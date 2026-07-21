@@ -507,10 +507,39 @@ orientations/walls/ez/edge-clamp, pool ET footprint strictement égaux) + garde 
 suite complète verte (exit 0). `out_costs` invariant par construction (rempli par le BFS, non fenêtré).
 **Gain mesuré (bench A/B, board 220×300 res 5, gym hex)** : ovale [20,14] **1,49×** (15,85→10,66 ms/appel),
 round 10 **1,78×**, round 3 **1,13×** — gain croissant avec |offsets| (les gros socles, dont l'ovale =
-17,7% du training, portent le coût). Reliquat sur petits socles = le BFS `deque` (étape 4). **Reste :
-BFS wavefront/numba (étape 4).**
+17,7% du training, portent le coût).
 
-**Étape 4 (BFS) — NON COMMENCÉE (code).** Cadrage d'implémentation basé sur profils réels + **cardinalités mesurées**
+**Étape 4 (BFS wavefront) — BENCHÉE ET RÉFUTÉE À move_range=12 (2026-07-21).** Prototype wavefront
+bbox-NumPy (coords locales, parité absolue) **prouvé strictement équivalent** au deque (reach ET dist
+identiques sur move 12/30/60 × densités). **Mais perf : le wavefront PERD au move_range du training**
+(move 12 : **0,46×** ; il ne gagne qu'à move≥30 : 1,05× ; move 60 : 1,68×). Or **le move_range réel du
+chemin gym hex est 12** (mesuré : `movement_build_valid_destinations_pool` → `_build_multi_hex_vectorized`
+reçoit `move_range=12`, board 220×300, ~450 ancres). À move 12 le **BFS deque isolé ne coûte que 0,30 ms**
+(≈25 % du build round3, ≈3 % du build ovale). Le profil §2bis (`bfs=12 ms`) englobait donc plus que la
+boucle deque, ou un autre régime. **Conclusion : le BFS n'est pas le reliquat ; l'étape 4 est abandonnée
+pour ce régime.** numba-deque non testé (inutile : le deque n'est pas le hotspot).
+
+**Nouveau hotspot MESURÉ (cProfile, ez=2 réel, move 12, board 220×300) — le vrai reliquat après L_bbox :**
+- **Ovale [20,14]** : `_dilate_by_kernel` **41 %** + `_spread_by_kernel` **19 %** du build. Le fenêtrage
+  L_bbox a réduit le *travail NumPy par slice*, mais la **boucle Python sur les ~200 offsets** de
+  l'empreinte demeure (1,35 M appels à `max()`/`min()` de bornes de slice). + `_footprint_oval` /
+  `_hex_center` (490 k). **C'est le levier L2** (numba OU décomposition en runs NumPy de `_dilate`/
+  `_spread`), que le §8 avait déclaré « caduc » et que cette mesure **réhabilite**.
+- **Round 3** : hotspot = corps de `_build_multi_hex_vectorized` (0,16 s/200 = allocations plein-board
+  `col_parity_mask`/`_dist_arr`/`ravel(order='F')`/`np.where` + BFS deque léger). Levier = **fenêtrer le
+  corps `_build` à la bbox** (variante (a), écartée en L_bbox par prudence).
+- À ez=10 (Board×10 futur) : `_euclidean_mover_ez_forbidden_mask` (§6) grimpe à ~40 % pour l'ovale ;
+  hotspot dépendant de l'ez.
+
+**➜ DÉCISION DE PÉRIMÈTRE EN ATTENTE (utilisateur).** Le prochain levier n'est plus le BFS mais, au
+choix : (L2a) `_dilate`/`_spread` en **numba** — dépendance `numba` (déjà au venv, à épingler) + risque
+segfault historique, chemin Python conservé en repli ; (L2b) décomposition des offsets en **runs
+horizontaux NumPy pur** (ovale ~200 offsets → ~14-20 runs, sans dépendance, algo plus complexe) ;
+(L3) fenêtrer le **corps `_build`** à la bbox (variante (a), gain sur petits socles). Aucun code engagé
+avant arbitrage.
+
+**Ancien cadrage étape 4 (BFS) — conservé pour trace, NE PAS ENGAGER (réfuté ci-dessus).**
+Cadrage d'implémentation basé sur profils réels + **cardinalités mesurées**
 (2026-07-21, §2bis). `movement_handlers.py` et `hex_utils.py` **intacts**. Filet de tests d'équivalence
 déjà en place (§0). Acquis de la mesure : `reach`/board ≤ 16,6 %, `|walls|` réel ≈ 435-988,
 `_dilate` O(|offsets|×board) indépendant de la densité → L2-dense = levier le plus faible ; le facteur

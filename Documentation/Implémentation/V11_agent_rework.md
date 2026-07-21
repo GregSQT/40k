@@ -32,20 +32,14 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 
 | # | Entrée | Nature | Ordre proposé | Pourquoi cet ordre |
 |---|---|---|---|---|
-| **§0.17** | Travail non commité | dette de session, **périssable** | **1** | 6 fichiers non commités en 3 lots indépendants (correctif, audit §0.19, doc+consigne). ⚠️ `config/users.db` sali par les runs d'enquête — **ne jamais le commiter**. Fermée à tort à 21:00, rouverte à 21:45 : entrée périssable par nature. |
-| ~~**§0.18**~~ | ~~🔴 `collision intra-plan` de retour~~ | ✅ **CORRIGÉE le 2026-07-20** | — | Cause trouvée, reproduite par test, corrigée par couplage maximum, mutation-testée, suite verte. **Aucune part ouverte.** ➜ **descendue en §0hist.** |
-| ~~**§0.21**~~ | ~~Ordre glouton, B2B non maximal~~ | ✅ **CORRIGÉE le 2026-07-20** | — | Optimum implémenté (couplage maximum) le jour même. À l'origine de la **règle 7 de `CLAUDE.md`**. ➜ **descendue en §0hist** (avec §0.20). |
-| **§0.14** | Re-mesure du run | **non-régression §0.11 VALIDÉE**, score encore dû | **2** | ✅ **Non-régression §0.11 validée le 2026-07-21 : 3 runs `x5_debug 500` indépendants, 3× 500/500, zéro crash intra-plan** (1500 ép. cumulés). Reste le **score par matchup** interprétable : exige un run long réel (10-30k ép., ~36 h) — dépend du gain perf **§0.22**. |
-| ~~**§0.15**~~ | ~~Rosters `training` ≡ `holdout_regular`~~ | ✅ **TRANCHÉ le 2026-07-21** | — | Identité **assumée** par l'utilisateur : le holdout porte sur l'adversaire, pas le roster (§10.5, cohérent démo §10.2). Le win-rate par matchup mesure la robustesse à l'adversaire — périmètre choisi, pas angle mort. |
-| ~~**§0.16**~~ | ~~Réserves de l'évaluation~~ | ✅ **SOLDÉE le 2026-07-21** | — | (a) corrigée (worst_bot exclut tactical + ranking supprimé si éval non fiable, tests + mutations). (b) **status quo validé** : `DefensiveSmartBot` reste hors éval (il sous-performait), couverture unitaire suffisante. (c) **conservée délibérément** : clé + `build_holdout_benchmark.py` gardés pour un holdout généré prévu **après la démo**. (b) et (c) → **§0ter Notes post-implémentation**. |
-| **§0.19** | Revérifier T1→T5 et §9 ligne à ligne | audit de fond — **SOLDÉ (§0.19.1 → §0.19.3)** | **clos** | ✅ **T1→T5 tous verrouillés par mutation-test**, y compris le **branchement** de R4 (les 6 exigences de §8.3) et les **2 sites** de R6. §9 = **plan non implémenté**, jamais marqué ✅ : prémisse de la tâche fausse. Suite complète `EXIT=0` avec garde de stabilité d'arbre. |
-| **§0.22** | `MOVE_POOL_BUILD` = 95,6 % du training | 🎯 **L1 + L_bbox livrés (gain ovale 1,49×, pool strictement identique) ; reste le BFS (étape 4)** | **6** | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) faits le 2026-07-21** — A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. Étapes 0-1 faites (cible confirmée + **pool hex du training verrouillé par test**). Cache des masques : codé, prouvé équivalent, **mesuré 0 % → reverté**. **Facteur dominant = SURFACE, pas numba** (mesuré : `reach`/board ≤ 16,6 %, `_dilate` O(\|offsets\|×board) indépendant de la densité). Levier optimal = **borner toutes les dilatations à la bbox `move_range`** (pur NumPy, exact, inconditionnel) ; Minkowski/cache-murs/numba-dense **caducs** (`\|obstacles\|`≈2400-3000 mesuré) ; numba réservé au seul reliquat BFS petits socles, **à bencher vs wavefront bbox-NumPy**. Ordre : L1 → L_bbox → re-bench → BFS conditionnel. Détail + mesures → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§2bis, §8) ; cadrage garde-fous → **[`V11_move_pool_optimization.md`](V11_move_pool_optimization.md)**. |
+| **§0.14** | Re-mesure du run | non-régression §0.11 VALIDÉE, **score par matchup encore dû** | **1** | ✅ **Non-régression §0.11 validée le 2026-07-21 : 3 runs `x5_debug 500` indépendants, 3× 500/500, zéro crash intra-plan** (1500 ép. cumulés). Reste le **score par matchup interprétable** : exige un run long réel (10-30k ép., ~36 h) pour que l'agent **converge** (les runs 500/1k ne mesurent que la non-régression, pas un win-rate) — dépend du gain perf **§0.22**. |
+| **§0.22** | `MOVE_POOL_BUILD` = 95,6 % du training | 🎯 **L1 + L_bbox livrés (gain ovale 1,49×, pool strictement identique) ; reste le BFS (étape 4)** | **2** | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) faits le 2026-07-21** — A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. Étapes 0-1 faites (cible confirmée + **pool hex du training verrouillé par test**). Cache des masques : codé, prouvé équivalent, **mesuré 0 % → reverté**. **Facteur dominant = SURFACE, pas numba** (mesuré : `reach`/board ≤ 16,6 %, `_dilate` O(\|offsets\|×board) indépendant de la densité). Levier optimal = **borner toutes les dilatations à la bbox `move_range`** (pur NumPy, exact, inconditionnel) ; Minkowski/cache-murs/numba-dense **caducs** (`\|obstacles\|`≈2400-3000 mesuré) ; numba réservé au seul reliquat BFS petits socles, **à bencher vs wavefront bbox-NumPy**. Ordre : L1 → L_bbox → re-bench → BFS conditionnel. Détail + mesures → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§2bis, §8) ; cadrage garde-fous → **[`V11_move_pool_optimization.md`](V11_move_pool_optimization.md)**. |
 
-L'**ordre est une proposition**, pas un constat, **sauf §0.18 → §0.14** qui est une dépendance
-**technique et bloquante** : tant que le moteur crashe en cours de run, aucune mesure ne peut
-aboutir. (L'ancienne dépendance §0.12 → §0.14 est **levée depuis le 2026-07-20**, §0.12 étant
-livré.) Les statuts ont été confrontés au code, à `git status` et à **deux runs réels** le
-2026-07-20.
+Ne restent ouverts que **§0.14** et **§0.22**, liés par une dépendance : le **score par matchup**
+de §0.14 exige un run long, dont la durée dépend du **gain perf de §0.22**. (Les dépendances
+historiques §0.12 → §0.14 et §0.18 → §0.14 sont **levées** : §0.12 et §0.18 sont livrés et
+descendus en §0hist.) Les entrées résolues §0.15, §0.16, §0.17, §0.18, §0.19, §0.21 sont
+**descendues en §0hist** (§0.16 aussi en §0ter pour ses notes post-implémentation).
 
 ⚠️ **Avant de vous appuyer sur une affirmation de ce document, lire §0bis** — en particulier la
 réserve de méthode sur le document lui-même (T1→T5 et section 9 n'ont **pas** été revérifiés
@@ -138,479 +132,6 @@ produire un win-rate **par roster** interprétable au sens de §10.6. ⚠️ Cf.
 rosters `training` et `holdout_regular` étant identiques, ce win-rate mesurera la robustesse à
 l'**adversaire**, jamais au roster.
 
-### 0.19 Revérifier T1→T5 et la section 9 ligne à ligne — 🟠 OUVERT (tâche créée le 2026-07-20)
-
-**Énoncé.** Les tranches **T1, T2, T3, T4, T5** (§5) et toute la **section 9** (Phase A') sont
-marquées ✅ FAIT, mais **n'ont jamais été revérifiées ligne à ligne contre le code**. Leur statut
-repose sur les sessions où elles ont été écrites, pas sur un audit ultérieur. La réserve existe
-depuis le 2026-07-19 en §0bis (« Réserve de méthode — ce qui n'a pas été revérifié ») ; elle y
-est une **mise en garde**, pas une tâche. **Cette entrée en fait une tâche**, pour qu'elle cesse
-d'être un avertissement que chacun contourne.
-
-**Pourquoi ça n'est pas de la précaution abstraite.** Le taux de découverte est élevé partout où
-on a effectivement regardé :
-
-| Session | Ce qui a été trouvé en revérifiant |
-|---|---|
-| 2026-07-19 soir | **3** affirmations périmées (« prochain bloqueur §10.4 » déjà résolu ; « archivage des holdouts à faire » déjà fait ; « 9 échecs préexistants » alors que la suite est verte) |
-| 2026-07-20 | **8** affirmations périmées recensées en §0bis, dont la n°6 (« 9 tests `roster_pool_schedule` échouent ») **démontrée fausse** par la suite complète |
-| 2026-07-20 | **§0.11 déclaré résolu ne l'est pas** (§0.18) — et le T6-i portait déjà, en 2026-07-19, le motif « code testé mais jamais appelé » |
-
-Trois marqueurs ✅ démentis sur les seules zones auditées. **Rien n'indique que T1→T5 et la
-section 9 soient d'une autre nature** — simplement, personne n'y a regardé.
-
-**Méthode suggérée** (une tranche = une passe, résultat écrit ici même) :
-1. Pour chaque critère d'acceptation de §6, retrouver **le test** qui le verrouille — pas le
-   code, le **test**. §8 pose la règle « une règle = son fichier de tests ».
-2. Vérifier que ce test **s'exécute** (il est collecté par la suite) **et qu'il échoue** si on
-   neutralise le code qu'il prétend couvrir. Le motif récurrent de ce projet est le **code testé
-   mais jamais appelé** (T6-i) et le **test qui passe pour la mauvaise raison** (rencontré en
-   §0.12 sur le bonus de kill, où le terme HP masquait le terme testé).
-3. Tout ✅ qui ne survit pas à (1) et (2) redevient ⏳, avec la preuve du démenti.
-
-⚠️ **Ne pas « nettoyer » en relisant la prose.** Corriger une affirmation sans relire le code
-reproduit exactement l'erreur qu'on cherche — c'est écrit en tête du tableau des affirmations
-périmées (§0bis), et c'est pour cette raison que ces 8 lignes ont été **signalées et non
-corrigées**.
-
-**Non planifié** : cette entrée n'a pas d'ordre dans le tableau d'état. C'est un audit de fond,
-à mener quand le chemin critique (§0.18 → §0.14) est dégagé — ou immédiatement si l'on doute
-d'une tranche en particulier.
-
-#### 0.19.2 Retrait du repli silencieux de `_ai_select_fight_target` — ✅ FAIT (2026-07-20)
-
-**Décision utilisateur** : « il faut absolument fixer ça ». Livré après la fin de la chasse §0.18.
-
-**Ce qui était en cause.** `_ai_select_fight_target` (fight_handlers) enveloppait tout son corps
-dans un `try/except Exception: return valid_targets[0]`. Il avalait les **deux** `require_key`
-(`reward_configs`, puis la config de l'agent combattant) **et** le `ValueError` de
-`get_model_key` sur un `unitType` inconnu. **Aggravant vérifié** : sa seule trace était
-`add_console_log`, qui est un **no-op tant que `debug_mode` est faux**
-([game_utils.py:74](../../engine/game_utils.py#L74)) — en entraînement normal l'erreur était
-**totalement** silencieuse, le seul symptôme étant un ciblage de mêlée dégradé sur la première
-cible du pool.
-
-**Ce qui a été écarté avant d'agir.** On pouvait craindre que le repli soit atteint en
-permanence : tous les `unitType` des rosters mappent vers `CoreAgent`, alors que le moteur tourne
-en `rewards_config="ArmageddonAgent"`. **Faux** : [w40k_core.py:918-924](../../engine/w40k_core.py#L918-L924)
-enregistre le `model_key` de **chaque** unité vers les rewards de l'agent contrôlé, donc
-`reward_configs` contient bien `CoreAgent`. Le cas nominal n'atteint pas le repli — c'est ce qui
-rendait le retrait sûr.
-
-**Fix** : `try/except` supprimé, corps désindenté, aucune autre modification de comportement.
-
-**Test** : `tests/unit/engine/test_fight_target_selection_no_fallback.py` (+4, porté à **10**
-par §0.19.3) —
-`reward_configs` sans la clé de l'agent, `reward_configs` absent, `unitType` inconnu, plus une
-non-régression sur l'erreur explicite qui précède le `try`.
-**Contre-épreuve faite** (`git stash` du seul `fight_handlers.py`) : **3 rouges sur le code
-d'avant** (`DID NOT RAISE`), **4 verts après**. Suite complète `EXIT=0`.
-
-⚠️ **Piège rencontré en écrivant le test** : il attendait `KeyError`, alors que `require_key`
-lève `ConfigurationError` (sous-classe de `RuntimeError`,
-[data_validation.py:17](../../shared/data_validation.py#L17)). Le test a donc échoué **après** le
-fix alors que le fix était bon — c'était l'attente qui était fausse. Corrigé en vérifiant
-**type ET fragment de message** (§8.1).
-
-**Les DEUX autres replis de la même fonction — également retirés (2026-07-20).** Ils avaient
-d'abord été renvoyés à l'utilisateur « pour arbitrage » : **c'était une erreur de cadrage**.
-La règle métier était déjà posée (« aucun fallback pour masquer une erreur ») ; il ne manquait
-que la **lecture du code**, qui est du ressort de l'implémentation. Rappel utilisateur, à
-retenir : *« Je tranche le métier, pas l'optimisation du code. »*
-
-| Repli | Ce que la lecture a établi | Remplacé par |
-|---|---|---|
-| `if not valid_targets: return ""` | **Branche MORTE** : les **4** sites d'appel gardent déjà le pool vide en amont — fight_handlers ~3381 (`if not targets: return []`), ~5537 (`if not valid: … return`), ~6271 (`if valid:`), w40k_core ~5518 (`if targets else None`). | `ValueError` « pool de cibles VIDE » |
-| `if not target: continue` (×2 boucles) | Le pool vient de `units_cache` ([fight_handlers:2037](../../engine/phase_handlers/fight_handlers.py#L2037)) ; une cible qui y figure sans être dans `unit_by_id` est une **désynchronisation d'index**, donc un bug. Si TOUTES manquaient, la fonction renvoyait `valid_targets[0]` sans avoir scoré. | `ValueError` « absente de unit_by_id » |
-
-⚠️ **Affirmation fausse émise en cours de route, corrigée après lecture** : il avait été écrit que
-le `""` « remonte à 3 des 4 sites d'appel **sans garde** ». C'est l'**inverse** — les 4 gardent.
-Le recensement avait été fait de mémoire du `grep`, pas en lisant les sites. Motif n°1 du
-document, commis dans la session qui l'auditait.
-
-**Tests (portés à 6)** : + `test_empty_target_pool_raises_instead_of_empty_string` et
-`test_target_missing_from_unit_by_id_raises`. Contre-épreuve rejouée (`git stash` du seul
-`fight_handlers.py`) : **5 rouges avant, 6 verts après**. ✅ **Cette mesure est fiable même en
-contexte concurrent** : elle ne dépend que de `fight_handlers.py`, qu'aucun autre agent ne
-touche — contrairement aux suites complètes (cf. le piège « verrou global » de §0bis).
-
-#### 0.19.3 Fermeture de T1 — les deux trous de §0.19.1 sont comblés — ✅ FAIT (2026-07-21)
-
-**Déclencheur** : règle 7 de `CLAUDE.md` (commit `056c948e`). §0.19.1 avait *documenté* l'absence
-de tests R4 et la non-couverture de R6 site 1 — or « documenter un manque n'est PAS le traiter ».
-Le traitement était techniquement possible (l'instrumentation §0.18 avait été retirée), donc dû.
-
-**Récapitulatif — chiffres relevés par exécution le 2026-07-21, pas de mémoire.**
-
-| Fichier | Tests | Objet | Mutations → verdict |
-|---|---|---|---|
-| `test_fight_target_selection_no_fallback.py` | **10** | §0.19.2 (3 replis) + sélection sans sentinelle | 5 rouges (replis) ; 2 rouges (`max`→`min`, scoring aplati) |
-| `test_charge_oval_base_reverse_bfs.py` | **4** | R6, **les 2 sites**, déterministe + garde d'atteinte | 3 rouges par site (L826 et L3629, mutés isolément) |
-| `test_programmatic_owner_predicate.py` | **22** | R4 — le **prédicat** et son refus du repli | 3 rouges (bascule gym, `player_types`, erreur explicite) |
-| `test_r4_auto_decider_wiring.py` | **14** | R4 — le **branchement** et sa consommation | 3 rouges (débranchements) + 1 rouge (site `defender_human` isolé) |
-| **Total** | **50** | | **17 mutations, 17 rouges** |
-
-**Suite complète après ces travaux : `EXIT=0`, zéro échec, `GARDE=OK`** — empreinte `mtime` de
-`engine/ tests/ ai/ config/` identique avant et après le run (`833a2bfc…`), donc aucun écrivain
-concurrent : la mesure est valide au sens du piège « verrou global » de §0bis.
-
-⚠️ **Ce qui n'a PAS été mesuré**, à ne pas déduire de ce qui précède : aucun run d'entraînement
-n'a été lancé de toute cette passe. Les runs §0.18 restent dus (cf. l'entrée correspondante) —
-un crash dépendant de la trajectoire ne se solde pas par une suite verte.
-
-**R6 site 1 — arbitrage utilisateur et ce qui en a été fait.** L'utilisateur a tranché : « x5 est
-LA priorité ; si on doit sacrifier x1, on le sacrifie. » **On n'a pas eu à le faire**, et le
-signaler faisait partie du travail : l'arbitrage était conditionnel, et la condition n'est pas
-remplie. Le chemin x1 est **vif** — [api_server.py:56](../../services/api_server.py#L56) et
-`frontend/src/hooks/useGameConfig.ts:228` exposent le board `25x21` au PvP, et
-`ArmageddonAgent_training_config.json` porte une phase de curriculum x1. Le supprimer aurait été
-une **régression PvP sans aucun gain au x5** : le fix R6 y était déjà correct, seulement invisible
-aux tests. Traitement retenu : le **couvrir**.
-
-`tests/unit/engine/test_charge_oval_base_reverse_bfs.py` (+4) — Carnifex `[41,27]`, Psychophage
-`[47,36]`, non-régression socle rond `int`, et surtout une **garde d'atteinte**
-(`test_reverse_bfs_is_actually_reached`) qui espionne l'appel à
-`_charge_reverse_goal_bfs_for_eligibility`. ⚠️ **Sans cette garde le fichier ne vaudrait rien** :
-c'est le motif §0.11 (« un test vert ne couvre que les états qu'il atteint »), déjà subi par
-`test_move_mask_is_executable.py`. Le test unitaire atteint le site parce que la fixture ne
-définit pas `inches_to_subhex` → `.get(..., 1)` vaut 1, ce qui active le BFS inverse.
-**Mutation `max(_mover_bs)` → `int(_mover_bs)` : 3 ROUGES** (dont la garde), le socle rond reste
-vert.
-
-**R4 — prédicat ET branchement, les six exigences de §8.3 sont couvertes (2026-07-21).**
-
-| Exigence §8.3 pour R4 | État | Où |
-|---|---|---|
-| Matrice (gym True/False) × (`player_types` human/ai) | ✅ | `test_programmatic_owner_predicate.py` |
-| Test négatif `_is_ai_controlled_shooting_unit` | ✅ | idem |
-| Allocation **fight** auto en gym, pertes réelles (FIGHT_CTX) | ✅ | `test_t5_bare_loop.py` (préexistant) |
-| Allocation **tir** auto en gym | ✅ | `test_r4_auto_decider_wiring.py` |
-| Les **4 sites `defender_human`** du flux fight | ✅ | idem — **verrou STRUCTUREL** `test_every_defender_human_site_delegates_to_the_predicate`, pas une déduction depuis le helper |
-| **Miroir PvP** : en PvP humain l'allocation reste manuelle | ✅ | idem, un jumeau PvP par cas gym |
-
-🔴 **Pourquoi les tests de prédicat ne suffisaient pas.** Le prédicat était déjà correct AVANT
-T1 ; la rupture R4 était son **branchement**. `test_programmatic_owner_predicate.py` ne rougit
-pas si l'on débranche `SHOOT_CTX.auto_decider` — d'où
-`tests/unit/engine/test_r4_auto_decider_wiring.py` (**+14**, comptés par exécution), qui
-vérifie la **chaîne** :
-
-    SHOOT_CTX.auto_decider = _target_defender_is_ai -> is_programmatic_defender -> is_programmatic_owner
-    FIGHT_CTX.auto_decider = _fight_auto_defender   -> _is_ai_controlled_fight_unit -> is_programmatic_owner
-    les 4 sites `defender_human` (~5523, ~5548, ~6248, ~6282) -> _is_ai_controlled_fight_unit
-    consommation : _manual_allocation_step (shared_utils) — DEUX sites d'interrogation
-
-⚠️ **Le second site de consommation avait failli être manqué** : `_manual_allocation_step`
-interroge `auto_decider` **deux fois** — une fois pour l'ordre des groupes (~L6416), une fois
-pour le **choix de la figurine** qui encaisse (~L6446). Le premier test ne couvrait que l'ordre.
-Les deux sont désormais couverts, chacun avec son miroir PvP.
-
-**3 mutations de débranchement, 3 rouges :**
-
-| Mutation | Tests rouges |
-|---|---|
-| `SHOOT_CTX.auto_decider` → `None` | 5 |
-| `FIGHT_CTX.auto_decider` → `None` | 2 |
-| `_is_ai_controlled_fight_unit` recâblé sur `player_types` en direct (**la rupture R4 d'origine reproduite**) | 2, dont `defender_human_is_false_in_gym` |
-
-La troisième est la preuve qui manquait : elle rejoue le bug historique et le test le rattrape.
-
-⚠️ **Erreur commise puis corrigée dans la même passe, à retenir.** La première version de ce
-fichier testait `_is_ai_controlled_fight_unit` et en **déduisait** que les 4 sites
-`defender_human` étaient couverts. C'est **exactement le raisonnement « prédicat correct donc
-branchement correct »** que le fichier existe pour interdire, reproduit un cran plus haut :
-débrancher un seul des 4 sites laissait la suite **verte**. ➜ Corrigé par
-`test_every_defender_human_site_delegates_to_the_predicate`, un **verrou structurel** qui lit la
-source, exige que chaque affectation de `defender_human` passe par le prédicat, et qu'il y en ait
-**exactement 4** (un 5ᵉ site non gardé fait rougir). Mutation d'un seul site → **ROUGE**.
-**Leçon : un test de helper ne couvre jamais ses appelants ; il faut vérifier l'appel.**
-
-⏳ **Faiblesse assumée, non corrigée** : les deux tests de consommation
-(`_manual_allocation_step`) reposent sur **8 monkeypatches** de fonctions vives
-(`_build_alloc_groups`, `_group_alive`, `_auto_declared_order`, `_declare_order_payload`,
-`_finalize_manual_allocation`, `_current_live_group`, `_select_allocation_model`,
-`_manual_waiting_payload`). C'est légal (§8.1 n'interdit que le monkeypatch de code **mort**),
-mais ils vérifient en partie le **modèle** qu'on se fait de la fonction plutôt que la fonction :
-si sa forme change, ils peuvent rester verts pendant que la production casse. Une couverture par
-un vrai `game_state` d'allocation serait plus solide — coût non négligeable, à peser si ce
-chemin bouge.
-
-`tests/unit/engine/test_programmatic_owner_predicate.py`
-(+22) : matrice complète (gym True/False) × (`player_types` human/ai) × (joueur 1/2) ; les trois
-erreurs explicites (`player_types` manquant hors gym, joueur inconnu, cible absente de
-`units_cache`) ; le court-circuit gym qui précède le `require_key` ;
-`is_programmatic_defender` résolvant le propriétaire via `units_cache` ; et le **test négatif**
-exigé par le ⚠️ R4 — `_is_ai_controlled_shooting_unit` lit `player_types` et **jamais** le flag
-gym, sous peine d'auto-activer les unités du joueur entraîné.
-
-**3 mutations, 3 rouges**, une par branche du contrat :
-
-| Mutation | Effet | Tests rouges |
-|---|---|---|
-| `if game_state.get("gym_training_mode")` → `if False` | bascule gym neutralisée | 4 (dont `defender_in_gym`) |
-| `return player_types[p] == "ai"` → `return True` | branche hors-gym toujours vraie | 4 (dont le miroir PvE) |
-| `raise KeyError(...)` → `return False` | erreur explicite → **défaut silencieux** | 1 (`unknown_player_raises`) |
-
-La troisième est la plus importante : elle prouve que le test **interdit le repli**, au lieu de
-seulement constater un comportement.
-
-⚠️ **Restauration par `cp`, jamais `git checkout`** — `shared_utils.py` portait alors du travail
-non commité d'un autre agent (cf. §0bis). Vérifiée par `git diff --stat` vide.
-
-**Deux dettes révélées par cette passe — ✅ TOUTES DEUX TRAITÉES le 2026-07-21 (règle 7) :**
-
-1. ✅ **Le site R6 n°2 n'était verrouillé QUE par un test à exploration aléatoire.**
-   `test_t5_bare_loop.py` déroule des épisodes au hasard : c'était **l'antipattern §0.11**
-   reproché au site n°1, qui a déjà piégé `test_move_mask_is_executable.py`. Il tenait par
-   chance de trajectoire, pas par construction.
-   ➜ **Résolu sans écrire une ligne de plus** : le site n°2 (~L3629) est situé **avant**
-   l'embranchement vers le BFS inverse (~L3698), donc tout appel à
-   `charge_build_valid_destinations_pool` le traverse — `test_charge_oval_base_reverse_bfs.py`
-   le couvrait déjà. **Vérifié par mutation isolée du seul L3629, ce fichier seul (sans
-   `test_t5_bare_loop.py`) : 3 ROUGES.** Les deux sites R6 sont donc désormais verrouillés de
-   façon **déterministe**.
-2. ✅ **Code mort introduit par le fix §0.19.2** : `best_reward = -999999` était une sentinelle
-   utile tant que `if not target: continue` pouvait sauter toutes les cibles ; depuis que ce
-   `continue` lève, elle est inatteignable.
-   ➜ Boucle remplacée par `max(resolved, key=...)`, qui supprime **aussi** le second
-   `get_unit_by_id` par cible (la première boucle l'avait déjà résolue). `max` retient le
-   **premier** maximum : départage identique au `>` strict, donc sélection **stable**
-   (déterminisme §8.1). **+4 tests** dans `test_fight_target_selection_no_fallback.py`
-   (argmax réel, stabilité sur deux appels, égalité → premier du pool, un scoring par cible),
-   **2 mutations → rouges** (`max`→`min`, scoring aplati à 0).
-
-⚠️ **Piège auto-infligé, à ne pas refaire** : le helper de mutation restaurait par
-`git checkout --`, ce qui a **effacé le refactor non commité en cours** — précisément la mise en
-garde inscrite en §0bis, commise par son propre auteur. Les 10 tests sont alors repassés au vert
-sur le code d'origine, donnant l'illusion d'une mutation validée. **Sauvegarde/restauration par
-`cp` obligatoire dès qu'on mute un fichier qu'on est soi-même en train de modifier.**
-
-**Suite complète — première mesure VALIDE de tout ce travail** : `EXIT=0`, zéro échec, avec la
-garde de stabilité d'arbre de §0bis (empreinte `mtime` de `engine/ tests/ ai/ config/` identique
-avant et après le run → aucun écrivain concurrent). Les trois suites précédentes de la session
-avaient toutes été invalidées.
-
-#### 0.19.1 Passe d'audit du 2026-07-20 (soir) — T1→T5 faits, section 9 **sans objet**
-
-**Méthode réellement appliquée.** Pour chaque critère de §6 : retrouver le test, vérifier qu'il
-est collecté, puis le **neutraliser par mutation du code de production** et observer le verdict,
-puis restaurer. Six mutations menées. **Les cinq fichiers mutés ont été restaurés et vérifiés
-par `git diff --stat` vide** : `charge_handlers.py`, `macro_intents.py`, `train.py`,
-`game_state.py`, `action_decoder.py`. `shared_utils.py`, `w40k_core.py` et le script de chasse
-**n'ont pas été touchés** pendant CETTE passe (ils portaient alors l'instrumentation §0.18) ;
-aucun training lancé. ⚠️ **État daté** : depuis, l'instrumentation a été retirée,
-`scripts/hunt_intra_squad_superposition.py` a été **supprimé**, et `shared_utils.py` a bien été
-muté — proprement, en §0.19.3 (sauvegarde/restauration par `cp`).
-
-**Tableau de verdicts.**
-
-| Tranche | Critère §6 | Test qui le verrouille | Mutation appliquée | Verdict | Statut |
-|---|---|---|---|---|---|
-| **T1 / R6 site 1** | socle ovale en **éligibilité** de charge | ~~aucun~~ → `test_charge_oval_base_reverse_bfs.py` (§0.19.3) | `charge_handlers.py:826` → `int(_mover_bs)` | ~~VERT~~ → **ROUGE (3 tests)** | ~~⏳~~ **✅** |
-| **T1 / R6 site 2** | socle ovale, **pool de destinations** | `test_charge_oval_base_reverse_bfs.py` (déterministe, §0.19.3) + `test_t5_bare_loop.py` | `charge_handlers.py:3629` → `int(_mover_bs)` | **ROUGE** (`TypeError`) | ✅ |
-| **T1 / R4** *(prédicat)* | prédicat programmatique unique | ~~AUCUN~~ → `test_programmatic_owner_predicate.py` (§0.19.3) | 3 mutations : bascule gym, branche `player_types`, erreur explicite | **ROUGE (3/3)** | ✅ |
-| **T1 / R4** *(branchement)* | `auto_decider` tir + 4 sites `defender_human` + miroir PvP | `test_r4_auto_decider_wiring.py` (§0.19.3) | 3 débranchements : `SHOOT_CTX`, `FIGHT_CTX`, prédicat recâblé | **ROUGE (3/3)** | ✅ |
-| **T2** | zéro littéral d'action dans `ai/` | `test_action_space_mirror.py` | `macro_intents.ACTION_CHARGE` 1030→1029 | **ROUGE** (2 tests) | ✅ |
-| **T3** | board refs + `--training-config` obligatoire | `test_train_board_refs.py` | reconstruction `{cols}x{rows}` **et** garde R1 neutralisée | **ROUGE** (3 tests) | ✅ |
-| **T4** | resolver `board_ref` | `test_board_ref_resolver.py` | garde « board dir inexistant » neutralisée | **ROUGE** | ✅ |
-| **T5** | parité masque ↔ commit de déploiement | `test_deployment_clearance_parity.py::test_deployment_mask_mirrors_commit_overlap_predicate` | `_deployment_clearance_filter` → `return candidates` | **ROUGE**, symptôme d'origine | ✅ |
-
-> ✅ **Les deux démentis ci-dessous sont RÉSOLUS depuis le 2026-07-21 — voir §0.19.3.** Le
-> constat historique est conservé tel quel : c'est lui qui documente le trou et la méthode qui
-> l'a trouvé.
-
-**Les deux démentis de fond.**
-
-1. 🔴 **T1 / R6 site 1 est du CODE MORT à la résolution du training — septième occurrence du
-   motif §0.4.** `_charge_reverse_goal_bfs_for_eligibility` est gardé par
-   `int(game_state.get("inches_to_subhex", 1)) <= 1`
-   ([charge_handlers.py:3698](../../engine/phase_handlers/charge_handlers.py#L3698)). Le training
-   tourne en **x5**, donc ce site n'est **jamais atteint**. Preuve : `int()` sur une liste lève
-   `TypeError` de façon inconditionnelle, et la suite reste **verte** sous cette mutation. Le fix
-   R6 y est correct mais **non exercé et non verrouillé** ; seul le site 2 l'est. Conséquence
-   pratique : nulle aujourd'hui (x5/x10 passent par le BFS avant) — mais toute réactivation du
-   chemin x1, ou tout run à `inches_to_subhex = 1`, s'appuierait sur du code qu'aucun test ne
-   garde.
-
-2. 🔴 **T1 / R4 n'a aucun test.** `grep -rln "is_programmatic_owner\|is_programmatic_defender"
-   tests/` retourne **vide**, alors que §8.3 impose explicitement une matrice
-   (gym × `player_types`), l'allocation tir **et** fight en gym, les 4 sites `defender_human`, le
-   **miroir PvP** et le test négatif sur `_is_ai_controlled_shooting_unit`. Le code est présent et
-   conforme à sa description ([shared_utils.py:97-124](../../engine/phase_handlers/shared_utils.py#L97-L124),
-   lu). La seule couverture est **indirecte** : `test_bare_loop_melee_losses_via_fight_ctx`
-   exerce la branche gym=True. **Rien** ne couvre la branche PvP ni la non-régression du miroir.
-   ⚠️ **Mutation impossible dans cette session** : `shared_utils.py` porte l'instrumentation
-   §0.18. **Ce ⏳ repose sur une absence de test constatée, pas sur un mutation-test** — à
-   confirmer par mutation quand l'instrumentation sera retirée.
-
-**Ce que l'audit n'a PAS trouvé.** T2, T3, T4, T5 sont verrouillés par des tests qui rougissent
-sur mutation. Aucun « test qui passe pour la mauvaise raison » sur ces quatre tranches.
-
-**Section 9 : la prémisse de §0.19 était FAUSSE.** L'énoncé ci-dessus affirme que « toute la
-section 9 est marquée ✅ FAIT ». Vérification : les lignes de la section 9 ne contiennent
-**aucun** marqueur `✅`, `FAIT` ni `⏳`. C'est une section de **plan** (P1→P5), **non
-implémentée** — il n'y a donc aucun ✅ à démentir. Ses affirmations de *diagnostic* ont
-néanmoins été revérifiées **par lecture** (pas par grep seul) et **tiennent toutes** :
-`_attack_sequence_rng` sans appelant vif (seuls des tests l'importent) ; `apply_rules` /
-`_apply_single_rule` toujours `return context` pass-through
-([rules.py:279-327](../../engine/weapons/rules.py#L279-L327)) ; `_cover_worsened_bs` ne lit
-toujours pas `IGNORES_COVER` ([shared_utils.py:5980-6005](../../engine/phase_handlers/shared_utils.py#L5980-L6005)) ;
-`_ai_select_shooting_target` de `shooting_handlers` toujours sans appelant (l'homonyme de
-`pve_controller` est, lui, vif — ne pas les confondre) ; `reroll_charge` toujours dans
-`config/unit_rules.json` et nulle part dans le code ; `_select_ai_rule_choice_option` toujours en
-`raw_action_int % len(options)` en gym ([w40k_core.py:2471](../../engine/w40k_core.py#L2471)) ;
-le `except Exception: … return valid_targets[0]` de `_ai_select_fight_target` toujours présent.
-**Seules les références de ligne ont dérivé** (~+200 à +350 lignes) — signalées, non corrigées.
-
-**Trois affirmations périmées repérées, SIGNALÉES et NON corrigées** (elles rejoignent le
-tableau de §0bis) :
-
-| # | Où | Affirmation | Pourquoi elle est périmée |
-|---|---|---|---|
-| 11 | §6, critère **T2**, et §8.2 | « `action_space.n == 41` », « `ACTION_WAIT` (18) », « `6+6+6+1+5+1+1+15 == 41` », « 19→shoot slot 0, 24→charge » | Le layout réel est **1047** actions : `ACTION_WAIT = 1024`, `SHOOT_SLOT_BASE = 1025`, `ACTION_CHARGE = 1030`, `ACTION_FIGHT = 1031` ([macro_intents.py:20-38](../../engine/macro_intents.py#L20-L38)). Changé par la refonte spatiale du move. Le critère T2 **réel** (zéro littéral d'action dans `ai/`) reste, lui, satisfait. |
-| 12 | §6, critère **T4** | « Les **61 scénarios** se chargent (script de balayage) » | La banque `ArmageddonAgent` compte **5** scénarios et `test_bank_has_expected_count` l'assert explicitement ; la banque `CoreAgent` en compte **4**. De plus `scripts/sweep_scenario_bank_v11.py:24` pointe encore `config/agents/CoreAgent/scenarios` : **le balayage du critère n'est plus exécutable tel quel**. La migration T4 a bien eu lieu ; c'est le critère qui n'a pas suivi. |
-| 13 | §8.2 | « Fichier proposé : `tests/unit/engine/test_agent_interface_contract.py` … C'est LE verrou anti-récidive de R5 » | Ce fichier **n'existe pas**. Le verrou existe sous un autre nom et une autre forme — `test_action_space_mirror.py` — et il est **meilleur** : il vérifie `macro_intents` ≡ `shared_utils` constante par constante, et le décodeur **importe** ces mêmes constantes ([action_decoder.py:25-32](../../engine/action_decoder.py#L25-L32)), donc la désynchronisation visée par §8.2 est structurellement impossible. |
-
-**Réserve sur le critère T5, indépendante du mutation-test.** §6 exige « 10 épisodes aléatoires
-masqués terminés sur **≥3 scénarios × sièges p1/p2** ». `test_t5_bare_loop.py` exerce **un**
-scénario fixe × 3 seeds et **aucun siège** (`grep agent_seat_mode tests/` ne retourne que des
-fichiers `tests/unit/ai/`). T5 le dit d'ailleurs lui-même dans son « Reste » : le siège
-`p2`/`random` crashait encore au reset. **Le ✅ de T5 couvre un périmètre strictement plus étroit
-que son critère** — il vaut pour le moteur nu, siège p1, comme la tranche l'annonce en tête.
-
-**Réserves de méthode sur cette passe elle-même** (à ne pas répéter) :
-- Une première suite complète avait été lancée **en parallèle des mutations** : contaminée par
-  construction, elle a été **tuée et non exploitée**. Ne jamais mesurer une baseline pendant
-  qu'on mute.
-- Deux premières tentatives de mutation-test sur T5 ont été **tuées par leur propre `timeout`**
-  sans verdict, et un `pkill` trop large a tué sa propre commande. Un non-aboutissement n'est
-  **pas** un rouge : le verdict n'a été obtenu qu'en isolant le test d'assertion pure
-  (**42 s vert** / **6,7 s rouge**) au lieu du fichier entier, dont l'autre test déroule des
-  épisodes. Sur une machine chargée (load ~15, 10 process de chasse), **chronométrer le
-  contrôle propre AVANT de conclure d'une lenteur sous mutation**.
-- `tests/unit/engine/test_pile_in_intra_squad_collision.py` est apparu dans `git status` pendant
-  la session : il vient des process §0.18, **pas de cet audit**.
-
-**⚠️ La première suite de fin de passe est sortie en `EXIT=1` — mesure INVALIDE, ne pas la citer.**
-Elle montrait un échec de
-`test_pile_in_intra_squad_collision.py::test_stationary_b2b_figurine_cell_is_not_stolen`. Cause
-identifiée par les **mtimes** : la **chasse §0.18** écrivait `shared_utils.py` (20:14:31) et son
-propre test (20:13:58) **pendant** que cette suite tournait (~20:05→20:45). **Deuxième baseline
-contaminée de la session**, après celle des mutations — même erreur, autre écrivain. ⚠️ **Ne
-jamais mesurer une suite pendant qu'un autre process écrit dans `engine/`**, y compris un process
-qu'on n'a pas lancé soi-même.
-
-⚠️ **Aucune suite complète de cette session ne constitue une mesure de référence.** Trois runs
-ont été invalidés par un écrivain concurrent (détail et règle : piège « verrou global » en §0bis).
-Le dernier, `EXIT=0`, a tourné de 21:17:37 à 21:22:54 alors que `shared_utils.py` était écrit à
-**21:20:33** par l'agent concurrent — **non exploitable, malgré son vert**. La mesure de référence
-est celle produite par l'agent concurrent **après gel des écritures**, à reprendre ici quand elle
-tombe.
-
-**Ce qui EST mesuré de façon fiable**, parce que cela ne dépend que de fichiers qu'aucun autre
-agent ne touche : les mutation-tests par tranche du tableau ci-dessus, et la contre-épreuve de
-§0.19.2 sur `fight_handlers.py`. Le test de pile-in passe **3 fois sur 3** en isolé.
-
-### 0.15 Rosters `training` ≡ `holdout_regular` — ✅ TRANCHÉ (2026-07-21 : identité ASSUMÉE)
-
-> Part **ouverte** de §0.6. La suppression des listes holdout mortes, elle, est résolue — voir
-> §0.6 pour la décision et sa justification.
-
-⚠️ **Les rosters `training` et `holdout_regular` sont IDENTIQUES** (vérifié : mêmes compositions,
-mêmes totaux, aux deux emplacements). C'est cohérent avec la décision §10.5 — le holdout porte sur
-l'**adversaire**, pas sur le roster — mais il faut en avoir conscience : **il n'existe aucune
-séparation de listes entre entraînement et évaluation**. Un sur-apprentissage sur les
-particularités de ces deux listes ne serait détecté par aucun des scénarios d'éval actuels.
-
-**Statut** : ✅ **TRANCHÉ le 2026-07-21 — l'utilisateur ASSUME l'identité** (« Oui : rosters
-training ≡ holdout_regular »). Le holdout porte donc **exclusivement sur l'adversaire** (§10.5),
-jamais sur le roster : c'est cohérent avec la démo de financement (2 rosters fixes SM/Orks, §10.2)
-et avec la spécialisation assumée. **Conséquence à garder en tête** : aucun scénario d'éval ne
-détectera un sur-apprentissage sur les particularités de ces deux listes ; le win-rate par matchup
-mesure la robustesse à l'**adversaire**, pas au roster. Ce n'est pas un angle mort à corriger,
-c'est le périmètre choisi.
-
-### 0.16 Réserves de l'évaluation — 🟠 OUVERT (extraits de §0.5, §0.6 et §0.7)
-
-> Trois réserves distinctes, aucune bloquante aujourd'hui, toutes déjà constatées. Leurs
-> entrées d'origine (§0.5 fail-fast, §0.6 listes holdout, §0.7 run 60/60) sont résolues par
-> ailleurs.
-
-**(a) Réserves du fail-fast `--eval` (ex-§0.5)**
-
-Réserves :
-- ✅ **CORRIGÉE (2026-07-21)** — Le bloc `🏁 Scenario ranking` s'imprimait **avant** le raise
-  eval-only sur `total_failed_episodes > 0` : quand des épisodes échouaient, les `combined`/
-  `worst_bot_score` par scénario (calculés sur un dénominateur **tronqué** — épisodes plantés
-  retirés par `_get_result_with_timeout`) étaient présentés comme un classement fiable juste
-  avant que la mesure ne soit invalidée. **Root cause** : la décision d'affichage n'était pas
-  gardée par la fiabilité de l'éval. **Fix** : décision extraite dans le helper pur
-  `_render_scenario_ranking(scenario_scores, total_failed_episodes)`
-  ([bot_evaluation.py](../../ai/bot_evaluation.py)) — si `total_failed_episodes > 0`, il retourne
-  un **avertissement explicite** (`⚠️ Scenario ranking SUPPRIMÉ : évaluation NON FIABLE`) au lieu
-  du classement, jamais un chiffre. Vaut pour le training ET l'eval-only (les deux passent par ce
-  print quand `show_summary`). **Verrou** : 3 tests dans `test_eval_holdout_opponent.py`
-  (affichage nominal trié, suppression + avertissement quand `failed>0`, liste vide sans scores) ;
-  **mutation** de la garde (`total_failed_episodes > 0` → `False`) → **1 rouge** ciblé, vert après.
-- ✅ **CORRIGÉE (2026-07-21)** — `worst_bot_name` du chemin eval-only était calculé sur **toutes**
-  les clés de `bot_eval_weights`, `tactical` **inclus**, alors que §10.5 impose son exclusion des
-  signaux de sélection. Le poids nul ne protégeait pas ce site (min sur des NOMS). **DEUX sites
-  étaient touchés, pas un** : le eval-only ([train.py:4682](../../ai/train.py#L4682)) ET le
-  `worst_bot_score` **par-scénario** de [bot_evaluation.py:1180](../../ai/bot_evaluation.py#L1180),
-  qui alimente le **gate de curriculum** (`_extract_worst_bot_scores_for_gate`) — donc un vrai
-  signal de sélection, pas seulement un affichage. Source unique : helper
-  `selection_worst_bot(scores)` dans `training_callbacks.py` (exclut `HOLDOUT_BOT_NAMES`, lève si
-  plus aucun bot de sélection). Verrou : 3 tests dans `test_eval_holdout_opponent.py` (lock
-  comportemental « holdout=min ne pilote pas worst_bot », lock du `raise`, lock **structurel** que
-  les deux sites délèguent au helper) ; **2 rouges sous mutation** du helper, verts après. Le test
-  préexistant `test_holdout_bots_excluded_from_every_selection_signal` couvrait metrics_tracker
-  mais **manquait ces deux sites** — c'était exactement le trou.
-
-**(b) Le 7ᵉ site du portage n'est pas couvert runtime — ✅ STATUS QUO VALIDÉ (2026-07-21)**
-
-Décision utilisateur : **`DefensiveSmartBot` reste hors éval.** Il avait été retiré délibérément
-parce qu'il **sous-performait** ; le réintroduire seulement pour couvrir `_best_target_slot_by_threat`
-en runtime n'a pas de justification (et fausserait la composition d'éval, donc `combined` et poids).
-Ce site reste couvert par son **test unitaire**, ce qui est jugé suffisant. ➜ Sujet clos, déplacé en
-**§0ter — Notes post-implémentation**. (Constat d'origine conservé ci-dessous pour mémoire.)
-
-- Le **7ᵉ site du portage** (`_best_target_slot_by_threat`) n'est couvert que par un test unitaire :
-  son appelant `DefensiveSmartBot` n'est pas dans `bot_eval_weights`, donc l'éval ne le joue pas
-  (`active_bot_names = tuple(eval_weights.keys())`, [bot_evaluation.py:893](../../ai/bot_evaluation.py#L893)).
-  Piège §10.5 : **une liste de poids détermine qui TOURNE, pas seulement qui COMPTE.**
-
-**(c) Clé de config `holdout_hard_opponent_budget_modifier` — ✅ CONSERVÉE DÉLIBÉRÉMENT (2026-07-21)**
-
-Décision utilisateur : **garder la clé ET `scripts/build_holdout_benchmark.py`.** Un holdout à armées
-**générées** est prévu **après la démo** (une fois les 2 armées focus terminées). La clé n'est donc pas
-« morte » mais **en attente d'usage** : elle n'est simplement pas consommée par le chemin de training
-actuel (2 rosters fixes, §10.2). ➜ Ni la clé ni le script ne sont supprimés ; ce n'est plus une
-réserve mais un **choix assumé**. Note en §0ter.
-
-### 0.17 Travail non commité — 🟠 OUVERT (état au 2026-07-21 00:05)
-
-⚠️ **Entrée périssable par nature : la confronter à `git status` / `git log` AVANT de s'en
-servir.** Elle a déjà été fermée à tort une fois, rouverte, puis **rendue fausse par les commits
-eux-mêmes** — la version précédente listait 6 fichiers « non commités » au moment où ils étaient
-commités. Une entrée d'état ne survit pas à l'action qu'elle décrit.
-
-**Session du 2026-07-20 : intégralement commitée**, `HEAD` = `056c948e`, arbre de travail propre.
-Quatre lots, du plus indépendant au plus transverse :
-
-| Lot | Commit | Contenu |
-|---|---|---|
-| A | `47af78f3` | Correctif §0.18/§0.21 — couplage maximum, source unique pile-in/conso, 4 tests |
-| B | `ea79e545` | Audit §0.19.2 — 3 replis silencieux de `_ai_select_fight_target`, 6 tests |
-| C | `04170652` | Documentation — §0.18/§0.20/§0.21, §0.19.1/§0.19.2, garde d'arbre en §0bis |
-| D | `056c948e` | Gouvernance — **règle 7 de `CLAUDE.md`** (lot séparé : ce n'est pas du code) |
-
-🔴 **`config/users.db` — restauré (`git checkout`) AVANT les commits, il n'entre dans aucun.**
-Fichier **protégé** (CLAUDE.md), sali par les runs d'enquête §0.18 (`probe20`, `probe60`).
-Il redeviendra sale au prochain training : le restaurer avant chaque commit.
-
-**Pourquoi l'entrée reste OUVERTE malgré tout** : les tests R4 de §8.3 sont en cours d'écriture
-(cf. §0.19). Ils produiront du non-commité dès qu'ils existeront. Fermer cette entrée maintenant
-la rendrait fausse une troisième fois.
-
 ### 0.22 Coût du move pool — `MOVE_POOL_BUILD` = 95,6 % du training — 🟠 OUVERT (cardinalités mesurées + levier tranché, 2026-07-21)
 
 > **⚠️ MAJ 2026-07-21 — CE QUI SUIT DANS CETTE SECTION EST EN PARTIE SUPERSEDED.** Le profil interne
@@ -677,8 +198,12 @@ mesurées, levier tranché (bbox NumPy). ~~Prochaine action : L1 → L_bbox (cf.
 fenêtrées sur la bbox `start ± (move_range + max|offset|)` du chemin ground (variante (b), pur NumPy ;
 FLY exclu). Garde-fous : oracle + snapshot ovale + **A/B fenêtré==plein-board** (7 cas) + suite
 complète verte. **Gain A/B (220×300, gym hex)** : ovale [20,14] 1,49×, round 10 1,78×, round 3 1,13×
-(pool strictement identique) — gain croissant avec la taille du socle. **Prochaine action : étape 4**
-(BFS `deque` → wavefront bbox-NumPy vs numba, le reliquat sur petits socles).
+(pool strictement identique) — gain croissant avec la taille du socle. **Étape 4 (BFS wavefront)
+BENCHÉE ET RÉFUTÉE** : prototype prouvé équivalent mais **plus lent à move_range=12** (le régime réel du
+training, mesuré) ; le BFS deque n'y coûte que 0,30 ms. **Nouveau hotspot mesuré (cProfile ez=2)** : la
+boucle Python sur les ~200 offsets de `_dilate`/`_spread` (ovale, ~60 % du build) → levier **L2**
+(numba OU runs NumPy), que le §8 avait cru caduc. **Décision de périmètre en attente utilisateur** (L2a
+numba / L2b runs NumPy / L3 fenêtrer le corps `_build`) — cf. `V11_move_build_acceleration.md §10`.
 
 ## 0bis. Pièges et leçons de méthode — 📌 SECTION CANONIQUE
 
@@ -2356,6 +1881,479 @@ complet et la source unique partagée avec la consolidation.
 `test_greedy_order_does_not_cost_an_engagement` : **1 figurine engagée sur 2**. Avec le
 couplage : **2 sur 2**. Le test verrouille donc l'optimalité, pas seulement l'absence de
 collision.
+
+### 0.15 Rosters `training` ≡ `holdout_regular` — ✅ TRANCHÉ (2026-07-21 : identité ASSUMÉE)
+
+> Part **ouverte** de §0.6. La suppression des listes holdout mortes, elle, est résolue — voir
+> §0.6 pour la décision et sa justification.
+
+⚠️ **Les rosters `training` et `holdout_regular` sont IDENTIQUES** (vérifié : mêmes compositions,
+mêmes totaux, aux deux emplacements). C'est cohérent avec la décision §10.5 — le holdout porte sur
+l'**adversaire**, pas sur le roster — mais il faut en avoir conscience : **il n'existe aucune
+séparation de listes entre entraînement et évaluation**. Un sur-apprentissage sur les
+particularités de ces deux listes ne serait détecté par aucun des scénarios d'éval actuels.
+
+**Statut** : ✅ **TRANCHÉ le 2026-07-21 — l'utilisateur ASSUME l'identité** (« Oui : rosters
+training ≡ holdout_regular »). Le holdout porte donc **exclusivement sur l'adversaire** (§10.5),
+jamais sur le roster : c'est cohérent avec la démo de financement (2 rosters fixes SM/Orks, §10.2)
+et avec la spécialisation assumée. **Conséquence à garder en tête** : aucun scénario d'éval ne
+détectera un sur-apprentissage sur les particularités de ces deux listes ; le win-rate par matchup
+mesure la robustesse à l'**adversaire**, pas au roster. Ce n'est pas un angle mort à corriger,
+c'est le périmètre choisi.
+
+### 0.16 Réserves de l'évaluation — ✅ SOLDÉE (2026-07-21 ; extraits de §0.5, §0.6 et §0.7)
+
+> Trois réserves distinctes, aucune bloquante aujourd'hui, toutes déjà constatées. Leurs
+> entrées d'origine (§0.5 fail-fast, §0.6 listes holdout, §0.7 run 60/60) sont résolues par
+> ailleurs.
+
+**(a) Réserves du fail-fast `--eval` (ex-§0.5)**
+
+Réserves :
+- ✅ **CORRIGÉE (2026-07-21)** — Le bloc `🏁 Scenario ranking` s'imprimait **avant** le raise
+  eval-only sur `total_failed_episodes > 0` : quand des épisodes échouaient, les `combined`/
+  `worst_bot_score` par scénario (calculés sur un dénominateur **tronqué** — épisodes plantés
+  retirés par `_get_result_with_timeout`) étaient présentés comme un classement fiable juste
+  avant que la mesure ne soit invalidée. **Root cause** : la décision d'affichage n'était pas
+  gardée par la fiabilité de l'éval. **Fix** : décision extraite dans le helper pur
+  `_render_scenario_ranking(scenario_scores, total_failed_episodes)`
+  ([bot_evaluation.py](../../ai/bot_evaluation.py)) — si `total_failed_episodes > 0`, il retourne
+  un **avertissement explicite** (`⚠️ Scenario ranking SUPPRIMÉ : évaluation NON FIABLE`) au lieu
+  du classement, jamais un chiffre. Vaut pour le training ET l'eval-only (les deux passent par ce
+  print quand `show_summary`). **Verrou** : 3 tests dans `test_eval_holdout_opponent.py`
+  (affichage nominal trié, suppression + avertissement quand `failed>0`, liste vide sans scores) ;
+  **mutation** de la garde (`total_failed_episodes > 0` → `False`) → **1 rouge** ciblé, vert après.
+- ✅ **CORRIGÉE (2026-07-21)** — `worst_bot_name` du chemin eval-only était calculé sur **toutes**
+  les clés de `bot_eval_weights`, `tactical` **inclus**, alors que §10.5 impose son exclusion des
+  signaux de sélection. Le poids nul ne protégeait pas ce site (min sur des NOMS). **DEUX sites
+  étaient touchés, pas un** : le eval-only ([train.py:4682](../../ai/train.py#L4682)) ET le
+  `worst_bot_score` **par-scénario** de [bot_evaluation.py:1180](../../ai/bot_evaluation.py#L1180),
+  qui alimente le **gate de curriculum** (`_extract_worst_bot_scores_for_gate`) — donc un vrai
+  signal de sélection, pas seulement un affichage. Source unique : helper
+  `selection_worst_bot(scores)` dans `training_callbacks.py` (exclut `HOLDOUT_BOT_NAMES`, lève si
+  plus aucun bot de sélection). Verrou : 3 tests dans `test_eval_holdout_opponent.py` (lock
+  comportemental « holdout=min ne pilote pas worst_bot », lock du `raise`, lock **structurel** que
+  les deux sites délèguent au helper) ; **2 rouges sous mutation** du helper, verts après. Le test
+  préexistant `test_holdout_bots_excluded_from_every_selection_signal` couvrait metrics_tracker
+  mais **manquait ces deux sites** — c'était exactement le trou.
+
+**(b) Le 7ᵉ site du portage n'est pas couvert runtime — ✅ STATUS QUO VALIDÉ (2026-07-21)**
+
+Décision utilisateur : **`DefensiveSmartBot` reste hors éval.** Il avait été retiré délibérément
+parce qu'il **sous-performait** ; le réintroduire seulement pour couvrir `_best_target_slot_by_threat`
+en runtime n'a pas de justification (et fausserait la composition d'éval, donc `combined` et poids).
+Ce site reste couvert par son **test unitaire**, ce qui est jugé suffisant. ➜ Sujet clos, déplacé en
+**§0ter — Notes post-implémentation**. (Constat d'origine conservé ci-dessous pour mémoire.)
+
+- Le **7ᵉ site du portage** (`_best_target_slot_by_threat`) n'est couvert que par un test unitaire :
+  son appelant `DefensiveSmartBot` n'est pas dans `bot_eval_weights`, donc l'éval ne le joue pas
+  (`active_bot_names = tuple(eval_weights.keys())`, [bot_evaluation.py:893](../../ai/bot_evaluation.py#L893)).
+  Piège §10.5 : **une liste de poids détermine qui TOURNE, pas seulement qui COMPTE.**
+
+**(c) Clé de config `holdout_hard_opponent_budget_modifier` — ✅ CONSERVÉE DÉLIBÉRÉMENT (2026-07-21)**
+
+Décision utilisateur : **garder la clé ET `scripts/build_holdout_benchmark.py`.** Un holdout à armées
+**générées** est prévu **après la démo** (une fois les 2 armées focus terminées). La clé n'est donc pas
+« morte » mais **en attente d'usage** : elle n'est simplement pas consommée par le chemin de training
+actuel (2 rosters fixes, §10.2). ➜ Ni la clé ni le script ne sont supprimés ; ce n'est plus une
+réserve mais un **choix assumé**. Note en §0ter.
+
+### 0.17 Travail non commité — ✅ CLÔTURÉE (entrée périssable périmée : tout est commité, `git status` propre)
+
+⚠️ **Entrée périssable par nature : la confronter à `git status` / `git log` AVANT de s'en
+servir.** Elle a déjà été fermée à tort une fois, rouverte, puis **rendue fausse par les commits
+eux-mêmes** — la version précédente listait 6 fichiers « non commités » au moment où ils étaient
+commités. Une entrée d'état ne survit pas à l'action qu'elle décrit.
+
+**Session du 2026-07-20 : intégralement commitée**, `HEAD` = `056c948e`, arbre de travail propre.
+Quatre lots, du plus indépendant au plus transverse :
+
+| Lot | Commit | Contenu |
+|---|---|---|
+| A | `47af78f3` | Correctif §0.18/§0.21 — couplage maximum, source unique pile-in/conso, 4 tests |
+| B | `ea79e545` | Audit §0.19.2 — 3 replis silencieux de `_ai_select_fight_target`, 6 tests |
+| C | `04170652` | Documentation — §0.18/§0.20/§0.21, §0.19.1/§0.19.2, garde d'arbre en §0bis |
+| D | `056c948e` | Gouvernance — **règle 7 de `CLAUDE.md`** (lot séparé : ce n'est pas du code) |
+
+🔴 **`config/users.db` — restauré (`git checkout`) AVANT les commits, il n'entre dans aucun.**
+Fichier **protégé** (CLAUDE.md), sali par les runs d'enquête §0.18 (`probe20`, `probe60`).
+Il redeviendra sale au prochain training : le restaurer avant chaque commit.
+
+**Pourquoi l'entrée reste OUVERTE malgré tout** : les tests R4 de §8.3 sont en cours d'écriture
+(cf. §0.19). Ils produiront du non-commité dès qu'ils existeront. Fermer cette entrée maintenant
+la rendrait fausse une troisième fois.
+
+### 0.19 Revérifier T1→T5 et la section 9 ligne à ligne — ✅ SOLDÉ (§0.19.1 → §0.19.3, 2026-07-21)
+
+**Énoncé.** Les tranches **T1, T2, T3, T4, T5** (§5) et toute la **section 9** (Phase A') sont
+marquées ✅ FAIT, mais **n'ont jamais été revérifiées ligne à ligne contre le code**. Leur statut
+repose sur les sessions où elles ont été écrites, pas sur un audit ultérieur. La réserve existe
+depuis le 2026-07-19 en §0bis (« Réserve de méthode — ce qui n'a pas été revérifié ») ; elle y
+est une **mise en garde**, pas une tâche. **Cette entrée en fait une tâche**, pour qu'elle cesse
+d'être un avertissement que chacun contourne.
+
+**Pourquoi ça n'est pas de la précaution abstraite.** Le taux de découverte est élevé partout où
+on a effectivement regardé :
+
+| Session | Ce qui a été trouvé en revérifiant |
+|---|---|
+| 2026-07-19 soir | **3** affirmations périmées (« prochain bloqueur §10.4 » déjà résolu ; « archivage des holdouts à faire » déjà fait ; « 9 échecs préexistants » alors que la suite est verte) |
+| 2026-07-20 | **8** affirmations périmées recensées en §0bis, dont la n°6 (« 9 tests `roster_pool_schedule` échouent ») **démontrée fausse** par la suite complète |
+| 2026-07-20 | **§0.11 déclaré résolu ne l'est pas** (§0.18) — et le T6-i portait déjà, en 2026-07-19, le motif « code testé mais jamais appelé » |
+
+Trois marqueurs ✅ démentis sur les seules zones auditées. **Rien n'indique que T1→T5 et la
+section 9 soient d'une autre nature** — simplement, personne n'y a regardé.
+
+**Méthode suggérée** (une tranche = une passe, résultat écrit ici même) :
+1. Pour chaque critère d'acceptation de §6, retrouver **le test** qui le verrouille — pas le
+   code, le **test**. §8 pose la règle « une règle = son fichier de tests ».
+2. Vérifier que ce test **s'exécute** (il est collecté par la suite) **et qu'il échoue** si on
+   neutralise le code qu'il prétend couvrir. Le motif récurrent de ce projet est le **code testé
+   mais jamais appelé** (T6-i) et le **test qui passe pour la mauvaise raison** (rencontré en
+   §0.12 sur le bonus de kill, où le terme HP masquait le terme testé).
+3. Tout ✅ qui ne survit pas à (1) et (2) redevient ⏳, avec la preuve du démenti.
+
+⚠️ **Ne pas « nettoyer » en relisant la prose.** Corriger une affirmation sans relire le code
+reproduit exactement l'erreur qu'on cherche — c'est écrit en tête du tableau des affirmations
+périmées (§0bis), et c'est pour cette raison que ces 8 lignes ont été **signalées et non
+corrigées**.
+
+**Non planifié** : cette entrée n'a pas d'ordre dans le tableau d'état. C'est un audit de fond,
+à mener quand le chemin critique (§0.18 → §0.14) est dégagé — ou immédiatement si l'on doute
+d'une tranche en particulier.
+
+#### 0.19.2 Retrait du repli silencieux de `_ai_select_fight_target` — ✅ FAIT (2026-07-20)
+
+**Décision utilisateur** : « il faut absolument fixer ça ». Livré après la fin de la chasse §0.18.
+
+**Ce qui était en cause.** `_ai_select_fight_target` (fight_handlers) enveloppait tout son corps
+dans un `try/except Exception: return valid_targets[0]`. Il avalait les **deux** `require_key`
+(`reward_configs`, puis la config de l'agent combattant) **et** le `ValueError` de
+`get_model_key` sur un `unitType` inconnu. **Aggravant vérifié** : sa seule trace était
+`add_console_log`, qui est un **no-op tant que `debug_mode` est faux**
+([game_utils.py:74](../../engine/game_utils.py#L74)) — en entraînement normal l'erreur était
+**totalement** silencieuse, le seul symptôme étant un ciblage de mêlée dégradé sur la première
+cible du pool.
+
+**Ce qui a été écarté avant d'agir.** On pouvait craindre que le repli soit atteint en
+permanence : tous les `unitType` des rosters mappent vers `CoreAgent`, alors que le moteur tourne
+en `rewards_config="ArmageddonAgent"`. **Faux** : [w40k_core.py:918-924](../../engine/w40k_core.py#L918-L924)
+enregistre le `model_key` de **chaque** unité vers les rewards de l'agent contrôlé, donc
+`reward_configs` contient bien `CoreAgent`. Le cas nominal n'atteint pas le repli — c'est ce qui
+rendait le retrait sûr.
+
+**Fix** : `try/except` supprimé, corps désindenté, aucune autre modification de comportement.
+
+**Test** : `tests/unit/engine/test_fight_target_selection_no_fallback.py` (+4, porté à **10**
+par §0.19.3) —
+`reward_configs` sans la clé de l'agent, `reward_configs` absent, `unitType` inconnu, plus une
+non-régression sur l'erreur explicite qui précède le `try`.
+**Contre-épreuve faite** (`git stash` du seul `fight_handlers.py`) : **3 rouges sur le code
+d'avant** (`DID NOT RAISE`), **4 verts après**. Suite complète `EXIT=0`.
+
+⚠️ **Piège rencontré en écrivant le test** : il attendait `KeyError`, alors que `require_key`
+lève `ConfigurationError` (sous-classe de `RuntimeError`,
+[data_validation.py:17](../../shared/data_validation.py#L17)). Le test a donc échoué **après** le
+fix alors que le fix était bon — c'était l'attente qui était fausse. Corrigé en vérifiant
+**type ET fragment de message** (§8.1).
+
+**Les DEUX autres replis de la même fonction — également retirés (2026-07-20).** Ils avaient
+d'abord été renvoyés à l'utilisateur « pour arbitrage » : **c'était une erreur de cadrage**.
+La règle métier était déjà posée (« aucun fallback pour masquer une erreur ») ; il ne manquait
+que la **lecture du code**, qui est du ressort de l'implémentation. Rappel utilisateur, à
+retenir : *« Je tranche le métier, pas l'optimisation du code. »*
+
+| Repli | Ce que la lecture a établi | Remplacé par |
+|---|---|---|
+| `if not valid_targets: return ""` | **Branche MORTE** : les **4** sites d'appel gardent déjà le pool vide en amont — fight_handlers ~3381 (`if not targets: return []`), ~5537 (`if not valid: … return`), ~6271 (`if valid:`), w40k_core ~5518 (`if targets else None`). | `ValueError` « pool de cibles VIDE » |
+| `if not target: continue` (×2 boucles) | Le pool vient de `units_cache` ([fight_handlers:2037](../../engine/phase_handlers/fight_handlers.py#L2037)) ; une cible qui y figure sans être dans `unit_by_id` est une **désynchronisation d'index**, donc un bug. Si TOUTES manquaient, la fonction renvoyait `valid_targets[0]` sans avoir scoré. | `ValueError` « absente de unit_by_id » |
+
+⚠️ **Affirmation fausse émise en cours de route, corrigée après lecture** : il avait été écrit que
+le `""` « remonte à 3 des 4 sites d'appel **sans garde** ». C'est l'**inverse** — les 4 gardent.
+Le recensement avait été fait de mémoire du `grep`, pas en lisant les sites. Motif n°1 du
+document, commis dans la session qui l'auditait.
+
+**Tests (portés à 6)** : + `test_empty_target_pool_raises_instead_of_empty_string` et
+`test_target_missing_from_unit_by_id_raises`. Contre-épreuve rejouée (`git stash` du seul
+`fight_handlers.py`) : **5 rouges avant, 6 verts après**. ✅ **Cette mesure est fiable même en
+contexte concurrent** : elle ne dépend que de `fight_handlers.py`, qu'aucun autre agent ne
+touche — contrairement aux suites complètes (cf. le piège « verrou global » de §0bis).
+
+#### 0.19.3 Fermeture de T1 — les deux trous de §0.19.1 sont comblés — ✅ FAIT (2026-07-21)
+
+**Déclencheur** : règle 7 de `CLAUDE.md` (commit `056c948e`). §0.19.1 avait *documenté* l'absence
+de tests R4 et la non-couverture de R6 site 1 — or « documenter un manque n'est PAS le traiter ».
+Le traitement était techniquement possible (l'instrumentation §0.18 avait été retirée), donc dû.
+
+**Récapitulatif — chiffres relevés par exécution le 2026-07-21, pas de mémoire.**
+
+| Fichier | Tests | Objet | Mutations → verdict |
+|---|---|---|---|
+| `test_fight_target_selection_no_fallback.py` | **10** | §0.19.2 (3 replis) + sélection sans sentinelle | 5 rouges (replis) ; 2 rouges (`max`→`min`, scoring aplati) |
+| `test_charge_oval_base_reverse_bfs.py` | **4** | R6, **les 2 sites**, déterministe + garde d'atteinte | 3 rouges par site (L826 et L3629, mutés isolément) |
+| `test_programmatic_owner_predicate.py` | **22** | R4 — le **prédicat** et son refus du repli | 3 rouges (bascule gym, `player_types`, erreur explicite) |
+| `test_r4_auto_decider_wiring.py` | **14** | R4 — le **branchement** et sa consommation | 3 rouges (débranchements) + 1 rouge (site `defender_human` isolé) |
+| **Total** | **50** | | **17 mutations, 17 rouges** |
+
+**Suite complète après ces travaux : `EXIT=0`, zéro échec, `GARDE=OK`** — empreinte `mtime` de
+`engine/ tests/ ai/ config/` identique avant et après le run (`833a2bfc…`), donc aucun écrivain
+concurrent : la mesure est valide au sens du piège « verrou global » de §0bis.
+
+⚠️ **Ce qui n'a PAS été mesuré**, à ne pas déduire de ce qui précède : aucun run d'entraînement
+n'a été lancé de toute cette passe. Les runs §0.18 restent dus (cf. l'entrée correspondante) —
+un crash dépendant de la trajectoire ne se solde pas par une suite verte.
+
+**R6 site 1 — arbitrage utilisateur et ce qui en a été fait.** L'utilisateur a tranché : « x5 est
+LA priorité ; si on doit sacrifier x1, on le sacrifie. » **On n'a pas eu à le faire**, et le
+signaler faisait partie du travail : l'arbitrage était conditionnel, et la condition n'est pas
+remplie. Le chemin x1 est **vif** — [api_server.py:56](../../services/api_server.py#L56) et
+`frontend/src/hooks/useGameConfig.ts:228` exposent le board `25x21` au PvP, et
+`ArmageddonAgent_training_config.json` porte une phase de curriculum x1. Le supprimer aurait été
+une **régression PvP sans aucun gain au x5** : le fix R6 y était déjà correct, seulement invisible
+aux tests. Traitement retenu : le **couvrir**.
+
+`tests/unit/engine/test_charge_oval_base_reverse_bfs.py` (+4) — Carnifex `[41,27]`, Psychophage
+`[47,36]`, non-régression socle rond `int`, et surtout une **garde d'atteinte**
+(`test_reverse_bfs_is_actually_reached`) qui espionne l'appel à
+`_charge_reverse_goal_bfs_for_eligibility`. ⚠️ **Sans cette garde le fichier ne vaudrait rien** :
+c'est le motif §0.11 (« un test vert ne couvre que les états qu'il atteint »), déjà subi par
+`test_move_mask_is_executable.py`. Le test unitaire atteint le site parce que la fixture ne
+définit pas `inches_to_subhex` → `.get(..., 1)` vaut 1, ce qui active le BFS inverse.
+**Mutation `max(_mover_bs)` → `int(_mover_bs)` : 3 ROUGES** (dont la garde), le socle rond reste
+vert.
+
+**R4 — prédicat ET branchement, les six exigences de §8.3 sont couvertes (2026-07-21).**
+
+| Exigence §8.3 pour R4 | État | Où |
+|---|---|---|
+| Matrice (gym True/False) × (`player_types` human/ai) | ✅ | `test_programmatic_owner_predicate.py` |
+| Test négatif `_is_ai_controlled_shooting_unit` | ✅ | idem |
+| Allocation **fight** auto en gym, pertes réelles (FIGHT_CTX) | ✅ | `test_t5_bare_loop.py` (préexistant) |
+| Allocation **tir** auto en gym | ✅ | `test_r4_auto_decider_wiring.py` |
+| Les **4 sites `defender_human`** du flux fight | ✅ | idem — **verrou STRUCTUREL** `test_every_defender_human_site_delegates_to_the_predicate`, pas une déduction depuis le helper |
+| **Miroir PvP** : en PvP humain l'allocation reste manuelle | ✅ | idem, un jumeau PvP par cas gym |
+
+🔴 **Pourquoi les tests de prédicat ne suffisaient pas.** Le prédicat était déjà correct AVANT
+T1 ; la rupture R4 était son **branchement**. `test_programmatic_owner_predicate.py` ne rougit
+pas si l'on débranche `SHOOT_CTX.auto_decider` — d'où
+`tests/unit/engine/test_r4_auto_decider_wiring.py` (**+14**, comptés par exécution), qui
+vérifie la **chaîne** :
+
+    SHOOT_CTX.auto_decider = _target_defender_is_ai -> is_programmatic_defender -> is_programmatic_owner
+    FIGHT_CTX.auto_decider = _fight_auto_defender   -> _is_ai_controlled_fight_unit -> is_programmatic_owner
+    les 4 sites `defender_human` (~5523, ~5548, ~6248, ~6282) -> _is_ai_controlled_fight_unit
+    consommation : _manual_allocation_step (shared_utils) — DEUX sites d'interrogation
+
+⚠️ **Le second site de consommation avait failli être manqué** : `_manual_allocation_step`
+interroge `auto_decider` **deux fois** — une fois pour l'ordre des groupes (~L6416), une fois
+pour le **choix de la figurine** qui encaisse (~L6446). Le premier test ne couvrait que l'ordre.
+Les deux sont désormais couverts, chacun avec son miroir PvP.
+
+**3 mutations de débranchement, 3 rouges :**
+
+| Mutation | Tests rouges |
+|---|---|
+| `SHOOT_CTX.auto_decider` → `None` | 5 |
+| `FIGHT_CTX.auto_decider` → `None` | 2 |
+| `_is_ai_controlled_fight_unit` recâblé sur `player_types` en direct (**la rupture R4 d'origine reproduite**) | 2, dont `defender_human_is_false_in_gym` |
+
+La troisième est la preuve qui manquait : elle rejoue le bug historique et le test le rattrape.
+
+⚠️ **Erreur commise puis corrigée dans la même passe, à retenir.** La première version de ce
+fichier testait `_is_ai_controlled_fight_unit` et en **déduisait** que les 4 sites
+`defender_human` étaient couverts. C'est **exactement le raisonnement « prédicat correct donc
+branchement correct »** que le fichier existe pour interdire, reproduit un cran plus haut :
+débrancher un seul des 4 sites laissait la suite **verte**. ➜ Corrigé par
+`test_every_defender_human_site_delegates_to_the_predicate`, un **verrou structurel** qui lit la
+source, exige que chaque affectation de `defender_human` passe par le prédicat, et qu'il y en ait
+**exactement 4** (un 5ᵉ site non gardé fait rougir). Mutation d'un seul site → **ROUGE**.
+**Leçon : un test de helper ne couvre jamais ses appelants ; il faut vérifier l'appel.**
+
+⏳ **Faiblesse assumée, non corrigée** : les deux tests de consommation
+(`_manual_allocation_step`) reposent sur **8 monkeypatches** de fonctions vives
+(`_build_alloc_groups`, `_group_alive`, `_auto_declared_order`, `_declare_order_payload`,
+`_finalize_manual_allocation`, `_current_live_group`, `_select_allocation_model`,
+`_manual_waiting_payload`). C'est légal (§8.1 n'interdit que le monkeypatch de code **mort**),
+mais ils vérifient en partie le **modèle** qu'on se fait de la fonction plutôt que la fonction :
+si sa forme change, ils peuvent rester verts pendant que la production casse. Une couverture par
+un vrai `game_state` d'allocation serait plus solide — coût non négligeable, à peser si ce
+chemin bouge.
+
+`tests/unit/engine/test_programmatic_owner_predicate.py`
+(+22) : matrice complète (gym True/False) × (`player_types` human/ai) × (joueur 1/2) ; les trois
+erreurs explicites (`player_types` manquant hors gym, joueur inconnu, cible absente de
+`units_cache`) ; le court-circuit gym qui précède le `require_key` ;
+`is_programmatic_defender` résolvant le propriétaire via `units_cache` ; et le **test négatif**
+exigé par le ⚠️ R4 — `_is_ai_controlled_shooting_unit` lit `player_types` et **jamais** le flag
+gym, sous peine d'auto-activer les unités du joueur entraîné.
+
+**3 mutations, 3 rouges**, une par branche du contrat :
+
+| Mutation | Effet | Tests rouges |
+|---|---|---|
+| `if game_state.get("gym_training_mode")` → `if False` | bascule gym neutralisée | 4 (dont `defender_in_gym`) |
+| `return player_types[p] == "ai"` → `return True` | branche hors-gym toujours vraie | 4 (dont le miroir PvE) |
+| `raise KeyError(...)` → `return False` | erreur explicite → **défaut silencieux** | 1 (`unknown_player_raises`) |
+
+La troisième est la plus importante : elle prouve que le test **interdit le repli**, au lieu de
+seulement constater un comportement.
+
+⚠️ **Restauration par `cp`, jamais `git checkout`** — `shared_utils.py` portait alors du travail
+non commité d'un autre agent (cf. §0bis). Vérifiée par `git diff --stat` vide.
+
+**Deux dettes révélées par cette passe — ✅ TOUTES DEUX TRAITÉES le 2026-07-21 (règle 7) :**
+
+1. ✅ **Le site R6 n°2 n'était verrouillé QUE par un test à exploration aléatoire.**
+   `test_t5_bare_loop.py` déroule des épisodes au hasard : c'était **l'antipattern §0.11**
+   reproché au site n°1, qui a déjà piégé `test_move_mask_is_executable.py`. Il tenait par
+   chance de trajectoire, pas par construction.
+   ➜ **Résolu sans écrire une ligne de plus** : le site n°2 (~L3629) est situé **avant**
+   l'embranchement vers le BFS inverse (~L3698), donc tout appel à
+   `charge_build_valid_destinations_pool` le traverse — `test_charge_oval_base_reverse_bfs.py`
+   le couvrait déjà. **Vérifié par mutation isolée du seul L3629, ce fichier seul (sans
+   `test_t5_bare_loop.py`) : 3 ROUGES.** Les deux sites R6 sont donc désormais verrouillés de
+   façon **déterministe**.
+2. ✅ **Code mort introduit par le fix §0.19.2** : `best_reward = -999999` était une sentinelle
+   utile tant que `if not target: continue` pouvait sauter toutes les cibles ; depuis que ce
+   `continue` lève, elle est inatteignable.
+   ➜ Boucle remplacée par `max(resolved, key=...)`, qui supprime **aussi** le second
+   `get_unit_by_id` par cible (la première boucle l'avait déjà résolue). `max` retient le
+   **premier** maximum : départage identique au `>` strict, donc sélection **stable**
+   (déterminisme §8.1). **+4 tests** dans `test_fight_target_selection_no_fallback.py`
+   (argmax réel, stabilité sur deux appels, égalité → premier du pool, un scoring par cible),
+   **2 mutations → rouges** (`max`→`min`, scoring aplati à 0).
+
+⚠️ **Piège auto-infligé, à ne pas refaire** : le helper de mutation restaurait par
+`git checkout --`, ce qui a **effacé le refactor non commité en cours** — précisément la mise en
+garde inscrite en §0bis, commise par son propre auteur. Les 10 tests sont alors repassés au vert
+sur le code d'origine, donnant l'illusion d'une mutation validée. **Sauvegarde/restauration par
+`cp` obligatoire dès qu'on mute un fichier qu'on est soi-même en train de modifier.**
+
+**Suite complète — première mesure VALIDE de tout ce travail** : `EXIT=0`, zéro échec, avec la
+garde de stabilité d'arbre de §0bis (empreinte `mtime` de `engine/ tests/ ai/ config/` identique
+avant et après le run → aucun écrivain concurrent). Les trois suites précédentes de la session
+avaient toutes été invalidées.
+
+#### 0.19.1 Passe d'audit du 2026-07-20 (soir) — T1→T5 faits, section 9 **sans objet**
+
+**Méthode réellement appliquée.** Pour chaque critère de §6 : retrouver le test, vérifier qu'il
+est collecté, puis le **neutraliser par mutation du code de production** et observer le verdict,
+puis restaurer. Six mutations menées. **Les cinq fichiers mutés ont été restaurés et vérifiés
+par `git diff --stat` vide** : `charge_handlers.py`, `macro_intents.py`, `train.py`,
+`game_state.py`, `action_decoder.py`. `shared_utils.py`, `w40k_core.py` et le script de chasse
+**n'ont pas été touchés** pendant CETTE passe (ils portaient alors l'instrumentation §0.18) ;
+aucun training lancé. ⚠️ **État daté** : depuis, l'instrumentation a été retirée,
+`scripts/hunt_intra_squad_superposition.py` a été **supprimé**, et `shared_utils.py` a bien été
+muté — proprement, en §0.19.3 (sauvegarde/restauration par `cp`).
+
+**Tableau de verdicts.**
+
+| Tranche | Critère §6 | Test qui le verrouille | Mutation appliquée | Verdict | Statut |
+|---|---|---|---|---|---|
+| **T1 / R6 site 1** | socle ovale en **éligibilité** de charge | ~~aucun~~ → `test_charge_oval_base_reverse_bfs.py` (§0.19.3) | `charge_handlers.py:826` → `int(_mover_bs)` | ~~VERT~~ → **ROUGE (3 tests)** | ~~⏳~~ **✅** |
+| **T1 / R6 site 2** | socle ovale, **pool de destinations** | `test_charge_oval_base_reverse_bfs.py` (déterministe, §0.19.3) + `test_t5_bare_loop.py` | `charge_handlers.py:3629` → `int(_mover_bs)` | **ROUGE** (`TypeError`) | ✅ |
+| **T1 / R4** *(prédicat)* | prédicat programmatique unique | ~~AUCUN~~ → `test_programmatic_owner_predicate.py` (§0.19.3) | 3 mutations : bascule gym, branche `player_types`, erreur explicite | **ROUGE (3/3)** | ✅ |
+| **T1 / R4** *(branchement)* | `auto_decider` tir + 4 sites `defender_human` + miroir PvP | `test_r4_auto_decider_wiring.py` (§0.19.3) | 3 débranchements : `SHOOT_CTX`, `FIGHT_CTX`, prédicat recâblé | **ROUGE (3/3)** | ✅ |
+| **T2** | zéro littéral d'action dans `ai/` | `test_action_space_mirror.py` | `macro_intents.ACTION_CHARGE` 1030→1029 | **ROUGE** (2 tests) | ✅ |
+| **T3** | board refs + `--training-config` obligatoire | `test_train_board_refs.py` | reconstruction `{cols}x{rows}` **et** garde R1 neutralisée | **ROUGE** (3 tests) | ✅ |
+| **T4** | resolver `board_ref` | `test_board_ref_resolver.py` | garde « board dir inexistant » neutralisée | **ROUGE** | ✅ |
+| **T5** | parité masque ↔ commit de déploiement | `test_deployment_clearance_parity.py::test_deployment_mask_mirrors_commit_overlap_predicate` | `_deployment_clearance_filter` → `return candidates` | **ROUGE**, symptôme d'origine | ✅ |
+
+> ✅ **Les deux démentis ci-dessous sont RÉSOLUS depuis le 2026-07-21 — voir §0.19.3.** Le
+> constat historique est conservé tel quel : c'est lui qui documente le trou et la méthode qui
+> l'a trouvé.
+
+**Les deux démentis de fond.**
+
+1. 🔴 **T1 / R6 site 1 est du CODE MORT à la résolution du training — septième occurrence du
+   motif §0.4.** `_charge_reverse_goal_bfs_for_eligibility` est gardé par
+   `int(game_state.get("inches_to_subhex", 1)) <= 1`
+   ([charge_handlers.py:3698](../../engine/phase_handlers/charge_handlers.py#L3698)). Le training
+   tourne en **x5**, donc ce site n'est **jamais atteint**. Preuve : `int()` sur une liste lève
+   `TypeError` de façon inconditionnelle, et la suite reste **verte** sous cette mutation. Le fix
+   R6 y est correct mais **non exercé et non verrouillé** ; seul le site 2 l'est. Conséquence
+   pratique : nulle aujourd'hui (x5/x10 passent par le BFS avant) — mais toute réactivation du
+   chemin x1, ou tout run à `inches_to_subhex = 1`, s'appuierait sur du code qu'aucun test ne
+   garde.
+
+2. 🔴 **T1 / R4 n'a aucun test.** `grep -rln "is_programmatic_owner\|is_programmatic_defender"
+   tests/` retourne **vide**, alors que §8.3 impose explicitement une matrice
+   (gym × `player_types`), l'allocation tir **et** fight en gym, les 4 sites `defender_human`, le
+   **miroir PvP** et le test négatif sur `_is_ai_controlled_shooting_unit`. Le code est présent et
+   conforme à sa description ([shared_utils.py:97-124](../../engine/phase_handlers/shared_utils.py#L97-L124),
+   lu). La seule couverture est **indirecte** : `test_bare_loop_melee_losses_via_fight_ctx`
+   exerce la branche gym=True. **Rien** ne couvre la branche PvP ni la non-régression du miroir.
+   ⚠️ **Mutation impossible dans cette session** : `shared_utils.py` porte l'instrumentation
+   §0.18. **Ce ⏳ repose sur une absence de test constatée, pas sur un mutation-test** — à
+   confirmer par mutation quand l'instrumentation sera retirée.
+
+**Ce que l'audit n'a PAS trouvé.** T2, T3, T4, T5 sont verrouillés par des tests qui rougissent
+sur mutation. Aucun « test qui passe pour la mauvaise raison » sur ces quatre tranches.
+
+**Section 9 : la prémisse de §0.19 était FAUSSE.** L'énoncé ci-dessus affirme que « toute la
+section 9 est marquée ✅ FAIT ». Vérification : les lignes de la section 9 ne contiennent
+**aucun** marqueur `✅`, `FAIT` ni `⏳`. C'est une section de **plan** (P1→P5), **non
+implémentée** — il n'y a donc aucun ✅ à démentir. Ses affirmations de *diagnostic* ont
+néanmoins été revérifiées **par lecture** (pas par grep seul) et **tiennent toutes** :
+`_attack_sequence_rng` sans appelant vif (seuls des tests l'importent) ; `apply_rules` /
+`_apply_single_rule` toujours `return context` pass-through
+([rules.py:279-327](../../engine/weapons/rules.py#L279-L327)) ; `_cover_worsened_bs` ne lit
+toujours pas `IGNORES_COVER` ([shared_utils.py:5980-6005](../../engine/phase_handlers/shared_utils.py#L5980-L6005)) ;
+`_ai_select_shooting_target` de `shooting_handlers` toujours sans appelant (l'homonyme de
+`pve_controller` est, lui, vif — ne pas les confondre) ; `reroll_charge` toujours dans
+`config/unit_rules.json` et nulle part dans le code ; `_select_ai_rule_choice_option` toujours en
+`raw_action_int % len(options)` en gym ([w40k_core.py:2471](../../engine/w40k_core.py#L2471)) ;
+le `except Exception: … return valid_targets[0]` de `_ai_select_fight_target` toujours présent.
+**Seules les références de ligne ont dérivé** (~+200 à +350 lignes) — signalées, non corrigées.
+
+**Trois affirmations périmées repérées, SIGNALÉES et NON corrigées** (elles rejoignent le
+tableau de §0bis) :
+
+| # | Où | Affirmation | Pourquoi elle est périmée |
+|---|---|---|---|
+| 11 | §6, critère **T2**, et §8.2 | « `action_space.n == 41` », « `ACTION_WAIT` (18) », « `6+6+6+1+5+1+1+15 == 41` », « 19→shoot slot 0, 24→charge » | Le layout réel est **1047** actions : `ACTION_WAIT = 1024`, `SHOOT_SLOT_BASE = 1025`, `ACTION_CHARGE = 1030`, `ACTION_FIGHT = 1031` ([macro_intents.py:20-38](../../engine/macro_intents.py#L20-L38)). Changé par la refonte spatiale du move. Le critère T2 **réel** (zéro littéral d'action dans `ai/`) reste, lui, satisfait. |
+| 12 | §6, critère **T4** | « Les **61 scénarios** se chargent (script de balayage) » | La banque `ArmageddonAgent` compte **5** scénarios et `test_bank_has_expected_count` l'assert explicitement ; la banque `CoreAgent` en compte **4**. De plus `scripts/sweep_scenario_bank_v11.py:24` pointe encore `config/agents/CoreAgent/scenarios` : **le balayage du critère n'est plus exécutable tel quel**. La migration T4 a bien eu lieu ; c'est le critère qui n'a pas suivi. |
+| 13 | §8.2 | « Fichier proposé : `tests/unit/engine/test_agent_interface_contract.py` … C'est LE verrou anti-récidive de R5 » | Ce fichier **n'existe pas**. Le verrou existe sous un autre nom et une autre forme — `test_action_space_mirror.py` — et il est **meilleur** : il vérifie `macro_intents` ≡ `shared_utils` constante par constante, et le décodeur **importe** ces mêmes constantes ([action_decoder.py:25-32](../../engine/action_decoder.py#L25-L32)), donc la désynchronisation visée par §8.2 est structurellement impossible. |
+
+**Réserve sur le critère T5, indépendante du mutation-test.** §6 exige « 10 épisodes aléatoires
+masqués terminés sur **≥3 scénarios × sièges p1/p2** ». `test_t5_bare_loop.py` exerce **un**
+scénario fixe × 3 seeds et **aucun siège** (`grep agent_seat_mode tests/` ne retourne que des
+fichiers `tests/unit/ai/`). T5 le dit d'ailleurs lui-même dans son « Reste » : le siège
+`p2`/`random` crashait encore au reset. **Le ✅ de T5 couvre un périmètre strictement plus étroit
+que son critère** — il vaut pour le moteur nu, siège p1, comme la tranche l'annonce en tête.
+
+**Réserves de méthode sur cette passe elle-même** (à ne pas répéter) :
+- Une première suite complète avait été lancée **en parallèle des mutations** : contaminée par
+  construction, elle a été **tuée et non exploitée**. Ne jamais mesurer une baseline pendant
+  qu'on mute.
+- Deux premières tentatives de mutation-test sur T5 ont été **tuées par leur propre `timeout`**
+  sans verdict, et un `pkill` trop large a tué sa propre commande. Un non-aboutissement n'est
+  **pas** un rouge : le verdict n'a été obtenu qu'en isolant le test d'assertion pure
+  (**42 s vert** / **6,7 s rouge**) au lieu du fichier entier, dont l'autre test déroule des
+  épisodes. Sur une machine chargée (load ~15, 10 process de chasse), **chronométrer le
+  contrôle propre AVANT de conclure d'une lenteur sous mutation**.
+- `tests/unit/engine/test_pile_in_intra_squad_collision.py` est apparu dans `git status` pendant
+  la session : il vient des process §0.18, **pas de cet audit**.
+
+**⚠️ La première suite de fin de passe est sortie en `EXIT=1` — mesure INVALIDE, ne pas la citer.**
+Elle montrait un échec de
+`test_pile_in_intra_squad_collision.py::test_stationary_b2b_figurine_cell_is_not_stolen`. Cause
+identifiée par les **mtimes** : la **chasse §0.18** écrivait `shared_utils.py` (20:14:31) et son
+propre test (20:13:58) **pendant** que cette suite tournait (~20:05→20:45). **Deuxième baseline
+contaminée de la session**, après celle des mutations — même erreur, autre écrivain. ⚠️ **Ne
+jamais mesurer une suite pendant qu'un autre process écrit dans `engine/`**, y compris un process
+qu'on n'a pas lancé soi-même.
+
+⚠️ **Aucune suite complète de cette session ne constitue une mesure de référence.** Trois runs
+ont été invalidés par un écrivain concurrent (détail et règle : piège « verrou global » en §0bis).
+Le dernier, `EXIT=0`, a tourné de 21:17:37 à 21:22:54 alors que `shared_utils.py` était écrit à
+**21:20:33** par l'agent concurrent — **non exploitable, malgré son vert**. La mesure de référence
+est celle produite par l'agent concurrent **après gel des écritures**, à reprendre ici quand elle
+tombe.
+
+**Ce qui EST mesuré de façon fiable**, parce que cela ne dépend que de fichiers qu'aucun autre
+agent ne touche : les mutation-tests par tranche du tableau ci-dessus, et la contre-épreuve de
+§0.19.2 sur `fight_handlers.py`. Le test de pile-in passe **3 fois sur 3** en isolé.
 
 ## 1. Objectif
 
