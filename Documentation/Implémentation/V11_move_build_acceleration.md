@@ -484,7 +484,16 @@ par la bbox, wavefront-NumPy ou numba selon bench. Un run x5 étant à 95,6 % da
 
 ## 10. État
 
-**NON COMMENCÉ (code).** Cadrage d'implémentation basé sur profils réels + **cardinalités mesurées**
+**L1 FAIT (2026-07-21).** `precompute_footprint_offsets` ([hex_utils.py:1274](../../engine/hex_utils.py#L1274))
+est mémoïsée par un dict module-level `_FOOTPRINT_OFFSETS_CACHE` clé `(base_shape, base_size normalisé
+tuple, orientation)` : géométrie pure/déterministe, sortie immuable, aucune invalidation. Verrouillée par
+`TestPrecomputeFootprintOffsetsMemoization` (5 tests : équivalence stricte vs oracle géométrique sur
+round/oval/square × orientations, hit de cache = même objet, clé list≡tuple, non-collision, erreur
+préservée à travers le cache). Non-régression : `test_hex_utils` (103) + `test_movement_pool_build` +
+`test_deployment_footprint_erosion` + balayage move/charge/fight/deploy/action_decoder/spatial (475)
+verts. Gain non re-benché isolément (le DoD re-benche après L1+L_bbox, étape 3). **Reste : L_bbox.**
+
+**L_bbox — NON COMMENCÉ (code).** Cadrage d'implémentation basé sur profils réels + **cardinalités mesurées**
 (2026-07-21, §2bis). `movement_handlers.py` et `hex_utils.py` **intacts**. Filet de tests d'équivalence
 déjà en place (§0). Acquis de la mesure : `reach`/board ≤ 16,6 %, `|walls|` réel ≈ 435-988,
 `_dilate` O(|offsets|×board) indépendant de la densité → L2-dense = levier le plus faible ; le facteur
@@ -492,5 +501,6 @@ surface (reach) domine et se capte en **NumPy pur** par la **dilatation-bbox `mo
 (b) §8), **sans numba** — numba n'est en jeu que pour le reliquat BFS des petits socles, et seulement
 si un wavefront bbox-NumPy ne suffit pas. **`|occupied|` désormais MESURÉ** (~1900/build, 2 rosters
 training §2bis) → `|obstacles|`≈2400-3000 → Minkowski/cache-murs/L2-numba-dense **caducs** (pas assez
-épars pour battre la bbox-NumPy). **Aucun inconnu bloquant restant.** Prochaine action code : L1
-(mémoïsation, indépendante) puis L_bbox (pur NumPy, gain surface).
+épars pour battre la bbox-NumPy). **Aucun inconnu bloquant restant.** ~~Prochaine action code : L1
+(mémoïsation, indépendante) puis L_bbox (pur NumPy, gain surface).~~ **L1 fait le 2026-07-21 (cf. début
+de §10). Prochaine action code : L_bbox (pur NumPy, gain surface).**

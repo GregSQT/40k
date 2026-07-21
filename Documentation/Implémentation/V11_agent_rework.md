@@ -671,7 +671,10 @@ garde-fou d'équivalence stricte, exigences cache/invalidation/tests, non-régre
 ➜ garde-fous/cadrage **[`V11_move_pool_optimization.md`](V11_move_pool_optimization.md)** ; **mesures +
 plan d'implémentation à jour [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)**. Code
 toujours **non commencé** (aucune ligne de `_build_multi_hex_vectorized` modifiée) ; cardinalités
-mesurées, levier tranché (bbox NumPy). Prochaine action : L1 → L_bbox (cf. §8 du doc dédié).
+mesurées, levier tranché (bbox NumPy). ~~Prochaine action : L1 → L_bbox (cf. §8 du doc dédié).~~
+**L1 fait le 2026-07-21** (`precompute_footprint_offsets` mémoïsée, 5 tests d'équivalence + 475 de
+non-régression verts — cf. `V11_move_build_acceleration.md §10`). `_build_multi_hex_vectorized`
+toujours intacte. **Prochaine action : L_bbox** (fenêtrage bbox `move_range`, pur NumPy).
 
 ## 0bis. Pièges et leçons de méthode — 📌 SECTION CANONIQUE
 

@@ -1271,6 +1271,12 @@ def compute_footprint_placement_mask(
     return bad
 
 
+_FOOTPRINT_OFFSETS_CACHE: Dict[
+    Tuple[str, Any, int],
+    Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]],
+] = {}
+
+
 def precompute_footprint_offsets(
     base_shape: str,
     base_size: "int | list[int]",
@@ -1295,13 +1301,26 @@ def precompute_footprint_offsets(
         To reconstruct the footprint at (c, r):
             offsets = offsets_even if c % 2 == 0 else offsets_odd
             footprint = {(c + dc, r + dr) for dc, dr in offsets}
+
+    Mémoïsé (L1) : le résultat ne dépend que de ``(base_shape, base_size,
+    orientation)`` — géométrie pure, déterministe, sans état ni I/O. La sortie
+    est immuable (tuples), donc partageable entre appelants sans copie ni risque
+    de mutation. Aucune invalidation nécessaire.
     """
+    size_key = tuple(base_size) if isinstance(base_size, (list, tuple)) else base_size
+    cache_key = (base_shape, size_key, orientation)
+    cached = _FOOTPRINT_OFFSETS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     ref_row = 100
     fp_even = compute_occupied_hexes(0, ref_row, base_shape, base_size, orientation)
     fp_odd = compute_occupied_hexes(1, ref_row, base_shape, base_size, orientation)
     offsets_even = tuple((c - 0, r - ref_row) for c, r in fp_even)
     offsets_odd = tuple((c - 1, r - ref_row) for c, r in fp_odd)
-    return offsets_even, offsets_odd
+    result = (offsets_even, offsets_odd)
+    _FOOTPRINT_OFFSETS_CACHE[cache_key] = result
+    return result
 
 
 def _footprint_round(center_col: int, center_row: int, diameter: int) -> Set[Tuple[int, int]]:

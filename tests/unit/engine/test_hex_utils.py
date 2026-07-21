@@ -30,6 +30,7 @@ from engine.hex_utils import (
     _hex_center,
     precompute_footprint_offsets,
     compute_footprint_placement_mask,
+    _FOOTPRINT_OFFSETS_CACHE,
 )
 
 
@@ -605,3 +606,66 @@ class TestExpandWallGroupToHexList:
     def test_empty_group_raises(self):
         with pytest.raises(ValueError, match="non-empty"):
             expand_wall_group_to_hex_list({"hexes": [], "segments": []})
+
+
+class TestPrecomputeFootprintOffsetsMemoization:
+    """L1 — la mémoïsation de precompute_footprint_offsets ne change PAS la sortie.
+
+    Garde-fou métier : le pool dépend de ces offsets. Le cache doit être une
+    optimisation pure (équivalence stricte avec la reconstruction géométrique
+    d'origine), pas une source de divergence.
+    """
+
+    @staticmethod
+    def _oracle(base_shape, base_size, orientation):
+        """Reconstruction indépendante via compute_occupied_hexes (sémantique d'origine)."""
+        ref_row = 100
+        fp_even = compute_occupied_hexes(0, ref_row, base_shape, base_size, orientation)
+        fp_odd = compute_occupied_hexes(1, ref_row, base_shape, base_size, orientation)
+        off_even = tuple((c - 0, r - ref_row) for c, r in fp_even)
+        off_odd = tuple((c - 1, r - ref_row) for c, r in fp_odd)
+        return off_even, off_odd
+
+    @pytest.mark.parametrize(
+        "shape,size,orient",
+        [
+            ("round", 3, 0),
+            ("round", 13, 0),
+            ("round", 1, 0),
+            ("square", 10, 0),
+            ("square", 10, 1),
+            ("square", 10, 3),
+            ("oval", [20, 10], 0),
+            ("oval", [20, 10], 1),
+            ("oval", [105, 70], 0),
+            ("oval", [105, 70], 3),
+        ],
+    )
+    def test_matches_geometric_oracle(self, shape, size, orient):
+        expected = self._oracle(shape, size, orient)
+        actual = precompute_footprint_offsets(shape, size, orient)
+        assert actual == expected
+
+    def test_cache_hit_returns_identical_object(self):
+        _FOOTPRINT_OFFSETS_CACHE.clear()
+        first = precompute_footprint_offsets("oval", [20, 10], 2)
+        second = precompute_footprint_offsets("oval", [20, 10], 2)
+        # Deuxième appel = hit de cache : même objet, pas seulement égalité.
+        assert first is second
+
+    def test_list_and_tuple_size_share_cache_entry(self):
+        _FOOTPRINT_OFFSETS_CACHE.clear()
+        from_list = precompute_footprint_offsets("oval", [20, 10], 0)
+        from_tuple = precompute_footprint_offsets("oval", (20, 10), 0)
+        assert from_list is from_tuple
+
+    def test_distinct_keys_do_not_collide(self):
+        a = precompute_footprint_offsets("oval", [20, 10], 0)
+        b = precompute_footprint_offsets("oval", [20, 10], 1)
+        c = precompute_footprint_offsets("round", 3, 0)
+        assert a != b
+        assert a != c
+
+    def test_invalid_shape_still_raises_through_cache(self):
+        with pytest.raises(ValueError):
+            precompute_footprint_offsets("triangle", 5, 0)
