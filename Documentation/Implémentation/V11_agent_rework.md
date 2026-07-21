@@ -39,7 +39,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | ~~**§0.15**~~ | ~~Rosters `training` ≡ `holdout_regular`~~ | ✅ **TRANCHÉ le 2026-07-21** | — | Identité **assumée** par l'utilisateur : le holdout porte sur l'adversaire, pas le roster (§10.5, cohérent démo §10.2). Le win-rate par matchup mesure la robustesse à l'adversaire — périmètre choisi, pas angle mort. |
 | ~~**§0.16**~~ | ~~Réserves de l'évaluation~~ | ✅ **SOLDÉE le 2026-07-21** | — | (a) corrigée (worst_bot exclut tactical + ranking supprimé si éval non fiable, tests + mutations). (b) **status quo validé** : `DefensiveSmartBot` reste hors éval (il sous-performait), couverture unitaire suffisante. (c) **conservée délibérément** : clé + `build_holdout_benchmark.py` gardés pour un holdout généré prévu **après la démo**. (b) et (c) → **§0ter Notes post-implémentation**. |
 | **§0.19** | Revérifier T1→T5 et §9 ligne à ligne | audit de fond — **SOLDÉ (§0.19.1 → §0.19.3)** | **clos** | ✅ **T1→T5 tous verrouillés par mutation-test**, y compris le **branchement** de R4 (les 6 exigences de §8.3) et les **2 sites** de R6. §9 = **plan non implémenté**, jamais marqué ✅ : prémisse de la tâche fausse. Suite complète `EXIT=0` avec garde de stabilité d'arbre. |
-| **§0.22** | `MOVE_POOL_BUILD` = 95,6 % du training | 🎯 **approche cache RÉFUTÉE par mesure ; reste le BFS (Option C) à arbitrer** | **6** | Étapes 0-1 faites (cible confirmée + **pool hex du training verrouillé par test**, apport net). Le cache des masques (plan initial) a été codé, prouvé équivalent, **mesuré 0 % → reverté** (masques = 1,5 % du temps). **Seul levier réel = réécrire le BFS deque** (`numba`/`cython`, autorisés) — chantier à part, à lancer. Détail → **[`V11_move_pool_optimization.md`](V11_move_pool_optimization.md)**. |
+| **§0.22** | `MOVE_POOL_BUILD` = 95,6 % du training | 🎯 **cardinalités mesurées ; levier optimal identifié = dilatation bbox `move_range` (pur NumPy, sans numba)** | **6** | Étapes 0-1 faites (cible confirmée + **pool hex du training verrouillé par test**). Cache des masques : codé, prouvé équivalent, **mesuré 0 % → reverté**. **Facteur dominant = SURFACE, pas numba** (mesuré : `reach`/board ≤ 16,6 %, `_dilate` O(\|offsets\|×board) indépendant de la densité). Levier optimal = **borner toutes les dilatations à la bbox `move_range`** (pur NumPy, exact, inconditionnel) ; Minkowski/cache-murs/numba-dense **caducs** (`\|obstacles\|`≈2400-3000 mesuré) ; numba réservé au seul reliquat BFS petits socles, **à bencher vs wavefront bbox-NumPy**. Ordre : L1 → L_bbox → re-bench → BFS conditionnel. Détail + mesures → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§2bis, §8) ; cadrage garde-fous → **[`V11_move_pool_optimization.md`](V11_move_pool_optimization.md)**. |
 
 L'**ordre est une proposition**, pas un constat, **sauf §0.18 → §0.14** qui est une dépendance
 **technique et bloquante** : tant que le moteur crashe en cours de run, aucune mesure ne peut
@@ -611,7 +611,19 @@ Il redeviendra sale au prochain training : le restaurer avant chaque commit.
 (cf. §0.19). Ils produiront du non-commité dès qu'ils existeront. Fermer cette entrée maintenant
 la rendrait fausse une troisième fois.
 
-### 0.22 Coût du move pool — `MOVE_POOL_BUILD` = 95,6 % du training — 🟠 OUVERT (diagnostic + profileur réparé, 2026-07-21)
+### 0.22 Coût du move pool — `MOVE_POOL_BUILD` = 95,6 % du training — 🟠 OUVERT (cardinalités mesurées + levier tranché, 2026-07-21)
+
+> **⚠️ MAJ 2026-07-21 — CE QUI SUIT DANS CETTE SECTION EST EN PARTIE SUPERSEDED.** Le profil interne
+> a depuis été re-mesuré sur le **vrai board 220×300** et toutes les cardinalités décisives sont
+> connues (`reach`/board ≤ 16,6 %, `|walls|`≈435-988, `|occupied|`≈1900/build, `|obstacles|`≈2400-3000).
+> **Conclusion tranchée : le facteur dominant est la SURFACE, pas numba.** `_dilate_by_kernel` est
+> O(|offsets|×board) *indépendant de la densité* → le levier optimal est **borner les dilatations à la
+> bbox `move_range`** (pur NumPy, exact, inconditionnel, **sans dépendance**). Minkowski, cache-murs et
+> numba-dense sont **caducs** ; numba n'est en jeu que pour le reliquat BFS des petits socles, **à
+> bencher d'abord contre un wavefront bbox-NumPy**. Le « chantier cache » décrit plus bas est **réfuté
+> (0 %)** et le cProfile 60×80 ci-dessous est remplacé par le profil 220×300.
+> **➜ Source de vérité désormais : [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)
+> (§2 profil réel, §2bis mesures + verdict, §8 ordre L1→L_bbox→re-bench→BFS).**
 
 **Constat chiffré (bench x5 du 2026-07-21, `perf_timing_bench_x5.log.score.json`).**
 `MOVE_POOL_BUILD` : **374 390 appels, 17,49 ms/appel, somme 6548,7 s sur 6848,6 s de temps
@@ -642,7 +654,8 @@ itérations, tri `tottime`).** Proportions à re-mesurer sur 220×300, cf. `V11_
 ⚠️ **La config n'est PAS le goulot** : après warmup, `get_game_config` est cachée (le profil froid
 montrait un `_io.open` par appel, disparu à chaud). Ne pas partir sur cette fausse piste.
 
-**Chantier proposé — NON commencé (règle 7 : annoncé avant, pas livré à moitié).** Cacher entre
+**Chantier proposé — 🔴 RÉFUTÉ (mesuré 0 %, cf. MAJ en tête de §0.22).** *Historique conservé pour
+traçabilité, NE PAS engager.* Cacher entre
 appels ce qui ne dépend que de (dims plateau × forme de socle) et non de l'état mobile :
 `col_parity_mask`, `off_even_arr`/`off_odd_arr`, et les masques de bornes/parité
 (`_bounds_bad_parity`), aujourd'hui réalloués/recalculés à **chacun** des 374 k appels. Exige :
@@ -655,8 +668,10 @@ Aucune ligne de `_build_multi_hex_vectorized` n'a été modifiée.
 que « le gain de performance ne se fasse pas au détriment du métier et du PvP ». Le chantier (objectif,
 garde-fou d'équivalence stricte, exigences cache/invalidation/tests, non-régression PvP, plan par
 étapes, Definition of Done) est **cadré dans un document dédié** :
-➜ **[`V11_move_pool_optimization.md`](V11_move_pool_optimization.md)**. Toujours **non commencé**
-(aucune ligne de `_build_multi_hex_vectorized` modifiée).
+➜ garde-fous/cadrage **[`V11_move_pool_optimization.md`](V11_move_pool_optimization.md)** ; **mesures +
+plan d'implémentation à jour [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)**. Code
+toujours **non commencé** (aucune ligne de `_build_multi_hex_vectorized` modifiée) ; cardinalités
+mesurées, levier tranché (bbox NumPy). Prochaine action : L1 → L_bbox (cf. §8 du doc dédié).
 
 ## 0bis. Pièges et leçons de méthode — 📌 SECTION CANONIQUE
 

@@ -28,6 +28,15 @@ une perte de **métier** ne l'est nulle part.
 « équivalence stricte avec le BFS Python hex orig. ». Un cache qui accélère mais change **un seul**
 hex du pool est une **régression métier ET PvP**, pas une optimisation.
 
+**Définition de « métier / PvP » (précision utilisateur, 2026-07-21).** Le périmètre protégé, ce
+sont **les règles 40K et le gameplay ressenti par le joueur**, PAS les choix techniques. On peut
+librement remettre en cause le moteur — algorithmes, structures de données, vectorisation, numba,
+fenêtrage bbox, ordre des calculs, allocation mémoire. On ne touche **jamais** aux règles du jeu ni
+aux fonctionnalités de gameplay : l'éligibilité des destinations, les coûts de déplacement, le
+footprint, l'ordre de jeu, ce que le joueur voit et peut faire doivent rester **identiques**. Formule
+de référence : **on peut changer le moteur, jamais l'expérience joueur.** L'équivalence stricte de
+pool ci-dessus est la traduction opérationnelle et vérifiable de ce principe.
+
 **Corollaire — le risque réel.** Un pool faux ne lève **aucune exception** : l'agent s'entraîne et
 le PvP joue sur des destinations invalides **silencieusement**. Ce chantier ne peut donc pas se
 valider par « le run passe » : il se valide par un test d'**équivalence A/B** (pool avec cache ==
@@ -334,10 +343,20 @@ passer à la suivante, avec la non-régression PvP en garde-fou dur.
    (`movement_handlers.py` intact) pour ne pas laisser de complexité à gain nul sur du code métier
    critique. **Acquis conservé** : les tests d'équivalence (Étape 1 + snapshot ovale) restent —
    ils verrouillent le pool hex du training, ce qu'aucun test ne faisait avant.
-4. 🎯 **SEUL LEVIER RÉEL = le BFS (Option C).** Les 69 % de `bfs_s` sont la boucle `deque` Python
-   (l.1770-1791) + les dilatations d'obstacles **mobiles** — rien de cachable. Réduire ce coût
-   exige de réécrire le BFS lui-même : wavefront NumPy borné (risque `out_costs`) ou
-   `numba`/`cython` (autorisés, D3). ⏳ **À arbitrer/lancer** : c'est un chantier à part entière.
+4. 🎯 **Levier réel = accélérer le NOYAU de calcul** (Option C). ⚠️ Le profil interne fin
+   (2026-07-21) a **nuancé « le BFS »** : le hotspot **dépend du socle** — boucle `deque` sur petits
+   socles (66 %), mais **dilatations morphologiques** `_dilate_by_kernel`/`_spread_by_kernel` sur
+   gros socles/ovales (~52 %), + `precompute_footprint_offsets` non mémoïsé (~17 %). ⚠️ **Levier
+   dominant = un facteur SURFACE, pas numba** : tout tourne en plein plateau 220×300 alors que `reach`
+   est borné par `move_range`. Mesuré : `reach`/board ≤ 16,6 % et `_dilate` est O(|offsets|×board)
+   indépendant de la densité → borner les dilatations à la **bbox `move_range`** (variante pur NumPy,
+   exacte, connue a priori, sans numba) est le plus gros gain sûr et **précède** tout portage numba
+   (rétrogradé, caduc sur les dilatations : `|occupied|`≈1900 et `|obstacles|`≈2400-3000 **mesurés**).
+   Ordre d'exécution révisé (L1 → L_bbox → re-bench → BFS wavefront-NumPy-vs-numba), chiffrage
+   `|reach|`/board, sûreté `eng_bad` et
+   distinction par-ancre/bbox détaillés dans
+   **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§2bis, §6bis, §8). ⏳ **À
+   lancer** (L1 + L_bbox = les pas sûrs/rentables sans dépendance ; numba conditionnel au bench BFS).
 5. ⏳ **Re-bench** après l'attaque du BFS.
 
 Chaque étape = une passe verrouillée par test. **Jamais « optimisation + validation par un run ».**
@@ -369,7 +388,12 @@ Chaque étape = une passe verrouillée par test. **Jamais « optimisation + vali
   **C'est le livrable net de cette session** : ce chemin n'avait aucun test d'égalité avant.
 - 🔴 **Étapes 2-3** (extraction + cache des masques) : implémentées, prouvées équivalentes,
   **mesurées à 0 % de gain, RÉVERTÉES** (§10). `movement_handlers.py` **intact**.
-- 🎯 **Reste le seul vrai levier : le BFS (Option C)** — chantier `numba`/`cython` à part entière,
-  **à arbitrer/lancer** (§10 point 4). Non commencé.
+- 🎯 **Levier optimal tranché par mesure (2026-07-21) : la dilatation bornée à la bbox `move_range`**
+  (pur NumPy, exact, inconditionnel, **sans numba**) — cf. lignes 337-349 ci-dessus et
+  [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md) §2bis/§8. Le facteur dominant est
+  la **surface** (board vs `reach` ≤ 16,6 %), pas la constante numba. Le BFS `deque` (Option C /
+  `numba`) est **rétrogradé au reliquat conditionnel** des petits socles, à bencher d'abord contre un
+  wavefront bbox-NumPy. Non commencé (code).
 
-`V11_agent_rework.md §0.22` pointe ici. Prochaine décision : engager (ou non) la refonte du BFS.
+`V11_agent_rework.md §0.22` pointe ici. Prochaine action : **L1 → L_bbox** (pas sûrs/rentables, pur
+NumPy) ; numba seulement si le bench BFS le justifie.
