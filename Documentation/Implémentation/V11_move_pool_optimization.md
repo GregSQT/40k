@@ -57,14 +57,24 @@ a **exactement deux sites d'appel**, tous deux internes à `movement_build_valid
 La fonction **ne sert pas** les phases charge / pile-in / consolidation, qui ont leurs propres BFS
 (`CHARGE_DEST_BFS`, `FIGHT_CONSOLIDATION_BFS`, [perf_timing.py:99-122](../../engine/perf_timing.py#L99)).
 
-> ⚠️ **ÉTAPE 0 OBLIGATOIRE avant tout code.** Le cProfile de §0.22 qui donne
-> « `_build_multi_hex_vectorized` ~68 % » a été pris avec `base=5` **forcé** (multi-hex). Il faut
-> **confirmer, sur le log du bench x5 réel** (`perf_timing_bench_x5.log`, lignes par branche —
-> fly [2466](../../engine/phase_handlers/movement_handlers.py#L2466), read_only
-> [2823](../../engine/phase_handlers/movement_handlers.py#L2823), ground
-> [2905](../../engine/phase_handlers/movement_handlers.py#L2905)), **quelle branche concentre les
-> 374 k appels**. Si le training est majoritairement **single-hex**, optimiser cette fonction ne
-> gagne rien et le vrai chantier est le BFS single-hex `deque`. **Ne pas assumer.**
+> ✅ **ÉTAPE 0 FAITE (2026-07-21) — cible confirmée.** Agrégation des **374 390** lignes
+> `MOVE_POOL_BUILD` de `perf_timing_bench_x5.log` (bench x5 réel sur `44x60x5`) :
+> **100 % des appels sont `fly=False single_hex=False`** = **ground multi-hex** → passent tous par
+> `_build_multi_hex_vectorized` (appel 2, [movement_handlers.py:2747](../../engine/phase_handlers/movement_handlers.py#L2747)).
+> **Aucun** single-hex, **aucun** fly. La cible est donc unique et certaine.
+> Décomposition du temps : `bfs_s` (= durée de `_build_multi_hex_vectorized` entière) =
+> **4542 s / 6549 s = 69,4 %** ; `prep_s + post_bfs_s` (sets walls/occupied/enemy + footprint) =
+> **30,6 %**. Socles réels (distribution exacte sur les 374 390 lignes du log) : `base=6` 45,4 %,
+> `base=[20,14]` 17,7 %, `base=18` 9,5 %, `base=5` 9,4 %, `base=10` 9,3 %, `base=8` 8,7 %.
+> ✅ **« base=None » ÉLUCIDÉ (2026-07-21) — faux problème.** Il n'existe **aucune** ligne `base=None`
+> dans `perf_timing_bench_x5.log` (`grep -c base=None` → 0) : le socle est loggé partout. Les 17,7 %
+> attribués à `base=None` sont **exactement** les socles **ovales/rectangulaires** `base=[20,14]`
+> (66 164 / 374 390 = 17,7 %) — un `BASE_SIZE` **liste** rendu `[20,14]` par `perf_field`
+> ([perf_timing.py:272](../../engine/perf_timing.py#L272), suppression des espaces). C'est le script
+> d'agrégation de `score.json` qui a rendu la liste comme `None`, pas le moteur. **Conséquence pour
+> la clé de cache** : `BASE_SIZE` peut être un **scalaire int** OU une **liste `[major, minor]`**
+> (17,7 % des appels), et l'ovale n'est pas symétrique → la clé socle doit porter
+> `(base_shape, base_size, orientation)` sans supposer un int (cf. §6). Ce n'est pas un socle manquant.
 
 **Chemin chaud** (origine des 374 k appels) : `build_squad_move_cell_map`
 ([shared_utils.py:7711](../../engine/phase_handlers/shared_utils.py#L7711), `read_only=True`,
@@ -168,10 +178,18 @@ des ennemis → mobile, non cachable.
   différentes. Un cache de niveau processus partagé entre deux
   environnements **sans les dims dans la clé** servirait à l'un le masque de l'autre → **pool faux
   en PvP**. C'est le risque n°1.
-- **Réserve honnête** (cartographie) : l'absence de toute réécriture de `board_cols` /
-  `inches_to_subhex` après init n'a pas été prouvée sur *tous* les chemins (reset d'env gym entre
-  épisodes notamment). La clé doit donc porter `(board_cols, board_rows, inches_to_subhex)` — ou
-  un id de config/board — pour être robuste à un changement d'environnement.
+- ✅ **Réserve levée (2026-07-21) — dims immuables prouvées sur tous les chemins.** `board_cols` /
+  `board_rows` / `inches_to_subhex` sont posés **une seule fois** dans le dict `game_state`
+  ([w40k_core.py:575](../../engine/w40k_core.py#L575)) et **jamais réécrits** : `grep` global des
+  affectations `game_state["board_cols"/"board_rows"/"inches_to_subhex"] =` → **zéro** hors ce dict
+  initial. `reset()` réutilise le **même** objet `game_state` mais son `update(...)`
+  ([w40k_core.py:1002](../../engine/w40k_core.py#L1002)) ne touche pas aux dims, et `_reload_scenario`
+  (rotation de scénario random) ne fait que **lire** les dims
+  ([w40k_core.py:6220](../../engine/w40k_core.py#L6220), `.get()`), jamais les écrire. Un env est donc
+  lié à un seul plateau pour toute sa vie. **Conséquence** : un cache **attaché au `game_state`** (portée
+  ci-dessous) est sûr avec une **clé par socle seul** — les dims n'ont pas besoin d'y figurer. Les
+  `(board_cols, board_rows, inches_to_subhex)` dans la clé ne restent nécessaires que pour un cache
+  **partagé au niveau processus** (singleton module), où deux envs de dims différentes se croiseraient.
 - **Portée du cache** : préférer un cache **attaché au `game_state`** (ou à l'env) plutôt qu'un
   singleton module global — l'isolation par run élimine par construction le risque de fuite
   PvP↔training. À défaut, clé pleinement qualifiée par les dims.
