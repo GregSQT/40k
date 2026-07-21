@@ -531,12 +531,45 @@ pour ce régime.** numba-deque non testé (inutile : le deque n'est pas le hotsp
 - À ez=10 (Board×10 futur) : `_euclidean_mover_ez_forbidden_mask` (§6) grimpe à ~40 % pour l'ovale ;
   hotspot dépendant de l'ez.
 
-**➜ DÉCISION DE PÉRIMÈTRE EN ATTENTE (utilisateur).** Le prochain levier n'est plus le BFS mais, au
-choix : (L2a) `_dilate`/`_spread` en **numba** — dépendance `numba` (déjà au venv, à épingler) + risque
-segfault historique, chemin Python conservé en repli ; (L2b) décomposition des offsets en **runs
-horizontaux NumPy pur** (ovale ~200 offsets → ~14-20 runs, sans dépendance, algo plus complexe) ;
-(L3) fenêtrer le **corps `_build`** à la bbox (variante (a), gain sur petits socles). Aucun code engagé
-avant arbitrage.
+**L2b (décomposition en runs, NumPy pur) — PROTOTYPÉ ET INSUFFISANT (2026-07-21).** Deux variantes
+prototypées hors prod, **toutes deux prouvées strictement équivalentes** à `_dilate_by_kernel` :
+- **Par lignes** (`dr` fixe → `dc` contigu) : **RÉFUTÉ** — en coords hex offset, l'empreinte **ovale
+  n'est PAS contiguë par ligne** (`rows_contig=False`) → fallback boucle sur le socle dominant. Et
+  0,38–0,81× sur les socles décomposables (overhead d'allocation NumPy sur la petite bbox).
+- **Par colonnes** (`dc` fixe → `dr` contigu ; `cols_contig=True` partout, ovale inclus) via
+  **sparse-table row OR** : équivalent, mais **1,34× ovale seulement**, **<1× sur petits socles**
+  (round3 0,27×, round10 0,94×) car la sparse-table alloue des tableaux plein-board. Par-dessus L_bbox,
+  l'apport net ovale ≈ 1,1× (les dilatations ne sont qu'une part du build). Gain marginal contre une
+  complexité réelle (sparse-table + seuil |offsets| + fallback contiguïté + régression petits socles).
+  **Verdict : ne pas intégrer en l'état.** Une variante bbox-restreinte (sparse-table sur `bbox_ext`
+  ~45×45 au lieu du board) pourrait viser ~3× ovale, au prix d'un remapping de coords (variante (a)).
+
+**Constat de fond** : sur de PETITS tableaux (bbox 25×25), la boucle offsets prod fait des slice-OR
+**in-place sans allocation** ; toute décomposition NumPy qui alloue des temporaires par run/niveau part
+avec un handicap d'overhead. Seul un chemin **sans allocation par offset** (numba in-place, ou
+sparse-table bbox-restreinte soigneusement bufferisée) peut battre franchement la boucle.
+
+**➜ DÉCISION PRISE — (B) STOP (utilisateur, 2026-07-21).** Le chantier perf s'arrête à **L1 + L_bbox**
+(commités : `ff2293e0`, `6f268d38`). Gain sûr acquis (ovale 1,49×, round10 1,78×, pool strictement
+identique), zéro dépendance, zéro risque runtime. **Le reliquat n'est PAS poursuivi** car son ratio
+gain/risque est mauvais après mesure :
+- **(A) numba** — gain franc/uniforme MAIS dépendance `numba` + **risque segfault historique** (le code
+  a fui `scipy` pour ça, l.1594), non couvert par les tests → tuerait un run de 36 h. **Écarté**, sauf
+  si le run §0.14 s'avère en pratique trop long : c'est alors le **levier de repli recommandé**, à
+  encadrer (épingler `numba` aux requirements, chemin Python conservé en repli, A/B numba==Python).
+- **(C) L2b-colonnes bbox-restreint** — NumPy pur ~3× ovale visé mais complexité (sparse-table +
+  remapping bbox + seuil |offsets|) pour un gain net modeste. **Écarté** (mauvais ratio complexité/gain).
+
+**Prochaine étape du dossier V11 : `V11_agent_rework.md §0.14`** — lancer le run long réel
+(`total_episodes` 10-30k, `bot_eval_final` élevé) pour produire le win-rate PAR MATCHUP interprétable
+(robustesse à l'adversaire, §0.15). C'est l'objet du prompt de reprise ci-dessous (§11).
+
+## 11. Prompt de reprise (agent frais) — lancer le run §0.14
+
+> Contexte : chantier perf `MOVE_POOL_BUILD` clos à L1+L_bbox (§10, décision B). Objectif désormais :
+> le run long de `V11_agent_rework.md §0.14` (win-rate par matchup). NE PAS rouvrir la perf sauf si le
+> run est en pratique trop long — alors seulement, levier de repli = numba sur `_dilate`/`_spread` (§10,
+> option A, à encadrer). Voir le prompt détaillé dans le message de handoff de la session du 2026-07-21.
 
 **Ancien cadrage étape 4 (BFS) — conservé pour trace, NE PAS ENGAGER (réfuté ci-dessus).**
 Cadrage d'implémentation basé sur profils réels + **cardinalités mesurées**

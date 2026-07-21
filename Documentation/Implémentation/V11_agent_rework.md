@@ -33,12 +33,13 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | # | Entrée | Nature | Ordre proposé | Pourquoi cet ordre |
 |---|---|---|---|---|
 | **§0.14** | Re-mesure du run | non-régression §0.11 VALIDÉE, **score par matchup encore dû** | **1** | ✅ **Non-régression §0.11 validée le 2026-07-21 : 3 runs `x5_debug 500` indépendants, 3× 500/500, zéro crash intra-plan** (1500 ép. cumulés). Reste le **score par matchup interprétable** : exige un run long réel (10-30k ép., ~36 h) pour que l'agent **converge** (les runs 500/1k ne mesurent que la non-régression, pas un win-rate) — dépend du gain perf **§0.22**. |
-| **§0.22** | `MOVE_POOL_BUILD` = 95,6 % du training | 🎯 **L1 + L_bbox livrés (gain ovale 1,49×, pool strictement identique) ; reste le BFS (étape 4)** | **2** | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) faits le 2026-07-21** — A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. Étapes 0-1 faites (cible confirmée + **pool hex du training verrouillé par test**). Cache des masques : codé, prouvé équivalent, **mesuré 0 % → reverté**. **Facteur dominant = SURFACE, pas numba** (mesuré : `reach`/board ≤ 16,6 %, `_dilate` O(\|offsets\|×board) indépendant de la densité). Levier optimal = **borner toutes les dilatations à la bbox `move_range`** (pur NumPy, exact, inconditionnel) ; Minkowski/cache-murs/numba-dense **caducs** (`\|obstacles\|`≈2400-3000 mesuré) ; numba réservé au seul reliquat BFS petits socles, **à bencher vs wavefront bbox-NumPy**. Ordre : L1 → L_bbox → re-bench → BFS conditionnel. Détail + mesures → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§2bis, §8) ; cadrage garde-fous → **[`V11_move_pool_optimization.md`](V11_move_pool_optimization.md)**. |
+| ~~**§0.22**~~ | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **CLOS le 2026-07-21 — décision (B) STOP à L1+L_bbox** | — | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) livrés et commités** (`ff2293e0`, `6f268d38`) — gain ovale **1,49×**, round10 1,78×, pool strictement identique ; A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. **Reliquat NON poursuivi** (ratio gain/risque mauvais, mesuré) : BFS wavefront réfuté (plus lent à move 12), L2b runs NumPy réfuté (1,1× net + complexité), numba écarté (risque segfault sur run 36 h) — **levier de repli = numba encadré SI le run §0.14 reste trop long**. Détail complet → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§10, §11) ; leçon de méthode → §0bis. |
 
-Ne restent ouverts que **§0.14** et **§0.22**, liés par une dépendance : le **score par matchup**
-de §0.14 exige un run long, dont la durée dépend du **gain perf de §0.22**. (Les dépendances
-historiques §0.12 → §0.14 et §0.18 → §0.14 sont **levées** : §0.12 et §0.18 sont livrés et
-descendus en §0hist.) Les entrées résolues §0.15, §0.16, §0.17, §0.18, §0.19, §0.21 sont
+**Ne reste ouvert que §0.14** — le run long réel pour un **score par matchup** interprétable.
+**§0.22 est CLOS** (décision B, L1+L_bbox livrés) : la dépendance perf est levée, le run se lance avec
+le gain acquis (si sa durée reste prohibitive en pratique, le repli est numba encadré, cf. §0.22 /
+`V11_move_build_acceleration.md §10`). (Les dépendances historiques §0.12 → §0.14 et §0.18 → §0.14
+sont **levées** : §0.12 et §0.18 sont livrés.) Les entrées résolues §0.15–§0.19, §0.21, **§0.22** sont
 **descendues en §0hist** (§0.16 aussi en §0ter pour ses notes post-implémentation).
 
 ⚠️ **Avant de vous appuyer sur une affirmation de ce document, lire §0bis** — en particulier la
@@ -201,9 +202,12 @@ complète verte. **Gain A/B (220×300, gym hex)** : ovale [20,14] 1,49×, round 
 (pool strictement identique) — gain croissant avec la taille du socle. **Étape 4 (BFS wavefront)
 BENCHÉE ET RÉFUTÉE** : prototype prouvé équivalent mais **plus lent à move_range=12** (le régime réel du
 training, mesuré) ; le BFS deque n'y coûte que 0,30 ms. **Nouveau hotspot mesuré (cProfile ez=2)** : la
-boucle Python sur les ~200 offsets de `_dilate`/`_spread` (ovale, ~60 % du build) → levier **L2**
-(numba OU runs NumPy), que le §8 avait cru caduc. **Décision de périmètre en attente utilisateur** (L2a
-numba / L2b runs NumPy / L3 fenêtrer le corps `_build`) — cf. `V11_move_build_acceleration.md §10`.
+boucle Python sur les ~200 offsets de `_dilate`/`_spread` (ovale, ~60 % du build). **L2b (runs NumPy pur)
+prototypé et jugé insuffisant** : par lignes réfuté (ovale non contigu), par colonnes 1,34× ovale mais
+<1× petits socles + complexité (sparse-table). **Décision de périmètre en attente utilisateur** : (A)
+numba (gain franc, risque segfault/dépendance) / (B) STOP et lancer le run §0.14 (L1+L_bbox = 1,49×
+acquis) / (C) L2b-colonnes bbox-restreint (NumPy pur, ~3× ovale visé, complexe) — cf.
+`V11_move_build_acceleration.md §10`.
 
 ## 0bis. Pièges et leçons de méthode — 📌 SECTION CANONIQUE
 
@@ -260,6 +264,27 @@ Le seul contre-exemple était dans le répertoire non échantillonné.
 
 ### Sur le raisonnement et la preuve
 
+
+**Prototyper + bencher AVANT d'intégrer un levier perf (§0.22, 2026-07-21) — la mesure prime sur le plan écrit.**
+Le chantier `MOVE_POOL_BUILD` a fait CINQ mesures qui ont chacune démenti une hypothèse « évidente » du
+plan §8, et un prototype hors-prod les a toutes attrapées avant tout code de prod :
+1. Le plan désignait le **BFS** comme reliquat n°1 (« 66 % sur petits socles », profil §2bis). Mesuré :
+   le BFS deque isolé ne coûte que **0,30 ms à move_range=12** (le régime réel du training, lui aussi
+   mesuré, pas supposé). Le profil §2bis englobait autre chose.
+2. Le plan proposait un **wavefront bbox-NumPy** pour le BFS. Prototype prouvé équivalent (reach+dist)
+   mais **plus lent à move 12** (0,46×) ; il ne gagne qu'à move≥30. Réfuté.
+3. Le vrai hotspot mesuré (cProfile) = la **boucle Python sur les offsets** de `_dilate`/`_spread`
+   (gros socles), que le §8 avait déclaré « caduc ». Réhabilité par la mesure.
+4. **L2b par lignes** (décompo runs) : l'empreinte **ovale n'est pas contiguë par ligne** en coords hex
+   → fallback sur le socle qui compte. Réfuté.
+5. **L2b par colonnes** (sparse-table) : équivalent, mais 1,34× ovale seulement / <1× petits socles →
+   gain net ~1,1× pour une vraie complexité. Non intégré.
+**Leçon** : un profil agrégé (« X = 66 % ») ne dit PAS quel code optimiser — il faut mesurer le
+**régime réel** (ici `move_range`, le socle, l'`ez`) et **prototyper le remplacement en A/B équivalent
++ bench AVANT de toucher la prod**. Le filet de tests (oracle + snapshot + A/B fenêtré==plein-board)
+garantissait qu'aucune régression métier ne pouvait passer ; le bench a garanti qu'aucune complexité
+inutile n'a été livrée. Seuls **L1 + L_bbox** (gain sûr, sans dépendance) ont été retenus ; décision
+**(B) STOP**. Détail complet → `V11_move_build_acceleration.md §10`.
 
 **Une invariance est CONDITIONNELLE à son état initial (§0.1)**
 
