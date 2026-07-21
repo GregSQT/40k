@@ -493,7 +493,24 @@ préservée à travers le cache). Non-régression : `test_hex_utils` (103) + `te
 `test_deployment_footprint_erosion` + balayage move/charge/fight/deploy/action_decoder/spatial (475)
 verts. Gain non re-benché isolément (le DoD re-benche après L1+L_bbox, étape 3). **Reste : L_bbox.**
 
-**L_bbox — NON COMMENCÉ (code).** Cadrage d'implémentation basé sur profils réels + **cardinalités mesurées**
+**L_bbox FAIT (2026-07-21).** Toutes les dilatations slice-OR de `_build_multi_hex_vectorized`
+(`_dilate_by_kernel` → `bad_dest`/`bad_traverse`/`eng_bad` ez==1 ; `_spread_by_kernel` → footprint)
+sont fenêtrées sur la bbox `start ± (move_range + max|offset|)` du chemin **ground** (variante (b) :
+tableaux plein-board conservés, seuls les indices de slice bornés → parité `col&1` absolue préservée,
+pur NumPy). FLY exclu (disque, étendue row ~1,5×move_range). Fenêtre calculée par le helper
+module-level `_ground_move_bbox_window` ; param additif `_bbox_window=True` (False = plein-board pour
+l'A/B). **Preuve de correction** : pas BFS ∈ {-1,0,1}² ⇒ `reach ⊆ start ± move_range`, et
+`bad_*`/`eng_bad`/footprint ne sont jamais **lus** hors bbox (`cd >= move_range → continue` borne les
+voisins testés). **Garde-fous verts** : oracle ground (ez 1/5/10, round/square/walls) + snapshot ovale
+MOVE 12 (pool+footprint hash inchangés) + **A/B fenêtré==plein-board** sur 7 cas (round/square/oval ×
+orientations/walls/ez/edge-clamp, pool ET footprint strictement égaux) + garde de narrowing du helper ;
+suite complète verte (exit 0). `out_costs` invariant par construction (rempli par le BFS, non fenêtré).
+**Gain mesuré (bench A/B, board 220×300 res 5, gym hex)** : ovale [20,14] **1,49×** (15,85→10,66 ms/appel),
+round 10 **1,78×**, round 3 **1,13×** — gain croissant avec |offsets| (les gros socles, dont l'ovale =
+17,7% du training, portent le coût). Reliquat sur petits socles = le BFS `deque` (étape 4). **Reste :
+BFS wavefront/numba (étape 4).**
+
+**Étape 4 (BFS) — NON COMMENCÉE (code).** Cadrage d'implémentation basé sur profils réels + **cardinalités mesurées**
 (2026-07-21, §2bis). `movement_handlers.py` et `hex_utils.py` **intacts**. Filet de tests d'équivalence
 déjà en place (§0). Acquis de la mesure : `reach`/board ≤ 16,6 %, `|walls|` réel ≈ 435-988,
 `_dilate` O(|offsets|×board) indépendant de la densité → L2-dense = levier le plus faible ; le facteur
@@ -502,5 +519,6 @@ surface (reach) domine et se capte en **NumPy pur** par la **dilatation-bbox `mo
 si un wavefront bbox-NumPy ne suffit pas. **`|occupied|` désormais MESURÉ** (~1900/build, 2 rosters
 training §2bis) → `|obstacles|`≈2400-3000 → Minkowski/cache-murs/L2-numba-dense **caducs** (pas assez
 épars pour battre la bbox-NumPy). **Aucun inconnu bloquant restant.** ~~Prochaine action code : L1
-(mémoïsation, indépendante) puis L_bbox (pur NumPy, gain surface).~~ **L1 fait le 2026-07-21 (cf. début
-de §10). Prochaine action code : L_bbox (pur NumPy, gain surface).**
+(mémoïsation, indépendante) puis L_bbox (pur NumPy, gain surface).~~ **L1 + L_bbox faits le 2026-07-21
+(cf. début de §10 ; gain ovale 1,49×, round10 1,78×, pool strictement identique). Prochaine action code :
+étape 4 — BFS wavefront bbox-NumPy vs numba (reliquat sur petits socles).**

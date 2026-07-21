@@ -593,6 +593,121 @@ def test_oval_base_hex_pool_snapshot(orient):
     )
 
 
+# ── V11 §0.22 L_bbox — A/B : le fenêtrage bbox des dilatations produit un pool ET une footprint
+# zone STRICTEMENT identiques au plein-board. Garde-fou central du levier (cf.
+# V11_move_pool_optimization.md §7). Contrairement à l'oracle, cet A/B couvre TOUTES les formes
+# (ovales inclus) car il compare le MÊME code à lui-même, seule la fenêtre changeant.
+# `out_costs` n'est PAS dans cet A/B : il est rempli par le BFS ground (`_dist_arr`), que L_bbox
+# ne touche pas (seuls `_dilate`/`_spread` sont fenêtrés) → invariant par construction.
+_LBBOX_AB_CASES = [
+    ("round2_ez10", [
+        {"id": 1, "col": 20, "row": 20, "HP_CUR": 2, "player": 0, "MOVE": 6,
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
+        {"id": 2, "col": 34, "row": 20, "HP_CUR": 2, "player": 1,
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
+    ], 10, None, 60, 60),
+    ("round3_walls_ez5", [
+        {"id": 1, "col": 18, "row": 18, "HP_CUR": 2, "player": 0, "MOVE": 7,
+         "BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
+        {"id": 2, "col": 40, "row": 40, "HP_CUR": 2, "player": 1,
+         "BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
+    ], 5, {(c, 24) for c in range(12, 26)} | {(25, r) for r in range(12, 26)}, 60, 60),
+    ("round2_adjacent_enemy_ez1", [
+        {"id": 1, "col": 20, "row": 20, "HP_CUR": 2, "player": 0, "MOVE": 5,
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
+        {"id": 2, "col": 24, "row": 20, "HP_CUR": 2, "player": 1,
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
+    ], 1, None, 60, 60),
+    ("square2_ez10", [
+        {"id": 1, "col": 20, "row": 20, "HP_CUR": 2, "player": 0, "MOVE": 6,
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "square", "orientation": 1},
+        {"id": 2, "col": 34, "row": 20, "HP_CUR": 2, "player": 1,
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "square"},
+    ], 10, None, 60, 60),
+    ("oval_move12_orient0_ez10", [
+        {"id": 1, "col": 20, "row": 40, "HP_CUR": 2, "player": 0, "MOVE": 12,
+         "BASE_SIZE": [20, 14], "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "oval", "orientation": 0},
+        {"id": 2, "col": 60, "row": 40, "HP_CUR": 2, "player": 1,
+         "BASE_SIZE": [20, 14], "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "oval", "orientation": 0},
+    ], 10, None, 80, 80),
+    ("oval_move12_orient1_ez10", [
+        {"id": 1, "col": 20, "row": 40, "HP_CUR": 2, "player": 0, "MOVE": 12,
+         "BASE_SIZE": [20, 14], "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "oval", "orientation": 1},
+        {"id": 2, "col": 60, "row": 40, "HP_CUR": 2, "player": 1,
+         "BASE_SIZE": [20, 14], "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "oval", "orientation": 1},
+    ], 10, None, 80, 80),
+    ("round_move12_edge_clamp", [
+        {"id": 1, "col": 3, "row": 3, "HP_CUR": 2, "player": 0, "MOVE": 12,
+         "BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
+        {"id": 2, "col": 50, "row": 50, "HP_CUR": 2, "player": 1,
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
+    ], 10, None, 60, 60),
+]
+
+
+@pytest.mark.parametrize(
+    "name,units,ez,walls,bc,br", _LBBOX_AB_CASES, ids=[c[0] for c in _LBBOX_AB_CASES]
+)
+def test_bbox_window_equals_full_board(monkeypatch, name, units, ez, walls, bc, br):
+    """Pool + footprint zone fenêtrés (prod) == plein-board (`_bbox_window=False`)."""
+    import engine.phase_handlers.movement_handlers as mh
+
+    # Fenêtré (défaut de prod).
+    pool_win, fz_win, _gs = _run_pool(
+        [dict(u) for u in units], ez, walls=walls, board_cols=bc, board_rows=br, gym=True
+    )
+
+    # Plein-board forcé via injection du kwarg additif.
+    orig = mh._build_multi_hex_vectorized
+
+    def _full_board(*a, **k):
+        k["_bbox_window"] = False
+        return orig(*a, **k)
+
+    monkeypatch.setattr(mh, "_build_multi_hex_vectorized", _full_board)
+    pool_full, fz_full, _gs2 = _run_pool(
+        [dict(u) for u in units], ez, walls=walls, board_cols=bc, board_rows=br, gym=True
+    )
+
+    assert set(pool_win) == set(pool_full), (
+        f"[{name}] pool fenêtré != plein-board\n"
+        f"  fenêtré seul: {sorted(set(pool_win) - set(pool_full))[:20]}\n"
+        f"  plein seul:   {sorted(set(pool_full) - set(pool_win))[:20]}"
+    )
+    assert fz_win == fz_full, (
+        f"[{name}] footprint zone fenêtrée != plein-board "
+        f"(Δ={len(fz_win ^ fz_full)} cellules)"
+    )
+
+
+def test_ground_bbox_window_narrows_and_clamps():
+    """GARDE D'ATTEINTE : la fenêtre bbox est STRICTEMENT plus petite que le board (sinon l'A/B
+    validerait un no-op), et englobe reach (start ± move_range) + empreintes (±max|offset|)."""
+    import numpy as np
+    from engine.hex_utils import precompute_footprint_offsets
+    from engine.phase_handlers.movement_handlers import _ground_move_bbox_window
+
+    off_e, off_o = precompute_footprint_offsets("round", 2, 0)
+    oe = np.asarray(off_e, dtype=np.int64).reshape(-1, 2)
+    oo = np.asarray(off_o, dtype=np.int64).reshape(-1, 2)
+    max_off = int(max(np.abs(oe).max(), np.abs(oo).max()))
+
+    # Board large, portée modeste, centre loin des bords → fenêtre strictement incluse.
+    c_lo, c_hi, r_lo, r_hi = _ground_move_bbox_window(100, 150, 6, oe, oo, 220, 300)
+    assert (c_hi - c_lo) < 220 and (r_hi - r_lo) < 300, "la fenêtre doit réduire le board"
+    # Englobe reach + empreinte : au moins start ± (move_range) accessible dans la fenêtre.
+    assert c_lo <= 100 - 6 and c_hi > 100 + 6
+    assert r_lo <= 150 - 6 and r_hi > 150 + 6
+    # Marge exacte = move_range + max|offset|.
+    assert c_lo == 100 - (6 + max_off)
+    assert c_hi == 100 + (6 + max_off) + 1
+
+    # Bords : clamp au plateau, jamais hors bornes.
+    c_lo2, c_hi2, r_lo2, r_hi2 = _ground_move_bbox_window(2, 2, 12, oe, oo, 60, 60)
+    assert c_lo2 == 0 and r_lo2 == 0
+    assert c_hi2 <= 60 and r_hi2 <= 60
+
+
 def test_vectorized_multi_hex_matches_oracle_mixed_square_enemy_ez10() -> None:
     """Ennemi carré → branche dilatation hex. Doit coïncider avec l'oracle sémantique."""
     units = [

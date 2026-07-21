@@ -39,7 +39,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | ~~**§0.15**~~ | ~~Rosters `training` ≡ `holdout_regular`~~ | ✅ **TRANCHÉ le 2026-07-21** | — | Identité **assumée** par l'utilisateur : le holdout porte sur l'adversaire, pas le roster (§10.5, cohérent démo §10.2). Le win-rate par matchup mesure la robustesse à l'adversaire — périmètre choisi, pas angle mort. |
 | ~~**§0.16**~~ | ~~Réserves de l'évaluation~~ | ✅ **SOLDÉE le 2026-07-21** | — | (a) corrigée (worst_bot exclut tactical + ranking supprimé si éval non fiable, tests + mutations). (b) **status quo validé** : `DefensiveSmartBot` reste hors éval (il sous-performait), couverture unitaire suffisante. (c) **conservée délibérément** : clé + `build_holdout_benchmark.py` gardés pour un holdout généré prévu **après la démo**. (b) et (c) → **§0ter Notes post-implémentation**. |
 | **§0.19** | Revérifier T1→T5 et §9 ligne à ligne | audit de fond — **SOLDÉ (§0.19.1 → §0.19.3)** | **clos** | ✅ **T1→T5 tous verrouillés par mutation-test**, y compris le **branchement** de R4 (les 6 exigences de §8.3) et les **2 sites** de R6. §9 = **plan non implémenté**, jamais marqué ✅ : prémisse de la tâche fausse. Suite complète `EXIT=0` avec garde de stabilité d'arbre. |
-| **§0.22** | `MOVE_POOL_BUILD` = 95,6 % du training | 🎯 **cardinalités mesurées ; levier optimal identifié = dilatation bbox `move_range` (pur NumPy, sans numba)** | **6** | Étapes 0-1 faites (cible confirmée + **pool hex du training verrouillé par test**). Cache des masques : codé, prouvé équivalent, **mesuré 0 % → reverté**. **Facteur dominant = SURFACE, pas numba** (mesuré : `reach`/board ≤ 16,6 %, `_dilate` O(\|offsets\|×board) indépendant de la densité). Levier optimal = **borner toutes les dilatations à la bbox `move_range`** (pur NumPy, exact, inconditionnel) ; Minkowski/cache-murs/numba-dense **caducs** (`\|obstacles\|`≈2400-3000 mesuré) ; numba réservé au seul reliquat BFS petits socles, **à bencher vs wavefront bbox-NumPy**. Ordre : L1 → L_bbox → re-bench → BFS conditionnel. Détail + mesures → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§2bis, §8) ; cadrage garde-fous → **[`V11_move_pool_optimization.md`](V11_move_pool_optimization.md)**. |
+| **§0.22** | `MOVE_POOL_BUILD` = 95,6 % du training | 🎯 **L1 + L_bbox livrés (gain ovale 1,49×, pool strictement identique) ; reste le BFS (étape 4)** | **6** | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) faits le 2026-07-21** — A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. Étapes 0-1 faites (cible confirmée + **pool hex du training verrouillé par test**). Cache des masques : codé, prouvé équivalent, **mesuré 0 % → reverté**. **Facteur dominant = SURFACE, pas numba** (mesuré : `reach`/board ≤ 16,6 %, `_dilate` O(\|offsets\|×board) indépendant de la densité). Levier optimal = **borner toutes les dilatations à la bbox `move_range`** (pur NumPy, exact, inconditionnel) ; Minkowski/cache-murs/numba-dense **caducs** (`\|obstacles\|`≈2400-3000 mesuré) ; numba réservé au seul reliquat BFS petits socles, **à bencher vs wavefront bbox-NumPy**. Ordre : L1 → L_bbox → re-bench → BFS conditionnel. Détail + mesures → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§2bis, §8) ; cadrage garde-fous → **[`V11_move_pool_optimization.md`](V11_move_pool_optimization.md)**. |
 
 L'**ordre est une proposition**, pas un constat, **sauf §0.18 → §0.14** qui est une dépendance
 **technique et bloquante** : tant que le moteur crashe en cours de run, aucune mesure ne peut
@@ -672,9 +672,13 @@ garde-fou d'équivalence stricte, exigences cache/invalidation/tests, non-régre
 plan d'implémentation à jour [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)**. Code
 toujours **non commencé** (aucune ligne de `_build_multi_hex_vectorized` modifiée) ; cardinalités
 mesurées, levier tranché (bbox NumPy). ~~Prochaine action : L1 → L_bbox (cf. §8 du doc dédié).~~
-**L1 fait le 2026-07-21** (`precompute_footprint_offsets` mémoïsée, 5 tests d'équivalence + 475 de
-non-régression verts — cf. `V11_move_build_acceleration.md §10`). `_build_multi_hex_vectorized`
-toujours intacte. **Prochaine action : L_bbox** (fenêtrage bbox `move_range`, pur NumPy).
+**L1 + L_bbox faits le 2026-07-21** (cf. `V11_move_build_acceleration.md §10`). L1 :
+`precompute_footprint_offsets` mémoïsée. L_bbox : dilatations de `_build_multi_hex_vectorized`
+fenêtrées sur la bbox `start ± (move_range + max|offset|)` du chemin ground (variante (b), pur NumPy ;
+FLY exclu). Garde-fous : oracle + snapshot ovale + **A/B fenêtré==plein-board** (7 cas) + suite
+complète verte. **Gain A/B (220×300, gym hex)** : ovale [20,14] 1,49×, round 10 1,78×, round 3 1,13×
+(pool strictement identique) — gain croissant avec la taille du socle. **Prochaine action : étape 4**
+(BFS `deque` → wavefront bbox-NumPy vs numba, le reliquat sur petits socles).
 
 ## 0bis. Pièges et leçons de méthode — 📌 SECTION CANONIQUE
 

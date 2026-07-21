@@ -1520,6 +1520,43 @@ def _compute_mover_ez_forbidden_mask(
     return eng_bad
 
 
+def _ground_move_bbox_window(
+    start_col: int,
+    start_row: int,
+    move_range: int,
+    off_even_arr: "np.ndarray",
+    off_odd_arr: "np.ndarray",
+    board_cols: int,
+    board_rows: int,
+) -> Tuple[int, int, int, int]:
+    """Fenêtre bbox englobant ``reach`` ∪ empreintes du chemin GROUND (L_bbox, §0.22).
+
+    Le BFS ground fait des pas de voisinage dans ``{-1,0,1}²`` → ``reach ⊆ start ± move_range``
+    en col ET row ; les empreintes s'étendent de ``±max|offset|``. Retourne
+    ``(c_lo, c_hi, r_lo, r_hi)`` (bornes de slice demi-ouvertes) clampé au plateau. Hors de cette
+    fenêtre, aucune valeur de dilatation n'est jamais **lue** (cf. docstring de
+    ``_build_multi_hex_vectorized``), donc y borner les slices est exact.
+    """
+    import numpy as np
+
+    max_dc = 0
+    max_dr = 0
+    if off_even_arr.size:
+        max_dc = int(np.abs(off_even_arr[:, 0]).max())
+        max_dr = int(np.abs(off_even_arr[:, 1]).max())
+    if off_odd_arr.size:
+        max_dc = max(max_dc, int(np.abs(off_odd_arr[:, 0]).max()))
+        max_dr = max(max_dr, int(np.abs(off_odd_arr[:, 1]).max()))
+    pad_c = int(move_range) + max_dc
+    pad_r = int(move_range) + max_dr
+    return (
+        max(0, start_col - pad_c),
+        min(board_cols, start_col + pad_c + 1),
+        max(0, start_row - pad_r),
+        min(board_rows, start_row + pad_r + 1),
+    )
+
+
 def _build_multi_hex_vectorized(
     *,
     game_state: Dict[str, Any],
@@ -1542,10 +1579,21 @@ def _build_multi_hex_vectorized(
     thru_friendly: bool,
     fly: bool = False,
     out_costs: Optional[Dict[Tuple[int, int], float]] = None,
+    _bbox_window: bool = True,
 ) -> Tuple[List[Tuple[int, int]], Set[Tuple[int, int]], int]:
     """BFS/disk multi-hex vectorisé NumPy (``ground`` et ``fly``). Gère toutes les formes de socles.
 
     Retourne ``(valid_destinations, footprint_zone, visited_count)``.
+
+    ``_bbox_window`` (optionnel, L_bbox — accélération §0.22) : fenêtre toutes les dilatations
+    slice-OR (``_dilate_by_kernel`` / ``_spread_by_kernel``) sur la bbox
+    ``start ± (move_range + max|offset|)`` du **chemin ground** (``not fly``). C'est une
+    optimisation de **surface pure** : le BFS ground fait des pas de voisinage dans ``{-1,0,1}²``,
+    donc ``reach ⊆ start ± move_range`` en col ET row, et ``bad_dest`` / ``bad_traverse`` /
+    ``eng_bad`` / footprint ne sont jamais **lus** hors de cette bbox. Fenêtrer les slices y produit
+    un pool, une footprint zone et des ``out_costs`` **strictement identiques** au plein-board.
+    ``fly`` (disque, étendue row jusqu'à ~1,5×move_range) est **exclu** : bbox laissée à ``None``.
+    ``_bbox_window=False`` restaure le plein-board (garde-fou du test A/B fenêtré == plein-board).
 
     ``out_costs`` (optionnel, refonte spatiale §7 T2) : si fourni, rempli avec
     ``{(col, row): coût géodésique en SUBHEX (float)}`` pour chaque destination valide. Le coût est
@@ -1588,11 +1636,29 @@ def _build_multi_hex_vectorized(
         col_is_even[:, None], (board_cols, board_rows)
     ).copy()
 
-    def _dilate_by_kernel(src: "np.ndarray", kernel: "np.ndarray") -> "np.ndarray":
+    # L_bbox (§0.22) — fenêtre de la sortie utile pour le chemin ground. `None` ⇒ plein-board
+    # (fly, ou A/B `_bbox_window=False`).
+    _bbox: Optional[Tuple[int, int, int, int]] = None
+    if _bbox_window and not fly:
+        _bbox = _ground_move_bbox_window(
+            start_col, start_row, move_range,
+            off_even_arr, off_odd_arr, board_cols, board_rows,
+        )
+
+    def _dilate_by_kernel(
+        src: "np.ndarray",
+        kernel: "np.ndarray",
+        bbox: Optional[Tuple[int, int, int, int]] = None,
+    ) -> "np.ndarray":
         """``out[c, r] = any_{(dc, dr) ∈ kernel} src[c+dc, r+dr]``.
 
         Boucle slices uniquement : ``scipy.ndimage.binary_dilation`` a provoqué des segfaults
         sur certains environnements (extensions natives / ``origin``), donc pas de chemin SciPy ici.
+
+        ``bbox`` (L_bbox) : si fourni ``(c_lo, c_hi, r_lo, r_hi)``, borne le slice **destination**
+        à cette fenêtre (la source suit par le décalage ``dst + offset``). Le tableau reste
+        plein-board ; seules les cases de sortie utiles sont écrites → coût ``O(|kernel|×bbox)``
+        au lieu de ``O(|kernel|×board)``, sans remapping ni perte de parité.
         """
         out = np.zeros_like(src)
         if kernel.size == 0:
@@ -1608,16 +1674,36 @@ def _build_multi_hex_vectorized(
             c_dst_hi = c_src_hi - int(dc)
             r_dst_lo = r_src_lo - int(dr)
             r_dst_hi = r_src_hi - int(dr)
+            if bbox is not None:
+                c_dst_lo = max(c_dst_lo, bbox[0])
+                c_dst_hi = min(c_dst_hi, bbox[1])
+                r_dst_lo = max(r_dst_lo, bbox[2])
+                r_dst_hi = min(r_dst_hi, bbox[3])
+                if c_dst_lo >= c_dst_hi or r_dst_lo >= r_dst_hi:
+                    continue
+                # src = dst + offset (invariant du slice ci-dessus) : dériver après le clamp.
+                c_src_lo = c_dst_lo + int(dc)
+                c_src_hi = c_dst_hi + int(dc)
+                r_src_lo = r_dst_lo + int(dr)
+                r_src_hi = r_dst_hi + int(dr)
             out[c_dst_lo:c_dst_hi, r_dst_lo:r_dst_hi] |= src[
                 c_src_lo:c_src_hi, r_src_lo:r_src_hi
             ]
         return out
 
-    def _spread_by_kernel(src: "np.ndarray", kernel: "np.ndarray") -> "np.ndarray":
+    def _spread_by_kernel(
+        src: "np.ndarray",
+        kernel: "np.ndarray",
+        bbox: Optional[Tuple[int, int, int, int]] = None,
+    ) -> "np.ndarray":
         """``out[c+dc, r+dr] = any src[c, r]`` pour chaque ``(dc, dr) ∈ kernel``.
 
         Utilisé pour : propagation BFS (src → voisin = src + offset) ou union d’empreintes
         (ancre valide → cellules (c+dc, r+dr) de son empreinte).
+
+        ``bbox`` (L_bbox) : si fourni, borne le slice **source** à la fenêtre (la destination suit
+        par ``dst = src + offset``). Correct quand toutes les sources non nulles sont dans la bbox
+        (footprint : ancres valides ⊆ ``reach`` ⊆ bbox) → sortie identique au plein-board.
         """
         out = np.zeros_like(src)
         for dc, dr in kernel:
@@ -1627,6 +1713,13 @@ def _build_multi_hex_vectorized(
             src_r_hi = board_rows - max(0, int(dr))
             if src_c_lo >= src_c_hi or src_r_lo >= src_r_hi:
                 continue
+            if bbox is not None:
+                src_c_lo = max(src_c_lo, bbox[0])
+                src_c_hi = min(src_c_hi, bbox[1])
+                src_r_lo = max(src_r_lo, bbox[2])
+                src_r_hi = min(src_r_hi, bbox[3])
+                if src_c_lo >= src_c_hi or src_r_lo >= src_r_hi:
+                    continue
             dst_c_lo = src_c_lo + int(dc)
             dst_c_hi = src_c_hi + int(dc)
             dst_r_lo = src_r_lo + int(dr)
@@ -1673,8 +1766,8 @@ def _build_multi_hex_vectorized(
         return bad
 
     def _placement_bad(obstacles_mask: "np.ndarray") -> "np.ndarray":
-        hit_even = _dilate_by_kernel(obstacles_mask, off_even_arr)
-        hit_odd = _dilate_by_kernel(obstacles_mask, off_odd_arr)
+        hit_even = _dilate_by_kernel(obstacles_mask, off_even_arr, _bbox)
+        hit_odd = _dilate_by_kernel(obstacles_mask, off_odd_arr, _bbox)
         hit = np.where(col_parity_mask, hit_even, hit_odd)
         bounds_bad_even = _bounds_bad_parity(off_even_arr)
         bounds_bad_odd = _bounds_bad_parity(off_odd_arr)
@@ -1693,8 +1786,8 @@ def _build_multi_hex_vectorized(
         )
     elif ez == 1 and enemy_adjacent_hexes:
         enemy_adj_mask = _mask_from_cells(enemy_adjacent_hexes)
-        eng_bad_even = _dilate_by_kernel(enemy_adj_mask, off_even_arr)
-        eng_bad_odd = _dilate_by_kernel(enemy_adj_mask, off_odd_arr)
+        eng_bad_even = _dilate_by_kernel(enemy_adj_mask, off_even_arr, _bbox)
+        eng_bad_odd = _dilate_by_kernel(enemy_adj_mask, off_odd_arr, _bbox)
         eng_bad = np.where(col_parity_mask, eng_bad_even, eng_bad_odd)
     else:
         eng_bad = np.zeros((board_cols, board_rows), dtype=bool)
@@ -1806,8 +1899,8 @@ def _build_multi_hex_vectorized(
 
     fpz_even_mask = valid_mask & col_parity_mask
     fpz_odd_mask = valid_mask & ~col_parity_mask
-    footprint_zone_mask = _spread_by_kernel(fpz_even_mask, off_even_arr) | _spread_by_kernel(
-        fpz_odd_mask, off_odd_arr
+    footprint_zone_mask = _spread_by_kernel(fpz_even_mask, off_even_arr, _bbox) | _spread_by_kernel(
+        fpz_odd_mask, off_odd_arr, _bbox
     )
     start_offsets = off_even_arr if (start_col & 1) == 0 else off_odd_arr
     for dc, dr in start_offsets:
