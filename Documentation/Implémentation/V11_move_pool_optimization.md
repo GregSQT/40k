@@ -197,6 +197,18 @@ des ennemis → mobile, non cachable.
   (plateau × socle) identique. Rien à invalider en cours de partie **si** la portée §4.1 est
   respectée (aucune dépendance mobile). Si on cache aussi les murs (§4.3), il faut invalider au
   changement de terrain — d'où le compromis §9.
+- 🔴 **`game_state` est RÉUTILISÉ d'un épisode à l'autre — suivre le précédent de purge existant
+  (vérifié 2026-07-21).** `reset()` garde le **même objet** `game_state` et
+  `_reload_scenario` en change les **murs** (le board, lui, ne change pas) ; le code y purge déjà
+  explicitement `_grid_static_hex_arrays` et **`_squad_move_cell_maps`**
+  ([w40k_core.py:975-980](../../engine/w40k_core.py#L975)) avec l'avertissement littéral : « une
+  carte calculée sur d'**AUTRES murs** passerait le contrôle ». **Conséquence pour ce chantier :**
+  un cache attaché au `game_state` **y survit entre épisodes**. Pour les invariants §4.1 c'est
+  **bénin** (dims constantes → même valeur). **Mais tout cache dépendant des murs (§4.3, option B)
+  DOIT être purgé dans `reset()` au même endroit que `_squad_move_cell_maps`**, sinon corruption
+  **silencieuse** du pool à l'épisode suivant — c'est exactement le piège déjà traité pour le cache
+  de move. **Suivre ce précédent, ne pas réinventer l'invalidation.** (`_squad_move_cell_maps` est
+  d'ailleurs le cache de move existant : s'en inspirer pour la portée et la purge.)
 
 ---
 
@@ -214,6 +226,19 @@ des ennemis → mobile, non cachable.
   (`_assert_euclidean_pool_invariants`, [:390](../../tests/unit/engine/test_movement_pool_build.py#L390)),
   pas l'égalité exacte. **Il n'existe donc aujourd'hui aucun test d'égalité stricte sur le pool
   réellement produit en training.**
+- 🔑 **Pour tester le chemin hex (`_build_multi_hex_vectorized`), le game_state doit porter
+  `gym_training_mode=True`** (vérifié 2026-07-21) : `_move_distance_metric`
+  ([movement_handlers.py:1878](../../engine/phase_handlers/movement_handlers.py#L1878)) lit
+  `distance_metric["move_gym"]` (=`hex`) en gym, sinon `["move"]` (=`euclidean`, chemin PvP
+  `_euclidean_ground_anchor_multihex`). Les `_run_pool(...)` existants **ne posent pas** ce flag →
+  ils testent le chemin **euclidean**, pas la cible. C'est pourquoi le trou existe. Un test
+  d'égalité stricte de la cible doit donc forcer `gym_training_mode=True`.
+- ⚠️ **Limite de `_oracle_pool` : socles à `BASE_SIZE` SCALAIRE seulement.** Il fait
+  `int(BASE_SIZE)` ([test_movement_pool_build.py:306](../../tests/unit/engine/test_movement_pool_build.py#L306))
+  → **plante sur un socle ovale `[20,14]`** (17,7 % du training, §2). L'égalité stricte à l'oracle
+  ne couvre donc PAS les ovales : ils relèvent du **test A/B cache-vs-sans-cache** (§8.1, sans
+  oracle absolu) ou d'un **oracle étendu aux socles liste** à écrire si l'on veut leur égalité
+  stricte. À prévoir : les ovales sont le 2ᵉ socle le plus fréquent.
 - **Déterminisme** verrouillé : `test_movement_build_valid_destinations_pool_deterministic`
   ([:495](../../tests/unit/engine/test_movement_pool_build.py#L495)) — deux appels → mêmes
   ancres/zone. Utile pour un cache.
@@ -281,20 +306,46 @@ passer à la suivante, avec la non-régression PvP en garde-fou dur.
 
 ---
 
-## 10. Plan par étapes (à lancer après D1-D3)
+## 10. Plan par étapes (avancement 2026-07-21)
 
-0. **Étape 0** (§2) : confirmer sur le log de bench réel quelle branche concentre les 374 k appels.
-   Si single-hex domine → ré-cibler le chantier sur le BFS single-hex avant tout.
-1. **Figer l'oracle A/B AVANT toute optimisation** (§8.1) : test qui capture le pool actuel sur un
-   échantillon représentatif, vert sur le code actuel.
-2. **Extraire** les invariants §4.1 dans une fonction pure, **sans cache** → oracle A/B reste vert
-   (pur refactor, pool identique). Mutualiser avec le second site §5.
-3. **Introduire le cache** (clé §6, portée attachée au `game_state`) → A/B + PvP smoke + suite
-   verts.
-4. Selon D1 : murs (B) et/ou BFS (C), chacun verrouillé par A/B avant de passer au suivant.
-5. **Re-bench** et consigner le gain réel **ici** (remplacer les estimations par des mesures).
+0. ✅ **Étape 0 FAITE** (§2) : 100 % des 374 k appels = ground multi-hex → cible = `_build_multi_
+   hex_vectorized`, confirmée. `bfs_s`=69,4 %, prep+post=30,6 %.
+1. ✅ **Étape 1 FAITE (socles ronds/carrés)** : le trou ez>1 est comblé. `_build_multi_hex_
+   vectorized` (forcé via `gym=True` → move_gym=hex) est désormais verrouillé en **égalité stricte**
+   contre `_oracle_pool` — 3 cas (base2/base3 ez10, base2+murs ez5) dans
+   `tests/unit/engine/test_movement_pool_build.py::test_hex_multihex_pool_equals_oracle`, **+ garde
+   d'atteinte** (`test_hex_oracle_test_actually_reaches_build_multi_hex_vectorized`) et **mutation
+   confirmée** (tronquer le pool → 3 rouges, garde verte). Fichier complet vert (11 tests).
+   ⏳ **Reste dans l'Étape 1** : les socles **ovales** `[20,14]` (17,7 %) — non couvrables par
+   `_oracle_pool` (`int(BASE_SIZE)`), à couvrir par un **snapshot A/B** (capturer le pool ovale
+   actuel avant refacto, vérifier l'invariance) au moment de l'Étape 2/3.
+2-3. 🔴 **Extraction + cache des masques §4.1 : IMPLÉMENTÉS, MESURÉS INUTILES, RÉVERTÉS
+   (2026-07-21).** Le cache (masques mémoïsés par `(dims × socle)` sur le `game_state`) a été
+   codé, prouvé strictement équivalent (oracle + snapshot + A/B des masques, tout vert) **puis
+   mesuré** :
+
+   | Mesure (board 220×300, socle round base6) | Valeur |
+   |---|---|
+   | `_move_pool_static_masks` seul | **0,059 ms/appel = 1,5 %** du build (~3,8 ms) |
+   | build AVEC cache vs SANS cache (60 appels) | **0,0 % de gain** (3,83 ms ≡ 3,83 ms) |
+
+   ➜ **L'approche « cacher les masques parité/bornes » (le plan initial de §0.22) est un
+   cul-de-sac** : ces masques ne pèsent que 1,5 %, et le lookup annule le gain. **Code revert**
+   (`movement_handlers.py` intact) pour ne pas laisser de complexité à gain nul sur du code métier
+   critique. **Acquis conservé** : les tests d'équivalence (Étape 1 + snapshot ovale) restent —
+   ils verrouillent le pool hex du training, ce qu'aucun test ne faisait avant.
+4. 🎯 **SEUL LEVIER RÉEL = le BFS (Option C).** Les 69 % de `bfs_s` sont la boucle `deque` Python
+   (l.1770-1791) + les dilatations d'obstacles **mobiles** — rien de cachable. Réduire ce coût
+   exige de réécrire le BFS lui-même : wavefront NumPy borné (risque `out_costs`) ou
+   `numba`/`cython` (autorisés, D3). ⏳ **À arbitrer/lancer** : c'est un chantier à part entière.
+5. ⏳ **Re-bench** après l'attaque du BFS.
 
 Chaque étape = une passe verrouillée par test. **Jamais « optimisation + validation par un run ».**
+
+> 📌 **Leçon (2026-07-21).** Le cadrage initial (§4.1, §9) présumait que l'allocation répétée des
+> masques pesait « bien plus » sur 220×300. **La mesure l'a démenti : 1,5 %.** On a évité de livrer
+> une optimisation à gain nul en **mesurant avant de conclure** (§8.5) — exactement ce que le
+> chantier imposait. Le temps est ailleurs (BFS) ; y aller directement.
 
 ---
 
@@ -309,9 +360,16 @@ Chaque étape = une passe verrouillée par test. **Jamais « optimisation + vali
 
 ---
 
-## 12. État
+## 12. État (2026-07-21)
 
-**NON COMMENCÉ — cadrage COMPLET, décisions §9 tranchées (2026-07-21).** Aucune ligne de
-`_build_multi_hex_vectorized` ni de `_compute_mover_ez_forbidden_mask` modifiée. Prêt à démarrer par
-l'**Étape 0** (§10 : confirmer la branche dominante sur le log x5 réel) puis l'**Étape 1** (oracle
-A/B). Le chantier d'implémentation est un cycle moteur dédié, à mener dans une session propre.
+- ✅ **Étape 0** faite : cible confirmée (100 % ground multi-hex, §2).
+- ✅ **Étape 1** faite : le pool hex du training est verrouillé — égalité stricte vs oracle (socles
+  ronds/carrés) + **snapshot golden ovales** (`test_movement_pool_build.py`,
+  `test_hex_multihex_pool_equals_oracle`, `test_oval_base_hex_pool_snapshot`, garde d'atteinte).
+  **C'est le livrable net de cette session** : ce chemin n'avait aucun test d'égalité avant.
+- 🔴 **Étapes 2-3** (extraction + cache des masques) : implémentées, prouvées équivalentes,
+  **mesurées à 0 % de gain, RÉVERTÉES** (§10). `movement_handlers.py` **intact**.
+- 🎯 **Reste le seul vrai levier : le BFS (Option C)** — chantier `numba`/`cython` à part entière,
+  **à arbitrer/lancer** (§10 point 4). Non commencé.
+
+`V11_agent_rework.md §0.22` pointe ici. Prochaine décision : engager (ou non) la refonte du BFS.

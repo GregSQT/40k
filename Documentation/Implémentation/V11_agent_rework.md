@@ -35,11 +35,11 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | **§0.17** | Travail non commité | dette de session, **périssable** | **1** | 6 fichiers non commités en 3 lots indépendants (correctif, audit §0.19, doc+consigne). ⚠️ `config/users.db` sali par les runs d'enquête — **ne jamais le commiter**. Fermée à tort à 21:00, rouverte à 21:45 : entrée périssable par nature. |
 | ~~**§0.18**~~ | ~~🔴 `collision intra-plan` de retour~~ | ✅ **CORRIGÉE le 2026-07-20** | — | Cause trouvée, reproduite par test, corrigée par couplage maximum, mutation-testée, suite verte. **Aucune part ouverte.** ➜ **descendue en §0hist.** |
 | ~~**§0.21**~~ | ~~Ordre glouton, B2B non maximal~~ | ✅ **CORRIGÉE le 2026-07-20** | — | Optimum implémenté (couplage maximum) le jour même. À l'origine de la **règle 7 de `CLAUDE.md`**. ➜ **descendue en §0hist** (avec §0.20). |
-| **§0.14** | Re-mesure du run — **score** seulement | mesure manquante, **débloquée** | **2** | 🟢 **Débloquée** par la résolution de §0.18. Il faut désormais 2-3 runs longs : un run vert ne prouve rien (leçon §0.18). |
+| **§0.14** | Re-mesure du run | **non-régression §0.11 VALIDÉE**, score encore dû | **2** | ✅ **Non-régression §0.11 validée le 2026-07-21 : 3 runs `x5_debug 500` indépendants, 3× 500/500, zéro crash intra-plan** (1500 ép. cumulés). Reste le **score par matchup** interprétable : exige un run long réel (10-30k ép., ~36 h) — dépend du gain perf **§0.22**. |
 | ~~**§0.15**~~ | ~~Rosters `training` ≡ `holdout_regular`~~ | ✅ **TRANCHÉ le 2026-07-21** | — | Identité **assumée** par l'utilisateur : le holdout porte sur l'adversaire, pas le roster (§10.5, cohérent démo §10.2). Le win-rate par matchup mesure la robustesse à l'adversaire — périmètre choisi, pas angle mort. |
 | ~~**§0.16**~~ | ~~Réserves de l'évaluation~~ | ✅ **SOLDÉE le 2026-07-21** | — | (a) corrigée (worst_bot exclut tactical + ranking supprimé si éval non fiable, tests + mutations). (b) **status quo validé** : `DefensiveSmartBot` reste hors éval (il sous-performait), couverture unitaire suffisante. (c) **conservée délibérément** : clé + `build_holdout_benchmark.py` gardés pour un holdout généré prévu **après la démo**. (b) et (c) → **§0ter Notes post-implémentation**. |
 | **§0.19** | Revérifier T1→T5 et §9 ligne à ligne | audit de fond — **SOLDÉ (§0.19.1 → §0.19.3)** | **clos** | ✅ **T1→T5 tous verrouillés par mutation-test**, y compris le **branchement** de R4 (les 6 exigences de §8.3) et les **2 sites** de R6. §9 = **plan non implémenté**, jamais marqué ✅ : prémisse de la tâche fausse. Suite complète `EXIT=0` avec garde de stabilité d'arbre. |
-| **§0.22** | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **arbitrage tranché (2026-07-21) : à faire** — chantier déplacé dans un doc dédié | **6** | Diagnostic chiffré (`_build_multi_hex_vectorized` ~68 %). L'utilisateur a tranché : optimiser, **sans détriment métier/PvP**. Cadrage complet (garde-fous, plan, DoD) → **[`V11_move_pool_optimization.md`](V11_move_pool_optimization.md)**. Non commencé. |
+| **§0.22** | `MOVE_POOL_BUILD` = 95,6 % du training | 🎯 **approche cache RÉFUTÉE par mesure ; reste le BFS (Option C) à arbitrer** | **6** | Étapes 0-1 faites (cible confirmée + **pool hex du training verrouillé par test**, apport net). Le cache des masques (plan initial) a été codé, prouvé équivalent, **mesuré 0 % → reverté** (masques = 1,5 % du temps). **Seul levier réel = réécrire le BFS deque** (`numba`/`cython`, autorisés) — chantier à part, à lancer. Détail → **[`V11_move_pool_optimization.md`](V11_move_pool_optimization.md)**. |
 
 L'**ordre est une proposition**, pas un constat, **sauf §0.18 → §0.14** qui est une dépendance
 **technique et bloquante** : tant que le moteur crashe en cours de run, aucune mesure ne peut
@@ -52,10 +52,23 @@ réserve de méthode sur le document lui-même (T1→T5 et section 9 n'ont **pas
 ligne à ligne) et la règle de périmètre `ArmageddonAgent`.
 
 
-### 0.14 Re-mesure du run — 🟠 OUVERTE, DÉBLOQUÉE (2 runs le 2026-07-20 : 1 abouti sans score exploitable, 1 crashé ; §0.18 corrigé depuis)
+### 0.14 Re-mesure du run — 🟢 NON-RÉGRESSION §0.11 VALIDÉE (3 runs le 2026-07-21) ; score interprétable encore dû
 
 > Part **ouverte** de §0.13 (run x5_debug 100 épisodes). Le run et le fix de l'évaluation
 > finale sont résolus et documentés en **§0.13**.
+
+> ✅ **NON-RÉGRESSION §0.11 VALIDÉE (2026-07-21) — 3 runs indépendants, zéro crash.** Après le fix
+> §0.18, la commande de re-mesure (`x5_debug --total-episodes 500`) a été relancée **3 fois** :
+> **3× 500/500 épisodes, `✅ TRAINING COMPLETE`, ZÉRO `collision intra-plan`, zéro `Traceback`,
+> zéro `incohérence masque`** (grep sur les 3 logs). Le crash dépendant de la trajectoire qui
+> survenait à l'épisode ~280 (§0.18) **n'est plus jamais réapparu** sur 1500 épisodes cumulés.
+> L'avertissement « la non-régression de §0.11 reste non validée par un run » de §0.18 est
+> **LEVÉ**. ⚠️ **Ce que ces 3 runs NE prouvent PAS** : le **score par matchup**. À 500 épisodes /
+> 2 par bot, les Combined (61,5 % / 38 % / 19,5 % / 42 %) restent **non concluants** (bruit
+> d'échantillon) — c'est le **pipeline** qui est validé, pas la politique. Un win-rate
+> interprétable exige toujours un run long à `total_episodes` réel (10-30k), aujourd'hui coûteux
+> en temps (~36 h) — c'est précisément la cible du chantier `V11_move_pool_optimization.md` (§0.22).
+> §0.15 étant tranché, ce win-rate mesurera la robustesse à l'**adversaire**.
 
 **Run de re-mesure du 2026-07-20 — commande exacte :**
 

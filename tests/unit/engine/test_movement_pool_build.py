@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Set, Tuple
 
+import pytest
+
 from engine.phase_handlers.movement_handlers import (
     _enemy_items_within_move_engagement_horizon,
     _movement_engagement_violates,
@@ -259,8 +261,14 @@ def _run_pool(
     board_cols: int = 40,
     board_rows: int = 40,
     walls: Set[Tuple[int, int]] | None = None,
+    gym: bool = False,
 ) -> Tuple[List[Tuple[int, int]], Set[Tuple[int, int]], Dict[str, Any]]:
-    """Appelle ``movement_build_valid_destinations_pool`` (chemin unique vectorisé NumPy)."""
+    """Appelle ``movement_build_valid_destinations_pool`` (chemin unique vectorisé NumPy).
+
+    ``gym=True`` pose ``gym_training_mode`` → ``_move_distance_metric`` lit ``move_gym`` (=hex) et
+    le chemin GROUND multi-hex passe par ``_build_multi_hex_vectorized`` (la cible du training x5),
+    au lieu du chemin ``move``=euclidean du PvP. Défaut ``False`` = comportement historique.
+    """
     units = [_fill(u) for u in units]
     config = {
         "game_rules": {"engagement_zone": ez, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
@@ -278,6 +286,8 @@ def _run_pool(
         "unit_by_id": _make_unit_by_id(units),
         "inches_to_subhex": 1,
     }
+    if gym:
+        game_state["gym_training_mode"] = True
     build_units_cache(game_state)
     build_enemy_adjacent_hexes(game_state, 0)
     pool = movement_build_valid_destinations_pool(game_state, "1")
@@ -478,6 +488,109 @@ def test_vectorized_multi_hex_matches_oracle_base2_ez1() -> None:
     ]
     pool, _fz, gs = _run_pool(units, ez=1, board_cols=20, board_rows=20)
     assert set(pool) == _oracle_pool(gs, "1", ez=1)
+
+
+# ── V11 §0.22 Étape 1 — égalité stricte du pool HEX multi-hex ez>1 (chemin `_build_multi_hex_
+# vectorized`, 100 % du training x5) contre l'oracle. Le trou : les cas ez>1 ci-dessus tournent en
+# `move`=euclidean (PvP) et n'imposent que des invariants ; personne ne verrouillait le pool hex
+# réellement produit en gym. On force `gym=True` (→ move_gym=hex). Socles ronds/carrés seulement :
+# `_oracle_pool` fait `int(BASE_SIZE)` et ne modélise pas les ovales `[20,14]` (couverts plus tard
+# par le test A/B cache-vs-sans-cache, cf. V11_move_pool_optimization.md §7-§8).
+
+_HEX_ORACLE_CASES = [
+    ("base2_round_ez10", [
+        {"id": 1, "col": 12, "row": 12, "HP_CUR": 2, "player": 0, "MOVE": 5,
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
+        {"id": 2, "col": 26, "row": 12, "HP_CUR": 2, "player": 1,
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
+    ], 10, None),
+    ("base3_round_ez10", [
+        {"id": 1, "col": 12, "row": 12, "HP_CUR": 2, "player": 0, "MOVE": 6,
+         "BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
+        {"id": 2, "col": 24, "row": 12, "HP_CUR": 2, "player": 1,
+         "BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
+    ], 10, None),
+    ("base2_walls_ez5", [
+        {"id": 1, "col": 12, "row": 12, "HP_CUR": 2, "player": 0, "MOVE": 5,
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
+        {"id": 2, "col": 28, "row": 28, "HP_CUR": 2, "player": 1,
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
+    ], 5, {(c, 15) for c in range(9, 16)} | {(16, r) for r in range(9, 16)}),
+]
+
+
+@pytest.mark.parametrize(
+    "name,units,ez,walls", _HEX_ORACLE_CASES, ids=[c[0] for c in _HEX_ORACLE_CASES]
+)
+def test_hex_multihex_pool_equals_oracle(name, units, ez, walls):
+    """Le pool hex (gym) multi-hex ez>1 doit être STRICTEMENT égal à l'oracle BFS hex."""
+    pool, _fz, gs = _run_pool(units, ez, walls=walls, gym=True)
+    oracle = _oracle_pool(gs, "1", ez=ez)
+    assert set(pool) == oracle, (
+        f"[{name}] pool hex prod != oracle\n"
+        f"  prod seul: {sorted(set(pool) - oracle)[:20]}\n"
+        f"  oracle seul: {sorted(oracle - set(pool))[:20]}"
+    )
+
+
+def test_hex_oracle_test_actually_reaches_build_multi_hex_vectorized(monkeypatch):
+    """GARDE D'ATTEINTE (motif §0.11) : sans elle, l'égalité ci-dessus pourrait tester un autre
+    chemin (single-hex / euclidean) et ne rien couvrir de la cible."""
+    import engine.phase_handlers.movement_handlers as mh
+
+    calls = {"n": 0}
+    orig = mh._build_multi_hex_vectorized
+
+    def _spy(*a, **k):
+        calls["n"] += 1
+        return orig(*a, **k)
+
+    monkeypatch.setattr(mh, "_build_multi_hex_vectorized", _spy)
+    name, units, ez, walls = _HEX_ORACLE_CASES[0]
+    _run_pool(units, ez, walls=walls, gym=True)
+    assert calls["n"] >= 1, (
+        "_build_multi_hex_vectorized JAMAIS appelé : l'égalité teste un autre chemin que la cible."
+    )
+
+
+# ── V11 §0.22 — SNAPSHOT golden pour les socles OVALES `[20,14]` (chemin hex/gym).
+# `_oracle_pool` fait `int(BASE_SIZE)` et ne peut pas les modéliser (§7 du doc dédié) ; or c'est le
+# 2ᵉ socle le plus fréquent du training (17,7 %). Ce golden fige le pool ET la footprint zone
+# produits AUJOURD'HUI : tout refacto d'extraction (Étape 2) ou cache (Étape 3) doit les laisser
+# STRICTEMENT inchangés. Valeurs capturées le 2026-07-21 sur le code de référence.
+# Régénération (si le pool change LÉGITIMEMENT) : imprimer len + sha256[:16] de sorted(set(pool))
+# et de sorted(fz), et reporter ici — jamais éditer à l'aveugle.
+import hashlib
+
+_OVAL_SNAPSHOT = {
+    # orientation -> (pool_len, pool_sha16, fz_len, fz_sha16)
+    0: (419, "9377c8dc50eef5d0", 1170, "9808806103a4b978"),
+    1: (449, "0b2ab46bf3d879a6", 1208, "fb5e179a6998400b"),
+}
+
+
+@pytest.mark.parametrize("orient", [0, 1])
+def test_oval_base_hex_pool_snapshot(orient):
+    """Non-régression stricte du pool ovale hex/gym (socle non couvert par l'oracle)."""
+    units = [
+        {"id": 1, "col": 20, "row": 40, "HP_CUR": 2, "player": 0, "MOVE": 12,
+         "BASE_SIZE": [20, 14], "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "oval", "orientation": orient},
+        {"id": 2, "col": 60, "row": 40, "HP_CUR": 2, "player": 1,
+         "BASE_SIZE": [20, 14], "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "oval", "orientation": orient},
+    ]
+    pool, fz, _gs = _run_pool(units, ez=10, board_cols=80, board_rows=80, gym=True)
+    pool_s = sorted(set(pool))
+    fz_s = sorted(fz)
+    exp_pool_len, exp_pool_h, exp_fz_len, exp_fz_h = _OVAL_SNAPSHOT[orient]
+    got_pool_h = hashlib.sha256(repr(pool_s).encode()).hexdigest()[:16]
+    got_fz_h = hashlib.sha256(repr(fz_s).encode()).hexdigest()[:16]
+    assert (len(pool_s), got_pool_h) == (exp_pool_len, exp_pool_h), (
+        f"pool ovale orient={orient} a changé : len {len(pool_s)} (attendu {exp_pool_len}), "
+        f"hash {got_pool_h} (attendu {exp_pool_h}) — régression de pool ou changement légitime."
+    )
+    assert (len(fz_s), got_fz_h) == (exp_fz_len, exp_fz_h), (
+        f"footprint zone ovale orient={orient} a changé : len {len(fz_s)} (attendu {exp_fz_len})."
+    )
 
 
 def test_vectorized_multi_hex_matches_oracle_mixed_square_enemy_ez10() -> None:
