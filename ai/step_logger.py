@@ -94,8 +94,15 @@ class StepLogger:
 
             # Format message using gameLogUtils.ts style
             message = self._format_replay_style_message(unit_id, action_type, action_details)
-            
-            
+            # Segment per-figurine [MODELS: <mid>@(c,r) ...] : positions par socle courantes,
+            # source de verite pour l'analyzer (raisonnement par socle, pas par ancre). Ajoute
+            # ICI, en un seul point, pour couvrir tous les types d'action. Absent/vide -> rien.
+            if action_details is not None:
+                _models_seg = action_details.get("models_segment")  # get allowed
+                if _models_seg:
+                    message = f"{message} {_models_seg}"
+
+
             # Standard format: [timestamp] TX PX PHASE : Message [SUCCESS/FAILED]
             success_status = "SUCCESS" if success else "FAILED"
             phase_upper = phase.upper()

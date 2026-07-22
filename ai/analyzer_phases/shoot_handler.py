@@ -228,7 +228,11 @@ def handle_shoot(
             rng_nb_by_weapon = require_key(limits, "rng_nb_by_weapon")
             rapid_fire_by_weapon = require_key(limits, "rapid_fire_by_weapon")
             weapon_name_for_limits = weapon_display_name.strip()
-            if weapon_name_for_limits not in rng_nb_by_weapon:
+            from ai.analyzer_perfig import resolve_weapon_value
+            rng_nb = resolve_weapon_value(
+                weapon_name_for_limits, rng_nb_by_weapon, config.rng_nb_by_weapon_global
+            )
+            if rng_nb is None:
                 stats['parse_errors'].append({
                     'episode': state.current_episode_num,
                     'turn': turn,
@@ -237,8 +241,11 @@ def handle_shoot(
                     'error': f"Weapon '{weapon_name_for_limits}' missing RNG_NB for unit type {shooter_unit_type}"
                 })
             else:
-                rng_nb = rng_nb_by_weapon[weapon_name_for_limits]
-                rapid_fire_value = require_key(rapid_fire_by_weapon, weapon_name_for_limits)
+                rapid_fire_value = resolve_weapon_value(
+                    weapon_name_for_limits, rapid_fire_by_weapon, config.rapid_fire_by_weapon_global
+                )
+                if rapid_fire_value is None:
+                    rapid_fire_value = 0
                 rapid_fire_match = re.search(r'\[RAPID(?: |_)?FIRE:(\d+)\]', action_desc, re.IGNORECASE)
                 rapid_fire_bonus_for_this_shot = 0
                 if rapid_fire_match:
@@ -300,10 +307,17 @@ def handle_shoot(
                 state.shot_sequence_counts[seq_key] += 1
                 current_shot_index = state.shot_sequence_counts[seq_key]
                 shooter_player_for_stats = require_key(state.unit_player, shooter_id)
+                # Class B (comptage per-figurine) : le plafond de tirs d'une escouade =
+                # (nb de socles vivants qui tirent) × NB par modèle. Les socles vivants sont
+                # listés dans le segment [MODELS:] de la ligne (current_line_models). Sans
+                # segment (logs anciens/synthétiques) → 1 modèle (comportement ancre legacy).
+                n_shooter_models = len(state.current_line_models.get(shooter_id, {})) or 1
+                rng_nb_squad = rng_nb * n_shooter_models
+                rapid_fire_value_squad = rapid_fire_value * n_shooter_models
                 rapid_fire_bonus_window = (
                     rapid_fire_value > 0
-                    and current_shot_index > rng_nb
-                    and current_shot_index <= (rng_nb + rapid_fire_value)
+                    and current_shot_index > rng_nb_squad
+                    and current_shot_index <= (rng_nb_squad + rapid_fire_value_squad)
                 )
                 rapid_fire_marker_valid = (
                     rapid_fire_match is not None
@@ -318,7 +332,9 @@ def handle_shoot(
                             'episode': state.current_episode_num,
                             'line': line.strip(),
                         }
-                max_allowed_shots = rng_nb + rapid_fire_bonus_for_this_shot
+                max_allowed_shots = rng_nb_squad + (
+                    rapid_fire_value_squad if rapid_fire_bonus_for_this_shot > 0 else 0
+                )
                 if state.shot_sequence_counts[seq_key] > max_allowed_shots:
                     stats['shoot_over_rng_nb'][shooter_player_for_stats] += 1
                     if stats['first_error_lines']['shoot_over_rng_nb'][shooter_player_for_stats] is None:
@@ -460,13 +476,29 @@ def handle_shoot(
                 if stats['first_error_lines']['shoot_invalid'][player] is None:
                     stats['first_error_lines']['shoot_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
         if weapon_range is not None:
-            # Portée mesurée bord-à-bord via le sélecteur `ranged` (le `distance` hex
-            # ci-dessus reste pour les tests d'adjacence == 1, pas pour la portée).
-            _shoot_metric = _analyzer_ranged_metric(config)
-            target_unit_type = require_key(state.unit_types, target_id)
-            _shooter_socle = _analyzer_socle(config, shooter_unit_type, shooter_col, shooter_row)
-            _target_socle = _analyzer_socle(config, target_unit_type, target_pos[0], target_pos[1])
-            if ranged_edge_distance(_shooter_socle, _target_socle, _shoot_metric) > weapon_range:
+            # Portée PER-SOCLE (10 Shooting / 06.01) : à portée si AU MOINS un socle tireur
+            # est à ≤ RNG (bord-à-bord) d'AU MOINS un socle cible. On mesure sur les empreintes
+            # (min_distance_between_sets) — parité avec l'engagement. L'ancre-à-ancre pouvait
+            # déclarer hors-portée alors qu'un socle avancé atteint la cible.
+            from ai.analyzer_perfig import squads_min_edge_distance
+            shooter_models = state.current_line_models.get(shooter_id)
+            target_models = state.positions_by_model.get(target_id)
+            if shooter_models and target_models:
+                shooter_base = state.unit_base.get(shooter_id, ("round", 1))
+                target_base = state.unit_base.get(target_id, ("round", 1))
+                edge_dist = squads_min_edge_distance(
+                    shooter_models, shooter_base, target_models, target_base,
+                    max_distance=int(weapon_range),
+                )
+                out_of_range = edge_dist > weapon_range
+            else:
+                # Repli ancre legacy (log ancien/synthétique sans [MODELS:]).
+                _shoot_metric = _analyzer_ranged_metric(config)
+                target_unit_type = require_key(state.unit_types, target_id)
+                _shooter_socle = _analyzer_socle(config, shooter_unit_type, shooter_col, shooter_row)
+                _target_socle = _analyzer_socle(config, target_unit_type, target_pos[0], target_pos[1])
+                out_of_range = ranged_edge_distance(_shooter_socle, _target_socle, _shoot_metric) > weapon_range
+            if out_of_range:
                 stats['shoot_invalid'][player]['out_of_range'] += 1
                 if stats['first_error_lines']['shoot_invalid'][player] is None:
                     stats['first_error_lines']['shoot_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
@@ -826,36 +858,71 @@ def handle_advance(
         })
     else:
         advance_roll = int(advance_roll_match.group(1))
-        advance_budget = advance_roll * _get_inches_to_subhex_for_analyzer()
+        # Advance (09 Movement) = MOVE + D6 : le budget inclut le mouvement de base de
+        # l'escouade, PAS seulement le jet. Le moteur applique « budget M+jet »
+        # (movement_handlers.movement_set_advance_mode_handler). L'ancien budget = jet×scale
+        # seul produisait de faux « distance>roll »/« path blocked » (chaque figurine dépasse
+        # mécaniquement un budget amputé de M).
+        advance_budget = (
+            require_key(state.unit_move, advance_unit_id)
+            + advance_roll * _get_inches_to_subhex_for_analyzer()
+        )
         occupied_positions = _build_occupied_positions(state.unit_positions, state.unit_hp, advance_unit_id)
         enemy_adjacent_hexes = _build_enemy_adjacent_hexes(state.unit_positions, state.unit_player, state.unit_hp, player)
         advance_unit_type = require_key(state.unit_types, advance_unit_id)
         advance_is_fly = require_key(config.unit_is_fly_by_type, advance_unit_type)
-        if advance_is_fly:
-            advance_distance = calculate_hex_distance(start_col, start_row, dest_col, dest_row)
-            if advance_distance > advance_budget:
-                stats['move_distance_over_limit']['advance'][player] += 1
-                if stats['first_error_lines']['move_distance_over_limit']['advance'][player] is None:
-                    stats['first_error_lines']['move_distance_over_limit']['advance'][player] = {
-                        'episode': state.current_episode_num, 'line': line.strip()
-                    }
+        # CONTRÔLE PER-SOCLE (09 Movement / Advance) : identique au move, budget = D6×scale.
+        # Chaque figurine avance de son origine (positions_by_model, ligne N-1) vers sa
+        # destination ([MODELS:] de cette ligne). L'ancre d'escouade peut dépasser le budget
+        # (reformation) tout en gardant chaque socle ≤ budget → l'ancre-à-ancre produisait de
+        # faux « distance>roll » / « path blocked ».
+        prev_models = state.positions_by_model.get(advance_unit_id)
+        new_models = state.current_line_models.get(advance_unit_id)
+        adv_blocked = False
+        adv_over = False
+        if prev_models and new_models:
+            for mid in [m for m in new_models if m in prev_models]:
+                o_col, o_row = prev_models[mid]
+                d_col, d_row = new_models[mid]
+                if (o_col, o_row) == (d_col, d_row):
+                    continue
+                if advance_is_fly:
+                    if calculate_hex_distance(o_col, o_row, d_col, d_row) > advance_budget:
+                        adv_over = True
+                else:
+                    steps = _bfs_shortest_path_length(
+                        o_col, o_row, d_col, d_row,
+                        advance_budget, state.wall_hexes, occupied_positions, enemy_adjacent_hexes
+                    )
+                    if steps is None:
+                        adv_blocked = True
+                    elif steps > advance_budget:
+                        adv_over = True
         else:
-            shortest_steps = _bfs_shortest_path_length(
-                start_col, start_row, dest_col, dest_row,
-                advance_budget, state.wall_hexes, occupied_positions, enemy_adjacent_hexes
-            )
-            if shortest_steps is None:
-                stats['move_path_blocked']['advance'][player] += 1
-                if stats['first_error_lines']['move_path_blocked']['advance'][player] is None:
-                    stats['first_error_lines']['move_path_blocked']['advance'][player] = {
-                        'episode': state.current_episode_num, 'line': line.strip()
-                    }
-            elif shortest_steps > advance_budget:
-                stats['move_distance_over_limit']['advance'][player] += 1
-                if stats['first_error_lines']['move_distance_over_limit']['advance'][player] is None:
-                    stats['first_error_lines']['move_distance_over_limit']['advance'][player] = {
-                        'episode': state.current_episode_num, 'line': line.strip()
-                    }
+            if advance_is_fly:
+                if calculate_hex_distance(start_col, start_row, dest_col, dest_row) > advance_budget:
+                    adv_over = True
+            else:
+                shortest_steps = _bfs_shortest_path_length(
+                    start_col, start_row, dest_col, dest_row,
+                    advance_budget, state.wall_hexes, occupied_positions, enemy_adjacent_hexes
+                )
+                if shortest_steps is None:
+                    adv_blocked = True
+                elif shortest_steps > advance_budget:
+                    adv_over = True
+        if adv_blocked:
+            stats['move_path_blocked']['advance'][player] += 1
+            if stats['first_error_lines']['move_path_blocked']['advance'][player] is None:
+                stats['first_error_lines']['move_path_blocked']['advance'][player] = {
+                    'episode': state.current_episode_num, 'line': line.strip()
+                }
+        if adv_over:
+            stats['move_distance_over_limit']['advance'][player] += 1
+            if stats['first_error_lines']['move_distance_over_limit']['advance'][player] is None:
+                stats['first_error_lines']['move_distance_over_limit']['advance'][player] = {
+                    'episode': state.current_episode_num, 'line': line.strip()
+                }
 
     if phase == 'SHOOT' and advance_unit_id in state.units_advanced:
         stats['advance_twice_in_shoot_phase'][player] += 1

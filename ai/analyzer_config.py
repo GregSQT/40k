@@ -33,6 +33,16 @@ class AnalyzerConfig:
     weapon_rule_to_weapons: Dict[str, Set[str]]
     resolve_rule_id: Callable  # closure over all_unit_rules_config
     inches_to_subhex: int
+    # Cartes GLOBALES arme→NB/portée, agrégées sur TOUS les model-types du registre.
+    # Une escouade V11 est hétérogène (ex. "Boyz" contient Warboss/PainBoy/Nob...) ; l'arme
+    # loguée peut appartenir à un model-type du squad et non à l'entrée unit_type. La
+    # résolution per-unit-type échoue alors → on retombe sur ces cartes globales. En cas de
+    # même nom d'arme avec NB différents entre model-types, on retient le MAX (plafond).
+    rng_nb_by_weapon_global: Dict[str, int]
+    cc_nb_by_weapon_global: Dict[str, int]
+    rapid_fire_by_weapon_global: Dict[str, int]
+    weapon_range_global: Dict[str, int]
+    weapon_is_pistol_global: Dict[str, bool]
 
 
 def load_analyzer_config() -> AnalyzerConfig:
@@ -250,6 +260,25 @@ def load_analyzer_config() -> AnalyzerConfig:
                 rule_base = str(r).split(":")[0] if ":" in str(r) else str(r)
                 weapon_rule_to_weapons.setdefault(rule_base, set()).add(weapon_key)
 
+    # Cartes globales arme→NB/portée (agrégation MAX sur tous les model-types).
+    rng_nb_by_weapon_global: Dict[str, int] = {}
+    cc_nb_by_weapon_global: Dict[str, int] = {}
+    rapid_fire_by_weapon_global: Dict[str, int] = {}
+    weapon_range_global: Dict[str, int] = {}
+    weapon_is_pistol_global: Dict[str, bool] = {}
+    for _ut, _limits in unit_attack_limits.items():
+        for _wname, _nb in _limits["rng_nb_by_weapon"].items():
+            rng_nb_by_weapon_global[_wname] = max(rng_nb_by_weapon_global.get(_wname, 0), _nb)
+        for _wname, _rf in _limits["rapid_fire_by_weapon"].items():
+            rapid_fire_by_weapon_global[_wname] = max(rapid_fire_by_weapon_global.get(_wname, 0), _rf)
+        for _wname, _nb in _limits["cc_nb_by_weapon"].items():
+            cc_nb_by_weapon_global[_wname] = max(cc_nb_by_weapon_global.get(_wname, 0), _nb)
+    for _ut, _winfos in unit_weapons_cache.items():
+        for _winfo in _winfos:
+            _wname = _winfo["name"]
+            weapon_range_global[_wname] = max(weapon_range_global.get(_wname, 0), _winfo["range"])
+            weapon_is_pistol_global[_wname] = weapon_is_pistol_global.get(_wname, False) or _winfo["is_pistol"]
+
     return AnalyzerConfig(
         unit_registry=unit_registry,
         config_loader=config_loader,
@@ -265,4 +294,9 @@ def load_analyzer_config() -> AnalyzerConfig:
         weapon_rule_to_weapons=weapon_rule_to_weapons,
         resolve_rule_id=resolve_effect_rule_id_to_technical,
         inches_to_subhex=inches_to_subhex,
+        rng_nb_by_weapon_global=rng_nb_by_weapon_global,
+        cc_nb_by_weapon_global=cc_nb_by_weapon_global,
+        rapid_fire_by_weapon_global=rapid_fire_by_weapon_global,
+        weapon_range_global=weapon_range_global,
+        weapon_is_pistol_global=weapon_is_pistol_global,
     )

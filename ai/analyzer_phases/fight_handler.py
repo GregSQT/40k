@@ -100,7 +100,11 @@ def handle_fight(
             if fighter_unit_type:
                 limits = require_key(config.unit_attack_limits, fighter_unit_type)
                 cc_nb_by_weapon = require_key(limits, "cc_nb_by_weapon")
-                if weapon_display_name not in cc_nb_by_weapon:
+                from ai.analyzer_perfig import resolve_weapon_value
+                cc_nb_single = resolve_weapon_value(
+                    weapon_display_name, cc_nb_by_weapon, config.cc_nb_by_weapon_global
+                )
+                if cc_nb_single is None:
                     stats['parse_errors'].append({
                         'episode': state.current_episode_num,
                         'turn': turn,
@@ -109,7 +113,9 @@ def handle_fight(
                         'error': f"Weapon '{weapon_display_name}' missing CC_NB for unit type {fighter_unit_type}"
                     })
                 else:
-                    cc_nb = cc_nb_by_weapon[weapon_display_name]
+                    # Class B : plafond d'attaques escouade = (socles vivants) × CC_NB/modèle.
+                    n_fighter_models = len(state.current_line_models.get(fighter_id, {})) or 1
+                    cc_nb = cc_nb_single * n_fighter_models
                     seq_key = (state.fight_phase_seq_id, fighter_id, weapon_display_name)
                     if (state.last_fight_fighter_id != fighter_id or
                             state.last_fight_weapon != weapon_display_name):
@@ -146,8 +152,27 @@ def handle_fight(
         if target_id in state.unit_hp and require_key(state.unit_hp, target_id) > 0:
             _position_cache_set(state.unit_positions, target_id, target_col, target_row)
 
-        # RULE: Fight from non-adjacent
-        if not is_adjacent(fighter_col, fighter_row, target_col, target_row):
+        # RULE: Fight from non-adjacent — CONTRÔLE PER-SOCLE (12.04 / engagement range).
+        # Combat légal si AU MOINS un socle attaquant est à portée d'engagement (bord-à-bord
+        # ≤ engagement_zone subhexes) d'AU MOINS un socle cible. On réutilise les empreintes
+        # moteur (compute_occupied_hexes / min_distance_between_sets). L'ancre-à-ancre
+        # (is_adjacent, distance hex==1) était bien plus restrictif que la règle → faux positifs.
+        from ai.analyzer_perfig import squads_min_edge_distance
+        from ai.analyzer import _get_engagement_zone_for_analyzer
+        fighter_models = state.current_line_models.get(fighter_id)
+        target_models = state.positions_by_model.get(target_id)
+        if fighter_models and target_models:
+            ez = _get_engagement_zone_for_analyzer()
+            fighter_base = state.unit_base.get(fighter_id, ("round", 1))
+            target_base = state.unit_base.get(target_id, ("round", 1))
+            edge = squads_min_edge_distance(
+                fighter_models, fighter_base, target_models, target_base, max_distance=ez
+            )
+            fight_non_adjacent = edge > ez
+        else:
+            # Pas de données per-socle (log ancien/synthétique) → repli ancre legacy.
+            fight_non_adjacent = not is_adjacent(fighter_col, fighter_row, target_col, target_row)
+        if fight_non_adjacent:
             stats['fight_from_non_adjacent'][player] += 1
             if stats['first_error_lines']['fight_from_non_adjacent'][player] is None:
                 stats['first_error_lines']['fight_from_non_adjacent'][player] = {'episode': state.current_episode_num, 'line': line.strip()}

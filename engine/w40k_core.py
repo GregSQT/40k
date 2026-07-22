@@ -4769,6 +4769,29 @@ class W40KEngine(gym.Env):
         "damageDealt": "damage_dealt",
     }
 
+    def _models_segment_for_unit(self, unit_id: Any) -> str:
+        """Segment ``[MODELS: <mid>@(c,r) ...]`` des positions per-figurine COURANTES de l'unite.
+
+        Source de verite : ``units_cache[unit_id]['occupied_hexes_by_model']`` (resynchronise
+        par ``commit_move`` apres chaque deplacement). Permet a l'analyzer de raisonner par
+        socle au lieu de l'ancre. Chaine vide si l'unite n'a pas d'entree cache exploitable
+        (id absent, unite retiree) : le per-figurine est une INFO de log, jamais un chemin de
+        regle — il ne doit en aucun cas faire crasher le flux de journalisation.
+        """
+        if unit_id is None:
+            return ""
+        from engine.action_log_utils import format_models_segment
+        units_cache = self.game_state.get("units_cache")  # get allowed
+        if not isinstance(units_cache, dict):
+            return ""
+        entry = units_cache.get(unit_id)  # get allowed
+        if not isinstance(entry, dict):
+            return ""
+        by_model = entry.get("occupied_hexes_by_model")  # get allowed
+        if not isinstance(by_model, dict) or not by_model:
+            return ""
+        return format_models_segment((mid, pos[0], pos[1]) for mid, pos in by_model.items())
+
     def _build_shot_details(
         self, raw_log: Dict[str, Any], shot: Dict[str, Any], pre_action_turn: Any,
         fight_state: Optional[Dict[str, Any]],
@@ -4803,6 +4826,7 @@ class W40KEngine(gym.Env):
         details["save_result"] = None if save_success is None else ("SAVE" if save_success else "FAIL")
         if fight_state is not None:
             details.update(fight_state)
+        details["models_segment"] = self._models_segment_for_unit(unit_id)
         return details
 
     def _flush_squad_action_logs_to_step_logger(
@@ -4936,6 +4960,7 @@ class W40KEngine(gym.Env):
             value = raw_log.get(src)  # get allowed
             if value is not None:
                 details[dst] = value
+        details["models_segment"] = self._models_segment_for_unit(unit_id)
         return details
 
     def _fight_v11_gym_settle(self) -> None:

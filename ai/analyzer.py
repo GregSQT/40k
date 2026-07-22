@@ -61,14 +61,23 @@ def _get_inches_to_subhex_for_analyzer() -> int:
 
 
 def _get_engagement_zone_for_analyzer() -> int:
-    """Load canonical engagement_zone from game_config (same as engine)."""
+    """Engagement zone en SUBHEXES, identique au moteur.
+
+    game_config['game_rules']['engagement_zone'] est stocké EN POUCES (standard GW). Le moteur
+    le convertit ×inches_to_subhex au chargement (engine.w40k_core : gr['engagement_zone'] *=
+    inches_to_subhex). L'analyzer doit appliquer la MÊME conversion, sinon il compare des
+    empreintes (subhex) à un seuil en pouces (2 au lieu de 10) → toute la mêlée/engagement
+    remontait faussement « non-adjacent ». Root cause des « Fight from non-adjacent ».
+    """
     global _engagement_zone_analyzer_cache
     if _engagement_zone_analyzer_cache is not None:
         return _engagement_zone_analyzer_cache
     from config_loader import get_config_loader
     game_config = get_config_loader().get_game_config()
     game_rules = require_key(game_config, "game_rules")
-    _engagement_zone_analyzer_cache = int(require_key(game_rules, "engagement_zone"))
+    _engagement_zone_analyzer_cache = (
+        int(require_key(game_rules, "engagement_zone")) * _get_inches_to_subhex_for_analyzer()
+    )
     return _engagement_zone_analyzer_cache
 
 MAX_D3 = 3

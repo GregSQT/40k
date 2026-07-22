@@ -28,6 +28,15 @@ class AnalyzerState:
     unit_types: Dict[str, str] = field(default_factory=dict)
     unit_move: Dict[str, int] = field(default_factory=dict)
 
+    # Couche per-figurine (V11) : socles vivants par unité, maintenu frame-à-frame
+    # depuis le segment [MODELS:] de chaque ligne. unit_id = préfixe de mid avant '#'.
+    positions_by_model: Dict[str, Dict[str, Tuple[int, int]]] = field(default_factory=dict)
+    # Socles listés SUR LA LIGNE COURANTE (nouvelles positions de l'unité qui agit) ;
+    # positions_by_model garde encore l'état PRÉCÉDENT tant que la ligne n'est pas finie.
+    current_line_models: Dict[str, Dict[str, Tuple[int, int]]] = field(default_factory=dict)
+    # Base (shape, size) par unité, lue sur la ligne "Starting position ... base=".
+    unit_base: Dict[str, Tuple[str, object]] = field(default_factory=dict)
+
     # Board
     wall_hexes: Set[Tuple[int, int]] = field(default_factory=set)
     objective_hexes: Dict[int, Set[Tuple[int, int]]] = field(default_factory=dict)

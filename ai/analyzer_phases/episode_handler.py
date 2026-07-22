@@ -80,3 +80,6 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.scored_turns = set()
     state.primary_objective_configs = []
     state.selected_choice_by_unit_source = {}
+    state.positions_by_model = {}
+    state.current_line_models = {}
+    state.unit_base = {}

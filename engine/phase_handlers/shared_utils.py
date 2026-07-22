@@ -3309,6 +3309,90 @@ def build_move_blocked_cells_by_level(
     return out
 
 
+def build_move_transit_blocked(
+    game_state: Dict[str, Any], squad_id: str, player: int, level: int
+) -> Set[Tuple[int, int]]:
+    """Cellules INFRANCHISSABLES EN TRANSIT pour le BFS géodésique par-figurine du move sol.
+
+    Miroir EXACT des obstacles de pas du pool d'ancre sol
+    (``movement_build_valid_destinations_pool``, chemin ``is_single_hex`` hex) : murs TOUJOURS,
+    puis figs ennemies / amies / bande d'EZ ennemie selon les toggles ``config["move"]``
+    (``_get_move_traversal_rules``). Défauts du jeu : ennemis bloquent, amies traversables,
+    bande d'EZ traversable — donc en pratique ``murs ∪ ennemis``.
+
+    C'est la définition de trajet légal (règle 03, distance de CHEMIN) partagée par les DEUX
+    côtés de l'invariant « masque ⊆ exécutable » sur le budget : l'érosion du pool
+    (``erode_move_pool_by_squad_block``) et la validation d'un plan (``explain_move_plan_
+    rejection``). Les dupliquer rouvrirait la classe de bug masque/exécution.
+
+    La destination (occupation, EZ) n'est PAS filtrée ici : elle l'est par
+    ``build_move_blocked_cells_by_level``. Ce set ne borne QUE l'atteignabilité du chemin.
+    Lecture pure.
+    """
+    from engine.phase_handlers.movement_handlers import _get_move_traversal_rules
+
+    thru_ez, thru_enemy, thru_friendly = _get_move_traversal_rules(game_state)
+    transit: Set[Tuple[int, int]] = set(game_state.get("wall_hexes", set()))  # get allowed
+    if not thru_enemy:
+        transit |= build_enemy_occupied_positions_set(
+            game_state, current_player=int(player), level=int(level)
+        )
+    if not thru_friendly:
+        # Amies = toute occupation hors escouade active, moins les ennemies (miroir du pool :
+        # `_friendly_occ = _occupied - _enemy_occ`, `_occupied` excluant déjà l'escouade active).
+        friendly = build_occupied_positions_set(
+            game_state, exclude_unit_id=str(squad_id), level=int(level)
+        ) - build_enemy_occupied_positions_set(
+            game_state, current_player=int(player), level=int(level)
+        )
+        transit |= friendly
+    if not thru_ez:
+        transit |= require_key(game_state, f"enemy_adjacent_hexes_player_{int(player)}")
+    return transit
+
+
+def geodesic_move_reach(
+    start_col: int,
+    start_row: int,
+    budget: int,
+    transit_blocked: Set[Tuple[int, int]],
+    board_cols: int,
+    board_rows: int,
+) -> Dict[Tuple[int, int], int]:
+    """Champ géodésique HEX (distance de CHEMIN en pas) depuis ``(start_col, start_row)``,
+    borné à ``budget`` pas, ``transit_blocked`` (murs + obstacles de traversée) infranchissable.
+
+    BFS centre-à-centre, ``get_hex_neighbors`` (parity-aware) — même voisinage et même
+    traitement des murs que le pool d'ancre réactif (``if neighbor in blocked: continue``).
+    Retourne ``{(col, row): distance}`` pour toute cellule atteignable en ``<= budget`` pas
+    (la case de départ y figure à distance 0). Une cellule absente = injoignable dans le budget.
+    Lecture pure.
+    """
+    from collections import deque
+
+    start = (int(start_col), int(start_row))
+    field: Dict[Tuple[int, int], int] = {start: 0}
+    if budget <= 0:
+        return field
+    queue: "deque[Tuple[Tuple[int, int], int]]" = deque([(start, 0)])
+    while queue:
+        (cc, cr), cd = queue.popleft()
+        if cd >= budget:
+            continue
+        nd = cd + 1
+        for nc, nr in get_hex_neighbors(cc, cr):
+            if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                continue
+            nb = (nc, nr)
+            if nb in field:
+                continue
+            if nb in transit_blocked:
+                continue
+            field[nb] = nd
+            queue.append((nb, nd))
+    return field
+
+
 def build_rigid_plan(
     anchor_dest_col: int,
     anchor_dest_row: int,
@@ -3442,6 +3526,30 @@ def explain_move_plan_rejection(
                 return f"figurine {mid} absente de models_cache"
             origin_positions[mid] = (int(m["col"]), int(m["row"]))
 
+    # Budget en distance de CHEMIN (règle 03) : le sol traite les murs (et ennemis, cf. toggles)
+    # comme infranchissables en transit, donc la distance à vol d'oiseau sous-estime le trajet
+    # d'une figurine qui doit contourner un obstacle. On borne alors chaque figurine par un BFS
+    # géodésique depuis SON origine. Deux exclusions laissent la distance à vol d'oiseau exacte :
+    #   - FLY actif (Take to the skies 21.03) : la traversée ignore murs/figurines → chemin == cube ;
+    #   - métrique euclidienne (PvP) : le trajet légal est euclidien et déjà borné par le pool
+    #     par-figurine (`movement_build_model_destinations_pool`), pas par ce prédicat hex.
+    _use_geodesic_budget = False
+    if c["budget_per_model"] is not None:
+        from engine.phase_handlers.movement_handlers import (
+            _fly_traversal_active,
+            _move_distance_metric,
+        )
+        # Métrique AVANT l'unité (cf. érosion) : euclidien / non-hex → cube-exact, pas de lecture d'unité.
+        if _move_distance_metric(game_state) == "hex":
+            _unit_obj = get_unit_by_id(game_state, squad_id)
+            _use_geodesic_budget = not (
+                _unit_obj is not None and _fly_traversal_active(game_state, _unit_obj, squad_id)
+            )
+    # Champs géodésiques par (origine, niveau) — mémoïsés : plusieurs figurines partageraient
+    # rarement une origine, mais un même plan peut re-tester la même origine (snap).
+    _geo_fields: Dict[Tuple[int, int, int], Dict[Tuple[int, int], int]] = {}
+    _transit_by_level: Dict[int, Set[Tuple[int, int]]] = {}
+
     # Clé (niveau, col, row) : le NIVEAU fait partie de l'identité d'une position — meme
     # regle que le contrôle de cellule interdite juste en dessous, qui est deja per-niveau.
     # Clefer sur (col,row) seul rejetait comme « collision » deux figurines legalement
@@ -3470,12 +3578,36 @@ def explain_move_plan_rejection(
         new_cells.add(occupied)
         if c["budget_per_model"] is not None:
             o_col, o_row = origin_positions[mid]
-            dist = calculate_hex_distance(o_col, o_row, nc, nr)
-            if dist > int(c["budget_per_model"]):
-                return (
-                    f"figurine {mid} hors budget : distance {dist} depuis "
-                    f"({o_col},{o_row}) > budget_per_model={int(c['budget_per_model'])}"
-                )
+            budget = int(c["budget_per_model"])
+            if not _use_geodesic_budget:
+                dist = calculate_hex_distance(o_col, o_row, nc, nr)
+                if dist > budget:
+                    return (
+                        f"figurine {mid} hors budget : distance {dist} depuis "
+                        f"({o_col},{o_row}) > budget_per_model={budget}"
+                    )
+            else:
+                _origin_level = int(require_key(models_cache[mid], "level"))
+                if _origin_level not in _transit_by_level:
+                    _transit_by_level[_origin_level] = build_move_transit_blocked(
+                        game_state, squad_id, player, _origin_level
+                    )
+                _fkey = (o_col, o_row, _origin_level)
+                _field = _geo_fields.get(_fkey)
+                if _field is None:
+                    _field = geodesic_move_reach(
+                        o_col, o_row, budget,
+                        _transit_by_level[_origin_level], board_cols, board_rows,
+                    )
+                    _geo_fields[_fkey] = _field
+                _pdist = _field.get(cell)
+                if _pdist is None:
+                    _sl = calculate_hex_distance(o_col, o_row, nc, nr)
+                    return (
+                        f"figurine {mid} hors budget : ({nc},{nr}) injoignable en chemin "
+                        f"<= {budget} pas depuis ({o_col},{o_row}) "
+                        f"(distance a vol d'oiseau {_sl}, trajet legal contournant murs/figs > budget)"
+                    )
 
     if c["require_coherency"]:
         plan_positions = {entry[0]: (int(entry[1]), int(entry[2])) for entry in plan}
@@ -7570,6 +7702,7 @@ def erode_move_pool_by_squad_block(
     squad_id: str,
     costs: Dict[Tuple[int, int], float],
     constraints: Optional[Dict[str, Any]] = None,
+    move_budget: Optional[int] = None,
 ) -> Dict[Tuple[int, int], float]:
     """V11 T6-g — Retire du pool de move les ancres dont le BLOC translaté est illégal.
 
@@ -7591,13 +7724,25 @@ def erode_move_pool_by_squad_block(
     ne peuvent pas diverger. ``constraints`` doit refléter celles que l'exécution appliquera
     (défaut ``DEFAULT_MOVE_CONSTRAINTS``, ce que passe ``execute_squad_move`` sans
     ``extra_constraints``) : les fournir plus permissives ici sur-filtrerait le masque.
-    Ce sont les seules contraintes érodables. Les deux autres sont INVARIANTES par
-    translation rigide, donc déjà garanties par le pool d'ancre :
-      - ``budget_per_model`` : ``calculate_hex_distance`` est une distance cube, donc
-        invariante par translation — la distance de chaque figurine à son origine est égale
-        à celle de l'ancre, elle-même bornée par le coût géodésique du pool ;
-      - ``require_coherency`` / collision intra-plan : ne dépendent que des positions
-        RELATIVES, préservées par la translation cube.
+
+    ``budget_per_model`` (distance de CHEMIN, règle 03) est AUSSI érodé ici, au sol. La distance
+    à vol d'oiseau (cube) est bien invariante par translation, mais PAS le trajet légal : une
+    figurine partant derrière un mur doit le contourner et peut dépasser son budget là où l'ancre
+    (dégagée) tient — c'était le bug « trajet légal > budget ». On borne donc chaque figurine par
+    un BFS géodésique depuis SON origine (``geodesic_move_reach`` sur ``build_move_transit_
+    blocked``, le MÊME prédicat de transit que ``explain_move_plan_rejection``), au budget que
+    l'exécution appliquera à la candidate (M pour normal/fall_back, M + jet pour advance, déduit du
+    coût d'ancre via ``classify_squad_move_type``). Exclusions rendant le cube exact (érosion de
+    budget inactive) : FLY actif (21.03, traversée libre) et métrique euclidienne (PvP, hors de ce
+    masque hex). ``require_coherency`` / collision intra-plan restent INVARIANTS par translation
+    rigide (positions RELATIVES préservées) → déjà garantis par le pool d'ancre.
+
+    ``move_budget`` : budget (subhex) auquel le pool a été construit — À PASSER par
+    ``build_squad_move_cell_map`` pour que l'érosion de budget connaisse le régime réel
+    (normal/advance/fall_back). Au masque le jet d'Advance n'est PAS encore dans
+    ``_squad_advance_rolls`` (le décodeur l'y stocke à l'exécution) : le re-dériver via
+    ``_advance_roll_for`` raterait l'Advance et laisserait passer les cellules advance
+    (bug masque/exécution). À ``None`` (appel autonome), on retombe sur ``_advance_roll_for``.
 
     Lecture pure. Retourne un nouveau dict (sous-ensemble de ``costs``).
     """
@@ -7613,12 +7758,16 @@ def erode_move_pool_by_squad_block(
     anchor = models_cache[alive_mids[0]]
     ax, ay, az = offset_to_cube(int(anchor["col"]), int(anchor["row"]))
     offsets_by_level: Dict[int, List[Tuple[int, int, int]]] = {}
+    # (origine_col, origine_row, niveau, offset_cube) par figurine — pour l'érosion par budget
+    # géodésique (chaque figurine part de SON origine, pas de l'ancre).
+    models_geo: List[Tuple[int, int, int, Tuple[int, int, int]]] = []
     for mid in alive_mids:
         m = models_cache[mid]
         mx, my, mz = offset_to_cube(int(m["col"]), int(m["row"]))
-        offsets_by_level.setdefault(int(require_key(m, "level")), []).append(
-            (mx - ax, my - ay, mz - az)
-        )
+        off = (mx - ax, my - ay, mz - az)
+        lvl = int(require_key(m, "level"))
+        offsets_by_level.setdefault(lvl, []).append(off)
+        models_geo.append((int(m["col"]), int(m["row"]), lvl, off))
 
     board_cols = int(require_key(game_state, "board_cols"))
     board_rows = int(require_key(game_state, "board_rows"))
@@ -7643,6 +7792,113 @@ def erode_move_pool_by_squad_block(
             merged |= s
         blocked_by_level[lv] = merged
 
+    # ── Budget en distance de CHEMIN par-figurine (bug « trajet légal > budget ») ──
+    # Le pool borne le TRAJET de l'ANCRE (chemin, contournant murs) ; l'exécution translate tout
+    # le bloc du même vecteur cube. La distance à vol d'oiseau (cube) est invariante par cette
+    # translation, mais PAS le trajet légal : une sœur partant derrière un mur doit le contourner
+    # et peut dépasser son budget là où l'ancre (dégagée) tient. On érode donc les ancres où une
+    # figurine non-FLY dépasserait son budget de chemin. Prédicat EXACT (mêmes champs géodésiques
+    # que ``explain_move_plan_rejection``) → toute cellule conservée passe la validation à
+    # l'exécution : invariant « masque ⊆ exécutable », ZÉRO crash, ZÉRO sur-érosion.
+    #
+    # Coût : un BFS géodésique par figurine RÉELLEMENT proche d'un obstacle de transit (gate).
+    # Une figurine sans mur/ennemi dans son rayon de budget a chemin == cube, déjà borné par le
+    # pool d'ancre → aucun BFS (cas dégagé, dominant). Le BFS n'est payé qu'au contact du terrain.
+    # Exclusions rétablissant l'exactitude cube : FLY actif (21.03) et métrique euclidienne (PvP).
+    _geo_budget = False
+    _field_by_origin: Dict[Tuple[int, int, int], Dict[Tuple[int, int], int]] = {}
+    _geo_models: List[Tuple[int, int, int, Tuple[int, int, int]]] = []
+    _classifier_normal = 0
+    _normal_exec = 0
+    _advance_exec: Optional[int] = None
+    _in_er = False
+    from engine.phase_handlers.movement_handlers import (
+        _fly_traversal_active,
+        _move_distance_metric,
+        _advance_roll_for,
+        squad_descent_penalty_subhex,
+    )
+    # Métrique AVANT l'unité : le budget géodésique ne concerne que le masque gym (hex).
+    # En euclidien (PvP), on ne lit ni l'unité ni les budgets (game_state minimal des tests d'unité).
+    if _move_distance_metric(game_state) == "hex":
+        _unit_obj = get_unit_by_id(game_state, squad_id)
+        _fly_active = (
+            _unit_obj is not None and _fly_traversal_active(game_state, _unit_obj, str(squad_id))
+        )
+    else:
+        _fly_active = True  # inhibe le budget géodésique (traité comme cube-exact)
+    if not _fly_active:
+        _geo_budget = True
+        _descent = squad_descent_penalty_subhex(game_state, str(squad_id))
+        _classifier_normal = get_squad_move_budget(str(squad_id), game_state, "normal")
+        _normal_exec = max(0, _classifier_normal - _descent)
+        _in_er = _squad_is_in_enemy_er(game_state, str(squad_id))
+        # Budget de construction du pool = source de vérité du régime (normal/advance/fall_back).
+        # CRUCIAL : au masque, le jet d'Advance est passé en PARAMÈTRE à `build_squad_move_cell_map`
+        # mais n'est PAS encore dans `_squad_advance_rolls` (le décodeur l'y stocke seulement à
+        # l'exécution). Re-dériver via `_advance_roll_for` renverrait donc None et raterait le
+        # régime Advance → l'érosion utiliserait l'extent normal et laisserait passer les cellules
+        # advance (bug masque/exécution). On prend donc le budget que le POOL a réellement utilisé.
+        if move_budget is not None:
+            _pool_budget = int(move_budget)
+        else:
+            # Appel autonome (hors masque gym) : re-dérive comme le pool par défaut.
+            _adv_roll = _advance_roll_for(str(squad_id), game_state)
+            if _in_er:
+                _pool_budget = get_squad_move_budget(str(squad_id), game_state, "fall_back")
+            elif _adv_roll is not None:
+                _pool_budget = get_squad_move_budget(
+                    str(squad_id), game_state, "advance", advance_roll=_adv_roll
+                )
+            else:
+                _pool_budget = _classifier_normal
+        # Régime Advance ssi le pool a été construit à un budget > M (le jet a élargi le disque).
+        if (not _in_er) and _pool_budget > _classifier_normal:
+            _advance_exec = max(0, _pool_budget - _descent)
+        _extent = _advance_exec if _advance_exec is not None else _normal_exec
+        # Transit sol par niveau (murs + ennemis/amies/EZ selon toggles) — même prédicat de chemin
+        # que `explain_move_plan_rejection`. Champ géodésique par ORIGINE de figurine, borné à
+        # l'extent (budget max), réutilisé pour toutes les candidates.
+        _transit_by_level: Dict[int, Set[Tuple[int, int]]] = {}
+        for (_oc, _or_, lvl, _off) in models_geo:
+            if lvl not in _transit_by_level:
+                _transit_by_level[lvl] = build_move_transit_blocked(
+                    game_state, str(squad_id), player, lvl
+                )
+        # Gate : une figurine dont aucun obstacle de transit n'est à <= extent (bbox) a chemin ==
+        # cube partout dans son budget → borne déjà assurée par le pool. Seules les figurines au
+        # contact d'un obstacle exigent un BFS. ``_local_transit`` = transit filtré à la bbox du
+        # bloc, calculé une fois (test de proximité en O(|local|), pas O(|murs board|)).
+        _local_transit_by_level: Dict[int, List[Tuple[int, int]]] = {}
+        if models_geo:
+            _bmin_c = min(oc for oc, _r, _l, _o in models_geo) - _extent
+            _bmax_c = max(oc for oc, _r, _l, _o in models_geo) + _extent
+            _bmin_r = min(orow for _c, orow, _l, _o in models_geo) - _extent
+            _bmax_r = max(orow for _c, orow, _l, _o in models_geo) + _extent
+            for lvl, tset in _transit_by_level.items():
+                _local_transit_by_level[lvl] = [
+                    (tc, tr) for (tc, tr) in tset
+                    if _bmin_r <= tr <= _bmax_r and _bmin_c <= tc <= _bmax_c
+                ]
+        for (ocol, orow, lvl, off) in models_geo:
+            # Le court-circuit cube n'est valide que si le budget d'exécution égale le budget
+            # classifieur (sinon M - descente < M et le cube n'est plus garanti par le pool).
+            if _descent == 0:
+                _local = _local_transit_by_level.get(lvl, ())
+                if not any(
+                    abs(tc - ocol) <= _extent and abs(tr - orow) <= _extent
+                    for (tc, tr) in _local
+                ):
+                    continue  # cube-safe : aucun BFS
+            _geo_models.append((ocol, orow, lvl, off))
+            _fkey = (ocol, orow, lvl)
+            if _fkey not in _field_by_origin:
+                _field_by_origin[_fkey] = geodesic_move_reach(
+                    ocol, orow, _extent, _transit_by_level[lvl], board_cols, board_rows
+                )
+        if not _geo_models:
+            _geo_budget = False  # aucune figurine à contraindre → pool d'ancre déjà exact
+
     kept: Dict[Tuple[int, int], float] = {}
     for (cc, rr), cost in costs.items():
         bx, by, bz = offset_to_cube(int(cc), int(rr))
@@ -7659,6 +7915,21 @@ def erode_move_pool_by_squad_block(
                     break
             if not ok:
                 break
+        if ok and _geo_budget:
+            # Budget effectif de CETTE candidate = celui que l'exécution appliquera, déduit du type
+            # de move (classify_squad_move_type sur le coût d'ancre) : normal/fall_back → M,
+            # advance → M + jet. Chaque figurine contrainte doit atteindre sa destination translatée
+            # dans ce budget en distance de CHEMIN (sinon `validate_move_plan` lèverait à l'exécution).
+            if _in_er or cost <= _classifier_normal:
+                _exec_b = _normal_exec
+            else:
+                _exec_b = _advance_exec if _advance_exec is not None else _normal_exec
+            for (ocol, orow, lvl, (ox, oy, oz)) in _geo_models:
+                ncol, nrow = cube_to_offset(bx + ox, by + oy, bz + oz)
+                _d = _field_by_origin[(ocol, orow, lvl)].get((ncol, nrow))
+                if _d is None or _d > _exec_b:
+                    ok = False
+                    break
         if ok:
             kept[(cc, rr)] = cost
     return kept
@@ -7697,6 +7968,54 @@ def build_squad_move_cell_map(
     if entry is None:
         return {}
 
+    # Mémoïsation intra-step. Le masque reconstruit cette carte des milliers de fois par épisode
+    # (pool BFS + érosion géodésique par-figurine au budget Advance = coût dominant) ; sans cache
+    # x5_debug passe de ~6 s/ép à ~100 s/ép. La CLÉ est un FINGERPRINT LU de l'état réel dont
+    # dépend la carte — PAS `_unit_move_version`. Une 1re version clé sur `_unit_move_version` a
+    # causé une régression masque⊆exécutable (§0.18) : un chemin d'écriture de position ne bumpe
+    # pas ce compteur (fenêtre de batch LoS / mutation directe), si bien qu'une carte cachée était
+    # servie alors que l'occupation avait changé → le masque offrait une cellule d'ancre déjà
+    # occupée → `execute_squad_move` levait « incohérence masque/exécution » sur un ADVANCE.
+    #
+    # Le fingerprint capture TOUT ce qui change la carte, en le LISANT directement (immunisé au
+    # bypass du compteur) :
+    #   - empreinte spatiale de TOUTES les unités (col/row/occupied_hexes) → occupation des autres
+    #     escouades ET positions ennemies (transit géodésique) ;
+    #   - bloc de CETTE escouade (figs vivantes col/row/level) → forme rigide + coût de descente ;
+    #   - régime de budget : `advance_roll`, appartenance à `units_took_to_skies` (malus TTS),
+    #     battle-shock de l'escouade (Desperate Escape traverse les ennemis) ; `phase` (le cache
+    #     enemy_adjacent est par-phase, stable intra-phase). Les murs et les toggles sont statiques.
+    # O(unités + figs) par appel — négligeable devant le BFS géodésique qu'il évite sur un hit.
+    _mc_fp = require_key(game_state, "models_cache")
+    _sm_fp = require_key(game_state, "squad_models")
+    _units_fp = tuple(sorted(
+        (
+            str(_sid), int(_e["col"]), int(_e["row"]),
+            tuple(sorted((int(_c), int(_r)) for _c, _r in _e["occupied_hexes"]))
+            if _e.get("occupied_hexes") else (),  # get allowed (single-hex -> ancre seule)
+        )
+        for _sid, _e in units_cache.items()
+    ))
+    _block_fp = tuple(sorted(
+        (str(_mid), int(_m["col"]), int(_m["row"]), int(_m.get("level", 0)))  # get allowed
+        for _mid in _sm_fp.get(str(squad_id), [])  # get allowed
+        if (_m := _mc_fp.get(str(_mid))) is not None
+    ))
+    _unit_obj_fp = get_unit_by_id(game_state, squad_id)
+    _bshock = bool(_unit_obj_fp.get("battle_shocked", False)) if _unit_obj_fp else False  # get allowed
+    _fp_key = (
+        advance_roll,
+        str(squad_id) in game_state.get("units_took_to_skies", set()),  # get allowed
+        str(game_state.get("phase", "")),  # get allowed
+        _bshock,
+        hash(_units_fp),
+        hash(_block_fp),
+    )
+    _cache = game_state.setdefault("_squad_move_pool_cache", {})
+    _hit = _cache.get(str(squad_id))
+    if _hit is not None and _hit[0] == _fp_key:
+        return _hit[1]
+
     if _squad_is_in_enemy_er(game_state, squad_id):
         budget = get_squad_move_budget(squad_id, game_state, "fall_back")
     elif advance_roll is None:
@@ -7714,14 +8033,18 @@ def build_squad_move_cell_map(
 
     # T6-g : le pool ci-dessus ne valide que l'ANCRE ; l'execution translate tout le BLOC.
     # Erosion par l'empreinte combinee AVANT projection -> toute cellule masquee=1 est
-    # executable par `build_rigid_plan` + `validate_move_plan`.
-    costs = erode_move_pool_by_squad_block(game_state, squad_id, costs)
+    # executable par `build_rigid_plan` + `validate_move_plan`. On passe `budget` (le budget
+    # EXACT auquel le pool a ete construit) : l'erosion du budget de chemin par-figurine en depend,
+    # et le jet d'Advance n'est pas encore dans `_squad_advance_rolls` au masque (cf. erode).
+    costs = erode_move_pool_by_squad_block(game_state, squad_id, costs, move_budget=budget)
 
     # Ancre = units_cache, la MEME source que `require_unit_position` d'ou part le pool : grille et
     # pool sont donc concentriques.
     anchor_col, anchor_row = int(entry["col"]), int(entry["row"])
     half_extent = grid_half_extent_subhex(game_state, squad_id)
-    return project_pool_to_grid(costs, anchor_col, anchor_row, half_extent)
+    result = project_pool_to_grid(costs, anchor_col, anchor_row, half_extent)
+    _cache[str(squad_id)] = (_fp_key, result)
+    return result
 
 
 def _squad_direction_move_legal(

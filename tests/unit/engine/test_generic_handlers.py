@@ -4,7 +4,7 @@ from engine.phase_handlers.generic_handlers import end_activation
 
 
 def test_end_activation_wait_adds_wait_log_with_position() -> None:
-    unit = {"id": "u1"}
+    unit = {"id": "u1", "player": 1}
     game_state = {
         "turn": 3,
         "phase": "MOVEMENT",
@@ -22,6 +22,7 @@ def test_end_activation_wait_adds_wait_log_with_position() -> None:
     assert wait_log["turn"] == 3
     assert wait_log["phase"] == "MOVEMENT"
     assert wait_log["unitId"] == "u1"
+    assert wait_log["player"] == 1
     assert wait_log["col"] == 7
     assert wait_log["row"] == 9
     assert "(7, 9) WAIT" in wait_log["message"]

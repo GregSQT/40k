@@ -50,9 +50,40 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
     stats = state.stats
     unit_id: Optional[str] = None  # may be set from unit_start or deploy lines
 
+    from ai.analyzer_perfig import parse_models_segment
+
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
             state.line_number += 1
+            # Segment per-figurine [MODELS:] : socles vivants de l'unité qui agit sur
+            # CETTE ligne. On le stocke dans current_line_models (positions_by_model garde
+            # l'état précédent pour les contrôles de move per-socle) puis on fusionne en fin
+            # de traitement de la ligne. Aliveness pilotée par ce segment (résurrection des
+            # unités faussement tuées par le modèle d'ancre 1-HP : cf. Class C engagement).
+            # Fusionner d'abord les socles de la LIGNE PRÉCÉDENTE dans l'état persistant :
+            # positions_by_model reflète alors tout jusqu'à la ligne N-1 (= positions
+            # d'ORIGINE per-socle pour le contrôle de move de la ligne N), tandis que
+            # current_line_models portera les positions de DESTINATION de la ligne N.
+            for _muid, _mmodels in state.current_line_models.items():
+                state.positions_by_model[_muid] = _mmodels
+            state.current_line_models = parse_models_segment(line) or {}
+            if state.current_line_models:
+                for _uid, _models in state.current_line_models.items():
+                    if not _models:
+                        continue
+                    # L'unité a des socles vivants sur le plateau -> elle est vivante.
+                    # Réparer l'incohérence unit_positions/unit_hp créée par une "mort"
+                    # d'ancre (HP_MAX squad = 1) alors que l'escouade a encore des figurines.
+                    if _uid in state.unit_player:
+                        if state.unit_hp.get(_uid, 0) <= 0:
+                            state.unit_hp[_uid] = len(_models)
+                            state.dead_units_current_episode.discard(_uid)
+                        # Restaurer l'ancre si elle a été purgée par la fausse mort d'ancre :
+                        # les handlers la resynchronisent ensuite depuis l'ancre loguée.
+                        if _uid not in state.unit_positions:
+                            _first_pos = next(iter(_models.values()))
+                            _position_cache_set(state.unit_positions, _uid, _first_pos[0], _first_pos[1])
+
             # Episode start
             if '=== EPISODE' in line and 'START ===' in line:
                 handle_episode_start(state, config, line)
@@ -176,6 +207,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 state.unit_move[unit_id] = unit_move_value * config.inches_to_subhex
                 state.positions_at_turn_start[unit_id] = (col, row)
                 state.unit_movement_history[unit_id] = [{"position": (col, row)}]
+                base_token_match = re.search(r'base=\w+/(?:\d+|\[[^\]]*\])', line)
+                if base_token_match:
+                    from ai.analyzer_perfig import parse_base_token
+                    state.unit_base[unit_id] = parse_base_token(base_token_match.group(0))
                 continue
 
             # Parse unit deployment positions (authoritative start positions)

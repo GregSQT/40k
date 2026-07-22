@@ -90,6 +90,7 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
                 "turn": game_state["turn"],
                 "phase": game_state["phase"],
                 "unitId": unit_id,
+                "player": require_key(unit, "player"),
                 "col": unit_col,
                 "row": unit_row,
                 "timestamp": "server_time",
@@ -312,7 +313,6 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         # DEBUG: Check if unit is ending activation without attacking when it should
         if arg3 == "PASS":
             from engine.game_utils import add_console_log, safe_print
-            from shared.data_validation import require_key
             attack_left = require_key(unit, "ATTACK_LEFT")
             if attack_left > 0:
                 # Unit is passing but has attacks left - check if adjacent to enemy

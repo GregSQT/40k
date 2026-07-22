@@ -10,7 +10,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 
 ---
 
-## 0. ÉTAT AU 2026-07-20 — À LIRE EN PREMIER
+## 0. ÉTAT AU 2026-07-22 — À LIRE EN PREMIER
 
 > **Cette section ne contient QUE ce qui est ouvert et actionnable.**
 > - Ce qui est résolu est en **§0hist — Historique résolu** : entrées intégrales, ancres
@@ -20,7 +20,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.23` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.28` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.27` le 2026-07-22).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -32,22 +32,28 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 
 | # | Entrée | Nature | Ordre proposé | Pourquoi cet ordre |
 |---|---|---|---|---|
-| **§0.14** | Re-mesure du run | non-régression §0.11 VALIDÉE, **score par matchup encore dû** | **1** | ✅ **Non-régression §0.11 validée le 2026-07-21 : 3 runs `x5_debug 500` indépendants, 3× 500/500, zéro crash intra-plan** (1500 ép. cumulés). Reste le **score par matchup interprétable** : exige un run long réel (10-30k ép., ~36 h) pour que l'agent **converge** (les runs 500/1k ne mesurent que la non-régression, pas un win-rate) — dépend du gain perf **§0.22**. |
-| ~~**§0.22**~~ | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **CLOS le 2026-07-21 — décision (B) STOP à L1+L_bbox** | — | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) livrés et commités** (`ff2293e0`, `6f268d38`) — gain ovale **1,49×**, round10 1,78×, pool strictement identique ; A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. **Reliquat NON poursuivi** (ratio gain/risque mauvais, mesuré) : BFS wavefront réfuté (plus lent à move 12), L2b runs NumPy réfuté (1,1× net + complexité), numba écarté (risque segfault sur run 36 h) — **levier de repli = numba encadré SI le run §0.14 reste trop long**. Détail complet → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§10, §11) ; leçon de méthode → §0bis. |
+| **§0.14** | Re-mesure du run | run lancé, **bloqué à l'éval du marker 2000** (cf. §0.27) | **2** | 🟠 **MAJ 2026-07-22.** Run `x5_new` (10k ép., 48 envs) lancé sur moteur+analyzer désormais fiables (§0.23–§0.26). **Le training a atteint l'épisode 2000 sans un seul crash** (le fix move §0.25/§0.26 tient), MAIS le garde-fou d'éval a **arrêté le run au 1er checkpoint** : 500 ép. d'éval « failed » sur **timeout de task** (cf. **§0.27**). Aucun win-rate produit. Prérequis levés depuis le 2026-07-21 : dépendance perf §0.22 non bloquante (le run tourne), analyzer fiabilisé (§0.24). **Nouveau bloqueur = §0.27.** |
+| **§0.27** | Blocage éval au checkpoint | 🔴 **OUVERT (2026-07-22)** — bloqueur actuel de §0.14 | **1** | À l'éval intermédiaire (`bot_eval_intermediate=100` ép./bot × 5 bots = 500), **un task a dépassé le timeout de 1 h** (`bot_eval_task_timeout_seconds=3600`, durée mesurée 3675 s) → pool avorté, 500 ép. marqués `failed` → `RuntimeError` strict (§0.7). **Diagnostic (mesuré, PAS un hang) :** le cap `max_turns×400=2000` pas/épisode existe (aucun hang infini possible) ; le modèle à 2000 ép. (à peine entraîné) produit des **parties dégénérées** atteignant ce cap, et le **coût par-pas du fix géodésique §0.25** (l'érosion « load-bearing » = le coût §0.22) rend ces épisodes trop longs. Sonde : **0 ép. d'éval terminé en 2 min** sur le modèle courant (vs 17 s/ép sur un autre modèle). Reco non tranchée : (1) distinguer timeout vs crash dans le garde-fou (ne pas hard-stop sur lenteur) + (2) réduire l'éval intermédiaire (100→~20), `bot_eval_final=100` gardé. Décision perf géodésique (option lourde) en réserve. |
+| **§0.24** | Analyzer réaligné per-figurine | 🟢 **RÉSOLU (2026-07-22)** ; résiduel FP documenté | — | Détail intégral → **§0hist §0.24**. Résiduel non bloquant : suivi HP/mort de la **cible** pas encore per-figurine → **FP « Fight a dead unit »** (174 sur log réf, **prouvé FP** : Unit 104 tracée vivante) + off-by-1 fight/advance. |
+| ~~**§0.23**~~ | Logger per-figurine `[MODELS:]` + `PNone` | ✅ **CLOS (2026-07-22)** | — | Détail → **§0hist §0.23**. |
+| ~~**§0.25**~~ | Bug moteur : budget move per-fig en ligne droite | ✅ **CORRIGÉ (2026-07-22)** — géodésique | — | Détail → **§0hist §0.25**. Conséquence perf → **§0.27**. |
+| ~~**§0.26**~~ | Régression cache masque (clé `_unit_move_version` contournée) | ✅ **CORRIGÉ (2026-07-22)** — clé fingerprint | — | Détail → **§0hist §0.26**. |
+| ~~**§0.22**~~ | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **CLOS le 2026-07-21 — décision (B) STOP à L1+L_bbox** | — | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) livrés et commités** (`ff2293e0`, `6f268d38`) — gain ovale **1,49×**, round10 1,78×, pool strictement identique ; A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. **Reliquat NON poursuivi** (ratio gain/risque mauvais, mesuré) : BFS wavefront réfuté (plus lent à move 12), L2b runs NumPy réfuté (1,1× net + complexité), numba écarté (risque segfault sur run 36 h). ⚠️ **MAJ 2026-07-22 : ce coût perf est désormais INCONTOURNABLE** — le fix de conformité move §0.25 REQUIERT une érosion géodésique par-figurine, exactement le coût que §0.22 combattait. Il refait surface en §0.27. Détail complet → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§10, §11) ; leçon de méthode → §0bis. |
 
-**Ne reste ouvert que §0.14** — le run long réel pour un **score par matchup** interprétable.
-**§0.22 est CLOS** (décision B, L1+L_bbox livrés) : la dépendance perf est levée, le run se lance avec
-le gain acquis (si sa durée reste prohibitive en pratique, le repli est numba encadré, cf. §0.22 /
-`V11_move_build_acceleration.md §10`). (Les dépendances historiques §0.12 → §0.14 et §0.18 → §0.14
-sont **levées** : §0.12 et §0.18 sont livrés.) Les entrées résolues §0.15–§0.19, §0.21, **§0.22** sont
-**descendues en §0hist** (§0.16 aussi en §0ter pour ses notes post-implémentation).
+**Restent ouverts : §0.27 (bloqueur, à traiter en premier) puis §0.14 (qui en dépend).**
+La nuit du 2026-07-21→22 a livré §0.23–§0.26 (logger+analyzer per-figurine, bug moteur move + régression cache),
+qui **débloquent la mesurabilité** (analyzer fiable) mais font émerger §0.27 (coût géodésique en éval).
+**§0.22 est CLOS** mais son coût est réactivé par §0.25 (cf. la MAJ dans sa ligne). (Les dépendances
+historiques §0.12 → §0.14 et §0.18 → §0.14 sont **levées** : §0.12 et §0.18 sont livrés.) Les entrées
+résolues §0.15–§0.19, §0.21, **§0.22**, **§0.23**, **§0.24**, **§0.25**, **§0.26** sont **descendues en
+§0hist** (§0.16 aussi en §0ter pour ses notes post-implémentation).
 
 ⚠️ **Avant de vous appuyer sur une affirmation de ce document, lire §0bis** — en particulier la
 réserve de méthode sur le document lui-même (T1→T5 et section 9 n'ont **pas** été revérifiés
 ligne à ligne) et la règle de périmètre `ArmageddonAgent`.
 
 
-### 0.14 Re-mesure du run — 🟢 NON-RÉGRESSION §0.11 VALIDÉE (3 runs le 2026-07-21) ; score interprétable encore dû
+### 0.14 Re-mesure du run — 🟠 RUN LANCÉ LE 2026-07-22, BLOQUÉ À L'ÉVAL DU MARKER 2000 (cf. §0.27) ; score encore dû
 
 > Part **ouverte** de §0.13 (run x5_debug 100 épisodes). Le run et le fix de l'évaluation
 > finale sont résolus et documentés en **§0.13**.
@@ -132,6 +138,75 @@ ni du reward ni de l'observation. Le score, lui, est à jeter deux fois plutôt 
 produire un win-rate **par roster** interprétable au sens de §10.6. ⚠️ Cf. **§0.15** : les
 rosters `training` et `holdout_regular` étant identiques, ce win-rate mesurera la robustesse à
 l'**adversaire**, jamais au roster.
+
+**🟠 MAJ 2026-07-22 — le run réel a ENFIN été lancé, et il a franchi la non-régression mais s'est
+arrêté à l'éval.** Commande exacte : `python3 ai/train.py --agent ArmageddonAgent --scenario bot
+--new --training-config x5_new` (10k ép., 48 envs, `bot_eval_final=100`), lancée après le
+réalignement complet de l'instrument (§0.23 logger per-figurine, §0.24 analyzer per-figurine) et la
+correction d'un **vrai bug moteur de move** découvert par l'analyzer fiabilisé (§0.25 budget
+ligne-droite → géodésique ; §0.26 régression cache). **Le training a atteint l'épisode 2000 (20 %)
+sans un seul crash `incohérence masque/exécution`** en ~3 h 40 — la conformité move et la
+non-régression tiennent sur un vrai run 48-envs. **Mais** le premier checkpoint d'évaluation (marker
+2000) a déclenché le garde-fou strict d'éval : **500 épisodes d'éval `failed` sur timeout de task**
+→ arrêt. **Aucun win-rate n'a donc été produit.** Le score par matchup reste dû, désormais bloqué par
+**§0.27** (et non plus par la perf du pool §0.22, ni par un défaut d'instrument). ⚠️ Cette entrée
+confirme une fois de plus la leçon §0bis « un run vert ne prouve rien » : le fix move §0.25 avait
+passé un `--step` de 4 épisodes puis **crashé en 1 min** sur un vrai run 48-envs (cf. §0.26) — c'est
+le run multi-env, pas le smoke, qui a validé.
+
+### 0.27 Blocage à l'éval du checkpoint — task d'éval en timeout (parties dégénérées × coût géodésique) — 🔴 OUVERT (2026-07-22)
+
+> **Bloqueur ACTUEL de §0.14.** Ce n'est ni la perf du pool (§0.22), ni un défaut d'instrument
+> (§0.24), ni un hang infini : c'est le **coût par-pas du fix move géodésique (§0.25)** appliqué à des
+> parties longues d'un modèle encore nul, qui fait dépasser le timeout d'un task d'éval.
+
+**Reproduction (le run §0.14 lui-même).** À l'épisode 2000, le callback lance l'éval intermédiaire
+(`bot_eval_freq=2000`, `bot_eval_intermediate=100` ép./bot × 5 bots pondérés = **500 ép.**). Message
+exact d'arrêt :
+```
+RuntimeError: Bot evaluation failed episodes detected: marker=2000, failed_episodes=500,
+duration_seconds=3675.8. Training stops immediately to enforce strict evaluation reliability.
+```
+`training_callbacks.py:2119` (`_apply_eval_results`) lève dès `total_failed_episodes > 0` (garde-fou
+strict de §0.7 : « aucune mesure §10.6 tant qu'un bug plante des épisodes »).
+
+**Mécanisme (mesuré, PAS supposé).**
+- Un **task d'éval** = un bot × N épisodes joués **séquentiellement dans un seul env** (sous-process).
+  Le collecteur parallèle (`bot_evaluation.py:655-737`) applique un **timeout PAR TASK**
+  (`bot_eval_task_timeout_seconds=3600` pour la phase `x5_new`) ; si UN task le dépasse, **tout le pool
+  est force-terminé et tous les épisodes pending sont marqués `failed`** (`:716`, `:719-736`). D'où
+  `failed_episodes=500` (l'éval a à peine démarré) et `duration≈3600`.
+- **Ce n'est PAS un hang infini** : chaque épisode d'éval est borné par
+  `max_steps_per_episode = get_max_turns()×400 = 5×400 = 2000` pas (`bot_evaluation.py:1072`, boucle
+  `while not done and step_count < max_steps_per_episode` `:555`). Un épisode s'arrête au cap.
+- **C'est de la lenteur** : le modèle à 2000 ép. est à peine entraîné → il produit des **parties
+  dégénérées** qui atteignent le cap 2000 pas, et le fix move **géodésique (§0.25)** rend chaque pas
+  coûteux (érosion de pool par-figurine, « load-bearing » cf. §0.25). Un task de 100 parties longues
+  dépasse l'heure.
+
+**Preuve chiffrée.** Sonde d'éval contrôlée sur le modèle courant (marker ≈2000,
+`--eval --training-config x5_new --scenario <holdout> --test-episodes 15`) : **0 épisode d'éval
+terminé en 2 min** (`0/90 [00:00]`). À comparer aux **17 s/ép** mesurés sur un autre modèle plus tôt
+(12 ép. d'éval en 3 min 21 pendant un `--step`). 100 ép. × ce régime dépasse `bot_eval_task_timeout_seconds`.
+
+**Tension de fond.** Le garde-fou traite un **timeout (lenteur)** comme un **crash (bug)** — or ici il
+n'y a aucun bug d'épisode. Et la lenteur = le coût géodésique, i.e. exactement le coût **§0.22** que
+l'utilisateur a clos, désormais incontournable puisque la conformité move (§0.25) l'exige.
+
+**Options identifiées (NON tranchées — décision utilisateur, cf. perf §0.22).**
+1. **Distinguer timeout vs crash** dans le garde-fou `_apply_eval_results` : hard-stop uniquement sur
+   **exception** d'épisode (vrai bug), pas sur **timeout** (lenteur). Le run continuerait ; les évals
+   plus tardives (modèle meilleur → parties courtes → éval rapide) passeraient. Hypothèse à confirmer :
+   l'éval s'accélère quand le modèle s'améliore.
+2. **Réduire l'éval intermédiaire** (`bot_eval_intermediate` 100 → ~20) : c'est un signal de
+   monitoring, pas la mesure §10.6 ; garder `bot_eval_final=100`. ⚠️ mais l'éval FINALE (100 ép.)
+   heurtera le même mur si le modèle final produit encore des parties longues.
+3. **Accélérer le géodésique** (vectorisation NumPy du champ géodésique, cf. `V11_move_build_acceleration.md`) —
+   **rouvre §0.22** (option lourde, en réserve).
+4. Baisser le cap `max_turns×400` (change la sémantique de partie — à éviter sans raison règles).
+
+Reco de départ (ne rouvre pas §0.22) : (1) + (2). ⚠️ Prérequis : vérifier sur un marker plus avancé
+que l'éval s'accélère réellement, sinon (3) devient nécessaire.
 
 ### 0.22 Coût du move pool — `MOVE_POOL_BUILD` = 95,6 % du training — 🟠 OUVERT (cardinalités mesurées + levier tranché, 2026-07-21)
 
@@ -285,6 +360,49 @@ plan §8, et un prototype hors-prod les a toutes attrapées avant tout code de p
 garantissait qu'aucune régression métier ne pouvait passer ; le bench a garanti qu'aucune complexité
 inutile n'a été livrée. Seuls **L1 + L_bbox** (gain sûr, sans dépendance) ont été retenus ; décision
 **(B) STOP**. Détail complet → `V11_move_build_acceleration.md §10`.
+
+**« Un run vert ne prouve rien » — DEUX confirmations de plus la nuit du 2026-07-22 (§0.25/§0.26).**
+Le motif §0.11/§0.18 s'est répété deux fois en une nuit : (1) le fix move §0.25 a passé un `--step` de
+**4 épisodes mono-env**, puis a **crashé en ~1 min** sur un vrai run 48-envs (`incohérence
+masque/exécution`, §0.26) — le crash dépend de la trajectoire, qu'un smoke court ne visite pas ;
+(2) c'est un **test déterministe reproduisant la condition exacte du crash** (occupation sans bump de
+version → cache périmé) qui a verrouillé le fix, pas un run vert. **Règle renforcée : pour un invariant
+(masque⊆exécutable, terminaison, budget), la preuve est un TEST QUI REPRODUIT L'ÉCHEC, pas un run qui
+passe.** Le vrai run multi-env reste le juge final (le `--step` mono-env est structurellement aveugle
+aux races de cache et aux états rares). Corollaire opérationnel : ne JAMAIS relancer un run coûteux
+(19 h) sur la foi d'un smoke ; passer par un run multi-env qui franchit la zone de crash connue.
+
+**Vérifier le PÉRIMÈTRE d'un travail délégué avant de l'accepter (2026-07-22).** Un agent chargé de
+corriger l'analyzer (puis un autre le moteur) a livré, **sans le déclarer**, une refonte hors-périmètre
+de `services/api_server.py` (**366 lignes**, −265/+104) + un `defaults.agent` dans `config/config.json`
+— non lu par le chemin d'entraînement, non demandé. Détecté par `git status` avant tout commit et
+**révoqué** (`git checkout -- config/config.json services/api_server.py`). **Ne jamais faire confiance
+au « je n'ai touché que X » d'un agent : diffuser `git status`/`git diff` sur l'ARBRE ENTIER, pas sur
+les fichiers annoncés.** Les agents restaurent aussi leurs propres backups de modèle → vérifier le md5
+du `.zip` canonique (il n'a PAS à changer hors run `--new` voulu).
+
+**Mesurer/lire AVANT d'affirmer une root cause (2026-07-22).** Deux affirmations trop rapides corrigées
+la même nuit : (a) les 5508 « erreurs » analyzer qualifiées de « faux positifs » **avant de les avoir
+lues** — en réalité un mélange de vrais bugs analyzer (§0.24) ET d'un vrai bug moteur (§0.25) ; (b) le
+crash §0.26 attribué à « l'érosion d'occupation » alors que la root cause était le **cache** (trouvée
+en instrumentant `build_squad_move_cell_map`, pas en devinant). **Un profil/compteur agrégé ou une
+analogie ne DÉSIGNENT pas la cause : instrumenter le régime réel, puis conclure.** (Même leçon que la
+perf §0.22 ci-dessus, re-vérifiée côté correction de bug.)
+
+**Fiabiliser l'INSTRUMENT avant de l'utiliser comme juge (2026-07-22, §0.23/§0.24).** L'analyzer était
+l'unique validateur du training mais restait pré-squad (ancre) → il ne pouvait ni prouver la
+conformité, ni être cru quand il criait. Tant qu'un instrument de validation n'est pas réaligné sur la
+V11 (per-figurine) ET prouvé sans faux positif sur les vraies unités, **toute mesure produite avec est
+suspecte dans les deux sens** (faux positifs qui masquent + potentiels vrais bugs non vus). Le
+réalignement a **payé immédiatement** : l'analyzer fiabilisé a fait émerger un vrai bug moteur (§0.25)
+invisible jusque-là.
+
+**Une contrainte de conformité peut être INCOMPATIBLE avec une décision de perf close (2026-07-22).**
+§0.22 a été clos « STOP » pour ne pas payer le BFS par-socle. Mais la conformité move (§0.25) l'EXIGE
+(érosion géodésique par-figurine) : la décision perf est **rouverte de facto par une exigence règles**,
+pas par un choix d'optimisation. Quand une entrée est close sur un arbitrage coût/gain, vérifier qu'une
+exigence de correction ne la rend pas caduque avant de s'appuyer sur sa clôture. Conséquence vive :
+§0.27 (éval trop lente).
 
 **Une invariance est CONDITIONNELLE à son état initial (§0.1)**
 
@@ -547,6 +665,169 @@ AVANT d'y lancer un entraînement.
 > des affirmations que leurs propres auteurs ont ensuite corrigées sur place. Ne pas s'appuyer
 > sur l'une d'elles sans la confronter au code.
 
+
+### 0.23 Logger per-figurine `[MODELS:]` + fix `PNone` — ✅ CLOS (2026-07-22)
+
+**Constat.** Le step logger (`ai/step_logger.py`) et l'analyzer raisonnaient en **ancre d'escouade**
+(« une unité = un point »), modèle pré-squad. Un step.log de vrai run (rosters SM/Orks) montrait une
+**seule ligne par escouade à l'ancre** (ex. `Unit 1(172,122) ADVANCED from … to …`) alors qu'une
+escouade compte jusqu'à 12 figurines aux positions distinctes → l'analyzer, en aval, faisait des
+BFS/distance/adjacence/LoS **ancre-à-ancre** = faux positifs en masse (cf. §0.24). Bug distinct
+constaté sur le même log : des lignes `E1 T1 **PNone** SHOOT : … WAIT` (champ joueur = `None`).
+
+**T0 — fix `PNone` (root cause).** Le payload WAIT (`engine/phase_handlers/generic_handlers.py`,
+`end_activation`, branche `arg1=="WAIT"`) **n'incluait pas la clé `"player"`** (contrairement au
+payload move `movement_handlers.py:3929`) → au flush, `raw_log.get("player")` renvoyait `None` →
+rendu littéral `PNone`, et le regex maître de l'analyzer (`P(\d+)`) **rejetait ces lignes**
+silencieusement (WAIT jamais comptés). Correctif : ajout de `"player": require_key(unit, "player")`
+au payload WAIT. Au passage, suppression d'un **ré-import local** `from shared.data_validation import
+require_key` (dans la même fonction) qui rendait `require_key` variable locale → `UnboundLocalError`
+sur la ligne ajoutée (piège Python : un import local dans une fonction masque le symbole module-level
+sur TOUTE la fonction). Test `tests/unit/engine/test_generic_handlers.py` mis au contrat (`unit` porte
+`player`, le wait-log l'expose) ; 32 tests logger verts.
+
+**T1 — segment per-figurine, injection unique dans le flush.** Le message d'action vu par l'analyzer
+en **training** n'est PAS construit par les handlers moteur mais par `ai/step_logger.py`
+(`_format_replay_style_message`), alimenté par le flush `w40k_core.py._flush_squad_action_logs_to_step_logger`
+via `_build_step_log_details` / `_build_shot_details`. Le vrai appender du move training est
+`w40k_core.py:5266` (après `execute_squad_move`), à l'ancre seule (aucune donnée per-figurine). Plutôt
+que plomber ~12 sites, **injection centralisée** : nouveau helper `_models_segment_for_unit(unit_id)`
+(lit `units_cache[unit_id]["occupied_hexes_by_model"]`, source de vérité per-socle resynchronisée par
+`commit_move`), appelé dans `_build_step_log_details` ET `_build_shot_details`, qui posent
+`details["models_segment"]` ; `step_logger.log_action` **appende ce segment une seule fois** après le
+formatage du message. Format : `[MODELS: <unit>#<idx>@(col,row) …]` en fin de message (avant
+`[SUCCESS]`), **rétro-compatible** (l'ancre en tête reste ; `re.match` prefix des parseurs existants +
+`replay_converter.py` non cassés). Helpers `format_models_segment` / `models_segment_from_move_details`
+/ `models_segment_from_cache` ajoutés à `engine/action_log_utils.py`. Le per-figurine est une INFO de
+log (jamais un chemin de règle) → segment vide si l'unité n'a pas de cache exploitable, pas de crash.
+
+**Vérifié sur log frais** (`--step` sur ArmageddonAgent) : **100 % des lignes d'action portent
+`[MODELS:]`** (2163 puis 2306 lignes selon le run), `PNone = 0`, les escouades apparaissent enfin
+telles quelles (unité 1 = 12 socles `1#0`…`1#11`, socles morts absents de la liste). Fichiers :
+`engine/phase_handlers/generic_handlers.py`, `engine/action_log_utils.py`, `engine/w40k_core.py`,
+`ai/step_logger.py`, `tests/unit/engine/test_generic_handlers.py`.
+
+### 0.24 Analyzer réaligné per-figurine (parsing/comptage/géométrie/données) — ✅ RÉSOLU (2026-07-22) ; résiduel FP documenté
+
+**Motivation.** L'analyzer (`ai/analyzer.py` ~184 Ko + `ai/analyzer_phases/*`, `ai/analyzer_core.py`)
+est l'UNIQUE instrument de validation du training (CLAUDE.md : « --step + analyzer.py + replay »).
+Tant qu'il raisonne à l'ancre, il ne peut ni détecter un vrai bug règles, ni être cru quand il en
+signale — il était donc **impossible d'affirmer que le training n'apprenait pas des coups illégaux**.
+Baseline sur un log frais per-figurine (`step_fresh_ref.log`, 2545 lignes, analyzer encore ancre) :
+**1809 « erreurs »**, dont advance path blocked 297, fight non-adjacent 442, attacks over CC_NB 146,
+shots over RNG_NB 85, advance>roll 61, + 367 « parsing errors ».
+
+**Trois classes de défaut (les 3 corrigées).**
+- **Classe A — géométrie ancre.** BFS `_bfs_shortest_path_length` (point-à-point), move/advance path
+  blocked, distance>roll, out_of_range/adjacent, fight non-adjacent, LoS — tous ancre-à-ancre.
+  Corrigé en **per-socle** : nouveau module `ai/analyzer_perfig.py` (parse `[MODELS:]`, empreintes de
+  socle via helpers moteur `compute_occupied_hexes`/`min_distance_between_sets`, distance bord-à-bord
+  escouade↔escouade) ; état `positions_by_model` maintenu **frame-à-frame** dans `analyzer_core.py`
+  (`ai/analyzer_state.py` : champs `positions_by_model`, `current_line_models`, `unit_base`) ; BFS de
+  move/advance par-socle (origine = ligne N-1, dest = `[MODELS:]` de la ligne N), portée/adjacence
+  bord-à-bord, gestion **FLY** (les FLY franchissent murs/figurines → exclus du contournement,
+  `move_handler.py:211-213`, `shoot_handler.py:873`).
+- **Classe B — comptage.** `Shots over RNG_NB` / `Attacks over CC_NB` comparaient les jets **agrégés de
+  toute l'escouade** au NB d'**un seul** modèle → dépassement mécanique. Corrigé : plafond ×(nb de
+  socles vivants sur la ligne `[MODELS:]`) ; profil composite `A / B` → NB = max des composantes.
+- **Classe C — données manquantes** (les « 367 parsing errors » n'en étaient pas) :
+  `Weapon 'Shoota / Kustom Shoota' missing RNG_NB for Boyz` (×36), `Crozius Arcanum missing CC_NB for
+  VanguardVeteranSquadJumpPack` (×30), `Engagement check missing unit data for unit_id: 1` (×47).
+  Corrigé : `ai/analyzer_config.py` agrège les cartes arme→NB/portée sur **tous** les model-types
+  (escouades hétérogènes) ; résolveur d'arme avec split `" / "` ; résurrection dans `analyzer_core.py`
+  des unités faussement tuées par le modèle d'ancre 1-HP.
+
+**DEUX vrais bugs analyzer trouvés et corrigés** (audit indépendant contre la config moteur — ce
+sont eux qui supprimaient ~503 FP, PAS de la permissivité) :
+- `_get_engagement_zone_for_analyzer` lisait **2 (pouces)** au lieu de **10 subhex**
+  (`engagement_zone=2` pouces × `inches_to_subhex=5`, scalé au chargement `w40k_core` ; le moteur
+  `get_engagement_zone` renvoie 10). C'était la root cause des 442 « fight from non-adjacent ».
+- Budget **Advance** = jet seul au lieu de **MOVE + jet** (règle 09.02). Root cause des 61 « advance>roll ».
+
+**Résultat (log réf, vérifié indépendamment)** : **1809 → 319**, parsing/shots/attacks/advance-dist/tirs
+= **0**, path-blocked réduit (le résiduel = **vrai bug moteur §0.25**), fight non-adjacent 442 → 12
+(FP off-by-1). `pytest -k analyzer` : **39 passed** (28 existants + 11 nouveaux dont
+`tests/unit/ai/test_analyzer_perfig.py`).
+
+**⚠️ Résiduel NON traité (non bloquant).** Le suivi **HP/mort de la CIBLE** n'est pas encore
+per-figurine (les lignes FIGHT ne relistent que l'attaquant dans `[MODELS:]`) → **FP « Fight a dead
+unit »** : 174 sur le log réf, **prouvés FP** (Unit 104 tracée dans l'épisode 2 : 6 socles à T2,
+riposte à T4, combat encore à T5 = bien vivante, pas un mort frappé). Idem « Shoot at dead unit » (9)
+et les off-by-1 fight (12) / advance (1). ➜ Pour un analyzer à **0** propre, il reste à porter le
+suivi HP/mort et l'empreinte cible en per-figurine (émettre aussi les socles du défenseur). C'est de
+la **sur-détection** de l'analyzer (il sur-signale), **jamais** une triche moteur.
+
+### 0.25 Bug moteur : budget de move per-figurine mesuré en ligne droite, pas en trajet contournant les murs — ✅ CORRIGÉ (2026-07-22, géodésique)
+
+**Découverte.** Une fois l'analyzer fiable (§0.24), son résiduel « path blocked » sur unités
+**NON-FLY** (Gretchin/Intercessor/Boyz, FLY correctement exclus) s'est avéré être un **VRAI bug
+moteur**, confirmé par lecture de code (pas inféré) :
+- `explain_move_plan_rejection` (`engine/phase_handlers/shared_utils.py:3473`) validait le budget
+  par-figurine avec `dist = calculate_hex_distance(origine, dest)` = **distance à vol d'oiseau** ; les
+  murs ne bloquaient que la **case d'arrivée** (`blocked_by_level`), jamais le trajet.
+- Or le modèle de mouvement du moteur traite les murs comme **infranchissables en transit** : le pool
+  de move réactif fait un BFS qui saute les murs (`shared_utils.py:2111` `if neighbor in wall_set:
+  continue`, distance = pas BFS).
+- `build_rigid_plan` translate tout le bloc du **même vecteur cube** → chaque figurine a la même
+  distance à vol d'oiseau que l'ancre (le check ligne-droite passe **toujours**), mais une sœur
+  derrière un mur a un trajet légal (contournement) qui **dépasse le budget**. Dette connue T6-g
+  (« pool BFS validé sur l'ancre, pas le bloc »), désormais **chiffrée : 111 figurine-moves illégaux /
+  3 épisodes** sur le log réf.
+
+**Décision utilisateur** : fix **validation-only** (léger) plutôt que refonte du pool, run **après** le fix.
+
+**Fix livré (par un agent, root cause exacte + harnais).** Root cause raffinée : le pool/masque
+validait déjà le BLOC pour les prédicats de CELLULE (murs/occupation/ER via
+`erode_move_pool_by_squad_block`, T6-g) mais **pas pour le budget** (supposé « invariant par
+translation rigide » — faux pour la distance de CHEMIN). Changements dans
+`engine/phase_handlers/shared_utils.py` : helpers `build_move_transit_blocked` (obstacles de transit,
+parité exacte avec le pool) + `geodesic_move_reach` (BFS géodésique borné au budget) ; le check budget
+par-figurine (validation + exécution) passe de la ligne droite au **BFS géodésique** pour les
+non-FLY (FLY et euclidien PvP conservés) ; **érosion** du pool étendue au même prédicat géodésique
+(sinon l'invariant masque⊆exécutable casse : le masque offrirait une ancre que la validation rejette).
+
+**Perf — nuance importante.** Valider UN plan (une escouade, BFS borné) est peu coûteux ; c'est
+l'**érosion géodésique du pool** (par-figurine sur les cellules du masque) qui est chère = exactement
+le coût **§0.22**. L'agent l'a signalée « **load-bearing** » (la désactiver `GEO_OFF` crashe
+immédiatement, validation et érosion sont couplées). En training 48-envs elle est **net-gagnante**
+grâce à une mémoïsation (cf. §0.26). **Mais elle refait surface en éval mono-env → §0.27.**
+
+**Validé** (après le correctif de régression §0.26) : path-blocked **111 → ~1** (off-by-1 FP
+analyzer : le BFS analyzer bloque aussi les figurines AMIES en transit, que le moteur traverse via
+`can_move_through_friendly_model=true` — c'est l'analyzer qui est légèrement trop strict, pas le
+moteur) ; tests `tests/unit/engine/test_move_budget_geodesic.py` (8) + `test_move_pool_block_erosion`
+(6) + `test_move_mask_is_executable` verts ; **run réel 48-envs franchit 2000 ép. sans crash**.
+
+### 0.26 Régression `incohérence masque/exécution` sur advance (cache de masque périmé) — ✅ CORRIGÉ (2026-07-22, clé fingerprint)
+
+**Symptôme.** Le premier vrai run après le fix §0.25 a **crashé en ~1 min** (rollout 48-envs) :
+```
+ValueError: execute_squad_move a échoué : squad=4 type=advance dest=(163,204) —
+figurine 4#0 en (163,204) sur cellule interdite : occupation d'une autre escouade
+(incohérence masque/exécution)   [w40k_core.py:5268]
+```
+Le `--step` de 4 épisodes (mono-env) du fix §0.25 **n'avait rien vu** — crash trajectoire-dépendant
+(re-cf. leçon §0bis « un run vert ne prouve rien », piège §0.18).
+
+**Root cause (PAS l'érosion, contrairement à l'hypothèse initiale).** La **mémoïsation** ajoutée au
+fix §0.25 pour la perf (`build_squad_move_cell_map`, clée sur le compteur `_unit_move_version`) a un
+**bypass** : certaines écritures d'occupation (fenêtre de batch LoS / écriture directe) ne **bumpent
+pas** ce compteur → une carte de masque **périmée** est servie → une cellule désormais occupée par une
+autre escouade est encore offerte comme destination d'advance → `execute_squad_move` lève l'invariant.
+Le pool à froid, lui, excluait toujours les cellules occupées : le bug était **purement le cache**.
+
+**Fix.** Clé de cache = **fingerprint LU de l'état réel** (positions+empreintes de toutes les unités =
+occupation+ennemis, bloc de l'escouade, régime de budget), **immunisé au bypass du compteur**. Sûr par
+construction.
+
+**Harnais (leçon §0.18 appliquée : preuve déterministe > run vert).** Test
+`test_cell_map_cache_invalidates_on_occupation_change_without_version_bump` **reproduit
+déterministiquement** la condition exacte du crash (occuper une cellule offerte SANS bumper le
+compteur, redemander la carte) : l'ancien cache servirait le périmé, le nouveau s'invalide. Test
+`test_advance_block_overlapping_another_squad_is_eroded_not_crashed` ajouté. **Vérif indépendante par
+l'appelant** : tous les tests moteur verts, `--step` 0 crash, et surtout **le vrai run 48-envs a
+franchi la zone de crash (épisode ~1 → 2000) sans une seule `incohérence masque`** avant d'être arrêté
+par §0.27. Fichiers : `engine/phase_handlers/shared_utils.py` + `test_move_budget_geodesic.py`.
 
 ### 0.-1 🟢 PÉRIMÈTRE ET BASELINE (2026-07-19 soir) — LIRE AVANT TOUT
 
