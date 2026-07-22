@@ -59,6 +59,10 @@ interface ReplayAction {
   advance_roll?: number;
   // Rule choice fields
   selected_rule_name?: string;
+  // Positions per-figurine [MODELS:] de l'unite qui agit (mid "unit#idx" -> [col,row]).
+  models?: Record<string, [number, number]>;
+  // Positions per-figurine [TARGET_MODELS:] des survivants de la cible post-pertes (tir/combat).
+  target_models?: Record<string, [number, number]>;
 }
 
 interface PrimaryObjectiveRule {
@@ -143,6 +147,8 @@ interface ReplayEpisodeDuringParsing {
   >;
   initial_positions: Record<number, { col: number; row: number }>;
   first_seen_positions: Record<number, { col: number; row: number }>;
+  // Positions per-figurine de deploiement (segment [MODELS:] des lignes "Starting position").
+  initial_models: Record<number, Record<string, [number, number]>>;
   deployed_unit_ids: Set<number>;
   walls: Array<{ col: number; row: number }>;
   objectives: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>;
@@ -195,6 +201,35 @@ export function parse_log_file_from_text(text: string): ReplayData {
   };
   const episodes: ReplayEpisodeDuringParsing[] = [];
   let currentEpisode: ReplayEpisodeDuringParsing | null = null;
+
+  // Extrait un segment per-figurine "[LABEL: unit#idx@(col,row) ...]" -> { "unit#idx": [col,row] }.
+  // LABEL = "MODELS" (unite qui agit) ou "TARGET_MODELS" (survivants cible post-pertes). Retourne
+  // null si absent. Miroir du parseur moteur (ai/analyzer_perfig.parse_models_segment).
+  const modelTokenRe = /(\S+?#\S*?)@\((-?\d+),\s*(-?\d+)\)/g;
+  const extractModelsSegment = (
+    text: string,
+    label: string
+  ): Record<string, [number, number]> | null => {
+    const seg = text.match(new RegExp("\\[" + label + ":\\s*([^\\]]+)\\]"));
+    if (!seg) return null;
+    const out: Record<string, [number, number]> = {};
+    modelTokenRe.lastIndex = 0;
+    let tok: RegExpExecArray | null;
+    while ((tok = modelTokenRe.exec(seg[1])) !== null) {
+      out[tok[1]] = [parseInt(tok[2], 10), parseInt(tok[3], 10)];
+    }
+    return Object.keys(out).length > 0 ? out : null;
+  };
+
+  // Segments per-figurine de la ligne courante, attaches a l'action qu'elle produit via pushAction.
+  let lineModels: Record<string, [number, number]> | null = null;
+  let lineTargetModels: Record<string, [number, number]> | null = null;
+  const pushAction = (action: ReplayAction): void => {
+    if (lineModels) action.models = lineModels;
+    if (lineTargetModels) action.target_models = lineTargetModels;
+    currentEpisode!.actions.push(action);
+  };
+
   const syncKnownUnitPosition = (
     episode: ReplayEpisodeDuringParsing,
     unitId: number,
@@ -216,6 +251,11 @@ export function parse_log_file_from_text(text: string): ReplayData {
   for (const line of lines) {
     const trimmed = line.trim();
 
+    // Segments per-figurine de CETTE ligne (reinitialises a chaque ligne -> aucun report d'une
+    // ligne a l'autre). Attaches a l'action produite par la ligne via pushAction.
+    lineModels = extractModelsSegment(trimmed, "MODELS");
+    lineTargetModels = extractModelsSegment(trimmed, "TARGET_MODELS");
+
     // Episode start - matches both "=== EPISODE START ===" and "=== EPISODE 1 START ==="
     if (trimmed.includes("=== EPISODE") && trimmed.includes("START ===")) {
       if (currentEpisode) {
@@ -227,6 +267,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
         units: {},
         initial_positions: {},
         first_seen_positions: {},
+        initial_models: {},
         deployed_unit_ids: new Set<number>(),
         final_result: null,
         win_method: null,
@@ -368,6 +409,10 @@ export function parse_log_file_from_text(text: string): ReplayData {
         ...(parsedBaseSize !== undefined ? { BASE_SIZE: parsedBaseSize } : {}),
       };
       currentEpisode.initial_positions[unitId] = { col, row };
+      // Positions per-figurine de deploiement (segment [MODELS:] de la ligne Starting position).
+      if (lineModels) {
+        currentEpisode.initial_models[unitId] = lineModels;
+      }
       continue;
     }
 
@@ -385,7 +430,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const toCol = parseInt(deployMatch[9], 10);
       const toRow = parseInt(deployMatch[10], 10);
 
-      currentEpisode.actions.push({
+      pushAction({
         type: "deploy",
         timestamp,
         turn,
@@ -435,7 +480,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
           fromRow = currentEpisode.units[unitId].row;
         }
 
-        currentEpisode.actions.push({
+        pushAction({
           type: isReactiveMove ? "reactive_move" : "move",
           timestamp,
           turn,
@@ -452,7 +497,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
           currentEpisode.units[unitId].row = endRow;
         }
       } else if (actionType === "WAIT") {
-        currentEpisode.actions.push({
+        pushAction({
           type: "move_wait",
           timestamp,
           turn,
@@ -476,7 +521,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const unitCol = parseInt(hazardousResultMatch[5], 10);
       const unitRow = parseInt(hazardousResultMatch[6], 10);
       const outcome = hazardousResultMatch[7];
-      currentEpisode.actions.push({
+      pushAction({
         type: "hazardous",
         timestamp,
         turn,
@@ -503,7 +548,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const unitCol = parseInt(rollInfoMatch[6], 10);
       const unitRow = parseInt(rollInfoMatch[7], 10);
 
-      currentEpisode.actions.push({
+      pushAction({
         type: "roll_info",
         timestamp,
         turn,
@@ -566,7 +611,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
             action.reward = parseFloat(rewardMatch[1]);
           }
 
-          currentEpisode.actions.push(action);
+          pushAction(action);
 
           // Update unit position immediately (like move actions)
           if (currentEpisode.units[shooterId]) {
@@ -680,10 +725,10 @@ export function parse_log_file_from_text(text: string): ReplayData {
             action.weapon_name = weaponMatch[1];
           }
 
-          currentEpisode.actions.push(action);
+          pushAction(action);
         }
       } else if (actionType === "WAIT") {
-        currentEpisode.actions.push({
+        pushAction({
           type: "wait",
           timestamp,
           turn,
@@ -716,7 +761,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const targetRow = parseInt(chargeImpactMatch[10], 10);
       syncKnownUnitPosition(currentEpisode, unitId, unitCol, unitRow);
       syncKnownUnitPosition(currentEpisode, targetId, targetCol, targetRow);
-      currentEpisode.actions.push({
+      pushAction({
         type: "charge_impact",
         timestamp,
         turn,
@@ -783,7 +828,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
             );
           }
 
-          currentEpisode.actions.push({
+          pushAction({
             type: "charge",
             timestamp,
             turn,
@@ -807,7 +852,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       } else if (actionType === "WAIT") {
         // WAIT means the charge roll was too low or unit chose not to charge
         // We don't know the exact roll, but we can indicate it failed
-        currentEpisode.actions.push({
+        pushAction({
           type: "charge_wait",
           timestamp,
           turn,
@@ -849,7 +894,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
           failedReason = failedReasonMatch ? failedReasonMatch[1] : "roll_too_low";
         }
 
-        currentEpisode.actions.push({
+        pushAction({
           type: "charge_fail",
           timestamp,
           turn,
@@ -887,7 +932,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const selectedRuleName = ruleChoiceMatch[8].trim();
       syncKnownUnitPosition(currentEpisode, unitId, unitCol, unitRow);
 
-      currentEpisode.actions.push({
+      pushAction({
         type: "rule_choice",
         timestamp,
         turn,
@@ -1013,7 +1058,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
         action.save_result = dmg > 0 ? "FAIL" : "SAVED";
       }
 
-      currentEpisode.actions.push(action);
+      pushAction(action);
 
       // Apply damage to target unit
       const damage = action.damage || 0;
@@ -1079,12 +1124,15 @@ export function parse_log_file_from_text(text: string): ReplayData {
       }
       // Use unit's actual HP_MAX (set based on unit type during parsing)
       const unitHP = unit.HP_MAX;
+      // Positions per-figurine de deploiement -> rendu multi-socles des l'etat initial.
+      const initModels = episode.initial_models[Number(uid)];
       initialUnits.push({
         ...unit,
         col: startPos.col,
         row: startPos.row,
         HP_CUR: unitHP,
         HP_MAX: unitHP,
+        ...(initModels ? { occupied_hexes_by_model: initModels } : {}),
       });
     }
 
@@ -1231,6 +1279,21 @@ export function parse_log_file_from_text(text: string): ReplayData {
           }
         }
       }
+
+      // Positions per-figurine : le segment est autoritatif (positions courantes par socle).
+      // action.models -> unite qui agit ; action.target_models -> survivants de la cible post-pertes.
+      // L'unite est deduite du prefixe du mid ("unit#idx"). Ignore si l'unite n'est plus en jeu.
+      const applyModels = (m: Record<string, [number, number]> | undefined): void => {
+        if (!m) return;
+        const firstKey = Object.keys(m)[0];
+        if (!firstKey) return;
+        const uid = Number(firstKey.split("#")[0]);
+        if (currentUnits[uid]) {
+          currentUnits[uid].occupied_hexes_by_model = m;
+        }
+      };
+      applyModels(action.models);
+      applyModels(action.target_models);
 
       // Determine phase from action type
       let phase = "move";

@@ -101,6 +101,12 @@ class StepLogger:
                 _models_seg = action_details.get("models_segment")  # get allowed
                 if _models_seg:
                     message = f"{message} {_models_seg}"
+                # Segment cible [TARGET_MODELS:] (survivants per-figurine de la cible post-pertes,
+                # tir/combat) : consomme UNIQUEMENT par le replay. Distinct de [MODELS:] pour ne
+                # pas perturber l'analyzer (son regex \[MODELS: ne matche pas [TARGET_MODELS:).
+                _target_models_seg = action_details.get("target_models_segment")  # get allowed
+                if _target_models_seg:
+                    message = f"{message} {_target_models_seg}"
 
 
             # Standard format: [timestamp] TX PX PHASE : Message [SUCCESS/FAILED]
@@ -250,9 +256,14 @@ class StepLogger:
                     base_shape = require_key(unit, "BASE_SHAPE")
                     base_size = require_key(unit, "BASE_SIZE")
                     base_info = f" base={base_shape}/{base_size}" if base_size != 1 else ""
+                    # Segment per-figurine initial [MODELS:] (positions de deploiement par socle) :
+                    # meme source de verite que les lignes d'action -> le replay affiche tous les
+                    # socles des le debut. Absent/vide -> rien (mono-fig sans cache exploitable).
+                    models_seg = unit.get("models_segment")  # get allowed
+                    models_suffix = f" {models_seg}" if models_seg else ""
                     f.write(
                         f"[{timestamp}] Unit {unit['id']} ({unit_type}){display_suffix} {player_name}: "
-                        f"Starting position ({unit['col']},{unit['row']}), HP_MAX={hp_max}{base_info}\n"
+                        f"Starting position ({unit['col']},{unit['row']}), HP_MAX={hp_max}{base_info}{models_suffix}\n"
                     )
 
                 f.write(f"[{timestamp}] === ACTIONS START ===\n")

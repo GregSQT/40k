@@ -1445,6 +1445,10 @@ class W40KEngine(gym.Env):
                     "HP_MAX": hp_max,
                     "BASE_SIZE": require_key(unit, "BASE_SIZE"),
                     "BASE_SHAPE": require_key(unit, "BASE_SHAPE"),
+                    # Positions per-figurine initiales (deploiement) : occupied_hexes_by_model est
+                    # peuple au build du cache (reset), donc valable ici. Permet au replay d'afficher
+                    # tous les socles des le debut, pas seulement l'ancre.
+                    "models_segment": self._models_segment_for_unit(uid),
                 })
             board_cols = self.game_state["board_cols"]
             board_rows = self.game_state["board_rows"]
@@ -4883,7 +4887,7 @@ class W40KEngine(gym.Env):
         "damageDealt": "damage_dealt",
     }
 
-    def _models_segment_for_unit(self, unit_id: Any) -> str:
+    def _models_segment_for_unit(self, unit_id: Any, label: str = "MODELS") -> str:
         """Segment ``[MODELS: <mid>@(c,r) ...]`` des positions per-figurine COURANTES de l'unite.
 
         Source de verite : ``units_cache[unit_id]['occupied_hexes_by_model']`` (resynchronise
@@ -4904,11 +4908,13 @@ class W40KEngine(gym.Env):
         by_model = entry.get("occupied_hexes_by_model")  # get allowed
         if not isinstance(by_model, dict) or not by_model:
             return ""
-        return format_models_segment((mid, pos[0], pos[1]) for mid, pos in by_model.items())
+        return format_models_segment(
+            ((mid, pos[0], pos[1]) for mid, pos in by_model.items()), label=label
+        )
 
     def _build_shot_details(
         self, raw_log: Dict[str, Any], shot: Dict[str, Any], pre_action_turn: Any,
-        fight_state: Optional[Dict[str, Any]],
+        fight_state: Optional[Dict[str, Any]], include_target_models: bool = False,
     ) -> Dict[str, Any]:
         """Details d'UN jet (tir ou combat) pour le formateur du StepLogger.
 
@@ -4941,6 +4947,24 @@ class W40KEngine(gym.Env):
         if fight_state is not None:
             details.update(fight_state)
         details["models_segment"] = self._models_segment_for_unit(unit_id)
+        # Survivants per-figurine de la CIBLE, post-pertes (le flush intervient apres resolution
+        # complete de l'action -> figurines mortes deja retirees du cache). Le segment [MODELS:]
+        # ne couvre que l'unite qui agit ; sans ce segment cible, une escouade decimee par le tir
+        # ne perdrait ses socles a l'ecran (replay) qu'a sa prochaine action. Chaine vide si la
+        # cible est entierement detruite (plus d'entree cache) -> le parser la retire via HP<=0.
+        #
+        # include_target_models : n'est vrai que sur le DERNIER jet visant cette cible (calcule par
+        # _flush_squad_action_logs_to_step_logger). Regle 40K : les pertes se retirent APRES
+        # resolution de toutes les attaques (04/05), pas jet par jet. Emettre le segment sur chaque
+        # jet ferait chuter les socles des le 1er jet (avant que les degats soient montres) ; le
+        # deferer au dernier jet aligne la chute des socles sur la fin des degats -> HP descend
+        # d'abord, socles ensuite, conforme au sequencage des regles.
+        if include_target_models:
+            target_id = raw_log.get("targetId")  # get allowed
+            if target_id is not None:
+                details["target_models_segment"] = self._models_segment_for_unit(
+                    target_id, label="TARGET_MODELS"
+                )
         return details
 
     def _flush_squad_action_logs_to_step_logger(
@@ -4972,7 +4996,21 @@ class W40KEngine(gym.Env):
                 f"action_logs cursor ({pre_action_logs_len}) cannot exceed current length "
                 f"({len(action_logs)}) — action_logs must not shrink within a step"
             )
-        for raw_log in action_logs[pre_action_logs_len:]:
+        # Position (index raw_log, index jet) du DERNIER jet visant chaque cible sur l'ensemble de
+        # l'action : le segment [TARGET_MODELS:] n'est emis que la (retrait des socles en bloc apres
+        # les attaques, cf. _build_shot_details). Le dernier ecrit gagne -> derniere arme, dernier jet.
+        sub_logs = action_logs[pre_action_logs_len:]
+        last_target_jet: Dict[Any, Tuple[int, int]] = {}
+        for _ri, _rl in enumerate(sub_logs):
+            if not isinstance(_rl, dict):
+                continue
+            if _rl.get("type") in self._STEP_LOG_TYPE_MAP and self._STEP_LOG_TYPE_MAP.get(_rl.get("type")) in ("shoot", "combat"):
+                _tid = _rl.get("targetId")  # get allowed
+                _shots = _rl.get("shootDetails")  # get allowed
+                if _tid is not None and isinstance(_shots, list) and _shots:
+                    last_target_jet[_tid] = (_ri, len(_shots) - 1)
+
+        for _raw_idx, raw_log in enumerate(sub_logs):
             if not isinstance(raw_log, dict):
                 raise TypeError(f"action_logs entry must be a dict, got {type(raw_log).__name__}")
             raw_type = require_key(raw_log, "type")
@@ -5004,9 +5042,14 @@ class W40KEngine(gym.Env):
                         f"(got {type(shots).__name__}) — contrat _emit_squad_shoot_log rompu"
                     )
                 fight_state = pre_action_fight_state if action_type == "combat" else None
-                for shot in shots:
+                _target_id = raw_log.get("targetId")  # get allowed
+                _last_jet = last_target_jet.get(_target_id)  # get allowed
+                for _shot_idx, shot in enumerate(shots):
                     if not isinstance(shot, dict):
                         raise TypeError(f"shootDetails entry must be a dict, got {type(shot).__name__}")
+                    # Segment cible uniquement sur le DERNIER jet visant cette cible sur toute
+                    # l'action (retrait des socles en bloc apres les attaques, cf. _build_shot_details).
+                    _emit_target = _last_jet is not None and (_raw_idx, _shot_idx) == _last_jet
                     self.step_logger.log_action(
                         unit_id=raw_log.get("shooterId"),  # get allowed
                         action_type=action_type,
@@ -5015,7 +5058,8 @@ class W40KEngine(gym.Env):
                         success=True,
                         step_increment=True,
                         action_details=self._build_shot_details(
-                            raw_log, shot, pre_action_turn, fight_state
+                            raw_log, shot, pre_action_turn, fight_state,
+                            include_target_models=_emit_target,
                         ),
                     )
                 continue

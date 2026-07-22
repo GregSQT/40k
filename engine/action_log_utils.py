@@ -9,7 +9,7 @@ It resets with a new episode (``w40k_core`` reset).
 from typing import Any, Dict, Iterable, MutableMapping, Tuple
 
 
-def format_models_segment(items: Iterable[Tuple[Any, int, int]]) -> str:
+def format_models_segment(items: Iterable[Tuple[Any, int, int]], label: str = "MODELS") -> str:
     """
     Build the per-figurine log segment ``[MODELS: <mid>@(<col>,<row>) ...]``.
 
@@ -17,11 +17,15 @@ def format_models_segment(items: Iterable[Tuple[Any, int, int]]) -> str:
     to action messages so the analyzer can reconstruct per-figurine positions
     instead of reasoning on the squad anchor alone. Returns ``""`` when empty
     (nothing to append rather than an empty, misleading segment).
+
+    ``label`` selects the wrapper : ``"MODELS"`` (défaut, unité qui agit, lu par
+    l'analyzer) ou ``"TARGET_MODELS"`` (survivants de la cible post-pertes, consommé
+    uniquement par le replay — le regex analyzer ``\\[MODELS:`` ne matche pas ``[TARGET_MODELS:``).
     """
     parts = [f"{mid}@({int(col)},{int(row)})" for mid, col, row in items]
     if not parts:
         return ""
-    return "[MODELS: " + " ".join(parts) + "]"
+    return f"[{label}: " + " ".join(parts) + "]"
 
 
 def models_segment_from_move_details(move_details: Iterable[Dict[str, Any]]) -> str:

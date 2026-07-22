@@ -455,16 +455,40 @@ export const BoardReplay: React.FC = () => {
 
     const buildUnitsCache = (
       units: Unit[]
-    ): Record<string, { col: number; row: number; HP_CUR: number; player: number }> => {
-      const cache: Record<string, { col: number; row: number; HP_CUR: number; player: number }> =
-        {};
+    ): Record<
+      string,
+      {
+        col: number;
+        row: number;
+        HP_CUR: number;
+        player: number;
+        occupied_hexes_by_model?: Record<string, [number, number]>;
+      }
+    > => {
+      const cache: Record<
+        string,
+        {
+          col: number;
+          row: number;
+          HP_CUR: number;
+          player: number;
+          occupied_hexes_by_model?: Record<string, [number, number]>;
+        }
+      > = {};
       units.forEach((unit) => {
         if (unit.HP_CUR > 0) {
+          // occupied_hexes_by_model : positions per-figurine issues des segments [MODELS:]/
+          // [TARGET_MODELS:] du step.log. Present -> BoardPvp/UnitRenderer dessine un socle par
+          // figurine ; absent -> fallback un socle a l'ancre (logs sans segment per-fig).
+          const perFig = (unit as unknown as {
+            occupied_hexes_by_model?: Record<string, [number, number]>;
+          }).occupied_hexes_by_model;
           cache[unit.id.toString()] = {
             col: unit.col,
             row: unit.row,
             HP_CUR: unit.HP_CUR,
             player: unit.player,
+            ...(perFig ? { occupied_hexes_by_model: perFig } : {}),
           };
         }
       });

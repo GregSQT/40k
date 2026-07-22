@@ -1410,6 +1410,18 @@ def _perf_timing_boot_if_enabled() -> None:
 
 _perf_timing_boot_if_enabled()
 
+def _configured_agent_key() -> str:
+    """Identité de l'agent unique depuis config/config.json (defaults.agent_key).
+
+    Même source de vérité que ``UnitRegistry.AGENT_KEY`` : les modes de test (PvE/pve_test/ED)
+    qui forcent un agent lisent cette clé au lieu de la hardcoder. No fallback : clé absente ->
+    ConfigurationError (jamais un agent en dur qui pourrait ne plus exister, cf. retrait CoreAgent).
+    """
+    from config_loader import get_config_loader
+    cfg = get_config_loader().load_config("config", force_reload=False)
+    return require_key(require_key(cfg, "defaults"), "agent_key")
+
+
 def get_agents_from_scenario(scenario_file: str, unit_registry) -> set:
     """Extract unique agent keys from scenario units.
     
@@ -2101,7 +2113,7 @@ def start_game():
         elif requested_mode == "pve":
             initialize_test_engine(
                 scenario_file=scenario_file,
-                forced_agent_key="CoreAgent",
+                forced_agent_key=_configured_agent_key(),
             )
         elif requested_mode == "pve_test":
             if board_path is None:
@@ -2114,7 +2126,7 @@ def start_game():
             try:
                 initialize_test_engine(
                     scenario_file=scenario_file,
-                    forced_agent_key="CoreAgent",
+                    forced_agent_key=_configured_agent_key(),
                 )
             finally:
                 if _prev_board is not None:
@@ -2126,7 +2138,7 @@ def start_game():
                 scenario_file = ED_SCENARIO_DEFAULT
             initialize_test_engine(
                 scenario_file=scenario_file,
-                forced_agent_key="CoreAgent",
+                forced_agent_key=_configured_agent_key(),
             )
         else:
             initialize_engine(scenario_file=scenario_file)
@@ -3206,8 +3218,8 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
     game_state["unit_by_id"] = {str(u["id"]): u for u in combined_units}
 
     # Rebuild reward config mappings using engine centralized logic.
-    # This preserves mono-agent CoreAgent behavior by mapping all model keys
-    # to controlled_agent rewards in single-policy mode.
+    # This preserves mono-agent (single-policy) behavior by mapping all model keys
+    # to controlled_agent rewards.
     reward_configs = engine_instance._build_reward_configs_for_current_units()
     game_state["reward_configs"] = reward_configs
     game_state["rewards_configs"] = reward_configs

@@ -16,18 +16,24 @@ from shared.data_validation import require_key, require_present
 
 class UnitRegistry:
     """Dynamic unit discovery and faction-role management system."""
-    CORE_AGENT_KEY = "CoreAgent"
-    
+
     def __init__(self, project_root: Optional[str] = None):
         if project_root is None:
             # Auto-detect project root from current file location
             self.project_root = Path(__file__).parent.parent
         else:
             self.project_root = Path(project_root)
-            
+
         self.frontend_src = self.project_root / "frontend" / "src"
         self.roster_dir = self.frontend_src / "roster"
-        
+
+        # Identité de l'agent unique (mode single-agent), lue depuis config/config.json
+        # (defaults.agent_key) — plus de hardcode. CoreAgent a été retiré (V11 T6-i, commit
+        # 20a2d479) au profit d'ArmageddonAgent ; changer d'agent = éditer la config, pas le code.
+        # Doit être défini AVANT _build_faction_role_matrix (qui l'utilise). No fallback : absent
+        # en config -> KeyError explicite (require_key).
+        self.AGENT_KEY = self._load_agent_key()
+
         # Core data structures
         self.units: Dict[str, Dict] = {}
         self.factions: Set[str] = set()
@@ -39,6 +45,18 @@ class UnitRegistry:
         # Initialize the registry
         self._discover_all_units(verbose=False)
         self._build_faction_role_matrix()
+
+    def _load_agent_key(self) -> str:
+        """Identité de l'agent unique depuis config/config.json (defaults.agent_key).
+
+        No fallback : si la clé manque, on lève (require_key) plutôt que de retomber sur une
+        valeur hardcodée qui masquerait une config incomplète.
+        """
+        from config_loader import get_config_loader
+        config_loader = get_config_loader()
+        cfg = config_loader.load_config("config", force_reload=False)
+        defaults = require_key(cfg, "defaults")
+        return require_key(defaults, "agent_key")
 
     def _load_unit_rules(self) -> Dict[str, Dict]:
         """Load unit rules config for validation."""
@@ -711,7 +729,7 @@ class UnitRegistry:
 
         # Current project mode: single shared agent for all units.
         for unit_type, unit_data in self.units.items():
-            agent_key = self.CORE_AGENT_KEY
+            agent_key = self.AGENT_KEY
 
             # Add to matrix
             if agent_key not in self.faction_role_matrix:
@@ -722,7 +740,7 @@ class UnitRegistry:
     def _generate_advanced_agent_key(self, unit_type: str, unit_data: Dict) -> str:
         """Legacy helper kept for compatibility; single-agent mode always uses CoreAgent."""
         _ = unit_type, unit_data
-        return self.CORE_AGENT_KEY
+        return self.AGENT_KEY
     
     def _determine_move_type(self, unit_type: str, unit_data: Dict) -> str:
         """Determine movement type based on unit characteristics."""
@@ -768,11 +786,11 @@ class UnitRegistry:
         if unit_type not in self.units:
             raise ValueError(f"Unknown unit type: {unit_type}")
 
-        return self.CORE_AGENT_KEY
+        return self.AGENT_KEY
     
     def get_required_models(self) -> List[str]:
         """Get list of required model keys (single-agent mode)."""
-        return [self.CORE_AGENT_KEY]
+        return [self.AGENT_KEY]
     
     def get_all_model_keys(self) -> List[str]:
         """Get all available model keys (alias for get_required_models)."""

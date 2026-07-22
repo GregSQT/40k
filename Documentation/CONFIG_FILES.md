@@ -9,10 +9,11 @@ This document describes all configuration files used in the W40K game engine.
 ## Table of Contents
 
 1. [Weapon Rules](#weapon-rules-configweapon_rulesjson)
-2. [Game Config](#game-config-configgame_configjson)
-3. [Training Configuration](#training-configuration)
-4. [Scenario Files](#scenario-files)
-5. [Armory Files](#armory-files)
+2. [App Config](#app-config-configconfigjson)
+3. [Game Config](#game-config-configgame_configjson)
+4. [Training Configuration](#training-configuration)
+5. [Scenario Files](#scenario-files)
+6. [Armory Files](#armory-files)
 
 ---
 
@@ -133,6 +134,43 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
 
 ---
 
+## App Config (`config/config.json`)
+
+**Location**: `/config/config.json` (backend only — non copié vers le frontend)
+
+**Purpose**: Configuration infra/projet : chemins, defaults, env d'entraînement. Distinct de
+`game_config.json` (règles de jeu).
+
+### Key Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `paths.model_file` | string | Template du chemin modèle (`ai/models/{agent_key}/model_{agent_key}.zip`) |
+| `defaults.scenario` / `training_config` / `rewards_config` / `game_config` | string | Noms de config par défaut |
+| `defaults.test_board` | string | Board par défaut des modes test |
+| `defaults.agent_key` | string | **Identité de l'agent unique (mode single-agent)**. Source de vérité lue par `UnitRegistry._load_agent_key()` → `UnitRegistry.AGENT_KEY` (moteur : `get_model_key()`, rewards, handlers ; serveur PvP : `get_agents_from_scenario`) ET par `api_server._configured_agent_key()` pour les modes de test forçant un agent (PvE/pve_test/Endless_duty). Changer d'agent = éditer cette clé, jamais le code. No fallback : clé absente → `ConfigurationError`. |
+
+### Example
+
+```json
+{
+  "defaults": {
+    "scenario": "default",
+    "training_config": "default",
+    "rewards_config": "default",
+    "game_config": "default",
+    "test_board": "x5_44x60",
+    "agent_key": "ArmageddonAgent"
+  }
+}
+```
+
+**Note historique** : `CoreAgent` a été retiré (V11 T6-i, commit `20a2d479`) au profit
+d'`ArmageddonAgent`. Auparavant l'identité single-agent était hardcodée (`UnitRegistry.CORE_AGENT_KEY`) ;
+elle est désormais pilotée par `defaults.agent_key`.
+
+---
+
 ## Game Config (`config/game_config.json`)
 
 **Location**: `/config/game_config.json`
@@ -174,7 +212,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
 
 **Purpose**: Configure PPO training parameters for AI agents.
 
-**Example**: `/config/agents/CoreAgent/CoreAgent_training_config.json` (rewards : `/config/agents/CoreAgent/CoreAgent_rewards_config.json`)
+**Example**: `/config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` (rewards : `/config/agents/ArmageddonAgent/ArmageddonAgent_rewards_config.json`)
 
 ### Key Fields
 

@@ -22,7 +22,8 @@
     "training_config": "default",
     "rewards_config": "default",
     "game_config": "default",
-    "test_board": "x5_44x60"
+    "test_board": "x5_44x60",
+    "agent_key": "ArmageddonAgent"
   },
   "training_env": {
     "OMP_NUM_THREADS": 1,
