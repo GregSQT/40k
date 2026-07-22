@@ -4566,6 +4566,11 @@ def main():
             unit_registry = UnitRegistry()
 
             eval_scenario_list_override = None
+            # Un scenario explicite (chemin .json) est joue TEL QUEL : pas de repli holdout,
+            # pas de materialisation wall_ref (celle-ci exige un scenario sous agents/ et
+            # reecrit le terrain). Sert a jouer/visualiser un scenario cible (ex. placement
+            # fixed) via --eval --step. Voir evaluate_against_bots(materialize_eval_refs).
+            explicit_scenario_raw = False
             if args.rule_checker:
                 eval_scenario_list_override = _load_rule_checker_scenarios(project_root)
                 scenario_file = eval_scenario_list_override[0]
@@ -4573,6 +4578,17 @@ def main():
                     f"📋 Rule-checker test-only mode: {len(eval_scenario_list_override)} scenario(s) from manifest"
                 )
                 print(f"📋 Using first rule-checker scenario for env init: {os.path.basename(scenario_file)}")
+            elif args.scenario and args.scenario.endswith(".json"):
+                scenario_file = (
+                    args.scenario
+                    if os.path.isabs(args.scenario)
+                    else os.path.join(project_root, args.scenario)
+                )
+                if not os.path.exists(scenario_file):
+                    raise FileNotFoundError(f"--scenario file not found: {scenario_file}")
+                eval_scenario_list_override = [scenario_file]
+                explicit_scenario_raw = True
+                print(f"📋 Using explicit scenario (played as-is): {os.path.basename(scenario_file)}")
             else:
                 # Test-only mode must evaluate on holdout scenarios only.
                 if args.scenario == "bot":
@@ -4657,6 +4673,7 @@ def main():
                 model_path=model_path,
                 scenario_pool="holdout",
                 scenario_list_override=eval_scenario_list_override,
+                materialize_eval_refs=not explicit_scenario_raw,
             )
             
             # Fiabilité stricte, miroir de `_apply_eval_results` (training_callbacks) : un épisode

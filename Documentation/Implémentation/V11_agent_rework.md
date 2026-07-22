@@ -166,6 +166,21 @@ agent frais qui reprend :
 Décisions ouvertes (utilisateur) : forme exacte de la rampe ; coexistence éventuelle avec
 `deployment_random_mix` ; siège (`agent_seat_mode`) gardé aléatoire ou figé en phase strict.
 
+**Outillage : jouer/visualiser UN scénario explicite en éval (2026-07-22).** Pour observer un
+scénario précis (ex. `scenario_fixed_brawl_sm_orks.json`, placement fixed) avec le modèle courant
+SANS l'entraîner ni écraser le `.zip`, `--test-only` accepte désormais un chemin de scénario
+explicite :
+`python3 ai/train.py --agent ArmageddonAgent --training-config x5_debug --test-only --eval --step
+--scenario config/board/44x60x5/scenario/scenario_fixed_brawl_sm_orks.json`.
+Il est joué **tel quel** (`train.py`, branche test-only) : ni repli holdout, ni matérialisation
+`wall_ref` (celle-ci exige un scénario sous `agents/.../scenarios/<split>/` et réécrit le terrain —
+elle casserait un scénario autonome sous `config/board/`). Mécanisme : `evaluate_against_bots(...,
+materialize_eval_refs=False, scenario_list_override=[chemin])`. Le mode holdout par défaut
+(`materialize_eval_refs=True`) est **inchangé**. Verrou : `scripts/eval_explicit_scenario_test.py`
+(ROUGE : la matérialisation lève hors `agents/` ; VERT : le scénario explicite est joué, 0 planté).
+⚠️ Un scénario `fixed` joué en test-only n'a **aucune** phase de déploiement (step.log : 0
+`DEPLOYMENT`, figurines aux positions du fichier dès T1).
+
 
 ### 0.14 Re-mesure du run — 🟠 RUN LANCÉ LE 2026-07-22, BLOQUÉ À L'ÉVAL DU MARKER 2000 (cf. §0.27) ; score encore dû
 

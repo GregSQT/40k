@@ -1,27 +1,27 @@
 {
   "CHARGE_DEST_BFS": {
-    "calls": 5348,
-    "avg_s": 0.016244,
-    "sum_s": 86.87,
-    "avg_bfs_s": 0.005064,
-    "avg_eng_s": 0.001648
+    "calls": 10765,
+    "avg_s": 0.01815,
+    "sum_s": 195.39,
+    "avg_bfs_s": 0.005636,
+    "avg_eng_s": 0.002029
   },
   "MOVE_POOL_BUILD": {
-    "calls": 374390,
-    "avg_s": 0.017492,
-    "sum_s": 6548.73,
-    "avg_bfs_s": 0.012133
+    "calls": 429134,
+    "avg_s": 0.017723,
+    "sum_s": 7605.69,
+    "avg_bfs_s": 0.012255
   },
   "CHARGE_PHASE_START": {
-    "calls": 24933,
-    "avg_s": 0.008544,
-    "sum_s": 213.02,
-    "avg_pool_s": 0.00582
+    "calls": 34872,
+    "avg_s": 0.011836,
+    "sum_s": 412.73,
+    "avg_pool_s": 0.008544
   },
-  "__total_s": 6848.63,
-  "__total_calls": 404671,
-  "__score_ms": 16.924,
-  "__n_episodes": 127,
+  "__total_s": 8213.81,
+  "__total_calls": 474771,
+  "__score_ms": 17.3006,
+  "__n_episodes": 128,
   "__episodes": [
     1,
     2,
@@ -149,6 +149,7 @@
     124,
     125,
     126,
-    127
+    127,
+    128
   ]
 }

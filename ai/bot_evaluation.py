@@ -777,7 +777,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                          show_summary: bool = True, eval_progress_prefix: Optional[str] = None,
                          scenario_pool: str = "training", model_path: Optional[str] = None,
                          line_length_state: Optional[Dict[str, Any]] = None,
-                         scenario_list_override: Optional[List[str]] = None):
+                         scenario_list_override: Optional[List[str]] = None,
+                         materialize_eval_refs: bool = True):
     """
     Standalone bot evaluation function - single source of truth for all bot testing.
 
@@ -982,7 +983,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     sampling_cfg = training_cfg.get("scenario_sampling")
     eval_wall_refs: List[str] = []
     eval_ref_strict = False
-    if scenario_pool == "holdout":
+    if scenario_pool == "holdout" and materialize_eval_refs:
         if not isinstance(sampling_cfg, dict):
             raise TypeError(
                 "scenario_sampling must be an object in training config for holdout evaluation"
@@ -1049,7 +1050,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         for scenario_index, scenario_file in enumerate(scenario_list):
             scenario_name = _scenario_name_from_file(base_agent_key, scenario_file)
             task_scenario_file = scenario_file
-            if scenario_pool == "holdout" and eval_ref_strict:
+            if scenario_pool == "holdout" and eval_ref_strict and materialize_eval_refs:
                 wall_ref = eval_wall_refs[(scenario_index + len(bot_name)) % len(eval_wall_refs)]
                 task_scenario_file = _materialize_eval_scenario_refs(
                     scenario_path=scenario_file,
