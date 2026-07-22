@@ -1417,7 +1417,8 @@ python3 ai/train.py --agent ArmageddonAgent --eval --training-config x1_debug
 ```
 
 Notes sur la commande, lues dans [train.py](../../ai/train.py) : `--eval` est un alias de
-`--test-only` (L4384) ; le mode **refuse** `--scenario bot` et résout **seul** les holdouts
+`--test-only` (L4384) ; le mode **refuse** `--scenario bot` et, à défaut d'un chemin de scénario
+explicite `.json` (joué tel quel, cf. §0.29 « Outillage »), résout **seul** les holdouts
 (L4647) ; `--training-config` est obligatoire en pratique — le défaut `"default"` n'existe pas
 (rupture R1, jamais corrigée). Phases réelles : `x1`, `x5_append`, `x5_new`, `x1_debug`, `x5_debug`.
 
