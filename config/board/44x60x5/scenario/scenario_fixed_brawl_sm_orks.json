@@ -1,0 +1,226 @@
+{
+  "primary_objectives": [
+    "objectives_control"
+  ],
+  "board_ref": "44x60x5",
+  "terrain_ref": "terrain-mc1.json",
+  "deployment_type": "fixed",
+  "units": [
+    {
+      "id": 101,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": 90,
+      "row": 92,
+      "models": [
+        {
+          "col": 90,
+          "row": 92,
+          "unit_type": "Intercessor"
+        },
+        {
+          "col": 98,
+          "row": 92,
+          "unit_type": "Intercessor"
+        },
+        {
+          "col": 106,
+          "row": 92,
+          "unit_type": "Intercessor"
+        },
+        {
+          "col": 114,
+          "row": 92,
+          "unit_type": "IntercessorGrenadeLauncher"
+        },
+        {
+          "col": 122,
+          "row": 92,
+          "unit_type": "IntercessorSergeant"
+        },
+        {
+          "col": 130,
+          "row": 92,
+          "unit_type": "Librarian"
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "unit_type": "VanguardVeteranSquadJumpPack",
+      "player": 1,
+      "col": 90,
+      "row": 100,
+      "models": [
+        {
+          "col": 90,
+          "row": 100,
+          "unit_type": "VanguardVeteranSquadJumpPack"
+        },
+        {
+          "col": 98,
+          "row": 100,
+          "unit_type": "VanguardVeteranSquadJumpPack"
+        },
+        {
+          "col": 106,
+          "row": 100,
+          "unit_type": "VanguardVeteranSquadJumpPack"
+        },
+        {
+          "col": 114,
+          "row": 100,
+          "unit_type": "VanguardVeteranSquadJumpPackSergeant"
+        },
+        {
+          "col": 122,
+          "row": 100,
+          "unit_type": "VanguardVeteranSquadJumpPackPlasma"
+        },
+        {
+          "col": 130,
+          "row": 100,
+          "unit_type": "ChaplainJumpPack"
+        }
+      ]
+    },
+    {
+      "id": 201,
+      "unit_type": "Boyz",
+      "player": 2,
+      "col": 66,
+      "row": 198,
+      "models": [
+        {
+          "col": 66,
+          "row": 198,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 74,
+          "row": 198,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 82,
+          "row": 198,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 90,
+          "row": 198,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 98,
+          "row": 198,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 106,
+          "row": 198,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 114,
+          "row": 198,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 122,
+          "row": 198,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 130,
+          "row": 198,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 138,
+          "row": 198,
+          "unit_type": "BoyzNobKombi"
+        },
+        {
+          "col": 146,
+          "row": 198,
+          "unit_type": "Warboss"
+        },
+        {
+          "col": 154,
+          "row": 198,
+          "unit_type": "PainBoy"
+        }
+      ]
+    },
+    {
+      "id": 202,
+      "unit_type": "Boyz",
+      "player": 2,
+      "col": 66,
+      "row": 206,
+      "models": [
+        {
+          "col": 66,
+          "row": 206,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 74,
+          "row": 206,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 82,
+          "row": 206,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 90,
+          "row": 206,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 98,
+          "row": 206,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 106,
+          "row": 206,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 114,
+          "row": 206,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 122,
+          "row": 206,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 130,
+          "row": 206,
+          "unit_type": "Boyz"
+        },
+        {
+          "col": 138,
+          "row": 206,
+          "unit_type": "BoyzNobKombi"
+        },
+        {
+          "col": 146,
+          "row": 206,
+          "unit_type": "Bigboss"
+        },
+        {
+          "col": 154,
+          "row": 206,
+          "unit_type": "BannerNob"
+        }
+      ]
+    }
+  ]
+}

@@ -20,7 +20,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.28` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.27` le 2026-07-22).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.29` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -33,14 +33,16 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | # | Entrée | Nature | Ordre proposé | Pourquoi cet ordre |
 |---|---|---|---|---|
 | **§0.14** | Re-mesure du run | run lancé, **bloqué à l'éval du marker 2000** (cf. §0.27) | **2** | 🟠 **MAJ 2026-07-22.** Run `x5_new` (10k ép., 48 envs) lancé sur moteur+analyzer désormais fiables (§0.23–§0.26). **Le training a atteint l'épisode 2000 sans un seul crash** (le fix move §0.25/§0.26 tient), MAIS le garde-fou d'éval a **arrêté le run au 1er checkpoint** : 500 ép. d'éval « failed » sur **timeout de task** (cf. **§0.27**). Aucun win-rate produit. Prérequis levés depuis le 2026-07-21 : dépendance perf §0.22 non bloquante (le run tourne), analyzer fiabilisé (§0.24). **Nouveau bloqueur = §0.27.** |
-| **§0.27** | Blocage éval au checkpoint | 🔴 **OUVERT (2026-07-22)** — bloqueur actuel de §0.14 | **1** | À l'éval intermédiaire (`bot_eval_intermediate=100` ép./bot × 5 bots = 500), **un task a dépassé le timeout de 1 h** (`bot_eval_task_timeout_seconds=3600`, durée mesurée 3675 s) → pool avorté, 500 ép. marqués `failed` → `RuntimeError` strict (§0.7). **Diagnostic (mesuré, PAS un hang) :** le cap `max_turns×400=2000` pas/épisode existe (aucun hang infini possible) ; le modèle à 2000 ép. (à peine entraîné) produit des **parties dégénérées** atteignant ce cap, et le **coût par-pas du fix géodésique §0.25** (l'érosion « load-bearing » = le coût §0.22) rend ces épisodes trop longs. Sonde : **0 ép. d'éval terminé en 2 min** sur le modèle courant (vs 17 s/ép sur un autre modèle). Reco non tranchée : (1) distinguer timeout vs crash dans le garde-fou (ne pas hard-stop sur lenteur) + (2) réduire l'éval intermédiaire (100→~20), `bot_eval_final=100` gardé. Décision perf géodésique (option lourde) en réserve. |
+| **§0.27** | Blocage éval au checkpoint | 🔴 **OUVERT (2026-07-22)** — approuvé, DIFFÉRÉ (win-rate repoussé) | **3** | À l'éval intermédiaire (`bot_eval_intermediate=100` ép./bot × 5 bots = 500), **un task a dépassé le timeout de 1 h** (`bot_eval_task_timeout_seconds=3600`, durée mesurée 3675 s) → pool avorté, 500 ép. marqués `failed` → `RuntimeError` strict (§0.7). **Diagnostic (mesuré, PAS un hang) :** le cap `max_turns×400=2000` pas/épisode existe (aucun hang infini possible) ; le modèle à 2000 ép. (à peine entraîné) produit des **parties dégénérées** atteignant ce cap, et le **coût par-pas du fix géodésique §0.25** (l'érosion « load-bearing » = le coût §0.22) rend ces épisodes trop longs. Sonde : **0 ép. d'éval terminé en 2 min** sur le modèle courant (vs 17 s/ép sur un autre modèle). Fix approuvé (utilisateur) : (1) distinguer timeout vs crash dans le garde-fou (ne pas hard-stop sur lenteur, run résilient) + (2) réduire l'éval intermédiaire (100→~20), `bot_eval_final=100` gardé. **DIFFÉRÉ** : le win-rate est repoussé tant que la conformité tir (§0.28) n'est pas verrouillée. |
+| **§0.28** | Conformité tir obscuring (13.10) — soupçon | ✅ **RÉFUTÉ (2026-07-22)** — AUCUN bug, mesuré in-engine sur le vrai gate | — | Suspicion utilisateur (tir « à travers terrain » en replay) **investiguée à fond puis RÉFUTÉE**. Le vrai gate de tir gym = `build_squad_action_mask` (branche shoot, `shared_utils.py:8170`) → `_model_can_shoot_target` (`:4722`) → `_attacker_model_can_reach_squad` (`:4515`) → `_compute_visibility_with_obscuring` : **par-figurine, footprint COMPLET, obscuring-aware (13.10)**. Audit LIVE inséré au `return True` du gate : **297 tirs approuvés, 0 sans ligne socle→socle évitant l'obscuring** (`GATE_BUG=0`, `obscuring_clear_line=False=0`). Le « tir à travers terrain » = **peek légal par-figurine** (06.01 : un bord de socle voit là où le centre est masqué). ⚠️ Mes « 10 tirs illégaux confirmés » puis « 3 sur données fraîches » étaient TOUS des **FAUX POSITIFS** : scan offline centre-à-centre + reconstructions non fidèles (positions/arme/état). Détail méthode → §0bis. Fixture d'audit obscuring (cas net, bloque correctement) : commité. |
 | **§0.24** | Analyzer réaligné per-figurine | 🟢 **RÉSOLU (2026-07-22)** ; résiduel FP documenté | — | Détail intégral → **§0hist §0.24**. Résiduel non bloquant : suivi HP/mort de la **cible** pas encore per-figurine → **FP « Fight a dead unit »** (174 sur log réf, **prouvé FP** : Unit 104 tracée vivante) + off-by-1 fight/advance. |
 | ~~**§0.23**~~ | Logger per-figurine `[MODELS:]` + `PNone` | ✅ **CLOS (2026-07-22)** | — | Détail → **§0hist §0.23**. |
 | ~~**§0.25**~~ | Bug moteur : budget move per-fig en ligne droite | ✅ **CORRIGÉ (2026-07-22)** — géodésique | — | Détail → **§0hist §0.25**. Conséquence perf → **§0.27**. |
 | ~~**§0.26**~~ | Régression cache masque (clé `_unit_move_version` contournée) | ✅ **CORRIGÉ (2026-07-22)** — clé fingerprint | — | Détail → **§0hist §0.26**. |
+| **§0.29** | Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum | 🟢 **MÉCANIQUE LIVRÉE + VALIDÉE IN-ENGINE (2026-07-22)** ; reste USAGE+MESURE (cf. « Suite » §0.29 ; win-rate rejoint §0.14, bloqué par §0.27) | 4 | Scénario `scenario_fixed_brawl_sm_orks.json` (terrain **`terrain-mc1.json`**, 36 figurines, compositions réelles des rosters training SM+Orks) où **le champ `deployment_type` bascule** placement manuel ↔ déploiement (`"fixed"` = positions `col/row`, aucun déploiement ; `"active"` = phase de déploiement). Positions par défaut dans les bandes **dégagées de mc1** (rows 90-105 / 195-210, éditables). **+ scheduler `deployment_mode_schedule`** (opt-in) : proportion `active` **croissante par épisode** au fil du training (rampe linéaire, miroir de `deployment_random_mix`, orthogonal à lui). **+ emplacements `top`/`bottom` par figurine DANS les 4 rosters** (P1=top, P2=bottom ; siège+rotation aléatoires conservés) → le mode strict marche sur le vrai chemin roster. 3 verrous verts sur le VRAI moteur : `fixed_brawl_deploy_modes_test.py` (bascule units[]) + `deployment_mode_schedule_test.py` (bornes 0/1 + rampe) + `roster_fixed_positions_test.py` (rosters top/bottom, rotation réelle). Détail → **§0.29** ci-dessous. |
 | ~~**§0.22**~~ | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **CLOS le 2026-07-21 — décision (B) STOP à L1+L_bbox** | — | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) livrés et commités** (`ff2293e0`, `6f268d38`) — gain ovale **1,49×**, round10 1,78×, pool strictement identique ; A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. **Reliquat NON poursuivi** (ratio gain/risque mauvais, mesuré) : BFS wavefront réfuté (plus lent à move 12), L2b runs NumPy réfuté (1,1× net + complexité), numba écarté (risque segfault sur run 36 h). ⚠️ **MAJ 2026-07-22 : ce coût perf est désormais INCONTOURNABLE** — le fix de conformité move §0.25 REQUIERT une érosion géodésique par-figurine, exactement le coût que §0.22 combattait. Il refait surface en §0.27. Détail complet → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§10, §11) ; leçon de méthode → §0bis. |
 
-**Restent ouverts : §0.27 (bloqueur, à traiter en premier) puis §0.14 (qui en dépend).**
+**Restent ouverts : §0.27 (garde-fou éval, fix approuvé) puis §0.14 (win-rate). §0.28 (conformité tir obscuring) est RÉFUTÉ — aucun bug (mesuré in-engine).**
 La nuit du 2026-07-21→22 a livré §0.23–§0.26 (logger+analyzer per-figurine, bug moteur move + régression cache),
 qui **débloquent la mesurabilité** (analyzer fiable) mais font émerger §0.27 (coût géodésique en éval).
 **§0.22 est CLOS** mais son coût est réactivé par §0.25 (cf. la MAJ dans sa ligne). (Les dépendances
@@ -51,6 +53,118 @@ résolues §0.15–§0.19, §0.21, **§0.22**, **§0.23**, **§0.24**, **§0.25*
 ⚠️ **Avant de vous appuyer sur une affirmation de ce document, lire §0bis** — en particulier la
 réserve de méthode sur le document lui-même (T1→T5 et section 9 n'ont **pas** été revérifiés
 ligne à ligne) et la règle de périmètre `ArmageddonAgent`.
+
+
+### 0.29 Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum — ✅ LIVRÉ + VALIDÉ IN-ENGINE (2026-07-22)
+
+**But (recadré par l'utilisateur).** Pouvoir **placer les unités manuellement** ET **choisir**, sur un
+même fichier, entre placement figé (manuel) et phase de déploiement — le tout sur le terrain réel du
+training, sans nouveau terrain. Reliquat demandé : faire évoluer la **proportion figé↔déploiement au
+fil du training** (curriculum). Matchup **Space Marines vs Orks**.
+
+**Fichiers livrés.**
+- `config/board/44x60x5/scenario/scenario_fixed_brawl_sm_orks.json` — 4 escouades / **36 figurines**,
+  format `units[]` avec clé `models` (compositions RÉELLES des rosters training) :
+  P1 SM = Intercessor (Bolt Rifle) + VanguardVeteranSquadJumpPack (jump pack) ;
+  P2 Orks = 2× Boyz. Chaque figurine a `col/row/unit_type` propre (sergents, plasma, personnages
+  fidèles au roster). `terrain_ref` = **`terrain-mc1.json`** (terrain réel du training).
+- `scripts/fixed_brawl_deploy_modes_test.py` — **verrou** (bascule fixed↔active).
+- *(Aucun terrain créé — un premier jet en avait introduit un, retiré à la demande de l'utilisateur.)*
+
+**Le seul levier = `deployment_type`** (tracé, pas supposé). `game_state.py::load_units_from_scenario` :
+- `"fixed"` (ou champ absent, défaut ~L274) → chaque unité EXIGE `col/row` top-niveau = ancre =
+  `models[0]` (~L589-594), figurines posées telles quelles ; la clé `models[]` est normalisée par
+  figurine (~L874-985, override `unit_type`/stats par modèle). Au `reset`, phase `command` directe
+  (aucun `deployment`).
+- `"active"` → au `reset`, `deployment_type=="active"` déclenche la phase `deployment`
+  (`w40k_core.py:1364`), figurines mises à la sentinelle (-1,-1) et placées en jeu (IA/manuel). Les
+  `col/row` du fichier sont alors ignorés. `terrain-mc1.json` fournit les `deployment_zones` requises.
+
+**Positions par défaut** (éditables). Board 220×300 subhex. Placées dans les **bandes dégagées de
+mc1** (P1 SM rows 92/100, P2 Orks rows 198/206 ; cols 66-154), à l'écart des murs de la ruine
+centrale (rows ~120-185) — vérifié : le mode `fixed` chargeait en erreur « footprint on wall hex »
+tant que les unités tombaient sur la ruine. Portées lues (datasheets) pour référence : Bolt Rifle
+24″=120 subhex, shoota Boyz 18″=90 ; charge 11.02 (≤12″, non-engagé), zone d'engagement 03.04
+(2″=10 subhex hz).
+
+**Preuve in-engine (verrou, chemin gym réel).** `python3 scripts/fixed_brawl_deploy_modes_test.py` :
+```
+✅ fixed  : phase initiale='command', 4 unités / 36 figurines placées (aucun déploiement)
+✅ active : phase initiale='deployment', 4 unités en attente de déploiement
+✅ VERROU OK : même fichier, bascule fixed↔active par `deployment_type` (36 figurines).
+```
+⚠️ Piège rencontré (dans le verrou) : le loader **mémoïse le JSON par chemin absolu** (~L240) — tester
+deux modes en réécrivant un seul fichier temporaire relit le cache du 1er mode ; le verrou utilise
+donc **deux chemins distincts**.
+
+**Proportionnalité figé↔déploiement au fil du training — ✅ LIVRÉ (scheduler continu).** Approche
+retenue (arbitrage utilisateur) : **montée lisse par épisode**, mode `active` tiré à proba p(t)
+croissante, sur un SEUL fichier rechargé dans le mode tiré (réutilise les 2 chemins de chargement
+éprouvés plutôt qu'un chemin « hybride » risqué côté fuite d'état — cf. §0.25/§0.26). Implémentation
+(3 fichiers) :
+1. `game_state.py::load_units_from_scenario(..., deployment_type_override=None)` — force le mode du
+   chargement en remplaçant le `deployment_type` du JSON (et neutralise les surcharges P1/P2).
+2. `w40k_core.py::_configure_deployment_mode_for_episode()` — **miroir de `deployment_random_mix`**
+   (orthogonal : celui-ci choisit fixed/active, l'autre randomise les ACTIONS d'un déploiement déjà
+   actif). p(t) = `active_ratio_start + (end−start)·min(progress, freeze)`, progress =
+   `episode_number/(total_episodes−1)`, Bernoulli(p) → `active`/`fixed`. Dans `reset()`, impose un
+   rechargement avec l'override (reward_configs reconstruits via le chemin `_reload_scenario` existant).
+3. Config `x5_new.deployment_mode_schedule` (opt-in, `enabled:false` par défaut) :
+   `active_ratio_start/active_ratio_end/schedule:"linear"/freeze_after_progress`, `training_only`.
+**Preuve in-engine** — `python3 scripts/deployment_mode_schedule_test.py` : ratio 0.0→ 20/20 `fixed` ;
+ratio 1.0→ 20/20 `active` ; rampe 0→1 (60 ép.)→ part `active` croissante (1re moitié 8, 2e moitié 24),
+avec cohérence stricte mode↔phase (`fixed`→`command`, `active`→`deployment`). Le scheduler est
+**orthogonal** à `deployment_random_mix` (les deux peuvent coexister). ⚠️ `training_only:true` exige
+le scénario sous `.../scenarios/training/` (`_is_training_scenario_context`) — le déposer là pour
+l'activer en training réel ; mettre `enabled:true` dans `x5_new`.
+
+**Emplacements DANS les rosters (mode strict sur le chemin roster réel) — ✅ LIVRÉ.** Le training
+réel ne joue pas un `units[]` figé : il passe par le **template roster** (`scenario_training_armageddon.json`,
+`agent_roster_ref=training_random`, `opponent_roster_ref=[SM,Orks]`, **siège aléatoire**). Or un
+roster compact ne portait aucune coordonnée → `fixed` était interdit (`_expand_compact_roster_to_basic_units`
+levait). Solution retenue par l'utilisateur (pas de miroir) : **chaque roster déclare `top` ET `bottom`
+par figurine**, le loader choisit le côté selon le joueur assigné (**convention P1=top, P2=bottom**) —
+comme le siège est aléatoire, les deux côtés sont portés. Implémentation :
+- `game_state.py::_expand_compact_roster_to_basic_units` — `models[i]` accepte la forme objet
+  `{unit_type, top:{col,row[,level]}, bottom:{...}}` ; unité **mono** (véhicule/perso) : positions au
+  **niveau de l'entrée** (`top`/`bottom`) pour NE PAS la transformer en escouade (comportement `active`
+  préservé). En `fixed` : positions obligatoires (sinon erreur explicite), `count==1` requis, côté
+  sélectionné par joueur. En `active` : positions ignorées (roster à double usage). Helper
+  `_parse_roster_model_side` (validation stricte col/row/level).
+- Les **4 rosters** training (agent SM/Orks, opponent SM/Orks) portent désormais `top`/`bottom`,
+  produits par le **générateur committé `scripts/gen_roster_positions.py`** (reproductible) :
+  placement en **réseau hexagonal** (pas 9 subhex) par footprint réel (tailles de socle variables
+  persos/véhicules), wall-aware (terrain-mc1), sans chevauchement (le mode `fixed` valide les
+  footprints), dans les bandes haute (~rows 40-104) et basse (~196-260). **Cohérence d'escouade
+  GARANTIE** : le générateur n'accepte un centre d'escouade que si la formation est cohérente. La
+  règle moteur (03.03, `game_config` : `squad_min_neighbors`=1, `cohesion_distance_mode`="euclidean"
+  bord-à-bord 2", étalement 9") n'exige qu'**≥1 voisin** ; le générateur vise ≥2 centre-à-centre =
+  borne conservatrice. **L'oracle est la fonction moteur `validate_squad_coherency`** — c'est ELLE
+  que le verrou asserte à la charge (pas une réimplémentation).
+**Preuve in-engine** — `python3 scripts/roster_fixed_positions_test.py` : 8 épisodes `fixed` (rosters
++ siège tirés au hasard) → **aucun déploiement, toutes figurines placées, P1 en bande haute / P2 en
+bande basse, escouades cohérentes** ; 3 épisodes `active` → phase `deployment`, sentinelles.
+Cohérence re-vérifiée hors test : 0 figurine sous-cohérente sur 12 chargements (2 sièges × 6 rosters
+aléatoires). Régression : template `active` + rosters positionnés, scheduler off → step normal
+(deployment→move→shoot), aucun crash. Le scheduler `deployment_mode_schedule` rampe donc **strict
+(positions rosters) → déploiement appris** directement sur le vrai flux (rotation SM/Orks + siège
+aléatoires conservés). ⚠️ Si une composition de roster change, relancer `gen_roster_positions.py`.
+
+**Suite (mécanique LIVRÉE ; reste l'USAGE + la mesure — arbitrage utilisateur / dépendances).** Un
+agent frais qui reprend :
+1. **Activer le curriculum** : `x5_new.deployment_mode_schedule.enabled = true` puis régler la rampe
+   (`active_ratio_start`/`active_ratio_end`/`freeze_after_progress`, p.ex. 0.0→1.0 sur 0.8 de la
+   progression). Aucun autre câblage : le template roster réel (`scenario_training_armageddon.json`)
+   marche tel quel, rosters déjà positionnés.
+2. **Vérifier en épisode réel** avant un long run : `python3 ai/train.py --agent ArmageddonAgent
+   --training-config x5_new --step` + `ai/analyzer.py` + replay → confirmer que des épisodes `fixed`
+   (placement rosters, aucun déploiement) ET `active` (déploiement) surviennent, dans la bonne
+   proportion selon l'avancement.
+3. **Mesurer l'objectif curriculum** : win-rate en régime `fixed` (strict) vs `active` au fil de la
+   rampe — c'est la métrique qui valide « scénarios fixes → apprendre à se déployer ». **Rejoint
+   §0.14 (win-rate), donc BLOQUÉ par §0.27** (garde-fou d'éval trop lent) : lever §0.27 d'abord.
+Décisions ouvertes (utilisateur) : forme exacte de la rampe ; coexistence éventuelle avec
+`deployment_random_mix` ; siège (`agent_seat_mode`) gardé aléatoire ou figé en phase strict.
 
 
 ### 0.14 Re-mesure du run — 🟠 RUN LANCÉ LE 2026-07-22, BLOQUÉ À L'ÉVAL DU MARKER 2000 (cf. §0.27) ; score encore dû
@@ -153,6 +267,52 @@ non-régression tiennent sur un vrai run 48-envs. **Mais** le premier checkpoint
 confirme une fois de plus la leçon §0bis « un run vert ne prouve rien » : le fix move §0.25 avait
 passé un `--step` de 4 épisodes puis **crashé en 1 min** sur un vrai run 48-envs (cf. §0.26) — c'est
 le run multi-env, pas le smoke, qui a validé.
+
+### 0.28 Conformité tir obscuring (13.10) — soupçon RÉFUTÉ (aucun bug) — ✅ (2026-07-22)
+
+> **Conclusion : AUCUN bug.** Le moteur ne tire PAS à travers une aire occultante. La suspicion
+> (utilisateur, replay) a été investiguée à fond ; le verdict a nécessité de mesurer **in-engine sur le
+> vrai chemin d'éligibilité**, après une cascade de faux positifs offline (leçon → §0bis).
+
+**Règle (13 Terrain §13.10 + 06.01).** Deux figurines ne sont pas visibles ssi **TOUTE** ligne de vue
+entre elles traverse une aire occultante (hors aire occupée par l'une des deux). La LoS se trace **par
+figurine** et **depuis n'importe quelle partie du socle** (06.01) : un **bord** de socle peut voir là
+où le **centre** est masqué (peek légal).
+
+**Le vrai gate de tir gym** (pipeline squad V11, celui que MaskablePPO emprunte) :
+`env.get_action_mask` → `get_squad_action_mask_and_eligible_units` → `build_squad_action_mask` (branche
+shoot [`shared_utils.py:8170`](../../engine/phase_handlers/shared_utils.py#L8170)) →
+`_model_can_shoot_target` ([`:4722`](../../engine/phase_handlers/shared_utils.py#L4722)) →
+`_attacker_model_can_reach_squad` ([`:4515`](../../engine/phase_handlers/shared_utils.py#L4515)) →
+`_compute_visibility_with_obscuring`. Ce chemin est **par-figurine, footprint COMPLET, obscuring-aware
+(13.10)**. Il n'utilise **PAS** `compute_unit_los`/`valid_target_pool_build` (chemin legacy mono-fig) —
+d'où l'échec de mes audits initiaux placés sur le mauvais chemin.
+
+**Preuve (audit LIVE sur le vrai gate).** Instrumentation temporaire au `return True` de
+`_model_can_shoot_target`, recalcul indépendant « existe-t-il une ligne socle→socle évitant l'obscuring
+(hors aires exclues) ? » sur les footprints réels. Run `--step` : **297 tirs approuvés,
+`obscuring_clear_line=False = 0`, `GATE_BUG = 0`**. Le gate n'approuve JAMAIS un tir sans une ligne de
+socle qui évite les aires occultantes. Le « tir à travers terrain » vu en replay = **peek légal
+par-figurine**.
+
+**Ce qui a été RÉFUTÉ (mes propres faux positifs).** Un scan offline `step.log` centre→centre a
+flaggé 7–12 « tirs illégaux » par run ; des rejeux headless successifs ont même « confirmé » 10 puis 3
+tirs. **Tous FAUX** : (a) le scan teste des lignes **centre→centre**, alors que la LoS légale est
+**footprint→footprint** (un bord voit ce que le centre ne voit pas) ; (b) les rejeux headless étaient
+**non fidèles** (1er rejeu : unités restées à `(-1,-1)` car `place()` écrivait `unit["col"]` au lieu de
+`units_cache` ; suivants : arme/portée/état divergents du training). Le seul verdict fiable est venu de
+l'audit **dans le moteur, sur le vrai gate**, pas d'une reconstruction.
+
+**Livrable conservé.** Fixture d'audit obscuring (aire pleinement interposée, bloque correctement,
+`can_see=False`) : commité — `config/board/44x60x5/scenario/scenario_obscuring_fixture.json` +
+`terrain/terrain_obscuring_fixture.json`. Réutilisable comme test de non-régression 13.10.
+
+**⚠️ Leçon de méthode (→ §0bis).** Le **premier** rejeu a conclu « 0 bug sur 476 » — **FAUX** : `place()`
+poussait `unit["col"/"row"]` alors que `require_unit_position` lit `units_cache` ; les unités restaient
+à `(-1,-1)` (non déployées, `deployment_type="active"`), la LoS testait une ligne triviale
+`(-1,-1)→(-1,-1)` = visible. Le contrôle « les unités ont-elles vraiment bougé ? » (assert
+`require_unit_position == position loggée`) a retourné le verdict. Corollaire du motif §0.11/§0.18 :
+**un rejeu vert ne prouve rien s'il ne vérifie pas son propre setup.**
 
 ### 0.27 Blocage à l'éval du checkpoint — task d'éval en timeout (parties dégénérées × coût géodésique) — 🔴 OUVERT (2026-07-22)
 
@@ -293,6 +453,29 @@ acquis) / (C) L2b-colonnes bbox-restreint (NumPy pur, ~3× ovale visé, complexe
 >
 > Ces passages existent pour **empêcher de re-diagnostiquer un faux problème**. Aucun ne doit
 > être résumé ni supprimé, même si l'entrée dont il vient est close.
+
+### Ne pas juger une conformité de règle par une reconstruction offline — mesurer sur le vrai chemin in-engine (§0.28, 2026-07-22)
+
+Un soupçon de « tir à travers terrain » (obscuring 13.10) a coûté une **cascade de faux verdicts**
+avant d'être **réfuté** par une mesure in-engine. Les pièges, dans l'ordre où ils ont trompé :
+1. **Scan offline centre→centre** : la LoS légale est **footprint→footprint par-figurine** (06.01, un
+   bord de socle voit ce que le centre ne voit pas). Tester centre→centre sur-flagge en masse. Ce
+   motif est le **même** que celui qui a fait retirer le contrôle LoS de l'analyzer (§0.24 /
+   `project_analyzer_los_verdict`).
+2. **Rejeu headless non fidèle** : `place()` écrivait `unit["col"/"row"]` alors que le moteur lit
+   `units_cache` (`require_unit_position`) → unités restées à `(-1,-1)` → LoS triviale. Puis même
+   corrigé, l'arme/portée/état divergeaient du training. **Un rejeu doit vérifier son propre setup**
+   (assert `require_unit_position == position attendue`) avant de conclure quoi que ce soit.
+3. **Instrumenter le mauvais chemin** : 6 points instrumentés (compute_unit_los, valid_target_pool_build,
+   pool cache-hit, w40k_core log, action_decoder legacy) ont montré **0 hit** — le pipeline squad V11
+   n'emprunte AUCUN. Le vrai gate est `build_squad_action_mask` → `_model_can_shoot_target` →
+   `_attacker_model_can_reach_squad`. **Toujours tracer `env.get_action_mask` d'abord**, ne pas deviner.
+4. **Env var non propagée** : un audit gardé par `W40K_LOS_AUDIT` montrait 0 hit ; en inconditionnel,
+   297. Vérifier qu'une instrumentation gardée **s'exécute vraiment** (heartbeat) avant d'interpréter un 0.
+
+**Règle** : une affirmation de (non-)conformité de règle n'est valide **que** mesurée dans le moteur, sur
+le chemin réellement emprunté, avec un heartbeat qui prouve que la sonde tourne. Une reconstruction
+offline ne prouve rien sur la conformité.
 
 ### Sur ce document lui-même (§0.-1, §0.0)
 

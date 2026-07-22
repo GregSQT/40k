@@ -474,6 +474,14 @@
       "freeze_after_progress": 0.8,
       "apply_to": "agent_only"
     },
+    "deployment_mode_schedule": {
+      "enabled": false,
+      "training_only": true,
+      "active_ratio_start": 0.0,
+      "active_ratio_end": 1.0,
+      "schedule": "linear",
+      "freeze_after_progress": 1.0
+    },
     "observation_params": {
       "obs_size": 108,
       "perception_radius": 25,
@@ -799,6 +807,14 @@
           "elite": 6
         }
       }
+    },
+    "deployment_mode_schedule": {
+      "enabled": false,
+      "training_only": true,
+      "active_ratio_start": 0.0,
+      "active_ratio_end": 0.0,
+      "schedule": "linear",
+      "freeze_after_progress": 1.0
     },
     "deployment_random_mix": {
       "enabled": false,

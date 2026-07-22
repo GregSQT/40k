@@ -5,50 +5,52 @@
       "unit_type": "VanguardVeteranSquadJumpPack",
       "count": 1,
       "models": [
-        "VanguardVeteranSquadJumpPack",
-        "VanguardVeteranSquadJumpPack",
-        "VanguardVeteranSquadJumpPack",
-        "VanguardVeteranSquadJumpPackSergeant",
-        "VanguardVeteranSquadJumpPackPlasma",
-        "ChaplainJumpPack"
+        {"unit_type": "VanguardVeteranSquadJumpPack", "top": {"col": 40, "row": 55}, "bottom": {"col": 40, "row": 210}},
+        {"unit_type": "VanguardVeteranSquadJumpPack", "top": {"col": 36, "row": 63}, "bottom": {"col": 36, "row": 218}},
+        {"unit_type": "VanguardVeteranSquadJumpPack", "top": {"col": 44, "row": 63}, "bottom": {"col": 44, "row": 218}},
+        {"unit_type": "VanguardVeteranSquadJumpPackSergeant", "top": {"col": 49, "row": 55}, "bottom": {"col": 49, "row": 210}},
+        {"unit_type": "VanguardVeteranSquadJumpPackPlasma", "top": {"col": 44, "row": 47}, "bottom": {"col": 44, "row": 202}},
+        {"unit_type": "ChaplainJumpPack", "top": {"col": 36, "row": 47}, "bottom": {"col": 36, "row": 202}}
       ]
     },
     {
       "unit_type": "EradicatorHeavyBolter",
       "count": 1,
       "models": [
-        "EradicatorHeavyBolter",
-        "EradicatorHeavyBolter",
-        "EradicatorHeavyBolterSergeant"
+        {"unit_type": "EradicatorHeavyBolter", "top": {"col": 74, "row": 55}, "bottom": {"col": 74, "row": 210}},
+        {"unit_type": "EradicatorHeavyBolter", "top": {"col": 70, "row": 63}, "bottom": {"col": 70, "row": 218}},
+        {"unit_type": "EradicatorHeavyBolterSergeant", "top": {"col": 78, "row": 47}, "bottom": {"col": 83, "row": 210}}
       ]
     },
     {
       "unit_type": "LandSpeederOnslaughtGatlingCannon",
-      "count": 1
+      "count": 1,
+      "top": {"col": 108, "row": 55},
+      "bottom": {"col": 108, "row": 210}
     },
     {
       "unit_type": "Intercessor",
       "count": 1,
       "models": [
-        "Intercessor",
-        "Intercessor",
-        "Intercessor",
-        "IntercessorGrenadeLauncher",
-        "IntercessorSergeant",
-        "Librarian"
+        {"unit_type": "Intercessor", "top": {"col": 142, "row": 55}, "bottom": {"col": 142, "row": 210}},
+        {"unit_type": "Intercessor", "top": {"col": 146, "row": 63}, "bottom": {"col": 138, "row": 218}},
+        {"unit_type": "Intercessor", "top": {"col": 151, "row": 55}, "bottom": {"col": 146, "row": 218}},
+        {"unit_type": "IntercessorGrenadeLauncher", "top": {"col": 146, "row": 47}, "bottom": {"col": 151, "row": 210}},
+        {"unit_type": "IntercessorSergeant", "top": {"col": 138, "row": 47}, "bottom": {"col": 146, "row": 202}},
+        {"unit_type": "Librarian", "top": {"col": 133, "row": 55}, "bottom": {"col": 138, "row": 202}}
       ]
     },
     {
       "unit_type": "Intercessor",
       "count": 1,
       "models": [
-        "Intercessor",
-        "Intercessor",
-        "Intercessor",
-        "IntercessorGrenadeLauncher",
-        "IntercessorSergeant",
-        "CaptainRelicShield",
-        "Ancient"
+        {"unit_type": "Intercessor", "top": {"col": 40, "row": 77}, "bottom": {"col": 176, "row": 210}},
+        {"unit_type": "Intercessor", "top": {"col": 36, "row": 85}, "bottom": {"col": 172, "row": 218}},
+        {"unit_type": "Intercessor", "top": {"col": 44, "row": 85}, "bottom": {"col": 180, "row": 218}},
+        {"unit_type": "IntercessorGrenadeLauncher", "top": {"col": 49, "row": 77}, "bottom": {"col": 185, "row": 210}},
+        {"unit_type": "IntercessorSergeant", "top": {"col": 44, "row": 69}, "bottom": {"col": 180, "row": 202}},
+        {"unit_type": "CaptainRelicShield", "top": {"col": 36, "row": 69}, "bottom": {"col": 172, "row": 202}},
+        {"unit_type": "Ancient", "top": {"col": 31, "row": 77}, "bottom": {"col": 167, "row": 210}}
       ]
     }
   ]

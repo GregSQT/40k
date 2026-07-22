@@ -1,0 +1,8 @@
+{
+  "primary_objectives": ["objectives_control"],
+  "terrain_ref": "terrain_obscuring_fixture.json",
+  "units": [
+    { "id": 8001, "unit_type": "Intercessor", "player": 1, "col": 110, "row": 100 },
+    { "id": 8002, "unit_type": "Termagant",   "player": 2, "col": 110, "row": 160 }
+  ]
+}

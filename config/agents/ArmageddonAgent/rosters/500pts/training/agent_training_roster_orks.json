@@ -5,65 +5,71 @@
       "unit_type": "Boyz",
       "count": 1,
       "models": [
-        "Boyz",
-        "Boyz",
-        "Boyz",
-        "Boyz",
-        "Boyz",
-        "Boyz",
-        "Boyz",
-        "Boyz",
-        "Boyz",
-        "BoyzNobKombi",
-        "Warboss",
-        "PainBoy"
+        {"unit_type": "Boyz", "top": {"col": 40, "row": 55}, "bottom": {"col": 74, "row": 210}},
+        {"unit_type": "Boyz", "top": {"col": 36, "row": 63}, "bottom": {"col": 70, "row": 218}},
+        {"unit_type": "Boyz", "top": {"col": 44, "row": 63}, "bottom": {"col": 78, "row": 218}},
+        {"unit_type": "Boyz", "top": {"col": 49, "row": 55}, "bottom": {"col": 83, "row": 210}},
+        {"unit_type": "Boyz", "top": {"col": 44, "row": 47}, "bottom": {"col": 78, "row": 202}},
+        {"unit_type": "Boyz", "top": {"col": 36, "row": 47}, "bottom": {"col": 70, "row": 202}},
+        {"unit_type": "Boyz", "top": {"col": 31, "row": 55}, "bottom": {"col": 65, "row": 210}},
+        {"unit_type": "Boyz", "top": {"col": 31, "row": 71}, "bottom": {"col": 65, "row": 226}},
+        {"unit_type": "Boyz", "top": {"col": 40, "row": 71}, "bottom": {"col": 74, "row": 226}},
+        {"unit_type": "BoyzNobKombi", "top": {"col": 49, "row": 71}, "bottom": {"col": 88, "row": 218}},
+        {"unit_type": "Warboss", "top": {"col": 54, "row": 47}, "bottom": {"col": 92, "row": 210}},
+        {"unit_type": "PainBoy", "top": {"col": 54, "row": 63}, "bottom": {"col": 88, "row": 202}}
       ]
     },
     {
       "unit_type": "Boyz",
       "count": 1,
       "models": [
-        "Boyz",
-        "Boyz",
-        "Boyz",
-        "Boyz",
-        "Boyz",
-        "Boyz",
-        "Boyz",
-        "Boyz",
-        "Boyz",
-        "BoyzNobKombi",
-        "Bigboss",
-        "BannerNob"
+        {"unit_type": "Boyz", "top": {"col": 108, "row": 55}, "bottom": {"col": 142, "row": 210}},
+        {"unit_type": "Boyz", "top": {"col": 104, "row": 63}, "bottom": {"col": 138, "row": 218}},
+        {"unit_type": "Boyz", "top": {"col": 112, "row": 63}, "bottom": {"col": 146, "row": 218}},
+        {"unit_type": "Boyz", "top": {"col": 117, "row": 55}, "bottom": {"col": 151, "row": 210}},
+        {"unit_type": "Boyz", "top": {"col": 112, "row": 47}, "bottom": {"col": 146, "row": 202}},
+        {"unit_type": "Boyz", "top": {"col": 104, "row": 47}, "bottom": {"col": 138, "row": 202}},
+        {"unit_type": "Boyz", "top": {"col": 99, "row": 55}, "bottom": {"col": 133, "row": 210}},
+        {"unit_type": "Boyz", "top": {"col": 108, "row": 71}, "bottom": {"col": 133, "row": 226}},
+        {"unit_type": "Boyz", "top": {"col": 122, "row": 63}, "bottom": {"col": 142, "row": 226}},
+        {"unit_type": "BoyzNobKombi", "top": {"col": 126, "row": 55}, "bottom": {"col": 151, "row": 226}},
+        {"unit_type": "Bigboss", "top": {"col": 122, "row": 47}, "bottom": {"col": 156, "row": 218}},
+        {"unit_type": "BannerNob", "top": {"col": 117, "row": 39}, "bottom": {"col": 160, "row": 210}}
       ]
     },
     {
       "unit_type": "Gretchin",
       "count": 1,
       "models": [
-        "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "Gretchin"
+        {"unit_type": "Gretchin", "top": {"col": 176, "row": 55}, "bottom": {"col": 176, "row": 210}},
+        {"unit_type": "Gretchin", "top": {"col": 172, "row": 63}, "bottom": {"col": 172, "row": 218}},
+        {"unit_type": "Gretchin", "top": {"col": 180, "row": 63}, "bottom": {"col": 180, "row": 218}},
+        {"unit_type": "Gretchin", "top": {"col": 185, "row": 55}, "bottom": {"col": 185, "row": 210}},
+        {"unit_type": "Gretchin", "top": {"col": 172, "row": 47}, "bottom": {"col": 180, "row": 202}},
+        {"unit_type": "Gretchin", "top": {"col": 167, "row": 55}, "bottom": {"col": 172, "row": 202}},
+        {"unit_type": "Gretchin", "top": {"col": 167, "row": 71}, "bottom": {"col": 167, "row": 210}},
+        {"unit_type": "Gretchin", "top": {"col": 176, "row": 71}, "bottom": {"col": 167, "row": 226}},
+        {"unit_type": "Gretchin", "top": {"col": 185, "row": 71}, "bottom": {"col": 176, "row": 226}},
+        {"unit_type": "Gretchin", "top": {"col": 190, "row": 63}, "bottom": {"col": 185, "row": 226}}
       ]
     },
     {
       "unit_type": "WeirdBoy",
-      "count": 1
+      "count": 1,
+      "top": {"col": 36, "row": 85},
+      "bottom": {"col": 40, "row": 232}
     },
     {
       "unit_type": "WarTrakk",
-      "count": 1
+      "count": 1,
+      "top": {"col": 74, "row": 77},
+      "bottom": {"col": 65, "row": 248}
     },
     {
       "unit_type": "BigMekDakkarig",
-      "count": 1
+      "count": 1,
+      "top": {"col": 99, "row": 93},
+      "bottom": {"col": 104, "row": 240}
     }
   ]
 }

@@ -1,0 +1,18 @@
+{
+  "terrain_id": "terrain_obscuring_fixture",
+  "terrain": [
+    {
+      "id": "obscuring_band",
+      "name": "obscuring band between squads",
+      "obscuring": true,
+      "shape": "polygon",
+      "vertices": [
+        [40, 125],
+        [180, 125],
+        [180, 135],
+        [40, 135]
+      ],
+      "objective": false
+    }
+  ]
+}

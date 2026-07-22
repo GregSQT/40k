@@ -880,6 +880,111 @@ class W40KEngine(gym.Env):
         self.game_state["deployment_random_mix_ratio"] = mix_ratio
         self.game_state["deployment_random_mix_episode_enabled"] = self._deployment_random_mix_episode_enabled
 
+    def _configure_deployment_mode_for_episode(self) -> Optional[str]:
+        """Scheduler par-épisode du MODE de déploiement (fixed ↔ active), rampé sur la progression.
+
+        Orthogonal à ``deployment_random_mix`` (qui, lui, randomise les ACTIONS d'un déploiement
+        déjà actif). Ici on choisit, par épisode, si le scénario est rejoué en placement figé
+        (``fixed``, positions du JSON) ou en phase de déploiement (``active``, positions ignorées).
+
+        Contrat (training_config):
+          deployment_mode_schedule:
+            enabled: bool
+            training_only: bool
+            active_ratio_start: float in [0,1]   # proba 'active' au début du training
+            active_ratio_end: float in [0,1]     # proba 'active' à la fin
+            schedule: "linear"
+            freeze_after_progress: float in [0,1]
+
+        Retourne "active" | "fixed" pour l'épisode, ou None si inactif (mode laissé au JSON).
+        """
+        if not isinstance(self.training_config, dict):
+            return None
+        cfg = self.training_config.get("deployment_mode_schedule")
+        if cfg is None:
+            return None
+        if not isinstance(cfg, dict):
+            raise TypeError(
+                "training_config.deployment_mode_schedule must be an object "
+                f"(got {type(cfg).__name__})"
+            )
+
+        enabled = require_key(cfg, "enabled")
+        if not isinstance(enabled, bool):
+            raise TypeError(
+                "training_config.deployment_mode_schedule.enabled must be bool "
+                f"(got {type(enabled).__name__})"
+            )
+        if not enabled:
+            return None
+
+        training_only = require_key(cfg, "training_only")
+        if not isinstance(training_only, bool):
+            raise TypeError(
+                "training_config.deployment_mode_schedule.training_only must be bool "
+                f"(got {type(training_only).__name__})"
+            )
+        if training_only and not self._is_training_scenario_context():
+            return None
+
+        ratio_start = require_key(cfg, "active_ratio_start")
+        ratio_end = require_key(cfg, "active_ratio_end")
+        for name, val in (("active_ratio_start", ratio_start), ("active_ratio_end", ratio_end)):
+            if not isinstance(val, (int, float)) or isinstance(val, bool):
+                raise TypeError(
+                    f"training_config.deployment_mode_schedule.{name} must be number "
+                    f"(got {type(val).__name__})"
+                )
+            if float(val) < 0.0 or float(val) > 1.0:
+                raise ValueError(
+                    f"training_config.deployment_mode_schedule.{name} must be in [0,1] (got {val})"
+                )
+        ratio_start = float(ratio_start)
+        ratio_end = float(ratio_end)
+
+        schedule = require_key(cfg, "schedule")
+        if schedule != "linear":
+            raise ValueError(
+                "training_config.deployment_mode_schedule.schedule must be 'linear' "
+                f"(got {schedule!r})"
+            )
+        freeze_after_progress = require_key(cfg, "freeze_after_progress")
+        if not isinstance(freeze_after_progress, (int, float)) or isinstance(freeze_after_progress, bool):
+            raise TypeError(
+                "training_config.deployment_mode_schedule.freeze_after_progress must be number "
+                f"(got {type(freeze_after_progress).__name__})"
+            )
+        freeze_after_progress = float(freeze_after_progress)
+        if freeze_after_progress < 0.0 or freeze_after_progress > 1.0:
+            raise ValueError(
+                "training_config.deployment_mode_schedule.freeze_after_progress must be in [0,1] "
+                f"(got {freeze_after_progress})"
+            )
+
+        total_episodes = require_key(self.training_config, "total_episodes")
+        if not isinstance(total_episodes, int) or isinstance(total_episodes, bool):
+            raise TypeError(
+                "training_config.total_episodes must be integer "
+                f"(got {type(total_episodes).__name__})"
+            )
+        if total_episodes <= 0:
+            raise ValueError(f"training_config.total_episodes must be > 0 (got {total_episodes})")
+
+        # Progression : self.episode_number est PRÉ-incrément à ce stade du reset (l'incrément a
+        # lieu plus bas). Premier épisode → 0 → proba = active_ratio_start. Base cohérente avec
+        # l'index utilisé par le loader (`_training_episode_index`).
+        episode_index = max(0, int(self.episode_number))
+        denominator = max(1, total_episodes - 1)
+        progress = min(1.0, max(0.0, float(episode_index) / float(denominator)))
+        capped_progress = min(progress, freeze_after_progress)
+        p_active = ratio_start + ((ratio_end - ratio_start) * capped_progress)
+        p_active = min(1.0, max(0.0, p_active))
+
+        mode = "active" if random.random() < p_active else "fixed"
+        self.game_state["deployment_mode_schedule_p_active"] = p_active
+        self.game_state["deployment_mode_schedule_mode"] = mode
+        return mode
+
     def _should_force_random_deployment_action(self, action_mask: np.ndarray) -> bool:
         """Return True when current deployment step must use random valid action."""
         if self.game_state.get("phase") != "deployment":
@@ -958,9 +1063,18 @@ class W40KEngine(gym.Env):
         elif getattr(self, "_scenario_has_random_agent_roster", False):
             should_reload_scenario = True
 
+        # Scheduler par-épisode fixed↔active : impose un rechargement avec le mode tiré (rampé sur
+        # la progression du training). None = scheduler inactif → mode laissé au JSON du scénario.
+        episode_deployment_mode = self._configure_deployment_mode_for_episode()
+        if episode_deployment_mode is not None:
+            should_reload_scenario = True
+
         # RANDOM SCENARIO SELECTION: Pick a random scenario for this episode
         if should_reload_scenario:
-            self._reload_scenario(require_present(self._current_scenario_file, "_current_scenario_file"))
+            self._reload_scenario(
+                require_present(self._current_scenario_file, "_current_scenario_file"),
+                deployment_type_override=episode_deployment_mode,
+            )
             # Rebuild reward configs for units in the new scenario.
             reward_configs = self._build_reward_configs_for_current_units()
             self.game_state["reward_configs"] = reward_configs
@@ -6143,8 +6257,12 @@ class W40KEngine(gym.Env):
             unit_by_id[uid] = u
         self.game_state["unit_by_id"] = unit_by_id
 
-    def _load_units_from_scenario(self, scenario_file, unit_registry):
-        """Load units from scenario - delegates to state_manager."""
+    def _load_units_from_scenario(self, scenario_file, unit_registry, deployment_type_override=None):
+        """Load units from scenario - delegates to state_manager.
+
+        ``deployment_type_override`` : propage le mode de déploiement choisi pour l'épisode
+        (scheduler fixed↔active), voir ``GameStateManager.load_units_from_scenario``.
+        """
         # Create temporary state_manager just for loading during init.
         # During early bootstrap, self.config may not exist yet; default bootstrap seat is player 1.
         bootstrap_controlled_player = 1
@@ -6165,20 +6283,27 @@ class W40KEngine(gym.Env):
             bootstrap_config,
             unit_registry
         )
-        return temp_manager.load_units_from_scenario(scenario_file, unit_registry)
+        return temp_manager.load_units_from_scenario(
+            scenario_file, unit_registry, deployment_type_override=deployment_type_override
+        )
 
-    def _reload_scenario(self, scenario_file: str):
+    def _reload_scenario(self, scenario_file: str, deployment_type_override=None):
         """Reload scenario data for random scenario selection during training.
 
         This method is called during reset() when random_scenario_mode is enabled.
         It reloads units, walls, and objectives from the selected scenario file.
+
+        ``deployment_type_override`` : mode de déploiement imposé pour l'épisode
+        (scheduler fixed↔active, cf. ``_configure_deployment_mode_for_episode``).
         """
         from config_loader import get_config_loader
         config_loader = get_config_loader()
         board_config = config_loader.get_board_config()
 
         # Load scenario data (units + optional terrain)
-        scenario_result = self._load_units_from_scenario(scenario_file, self.unit_registry)
+        scenario_result = self._load_units_from_scenario(
+            scenario_file, self.unit_registry, deployment_type_override=deployment_type_override
+        )
         scenario_units = scenario_result["units"]
         scenario_roster_info = scenario_result.get("roster_info")
         scenario_primary_objective_ids = scenario_result.get("primary_objectives")

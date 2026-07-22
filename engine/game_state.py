@@ -224,8 +224,16 @@ class GameStateManager:
             if field not in unit:
                 raise ValueError(f"Unit {unit['id']} missing required UPPERCASE field: {field}")
 
-    def load_units_from_scenario(self, scenario_file, unit_registry):
-            """Load units from scenario file - NO FALLBACKS ALLOWED."""
+    def load_units_from_scenario(self, scenario_file, unit_registry, deployment_type_override=None):
+            """Load units from scenario file - NO FALLBACKS ALLOWED.
+
+            ``deployment_type_override`` (optionnel) : force le mode de déploiement de CE chargement,
+            en remplaçant le ``deployment_type`` du JSON (et en neutralisant les surcharges par joueur
+            ``deployment_type_P1``/``deployment_type_P2``). Sert au scheduler par-épisode fixed↔active
+            (`w40k_core._configure_deployment_mode_for_episode`) : le MÊME fichier est rechargé tantôt
+            "fixed" (positions du JSON), tantôt "active" (déploiement, positions ignorées). Exige un
+            scénario objet (dict) fournissant des zones de déploiement pour le mode "active".
+            """
             if not scenario_file:
                 raise ValueError("scenario_file is required - no fallbacks allowed")
             if not unit_registry:
@@ -246,7 +254,25 @@ class GameStateManager:
                 except Exception as e:
                     raise ValueError(f"Failed to parse scenario file {scenario_file}: {e}")
                 _scenario_json_cache[abs_path] = copy.deepcopy(scenario_data)
-            
+
+            # Override par-épisode du mode de déploiement (scheduler fixed↔active). Appliqué sur la
+            # copie locale (jamais sur le cache) AVANT toute résolution de deployment_type.
+            if deployment_type_override is not None:
+                valid_override = ("fixed", "active", "random")
+                if deployment_type_override not in valid_override:
+                    raise ValueError(
+                        f"deployment_type_override invalide: {deployment_type_override!r} "
+                        f"(attendu {valid_override})"
+                    )
+                if not isinstance(scenario_data, dict):
+                    raise ValueError(
+                        f"deployment_type_override requiert un scénario objet (dict) avec zones de "
+                        f"déploiement, pas une simple liste d'unités: {scenario_file}"
+                    )
+                scenario_data["deployment_type"] = deployment_type_override
+                scenario_data.pop("deployment_type_P1", None)
+                scenario_data.pop("deployment_type_P2", None)
+
             scenario_roster_info: Optional[Dict[str, Any]] = None
             if isinstance(scenario_data, list):
                 basic_units = scenario_data
@@ -1793,6 +1819,11 @@ class GameStateManager:
                 )
 
             model_specs: Optional[List[Dict[str, Any]]] = None
+            # Positions par figurine (mode 'fixed'/strict) : parallèle à model_specs, chaque entrée
+            # = {'top': (col,row,level), 'bottom': (col,row,level)} ou None. Une escouade positionnée
+            # porte les DEUX côtés (top=joueur 1, bottom=joueur 2) car le siège est aléatoire.
+            model_positions: Optional[List[Optional[Dict[str, Tuple[int, int, int]]]]] = None
+            positions_declared = False
             if has_models_per_unit:
                 models_per_unit = comp_entry["models_per_unit"]
                 if (
@@ -1805,42 +1836,170 @@ class GameStateManager:
                         f"positive int, got {models_per_unit!r}"
                     )
                 # Escouade homogène : pas d'override par figurine, les figurines
-                # héritent des stats de l'unit_type de l'escouade.
+                # héritent des stats de l'unit_type de l'escouade. Pas de positions (active seul).
                 model_specs = [{} for _ in range(models_per_unit)]
             elif has_models:
                 raw_models = comp_entry["models"]
                 if not isinstance(raw_models, list) or not raw_models:
                     raise ValueError(
                         f"Roster {roster_path} composition[{idx}].models must be a non-empty list "
-                        f"of unit_type strings"
+                        f"of unit_type strings or per-model objects"
                     )
                 model_specs = []
-                for m_idx, model_type in enumerate(raw_models):
-                    if not isinstance(model_type, str) or not model_type.strip():
+                model_positions = []
+                for m_idx, spec in enumerate(raw_models):
+                    if isinstance(spec, str):
+                        # Forme historique : type seul, aucune position (déploiement 'active' requis).
+                        if not spec.strip():
+                            raise ValueError(
+                                f"Roster {roster_path} composition[{idx}].models[{m_idx}] must be "
+                                f"non-empty string, got {spec!r}"
+                            )
+                        model_specs.append({"unit_type": spec.strip()})
+                        model_positions.append(None)
+                    elif isinstance(spec, dict):
+                        # Forme positionnée : {unit_type, top:{col,row[,level]}, bottom:{...}}.
+                        mt = require_key(spec, "unit_type")
+                        if not isinstance(mt, str) or not mt.strip():
+                            raise ValueError(
+                                f"Roster {roster_path} composition[{idx}].models[{m_idx}].unit_type "
+                                f"must be non-empty string, got {mt!r}"
+                            )
+                        model_specs.append({"unit_type": mt.strip()})
+                        has_top = "top" in spec
+                        has_bottom = "bottom" in spec
+                        if not has_top and not has_bottom:
+                            model_positions.append(None)
+                        elif has_top and has_bottom:
+                            model_positions.append({
+                                "top": self._parse_roster_model_side(
+                                    spec["top"], roster_path, idx, m_idx, "top"
+                                ),
+                                "bottom": self._parse_roster_model_side(
+                                    spec["bottom"], roster_path, idx, m_idx, "bottom"
+                                ),
+                            })
+                        else:
+                            raise ValueError(
+                                f"Roster {roster_path} composition[{idx}].models[{m_idx}] must "
+                                f"declare BOTH 'top' and 'bottom' positions (or neither)"
+                            )
+                    else:
                         raise ValueError(
-                            f"Roster {roster_path} composition[{idx}].models[{m_idx}] must be "
-                            f"non-empty string, got {model_type!r}"
+                            f"Roster {roster_path} composition[{idx}].models[{m_idx}] must be a "
+                            f"unit_type string or an object {{unit_type, top, bottom}}, "
+                            f"got {type(spec).__name__}"
                         )
-                    model_specs.append({"unit_type": model_type.strip()})
+                pos_flags = [p is not None for p in model_positions]
+                if any(pos_flags) and not all(pos_flags):
+                    raise ValueError(
+                        f"Roster {roster_path} composition[{idx}].models mixes positioned and "
+                        f"unpositioned figurines — declare top/bottom on ALL figurines or NONE"
+                    )
+                positions_declared = bool(pos_flags) and all(pos_flags)
 
             if model_specs is not None and deployment_type != "active":
-                raise ValueError(
-                    f"Roster {roster_path} composition[{idx}] declares a multi-model squad but "
-                    f"player {player} deployment type is '{deployment_type}': compact rosters carry "
-                    f"no coordinates, so per-model squads require deployment type 'active'"
-                )
-
-            for _ in range(count):
-                unit_entry: Dict[str, Any] = {
+                # Hors 'active', une escouade multi-figurines DOIT porter des positions par figurine
+                # (top/bottom) — sinon _build_enhanced_unit exigerait col/row absents. Pas de fallback.
+                if not positions_declared:
+                    raise ValueError(
+                        f"Roster {roster_path} composition[{idx}] declares a multi-model squad but "
+                        f"player {player} deployment type is '{deployment_type}': déclare des positions "
+                        f"par figurine (top/bottom) ou utilise le déploiement 'active'"
+                    )
+                if count != 1:
+                    raise ValueError(
+                        f"Roster {roster_path} composition[{idx}]: une escouade positionnée exige "
+                        f"count == 1 (got {count})"
+                    )
+                # Sélection du côté selon le joueur assigné (convention : P1=top, P2=bottom).
+                side = "top" if int(player) == 1 else "bottom"
+                placed_models: List[Dict[str, Any]] = []
+                for base_spec, pos in zip(model_specs, model_positions or []):
+                    p_col, p_row, p_level = pos[side]
+                    placed = {"unit_type": base_spec["unit_type"], "col": p_col, "row": p_row}
+                    if p_level:
+                        placed["level"] = p_level
+                    placed_models.append(placed)
+                unit_entry = {
                     "id": next_id,
                     "player": player,
-                    "unit_type": unit_type.strip()
+                    "unit_type": unit_type.strip(),
+                    "col": placed_models[0]["col"],
+                    "row": placed_models[0]["row"],
+                    "models": placed_models,
                 }
-                if model_specs is not None:
-                    unit_entry["models"] = copy.deepcopy(model_specs)
+                expanded_units.append(unit_entry)
+                next_id += 1
+                continue
+
+            # Déploiement 'active' (positions ignorées : roster à double usage) ou mono-figurine.
+            emit_models: Optional[List[Dict[str, Any]]] = None
+            if model_specs is not None:
+                emit_models = [
+                    {"unit_type": s["unit_type"]} if "unit_type" in s else {}
+                    for s in model_specs
+                ]
+            # Unité mono-figurine (ni 'models' ni 'models_per_unit') en mode 'fixed' : elle porte
+            # ses positions au NIVEAU DE L'ENTRÉE (top/bottom), pour ne pas la transformer en
+            # escouade (comportement 'active' des véhicules/persos préservé à l'identique).
+            mono_pos: Optional[Tuple[int, int, int]] = None
+            if model_specs is None and deployment_type != "active":
+                has_top = "top" in comp_entry
+                has_bottom = "bottom" in comp_entry
+                if not (has_top and has_bottom):
+                    raise ValueError(
+                        f"Roster {roster_path} composition[{idx}] (unité mono '{unit_type}') en "
+                        f"déploiement '{deployment_type}' exige des positions 'top' ET 'bottom' au "
+                        f"niveau de l'entrée, ou le déploiement 'active'"
+                    )
+                if count != 1:
+                    raise ValueError(
+                        f"Roster {roster_path} composition[{idx}]: une unité positionnée exige "
+                        f"count == 1 (got {count})"
+                    )
+                side = "top" if int(player) == 1 else "bottom"
+                mono_pos = self._parse_roster_model_side(
+                    comp_entry[side], roster_path, idx, 0, side
+                )
+            for _ in range(count):
+                unit_entry = {
+                    "id": next_id,
+                    "player": player,
+                    "unit_type": unit_type.strip(),
+                }
+                if emit_models is not None:
+                    unit_entry["models"] = copy.deepcopy(emit_models)
+                if mono_pos is not None:
+                    unit_entry["col"] = mono_pos[0]
+                    unit_entry["row"] = mono_pos[1]
+                    if mono_pos[2]:
+                        unit_entry["level"] = mono_pos[2]
                 expanded_units.append(unit_entry)
                 next_id += 1
         return expanded_units
+
+    def _parse_roster_model_side(
+        self, side_spec: Any, roster_path: str, comp_idx: int, model_idx: int, side_name: str
+    ) -> Tuple[int, int, int]:
+        """Valide et normalise une position de côté ``{col, row[, level]}`` d'un modèle de roster.
+
+        Retourne ``(col, row, level)``. ``level`` optionnel (défaut 0). Aucun fallback : toute
+        clé manquante/invalide est une erreur explicite.
+        """
+        hint = f"Roster {roster_path} composition[{comp_idx}].models[{model_idx}].{side_name}"
+        if not isinstance(side_spec, dict):
+            raise ValueError(f"{hint} must be an object {{col, row[, level]}}, got {type(side_spec).__name__}")
+        col = require_key(side_spec, "col")
+        row = require_key(side_spec, "row")
+        if not isinstance(col, int) or isinstance(col, bool):
+            raise ValueError(f"{hint}.col must be int, got {col!r}")
+        if not isinstance(row, int) or isinstance(row, bool):
+            raise ValueError(f"{hint}.row must be int, got {row!r}")
+        level = side_spec.get("level", 0)  # get allowed (champ optionnel : sol par défaut)
+        if not isinstance(level, int) or isinstance(level, bool) or level < 0:
+            raise ValueError(f"{hint}.level must be a non-negative int, got {level!r}")
+        return int(col), int(row), int(level)
     
     # ============================================================================
     # UTILITIES
