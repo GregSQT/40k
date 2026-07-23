@@ -86,7 +86,7 @@ multiplier les socles. Le cercle vert se dessine par figurine, aux mêmes centre
 |---|---|---|---|
 | A | Cercle vert en **phase fight** | **fait — validé unit + tsc ; visuel browser à confirmer** | Confirmer le cercle vert en fight dans un replay (§4.A) |
 | B | Purge legacy pools V10 du `game_state` | **audit requis, non planifié** | Vérifier inertie puis retirer (§4.B) |
-| C | `pile_in` / `consolidation` classés en **phase `move`** | **bug annexe ouvert** (test rouge dédié, cf. §4.C) | Classer en `fight` + méta |
+| C | `pile_in` / `consolidation` classés en **phase `move`** | **fait (2026-07-23)** | — |
 | — | Replay per-figurine (segments MODELS/TARGET_MODELS) | **fait** (commits `81e56c35`, `4ea850c3`) | — |
 | — | Détail par-figurine (bouton +) move/advance/charge/reactive | **fait** (`4ea850c3`) | — |
 
@@ -171,16 +171,20 @@ audit d'inertie de `_update_fight_subphase` V10 (`:1564`, `:2510`) et des retrai
 Le fix §4.A a déjà retiré la lecture de ces pools au **logging** ; il reste leur cycle de vie complet
 dans le `game_state`.
 
-### 4.C — `pile_in` / `consolidation` classés en phase `move`
-`replayParser.ts:1391-1401` : la phase d'un état est déduite par `action.type.includes("fight")`.
-Or `"pile_in"` / `"consolidation"` ne contiennent pas `"fight"` → classés `move` par défaut.
-Conséquence restante : pendant un déplacement de combat, le **tracker de phase** affiche `move` au
-lieu de `fight`. Le cercle vert, lui, est correct (restreint à l'unité qui bouge via
-`eligibleUnitIds = [replayActiveUnitId]`, cf. §3). Donc C se réduit au **label de phase**.
-Test rouge dédié pré-existant : `tests/unit/engine/test_squad_step_logging.py::
-test_type_without_formatter_is_skipped_not_crashed` (attend pile_in « sans formateur », or il en a un
-depuis `4ea850c3` et sort en `phase="move"`). Fix propre = classer `phase="fight"` (parseur) +
-émettre `[FIGHT_SUBPHASE:…]` sur ces lignes (moteur) + réaligner le test.
+### 4.C — `pile_in` / `consolidation` classés en phase `move` ✅ FAIT (2026-07-23)
+Le moteur loggue déjà ces lignes `FIGHT : … PILED IN/CONSOLIDATED` (phase correcte côté log). Le bug
+était **parseur-only** : la phase de l'ÉTAT était déduite par `action.type.includes("fight")`, or
+`"pile_in"`/`"consolidation"` ne contiennent pas `"fight"` → classés `move`.
+
+**Implémenté :**
+1. `frontend/src/utils/replayParser.ts` : `pile_in`/`consolidation` → `phase="fight"` ; `fightStateFields`
+   étendu — `fight_subphase` dérivé du type (`pile_in`/`consolidate`, exact vs moteur, non loggué sur
+   ces lignes) et `fight_eligible_units = [unit_id]` (l'unité qui bouge = active).
+2. `tests/unit/engine/test_squad_step_logging.py` : test obsolète réaligné (`pile_in` A un formateur,
+   présent dans `_STEP_LOG_TYPE_MAP`) + nouveau `test_pile_in_is_logged_as_fight`.
+3. Verrou parseur : `replayParser.test.ts` (pile_in → `phase="fight"`, `fight_eligible_units=[unit_id]`).
+
+Validé : pytest squad_step_logging vert, vitest 5/5, tsc propre. Pas de régénération de log (parseur seul).
 
 ---
 

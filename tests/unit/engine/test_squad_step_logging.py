@@ -104,13 +104,28 @@ def test_move_type_maps_to_formatter_action_type(move_type, expected):
 
 
 def test_type_without_formatter_is_skipped_not_crashed():
-    """pile_in/consolidation/death... n'ont pas de formateur : ignorés volontairement."""
+    """death/roll_info/battle_shock n'ont pas de formateur (_STEP_LOG_TYPE_MAP) : ignorés
+    volontairement. NB: pile_in/consolidation, eux, SONT journalisés (phase fight) — cf.
+    test_pile_in_is_logged_as_fight."""
     logger = _FakeStepLogger()
-    logs = [{"type": "pile_in", "unitId": "1"}, {"type": "death", "unitId": "2"},
-            {"type": "roll_info"}, {"type": "battle_shock"}]
+    logs = [{"type": "death", "unitId": "2"}, {"type": "roll_info"}, {"type": "battle_shock"}]
     eng = _engine_stub(logs, logger)
     _drain(eng)
     assert logger.calls == []
+
+
+def test_pile_in_is_logged_as_fight():
+    """pile_in/consolidation sont des déplacements de la phase fight : journalisés (formateur present
+    dans _STEP_LOG_TYPE_MAP), avec la phase portee par le raw_log."""
+    logger = _FakeStepLogger()
+    logs = [
+        {"type": "pile_in", "unitId": "1", "phase": "fight", "player": 1},
+        {"type": "consolidation", "unitId": "2", "phase": "fight", "player": 2},
+    ]
+    eng = _engine_stub(logs, logger)
+    _drain(eng)
+    assert [c["action_type"] for c in logger.calls] == ["pile_in", "consolidation"]
+    assert all(c["phase"] == "fight" for c in logger.calls)
 
 
 def test_shoot_emits_one_log_action_per_shot():

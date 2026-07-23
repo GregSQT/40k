@@ -1372,17 +1372,40 @@ export function parse_log_file_from_text(text: string): ReplayData {
         phase = "shoot";
       } else if (action.type.includes("charge")) {
         phase = "charge";
-      } else if (action.type.includes("fight")) {
+      } else if (
+        action.type.includes("fight") ||
+        action.type === "pile_in" ||
+        action.type === "consolidation"
+      ) {
+        // pile_in (12.02) / consolidation (12.07) sont des déplacements de la PHASE FIGHT — le moteur
+        // les loggue « FIGHT : … PILED IN/CONSOLIDATED ». Sans ça, ils tombaient en phase "move".
         phase = "fight";
       }
 
-      // Cercle vert en fight = UNIQUEMENT l'unité activée (celle qui frappe), pas le pool activable.
-      // L'unité active EST l'attaquant de la ligne FOUGHT → fight_eligible_units = [attacker_id].
-      // fight_subphase reste requis pour que BoardPvp prenne la branche pool (sinon fallback = toutes).
-      const fightStateFields = action.type.includes("fight")
+      // Cercle vert en fight = UNIQUEMENT l'unité active (celle qui joue), pas le pool activable.
+      //  - FOUGHT       → unité active = attaquant (attacker_id), sous-phase parsée [FIGHT_SUBPHASE].
+      //  - pile_in/conso → unité active = celle qui bouge (unit_id) ; sous-phase dérivée du type
+      //    (exacte vs moteur : fight_subphase ∈ pile_in/consolidate), non loggée sur ces lignes.
+      const isFightPhaseAction =
+        action.type.includes("fight") ||
+        action.type === "pile_in" ||
+        action.type === "consolidation";
+      const fightStateFields = isFightPhaseAction
         ? {
-            fight_subphase: action.fight_subphase,
-            fight_eligible_units: action.attacker_id != null ? [action.attacker_id] : [],
+            fight_subphase:
+              action.type === "pile_in"
+                ? "pile_in"
+                : action.type === "consolidation"
+                  ? "consolidate"
+                  : action.fight_subphase,
+            fight_eligible_units:
+              action.type === "fight"
+                ? action.attacker_id != null
+                  ? [action.attacker_id]
+                  : []
+                : action.unit_id != null
+                  ? [action.unit_id]
+                  : [],
           }
         : {};
 
