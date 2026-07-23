@@ -50,9 +50,6 @@ interface ReplayAction {
   weapon_name?: string;
   // Fight phase metadata (AI_TURN.md compliance)
   fight_subphase?: string;
-  charging_activation_pool?: number[];
-  active_alternating_activation_pool?: number[];
-  non_active_alternating_activation_pool?: number[];
   // Charge action fields
   charge_roll?: number;
   charge_success?: boolean;
@@ -1040,28 +1037,6 @@ export function parse_log_file_from_text(text: string): ReplayData {
       }
       action.fight_subphase = fightSubphaseMatch[1].trim();
 
-      const parsePoolTag = (tagName: string): number[] => {
-        const tagMatch = trimmed.match(new RegExp(`\\[${tagName}:([^\\]]*)\\]`));
-        if (!tagMatch) {
-          throw new Error(`Fight replay line missing ${tagName} metadata: ${trimmed}`);
-        }
-        const rawPayload = tagMatch[1].trim();
-        if (rawPayload === "") {
-          return [];
-        }
-        const parsed = rawPayload.split(",").map((token) => {
-          const value = parseInt(token.trim(), 10);
-          if (Number.isNaN(value)) {
-            throw new Error(`Invalid ${tagName} entry '${token}' in line: ${trimmed}`);
-          }
-          return value;
-        });
-        return parsed;
-      };
-      action.charging_activation_pool = parsePoolTag("CHARGING_POOL");
-      action.active_alternating_activation_pool = parsePoolTag("ACTIVE_ALT_POOL");
-      action.non_active_alternating_activation_pool = parsePoolTag("NON_ACTIVE_ALT_POOL");
-
       // Add detailed combat rolls if available
       if (hitMatch) {
         action.hit_roll = parseInt(hitMatch[1], 10);
@@ -1401,12 +1376,13 @@ export function parse_log_file_from_text(text: string): ReplayData {
         phase = "fight";
       }
 
+      // Cercle vert en fight = UNIQUEMENT l'unité activée (celle qui frappe), pas le pool activable.
+      // L'unité active EST l'attaquant de la ligne FOUGHT → fight_eligible_units = [attacker_id].
+      // fight_subphase reste requis pour que BoardPvp prenne la branche pool (sinon fallback = toutes).
       const fightStateFields = action.type.includes("fight")
         ? {
             fight_subphase: action.fight_subphase,
-            charging_activation_pool: action.charging_activation_pool,
-            active_alternating_activation_pool: action.active_alternating_activation_pool,
-            non_active_alternating_activation_pool: action.non_active_alternating_activation_pool,
+            fight_eligible_units: action.attacker_id != null ? [action.attacker_id] : [],
           }
         : {};
 

@@ -1724,18 +1724,12 @@ class W40KEngine(gym.Env):
         # les entrees produites par CETTE action (cf. _flush_squad_action_logs_to_step_logger).
         _pre_action_logs_len = len(self.game_state.get("action_logs", []))  # get allowed
         _pre_action_turn = require_key(self.game_state, "turn")
-        # Etat fight AVANT l'action : le formateur "combat" exige fight_subphase + les 3 pools
-        # d'activation (contrat replay), et l'action les MUTE (end_activation retire l'unite du
-        # pool). Les lire au drain donnerait l'etat d'apres — on capture donc ici.
+        # Etat fight AVANT l'action : le formateur "combat" exige fight_subphase (contrat replay).
+        # L'action peut faire transiter la sous-phase (end_activation) — on capture donc AVANT, pour
+        # journaliser la sous-phase DANS laquelle l'action a eu lieu. Le cercle vert du replay (unite
+        # active) est derive de l'attaquant de la ligne, pas d'un pool (cf. Documentation Replay.md).
         _pre_action_fight_state = {
             "fight_subphase": self.game_state.get("fight_subphase"),  # get allowed
-            "charging_activation_pool": list(self.game_state.get("charging_activation_pool", [])),  # get allowed
-            "active_alternating_activation_pool": list(
-                self.game_state.get("active_alternating_activation_pool", [])  # get allowed
-            ),
-            "non_active_alternating_activation_pool": list(
-                self.game_state.get("non_active_alternating_activation_pool", [])  # get allowed
-            ),
         }
 
         # Process semantic action with AI_TURN.md compliance
@@ -3676,13 +3670,7 @@ class W40KEngine(gym.Env):
                                                 f"fight_subphase is None during combat logging: "
                                                 f"unit_id={unit_id}, turn={pre_action_turn}"
                                             )
-                                        charging_pool = require_key(self.game_state, "charging_activation_pool")
-                                        active_pool = require_key(self.game_state, "active_alternating_activation_pool")
-                                        non_active_pool = require_key(self.game_state, "non_active_alternating_activation_pool")
                                         attack_details["fight_subphase"] = fight_subphase
-                                        attack_details["charging_activation_pool"] = list(charging_pool)
-                                        attack_details["active_alternating_activation_pool"] = list(active_pool)
-                                        attack_details["non_active_alternating_activation_pool"] = list(non_active_pool)
                                     
                                     # Déterminer step_increment selon le type d'action et success
                                     # Pour combat/shoot, step_increment seulement pour la première attaque ET si success
@@ -3879,13 +3867,7 @@ class W40KEngine(gym.Env):
                                                 f"fight_subphase is None during combat logging: "
                                                 f"unit_id={unit_id}, turn={pre_action_turn}"
                                             )
-                                        charging_pool = require_key(self.game_state, "charging_activation_pool")
-                                        active_pool = require_key(self.game_state, "active_alternating_activation_pool")
-                                        non_active_pool = require_key(self.game_state, "non_active_alternating_activation_pool")
                                         attack_details["fight_subphase"] = fight_subphase
-                                        attack_details["charging_activation_pool"] = list(charging_pool)
-                                        attack_details["active_alternating_activation_pool"] = list(active_pool)
-                                        attack_details["non_active_alternating_activation_pool"] = list(non_active_pool)
                                     
                                     # Déterminer step_increment selon le type d'action et success
                                     # Pour combat/shoot, step_increment seulement pour la première attaque ET si success

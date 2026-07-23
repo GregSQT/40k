@@ -11,6 +11,7 @@ describe("replayParser", () => {
       "Scenario: demo",
       "Bot: RandomBot",
       `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
       "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
       "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
       "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
@@ -33,6 +34,31 @@ describe("replayParser", () => {
       "EPISODE END: Winner=1, Method=elimination",
     ].join("\n");
     expect(() => parse_log_file_from_text(text)).toThrow(/Missing Rules block/);
+  });
+
+  it("expose UNIQUEMENT l'attaquant comme unite eligible dans l'etat fight", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+      "[12:00:01] T1 P2 DEPLOYMENT : Unit 2(-1,-1) DEPLOYED from (-1,-1) to (1,0)",
+      "[12:00:02] T1 P1 FIGHT : Unit 1(0,0) FOUGHT Unit 2(1,0) with [Close Combat Weapon] - Hit 4(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [FIGHT_SUBPHASE:fight] [SUCCESS]",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const parsed = parse_log_file_from_text(text);
+    const fightState = parsed.episodes[0].states.find(
+      (s) => (s as { phase?: string }).phase === "fight"
+    ) as { fight_eligible_units?: number[]; fight_subphase?: string } | undefined;
+    expect(fightState).toBeDefined();
+    expect(fightState!.fight_subphase).toBe("fight");
+    // Seule l'unite qui frappe (attaquant = 1), pas la cible ni un pool.
+    expect(fightState!.fight_eligible_units).toEqual([1]);
   });
 
   it("leve une erreur si control_method est absent dans Rules", () => {

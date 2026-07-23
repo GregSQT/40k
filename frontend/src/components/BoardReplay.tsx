@@ -72,9 +72,6 @@ interface ReplayAction {
   weapon_name?: string;
   // Fight phase metadata (AI_TURN.md compliance)
   fight_subphase?: string;
-  charging_activation_pool?: number[];
-  active_alternating_activation_pool?: number[];
-  non_active_alternating_activation_pool?: number[];
   // Charge action fields
   charge_roll?: number;
   charge_success?: boolean;
@@ -2158,13 +2155,30 @@ export const BoardReplay: React.FC = () => {
     return candidate;
   })();
 
+  // Cercle vert = UNIQUEMENT l'unité qui joue l'action courante (l'unité active), dans TOUTES les
+  // phases. On restreint donc l'éligibilité à cette seule unité (id selon le type d'action) au lieu
+  // de marquer toutes les unités activables. Aucune action courante → aucune unité éligible.
+  const replayActiveUnitId: number | null = (() => {
+    if (!currentAction) return null;
+    switch (currentAction.type) {
+      case "shoot":
+        return currentAction.shooter_id ?? null;
+      case "fight":
+        return currentAction.attacker_id ?? null;
+      default:
+        // move, reactive_move, move_wait, advance, charge(_wait/_fail), deploy, pile_in,
+        // consolidation, rule_choice… : l'unité active est portée par unit_id.
+        return currentAction.unit_id ?? null;
+    }
+  })();
+
   // Center column: Board
   const centerContent =
     currentState && gameConfig && replayCurrentPlayer !== null ? (
       <BoardPvp
         units={unitsWithGhost}
         selectedUnitId={replaySelectedUnitId}
-        eligibleUnitIds={unitsWithGhost.map((u) => u.id)}
+        eligibleUnitIds={replayActiveUnitId !== null ? [replayActiveUnitId] : []}
         showHexCoordinates={showHexCoordinates}
         showLosDebugOverlay={settings.showDebugLoS}
         mode={currentAction?.type === "advance" ? "advancePreview" : "select"}

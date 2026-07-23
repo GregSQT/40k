@@ -230,30 +230,40 @@ def test_format_replay_style_message_charge_fail_and_impact() -> None:
     assert "[R:+1.0]" in impact_msg
 
 
-def test_format_replay_style_message_combat_requires_replay_contract_fields() -> None:
+def _combat_details() -> dict:
+    return {
+        "unit_with_coords": "3(4, 4)",
+        "target_id": 8,
+        "hit_roll": 5,
+        "wound_roll": 4,
+        "save_roll": 2,
+        "damage_dealt": 1,
+        "hit_result": "HIT",
+        "wound_result": "WOUND",
+        "save_result": "FAIL",
+        "hit_target": 3,
+        "wound_target": 4,
+        "save_target": 3,
+        "fight_subphase": "fight",
+    }
+
+
+def test_format_replay_style_message_combat_requires_fight_subphase() -> None:
     logger = StepLogger(enabled=False)
+    details = _combat_details()
+    del details["fight_subphase"]
     with pytest.raises(KeyError, match=r"fight_subphase"):
-        logger._format_replay_style_message(
-            3,
-            "combat",
-            {
-                "unit_with_coords": "3(4, 4)",
-                "target_id": 8,
-                "hit_roll": 5,
-                "wound_roll": 4,
-                "save_roll": 2,
-                "damage_dealt": 1,
-                "hit_result": "HIT",
-                "wound_result": "WOUND",
-                "save_result": "FAIL",
-                "hit_target": 3,
-                "wound_target": 4,
-                "save_target": 3,
-                "charging_activation_pool": [],
-                "active_alternating_activation_pool": [],
-                "non_active_alternating_activation_pool": [],
-            },
-        )
+        logger._format_replay_style_message(3, "combat", details)
+
+
+def test_format_replay_style_message_combat_emits_only_fight_subphase() -> None:
+    # Contrat replay : la ligne combat porte UNIQUEMENT [FIGHT_SUBPHASE:…]. Aucun pool loggué —
+    # le cercle vert (unité active) est dérivé de l'attaquant côté parser.
+    logger = StepLogger(enabled=False)
+    msg = logger._format_replay_style_message(3, "combat", _combat_details())
+    assert "[FIGHT_SUBPHASE:fight]" in msg
+    assert "FIGHT_ELIGIBLE" not in msg
+    assert "CHARGING_POOL" not in msg
 
 
 def test_unknown_action_type_raises_and_phase_transition_logs(tmp_path: Path) -> None:
