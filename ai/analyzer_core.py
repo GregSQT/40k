@@ -75,8 +75,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     # Réparer l'incohérence unit_positions/unit_hp créée par une "mort"
                     # d'ancre (HP_MAX squad = 1) alors que l'escouade a encore des figurines.
                     if _uid in state.unit_player:
+                        # [MODELS:] = source de vérité du nb de figurines vivantes de _uid.
+                        state.unit_models_alive[_uid] = len(_models)
                         if state.unit_hp.get(_uid, 0) <= 0:
-                            state.unit_hp[_uid] = len(_models)
+                            # Escouade faussement retirée : ressusciter la figurine front à PV pleins.
+                            state.unit_hp[_uid] = require_key(state.unit_hp_max_per_model, _uid)
                             state.dead_units_current_episode.discard(_uid)
                         # Restaurer l'ancre si elle a été purgée par la fausse mort d'ancre :
                         # les handlers la resynchronisent ensuite depuis l'ancre loguée.
@@ -196,9 +199,15 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 _debug_log(f"[ANALYZER] Unit {unit_id} ({unit_type}) HP_MAX={hp_max} from registry")
                 unit_move_value = require_key(unit_data, "MOVE")
                 
-                # Initialize HP_CUR = HP_MAX (unit starts at full HP)
+                # Modèle HP par-figurine : unit_hp = PV de la figurine front (= HP_MAX à plein),
+                # nb de figurines vivantes compté sur le segment [MODELS:] de la ligne de départ
+                # (source de vérité moteur), PV_MAX/figurine mémorisé pour reset à chaque perte.
+                deploy_models = state.current_line_models.get(unit_id)
+                n_models = len(deploy_models) if deploy_models else 1
                 state.unit_hp[unit_id] = hp_max
-                
+                state.unit_models_alive[unit_id] = n_models
+                state.unit_hp_max_per_model[unit_id] = hp_max
+
                 state.unit_player[unit_id] = player
                 _position_cache_set(state.unit_positions, unit_id, col, row)
                 state.unit_types[unit_id] = unit_type
@@ -332,6 +341,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     action_desc,
                     re.IGNORECASE,
                 )
+                # Attaquant de la ligne (préfixe "Unit N(...)") : sert à attribuer la
+                # destruction d'une cible pour distinguer les attaques restantes de la MÊME
+                # activation (excess lost) d'un vrai cadavre attaqué par une unité tierce.
+                _dmg_actor_match = re.match(r'Unit (\d+)\(', action_desc)
+                _dmg_actor_id = _dmg_actor_match.group(1) if _dmg_actor_match else None
 
                 # CRITICAL: Apply damage regardless of STEP marker
                 # Non-step lines still contain real attacks/shots and can kill units.
@@ -354,18 +368,22 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
                         if damage_match:
                             damage = int(damage_match.group(1))
-                            # RULE: Shoot at dead unit (target already dead when shot)
+                            # RULE: Shoot at dead unit (target already dead when shot).
+                            # Exception 05 Attack sequence : les tirs restants de la MÊME
+                            # activation qui a détruit la cible sont des « excess attacks lost »
+                            # (même attaquant, même turn/phase) → pas une violation.
                             if damage > 0:
                                 target_already_dead = target_id not in state.unit_hp or require_key(state.unit_hp, target_id) <= 0
-                                if target_already_dead:
+                                same_activation_kill = state.unit_kill_context.get(target_id) == (_dmg_actor_id, turn, phase)
+                                if target_already_dead and not same_activation_kill:
                                     stats['shoot_at_dead_unit'][player] += 1
                                     if stats['first_error_lines']['shoot_at_dead_unit'][player] is None:
                                         stats['first_error_lines']['shoot_at_dead_unit'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
                             _apply_damage_and_handle_death(
-                                target_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
-                                line, state.dead_units_current_episode, state.unit_hp, state.unit_types, state.unit_positions, state.unit_deaths, stats
+                                target_id, _dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
+                                line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_hp_max_per_model, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats
                             )
-                
+
                 if 'attacked unit' in action_desc.lower() or 'fought unit' in action_desc.lower():
                     target_match = re.search(r'(?:ATTACKED|FOUGHT) Unit (\d+)', action_desc, re.IGNORECASE)
                     if target_match:
@@ -374,10 +392,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         if damage_match:
                             damage = int(damage_match.group(1))
                             _apply_damage_and_handle_death(
-                                target_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
-                                line, state.dead_units_current_episode, state.unit_hp, state.unit_types, state.unit_positions, state.unit_deaths, stats
+                                target_id, _dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
+                                line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_hp_max_per_model, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats
                             )
-                
+
                 # CHARGE IMPACT mortal wounds:
                 # "Unit X(c,r) IMPACTED [...] Unit Y(c,r) - Hit:T+:N(HIT|FAIL) Wound:AUTO Save:NONE[MW] Dmg:ZHP"
                 impact_damage_match = re.search(
@@ -391,8 +409,8 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     damage = int(damage_group) if damage_group is not None else 0
                     if damage > 0:
                         _apply_damage_and_handle_death(
-                            target_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
-                            line, state.dead_units_current_episode, state.unit_hp, state.unit_types, state.unit_positions, state.unit_deaths, stats
+                            target_id, _dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
+                            line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_hp_max_per_model, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats
                         )
 
                 # HAZARDOUS explicit self-destruction line:
@@ -415,6 +433,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             f"[DEATH REMOVED] E{state.current_episode_num} T{turn} {phase} "
                             f"target_id={destroyed_unit_id} target_type={destroyed_unit_type} reason=hazardous_destroyed_line"
                         )
+                        state.unit_models_alive[destroyed_unit_id] = 0
                         del state.unit_hp[destroyed_unit_id]
 
                 actor_match = re.match(r'Unit (\d+)\(', action_desc)
@@ -872,7 +891,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         action_type = 'advance'
                         if handle_advance(state, config, line, action_desc, action_unit_id, player, turn, phase):
                             continue
-                elif re.search(r"CHARGED(?:\s+(?:\([A-Za-z0-9_ ]+\)|\[[A-Za-z0-9_ ]+\]))?\s+Unit", action_desc):
+                elif re.search(r"CHARGED(?:\s+(?:\([A-Za-z0-9_ ]+\)|\[[A-Za-z0-9_ ]+\]))?\s+Unit", action_desc) or "FAILED CHARGE" in action_desc:
                         action_type = 'charge'
                         handle_charge(state, config, line, action_desc, action_unit_id, player, turn, phase)
                 elif (
@@ -887,6 +906,24 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             action_type = 'fled'
                         if handle_move_or_fled(state, config, line, action_desc, action_unit_id, player, turn, phase):
                             continue
+                elif "CONSOLIDATED from" in action_desc or "PILED IN from" in action_desc:
+                        # Mouvements de fin de combat (12.02 pile-in / 12.07 consolidation) :
+                        # recalent l'ancre d'escouade (positions_by_model est déjà mis à jour via
+                        # le segment [MODELS:]). Sans ça l'ancre reste figée sur la position de
+                        # combat → faux mismatch position/log au move/advance suivant (2.2).
+                        action_type = 'move'
+                        _consol_match = re.search(
+                            r'Unit (\d+)\(\d+,\s*\d+\) (?:CONSOLIDATED|PILED IN) from '
+                            r'\(\d+,\s*\d+\) to \((\d+),\s*(\d+)\)',
+                            action_desc,
+                        )
+                        if _consol_match:
+                            _consol_uid = _consol_match.group(1)
+                            if _consol_uid in state.unit_hp and require_key(state.unit_hp, _consol_uid) > 0:
+                                _position_cache_set(
+                                    state.unit_positions, _consol_uid,
+                                    int(_consol_match.group(2)), int(_consol_match.group(3)),
+                                )
                 elif "FOUGHT Unit" in action_desc:
                         action_type = 'fight'
                         handle_fight(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)

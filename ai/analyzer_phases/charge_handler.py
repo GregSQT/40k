@@ -86,13 +86,23 @@ def handle_charge(
                     'episode': state.current_episode_num,
                     'line': line.strip()
                 }
-        elif state.unit_positions[charge_unit_id] != (start_col, start_row):
-            stats['position_log_mismatch']['charge']['mismatch'] += 1
-            if stats['first_error_lines']['position_log_mismatch']['charge'] is None:
-                stats['first_error_lines']['position_log_mismatch']['charge'] = {
-                    'episode': state.current_episode_num,
-                    'line': line.strip()
-                }
+        else:
+            from ai.analyzer_perfig import move_start_status, _DEFAULT_BASE
+            _pos_status = move_start_status(
+                state.positions_by_model.get(charge_unit_id),
+                state.unit_base.get(charge_unit_id, _DEFAULT_BASE),
+                state.unit_positions[charge_unit_id],
+                start_col, start_row,
+            )
+            if _pos_status == 'mismatch':
+                stats['position_log_mismatch']['charge']['mismatch'] += 1
+                if stats['first_error_lines']['position_log_mismatch']['charge'] is None:
+                    stats['first_error_lines']['position_log_mismatch']['charge'] = {
+                        'episode': state.current_episode_num,
+                        'line': line.strip()
+                    }
+            elif _pos_status == 'absorbed':
+                stats['position_log_mismatch']['charge']['anchor_absorbed'] += 1
 
         # RULE: Dead unit charging
         charge_unit_dead = charge_unit_id not in state.unit_hp or require_key(state.unit_hp, charge_unit_id) <= 0
@@ -271,7 +281,7 @@ def handle_charge(
     else:
         # Check if it's a FAILED charge
         failed_charge_match = re.search(
-            r'Unit (\d+)\((\d+),\s*(\d+)\) FAILED CHARGE to unit (\d+)\((\d+),\s*(\d+)\)',
+            r'Unit (\d+)\s+FAILED CHARGE to unit (\d+)\((\d+),\s*(\d+)\)',
             action_desc,
             re.IGNORECASE
         )

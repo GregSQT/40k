@@ -44,6 +44,8 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     stats['current_episode_deaths'] = []
     stats['wounded_enemies'] = {1: set(), 2: set()}
     state.unit_hp = {}
+    state.unit_models_alive = {}
+    state.unit_hp_max_per_model = {}
     state.unit_player = {}
     state.unit_positions = {}
     state.unit_types = {}
@@ -72,6 +74,7 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.combi_profile_usage = {}
     state.combi_conflicts_seen = set()
     state.unit_deaths = []
+    state.unit_kill_context = {}
     state.phase_activation_seen = {}
     stats['objective_control_history'][state.current_episode_num] = []
     state.last_objective_snapshot = None

@@ -229,7 +229,11 @@ def handle_fight(
                         elif death_phase_order == current_phase_order and death_line_num < state.line_number:
                             target_died_before_fight = True
                             break
-            if target_died_before_fight:
+            # Exception 05 Attack sequence : les attaques restantes de la MÊME activation
+            # (même attaquant, même turn/phase) qui a détruit la cible sont des « excess
+            # attacks lost », pas une attaque sur cadavre → ne pas compter.
+            same_activation_kill = state.unit_kill_context.get(target_id) == (fighter_id, turn, phase)
+            if target_died_before_fight and not same_activation_kill:
                 attacker_player = require_key(state.unit_player, fighter_id)
                 stats['fight_dead_unit_target'][attacker_player] += 1
                 if stats['first_error_lines']['fight_dead_unit_target'][attacker_player] is None:

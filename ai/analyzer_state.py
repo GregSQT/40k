@@ -22,7 +22,13 @@ class AnalyzerState:
     episode_step_index: int = 0
 
     # Suivi unités
+    # Modèle HP par-figurine (05 Attack sequence) : unit_hp[uid] = PV de la figurine
+    # "front" en cours d'endommagement ; unit_models_alive[uid] = nb de figurines vivantes ;
+    # unit_hp_max_per_model[uid] = PV_MAX d'une figurine (registry). Invariant conservé :
+    # uid présent dans unit_hp avec valeur > 0 ⟺ escouade vivante (≥1 figurine).
     unit_hp: Dict[str, int] = field(default_factory=dict)
+    unit_models_alive: Dict[str, int] = field(default_factory=dict)
+    unit_hp_max_per_model: Dict[str, int] = field(default_factory=dict)
     unit_player: Dict[str, int] = field(default_factory=dict)
     unit_positions: Dict[str, Tuple[int, int]] = field(default_factory=dict)
     unit_types: Dict[str, str] = field(default_factory=dict)
@@ -44,6 +50,11 @@ class AnalyzerState:
 
     # Suivi morts
     unit_deaths: List = field(default_factory=list)
+    # Contexte de la destruction d'une escouade : dead_id -> (attaquant, turn, phase).
+    # Sert à ne pas compter comme « attaque sur unité morte » les attaques restantes de
+    # LA MÊME activation qui a détruit la cible (excess attacks lost, 05 Attack sequence),
+    # tout en gardant le contrôle pour une unité tierce attaquant un vrai cadavre.
+    unit_kill_context: Dict[str, Tuple[str, int, str]] = field(default_factory=dict)
     line_number: int = 0
     dead_units_current_episode: Set[str] = field(default_factory=set)
     revived_units_current_episode: Set[str] = field(default_factory=set)

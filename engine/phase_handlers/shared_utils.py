@@ -6019,15 +6019,17 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
     target_sid_g = g["target_sid"]
     attacker_squad_id_str = g["attacker_squad_id"]
     sq_uc = game_state.get("units_cache", {}).get(attacker_squad_id_str, {})  # get allowed
-    tgt_uc = game_state.get("units_cache", {}).get(target_sid_g, {})  # get allowed
     tgt_unit = next((u for u in game_state["units"] if str(u["id"]) == target_sid_g), None)
     tgt_unit_type_g = tgt_unit.get("unitType") if tgt_unit else None
     atk_unit = next((u for u in game_state["units"] if str(u["id"]) == attacker_squad_id_str), None)
     atk_unit_type_g = atk_unit.get("unitType") if atk_unit else None
     ac = int(sq_uc.get("col", 0))  # get allowed
     ar = int(sq_uc.get("row", 0))  # get allowed
-    tc = int(tgt_uc.get("col", 0))  # get allowed
-    tr = int(tgt_uc.get("row", 0))  # get allowed
+    # Position cible = ancre capturée à la création du groupe (cible alors vivante). Ne PAS
+    # relire units_cache ici : l'émission est différée en fin d'allocation, après le retrait
+    # d'une éventuelle escouade détruite → l'ancien tgt_uc.get("col", 0) rendait (0,0).
+    tc = int(require_key(g, "target_col"))
+    tr = int(require_key(g, "target_row"))
     weapon_suffix = f" [{weapon_name_g}]" if weapon_name_g else ""
     # Cover (13.08, ranged-only) : si la cible avait le couvert, afficher la degradation
     # du seuil de touche (ex 3+->4+) + token [COVER] (tooltip regle cote frontend).
@@ -6627,9 +6629,16 @@ def _build_manual_allocation(
         gkey = (r["bs"], r["ap"], r["dmg_raw"], r["display_wth"], r["display_save_th"], target_sid)
         if gkey not in group_index_by_key:
             group_index_by_key[gkey] = len(weapon_groups)
+            # Position de l'ancre cible CAPTURÉE ICI (cible vivante : aucune figurine n'est
+            # retirée avant l'allocation) pour le log de fin de groupe. Sans ça, l'émission
+            # différée relit units_cache après un éventuel retrait de l'escouade détruite et
+            # tombait sur (0,0) (fallback anti-erreur supprimé).
+            _tgt_uc_live = require_key(require_key(game_state, "units_cache"), target_sid)
             _grp = {
                 "attacker_squad_id": str(attacker.get("squad_id", attacker_mid)),
                 "weapon_name": weapon_name, "weapon_names": [weapon_name], "target_sid": target_sid,
+                "target_col": int(require_key(_tgt_uc_live, "col")),
+                "target_row": int(require_key(_tgt_uc_live, "row")),
                 "bs": r["bs"], "ap": r["ap"], "dmg_raw": r["dmg_raw"],
                 "display_wth": r["display_wth"], "display_save_th": r["display_save_th"],
                 "player": int(attacker.get("player", 0)),  # get allowed

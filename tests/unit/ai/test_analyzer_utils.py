@@ -132,9 +132,12 @@ def test_unit_hp_and_damage_helpers() -> None:
         "current_episode_deaths": [],
     }
     unit_hp = {"u1": 3, "u2": 1}
+    unit_models_alive = {"u1": 1, "u2": 1}
+    unit_hp_max_per_model = {"u1": 3, "u2": 1}
     unit_types = {"u2": "Termagant"}
     unit_positions = {"u2": (1, 1)}
     unit_deaths = []
+    unit_kill_context = {}
     dead = set()
 
     assert an._get_unit_hp_value(unit_hp, "u1", context="ctx") == 3
@@ -152,6 +155,7 @@ def test_unit_hp_and_damage_helpers() -> None:
 
     an._apply_damage_and_handle_death(
         target_id="missing",
+        attacker_id="a1",
         damage=1,
         player=1,
         turn=1,
@@ -161,15 +165,19 @@ def test_unit_hp_and_damage_helpers() -> None:
         line_text="line",
         dead_units_current_episode=dead,
         unit_hp=unit_hp,
+        unit_models_alive=unit_models_alive,
+        unit_hp_max_per_model=unit_hp_max_per_model,
         unit_types=unit_types,
         unit_positions=unit_positions,
         unit_deaths=unit_deaths,
+        unit_kill_context=unit_kill_context,
         stats=stats,
     )
     assert stats["damage_missing_unit_hp"][1] == 1
 
     an._apply_damage_and_handle_death(
         target_id="u2",
+        attacker_id="a1",
         damage=2,
         player=1,
         turn=1,
@@ -179,9 +187,12 @@ def test_unit_hp_and_damage_helpers() -> None:
         line_text="line2",
         dead_units_current_episode=dead,
         unit_hp=unit_hp,
+        unit_models_alive=unit_models_alive,
+        unit_hp_max_per_model=unit_hp_max_per_model,
         unit_types=unit_types,
         unit_positions=unit_positions,
         unit_deaths=unit_deaths,
+        unit_kill_context=unit_kill_context,
         stats=stats,
     )
     assert "u2" in dead

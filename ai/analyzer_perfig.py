@@ -95,6 +95,33 @@ def squad_footprint(
     return fp
 
 
+def move_start_status(
+    models: Optional[Dict[str, Tuple[int, int]]],
+    base: Tuple[str, object],
+    anchor_stored: Optional[Tuple[int, int]],
+    start_col: int,
+    start_row: int,
+) -> str:
+    """Statut de cohérence de la position de départ loggée d'un déplacement (contrôle 2.2,
+    version per-figurine). Retourne l'un de :
+
+    - ``'mismatch'``  : départ HORS de l'empreinte des socles de départ connus (dernier segment
+      [MODELS:]) → vraie incohérence (téléportation / log manquant).
+    - ``'absorbed'``  : départ cohérent géométriquement (dans l'empreinte) mais ≠ ancre
+      mémorisée → bruit de recalcul d'ancre d'escouade moteur (±1 subhex entre une consolidation
+      et l'advance suivant, socles inchangés). Compté pour information, pas une erreur.
+    - ``'exact'``     : départ = ancre mémorisée.
+
+    Sans donnée per-figurine (log sans [MODELS:]) : repli ancre-à-ancre → ``'exact'`` si
+    égalité, sinon ``'mismatch'``."""
+    start = (start_col, start_row)
+    if not models:
+        return "exact" if anchor_stored == start else "mismatch"
+    if start not in squad_footprint(models, base):
+        return "mismatch"
+    return "exact" if anchor_stored == start else "absorbed"
+
+
 def squads_min_edge_distance(
     models_a: Dict[str, Tuple[int, int]],
     base_a: Tuple[str, object],

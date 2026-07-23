@@ -406,6 +406,7 @@ def _get_unit_hp_value(
 
 def _apply_damage_and_handle_death(
     target_id: str,
+    attacker_id: Optional[str],
     damage: int,
     player: int,
     turn: int,
@@ -415,15 +416,31 @@ def _apply_damage_and_handle_death(
     line_text: str,
     dead_units_current_episode: Set[str],
     unit_hp: Dict[str, int],
+    unit_models_alive: Dict[str, int],
+    unit_hp_max_per_model: Dict[str, int],
     unit_types: Dict[str, str],
     unit_positions: Dict[str, Tuple[int, int]],
     unit_deaths: List[Tuple[int, str, str, int]],
+    unit_kill_context: Dict[str, Tuple[str, int, str]],
     stats: Dict[str, Any]
 ) -> None:
-    """Apply damage to target and remove unit when HP <= 0."""
+    """Applique une blessure à la cible via l'allocation par-figurine (05 Attack sequence).
+
+    Une blessure est allouée à la figurine « front » ; si ses PV tombent ≤ 0 elle est
+    détruite et l'excès de dégâts est PERDU (jamais reporté sur la figurine suivante).
+    L'escouade n'est retirée que lorsque sa DERNIÈRE figurine est détruite. unit_hp reste
+    l'invariant d'aliveness (présent et > 0 ⟺ escouade vivante)."""
     if damage <= 0:
         return
     if target_id not in unit_hp:
+        # Exception 05 Attack sequence : blessure de la MÊME activation qui a détruit la
+        # cible (même attaquant, même turn/phase) = « excess wound lost », pas une anomalie.
+        if unit_kill_context.get(target_id) == (attacker_id, turn, phase):
+            _debug_log(
+                f"[EXCESS WOUND LOST] E{current_episode_num} T{turn} {phase} "
+                f"target_id={target_id} damage={damage} killer={attacker_id}"
+            )
+            return
         stats['damage_missing_unit_hp'][player] += 1
         if stats['first_error_lines']['damage_missing_unit_hp'][player] is None:
             stats['first_error_lines']['damage_missing_unit_hp'][player] = {
@@ -435,36 +452,44 @@ def _apply_damage_and_handle_death(
             f"target_id={target_id} damage={damage} reason=target_missing_unit_hp"
         )
         return
-    if damage > unit_hp[target_id]:
-        # Overkill is valid in W40K (e.g., multi-damage weapons vs 1HP targets).
-        # Keep as debug signal only, do not count as error.
-        _debug_log(
-            f"[DAMAGE OVERKILL] E{current_episode_num} T{turn} {phase} "
-            f"target_id={target_id} damage={damage} hp_before={unit_hp[target_id]}"
-        )
     _debug_log(
         f"[DAMAGE APPLY] E{current_episode_num} T{turn} {phase} "
-        f"target_id={target_id} damage={damage} old_hp={unit_hp[target_id]}"
+        f"target_id={target_id} damage={damage} front_hp={unit_hp[target_id]} "
+        f"models_alive={require_key(unit_models_alive, target_id)}"
     )
-    unit_hp[target_id] -= damage
-    if unit_hp[target_id] <= 0:
-        target_type = require_key(unit_types, target_id)
-        stats['current_episode_deaths'].append((player, target_id, target_type))
-        stats['wounded_enemies'][player].discard(target_id)
-        _position_cache_remove(unit_positions, target_id)
-        # Track death with line number for chronological order checking
-        unit_deaths.append((turn, phase, target_id, line_number))
-        dead_units_current_episode.add(target_id)
-        _debug_log(
-            f"[DEATH REMOVED] E{current_episode_num} T{turn} {phase} "
-            f"target_id={target_id} target_type={target_type}"
-        )
-        del unit_hp[target_id]
+    front_hp = unit_hp[target_id] - damage
+    if front_hp <= 0:
+        # Figurine front détruite ; l'excès (overkill) est perdu, pas reporté (05.xx).
+        unit_models_alive[target_id] -= 1
+        if unit_models_alive[target_id] <= 0:
+            # Dernière figurine détruite → escouade retirée.
+            target_type = require_key(unit_types, target_id)
+            stats['current_episode_deaths'].append((player, target_id, target_type))
+            stats['wounded_enemies'][player].discard(target_id)
+            _position_cache_remove(unit_positions, target_id)
+            unit_deaths.append((turn, phase, target_id, line_number))
+            dead_units_current_episode.add(target_id)
+            if attacker_id is not None:
+                unit_kill_context[target_id] = (attacker_id, turn, phase)
+            _debug_log(
+                f"[DEATH REMOVED] E{current_episode_num} T{turn} {phase} "
+                f"target_id={target_id} target_type={target_type} killer={attacker_id}"
+            )
+            del unit_hp[target_id]
+        else:
+            # Nouvelle figurine front à PV pleins ; escouade toujours vivante.
+            unit_hp[target_id] = require_key(unit_hp_max_per_model, target_id)
+            stats['wounded_enemies'][player].add(target_id)
+            _debug_log(
+                f"[MODEL SLAIN] E{current_episode_num} T{turn} {phase} "
+                f"target_id={target_id} models_left={unit_models_alive[target_id]}"
+            )
     else:
+        unit_hp[target_id] = front_hp
         stats['wounded_enemies'][player].add(target_id)
         _debug_log(
             f"[DAMAGE RESULT] E{current_episode_num} T{turn} {phase} "
-            f"target_id={target_id} new_hp={unit_hp[target_id]}"
+            f"target_id={target_id} front_hp={front_hp}"
         )
 
 
@@ -1114,9 +1139,9 @@ def parse_step_log(filepath: str) -> Dict:
         'advance_after_shoot': {1: 0, 2: 0},
         'advance_twice_in_shoot_phase': {1: 0, 2: 0},
         'position_log_mismatch': {
-            'move': {'total': 0, 'mismatch': 0, 'missing': 0},
-            'advance': {'total': 0, 'mismatch': 0, 'missing': 0},
-            'charge': {'total': 0, 'mismatch': 0, 'missing': 0}
+            'move': {'total': 0, 'mismatch': 0, 'missing': 0, 'anchor_absorbed': 0},
+            'advance': {'total': 0, 'mismatch': 0, 'missing': 0, 'anchor_absorbed': 0},
+            'charge': {'total': 0, 'mismatch': 0, 'missing': 0, 'anchor_absorbed': 0}
         },
         'damage_missing_unit_hp': {1: 0, 2: 0},
         'damage_exceeds_hp': {1: 0, 2: 0},
@@ -2981,12 +3006,17 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         total = stats['position_log_mismatch'][action_key]['total']
         mismatch = stats['position_log_mismatch'][action_key]['mismatch']
         missing = stats['position_log_mismatch'][action_key]['missing']
+        absorbed = stats['position_log_mismatch'][action_key]['anchor_absorbed']
         pct = (mismatch / total * 100.0) if total > 0 else 0.0
         log_print(
             f"{action_key.upper():8s} total={total:6d} mismatch={mismatch:6d} "
-            f"missing={missing:6d} mismatch_pct={pct:6.2f}%"
+            f"missing={missing:6d} mismatch_pct={pct:6.2f}% anchor_absorbed={absorbed:6d}"
         )
     log_print("---")
+    # anchor_absorbed = départs cohérents via l'empreinte du socle mais ≠ ancre mémorisée :
+    # bruit de recalcul d'ancre d'escouade côté moteur (±1 subhex), tracé mais NON compté
+    # comme incohérence. Un total élevé signalerait une instabilité d'ancre à investiguer.
+    log_print("(anchor_absorbed = bruit d'ancre d'escouade absorbé, informatif — pas une erreur)")
     log_print(f"Total collisions (2+ units in same hex): {len(stats['unit_position_collisions'])}")
 
     # DMG ISSUES

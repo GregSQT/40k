@@ -226,12 +226,22 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
             stats['first_error_lines']['position_log_mismatch']['move'] = {
                 'episode': state.current_episode_num, 'line': line.strip()
             }
-    elif state.unit_positions[move_unit_id] != (start_col, start_row):
-        stats['position_log_mismatch']['move']['mismatch'] += 1
-        if stats['first_error_lines']['position_log_mismatch']['move'] is None:
-            stats['first_error_lines']['position_log_mismatch']['move'] = {
-                'episode': state.current_episode_num, 'line': line.strip()
-            }
+    else:
+        from ai.analyzer_perfig import move_start_status, _DEFAULT_BASE
+        _pos_status = move_start_status(
+            state.positions_by_model.get(move_unit_id),
+            state.unit_base.get(move_unit_id, _DEFAULT_BASE),
+            state.unit_positions[move_unit_id],
+            start_col, start_row,
+        )
+        if _pos_status == 'mismatch':
+            stats['position_log_mismatch']['move']['mismatch'] += 1
+            if stats['first_error_lines']['position_log_mismatch']['move'] is None:
+                stats['first_error_lines']['position_log_mismatch']['move'] = {
+                    'episode': state.current_episode_num, 'line': line.strip()
+                }
+        elif _pos_status == 'absorbed':
+            stats['position_log_mismatch']['move']['anchor_absorbed'] += 1
 
     # RULE: Dead unit moving
     move_unit_dead = move_unit_id not in state.unit_hp or require_key(state.unit_hp, move_unit_id) <= 0
