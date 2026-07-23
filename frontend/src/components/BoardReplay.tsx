@@ -9,6 +9,7 @@ import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
 import type { GameState, Unit, Weapon } from "../types/game";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
+import { computeHexReachable } from "../utils/replayHexReachable";
 import {
   getDiceAverage,
   getSelectedMeleeWeapon,
@@ -2172,6 +2173,46 @@ export const BoardReplay: React.FC = () => {
     }
   })();
 
+  // Preview de move (disques d'ancres atteignables) : le replay ne reçoit pas le pool moteur, on le
+  // recalcule client-side comme pour charge/advance. Injecté dans le game_state via
+  // `valid_move_destinations_pool` → consommé par pickMoveDestinationAnchorsFromGameState (disques)
+  // et syncMoveDestinationPoolRefs (pool + footprint), exactement comme en PvP.
+  // Mémoïsé sur les entrées stables par étape : le BFS (jusqu'à ~M×inches_to_subhex de rayon) ne se
+  // relance qu'au changement d'action/état, pas à chaque re-render (hover, playback tick…).
+  const replayMoveDestinationPool: Array<{ col: number; row: number }> | null = useMemo(() => {
+    if (
+      (currentAction?.type !== "move" && currentAction?.type !== "reactive_move") ||
+      !currentAction.from ||
+      !currentAction.unit_id ||
+      !currentEpisode ||
+      !currentState
+    ) {
+      return null;
+    }
+    const movingUnit = currentState.units.find((u) => u.id === currentAction.unit_id);
+    if (!movingUnit || typeof movingUnit.MOVE !== "number" || movingUnit.MOVE <= 0) {
+      return null;
+    }
+    const budget = movingUnit.MOVE * currentEpisode.board.inches_to_subhex;
+    return computeHexReachable({
+      from: currentAction.from,
+      budget,
+      boardCols: currentEpisode.board.cols,
+      boardRows: currentEpisode.board.rows,
+      walls: currentState.walls,
+      units: currentState.units,
+      selfUnitId: currentAction.unit_id,
+    });
+  }, [currentAction, currentState, currentEpisode]);
+
+  const gameStateForBoard: GameState =
+    replayMoveDestinationPool !== null
+      ? ({
+          ...(currentState as GameState),
+          valid_move_destinations_pool: replayMoveDestinationPool,
+        } as GameState)
+      : (currentState as GameState);
+
   // Center column: Board
   const centerContent =
     currentState && gameConfig && replayCurrentPlayer !== null ? (
@@ -2203,7 +2244,7 @@ export const BoardReplay: React.FC = () => {
         unitsMoved={[]}
         phase={currentState.phase || "move"}
         onShoot={() => {}}
-        gameState={currentState as GameState}
+        gameState={gameStateForBoard}
         replayActionIndex={currentActionIndex}
         objectiveControlOverride={replayObjectiveControlMap}
         getChargeDestinations={(unitId: number) => {
@@ -2381,120 +2422,21 @@ export const BoardReplay: React.FC = () => {
             advanceMoveBudget > 0 &&
             unitId === -3
           ) {
-            const advanceFrom = currentAction.from;
-            const advanceRollValue = advanceMoveBudget;
-
-            if (!advanceRollValue || advanceRollValue <= 0) {
-              return [];
-            }
-
             // Find the advancing unit (actual unit, not ghost)
             const advancingUnit = unitsWithGhost.find((u) => u.id === currentAction.unit_id);
-            if (!advancingUnit) {
+            if (!advancingUnit || !currentAction.unit_id) {
               return [];
             }
 
-            // Helper function to get hex neighbors (6 directions)
-            const getHexNeighbors = (col: number, row: number): { col: number; row: number }[] => {
-              const parity = col & 1; // 0 for even, 1 for odd
-              if (parity === 0) {
-                // Even column
-                return [
-                  { col, row: row - 1 }, // N
-                  { col: col + 1, row: row - 1 }, // NE
-                  { col: col + 1, row }, // SE
-                  { col, row: row + 1 }, // S
-                  { col: col - 1, row }, // SW
-                  { col: col - 1, row: row - 1 }, // NW
-                ];
-              } else {
-                // Odd column
-                return [
-                  { col, row: row - 1 }, // N
-                  { col: col + 1, row }, // NE
-                  { col: col + 1, row: row + 1 }, // SE
-                  { col, row: row + 1 }, // S
-                  { col: col - 1, row: row + 1 }, // SW
-                  { col: col - 1, row }, // NW
-                ];
-              }
-            };
-
-            // Helper function to check if hex is traversable (advance cannot end adjacent to enemies)
-            const isTraversable = (col: number, row: number): boolean => {
-              const boardCols = currentEpisode!.board.cols;
-              const boardRows = currentEpisode!.board.rows;
-
-              // Check bounds
-              if (col < 0 || row < 0 || col >= boardCols || row >= boardRows) {
-                return false;
-              }
-
-              // Check walls
-              if (
-                currentState?.walls?.some(
-                  (w: { col: number; row: number }) => w.col === col && w.row === row
-                )
-              ) {
-                return false;
-              }
-
-              // Check if occupied by another unit (excluding the advancing unit)
-              if (
-                unitsWithGhost.some(
-                  (u) =>
-                    u.col === col &&
-                    u.row === row &&
-                    u.id !== currentAction.unit_id &&
-                    u.id >= 0 &&
-                    u.HP_CUR > 0
-                )
-              ) {
-                return false;
-              }
-
-              return true;
-            };
-
-            // BFS to find all reachable hexes within advance_roll distance
-            const validDestinations: { col: number; row: number }[] = [];
-            const visited = new Set<string>();
-            const queue: Array<{ col: number; row: number; distance: number }> = [
-              { col: advanceFrom.col, row: advanceFrom.row, distance: 0 },
-            ];
-            visited.add(`${advanceFrom.col},${advanceFrom.row}`);
-
-            while (queue.length > 0) {
-              const current = queue.shift()!;
-              const { col, row, distance } = current;
-
-              if (distance > 0 && distance <= advanceRollValue && isTraversable(col, row)) {
-                validDestinations.push({ col, row });
-              }
-
-              if (distance < advanceRollValue) {
-                const neighbors = getHexNeighbors(col, row);
-                for (const neighbor of neighbors) {
-                  const neighborKey = `${neighbor.col},${neighbor.row}`;
-                  if (!visited.has(neighborKey)) {
-                    visited.add(neighborKey);
-                    const neighborDistance = distance + 1;
-                    if (
-                      neighborDistance <= advanceRollValue &&
-                      isTraversable(neighbor.col, neighbor.row)
-                    ) {
-                      queue.push({
-                        col: neighbor.col,
-                        row: neighbor.row,
-                        distance: neighborDistance,
-                      });
-                    }
-                  }
-                }
-              }
-            }
-
-            return validDestinations;
+            return computeHexReachable({
+              from: currentAction.from,
+              budget: advanceMoveBudget,
+              boardCols: currentEpisode!.board.cols,
+              boardRows: currentEpisode!.board.rows,
+              walls: currentState?.walls,
+              units: unitsWithGhost,
+              selfUnitId: currentAction.unit_id,
+            });
           }
           return [];
         }}
