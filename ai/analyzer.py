@@ -1127,6 +1127,9 @@ def parse_step_log(filepath: str) -> Dict:
         'charge_after_flee': {1: 0, 2: 0},
         'charge_dead_unit': {1: 0, 2: 0},
         'dead_unit_charging': {1: 0, 2: 0},
+        # 'fight_from_non_adjacent' RETIRE (2026-07-24) : cf. analyzer_phases/fight_handler.py —
+        # gate combat moteur EUCLIDIEN + position cible pré-perte non journalisee → non
+        # reconstructible. Cle conservee a 0 (jamais incrementee) pour la retro-compat des totaux.
         'fight_from_non_adjacent': {1: 0, 2: 0},
         'fight_friendly': {1: 0, 2: 0},
         'fight_dead_unit_attacker': {1: 0, 2: 0},
@@ -2654,15 +2657,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     active_debug_section = "1.4"
     log_print("\n" + "-" * 80)
     _table_header("1.4 FIGHT ERRORS")
-    agent_fight_non_adj = stats['fight_from_non_adjacent'][1]
-    bot_fight_non_adj = stats['fight_from_non_adjacent'][2]
-    _table_row("Fight from non-adjacent hex:", _fmt_count(agent_fight_non_adj), _fmt_count(bot_fight_non_adj))
-    if agent_fight_non_adj > 0 and stats['first_error_lines']['fight_from_non_adjacent'][1]:
-        first_err = stats['first_error_lines']['fight_from_non_adjacent'][1]
-        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_fight_non_adj > 0 and stats['first_error_lines']['fight_from_non_adjacent'][2]:
-        first_err = stats['first_error_lines']['fight_from_non_adjacent'][2]
-        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    # "Fight from non-adjacent hex" RETIRE (2026-07-24) : contrôle non reconstructible depuis
+    # step.log (gate combat moteur euclidien + position cible pré-perte non journalisee).
+    # Invariant verrouillé par tests/unit/engine/test_fight_spatial_contract.py.
     agent_fight_friendly = stats['fight_friendly'][1]
     bot_fight_friendly = stats['fight_friendly'][2]
     _table_row("Fight a friendly unit:", _fmt_count(agent_fight_friendly), _fmt_count(bot_fight_friendly))

@@ -28,7 +28,6 @@ def handle_fight(
     from ai.analyzer import (
         _track_action_phase_accuracy,
         _position_cache_set,
-        is_adjacent,
         is_within_engine_engagement_zone,
         _get_engagement_zone_for_analyzer,
     )
@@ -152,30 +151,26 @@ def handle_fight(
         if target_id in state.unit_hp and require_key(state.unit_hp, target_id) > 0:
             _position_cache_set(state.unit_positions, target_id, target_col, target_row)
 
-        # RULE: Fight from non-adjacent — CONTRÔLE PER-SOCLE (12.04 / engagement range).
-        # Combat légal si AU MOINS un socle attaquant est à portée d'engagement (bord-à-bord
-        # ≤ engagement_zone subhexes) d'AU MOINS un socle cible. On réutilise les empreintes
-        # moteur (compute_occupied_hexes / min_distance_between_sets). L'ancre-à-ancre
-        # (is_adjacent, distance hex==1) était bien plus restrictif que la règle → faux positifs.
-        from ai.analyzer_perfig import squads_min_edge_distance
-        from ai.analyzer import _get_engagement_zone_for_analyzer
-        fighter_models = state.current_line_models.get(fighter_id)
-        target_models = state.positions_by_model.get(target_id)
-        if fighter_models and target_models:
-            ez = _get_engagement_zone_for_analyzer()
-            fighter_base = state.unit_base.get(fighter_id, ("round", 1))
-            target_base = state.unit_base.get(target_id, ("round", 1))
-            edge = squads_min_edge_distance(
-                fighter_models, fighter_base, target_models, target_base, max_distance=ez
-            )
-            fight_non_adjacent = edge > ez
-        else:
-            # Pas de données per-socle (log ancien/synthétique) → repli ancre legacy.
-            fight_non_adjacent = not is_adjacent(fighter_col, fighter_row, target_col, target_row)
-        if fight_non_adjacent:
-            stats['fight_from_non_adjacent'][player] += 1
-            if stats['first_error_lines']['fight_from_non_adjacent'][player] is None:
-                stats['first_error_lines']['fight_from_non_adjacent'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
+        # RULE: Fight from non-adjacent — CONTRÔLE RETIRÉ (2026-07-24).
+        # Non reconstructible depuis step.log, pour DEUX raisons prouvées (cf. investigation) :
+        #   1. MÉTRIQUE. Le moteur gate le combat en EUCLIDIEN (config
+        #      distance_metric.engagement="euclidean" → entries_in_engagement_zone / seuil
+        #      engagement_minimum_clearance_norm = ez×1,5). Ce contrôle mesurait en HEX
+        #      (squads_min_edge_distance = min_distance_between_sets). Sur socles à grand
+        #      diamètre (ex. round/18 vs round/6), l'écart hex↔euclidien au bord dépasse 1 subhex :
+        #      hexEdge=12 alors que euclidien=13,5 ≤ 15 → engagé pour le moteur, "non-adjacent"
+        #      faussement pour l'analyzer.
+        #   2. POSITION CIBLE. La position de la cible AU MOMENT DU COMBAT n'est PAS journalisée
+        #      de façon fiable : positions_by_model est périmé (maj uniquement quand la cible AGIT),
+        #      et [TARGET_MODELS:] liste les SURVIVANTS POST-PERTES (les socles proches détruits ont
+        #      disparu → survivants plus loin). Aucune source log ne donne l'empreinte cible pré-perte.
+        # Le moteur garantit déjà l'invariant au gate _fight_build_valid_target_pool (n'ajoute que
+        # des cibles dans la zone d'engagement euclidienne). Un contrôle analyzer qui relirait ces
+        # positions depuis le log referait le MÊME calcul que le moteur (mêmes empreintes, même
+        # primitive) → tautologie, aucune détection. La vérification vit donc dans le moteur, figée
+        # par tests/unit/engine/test_fight_spatial_contract.py (dont
+        # test_fight_b_engagement_pool_large_base_euclidean_not_hex, qui verrouille précisément le cas
+        # grand-socle hex≠euclidien à l'origine de ce faux positif).
 
         # RULE: Fight friendly
         if (target_id in state.unit_player and fighter_id in state.unit_player and
