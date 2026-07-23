@@ -28,6 +28,18 @@ def format_models_segment(items: Iterable[Tuple[Any, int, int]], label: str = "M
     return f"[{label}: " + " ".join(parts) + "]"
 
 
+def format_shooter_models_segment(model_ids: Iterable[Any]) -> str:
+    """Segment ``[SHOOTER_MODELS: <mid> <mid> ...]`` des figs ayant EFFECTIVEMENT tire/frappe.
+
+    Sous-ensemble de ``[MODELS:]`` (positions par socle) restreint aux figs qui ont agi. Ids seuls
+    (les positions sont deja portees par ``[MODELS:]``). Consomme uniquement par le replay pour
+    restreindre le cercle vert et le cone LoS aux figs tireuses. ``""`` si vide (rien a emettre)."""
+    parts = [str(m) for m in model_ids]
+    if not parts:
+        return ""
+    return "[SHOOTER_MODELS: " + " ".join(parts) + "]"
+
+
 def models_segment_from_move_details(move_details: Iterable[Dict[str, Any]]) -> str:
     """Per-figurine segment from a move's ``moveDetails`` (destination positions)."""
     return format_models_segment(

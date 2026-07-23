@@ -4928,6 +4928,12 @@ class W40KEngine(gym.Env):
         if fight_state is not None:
             details.update(fight_state)
         details["models_segment"] = self._models_segment_for_unit(unit_id)
+        # Figs ayant EFFECTIVEMENT tire (sous-ensemble de [MODELS:]) : porte par le log de groupe
+        # (_emit_squad_shoot_log -> "shooterModels"). Absent sur les actions sans resolution par-fig.
+        shooter_models = raw_log.get("shooterModels")  # get allowed
+        if shooter_models:
+            from engine.action_log_utils import format_shooter_models_segment
+            details["shooter_models_segment"] = format_shooter_models_segment(shooter_models)
         # Survivants per-figurine de la CIBLE, post-pertes (le flush intervient apres resolution
         # complete de l'action -> figurines mortes deja retirees du cache). Le segment [MODELS:]
         # ne couvre que l'unite qui agit ; sans ce segment cible, une escouade decimee par le tir

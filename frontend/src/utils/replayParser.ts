@@ -60,6 +60,9 @@ interface ReplayAction {
   selected_rule_name?: string;
   // Positions per-figurine [MODELS:] de l'unite qui agit (mid "unit#idx" -> [col,row]).
   models?: Record<string, [number, number]>;
+  // [SHOOTER_MODELS:] figs de l'unite ayant EFFECTIVEMENT tire/frappe (sous-ensemble de models).
+  // Restreint le cercle vert + le cone LoS a ces figs cote replay. Ids seuls ("unit#idx").
+  shooter_models?: string[];
   // Positions per-figurine [TARGET_MODELS:] des survivants de la cible post-pertes (tir/combat).
   target_models?: Record<string, [number, number]>;
   // Detail par-figurine depart->arrivee (miroir du moveDetails PvP, cf. movement_handlers.py).
@@ -229,12 +232,23 @@ export function parse_log_file_from_text(text: string): ReplayData {
     return Object.keys(out).length > 0 ? out : null;
   };
 
+  // Extrait un segment "[SHOOTER_MODELS: unit#idx unit#idx ...]" -> ["unit#idx", ...] (ids seuls,
+  // pas de coords : les positions viennent de [MODELS:]). null si absent.
+  const extractShooterModelsSegment = (text: string): string[] | null => {
+    const seg = text.match(/\[SHOOTER_MODELS:\s*([^\]]+)\]/);
+    if (!seg) return null;
+    const ids = seg[1].trim().split(/\s+/).filter((s) => s.length > 0);
+    return ids.length > 0 ? ids : null;
+  };
+
   // Segments per-figurine de la ligne courante, attaches a l'action qu'elle produit via pushAction.
   let lineModels: Record<string, [number, number]> | null = null;
   let lineTargetModels: Record<string, [number, number]> | null = null;
+  let lineShooterModels: string[] | null = null;
   const pushAction = (action: ReplayAction): void => {
     if (lineModels) action.models = lineModels;
     if (lineTargetModels) action.target_models = lineTargetModels;
+    if (lineShooterModels) action.shooter_models = lineShooterModels;
     currentEpisode!.actions.push(action);
   };
 
@@ -263,6 +277,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
     // ligne a l'autre). Attaches a l'action produite par la ligne via pushAction.
     lineModels = extractModelsSegment(trimmed, "MODELS");
     lineTargetModels = extractModelsSegment(trimmed, "TARGET_MODELS");
+    lineShooterModels = extractShooterModelsSegment(trimmed);
 
     // Episode start - matches both "=== EPISODE START ===" and "=== EPISODE 1 START ==="
     if (trimmed.includes("=== EPISODE") && trimmed.includes("START ===")) {

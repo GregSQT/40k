@@ -32,6 +32,7 @@ async function initializeUnitRegistry(): Promise<void> {
     // Clear existing registry
     unitClassMap = {};
     availableUnitTypes = [];
+    rangedRangeByDisplayName = null;
 
     // Load unit registry from config file
     const registryResponse = await fetch("/config/unit_registry.json");
@@ -78,6 +79,35 @@ async function initializeUnitRegistry(): Promise<void> {
 
 export function getAvailableUnitTypes(): string[] {
   return [...availableUnitTypes];
+}
+
+// Index display_name -> RNG (POUCES bruts) construit à la demande depuis TOUTES les classes d'unités.
+let rangedRangeByDisplayName: Map<string, number> | null = null;
+
+/**
+ * Portée (en POUCES, valeur brute du registre) d'une arme à distance identifiée par son
+ * ``display_name``, cherchée dans TOUTES les classes d'unités. Une arme spéciale (ex. Kombi Rokkit
+ * du Nob) vit sur le type de la figurine porteuse, pas sur l'unité de base — ce scan global la
+ * retrouve à partir du seul nom loggué (`with [<weapon>]`). Mémoïsé (invalidé au ré-init du
+ * registre). ``undefined`` si aucune arme ne porte ce nom. Plusieurs entrées homonymes → max des
+ * RNG (armes identiques : même valeur ; le max évite une sous-estimation en cas de doublon). Le
+ * scaling subhex reste à la charge de l'appelant (× inches_to_subhex).
+ */
+export function getRangedWeaponRangeByDisplayName(displayName: string): number | undefined {
+  if (rangedRangeByDisplayName === null) {
+    rangedRangeByDisplayName = new Map();
+    for (const uc of Object.values(unitClassMap)) {
+      for (const w of uc.RNG_WEAPONS ?? []) {
+        const dn = w["display_name"];
+        const rng = w["RNG"];
+        if (typeof dn === "string" && typeof rng === "number") {
+          const prev = rangedRangeByDisplayName.get(dn) ?? 0;
+          if (rng > prev) rangedRangeByDisplayName.set(dn, rng);
+        }
+      }
+    }
+  }
+  return rangedRangeByDisplayName.get(displayName);
 }
 
 export function isValidUnitType(type: string): boolean {

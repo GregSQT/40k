@@ -196,6 +196,11 @@ interface UnitRendererProps {
   isPreview?: boolean;
   previewType?: "move" | "attack";
   isEligible?: boolean; // Add eligibility as a prop instead of calculating it
+  /** Restreint le cercle vert d'activation aux SEULES figs listées (model_id "unit#idx"), au lieu de
+   * toute l'escouade éligible. Utilisé par le replay pour n'entourer que les figs ayant réellement
+   * tiré/frappé (segment [SHOOTER_MODELS:]). Absent/undefined → comportement historique (toutes les
+   * figs de l'unité éligible). Liste vide → aucune fig entourée. */
+  eligibleModelIds?: string[];
   isShootable?: boolean; // Add shootability based on LoS validation
   displayOrientationStep?: number;
 
@@ -671,7 +676,13 @@ export class UnitRenderer {
       // (cercle d'éligibilité, veil de charge, HP par-fig, id debug) — demande utilisateur.
       if (!this.props.hideIndicators && !figLevelGhost) {
         this.renderChargeTargetVeil(iconZIndex);
-        this.renderGreenActivationCircle(isEligible && !figGhost, figIconScale);
+        // Restriction par-fig : si eligibleModelIds est fourni, seules ces figs reçoivent le cercle
+        // vert (replay = figs ayant réellement agi). Sinon, toutes les figs de l'unité éligible.
+        const figActivable =
+          this.props.eligibleModelIds === undefined ||
+          (this.currentFigModelId !== null &&
+            this.props.eligibleModelIds.includes(this.currentFigModelId));
+        this.renderGreenActivationCircle(isEligible && !figGhost && figActivable, figIconScale);
         this.renderUnitIdDebug(iconZIndex);
         // Barre HP propre de la figurine : pour toutes les figs en mode
         // hpBarPerModel, et TOUJOURS pour un character (les deux modes).

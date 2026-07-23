@@ -107,6 +107,13 @@ class StepLogger:
                 _target_models_seg = action_details.get("target_models_segment")  # get allowed
                 if _target_models_seg:
                     message = f"{message} {_target_models_seg}"
+                # Segment [SHOOTER_MODELS:] : figs de l'unite qui agit ayant EFFECTIVEMENT tire/frappe
+                # dans cette action (sous-ensemble de [MODELS:]). Consomme UNIQUEMENT par le replay
+                # (cercle vert + cone LoS restreints aux figs tireuses). Distinct de [MODELS:] pour ne
+                # pas perturber l'analyzer (son regex \[MODELS: ne matche pas [SHOOTER_MODELS:).
+                _shooter_models_seg = action_details.get("shooter_models_segment")  # get allowed
+                if _shooter_models_seg:
+                    message = f"{message} {_shooter_models_seg}"
 
 
             # Standard format: [timestamp] TX PX PHASE : Message [SUCCESS/FAILED]

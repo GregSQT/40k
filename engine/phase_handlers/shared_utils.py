@@ -6056,6 +6056,7 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "turn": game_state.get("turn", 0),  # get allowed
         "phase": ctx.phase_label,
         "shooterId": attacker_squad_id_str,
+        "shooterModels": list(g.get("shooter_mids", [])),
         "targetId": target_sid_g,
         "weaponName": weapon_name_g if weapon_name_g else None,
         "targetUnitType": tgt_unit_type_g,
@@ -6633,6 +6634,10 @@ def _build_manual_allocation(
                 "display_wth": r["display_wth"], "display_save_th": r["display_save_th"],
                 "player": int(attacker.get("player", 0)),  # get allowed
                 "attacks": 0, "damage": 0, "kills": 0, "killed_model_ids": [], "shots": [],
+                # Figs de l escouade ayant EFFECTIVEMENT tire dans ce groupe (arme/cible). Source de
+                # verite du cercle vert + cone LoS par-fig cote replay : c est le model_id resolu par
+                # roll_intent_fn (attacker_mid), pas un match par nom d arme.
+                "shooter_mids": [],
             }
             # Cover (regle 13.08) : ranged-only -> present uniquement sur le chemin tir
             # (le chemin combat partage cette fonction mais ne fournit pas ces cles).
@@ -6647,6 +6652,8 @@ def _build_manual_allocation(
             g["weapon_name"] = " / ".join(g["weapon_names"])
         g["attacks"] += counts["attacks"]
         g["shots"].extend(r["shot_records"])
+        if attacker_mid not in g["shooter_mids"]:
+            g["shooter_mids"].append(attacker_mid)
 
         # Blessures accumulees PAR PROFIL d arme (gidx) : chaque profil = un lot resolu
         # independamment (regle 04.03). Triees save croissant a la construction du lot.

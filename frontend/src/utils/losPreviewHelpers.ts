@@ -329,56 +329,82 @@ export function buildLosPreviewFromSource(
     }
   }
   // Empreinte tireur — obscuring areas it occupies never block (13.10). Position courante :
-  // union des socles par-figurine du cache moteur (miroir backend). Position hypothétique :
-  // socle unique recalculé à fromCol/fromRow.
+  // socles par-figurine du cache moteur (miroir backend). Position hypothétique : socle unique
+  // recalculé à fromCol/fromRow.
   const shooterSize = resolveBaseSizeForUnitDisplay(params.source.unit);
   const centers = params.shooterModelCenters;
-  const cacheFpKeys =
-    centers && Object.keys(centers).length > 0
-      ? squadFootprintHexKeysFromModelCenters(centers, params.source.unit)
+  const keySetToPairs = (keys: Set<string> | null): Array<[number, number]> | null =>
+    keys
+      ? Array.from(keys).map((k) => {
+          const [c, r] = k.split(",").map(Number);
+          return [c, r] as [number, number];
+        })
       : null;
-  const shooterFootprint: Array<[number, number]> = cacheFpKeys
-    ? Array.from(cacheFpKeys).map((k) => {
-        const [c, r] = k.split(",").map(Number);
-        return [c, r] as [number, number];
-      })
-    : shooterSize > 1
-      ? computeOccupiedHexes(params.source.fromCol, params.source.fromRow, "round", shooterSize)
-      : [[params.source.fromCol, params.source.fromRow]];
-  // Portée : "hex" = gate hex du WASM (historique) ; "euclidean" = on élargit le scan WASM
-  // (padding = étendue hex de l'empreinte + 1) puis on filtre par distance bord-à-bord
-  // euclidienne exacte (miroir backend ranged_edge_distance_to_cell). Le WASM reste un pur
-  // calculateur de LoS.
   const metric = params.distanceMetric ?? "hex";
-  const footprintPad =
-    shooterFootprint.reduce(
-      (m, [c, r]) => Math.max(m, hexDistOff(params.source.fromCol, params.source.fromRow, c, r)),
-      0
-    ) + 1;
-  const scanRange = metric === "euclidean" ? params.maxRange + footprintPad : params.maxRange;
-  const inMaxRange = (h: { col: number; row: number }): boolean =>
-    metric !== "euclidean" ||
-    euclideanEdgeDistanceToCellSubhex(
-      params.source.fromCol,
-      params.source.fromRow,
-      shooterSize,
-      h.col,
-      h.row
-    ) <= params.maxRange;
-  // Cône « au sol » (BASE, bleu) : TOUS les murs bloquent, empreinte complète de l'unité. C'est le
-  // cône normal, indépendant du niveau affiché.
   const effectiveWallHexes = baseWallHexes;
-  const visibleHexesRaw = computeVisibleHexes(
-    params.source.fromCol,
-    params.source.fromRow,
-    scanRange,
-    params.boardCols,
-    params.boardRows,
-    effectiveWallHexes,
-    obscuringHexes,
-    terrainHexes,
-    shooterFootprint
-  );
+  // Cône LoS d'UNE figurine tireuse depuis sa position, avec son propre socle.
+  // Règle 06.01 : la LoS de tir se trace PAR figurine (miroir backend _target_model_visible_cells),
+  // pas depuis l'ancre de l'unité. La preview = UNION des cônes de chaque figurine vivante → elle
+  // reflète exactement ce que le moteur autorise (une fig avancée voit la cible même si l'ancre est
+  // masquée par le terrain). "hex" = gate hex du WASM ; "euclidean" = scan élargi (padding = étendue
+  // hex du socle + 1) puis filtre distance bord-à-bord euclidienne (miroir ranged_edge_distance_to_cell).
+  const coneFor = (
+    originCol: number,
+    originRow: number,
+    footprint: Array<[number, number]>,
+    walls: Array<[number, number]>
+  ): VisibleHex[] => {
+    const pad =
+      footprint.reduce((m, [c, r]) => Math.max(m, hexDistOff(originCol, originRow, c, r)), 0) + 1;
+    const scan = metric === "euclidean" ? params.maxRange + pad : params.maxRange;
+    const raw = computeVisibleHexes(
+      originCol,
+      originRow,
+      scan,
+      params.boardCols,
+      params.boardRows,
+      walls,
+      obscuringHexes,
+      terrainHexes,
+      footprint
+    );
+    return metric === "euclidean"
+      ? raw.filter(
+          (h) =>
+            euclideanEdgeDistanceToCellSubhex(originCol, originRow, shooterSize, h.col, h.row) <=
+            params.maxRange
+        )
+      : raw;
+  };
+  // Origines du cône BASE (bleu, « au sol » : tous les murs bloquent). Position courante → une
+  // origine PAR figurine vivante (centre + socle de la fig). Position hypothétique (survol, pas de
+  // cache par-fig) → origine unique à fromCol/fromRow avec le socle recalculé.
+  const shooterOrigins: Array<{ col: number; row: number; footprint: Array<[number, number]> }> = [];
+  if (centers && Object.keys(centers).length > 0) {
+    for (const [mid, pos] of Object.entries(centers)) {
+      const fp = keySetToPairs(
+        squadFootprintHexKeysFromModelCenters({ [mid]: pos }, params.source.unit)
+      ) ?? [[pos[0], pos[1]]];
+      shooterOrigins.push({ col: pos[0], row: pos[1], footprint: fp });
+    }
+  } else {
+    const fp: Array<[number, number]> =
+      shooterSize > 1
+        ? computeOccupiedHexes(params.source.fromCol, params.source.fromRow, "round", shooterSize)
+        : [[params.source.fromCol, params.source.fromRow]];
+    shooterOrigins.push({ col: params.source.fromCol, row: params.source.fromRow, footprint: fp });
+  }
+  // Union des cônes par-figurine. L'état (1 clair / 2 couvert) ne dépend que de la case visée (dans
+  // une terrain area ou non), identique quelle que soit l'origine → une case vue par au moins une
+  // figurine est retenue une fois.
+  const visByKey = new Map<string, VisibleHex>();
+  for (const o of shooterOrigins) {
+    for (const h of coneFor(o.col, o.row, o.footprint, effectiveWallHexes)) {
+      const k = `${h.col},${h.row}`;
+      if (!visByKey.has(k)) visByKey.set(k, h);
+    }
+  }
+  const visibleHexes = Array.from(visByKey.values());
   // Overlay VERT « vue par l'étage » : UNIQUEMENT si le niveau AFFICHÉ (viewLevel) >= 1. Pour chaque
   // figurine SUR cet étage (niveau == viewLevel), on retire les murs de sa ruine et on garde les
   // cases vues EN PLUS de la base (celles que la vue au sol ne voit pas). « quand une fig est
@@ -387,48 +413,29 @@ export function buildLosPreviewFromSource(
   const modelLevels = params.shooterModelLevels;
   const elevatedCells: Array<{ col: number; row: number }> = [];
   if (viewLevel >= 1 && centers && modelLevels) {
-    const baseKeys = new Set(visibleHexesRaw.map((h) => `${h.col},${h.row}`));
+    const baseKeys = new Set(visibleHexes.map((h) => `${h.col},${h.row}`));
     const elevByKey = new Map<string, VisibleHex>();
     for (const [mid, center] of Object.entries(centers)) {
       if ((modelLevels[mid] ?? 0) !== viewLevel) continue;
-      const fpKeys = squadFootprintHexKeysFromModelCenters({ [mid]: center }, params.source.unit);
-      const modelFp: Array<[number, number]> = fpKeys
-        ? Array.from(fpKeys).map((k) => {
-            const [c, r] = k.split(",").map(Number);
-            return [c, r] as [number, number];
-          })
-        : [center];
+      const modelFp = keySetToPairs(
+        squadFootprintHexKeysFromModelCenters({ [mid]: center }, params.source.unit)
+      ) ?? [center];
       const walls = removeWallsAroundOccupiedFloor(
         baseWallHexes,
         modelFp,
         params.terrainFloors,
         viewLevel
       );
-      // Origine du scan = la FIGURINE elle-même (center), pas l'ancre de l'unité : le rayon LoS
-      // principal du WASM part de (shooterCol,shooterRow) → le cône vert rayonne bien depuis la fig
-      // sur l'étage, et non depuis le socle d'ancre au sol.
-      const raw = computeVisibleHexes(
-        center[0],
-        center[1],
-        scanRange,
-        params.boardCols,
-        params.boardRows,
-        walls,
-        obscuringHexes,
-        terrainHexes,
-        modelFp
-      );
-      for (const h of raw) {
+      // Origine du scan = la FIGURINE elle-même (center), pas l'ancre de l'unité.
+      for (const h of coneFor(center[0], center[1], modelFp, walls)) {
         const k = `${h.col},${h.row}`;
         if (!baseKeys.has(k)) elevByKey.set(k, h);
       }
     }
     for (const h of elevByKey.values()) {
-      if (inMaxRange(h)) elevatedCells.push({ col: h.col, row: h.row });
+      elevatedCells.push({ col: h.col, row: h.row });
     }
   }
-  const visibleHexes =
-    metric === "euclidean" ? visibleHexesRaw.filter(inMaxRange) : visibleHexesRaw;
   const losPreview = buildShootingLosPreviewFromVisibleHexes(
     visibleHexes,
     params.units,

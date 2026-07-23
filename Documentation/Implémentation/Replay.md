@@ -75,8 +75,31 @@ dans **toutes** les phases. `BoardReplay` restreint donc `eligibleUnitIds = [rep
 `current_player` en replay = `action.player` pour les actions move/shoot/charge/fight
 (`BoardReplay.replayCurrentPlayer`), sinon `state.current_player`.
 
-Le rendu per-figurine (occupied_hexes_by_model) **n'affecte pas** l'éligibilité — il ne fait que
-multiplier les socles. Le cercle vert se dessine par figurine, aux mêmes centres que les socles.
+Le rendu per-figurine (occupied_hexes_by_model) ne change pas quelle **unité** est éligible — il
+multiplie les socles. Le cercle vert se dessine par figurine, aux mêmes centres que les socles.
+
+**Restriction par-figurine (tir/combat).** Une action de tir/combat ne fait souvent agir qu'une
+partie de l'escouade (ex. le Nob et son Kombi Rokkit). Le moteur loggue les figs ayant réellement
+tiré/frappé via le segment `[SHOOTER_MODELS: <mid> …]` (émis par `_emit_squad_shoot_log` →
+`shooterModels`, source = `attacker_mid` par-modèle, PAS un match par nom d'arme). Chaîne de bout
+en bout :
+
+- **Backend** : `shared_utils._emit_squad_shoot_log` (champ `shooterModels`) →
+  `w40k_core._build_shot_details` (`shooter_models_segment` via
+  `action_log_utils.format_shooter_models_segment`) → `ai/step_logger` l'ajoute à la ligne.
+  Le regex analyzer `\[MODELS:` ne matche pas `\[SHOOTER_MODELS:` → aucun impact analyzer.
+- **Parser** : `replayParser.extractShooterModelsSegment` → `action.shooter_models` (ids seuls ;
+  positions déjà dans `[MODELS:]`).
+- **Rendu** : `BoardReplay.replayActiveModelIdsByUnit` → prop `BoardPvp.activeModelIdsByUnit` →
+  `UnitRenderer.eligibleModelIds` : le cercle vert n'entoure QUE ces figs (absent → toute
+  l'escouade éligible, comportement historique).
+- **Cône LoS (tir)** : `restrictShooterCentersToActive` restreint la source du cône aux figs
+  tireuses, et `BoardReplay.replayActiveShootRangeByUnit` remplace la portée max d'escouade par la
+  portée de l'arme réellement tirée → le cône colle à l'arme de la fig. Une arme SPÉCIALE (ex. Kombi
+  Rokkit du Nob, 24") vit sur le type de la figurine porteuse, PAS sur l'unité de base (Boyz, Shoota
+  18") : la portée vient donc de `UnitFactory.getRangedWeaponRangeByDisplayName` (scan global de
+  TOUTES les classes d'unités par `display_name`, en pouces) × `inches_to_subhex`, pas de
+  `unit.RNG_WEAPONS`. Hors replay (props absentes), le PvP live est inchangé.
 
 ---
 

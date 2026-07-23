@@ -4,7 +4,11 @@
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "../App.css";
-import { getUnitClass, initializeUnitRegistry } from "../data/UnitFactory";
+import {
+  getRangedWeaponRangeByDisplayName,
+  getUnitClass,
+  initializeUnitRegistry,
+} from "../data/UnitFactory";
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
 import type { GameState, Unit, Weapon } from "../types/game";
@@ -71,6 +75,9 @@ interface ReplayAction {
   save_result?: string;
   // Weapon info
   weapon_name?: string;
+  // [SHOOTER_MODELS:] figs de l'unite ayant EFFECTIVEMENT tire/frappe (sous-ensemble de l'escouade).
+  // Restreint le cercle vert + le cone LoS a ces figs. Ids "unit#idx".
+  shooter_models?: string[];
   // Fight phase metadata (AI_TURN.md compliance)
   fight_subphase?: string;
   // Charge action fields
@@ -319,6 +326,21 @@ export const BoardReplay: React.FC = () => {
         return raw;
       };
 
+      // Portées d'armes : le registre les stocke en POUCES. Le PvP live les convertit en subhexes
+      // au chargement (game_state.py : RNG × inches_to_subhex) ; le replay enrichit depuis le
+      // registre brut → même conversion ICI, sinon une portée de 18" est traitée comme 18 subhex
+      // (cône plafonné à 18/inches_to_subhex pouces). Copie des armes (pas de mutation du registre).
+      const scaleWeaponRanges = (raw: unknown): Weapon[] => {
+        const arr = (raw as Weapon[] | undefined) ?? [];
+        return arr.map((w) => {
+          const rng = (w as { RNG?: unknown }).RNG;
+          if (inchesToSubhex !== 1 && typeof rng === "number") {
+            return { ...w, RNG: rng * inchesToSubhex };
+          }
+          return { ...w };
+        });
+      };
+
       return units.map((unit) => {
         try {
           const UnitClass = getUnitClass(unit.type || "");
@@ -349,8 +371,8 @@ export const BoardReplay: React.FC = () => {
             OC: UnitClass.OC || 0,
             VALUE: UnitClass.VALUE || 0,
             // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract from weapons arrays
-            RNG_WEAPONS: (UnitClass.RNG_WEAPONS || []) as unknown as Weapon[],
-            CC_WEAPONS: (UnitClass.CC_WEAPONS || []) as unknown as Weapon[],
+            RNG_WEAPONS: scaleWeaponRanges(UnitClass.RNG_WEAPONS),
+            CC_WEAPONS: scaleWeaponRanges(UnitClass.CC_WEAPONS),
             selectedRngWeaponIndex:
               UnitClass.RNG_WEAPONS && UnitClass.RNG_WEAPONS.length > 0 ? 0 : undefined,
             selectedCcWeaponIndex:
@@ -2173,6 +2195,38 @@ export const BoardReplay: React.FC = () => {
     }
   })();
 
+  // Figs ayant EFFECTIVEMENT tiré/frappé (segment [SHOOTER_MODELS:]). Restreint le cercle vert (et,
+  // pour le tir, la source du cône LoS) à ces seules figs — pas toute l'escouade. Absent → toutes.
+  const replayActiveModelIdsByUnit: Record<string, string[]> | undefined = (() => {
+    if (currentAction?.type !== "shoot" && currentAction?.type !== "fight") return undefined;
+    const ids = currentAction.shooter_models;
+    const uid =
+      currentAction.type === "shoot" ? currentAction.shooter_id : currentAction.attacker_id;
+    if (!ids || ids.length === 0 || uid == null) return undefined;
+    return { [String(uid)]: ids };
+  })();
+
+  // Portée (subhex) de l'arme RÉELLEMENT tirée dans l'action, pour que le cône LoS de la fig tireuse
+  // colle à SON arme (pas à la portée max de l'escouade). L'arme peut être portée par une fig SPÉCIALE
+  // (ex. Kombi Rokkit du Nob) absente des armes niveau unité → lookup global par display_name dans
+  // TOUTES les classes d'unités (getRangedWeaponRangeByDisplayName, en pouces), puis × inches_to_subhex.
+  // weapon_name peut agréger plusieurs profils ("A / B") → on prend le max.
+  const replayActiveShootRangeByUnit: Record<string, number> | undefined = (() => {
+    if (currentAction?.type !== "shoot") return undefined;
+    const uid = currentAction.shooter_id;
+    const wname = currentAction.weapon_name;
+    if (uid == null || !wname || !currentEpisode) return undefined;
+    const ish = currentEpisode.board.inches_to_subhex;
+    let bestSubhex = 0;
+    for (const raw of wname.split("/")) {
+      const inches = getRangedWeaponRangeByDisplayName(raw.trim());
+      if (inches !== undefined) {
+        bestSubhex = Math.max(bestSubhex, ish !== 1 ? inches * ish : inches);
+      }
+    }
+    return bestSubhex > 0 ? { [String(uid)]: bestSubhex } : undefined;
+  })();
+
   // Preview de move (disques d'ancres atteignables) : le replay ne reçoit pas le pool moteur, on le
   // recalcule client-side comme pour charge/advance. Injecté dans le game_state via
   // `valid_move_destinations_pool` → consommé par pickMoveDestinationAnchorsFromGameState (disques)
@@ -2220,6 +2274,8 @@ export const BoardReplay: React.FC = () => {
         units={unitsWithGhost}
         selectedUnitId={replaySelectedUnitId}
         eligibleUnitIds={replayActiveUnitId !== null ? [replayActiveUnitId] : []}
+        activeModelIdsByUnit={replayActiveModelIdsByUnit}
+        activeShootRangeByUnit={replayActiveShootRangeByUnit}
         showHexCoordinates={showHexCoordinates}
         showLosDebugOverlay={settings.showDebugLoS}
         mode={currentAction?.type === "advance" ? "advancePreview" : "select"}

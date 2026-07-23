@@ -541,6 +541,13 @@ type BoardProps = {
   selectedUnitId: number | null;
   ruleChoiceHighlightedUnitId?: number | null;
   eligibleUnitIds: number[];
+  /** Replay : restreint le cercle vert aux figs ayant réellement agi (segment [SHOOTER_MODELS:]),
+   * par unité (id → liste de model_id "unit#idx"). Absent → toutes les figs de l'unité éligible.
+   * En phase tir, restreint AUSSI la source du cône LoS à ces figs. */
+  activeModelIdsByUnit?: Record<string, string[]>;
+  /** Replay tir : portée (subhex) de l'arme réellement tirée, par unité — le cône de la fig tireuse
+   * utilise SA portée d'arme au lieu de la portée max de l'escouade. Absent → portée max unité. */
+  activeShootRangeByUnit?: Record<string, number>;
   /** Transition/init de phase en vol : le moteur n'est pas prêt, on masque les cercles verts. */
   phaseInitPending?: boolean;
   showHexCoordinates?: boolean;
@@ -1160,6 +1167,8 @@ export default function Board({
   selectedUnitId,
   ruleChoiceHighlightedUnitId = null,
   eligibleUnitIds,
+  activeModelIdsByUnit,
+  activeShootRangeByUnit,
   phaseInitPending = false,
   showHexCoordinates = false,
   showLosDebugOverlay = false,
@@ -3163,6 +3172,24 @@ export default function Board({
       .join("|");
   }, [units, gameState?.units_cache]);
 
+  // Replay tir : si l'action ne fait tirer qu'une partie de l'escouade (segment [SHOOTER_MODELS:]),
+  // le cône LoS ne part QUE des figs tireuses (pas toute l'escouade). Filtre les centres par-fig sur
+  // ``activeModelIdsByUnit`` ; hors replay (prop absente) → centres inchangés (comportement live). Si
+  // aucun centre ne matche (id désaligné), repli sur tous les centres plutôt qu'un cône vide.
+  const restrictShooterCentersToActive = (
+    unitId: UnitId,
+    centers: Record<string, [number, number]> | undefined
+  ): Record<string, [number, number]> | undefined => {
+    const active = activeModelIdsByUnit?.[String(unitId)];
+    if (!active || active.length === 0 || !centers) return centers;
+    const set = new Set(active);
+    const out: Record<string, [number, number]> = {};
+    for (const [mid, pos] of Object.entries(centers)) {
+      if (set.has(mid)) out[mid] = pos;
+    }
+    return Object.keys(out).length > 0 ? out : centers;
+  };
+
   /**
    * Phase tir : même source LoS frontend que le survol move — ``buildLosPreviewFromSource``.
    * Le backend reste la vérité métier pour la validation finale des cibles.
@@ -3240,7 +3267,8 @@ export default function Board({
     const source = resolveShootLosSource();
     if (!source?.unit.RNG_WEAPONS?.length) return empty;
 
-    const range = getMaxRangedRange(source.unit);
+    // Replay : portée de l'arme réellement tirée (par la fig tireuse) plutôt que la portée max.
+    const range = activeShootRangeByUnit?.[String(source.unit.id)] ?? getMaxRangedRange(source.unit);
     if (range <= 0) return empty;
 
     try {
@@ -3260,7 +3288,9 @@ export default function Board({
         maxRange: range,
         distanceMetric: rangedPreviewMetric(gameConfig),
         unitsCacheByModel: ucByModel,
-        shooterModelCenters: atCurrentPos ? ucByModel?.[String(source.unit.id)] : undefined,
+        shooterModelCenters: atCurrentPos
+          ? restrictShooterCentersToActive(source.unit.id, ucByModel?.[String(source.unit.id)])
+          : undefined,
         shooterModelLevels: atCurrentPos ? ucLevels?.[String(source.unit.id)] : undefined,
       });
       const blinkIds = losPreview.blinkIds;
@@ -3292,6 +3322,8 @@ export default function Board({
     squadShootPlan?.unitId,
     gameState?.units_cache,
     losTerrainFloors,
+    activeModelIdsByUnit,
+    activeShootRangeByUnit,
   ]);
 
   const effectiveBlinkingUnitsWithMovePreview = useMemo(() => {
@@ -8766,7 +8798,9 @@ export default function Board({
       }
 
       const attackCellSet = new Set<string>();
-      const range = getMaxRangedRange(source.unit);
+      // Replay : portée de l'arme réellement tirée (fig tireuse) plutôt que la portée max de l'escouade.
+      const range =
+        activeShootRangeByUnit?.[String(source.unit.id)] ?? getMaxRangedRange(source.unit);
       if (range <= 0) {
         return;
       }
@@ -8791,7 +8825,9 @@ export default function Board({
           maxRange: range,
           distanceMetric: rangedPreviewMetric(gameConfig),
           unitsCacheByModel: ucByModel,
-          shooterModelCenters: atCurrentPos ? ucByModel?.[String(source.unit.id)] : undefined,
+          shooterModelCenters: atCurrentPos
+            ? restrictShooterCentersToActive(source.unit.id, ucByModel?.[String(source.unit.id)])
+            : undefined,
           shooterModelLevels: atCurrentPos ? ucLevels?.[String(source.unit.id)] : undefined,
           viewLevel: currentLevel,
         });
@@ -10218,6 +10254,8 @@ export default function Board({
           useOverlayIcons: true,
           isPreview: false,
           isEligible: isMoveOriginGhost ? false : isEligibleForRendering || false,
+          // Replay : restreint le cercle vert aux figs ayant réellement agi pour cette unité.
+          eligibleModelIds: activeModelIdsByUnit?.[String(unit.id)],
           isShootable,
           displayOrientationStep: orientationStepForBoard(unit, gameState?.units_cache),
           boardConfig: boardConfigForRender,
