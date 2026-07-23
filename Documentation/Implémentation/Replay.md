@@ -85,7 +85,7 @@ multiplier les socles. Le cercle vert se dessine par figurine, aux mêmes centre
 | # | Chantier | État | Prochaine action |
 |---|---|---|---|
 | A | Cercle vert en **phase fight** | **fait — validé unit + tsc ; visuel browser à confirmer** | Confirmer le cercle vert en fight dans un replay (§4.A) |
-| B | Purge legacy pools V10 du `game_state` | **audit requis, non planifié** | Vérifier inertie puis retirer (§4.B) |
+| B | Purge legacy pools V10 du `game_state` | **fait moteur (2026-07-23)** ; résidu front `useEngineAPI` | Nettoyer l'auto-play PvP quand validable en live (§4.B) |
 | C | `pile_in` / `consolidation` classés en **phase `move`** | **fait (2026-07-23)** | — |
 | — | Replay per-figurine (segments MODELS/TARGET_MODELS) | **fait** (commits `81e56c35`, `4ea850c3`) | — |
 | — | Détail par-figurine (bouton +) move/advance/charge/reactive | **fait** (`4ea850c3`) | — |
@@ -158,18 +158,34 @@ active en cours d'activation. Le vert éclaire les unités sélectionnables pour
 `vitest replayParser` 4/4 ; `tsc` propre. **Reste :** confirmer visuellement le cercle vert en fight
 dans un replay browser (le `step.log` régénéré le permet).
 
-### 4.B — Purge legacy V10 dans le `game_state` (à auditer, NE PAS mêler à A)
-Les 3 pools ne sont **pas** du mort trivial : **88 usages** hors tests côté moteur
-(fight_handlers 42, w40k_core 20, generic_handlers 17, shared_utils 3), encore écrits/retirés
-activement (`fight_handlers.py:266-320`, `:1887-1889` ; `generic_handlers.py:432-433`).
-`fight_build_activation_pools` survit pour `tests/unit/engine/test_fight_activation_pools.py`
-(`fight_handlers.py:227-229`). Côté front, `useEngineAPI.ts:9376-9447` a des branches
-`fightSubphase === "charging"`/alternating — **mortes en V11** (le subphase vaut pile_in/fight/
-consolidate) mais présentes.
-→ Refactor transverse et risqué, **aucun effet sur le cercle vert**. À traiter séparément, après
-audit d'inertie de `_update_fight_subphase` V10 (`:1564`, `:2510`) et des retraits generic_handlers.
-Le fix §4.A a déjà retiré la lecture de ces pools au **logging** ; il reste leur cycle de vie complet
-dans le `game_state`.
+### 4.B — Purge legacy V10 du `game_state` — ✅ MOTEUR FAIT (2026-07-23), résidu front
+**Audit.** Les 3 pools étaient inertes en V11 : machine V10 (`fight_build_activation_pools`,
+`_update_fight_subphase`, helpers alternance/consolidation) **morte** (chaîne remontant à des fonctions
+sans appelant) ; seul chemin vivant = `end_activation(FIGHT)` dont le `phase_complete` dérivé des pools
+vides était déjà **jeté** par le caller squad_fight.
+
+**Fait (moteur) :**
+- `generic_handlers.end_activation` : branches FIGHT (retrait pool + `pool_empty`) retirées ; tracking
+  `units_fought` + step conservés. `_rebuild_alternating_pools_for_fight` supprimée.
+- `fight_handlers` : 8 fonctions V10 mortes supprimées (`fight_build_activation_pools`,
+  `_fight_maybe_lazy_rebuild_alternating_pools`, `_fight_post_process_fight_activation_result`,
+  `_fight_try_begin_consolidation_after_attacks`, `_handle_fight_consolidation_resolution`,
+  `_update_fight_subphase`, `_fight_finish_no_more_targets_after_attack`, `_toggle_fight_alternation`)
+  + bloc pool mort dans `_fight_phase_complete` (`fight_phase_end` est vivant → lisait via `require_key`)
+  + scrubbing V10 dans `_remove_dead_unit_from_fight_pools` (cross-phase conservé).
+- Init pools retiré (`w40k_core`, `_fight_phase_complete`) ; 3 clés retirées de
+  `shared_utils._remove_unit_from_all_activation_pools`.
+- Tests : `test_fight_activation_pools.py` supprimé (V10) ; 3 tests V10 retirés de `test_fight_execution`
+  (+ 1 réécrit sur `shoot_activation_pool`).
+- **Front sûr** : `game.ts` (types) et `BoardPvp.tsx` (deps) purgés.
+- Validé : grep V10 **vide** côté moteur+front(hors résidu), 97 tests moteur verts, run `--step` OK
+  (FOUGHT + pile_in/conso, 0 KeyError/NameError), tsc propre.
+
+**Résidu assumé (front)** : `useEngineAPI.ts` (~L9374-9448 et type L241-243) garde des branches
+`fightSubphase === "charging"/alternating_*` **mortes en V11** (sous-phases pile_in/fight/consolidate).
+Les nettoyer touche l'**auto-play PvP live** (currentPoolSize/hasMoreEligibleUnits) → non validable en
+headless. À reprendre avec un test PvP fight réel, en remplaçant par `fight_eligible_units`
+(déjà la source V11 vivante ailleurs dans ce hook).
 
 ### 4.C — `pile_in` / `consolidation` classés en phase `move` ✅ FAIT (2026-07-23)
 Le moteur loggue déjà ces lignes `FIGHT : … PILED IN/CONSOLIDATED` (phase correcte côté log). Le bug

@@ -986,9 +986,6 @@ def _remove_unit_from_all_activation_pools(game_state: Dict[str, Any], unit_id_s
         "move_activation_pool",
         "shoot_activation_pool",
         "charge_activation_pool",
-        "charging_activation_pool",
-        "active_alternating_activation_pool",
-        "non_active_alternating_activation_pool",
     ):
         if pool_key in game_state and game_state[pool_key] is not None:
             game_state[pool_key] = [uid for uid in game_state[pool_key] if str(uid) != unit_id_str]

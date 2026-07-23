@@ -335,10 +335,6 @@ export interface GameState {
   fight_step?: "fights_first" | "remaining" | null;
   fight_selector?: number | null;
   active_fight_unit?: string | null;
-  // Déprécié V11 (le moteur émet ces pools vides ; éligibilité = fight_eligible_units).
-  charging_activation_pool?: string[];
-  active_alternating_activation_pool?: string[];
-  non_active_alternating_activation_pool?: string[];
   units_cache?: Record<
     string,
     {

@@ -116,37 +116,6 @@ class TestHpManagement:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestFightDeathCascade:
-    def test_dead_unit_removed_from_charging_pool(self):
-        """fight_cascade_charging : unité morte retirée du charging_activation_pool."""
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]
-        gs = _make_game_state(units)
-        gs["charging_activation_pool"] = ["1", "2", "3"]
-        _remove_dead_unit_from_fight_pools(gs, "2")
-        assert "2" not in gs["charging_activation_pool"]
-        assert "1" in gs["charging_activation_pool"]
-
-    def test_dead_unit_removed_from_active_alternating_pool(self):
-        """fight_cascade_active : unité morte retirée de active_alternating_activation_pool."""
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]
-        gs = _make_game_state(units)
-        gs["active_alternating_activation_pool"] = ["1", "2"]
-        _remove_dead_unit_from_fight_pools(gs, "2")
-        assert "2" not in gs["active_alternating_activation_pool"]
-        assert "1" in gs["active_alternating_activation_pool"]
-
-    def test_dead_unit_removed_from_non_active_alternating_pool(self):
-        """fight_cascade_nonactive : unité morte retirée de non_active_alternating_activation_pool.
-
-        L'unité doit d'abord être retirée du units_cache (HP→0), sinon le lazy rebuild
-        la réinsère dans le pool depuis units_cache.
-        """
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]
-        gs = _make_game_state(units)
-        gs["non_active_alternating_activation_pool"] = ["2", "3"]
-        update_units_cache_hp(gs, "2", 0)  # mort → retrait du units_cache
-        _remove_dead_unit_from_fight_pools(gs, "2")
-        assert "2" not in gs["non_active_alternating_activation_pool"]
-
     def test_dead_unit_removed_from_shoot_pool_via_fight_cascade(self):
         """fight_cascade_shoot : mort en fight → retirée aussi du shoot_activation_pool (cross-phase)."""
         units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]
@@ -159,9 +128,9 @@ class TestFightDeathCascade:
         """fight_cascade_absent : unité absente des pools → pas d'erreur, pools inchangés."""
         units = [_unit(1, 1, 5, 10)]
         gs = _make_game_state(units)
-        gs["charging_activation_pool"] = ["1"]
+        gs["shoot_activation_pool"] = ["1"]
         _remove_dead_unit_from_fight_pools(gs, "99")
-        assert gs["charging_activation_pool"] == ["1"]
+        assert gs["shoot_activation_pool"] == ["1"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

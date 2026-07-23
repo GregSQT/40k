@@ -536,9 +536,6 @@ class W40KEngine(gym.Env):
             "move_activation_pool": [],
             "shoot_activation_pool": [],
             "charge_activation_pool": [],
-            "charging_activation_pool": [],
-            "active_alternating_activation_pool": [],
-            "non_active_alternating_activation_pool": [],
             
             # AI_MOVE.md movement preview state
             "valid_move_destinations_pool": [],

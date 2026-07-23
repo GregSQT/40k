@@ -223,42 +223,10 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             ]
             if len(pool_before) != len(game_state["charge_activation_pool"]):
                 response["removed_from_charge_pool"] = True
-    elif arg4 == "FIGHT":
-        # Fight phase has 3 sub-phase pools - check all 3
-        # Units can only be in ONE pool at a time (verified via AI_TURN.md lines 717-718, 730-731)
-        removed = False
+    # arg4 == "FIGHT" : plus de retrait de pool. La sélection FIGHT V11 (fight_subphase +
+    # fight_v11_current_pool) est l'unique autorité ; les pools d'activation V10 (charging/
+    # alternating) sont supprimés. Le tracking units_fought (arg3) et le step restent gérés ci-dessus.
 
-        # CRITICAL: Normalize unit_id to string for comparison (pools contain strings)
-        unit_id_str = str(unit_id)
-
-        # Sub-phase 1: Charging pool (current player's charging units)
-        if "charging_activation_pool" in game_state:
-            # Convert pool to list of strings for comparison
-            pool_str = [str(id) for id in game_state["charging_activation_pool"]]
-            if unit_id_str in pool_str:
-                game_state["charging_activation_pool"] = [id for id in game_state["charging_activation_pool"] if str(id) != unit_id_str]
-                response["removed_from_charging_pool"] = True
-                removed = True
-
-        # Sub-phase 2: Active alternating pool (current player's non-charging units)
-        if not removed and "active_alternating_activation_pool" in game_state:
-            pool_str = [str(id) for id in game_state["active_alternating_activation_pool"]]
-            if unit_id_str in pool_str:
-                game_state["active_alternating_activation_pool"] = [id for id in game_state["active_alternating_activation_pool"] if str(id) != unit_id_str]
-                response["removed_from_active_alternating_pool"] = True
-                removed = True
-
-        # Sub-phase 2: Non-active alternating pool (opponent's units)
-        if not removed and "non_active_alternating_activation_pool" in game_state:
-            pool_str = [str(id) for id in game_state["non_active_alternating_activation_pool"]]
-            if unit_id_str in pool_str:
-                game_state["non_active_alternating_activation_pool"] = [id for id in game_state["non_active_alternating_activation_pool"] if str(id) != unit_id_str]
-                response["removed_from_non_active_alternating_pool"] = True
-                removed = True
-
-        if removed:
-            response["removed_from_fight_pool"] = True  # Generic flag for compatibility
-    
     # ├── Arg5 = 1 ?
     # │   ├── YES -> log the error
     # │   └── NO -> No action
@@ -309,128 +277,15 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             pool_empty = True
         else:
             pool_empty = len(game_state["charge_activation_pool"]) == 0
-    elif arg4 == "FIGHT":
-        # DEBUG: Check if unit is ending activation without attacking when it should
-        if arg3 == "PASS":
-            from engine.game_utils import add_console_log, safe_print
-            attack_left = require_key(unit, "ATTACK_LEFT")
-            if attack_left > 0:
-                # Unit is passing but has attacks left - check if adjacent to enemy
-                from .fight_handlers import _is_adjacent_to_enemy_within_cc_range
-                is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
-                if is_adjacent:
-                    if "episode_number" in game_state and "turn" in game_state:
-                        episode = game_state["episode_number"]
-                        turn = game_state["turn"]
-                        if "console_logs" not in game_state:
-                            game_state["console_logs"] = []
-                        log_msg = f"[FIGHT DEBUG] ⚠️ E{episode} T{turn} fight end_activation: Unit {unit['id']} ADJACENT to enemy but PASSING with ATTACK_LEFT={attack_left}"
-                        add_console_log(game_state, log_msg)
-                        safe_print(game_state, log_msg)
-        
-        # Fight phase complete when ALL 3 pools empty
-        if "charging_activation_pool" not in game_state:
-            charging_empty = True
-        else:
-            charging_empty = len(game_state["charging_activation_pool"]) == 0
-
-        # Rebuild paresseux : passage charge → alternance (``removed_from_charging_pool``) ;
-        # morts / consolidation (déplacement) via ``_fight_maybe_lazy_rebuild_alternating_pools``.
-        # Si retrait d'un pool alternating sans marquer ``units_fought`` (``arg3 != "FIGHT"`` :
-        # PASS, etc.), rebuild pour réaligner l'éligibilité (évite pools tronqués vs ancien
-        # ``removed_from_active|non_active``). Pas de rebuild quand ``arg3 == "FIGHT"`` : la
-        # liste a déjà été filtrée et ``units_fought`` exclut l'unité du rescan.
-        if charging_empty and response.get("removed_from_charging_pool"):
-            _rebuild_alternating_pools_for_fight(game_state)
-        elif (
-            charging_empty
-            and arg3 != "FIGHT"
-            and (
-                response.get("removed_from_active_alternating_pool")
-                or response.get("removed_from_non_active_alternating_pool")
-            )
-        ):
-            _rebuild_alternating_pools_for_fight(game_state)
-
-        if "active_alternating_activation_pool" not in game_state:
-            active_alt_empty = True
-        else:
-            active_alt_empty = len(game_state["active_alternating_activation_pool"]) == 0
-
-        if "non_active_alternating_activation_pool" not in game_state:
-            non_active_alt_empty = True
-        else:
-            non_active_alt_empty = len(game_state["non_active_alternating_activation_pool"]) == 0
-
-        pool_empty = charging_empty and active_alt_empty and non_active_alt_empty
+    # arg4 == "FIGHT" : pas de pool V10 à tester. La fin de phase FIGHT est décidée par la machine
+    # V11 (fight_v11 / _fight_v11_gym_settle), pas par ``phase_complete`` d'``end_activation`` — le
+    # caller squad_fight ignore d'ailleurs ce champ. ``pool_empty`` reste donc False pour FIGHT.
     # Note: COMMAND phase doesn't use end_activation, so no need to handle it here
     
     if pool_empty:
         response["phase_complete"] = True
 
     return response
-
-
-def _rebuild_alternating_pools_for_fight(game_state: Dict[str, Any]) -> None:
-    """
-    Rebuild alternating activation pools when fight pool membership may have changed.
-
-    CRITICAL: Appelé (1) depuis ``end_activation`` (``arg4 == FIGHT``) : pool charge vide
-    et dernier chargeur retiré, **ou** pool charge vide + retrait alternating avec
-    ``arg3 != FIGHT`` (ex. PASS) ; (2) depuis ``fight_handlers._fight_maybe_lazy_rebuild_alternating_pools``
-    sur mort (alternance) ou consolidation avec déplacement.
-
-    This must be called BEFORE checking if the phase is complete.
-
-    PERF: One pass over ``units_cache`` × inner scan over all enemies in
-    ``_is_adjacent_to_enemy_for_fight`` (footprint distance). Cost grows roughly
-    with ``n_units²`` and with larger ``occupied_hexes`` (ex. résolution ×10).
-    It runs notably when the **charging** pool vient de se vider (passage charge
-    → alternance) : la dernière attaque du chargeur déclenche ce rebuild en plus
-    de ``end_activation`` — d’où un pic de latence **sans** logique CC supplémentaire
-    sur le dernier jet par rapport aux attaques précédentes.
-    """
-    current_player = game_state["current_player"]
-
-    # AI_TURN.md COMPLIANCE: Ensure units_fought exists
-    if "units_fought" not in game_state:
-        game_state["units_fought"] = set()
-
-    # AI_TURN.md COMPLIANCE: units_charged must exist
-    if "units_charged" not in game_state:
-        game_state["units_charged"] = set()
-
-    # Rebuild alternating pools (units NOT in units_charged, adjacent to enemies)
-    active_alternating = []
-    non_active_alternating = []
-    units_charged_set = {str(uid) for uid in game_state["units_charged"]}
-    units_fought_set = {str(uid) for uid in game_state["units_fought"]}
-
-    units_cache = require_key(game_state, "units_cache")
-    for unit_id, cache_entry in units_cache.items():
-        unit = get_unit_by_id(game_state, unit_id)
-        if not unit:
-            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-        player = cache_entry["player"]
-
-        # Skip units that already charged (they had their turn)
-        if str(unit_id) in units_charged_set:
-            continue
-
-        # Skip units that already fought
-        if str(unit_id) in units_fought_set:
-            continue
-
-        is_adjacent = _is_adjacent_to_enemy_for_fight(game_state, unit)
-
-        if is_adjacent:
-            if player == current_player:
-                active_alternating.append(unit_id)
-            else:
-                non_active_alternating.append(unit_id)
-
-    game_state["active_alternating_activation_pool"] = active_alternating
-    game_state["non_active_alternating_activation_pool"] = non_active_alternating
 
 
 def _is_adjacent_to_enemy_for_fight(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
