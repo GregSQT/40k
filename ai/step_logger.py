@@ -828,6 +828,27 @@ class StepLogger:
             
             return f"Unit {unit_id}{unit_coords} COMBAT COMPLETE at Unit {target_id} - {total_attacks} attacks, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
             
+        elif action_type in ("pile_in", "consolidation") and details:
+            # Déplacements de la phase fight (12.02 pile-in / 12.07 consolidation), format miroir
+            # du move : « Unit X(c,r) PILED IN/CONSOLIDATED from (a,b) to (c,d) ». Le segment
+            # [MODELS:] (positions par-figurine d'arrivée) est ajouté génériquement par log_action.
+            verb = "PILED IN" if action_type == "pile_in" else "CONSOLIDATED"
+            if (
+                "start_pos" in details
+                and details["start_pos"] is not None
+                and "end_pos" in details
+                and details["end_pos"] is not None
+            ):
+                start_col, start_row = details["start_pos"]
+                end_col, end_row = details["end_pos"]
+                base_msg = f"{unit_label} {verb} from ({start_col},{start_row}) to ({end_col},{end_row})"
+            else:
+                raise KeyError(f"{action_type} action missing required position data")
+            reward = details.get("reward")
+            if reward is not None:
+                base_msg += f" [R:{reward:+.1f}]"
+            return base_msg
+
         else:
             raise ValueError(f"Unknown action_type '{action_type}'")
     

@@ -4855,6 +4855,8 @@ class W40KEngine(gym.Env):
         "charge": "charge",
         "charge_fail": "charge_fail",
         "charge_impact": "charge_impact",
+        "pile_in": "pile_in",
+        "consolidation": "consolidation",
         "wait": "wait",
         "rule_choice": "rule_choice",
         "move_after_shooting": "move_after_shooting",
@@ -5121,6 +5123,54 @@ class W40KEngine(gym.Env):
         details["models_segment"] = self._models_segment_for_unit(unit_id)
         return details
 
+    def _gym_commit_fight_move(
+        self, gs: Dict[str, Any], uid: str, plan: List[Tuple[str, int, int]], kind: str
+    ) -> None:
+        """Commit gym d'un move fight groupé (pile-in/consolidation) + log par-figurine.
+
+        Le driver gym résout ces déplacements via ``commit_move`` sans passer par les handlers
+        interactifs : le log par-figurine (source du step.log/replay ET du game log PvP) doit donc
+        être émis ICI, via la helper partagée ``_append_fight_move_log`` — sinon le training ne
+        produit AUCUNE ligne pile-in/consolidation. Miroir strict du chemin manuel : capture des
+        positions par-figurine + ancre AVANT le commit, arrivée relue APRÈS.
+        """
+        from engine.phase_handlers.shared_utils import commit_move
+        from engine.phase_handlers.fight_handlers import _append_fight_move_log
+
+        unit = self._get_unit_by_id(str(uid))
+        if unit is None:
+            raise KeyError(f"_gym_commit_fight_move: unité {uid!r} absente de game_state['units']")
+        models_cache = require_key(gs, "models_cache")
+        squad_models = require_key(gs, "squad_models")
+        alive = [str(m) for m in require_key(squad_models, str(uid)) if str(m) in models_cache]
+        before = {
+            m: (int(models_cache[m]["col"]), int(models_cache[m]["row"])) for m in alive
+        }
+        uc_before = require_key(gs, "units_cache")[str(uid)]
+        from_col, from_row = int(uc_before["col"]), int(uc_before["row"])
+        plan_dest = {str(e[0]): (int(e[1]), int(e[2])) for e in plan}
+
+        commit_move(plan, gs, kind)
+
+        uc_after = require_key(gs, "units_cache")[str(uid)]
+        to_col, to_row = int(uc_after["col"]), int(uc_after["row"])
+        move_details = [
+            {
+                "modelId": m,
+                "fromCol": before[m][0],
+                "fromRow": before[m][1],
+                "toCol": plan_dest.get(m, before[m])[0],
+                "toRow": plan_dest.get(m, before[m])[1],
+            }
+            for m in alive
+        ]
+        _append_fight_move_log(
+            gs, unit, kind=kind,
+            from_col=from_col, from_row=from_row,
+            to_col=to_col, to_row=to_row,
+            move_details=move_details,
+        )
+
     def _fight_v11_gym_settle(self) -> None:
         """Deroule les etapes NON-DECISIONNELLES de la machine V11 (chemin gym uniquement).
 
@@ -5160,7 +5210,6 @@ class W40KEngine(gym.Env):
             fight_v11_grouped_next,
         )
         from engine.phase_handlers.shared_utils import (
-            commit_move,
             fight_pile_in_plan,
             squad_consolidate_plan,
         )
@@ -5184,7 +5233,7 @@ class W40KEngine(gym.Env):
                 for uid in nxt[1]:
                     plan = fight_pile_in_plan(gs, str(uid))
                     if plan is not None:
-                        commit_move(plan, gs, "pile_in")
+                        self._gym_commit_fight_move(gs, str(uid), plan, "pile_in")
                     # 12.02 : « Each unit cannot make more than one pile-in move during this
                     # step » — le marquage vaut aussi pour un plan vide (skip legal, 12 encart).
                     require_key(gs, "pile_in_done").add(str(uid))
@@ -5205,7 +5254,7 @@ class W40KEngine(gym.Env):
                 for uid in nxt[1]:
                     plan = squad_consolidate_plan(gs, str(uid))
                     if plan is not None:
-                        commit_move(plan, gs, "consolidation")
+                        self._gym_commit_fight_move(gs, str(uid), plan, "consolidation")
                     require_key(gs, "consolidation_done").add(str(uid))
                 continue
 

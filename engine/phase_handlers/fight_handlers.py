@@ -963,6 +963,53 @@ def _fight_apply_pile_in_move(
     # périmé en observation/reward RL jusqu'au 1er move du tour suivant.
 
 
+def _append_fight_move_log(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    *,
+    kind: str,
+    from_col: int,
+    from_row: int,
+    to_col: int,
+    to_row: int,
+    move_details: List[Dict[str, Any]],
+) -> None:
+    """Log par-figurine unique d'un déplacement de phase fight (pile-in / consolidation).
+
+    Point de vérité UNIQUE partagé par le chemin manuel PvP et le driver gym
+    (`_fight_v11_gym_settle` via `commit_move`) : la ligne (PvP game log + step.log/replay)
+    est ainsi strictement identique dans les deux flux. ``kind`` ∈ {"pile_in", "consolidation"} ;
+    le verbe et le type d'event en découlent. ``move_details`` : départ→arrivée par figurine.
+    """
+    if kind == "pile_in":
+        verb = "PILED IN"
+    elif kind == "consolidation":
+        verb = "CONSOLIDATED"
+    else:
+        raise ValueError(f"_append_fight_move_log: kind invalide {kind!r}")
+    append_action_log(
+        game_state,
+        {
+            "type": kind,
+            "message": (
+                f"Unit {unit['id']} {verb} from ({from_col},{from_row}) "
+                f"to ({to_col},{to_row})"
+            ),
+            "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
+            "phase": "fight",
+            "unitId": unit["id"],
+            "player": unit["player"],
+            "fromCol": from_col,
+            "fromRow": from_row,
+            "toCol": to_col,
+            "toRow": to_row,
+            "timestamp": "server_time",
+            "is_ai_action": unit["player"] == 2,
+            "moveDetails": move_details,
+        },
+    )
+
+
 def _fight_clear_consolidation_state(game_state: Dict[str, Any]) -> None:
     game_state.pop("fight_consolidation_pending", None)
     game_state.pop("valid_consolidation_destinations", None)
@@ -6104,26 +6151,11 @@ def _fight_v11_manual_step(
                 }
                 for m, nc, nr, nlv in full_plan
             ]
-            append_action_log(
-                game_state,
-                {
-                    "type": "pile_in",
-                    "message": (
-                        f"Unit {u['id']} PILED IN from ({_from_col},{_from_row}) "
-                        f"to ({_to_col},{_to_row})"
-                    ),
-                    "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
-                    "phase": "fight",
-                    "unitId": u["id"],
-                    "player": u["player"],
-                    "fromCol": _from_col,
-                    "fromRow": _from_row,
-                    "toCol": _to_col,
-                    "toRow": _to_row,
-                    "timestamp": "server_time",
-                    "is_ai_action": u["player"] == 2,
-                    "moveDetails": _move_details,
-                },
+            _append_fight_move_log(
+                game_state, u, kind="pile_in",
+                from_col=_from_col, from_row=_from_row,
+                to_col=_to_col, to_row=_to_row,
+                move_details=_move_details,
             )
             _fight_v11_log(
                 game_state, f"PILE IN unit {act_uid} → commit par-figurine ({len(full_plan)} figs)"
@@ -6505,26 +6537,11 @@ def _fight_v11_manual_step(
                 }
                 for m, nc, nr, nlv in full_plan
             ]
-            append_action_log(
-                game_state,
-                {
-                    "type": "consolidation",
-                    "message": (
-                        f"Unit {u['id']} CONSOLIDATED from ({_from_col},{_from_row}) "
-                        f"to ({_to_col},{_to_row})"
-                    ),
-                    "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
-                    "phase": "fight",
-                    "unitId": u["id"],
-                    "player": u["player"],
-                    "fromCol": _from_col,
-                    "fromRow": _from_row,
-                    "toCol": _to_col,
-                    "toRow": _to_row,
-                    "timestamp": "server_time",
-                    "is_ai_action": u["player"] == 2,
-                    "moveDetails": _move_details,
-                },
+            _append_fight_move_log(
+                game_state, u, kind="consolidation",
+                from_col=_from_col, from_row=_from_row,
+                to_col=_to_col, to_row=_to_row,
+                move_details=_move_details,
             )
             _fight_v11_log(
                 game_state,

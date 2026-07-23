@@ -38,6 +38,8 @@ interface ReplayAction {
   hazardous_mortal_wounds?: number;
   reward?: number;
   move_mode?: string;
+  // Fall back : action de move dont l'unite quitte l'engagement (miroir PvP FLED).
+  was_flee?: boolean;
   // Fight action fields
   attacker_id?: number;
   attacker_pos?: { col: number; row: number };
@@ -63,6 +65,15 @@ interface ReplayAction {
   models?: Record<string, [number, number]>;
   // Positions per-figurine [TARGET_MODELS:] des survivants de la cible post-pertes (tir/combat).
   target_models?: Record<string, [number, number]>;
+  // Detail par-figurine depart->arrivee (miroir du moveDetails PvP, cf. movement_handlers.py).
+  // Construit au fil des actions : depart = occupied_hexes_by_model precedent, arrivee = models.
+  move_details?: Array<{
+    modelId: string;
+    fromCol: number;
+    fromRow: number;
+    toCol: number;
+    toRow: number;
+  }>;
 }
 
 interface PrimaryObjectiveRule {
@@ -490,6 +501,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
           to: { col: endCol, row: endRow },
           log_message: extractLogMessage(trimmed),
           ...(isFlyMove ? { move_mode: "fly" } : {}),
+          ...(actionType === "FLED" ? { was_flee: true } : {}),
         });
 
         if (currentEpisode.units[unitId]) {
@@ -506,6 +518,40 @@ export function parse_log_file_from_text(text: string): ReplayData {
           unit_id: unitId,
           pos: { col: endCol, row: endRow },
         });
+      }
+      continue;
+    }
+
+    // Deplacements de la phase fight : PILE IN (12.02) / CONSOLIDATION (12.07).
+    // Format StepLogger : "FIGHT : Unit X(c,r) PILED IN/CONSOLIDATED from (a,b) to (c,d) [MODELS:...]".
+    // Le segment [MODELS:] (arrivee per-figurine) est attache a l'action via pushAction.
+    const fightMoveMatch = trimmed.match(
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) (PILED IN|CONSOLIDATED) from \((\d+),(\d+)\) to \((\d+),(\d+)\)/
+    );
+    if (fightMoveMatch) {
+      const timestamp = fightMoveMatch[1];
+      const turn = fightMoveMatch[2];
+      const player = parseInt(fightMoveMatch[3], 10);
+      const unitId = parseInt(fightMoveMatch[4], 10);
+      const verb = fightMoveMatch[7];
+      const fromCol = parseInt(fightMoveMatch[8], 10);
+      const fromRow = parseInt(fightMoveMatch[9], 10);
+      const toCol = parseInt(fightMoveMatch[10], 10);
+      const toRow = parseInt(fightMoveMatch[11], 10);
+      syncKnownUnitPosition(currentEpisode, unitId, toCol, toRow);
+      pushAction({
+        type: verb === "PILED IN" ? "pile_in" : "consolidation",
+        timestamp,
+        turn,
+        player,
+        unit_id: unitId,
+        from: { col: fromCol, row: fromRow },
+        to: { col: toCol, row: toRow },
+        log_message: extractLogMessage(trimmed),
+      });
+      if (currentEpisode.units[unitId]) {
+        currentEpisode.units[unitId].col = toCol;
+        currentEpisode.units[unitId].row = toRow;
       }
       continue;
     }
@@ -1215,6 +1261,16 @@ export function parse_log_file_from_text(text: string): ReplayData {
           currentUnits[unitId].col = action.to.col;
           currentUnits[unitId].row = action.to.row;
         }
+      } else if (
+        (action.type === "pile_in" || action.type === "consolidation") &&
+        action.unit_id
+      ) {
+        // Deplacements de la phase fight - maj de l'ancre (les figurines suivent via applyModels).
+        const unitId = action.unit_id;
+        if (currentUnits[unitId] && action.to) {
+          currentUnits[unitId].col = action.to.col;
+          currentUnits[unitId].row = action.to.row;
+        }
       } else if (action.type === "shoot" && action.target_id !== undefined) {
         // Handle shoot actions (even if damage is 0)
         const targetId = action.target_id;
@@ -1292,6 +1348,42 @@ export function parse_log_file_from_text(text: string): ReplayData {
           currentUnits[uid].occupied_hexes_by_model = m;
         }
       };
+      // moveDetails par-figurine (miroir PvP) : capture le depart AVANT applyModels.
+      // Depart = positions per-figurine precedentes de l'unite (occupied_hexes_by_model courant,
+      // deploiement au premier move) ; arrivee = action.models. Uniquement pour les actions de
+      // deplacement per-figurine avec segment [MODELS:] present.
+      if (
+        action.models &&
+        (action.type === "move" ||
+          action.type === "reactive_move" ||
+          action.type === "advance" ||
+          action.type === "charge" ||
+          action.type === "pile_in" ||
+          action.type === "consolidation")
+      ) {
+        const firstKey = Object.keys(action.models)[0];
+        const uidMove = firstKey ? Number(firstKey.split("#")[0]) : NaN;
+        const prevModels = Number.isNaN(uidMove)
+          ? undefined
+          : currentUnits[uidMove]?.occupied_hexes_by_model;
+        if (prevModels) {
+          const details: NonNullable<ReplayAction["move_details"]> = [];
+          for (const [mid, dest] of Object.entries(action.models)) {
+            const from = (prevModels as Record<string, [number, number]>)[mid];
+            if (!from) continue;
+            details.push({
+              modelId: mid,
+              fromCol: from[0],
+              fromRow: from[1],
+              toCol: dest[0],
+              toRow: dest[1],
+            });
+          }
+          if (details.length > 0) {
+            action.move_details = details;
+          }
+        }
+      }
       applyModels(action.models);
       applyModels(action.target_models);
 

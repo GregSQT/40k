@@ -1320,7 +1320,9 @@ export const BoardReplay: React.FC = () => {
             ? "fight"
             : "shoot"
           : null;
-      const actionPhase = action.type.includes("fight")
+      const actionPhase = action.type.includes("fight") ||
+        action.type === "pile_in" ||
+        action.type === "consolidation"
         ? "fight"
         : action.type.includes("charge")
           ? "charge"
@@ -1342,6 +1344,8 @@ export const BoardReplay: React.FC = () => {
           startHex: `(${action.from.col},${action.from.row})`,
           endHex: `(${action.to.col},${action.to.row})`,
           player: action.player,
+          ...(action.was_flee ? { action_name: "FLED" } : {}),
+          moveDetails: action.move_details,
         });
       } else if (action.type === "reactive_move" && action.from && action.to) {
         const reactiveMessage = requireReplayLogMessage(action, "reactive_move");
@@ -1356,6 +1360,7 @@ export const BoardReplay: React.FC = () => {
           endHex: `(${action.to.col},${action.to.row})`,
           player: action.player,
           ruleHintByLabel: reactiveRuleLabel ? { [reactiveRuleLabel]: "reactive_move" } : undefined,
+          moveDetails: action.move_details,
         });
       } else if (action.type === "rule_choice" && action.pos) {
         gameLog.addEvent({
@@ -1388,6 +1393,25 @@ export const BoardReplay: React.FC = () => {
           startHex: `(${action.from.col},${action.from.row})`,
           endHex: `(${action.to.col},${action.to.row})`,
           player: action.player,
+          action_name: "ADVANCED",
+          moveDetails: action.move_details,
+        });
+      } else if (
+        (action.type === "pile_in" || action.type === "consolidation") &&
+        action.from &&
+        action.to
+      ) {
+        const fightMoveMessage = requireReplayLogMessage(action, action.type);
+        gameLog.addEvent({
+          type: action.type,
+          message: fightMoveMessage,
+          unitId: action.unit_id!,
+          turnNumber: turnNumber,
+          phase: "FIGHT",
+          startHex: `(${action.from.col},${action.from.row})`,
+          endHex: `(${action.to.col},${action.to.row})`,
+          player: action.player,
+          moveDetails: action.move_details,
         });
       } else if (action.type === "move_wait" && action.pos) {
         const moveWaitMessage = requireReplayLogMessage(action, "move_wait");
@@ -1519,6 +1543,7 @@ export const BoardReplay: React.FC = () => {
           player: action.player,
           startHex: `(${action.from.col},${action.from.row})`,
           endHex: `(${action.to.col},${action.to.row})`,
+          moveDetails: action.move_details,
         });
       } else if (action.type === "charge_wait") {
         // Handle charge wait actions (failed charge or chose not to charge)
