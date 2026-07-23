@@ -668,6 +668,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Mask loops (polygone lissé monde) de la zone de landing de la fig active — même contrat que
    * ``squadMoveModelMaskLoopsRef`` pour le move per-fig. Rendu lissé au lieu de disques bruts. */
   const chargeModelMaskLoopsRef = useRef<number[][] | null>(null);
+  /** Boucles de contour (monde) de la zone d'atterrissage de la charge d'ESCOUADE rigide
+   * (backend ``charge_preview_display_mask_loops``, source = union des empreintes finales). Le board
+   * les rend en polygone lissé (Chaikin) ; repli sur le pool d'empreintes si absentes. */
+  const chargePreviewDisplayMaskLoopsRef = useRef<number[][] | null>(null);
   /**
    * Pile-in par-figurine (V11 12.04, mode fin type charge) — plan provisoire NON committé.
    * ``models`` : figs déjà posées (model_id -> {col,row}) ; les non-posées restent à l'origine.
@@ -883,6 +887,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     chargeDestPoolRef.current = new Set();
     chargeFootprintZoneRef.current = new Set();
     chargeDestDistancesRef.current = new Map();
+    // Synchrone avec le pool d'empreintes : les boucles de contour ne doivent jamais survivre au pool.
+    chargePreviewDisplayMaskLoopsRef.current = null;
   }, []);
 
   const [advanceWarningPopup, setAdvanceWarningPopup] = useState<{
@@ -2792,6 +2798,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               const displayRaw = (data.result as { charge_preview_display_hexes?: unknown })
                 .charge_preview_display_hexes;
               const overlayNorm = normalizeChargeDestinationsFromApi(displayRaw ?? []);
+              chargePreviewDisplayMaskLoopsRef.current = normalizeMaskLoopsFromApi(
+                (data.result as { charge_preview_display_mask_loops?: unknown })
+                  .charge_preview_display_mask_loops
+              );
               setChargeDestinations(anchorsNorm);
               setChargePreviewOverlayHexes(overlayNorm);
               syncChargePoolRefs(anchorsNorm, overlayNorm);
@@ -2842,6 +2852,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             const displayRawFb = (data.result as { charge_preview_display_hexes?: unknown })
               .charge_preview_display_hexes;
             const overlayNormFb = normalizeChargeDestinationsFromApi(displayRawFb ?? []);
+            chargePreviewDisplayMaskLoopsRef.current = normalizeMaskLoopsFromApi(
+              (data.result as { charge_preview_display_mask_loops?: unknown })
+                .charge_preview_display_mask_loops
+            );
             setChargeDestinations(anchorsNormFb);
             setChargePreviewOverlayHexes(overlayNormFb);
             syncChargePoolRefs(anchorsNormFb, overlayNormFb);
@@ -7920,6 +7934,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       chargeDestPoolRef,
       chargeDestDistancesRef,
       chargeFootprintZoneRef,
+      chargePreviewDisplayMaskLoopsRef,
       pendingMoveAfterShooting: false,
       activationPendingUnitId: null,
       chargingUnitId: null,
@@ -8339,6 +8354,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     chargeDestDistancesRef,
     chargeDestPoolRef,
     chargeFootprintZoneRef,
+    chargePreviewDisplayMaskLoopsRef,
     pendingMoveAfterShooting: pendingPreviewAction === "move_after_shooting",
     activationPendingUnitId,
     // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Export advance state and handler

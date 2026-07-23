@@ -856,6 +856,9 @@ type BoardProps = {
    * Source du tooltip de charge (au lieu de la distance à vol d'oiseau, qui sous-estime les détours). */
   chargeDestDistancesRef?: React.RefObject<Map<string, number>>;
   chargeFootprintZoneRef?: React.RefObject<Set<string>>;
+  /** Boucles de contour (monde) de la zone d'atterrissage de la charge d'escouade (backend
+   * ``charge_preview_display_mask_loops``) → rendu lissé, source primaire du masque. */
+  chargePreviewDisplayMaskLoopsRef?: React.RefObject<number[][] | null>;
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action callback
   onAdvance?: (unitId: number) => void;
   onAdvanceMove?: (unitId: number | string, destCol: number, destRow: number) => void;
@@ -1306,6 +1309,7 @@ export default function Board({
   chargeDestPoolRef,
   chargeDestDistancesRef,
   chargeFootprintZoneRef,
+  chargePreviewDisplayMaskLoopsRef,
   onAdvance,
   onAdvanceMove,
   onCancelAdvance,
@@ -7913,6 +7917,10 @@ export default function Board({
       if (chargeFootprintZoneRef?.current && chargeFootprintZoneRef.current.size > 0) {
         chargeFootprintZoneRef.current.clear();
       }
+      // Synchrone avec le pool d'empreintes : les boucles de contour ne survivent jamais au pool.
+      if (chargePreviewDisplayMaskLoopsRef?.current) {
+        chargePreviewDisplayMaskLoopsRef.current = null;
+      }
     }
 
     // Comme la charge (syncChargePoolRefs synchrone dans le handler API) : remplir les refs
@@ -9409,6 +9417,18 @@ export default function Board({
       return ds === 1 ? norm : norm.map((loop) => loop.map((v) => v * ds));
     })();
 
+    // Charge d'escouade rigide : boucles de contour (backend) de la zone d'atterrissage → masque
+    // lissé (source primaire, pool d'empreintes en repli côté BoardDisplay). Même mise à l'échelle
+    // display_scale que le move/charge per-fig. Non utilisé pour la charge per-fig (chargeModelMaskLoops).
+    const chargeFootprintZoneMaskLoops = (() => {
+      if (perModelChargeLike) return null;
+      const norm = normalizeMaskLoopsFromApi(chargePreviewDisplayMaskLoopsRef?.current);
+      if (!norm) return null;
+      const ds =
+        (boardConfig?.display as { display_scale?: number } | undefined)?.display_scale ?? 1;
+      return ds === 1 ? norm : norm.map((loop) => loop.map((v) => v * ds));
+    })();
+
     const drawBoardOptions: DrawBoardOptions = {
       availableCells: effectiveAvailableCells,
       attackCells,
@@ -9449,6 +9469,11 @@ export default function Board({
       pendingMoveAfterShooting,
       chargeDestPoolRef:
         perModelChargeLike && activeChargeLikePoolRef ? activeChargeLikePoolRef : chargeDestPoolRef,
+      // Union des empreintes finales légales (charge d'escouade rigide) → REPLI du masque lissé si
+      // les boucles backend sont absentes. Absent pour la charge per-fig (chargeModelMaskLoops).
+      chargeFootprintZonePoolRef: perModelChargeLike ? undefined : chargeFootprintZoneRef,
+      // Source PRIMAIRE du masque lissé (boucles backend, numpy). Le pool ci-dessus n'est qu'un repli.
+      chargeFootprintZoneMaskLoops,
       selectedUnitBaseSize: unitForFootprintBase
         ? resolveBaseSizeForUnitDisplay(unitForFootprintBase)
         : undefined,

@@ -4495,6 +4495,18 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         )
         display_hexes = [[int(c), int(r)] for (c, r) in display_union]
 
+        # Boucles de contour (monde) de la zone d'atterrissage → l'UI rend un polygone lissé
+        # (Chaikin), pas des disques festonnés. Même helper/source que la charge par-figurine
+        # (compute_move_preview_mask_loops_world sur l'union des empreintes) : rendu identique à la
+        # move. Le front consomme ces boucles en priorité, avec le pool d'empreintes en repli.
+        from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
+        _display_loops = compute_move_preview_mask_loops_world(display_union, game_state)
+        charge_preview_display_mask_loops = (
+            [[[float(x), float(y)] for (x, y) in loop] for loop in _display_loops]
+            if _display_loops
+            else []
+        )
+
         # Distance de mouvement réelle par ancre (sous-hex), depuis le BFS de charge : profondeur de
         # chemin au sol (respecte murs/figs), distance directe en vol déclaré. Sert au tooltip pour
         # afficher la vraie distance de charge au lieu de la ligne droite (qui sous-estime les détours).
@@ -4522,6 +4534,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
             "valid_destinations": valid_pool,
             "charge_dest_distances": charge_dest_distances,
             "charge_preview_display_hexes": display_hexes,
+            "charge_preview_display_mask_loops": charge_preview_display_mask_loops,
             "preview_data": preview_data,
             "clear_blinking_gentle": True,  # Stop blinking when target is selected
             "waiting_for_player": True  # Wait for destination selection

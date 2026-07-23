@@ -197,6 +197,8 @@ export function computeDrawBoardPartialRedrawFingerprint(
     movePreviewFootprintSpanFromState,
     pendingMoveAfterShooting = false,
     chargeDestPoolRef,
+    chargeFootprintZonePoolRef,
+    chargeFootprintZoneMaskLoops = null,
     selectedUnitBaseSize,
     selectedUnitAnchor,
     movePreviewFootprintMaskLoops = null,
@@ -303,6 +305,18 @@ export function computeDrawBoardPartialRedrawFingerprint(
     chargeDestPoolHash:
       useChargeDestPoolDiskDraw && chargeDestPoolRef?.current
         ? hashStringSetStable(chargeDestPoolRef.current)
+        : null,
+    chargeFootprintZonePoolHash:
+      useChargeDestPoolDiskDraw &&
+      chargeFootprintZonePoolRef?.current &&
+      chargeFootprintZonePoolRef.current.size > 0
+        ? hashStringSetStable(chargeFootprintZonePoolRef.current)
+        : null,
+    chargeFootprintZoneLoopsFp:
+      useChargeDestPoolDiskDraw &&
+      chargeFootprintZoneMaskLoops != null &&
+      chargeFootprintZoneMaskLoops.length > 0
+        ? fingerprintPrecomputedMaskLoops(chargeFootprintZoneMaskLoops)
         : null,
     digestAvail: clickableAvailDigest,
     digestAtk: digestHighlightCellList(attackCells),
@@ -862,6 +876,20 @@ export interface DrawBoardOptions {
   pendingMoveAfterShooting?: boolean;
   /** Ancres charge (même sémantique que ``moveDestPoolRef``) — preview multi-base comme la phase move. */
   chargeDestPoolRef?: React.RefObject<Set<string>>;
+  /**
+   * Union des empreintes finales légales de la charge d'escouade (``display_union`` backend =
+   * ``charge_preview_display_hexes``). Sert à rendre la zone d'atterrissage en **contour lissé**
+   * (pipeline move/Chaikin) au lieu de disques festonnés. Si vide, on retombe sur le rendu par
+   * disques d'ancres historique.
+   */
+  chargeFootprintZonePoolRef?: React.RefObject<Set<string>>;
+  /**
+   * Boucles de contour (monde) de la zone d'atterrissage de la charge d'escouade
+   * (``charge_preview_display_mask_loops`` backend, numpy). **Source primaire** du masque lissé :
+   * si présentes, elles priment sur ``chargeFootprintZonePoolRef`` (repli). Contrat identique à
+   * ``movePreviewFootprintMaskLoops`` / ``chargeModelMaskLoops``.
+   */
+  chargeFootprintZoneMaskLoops?: number[][] | null;
   selectedUnitBaseSize?: number;
   /**
    * (col, row) de l'unité dont on dessine la preview move / advance / post-shoot.
@@ -1906,6 +1934,8 @@ export const drawBoard = (
       movePreviewFootprintSpanFromState,
       pendingMoveAfterShooting = false,
       chargeDestPoolRef,
+      chargeFootprintZonePoolRef,
+      chargeFootprintZoneMaskLoops = null,
       selectedUnitBaseSize,
       selectedUnitAnchor,
       losDebugShowRatio: _losDebugShowRatio = false,
@@ -2708,32 +2738,71 @@ export const drawBoard = (
       );
     } else if (useChargeDestPoolDiskDraw && chargeDestPoolRef?.current) {
       const footprintRadius = (footprintSpanForPool / 2) * HEX_HORIZ_SPACING;
-      const chargeGfx = new PIXI.Graphics();
-      chargeGfx.name = "charge-dest-pool-gfx";
-      const chargePool = chargeDestPoolRef.current;
-      fillFootprintPoolCircles(
-        chargeGfx,
-        chargePool,
-        footprintRadius,
-        CHARGE_DESTINATION_HEX_FILL,
-        HEX_HORIZ_SPACING,
-        HEX_WIDTH,
-        HEX_HEIGHT,
-        HEX_VERT_SPACING,
-        MARGIN
-      );
-      addFootprintHighlightSprite(app, highlightContainer, chargeGfx, 0.28, "charge-dest-pool");
-      addFootprintPoolSmoothOutlines(
-        highlightContainer,
-        chargePool,
-        footprintRadius,
-        HEX_HORIZ_SPACING,
-        HEX_WIDTH,
-        HEX_HEIGHT,
-        HEX_VERT_SPACING,
-        MARGIN,
-        CHARGE_DESTINATION_HEX_FILL
-      );
+      // Zone d'atterrissage de charge d'escouade : si l'union des empreintes finales légales
+      // (``chargeFootprintZonePoolRef`` = ``charge_preview_display_hexes`` backend) est disponible,
+      // on la rend en **contour lissé** via le MÊME pipeline que la move/charge per-fig (masque
+      // polygone d'union → Chaikin → RT/blur), au lieu de disques d'ancres festonnés. Repli sur
+      // l'ancien rendu par disques uniquement si l'union n'est pas fournie (ex. mode select du pool).
+      const chargeZonePool =
+        chargeFootprintZonePoolRef?.current && chargeFootprintZonePoolRef.current.size > 0
+          ? chargeFootprintZonePoolRef.current
+          : null;
+      const hasChargeZoneLoops =
+        chargeFootprintZoneMaskLoops != null && chargeFootprintZoneMaskLoops.length > 0;
+      if (hasChargeZoneLoops || chargeZonePool) {
+        // Boucles backend (numpy) en source PRIMAIRE ; le pool d'empreintes n'est qu'un repli si
+        // le backend ne les a pas fournies (topologie non exploitable côté serveur). ``anchorPool``
+        // (bornes du calque coloré) = pool d'empreintes si dispo, sinon les ancres (jamais vide ici).
+        const anchorPool = chargeZonePool ?? chargeDestPoolRef.current;
+        const maskGeom = resolveMovePreviewMaskLoopsBeforeSmooth(
+          hasChargeZoneLoops ? chargeFootprintZoneMaskLoops : null,
+          chargeZonePool,
+          HEX_RADIUS,
+          HEX_HORIZ_SPACING,
+          HEX_WIDTH,
+          HEX_HEIGHT,
+          HEX_VERT_SPACING,
+          MARGIN,
+          "charge-dest-pool",
+          anchorPool.size
+        );
+        renderMoveAdvanceDestPoolCircleLayer(
+          highlightContainer,
+          app,
+          anchorPool,
+          footprintRadius,
+          CHARGE_DESTINATION_HEX_FILL,
+          "charge-dest-pool",
+          maskGeom
+        );
+      } else {
+        const chargeGfx = new PIXI.Graphics();
+        chargeGfx.name = "charge-dest-pool-gfx";
+        const chargePool = chargeDestPoolRef.current;
+        fillFootprintPoolCircles(
+          chargeGfx,
+          chargePool,
+          footprintRadius,
+          CHARGE_DESTINATION_HEX_FILL,
+          HEX_HORIZ_SPACING,
+          HEX_WIDTH,
+          HEX_HEIGHT,
+          HEX_VERT_SPACING,
+          MARGIN
+        );
+        addFootprintHighlightSprite(app, highlightContainer, chargeGfx, 0.28, "charge-dest-pool");
+        addFootprintPoolSmoothOutlines(
+          highlightContainer,
+          chargePool,
+          footprintRadius,
+          HEX_HORIZ_SPACING,
+          HEX_WIDTH,
+          HEX_HEIGHT,
+          HEX_VERT_SPACING,
+          MARGIN,
+          CHARGE_DESTINATION_HEX_FILL
+        );
+      }
     } else {
       drawGroup(
         chargeCells.map((c: HighlightCell | [number, number]) => ({

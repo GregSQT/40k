@@ -5652,6 +5652,7 @@ export const BoardWithAPI: React.FC = () => {
             chargeDestPoolRef={apiProps.chargeDestPoolRef}
             chargeDestDistancesRef={apiProps.chargeDestDistancesRef}
             chargeFootprintZoneRef={apiProps.chargeFootprintZoneRef}
+            chargePreviewDisplayMaskLoopsRef={apiProps.chargePreviewDisplayMaskLoopsRef}
             onAdvance={isGameOver ? () => {} : apiProps.onAdvance}
             onAdvanceMove={isGameOver ? () => {} : apiProps.onAdvanceMove}
             onCancelAdvance={isGameOver ? () => {} : apiProps.onCancelAdvance}
