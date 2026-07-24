@@ -37,71 +37,82 @@ from engine.phase_handlers.fight_handlers import fight_v11_current_pool
 
 
 def _read_proc_self_io() -> Dict[str, int]:
-    """Read per-process IO counters from /proc/self/io (Linux only)."""
+    """
+    Read per-process IO counters from /proc/self/io.
+
+    Linux-only by construction (ce script importe deja `resource`, module Unix-only).
+    L'absence du fichier ou d'un compteur est une ERREUR : rapporter 0 rendrait une
+    metrique indisponible indistinguable d'une mesure a zero.
+    """
     io_path = "/proc/self/io"
-    data: Dict[str, int] = {}
     if not os.path.exists(io_path):
-        return data
+        raise RuntimeError(
+            f"{io_path} is required to measure per-process IO (Linux-only benchmark)"
+        )
+    data: Dict[str, int] = {}
     with open(io_path, "r", encoding="utf-8") as handle:
         for line in handle:
             parts = line.strip().split(":")
             if len(parts) != 2:
                 continue
-            key = parts[0].strip()
-            value = parts[1].strip()
-            if value.isdigit():
-                data[key] = int(value)
+            data[parts[0].strip()] = int(parts[1].strip())
     return data
 
 
-def _read_proc_net_dev() -> Tuple[int, int]:
-    """Read system-wide RX/TX bytes from /proc/net/dev (Linux only)."""
-    net_path = "/proc/net/dev"
-    if not os.path.exists(net_path):
-        return 0, 0
-    rx_total = 0
-    tx_total = 0
-    with open(net_path, "r", encoding="utf-8") as handle:
-        lines = handle.readlines()
-    for line in lines[2:]:
-        if ":" not in line:
-            continue
-        _, data = line.split(":", 1)
-        fields = data.split()
-        if len(fields) < 10:
-            continue
-        rx_total += int(fields[0])
-        tx_total += int(fields[8])
-    return rx_total, tx_total
-
-
 def _capture_metrics_snapshot() -> Dict[str, float]:
-    """Capture a metrics snapshot for delta computation."""
+    """
+    Capture a metrics snapshot for delta computation.
+
+    Pas de compteur reseau : /proc/net/dev est SYSTEME (tout l'hote), donc non
+    attribuable a ce process. Une charge purement locale y relevait plusieurs Mo de
+    trafic appartenant a d'autres processus — une metrique de capacite fausse.
+
+    `process_peak_rss_kb` = ru_maxrss, high-water mark du PROCESS ENTIER depuis son
+    demarrage (interpreteur + imports torch/sb3 + moteur compris), monotone et non
+    remise a zero. C'est VOLONTAIREMENT l'empreinte totale : pour du capacity planning
+    on dimensionne la machine sur ce que le process occupe en pic, pas sur le delta de
+    la seule boucle de charge. Ce n'est donc PAS un delta et n'est pas soustrait.
+    """
     ru_self = resource.getrusage(resource.RUSAGE_SELF)
     io_data = _read_proc_self_io()
-    rx_bytes, tx_bytes = _read_proc_net_dev()
     return {
         "wall_time": time.time(),
         "cpu_time": time.process_time(),
-        "max_rss_kb": float(ru_self.ru_maxrss),
-        "io_read_bytes": float(io_data.get("read_bytes", 0)),
-        "io_write_bytes": float(io_data.get("write_bytes", 0)),
-        "net_rx_bytes": float(rx_bytes),
-        "net_tx_bytes": float(tx_bytes),
+        "process_peak_rss_kb": float(ru_self.ru_maxrss),
+        "io_read_bytes": float(require_key(io_data, "read_bytes")),
+        "io_write_bytes": float(require_key(io_data, "write_bytes")),
     }
 
 
 def _delta_metrics(start: Dict[str, float], end: Dict[str, float]) -> Dict[str, float]:
-    """Compute deltas between two snapshots."""
+    """
+    Compute deltas between two snapshots.
+
+    `process_peak_rss_kb` est un PIC absolu du process (imports compris), pas un delta :
+    on prend la valeur finale telle quelle. Voir _capture_metrics_snapshot.
+    """
     return {
         "wall_time_sec": end["wall_time"] - start["wall_time"],
         "cpu_time_sec": end["cpu_time"] - start["cpu_time"],
-        "max_rss_kb": end["max_rss_kb"],
+        "process_peak_rss_kb": end["process_peak_rss_kb"],
         "io_read_bytes": end["io_read_bytes"] - start["io_read_bytes"],
         "io_write_bytes": end["io_write_bytes"] - start["io_write_bytes"],
-        "net_rx_bytes": end["net_rx_bytes"] - start["net_rx_bytes"],
-        "net_tx_bytes": end["net_tx_bytes"] - start["net_tx_bytes"],
     }
+
+
+def _deployable_units_slot(game_state: dict) -> Tuple[dict, object]:
+    """
+    Return (container, key) pointing at the deployable-unit list of the current deployer.
+    `deployable_units` is keyed by player, int or str depending on the serialization path:
+    the caller must write back on the very key it read, never on an invented one.
+    """
+    deployment_state = require_key(game_state, "deployment_state")
+    current_deployer = int(require_key(deployment_state, "current_deployer"))
+    deployable_units = require_key(deployment_state, "deployable_units")
+    for key in (current_deployer, str(current_deployer)):
+        if key in deployable_units:
+            return deployable_units, key
+    raise KeyError(f"deployable_units missing player {current_deployer}")
 
 
 def _get_activation_pool(game_state: dict) -> List[str]:
@@ -110,6 +121,13 @@ def _get_activation_pool(game_state: dict) -> List[str]:
     Raises if required data is missing to avoid silent fallbacks.
     """
     phase = require_key(game_state, "phase")
+    if phase == "deployment":
+        # Le pool de deploiement est deployment_state["deployable_units"][current_deployer] :
+        # action_decoder deploie eligible_units[0], donc son ORDRE pilote la selection.
+        container, key = _deployable_units_slot(game_state)
+        return [str(uid) for uid in container[key]]
+    if phase == "command":
+        return require_key(game_state, "command_activation_pool")
     if phase == "move":
         return require_key(game_state, "move_activation_pool")
     if phase == "shoot":
@@ -127,11 +145,16 @@ def _get_activation_pool(game_state: dict) -> List[str]:
 
 
 def _prioritize_unit_in_pool(pool: List[str], unit_id: str) -> List[str]:
-    """Move unit_id to the front of the pool (if present)."""
+    """
+    Move unit_id to the front of the pool.
+
+    L'unite DOIT appartenir au pool : l'appelant la tire du pool lu juste avant.
+    Retourner le pool inchange masquerait une desynchronisation entre la lecture et
+    la priorisation — donc erreur explicite.
+    """
     if unit_id not in pool:
-        return pool
-    new_pool = [unit_id] + [u for u in pool if u != unit_id]
-    return new_pool
+        raise ValueError(f"Unit {unit_id!r} is not in the activation pool: {pool}")
+    return [unit_id] + [u for u in pool if u != unit_id]
 
 
 def _select_random_action(mask) -> int:
@@ -151,14 +174,35 @@ def run_episode(
 ) -> int:
     """Run a single episode and return the step count."""
     engine.reset()
+    # Budget explicite de l'operateur (on ecourte volontairement la charge) VS garde
+    # anti-runaway derivee du moteur : les deux se comptent par tour, mais un depassement
+    # de la garde est un BUG (la production leve, cf. env_wrappers), pas une fin normale.
+    operator_budget = max_steps_per_turn is not None
+    if max_steps_per_turn is None:
+        # Derive des figurines en jeu : n'existe qu'apres reset().
+        max_steps_per_turn = engine.get_turn_step_limit()
     steps = 0
+    turn_steps = 0
+    turn_key: Optional[Tuple[int, int]] = None
     while True:
-        game_state = require_key(engine.__dict__, "game_state")
+        game_state = engine.game_state
         current_player = require_key(game_state, "current_player")
+        # Le budget porte sur les activations d'UN joueur sur UN tour (meme portee que
+        # compute_turn_step_limit) : le compteur repart a chaque changement de main.
+        current_turn_key = (int(require_key(game_state, "turn")), int(current_player))
+        if current_turn_key != turn_key:
+            turn_key = current_turn_key
+            turn_steps = 0
         if game_state.get("game_over"):
             break
 
-        if max_steps_per_turn is not None and steps >= max_steps_per_turn:
+        if turn_steps >= max_steps_per_turn:
+            if not operator_budget:
+                raise RuntimeError(
+                    f"Turn step budget exceeded: {turn_steps} steps for player "
+                    f"{current_player} on turn {current_turn_key[0]} "
+                    f"(limit {max_steps_per_turn}) — engine loop suspected"
+                )
             break
 
         should_apply_macro = (
@@ -167,25 +211,33 @@ def run_episode(
 
         if should_apply_macro:
             pool = _get_activation_pool(game_state)
-            if pool:
-                phase = require_key(game_state, "phase")
+            phase = require_key(game_state, "phase")
+            # V11 : le pool fight est derive read-only (fight_v11_current_pool), il n'existe
+            # aucune cle d'etat a reordonner. La lecture ci-dessus exerce deja le cout de
+            # derivation ; tirer un choix ne ferait que consommer le RNG sans effet.
+            if pool and phase != "fight":
                 if phase == "shoot" and game_state.get("active_shooting_unit") is not None:
+                    # active_shooting_unit est TOUJOURS dans shoot_activation_pool par contrat
+                    # moteur : elle n'y entre que si deja presente (shooting_unit_activation_start
+                    # -> unit_not_in_pool), en sort en meme temps que le retrait du pool (fin
+                    # d'activation -> reaffectee a pool[0] ou supprimee ; mort -> clear atomique).
+                    # _prioritize_unit_in_pool ne peut donc pas lever ici.
                     active_unit = str(game_state["active_shooting_unit"])
                     updated_pool = _prioritize_unit_in_pool(pool, active_unit)
                 else:
                     chosen_unit = random.choice(pool)
                     updated_pool = _prioritize_unit_in_pool(pool, chosen_unit)
-                if phase == "move":
+                if phase == "deployment":
+                    container, key = _deployable_units_slot(game_state)
+                    container[key] = updated_pool
+                elif phase == "command":
+                    game_state["command_activation_pool"] = updated_pool
+                elif phase == "move":
                     game_state["move_activation_pool"] = updated_pool
                 elif phase == "shoot":
                     game_state["shoot_activation_pool"] = updated_pool
                 elif phase == "charge":
                     game_state["charge_activation_pool"] = updated_pool
-                elif phase == "fight":
-                    # V11 : le pool fight est derive read-only (fight_v11_current_pool), il
-                    # n'existe aucune cle d'etat a reordonner. La lecture ci-dessus exerce
-                    # deja le cout macro ; aucune ecriture n'est possible ni signifiante.
-                    pass
                 else:
                     raise ValueError(f"Unsupported phase: {phase}")
 
@@ -193,6 +245,7 @@ def run_episode(
         action = _select_random_action(mask)
         _, _, terminated, truncated, _ = engine.step(action)
         steps += 1
+        turn_steps += 1
         if terminated or truncated:
             break
     return steps
@@ -208,7 +261,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--macro-player", type=int, choices=[1, 2], required=True, help="Player controlled by macro")
     parser.add_argument("--macro-every-steps", type=int, required=True, help="Apply macro selection every N steps")
     parser.add_argument("--macro-both", action="store_true", help="Apply macro selection to both players")
-    parser.add_argument("--max-steps-per-turn", type=int, help="Max steps per turn")
+    parser.add_argument(
+        "--max-steps-per-turn",
+        type=int,
+        help="Operator budget of steps per player-turn (default: engine anti-runaway guard)",
+    )
+    parser.add_argument(
+        "--trace-python-memory",
+        action="store_true",
+        help=(
+            "Track Python allocations with tracemalloc. WARNING: measured ~9.6x CPU "
+            "overhead — the reported CPU time then includes the tracing itself."
+        ),
+    )
     parser.add_argument("--metrics-out", help="Write metrics summary to JSON file")
     parser.add_argument("--seed", type=int, help="Random seed")
     return parser.parse_args()
@@ -241,52 +306,55 @@ def main() -> None:
     )
 
     total_steps = 0
-    tracemalloc.start()
+    # tracemalloc instrumente CHAQUE allocation : mesure ~9.6x le CPU sur ce bench. Il est
+    # donc opt-in, sinon la metrique CPU rapportee serait surtout celle de l'instrument.
+    if args.trace_python_memory:
+        tracemalloc.start()
     metrics_start = _capture_metrics_snapshot()
     for ep in range(1, args.episodes + 1):
         steps = run_episode(
             engine=engine,
             macro_player=args.macro_player,
             macro_every_steps=args.macro_every_steps,
-            # Defaut = le budget par tour du moteur lui-meme (derive des figurines en
-            # jeu), pour que ce harnais de charge exerce la meme borne que la production.
-            max_steps_per_turn=(
-                args.max_steps_per_turn
-                if args.max_steps_per_turn is not None
-                else engine.get_turn_step_limit()
-            ),
+            # None = budget par tour du moteur lui-meme (derive des figurines en jeu, donc
+            # resolu apres reset), pour exercer la meme borne que la production.
+            max_steps_per_turn=args.max_steps_per_turn,
             macro_both=args.macro_both,
         )
         total_steps += steps
         print(f"[episode {ep}] steps={steps}")
     metrics_end = _capture_metrics_snapshot()
     metrics_delta = _delta_metrics(metrics_start, metrics_end)
-    current_mem, peak_mem = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
+    py_peak_kb: Optional[float] = None
+    if args.trace_python_memory:
+        _, peak_mem = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        py_peak_kb = peak_mem / 1024
     if metrics_delta["wall_time_sec"] <= 0:
         raise ValueError("Elapsed time must be > 0")
     steps_per_sec = total_steps / metrics_delta["wall_time_sec"]
-    max_rss_mb = metrics_delta["max_rss_kb"] / 1024
-    py_peak_mb = peak_mem / (1024 * 1024)
+    process_peak_rss_mb = metrics_delta["process_peak_rss_kb"] / 1024
     io_read_mb = metrics_delta["io_read_bytes"] / (1024 * 1024)
     io_write_mb = metrics_delta["io_write_bytes"] / (1024 * 1024)
-    net_rx_mb = metrics_delta["net_rx_bytes"] / (1024 * 1024)
-    net_tx_mb = metrics_delta["net_tx_bytes"] / (1024 * 1024)
     print("--------------------------")
+    print(f"Steps : {total_steps} ({steps_per_sec:.2f} steps/sec)")
+    print(f"Wall time : {metrics_delta['wall_time_sec']:.2f} seconds")
     print(f"CPU time : {metrics_delta['cpu_time_sec']:.2f} seconds")
-    print(f"RAM max : {max_rss_mb:.2f} Mb")
+    print(f"Process RSS peak : {process_peak_rss_mb:.2f} Mb (whole process, imports included)")
     print(f"Disk read : {io_read_mb:.2f} Mb")
     print(f"Disk write : {io_write_mb:.2f} Mb")
-    print(f"Network download : {net_rx_mb:.2f} Mb")
-    print(f"Network upload : {net_tx_mb:.2f} Mb")
+    if py_peak_kb is not None:
+        print(f"Python heap peak : {py_peak_kb / 1024:.2f} Mb (tracemalloc: CPU time inflated)")
     if args.metrics_out:
         payload = {
             "episodes": args.episodes,
             "total_steps": total_steps,
             "steps_per_sec": steps_per_sec,
             "metrics": metrics_delta,
-            "python_memory_peak_kb": peak_mem / 1024,
         }
+        # Absent du payload si non mesure : une cle a 0 se lirait comme une mesure.
+        if py_peak_kb is not None:
+            payload["python_memory_peak_kb"] = py_peak_kb
         with open(args.metrics_out, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)
 
