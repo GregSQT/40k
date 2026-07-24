@@ -6330,6 +6330,37 @@ def _manual_roll_intent(
     alive0 = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
     if not alive0:
         return None
+    # Attaquant (escouade) resolu ICI : sert closest_target_penetration (ci-dessous) ET les
+    # rerolls to-wound (plus bas). Constant pour l intent.
+    attacker_unit = get_unit_by_id(game_state, str(attacker["squad_id"]))
+    # closest_target_penetration (regle projet unit_rules.json) : +1 de penetration (AP-1,
+    # convention AP negatif cf. save_threshold) quand l unite tire sur la cible ELIGIBLE la
+    # plus proche. Porte du code MORT _attack_sequence_rng (shooting_handlers) vers le chemin
+    # VIF. La distance se mesure au niveau ESCOUADE (attacker["squad_id"]) : « closest eligible
+    # unit » est une determination d unite (01.04, bord-a-bord via le selecteur `ranged`), pas
+    # par figurine — attacker est ici une FIGURINE (models_cache), d ou le squad_id explicite.
+    if attacker_unit is not None and _unit_has_rule_effect(attacker_unit, "closest_target_penetration"):
+        from engine.phase_handlers.shooting_handlers import (
+            shooting_build_valid_target_pool,
+            _ranged_distance_metric,
+        )
+        from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
+        _ctp_attacker_sid = str(attacker["squad_id"])
+        _ctp_pool = shooting_build_valid_target_pool(game_state, _ctp_attacker_sid)
+        if _ctp_pool:
+            _ctp_uc = require_key(game_state, "units_cache")
+            _ctp_metric = _ranged_distance_metric()
+            _ctp_attacker_socle = socle_from_cache_entry(_ctp_uc[_ctp_attacker_sid])
+
+            def _ctp_dist(uid: str) -> float:
+                if uid not in _ctp_uc:
+                    raise KeyError(f"_manual_roll_intent closest_target_penetration: unit {uid} absente de units_cache")
+                return ranged_edge_distance(
+                    _ctp_attacker_socle, socle_from_cache_entry(_ctp_uc[uid]), _ctp_metric
+                )
+
+            if min(_ctp_pool, key=_ctp_dist) == target_sid:
+                ap = ap - 1
     # Conforme 19.02 : seuil de blessure vs plus haute T bodyguard (depend de l arme via strength).
     wth = wound_threshold(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
     first_alive = models_cache[alive0[0]]
@@ -6339,7 +6370,6 @@ def _manual_roll_intent(
     # Rerolls to-wound au TIR (abilities UNITE, constantes pour l intent) — miroir exact du
     # fight (_manual_roll_fight_intent) : reroll_1_towound = reroll d un dé de blessure = 1 ;
     # reroll_towound_target_on_objective = reroll de tout échec si la cible est sur objectif.
-    attacker_unit = get_unit_by_id(game_state, str(attacker["squad_id"]))
     target_unit = get_unit_by_id(game_state, str(target_sid))
     reroll_wound1 = attacker_unit is not None and _unit_has_rule_effect(attacker_unit, "reroll_1_towound")
     reroll_wound_obj = (
