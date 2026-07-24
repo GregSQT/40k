@@ -45,6 +45,14 @@ def _load(seed: int = 0):
         scenario_file=str(SCENARIO), unit_registry=UnitRegistry(), quiet=True,
         gym_training_mode=True,
     )
+    # Le training_config x5_debug programme 0 % de déploiement actif (deployment_mode_schedule,
+    # active_ratio 0.0→0.0) : sans neutralisation le scénario est rejoué en 'fixed' et la phase
+    # deployment n'existe jamais. Ce test cible le COMMIT d'un déploiement ACTIF (deploy_unit) —
+    # on désactive donc le scheduler par-épisode pour que le deployment_type='active' du scénario
+    # soit respecté.
+    sched = eng.training_config.get("deployment_mode_schedule")
+    if isinstance(sched, dict):
+        sched["enabled"] = False
     eng.reset(seed=seed)
     return eng
 

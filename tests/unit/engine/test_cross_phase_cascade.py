@@ -1,7 +1,8 @@
 """Tests unitaires — cascade inter-phases : mort d'unité et filtres de pool cross-phase.
 
 Couvre :
-- Unité tuée en combat → retirée de tous les pools fight (charging, alternating, non-active)
+- Unité tuée en combat → exclue de l'éligibilité fight V11 (live via is_unit_alive) ET retirée
+  des pools cross-phase survivants (move/shoot/charge) par la cascade
 - Unité tuée en tir → retirée de shoot, move, charge pools
 - Unité ayant fui (units_fled) → exclue du pool de charge ET vérifiée dans le shoot pool
 - Unité avancée (units_advanced) → exclue du pool de charge
@@ -13,7 +14,10 @@ from typing import Any, Dict, List
 
 import pytest
 
-from engine.phase_handlers.fight_handlers import _remove_dead_unit_from_fight_pools
+from engine.phase_handlers.fight_handlers import (
+    _remove_dead_unit_from_fight_pools,
+    fight_v11_eligible_unit_ids,
+)
 from engine.phase_handlers.shooting_handlers import _remove_dead_unit_from_pools
 from engine.phase_handlers.charge_handlers import get_eligible_units as charge_get_eligible_units
 from engine.phase_handlers.shooting_handlers import shooting_build_activation_pool
@@ -93,9 +97,6 @@ def _make_gs(units: List[Dict[str, Any]], phase: str = "fight") -> Dict[str, Any
         "move_activation_pool": [],
         "shoot_activation_pool": [],
         "charge_activation_pool": [],
-        "charging_activation_pool": [],
-        "active_alternating_activation_pool": [],
-        "non_active_alternating_activation_pool": [],
         "hex_los_cache": {},
         "los_cache": {},
         "_unit_move_version": 0,
@@ -112,58 +113,31 @@ def _make_gs(units: List[Dict[str, Any]], phase: str = "fight") -> Dict[str, Any
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestFightDeathCascade:
-    def test_dead_unit_removed_from_charging_pool(self):
-        """cascade_fight_charging : unité tuée → retirée du charging_activation_pool."""
+    def test_dead_unit_excluded_from_v11_fight_eligibility(self):
+        """cascade_fight_v11 : un mort n'est plus éligible au combat.
+
+        Le fight V11 (12.04) a supprimé les pools par sous-phase (charging / active_alternating /
+        non_active_alternating) : l'éligibilité est désormais dérivée LIVE de ``units_cache`` via
+        ``is_unit_alive``. Retirer une figurine de ``units_cache`` (la mort) l'exclut donc de
+        ``fight_v11_eligible_unit_ids`` sans aucune mutation de pool.
+        """
         units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]
         gs = _make_gs(units)
-        gs["charging_activation_pool"] = ["1", "2"]
-        gs["active_alternating_activation_pool"] = []
-        gs["non_active_alternating_activation_pool"] = []
-        # Simuler la mort : HP_CUR → 0 + retirer de units_cache
+        # Vivant et adjacent à l'ennemi → éligible avant la mort.
+        assert "1" in fight_v11_eligible_unit_ids(gs, 1, fights_first_only=False)
+
+        # Mort : HP_CUR → 0 + retrait de units_cache (invariant is_unit_alive).
         units[0]["HP_CUR"] = 0
         gs["units_cache"].pop("1", None)
-
         _remove_dead_unit_from_fight_pools(gs, "1")
 
-        assert "1" not in gs["charging_activation_pool"]
-        assert "2" in gs["charging_activation_pool"]
-
-    def test_dead_unit_removed_from_active_alternating_pool(self):
-        """cascade_fight_active_alt : mort → retirée du active_alternating_activation_pool."""
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]
-        gs = _make_gs(units)
-        gs["charging_activation_pool"] = []
-        gs["active_alternating_activation_pool"] = ["1", "2"]
-        gs["non_active_alternating_activation_pool"] = []
-        units[0]["HP_CUR"] = 0
-        gs["units_cache"].pop("1", None)
-
-        _remove_dead_unit_from_fight_pools(gs, "1")
-
-        assert "1" not in gs["active_alternating_activation_pool"]
-
-    def test_dead_unit_removed_from_non_active_alternating_pool(self):
-        """cascade_fight_non_active : mort → retirée du non_active_alternating_activation_pool."""
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]
-        gs = _make_gs(units)
-        gs["charging_activation_pool"] = []
-        gs["active_alternating_activation_pool"] = []
-        gs["non_active_alternating_activation_pool"] = ["1", "2"]
-        units[0]["HP_CUR"] = 0
-        gs["units_cache"].pop("1", None)
-
-        _remove_dead_unit_from_fight_pools(gs, "1")
-
-        assert "1" not in gs["non_active_alternating_activation_pool"]
+        assert "1" not in fight_v11_eligible_unit_ids(gs, 1, fights_first_only=False)
 
     def test_dead_unit_removed_from_shoot_pool_via_fight_cascade(self):
         """cascade_fight_also_shoot : _remove_dead_unit_from_fight_pools retire aussi du shoot pool."""
         units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]
         gs = _make_gs(units)
         gs["shoot_activation_pool"] = ["1", "2"]
-        gs["charging_activation_pool"] = []
-        gs["active_alternating_activation_pool"] = []
-        gs["non_active_alternating_activation_pool"] = []
         units[0]["HP_CUR"] = 0
         gs["units_cache"].pop("1", None)
 
@@ -176,9 +150,6 @@ class TestFightDeathCascade:
         units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]
         gs = _make_gs(units)
         gs["move_activation_pool"] = ["1", "2"]
-        gs["charging_activation_pool"] = []
-        gs["active_alternating_activation_pool"] = []
-        gs["non_active_alternating_activation_pool"] = []
         units[0]["HP_CUR"] = 0
         gs["units_cache"].pop("1", None)
 

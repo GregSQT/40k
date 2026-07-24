@@ -33,6 +33,7 @@ from config_loader import get_config_loader
 from shared.data_validation import require_key
 from ai.unit_registry import UnitRegistry
 from engine.w40k_core import W40KEngine
+from engine.phase_handlers.fight_handlers import fight_v11_current_pool
 
 
 def _read_proc_self_io() -> Dict[str, int]:
@@ -117,13 +118,11 @@ def _get_activation_pool(game_state: dict) -> List[str]:
         return require_key(game_state, "charge_activation_pool")
     if phase == "fight":
         fight_subphase = require_key(game_state, "fight_subphase")
-        if fight_subphase in ("charging",):
-            return require_key(game_state, "charging_activation_pool")
-        if fight_subphase in ("alternating_non_active", "cleanup_non_active"):
-            return require_key(game_state, "non_active_alternating_activation_pool")
-        if fight_subphase in ("alternating_active", "cleanup_active"):
-            return require_key(game_state, "active_alternating_activation_pool")
-        raise ValueError(f"Unsupported fight_subphase: {fight_subphase}")
+        if fight_subphase not in ("pile_in", "consolidate", "fight"):
+            raise ValueError(f"Unsupported fight_subphase: {fight_subphase}")
+        # V11 : aucun pool d'activation n'est stocke en phase fight. Le pool eligible est
+        # derive a la volee (miroir lecture-seule des drivers fight_v11_*).
+        return fight_v11_current_pool(game_state)
     raise ValueError(f"Unsupported phase: {phase}")
 
 
@@ -183,15 +182,10 @@ def run_episode(
                 elif phase == "charge":
                     game_state["charge_activation_pool"] = updated_pool
                 elif phase == "fight":
-                    fight_subphase = require_key(game_state, "fight_subphase")
-                    if fight_subphase in ("charging",):
-                        game_state["charging_activation_pool"] = updated_pool
-                    elif fight_subphase in ("alternating_non_active", "cleanup_non_active"):
-                        game_state["non_active_alternating_activation_pool"] = updated_pool
-                    elif fight_subphase in ("alternating_active", "cleanup_active"):
-                        game_state["active_alternating_activation_pool"] = updated_pool
-                    else:
-                        raise ValueError(f"Unsupported fight_subphase: {fight_subphase}")
+                    # V11 : le pool fight est derive read-only (fight_v11_current_pool), il
+                    # n'existe aucune cle d'etat a reordonner. La lecture ci-dessus exerce
+                    # deja le cout macro ; aucune ecriture n'est possible ni signifiante.
+                    pass
                 else:
                     raise ValueError(f"Unsupported phase: {phase}")
 

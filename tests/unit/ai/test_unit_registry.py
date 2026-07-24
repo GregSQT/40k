@@ -14,6 +14,10 @@ def _make_registry_stub() -> UnitRegistry:
     registry.faction_role_combinations = set()
     registry.faction_role_matrix = {}
     registry._unit_rules = {"rapid_fire": {}, "fallback_and_shoot": {}}
+    # L'identité de l'agent unique n'est plus une constante de classe (CORE_AGENT_KEY) mais un
+    # attribut d'instance chargé depuis config/config.json par __init__ (self.AGENT_KEY). Le stub
+    # bypasse __init__ : on fixe une valeur déterministe pour garder ces tests hermétiques.
+    registry.AGENT_KEY = "CoreAgent"
     return registry
 
 
@@ -51,12 +55,12 @@ def test_dynamic_classification_helpers_without_static_labels() -> None:
 def test_model_key_and_unit_data_accessors() -> None:
     registry = _make_registry_stub()
     registry.units = {"Intercessor": {"faction": "SpaceMarine", "role": "Ranged", "HP_MAX": 2}}
-    registry.faction_role_matrix = {UnitRegistry.CORE_AGENT_KEY: ["Intercessor"]}
+    registry.faction_role_matrix = {registry.AGENT_KEY: ["Intercessor"]}
 
-    assert registry.get_model_key("Intercessor") == UnitRegistry.CORE_AGENT_KEY
-    assert registry.get_required_models() == [UnitRegistry.CORE_AGENT_KEY]
-    assert registry.get_all_model_keys() == [UnitRegistry.CORE_AGENT_KEY]
-    assert registry.get_units_for_model(UnitRegistry.CORE_AGENT_KEY) == ["Intercessor"]
+    assert registry.get_model_key("Intercessor") == registry.AGENT_KEY
+    assert registry.get_required_models() == [registry.AGENT_KEY]
+    assert registry.get_all_model_keys() == [registry.AGENT_KEY]
+    assert registry.get_units_for_model(registry.AGENT_KEY) == ["Intercessor"]
     assert registry.get_faction_units("SpaceMarine") == ["Intercessor"]
     assert registry.get_role_units("Ranged") == ["Intercessor"]
 
@@ -79,8 +83,8 @@ def test_build_faction_role_matrix_single_agent_mode() -> None:
         "Termagant": {"faction": "Tyranid", "role": "Ranged"},
     }
     registry._build_faction_role_matrix()
-    assert UnitRegistry.CORE_AGENT_KEY in registry.faction_role_matrix
-    assert sorted(registry.faction_role_matrix[UnitRegistry.CORE_AGENT_KEY]) == ["Intercessor", "Termagant"]
+    assert registry.AGENT_KEY in registry.faction_role_matrix
+    assert sorted(registry.faction_role_matrix[registry.AGENT_KEY]) == ["Intercessor", "Termagant"]
 
 
 def test_extract_static_properties_parses_rules_weapons_and_indexes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -150,10 +154,10 @@ def test_save_registry_cache_writes_json(tmp_path: Path) -> None:
     registry.factions = {"SpaceMarine"}
     registry.roles = {"Ranged"}
     registry.faction_role_combinations = {("SpaceMarine", "Ranged")}
-    registry.faction_role_matrix = {UnitRegistry.CORE_AGENT_KEY: ["Intercessor"]}
+    registry.faction_role_matrix = {registry.AGENT_KEY: ["Intercessor"]}
     cache_file = tmp_path / "config" / "unit_registry_cache.json"
 
     registry.save_registry_cache(str(cache_file))
     data = json.loads(cache_file.read_text(encoding="utf-8"))
     assert data["units"]["Intercessor"]["faction"] == "SpaceMarine"
-    assert data["faction_role_matrix"][UnitRegistry.CORE_AGENT_KEY] == ["Intercessor"]
+    assert data["faction_role_matrix"][registry.AGENT_KEY] == ["Intercessor"]

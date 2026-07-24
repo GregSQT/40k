@@ -24,6 +24,13 @@ import pytest
 from engine.phase_handlers.fight_handlers import _ai_select_fight_target
 from shared.data_validation import ConfigurationError
 
+# La clé de l'agent combattant est résolue par le registry en mode single-agent
+# (config/config.json → defaults.agent_key). On la lit ici plutôt que de la coder en dur :
+# sinon le test casse dès que l'agent unique configuré change (CoreAgent → ArmageddonAgent…).
+from ai.unit_registry import UnitRegistry
+
+_AGENT_KEY = UnitRegistry().get_model_key("Intercessor")
+
 
 def _unit(uid: str, unit_type: str = "Intercessor") -> Dict[str, Any]:
     return {"id": uid, "unitType": unit_type}
@@ -43,7 +50,7 @@ def test_missing_reward_configs_key_raises_instead_of_first_target():
     Avant le fix : le `except Exception` renvoyait `valid_targets[0]` ("2") en silence.
     """
     gs = _game_state(reward_configs={})  # la clé de l'agent est absente
-    with pytest.raises(ConfigurationError, match="CoreAgent"):
+    with pytest.raises(ConfigurationError, match=_AGENT_KEY):
         _ai_select_fight_target(gs, "1", ["2", "3"])
 
 
@@ -57,7 +64,7 @@ def test_missing_reward_configs_entirely_raises():
 
 def test_unknown_unit_type_raises_instead_of_first_target():
     """`unitType` inconnu du registry → ValueError de `get_model_key`, PAS un repli."""
-    gs = _game_state(reward_configs={"CoreAgent": {}}, fighter_type="CeTypeNExistePas")
+    gs = _game_state(reward_configs={_AGENT_KEY: {}}, fighter_type="CeTypeNExistePas")
     with pytest.raises(ValueError, match="Unknown unit type"):
         _ai_select_fight_target(gs, "1", ["2", "3"])
 
@@ -68,7 +75,7 @@ def test_empty_target_pool_raises_instead_of_empty_string():
     Les 4 sites d'appel gardent déjà ce cas en amont : la branche était morte, et son `return ""`
     aurait produit un identifiant d'unité vide en silence si elle avait été atteinte.
     """
-    gs = _game_state(reward_configs={"CoreAgent": {}})
+    gs = _game_state(reward_configs={_AGENT_KEY: {}})
     with pytest.raises(ValueError, match="pool de cibles VIDE"):
         _ai_select_fight_target(gs, "1", [])
 
@@ -79,7 +86,7 @@ def test_target_missing_from_unit_by_id_raises():
     Le pool est construit depuis `units_cache` : une cible qui y figure sans être dans
     `unit_by_id` est une désynchronisation d'index. Avant le fix, elle était sautée sans bruit.
     """
-    gs = _game_state(reward_configs={"CoreAgent": {}})
+    gs = _game_state(reward_configs={_AGENT_KEY: {}})
     with pytest.raises(ValueError, match="absente de unit_by_id"):
         _ai_select_fight_target(gs, "1", ["2", "42"])  # "42" n'est pas dans unit_by_id
 
@@ -113,14 +120,14 @@ def test_selects_highest_scoring_target_not_the_first(scripted_mapper):
     renverrait `valid_targets[0]` passerait inaperçu sans ce test.
     """
     scripted_mapper.scores = {"2": 1.0, "3": 9.0}
-    gs = _game_state(reward_configs={"CoreAgent": {}})
+    gs = _game_state(reward_configs={_AGENT_KEY: {}})
     assert _ai_select_fight_target(gs, "1", ["2", "3"]) == "3"
 
 
 def test_selection_is_stable_across_identical_calls(scripted_mapper):
     """Déterminisme (§8.1) : deux appels identiques rendent la même cible."""
     scripted_mapper.scores = {"2": 4.0, "3": 7.0}
-    gs = _game_state(reward_configs={"CoreAgent": {}})
+    gs = _game_state(reward_configs={_AGENT_KEY: {}})
     first = _ai_select_fight_target(gs, "1", ["2", "3"])
     second = _ai_select_fight_target(gs, "1", ["2", "3"])
     assert first == second == "3"
@@ -129,7 +136,7 @@ def test_selection_is_stable_across_identical_calls(scripted_mapper):
 def test_tie_keeps_the_first_of_the_pool(scripted_mapper):
     """Égalité de score → PREMIER du pool, comme l'ancien `>` strict (non-régression)."""
     scripted_mapper.scores = {"2": 5.0, "3": 5.0}
-    gs = _game_state(reward_configs={"CoreAgent": {}})
+    gs = _game_state(reward_configs={_AGENT_KEY: {}})
     assert _ai_select_fight_target(gs, "1", ["2", "3"]) == "2"
     assert _ai_select_fight_target(gs, "1", ["3", "2"]) == "3"
 
@@ -137,13 +144,13 @@ def test_tie_keeps_the_first_of_the_pool(scripted_mapper):
 def test_each_target_is_scored_exactly_once(scripted_mapper):
     """Le refactor supprime le double `get_unit_by_id` : un seul scoring par cible."""
     scripted_mapper.scores = {"2": 1.0, "3": 2.0}
-    gs = _game_state(reward_configs={"CoreAgent": {}})
+    gs = _game_state(reward_configs={_AGENT_KEY: {}})
     _ai_select_fight_target(gs, "1", ["2", "3"])
     assert sorted(scripted_mapper.calls) == ["2", "3"], scripted_mapper.calls
 
 
 def test_unknown_fighter_unit_still_raises_value_error():
     """Non-régression : l'erreur explicite déjà présente AVANT le try n'est pas touchée."""
-    gs = _game_state(reward_configs={"CoreAgent": {}})
+    gs = _game_state(reward_configs={_AGENT_KEY: {}})
     with pytest.raises(ValueError, match="Unit not found for fight target selection"):
         _ai_select_fight_target(gs, "99", ["2", "3"])

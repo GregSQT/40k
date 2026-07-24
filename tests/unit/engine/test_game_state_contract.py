@@ -183,14 +183,15 @@ class TestGameStateTrackingSets:
 
 class TestGameStateActivationPools:
 
+    # Pools d'activation réellement construits par le moteur. Le fight V11 (fight_subphase
+    # pile_in/consolidate/fight + fight_v11_current_pool) a supprimé le modèle des pools par
+    # sous-phase de combat (charging/active_alternating/non_active_alternating) : plus aucune
+    # ligne du moteur ne crée ou ne lit ces clés, elles ne font donc plus partie du contrat.
     _required_pools = [
         "command_activation_pool",
         "move_activation_pool",
         "shoot_activation_pool",
         "charge_activation_pool",
-        "charging_activation_pool",
-        "active_alternating_activation_pool",
-        "non_active_alternating_activation_pool",
     ]
 
     @pytest.mark.parametrize("key", _required_pools)
