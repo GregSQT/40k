@@ -6077,6 +6077,7 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
 
 def _cover_worsened_bs(
     game_state: Dict[str, Any], attacker: Dict[str, Any], target_sid: str, bs: int,
+    weapon: Dict[str, Any],
 ) -> Tuple[int, bool]:
     """Applique le Benefit of Cover (regle 13.08) au seuil de touche d un tir.
 
@@ -6086,9 +6087,16 @@ def _cover_worsened_bs(
     (los_cover_cache derive du meme calcul). Clamp a 6 : un 6 non-modifie touche toujours
     (CRITICAL HIT, 05.01), donc un BS6+ sous cover reste touche-sur-6.
 
+    IGNORES COVER (24.18) : si l arme tire avec une regle [IGNORES COVER], la cible
+    « cannot have the benefit of cover against that attack ». Court-circuit en tete :
+    aucun malus, et le calcul de LoS est evite.
+
     Retourne (bs_effectif, cover). Aucun repli : si une unite est introuvable c est
     un bug -> erreur explicite.
     """
+    from engine.utils.weapon_helpers import weapon_has_rule
+    if weapon_has_rule(weapon, "IGNORES_COVER"):
+        return bs, False
     from engine.phase_handlers.shooting_handlers import compute_unit_los, _get_unit_by_id
     shooter_sid = str(require_key(attacker, "squad_id"))
     shooter_unit = _get_unit_by_id(game_state, shooter_sid)
@@ -6283,7 +6291,7 @@ def _manual_roll_intent(
     if n_attacks <= 0:
         return None
     bs_base = int(weapon.get("ATK", weapon.get("BS", 4)))  # get allowed
-    bs, cover = _cover_worsened_bs(game_state, attacker, target_sid, bs_base)
+    bs, cover = _cover_worsened_bs(game_state, attacker, target_sid, bs_base, weapon)
     strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))  # get allowed
     ap = int(weapon.get("AP", 0))  # get allowed
     dmg_raw = weapon.get("DMG", 1)  # get allowed

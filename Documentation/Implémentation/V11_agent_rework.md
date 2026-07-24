@@ -2488,7 +2488,14 @@ Il redeviendra sale au prochain training : le restaurer avant chaque commit.
 (cf. §0.19). Ils produiront du non-commité dès qu'ils existeront. Fermer cette entrée maintenant
 la rendrait fausse une troisième fois.
 
-### 0.19 Revérifier T1→T5 et la section 9 ligne à ligne — ✅ SOLDÉ (§0.19.1 → §0.19.3, 2026-07-21)
+### 0.19 Revérifier T1→T5 et la section 9 ligne à ligne — ⏳ PARTIEL (T1 soldé §0.19.1→§0.19.3 ; section 9 auditée le 2026-07-24 → **NON FAITE**, cf. §9.0)
+
+> ⚠️ **Correction 2026-07-24.** Le « ✅ SOLDÉ » d'origine était prématuré : les passes §0.19.1
+> → §0.19.3 n'ont audité **que T1** (R4 `auto_decider`, R6 charge BFS). **La section 9 (Phase A')
+> n'a jamais été revérifiée par cette entrée** — elle l'a été pour la première fois le 2026-07-24,
+> verdict en §9.0 : **aucune de ses cinq sous-parties (P1→P5) n'est réellement en place** malgré
+> les marqueurs ✅ FAIT. Le taux de découverte élevé annoncé ci-dessous se confirme donc jusque
+> sur la section 9.
 
 **Énoncé.** Les tranches **T1, T2, T3, T4, T5** (§5) et toute la **section 9** (Phase A') sont
 marquées ✅ FAIT, mais **n'ont jamais été revérifiées ligne à ligne contre le code**. Leur statut
@@ -4538,6 +4545,78 @@ choisit. Périmètre strict : règles présentes dans le moteur — on n'entraî
 absente (stratagèmes, CP, FNP, transports, etc. restent hors scope). Prérequis : Phase A
 (T1-T6) validée.
 
+### 9.0 AUDIT DE STATUT 2026-07-24 — Phase A' NON FAITE (P1→P5 = 0/5) — ❌
+
+Revérification ligne à ligne contre le code (la première ; §0.19 ne l'avait jamais menée, cf. sa
+correction). **Aucune des cinq sous-parties n'est réellement en place**, malgré les marqueurs
+✅ FAIT antérieurs. Chiffres et sites relevés par grep/lecture le 2026-07-24, pas de mémoire.
+
+| Sous-partie | Statut réel | Preuve vérifiée |
+|---|---|---|
+| **P1** — Parité de résolution (§9.2) | ❌ **fait à l'envers** | Règles HEAVY, IGNORES_COVER, DEVASTATING_WOUNDS, closest_target_penetration, HAZARDOUS, reroll_1_towound, reroll_towound_target_on_objective écrites **dans `_attack_sequence_rng`** (le code MORT, [shooting_handlers.py:5998](../../engine/phase_handlers/shooting_handlers.py#L5998)), **absentes du chemin vif** `shared_utils` (grep = 0 dans `_manual_roll_intent`). `_attack_sequence_rng` n'a **aucun appelant vif** (seuls 6 fichiers de tests le monkeypatchent) → règles **inactives en gym ET PvP**. Code mort **non supprimé** : `_attack_sequence_rng`, états `_rapid_fire_*` ([w40k_core.py:1208-1214](../../engine/w40k_core.py#L1208)), log `rapid_fire_bonus_shot`, 5 branches « squad path expected » ([shooting_handlers.py:5699-5807](../../engine/phase_handlers/shooting_handlers.py#L5699)) tous présents. |
+| **P2** — Mécanisme générique décision agent (§9.3) | ❌ **absent** | Grep `pending_agent_decision` / `CHOICE_[0-9]` / `agent_decision` sur `engine/` + `ai/` = 0. Action_space non étendu : `TOTAL_ACTION_SIZE` reste `BASE_ZONE_INTENT + MAX_OBJECTIVES*3` ([macro_intents.py:20](../../engine/macro_intents.py#L20)), pas le `41+K` prévu. Aucun bloc obs « contexte de décision ». |
+| **P3** — Branchement décision par décision (§9.4) | ❌ **0/9** | Point 0 (pseudo-décision aléatoire, le plus urgent) toujours vif : `raw_action_int % len(options)` à [w40k_core.py:2580](../../engine/w40k_core.py#L2580). Points 1-8 : sélecteurs heuristiques `_ai_select_*` / scoring intacts, aucun branché sur une décision agent. |
+| **P4** — Observation de support (§9.5) | ❌ **sans objet** | Le bloc décision (P2) n'existant pas, son support obs non plus. |
+| **P5** — Validation par tranche (§9.6) | ❌ **sans objet** | Aucune tranche P3 ouverte → aucun cycle win-rate. |
+
+**Seul acquis réel** : les 4 rerolls de fight sont vifs ([fight_handlers.py:5153-5206](../../engine/phase_handlers/fight_handlers.py#L5153)) — mais §9.2 les liste déjà comme « déjà vifs », donc rien de neuf au titre de P1.
+
+⚠️ **Pourquoi les ✅ FAIT étaient faux.** Le travail P1 identifiable (règles d'armes) a été écrit
+**dans le code mort** au lieu du chemin vif, et une batterie de tests (`test_unit_rules_shoot.py`,
+`test_shoot_attack_sequence.py`, `test_special_rules_e2e.py`, `test_fight_special_rules.py`,
+`test_phase_transitions.py`) le **monkeypatche** et passe au vert. C'est exactement le double motif
+que §0.19 existe pour interdire : **code testé mais jamais appelé** (T6-i) + **test qui passe pour
+la mauvaise raison**. En jeu réel, ces règles ne s'exécutent nulle part.
+
+**Conséquence de planning.** La Phase A' est **à faire intégralement**, dans l'ordre du plan
+ci-dessous (P1 corrigé = déplacer les règles vers le vif PUIS supprimer le mort ; puis P2→P5).
+Les critères d'acceptation de §9.2→§9.6 restent valides tels quels.
+
+### 9.0bis Optimalité du plan — arbitrage avant exécution (2026-07-24)
+
+Question posée : « faire décider à l'agent TOUT ce qu'il peut est-il optimal ? ». Sites de code
+ci-dessous **vérifiés par lecture** le 2026-07-24.
+
+**La MÉTHODE du plan est bonne** — à garder telle quelle :
+- **P2 générique** (un canal `pending_agent_decision` + `CHOICE_0..K`) plutôt qu'une action ad
+  hoc par décision : évite l'explosion de l'action_space, mutualise, et le miroir des prompts PvP
+  `waiting_for_player` respecte la règle projet « gym copie PvP ».
+- **§9.6** (une tranche = une décision, win-rate ≥ tranche précédente sinon corriger
+  observation/reward AVANT d'empiler) : c'est le garde-fou qui rend le plan robuste au risque
+  « plus de décisions = agent pire ». À ne jamais assouplir.
+
+**L'OBJECTIF « tout » n'est pas optimal en soi** — trois réserves, avec le traitement retenu :
+
+1. **Levier tactique nul = ne pas brancher (mesurer, ne pas juger à la main).** Certaines
+   décisions ont un optimum calculable déjà atteint en auto : choix d'arme CC par expected damage
+   `_auto_select_cc_weapon_for_fig` ([shared_utils.py:7370](../../engine/phase_handlers/shared_utils.py#L7370)),
+   ordre de déclaration des groupes d'allocation `_auto_declared_order`
+   ([shared_utils.py:6462](../../engine/phase_handlers/shared_utils.py#L6462)). Les brancher
+   n'ajoute que de la dimensionnalité (dilution du reward, credit assignment plus profond,
+   risque de catastrophic forgetting — piège connu CLAUDE.md) sans gain. **Critère d'arbitrage à
+   appliquer AVANT chaque tranche P3** : mesurer le *regret* de la décision — écart de valeur
+   entre le choix optimal (rollout/oracle) et le choix de l'heuristique auto. Regret négligeable
+   → rester en auto ; regret significatif → brancher. Ça remplace le « optionnels, à statuer
+   utilisateur » (§9.4 point 8) par une mesure, pas un avis.
+
+2. **Décisions spatiales : ne pas exposer en top-K d'hex.** Pour destination de pile-in/conso
+   (§9.4 point 5), move-after-shooting (point 6), placement de charge, les candidats pertinents
+   dépassent souvent K=6 → un top-K figé **tronque et peut exclure l'optimum** (troncature
+   silencieuse = anti-pattern projet). Le plan le fait DÉJÀ bien pour le déploiement : actions
+   4-8 = **5 stratégies tactiques scorées** (aggressive front / objective pressure /
+   safe-cohesion / left / right flank), pas des hex bruts —
+   [action_decoder.py:1833](../../engine/action_decoder.py#L1833). **À généraliser** : paramétrer
+   toute décision spatiale à grand espace en *intentions scorées*, pas en hex. Sinon K=6 devient
+   un plafond arbitraire sur la qualité.
+
+3. **K=6 est un défaut, pas une loi.** L'alignement sur les 6 slots figurines (§9.3) vaut pour
+   l'allocation de pertes ; il n'a aucune raison de borner les décisions de cardinalité
+   différente. K doit être choisi par type de décision, pas global.
+
+**En clair** : le plan est quasi-optimal en méthode ; l'objectif « tout » doit rester
+**subordonné au win-rate §9.6 et au regret mesuré** (réserve 1), et la **paramétrisation des
+décisions spatiales en intentions scorées** (réserve 2) est le point technique à ne pas rater.
+
 ### 9.1 Constat d'architecture (audit 2026-07-14, vérifié par lecture)
 
 Il existe DEUX moteurs de résolution d'attaque :
@@ -4609,6 +4688,41 @@ Suppression du code mort (fin de P1) : `_attack_sequence_rng` (~5820-6003), les 
 (w40k_core ~3561, non attrapé par le grep), et les tests qui monkeypatchent le mort.
 Critère : grep `_attack_sequence_rng|_rapid_fire_|rapid_fire_bonus_shot` vide (hors nouvelle
 implémentation vive) + suite verte.
+
+### 9.2.1 Progression P1 (démarrée 2026-07-24)
+
+Ordre de démarrage validé utilisateur : commencer par IGNORES_COVER (seul cas où l'absence rend
+une règle active FAUSSE). Arbitrages actés le 2026-07-24 : `reroll_charge` → **à implémenter**
+(tranche charge) ; les ~10 règles d'armes observées non appliquées → **périmètre A' étendu, à
+implémenter** (tranches ultérieures).
+
+| Règle | Statut | Où (vif) | Test |
+|---|---|---|---|
+| **IGNORES_COVER (24.18)** | ✅ **FAIT dans le vif** (2026-07-24) | Helper `weapon_has_rule` ([weapon_helpers.py](../../engine/utils/weapon_helpers.py)) + court-circuit `(bs, False)` en tête de `_cover_worsened_bs` ([shared_utils.py:6078](../../engine/phase_handlers/shared_utils.py#L6078)), avant tout calcul de LoS. PDF 24.18 + 13.08 relus. | `tests/unit/engine/test_ignores_cover.py` (**6**) : 4 unitaires directs + **2 bout-en-bout via `_manual_roll_intent`** (verrouillent le CÂBLAGE appelant→fonction, pas la fonction seule — cf. §0.19.3). Deux contre-épreuves faites : (a) court-circuit neutralisé → 2 rouges ; (b) mauvais `weapon` passé à l'appel → l'e2e rougit. Restauré → 6 verts. |
+| HEAVY, HAZARDOUS, DEVASTATING_WOUNDS, RAPID_FIRE, closest_target_penetration, reroll_1_towound (tir), reroll_towound_target_on_objective (tir) | ⏳ à porter du mort vers le vif | — | — |
+| reroll_charge (impl), ~10 règles observées (impl) | ⏳ extension actée 2026-07-24 | — | — |
+| Suppression du code mort (fin P1) | ⏳ | — | — |
+
+**Choix d'implémentation IGNORES_COVER (vérifiés).** `_cover_worsened_bs` recevait `attacker`
+mais pas l'arme ; l'appelant `_manual_roll_intent` résout déjà `weapon` juste avant l'appel
+([shared_utils.py:6269](../../engine/phase_handlers/shared_utils.py#L6269)) → signature étendue de
+`weapon` (appelant unique, vérifié : aucun autre site ni test n'appelait la fonction). Le helper
+`weapon_has_rule` gère les trois formes d'entrée WEAPON_RULES (`'NAME'`, `'NAME:param'`, objet
+`.rule`) et est réutilisable par les tranches P1 suivantes.
+
+⚠️ **Dépendance à honorer quand INDIRECT_FIRE sera implémenté** : 24.18 dit « cannot have the
+benefit of cover … *including from rules that give a model or unit the benefit of cover* ». Or
+INDIRECT_FIRE (10 Shooting) accorde le cover à la cible. Aujourd'hui la SEULE source de cover est
+`compute_unit_los`, que le court-circuit évite → conforme. Mais la tranche INDIRECT_FIRE devra
+router SON cover par un point qu'IGNORES_COVER annule aussi, sinon 24.18 sera violée pour la
+combinaison des deux règles.
+
+⚠️ **État de la suite au 2026-07-24** : `tests/unit/` porte **15 échecs préexistants**
+(`test_deployment_per_model_commit`, `test_fight_target_selection_no_fallback`,
+`test_game_state_contract`), **sans rapport avec cette tranche** — démontré par `git stash` : ils
+rougissent à l'identique sur base propre. La règle §8.5 (« suite verte = condition de sortie de
+tranche ») n'est donc PAS remplie **pour une cause externe** : ces 15 échecs sont à traiter comme
+un sujet distinct avant de clôturer P1.
 
 ### 9.3 P2 — Mécanisme générique « décision agent »
 
