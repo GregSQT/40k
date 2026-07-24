@@ -1934,7 +1934,7 @@ class W40KEngine(gym.Env):
             shoot_kills = sum(
                 1 for log in action_logs
                 if log.get("type") == "shoot"
-                and log.get("action_name") == "kill_target"
+                and log.get("target_died", False)
                 and int(log["player"]) == controlled_player
             )
             melee_kills = sum(
