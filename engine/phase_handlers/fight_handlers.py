@@ -38,6 +38,7 @@ from .shared_utils import (
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position,
     unit_has_rule_effect as shared_unit_has_rule_effect,
+    is_unit_on_objective as shared_is_unit_on_objective,
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
     get_source_unit_rule_display_name_for_effect as shared_get_source_unit_rule_display_name_for_effect,
     build_occupied_positions_set,
@@ -163,32 +164,11 @@ def _fight_verbose_trace(message: str) -> None:
 
 
 def _is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
-    """Return True if unit coordinates are inside any objective hex."""
-    unit_col, unit_row = require_unit_position(unit, game_state)
-    objectives = require_key(game_state, "objectives")
-    if not isinstance(objectives, list):
-        raise TypeError(f"game_state['objectives'] must be a list, got {type(objectives).__name__}")
+    """Return True if unit coordinates are inside any objective hex.
 
-    for objective in objectives:
-        objective_hexes = require_key(objective, "hexes")
-        if not isinstance(objective_hexes, list):
-            raise TypeError(f"objective['hexes'] must be a list, got {type(objective_hexes).__name__}")
-        for objective_hex in objective_hexes:
-            if isinstance(objective_hex, dict):
-                obj_col, obj_row = normalize_coordinates(
-                    require_key(objective_hex, "col"),
-                    require_key(objective_hex, "row")
-                )
-            elif isinstance(objective_hex, (list, tuple)) and len(objective_hex) == 2:
-                obj_col, obj_row = normalize_coordinates(objective_hex[0], objective_hex[1])
-            else:
-                raise TypeError(
-                    "objective hex entry must be {'col','row'} or [col,row]/(col,row), "
-                    f"got {objective_hex!r}"
-                )
-            if unit_col == obj_col and unit_row == obj_row:
-                return True
-    return False
+    Delegue au helper partage (shared_utils) : identique tir/fight (reroll_towound_target
+    _on_objective s applique aux deux phases)."""
+    return shared_is_unit_on_objective(unit, game_state)
 
 
 def _append_fight_nb_roll_info_log(

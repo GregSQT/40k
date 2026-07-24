@@ -4699,7 +4699,8 @@ implémenter** (tranches ultérieures).
 | Règle | Statut | Où (vif) | Test |
 |---|---|---|---|
 | **IGNORES_COVER (24.18)** | ✅ **FAIT dans le vif** (2026-07-24) | Helper `weapon_has_rule` ([weapon_helpers.py](../../engine/utils/weapon_helpers.py)) + court-circuit `(bs, False)` en tête de `_cover_worsened_bs` ([shared_utils.py:6078](../../engine/phase_handlers/shared_utils.py#L6078)), avant tout calcul de LoS. PDF 24.18 + 13.08 relus. | `tests/unit/engine/test_ignores_cover.py` (**6**) : 4 unitaires directs + **2 bout-en-bout via `_manual_roll_intent`** (verrouillent le CÂBLAGE appelant→fonction, pas la fonction seule — cf. §0.19.3). Deux contre-épreuves faites : (a) court-circuit neutralisé → 2 rouges ; (b) mauvais `weapon` passé à l'appel → l'e2e rougit. Restauré → 6 verts. |
-| HEAVY, HAZARDOUS, DEVASTATING_WOUNDS, RAPID_FIRE, closest_target_penetration, reroll_1_towound (tir), reroll_towound_target_on_objective (tir) | ⏳ à porter du mort vers le vif | — | — |
+| **reroll_1_towound (tir) + reroll_towound_target_on_objective (tir)** | ✅ **FAIT dans le vif** (2026-07-25) | Ajoutés dans `_manual_roll_intent` (tir) en **miroir exact** de `_manual_roll_fight_intent` ([fight_handlers.py:5203](../../engine/phase_handlers/fight_handlers.py#L5203)) : conditions via `_unit_has_rule_effect` + `is_unit_on_objective`. Helper `_is_unit_on_objective` **déplacé** de fight_handlers vers shared_utils (`is_unit_on_objective`, générique tir/fight), fight délègue. PDF 01 Core « Re-rolls » (un dé re-roll une fois). | `tests/unit/engine/test_reroll_towound_shoot.py` (**5**, bout-en-bout via `_manual_roll_intent`, RNG déterministe) : reroll d'un 1 / reroll tout échec sur objectif / discrimination non-1 et off-objectif / sans règle. Contre-épreuve : bloc reroll neutralisé → 2 rouges. |
+| HEAVY, HAZARDOUS, DEVASTATING_WOUNDS, RAPID_FIRE, closest_target_penetration | ⏳ à porter du mort vers le vif | — | — |
 | reroll_charge (impl), ~10 règles observées (impl) | ⏳ extension actée 2026-07-24 | — | — |
 | Suppression du code mort (fin P1) | ⏳ | — | — |
 
@@ -4717,12 +4718,25 @@ INDIRECT_FIRE (10 Shooting) accorde le cover à la cible. Aujourd'hui la SEULE s
 router SON cover par un point qu'IGNORES_COVER annule aussi, sinon 24.18 sera violée pour la
 combinaison des deux règles.
 
-⚠️ **État de la suite au 2026-07-24** : `tests/unit/` porte **15 échecs préexistants**
-(`test_deployment_per_model_commit`, `test_fight_target_selection_no_fallback`,
-`test_game_state_contract`), **sans rapport avec cette tranche** — démontré par `git stash` : ils
-rougissent à l'identique sur base propre. La règle §8.5 (« suite verte = condition de sortie de
-tranche ») n'est donc PAS remplie **pour une cause externe** : ces 15 échecs sont à traiter comme
-un sujet distinct avant de clôturer P1.
+**Choix d'implémentation rerolls tir (vérifiés).** Conformité tranchée sur la source de vérité
+`config/unit_rules.json`, PAS sur le seul plan : `reroll_1_towound` (« When this unit makes an
+attack, it can reroll rolls of 1 for the wound rolls ») et `reroll_towound_target_on_objective`
+(« …reroll the wound rolls if the target unit is on an objective ») n'ont **AUCUNE restriction de
+phase** → ils s'appliquent au tir comme au fight. Par contraste `reroll_1_tohit_fight` /
+`reroll_1_save_fight` portent « During the fight phase » + suffixe `_fight` : mêlée-only. La
+distinction de nommage est donc **délibérée** — l'asymétrie tir/fight préexistante était bien un
+bug, et l'application au tir est la correction juste (pas une sur-application). Implémentation en
+**miroir exact** du fight (helper `_unit_has_rule_effect`, mécanique un-reroll-par-dé) ; la
+condition d'échec du tir est préservée → zéro régression quand aucune règle de reroll n'est
+présente. Effet de bord traité : `_manual_roll_intent` résout désormais attaquant/cible via
+`get_unit_by_id` → exige `unit_by_id` dans le game_state (toujours présent en runtime ; fixture
+de `test_ignores_cover.py` complété en conséquence).
+
+✅ **État de la suite (mis à jour 2026-07-25)** : les **15 échecs** qui étaient préexistants au
+2026-07-24 (`test_deployment_per_model_commit`, `test_fight_target_selection_no_fallback`,
+`test_game_state_contract`) ont été **corrigés** (contrats périmés post-V11 — commits `38362e81`,
+`b9dc9916`). `tests/unit/` re-vérifiée verte avant la tranche rerolls ; validation complète
+post-rerolls en cours. La condition §8.5 est donc rétablie.
 
 ### 9.3 P2 — Mécanisme générique « décision agent »
 

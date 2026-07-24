@@ -1138,6 +1138,38 @@ def require_unit_position(
     return pos
 
 
+def is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
+    """True si les coordonnees de l unite sont dans un hex d objectif.
+
+    Helper generique de position (tir ET fight) : le reroll_towound_target_on_objective
+    s applique aux deux phases. Aucun repli : objectives/hexes malformes -> erreur explicite.
+    """
+    unit_col, unit_row = require_unit_position(unit, game_state)
+    objectives = require_key(game_state, "objectives")
+    if not isinstance(objectives, list):
+        raise TypeError(f"game_state['objectives'] must be a list, got {type(objectives).__name__}")
+    for objective in objectives:
+        objective_hexes = require_key(objective, "hexes")
+        if not isinstance(objective_hexes, list):
+            raise TypeError(f"objective['hexes'] must be a list, got {type(objective_hexes).__name__}")
+        for objective_hex in objective_hexes:
+            if isinstance(objective_hex, dict):
+                obj_col, obj_row = normalize_coordinates(
+                    require_key(objective_hex, "col"),
+                    require_key(objective_hex, "row"),
+                )
+            elif isinstance(objective_hex, (list, tuple)) and len(objective_hex) == 2:
+                obj_col, obj_row = normalize_coordinates(objective_hex[0], objective_hex[1])
+            else:
+                raise TypeError(
+                    "objective hex entry must be {'col','row'} or [col,row]/(col,row), "
+                    f"got {objective_hex!r}"
+                )
+            if unit_col == obj_col and unit_row == obj_row:
+                return True
+    return False
+
+
 # ============================================================================
 # LoS invalidation choke-point (a′) — LoS_unique_source_of_truth.md §4.1bis (D1–D4)
 # ============================================================================
@@ -6304,6 +6336,18 @@ def _manual_roll_intent(
     display_wth = wth
     display_save_th = save_threshold(int(first_alive["ARMOR_SAVE"]), int(first_alive.get("INVUL_SAVE", 7)), ap)
     weapon_name = weapon.get("display_name", weapon.get("NAME", weapon.get("name", "")))  # get allowed
+    # Rerolls to-wound au TIR (abilities UNITE, constantes pour l intent) — miroir exact du
+    # fight (_manual_roll_fight_intent) : reroll_1_towound = reroll d un dé de blessure = 1 ;
+    # reroll_towound_target_on_objective = reroll de tout échec si la cible est sur objectif.
+    attacker_unit = get_unit_by_id(game_state, str(attacker["squad_id"]))
+    target_unit = get_unit_by_id(game_state, str(target_sid))
+    reroll_wound1 = attacker_unit is not None and _unit_has_rule_effect(attacker_unit, "reroll_1_towound")
+    reroll_wound_obj = (
+        attacker_unit is not None
+        and target_unit is not None
+        and _unit_has_rule_effect(attacker_unit, "reroll_towound_target_on_objective")
+        and is_unit_on_objective(target_unit, game_state)
+    )
     shot_records: List[Dict[str, Any]] = []
     pending_wounds: List[Dict[str, Any]] = []
     attacks = hits = wounds = 0
@@ -6315,7 +6359,11 @@ def _manual_roll_intent(
             continue
         hits += 1
         wound_roll = random.randint(1, 6)
-        if wound_roll == 1 or wound_roll < wth:
+        wound_fail = wound_roll == 1 or wound_roll < wth
+        if wound_fail and ((wound_roll == 1 and reroll_wound1) or reroll_wound_obj):
+            wound_roll = random.randint(1, 6)
+            wound_fail = wound_roll == 1 or wound_roll < wth
+        if wound_fail:
             shot_records.append({"attackRoll": hit_roll, "hitResult": "HIT", "hitTarget": bs, "strengthRoll": wound_roll, "strengthResult": "FAILED", "woundTarget": wth})
             continue
         wounds += 1
