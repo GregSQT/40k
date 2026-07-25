@@ -4703,7 +4703,8 @@ implémenter** (tranches ultérieures).
 | **closest_target_penetration** | ✅ **FAIT dans le vif** (2026-07-25) | Bloc dans `_manual_roll_intent` ([shared_utils.py:6335](../../engine/phase_handlers/shared_utils.py#L6335)), au calcul de l'AP effectif AVANT `save_threshold`/`display_save_th`. Garde `_unit_has_rule_effect(attacker_unit, "closest_target_penetration")` ; « cible la plus proche » = `min()` sur `shooting_build_valid_target_pool` (éligibles) via `ranged_edge_distance` bord-à-bord (sélecteur `ranged`), mesurée au niveau **ESCOUADE** (`attacker["squad_id"]` — dans le vif `attacker` est une FIGURINE, écart corrigé vs le mort qui utilisait `attacker["id"]`). AP+1 = `ap -= 1` (convention AP négatif, cf. `save_threshold`). Spec = `config/unit_rules.json` (aucun PDF ; le PDF 22 ne contient QUE Aura/Faction/Psychic/Wargear + Plunging Fire). Se propage au groupe d'arme (`gkey`), à l'allocation (`g["ap"]`) et au `display_save_th`. | `tests/unit/engine/test_closest_target_penetration_shoot.py` (**3**, bout-en-bout via `_manual_roll_intent`, distance mesurée pour de vrai sur `units_cache` positionnés, pool éligibles monkeypatché) : (a) cible la plus proche + règle → AP-1 + save_th dégradé ; (b) cible plus lointaine + règle → inchangé (discrimination « closest ») ; (c) plus proche sans règle → inchangé. Contre-épreuve mutation : `ap -= 1` neutralisé → (a) rouge. Suite `tests/unit/` verte. **Impact PvP** : chemin partagé → l'équilibre PvP change aussi. |
 | **HEAVY** | ✅ **FAIT dans le vif** (2026-07-25) | Bloc dans `_manual_roll_intent` après `_cover_worsened_bs` ([shared_utils.py:6327](../../engine/phase_handlers/shared_utils.py#L6327)) : si `weapon_has_rule(weapon, "HEAVY")` ET l'escouade est absente de `units_moved` ET `units_advanced` (« Remained Stationary »), alors `bs = max(2, bs-1)` (+1 au jet de touche, plancher 2 car un 1 naturel rate toujours, 05.01). ⚠️ **Écart PDF assumé** : la spec suivie est `config/weapon_rules.json` (« Add 1 to Hit rolls if the bearer Remained Stationary this turn ») — **plus simple que le PDF 24.16** qui exige en plus *unengaged*, *pas arrivé ce tour (deep strike)* et *aucune figurine bougée >3"*. Ces trois clauses sont **non implémentables fidèlement** avec l'état moteur actuel : (a) aucun tracker d'arrivée/réserve n'existe (arrivées en cours de bataille non modélisées → clause vacante) ; (b) `units_moved` est **booléen** (bougé/pas bougé), pas de distance par-figurine → le seuil « >3" » n'a pas la donnée. On suit donc la config moteur (comme pour unit_rules.json). Le code mort était déjà conforme à cette def projet. | `tests/unit/engine/test_heavy_shoot.py` (**4**, e2e via `_manual_roll_intent`) : stationnaire→BS4→3 ; a bougé / a advance→pas de bonus (paramétré) ; sans HEAVY→pas de bonus. Contre-épreuve mutation : `bs=max(2,bs-1)` neutralisé→rouge. |
 | **RAPID_FIRE X** | ✅ **FAIT dans le vif** (2026-07-25) | Bloc dans `_manual_roll_intent` juste après BLAST ([shared_utils.py:6323](../../engine/phase_handlers/shared_utils.py#L6323)), à la constitution du pool d'attaques (avant tout jet) : si l'arme déclare `RAPID_FIRE:X` (param extrait par le nouveau helper `weapon_rule_parameter`, [weapon_helpers.py](../../engine/utils/weapon_helpers.py), miroir de l'extraction `analyzer_config.py`) ET la cible est dans la **demi-portée** (`RNG/2`, RNG déjà en subhexes), alors `n_attacks += X`. Distance escouade→escouade via `ranged_edge_distance` (sélecteur `ranged`) — même convention que le gate de portée du moteur (socle d'escouade avec centres par-figurine) et que CTP ; positions figées pendant la résolution → mesurer là = « Select Targets step » (24.30). Conforme `config/weapon_rules.json` (« Increase this weapon's Attacks by X when target unit is within half range ») ET PDF 24.30. Pas de double-comptage : `n_attacks_resolved` (déclaration) = NB de base seul, BLAST et RAPID_FIRE ajoutés ici. | `tests/unit/engine/test_rapid_fire_shoot.py` (**3**, e2e via `_manual_roll_intent`, positions extrêmes proche/loin → seuil non ambigu) : dans demi-portée→+X ; hors→pas de bonus ; sans RAPID_FIRE→pas de bonus. Contre-épreuve mutation : `n_attacks += _rf_x` neutralisé→rouge. |
-| HAZARDOUS, DEVASTATING_WOUNDS | ⏳ à porter du mort vers le vif (sur spec `weapon_rules.json` / PDF 24) | — | — |
+| **DEVASTATING_WOUNDS** | ✅ **FAIT dans le vif** (2026-07-25) | Trois points câblés dans le chemin manuel : (1) flag posé au jet dans `_manual_roll_intent` ([shared_utils.py:6440](../../engine/phase_handlers/shared_utils.py#L6440)) sur blessure critique = jet de blessure **non modifié de 6** (05.02 ; testé sur la valeur finale, donc post-reroll) ET arme `DEVASTATING_WOUNDS` ; (2) propagé dans `_build_manual_allocation` (copie du pool) ; (3) consommé dans `_resolve_one_manual_wound` ([shared_utils.py:6527](../../engine/phase_handlers/shared_utils.py#L6527)) : court-circuite la comparaison de save (`saveSkipped`), la blessure échoue d'office → dégâts appliqués comme une save ratée (excess perdu par fig = normal). save_roll reste tiré (séquence RNG uniforme hit/wound/save) mais ignoré. ⚠️ **Écart PDF assumé** : la spec suivie est `config/weapon_rules.json` (« No saving throw can be made against a critical wound rolled with this weapon ») = **simple skip de save**, PAS les **blessures mortelles = D** du PDF 24.10 (fin de séquence d'attaque, 1 fig max par crit). On suit la config moteur (comme unit_rules.json) ; le code mort faisait déjà ce skip. | `tests/unit/engine/test_devastating_wounds_shoot.py` (**2 BOUT-EN-BOUT** via `build_manual_shoot_allocation` en `gym_training_mode` → résolution auto complète, verrouille les 3 points d'un coup) : critique+DEVASTATING → save 6 (qui réussirait sur Sv2+) **sautée** → dégât infligé ; sans DEVASTATING → save 6 protège. Contre-épreuve mutation : court-circuit `not _devastating` retiré → rouge. |
+| HAZARDOUS | ⏳ à porter — **intégration multi-systèmes** (voir §9.2.2), pas un portage `_manual_roll_intent` | — | — |
 | reroll_charge (impl), ~10 règles observées (impl) | ⏳ extension actée 2026-07-24 | — | — |
 | Suppression du code mort (fin P1) | ⏳ | — | — |
 
@@ -4740,6 +4741,43 @@ de `test_ignores_cover.py` complété en conséquence).
 `test_game_state_contract`) ont été **corrigés** (contrats périmés post-V11 — commits `38362e81`,
 `b9dc9916`). `tests/unit/` re-vérifiée verte avant la tranche rerolls ; validation complète
 post-rerolls en cours. La condition §8.5 est donc rétablie.
+
+**Session 2026-07-25 (nuit) — 4 tranches livrées + 1 différée.** Portées dans le vif, chacune
+avec test e2e + contre-épreuve mutation, suite `tests/unit/` re-vérifiée verte et commit
+séparé : `closest_target_penetration`, `HEAVY`, `RAPID_FIRE`, `DEVASTATING_WOUNDS` (cf.
+lignes ✅ ci-dessus). Effet de bord traité : `test_ignores_cover` utilisait `["HEAVY"]` comme
+arme « quelconque » supposée inerte — basculé sur arme nue une fois HEAVY vif. Méthode :
+conformité tranchée sur `config/weapon_rules.json` (source de vérité projet des règles d'armes)
+quand elle diffère du PDF 24 — écarts explicitement documentés par tranche.
+
+### 9.2.2 HAZARDOUS — DIFFÉRÉE (intégration multi-systèmes, pas un portage) — 2026-07-25
+
+⚠️ **Non portée cette session, volontairement.** Contrairement aux 4 autres, HAZARDOUS n'est
+**pas** une modification locale de `_manual_roll_intent` : la règle (PDF 24.15 + 06.03 ;
+`weapon_rules.json`) déclenche **après que le tireur a résolu TOUTES ses attaques**, roule **1 D6
+par arme HAZARDOUS sélectionnée** (≠ par figurine), et sur 1-2 inflige des **blessures mortelles
+au TIREUR lui-même** (1, ou 3 si toute l'unité est MONSTER/VEHICLE).
+
+**Pourquoi c'est une intégration, pas un portage :**
+- Point de déclenchement = **fin d'activation de tir** du tireur (après la dernière allocation
+  défenseur), qui vit dans `w40k_core` (résolution étalée sur plusieurs actions en PvP), **pas**
+  dans `_manual_roll_intent` (per-intent/per-cible).
+- Les MW visent le **tireur** → nouvel **état d'allocation manuelle côté joueur tireur**
+  (`build_manual_hazard_allocation` existe, mais les handlers `w40k_core`
+  `_handle_hazard_*`/`_resume_after_hazard` sont **câblés pour Desperate Escape (mouvement
+  09.07)** et reviennent à la phase de move — il faut un chemin de reprise vers le **tir**).
+- En gym le tireur est programmatique → `allocate_mortal_wounds(auto_resolve=True)` résout inline
+  (faisable) ; mais le **chemin PvP interactif** (le joueur choisit sa figurine sacrifiée) ne se
+  **valide pas sans session runtime navigateur** — hors périmètre d'une session autonome de nuit.
+  Livrer le seul chemin auto violerait « corrige gym ET PvP » (§9.2) et la clôture-complète.
+
+**Réutilisable quand elle sera traitée :** `roll_hazard_for_unit` (à généraliser : rolls **par
+arme HAZARDOUS** au lieu de par figurine), `allocate_mortal_wounds` (auto),
+`build_manual_hazard_allocation` + `HAZARD_CTX` (manuel), `weapon_has_rule(weapon, "HAZARDOUS")`.
+**À créer :** hook fin-d'activation-tir dans `w40k_core` (comptage des armes HAZARDOUS
+sélectionnées + trigger), et chemin de reprise post-allocation vers le flux tir + point de
+décision gym si le tireur humain. **Verrou attendu :** test e2e headless (gym auto) + validation
+runtime PvP du prompt.
 
 ### 9.3 P2 — Mécanisme générique « décision agent »
 

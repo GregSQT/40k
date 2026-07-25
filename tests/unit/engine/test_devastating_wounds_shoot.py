@@ -1,0 +1,83 @@
+"""DEVASTATING_WOUNDS au TIR dans le chemin VIF (résolution complète, gym auto).
+
+Regle d arme PROJET (config/weapon_rules.json) : « No saving throw can be made against a
+critical wound rolled with this weapon. » Blessure critique = jet de blessure NON MODIFIE
+de 6 (05.02). Portee du code MORT vers le vif.
+
+ECART PDF ASSUME : la def projet = simple SKIP de la sauvegarde (degats normaux appliques),
+PAS les blessures mortelles du PDF 24.10. On suit la config (cf. §9.2.1).
+
+Test BOUT-EN-BOUT via build_manual_shoot_allocation en `gym_training_mode` (defenseur
+programmatique -> allocation auto-resolue sans prompt) : verrouille les TROIS points du
+cablage (flag pose au jet dans _manual_roll_intent -> propage dans _build_manual_allocation
+-> consomme dans _resolve_one_manual_wound). RNG force : touche 4, blessure 6 (critique),
+save 6 (qui REUSSIRAIT sur une Sv 2+). Contre-epreuve fonctionnelle : sans DEVASTATING, la
+meme save 6 reussit et aucun degat n est inflige.
+"""
+import random
+
+from engine.phase_handlers import shooting_handlers
+from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
+
+
+def _seq(monkeypatch, rolls):
+    seq = list(rolls)
+
+    def fake(a, b):
+        assert seq, "sequence RNG epuisee"
+        return seq.pop(0)
+
+    monkeypatch.setattr(random, "randint", fake)
+    monkeypatch.setattr(shooting_handlers, "compute_unit_los", lambda gs, s, t: {"cover": False})
+    monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
+
+
+def _uc(col, row, *, player):
+    return {"BASE_SHAPE": "round", "BASE_SIZE": 1, "col": col, "row": row,
+            "occupied_hexes": set(), "VALUE": 10.0, "player": player}
+
+
+def _game_state(weapon_rules):
+    """Tireur '1' (arme S4 DMG1) vs cible '2' (Sv 2+, T4, HP2). gym_training_mode -> auto."""
+    weapon = {"BS": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "WEAPON_RULES": weapon_rules, "display_name": "Gun"}
+    attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
+                "col": 0, "row": 0, "RNG_WEAPONS": [weapon]}
+    target = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 2, "HP_MAX": 2, "ARMOR_SAVE": 2,
+              "INVUL_SAVE": 7, "role": None, "unitType": "Grunt", "points_per_hp": 5.0, "VALUE": 10.0,
+              "col": 9, "row": 9}
+    gs = {
+        "gym_training_mode": True,
+        "turn": 1, "phase": "shoot",
+        "action_logs": [], "action_log_seq": 0,
+        "models_cache": {"A1": attacker, "T1": target},
+        "squad_models": {"1": ["A1"], "2": ["T1"]},
+        "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},
+        "units_cache": {"1": _uc(0, 0, player=0), "2": _uc(9, 9, player=1)},
+        "units": [{"id": "1", "player": 0}, {"id": "2", "player": 1}],
+        "unit_by_id": {"1": {"id": "1", "UNIT_RULES": []}, "2": {"id": "2", "UNIT_RULES": []}},
+        "objectives": [], "units_moved": set(), "units_advanced": set(),
+        "pending_squad_shoot_intents": {
+            "1": [{"model_id": "A1", "target_unit_id": "2", "weapon_index": 0, "n_attacks_resolved": 1}]
+        },
+    }
+    return gs
+
+
+def test_devastating_critique_ignore_la_save(monkeypatch):
+    """Blessure critique (6) avec DEVASTATING : save 6 (qui réussirait) SAUTÉE -> 1 dégât."""
+    _seq(monkeypatch, [4, 6, 6])  # hit=4, wound=6 (crit), save=6
+    gs = _game_state(["DEVASTATING_WOUNDS"])
+
+    build_manual_shoot_allocation(gs, "1")
+
+    assert gs["models_cache"]["T1"]["HP_CUR"] == 1, "critique DEVASTATING : dégât infligé malgré save 6"
+
+
+def test_sans_devastating_la_save_reussit(monkeypatch):
+    """Meme critique (6) SANS DEVASTATING : save 6 réussit sur Sv2+ -> aucun dégât."""
+    _seq(monkeypatch, [4, 6, 6])
+    gs = _game_state([])
+
+    build_manual_shoot_allocation(gs, "1")
+
+    assert gs["models_cache"]["T1"]["HP_CUR"] == 2, "sans DEVASTATING la save 6 protège"

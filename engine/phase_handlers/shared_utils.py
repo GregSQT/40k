@@ -6421,6 +6421,7 @@ def _manual_roll_intent(
     )
     shot_records: List[Dict[str, Any]] = []
     pending_wounds: List[Dict[str, Any]] = []
+    has_devastating = weapon_has_rule(weapon, "DEVASTATING_WOUNDS")
     attacks = hits = wounds = 0
     for _ in range(int(n_attacks)):
         attacks += 1
@@ -6441,9 +6442,19 @@ def _manual_roll_intent(
         # save_roll tire ici (ordre RNG stable) mais COMPARE a l allocation (seuil de
         # la fig choisie). saveTarget/saveSuccess/damageDealt completes a l allocation.
         save_roll = random.randint(1, 6)
+        # DEVASTATING_WOUNDS (config/weapon_rules.json) : « No saving throw can be made against
+        # a critical wound rolled with this weapon. » Blessure critique = jet de blessure NON
+        # MODIFIE de 6 (05.02 ; un reroll produit un nouveau non-modifie, donc on teste la valeur
+        # finale). save_roll reste tire (sequence RNG uniforme hit/wound/save par attaque) mais
+        # l allocation le SAUTERA : degats appliques d office (excess perdu par fig = normal).
+        # Porte du code mort vers le vif. NB : la def PROJET = simple skip de save, PAS les
+        # blessures mortelles du PDF 24.10 — on suit la config, ecart documente en §9.2.1.
+        _devastating = has_devastating and wound_roll == 6
         rec = {"attackRoll": hit_roll, "hitResult": "HIT", "hitTarget": bs, "strengthRoll": wound_roll, "strengthResult": "SUCCESS", "woundTarget": wth, "saveRoll": save_roll, "damageDealt": 0}
+        if _devastating:
+            rec["devastating"] = True
         shot_records.append(rec)
-        pending_wounds.append({"save_roll": save_roll, "rec": rec})
+        pending_wounds.append({"save_roll": save_roll, "rec": rec, "devastating": _devastating})
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": bs, "bs_base": bs_base, "cover": cover, "ap": ap, "dmg_raw": dmg_raw,
@@ -6516,13 +6527,19 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     save_th = save_threshold(int(m["ARMOR_SAVE"]), int(m.get("INVUL_SAVE", 7)), ap)
     save_roll = int(pw["save_roll"])
     rec["saveTarget"] = save_th
-    # Save reussie : roll != 1 et >= seuil. Aucun degat.
-    if save_roll != 1 and save_roll >= save_th:
+    # DEVASTATING_WOUNDS (weapon_rules.json) : « No saving throw can be made against a critical
+    # wound. » Le flag est pose au jet (blessure critique = 6 non modifie). On SAUTE la
+    # comparaison de save : la blessure echoue d office, degats appliques comme une save ratee.
+    _devastating = bool(pw.get("devastating"))
+    # Save reussie : roll != 1 et >= seuil. Aucun degat. (Court-circuitee si devastating.)
+    if not _devastating and save_roll != 1 and save_roll >= save_th:
         rec["saveSuccess"] = True
         rec["damageDealt"] = 0
         batch["pool_index"] += 1
         return
     rec["saveSuccess"] = False
+    if _devastating:
+        rec["saveSkipped"] = True
     summary["failed_saves"] += 1
     # Degats tires UNIQUEMENT maintenant (save echouee).
     try:
@@ -6799,6 +6816,8 @@ def _build_manual_allocation(
             batch_pool_by_gidx[gidx].append({
                 "save_roll": pw["save_roll"],
                 "rec": pw["rec"], "attacker_mid": attacker_mid,
+                # DEVASTATING_WOUNDS : propage le flag crit-sans-save jusqu a l allocation.
+                "devastating": bool(pw.get("devastating")),
             })
 
         # decrement attacks_left (tir : 1 par intent ; combat : nb d attaques de l intent)
