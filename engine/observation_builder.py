@@ -25,6 +25,8 @@ from engine.phase_handlers.shared_utils import (
     get_fighting_models,
     wound_threshold, save_threshold,
     BASE_TO_BASE_SUBHEX,
+    # D1 : ordre des slots ennemis IDENTIQUE a l action tir/charge (source unique)
+    get_enemy_slot_mapping,
 )
 from engine.macro_intents import (
     INTENT_INVADE,
@@ -1232,7 +1234,7 @@ class ObservationBuilder:
     # Structure 108-dim per squad.md PR4 :
     #   [0:16]    Global context (16 floats, identique a build_observation[0:16])
     #   [16:21]   Squad aggregates (5 floats: nb_alive_norm, is_coherent, OC_total,
-    #             HP_pct, firepower_estimate)
+    #             fall_back_flag [ex-HP_pct doublon], firepower_estimate)
     #   [21:63]   Top-k=6 fig features (7 features × 6 figs, zero-padded if <6 alive)
     #             col_rel/perception_radius, row_rel/perception_radius, HP%,
     #             weapon_idx_norm, is_fighting_eligible, is_b2b_enemy, is_b2b_ally_in_b2b
@@ -1332,7 +1334,12 @@ class ObservationBuilder:
         obs[16] = min(1.0, nb_alive / float(model_count_at_start))
         obs[17] = 1.0 if active_sq.get("is_coherent", False) else 0.0
         obs[18] = min(1.0, int(active_sq.get("oc_total", 0)) / 10.0)  # get allowed
-        obs[19] = min(1.0, int(active_entry["HP_CUR"]) / float(total_hp_pool)) if total_hp_pool > 0 else 0.0
+        # obs[19] : ex-doublon exact de obs[4] (HP%). Reaffecte au flag FALL BACK (repli) —
+        # l escouade s est-elle repliee ce tour ? Utile pour HEAVY (24.16) et l eligibilite
+        # tir/charge. MEME source que le masque d action (`units_fled`, cf.
+        # build_squad_action_mask). Set-membership : absence = pas de repli = 0.0 (pas un
+        # defaut masquant, c est la semantique reelle, comme obs[5:8]).
+        obs[19] = 1.0 if active_squad_id in game_state.get("units_fled", set()) else 0.0
         # Firepower estimate : sum(P(hit)*P(wound)*D) sur les armes RNG selectionnees,
         # vs cible generique T=4, Sv=4 (normalisation /10)
         firepower = 0.0
@@ -1428,11 +1435,12 @@ class ObservationBuilder:
             obs[base + 6] = 1.0 if is_b2b_ally_in_b2b else 0.0
 
         # === SECTION 4: 5 enemy slots × 9 features = 45 floats [63:108] ===
-        # PR4 4a : slot mapping naif (ordre de creation). Stable mapping HP*OC = PR4 4d.
-        enemy_squads = sorted(
-            (sid for sid, e in units_cache.items() if int(e["player"]) != active_player),
-            key=lambda s: str(s)
-        )
+        # D1 : l ordre des slots ennemis DOIT etre celui de l action tir/charge
+        # (`get_enemy_slot_mapping`, mapping stable HP*OC fige a l init, PR4 4d), sinon
+        # obs-slot-i decrit un AUTRE ennemi que action-slot-i -> choix de cible brouille.
+        # Source unique partagee avec le masque (build_squad_action_mask) et l execution
+        # (action_decoder). Retourne 5 entrees, None pour slot vide/mort.
+        enemy_slot_ids = get_enemy_slot_mapping(game_state, active_player)
         # Entrees alliees (pour is_locked_by_friendly_er, mesure bord-a-bord)
         from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
         ez = get_engagement_zone(game_state)
@@ -1449,9 +1457,9 @@ class ObservationBuilder:
                 active_sample_weapon = a_weapons[int(a_sel)]
         for slot_i in range(self.SQUAD_N_ENEMY_SLOTS):
             base = 63 + slot_i * self.SQUAD_PER_ENEMY_SLOT
-            if slot_i >= len(enemy_squads):
-                continue  # slot vide (mask=0)
-            esid = enemy_squads[slot_i]
+            esid = enemy_slot_ids[slot_i] if slot_i < len(enemy_slot_ids) else None
+            if esid is None or esid not in units_cache:
+                continue  # slot vide/mort (mask=0)
             e_entry = units_cache[esid]
             e_sq = squad_cache.get(esid, {})  # get allowed
             e_mids = [m for m in squad_models.get(esid, []) if m in models_cache]  # get allowed
