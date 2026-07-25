@@ -430,10 +430,20 @@ class UnitRegistry:
             
             # Try to convert to appropriate type
             if prop_value.startswith('[') and prop_value.endswith(']'):
+                # Les tableaux TS multi-lignes portent une virgule finale (valide en TS,
+                # invalide en JSON) : la retirer avant json.loads plutôt que de retomber
+                # silencieusement sur la string brute (fallback masquant interdit).
+                normalized = re.sub(r',(\s*[\]}])', r'\1', prop_value)
                 try:
-                    properties[prop_name] = json.loads(prop_value)
+                    properties[prop_name] = json.loads(normalized)
                 except json.JSONDecodeError:
-                    properties[prop_name] = prop_value
+                    # Guillemets simples (TS) : extraire les tokens quotés (tableaux de strings).
+                    items = re.findall(r'["\']([^"\']*)["\']', prop_value)
+                    if not items:
+                        raise ValueError(
+                            f"Static array {prop_name} unparseable in {ts_file}: {prop_value!r}"
+                        )
+                    properties[prop_name] = items
             elif prop_value.isdigit() or (prop_value.startswith('-') and prop_value[1:].isdigit()):
                 properties[prop_name] = int(prop_value)
             elif prop_value.replace('.', '').isdigit():

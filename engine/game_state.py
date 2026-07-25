@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 from shared.data_validation import ConfigurationError, require_key
 from engine.combat_utils import normalize_coordinates, get_unit_coordinates, resolve_dice_value
-from engine.phase_handlers.shared_utils import is_unit_alive
+from engine.phase_handlers.shared_utils import is_unit_alive, _derive_model_role
 from engine.hex_utils import expand_wall_group_to_hex_list, polygon_to_hex_list
 
 # PERF: In-memory caches to avoid repeated disk I/O during scenario rotation.
@@ -560,7 +560,7 @@ class GameStateManager:
                         return False
                 return True
 
-            basic_units = self._fold_attached_characters(basic_units)
+            basic_units = self._fold_attached_characters(basic_units, unit_registry)
 
             enhanced_units = []
             for unit_data in basic_units:
@@ -720,7 +720,7 @@ class GameStateManager:
                 "tutorial_fight_no_death_unit_ids": scenario_tutorial_fight_no_death_unit_ids,
             }
 
-    def _fold_attached_characters(self, basic_units: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _fold_attached_characters(self, basic_units: List[Dict[str, Any]], unit_registry: Any) -> List[Dict[str, Any]]:
         """Fusionne les characters ``attached_squad`` comme figurines de leur squad.
 
         Règle 19 : un character déclaré séparément avec ``"attached_squad": <id>``
@@ -732,6 +732,8 @@ class GameStateManager:
         """
         units_by_id_raw = {str(u["id"]): u for u in basic_units if "id" in u}
         folded_ids: Set[str] = set()
+        # Unicité 19.01/24.22/24.34 : au plus un leader ET un support par bodyguard.
+        attached_roles_by_target: Dict[str, Set[str]] = {}
         for u in basic_units:
             if "attached_squad" not in u:
                 continue
@@ -748,6 +750,37 @@ class GameStateManager:
                     f"Unit {u.get('id')}: 'attached_squad' target '{target_id}' "
                     f"belongs to a different player"
                 )
+            # Légalité d'attachement 19.01/24.22/24.34 : le character doit être un
+            # leader/support et la cible un bodyguard ÉLIGIBLE — un de ses keywords de
+            # nom d'unité ∈ CAN_LEAD du character (comparaison insensible à la casse,
+            # les entrées CAN_LEAD listent des noms d'unité comme "terminator squad").
+            char_data = unit_registry.get_unit_data(u["unit_type"])
+            char_role = _derive_model_role(require_key(char_data, "UNIT_RULES"))
+            if char_role not in ("leader", "support"):
+                raise ValueError(
+                    f"Unit {u.get('id')} ({u['unit_type']}): 'attached_squad' set but the "
+                    f"unit has no LEADER/SUPPORT role (derived role: {char_role})"
+                )
+            can_lead = {str(name).lower() for name in char_data["CAN_LEAD"]} if "CAN_LEAD" in char_data else set()
+            target_data = unit_registry.get_unit_data(target["unit_type"])
+            target_keywords = {
+                str(kw["keywordId"]).lower()
+                for kw in require_key(target_data, "UNIT_KEYWORDS")
+                if isinstance(kw, dict) and "keywordId" in kw
+            }
+            if not (can_lead & target_keywords):
+                raise ValueError(
+                    f"Unit {u.get('id')} ({u['unit_type']}): illegal attachment (19.01) — "
+                    f"target '{target_id}' ({target['unit_type']}) is not an eligible bodyguard. "
+                    f"CAN_LEAD={sorted(can_lead)} vs target keywords={sorted(target_keywords)}"
+                )
+            existing_roles = attached_roles_by_target.setdefault(target_id, set())
+            if char_role in existing_roles:
+                raise ValueError(
+                    f"Unit {u.get('id')} ({u['unit_type']}): bodyguard '{target_id}' already has "
+                    f"a {char_role} attached (19.01: at most one leader and one support per bodyguard)"
+                )
+            existing_roles.add(char_role)
             # Figurine du character injectée dans le squad (override unit_type).
             char_model: Dict[str, Any] = {"unit_type": u["unit_type"]}
             if "col" in u:
