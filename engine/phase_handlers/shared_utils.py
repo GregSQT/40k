@@ -6275,6 +6275,31 @@ def _declare_order_payload(
     }
 
 
+def _ranged_squad_edge_distance(
+    game_state: Dict[str, Any], attacker_sid: str, target_sid: str,
+    *, metric: Optional[str] = None, attacker_socle: Any = None,
+) -> float:
+    """Distance de portee bord-a-bord (subhexes) entre deux escouades via le selecteur
+    `ranged` — socles d escouade (centres par-figurine), meme convention que le gate de portee
+    du moteur. Mutualise par closest_target_penetration et RAPID_FIRE (tir vif).
+
+    `metric` / `attacker_socle` : precalculables et injectables pour une boucle (ex: CTP mesure
+    vers tout un pool) — evite de relire la config et de reconstruire le socle attaquant a
+    chaque cible. Aucun repli masquant : units_cache et les entrees requises sont exigees.
+    """
+    from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
+    uc = require_key(game_state, "units_cache")
+    if metric is None:
+        from engine.phase_handlers.shooting_handlers import _ranged_distance_metric
+        metric = _ranged_distance_metric()
+    if attacker_socle is None:
+        attacker_socle = socle_from_cache_entry(uc[str(attacker_sid)])
+    tgt = str(target_sid)
+    if tgt not in uc:
+        raise KeyError(f"_ranged_squad_edge_distance: unit {tgt} absente de units_cache")
+    return ranged_edge_distance(attacker_socle, socle_from_cache_entry(uc[tgt]), metric)
+
+
 def _manual_roll_intent(
     game_state: Dict[str, Any], intent: Dict[str, Any],
     targets_meta: Dict[str, Dict[str, Any]],
@@ -6329,19 +6354,11 @@ def _manual_roll_intent(
     from engine.utils.weapon_helpers import weapon_rule_parameter
     _rf_x = weapon_rule_parameter(weapon, "RAPID_FIRE")
     if _rf_x is not None:
-        _rf_rng = int(weapon.get("RNG", 0))  # get allowed
-        if _rf_rng > 0:
-            from engine.phase_handlers.shooting_handlers import _ranged_distance_metric
-            from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
-            _rf_uc = require_key(game_state, "units_cache")
-            _rf_sid = str(attacker["squad_id"])
-            _rf_dist = ranged_edge_distance(
-                socle_from_cache_entry(_rf_uc[_rf_sid]),
-                socle_from_cache_entry(_rf_uc[target_sid]),
-                _ranged_distance_metric(),
-            )
-            if _rf_dist <= _rf_rng / 2.0:
-                n_attacks += _rf_x
+        _rf_rng = int(require_key(weapon, "RNG"))  # arme RAPID_FIRE = arme de tir : RNG requis
+        if _rf_rng > 0 and _ranged_squad_edge_distance(
+            game_state, str(attacker["squad_id"]), target_sid
+        ) <= _rf_rng / 2.0:
+            n_attacks += _rf_x
     if n_attacks <= 0:
         return None
     bs_base = int(weapon.get("ATK", weapon.get("BS", 4)))  # get allowed
@@ -6385,22 +6402,17 @@ def _manual_roll_intent(
             shooting_build_valid_target_pool,
             _ranged_distance_metric,
         )
-        from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
+        from engine.combat_utils import socle_from_cache_entry
         _ctp_attacker_sid = str(attacker["squad_id"])
         _ctp_pool = shooting_build_valid_target_pool(game_state, _ctp_attacker_sid)
         if _ctp_pool:
-            _ctp_uc = require_key(game_state, "units_cache")
+            # metric + socle attaquant precalcules UNE fois puis injectes : la mesure vers chaque
+            # cible du pool ne relit ni la config ni ne reconstruit le socle attaquant.
             _ctp_metric = _ranged_distance_metric()
-            _ctp_attacker_socle = socle_from_cache_entry(_ctp_uc[_ctp_attacker_sid])
-
-            def _ctp_dist(uid: str) -> float:
-                if uid not in _ctp_uc:
-                    raise KeyError(f"_manual_roll_intent closest_target_penetration: unit {uid} absente de units_cache")
-                return ranged_edge_distance(
-                    _ctp_attacker_socle, socle_from_cache_entry(_ctp_uc[uid]), _ctp_metric
-                )
-
-            if min(_ctp_pool, key=_ctp_dist) == target_sid:
+            _ctp_attacker_socle = socle_from_cache_entry(require_key(game_state, "units_cache")[_ctp_attacker_sid])
+            _closest = min(_ctp_pool, key=lambda uid: _ranged_squad_edge_distance(
+                game_state, _ctp_attacker_sid, uid, metric=_ctp_metric, attacker_socle=_ctp_attacker_socle))
+            if _closest == target_sid:
                 ap = ap - 1
     # Conforme 19.02 : seuil de blessure vs plus haute T bodyguard (depend de l arme via strength).
     wth = wound_threshold(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
