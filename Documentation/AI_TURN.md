@@ -377,6 +377,10 @@ Decision factors: Unit value, importance of actions this turn, long term strateg
 | 09.06 | Advance (max = M + D6 ; après : pas de charge ni action) | ✅ | `roll_advance_for_squad`, `units_advanced` ; tir après advance → voir section Shooting (ASSAULT / `shoot_after_advance`) |
 | 09.07 | Fall-back (engaged ; Ordered Retreat / Desperate Escape ; hazard ; battle-shock ; après : pas tir/charge/action) | ✅ | `desperate_escape = battle_shocked`, `roll_hazard_for_unit`, `roll_battle_shock`, `units_fled`, traversée ennemis en Desperate Escape |
 | 18.04 | Disembark move | ⛔ Non implémenté | pas de transports |
+| 19.01 | Forming attached units (éligibilité bodyguard + unicité leader/support) | ✅ | `_fold_attached_characters` : keyword de nom d'unité ∈ `CAN_LEAD` (insensible casse) ; au plus 1 leader ET 1 support par bodyguard → erreur explicite. Test `test_attached_units_legality_19_01.py` |
+| 19.02 | Attacking attached units (T = plus haute T bodyguard) | ✅ | `_target_highest_bodyguard_toughness` (tir + fight). Trigger « unité détruite » = dernière figurine du squad (l'unité attachée est un squad unique). Test `test_attached_units_toughness_19_02.py` |
+| 19.03 | Keywords in attached units (union des keywords) | ⏳ en cours | l'unité attachée a l'union des keywords de ses composants ; consommateurs keyword (`[ANTI-X]`…) en cours d'implémentation |
+| 19.04 | Abilities in attached units (règle du leader → toute l'unité) | ⏳ différé | **dépendance** : la tranche `reroll_charge` (règle unité-wide portée par les leaders, sans consommateur vif à ce jour) devra l'appliquer au niveau **unité attachée** — aujourd'hui le fold n'injecte le leader que comme figurine, sa règle n'est pas dans les `UNIT_RULES` du squad |
 | 20.04 | Ingress move | ⛔ Non implémenté | pas de réserves |
 | 03.01 | Moving (traverse alliés, pas ennemis, pas hors plateau) | ✅ | config `move.can_move_through_friendly_model` / `can_move_through_enemy_model` ; bord = bounds plateau |
 | 03.02 | Set up (déploiement) | ✅ | `deployment_handlers` |
