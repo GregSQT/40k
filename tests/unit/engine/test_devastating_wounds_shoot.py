@@ -63,21 +63,36 @@ def _game_state(weapon_rules):
     return gs
 
 
+def _shot_records(gs):
+    """Concatène les records de tir (shootDetails) de tous les logs de tir émis."""
+    out = []
+    for log in gs.get("action_logs", []):
+        out.extend(log.get("shootDetails", []) if isinstance(log, dict) else [])
+    return out
+
+
 def test_devastating_critique_ignore_la_save(monkeypatch):
-    """Blessure critique (6) avec DEVASTATING : save 6 (qui réussirait) SAUTÉE -> 1 dégât."""
+    """Blessure critique (6) avec DEVASTATING : save 6 (qui réussirait) SAUTÉE -> 1 dégât,
+    ET le record est tagué blessure mortelle (saveSkipped + mortalWound) pour log/FNP futur."""
     _seq(monkeypatch, [4, 6, 6])  # hit=4, wound=6 (crit), save=6
     gs = _game_state(["DEVASTATING_WOUNDS"])
 
     build_manual_shoot_allocation(gs, "1")
 
     assert gs["models_cache"]["T1"]["HP_CUR"] == 1, "critique DEVASTATING : dégât infligé malgré save 6"
+    crit = [s for s in _shot_records(gs) if s.get("strengthRoll") == 6]
+    assert crit, "record du tir critique attendu dans le log"
+    assert crit[0].get("mortalWound") is True and crit[0].get("saveSkipped") is True, \
+        "le crit DEVASTATING doit être tagué blessure mortelle (save sautée)"
 
 
 def test_sans_devastating_la_save_reussit(monkeypatch):
-    """Meme critique (6) SANS DEVASTATING : save 6 réussit sur Sv2+ -> aucun dégât."""
+    """Meme critique (6) SANS DEVASTATING : save 6 réussit sur Sv2+ -> aucun dégât,
+    et aucun tag blessure mortelle."""
     _seq(monkeypatch, [4, 6, 6])
     gs = _game_state([])
 
     build_manual_shoot_allocation(gs, "1")
 
     assert gs["models_cache"]["T1"]["HP_CUR"] == 2, "sans DEVASTATING la save 6 protège"
+    assert all(not s.get("mortalWound") for s in _shot_records(gs)), "aucun tag mortalWound sans DEVASTATING"

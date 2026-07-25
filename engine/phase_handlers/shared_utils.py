@@ -6551,7 +6551,12 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
         return
     rec["saveSuccess"] = False
     if _devastating:
+        # DEVASTATING_WOUNDS (24.10) : blessure critique -> blessure MORTELLE. Aucune save
+        # (armure ET invulnerable). Tag explicite pour le log/display et un futur hook Feel
+        # No Pain (point d accroche unique). Degats = D appliques a UNE figurine (excess perdu
+        # ci-dessous, comme « max one model per critical wound »).
         rec["saveSkipped"] = True
+        rec["mortalWound"] = True
     summary["failed_saves"] += 1
     # Degats tires UNIQUEMENT maintenant (save echouee).
     try:
@@ -6854,9 +6859,11 @@ def _build_manual_allocation(
             if not pool:
                 continue  # ce profil n a inflige aucune blessure -> aucun lot a resoudre
             # Regle 05.04 (INFLICT DAMAGE) : du save_roll le plus bas au plus haut (tri
-            # stable, l ordre d attaque departage les egalites). Determine l ordre de
-            # tirage des degats des armes a degats variables (conforme, voulu).
-            pool_sorted = sorted(pool, key=lambda pw: pw["save_roll"])
+            # stable, l ordre d attaque departage les egalites). DEVASTATING_WOUNDS (24.10) :
+            # les blessures MORTELLES (crit sans save) sont infligees « after resolving any
+            # normal damage » -> triees en fin de lot (cle devastating False<True) tout en
+            # gardant l ordre save croissant a l interieur de chaque categorie.
+            pool_sorted = sorted(pool, key=lambda pw: (bool(pw.get("devastating")), pw["save_roll"]))
             batches.append({
                 "target_sid": tsid,
                 "weapon_group_idx": gidx,
