@@ -6324,6 +6324,25 @@ def _manual_roll_intent(
         return None
     bs_base = int(weapon.get("ATK", weapon.get("BS", 4)))  # get allowed
     bs, cover = _cover_worsened_bs(game_state, attacker, target_sid, bs_base, weapon)
+    # HEAVY (config/weapon_rules.json, source de verite PROJET des regles d armes) :
+    # « Add 1 to Hit rolls if the bearer Remained Stationary this turn. » +1 au jet de touche
+    # = seuil BS ameliore de 1, plancher 2 (un 1 naturel rate toujours, 05.01). « Remained
+    # stationary » = escouade absente de units_moved ET units_advanced. Porte du code MORT vers
+    # le vif. NB : la def PROJET est deliberement plus simple que le PDF 24.16 (elle IGNORE les
+    # clauses « unengaged », « set up this turn » et « moved <= 3\" ») — on suit la config
+    # moteur, comme pour les regles unit_rules.json ; ecart PDF documente en §9.2.1.
+    from engine.utils.weapon_helpers import weapon_has_rule
+    if weapon_has_rule(weapon, "HEAVY"):
+        _heavy_sid = str(attacker["squad_id"])
+        # Absent = aucune escouade n a bouge/advance ce tour (defaut metier valide, PAS un
+        # masquage d erreur : units_moved/units_advanced sont crees paresseusement au 1er
+        # mouvement ; leur absence signifie "personne n a bouge" = stationnaire).
+        _remained_stationary = (
+            _heavy_sid not in game_state.get("units_moved", set())
+            and _heavy_sid not in game_state.get("units_advanced", set())
+        )
+        if _remained_stationary:
+            bs = max(2, bs - 1)
     strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))  # get allowed
     ap = int(weapon.get("AP", 0))  # get allowed
     dmg_raw = weapon.get("DMG", 1)  # get allowed

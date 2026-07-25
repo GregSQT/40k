@@ -119,10 +119,13 @@ def test_e2e_ignores_cover_result_has_no_cover(monkeypatch):
 
 
 def test_e2e_no_ignores_cover_result_has_cover(monkeypatch):
-    """Meme chaine sans le flag : cover=True et bs = bs_base+1 (13.08) — prouve la discrimination."""
+    """Meme chaine sans le flag : cover=True et bs = bs_base+1 (13.08) — prouve la discrimination.
+
+    Arme NUE (aucune regle) : depuis que HEAVY est vif (V11 P1), une arme HEAVY stationnaire
+    ameliorerait le seuil de 1 et MASQUERAIT le +1 de cover teste ici — d'ou le profil sans regle."""
     calls = []
     _force_cover_true(monkeypatch, calls)
-    game_state, intent = _minimal_shoot_game_state(["HEAVY"])
+    game_state, intent = _minimal_shoot_game_state([])
 
     result = _manual_roll_intent(game_state, intent, {})
 
