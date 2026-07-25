@@ -6320,6 +6320,28 @@ def _manual_roll_intent(
     if _has_blast_keyword(weapon):
         tgt_size = int(intent.get("target_squad_size_at_declaration", 0))  # get allowed
         n_attacks += tgt_size // 5
+    # RAPID_FIRE X (config/weapon_rules.json ; PDF 24.30) : « Increase this weapon's Attacks
+    # by X when target unit is within half range. » Ajoute X des a la constitution du pool
+    # d attaques (comme BLAST), avant tout jet. Demi-portee = RNG/2 (RNG deja en subhexes).
+    # Distance mesuree escouade->escouade via le selecteur `ranged` — meme convention que le
+    # gate de portee du moteur (socle d escouade incluant les centres par-figurine) et que CTP.
+    # Positions figees pendant la resolution => mesurer ici == « Select Targets step ».
+    from engine.utils.weapon_helpers import weapon_rule_parameter
+    _rf_x = weapon_rule_parameter(weapon, "RAPID_FIRE")
+    if _rf_x is not None:
+        _rf_rng = int(weapon.get("RNG", 0))  # get allowed
+        if _rf_rng > 0:
+            from engine.phase_handlers.shooting_handlers import _ranged_distance_metric
+            from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
+            _rf_uc = require_key(game_state, "units_cache")
+            _rf_sid = str(attacker["squad_id"])
+            _rf_dist = ranged_edge_distance(
+                socle_from_cache_entry(_rf_uc[_rf_sid]),
+                socle_from_cache_entry(_rf_uc[target_sid]),
+                _ranged_distance_metric(),
+            )
+            if _rf_dist <= _rf_rng / 2.0:
+                n_attacks += _rf_x
     if n_attacks <= 0:
         return None
     bs_base = int(weapon.get("ATK", weapon.get("BS", 4)))  # get allowed

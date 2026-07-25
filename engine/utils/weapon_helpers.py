@@ -38,6 +38,46 @@ def weapon_has_rule(weapon: Dict[str, Any], rule_id: str) -> bool:
     return False
 
 
+def weapon_rule_parameter(weapon: Dict[str, Any], rule_id: str) -> Optional[int]:
+    """Valeur entiere du parametre d'une regle d'arme parametree (ex: RAPID_FIRE:X).
+
+    Gere les deux formes runtime : chaine 'NAME:param' et objet ParsedWeaponRule
+    (attributs `.rule` / `.parameter`). Comparaison du nom insensible a la casse.
+    Retourne None si l'arme ne declare PAS `rule_id`. Leve (aucun repli masquant) si la
+    regle est presente mais son parametre est absent ou non entier. Miroir de l'extraction
+    de `ai/analyzer_config.py` (RAPID_FIRE), mutualisee ici pour le chemin de resolution.
+    """
+    rules = require_key(weapon, "WEAPON_RULES")
+    if not isinstance(rules, list):
+        raise TypeError(
+            f"WEAPON_RULES must be a list, got {type(rules).__name__} "
+            f"for weapon {weapon.get('display_name', weapon.get('NAME'))}"
+        )
+    target = rule_id.strip().upper()
+    for entry in rules:
+        if isinstance(entry, str):
+            if entry.split(":", 1)[0].strip().upper() != target:
+                continue
+            if ":" not in entry:
+                raise ValueError(f"Weapon rule {rule_id!r} present but missing parameter: {entry!r}")
+            raw: Any = entry.split(":", 1)[1]
+        elif hasattr(entry, "rule"):
+            if str(getattr(entry, "rule")).strip().upper() != target:
+                continue
+            raw = getattr(entry, "parameter", None)
+            if raw is None:
+                raise ValueError(f"Weapon rule {rule_id!r} present but missing parameter (object form)")
+        else:
+            raise TypeError(
+                f"Unsupported WEAPON_RULES entry type: {type(entry).__name__} ({entry!r})"
+            )
+        try:
+            return int(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid parameter for weapon rule {rule_id!r}: {raw!r}") from exc
+    return None
+
+
 def get_selected_ranged_weapon(unit: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Get currently selected ranged weapon."""
     if "RNG_WEAPONS" not in unit:
