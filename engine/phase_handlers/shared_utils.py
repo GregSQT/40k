@@ -566,6 +566,95 @@ def _derive_model_role(unit_rules: List[Dict[str, Any]]) -> Optional[str]:
     return next(iter(roles)) if roles else None
 
 
+def strip_role_rules(unit_rules: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Regles d unite privees des marqueurs de ROLE (cf. ROLE_TIER).
+
+    Les roles sont des marqueurs PAR FIGURINE (ordre d allocation 05.03/05.04, T bodyguard
+    19.02) : ils ne doivent JAMAIS remonter au niveau escouade par l union 19.04, sinon
+    `_derive_model_role` verrait "leader" sur toutes les figurines de base du squad.
+    """
+    return [
+        r for r in unit_rules
+        if not (isinstance(r, dict) and r.get("ruleId") in ROLE_TIER)
+    ]
+
+
+def compute_unit_rules_in_effect(
+    own_rules: List[Dict[str, Any]],
+    attached_rule_groups: Dict[str, List[Dict[str, Any]]],
+    *,
+    native_alive: bool,
+    alive_attached_sources: Set[str],
+) -> List[Dict[str, Any]]:
+    """Regles d unite EN VIGUEUR sur une unite (potentiellement attachee) — regle 19.04.
+
+    PDF 19.04 « Abilities in attached units » : les regles qui affectent une unite (ou ses
+    figurines) s appliquent a CHAQUE figurine de l unite attachee, jusqu a ce que leur source
+    soit detruite. Le tableau du PDF donne deux sources ici :
+      - « Bodyguard unit » -> jusqu a la mort de la DERNIERE figurine du bodyguard ;
+      - « Leader/support unit » -> jusqu a la mort de la DERNIERE figurine de CE leader/support
+        (note du PDF : le leader garde ses propres regles meme si son bodyguard est detruit).
+
+    `own_rules` = bloc bodyguard (regles de l unit_type de l escouade + regles propres de ses
+    figurines natives), immuable, calcule au build. `attached_rule_groups` = {id de l unite
+    character repliee -> ses regles}, immuable lui aussi. Ce qui varie est le VIVANT :
+    `native_alive` et `alive_attached_sources`.
+
+    Union ordonnee, dedupliquee sur ruleId : bodyguard d abord (l ordre de declaration reste
+    celui du datasheet de l escouade), puis les groupes attaches dans l ordre du fold.
+    """
+    in_effect: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+
+    def _add(rules: List[Dict[str, Any]]) -> None:
+        for rule in rules:
+            rule_id = str(require_key(rule, "ruleId"))
+            if rule_id in seen:
+                continue
+            seen.add(rule_id)
+            in_effect.append(copy.deepcopy(rule))
+
+    if native_alive:
+        _add(own_rules)
+    for source_id, rules in attached_rule_groups.items():
+        if str(source_id) in alive_attached_sources:
+            _add(rules)
+    return in_effect
+
+
+def recompute_unit_rules_in_effect(game_state: Dict[str, Any], unit_id: str) -> None:
+    """Reevalue `unit["UNIT_RULES"]` (19.04) depuis les figurines VIVANTES de l escouade.
+
+    Appelee a chaque mort de figurine (`destroy_model`). Sans objet — et sans effet — pour une
+    unite qui ne porte aucun character replie ET dont aucune figurine n a de regle propre :
+    `_UNIT_RULES_IN_EFFECT_OWN` vaut alors exactement les regles du datasheet.
+
+    Les unites construites hors du builder (fixtures de test synthetiques) n ont pas les cles
+    de provenance : rien a recalculer, leur `UNIT_RULES` est deja la verite.
+    """
+    unit = get_unit_by_id(game_state, str(unit_id))
+    if unit is None:
+        return
+    if "_UNIT_RULES_OWN" not in unit:
+        return
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive = [
+        models_cache[mid] for mid in squad_models.get(str(unit_id), [])  # get allowed
+        if mid in models_cache
+    ]
+    native_alive = any("attached_from" not in m for m in alive)
+    alive_sources = {
+        str(m["attached_from"]) for m in alive if "attached_from" in m
+    }
+    unit["UNIT_RULES"] = compute_unit_rules_in_effect(
+        require_key(unit, "_UNIT_RULES_OWN"),
+        require_key(unit, "_ATTACHED_RULE_GROUPS"),
+        native_alive=native_alive,
+        alive_attached_sources=alive_sources,
+    )
+
+
 def _build_models_for_unit(
     unit: Dict[str, Any],
     unit_id: str,
@@ -693,6 +782,10 @@ def _build_models_for_unit(
             "CC_WEAPONS": copy.deepcopy(spec.get("CC_WEAPONS", cc_weapons)),
             "selectedRngWeaponIndex": spec.get("selectedRngWeaponIndex", selected_rng),
             "selectedCcWeaponIndex": spec.get("selectedCcWeaponIndex", selected_cc),
+            # Provenance 19.04 : id de l unite character repliee dans ce squad par
+            # `_fold_attached_characters`. Absente = figurine NATIVE du bodyguard. C est ce qui
+            # permet a `recompute_unit_rules_in_effect` de savoir quelle source de regle meurt.
+            **({"attached_from": str(spec["attached_from"])} if "attached_from" in spec else {}),
         }
     squad_models[unit_id] = model_ids
 

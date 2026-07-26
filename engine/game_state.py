@@ -12,7 +12,9 @@ from pathlib import Path
 import re
 from shared.data_validation import ConfigurationError, require_key
 from engine.combat_utils import normalize_coordinates, get_unit_coordinates, resolve_dice_value
-from engine.phase_handlers.shared_utils import is_unit_alive, _derive_model_role
+from engine.phase_handlers.shared_utils import (
+    is_unit_alive, _derive_model_role, compute_unit_rules_in_effect, strip_role_rules,
+)
 from engine.hex_utils import expand_wall_group_to_hex_list, polygon_to_hex_list
 
 # PERF: In-memory caches to avoid repeated disk I/O during scenario rotation.
@@ -134,6 +136,18 @@ class GameStateManager:
         
         unit_rules = copy.deepcopy(config["UNIT_RULES"]) if "UNIT_RULES" in config else []
         unit_keywords = copy.deepcopy(require_key(config, "UNIT_KEYWORDS"))
+        # Provenance 19.04 : `_build_enhanced_unit` (autorité) l'a déjà calculée — on la
+        # transporte telle quelle. Une unité construite par un autre chemin (API build army,
+        # fixture) n'a par construction aucun character replié : ses règles en vigueur SONT
+        # ses règles propres. Ce n'est pas un repli anti-erreur mais l'identité du cas simple.
+        unit_rules_own = (
+            copy.deepcopy(config["_UNIT_RULES_OWN"]) if "_UNIT_RULES_OWN" in config
+            else copy.deepcopy(unit_rules)
+        )
+        attached_rule_groups = (
+            copy.deepcopy(config["_ATTACHED_RULE_GROUPS"]) if "_ATTACHED_RULE_GROUPS" in config
+            else {}
+        )
 
         # Scaling (MOVE, RNG, BASE_SIZE) : autorité unique = _build_enhanced_unit, qui produit
         # TOUTES les units (loader + change_roster + reload). create_unit ne voit que du déjà-scalé.
@@ -189,6 +203,9 @@ class GameStateManager:
             "MODEL_HEIGHT": float(require_key(config, "MODEL_HEIGHT")),
             "orientation": orientation_init,
             "UNIT_RULES": unit_rules,
+            # Sources immuables dont UNIT_RULES est l'union en vigueur (19.04).
+            "_UNIT_RULES_OWN": unit_rules_own,
+            "_ATTACHED_RULE_GROUPS": attached_rule_groups,
             "UNIT_KEYWORDS": unit_keywords,
             # Tour de mise en place (règle 24.16 « not set up this turn » + feature
             # d'observation déploiement/réserve). 0 = posée avant la bataille (positions du
@@ -787,7 +804,13 @@ class GameStateManager:
                 )
             existing_roles.add(char_role)
             # Figurine du character injectée dans le squad (override unit_type).
-            char_model: Dict[str, Any] = {"unit_type": u["unit_type"]}
+            # `attached_from` = id de l'unité character d'origine : c'est la SOURCE au sens
+            # 19.04 (« until the last model in that leader/support unit is destroyed »). Sans
+            # ce marqueur, rien ne distingue la figurine du leader d'une figurine native du
+            # bodyguard, et l'extinction des règles ne peut pas être calculée.
+            char_model: Dict[str, Any] = {
+                "unit_type": u["unit_type"], "attached_from": str(u["id"]),
+            }
             if "col" in u:
                 char_model["col"] = u["col"]
             if "row" in u:
@@ -916,6 +939,15 @@ class GameStateManager:
             ),
             "orientation": orientation_u,
             "UNIT_RULES": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
+            # Provenance des règles (19.04) — sources IMMUABLES dont `UNIT_RULES` est dérivé :
+            #   `_UNIT_RULES_OWN`       = bloc « bodyguard unit » (datasheet de l'escouade +
+            #                             règles propres de ses figurines natives) ;
+            #   `_ATTACHED_RULE_GROUPS` = {id de l'unité leader/support repliée -> ses règles}.
+            # `UNIT_RULES` = union des sources dont il reste ≥1 figurine vivante, recalculée à
+            # chaque mort par `recompute_unit_rules_in_effect`. Renseignées pour de bon dans le
+            # bloc `models` ci-dessous ; ces valeurs valent pour une unité sans `models`.
+            "_UNIT_RULES_OWN": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
+            "_ATTACHED_RULE_GROUPS": {},
             "UNIT_KEYWORDS": copy.deepcopy(require_key(full_unit_data, "UNIT_KEYWORDS")),
             # Cf. create_unit : 0 = posée avant la bataille, None = déploiement actif en attente.
             "deployed_on_turn": None if player_deployment_type == "active" else 0,
@@ -969,6 +1001,9 @@ class GameStateManager:
                 # niveau ancre de l'unité et perd le level déclaré par modèle dans le scénario.
                 m_level = _validate_level(spec.get("level", 0), unit_data["id"])  # get allowed (champ optionnel : level absent = sol)
                 m_spec: Dict[str, Any] = {"col": m_norm_col, "row": m_norm_row, "level": m_level}
+                # Provenance 19.04 posée par le fold : conservée jusqu'à models_cache.
+                if "attached_from" in spec:
+                    m_spec["attached_from"] = str(spec["attached_from"])
                 model_unit_type = spec.get("unit_type")
                 if model_unit_type is not None:
                     # Load stats for this specific model's unit_type
@@ -1063,6 +1098,39 @@ class GameStateManager:
                     enhanced_unit["UNIT_KEYWORDS"].append(copy.deepcopy(kw))
             # Les dérivés de keywords se recalculent sur l'union (même autorité, une seule fois).
             enhanced_unit["hideable"] = compute_hideable(enhanced_unit["UNIT_KEYWORDS"])
+            # Règle 19.04 (Abilities in attached units) : « abilities/rules that affect a unit
+            # (or models in it) apply to every model in an attached unit ». Jumeau exact de
+            # l'union 19.03 ci-dessus, mais sur les RÈGLES et avec une extinction par source
+            # (cf. `compute_unit_rules_in_effect`). Deux sources sont séparées ici une fois
+            # pour toutes : le bloc bodyguard (datasheet de l'escouade + règles propres de ses
+            # figurines natives — sergent, arme spéciale) et un groupe par character replié.
+            # Les marqueurs de rôle sont retirés des règles de FIGURINE : ils qualifient la
+            # figurine (ordre d'allocation 05.04, T bodyguard 19.02), pas l'escouade.
+            own_rules: List[Dict[str, Any]] = copy.deepcopy(
+                require_key(full_unit_data, "UNIT_RULES")
+            )
+            own_seen = {str(require_key(r, "ruleId")) for r in own_rules}
+            attached_groups: Dict[str, List[Dict[str, Any]]] = {}
+            for spec in normalized_models:
+                spec_rules = strip_role_rules(spec["UNIT_RULES"]) if "UNIT_RULES" in spec else []
+                if "attached_from" in spec:
+                    attached_groups.setdefault(str(spec["attached_from"]), []).extend(
+                        copy.deepcopy(spec_rules)
+                    )
+                    continue
+                for rule in spec_rules:
+                    rule_id = str(require_key(rule, "ruleId"))
+                    if rule_id in own_seen:
+                        continue
+                    own_seen.add(rule_id)
+                    own_rules.append(copy.deepcopy(rule))
+            enhanced_unit["_UNIT_RULES_OWN"] = own_rules
+            enhanced_unit["_ATTACHED_RULE_GROUPS"] = attached_groups
+            enhanced_unit["UNIT_RULES"] = compute_unit_rules_in_effect(
+                own_rules, attached_groups,
+                native_alive=any("attached_from" not in s for s in normalized_models),
+                alive_attached_sources=set(attached_groups),
+            )
             # Invariant §2.5 : le niveau ancre de l'unité = niveau de models[0] (cf. commentaire
             # create_unit). Sans ça, une unité dont la 1ère figurine est déclarée en hauteur garde
             # une ancre au sol (0) et désynchronise units_cache de l'empreinte réelle.
