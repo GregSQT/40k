@@ -35,7 +35,7 @@ export const AELDARI_ARMORY: Record<string, Weapon> = {
   shuriken_cannon: { display_name: "Shuriken Cannon", RNG: 24, NB: 3, ATK: 3, STR: 6, AP: -1, DMG: 2, WEAPON_RULES: ["SUSTAINED_HITS:1"] },
   shuriken_catapult: { display_name: "Shuriken Catapult", RNG: 18, NB: 2, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: ["ASSAULT"] },
   shuriken_catapult_avenger: { display_name: "Avenger Shuriken Catapult", RNG: 18, NB: 4, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: ["ASSAULT"] },
-  shuriken_pistol: { display_name: "Shuriken Pistol", RNG: 12, NB: 1, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: ["ASSAULT", "PISTOL"] },
+  shuriken_pistol: { display_name: "Shuriken Pistol", RNG: 12, NB: 1, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: ["ASSAULT", "CLOSE_QUARTERS"] },
   wraithcannon: { display_name: "Wraith Cannon", RNG: 18, NB: 1, ATK: 4, STR: 14, AP: -4, DMG: D6_PLUS_1, WEAPON_RULES: [] },
 
   // #########################################################################################

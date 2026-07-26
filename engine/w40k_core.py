@@ -523,6 +523,7 @@ class W40KEngine(gym.Env):
 
             # AI_TURN.md required tracking sets
             "units_moved": set(),
+            "moved_distance_by_model": {},
             "units_fled": set(),
             "units_cannot_charge": set(),
             "units_shot": set(),
@@ -1164,6 +1165,7 @@ class W40KEngine(gym.Env):
             "zone_intent_free_steps_remaining": 0,
             "unit_zone_assignments": {},
             "units_moved": set(),
+            "moved_distance_by_model": {},
             "units_fled": set(),
             "units_cannot_charge": set(),
             "units_shot": set(),
@@ -1225,7 +1227,7 @@ class W40KEngine(gym.Env):
                 "TOTAL_ATTACK_LOG",
                 "selected_target_id",
                 "activation_position",
-                "_shooting_with_pistol",
+                "_shooting_with_close_quarters",
                 "_manual_weapon_selected",
                 "manualWeaponSelected",
                 "_shoot_activation_started",
@@ -2167,7 +2169,7 @@ class W40KEngine(gym.Env):
                             f"'valid_target_pool_sample': {valid_target_pool_sample}, "
                             f"'shoot_activation_started': {active_unit.get('_shoot_activation_started')}, "
                             f"'manual_weapon_selected': {active_unit.get('_manual_weapon_selected')}, "
-                            f"'shooting_with_pistol': {active_unit.get('_shooting_with_pistol')}, "
+                            f"'shooting_with_close_quarters': {active_unit.get('_shooting_with_close_quarters')}, "
                             f"'rapid_fire_context_weapon_index': {active_unit.get('_rapid_fire_context_weapon_index')}, "
                             f"'rapid_fire_base_nb': {active_unit.get('_rapid_fire_base_nb')}, "
                             f"'rapid_fire_shots_fired': {active_unit.get('_rapid_fire_shots_fired')}, "
@@ -4488,7 +4490,7 @@ class W40KEngine(gym.Env):
 
         def _squad_available_weapons(unit: Dict[str, Any]) -> List[Dict[str, Any]]:
             """available_weapons pour le menu : union des armes par-figurine, avec `can_use`
-            calcule PAR-FIGURINE (≥1 fig peut tirer sur ≥1 ennemi) + exclusion Pistol/non-Pistol
+            calcule PAR-FIGURINE (≥1 fig peut tirer sur ≥1 ennemi) + exclusion Close-quarters/non-Close-quarters
             au niveau unite (10.06). Cf. squad_shoot_menu_weapons."""
             return squad_shoot_menu_weapons(self.game_state, str(unit["id"]))
 
@@ -4674,7 +4676,7 @@ class W40KEngine(gym.Env):
             }
 
         if name == "squad_shoot_menu_weapons":
-            # Read-only : profils du menu avec can_use par-fig + exclusion Pistol/non-Pistol.
+            # Read-only : profils du menu avec can_use par-fig + exclusion Close-quarters/non-Close-quarters.
             weapons = squad_shoot_menu_weapons(self.game_state, squad_id)
             return True, {"action": name, "unitId": squad_id, "weapons": weapons}
 
@@ -6170,6 +6172,7 @@ class W40KEngine(gym.Env):
     def _tracking_cleanup(self):
         """Clear tracking sets at the VERY BEGINNING of movement phase."""
         self.game_state["units_moved"] = set()
+        self.game_state["moved_distance_by_model"] = {}
         self.game_state["units_fled"] = set()
         self.game_state["units_cannot_charge"] = set()
         self.game_state["units_shot"] = set()

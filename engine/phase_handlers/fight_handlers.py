@@ -6,7 +6,7 @@ Pure stateless functions implementing AI_TURN.md fight specification
 References: AI_TURN.md Section ⚔️ FIGHT PHASE LOGIC
 ZERO TOLERANCE for state storage or wrapper patterns
 
-CRITICAL: On ne tire PAS en phase de fight. La règle PISTOL permet de tirer en phase
+CRITICAL: On ne tire PAS en phase de fight. La règle CLOSE_QUARTERS permet de tirer en phase
 de SHOOTING même si l'unité est adjacente à une unité ennemie (exception au "engaged").
 """
 
@@ -1814,7 +1814,7 @@ def squad_fight_menu_weapons(
 
     usable = AU MOINS une figurine portant le profil est engagee avec AU MOINS une unite
     ennemie (calcule par-fig via _model_can_fight_target_with_weapon). Pas de portee/LoS ni
-    d exclusion Pistol : la melee n a pas la restriction 10.06 (jumeau simplifie de
+    d exclusion Close-quarters : la melee n a pas la restriction 10.06 (jumeau simplifie de
     squad_shoot_menu_weapons)."""
     from .shared_utils import init_pending_intents, require_key as _require_key
     models_cache = _require_key(game_state, "models_cache")

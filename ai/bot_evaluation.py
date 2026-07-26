@@ -1192,8 +1192,20 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 "draws": r["draws"],
             }
 
+    # V11 §0.27 : deux causes d'echec sont agregees separement car elles n'ont PAS la meme
+    # consequence. `timeout` = la tache a depasse son deadline (LENTEUR mesuree : parties
+    # degenerees x cout geodesique), le moteur est sain. `error` = exception dans le worker
+    # (crash moteur). Un crash doit arreter le training ; une lenteur doit invalider la MESURE
+    # sans tuer un run de 36 h. Les deux restent comptes dans total_failed_episodes, qui garde
+    # sa semantique historique « la mesure n'est pas fiable ».
     total_failed_episodes = sum(int(require_key(r, "failed_episodes")) for r in results_list)
+    total_timeout_episodes = sum(
+        int(require_key(r, "failed_episodes")) for r in results_list if r.get("timeout")
+    )
+    total_error_episodes = total_failed_episodes - total_timeout_episodes
     results["total_failed_episodes"] = total_failed_episodes
+    results["total_timeout_episodes"] = total_timeout_episodes
+    results["total_error_episodes"] = total_error_episodes
     results["eval_reliable"] = total_failed_episodes == 0
     results["eval_duration_seconds"] = float(time.time() - eval_wall_start)
 

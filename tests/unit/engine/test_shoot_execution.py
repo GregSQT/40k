@@ -35,7 +35,7 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
         "UNIT_RULES": [],
         "RNG_WEAPONS": [],
         "CC_WEAPONS": [],
-        "_shooting_with_pistol": None,
+        "_shooting_with_close_quarters": None,
     }
 
 

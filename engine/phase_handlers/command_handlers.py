@@ -42,6 +42,9 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
     # Reset ALL tracking sets (moved from movement_phase_start)
     game_state["units_moved"] = set()
+    # Distance parcourue par figurine (V11 §9.2.5) — MEME cycle de vie que `units_moved` :
+    # c'est la version continue du meme fait ("cette figurine a bouge de X ce tour").
+    game_state["moved_distance_by_model"] = {}
     game_state["units_fled"] = set()
     game_state["units_shot"] = set()
     game_state["units_charged"] = set()

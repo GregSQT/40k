@@ -23,7 +23,7 @@ export const ADEPTUS_CUSTODES_ARMORY: Record<string, Weapon> = {
   bolter: { display_name: "Bolter", RNG: 24, NB: 1, ATK: 3, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["RAPID_FIRE:1"] },
   castellan_axe_ranged: { display_name: "Castellan Axe", RNG: 24, NB: 2, ATK: 2, STR: 4, AP: -1, DMG: 2, WEAPON_RULES: ["ASSAULT"] },
   guardian_spear_ranged: { display_name: "Guardian Spear", RNG: 24, NB: 2, ATK: 2, STR: 4, AP: -1, DMG: 2, WEAPON_RULES: ["ASSAULT"] },
-  sentinel_blade_ranged: { display_name: "Sentinel Blade", RNG: 12, NB: 2, ATK: 2, STR: 4, AP: -1, DMG: 2, WEAPON_RULES: ["ASSAULT", "PISTOL"] },
+  sentinel_blade_ranged: { display_name: "Sentinel Blade", RNG: 12, NB: 2, ATK: 2, STR: 4, AP: -1, DMG: 2, WEAPON_RULES: ["ASSAULT", "CLOSE_QUARTERS"] },
   whitchseeker_flamer: { display_name: "Whitchseeker Flamer", RNG: 12, NB: D6, ATK: 7, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["IGNORES_COVER", "TORRENT"] },
 
   // #########################################################################################

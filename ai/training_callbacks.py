@@ -2114,14 +2114,44 @@ class BotEvaluationCallback(BaseCallback):
         self.last_eval_marker = int(eval_marker)
 
         total_failed_episodes = int(require_key(results, "total_failed_episodes"))
+        total_timeout_episodes = int(require_key(results, "total_timeout_episodes"))
+        total_error_episodes = int(require_key(results, "total_error_episodes"))
         eval_duration_seconds = float(require_key(results, "eval_duration_seconds"))
-        if total_failed_episodes > 0:
+
+        # V11 §0.27 : un CRASH de worker reste un arret immediat — c'est un bug moteur, il ne
+        # doit jamais etre absorbe.
+        if total_error_episodes > 0:
             raise RuntimeError(
-                "Bot evaluation failed episodes detected: "
-                f"marker={eval_marker}, failed_episodes={total_failed_episodes}, "
+                "Bot evaluation crashed episodes detected: "
+                f"marker={eval_marker}, error_episodes={total_error_episodes}, "
+                f"timeout_episodes={total_timeout_episodes}, "
                 f"duration_seconds={eval_duration_seconds:.1f}. "
                 "Training stops immediately to enforce strict evaluation reliability."
             )
+
+        # V11 §0.27 : un TIMEOUT n'est pas un bug, c'est de la LENTEUR (parties degenerees x cout
+        # geodesique du move par-figurine). Tuer un run de 36 h pour ca est disproportionne. Mais
+        # le score est calcule sur un denominateur tronque : il ne doit alimenter AUCUN signal.
+        # On sort donc AVANT le gate, le log de metrique, la sauvegarde du best model,
+        # l'early stopping et l'historique robuste. Le marker reste synchronise pour que le gate
+        # de curriculum (train.py) ne se declare pas desynchronise ; c'est LUI qui refuse de
+        # valider une phase sur `eval_reliable=False`.
+        if total_timeout_episodes > 0:
+            print(
+                f"\n⚠️  Évaluation NON FIABLE au marker {eval_marker} : "
+                f"{total_timeout_episodes} épisode(s) abandonné(s) sur TIMEOUT de task "
+                f"(durée {eval_duration_seconds:.1f}s). Aucun crash moteur. "
+                "Le training CONTINUE ; ce point de mesure est ignoré (pas de gate, pas de "
+                "best model, pas de métrique). Réduire `bot_eval_intermediate` ou augmenter "
+                "`bot_eval_task_timeout_seconds` si le cas se répète."
+            )
+            if self.metrics_tracker is not None:
+                self.metrics_tracker.writer.add_scalar(
+                    "0_critical/0_eval_timeout_episodes",
+                    float(total_timeout_episodes),
+                    int(eval_marker),
+                )
+            return
         gate_pass = self._evaluate_model_gate(results, eval_marker)
 
         combined_win_rate = require_key(results, 'combined')

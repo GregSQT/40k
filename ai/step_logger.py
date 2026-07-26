@@ -498,7 +498,7 @@ class StepLogger:
             save_skip_reason = details.get("save_skip_reason")
             rapid_fire_bonus_shot = bool(details.get("rapid_fire_bonus_shot", False))
             assault_applied = bool(details.get("assault_applied", False))
-            pistol_applied = bool(details.get("pistol_applied", False))
+            close_quarters_applied = bool(details.get("close_quarters_applied", False))
             hazardous_test_required = bool(details.get("hazardous_test_required", False))
             hazardous_test_roll = details.get("hazardous_test_roll")
             
@@ -513,8 +513,8 @@ class StepLogger:
             shot_tags = []
             if assault_applied:
                 shot_tags.append("[ASSAULT]")
-            if pistol_applied:
-                shot_tags.append("[PISTOL]")
+            if close_quarters_applied:
+                shot_tags.append("[CLOSE-QUARTERS]")
             if rapid_fire_bonus_shot:
                 rapid_fire_rule_value = require_key(details, "rapid_fire_rule_value")
                 if not isinstance(rapid_fire_rule_value, int) or rapid_fire_rule_value <= 0:

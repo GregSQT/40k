@@ -4158,8 +4158,14 @@ def train_with_curriculum(
 
             combined = float(require_key(last_eval, "combined"))
             worst_bot_score_mean, worst_bot_score_min_raw = _extract_worst_bot_scores_for_gate(last_eval)
+            # V11 §0.27 : une eval abandonnee sur timeout produit des scores calcules sur un
+            # denominateur tronque. Le training survit (training_callbacks), mais ce point ne
+            # peut PAS valider une transition de phase : le gate est refuse et la serie
+            # consecutive est remise a zero, sans arreter le run.
+            eval_reliable = bool(require_key(last_eval, "eval_reliable"))
             gate_now = (
-                phase_episodes >= min_episodes_in_phase
+                eval_reliable
+                and phase_episodes >= min_episodes_in_phase
                 and combined >= combined_min
                 and worst_bot_score_mean >= worst_bot_score_mean_min
                 and worst_bot_score_min_raw >= worst_bot_score_floor_min
@@ -4178,6 +4184,7 @@ def train_with_curriculum(
                     "worst_bot_score_mean": worst_bot_score_mean,
                     "worst_bot_score_min_raw": worst_bot_score_min_raw,
                     "gate_ok": gate_now,
+                    "eval_reliable": eval_reliable,
                     "consecutive_ok": consecutive_ok
                 }
             )
@@ -4689,11 +4696,23 @@ def main():
             # moteur n'est pas une défaite de l'agent : il n'a pas à être compté, il a à faire
             # échouer la mesure.
             total_failed_episodes = int(require_key(results, "total_failed_episodes"))
+            total_timeout_episodes = int(require_key(results, "total_timeout_episodes"))
+            total_error_episodes = int(require_key(results, "total_error_episodes"))
             eval_duration_seconds = float(require_key(results, "eval_duration_seconds"))
+            # V11 §0.27 : ce site est l'eval FINALE (score livre). Contrairement a l'eval
+            # intermediaire, un score tronque ne peut pas etre publie — on leve dans les deux
+            # cas, mais la cause est distinguee : `error` = crash moteur a corriger,
+            # `timeout` = lenteur (baisser bot_eval_final ou monter le timeout).
             if total_failed_episodes > 0:
+                cause = (
+                    "crash(s) moteur" if total_error_episodes > 0 and total_timeout_episodes == 0
+                    else "timeout(s) de task (lenteur, pas un crash)" if total_error_episodes == 0
+                    else "crash(s) moteur ET timeout(s)"
+                )
                 raise RuntimeError(
-                    "Bot evaluation failed episodes detected: "
-                    f"failed_episodes={total_failed_episodes}, "
+                    f"Bot evaluation failed episodes detected — {cause}: "
+                    f"failed_episodes={total_failed_episodes} "
+                    f"(error={total_error_episodes}, timeout={total_timeout_episodes}), "
                     f"duration_seconds={eval_duration_seconds:.1f}. "
                     "Evaluation stops immediately to enforce strict evaluation reliability."
                 )

@@ -20,9 +20,9 @@ const D6_PLUS_3: DiceValue = "D6+3";
 
 export const CHAOS_ARMORY: Record<string, Weapon> = {
   // Ranged Weapons
-  autopistol: { display_name: "Autopistol", RNG: 12, NB: 1, ATK: 4, STR: 3, AP: 0, DMG: 1, WEAPON_RULES: ["PISTOL"] },
+  autopistol: { display_name: "Autopistol", RNG: 12, NB: 1, ATK: 4, STR: 3, AP: 0, DMG: 1, WEAPON_RULES: ["CLOSE_QUARTERS"] },
   balefire_pike: { display_name: "Balefire Pike", RNG: 12, NB: D6_PLUS_3, ATK: 7, STR: 5, AP: -1, DMG: 1, WEAPON_RULES: ["IGNORES_COVER", "TORRENT"] },
-  bolt_pistol: { display_name: "Bolt Pistol", RNG: 12, NB: 1, ATK: 4, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["PISTOL"] },
+  bolt_pistol: { display_name: "Bolt Pistol", RNG: 12, NB: 1, ATK: 4, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["CLOSE_QUARTERS"] },
   boltgun: { display_name: "Boltgun", RNG: 24, NB: 2, ATK: 3, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: [] },
   fleshmetal_guns_focused_malice: { display_name: "Fleshmetal Guns (Focused Malice)", RNG: 24, NB: D3, ATK: 3, STR: 12, AP: -3, DMG: 4, WEAPON_RULES: ["MELTA:2"] },
   fleshmetal_guns_ruinous_salvo: { display_name: "Fleshmetal Guns (Ruinous Salvo)", RNG: 24, NB: D6, ATK: 3, STR: 8, AP: -2, DMG: 2, WEAPON_RULES: ["BLAST"] },
@@ -31,8 +31,8 @@ export const CHAOS_ARMORY: Record<string, Weapon> = {
   meltagun: { display_name: "Meltagun", RNG: 12, NB: 1, ATK: 3, STR: 9, AP: -4, DMG: D6, WEAPON_RULES: ["MELTA:2"] },
   plasma_gun_standard: { display_name: "Plasma Gun (Standard)", COMBI_WEAPON: "plasma_gun", RNG: 24, NB: 1, ATK: 3, STR: 7, AP: -2, DMG: 1, WEAPON_RULES: ["RAPID_FIRE:1"] },
   plasma_gun_supercharge: { display_name: "Plasma Gun (Supercharge)", COMBI_WEAPON: "plasma_gun", RNG: 24, NB: 1, ATK: 3, STR: 8, AP: -3, DMG: 2, WEAPON_RULES: ["RAPID_FIRE:1", "HAZARDOUS"] },
-  plasma_pistol_standard: { display_name: "Plasma Pistol (Standard)", COMBI_WEAPON: "plasma_pistol", RNG: 12, NB: 1, ATK: 3, STR: 7, AP: -2, DMG: 1, WEAPON_RULES: ["PISTOL"] },
-  plasma_pistol_supercharge: { display_name: "Plasma Pistol (Supercharge)", COMBI_WEAPON: "plasma_pistol", RNG: 12, NB: 1, ATK: 3, STR: 8, AP: -3, DMG: 2, WEAPON_RULES: ["PISTOL", "HAZARDOUS"] },
+  plasma_pistol_standard: { display_name: "Plasma Pistol (Standard)", COMBI_WEAPON: "plasma_pistol", RNG: 12, NB: 1, ATK: 3, STR: 7, AP: -2, DMG: 1, WEAPON_RULES: ["CLOSE_QUARTERS"] },
+  plasma_pistol_supercharge: { display_name: "Plasma Pistol (Supercharge)", COMBI_WEAPON: "plasma_pistol", RNG: 12, NB: 1, ATK: 3, STR: 8, AP: -3, DMG: 2, WEAPON_RULES: ["CLOSE_QUARTERS", "HAZARDOUS"] },
 
   // #########################################################################################
   // #################################### Melee Weapons ######################################

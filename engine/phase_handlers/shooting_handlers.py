@@ -212,17 +212,17 @@ def _weapon_has_assault_rule(weapon: Dict[str, Any]) -> bool:
     return False
 
 
-def _weapon_has_pistol_rule(weapon: Dict[str, Any]) -> bool:
-    """Check if weapon has PISTOL rule."""
+def _weapon_has_close_quarters_rule(weapon: Dict[str, Any]) -> bool:
+    """Check if weapon has CLOSE_QUARTERS rule."""
     if not weapon:
         return False
     rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
     # Handle both ParsedWeaponRule objects and strings
     for rule in rules:
         if hasattr(rule, 'rule'):  # ParsedWeaponRule object
-            if rule.rule == "PISTOL":
+            if rule.rule == "CLOSE_QUARTERS":
                 return True
-        elif rule == "PISTOL":  # String
+        elif rule == "CLOSE_QUARTERS":  # String
             return True
     return False
 
@@ -591,10 +591,10 @@ def weapon_availability_check(
                 can_use = False
                 reason = "Cannot shoot when adjacent (weapon_rule=0)"
             else:
-                # arg1=1 AND arg3=1 -> ✅ Weapon MUST have PISTOL rule (continue to next check)
-                if not _weapon_has_pistol_rule(weapon):
+                # arg1=1 AND arg3=1 -> ✅ Weapon MUST have CLOSE_QUARTERS rule (continue to next check)
+                if not _weapon_has_close_quarters_rule(weapon):
                     can_use = False
-                    reason = "No PISTOL rule (cannot shoot non-PISTOL when adjacent)"
+                    reason = "No CLOSE_QUARTERS rule (cannot shoot non-CLOSE_QUARTERS when adjacent)"
         
         # Check weapon.shot flag
         if can_use:
@@ -617,21 +617,21 @@ def weapon_availability_check(
                 f"combi_key={combi_key} chosen_index={combi_choice[combi_key]}"
             )
         
-        # Check PISTOL category mixing restriction
+        # Check CLOSE_QUARTERS category mixing restriction
         # If unit has already fired with a weapon, can only use weapons of the same category
-        if can_use and "_shooting_with_pistol" in unit and unit["_shooting_with_pistol"] is not None:
-            weapon_is_pistol = _weapon_has_pistol_rule(weapon)
+        if can_use and "_shooting_with_close_quarters" in unit and unit["_shooting_with_close_quarters"] is not None:
+            weapon_is_close_quarters = _weapon_has_close_quarters_rule(weapon)
             
-            if unit["_shooting_with_pistol"]:
-                # Unit fired with PISTOL weapon, can only select other PISTOL weapons
-                if not weapon_is_pistol:
+            if unit["_shooting_with_close_quarters"]:
+                # Unit fired with CLOSE_QUARTERS weapon, can only select other CLOSE_QUARTERS weapons
+                if not weapon_is_close_quarters:
                     can_use = False
-                    reason = "Cannot mix PISTOL with non-PISTOL weapons"
+                    reason = "Cannot mix CLOSE_QUARTERS with non-CLOSE_QUARTERS weapons"
             else:
-                # Unit fired with non-PISTOL weapon, cannot select PISTOL weapons
-                if weapon_is_pistol:
+                # Unit fired with non-CLOSE_QUARTERS weapon, cannot select CLOSE_QUARTERS weapons
+                if weapon_is_close_quarters:
                     can_use = False
-                    reason = "Cannot mix non-PISTOL with PISTOL weapons"
+                    reason = "Cannot mix non-CLOSE_QUARTERS with CLOSE_QUARTERS weapons"
         
         # Check weapon.RNG and target availability
         if can_use:
@@ -659,7 +659,7 @@ def weapon_availability_check(
                 from engine.spatial_relations import get_engagement_zone
 
                 melee_range = get_engagement_zone(game_state)
-                weapon_is_pistol = _weapon_has_pistol_rule(weapon)
+                weapon_is_close_quarters = _weapon_has_close_quarters_rule(weapon)
                 shooter_engaged = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
 
                 _trs = time.perf_counter() if _perf_wa else None
@@ -672,11 +672,11 @@ def weapon_availability_check(
                     try:
                         if row["los_cache_has_key"] and row["los_cache_true"]:
                             if shooter_engaged:
-                                if not weapon_is_pistol:
+                                if not weapon_is_close_quarters:
                                     continue
                                 if not row["enemy_engaged_with_shooter"]:
                                     continue
-                            elif row["enemy_engaged_with_shooter"] and not weapon_is_pistol:
+                            elif row["enemy_engaged_with_shooter"] and not weapon_is_close_quarters:
                                 continue
                             if row["friendly_blocks"]:
                                 continue
@@ -722,7 +722,7 @@ def weapon_availability_check(
 def _get_available_weapons_for_selection(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
-    current_weapon_is_pistol: Optional[bool] = None,
+    current_weapon_is_close_quarters: Optional[bool] = None,
     exclude_used: bool = True,
     has_advanced: bool = False
 ) -> List[Dict[str, Any]]:
@@ -734,7 +734,7 @@ def _get_available_weapons_for_selection(
     - Range: weapon must have at least one target in range
     - LoS: weapon must have at least one target with line of sight
     - ASSAULT rule: if unit advanced
-    - PISTOL rule: category (PISTOL or non-PISTOL)
+    - CLOSE_QUARTERS rule: category (CLOSE_QUARTERS or non-CLOSE_QUARTERS)
     - Used weapons: if exclude_used=True, exclude weapons with weapon.shot = 1
     
     Returns:
@@ -778,18 +778,18 @@ def _get_available_weapons_for_selection(
                 })
                 continue
         
-        # Check PISTOL rule category
-        # Only apply PISTOL filter if unit has already fired (current_weapon_is_pistol is not None)
+        # Check CLOSE_QUARTERS rule category
+        # Only apply CLOSE_QUARTERS filter if unit has already fired (current_weapon_is_close_quarters is not None)
         # If None, unit hasn't fired yet, so all weapons should be selectable
         weapon_rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
-        is_pistol = "PISTOL" in weapon_rules
+        is_close_quarters = "CLOSE_QUARTERS" in weapon_rules
         
-        if current_weapon_is_pistol is not None:
-            if current_weapon_is_pistol:
-                # If current weapon is PISTOL, can only select other PISTOL weapons
-                if not is_pistol:
+        if current_weapon_is_close_quarters is not None:
+            if current_weapon_is_close_quarters:
+                # If current weapon is CLOSE_QUARTERS, can only select other CLOSE_QUARTERS weapons
+                if not is_close_quarters:
                     can_use = False
-                    reason = "Cannot mix PISTOL with non-PISTOL weapons"
+                    reason = "Cannot mix CLOSE_QUARTERS with non-CLOSE_QUARTERS weapons"
                     available_weapons.append({
                         "index": idx,
                         "weapon": _serialize_weapon_for_json(weapon),
@@ -798,10 +798,10 @@ def _get_available_weapons_for_selection(
                     })
                     continue
             else:
-                # If current weapon is not PISTOL, exclude PISTOL weapons
-                if is_pistol:
+                # If current weapon is not CLOSE_QUARTERS, exclude CLOSE_QUARTERS weapons
+                if is_close_quarters:
                     can_use = False
-                    reason = "Cannot mix non-PISTOL with PISTOL weapons"
+                    reason = "Cannot mix non-CLOSE_QUARTERS with CLOSE_QUARTERS weapons"
                     available_weapons.append({
                         "index": idx,
                         "weapon": _serialize_weapon_for_json(weapon),
@@ -939,7 +939,7 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 "TOTAL_ATTACK_LOG",
                 "selected_target_id",
                 "activation_position",
-                "_shooting_with_pistol",
+                "_shooting_with_close_quarters",
                 "_manual_weapon_selected",
                 "manualWeaponSelected",
                 "_shoot_activation_started",
@@ -961,7 +961,7 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
             
             if rng_weapons:
                 # Initialize weapon selection. Full weapon_availability_check is only needed when
-                # adjacent (PISTOL) or after advance (ASSAULT / combi) — otherwise O(weapons×enemies)
+                # adjacent (CLOSE_QUARTERS) or after advance (ASSAULT / combi) — otherwise O(weapons×enemies)
                 # per ally dominated SHOOT_PHASE_START reset_allies_s.
                 unit_id_str = str(unit["id"])
                 has_advanced = unit_id_str in require_key(game_state, "units_advanced")
@@ -988,13 +988,13 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
                     )
                     usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
                     if usable_weapons:
-                        # If adjacent, prioritize PISTOL weapons
+                        # If adjacent, prioritize CLOSE_QUARTERS weapons
                         if is_adjacent:
-                            pistol_weapons = [
-                                w for w in usable_weapons if _weapon_has_pistol_rule(require_key(w, "weapon"))
+                            close_quarters_weapons = [
+                                w for w in usable_weapons if _weapon_has_close_quarters_rule(require_key(w, "weapon"))
                             ]
-                            if pistol_weapons:
-                                first_weapon = pistol_weapons[0]
+                            if close_quarters_weapons:
+                                first_weapon = close_quarters_weapons[0]
                             else:
                                 first_weapon = usable_weapons[0]
                         else:
@@ -1493,7 +1493,7 @@ def preview_shoot_valid_targets_from_position(
     Return shooting preview data from a hypothetical position (read-only, no mutation).
 
     Aligné sur l'activation tir : copie d'état, tireur déplacé virtuellement, ``build_unit_los_cache``
-    puis ``valid_target_pool_build`` (empreintes §3.3, PISTOL / adjacent, alliés au contact, etc.).
+    puis ``valid_target_pool_build`` (empreintes §3.3, CLOSE_QUARTERS / adjacent, alliés au contact, etc.).
 
     L'ancienne implémentation (distance centre-à-centre + ``compute_los_state`` seuls) pouvait
     marquer des cibles « valides » alors que le pool moteur les exclut.
@@ -2239,7 +2239,7 @@ def _unit_has_firable_target(game_state: Dict[str, Any], unit: Dict[str, Any],
             continue
         enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(shooter_entry, enemy_entry, melee_range)
         if is_adjacent and not enemy_adjacent_to_shooter:
-            # Arme PISTOL : ne peut cibler que l'ennemi avec lequel l'unité est engagée.
+            # Arme CLOSE_QUARTERS : ne peut cibler que l'ennemi avec lequel l'unité est engagée.
             continue
         if _friendly_engagement_blocks_ranged_shot(
             game_state, shooter_id_str, shooter_player_int, enemy_entry, str(enemy_id),
@@ -2258,9 +2258,9 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     tirable ET au moins une cible ennemie à portée de cette arme avec LoS.
     L'Advance n'est PAS une action de la phase de tir : elle se joue en phase de mouvement.
     """
-    # PISTOL rule: Initialize _shooting_with_pistol to None for eligibility check
-    # This ensures each unit starts with no PISTOL category restriction
-    unit["_shooting_with_pistol"] = None
+    # CLOSE_QUARTERS rule: Initialize _shooting_with_close_quarters to None for eligibility check
+    # This ensures each unit starts with no CLOSE_QUARTERS category restriction
+    unit["_shooting_with_close_quarters"] = None
 
     _uid = str(unit["id"])
 
@@ -2293,10 +2293,10 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
 
     rng_weapons = require_key(unit, "RNG_WEAPONS")
     if is_adjacent:
-        # Engagé : seules les armes PISTOL/CLOSE-QUARTERS peuvent tirer (10.06).
+        # Engagé : seules les armes CLOSE_QUARTERS/CLOSE-QUARTERS peuvent tirer (10.06).
         # (Le close-quarters MONSTER/VEHICLE n'est pas implémenté dans le moteur.)
         firable_weapons = [w for w in rng_weapons
-                           if require_key(w, "RNG") > 0 and _weapon_has_pistol_rule(w)]
+                           if require_key(w, "RNG") > 0 and _weapon_has_close_quarters_rule(w)]
     elif has_advanced:
         # Non-engagé et ayant avancé : seules les armes ASSAULT (ou shoot_after_advance) tirent (10.05).
         firable_weapons = [w for w in rng_weapons
@@ -2401,15 +2401,15 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
         shooter_entry, target_entry, melee_range
     )
     selected_weapon = get_selected_ranged_weapon(shooter)
-    weapon_is_pistol = bool(selected_weapon and _weapon_has_pistol_rule(selected_weapon))
+    weapon_is_close_quarters = bool(selected_weapon and _weapon_has_close_quarters_rule(selected_weapon))
     shooter_is_engaged = _is_adjacent_to_enemy_within_cc_range(game_state, shooter)
 
     if shooter_is_engaged:
-        if not weapon_is_pistol:
+        if not weapon_is_close_quarters:
             return False
         if not enemy_adjacent_to_shooter:
             return False
-    elif enemy_adjacent_to_shooter and not weapon_is_pistol:
+    elif enemy_adjacent_to_shooter and not weapon_is_close_quarters:
         return False
 
     shooter_player_int = require_present(int(shooter["player"]) if shooter["player"] is not None else None, "shooter['player']")
@@ -2522,9 +2522,9 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     # Determine adjacency
     unit_is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
 
-    # PISTOL rule: Reset _shooting_with_pistol for this activation (no category restriction yet)
+    # CLOSE_QUARTERS rule: Reset _shooting_with_close_quarters for this activation (no category restriction yet)
     # This must be done BEFORE weapon_availability_check to avoid incorrect filtering
-    unit["_shooting_with_pistol"] = None
+    unit["_shooting_with_close_quarters"] = None
     # RAPID_FIRE state is activation-scoped and must be reset at activation start.
     unit["_rapid_fire_context_weapon_index"] = None
     unit["_rapid_fire_base_nb"] = 0
@@ -2637,7 +2637,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
         )
     
     # AI_TURN.md STEP 3: Pre-select first available weapon
-    # If unit is adjacent to enemy, prioritize PISTOL weapons
+    # If unit is adjacent to enemy, prioritize CLOSE_QUARTERS weapons
     if not usable_weapons:
         # No usable weapons under current rules -> no valid actions (l'advance se joue en phase de mouvement) → skip.
         _success, result = _handle_shooting_end_activation(
@@ -2660,19 +2660,19 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
         return result
     if usable_weapons:
         if unit_is_adjacent:
-            # Prioritize PISTOL weapons when adjacent to enemy
-            pistol_weapons = []
-            non_pistol_weapons = []
+            # Prioritize CLOSE_QUARTERS weapons when adjacent to enemy
+            close_quarters_weapons = []
+            non_close_quarters_weapons = []
             for w in usable_weapons:
                 weapon = require_key(w, "weapon")
-                if _weapon_has_pistol_rule(weapon):
-                    pistol_weapons.append(w)
+                if _weapon_has_close_quarters_rule(weapon):
+                    close_quarters_weapons.append(w)
                 else:
-                    non_pistol_weapons.append(w)
+                    non_close_quarters_weapons.append(w)
             
-            # Prefer PISTOL weapons, but fall back to non-PISTOL if no PISTOL available
-            if pistol_weapons:
-                first_weapon = pistol_weapons[0]
+            # Prefer CLOSE_QUARTERS weapons, but fall back to non-CLOSE_QUARTERS if no CLOSE_QUARTERS available
+            if close_quarters_weapons:
+                first_weapon = close_quarters_weapons[0]
             else:
                 first_weapon = usable_weapons[0]
         else:
@@ -2978,19 +2978,19 @@ def valid_target_pool_build(
             )
 
         shooter_is_engaged = adjacent_status == 1
-        has_pistol_weapon = False
+        has_close_quarters_weapon = False
         
         if enemy_adjacent_to_shooter:
-            # Enemy is adjacent to shooter - check if any weapon has PISTOL rule
+            # Enemy is adjacent to shooter - check if any weapon has CLOSE_QUARTERS rule
             for weapon_idx in usable_weapon_indices:
                 if weapon_idx < len(rng_weapons):
                     weapon = rng_weapons[weapon_idx]
-                    if _weapon_has_pistol_rule(weapon):
-                        has_pistol_weapon = True
+                    if _weapon_has_close_quarters_rule(weapon):
+                        has_close_quarters_weapon = True
                         break
             
-            # If no PISTOL weapon available, cannot shoot at adjacent enemy
-            if not has_pistol_weapon:
+            # If no CLOSE_QUARTERS weapon available, cannot shoot at adjacent enemy
+            if not has_close_quarters_weapon:
                 if game_state.get("debug_mode", False):
                     from engine.game_utils import add_debug_file_log
                     _ep = enemy.get("col", "?")
@@ -2998,7 +2998,7 @@ def valid_target_pool_build(
                     add_debug_file_log(
                         game_state,
                         f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
-                        f"Enemy {enemy_id_normalized}({_ep},{_er}) EXCLUDED - adjacent without PISTOL weapon"
+                        f"Enemy {enemy_id_normalized}({_ep},{_er}) EXCLUDED - adjacent without CLOSE_QUARTERS weapon"
                     )
                 continue
         
@@ -3017,7 +3017,7 @@ def valid_target_pool_build(
 
         # Unit NOT adjacent to friendly unit (excluding active unit)? -> NO -> Skip enemy unit
         # CRITICAL: This rule applies ONLY when enemy is NOT adjacent to shooter
-        # If enemy is adjacent to shooter AND we have PISTOL weapon, we can shoot regardless of engagement
+        # If enemy is adjacent to shooter AND we have CLOSE_QUARTERS weapon, we can shoot regardless of engagement
         # If enemy is NOT adjacent to shooter, normal rules apply: cannot shoot if enemy is engaged with friendly units
         if not enemy_adjacent_to_shooter and row_opt is None:
             enemy_adjacent_to_friendly = False
@@ -5063,7 +5063,7 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
     - unit's TOTAL_ATTACK_LOG
     - unit's selected_target_id
     - unit's activation_position
-    - unit's _shooting_with_pistol
+    - unit's _shooting_with_close_quarters
     - unit's SHOOT_LEFT (reset to 0)
     
     Called BEFORE end_activation to clean up state, exactly like movement_clear_preview in MOVE.
@@ -5091,8 +5091,8 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
         del unit["selected_target_id"]
     if "activation_position" in unit:
         del unit["activation_position"]
-    if "_shooting_with_pistol" in unit:
-        del unit["_shooting_with_pistol"]
+    if "_shooting_with_close_quarters" in unit:
+        del unit["_shooting_with_close_quarters"]
     if "_manual_weapon_selected" in unit:
         del unit["_manual_weapon_selected"]
     if "manualWeaponSelected" in unit:

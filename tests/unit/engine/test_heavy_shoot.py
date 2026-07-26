@@ -11,14 +11,17 @@ Etat des trois clauses dans ce moteur :
 - pas pose ce tour     : TESTE sur `deployed_on_turn` (0 = pre-bataille, N = arrivee de
                          reserve au tour N). Aucune arrivee en cours de bataille n existe encore
                          (reserves 20 non modelisees), mais la clause est cablee.
-- aucune fig > 3"      : borne CONSERVATRICE « aucune figurine n a bouge » (units_moved /
-                         units_advanced) — la distance parcourue par figurine n est pas
-                         conservee par le moteur. Plus stricte que le PDF, jamais laxiste.
+- aucune fig > 3"      : EXACT depuis le 2026-07-26 — teste sur la DISTANCE reellement
+                         parcourue par figurine (`moved_distance_by_model`, accumulee par
+                         `commit_move` en distance de CHEMIN geodesique). L ancienne borne
+                         conservatrice (« aucune figurine n a bouge ») refusait le bonus a une
+                         escouade qui s etait repositionnee de 2", ce que le PDF accorde.
 
 Discrimination verrouillee (contre-epreuve mutation : neutraliser `bs = max(2, bs-1)` => rouge) :
 - HEAVY + stationnaire + unengaged   -> BS ameliore (4 -> 3)
-- HEAVY + a bouge (units_moved)      -> pas de bonus (4)
-- HEAVY + a advance (units_advanced) -> pas de bonus (4)
+- HEAVY + a bouge de 4" (> 3")       -> pas de bonus (4)
+- HEAVY + a bouge de 2" (<= 3")      -> bonus CONSERVE (3) — la clause est une distance
+- HEAVY + a bouge de 3" pile         -> bonus CONSERVE (3) — « MORE than 3\" », comparaison stricte
 - HEAVY + stationnaire mais ENGAGE   -> pas de bonus (4)
 - HEAVY + POSEE CE TOUR (arrivee de reserve) -> pas de bonus (4)
 - sans HEAVY + stationnaire          -> pas de bonus (4)
@@ -41,8 +44,11 @@ def _neutralise(monkeypatch, *, engaged=False):
     )
 
 
-def _game_state(weapon_rules, *, moved=False, advanced=False, deployed_on_turn=0):
-    """1 tireur (escouade '1', BS4) + 1 cible. moved/advanced marquent l escouade."""
+INCHES_TO_SUBHEX = 5
+
+
+def _game_state(weapon_rules, *, moved_inches=0.0, deployed_on_turn=0):
+    """1 tireur (escouade '1', BS4) + 1 cible. `moved_inches` = distance parcourue par A1."""
     weapon = {"BS": 4, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "WEAPON_RULES": weapon_rules, "display_name": "Gun"}
     attacker = {"id": "A1", "squad_id": "1", "T": 4, "player": 0, "RNG_WEAPONS": [weapon]}
     target_model = {"id": "T1", "T": 4, "HP_CUR": 2, "HP_MAX": 2, "ARMOR_SAVE": 3,
@@ -55,9 +61,10 @@ def _game_state(weapon_rules, *, moved=False, advanced=False, deployed_on_turn=0
         "unit_by_id": {"1": {"id": "1", "UNIT_RULES": [], "deployed_on_turn": deployed_on_turn},
                        "2": {"id": "2", "UNIT_RULES": [], "deployed_on_turn": 0}},
         "objectives": [], "turn": 2,
-        "units_moved": {"1"} if moved else set(),
-        "units_advanced": {"1"} if advanced else set(),
+        "inches_to_subhex": INCHES_TO_SUBHEX,
+        "moved_distance_by_model": {"A1": float(moved_inches) * INCHES_TO_SUBHEX},
     }
+    gs["squad_models"]["1"] = ["A1"]
     intent = {"model_id": "A1", "target_unit_id": "2", "weapon_index": 0, "n_attacks_resolved": 1}
     return gs, intent
 
@@ -70,11 +77,36 @@ def test_heavy_stationnaire_ameliore_le_seuil(monkeypatch):
     assert result["bs"] == 3
 
 
-@pytest.mark.parametrize("moved,advanced", [(True, False), (False, True)])
-def test_heavy_apres_mouvement_pas_de_bonus(monkeypatch, moved, advanced):
-    """HEAVY mais a bouge OU advance -> pas de bonus (BS reste 4)."""
+@pytest.mark.parametrize("moved_inches", [3.5, 4.0, 12.0])
+def test_heavy_apres_plus_de_3_pouces_pas_de_bonus(monkeypatch, moved_inches):
+    """24.16 clause 3 : une figurine a parcouru PLUS de 3" -> pas de bonus (BS reste 4)."""
     _neutralise(monkeypatch)
-    gs, intent = _game_state(["HEAVY"], moved=moved, advanced=advanced)
+    gs, intent = _game_state(["HEAVY"], moved_inches=moved_inches)
+    result = roll_shoot_intent(gs, intent)
+    assert result["bs"] == 4
+
+
+@pytest.mark.parametrize("moved_inches", [0.0, 2.0, 3.0])
+def test_heavy_jusqu_a_3_pouces_bonus_conserve(monkeypatch, moved_inches):
+    """24.16 clause 3 : « MORE than 3\" » — 3" pile conserve le bonus (comparaison stricte).
+
+    C est le gain de conformite du 2026-07-26 : l ancienne borne « aucune figurine n a bouge »
+    rendait ces trois cas ROUGES pour 2.0 et 3.0.
+    """
+    _neutralise(monkeypatch)
+    gs, intent = _game_state(["HEAVY"], moved_inches=moved_inches)
+    result = roll_shoot_intent(gs, intent)
+    assert result["bs"] == 3
+
+
+def test_heavy_clause_3_porte_sur_la_figurine_qui_a_le_plus_bouge(monkeypatch):
+    """« NO MODEL in that unit has moved more than 3\" » : UNE figurine suffit a annuler."""
+    _neutralise(monkeypatch)
+    gs, intent = _game_state(["HEAVY"], moved_inches=0.0)
+    # A1 (le tireur) n a pas bouge, mais une autre figurine de SON escouade a couru 6".
+    gs["models_cache"]["A2"] = dict(gs["models_cache"]["A1"], id="A2")
+    gs["squad_models"]["1"] = ["A1", "A2"]
+    gs["moved_distance_by_model"]["A2"] = 6.0 * INCHES_TO_SUBHEX
     result = roll_shoot_intent(gs, intent)
     assert result["bs"] == 4
 
@@ -107,13 +139,13 @@ def test_le_log_de_tir_affiche_le_token_heavy(monkeypatch):
     """Le combat log doit montrer `Hit:X+ [HEAVY]` quand le bonus est APPLIQUE — le frontend
     y accroche le tooltip de la regle (meme mecanique que [COVER] / [HAZARD]).
 
-    Discrimination : arme HEAVY mais unite ayant bouge -> aucun token (le bonus n a pas eu lieu).
+    Discrimination : arme HEAVY mais unite ayant parcouru 6" -> aucun token (bonus non applique).
     """
     from engine.phase_handlers.shared_utils import _emit_squad_shoot_log, SHOOT_CTX
 
-    def _log_message(*, moved):
+    def _log_message(*, moved_inches):
         _neutralise(monkeypatch)
-        gs, intent = _game_state(["HEAVY"], moved=moved)
+        gs, intent = _game_state(["HEAVY"], moved_inches=moved_inches)
         r = roll_shoot_intent(gs, intent)
         gs.update({"units": [{"id": "1", "unitType": "Shooter"}, {"id": "2", "unitType": "Grunt"}],
                    "action_logs": [], "action_log_seq": 0, "turn": 2})
@@ -128,8 +160,8 @@ def test_le_log_de_tir_affiche_le_token_heavy(monkeypatch):
         _emit_squad_shoot_log(gs, group, SHOOT_CTX)
         return gs["action_logs"][-1]["message"]
 
-    stationnaire = _log_message(moved=False)
-    apres_mouvement = _log_message(moved=True)
+    stationnaire = _log_message(moved_inches=0.0)
+    apres_mouvement = _log_message(moved_inches=6.0)
 
     assert "Hit:3+ [HEAVY]" in stationnaire, stationnaire
     assert "[HEAVY]" not in apres_mouvement, apres_mouvement

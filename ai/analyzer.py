@@ -1083,11 +1083,11 @@ def parse_step_log(filepath: str) -> Dict:
             2: {'aggressive': 0, 'tactical': 0, 'defensive': 0, 'objective': 0},
         },
         'shots_after_advance': {1: 0, 2: 0},
-        'pistol_shots': {
+        'close_quarters_shots': {
             1: {'adjacent': 0, 'not_adjacent': 0},
             2: {'adjacent': 0, 'not_adjacent': 0}
         },
-        'non_pistol_adjacent_shots': {1: 0, 2: 0},
+        'non_close_quarters_adjacent_shots': {1: 0, 2: 0},
         'wait_by_phase': {
             1: {'move_wait': 0, 'wait_with_los': 0, 'wait_no_los': 0},
             2: {'move_wait': 0, 'wait_with_los': 0, 'wait_no_los': 0}
@@ -1113,7 +1113,7 @@ def parse_step_log(filepath: str) -> Dict:
         'move_after_shooting_distance_over_limit': {1: 0, 2: 0},
         'shoot_at_friendly': {1: 0, 2: 0},
         'shoot_at_engaged_enemy': {1: 0, 2: 0},
-        'pistol_engaged_shot_non_adjacent': {1: 0, 2: 0},
+        'close_quarters_engaged_shot_non_adjacent': {1: 0, 2: 0},
         'shoot_dead_unit': {1: 0, 2: 0},
         'shoot_at_dead_unit': {1: 0, 2: 0},
         'shoot_over_rng_nb': {1: 0, 2: 0},
@@ -1152,8 +1152,8 @@ def parse_step_log(filepath: str) -> Dict:
         'shoot_invalid': {
             # 'no_los' RETIRE (2026-07-16) : cf. shoot_handler.py — LoS ancre-a-ancre contraire
             # a 06.01, non reconstructible depuis step.log. Verification deplacee en test moteur.
-            1: {'total': 0, 'out_of_range': 0, 'adjacent_non_pistol': 0},
-            2: {'total': 0, 'out_of_range': 0, 'adjacent_non_pistol': 0}
+            1: {'total': 0, 'out_of_range': 0, 'adjacent_non_close_quarters': 0},
+            2: {'total': 0, 'out_of_range': 0, 'adjacent_non_close_quarters': 0}
         },
         'charge_invalid': {
             1: {'total': 0, 'distance_over_roll': 0, 'advanced': 0, 'fled': 0},
@@ -1211,7 +1211,7 @@ def parse_step_log(filepath: str) -> Dict:
             'move_after_shooting_distance_over_limit': {1: None, 2: None},
             'shoot_at_friendly': {1: None, 2: None},
             'shoot_at_engaged_enemy': {1: None, 2: None},
-            'pistol_engaged_shot_non_adjacent': {1: None, 2: None},
+            'close_quarters_engaged_shot_non_adjacent': {1: None, 2: None},
             'shoot_dead_unit': {1: None, 2: None},
             'shoot_at_dead_unit': {1: None, 2: None},
             'shoot_over_rng_nb': {1: None, 2: None},
@@ -2174,48 +2174,48 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         f"{bot_shots_after_advance:6d} ({bot_pct_after_advance:5.1f}%)",
     )
     
-    # PISTOL WEAPON SHOTS
-    _table_header("PISTOL WEAPON SHOTS BY ADJACENCY")
-    agent_pistol_adj = stats['pistol_shots'][1]['adjacent']
-    bot_pistol_adj = stats['pistol_shots'][2]['adjacent']
-    agent_pistol_not_adj = stats['pistol_shots'][1]['not_adjacent']
-    bot_pistol_not_adj = stats['pistol_shots'][2]['not_adjacent']
-    agent_pistol_total = agent_pistol_adj + agent_pistol_not_adj
-    bot_pistol_total = bot_pistol_adj + bot_pistol_not_adj
+    # CLOSE_QUARTERS WEAPON SHOTS
+    _table_header("CLOSE_QUARTERS WEAPON SHOTS BY ADJACENCY")
+    agent_close_quarters_adj = stats['close_quarters_shots'][1]['adjacent']
+    bot_close_quarters_adj = stats['close_quarters_shots'][2]['adjacent']
+    agent_close_quarters_not_adj = stats['close_quarters_shots'][1]['not_adjacent']
+    bot_close_quarters_not_adj = stats['close_quarters_shots'][2]['not_adjacent']
+    agent_close_quarters_total = agent_close_quarters_adj + agent_close_quarters_not_adj
+    bot_close_quarters_total = bot_close_quarters_adj + bot_close_quarters_not_adj
     
-    agent_pistol_adj_pct = (agent_pistol_adj / agent_pistol_total * 100) if agent_pistol_total > 0 else 0
-    bot_pistol_adj_pct = (bot_pistol_adj / bot_pistol_total * 100) if bot_pistol_total > 0 else 0
-    agent_pistol_not_adj_pct = (agent_pistol_not_adj / agent_pistol_total * 100) if agent_pistol_total > 0 else 0
-    bot_pistol_not_adj_pct = (bot_pistol_not_adj / bot_pistol_total * 100) if bot_pistol_total > 0 else 0
+    agent_close_quarters_adj_pct = (agent_close_quarters_adj / agent_close_quarters_total * 100) if agent_close_quarters_total > 0 else 0
+    bot_close_quarters_adj_pct = (bot_close_quarters_adj / bot_close_quarters_total * 100) if bot_close_quarters_total > 0 else 0
+    agent_close_quarters_not_adj_pct = (agent_close_quarters_not_adj / agent_close_quarters_total * 100) if agent_close_quarters_total > 0 else 0
+    bot_close_quarters_not_adj_pct = (bot_close_quarters_not_adj / bot_close_quarters_total * 100) if bot_close_quarters_total > 0 else 0
     
     _table_row(
-        "PISTOL shots (adjacent):",
-        f"{agent_pistol_adj:6d} ({agent_pistol_adj_pct:5.1f}%)",
-        f"{bot_pistol_adj:6d} ({bot_pistol_adj_pct:5.1f}%)",
+        "CLOSE_QUARTERS shots (adjacent):",
+        f"{agent_close_quarters_adj:6d} ({agent_close_quarters_adj_pct:5.1f}%)",
+        f"{bot_close_quarters_adj:6d} ({bot_close_quarters_adj_pct:5.1f}%)",
     )
     _table_row(
-        "PISTOL shots (not adjacent):",
-        f"{agent_pistol_not_adj:6d} ({agent_pistol_not_adj_pct:5.1f}%)",
-        f"{bot_pistol_not_adj:6d} ({bot_pistol_not_adj_pct:5.1f}%)",
+        "CLOSE_QUARTERS shots (not adjacent):",
+        f"{agent_close_quarters_not_adj:6d} ({agent_close_quarters_not_adj_pct:5.1f}%)",
+        f"{bot_close_quarters_not_adj:6d} ({bot_close_quarters_not_adj_pct:5.1f}%)",
     )
-    _table_row("Total PISTOL shots:", _fmt_count(agent_pistol_total), _fmt_count(bot_pistol_total))
+    _table_row("Total CLOSE_QUARTERS shots:", _fmt_count(agent_close_quarters_total), _fmt_count(bot_close_quarters_total))
     
-    agent_non_pistol_adj = stats['non_pistol_adjacent_shots'][1]
-    bot_non_pistol_adj = stats['non_pistol_adjacent_shots'][2]
+    agent_non_close_quarters_adj = stats['non_close_quarters_adjacent_shots'][1]
+    bot_non_close_quarters_adj = stats['non_close_quarters_adjacent_shots'][2]
     _table_row(
-        "Non-PISTOL shots (adjacent):",
-        _fmt_count(agent_non_pistol_adj),
-        _fmt_count(bot_non_pistol_adj),
+        "Non-CLOSE_QUARTERS shots (adjacent):",
+        _fmt_count(agent_non_close_quarters_adj),
+        _fmt_count(bot_non_close_quarters_adj),
     )
 
     _table_header("SHOOTING VALIDITY")
     agent_invalid_total = (
         stats['shoot_invalid'][1]['out_of_range'] +
-        stats['shoot_invalid'][1]['adjacent_non_pistol']
+        stats['shoot_invalid'][1]['adjacent_non_close_quarters']
     )
     bot_invalid_total = (
         stats['shoot_invalid'][2]['out_of_range'] +
-        stats['shoot_invalid'][2]['adjacent_non_pistol']
+        stats['shoot_invalid'][2]['adjacent_non_close_quarters']
     )
     agent_shot_total = stats['shoot_invalid'][1]['total']
     bot_shot_total = stats['shoot_invalid'][2]['total']
@@ -2232,9 +2232,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         _fmt_count(stats['shoot_invalid'][2]['out_of_range']),
     )
     _table_row(
-        "Adjacent non-pistol:",
-        _fmt_count(stats['shoot_invalid'][1]['adjacent_non_pistol']),
-        _fmt_count(stats['shoot_invalid'][2]['adjacent_non_pistol']),
+        "Adjacent non-close_quarters:",
+        _fmt_count(stats['shoot_invalid'][1]['adjacent_non_close_quarters']),
+        _fmt_count(stats['shoot_invalid'][2]['adjacent_non_close_quarters']),
     )
     if stats['first_error_lines']['shoot_invalid'][1]:
         first_err = stats['first_error_lines']['shoot_invalid'][1]
@@ -2462,14 +2462,14 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     _table_header("1.2 SHOOTING ERRORS")
     agent_shoot_invalid = (
         stats['shoot_invalid'][1]['out_of_range'] +
-        stats['shoot_invalid'][1]['adjacent_non_pistol']
+        stats['shoot_invalid'][1]['adjacent_non_close_quarters']
     )
     bot_shoot_invalid = (
         stats['shoot_invalid'][2]['out_of_range'] +
-        stats['shoot_invalid'][2]['adjacent_non_pistol']
+        stats['shoot_invalid'][2]['adjacent_non_close_quarters']
     )
     _table_row(
-        "Tirs invalides (portee/adjacent non-pistol):",
+        "Tirs invalides (portee/adjacent non-close_quarters):",
         _fmt_count(agent_shoot_invalid),
         _fmt_count(bot_shoot_invalid),
     )
@@ -2540,22 +2540,22 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_shoot_engaged > 0 and stats['first_error_lines']['shoot_at_engaged_enemy'][2]:
         first_err = stats['first_error_lines']['shoot_at_engaged_enemy'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    agent_pistol_engaged_non_adj = stats['pistol_engaged_shot_non_adjacent'][1]
-    bot_pistol_engaged_non_adj = stats['pistol_engaged_shot_non_adjacent'][2]
+    agent_close_quarters_engaged_non_adj = stats['close_quarters_engaged_shot_non_adjacent'][1]
+    bot_close_quarters_engaged_non_adj = stats['close_quarters_engaged_shot_non_adjacent'][2]
     _table_row(
-        "PISTOL shot non-adjacent while engaged:",
-        _fmt_count(agent_pistol_engaged_non_adj),
-        _fmt_count(bot_pistol_engaged_non_adj),
+        "CLOSE_QUARTERS shot non-adjacent while engaged:",
+        _fmt_count(agent_close_quarters_engaged_non_adj),
+        _fmt_count(bot_close_quarters_engaged_non_adj),
     )
-    if agent_pistol_engaged_non_adj > 0 and stats['first_error_lines']['pistol_engaged_shot_non_adjacent'][1]:
-        first_err = stats['first_error_lines']['pistol_engaged_shot_non_adjacent'][1]
+    if agent_close_quarters_engaged_non_adj > 0 and stats['first_error_lines']['close_quarters_engaged_shot_non_adjacent'][1]:
+        first_err = stats['first_error_lines']['close_quarters_engaged_shot_non_adjacent'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_pistol_engaged_non_adj > 0 and stats['first_error_lines']['pistol_engaged_shot_non_adjacent'][2]:
-        first_err = stats['first_error_lines']['pistol_engaged_shot_non_adjacent'][2]
+    if bot_close_quarters_engaged_non_adj > 0 and stats['first_error_lines']['close_quarters_engaged_shot_non_adjacent'][2]:
+        first_err = stats['first_error_lines']['close_quarters_engaged_shot_non_adjacent'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    agent_non_pistol_adj = stats['non_pistol_adjacent_shots'][1]
-    bot_non_pistol_adj = stats['non_pistol_adjacent_shots'][2]
-    _table_row("Non-pistol adjacent shots:", _fmt_count(agent_non_pistol_adj), _fmt_count(bot_non_pistol_adj))
+    agent_non_close_quarters_adj = stats['non_close_quarters_adjacent_shots'][1]
+    bot_non_close_quarters_adj = stats['non_close_quarters_adjacent_shots'][2]
+    _table_row("Non-close_quarters adjacent shots:", _fmt_count(agent_non_close_quarters_adj), _fmt_count(bot_non_close_quarters_adj))
     agent_advance_after_shoot = stats['advance_after_shoot'][1]
     bot_advance_after_shoot = stats['advance_after_shoot'][2]
     _table_row("Advance after shoot:", _fmt_count(agent_advance_after_shoot), _fmt_count(bot_advance_after_shoot))
@@ -3096,8 +3096,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         stats['reactive_move_checks']['distance_over_roll'][1] + stats['reactive_move_checks']['distance_over_roll'][2]
     )
     shoot_invalid_total = (
-        stats['shoot_invalid'][1]['out_of_range'] + stats['shoot_invalid'][1]['adjacent_non_pistol'] +
-        stats['shoot_invalid'][2]['out_of_range'] + stats['shoot_invalid'][2]['adjacent_non_pistol']
+        stats['shoot_invalid'][1]['out_of_range'] + stats['shoot_invalid'][1]['adjacent_non_close_quarters'] +
+        stats['shoot_invalid'][2]['out_of_range'] + stats['shoot_invalid'][2]['adjacent_non_close_quarters']
     )
     shooting_errors = (
         stats['shoot_over_rng_nb'][1] + stats['shoot_over_rng_nb'][2] +
@@ -3105,7 +3105,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         stats['shoot_after_flee'][1] + stats['shoot_after_flee'][2] +
         stats['shoot_at_friendly'][1] + stats['shoot_at_friendly'][2] +
         stats['shoot_at_engaged_enemy'][1] + stats['shoot_at_engaged_enemy'][2] +
-        stats['pistol_engaged_shot_non_adjacent'][1] + stats['pistol_engaged_shot_non_adjacent'][2] +
+        stats['close_quarters_engaged_shot_non_adjacent'][1] + stats['close_quarters_engaged_shot_non_adjacent'][2] +
         stats['advance_after_shoot'][1] + stats['advance_after_shoot'][2] +
         stats['advance_twice_in_shoot_phase'][1] + stats['advance_twice_in_shoot_phase'][2] +
         stats['move_distance_over_limit']['advance'][1] + stats['move_distance_over_limit']['advance'][2] +
@@ -3346,8 +3346,8 @@ if __name__ == "__main__":
         
         # Calculate total errors (all error counts between MOVEMENT ERRORS and SAMPLE ACTIONS)
         shoot_invalid_total = (
-            stats['shoot_invalid'][1]['out_of_range'] + stats['shoot_invalid'][1]['adjacent_non_pistol'] +
-            stats['shoot_invalid'][2]['out_of_range'] + stats['shoot_invalid'][2]['adjacent_non_pistol']
+            stats['shoot_invalid'][1]['out_of_range'] + stats['shoot_invalid'][1]['adjacent_non_close_quarters'] +
+            stats['shoot_invalid'][2]['out_of_range'] + stats['shoot_invalid'][2]['adjacent_non_close_quarters']
         )
         move_errors = (
             stats['wall_collisions'][1] + stats['wall_collisions'][2] +
@@ -3366,7 +3366,7 @@ if __name__ == "__main__":
             stats['shoot_after_flee'][1] + stats['shoot_after_flee'][2] +
             stats['shoot_at_friendly'][1] + stats['shoot_at_friendly'][2] +
             stats['shoot_at_engaged_enemy'][1] + stats['shoot_at_engaged_enemy'][2] +
-            stats['pistol_engaged_shot_non_adjacent'][1] + stats['pistol_engaged_shot_non_adjacent'][2] +
+            stats['close_quarters_engaged_shot_non_adjacent'][1] + stats['close_quarters_engaged_shot_non_adjacent'][2] +
             stats['advance_after_shoot'][1] + stats['advance_after_shoot'][2] +
             stats['advance_twice_in_shoot_phase'][1] + stats['advance_twice_in_shoot_phase'][2] +
             stats['move_distance_over_limit']['advance'][1] + stats['move_distance_over_limit']['advance'][2] +

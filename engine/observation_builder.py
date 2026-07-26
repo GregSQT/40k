@@ -38,6 +38,11 @@ from engine.macro_intents import (
     get_objective_center,
 )
 from engine.weapon_damage_cache import lookup_best_weapon
+from engine.observation_weapon_profiles import (
+    PROFILE_BIN_SIZE,
+    PROFILE_CONT_SIZE,
+    encode_squad_weapon_profiles,
+)
 
 class ObservationBuilder:
     """Builds observations for the agent."""
@@ -46,7 +51,7 @@ class ObservationBuilder:
     # Taille TOTALE du vecteur squad = SQUAD_OBS_CONT_SIZE + SQUAD_OBS_BIN_SIZE.
     # C'est cette valeur que la config d'agent porte dans observation_params.obs_size et
     # qui route le dispatch (w40k_core._build_observation). Voir build_squad_observation.
-    SQUAD_OBS_SIZE_TARGET = 199
+    SQUAD_OBS_SIZE_TARGET = 1011
     RULE_FEATURE_BASE_IDX = 314
     RULE_FEATURE_COUNT = 34
     RULE_AWARE_MACRO_BASE_IDX = 348  # kept for reference: base of macro intent context (obs[348:359])
@@ -79,7 +84,7 @@ class ObservationBuilder:
         "INDIRECT_FIRE",
         "LETHAL_HITS",
         "MELTA",
-        "PISTOL",
+        "CLOSE_QUARTERS",
         "PRECISION",
         "PSYCHIC",
         "RAPID_FIRE",
@@ -1256,7 +1261,7 @@ class ObservationBuilder:
     # LAYOUT (l'ordre ci-dessous EST l'ordre d'émission ; les tailles sont vérifiées à chaud
     # contre SQUAD_OBS_CONT_SIZE / SQUAD_OBS_BIN_SIZE — toute dérive lève une erreur) :
     #
-    #   vec_cont (119) :
+    #   vec_cont (459) :
     #     [0]      tour courant (brut)
     #     [1]      steps de l'épisode (brut)
     #     [2]      figurines vivantes / effectif de départ
@@ -1267,16 +1272,21 @@ class ObservationBuilder:
     #     [7]      VALUE cumulée ennemie vivante / VALUE de départ
     #     [8]      PV de la figurine blessée / son HP_MAX (1.0 si aucune entamée)
     #     [9:14]   profil d'escouade brut : MOVE, HP_MAX, T, save, invulnérable
-    #     [14:44]  6 TYPES de figurines × 5 : HP_MAX, T, save, invulnérable, effectif vivant
+    #     [14:16]  distance PARCOURUE ce tour (subhex géodésiques) : max sur l'escouade, somme
+    #     [16:159] 11 PROFILS D'ARMES de mon escouade × 13 (6 tir + 5 mêlée) — cf.
+    #              observation_weapon_profiles : NB, ATK, STR, AP, DMG, portée, porteurs
+    #              vivants, puis RAPID_FIRE/SUSTAINED_HITS/MELTA/CLEAVE/BLAST X, puis Y+ ANTI
+    #     [159:189] 6 TYPES de figurines × 5 : HP_MAX, T, save, invulnérable, effectif vivant
     #              du type (décrit l'escouade entière, quelle que soit sa taille)
-    #     [44:56]  6 figurines × 2 : col_rel, row_rel (subhex bruts vs centroïde)
-    #     [56:59]  compteurs d'engagement sur l'escouade ENTIÈRE : figurines éligibles au
+    #     [189:201] 6 figurines × 2 : col_rel, row_rel (subhex bruts vs centroïde)
+    #     [201:204] compteurs d'engagement sur l'escouade ENTIÈRE : figurines éligibles au
     #              combat, dans l'EZ ennemie, dans l'EZ via un allié
-    #     [59:119] 5 slots ennemis × 12 : taille, PV totaux, VALUE vivante, col_rel/row_rel de
+    #     [204:459] 5 slots ennemis × 51 : taille, PV totaux, VALUE vivante, col_rel/row_rel de
     #              la figurine ennemie la plus proche (bruts vs centroïde), distance bord-à-bord,
-    #              OC total, MOVE, HP_MAX, T, save, invulnérable
+    #              OC total, MOVE, HP_MAX, T, save, invulnérable, puis 3 PROFILS D'ARMES × 13
+    #              (2 tir + 1 mêlée, mêmes champs que ci-dessus)
     #
-    #   vec_bin (80) :
+    #   vec_bin (552) :
     #     [0]      est-ce mon tour ?
     #     [1]      phase (deployment/command=0, move=.25, tir=.5, charge=.75, combat=1)
     #     [2]      a bougé ce tour ?
@@ -1291,17 +1301,44 @@ class ObservationBuilder:
     #     [11]     dans la zone d'engagement d'un ennemi (engagée) ?
     #     [12:17]  contrôle des 5 objectifs dans {-1, 0, +1}
     #     [17:22]  présence des 5 objectifs (1 = l'objectif existe dans le scénario)
-    #     [22:52]  6 TYPES de figurines × 5 : rôle one-hot (special_weapon, sergeant, support,
+    #     [22:26]  mise en place (source `deployed_on_turn`) : one-hot 3 états — pas encore sur
+    #              le board / posée avant la bataille / arrivée en cours de bataille — plus le
+    #              bit « posée CE tour » (clause 2 de [HEAVY] 24.16)
+    #     [26:224] 11 PROFILS D'ARMES de mon escouade × 18 : 12 drapeaux de règles
+    #              (DEVASTATING_WOUNDS, LETHAL_HITS, TORRENT, TWIN_LINKED, EXTRA_ATTACKS,
+    #              PRECISION, PSYCHIC, HAZARDOUS, HEAVY, IGNORES_COVER, CLOSE_QUARTERS, ASSAULT),
+    #              one-hot du keyword ciblé par ANTI-X (5), slot de profil occupé
+    #     [224:254] 6 TYPES de figurines × 5 : rôle one-hot (special_weapon, sergeant, support,
     #              leader — tout à 0 = type « figurine de base »), slot de type occupé
-    #     [52:70]  6 figurines × 3 : éligible fight, dans l'EZ d'un ennemi, dans l'EZ via un
+    #     [254:272] 6 figurines × 3 : éligible fight, dans l'EZ d'un ennemi, dans l'EZ via un
     #              allié lui-même engagé (règle du « copain »)
-    #     [70:80]  5 slots ennemis × 2 : slot occupé (mask), bloqué par un allié (EZ)
+    #     [272:552] 5 slots ennemis × 56 : slot occupé (mask), bloqué par un allié (EZ), puis
+    #              3 PROFILS D'ARMES × 18 (mêmes champs que ci-dessus)
     #
-    # Les entités absentes (figurine au-delà de l'effectif, slot ennemi vide) sont remplies de
-    # zéros : le padding est identifié par le mask du slot (vec_bin) / l'effectif (vec_cont).
+    # Les entités absentes (figurine au-delà de l'effectif, slot ennemi vide, slot de profil
+    # d'arme vide) sont remplies de zéros : le padding est identifié par le mask du slot
+    # (vec_bin) / l'effectif (vec_cont).
 
-    SQUAD_OBS_CONT_SIZE = 119
-    SQUAD_OBS_BIN_SIZE = 80
+    # Profils d'armes (V11 §9.2.5) — K par registre. Les valeurs de MON escouade sont
+    # dimensionnées sur les rosters d'entraînement RÉELS (mesuré : au plus 6 profils de tir et
+    # 5 de mêlée, persos attachés compris) : mes propres capacités ne sont donc jamais
+    # tronquées. Les slots ENNEMIS sont volontairement plus courts — décrire 11 profils pour
+    # chacune des 5 escouades ennemies coûterait 5 fois le vecteur entier pour une information
+    # marginale ; les profils sont ordonnés par nombre de PORTEURS, donc les slots retenus sont
+    # le gros du volume de feu adverse. Tout dépassement est LOGUÉ (jamais silencieux).
+    SQUAD_SELF_K_RANGED = 6
+    SQUAD_SELF_K_MELEE = 5
+    SQUAD_ENEMY_K_RANGED = 2
+    SQUAD_ENEMY_K_MELEE = 1
+    SQUAD_SELF_N_PROFILES = SQUAD_SELF_K_RANGED + SQUAD_SELF_K_MELEE
+    SQUAD_ENEMY_N_PROFILES = SQUAD_ENEMY_K_RANGED + SQUAD_ENEMY_K_MELEE
+    # Mise en place / réserve : one-hot 3 états + « posée ce tour ».
+    SQUAD_N_DEPLOY_STATE_BIN = 4
+    # Distance parcourue ce tour : max et somme sur l'escouade.
+    SQUAD_N_MOVED_DISTANCE_CONT = 2
+
+    SQUAD_OBS_CONT_SIZE = 459
+    SQUAD_OBS_BIN_SIZE = 552
     SQUAD_OBS_SIZE = SQUAD_OBS_CONT_SIZE + SQUAD_OBS_BIN_SIZE  # = SQUAD_OBS_SIZE_TARGET
     SQUAD_TOP_K = 6
     # Roles d allocation (regle 19), ordre FIGE du one-hot par figurine. `None` (figurine de
@@ -1319,16 +1356,27 @@ class ObservationBuilder:
     # rendent l etat de combat independant du plafond du bloc figurines.
     SQUAD_N_ENGAGEMENT_COUNTERS = 3
     SQUAD_N_ENEMY_SLOTS = 5
-    SQUAD_PER_ENEMY_SLOT_CONT = 12
-    SQUAD_PER_ENEMY_SLOT_BIN = 2
+    # Un slot ennemi = son résumé d'escouade (12 cont / 2 bin) + ses profils d'armes.
+    SQUAD_PER_ENEMY_SLOT_SUMMARY_CONT = 12
+    SQUAD_PER_ENEMY_SLOT_SUMMARY_BIN = 2
+    SQUAD_PER_ENEMY_SLOT_CONT = (
+        SQUAD_PER_ENEMY_SLOT_SUMMARY_CONT + SQUAD_ENEMY_N_PROFILES * PROFILE_CONT_SIZE
+    )
+    SQUAD_PER_ENEMY_SLOT_BIN = (
+        SQUAD_PER_ENEMY_SLOT_SUMMARY_BIN + SQUAD_ENEMY_N_PROFILES * PROFILE_BIN_SIZE
+    )
 
     # Bases des blocs repetes (figurines, slots ennemis) dans chaque vecteur. Ce sont les
     # SEULS offsets publics : le code de lecture (tests, outillage) passe par les accesseurs
     # ci-dessous plutot que de recopier des index. Les bases sont VERIFIEES a chaud pendant
     # la construction (voir _check_block_base) — une derive du layout leve une erreur au lieu
     # de decaler silencieusement une feature.
-    SQUAD_CONT_TYPES_BASE = 14
-    SQUAD_BIN_TYPES_BASE = 22
+    # Base du bloc « profils d'armes de mon escouade » : juste après le profil d'escouade B3
+    # (cont) / le bloc mise en place (bin).
+    SQUAD_CONT_WEAPONS_BASE = 14 + SQUAD_N_MOVED_DISTANCE_CONT
+    SQUAD_BIN_WEAPONS_BASE = 22 + SQUAD_N_DEPLOY_STATE_BIN
+    SQUAD_CONT_TYPES_BASE = SQUAD_CONT_WEAPONS_BASE + SQUAD_SELF_N_PROFILES * PROFILE_CONT_SIZE
+    SQUAD_BIN_TYPES_BASE = SQUAD_BIN_WEAPONS_BASE + SQUAD_SELF_N_PROFILES * PROFILE_BIN_SIZE
     SQUAD_CONT_MODELS_BASE = SQUAD_CONT_TYPES_BASE + SQUAD_N_MODEL_TYPES * SQUAD_PER_MODEL_TYPE_CONT
     SQUAD_BIN_MODELS_BASE = SQUAD_BIN_TYPES_BASE + SQUAD_N_MODEL_TYPES * SQUAD_PER_MODEL_TYPE_BIN
 
@@ -1370,6 +1418,21 @@ class ObservationBuilder:
             + cls.SQUAD_TOP_K * cls.SQUAD_PER_MODEL_BIN
             + slot_i * cls.SQUAD_PER_ENEMY_SLOT_BIN
         )
+
+    @staticmethod
+    def _weapon_truncation_logger(game_state: Dict[str, Any], squad_id: str):
+        """Callback de troncature du bloc profils d armes — LOGUE, jamais silencieux (§11)."""
+
+        def _log(weapons_key: str, n_profiles: int, k_slots: int) -> None:
+            from engine.game_utils import add_debug_file_log
+
+            add_debug_file_log(
+                game_state,
+                f"[OBS] escouade {squad_id} : {n_profiles} profils {weapons_key} pour "
+                f"{k_slots} slots — les profils les moins portes ne sont pas observes.",
+            )
+
+        return _log
 
     @staticmethod
     def _check_block_base(name: str, produced: int, expected: int) -> None:
@@ -1689,7 +1752,8 @@ class ObservationBuilder:
         binv.append(1.0 if current_player == active_player else 0.0)
         phase_encoding = {"deployment": 0.0, "command": 0.0, "move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}
         binv.append(phase_encoding.get(game_state.get("phase", "command"), 0.0))
-        cont.append(float(int(game_state.get("turn", 0))))  # get allowed
+        current_turn = int(game_state.get("turn", 0))  # get allowed (etat non initialise = tour 0)
+        cont.append(float(current_turn))
         cont.append(float(int(game_state.get("episode_steps", 0))))  # get allowed
         # Effectif restant + OC (agregats d escouade). Le PV% d escouade a disparu : il etait
         # redondant avec {effectif vivant, HP_MAX, PV de la figurine blessee} (V11 §9.2).
@@ -1791,6 +1855,51 @@ class ObservationBuilder:
         control, presence = self._squad_objective_control(game_state, active_player)
         binv.extend(control)
         binv.extend(presence)
+
+        # Liste des figurines vivantes de l escouade — partagee par les blocs qui suivent.
+        alive_mid_list = [m for m in squad_models.get(active_squad_id, []) if m in models_cache]  # get allowed
+
+        # Distance PARCOURUE ce tour, en subhex GEODESIQUES (le cout reel du chemin, pas
+        # l ecart depart<->arrivee : contourner un mur coute plus cher). Deux usages, une
+        # seule donnee (V11 §11) : la clause 3 de [HEAVY] 24.16 (« aucune figurine n a bouge de
+        # plus de 3\" ») et la decision de move/advance/charge de l agent, qui a besoin de
+        # savoir combien de budget il a deja consomme. Max ET somme : le max porte la clause de
+        # regle, la somme dit si toute l escouade a bouge ou une seule figurine.
+        moved_by_model = require_key(game_state, "moved_distance_by_model")
+        squad_moved = [float(moved_by_model.get(mid, 0.0)) for mid in alive_mid_list]  # get allowed
+        cont.append(max(squad_moved) if squad_moved else 0.0)
+        cont.append(float(sum(squad_moved)))
+
+        # Mise en place / reserve (source unique `deployed_on_turn`, la MEME que la clause 2 de
+        # [HEAVY] 24.16 — cf. _unit_was_set_up_this_turn). One-hot 3 etats + « posee ce tour » :
+        # l etat seul ne dit pas si la pose est de CE tour, et c est ce dernier point qui
+        # supprime le bonus HEAVY.
+        deployed_on_turn = require_key(active_unit, "deployed_on_turn")
+        binv.append(1.0 if deployed_on_turn is None else 0.0)            # pas encore sur le board
+        binv.append(1.0 if deployed_on_turn == 0 else 0.0)               # posee avant la bataille
+        binv.append(
+            1.0 if (deployed_on_turn is not None and int(deployed_on_turn) > 0) else 0.0
+        )                                                                # arrivee en cours de bataille
+        binv.append(
+            1.0
+            if (deployed_on_turn is not None and int(deployed_on_turn) == current_turn)
+            else 0.0
+        )                                                                # posee CE tour (24.16)
+
+        # === BLOC B3bis : PROFILS D ARMES de mon escouade (V11 §9.2.5) ===
+        # Toutes les regles d armes du PDF 24 sont resolues dans le moteur depuis le
+        # 2026-07-26 ; sans ce bloc l agent les SUBIT sans les percevoir. Ordre et contenu :
+        # observation_weapon_profiles (source unique, partagee avec les slots ennemis).
+        self._check_block_base("armes/cont", len(cont), self.SQUAD_CONT_WEAPONS_BASE)
+        self._check_block_base("armes/bin", len(binv), self.SQUAD_BIN_WEAPONS_BASE)
+        encode_squad_weapon_profiles(
+            cont,
+            binv,
+            alive_models,
+            self.SQUAD_SELF_K_RANGED,
+            self.SQUAD_SELF_K_MELEE,
+            on_truncation=self._weapon_truncation_logger(game_state, active_squad_id),
+        )
 
         # === BLOC C1 : TYPES de figurines (profil + effectif), puis C2 : figurines ===
         # §9.4 : les stats sont exposees « une fois au niveau escouade + exceptions », JAMAIS
@@ -1979,6 +2088,20 @@ class ObservationBuilder:
             cont.append(float(require_key(e_unit, "ARMOR_SAVE")))
             cont.append(float(require_key(e_unit, "INVUL_SAVE")))
             binv.append(1.0)  # slot_mask (alive)
+            # Profil OFFENSIF de la cible (V11 §9.2.5 / §10 bloc D) : sans lui, un Gretchin et
+            # une escouade a fusion se ressemblent dans l observation. MEME encodeur que mon
+            # escouade, K plus court (cf. SQUAD_ENEMY_K_*), profils ordonnes par porteurs.
+            enemy_profile_cont: List[float] = []
+            enemy_profile_bin: List[float] = []
+            encode_squad_weapon_profiles(
+                enemy_profile_cont,
+                enemy_profile_bin,
+                [models_cache[mid] for mid in e_mids],
+                self.SQUAD_ENEMY_K_RANGED,
+                self.SQUAD_ENEMY_K_MELEE,
+                on_truncation=self._weapon_truncation_logger(game_state, str(esid)),
+            )
+            cont.extend(enemy_profile_cont)
             # is_locked_by_friendly_er : l escouade ennemie est dans l ER (bord-a-bord)
             # d au moins une escouade alliee.
             # metric="hex" ÉPINGLÉ : feature d'observation IA (§10) — reste hex même après la
@@ -1987,6 +2110,7 @@ class ObservationBuilder:
                 unit_entries_within_engagement_zone(e_entry, ae, ez_zone, metric="hex") for ae in ally_entries
             )
             binv.append(1.0 if is_locked else 0.0)
+            binv.extend(enemy_profile_bin)
 
         if len(cont) != self.SQUAD_OBS_CONT_SIZE or len(binv) != self.SQUAD_OBS_BIN_SIZE:
             raise RuntimeError(

@@ -20,7 +20,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.29` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.31` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -32,17 +32,24 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 
 | # | Entrée | Nature | Ordre proposé | Pourquoi cet ordre |
 |---|---|---|---|---|
-| **§0.14** | Re-mesure du run | run lancé, **bloqué à l'éval du marker 2000** (cf. §0.27) | **2** | 🟠 **MAJ 2026-07-22.** Run `x5_new` (10k ép., 48 envs) lancé sur moteur+analyzer désormais fiables (§0.23–§0.26). **Le training a atteint l'épisode 2000 sans un seul crash** (le fix move §0.25/§0.26 tient), MAIS le garde-fou d'éval a **arrêté le run au 1er checkpoint** : 500 ép. d'éval « failed » sur **timeout de task** (cf. **§0.27**). Aucun win-rate produit. Prérequis levés depuis le 2026-07-21 : dépendance perf §0.22 non bloquante (le run tourne), analyzer fiabilisé (§0.24). **Nouveau bloqueur = §0.27.** |
-| **§0.27** | Blocage éval au checkpoint | 🔴 **OUVERT (2026-07-22)** — approuvé, DIFFÉRÉ (win-rate repoussé) | **3** | À l'éval intermédiaire (`bot_eval_intermediate=100` ép./bot × 5 bots = 500), **un task a dépassé le timeout de 1 h** (`bot_eval_task_timeout_seconds=3600`, durée mesurée 3675 s) → pool avorté, 500 ép. marqués `failed` → `RuntimeError` strict (§0.7). **Diagnostic (mesuré, PAS un hang) :** le cap `max_turns×400=2000` pas/épisode existe (aucun hang infini possible) ; le modèle à 2000 ép. (à peine entraîné) produit des **parties dégénérées** atteignant ce cap, et le **coût par-pas du fix géodésique §0.25** (l'érosion « load-bearing » = le coût §0.22) rend ces épisodes trop longs. Sonde : **0 ép. d'éval terminé en 2 min** sur le modèle courant (vs 17 s/ép sur un autre modèle). Fix approuvé (utilisateur) : (1) distinguer timeout vs crash dans le garde-fou (ne pas hard-stop sur lenteur, run résilient) + (2) réduire l'éval intermédiaire (100→~20), `bot_eval_final=100` gardé. **DIFFÉRÉ** : le win-rate est repoussé tant que la conformité tir (§0.28) n'est pas verrouillée. |
+| **§0.14** | Re-mesure du run | 🟠 **DÉBLOQUÉ (2026-07-26)** — §0.27 corrigé + §9.2.5 livré ; run `--new` à lancer | **1** | 🟠 **MAJ 2026-07-22.** Run `x5_new` (10k ép., 48 envs) lancé sur moteur+analyzer désormais fiables (§0.23–§0.26). **Le training a atteint l'épisode 2000 sans un seul crash** (le fix move §0.25/§0.26 tient), MAIS le garde-fou d'éval a **arrêté le run au 1er checkpoint** : 500 ép. d'éval « failed » sur **timeout de task** (cf. **§0.27**). Aucun win-rate produit. Prérequis levés depuis le 2026-07-21 : dépendance perf §0.22 non bloquante (le run tourne), analyzer fiabilisé (§0.24). **MAJ 2026-07-26 : §0.27 est CORRIGÉ et §9.2.5 (observation des règles) est LIVRÉ — plus aucun prérequis technique.** Le prochain run doit être un `--new` : `obs_size` 199 → **1011**. |
+| ~~**§0.27**~~ | Blocage éval au checkpoint | ✅ **CORRIGÉ (2026-07-26)** — timeout≠crash + éval intermédiaire 100→20 (7 tests, mutation) | — | À l'éval intermédiaire (`bot_eval_intermediate=100` ép./bot × 5 bots = 500), **un task a dépassé le timeout de 1 h** (`bot_eval_task_timeout_seconds=3600`, durée mesurée 3675 s) → pool avorté, 500 ép. marqués `failed` → `RuntimeError` strict (§0.7). **Diagnostic (mesuré, PAS un hang) :** le cap `max_turns×400=2000` pas/épisode existe (aucun hang infini possible) ; le modèle à 2000 ép. (à peine entraîné) produit des **parties dégénérées** atteignant ce cap, et le **coût par-pas du fix géodésique §0.25** (l'érosion « load-bearing » = le coût §0.22) rend ces épisodes trop longs. Sonde : **0 ép. d'éval terminé en 2 min** sur le modèle courant (vs 17 s/ép sur un autre modèle). Fix approuvé (utilisateur) : (1) distinguer timeout vs crash dans le garde-fou (ne pas hard-stop sur lenteur, run résilient) + (2) réduire l'éval intermédiaire (100→~20), `bot_eval_final=100` gardé. **DIFFÉRÉ** : le win-rate est repoussé tant que la conformité tir (§0.28) n'est pas verrouillée. |
 | **§0.28** | Conformité tir obscuring (13.10) — soupçon | ✅ **RÉFUTÉ (2026-07-22)** — AUCUN bug, mesuré in-engine sur le vrai gate | — | Suspicion utilisateur (tir « à travers terrain » en replay) **investiguée à fond puis RÉFUTÉE**. Le vrai gate de tir gym = `build_squad_action_mask` (branche shoot, `shared_utils.py:8170`) → `_model_can_shoot_target` (`:4722`) → `_attacker_model_can_reach_squad` (`:4515`) → `_compute_visibility_with_obscuring` : **par-figurine, footprint COMPLET, obscuring-aware (13.10)**. Audit LIVE inséré au `return True` du gate : **297 tirs approuvés, 0 sans ligne socle→socle évitant l'obscuring** (`GATE_BUG=0`, `obscuring_clear_line=False=0`). Le « tir à travers terrain » = **peek légal par-figurine** (06.01 : un bord de socle voit là où le centre est masqué). ⚠️ Mes « 10 tirs illégaux confirmés » puis « 3 sur données fraîches » étaient TOUS des **FAUX POSITIFS** : scan offline centre-à-centre + reconstructions non fidèles (positions/arme/état). Détail méthode → §0bis. Fixture d'audit obscuring (cas net, bloque correctement) : commité. |
 | **§0.24** | Analyzer réaligné per-figurine | 🟢 **RÉSOLU (2026-07-22)** ; résiduel FP documenté | — | Détail intégral → **§0hist §0.24**. Résiduel non bloquant : suivi HP/mort de la **cible** pas encore per-figurine → **FP « Fight a dead unit »** (174 sur log réf, **prouvé FP** : Unit 104 tracée vivante) + off-by-1 fight/advance. |
 | ~~**§0.23**~~ | Logger per-figurine `[MODELS:]` + `PNone` | ✅ **CLOS (2026-07-22)** | — | Détail → **§0hist §0.23**. |
 | ~~**§0.25**~~ | Bug moteur : budget move per-fig en ligne droite | ✅ **CORRIGÉ (2026-07-22)** — géodésique | — | Détail → **§0hist §0.25**. Conséquence perf → **§0.27**. |
 | ~~**§0.26**~~ | Régression cache masque (clé `_unit_move_version` contournée) | ✅ **CORRIGÉ (2026-07-22)** — clé fingerprint | — | Détail → **§0hist §0.26**. |
-| **§0.29** | Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum | 🟢 **MÉCANIQUE LIVRÉE + VALIDÉE IN-ENGINE (2026-07-22)** ; reste USAGE+MESURE (cf. « Suite » §0.29 ; win-rate rejoint §0.14, bloqué par §0.27) | 4 | Scénario `scenario_fixed_brawl_sm_orks.json` (terrain **`terrain-mc1.json`**, 36 figurines, compositions réelles des rosters training SM+Orks) où **le champ `deployment_type` bascule** placement manuel ↔ déploiement (`"fixed"` = positions `col/row`, aucun déploiement ; `"active"` = phase de déploiement). Positions par défaut dans les bandes **dégagées de mc1** (rows 90-105 / 195-210, éditables). **+ scheduler `deployment_mode_schedule`** (opt-in) : proportion `active` **croissante par épisode** au fil du training (rampe linéaire, miroir de `deployment_random_mix`, orthogonal à lui). **+ emplacements `top`/`bottom` par figurine DANS les 4 rosters** (P1=top, P2=bottom ; siège+rotation aléatoires conservés) → le mode strict marche sur le vrai chemin roster. 3 verrous verts sur le VRAI moteur : `test_fixed_brawl_deploy_modes.py` (bascule units[]) + `test_deployment_mode_schedule.py` (bornes 0/1 + rampe) + `test_roster_fixed_positions.py` (rosters top/bottom, rotation réelle). Détail → **§0.29** ci-dessous. |
+| **§0.29** | Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum | 🟢 **MÉCANIQUE LIVRÉE + VALIDÉE IN-ENGINE (2026-07-22)** ; reste USAGE+MESURE (cf. « Suite » §0.29 ; win-rate rejoint §0.14, **débloqué le 2026-07-26**) | 4 | Scénario `scenario_fixed_brawl_sm_orks.json` (terrain **`terrain-mc1.json`**, 36 figurines, compositions réelles des rosters training SM+Orks) où **le champ `deployment_type` bascule** placement manuel ↔ déploiement (`"fixed"` = positions `col/row`, aucun déploiement ; `"active"` = phase de déploiement). Positions par défaut dans les bandes **dégagées de mc1** (rows 90-105 / 195-210, éditables). **+ scheduler `deployment_mode_schedule`** (opt-in) : proportion `active` **croissante par épisode** au fil du training (rampe linéaire, miroir de `deployment_random_mix`, orthogonal à lui). **+ emplacements `top`/`bottom` par figurine DANS les 4 rosters** (P1=top, P2=bottom ; siège+rotation aléatoires conservés) → le mode strict marche sur le vrai chemin roster. 3 verrous verts sur le VRAI moteur : `test_fixed_brawl_deploy_modes.py` (bascule units[]) + `test_deployment_mode_schedule.py` (bornes 0/1 + rampe) + `test_roster_fixed_positions.py` (rosters top/bottom, rotation réelle). Détail → **§0.29** ci-dessous. |
+| **§0.30** | Encodeur d'entités partagé + tête pointeur (et 6 trous trouvés le 2026-07-26) | 🔴 **OUVERT (2026-07-26)** — chantier dédié, bloque §0.14 | **1** | Vérification demandée par l'utilisateur après §9.2.5. **6 trous trouvés**, dont : une escouade ennemie **invisible ET intirable** dans 6 épisodes sur 10 (5 slots figés pour 6 escouades mesurées) ; le gym ignore les types de tir **10.05 / 10.06** ; au tir le gym déclare **une seule arme (index 0), une seule cible** — violation de **04.01** et **04.02** ; l'heuristique d'arme de mêlée a été **périmée par P1** (ignore ANTI-X, DEVASTATING, MELTA…). Décisions actées : renommage `PISTOL` → `CLOSE_QUARTERS`, encodeur d'entité **partagé** (unités+armes, amies+ennemies), **K=20 unités / K=10 armes**, **tête pointeur** pour le ciblage, retrain accepté. Détail complet, mesures et plan → **[`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)**. |
 | ~~**§0.22**~~ | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **CLOS le 2026-07-21 — décision (B) STOP à L1+L_bbox** | — | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) livrés et commités** (`ff2293e0`, `6f268d38`) — gain ovale **1,49×**, round10 1,78×, pool strictement identique ; A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. **Reliquat NON poursuivi** (ratio gain/risque mauvais, mesuré) : BFS wavefront réfuté (plus lent à move 12), L2b runs NumPy réfuté (1,1× net + complexité), numba écarté (risque segfault sur run 36 h). ⚠️ **MAJ 2026-07-22 : ce coût perf est désormais INCONTOURNABLE** — le fix de conformité move §0.25 REQUIERT une érosion géodésique par-figurine, exactement le coût que §0.22 combattait. Il refait surface en §0.27. Détail complet → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§10, §11) ; leçon de méthode → §0bis. |
 
-**Restent ouverts : §0.27 (garde-fou éval, fix approuvé) puis §0.14 (win-rate). §0.28 (conformité tir obscuring) est RÉFUTÉ — aucun bug (mesuré in-engine).**
+**MAJ 2026-07-26 : §0.27 est CORRIGÉ et §9.2.5 (observation des règles d'armes) est LIVRÉ.**
+⚠️ **MAIS le run long est de nouveau BLOQUÉ, par §0.30** (ouvert le 2026-07-26) : la
+vérification de §9.2.5 a trouvé qu'une escouade ennemie est invisible et intirable dans la
+majorité des épisodes, et que le gym viole 04.01/04.02 au tir. Lancer 36 h avant de corriger
+reviendrait à entraîner sur un jeu tronqué. Le run restera un **`--new`** (`obs_size` 199 →
+1011, et il rebougera avec §0.30).
+**§0.28 (conformité tir obscuring) est RÉFUTÉ — aucun bug (mesuré in-engine).**
 La nuit du 2026-07-21→22 a livré §0.23–§0.26 (logger+analyzer per-figurine, bug moteur move + régression cache),
 qui **débloquent la mesurabilité** (analyzer fiable) mais font émerger §0.27 (coût géodésique en éval).
 **§0.22 est CLOS** mais son coût est réactivé par §0.25 (cf. la MAJ dans sa ligne). (Les dépendances
@@ -162,7 +169,7 @@ agent frais qui reprend :
    proportion selon l'avancement.
 3. **Mesurer l'objectif curriculum** : win-rate en régime `fixed` (strict) vs `active` au fil de la
    rampe — c'est la métrique qui valide « scénarios fixes → apprendre à se déployer ». **Rejoint
-   §0.14 (win-rate), donc BLOQUÉ par §0.27** (garde-fou d'éval trop lent) : lever §0.27 d'abord.
+   §0.14 (win-rate)**, ✅ **débloqué le 2026-07-26** (§0.27 corrigé, §9.2.5 livré).
 Décisions ouvertes (utilisateur) : forme exacte de la rampe ; coexistence éventuelle avec
 `deployment_random_mix` ; siège (`agent_seat_mode`) gardé aléatoire ou figé en phase strict.
 
@@ -329,9 +336,47 @@ poussait `unit["col"/"row"]` alors que `require_unit_position` lit `units_cache`
 `require_unit_position == position loggée`) a retourné le verdict. Corollaire du motif §0.11/§0.18 :
 **un rejeu vert ne prouve rien s'il ne vérifie pas son propre setup.**
 
-### 0.27 Blocage à l'éval du checkpoint — task d'éval en timeout (parties dégénérées × coût géodésique) — 🔴 OUVERT (2026-07-22)
+### 0.27 Blocage à l'éval du checkpoint — task d'éval en timeout (parties dégénérées × coût géodésique) — ✅ CORRIGÉ (2026-07-26)
 
-> **Bloqueur ACTUEL de §0.14.** Ce n'est ni la perf du pool (§0.22), ni un défaut d'instrument
+> ✅ **FIX LIVRÉ le 2026-07-26 — options (1) + (2), celles approuvées.** Le diagnostic ci-dessous
+> reste valide intégralement ; seul le garde-fou change.
+>
+> **(1) Timeout ≠ crash.** `evaluate_against_bots` publie désormais **trois** compteurs au lieu
+> d'un : `total_failed_episodes` (sémantique historique inchangée : « la mesure n'est pas
+> fiable »), `total_timeout_episodes`, `total_error_episodes` (= la différence, source unique).
+> Conséquences par site :
+> - `training_callbacks.py::_apply_eval_results` (éval INTERMÉDIAIRE) : lève toujours sur
+>   `total_error_episodes > 0` (**un crash moteur ne s'absorbe pas**) ; sur timeout seul, imprime
+>   `⚠️ Évaluation NON FIABLE`, loggue le compteur TensorBoard `0_critical/0_eval_timeout_episodes`
+>   et **sort avant** le gate, la métrique de win-rate, la sauvegarde du best model, l'early
+>   stopping et l'historique robuste. Le training continue ; **le point de mesure est ignoré, pas
+>   maquillé** — c'est le point clé : un score sur dénominateur tronqué n'alimente AUCUN signal.
+> - `train.py` (gate de CURRICULUM) : `gate_now` exige maintenant `eval_reliable`. Une éval
+>   abandonnée ne peut plus valider une transition de phase, et remet `consecutive_ok` à 0 —
+>   sans tuer le run. Le `marker` reste synchronisé, donc la garde d'anti-désynchronisation
+>   (`last_bot_eval_marker != total_global_episodes`) ne se déclenche pas.
+> - `train.py` (éval FINALE / eval-only) : **reste strict dans les deux cas** — c'est le score
+>   livré, un échantillon tronqué ne se publie pas. Seul le message change : il nomme la cause
+>   (crash / timeout / les deux), pour que le diagnostic soit immédiat au lieu d'exiger une
+>   nouvelle enquête.
+>
+> **(2) Éval intermédiaire réduite** : `x5_new.bot_eval_intermediate` **100 → 20** ép./bot
+> (5 bots → 100 ép. au lieu de 500, tasks 5× plus courts). `bot_eval_final=100` **inchangé** et
+> `bot_eval_task_timeout_seconds=3600` inchangé. Les autres phases ne sont pas touchées.
+>
+> **Verrou** : `tests/unit/ai/test_eval_timeout_resilience.py` (**7** tests) — crash lève /
+> crash+timeout lève (le crash prime) / timeout ne lève pas et n'atteint pas le gate / timeout
+> loggue le compteur mais **jamais** un win-rate / éval propre atteint le gate (non-régression) /
+> contrat des 3 compteurs / verrou **AST** sur `gate_now` exigeant `eval_reliable`.
+> **Contre-épreuve mutation** : garde-fou remis sur `total_failed_episodes` + early-return
+> neutralisé + `eval_reliable` retiré du gate → **3 rouges** ; restauré → 7 verts.
+>
+> ⚠️ **Ce que ce fix NE prouve PAS** : que l'éval s'accélère quand le modèle s'améliore
+> (hypothèse de l'option 1, toujours non mesurée). Il garantit seulement que le run **survit**
+> à des évals lentes. Si l'éval FINALE heurte le même mur, le reliquat est l'option (3)
+> (accélération du géodésique, rouvre §0.22).
+
+> **Bloqueur historique de §0.14 (diagnostic conservé).** Ce n'est ni la perf du pool (§0.22), ni un défaut d'instrument
 > (§0.24), ni un hang infini : c'est le **coût par-pas du fix move géodésique (§0.25)** appliqué à des
 > parties longues d'un modèle encore nul, qui fait dépasser le timeout d'un task d'éval.
 
@@ -368,7 +413,7 @@ terminé en 2 min** (`0/90 [00:00]`). À comparer aux **17 s/ép** mesurés sur 
 n'y a aucun bug d'épisode. Et la lenteur = le coût géodésique, i.e. exactement le coût **§0.22** que
 l'utilisateur a clos, désormais incontournable puisque la conformité move (§0.25) l'exige.
 
-**Options identifiées (NON tranchées — décision utilisateur, cf. perf §0.22).**
+**Options identifiées (tranchées : (1)+(2) LIVRÉES le 2026-07-26, cf. encadré en tête).**
 1. **Distinguer timeout vs crash** dans le garde-fou `_apply_eval_results` : hard-stop uniquement sur
    **exception** d'épisode (vrai bug), pas sur **timeout** (lenteur). Le run continuerait ; les évals
    plus tardives (modèle meilleur → parties courtes → éval rapide) passeraient. Hypothèse à confirmer :
@@ -4712,7 +4757,7 @@ implémenter** (tranches ultérieures).
 | **EXTRA ATTACKS (24.11)** | ✅ **FAIT dans le vif** (2026-07-26) | Select Weapons step : `_select_fight_weapon_indices_for_fig` = **toutes** les armes EXTRA ATTACKS + **une** autre arme de mêlée (« if possible »), le choix principal les excluant. `squad_declare_fight` émet **un intent par arme** et `ATTACK_LEFT` cumule (sinon la 2ᵉ arme ne se résolvait jamais). | `test_extra_attacks_fight.py` (**7**, sélection + câblage). |
 | **PRECISION (24.28)** | ✅ **FAIT dans le vif** (2026-07-26) | Override à l'ouverture de l'Allocation Order step : `_apply_precision_allocation_override` place le groupe CHARACTER visible en tête de l'ordre déclaré par le défenseur (l'ordre du défenseur est conservé pour le reste). Visibilité : mêlée = acquise au contact ; tir = `_attacker_model_can_reach_squad` restreint aux figurines CHARACTER (nouveau paramètre `only_target_mids`). Arbitrage du « can select » : **toujours**, sur le CHARACTER le plus cher. Ce n'est PAS un choix laissé à l'agent aujourd'hui — le mécanisme générique de décision agent (**P2**, `pending_agent_decision` + `CHOICE_0..K`) n'existe pas encore et l'action_space n'est pas étendu ; sans P2, la seule alternative serait une action ad hoc, exactement ce que §9.3 interdit. **Inscrite comme candidate à une tranche P3.** L'automatisme actuel est le choix strictement favorable à l'attaquant (viser le CHARACTER est l'unique effet de la règle), donc le regret attendu est faible — c'est le critère d'arbitrage de §9.0bis (mesurer le regret avant de brancher). | `test_precision.py` (**4**, dont la **contre-épreuve 05.03** : sans PRECISION le character est intouchable). |
 | **PSYCHIC (24.29)** | ✅ **FAIT dans le vif** (2026-07-26) | « ignore any or all modifiers to BS/WS and to the hit roll » : le seul modificateur défavorable du moteur est le malus de couvert 13.08 → ignoré, **mais la cible garde le bénéfice du couvert** (contrairement à IGNORES COVER 24.18 qui le supprime). Le bonus HEAVY est conservé (« any or all » = choix du joueur). | `test_psychic_shoot.py` (**4**, dont la distinction explicite PSYCHIC vs IGNORES COVER). |
-| **HEAVY (24.16) — mise en conformité PDF** | ✅ **RENFORCÉ** (2026-07-26) | La clause **« that unit is unengaged »**, absente de la config et donc de la 1ʳᵉ implémentation, est branchée (`_heavy_unit_is_engaged`, même prédicat que le gate de tir 10.06). Clause **« pas posée ce tour » : CÂBLÉE** sur le nouveau champ moteur `deployed_on_turn` (posé à la création de l'unité et au commit de déploiement — `_apply_deploy_plan` ; 0 = pré-bataille, N = arrivée de réserve au tour N, `None` = hors board). Aucune arrivée en cours de bataille n'existe encore (réserves 20 non modélisées) mais la clause n'aura pas à être retouchée le jour où elles arrivent. **C'est la source unique partagée avec la feature d'observation déploiement/réserve** (`V11_audit_observation.md` §8). Clause « aucune figurine > 3" » : borne **conservatrice** « aucune figurine n'a bougé » — le moteur ne conserve pas la distance parcourue par figurine ; plus strict que le PDF, jamais laxiste. **Traitement acté** : porter le coût géodésique du chemin jusqu'à `commit_move` et l'accumuler par figurine (`moved_distance_by_model`), donnée qui sert AUSSI l'observation — spécifié dans `V11_audit_observation.md` (« À coder », point 3). | `test_heavy_shoot.py` (**7** : bonus si stationnaire+unengaged ; pas de bonus si bougé / advance / engagé / **posé ce tour** ; bonus conservé si posé au tour précédent ; rien sans HEAVY). |
+| **HEAVY (24.16) — mise en conformité PDF** | ✅ **RENFORCÉ** (2026-07-26) | La clause **« that unit is unengaged »**, absente de la config et donc de la 1ʳᵉ implémentation, est branchée (`_heavy_unit_is_engaged`, même prédicat que le gate de tir 10.06). Clause **« pas posée ce tour » : CÂBLÉE** sur le nouveau champ moteur `deployed_on_turn` (posé à la création de l'unité et au commit de déploiement — `_apply_deploy_plan` ; 0 = pré-bataille, N = arrivée de réserve au tour N, `None` = hors board). Aucune arrivée en cours de bataille n'existe encore (réserves 20 non modélisées) mais la clause n'aura pas à être retouchée le jour où elles arrivent. **C'est la source unique partagée avec la feature d'observation déploiement/réserve** (`V11_audit_observation.md` §8). Clause « aucune figurine > 3" » : ✅ **EXACTE depuis le 2026-07-26** — `moved_distance_by_model` (distance de CHEMIN accumulée par `commit_move`, hex géodésique en gym ET euclidienne any-angle en PvP) remplace la borne conservatrice « aucune figurine n'a bougé ». Détail et périmètre → **§9.2.6**. | `test_heavy_shoot.py` (**13** : bonus si stationnaire+unengaged ; pas de bonus si engagé / **posé ce tour** / **une figurine a parcouru > 3"** ; bonus CONSERVÉ jusqu'à 3" inclus (comparaison stricte) ; bonus conservé si posé au tour précédent ; rien sans HEAVY). |
 | **reroll_charge** (`unit_rules.json`) | ✅ **IMPLÉMENTÉ** (2026-07-26) | Règle d'unité déclarée par 4 unités Orks et **totalement absente du code** (grep zéro). `roll_charge_distance` + `unit_can_reroll_charge` mutualisés ; relance sur le seul critère exact : le jet n'atteint **aucune** cible/destination légale (gym `squad_charge` ; PvP roll-first `charge_target_selection`). Un dé ne se relance qu'une fois. Débloque **19.04** (la règle du leader vaut pour l'unité attachée : `_unit_has_rule_effect` lit les UNIT_RULES de l'escouade). | `test_reroll_charge.py` (**5**, dont l'ancrage donnée « des unités Orks déclarent bien la règle »). |
 | **19.03 — union des keywords** | ✅ **FAIT** (2026-07-26) | `_build_enhanced_unit` : l'unité porte l'UNION des keywords de ses composants (prérequis d'ANTI-X). Keywords **propres** conservés par figurine pour les règles « each model » (06.03). `hideable` recalculé sur l'union. | `test_attached_units_keywords_19_03.py` (**2**, e2e via le vrai chargement de scénario). |
 | ~~~10 règles observées non appliquées~~ | ✅ **SOLDÉ** — il n'en reste **aucune** | Les 9 règles listées au 2026-07-24 sont traitées : TORRENT, TWIN_LINKED, SUSTAINED_HITS, LETHAL_HITS, MELTA, ANTI_* ✅ ; EXTRA_ATTACKS ✅ ; PSYCHIC ✅. **Seule INDIRECT_FIRE (24.19) reste** — ce n'est pas une règle de résolution mais un TYPE DE TIR entier (10.07 : tirer sans ligne de vue, la cible bénéficiant du couvert), donc un chantier à part et non un portage. **Laissée ouverte volontairement** ; 2 armes concernées, aucune dans les rosters de training. ⚠️ Dépendance déjà notée : quand elle sera faite, son couvert devra passer par un point qu'[IGNORES COVER] 24.18 annule aussi. | — |
@@ -4828,16 +4873,135 @@ suit le PDF), mais elles restent lues comme documentation. **Décision utilisate
 corriger le fichier de config pour qu'il décrive les vraies règles, ou le marquer explicitement
 comme non normatif.
 
-### 9.2.5 Ce que l'agent NE voit PAS encore — dette ouverte, chiffrée
+### 9.2.5 Ce que l'agent voit des règles — ✅ LIVRÉ (2026-07-26)
 
-Les règles ci-dessus sont **vives dans le moteur**, mais l'observation squad (199-d) **ne contient
-aucun profil d'arme ni bit de règle** : cf. `V11_audit_observation.md` §8 (« Hors périmètre, non
-fait : profils d'armes bruts — les bits/params de règles s'insèrent dans le même bloc »).
-L'agent subit donc ces règles sans les percevoir.
+> **Était** : « les règles sont vives dans le moteur, mais l'observation squad (199-d) ne contient
+> aucun profil d'arme ni bit de règle — l'agent les subit sans les percevoir ». **C'est fait.**
+> `obs_size` **199 → 1011** (`vec_cont` 459, `vec_bin` 552) ⇒ **retrain from scratch**
+> (déjà acté ; les `.zip` existants sont incompatibles, par construction).
 
-C'est exactement le travail que l'audit d'observation avait mis « en attente du portage des
-capacités » — **le portage est terminé, le signal est levé**. C'est la prochaine tranche
-naturelle, et elle change `obs_size` (retrain from scratch, déjà acté).
+**Ce qui a été ajouté à l'observation squad** (détail de layout : en-tête de
+`build_squad_observation`, source unique) :
+
+1. **Profils d'armes bruts + bits/params de règles** — nouveau module
+   [`engine/observation_weapon_profiles.py`](../../engine/observation_weapon_profiles.py),
+   **encodeur unique consommé par mon escouade ET par les slots ennemis** (un encodeur par camp
+   aurait dérivé). Un profil = `{NB, ATK, STR, AP, DMG, portée, **nb de porteurs vivants**}` +
+   6 params de règles (RAPID FIRE / SUSTAINED HITS / MELTA / CLEAVE / BLAST X, et le Y+ de
+   ANTI) + 12 drapeaux (DEVASTATING WOUNDS, LETHAL HITS, TORRENT, TWIN-LINKED, EXTRA ATTACKS,
+   PRECISION, PSYCHIC, HAZARDOUS, HEAVY, IGNORES COVER, PISTOL, ASSAULT) + le **one-hot du
+   keyword ciblé par ANTI-X** + un mask. **13 cont + 18 bin par profil.**
+   - Le **compteur de porteurs** est ce qui distingue « 1 rokkit » de « 9 shootas » : le volume
+     de feu est `porteurs × NB`. Les profils sont regroupés par **identité de caractéristiques**
+     (deux noms différents, même profil = un seul slot ; une arme « à profils multiples » = une
+     entrée par profil, aucun cas particulier).
+   - **[INDIRECT FIRE] 24.19 est délibérément ABSENTE** : elle n'est pas implémentée (cf. la
+     ligne « 10 règles observées » de §9.2.1). Un bit pour une règle inerte est du bruit pur.
+   - ⚠️ **Réserve sur [ASSAULT] et [PISTOL]** : bits conservés (effet réel côté PvP), mais le
+     gate de tir gym rend leurs types de tir (10.05 / 10.06) INATTEIGNABLES pour l'agent —
+     trou de conformité trouvé le 2026-07-26, **ouvert** : voir **§9.2.7**.
+   - **K par camp, mesuré** : mon escouade **6 profils de tir + 5 de mêlée** — le maximum
+     observé sur les rosters d'entraînement réels, persos attachés compris, donc **mes propres
+     capacités ne sont jamais tronquées** ; slots ennemis **2 tir + 1 mêlée**, ordonnés par
+     nombre de porteurs (le gros du volume de feu adverse). ⚠️ **Arbitrage assumé** : 11 profils
+     × 5 escouades ennemies coûteraient 5 fois le vecteur entier pour une information marginale.
+     Tout dépassement de K est **LOGUÉ** (`add_debug_file_log`), jamais silencieux.
+2. **Mise en place / réserve** — one-hot 3 états (pas sur le board / posée avant la bataille /
+   arrivée en cours de bataille) **+ le bit « posée CE tour »**, dérivés de `deployed_on_turn`,
+   la **source unique déjà utilisée par la clause 2 de [HEAVY] 24.16**. Le one-hot seul ne dit
+   pas si la pose est de ce tour — or c'est ce point-là qui supprime le bonus.
+3. **Distance parcourue ce tour, par figurine** — nouvelle donnée moteur
+   `moved_distance_by_model`, accumulée par `commit_move` en **distance de CHEMIN** ; exposée en
+   **max** (porte la clause de règle) et **somme** (toute l'escouade a-t-elle bougé, ou une
+   seule figurine). Voir §9.2.6 : elle rend la **clause 3 de [HEAVY] 24.16 EXACTE**.
+
+**Verrous** : `tests/unit/engine/test_squad_obs_weapon_profiles.py` (**19**) et
+`test_moved_distance_and_deploy_obs.py` (**10**). Contre-épreuves mutation : compteur de porteurs
+figé + one-hot ANTI éteint + ordre des profils changé → **6 rouges** ; mesure à vol d'oiseau +
+accumulation remplacée par écrasement → **2 rouges** ; restauré → verts. Les 6 fichiers de tests
+d'observation squad préexistants restent verts **sans modification** (ils passent par les
+accesseurs de layout, pas par des index recopiés).
+
+**Ce que cette tranche NE fait PAS** (et pourquoi) :
+- **Bloc E « escouades amies »** : toujours différé, il part avec l'archi set-based (le faire en
+  K slots fixes exigerait d'inventer un ordre qu'aucune action ne consomme — cf.
+  `V11_audit_observation.md` §11).
+- **Listes de longueur variable** (fin des plafonds K) : idem, c'est l'étape architecture.
+
+### 9.2.7 🔴 TROU DE CONFORMITÉ TROUVÉ le 2026-07-26 — les types de tir 10.05 / 10.06 n'existent pas pour l'agent
+
+**Trouvé en vérifiant, à la demande de l'utilisateur, l'affirmation « seules les règles à effet
+réel sont exposées » de §9.2.5.** Elle est FAUSSE pour deux bits, et la cause n'est pas
+l'observation : c'est le moteur.
+
+**Le fait, lu dans le code.** Le gate de tir du chemin squad/gym
+([`build_squad_action_mask`](../../engine/phase_handlers/shared_utils.py), branche `phase ==
+"shoot"`) calcule :
+`can_shoot = not has_fled and not has_advanced and not has_shot and not in_er` — **sans aucune
+exception d'arme**.
+
+**Ce que disent les PDF** (lus, pas supposés) :
+- **10.05 ASSAULT SHOOTING** — éligible si : « Unengaged **and made an advance move this turn** »
+  ET l'unité a ≥1 arme [ASSAULT]. *While shooting* : seules les armes [ASSAULT] peuvent être
+  sélectionnées. ⇒ `has_advanced` ne doit PAS fermer le tir quand une arme [ASSAULT] est portée.
+- **10.06 CLOSE-QUARTERS SHOOTING** — éligible si : « **Engaged** and did not make an advance
+  move this turn » ET l'unité a ≥1 arme [CLOSE-QUARTERS] **ou est MONSTER/VEHICLE**. *While
+  shooting* : les figurines peuvent cibler les unités avec lesquelles l'unité est engagée.
+  ⇒ `in_er` ne doit PAS fermer le tir dans ces cas. **24.27 : [PISTOL] et [CLOSE-QUARTERS] sont
+  identiques à toutes fins de règles** — donc la règle porte bien sur les armes [PISTOL] du
+  projet.
+
+**Portée du trou.** Le chemin **PvP/mono-figurine** connaît les deux règles
+(`_weapon_has_assault_rule` → `weapon_availability_check` ; `_weapon_has_pistol_rule` → sélection
+d'arme et allocation en zone d'engagement, `shared_utils` ~5030/5081/5802/6072). Le chemin
+**squad/gym** ne les connaît pas. C'est **exactement le motif de §9.1** — une règle vive sur un
+chemin, absente de l'autre — et le motif récurrent du document (« code testé mais jamais appelé »,
+« migration partielle d'un chemin »).
+
+**Sens de l'écart** : le gate gym est **plus STRICT** que les règles (il refuse des tirs légaux),
+donc jamais laxiste. Conséquence : l'agent ne peut pas apprendre le tir d'assaut ni le tir à bout
+portant, et les 30 armes [PISTOL] / 22 [ASSAULT] des armories perdent leur intérêt tactique côté
+IA. Côté observation, les bits `PISTOL` et `ASSAULT` décrivent donc une capacité inexploitable en
+gym — ils sont **conservés** (l'effet PvP est réel) avec la réserve écrite dans
+`observation_weapon_profiles.py`.
+
+**Statut : OUVERT — repris dans le chantier dédié [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md) (tranche T-B), avec 5 autres trous trouvés le même jour.** Non traité dans cette session — c'est une **nouvelle règle à implémenter**
+(deux types de tir, avec restriction d'armes et restriction de cibles), pas un correctif de la
+tranche observation. Périmètre estimé, à arbitrer : (1) gate `build_squad_action_mask` ;
+(2) restriction « seules les armes [ASSAULT] » / « seules les armes [PISTOL] » à la sélection
+d'armes du squad ; (3) restriction de cible 10.06 (uniquement les unités engagées) ; (4) miroir
+PvP à vérifier (le chemin mono connaît les helpers mais pas forcément les deux types complets) ;
+(5) tests par règle + contre-épreuve mutation.
+
+### 9.2.6 [HEAVY] 24.16 clause 3 — passage à la clause EXACTE (2026-07-26)
+
+L'implémentation du 2026-07-26 appliquait la borne **conservatrice** « aucune figurine n'a
+bougé » faute de distance par figurine. Elle est remplacée par la clause du PDF : **« no model in
+that unit has moved more than 3" this turn »**, comparaison **stricte** (3" pile conserve le
+bonus). Conséquence de jeu : une escouade qui se repositionne de 2" garde désormais son +1, ce
+que le moteur lui refusait à tort.
+
+**La donnée** est la distance de **CHEMIN**, pas l'écart départ↔arrivée — contourner un mur coûte
+plus cher. C'est le point qui empêche la règle de devenir laxiste, et il est mesuré **dans les
+deux métriques du moteur** :
+- métrique `hex` (gym) → BFS géodésique `geodesic_move_reach`, avec la définition **partagée** du
+  trajet légal (`build_move_transit_blocked`) ;
+- métrique `euclidean` (PvP) → champ any-angle `_euclidean_move_field`, **la primitive même du
+  pool de destinations par-figurine**. Sans ce second cas, PvP aurait mesuré à vol d'oiseau et la
+  règle serait devenue **laxiste** là-bas (le contraire de la borne d'avant).
+- FLY (21.03) traverse tout : le champ sans obstacle redonne la ligne droite, aucun cas
+  particulier.
+
+**Périmètre assumé** : seuls les moves de la **phase de mouvement** (`normal`/`advance`/
+`fall_back`) sont comptabilisés. Ce n'est pas une omission — l'ordre des phases (**PDF 07.02** :
+Commande, Mouvement, **Tir**, Charge, Combat) garantit qu'au moment du tir, aucun move de charge
+ni de pile-in n'a pu avoir lieu dans le même tour. Les compter avec la métrique du move donnerait
+un chiffre faux (ils relèvent d'une autre géométrie) ; à vol d'oiseau, un chiffre sous-estimé.
+
+`moved_distance_by_model` est remis à zéro **au même endroit que `units_moved`**
+(`command_phase_start` + `_tracking_cleanup`) : c'est la version continue du même fait.
+Verrou : `test_heavy_shoot.py` passe de 7 à **13** tests (>3" perd / ≤3" garde / 3" pile garde /
+une AUTRE figurine de l'escouade suffit à annuler) ; mutation « seuil 3" → seuil 0 » → 2 rouges.
 
 Corrigé en revanche cette nuit : le pipeline mono-figurine legacy **crashait** (`KeyError`) sur
 toute unité portant CLEAVE ou PRECISION — donc sur Warboss, Bigboss et PainBoy, tous présents

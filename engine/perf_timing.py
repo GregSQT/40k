@@ -48,7 +48,7 @@ Lignes typiques (référence) :
   tailles par clé de premier niveau, et clés ≥ 10 Ko (voir ``services.api_server._log_payload_breakdown``).
 - ``SHOOT_ACTIVATION_START`` — une activation tir (``activate_unit`` → ``shooting_unit_activation_start``) :
   ``los_cache_s`` (``build_unit_los_cache``) ;
-  ``activation_prep_s`` (réinitialisations entre fin LoS et précheck ennemi : adjacence, PISTOL, reset ``shot``, etc.) ;
+  ``activation_prep_s`` (réinitialisations entre fin LoS et précheck ennemi : adjacence, CLOSE_QUARTERS, reset ``shot``, etc.) ;
   ``enemy_precheck_s`` (uniquement ``_build_weapon_availability_enemy_precheck``) ;
   ``weapon_avail_inner_s`` (uniquement le corps de ``weapon_availability_check`` avec ``_precheck`` déjà fourni) ;
   ``target_pool_s`` (``shooting_build_valid_target_pool``) ; ``tail_s`` (arme par défaut, JSON armes, etc.) ;

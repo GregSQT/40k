@@ -74,9 +74,9 @@
     "description": "Increase the Damage by X when targeting units within half range.",
     "has_parameter": true
   },
-  "PISTOL": {
-    "name": "Pistol",
-    "description": "The bearer can shoot with this weapon even if within Engagement Range of enemy units, but must target one of those enemy units. Cannot be shot alongside any other non-Pistol weapon (except by a Monster or Vehicle).",
+  "CLOSE_QUARTERS": {
+    "name": "Close-quarters",
+    "description": "Units containing one or more models with a [CLOSE-QUARTERS] weapon can shoot using close-quarters shooting (10.06). When using another shooting type, for each model in that unit (excluding MONSTER/VEHICLE models), you can only select one of the following to make attacks with: one or more of its [CLOSE-QUARTERS] weapons, or one or more of its other ranged weapons. Formerly named [PISTOL]: 24.27 states both are identical for all rules purposes.",
     "has_parameter": false
   },
   "PRECISION": {

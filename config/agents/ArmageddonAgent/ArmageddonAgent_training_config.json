@@ -110,7 +110,7 @@
       "apply_to": "agent_only"
     },
     "observation_params": {
-      "obs_size": 199,
+      "obs_size": 1011,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
@@ -292,7 +292,7 @@
       "apply_to": "agent_only"
     },
     "observation_params": {
-      "obs_size": 199,
+      "obs_size": 1011,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
@@ -419,7 +419,7 @@
       "eval_render": false,
       "bot_eval_freq": 2000,
       "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 100,
+      "bot_eval_intermediate": 20,
       "bot_eval_final": 100,
       "bot_eval_worker_device": "cpu",
       "bot_eval_task_timeout_seconds": 3600,
@@ -483,7 +483,7 @@
       "freeze_after_progress": 1.0
     },
     "observation_params": {
-      "obs_size": 199,
+      "obs_size": 1011,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
@@ -632,7 +632,7 @@
       "apply_to": "agent_only"
     },
     "observation_params": {
-      "obs_size": 199,
+      "obs_size": 1011,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
@@ -826,7 +826,7 @@
       "apply_to": "agent_only"
     },
     "observation_params": {
-      "obs_size": 199,
+      "obs_size": 1011,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,

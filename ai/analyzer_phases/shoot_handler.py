@@ -181,7 +181,7 @@ def handle_shoot(
     # Le tir reste par ailleurs gaté à la source par `_attacker_model_can_reach_squad`.
 
     weapon_match = re.search(r'with \[([^\]]+)\]', action_desc)
-    is_pistol = False
+    is_close_quarters = False
     weapon_found = False
     weapon_range = None
     shooter_unit_type = require_key(state.unit_types, shooter_id)
@@ -195,7 +195,7 @@ def handle_shoot(
         weapons_info = require_key(config.unit_weapons_cache, shooter_unit_type)
         for weapon_info in weapons_info:
             if weapon_info['name'].lower() == weapon_name_lower:
-                is_pistol = weapon_info['is_pistol']
+                is_close_quarters = weapon_info['is_close_quarters']
                 weapon_range = weapon_info['range']
                 weapon_found = True
                 weapon_info_matched = weapon_info
@@ -440,12 +440,12 @@ def handle_shoot(
     else:
         target_engaged = False
 
-    if target_engaged and not is_pistol:
+    if target_engaged and not is_close_quarters:
         stats['shoot_at_engaged_enemy'][player] += 1
         if stats['first_error_lines']['shoot_at_engaged_enemy'][player] is None:
             stats['first_error_lines']['shoot_at_engaged_enemy'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
 
-    # Track PISTOL weapon shots
+    # Track CLOSE_QUARTERS weapon shots
     heavy_applied_in_log = re.search(r'(?:\[\s*HEAVY\s*\]|\sHEAVY\s)', action_desc, re.IGNORECASE) is not None
     if weapon_match and target_pos and weapon_found:
         distance = calculate_hex_distance(shooter_col, shooter_row, target_pos[0], target_pos[1])
@@ -457,22 +457,22 @@ def handle_shoot(
             engagement_zone=_get_engagement_zone_for_analyzer(),
             position_override=(shooter_col, shooter_row),
         )
-        if is_pistol:
+        if is_close_quarters:
             if distance == 1:
-                stats['pistol_shots'][player]['adjacent'] += 1
+                stats['close_quarters_shots'][player]['adjacent'] += 1
             else:
-                stats['pistol_shots'][player]['not_adjacent'] += 1
+                stats['close_quarters_shots'][player]['not_adjacent'] += 1
                 if shooter_engaged:
-                    stats['pistol_engaged_shot_non_adjacent'][player] += 1
-                    if stats['first_error_lines']['pistol_engaged_shot_non_adjacent'][player] is None:
-                        stats['first_error_lines']['pistol_engaged_shot_non_adjacent'][player] = {
+                    stats['close_quarters_engaged_shot_non_adjacent'][player] += 1
+                    if stats['first_error_lines']['close_quarters_engaged_shot_non_adjacent'][player] is None:
+                        stats['first_error_lines']['close_quarters_engaged_shot_non_adjacent'][player] = {
                             'episode': state.current_episode_num,
                             'line': line.strip()
                         }
         else:
             if distance == 1:
-                stats['non_pistol_adjacent_shots'][player] += 1
-                stats['shoot_invalid'][player]['adjacent_non_pistol'] += 1
+                stats['non_close_quarters_adjacent_shots'][player] += 1
+                stats['shoot_invalid'][player]['adjacent_non_close_quarters'] += 1
                 if stats['first_error_lines']['shoot_invalid'][player] is None:
                     stats['first_error_lines']['shoot_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
         if weapon_range is not None:
@@ -531,8 +531,8 @@ def handle_shoot(
             stats['weapon_rule_usage'][key][pl_int] += 1
         if target_pos:
             distance = calculate_hex_distance(shooter_col, shooter_row, target_pos[0], target_pos[1])
-            if distance == 1 and "PISTOL" in weapon_rules_list:
-                key = ("PISTOL", weapon_key)
+            if distance == 1 and "CLOSE_QUARTERS" in weapon_rules_list:
+                key = ("CLOSE_QUARTERS", weapon_key)
                 stats['weapon_rule_usage'][key][pl_int] += 1
         if heavy_applied_in_log:
             key = ("HEAVY", weapon_key)
@@ -644,8 +644,8 @@ def handle_wait(
                         break
 
             if is_adj:
-                has_pistol = any(require_key(w, 'is_pistol') for w in ranged_weapons)
-                if not has_pistol:
+                has_close_quarters = any(require_key(w, 'is_close_quarters') for w in ranged_weapons)
+                if not has_close_quarters:
                     stats['shoot_vs_wait']['wait'] -= 1
                     stats['shoot_vs_wait_by_player'][player]['wait'] -= 1
                     stats['shoot_vs_wait']['skip'] += 1
@@ -674,11 +674,11 @@ def handle_wait(
                     can_reach = False
                     for weapon in ranged_weapons:
                         weapon_range = require_key(weapon, 'range')
-                        is_pistol = require_key(weapon, 'is_pistol')
+                        is_close_quarters = require_key(weapon, 'is_close_quarters')
                         # Portée bord-à-bord (sélecteur `ranged`) ; `distance` hex reste pour == 1.
                         if _wait_ranged_edge > weapon_range:
                             continue
-                        if distance == 1 and not is_pistol:
+                        if distance == 1 and not is_close_quarters:
                             continue
                         target_in_melee = False
                         player_int = int(player) if player is not None else None

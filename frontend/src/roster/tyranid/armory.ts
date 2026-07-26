@@ -33,7 +33,7 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
   psychic_scream: { display_name: "Psychic Scream", RNG: 18, NB: TWO_D6, ATK: 1, STR: 5, AP: -1, DMG: 2, WEAPON_RULES: ["IGNORES_COVER", "PSYCHIC", "TORRENT"] },
   psychoclastic_torrent: { display_name: "Psychoclastic Torrent", RNG: 12, NB: D6, ATK: 1, STR: 6, AP: -1, DMG: 1, WEAPON_RULES: ["IGNORES_COVER", "TORRENT"] },
   shockcannon: { display_name: "ShockCannon", RNG: 24, NB: 2, ATK: 3, STR: 7, AP: -1, DMG: 3, WEAPON_RULES: ["ANTI_VEHICLE:2"] },
-  spinemaws: { display_name: "Spinemaws", RNG: 6, NB: 4, ATK: 5, STR: 3, AP: 0, DMG: 1, WEAPON_RULES: ["PISTOL"] },
+  spinemaws: { display_name: "Spinemaws", RNG: 6, NB: 4, ATK: 5, STR: 3, AP: 0, DMG: 1, WEAPON_RULES: ["CLOSE_QUARTERS"] },
   spore_mine_launcher: { display_name: "Spore Mine Launcher", RNG: 48, NB: D3, ATK: 4, STR: 6, AP: -1, DMG: 2, WEAPON_RULES: ["BLAST", "DEVASTATING_WOUNDS", "HEAVY", "INDIRECT_FIRE"] },
   warp_blast_witchfire: { display_name: "Warp Blast (Witchfire)", RNG: 24, NB: D3, ATK: 3, STR: 7, AP: -2, DMG: D3, WEAPON_RULES: ["BLAST", "PSYCHIC"] },
   warp_blast_focused_bolt: { display_name: "Warp Blast (Focused Bolt)", RNG: 24, NB: 1, ATK: 3, STR: 12, AP: -3, DMG: D6_PLUS_1, WEAPON_RULES: ["LETHAL_HITS", "PSYCHIC"] },

@@ -8,7 +8,7 @@ from engine.phase_handlers.shooting_handlers import _has_valid_shooting_targets
 from engine.phase_handlers.shared_utils import build_units_cache
 
 
-def _weapon(pistol: bool = False, rng: int = 24) -> Dict[str, Any]:
+def _weapon(close_quarters: bool = False, rng: int = 24) -> Dict[str, Any]:
     return {
         "RNG": rng,
         "SHOTS": "1",
@@ -16,11 +16,11 @@ def _weapon(pistol: bool = False, rng: int = 24) -> Dict[str, Any]:
         "AP": 0,
         "DAMAGE": 1,
         "shot": 0,
-        "WEAPON_RULES": ["PISTOL"] if pistol else [],
+        "WEAPON_RULES": ["CLOSE_QUARTERS"] if close_quarters else [],
     }
 
 
-def _unit(uid: int, player: int, col: int, row: int, pistol: bool = False, base_size: int = 3) -> Dict[str, Any]:
+def _unit(uid: int, player: int, col: int, row: int, close_quarters: bool = False, base_size: int = 3) -> Dict[str, Any]:
     return {
         "id": uid,
         "player": player,
@@ -40,9 +40,9 @@ def _unit(uid: int, player: int, col: int, row: int, pistol: bool = False, base_
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
-        "RNG_WEAPONS": [_weapon(pistol=pistol)],
+        "RNG_WEAPONS": [_weapon(close_quarters=close_quarters)],
         "CC_WEAPONS": [],
-        "_shooting_with_pistol": None,
+        "_shooting_with_close_quarters": None,
     }
 
 
@@ -83,24 +83,24 @@ class TestHasValidShootingTargets:
         gs = _make_game_state([shooter, enemy])
         assert _has_valid_shooting_targets(gs, shooter, 1) is True
 
-    def test_adjacent_no_pistol_excluded(self):
-        """shoot_adjacent_no_pistol : unité en EZ (grands socles) sans arme PISTOL → exclue.
+    def test_adjacent_no_close_quarters_excluded(self):
+        """shoot_adjacent_no_close_quarters : unité en EZ (grands socles) sans arme CLOSE_QUARTERS → exclue.
 
         euclidean_edge_clearance(5,10, 30,10, r=18.75, r=18.75) = 7.5 ≤ engagement_zone=10.
-        → adjacente → weapon_availability_check : aucune arme PISTOL → can_shoot=False → False.
+        → adjacente → weapon_availability_check : aucune arme CLOSE_QUARTERS → can_shoot=False → False.
         """
-        shooter = {**_unit(1, 1, 5, 10, pistol=False, base_size=25)}
+        shooter = {**_unit(1, 1, 5, 10, close_quarters=False, base_size=25)}
         enemy = {**_unit(2, 2, 30, 10, base_size=25)}
         gs = _make_game_state([shooter, enemy])
         assert _has_valid_shooting_targets(gs, shooter, 1) is False
 
-    def test_adjacent_pistol_eligible(self):
-        """shoot_adjacent_pistol : unité en EZ avec arme PISTOL et LOS en cache → éligible.
+    def test_adjacent_close_quarters_eligible(self):
+        """shoot_adjacent_close_quarters : unité en EZ avec arme CLOSE_QUARTERS et LOS en cache → éligible.
 
-        Même setup que test_adjacent_no_pistol_excluded, mais arme PISTOL.
+        Même setup que test_adjacent_no_close_quarters_excluded, mais arme CLOSE_QUARTERS.
         los_cache pré-rempli pour éviter le calcul LOS (qui nécessite les_visibility_min_ratio).
         """
-        shooter = {**_unit(1, 1, 5, 10, pistol=True, base_size=25)}
+        shooter = {**_unit(1, 1, 5, 10, close_quarters=True, base_size=25)}
         enemy = {**_unit(2, 2, 30, 10, base_size=25)}
         # Pré-remplir le cache LOS : le shooter voit l'ennemi
         shooter["los_cache"] = {"2": True}

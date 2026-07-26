@@ -185,9 +185,9 @@ class TestShootingActivationPool:
 
 
 class TestMultiHexShootingInvariants:
-    def test_large_base_adjacent_via_footprint_excluded_without_pistol(self):
+    def test_large_base_adjacent_via_footprint_excluded_without_close_quarters(self):
         """footprint_adjacency_shooting : grand socle (BASE_SIZE=25) en EZ via empreinte → adjacent
-        → arme sans règle PISTOL non utilisable → unité absente du pool de tir.
+        → arme sans règle CLOSE_QUARTERS non utilisable → unité absente du pool de tir.
 
         euclidean_edge_clearance(5,10, 30,10, r=18.75, r=18.75) = 45 - 37.5 = 7.5 ≤ req(15.0).
         """
@@ -198,7 +198,7 @@ class TestMultiHexShootingInvariants:
         gs = _make_game_state(units, current_player=1)
         shooting_build_activation_pool(gs)
         assert "1" not in gs["shoot_activation_pool"], (
-            "large-base shooter in EZ via footprint must be excluded (no PISTOL weapon)"
+            "large-base shooter in EZ via footprint must be excluded (no CLOSE_QUARTERS weapon)"
         )
 
     def test_small_base_not_adjacent_in_shoot_pool(self):

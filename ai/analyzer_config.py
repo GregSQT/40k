@@ -42,7 +42,7 @@ class AnalyzerConfig:
     cc_nb_by_weapon_global: Dict[str, int]
     rapid_fire_by_weapon_global: Dict[str, int]
     weapon_range_global: Dict[str, int]
-    weapon_is_pistol_global: Dict[str, bool]
+    weapon_is_close_quarters_global: Dict[str, bool]
 
 
 def load_analyzer_config() -> AnalyzerConfig:
@@ -176,7 +176,7 @@ def load_analyzer_config() -> AnalyzerConfig:
                         "name": require_key(weapon, "display_name"),
                         "range": require_key(weapon, "RNG") * inches_to_subhex,
                         "rules": weapon_rules,
-                        "is_pistol": "PISTOL" in weapon_rules,
+                        "is_close_quarters": "CLOSE_QUARTERS" in weapon_rules,
                     }
                 )
         unit_weapons_cache[unit_type] = weapons_info
@@ -265,7 +265,7 @@ def load_analyzer_config() -> AnalyzerConfig:
     cc_nb_by_weapon_global: Dict[str, int] = {}
     rapid_fire_by_weapon_global: Dict[str, int] = {}
     weapon_range_global: Dict[str, int] = {}
-    weapon_is_pistol_global: Dict[str, bool] = {}
+    weapon_is_close_quarters_global: Dict[str, bool] = {}
     for _ut, _limits in unit_attack_limits.items():
         for _wname, _nb in _limits["rng_nb_by_weapon"].items():
             rng_nb_by_weapon_global[_wname] = max(rng_nb_by_weapon_global.get(_wname, 0), _nb)
@@ -277,7 +277,7 @@ def load_analyzer_config() -> AnalyzerConfig:
         for _winfo in _winfos:
             _wname = _winfo["name"]
             weapon_range_global[_wname] = max(weapon_range_global.get(_wname, 0), _winfo["range"])
-            weapon_is_pistol_global[_wname] = weapon_is_pistol_global.get(_wname, False) or _winfo["is_pistol"]
+            weapon_is_close_quarters_global[_wname] = weapon_is_close_quarters_global.get(_wname, False) or _winfo["is_close_quarters"]
 
     return AnalyzerConfig(
         unit_registry=unit_registry,
@@ -298,5 +298,5 @@ def load_analyzer_config() -> AnalyzerConfig:
         cc_nb_by_weapon_global=cc_nb_by_weapon_global,
         rapid_fire_by_weapon_global=rapid_fire_by_weapon_global,
         weapon_range_global=weapon_range_global,
-        weapon_is_pistol_global=weapon_is_pistol_global,
+        weapon_is_close_quarters_global=weapon_is_close_quarters_global,
     )

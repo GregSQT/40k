@@ -400,6 +400,35 @@ slot N » vise un slot) → on conserve les 5 embeddings, le pooling n'est qu'un
 
 _(rempli au fil des étapes ; preuves = tests + numéros de ligne)_
 
+### 2026-07-26 — Étape T8 : profils d'armes + règles, mise en place, distance parcourue — ✅ FAIT
+
+Périmètre exécuté : **les 3 points « débloqués par la fin du portage des capacités »** du §11.
+`obs_size` **199 → 1011** (`vec_cont` 459, `vec_bin` 552) ⇒ **retrain from scratch**.
+
+- **Profils d'armes bruts + bits/params de règles** (le trou principal, point 1) — nouveau module
+  [`engine/observation_weapon_profiles.py`](../../engine/observation_weapon_profiles.py) :
+  encodeur **unique** partagé par mon escouade et par les slots ennemis. Un profil =
+  `{NB, ATK, STR, AP, DMG, portée, nb de porteurs vivants}` + params (RAPID FIRE / SUSTAINED
+  HITS / MELTA / CLEAVE / BLAST X, Y+ de ANTI) + 12 drapeaux + one-hot du **keyword ciblé par
+  ANTI-X** + mask ⇒ 13 cont / 18 bin. Regroupement par **identité de profil**, ordre déterministe
+  par nombre de porteurs. **K mesuré sur les rosters réels** : 6 tir + 5 mêlée pour mon escouade
+  (aucune troncature de mes propres capacités), 2 tir + 1 mêlée par slot ennemi ; dépassement
+  **logué**. [INDIRECT FIRE] volontairement absente (non implémentée ⇒ bit inerte).
+- **Mise en place / réserve** (point 2) : one-hot 3 états dérivé de `deployed_on_turn` **+ le bit
+  « posée CE tour »** — l'état seul ne dit pas si la pose est de ce tour, or c'est ce point qui
+  supprime le bonus [HEAVY] (24.16 clause 2).
+- **Distance parcourue par figurine** (point 3) : `moved_distance_by_model`, accumulée par
+  `commit_move` en **distance de CHEMIN**, exposée en max + somme. Mesurée dans les **deux**
+  métriques (hex géodésique en gym, euclidienne any-angle en PvP via la primitive du pool
+  par-figurine) ; sinon [HEAVY] serait devenue laxiste en PvP. Elle rend la **clause 3 de
+  [HEAVY] 24.16 EXACTE** (détail : `V11_agent_rework.md` §9.2.6).
+- **Tests** : `test_squad_obs_weapon_profiles.py` (19) + `test_moved_distance_and_deploy_obs.py`
+  (10) + `test_heavy_shoot.py` (7 → 13). Contre-épreuves mutation : 6 rouges (profils), 2 rouges
+  (distance), 2 rouges (seuil HEAVY). Les 6 fichiers d'obs squad préexistants restent verts
+  **sans modification** — ils passent par les accesseurs de layout.
+- **Reste hors périmètre, inchangé** : bloc E « escouades amies » et listes de longueur variable
+  → étape architecture set-based.
+
 ### 2026-07-25 — Étape 1 : D1 (réalignement des slots ennemis) + fall_back — ✅ FAIT
 - **D1** : `build_squad_observation` lit désormais l'ordre des slots ennemis via
   `get_enemy_slot_mapping` (mapping stable HP×OC, **même source que le masque et l'exécution**),
@@ -626,8 +655,12 @@ mission).
   5ᵉ logique inline avant (divergence interdite).
 
 > **Statut (mis à jour 2026-07-26)** : le portage des capacités est **terminé**, le signal est levé.
-> - `deployed_on_turn` : ✅ **codé côté MOTEUR** (création d'unité + commit de déploiement) et déjà
->   consommé par la clause 2 de [HEAVY] 24.16. Le one-hot d'OBSERVATION (+3) reste à dériver.
+> - `deployed_on_turn` : ✅ **codé côté MOTEUR** (création d'unité + commit de déploiement), déjà
+>   consommé par la clause 2 de [HEAVY] 24.16, et ✅ **dérivé dans l'OBSERVATION le 2026-07-26**
+>   (cf. §8, étape T8). Écart assumé sur la spec ci-dessus : **+4 et non +3** — le one-hot 3 états
+>   ne dit pas si la pose est de CE tour, or c'est exactement ce qui supprime le bonus [HEAVY]
+>   (24.16 clause 2). Un 4ᵉ bit « posée ce tour » est ajouté ; les 3 états gardent leur sens
+>   (hors board / avant la bataille / arrivée en cours de bataille).
 > - `+7/+8` conscients des règles : ⏳ toujours à faire — c'est maintenant possible, la liste des
 >   règles résolues ne bouge plus.
 
@@ -870,7 +903,7 @@ move. Canal « menace ennemie » différé.
 
 ---
 
-## 11. Reste à faire (état au 2026-07-25)
+## 11. Reste à faire (état au 2026-07-26)
 
 ### Fait (code)
 - ✅ **D1** (réalignement slots ennemis) + **fall_back** — testés (§8).
@@ -882,6 +915,8 @@ move. Canal « menace ennemie » différé.
   **bloc de TYPES de figurines** (profil défensif + rôle + effectif vivant, escouade entière
   décrite) + compteurs d'engagement ; **canal grille couvert** (dilaté au rayon de socle).
   `obs_size` 108 → **199**.
+- ✅ **T8 (2026-07-26)** : profils d'armes bruts + bits/params de règles (escouade ET ennemis),
+  one-hot mise en place/réserve, distance parcourue par figurine. `obs_size` 199 → **1011**.
 - ✅ **Contrôle d'objectif branché sur le checkpoint 14.02** (fin de phase/tour) dans le chemin
   gym, qui ne l'exécutait jamais — l'observation le lit au lieu de le recalculer (§8 T8).
 
@@ -891,7 +926,12 @@ move. Canal « menace ennemie » différé.
   consomme (contrairement aux ennemis, ordonnés par `get_enemy_slot_mapping`) — même défaut que D1.
 - **Listes de longueur variable** (fin des plafonds 6 figurines / 5 escouades) : idem, archi.
 
-### À coder — le portage des capacités est TERMINÉ (2026-07-26), ces points sont débloqués
+### ✅ FAIT le 2026-07-26 — les 3 points débloqués par la fin du portage des capacités
+
+> **Livrés (cf. §8, étape T8).** `obs_size` 199 → **1011**. Le libellé d'origine est conservé
+> ci-dessous comme spécification de ce qui a été codé ; les écarts assumés (K par camp,
+> [INDIRECT FIRE] exclue, périmètre phase de mouvement pour la distance) sont documentés en §8
+> et dans `V11_agent_rework.md` §9.2.5–§9.2.6.
 
 > Le signal attendu est levé : toutes les règles d'armes du PDF 24 présentes dans les armories sont
 > résolues dans le chemin vif, tir ET mêlée (cf. `V11_agent_rework.md` §9.2.1–§9.2.5).
@@ -926,6 +966,14 @@ move. Canal « menace ennemie » différé.
      `moved_distance_by_model` remis à zéro au début du tour du joueur.
    - `obs_size` : +1 par figurine observée (ou +2 : max et somme sur l'escouade) — à trancher au
      moment de l'implémentation, avec le bloc figurines.
+
+> 🔴 **MAJ 2026-07-26 — l'architecture est OUVERTE, avec son chantier dédié :**
+> [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md). Décisions actées : encodeur
+> d'entité **partagé** (unités ET armes, amies ET ennemies), **agrégation seulement pour ce
+> qu'aucune action ne désigne** (alliés, armes, types de figurines), **embeddings par slot +
+> tête pointeur** pour les ennemis (une action les désigne — c'est l'invariant D1), **K=20
+> unités / K=10 armes**. Motif déclencheur : 5 slots ennemis figés pour **6 escouades mesurées**
+> → une unité invisible et intirable dans 6 épisodes sur 10.
 
 ### Architecture (après les correctifs d'observation)
 - **Set-based Niveau 1** (Deep Sets, listes variables) → retrain → mesurer le win-rate.

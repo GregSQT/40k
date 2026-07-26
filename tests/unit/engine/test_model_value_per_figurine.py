@@ -48,6 +48,8 @@ def _unit(uid: int, value: int, hp_max: int, models: List[Dict[str, Any]] | None
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
+        # Mise en place (24.16 clause 2 / feature d observation) : 0 = posee avant la bataille.
+        "deployed_on_turn": 0,
         "RNG_WEAPONS": [],
         "CC_WEAPONS": [],
         "selectedRngWeaponIndex": 0,
@@ -267,6 +269,9 @@ class TestObservationEnemySquadValue:
             "current_player": 1,
             "phase": "shoot",
             "inches_to_subhex": 1,
+            # Distance parcourue ce tour (V11 §9.2.5) : partie du contrat d etat, au meme titre
+            # que `units_moved`. Vide = personne n a bouge.
+            "moved_distance_by_model": {},
         }
         build_units_cache(gs)
         builder = ObservationBuilder({

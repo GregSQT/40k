@@ -23,7 +23,7 @@ export const ORK_ARMORY: Record<string, Weapon> = {
   // #########################################################################################
   // #################################### Range Weapons ######################################
   // ########################################################################################
-  blasta: { display_name: "Blasta'", RNG: 12, NB: 1, ATK: 4, STR: 3, AP: 0, DMG: 1, WEAPON_RULES: ["PISTOL"] },
+  blasta: { display_name: "Blasta'", RNG: 12, NB: 1, ATK: 4, STR: 3, AP: 0, DMG: 1, WEAPON_RULES: ["CLOSE_QUARTERS"] },
   blitzcannon: { display_name: "Blitzcannon", RNG: 24, NB: 8, ATK: 5, STR: 7, AP: -2, DMG: 2, WEAPON_RULES: ["HEAVY", "SUSTAINED_HITS:1"] },
   eadbanger: { display_name: "'eadbanger'", RNG: 24, NB: 1, ATK: 4, STR: 6, AP: -3, DMG: 1, WEAPON_RULES: ["PRECISION", "PSYCHIC"] },
   kombi_rokkit: { display_name: "Kombi Rokkit", RNG: 24, NB: 1, ATK: 5, STR: 10, AP: -2, DMG: 3, WEAPON_RULES: [] },
@@ -33,7 +33,7 @@ export const ORK_ARMORY: Record<string, Weapon> = {
   rokkit_launcha: { display_name: "Rokkit Launcha", RNG: 24, NB: D6_PLUS_3, ATK: 5, STR: 10, AP: -2, DMG: 3, WEAPON_RULES: [] },
   rokkit_launcha_heavy: { display_name: "Rokkit Launcha", RNG: 24, NB: 6, ATK: 5, STR: 10, AP: -2, DMG: 3, WEAPON_RULES: ["HEAVY"] },
   shoota: { display_name: "Shoota", RNG: 18, NB: 2, ATK: 5, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["RAPID_FIRE:1"] },
-  slugga: { display_name: "Slugga", RNG: 12, NB: 1, ATK: 5, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["PISTOL"] },
+  slugga: { display_name: "Slugga", RNG: 12, NB: 1, ATK: 5, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["CLOSE_QUARTERS"] },
 
   // #########################################################################################
   // #################################### Melee Weapons ######################################

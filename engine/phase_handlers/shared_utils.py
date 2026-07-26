@@ -3576,6 +3576,181 @@ def _validate_plan_coherency(
     return _positions_in_coherency(models, game_state)
 
 
+def move_uses_geodesic_distance(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """La distance de move de cette escouade se mesure-t-elle en CHEMIN (BFS géodésique) ?
+
+    Source UNIQUE du choix de métrique, partagée par la validation d'un plan
+    (`explain_move_plan_rejection`) et par la comptabilisation de la distance parcourue
+    (`move_plan_path_distances`). Deux cas où la distance à vol d'oiseau est EXACTE, donc où
+    le BFS est inutile — ce ne sont pas des replis, ce sont des géométries différentes :
+      - FLY actif (Take to the skies 21.03) : la traversée ignore murs et figurines → le
+        trajet légal EST la ligne droite ;
+      - métrique euclidienne (PvP) : le trajet légal est euclidien, déjà borné par le pool
+        par-figurine, pas par le prédicat hex.
+    """
+    from engine.phase_handlers.movement_handlers import (
+        _fly_traversal_active,
+        _move_distance_metric,
+    )
+
+    # Métrique AVANT l'unité (cf. érosion) : euclidien / non-hex → cube-exact, pas de lecture d'unité.
+    if _move_distance_metric(game_state) != "hex":
+        return False
+    _unit_obj = get_unit_by_id(game_state, str(squad_id))
+    return not (
+        _unit_obj is not None and _fly_traversal_active(game_state, _unit_obj, str(squad_id))
+    )
+
+
+# Bornes SUPÉRIEURES du budget d'un move, par type, en POUCES. Elles ne servent qu'à borner
+# l'exploration du BFS géodésique quand le budget exact n'est pas reconstructible depuis
+# `commit_move` (le jet d'Advance/de charge n'y est pas transmis). Borner PLUS LARGE ne change
+# AUCUNE distance : la distance géodésique est une propriété du graphe, le budget ne limite que
+# l'étendue explorée. C'est donc une optimisation de calcul, pas une approximation de règle.
+MAX_ADVANCE_ROLL_INCHES_BOUND = 6   # 1D6
+
+# Types de move de la PHASE DE MOUVEMENT — les seuls dont la distance parcourue est comptabilisée
+# (cf. commit_move : les autres relèvent d'une autre géométrie).
+MOVE_PHASE_MOVE_TYPES = ("normal", "advance", "fall_back")
+
+
+def _move_distance_field_bound(
+    game_state: Dict[str, Any], squad_id: str, move_type: str
+) -> int:
+    """Borne (subhex) pour le champ géodésique servant à MESURER la distance parcourue."""
+    if move_type not in MOVE_PHASE_MOVE_TYPES:
+        raise ValueError(
+            f"_move_distance_field_bound: move_type {move_type!r} hors phase de mouvement — "
+            f"sa distance se mesure avec une autre geometrie (cf. commit_move)"
+        )
+    # normal / fall_back : le budget EXACT est reconstructible -> même clé de mémoïsation que
+    # la validation qui vient de tourner (cache chaud, aucun BFS supplémentaire).
+    base = get_squad_move_budget(str(squad_id), game_state, "normal")
+    if move_type == "advance":
+        inches = int(require_key(game_state, "inches_to_subhex"))
+        return base + MAX_ADVANCE_ROLL_INCHES_BOUND * inches
+    return base
+
+
+def _euclidean_path_distance(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    player: int,
+    model: Dict[str, Any],
+    dest: Tuple[int, int],
+    level: int,
+    bound: int,
+) -> float:
+    """Distance de chemin ANY-ANGLE (métrique euclidienne) parcourue par une figurine.
+
+    Même primitive que le pool de destinations par-figurine (`_euclidean_move_field`) : socle
+    rond -> clairance continue, socle non-rond -> obstacles dilatés par l'empreinte orientée.
+    Les obstacles de traversée sont ceux de la définition PARTAGÉE du trajet légal
+    (`build_move_transit_blocked`).
+
+    FLY (21.03) traverse murs et figurines : le champ n'a alors aucun obstacle, ce qui redonne
+    exactement la ligne droite — pas besoin d'un cas particulier.
+    """
+    from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH, precompute_footprint_offsets
+    from engine.phase_handlers.geodesic_move import _euclidean_move_field
+    from engine.phase_handlers.movement_handlers import _fly_traversal_active
+
+    start = (int(model["col"]), int(model["row"]))
+    if start == (int(dest[0]), int(dest[1])):
+        return 0.0
+    unit = get_unit_by_id(game_state, str(squad_id))
+    obstacles: Set[Tuple[int, int]] = set()
+    if not (unit is not None and _fly_traversal_active(game_state, unit, str(squad_id))):
+        obstacles = set(build_move_transit_blocked(game_state, squad_id, player, level))
+    obstacles.discard(start)
+    base_shape = str(require_key(model, "BASE_SHAPE"))
+    base_size = require_key(model, "BASE_SIZE")
+    orientation = int(model.get("orientation", 0))  # get allowed (defaut face nord, cf. pool)
+    off_even, off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
+    field = _euclidean_move_field(
+        start, base_shape, base_size, off_even, off_odd, obstacles,
+        int(require_key(game_state, "board_cols")),
+        int(require_key(game_state, "board_rows")),
+        float(bound) * ENGAGEMENT_NORM_HEX_WIDTH,
+    )
+    reached = field.get((int(dest[0]), int(dest[1])))
+    if reached is None:
+        raise RuntimeError(
+            f"_euclidean_path_distance: destination {dest} injoignable en chemin <= {bound} "
+            f"depuis {start} alors que le plan a ete valide. Incoherence validation/mesure."
+        )
+    return float(reached) / ENGAGEMENT_NORM_HEX_WIDTH
+
+
+def move_plan_path_distances(
+    plan: MovePlan,
+    game_state: Dict[str, Any],
+    move_type: str,
+) -> Dict[str, float]:
+    """Distance réellement PARCOURUE par chaque figurine d'un plan, avant application.
+
+    À appeler AVANT `commit_move` (les origines sont lues dans `models_cache`). La mesure suit
+    exactement la métrique du move (`move_uses_geodesic_distance`) : distance de CHEMIN quand
+    le trajet doit contourner murs et figurines, distance à vol d'oiseau quand la géométrie la
+    rend exacte. Une destination injoignable dans la borne explorée est une INCOHÉRENCE (le
+    plan a été validé juste avant) : erreur explicite, jamais une distance inventée.
+    """
+    if not plan:
+        return {}
+    models_cache = require_key(game_state, "models_cache")
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    first = models_cache.get(plan[0][0])
+    if first is None:
+        raise KeyError(f"move_plan_path_distances: figurine {plan[0][0]} absente de models_cache")
+    squad_id = str(first["squad_id"])
+    player = int(first["player"])
+    use_geodesic = move_uses_geodesic_distance(game_state, squad_id)
+    bound = _move_distance_field_bound(game_state, squad_id, move_type)
+
+    distances: Dict[str, float] = {}
+    fields = _move_spatial_cache(game_state)["geo"]
+    transit_by_level: Dict[int, Set[Tuple[int, int]]] = {}
+    for entry in plan:
+        mid = str(entry[0])
+        model = models_cache.get(mid)
+        if model is None:
+            raise KeyError(f"move_plan_path_distances: figurine {mid} absente de models_cache")
+        o_col, o_row = int(model["col"]), int(model["row"])
+        n_col, n_row = int(entry[1]), int(entry[2])
+        o_level = int(require_key(model, "level"))
+        if not use_geodesic:
+            # Métrique EUCLIDIENNE (PvP) ou FLY. FLY (21.03) traverse tout : la ligne droite EST
+            # le trajet. En euclidien au sol, le trajet contourne les obstacles — on mesure donc
+            # avec la MEME primitive any-angle que le pool par-figurine
+            # (`_euclidean_move_field`), sans quoi un contournement de mur serait sous-compte et
+            # [HEAVY] 24.16 deviendrait LAXISTE en PvP.
+            distances[mid] = _euclidean_path_distance(
+                game_state, squad_id, player, model, (n_col, n_row), o_level, bound
+            )
+            continue
+        if o_level not in transit_by_level:
+            transit_by_level[o_level] = build_move_transit_blocked(
+                game_state, squad_id, player, o_level
+            )
+        fkey = (squad_id, player, o_col, o_row, o_level, bound)
+        field = fields.get(fkey)
+        if field is None:
+            field = geodesic_move_reach(
+                o_col, o_row, bound, transit_by_level[o_level], board_cols, board_rows
+            )
+            fields[fkey] = field
+        path = field.get((n_col, n_row))
+        if path is None:
+            raise RuntimeError(
+                f"move_plan_path_distances: figurine {mid} — destination ({n_col},{n_row}) "
+                f"injoignable en chemin <= {bound} depuis ({o_col},{o_row}) alors que le plan "
+                f"a ete valide. Incoherence validation/mesure."
+            )
+        distances[mid] = float(path)
+    return distances
+
+
 def validate_move_plan(
     plan: MovePlan,
     game_state: Dict[str, Any],
@@ -3658,18 +3833,11 @@ def explain_move_plan_rejection(
     #   - FLY actif (Take to the skies 21.03) : la traversée ignore murs/figurines → chemin == cube ;
     #   - métrique euclidienne (PvP) : le trajet légal est euclidien et déjà borné par le pool
     #     par-figurine (`movement_build_model_destinations_pool`), pas par ce prédicat hex.
-    _use_geodesic_budget = False
-    if c["budget_per_model"] is not None:
-        from engine.phase_handlers.movement_handlers import (
-            _fly_traversal_active,
-            _move_distance_metric,
-        )
-        # Métrique AVANT l'unité (cf. érosion) : euclidien / non-hex → cube-exact, pas de lecture d'unité.
-        if _move_distance_metric(game_state) == "hex":
-            _unit_obj = get_unit_by_id(game_state, squad_id)
-            _use_geodesic_budget = not (
-                _unit_obj is not None and _fly_traversal_active(game_state, _unit_obj, squad_id)
-            )
+    _use_geodesic_budget = (
+        move_uses_geodesic_distance(game_state, squad_id)
+        if c["budget_per_model"] is not None
+        else False
+    )
     # Champs géodésiques par (escouade, joueur, origine, niveau, budget) — mémoïsés au niveau de
     # l'ÉTAT (`_move_spatial_cache`), pas de l'appel : le champ ne dépend pas de la destination
     # testée, alors que ce prédicat est appelé une fois par cellule candidate. Mesure sur
@@ -4543,6 +4711,24 @@ def commit_move(
     if first is None:
         raise KeyError(f"commit_move: anchor model {plan[0][0]} not in models_cache")
     squad_id = str(first["squad_id"])
+    # Distance PARCOURUE par figurine, mesurée AVANT d'appliquer les positions (les origines
+    # sont lues dans models_cache). Sert la clause 3 de [HEAVY] 24.16 (« aucune figurine n a
+    # bougé de plus de 3" ce tour ») ET l'observation de l'agent (V11 §9.2.5) — une seule
+    # donnée, deux consommateurs.
+    #
+    # PÉRIMÈTRE : les moves de la PHASE DE MOUVEMENT uniquement. Ce n'est pas une omission :
+    #  - pour [HEAVY], c'est EXACT — l'ordre des phases (PDF 07.02 : Commande, Mouvement, Tir,
+    #    Charge, Combat) garantit qu'au moment du tir, seuls des moves de phase de mouvement ont
+    #    pu avoir lieu dans ce tour ;
+    #  - charge / pile-in / consolidation se mesurent avec une AUTRE géométrie (champ euclidien
+    #    any-angle par-figurine, `_euclidean_move_field`), pas avec le champ hex géodésique du
+    #    move. Les compter ici avec la mauvaise métrique produirait un chiffre faux ; les
+    #    compter à vol d'oiseau SOUS-estimerait le trajet, donc rendrait [HEAVY] laxiste.
+    if move_type in MOVE_PHASE_MOVE_TYPES:
+        _distances = move_plan_path_distances(plan, game_state, move_type)
+        _moved_by_model = game_state.setdefault("moved_distance_by_model", {})
+        for _mid, _dist in _distances.items():
+            _moved_by_model[_mid] = _moved_by_model.get(_mid, 0.0) + _dist
     # Choke-point LoS (D1) : un seul batch pour tout le plan → 1 invalidation ciblée par unité
     # + 1 bump, émis par _touch_unit_los depuis update_model_position / update_units_cache_position.
     _los_owned = _los_begin_batch(game_state)
@@ -4802,14 +4988,14 @@ def _shoot_engagement_blocks_target(
     game_state: Dict[str, Any],
     attacker_squad_id: str,
     target_squad_id: str,
-    weapon_is_pistol: bool,
+    weapon_is_close_quarters: bool,
 ) -> bool:
     """Regles de ciblage tir 40K manquantes au chemin per-figurine (portee+LoS seuls).
 
     Replique EXACTEMENT _is_valid_shooting_target (chemin legacy/RL) :
       - 04.02 : la cible doit etre Unengaged -> interdit si elle est dans l'EZ
         d'une unite alliee au tireur (_friendly_engagement_blocks_ranged_shot).
-      - 10.06 : si le tireur est engage, il ne peut tirer qu'avec une arme PISTOL,
+      - 10.06 : si le tireur est engage, il ne peut tirer qu'avec une arme CLOSE_QUARTERS,
         et seulement sur l'unite avec laquelle il est engage.
     Returns True si le tir est INTERDIT par ces regles.
     """
@@ -4839,13 +5025,13 @@ def _shoot_engagement_blocks_target(
         return False
     shooter_is_engaged = _is_adjacent_to_enemy_within_cc_range(game_state, shooter_unit)
 
-    # 10.06 : tireur engage -> PISTOL uniquement, et seulement la cible engagee.
+    # 10.06 : tireur engage -> CLOSE_QUARTERS uniquement, et seulement la cible engagee.
     if shooter_is_engaged:
-        if not weapon_is_pistol:
+        if not weapon_is_close_quarters:
             return True
         if not enemy_adjacent_to_shooter:
             return True
-    elif enemy_adjacent_to_shooter and not weapon_is_pistol:
+    elif enemy_adjacent_to_shooter and not weapon_is_close_quarters:
         return True
 
     # 04.02 : cible engagee avec une unite alliee au tireur -> Unengaged viole.
@@ -4892,7 +5078,7 @@ def _model_can_shoot_target(
     if range_subhex <= 0:
         return False
     # Import lazy : shooting_handlers importe shared_utils (eviter le cycle).
-    from engine.phase_handlers.shooting_handlers import _weapon_has_pistol_rule
+    from engine.phase_handlers.shooting_handlers import _weapon_has_close_quarters_rule
 
     ac = int(attacker_model["col"])
     ar = int(attacker_model["row"])
@@ -4902,7 +5088,7 @@ def _model_can_shoot_target(
         game_state,
         str(attacker_model["squad_id"]),
         target_squad_id,
-        _weapon_has_pistol_rule(weapon),
+        _weapon_has_close_quarters_rule(weapon),
     ):
         return False
     return True
@@ -5544,8 +5730,8 @@ def squad_model_valid_targets(
         if int(models_cache[first]["player"]) == attacker_player:
             continue  # allie
         # Cible valide si AU MOINS UNE arme de la fig peut la viser (portee + LoS +
-        # engagement/Pistol) — et non la seule arme selectionnee : sinon une unite engagee
-        # avec pistolet ne verrait pas sa cible engagee (arme selectionnee non-Pistol).
+        # engagement/Close-quarters) — et non la seule arme selectionnee : sinon une unite engagee
+        # avec pistolet ne verrait pas sa cible engagee (arme selectionnee non-Close-quarters).
         if any(
             _model_can_shoot_target_with_weapon(game_state, m, sid, idx)
             for idx in range(len(weapons))
@@ -5611,9 +5797,9 @@ def squad_shoot_los_overview(
     enemy_sids = _enemy_squad_ids(game_state, attacker_player) if attacker_player is not None else []
 
     # Engagement au niveau escouade (regle 10.06) : si l escouade est engagee, ses figs
-    # ne peuvent tirer QU avec une arme Pistol (portee plus courte, donc PAS widx_max).
+    # ne peuvent tirer QU avec une arme Close-quarters (portee plus courte, donc PAS widx_max).
     from engine.phase_handlers.shooting_handlers import (
-        _weapon_has_pistol_rule,
+        _weapon_has_close_quarters_rule,
         _is_adjacent_to_enemy_within_cc_range,
     )
     shooter_unit = get_unit_by_id(game_state, attacker_squad_id)
@@ -5637,14 +5823,14 @@ def squad_shoot_los_overview(
         if not free_weapons:
             continue  # fig entierement affectee → hors blink et hors decompte
         free_count += 1
-        # Arme de test : engagee → un Pistol libre (seul autorise) ; sinon → plus longue
+        # Arme de test : engagee → un Close-quarters libre (seul autorise) ; sinon → plus longue
         # portee. La LoS (raycasting) ne depend pas de l arme et reach est monotone en
         # portee, d ou 1 seul test/ennemi (l arme la plus permissive du cas).
         if squad_engaged:
-            pistol_free = [w for w in free_weapons if _weapon_has_pistol_rule(weapons[w])]
-            if not pistol_free:
+            close_quarters_free = [w for w in free_weapons if _weapon_has_close_quarters_rule(weapons[w])]
+            if not close_quarters_free:
                 continue  # engagee sans pistolet → ne peut rien viser au tir
-            test_widx = pistol_free[0]
+            test_widx = close_quarters_free[0]
         else:
             test_widx = max(free_weapons, key=lambda w: _weapon_range_subhex(weapons[w]))
         for sid in enemy_sids:
@@ -5708,7 +5894,7 @@ def _model_can_shoot_target_with_weapon(
     range_subhex = int(weapon["RNG"])
     if range_subhex <= 0:
         return False
-    from engine.phase_handlers.shooting_handlers import _weapon_has_pistol_rule
+    from engine.phase_handlers.shooting_handlers import _weapon_has_close_quarters_rule
 
     ac = int(attacker_model["col"])
     ar = int(attacker_model["row"])
@@ -5718,7 +5904,7 @@ def _model_can_shoot_target_with_weapon(
         game_state,
         str(attacker_model["squad_id"]),
         target_squad_id,
-        _weapon_has_pistol_rule(weapon),
+        _weapon_has_close_quarters_rule(weapon),
     ):
         return False
     return True
@@ -5878,17 +6064,17 @@ def squad_shoot_menu_weapons(
     - usable = AU MOINS une figurine portant le profil peut tirer sur AU MOINS un ennemi
       (portee + LoS + engagement, calcule par-fig — pas depuis l ancre escouade). Le pistolet
       est donc utilisable engage OU non (arme de tir normale + exception 10.06).
-    - Exclusion 10.06 au niveau unite : si un Pistol est deja declare, les non-Pistol ne sont
-      plus selectionnables ; si un non-Pistol est declare, les Pistol ne le sont plus."""
+    - Exclusion 10.06 au niveau unite : si un Close-quarters est deja declare, les non-Close-quarters ne sont
+      plus selectionnables ; si un non-Close-quarters est declare, les Close-quarters ne le sont plus."""
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     init_pending_intents(game_state)
-    from engine.phase_handlers.shooting_handlers import _weapon_has_pistol_rule
+    from engine.phase_handlers.shooting_handlers import _weapon_has_close_quarters_rule
 
-    # Type d arme deja engage par l unite (Pistol vs non-Pistol) — via les declarations.
+    # Type d arme deja engage par l unite (Close-quarters vs non-Close-quarters) — via les declarations.
     intents = game_state["pending_squad_shoot_intents"].get(attacker_squad_id, [])  # get allowed
-    declared_pistol = False
-    declared_nonpistol = False
+    declared_close_quarters = False
+    declared_non_close_quarters = False
     for it in intents:
         m = models_cache.get(str(it["model_id"]))
         if m is None:
@@ -5896,10 +6082,10 @@ def squad_shoot_menu_weapons(
         ws = m.get("RNG_WEAPONS", [])  # get allowed
         wi = int(it["weapon_index"])
         if 0 <= wi < len(ws) and isinstance(ws[wi], dict):
-            if _weapon_has_pistol_rule(ws[wi]):
-                declared_pistol = True
+            if _weapon_has_close_quarters_rule(ws[wi]):
+                declared_close_quarters = True
             else:
-                declared_nonpistol = True
+                declared_non_close_quarters = True
 
     mids = squad_models.get(attacker_squad_id, [])  # get allowed
     player = int(models_cache[mids[0]]["player"]) if mids and mids[0] in models_cache else None
@@ -5908,7 +6094,7 @@ def squad_shoot_menu_weapons(
     result: List[Dict[str, Any]] = []
     for idx, w in enumerate(_union_weapons(game_state, "RNG_WEAPONS", attacker_squad_id)):
         code = w["code"]
-        is_pistol = _weapon_has_pistol_rule(w)
+        is_close_quarters = _weapon_has_close_quarters_rule(w)
         usable = False
         for mid in mids:
             m = models_cache.get(mid)
@@ -5927,10 +6113,10 @@ def squad_shoot_menu_weapons(
             ):
                 usable = True
                 break
-        # Exclusion Pistol / non-Pistol au niveau unite (10.06).
-        if declared_pistol and not is_pistol:
+        # Exclusion Close-quarters / non-Close-quarters au niveau unite (10.06).
+        if declared_close_quarters and not is_close_quarters:
             usable = False
-        if declared_nonpistol and is_pistol:
+        if declared_non_close_quarters and is_close_quarters:
             usable = False
         result.append({"index": idx, "weapon": w, "can_use": usable, "reason": None})
     return result
@@ -6486,6 +6672,31 @@ def _unit_was_set_up_this_turn(game_state: Dict[str, Any], squad_id: str) -> boo
     return int(deployed_on_turn) == int(require_key(game_state, "turn"))
 
 
+HEAVY_MOVED_THRESHOLD_INCHES = 3  # 24.16 clause 3 : « moved more than 3" this turn »
+
+
+def _unit_moved_more_than_heavy_threshold(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """Une figurine de l escouade a-t-elle parcouru PLUS de 3" ce tour (clause 3 de 24.16) ?
+
+    Source unique : `moved_distance_by_model`, accumule par `commit_move` en distance de CHEMIN
+    (geodesique). Un dict vide signifie « aucun deplacement enregistre ce tour » — ce n est pas
+    un repli masquant : le dict est REMIS A ZERO au debut du tour, exactement comme
+    `units_moved`, et une figurine absente n a pas bouge.
+
+    Comparaison STRICTE (« more than 3\" ») : un deplacement de 3" pile conserve le bonus.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    moved = require_key(game_state, "moved_distance_by_model")
+    threshold = HEAVY_MOVED_THRESHOLD_INCHES * int(require_key(game_state, "inches_to_subhex"))
+    squad_models = require_key(game_state, "squad_models")
+    for mid in squad_models.get(str(squad_id), []):  # get allowed (escouade morte = aucune fig)
+        if mid not in models_cache:
+            continue  # figurine detruite : elle ne tire plus, sa distance ne compte pas
+        if float(moved.get(mid, 0.0)) > threshold:  # get allowed (absente = n a pas bouge)
+            return True
+    return False
+
+
 def _heavy_unit_is_engaged(game_state: Dict[str, Any], squad_id: str) -> bool:
     """L unite est-elle ENGAGEE (clause 1 de [HEAVY] 24.16) ?
 
@@ -6592,26 +6803,19 @@ def _manual_roll_intent(
     #      pre-bataille, N = arrivee de reserve au tour N. Aujourd hui aucune arrivee en cours de
     #      bataille n existe (reserves 20 non modelisees) donc la clause est toujours satisfaite,
     #      mais elle est CABLEE : le jour ou les reserves arrivent, HEAVY sera juste sans retouche ;
-    #  (3) aucune fig > 3"     -> le moteur ne conserve pas la DISTANCE parcourue par figurine
-    #      (units_moved est booleen). On applique donc la borne CONSERVATRICE « aucune figurine
-    #      n a bouge » : strictement plus stricte que le PDF (elle refuse le bonus quand le PDF
-    #      l accorderait pour un deplacement <= 3"), donc jamais de bonus indu. Passer a la clause
-    #      exacte suppose de porter le cout geodesique du chemin jusqu a commit_move.
+    #  (3) aucune fig > 3"     -> teste sur la DISTANCE REELLE parcourue ce tour, accumulee par
+    #      figurine par `commit_move` (`moved_distance_by_model`, distance de CHEMIN geodesique :
+    #      contourner un mur coute plus cher que l ecart depart<->arrivee). C est la clause EXACTE
+    #      du PDF : une escouade qui s est repositionnee de 2" garde son bonus, ce que la borne
+    #      conservatrice d avant (« aucune figurine n a bouge ») lui refusait a tort.
     from engine.utils.weapon_helpers import weapon_has_rule
     # Trace d affichage : le bonus a-t-il ETE APPLIQUE (pas « l arme declare HEAVY ») ? Le log
     # de tir en tire le token [HEAVY], comme [COVER] pour le couvert.
     _heavy_applied = False
     if weapon_has_rule(weapon, "HEAVY"):
         _heavy_sid = str(attacker["squad_id"])
-        # Absent = aucune escouade n a bouge/advance ce tour (defaut metier valide, PAS un
-        # masquage d erreur : units_moved/units_advanced sont crees paresseusement au 1er
-        # mouvement ; leur absence signifie "personne n a bouge" = stationnaire).
-        _remained_stationary = (
-            _heavy_sid not in game_state.get("units_moved", set())
-            and _heavy_sid not in game_state.get("units_advanced", set())
-        )
         if (
-            _remained_stationary
+            not _unit_moved_more_than_heavy_threshold(game_state, _heavy_sid)
             and not _heavy_unit_is_engaged(game_state, _heavy_sid)
             and not _unit_was_set_up_this_turn(game_state, _heavy_sid)
         ):
