@@ -8,6 +8,25 @@ from engine.w40k_core import W40KEngine
 from shared.data_validation import require_present
 
 
+class _StateManagerStub:
+    """Doublure du state_manager du moteur pour les tests de SERIALISATION.
+
+    `_game_state_for_json` declenche le rafraichissement de frontiere du controle d'objectif
+    (regle 14.02, `refresh_objective_control_on_boundary`) : un faux moteur doit donc porter un
+    `state_manager`, comme le vrai. Le stub compte les appels, ce qui permet de VERIFIER le
+    contrat (cf. test_game_state_for_json_triggers_objective_control_refresh) au lieu de le
+    contourner.
+    """
+
+    def __init__(self) -> None:
+        self.boundary_refresh_calls = 0
+
+    def refresh_objective_control_on_boundary(self, game_state: Dict[str, Any]) -> bool:
+        self.boundary_refresh_calls += 1
+        return False
+
+
+
 def test_make_json_serializable_handles_tuple_keys_set_and_object_dict() -> None:
     class Dummy:
         def __init__(self) -> None:
@@ -45,6 +64,7 @@ def test_api_json_response_orjson_encodes_set_and_numpy_without_pre_walk() -> No
 
 def test_game_state_for_json_removes_topology_arrays() -> None:
     engine_instance = type("E", (), {"game_state": {"los_topology": 1, "pathfinding_topology": 2, "x": 3, "terrain_areas": [], "units_cache": {}}})()
+    engine_instance.state_manager = _StateManagerStub()
     state = api_server._game_state_for_json(engine_instance)
     assert "los_topology" not in state
     assert "pathfinding_topology" not in state
@@ -65,6 +85,7 @@ def test_game_state_for_json_drops_footprint_zone_when_mask_loops_present() -> N
             },
         },
     )()
+    engine_instance.state_manager = _StateManagerStub()
     state = api_server._game_state_for_json(engine_instance)
     assert "move_preview_footprint_zone" not in state
     assert state["move_preview_footprint_mask_loops"] is not None
@@ -89,9 +110,11 @@ def test_game_state_for_json_omits_large_mask_loops_when_client_hash_matches() -
             },
         },
     )()
+    engine_instance.state_manager = _StateManagerStub()
     state1 = api_server._game_state_for_json(engine_instance, mask_loops_client_hash=None)
     h = state1["move_preview_footprint_mask_loops_hash"]
     assert isinstance(h, str)
+    engine_instance.state_manager = _StateManagerStub()
     state2 = api_server._game_state_for_json(engine_instance, mask_loops_client_hash=h)
     assert state2.get("move_preview_footprint_mask_loops_unchanged") is True
     assert state2.get("move_preview_footprint_mask_loops") is None
@@ -111,8 +134,10 @@ def test_game_state_for_json_does_not_omit_small_mask_loops_even_if_hash_matches
             },
         },
     )()
+    engine_instance.state_manager = _StateManagerStub()
     state1 = api_server._game_state_for_json(engine_instance)
     h = state1["move_preview_footprint_mask_loops_hash"]
+    engine_instance.state_manager = _StateManagerStub()
     state2 = api_server._game_state_for_json(engine_instance, mask_loops_client_hash=h)
     assert state2.get("move_preview_footprint_mask_loops_unchanged") is not True
     assert state2.get("move_preview_footprint_mask_loops") is not None
@@ -135,6 +160,7 @@ def test_game_state_for_json_strips_internal_engine_keys() -> None:
             },
         },
     )()
+    engine_instance.state_manager = _StateManagerStub()
     state = api_server._game_state_for_json(engine_instance)
     assert state["turn"] == 1
     assert "units_cache_prev" not in state
@@ -159,6 +185,7 @@ def test_game_state_for_json_drops_preview_hexes_when_move_pool_present() -> Non
             },
         },
     )()
+    engine_instance.state_manager = _StateManagerStub()
     state = api_server._game_state_for_json(engine_instance)
     assert state["valid_move_destinations_pool"] == anchors
     assert "preview_hexes" not in state
@@ -178,8 +205,10 @@ def test_game_state_for_json_omits_objectives_when_for_post_action() -> None:
             },
         },
     )()
+    engine_instance.state_manager = _StateManagerStub()
     full = api_server._game_state_for_json(engine_instance, for_post_action=False)
     assert full.get("objectives") is not None
+    engine_instance.state_manager = _StateManagerStub()
     slim = api_server._game_state_for_json(engine_instance, for_post_action=True)
     assert "objectives" not in slim
 
@@ -224,6 +253,7 @@ def test_game_state_for_json_excludes_config_blob() -> None:
             },
         },
     )()
+    engine_instance.state_manager = _StateManagerStub()
     state = api_server._game_state_for_json(engine_instance)
     assert state["turn"] == 1
     assert "config" not in state
@@ -245,6 +275,7 @@ def test_game_state_for_json_excludes_weapon_damage_table_and_per_player_adjacen
             },
         },
     )()
+    engine_instance.state_manager = _StateManagerStub()
     state = api_server._game_state_for_json(engine_instance)
     assert state["turn"] == 1
     assert "weapon_damage_table" not in state
@@ -266,6 +297,7 @@ def test_game_state_for_json_excludes_move_preview_border() -> None:
             },
         },
     )()
+    engine_instance.state_manager = _StateManagerStub()
     state = api_server._game_state_for_json(engine_instance)
     assert "move_preview_border" not in state
     assert state["valid_move_destinations_pool"] == [[1, 2], [3, 4]]
@@ -410,3 +442,24 @@ def test_load_army_file_and_list_armies_from_temp_config(
     armies = api_server._list_armies()
     assert len(armies) == 1
     assert armies[0]["faction_display_name"] == "Space Marine"
+
+
+def test_game_state_for_json_triggers_objective_control_refresh() -> None:
+    """La sérialisation d'état déclenche le rafraîchissement de frontière du contrôle d'objectif.
+
+    Règle 14.02 : le contrôle est réévalué à la fin de chaque phase/tour. Côté PvP, c'est ici que
+    la frontière est détectée — via `refresh_objective_control_on_boundary`, la MÊME fonction que
+    le chemin gym (avant, l'API portait sa propre détection inline). Ce test verrouille l'appel :
+    s'il disparaît, le contrôle d'objectif du PvP se fige silencieusement.
+    """
+    engine_instance = type(
+        "E",
+        (),
+        {"game_state": {"phase": "move", "turn": 1, "terrain_areas": [], "units_cache": {}}},
+    )()
+    engine_instance.state_manager = _StateManagerStub()
+
+    api_server._game_state_for_json(engine_instance)
+    api_server._game_state_for_json(engine_instance)
+
+    assert engine_instance.state_manager.boundary_refresh_calls == 2

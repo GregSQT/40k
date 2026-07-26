@@ -110,11 +110,11 @@
       "apply_to": "agent_only"
     },
     "observation_params": {
-      "obs_size": 108,
+      "obs_size": 199,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=108 = vecteur (16 global + 5 squad agg + 7x6 top-k figs + 9x5 enemy slots) ; la grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
+      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=199 = taille TOTALE du vecteur squad, scinde en vec_cont (119 continues BRUTES, normalisees par VecNormalize) + vec_bin (80 valeurs discretes JAMAIS normalisees) — refonte V11 (V11_audit_observation.md §9/§10). La grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. Le layout fait foi dans engine/observation_builder.py (SQUAD_OBS_CONT_SIZE + SQUAD_OBS_BIN_SIZE), verifie a l init du moteur. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
     },
     "step_log_buffer_size": 200,
     "vec_normalize": {
@@ -292,11 +292,11 @@
       "apply_to": "agent_only"
     },
     "observation_params": {
-      "obs_size": 108,
+      "obs_size": 199,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=108 = vecteur (16 global + 5 squad agg + 7x6 top-k figs + 9x5 enemy slots) ; la grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
+      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=199 = taille TOTALE du vecteur squad, scinde en vec_cont (119 continues BRUTES, normalisees par VecNormalize) + vec_bin (80 valeurs discretes JAMAIS normalisees) — refonte V11 (V11_audit_observation.md §9/§10). La grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. Le layout fait foi dans engine/observation_builder.py (SQUAD_OBS_CONT_SIZE + SQUAD_OBS_BIN_SIZE), verifie a l init du moteur. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
     },
     "step_log_buffer_size": 200,
     "vec_normalize": {
@@ -483,11 +483,11 @@
       "freeze_after_progress": 1.0
     },
     "observation_params": {
-      "obs_size": 108,
+      "obs_size": 199,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=108 = vecteur (16 global + 5 squad agg + 7x6 top-k figs + 9x5 enemy slots) ; la grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
+      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=199 = taille TOTALE du vecteur squad, scinde en vec_cont (119 continues BRUTES, normalisees par VecNormalize) + vec_bin (80 valeurs discretes JAMAIS normalisees) — refonte V11 (V11_audit_observation.md §9/§10). La grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. Le layout fait foi dans engine/observation_builder.py (SQUAD_OBS_CONT_SIZE + SQUAD_OBS_BIN_SIZE), verifie a l init du moteur. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
     },
     "step_log_buffer_size": 200,
     "vec_normalize": {
@@ -632,11 +632,11 @@
       "apply_to": "agent_only"
     },
     "observation_params": {
-      "obs_size": 108,
+      "obs_size": 199,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=108 = vecteur (16 global + 5 squad agg + 7x6 top-k figs + 9x5 enemy slots) ; la grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
+      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=199 = taille TOTALE du vecteur squad, scinde en vec_cont (119 continues BRUTES, normalisees par VecNormalize) + vec_bin (80 valeurs discretes JAMAIS normalisees) — refonte V11 (V11_audit_observation.md §9/§10). La grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. Le layout fait foi dans engine/observation_builder.py (SQUAD_OBS_CONT_SIZE + SQUAD_OBS_BIN_SIZE), verifie a l init du moteur. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
     },
     "step_log_buffer_size": 200,
     "model_params": {
@@ -826,11 +826,11 @@
       "apply_to": "agent_only"
     },
     "observation_params": {
-      "obs_size": 108,
+      "obs_size": 199,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=108 = vecteur (16 global + 5 squad agg + 7x6 top-k figs + 9x5 enemy slots) ; la grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
+      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=199 = taille TOTALE du vecteur squad, scinde en vec_cont (119 continues BRUTES, normalisees par VecNormalize) + vec_bin (80 valeurs discretes JAMAIS normalisees) — refonte V11 (V11_audit_observation.md §9/§10). La grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. Le layout fait foi dans engine/observation_builder.py (SQUAD_OBS_CONT_SIZE + SQUAD_OBS_BIN_SIZE), verifie a l init du moteur. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
     },
     "step_log_buffer_size": 200,
     "model_params": {

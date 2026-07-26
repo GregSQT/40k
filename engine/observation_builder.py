@@ -43,7 +43,10 @@ class ObservationBuilder:
     """Builds observations for the agent."""
 
     PHASE2_OBS_SIZE = 357
-    SQUAD_OBS_SIZE_TARGET = 108  # PR4 cible — voir build_squad_observation
+    # Taille TOTALE du vecteur squad = SQUAD_OBS_CONT_SIZE + SQUAD_OBS_BIN_SIZE.
+    # C'est cette valeur que la config d'agent porte dans observation_params.obs_size et
+    # qui route le dispatch (w40k_core._build_observation). Voir build_squad_observation.
+    SQUAD_OBS_SIZE_TARGET = 199
     RULE_FEATURE_BASE_IDX = 314
     RULE_FEATURE_COUNT = 32
     RULE_AWARE_MACRO_BASE_IDX = 346  # kept for reference: base of macro intent context (obs[346:357])
@@ -1090,13 +1093,14 @@ class ObservationBuilder:
         Asymmetric design: More complete information about enemies than allies.
         Agent discovers optimal tactical combinations through training.
         """
-        # PR4 4e-ii : pipeline mono-fig (357-d) uniquement. Si obs_size == 108
-        # (squad pipeline), le caller doit appeler build_squad_observation. Cette
-        # fonction n est PAS retro-compatible avec 108-d.
+        # PR4 4e-ii : pipeline mono-fig (357-d) uniquement. Si obs_size vaut la taille du
+        # pipeline squad (SQUAD_OBS_SIZE_TARGET), le caller doit appeler
+        # build_squad_observation. Cette fonction n est PAS retro-compatible avec le squad.
         if self.obs_size != self.PHASE2_OBS_SIZE:
             raise RuntimeError(
                 f"build_observation requires obs_size={self.PHASE2_OBS_SIZE} (mono-fig pipeline). "
-                f"Got obs_size={self.obs_size}. For squad pipeline (108-d), call "
+                f"Got obs_size={self.obs_size}. For squad pipeline "
+                f"({self.SQUAD_OBS_SIZE_TARGET}-d), call "
                 "build_squad_observation(game_state, active_squad_id) instead."
             )
 
@@ -1229,41 +1233,413 @@ class ObservationBuilder:
         return obs
 
     # ========================================================================
-    # PR4 4a — NEW SQUAD OBSERVATION (parallel to build_observation)
+    # OBSERVATION SQUAD — DEUX vecteurs : continues brutes / discrètes
     # ========================================================================
-    # Structure 108-dim per squad.md PR4 :
-    #   [0:16]    Global context (16 floats, identique a build_observation[0:16])
-    #   [16:21]   Squad aggregates (5 floats: nb_alive_norm, is_coherent, OC_total,
-    #             fall_back_flag [ex-HP_pct doublon], firepower_estimate)
-    #   [21:63]   Top-k=6 fig features (7 features × 6 figs, zero-padded if <6 alive)
-    #             col_rel/perception_radius, row_rel/perception_radius, HP%,
-    #             weapon_idx_norm, is_fighting_eligible, is_b2b_enemy, is_b2b_ally_in_b2b
-    #   [63:108]  5 enemy slots × 9 features
-    #             squad_size, HP_total, anchor_col_rel, anchor_row_rel, OC_total,
-    #             slot_mask, is_locked_by_friendly_er, value_over_ttk, threat_level
-    # PR4 4a : slot mapping = premiers 5 squad_ids ennemis tries par index creation.
-    # Slot mapping stable (par HP*OC) defere a PR4 4d.
+    # Refonte V11 (Documentation/Implémentation/V11_audit_observation.md §9.5 « Normalisation »,
+    # §10). L'observation vectorielle est livrée en DEUX morceaux, jamais en un seul :
+    #
+    #   - "vec_cont" : grandeurs CONTINUES en unités BRUTES (subhex, PV, points, OC, tours…).
+    #     Normalisées à l'entraînement par VecNormalize (running mean/var, `norm_obs_keys`,
+    #     ai/train.py). D'où l'absence de /5 /10 /20 /40 manuels : une division fixe est une
+    #     SECONDE normalisation, saturante (le /10 de la taille d'escouade écrasait une escouade
+    #     de 20 Boyz à 1.0) et non ré-estimable sur la distribution réelle.
+    #   - "vec_bin" : valeurs à sémantique DISCRÈTE (drapeaux 0/1, encodage de phase, contrôle
+    #     d'objectif dans {-1, 0, +1}). JAMAIS normalisées : recentrer un drapeau détruit son
+    #     sens (le 0 « absent » deviendrait négatif, l'échelle 0/1 deviendrait arbitraire).
+    #
+    # Les ratios sans dimension (PV %, effectif %) restent dans "vec_cont" : ce sont des
+    # grandeurs continues bornées par construction, pas des normalisations ajoutées.
+    #
+    # LAYOUT (l'ordre ci-dessous EST l'ordre d'émission ; les tailles sont vérifiées à chaud
+    # contre SQUAD_OBS_CONT_SIZE / SQUAD_OBS_BIN_SIZE — toute dérive lève une erreur) :
+    #
+    #   vec_cont (119) :
+    #     [0]      tour courant (brut)
+    #     [1]      steps de l'épisode (brut)
+    #     [2]      figurines vivantes / effectif de départ
+    #     [3]      OC total de l'escouade (brut)
+    #     [4]      mon score de mission (victory points, brut)
+    #     [5]      score de mission ennemi (brut)
+    #     [6]      VALUE cumulée amie vivante / VALUE de départ
+    #     [7]      VALUE cumulée ennemie vivante / VALUE de départ
+    #     [8]      PV de la figurine blessée / son HP_MAX (1.0 si aucune entamée)
+    #     [9:14]   profil d'escouade brut : MOVE, HP_MAX, T, save, invulnérable
+    #     [14:44]  6 TYPES de figurines × 5 : HP_MAX, T, save, invulnérable, effectif vivant
+    #              du type (décrit l'escouade entière, quelle que soit sa taille)
+    #     [44:56]  6 figurines × 2 : col_rel, row_rel (subhex bruts vs centroïde)
+    #     [56:59]  compteurs d'engagement sur l'escouade ENTIÈRE : figurines éligibles au
+    #              combat, dans l'EZ ennemie, dans l'EZ via un allié
+    #     [59:119] 5 slots ennemis × 12 : taille, PV totaux, VALUE vivante, col_rel/row_rel de
+    #              la figurine ennemie la plus proche (bruts vs centroïde), distance bord-à-bord,
+    #              OC total, MOVE, HP_MAX, T, save, invulnérable
+    #
+    #   vec_bin (80) :
+    #     [0]      est-ce mon tour ?
+    #     [1]      phase (deployment/command=0, move=.25, tir=.5, charge=.75, combat=1)
+    #     [2]      a bougé ce tour ?
+    #     [3]      a tiré ?
+    #     [4]      a combattu ?
+    #     [5]      a fait une avance ?
+    #     [6]      s'est repliée (fall back) ce tour ?
+    #     [7]      est en cohérence ?
+    #     [8]      hidden (13.09) ?
+    #     [9]      « gone to ground » prêt (13.5, volets indépendants du tireur) ?
+    #     [10]     à couvert (13.08, volet « within a terrain area ») ?
+    #     [11]     dans la zone d'engagement d'un ennemi (engagée) ?
+    #     [12:17]  contrôle des 5 objectifs dans {-1, 0, +1}
+    #     [17:22]  présence des 5 objectifs (1 = l'objectif existe dans le scénario)
+    #     [22:52]  6 TYPES de figurines × 5 : rôle one-hot (special_weapon, sergeant, support,
+    #              leader — tout à 0 = type « figurine de base »), slot de type occupé
+    #     [52:70]  6 figurines × 3 : éligible fight, dans l'EZ d'un ennemi, dans l'EZ via un
+    #              allié lui-même engagé (règle du « copain »)
+    #     [70:80]  5 slots ennemis × 2 : slot occupé (mask), bloqué par un allié (EZ)
+    #
+    # Les entités absentes (figurine au-delà de l'effectif, slot ennemi vide) sont remplies de
+    # zéros : le padding est identifié par le mask du slot (vec_bin) / l'effectif (vec_cont).
 
-    SQUAD_OBS_SIZE = 108
-    SQUAD_N_GLOBAL = 16
-    SQUAD_N_AGG = 5
+    SQUAD_OBS_CONT_SIZE = 119
+    SQUAD_OBS_BIN_SIZE = 80
+    SQUAD_OBS_SIZE = SQUAD_OBS_CONT_SIZE + SQUAD_OBS_BIN_SIZE  # = SQUAD_OBS_SIZE_TARGET
     SQUAD_TOP_K = 6
-    SQUAD_PER_MODEL = 7
+    # Roles d allocation (regle 19), ordre FIGE du one-hot par figurine. `None` (figurine de
+    # base) = les 5 bits a zero : c est le cas majoritaire, il n a pas besoin d un bit dedie.
+    SQUAD_MODEL_ROLES = ("special_weapon", "sergeant", "support", "leader")
+    # Types de figurines (bloc C1). K = 6 slots, dimensionne sur les rosters reels (max mesure :
+    # 4 types — 9 Boyz + 1 Nob + leader + support) avec une marge ; un depassement est LOGUE.
+    SQUAD_N_MODEL_TYPES = 6
+    SQUAD_PER_MODEL_TYPE_CONT = 5   # HP_MAX, T, save, invulnerable, effectif vivant du type
+    SQUAD_PER_MODEL_TYPE_BIN = 5    # role one-hot (4) + slot occupe
+    # Figurines (bloc C2) : uniquement ce qui est individuel.
+    SQUAD_PER_MODEL_CONT = 2        # col_rel, row_rel
+    SQUAD_PER_MODEL_BIN = 3         # eligible fight, dans l EZ ennemie, dans l EZ via un allie
+    # Compteurs d engagement sur l escouade entiere (fight / dans l EZ / via un allie) : ils
+    # rendent l etat de combat independant du plafond du bloc figurines.
+    SQUAD_N_ENGAGEMENT_COUNTERS = 3
     SQUAD_N_ENEMY_SLOTS = 5
-    SQUAD_PER_ENEMY_SLOT = 9
+    SQUAD_PER_ENEMY_SLOT_CONT = 12
+    SQUAD_PER_ENEMY_SLOT_BIN = 2
+
+    # Bases des blocs repetes (figurines, slots ennemis) dans chaque vecteur. Ce sont les
+    # SEULS offsets publics : le code de lecture (tests, outillage) passe par les accesseurs
+    # ci-dessous plutot que de recopier des index. Les bases sont VERIFIEES a chaud pendant
+    # la construction (voir _check_block_base) — une derive du layout leve une erreur au lieu
+    # de decaler silencieusement une feature.
+    SQUAD_CONT_TYPES_BASE = 14
+    SQUAD_BIN_TYPES_BASE = 22
+    SQUAD_CONT_MODELS_BASE = SQUAD_CONT_TYPES_BASE + SQUAD_N_MODEL_TYPES * SQUAD_PER_MODEL_TYPE_CONT
+    SQUAD_BIN_MODELS_BASE = SQUAD_BIN_TYPES_BASE + SQUAD_N_MODEL_TYPES * SQUAD_PER_MODEL_TYPE_BIN
+
+    @classmethod
+    def squad_type_cont_base(cls, t_idx: int) -> int:
+        """Index de depart des features CONTINUES du t-ieme type de figurine dans "vec_cont"."""
+        return cls.SQUAD_CONT_TYPES_BASE + t_idx * cls.SQUAD_PER_MODEL_TYPE_CONT
+
+    @classmethod
+    def squad_type_bin_base(cls, t_idx: int) -> int:
+        """Index de depart des drapeaux du t-ieme type de figurine dans "vec_bin"."""
+        return cls.SQUAD_BIN_TYPES_BASE + t_idx * cls.SQUAD_PER_MODEL_TYPE_BIN
+
+    @classmethod
+    def squad_model_cont_base(cls, k_idx: int) -> int:
+        """Index de depart des features CONTINUES de la k-ieme figurine dans "vec_cont"."""
+        return cls.SQUAD_CONT_MODELS_BASE + k_idx * cls.SQUAD_PER_MODEL_CONT
+
+    @classmethod
+    def squad_model_bin_base(cls, k_idx: int) -> int:
+        """Index de depart des drapeaux de la k-ieme figurine dans "vec_bin"."""
+        return cls.SQUAD_BIN_MODELS_BASE + k_idx * cls.SQUAD_PER_MODEL_BIN
+
+    @classmethod
+    def squad_enemy_cont_base(cls, slot_i: int) -> int:
+        """Index de depart des features CONTINUES du slot ennemi i dans "vec_cont"."""
+        return (
+            cls.SQUAD_CONT_MODELS_BASE
+            + cls.SQUAD_TOP_K * cls.SQUAD_PER_MODEL_CONT
+            + cls.SQUAD_N_ENGAGEMENT_COUNTERS
+            + slot_i * cls.SQUAD_PER_ENEMY_SLOT_CONT
+        )
+
+    @classmethod
+    def squad_enemy_bin_base(cls, slot_i: int) -> int:
+        """Index de depart des drapeaux du slot ennemi i dans "vec_bin"."""
+        return (
+            cls.SQUAD_BIN_MODELS_BASE
+            + cls.SQUAD_TOP_K * cls.SQUAD_PER_MODEL_BIN
+            + slot_i * cls.SQUAD_PER_ENEMY_SLOT_BIN
+        )
+
+    @staticmethod
+    def _check_block_base(name: str, produced: int, expected: int) -> None:
+        """Verifie qu un bloc commence bien a l index annonce par les constantes de layout."""
+        if produced != expected:
+            raise RuntimeError(
+                f"build_squad_observation: base du bloc '{name}' = {produced}, "
+                f"constante = {expected}. Layout et constantes desynchronises."
+            )
+
+    SQUAD_N_OBJECTIVE_SLOTS = 5
+
+    @staticmethod
+    def _squad_model_types(
+        alive_mids: List[str], models_cache: Dict[str, Any]
+    ) -> List[Tuple[Tuple[Any, int, int, int, int], int]]:
+        """Regroupe les figurines vivantes par TYPE : [( (role, HP_MAX, T, save, invul), nb ), …].
+
+        Une escouade est homogene, sauf exceptions (arme speciale, sergent, personnage attache
+        fusionne COMME figurine par la regle 19). Decrire chaque figurine separement repeterait
+        le meme profil des dizaines de fois et plafonnerait arbitrairement l effectif observe ;
+        decrire les TYPES avec leur effectif decrit l escouade ENTIERE en quelques dimensions
+        (mesure sur les rosters reels : 4 types au maximum).
+
+        Ordre DETERMINISTE et independant de l etat mouvant : tier de role decroissant
+        (leader > support > sergeant > special_weapon > base), puis profil defensif. Les slots
+        ne permutent donc pas d un step a l autre.
+        """
+        from engine.phase_handlers.shared_utils import ROLE_TIER
+
+        counts: Dict[Tuple[Any, int, int, int, int], int] = {}
+        for mid in alive_mids:
+            model = models_cache[mid]
+            key = (
+                model.get("role"),  # get allowed (None = figurine de base)
+                int(require_key(model, "HP_MAX")),
+                int(require_key(model, "T")),
+                int(require_key(model, "ARMOR_SAVE")),
+                int(require_key(model, "INVUL_SAVE")),
+            )
+            counts[key] = counts.get(key, 0) + 1
+
+        def _rank(item: Tuple[Tuple[Any, int, int, int, int], int]) -> Tuple[int, int, int, int, int]:
+            (role, hp_max, toughness, save, invul), _count = item
+            tier = ROLE_TIER[role] if role in ROLE_TIER else 0
+            return (-tier, -hp_max, -toughness, save, invul)
+
+        return sorted(counts.items(), key=_rank)
+
+    @staticmethod
+    def _squad_models_for_observation(
+        alive_mids: List[str],
+        models_cache: Dict[str, Any],
+        squad_defence: Tuple[int, int, int, int],
+    ) -> List[str]:
+        """Ordonne les figurines pour le bloc C : les EXCEPTIONS d abord, puis les figurines de base.
+
+        Le bloc n expose que `SQUAD_TOP_K` figurines. Les prendre dans l ordre de creation les
+        tronque au mauvais endroit : sur les rosters reels, les personnages attaches (regle 19)
+        sont ajoutes EN FIN de liste — un Warboss en 11e position d une escouade de 12 Boyz
+        n etait jamais observe, ce qui rendait inoperants le role et le profil derogatoire.
+
+        Tri par pertinence decroissante : tier de role (leader > support > sergeant >
+        special_weapon > base), puis profil defensif derogatoire, puis index de creation. Il est
+        DETERMINISTE a composition donnee (pas de dependance a la position ni aux PV, qui
+        feraient permuter les slots d un step a l autre et brouilleraient l apprentissage).
+        Aucune action ne cible une figurine par son slot (le move passe par la grille, le fight
+        est oui/non), donc reordonner ce bloc n a pas d effet de bord sur le masque — a la
+        difference des slots ennemis, qui restent alignes sur `get_enemy_slot_mapping`.
+        """
+        from engine.phase_handlers.shared_utils import ROLE_TIER
+
+        def _rank(indexed: Tuple[int, str]) -> Tuple[int, int, int]:
+            idx, mid = indexed
+            model = models_cache[mid]
+            role = model.get("role")  # get allowed (None = figurine de base)
+            tier = ROLE_TIER[role] if role in ROLE_TIER else 0
+            defence = (
+                int(require_key(model, "HP_MAX")),
+                int(require_key(model, "T")),
+                int(require_key(model, "ARMOR_SAVE")),
+                int(require_key(model, "INVUL_SAVE")),
+            )
+            return (-tier, 0 if defence != squad_defence else 1, idx)
+
+        return [mid for _idx, mid in sorted(enumerate(alive_mids), key=_rank)]
+
+    @staticmethod
+    def _engagement_relevant_entries(
+        game_state: Dict[str, Any],
+        reference_entry: Dict[str, Any],
+        engagement_zone: int,
+        enemy_of_player: int,
+    ) -> List[Dict[str, Any]]:
+        """Escouades adverses assez proches pour POUVOIR etre en zone d engagement.
+
+        Sur-approximation STRICTE : la borne (distance hex entre figurines les plus proches
+        <= ez + rayons majorants d empreinte) est celle du pruning du move
+        (`movement_handlers._relevant_enemies_for_move`, meme helpers) — tout ce qui est
+        elimine est hors de portee d engagement quelle que soit la forme des socles. Le
+        resultat des tests EZ est donc identique a un scan complet, sans en payer le cout :
+        le test exact compare des EMPREINTES entieres (jusqu a ~200 cases par grande base) et
+        l observation l evalue pour 6 figurines a chaque step.
+        """
+        from engine.combat_utils import calculate_hex_distance
+        from engine.phase_handlers.movement_handlers import (
+            _hex_radius_upper_for_engagement_prune,
+            _move_preview_footprint_span,
+        )
+        from engine.phase_handlers.shared_utils import get_max_base_size_hex
+
+        units_cache = require_key(game_state, "units_cache")
+        max_bs = get_max_base_size_hex(game_state)
+        ref_r = _hex_radius_upper_for_engagement_prune(_move_preview_footprint_span(reference_entry))
+        ref_positions = list(
+            require_key(reference_entry, "occupied_hexes_by_model").values()
+        ) or [(int(reference_entry["col"]), int(reference_entry["row"]))]
+
+        out: List[Dict[str, Any]] = []
+        for _sid, entry in units_cache.items():
+            if int(entry["player"]) == enemy_of_player:
+                continue
+            e_r = _hex_radius_upper_for_engagement_prune(
+                min(_move_preview_footprint_span(entry), max_bs)
+            )
+            horizon = int(engagement_zone) + ref_r + e_r + 1
+            by_model = entry.get("occupied_hexes_by_model")  # get allowed (mono-fig)
+            positions = list(by_model.values()) if by_model else [(int(entry["col"]), int(entry["row"]))]
+            if any(
+                calculate_hex_distance(int(rc), int(rr), int(pc), int(pr)) <= horizon
+                for rc, rr in ref_positions
+                for pc, pr in positions
+            ):
+                out.append(entry)
+        return out
+
+    def _squad_terrain_flags(
+        self, game_state: Dict[str, Any], active_squad_id: str, active_unit: Dict[str, Any]
+    ) -> Tuple[float, float, float]:
+        """(hidden, gone_to_ground_ready, in_cover) de l escouade — regles 13.09, 13.5, 13.08.
+
+        Les trois sont calcules ICI, a l instant de l observation, et non lus sur
+        ``unit['hidden']`` : ce champ n est rafraichi qu au DEBUT de la phase de tir
+        (``compute_hidden_statuses``), donc il est perime pendant le move — exactement le moment
+        ou l agent decide d aller se cacher. Meme geometrie que le moteur
+        (``compute_models_within_terrain``), aucune duplication de regle.
+
+        - **hidden (13.09)** : hideable (INFANTRY/BEASTS/SWARM) ET toutes les figurines vivantes
+          dans une zone obscurante ET l unite n a tire ni ce tour ni au tour precedent.
+        - **gone to ground « pret » (13.5)** : hidden ET toutes les figurines vivantes dans une
+          zone de terrain contenant un terrain **Solid** (dense, 13.11). La derniere condition
+          de 13.5 — « pas entierement visible pour la figurine ATTAQUANTE a cause d un Solid
+          intervenant » — depend du tireur et n a donc PAS de valeur au niveau escouade : elle
+          reste dans le calcul par-paire du moteur (``hidden_enemy_out_of_detection``). Ce
+          drapeau dit « je remplis tout ce qui ne depend pas de l ennemi ».
+        - **in_cover (13.08)** : hideable ET toutes les figurines vivantes dans une zone de
+          terrain — c est la premiere des deux conditions alternatives de 13.08, et elle ne
+          depend PAS de l attaquant : si elle est remplie par toutes mes figurines, l escouade a
+          le benefice du couvert contre TOUTE attaque a distance. La seconde condition
+          (« pas entierement visible pour la figurine attaquante ») est par-tireur et reste dans
+          ``compute_unit_los``.
+        """
+        from engine.phase_handlers.shooting_handlers import compute_models_within_terrain
+
+        units_cache = require_key(game_state, "units_cache")
+        entry = units_cache[active_squad_id]
+        by_model = require_key(entry, "occupied_hexes_by_model")
+        # `hideable` : MEME convention de lecture que le calcul de reference du moteur
+        # (`compute_hidden_statuses`, shooting_handlers) — absence = non hideable. Etre plus
+        # strict ici que la source de la regle ferait diverger observation et resolution.
+        if not by_model or not bool(active_unit.get("hideable")):  # get allowed (cf. ci-dessus)
+            return 0.0, 0.0, 0.0
+        terrain_areas = require_key(game_state, "terrain_areas")
+
+        in_any_terrain = compute_models_within_terrain(
+            entry, by_model, game_state, terrain_areas, obscuring_only=False
+        )
+        all_in_terrain = len(in_any_terrain) == len(by_model)
+        # Les passes suivantes sont conditionnees : une zone obscurante EST une zone de terrain,
+        # donc « toutes dans une zone obscurante » implique « toutes dans une zone ». Si le
+        # couvert est deja faux, hidden l est aussi — inutile de rescanner (le test
+        # figurine<->polygone est le poste dominant de cette fonction).
+        shot_now = str(active_squad_id) in {str(x) for x in game_state.get("units_shot", set())}
+        shot_prev = str(active_squad_id) in {
+            str(x) for x in game_state.get("units_shot_previous_turn", set())
+        }
+        hidden = False
+        if all_in_terrain and not shot_now and not shot_prev:
+            in_obscuring = compute_models_within_terrain(
+                entry, by_model, game_state, terrain_areas, obscuring_only=True
+            )
+            hidden = len(in_obscuring) == len(by_model)
+
+        gtg_ready = False
+        if hidden:
+            # Zones contenant un terrain Solid (13.11 : les terrains dense ont la regle Solid).
+            # Le moteur ne type le « dense » qu au niveau des MURS (dense_wall_hexes) : une zone
+            # est donc Solid des qu elle contient un mur dense. Statique -> memoise.
+            solid_areas = game_state.get("_obs_solid_terrain_areas")  # get allowed
+            if solid_areas is None:
+                from engine.phase_handlers.shooting_handlers import _get_dense_wall_set
+
+                dense = _get_dense_wall_set(game_state)
+                solid_areas = [
+                    a
+                    for a in terrain_areas
+                    if any((int(h[0]), int(h[1])) in dense for h in require_key(a, "hexes"))
+                ]
+                game_state["_obs_solid_terrain_areas"] = solid_areas
+            if solid_areas:
+                in_solid = compute_models_within_terrain(
+                    entry, by_model, game_state, solid_areas, obscuring_only=False
+                )
+                gtg_ready = len(in_solid) == len(by_model)
+
+        return (1.0 if hidden else 0.0), (1.0 if gtg_ready else 0.0), (1.0 if all_in_terrain else 0.0)
+
+    def _squad_objective_control(
+        self, game_state: Dict[str, Any], active_player: int
+    ) -> Tuple[List[float], List[float]]:
+        """Controle et presence des 5 slots d objectif, du point de vue de `active_player`.
+
+        Retourne (controle, presence) :
+          - controle[i] : +1 je controle, -1 l ennemi controle, 0 conteste/neutre/absent ;
+          - presence[i] : 1 si l objectif existe dans le scenario, 0 sinon (sans ce bit, le 0
+            de controle est ambigu : « conteste » ou « pas d objectif »).
+
+        LECTURE PURE de `objective_controllers`, l etat persistant du moteur — **aucun calcul
+        ici**. Regle 14.02 : le controle est determine a la FIN de chaque phase et de chaque
+        tour, pas en continu ; le rafraichir a chaque action serait a la fois faux (l agent
+        verrait un controle qui n existe pas encore) et couteux (somme des OC par figurine sur
+        toutes les zones). Le rafraichissement de frontiere est fait par
+        `GameStateManager.refresh_objective_control_on_boundary`, appele par le moteur avant
+        toute construction d observation (et par l API PvP) — meme source que le scoring des VP.
+
+        Debut de bataille : aucune frontiere franchie, donc aucun controleur → 0 partout, ce
+        qui est la verite de la regle, pas une valeur par defaut.
+        """
+        objectives = require_key(game_state, "objectives")
+        controllers = game_state.get("objective_controllers", {})  # get allowed (avant 1re frontiere)
+
+        control: List[float] = []
+        presence: List[float] = []
+        for i in range(self.SQUAD_N_OBJECTIVE_SLOTS):
+            if i >= len(objectives):
+                control.append(0.0)
+                presence.append(0.0)
+                continue
+            controller = controllers.get(str(require_key(objectives[i], "id")))  # get allowed
+            if controller is None:
+                control.append(0.0)
+            else:
+                control.append(1.0 if int(controller) == active_player else -1.0)
+            presence.append(1.0)
+        return control, presence
+
+    def _empty_squad_observation(self) -> Dict[str, np.ndarray]:
+        """Observation nulle (escouade morte/absente) — mêmes clés et tailles que le cas nominal."""
+        return {
+            "vec_cont": np.zeros(self.SQUAD_OBS_CONT_SIZE, dtype=np.float32),
+            "vec_bin": np.zeros(self.SQUAD_OBS_BIN_SIZE, dtype=np.float32),
+        }
 
     def build_squad_observation(
         self, game_state: Dict[str, Any], active_squad_id: str
-    ) -> np.ndarray:
-        """Construit l observation 108-dim pour une escouade active (PR4 4a).
+    ) -> Dict[str, np.ndarray]:
+        """Construit l'observation vectorielle d'une escouade : {"vec_cont", "vec_bin"}.
 
-        Parallel implementation: ne modifie pas build_observation. La selection
-        active_squad vs active_unit est de la responsabilite du caller (decoder PR4).
-
-        Spec : Documentation/TODO/squad.md §"Observation (micro)" et formule
-        obs_size = N_global + 92.
+        Le découpage cont/bin et l'ordre des dimensions sont documentés dans le LAYOUT
+        ci-dessus (source unique). La grille égocentrique est fournie à part par
+        `build_squad_grid` ; l'assemblage du Dict d'observation final (avec "grid") est la
+        responsabilité de `W40KEngine._build_observation`.
         """
-        obs = np.zeros(self.SQUAD_OBS_SIZE, dtype=np.float32)
         # C2 cleanup (audit) : message d erreur explicite si l ordre d init est cassé.
         # squad_cache, models_cache, squad_models sont construits par build_units_cache.
         # Si absents, appelez build_units_cache(game_state) avant build_squad_observation.
@@ -1279,275 +1655,347 @@ class ObservationBuilder:
         squad_cache = game_state["squad_cache"]
 
         if active_squad_id not in units_cache or active_squad_id not in squad_cache:
-            return obs  # squad dead/absent -> zero observation
+            return self._empty_squad_observation()  # squad dead/absent -> zero observation
         active_entry = units_cache[active_squad_id]
         active_sq = squad_cache[active_squad_id]
         active_player = int(active_entry["player"])
+        active_unit = get_unit_by_id(str(active_squad_id), game_state)
+        if active_unit is None:
+            raise KeyError(f"Unit {active_squad_id} missing from game_state['units'] for observation")
 
-        # === SECTION 1: Global context (16 floats) — meme structure que build_observation ===
+        cont: List[float] = []
+        binv: List[float] = []
+        # Primitives EZ (regle 03.04) partagees par les 3 usages de cette fonction : drapeau
+        # « escouade engagee », contact par figurine (bloc C), ennemi bloque par un allie
+        # (bloc D). metric="hex" EPINGLE : feature d observation IA (V11 §10) — reste hex meme
+        # apres la bascule EZ euclidienne 7.6 (retrain hors perimetre de la migration).
+        from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
+        ez_zone = get_engagement_zone(game_state)
+        # Le test EZ exact compare des EMPREINTES (jusqu a ~200 cases pour une grande base) :
+        # a l echelle de l observation (6 figurines x N escouades ennemies, a chaque step) c est
+        # le poste dominant. On elimine d abord les escouades trop loin pour pouvoir engager,
+        # avec la MEME borne conservatrice que le pruning du move
+        # (`_relevant_enemies_for_move` : distance d ancre <= ez + rayons majorants, mesuree
+        # depuis la figurine la plus proche). Sur-approximation stricte -> resultat identique.
+        ez_relevant_enemies = self._engagement_relevant_entries(
+            game_state, active_entry, ez_zone, enemy_of_player=active_player
+        )
+
+        # === BLOC A : contexte général ===
         current_player = int(require_key(game_state, "current_player"))
-        obs[0] = 1.0 if current_player == active_player else 0.0
+        binv.append(1.0 if current_player == active_player else 0.0)
         phase_encoding = {"deployment": 0.0, "command": 0.0, "move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}
-        obs[1] = phase_encoding.get(game_state.get("phase", "command"), 0.0)
-        obs[2] = min(1.0, int(game_state.get("turn", 0)) / 5.0)  # get allowed
-        obs[3] = min(1.0, int(game_state.get("episode_steps", 0)) / 100.0)  # get allowed
-        # HP pct du squad actif
+        binv.append(phase_encoding.get(game_state.get("phase", "command"), 0.0))
+        cont.append(float(int(game_state.get("turn", 0))))  # get allowed
+        cont.append(float(int(game_state.get("episode_steps", 0))))  # get allowed
+        # Effectif restant + OC (agregats d escouade). Le PV% d escouade a disparu : il etait
+        # redondant avec {effectif vivant, HP_MAX, PV de la figurine blessee} (V11 §9.2).
         model_count_at_start = max(1, int(active_sq.get("model_count_at_start", 1)))
-        # HP_MAX par modele (mono-fig: HP_MAX direct; multi-fig: somme via models_cache)
-        total_hp_pool = 0
-        for mid in squad_models.get(active_squad_id, []):  # get allowed
-            m = models_cache.get(mid)
-            if m is not None:
-                total_hp_pool += int(m["HP_MAX"])
-        if total_hp_pool == 0:
-            total_hp_pool = model_count_at_start
-        obs[4] = min(1.0, int(active_entry["HP_CUR"]) / float(total_hp_pool)) if total_hp_pool > 0 else 0.0
-        obs[5] = 1.0 if active_squad_id in game_state.get("units_moved", set()) else 0.0
-        obs[6] = 1.0 if active_squad_id in game_state.get("units_shot", set()) else 0.0
-        obs[7] = 1.0 if active_squad_id in game_state.get("units_attacked", set()) else 0.0
-        obs[8] = 1.0 if active_squad_id in game_state.get("units_advanced", set()) else 0.0
-        # alive friendlies/enemies normalises
-        max_nearby = self.max_nearby_units
-        alive_friendlies = sum(
-            1 for sid, e in units_cache.items() if int(e["player"]) == active_player
+        cont.append(int(active_sq["model_count"]) / float(model_count_at_start))
+        cont.append(float(int(active_sq.get("oc_total", 0))))  # get allowed
+        # Drapeaux d activation (source = memes sets que le masque d action)
+        binv.append(1.0 if active_squad_id in game_state.get("units_moved", set()) else 0.0)
+        binv.append(1.0 if active_squad_id in game_state.get("units_shot", set()) else 0.0)
+        binv.append(1.0 if active_squad_id in game_state.get("units_attacked", set()) else 0.0)
+        binv.append(1.0 if active_squad_id in game_state.get("units_advanced", set()) else 0.0)
+        # FALL BACK (repli) — MEME source que le masque d action (`units_fled`).
+        # Set-membership : absence = pas de repli = 0.0 (semantique reelle, comme units_moved).
+        binv.append(1.0 if active_squad_id in game_state.get("units_fled", set()) else 0.0)
+        binv.append(1.0 if active_sq.get("is_coherent", False) else 0.0)
+        # Etat terrain de l escouade (regles 13.09 / 13.5 / 13.08) — recalcule a chaud, cf.
+        # _squad_terrain_flags (le champ unit['hidden'] du moteur n est rafraichi qu au debut
+        # de la phase de tir : le lire ici renverrait un etat perime pendant le move).
+        hidden_flag, gtg_flag, cover_flag = self._squad_terrain_flags(
+            game_state, active_squad_id, active_unit
         )
-        alive_enemies = sum(
-            1 for sid, e in units_cache.items() if int(e["player"]) != active_player
+        binv.append(hidden_flag)
+        binv.append(gtg_flag)
+        binv.append(cover_flag)
+        # Dans la zone d engagement d un ennemi : conditionne l eligibilite au tir (10.04) et a
+        # la charge. Meme primitive que le moteur ; metric="hex" EPINGLE comme le reste des
+        # features d observation (V11 §10).
+        binv.append(
+            1.0
+            if any(
+                unit_entries_within_engagement_zone(active_entry, e, ez_zone, metric="hex")
+                for e in ez_relevant_enemies
+            )
+            else 0.0
         )
-        obs[9] = alive_friendlies / max(1, max_nearby)
-        obs[10] = alive_enemies / max(1, max_nearby)
-        # Objective control (5 floats) — reuse existing encoder mais avec active_unit synthetique
-        synthetic_active = {
-            "id": active_squad_id,
-            "player": active_player,
-            "col": int(active_entry["col"]),
-            "row": int(active_entry["row"]),
-        }
-        positions = {uid: (int(e["col"]), int(e["row"])) for uid, e in units_cache.items()}
-        try:
-            self._encode_objective_control(obs, synthetic_active, game_state, base_idx=11, positions=positions)
-        except Exception:
-            pass  # objectifs absents → zero (PR4 acceptable, sera plus strict en PR5)
+        # Score de mission (victory points) — SANS lui l agent ignore qui gagne, donc ne peut
+        # pas arbitrer « je mene -> je preserve » vs « je suis derriere -> je prends des
+        # risques » (V11 §9.8). Meme source que la condition de victoire (game_state.py).
+        enemy_player = 2 if active_player == 1 else 1
+        victory_points = require_key(game_state, "victory_points")
+        cont.append(float(require_key(victory_points, active_player)))
+        cont.append(float(require_key(victory_points, enemy_player)))
+        # VALUE cumulee vivante / VALUE de depart, par camp (force d usure). Somme PAR FIGURINE
+        # (VALUE_i), exacte meme sur une escouade heterogene en points (Boyz 9x7 + Nob 12).
+        # value_at_start : capture au build des caches (les mortes disparaissent de models_cache,
+        # la valeur de depart ne serait plus derivable ensuite).
+        value_at_start = require_key(game_state, "value_at_start")
+        value_alive = {active_player: 0.0, enemy_player: 0.0}
+        for m in models_cache.values():
+            p = int(require_key(m, "player"))
+            if p in value_alive:
+                value_alive[p] += float(require_key(m, "VALUE"))
+        for p in (active_player, enemy_player):
+            start_value = float(require_key(value_at_start, p))
+            if start_value <= 0:
+                raise ValueError(
+                    f"value_at_start[{p}] = {start_value} : une armee de valeur nulle rend la "
+                    f"force d usure indefinie (donnee de roster invalide)."
+                )
+            cont.append(value_alive[p] / start_value)
+        # PV de la figurine BLESSEE (V11 §9.2) : en 40K les pertes s allouent une figurine a la
+        # fois, donc au plus une figurine est partiellement blessee. Avec {effectif vivant,
+        # HP_MAX, ce ratio} l etat PV de l escouade est complet — sans lister les PV de chaque
+        # figurine (redondants, supprimes du bloc C). Aucune figurine entamee -> 1.0 (« aucun
+        # PV perdu en cours »), pas une valeur de repli : c est la lecture exacte du minimum.
+        alive_models = [models_cache[m] for m in squad_models.get(active_squad_id, []) if m in models_cache]  # get allowed
+        if not alive_models:
+            # Une escouade presente dans units_cache SANS figurine vivante est une incoherence
+            # de cache (destroy_model retire l escouade a la derniere perte). Un 0.0 ici se
+            # lirait « figurine a l agonie » : erreur explicite plutot que valeur trompeuse.
+            raise RuntimeError(
+                f"build_squad_observation: escouade {active_squad_id} presente dans units_cache "
+                f"mais sans figurine vivante dans models_cache (cache incoherent)."
+            )
+        cont.append(
+            min(
+                int(require_key(m, "HP_CUR")) / float(int(require_key(m, "HP_MAX")))
+                for m in alive_models
+            )
+        )
+        # Profil de l escouade — donnees BRUTES (V11 §9.3/§10 B3). Source = la datasheet de
+        # l unite (game_state["units"]), pas une figurine echantillon : c est le profil
+        # d escouade, les figurines derogatoires (persos attaches) relevent des exceptions du
+        # bloc C. L ex-obs[20] « firepower generique vs T4/Sv4 » est SUPPRIMEE : elle resumait
+        # l offensif contre une cible fictive (une arme anti-char y paraissait nulle) et
+        # remplacait les donnees brutes en perdant de l information.
+        squad_defence = (
+            int(require_key(active_unit, "HP_MAX")),
+            int(require_key(active_unit, "T")),
+            int(require_key(active_unit, "ARMOR_SAVE")),
+            int(require_key(active_unit, "INVUL_SAVE")),
+        )
+        cont.append(float(require_key(active_unit, "MOVE")))
+        for stat in squad_defence:
+            cont.append(float(stat))
+        # Objectifs : controle dans {-1, 0, +1} + bit de PRESENCE (distingue « contest/vide »
+        # de « objectif absent du scenario », impossible a lire sur le seul 0). Plus aucun
+        # try/except : un objectif malforme doit lever, pas passer le canal a zero en silence.
+        control, presence = self._squad_objective_control(game_state, active_player)
+        binv.extend(control)
+        binv.extend(presence)
 
-        # === SECTION 2: Squad aggregates (5 floats) [16:21] ===
-        nb_alive = int(active_sq["model_count"])
-        obs[16] = min(1.0, nb_alive / float(model_count_at_start))
-        obs[17] = 1.0 if active_sq.get("is_coherent", False) else 0.0
-        obs[18] = min(1.0, int(active_sq.get("oc_total", 0)) / 10.0)  # get allowed
-        # obs[19] : ex-doublon exact de obs[4] (HP%). Reaffecte au flag FALL BACK (repli) —
-        # l escouade s est-elle repliee ce tour ? Utile pour HEAVY (24.16) et l eligibilite
-        # tir/charge. MEME source que le masque d action (`units_fled`, cf.
-        # build_squad_action_mask). Set-membership : absence = pas de repli = 0.0 (pas un
-        # defaut masquant, c est la semantique reelle, comme obs[5:8]).
-        obs[19] = 1.0 if active_squad_id in game_state.get("units_fled", set()) else 0.0
-        # Firepower estimate : sum(P(hit)*P(wound)*D) sur les armes RNG selectionnees,
-        # vs cible generique T=4, Sv=4 (normalisation /10)
-        firepower = 0.0
-        for mid in squad_models.get(active_squad_id, []):  # get allowed
-            m = models_cache.get(mid)
-            if m is None:
-                continue
-            weapons = m.get("RNG_WEAPONS", [])  # get allowed
-            sel = m.get("selectedRngWeaponIndex")
-            if not weapons or sel is None or not (0 <= int(sel) < len(weapons)):
-                continue
-            w = weapons[int(sel)]
-            if not isinstance(w, dict):
-                continue
-            bs = int(w.get("ATK", w.get("BS", 4)))
-            s = int(w.get("STR", w.get("S", 4)))
-            ap = int(w.get("AP", 0))  # get allowed
-            dmg_raw = w.get("DMG", 1)
-            try:
-                d = float(expected_dice_value(dmg_raw, "obs_firepower"))
-            except Exception:
-                d = float(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1.0
-            nb_raw = w.get("NB", 1)
-            try:
-                n = float(expected_dice_value(nb_raw, "obs_firepower_nb"))
-            except Exception:
-                n = float(nb_raw) if isinstance(nb_raw, (int, float)) else 1.0
-            p_hit = max(0.0, (7 - bs) / 6.0) if bs <= 6 else 0.0
-            wth = wound_threshold(s, 4)
-            p_wound = max(0.0, (7 - wth) / 6.0)
-            sv = save_threshold(4, 7, ap)
-            p_fail = max(0.0, (sv - 1) / 6.0) if sv < 7 else 1.0
-            firepower += n * p_hit * p_wound * p_fail * d
-        obs[20] = min(1.0, firepower / 10.0)
-
-        # === SECTION 3: Top-k=6 fig features (7 × 6 = 42 floats) [21:63] ===
+        # === BLOC C1 : TYPES de figurines (profil + effectif), puis C2 : figurines ===
+        # §9.4 : les stats sont exposees « une fois au niveau escouade + exceptions », JAMAIS
+        # repetees par figurine. Une escouade se resume a quelques TYPES (mesure sur les rosters
+        # reels : 4 au maximum — 9 Boyz + 1 Nob + leader + support), la ou un bloc par figurine
+        # en plafonnait arbitrairement le nombre a SQUAD_TOP_K et laissait la majorite de
+        # l effectif invisible. Chaque type porte son profil defensif ET son NOMBRE de figurines
+        # vivantes : l escouade entiere est donc decrite, quelle que soit sa taille.
         cx = float(active_sq.get("centroid_col", active_entry["col"]))
         cy = float(active_sq.get("centroid_row", active_entry["row"]))
-        pr = float(max(1, self.perception_radius))
-        # Calcule once : fighting_models + B2B with enemies
+        # Calcule once : fighting_models (pool 12.04, source moteur)
         fighting_set: set = set()
         try:
             fighting_set = set(get_fighting_models(game_state, active_squad_id))
         except Exception:
             fighting_set = set()
-        # Enemy positions pour B2B
-        enemy_positions: List[Tuple[int, int]] = []
-        for sid, e in units_cache.items():
-            if int(e["player"]) == active_player:
+        alive_mids = self._squad_models_for_observation(
+            [m for m in squad_models.get(active_squad_id, []) if m in models_cache],  # get allowed
+            models_cache,
+            squad_defence,
+        )
+        self._check_block_base("types/cont", len(cont), self.SQUAD_CONT_TYPES_BASE)
+        self._check_block_base("types/bin", len(binv), self.SQUAD_BIN_TYPES_BASE)
+        squad_types = self._squad_model_types(alive_mids, models_cache)
+        if len(squad_types) > self.SQUAD_N_MODEL_TYPES:
+            # Troncature LOGUEE, jamais silencieuse (§11 « troncature loguee si depassement »).
+            from engine.game_utils import add_debug_file_log
+
+            add_debug_file_log(
+                game_state,
+                f"[OBS] escouade {active_squad_id} : {len(squad_types)} types de figurines pour "
+                f"{self.SQUAD_N_MODEL_TYPES} slots — les moins prioritaires ne sont pas observes.",
+            )
+        for t_idx in range(self.SQUAD_N_MODEL_TYPES):
+            if t_idx >= len(squad_types):
+                cont.extend([0.0] * self.SQUAD_PER_MODEL_TYPE_CONT)  # slot de type vide
+                binv.extend([0.0] * self.SQUAD_PER_MODEL_TYPE_BIN)
                 continue
-            for mid in squad_models.get(sid, []):  # get allowed
-                m = models_cache.get(mid)
-                if m is not None:
-                    enemy_positions.append((int(m["col"]), int(m["row"])))
-        alive_mids = [m for m in squad_models.get(active_squad_id, []) if m in models_cache]  # get allowed
+            (role, hp_max, toughness, save, invul), count = squad_types[t_idx]
+            cont.append(float(hp_max))
+            cont.append(float(toughness))
+            cont.append(float(save))
+            cont.append(float(invul))
+            # Effectif VIVANT de ce type : sans lui, l agent ignore si le profil concerne
+            # 1 figurine ou 19 (meme motif {profil, nb de porteurs} que les armes, §11).
+            cont.append(float(count))
+            # Role d allocation (regle 19) en ONE-HOT. One-hot et non scalaire ordonne : meme si
+            # le moteur classe ces roles par tier pour l allocation des pertes, l ecart entre
+            # deux roles n a pas de sens numerique (un scalaire imposerait « leader = 2 x
+            # sergeant »). Aucun bit allume = figurine de base.
+            for role_name in self.SQUAD_MODEL_ROLES:
+                binv.append(1.0 if role == role_name else 0.0)
+            binv.append(1.0)  # slot de type occupe (distingue « type absent » de « compteur 0 »)
+
+        # === BLOC C2 : figurines — ce qui est irreductiblement INDIVIDUEL ===
+        # Position et etat d engagement ne se resument pas par type. Ce bloc reste plafonne a
+        # SQUAD_TOP_K (les exceptions d abord, cf. _squad_models_for_observation), mais plus
+        # rien d essentiel n y est tronque : les profils sont en C1 (effectif complet), les
+        # positions des figurines non listees sont peintes sur le canal « allie » de la grille,
+        # et les compteurs d engagement ci-dessous portent l etat de TOUTE l escouade.
+        self._check_block_base("figurines/cont", len(cont), self.SQUAD_CONT_MODELS_BASE)
+        self._check_block_base("figurines/bin", len(binv), self.SQUAD_BIN_MODELS_BASE)
+        # Contact par figurine = presence dans la ZONE D ENGAGEMENT (03.04), plus le test
+        # bord-a-bord brut `calculate_hex_distance == 1` (V11 §9.2) : ce dernier ignorait la
+        # composante verticale de l EZ et divergeait de la regle des que les etages existent.
+        # Meme primitive que le moteur (`unit_entries_within_engagement_zone` sur des entrees
+        # synthetiques par figurine, comme get_fighting_models) ; metric="hex" EPINGLE comme
+        # le reste des features d observation (V11 §10).
+        from engine.phase_handlers.shared_utils import _synth_model_entry
+        enemy_entries_all = ez_relevant_enemies
+        synth_by_mid: Dict[str, Dict[str, Any]] = {}
+        in_enemy_ez: Dict[str, bool] = {}
+        for mid in alive_mids:
+            m = models_cache[mid]
+            synth = _synth_model_entry(game_state, active_squad_id, m, int(m["col"]), int(m["row"]))
+            synth_by_mid[mid] = synth
+            in_enemy_ez[mid] = any(
+                unit_entries_within_engagement_zone(synth, ee, ez_zone, metric="hex")
+                for ee in enemy_entries_all
+            )
+        relayed_by_mid: Dict[str, bool] = {}
+        for mid in alive_mids:
+            relayed = False
+            if not in_enemy_ez[mid]:
+                for other_mid in alive_mids:
+                    if other_mid == mid or not in_enemy_ez[other_mid]:
+                        continue
+                    if unit_entries_within_engagement_zone(
+                        synth_by_mid[mid], synth_by_mid[other_mid], ez_zone, metric="hex"
+                    ):
+                        relayed = True
+                        break
+            relayed_by_mid[mid] = relayed
         for k_idx in range(self.SQUAD_TOP_K):
-            base = 21 + k_idx * self.SQUAD_PER_MODEL
             if k_idx >= len(alive_mids):
-                continue  # zero-padded
+                cont.extend([0.0] * self.SQUAD_PER_MODEL_CONT)  # zero-padded
+                binv.extend([0.0] * self.SQUAD_PER_MODEL_BIN)
+                continue
             mid = alive_mids[k_idx]
             m = models_cache[mid]
-            col_rel = (int(m["col"]) - cx) / pr
-            row_rel = (int(m["row"]) - cy) / pr
-            obs[base + 0] = max(-1.0, min(1.0, col_rel))
-            obs[base + 1] = max(-1.0, min(1.0, row_rel))
-            obs[base + 2] = int(m["HP_CUR"]) / max(1, int(m["HP_MAX"]))
-            sel_idx = m.get("selectedCcWeaponIndex")
-            obs[base + 3] = (int(sel_idx) if sel_idx is not None else 0) / 5.0
-            obs[base + 4] = 1.0 if mid in fighting_set else 0.0
-            # B2B with enemy (condition 1 simplified : distance == 1)
-            mc = int(m["col"]); mr = int(m["row"])
-            is_b2b_enemy = any(
-                calculate_hex_distance(mc, mr, ec, er) == BASE_TO_BASE_SUBHEX
-                for ec, er in enemy_positions
-            )
-            obs[base + 5] = 1.0 if is_b2b_enemy else 0.0
-            # B2B with ally that is B2B with enemy (buddy rule features)
-            is_b2b_ally_in_b2b = False
-            if not is_b2b_enemy:
-                for other_mid in alive_mids:
-                    if other_mid == mid:
-                        continue
-                    om = models_cache[other_mid]
-                    oc, or_ = int(om["col"]), int(om["row"])
-                    if calculate_hex_distance(mc, mr, oc, or_) != BASE_TO_BASE_SUBHEX:
-                        continue
-                    if any(
-                        calculate_hex_distance(oc, or_, ec, er) == BASE_TO_BASE_SUBHEX
-                        for ec, er in enemy_positions
-                    ):
-                        is_b2b_ally_in_b2b = True
-                        break
-            obs[base + 6] = 1.0 if is_b2b_ally_in_b2b else 0.0
+            cont.append(float(int(m["col"])) - cx)
+            cont.append(float(int(m["row"])) - cy)
+            binv.append(1.0 if mid in fighting_set else 0.0)
+            binv.append(1.0 if in_enemy_ez[mid] else 0.0)
+            binv.append(1.0 if relayed_by_mid[mid] else 0.0)
+        # Compteurs d engagement sur l escouade ENTIERE : l etat de combat ne depend plus du
+        # plafond du bloc ci-dessus (une escouade de 20 Boyz dont 12 sont engagees le dit).
+        cont.append(float(sum(1 for mid in alive_mids if mid in fighting_set)))
+        cont.append(float(sum(1 for mid in alive_mids if in_enemy_ez[mid])))
+        cont.append(float(sum(1 for mid in alive_mids if relayed_by_mid[mid])))
 
-        # === SECTION 4: 5 enemy slots × 9 features = 45 floats [63:108] ===
+        # === BLOC D : slots ennemis ===
         # D1 : l ordre des slots ennemis DOIT etre celui de l action tir/charge
         # (`get_enemy_slot_mapping`, mapping stable HP*OC fige a l init, PR4 4d), sinon
         # obs-slot-i decrit un AUTRE ennemi que action-slot-i -> choix de cible brouille.
         # Source unique partagee avec le masque (build_squad_action_mask) et l execution
         # (action_decoder). Retourne 5 entrees, None pour slot vide/mort.
+        self._check_block_base("ennemis/cont", len(cont), self.squad_enemy_cont_base(0))
+        self._check_block_base("ennemis/bin", len(binv), self.squad_enemy_bin_base(0))
         enemy_slot_ids = get_enemy_slot_mapping(game_state, active_player)
+        # Socle et metrique de portee resolus UNE fois pour les 5 slots (le helper les
+        # recalculerait a chaque cible).
+        from engine.combat_utils import socle_from_cache_entry
+        from engine.phase_handlers.shared_utils import _ranged_squad_edge_distance
+        from engine.phase_handlers.shooting_handlers import _ranged_distance_metric
+        ranged_metric = _ranged_distance_metric()
+        active_socle = socle_from_cache_entry(active_entry)
         # Entrees alliees (pour is_locked_by_friendly_er, mesure bord-a-bord)
-        from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
-        ez = get_engagement_zone(game_state)
         ally_entries: List[Dict[str, Any]] = [
             e for sid, e in units_cache.items() if int(e["player"]) == active_player
         ]
-        # Pour value_over_ttk et threat_level : utiliser arme RNG[0] de l active squad
-        active_sample_weapon: Optional[Dict[str, Any]] = None
-        if alive_mids:
-            a_sample = models_cache[alive_mids[0]]
-            a_weapons = a_sample.get("RNG_WEAPONS", [])  # get allowed
-            a_sel = a_sample.get("selectedRngWeaponIndex")
-            if a_weapons and a_sel is not None and 0 <= int(a_sel) < len(a_weapons):
-                active_sample_weapon = a_weapons[int(a_sel)]
+        # SUPPRIMES ici (V11 §9.1) : value_over_ttk (rentabilite) et threat_level (menace).
+        # C etaient des features CALCULEES a partir d une seule arme echantillon (RNG[0] de la
+        # 1re figurine) et d une seule figurine cible, en ignorant toutes les regles speciales
+        # et le couvert : deux nombres faux des que les capacites sont actives, qui en plus
+        # REMPLACAIENT les donnees brutes en perdant de l information. L agent les reapprend
+        # depuis les stats brutes des deux camps (bloc B3 / bloc D).
         for slot_i in range(self.SQUAD_N_ENEMY_SLOTS):
-            base = 63 + slot_i * self.SQUAD_PER_ENEMY_SLOT
             esid = enemy_slot_ids[slot_i] if slot_i < len(enemy_slot_ids) else None
             if esid is None or esid not in units_cache:
-                continue  # slot vide/mort (mask=0)
+                cont.extend([0.0] * self.SQUAD_PER_ENEMY_SLOT_CONT)  # slot vide/mort (mask=0)
+                binv.extend([0.0] * self.SQUAD_PER_ENEMY_SLOT_BIN)
+                continue
             e_entry = units_cache[esid]
             e_sq = squad_cache.get(esid, {})  # get allowed
             e_mids = [m for m in squad_models.get(esid, []) if m in models_cache]  # get allowed
             e_size = len(e_mids)
             e_hp_total = int(e_entry.get("HP_CUR", 0))  # get allowed
-            obs[base + 0] = min(1.0, e_size / 10.0)
-            obs[base + 1] = min(1.0, e_hp_total / 30.0)
-            obs[base + 2] = max(-1.0, min(1.0, (int(e_entry["col"]) - cx) / pr))
-            obs[base + 3] = max(-1.0, min(1.0, (int(e_entry["row"]) - cy) / pr))
-            obs[base + 4] = min(1.0, int(e_sq.get("oc_total", 0)) / 10.0)  # get allowed
-            obs[base + 5] = 1.0  # slot_mask (alive)
+            cont.append(float(e_size))
+            cont.append(float(e_hp_total))
+            # VALUE vivante de la cible : somme PAR FIGURINE (exacte sur une escouade
+            # heterogene en points, ex. Boyz 9x7 + Nob 12 + perso attache).
+            cont.append(sum(float(require_key(models_cache[mid], "VALUE")) for mid in e_mids))
+            # Position mesuree depuis la figurine ennemie la PLUS PROCHE de mon centroide, et
+            # non depuis l ancre de l escouade (V11 §9.2) : sur une escouade de 20 Boyz etalee,
+            # l ancre peut etre a l oppose de la figurine qui me menace. Les coordonnees
+            # donnent la direction, la distance ci-dessous donne la portee.
+            nearest_mid = min(
+                e_mids,
+                key=lambda mid: (float(models_cache[mid]["col"]) - cx) ** 2
+                + (float(models_cache[mid]["row"]) - cy) ** 2,
+            )
+            nearest = models_cache[nearest_mid]
+            cont.append(float(int(nearest["col"])) - cx)
+            cont.append(float(int(nearest["row"])) - cy)
+            # Distance bord-a-bord escouade<->escouade : MEME mesure que le gate de portee du
+            # moteur (_ranged_squad_edge_distance, socles par-figurine), donc directement
+            # comparable aux portees d armes exposees par les profils.
+            cont.append(
+                float(
+                    _ranged_squad_edge_distance(
+                        game_state, active_squad_id, esid,
+                        metric=ranged_metric, attacker_socle=active_socle,
+                    )
+                )
+            )
+            cont.append(float(int(e_sq.get("oc_total", 0))))  # get allowed
+            # Profil brut de la cible (V11 §10 bloc D) : mobilite (anticiper sa menace apres
+            # son move) + defensif (choix de cible). Source = sa datasheet, comme le bloc B3.
+            e_unit = get_unit_by_id(str(esid), game_state)
+            if e_unit is None:
+                raise KeyError(f"Unit {esid} missing from game_state['units'] for observation")
+            cont.append(float(require_key(e_unit, "MOVE")))
+            cont.append(float(require_key(e_unit, "HP_MAX")))
+            cont.append(float(require_key(e_unit, "T")))
+            cont.append(float(require_key(e_unit, "ARMOR_SAVE")))
+            cont.append(float(require_key(e_unit, "INVUL_SAVE")))
+            binv.append(1.0)  # slot_mask (alive)
             # is_locked_by_friendly_er : l escouade ennemie est dans l ER (bord-a-bord)
             # d au moins une escouade alliee.
             # metric="hex" ÉPINGLÉ : feature d'observation IA (§10) — reste hex même après la
             # bascule EZ euclidienne 7.6 (retrain hors périmètre migration, décision actée).
             is_locked = any(
-                unit_entries_within_engagement_zone(e_entry, ae, ez, metric="hex") for ae in ally_entries
+                unit_entries_within_engagement_zone(e_entry, ae, ez_zone, metric="hex") for ae in ally_entries
             )
-            obs[base + 6] = 1.0 if is_locked else 0.0
-            # value_over_ttk = VALUE_cible / TTK, normalise (cap a 1.0)
-            value_over_ttk = 0.0
-            threat_level = 0.0
-            if active_sample_weapon is not None and isinstance(active_sample_weapon, dict) and e_mids:
-                t_target = int(models_cache[e_mids[0]].get("T", 4))
-                sv_target = int(models_cache[e_mids[0]].get("ARMOR_SAVE", 7))
-                invul_target = int(models_cache[e_mids[0]].get("INVUL_SAVE", 7))
-                bs = int(active_sample_weapon.get("ATK", active_sample_weapon.get("BS", 4)))
-                s = int(active_sample_weapon.get("STR", active_sample_weapon.get("S", 4)))
-                ap = int(active_sample_weapon.get("AP", 0))  # get allowed
-                dmg_raw = active_sample_weapon.get("DMG", 1)
-                try:
-                    d_mean = float(expected_dice_value(dmg_raw, "obs_ttk_dmg"))
-                except Exception:
-                    d_mean = float(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1.0
-                p_hit = max(0.0, (7 - bs) / 6.0) if bs <= 6 else 0.0
-                wth = wound_threshold(s, t_target)
-                p_wound = max(0.0, (7 - wth) / 6.0)
-                sv_th = save_threshold(sv_target, invul_target, ap)
-                p_fail = max(0.0, (sv_th - 1) / 6.0) if sv_th < 7 else 1.0
-                expected_dmg_per_attack = p_hit * p_wound * p_fail * d_mean
-                if expected_dmg_per_attack > 0:
-                    # VALUE de la cible = somme PAR FIGURINE de points_per_hp_i * HP_CUR_i.
-                    # Depuis que points_per_hp est calcule par figurine (VALUE_i / HP_MAX_i),
-                    # extrapoler celui de e_mids[0] a toute l escouade est FAUX des qu elle est
-                    # heterogene en points (Boyz 9 x 7 + Nob 12, perso attache) : la somme doit
-                    # etre faite figurine a figurine. require_key : pas de defaut masquant.
-                    e_value = sum(
-                        float(require_key(models_cache[mid], "points_per_hp"))
-                        * float(require_key(models_cache[mid], "HP_CUR"))
-                        for mid in e_mids
-                    )
-                    # TTK = HP_total / expected_dmg_per_attack (en nb attaques moyennes)
-                    ttk = max(1.0, e_hp_total / expected_dmg_per_attack)
-                    value_over_ttk = min(1.0, e_value / (ttk * 50.0))  # /50 normalisation
-            # threat_level = expected damage des armes ennemies sur notre escouade
-            if e_mids:
-                e_sample = models_cache[e_mids[0]]
-                e_weapons = e_sample.get("RNG_WEAPONS", [])  # get allowed
-                e_sel = e_sample.get("selectedRngWeaponIndex")
-                if e_weapons and e_sel is not None and 0 <= int(e_sel) < len(e_weapons):
-                    ew = e_weapons[int(e_sel)]
-                    if isinstance(ew, dict) and alive_mids:
-                        # vs notre T/Sv (premier modele actif)
-                        our_t = int(models_cache[alive_mids[0]].get("T", 4))
-                        our_sv = int(models_cache[alive_mids[0]].get("ARMOR_SAVE", 7))
-                        our_inv = int(models_cache[alive_mids[0]].get("INVUL_SAVE", 7))
-                        e_bs = int(ew.get("ATK", ew.get("BS", 4)))
-                        e_s = int(ew.get("STR", ew.get("S", 4)))
-                        e_ap = int(ew.get("AP", 0))  # get allowed
-                        e_dmg_raw = ew.get("DMG", 1)
-                        try:
-                            e_d = float(expected_dice_value(e_dmg_raw, "obs_threat_dmg"))
-                        except Exception:
-                            e_d = float(e_dmg_raw) if isinstance(e_dmg_raw, (int, float)) else 1.0
-                        try:
-                            e_nb = float(expected_dice_value(ew.get("NB", 1), "obs_threat_nb"))
-                        except Exception:
-                            e_nb = float(ew.get("NB", 1)) if isinstance(ew.get("NB", 1), (int, float)) else 1.0
-                        e_phit = max(0.0, (7 - e_bs) / 6.0) if e_bs <= 6 else 0.0
-                        e_wth = wound_threshold(e_s, our_t)
-                        e_pw = max(0.0, (7 - e_wth) / 6.0)
-                        e_svth = save_threshold(our_sv, our_inv, e_ap)
-                        e_pf = max(0.0, (e_svth - 1) / 6.0) if e_svth < 7 else 1.0
-                        threat_level = min(1.0, e_size * e_nb * e_phit * e_pw * e_pf * e_d / 20.0)
-            obs[base + 7] = value_over_ttk
-            obs[base + 8] = threat_level
+            binv.append(1.0 if is_locked else 0.0)
 
-        return obs
+        if len(cont) != self.SQUAD_OBS_CONT_SIZE or len(binv) != self.SQUAD_OBS_BIN_SIZE:
+            raise RuntimeError(
+                f"build_squad_observation: layout desynchronise — produit "
+                f"cont={len(cont)} (attendu {self.SQUAD_OBS_CONT_SIZE}), "
+                f"bin={len(binv)} (attendu {self.SQUAD_OBS_BIN_SIZE}). "
+                f"Mettre a jour SQUAD_OBS_CONT_SIZE/SQUAD_OBS_BIN_SIZE et obs_size en config."
+            )
+        return {
+            "vec_cont": np.asarray(cont, dtype=np.float32),
+            "vec_bin": np.asarray(binv, dtype=np.float32),
+        }
 
     # ========================================================================
     # T1 — GRILLE SPATIALE EGOCENTRIQUE (move_action_space_spatial_rework §6.2)
@@ -1556,12 +2004,12 @@ class ObservationBuilder:
     def build_squad_grid(self, game_state: Dict[str, Any], active_squad_id: str) -> np.ndarray:
         """Grille egocentrique (GRID_CHANNELS, GRID_SIZE, GRID_SIZE) autour de l'escouade active.
 
-        Corrige le defaut le plus grave de l'obs squad 108-d : elle ne contenait AUCUN terrain
+        Corrige le defaut le plus grave de l'obs squad vectorielle : elle ne contenait AUCUN terrain
         (spec §4.1), donc l'agent ne percevait pas les murs — le masque l'empechait de jouer
         illegal, jamais de contourner, de se couvrir ou de bloquer une ligne de vue.
 
-        Canaux (spec §10.1) : murs, occupation alliee, occupation ennemie, EZ ennemie,
-        objectifs, niveau (etages).
+        Canaux (spec §10.1 + V11 §9.10) : murs, occupation alliee, occupation ennemie,
+        EZ ennemie, objectifs, niveau (etages), couvert.
 
         Geometrie deleguee a `engine/spatial_grid` — source UNIQUE partagee avec le masque (T2)
         et le decoder (T3). Layout (C,H,W) = convention CNN de sb3 (`NatureCNN`).
@@ -1574,12 +2022,15 @@ class ObservationBuilder:
         from engine.spatial_grid import (
             GRID_CHANNELS,
             GRID_CH_ALLY,
+            GRID_CH_COVER,
             GRID_CH_ENEMY,
             GRID_CH_EZ,
             GRID_CH_LEVEL,
             GRID_CH_OBJECTIVE,
             GRID_CH_WALL,
             GRID_SIZE,
+            cover_dilation_cells,
+            dilate_channel,
             grid_half_extent_subhex,
             hex_arrays_to_cells,
         )
@@ -1638,9 +2089,19 @@ class ObservationBuilder:
                     else:
                         objective_hexes.append((int(hex_entry["col"]), int(hex_entry["row"])))
 
+            # Cases donnant le benefice du couvert (13.08) = hexes des terrain areas. MEME
+            # ensemble que celui peint en `cover_cells` par la preview de tir du moteur : une
+            # figurine hideable qui s y tient est « within a terrain area ». Statique comme les
+            # murs et les objectifs.
+            cover_hexes: List[Tuple[int, int]] = []
+            for area in game_state.get("terrain_areas", []):  # get allowed (scenario sans terrain)
+                for hex_entry in require_key(area, "hexes"):
+                    cover_hexes.append((int(hex_entry[0]), int(hex_entry[1])))
+
             static = {
                 "walls": _to_arrays(game_state.get("wall_hexes", set())),  # get allowed (board sans mur)
                 "objectives": _to_arrays(objective_hexes),
+                "cover": _to_arrays(cover_hexes),
             }
             game_state["_grid_static_hex_arrays"] = static
 
@@ -1680,6 +2141,19 @@ class ObservationBuilder:
         # Sur le board x5 les objectifs sont des ZONES (~10 500 hexes), pas des points : c'est
         # de loin le canal le plus lourd, d'ou la memoisation ci-dessus.
         _paint_arrays(GRID_CH_OBJECTIVE, *static["objectives"])
+
+        # --- Canal 6 : couvert -------------------------------------------------
+        # Hexes des terrain areas, PUIS dilatation du rayon de socle de l escouade active :
+        # la regle 13.08 accorde le couvert des que le SOCLE chevauche la zone, donc les cases
+        # de la couronne autour de la zone donnent aussi le couvert. Sans dilatation, l agent
+        # voyait ces cases a 0 alors qu elles couvrent (ecart ~2 cellules pour un socle
+        # d infanterie de 16 subhex sur le board x5). Dilatation en espace grille : exacte au
+        # grain de la grille et de cout negligeable.
+        _paint_arrays(GRID_CH_COVER, *static["cover"])
+        grid[GRID_CH_COVER] = dilate_channel(
+            grid[GRID_CH_COVER],
+            cover_dilation_cells(require_key(active_entry, "BASE_SIZE"), half_extent),
+        )
 
         # --- Canal 5 : niveau (etages) ----------------------------------------
         # Vaut 0 partout tant qu'aucun etage n'est declare : le sol EST le niveau 0, ce n'est

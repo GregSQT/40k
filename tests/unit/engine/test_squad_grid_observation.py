@@ -12,6 +12,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
+from engine.observation_builder import ObservationBuilder
 from engine.spatial_grid import (
     GRID_CHANNELS,
     GRID_CH_ALLY,
@@ -56,7 +57,7 @@ FAR_WALL = (60, 60)
 def _config(walls, objectives) -> Dict[str, Any]:
     obs_params = {
         "perception_radius": 25, "max_nearby_units": 10, "max_valid_targets": 5,
-        "obs_size": 108, "action_space_size": 1047,
+        "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET, "action_space_size": 1047,
     }
     return {
         "board": {
@@ -247,3 +248,81 @@ def test_dead_squad_returns_empty_grid(engine):
     grid = engine.obs_builder.build_squad_grid(engine.game_state, "999")
     assert grid.shape == (GRID_CHANNELS, GRID_SIZE, GRID_SIZE)
     assert grid.sum() == 0.0
+
+
+# ---------------------------------------------------------------------------
+# T7 (V11 §9.10) — canal « couvert »
+# ---------------------------------------------------------------------------
+
+def test_cover_channel_paints_terrain_areas(engine):
+    """Canal couvert = hexes des terrain areas (règle 13.08 « within a terrain area »).
+
+    Contre-épreuve : avant ce canal, la grille ne portait le terrain que comme MUR binaire —
+    l'agent ne pouvait pas distinguer une case qui donne le couvert d'un simple bloqueur de
+    vue, donc « se déplacer vers le couvert » n'était pas dérivable de l'observation.
+    """
+    from engine.spatial_grid import GRID_CH_COVER
+
+    gs = engine.game_state
+    cover_hex = (22, 20)
+    gs["terrain_areas"] = [{
+        "id": "area1",
+        "obscuring": True,
+        "polygon_vertices": [[21, 19], [23, 19], [23, 21], [21, 21]],
+        "hexes": [list(cover_hex)],
+    }]
+    gs.pop("_grid_static_hex_arrays", None)  # les statiques sont memoises
+
+    grid = _grid(engine)
+    half_extent = grid_half_extent_subhex(gs, "1")
+    gx, gy = hex_to_cell(cover_hex[0], cover_hex[1], ANCHOR_COL, ANCHOR_ROW, half_extent)
+    assert grid[GRID_CH_COVER, gy, gx] == 1.0
+    # Le mur voisin, lui, n'est PAS du couvert (aucune terrain area ne le contient).
+    wx, wy = hex_to_cell(NEAR_WALL[0], NEAR_WALL[1], ANCHOR_COL, ANCHOR_ROW, half_extent)
+    assert grid[GRID_CH_COVER, wy, wx] == 0.0
+    assert grid[GRID_CH_WALL, wy, wx] == 1.0
+
+
+def test_cover_channel_is_empty_without_terrain_areas(engine):
+    """Sans terrain area, le canal couvert reste nul (aucun couvert n'est inventé)."""
+    from engine.spatial_grid import GRID_CH_COVER
+
+    assert engine.game_state["terrain_areas"] == []
+    assert float(_grid(engine)[GRID_CH_COVER].sum()) == 0.0
+
+
+def test_cover_channel_is_dilated_by_base_radius():
+    """13.08 : le couvert s'obtient dès que le SOCLE chevauche la zone, pas seulement l'ancre.
+
+    Contre-épreuve : même zone, deux escouades — l'une à socle 1 subhex, l'autre à socle 16.
+    La grande base doit voir une couronne de cases couvrantes autour de la zone que la petite
+    ne voit pas. Sans dilatation, les deux canaux seraient identiques (bug corrigé).
+    """
+    from engine.spatial_grid import GRID_CH_COVER, cover_dilation_cells
+
+    def _cover_sum(base_size: int) -> float:
+        cfg = _config([], [{"id": "obj1", "name": "Alpha", "hexes": [[22, 22]]}])
+        for unit in cfg["units"]:
+            unit["BASE_SIZE"] = base_size
+        with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
+             patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
+            eng = W40KEngine(config=cfg)
+        eng.reset()
+        gs = eng.game_state
+        gs["terrain_areas"] = [{
+            "id": "area1", "obscuring": True,
+            "polygon_vertices": [[21, 19], [23, 19], [23, 21], [21, 21]],
+            "hexes": [[22, 20]],
+        }]
+        gs.pop("_grid_static_hex_arrays", None)
+        half_extent = grid_half_extent_subhex(gs, "1")
+        dilation = cover_dilation_cells(base_size, half_extent)
+        assert (dilation == 0) if base_size == 1 else (dilation > 0), (
+            f"fixture : socle {base_size} -> dilatation {dilation} inattendue"
+        )
+        return float(eng.obs_builder.build_squad_grid(gs, "1")[GRID_CH_COVER].sum())
+
+    small = _cover_sum(1)
+    large = _cover_sum(16)
+    assert small == 1.0, "socle d'un hex : la seule case de la zone"
+    assert large > small, "grande base : la couronne alentour couvre aussi"

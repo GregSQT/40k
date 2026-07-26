@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
+from engine.observation_builder import ObservationBuilder
 from engine.phase_handlers.movement_handlers import _advance_roll_for
 from engine.phase_handlers.shared_utils import execute_squad_move, get_squad_move_budget
 from engine.w40k_core import W40KEngine
@@ -41,7 +42,7 @@ def _unit_cfg(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
 @pytest.fixture
 def engine():
     obs_params = {"perception_radius": 25, "max_nearby_units": 10, "max_valid_targets": 5,
-                  "obs_size": 108, "action_space_size": 1047}
+                  "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET, "action_space_size": 1047}
     config = {
         "board": {"default": {"cols": 60, "rows": 60, "hex_radius": 1.0, "margin": 0.0,
                               "wall_hexes": [], "objectives": [], "inches_to_subhex": 1}},

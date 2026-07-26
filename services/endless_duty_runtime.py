@@ -677,7 +677,15 @@ def _replace_units_for_player(gs: Dict[str, Any], player: int, replacement_units
     kept = [u for u in require_key(gs, "units") if int(require_key(u, "player")) != int(player)]
     gs["units"] = kept + replacement_units
     gs["unit_by_id"] = {str(require_key(u, "id")): u for u in gs["units"]}
+    # `value_at_start` (force d usure observee par l agent) est recalculee par
+    # build_units_cache pour LES DEUX joueurs. Ici seul `player` est remplace : la reference
+    # de l adversaire doit rester celle de son propre debut, sinon ses pertes deja subies
+    # disparaissent de l observation (son ratio remonterait a 1.0 sans avoir rien regagne).
+    previous_value_at_start = dict(gs.get("value_at_start") or {})  # get allowed (1er appel)
     build_units_cache(gs)
+    opponent = 1 if int(player) == 2 else 2
+    if opponent in previous_value_at_start:
+        require_key(gs, "value_at_start")[opponent] = previous_value_at_start[opponent]
     rebuild_choice_timing_index(gs)
     units_cache = require_key(gs, "units_cache")
     gs["units_cache_prev"] = {

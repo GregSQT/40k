@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""ai/spatial_extractor.py - Extracteur de features pour l'obs Dict {"vec", "grid"}.
+"""ai/spatial_extractor.py - Extracteur de features pour l'obs Dict {"vec_cont", "vec_bin", "grid"}.
 
 Refonte spatiale du move (Documentation/Implementation/A_faire/move_action_space_spatial_rework.md,
-T1b/T5). L'obs de l'agent est desormais un `Dict` :
-  - "vec"  : vecteur 108-d (contexte global + agregats squad + top-k figs + slots ennemis)
-  - "grid" : grille egocentrique (GRID_CHANNELS, GRID_SIZE, GRID_SIZE) = perception du terrain
+T1b/T5) + refonte de l'observation V11 (V11_audit_observation.md §9.5). L'obs de l'agent est un
+`Dict` :
+  - "vec_cont" : grandeurs CONTINUES brutes (normalisees par VecNormalize)
+  - "vec_bin"  : valeurs DISCRETES (drapeaux, phase, controle d'objectif) JAMAIS normalisees
+  - "grid"     : grille egocentrique (GRID_CHANNELS, GRID_SIZE, GRID_SIZE) = perception du terrain
+
+Les deux vecteurs sont concatenes tels quels apres le CNN : le split n'existe que pour la
+normalisation (VecNormalize agit par cle), pas pour le reseau.
 
 `CombinedExtractor` (le defaut de `MultiInputPolicy`) applique `NatureCNN` uniquement aux sous-espaces
-reconnus comme images (`is_image_space` : 3D + canaux dans {1,3}). La grille a GRID_CHANNELS=6 canaux :
-elle serait donc APLATIE (6144 floats), ce qui detruit le biais inductif spatial vise par la refonte
+reconnus comme images (`is_image_space` : 3D + canaux dans {1,3}). La grille a GRID_CHANNELS canaux (>3) :
+elle serait donc APLATIE (GRID_CHANNELS x 1024 floats), ce qui detruit le biais inductif spatial vise par la refonte
 (spec §6.2). D'ou cet extracteur : CNN sur la grille, passthrough du vecteur, concatenation.
 
 Aucun repli, aucune valeur par defaut masquant une erreur : la forme de la grille vient des
@@ -26,12 +31,12 @@ from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
 
 
 class SpatialCombinedExtractor(BaseFeaturesExtractor):
-    """CNN sur "grid" + passthrough de "vec", concatenes en un vecteur de features.
+    """CNN sur "grid" + passthrough de "vec_cont"/"vec_bin", concatenes en un vecteur de features.
 
-    `cnn_features` : dimension de la sortie CNN avant concatenation avec le vecteur.
+    `cnn_features` : dimension de la sortie CNN avant concatenation avec les vecteurs.
     OBLIGATOIRE, sans defaut : la valeur vient de la config JSON de l'agent
     (`model_params.policy_kwargs.features_extractor_kwargs.cnn_features`), transmise par sb3.
-    `features_dim` (attribut sb3) = cnn_features + dim("vec").
+    `features_dim` (attribut sb3) = cnn_features + dim("vec_cont") + dim("vec_bin").
     """
 
     def __init__(self, observation_space: gym.spaces.Dict, cnn_features: int):
@@ -43,7 +48,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
             raise TypeError(
                 f"SpatialCombinedExtractor attend un espace Dict, recu {type(observation_space)}"
             )
-        for key in ("vec", "grid"):
+        for key in ("vec_cont", "vec_bin", "grid"):
             if key not in observation_space.spaces:
                 raise KeyError(
                     f"SpatialCombinedExtractor : cle '{key}' absente de l'espace d'observation "
@@ -56,13 +61,14 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 f"SpatialCombinedExtractor : forme de grille inattendue {grid_space.shape}, "
                 f"attendu {(GRID_CHANNELS, GRID_SIZE, GRID_SIZE)}"
             )
-        vec_space = observation_space.spaces["vec"]
-        vec_shape = vec_space.shape
-        if vec_shape is None or len(vec_shape) != 1:
-            raise ValueError(
-                f"SpatialCombinedExtractor : 'vec' doit etre 1D, recu shape {vec_shape}"
-            )
-        vec_dim = int(vec_shape[0])
+        vec_dim = 0
+        for key in ("vec_cont", "vec_bin"):
+            vec_shape = observation_space.spaces[key].shape
+            if vec_shape is None or len(vec_shape) != 1:
+                raise ValueError(
+                    f"SpatialCombinedExtractor : '{key}' doit etre 1D, recu shape {vec_shape}"
+                )
+            vec_dim += int(vec_shape[0])
 
         super().__init__(observation_space, features_dim=cnn_features + vec_dim)
 
@@ -82,6 +88,5 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
 
     def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
         grid = observations["grid"]
-        vec = observations["vec"]
         cnn_out = self.cnn_head(self.cnn(grid))
-        return torch.cat([cnn_out, vec], dim=1)
+        return torch.cat([cnn_out, observations["vec_cont"], observations["vec_bin"]], dim=1)

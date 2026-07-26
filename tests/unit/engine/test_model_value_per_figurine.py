@@ -224,7 +224,7 @@ class TestSquadCombatShapingModelValue:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# D — observation : value_over_ttk somme la VALUE PAR FIGURINE
+# D — observation : la VALUE d'une escouade ennemie somme la VALUE PAR FIGURINE
 # ─────────────────────────────────────────────────────────────────────────────
 # 4e rupture, non recensee par l'enonce d'origine de §0.12 et introduite EN
 # REGRESSION par les etapes A/B : observation_builder extrapolait le
@@ -232,9 +232,13 @@ class TestSquadCombatShapingModelValue:
 # donc exact ; faux des que l'escouade est heterogene en points.
 # L'invariant teste ici est le plus fort disponible : le resultat ne doit pas
 # dependre de l'ORDRE des figurines dans l'escouade.
+#
+# Refonte V11 (V11_audit_observation.md §9.1) : la feature calculee `value_over_ttk`
+# a ete SUPPRIMEE de l'observation au profit de la donnee brute — la VALUE vivante
+# de l'escouade ennemie (bloc D). L'invariant, lui, est inchange et porte desormais
+# sur cette dimension : c'est toujours une somme PAR FIGURINE.
 
-class TestObservationValueOverTtk:
-    _SLOT_VALUE_OVER_TTK = 63 + 7  # base du slot ennemi 0 + offset value_over_ttk
+class TestObservationEnemySquadValue:
 
     def _obs_enemy_slot0(self, enemy_models: List[Dict[str, Any]]) -> float:
         from engine.observation_builder import ObservationBuilder
@@ -268,10 +272,13 @@ class TestObservationValueOverTtk:
         builder = ObservationBuilder({
             "observation_params": {
                 "perception_radius": 25, "max_nearby_units": 6,
-                "max_valid_targets": 5, "obs_size": 357,
+                "max_valid_targets": 5,
+                "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET,
             }
         })
-        return float(builder.build_squad_observation(gs, "1")[self._SLOT_VALUE_OVER_TTK])
+        gs["victory_points"] = {1: 0, 2: 0}
+        cont = builder.build_squad_observation(gs, "1")["vec_cont"]
+        return float(cont[ObservationBuilder.squad_enemy_cont_base(0) + 2])  # VALUE du slot 0
 
     def _boyz(self, nob_index: int) -> List[Dict[str, Any]]:
         """9 Boyz a 7 pts + 1 Nob a 12, le Nob place a `nob_index`."""
@@ -280,7 +287,7 @@ class TestObservationValueOverTtk:
         return models
 
     def test_invariant_a_lordre_des_figurines(self):
-        """Le Nob en tete ou en queue : meme value_over_ttk (rouge avant le fix)."""
+        """Le Nob en tete ou en queue : meme VALUE d'escouade (rouge avant le fix)."""
         nob_premier = self._obs_enemy_slot0(self._boyz(nob_index=0))
         nob_dernier = self._obs_enemy_slot0(self._boyz(nob_index=9))
         assert nob_premier > 0.0

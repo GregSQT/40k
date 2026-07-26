@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
+from engine.observation_builder import ObservationBuilder
 from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
 from engine.w40k_core import W40KEngine
 
@@ -49,7 +50,7 @@ def _unit_cfg(uid: int, player: int, col: int, row: int, hp: int, oc: int) -> Di
 def _config() -> Dict[str, Any]:
     obs_params = {
         "perception_radius": 25, "max_nearby_units": 10, "max_valid_targets": 5,
-        "obs_size": 108, "action_space_size": 1047,
+        "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET, "action_space_size": 1047,
     }
     return {
         "board": {
@@ -89,8 +90,12 @@ def engine():
 
 
 def _enemy_slot_hp(obs, slot_i: int) -> float:
-    # obs[base+1] = min(1, HP_total/30) ; base = 63 + slot*9
-    return float(obs[63 + slot_i * 9 + 1])
+    """PV totaux BRUTS du slot ennemi i (vec_cont[base+1], cf. layout build_squad_observation)."""
+    return float(obs["vec_cont"][ObservationBuilder.squad_enemy_cont_base(slot_i) + 1])
+
+
+def _enemy_slot_mask(obs, slot_i: int) -> float:
+    return float(obs["vec_bin"][ObservationBuilder.squad_enemy_bin_base(slot_i)])
 
 
 def test_fixture_threat_order_differs_from_alpha_order(engine):
@@ -112,24 +117,27 @@ def test_obs_enemy_slots_follow_action_mapping(engine):
     units_cache = gs["units_cache"]
     for i, esid in enumerate(mapping):
         if esid is None:
-            assert obs[63 + i * 9 + 5] == 0.0  # slot_mask vide
+            assert _enemy_slot_mask(obs, i) == 0.0  # slot_mask vide
             continue
-        expected_hp = min(1.0, int(units_cache[esid]["HP_CUR"]) / 30.0)
+        expected_hp = float(int(units_cache[esid]["HP_CUR"]))
         assert _enemy_slot_hp(obs, i) == pytest.approx(expected_hp), (
-            f"slot {i} desaligne : obs decrit HP {_enemy_slot_hp(obs, i)*30:.0f}, "
+            f"slot {i} desaligne : obs decrit HP {_enemy_slot_hp(obs, i):.0f}, "
             f"mapping attend {esid} (HP {units_cache[esid]['HP_CUR']})"
         )
 
 
-def test_fall_back_flag_obs19(engine):
-    """obs[19] = flag FALL BACK (ex-doublon HP%), source `units_fled`."""
+# vec_bin[6] = flag FALL BACK (cf. layout build_squad_observation, bloc B1)
+_BIN_FALL_BACK = 6
+
+
+def test_fall_back_flag(engine):
+    """Le flag FALL BACK (vec_bin) suit `units_fled`, pas les PV."""
     gs = engine.game_state
     gs.setdefault("units_fled", set()).discard("1")
     obs_no = engine.obs_builder.build_squad_observation(gs, "1")
-    assert obs_no[19] == 0.0
+    assert obs_no["vec_bin"][_BIN_FALL_BACK] == 0.0
 
     gs.setdefault("units_fled", set()).add("1")
     obs_yes = engine.obs_builder.build_squad_observation(gs, "1")
-    assert obs_yes[19] == 1.0
-    # obs[19] suit desormais `units_fled` (0->1 selon le repli), plus HP% : les deux
-    # assertions ci-dessus le prouvent (la valeur ne depend plus des PV).
+    assert obs_yes["vec_bin"][_BIN_FALL_BACK] == 1.0
+    # La valeur ne depend plus des PV (0->1 a PV constants) : les deux assertions le prouvent.

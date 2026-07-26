@@ -445,8 +445,8 @@ def _build_eval_obs_normalizer_for_worker(
     from ai.vec_normalize_utils import normalize_observation_for_inference, get_vec_normalize_path
 
     # Obs Dict (pipeline squad spatial, refonte T4) : VecNormalize a ete entrainee avec
-    # norm_obs_keys=["vec"] (la grille reste 0/1, jamais normalisee). normalize_obs ne touche
-    # alors que la cle "vec". On charge l'objet VecNormalize une seule fois (lazy) au lieu de
+    # norm_obs_keys=["vec_cont"] (grille et drapeaux restent bruts, jamais normalises).
+    # normalize_obs ne touche alors que la cle "vec_cont". On charge l'objet une seule fois au lieu de
     # recharger le pkl a chaque step. Le chemin legacy (obs Box a plat) reste byte-identique.
     _dict_vecnorm = {"obj": None}
 

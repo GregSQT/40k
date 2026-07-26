@@ -35,78 +35,47 @@ d'arme brute, et il lui manque des informations de décision que les règles exi
 
 ## 1. Ce que l'agent voit réellement
 
-L'observation active a **deux morceaux** donnés ensemble au réseau :
+> **Section d'audit — état AVANT la refonte T1→T7** (§8). Chiffres conservés tels quels : ils
+> documentent le point de départ. État réel du code : §8 et §11.
 
-1. un **vecteur de 108 nombres** (`build_squad_observation`, [1253-1542](../../engine/observation_builder.py#L1253)),
+L'observation avait **deux morceaux** donnés ensemble au réseau :
+
+1. un **vecteur de 108 nombres** (`build_squad_observation`) — aujourd'hui **199**, scindé
+   `vec_cont` (119) / `vec_bin` (80) ;
 2. une **grille égocentrique** de 6 images superposées centrées sur l'escouade active
-   (`build_squad_grid`, [1548-1692](../../engine/observation_builder.py#L1548)).
+   (`build_squad_grid`) — aujourd'hui **7 canaux**.
 
 L'espace d'action associé (justification config) : 1024 cases de déplacement + attendre +
 5 cibles de tir + charge + fight + 15 macro (5 objectifs × 3 intentions). **Donc l'agent choisit
 déjà : où bouger, quelle cible tirer/charger, quel objectif viser.** L'observation doit nourrir
 ces choix-là.
 
-### 1.1 Le vecteur — les 108 nombres, un par un (sans jargon)
+### 1.1 Le vecteur — ce que l'agent voit, poste par poste
 
-> **État** : ce tableau décrit le code **actuel**, après l'étape 1 (D1 + fall_back, cf. §8).
-> Les refontes décidées (données brutes, suppressions, corrections) sont en **§9** et **pas encore
-> codées** — ne pas les chercher ici.
+> **⚠️ État (2026-07-25)** : le tableau détaillé qui figurait ici décrivait l'observation
+> **108-d d'avant la refonte T1→T7** (§8). Il est **périmé** et a été retiré plutôt que
+> maintenu en double : le vecteur fait désormais **199 dimensions**, scindées en `vec_cont`
+> (119 continues **brutes**, normalisées par VecNormalize) et `vec_bin` (80 valeurs discrètes
+> jamais normalisées).
+>
+> **Source unique du layout** : le bloc LAYOUT en tête de `build_squad_observation`
+> ([observation_builder.py:1250-1345](../../engine/observation_builder.py#L1250)), qui liste
+> l'ordre exact des dimensions et est **vérifié à l'exécution** (bases de blocs + tailles).
+> Recopier ce layout ici créerait une seconde source de vérité qui ne pourrait qu'avoir tort.
+>
+> Contenu par bloc : **A** contexte (tour, steps, phase, mon tour, VP des deux camps, VALUE
+> cumulée des deux camps, contrôle + présence des 5 objectifs) · **B** mon escouade (drapeaux
+> d'activation, hidden / gone-to-ground / à couvert / engagée, effectif, PV de la figurine
+> blessée, OC, cohérence, profil brut MOVE/HP_MAX/T/save/invul) · **C** 6 figurines
+> (position relative, éligible fight, dans l'EZ, EZ via allié) · **D** 5 slots ennemis
+> (taille, PV, VALUE, position de la figurine la plus proche + distance, OC, mask, bloqué par
+> un allié, MOVE, profil défensif).
+>
+> Le reste de ce §1 et les §2-§6 décrivent l'état **d'avant la refonte** : ils constituent
+> l'audit qui l'a motivée, et sont conservés à ce titre. Les décisions sont en §9/§10, l'état
+> réel du code en §8/§11.
 
-**Bloc « contexte général » (index 0 à 15)**
-
-| # | Ce que c'est, en clair | Ligne |
-|---|---|---|
-| 0 | Est-ce mon tour ? (1 = oui) | [1287](../../engine/observation_builder.py#L1287) |
-| 1 | Quelle phase (déploiement/commande=0, move=0.25, tir=0.5, charge=0.75, combat=1) | [1289](../../engine/observation_builder.py#L1289) |
-| 2 | Numéro du tour, sur 5 | [1290](../../engine/observation_builder.py#L1290) |
-| 3 | Nombre de « pas » joués dans la partie, sur 100 | [1291](../../engine/observation_builder.py#L1291) |
-| 4 | Points de vie restants de mon escouade (en % du total) | [1302](../../engine/observation_builder.py#L1302) |
-| 5 | Mon escouade a-t-elle déjà bougé ce tour ? | [1303](../../engine/observation_builder.py#L1303) |
-| 6 | A-t-elle déjà tiré ? | [1304](../../engine/observation_builder.py#L1304) |
-| 7 | A-t-elle déjà combattu ? | [1305](../../engine/observation_builder.py#L1305) |
-| 8 | A-t-elle fait une avance (advance) ? | [1306](../../engine/observation_builder.py#L1306) |
-| 9 | Nombre d'escouades amies vivantes (normalisé) | [1315](../../engine/observation_builder.py#L1315) |
-| 10 | Nombre d'escouades ennemies vivantes (normalisé) | [1316](../../engine/observation_builder.py#L1316) |
-| 11-15 | Pour chacun des 5 objectifs : +1 je le tiens, −1 l'ennemi le tient, 0 contesté/vide | [1326](../../engine/observation_builder.py#L1326) |
-
-**Bloc « résumé de mon escouade » (index 16 à 20)**
-
-| # | En clair | Ligne |
-|---|---|---|
-| 16 | Combien de figurines me restent (en % de l'effectif de départ) | [1332](../../engine/observation_builder.py#L1332) |
-| 17 | Mon escouade est-elle en cohérence (bien groupée) ? | [1333](../../engine/observation_builder.py#L1333) |
-| 18 | Score de contrôle d'objectif de mon escouade (somme des OC) | [1334](../../engine/observation_builder.py#L1334) |
-| 19 | **Flag FALL BACK** — l'escouade s'est-elle repliée ce tour ? (ex-doublon HP% réaffecté, cf. §8) | [1335](../../engine/observation_builder.py#L1335) |
-| 20 | Estimation de ma puissance de feu contre une cible générique (T4/save 4) | [1369](../../engine/observation_builder.py#L1369) |
-
-**Bloc « mes figurines », 6 figurines max × 7 infos (index 21 à 62)**
-Pour chacune des 6 premières figurines vivantes :
-
-| décalage | En clair | Ligne |
-|---|---|---|
-| +0 / +1 | Position de la figurine par rapport au centre de l'escouade (colonne / ligne) | [1399](../../engine/observation_builder.py#L1399) |
-| +2 | Ses points de vie (%) | [1401](../../engine/observation_builder.py#L1401) |
-| +3 | Index de l'arme de corps-à-corps sélectionnée (sur 5) | [1403](../../engine/observation_builder.py#L1403) |
-| +4 | Peut-elle combattre maintenant (éligible fight) ? | [1404](../../engine/observation_builder.py#L1404) |
-| +5 | Est-elle au contact d'un ennemi ? | [1411](../../engine/observation_builder.py#L1411) |
-| +6 | Est-elle au contact d'un ami qui, lui, touche un ennemi (règle du « copain ») ? | [1428](../../engine/observation_builder.py#L1428) |
-
-**Bloc « ennemis », 5 emplacements × 9 infos (index 63 à 107)**
-Pour chacun des 5 slots ennemis, **ordre = menace HP×OC décroissante** (`get_enemy_slot_mapping`,
-même ordre que l'action tir/charge — D1 corrigé, cf. §8) :
-
-| décalage | En clair | Ligne |
-|---|---|---|
-| +0 | Taille de l'escouade ennemie (nb figurines /10) | [1460](../../engine/observation_builder.py#L1460) |
-| +1 | Ses points de vie totaux (/30) | [1461](../../engine/observation_builder.py#L1461) |
-| +2 / +3 | Sa position par rapport à moi (colonne / ligne) | [1462](../../engine/observation_builder.py#L1462) |
-| +4 | Son score de contrôle d'objectif | [1464](../../engine/observation_builder.py#L1464) |
-| +5 | Emplacement occupé (1 = un ennemi est là, 0 = vide) | [1465](../../engine/observation_builder.py#L1465) |
-| +6 | Est-il « bloqué » au contact d'une de mes escouades ? | [1473](../../engine/observation_builder.py#L1473) |
-| +7 | Rentabilité de le tuer (sa valeur en points ÷ temps pour le tuer) | [1539](../../engine/observation_builder.py#L1539) |
-| +8 | Menace qu'il représente (dégâts qu'il peut me faire) | [1540](../../engine/observation_builder.py#L1540) |
-
-### 1.2 La grille égocentrique — 6 images (canaux)
+### 1.2 La grille égocentrique — 6 images (canaux) — *7 depuis T7 (§8), avec le canal « couvert »*
 
 Centrée sur l'escouade active, chaque « pixel » = un hex. 6 couches
 ([1566-1690](../../engine/observation_builder.py#L1566)) :
@@ -373,6 +342,13 @@ d'échantillonnage (« évaluer un ennemi » appris une fois pour 5 slots), scal
 d'entités.
 
 ### 7.2 Découpe proposée (offsets fixes connus)
+
+> **Note (2026-07-25)** : les offsets ci-dessous sont ceux du vecteur 108-d d'avant T1→T7. Le
+> **principe** (poids partagés par entité + pooling masqué, embeddings ennemis conservés par slot)
+> est inchangé ; les offsets réels se lisent via les accesseurs `squad_model_*_base` /
+> `squad_enemy_*_base` de `ObservationBuilder`, et le vecteur arrive maintenant en **deux** clés
+> (`vec_cont`, `vec_bin`) à concaténer avant découpe.
+
 ```
 vec (108, déjà normalisé par VecNormalize)
  ├─ ctx  = vec[0:21]                    → φ_ctx : MLP(21 → 64)
@@ -438,6 +414,194 @@ _(rempli au fil des étapes ; preuves = tests + numéros de ligne)_
 - **Impact** : change les valeurs de l'observation → **retrain requis** (attendu). `obs_size`
   inchangé (108).
 
+### 2026-07-25 — Étapes T1→T7 : refonte du vecteur (hors portage des capacités) — ✅ FAIT
+
+Périmètre exécuté : la partie « à coder — indépendante du portage des capacités » du §11.
+**Hors périmètre, non fait** (arbitré avec l'utilisateur avant de coder) : profils d'armes bruts
+(les bits/params de règles s'insèrent dans le même bloc → réécriture double), **bloc E escouades
+amies** (spécifié en longueur variable → part avec l'archi set-based), observation de déploiement,
+archi set-based. **Tout le reste du §10 est implémenté** : le rôle et le profil défensif par
+figurine, d'abord omis sans être signalés, ont été ajoutés en T9.
+
+**`obs_size` : 108 → 199**, réparti en `vec_cont` (119) + `vec_bin` (80). Les 5 profils de
+[ArmageddonAgent_training_config.json](../../config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json)
+sont à jour ; la cohérence config ↔ layout est **vérifiée à l'init du moteur** (erreur explicite
+si `obs_size ≠ CONT+BIN`, [w40k_core.py:670-690](../../engine/w40k_core.py#L670)).
+
+**T1 — deux vecteurs, valeurs brutes.** `build_squad_observation` retourne
+`{"vec_cont", "vec_bin"}` ; l'obs de l'env devient `Dict {vec_cont, vec_bin, grid}`.
+Toutes les divisions manuelles (`/5 /10 /20 /30 /100` + clamps) sont **supprimées** : elles
+saturaient (une escouade de 20 Boyz valait 1.0 comme une de 10) et faisaient double emploi avec
+`VecNormalize`, qui ne normalise plus que `vec_cont` (`norm_obs_keys`,
+[train.py:1308](../../ai/train.py#L1308)). `vec_bin` (drapeaux, phase, contrôle d'objectif) n'est
+**jamais** normalisé. Bornes de `vec_cont` = ±inf (une borne 0..1 mentirait sur des PV bruts).
+Layout et constantes : [observation_builder.py:1294-1345](../../engine/observation_builder.py#L1294) ;
+accesseurs d'offsets + vérification des bases de blocs **à chaud** (`_check_block_base`) →
+toute dérive lève au lieu de décaler une feature en silence.
+Impacts : [w40k_core.py](../../engine/w40k_core.py), [spatial_extractor.py](../../ai/spatial_extractor.py),
+[train.py](../../ai/train.py), [bot_evaluation.py](../../ai/bot_evaluation.py).
+
+**T2 — Bloc A.** ➕ score de mission (VP mien/ennemi, même source que la condition de victoire) ;
+➕ VALUE cumulée vivante / VALUE de départ des deux camps (`value_at_start` capturé au build des
+caches, [shared_utils.py:888](../../engine/phase_handlers/shared_utils.py#L888) — les figurines
+mortes disparaissent de `models_cache`, la valeur initiale ne serait plus dérivable) ;
+✏️ contrôle d'objectif = **lecture** de `objective_controllers`, l'état persistant du moteur ;
+➕ 5 bits de présence ; ❌ `try/except: pass` supprimé ; ❌ compte d'escouades amies/ennemies
+(remplacé par la VALUE cumulée). Voir T8 ci-dessous : ce point a d'abord été implémenté comme un
+recalcul par observation, ce qui était faux au regard de 14.02.
+
+**T3 — suppressions + réorg PV.** ❌ `obs[20]` firepower générique T4/Sv4, ❌ `+7 value_over_ttk`,
+❌ `+8 threat_level`, ❌ index d'arme CC par figurine, ❌ PV par figurine. ✏️ PV réorganisés :
+{effectif vivant, HP_MAX, **PV de la figurine blessée**}. ➕ profil d'escouade brut
+(MOVE / HP_MAX / T / save / invulnérable), lu sur la datasheet de l'unité.
+
+**T4 — drapeaux terrain** ([observation_builder.py:1400](../../engine/observation_builder.py#L1400)) :
+`hidden` (13.09), `gone to ground` prêt (13.5), `à couvert` (13.08), `dans l'EZ ennemie`.
+Règles relues (PDF 13 + 13-5) : **13.08 a deux conditions alternatives**, la première
+(`INFANTRY/BEASTS/SWARM` + *within a terrain area*) **ne dépend pas de l'attaquant** — si toutes
+mes figurines la remplissent, l'escouade a le couvert contre **toute** attaque à distance : c'est
+une condition suffisante exacte, pas une heuristique. Les volets « pas entièrement visible pour la
+figurine attaquante » (13.08 b, 13.5) sont **par-tireur** : ils n'ont pas de valeur au niveau
+escouade et restent dans `compute_unit_los`. Les trois drapeaux sont **recalculés à chaud** :
+`unit['hidden']` n'est rafraîchi qu'au début de la phase de tir, donc périmé pendant le move —
+exactement quand l'agent décide d'aller se couvrir. Géométrie mutualisée via
+`compute_models_within_terrain` ([shooting_handlers.py:1121](../../engine/phase_handlers/shooting_handlers.py#L1121)),
+généralisation de `compute_models_in_obscuring_terrain` (qui la consomme).
+
+**T5 — contacts par figurine → EZ.** Le bord-à-bord brut (`calculate_hex_distance == 1`, ancre à
+ancre) est remplacé par la primitive d'engagement du moteur sur des entrées synthétiques par
+figurine (`_synth_model_entry` + `unit_entries_within_engagement_zone`, comme `get_fighting_models`).
+Deux socles de 16 hex dont les ancres sont à 2 subhex sont engagés selon 03.04 et selon le pool de
+combat — l'ancien test répondait 0.
+
+**T6 — bloc ennemi.** ✏️ position mesurée depuis la **figurine ennemie la plus proche** (l'ancre
+d'une escouade étalée peut être à l'opposé de la menace) ; ➕ **distance bord-à-bord** avec la
+mesure du gate de portée du moteur (`_ranged_squad_edge_distance`) ; ➕ VALUE vivante (somme
+par figurine) ; ➕ MOVE + profil défensif de la cible.
+
+**T7 — 7e canal de grille « couvert »** ([spatial_grid.py:56](../../engine/spatial_grid.py#L56)) :
+hexes des `terrain_areas`, exactement l'ensemble que le moteur peint en `cover_cells`. Le drapeau
+B2 dit *si* l'escouade est couverte, ce canal dit *où* aller se couvrir. `GRID_CHANNELS` 6 → 7
+(l'extracteur et le masque lisent la constante, aucun autre changement).
+
+**T8 — contrôle d'objectif : fin de phase, pas fin de step (correction).** La règle 14.02 dit
+que le contrôle est déterminé **à la fin de chaque phase et de chaque tour**. Le moteur a déjà
+tout ce qu'il faut — `run_objective_control_checkpoint` + `game_config.objective_control_check`
+(fin de command/move/shoot/charge/fight + fin de tour) — mais ce checkpoint n'était appelé que
+depuis **l'API PvP** : en entraînement, `objective_controllers` n'était jamais rafraîchi. La
+première implémentation de T2 contournait le problème en **recalculant** le contrôle à chaque
+observation : coûteux (somme des OC par figurine sur 5 zones à chaque action) et surtout **faux**
+— l'agent voyait un contrôle basculer au milieu d'une phase, alors que la règle (et le scoring des
+VP, qui lit la même source) ne le réévalue qu'à la frontière.
+Corrigé : `GameStateManager.refresh_objective_control_on_boundary`
+([game_state.py](../../engine/game_state.py)) détecte la frontière (phase, tour) et déclenche le
+checkpoint ; elle est appelée par le **moteur** avant toute construction d'observation
+([w40k_core.py](../../engine/w40k_core.py)) **et** par l'API PvP, qui portait jusque-là sa propre
+détection inline (deux sources → une). `calculate_objective_control` fait maintenant **une seule
+passe d'empreintes** pour tous les objectifs (`sum_objective_control_oc_multi`).
+Conséquences : l'observation ne calcule plus rien (lecture pure), le contrôle observé est celui du
+scoring, et au début de bataille aucun objectif n'est contrôlé — ce qui est la règle, pas un défaut.
+
+**T9 — Bloc C complété (rôle + profil défensif par figurine).** Manquants dans la première
+livraison, et non signalés : le §10 les liste en ➕ et ce sont des données non-règles, donc dans le
+périmètre. ➕ **rôle d'allocation** (règle 19) en **one-hot** `special_weapon / sergeant / support /
+leader` (tout à 0 = figurine de base) — one-hot et non scalaire, l'ordre des tiers n'ayant pas de
+sens numérique ; ➕ **profil défensif dérogatoire** : le profil d'escouade (B3) décrit **la figurine de base** et
+n'est PAS répété par figurine (§9.4 : « exposer une fois au niveau escouade + exceptions »). Seules
+les figurines qui **dérogent** portent leurs HP_MAX / T / save / invulnérable ; une figurine
+conforme laisse ces 4 dimensions à 0, et un **bit de dérogation** lève l'ambiguïté (0 = « conforme »,
+pas « T=0 »). Sans cela, un personnage attaché (fusionné *comme figurine*, règle 19) était décrit
+exactement comme un Boyz de base — et une première version, elle, recopiait bêtement les mêmes 4
+stats sur les 6 figurines.
+
+**T10 — canal « couvert » dilaté au rayon de socle.** 13.08 accorde le couvert dès que le **socle**
+chevauche la zone (`model_within_terrain`), pas seulement quand l'ancre y tombe : peindre les seuls
+hexes de la zone laissait à 0 une couronne de cases pourtant couvrantes (~2 cellules de grille pour
+un socle d'infanterie de 16 subhex sur le board ×5). Le canal est désormais dilaté de
+`cover_dilation_cells(BASE_SIZE, half_extent)` cellules
+([spatial_grid.py](../../engine/spatial_grid.py)) — dilatation morphologique numpy, coût négligeable,
+exacte au grain de la grille.
+
+**T11 — le bloc figurines expose les EXCEPTIONS, plus « les 6 premières créées ».** Défaut mis en
+évidence en auditant T9 sur les rosters réels : le bloc est plafonné à `SQUAD_TOP_K = 6` et prenait
+les figurines dans l'ordre de création, alors que les personnages attachés (règle 19) sont ajoutés
+**en fin de liste** — positions 11 et 12 d'une escouade de 12 Boyz. Résultat : sur **les quatre
+escouades concernées** des rosters d'entraînement, `leader` et `support` n'étaient **jamais**
+observés, ce qui rendait le rôle et le profil dérogatoire de T9 strictement inopérants.
+`_squad_models_for_observation` trie désormais par pertinence décroissante — tier de rôle
+(leader > support > sergeant > special_weapon > base), puis profil défensif dérogatoire, puis index
+de création. Tri **déterministe à composition donnée** : il ne dépend ni de la position ni des PV,
+qui feraient permuter les slots d'un step à l'autre (les figurines n'étant ciblées par aucune
+action, réordonner ce bloc n'a aucun effet sur le masque — contrairement aux slots ennemis, qui
+restent alignés sur `get_enemy_slot_mapping`). Vérifié sur le scénario d'entraînement : les slots 0
+et 1 portent bien `leader` et `support`.
+Reste borné, et assumé : au-delà de 6, des figurines **de base** ne sont pas listées — leur position
+est toutefois peinte sur le canal « allié » de la grille, et la levée du plafond appartient à
+l'archi set-based (§9.9).
+
+**T12 — le bloc figurines devient un bloc de TYPES (correction de fond).** T11 réglait *quelles*
+figurines entrent dans les 6 slots, mais laissait le vrai défaut : décrire des **figurines** là où
+§9.4 demande « une fois au niveau escouade + exceptions ». Une escouade de 12 n'a que **4 types**
+distincts (mesuré sur les rosters : 9 Boyz + 1 Nob + leader + support) — décrire des figurines
+répétait le même profil et laissait la moitié de l'effectif hors du vecteur.
+Nouveau **bloc C1 « types »** : 6 slots × `{HP_MAX, T, save, invulnérable, effectif vivant du
+type}` + rôle one-hot + bit d'occupation. L'**effectif complet** est donc décrit quelle que soit la
+taille de l'escouade (vérifié : 12/12 et 10/10 sur le scénario d'entraînement) ; un dépassement de
+6 types est **logué**, jamais silencieux. Le compteur par type est le même motif `{profil, nb de
+porteurs}` que celui prévu pour les armes (§11).
+Le **bloc C2 « figurines »** ne garde que l'irréductiblement individuel — position relative et état
+d'engagement — et trois **compteurs d'engagement sur l'escouade entière** (éligibles au combat,
+dans l'EZ, via un allié) rendent l'état de combat indépendant du plafond. Ce qui reste hors des
+6 slots : les positions individuelles des figurines de base, déjà peintes sur le canal « allié » de
+la grille. `obs_size` 190 → **199**.
+
+**Coût mesuré** (scénario d'entraînement réel, 11 escouades / 60 figurines) : construction du
+vecteur **19,6 ms → 4,6 ms**, grille ~1,6 ms, pour un `step` complet à ~93 ms. Trois leviers, tous
+**exacts** (aucun résultat modifié) : (1) le contrôle d'objectif n'est plus calculé par observation
+mais une fois par frontière de phase (T8) ; (2) `sum_objective_control_oc_multi` — une seule passe
+d'empreintes pour les 5 objectifs au lieu d'une par objectif ; (3) pré-filtre des escouades
+candidates à l'EZ avec la **borne conservatrice du pruning du move**
+(`_relevant_enemies_for_move`), le test EZ exact comparant des empreintes entières.
+
+Deux optimisations supplémentaires ont été **essayées puis abandonnées**, chacune parce qu'elle
+n'était pas exacte :
+- *mémoïsation des empreintes de socle* (forme relative par parité de colonne) : déplaçait des
+  cases situées pile sur le bord du socle (arrondi flottant) → modifiait la géométrie du moteur ;
+- *pré-filtre du contrôle d'objectif par l'union `occupied_hexes` de l'escouade* : sur un plateau
+  `engagement_zone <= 1`, `_compute_unit_occupied_hexes` réduit l'occupation à UNE case par
+  figurine alors que la règle 14.02 teste l'empreinte complète — l'union n'y est pas un
+  sur-ensemble, le filtre aurait perdu du contrôle d'objectif en silence (mis en évidence par un
+  test d'invariant écrit pour l'occasion, resté rouge).
+
+**Tests** — suite `tests/unit/` **entièrement verte** (1574 tests, exit 0). Nouveaux fichiers
+(contre-épreuve dans chacun) :
+`test_squad_obs_vector_split.py` (7), `test_squad_obs_context_block.py` (6),
+`test_squad_obs_stats_and_removals.py` (5), `test_squad_obs_terrain_flags.py` (7),
+`test_squad_obs_model_engagement.py` (4), `test_squad_obs_enemy_block.py` (5),
+`test_squad_grid_observation.py` (+2 pour le canal couvert), `test_squad_obs_enemy_slot_alignment.py` (3),
+`test_endless_duty_value_baseline.py` (2). T8/T9/T10 ajoutent : contrôle figé pendant une phase et
+réévalué à la frontière, aucun contrôle avant la première frontière, objectif malformé qui lève
+(observation et checkpoint), profil défensif exposé UNIQUEMENT pour un perso attaché (figurine conforme = zéros),
+rôle en one-hot couvrant tous les rôles du moteur, escouade homogène décrite comme UN type, perso attaché formant son
+propre type, effectif total décrit au-delà du plafond du bloc figurines, ordre des types stable
+quand les figurines bougent ou sont blessées, compteurs d'engagement couvrant toute l'escouade, canal
+couvert dilaté pour un grand socle. Les tests qui figeaient `obs_size: 108` passent par
+`ObservationBuilder.SQUAD_OBS_SIZE_TARGET`. `test_model_value_per_figurine.py` : la classe qui
+testait `value_over_ttk` (feature supprimée) est **réécrite** sur la VALUE d'escouade ennemie —
+l'invariant protégé (somme PAR FIGURINE, indépendante de l'ordre) est le même.
+
+**Effet de bord traité** : `build_units_cache` recalcule `value_at_start` pour les DEUX joueurs ;
+en mode *endless duty*, `_replace_units_for_player` ne remplace qu'un camp — la référence de
+l'adversaire est désormais restaurée après le rebuild
+([endless_duty_runtime.py](../../services/endless_duty_runtime.py)), sinon ses pertes déjà subies
+disparaissaient de l'observation.
+
+**Chemin PvP** : `scripts/pvp_smoke_test.py --spawn-server` → **27 PASS / 0 FAIL** (les primitives
+touchées — EZ, terrain, contrôle d'objectif — sont partagées gym/PvP).
+
+**Impact** : valeurs ET taille de l'observation changent → **retrain complet requis** (acté, hors
+mission).
+
 ### Décisions actées (2026-07-25) — à implémenter APRÈS le portage des capacités (attente signal)
 
 **Feature statut déploiement / réserve (pour HEAVY 24.16).**
@@ -452,7 +616,7 @@ _(rempli au fil des étapes ; preuves = tests + numéros de ligne)_
 - **Lien HEAVY** : condition « pas posée ce tour » satisfaite sauf état `2`. On ne distingue
   déploiement-initial et arrivée-tour-précédent que si une règle future l'exige — sinon c'est du
   bruit non exploité (principe de l'audit). La granularité complète reste dans `deployed_on_turn`.
-- `obs_size` : 108 → **111** (retrain, non contraignant).
+- `obs_size` : **+3** par rapport à la valeur courante (199 après T1→T12) — retrain, non contraignant.
 
 **+7/+8 (rentabilité/menace) conscients des règles et du couvert.**
 - Construire **UNE** fonction d'espérance de dégâts consciente des règles (source unique, remplaçant
@@ -705,13 +869,23 @@ move. Canal « menace ennemie » différé.
 ## 11. Reste à faire (état au 2026-07-25)
 
 ### Fait (code)
-- ✅ **D1** (réalignement slots ennemis) + **fall_back** (obs[19]) — testés (§8).
+- ✅ **D1** (réalignement slots ennemis) + **fall_back** — testés (§8).
+- ✅ **T1→T7** (§8, 2026-07-25) : split `vec_cont`/`vec_bin` + valeurs brutes (fin des divisions
+  manuelles) ; score VP ; VALUE cumulée amie/ennemie ; objectifs [−1,1] + présence + calcul moteur
+  14.02 (fin du `try/except`) ; réorg PV + profil d'escouade brut ; suppressions obs[20] / +7 / +8 /
+  index arme CC / PV par-fig / compte d'escouades ; flags hidden / GtG / EZ / couvert ; contacts
+  per-fig → EZ ; position ennemie → fig la plus proche + distance + VALUE + MOVE + défensif ;
+  **bloc de TYPES de figurines** (profil défensif + rôle + effectif vivant, escouade entière
+  décrite) + compteurs d'engagement ; **canal grille couvert** (dilaté au rayon de socle).
+  `obs_size` 108 → **199**.
+- ✅ **Contrôle d'objectif branché sur le checkpoint 14.02** (fin de phase/tour) dans le chemin
+  gym, qui ne l'exécutait jamais — l'observation le lit au lieu de le recalculer (§8 T8).
 
-### À coder — indépendant du portage des capacités (faisable dès accord)
-- Score VP (Bloc A) ; VALUE cumulée amie/ennemie ; **bloc escouades amies** ; objectifs [−1,1] +
-  présence ; réorg PV (HP_MAX/HP_CUR, suppr PV par-fig) ; normalisations /20 /40 ; position ennemie
-  → fig proche + distance ; contact per-fig → EZ ; flags hidden / GtG / EZ / couvert ; suppression
-  obs[20] / +7 / +8 / index arme CC ; **canal grille couvert** ; listes de longueur variable.
+### À coder — reste indépendant du portage des capacités
+- **Bloc E « escouades amies »** : spécifié en longueur variable (§10) → part avec l'archi
+  set-based. Le faire en K slots fixes exigerait d'inventer un ordre de slots qu'aucune action ne
+  consomme (contrairement aux ennemis, ordonnés par `get_enemy_slot_mapping`) — même défaut que D1.
+- **Listes de longueur variable** (fin des plafonds 6 figurines / 5 escouades) : idem, archi.
 
 ### À coder — dépendant du portage des capacités (après stabilisation)
 - Profils bruts **offensifs/défensifs** (escouade, ennemis, alliées) avec **flags de règles à effet

@@ -1113,18 +1113,37 @@ def compute_models_in_obscuring_terrain(
     (preview de mouvement) → garantit un résultat identique entre preview et drop, pour toute
     forme de base. Les gates niveau-unité (vivant, hideable, a tiré) sont gérés par l'appelant.
     """
+    return compute_models_within_terrain(
+        unit, by_model, game_state, terrain_areas, obscuring_only=True
+    )
+
+
+def compute_models_within_terrain(
+    unit: Dict[str, Any],
+    by_model: Dict[Any, Any],
+    game_state: Dict[str, Any],
+    terrain_areas: List[Dict[str, Any]],
+    obscuring_only: bool,
+) -> List[Any]:
+    """Figurines de ``by_model`` dont le socle est « within a terrain area », par figurine.
+
+    ``obscuring_only=True`` restreint aux zones obscurantes (Hidden 13.09) ; ``False`` prend
+    toute zone de terrain (Benefit of Cover 13.08, volet « INFANTRY/BEASTS/SWARM within a
+    terrain area »). Read-only. Généralisation de ``compute_models_in_obscuring_terrain``, dont
+    elle est la source : une seule géométrie figurine↔terrain pour les deux règles.
+    """
     from engine.terrain_utils import model_within_terrain
     base_shape = require_key(unit, "BASE_SHAPE")
     base_size = require_key(unit, "BASE_SIZE")
     orientation = int(require_key(unit, "orientation"))
-    hidden_model_ids: List[Any] = []
+    model_ids: List[Any] = []
     for mid, (col, row) in by_model.items():
         if model_within_terrain(
             int(col), int(row), base_shape, base_size, orientation,
-            terrain_areas, obscuring_only=True,
+            terrain_areas, obscuring_only=obscuring_only,
         ):
-            hidden_model_ids.append(mid)
-    return hidden_model_ids
+            model_ids.append(mid)
+    return model_ids
 
 
 def compute_hidden_statuses(game_state: Dict[str, Any]) -> None:

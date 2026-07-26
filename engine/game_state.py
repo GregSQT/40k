@@ -2055,58 +2055,8 @@ class GameStateManager:
     def _sum_objective_control_oc(
         self, game_state: Dict[str, Any], hex_set: Set[Tuple[int, int]]
     ) -> Tuple[int, int]:
-        """
-        Rule 14.02: return ``(player_1_oc, player_2_oc)`` summed over every MODEL within the
-        terrain area.
-
-        A model counts when ANY hex of its base footprint overlaps ``hex_set`` (the model is
-        within range while any part of its base is inside the terrain area); each such model
-        contributes its unit's OC characteristic (OC is per-model). Dead models
-        (``HP_CUR <= 0``) and units with OC 0 are ignored.
-        """
-        from engine.hex_utils import compute_occupied_hexes
-
-        units_cache = require_key(game_state, "units_cache")
-        models_cache = require_key(game_state, "models_cache")
-        squad_models = require_key(game_state, "squad_models")
-        unit_by_id = {str(u["id"]): u for u in game_state["units"]}
-
-        player_1_oc = 0
-        player_2_oc = 0
-        for unit_id in units_cache:
-            unit = unit_by_id.get(str(unit_id))
-            if not unit:
-                raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-            oc = require_key(unit, "OC")
-            if oc <= 0:
-                continue
-            unit_player = int(require_key(unit, "player"))
-            if unit_player not in (1, 2):
-                raise ValueError(f"Unexpected unit player id: {unit_player}")
-            orientation = int(require_key(units_cache[unit_id], "orientation"))
-            model_ids = require_key(squad_models, unit_id)
-            models_in_area = 0
-            for mid in model_ids:
-                model = models_cache.get(mid)
-                if model is None:
-                    continue
-                if int(model.get("HP_CUR", 1)) <= 0:
-                    continue
-                footprint = compute_occupied_hexes(
-                    int(model["col"]),
-                    int(model["row"]),
-                    model["BASE_SHAPE"],
-                    model["BASE_SIZE"],
-                    orientation,
-                )
-                if not footprint.isdisjoint(hex_set):
-                    models_in_area += 1
-            if models_in_area:
-                if unit_player == 1:
-                    player_1_oc += oc * models_in_area
-                else:
-                    player_2_oc += oc * models_in_area
-        return player_1_oc, player_2_oc
+        """Rule 14.02 (voir ``sum_objective_control_oc``, source unique module-level)."""
+        return sum_objective_control_oc(game_state, hex_set)
 
     def calculate_objective_control(self, game_state: Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
         """
@@ -2168,17 +2118,20 @@ class GameStateManager:
 
         result = {}
 
-        for objective in objectives:
+        # UNE passe d'empreintes pour TOUS les objectifs (au lieu d'une par objectif) : le scan
+        # de socle est le poste dominant de ce calcul, et il est identique d'une zone à l'autre.
+        hex_sets = [
+            {normalize_coordinates(h[0], h[1]) for h in require_key(objective, "hexes")}
+            for objective in objectives
+        ]
+        oc_sums = sum_objective_control_oc_multi(game_state, hex_sets)
+
+        for obj_index, objective in enumerate(objectives):
             obj_id = objective["id"]
-            obj_hexes = objective["hexes"]
             obj_id_key = str(obj_id)
 
-            # Convert hex list to a set of normalized coordinates for fast lookup
-            # (must match the normalized model positions compared in _sum_objective_control_oc).
-            hex_set = {normalize_coordinates(h[0], h[1]) for h in obj_hexes}
-
             # Rule 14.02: sum OC of all models whose footprint centre is within the area.
-            player_1_oc, player_2_oc = self._sum_objective_control_oc(game_state, hex_set)
+            player_1_oc, player_2_oc = oc_sums[obj_index]
 
             # Get current controller from persistent state; explicit init when first seeing this objective
             if obj_id_key not in game_state["objective_controllers"]:
@@ -2277,6 +2230,37 @@ class GameStateManager:
         ):
             return
         self.calculate_objective_control(game_state)
+
+    def refresh_objective_control_on_boundary(self, game_state: Dict[str, Any]) -> bool:
+        """Réévalue le contrôle d'objectif SI une frontière de phase/tour vient d'être franchie.
+
+        Règle 14.02 : le contrôle est déterminé à la FIN de chaque phase et de chaque tour, pas
+        en continu. Cette méthode est le point d'entrée unique de ce rafraîchissement : elle
+        mémorise la dernière frontière vue dans ``game_state`` et n'appelle
+        ``run_objective_control_checkpoint`` que lorsque (phase, tour) a changé — donc au plus
+        une fois par phase, jamais à chaque action.
+
+        Partagée par les DEUX chemins : le moteur gym (``W40KEngine.step``/``reset``) et l'API
+        PvP (sérialisation d'état). Avant, seul le PvP déclenchait le checkpoint : en
+        entraînement ``objective_controllers`` n'était jamais rafraîchi, donc le contrôle
+        d'objectif restait figé sur son état initial.
+
+        Retourne True si le checkpoint a été exécuté.
+        """
+        phase = game_state.get("phase")  # get allowed (pré-reset)
+        turn = game_state.get("turn")  # get allowed (pré-reset)
+        last = game_state.get("_objective_control_last_boundary")  # get allowed (1er passage)
+        game_state["_objective_control_last_boundary"] = (phase, turn)
+        if last is None:
+            # Début de bataille : aucune frontière franchie → aucun objectif contrôlé (14.02).
+            return False
+        last_phase, last_turn = last
+        if phase == last_phase and turn == last_turn:
+            return False
+        self.run_objective_control_checkpoint(
+            game_state, last_phase, phase, turn_changed=(turn != last_turn)
+        )
+        return True
 
     def _calculate_primary_objective_control_counts(
         self,
@@ -2536,3 +2520,83 @@ class GameStateManager:
         if p2_value > p1_value:
             return 2, "value_tiebreaker"
         return -1, "draw"
+
+
+
+def sum_objective_control_oc(
+    game_state: Dict[str, Any], hex_set: Set[Tuple[int, int]]
+) -> Tuple[int, int]:
+    """Rule 14.02 : ``(player_1_oc, player_2_oc)`` sommes sur toute FIGURINE dans la zone.
+
+    Une figurine compte des qu UNE case de son empreinte de socle recouvre ``hex_set`` ; elle
+    apporte alors la caracteristique OC de son unite (l OC est par figurine). Les figurines
+    mortes (absentes de models_cache) et les unites a OC 0 sont ignorees.
+
+    Fonction module-level : SOURCE UNIQUE partagee par le controle d objectif du moteur
+    (``StateManager._sum_objective_control_oc`` / ``calculate_objective_control``) et par
+    l observation de l agent (V11 §9.2), qui comparait auparavant la seule ANCRE de chaque
+    unite au hex_set — une regle differente de celle du moteur. Lecture pure : aucun etat
+    n est mute (contrairement a ``calculate_objective_control``, qui met a jour
+    ``objective_controllers``), donc appelable depuis la construction d une observation.
+    """
+    return sum_objective_control_oc_multi(game_state, [hex_set])[0]
+
+
+def sum_objective_control_oc_multi(
+    game_state: Dict[str, Any], hex_sets: List[Set[Tuple[int, int]]]
+) -> List[Tuple[int, int]]:
+    """Version multi-zones de ``sum_objective_control_oc`` : UNE passe pour N objectifs.
+
+    Chaque empreinte de figurine est calculee une seule fois puis testee contre les N zones,
+    au lieu d etre recalculee par zone (``compute_occupied_hexes`` rescanne un carre de cases,
+    c est le poste dominant quand l observation evalue les 5 objectifs a chaque step).
+
+    Un pre-filtre par union d escouade (``units_cache[uid]["occupied_hexes"]``) a ete envisage
+    puis ECARTE : sur un plateau ``engagement_zone <= 1``, ``_compute_unit_occupied_hexes``
+    reduit l occupation a UNE case par figurine, alors que le controle d objectif teste
+    l empreinte complete — l union n y est donc pas un sur-ensemble et le filtre perdrait du
+    controle en silence. Seule la mutualisation des empreintes (exacte) est conservee.
+    """
+    from engine.hex_utils import compute_occupied_hexes
+
+    units_cache = require_key(game_state, "units_cache")
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+
+    sums: List[List[int]] = [[0, 0] for _ in hex_sets]
+    for unit_id in units_cache:
+        unit = unit_by_id.get(str(unit_id))
+        if not unit:
+            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+        oc = require_key(unit, "OC")
+        if oc <= 0:
+            continue
+        unit_player = int(require_key(unit, "player"))
+        if unit_player not in (1, 2):
+            raise ValueError(f"Unexpected unit player id: {unit_player}")
+        entry = units_cache[unit_id]
+        candidate_zones = range(len(hex_sets))
+        orientation = int(require_key(entry, "orientation"))
+        model_ids = require_key(squad_models, unit_id)
+        models_in_area = [0] * len(hex_sets)
+        for mid in model_ids:
+            model = models_cache.get(mid)
+            if model is None:
+                continue
+            if int(model.get("HP_CUR", 1)) <= 0:
+                continue
+            footprint = compute_occupied_hexes(
+                int(model["col"]),
+                int(model["row"]),
+                model["BASE_SHAPE"],
+                model["BASE_SIZE"],
+                orientation,
+            )
+            for i in candidate_zones:
+                if not footprint.isdisjoint(hex_sets[i]):
+                    models_in_area[i] += 1
+        for i in candidate_zones:
+            if models_in_area[i]:
+                sums[i][0 if unit_player == 1 else 1] += oc * models_in_area[i]
+    return [(p1, p2) for p1, p2 in sums]

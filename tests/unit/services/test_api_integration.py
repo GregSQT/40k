@@ -20,6 +20,7 @@ import pytest
 
 import services.api_server as api_server
 from services.api_server import app
+from engine.game_state import GameStateManager
 from engine.w40k_core import W40KEngine
 from engine.phase_handlers.shared_utils import build_units_cache, build_enemy_adjacent_hexes
 
@@ -152,6 +153,11 @@ def _make_semi_real_engine(units: List[Dict[str, Any]], phase: str = "move") -> 
     engine._shooting_phase_initialized = False
     engine._movement_phase_initialized = False
     engine.current_mode_code = "pvp"
+    # Le moteur est construit sans __init__ : on lui pose le state_manager reel, que l'API
+    # utilise pour le rafraichissement de frontiere du controle d'objectif (regle 14.02).
+    # Sans point de checkpoint dans cette config, l'appel est un no-op — mais l'attribut doit
+    # exister, comme sur un moteur normal.
+    engine.state_manager = GameStateManager(engine.config, None)
     return engine
 
 

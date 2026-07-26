@@ -881,6 +881,16 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
             units_cache[squad_id]["OC_TOTAL"] = entry["oc_total"]
     game_state["squad_cache"] = squad_cache
 
+    # VALUE totale de depart PAR JOUEUR, capturee ici et jamais recalculee : les figurines
+    # detruites disparaissent de models_cache, donc la valeur initiale n est plus derivable
+    # ensuite. Sert la feature « VALUE cumulee / valeur de depart » de l observation (force
+    # d usure, V11 §9.8) — meme motif que model_count_at_start ci-dessus.
+    value_at_start: Dict[int, int] = {}
+    for model in models_cache.values():
+        p = int(require_key(model, "player"))
+        value_at_start[p] = value_at_start.get(p, 0) + int(require_key(model, "VALUE"))
+    game_state["value_at_start"] = value_at_start
+
     from engine.game_utils import add_debug_file_log
     episode = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")

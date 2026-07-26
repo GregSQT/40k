@@ -664,14 +664,35 @@ class W40KEngine(gym.Env):
                 "No default value allowed."
             )
         
-        # Pipeline squad (obs_size=108) : obs Dict {"vec", "grid"} — la grille egocentrique
+        # Pipeline squad : obs Dict {"vec_cont", "vec_bin", "grid"} — la grille egocentrique
         # (perception du terrain, spec §4.1) est branchee sur la policy via MultiInputPolicy
         # (move_action_space_spatial_rework.md T1b). Pipeline mono-fig legacy : Box inchange.
+        #
+        # Le vecteur est scinde (V11 §9.5) : "vec_cont" porte des grandeurs BRUTES normalisees
+        # par VecNormalize (d ou des bornes non finies : une borne 0..1 mentirait sur des PV ou
+        # des subhex bruts), "vec_bin" porte des valeurs discretes JAMAIS normalisees (drapeaux,
+        # phase, controle d objectif dans [-1, 1]).
         if obs_size == self.obs_builder.SQUAD_OBS_SIZE_TARGET:
             from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
 
+            if (
+                self.obs_builder.SQUAD_OBS_CONT_SIZE + self.obs_builder.SQUAD_OBS_BIN_SIZE
+                != obs_size
+            ):
+                raise ValueError(
+                    f"observation_params.obs_size={obs_size} incoherent avec le layout squad "
+                    f"(cont={self.obs_builder.SQUAD_OBS_CONT_SIZE} + "
+                    f"bin={self.obs_builder.SQUAD_OBS_BIN_SIZE}). Mettre la config a jour."
+                )
             self.observation_space = gym.spaces.Dict({
-                "vec": gym.spaces.Box(low=0.0, high=1.0, shape=(obs_size,), dtype=np.float32),
+                "vec_cont": gym.spaces.Box(
+                    low=-np.inf, high=np.inf,
+                    shape=(self.obs_builder.SQUAD_OBS_CONT_SIZE,), dtype=np.float32,
+                ),
+                "vec_bin": gym.spaces.Box(
+                    low=-1.0, high=1.0,
+                    shape=(self.obs_builder.SQUAD_OBS_BIN_SIZE,), dtype=np.float32,
+                ),
                 "grid": gym.spaces.Box(
                     low=0.0, high=1.0,
                     shape=(GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32,
@@ -6209,12 +6230,20 @@ class W40KEngine(gym.Env):
     def _build_observation(self):
         """Build observation — route selon obs_size :
            - 357 : pipeline mono-fig legacy (build_observation) -> np.ndarray
-           - 108 : pipeline squad (build_squad_observation) -> Dict {"vec", "grid"}
+           - squad : build_squad_observation -> Dict {"vec_cont", "vec_bin", "grid"}
 
-        Pipeline squad : l'obs est un Dict, avec le vecteur 108-d ET la grille egocentrique
-        (perception du terrain, spec §4.1 / T1b). La geometrie de la grille est celle de
-        `engine.spatial_grid`, partagee avec le masque (T2) et le decoder (T3).
+        Pipeline squad : l'obs est un Dict, avec le vecteur scinde cont/bin (V11 §9.5) ET la
+        grille egocentrique (perception du terrain, spec §4.1 / T1b). La geometrie de la grille
+        est celle de `engine.spatial_grid`, partagee avec le masque (T2) et le decoder (T3).
         """
+        # Regle 14.02 : le controle d objectif est determine a la FIN de chaque phase/tour.
+        # Ce point de passage est le seul commun aux 7 sites de construction d observation du
+        # moteur (step, reset, cascades de transition) : y placer la detection de frontiere
+        # garantit que l observation lit un `objective_controllers` a jour, sans jamais
+        # recalculer quoi que ce soit pendant une phase. Le rafraichissement lui-meme est
+        # no-op tant que (phase, tour) n a pas change — cf.
+        # GameStateManager.refresh_objective_control_on_boundary (partage avec le PvP).
+        self.state_manager.refresh_objective_control_on_boundary(self.game_state)
         obs_size = self.obs_builder.obs_size
         is_squad_pipeline = obs_size == self.obs_builder.SQUAD_OBS_SIZE_TARGET
 
@@ -6222,18 +6251,16 @@ class W40KEngine(gym.Env):
             if is_squad_pipeline:
                 from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
 
-                return {
-                    "vec": np.zeros(obs_size, dtype=np.float32),
-                    "grid": np.zeros((GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32),
-                }
+                obs = self.obs_builder._empty_squad_observation()
+                obs["grid"] = np.zeros((GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32)
+                return obs
             return np.zeros(obs_size, dtype=np.float32)
 
         def _build_for_squad(squad_id: str):  # get allowed
             if is_squad_pipeline:
-                return {
-                    "vec": self.obs_builder.build_squad_observation(self.game_state, squad_id),
-                    "grid": self.obs_builder.build_squad_grid(self.game_state, squad_id),
-                }
+                obs = self.obs_builder.build_squad_observation(self.game_state, squad_id)
+                obs["grid"] = self.obs_builder.build_squad_grid(self.game_state, squad_id)
+                return obs
             return self.obs_builder.build_observation(self.game_state)
 
         if self.game_state.get("phase") == "deployment":

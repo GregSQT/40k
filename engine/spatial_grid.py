@@ -36,10 +36,10 @@ import numpy as np
 
 from engine.hex_utils import _hex_center
 
-# --- Forme de la grille (spec §10.1 : 32x32x6) ------------------------------
+# --- Forme de la grille (spec §10.1 ; 7e canal : V11 §9.10) ------------------
 GRID_SIZE = 32
 GRID_CELL_COUNT = GRID_SIZE * GRID_SIZE  # 1024 cellules = taille de la tete spatiale
-GRID_CHANNELS = 6
+GRID_CHANNELS = 7
 
 # Canaux (spec §10.1)
 GRID_CH_WALL = 0       # murs / obstacles infranchissables
@@ -48,6 +48,12 @@ GRID_CH_ENEMY = 2      # occupation ennemie
 GRID_CH_EZ = 3         # zone d'engagement ennemie
 GRID_CH_OBJECTIVE = 4  # objectifs
 GRID_CH_LEVEL = 5      # niveau (etages)
+# Cases qui DONNENT le benefice du couvert (regle 13.08 : « within a terrain area ») — hexes
+# des terrain areas, exactement l ensemble que le moteur peint en cover_cells. Le drapeau
+# « a couvert » du vecteur dit SI l escouade est couverte ; ce canal dit OU aller se couvrir,
+# case par case : sans lui la grille ne distinguait pas un terrain couvrant d un simple
+# bloqueur de vue (V11 §5bis.4 / §9.10).
+GRID_CH_COVER = 6
 
 # Distance centre-a-centre de deux hexes voisins, dans l'espace de `_hex_center`
 # (hex_radius=1.0, flat-top). VERIFIE : uniforme sur les 6 voisins et les 2 parites.
@@ -99,6 +105,55 @@ def _half_extent_px(half_extent_subhex: int) -> float:
     dans la cellule de bord.
     """
     return (float(half_extent_subhex) + 0.5) * HEX_STEP_PX
+
+
+def cover_dilation_cells(base_size: Any, half_extent_subhex: int) -> int:
+    """Rayon de dilatation, EN CELLULES, du canal « couvert » pour un socle de `base_size`.
+
+    Règle 13.08 : une figurine est « within a terrain area » dès que son SOCLE chevauche la
+    zone — pas seulement quand son ancre y tombe. Peindre les seuls hexes de la zone laisse
+    donc à 0 une couronne de cases où l'agent aurait pourtant le couvert : sur le board ×5, un
+    socle d'infanterie de 16 subhex de diamètre déborde de ~2 cellules de grille.
+
+    Conversion : la grille couvre [-W, +W] en unités `_hex_center` sur GRID_SIZE cellules, donc
+    une cellule vaut `2W / GRID_SIZE`. On arrondit au SUPÉRIEUR (couronne complète plutôt que
+    tronquée) et on borne à 0 quand le socle tient dans une cellule (infanterie de petite base :
+    la dilatation serait du bruit).
+    """
+    from engine.hex_utils import round_base_radius_norm
+
+    # Socle non rond (oval/square) : on prend sa plus GRANDE dimension — borne superieure du
+    # debordement quelle que soit l orientation, donc jamais de couronne manquante.
+    if isinstance(base_size, (list, tuple)):
+        if not base_size:
+            raise ValueError("cover_dilation_cells: BASE_SIZE liste vide")
+        span = max(float(v) for v in base_size)
+    else:
+        span = float(base_size)
+    cell_px = 2.0 * _half_extent_px(half_extent_subhex) / GRID_SIZE
+    if cell_px <= 0:
+        raise ValueError(f"cover_dilation_cells: taille de cellule invalide ({cell_px})")
+    return int(math.floor(round_base_radius_norm(span) / cell_px))
+
+
+def dilate_channel(channel: np.ndarray, radius_cells: int) -> np.ndarray:
+    """Dilatation morphologique (voisinage carré) d'un canal de grille, `radius_cells` fois.
+
+    Pure numpy (pas de dépendance scipy) : à chaque passe, chaque cellule prend le max de ses
+    voisines. `radius_cells <= 0` renvoie le canal inchangé.
+    """
+    if radius_cells <= 0:
+        return channel
+    out = channel
+    for _ in range(int(radius_cells)):
+        shifted = out.copy()
+        shifted[1:, :] = np.maximum(shifted[1:, :], out[:-1, :])
+        shifted[:-1, :] = np.maximum(shifted[:-1, :], out[1:, :])
+        base = shifted.copy()
+        shifted[:, 1:] = np.maximum(shifted[:, 1:], base[:, :-1])
+        shifted[:, :-1] = np.maximum(shifted[:, :-1], base[:, 1:])
+        out = shifted
+    return out
 
 
 def hex_to_cell(

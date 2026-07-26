@@ -1301,18 +1301,25 @@ def resolve_device_mode(device_mode: Optional[str], gpu_available: bool, total_p
 
 
 def _is_dict_obs_space(observation_space) -> bool:
-    """True si l'obs est le Dict {"vec", "grid"} du pipeline squad spatial (T1b)."""
+    """True si l'obs est le Dict {"vec_cont", "vec_bin", "grid"} du pipeline squad spatial."""
     return isinstance(observation_space, gym.spaces.Dict)
 
 
 def _vec_norm_obs_keys(observation_space):
     """Cles a normaliser par VecNormalize.
 
-    Obs Dict : normaliser UNIQUEMENT "vec" — la grille porte des canaux deja dans [0,1]
-    (occupation/murs/EZ/objectifs 0-1, niveau normalise), la normaliser detruirait sa
-    semantique et son creux (spec T1b). Obs Box : comportement historique (None = tout).
+    Obs Dict : normaliser UNIQUEMENT "vec_cont" (V11 §9.5).
+    - "vec_cont" porte des grandeurs BRUTES (PV, points, subhex, OC) : c'est exactement ce que
+      la running mean/var de VecNormalize doit mettre a l'echelle — d'ou l'absence de division
+      manuelle dans l'observation.
+    - "vec_bin" porte des valeurs discretes (drapeaux 0/1, phase, controle d'objectif dans
+      {-1,0,1}) : les recentrer/reduire detruirait leur semantique (un 0 « absent » deviendrait
+      negatif, l'ecart 0->1 deviendrait dependant de la frequence du drapeau).
+    - "grid" porte des canaux deja dans [0,1] (occupation/murs/EZ/objectifs/couvert, niveau
+      normalise) : la normaliser detruirait sa semantique et son creux (spec T1b).
+    Obs Box : comportement historique (None = tout).
     """
-    return ["vec"] if _is_dict_obs_space(observation_space) else None
+    return ["vec_cont"] if _is_dict_obs_space(observation_space) else None
 
 
 def _apply_vec_normalize(env, model_path_for_vn, vec_norm_cfg, new_model, n_envs, log_fn):
