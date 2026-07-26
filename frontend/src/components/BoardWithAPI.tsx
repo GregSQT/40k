@@ -5726,7 +5726,7 @@ export const BoardWithAPI: React.FC = () => {
             style={{
               width: "min(720px, calc(100vw - 32px))",
               backgroundColor: "#0b1322",
-              border: "2px solid #60a5fa",
+              border: "2px solid var(--ui-green-border)",
               borderRadius: "10px",
               boxShadow: "0 14px 40px rgba(0,0,0,0.55)",
               padding: "22px 24px 18px 24px",
@@ -6434,11 +6434,16 @@ export const BoardWithAPI: React.FC = () => {
                 disabled={isSubmittingEndlessDuty || !isProjectedDraftAffordable}
                 style={{
                   padding: "10px 14px",
-                  border: "1px solid #60a5fa",
+                  border: "1px solid rgba(0,0,0,0.35)",
                   borderRadius: "6px",
                   background:
-                    isSubmittingEndlessDuty || !isProjectedDraftAffordable ? "#334155" : "#1d4ed8",
-                  color: "#eff6ff",
+                    isSubmittingEndlessDuty || !isProjectedDraftAffordable
+                      ? "var(--ui-green-validate-off)"
+                      : "var(--ui-green-validate)",
+                  color:
+                    isSubmittingEndlessDuty || !isProjectedDraftAffordable
+                      ? "rgba(229,231,235,0.5)"
+                      : "#fff",
                   cursor:
                     isSubmittingEndlessDuty || !isProjectedDraftAffordable
                       ? "not-allowed"

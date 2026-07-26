@@ -227,6 +227,36 @@ def _weapon_has_close_quarters_rule(weapon: Dict[str, Any]) -> bool:
     return False
 
 
+def _unit_shoots_as_monster_or_vehicle(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """L'unité tire-t-elle sous le volet MONSTER/VEHICLE de 10.06 ?
+
+    **PDF 10.06 — CLOSE-QUARTERS SHOOTING** : « MONSTER and VEHICLE Models: you can select any
+    of that model's ranged weapons. » Le volet est donc PAR FIGURINE, et le prédicat exact est
+    `_model_is_monster_or_vehicle` (shared_utils) — c'est lui que le chemin par-figurine utilise
+    (`_shoot_engagement_blocks_target`, `_manual_roll_intent`).
+
+    Ici, on répond pour l'UNITÉ entière : ces gates-là (cercle vert, menu d'armes, pool de
+    cibles) décident au niveau unité. On exige donc que **TOUTES** les figurines vivantes soient
+    MONSTER/VEHICLE. Répondre « oui » dès qu'une seule l'est ouvrirait dans l'interface un tir
+    que la déclaration par-figurine refuserait ensuite — la classe de bug « le masque offre plus
+    que l'exécutable ». Exact sur les rosters réels (les 9 unités MONSTER/VEHICLE y sont
+    mono-figurine, aucune escouade mixte), conservateur sinon, jamais laxiste.
+    """
+    from engine.phase_handlers.shared_utils import _model_is_monster_or_vehicle
+
+    models_cache = game_state.get("models_cache")  # get allowed (chemin sans caches -> unité)
+    squad_models = game_state.get("squad_models")  # get allowed
+    if models_cache and squad_models:
+        alive = [
+            models_cache[mid]
+            for mid in squad_models.get(str(unit["id"]), [])  # get allowed
+            if mid in models_cache
+        ]
+        if alive:
+            return all(_model_is_monster_or_vehicle(m) for m in alive)
+    return _model_is_monster_or_vehicle(unit)
+
+
 def _get_rapid_fire_parameter(weapon: Dict[str, Any]) -> Optional[int]:
     """Return RAPID_FIRE parameter X from weapon rules, or None if absent."""
     if not weapon:
@@ -591,8 +621,14 @@ def weapon_availability_check(
                 can_use = False
                 reason = "Cannot shoot when adjacent (weapon_rule=0)"
             else:
-                # arg1=1 AND arg3=1 -> ✅ Weapon MUST have CLOSE_QUARTERS rule (continue to next check)
-                if not _weapon_has_close_quarters_rule(weapon):
+                # arg1=1 AND arg3=1 -> ✅ 10.06 « WHILE SHOOTING », deux volets :
+                #   - Non-MONSTER/Non-VEHICLE : seules les armes [CLOSE-QUARTERS] ;
+                #   - MONSTER/VEHICLE : « you can select ANY of that model's ranged weapons »,
+                #     au prix d'un -1 au jet de touche appliqué à la RÉSOLUTION
+                #     (`_manual_roll_intent`, shared_utils) — pas ici.
+                if not _weapon_has_close_quarters_rule(weapon) and not _unit_shoots_as_monster_or_vehicle(
+                    game_state, unit
+                ):
                     can_use = False
                     reason = "No CLOSE_QUARTERS rule (cannot shoot non-CLOSE_QUARTERS when adjacent)"
         
@@ -617,9 +653,16 @@ def weapon_availability_check(
                 f"combi_key={combi_key} chosen_index={combi_choice[combi_key]}"
             )
         
-        # Check CLOSE_QUARTERS category mixing restriction
-        # If unit has already fired with a weapon, can only use weapons of the same category
-        if can_use and "_shooting_with_close_quarters" in unit and unit["_shooting_with_close_quarters"] is not None:
+        # [CLOSE-QUARTERS] 24.07 (SIDEARMS) : « for each model in that unit (EXCLUDING
+        # MONSTER/VEHICLE models), you can only select one of the following » — la restriction de
+        # melange ne s applique donc PAS a une figurine MONSTER/VEHICLE. Sans cette exclusion, le
+        # volet MONSTER/VEHICLE de 10.06 serait rendu inoperant des la 2e arme tiree.
+        if (
+            can_use
+            and "_shooting_with_close_quarters" in unit
+            and unit["_shooting_with_close_quarters"] is not None
+            and not _unit_shoots_as_monster_or_vehicle(game_state, unit)
+        ):
             weapon_is_close_quarters = _weapon_has_close_quarters_rule(weapon)
             
             if unit["_shooting_with_close_quarters"]:
@@ -661,6 +704,9 @@ def weapon_availability_check(
                 melee_range = get_engagement_zone(game_state)
                 weapon_is_close_quarters = _weapon_has_close_quarters_rule(weapon)
                 shooter_engaged = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+                from engine.utils.weapon_helpers import weapon_has_rule
+
+                weapon_is_blast = weapon_has_rule(weapon, "BLAST")
 
                 _trs = time.perf_counter() if _perf_wa else None
                 for row in require_present(_enemy_precheck_for_availability, "_enemy_precheck_for_availability"):
@@ -672,10 +718,17 @@ def weapon_availability_check(
                     try:
                         if row["los_cache_has_key"] and row["los_cache_true"]:
                             if shooter_engaged:
-                                if not weapon_is_close_quarters:
-                                    continue
-                                if not row["enemy_engaged_with_shooter"]:
-                                    continue
+                                # 10.06, memes deux volets que `_is_valid_shooting_target` :
+                                # MONSTER/VEHICLE = toute arme et toute cible, sauf [BLAST] sur
+                                # une unite engagee ; sinon [CLOSE-QUARTERS] + cible engagee.
+                                if _unit_shoots_as_monster_or_vehicle(game_state, unit):
+                                    if weapon_is_blast and row["enemy_engaged_with_shooter"]:
+                                        continue
+                                else:
+                                    if not weapon_is_close_quarters:
+                                        continue
+                                    if not row["enemy_engaged_with_shooter"]:
+                                        continue
                             elif row["enemy_engaged_with_shooter"] and not weapon_is_close_quarters:
                                 continue
                             if row["friendly_blocks"]:
@@ -2292,11 +2345,25 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     has_advanced = unit_id_str in game_state.get("units_advanced", set())
 
     rng_weapons = require_key(unit, "RNG_WEAPONS")
-    if is_adjacent:
-        # Engagé : seules les armes CLOSE_QUARTERS/CLOSE-QUARTERS peuvent tirer (10.06).
-        # (Le close-quarters MONSTER/VEHICLE n'est pas implémenté dans le moteur.)
-        firable_weapons = [w for w in rng_weapons
-                           if require_key(w, "RNG") > 0 and _weapon_has_close_quarters_rule(w)]
+    if is_adjacent and has_advanced:
+        # 10.06 exige « Engaged AND **did not make an advance move this turn** », et 10.05 exige
+        # d'être unengaged : une unité engagée qui a avancé ne relève d'AUCUN type de tir. Ce
+        # chemin l'autorisait pourtant (branche `is_adjacent` testée avant `has_advanced`), à la
+        # seule condition d'avoir une arme [CLOSE-QUARTERS] — laxisme trouvé en écrivant le test
+        # de parité avec `resolve_squad_shooting_type`, qui rend None dans ce cas.
+        firable_weapons = []
+    elif is_adjacent:
+        # Engagé, sans advance : tir à bout portant (10.06). Deux volets :
+        #   - Non-MONSTER/Non-VEHICLE : seules les armes [CLOSE-QUARTERS] tirent ;
+        #   - MONSTER/VEHICLE : « you can select any of that model's ranged weapons » — toutes
+        #     les armes tirent, avec -1 au jet de touche appliqué à la résolution.
+        # Le volet MONSTER/VEHICLE était absent de CE chemin alors qu'il existe côté squad/gym
+        # depuis T-B : divergence §1.9, refermée le 2026-07-26.
+        if _unit_shoots_as_monster_or_vehicle(game_state, unit):
+            firable_weapons = [w for w in rng_weapons if require_key(w, "RNG") > 0]
+        else:
+            firable_weapons = [w for w in rng_weapons
+                               if require_key(w, "RNG") > 0 and _weapon_has_close_quarters_rule(w)]
     elif has_advanced:
         # Non-engagé et ayant avancé : seules les armes ASSAULT (ou shoot_after_advance) tirent (10.05).
         firable_weapons = [w for w in rng_weapons
@@ -2404,11 +2471,27 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     weapon_is_close_quarters = bool(selected_weapon and _weapon_has_close_quarters_rule(selected_weapon))
     shooter_is_engaged = _is_adjacent_to_enemy_within_cc_range(game_state, shooter)
 
+    # 10.06 « WHILE SHOOTING », deux volets — MÊME découpe que le chemin par-figurine
+    # (`_shoot_engagement_blocks_target`, shared_utils), pour que les deux ne divergent pas :
+    #  - Non-MONSTER/Non-VEHICLE : armes [CLOSE-QUARTERS] uniquement, ET cibles limitées aux
+    #    unités avec lesquelles l'unité est engagée ;
+    #  - MONSTER/VEHICLE : n'importe quelle arme et n'importe quelle cible, SAUF qu'une arme
+    #    [BLAST] « still cannot target a unit your unit is engaged with ».
     if shooter_is_engaged:
-        if not weapon_is_close_quarters:
-            return False
-        if not enemy_adjacent_to_shooter:
-            return False
+        if _unit_shoots_as_monster_or_vehicle(game_state, shooter):
+            from engine.utils.weapon_helpers import weapon_has_rule
+
+            if (
+                selected_weapon
+                and weapon_has_rule(selected_weapon, "BLAST")
+                and enemy_adjacent_to_shooter
+            ):
+                return False
+        else:
+            if not weapon_is_close_quarters:
+                return False
+            if not enemy_adjacent_to_shooter:
+                return False
     elif enemy_adjacent_to_shooter and not weapon_is_close_quarters:
         return False
 
@@ -2979,8 +3062,13 @@ def valid_target_pool_build(
 
         shooter_is_engaged = adjacent_status == 1
         has_close_quarters_weapon = False
-        
-        if enemy_adjacent_to_shooter:
+        # 10.06 volet MONSTER/VEHICLE : « you can select any of that model's ranged weapons » —
+        # l'absence d'arme [CLOSE-QUARTERS] n'exclut donc PAS la cible engagee, et l'unite n'est
+        # pas limitee aux seules cibles avec lesquelles elle est engagee. (Divergence §1.9 :
+        # ce volet existait cote squad/gym depuis T-B, pas ici.)
+        shooter_is_mv = _unit_shoots_as_monster_or_vehicle(game_state, unit)
+
+        if enemy_adjacent_to_shooter and not shooter_is_mv:
             # Enemy is adjacent to shooter - check if any weapon has CLOSE_QUARTERS rule
             for weapon_idx in usable_weapon_indices:
                 if weapon_idx < len(rng_weapons):
@@ -3002,8 +3090,8 @@ def valid_target_pool_build(
                     )
                 continue
         
-        # Engaged shooter can only target adjacent enemies.
-        if shooter_is_engaged and not enemy_adjacent_to_shooter:
+        # Engaged shooter can only target adjacent enemies (10.06, volet non-MONSTER/VEHICLE).
+        if shooter_is_engaged and not enemy_adjacent_to_shooter and not shooter_is_mv:
             if game_state.get("debug_mode", False):
                 from engine.game_utils import add_debug_file_log
                 _ep = enemy.get("col", "?")

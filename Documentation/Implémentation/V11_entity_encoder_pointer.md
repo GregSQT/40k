@@ -28,7 +28,7 @@ les numéros de ligne sont indicatifs. Re-localiser par grep avant d'éditer.
 | **T-E** | **Tête pointeur** + slots ennemis 5 → 20 (espace d'action) | ✅ **FAIT (2026-07-26)** |
 | **T-F** | K armes = 10 des deux côtés + bloc « types de figurines » ennemis | ✅ **FAIT (2026-07-26)** |
 | **T-G** | Run `--new` + win-rate (§0.14) | ⏳ **débloqué (2026-07-26)** — à lancer par l'utilisateur |
-| **résidu** | 10.06 MONSTER/VEHICLE côté PvP/mono (divergence créée par T-B) | ⏳ à faire, cf. §1.9 |
+| **résidu** | 10.06 MONSTER/VEHICLE côté PvP/mono (divergence créée par T-B) | ✅ **FAIT (2026-07-26)**, cf. §1.9 |
 
 ---
 
@@ -130,10 +130,18 @@ véhicule engagé peut tirer son arme principale (à -1) en entraînement, mais 
 **Sens de l'écart** : le chemin PvP est plus STRICT que le PDF, donc jamais laxiste — mais il
 refuse un tir légal.
 
-**Traitement** : à faire, hors T-B parce que c'est une **modification de comportement PvP** et
-que T-C en a déjà introduit une (sélection multi-armes) que l'utilisateur doit d'abord valider
-en jeu réel. Empiler deux changements PvP non validés rendrait un éventuel écart impossible à
-attribuer. À reprendre avec la validation PvP de T-C.
+**Traitement** : ✅ **FAIT le 2026-07-26**, après validation PvP de T-C par l'utilisateur
+(essai sur `CaptainGravisChainSwordBoltstorm` : choix d'arme conforme). Détail → journal §6.
+
+⚠️ **Mesure faite au moment de demander cette validation** : l'« impact PvP » de T-C était en
+réalité **nul sur les rosters actuels**. Les corrections 04.01/04.02/24.07 portent sur
+`squad_declare_shoot`, dont le SEUL appelant est l'action gym `squad_shoot` (le tir PvP est
+manuel, arme par arme). Restait l'heuristique de mêlée, bien partagée — mais sur les
+179 unités du registre, **7** portent ≥2 armes de mêlée et, dans les 7, la seconde est
+[EXTRA ATTACKS] : toujours ajoutée d'office (24.11), donc exclue du choix principal. Après
+exclusion, l'heuristique n'a **jamais plus d'un candidat**. La prudence affichée ici était
+donc surdimensionnée ; le constat est conservé parce qu'il redeviendra vrai dès qu'une unité
+portera deux armes de mêlée « normales ».
 
 ### 1.4 🟠 L'heuristique de choix d'arme de mêlée a été périmée par P1
 
@@ -709,3 +717,44 @@ tous les 25 steps, les DEUX camps) :
 pire cas mesuré ; la troncature d'un profil **ENNEMI** est loguée (contre-épreuve : rien n'est
 logué quand tout tient) ; la troncature des **types** ennemis est loguée. PvP : 27 PASS / 0 FAIL.
 `pyright` vert.
+
+### 2026-07-26 — §1.9 refermée : le volet MONSTER/VEHICLE de 10.06 existe des DEUX côtés
+
+Feu vert de l'utilisateur après validation PvP de T-C. **PDF 10.06 relu avant d'écrire une ligne**
+(`Documentation/40k_rules/10 Shooting phase.pdf`) — le volet MONSTER/VEHICLE y tient en trois
+clauses, toutes portées :
+
+| Clause PDF | Chemin squad (T-B) | Chemin mono/PvP (avant) | Chemin mono/PvP (après) |
+|---|---|---|---|
+| éligible « or **is a MONSTER/VEHICLE unit** » | ✅ | ❌ refusait le tir | ✅ |
+| « you can select **any** of that model's ranged weapons » | ✅ | ❌ [CLOSE-QUARTERS] seules | ✅ |
+| cibles non limitées aux unités engagées | ✅ | ❌ | ✅ |
+| [BLAST] « still cannot target a unit your unit is engaged with » | ✅ | — (inatteignable) | ✅ |
+| −1 au jet de touche | ✅ (partagé, `_manual_roll_intent`) | ✅ déjà partagé | ✅ |
+
+- **Granularité** : le prédicat exact est PAR FIGURINE (`_model_is_monster_or_vehicle`). Les gates
+  du chemin mono (cercle vert, menu d'armes, pool de cibles) décident au niveau UNITÉ : le
+  nouveau `_unit_shoots_as_monster_or_vehicle` exige donc que **toutes** les figurines vivantes
+  soient MONSTER/VEHICLE. Répondre « oui » dès qu'une seule l'est offrirait dans l'interface un
+  tir que la déclaration par-figurine refuserait — la classe « le masque offre plus que
+  l'exécutable ». **Mesuré** : les 9 unités MONSTER/VEHICLE des rosters sont mono-figurine, aucune
+  escouade mixte — le prédicat est donc exact en pratique, conservateur sinon, jamais laxiste.
+- **24.07 (SIDEARMS) relu aussi** : la restriction de mélange vaut « for each model in that unit
+  (**excluding MONSTER/VEHICLE models**) ». Sans cette exclusion, le volet ci-dessus serait mort
+  dès la 2ᵉ arme tirée. Ajoutée au chemin mono.
+- 🔴 **Laxisme PRÉEXISTANT trouvé en écrivant le test de parité** : le gate mono testait
+  `is_adjacent` AVANT `has_advanced`, si bien qu'une unité **engagée qui avait avancé** pouvait
+  tirer dès qu'elle portait une arme [CLOSE-QUARTERS] — alors que 10.06 exige « did not make an
+  advance move this turn » et que 10.05 exige d'être unengaged : elle ne relève d'AUCUN type de
+  tir. Le chemin squad rendait déjà `None`. Corrigé, et c'est le test de parité qui l'a révélé.
+
+**Verrou** : `tests/unit/engine/test_close_quarters_monster_vehicle_mono.py` (**10**). Chaque test
+MONSTER/VEHICLE a son **jumeau INFANTRY** qui doit rester refusé — le fix ne doit rien ouvrir à
+l'infanterie. Le dernier test compare les DEUX chemins sur le même état (`resolve_squad_shooting_type`
+vs le gate mono) : c'est lui qui empêche la divergence §9.1 de revenir.
+
+**Contre-épreuves mutation** : volet MV retiré du gate → **2 rouges** ; exclusion 24.07 retirée →
+**1 rouge** ; restriction [BLAST] retirée → **1 rouge** ; restauré → verts.
+
+**Vérifications** : 18 fichiers de tests de tir en non-régression (aucun changement), PvP
+27 PASS / 0 FAIL, smoke moteur 3 épisodes complets, `pyright` vert.
