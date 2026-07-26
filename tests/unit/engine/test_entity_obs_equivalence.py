@@ -273,3 +273,64 @@ def test_ally_overflow_is_logged_never_silent():
                side_effect=lambda gs, msg: captured.append(msg)):
         eng.obs_builder.build_squad_observation(eng.game_state, "1")
     assert any("escouades alliees" in m for m in captured), "dépassement d'alliés NON logué"
+
+
+# ---------------------------------------------------------------------------
+# T-F — K armes = 10 par registre des DEUX côtés
+# ---------------------------------------------------------------------------
+
+def test_k_weapons_covers_the_measured_worst_case():
+    """Mesuré sur les rosters d'entraînement réels : 6 profils de tir, 5 de mêlée au maximum.
+
+    K = 10 par registre laisse une marge nette. Depuis que les armes passent par un encodeur
+    PARTAGÉ, un slot de plus coûte du compute, pas des paramètres : rogner K n'a plus de
+    contrepartie — c'était l'arbitrage de §1.5, désormais caduc.
+    """
+    assert ObservationBuilder.K_WEAPONS_RANGED >= 6
+    assert ObservationBuilder.K_WEAPONS_MELEE >= 5
+    assert ObservationBuilder.K_MODEL_TYPES >= 5
+
+
+def test_enemy_profile_truncation_is_logged_never_silent():
+    """Une escouade ENNEMIE qui dépasse K loggue sa troncature (elle ne la subissait pas avant).
+
+    Contre-épreuve intégrée : la même escouade à K profils exactement ne loggue RIEN.
+    """
+    k = ObservationBuilder.K_WEAPONS_RANGED
+
+    def _log_of(n_profiles: int) -> List[str]:
+        per_model = {
+            i: {"RNG_WEAPONS": [_weapon(display_name=f"W{i}", STR=3 + i)]}
+            for i in range(n_profiles)
+        }
+        eng = _make_engine([
+            _unit_cfg(1, 1, [(20, 20)]),
+            _unit_cfg(2, 2, [(60 + 2 * i, 20) for i in range(n_profiles)],
+                      per_model_over=per_model),
+        ])
+        captured: List[str] = []
+        with patch("engine.game_utils.add_debug_file_log",
+                   side_effect=lambda gs, msg: captured.append(msg)):
+            eng.obs_builder.build_squad_observation(eng.game_state, "1")
+        return [m for m in captured if "profils RNG_WEAPONS" in m and "escouade 2" in m]
+
+    assert _log_of(k + 2), "troncature d'un profil ENNEMI non loguee"
+    assert not _log_of(k), "log de troncature emis alors qu'aucun profil n'est tronque"
+
+
+def test_enemy_model_type_truncation_is_logged():
+    """Idem pour les TYPES de figurines ennemis : le dépassement de K est tracé."""
+    k = ObservationBuilder.K_MODEL_TYPES
+    n = k + 2
+    eng = _make_engine([
+        _unit_cfg(1, 1, [(20, 20)]),
+        _unit_cfg(2, 2, [(60 + 2 * i, 20) for i in range(n)]),
+    ])
+    gs = eng.game_state
+    for i in range(n):  # n profils défensifs DISTINCTS -> n types
+        gs["models_cache"][f"2#{i}"].update({"HP_MAX": 2 + i, "T": 3 + i})
+    captured: List[str] = []
+    with patch("engine.game_utils.add_debug_file_log",
+               side_effect=lambda state, msg: captured.append(msg)):
+        eng.obs_builder.build_squad_observation(gs, "1")
+    assert any("types de figurines" in m and "escouade 2" in m for m in captured)

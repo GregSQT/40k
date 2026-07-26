@@ -26,8 +26,8 @@ les numéros de ligne sont indicatifs. Re-localiser par grep avant d'éditer.
 | **T-C** | Sélection d'armes : défaut correct (04.01 / 04.02) + heuristique mêlée consciente des règles | ✅ **FAIT (2026-07-26)** |
 | **T-D** | Observation en **tenseurs d'entités** + **encodeurs partagés** | ✅ **FAIT (2026-07-26)** |
 | **T-E** | **Tête pointeur** + slots ennemis 5 → 20 (espace d'action) | ✅ **FAIT (2026-07-26)** |
-| **T-F** | K armes = 10 des deux côtés + bloc « types de figurines » ennemis | ⏳ à faire |
-| **T-G** | Run `--new` + win-rate (§0.14) | ⏳ bloqué par T-A→T-F |
+| **T-F** | K armes = 10 des deux côtés + bloc « types de figurines » ennemis | ✅ **FAIT (2026-07-26)** |
+| **T-G** | Run `--new` + win-rate (§0.14) | ⏳ **débloqué (2026-07-26)** — à lancer par l'utilisateur |
 | **résidu** | 10.06 MONSTER/VEHICLE côté PvP/mono (divergence créée par T-B) | ⏳ à faire, cf. §1.9 |
 
 ---
@@ -684,3 +684,28 @@ masque comme une PONDÉRATION. Sur des observations dégénérées (masque non b
 dénominateur pouvait tomber à zéro → logits NaN → `MaskableCategorical` refuse la distribution.
 Le masque est désormais lu comme une **présence** (`> 0`), conformément au contrat « les clés
 `_bin` sont discrètes ».
+
+### 2026-07-26 — T-F livrée : K = 10 par registre des deux côtés, types ennemis mesurés
+
+- **K armes 6+5 → 10+10**, des DEUX côtés (le schéma unifié de T-D interdit d'en donner plus à
+  un camp qu'à l'autre). Le coût est désormais en compute, pas en paramètres : l'encodeur d'arme
+  est partagé, un slot de plus ne crée aucun poids. `obs_size` **12284 → 20096**.
+- **Bloc « types de figurines » ennemis** : livré dès T-D, par construction du schéma unifié.
+  T-F le VÉRIFIE sur les rosters réels au lieu de le supposer.
+
+**Mesure sur les rosters réels** (5 épisodes complets, tous les états d'unités échantillonnés
+tous les 25 steps, les DEUX camps) :
+
+| Grandeur | Maximum mesuré | K | Marge |
+|---|---|---|---|
+| profils de tir par escouade | **6** | 10 | ✅ |
+| profils de mêlée | **5** | 10 | ✅ |
+| types de figurines | **5** | 6 | ✅ |
+
+⇒ **0 troncature loguée** sur toute la mesure. `build_squad_observation` : **3,20 ms**
+(3,95 ms au format plat, qui décrivait pourtant 4 fois moins d'entités).
+
+**Verrous** : 3 tests ajoutés à `test_entity_obs_equivalence.py` (**10** au total) — K couvre le
+pire cas mesuré ; la troncature d'un profil **ENNEMI** est loguée (contre-épreuve : rien n'est
+logué quand tout tient) ; la troncature des **types** ennemis est loguée. PvP : 27 PASS / 0 FAIL.
+`pyright` vert.

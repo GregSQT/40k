@@ -1305,10 +1305,13 @@ class ObservationBuilder:
     #: hors de l'observation ET hors de portee d'action (§1.1, mesure).
     K_ENEMY_SLOTS = 20
     #: Profils d'armes par registre et par unité — MÊME valeur pour les deux camps (§3.3 : une
-    #: arme est une arme des deux côtés). Mesuré : au plus 6 profils de tir et 5 de mêlée par
-    #: escouade sur les rosters d'entraînement. Tout dépassement est LOGUÉ.
-    K_WEAPONS_RANGED = 6
-    K_WEAPONS_MELEE = 5
+    #: arme est une arme des deux côtés). Mesuré sur les rosters d'entraînement réels : au plus
+    #: 6 profils de tir et 5 de mêlée par escouade. K = 10 par registre (décision §2.4) laisse
+    #: donc une marge nette, et ne coûte plus rien en paramètres depuis que les armes passent par
+    #: un encodeur PARTAGÉ (le coût est en compute, pas en poids — §3.4). Tout dépassement reste
+    #: LOGUÉ : le jour où un roster dépasse K, on le sait au lieu de le subir.
+    K_WEAPONS_RANGED = 10
+    K_WEAPONS_MELEE = 10
     K_WEAPONS = K_WEAPONS_RANGED + K_WEAPONS_MELEE
     #: Types de figurines par unité (profil défensif + rôle + effectif du type), des DEUX côtés.
     #: Mesuré : jusqu'à 5 types défensifs distincts par escouade.
