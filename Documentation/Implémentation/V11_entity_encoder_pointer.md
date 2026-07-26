@@ -29,6 +29,7 @@ les numéros de ligne sont indicatifs. Re-localiser par grep avant d'éditer.
 | **T-F** | K armes = 10 des deux côtés + bloc « types de figurines » ennemis | ✅ **FAIT (2026-07-26)** |
 | **T-G** | Run `--new` + win-rate (§0.14) | ⏳ **débloqué (2026-07-26)** — à lancer par l'utilisateur |
 | **résidu** | 10.06 MONSTER/VEHICLE côté PvP/mono (divergence créée par T-B) | ✅ **FAIT (2026-07-26)**, cf. §1.9 |
+| **audit** | Passe « tout est optimal et documenté ? » — 6 écarts trouvés, tous corrigés | ✅ **FAIT (2026-07-26)**, cf. journal |
 
 ---
 

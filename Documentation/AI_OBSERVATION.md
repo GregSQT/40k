@@ -57,7 +57,7 @@ réseau généralise d'un slot à l'autre et le coût d'un slot supplémentaire 
 **`obs_size`** (config d'agent, `observation_params.obs_size`) = nombre TOTAL de scalaires,
 grille exclue — calculé par `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`. Historique : 108 (T6) →
 199 (refonte du vecteur, 2026-07-25) → 1011 (profils d'armes et règles, 2026-07-26) → 5729
-(tenseurs d'entités, T-D) → 12284 (20 slots ennemis, T-E) → **20096** (K armes = 10 par registre,
+(tenseurs d'entités, T-D) → 12284 (20 slots ennemis, T-E) → 20096 (K armes = 10 par registre,
 T-F) → **20166** (plafond du bloc figurines 6 → 20, 2026-07-26). **Toute évolution du schéma change cette valeur et rend les
 `.zip` existants incompatibles : le retrain `--new` est obligatoire.**
 
