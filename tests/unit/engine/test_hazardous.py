@@ -68,6 +68,9 @@ def _game_state(weapon_rules, *, shooters=1, shooter_keywords=("INFANTRY",)):
                     "UNIT_KEYWORDS": _kw("INFANTRY")}
     return {
         "gym_training_mode": True,
+        # Zone d'engagement : exigee des que le moteur resout un type de tir (10.04-10.06),
+        # ce que fait desormais [CLOSE-QUARTERS] pour les figurines MONSTER/VEHICLE.
+        "config": {"game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5}},
         "turn": 1, "phase": "shoot",
         "action_logs": [], "action_log_seq": 0,
         "models_cache": models,

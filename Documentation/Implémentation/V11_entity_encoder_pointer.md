@@ -21,8 +21,8 @@ les numéros de ligne sont indicatifs. Re-localiser par grep avant d'éditer.
 
 | Tranche | Objet | Statut |
 |---|---|---|
-| **T-A** | Renommage `PISTOL` → `CLOSE_QUARTERS` | ⏳ à faire |
-| **T-B** | Tir d'assaut 10.05 + tir à bout portant 10.06 dans le gate squad/gym | ⏳ à faire |
+| **T-A** | Renommage `PISTOL` → `CLOSE_QUARTERS` | ✅ **FAIT (2026-07-26)** |
+| **T-B** | Tir d'assaut 10.05 + tir à bout portant 10.06 dans le gate squad/gym | ✅ **FAIT (2026-07-26)** |
 | **T-C** | Sélection d'armes : défaut correct (04.01 / 04.02) + heuristique mêlée consciente des règles | ⏳ à faire |
 | **T-D** | Observation en **tenseurs d'entités** + **encodeurs partagés** | ⏳ à faire |
 | **T-E** | **Tête pointeur** + slots ennemis 5 → 20 (espace d'action) | ⏳ à faire |
@@ -457,3 +457,45 @@ alliés, et la cible par arme (04.02) est un problème d'affectation non trivial
 Chantier ouvert après la vérification de §9.2.5. Constats §1.1 à §1.8 établis et mesurés,
 décisions §2 actées par l'utilisateur, architecture §3 arrêtée, plan §4 rédigé. Aucune tranche
 implémentée à ce stade.
+
+### 2026-07-26 — T-A livrée : renommage `PISTOL` → `CLOSE_QUARTERS`
+
+- `config/weapon_rules.json` : clé + `name` + description alignée sur 24.07 / 10.06, avec la
+  mention historique de 24.27 (« Formerly named [PISTOL] »).
+- **6 armories TypeScript** (source unique : `engine/weapons/parser.py` les lit au runtime) —
+  30 armes migrées.
+- `engine/` + `ai/` : prédicats (`_weapon_has_close_quarters_rule`), champ d'état
+  (`_shooting_with_close_quarters`), clés de stats de l'analyzer, token de log
+  `[CLOSE-QUARTERS]` (la normalisation du tooltip `GameLog` ramène `_` et `-` au même espace,
+  donc le tooltip résout).
+- **Verrou** : `tests/unit/engine/test_close_quarters_rename.py` (**5**). Il distingue la RÈGLE
+  (majuscules) des NOMS d'armes (« bolt pistol ») — ⚠️ **piège réel rencontré** : un
+  remplacement en minuscules avait transformé `'bolt pistol'` en `'bolt close_quarters'` et le
+  mot français « pistolet » en « close_quarterset ». Les deux sont corrigés et verrouillés.
+- Vérifié in-engine : **0** arme porte encore `PISTOL`, **40** armes reconnues par le prédicat.
+- PvP : 27 PASS / 0 FAIL. `pyright`, `tsc`, `biome` verts.
+
+### 2026-07-26 — T-B livrée : les types de tir 10.04 / 10.05 / 10.06 sur le chemin squad
+
+- Nouveau résolveur `resolve_squad_shooting_type` (shared_utils) : rend le type de tir
+  applicable (`normal` / `assault` / `close_quarters` / `None`) selon les conditions **du PDF**,
+  et intègre les règles d'unité du projet (`shoot_after_advance`, `shoot_after_flee`) — mêmes
+  prédicats que le chemin mono, pour que les deux ne divergent plus.
+- `shooting_type_allows_weapon` + `squad_model_shootable_weapon_indices` : volet « WHILE
+  SHOOTING » (armes sélectionnables par type).
+- **Le gate du masque** consomme le résolveur au lieu de `not has_advanced and not in_er`, et
+  teste **toute arme éligible** au lieu du seul `selectedRngWeaponIndex` (qui vaut 0 pendant
+  toute la partie en gym — le masque était donc aveugle aux autres armes d'une figurine).
+- **10.06 volet MONSTER/VEHICLE implémenté** (le chemin mono le déclarait non implémenté) :
+  éligibilité sans arme [CLOSE-QUARTERS], liberté de sélection d'arme, **-1 au jet de touche**
+  sauf [CLOSE-QUARTERS] sur une unité engagée, et **[BLAST] ne peut toujours pas viser une unité
+  engagée**. Le volet non-MONSTER/VEHICLE était déjà correct dans
+  `_shoot_engagement_blocks_target` — c'est bien le gate qui bloquait en amont.
+- **Verrou** : `tests/unit/engine/test_shooting_types_squad_gate.py` (**13**), tous sur le VRAI
+  masque. Contre-épreuves mutation : ancien gate restauré → **3 rouges** ; volet MONSTER/VEHICLE
+  neutralisé → **1 rouge** ; malus -1 neutralisé → **1 rouge**.
+- **Effet mesuré en épisode réel** (3 épisodes) : **48** situations de tir d'assaut et **7** de
+  tir à bout portant s'ouvrent, là où l'agent ne pouvait auparavant pas tirer du tout.
+- Effet de bord traité : la fixture de `test_hazardous.py` devait porter `config.game_rules`
+  (la résolution d'un type de tir exige la zone d'engagement).
+- PvP : 27 PASS / 0 FAIL. `pyright` vert.

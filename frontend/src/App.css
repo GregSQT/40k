@@ -475,25 +475,11 @@ body {
   gap: var(--spacing-sm);
 }
 
-/* Pas de contour bleu de focus sur les boutons du container : halo glow vert commun à la place. */
-.replay-playback-controls-container button:focus {
-  outline: none;
-}
-.replay-playback-controls-container button:focus-visible {
-  outline: none;
-  box-shadow: var(--btn-glow-shadow);
-}
+/* Le halo glow vert de focus est global (voir "Focus Management"). */
 
-/* Champ note du popup de save : fond noir, halo glow vert au focus (pas de contour bleu). */
+/* Champ note du popup de save : fond noir. */
 .replay-note-input {
   background: #000;
-}
-.replay-note-input:focus {
-  outline: none;
-}
-.replay-note-input:focus-visible {
-  outline: none;
-  box-shadow: var(--btn-glow-shadow);
 }
 
 /* Replay Playback Controls Layout */
@@ -1417,12 +1403,6 @@ body {
   background: #4b5563;
 }
 
-.deployment-panel__picker-close:focus,
-.deployment-panel__picker-close:focus-visible {
-  outline: none;
-  box-shadow: var(--btn-glow-shadow);
-}
-
 .deployment-panel__type-group {
   border-radius: 6px;
   padding: 8px;
@@ -1734,8 +1714,8 @@ body {
 }
 
 .btn:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--btn-glow-shadow);
 }
 
 .btn--primary {
@@ -1991,18 +1971,18 @@ body {
   text-align: center;
 }
 
-/* Focus Management */
+/* Focus Management — halo glow vert commun (jamais de contour bleu de sélection). */
 *:focus {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--btn-glow-shadow);
 }
 
 button:focus,
 input:focus,
 select:focus,
 textarea:focus {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--btn-glow-shadow);
 }
 
 /* High Contrast Mode Support */

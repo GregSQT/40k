@@ -4989,6 +4989,8 @@ def _shoot_engagement_blocks_target(
     attacker_squad_id: str,
     target_squad_id: str,
     weapon_is_close_quarters: bool,
+    shooter_model: Dict[str, Any],
+    weapon_is_blast: bool,
 ) -> bool:
     """Regles de ciblage tir 40K manquantes au chemin per-figurine (portee+LoS seuls).
 
@@ -5025,12 +5027,21 @@ def _shoot_engagement_blocks_target(
         return False
     shooter_is_engaged = _is_adjacent_to_enemy_within_cc_range(game_state, shooter_unit)
 
-    # 10.06 : tireur engage -> CLOSE_QUARTERS uniquement, et seulement la cible engagee.
+    # 10.06 « WHILE SHOOTING », deux volets selon la figurine :
+    #  - Non-MONSTER/Non-VEHICLE : « you can only select [CLOSE-QUARTERS] weapons and you can
+    #    only select enemy units that are engaged with your unit as targets » ;
+    #  - MONSTER/VEHICLE : peut selectionner n importe quelle arme (au prix d un -1 au jet de
+    #    touche, applique a la RESOLUTION), MAIS « if that attack is made with a [BLAST] weapon,
+    #    it still cannot target a unit your unit is engaged with ».
     if shooter_is_engaged:
-        if not weapon_is_close_quarters:
-            return True
-        if not enemy_adjacent_to_shooter:
-            return True
+        if _model_is_monster_or_vehicle(shooter_model):
+            if weapon_is_blast and enemy_adjacent_to_shooter:
+                return True
+        else:
+            if not weapon_is_close_quarters:
+                return True
+            if not enemy_adjacent_to_shooter:
+                return True
     elif enemy_adjacent_to_shooter and not weapon_is_close_quarters:
         return True
 
@@ -5079,6 +5090,7 @@ def _model_can_shoot_target(
         return False
     # Import lazy : shooting_handlers importe shared_utils (eviter le cycle).
     from engine.phase_handlers.shooting_handlers import _weapon_has_close_quarters_rule
+    from engine.utils.weapon_helpers import weapon_has_rule
 
     ac = int(attacker_model["col"])
     ar = int(attacker_model["row"])
@@ -5089,6 +5101,8 @@ def _model_can_shoot_target(
         str(attacker_model["squad_id"]),
         target_squad_id,
         _weapon_has_close_quarters_rule(weapon),
+        attacker_model,
+        weapon_has_rule(weapon, "BLAST"),
     ):
         return False
     return True
@@ -5871,6 +5885,178 @@ def squad_undeclare_shoot_model(
 # Marche pour mono ET multi-figurine (mono = squad d 1 modele).
 
 
+# ============================================================================
+# TYPES DE TIR (10.04 / 10.05 / 10.06) — chemin SQUAD/GYM
+# ============================================================================
+# Le gate de tir du masque squad se resumait a
+# `not has_fled and not has_advanced and not has_shot and not in_er`, SANS aucune exception
+# d arme : le tir d assaut et le tir a bout portant n existaient donc pas pour l agent, alors
+# que le chemin PvP/mono les connait (`_can_shoot`, shooting_handlers). Motif §9.1 — une regle
+# vive sur un chemin, absente de l autre. Detail : V11_entity_encoder_pointer.md §1.2.
+
+SHOOTING_TYPE_NORMAL = "normal"
+SHOOTING_TYPE_ASSAULT = "assault"
+SHOOTING_TYPE_CLOSE_QUARTERS = "close_quarters"
+
+
+def _model_is_monster_or_vehicle(model: Dict[str, Any]) -> bool:
+    """Keywords MONSTER/VEHICLE de la FIGURINE (pas de l unite).
+
+    Meme convention que le hazard roll 06.03 : le test « each model » se lit sur les keywords
+    PROPRES de la figurine, sinon l union 19.03 ferait passer toute une escouade d infanterie
+    pour MONSTER des qu un character MONSTER y est attache.
+    """
+    keywords = model.get("UNIT_KEYWORDS", [])  # get allowed (figurine sans keywords = ni l un ni l autre)
+    if not isinstance(keywords, list):
+        raise TypeError(
+            f"UNIT_KEYWORDS must be a list for model {model.get('id')}, "
+            f"got {type(keywords).__name__}"
+        )
+    for entry in keywords:
+        kid = entry.get("keywordId") if isinstance(entry, dict) else entry  # get allowed
+        if str(kid).strip().upper() in ("MONSTER", "VEHICLE"):
+            return True
+    return False
+
+
+def _squads_are_engaged(
+    game_state: Dict[str, Any], squad_id: str, other_squad_id: str
+) -> bool:
+    """Ces deux escouades sont-elles engagees l une avec l autre (03.04) ?
+
+    Meme primitive que le ciblage 10.06 (`_shoot_engagement_blocks_target`) : zone
+    d engagement sur les entrees de cache, pas une distance ad hoc.
+    """
+    from engine.spatial_relations import (
+        get_engagement_zone,
+        unit_entries_within_engagement_zone,
+    )
+
+    units_cache = require_key(game_state, "units_cache")
+    a = units_cache.get(str(squad_id))
+    b = units_cache.get(str(other_squad_id))
+    if a is None or b is None:
+        return False
+    return unit_entries_within_engagement_zone(a, b, get_engagement_zone(game_state))
+
+
+def resolve_squad_shooting_type(
+    game_state: Dict[str, Any], squad_id: str
+) -> Optional[str]:
+    """Type de tir applicable a cette escouade, ou None si elle ne peut pas tirer.
+
+    Source de verite : PDF 10 Shooting phase.
+      - **10.04 normal**        : unengaged ET pas d advance ce tour.
+      - **10.05 assault**       : unengaged ET a fait un advance ce tour ET >=1 arme [ASSAULT].
+      - **10.06 close-quarters**: ENGAGEE ET pas d advance ce tour ET (>=1 arme
+        [CLOSE_QUARTERS] OU au moins une figurine MONSTER/VEHICLE).
+
+    Les regles d UNITE du projet elargissent 10.05 (`shoot_after_advance`) et le repli
+    (`shoot_after_flee`) — memes predicats que le chemin mono, pour que les deux chemins ne
+    divergent pas.
+
+    Ordre des tests = ordre des conditions du PDF ; un seul type peut s appliquer (les
+    conditions « engaged / unengaged » et « advance / pas d advance » sont exclusives).
+    """
+    from engine.phase_handlers.shooting_handlers import (
+        _can_unit_shoot_after_advance_with_weapon,
+        _weapon_has_close_quarters_rule,
+        _unit_has_rule,
+    )
+
+    sid = str(squad_id)
+    if sid in game_state.get("units_shot", set()):  # get allowed (absent = personne n a tire)
+        return None
+    unit = get_unit_by_id(game_state, sid)
+    if unit is None:
+        return None
+    if sid in game_state.get("units_fled", set()) and not _unit_has_rule(  # get allowed
+        unit, "shoot_after_flee"
+    ):
+        return None
+
+    has_advanced = sid in game_state.get("units_advanced", set())  # get allowed
+    engaged = _squad_is_in_enemy_er(game_state, sid)
+
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive = [models_cache[m] for m in squad_models.get(sid, []) if m in models_cache]  # get allowed
+    if not alive:
+        return None
+
+    def _any_weapon(predicate) -> bool:
+        return any(
+            predicate(w)
+            for m in alive
+            for w in m.get("RNG_WEAPONS", [])  # get allowed
+            if isinstance(w, dict) and int(w.get("RNG", 0)) > 0  # get allowed
+        )
+
+    if engaged:
+        if has_advanced:
+            return None  # 10.06 exige « did not make an advance move this turn »
+        if _any_weapon(_weapon_has_close_quarters_rule) or any(
+            _model_is_monster_or_vehicle(m) for m in alive
+        ):
+            return SHOOTING_TYPE_CLOSE_QUARTERS
+        return None
+    if has_advanced:
+        if _any_weapon(lambda w: _can_unit_shoot_after_advance_with_weapon(unit, w)):
+            return SHOOTING_TYPE_ASSAULT
+        return None
+    return SHOOTING_TYPE_NORMAL
+
+
+def shooting_type_allows_weapon(
+    shooting_type: str,
+    unit: Dict[str, Any],
+    model: Dict[str, Any],
+    weapon: Dict[str, Any],
+) -> bool:
+    """L arme est-elle SELECTIONNABLE sous ce type de tir (volet « WHILE SHOOTING ») ?
+
+    - 10.04 normal        : toutes les armes de tir.
+    - 10.05 assault       : « You can only select [ASSAULT] weapons » (+ la regle d unite
+      `shoot_after_advance` du projet, meme predicat que le chemin mono).
+    - 10.06 close-quarters: « Non-MONSTER/Non-VEHICLE Models: you can only select
+      [CLOSE-QUARTERS] weapons ». Une figurine MONSTER/VEHICLE, elle, peut selectionner
+      n importe quelle arme — au prix d un -1 au jet de touche (applique a la resolution).
+    """
+    from engine.phase_handlers.shooting_handlers import (
+        _can_unit_shoot_after_advance_with_weapon,
+        _weapon_has_close_quarters_rule,
+    )
+
+    if shooting_type == SHOOTING_TYPE_NORMAL:
+        return True
+    if shooting_type == SHOOTING_TYPE_ASSAULT:
+        return _can_unit_shoot_after_advance_with_weapon(unit, weapon)
+    if shooting_type == SHOOTING_TYPE_CLOSE_QUARTERS:
+        if _model_is_monster_or_vehicle(model):
+            return True
+        return _weapon_has_close_quarters_rule(weapon)
+    raise ValueError(f"shooting_type inconnu : {shooting_type!r}")
+
+
+def squad_model_shootable_weapon_indices(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    model: Dict[str, Any],
+    shooting_type: str,
+) -> List[int]:
+    """Index des armes de tir que CETTE figurine peut selectionner sous ce type de tir."""
+    unit = get_unit_by_id(game_state, str(squad_id))
+    if unit is None:
+        return []
+    out: List[int] = []
+    for idx, weapon in enumerate(model.get("RNG_WEAPONS", [])):  # get allowed
+        if not isinstance(weapon, dict) or int(weapon.get("RNG", 0)) <= 0:  # get allowed
+            continue
+        if shooting_type_allows_weapon(shooting_type, unit, model, weapon):
+            out.append(idx)
+    return out
+
+
 def _model_can_shoot_target_with_weapon(
     game_state: Dict[str, Any],
     attacker_model: Dict[str, Any],
@@ -5895,6 +6081,7 @@ def _model_can_shoot_target_with_weapon(
     if range_subhex <= 0:
         return False
     from engine.phase_handlers.shooting_handlers import _weapon_has_close_quarters_rule
+    from engine.utils.weapon_helpers import weapon_has_rule
 
     ac = int(attacker_model["col"])
     ar = int(attacker_model["row"])
@@ -5905,6 +6092,8 @@ def _model_can_shoot_target_with_weapon(
         str(attacker_model["squad_id"]),
         target_squad_id,
         _weapon_has_close_quarters_rule(weapon),
+        attacker_model,
+        weapon_has_rule(weapon, "BLAST"),
     ):
         return False
     return True
@@ -6821,6 +7010,20 @@ def _manual_roll_intent(
         ):
             bs = max(2, bs - 1)
             _heavy_applied = True
+    # [10.06] tir a bout portant, volet MONSTER/VEHICLE : « Each time a MONSTER/VEHICLE model in
+    # your unit makes an attack: unless that attack is made with a [CLOSE-QUARTERS] weapon AND
+    # targets a unit your unit is engaged with, subtract 1 from the hit roll. » -1 au jet =
+    # seuil BS degrade de 1 (plafond 6 : un 6 non modifie touche toujours, 05.01). Le volet
+    # « non-MONSTER/VEHICLE » (armes et cibles restreintes) est applique en amont, au ciblage
+    # (_shoot_engagement_blocks_target) et a la selection d armes (shooting_type_allows_weapon).
+    _cq_malus_applied = False
+    if _model_is_monster_or_vehicle(attacker):
+        _cq_sid = str(attacker["squad_id"])
+        if resolve_squad_shooting_type(game_state, _cq_sid) == SHOOTING_TYPE_CLOSE_QUARTERS:
+            _cq_engaged_target = _squads_are_engaged(game_state, _cq_sid, str(target_sid))
+            if not (weapon_has_rule(weapon, "CLOSE_QUARTERS") and _cq_engaged_target):
+                bs = min(6, bs + 1)
+                _cq_malus_applied = True
     strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))  # get allowed
     ap = int(weapon.get("AP", 0))  # get allowed
     dmg_raw = weapon.get("DMG", 1)  # get allowed
@@ -8993,8 +9196,11 @@ def build_squad_action_mask(
 
     # --- Shoot phase: shoot slots 19-23 ---
     elif phase == "shoot":
-        can_shoot = not has_fled and not has_advanced and not has_shot and not in_er
-        if can_shoot:
+        # 10.04 / 10.05 / 10.06 : le type de tir applicable REMPLACE l ancien
+        # `not has_advanced and not in_er`, qui fermait le tir sans regarder les armes et
+        # supprimait donc deux types de tir entiers pour l agent (cf. resolve_squad_shooting_type).
+        shooting_type = resolve_squad_shooting_type(game_state, squad_id)
+        if shooting_type is not None:
             for slot_i, esid in enumerate(enemy_slot_ids):
                 if esid is None or esid not in units_cache:
                     continue
@@ -9018,8 +9224,16 @@ def build_squad_action_mask(
                     m = models_cache.get(mid)
                     if m is None:
                         continue
-                    if _model_can_shoot_target(game_state, m, esid):
-                        can_any_hit = True
+                    # Toute arme SELECTIONNABLE sous ce type de tir suffit — pas seulement
+                    # `selectedRngWeaponIndex`, qui vaut 0 pour toute la partie en gym et
+                    # rendait le masque aveugle aux autres armes de la figurine.
+                    for widx in squad_model_shootable_weapon_indices(
+                        game_state, squad_id, m, shooting_type
+                    ):
+                        if _model_can_shoot_target_with_weapon(game_state, m, esid, widx):
+                            can_any_hit = True
+                            break
+                    if can_any_hit:
                         break
                 if can_any_hit:
                     mask[SQUAD_ACTION_SHOOT_SLOT_BASE + slot_i] = 1
