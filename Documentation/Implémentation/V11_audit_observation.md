@@ -40,36 +40,37 @@ d'arme brute, et il lui manque des informations de décision que les règles exi
 
 L'observation avait **deux morceaux** donnés ensemble au réseau :
 
-1. un **vecteur de 108 nombres** (`build_squad_observation`) — aujourd'hui **199**, scindé
-   `vec_cont` (119) / `vec_bin` (80) ;
+1. un **vecteur de 108 nombres** (`build_squad_observation`) — devenu 199, puis 1011, et
+   **aujourd'hui un jeu de TENSEURS D'ENTITÉS** de **20 166** scalaires (§0.30 T-D→T-F) ;
 2. une **grille égocentrique** de 6 images superposées centrées sur l'escouade active
    (`build_squad_grid`) — aujourd'hui **7 canaux**.
 
-L'espace d'action associé (justification config) : 1024 cases de déplacement + attendre +
-5 cibles de tir + charge + fight + 15 macro (5 objectifs × 3 intentions). **Donc l'agent choisit
-déjà : où bouger, quelle cible tirer/charger, quel objectif viser.** L'observation doit nourrir
-ces choix-là.
+L'espace d'action associé : 1024 cases de déplacement + attendre + **20** cibles de tir (5 à
+l'époque de cet audit, cf. §0.30 T-E) + charge + fight + 15 macro (5 objectifs × 3 intentions),
+soit **1 062**. **Donc l'agent choisit déjà : où bouger, quelle cible tirer/charger, quel
+objectif viser.** L'observation doit nourrir ces choix-là.
 
 ### 1.1 Le vecteur — ce que l'agent voit, poste par poste
 
-> **⚠️ État (2026-07-25)** : le tableau détaillé qui figurait ici décrivait l'observation
-> **108-d d'avant la refonte T1→T7** (§8). Il est **périmé** et a été retiré plutôt que
-> maintenu en double : le vecteur fait désormais **199 dimensions**, scindées en `vec_cont`
-> (119 continues **brutes**, normalisées par VecNormalize) et `vec_bin` (80 valeurs discrètes
-> jamais normalisées).
+> **⚠️ État (mis à jour le 2026-07-26)** : le tableau détaillé qui figurait ici décrivait
+> l'observation **108-d d'avant la refonte T1→T7** (§8). Il a été retiré plutôt que maintenu en
+> double. Depuis, l'observation a changé DEUX fois de contrat : 199 → 1011 (profils d'armes et
+> règles, §9.2.5) puis, avec §0.30 T-D, **elle n'est plus un vecteur du tout**.
 >
-> **Source unique du layout** : le bloc LAYOUT en tête de `build_squad_observation`
-> ([observation_builder.py:1250-1345](../../engine/observation_builder.py#L1250)), qui liste
-> l'ordre exact des dimensions et est **vérifié à l'exécution** (bases de blocs + tailles).
-> Recopier ce layout ici créerait une seconde source de vérité qui ne pourrait qu'avoir tort.
+> **Contrat actuel** : un `Dict` de **tenseurs d'entités** — `global_cont` / `global_bin`,
+> `allies_*` (ligne 0 = l'unité ACTIVE), `enemies_*` (ordre = slots d'action de tir),
+> `self_models_*`, plus la grille. Chaque UNITÉ, amie ou ennemie, porte le MÊME schéma de
+> features et passe par le MÊME encodeur.
 >
-> Contenu par bloc : **A** contexte (tour, steps, phase, mon tour, VP des deux camps, VALUE
-> cumulée des deux camps, contrôle + présence des 5 objectifs) · **B** mon escouade (drapeaux
-> d'activation, hidden / gone-to-ground / à couvert / engagée, effectif, PV de la figurine
-> blessée, OC, cohérence, profil brut MOVE/HP_MAX/T/save/invul) · **C** 6 figurines
-> (position relative, éligible fight, dans l'EZ, EZ via allié) · **D** 5 slots ennemis
-> (taille, PV, VALUE, position de la figurine la plus proche + distance, OC, mask, bloqué par
-> un allié, MOVE, profil défensif).
+> **Source unique du layout** : `engine/observation_entities.py` (schéma) et l'en-tête
+> « OBSERVATION SQUAD — TENSEURS D'ENTITÉS » de `build_squad_observation`
+> ([observation_builder.py](../../engine/observation_builder.py)), dont les formes sont
+> **calculées** par `squad_obs_shapes()` et vérifiées à l'exécution. Recopier ce layout ici
+> créerait une seconde source de vérité qui ne pourrait qu'avoir tort — c'est précisément ce
+> qui vient d'être constaté sur ce paragraphe.
+>
+> Lecture d'ensemble : `Documentation/AI_OBSERVATION.md`, section « CE QUE L'AGENT OBSERVE
+> AUJOURD'HUI ». Journal et mesures : `V11_entity_encoder_pointer.md` §6.
 >
 > Le reste de ce §1 et les §2-§6 décrivent l'état **d'avant la refonte** : ils constituent
 > l'audit qui l'a motivée, et sont conservés à ce titre. Les décisions sont en §9/§10, l'état

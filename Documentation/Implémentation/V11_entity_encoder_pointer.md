@@ -813,6 +813,24 @@ d'observation (donc rien à réaligner) ; `check_ai_rules.py` et `hidden_action_
 analyseurs statiques qui n'instancient pas le moteur ; les `.get()` ajoutés portent leur
 marqueur de convention ; aucun accesseur de layout supprimé n'est encore référencé.
 
+**Passe 3 (« la doc est-elle à jour ? ») — 5 documents mentaient encore, tous corrigés** :
+
+| Document | Ce qu'il affirmait comme COURANT | État réel |
+|---|---|---|
+| `AI_TRAINING.md` (bandeau « référence unique ») | `obs_size` **108**, espace d'action **41**, layout « 16 global + 6 figurines × 7 + 5 slots ennemis × 9 », source = `CoreAgent_training_config.json` | 20 166 / 1 062 / tenseurs d'entités ; ce fichier de config **n'existe plus** |
+| `AI_IMPLEMENTATION.md` | « Action Space (**12 actions**) : 0-3 move, 4-8 shoot, 9 charge… » et obs `shape (150,)` | 1 062 actions ; obs = Dict de tenseurs |
+| `V11_audit_observation.md` §1 / §1.1 | « aujourd'hui **199**, scindé `vec_cont` (119) / `vec_bin` (80) », « **5 slots** ennemis » | contrat remplacé deux fois depuis |
+| `A_faire/move_action_space_spatial_rework.md` §4.5 | « l'action space vaut **désormais 1047** » | 1 062 depuis T-E |
+| `Weapon_rules.md` | exemple de config `obs_size: 313` sans date | valeur **calculée**, jamais choisie à la main |
+
+Les bandeaux de `AI_TRAINING` et `AI_IMPLEMENTATION` étaient déjà faux **avant** ce chantier
+(108 alors que §9.2.5 avait porté l'observation à 1011) : la leçon n'est pas « j'ai oublié de les
+mettre à jour », c'est qu'**un chiffre recopié dans un document dérive silencieusement**. Les
+bandeaux réécrits pointent donc vers la valeur CALCULÉE (`SQUAD_OBS_SIZE_TARGET`,
+`TOTAL_ACTION_SIZE`) au lieu de la redonner comme une constante de plus. Vérification ajoutée à
+la routine : un script confronte chaque chiffre « en vigueur » de la doc aux valeurs du code —
+il est vert au 2026-07-26.
+
 **Ce qui reste ouvert, et pourquoi ce n'est pas de la dette masquée** :
 
 - **T-G, le run `--new`** : c'est l'utilisateur qui le déclenche (36 h). Tant qu'il n'a pas
@@ -827,3 +845,11 @@ marqueur de convention ; aucun accesseur de layout supprimé n'est encore réfé
   redimensionner la tête d'action de SB3, donc de toucher l'initialisation orthogonale et la
   sauvegarde/reprise, pour ~6 k paramètres qui ne reçoivent aucun gradient.
 - **Choix d'arme par l'agent (P3)** : différé, cf. §5.3 — inchangé, et désormais MESURABLE.
+- **`scripts/profile_env_step_360x312.py`** appelle le moteur avec `training_config_name="default"`,
+  section qui n'existe dans **aucune** config d'agent (`config/agents/CoreAgent/` n'a plus de
+  fichier de config). Ce script de profilage est cassé **depuis avant ce chantier** ; le correctif
+  tient en un mot, mais choisir la section de remplacement appartient à l'utilisateur — et je ne
+  peux pas l'exercer utilement (il lui faut un trail d'actions et un board 360×312).
+- **Corps de `AI_IMPLEMENTATION.md`** : les deux blocs faux sur l'espace d'action et la forme de
+  l'observation sont corrigés, mais le récit d'architecture de ce document est antérieur à V10 et
+  n'a pas été relu ligne à ligne. Le remettre à niveau est un chantier en soi, à arbitrer.

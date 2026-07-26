@@ -338,16 +338,22 @@ engine/
 - `get_all_valid_targets(unit, game_state)` - Get all possible targets
 - `can_melee_units_charge_target(target, game_state)` - Check charge possibility
 
-**Action Space (12 actions):**
-- 0-3: Movement (N/S/E/W directions)
-- 4-8: Shoot (target slots 0-4)
-- 9: Charge
-- 10: Fight
-- 11: Wait
+**Action Space — ⚠️ PÉRIMÉ, corrigé le 2026-07-26 (vérifié dans le code) :**
 
-**Masking Logic:**
-- Movement phase: Actions 0-3, 11 valid
-- Shooting phase: Actions 4-8 (dynamically based on available targets), 11 valid
+Le layout « 12 actions » décrit ci-dessous n'existe plus. L'espace d'action réel vaut
+**1 062** actions (`engine/macro_intents.py::TOTAL_ACTION_SIZE`, miroir verrouillé par
+`tests/unit/engine/test_action_space_mirror.py`) :
+
+- **0-1023** : destination = cellule de la grille égocentrique 32×32 (le TYPE de move —
+  normal / advance / fall back — est *déduit* du coût géodésique, jamais choisi) ;
+- **1024** : wait / fin d'activation ;
+- **1025-1044** : tir sur le slot ennemi 0-19 (20 slots depuis V11 §0.30 T-E ; les logits
+  viennent d'une tête pointeur, `ai/pointer_policy.py`) ;
+- **1045** : charge · **1046** : fight ;
+- **1047-1061** : zone intents (5 objectifs × 3 intentions).
+
+Le masque est construit par `build_squad_action_mask` (`shared_utils`), source unique partagée
+avec le décodeur.
 - Charge phase: Actions 9, 11 valid
 - Fight phase: Action 10 valid only (NO wait in fight)
 
@@ -838,6 +844,10 @@ obs_builder.build_observation(game_state)
 │     • Type match score
 │
 └─ Return: numpy array shape (150,)
+                     ⚠️ Ce schéma décrit un pipeline d'observation HISTORIQUE (150 floats).
+                     L'agent observe aujourd'hui un Dict de TENSEURS D'ENTITÉS (20 166
+                     scalaires + grille 7×32×32) — cf. AI_OBSERVATION.md, section
+                     « CE QUE L'AGENT OBSERVE AUJOURD'HUI ». Vérifié le 2026-07-26.
 ```
 
 **7. Calculate Reward**

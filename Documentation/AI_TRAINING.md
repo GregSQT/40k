@@ -6,25 +6,32 @@
 > **Moteur de jeu** : voir [AI_IMPLEMENTATION.md](AI_IMPLEMENTATION.md).  
 > **Métriques détaillées et tuning ciblé** : voir [AI_METRICS.md](AI_METRICS.md) (inclut le guide de tuning rapide).
 
-> ## ⚠️ MàJ 2026-07-16 (V11 T6) — INTERFACE AGENT : LES CHIFFRES CI-DESSOUS SONT PÉRIMÉS
+> ## ⚠️ INTERFACE AGENT — chiffres en vigueur (vérifiés dans le code le **2026-07-26**)
 >
-> Les mentions **`obs_size: 355`** (et `323`) dans ce document décrivent un layout d'observation
-> **qui n'est plus celui de l'agent**. Vérifié dans le code (2026-07-16) :
+> Les mentions **`obs_size: 355`** (et `323`, `313`, `150`) qui subsistent dans le corps de ce
+> document décrivent des layouts **historiques**. L'interface réelle est celle-ci :
 >
-> | | Valeur en vigueur | Source de vérité |
+> | | Valeur en vigueur | Source de vérité (à relire, jamais à recopier) |
 > |---|---|---|
-> | `obs_size` | **108** (observation squad) | `CoreAgent_training_config.json` → `observation_params` ; `engine/observation_builder.py` (`SQUAD_OBS_SIZE`) |
-> | `action_space_size` | **41** (26 micro + 15 macro) | idem ; layout dans `engine/macro_intents.py` |
+> | `obs_size` | **20 166** | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) ; porté par `config/agents/<agent>/<agent>_training_config.json` → `observation_params` |
+> | espace d'action | **1 062** (1 047 micro + 15 macro) | `engine/macro_intents.py` (`TOTAL_ACTION_SIZE`), miroir de `shared_utils.SQUAD_ACTION_*` |
 >
-> - Layout squad 108 = 16 global + 5 agrégats squad + 6 figurines × 7 + 5 slots ennemis × 9.
-> - Espace d'action 41 = 0-5 move, 6-11 advance, 12-17 fall back, 18 wait, 19-23 shoot, 24 charge,
->   25 fight, 26-40 zone intents. **Constantes nommées obligatoires** (`engine/macro_intents.py`) :
->   un littéral d'action dans `ai/` est un bug de revue (rupture R5).
+> - **L'observation n'est plus un vecteur** : c'est un `Dict` de **tenseurs d'entités** (chaque
+>   unité — la mienne, mes alliées, les ennemies — porte le même schéma et passe par le même
+>   encodeur), plus une grille égocentrique 7×32×32. Détail : [AI_OBSERVATION.md](AI_OBSERVATION.md),
+>   section « CE QUE L'AGENT OBSERVE AUJOURD'HUI ».
+> - Espace d'action = 0-1023 cellules de la grille égocentrique, 1024 wait, **1025-1044 tir
+>   (20 slots ennemis)**, 1045 charge, 1046 fight, 1047-1061 zone intents.
+>   **Constantes nommées obligatoires** (`engine/macro_intents.py`) : un littéral d'action dans
+>   `ai/` est un bug de revue (rupture R5).
+> - `action_space_size` **n'est plus configuré** : la taille est DÉRIVÉE du moteur. Le recopier en
+>   config créait une seconde source de vérité qui ne pouvait qu'avoir tort.
 > - **Aucun modèle antérieur n'est réutilisable** (layout obs + stats VecNormalize) : tout run se
->   fait avec `--new`. Les configs snapshot `obs_size: 355` sont archivées (marqueur `_ARCHIVE`).
+>   fait avec `--new`. Un `obs_size` périmé en config **lève désormais à l'init du moteur**, en
+>   citant la valeur attendue.
 >
-> Détail du layout d'observation : [AI_OBSERVATION.md](AI_OBSERVATION.md) (voir son propre bandeau).
-> Source : `Documentation/Implémentation/V11_agent_rework.md` (rupture R8, hygiène T6).
+> Source : `Documentation/Implémentation/V11_agent_rework.md` (rupture R8, hygiène T6) et
+> `V11_entity_encoder_pointer.md` (§0.30, tranches T-A→T-F).
 
 ---
 

@@ -177,8 +177,11 @@ géométrie**. À ne pas présenter comme un « miroir exact du PvP ».
 
 ### 4.5 L'action space réel est 41, pas 26 — *(constat d'investigation, avant refonte)*
 
-> **Périmé depuis T2b** : l'action space vaut désormais **1047** (`BASE_ZONE_INTENT = 1032`,
-> `TOTAL_ACTION_SIZE = 1032 + 5×3`). Le constat ci-dessous décrit l'état à l'investigation.
+> **Périmé depuis T2b** : l'action space est passé à 1047 (`BASE_ZONE_INTENT = 1032`), puis à
+> **1062** avec V11 §0.30 T-E, qui porte les slots de tir de 5 à **20**
+> (`SHOOT_SLOT_BASE = 1025`, `CHARGE = 1045`, `FIGHT = 1046`, `BASE_ZONE_INTENT = 1047`,
+> `TOTAL_ACTION_SIZE = 1047 + 5×3 = 1062`). Le constat ci-dessous décrit l'état à
+> l'investigation.
 > **L'exigence de synchronisation, elle, reste valable et est maintenant VÉRIFIÉE par test**
 > (`tests/unit/engine/test_action_space_mirror.py`) — elle ne l'était par rien.
 
@@ -329,8 +332,10 @@ actuel devient incompatible.
 
 **Fait — le masque spatial** (T2b) :
 - `SQUAD_ACTION_*` refondus : `MOVE_CELL_BASE=0` / `COUNT=1024` (= `GRID_CELL_COUNT`), `WAIT=1024`,
-  `SHOOT_SLOT_BASE=1025`, `CHARGE=1030`, `FIGHT=1031` → **`SQUAD_ACTION_SIZE = 1032`**.
-  `macro_intents` : `BASE_ZONE_INTENT=1032`, **`TOTAL_ACTION_SIZE = 1047`**. Le miroir §4.5, que
+  `SHOOT_SLOT_BASE=1025`, puis charge et fight → **`SQUAD_ACTION_SIZE = 1032`** à l'époque de
+  T2b (5 slots de tir). ⚠️ **MàJ V11 §0.30 T-E (2026-07-26)** : 20 slots de tir → `CHARGE=1045`,
+  `FIGHT=1046`, **`SQUAD_ACTION_SIZE = 1047`**, `BASE_ZONE_INTENT=1047`,
+  **`TOTAL_ACTION_SIZE = 1062`**. Le miroir §4.5, que
   la spec imposait mais que **rien ne vérifiait**, est désormais verrouillé par test
   (`tests/unit/engine/test_action_space_mirror.py`).
 - `build_squad_move_cell_map()` : **source unique** du masque ET du décodage → un mismatch
