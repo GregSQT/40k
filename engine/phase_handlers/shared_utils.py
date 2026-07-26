@@ -6125,6 +6125,11 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         hit_part = f"Hit:{g['bs_base']}+->{g['bs']}+[COVER]"
     else:
         hit_part = f"Hit:{g['bs']}+"
+    # [HEAVY] 24.16 : token affiche quand le +1 au jet de touche a ete APPLIQUE (pas seulement
+    # declare par l arme). Le frontend y accroche automatiquement le tooltip de la regle
+    # (weapon_rules.json), comme pour [COVER] / [HAZARD].
+    if g.get("heavy_applied"):
+        hit_part = f"{hit_part} [HEAVY]"
     attack_log = (
         f"Shots:{g['attacks']} - "
         f"{hit_part} Wound:{g['display_wth']}+ Save:{g['display_save_th']}+ - "
@@ -6527,6 +6532,9 @@ def _manual_roll_intent(
     #      l accorderait pour un deplacement <= 3"), donc jamais de bonus indu. Passer a la clause
     #      exacte suppose de porter le cout geodesique du chemin jusqu a commit_move.
     from engine.utils.weapon_helpers import weapon_has_rule
+    # Trace d affichage : le bonus a-t-il ETE APPLIQUE (pas « l arme declare HEAVY ») ? Le log
+    # de tir en tire le token [HEAVY], comme [COVER] pour le couvert.
+    _heavy_applied = False
     if weapon_has_rule(weapon, "HEAVY"):
         _heavy_sid = str(attacker["squad_id"])
         # Absent = aucune escouade n a bouge/advance ce tour (defaut metier valide, PAS un
@@ -6542,6 +6550,7 @@ def _manual_roll_intent(
             and not _unit_was_set_up_this_turn(game_state, _heavy_sid)
         ):
             bs = max(2, bs - 1)
+            _heavy_applied = True
     strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))  # get allowed
     ap = int(weapon.get("AP", 0))  # get allowed
     dmg_raw = weapon.get("DMG", 1)  # get allowed
@@ -6628,6 +6637,7 @@ def _manual_roll_intent(
         # [PRECISION] 24.28 (tir) : la visibilite de la figurine CHARACTER se teste a la portee
         # de l arme, avec la meme primitive que le gate de tir. RNG n est exige que si l arme
         # porte la regle (seul cas ou la valeur est lue).
+        "heavy_applied": _heavy_applied,
         "precision": _weapon_precision,
         "precision_range": int(require_key(weapon, "RNG")) if _weapon_precision else None,
         "display_wth": display_wth, "display_save_th": display_save_th,
@@ -7099,6 +7109,10 @@ def _build_manual_allocation(
                 # [PRECISION] 24.28 : porte par le PROFIL d arme du lot (l override d allocation
                 # s applique lot par lot). `precision_range` = portee de l arme pour le test de
                 # visibilite au tir ; None en melee (visibilite acquise au contact).
+                # [HEAVY] 24.16 : affiche dans le log de tir. Propriete de l UNITE et du TOUR
+                # (constante sur toute l activation), donc jamais ambigue au sein d un groupe ;
+                # `bs` est de toute facon deja dans la cle de groupe.
+                "heavy_applied": bool(r["heavy_applied"]) if "heavy_applied" in r else False,
                 "precision": require_key(r, "precision"),
                 "precision_range": require_key(r, "precision_range"),
                 "display_wth": r["display_wth"], "display_save_th": r["display_save_th"],

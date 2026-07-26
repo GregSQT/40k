@@ -103,6 +103,38 @@ def test_heavy_pose_un_tour_avant_bonus_conserve(monkeypatch):
     assert result["bs"] == 3
 
 
+def test_le_log_de_tir_affiche_le_token_heavy(monkeypatch):
+    """Le combat log doit montrer `Hit:X+ [HEAVY]` quand le bonus est APPLIQUE — le frontend
+    y accroche le tooltip de la regle (meme mecanique que [COVER] / [HAZARD]).
+
+    Discrimination : arme HEAVY mais unite ayant bouge -> aucun token (le bonus n a pas eu lieu).
+    """
+    from engine.phase_handlers.shared_utils import _emit_squad_shoot_log, SHOOT_CTX
+
+    def _log_message(*, moved):
+        _neutralise(monkeypatch)
+        gs, intent = _game_state(["HEAVY"], moved=moved)
+        r = _manual_roll_intent(gs, intent, {})
+        gs.update({"units": [{"id": "1", "unitType": "Shooter"}, {"id": "2", "unitType": "Grunt"}],
+                   "action_logs": [], "action_log_seq": 0, "turn": 2})
+        gs["units_cache"]["1"] = {"col": 0, "row": 0}
+        group = {
+            "weapon_name": "Gun", "target_sid": "2", "attacker_squad_id": "1",
+            "target_col": 9, "target_row": 9, "attacks": 1, "damage": 0, "kills": 0,
+            "bs": r["bs"], "display_wth": r["display_wth"], "display_save_th": r["display_save_th"],
+            "heavy_applied": r["heavy_applied"], "shooter_mids": ["A1"], "shots": [],
+            "player": 0,
+        }
+        _emit_squad_shoot_log(gs, group, SHOOT_CTX)
+        return gs["action_logs"][-1]["message"]
+
+    stationnaire = _log_message(moved=False)
+    apres_mouvement = _log_message(moved=True)
+
+    assert "Hit:3+ [HEAVY]" in stationnaire, stationnaire
+    assert "[HEAVY]" not in apres_mouvement, apres_mouvement
+
+
 def test_sans_heavy_pas_de_bonus(monkeypatch):
     """Sans HEAVY, meme stationnaire -> BS reste 4 (contre-epreuve fonctionnelle)."""
     _neutralise(monkeypatch)

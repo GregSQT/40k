@@ -308,7 +308,7 @@ export const GameLog: React.FC<GameLogProps> = ({
     setRuleDescription(
       descriptions,
       "HAZARD",
-      "Roll one D6 for each model in the unit: on a 1-2, the unit suffers 1 (or 3 if it is a MONSTER or VEHICLE) Mortal Wound.",
+      "Hazard roll (06.03): roll one D6 — on a 1-2 the unit suffers 1 mortal wound, or 3 if every model in it is a MONSTER or VEHICLE. Desperate Escape rolls one die per model; a Hazardous weapon rolls one die per selected weapon.",
       false
     );
 
