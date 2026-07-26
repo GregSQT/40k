@@ -21,14 +21,11 @@ Principes (décidés dans `V11_audit_observation.md` §9.3/§9.4/§11, appliqué
   dans le chemin vif (`attack_sequence.py`, `shared_utils._manual_roll_intent`, `fight_handlers`,
   `shooting_handlers`). [INDIRECT FIRE] 24.19 en est ABSENTE **délibérément** : elle n'est pas
   implémentée (V11 §9.2.1), un bit pour elle serait du bruit pur.
-  ⚠️ **Réserve mesurée le 2026-07-26 sur [ASSAULT] 24.04 et [CLOSE_QUARTERS] 24.27.** Les deux bits sont
-  exposés parce que les deux règles ont un effet RÉEL sur le chemin PvP/mono-figurine
-  (`_weapon_has_assault_rule` → `weapon_availability_check` ; `_weapon_has_close_quarters_rule` →
-  sélection d'arme et allocation en zone d'engagement). Mais le gate de tir du chemin SQUAD/GYM
-  (`build_squad_action_mask`, branche shoot) ferme le tir dès `has_advanced` ou `in_er`, sans
-  exception : **le tir d'assaut (10.05) et le tir à bout portant (10.06) n'existent pas pour
-  l'agent**. Tant que ce n'est pas comblé, ces deux bits décrivent, côté gym, une capacité que
-  l'agent ne peut pas exercer. Voir `V11_agent_rework.md` §9.2.7.
+  ✅ **Réserve LEVÉE le 2026-07-26 (tranche T-B).** Elle notait que [ASSAULT] 24.04 et
+  [CLOSE_QUARTERS] 24.27 étaient exposées alors que le gate de tir squad/gym fermait le tir dès
+  `has_advanced` ou `in_er` : leurs types de tir (10.05 / 10.06) n'existaient pas pour l'agent.
+  `resolve_squad_shooting_type` les a ouverts — les deux bits décrivent désormais une capacité
+  réellement exerçable. Voir `V11_entity_encoder_pointer.md` §1.2 et son journal.
 - **Règles paramétrées = la valeur, pas un bit** (§9 « Décisions tranchées ») : [RAPID FIRE X],
   [SUSTAINED HITS X], [MELTA X], [CLEAVE X], [BLAST X] et le Y+ de [ANTI-X Y+] passent en
   continu. Le **keyword ciblé** par [ANTI-X] est exposé en one-hot : sans lui le seuil Y+ est

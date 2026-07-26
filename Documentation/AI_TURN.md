@@ -558,11 +558,17 @@ For each weapon:
 │   └── arg2 = 1 → Unit DID advance:
 │       ├── arg1 = 0 → ❌ Weapon CANNOT be selectable (skip weapon)
 │       └── arg1 = 1 → ✅ Weapon MUST have ASSAULT rule (continue to next check)
+⚠️ **MAJ 2026-07-26 (V11 T-B)** — cet arbre décrit le chemin PvP/mono. Le chemin SQUAD/GYM
+résout désormais un **type de tir** (10.04 normal / 10.05 assault / 10.06 close-quarters) via
+`resolve_squad_shooting_type`, qui commande les armes sélectionnables. Le volet MONSTER/VEHICLE
+de 10.06 (−1 au jet, [BLAST] interdit sur unité engagée) n'existe que côté squad — divergence
+connue, cf. `Documentation/Implémentation/V11_entity_encoder_pointer.md` §1.9.
+
 ├── Check arg3 (adjacent_status):
 │   ├── arg3 = 0 → No restriction (continue to next check)
 │   └── arg3 = 1 → Unit IS adjacent to enemy:
 │       ├── arg1 = 0 → ❌ Weapon CANNOT be selectable (skip weapon)
-│       └── arg1 = 1 → ✅ Weapon MUST have PISTOL rule (continue to next check)
+│       └── arg1 = 1 → ✅ Weapon MUST have CLOSE_QUARTERS rule (continue to next check)
 ├── Check weapon.shot flag:
 │   ├── weapon.shot = 0 → No restriction (continue to next check)
 │   └── weapon.shot = 1 → ❌ Weapon CANNOT be selectable (skip weapon)
@@ -574,7 +580,7 @@ For each weapon:
         │   ├── In Line of Sight (no dense wall AND no intervening obscuring terrain blocking — compute_unit_los)
         │   ├── HP_CUR > 0 (alive)
         │   └── NOT adjacent to friendly unit (excluding active unit)
-        │       └── EXCEPTION: If enemy is adjacent to shooter AND weapon has PISTOL rule:
+        │       └── EXCEPTION: If enemy is adjacent to shooter AND weapon has CLOSE_QUARTERS rule:
         │           └── ✅ Can shoot at adjacent enemy (even if engaged with other friendly units)
         │       └── If enemy is NOT adjacent to shooter:
         │           └── ❌ Cannot shoot if enemy is adjacent to any friendly unit
@@ -670,7 +676,7 @@ update_los_cache_after_target_death(dead_target_id):
 2. `valid_target_pool_build` filtre `los_cache` pour ne garder que les cibles avec `has_los == true` (optimisation)
 3. Pour chaque cible avec LoS, on vérifie :
    - Distance (range d'**au moins une arme** dans `weapon_available_pool`)
-   - PISTOL rule (si adjacent)
+   - CLOSE_QUARTERS rule (si adjacent)
    - Engaged enemy rule (si pas adjacent)
 4. Les cibles qui passent tous les checks sont ajoutées au pool
 
@@ -693,7 +699,7 @@ valid_target_pool_build(arg1, arg2, arg3):
 │   ├── distance = calculate_distance(unit, enemy_unit)
 │   ├── Range check: distance <= RNG of AT LEAST ONE weapon in usable_weapons? → NO → Skip enemy unit
 │   ├── Adjacent check: enemy adjacent to shooter?
-│   │   ├── YES → Check PISTOL weapon rule
+│   │   ├── YES → Check CLOSE_QUARTERS weapon rule
 │   │   └── NO → Check engaged enemy rule
 │   └── ALL conditions met → ✅ Add target_id to valid_target_pool
 └── Return valid_target_pool
@@ -1269,8 +1275,8 @@ Trade-off: Better position next turn vs losing shooting opportunity this turn
    - **Causes possibles :**
      - Aucune cible avec LoS (toutes bloquées par des murs)
      - Aucune cible à portée (toutes trop loin)
-     - Toutes les cibles sont engagées avec des unités amies (sans PISTOL)
-     - Toutes les cibles adjacentes sans arme PISTOL
+     - Toutes les cibles sont engagées avec des unités amies (sans CLOSE_QUARTERS)
+     - Toutes les cibles adjacentes sans arme CLOSE_QUARTERS
    - **Situation :** NORMAL - aucune cible valide selon les règles
    - **Comportement :** 
      - Si `CAN_ADVANCE == true` → Go to STEP 3: ACTION_SELECTION (peut avancer)
@@ -1316,7 +1322,7 @@ ASSERT: game_state["units_cache"] exists (doit être construit au reset)
 
 **All features preserved:**
 - ✅ Advance action support
-- ✅ Weapon rules (ASSAULT, PISTOL)
+- ✅ Weapon rules (ASSAULT, CLOSE_QUARTERS)
 - ✅ Multi-shot sequences
 - ✅ Dynamic targeting
 - ✅ Slaughter handling
@@ -1361,7 +1367,7 @@ ASSERT: game_state["units_cache"] exists (doit être construit au reset)
 | 10.03 | End of Shooting phase | ✅ | transition → charge |
 | 10.04 | Normal shooting (unengaged, pas d'advance ce tour ; après : pas d'action) | ✅ | éligibilité `shooting_handlers` |
 | 10.05 | Assault shooting (unengaged + advance + arme [ASSAULT] ; seules armes [ASSAULT]) | ✅ | `_can_unit_shoot_after_advance_with_weapon`, `_weapon_has_assault_rule` |
-| 10.06 | Close-quarters shooting (engaged, pas d'advance ; arme [CLOSE-QUARTERS]/[PISTOL] ou MONSTER/VEHICLE ; cible unités engagées) | 🟡 | code via `_weapon_has_pistol_rule` ; [PISTOL] ≡ [CLOSE-QUARTERS] (24.27) ; malus −1 to hit MONSTER/VEHICLE → ⚠️ à vérifier |
+| 10.06 | Close-quarters shooting (engaged, pas d'advance ; arme [CLOSE-QUARTERS]/[CLOSE_QUARTERS] ou MONSTER/VEHICLE ; cible unités engagées) | 🟡 | code via `_weapon_has_pistol_rule` ; [CLOSE_QUARTERS] ≡ [CLOSE-QUARTERS] (24.27) ; malus −1 to hit MONSTER/VEHICLE → ⚠️ à vérifier |
 | 10.07 | Indirect shooting (unengaged, pas d'advance, arme [INDIRECT FIRE] ; cible non-visible, cover forcé, échec 1-5 sauf stationnaire visible → 1-3, pas de re-roll) | ⛔ + ⚠️ | `INDIRECT_FIRE` reconnu au registry mais effets (cible non-visible, cover forcé, seuils 1-5/1-3) **non appliqués** en résolution |
 | 04.01 | Select weapons (≥1 arme ranged par modèle) | ✅ | `weapon_selection` |
 | 04.02 | Select targets (visible 06.01, à portée, unengaged) | ✅ | LOS/portée/`valid_target_pool` ; cible unengaged sauf close-quarters |
@@ -1381,7 +1387,7 @@ ASSERT: game_state["units_cache"] exists (doit être construit au reset)
 | ANTI 24.03 | ✅ | 🟡 | crit wound conditionnel — partiel, à vérifier |
 | AP / InSv (05.03) | — | ✅ | `save_threshold` |
 | ASSAULT 24.04 | ✅ | ✅ | éligibilité tir post-advance |
-| PISTOL / CLOSE-QUARTERS 24.27 / 24.07 | ✅ | ✅ | tir en état engaged |
+| CLOSE_QUARTERS / CLOSE-QUARTERS 24.27 / 24.07 | ✅ | ✅ | tir en état engaged |
 | RAPID FIRE 24.30 | ✅ | ⛔ | +X dés à demi-portée non appliqué |
 | MELTA 24.25 | ✅ | ⛔ | +X D à demi-portée non appliqué |
 | SUSTAINED HITS 24.36 | ✅ | ⛔ | dépend du critical hit (non géré) |
@@ -1539,7 +1545,7 @@ ASSERT: game_state["units_cache"] exists (doit être construit au reset)
 │   │       ├── Clear any unit remaining in valid_target_pool
 │   │       ├── Clear TOTAL_ATTACK log
 │   │       ├── Is the active unit adjacent to an enemy unit ?
-│   │       │   ├── YES → weapon_availability_check (weapon_rule,0,1) → Build weapon_available_pool (only PISTOL weapons if weapon_rule=1)
+│   │       │   ├── YES → weapon_availability_check (weapon_rule,0,1) → Build weapon_available_pool (only CLOSE_QUARTERS weapons if weapon_rule=1)
 │   │       │   │   └── Store: unit_is_adjacent = true
 │   │       │   └── NO → weapon_availability_check (weapon_rule,0,0) → Build weapon_available_pool (all available weapons)
 │   │       │       └── Store: unit_is_adjacent = false

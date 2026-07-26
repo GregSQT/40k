@@ -15,6 +15,15 @@
 > - `engine/w40k_core.py::_build_observation` **route selon `obs_size`** : `108` →
 >   `build_squad_observation` (pipeline squad actif) ; `357` → `build_observation` (pipeline
 >   mono-figurine legacy, `PHASE2_OBS_SIZE = 357`).
+> ⚠️ **PÉRIMÉ depuis le 2026-07-26 — ne pas s'appuyer sur les chiffres de cette section.**
+> Le layout squad est passé à **108 → 199** (refonte du vecteur, 2026-07-25) puis à **1011**
+> (profils d'armes + bits de règles + mise en place + distance parcourue, 2026-07-26). La
+> **source unique** du layout est l'en-tête de `build_squad_observation`
+> (`engine/observation_builder.py`) ; l'historique et les décisions sont dans
+> `Documentation/Implémentation/V11_audit_observation.md` (§8, §10) et
+> `V11_agent_rework.md` §9.2.5. Réécrire cette section fait partie du chantier
+> `V11_entity_encoder_pointer.md` (T-D change à nouveau le contrat : tenseurs d'entités).
+>
 > - Layout squad 108 (`engine/observation_builder.py`, constantes `SQUAD_*`) :
 >   **16 global + 5 agrégats squad + 6 figurines top-k × 7 features + 5 slots ennemis × 9 features**
 >   = 16 + 5 + 42 + 45 = 108. Layout **purement 2D** (col/row) : **aucune feature de niveau/élévation**
@@ -305,7 +314,7 @@ obs[37] = ARMOR_SAVE / 6.0           # Armor save
 - 12 unit-rule flags (`charge_after_advance`, `charge_after_flee`, `charge_impact`, `closest_target_penetration`, `reactive_move`, `reroll_1_save_fight`, `reroll_1_tohit_fight`, `reroll_1_towound`, `reroll_towound_target_on_objective`, `shoot_after_advance`, `shoot_after_flee`, `move_after_shooting`)
 - 1 keyword flag (`fly`)
 - 2 invulnerable-save features (`has_invul`, normalized quality)
-- 17 weapon-rule features from selected ranged + melee weapons (`ANTI_VEHICLE`, `ASSAULT`, `BLAST`, `DEVASTATING_WOUNDS`, `EXTRA_ATTACKS`, `HAZARDOUS`, `HEAVY`, `IGNORES_COVER`, `INDIRECT_FIRE`, `LETHAL_HITS`, `MELTA`, `PISTOL`, `PSYCHIC`, `RAPID_FIRE`, `SUSTAINED_HITS`, `TORRENT`, `TWIN_LINKED`)
+- 17 weapon-rule features from selected ranged + melee weapons (`ANTI_VEHICLE`, `ASSAULT`, `BLAST`, `DEVASTATING_WOUNDS`, `EXTRA_ATTACKS`, `HAZARDOUS`, `HEAVY`, `IGNORES_COVER`, `INDIRECT_FIRE`, `LETHAL_HITS`, `MELTA`, `CLOSE_QUARTERS`, `PSYCHIC`, `RAPID_FIRE`, `SUSTAINED_HITS`, `TORRENT`, `TWIN_LINKED`)
 
 Parameterized weapon rules are encoded as normalized scalar intensity (max across selected ranged/melee), not only binary presence.
 

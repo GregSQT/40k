@@ -2,7 +2,7 @@
 
 Ouvert le **2026-07-26**. Chantier issu d'une seule question de l'utilisateur — « tout est optimal
 et documenté ? » — posée après la livraison de §9.2.5 (observation des règles d'armes). La
-vérification a trouvé **six trous**, dont un qui rend une unité ennemie invisible et intirable dans
+vérification a trouvé **six trous** (un septième, §1.9, est apparu pendant l'exécution), dont un qui rend une unité ennemie invisible et intirable dans
 la majorité des épisodes.
 
 **Convention d'ancrage** (identique au reste de la doc V11) : l'ancre est le **nom de fonction** ;
@@ -28,6 +28,7 @@ les numéros de ligne sont indicatifs. Re-localiser par grep avant d'éditer.
 | **T-E** | **Tête pointeur** + slots ennemis 5 → 20 (espace d'action) | ⏳ à faire |
 | **T-F** | K armes = 10 des deux côtés + bloc « types de figurines » ennemis | ⏳ à faire |
 | **T-G** | Run `--new` + win-rate (§0.14) | ⏳ bloqué par T-A→T-F |
+| **résidu** | 10.06 MONSTER/VEHICLE côté PvP/mono (divergence créée par T-B) | ⏳ à faire, cf. §1.9 |
 
 ---
 
@@ -110,6 +111,29 @@ tirent leur Bolt Pistol au lieu de leur Bolt Rifle / Smite.
 `(model_id, weapon_index) → target_unit_id`, et `declare_attack_weapon` (moteur générique
 paramétré par `ctx`, partagé tir/combat) gère déjà la **cible par arme** avec remplacement. Le
 correctif porte donc sur la **déclaration gym**, pas sur la structure.
+
+### 1.9 🟠 DIVERGENCE CRÉÉE PAR T-B — le volet MONSTER/VEHICLE de 10.06 n'existe que côté gym
+
+Trouvée le 2026-07-26 **après** la livraison de T-B, en vérifiant que rien n'avait été rendu faux.
+
+T-B a implémenté le volet MONSTER/VEHICLE de 10.06 (éligibilité sans arme [CLOSE-QUARTERS],
+-1 au jet de touche, [BLAST] interdit sur une unité engagée) sur le chemin **squad/gym**. Le
+chemin **PvP/mono** ne l'a pas : `_can_shoot` (shooting_handlers, branche `is_adjacent`) filtre
+toujours sur les seules armes [CLOSE-QUARTERS], et son commentaire affirme encore que le
+close-quarters MONSTER/VEHICLE « n'est pas implémenté dans le moteur » — ce qui est désormais
+faux.
+
+**C'est le motif §9.1 inversé** : la règle est vive sur un chemin et absente de l'autre. Avant
+T-B, la divergence penchait du côté PvP ; elle penche maintenant du côté gym. Concrètement, un
+véhicule engagé peut tirer son arme principale (à -1) en entraînement, mais pas en PvP.
+
+**Sens de l'écart** : le chemin PvP est plus STRICT que le PDF, donc jamais laxiste — mais il
+refuse un tir légal.
+
+**Traitement** : à faire, hors T-B parce que c'est une **modification de comportement PvP** et
+que T-C en a déjà introduit une (sélection multi-armes) que l'utilisateur doit d'abord valider
+en jeu réel. Empiler deux changements PvP non validés rendrait un éventuel écart impossible à
+attribuer. À reprendre avec la validation PvP de T-C.
 
 ### 1.4 🟠 L'heuristique de choix d'arme de mêlée a été périmée par P1
 

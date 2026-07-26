@@ -4929,7 +4929,7 @@ accesseurs de layout, pas par des index recopiés).
   `V11_audit_observation.md` §11).
 - **Listes de longueur variable** (fin des plafonds K) : idem, c'est l'étape architecture.
 
-### 9.2.7 🔴 TROU DE CONFORMITÉ TROUVÉ le 2026-07-26 — les types de tir 10.05 / 10.06 n'existent pas pour l'agent
+### 9.2.7 ✅ CORRIGÉ le 2026-07-26 (tranche T-B) — les types de tir 10.05 / 10.06 existent enfin pour l'agent
 
 **Trouvé en vérifiant, à la demande de l'utilisateur, l'affirmation « seules les règles à effet
 réel sont exposées » de §9.2.5.** Elle est FAUSSE pour deux bits, et la cause n'est pas
@@ -4966,7 +4966,7 @@ IA. Côté observation, les bits `PISTOL` et `ASSAULT` décrivent donc une capac
 gym — ils sont **conservés** (l'effet PvP est réel) avec la réserve écrite dans
 `observation_weapon_profiles.py`.
 
-**Statut : OUVERT — repris dans le chantier dédié [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md) (tranche T-B), avec 5 autres trous trouvés le même jour.** Non traité dans cette session — c'est une **nouvelle règle à implémenter**
+**Statut : ✅ FERMÉ le 2026-07-26 par la tranche **T-B** du chantier dédié [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md) (tranche T-B), avec 5 autres trous trouvés le même jour.** Le résolveur `resolve_squad_shooting_type` ouvre 10.05 et 10.06, le masque teste toute arme éligible, et le volet MONSTER/VEHICLE de 10.06 est implémenté (13 tests, mutations → 5 rouges). ⚠️ **Résidu** : le chemin PvP/mono ne connaît toujours pas le volet MONSTER/VEHICLE — voir §1.9 du chantier. Périmètre d'origine — c'est une **nouvelle règle à implémenter**
 (deux types de tir, avec restriction d'armes et restriction de cibles), pas un correctif de la
 tranche observation. Périmètre estimé, à arbitrer : (1) gate `build_squad_action_mask` ;
 (2) restriction « seules les armes [ASSAULT] » / « seules les armes [PISTOL] » à la sélection

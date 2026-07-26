@@ -117,7 +117,7 @@ Pistol                       Bolt Pistol (Intercessor)             8         10 
 
 **Règles actuelles :**
 - **ASSAULT** : tir après advance (vérifié uniquement si l'unité a avancé avant de tirer)
-- **PISTOL** : tir à distance 1 (ennemi adjacent)
+- **CLOSE_QUARTERS** : tir à distance 1 (ennemi adjacent)
 
 **Validation ASSAULT :** L'analyzer ne compte que les tirs effectués après une action ADVANCE du même tour pour la même unité.
 

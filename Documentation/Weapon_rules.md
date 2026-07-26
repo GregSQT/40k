@@ -142,14 +142,14 @@ Defined in `config/weapon_rules.json`:
 | `DEVASTATING_WOUNDS` | ❌ | Critical wound skips save |
 | `EXTRA_ATTACKS` | ❌ | Weapon can be used in addition to other attacks |
 | `HAZARDOUS` | ❌ | Hazardous test after shooting/fighting; on 1 suffer 3 MW |
-| `HEAVY` | ❌ | +1 to hit when bearer remained stationary |
-| `IGNORES_COVER` | ❌ | Target cannot benefit from cover |
-| `LETHAL_HITS` | ❌ | Critical hit automatically wounds |
+| `HEAVY` | ✅ | +1 to hit when bearer remained stationary |
+| `IGNORES_COVER` | ✅ | Target cannot benefit from cover |
+| `LETHAL_HITS` | ✅ | Critical hit automatically wounds |
 | `MELTA` | ✅ X | Increase damage by X within half range |
-| `PISTOL` | ❌ | Can shoot while engaged, with pistol targeting restrictions |
+| `CLOSE_QUARTERS` | ✅ | Can shoot while engaged, with pistol targeting restrictions |
 | `RAPID_FIRE` | ✅ X | Increase attacks by X within half range |
 | `SUSTAINED_HITS` | ✅ X | Critical hit scores X additional hits |
-| `TORRENT` | ❌ | Attacks auto-hit |
+| `TORRENT` | ✅ | Attacks auto-hit |
 | `TWIN_LINKED` | ❌ | Re-roll wound roll |
 
 ### Gameplay Effect Coverage (engine status)
@@ -157,7 +157,7 @@ Defined in `config/weapon_rules.json`:
 Current implemented effects in gameplay (mainly `engine/phase_handlers/shooting_handlers.py`):
 
 - ✅ `ASSAULT` (shoot-after-advance eligibility)
-- ✅ `PISTOL` (engagement exception + pistol/non-pistol category restrictions)
+- ✅ `CLOSE_QUARTERS` (engagement exception + close-quarters/non-close-quarters category restrictions)
 - ✅ `HEAVY` (+1 to hit when stationary)
 - ✅ `RAPID_FIRE:X` (bonus shots at half range)
 - ✅ `DEVASTATING_WOUNDS` (critical wound bypasses save)
@@ -217,7 +217,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
 ### Roadmap: Remaining Rule Implementations
 
 Already implemented:
-- `RAPID_FIRE`, `ASSAULT`, `PISTOL`, `HEAVY`, `DEVASTATING_WOUNDS`, `HAZARDOUS`
+- `RAPID_FIRE`, `ASSAULT`, `CLOSE_QUARTERS`, `HEAVY`, `DEVASTATING_WOUNDS`, `HAZARDOUS`
 
 Remaining planned integration points:
 - `MELTA` → Damage modification within half range
@@ -330,7 +330,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 4,
     AP: 0,
     DMG: 1,
-    WEAPON_RULES: ["PISTOL"]
+    WEAPON_RULES: ["CLOSE_QUARTERS"]
   },
   
   CombatKnife: {

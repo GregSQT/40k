@@ -541,7 +541,7 @@ Weapon rules are defined and validated through a dedicated registry:
   - `description`: human description
   - `has_parameter`: whether the rule requires a numeric parameter (`RAPID_FIRE:1`, `SUSTAINED_HITS:2`, etc.)
 - **Weapon-attached rules**: `WEAPON_RULES` on each armory weapon entry
-  - Static form: `"HEAVY"`, `"PISTOL"`, `"HAZARDOUS"`
+  - Static form: `"HEAVY"`, `"CLOSE_QUARTERS"`, `"HAZARDOUS"`
   - Parameterized form: `"RAPID_FIRE:1"`, `"SUSTAINED_HITS:1"`
 
 Runtime pipeline:
