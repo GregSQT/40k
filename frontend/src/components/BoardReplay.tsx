@@ -14,6 +14,9 @@ import { useGameLog } from "../hooks/useGameLog";
 import type { GameState, Unit, Weapon } from "../types/game";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { computeHexReachable } from "../utils/replayHexReachable";
+// Source unique du type d'action de replay : celui que produit le parseur (pas de copie locale
+// qui dérive silencieusement quand le parseur gagne un champ).
+import type { ReplayAction } from "../utils/replayParser";
 import {
   getDiceAverage,
   getSelectedMeleeWeapon,
@@ -31,64 +34,6 @@ import { UnitStatusTable } from "./UnitStatusTable";
 // Extended Unit type for replay mode (with ghost units)
 interface UnitWithGhost extends Unit {
   isGhost?: boolean;
-}
-
-// Import replay parser types
-interface ReplayAction {
-  type: string;
-  timestamp: string;
-  turn: string;
-  player: number;
-  log_message?: string;
-  unit_id?: number;
-  from?: { col: number; row: number };
-  to?: { col: number; row: number };
-  pos?: { col: number; row: number };
-  shooter_id?: number;
-  shooter_pos?: { col: number; row: number };
-  target_id?: number;
-  target_pos?: { col: number; row: number };
-  damage?: number;
-  hit_roll?: number;
-  wound_roll?: number;
-  save_roll?: number;
-  save_target?: number;
-  save_skipped?: boolean;
-  save_skip_reason?: string;
-  devastating_wounds_applied?: boolean;
-  rapid_fire_bonus_shot?: boolean;
-  rapid_fire_rule_value?: number;
-  heavy_applied?: boolean;
-  hazardous_test_roll?: number;
-  hazardous_triggered?: boolean;
-  hazardous_self_died?: boolean;
-  hazardous_mortal_wounds?: number;
-  reward?: number;
-  // Fight action fields
-  attacker_id?: number;
-  attacker_pos?: { col: number; row: number };
-  hit_target?: number;
-  hit_target_base?: number;
-  hit_result?: string;
-  wound_target?: number;
-  wound_result?: string;
-  save_result?: string;
-  // Weapon info
-  weapon_name?: string;
-  // [SHOOTER_MODELS:] figs de l'unite ayant EFFECTIVEMENT tire/frappe (sous-ensemble de l'escouade).
-  // Restreint le cercle vert + le cone LoS a ces figs. Ids "unit#idx".
-  shooter_models?: string[];
-  // Fight phase metadata (AI_TURN.md compliance)
-  fight_subphase?: string;
-  // Charge action fields
-  charge_roll?: number;
-  charge_success?: boolean;
-  // Advance action fields
-  advance_roll?: number;
-  /** Budget sous-hex (moteur) ; préféré pour le BFS replay (Boardx10). */
-  advance_max_subhex?: number;
-  // Rule choice fields
-  selected_rule_name?: string;
 }
 
 interface PrimaryObjectiveRule {
@@ -500,9 +445,11 @@ export const BoardReplay: React.FC = () => {
           // occupied_hexes_by_model : positions per-figurine issues des segments [MODELS:]/
           // [TARGET_MODELS:] du step.log. Present -> BoardPvp/UnitRenderer dessine un socle par
           // figurine ; absent -> fallback un socle a l'ancre (logs sans segment per-fig).
-          const perFig = (unit as unknown as {
-            occupied_hexes_by_model?: Record<string, [number, number]>;
-          }).occupied_hexes_by_model;
+          const perFig = (
+            unit as unknown as {
+              occupied_hexes_by_model?: Record<string, [number, number]>;
+            }
+          ).occupied_hexes_by_model;
           cache[unit.id.toString()] = {
             col: unit.col,
             row: unit.row,
@@ -1340,18 +1287,19 @@ export const BoardReplay: React.FC = () => {
             ? "fight"
             : "shoot"
           : null;
-      const actionPhase = action.type.includes("fight") ||
+      const actionPhase =
+        action.type.includes("fight") ||
         action.type === "pile_in" ||
         action.type === "consolidation"
-        ? "fight"
-        : action.type.includes("charge")
-          ? "charge"
-          : rollInfoPhase ||
-              action.type.includes("shoot") ||
-              action.type === "advance" ||
-              action.type === "hazardous"
-            ? "shoot"
-            : "move";
+          ? "fight"
+          : action.type.includes("charge")
+            ? "charge"
+            : rollInfoPhase ||
+                action.type.includes("shoot") ||
+                action.type === "advance" ||
+                action.type === "hazardous"
+              ? "shoot"
+              : "move";
 
       if (action.type === "move" && action.from && action.to) {
         const moveMessage = requireReplayLogMessage(action, "move");
@@ -2134,9 +2082,6 @@ export const BoardReplay: React.FC = () => {
 
   const resolveAdvanceMoveBudget = (action: ReplayAction | null | undefined): number => {
     if (!action || action.type !== "advance") return 0;
-    if (typeof action.advance_max_subhex === "number" && action.advance_max_subhex > 0) {
-      return action.advance_max_subhex;
-    }
     const roll = action.advance_roll;
     if (roll === undefined || roll <= 0) return 0;
     if (!currentEpisode) {
@@ -2233,7 +2178,10 @@ export const BoardReplay: React.FC = () => {
   // et syncMoveDestinationPoolRefs (pool + footprint), exactement comme en PvP.
   // Mémoïsé sur les entrées stables par étape : le BFS (jusqu'à ~M×inches_to_subhex de rayon) ne se
   // relance qu'au changement d'action/état, pas à chaque re-render (hover, playback tick…).
-  const replayMoveDestinationPool: Array<{ col: number; row: number }> | null = useMemo(() => {
+  // Forme identique au moteur (couples ``[col, row]``, cf. movement_handlers.movement_build_valid_
+  // destinations_pool) : le champ injecté doit respecter le contrat GameState, pas une forme
+  // objet propre au replay.
+  const replayMoveDestinationPool: Array<[number, number]> | null = useMemo(() => {
     if (
       (currentAction?.type !== "move" && currentAction?.type !== "reactive_move") ||
       !currentAction.from ||
@@ -2256,7 +2204,7 @@ export const BoardReplay: React.FC = () => {
       walls: currentState.walls,
       units: currentState.units,
       selfUnitId: currentAction.unit_id,
-    });
+    }).map((h): [number, number] => [h.col, h.row]);
   }, [currentAction, currentState, currentEpisode]);
 
   const gameStateForBoard: GameState =

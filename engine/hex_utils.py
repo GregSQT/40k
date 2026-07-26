@@ -1172,7 +1172,7 @@ def compute_occupied_hexes(
     center_col: int,
     center_row: int,
     base_shape: str,
-    base_size: "int | list[int]",
+    base_size: "int | Sequence[int]",
     orientation: int = 0,
 ) -> Set[Tuple[int, int]]:
     """Compute the set of hex cells occupied by a unit's base (§2.5).
@@ -1207,7 +1207,7 @@ def _compute_occupied_hexes_raw(
     center_col: int,
     center_row: int,
     base_shape: str,
-    base_size: "int | list[int]",
+    base_size: "int | Sequence[int]",
     orientation: int = 0,
 ) -> Set[Tuple[int, int]]:
     """Balayage géométrique de l'empreinte, sans mémoïsation — SOURCE de vérité de la forme.
@@ -1305,7 +1305,7 @@ _FOOTPRINT_OFFSETS_CACHE: Dict[
 
 def precompute_footprint_offsets(
     base_shape: str,
-    base_size: "int | list[int]",
+    base_size: "int | Sequence[int]",
     orientation: int = 0,
 ) -> Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]:
     """Pre-compute footprint offsets for even-column and odd-column centers.

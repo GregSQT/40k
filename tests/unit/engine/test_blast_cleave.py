@@ -16,8 +16,7 @@ import pytest
 from shared.data_validation import ConfigurationError
 
 from engine.phase_handlers import shooting_handlers
-from engine.phase_handlers.fight_handlers import _manual_roll_fight_intent
-from engine.phase_handlers.shared_utils import _manual_roll_intent
+from tests.unit.engine._roll_helpers import roll_fight_intent, roll_shoot_intent
 
 
 def _neutralise(monkeypatch):
@@ -57,28 +56,28 @@ def test_blast_ajoute_un_de_par_cinq_figurines(monkeypatch):
     """24.05 : cible de 11 figurines -> +2 des (11 // 5), soit 3 attaques."""
     _neutralise(monkeypatch)
     gs, intent = _shoot_state(["BLAST"], target_size=11)
-    assert _manual_roll_intent(gs, intent, {})["counts"]["attacks"] == 3
+    assert roll_shoot_intent(gs, intent)["counts"]["attacks"] == 3
 
 
 def test_blast_arrondi_inferieur(monkeypatch):
     """24.05 : cible de 4 figurines -> aucun de additionnel."""
     _neutralise(monkeypatch)
     gs, intent = _shoot_state(["BLAST"], target_size=4)
-    assert _manual_roll_intent(gs, intent, {})["counts"]["attacks"] == 1
+    assert roll_shoot_intent(gs, intent)["counts"]["attacks"] == 1
 
 
 def test_blast_parametre_multiplie(monkeypatch):
     """[BLAST 2] : 2 des par tranche de 5 -> cible de 12 -> 1 + 2*2 = 5 attaques."""
     _neutralise(monkeypatch)
     gs, intent = _shoot_state(["BLAST:2"], target_size=12)
-    assert _manual_roll_intent(gs, intent, {})["counts"]["attacks"] == 5
+    assert roll_shoot_intent(gs, intent)["counts"]["attacks"] == 5
 
 
 def test_sans_blast_pas_de_de_additionnel(monkeypatch):
     """Contre-epreuve : meme cible de 11 figurines, arme nue -> 1 attaque."""
     _neutralise(monkeypatch)
     gs, intent = _shoot_state([], target_size=11)
-    assert _manual_roll_intent(gs, intent, {})["counts"]["attacks"] == 1
+    assert roll_shoot_intent(gs, intent)["counts"]["attacks"] == 1
 
 
 # --------------------------------------------------------------------------- CLEAVE (melee)
@@ -108,7 +107,7 @@ def test_cleave_ajoute_x_des_par_cinq_figurines(monkeypatch):
     """24.06 : [CLEAVE 1] contre 16 figurines -> +3 des (16 // 5), soit 4 attaques."""
     monkeypatch.setattr(random, "randint", lambda a, b: 4)
     gs, intent = _fight_state(["CLEAVE:1"], target_size=16)
-    assert _manual_roll_fight_intent(gs, intent, {})["counts"]["attacks"] == 4
+    assert roll_fight_intent(gs, intent)["counts"]["attacks"] == 4
 
 
 def test_cleave_inactif_si_plusieurs_cibles(monkeypatch):
@@ -117,14 +116,14 @@ def test_cleave_inactif_si_plusieurs_cibles(monkeypatch):
     autre_cible = {"model_id": "A1", "target_unit_id": "3", "weapon_index": 0,
                    "n_attacks_resolved": 1, "target_squad_size_at_declaration": 16}
     gs, intent = _fight_state(["CLEAVE:1"], target_size=16, extra_intents=(autre_cible,))
-    assert _manual_roll_fight_intent(gs, intent, {})["counts"]["attacks"] == 1
+    assert roll_fight_intent(gs, intent)["counts"]["attacks"] == 1
 
 
 def test_sans_cleave_pas_de_de_additionnel(monkeypatch):
     """Contre-epreuve : arme nue contre 16 figurines -> 1 attaque."""
     monkeypatch.setattr(random, "randint", lambda a, b: 4)
     gs, intent = _fight_state([], target_size=16)
-    assert _manual_roll_fight_intent(gs, intent, {})["counts"]["attacks"] == 1
+    assert roll_fight_intent(gs, intent)["counts"]["attacks"] == 1
 
 
 def test_cleave_exige_la_taille_a_la_declaration(monkeypatch):
@@ -133,4 +132,4 @@ def test_cleave_exige_la_taille_a_la_declaration(monkeypatch):
     gs, intent = _fight_state(["CLEAVE:1"], target_size=16)
     del intent["target_squad_size_at_declaration"]
     with pytest.raises(ConfigurationError):
-        _manual_roll_fight_intent(gs, intent, {})
+        roll_fight_intent(gs, intent)

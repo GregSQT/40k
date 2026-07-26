@@ -39,6 +39,8 @@ def _make_env(active_ratio: float):
         quiet=True,
         gym_training_mode=True,
     )
+    # Chemin training : la config de phase est chargée à l'init (le moteur lève sinon).
+    assert env.training_config is not None
     env.training_config = dict(env.training_config)
     env.training_config["deployment_mode_schedule"] = {
         "enabled": True,

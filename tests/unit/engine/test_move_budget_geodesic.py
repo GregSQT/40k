@@ -16,7 +16,7 @@ mais le seul trajet légal contourne le mur (> 3 pas). Le check ligne-droite his
 le check géodésique rejette.
 """
 
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 from engine.phase_handlers.shared_utils import (
     build_rigid_plan,
@@ -67,9 +67,16 @@ def _gs(wall: Iterable[Tuple[int, int]], *, fly: bool = False) -> Dict[str, Any]
     }
 
 
+def _rigid_plan(col: int, row: int, gs: Dict[str, Any]) -> List[Tuple[str, int, int]]:
+    """Plan rigide de l'escouade '1' — ``None`` signifierait une escouade sans figurine vivante,
+    ce qu'aucune fixture de ce module ne construit : on échoue au lieu de le propager."""
+    plan = build_rigid_plan(col, row, "1", gs)
+    assert plan is not None, "escouade '1' sans figurine vivante"
+    return plan
+
+
 def _sister_dest(gs: Dict[str, Any]) -> Tuple[int, int]:
-    plan = build_rigid_plan(ANCHOR_DEST[0], ANCHOR_DEST[1], "1", gs)
-    assert plan is not None
+    plan = _rigid_plan(ANCHOR_DEST[0], ANCHOR_DEST[1], gs)
     sister = next(p for p in plan if p[0] == "1#1")
     return int(sister[1]), int(sister[2])
 
@@ -119,7 +126,7 @@ def test_advance_block_overlapping_another_squad_is_eroded_not_crashed():
     )
     # Et l'invariant : toute ancre conservée produit un plan que validate_move_plan accepte.
     for (cc, rr) in kept_occ:
-        plan = build_rigid_plan(cc, rr, "1", gs_occ)
+        plan = _rigid_plan(cc, rr, gs_occ)
         reason = explain_move_plan_rejection(
             plan, gs_occ, {"budget_per_model": ADV_BUDGET, "require_coherency": False},
         )
@@ -132,7 +139,7 @@ def test_straight_line_within_budget_but_path_exceeds_is_rejected():
     sc, sr = _sister_dest(gs)
     # Garantit qu'on exerce bien le bug : l'ancien check ligne-droite AURAIT accepté.
     assert calculate_hex_distance(10, 10, sc, sr) <= BUDGET
-    plan = build_rigid_plan(ANCHOR_DEST[0], ANCHOR_DEST[1], "1", gs)
+    plan = _rigid_plan(ANCHOR_DEST[0], ANCHOR_DEST[1], gs)
     reason = explain_move_plan_rejection(
         plan, gs, {"budget_per_model": BUDGET, "require_coherency": False}
     )
@@ -142,7 +149,7 @@ def test_straight_line_within_budget_but_path_exceeds_is_rejected():
 def test_same_plan_without_wall_is_accepted():
     """Sans mur, le trajet == la ligne droite → le plan passe (pas de sur-rejet)."""
     gs = _gs(set())
-    plan = build_rigid_plan(ANCHOR_DEST[0], ANCHOR_DEST[1], "1", gs)
+    plan = _rigid_plan(ANCHOR_DEST[0], ANCHOR_DEST[1], gs)
     reason = explain_move_plan_rejection(
         plan, gs, {"budget_per_model": BUDGET, "require_coherency": False}
     )
@@ -152,7 +159,7 @@ def test_same_plan_without_wall_is_accepted():
 def test_fly_squad_uses_straight_line_even_with_wall():
     """FLY (traversée libre 21.03) : le budget reste à vol d'oiseau, le mur n'ajoute rien."""
     gs = _gs(WALL, fly=True)
-    plan = build_rigid_plan(ANCHOR_DEST[0], ANCHOR_DEST[1], "1", gs)
+    plan = _rigid_plan(ANCHOR_DEST[0], ANCHOR_DEST[1], gs)
     # allow_walls pour que la sœur puisse finir sur/au-delà du mur (FLY franchit) : on isole le budget.
     reason = explain_move_plan_rejection(
         plan, gs, {"budget_per_model": BUDGET, "require_coherency": False, "allow_walls": True},
@@ -179,7 +186,7 @@ def test_erosion_and_validation_agree_on_every_pool_cell():
     pool = {(c, 10): float(BUDGET) for c in range(4, 12)}
     kept = erode_move_pool_by_squad_block(gs, "1", dict(pool))
     for (cc, rr) in kept:
-        plan = build_rigid_plan(cc, rr, "1", gs)
+        plan = _rigid_plan(cc, rr, gs)
         reason = explain_move_plan_rejection(
             plan, gs, {"budget_per_model": BUDGET, "require_coherency": False}
         )

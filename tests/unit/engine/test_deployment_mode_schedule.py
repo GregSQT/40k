@@ -35,6 +35,8 @@ def _make_env(start: float, end: float, total_episodes: int, freeze: float = 1.0
         gym_training_mode=True,
     )
     # Injection du contrat scheduler (training_only:false = on ne dépend pas du split de chemin).
+    # Chemin training : la config de phase est chargée à l'init (le moteur lève sinon).
+    assert env.training_config is not None
     env.training_config = dict(env.training_config)
     env.training_config["total_episodes"] = total_episodes
     env.training_config["deployment_mode_schedule"] = {

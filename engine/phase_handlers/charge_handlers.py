@@ -2970,6 +2970,8 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
     is_gym = game_state.get("gym_training_mode", False)
     charge_roll = None
     max_distance_subhex = None
+    # En gym le jet reste à la sélection : ni jet ni override d'activation ici.
+    _charge_override = None
     if not is_gym:
         # TEST : override manuel de la distance de charge (posé via l'API), remplace le jet 2D6.
         _charge_override = game_state.get("charge_roll_override")

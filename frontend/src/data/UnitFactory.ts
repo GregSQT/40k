@@ -98,8 +98,8 @@ export function getRangedWeaponRangeByDisplayName(displayName: string): number |
     rangedRangeByDisplayName = new Map();
     for (const uc of Object.values(unitClassMap)) {
       for (const w of uc.RNG_WEAPONS ?? []) {
-        const dn = w["display_name"];
-        const rng = w["RNG"];
+        const dn = w.display_name;
+        const rng = w.RNG;
         if (typeof dn === "string" && typeof rng === "number") {
           const prev = rangedRangeByDisplayName.get(dn) ?? 0;
           if (rng > prev) rangedRangeByDisplayName.set(dn, rng);

@@ -18,7 +18,7 @@ Discrimination (contre-epreuve mutation : neutraliser `n_attacks += _rf_x` => ro
 import random
 
 from engine.phase_handlers import shooting_handlers
-from engine.phase_handlers.shared_utils import _manual_roll_intent
+from tests.unit.engine._roll_helpers import roll_shoot_intent
 
 
 def _neutralise(monkeypatch):
@@ -56,7 +56,7 @@ def test_rapid_fire_dans_demi_portee_ajoute_x(monkeypatch):
     """RAPID_FIRE:2, cible quasi-collee (dans la demi-portee) -> 1 + 2 = 3 attaques."""
     _neutralise(monkeypatch)
     gs, intent = _game_state(["RAPID_FIRE:2"], target_row=1)
-    result = _manual_roll_intent(gs, intent, {})
+    result = roll_shoot_intent(gs, intent)
     assert result["counts"]["attacks"] == 3
 
 
@@ -64,7 +64,7 @@ def test_rapid_fire_hors_demi_portee_pas_de_bonus(monkeypatch):
     """RAPID_FIRE:2, cible tres loin (hors demi-portee) -> 1 attaque."""
     _neutralise(monkeypatch)
     gs, intent = _game_state(["RAPID_FIRE:2"], target_row=100)
-    result = _manual_roll_intent(gs, intent, {})
+    result = roll_shoot_intent(gs, intent)
     assert result["counts"]["attacks"] == 1
 
 
@@ -72,5 +72,5 @@ def test_sans_rapid_fire_pas_de_bonus(monkeypatch):
     """Sans RAPID_FIRE, cible proche -> 1 attaque (contre-epreuve fonctionnelle)."""
     _neutralise(monkeypatch)
     gs, intent = _game_state([], target_row=1)
-    result = _manual_roll_intent(gs, intent, {})
+    result = roll_shoot_intent(gs, intent)
     assert result["counts"]["attacks"] == 1

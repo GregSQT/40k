@@ -12,7 +12,7 @@ qu'une fois ; le second resultat est accepte tel quel.
 import random
 
 from engine.phase_handlers import shooting_handlers
-from engine.phase_handlers.shared_utils import _manual_roll_intent
+from tests.unit.engine._roll_helpers import roll_shoot_intent
 
 
 def _seq_randint(monkeypatch, rolls):
@@ -59,7 +59,7 @@ def test_reroll_1_towound_rerolls_a_failed_1(monkeypatch):
     seq = _seq_randint(monkeypatch, [4, 1, 6, 2])  # hit, wound=1, reroll=6, save
     gs, intent = _game_state([{"ruleId": "reroll_1_towound"}])
 
-    result = _manual_roll_intent(gs, intent, {})
+    result = roll_shoot_intent(gs, intent)
 
     assert result["counts"]["wounds"] == 1
     assert result["shot_records"][0]["strengthResult"] == "SUCCESS"
@@ -72,7 +72,7 @@ def test_no_rule_does_not_reroll(monkeypatch):
     seq = _seq_randint(monkeypatch, [4, 1])  # hit, wound=1 -> FAILED, pas de 3e de
     gs, intent = _game_state([])
 
-    result = _manual_roll_intent(gs, intent, {})
+    result = roll_shoot_intent(gs, intent)
 
     assert result["counts"]["wounds"] == 0
     assert result["shot_records"][0]["strengthResult"] == "FAILED"
@@ -84,7 +84,7 @@ def test_reroll_1_towound_ignores_non_1_failure(monkeypatch):
     seq = _seq_randint(monkeypatch, [4, 3])  # hit, wound=3 (<4, mais != 1) -> FAILED, pas de reroll
     gs, intent = _game_state([{"ruleId": "reroll_1_towound"}])
 
-    result = _manual_roll_intent(gs, intent, {})
+    result = roll_shoot_intent(gs, intent)
 
     assert result["counts"]["wounds"] == 0
     assert seq == []
@@ -95,7 +95,7 @@ def test_reroll_towound_on_objective_rerolls_any_failure(monkeypatch):
     seq = _seq_randint(monkeypatch, [4, 3, 5, 2])  # hit, wound=3 (echec), reroll=5 (succes), save
     gs, intent = _game_state([{"ruleId": "reroll_towound_target_on_objective"}], target_col=5, target_row=5)
 
-    result = _manual_roll_intent(gs, intent, {})
+    result = roll_shoot_intent(gs, intent)
 
     assert result["counts"]["wounds"] == 1
     assert result["shot_records"][0]["strengthRoll"] == 5
@@ -107,7 +107,7 @@ def test_reroll_towound_on_objective_inactive_off_objective(monkeypatch):
     seq = _seq_randint(monkeypatch, [4, 3])  # hit, wound=3 -> FAILED, pas de reroll
     gs, intent = _game_state([{"ruleId": "reroll_towound_target_on_objective"}], target_col=9, target_row=9)
 
-    result = _manual_roll_intent(gs, intent, {})
+    result = roll_shoot_intent(gs, intent)
 
     assert result["counts"]["wounds"] == 0
     assert seq == []

@@ -16,7 +16,7 @@ Aucun fallback masquant une erreur : si une donnée requise manque, on lève.
 """
 
 import re
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 from engine.hex_utils import compute_occupied_hexes, min_distance_between_sets
 
@@ -24,15 +24,20 @@ from engine.hex_utils import compute_occupied_hexes, min_distance_between_sets
 _MODELS_RE = re.compile(r'\[MODELS:\s*([^\]]+)\]')
 _TOKEN_RE = re.compile(r'(\S+?#\S*?)@\((-?\d+),\s*(-?\d+)\)')
 
+# Taille de socle telle que l'attend le moteur (`compute_occupied_hexes`) : diamètre entier pour
+# un socle rond, [major, minor] pour un ovale.
+BaseSize = Union[int, List[int]]
+Base = Tuple[str, BaseSize]
+
 # Base par défaut si un socle n'a pas de base connue : round diamètre 1 (1 hex).
 # Utilisé uniquement quand aucune ligne "Starting position ... base=" n'a été vue
 # (logs de test synthétiques) — jamais pour masquer une erreur métier.
-_DEFAULT_BASE: Tuple[str, object] = ("round", 1)
+_DEFAULT_BASE: Base = ("round", 1)
 
-_fp_cache: Dict[Tuple[int, int, str, object], frozenset] = {}
+_fp_cache: Dict[Tuple[int, int, str, Union[int, Tuple[int, ...]]], frozenset] = {}
 
 
-def parse_base_token(token: str) -> Tuple[str, object]:
+def parse_base_token(token: str) -> Base:
     """Parse un token `base=round/6` ou `base=oval/[20, 14]` → (shape, size)."""
     if not token.startswith("base="):
         raise ValueError(f"Base token invalide: {token!r}")
@@ -69,7 +74,7 @@ def parse_models_segment(text: str) -> Optional[Dict[str, Dict[str, Tuple[int, i
     return result
 
 
-def _model_footprint(col: int, row: int, base: Tuple[str, object]) -> frozenset:
+def _model_footprint(col: int, row: int, base: Base) -> frozenset:
     shape, size = base
     key = (col, row, shape, size if isinstance(size, int) else tuple(size))
     cached = _fp_cache.get(key)
@@ -80,13 +85,13 @@ def _model_footprint(col: int, row: int, base: Tuple[str, object]) -> frozenset:
     return fp
 
 
-def _unit_base(unit_base: Dict[str, Tuple[str, object]], unit_id: str) -> Tuple[str, object]:
+def _unit_base(unit_base: Dict[str, Base], unit_id: str) -> Base:
     return unit_base.get(unit_id, _DEFAULT_BASE)
 
 
 def squad_footprint(
     models: Dict[str, Tuple[int, int]],
-    base: Tuple[str, object],
+    base: Base,
 ) -> Set[Tuple[int, int]]:
     """Union des empreintes de tous les socles vivants d'une escouade."""
     fp: Set[Tuple[int, int]] = set()
@@ -97,7 +102,7 @@ def squad_footprint(
 
 def move_start_status(
     models: Optional[Dict[str, Tuple[int, int]]],
-    base: Tuple[str, object],
+    base: Base,
     anchor_stored: Optional[Tuple[int, int]],
     start_col: int,
     start_row: int,
@@ -124,9 +129,9 @@ def move_start_status(
 
 def squads_min_edge_distance(
     models_a: Dict[str, Tuple[int, int]],
-    base_a: Tuple[str, object],
+    base_a: Base,
     models_b: Dict[str, Tuple[int, int]],
-    base_b: Tuple[str, object],
+    base_b: Base,
     max_distance: int = 0,
 ) -> int:
     """Distance bord-à-bord minimale (subhexes) entre le socle le plus proche de A et

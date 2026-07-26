@@ -68,10 +68,12 @@ def test_geometry_premise_hex_non_adjacent_but_euclidean_engaged() -> None:
     )
 
     ez = 10  # engagement_zone (2") × inches_to_subhex (5)
-    a = Socle("round", 18, *ATTACKER, set(compute_occupied_hexes(*ATTACKER, "round", 18, 0)), [ATTACKER], 0)
-    b = Socle("round", 6, *TARGET, set(compute_occupied_hexes(*TARGET, "round", 6, 0)), [TARGET], 0)
+    fp_a = set(compute_occupied_hexes(*ATTACKER, "round", 18, 0))
+    fp_b = set(compute_occupied_hexes(*TARGET, "round", 6, 0))
+    a = Socle("round", 18, *ATTACKER, fp_a, [ATTACKER], 0)
+    b = Socle("round", 6, *TARGET, fp_b, [TARGET], 0)
 
-    hex_edge = min_distance_between_sets(a.fp, b.fp, max_distance=99)
+    hex_edge = min_distance_between_sets(fp_a, fp_b, max_distance=99)
     eucl_edge = euclidean_edge_distance(a, b)
 
     assert hex_edge > ez, f"prémisse invalide : hexEdge={hex_edge} devrait être > {ez}"

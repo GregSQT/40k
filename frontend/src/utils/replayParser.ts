@@ -2,7 +2,7 @@
 // Parse train_step.log into replay format on the frontend
 // VERSION: 2025-11-17-11-35 - Dead unit tracking implementation
 
-interface ReplayAction {
+export interface ReplayAction {
   type: string;
   timestamp: string;
   turn: string;
@@ -221,13 +221,14 @@ export function parse_log_file_from_text(text: string): ReplayData {
     text: string,
     label: string
   ): Record<string, [number, number]> | null => {
-    const seg = text.match(new RegExp("\\[" + label + ":\\s*([^\\]]+)\\]"));
+    const seg = text.match(new RegExp(`\\[${label}:\\s*([^\\]]+)\\]`));
     if (!seg) return null;
     const out: Record<string, [number, number]> = {};
     modelTokenRe.lastIndex = 0;
-    let tok: RegExpExecArray | null;
-    while ((tok = modelTokenRe.exec(seg[1])) !== null) {
+    let tok = modelTokenRe.exec(seg[1]);
+    while (tok !== null) {
       out[tok[1]] = [parseInt(tok[2], 10), parseInt(tok[3], 10)];
+      tok = modelTokenRe.exec(seg[1]);
     }
     return Object.keys(out).length > 0 ? out : null;
   };
@@ -237,7 +238,10 @@ export function parse_log_file_from_text(text: string): ReplayData {
   const extractShooterModelsSegment = (text: string): string[] | null => {
     const seg = text.match(/\[SHOOTER_MODELS:\s*([^\]]+)\]/);
     if (!seg) return null;
-    const ids = seg[1].trim().split(/\s+/).filter((s) => s.length > 0);
+    const ids = seg[1]
+      .trim()
+      .split(/\s+/)
+      .filter((s) => s.length > 0);
     return ids.length > 0 ? ids : null;
   };
 
@@ -1251,10 +1255,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
           currentUnits[unitId].col = action.to.col;
           currentUnits[unitId].row = action.to.row;
         }
-      } else if (
-        (action.type === "pile_in" || action.type === "consolidation") &&
-        action.unit_id
-      ) {
+      } else if ((action.type === "pile_in" || action.type === "consolidation") && action.unit_id) {
         // Deplacements de la phase fight - maj de l'ancre (les figurines suivent via applyModels).
         const unitId = action.unit_id;
         if (currentUnits[unitId] && action.to) {

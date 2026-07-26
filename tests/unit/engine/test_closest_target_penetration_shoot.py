@@ -20,7 +20,7 @@ Discrimination verrouillee : effet UNIQUEMENT si (regle presente) ET (cible = pl
 import random
 
 from engine.phase_handlers import shooting_handlers
-from engine.phase_handlers.shared_utils import _manual_roll_intent
+from tests.unit.engine._roll_helpers import roll_shoot_intent
 
 
 def _neutralise_rng_and_cover(monkeypatch):
@@ -78,7 +78,7 @@ def test_ap_ameliore_sur_la_cible_la_plus_proche(monkeypatch):
     _neutralise_rng_and_cover(monkeypatch)
     gs, _ = _game_state([{"ruleId": "closest_target_penetration"}])
 
-    result = _manual_roll_intent(gs, _intent("2"), {})
+    result = roll_shoot_intent(gs, _intent("2"))
 
     assert result["ap"] == -2, "AP+1 penetration attendu sur la cible la plus proche"
     assert result["display_save_th"] == 5
@@ -89,7 +89,7 @@ def test_pas_d_effet_sur_une_cible_plus_lointaine(monkeypatch):
     _neutralise_rng_and_cover(monkeypatch)
     gs, _ = _game_state([{"ruleId": "closest_target_penetration"}])
 
-    result = _manual_roll_intent(gs, _intent("3"), {})
+    result = roll_shoot_intent(gs, _intent("3"))
 
     assert result["ap"] == -1, "seule la cible la plus proche beneficie du bonus"
     assert result["display_save_th"] == 4
@@ -100,7 +100,7 @@ def test_pas_d_effet_sans_la_regle(monkeypatch):
     _neutralise_rng_and_cover(monkeypatch)
     gs, _ = _game_state([])
 
-    result = _manual_roll_intent(gs, _intent("2"), {})
+    result = roll_shoot_intent(gs, _intent("2"))
 
     assert result["ap"] == -1
     assert result["display_save_th"] == 4

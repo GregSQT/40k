@@ -44,9 +44,7 @@ describe("replayParser", () => {
     const parsed = parse_log_file_from_text(text);
     const pileState = parsed.episodes[0].states.find(
       (s) => (s as { fight_subphase?: string }).fight_subphase === "pile_in"
-    ) as
-      | { phase?: string; fight_subphase?: string; fight_eligible_units?: number[] }
-      | undefined;
+    ) as { phase?: string; fight_subphase?: string; fight_eligible_units?: number[] } | undefined;
     expect(pileState).toBeDefined();
     expect(pileState!.phase).toBe("fight");
     expect(pileState!.fight_eligible_units).toEqual([1]);

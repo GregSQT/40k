@@ -28,7 +28,7 @@ import random
 import pytest
 
 from engine.phase_handlers import shooting_handlers
-from engine.phase_handlers.shared_utils import _manual_roll_intent
+from tests.unit.engine._roll_helpers import roll_shoot_intent
 
 
 def _neutralise(monkeypatch, *, engaged=False):
@@ -66,7 +66,7 @@ def test_heavy_stationnaire_ameliore_le_seuil(monkeypatch):
     """HEAVY + stationnaire -> BS 4 ameliore a 3."""
     _neutralise(monkeypatch)
     gs, intent = _game_state(["HEAVY"])
-    result = _manual_roll_intent(gs, intent, {})
+    result = roll_shoot_intent(gs, intent)
     assert result["bs"] == 3
 
 
@@ -75,7 +75,7 @@ def test_heavy_apres_mouvement_pas_de_bonus(monkeypatch, moved, advanced):
     """HEAVY mais a bouge OU advance -> pas de bonus (BS reste 4)."""
     _neutralise(monkeypatch)
     gs, intent = _game_state(["HEAVY"], moved=moved, advanced=advanced)
-    result = _manual_roll_intent(gs, intent, {})
+    result = roll_shoot_intent(gs, intent)
     assert result["bs"] == 4
 
 
@@ -83,7 +83,7 @@ def test_heavy_engage_pas_de_bonus(monkeypatch):
     """24.16 clause 1 : stationnaire mais ENGAGE -> aucun bonus (BS reste 4)."""
     _neutralise(monkeypatch, engaged=True)
     gs, intent = _game_state(["HEAVY"])
-    result = _manual_roll_intent(gs, intent, {})
+    result = roll_shoot_intent(gs, intent)
     assert result["bs"] == 4
 
 
@@ -91,7 +91,7 @@ def test_heavy_pose_ce_tour_pas_de_bonus(monkeypatch):
     """24.16 clause 2 : unite arrivee de reserve CE TOUR -> aucun bonus (BS reste 4)."""
     _neutralise(monkeypatch)
     gs, intent = _game_state(["HEAVY"], deployed_on_turn=2)  # turn == 2 dans la fixture
-    result = _manual_roll_intent(gs, intent, {})
+    result = roll_shoot_intent(gs, intent)
     assert result["bs"] == 4
 
 
@@ -99,7 +99,7 @@ def test_heavy_pose_un_tour_avant_bonus_conserve(monkeypatch):
     """Discrimination : arrivee au tour PRECEDENT -> le bonus s applique."""
     _neutralise(monkeypatch)
     gs, intent = _game_state(["HEAVY"], deployed_on_turn=1)
-    result = _manual_roll_intent(gs, intent, {})
+    result = roll_shoot_intent(gs, intent)
     assert result["bs"] == 3
 
 
@@ -114,7 +114,7 @@ def test_le_log_de_tir_affiche_le_token_heavy(monkeypatch):
     def _log_message(*, moved):
         _neutralise(monkeypatch)
         gs, intent = _game_state(["HEAVY"], moved=moved)
-        r = _manual_roll_intent(gs, intent, {})
+        r = roll_shoot_intent(gs, intent)
         gs.update({"units": [{"id": "1", "unitType": "Shooter"}, {"id": "2", "unitType": "Grunt"}],
                    "action_logs": [], "action_log_seq": 0, "turn": 2})
         gs["units_cache"]["1"] = {"col": 0, "row": 0}
@@ -139,5 +139,5 @@ def test_sans_heavy_pas_de_bonus(monkeypatch):
     """Sans HEAVY, meme stationnaire -> BS reste 4 (contre-epreuve fonctionnelle)."""
     _neutralise(monkeypatch)
     gs, intent = _game_state([])
-    result = _manual_roll_intent(gs, intent, {})
+    result = roll_shoot_intent(gs, intent)
     assert result["bs"] == 4

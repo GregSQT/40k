@@ -3125,7 +3125,9 @@ def _build_units_from_scenario_army(
         {"board": get_config_loader().get_board_config(), "controlled_player": int(player)},
         reg,
     )
-    basic_units = manager._fold_attached_characters(copy.deepcopy(require_key(army_cfg, "units")))
+    basic_units = manager._fold_attached_characters(
+        copy.deepcopy(require_key(army_cfg, "units")), reg
+    )
     built_units: list[Dict[str, Any]] = []
     for unit_def in basic_units:
         unit_type = require_key(unit_def, "unit_type")

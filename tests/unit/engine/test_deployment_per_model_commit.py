@@ -50,6 +50,7 @@ def _load(seed: int = 0):
     # deployment n'existe jamais. Ce test cible le COMMIT d'un déploiement ACTIF (deploy_unit) —
     # on désactive donc le scheduler par-épisode pour que le deployment_type='active' du scénario
     # soit respecté.
+    assert eng.training_config is not None
     sched = eng.training_config.get("deployment_mode_schedule")
     if isinstance(sched, dict):
         sched["enabled"] = False

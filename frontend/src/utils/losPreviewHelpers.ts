@@ -379,7 +379,8 @@ export function buildLosPreviewFromSource(
   // Origines du cône BASE (bleu, « au sol » : tous les murs bloquent). Position courante → une
   // origine PAR figurine vivante (centre + socle de la fig). Position hypothétique (survol, pas de
   // cache par-fig) → origine unique à fromCol/fromRow avec le socle recalculé.
-  const shooterOrigins: Array<{ col: number; row: number; footprint: Array<[number, number]> }> = [];
+  const shooterOrigins: Array<{ col: number; row: number; footprint: Array<[number, number]> }> =
+    [];
   if (centers && Object.keys(centers).length > 0) {
     for (const [mid, pos] of Object.entries(centers)) {
       const fp = keySetToPairs(

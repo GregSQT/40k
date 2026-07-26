@@ -8,7 +8,7 @@ dans le JSON (activate_unit).
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Collection, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -55,7 +55,7 @@ def _board_hex_radius_margin(game_state: Dict[str, Any]) -> Tuple[float, float]:
 
 
 def compute_move_preview_mask_loops_world(
-    hex_cells: Set[Tuple[int, int]],
+    hex_cells: Collection[Tuple[int, int]],
     game_state: Dict[str, Any],
 ) -> Optional[List[List[Tuple[float, float]]]]:
     """

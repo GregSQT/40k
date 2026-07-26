@@ -275,10 +275,14 @@ def test_cover_channel_paints_terrain_areas(engine):
 
     grid = _grid(engine)
     half_extent = grid_half_extent_subhex(gs, "1")
-    gx, gy = hex_to_cell(cover_hex[0], cover_hex[1], ANCHOR_COL, ANCHOR_ROW, half_extent)
+    cover_cell = hex_to_cell(cover_hex[0], cover_hex[1], ANCHOR_COL, ANCHOR_ROW, half_extent)
+    assert cover_cell is not None, "l'hex de couvert doit tomber dans la grille"
+    gx, gy = cover_cell
     assert grid[GRID_CH_COVER, gy, gx] == 1.0
     # Le mur voisin, lui, n'est PAS du couvert (aucune terrain area ne le contient).
-    wx, wy = hex_to_cell(NEAR_WALL[0], NEAR_WALL[1], ANCHOR_COL, ANCHOR_ROW, half_extent)
+    wall_cell = hex_to_cell(NEAR_WALL[0], NEAR_WALL[1], ANCHOR_COL, ANCHOR_ROW, half_extent)
+    assert wall_cell is not None, "le mur proche doit tomber dans la grille"
+    wx, wy = wall_cell
     assert grid[GRID_CH_COVER, wy, wx] == 0.0
     assert grid[GRID_CH_WALL, wy, wx] == 1.0
 

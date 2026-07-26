@@ -26,6 +26,29 @@ class _StateManagerStub:
         return False
 
 
+class _EngineStub:
+    """Faux moteur minimal pour les helpers de serialisation de l'API.
+
+    Classe NOMMEE plutot que `type("E", (), {...})()` : les attributs sont declares, donc le
+    contrat lu par `_game_state_for_json` (`game_state` + `state_manager`),
+    `_attach_player_types` (`current_mode_code`) et `_build_units_from_scenario_army`
+    (`unit_registry`) reste verifiable au lieu d'etre un objet opaque ou l'on greffe des
+    attributs a la volee.
+    """
+
+    def __init__(
+        self,
+        game_state: Dict[str, Any],
+        *,
+        current_mode_code: str = "pvp",
+        unit_registry: Any = None,
+    ) -> None:
+        self.game_state = game_state
+        self.current_mode_code = current_mode_code
+        self.unit_registry = unit_registry
+        self.state_manager = _StateManagerStub()
+
+
 
 def test_make_json_serializable_handles_tuple_keys_set_and_object_dict() -> None:
     class Dummy:
@@ -63,8 +86,9 @@ def test_api_json_response_orjson_encodes_set_and_numpy_without_pre_walk() -> No
 
 
 def test_game_state_for_json_removes_topology_arrays() -> None:
-    engine_instance = type("E", (), {"game_state": {"los_topology": 1, "pathfinding_topology": 2, "x": 3, "terrain_areas": [], "units_cache": {}}})()
-    engine_instance.state_manager = _StateManagerStub()
+    engine_instance = _EngineStub(
+        {"los_topology": 1, "pathfinding_topology": 2, "x": 3, "terrain_areas": [], "units_cache": {}}
+    )
     state = api_server._game_state_for_json(engine_instance)
     assert "los_topology" not in state
     assert "pathfinding_topology" not in state
@@ -72,20 +96,15 @@ def test_game_state_for_json_removes_topology_arrays() -> None:
 
 
 def test_game_state_for_json_drops_footprint_zone_when_mask_loops_present() -> None:
-    engine_instance = type(
-        "E",
-        (),
+    engine_instance = _EngineStub(
         {
-            "game_state": {
-                "phase": "move",
-                "terrain_areas": [],
-                "units_cache": {},
-                "move_preview_footprint_zone": {(1, 2), (3, 4)},
-                "move_preview_footprint_mask_loops": [[[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]],
-            },
-        },
-    )()
-    engine_instance.state_manager = _StateManagerStub()
+            "phase": "move",
+            "terrain_areas": [],
+            "units_cache": {},
+            "move_preview_footprint_zone": {(1, 2), (3, 4)},
+            "move_preview_footprint_mask_loops": [[[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]],
+        }
+    )
     state = api_server._game_state_for_json(engine_instance)
     assert "move_preview_footprint_zone" not in state
     assert state["move_preview_footprint_mask_loops"] is not None
@@ -97,24 +116,18 @@ def test_game_state_for_json_drops_footprint_zone_when_mask_loops_present() -> N
 def test_game_state_for_json_omits_large_mask_loops_when_client_hash_matches() -> None:
     loop = [[float(i), 0.0] for i in range(70)]
     loops = [loop]
-    engine_instance = type(
-        "E",
-        (),
+    engine_instance = _EngineStub(
         {
-            "game_state": {
-                "phase": "move",
-                "terrain_areas": [],
-                "units_cache": {},
-                "move_preview_footprint_zone": {(0, 0)},
-                "move_preview_footprint_mask_loops": loops,
-            },
-        },
-    )()
-    engine_instance.state_manager = _StateManagerStub()
+            "phase": "move",
+            "terrain_areas": [],
+            "units_cache": {},
+            "move_preview_footprint_zone": {(0, 0)},
+            "move_preview_footprint_mask_loops": loops,
+        }
+    )
     state1 = api_server._game_state_for_json(engine_instance, mask_loops_client_hash=None)
     h = state1["move_preview_footprint_mask_loops_hash"]
     assert isinstance(h, str)
-    engine_instance.state_manager = _StateManagerStub()
     state2 = api_server._game_state_for_json(engine_instance, mask_loops_client_hash=h)
     assert state2.get("move_preview_footprint_mask_loops_unchanged") is True
     assert state2.get("move_preview_footprint_mask_loops") is None
@@ -122,45 +135,34 @@ def test_game_state_for_json_omits_large_mask_loops_when_client_hash_matches() -
 
 def test_game_state_for_json_does_not_omit_small_mask_loops_even_if_hash_matches() -> None:
     loops = [[[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]]
-    engine_instance = type(
-        "E",
-        (),
+    engine_instance = _EngineStub(
         {
-            "game_state": {
-                "phase": "move",
-                "terrain_areas": [],
-                "units_cache": {},
-                "move_preview_footprint_mask_loops": loops,
-            },
-        },
-    )()
-    engine_instance.state_manager = _StateManagerStub()
+            "phase": "move",
+            "terrain_areas": [],
+            "units_cache": {},
+            "move_preview_footprint_mask_loops": loops,
+        }
+    )
     state1 = api_server._game_state_for_json(engine_instance)
     h = state1["move_preview_footprint_mask_loops_hash"]
-    engine_instance.state_manager = _StateManagerStub()
     state2 = api_server._game_state_for_json(engine_instance, mask_loops_client_hash=h)
     assert state2.get("move_preview_footprint_mask_loops_unchanged") is not True
     assert state2.get("move_preview_footprint_mask_loops") is not None
 
 
 def test_game_state_for_json_strips_internal_engine_keys() -> None:
-    engine_instance = type(
-        "E",
-        (),
+    engine_instance = _EngineStub(
         {
-            "game_state": {
-                "phase": "move",
-                "terrain_areas": [],
-                "units_cache": {},
-                "turn": 1,
-                "units_cache_prev": {"1": {"col": 0, "row": 0}},
-                "last_compliance_data": {"x": 1},
-                "_best_weapon_cache": {"k": "v"},
-                "console_logs": ["noise"],
-            },
-        },
-    )()
-    engine_instance.state_manager = _StateManagerStub()
+            "phase": "move",
+            "terrain_areas": [],
+            "units_cache": {},
+            "turn": 1,
+            "units_cache_prev": {"1": {"col": 0, "row": 0}},
+            "last_compliance_data": {"x": 1},
+            "_best_weapon_cache": {"k": "v"},
+            "console_logs": ["noise"],
+        }
+    )
     state = api_server._game_state_for_json(engine_instance)
     assert state["turn"] == 1
     assert "units_cache_prev" not in state
@@ -172,43 +174,32 @@ def test_game_state_for_json_strips_internal_engine_keys() -> None:
 def test_game_state_for_json_drops_preview_hexes_when_move_pool_present() -> None:
     """``preview_hexes`` est un alias du pool d’ancres — ne pas dupliquer le JSON."""
     anchors = [[1, 2], [3, 4]]
-    engine_instance = type(
-        "E",
-        (),
+    engine_instance = _EngineStub(
         {
-            "game_state": {
-                "phase": "move",
-                "terrain_areas": [],
-                "units_cache": {},
-                "valid_move_destinations_pool": anchors,
-                "preview_hexes": list(anchors),
-            },
-        },
-    )()
-    engine_instance.state_manager = _StateManagerStub()
+            "phase": "move",
+            "terrain_areas": [],
+            "units_cache": {},
+            "valid_move_destinations_pool": anchors,
+            "preview_hexes": list(anchors),
+        }
+    )
     state = api_server._game_state_for_json(engine_instance)
     assert state["valid_move_destinations_pool"] == anchors
     assert "preview_hexes" not in state
 
 
 def test_game_state_for_json_omits_objectives_when_for_post_action() -> None:
-    engine_instance = type(
-        "E",
-        (),
+    engine_instance = _EngineStub(
         {
-            "game_state": {
-                "phase": "move",
-                "terrain_areas": [],
-                "units_cache": {},
-                "objectives": [{"name": "A", "hexes": [{"col": 0, "row": 0}]}],
-                "turn": 1,
-            },
-        },
-    )()
-    engine_instance.state_manager = _StateManagerStub()
+            "phase": "move",
+            "terrain_areas": [],
+            "units_cache": {},
+            "objectives": [{"name": "A", "hexes": [{"col": 0, "row": 0}]}],
+            "turn": 1,
+        }
+    )
     full = api_server._game_state_for_json(engine_instance, for_post_action=False)
     assert full.get("objectives") is not None
-    engine_instance.state_manager = _StateManagerStub()
     slim = api_server._game_state_for_json(engine_instance, for_post_action=True)
     assert "objectives" not in slim
 
@@ -240,42 +231,32 @@ def test_slim_execute_action_result_drops_duplicate_move_pool_fields() -> None:
 
 
 def test_game_state_for_json_excludes_config_blob() -> None:
-    engine_instance = type(
-        "E",
-        (),
+    engine_instance = _EngineStub(
         {
-            "game_state": {
-                "phase": "move",
-                "terrain_areas": [],
-                "units_cache": {},
-                "config": {"game_rules": {"max_turns": 5}, "board": {"x": 1}},
-                "turn": 1,
-            },
-        },
-    )()
-    engine_instance.state_manager = _StateManagerStub()
+            "phase": "move",
+            "terrain_areas": [],
+            "units_cache": {},
+            "config": {"game_rules": {"max_turns": 5}, "board": {"x": 1}},
+            "turn": 1,
+        }
+    )
     state = api_server._game_state_for_json(engine_instance)
     assert state["turn"] == 1
     assert "config" not in state
 
 
 def test_game_state_for_json_excludes_weapon_damage_table_and_per_player_adjacent_caches() -> None:
-    engine_instance = type(
-        "E",
-        (),
+    engine_instance = _EngineStub(
         {
-            "game_state": {
-                "phase": "move",
-                "terrain_areas": [],
-                "units_cache": {},
-                "weapon_damage_table": {"A": {"B": {"C": 1}}},
-                "enemy_adjacent_hexes_player_1": {(1, 2), (3, 4)},
-                "enemy_adjacent_counts_player_2": {"x": 3},
-                "turn": 1,
-            },
-        },
-    )()
-    engine_instance.state_manager = _StateManagerStub()
+            "phase": "move",
+            "terrain_areas": [],
+            "units_cache": {},
+            "weapon_damage_table": {"A": {"B": {"C": 1}}},
+            "enemy_adjacent_hexes_player_1": {(1, 2), (3, 4)},
+            "enemy_adjacent_counts_player_2": {"x": 3},
+            "turn": 1,
+        }
+    )
     state = api_server._game_state_for_json(engine_instance)
     assert state["turn"] == 1
     assert "weapon_damage_table" not in state
@@ -284,20 +265,15 @@ def test_game_state_for_json_excludes_weapon_damage_table_and_per_player_adjacen
 
 
 def test_game_state_for_json_excludes_move_preview_border() -> None:
-    engine_instance = type(
-        "E",
-        (),
+    engine_instance = _EngineStub(
         {
-            "game_state": {
-                "phase": "move",
-                "terrain_areas": [],
-                "units_cache": {},
-                "valid_move_destinations_pool": [[1, 2], [3, 4]],
-                "move_preview_border": [[1, 2]],
-            },
-        },
-    )()
-    engine_instance.state_manager = _StateManagerStub()
+            "phase": "move",
+            "terrain_areas": [],
+            "units_cache": {},
+            "valid_move_destinations_pool": [[1, 2], [3, 4]],
+            "move_preview_border": [[1, 2]],
+        }
+    )
     state = api_server._game_state_for_json(engine_instance)
     assert "move_preview_border" not in state
     assert state["valid_move_destinations_pool"] == [[1, 2], [3, 4]]
@@ -313,7 +289,7 @@ def test_sync_units_hp_from_cache_applies_cache_and_sets_zero_for_dead() -> None
 
 def test_build_and_attach_player_types_for_pve() -> None:
     assert api_server._build_player_types(True, "pve") == {"1": "human", "2": "ai"}
-    engine_instance = type("E", (), {"game_state": {}, "current_mode_code": "pve"})()
+    engine_instance = _EngineStub({}, current_mode_code="pve")
     serializable_state: Dict[str, Any] = {}
     api_server._attach_player_types(serializable_state, cast(W40KEngine, engine_instance))
     assert serializable_state["player_types"]["2"] == "ai"
@@ -321,7 +297,7 @@ def test_build_and_attach_player_types_for_pve() -> None:
 
 
 def test_attach_player_types_rejects_invalid_mode() -> None:
-    engine_instance = type("E", (), {"game_state": {}, "current_mode_code": "invalid"})()
+    engine_instance = _EngineStub({}, current_mode_code="invalid")
     with pytest.raises(ValueError, match=r"Unsupported current_mode_code"):
         api_server._attach_player_types({}, cast(W40KEngine, engine_instance))
 
@@ -452,14 +428,51 @@ def test_game_state_for_json_triggers_objective_control_refresh() -> None:
     le chemin gym (avant, l'API portait sa propre détection inline). Ce test verrouille l'appel :
     s'il disparaît, le contrôle d'objectif du PvP se fige silencieusement.
     """
-    engine_instance = type(
-        "E",
-        (),
-        {"game_state": {"phase": "move", "turn": 1, "terrain_areas": [], "units_cache": {}}},
-    )()
-    engine_instance.state_manager = _StateManagerStub()
+    engine_instance = _EngineStub(
+        {"phase": "move", "turn": 1, "terrain_areas": [], "units_cache": {}}
+    )
 
     api_server._game_state_for_json(engine_instance)
     api_server._game_state_for_json(engine_instance)
 
     assert engine_instance.state_manager.boundary_refresh_calls == 2
+
+
+def test_build_units_from_scenario_army_folds_attached_characters() -> None:
+    """`change_roster` sur une army au FORMAT SCENARIO doit construire les unites.
+
+    Ce chemin appelait `_fold_attached_characters` sans son argument `unit_registry` : toute
+    tentative de changer de roster avec un fichier au format scenario levait un TypeError avant
+    d'avoir construit la moindre unite. Le test verrouille l'appel ET son effet metier (regle 19 :
+    un character `attached_squad` n'existe plus comme unite separee, il est replie dans sa squad).
+    """
+    import json
+    from pathlib import Path
+
+    from ai.unit_registry import UnitRegistry
+
+    army_path = (
+        Path(__file__).resolve().parents[3]
+        / "config/board/44x60x5/scenario/scenario_pvp.json"
+    )
+    army_cfg = json.loads(army_path.read_text())
+    raw_units = army_cfg["units"]
+    attached_count = sum(1 for u in raw_units if "attached_squad" in u)
+    assert attached_count > 0, "fixture invalide : ce scenario doit porter des characters attaches"
+
+    engine_instance = cast(W40KEngine, _EngineStub({}, unit_registry=UnitRegistry()))
+
+    built, next_id = api_server._build_units_from_scenario_army(engine_instance, army_cfg, 1, 1)
+
+    assert len(built) == len(raw_units) - attached_count
+    assert next_id == 1 + len(built)
+    assert {u["player"] for u in built} == {1}
+    # Deploiement actif : positions sentinelles, le joueur place ensuite.
+    assert all(u["col"] == -1 and u["row"] == -1 for u in built)
+
+
+def test_build_units_from_scenario_army_requires_unit_registry() -> None:
+    """Sans registre, on leve explicitement au lieu de construire des unites incompletes."""
+    engine_instance = cast(W40KEngine, _EngineStub({}, unit_registry=None))
+    with pytest.raises(ValueError, match=r"unit_registry is required"):
+        api_server._build_units_from_scenario_army(engine_instance, {"units": []}, 1, 1)

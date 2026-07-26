@@ -73,13 +73,17 @@ def test_explicit_scenario_played_as_is():
         quiet=True,
         gym_training_mode=True,
     )
-    masked_env = ActionMasker(base_env, lambda env: env.get_action_mask())
+    # Même mask_fn qu'en évaluation réelle (ai/bot_evaluation) : le masque vient du moteur wrappé.
+    masked_env = ActionMasker(base_env, lambda _env: base_env.get_action_mask())
 
     # Lecture des MÉTADONNÉES du zip avant tout chargement de politique : la politique sur disque peut
     # précéder la refonte d'observation V11 (obs_size 108 → 199, 6 → 7 canaux), auquel cas ni
     # `MaskablePPO.load` ni l'extracteur spatial ne peuvent la reconstruire. Dans ce cas le verrou est
     # dormant jusqu'au retrain — on le dit, on ne masque pas.
-    saved_obs_space = load_from_zip_file(model_path, load_data=True, device="cpu")[0]["observation_space"]
+    saved_data = load_from_zip_file(model_path, load_data=True, device="cpu")[0]
+    if saved_data is None:
+        raise ValueError(f"Modèle {model_path} sans métadonnées (observation_space illisible)")
+    saved_obs_space = saved_data["observation_space"]
     if saved_obs_space != masked_env.observation_space:
         pytest.skip(
             f"politique sur disque incompatible avec l'observation courante "

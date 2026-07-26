@@ -5,6 +5,8 @@ AnalyzerState — état partagé entre les handlers de parse_step_log.
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from ai.analyzer_perfig import Base
+
 
 @dataclass
 class AnalyzerState:
@@ -41,7 +43,7 @@ class AnalyzerState:
     # positions_by_model garde encore l'état PRÉCÉDENT tant que la ligne n'est pas finie.
     current_line_models: Dict[str, Dict[str, Tuple[int, int]]] = field(default_factory=dict)
     # Base (shape, size) par unité, lue sur la ligne "Starting position ... base=".
-    unit_base: Dict[str, Tuple[str, object]] = field(default_factory=dict)
+    unit_base: Dict[str, Base] = field(default_factory=dict)
 
     # Board
     wall_hexes: Set[Tuple[int, int]] = field(default_factory=set)

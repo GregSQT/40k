@@ -36,6 +36,7 @@ def test_parse_models_dead_socles_absent_from_list():
     # 1#0 / 1#1 morts : la liste commence à 1#2 (règle « socles morts disparaissent »).
     seg = "[MODELS: 1#2@(85,164) 1#5@(79,168)]"
     parsed = parse_models_segment(seg)
+    assert parsed is not None
     assert set(parsed["1"].keys()) == {"1#2", "1#5"}
 
 

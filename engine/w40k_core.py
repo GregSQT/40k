@@ -148,7 +148,15 @@ class W40KEngine(gym.Env):
     Slim W40K game engine - delegates to specialized modules.
     Core responsibilities: Gym interface, phase orchestration, episode management.
     """
-    
+
+    # Config d'entraînement de la phase courante. Annotation SEULE (pas d'affectation) : elle
+    # type l'attribut sans le créer, donc un chemin d'``__init__`` qui oublierait de l'assigner
+    # lève toujours AttributeError au lieu de passer pour un ``None`` légitime. ``None`` est une
+    # valeur métier du chemin API multi-agents (aucun agent connu déclaré) ; les chemins
+    # d'entraînement lèvent plutôt que de la laisser vide.
+    training_config: Optional[Dict[str, Any]]
+
+
     # ============================================================================
     # INITIALIZATION (KEEP FROM LINES 42-214)
     # ============================================================================
@@ -5026,7 +5034,8 @@ class W40KEngine(gym.Env):
         for _ri, _rl in enumerate(sub_logs):
             if not isinstance(_rl, dict):
                 continue
-            if _rl.get("type") in self._STEP_LOG_TYPE_MAP and self._STEP_LOG_TYPE_MAP.get(_rl.get("type")) in ("shoot", "combat"):
+            _rl_type = _rl.get("type")  # get allowed
+            if isinstance(_rl_type, str) and self._STEP_LOG_TYPE_MAP.get(_rl_type) in ("shoot", "combat"):
                 _tid = _rl.get("targetId")  # get allowed
                 _shots = _rl.get("shootDetails")  # get allowed
                 if _tid is not None and isinstance(_shots, list) and _shots:

@@ -1891,7 +1891,10 @@ class GameStateManager:
             # = {'top': (col,row,level), 'bottom': (col,row,level)} ou None. Une escouade positionnée
             # porte les DEUX côtés (top=joueur 1, bottom=joueur 2) car le siège est aléatoire.
             model_positions: Optional[List[Optional[Dict[str, Tuple[int, int, int]]]]] = None
-            positions_declared = False
+            # Même liste que ``model_positions``, mais renseignée UNIQUEMENT quand TOUTES les
+            # figurines portent leurs deux côtés : c'est la seule forme consommée par le placement
+            # ci-dessous (plus aucune entrée None à retester).
+            declared_model_positions: Optional[List[Dict[str, Tuple[int, int, int]]]] = None
             if has_models_per_unit:
                 models_per_unit = comp_entry["models_per_unit"]
                 if (
@@ -1964,12 +1967,13 @@ class GameStateManager:
                         f"Roster {roster_path} composition[{idx}].models mixes positioned and "
                         f"unpositioned figurines — declare top/bottom on ALL figurines or NONE"
                     )
-                positions_declared = bool(pos_flags) and all(pos_flags)
+                if pos_flags and all(pos_flags):
+                    declared_model_positions = [p for p in model_positions if p is not None]
 
             if model_specs is not None and deployment_type != "active":
                 # Hors 'active', une escouade multi-figurines DOIT porter des positions par figurine
                 # (top/bottom) — sinon _build_enhanced_unit exigerait col/row absents. Pas de fallback.
-                if not positions_declared:
+                if declared_model_positions is None:
                     raise ValueError(
                         f"Roster {roster_path} composition[{idx}] declares a multi-model squad but "
                         f"player {player} deployment type is '{deployment_type}': déclare des positions "
@@ -1983,7 +1987,7 @@ class GameStateManager:
                 # Sélection du côté selon le joueur assigné (convention : P1=top, P2=bottom).
                 side = "top" if int(player) == 1 else "bottom"
                 placed_models: List[Dict[str, Any]] = []
-                for base_spec, pos in zip(model_specs, model_positions or []):
+                for base_spec, pos in zip(model_specs, declared_model_positions):
                     p_col, p_row, p_level = pos[side]
                     placed = {"unit_type": base_spec["unit_type"], "col": p_col, "row": p_row}
                     if p_level:

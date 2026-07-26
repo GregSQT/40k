@@ -3176,19 +3176,22 @@ export default function Board({
   // le cône LoS ne part QUE des figs tireuses (pas toute l'escouade). Filtre les centres par-fig sur
   // ``activeModelIdsByUnit`` ; hors replay (prop absente) → centres inchangés (comportement live). Si
   // aucun centre ne matche (id désaligné), repli sur tous les centres plutôt qu'un cône vide.
-  const restrictShooterCentersToActive = (
-    unitId: UnitId,
-    centers: Record<string, [number, number]> | undefined
-  ): Record<string, [number, number]> | undefined => {
-    const active = activeModelIdsByUnit?.[String(unitId)];
-    if (!active || active.length === 0 || !centers) return centers;
-    const set = new Set(active);
-    const out: Record<string, [number, number]> = {};
-    for (const [mid, pos] of Object.entries(centers)) {
-      if (set.has(mid)) out[mid] = pos;
-    }
-    return Object.keys(out).length > 0 ? out : centers;
-  };
+  const restrictShooterCentersToActive = useCallback(
+    (
+      unitId: UnitId,
+      centers: Record<string, [number, number]> | undefined
+    ): Record<string, [number, number]> | undefined => {
+      const active = activeModelIdsByUnit?.[String(unitId)];
+      if (!active || active.length === 0 || !centers) return centers;
+      const set = new Set(active);
+      const out: Record<string, [number, number]> = {};
+      for (const [mid, pos] of Object.entries(centers)) {
+        if (set.has(mid)) out[mid] = pos;
+      }
+      return Object.keys(out).length > 0 ? out : centers;
+    },
+    [activeModelIdsByUnit]
+  );
 
   /**
    * Phase tir : même source LoS frontend que le survol move — ``buildLosPreviewFromSource``.
@@ -3268,7 +3271,8 @@ export default function Board({
     if (!source?.unit.RNG_WEAPONS?.length) return empty;
 
     // Replay : portée de l'arme réellement tirée (par la fig tireuse) plutôt que la portée max.
-    const range = activeShootRangeByUnit?.[String(source.unit.id)] ?? getMaxRangedRange(source.unit);
+    const range =
+      activeShootRangeByUnit?.[String(source.unit.id)] ?? getMaxRangedRange(source.unit);
     if (range <= 0) return empty;
 
     try {
@@ -3322,7 +3326,7 @@ export default function Board({
     squadShootPlan?.unitId,
     gameState?.units_cache,
     losTerrainFloors,
-    activeModelIdsByUnit,
+    restrictShooterCentersToActive,
     activeShootRangeByUnit,
   ]);
 
