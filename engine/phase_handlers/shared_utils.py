@@ -5147,43 +5147,71 @@ def squad_declare_shoot(
             1 for mid in squad_models.get(target_sid, []) if mid in models_cache  # get allowed
         )
 
+    # 10.04-10.06 : type de tir applicable. Il commande QUELLES armes sont selectionnables
+    # (volet « WHILE SHOOTING ») — cf. resolve_squad_shooting_type.
+    shooting_type = resolve_squad_shooting_type(game_state, attacker_squad_id)
+    if shooting_type is None:
+        return intents
+
+    def _target_for_weapon(model: Dict[str, Any], widx: int) -> Optional[str]:
+        """04.02 : chaque ARME choisit SA cible. Les portees different d une arme a l autre,
+        donc la cible prioritaire du slot d action peut etre hors d atteinte de l une et pas
+        de l autre — d ou une resolution par arme et non par figurine."""
+        if _model_can_shoot_target_with_weapon(game_state, model, priority_target_squad_id, widx):
+            return priority_target_squad_id
+        for slot_sid in eligible_target_slots:
+            if slot_sid == priority_target_squad_id:
+                continue
+            if _model_can_shoot_target_with_weapon(game_state, model, slot_sid, widx):
+                return slot_sid
+        return None
+
     for mid in squad_models.get(attacker_squad_id, []):  # get allowed
         m = models_cache.get(mid)
         if m is None:
             continue
-        chosen_target: Optional[str] = None
-        if _model_can_shoot_target(game_state, m, priority_target_squad_id):
-            chosen_target = priority_target_squad_id
-        else:
-            for slot_sid in eligible_target_slots:
-                if slot_sid == priority_target_squad_id:
-                    continue
-                if _model_can_shoot_target(game_state, m, slot_sid):
-                    chosen_target = slot_sid
-                    break
-        if chosen_target is None:
-            continue  # fig bloquee, ne tire pas
-        sel = m.get("selectedRngWeaponIndex")
-        weapon_idx = int(sel) if sel is not None else 0
-        # F3 fix (audit) : resoudre NB UNE SEULE FOIS a la declaration, stocker
-        # dans l intent. Sinon le double-roll de_resolve_squad_shoot decouple le
-        # nombre d attaques effectif de SHOOT_LEFT pour les armes a NB variable (D3/D6).
         weapons = m.get("RNG_WEAPONS", [])  # get allowed
-        n_attacks_resolved = 0
-        if 0 <= weapon_idx < len(weapons):
-            w = weapons[weapon_idx]
-            if isinstance(w, dict) and "NB" in w:
-                try:
-                    n_attacks_resolved = int(resolve_dice_value(w["NB"], f"squad_declare_shoot_NB_{mid}"))
-                except Exception:
-                    n_attacks_resolved = int(w["NB"]) if isinstance(w["NB"], (int, float)) else 1
-        intents.append({
-            "model_id": mid,
-            "weapon_index": weapon_idx,
-            "target_unit_id": chosen_target,
-            "target_squad_size_at_declaration": _target_size(chosen_target),
-            "n_attacks_resolved": n_attacks_resolved,
-        })
+        # 04.01 « You can select ONE OR MORE ranged weapons that model has » : on declare
+        # TOUTES les armes utilisables, pas la seule `selectedRngWeaponIndex` (qui vaut 0
+        # pendant toute la partie en gym — ce champ n est ecrit que par le flux PvP manuel).
+        usable: List[Tuple[int, str]] = []
+        for widx in squad_model_shootable_weapon_indices(
+            game_state, attacker_squad_id, m, shooting_type
+        ):
+            target = _target_for_weapon(m, widx)
+            if target is not None:
+                usable.append((widx, target))
+        if not usable:
+            continue  # fig bloquee, ne tire pas
+
+        # 24.07 (SIDEARMS, PDF 04) : hors MONSTER/VEHICLE, une figurine choisit SOIT ses armes
+        # [CLOSE-QUARTERS], SOIT ses autres armes de tir — jamais les deux. Defaut retenu : la
+        # famille qui place le PLUS d armes sur une cible ; a egalite, les armes principales
+        # (non-[CLOSE-QUARTERS]), le pistolet etant une arme de secours. Ce defaut n est PAS
+        # l optimum en toute circonstance (cf. [HAZARDOUS] : chaque arme declaree = un jet de
+        # risque) — c est precisement pourquoi ce choix est un candidat P3, mesurable une fois
+        # ce defaut correct (V11_entity_encoder_pointer.md §5.3).
+        if not _model_is_monster_or_vehicle(m):
+            from engine.phase_handlers.shooting_handlers import _weapon_has_close_quarters_rule
+
+            cq = [(i, t) for i, t in usable if _weapon_has_close_quarters_rule(weapons[i])]
+            other = [(i, t) for i, t in usable if (i, t) not in cq]
+            if cq and other:
+                usable = cq if len(cq) > len(other) else other
+
+        for widx, target in usable:
+            # F3 fix (audit) : resoudre NB UNE SEULE FOIS a la declaration, stocke dans l intent.
+            # Sinon le double-roll de _resolve_squad_shoot decouple le nombre d attaques effectif
+            # pour les armes a NB variable (D3/D6).
+            intents.append({
+                "model_id": mid,
+                "weapon_index": widx,
+                "target_unit_id": target,
+                "target_squad_size_at_declaration": _target_size(target),
+                "n_attacks_resolved": _resolve_intent_nb(
+                    weapons, widx, f"squad_declare_shoot_NB_{mid}_{widx}"
+                ),
+            })
     return intents
 
 
@@ -6813,10 +6841,12 @@ def unit_can_reroll_charge(game_state: Dict[str, Any], unit_id: str) -> bool:
     """L unite porte-t-elle `reroll_charge` (config/unit_rules.json) ?
 
     « When this unit makes a charge, it can reroll the charge roll. » Regle d UNITE (pas
-    d arme), portee par les leaders Orks (Unstoppable Valour). Elle s applique a l unite
-    ATTACHEE entiere (19.04 : « Abilities in attached units » — la regle du leader vaut pour
-    toute l unite) : `_unit_has_rule_effect` lit les UNIT_RULES de l escouade, qui incluent
-    celles injectees par le fold du character.
+    d arme), portee par les leaders Orks (Unstoppable Valour) et par 5 characters SM.
+
+    ⚠️ 19.04 NON IMPLEMENTE (audit 2026-07-26, cf. V11_agent_rework.md §9.2.8) : sur une unite
+    ATTACHEE, la regle du leader n est PAS vue ici. `_unit_has_rule_effect` lit les UNIT_RULES
+    de l ESCOUADE, et le fold (`_fold_attached_characters`) pose celles du character sur
+    `models[i]`, jamais sur l escouade — un Captain attache perd donc son reroll_charge.
     """
     unit = get_unit_by_id(game_state, str(unit_id))
     if unit is None:
@@ -8338,7 +8368,8 @@ def _extra_attacks_weapon_indices(attacker: Dict[str, Any]) -> List[int]:
 
 
 def _select_fight_weapon_indices_for_fig(
-    attacker: Dict[str, Any], target_t: int, target_sv: int, target_invul: int
+    attacker: Dict[str, Any], target_t: int, target_sv: int, target_invul: int,
+    target_unit: Optional[Dict[str, Any]] = None,
 ) -> List[int]:
     """Armes de melee SELECTIONNEES par une figurine (Select Weapons step, 04.01).
 
@@ -8359,7 +8390,8 @@ def _select_fight_weapon_indices_for_fig(
     # « one of that model's OTHER melee weapons » : le choix principal exclut les armes
     # EXTRA ATTACKS (elles sont deja toutes selectionnees).
     main = _auto_select_cc_weapon_for_fig(
-        attacker, target_t, target_sv, target_invul, excluded_indices=frozenset(extra),
+        attacker, target_t, target_sv, target_invul, target_unit,
+        excluded_indices=frozenset(extra),
     )
     # « if possible » : une figurine qui n a QUE des armes EXTRA ATTACKS n en ajoute pas d autre.
     return ([main] if main is not None else []) + extra
@@ -8367,13 +8399,27 @@ def _select_fight_weapon_indices_for_fig(
 
 def _auto_select_cc_weapon_for_fig(
     attacker: Dict[str, Any], target_t: int, target_sv: int, target_invul: int,
+    target_unit: Optional[Dict[str, Any]] = None,
     excluded_indices: frozenset = frozenset(),
 ) -> Optional[int]:
-    """Choisit l index de l arme CC maximisant l expected damage P(hit)*P(wound)*P(failed_save)*D.
+    """Choisit l arme de melee maximisant l esperance de degats, REGLES D ARME COMPRISES.
 
-    `excluded_indices` : armes hors du choix (cf. [EXTRA ATTACKS] 24.11, deja selectionnees).
-    Tie-break : index d arme le plus bas. Retourne None si aucune arme selectionnable.
+    ⚠️ Cette heuristique avait ete rendue FAUSSE par P1 (2026-07-26) : elle notait les armes sur
+    leurs seules caracteristiques brutes, donc ignorait [ANTI-X], [DEVASTATING WOUNDS],
+    [SUSTAINED HITS], [LETHAL HITS] et [TWIN-LINKED] — toutes vives dans le moteur. Une arme
+    [ANTI-INFANTRY 1+] n etait jamais preferee contre de l infanterie. Elle passe desormais par
+    `attack_sequence.expected_damage_per_attack`, c est-a-dire par le MEME modele que la boucle
+    de resolution : une seule definition de l esperance de degats, aucune divergence possible.
+
+    `target_unit` fournit les KEYWORDS de la cible, sans lesquels [ANTI-X] est ininterpretable
+    (24.03, union 19.03). `excluded_indices` : armes hors du choix (cf. [EXTRA ATTACKS] 24.11,
+    deja selectionnees). Tie-break : index d arme le plus bas. None si aucune arme.
     """
+    from engine.phase_handlers.attack_sequence import (
+        build_weapon_attack_profile,
+        expected_damage_per_attack,
+    )
+
     weapons = attacker.get("CC_WEAPONS", [])  # get allowed
     if not weapons:
         return None
@@ -8385,21 +8431,18 @@ def _auto_select_cc_weapon_for_fig(
         ws = int(w.get("ATK", w.get("WS", 4)))  # WS via ATK convention
         s = int(w.get("STR", w.get("S", 4)))
         ap = int(w.get("AP", 0))  # get allowed
-        dmg_raw = w.get("DMG", 1)
-        try:
-            dmg = float(expected_dice_value(dmg_raw, f"auto_select_cc_dmg"))
-        except Exception:
-            dmg = float(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1.0
-        # P(hit) : roll >= ws, et 1 always fail
-        p_hit = max(0.0, (7 - ws) / 6.0) if ws <= 6 else 0.0
-        wth = wound_threshold(s, target_t)
-        p_wound = max(0.0, (7 - wth) / 6.0)
-        save_th = save_threshold(target_sv, target_invul, ap)
-        if save_th >= 7:
-            p_failed_save = 1.0
-        else:
-            p_failed_save = max(0.0, (save_th - 1) / 6.0)
-        score = p_hit * p_wound * p_failed_save * dmg
+        # Aucun repli silencieux : une valeur de DMG non resoluble est une donnee d arme
+        # invalide, elle doit lever (l ancien try/except la remplacait par 1.0 en silence).
+        dmg = float(expected_dice_value(require_key(w, "DMG"), "auto_select_cc_dmg"))
+        n_attacks = float(expected_dice_value(require_key(w, "NB"), "auto_select_cc_nb"))
+        profile = build_weapon_attack_profile(w, target_unit)
+        score = n_attacks * expected_damage_per_attack(
+            profile,
+            hit_target=ws,
+            wound_target=wound_threshold(s, target_t),
+            save_threshold_value=save_threshold(target_sv, target_invul, ap),
+            damage=dmg,
+        )
         if score > best_score:
             best_score = score
             best_idx = idx
@@ -8447,7 +8490,9 @@ def squad_declare_fight(
             continue
         # Select Weapons step (04.01) : arme principale + TOUTES les armes [EXTRA ATTACKS]
         # (24.11). Un intent par arme selectionnee -> une figurine peut produire 2 intents.
-        selected_indices = _select_fight_weapon_indices_for_fig(m, target_t, target_sv, target_invul)
+        selected_indices = _select_fight_weapon_indices_for_fig(
+            m, target_t, target_sv, target_invul, get_unit_by_id(game_state, str(target_squad_id))
+        )
         if not selected_indices:
             continue
         m["selectedCcWeaponIndex"] = selected_indices[0]

@@ -4758,8 +4758,9 @@ implémenter** (tranches ultérieures).
 | **PRECISION (24.28)** | ✅ **FAIT dans le vif** (2026-07-26) | Override à l'ouverture de l'Allocation Order step : `_apply_precision_allocation_override` place le groupe CHARACTER visible en tête de l'ordre déclaré par le défenseur (l'ordre du défenseur est conservé pour le reste). Visibilité : mêlée = acquise au contact ; tir = `_attacker_model_can_reach_squad` restreint aux figurines CHARACTER (nouveau paramètre `only_target_mids`). Arbitrage du « can select » : **toujours**, sur le CHARACTER le plus cher. Ce n'est PAS un choix laissé à l'agent aujourd'hui — le mécanisme générique de décision agent (**P2**, `pending_agent_decision` + `CHOICE_0..K`) n'existe pas encore et l'action_space n'est pas étendu ; sans P2, la seule alternative serait une action ad hoc, exactement ce que §9.3 interdit. **Inscrite comme candidate à une tranche P3.** L'automatisme actuel est le choix strictement favorable à l'attaquant (viser le CHARACTER est l'unique effet de la règle), donc le regret attendu est faible — c'est le critère d'arbitrage de §9.0bis (mesurer le regret avant de brancher). | `test_precision.py` (**4**, dont la **contre-épreuve 05.03** : sans PRECISION le character est intouchable). |
 | **PSYCHIC (24.29)** | ✅ **FAIT dans le vif** (2026-07-26) | « ignore any or all modifiers to BS/WS and to the hit roll » : le seul modificateur défavorable du moteur est le malus de couvert 13.08 → ignoré, **mais la cible garde le bénéfice du couvert** (contrairement à IGNORES COVER 24.18 qui le supprime). Le bonus HEAVY est conservé (« any or all » = choix du joueur). | `test_psychic_shoot.py` (**4**, dont la distinction explicite PSYCHIC vs IGNORES COVER). |
 | **HEAVY (24.16) — mise en conformité PDF** | ✅ **RENFORCÉ** (2026-07-26) | La clause **« that unit is unengaged »**, absente de la config et donc de la 1ʳᵉ implémentation, est branchée (`_heavy_unit_is_engaged`, même prédicat que le gate de tir 10.06). Clause **« pas posée ce tour » : CÂBLÉE** sur le nouveau champ moteur `deployed_on_turn` (posé à la création de l'unité et au commit de déploiement — `_apply_deploy_plan` ; 0 = pré-bataille, N = arrivée de réserve au tour N, `None` = hors board). Aucune arrivée en cours de bataille n'existe encore (réserves 20 non modélisées) mais la clause n'aura pas à être retouchée le jour où elles arrivent. **C'est la source unique partagée avec la feature d'observation déploiement/réserve** (`V11_audit_observation.md` §8). Clause « aucune figurine > 3" » : ✅ **EXACTE depuis le 2026-07-26** — `moved_distance_by_model` (distance de CHEMIN accumulée par `commit_move`, hex géodésique en gym ET euclidienne any-angle en PvP) remplace la borne conservatrice « aucune figurine n'a bougé ». Détail et périmètre → **§9.2.6**. | `test_heavy_shoot.py` (**13** : bonus si stationnaire+unengaged ; pas de bonus si engagé / **posé ce tour** / **une figurine a parcouru > 3"** ; bonus CONSERVÉ jusqu'à 3" inclus (comparaison stricte) ; bonus conservé si posé au tour précédent ; rien sans HEAVY). |
-| **reroll_charge** (`unit_rules.json`) | ✅ **IMPLÉMENTÉ** (2026-07-26) | Règle d'unité déclarée par 4 unités Orks et **totalement absente du code** (grep zéro). `roll_charge_distance` + `unit_can_reroll_charge` mutualisés ; relance sur le seul critère exact : le jet n'atteint **aucune** cible/destination légale (gym `squad_charge` ; PvP roll-first `charge_target_selection`). Un dé ne se relance qu'une fois. Débloque **19.04** (la règle du leader vaut pour l'unité attachée : `_unit_has_rule_effect` lit les UNIT_RULES de l'escouade). | `test_reroll_charge.py` (**5**, dont l'ancrage donnée « des unités Orks déclarent bien la règle »). |
+| **reroll_charge** (`unit_rules.json`) | ✅ **IMPLÉMENTÉ** (2026-07-26) | Règle d'unité déclarée par 4 unités Orks et **totalement absente du code** (grep zéro). `roll_charge_distance` + `unit_can_reroll_charge` mutualisés ; relance sur le seul critère exact : le jet n'atteint **aucune** cible/destination légale (gym `squad_charge` ; PvP roll-first `charge_target_selection`). Un dé ne se relance qu'une fois. ⚠️ **Correction du 2026-07-26** : cette ligne affirmait que la tranche « débloque 19.04 » parce que `_unit_has_rule_effect` lit les `UNIT_RULES` de l'escouade — **faux**, le fold ne les y écrit jamais (cf. ligne 19.04 ci-dessous). Sur une unité attachée, le `reroll_charge` d'un leader n'est **pas** appliqué : il est perdu. | `test_reroll_charge.py` (**5**, dont l'ancrage donnée « des unités Orks déclarent bien la règle »). ⚠️ Les 4 premiers tests fabriquent un `game_state` à la main et ne passent jamais par une unité attachée réelle — c'est ce qui a laissé passer le trou 19.04. |
 | **19.03 — union des keywords** | ✅ **FAIT** (2026-07-26) | `_build_enhanced_unit` : l'unité porte l'UNION des keywords de ses composants (prérequis d'ANTI-X). Keywords **propres** conservés par figurine pour les règles « each model » (06.03). `hideable` recalculé sur l'union. | `test_attached_units_keywords_19_03.py` (**2**, e2e via le vrai chargement de scénario). |
+| **19.04 — abilities in attached units** | ❌ **NON IMPLÉMENTÉ — bug vif** (audit du 2026-07-26) | Voir §9.2.8. Résumé : `_fold_attached_characters` replie le character en **figurine** ; ses `UNIT_RULES` vont sur `models[i]` et jamais sur l'escouade, alors que 100 % des consommateurs lisent l'escouade. Effet mesuré (Intercessor + `CaptainPowerWeaponBolter`) : `UNIT_RULES` escouade `[]`, `unit_can_reroll_charge` = `False` — la règle du leader **disparaît du jeu** dès qu'il est attaché. Concerne le scénario PvP de référence ([scenario_pvp.json:8-9](../../config/board/44x60x5/scenario/scenario_pvp.json#L8-L9)) et 9 characters des rosters SM/Ork. | Aucun. Le test `test_reroll_charge.py` ne passe jamais par une unité attachée. |
 | ~~~10 règles observées non appliquées~~ | ✅ **SOLDÉ** — il n'en reste **aucune** | Les 9 règles listées au 2026-07-24 sont traitées : TORRENT, TWIN_LINKED, SUSTAINED_HITS, LETHAL_HITS, MELTA, ANTI_* ✅ ; EXTRA_ATTACKS ✅ ; PSYCHIC ✅. **Seule INDIRECT_FIRE (24.19) reste** — ce n'est pas une règle de résolution mais un TYPE DE TIR entier (10.07 : tirer sans ligne de vue, la cible bénéficiant du couvert), donc un chantier à part et non un portage. **Laissée ouverte volontairement** ; 2 armes concernées, aucune dans les rosters de training. ⚠️ Dépendance déjà notée : quand elle sera faite, son couvert devra passer par un point qu'[IGNORES COVER] 24.18 annule aussi. | — |
 | Suppression du code mort (fin P1) | ⏳ | — | — |
 
@@ -5007,6 +5008,78 @@ Corrigé en revanche cette nuit : le pipeline mono-figurine legacy **crashait** 
 toute unité portant CLEAVE ou PRECISION — donc sur Warboss, Bigboss et PainBoy, tous présents
 dans les rosters de training. Les deux canaux sont ajoutés (`obs_size` legacy 357 → **359**) ;
 le pipeline squad V11 (199) n'est pas concerné.
+
+### 9.2.8 🔴 AUDIT RÈGLE 19 (Attached units) — 19.01/19.02/19.03 conformes, **19.04 absent** (2026-07-26)
+
+Audit refait de bout en bout après relecture des PDFs **19**, **24** (p5-p8 : LEADER 24.22,
+LONE OPERATIVE 24.24, PRECISION 24.28, SUPPORT 24.34), **25** (p1-p3 : starting strength,
+destroyed, mixed keywords, revived), **05** p5 et **08** (battle-shock 08.03).
+
+**Conforme (vérifié clause par clause, cf. la table règle 19 d'[AI_TURN.md](../AI_TURN.md)) :**
+19.01 (les 4 gardes du fold + les clauses structurelles), 19.02 (T bodyguard + repli
+leader-only + trigger de destruction), 19.03 (union des keywords / keywords propres par
+figurine). Clauses connexes sans objet et documentées : Lone Operative (aucune donnée),
+Revived (aucune mécanique), Starting strength (correct par construction du fold).
+
+**Le trou : 19.04 « Abilities in attached units ».**
+
+Ce que dit le PDF : les règles qui affectent une figurine précise ne valent que pour elle ;
+**toutes les autres s'appliquent à chaque figurine de l'unité attachée**, jusqu'à ce que la
+source soit détruite — dernière figurine du leader/support, dernière figurine du bodyguard, ou
+la figurine porteuse. Et si cette dernière figurine tombe sous une attaque, la règle **survit
+jusqu'à ce que l'unité attaquante ait résolu toutes ses attaques**.
+
+Ce que fait le code : [`_fold_attached_characters`](../../engine/game_state.py#L728) replie le
+character en figurine ; ses `UNIT_RULES` sont copiées sur `models[i]`
+([game_state.py:1019](../../engine/game_state.py#L1019)) et l'escouade garde les seules
+`UNIT_RULES` de son propre `unit_type` ([game_state.py:918](../../engine/game_state.py#L918)).
+Or **tous** les consommateurs interrogent l'escouade : `_unit_has_rule_effect`
+([shared_utils.py:1904](../../engine/phase_handlers/shared_utils.py#L1904)), ses trois
+ré-exports (`shooting_handlers:304`, `charge_handlers:52`, `fight_handlers:86`), les lectures
+directes de `w40k_core` (2341 / 2426 / 2583) et l'observation IA
+([observation_builder.py:2386](../../engine/observation_builder.py#L2386)). Aucun site ne
+regarde `models[i]["UNIT_RULES"]`.
+
+Reproduction (Intercessor 101 + `CaptainPowerWeaponBolter` 102 attaché, chargement réel) :
+
+```
+UNIT_RULES escouade      : []
+UNIT_RULES par figurine  : [[], ['reroll_charge', 'leader']]
+unit_can_reroll_charge(101) = False        # le Captain porte bien reroll_charge au registry
+```
+
+Ce n'est donc pas « l'unité ne profite pas du leader » mais « **le leader perd sa règle** » :
+autonome il relance sa charge, attaché il ne la relance plus. Le scénario PvP de référence
+attache un `CaptainTerminatorRelicWeaponBolter` et un `LibrarianTerminator`
+([scenario_pvp.json:8-9](../../config/board/44x60x5/scenario/scenario_pvp.json#L8-L9)) : le bug
+est vif en PvP **et** en gym.
+
+**Trois manques distincts, à ne pas confondre :**
+
+| # | Manque | État | Impact données actuelles |
+|---|---|---|---|
+| a | **Montant** — la règle du leader/support ne remonte pas à l'unité | ❌ | `reroll_charge` de 9 characters SM/Ork ; tout `unit_rules.json` futur porté par un character |
+| b | **Descendant** — la règle du bodyguard reste active après la mort de sa dernière figurine bodyguard | ❌ | un character survivant seul continue de bénéficier de `charge_impact`, `cunning_hunters`, `closest_target_penetration`… du squad mort |
+| c | **Fenêtre 19.04** — la règle survit « until the attacking unit has resolved all of its attacks » | ❌ | conséquence de (a)/(b) ; s'aligne sur la fenêtre déjà utilisée par HAZARDOUS/`_finalize_manual_allocation` |
+
+**Pourquoi une union statique au chargement serait fausse** : 19.04 est dynamique. Fusionner les
+`UNIT_RULES` dans `_build_enhanced_unit` réglerait (a) mais **installerait** (b) — la règle
+resterait après la mort de sa source. La résolution doit se faire sur les figurines **vivantes**
+(`models_cache` + `squad_models`), au point de lecture.
+
+**Deux pièges de conception :**
+1. Les rôles `leader` / `support` / `sergeant` / `special_weapon` sont des **marqueurs
+   par-figurine** consommés par `ROLE_TIER` / `_is_character_role` (ordre d'allocation 05.03,
+   T bodyguard 19.02). Les remonter à l'escouade casserait 19.02. Ils doivent être exclus.
+2. Le PDF exclut aussi les règles « affecting a single specified model » (enhancement/wargear).
+   `config/unit_rules.json` ne porte aucun marqueur de portée : tout ce qui y figure est
+   unit-wide. Écart config/PDF **sans conséquence aujourd'hui** (aucun enhancement modélisé) —
+   à trancher le jour où une règle par-figurine sera déclarée. Précédent §9.2.4 : on suit la config.
+
+**Tranches proposées** (non exécutées, périmètre à arbitrer) : **19.04-a** résolution unit-wide
+sur figurines vivantes, rôles exclus, avec test e2e sur chargement réel de scénario ;
+**19.04-b** extinction à la mort de la dernière figurine source (les deux sens) ;
+**19.04-c** fenêtre « jusqu'à la fin des attaques de l'attaquant ».
 
 ### 9.3 P2 — Mécanisme générique « décision agent »
 

@@ -23,7 +23,7 @@ les numéros de ligne sont indicatifs. Re-localiser par grep avant d'éditer.
 |---|---|---|
 | **T-A** | Renommage `PISTOL` → `CLOSE_QUARTERS` | ✅ **FAIT (2026-07-26)** |
 | **T-B** | Tir d'assaut 10.05 + tir à bout portant 10.06 dans le gate squad/gym | ✅ **FAIT (2026-07-26)** |
-| **T-C** | Sélection d'armes : défaut correct (04.01 / 04.02) + heuristique mêlée consciente des règles | ⏳ à faire |
+| **T-C** | Sélection d'armes : défaut correct (04.01 / 04.02) + heuristique mêlée consciente des règles | ✅ **FAIT (2026-07-26)** |
 | **T-D** | Observation en **tenseurs d'entités** + **encodeurs partagés** | ⏳ à faire |
 | **T-E** | **Tête pointeur** + slots ennemis 5 → 20 (espace d'action) | ⏳ à faire |
 | **T-F** | K armes = 10 des deux côtés + bloc « types de figurines » ennemis | ⏳ à faire |
@@ -499,3 +499,36 @@ implémentée à ce stade.
 - Effet de bord traité : la fixture de `test_hazardous.py` devait porter `config.game_rules`
   (la résolution d'un type de tir exige la zone d'engagement).
 - PvP : 27 PASS / 0 FAIL. `pyright` vert.
+
+### 2026-07-26 — T-C livrée : le défaut de sélection d'armes respecte 04.01 et 04.02
+
+- **04.01** — `squad_declare_shoot` déclare désormais **toutes les armes utilisables** de chaque
+  figurine (un intent par arme), au lieu de la seule `selectedRngWeaponIndex` — champ écrit
+  uniquement par le flux PvP manuel, donc figé à 0 pendant toute la partie en gym.
+- **04.02** — chaque arme choisit **sa propre cible** : la cible prioritaire du slot d'action si
+  cette arme l'atteint, sinon le premier slot éligible **pour cette arme**. Les portées diffèrent
+  d'une arme à l'autre, la cible ne pouvait donc pas être décidée au niveau de la figurine.
+- **24.07 (SIDEARMS)** — hors MONSTER/VEHICLE, une figurine ne mélange pas ses armes
+  [CLOSE-QUARTERS] et ses autres armes. Défaut retenu : la famille qui place le plus d'armes sur
+  une cible ; à égalité, les armes principales. ⚠️ Ce défaut n'est **pas** l'optimum en toute
+  circonstance ([HAZARDOUS] : chaque arme déclarée = un jet de risque) — c'est précisément ce qui
+  en fait un candidat P3, désormais **mesurable** (§5.3).
+- **Heuristique de mêlée** — `_auto_select_cc_weapon_for_fig` passe par la nouvelle fonction
+  `attack_sequence.expected_damage_per_attack`, **source unique** de l'espérance de dégâts,
+  placée à côté de la boucle de résolution qu'elle modélise. Elle intègre [ANTI-X],
+  [DEVASTATING WOUNDS], [SUSTAINED HITS], [LETHAL HITS] (avec l'arbitrage exact de
+  `lethal_hits_auto_wound_is_better`), [TWIN-LINKED], [TORRENT] — et compte **par faces**, comme
+  la résolution, pour qu'aucun écart ne soit possible. Les règles de POOL ([BLAST], [CLEAVE],
+  [RAPID FIRE], [EXTRA ATTACKS]) et d'ALLOCATION ([PRECISION]) en sont exclues volontairement,
+  avec la raison écrite dans la docstring. Le `try/except` de repli sur `DMG` est supprimé.
+- **Verrou** : `tests/unit/engine/test_weapon_selection_default.py` (**11**). Mutations : « une
+  seule arme » → **4 rouges** ; heuristique privée des keywords de la cible → **1 rouge**.
+- **Effet mesuré** (3 épisodes réels, déclarations instrumentées) : sur 49 déclarations de
+  figurine, **9 tirent 2 armes et 3 en tirent 3** — 24 % des figurines tiraient auparavant une
+  seule de leurs armes. Le cas « deux armes sur deux cibles » est couvert par un test
+  déterministe (il exige des portées très contrastées, rare en épisode aléatoire).
+- Effets de bord traités : fixtures de `test_extra_attacks_fight.py` (keywords de la cible, exigés
+  par [ANTI-X]) et de `test_hazardous.py` (zone d'engagement, exigée par la résolution d'un type
+  de tir).
+- PvP : 27 PASS / 0 FAIL. `pyright` vert.
+

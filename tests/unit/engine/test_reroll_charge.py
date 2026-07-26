@@ -8,9 +8,12 @@ Décision du « can » (documentée) : on relance sur le SEUL critère exact et 
 n'atteint aucune destination légale au contact de la cible. Un dé ne se relance qu'une fois
 (PDF 01 Core, Re-rolls).
 
-Lien 19.04 (Abilities in attached units) : la règle du leader vaut pour toute l'unité attachée.
-`unit_can_reroll_charge` lit les UNIT_RULES de l'ESCOUADE, donc l'unité entière en bénéficie dès
-que la règle y figure.
+⚠️ Lien 19.04 (Abilities in attached units) — CE QUI N'EST PAS TESTÉ ICI. `unit_can_reroll_charge`
+lit les UNIT_RULES de l'ESCOUADE ; le fold d'un character (`_fold_attached_characters`) pose les
+siennes sur `models[i]` et JAMAIS sur l'escouade, donc un leader attaché perd son reroll_charge.
+Les tests ci-dessous fabriquent un `game_state` à la main et ne passent par aucune unité attachée
+réelle : c'est exactement ce qui a laissé passer le trou. Audit et plan de correction :
+V11_agent_rework.md §9.2.8.
 """
 import pytest
 

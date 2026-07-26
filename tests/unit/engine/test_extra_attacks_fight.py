@@ -73,6 +73,10 @@ def test_declaration_produit_un_intent_par_arme(monkeypatch):
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "pending_squad_fight_intents": {"1": []},
         "pending_squad_shoot_intents": {},
+        # Keywords de la cible : exiges par [ANTI-X] 24.03, que l heuristique de choix d arme
+        # consulte desormais (elle passe par le socle de resolution).
+        "unit_by_id": {"1": {"id": "1", "UNIT_KEYWORDS": []},
+                       "2": {"id": "2", "UNIT_KEYWORDS": [{"keywordId": "INFANTRY"}]}},
     }
 
     intents = squad_declare_fight(gs, "1", "2")
@@ -92,6 +96,10 @@ def test_declaration_sans_extra_reste_a_un_intent(monkeypatch):
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "pending_squad_fight_intents": {"1": []},
         "pending_squad_shoot_intents": {},
+        # Keywords de la cible : exiges par [ANTI-X] 24.03, que l heuristique de choix d arme
+        # consulte desormais (elle passe par le socle de resolution).
+        "unit_by_id": {"1": {"id": "1", "UNIT_KEYWORDS": []},
+                       "2": {"id": "2", "UNIT_KEYWORDS": [{"keywordId": "INFANTRY"}]}},
     }
 
     intents = squad_declare_fight(gs, "1", "2")

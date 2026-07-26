@@ -168,6 +168,77 @@ def lethal_hits_auto_wound_is_better(
     return ev_auto >= ev_roll
 
 
+def expected_damage_per_attack(
+    profile: WeaponAttackProfile,
+    *,
+    hit_target: int,
+    wound_target: int,
+    save_threshold_value: int,
+    damage: float,
+) -> float:
+    """Espérance de dégâts d'UNE attaque, RÈGLES D'ARME COMPRISES.
+
+    Source unique de l'espérance de dégâts « consciente des règles ». Elle vit ici, à côté de
+    la boucle de résolution qu'elle modélise (`roll_attack_pool`) et de
+    `lethal_hits_auto_wound_is_better`, pour qu'il n'existe pas une seconde définition qui
+    dériverait — c'est la raison d'être du socle commun (§9.2.3).
+
+    Comptage par FACES, jamais de formule fermée : mêmes prédicats que la résolution (05.01 un
+    1 non modifié rate toujours ; 05.04 une sauvegarde de 1 échoue toujours), donc aucun écart
+    possible entre ce que l'heuristique croit et ce que le moteur jouera.
+
+    Règles modélisées : [TORRENT] (touche automatique, donc AUCUNE touche critique — pas de
+    hit roll), [SUSTAINED HITS X], [LETHAL HITS] (avec l'arbitrage exact de
+    `lethal_hits_auto_wound_is_better`), [TWIN-LINKED] (relance d'une blessure ratée, une seule
+    fois), [DEVASTATING WOUNDS] (blessure critique non sauvegardable), [ANTI-X Y+] (déjà porté
+    par `profile.crit_wound_on`).
+
+    NON modélisées, volontairement : les règles qui agissent sur la TAILLE DU POOL d'attaques
+    ([BLAST], [CLEAVE], [RAPID FIRE], [EXTRA ATTACKS]) — elles multiplient le nombre d'attaques,
+    pas la valeur d'une attaque, et l'appelant les applique au niveau du pool ; et celles qui
+    agissent sur l'ALLOCATION ([PRECISION]), qui ne change pas l'espérance de dégâts brute.
+    """
+    faces = range(1, 7)
+    p_fail_save = sum(
+        1 for f in faces if f == NATURAL_FAIL_ROLL or f < int(save_threshold_value)
+    ) / 6.0
+
+    p_crit_wound = sum(1 for f in faces if f >= profile.crit_wound_on) / 6.0
+    p_normal_wound = sum(
+        1 for f in faces
+        if f != NATURAL_FAIL_ROLL and f >= int(wound_target) and f < profile.crit_wound_on
+    ) / 6.0
+    ev_wound_once = (
+        p_crit_wound * (1.0 if profile.devastating else p_fail_save)
+        + p_normal_wound * p_fail_save
+    )
+    ev_wound = ev_wound_once
+    if profile.twin_linked:
+        # 24.38 : relance d'un jet de blessure raté — une seule fois (01 Core, Re-rolls).
+        ev_wound += (1.0 - p_crit_wound - p_normal_wound) * ev_wound_once
+
+    if profile.torrent:
+        # 24.37 : « does not make hit rolls » -> touche automatique, et donc aucune touche
+        # critique : [SUSTAINED HITS] et [LETHAL HITS] ne se déclenchent pas.
+        return ev_wound * float(damage)
+
+    p_crit_hit = sum(1 for f in faces if f >= profile.crit_hit_on) / 6.0
+    p_normal_hit = sum(
+        1 for f in faces
+        if f != NATURAL_FAIL_ROLL and f >= int(hit_target) and f < profile.crit_hit_on
+    ) / 6.0
+
+    ev_on_crit_hit = ev_wound
+    if profile.lethal_hits and lethal_hits_auto_wound_is_better(
+        profile, int(wound_target), int(save_threshold_value)
+    ):
+        ev_on_crit_hit = p_fail_save  # blessure automatique : plus de jet, donc plus de critique
+    # [SUSTAINED HITS X] : X touches SUPPLÉMENTAIRES (normales) par touche critique.
+    ev_on_crit_hit += profile.sustained_hits * ev_wound
+
+    return (p_crit_hit * ev_on_crit_hit + p_normal_hit * ev_wound) * float(damage)
+
+
 def roll_attack_pool(
     *,
     n_attacks: int,
