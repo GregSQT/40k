@@ -20,6 +20,7 @@ from engine.hex_utils import (
     pathfinding_distance,
     build_wall_set,
     compute_occupied_hexes,
+    _compute_occupied_hexes_raw,
     build_occupation_map,
     validate_placement,
     dilate_hex_set,
@@ -608,6 +609,40 @@ class TestExpandWallGroupToHexList:
             expand_wall_group_to_hex_list({"hexes": [], "segments": []})
 
 
+class TestComputeOccupiedHexesMatchesRawGeometry:
+    """`compute_occupied_hexes` traduit des offsets mémoïsés au lieu de rebalayer la géométrie.
+
+    Ce raccourci repose sur une propriété : l'empreinte est une TRANSLATION pure de sa forme de
+    référence dès lors que la PARITÉ de colonne est conservée. Si elle était fausse, le socle
+    serait déformé à certaines positions et le masque offrirait des cellules inexécutables —
+    exactement la classe de bug « masque ⊆ exécutable ». On la mesure au lieu de la raisonner :
+    équivalence stricte avec le balayage brut, aux deux parités et à des lignes différentes.
+    """
+
+    @pytest.mark.parametrize(
+        "shape,size,orient",
+        [
+            ("round", 1, 0),
+            ("round", 13, 0),
+            ("square", 10, 0),
+            ("square", 10, 3),
+            ("oval", [20, 10], 0),
+            ("oval", [20, 10], 1),
+            ("oval", [105, 70], 3),
+        ],
+    )
+    @pytest.mark.parametrize("center", [(0, 0), (10, 10), (11, 10), (50, 7), (43, 59)])
+    def test_equals_raw_scan_at_both_parities(self, shape, size, orient, center):
+        col, row = center
+        assert compute_occupied_hexes(col, row, shape, size, orient) == (
+            _compute_occupied_hexes_raw(col, row, shape, size, orient)
+        )
+
+    def test_invalid_shape_still_raises(self):
+        with pytest.raises(ValueError, match="Unknown base_shape"):
+            compute_occupied_hexes(10, 10, "triangle", 3)
+
+
 class TestPrecomputeFootprintOffsetsMemoization:
     """L1 — la mémoïsation de precompute_footprint_offsets ne change PAS la sortie.
 
@@ -618,10 +653,14 @@ class TestPrecomputeFootprintOffsetsMemoization:
 
     @staticmethod
     def _oracle(base_shape, base_size, orientation):
-        """Reconstruction indépendante via compute_occupied_hexes (sémantique d'origine)."""
+        """Reconstruction indépendante via le balayage géométrique brut (sémantique d'origine).
+
+        L'oracle DOIT rester ``_compute_occupied_hexes_raw`` : ``compute_occupied_hexes`` dérive
+        désormais de ces mêmes offsets, l'utiliser ici rendrait le test tautologique.
+        """
         ref_row = 100
-        fp_even = compute_occupied_hexes(0, ref_row, base_shape, base_size, orientation)
-        fp_odd = compute_occupied_hexes(1, ref_row, base_shape, base_size, orientation)
+        fp_even = _compute_occupied_hexes_raw(0, ref_row, base_shape, base_size, orientation)
+        fp_odd = _compute_occupied_hexes_raw(1, ref_row, base_shape, base_size, orientation)
         off_even = tuple((c - 0, r - ref_row) for c, r in fp_even)
         off_odd = tuple((c - 1, r - ref_row) for c, r in fp_odd)
         return off_even, off_odd

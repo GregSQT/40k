@@ -39,7 +39,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | ~~**§0.23**~~ | Logger per-figurine `[MODELS:]` + `PNone` | ✅ **CLOS (2026-07-22)** | — | Détail → **§0hist §0.23**. |
 | ~~**§0.25**~~ | Bug moteur : budget move per-fig en ligne droite | ✅ **CORRIGÉ (2026-07-22)** — géodésique | — | Détail → **§0hist §0.25**. Conséquence perf → **§0.27**. |
 | ~~**§0.26**~~ | Régression cache masque (clé `_unit_move_version` contournée) | ✅ **CORRIGÉ (2026-07-22)** — clé fingerprint | — | Détail → **§0hist §0.26**. |
-| **§0.29** | Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum | 🟢 **MÉCANIQUE LIVRÉE + VALIDÉE IN-ENGINE (2026-07-22)** ; reste USAGE+MESURE (cf. « Suite » §0.29 ; win-rate rejoint §0.14, bloqué par §0.27) | 4 | Scénario `scenario_fixed_brawl_sm_orks.json` (terrain **`terrain-mc1.json`**, 36 figurines, compositions réelles des rosters training SM+Orks) où **le champ `deployment_type` bascule** placement manuel ↔ déploiement (`"fixed"` = positions `col/row`, aucun déploiement ; `"active"` = phase de déploiement). Positions par défaut dans les bandes **dégagées de mc1** (rows 90-105 / 195-210, éditables). **+ scheduler `deployment_mode_schedule`** (opt-in) : proportion `active` **croissante par épisode** au fil du training (rampe linéaire, miroir de `deployment_random_mix`, orthogonal à lui). **+ emplacements `top`/`bottom` par figurine DANS les 4 rosters** (P1=top, P2=bottom ; siège+rotation aléatoires conservés) → le mode strict marche sur le vrai chemin roster. 3 verrous verts sur le VRAI moteur : `fixed_brawl_deploy_modes_test.py` (bascule units[]) + `deployment_mode_schedule_test.py` (bornes 0/1 + rampe) + `roster_fixed_positions_test.py` (rosters top/bottom, rotation réelle). Détail → **§0.29** ci-dessous. |
+| **§0.29** | Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum | 🟢 **MÉCANIQUE LIVRÉE + VALIDÉE IN-ENGINE (2026-07-22)** ; reste USAGE+MESURE (cf. « Suite » §0.29 ; win-rate rejoint §0.14, bloqué par §0.27) | 4 | Scénario `scenario_fixed_brawl_sm_orks.json` (terrain **`terrain-mc1.json`**, 36 figurines, compositions réelles des rosters training SM+Orks) où **le champ `deployment_type` bascule** placement manuel ↔ déploiement (`"fixed"` = positions `col/row`, aucun déploiement ; `"active"` = phase de déploiement). Positions par défaut dans les bandes **dégagées de mc1** (rows 90-105 / 195-210, éditables). **+ scheduler `deployment_mode_schedule`** (opt-in) : proportion `active` **croissante par épisode** au fil du training (rampe linéaire, miroir de `deployment_random_mix`, orthogonal à lui). **+ emplacements `top`/`bottom` par figurine DANS les 4 rosters** (P1=top, P2=bottom ; siège+rotation aléatoires conservés) → le mode strict marche sur le vrai chemin roster. 3 verrous verts sur le VRAI moteur : `test_fixed_brawl_deploy_modes.py` (bascule units[]) + `test_deployment_mode_schedule.py` (bornes 0/1 + rampe) + `test_roster_fixed_positions.py` (rosters top/bottom, rotation réelle). Détail → **§0.29** ci-dessous. |
 | ~~**§0.22**~~ | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **CLOS le 2026-07-21 — décision (B) STOP à L1+L_bbox** | — | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) livrés et commités** (`ff2293e0`, `6f268d38`) — gain ovale **1,49×**, round10 1,78×, pool strictement identique ; A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. **Reliquat NON poursuivi** (ratio gain/risque mauvais, mesuré) : BFS wavefront réfuté (plus lent à move 12), L2b runs NumPy réfuté (1,1× net + complexité), numba écarté (risque segfault sur run 36 h). ⚠️ **MAJ 2026-07-22 : ce coût perf est désormais INCONTOURNABLE** — le fix de conformité move §0.25 REQUIERT une érosion géodésique par-figurine, exactement le coût que §0.22 combattait. Il refait surface en §0.27. Détail complet → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§10, §11) ; leçon de méthode → §0bis. |
 
 **Restent ouverts : §0.27 (garde-fou éval, fix approuvé) puis §0.14 (win-rate). §0.28 (conformité tir obscuring) est RÉFUTÉ — aucun bug (mesuré in-engine).**
@@ -68,7 +68,7 @@ fil du training** (curriculum). Matchup **Space Marines vs Orks**.
   P1 SM = Intercessor (Bolt Rifle) + VanguardVeteranSquadJumpPack (jump pack) ;
   P2 Orks = 2× Boyz. Chaque figurine a `col/row/unit_type` propre (sergents, plasma, personnages
   fidèles au roster). `terrain_ref` = **`terrain-mc1.json`** (terrain réel du training).
-- `scripts/fixed_brawl_deploy_modes_test.py` — **verrou** (bascule fixed↔active).
+- `tests/unit/engine/test_fixed_brawl_deploy_modes.py` — **verrou** (bascule fixed↔active).
 - *(Aucun terrain créé — un premier jet en avait introduit un, retiré à la demande de l'utilisateur.)*
 
 **Le seul levier = `deployment_type`** (tracé, pas supposé). `game_state.py::load_units_from_scenario` :
@@ -87,7 +87,7 @@ tant que les unités tombaient sur la ruine. Portées lues (datasheets) pour ré
 24″=120 subhex, shoota Boyz 18″=90 ; charge 11.02 (≤12″, non-engagé), zone d'engagement 03.04
 (2″=10 subhex hz).
 
-**Preuve in-engine (verrou, chemin gym réel).** `python3 scripts/fixed_brawl_deploy_modes_test.py` :
+**Preuve in-engine (verrou, chemin gym réel).** `python3 -m pytest tests/unit/engine/test_fixed_brawl_deploy_modes.py` :
 ```
 ✅ fixed  : phase initiale='command', 4 unités / 36 figurines placées (aucun déploiement)
 ✅ active : phase initiale='deployment', 4 unités en attente de déploiement
@@ -111,7 +111,7 @@ croissante, sur un SEUL fichier rechargé dans le mode tiré (réutilise les 2 c
    rechargement avec l'override (reward_configs reconstruits via le chemin `_reload_scenario` existant).
 3. Config `x5_new.deployment_mode_schedule` (opt-in, `enabled:false` par défaut) :
    `active_ratio_start/active_ratio_end/schedule:"linear"/freeze_after_progress`, `training_only`.
-**Preuve in-engine** — `python3 scripts/deployment_mode_schedule_test.py` : ratio 0.0→ 20/20 `fixed` ;
+**Preuve in-engine** — `python3 -m pytest tests/unit/engine/test_deployment_mode_schedule.py` : ratio 0.0→ 20/20 `fixed` ;
 ratio 1.0→ 20/20 `active` ; rampe 0→1 (60 ép.)→ part `active` croissante (1re moitié 8, 2e moitié 24),
 avec cohérence stricte mode↔phase (`fixed`→`command`, `active`→`deployment`). Le scheduler est
 **orthogonal** à `deployment_random_mix` (les deux peuvent coexister). ⚠️ `training_only:true` exige
@@ -141,7 +141,7 @@ comme le siège est aléatoire, les deux côtés sont portés. Implémentation :
   bord-à-bord 2", étalement 9") n'exige qu'**≥1 voisin** ; le générateur vise ≥2 centre-à-centre =
   borne conservatrice. **L'oracle est la fonction moteur `validate_squad_coherency`** — c'est ELLE
   que le verrou asserte à la charge (pas une réimplémentation).
-**Preuve in-engine** — `python3 scripts/roster_fixed_positions_test.py` : 8 épisodes `fixed` (rosters
+**Preuve in-engine** — `python3 -m pytest tests/unit/engine/test_roster_fixed_positions.py` : 8 épisodes `fixed` (rosters
 + siège tirés au hasard) → **aucun déploiement, toutes figurines placées, P1 en bande haute / P2 en
 bande basse, escouades cohérentes** ; 3 épisodes `active` → phase `deployment`, sentinelles.
 Cohérence re-vérifiée hors test : 0 figurine sous-cohérente sur 12 chargements (2 sièges × 6 rosters
@@ -176,7 +176,7 @@ Il est joué **tel quel** (`train.py`, branche test-only) : ni repli holdout, ni
 `wall_ref` (celle-ci exige un scénario sous `agents/.../scenarios/<split>/` et réécrit le terrain —
 elle casserait un scénario autonome sous `config/board/`). Mécanisme : `evaluate_against_bots(...,
 materialize_eval_refs=False, scenario_list_override=[chemin])`. Le mode holdout par défaut
-(`materialize_eval_refs=True`) est **inchangé**. Verrou : `scripts/eval_explicit_scenario_test.py`
+(`materialize_eval_refs=True`) est **inchangé**. Verrou : `tests/unit/ai/test_eval_explicit_scenario.py`
 (ROUGE : la matérialisation lève hors `agents/` ; VERT : le scénario explicite est joué, 0 planté).
 ⚠️ Un scénario `fixed` joué en test-only n'a **aucune** phase de déploiement (step.log : 0
 `DEPLOYMENT`, figurines aux positions du fichier dès T1).

@@ -1189,6 +1189,32 @@ def compute_occupied_hexes(
 
     Raises:
         ValueError: On unknown base_shape or invalid base_size.
+
+    L'empreinte est une TRANSLATION pure de sa forme de référence, à parité de colonne égale :
+    ``_hex_center`` est affine en (col, row) et ne dépend de la colonne que par sa parité. On
+    traduit donc les offsets mémoïsés par ``precompute_footprint_offsets`` au lieu de rebalayer
+    la géométrie (O(|empreinte|) au lieu d'un balayage carré avec trigonométrie par cellule).
+    Mesure : 390 k appels / 51 s sur `test_move_mask_is_executable`, 41 k / 13 s sur les tests de
+    déploiement. L'équivalence stricte avec le balayage est verrouillée par
+    ``TestComputeOccupiedHexesMatchesRawGeometry`` (oracle = ``_compute_occupied_hexes_raw``).
+    """
+    offsets_even, offsets_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
+    offsets = offsets_odd if (int(center_col) & 1) else offsets_even
+    return {(int(center_col) + dc, int(center_row) + dr) for dc, dr in offsets}
+
+
+def _compute_occupied_hexes_raw(
+    center_col: int,
+    center_row: int,
+    base_shape: str,
+    base_size: "int | list[int]",
+    orientation: int = 0,
+) -> Set[Tuple[int, int]]:
+    """Balayage géométrique de l'empreinte, sans mémoïsation — SOURCE de vérité de la forme.
+
+    Utilisé par ``precompute_footprint_offsets`` (qui en dérive les offsets, deux fois par
+    (forme, taille, orientation)) et par les tests comme oracle indépendant. Le code applicatif
+    passe par ``compute_occupied_hexes``.
     """
     if base_shape == "round":
         if not isinstance(base_size, (int, float)):
@@ -1314,8 +1340,8 @@ def precompute_footprint_offsets(
         return cached
 
     ref_row = 100
-    fp_even = compute_occupied_hexes(0, ref_row, base_shape, base_size, orientation)
-    fp_odd = compute_occupied_hexes(1, ref_row, base_shape, base_size, orientation)
+    fp_even = _compute_occupied_hexes_raw(0, ref_row, base_shape, base_size, orientation)
+    fp_odd = _compute_occupied_hexes_raw(1, ref_row, base_shape, base_size, orientation)
     offsets_even = tuple((c - 0, r - ref_row) for c, r in fp_even)
     offsets_odd = tuple((c - 1, r - ref_row) for c, r in fp_odd)
     result = (offsets_even, offsets_odd)

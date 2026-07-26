@@ -11,7 +11,7 @@ Garanties du placement :
     de réseau est à 9 < 10 subhex (2\") → un amas compact garantit ≥2 voisins par figurine. NB : la
     règle moteur (game_config : `squad_min_neighbors`=1, distance bord-à-bord) n'exige qu'≥1 voisin ;
     on vise ≥2 centre-à-centre = borne CONSERVATRICE (superset), l'oracle reste
-    `validate_squad_coherency` (asserté par `scripts/roster_fixed_positions_test.py`) ;
+    `validate_squad_coherency` (asserté par `tests/unit/engine/test_roster_fixed_positions.py`) ;
   - joueur 1 = bande HAUTE (top), joueur 2 = bande BASSE (bottom).
 
 À relancer si une composition de roster change : python3 scripts/gen_roster_positions.py

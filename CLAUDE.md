@@ -46,6 +46,21 @@ ENTRAÎNEMENT IA :
 - Analyser : python3 ai/analyzer.py <fichier_de_résultats>
 - Pas de tests automatisés — validation via --step + analyzer.py + replay
 
+TESTS — QUI LANCE QUOI (NON NÉGOCIABLE) :
+- La VÉRIFICATION LARGE appartient à l'utilisateur. Il la lance lui-même, avec SA commande :
+  `python3 -m pytest tests/unit/ -q -n 8 --dist worksteal ; pyright ; p ai/hidden_action_finder.py ;
+   p scripts/check_ai_rules.py ; npx biome check frontend/src ;
+   (cd frontend && npx tsc --noEmit -p tsconfig.app.json)`
+- UN AGENT NE LANCE JAMAIS LA SUITE COMPLÈTE. Ni `pytest tests/unit/`, ni `pytest tests/`,
+  ni `pytest` nu, sous aucune forme (y compris derrière un `source .venv/... &&`).
+  Un hook la REFUSE (.claude/hooks/deny-full-test-suite.sh) — inutile de contourner.
+- Ce qu'un agent DOIT faire : lancer les FICHIERS de test ciblés qu'il vient d'écrire ou de
+  toucher (`pytest tests/unit/engine/test_xxx.py`), aussi souvent qu'il veut.
+- Si une validation large semble nécessaire, LE DIRE à l'utilisateur et s'arrêter là. Ne jamais
+  annoncer « suite verte » sans l'avoir réellement obtenue de lui.
+- Outils de conformité (documentés dans Documentation/Code_Compliance/) : `scripts/check_ai_rules.py`
+  et `ai/hidden_action_finder.py` font partie de la vérification de l'utilisateur, pas de la tienne.
+
 === WORKFLOW IA ===
 
 FICHIERS À NE JAMAIS MODIFIER AUTOMATIQUEMENT :

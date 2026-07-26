@@ -1,3 +1,0 @@
-#!/bin/bash
-# Script "check" pour exécuter la vérification des règles AI_TURN.md
-exec python3 "$(dirname "$0")/check_ai_rules.py" "$@"

@@ -279,7 +279,7 @@ Résultat attendu : à `shooting_build_activation_pool`, toutes les paires sont 
 3. **Pair-cache ciblé** : ✅ **FAIT** (D3) — `_unit_los_pair_cache` en **dict pur** persistant, invalidation ciblée
    dans `_touch_unit_los`, bloc versionné `holder=(ver,{})` retiré de `compute_unit_los`. `version++` centralisé
    conservé pour `_target_pool_cache` / `_los_cache_version` / `enemy_pos_hash`.
-   → **Validé** par `scripts/los_cache_invariant_test.py` : 61 opérations choke-point (translate / commit_move batch
+   → **Validé** par `tests/unit/engine/test_los_pair_cache_invariant.py` : 61 opérations choke-point (translate / commit_move batch
    / update_model_position non-ancre / destroy_model), **58528 vérifications de paires, zéro divergence**, +
    **contrôle de dents** vert (invalidation désactivée ⇒ péremption bien détectée).
 4. **Réchauffage** : ⏳ **NON FAIT** (optionnel, D4) — brancher le recalcul `(U → ennemis)` post-commit derrière
@@ -303,7 +303,7 @@ Résultat attendu : à `shooting_build_activation_pool`, toutes les paires sont 
   paire inter-camps `compute_unit_los` (servi) vs `_compute_unit_los_uncached` (vérité). Lève `AssertionError`
   avec `(s,t, cached, fresh, version)` à la moindre divergence ; retourne le nb de paires vérifiées.
 
-  **(2) Scénario driver** — ✅ implémenté : [`scripts/los_cache_invariant_test.py`](../../scripts/los_cache_invariant_test.py).
+  **(2) Scénario driver** — ✅ implémenté : [`tests/unit/engine/test_los_pair_cache_invariant.py`](../../tests/unit/engine/test_los_pair_cache_invariant.py).
   Construit un vrai jeu (board **44x60x5**, murs **walls-mc1** = 1098 hexs, 31 unités placées via
   `scenario_pvp_test.json`), puis exerce **directement** chaque fonction du choke-point sur unités réelles et
   ré-assère l'invariant après chacune :
@@ -318,7 +318,7 @@ Résultat attendu : à `shooting_build_activation_pool`, toutes les paires sont 
   **Contrôle de dents** (crucial) : le driver désactive volontairement `_invalidate_pair_cache_for_unit` et
   vérifie que l'invariant **détecte** alors une valeur périmée servie — sinon un test vert ne prouverait rien.
 
-  Lancement : `python3 scripts/los_cache_invariant_test.py` (exit ≠ 0 si divergence **ou** si le contrôle
+  Lancement : `python3 -m pytest tests/unit/engine/test_los_pair_cache_invariant.py` (exit ≠ 0 si divergence **ou** si le contrôle
   de dents échoue). Résultat courant : **INVARIANT OK** (58528 paires, 0 divergence) + **DENTS OK**.
 
   > Extension possible (non faite) : assertions comportementales « derrière le mur »

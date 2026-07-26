@@ -631,3 +631,44 @@ class TestConvertGymActionFightAlternating:
         result = d.convert_gym_action(10, gs)
         # L'unité morte est filtrée → pool vide → advance_phase
         assert result["action"] == "advance_phase"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sélection d'hex de déploiement (actions tactiques 4-8)
+#
+# Rapatrié de `scripts/test_action_decoder_validation.py` (2026-07-26) : ce fichier vivait hors de
+# `tests/`, donc n'était jamais collecté. Ses 3 autres cas (normalize int/numpy, rejet de type,
+# validate_against_mask) étaient déjà couverts ci-dessus ; seule la divergence flanc gauche/droit
+# ne l'était pas.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDeploymentHexSelection:
+    @staticmethod
+    def _make_gs() -> Dict[str, Any]:
+        # Unités à la sentinelle (-1) : rien n'est encore déployé.
+        units = [_unit(1, 1, -1, -1), _unit(2, 2, -1, -1)]
+        for u in units:
+            # Le plan de déploiement lit les mots-clés (INFANTRY = formation compacte au sol).
+            u["UNIT_KEYWORDS"] = ["INFANTRY"]
+        gs = _build_gs(units, "deployment")
+        gs["objectives"] = [{"hexes": [(12, 10)]}]
+        gs["terrain_areas"] = []  # aucun terrain : seule la géométrie du pool décide du flanc
+        gs["deployment_state"] = {
+            "current_deployer": 1,
+            "deployment_pools": {
+                1: [(0, 13), (4, 13), (8, 13), (16, 13), (24, 13)],
+                2: [(0, 0), (4, 0), (8, 0), (16, 0), (24, 0)],
+            },
+            "deployable_units": {1: ["1"], 2: ["2"]},
+            "deployed_units": set(),
+        }
+        return gs
+
+    def test_left_and_right_flank_actions_diverge(self):
+        """flancs : action 7 (flanc gauche) choisit un hex de colonne < action 8 (flanc droit)."""
+        d = _make_decoder()
+        gs = self._make_gs()
+        valid_hexes = d._get_valid_deployment_hexes(gs, 1, "1")
+        left_hex = d._select_deployment_hex_for_action(7, "1", gs, 1, valid_hexes)
+        right_hex = d._select_deployment_hex_for_action(8, "1", gs, 1, valid_hexes)
+        assert left_hex[0] < right_hex[0]

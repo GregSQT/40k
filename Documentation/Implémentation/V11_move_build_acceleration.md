@@ -74,12 +74,14 @@ BFS.**
 ## 2bis. Mesures de cardinalités (2026-07-21) — ce qui tranche les leviers
 
 Mesuré via capture des kwargs réels de `_build_multi_hex_vectorized`
-([scripts/measure_move_pool_reach_obstacles.py](../../scripts/measure_move_pool_reach_obstacles.py),
-`|reach|` recalculé par BFS fidèle sur `compute_footprint_placement_mask`, prouvé équivalent à
-`_placement_bad` ; `|occupied|` par
-[scripts/measure_move_pool_occupied.py](../../scripts/measure_move_pool_occupied.py) depuis les
-rosters training). **Reproductibles pour le re-bench avant/après (§8 étape 3).** Board 220×300 =
+(`scripts/measure_move_pool_reach_obstacles.py`, `|reach|` recalculé par BFS fidèle sur
+`compute_footprint_placement_mask`, prouvé équivalent à `_placement_bad` ; `|occupied|` par
+`scripts/measure_move_pool_occupied.py` depuis les rosters training). Board 220×300 =
 **66 000 cases**, scénario stress ez=10.
+
+> ⚠️ **Ces deux scripts de mesure ont été SUPPRIMÉS le 2026-07-26** (chantier clos, cf. §10
+> décision B) : leurs chiffres sont consignés ci-dessous et le re-bench avant/après du DoD (§7
+> étape 5) passe par `scripts/profile_move_pool.py`, lui conservé.
 
 | Grandeur | Valeur mesurée |
 |---|---|
@@ -483,6 +485,74 @@ par la bbox, wavefront-NumPy ou numba selon bench. Un run x5 étant à 95,6 % da
 ---
 
 ## 10. État
+
+**L1b + L_neighbors + L_movecache FAITS (2026-07-26) — chantier rouvert par le côté VALIDATION.**
+La décision (B) STOP de 2026-07-21 (§10 plus bas) portait sur le **build du pool**. Un profil du
+prédicat de **validation** (`explain_move_plan_rejection`, 4 212 appels sur
+`test_move_mask_is_executable`) a montré un gisement indépendant et bien plus gros : **403 s sur 428**,
+dont **352 s de BFS géodésique** (20 947 appels à `geodesic_move_reach`) et **94,7 M appels** à
+`get_hex_neighbors`. Cause : le prédicat reconstruisait à **chaque cellule candidate** des ensembles
+qui ne dépendent **pas** de la destination testée.
+
+- **L_neighbors** — `get_hex_neighbors` ([combat_utils.py:142](../../engine/combat_utils.py#L142)) est
+  une fonction **pure de deux entiers** : mémoïsée par `(col, row)` dans `_HEX_NEIGHBORS_CACHE`, borné
+  par le plateau (~2 600 entrées), aucune invalidation. C'est la boucle interne de **tous** les BFS du
+  moteur (pool de move, géodésique, charge, pile-in). Renvoie désormais un **tuple immuable** et non
+  une liste : le résultat étant partagé entre appelants, une liste exposerait le cache à une mutation.
+  Les 55 sites d'appel itèrent, testent l'appartenance, indexent ou construisent un `set` — **aucun ne
+  mute** (vérifié par grep `.append/.remove/.sort/.extend/.pop/+ [`).
+- **L1b** — `compute_occupied_hexes` ([hex_utils.py:1171](../../engine/hex_utils.py#L1171)) **traduit**
+  désormais les offsets déjà mémoïsés par `precompute_footprint_offsets` au lieu de rebalayer un carré
+  avec trigonométrie par cellule. C'est L1 poussé jusqu'au bout : L1 (2026-07-21) n'avait mémoïsé que
+  le **précalcul**, alors que le code applicatif appelait encore massivement le balayage direct
+  (390 k appels / 51 s sur le test move, 41 k / 13 s sur les tests de déploiement). Le balayage brut
+  survit sous `_compute_occupied_hexes_raw`, appelé par le précalcul **et par les tests comme oracle**.
+  ⚠️ L'oracle de `TestPrecomputeFootprintOffsetsMemoization` a dû être **repointé** sur le brut :
+  laissé sur `compute_occupied_hexes`, il serait devenu **tautologique**. Nouvelle classe
+  `TestComputeOccupiedHexesMatchesRawGeometry` (35 cas) qui verrouille la propriété portante —
+  l'empreinte est une **translation pure à parité de colonne égale** — aux deux parités et sur
+  plusieurs lignes, plus la préservation de l'erreur `Unknown base_shape` à travers le raccourci.
+- **L_movecache** — nouveau `_move_spatial_cache`
+  ([shared_utils.py](../../engine/phase_handlers/shared_utils.py)) : mémoïse cellules interdites
+  (`build_move_blocked_cells_by_level`), ensemble de transit (`build_move_transit_blocked`) et champs
+  géodésiques au niveau de l'**état**. La clé est un **fingerprint LU de l'état réel** — position ET
+  niveau de chaque figurine, phase, contenu des zones d'engagement ennemies — **jamais un compteur de
+  version** : c'est précisément le piège de la régression masque⊆exécutable §0.18 (un chemin d'écriture
+  de position ne bumpe pas le compteur → cache périmé servi). Tout changement de fingerprint jette le
+  holder entier, donc le cache ne grossit pas au fil de la partie. Les ensembles restent renvoyés **par
+  référence** (contrat de non-mutation déjà en vigueur, étendu aux listes).
+  Effet de bord traité : le `deepcopy` de la preview LoS de tir
+  ([shooting_handlers.py](../../engine/phase_handlers/shooting_handlers.py)) **partage ce cache par
+  référence** au lieu de le copier — sans risque, chaque lecture revalidant le fingerprint : si la
+  preview bouge une figurine, elle se reconstruit son propre holder sans toucher celui de l'état réel.
+
+**Gains mesurés (mêmes tests, même machine, avant → après)**
+
+| Test | Avant | Après | Facteur |
+|---|---|---|---|
+| `test_move_mask_is_executable[0]` | 687,2 s | 36,2 s | **19,0×** |
+| `test_move_mask_is_executable[1]` | 542,6 s | 36,1 s | **15,0×** |
+| `test_move_mask_is_executable[2]` | 526,0 s | 36,7 s | **14,3×** |
+| `test_deployment_mask_mirrors_commit_overlap_predicate` | 31,0 s | 20,2 s | 1,5× |
+| `test_deployment_per_model_commit` (5 tests) | ~9,7 s pièce | ~5,5 s pièce | 1,8× |
+
+Le BFS géodésique et les empreintes étant sur le **chemin chaud du masque**, le gain porte aussi sur le
+training, pas seulement sur les tests. Non-régression : move/charge/fight/déploiement/spatial/hex_utils/
+combat_utils, boucles moteur complètes (`test_engine_full_loop`, `test_engine_turn_loop`,
+`test_t5_bare_loop`, `test_cross_phase_cascade`), tir/LoS, observation, et l'intégralité de
+`tests/unit/ai/`, `tests/unit/services/`, `tests/unit/shared/` — verts. `pyright` sur les 5 fichiers
+touchés : seule une erreur **préexistante** (`test_hex_utils.py`, tuple passé à un paramètre
+`int | list[int]`, déjà dans HEAD).
+
+**Pôle restant identifié, NON traité (mesuré, pas supposé).** Après ces gains, le test le plus lourd
+du déploiement (20,2 s) est dominé par `_get_valid_deployment_hexes` (18,8 s cumulés, 98 appels) et
+`_build_deployment_scoring_cache` (8,8 s, 66 appels) dans
+[action_decoder.py](../../engine/action_decoder.py#L1013) — 835 k appels à `score_for_hex`, 8,4 M à
+`calculate_hex_distance`. **Ce n'est pas de la dette de ce chantier** : c'est l'heuristique de
+**scoring de déploiement de l'IA**, donc y toucher est un changement de comportement potentiel, à
+cadrer et à benchmarker séparément — pas une mémoïsation neutre comme celles ci-dessus.
+
+---
 
 **L1 FAIT (2026-07-21).** `precompute_footprint_offsets` ([hex_utils.py:1274](../../engine/hex_utils.py#L1274))
 est mémoïsée par un dict module-level `_FOOTPRINT_OFFSETS_CACHE` clé `(base_shape, base_size normalisé

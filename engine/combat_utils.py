@@ -139,46 +139,63 @@ def is_hex_adjacent_to_enemy(col: int, row: int, player: int,
     return (col_int, row_int) in enemy_adjacent_hexes
 
 
-def get_hex_neighbors(col: int, row: int) -> List[Tuple[int, int]]:
+_HEX_NEIGHBORS_CACHE: Dict[Tuple[int, int], Tuple[Tuple[int, int], ...]] = {}
+
+
+def get_hex_neighbors(col: int, row: int) -> Tuple[Tuple[int, int], ...]:
     """
     Get all 6 hexagonal neighbors for offset coordinates.
-    
+
     Hex neighbor offsets depend on whether column is even or odd.
     Even columns: NE/SE are (+1, -1) and (+1, 0)
     Odd columns: NE/SE are (+1, 0) and (+1, +1)
-    
+
+    Fonction PURE d'une paire d'entiers : le resultat est memoise par (col, row). C'est la
+    boucle interne de tous les BFS du moteur (pool de move, geodesique, charge, pile-in) —
+    mesure sur `test_move_mask_is_executable` : 94,7 M appels pour 187 s, soit 44 % du temps.
+    Le cache est borne par le plateau (~2 600 entrees), donc constant en memoire.
+
+    Le tuple renvoye est PARTAGE entre appelants, donc IMMUABLE par construction : renvoyer
+    une liste exposerait le cache a une mutation d'appelant. Tous les appelants iterent,
+    testent l'appartenance, indexent ou construisent un `set` — aucun ne mute.
+
     Args:
         col: Column coordinate (will be normalized to int)
         row: Row coordinate (will be normalized to int)
-    
+
     Returns:
-        List of 6 neighbor (col, row) tuples, all normalized to int
+        Tuple of 6 neighbor (col, row) tuples, all normalized to int
     """
     # Normalize coordinates to int
-    col_int, row_int = normalize_coordinates(col, row)
-    
+    key = normalize_coordinates(col, row)
+    cached = _HEX_NEIGHBORS_CACHE.get(key)
+    if cached is not None:
+        return cached
+    col_int, row_int = key
+
     # Determine if column is even or odd
     parity = col_int & 1  # 0 for even, 1 for odd
-    
+
     if parity == 0:  # Even column
-        neighbors = [
+        neighbors = (
             (int(col_int), int(row_int - 1)),      # N
             (int(col_int + 1), int(row_int - 1)),  # NE
             (int(col_int + 1), int(row_int)),      # SE
             (int(col_int), int(row_int + 1)),      # S
             (int(col_int - 1), int(row_int)),      # SW
             (int(col_int - 1), int(row_int - 1))   # NW
-        ]
+        )
     else:  # Odd column
-        neighbors = [
+        neighbors = (
             (int(col_int), int(row_int - 1)),      # N
             (int(col_int + 1), int(row_int)),      # NE
             (int(col_int + 1), int(row_int + 1)),  # SE
             (int(col_int), int(row_int + 1)),      # S
             (int(col_int - 1), int(row_int + 1)),  # SW
             (int(col_int - 1), int(row_int))       # NW
-        ]
-    
+        )
+
+    _HEX_NEIGHBORS_CACHE[key] = neighbors
     return neighbors
 
 

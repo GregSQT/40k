@@ -1553,8 +1553,12 @@ def preview_shoot_valid_targets_from_position(
     # écrites uniquement à l'init du jeu (w40k_core), jamais durant une action. On les partage
     # PAR RÉFÉRENCE via le memo de deepcopy (elles pèsent ~50% du coût) au lieu de les copier ;
     # le reste de game_state est deepcopié normalement (cross-références préservées).
+    # `_move_spatial_cache` est un cache PUR (ensembles spatiaux du move) dont chaque lecture
+    # revalide un fingerprint de l'état. Le partager par référence au lieu de le copier est donc
+    # sans risque : si la preview bouge une figurine, le fingerprint change et la preview se
+    # reconstruit SON propre holder, sans toucher celui de l'état réel.
     _preview_share_memo: Dict[int, Any] = {}
-    for _shared_key in ("config", "weapon_damage_table"):
+    for _shared_key in ("config", "weapon_damage_table", "_move_spatial_cache"):
         _shared_val = game_state.get(_shared_key)
         if _shared_val is not None:
             _preview_share_memo[id(_shared_val)] = _shared_val

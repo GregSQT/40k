@@ -825,8 +825,8 @@ le modèle + LoS 3D est le vrai chantier.
         Testé `entry_vertically_reachable` (ennemi 3"→True, 8"→False) ; dégénérescence sol structurelle.
         **1 différé** L3431 (FLY, §707).
       - ✅ **VALIDATION D'INTÉGRATION 3a (2026-07-07)** — script **pérennisé**
-        [scripts/charge3d_integration_test.py](file:///home/greg/40k/scripts/charge3d_integration_test.py)
-        (lancer : `source .venv/bin/activate && python3 scripts/charge3d_integration_test.py`) sur le VRAI
+        [tests/unit/engine/test_charge3d_floors_integration.py](file:///home/greg/40k/tests/unit/engine/test_charge3d_floors_integration.py)
+        (lancer : `source .venv/bin/activate && python3 -m pytest tests/unit/engine/test_charge3d_floors_integration.py`) sur le VRAI
         `scenario_floors_test` (env W40KEngine réel, floors rasterisés L1=1200/L2=400 hexes, roster réel) :
         `MODEL_HEIGHT` propagé (cible 4.0 / chargeur 2.5), `floor_height_by_model` = {sol 0.0, L1 3.0, L2 6.0}
         via les vrais floors, et le gate d'engagement 3D **bascule exactement au gap vertical réel** (cible L2,
@@ -903,7 +903,7 @@ le modèle + LoS 3D est le vrai chantier.
           - **Validé bout-en-bout dans l'app (2026-07-08)** : déclaration de charge sur cible à l'étage, sélection
             de la fig chargeuse, pool d'étage affiché en vue mono-niveau, pose et commit de la fig à l'étage
             (engagée, voile vert). Collision cross-niveau et niveau de rendu corrigés (cf. « Bugs 3b résolus »).
-          - Non-régression : [scripts/charge3d_integration_test.py](file:///home/greg/40k/scripts/charge3d_integration_test.py)
+          - Non-régression : [tests/unit/engine/test_charge3d_floors_integration.py](file:///home/greg/40k/tests/unit/engine/test_charge3d_floors_integration.py)
             étendu (chargeur montant → ancres d'étage `level≥1` dans le pool, gate climb §13.06) + pytest
             **1152 passed / 0 failed** + tsc vert.
 
@@ -1026,7 +1026,7 @@ le modèle + LoS 3D est le vrai chantier.
    horizontal déjà admis pour la charge. Le **gate d'engagement**, lui, est bien 3D. À ré-évaluer seulement si
    une mesure de distance 3D globale est adoptée (roadmap item 4).
 
-   **Validation** : script d'intégration dédié (miroir `charge3d_integration_test.py` : fig montant en pile-in/
+   **Validation** : script d'intégration dédié (miroir `test_charge3d_floors_integration.py` : fig montant en pile-in/
    conso → ancres d'étage + gate climb 3") + `python3 -m pytest tests/` (1152/0) + app sur `scenario_floors_test`.
    **Non-régression** : tout au sol / vue 0 / non-montant / hex / FLY → chemins vides → **byte-identique 2D**.
 
@@ -1267,7 +1267,7 @@ le modèle + LoS 3D est le vrai chantier.
    **Non-régression** : `src_height=tgt_height=None` (tous les appels actuels) → primitive **byte-identique**
    2D ; plateau **sans `floors`** → aucun plancher-occulteur, `wall_set` seul → identique à aujourd'hui ;
    RL/obs (métrique mono-niveau, `hex`) non concernés. **Validation** : script d'intégration dédié (miroir
-   [scripts/charge3d_integration_test.py](file:///home/greg/40k/scripts/charge3d_integration_test.py) sur
+   [tests/unit/engine/test_charge3d_floors_integration.py](file:///home/greg/40k/tests/unit/engine/test_charge3d_floors_integration.py) sur
    `scenario_floors_test` : tireur L1 vs cible sous l'étage → **bloquée** ; vs cible au sol à côté, mur
    dense entre les deux → **visible** si la ligne interpolée passe le mur au-dessus de `solid_ground_clearance`
    (b1), **bloquée** avec le kill-switch (a) ; deux figs au sol de part et d'autre du bâtiment → **visibles**
@@ -1305,7 +1305,7 @@ le modèle + LoS 3D est le vrai chantier.
    1. ✅ **Engagement 3D (chantier 4) — FAIT & VALIDÉ** : étapes 1 (fondation `floor_height_by_model` +
       `MODEL_HEIGHT` dans `units_cache`), 2 (primitive `entries_in_engagement_zone(..., vertical_zone_inches)`
       + config `engagement_zone_vertical: 5` + getter + wrappers), 3a (18 call-sites charge câblés, FLY différé).
-      Validé sur le vrai scénario ([scripts/charge3d_integration_test.py](file:///home/greg/40k/scripts/charge3d_integration_test.py)).
+      Validé sur le vrai scénario ([tests/unit/engine/test_charge3d_floors_integration.py](file:///home/greg/40k/tests/unit/engine/test_charge3d_floors_integration.py)).
       Non-régression pytest **entièrement rétablie** (`python3 -m pytest tests/` → **1152 passed, 2 skipped, 0 failed** ;
       dette de stubs `level`/`MODEL_HEIGHT`/`engagement_zone_vertical`/`_unit_move_version` + 7 tests obsolètes
       de la refonte advance→move réparés au passage).
@@ -1317,7 +1317,7 @@ le modèle + LoS 3D est le vrai chantier.
       par niveau), `provisional_plan` porté, front (Map niveau + pose/commit niveau + `perModelPlanView` préserve
       le niveau par-fig). Détail complet + pièges + bugs résolus dans la section chantier 4 ci-dessus. Validé
       bout-en-bout **dans l'app** (charge d'une fig vers l'étage : pool → pose → commit engagé) +
-      `scripts/charge3d_integration_test.py` étendu + pytest **1152 passed / 0 failed** + tsc vert.
+      `tests/unit/engine/test_charge3d_floors_integration.py` étendu + pytest **1152 passed / 0 failed** + tsc vert.
    2bis. ✅ **Mêlée 3D — pile-in (§12.03) & consolidation (§12.08) niveau-conscients : FLUX MANUEL PvP FAIT
       (2026-07-08, compile Python + import + `tsc` verts, NON validé runtime)**. Miroir move complet (option A) :
       une fig déjà en hauteur peut **rester** sur son étage ET **changer** de niveau dans le budget 3".

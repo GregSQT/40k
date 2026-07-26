@@ -18,7 +18,7 @@
 
 
     {
-      "id": 6, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 107, "row": 166,
+      "id": 6, "unit_type": "Hellblaster", "player": 1, "col": 107, "row": 166,
       "models": [
         { "col": 107, "row": 166 },
         { "col": 104, "row": 172 },

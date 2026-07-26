@@ -5,14 +5,47 @@
 ```bash
 # Python — tous les tests (depuis la racine)
 source .venv/bin/activate
-pytest tests/unit/ -q
+pytest tests/unit/ -q -n 8 --dist worksteal
 
 # Python — engine uniquement
-pytest tests/unit/engine/ -q
+pytest tests/unit/engine/ -q -n 8 --dist worksteal
 
 # Frontend (depuis frontend/)
 npx vitest run
 ```
+
+### Pourquoi `--dist worksteal` (mesuré 2026-07-26)
+
+`--dist load` (défaut de `pytest-xdist`) envoie à chaque worker un **gros lot initial pris dans
+l'ordre de collecte**. Les fichiers lourds étant voisins dans l'ordre alphabétique, ils atterrissent
+sur le **même** worker : il finit seul pendant que les sept autres dorment, et la barre de
+progression stagne dans les derniers pourcents. `worksteal` (xdist ≥ 3.2, 3.8 installé) rééquilibre
+en cours de route — un worker inactif vole du travail à un worker chargé.
+
+Mesure sur les 18 fichiers les plus lourds, même machine (8 cœurs) :
+
+| Commande | Mur | `user` (CPU réellement occupé) |
+|---|---|---|
+| `-n 8` (`load` par défaut) | 3 min 10 | 4 min 22 → ~1,4 cœur en moyenne |
+| `-n 8 --dist worksteal` | **1 min 34** | 5 min 13 |
+| `-n 12 --dist worksteal` | 1 min 40 | 5 min 42 |
+
+`-n 12` ne paie pas : la machine a 8 cœurs, l'oversubscription coûte plus qu'elle ne comble.
+
+### Les deux tests les plus lourds
+
+Ils dominent le mur de la suite : ce sont eux qui fixent le plancher, aucun découpage xdist ne peut
+les fractionner.
+
+| Test | Ce qu'il vérifie | Coût |
+|---|---|---|
+| `test_move_mask_is_executable` (×3 seeds) | invariant « masque ⊆ exécutable » sur de vraies parties, 400 steps | ~36 s / seed |
+| `test_deployment_clearance_parity::test_deployment_mask_mirrors_commit_overlap_predicate` | parité masque/commit du déploiement | ~20 s |
+
+Ils étaient respectivement à **687 s** et **31 s** avant l'optimisation du 2026-07-26
+(cf. `Implémentation/V11_move_build_acceleration.md` §10). Ne pas les alléger en réduisant
+`MAX_STEPS` ou le nombre de seeds : à ce coût-là, la couverture d'invariant vaut plus que les
+secondes gagnées.
 
 ---
 
@@ -20,7 +53,11 @@ npx vitest run
 
 ### Python — `tests/unit/engine/` + `tests/unit/services/`
 
-**990 tests, ~2.2s** (2 skipped)
+**⚠️ Chiffre périmé : « 990 tests, ~2.2s » (2 skipped).** L'inventaire ci-dessous n'a pas suivi la
+croissance de la suite. Ordre de grandeur réel (2026-07-26) : **150 fichiers, ~1 550 fonctions `test_`
+avant expansion des `parametrize`**. Le total collecté et le mur exacts sont à relever sur la commande
+de vérification complète (§ Lancer les tests) — ils ne sont pas re-postés ici tant qu'ils ne sont pas
+mesurés sur la suite entière.
 
 | Fichier | Tests | Ce qui est couvert |
 |---|---|---|

@@ -1,34 +1,0 @@
-warmup:   0%|          | 0/250 [00:00<?, ?step/s]warmup:   2%|▏         | 4/250 [00:01<01:50,  2.23step/s]warmup:   4%|▎         | 9/250 [00:02<01:00,  4.01step/s]warmup:   5%|▍         | 12/250 [00:03<01:00,  3.93step/s]warmup:   7%|▋         | 18/250 [00:03<00:42,  5.43step/s]warmup:  10%|█         | 25/250 [00:04<00:29,  7.52step/s]warmup:  12%|█▏        | 30/250 [00:06<00:53,  4.12step/s]warmup:  13%|█▎        | 33/250 [00:20<00:52,  4.12step/s]warmup:  14%|█▎        | 34/250 [00:23<04:31,  1.25s/step]warmup:  18%|█▊        | 44/250 [00:23<02:17,  1.49step/s]warmup:  20%|██        | 50/250 [00:34<03:17,  1.01step/s]measure:  20%|██        | 50/250 [00:34<03:17,  1.01step/s]measure:  22%|██▏       | 56/250 [00:34<02:21,  1.37step/s]measure:  24%|██▍       | 61/250 [00:35<01:53,  1.66step/s]measure:  26%|██▋       | 66/250 [00:36<01:27,  2.11step/s]measure:  30%|███       | 76/250 [00:37<00:52,  3.33step/s]measure:  32%|███▏      | 81/250 [00:43<01:28,  1.91step/s]measure:  34%|███▍      | 85/250 [00:48<01:54,  1.45step/s]measure:  35%|███▌      | 88/250 [00:51<01:58,  1.37step/s]measure:  36%|███▋      | 91/250 [00:54<02:10,  1.22step/s]measure:  40%|████      | 101/250 [00:55<01:04,  2.30step/s]measure:  43%|████▎     | 108/250 [00:56<00:45,  3.14step/s]measure:  45%|████▌     | 113/250 [00:58<00:51,  2.64step/s]measure:  46%|████▌     | 114/250 [00:59<01:10,  1.92step/s]
-Traceback (most recent call last):
-  File "/home/greg/40k/scripts/profile_env_step_360x312.py", line 477, in <module>
-    main()
-  File "/home/greg/40k/scripts/profile_env_step_360x312.py", line 385, in main
-    obs, _reward, terminated, truncated, _info = env.step(action)
-                                                 ^^^^^^^^^^^^^^^^
-  File "/home/greg/40k/engine/w40k_core.py", line 1438, in step
-    action_result = self._process_semantic_action(semantic_action)
-                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/greg/40k/engine/w40k_core.py", line 2622, in _process_semantic_action
-    success, result = self._process_fight_phase(action)
-                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/greg/40k/engine/w40k_core.py", line 4195, in _process_fight_phase
-    handler_response = fight_handlers.execute_action(self.game_state, current_unit, action, self.config)
-                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/greg/40k/engine/phase_handlers/fight_handlers.py", line 2485, in execute_action
-    return _handle_fight_attack(game_state, unit, target_id, config)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/greg/40k/engine/phase_handlers/fight_handlers.py", line 3328, in _handle_fight_attack
-    return _fight_finish_no_more_targets_after_attack(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/greg/40k/engine/phase_handlers/fight_handlers.py", line 2962, in _fight_finish_no_more_targets_after_attack
-    cons_nt = _fight_try_begin_consolidation_after_attacks(
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/greg/40k/engine/phase_handlers/fight_handlers.py", line 1612, in _fight_try_begin_consolidation_after_attacks
-    plan = _fight_plan_consolidation_destinations(game_state, unit)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/greg/40k/engine/phase_handlers/fight_handlers.py", line 1343, in _fight_plan_consolidation_destinations
-    closer_shell_union.update(dilate_hex_set_unbounded(efp, radius))
-                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/greg/40k/engine/hex_utils.py", line 191, in dilate_hex_set_unbounded
-    result.add(npos)
-KeyboardInterrupt

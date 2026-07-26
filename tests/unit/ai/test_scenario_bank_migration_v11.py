@@ -7,9 +7,10 @@ Couvre :
 - le chargement moteur + reset sur un échantillon couvrant chaque voie de déploiement
   (active / random / P1-P2 / benchmark / matchup) : >= 1 objectif, deployment_pools joueurs {1,2}.
 
-Le balayage EXHAUSTIF des 61 (W40KEngine + reset) est fourni par
-`scripts/sweep_scenario_bank_v11.py` (trop lourd pour la suite unitaire) ; ce test en couvre
-l'invariant statique sur les 61 + un échantillon représentatif chargé de bout en bout.
+Le balayage EXHAUSTIF des 61 (W40KEngine + reset) était fourni par `scripts/sweep_scenario_bank_v11.py`,
+trop lourd pour la suite unitaire et **supprimé le 2026-07-26** (critère T4 clos, balayage 61/61 déjà
+consigné dans `V11_agent_rework.md §3495`) ; ce test couvre l'invariant statique sur les 61 + un
+échantillon représentatif chargé de bout en bout.
 """
 from __future__ import annotations
 

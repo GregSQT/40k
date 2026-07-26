@@ -3312,6 +3312,49 @@ DEFAULT_MOVE_CONSTRAINTS: Dict[str, Any] = {
 }
 
 
+def _move_spatial_cache(game_state: Dict[str, Any]) -> Dict[str, Any]:
+    """Cache par-etat des ensembles spatiaux du move (cellules interdites, transit, champs
+    geodesiques), partage par les DEUX cotes de l'invariant « masque ⊆ executable ».
+
+    Motif : `explain_move_plan_rejection` reconstruit ces ensembles a CHAQUE cellule candidate,
+    alors qu'ils ne dependent que de l'etat, pas de la destination. Mesure sur
+    `test_move_mask_is_executable` (4 212 validations) : 352 s de BFS geodesique + 49 s de
+    construction d'ensembles, pour quelques dizaines de valeurs distinctes.
+
+    La CLE est un FINGERPRINT LU de l'etat reel — jamais un compteur de version. Un compteur a
+    deja cause une regression masque⊆executable (§0.18) : un chemin d'ecriture de position ne
+    le bumpe pas, si bien qu'un cache perime etait servi. Le fingerprint capture tout ce dont
+    ces ensembles dependent :
+      - position ET niveau de CHAQUE figurine vivante (occupation amie/ennemie, transit) ;
+      - phase (le cache `enemy_adjacent` est par-phase) ;
+      - contenu des zones d'engagement ennemies (elles derivent des positions, mais le chemin
+        d'override reactif les reecrit hors de ce derive — on les lit donc directement).
+    Les murs et les toggles de traversee sont statiques : hors fingerprint.
+
+    Tout changement de fingerprint jette le cache entier — il ne grossit donc pas au fil de la
+    partie. Les ensembles sont renvoyes PAR REFERENCE : ne pas les muter (meme contrat qu'avant).
+    """
+    models_cache = require_key(game_state, "models_cache")
+    ez_fp = tuple(
+        (_k, hash(frozenset(_v)))
+        for _k, _v in sorted(game_state.items())
+        if isinstance(_k, str) and _k.startswith("enemy_adjacent_hexes_player_")
+    )
+    fp = (
+        str(game_state.get("phase", "")),  # get allowed (phase absente = etat non initialise)
+        hash(tuple(sorted(
+            (str(_mid), int(_m["col"]), int(_m["row"]), int(_m.get("level", 0)))  # get allowed
+            for _mid, _m in models_cache.items()
+        ))),
+        ez_fp,
+    )
+    holder = game_state.get("_move_spatial_cache")  # get allowed (absent au 1er appel)
+    if holder is None or holder["fp"] != fp:
+        holder = {"fp": fp, "blocked": {}, "transit": {}, "geo": {}}
+        game_state["_move_spatial_cache"] = holder
+    return holder
+
+
 def build_move_blocked_cells_by_level(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -3347,8 +3390,21 @@ def build_move_blocked_cells_by_level(
     milliers de candidates (`erode_move_pool_by_squad_block`) peut, lui, materialiser l'union
     une fois s'il y trouve son compte — c'est SON arbitrage, pas celui du helper.
 
-    Les sets sont renvoyes PAR REFERENCE (lecture pure) : ne pas les muter.
+    Les sets sont renvoyes PAR REFERENCE (lecture pure) : ne pas les muter. Le resultat est
+    memoise par `_move_spatial_cache` (meme contrat de non-mutation, etendu aux listes).
     """
+    _levels_key = tuple(sorted(int(_lv) for _lv in levels))
+    _cache = _move_spatial_cache(game_state)["blocked"]
+    _ck = (
+        str(squad_id), int(player), _levels_key,
+        bool(constraints["allow_walls"]),
+        bool(constraints["forbid_enemy_er"]),
+        bool(constraints["allow_collisions"]),
+    )
+    _hit = _cache.get(_ck)
+    if _hit is not None:
+        return _hit
+
     wall_hexes = game_state.get("wall_hexes", set())  # get allowed
     static_blocked: List[Tuple[str, Set[Tuple[int, int]]]] = []
     if not constraints["allow_walls"] and wall_hexes:
@@ -3359,7 +3415,7 @@ def build_move_blocked_cells_by_level(
             static_blocked.append(("ER ennemie", enemy_er))
 
     out: Dict[int, List[Tuple[str, Set[Tuple[int, int]]]]] = {}
-    for lv in levels:
+    for lv in _levels_key:
         blocked = list(static_blocked)
         if not constraints["allow_collisions"]:
             blocked.append((
@@ -3367,6 +3423,7 @@ def build_move_blocked_cells_by_level(
                 build_occupied_positions_set(game_state, exclude_unit_id=squad_id, level=int(lv)),
             ))
         out[int(lv)] = blocked
+    _cache[_ck] = out
     return out
 
 
@@ -3388,9 +3445,15 @@ def build_move_transit_blocked(
 
     La destination (occupation, EZ) n'est PAS filtrée ici : elle l'est par
     ``build_move_blocked_cells_by_level``. Ce set ne borne QUE l'atteignabilité du chemin.
-    Lecture pure.
+    Lecture pure. Résultat mémoïsé par ``_move_spatial_cache`` (renvoyé par référence).
     """
     from engine.phase_handlers.movement_handlers import _get_move_traversal_rules
+
+    _cache = _move_spatial_cache(game_state)["transit"]
+    _ck = (str(squad_id), int(player), int(level))
+    _hit = _cache.get(_ck)
+    if _hit is not None:
+        return _hit
 
     thru_ez, thru_enemy, thru_friendly = _get_move_traversal_rules(game_state)
     transit: Set[Tuple[int, int]] = set(game_state.get("wall_hexes", set()))  # get allowed
@@ -3409,6 +3472,7 @@ def build_move_transit_blocked(
         transit |= friendly
     if not thru_ez:
         transit |= require_key(game_state, f"enemy_adjacent_hexes_player_{int(player)}")
+    _cache[_ck] = transit
     return transit
 
 
@@ -3606,9 +3670,11 @@ def explain_move_plan_rejection(
             _use_geodesic_budget = not (
                 _unit_obj is not None and _fly_traversal_active(game_state, _unit_obj, squad_id)
             )
-    # Champs géodésiques par (origine, niveau) — mémoïsés : plusieurs figurines partageraient
-    # rarement une origine, mais un même plan peut re-tester la même origine (snap).
-    _geo_fields: Dict[Tuple[int, int, int], Dict[Tuple[int, int], int]] = {}
+    # Champs géodésiques par (escouade, joueur, origine, niveau, budget) — mémoïsés au niveau de
+    # l'ÉTAT (`_move_spatial_cache`), pas de l'appel : le champ ne dépend pas de la destination
+    # testée, alors que ce prédicat est appelé une fois par cellule candidate. Mesure sur
+    # `test_move_mask_is_executable` : 20 947 BFS pour quelques dizaines de champs distincts.
+    _geo_fields: Dict[Any, Dict[Tuple[int, int], int]] = _move_spatial_cache(game_state)["geo"]
     _transit_by_level: Dict[int, Set[Tuple[int, int]]] = {}
 
     # Clé (niveau, col, row) : le NIVEAU fait partie de l'identité d'une position — meme
@@ -3653,7 +3719,7 @@ def explain_move_plan_rejection(
                     _transit_by_level[_origin_level] = build_move_transit_blocked(
                         game_state, squad_id, player, _origin_level
                     )
-                _fkey = (o_col, o_row, _origin_level)
+                _fkey = (str(squad_id), int(player), o_col, o_row, _origin_level, budget)
                 _field = _geo_fields.get(_fkey)
                 if _field is None:
                     _field = geodesic_move_reach(
