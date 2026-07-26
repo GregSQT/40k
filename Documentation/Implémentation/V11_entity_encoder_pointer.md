@@ -630,8 +630,9 @@ implémentée à ce stade.
 non émis pour les ennemis → **1 rouge** ; unité active retirée de la ligne 0 → **2 rouges** ;
 restauré → verts.
 
-**Mesures** — `build_squad_observation` : **3,46 ms** (contre 3,95 ms au format plat mesuré en
-§1.8), malgré 13 entités décrites au lieu de 6 : la passe d'engagement est calculée UNE fois pour
+**Mesures** — `build_squad_observation` : **3,5 ms** (contre 3,95 ms au format plat mesuré en
+§1.8 ; ±0,3 ms de dispersion d'une exécution à l'autre, cf. l'entrée d'audit du 2026-07-26),
+malgré 13 entités décrites au lieu de 6 : la passe d'engagement est calculée UNE fois pour
 toutes les entités au lieu d'être refaite par slot. Paramètres de la policy : **2 459 672 →
 2 281 864**, dont 1,05 M pour la tête du CNN (inchangée) — le tronc et les têtes fondent comme
 prévu en §3.4, et un slot ennemi supplémentaire ne coûtera plus de paramètres.
@@ -683,7 +684,7 @@ restauré → verts.
 
 **Vérifications** — épisode complet piloté par la policy pointeur sur le moteur réel
 (130 steps, `game_over`), masque de taille 1062, action choisie toujours dans le masque ;
-`build_squad_observation` **3,00 ms** à 20 slots (contre 3,95 ms au format plat à 5 slots) ;
+`build_squad_observation` ~**3,2 ms** à 20 slots (contre 3,95 ms au format plat à 5 slots) ;
 `obs_size` **5729 → 12284** (mémoire de rollout : 0,64 Go pour 8192 transitions, grille
 comprise). PvP : 27 PASS / 0 FAIL. `pyright` vert.
 
@@ -710,7 +711,7 @@ tous les 25 steps, les DEUX camps) :
 | profils de mêlée | **5** | 10 | ✅ |
 | types de figurines | **5** | 6 | ✅ |
 
-⇒ **0 troncature loguée** sur toute la mesure. `build_squad_observation` : **3,20 ms**
+⇒ **0 troncature loguée** sur toute la mesure. `build_squad_observation` : **3,2 ms**
 (3,95 ms au format plat, qui décrivait pourtant 4 fois moins d'entités).
 
 **Verrous** : 3 tests ajoutés à `test_entity_obs_equivalence.py` (**10** au total) — K couvre le
@@ -758,3 +759,57 @@ vs le gate mono) : c'est lui qui empêche la divergence §9.1 de revenir.
 
 **Vérifications** : 18 fichiers de tests de tir en non-régression (aucun changement), PvP
 27 PASS / 0 FAIL, smoke moteur 3 épisodes complets, `pyright` vert.
+
+### 2026-07-26 — AUDIT « tout est optimal et documenté ? » (la question qui a ouvert ce chantier)
+
+Re-posée après T-F et §1.9. Vérifié, **pas supposé** : chaque chiffre du journal a été recalculé
+depuis le code, chaque affirmation de doc confrontée à la réalité.
+
+**Ce qui a été trouvé et CORRIGÉ dans la foulée** :
+
+1. 🔴 **Plafond du bloc figurines resté à 6 sans raison.** `SQUAD_TOP_K` datait du format plat, où
+   chaque figurine coûtait des paramètres. Depuis T-D, ce bloc passe par un encodeur PARTAGÉ et
+   une agrégation masquée : son plafond ne coûte plus **aucun** paramètre, et l'état par-figurine
+   (EZ, éligibilité au combat) est **déjà calculé pour l'escouade entière**. Mesuré : jusqu'à
+   **12 figurines vivantes** par escouade — la moitié d'une escouade n'était donc pas décrite
+   individuellement, pour une économie de 70 scalaires. **6 → 20**, troncature loguée.
+   `obs_size` **20096 → 20166**.
+2. 🟠 **Deux implémentations de la règle de ciblage** — `_is_valid_shooting_target` (mono) et
+   `_shoot_engagement_blocks_target` (squad), la seconde se déclarant « réplique EXACTEMENT » la
+   première **sans qu'aucun test ne le vérifie**. C'est le motif §9.1 en attente de dérive, et je
+   venais d'en modifier une seule. Test de parité ajouté sur la matrice complète
+   (camp × règle d'arme × cible engagée ou non), unités mono-figurine.
+3. 🟠 **`action_space_size: 1047`** traînait dans **24 fixtures de tests** : clé morte (l'espace
+   d'action est dérivé du moteur depuis la refonte spatiale) portant désormais une valeur FAUSSE
+   (1062). Supprimée partout.
+4. 🟢 7 imports morts dans `observation_builder` (antérieurs au chantier), docstring
+   « slot (0-4) » périmée dans `evaluation_bots`.
+5. 🟢 **Chiffres de mesure du journal** : `build_squad_observation` était cité à 3,46 / 3,00 /
+   3,20 ms selon la tranche — trois valeurs issues de **deux harnais différents**, dont une
+   (3,00) ne se reproduisait pas. Re-mesuré 4 fois sur le même harnais : **3,2 à 3,5 ms** de
+   dispersion. Les entrées portent désormais un ordre de grandeur reproductible, pas une décimale
+   trompeuse. Paramètres de la policy re-vérifiés après T-F : **2 102 423**, inchangés (le K des
+   armes ne coûte rien en poids — c'était bien la promesse de l'encodeur partagé).
+
+**Ce qui a été vérifié et est CONFORME** : `AI_OBSERVATION.md` confronté clé par clé à
+`squad_obs_shapes()` (formes, `obs_size`, nombre de slots) — aucun écart ; aucun identifiant
+d'action en dur hors `macro_intents` / `shared_utils` ; les bots d'évaluation passent tous par
+`mi.SHOOT_SLOTS` (dérivé) ; l'analyzer, le StepLogger et le replay ne lisent **pas** le layout
+d'observation (donc rien à réaligner) ; `check_ai_rules.py` et `hidden_action_finder.py` sont des
+analyseurs statiques qui n'instancient pas le moteur ; les `.get()` ajoutés portent leur
+marqueur de convention ; aucun accesseur de layout supprimé n'est encore référencé.
+
+**Ce qui reste ouvert, et pourquoi ce n'est pas de la dette masquée** :
+
+- **T-G, le run `--new`** : c'est l'utilisateur qui le déclenche (36 h). Tant qu'il n'a pas
+  tourné, **aucune de ces tranches n'a de preuve de win-rate** — elles ont une preuve de
+  conformité et de forme, pas de performance. C'est le seul verdict qui manque.
+- **Observation de la phase de déploiement** : toujours déficiente (obs construite sur la 1ʳᵉ
+  unité du cache, grille dégénérée à (-1,-1), hexes candidats non décrits). Chantier dédié
+  déjà ouvert dans `V11_audit_observation.md` §11 — hors périmètre §0.30, et il exige une
+  observation SPÉCIFIQUE au déploiement, pas un ajustement.
+- **`action_net` conserve 20 colonnes inertes** (les logits de tir sont produits par le
+  pointeur). Assumé et documenté dans `pointer_policy.py` : les retirer exigerait de
+  redimensionner la tête d'action de SB3, donc de toucher l'initialisation orthogonale et la
+  sauvegarde/reprise, pour ~6 k paramètres qui ne reçoivent aucun gradient.
+- **Choix d'arme par l'agent (P3)** : différé, cf. §5.3 — inchangé, et désormais MESURABLE.

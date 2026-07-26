@@ -3,15 +3,12 @@
 observation_builder.py - Builds observations from game state
 """
 
-import os
-import time
 import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
 from shared.data_validation import require_key
 from engine.combat_utils import (
     calculate_hex_distance,
     calculate_pathfinding_distance,
-    has_line_of_sight,
     expected_dice_value,
     normalize_coordinates,
 )
@@ -19,12 +16,10 @@ from engine.game_utils import get_unit_by_id
 from engine.phase_handlers.shooting_handlers import _calculate_save_target, _calculate_wound_target as _calculate_wound_target_engine, compute_unit_los
 from engine.phase_handlers.shared_utils import (
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
-    get_unit_position, require_unit_position,
+    require_unit_position,
     unit_has_rule_effect,
     # PR4 4a: nouveau pipeline d observation squad
     get_fighting_models,
-    wound_threshold, save_threshold,
-    BASE_TO_BASE_SUBHEX,
     # D1 : ordre des slots ennemis IDENTIQUE a l action tir/charge (source unique)
     get_enemy_slot_mapping,
 )
@@ -1316,8 +1311,14 @@ class ObservationBuilder:
     #: Types de figurines par unité (profil défensif + rôle + effectif du type), des DEUX côtés.
     #: Mesuré : jusqu'à 5 types défensifs distincts par escouade.
     K_MODEL_TYPES = 6
-    #: Figurines individuelles de l'unité active (positions + engagement).
-    SQUAD_TOP_K = 6
+    #: Figurines individuelles de l'unité active (positions + engagement). Ce bloc est AGRÉGÉ
+    #: par l'extracteur (aucune action ne désigne une figurine) : son plafond ne coûte donc plus
+    #: aucun paramètre, et l'état par-figurine est de toute façon DÉJÀ calculé pour l'escouade
+    #: entière (les tests d'EZ bouclent sur toutes les figurines vivantes). Le laisser à 6
+    #: n'économisait que des scalaires, au prix de la moitié d'une escouade de 12 — mesuré :
+    #: jusqu'à 12 figurines vivantes par escouade sur les rosters d'entraînement. Tout
+    #: dépassement est LOGUÉ.
+    SQUAD_TOP_K = 20
     SQUAD_N_OBJECTIVE_SLOTS = 5
 
     #: Rôles d'allocation (règle 19), ordre FIGÉ du one-hot. `None` (figurine de base) = tous
@@ -2016,6 +2017,17 @@ class ObservationBuilder:
             relayed_by_mid[mid] = relayed
         sm_cont = obs["self_models_cont"]
         sm_bin = obs["self_models_bin"]
+        if len(alive_mids) > self.SQUAD_TOP_K:
+            # Troncature LOGUÉE, jamais silencieuse (§11). L'ordre place les EXCEPTIONS d'abord :
+            # ce sont les figurines de base qui sortent en premier.
+            from engine.game_utils import add_debug_file_log
+
+            add_debug_file_log(
+                game_state,
+                f"[OBS] escouade {active_squad_id} : {len(alive_mids)} figurines vivantes pour "
+                f"{self.SQUAD_TOP_K} slots — les moins prioritaires ne sont pas observees "
+                f"individuellement (leur profil reste decrit par le bloc TYPES).",
+            )
         for k_idx in range(min(self.SQUAD_TOP_K, len(alive_mids))):
             mid = alive_mids[k_idx]
             m = models_cache[mid]

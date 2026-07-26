@@ -84,7 +84,7 @@ def _config(
 ) -> Dict[str, Any]:
     obs_params = {
         "perception_radius": 25, "max_nearby_units": 10, "max_valid_targets": 5,
-        "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET, "action_space_size": 1047,
+        "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET,
     }
     return {
         "board": {

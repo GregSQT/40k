@@ -222,3 +222,43 @@ def test_both_paths_agree_on_the_monster_vehicle_volet():
         mono_ok = _has_valid_shooting_targets(eng.game_state, _unit(eng, "1"), 1)
         assert (squad_type == SHOOTING_TYPE_CLOSE_QUARTERS) is expected, keywords
         assert mono_ok is expected, keywords
+
+
+# --------------------------------------------------------- parité des deux CIBLAGES
+
+def test_targeting_rule_is_identical_on_both_paths():
+    """`_shoot_engagement_blocks_target` se déclare « réplique EXACTEMENT
+    `_is_valid_shooting_target` » — RIEN ne le vérifiait.
+
+    Deux implémentations de la même règle de ciblage vivent côte à côte (chemin mono/PvP et
+    chemin par-figurine squad/gym). C'est le motif §9.1 : elles ne peuvent que dériver. Ce test
+    les compare sur la matrice complète (camp du tireur × règle d'arme × cible engagée ou non),
+    avec des unités MONO-FIGURINE — le seul cas où les deux granularités (unité vs figurine)
+    doivent coïncider exactement.
+    """
+    from engine.phase_handlers.shared_utils import _shoot_engagement_blocks_target
+
+    cases = [
+        (kw, rules)
+        for kw in ("VEHICLE", "MONSTER", "INFANTRY")
+        for rules in ([], ["CLOSE_QUARTERS"], ["BLAST"], ["CLOSE_QUARTERS", "BLAST"])
+    ]
+    for keywords, rules in cases:
+        eng = _engaged_setup([keywords], [_weapon("W", rules, rng=48)])
+        gs = eng.game_state
+        shooter = _unit(eng, "1")
+        shooter["selectedRngWeaponIndex"] = 0
+        model = gs["models_cache"]["1#0"]
+        weapon = model["RNG_WEAPONS"][0]
+        for target_id in ("2", "3"):   # 2 = engagée avec le tireur, 3 = à distance
+            mono_ok = _is_valid_shooting_target(gs, shooter, _unit(eng, target_id))
+            squad_blocked = _shoot_engagement_blocks_target(
+                gs, "1", target_id,
+                "CLOSE_QUARTERS" in rules,
+                model,
+                "BLAST" in rules,
+            )
+            assert mono_ok is not squad_blocked, (
+                f"divergence mono/squad : {keywords} arme={rules or 'aucune regle'} "
+                f"cible={target_id} — mono autorise={mono_ok}, squad bloque={squad_blocked}"
+            )

@@ -27,7 +27,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 | `allies_wpn_cont` / `_bin` | (8, 20, 13) / (8, 20, 18) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants et bits/params de règles |
 | `allies_types_cont` / `_bin` | (8, 6, 5) / (8, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
 | `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
-| `self_models_cont` / `_bin` | (6, 2) / (6, 3) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement |
+| `self_models_cont` / `_bin` | (20, 2) / (20, 3) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement |
 | `grid` | (7, 32, 32) | grille égocentrique : murs, alliés, ennemis, EZ, objectifs, niveau, couvert |
 
 **Espace d'action** : une action de tir par slot ennemi (`SHOOT_SLOT_BASE + i`, 20 slots depuis
@@ -58,7 +58,7 @@ réseau généralise d'un slot à l'autre et le coût d'un slot supplémentaire 
 grille exclue — calculé par `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`. Historique : 108 (T6) →
 199 (refonte du vecteur, 2026-07-25) → 1011 (profils d'armes et règles, 2026-07-26) → 5729
 (tenseurs d'entités, T-D) → 12284 (20 slots ennemis, T-E) → **20096** (K armes = 10 par registre,
-T-F, 2026-07-26). **Toute évolution du schéma change cette valeur et rend les
+T-F) → **20166** (plafond du bloc figurines 6 → 20, 2026-07-26). **Toute évolution du schéma change cette valeur et rend les
 `.zip` existants incompatibles : le retrain `--new` est obligatoire.**
 
 **Historique et décisions** : `Documentation/Implémentation/V11_audit_observation.md` (§8, §10),

@@ -639,7 +639,11 @@ def _find_active_unit_for_bot(
 def _best_target_slot_by_hp(
     active_unit: Dict[str, Any], game_state: Dict[str, Any]
 ) -> Optional[int]:
-    """Return the target slot index (0-4) of the lowest-HP target, or None."""
+    """Return the target slot index of the lowest-HP target, or None.
+
+    L'intervalle de slots est celui de `macro_intents.SHOOT_SLOTS` (20 depuis V11 T-E), jamais
+    un litteral : le recopier ici en creerait une seconde verite.
+    """
     pool = active_unit.get("valid_target_pool")
     if not pool:
         return None
