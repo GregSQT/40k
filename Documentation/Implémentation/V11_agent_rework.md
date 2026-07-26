@@ -4933,6 +4933,26 @@ accesseurs de layout, pas par des index recopiés).
   K slots fixes exigerait d'inventer un ordre qu'aucune action ne consomme — cf.
   `V11_audit_observation.md` §11).
 - **Listes de longueur variable** (fin des plafonds K) : idem, c'est l'étape architecture.
+- 🔴 **Les règles d'UNITÉ (`config/unit_rules.json`) ne sont PAS observées** — constat vérifié le
+  2026-07-27, **non documenté jusqu'ici, ni comme trou ni comme choix**. Cette tranche a rendu
+  visibles les règles d'**armes** (profils + drapeaux) ; les règles d'unité, elles, n'existent
+  dans aucun schéma du pipeline squad : `UNIT_CONT_FIELDS`/`UNIT_BIN_FIELDS`
+  ([observation_entities.py](../../engine/observation_entities.py), contrat unique des tenseurs
+  d'entités) n'ont aucun champ de règle, et `unit_has_rule_effect` n'apparaît qu'à un seul
+  endroit de tout l'encodage : `_encode_rule_features`, appelée **uniquement** par
+  `build_observation` — le pipeline **mono-figurine legacy** (`obs_size` 357). Le routage
+  ([w40k_core.py](../../engine/w40k_core.py) `_build_observation`) envoie le pipeline squad sur
+  `build_squad_observation`, qui ne passe jamais par là. ⚠️ `AI_OBSERVATION.md` décrit bien
+  « 12 unit-rule flags », mais dans le layout `obs[314:346]` du legacy : lu vite, il fait croire
+  l'inverse. Concerné : les 12 règles vives (`reroll_charge`, `closest_target_penetration`,
+  `charge_after_advance`, `charge_after_flee`, `charge_impact`, `reactive_move`,
+  `move_after_shooting`, `shoot_after_advance`, `shoot_after_flee`, `reroll_1_towound`,
+  `reroll_towound_target_on_objective`, `reroll_1_tohit_fight`, `reroll_1_save_fight`) —
+  l'agent les subit sans les percevoir, exactement le constat qui avait motivé cette section
+  pour les règles d'armes. **Enjeu accru depuis 19.04** (§9.2.8) : une escouade menée par un
+  character porte désormais les règles de son leader, et cette information reste invisible.
+  **Ouvert — arbitrage de périmètre à faire** : le traiter touche `observation_entities.py`,
+  donc `obs_size` et le cœur du chantier `V11_entity_encoder_pointer.md` (T-D).
 
 ### 9.2.7 ✅ CORRIGÉ le 2026-07-26 (tranche T-B) — les types de tir 10.05 / 10.06 existent enfin pour l'agent
 
