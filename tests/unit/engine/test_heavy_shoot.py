@@ -8,8 +8,9 @@ on the battlefield this turn ; no model in that unit has moved more than 3" this
 
 Etat des trois clauses dans ce moteur :
 - unengaged            : TESTE (meme predicat que le gate de tir 10.06).
-- pas pose ce tour     : VACANT (ni reserves ni arrivees en cours de bataille modelisees ; le
-                         deploiement precede le 1er tour).
+- pas pose ce tour     : TESTE sur `deployed_on_turn` (0 = pre-bataille, N = arrivee de
+                         reserve au tour N). Aucune arrivee en cours de bataille n existe encore
+                         (reserves 20 non modelisees), mais la clause est cablee.
 - aucune fig > 3"      : borne CONSERVATRICE « aucune figurine n a bouge » (units_moved /
                          units_advanced) — la distance parcourue par figurine n est pas
                          conservee par le moteur. Plus stricte que le PDF, jamais laxiste.
@@ -19,6 +20,7 @@ Discrimination verrouillee (contre-epreuve mutation : neutraliser `bs = max(2, b
 - HEAVY + a bouge (units_moved)      -> pas de bonus (4)
 - HEAVY + a advance (units_advanced) -> pas de bonus (4)
 - HEAVY + stationnaire mais ENGAGE   -> pas de bonus (4)
+- HEAVY + POSEE CE TOUR (arrivee de reserve) -> pas de bonus (4)
 - sans HEAVY + stationnaire          -> pas de bonus (4)
 """
 import random
@@ -39,7 +41,7 @@ def _neutralise(monkeypatch, *, engaged=False):
     )
 
 
-def _game_state(weapon_rules, *, moved=False, advanced=False):
+def _game_state(weapon_rules, *, moved=False, advanced=False, deployed_on_turn=0):
     """1 tireur (escouade '1', BS4) + 1 cible. moved/advanced marquent l escouade."""
     weapon = {"BS": 4, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "WEAPON_RULES": weapon_rules, "display_name": "Gun"}
     attacker = {"id": "A1", "squad_id": "1", "T": 4, "player": 0, "RNG_WEAPONS": [weapon]}
@@ -50,8 +52,9 @@ def _game_state(weapon_rules, *, moved=False, advanced=False):
         "squad_models": {"2": ["T1"]},
         "squad_cache": {"2": {"model_count_at_start": 1}},
         "units_cache": {"2": {"col": 9, "row": 9, "VALUE": 10.0, "player": 1}},
-        "unit_by_id": {"1": {"id": "1", "UNIT_RULES": []}, "2": {"id": "2", "UNIT_RULES": []}},
-        "objectives": [],
+        "unit_by_id": {"1": {"id": "1", "UNIT_RULES": [], "deployed_on_turn": deployed_on_turn},
+                       "2": {"id": "2", "UNIT_RULES": [], "deployed_on_turn": 0}},
+        "objectives": [], "turn": 2,
         "units_moved": {"1"} if moved else set(),
         "units_advanced": {"1"} if advanced else set(),
     }
@@ -82,6 +85,22 @@ def test_heavy_engage_pas_de_bonus(monkeypatch):
     gs, intent = _game_state(["HEAVY"])
     result = _manual_roll_intent(gs, intent, {})
     assert result["bs"] == 4
+
+
+def test_heavy_pose_ce_tour_pas_de_bonus(monkeypatch):
+    """24.16 clause 2 : unite arrivee de reserve CE TOUR -> aucun bonus (BS reste 4)."""
+    _neutralise(monkeypatch)
+    gs, intent = _game_state(["HEAVY"], deployed_on_turn=2)  # turn == 2 dans la fixture
+    result = _manual_roll_intent(gs, intent, {})
+    assert result["bs"] == 4
+
+
+def test_heavy_pose_un_tour_avant_bonus_conserve(monkeypatch):
+    """Discrimination : arrivee au tour PRECEDENT -> le bonus s applique."""
+    _neutralise(monkeypatch)
+    gs, intent = _game_state(["HEAVY"], deployed_on_turn=1)
+    result = _manual_roll_intent(gs, intent, {})
+    assert result["bs"] == 3
 
 
 def test_sans_heavy_pas_de_bonus(monkeypatch):

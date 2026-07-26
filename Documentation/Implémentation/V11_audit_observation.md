@@ -625,7 +625,11 @@ mission).
   rerolls déjà stables). Puis brancher +7/+8 (et idéalement bots / reward) dessus. Ne pas coder de
   5ᵉ logique inline avant (divergence interdite).
 
-> **Statut** : les deux sont **en attente du signal utilisateur** (portage non terminé). Rien codé.
+> **Statut (mis à jour 2026-07-26)** : le portage des capacités est **terminé**, le signal est levé.
+> - `deployed_on_turn` : ✅ **codé côté MOTEUR** (création d'unité + commit de déploiement) et déjà
+>   consommé par la clause 2 de [HEAVY] 24.16. Le one-hot d'OBSERVATION (+3) reste à dériver.
+> - `+7/+8` conscients des règles : ⏳ toujours à faire — c'est maintenant possible, la liste des
+>   règles résolues ne bouge plus.
 
 ---
 
@@ -887,11 +891,41 @@ move. Canal « menace ennemie » différé.
   consomme (contrairement aux ennemis, ordonnés par `get_enemy_slot_mapping`) — même défaut que D1.
 - **Listes de longueur variable** (fin des plafonds 6 figurines / 5 escouades) : idem, archi.
 
-### À coder — dépendant du portage des capacités (après stabilisation)
-- Profils bruts **offensifs/défensifs** (escouade, ennemis, alliées) avec **flags de règles à effet
-  réel** — la liste des règles exposées suit la liste des règles résolues.
-- **Feature déploiement/réserve** one-hot 3 états dérivée de `deployed_on_turn` (source partagée HEAVY,
-  §8 « Décisions actées »).
+### À coder — le portage des capacités est TERMINÉ (2026-07-26), ces points sont débloqués
+
+> Le signal attendu est levé : toutes les règles d'armes du PDF 24 présentes dans les armories sont
+> résolues dans le chemin vif, tir ET mêlée (cf. `V11_agent_rework.md` §9.2.1–§9.2.5).
+> **L'observation est donc, à ce jour, le seul maillon qui manque** : l'agent SUBIT ces règles sans
+> en percevoir une seule.
+
+1. **Profils d'armes bruts + flags de règles à effet réel** (escouade, ennemis, alliées) — 🔴 **le
+   trou principal**. Le vecteur squad (199-d) ne contient **aucun** profil d'arme ni bit de règle :
+   ni NB/ATK/STR/AP/DMG/RNG, ni [DEVASTATING WOUNDS], [SUSTAINED HITS], [LETHAL HITS], [ANTI-X],
+   [MELTA], [TORRENT], [TWIN-LINKED], [BLAST], [CLEAVE], [EXTRA ATTACKS], [PRECISION], [PSYCHIC],
+   [HAZARDOUS], [HEAVY], [RAPID FIRE], [IGNORES COVER]. La liste exposée suit exactement la liste
+   des règles **résolues** (elle est désormais stable). Deux paramètres à exposer avec leur règle
+   (X de SUSTAINED/MELTA/RAPID FIRE/CLEAVE/BLAST, Y+ de ANTI-X) — et le **keyword ciblé** de ANTI-X,
+   sans quoi le canal est du bruit (l'effet dépend des keywords de la CIBLE, cf. 19.03).
+2. **Feature déploiement/réserve** one-hot 3 états dérivée de `deployed_on_turn` — ✅ **la source
+   moteur EXISTE depuis le 2026-07-26** (`engine/game_state.py` à la création, écrite au commit de
+   déploiement dans `deployment_handlers._apply_deploy_plan` ; 0 = pré-bataille, N = arrivée de
+   réserve au tour N, `None` = pas encore sur le board). Elle est déjà consommée par la clause 2 de
+   [HEAVY] 24.16. Reste à en **dériver le one-hot** dans l'observation (+3 dimensions).
+3. **Distance de déplacement par figurine ce tour** — ➕ **à ajouter** (demande utilisateur
+   2026-07-26). Deux usages, une seule donnée :
+   - **Règle** : clause 3 de [HEAVY] 24.16 (« no model in that unit has moved more than 3\" this
+     turn »). Aujourd'hui le moteur ne conserve **que** le booléen `units_moved`/`units_advanced`,
+     donc la clause est appliquée sous sa borne conservatrice « aucune figurine n'a bougé » — plus
+     stricte que la règle, jamais laxiste, mais fausse dès qu'une unité se repositionne de 2\".
+   - **Observation** : savoir de combien on a déjà bougé conditionne l'advance, la charge et le
+     move-after-shooting ; c'est une grandeur continue brute (subhexes), pas un drapeau.
+   - **Source** : le coût GÉODÉSIQUE du chemin (pas la distance à vol d'oiseau — un contournement
+     de mur coûte plus que l'écart départ↔arrivée). Il est déjà calculé par le pool de destinations
+     de move ; il faut le porter jusqu'à `commit_move` (qui ne reçoit aujourd'hui que
+     `(mid, col, row, level, orientation)`) et l'accumuler par figurine dans un
+     `moved_distance_by_model` remis à zéro au début du tour du joueur.
+   - `obs_size` : +1 par figurine observée (ou +2 : max et somme sur l'escouade) — à trancher au
+     moment de l'implémentation, avec le bloc figurines.
 
 ### Architecture (après les correctifs d'observation)
 - **Set-based Niveau 1** (Deep Sets, listes variables) → retrain → mesurer le win-rate.

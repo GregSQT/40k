@@ -141,6 +141,29 @@ def test_trois_mw_si_toutes_les_figurines_sont_vehicules(monkeypatch):
     assert gs["models_cache"]["A0"]["HP_CUR"] == 6, "véhicule : 3 MW"
 
 
+def test_le_log_est_publie_avant_le_choix_des_pertes(monkeypatch):
+    """Le combat log doit montrer le jet de hasard AVANT que le joueur ne désigne ses pertes.
+
+    Vérifié sur le chemin MANUEL (défenseur humain) : au moment où le moteur rend la main
+    (`waiting_for_player`), la ligne `[HAZARD]` est DÉJÀ dans `action_logs` — et elle n'y est
+    qu'une seule fois (elle est complétée en place, jamais ré-émise)."""
+    from engine.phase_handlers.shared_utils import roll_hazard_for_unit
+
+    gs = _game_state(["HAZARDOUS"], shooters=2)
+    gs["gym_training_mode"] = False
+    gs["player_types"] = {"0": "human", "1": "human"}
+    for mid in ("A0", "A1"):
+        gs["models_cache"][mid].update({"HP_CUR": 3, "HP_MAX": 3})
+    monkeypatch.setattr(random, "randint", lambda a, b: 1)  # jet raté
+
+    roll_hazard_for_unit("1", gs, False, n_rolls=1, context_label="Hazardous")
+
+    hazard_logs = [l for l in gs["action_logs"] if l.get("type") == "hazard"]
+    assert len(hazard_logs) == 1, "la ligne hazard doit être publiée une seule fois"
+    assert "[HAZARD]" in hazard_logs[0]["message"]
+    assert "pending_hazard_allocation" in gs, "le joueur doit encore avoir à choisir ses pertes"
+
+
 def test_une_seule_figurine_vehicule_ne_suffit_pas(monkeypatch):
     """06.03 dit « EACH model » : une escouade mixte infanterie/véhicule reste à 1 MW.
     (Sans le test par-figurine, l'union des keywords 19.03 aurait donné 3 MW à tort.)"""

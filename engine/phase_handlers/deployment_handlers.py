@@ -1037,6 +1037,15 @@ def _apply_deploy_plan(
     if entry is not None:
         set_unit_coordinates(unit, int(entry["col"]), int(entry["row"]))
         unit["level"] = int(require_key(entry, "level"))
+    # Statut de mise en place (source unique) — clause « that unit was not set up on the
+    # battlefield this turn » de [HEAVY] 24.16, et base de la feature d'observation
+    # déploiement/réserve (V11_audit_observation.md §8). Sentinelle None = pas encore sur le
+    # board. Une mise en place pendant la PHASE de déploiement est PRÉ-BATAILLE (tour 0), pas
+    # « this turn » : sans cette distinction, HEAVY serait refusé à tort au 1er tour. Une arrivée
+    # en cours de bataille (réserves, 20 — non modélisées à ce jour) porterait le tour courant.
+    unit["deployed_on_turn"] = (
+        0 if require_key(game_state, "phase") == "deployment" else int(require_key(game_state, "turn"))
+    )
     rebuild_choice_timing_index(game_state)
     return True, {}
 

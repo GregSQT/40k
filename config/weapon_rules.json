@@ -21,22 +21,22 @@
   },
   "ASSAULT": {
     "name": "Assault",
-    "description": " The bearer can shoot with this weapon even if he Advanced.",
+    "description": "Units containing one or more models with this weapon can shoot using assault shooting (they can shoot after Advancing).",
     "has_parameter": false
   },
   "BLAST": {
     "name": "Blast",
-    "description": "Add 1 to the weapon Attacks characteristic for every 5 models in the target unit.",
+    "description": "Each time you gather attack dice for this weapon, add one additional attack dice for every five models that were in the target unit in the Select Targets step (rounding down); a Blast X weapon adds X dice per five models.",
     "has_parameter": false
   },
   "CLEAVE": {
     "name": "Cleave",
-    "description": "Each time an attack is made with this weapon, it also hits X additional enemy models within the bearer's Engagement Range.",
+    "description": "Each time you gather attack dice for this weapon, if you only selected one target for all of that weapon's attacks, add X additional attack dice for every five models that were in the target unit in the Select Targets step (rounding down).",
     "has_parameter": true
   },
   "DEVASTATING_WOUNDS": {
     "name": "Devastating Wounds",
-    "description": "No saving throw can be mande against a critical wound rolled with this weapon.",
+    "description": "Each time an attack made with this weapon results in a critical wound, the attack sequence ends and the target suffers a number of mortal wounds equal to the weapon's Damage characteristic, inflicted after any normal damage. Those mortal wounds can damage at most one model per critical wound.",
     "has_parameter": false
   },
   "EXTRA_ATTACKS": {
@@ -46,12 +46,12 @@
   },
   "HAZARDOUS": {
     "name": "Hazardous",
-    "description": "After the bearer shoots or fights, roll one Hazardous test (one D6). If the roll is 1, the beared suffers 3 Mortal Wounds.",
+    "description": "Each time a unit is selected to shoot or to fight, after it has resolved all of its attacks, make one hazard roll (one D6) per Hazardous weapon selected: on a 1-2 that unit suffers 1 mortal wound, or 3 mortal wounds if every model in the unit is a Monster or Vehicle.",
     "has_parameter": false
   },
   "HEAVY": {
     "name": "Heavy",
-    "description": "Add 1 to Hit rolls if the bearer Remained Stationary this turn.",
+    "description": "Add 1 to the Hit roll in your Shooting phase if the attacking unit is unengaged, was not set up on the battlefield this turn, and no model in it moved more than 3\" this turn.",
     "has_parameter": false
   },
   "IGNORES_COVER": {
@@ -66,7 +66,7 @@
   },
   "LETHAL_HITS": {
     "name": "Lethal Hits",
-    "description": "Each time an attack is made with such a weapon, a Critical Hit automatically wounds the target.",
+    "description": "Each time an attack made with this weapon results in a critical hit, you can choose for that attack to automatically wound the target (no wound roll is made, so it cannot be a critical wound).",
     "has_parameter": false
   },
   "MELTA": {
@@ -81,12 +81,12 @@
   },
   "PRECISION": {
     "name": "Precision",
-    "description": "The attacks having this rule can directly target at visible CHARACTER models in the target unit.",
+    "description": "While resolving attacks made with this weapon, at the start of the Allocation Order step, if the target unit contains one or more CHARACTER models visible to one or more attacking models, the attacking player can make one such CHARACTER's allocation group the current allocation group.",
     "has_parameter": false
   },
   "PSYCHIC": {
     "name": "Psychic",
-    "description": "The attack is psychic.",
+    "description": "Each time an attack is made with this weapon, you can ignore any or all modifiers to that attack's BS/WS characteristic and to the hit roll. Attacks made with this weapon are psychic attacks.",
     "has_parameter": false
   },
   "RAPID_FIRE": {
@@ -96,7 +96,7 @@
   },
   "SUSTAINED_HITS": {
     "name": "Sustained Hits",
-    "description": "Each Critical Hit scores X additional hits on the target.",
+    "description": "Each time an attack made with this weapon results in a critical hit, that attack scores X additional hits on the target.",
     "has_parameter": true
   },
   "TORRENT": {
@@ -106,7 +106,7 @@
   },
   "TWIN_LINKED": {
     "name": "Twin Linked",
-    "description": "You can re-roll each attack with this weapon Wound roll.",
+    "description": "Each time an attack is made with this weapon, you can re-roll the wound roll.",
     "has_parameter": false
   }
 }

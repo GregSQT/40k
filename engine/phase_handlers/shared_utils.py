@@ -3798,8 +3798,11 @@ def roll_hazard_for_unit(
         f"- {fails} fail(s) - {total_wounds} mortal wound(s)"
     )
     # Détails par-figurine (06.02) : remplis pendant l'attribution, comme shootDetails au tir.
-    # La ligne de log est émise À LA FIN de l'allocation (calquée sur le tir), pas au roll :
-    # on diffère le payload dans game_state["hazard_pending_log"] tant que l'allocation court.
+    # ⚠ La ligne de log est émise IMMÉDIATEMENT, au jet — AVANT que le joueur ne choisisse ses
+    # pertes. Sinon le joueur doit désigner des figurines sans savoir combien de blessures
+    # mortelles il encaisse ni d'où elles viennent. `append_action_log` mute l'entrée en place
+    # et conserve la référence : les `hazardDetails` viennent compléter CETTE ligne pendant
+    # l'attribution, sans en créer une seconde.
     details: List[Dict[str, Any]] = []
     log_payload = {
         "type": "hazard",
@@ -3811,30 +3814,21 @@ def roll_hazard_for_unit(
         "result": f"{total_wounds} MW",
         "hazardDetails": details,
     }
+    # Émission AVANT toute attribution : le jet et son résultat sont visibles dans le combat log
+    # au moment où le joueur doit choisir les pertes (cf. commentaire ci-dessus).
+    append_action_log(game_state, log_payload)
     if total_wounds <= 0:
-        append_action_log(game_state, log_payload)  # rien à allouer : émission immédiate
         return total_wounds
     if auto_resolve:
         # IA / gym : attribution 06.02 deterministe, sans prompt. Retrait figurine par
         # figurine via destroy_model (PAS l'agregat units_cache qui ne retirait rien en multi-fig).
-        game_state["hazard_pending_log"] = log_payload
         allocate_mortal_wounds(game_state, str(unit_id), total_wounds, auto_resolve, details)
-        _finalize_hazard_log(game_state)  # auto : termine sans clic → emission immediate
         return total_wounds
     # Defenseur humain : allocation manuelle des pertes (groupes 05.03 + declaration d'ordre +
-    # choix de figurine), calquee sur le tir. log_payload est emis a la FIN de l'allocation,
-    # complete de ses hazardDetails (cf. build_manual_hazard_allocation).
+    # choix de figurine), calquee sur le tir. La ligne de log est DEJA affichee ; l allocation
+    # ne fait que la completer de ses hazardDetails (cf. build_manual_hazard_allocation).
     build_manual_hazard_allocation(game_state, str(unit_id), total_wounds, log_payload)
     return total_wounds
-
-
-def _finalize_hazard_log(game_state: Dict[str, Any]) -> None:
-    """Émet la ligne de log hazard différée, une fois l'attribution des MW terminée
-    (calquée sur le tir : la ligne n'apparaît qu'avec ses détails complets). No-op si
-    aucun payload en attente."""
-    payload = game_state.pop("hazard_pending_log", None)
-    if payload is not None:
-        append_action_log(game_state, payload)
 
 
 def select_eligible_models(game_state: Dict[str, Any], squad_id: str) -> List[str]:
@@ -6401,6 +6395,26 @@ def roll_charge_distance(
     return random.randint(1, 6) + random.randint(1, 6)
 
 
+def _unit_was_set_up_this_turn(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """L unite a-t-elle ete mise en place sur le champ de bataille CE TOUR (clause 2 de 24.16) ?
+
+    Source unique : `deployed_on_turn` (pose par le commit de deploiement). Conventions :
+    0 = mise en place PRE-BATAILLE (phase de deploiement, ou positions fixees par le scenario) ;
+    N > 0 = arrivee de reserve au tour N ; None = pas encore sur le board.
+
+    Une unite non deployee ne tire pas : `None` ne peut pas etre « posee ce tour » -> False.
+    Champ EXIGE (toute unite passe par create_unit / _build_enhanced_unit) : son absence est un
+    bug de construction d unite, pas un cas metier -> erreur explicite.
+    """
+    unit = get_unit_by_id(game_state, str(squad_id))
+    if unit is None:
+        raise KeyError(f"_unit_was_set_up_this_turn: unite {squad_id!r} introuvable")
+    deployed_on_turn = require_key(unit, "deployed_on_turn")
+    if deployed_on_turn is None:
+        return False
+    return int(deployed_on_turn) == int(require_key(game_state, "turn"))
+
+
 def _heavy_unit_is_engaged(game_state: Dict[str, Any], squad_id: str) -> bool:
     """L unite est-elle ENGAGEE (clause 1 de [HEAVY] 24.16) ?
 
@@ -6502,9 +6516,11 @@ def _manual_roll_intent(
     # +1 au jet de touche = seuil BS ameliore de 1, plancher 2 (un 1 non modifie rate toujours,
     # 05.01). Les trois clauses, dans l ordre du PDF :
     #  (1) unengaged           -> teste, meme predicat que le gate de tir 10.06 ;
-    #  (2) pas pose ce tour    -> VACANT : le moteur ne modelise ni reserves ni arrivees en cours
-    #      de bataille ; le deploiement a lieu AVANT le 1er tour (pre-battle), donc aucune unite
-    #      n est jamais « set up this turn ». A rebrancher si les reserves (20) sont implementees ;
+    #  (2) pas pose ce tour    -> teste sur `deployed_on_turn` (pose par le commit de deploiement,
+    #      source unique partagee avec la feature d observation deploiement/reserve) : 0 =
+    #      pre-bataille, N = arrivee de reserve au tour N. Aujourd hui aucune arrivee en cours de
+    #      bataille n existe (reserves 20 non modelisees) donc la clause est toujours satisfaite,
+    #      mais elle est CABLEE : le jour ou les reserves arrivent, HEAVY sera juste sans retouche ;
     #  (3) aucune fig > 3"     -> le moteur ne conserve pas la DISTANCE parcourue par figurine
     #      (units_moved est booleen). On applique donc la borne CONSERVATRICE « aucune figurine
     #      n a bouge » : strictement plus stricte que le PDF (elle refuse le bonus quand le PDF
@@ -6520,7 +6536,11 @@ def _manual_roll_intent(
             _heavy_sid not in game_state.get("units_moved", set())
             and _heavy_sid not in game_state.get("units_advanced", set())
         )
-        if _remained_stationary and not _heavy_unit_is_engaged(game_state, _heavy_sid):
+        if (
+            _remained_stationary
+            and not _heavy_unit_is_engaged(game_state, _heavy_sid)
+            and not _unit_was_set_up_this_turn(game_state, _heavy_sid)
+        ):
             bs = max(2, bs - 1)
     strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))  # get allowed
     ap = int(weapon.get("AP", 0))  # get allowed
@@ -7212,11 +7232,14 @@ def _resolve_one_hazard_wound(
 def _finalize_hazard_alloc_log(
     game_state: Dict[str, Any], alloc: Dict[str, Any], ctx: ManualAllocCtx
 ) -> None:
-    """Emet la ligne de log hazard differee, completee de ses hazardDetails, en fin
-    d allocation manuelle (calquee sur le tir : log emis avec ses details complets)."""
+    """Complete la ligne de log hazard DEJA emise avec ses details par-figurine.
+
+    La ligne est publiee au JET (roll_hazard_for_unit), avant que le joueur ne choisisse ses
+    pertes : `append_action_log` a mute le payload en place et l a laisse dans `action_logs`,
+    donc ecrire ici dans le meme dict met a jour la ligne existante — il ne faut SURTOUT PAS
+    la re-emettre (elle apparaitrait deux fois)."""
     payload = alloc["hazard_log_payload"]
     payload["hazardDetails"] = alloc["hazard_details"]
-    append_action_log(game_state, payload)
 
 
 HAZARD_CTX = ManualAllocCtx(
