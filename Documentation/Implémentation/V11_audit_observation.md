@@ -209,7 +209,7 @@ Donc une feature **LoS/couvert par ennemi pré-calculée** reste justifiée, mai
 
 **R6 — Réserve de méthode (inchangée, confirmée).**
 L'observation optimale se définit **par rapport aux décisions**. Ici les décisions tir/charge/cible
-existent **déjà** (espace d'action 1047), donc les manques §3.4 sont pertinents **maintenant**.
+existent **déjà** (espace d'action 1047 — **1062 depuis §0.30 T-E**, 20 slots de tir), donc les manques §3.4 sont pertinents **maintenant**.
 Les features plus fines resteront à réévaluer quand P2/P3 (mécanisme de décision) précisera les
 choix — mais corriger +7/+8 (§3.3) et le doublon (§3.2) est valable **quelle que soit** l'issue de
 P2/P3.
@@ -227,7 +227,7 @@ l'optimalité, on part ici des **décisions réelles** de l'agent (espace d'acti
 dérive l'information suffisante par décision. C'est le seul moyen de prouver la couverture.
 
 ### 5bis.1 Ce que l'agent décide RÉELLEMENT (vérifié)
-Espace d'action = 1047 ([macro_intents.py:19-32](../../engine/macro_intents.py#L19)) :
+Espace d'action = 1047 ([macro_intents.py](../../engine/macro_intents.py)) — **1062 depuis §0.30 T-E** (les slots de tir passent de 5 à 20) :
 - **1024** cases de la grille égocentrique = **où bouger** (phase move).
 - **wait**.
 - **5** slots de tir = **quel ennemi tirer** (parmi 5 slots).
@@ -381,7 +381,7 @@ slot N » vise un slot) → on conserve les 5 embeddings, le pooling n'est qu'un
    l'archi** (dérivable de HP>0 en attendant, donc pas urgent avant le pooling).
 3. **Rester en aval de `VecNormalize`** : découper le `vec` DANS l'extracteur (le Dict `{vec,grid}`
    et la normalisation running-mean restent transparents).
-4. **Masque d'action inchangé** : les 1047 logits finaux restent masqués par MaskablePPO.
+4. **Masque d'action inchangé** : les logits finaux (1047, **1062 depuis T-E**) restent masqués par MaskablePPO. ⚠️ Le « Niveau 2 » esquissé ici est LIVRÉ (tête pointeur, §0.30 T-E) : les logits de tir viennent d'un produit scalaire sur les embeddings ennemis, et le masquage reste celui de MaskablePPO.
 
 ### 7.5 Séquencement retenu
 1. **D1** (réalignement des slots) — fait.
@@ -920,11 +920,14 @@ move. Canal « menace ennemie » différé.
 - ✅ **Contrôle d'objectif branché sur le checkpoint 14.02** (fin de phase/tour) dans le chemin
   gym, qui ne l'exécutait jamais — l'observation le lit au lieu de le recalculer (§8 T8).
 
-### À coder — reste indépendant du portage des capacités
-- **Bloc E « escouades amies »** : spécifié en longueur variable (§10) → part avec l'archi
-  set-based. Le faire en K slots fixes exigerait d'inventer un ordre de slots qu'aucune action ne
-  consomme (contrairement aux ennemis, ordonnés par `get_enemy_slot_mapping`) — même défaut que D1.
-- **Listes de longueur variable** (fin des plafonds 6 figurines / 5 escouades) : idem, archi.
+### ✅ FAIT le 2026-07-26 — l'architecture set-based est livrée (§0.30, T-D→T-F)
+- **Bloc E « escouades amies »** : ✅ **livré**. Il attendait l'archi set-based pour une raison
+  précise — en K slots fixes, il aurait fallu inventer un ordre qu'aucune action ne consomme.
+  Les alliés étant désormais **agrégés** (permutation-invariant), la question disparaît.
+- **Plafonds** : les slots ennemis passent de 5 à **20** (tête pointeur : un slot ne coûte plus
+  de paramètres), les profils d'armes à **10 par registre des deux côtés**, et les types de
+  figurines existent aussi côté ennemi. Tout dépassement résiduel est **logué**.
+- Détail, mesures et verrous → [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md) §6.
 
 ### ✅ FAIT le 2026-07-26 — les 3 points débloqués par la fin du portage des capacités
 

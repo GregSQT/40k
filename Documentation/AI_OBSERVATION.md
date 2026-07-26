@@ -23,12 +23,18 @@ lecture, jamais une copie de chiffres qui dériverait.
 | Clé | Forme | Contenu |
 |---|---|---|
 | `global_cont` / `global_bin` | (6,) / (12,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, force d'usure, mon tour, phase, contrôle + présence des 5 objectifs |
-| `allies_cont` / `allies_bin` | (K_a, 19) / (K_a, 17) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades |
-| `allies_wpn_cont` / `_bin` | (K_a, K_w, 13) / (K_a, K_w, 18) | profils d'armes par unité (tir puis mêlée), avec porteurs vivants et bits/params de règles |
-| `allies_types_cont` / `_bin` | (K_a, K_t, 5) / (K_a, K_t, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
-| `enemies_*` | idem avec K_e | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
+| `allies_cont` / `allies_bin` | (8, 19) / (8, 17) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades |
+| `allies_wpn_cont` / `_bin` | (8, 20, 13) / (8, 20, 18) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants et bits/params de règles |
+| `allies_types_cont` / `_bin` | (8, 6, 5) / (8, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
+| `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
 | `self_models_cont` / `_bin` | (6, 2) / (6, 3) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement |
 | `grid` | (7, 32, 32) | grille égocentrique : murs, alliés, ennemis, EZ, objectifs, niveau, couvert |
+
+**Espace d'action** : une action de tir par slot ennemi (`SHOOT_SLOT_BASE + i`, 20 slots depuis
+T-E) ; les logits de ces actions sont produits par une **tête pointeur** (`ai/pointer_policy.py`)
+qui score `q · e_i` sur les embeddings — un slot de plus ne coûte donc aucun paramètre. Le
+mapping slot ↔ escouade est rafraîchi : les slots des escouades mortes sont rendus, et toute
+escouade vivante sans slot en reçoit un (une escouade vivante mappée ne change JAMAIS de slot).
 
 **Pourquoi ce format.** Au format plat, la première couche du réseau portait un jeu de poids
 DISTINCT par slot ennemi (mesuré : 640 paramètres par dimension d'observation, ~226 k par slot) :
@@ -50,8 +56,9 @@ réseau généralise d'un slot à l'autre et le coût d'un slot supplémentaire 
 
 **`obs_size`** (config d'agent, `observation_params.obs_size`) = nombre TOTAL de scalaires,
 grille exclue — calculé par `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`. Historique : 108 (T6) →
-199 (refonte du vecteur, 2026-07-25) → 1011 (profils d'armes et règles, 2026-07-26) → **5729**
-(tenseurs d'entités, 2026-07-26). **Toute évolution du schéma change cette valeur et rend les
+199 (refonte du vecteur, 2026-07-25) → 1011 (profils d'armes et règles, 2026-07-26) → 5729
+(tenseurs d'entités, T-D) → 12284 (20 slots ennemis, T-E) → **20096** (K armes = 10 par registre,
+T-F, 2026-07-26). **Toute évolution du schéma change cette valeur et rend les
 `.zip` existants incompatibles : le retrain `--new` est obligatoire.**
 
 **Historique et décisions** : `Documentation/Implémentation/V11_audit_observation.md` (§8, §10),
