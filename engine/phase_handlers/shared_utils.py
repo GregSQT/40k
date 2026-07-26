@@ -7005,10 +7005,11 @@ def unit_can_reroll_charge(game_state: Dict[str, Any], unit_id: str) -> bool:
     « When this unit makes a charge, it can reroll the charge roll. » Regle d UNITE (pas
     d arme), portee par les leaders Orks (Unstoppable Valour) et par 5 characters SM.
 
-    ⚠️ 19.04 NON IMPLEMENTE (audit 2026-07-26, cf. V11_agent_rework.md §9.2.8) : sur une unite
-    ATTACHEE, la regle du leader n est PAS vue ici. `_unit_has_rule_effect` lit les UNIT_RULES
-    de l ESCOUADE, et le fold (`_fold_attached_characters`) pose celles du character sur
-    `models[i]`, jamais sur l escouade — un Captain attache perd donc son reroll_charge.
+    Sur une unite ATTACHEE, la regle du leader vaut pour toute l unite (19.04, implemente le
+    2026-07-27, cf. V11_agent_rework.md §9.2.8) : `_unit_has_rule_effect` lit les UNIT_RULES de
+    l ESCOUADE, qui sont l union EN VIGUEUR de ses sources vivantes — recalculee a chaque mort
+    par `recompute_unit_rules_in_effect`. Un Captain attache confere donc bien son reroll_charge
+    a l escouade, et le lui retire en mourant.
     """
     unit = get_unit_by_id(game_state, str(unit_id))
     if unit is None:
