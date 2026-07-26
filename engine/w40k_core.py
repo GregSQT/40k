@@ -2791,11 +2791,25 @@ class W40KEngine(gym.Env):
 
 
     def _resume_after_hazard(self, uid: str) -> Tuple[bool, Dict[str, Any]]:
-        """Reprise du flux move après attribution du hazard : unité morte → fin d'activation
-        sans move (``desperate_escape_died``) ; sinon → pool Fall Back + preview."""
+        """Reprise du flux après attribution du hazard, selon l'ORIGINE du jet.
+
+        - ``shoot`` / ``fight`` : [HAZARDOUS] 24.15, déclenché APRÈS que l'unité a résolu
+          toutes ses attaques. Il n'y a plus rien à reprendre : l'activation est terminée.
+        - ``move`` (défaut historique) : Desperate Escape 09.07, déclenché AVANT le fall back —
+          unité morte → fin d'activation sans move ; sinon → pool Fall Back + preview.
+        """
         from engine.phase_handlers.shared_utils import is_unit_alive
         from engine.phase_handlers import movement_handlers as _mh
         sid = str(uid)
+        hazard_origin = self.game_state.pop("hazard_origin", "move")
+        if hazard_origin in ("shoot", "fight"):
+            return True, {
+                "action": f"squad_{hazard_origin}_manual_alloc",
+                "unitId": sid,
+                "activation_complete": True,
+                "waiting_for_player": False,
+                "done": True,
+            }
         if not is_unit_alive(sid, self.game_state):
             _mh._invalidate_all_destination_pools_after_movement(self.game_state)
             _mh.movement_clear_preview(self.game_state)
@@ -5588,8 +5602,22 @@ class W40KEngine(gym.Env):
         elif action_name == "squad_charge":
             squad_id = semantic["squad_id"]
             target_squad_id = semantic["target_squad_id"]
-            charge_roll = random.randint(1, 6) + random.randint(1, 6)
+            from engine.phase_handlers.shared_utils import (
+                roll_charge_distance, unit_can_reroll_charge,
+            )
+            charge_roll = roll_charge_distance(self.game_state, squad_id)
             plan = charge_build_valid_plan(self.game_state, squad_id, [target_squad_id], charge_roll)
+            # `reroll_charge` (unit_rules.json ; 19.04 pour une unité attachée) : « it CAN reroll
+            # the charge roll ». La décision est prise sur le seul critère qui compte et qui est
+            # ici connu sans approximation — le jet n'atteint aucune destination légale au contact
+            # de la cible. Un dé ne se relance qu'une fois (01 Core, Re-rolls) : une seule tentative.
+            if plan is None and unit_can_reroll_charge(self.game_state, squad_id):
+                charge_roll = roll_charge_distance(
+                    self.game_state, squad_id, previous_roll=charge_roll
+                )
+                plan = charge_build_valid_plan(
+                    self.game_state, squad_id, [target_squad_id], charge_roll
+                )
             unit = get_unit_by_id(squad_id, self.game_state)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable pour squad_charge")

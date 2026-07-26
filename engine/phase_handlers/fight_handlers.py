@@ -5126,6 +5126,27 @@ def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str,
 # strictement inchange (HP-pool unite).
 
 
+def _weapon_attacks_single_target(
+    game_state: Dict[str, Any], attacker_squad_id: str, attacker_mid: str,
+    weapon_index: int, target_sid: str,
+) -> bool:
+    """True si TOUTES les attaques de cette arme (cette figurine) visent UNE seule unite.
+
+    Clause de [CLEAVE] 24.06 (« if you only selected one target for all of that weapon's
+    attacks »). La declaration gym n emet qu une cible par activation ; le flux PvP par arme
+    permet de repartir les attaques d une meme arme sur plusieurs unites — dans ce cas la
+    regle ne s applique pas. Aucun repli : la liste d intents est exigee.
+    """
+    intents = require_key(game_state, "pending_squad_fight_intents").get(str(attacker_squad_id), [])  # get allowed (escouade sans declaration = aucune attaque)
+    targets = {
+        str(require_key(i, "target_unit_id"))
+        for i in intents
+        if str(require_key(i, "model_id")) == str(attacker_mid)
+        and int(require_key(i, "weapon_index")) == int(weapon_index)
+    }
+    return targets == {str(target_sid)}
+
+
 def _manual_roll_fight_intent(
     game_state: Dict[str, Any], intent: Dict[str, Any], targets_meta: Dict[str, Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
@@ -5162,6 +5183,17 @@ def _manual_roll_fight_intent(
     if not isinstance(weapon, dict):
         return None
     n_attacks = int(intent["n_attacks_resolved"]) if "n_attacks_resolved" in intent else 0
+    # [CLEAVE X] 24.06 : « Each time you gather attack dice for a [CLEAVE] weapon, IF YOU ONLY
+    # SELECTED ONE TARGET for all of that weapon's attacks, add X additional attack dice for
+    # every five models that were in the target unit in the Select Targets step (rounding
+    # down). » Jumeau melee de [BLAST] 24.05, avec la clause « une seule cible » en plus.
+    from engine.utils.weapon_helpers import weapon_rule_parameter_or
+    _cleave_x = weapon_rule_parameter_or(weapon, "CLEAVE", 1)
+    if _cleave_x is not None and _weapon_attacks_single_target(
+        game_state, str(attacker["squad_id"]), attacker_mid, weapon_index, target_sid
+    ):
+        _tgt_size = int(require_key(intent, "target_squad_size_at_declaration"))
+        n_attacks += _cleave_x * (_tgt_size // 5)
     if n_attacks <= 0:
         return None
     ws = int(weapon["ATK"])
@@ -5187,39 +5219,41 @@ def _manual_roll_fight_intent(
         and _is_unit_on_objective(target, game_state)
     )
     reroll_save1 = _unit_has_rule(target, "reroll_1_save_fight")
-    shot_records: List[Dict[str, Any]] = []
-    pending_wounds: List[Dict[str, Any]] = []
-    attacks = hits = wounds = 0
-    for _ in range(int(n_attacks)):
-        attacks += 1
-        hit_roll = random.randint(1, 6)
-        if hit_roll == 1 and reroll_hit1:
-            hit_roll = random.randint(1, 6)
-        if hit_roll < ws:
-            shot_records.append({"attackRoll": hit_roll, "hitResult": "MISS", "hitTarget": ws})
-            continue
-        hits += 1
-        wound_roll = random.randint(1, 6)
-        wound_success = wound_roll >= wth
-        if not wound_success and ((wound_roll == 1 and reroll_wound1) or reroll_wound_obj):
-            wound_roll = random.randint(1, 6)
-            wound_success = wound_roll >= wth
-        if not wound_success:
-            shot_records.append({"attackRoll": hit_roll, "hitResult": "HIT", "hitTarget": ws, "strengthRoll": wound_roll, "strengthResult": "FAILED", "woundTarget": wth})
-            continue
-        wounds += 1
-        save_roll = random.randint(1, 6)
-        if save_roll == 1 and reroll_save1:
-            save_roll = random.randint(1, 6)
-        rec = {"attackRoll": hit_roll, "hitResult": "HIT", "hitTarget": ws, "strengthRoll": wound_roll, "strengthResult": "SUCCESS", "woundTarget": wth, "saveRoll": save_roll, "damageDealt": 0}
-        shot_records.append(rec)
-        pending_wounds.append({"save_roll": save_roll, "rec": rec})
+    # Meme socle que le tir (05.01/05.02 + regles d armes 24) : les armes de melee declarent
+    # elles aussi [DEVASTATING WOUNDS], [SUSTAINED HITS], [LETHAL HITS], [ANTI-X],
+    # [TWIN-LINKED] — elles etaient jusqu ici ignorees en melee (aucune lecture de
+    # WEAPON_RULES dans ce roller). Le socle corrige aussi le 1 non modifie, qui rate
+    # toujours (05.01) : le test `hit_roll < ws` seul le laissait passer si ws valait 1.
+    from engine.phase_handlers.attack_sequence import (
+        RerollProfile, build_weapon_attack_profile, roll_attack_pool,
+    )
+    from engine.utils.weapon_helpers import weapon_has_rule
+    rolled = roll_attack_pool(
+        n_attacks=int(n_attacks),
+        hit_target=ws,
+        wound_target=wth,
+        save_threshold_value=display_save_th,
+        profile=build_weapon_attack_profile(weapon, target),
+        rerolls=RerollProfile(
+            hit_1=reroll_hit1, wound_1=reroll_wound1,
+            wound_any_fail=reroll_wound_obj, save_1=reroll_save1,
+        ),
+        roll_d6=lambda: random.randint(1, 6),
+    )
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": ws, "ap": ap, "dmg_raw": dmg_raw,
+        # [MELTA] 24.25 est indexee sur la demi-portee d une arme de TIR : aucune arme de melee
+        # ne la declare (les armories n en contiennent aucune). Le champ existe car l allocation
+        # est mutualisee tir/melee et l exige explicitement (aucun defaut implicite).
+        "dmg_bonus": 0,
+        # [PRECISION] 24.28 (melee) : `precision_range=None` -> visibilite acquise au contact
+        # (06.01 : aucun terrain ne s interpose a distance d engagement).
+        "precision": weapon_has_rule(weapon, "PRECISION"),
+        "precision_range": None,
         "display_wth": display_wth, "display_save_th": display_save_th,
-        "shot_records": shot_records, "pending_wounds": pending_wounds,
-        "counts": {"attacks": attacks, "hits": hits, "wounds": wounds},
+        "shot_records": rolled["shot_records"], "pending_wounds": rolled["pending_wounds"],
+        "counts": rolled["counts"],
     }
 
 
@@ -5257,6 +5291,9 @@ FIGHT_CTX = ManualAllocCtx(
     log_verb="FOUGHT",
     attacks_left_attr="ATTACK_LEFT",
     intents_key="pending_squad_fight_intents",
+    weapons_key="CC_WEAPONS",
+    # [HAZARDOUS] 24.15 : « each time a unit is selected to shoot OR SELECTED TO FIGHT ».
+    hazard_origin="fight",
     decrement_by_attacks=True,
     emit_unit_death_log=True,
     on_target_damaged=_fight_on_target_damaged,

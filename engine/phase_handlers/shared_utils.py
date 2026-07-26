@@ -73,6 +73,12 @@ class ManualAllocCtx:
     log_verb: str             # verbe du message de log (ex. "SHOT")
     attacks_left_attr: str    # attribut figurine decremente par intent (SHOOT_LEFT / ATTACK_LEFT)
     intents_key: str          # cle game_state des intents (pending_squad_*_intents)
+    # Cle figurine des armes de la phase (RNG_WEAPONS / CC_WEAPONS) : sert au comptage des
+    # armes [HAZARDOUS] selectionnees (24.15). Vide pour le mode mortal (hazard : pas d arme).
+    weapons_key: str = ""
+    # Origine des jets de hasard declenches en fin d activation ([HAZARDOUS] 24.15) : sert a
+    # la reprise du flux apres allocation manuelle des blessures mortelles (w40k_core).
+    hazard_origin: str = ""
     # Tir : SHOOT_LEFT = 1 activation -> decrement de 1. Combat : ATTACK_LEFT = nombre
     # d attaques -> decrement du nombre d attaques de l intent (consomme tout).
     decrement_by_attacks: bool = False
@@ -139,6 +145,8 @@ SHOOT_CTX = ManualAllocCtx(
     log_verb="SHOT",
     attacks_left_attr="SHOOT_LEFT",
     intents_key="pending_squad_shoot_intents",
+    weapons_key="RNG_WEAPONS",
+    hazard_origin="shoot",
     auto_decider=_target_defender_is_ai,
 )
 
@@ -667,6 +675,20 @@ def _build_models_for_unit(
             "ARMOR_SAVE": int(spec.get("ARMOR_SAVE", armor_save)),
             "INVUL_SAVE": int(spec.get("INVUL_SAVE", invul_save)),
             "T": int(spec.get("T", t_stat)),
+            # Keywords PROPRES de la figurine (19.03) : `unit["UNIT_KEYWORDS"]` porte l'UNION
+            # des composants de l'escouade ; les regles « each model » (06.03) doivent lire la
+            # figurine. Une figurine sans override est de l'unit_type de l'escouade — pour une
+            # escouade homogene, union == keywords propres. Propagation SANS invention : la cle
+            # n'est posee que si la donnee existe (toute unite de roster la porte, cf.
+            # create_unit / _build_enhanced_unit) ; son absence est signalee par une erreur
+            # explicite chez le consommateur qui en a besoin (ex. roll_hazard_for_unit, 06.03).
+            **(
+                {"UNIT_KEYWORDS": copy.deepcopy(spec["UNIT_KEYWORDS"])}
+                if "UNIT_KEYWORDS" in spec
+                else {"UNIT_KEYWORDS": copy.deepcopy(unit["UNIT_KEYWORDS"])}
+                if "UNIT_KEYWORDS" in unit
+                else {}
+            ),
             "RNG_WEAPONS": copy.deepcopy(spec.get("RNG_WEAPONS", rng_weapons)),
             "CC_WEAPONS": copy.deepcopy(spec.get("CC_WEAPONS", cc_weapons)),
             "selectedRngWeaponIndex": spec.get("selectedRngWeaponIndex", selected_rng),
@@ -3718,13 +3740,22 @@ def apply_snap_corrections(
     return corrected
 
 
-def roll_hazard_for_unit(unit_id: str, game_state: Dict[str, Any], auto_resolve: bool) -> int:
-    """Hazard roll pour une unité (règle 06.03) — avant un Desperate Escape fall-back.
+def roll_hazard_for_unit(
+    unit_id: str, game_state: Dict[str, Any], auto_resolve: bool,
+    *, n_rolls: Optional[int] = None, context_label: str = "Desperate Escape",
+) -> int:
+    """Hazard rolls pour une unité (règle 06.03) — Desperate Escape (09.07) ou [HAZARDOUS] (24.15).
 
-    Tire 1D6 par figurine vivante simultanément.
-    Sur 1-2 : 1 mortal wound (ou 3 si toute l'unité est MONSTER ou VEHICLE).
-    Les MW sont attribuées via la séquence 06.02 (``allocate_mortal_wounds``) :
-    ``auto_resolve`` est propagé (IA/gym = choix déterministe ; humain = prompt étape 3).
+    06.03 : 1D6 par jet, simultanément. Sur 1-2 : 1 mortal wound, ou 3 si CHAQUE figurine de
+    l'unité est MONSTER/VEHICLE. Les MW sont attribuées via la séquence 06.02
+    (``allocate_mortal_wounds``) : ``auto_resolve`` est propagé (IA/gym = choix déterministe ;
+    humain = prompt étape 3).
+
+    ``n_rolls`` : nombre de jets. Défaut (None) = une par figurine vivante — c'est la règle du
+    Desperate Escape 09.07 (« each model must take a test »). [HAZARDOUS] 24.15 en impose un
+    autre : un jet PAR ARME hazardous sélectionnée, indépendant du nombre de figurines.
+    ``context_label`` : origine du jet, pour la ligne de log.
+
     Retourne le total de mortal wounds rollés (avant arrêt éventuel si l'unité meurt).
     """
     import random
@@ -3733,28 +3764,37 @@ def roll_hazard_for_unit(unit_id: str, game_state: Dict[str, Any], auto_resolve:
     unit_id_str = str(unit_id)
     if unit_id_str not in squad_models:
         raise KeyError(f"roll_hazard_for_unit: unit {unit_id} not in squad_models")
-    alive_count = sum(1 for mid in squad_models[unit_id_str] if mid in models_cache)
-    if alive_count == 0:
+    alive_models = [mid for mid in squad_models[unit_id_str] if mid in models_cache]
+    if not alive_models:
+        return 0
+    roll_count = len(alive_models) if n_rolls is None else int(n_rolls)
+    if roll_count <= 0:
         return 0
     units = require_key(game_state, "units")
     try:
         unit = next(u for u in units if str(u.get("id")) == str(unit_id))
     except StopIteration:
         raise KeyError(f"roll_hazard_for_unit: unit {unit_id} not found in game_state['units']")
+    # 06.03 : « 3 mortal wounds instead if EACH model in that unit is a MONSTER/VEHICLE model. »
+    # Test PAR FIGURINE (models_cache porte les keywords propres, cf. 19.03) : une escouade
+    # d'infanterie menée par un character MONSTER ne doit pas hériter du seuil à 3.
     # UNIT_KEYWORDS = liste d'objets {"keywordId": "..."} (cf. game_state). Pattern canonique.
-    keyword_ids = {
-        str(require_key(kw, "keywordId")).strip().lower()
-        for kw in require_key(unit, "UNIT_KEYWORDS")
-    }
-    wounds_per_fail = 3 if ("monster" in keyword_ids or "vehicle" in keyword_ids) else 1
-    rolls = [random.randint(1, 6) for _ in range(alive_count)]
+    def _is_monster_or_vehicle(model: Dict[str, Any]) -> bool:
+        ids = {
+            str(require_key(kw, "keywordId")).strip().lower()
+            for kw in require_key(model, "UNIT_KEYWORDS")
+        }
+        return "monster" in ids or "vehicle" in ids
+
+    wounds_per_fail = 3 if all(_is_monster_or_vehicle(models_cache[mid]) for mid in alive_models) else 1
+    rolls = [random.randint(1, 6) for _ in range(roll_count)]
     fails = sum(1 for r in rolls if r <= 2)
     total_wounds = fails * wounds_per_fail
     col = int(unit.get("col", -1))
     row = int(unit.get("row", -1))
     _ut_seg = f" {unit['unitType']}" if unit.get("unitType") else ""
     msg = (
-        f"Unit {unit_id}{_ut_seg}({col},{row}) [HAZARD] roll (Desperate Escape): {alive_count} rolls "
+        f"Unit {unit_id}{_ut_seg}({col},{row}) [HAZARD] roll ({context_label}): {roll_count} rolls "
         f"- {fails} fail(s) - {total_wounds} mortal wound(s)"
     )
     # Détails par-figurine (06.02) : remplis pendant l'attribution, comme shootDetails au tir.
@@ -4558,6 +4598,7 @@ def _attacker_model_can_reach_squad(
     ar: int,
     target_squad_id: str,
     range_subhex: int,
+    only_target_mids: Optional[Set[str]] = None,
 ) -> bool:
     """Eligibilite portee + LoS per-fig, alignee sur le chemin canonique (valid_target_pool_build).
 
@@ -4597,6 +4638,10 @@ def _attacker_model_can_reach_squad(
     if target_squad_id_str not in squad_models:
         raise KeyError(f"_attacker_model_can_reach_squad: unit {target_squad_id} not in squad_models")
     target_mids = squad_models[target_squad_id_str]
+    # Restriction a un sous-ensemble de figurines cibles ([PRECISION] 24.28 : « one or more
+    # CHARACTER models VISIBLE to one or more of the attacking models »). None = escouade entiere.
+    if only_target_mids is not None:
+        target_mids = [m for m in target_mids if m in only_target_mids]
     # Rule 13.09 + 13.5 (Gone to Ground) : detection évaluée PAR FIGURINE dans la boucle ci-dessous.
     target_hidden = bool(_target_unit.get("hidden")) if _target_unit else False
     base_detection_subhex = (
@@ -5973,13 +6018,19 @@ def save_threshold(armor_save: int, invul_save: int, ap: int) -> int:
     return effective_armor
 
 
-def _has_blast_keyword(weapon: Dict[str, Any]) -> bool:
-    kws = weapon.get("KEYWORDS") or weapon.get("keywords") or []
-    if isinstance(kws, list):
-        return any(str(k).upper() == "BLAST" for k in kws)
-    if isinstance(kws, str):
-        return "BLAST" in kws.upper()
-    return False
+def _blast_extra_dice_per_five(weapon: Dict[str, Any]) -> Optional[int]:
+    """[BLAST] 24.05 : nombre de des additionnels par tranche de 5 figurines cibles.
+
+    « add one additional attack dice for every five models that were in the target unit in
+    the Select Targets step (rounding down) » ; la forme [BLAST X] en ajoute X par tranche.
+    Retourne None si l arme n est pas [BLAST].
+
+    ⚠ Correction de conformite : cette fonction lisait `weapon["KEYWORDS"]`, un champ qui
+    n existe sur AUCUNE arme des armories (les regles vivent dans `WEAPON_RULES`) — BLAST
+    n etait donc jamais applique, ni en gym ni en PvP.
+    """
+    from engine.utils.weapon_helpers import weapon_rule_parameter_or
+    return weapon_rule_parameter_or(weapon, "BLAST", 1)
 
 
 def _precompute_nearest_enemy_dist(
@@ -6150,6 +6201,14 @@ def _cover_worsened_bs(
     cover = bool(compute_unit_los(game_state, shooter_unit, target_unit)["cover"])
     if not cover:
         return bs, False
+    # [PSYCHIC] 24.29 : « you can ignore any or all modifiers to that attack's BS or WS
+    # characteristic and any or all modifiers to the hit roll. » Le choix appartient au joueur
+    # (« any or all ») : on ignore les modificateurs DEFAVORABLES et on garde les favorables —
+    # ici, le malus de couvert est ignore, tandis que le bonus [HEAVY] applique par l appelant
+    # est conserve. La cible garde le BENEFICE du couvert (flag rendu tel quel) : 24.29 neutralise
+    # le modificateur, il ne supprime pas le couvert (contrairement a [IGNORES COVER] 24.18).
+    if weapon_has_rule(weapon, "PSYCHIC"):
+        return bs, True
     return min(bs + 1, 6), True
 
 
@@ -6310,6 +6369,68 @@ def _ranged_squad_edge_distance(
     return ranged_edge_distance(attacker_socle, socle_from_cache_entry(uc[tgt]), metric)
 
 
+def unit_can_reroll_charge(game_state: Dict[str, Any], unit_id: str) -> bool:
+    """L unite porte-t-elle `reroll_charge` (config/unit_rules.json) ?
+
+    « When this unit makes a charge, it can reroll the charge roll. » Regle d UNITE (pas
+    d arme), portee par les leaders Orks (Unstoppable Valour). Elle s applique a l unite
+    ATTACHEE entiere (19.04 : « Abilities in attached units » — la regle du leader vaut pour
+    toute l unite) : `_unit_has_rule_effect` lit les UNIT_RULES de l escouade, qui incluent
+    celles injectees par le fold du character.
+    """
+    unit = get_unit_by_id(game_state, str(unit_id))
+    if unit is None:
+        raise KeyError(f"unit_can_reroll_charge: unite {unit_id!r} introuvable")
+    return _unit_has_rule_effect(unit, "reroll_charge")
+
+
+def roll_charge_distance(
+    game_state: Dict[str, Any], unit_id: str, *, previous_roll: Optional[int] = None,
+) -> int:
+    """Jet de charge 2D6 (11.02), avec `reroll_charge` si l unite le porte.
+
+    `previous_roll` : jet deja effectue a relancer (None = premier jet). Un jet ne se relance
+    qu une fois (PDF 01 Core, Re-rolls) — c est l appelant qui garantit l unicite en ne
+    rappelant cette fonction avec `previous_roll` qu une seule fois.
+
+    Aucun choix implicite ici : la DECISION de relancer appartient a l appelant, qui seul sait
+    si le jet suffit (cf. `squad_charge` : relance si aucun plan n atteint la cible).
+    """
+    import random
+    del previous_roll  # signature explicite : le jet precedent est jete, jamais combine
+    return random.randint(1, 6) + random.randint(1, 6)
+
+
+def _heavy_unit_is_engaged(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """L unite est-elle ENGAGEE (clause 1 de [HEAVY] 24.16) ?
+
+    Meme predicat que le gate de tir 10.06 (`_is_adjacent_to_enemy_within_cc_range`) : une
+    seule definition d « engage » dans le moteur. Unite introuvable = bug -> erreur explicite.
+    """
+    from engine.phase_handlers.shooting_handlers import _is_adjacent_to_enemy_within_cc_range
+    unit = get_unit_by_id(game_state, str(squad_id))
+    if unit is None:
+        raise KeyError(f"_heavy_unit_is_engaged: unite {squad_id!r} introuvable")
+    return bool(_is_adjacent_to_enemy_within_cc_range(game_state, unit))
+
+
+def _target_within_half_range(
+    game_state: Dict[str, Any], attacker_sid: str, target_sid: str, weapon: Dict[str, Any],
+) -> bool:
+    """Cible a DEMI-PORTEE de l arme, au sens « in the Select Targets step ».
+
+    Mutualise par [RAPID FIRE] 24.30 et [MELTA] 24.25 — deux regles qui posent exactement la
+    meme question. Demi-portee = RNG/2 (RNG deja en subhexes) ; distance escouade->escouade
+    par le selecteur `ranged` (meme convention que le gate de portee du moteur). Les positions
+    sont figees pendant la resolution : mesurer ici == mesurer au Select Targets step.
+    RNG est EXIGE (une arme portant ces regles est une arme de tir) : aucun repli.
+    """
+    rng = int(require_key(weapon, "RNG"))
+    if rng <= 0:
+        return False
+    return _ranged_squad_edge_distance(game_state, attacker_sid, target_sid) <= rng / 2.0
+
+
 def _manual_roll_intent(
     game_state: Dict[str, Any], intent: Dict[str, Any],
     targets_meta: Dict[str, Dict[str, Any]],
@@ -6352,9 +6473,12 @@ def _manual_roll_intent(
             n_attacks = resolve_dice_value(nb_raw, f"squad_shoot_attacks_{attacker_mid}")
         except Exception:
             n_attacks = int(nb_raw) if isinstance(nb_raw, (int, float)) else 1
-    if _has_blast_keyword(weapon):
+    # [BLAST] 24.05 : des additionnels selon la taille de la cible AU SELECT TARGETS STEP
+    # (d ou la taille capturee a la declaration, et non la taille courante).
+    _blast_x = _blast_extra_dice_per_five(weapon)
+    if _blast_x is not None:
         tgt_size = int(intent.get("target_squad_size_at_declaration", 0))  # get allowed
-        n_attacks += tgt_size // 5
+        n_attacks += _blast_x * (tgt_size // 5)
     # RAPID_FIRE X (config/weapon_rules.json ; PDF 24.30) : « Increase this weapon's Attacks
     # by X when target unit is within half range. » Ajoute X des a la constitution du pool
     # d attaques (comme BLAST), avant tout jet. Demi-portee = RNG/2 (RNG deja en subhexes).
@@ -6363,23 +6487,29 @@ def _manual_roll_intent(
     # Positions figees pendant la resolution => mesurer ici == « Select Targets step ».
     from engine.utils.weapon_helpers import weapon_rule_parameter
     _rf_x = weapon_rule_parameter(weapon, "RAPID_FIRE")
-    if _rf_x is not None:
-        _rf_rng = int(require_key(weapon, "RNG"))  # arme RAPID_FIRE = arme de tir : RNG requis
-        if _rf_rng > 0 and _ranged_squad_edge_distance(
-            game_state, str(attacker["squad_id"]), target_sid
-        ) <= _rf_rng / 2.0:
-            n_attacks += _rf_x
+    if _rf_x is not None and _target_within_half_range(
+        game_state, str(attacker["squad_id"]), target_sid, weapon
+    ):
+        n_attacks += _rf_x
     if n_attacks <= 0:
         return None
     bs_base = int(weapon.get("ATK", weapon.get("BS", 4)))  # get allowed
     bs, cover = _cover_worsened_bs(game_state, attacker, target_sid, bs_base, weapon)
-    # HEAVY (config/weapon_rules.json, source de verite PROJET des regles d armes) :
-    # « Add 1 to Hit rolls if the bearer Remained Stationary this turn. » +1 au jet de touche
-    # = seuil BS ameliore de 1, plancher 2 (un 1 naturel rate toujours, 05.01). « Remained
-    # stationary » = escouade absente de units_moved ET units_advanced. Porte du code MORT vers
-    # le vif. NB : la def PROJET est deliberement plus simple que le PDF 24.16 (elle IGNORE les
-    # clauses « unengaged », « set up this turn » et « moved <= 3\" ») — on suit la config
-    # moteur, comme pour les regles unit_rules.json ; ecart PDF documente en §9.2.1.
+    # [HEAVY] 24.16 (PDF, source de verite) : « In your Shooting phase, each time an attack is
+    # made with a [HEAVY] weapon, add 1 to the hit roll if ALL of the following apply to the
+    # attacking unit : that unit is UNENGAGED ; that unit was NOT SET UP on the battlefield this
+    # turn ; NO MODEL in that unit has MOVED MORE THAN 3" this turn. »
+    # +1 au jet de touche = seuil BS ameliore de 1, plancher 2 (un 1 non modifie rate toujours,
+    # 05.01). Les trois clauses, dans l ordre du PDF :
+    #  (1) unengaged           -> teste, meme predicat que le gate de tir 10.06 ;
+    #  (2) pas pose ce tour    -> VACANT : le moteur ne modelise ni reserves ni arrivees en cours
+    #      de bataille ; le deploiement a lieu AVANT le 1er tour (pre-battle), donc aucune unite
+    #      n est jamais « set up this turn ». A rebrancher si les reserves (20) sont implementees ;
+    #  (3) aucune fig > 3"     -> le moteur ne conserve pas la DISTANCE parcourue par figurine
+    #      (units_moved est booleen). On applique donc la borne CONSERVATRICE « aucune figurine
+    #      n a bouge » : strictement plus stricte que le PDF (elle refuse le bonus quand le PDF
+    #      l accorderait pour un deplacement <= 3"), donc jamais de bonus indu. Passer a la clause
+    #      exacte suppose de porter le cout geodesique du chemin jusqu a commit_move.
     from engine.utils.weapon_helpers import weapon_has_rule
     if weapon_has_rule(weapon, "HEAVY"):
         _heavy_sid = str(attacker["squad_id"])
@@ -6390,11 +6520,23 @@ def _manual_roll_intent(
             _heavy_sid not in game_state.get("units_moved", set())
             and _heavy_sid not in game_state.get("units_advanced", set())
         )
-        if _remained_stationary:
+        if _remained_stationary and not _heavy_unit_is_engaged(game_state, _heavy_sid):
             bs = max(2, bs - 1)
     strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))  # get allowed
     ap = int(weapon.get("AP", 0))  # get allowed
     dmg_raw = weapon.get("DMG", 1)  # get allowed
+    # [MELTA X] 24.25 : « if the target unit was within half range of that weapon in the Select
+    # Targets step, until the attacking unit's attacks have been resolved, add X to that
+    # weapon's D characteristic. » Le bonus porte sur la CARACTERISTIQUE (D6+2, pas 2 degats
+    # forfaitaires) : il est donc transporte jusqu a la resolution des degats et ajoute APRES
+    # le tirage du de de degats (_resolve_one_manual_wound). Meme mesure de demi-portee que
+    # RAPID FIRE (helper commun).
+    dmg_bonus = 0
+    _melta_x = weapon_rule_parameter(weapon, "MELTA")
+    if _melta_x is not None and _target_within_half_range(
+        game_state, str(attacker["squad_id"]), target_sid, weapon
+    ):
+        dmg_bonus = int(_melta_x)
     alive0 = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
     if not alive0:
         return None
@@ -6441,48 +6583,36 @@ def _manual_roll_intent(
         and _unit_has_rule_effect(attacker_unit, "reroll_towound_target_on_objective")
         and is_unit_on_objective(target_unit, game_state)
     )
-    shot_records: List[Dict[str, Any]] = []
-    pending_wounds: List[Dict[str, Any]] = []
-    has_devastating = weapon_has_rule(weapon, "DEVASTATING_WOUNDS")
-    attacks = hits = wounds = 0
-    for _ in range(int(n_attacks)):
-        attacks += 1
-        hit_roll = random.randint(1, 6)
-        if hit_roll == 1 or hit_roll < bs:
-            shot_records.append({"attackRoll": hit_roll, "hitResult": "MISS", "hitTarget": bs})
-            continue
-        hits += 1
-        wound_roll = random.randint(1, 6)
-        wound_fail = wound_roll == 1 or wound_roll < wth
-        if wound_fail and ((wound_roll == 1 and reroll_wound1) or reroll_wound_obj):
-            wound_roll = random.randint(1, 6)
-            wound_fail = wound_roll == 1 or wound_roll < wth
-        if wound_fail:
-            shot_records.append({"attackRoll": hit_roll, "hitResult": "HIT", "hitTarget": bs, "strengthRoll": wound_roll, "strengthResult": "FAILED", "woundTarget": wth})
-            continue
-        wounds += 1
-        # save_roll tire ici (ordre RNG stable) mais COMPARE a l allocation (seuil de
-        # la fig choisie). saveTarget/saveSuccess/damageDealt completes a l allocation.
-        save_roll = random.randint(1, 6)
-        # DEVASTATING_WOUNDS (config/weapon_rules.json) : « No saving throw can be made against
-        # a critical wound rolled with this weapon. » Blessure critique = jet de blessure NON
-        # MODIFIE de 6 (05.02 ; un reroll produit un nouveau non-modifie, donc on teste la valeur
-        # finale). save_roll reste tire (sequence RNG uniforme hit/wound/save par attaque) mais
-        # l allocation le SAUTERA : degats appliques d office (excess perdu par fig = normal).
-        # Porte du code mort vers le vif. NB : la def PROJET = simple skip de save, PAS les
-        # blessures mortelles du PDF 24.10 — on suit la config, ecart documente en §9.2.1.
-        _devastating = has_devastating and wound_roll == 6
-        rec = {"attackRoll": hit_roll, "hitResult": "HIT", "hitTarget": bs, "strengthRoll": wound_roll, "strengthResult": "SUCCESS", "woundTarget": wth, "saveRoll": save_roll, "damageDealt": 0}
-        if _devastating:
-            rec["devastating"] = True
-        shot_records.append(rec)
-        pending_wounds.append({"save_roll": save_roll, "rec": rec, "devastating": _devastating})
+    _weapon_precision = weapon_has_rule(weapon, "PRECISION")
+    # Sequence d attaque commune tir/melee (05.01/05.02 + regles d armes 24) : socle unique
+    # `attack_sequence.roll_attack_pool`. Y vivent touches/blessures CRITIQUES, [TORRENT],
+    # [SUSTAINED HITS], [LETHAL HITS], [TWIN-LINKED], [ANTI-X] et [DEVASTATING WOUNDS].
+    # Restent ici (specifiques au tir) : pool d attaques (BLAST/RAPID FIRE), seuil de touche
+    # (couvert/HEAVY/PSYCHIC), AP effectif (closest_target_penetration) et l allocation.
+    from engine.phase_handlers.attack_sequence import (
+        RerollProfile, build_weapon_attack_profile, roll_attack_pool,
+    )
+    rolled = roll_attack_pool(
+        n_attacks=int(n_attacks),
+        hit_target=bs,
+        wound_target=wth,
+        save_threshold_value=display_save_th,
+        profile=build_weapon_attack_profile(weapon, target_unit),
+        rerolls=RerollProfile(wound_1=reroll_wound1, wound_any_fail=reroll_wound_obj),
+        roll_d6=lambda: random.randint(1, 6),
+    )
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
-        "weapon_name": weapon_name, "bs": bs, "bs_base": bs_base, "cover": cover, "ap": ap, "dmg_raw": dmg_raw,
+        "weapon_name": weapon_name, "bs": bs, "bs_base": bs_base, "cover": cover, "ap": ap,
+        "dmg_raw": dmg_raw, "dmg_bonus": dmg_bonus,
+        # [PRECISION] 24.28 (tir) : la visibilite de la figurine CHARACTER se teste a la portee
+        # de l arme, avec la meme primitive que le gate de tir. RNG n est exige que si l arme
+        # porte la regle (seul cas ou la valeur est lue).
+        "precision": _weapon_precision,
+        "precision_range": int(require_key(weapon, "RNG")) if _weapon_precision else None,
         "display_wth": display_wth, "display_save_th": display_save_th,
-        "shot_records": shot_records, "pending_wounds": pending_wounds,
-        "counts": {"attacks": attacks, "hits": hits, "wounds": wounds},
+        "shot_records": rolled["shot_records"], "pending_wounds": rolled["pending_wounds"],
+        "counts": rolled["counts"],
     }
 
 
@@ -6573,6 +6703,9 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
         dmg = resolve_dice_value(cast(DiceValue, dmg_raw), f"squad_shoot_dmg_{pw['attacker_mid']}")
     except Exception:
         dmg = int(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1
+    # [MELTA X] 24.25 : X s ajoute a la caracteristique D -> apres le tirage du de de degats
+    # (D6+2, jamais 2 forfaitaire). 0 pour toute arme sans MELTA ou hors demi-portee.
+    dmg += int(require_key(g, "dmg_bonus"))
     if dmg <= 0:
         rec["damageDealt"] = 0
         rec["targetDied"] = False
@@ -6685,13 +6818,109 @@ def _finalize_manual_allocation(game_state: Dict[str, Any], ctx: ManualAllocCtx)
                 "player": int(tgt_unit["player"]) if tgt_unit is not None else 0,
                 "timestamp": "server_time",
             })
+    attacker_squad_id = str(alloc["attacker_squad_id"])
+    hazardous_count = int(alloc["hazardous_weapon_count"]) if "hazardous_weapon_count" in alloc else 0
     del game_state[ctx.alloc_key]
-    return {
+    result = {
         "action": ctx.manual_alloc_action,
         "waiting_for_player": False,
         "done": True,
         "shoot_result": summary,
     }
+    # [HAZARDOUS] 24.15 : « Each time a unit is selected to shoot or selected to fight, AFTER
+    # THAT UNIT HAS RESOLVED ALL OF ITS ATTACKS, make a number of hazard rolls (06.03) for that
+    # unit equal to the number of [HAZARDOUS] weapons you selected in the Select Weapons step. »
+    # C est exactement ce point : l allocation de l activation vient de se terminer.
+    # Le porteur des blessures mortelles est le TIREUR/COMBATTANT lui-meme.
+    if hazardous_count > 0 and ctx.hazard_origin:
+        auto = is_programmatic_owner(
+            game_state, require_key(require_key(game_state, "units_cache")[attacker_squad_id], "player")
+        ) if attacker_squad_id in require_key(game_state, "units_cache") else True
+        game_state["hazard_origin"] = ctx.hazard_origin
+        roll_hazard_for_unit(
+            attacker_squad_id, game_state, auto,
+            n_rolls=hazardous_count, context_label="Hazardous",
+        )
+        if not auto and "pending_hazard_allocation" in game_state:
+            # Joueur humain : l attribution des MW est un point de decision (05.03/06.02).
+            # La main lui est rendue ; la reprise post-allocation lit `hazard_origin`.
+            return manual_allocation_waiting_payload(game_state, HAZARD_CTX)
+        game_state.pop("hazard_origin", None)
+    return result
+
+
+def _apply_precision_allocation_override(
+    game_state: Dict[str, Any], alloc: Dict[str, Any], batch: Dict[str, Any],
+) -> None:
+    """[PRECISION] 24.28 — au debut de l Allocation Order step (05.03).
+
+    « While resolving attacks made with one or more [PRECISION] weapons, at the start of the
+    Allocation Order step, if the target unit contains one or more CHARACTER models VISIBLE to
+    one or more of the attacking models, the active player CAN select one allocation group that
+    contains one of those visible CHARACTER models. If they do, until those attacks are resolved,
+    or until that CHARACTER group is destroyed, that CHARACTER group is the current allocation
+    group. »
+
+    Arbitrage du « can » : l attaquant designe TOUJOURS le groupe CHARACTER visible le plus
+    couteux (VALUE). Sans cela la regle serait inerte — c est son unique effet — et le choix est
+    strictement favorable a l attaquant. Candidat a une decision agent (Phase A' P3).
+
+    L ordre declare par le DEFENSEUR est conserve : seul le groupe COURANT change (le groupe
+    CHARACTER passe en tete). Le reste de l ordre suit inchange.
+    """
+    group = alloc["weapon_groups"][batch["weapon_group_idx"]] if batch["weapon_group_idx"] is not None else None
+    if group is None or not group.get("precision"):  # get allowed (groupes hazard : pas d arme)
+        return
+    models_cache = require_key(game_state, "models_cache")
+    char_groups = [
+        g for g in batch["alloc_groups"]
+        if g["is_character"] and _group_alive(game_state, g)
+    ]
+    if not char_groups:
+        return
+    visible = [g for g in char_groups if _precision_group_is_visible(game_state, group, g)]
+    if not visible:
+        return
+    chosen = max(
+        visible,
+        key=lambda g: max(float(require_key(models_cache[m], "VALUE"))
+                          for m in g["model_ids"] if m in models_cache),
+    )
+    order = list(batch["declared_order"])
+    if chosen["group_id"] in order:
+        order.remove(chosen["group_id"])
+    batch["declared_order"] = [chosen["group_id"]] + order
+    batch["current_group_index"] = 0
+    batch["current_model_id"] = None
+
+
+def _precision_group_is_visible(
+    game_state: Dict[str, Any], weapon_group: Dict[str, Any], char_group: Dict[str, Any],
+) -> bool:
+    """Une figurine CHARACTER du groupe est-elle visible par une figurine attaquante (24.28) ?
+
+    Melee (`precision_range` absent) : les figurines sont au contact, la visibilite est acquise
+    (06.01 — aucun terrain ne peut s interposer a distance d engagement).
+    Tir : meme primitive que le gate de tir (`_attacker_model_can_reach_squad`, per-figurine,
+    footprint complet, obscuring-aware), restreinte aux figurines CHARACTER du groupe.
+    """
+    rng = weapon_group["precision_range"]
+    if rng is None:
+        return True
+    models_cache = require_key(game_state, "models_cache")
+    char_mids = {m for m in char_group["model_ids"] if m in models_cache}
+    if not char_mids:
+        return False
+    for mid in weapon_group["shooter_mids"]:
+        shooter = models_cache.get(mid)  # get allowed (figurine morte depuis la declaration)
+        if shooter is None:
+            continue
+        if _attacker_model_can_reach_squad(
+            game_state, shooter, int(shooter["col"]), int(shooter["row"]),
+            str(weapon_group["target_sid"]), int(rng), only_target_mids=char_mids,
+        ):
+            return True
+    return False
 
 
 def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> Dict[str, Any]:
@@ -6724,6 +6953,12 @@ def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> 
             else:
                 batch["declared_order"] = [g["group_id"] for g in live_groups]  # ordre implicite
                 batch["current_group_index"] = 0
+        # 2bis. [PRECISION] 24.28 : l attaquant peut imposer un groupe CHARACTER visible comme
+        # groupe courant, une seule fois par lot (l override est idempotent : il ne s applique
+        # qu au moment ou l ordre vient d etre fixe).
+        if not batch.get("precision_applied"):  # get allowed (cle posee a la 1re application)
+            batch["precision_applied"] = True
+            _apply_precision_allocation_override(game_state, alloc, batch)
         # 3. Allocation groupe par groupe (du lot).
         advanced_batch = False
         while True:
@@ -6755,6 +6990,32 @@ def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> 
         if not advanced_batch:
             break
     return _finalize_manual_allocation(game_state, ctx)
+
+
+def _count_selected_hazardous_weapons(
+    game_state: Dict[str, Any], ctx: ManualAllocCtx, intents: List[Dict[str, Any]],
+) -> int:
+    """Nombre d armes [HAZARDOUS] 24.15 selectionnees par l escouade (Select Weapons, 04.01).
+
+    Une arme selectionnee = un couple (figurine, index d arme) DISTINCT : deux figurines
+    portant chacune un pistolet a plasma surcharge font deux jets, mais une meme arme
+    declaree sur deux cibles n en fait qu un (24.02 : les instances ne se cumulent pas).
+    """
+    models_cache = require_key(game_state, "models_cache")
+    from engine.utils.weapon_helpers import weapon_has_rule
+    selected = set()
+    for intent in intents:
+        mid = str(require_key(intent, "model_id"))
+        widx = int(require_key(intent, "weapon_index"))
+        model = models_cache.get(mid)  # get allowed (figurine detruite en cours de resolution)
+        if model is None:
+            continue
+        weapons = model.get(ctx.weapons_key, [])  # get allowed (figurine sans arme de ce type)
+        if not (0 <= widx < len(weapons)) or not isinstance(weapons[widx], dict):
+            continue
+        if weapon_has_rule(weapons[widx], "HAZARDOUS"):
+            selected.add((mid, widx))
+    return len(selected)
 
 
 def _build_manual_allocation(
@@ -6797,7 +7058,10 @@ def _build_manual_allocation(
         # Regle 04.03 : les armes de PROFIL identique sur une meme cible se resolvent
         # ensemble (1 seul lot d allocation). La cle de groupe est donc le profil (et non
         # le nom) ; les noms distincts sont accumules pour l affichage (fenetre + log).
-        gkey = (r["bs"], r["ap"], r["dmg_raw"], r["display_wth"], r["display_save_th"], target_sid)
+        # [MELTA] 24.25 : le bonus de D fait partie du PROFIL (une meme arme a demi-portee et
+        # hors demi-portee ne se resout pas dans le meme lot) -> il entre dans la cle de groupe.
+        gkey = (r["bs"], r["ap"], r["dmg_raw"], require_key(r, "dmg_bonus"),
+                r["display_wth"], r["display_save_th"], target_sid)
         if gkey not in group_index_by_key:
             group_index_by_key[gkey] = len(weapon_groups)
             # Position de l'ancre cible CAPTURÉE ICI (cible vivante : aucune figurine n'est
@@ -6811,6 +7075,12 @@ def _build_manual_allocation(
                 "target_col": int(require_key(_tgt_uc_live, "col")),
                 "target_row": int(require_key(_tgt_uc_live, "row")),
                 "bs": r["bs"], "ap": r["ap"], "dmg_raw": r["dmg_raw"],
+                "dmg_bonus": require_key(r, "dmg_bonus"),
+                # [PRECISION] 24.28 : porte par le PROFIL d arme du lot (l override d allocation
+                # s applique lot par lot). `precision_range` = portee de l arme pour le test de
+                # visibilite au tir ; None en melee (visibilite acquise au contact).
+                "precision": require_key(r, "precision"),
+                "precision_range": require_key(r, "precision_range"),
                 "display_wth": r["display_wth"], "display_save_th": r["display_save_th"],
                 "player": int(attacker.get("player", 0)),  # get allowed
                 "attacks": 0, "damage": 0, "kills": 0, "killed_model_ids": [], "shots": [],
@@ -6890,6 +7160,11 @@ def _build_manual_allocation(
         "batches": batches,
         "current_batch_index": 0,
         "summary": summary,
+        # [HAZARDOUS] 24.15 : « make a number of hazard rolls equal to the number of
+        # [HAZARDOUS] weapons you SELECTED IN THE SELECT WEAPONS STEP ». Le compte se fait
+        # donc ICI, sur les intents declares (avant qu ils ne soient purges), et sert au
+        # declenchement de fin d activation (_finalize_manual_allocation).
+        "hazardous_weapon_count": _count_selected_hazardous_weapons(game_state, ctx, intents),
     }
     init_pending_intents(game_state)
     game_state[ctx.intents_key].pop(str(attacker_squad_id), None)
@@ -7542,20 +7817,60 @@ def get_fighting_models(game_state: Dict[str, Any], squad_id: str) -> List[str]:
 # ============================================================================
 
 
-def _auto_select_cc_weapon_for_fig(
-    attacker: Dict[str, Any], target_t: int, target_sv: int, target_invul: int
-) -> int:
-    """Choisit l index de l arme CC maximisant l expected damage P(hit)*P(wound)*P(failed_save)*D.
+def _extra_attacks_weapon_indices(attacker: Dict[str, Any]) -> List[int]:
+    """Indices des armes de melee [EXTRA ATTACKS] 24.11 de la figurine (ordre stable)."""
+    from engine.utils.weapon_helpers import weapon_has_rule
+    weapons = attacker.get("CC_WEAPONS", [])  # get allowed
+    return [
+        idx for idx, w in enumerate(weapons)
+        if isinstance(w, dict) and weapon_has_rule(w, "EXTRA_ATTACKS")
+    ]
 
-    Tie-break : index d arme le plus bas. Si pas d arme : retourne 0 (no-op).
+
+def _select_fight_weapon_indices_for_fig(
+    attacker: Dict[str, Any], target_t: int, target_sv: int, target_invul: int
+) -> List[int]:
+    """Armes de melee SELECTIONNEES par une figurine (Select Weapons step, 04.01).
+
+    [EXTRA ATTACKS] 24.11 : « for each of those models, you must select ALL of that model's
+    [EXTRA ATTACKS] weapons, AND one of that model's other melee weapons, if possible. »
+    -> la figurine attaque avec toutes ses armes EXTRA ATTACKS EN PLUS de sa meilleure autre
+    arme. Sans arme [EXTRA ATTACKS], on retrouve exactement le comportement anterieur : une
+    seule arme, choisie par esperance de degats.
+
+    Retourne les indices dans l ordre : arme principale d abord (elle porte
+    `selectedCcWeaponIndex`), puis les armes EXTRA ATTACKS. Liste vide si la figurine n a
+    aucune arme de melee.
     """
     weapons = attacker.get("CC_WEAPONS", [])  # get allowed
     if not weapons:
-        return 0
-    best_idx = 0
+        return []
+    extra = _extra_attacks_weapon_indices(attacker)
+    # « one of that model's OTHER melee weapons » : le choix principal exclut les armes
+    # EXTRA ATTACKS (elles sont deja toutes selectionnees).
+    main = _auto_select_cc_weapon_for_fig(
+        attacker, target_t, target_sv, target_invul, excluded_indices=frozenset(extra),
+    )
+    # « if possible » : une figurine qui n a QUE des armes EXTRA ATTACKS n en ajoute pas d autre.
+    return ([main] if main is not None else []) + extra
+
+
+def _auto_select_cc_weapon_for_fig(
+    attacker: Dict[str, Any], target_t: int, target_sv: int, target_invul: int,
+    excluded_indices: frozenset = frozenset(),
+) -> Optional[int]:
+    """Choisit l index de l arme CC maximisant l expected damage P(hit)*P(wound)*P(failed_save)*D.
+
+    `excluded_indices` : armes hors du choix (cf. [EXTRA ATTACKS] 24.11, deja selectionnees).
+    Tie-break : index d arme le plus bas. Retourne None si aucune arme selectionnable.
+    """
+    weapons = attacker.get("CC_WEAPONS", [])  # get allowed
+    if not weapons:
+        return None
+    best_idx: Optional[int] = None
     best_score = -1.0
     for idx, w in enumerate(weapons):
-        if not isinstance(w, dict):
+        if not isinstance(w, dict) or idx in excluded_indices:
             continue
         ws = int(w.get("ATK", w.get("WS", 4)))  # WS via ATK convention
         s = int(w.get("STR", w.get("S", 4)))
@@ -7620,25 +7935,40 @@ def squad_declare_fight(
         m = models_cache.get(mid)
         if m is None:
             continue
-        chosen_idx = _auto_select_cc_weapon_for_fig(m, target_t, target_sv, target_invul)
-        m["selectedCcWeaponIndex"] = chosen_idx
-        # F3 fix (audit) : resoudre NB UNE SEULE FOIS, stocker dans intent.
+        # Select Weapons step (04.01) : arme principale + TOUTES les armes [EXTRA ATTACKS]
+        # (24.11). Un intent par arme selectionnee -> une figurine peut produire 2 intents.
+        selected_indices = _select_fight_weapon_indices_for_fig(m, target_t, target_sv, target_invul)
+        if not selected_indices:
+            continue
+        m["selectedCcWeaponIndex"] = selected_indices[0]
         weapons = m.get("CC_WEAPONS", [])  # get allowed
-        n_attacks_resolved = 0
-        if 0 <= chosen_idx < len(weapons):
-            w = weapons[chosen_idx]
-            if isinstance(w, dict) and "NB" in w:
-                try:
-                    n_attacks_resolved = int(resolve_dice_value(w["NB"], f"squad_declare_fight_NB_{mid}"))
-                except Exception:
-                    n_attacks_resolved = int(w["NB"]) if isinstance(w["NB"], (int, float)) else 1
-                m["ATTACK_LEFT"] = n_attacks_resolved
-        intents.append({
-            "model_id": mid,
-            "weapon_index": chosen_idx,
-            "target_unit_id": target_squad_id,
-            "n_attacks_resolved": n_attacks_resolved,
-        })
+        total_attacks = 0
+        for chosen_idx in selected_indices:
+            # F3 fix (audit) : resoudre NB UNE SEULE FOIS, stocker dans intent.
+            n_attacks_resolved = 0
+            if 0 <= chosen_idx < len(weapons):
+                w = weapons[chosen_idx]
+                if isinstance(w, dict) and "NB" in w:
+                    try:
+                        n_attacks_resolved = int(resolve_dice_value(w["NB"], f"squad_declare_fight_NB_{mid}"))
+                    except Exception:
+                        n_attacks_resolved = int(w["NB"]) if isinstance(w["NB"], (int, float)) else 1
+            total_attacks += n_attacks_resolved
+            intents.append({
+                "model_id": mid,
+                "weapon_index": chosen_idx,
+                "target_unit_id": target_squad_id,
+                "n_attacks_resolved": n_attacks_resolved,
+                # Taille de la cible au Select Targets step — exigee par [CLEAVE] 24.06 (des
+                # additionnels par tranche de 5 figurines), jumeau melee de [BLAST] 24.05.
+                # Meme cle que les declarations de tir et que le chemin PvP par arme.
+                "target_squad_size_at_declaration": len(target_alive),
+            })
+        # ATTACK_LEFT = total des attaques declarees par la figurine (l allocation le decremente
+        # intent par intent : avec [EXTRA ATTACKS] il en faut la somme, sinon il tombe a 0 avant
+        # d avoir resolu la seconde arme).
+        if total_attacks > 0:
+            m["ATTACK_LEFT"] = total_attacks
     return intents
 
 

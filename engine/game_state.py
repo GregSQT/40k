@@ -1010,6 +1010,12 @@ class GameStateManager:
                         "OC": int(require_key(m_data, "OC")),
                         "VALUE": int(require_key(m_data, "VALUE")),
                         "UNIT_RULES": copy.deepcopy(require_key(m_data, "UNIT_RULES")),
+                        # Keywords PROPRES de la figurine (19.03) : l'unité porte l'UNION des
+                        # keywords de ses composants, mais les règles qui parlent de « each
+                        # model » (06.03 hazard : 3 MW si CHAQUE figurine est MONSTER/VEHICLE)
+                        # doivent interroger la figurine, pas l'union — sinon un character
+                        # attaché contaminerait toute l'escouade.
+                        "UNIT_KEYWORDS": copy.deepcopy(require_key(m_data, "UNIT_KEYWORDS")),
                         "RNG_WEAPONS": m_rng,
                         "CC_WEAPONS": m_cc,
                         "selectedRngWeaponIndex": 0 if m_rng else None,
@@ -1024,10 +1030,32 @@ class GameStateManager:
                     # l'affichage UnitStatusTable — lisent models[i].VALUE et ne doivent
                     # jamais retomber sur unit["VALUE"], qui porte la valeur de l'ESCOUADE.
                     m_spec["VALUE"] = int(full_unit_data["VALUE"])
+                    # Keywords propres = ceux de l'unit_type de l'escouade, capturés AVANT
+                    # l'union 19.03 appliquée plus bas à enhanced_unit["UNIT_KEYWORDS"].
+                    m_spec["UNIT_KEYWORDS"] = copy.deepcopy(require_key(full_unit_data, "UNIT_KEYWORDS"))
                     total_hp_cur += int(full_unit_data["HP_MAX"])
                     total_value += int(full_unit_data["VALUE"])
                 normalized_models.append(m_spec)
             enhanced_unit["models"] = normalized_models
+            # Règle 19.03 (Keywords in attached units) : « an attached unit has the keywords of
+            # all its component units ». Un squad contenant des figurines d'un autre unit_type
+            # (leader/support replié par _fold_attached_characters, ou squad hétérogène) porte
+            # donc l'UNION de leurs keywords. Sans ça, [ANTI-X] et les gates keyword (couvert
+            # 13.08, étages 13.06) ne voyaient que les keywords du bodyguard.
+            # Union ordonnée et dédupliquée sur keywordId (l'ordre reste stable et reproductible).
+            seen_keywords = {
+                str(require_key(kw, "keywordId")).strip().lower()
+                for kw in enhanced_unit["UNIT_KEYWORDS"]
+            }
+            for spec in normalized_models:
+                for kw in require_key(spec, "UNIT_KEYWORDS"):
+                    kw_id = str(require_key(kw, "keywordId")).strip().lower()
+                    if kw_id in seen_keywords:
+                        continue
+                    seen_keywords.add(kw_id)
+                    enhanced_unit["UNIT_KEYWORDS"].append(copy.deepcopy(kw))
+            # Les dérivés de keywords se recalculent sur l'union (même autorité, une seule fois).
+            enhanced_unit["hideable"] = compute_hideable(enhanced_unit["UNIT_KEYWORDS"])
             # Invariant §2.5 : le niveau ancre de l'unité = niveau de models[0] (cf. commentaire
             # create_unit). Sans ça, une unité dont la 1ère figurine est déclarée en hauteur garde
             # une ancre au sol (0) et désynchronise units_cache de l'empreinte réelle.

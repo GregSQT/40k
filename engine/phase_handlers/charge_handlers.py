@@ -35,6 +35,7 @@ from .shared_utils import (
     build_occupied_positions_set, build_enemy_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
     is_placement_valid_with_clearance, candidate_overlaps_any_unit,
     _synth_model_entry,
+    roll_charge_distance, unit_can_reroll_charge,
     MovePlan,
 )
 
@@ -2978,8 +2979,7 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
         elif unit_id in game_state["charge_roll_values"]:
             charge_roll = game_state["charge_roll_values"][unit_id]
         else:
-            import random
-            charge_roll = random.randint(1, 6) + random.randint(1, 6)
+            charge_roll = roll_charge_distance(game_state, unit_id)
             game_state["charge_roll_values"][unit_id] = charge_roll
         # Take to the skies (21.03) : -2" sur la distance max si le vol est déclaré (borne les cibles éligibles).
         max_distance_subhex = _charge_budget_subhex(game_state, unit_id, charge_roll)
@@ -2987,6 +2987,20 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
     # Build valid targets : bornées par la distance jetée en roll-first, sinon par charge_max_distance.
     _t_bvt0 = time.perf_counter() if _perf else None
     valid_targets = charge_build_valid_targets(game_state, unit_id, max_distance=max_distance_subhex)
+    # `reroll_charge` (unit_rules.json ; 19.04 sur une unité attachée) : « it CAN reroll the
+    # charge roll ». Critère exact et connu ici : le jet n'amène AUCUNE cible à portée. Un dé ne
+    # se relance qu'une fois (01 Core). Le jet stocké est remplacé (11.02 : c'est LE jet de
+    # charge de l'activation). En roll-first PvP, l'override de test court-circuite le reroll.
+    if (
+        not valid_targets and charge_roll is not None and _charge_override is None
+        and unit_can_reroll_charge(game_state, unit_id)
+    ):
+        charge_roll = roll_charge_distance(game_state, unit_id, previous_roll=charge_roll)
+        game_state["charge_roll_values"][unit_id] = charge_roll
+        max_distance_subhex = _charge_budget_subhex(game_state, unit_id, charge_roll)
+        valid_targets = charge_build_valid_targets(
+            game_state, unit_id, max_distance=max_distance_subhex
+        )
     _t_bvt1 = time.perf_counter() if _perf else None
     if _perf and _t_el0 is not None and _t_bvt0 is not None and _t_bvt1 is not None:
         append_perf_timing_line(

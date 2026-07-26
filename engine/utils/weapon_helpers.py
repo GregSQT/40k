@@ -78,6 +78,24 @@ def weapon_rule_parameter(weapon: Dict[str, Any], rule_id: str) -> Optional[int]
     return None
 
 
+def weapon_rule_parameter_or(weapon: Dict[str, Any], rule_id: str, default: int) -> Optional[int]:
+    """Parametre d'une regle d'arme dont le parametre est OPTIONNEL par les regles.
+
+    Cas vise : [BLAST] 24.05 et [CLEAVE] 24.06, ou la forme nue ([BLAST]) vaut « 1 dé
+    additionnel par tranche de 5 figurines » et la forme parametree ([BLAST 2]) vaut X.
+    `default` est donc une valeur METIER definie par le PDF, pas un repli anti-erreur.
+
+    Retourne None si l'arme ne declare PAS la regle.
+    """
+    if not weapon_has_rule(weapon, rule_id):
+        return None
+    try:
+        value = weapon_rule_parameter(weapon, rule_id)
+    except ValueError:
+        return default
+    return default if value is None else value
+
+
 def get_selected_ranged_weapon(unit: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Get currently selected ranged weapon."""
     if "RNG_WEAPONS" not in unit:

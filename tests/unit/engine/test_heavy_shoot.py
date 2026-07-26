@@ -1,21 +1,25 @@
-"""HEAVY au TIR dans le chemin VIF (_manual_roll_intent).
+"""[HEAVY] 24.16 au TIR dans le chemin VIF (_manual_roll_intent).
 
-Regle d arme PROJET (config/weapon_rules.json, source de verite du moteur) :
-« Add 1 to Hit rolls if the bearer Remained Stationary this turn. » Portee du code MORT
-(_attack_sequence_rng) vers le chemin VIF partage gym/PvP.
+PDF 24.16 (source de verite, arbitrage utilisateur 2026-07-26) : « add 1 to the hit roll if ALL
+of the following apply to the attacking unit : that unit is UNENGAGED ; that unit was not set up
+on the battlefield this turn ; no model in that unit has moved more than 3" this turn. »
 
-+1 au jet de touche = seuil BS ameliore de 1 (plancher 2). « Remained stationary » =
-escouade absente de units_moved ET units_advanced.
++1 au jet de touche = seuil BS ameliore de 1 (plancher 2 : un 1 non modifie rate toujours, 05.01).
 
-ECART PDF ASSUME : la def projet est plus simple que le PDF 24.16 (pas de clause
-« unengaged » / « set up this turn » / « moved <= 3\" ») — on suit la config, comme pour les
-regles unit_rules.json. Cf. §9.2.1.
+Etat des trois clauses dans ce moteur :
+- unengaged            : TESTE (meme predicat que le gate de tir 10.06).
+- pas pose ce tour     : VACANT (ni reserves ni arrivees en cours de bataille modelisees ; le
+                         deploiement precede le 1er tour).
+- aucune fig > 3"      : borne CONSERVATRICE « aucune figurine n a bouge » (units_moved /
+                         units_advanced) — la distance parcourue par figurine n est pas
+                         conservee par le moteur. Plus stricte que le PDF, jamais laxiste.
 
 Discrimination verrouillee (contre-epreuve mutation : neutraliser `bs = max(2, bs-1)` => rouge) :
-- HEAVY + stationnaire        -> BS ameliore (4 -> 3)
-- HEAVY + a bouge (units_moved)    -> pas de bonus (4)
+- HEAVY + stationnaire + unengaged   -> BS ameliore (4 -> 3)
+- HEAVY + a bouge (units_moved)      -> pas de bonus (4)
 - HEAVY + a advance (units_advanced) -> pas de bonus (4)
-- sans HEAVY + stationnaire    -> pas de bonus (4)
+- HEAVY + stationnaire mais ENGAGE   -> pas de bonus (4)
+- sans HEAVY + stationnaire          -> pas de bonus (4)
 """
 import random
 
@@ -25,10 +29,14 @@ from engine.phase_handlers import shooting_handlers
 from engine.phase_handlers.shared_utils import _manual_roll_intent
 
 
-def _neutralise(monkeypatch):
+def _neutralise(monkeypatch, *, engaged=False):
     monkeypatch.setattr(random, "randint", lambda a, b: 4)
     monkeypatch.setattr(shooting_handlers, "compute_unit_los", lambda gs, s, t: {"cover": False})
     monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
+    # Clause 1 de 24.16 : « that unit is unengaged » — meme predicat que le gate de tir.
+    monkeypatch.setattr(
+        shooting_handlers, "_is_adjacent_to_enemy_within_cc_range", lambda gs, u: engaged
+    )
 
 
 def _game_state(weapon_rules, *, moved=False, advanced=False):
@@ -64,6 +72,14 @@ def test_heavy_apres_mouvement_pas_de_bonus(monkeypatch, moved, advanced):
     """HEAVY mais a bouge OU advance -> pas de bonus (BS reste 4)."""
     _neutralise(monkeypatch)
     gs, intent = _game_state(["HEAVY"], moved=moved, advanced=advanced)
+    result = _manual_roll_intent(gs, intent, {})
+    assert result["bs"] == 4
+
+
+def test_heavy_engage_pas_de_bonus(monkeypatch):
+    """24.16 clause 1 : stationnaire mais ENGAGE -> aucun bonus (BS reste 4)."""
+    _neutralise(monkeypatch, engaged=True)
+    gs, intent = _game_state(["HEAVY"])
     result = _manual_roll_intent(gs, intent, {})
     assert result["bs"] == 4
 

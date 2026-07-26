@@ -164,6 +164,9 @@ def _alloc_ctx_state(auto: bool, monkeypatch, n_groups: int = 2) -> Dict[str, An
         "current_batch_index": 0,
         "batches": [{
             "target_sid": "10",
+            # Batch sans groupe d'armes (ce test ne porte que sur l'ordre des groupes) :
+            # même convention que le batch hazard, qui pose explicitement None.
+            "weapon_group_idx": None,
             "alloc_groups": None,
             "declared_order": None,
             "current_group_index": 0,
@@ -223,6 +226,9 @@ def _model_choice_state(auto: bool, monkeypatch) -> Dict[str, Any]:
         "current_batch_index": 0,
         "batches": [{
             "target_sid": "10",
+            # Batch sans groupe d'armes (ce test ne porte que sur l'ordre des groupes) :
+            # même convention que le batch hazard, qui pose explicitement None.
+            "weapon_group_idx": None,
             "alloc_groups": None,
             "declared_order": None,
             "current_group_index": 0,

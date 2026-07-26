@@ -42,14 +42,14 @@ from engine.weapon_damage_cache import lookup_best_weapon
 class ObservationBuilder:
     """Builds observations for the agent."""
 
-    PHASE2_OBS_SIZE = 357
+    PHASE2_OBS_SIZE = 359
     # Taille TOTALE du vecteur squad = SQUAD_OBS_CONT_SIZE + SQUAD_OBS_BIN_SIZE.
     # C'est cette valeur que la config d'agent porte dans observation_params.obs_size et
     # qui route le dispatch (w40k_core._build_observation). Voir build_squad_observation.
     SQUAD_OBS_SIZE_TARGET = 199
     RULE_FEATURE_BASE_IDX = 314
-    RULE_FEATURE_COUNT = 32
-    RULE_AWARE_MACRO_BASE_IDX = 346  # kept for reference: base of macro intent context (obs[346:357])
+    RULE_FEATURE_COUNT = 34
+    RULE_AWARE_MACRO_BASE_IDX = 348  # kept for reference: base of macro intent context (obs[348:359])
 
     _UNIT_RULE_FEATURE_IDS = (
         "charge_after_advance",
@@ -70,6 +70,7 @@ class ObservationBuilder:
         "ANTI_VEHICLE",
         "ASSAULT",
         "BLAST",
+        "CLEAVE",
         "DEVASTATING_WOUNDS",
         "EXTRA_ATTACKS",
         "HAZARDOUS",
@@ -79,6 +80,7 @@ class ObservationBuilder:
         "LETHAL_HITS",
         "MELTA",
         "PISTOL",
+        "PRECISION",
         "PSYCHIC",
         "RAPID_FIRE",
         "SUSTAINED_HITS",
@@ -88,6 +90,7 @@ class ObservationBuilder:
 
     _WEAPON_RULES_WITH_PARAMETER = frozenset({
         "ANTI_VEHICLE",
+        "CLEAVE",
         "MELTA",
         "RAPID_FIRE",
         "SUSTAINED_HITS",
@@ -1083,17 +1086,17 @@ class ObservationBuilder:
         - [314:318] Macro target (4 floats)
         - [318:323] Macro intent (5 floats)
 
-        Structure (355 floats, rule-aware):
+        Structure (359 floats, rule-aware):
         - Legacy blocks [0:313]
-        - [314:346] Rules features (32 floats):
+        - [314:348] Rules features (34 floats):
           unit rules (12), FLY (1), invul flags (2), weapon rules (17)
-        - [346:350] Macro target (4 floats)
-        - [350:355] Macro intent (5 floats)
+        - [348:352] Macro target (4 floats)
+        - [352:357] Macro intent (5 floats)
 
         Asymmetric design: More complete information about enemies than allies.
         Agent discovers optimal tactical combinations through training.
         """
-        # PR4 4e-ii : pipeline mono-fig (357-d) uniquement. Si obs_size vaut la taille du
+        # PR4 4e-ii : pipeline mono-fig (359-d) uniquement. Si obs_size vaut la taille du
         # pipeline squad (SQUAD_OBS_SIZE_TARGET), le caller doit appeler
         # build_squad_observation. Cette fonction n est PAS retro-compatible avec le squad.
         if self.obs_size != self.PHASE2_OBS_SIZE:
@@ -1226,8 +1229,8 @@ class ObservationBuilder:
             obs, active_unit, game_state, base_idx=274,
             valid_targets=valid_targets, six_enemies=six_enemies, positions=positions
         )
-        # === SECTION 7: Phase 2 — Rule features + Zone intent context (obs[314:357]) ===
-        # obs_size deja valide en tete (PR4 4e-ii early check) : on est en 357-d.
+        # === SECTION 7: Phase 2 — Rule features + Zone intent context (obs[314:359]) ===
+        # obs_size deja valide en tete (PR4 4e-ii early check) : on est en 359-d.
         self._encode_rule_features(obs, active_unit, game_state, base_idx=self.RULE_FEATURE_BASE_IDX)
         self._encode_macro_intent_context(obs, active_unit, game_state, base_idx=self.RULE_AWARE_MACRO_BASE_IDX, positions=positions)
         return obs
@@ -2397,15 +2400,15 @@ class ObservationBuilder:
         positions: Dict[str, Tuple[int, int]],
     ) -> None:
         """
-        Phase 2 zone intent context encoding — obs[346:357], 11 floats.
+        Phase 2 zone intent context encoding — obs[348:359], 11 floats.
 
         Source de vérité pour zone_idx : unit_zone_assignments (peuplé en début de command phase).
         Si la clé est absente → KeyError explicite.
 
         Layout:
-          obs[346:350] = c1_col_norm, c1_row_norm, c1_signal, c1_dist  (candidat 1 : navigation)
-          obs[350:354] = c2_col_norm, c2_row_norm, c2_signal, c2_dist  (candidat 2 : objectif zone)
-          obs[354:357] = intent_onehot [INVADE, DEFEND, ATTACK]
+          obs[348:352] = c1_col_norm, c1_row_norm, c1_signal, c1_dist  (candidat 1 : navigation)
+          obs[352:356] = c2_col_norm, c2_row_norm, c2_signal, c2_dist  (candidat 2 : objectif zone)
+          obs[356:359] = intent_onehot [INVADE, DEFEND, ATTACK]
         """
         unit_zone_assignments = game_state["unit_zone_assignments"]
         unit_id_str = str(active_unit["id"])
@@ -2495,7 +2498,7 @@ class ObservationBuilder:
         elif current_phase == "command":
             # Return first alive unit of current player as reference for zone intent observation.
             # Zone intents are global (not per-unit), but the obs builder needs a unit to encode
-            # obs[346:357] (c1/c2 candidates, intent one-hot). Any alive friendly unit works.
+            # obs[348:359] (c1/c2 candidates, intent one-hot). Any alive friendly unit works.
             for unit in game_state["units"]:
                 if unit.get("player") == current_player and is_unit_alive(str(unit["id"]), game_state):
                     return unit
