@@ -632,7 +632,14 @@ def recompute_unit_rules_in_effect(game_state: Dict[str, Any], unit_id: str) -> 
     Les unites construites hors du builder (fixtures de test synthetiques) n ont pas les cles
     de provenance : rien a recalculer, leur `UNIT_RULES` est deja la verite.
     """
-    unit = get_unit_by_id(game_state, str(unit_id))
+    # `unit_by_id` existe dans tout game_state reel (construit au reset). Son absence signale
+    # un game_state « moteur nu » — les fixtures spatiales de `destroy_model` ne modelisent que
+    # models_cache/squad_models — ou il n y a par definition aucune unite a recalculer. Ce n est
+    # pas un etat degrade rattrape en silence : c est un etat qui ne porte pas d unites.
+    units_index = game_state.get("unit_by_id")  # get allowed (cf. ci-dessus)
+    if units_index is None:
+        return
+    unit = units_index.get(str(unit_id))
     if unit is None:
         return
     if "_UNIT_RULES_OWN" not in unit:
@@ -3352,6 +3359,13 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
     # Choke-point LoS (constat 5) : la mort d'une figurine réduit le footprint du squad →
     # invalider ses paires. Id-based, valable même si l'ancre ne bouge pas / squad supprimé.
     _touch_unit_los(game_state, squad_id, old_col, old_row)
+    # Regle 19.04 : la mort d une figurine peut eteindre une SOURCE de regle d unite — le
+    # dernier bodyguard (les regles du datasheet de l escouade tombent, le leader survivant
+    # garde les siennes) ou la derniere figurine d un leader/support (sa regle quitte l unite).
+    # Recalcul ici, apres le retrait de models_cache/squad_models et AVANT les `return`
+    # anticipes plus bas : le vivant est deja a jour, et une unite entierement detruite doit
+    # elle aussi voir ses regles s eteindre.
+    recompute_unit_rules_in_effect(game_state, squad_id)
 
     from engine.game_utils import add_debug_file_log
     episode = game_state.get("episode_number", "?")

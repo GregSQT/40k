@@ -126,6 +126,78 @@ def test_provenance_des_regles_separee_par_source():
     }
 
 
+def _kill(engine, model_id: str) -> None:
+    from engine.phase_handlers.shared_utils import destroy_model
+
+    destroy_model(engine.game_state, model_id, "combat")
+
+
+def _models(engine) -> List[str]:
+    return list(engine.game_state["squad_models"]["101"])
+
+
+def test_mort_du_leader_eteint_sa_regle():
+    """19.04 : « until the last model in that leader/support unit is destroyed ».
+
+    Le Captain mort, l'escouade perd `reroll_charge` — et garde la sienne.
+    """
+    from engine.phase_handlers.shared_utils import unit_can_reroll_charge
+
+    eng = _load(_scenario([_BODYGUARD, _LEADER, _ENEMY]))
+    leader_mid = next(
+        mid for mid in _models(eng)
+        if "attached_from" in eng.game_state["models_cache"][mid]
+    )
+    assert unit_can_reroll_charge(eng.game_state, "101") is True
+
+    _kill(eng, leader_mid)
+
+    assert unit_can_reroll_charge(eng.game_state, "101") is False
+    assert _rule_ids(eng, "101") == {"targeted_intercession"}
+
+
+def test_mort_des_bodyguards_eteint_la_regle_du_datasheet_pas_celle_du_leader():
+    """19.04 : « until the last model in that bodyguard unit is destroyed », plus la note du
+    PDF « leader/support units continue to benefit from their own abilities even after their
+    bodyguard unit is destroyed, provided they started the battle in an attached unit »."""
+    from engine.phase_handlers.shared_utils import unit_can_reroll_charge
+
+    eng = _load(_scenario([_BODYGUARD, _LEADER, _ENEMY]))
+    models_cache = eng.game_state["models_cache"]
+    natives = [mid for mid in _models(eng) if "attached_from" not in models_cache[mid]]
+    assert len(natives) == 3
+
+    for mid in natives[:-1]:
+        _kill(eng, mid)
+    assert _rule_ids(eng, "101") == {"targeted_intercession", "reroll_charge"}, (
+        "tant qu'un bodyguard vit, les deux sources sont en vigueur"
+    )
+
+    _kill(eng, natives[-1])
+    assert _rule_ids(eng, "101") == {"reroll_charge"}
+    assert unit_can_reroll_charge(eng.game_state, "101") is True
+
+
+def test_unite_entierement_detruite_na_plus_aucune_regle():
+    """Aucune source vivante → aucune règle. Le PDF 25 « Destroyed » interdit à une unité
+    détruite d'utiliser des capacités ; ici c'est vrai par construction, pas par un garde."""
+    eng = _load(_scenario([_BODYGUARD, _LEADER, _ENEMY]))
+    for mid in _models(eng):
+        _kill(eng, mid)
+    assert _rule_ids(eng, "101") == set()
+
+
+def test_escouade_sans_character_perd_ses_regles_a_la_derniere_figurine():
+    """Le sens « descendant » vaut aussi sans character : une unité morte n'a plus de règle."""
+    eng = _load(_scenario([_BODYGUARD, _ENEMY]))
+    mids = _models(eng)
+    for mid in mids[:-1]:
+        _kill(eng, mid)
+    assert _rule_ids(eng, "101") == {"targeted_intercession"}
+    _kill(eng, mids[-1])
+    assert _rule_ids(eng, "101") == set()
+
+
 def test_marqueur_dattachement_sur_la_figurine():
     """La figurine repliée porte l'id de son unité d'origine jusque dans models_cache."""
     eng = _load(_scenario([_BODYGUARD, _LEADER, _ENEMY]))
