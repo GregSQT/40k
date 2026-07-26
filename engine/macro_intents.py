@@ -10,31 +10,35 @@ MAX_OBJECTIVES = 5
 # designe une CELLULE de la grille egocentrique 32x32, plus une direction 0-5. Le TYPE de move
 # (normal/advance/fall_back) n'est PAS une dimension d'action : il est infere du cout geodesique
 # de la cellule (cf. shared_utils.infer_squad_move_type).
-# 1032 micro actions:
+# 1047 micro actions (V11 §0.30 T-E : 20 slots de tir au lieu de 5) :
 #   0-1023   : destination = cellule (gx,gy) de la grille egocentrique  [cell_index = gy*32+gx]
 #   1024     : wait / end activation
-#   1025-1029: shoot slot 0-4 (5)
-#   1030     : charge
-#   1031     : fight
-BASE_ZONE_INTENT = 1032
-TOTAL_ACTION_SIZE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3  # 1047
+#   1025-1044: shoot slot 0-19 (20)
+#   1045     : charge
+#   1046     : fight
 
 # --- Named squad-action ids (single source of truth for ai/). --------------
 # Miroir EXACT de engine/phase_handlers/shared_utils.py (SQUAD_ACTION_*), qui reste la source
 # moteur (§4.5 : les deux DOIVENT rester synchronises — verrouille par test). Interdit tout
 # littéral d'action nu dans ai/ : importer ces noms. Aucune valeur par défaut, aucun fallback.
+# Les ids sont DERIVES les uns des autres (et non recopies en litteraux) : le miroir avec
+# shared_utils.SQUAD_ACTION_* ne peut plus se desynchroniser que sur UNE valeur, le nombre de
+# slots de tir — que `test_action_space_mirror.py` verrouille.
 MOVE_CELL_BASE = 0
 MOVE_CELL_COUNT = 1024       # 32x32, cf. engine.spatial_grid.GRID_CELL_COUNT
-ACTION_WAIT = 1024           # wait / end activation
-SHOOT_SLOT_BASE = 1025
-SHOOT_SLOT_COUNT = 5         # shoot enemy slots 0-4 -> 1025-1029
-ACTION_CHARGE = 1030
-ACTION_FIGHT = 1031
+ACTION_WAIT = MOVE_CELL_BASE + MOVE_CELL_COUNT   # 1024 — wait / end activation
+SHOOT_SLOT_BASE = ACTION_WAIT + 1                # 1025
+SHOOT_SLOT_COUNT = 20        # shoot enemy slots 0-19 -> 1025-1044 (V11 T-E)
+ACTION_CHARGE = SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT  # 1045
+ACTION_FIGHT = ACTION_CHARGE + 1                    # 1046
 DEPLOY_SLOT_BASE = 4
 DEPLOY_SLOT_COUNT = 5       # deployment strategy slots 0-4 -> 4-8
 
+BASE_ZONE_INTENT = ACTION_FIGHT + 1                            # 1047
+TOTAL_ACTION_SIZE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3      # 1062
+
 MOVE_CELLS = range(MOVE_CELL_BASE, MOVE_CELL_BASE + MOVE_CELL_COUNT)                # 0-1023
-SHOOT_SLOTS = range(SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT)            # 1025-1029
+SHOOT_SLOTS = range(SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT)            # 1025-1044
 DEPLOY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT)        # 4-8
 
 

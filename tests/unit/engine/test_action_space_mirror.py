@@ -21,6 +21,15 @@ def test_move_cell_count_matches_the_grid():
     assert su.SQUAD_ACTION_MOVE_CELL_COUNT == GRID_CELL_COUNT
 
 
+def test_shoot_slot_count_covers_the_measured_worst_case():
+    """§1.1 : 5 slots pour 6 escouades mesurees = une unite invisible ET intirable.
+
+    Le nombre de slots doit rester au-dessus du pire cas des rosters reels. La tete pointeur
+    rend un slot supplementaire gratuit en parametres — le rogner n'a plus aucune contrepartie.
+    """
+    assert mi.SHOOT_SLOT_COUNT >= 20
+
+
 def test_named_actions_mirror():
     assert mi.ACTION_WAIT == su.SQUAD_ACTION_WAIT
     assert mi.SHOOT_SLOT_BASE == su.SQUAD_ACTION_SHOOT_SLOT_BASE
@@ -36,7 +45,7 @@ def test_zone_intent_starts_right_after_the_micro_actions():
 
 def test_total_action_size():
     assert mi.TOTAL_ACTION_SIZE == su.SQUAD_ACTION_SIZE + mi.MAX_OBJECTIVES * 3
-    assert mi.TOTAL_ACTION_SIZE == 1047
+    assert mi.TOTAL_ACTION_SIZE == 1062
 
 
 def test_micro_action_ids_are_contiguous_and_unique():

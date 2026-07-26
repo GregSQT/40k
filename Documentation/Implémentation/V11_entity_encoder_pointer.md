@@ -25,7 +25,7 @@ les numéros de ligne sont indicatifs. Re-localiser par grep avant d'éditer.
 | **T-B** | Tir d'assaut 10.05 + tir à bout portant 10.06 dans le gate squad/gym | ✅ **FAIT (2026-07-26)** |
 | **T-C** | Sélection d'armes : défaut correct (04.01 / 04.02) + heuristique mêlée consciente des règles | ✅ **FAIT (2026-07-26)** |
 | **T-D** | Observation en **tenseurs d'entités** + **encodeurs partagés** | ✅ **FAIT (2026-07-26)** |
-| **T-E** | **Tête pointeur** + slots ennemis 5 → 20 (espace d'action) | ⏳ à faire |
+| **T-E** | **Tête pointeur** + slots ennemis 5 → 20 (espace d'action) | ✅ **FAIT (2026-07-26)** |
 | **T-F** | K armes = 10 des deux côtés + bloc « types de figurines » ennemis | ⏳ à faire |
 | **T-G** | Run `--new` + win-rate (§0.14) | ⏳ bloqué par T-A→T-F |
 | **résidu** | 10.06 MONSTER/VEHICLE côté PvP/mono (divergence créée par T-B) | ⏳ à faire, cf. §1.9 |
@@ -635,3 +635,52 @@ des slots ennemis, normalisation) ; `AI_TURN.md` — ancre de ligne périmée re
 ancre de fonction.
 
 **PvP** : 27 PASS / 0 FAIL. `pyright` vert sur les fichiers touchés.
+
+### 2026-07-26 — T-E livrée : tête pointeur + slots ennemis 5 → 20
+
+- **Espace d'action** : `SQUAD_ACTION_SHOOT_SLOT_COUNT` **5 → 20** ; `SQUAD_ACTION_SIZE`
+  1032 → **1047**, `TOTAL_ACTION_SIZE` 1047 → **1062**. Les ids de `engine/macro_intents.py` sont
+  désormais **dérivés** les uns des autres au lieu d'être des littéraux recopiés : la
+  désynchronisation avec `shared_utils` ne peut plus porter que sur UNE valeur, verrouillée par
+  `test_action_space_mirror.py`.
+- **Le mapping de slots ennemis n'est plus figé** (`_refresh_enemy_slot_mapping`) : les slots des
+  escouades mortes sont **rendus**, et toute escouade vivante sans slot en reçoit un, par menace
+  décroissante. Un slot occupé par une escouade VIVANTE ne bouge jamais — c'est ce dont
+  l'invariant D1 a besoin. Tout dépassement de K est **logué**.
+- **Tête pointeur** — [`ai/pointer_policy.py`](../../ai/pointer_policy.py) : les logits de tir
+  sont `q · e_i / sqrt(d)` sur les embeddings d'ennemis produits par l'extracteur. Le tronc MLP
+  ne reçoit QUE la partie tronc des features (ré-aplatir les embeddings annulerait le gain), et
+  **tout le reste est laissé à SB3** : distribution `MaskableCategorical`, masquage, `log_prob`,
+  entropie. C'était la mitigation retenue en §5.1 — réduire au minimum la surface de code où une
+  erreur échouerait EN SILENCE.
+- Le nombre de slots est désormais **gratuit en paramètres** : la policy passe de 2 281 864
+  (T-D, 5 slots) à **2 102 423** avec **20** slots — au format plat, 15 slots de plus auraient
+  coûté ~3,4 M paramètres (§1.8).
+
+**Verrous**
+
+- `tests/unit/ai/test_pointer_head.py` (**8**) : logits de tir = produit scalaire ; **comparaison
+  à une tête dense de référence** construite à la main (`W_dense = E · W_q / sqrt(d)`) sur
+  `log_prob` ET entropie ; masquage (un slot masqué a une probabilité nulle et l'entropie est
+  bornée par ln 3 sur 3 slots ouverts) ; localité du logit de slot ; **ordre de retour
+  `(values, log_prob, entropy)` de `evaluate_actions`** — l'inverser saboterait PPO en silence ;
+  cycle `learn()` complet avec gradient effectif sur `query_net`.
+- `tests/unit/engine/test_enemy_slot_coverage.py` (**7**) : 6 escouades ennemies toutes
+  observables ET tirables **via le VRAI masque** ; slot libéré réattribué ; slot d'une escouade
+  vivante jamais permuté ; dépassement logué (et **aucun** log quand tout tient).
+
+**Contre-épreuves mutation** : mapping re-figé (comportement d'avant T-E) → **1 rouge** ;
+K ramené à 5 → **2 rouges** dans la couverture + **4 rouges** dans le miroir d'espace d'action ;
+restauré → verts.
+
+**Vérifications** — épisode complet piloté par la policy pointeur sur le moteur réel
+(130 steps, `game_over`), masque de taille 1062, action choisie toujours dans le masque ;
+`build_squad_observation` **3,00 ms** à 20 slots (contre 3,95 ms au format plat à 5 slots) ;
+`obs_size` **5729 → 12284** (mémoire de rollout : 0,64 Go pour 8192 transitions, grille
+comprise). PvP : 27 PASS / 0 FAIL. `pyright` vert.
+
+**Un piège rencontré, corrigé** : l'agrégation masquée et la normalisation d'entités lisaient le
+masque comme une PONDÉRATION. Sur des observations dégénérées (masque non binaire), le
+dénominateur pouvait tomber à zéro → logits NaN → `MaskableCategorical` refuse la distribution.
+Le masque est désormais lu comme une **présence** (`> 0`), conformément au contrat « les clés
+`_bin` sont discrètes ».

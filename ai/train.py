@@ -1365,22 +1365,31 @@ def _apply_vec_normalize(env, model_path_for_vn, vec_norm_cfg, new_model, n_envs
     return env
 
 
-def _inject_spatial_extractor(policy_kwargs) -> None:
-    """Branche le CNN spatial sur `MultiInputPolicy` (obs Dict).
+def _inject_spatial_extractor(model_params) -> None:
+    """Branche l'extracteur d'entites ET la tete pointeur sur l'obs Dict.
 
-    Un extracteur ne se declare pas en JSON (c'est une classe) : il est injecte ici. Le defaut
-    `CombinedExtractor` aplatirait la grille (6 canaux -> non reconnue comme image), d'ou
-    `SpatialCombinedExtractor` (spec §6.2 / ai/spatial_extractor.py).
+    Ni un extracteur ni une classe de policy ne se declarent en JSON (ce sont des classes) :
+    elles sont injectees ici.
+    - `SpatialCombinedExtractor` : le defaut `CombinedExtractor` aplatirait la grille (7 canaux
+      -> non reconnue comme image) et traiterait les tenseurs d'entites comme un vecteur plat,
+      exactement ce que la refonte supprime.
+    - `PointerMaskablePolicy` (V11 §0.30 T-E) : les logits de tir viennent d'un produit scalaire
+      requete x embedding d'ennemi. Le `"policy"` du JSON ("MultiInputPolicy") est donc REMPLACE
+      — la valeur JSON reste la documentation du type d'obs attendu.
 
     `cnn_features` est un hyperparametre : il DOIT venir du JSON de l'agent
     (`policy_kwargs.features_extractor_kwargs.cnn_features`) — sb3 transmet ces kwargs au
     constructeur de l'extracteur. Absence = erreur explicite, jamais de valeur par defaut.
     """
+    from ai.pointer_policy import PointerMaskablePolicy
     from ai.spatial_extractor import SpatialCombinedExtractor
 
+    policy_kwargs = require_key(model_params, "policy_kwargs")
     fx_kwargs = require_key(policy_kwargs, "features_extractor_kwargs")
     require_key(fx_kwargs, "cnn_features")
     policy_kwargs["features_extractor_class"] = SpatialCombinedExtractor
+    require_key(model_params, "policy")  # doit exister en config, meme s'il est remplace ici
+    model_params["policy"] = PointerMaskablePolicy
 
 
 def _resolve_device_for_obs(observation_space, device_mode, gpu_available, total_params,
@@ -1603,7 +1612,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     # Obs Dict (pipeline squad spatial) : CNN -> GPU, extracteur injecte (le benchmark MlpPolicy
     # ne s'applique plus). Obs Box legacy : logique historique inchangee.
     if _is_dict_obs_space(env.observation_space):
-        _inject_spatial_extractor(policy_kwargs)
+        _inject_spatial_extractor(model_params)
     cache_key = (
         require_present(controlled_agent_key, "controlled_agent_key"),
         training_config_name,
@@ -1906,7 +1915,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     # BENCHMARK RESULTS: CPU 311 it/s vs GPU 282 it/s (10% faster on CPU)
     # Use GPU only for very large networks (>2000 hidden units)
     if _is_dict_obs_space(env.observation_space):
-        _inject_spatial_extractor(policy_kwargs)
+        _inject_spatial_extractor(model_params)
     cache_key = (
         require_present(agent_key, "agent_key"),
         training_config_name,
@@ -2627,7 +2636,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     net_arch = require_key(policy_kwargs, "net_arch")
     total_params = sum(net_arch) if isinstance(net_arch, list) else 512
     if _is_dict_obs_space(env.observation_space):
-        _inject_spatial_extractor(policy_kwargs)
+        _inject_spatial_extractor(model_params)
     cache_key = (
         require_present(agent_key, "agent_key"),
         training_config_name,

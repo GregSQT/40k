@@ -86,7 +86,7 @@ def engine():
 
 def test_mask_has_the_spatial_size(engine):
     mask = build_squad_action_mask(engine.game_state, "1", None, ADVANCE_ROLL)
-    assert len(mask) == SQUAD_ACTION_SIZE == 1032
+    assert len(mask) == SQUAD_ACTION_SIZE == 1047
 
 
 def test_root_cause_is_dead_agent_reaches_far_beyond_one_subhex(engine):

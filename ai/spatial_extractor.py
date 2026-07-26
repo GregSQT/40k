@@ -87,16 +87,21 @@ class EntityRunningNorm(nn.Module):
         self.count.copy_(tot)
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        """`x` : (…, F). `mask` : (…) à 1 sur les entités présentes."""
+        """`x` : (…, F). `mask` : (…) à 1 sur les entités présentes.
+
+        Le masque est lu comme une PRÉSENCE (`> 0`), conformément au contrat de l'observation
+        (les clés "_bin" sont discrètes). Le prendre comme une pondération quelconque rendrait
+        le compte d'entités — donc le dénominateur des statistiques — arbitraire.
+        """
         flat = x.reshape(-1, x.shape[-1])
-        weights = mask.reshape(-1).to(flat.dtype)
+        weights = (mask.reshape(-1) > 0).to(flat.dtype)
         if self.training:
             self._update(flat.detach(), weights.detach())
         normed = (x - self.running_mean) / torch.sqrt(self.running_var + self.epsilon)
         normed = torch.clamp(normed, -self.clip, self.clip)
         # Une entité absente ne doit PAS acquérir une valeur non nulle par recentrage : son
         # embedding serait alors indistinguable d'une entité réelle avant même le masquage.
-        return normed * mask.unsqueeze(-1)
+        return normed * (mask > 0).to(normed.dtype).unsqueeze(-1)
 
 
 def _mlp(sizes: Sequence[int]) -> nn.Sequential:
@@ -113,12 +118,13 @@ def _masked_mean_max(emb: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     `emb` : (B, K, D) ; `mask` : (B, K). Un ensemble vide donne zéro (et non NaN, ni le max de
     valeurs de padding — d'où le `-inf` sur les entités absentes avant le max).
     """
-    m = mask.unsqueeze(-1)
-    count = mask.sum(dim=1, keepdim=True).clamp(min=1.0)
+    present = (mask > 0).to(emb.dtype)
+    m = present.unsqueeze(-1)
+    count = present.sum(dim=1, keepdim=True).clamp(min=1.0)
     mean = (emb * m).sum(dim=1) / count
     neg_inf = torch.finfo(emb.dtype).min
     maxed = torch.where(m.bool(), emb, torch.full_like(emb, neg_inf)).max(dim=1).values
-    maxed = torch.where(mask.any(dim=1, keepdim=True).bool(), maxed, torch.zeros_like(maxed))
+    maxed = torch.where((present > 0).any(dim=1, keepdim=True), maxed, torch.zeros_like(maxed))
     return torch.cat([mean, maxed], dim=1)
 
 
@@ -289,7 +295,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         unit_in = torch.cat(
             [self.unit_norm(unit_cont, present), unit_bin, wpn_agg, typ_agg], dim=-1
         )
-        return self.unit_encoder(unit_in) * present.unsqueeze(-1)
+        return self.unit_encoder(unit_in) * (present > 0).to(unit_in.dtype).unsqueeze(-1)
 
     def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
         cnn_out = self.cnn_head(self.cnn(observations["grid"]))

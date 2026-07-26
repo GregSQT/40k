@@ -8612,7 +8612,7 @@ def squad_consolidate_plan(
 #   6    : Advance (direction depuis macro_intent)
 #   7    : Fall Back (direction auto)
 #   8    : wait / end activation
-#   9-13 : shoot slots 0-4
+#   9-28 : shoot slots 0-19 (V11 T-E : 5 -> 20 slots)
 #   14   : charge (vers cible macro_intent)
 #   15   : fight (Pile In + declare + resolve + Consolidation)
 #
@@ -8629,10 +8629,16 @@ SQUAD_ACTION_MOVE_CELL_BASE = 0
 SQUAD_ACTION_MOVE_CELL_COUNT = GRID_CELL_COUNT  # 32x32 = 1024
 SQUAD_ACTION_WAIT = SQUAD_ACTION_MOVE_CELL_BASE + SQUAD_ACTION_MOVE_CELL_COUNT  # 1024
 SQUAD_ACTION_SHOOT_SLOT_BASE = SQUAD_ACTION_WAIT + 1  # 1025
-SQUAD_ACTION_SHOOT_SLOT_COUNT = 5
-SQUAD_ACTION_CHARGE = SQUAD_ACTION_SHOOT_SLOT_BASE + SQUAD_ACTION_SHOOT_SLOT_COUNT  # 1030
-SQUAD_ACTION_FIGHT = SQUAD_ACTION_CHARGE + 1  # 1031
-SQUAD_ACTION_SIZE = SQUAD_ACTION_FIGHT + 1  # 1032
+# V11 §0.30 T-E : 5 -> 20. Mesure : 9 resets sur 10 comptent au moins 6 escouades ennemies,
+# donc a 5 slots au moins une escouade etait invisible ET intirable toute la partie (§1.1).
+# 20 couvre tres largement le pire cas mesure, et le depassement est desormais LOGUE. Ce
+# dimensionnement n'est possible que parce que la tete pointeur (ai/pointer_policy.py) produit
+# les logits de tir par produit scalaire sur les embeddings : un slot de plus coute ZERO
+# parametre, la ou le format plat en coutait ~226 k (§1.8, mesure).
+SQUAD_ACTION_SHOOT_SLOT_COUNT = 20
+SQUAD_ACTION_CHARGE = SQUAD_ACTION_SHOOT_SLOT_BASE + SQUAD_ACTION_SHOOT_SLOT_COUNT  # 1045
+SQUAD_ACTION_FIGHT = SQUAD_ACTION_CHARGE + 1  # 1046
+SQUAD_ACTION_SIZE = SQUAD_ACTION_FIGHT + 1  # 1047
 
 
 def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
@@ -9163,7 +9169,7 @@ def build_squad_action_mask(
     advance_roll: Optional[int] = None,
     move_cell_map: Optional[Dict[int, Tuple[Tuple[int, int], float]]] = None,
 ) -> List[int]:
-    """Construit le masque `SQUAD_ACTION_SIZE` (1032) pour une escouade active.
+    """Construit le masque `SQUAD_ACTION_SIZE` (1047) pour une escouade active.
 
     Phase move : les actions 0..1023 designent une CELLULE de la grille egocentrique, pas une
     direction (refonte spatiale, cf. `build_squad_move_cell_map`). Une cellule est mask=1 ssi
@@ -9327,68 +9333,123 @@ def build_squad_action_mask(
 
 
 # ============================================================================
-# STABLE ENEMY SLOT MAPPING (squad.md PR4 4d)
+# ENEMY SLOT MAPPING (squad.md PR4 4d ; V11 §0.30 T-E)
 # ============================================================================
-# Mapping fixe a l init de partie : top-5 escouades ennemies par menace
-# (HP_total * OC_total). Tie-break = ordre d index (deterministe).
-# Apres init, le mapping NE CHANGE JAMAIS. Si une escouade slot meurt, son
-# slot reste vide (masque=0). La 6eme escouade n est PAS promue.
+# Un slot = une action de tir (`SQUAD_ACTION_SHOOT_SLOT_BASE + i`) ET la ligne `i` du tenseur
+# ennemi de l'observation : les deux DOIVENT decrire la meme escouade (invariant D1).
+#
+# ⚠️ HISTORIQUE — le defaut que cette section corrige (V11_entity_encoder_pointer.md §1.1) :
+# le mapping etait fige a 5 slots a l'init et n'etait JAMAIS recalcule. Mesure sur les rosters
+# reels : 9 resets sur 10 comptent au moins 6 escouades d'un cote, si bien qu'une escouade
+# ennemie etait ABSENTE de l'observation et IMPOSSIBLE a prendre pour cible pendant toute la
+# partie ; et quand une escouade mappee mourait, son slot restait vide DEFINITIVEMENT au lieu
+# d'etre rendu a celle qui n'en avait pas. Plafond silencieux, jamais logue.
+#
+# Depuis T-E : K = SQUAD_ACTION_SHOOT_SLOT_COUNT (20, au-dessus du maximum mesure), les slots
+# LIBERES sont reattribues, et tout depassement est LOGUE. La tete pointeur (ai/pointer_policy)
+# rend le nombre de slots gratuit en parametres : c'est ce qui permet de le dimensionner sur le
+# pire cas au lieu de le rogner.
+#
+# STABILITE : le slot d'une escouade VIVANTE deja mappee ne change jamais. C'est ce dont
+# l'invariant D1 a besoin — l'agent ne doit pas voir « slot 2 » designer deux escouades
+# differentes d'un step a l'autre sans raison. Une reattribution n'a lieu que sur un slot
+# LIBRE (jamais attribue, ou libere par une escouade morte).
 
 
-def init_enemy_slot_mapping(game_state: Dict[str, Any], our_player: int) -> None:
-    """Construit le mapping stable a l init de partie. Idempotent.
+def _enemy_threat_order(
+    game_state: Dict[str, Any], sids: List[str]
+) -> List[str]:
+    """Trie des escouades par menace DECROISSANTE (HP total x OC total), tie-break deterministe.
 
-    Cle stockee : game_state[f"enemy_slot_mapping_p{our_player}"] = [sid_or_None, ...]
-    Liste de 5 entrees, chaque slot = squad_id ennemi ou None si moins de 5 ennemis.
-
-    A appeler UNE SEULE FOIS au debut de partie. Si la cle existe deja → no-op
-    (preserve mapping initial même si squad meurt).
+    Le tie-break est l'ordre d'identifiant (et non l'ordre d'iteration d'un dict) : deux etats
+    identiques donnent le meme mapping, condition d'un apprentissage reproductible.
     """
-    cache_key = f"enemy_slot_mapping_p{int(our_player)}"
-    if cache_key in game_state:
-        return
     units_cache = game_state.get("units_cache", {})  # get allowed
     squad_models = game_state.get("squad_models", {})  # get allowed
     models_cache = game_state.get("models_cache", {})  # get allowed
-    # Calcule (squad_id, threat) pour chaque ennemi vivant a l init
-    candidates: List[Tuple[str, float, int]] = []  # (sid, threat, idx)
-    enemy_sorted = sorted(
-        (sid for sid, e in units_cache.items() if int(e["player"]) != int(our_player)),
-        key=lambda s: str(s),
-    )
-    for idx, sid in enumerate(enemy_sorted):
+    scored: List[Tuple[str, float, int]] = []
+    for idx, sid in enumerate(sorted(sids, key=str)):
         entry = units_cache[sid]
         hp_total = int(entry.get("HP_CUR", 0))  # get allowed
-        # OC_total : prefer cache value, calcul de secours
         oc_total = int(entry.get("OC_TOTAL", 0))  # get allowed
         if oc_total == 0:
             for mid in squad_models.get(sid, []):  # get allowed
                 m = models_cache.get(mid)
                 if m is not None:
                     oc_total += int(m.get("OC", 0))  # get allowed
-        threat = float(hp_total) * float(oc_total)
-        candidates.append((str(sid), threat, idx))
-    # Tri : menace decroissante, tie-break index croissant (ordre creation)
-    candidates.sort(key=lambda t: (-t[1], t[2]))
-    slot_count = SQUAD_ACTION_SHOOT_SLOT_COUNT
-    mapping: List[Optional[str]] = [None] * slot_count
-    for slot_i in range(min(slot_count, len(candidates))):
-        mapping[slot_i] = candidates[slot_i][0]
-    game_state[cache_key] = mapping
+        scored.append((str(sid), float(hp_total) * float(oc_total), idx))
+    scored.sort(key=lambda t: (-t[1], t[2]))
+    return [sid for sid, _threat, _idx in scored]
+
+
+def init_enemy_slot_mapping(game_state: Dict[str, Any], our_player: int) -> None:
+    """Construit le mapping a l init de partie. Idempotent.
+
+    Cle stockee : game_state[f"enemy_slot_mapping_p{our_player}"] = [sid_or_None, ...] de
+    longueur SQUAD_ACTION_SHOOT_SLOT_COUNT. Les slots sont attribues par menace decroissante.
+    """
+    cache_key = f"enemy_slot_mapping_p{int(our_player)}"
+    if cache_key in game_state:
+        return
+    game_state[cache_key] = [None] * SQUAD_ACTION_SHOOT_SLOT_COUNT
+    _refresh_enemy_slot_mapping(game_state, our_player)
+
+
+def _refresh_enemy_slot_mapping(game_state: Dict[str, Any], our_player: int) -> None:
+    """Libere les slots des escouades mortes et donne un slot a celles qui n'en ont pas.
+
+    Deux proprietes, non negociables :
+    - une escouade VIVANTE deja mappee GARDE son slot (stabilite de l'invariant D1) ;
+    - une escouade vivante SANS slot en recoit un des qu'un slot est libre, par menace
+      decroissante. Sans cela, elle reste invisible et intirable pour toute la partie (§1.1).
+
+    Un depassement de K est LOGUE, jamais silencieux (§11).
+    """
+    cache_key = f"enemy_slot_mapping_p{int(our_player)}"
+    mapping: List[Optional[str]] = game_state[cache_key]
+    units_cache = game_state.get("units_cache", {})  # get allowed
+    # Une escouade absente de units_cache est morte : son slot redevient libre.
+    for slot_i, sid in enumerate(mapping):
+        if sid is not None and sid not in units_cache:
+            mapping[slot_i] = None
+    mapped = {sid for sid in mapping if sid is not None}
+    unmapped = [
+        str(sid)
+        for sid, e in units_cache.items()
+        if int(e["player"]) != int(our_player) and str(sid) not in mapped
+    ]
+    if not unmapped:
+        return
+    free_slots = [i for i, sid in enumerate(mapping) if sid is None]
+    for slot_i, sid in zip(free_slots, _enemy_threat_order(game_state, unmapped)):
+        mapping[slot_i] = sid
+    overflow = len(unmapped) - len(free_slots)
+    if overflow > 0:
+        from engine.game_utils import add_debug_file_log
+
+        add_debug_file_log(
+            game_state,
+            f"[SLOTS] joueur {int(our_player)} : {len(mapped) + len(unmapped)} escouades "
+            f"ennemies pour {SQUAD_ACTION_SHOOT_SLOT_COUNT} slots — {overflow} escouade(s) "
+            f"sans slot : invisibles dans l'observation et intirables.",
+        )
 
 
 def get_enemy_slot_mapping(
     game_state: Dict[str, Any], our_player: int
 ) -> List[Optional[str]]:
-    """Retourne le mapping fige. Si squad d un slot est mort, retourne None pour ce slot.
+    """Mapping courant slot -> escouade ennemie. Source UNIQUE du masque, de l'obs et du decoder.
 
-    Si le mapping n a jamais ete initialise, le construit (init lazy).
+    Init lazy au premier appel, puis rafraichi : les slots des escouades mortes sont rendus, et
+    toute escouade vivante sans slot en recoit un (cf. `_refresh_enemy_slot_mapping`).
     """
     cache_key = f"enemy_slot_mapping_p{int(our_player)}"
     if cache_key not in game_state:
         init_enemy_slot_mapping(game_state, our_player)
-    raw = game_state.get(cache_key, [None] * SQUAD_ACTION_SHOOT_SLOT_COUNT)
+    else:
+        _refresh_enemy_slot_mapping(game_state, our_player)
     units_cache = game_state.get("units_cache", {})  # get allowed
+    raw = game_state[cache_key]
     return [sid if (sid is not None and sid in units_cache) else None for sid in raw]
 
 

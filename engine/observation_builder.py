@@ -1301,7 +1301,9 @@ class ObservationBuilder:
     #: 6 escouades par camp ; K=8 laisse de la marge. Tout dépassement est LOGUÉ.
     K_ALLY_SLOTS = 8
     #: DOIT valoir SQUAD_ACTION_SHOOT_SLOT_COUNT (une action de tir par slot ennemi).
-    K_ENEMY_SLOTS = 5
+    #: 5 -> 20 en T-E : a 5 slots, 9 resets sur 10 laissaient au moins une escouade ennemie
+    #: hors de l'observation ET hors de portee d'action (§1.1, mesure).
+    K_ENEMY_SLOTS = 20
     #: Profils d'armes par registre et par unité — MÊME valeur pour les deux camps (§3.3 : une
     #: arme est une arme des deux côtés). Mesuré : au plus 6 profils de tir et 5 de mêlée par
     #: escouade sur les rosters d'entraînement. Tout dépassement est LOGUÉ.
