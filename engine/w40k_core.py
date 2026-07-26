@@ -673,40 +673,32 @@ class W40KEngine(gym.Env):
                 "No default value allowed."
             )
         
-        # Pipeline squad : obs Dict {"vec_cont", "vec_bin", "grid"} — la grille egocentrique
-        # (perception du terrain, spec §4.1) est branchee sur la policy via MultiInputPolicy
-        # (move_action_space_spatial_rework.md T1b). Pipeline mono-fig legacy : Box inchange.
+        # Pipeline squad : obs Dict de TENSEURS D'ENTITES (V11 §0.30 T-D) + la grille
+        # egocentrique (perception du terrain, spec §4.1), branche sur la policy via
+        # MultiInputPolicy. Pipeline mono-fig legacy : Box inchange.
         #
-        # Le vecteur est scinde (V11 §9.5) : "vec_cont" porte des grandeurs BRUTES normalisees
-        # par VecNormalize (d ou des bornes non finies : une borne 0..1 mentirait sur des PV ou
-        # des subhex bruts), "vec_bin" porte des valeurs discretes JAMAIS normalisees (drapeaux,
-        # phase, controle d objectif dans [-1, 1]).
+        # Les formes viennent de ObservationBuilder.squad_obs_shapes() — source UNIQUE, jamais
+        # recopiee ici. Bornes : les cles "_cont" portent des grandeurs BRUTES (une borne 0..1
+        # mentirait sur des PV ou des subhex), les cles "_bin" des valeurs discretes dans
+        # [-1, 1] (drapeaux, phase, controle d objectif).
         if obs_size == self.obs_builder.SQUAD_OBS_SIZE_TARGET:
             from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
 
-            if (
-                self.obs_builder.SQUAD_OBS_CONT_SIZE + self.obs_builder.SQUAD_OBS_BIN_SIZE
-                != obs_size
-            ):
-                raise ValueError(
-                    f"observation_params.obs_size={obs_size} incoherent avec le layout squad "
-                    f"(cont={self.obs_builder.SQUAD_OBS_CONT_SIZE} + "
-                    f"bin={self.obs_builder.SQUAD_OBS_BIN_SIZE}). Mettre la config a jour."
-                )
-            self.observation_space = gym.spaces.Dict({
-                "vec_cont": gym.spaces.Box(
-                    low=-np.inf, high=np.inf,
-                    shape=(self.obs_builder.SQUAD_OBS_CONT_SIZE,), dtype=np.float32,
-                ),
-                "vec_bin": gym.spaces.Box(
-                    low=-1.0, high=1.0,
-                    shape=(self.obs_builder.SQUAD_OBS_BIN_SIZE,), dtype=np.float32,
-                ),
-                "grid": gym.spaces.Box(
-                    low=0.0, high=1.0,
-                    shape=(GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32,
-                ),
-            })
+            spaces_dict = {}
+            for key, shape in self.obs_builder.squad_obs_shapes().items():
+                if key.endswith("_bin"):
+                    spaces_dict[key] = gym.spaces.Box(
+                        low=-1.0, high=1.0, shape=shape, dtype=np.float32
+                    )
+                else:
+                    spaces_dict[key] = gym.spaces.Box(
+                        low=-np.inf, high=np.inf, shape=shape, dtype=np.float32
+                    )
+            spaces_dict["grid"] = gym.spaces.Box(
+                low=0.0, high=1.0,
+                shape=(GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32,
+            )
+            self.observation_space = gym.spaces.Dict(spaces_dict)
         else:
             self.observation_space = gym.spaces.Box(
                 low=0.0, high=1.0, shape=(obs_size,), dtype=np.float32
@@ -6270,11 +6262,13 @@ class W40KEngine(gym.Env):
     def _build_observation(self):
         """Build observation — route selon obs_size :
            - 357 : pipeline mono-fig legacy (build_observation) -> np.ndarray
-           - squad : build_squad_observation -> Dict {"vec_cont", "vec_bin", "grid"}
+           - squad : build_squad_observation -> Dict de tenseurs d'entites + "grid"
 
-        Pipeline squad : l'obs est un Dict, avec le vecteur scinde cont/bin (V11 §9.5) ET la
-        grille egocentrique (perception du terrain, spec §4.1 / T1b). La geometrie de la grille
-        est celle de `engine.spatial_grid`, partagee avec le masque (T2) et le decoder (T3).
+        Pipeline squad : l'obs est un Dict de TENSEURS D'ENTITES (V11 §0.30 T-D — une unite,
+        amie ou ennemie, y porte le meme schema de features), toujours scinde continues/discretes
+        (V11 §9.5), plus la grille egocentrique (perception du terrain, spec §4.1 / T1b). La
+        geometrie de la grille est celle de `engine.spatial_grid`, partagee avec le masque (T2)
+        et le decoder (T3).
         """
         # Regle 14.02 : le controle d objectif est determine a la FIN de chaque phase/tour.
         # Ce point de passage est le seul commun aux 7 sites de construction d observation du

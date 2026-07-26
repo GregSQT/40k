@@ -1,17 +1,19 @@
-"""T1 — l'observation squad est scindee en "vec_cont" (continues BRUTES) / "vec_bin" (discretes).
+"""CONTRAT de l'observation squad : tenseurs d'entites + separation continues/discretes.
 
-Refonte V11 (Documentation/Implementation/V11_audit_observation.md §9.5 « Normalisation ») :
-les valeurs continues sont exposees en unites brutes et normalisees par VecNormalize
-(norm_obs_keys=["vec_cont"]), les valeurs discretes (drapeaux, phase, controle d'objectif) ne
-sont JAMAIS normalisees. Les divisions manuelles (/5 /10 /20 /30 /100, clamps a 1.0) sont
-retirees : elles saturaient (une escouade de 20 figurines valait 1.0 comme une de 10) et
-constituaient une seconde normalisation non ré-estimable.
+Refonte V11 §9.5 (« Normalisation ») puis §0.30 T-D (tenseurs d'entites) : les valeurs continues
+sont exposees en unites BRUTES, les valeurs discretes ne sont JAMAIS normalisees, et chaque
+UNITE — la mienne, mes alliees, les ennemies — porte le MEME schema de features pour qu'un
+encodeur PARTAGE puisse les traiter (engine/observation_entities.py).
 
 Contre-epreuves integrees :
 - `test_continuous_features_are_raw` echoue si une division fixe est reintroduite (les valeurs
   brutes attendues sont > 1.0, donc incompatibles avec les anciens /10 /30 satures) ;
-- `test_layout_sizes_match_constants` echoue si un bloc est ajoute sans mettre a jour les
-  constantes de taille (le builder leve alors RuntimeError) ;
+- `test_declared_size_matches_the_sum_of_every_tensor` echoue si un bloc est ajoute sans mettre
+  a jour `obs_size` ;
+- `test_enemy_slot_count_mirrors_the_action_space` echoue si l'observation et l'espace d'action
+  divergent sur le nombre de slots ennemis (c'est le desalignement D1) ;
+- `test_unit_schema_is_shared_by_both_sides` echoue si un camp gagne une feature que l'autre
+  n'a pas — l'encodeur partage n'aurait alors plus de sens ;
 - `test_observation_space_matches_builder` echoue si l'espace d'obs de l'env diverge du layout.
 """
 
@@ -24,6 +26,7 @@ import numpy as np
 import pytest
 
 from engine.observation_builder import ObservationBuilder
+from engine.observation_entities import global_bin_index, unit_bin_index, unit_cont_index
 from engine.w40k_core import W40KEngine
 
 
@@ -99,20 +102,35 @@ def engine():
     return eng
 
 
-def test_observation_has_two_vectors(engine):
+def test_observation_keys_match_the_declared_shapes(engine):
+    """Le builder emet EXACTEMENT les cles/formes de `squad_obs_shapes()` (source unique)."""
     obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
-    assert set(obs) == {"vec_cont", "vec_bin"}
-    assert obs["vec_cont"].dtype == np.float32 and obs["vec_bin"].dtype == np.float32
+    shapes = ObservationBuilder.squad_obs_shapes()
+    assert set(obs) == set(shapes)
+    for key, shape in shapes.items():
+        assert obs[key].shape == shape, key
+        assert obs[key].dtype == np.float32, key
 
 
-def test_layout_sizes_match_constants(engine):
+def test_declared_size_matches_the_sum_of_every_tensor(engine):
+    """`obs_size` (config d'agent) = somme des scalaires emis, grille exclue."""
     obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
-    assert obs["vec_cont"].shape == (ObservationBuilder.SQUAD_OBS_CONT_SIZE,)
-    assert obs["vec_bin"].shape == (ObservationBuilder.SQUAD_OBS_BIN_SIZE,)
-    assert (
-        ObservationBuilder.SQUAD_OBS_CONT_SIZE + ObservationBuilder.SQUAD_OBS_BIN_SIZE
-        == ObservationBuilder.SQUAD_OBS_SIZE_TARGET
-    )
+    total = sum(int(np.prod(v.shape)) for v in obs.values())
+    assert total == ObservationBuilder.SQUAD_OBS_SIZE_TARGET
+
+
+def test_enemy_slot_count_mirrors_the_action_space(engine):
+    """Un slot d'observation ennemi <-> une action de tir. Deux valeurs = un desalignement D1."""
+    from engine.phase_handlers.shared_utils import SQUAD_ACTION_SHOOT_SLOT_COUNT
+
+    assert ObservationBuilder.K_ENEMY_SLOTS == SQUAD_ACTION_SHOOT_SLOT_COUNT
+
+
+def test_unit_schema_is_shared_by_both_sides(engine):
+    """Ami et ennemi portent le MEME schema : c'est ce qui rend l'encodeur partage legitime."""
+    shapes = ObservationBuilder.squad_obs_shapes()
+    for suffix in ("cont", "bin", "wpn_cont", "wpn_bin", "types_cont", "types_bin"):
+        assert shapes[f"allies_{suffix}"][1:] == shapes[f"enemies_{suffix}"][1:], suffix
 
 
 def test_continuous_features_are_raw(engine):
@@ -121,59 +139,89 @@ def test_continuous_features_are_raw(engine):
     Sous l'ancien code (OC/10 clampe, taille/10, PV/30 clampes), ces trois assertions
     rougissent : chaque valeur y valait exactement 1.0.
     """
-    gs = engine.game_state
-    obs = engine.obs_builder.build_squad_observation(gs, "1")
-    cont = obs["vec_cont"]
-
-    assert cont[3] == pytest.approx(24.0)  # OC total brut (12 figurines x OC 2)
-
-    e_base = ObservationBuilder.squad_enemy_cont_base(0)
-    assert cont[e_base + 0] == pytest.approx(20.0)  # taille d'escouade brute
-    assert cont[e_base + 1] == pytest.approx(20.0)  # PV totaux bruts
-
-
-def test_binary_vector_holds_only_discrete_semantics(engine):
-    """vec_bin : drapeaux 0/1, phase dans {0,.25,.5,.75,1}, controle d'objectif dans {-1,0,1}."""
     obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
-    binv = obs["vec_bin"]
+    mine = obs["allies_cont"][0]
+    enemy = obs["enemies_cont"][0]
+
+    assert mine[unit_cont_index("oc_total")] == pytest.approx(24.0)  # 12 figurines x OC 2
+    assert enemy[unit_cont_index("alive_models")] == pytest.approx(20.0)
+    assert enemy[unit_cont_index("hp_total")] == pytest.approx(20.0)
+
+
+def test_binary_tensors_hold_only_discrete_semantics(engine):
+    """Cles "_bin" : drapeaux 0/1, phase dans {0,.25,.5,.75,1}, controle d'objectif dans {-1,0,1}."""
+    obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
     allowed_phase = {0.0, 0.25, 0.5, 0.75, 1.0}
-    assert float(binv[1]) in allowed_phase
-    for i, v in enumerate(binv):
-        if i == 1:
+    phase_idx = global_bin_index("phase")
+    assert float(obs["global_bin"][phase_idx]) in allowed_phase
+    for key, value in obs.items():
+        if not key.endswith("_bin"):
             continue
-        assert float(v) in {-1.0, 0.0, 1.0}, f"vec_bin[{i}] = {v} n'est pas discret"
+        for idx, v in enumerate(value.reshape(-1)):
+            if key == "global_bin" and idx == phase_idx:
+                continue
+            assert float(v) in {-1.0, 0.0, 1.0}, f"{key}[{idx}] = {v} n'est pas discret"
 
 
-def test_enemy_slot_offsets_are_contiguous_and_in_range(engine):
-    """Les accesseurs d'offset couvrent exactement les vecteurs (pas de trou, pas de debordement)."""
-    n = ObservationBuilder.SQUAD_N_ENEMY_SLOTS
-    last_cont = ObservationBuilder.squad_enemy_cont_base(n - 1) + ObservationBuilder.SQUAD_PER_ENEMY_SLOT_CONT
-    last_bin = ObservationBuilder.squad_enemy_bin_base(n - 1) + ObservationBuilder.SQUAD_PER_ENEMY_SLOT_BIN
-    assert last_cont == ObservationBuilder.SQUAD_OBS_CONT_SIZE
-    assert last_bin == ObservationBuilder.SQUAD_OBS_BIN_SIZE
+def test_absent_entities_are_zero_padded(engine):
+    """Un slot vide est une ligne de ZEROS : le bit `present` porte seul l'information."""
+    obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
+    present = unit_bin_index("present")
+    for family in ("allies", "enemies"):
+        for row in range(obs[f"{family}_bin"].shape[0]):
+            if float(obs[f"{family}_bin"][row][present]) == 1.0:
+                continue
+            assert not obs[f"{family}_cont"][row].any(), (family, row)
+            assert not obs[f"{family}_bin"][row].any(), (family, row)
+            assert not obs[f"{family}_wpn_cont"][row].any(), (family, row)
+            assert not obs[f"{family}_types_cont"][row].any(), (family, row)
+
+
+def test_active_unit_is_row_zero_of_the_allies(engine):
+    """Contrat : la ligne 0 des allies est l'unite OBSERVEE, et elle seule porte `is_active`."""
+    obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
+    is_active = unit_bin_index("is_active")
+    is_ally = unit_bin_index("is_ally")
+    assert float(obs["allies_bin"][0][is_active]) == 1.0
+    assert float(obs["allies_bin"][0][is_ally]) == 1.0
+    assert not any(
+        float(obs["allies_bin"][row][is_active]) for row in range(1, obs["allies_bin"].shape[0])
+    )
+    assert not obs["enemies_bin"][:, is_active].any()
+    assert not obs["enemies_bin"][:, is_ally].any()
 
 
 def test_observation_space_matches_builder(engine):
-    """L'espace d'obs de l'env expose les memes cles/tailles que le builder, grille comprise."""
+    """L'espace d'obs de l'env expose les memes cles/formes que le builder, grille comprise."""
     from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
 
     space = engine.observation_space
-    assert set(space.spaces) == {"vec_cont", "vec_bin", "grid"}
-    assert space.spaces["vec_cont"].shape == (ObservationBuilder.SQUAD_OBS_CONT_SIZE,)
-    assert space.spaces["vec_bin"].shape == (ObservationBuilder.SQUAD_OBS_BIN_SIZE,)
+    shapes = ObservationBuilder.squad_obs_shapes()
+    assert set(space.spaces) == set(shapes) | {"grid"}
+    for key, shape in shapes.items():
+        assert space.spaces[key].shape == shape, key
     assert space.spaces["grid"].shape == (GRID_CHANNELS, GRID_SIZE, GRID_SIZE)
     # Les continues brutes ne sont pas bornees a [0,1] : une borne 0..1 mentirait sur des PV
     # ou des subhex bruts et ferait echouer check_env des que la valeur depasse 1.
-    assert not np.isfinite(space.spaces["vec_cont"].high).any()
+    assert not np.isfinite(space.spaces["allies_cont"].high).any()
 
     obs = engine._build_observation()
-    assert set(obs) == {"vec_cont", "vec_bin", "grid"}
-    for key in ("vec_cont", "vec_bin", "grid"):
+    assert set(obs) == set(shapes) | {"grid"}
+    for key in obs:
         assert obs[key].shape == space.spaces[key].shape
 
 
-def test_vec_norm_obs_keys_targets_only_continuous(engine):
-    """VecNormalize ne normalise que "vec_cont" (drapeaux et grille restent bruts)."""
+def test_vec_norm_obs_keys_targets_only_the_global_block(engine):
+    """VecNormalize ne normalise que "global_cont".
+
+    Les tenseurs d'entites en sont EXCLUS : VecNormalize normalise element par element, donc
+    chaque slot aurait ses propres statistiques et le meme encodeur partage verrait des echelles
+    differentes selon le slot — ce qui annulerait le partage de poids (V11 §0.30 T-D). Ils sont
+    normalises dans l'extracteur, par une statistique commune a tous les slots.
+    """
     from ai.train import _vec_norm_obs_keys
 
-    assert _vec_norm_obs_keys(engine.observation_space) == ["vec_cont"]
+    assert _vec_norm_obs_keys(engine.observation_space) == ["global_cont"]
+    for key in ObservationBuilder.ENTITY_CONT_KEYS:
+        assert key in engine.observation_space.spaces
+        assert key not in _vec_norm_obs_keys(engine.observation_space)

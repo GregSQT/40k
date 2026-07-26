@@ -25,14 +25,20 @@ from unittest.mock import patch
 import pytest
 
 from engine.observation_builder import ObservationBuilder
+from engine.observation_entities import (
+    MODEL_TYPE_BIN_FIELDS,
+    SELF_MODEL_CONT_SIZE,
+    UNIT_CONT_SIZE,
+    unit_cont_index,
+)
 from engine.w40k_core import W40KEngine
 
-CONT_HP_WOUNDED = 8
-CONT_MOVE = 9
-CONT_HP_MAX = 10
-CONT_T = 11
-CONT_SAVE = 12
-CONT_INVUL = 13
+CONT_HP_WOUNDED = unit_cont_index("wounded_hp_ratio")
+CONT_MOVE = unit_cont_index("move")
+CONT_HP_MAX = unit_cont_index("hp_max")
+CONT_T = unit_cont_index("toughness")
+CONT_SAVE = unit_cont_index("armor_save")
+CONT_INVUL = unit_cont_index("invul_save")
 
 
 def _weapon_cfg() -> Dict[str, Any]:
@@ -105,7 +111,7 @@ def engine():
 
 def test_squad_profile_is_raw(engine):
     """MOVE / HP_MAX / T / save / invulnérable sortent en valeurs brutes de datasheet."""
-    cont = engine.obs_builder.build_squad_observation(engine.game_state, "1")["vec_cont"]
+    cont = engine.obs_builder.build_squad_observation(engine.game_state, "1")["allies_cont"][0]
     inches_to_subhex = int(engine.game_state["inches_to_subhex"])
     assert cont[CONT_MOVE] == pytest.approx(6.0 * inches_to_subhex)  # MOVE en subhex
     assert cont[CONT_HP_MAX] == pytest.approx(2.0)
@@ -117,19 +123,19 @@ def test_squad_profile_is_raw(engine):
 def test_wounded_model_hp_is_observed(engine):
     """PV de la figurine blessée : 1.0 tant qu'aucune n'est entamée, puis son ratio réel."""
     gs = engine.game_state
-    cont = engine.obs_builder.build_squad_observation(gs, "1")["vec_cont"]
+    cont = engine.obs_builder.build_squad_observation(gs, "1")["allies_cont"][0]
     assert cont[CONT_HP_WOUNDED] == pytest.approx(1.0)
 
     gs["models_cache"]["1#1"]["HP_CUR"] = 1  # figurine a 1 PV sur 2
-    cont = engine.obs_builder.build_squad_observation(gs, "1")["vec_cont"]
+    cont = engine.obs_builder.build_squad_observation(gs, "1")["allies_cont"][0]
     assert cont[CONT_HP_WOUNDED] == pytest.approx(0.5)
 
 
 def test_block_sizes_after_removals(engine):
     """Bloc figurine : uniquement l'individuel (position), le profil étant au niveau TYPE."""
-    assert ObservationBuilder.SQUAD_PER_MODEL_CONT == 2  # col_rel, row_rel
+    assert SELF_MODEL_CONT_SIZE == 2  # col_rel, row_rel
     obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
-    assert obs["vec_cont"].shape == (ObservationBuilder.SQUAD_OBS_CONT_SIZE,)
+    assert obs["allies_cont"].shape == (ObservationBuilder.K_ALLY_SLOTS, UNIT_CONT_SIZE)
 
 
 def test_model_block_holds_only_positions(engine):
@@ -139,19 +145,16 @@ def test_model_block_holds_only_positions(engine):
     figurines ne doit PAS bouger (sous l'ancien layout, deux de ses dimensions changeaient).
     """
     gs = engine.game_state
-    base = ObservationBuilder.squad_model_cont_base(0)
-    end = ObservationBuilder.squad_model_cont_base(ObservationBuilder.SQUAD_TOP_K - 1) + \
-        ObservationBuilder.SQUAD_PER_MODEL_CONT
-    before = list(engine.obs_builder.build_squad_observation(gs, "1")["vec_cont"][base:end])
+    before = engine.obs_builder.build_squad_observation(gs, "1")["self_models_cont"].tolist()
 
     gs["models_cache"]["1#0"]["HP_CUR"] = 1  # PV COURANTS : plus observés par figurine
     gs["models_cache"]["1#0"]["selectedCcWeaponIndex"] = 1
-    after = list(engine.obs_builder.build_squad_observation(gs, "1")["vec_cont"][base:end])
+    after = engine.obs_builder.build_squad_observation(gs, "1")["self_models_cont"].tolist()
     assert before == after
 
     # ... alors qu'un DEPLACEMENT de la meme figurine, lui, doit bien bouger le bloc.
     gs["models_cache"]["1#0"]["col"] = int(gs["models_cache"]["1#0"]["col"]) + 3
-    moved = list(engine.obs_builder.build_squad_observation(gs, "1")["vec_cont"][base:end])
+    moved = engine.obs_builder.build_squad_observation(gs, "1")["self_models_cont"].tolist()
     assert moved != after
 
 
@@ -162,17 +165,14 @@ def test_enemy_block_has_no_computed_features(engine):
     bloc ennemi. Sous l'ancien code, `value_over_ttk` et `threat_level` en dépendaient.
     """
     gs = engine.game_state
-    base = ObservationBuilder.squad_enemy_cont_base(0)
-    end = ObservationBuilder.squad_enemy_cont_base(ObservationBuilder.SQUAD_N_ENEMY_SLOTS - 1) + \
-        ObservationBuilder.SQUAD_PER_ENEMY_SLOT_CONT
-    before = list(engine.obs_builder.build_squad_observation(gs, "1")["vec_cont"][base:end])
+    before = engine.obs_builder.build_squad_observation(gs, "1")["enemies_cont"].tolist()
 
     for mid in gs["squad_models"]["1"]:
         gs["models_cache"][mid]["RNG_WEAPONS"] = [
             {"ATK": 2, "STR": 12, "AP": 3, "DMG": 6, "NB": 5, "RNG": 48, "WEAPON_RULES": []}
         ]
         gs["models_cache"][mid]["selectedRngWeaponIndex"] = 0
-    after = list(engine.obs_builder.build_squad_observation(gs, "1")["vec_cont"][base:end])
+    after = engine.obs_builder.build_squad_observation(gs, "1")["enemies_cont"].tolist()
     assert before == after
 
 
@@ -195,20 +195,20 @@ TYPE_COUNT = 4
 def _types(engine):
     """[(role|None, HP_MAX, T, save, invul, effectif), …] tels que lus DANS l'observation."""
     obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
-    cont, binv = obs["vec_cont"], obs["vec_bin"]
+    # Sous-registre « types » de l'unite ACTIVE = ligne 0 des allies.
+    cont, binv = obs["allies_types_cont"][0], obs["allies_types_bin"][0]
+    present = MODEL_TYPE_BIN_FIELDS.index("present")
     out = []
-    for t in range(ObservationBuilder.SQUAD_N_MODEL_TYPES):
-        b_bin = ObservationBuilder.squad_type_bin_base(t)
-        if float(binv[b_bin + _ROLE_BITS]) != 1.0:  # slot de type occupé ?
+    for t in range(ObservationBuilder.K_MODEL_TYPES):
+        if float(binv[t][present]) != 1.0:  # slot de type occupé ?
             continue
-        b_cont = ObservationBuilder.squad_type_cont_base(t)
-        onehot = [float(binv[b_bin + i]) for i in range(_ROLE_BITS)]
+        onehot = [float(binv[t][i]) for i in range(_ROLE_BITS)]
         role = ObservationBuilder.SQUAD_MODEL_ROLES[onehot.index(1.0)] if 1.0 in onehot else None
         out.append((
             role,
-            float(cont[b_cont + TYPE_HP_MAX]), float(cont[b_cont + TYPE_T]),
-            float(cont[b_cont + TYPE_SAVE]), float(cont[b_cont + TYPE_INVUL]),
-            float(cont[b_cont + TYPE_COUNT]),
+            float(cont[t][TYPE_HP_MAX]), float(cont[t][TYPE_T]),
+            float(cont[t][TYPE_SAVE]), float(cont[t][TYPE_INVUL]),
+            float(cont[t][TYPE_COUNT]),
         ))
     return out
 
@@ -284,10 +284,10 @@ def test_engagement_counters_cover_the_whole_squad():
         eng = W40KEngine(config=cfg)
     eng.reset()
 
-    cont = eng.obs_builder.build_squad_observation(eng.game_state, "1")["vec_cont"]
-    base = ObservationBuilder.squad_model_cont_base(ObservationBuilder.SQUAD_TOP_K - 1) + \
-        ObservationBuilder.SQUAD_PER_MODEL_CONT
-    n_fight, n_ez, n_buddy = (float(cont[base + i]) for i in range(3))
+    cont = eng.obs_builder.build_squad_observation(eng.game_state, "1")["allies_cont"][0]
+    n_fight = float(cont[unit_cont_index("n_fight_eligible")])
+    n_ez = float(cont[unit_cont_index("n_in_enemy_ez")])
+    n_buddy = float(cont[unit_cont_index("n_relayed_ez")])
     from engine.phase_handlers.shared_utils import get_fighting_models
 
     assert n_fight == float(len(set(get_fighting_models(eng.game_state, "1"))))

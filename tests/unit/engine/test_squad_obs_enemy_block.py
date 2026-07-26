@@ -21,21 +21,22 @@ from unittest.mock import patch
 import pytest
 
 from engine.observation_builder import ObservationBuilder
+from engine.observation_entities import UNIT_CONT_SIZE, unit_bin_index, unit_cont_index
 from engine.w40k_core import W40KEngine
 
-# Offsets dans le bloc ennemi (cf. layout de build_squad_observation)
-E_SIZE = 0
-E_HP = 1
-E_VALUE = 2
-E_COL = 3
-E_ROW = 4
-E_DIST = 5
-E_OC = 6
-E_MOVE = 7
-E_HP_MAX = 8
-E_T = 9
-E_SAVE = 10
-E_INVUL = 11
+# Features d'unite lues par NOM (schema unifie ami/ennemi, engine/observation_entities.py)
+E_SIZE = unit_cont_index("alive_models")
+E_HP = unit_cont_index("hp_total")
+E_VALUE = unit_cont_index("value_alive")
+E_COL = unit_cont_index("col_rel")
+E_ROW = unit_cont_index("row_rel")
+E_DIST = unit_cont_index("edge_distance")
+E_OC = unit_cont_index("oc_total")
+E_MOVE = unit_cont_index("move")
+E_HP_MAX = unit_cont_index("hp_max")
+E_T = unit_cont_index("toughness")
+E_SAVE = unit_cont_index("armor_save")
+E_INVUL = unit_cont_index("invul_save")
 
 
 def _weapon_cfg() -> Dict[str, Any]:
@@ -105,9 +106,7 @@ def _make_engine(units: List[Dict[str, Any]]) -> W40KEngine:
 
 
 def _slot(engine, slot_i: int = 0):
-    cont = engine.obs_builder.build_squad_observation(engine.game_state, "1")["vec_cont"]
-    base = ObservationBuilder.squad_enemy_cont_base(slot_i)
-    return cont[base:base + ObservationBuilder.SQUAD_PER_ENEMY_SLOT_CONT]
+    return engine.obs_builder.build_squad_observation(engine.game_state, "1")["enemies_cont"][slot_i]
 
 
 def test_position_follows_nearest_model_not_anchor():
@@ -171,8 +170,8 @@ def test_enemy_value_drops_with_losses():
 
 
 def test_empty_slot_is_zero_padded():
-    """Un slot sans ennemi vivant reste à zéro (le mask du vec_bin porte l'information)."""
+    """Un slot sans ennemi vivant reste à zéro (le bit `present` porte seul l'information)."""
     eng = _make_engine([_unit_cfg(1, 1, [(20, 20)]), _unit_cfg(2, 2, [(60, 20)])])
-    assert list(_slot(eng, 1)) == [0.0] * ObservationBuilder.SQUAD_PER_ENEMY_SLOT_CONT
-    binv = eng.obs_builder.build_squad_observation(eng.game_state, "1")["vec_bin"]
-    assert float(binv[ObservationBuilder.squad_enemy_bin_base(1)]) == 0.0
+    assert list(_slot(eng, 1)) == [0.0] * UNIT_CONT_SIZE
+    binv = eng.obs_builder.build_squad_observation(eng.game_state, "1")["enemies_bin"][1]
+    assert float(binv[unit_bin_index("present")]) == 0.0

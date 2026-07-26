@@ -133,26 +133,18 @@ def _make_engine(units: List[Dict[str, Any]]) -> W40KEngine:
 def _self_profile(engine: W40KEngine, slot: int) -> Tuple[Any, Any]:
     """(cont, bin) du slot de profil `slot` de MON escouade (0..K_ranged-1 = tir, puis mêlée)."""
     obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
-    c_base = ObservationBuilder.SQUAD_CONT_WEAPONS_BASE + slot * PROFILE_CONT_SIZE
-    b_base = ObservationBuilder.SQUAD_BIN_WEAPONS_BASE + slot * PROFILE_BIN_SIZE
-    return (obs["vec_cont"][c_base:c_base + PROFILE_CONT_SIZE],
-            obs["vec_bin"][b_base:b_base + PROFILE_BIN_SIZE])
+    # Sous-registre « armes » de l'unite ACTIVE = ligne 0 des allies.
+    return (obs["allies_wpn_cont"][0][slot], obs["allies_wpn_bin"][0][slot])
 
 
 def _melee_slot_index(slot_in_melee: int = 0) -> int:
-    return ObservationBuilder.SQUAD_SELF_K_RANGED + slot_in_melee
+    return ObservationBuilder.K_WEAPONS_RANGED + slot_in_melee
 
 
 def _enemy_profile(engine: W40KEngine, enemy_slot: int, profile_slot: int) -> Tuple[Any, Any]:
     obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
-    c_base = (ObservationBuilder.squad_enemy_cont_base(enemy_slot)
-              + ObservationBuilder.SQUAD_PER_ENEMY_SLOT_SUMMARY_CONT
-              + profile_slot * PROFILE_CONT_SIZE)
-    b_base = (ObservationBuilder.squad_enemy_bin_base(enemy_slot)
-              + ObservationBuilder.SQUAD_PER_ENEMY_SLOT_SUMMARY_BIN
-              + profile_slot * PROFILE_BIN_SIZE)
-    return (obs["vec_cont"][c_base:c_base + PROFILE_CONT_SIZE],
-            obs["vec_bin"][b_base:b_base + PROFILE_BIN_SIZE])
+    return (obs["enemies_wpn_cont"][enemy_slot][profile_slot],
+            obs["enemies_wpn_bin"][enemy_slot][profile_slot])
 
 
 # ---------------------------------------------------------------- regroupement
@@ -357,7 +349,7 @@ def test_profile_truncation_is_logged_never_silent():
     vrai chemin `build_squad_observation`. Contre-épreuve intégrée : la même escouade avec K
     profils exactement ne loggue RIEN.
     """
-    k = ObservationBuilder.SQUAD_SELF_K_RANGED
+    k = ObservationBuilder.K_WEAPONS_RANGED
 
     def _log_of(n_profiles: int) -> List[str]:
         # n_profiles armes de tir toutes différentes, une par figurine.

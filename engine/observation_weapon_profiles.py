@@ -55,7 +55,7 @@ WEAPON_RULE_PARAMS: Tuple[Tuple[str, int], ...] = (
     ("BLAST", 1),
 )
 
-# Règles BOOLÉENNES résolues dans le vif → un drapeau chacune (vec_bin, jamais normalisé).
+# Règles BOOLÉENNES résolues dans le vif → un drapeau chacune (clé "_bin", jamais normalisée).
 WEAPON_RULE_BITS: Tuple[str, ...] = (
     "DEVASTATING_WOUNDS",
     "LETHAL_HITS",

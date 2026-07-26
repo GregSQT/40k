@@ -29,11 +29,12 @@ import pytest
 
 from engine.w40k_core import W40KEngine
 from engine.observation_builder import ObservationBuilder
+from engine.observation_entities import unit_bin_index
 
-BIN_HIDDEN = 8
-BIN_GTG = 9
-BIN_COVER = 10
-BIN_IN_EZ = 11
+BIN_HIDDEN = unit_bin_index("hidden")
+BIN_GTG = unit_bin_index("gone_to_ground")
+BIN_COVER = unit_bin_index("in_cover")
+BIN_IN_EZ = unit_bin_index("engaged")
 
 # Zone de terrain rectangulaire couvrant les colonnes 28..36, lignes 18..22.
 _AREA_COLS = range(28, 37)
@@ -128,7 +129,8 @@ def _make_engine(cfg: Dict[str, Any], obscuring: bool = True, dense: bool = True
 
 
 def _flags(engine) -> Dict[str, float]:
-    binv = engine.obs_builder.build_squad_observation(engine.game_state, "1")["vec_bin"]
+    # Ligne 0 des allies = l'unite ACTIVE (contrat de l'observation entite, V11 §0.30 T-D).
+    binv = engine.obs_builder.build_squad_observation(engine.game_state, "1")["allies_bin"][0]
     return {
         "hidden": float(binv[BIN_HIDDEN]),
         "gtg": float(binv[BIN_GTG]),

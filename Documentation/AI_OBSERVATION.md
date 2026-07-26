@@ -2,42 +2,61 @@
 ## The Canonical Reference for Agent Observation & Training Systems
 
 > **📍 File Location**: Save as `Documentation/AI_OBSERVATION.md`
-> **Status**: ✅ CANONICAL REFERENCE (March 2026)
-> **Version**: 2.6 - Strategic pool scalars (spec) + Rule-Aware Observation System
+> **Status**: section « CE QUE L'AGENT OBSERVE AUJOURD'HUI » = à jour (2026-07-26) ;
+> le reste du document décrit le pipeline mono-figurine LEGACY, conservé pour référence.
+> **Version**: 3.0 — observation squad en tenseurs d'entités (V11 §0.30 T-D)
 
-> ## ⚠️ MàJ 2026-07-16 (V11 T6) — CE DOCUMENT NE DÉCRIT PAS LE PIPELINE ACTIF
->
-> **Le pipeline d'observation en vigueur pour `CoreAgent` est l'observation SQUAD à 108 floats**,
-> pas les 355/357 décrits ci-dessous. Vérifié dans le code (2026-07-16) :
->
-> - `config/agents/CoreAgent/CoreAgent_training_config.json` → `observation_params.obs_size = 108`,
->   `action_space_size = 41` (dans les 5 phases).
-> - `engine/w40k_core.py::_build_observation` **route selon `obs_size`** : `108` →
->   `build_squad_observation` (pipeline squad actif) ; `357` → `build_observation` (pipeline
->   mono-figurine legacy, `PHASE2_OBS_SIZE = 357`).
-> ⚠️ **PÉRIMÉ depuis le 2026-07-26 — ne pas s'appuyer sur les chiffres de cette section.**
-> Le layout squad est passé à **108 → 199** (refonte du vecteur, 2026-07-25) puis à **1011**
-> (profils d'armes + bits de règles + mise en place + distance parcourue, 2026-07-26). La
-> **source unique** du layout est l'en-tête de `build_squad_observation`
-> (`engine/observation_builder.py`) ; l'historique et les décisions sont dans
-> `Documentation/Implémentation/V11_audit_observation.md` (§8, §10) et
-> `V11_agent_rework.md` §9.2.5. Réécrire cette section fait partie du chantier
-> `V11_entity_encoder_pointer.md` (T-D change à nouveau le contrat : tenseurs d'entités).
->
-> - Layout squad 108 (`engine/observation_builder.py`, constantes `SQUAD_*`) :
->   **16 global + 5 agrégats squad + 6 figurines top-k × 7 features + 5 slots ennemis × 9 features**
->   = 16 + 5 + 42 + 45 = 108. Layout **purement 2D** (col/row) : **aucune feature de niveau/élévation**
->   (l'agent subit le coût de descente §13.06 sans le percevoir — c'est l'objet de la Phase B).
->
-> **Comment lire ce document** : tout ce qui suit décrit le pipeline mono-figurine 355/357
-> (toujours présent dans le code, atteignable via `obs_size = 357`, mais **pas** celui sur lequel
-> l'agent s'entraîne). Les configs snapshot en `obs_size = 355` (`BEST_CoreAgent_training_config.json`,
-> `CoreAgent_training_config_BEST_X1.json`, `CoreAgent_training_config_save_avant_X10.json`) sont
-> **archivées et incompatibles** avec le code actuel — elles portent un marqueur `_ARCHIVE`.
->
-> Toute modification du layout squad change `obs_size` → modèle from scratch obligatoire (`--new`)
-> + mise à jour de la `justification` de la config. Source : `Documentation/Implémentation/V11_agent_rework.md`
-> (rupture R8, hygiène T6).
+## 🔴 CE QUE L'AGENT OBSERVE AUJOURD'HUI — pipeline SQUAD en TENSEURS D'ENTITÉS
+
+> **Réécrit le 2026-07-26 (V11 §0.30, tranche T-D).** Cette section remplace l'avertissement
+> « PÉRIMÉ » qui la précédait. **Tout ce qui suit le bandeau `DOCUMENT STATUS` décrit le pipeline
+> MONO-FIGURINE legacy (355/357 floats)** : il existe toujours dans le code (atteignable par
+> `obs_size = 357`), mais **ce n'est pas celui sur lequel l'agent s'entraîne**.
+
+**Source unique du contrat** : l'en-tête « OBSERVATION SQUAD — TENSEURS D'ENTITÉS » de
+[`engine/observation_builder.py`](../engine/observation_builder.py) et le schéma
+[`engine/observation_entities.py`](../engine/observation_entities.py). Ce document en donne la
+lecture, jamais une copie de chiffres qui dériverait.
+
+**L'observation n'est plus un vecteur plat.** Elle est un `Dict` de tenseurs :
+
+| Clé | Forme | Contenu |
+|---|---|---|
+| `global_cont` / `global_bin` | (6,) / (12,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, force d'usure, mon tour, phase, contrôle + présence des 5 objectifs |
+| `allies_cont` / `allies_bin` | (K_a, 19) / (K_a, 17) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades |
+| `allies_wpn_cont` / `_bin` | (K_a, K_w, 13) / (K_a, K_w, 18) | profils d'armes par unité (tir puis mêlée), avec porteurs vivants et bits/params de règles |
+| `allies_types_cont` / `_bin` | (K_a, K_t, 5) / (K_a, K_t, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
+| `enemies_*` | idem avec K_e | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
+| `self_models_cont` / `_bin` | (6, 2) / (6, 3) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement |
+| `grid` | (7, 32, 32) | grille égocentrique : murs, alliés, ennemis, EZ, objectifs, niveau, couvert |
+
+**Pourquoi ce format.** Au format plat, la première couche du réseau portait un jeu de poids
+DISTINCT par slot ennemi (mesuré : 640 paramètres par dimension d'observation, ~226 k par slot) :
+le réseau réapprenait « évaluer un ennemi » autant de fois qu'il y avait de slots, et ajouter un
+slot coûtait des centaines de milliers de paramètres. En tenseurs d'entités, **le même encodeur
+est appliqué à chaque unité et à chaque arme, des DEUX camps** (`ai/spatial_extractor.py`) : le
+réseau généralise d'un slot à l'autre et le coût d'un slot supplémentaire est nul en paramètres.
+
+**Trois invariants à ne jamais casser :**
+1. **Schéma unifié** — une unité amie et une unité ennemie portent EXACTEMENT les mêmes features
+   (les features propres à l'unité active sont à zéro ailleurs, avec le bit `is_active` pour
+   masque). Sans cela, l'encodeur partagé n'a plus de sens.
+2. **Ordre des slots ennemis** — `enemies_*[i]` décrit l'ennemi que désigne l'action de tir de
+   slot `i` (invariant D1). Les alliés, eux, sont AGRÉGÉS : leur ordre n'a pas de sémantique.
+3. **Normalisation** — `VecNormalize` ne touche que `global_cont`. Les tenseurs d'entités sont
+   normalisés DANS l'extracteur par une statistique **commune à tous les slots**
+   (`EntityRunningNorm`) : une normalisation élément par élément donnerait à chaque slot ses
+   propres échelles et annulerait le partage de poids. Les clés `_bin` ne sont jamais normalisées.
+
+**`obs_size`** (config d'agent, `observation_params.obs_size`) = nombre TOTAL de scalaires,
+grille exclue — calculé par `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`. Historique : 108 (T6) →
+199 (refonte du vecteur, 2026-07-25) → 1011 (profils d'armes et règles, 2026-07-26) → **5729**
+(tenseurs d'entités, 2026-07-26). **Toute évolution du schéma change cette valeur et rend les
+`.zip` existants incompatibles : le retrain `--new` est obligatoire.**
+
+**Historique et décisions** : `Documentation/Implémentation/V11_audit_observation.md` (§8, §10),
+`V11_agent_rework.md` §9.2.5, `V11_entity_encoder_pointer.md` (§1 constats mesurés, §3
+architecture, §6 journal).
 
 ---
 

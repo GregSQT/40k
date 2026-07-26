@@ -24,7 +24,7 @@ les numéros de ligne sont indicatifs. Re-localiser par grep avant d'éditer.
 | **T-A** | Renommage `PISTOL` → `CLOSE_QUARTERS` | ✅ **FAIT (2026-07-26)** |
 | **T-B** | Tir d'assaut 10.05 + tir à bout portant 10.06 dans le gate squad/gym | ✅ **FAIT (2026-07-26)** |
 | **T-C** | Sélection d'armes : défaut correct (04.01 / 04.02) + heuristique mêlée consciente des règles | ✅ **FAIT (2026-07-26)** |
-| **T-D** | Observation en **tenseurs d'entités** + **encodeurs partagés** | ⏳ à faire |
+| **T-D** | Observation en **tenseurs d'entités** + **encodeurs partagés** | ✅ **FAIT (2026-07-26)** |
 | **T-E** | **Tête pointeur** + slots ennemis 5 → 20 (espace d'action) | ⏳ à faire |
 | **T-F** | K armes = 10 des deux côtés + bloc « types de figurines » ennemis | ⏳ à faire |
 | **T-G** | Run `--new` + win-rate (§0.14) | ⏳ bloqué par T-A→T-F |
@@ -556,3 +556,82 @@ implémentée à ce stade.
   de tir).
 - PvP : 27 PASS / 0 FAIL. `pyright` vert.
 
+### 2026-07-26 — T-D livrée : l'observation passe en tenseurs d'entités, encodeurs partagés
+
+**Re-vérification des constats AVANT de coder** (§0bis : ce projet a un historique de marqueurs
+✅ faux — les trois ont été re-mesurés sur le vrai moteur, 10 `reset()` du scénario
+`scenario_training_armageddon.json`) :
+
+| Constat | Mesure du 2026-07-26 (ouverture) | Re-mesure avant T-D | Verdict |
+|---|---|---|---|
+| §1.1 — 5 slots pour 6 escouades | 6 ép./10 avec ≥6 escouades | **9 resets/10** ont ≥6 escouades d'un côté ; **16** escouades ennemies sans slot (cumul 10 resets × 2 joueurs) | ✅ **confirmé, et pire que mesuré** |
+| §1.5 — K ennemi 2+1 trop pauvre | max 6 tir / 5 mêlée | max **6** tir / **5** mêlée (distribution : 6 tir sur 8 escouades, 5 mêlée sur 12) | ✅ confirmé |
+| §1.6 — pas de types ennemis | jusqu'à 5 types défensifs | jusqu'à **5** types ; `SQUAD_PER_ENEMY_SLOT_SUMMARY_CONT` = 12 features, **aucun bloc de types** | ✅ confirmé |
+
+**Ce qui a été fait**
+
+- **Nouveau schéma UNIFIÉ d'entité** — [`engine/observation_entities.py`](../../engine/observation_entities.py) :
+  une unité amie et une unité ennemie portent EXACTEMENT les mêmes features (19 continues +
+  17 drapeaux), plus trois sous-registres (armes, types de figurines, et pour l'unité active ses
+  figurines). Les features propres à l'unité observée (compteurs d'engagement, drapeaux de
+  terrain 13.08/13.09/13.5) sont à zéro ailleurs, **avec le bit `is_active` pour masque** (§3.3).
+- **Nouveau contrat d'observation** : `{vec_cont, vec_bin, grid}` → **16 tenseurs + `grid`**
+  (`global_*`, `allies_*`, `enemies_*`, `self_models_*`). Les formes viennent d'une source
+  unique, `ObservationBuilder.squad_obs_shapes()`, consommée par l'espace d'observation du
+  moteur, l'observation nulle et les tests — aucune forme n'est recopiée.
+  **`obs_size` 1011 → 5729** ⇒ retrain `--new` (déjà acté).
+- **Ligne 0 des alliés = l'unité ACTIVE**, contrat testé. Les autres alliées sont **agrégées** :
+  c'est ce qui débloque le **bloc E**, en attente depuis `V11_audit_observation.md` §11 (au
+  format plat il aurait fallu inventer un ordre de slots qu'aucune action ne consomme ; une
+  agrégation est invariante par permutation, la question disparaît).
+- **Extracteur à encodeurs PARTAGÉS** — [`ai/spatial_extractor.py`](../../ai/spatial_extractor.py) :
+  un seul `weapon_encoder`, un seul `unit_encoder`, un seul `type_encoder`, appliqués aux DEUX
+  camps ; agrégation masquée (moyenne ⊕ max) pour tout ce qu'aucune action ne désigne ; les
+  **embeddings ennemis par slot sont conservés** et exposés en fin de vecteur de features via
+  `enemy_embeddings_slice()` — le point d'accroche de la tête pointeur de T-E.
+- **Point dur `VecNormalize` traité, pas laissé implicite** : `norm_obs_keys` passe de
+  `["vec_cont"]` à `["global_cont"]` (clé singleton, aucun partage en jeu) ; les tenseurs
+  d'entités sont normalisés DANS l'encodeur par `EntityRunningNorm` — **une statistique par
+  feature, commune à tous les slots et aux deux camps**. Une normalisation élément par élément
+  aurait donné à chaque slot ses propres échelles et annulé le partage de poids.
+- **Effets de bord de §1.5 et §1.6 refermés par construction** : le schéma étant unifié, les
+  ennemis exposent désormais **6 profils de tir + 5 de mêlée** (au lieu de 2+1) et leur **bloc
+  de types de figurines** (qui n'existait pas). Il ne reste à T-F que le passage de K à 10/10 et
+  la re-mesure de la troncature.
+- **Outillage et tests migrés DANS la tranche** (et non après) : 10 fichiers de tests
+  d'observation réécrits sur des accesseurs **par NOM de feature** (`unit_cont_index(...)`), qui
+  remplacent les offsets recopiés ; l'analyzer ne lit pas l'observation (vérifié : zéro
+  occurrence de `vec_cont`/`vec_bin` hors moteur/tests).
+
+**Verrous**
+
+- `tests/unit/engine/test_entity_obs_equivalence.py` (**7**) — équivalence entité par entité
+  contre un recalcul indépendant depuis `game_state`, pour les trois familles (active, alliée,
+  slots ennemis dans l'ordre d'action), plus la lecture croisée « la même escouade vue de son
+  camp et d'en face donne les mêmes valeurs ».
+- `tests/unit/ai/test_entity_encoder_extractor.py` (**10**) — partage effectif des poids
+  (contre-épreuve par PERTURBATION : perturber `weapon_encoder` doit faire bouger les DEUX
+  camps — une simple égalité de sorties passerait aussi avec deux modules jumeaux), masquage du
+  padding, statistiques de normalisation partagées, et **construction + forward de la policy
+  MaskablePPO** (`log_prob` et entropie finis).
+- `tests/unit/engine/test_squad_obs_vector_split.py` réécrit en **test de CONTRAT** : formes,
+  somme des scalaires = `obs_size`, **miroir `K_ENEMY_SLOTS` ↔ `SQUAD_ACTION_SHOOT_SLOT_COUNT`**,
+  schéma identique des deux côtés, padding à zéro, ligne 0 = unité active.
+
+**Contre-épreuves mutation** : K armes ennemies ramené à 2+1 → **1 rouge** ; types de figurines
+non émis pour les ennemis → **1 rouge** ; unité active retirée de la ligne 0 → **2 rouges** ;
+restauré → verts.
+
+**Mesures** — `build_squad_observation` : **3,46 ms** (contre 3,95 ms au format plat mesuré en
+§1.8), malgré 13 entités décrites au lieu de 6 : la passe d'engagement est calculée UNE fois pour
+toutes les entités au lieu d'être refaite par slot. Paramètres de la policy : **2 459 672 →
+2 281 864**, dont 1,05 M pour la tête du CNN (inchangée) — le tronc et les têtes fondent comme
+prévu en §3.4, et un slot ennemi supplémentaire ne coûtera plus de paramètres.
+
+**Documents remis à jour dans la tranche** (ils portaient un avertissement « PÉRIMÉ » au lieu
+d'une description) : `Documentation/AI_OBSERVATION.md` — section « CE QUE L'AGENT OBSERVE
+AUJOURD'HUI » réécrite sur le contrat entité, avec les trois invariants (schéma unifié, ordre
+des slots ennemis, normalisation) ; `AI_TURN.md` — ancre de ligne périmée remplacée par une
+ancre de fonction.
+
+**PvP** : 27 PASS / 0 FAIL. `pyright` vert sur les fichiers touchés.

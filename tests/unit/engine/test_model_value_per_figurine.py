@@ -282,8 +282,10 @@ class TestObservationEnemySquadValue:
             }
         })
         gs["victory_points"] = {1: 0, 2: 0}
-        cont = builder.build_squad_observation(gs, "1")["vec_cont"]
-        return float(cont[ObservationBuilder.squad_enemy_cont_base(0) + 2])  # VALUE du slot 0
+        from engine.observation_entities import unit_cont_index
+
+        cont = builder.build_squad_observation(gs, "1")["enemies_cont"][0]
+        return float(cont[unit_cont_index("value_alive")])
 
     def _boyz(self, nob_index: int) -> List[Dict[str, Any]]:
         """9 Boyz a 7 pts + 1 Nob a 12, le Nob place a `nob_index`."""

@@ -17,6 +17,7 @@ from unittest.mock import patch
 import pytest
 
 from engine.observation_builder import ObservationBuilder
+from engine.observation_entities import unit_bin_index, unit_cont_index
 from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
 from engine.w40k_core import W40KEngine
 
@@ -90,12 +91,12 @@ def engine():
 
 
 def _enemy_slot_hp(obs, slot_i: int) -> float:
-    """PV totaux BRUTS du slot ennemi i (vec_cont[base+1], cf. layout build_squad_observation)."""
-    return float(obs["vec_cont"][ObservationBuilder.squad_enemy_cont_base(slot_i) + 1])
+    """PV totaux BRUTS du slot ennemi i (tenseur d'entites, lu par NOM de feature)."""
+    return float(obs["enemies_cont"][slot_i][unit_cont_index("hp_total")])
 
 
 def _enemy_slot_mask(obs, slot_i: int) -> float:
-    return float(obs["vec_bin"][ObservationBuilder.squad_enemy_bin_base(slot_i)])
+    return float(obs["enemies_bin"][slot_i][unit_bin_index("present")])
 
 
 def test_fixture_threat_order_differs_from_alpha_order(engine):
@@ -126,18 +127,17 @@ def test_obs_enemy_slots_follow_action_mapping(engine):
         )
 
 
-# vec_bin[6] = flag FALL BACK (cf. layout build_squad_observation, bloc B1)
-_BIN_FALL_BACK = 6
+_BIN_FALL_BACK = unit_bin_index("fled")
 
 
 def test_fall_back_flag(engine):
-    """Le flag FALL BACK (vec_bin) suit `units_fled`, pas les PV."""
+    """Le flag FALL BACK de l'unite active suit `units_fled`, pas les PV."""
     gs = engine.game_state
     gs.setdefault("units_fled", set()).discard("1")
     obs_no = engine.obs_builder.build_squad_observation(gs, "1")
-    assert obs_no["vec_bin"][_BIN_FALL_BACK] == 0.0
+    assert obs_no["allies_bin"][0][_BIN_FALL_BACK] == 0.0
 
     gs.setdefault("units_fled", set()).add("1")
     obs_yes = engine.obs_builder.build_squad_observation(gs, "1")
-    assert obs_yes["vec_bin"][_BIN_FALL_BACK] == 1.0
+    assert obs_yes["allies_bin"][0][_BIN_FALL_BACK] == 1.0
     # La valeur ne depend plus des PV (0->1 a PV constants) : les deux assertions le prouvent.

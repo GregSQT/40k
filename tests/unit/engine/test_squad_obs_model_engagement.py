@@ -101,12 +101,11 @@ def _make_engine(cfg: Dict[str, Any]) -> W40KEngine:
 
 
 def _model_flags(engine, k_idx: int) -> Dict[str, float]:
-    binv = engine.obs_builder.build_squad_observation(engine.game_state, "1")["vec_bin"]
-    base = ObservationBuilder.squad_model_bin_base(k_idx)
+    binv = engine.obs_builder.build_squad_observation(engine.game_state, "1")["self_models_bin"][k_idx]
     return {
-        "fight": float(binv[base + BIN_FIGHT_ELIGIBLE]),
-        "in_ez": float(binv[base + BIN_IN_ENEMY_EZ]),
-        "buddy": float(binv[base + BIN_EZ_VIA_BUDDY]),
+        "fight": float(binv[BIN_FIGHT_ELIGIBLE]),
+        "in_ez": float(binv[BIN_IN_ENEMY_EZ]),
+        "buddy": float(binv[BIN_EZ_VIA_BUDDY]),
     }
 
 

@@ -27,16 +27,18 @@ from unittest.mock import patch
 import pytest
 
 from engine.observation_builder import ObservationBuilder
+from engine.observation_entities import global_bin_index, global_cont_index
 from engine.phase_handlers.shared_utils import destroy_model, update_model_position
 from engine.w40k_core import W40KEngine
 
-# Offsets du bloc A (cf. layout de build_squad_observation)
-CONT_VP_MINE = 4
-CONT_VP_ENEMY = 5
-CONT_VALUE_MINE = 6
-CONT_VALUE_ENEMY = 7
-BIN_OBJ_CONTROL = 12
-BIN_OBJ_PRESENCE = 17
+# Contexte GLOBAL (tenseurs d'entites V11 §0.30 T-D) : lu par NOM de feature, jamais par un
+# index recopie — c'est ce qui permet au schema d'evoluer sans reecrire les tests.
+CONT_VP_MINE = global_cont_index("my_victory_points")
+CONT_VP_ENEMY = global_cont_index("enemy_victory_points")
+CONT_VALUE_MINE = global_cont_index("my_value_ratio")
+CONT_VALUE_ENEMY = global_cont_index("enemy_value_ratio")
+BIN_OBJ_CONTROL = global_bin_index("objective_control_0")
+BIN_OBJ_PRESENCE = global_bin_index("objective_present_0")
 
 
 def _weapon_cfg() -> Dict[str, Any]:
@@ -159,12 +161,12 @@ def test_victory_points_are_observed(engine):
     gs["victory_points"][1] = 7
     gs["victory_points"][2] = 3
 
-    cont = engine.obs_builder.build_squad_observation(gs, "1")["vec_cont"]
+    cont = engine.obs_builder.build_squad_observation(gs, "1")["global_cont"]
     assert cont[CONT_VP_MINE] == pytest.approx(7.0)
     assert cont[CONT_VP_ENEMY] == pytest.approx(3.0)
 
     # Vu du joueur 2, les roles s'inversent (l'observation est egocentrique).
-    cont_p2 = engine.obs_builder.build_squad_observation(gs, "2")["vec_cont"]
+    cont_p2 = engine.obs_builder.build_squad_observation(gs, "2")["global_cont"]
     assert cont_p2[CONT_VP_MINE] == pytest.approx(3.0)
     assert cont_p2[CONT_VP_ENEMY] == pytest.approx(7.0)
 
@@ -172,23 +174,23 @@ def test_victory_points_are_observed(engine):
 def test_value_ratio_drops_when_models_die(engine):
     """VALUE cumulee vivante / VALUE de depart : 1.0 a l'intact, decroit avec les pertes."""
     gs = engine.game_state
-    cont = engine.obs_builder.build_squad_observation(gs, "1")["vec_cont"]
+    cont = engine.obs_builder.build_squad_observation(gs, "1")["global_cont"]
     assert cont[CONT_VALUE_MINE] == pytest.approx(1.0)
     assert cont[CONT_VALUE_ENEMY] == pytest.approx(1.0)
 
     destroy_model(gs, "1#2", reason="combat")  # 1 figurine a 10 pts sur 30
-    cont = engine.obs_builder.build_squad_observation(gs, "1")["vec_cont"]
+    cont = engine.obs_builder.build_squad_observation(gs, "1")["global_cont"]
     assert cont[CONT_VALUE_MINE] == pytest.approx(2.0 / 3.0)
     assert cont[CONT_VALUE_ENEMY] == pytest.approx(1.0)
 
     destroy_model(gs, "2#1", reason="combat")  # 1 figurine ennemie a 20 pts sur 40
-    cont = engine.obs_builder.build_squad_observation(gs, "1")["vec_cont"]
+    cont = engine.obs_builder.build_squad_observation(gs, "1")["global_cont"]
     assert cont[CONT_VALUE_ENEMY] == pytest.approx(0.5)
 
 
 def test_no_control_before_any_phase_boundary(engine):
     """Debut de bataille : aucune frontiere franchie -> aucun controleur (14.02), pas un defaut."""
-    binv = engine.obs_builder.build_squad_observation(engine.game_state, "1")["vec_bin"]
+    binv = engine.obs_builder.build_squad_observation(engine.game_state, "1")["global_bin"]
     assert binv[BIN_OBJ_CONTROL] == pytest.approx(0.0)
     assert binv[BIN_OBJ_PRESENCE] == pytest.approx(1.0)
 
@@ -202,10 +204,10 @@ def test_objective_control_counts_models_not_anchor(engine):
     """
     gs = engine.game_state
     _cross_phase_boundary(engine)
-    binv = engine.obs_builder.build_squad_observation(gs, "1")["vec_bin"]
+    binv = engine.obs_builder.build_squad_observation(gs, "1")["global_bin"]
     assert binv[BIN_OBJ_CONTROL] == pytest.approx(1.0)
     # Vu de l'ennemi, le meme objectif est controle par l'adversaire.
-    binv_p2 = engine.obs_builder.build_squad_observation(gs, "2")["vec_bin"]
+    binv_p2 = engine.obs_builder.build_squad_observation(gs, "2")["global_bin"]
     assert binv_p2[BIN_OBJ_CONTROL] == pytest.approx(-1.0)
 
 
@@ -219,22 +221,22 @@ def test_control_is_frozen_during_a_phase(engine):
     """
     gs = engine.game_state
     _cross_phase_boundary(engine, "shoot")
-    assert engine.obs_builder.build_squad_observation(gs, "1")["vec_bin"][BIN_OBJ_CONTROL] == 1.0
+    assert engine.obs_builder.build_squad_observation(gs, "1")["global_bin"][BIN_OBJ_CONTROL] == 1.0
 
     for mid in gs["squad_models"]["1"]:
         update_model_position(gs, mid, 5 + int(mid.split("#")[1]) * 2, 60)
-    binv = engine.obs_builder.build_squad_observation(gs, "1")["vec_bin"]
+    binv = engine.obs_builder.build_squad_observation(gs, "1")["global_bin"]
     assert binv[BIN_OBJ_CONTROL] == pytest.approx(1.0), "le controle doit tenir jusqu'a la fin de phase"
 
     _cross_phase_boundary(engine, "charge")
-    binv = engine.obs_builder.build_squad_observation(gs, "1")["vec_bin"]
+    binv = engine.obs_builder.build_squad_observation(gs, "1")["global_bin"]
     assert binv[BIN_OBJ_CONTROL] == pytest.approx(0.0), "apres la frontiere, plus personne ne controle"
 
 
 def test_objective_presence_bits(engine):
     """1 objectif au scenario -> presence [1,0,0,0,0] ; le controle 0 des slots absents est alors lisible."""
     _cross_phase_boundary(engine)
-    binv = engine.obs_builder.build_squad_observation(engine.game_state, "1")["vec_bin"]
+    binv = engine.obs_builder.build_squad_observation(engine.game_state, "1")["global_bin"]
     presence = [float(v) for v in binv[BIN_OBJ_PRESENCE:BIN_OBJ_PRESENCE + 5]]
     assert presence == [1.0, 0.0, 0.0, 0.0, 0.0]
     absent_control = [float(v) for v in binv[BIN_OBJ_CONTROL + 1:BIN_OBJ_CONTROL + 5]]
@@ -250,7 +252,7 @@ def test_contested_objective_is_zero_but_present():
     )
     eng = _make_engine(cfg)
     _cross_phase_boundary(eng)
-    binv = eng.obs_builder.build_squad_observation(eng.game_state, "1")["vec_bin"]
+    binv = eng.obs_builder.build_squad_observation(eng.game_state, "1")["global_bin"]
     assert binv[BIN_OBJ_CONTROL] == pytest.approx(0.0)
     assert binv[BIN_OBJ_PRESENCE] == pytest.approx(1.0)
 

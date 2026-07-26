@@ -23,15 +23,15 @@ from unittest.mock import patch
 import pytest
 
 from engine.observation_builder import ObservationBuilder
+from engine.observation_entities import unit_bin_index, unit_cont_index
 from engine.w40k_core import W40KEngine
 
-CONT_MOVED_MAX = 14
-CONT_MOVED_SUM = 15
-BIN_DEPLOY_BASE = 22
-BIN_NOT_ON_BOARD = BIN_DEPLOY_BASE
-BIN_PRE_BATTLE = BIN_DEPLOY_BASE + 1
-BIN_ARRIVED_IN_BATTLE = BIN_DEPLOY_BASE + 2
-BIN_SET_UP_THIS_TURN = BIN_DEPLOY_BASE + 3
+CONT_MOVED_MAX = unit_cont_index("moved_max")
+CONT_MOVED_SUM = unit_cont_index("moved_sum")
+BIN_NOT_ON_BOARD = unit_bin_index("deploy_not_on_board")
+BIN_PRE_BATTLE = unit_bin_index("deploy_pre_battle")
+BIN_ARRIVED_IN_BATTLE = unit_bin_index("deploy_in_battle")
+BIN_SET_UP_THIS_TURN = unit_bin_index("deployed_this_turn")
 
 
 def _unit_cfg(uid: int, player: int, positions: List[Tuple[int, int]], *, move: int = 6) -> Dict[str, Any]:
@@ -206,7 +206,7 @@ def test_observation_exposes_max_and_sum_of_travelled_distance():
     d0 = _straight((10, 10), (14, 10))
     d1 = _straight((10, 12), (11, 12))
     assert d0 > d1
-    cont = _obs(eng)["vec_cont"]
+    cont = _obs(eng)["allies_cont"][0]
     assert cont[CONT_MOVED_MAX] == pytest.approx(d0, rel=1e-4)
     assert cont[CONT_MOVED_SUM] == pytest.approx(d0 + d1, rel=1e-4)
 
@@ -214,7 +214,7 @@ def test_observation_exposes_max_and_sum_of_travelled_distance():
 def test_observation_deploy_state_is_pre_battle_by_default():
     """Unité posée avant la bataille : one-hot « pré-bataille », pas « posée ce tour »."""
     eng = _make_engine([_unit_cfg(1, 1, [(10, 10)]), _unit_cfg(2, 2, [(50, 30)])])
-    binv = _obs(eng)["vec_bin"]
+    binv = _obs(eng)["allies_bin"][0]
     assert binv[BIN_NOT_ON_BOARD] == pytest.approx(0.0)
     assert binv[BIN_PRE_BATTLE] == pytest.approx(1.0)
     assert binv[BIN_ARRIVED_IN_BATTLE] == pytest.approx(0.0)
@@ -228,7 +228,7 @@ def test_observation_deploy_state_marks_an_arrival_this_turn():
     eng = _make_engine([_unit_cfg(1, 1, [(10, 10)]), _unit_cfg(2, 2, [(50, 30)])])
     eng.game_state["turn"] = 3
     get_unit_by_id("1", eng.game_state)["deployed_on_turn"] = 3
-    binv = _obs(eng)["vec_bin"]
+    binv = _obs(eng)["allies_bin"][0]
     assert binv[BIN_PRE_BATTLE] == pytest.approx(0.0)
     assert binv[BIN_ARRIVED_IN_BATTLE] == pytest.approx(1.0)
     assert binv[BIN_SET_UP_THIS_TURN] == pytest.approx(1.0)
@@ -241,6 +241,6 @@ def test_observation_deploy_state_distinguishes_a_previous_turn_arrival():
     eng = _make_engine([_unit_cfg(1, 1, [(10, 10)]), _unit_cfg(2, 2, [(50, 30)])])
     eng.game_state["turn"] = 3
     get_unit_by_id("1", eng.game_state)["deployed_on_turn"] = 2
-    binv = _obs(eng)["vec_bin"]
+    binv = _obs(eng)["allies_bin"][0]
     assert binv[BIN_ARRIVED_IN_BATTLE] == pytest.approx(1.0)
     assert binv[BIN_SET_UP_THIS_TURN] == pytest.approx(0.0)
