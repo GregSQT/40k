@@ -198,6 +198,93 @@ def test_escouade_sans_character_perd_ses_regles_a_la_derniere_figurine():
     assert _rule_ids(eng, "101") == set()
 
 
+def _open_shoot_allocation(engine, attacker_sid: str = "1", target_sid: str = "101") -> None:
+    """Ouvre une activation de tir minimale — ce que lisent `destroy_model` et
+    `_finalize_manual_allocation` (clé réelle `pending_shoot_allocation` de SHOOT_CTX)."""
+    engine.game_state["pending_shoot_allocation"] = {
+        "attacker_squad_id": attacker_sid,
+        "summary": {"targets_meta": {target_sid: {}}},
+        "weapon_groups": [],
+    }
+
+
+def test_source_tuee_par_une_attaque_confere_encore_sa_regle():
+    """19.04, dernière clause : « if that last model was destroyed as the result of an attack,
+    the ability it was conferring upon the attached unit applies until the attacking unit has
+    resolved all of its attacks »."""
+    from engine.phase_handlers.shared_utils import unit_can_reroll_charge
+
+    eng = _load(_scenario([_BODYGUARD, _LEADER, _ENEMY]))
+    leader_mid = next(
+        mid for mid in _models(eng)
+        if "attached_from" in eng.game_state["models_cache"][mid]
+    )
+    _open_shoot_allocation(eng)
+
+    _kill(eng, leader_mid)
+
+    assert leader_mid not in eng.game_state["models_cache"], "la figurine est bien morte"
+    assert unit_can_reroll_charge(eng.game_state, "101") is True, (
+        "la règle survit jusqu'à la fin des attaques de l'attaquant"
+    )
+
+
+def test_la_fenetre_se_referme_a_la_fin_des_attaques():
+    """Câblage : c'est `_finalize_manual_allocation` (« after that unit has resolved all of its
+    attacks », même point que HAZARDOUS 24.15) qui éteint la règle en sursis."""
+    from engine.phase_handlers.shared_utils import (
+        SHOOT_CTX, _finalize_manual_allocation, unit_can_reroll_charge,
+    )
+
+    eng = _load(_scenario([_BODYGUARD, _LEADER, _ENEMY]))
+    leader_mid = next(
+        mid for mid in _models(eng)
+        if "attached_from" in eng.game_state["models_cache"][mid]
+    )
+    _open_shoot_allocation(eng)
+    _kill(eng, leader_mid)
+    assert unit_can_reroll_charge(eng.game_state, "101") is True
+
+    _finalize_manual_allocation(eng.game_state, SHOOT_CTX)
+
+    assert unit_can_reroll_charge(eng.game_state, "101") is False
+    assert _rule_ids(eng, "101") == {"targeted_intercession"}
+
+
+def test_pas_de_sursis_hors_attaque():
+    """Discrimination : le sursis du PDF est conditionné à « destroyed as the result of an
+    attack ». Un retrait de cohérence (03.03) éteint la règle immédiatement, même si une
+    activation de tir est ouverte par ailleurs."""
+    from engine.phase_handlers.shared_utils import destroy_model, unit_can_reroll_charge
+
+    eng = _load(_scenario([_BODYGUARD, _LEADER, _ENEMY]))
+    leader_mid = next(
+        mid for mid in _models(eng)
+        if "attached_from" in eng.game_state["models_cache"][mid]
+    )
+    _open_shoot_allocation(eng)
+
+    destroy_model(eng.game_state, leader_mid, "coherency_removal")
+
+    assert unit_can_reroll_charge(eng.game_state, "101") is False
+
+
+def test_pas_de_sursis_sans_activation_ouverte():
+    """Hors activation, la mort éteint immédiatement : le sursis n'est pas un délai global."""
+    from engine.phase_handlers.shared_utils import unit_can_reroll_charge
+
+    eng = _load(_scenario([_BODYGUARD, _LEADER, _ENEMY]))
+    leader_mid = next(
+        mid for mid in _models(eng)
+        if "attached_from" in eng.game_state["models_cache"][mid]
+    )
+    assert "pending_shoot_allocation" not in eng.game_state
+
+    _kill(eng, leader_mid)
+
+    assert unit_can_reroll_charge(eng.game_state, "101") is False
+
+
 def test_marqueur_dattachement_sur_la_figurine():
     """La figurine repliée porte l'id de son unité d'origine jusque dans models_cache."""
     eng = _load(_scenario([_BODYGUARD, _LEADER, _ENEMY]))

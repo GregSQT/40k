@@ -622,6 +622,45 @@ def compute_unit_rules_in_effect(
     return in_effect
 
 
+def _attack_allocation_in_progress(game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Allocation d ATTAQUE en cours (tir ou combat), ou None.
+
+    Sert la fenetre 19.04 « until the attacking unit has resolved all of its attacks ». Le
+    pending_hazard_allocation en est exclu a dessein : une blessure mortelle HAZARDOUS n est pas
+    une attaque (24.15 / 06.03), le PDF ne lui accorde donc aucun sursis.
+    """
+    for key in ("pending_shoot_allocation", "pending_fight_allocation"):
+        alloc = game_state.get(key)  # get allowed (l allocation n existe que pendant l activation)
+        if alloc is not None:
+            return alloc
+    return None
+
+
+def _rule_sources_in_grace(game_state: Dict[str, Any], unit_id: str) -> Tuple[bool, Set[str]]:
+    """Sources de regles de `unit_id` mortes SOUS L ATTAQUE en cours (19.04, derniere clause).
+
+    « If that last model was destroyed as the result of an attack, the ability it was conferring
+    upon the attached unit applies until the attacking unit has resolved all of its attacks. »
+
+    La fenetre est portee par l allocation elle-meme : elle disparait avec elle
+    (`_finalize_manual_allocation`), donc aucun etat en sursis ne peut survivre a l activation.
+    Retourne (bloc bodyguard en sursis, ids des leaders/supports en sursis).
+    """
+    alloc = _attack_allocation_in_progress(game_state)
+    if alloc is None:
+        return False, set()
+    native = False
+    sources: Set[str] = set()
+    for entry in alloc.get("rule_sources_in_grace", []):  # get allowed (absent tant qu aucune mort)
+        if str(entry["squad_id"]) != str(unit_id):
+            continue
+        if entry["attached_from"] is None:
+            native = True
+        else:
+            sources.add(str(entry["attached_from"]))
+    return native, sources
+
+
 def recompute_unit_rules_in_effect(game_state: Dict[str, Any], unit_id: str) -> None:
     """Reevalue `unit["UNIT_RULES"]` (19.04) depuis les figurines VIVANTES de l escouade.
 
@@ -654,11 +693,14 @@ def recompute_unit_rules_in_effect(game_state: Dict[str, Any], unit_id: str) -> 
     alive_sources = {
         str(m["attached_from"]) for m in alive if "attached_from" in m
     }
+    # Derniere clause de 19.04 : une source tuee PAR UNE ATTAQUE confere encore sa regle
+    # jusqu a la fin des attaques de l unite attaquante.
+    grace_native, grace_sources = _rule_sources_in_grace(game_state, str(unit_id))
     unit["UNIT_RULES"] = compute_unit_rules_in_effect(
         require_key(unit, "_UNIT_RULES_OWN"),
         require_key(unit, "_ATTACHED_RULE_GROUPS"),
-        native_alive=native_alive,
-        alive_attached_sources=alive_sources,
+        native_alive=native_alive or grace_native,
+        alive_attached_sources=alive_sources | grace_sources,
     )
 
 
@@ -3365,6 +3407,19 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
     # Recalcul ici, apres le retrait de models_cache/squad_models et AVANT les `return`
     # anticipes plus bas : le vivant est deja a jour, et une unite entierement detruite doit
     # elle aussi voir ses regles s eteindre.
+    if reason == "combat":
+        # Tuee PAR UNE ATTAQUE : la source garde son effet jusqu a la fin des attaques de
+        # l unite attaquante (19.04, derniere clause). La fenetre vit DANS l allocation en
+        # cours, donc elle se referme d elle-meme a `_finalize_manual_allocation` — pas d etat
+        # en sursis capable de survivre a l activation.
+        _grace_alloc = _attack_allocation_in_progress(game_state)
+        if _grace_alloc is not None:
+            _grace_alloc.setdefault("rule_sources_in_grace", []).append({
+                "squad_id": squad_id,
+                "attached_from": (
+                    str(model["attached_from"]) if "attached_from" in model else None
+                ),
+            })
     recompute_unit_rules_in_effect(game_state, squad_id)
 
     from engine.game_utils import add_debug_file_log
@@ -7460,7 +7515,17 @@ def _finalize_manual_allocation(game_state: Dict[str, Any], ctx: ManualAllocCtx)
             })
     attacker_squad_id = str(alloc["attacker_squad_id"])
     hazardous_count = int(alloc["hazardous_weapon_count"]) if "hazardous_weapon_count" in alloc else 0
+    # 19.04, derniere clause : « the ability it was conferring applies until the attacking unit
+    # has resolved all of its attacks ». On y est. Les squads dont une source de regle est morte
+    # sous cette attaque sont recalcules APRES la suppression de l allocation — c est elle qui
+    # portait le sursis, donc le recalcul voit enfin la source eteinte.
+    _grace_squads = {
+        str(entry["squad_id"])
+        for entry in alloc.get("rule_sources_in_grace", [])  # get allowed (absent si aucune mort)
+    }
     del game_state[ctx.alloc_key]
+    for _sid in _grace_squads:
+        recompute_unit_rules_in_effect(game_state, _sid)
     result = {
         "action": ctx.manual_alloc_action,
         "waiting_for_player": False,
