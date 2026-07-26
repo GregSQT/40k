@@ -672,7 +672,27 @@ class W40KEngine(gym.Env):
                 "W40KEngine requires training_config with observation_params.obs_size. "
                 "No default value allowed."
             )
-        
+
+        # `obs_size` ROUTE le pipeline d'observation : il doit donc designer un pipeline qui
+        # EXISTE. Toute autre valeur tombait auparavant dans la branche `else` ci-dessous et
+        # construisait silencieusement un Box(obs_size) que RIEN ne sait remplir : l'incoherence
+        # n'apparaissait qu'a la 1re observation, sous un message parlant du pipeline mono-fig
+        # — alors que la cause reelle est « la config porte une taille perimee ». C'est
+        # exactement le repli masquant que la convention projet interdit : le layout squad change
+        # a chaque evolution du schema d'entites, donc ce cas se produit VRAIMENT (rencontre le
+        # 2026-07-26 en portant le bloc figurines de 6 a 20 slots).
+        _squad_obs_size = self.obs_builder.SQUAD_OBS_SIZE_TARGET
+        if obs_size not in (self.obs_builder.PHASE2_OBS_SIZE, _squad_obs_size):
+            raise ValueError(
+                f"observation_params.obs_size={obs_size} ne correspond a AUCUN pipeline "
+                f"d'observation : attendu {_squad_obs_size} (pipeline squad, taille calculee "
+                f"par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites) ou "
+                f"{self.obs_builder.PHASE2_OBS_SIZE} (pipeline mono-figurine legacy). "
+                f"Si le layout squad vient de changer, mettre obs_size a {_squad_obs_size} dans "
+                f"la config d'agent — et relancer un entrainement `--new` : les modeles existants "
+                f"sont incompatibles par construction."
+            )
+
         # Pipeline squad : obs Dict de TENSEURS D'ENTITES (V11 §0.30 T-D) + la grille
         # egocentrique (perception du terrain, spec §4.1), branche sur la policy via
         # MultiInputPolicy. Pipeline mono-fig legacy : Box inchange.

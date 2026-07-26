@@ -13,6 +13,7 @@ import pytest
 
 from engine.phase_handlers import command_handlers
 from engine.phase_handlers.shared_utils import build_units_cache
+from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
 from engine.reward_calculator import RewardCalculator
 
@@ -75,7 +76,7 @@ def _unit_cfg(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
 
 def _minimal_config() -> Dict[str, Any]:
     obs = {"perception_radius": 25, "max_nearby_units": 10,
-           "max_valid_targets": 5, "obs_size": 50}
+           "max_valid_targets": 5, "obs_size": ObservationBuilder.PHASE2_OBS_SIZE}
     return {
         "board": {"default": {"cols": 15, "rows": 13, "hex_radius": 1.0,
                                "margin": 0.0, "wall_hexes": [],
@@ -93,7 +94,7 @@ def _minimal_config() -> Dict[str, Any]:
 
 @pytest.fixture(autouse=True)
 def mocks(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(W40KEngine, "_build_observation", lambda self: np.zeros(50))
+    monkeypatch.setattr(W40KEngine, "_build_observation", lambda self: np.zeros(ObservationBuilder.PHASE2_OBS_SIZE))
     monkeypatch.setattr(RewardCalculator, "calculate_reward", lambda self, *a, **kw: 0.0)
 
 

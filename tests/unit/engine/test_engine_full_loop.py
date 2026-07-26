@@ -23,6 +23,7 @@ import pytest
 
 from engine.reward_calculator import RewardCalculator
 from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT
+from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
 
 
@@ -84,7 +85,7 @@ def _minimal_config() -> Dict[str, Any]:
         "perception_radius": 25,
         "max_nearby_units": 10,
         "max_valid_targets": 5,
-        "obs_size": 50,
+        "obs_size": ObservationBuilder.PHASE2_OBS_SIZE,
     }
     return {
         "board": {
@@ -135,7 +136,7 @@ def _minimal_config() -> Dict[str, Any]:
 
 @pytest.fixture(autouse=True)
 def mock_obs_and_reward(monkeypatch):
-    monkeypatch.setattr(W40KEngine, "_build_observation", lambda self: np.zeros(50))
+    monkeypatch.setattr(W40KEngine, "_build_observation", lambda self: np.zeros(ObservationBuilder.PHASE2_OBS_SIZE))
     monkeypatch.setattr(RewardCalculator, "calculate_reward", lambda self, *a, **kw: 0.0)
 
 

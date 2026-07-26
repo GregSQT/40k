@@ -791,6 +791,19 @@ depuis le code, chaque affirmation de doc confrontée à la réalité.
    trompeuse. Paramètres de la policy re-vérifiés après T-F : **2 102 423**, inchangés (le K des
    armes ne coûte rien en poids — c'était bien la promesse de l'encodeur partagé).
 
+6. 🔴 **Un `obs_size` périmé ne levait PAS à l'init.** Le routage était
+   `if obs_size == squad: … else: Box(obs_size)` : toute autre valeur construisait
+   **silencieusement** un espace d'observation que rien ne sait remplir, et l'incohérence
+   n'éclatait qu'à la première observation, sous un message parlant du **pipeline mono-figurine
+   legacy** — alors que la cause réelle est « la config porte une taille périmée ». C'est le
+   repli masquant que la convention projet interdit, et le cas se produit VRAIMENT : le layout
+   change à chaque évolution du schéma (rencontré en portant le bloc figurines à 20 slots).
+   `obs_size` doit désormais désigner un pipeline QUI EXISTE, sinon `W40KEngine.__init__` lève en
+   citant la valeur fautive ET la valeur attendue. Effet de bord assaini : 7 fixtures de tests
+   utilisaient `obs_size = 50`, une taille qui ne désigne aucun pipeline (doublure de test
+   couplée à un `_build_observation` mocké) — elles passent à `PHASE2_OBS_SIZE`, valeur d'un
+   pipeline réel.
+
 **Ce qui a été vérifié et est CONFORME** : `AI_OBSERVATION.md` confronté clé par clé à
 `squad_obs_shapes()` (formes, `obs_size`, nombre de slots) — aucun écart ; aucun identifiant
 d'action en dur hors `macro_intents` / `shared_utils` ; les bots d'évaluation passent tous par

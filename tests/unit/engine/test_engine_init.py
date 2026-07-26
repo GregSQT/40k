@@ -20,6 +20,7 @@ from unittest.mock import patch
 
 import pytest
 
+from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
 from shared.data_validation import ConfigurationError
 
@@ -36,7 +37,7 @@ def _minimal_config() -> Dict[str, Any]:
         "perception_radius": 25,
         "max_nearby_units": 10,
         "max_valid_targets": 5,
-        "obs_size": 50,
+        "obs_size": ObservationBuilder.PHASE2_OBS_SIZE,
     }
     return {
         "board": {
@@ -127,6 +128,43 @@ class TestEngineInitFailures:
         bad_config = {"pve_mode": False}  # Clé 'board' absente
         with pytest.raises((ConfigurationError, KeyError)):
             W40KEngine(config=bad_config)
+
+    def test_stale_obs_size_raises_at_init_not_later(self):
+        """`obs_size` périmé → ERREUR À L'INIT, avec la valeur attendue dans le message.
+
+        Auparavant, une taille inconnue tombait dans la branche « pipeline mono-fig legacy » et
+        construisait un `Box(obs_size)` que RIEN ne savait remplir : l'incohérence n'apparaissait
+        qu'à la première observation, sous un message parlant du pipeline 359 — alors que la
+        cause réelle est « la config porte une taille périmée ». Repli masquant, interdit par la
+        convention projet.
+
+        Le cas se produit VRAIMENT : le layout squad change à chaque évolution du schéma
+        d'entités (rencontré le 2026-07-26 en portant le bloc figurines de 6 à 20 slots).
+        """
+        cfg = _minimal_config()
+        stale = ObservationBuilder.SQUAD_OBS_SIZE_TARGET - 70   # taille d'un schéma antérieur
+        cfg["observation_params"]["obs_size"] = stale
+        cfg["training_config"]["observation_params"]["obs_size"] = stale
+
+        with patch("engine.w40k_core.load_weapon_damage_table", return_value={}):
+            with pytest.raises(ValueError) as err:
+                W40KEngine(config=cfg)
+        message = str(err.value)
+        assert str(stale) in message, "l'erreur doit citer la valeur fautive"
+        assert str(ObservationBuilder.SQUAD_OBS_SIZE_TARGET) in message, (
+            "l'erreur doit donner la valeur ATTENDUE, sinon elle n'aide pas a corriger"
+        )
+
+    def test_both_real_pipelines_are_accepted(self):
+        """Contre-épreuve : les deux tailles qui désignent un pipeline réel passent."""
+        for size in (ObservationBuilder.PHASE2_OBS_SIZE, ObservationBuilder.SQUAD_OBS_SIZE_TARGET):
+            cfg = _minimal_config()
+            cfg["observation_params"]["obs_size"] = size
+            cfg["training_config"]["observation_params"]["obs_size"] = size
+            with patch("engine.w40k_core.load_weapon_damage_table", return_value={}):
+                engine = W40KEngine(config=cfg)
+            assert engine.obs_builder.obs_size == size
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Succès avec config minimale réelle

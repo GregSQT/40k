@@ -20,13 +20,14 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
+from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
 
 
 @pytest.fixture(autouse=True)
 def mock_build_obs(monkeypatch):
     """Mocke _build_observation pour tous les tests — on ne teste pas l'obs builder ici."""
-    monkeypatch.setattr(W40KEngine, "_build_observation", lambda self: np.zeros(50))
+    monkeypatch.setattr(W40KEngine, "_build_observation", lambda self: np.zeros(ObservationBuilder.PHASE2_OBS_SIZE))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -70,7 +71,7 @@ def _minimal_config_with_units() -> Dict[str, Any]:
         "perception_radius": 25,
         "max_nearby_units": 10,
         "max_valid_targets": 5,
-        "obs_size": 50,
+        "obs_size": ObservationBuilder.PHASE2_OBS_SIZE,
     }
     return {
         "board": {
