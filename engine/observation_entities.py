@@ -29,6 +29,13 @@ from __future__ import annotations
 
 from typing import Dict, Tuple
 
+#: Clé du cache des sous-tenseurs d'armes dans le `game_state`
+#: (posée par `ObservationBuilder._encode_entity_weapons`, vidée par `build_units_cache`).
+#: Elle vit ici — module feuille, sans dépendance — pour que les deux côtés lisent la MÊME
+#: constante : en deux littéraux, une renommée d'un seul côté laisserait un cache jamais
+#: invalidé, donc des armes du roster précédent observées après une rotation.
+WEAPON_PROFILE_CACHE_KEY = "_obs_weapon_profiles_cache"
+
 # ---------------------------------------------------------------------------
 # Unité (ami ou ennemi — MÊME schéma, cf. §3.3)
 # ---------------------------------------------------------------------------

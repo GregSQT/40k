@@ -862,6 +862,14 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
     if "units" not in game_state:
         raise KeyError("game_state must have 'units' field to build units_cache")
 
+    # Le cache des profils d'armes de l'observation (ObservationBuilder._encode_entity_weapons)
+    # est indexé par (escouade, figurines vivantes). Le game_state étant MUTÉ d'un épisode à
+    # l'autre et jamais recréé, une entrée survivrait à la rotation de rosters : mêmes ids,
+    # armes différentes. Il tombe donc ici, avec les caches qu'il accompagne.
+    from engine.observation_entities import WEAPON_PROFILE_CACHE_KEY
+
+    game_state.pop(WEAPON_PROFILE_CACHE_KEY, None)
+
     units_cache: Dict[str, Dict[str, Any]] = {}
     occupation_map: Dict[Tuple[int, int], str] = {}
     models_cache: Dict[str, Dict[str, Any]] = {}

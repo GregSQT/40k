@@ -47,6 +47,7 @@ from engine.observation_entities import (
     SELF_MODEL_CONT_SIZE,
     UNIT_BIN_SIZE,
     UNIT_CONT_SIZE,
+    WEAPON_PROFILE_CACHE_KEY,
     global_bin_index,
     global_cont_index,
     unit_bin_index,
@@ -1653,6 +1654,7 @@ class ObservationBuilder:
         game_state: Dict[str, Any],
         squad_id: str,
         models: List[Dict[str, Any]],
+        alive_mids: List[str],
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Sous-tenseurs (K_WEAPONS, PROFILE_*_SIZE) des profils d'armes d'une unité.
 
@@ -1661,21 +1663,51 @@ class ObservationBuilder:
         tir et 1 de mêlée pour un maximum MESURÉ de 6 et 5 : l'arme d'exception d'un ennemi (le
         fuseur du sergent, l'arme [ANTI] du perso attaché) était tronquée à chaque épisode
         (§1.5).
+
+        MÉMOÏSÉ par (escouade, figurines vivantes). Ce bloc est le poste dominant de
+        l'observation — il est émis pour les 16 entités à CHAQUE step — alors que son contenu
+        est celui des datasheets : il ne bouge que si une figurine meurt (le nombre de porteurs
+        change) ou si l'escouade change de composition. La clé porte donc les mids vivants, ce
+        qui invalide exactement au bon moment ; le cache lui-même vit dans le `game_state` et
+        est vidé par `build_units_cache` (reconstruction des caches au reset), sans quoi la
+        rotation de rosters d'un épisode à l'autre pourrait réutiliser les armes du précédent.
+
+        ⚠️ Le tableau renvoyé est celui du cache : l'appelant l'écrit dans l'observation par
+        affectation numpy (donc par copie) et ne le mute jamais.
+        ⚠️ La TRONCATURE est mise en cache elle aussi, et REJOUÉE à chaque appel. Sans cela le
+        cache rendrait muet le garde-fou « aucun cap silencieux » (§11) dès le second step d'une
+        composition — un verrou qui cesse d'observer est pire que pas de verrou.
         """
-        cont: List[float] = []
-        binv: List[float] = []
-        encode_squad_weapon_profiles(
-            cont,
-            binv,
-            models,
-            self.K_WEAPONS_RANGED,
-            self.K_WEAPONS_MELEE,
-            on_truncation=self._weapon_truncation_logger(game_state, squad_id),
-        )
-        return (
-            np.asarray(cont, dtype=np.float32).reshape(self.K_WEAPONS, PROFILE_CONT_SIZE),
-            np.asarray(binv, dtype=np.float32).reshape(self.K_WEAPONS, PROFILE_BIN_SIZE),
-        )
+        cache = game_state.setdefault(WEAPON_PROFILE_CACHE_KEY, {})
+        cache_key = (squad_id, tuple(alive_mids))
+        hit = cache.get(cache_key)  # get allowed (absence = cache froid, pas une erreur)
+        if hit is None:
+            cont: List[float] = []
+            binv: List[float] = []
+            # Les dépassements sont COLLECTÉS au calcul froid, pas logués directement : c'est
+            # la rediffusion ci-dessous qui les émet, pour que froid et chaud tracent pareil.
+            truncations: List[Tuple[str, int, int]] = []
+            encode_squad_weapon_profiles(
+                cont,
+                binv,
+                models,
+                self.K_WEAPONS_RANGED,
+                self.K_WEAPONS_MELEE,
+                on_truncation=lambda key, n, k: truncations.append((key, n, k)),
+            )
+            # Une escouade ne traverse qu'un nombre borné de compositions (une par perte), et
+            # le cache meurt avec l'épisode : pas d'éviction à prévoir.
+            hit = (
+                np.asarray(cont, dtype=np.float32).reshape(self.K_WEAPONS, PROFILE_CONT_SIZE),
+                np.asarray(binv, dtype=np.float32).reshape(self.K_WEAPONS, PROFILE_BIN_SIZE),
+                tuple(truncations),
+            )
+            cache[cache_key] = hit
+
+        log_truncation = self._weapon_truncation_logger(game_state, squad_id)
+        for weapons_key, n_profiles, k_slots in hit[2]:
+            log_truncation(weapons_key, n_profiles, k_slots)
+        return hit[0], hit[1]
 
     def _encode_entity_model_types(
         self,
@@ -1855,7 +1887,7 @@ class ObservationBuilder:
             _c("n_in_enemy_ez", ctx["n_in_enemy_ez"])
             _c("n_relayed_ez", ctx["n_relayed_ez"])
 
-        wpn_cont, wpn_bin = self._encode_entity_weapons(game_state, squad_id, models)
+        wpn_cont, wpn_bin = self._encode_entity_weapons(game_state, squad_id, models, alive_mids)
         types_cont, types_bin = self._encode_entity_model_types(
             game_state, squad_id, alive_mids, models_cache
         )
