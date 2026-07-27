@@ -1927,16 +1927,22 @@ class ObservationBuilder:
         # coordonnées offset, deux voisins hexagonaux de parités de ligne différentes n'ont pas la
         # même norme, donc « la plus proche » et sa direction dépendaient de la parité. Même
         # repère que la grille égocentrique et que les directions d'objectif.
+        # Une SEULE passe, sans table intermédiaire : la projection n'est utile que pour le
+        # gagnant, et ce bloc tourne pour les 28 entités à chaque step (mesuré : la table coûtait
+        # 1 µs par entité de plus). `<` strict -> à égalité, la première de `alive_mids` gagne,
+        # comme le `min` qu'il remplace.
         anchor_x, anchor_y = ctx["anchor_x"], ctx["anchor_y"]
-        projected = {mid: _hex_center(int(models_cache[mid]["col"]), int(models_cache[mid]["row"]))
-                     for mid in alive_mids}
-        nearest_mid = min(
-            alive_mids,
-            key=lambda mid: (projected[mid][0] - anchor_x) ** 2
-            + (projected[mid][1] - anchor_y) ** 2,
-        )
-        _c("col_rel", projected[nearest_mid][0] - anchor_x)
-        _c("row_rel", projected[nearest_mid][1] - anchor_y)
+        nearest_d2: float = 0.0
+        nearest_x: float = 0.0
+        nearest_y: float = 0.0
+        for i, mid in enumerate(alive_mids):
+            entry_m = models_cache[mid]
+            px, py = _hex_center(int(entry_m["col"]), int(entry_m["row"]))
+            d2 = (px - anchor_x) ** 2 + (py - anchor_y) ** 2
+            if i == 0 or d2 < nearest_d2:
+                nearest_d2, nearest_x, nearest_y = d2, px, py
+        _c("col_rel", nearest_x - anchor_x)
+        _c("row_rel", nearest_y - anchor_y)
         if not is_active:
             # MÊME mesure que le gate de portée du moteur (socles par-figurine), donc
             # directement comparable aux portées d'armes exposées par les profils.
