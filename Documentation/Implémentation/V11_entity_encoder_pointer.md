@@ -32,7 +32,7 @@ les numéros de ligne sont indicatifs. Re-localiser par grep avant d'éditer.
 | **audit** | Passe « tout est optimal et documenté ? » — 6 écarts trouvés, tous corrigés | ✅ **FAIT (2026-07-26)**, cf. journal |
 | **T-H** | Complétude de l'obs : géométrie des objectifs + règles d'unité (+ cache des profils d'armes) | ✅ **FAIT (2026-07-27)**, cf. `V11_agent_rework.md` §0.31 |
 
-⚠️ **`obs_size` courant : 20601** (20166 → 20181 objectifs → 20545 règles d'unité → 20601 couvert/visibilité par slot ennemi, 2026-07-27).
+⚠️ **`obs_size` courant : 20626** (20166 → 20181 objectifs → 20545 règles d'unité → 20601 couvert/visibilité par slot ennemi, 2026-07-27 → **20626** bit `present` par figurine + phase en one-hot, §0.32 T-H/T-J, 2026-07-28).
 Les tailles citées dans le journal ci-dessous sont celles du jour de leur tranche : elles
 documentent une progression, elles ne décrivent pas l'état actuel.
 

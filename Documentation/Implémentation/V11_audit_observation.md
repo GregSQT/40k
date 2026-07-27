@@ -41,7 +41,7 @@ d'arme brute, et il lui manque des informations de décision que les règles exi
 L'observation avait **deux morceaux** donnés ensemble au réseau :
 
 1. un **vecteur de 108 nombres** (`build_squad_observation`) — devenu 199, puis 1011, et
-   **aujourd'hui un jeu de TENSEURS D'ENTITÉS** de **20 601** scalaires (§0.30 T-D→T-F, puis
+   **aujourd'hui un jeu de TENSEURS D'ENTITÉS** de **20 626** scalaires (§0.30 T-D→T-F, puis
    §0.31) ;
 2. une **grille égocentrique** de 6 images superposées centrées sur l'escouade active
    (`build_squad_grid`) — aujourd'hui **7 canaux**.

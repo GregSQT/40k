@@ -40,7 +40,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.32` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.33` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32` le 2026-07-28).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -52,7 +52,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 
 | # | Entrée | Nature | Ordre proposé | Pourquoi cet ordre |
 |---|---|---|---|---|
-| **§0.14** | Re-mesure du run | 🟠 **DÉBLOQUÉ (2026-07-26)** — §0.27 corrigé + §9.2.5 livré ; run `--new` à lancer | **1** | 🟠 **MAJ 2026-07-22.** Run `x5_new` (10k ép., 48 envs) lancé sur moteur+analyzer désormais fiables (§0.23–§0.26). **Le training a atteint l'épisode 2000 sans un seul crash** (le fix move §0.25/§0.26 tient), MAIS le garde-fou d'éval a **arrêté le run au 1er checkpoint** : 500 ép. d'éval « failed » sur **timeout de task** (cf. **§0.27**). Aucun win-rate produit. Prérequis levés depuis le 2026-07-21 : dépendance perf §0.22 non bloquante (le run tourne), analyzer fiabilisé (§0.24). **MAJ 2026-07-26 : §0.27 est CORRIGÉ, §9.2.5 est LIVRÉ, et §0.30 (T-A→T-F) est LIVRÉ — plus aucun prérequis technique ni fonctionnel.** Le prochain run doit être un `--new` : `obs_size` 199 → 1011 → **20601** (tenseurs d'entités ; +objectifs situés, +13 bits de règles d'unité, +couvert/visibilité par slot ennemi — §0.31). |
+| **§0.14** | Re-mesure du run | 🟠 **DÉBLOQUÉ (2026-07-26)** — §0.27 corrigé + §9.2.5 livré ; run `--new` à lancer | **1** | 🟠 **MAJ 2026-07-22.** Run `x5_new` (10k ép., 48 envs) lancé sur moteur+analyzer désormais fiables (§0.23–§0.26). **Le training a atteint l'épisode 2000 sans un seul crash** (le fix move §0.25/§0.26 tient), MAIS le garde-fou d'éval a **arrêté le run au 1er checkpoint** : 500 ép. d'éval « failed » sur **timeout de task** (cf. **§0.27**). Aucun win-rate produit. Prérequis levés depuis le 2026-07-21 : dépendance perf §0.22 non bloquante (le run tourne), analyzer fiabilisé (§0.24). **MAJ 2026-07-26 : §0.27 est CORRIGÉ, §9.2.5 est LIVRÉ, et §0.30 (T-A→T-F) est LIVRÉ — plus aucun prérequis technique ni fonctionnel.** Le prochain run doit être un `--new` : `obs_size` 199 → 1011 → **20626** (tenseurs d'entités ; +objectifs situés, +13 bits de règles d'unité, +couvert/visibilité par slot ennemi — §0.31 ; +bit `present` par figurine, +phase en one-hot — §0.32). |
 | ~~**§0.27**~~ | Blocage éval au checkpoint | ✅ **CORRIGÉ (2026-07-26)** — timeout≠crash + éval intermédiaire 100→20 (7 tests, mutation) | — | À l'éval intermédiaire (`bot_eval_intermediate=100` ép./bot × 5 bots = 500), **un task a dépassé le timeout de 1 h** (`bot_eval_task_timeout_seconds=3600`, durée mesurée 3675 s) → pool avorté, 500 ép. marqués `failed` → `RuntimeError` strict (§0.7). **Diagnostic (mesuré, PAS un hang) :** le cap `max_turns×400=2000` pas/épisode existe (aucun hang infini possible) ; le modèle à 2000 ép. (à peine entraîné) produit des **parties dégénérées** atteignant ce cap, et le **coût par-pas du fix géodésique §0.25** (l'érosion « load-bearing » = le coût §0.22) rend ces épisodes trop longs. Sonde : **0 ép. d'éval terminé en 2 min** sur le modèle courant (vs 17 s/ép sur un autre modèle). Fix approuvé (utilisateur) : (1) distinguer timeout vs crash dans le garde-fou (ne pas hard-stop sur lenteur, run résilient) + (2) réduire l'éval intermédiaire (100→~20), `bot_eval_final=100` gardé. **DIFFÉRÉ** : le win-rate est repoussé tant que la conformité tir (§0.28) n'est pas verrouillée. |
 | **§0.28** | Conformité tir obscuring (13.10) — soupçon | ✅ **RÉFUTÉ (2026-07-22)** — AUCUN bug, mesuré in-engine sur le vrai gate | — | Suspicion utilisateur (tir « à travers terrain » en replay) **investiguée à fond puis RÉFUTÉE**. Le vrai gate de tir gym = `build_squad_action_mask` (branche shoot, `shared_utils.py:8170`) → `_model_can_shoot_target` (`:4722`) → `_attacker_model_can_reach_squad` (`:4515`) → `_compute_visibility_with_obscuring` : **par-figurine, footprint COMPLET, obscuring-aware (13.10)**. Audit LIVE inséré au `return True` du gate : **297 tirs approuvés, 0 sans ligne socle→socle évitant l'obscuring** (`GATE_BUG=0`, `obscuring_clear_line=False=0`). Le « tir à travers terrain » = **peek légal par-figurine** (06.01 : un bord de socle voit là où le centre est masqué). ⚠️ Mes « 10 tirs illégaux confirmés » puis « 3 sur données fraîches » étaient TOUS des **FAUX POSITIFS** : scan offline centre-à-centre + reconstructions non fidèles (positions/arme/état). Détail méthode → §0bis. Fixture d'audit obscuring (cas net, bloque correctement) : commité. |
 | **§0.24** | Analyzer réaligné per-figurine | 🟢 **RÉSOLU (2026-07-22)** ; résiduel FP documenté | — | Détail intégral → **§0hist §0.24**. Résiduel non bloquant : suivi HP/mort de la **cible** pas encore per-figurine → **FP « Fight a dead unit »** (174 sur log réf, **prouvé FP** : Unit 104 tracée vivante) + off-by-1 fight/advance. |
@@ -62,15 +62,16 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | **§0.29** | Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum | 🟢 **MÉCANIQUE LIVRÉE + VALIDÉE IN-ENGINE (2026-07-22)** ; reste USAGE+MESURE (cf. « Suite » §0.29 ; win-rate rejoint §0.14, **débloqué le 2026-07-26**) | 4 | Scénario `scenario_fixed_brawl_sm_orks.json` (terrain **`terrain-mc1.json`**, 36 figurines, compositions réelles des rosters training SM+Orks) où **le champ `deployment_type` bascule** placement manuel ↔ déploiement (`"fixed"` = positions `col/row`, aucun déploiement ; `"active"` = phase de déploiement). Positions par défaut dans les bandes **dégagées de mc1** (rows 90-105 / 195-210, éditables). **+ scheduler `deployment_mode_schedule`** (opt-in) : proportion `active` **croissante par épisode** au fil du training (rampe linéaire, miroir de `deployment_random_mix`, orthogonal à lui). **+ emplacements `top`/`bottom` par figurine DANS les 4 rosters** (P1=top, P2=bottom ; siège+rotation aléatoires conservés) → le mode strict marche sur le vrai chemin roster. 3 verrous verts sur le VRAI moteur : `test_fixed_brawl_deploy_modes.py` (bascule units[]) + `test_deployment_mode_schedule.py` (bornes 0/1 + rampe) + `test_roster_fixed_positions.py` (rosters top/bottom, rotation réelle). Détail → **§0.29** ci-dessous. |
 | **§0.30** | Encodeur d'entités partagé + tête pointeur (et 6 trous trouvés le 2026-07-26) | 🟢 **LIVRÉ (2026-07-26)** — T-A→T-F faits ; ne bloque plus §0.14 | **1** | Vérification demandée par l'utilisateur après §9.2.5. **6 trous trouvés**, dont : une escouade ennemie **invisible ET intirable** dans 6 épisodes sur 10 (5 slots figés pour 6 escouades mesurées) ; le gym ignore les types de tir **10.05 / 10.06** ; au tir le gym déclare **une seule arme (index 0), une seule cible** — violation de **04.01** et **04.02** ; l'heuristique d'arme de mêlée a été **périmée par P1** (ignore ANTI-X, DEVASTATING, MELTA…). Décisions actées : renommage `PISTOL` → `CLOSE_QUARTERS`, encodeur d'entité **partagé** (unités+armes, amies+ennemies), **K=20 unités / K=10 armes**, **tête pointeur** pour le ciblage, retrain accepté. **TOUT est livré le 2026-07-26** (T-A→T-F + §1.9 + audit final) : `obs_size` 199 → **20166** *(valeur du 2026-07-26 ; état courant **20545**, cf. §0.31)*, espace d'action 1047 → **1062**. Résidu **§1.9** (volet MONSTER/VEHICLE de 10.06 côté PvP/mono) **refermé le 2026-07-26** après validation PvP de T-C par l'utilisateur — plus aucun résidu ouvert. Détail complet, mesures et journal → **[`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)**. |
 | **§0.31** | Complétude de l'observation (objectifs situés, règles d'unité) + cache des profils d'armes | 🟢 **LIVRÉ (2026-07-27)** — 3 commits, 13 tests + mutations | **1** | Audit demandé par l'utilisateur (« l'obs est-elle complète, branchée, optimale ? »). Branchement **intact**. **2 trous fermés** : (1) les objectifs n'avaient **aucune position** — mesuré, **1 à 2 sur 5** tombaient dans la fenêtre de grille alors que 15 actions de zone les désignent (`ab9baa56`) ; (2) les **règles d'unité** étaient invisibles du pipeline squad, 13 bits d'effet par entité, extinction 19.04 verrouillée (`0fb94a01`). **Perf** : profils d'armes mémoïsés, `build_squad_observation` **2,86 → 1,69 ms** (`7a84e124`). **K larges GARDÉS** (arbitrage utilisateur, généralisation future) — coût mesuré : **0 paramètre**, **0 ms de construction**, 1,39× sur le forward. `obs_size` **20166 → 20601** ⇒ le run §0.14 doit être un `--new` postérieur à ces commits. Détail → **§0.31**. |
+| **§0.32** | Optimalité de l'obs ET de la TÊTE d'action — audit du 2026-07-28 | 🟠 **OUVERT** — 6 constats ; **lot obs T-H/T-I/T-J LIVRÉ le 2026-07-28** (`deab7e03`, 13 tests + mutations, `obs_size` 20601 → **20626**) ; restent T-K/T-L (canaux) puis T-G (tête) | **2** (après le lancement du run §0.14 : T-G change la policy, donc un run en cours reste valide comme baseline) | Question de l'utilisateur : « mon obs est-elle optimale ? ». ⚠️ **Une 1re version de cette entrée affirmait « aucun manque de contenu, seulement la forme et l'aval » — FAUX et retiré le 2026-07-28** : la GRILLE a deux manques de contenu, **T-K** (le coût géodésique par cellule, déjà calculé pour le masque puis jeté — c'est lui qui arbitre normal vs advance, donc le tir et la charge) et **T-L** (l'escouade ACTIVE est peinte dans le canal allié, indistinguable des autres escouades amies sur une grille pourtant égocentrique). Ordre corrigé : lot obs (T-H/T-I/T-J) → canaux (T-K/T-L) → tête (T-G), parce que les canaux changent `GRID_CHANNELS`, donc l'entrée du CNN. **T-G (majeur)** : les 1024 logits de cellule de move sortent d'un `Linear` dense ([`pointer_policy.py:112`](../../ai/pointer_policy.py#L112)) et la carte CNN est aplatie avant la tête ([`spatial_extractor.py:228`](../../ai/spatial_extractor.py#L228)) — c'est **le défaut exact que la tête pointeur a corrigé pour 20 slots de tir, laissé sur 97 % de l'espace d'action**. **T-H** : une figurine sur le centroïde et non engagée a sa ligne `self_models_*` entièrement nulle ⇒ le masque de présence déduit par `abs().sum() > 0` la compte **absente**. **T-I** : `col_rel`/`row_rel` sont en coordonnées **offset brutes** alors que la grille et les directions d'objectif travaillent dans la projection `_hex_center`. **T-J** : `deployment` et `command` partagent la valeur `phase = 0.0`, et le décodage a un `.get(…, 0.0)`. Détail, mesures et périmètre → **§0.32**. |
 | ~~**§0.22**~~ | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **CLOS le 2026-07-21 — décision (B) STOP à L1+L_bbox** | — | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) livrés et commités** (`ff2293e0`, `6f268d38`) — gain ovale **1,49×**, round10 1,78×, pool strictement identique ; A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. **Reliquat NON poursuivi** (ratio gain/risque mauvais, mesuré) : BFS wavefront réfuté (plus lent à move 12), L2b runs NumPy réfuté (1,1× net + complexité), numba écarté (risque segfault sur run 36 h). ⚠️ **MAJ 2026-07-22 : ce coût perf est désormais INCONTOURNABLE** — le fix de conformité move §0.25 REQUIERT une érosion géodésique par-figurine, exactement le coût que §0.22 combattait. Il refait surface en §0.27. Détail complet → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§10, §11) ; leçon de méthode → §0bis. |
 
 **MAJ 2026-07-26 : §0.27 est CORRIGÉ et §9.2.5 (observation des règles d'armes) est LIVRÉ.**
 **§0.31 est LIVRÉ (2026-07-27)** : objectifs situés + règles d'unité visibles + cache des
-profils d'armes, couvert/visibilite exacts par slot ennemi ; `obs_size` **20601**, tout run antérieur est incompatible.
+profils d'armes, couvert/visibilite exacts par slot ennemi ; `obs_size` **20626** (§0.32 T-H/T-J), tout run antérieur est incompatible.
 **§0.30 est LIVRÉ (T-A→T-F, 2026-07-26)** : le blocage qu'il posait au run long est levé —
 l'escouade ennemie invisible et intirable, les types de tir 10.05/10.06 absents et les
 violations 04.01/04.02 au tir sont corrigés et verrouillés. Le run reste un **`--new`**
-(`obs_size` 199 → **20601** depuis §0.31, 2026-07-27).
+(`obs_size` 199 → **20626** depuis §0.32 T-H/T-J, 2026-07-28).
 **§0.28 (conformité tir obscuring) est RÉFUTÉ — aucun bug (mesuré in-engine).**
 La nuit du 2026-07-21→22 a livré §0.23–§0.26 (logger+analyzer per-figurine, bug moteur move + régression cache),
 qui **débloquent la mesurabilité** (analyzer fiable) mais font émerger §0.27 (coût géodésique en éval).
@@ -83,6 +84,226 @@ résolues §0.15–§0.19, §0.21, **§0.22**, **§0.23**, **§0.24**, **§0.25*
 réserve de méthode sur le document lui-même (T1→T5 et section 9 n'ont **pas** été revérifiés
 ligne à ligne) et la règle de périmètre `ArmageddonAgent`.
 
+
+### 0.32 Optimalité de l'observation ET de la tête d'action — audit du 2026-07-28 — 🟠 OUVERT (T-H/T-I/T-J ✅ LIVRÉS)
+
+**Origine.** Question de l'utilisateur : « mon obs est-elle optimale ? », posée pendant le test
+x1 qui précède le run x5. Audit fait **par lecture du code**, pas de la doc — puis recoupement
+des deux documents d'observation avec le code.
+
+⚠️ **Rectification du 2026-07-28, même jour.** La 1re version de cette entrée affirmait « aucun
+manque de règle actionnable dans le CONTENU de l'obs ; les constats portent sur la forme et sur
+l'aval ». **C'est faux** : l'audit initial n'avait regardé que le vecteur, pas la grille. Deux
+manques de CONTENU y ont été trouvés ensuite — **T-K** et **T-L** ci-dessous — et ils ont un
+meilleur ratio effort/gain que T-G. Leçon : « j'ai audité l'observation » ne vaut que si les
+**deux** moitiés de l'observation ont été lues ; le `Dict` en a deux, le vecteur et la grille.
+
+**Ce que l'audit NE trouve pas.** Aucun manque dans le VECTEUR (le contenu par entité est
+complet). Les cardinalités larges (§0.31) ne sont pas un problème : l'arbitrage y est mesuré (0 paramètre,
+0 ms de construction) et le coût du training est ailleurs (§0.22 : `MOVE_POOL_BUILD` = 95,6 %).
+**Conformité doc↔code : les deux documents sont exacts.** Recoupé : `obs_size` = 33 + 28×731 +
+100 = **20601** au moment de l'audit — **20626 depuis la livraison de T-H/T-J**, cf. ci-dessous —, `UNIT_CONT_SIZE` = 19, `UNIT_BIN_SIZE` = 19 + 13 = 32,
+`PROFILE_CONT/BIN_SIZE` = 13/18, `K_ENEMY_SLOTS` = 20 = `SHOOT_SLOT_COUNT` (verrouillé
+[`pointer_policy.py:70`](../../ai/pointer_policy.py#L70)), les 5 caches et leurs invalidations,
+les 3 invariants. Aucune affirmation périmée trouvée.
+
+**État du lot au 2026-07-28** : **T-H, T-I et T-J sont LIVRÉS** (`deab7e03`) — bit `present` explicite, projection `_hex_center` unique, phase en one-hot de 6 bits, et les 4 replis du chemin (`phase`, `oc_total`, `squad_cache`) supprimés. `obs_size` **20601 → 20626**. Restent ouverts **T-K** et **T-L** (contenu de la grille, donc `GRID_CHANNELS`) puis **T-G** (tête de move dense).
+
+---
+
+#### T-G — 🔴 La tête de move est DENSE : le défaut du format plat, laissé sur 97 % des actions
+
+**Constat vérifié.** [`pointer_policy.py:112`](../../ai/pointer_policy.py#L112) : seuls les 20
+logits de tir sortent d'un produit scalaire `q · e_i`. Les **1024 logits de cellule** sortent de
+`self.action_net(latent_pi)`, un `Linear(320 → 1062)` (net_arch `[320, 320]`, cf.
+`ArmageddonAgent_training_config.json`). En amont,
+[`spatial_extractor.py:228-239`](../../ai/spatial_extractor.py#L228-L239) fait
+`Conv → Conv(stride 2) → Conv(stride 2) → Flatten → Linear(4096, 256)` : **la carte spatiale est
+détruite avant d'atteindre la tête**.
+
+**Pourquoi c'est le point n°1.** C'est le raisonnement de
+[`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md) §1.8 mot pour mot — « chaque
+slot possède sa propre ligne de poids et n'apprend RIEN des autres » — mais appliqué à **1024
+actions au lieu de 20** :
+
+- chaque cellule a sa propre ligne de sortie (≈ 327 k paramètres, plus du quart du modèle) ;
+- deux cellules voisines ne partagent aucun poids : ce que l'agent apprend en (12,7) ne vaut pas
+  en (13,7) ;
+- la correspondance « cellule (gx,gy) de la grille ↔ logit `gy*32+gx` » doit être **ré-apprise**
+  par des poids denses, alors qu'elle est structurelle ;
+- les cellules rarement visitées restent mal apprises toute la partie — et sur x5 les épisodes
+  sont plus longs, donc cette sample-complexity se paie plein pot.
+
+⚠️ **Ne pas confondre avec la « tête spatiale » de
+[`A_faire/move_action_space_spatial_rework.md`](A_faire/move_action_space_spatial_rework.md)
+§6.2** : ce document appelle « tête spatiale » le fait que **l'action désigne une cellule**, pas
+une tête convolutive. La policy y est spécifiée `MultiInputPolicy` + « extracteur CNN pour la
+grille » — ce qui est bien ce qui est implémenté. Le manque n'est pas une régression : il n'a
+jamais été spécifié.
+
+**Correctif proposé (à valider avant écriture) — ne touche PAS l'observation.** Conserver dans
+l'extracteur une branche CNN **non aplatie**, à résolution 32×32 (pas de stride, ou remontée par
+interpolation), et produire le logit d'une cellule par une **conv 1×1** sur sa colonne de
+features : `logit(gx,gy) = w · f[:, gy, gx]`. Le nombre de cellules devient gratuit en
+paramètres et l'alignement obs↔action devient structurel. C'est le jumeau exact de la tête
+pointeur, côté move.
+
+⚠️ **Amendement du 2026-07-28 — la conv 1×1 SEULE serait PLUS FAIBLE que la tête dense.** La
+première rédaction de ce correctif vendait l'équivariance en translation comme un gain net. Elle
+est **fausse ici**, pour deux raisons qui imposent chacune un ajout obligatoire :
+
+1. **La sémantique d'une cellule dépend de son RAYON**, pas seulement de son voisinage : la
+   grille est égocentrique et normalisée par le budget d'Advance (centre = mon bloc, bord =
+   limite d'atteignabilité). Une conv pure est invariante par translation, donc **incapable
+   d'exprimer « le centre n'est pas le bord »** — alors que la tête dense, elle, sait exactement
+   où est chaque cellule. ⇒ **Canaux positionnels fixes obligatoires** (x, y, rayon normalisés),
+   concaténés avant le 1×1.
+2. **Un 1×1 sur une pile conv peu profonde a un champ réceptif de quelques cellules** : la tête
+   ne verrait ni le tour, ni les VP, ni les objectifs hors fenêtre, ni mes autres escouades —
+   toute la partie du tronc qui justifie une destination. ⇒ **Conditionnement obligatoire** par
+   le latent du tronc, diffusé (broadcast) sur les 32×32 avant le 1×1.
+
+Sans ces deux ajouts, le remède remplace un défaut par un autre. Le diagnostic (1024 lignes de
+poids indépendantes, aucun partage entre cellules voisines) reste, lui, entier.
+
+⚠️ **Zone à risque identique à celle de T-E** (cf. l'en-tête de `pointer_policy.py`) : une tête
+d'action custom sous `MaskablePPO` échoue **en silence** si `log_prob`, l'entropie ou le masquage
+sont faux. Même discipline obligatoire : ne toucher QUE la valeur des logits, laisser la
+distribution, le masquage, `log_prob` et l'entropie à SB3, et vérifier contre une tête dense de
+référence sur un cas jouet (`tests/unit/ai/test_pointer_head.py` est le modèle à suivre).
+
+---
+
+#### T-H — ✅ LIVRÉ (2026-07-28, `deab7e03`) — une figurine pouvait être vue comme ABSENTE
+
+**Constat.** `spatial_extractor.py` déduisait le masque de présence des figurines de l'unité active
+par `(|cont| + |bin|) > 0`, faute de bit dédié — le commentaire du code le disait lui-même :
+« aucune feature individuelle n'est un bit de présence ». Or le builder écrivait
+`col_rel = col − cx`, `row_rel = row − cy`. **Donc une figurine posée sur le centroïde arrondi, ni
+éligible au combat, ni dans une EZ ennemie, ni relayée, avait sa ligne ENTIÈREMENT nulle** — exclue
+de l'agrégation `_masked_mean_max` **et** du dénominateur de `EntityRunningNorm`. Rien ne levait :
+l'obs décrivait une escouade d'un effectif faux. Motif §0.18/§0.26 sous une autre forme.
+
+**Livré.** Bit `present` explicite en **dernière** position de `SELF_MODEL_BIN_FIELDS`
+([`observation_entities.py`](../../engine/observation_entities.py)) — même convention que les
+masques des registres d'armes et de types, lus en `[..., -1]` ; rempli par
+`build_squad_observation` ; **lu** par l'extracteur via `self_model_bin_index("present")` (aucun
+index recopié). Deux helpers d'index ajoutés (`self_model_cont_index` / `self_model_bin_index`),
+au même titre que `unit_*_index` / `global_*_index`. Le commentaire qui justifiait la déduction a
+disparu : il documentait le bug. **Coût : +20 scalaires** (`obs_size` 20601 → 20621, puis 20626
+avec T-J).
+
+**Tests** (`tests/unit/engine/test_squad_obs_geometry_phase_presence.py`,
+`tests/unit/ai/test_entity_encoder_extractor.py`) : la fixture pose une escouade de 4 figurines
+dont le centroïde tombe **exactement** sur (30,20) avec une figurine **pile dessus** — un
+garde-fou (`test_fixture_is_the_pathological_case`) vérifie que ce cas est bien celui du constat
+(continues nulles, aucun drapeau) ; la somme des bits `present` vaut l'effectif vivant avant comme
+après une perte ; les slots de padding restent à zéro ; côté extracteur, une ligne à `present = 0`
+mais à continues non nulles **ne doit plus** changer la sortie — c'est le cas qui discrimine « lire
+le bit » de « déduire la ligne » — avec sa contre-épreuve (`present = 1` doit, lui, changer la
+sortie). Mutation : la déduction remise en place fait rougir le test d'extracteur.
+
+---
+
+#### T-I — ✅ LIVRÉ (2026-07-28, `deab7e03`) — il n'y a plus qu'UNE géométrie dans l'observation
+
+**Constat.** `col_rel` / `row_rel` — pour les **entités** comme pour les **figurines** — étaient des
+différences de coordonnées **offset brutes**, alors que tout le reste de l'obs travaille dans la
+projection `_hex_center` : la grille égocentrique, qui l'a choisie **explicitement** pour éviter
+l'anisotropie de parité ([`spatial_grid.py`](../../engine/spatial_grid.py), « rasterisation
+GÉOMÉTRIQUE §10.9 »), et les directions d'objectif de §0.31. En offset, un même déplacement
+euclidien donne des `(Δcol, Δrow)` différents selon la parité de la ligne.
+
+**Livré.** Les deux paires sont émises dans la projection `_hex_center`, relativement à
+`_hex_center(centroïde arrondi)` — **la même origine** que `_squad_objective_geometry`. **Le choix
+de la figurine « la plus proche »** d'une entité passe lui aussi dans ce repère : le laisser en
+offset aurait fait dépendre de la parité *quelle* figurine est décrite, pas seulement sa direction
+— le constat aurait été à moitié traité. `_hex_center` est désormais importé au niveau module
+(feuille math/numpy, aucun cycle) et l'ancre projetée est calculée **une fois** puis passée par
+`ctx` aux 28 entités. **Coût nul en taille.**
+
+**Mesure de l'anisotropie corrigée** : deux voisins hexagonaux de (30,20) de parités différentes,
+(30,19) et (29,19), donnaient des normes **1,0** et **1,414** ; ils donnent tous deux **1,732**
+(= √3, le pas centre-à-centre). **Tests** : isotropie sur les figurines et sur les entités, plus
+deux oracles indépendants qui recalculent `_hex_center(fig) − _hex_center(ancre)` hors du builder.
+Mutation : le retour aux offsets fait rougir les 4.
+
+---
+
+#### T-J — ✅ LIVRÉ (2026-07-28, `deab7e03`) — `phase` est un one-hot, et plus rien ne se replie
+
+**Constat.** `{"deployment": 0.0, "command": 0.0, "move": 0.25, …}` puis `.get(phase, 0.0)` :
+`deployment` et `command` partageaient **0.0**, alors que les ids d'action 4–8 signifient « slot de
+déploiement » (`DEPLOY_SLOT_BASE = 4`) dans l'une et « cellule de move » dans l'autre
+([`macro_intents.py`](../../engine/macro_intents.py)) — le seul indice restant était **indirect**
+(les bits `deploy_not_on_board`). L'encodage ordinal imposait en plus une métrique entre phases qui
+n'a aucun sens, et le `.get` servait « déploiement » pour une phase inconnue.
+
+**Livré.** `phase_deployment` … `phase_fight` : **one-hot de 6 bits** dans `GLOBAL_BIN_FIELDS`,
+généré depuis `OBS_PHASE_IDS`. Cette constante est **verrouillée par test** sur
+`action_decoder.GAME_PHASES` plutôt qu'importée : `observation_entities` est une **feuille**, et
+importer `action_decoder` (qui tire tout le moteur) créerait un cycle — même montage que
+`N_OBJECTIVE_SLOTS` ↔ `macro_intents.MAX_OBJECTIVES`. Les trois replis sont tombés : `.get(phase,
+0.0)` → `ValueError` explicite sur une phase hors des 6 ; `game_state.get("phase", "command")` →
+`require_key` ; `sq.get("oc_total", 0)` → `require_key`, **et** avec lui le
+`squad_cache[sid] if sid in squad_cache else {}` qui le rendait atteignable — `squad_cache` est
+construit pour chaque escouade de `squad_models`, donc une entrée absente est une incohérence de
+cache, pas un cas de jeu, et `{}` la servait comme une escouade d'**OC nul** (règle 14).
+**Coût : +5 scalaires.**
+
+**Tests** : les 6 phases donnent 6 encodages **distincts** (dont `deployment` ≠ `command`, l'objet
+du constat), chacun un one-hot valide ; une phase inconnue (`"shooting"`, le nom du *log*) lève ;
+la clé `phase` absente lève. Le verrou existant `test_binary_tensors_hold_only_discrete_semantics`
+perd son exception : `phase` était la seule dimension `_bin` non discrète du contexte, elle ne l'est
+plus. Mutation : l'encodage ordinal restauré fait rougir les 3.
+
+---
+
+#### T-K — 🟠 Le COÛT GÉODÉSIQUE par cellule est calculé, puis jeté
+
+[`spatial_grid.py:260`](../../engine/spatial_grid.py#L260) — `project_pool_to_grid` renvoie
+`{cell_index: ((col,row), coût_géodésique)}`. Ce coût est produit **à chaque activation, pour le
+masque**, puis **jeté** : seul le seuil `coût ≤ M` en survit, pour inférer le type de move.
+
+Or c'est la quantité qui arbitre le choix le plus cher de la phase de mouvement : `coût > M`
+force un **advance**, qui interdit le tir non-[ASSAULT] et la charge. Aujourd'hui l'agent voit
+les murs bruts et doit **refaire le BFS mentalement** pour savoir si la cellule qu'il vise lui
+coûte son tir. Un canal `coût / budget` le lui dit exactement, à l'endroit exact.
+
+**Correctif** : un 8ᵉ canal de grille, `coût géodésique normalisé par le budget` (0 hors pool,
+le bit d'atteignabilité restant porté par le masque d'action). Le pool est **déjà mémoïsé** par
+fingerprint ([`shared_utils.py:9281`](../../engine/phase_handlers/shared_utils.py#L9281)).
+
+⚠️ **Piège dimensionnant, à mesurer avant de conclure** : l'obs doit demander le pool avec le
+**même `advance_roll` et à la même `phase`** que le masque — ces deux valeurs sont DANS la clé de
+fingerprint. Une clé différente = un miss = un **BFS géodésique complet par step**, c'est-à-dire
+exactement le poste à 95,6 % du training (§0.22, dont le coût est devenu incontournable depuis
+§0.25). Mesurer le taux de hit, pas le supposer.
+
+#### T-L — 🟠 Sur une grille ÉGOCENTRIQUE, l'escouade active est noyée dans le canal allié
+
+`build_squad_grid` peint le canal `GRID_CH_ALLY` avec **toutes** les unités du joueur actif :
+`sink = ally_hexes if int(entry["player"]) == active_player else enemy_hexes`
+([`observation_builder.py`](../../engine/observation_builder.py), canaux 1/2). L'escouade
+**active** y est donc indistinguable d'une escouade amie voisine — sur une grille pourtant
+centrée sur elle, dont la demi-étendue est SON budget, et dont chaque cellule jouable est une
+destination de SON bloc rigide.
+
+**Correctif** : un canal `self` distinct (les figurines de l'escouade active), le canal allié
+gardant les autres escouades amies. Combiné à T-K, `GRID_CHANNELS` passe de 7 à 9.
+
+⚠️ Ces deux canaux changent l'entrée du CNN : ils doivent être livrés **avant** T-G, sinon la
+tête est à retoucher deux fois.
+
+---
+
+**Note x1 → x5 (vérifiée, pas déduite).** L'obs est **invariante d'échelle par construction** :
+`MOVE` est déjà en subhex ([`shared_utils.py:4450`](../../engine/phase_handlers/shared_utils.py#L4450)),
+la demi-étendue de grille vaut le budget d'Advance, et toutes les longueurs (portées,
+`edge_distance`, distances d'objectif) scalent du même facteur `inches_to_subhex`. Un x1 qui
+apprend est donc un signal valide pour x5. ⚠️ **Piège** : `obs_size` est **identique** entre x1 et
+x5 — un `.zip` entraîné en x1 se chargera **sans erreur** sur un board x5. Rien n'avertit d'une
+reprise accidentelle.
 
 ### 0.31 Complétude de l'observation — objectifs situés + règles d'unité visibles — ✅ LIVRÉ (2026-07-27)
 
@@ -5014,7 +5235,7 @@ comme non normatif.
 > (déjà acté ; les `.zip` existants sont incompatibles, par construction).
 >
 > ⚠️ **MAJ 2026-07-26** : le contrat décrit ici (vecteur PLAT `vec_cont`/`vec_bin`) a été
-> REMPLACÉ par les **tenseurs d'entités** de §0.30 T-D (`obs_size` **20601** depuis §0.31). Ce qui suit reste
+> REMPLACÉ par les **tenseurs d'entités** de §0.30 T-D (`obs_size` **20626** depuis §0.32). Ce qui suit reste
 > la spécification de CE QUI est observé (profils d'armes, règles, mise en place, distance
 > parcourue) ; la FORME, elle, se lit dans `V11_entity_encoder_pointer.md` §6 et dans l'en-tête
 > de `build_squad_observation`.

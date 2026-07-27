@@ -22,12 +22,12 @@ lecture, jamais une copie de chiffres qui dériverait.
 
 | Clé | Forme | Contenu |
 |---|---|---|
-| `global_cont` / `global_bin` | (11,) / (22,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, force d'usure, **distance à chacun des 5 objectifs** ; mon tour, phase, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux** |
+| `global_cont` / `global_bin` | (11,) / (27,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, force d'usure, **distance à chacun des 5 objectifs** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux** |
 | `allies_cont` / `allies_bin` | (8, 19) / (8, 32) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les 32 drapeaux incluent les **13 règles d'unité en vigueur** (19.04) et, pour les ennemis seulement, `los_can_see` + `cover_vs_observer` |
 | `allies_wpn_cont` / `_bin` | (8, 20, 13) / (8, 20, 18) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants et bits/params de règles |
 | `allies_types_cont` / `_bin` | (8, 6, 5) / (8, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
 | `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
-| `self_models_cont` / `_bin` | (20, 2) / (20, 3) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement |
+| `self_models_cont` / `_bin` | (20, 2) / (20, 4) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement, **bit de présence** |
 | `grid` | (7, 32, 32) | grille égocentrique : murs, alliés, ennemis, EZ, objectifs, niveau, couvert |
 
 ### Structure Overview
@@ -37,11 +37,11 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 601 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 626 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (11,)                =      11               │
-│    global_bin             (22,)                =      22               │
+│    global_bin             (27,)                =      27               │
 │                                                                        │
 │  MES ESCOUADES — ligne 0 = l'unité ACTIVE          K_ALLY_SLOTS = 8    │
 │    allies_cont            (8, 19)              =     152               │
@@ -61,9 +61,9 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │                                                                        │
 │  MES FIGURINES (individuel)                        SQUAD_TOP_K = 20    │
 │    self_models_cont       (20, 2)              =      40               │
-│    self_models_bin        (20, 3)              =      60               │
+│    self_models_bin        (20, 4)              =      80               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      20 601              │
+│  TOTAL vectoriel (= obs_size)                      20 626              │
 │  + grid  (7, 32, 32) = 7 168, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -107,28 +107,39 @@ global_cont[10]    = objective_distance_4                   # subhex, hex le plu
 
 ```python
 global_bin[0]      = is_my_turn                             # 0.0 / 1.0
-global_bin[1]      = phase                                  # deploiement|commande=0, move=.25, tir=.5, charge=.75, combat=1
-global_bin[2]      = objective_control_0                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
-global_bin[3]      = objective_control_1                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
-global_bin[4]      = objective_control_2                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
-global_bin[5]      = objective_control_3                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
-global_bin[6]      = objective_control_4                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
-global_bin[7]      = objective_present_0                    # 0.0 / 1.0 (objectif present au scenario)
-global_bin[8]      = objective_present_1                    # 0.0 / 1.0 (objectif present au scenario)
-global_bin[9]      = objective_present_2                    # 0.0 / 1.0 (objectif present au scenario)
-global_bin[10]     = objective_present_3                    # 0.0 / 1.0 (objectif present au scenario)
-global_bin[11]     = objective_present_4                    # 0.0 / 1.0 (objectif present au scenario)
-global_bin[12]     = objective_dir_cos_0                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
-global_bin[13]     = objective_dir_sin_0                    # -1.0..1.0
-global_bin[14]     = objective_dir_cos_1                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
-global_bin[15]     = objective_dir_sin_1                    # -1.0..1.0
-global_bin[16]     = objective_dir_cos_2                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
-global_bin[17]     = objective_dir_sin_2                    # -1.0..1.0
-global_bin[18]     = objective_dir_cos_3                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
-global_bin[19]     = objective_dir_sin_3                    # -1.0..1.0
-global_bin[20]     = objective_dir_cos_4                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
-global_bin[21]     = objective_dir_sin_4                    # -1.0..1.0
+global_bin[1]      = phase_deployment                       # 0.0 / 1.0 — ONE-HOT de phase (6 bits, ordre GAME_PHASES)
+global_bin[2]      = phase_command                          # 0.0 / 1.0
+global_bin[3]      = phase_move                             # 0.0 / 1.0
+global_bin[4]      = phase_shoot                            # 0.0 / 1.0
+global_bin[5]      = phase_charge                           # 0.0 / 1.0
+global_bin[6]      = phase_fight                            # 0.0 / 1.0
+global_bin[7]      = objective_control_0                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
+global_bin[8]      = objective_control_1                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
+global_bin[9]      = objective_control_2                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
+global_bin[10]     = objective_control_3                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
+global_bin[11]     = objective_control_4                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
+global_bin[12]     = objective_present_0                    # 0.0 / 1.0 (objectif present au scenario)
+global_bin[13]     = objective_present_1                    # 0.0 / 1.0 (objectif present au scenario)
+global_bin[14]     = objective_present_2                    # 0.0 / 1.0 (objectif present au scenario)
+global_bin[15]     = objective_present_3                    # 0.0 / 1.0 (objectif present au scenario)
+global_bin[16]     = objective_present_4                    # 0.0 / 1.0 (objectif present au scenario)
+global_bin[17]     = objective_dir_cos_0                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
+global_bin[18]     = objective_dir_sin_0                    # -1.0..1.0
+global_bin[19]     = objective_dir_cos_1                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
+global_bin[20]     = objective_dir_sin_1                    # -1.0..1.0
+global_bin[21]     = objective_dir_cos_2                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
+global_bin[22]     = objective_dir_sin_2                    # -1.0..1.0
+global_bin[23]     = objective_dir_cos_3                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
+global_bin[24]     = objective_dir_sin_3                    # -1.0..1.0
+global_bin[25]     = objective_dir_cos_4                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
+global_bin[26]     = objective_dir_sin_4                    # -1.0..1.0
 ```
+
+La phase est un **one-hot de 6 bits** depuis le 2026-07-28 (V11 §0.32 T-J). L'encodage ordinal
+précédent (0 / .25 / .5 / .75 / 1) donnait la **même** valeur `0.0` à `deployment` et à `command`,
+deux phases où les ids d'action 4–8 signifient l'un « slot de déploiement », l'autre « cellule de
+move » — le seul indice restant était indirect. Une phase hors des 6 **lève** ; il n'y a plus de
+`.get(…, 0.0)`.
 
 #### `allies_cont[s]` / `enemies_cont[s]` — une unite, 19 features  ·  EntityRunningNorm
 
@@ -139,8 +150,8 @@ global_bin[21]     = objective_dir_sin_4                    # -1.0..1.0
 [s][3]     = oc_total                               # brut (OC cumule)
 [s][4]     = model_count_ratio                      # 0.0-1.0 (vivantes / depart)
 [s][5]     = wounded_hp_ratio                       # 0.0-1.0 (1.0 si aucune entamee)
-[s][6]     = col_rel                                # subhex SIGNE (vs centroide observateur)
-[s][7]     = row_rel                                # subhex SIGNE (vs centroide observateur)
+[s][6]     = col_rel                                # projection _hex_center SIGNEE (fig la plus proche)
+[s][7]     = row_rel                                # projection _hex_center SIGNEE (fig la plus proche)
 [s][8]     = edge_distance                          # subhex, bord-a-bord [ENNEMIS/ALLIES non actifs]
 [s][9]     = move                                   # brut (M de la datasheet)
 [s][10]    = hp_max                                 # brut
@@ -255,12 +266,25 @@ global_bin[21]     = objective_dir_sin_4                    # -1.0..1.0
 #### `self_models_cont[m]` / `self_models_bin[m]` — mes figurines  ·  EntityRunningNorm / jamais normalise
 
 ```python
-cont[m][0]     = col_rel                                # subhex SIGNE (vs centroide observateur)
-cont[m][1]     = row_rel                                # subhex SIGNE (vs centroide observateur)
+cont[m][0]     = col_rel                                # projection _hex_center SIGNEE (vs centroide arrondi)
+cont[m][1]     = row_rel                                # projection _hex_center SIGNEE (vs centroide arrondi)
 bin[m][0]      = fight_eligible                         # 0.0 / 1.0
 bin[m][1]      = in_enemy_ez                            # 0.0 / 1.0
 bin[m][2]      = ez_relayed_by_ally                     # 0.0 / 1.0
+bin[m][3]      = present                                # 0.0 / 1.0 — masque du bloc (0 = slot vide)
 ```
+
+**Le masque de ce bloc est le bit `present`**, comme pour les registres d'armes et de types
+(§0.32 T-H, 2026-07-28). Il était auparavant **déduit** de la ligne entière
+(`(|cont| + |bin|) > 0`), ce qui comptait **absente** une figurine posée sur le centroïde arrondi
+et sans aucun drapeau : ligne entièrement nulle, donc exclue de l'agrégation ET du dénominateur de
+`EntityRunningNorm`. La somme des bits `present` vaut désormais l'effectif observé.
+
+**`col_rel` / `row_rel` sont exprimés dans la projection `_hex_center`** — ici comme dans
+`allies_cont` / `enemies_cont`, et comme la grille égocentrique et les directions d'objectif
+(§0.32 T-I). Il n'y a plus qu'**une** géométrie dans l'observation : en coordonnées offset, deux
+voisins hexagonaux de parités de ligne différentes n'avaient pas la même norme. Le choix de la
+figurine « la plus proche » d'une entité se fait dans le même repère, pour la même raison.
 
 ### Les blocs logiques A→E, et ce qu'ils sont devenus
 
@@ -288,7 +312,10 @@ recréerait en cassant le partage de poids.
 
 **Espace d'action** : une action de tir par slot ennemi (`SHOOT_SLOT_BASE + i`, 20 slots depuis
 T-E) ; les logits de ces actions sont produits par une **tête pointeur** (`ai/pointer_policy.py`)
-qui score `q · e_i` sur les embeddings — un slot de plus ne coûte donc aucun paramètre. Le
+qui score `q · e_i` sur les embeddings — un slot de plus ne coûte donc aucun paramètre. ⚠️ **Ce
+partage de poids ne vaut QUE pour les 20 logits de tir** : les 1024 logits de cellule de move
+sortent du `action_net` dense de SB3, et la carte CNN est aplatie avant de l'atteindre — cf.
+**V11 §0.32 T-G**, ouvert, le point d'optimalité le plus lourd du pipeline. Le
 mapping slot ↔ escouade est rafraîchi : les slots des escouades mortes sont rendus, et toute
 escouade vivante sans slot en reçoit un (une escouade vivante mappée ne change JAMAIS de slot).
 
@@ -320,11 +347,12 @@ réseau généralise d'un slot à l'autre et le coût d'un slot supplémentaire 
 | `*_bin` d'entités | oui | **jamais** | — |
 | `grid` | — | **jamais** (canaux déjà dans [0,1]) | `_vec_norm_obs_keys` |
 
-⚠️ **`_bin` ne veut pas dire « binaire »** — il veut dire « **jamais normalisé** ». Trois groupes
-de dimensions y sont continues, et y sont **exprès** parce que des statistiques glissantes
-détruiraient leur sémantique ou amplifieraient leur bruit : `phase` (scalaire ordonné dans
-[0,1]), `objective_control_*` (dans {-1, 0, +1}), et `objective_dir_cos/sin_*` (déjà bornés et
-centrés). Ne pas « corriger » cela en les déplaçant vers `_cont`.
+⚠️ **`_bin` ne veut pas dire « binaire »** — il veut dire « **jamais normalisé** ». Deux groupes
+de dimensions y sont non binaires, et y sont **exprès** parce que des statistiques glissantes
+détruiraient leur sémantique ou amplifieraient leur bruit : `objective_control_*` (dans
+{-1, 0, +1}) et `objective_dir_cos/sin_*` (déjà bornés et centrés). Ne pas « corriger » cela en les
+déplaçant vers `_cont`. (`phase` était le troisième cas, comme scalaire ordinal ; c'est désormais
+un one-hot, donc réellement binaire — et toujours hors normalisation.)
 
 ### Ce qui est mémoïsé, et par quelle clé d'invalidation
 
@@ -351,7 +379,9 @@ grille exclue — calculé par `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`. Histo
 199 (refonte du vecteur, 2026-07-25) → 1011 (profils d'armes et règles, 2026-07-26) → 5729
 (tenseurs d'entités, T-D) → 12284 (20 slots ennemis, T-E) → 20096 (K armes = 10 par registre,
 T-F) → 20166 (plafond du bloc figurines 6 → 20, 2026-07-26) → 20181 (géométrie des objectifs,
-2026-07-27) → 20545 (règles d'unité, 13 bits par entité) → **20601** (couvert et visibilité exacts par slot ennemi, 2026-07-27). **Toute évolution du
+2026-07-27) → 20545 (règles d'unité, 13 bits par entité) → 20601 (couvert et visibilité exacts par
+slot ennemi, 2026-07-27) → **20626** (bit `present` par figurine + phase en one-hot de 6 bits,
+§0.32 T-H/T-J, 2026-07-28). **Toute évolution du
 schéma change cette valeur et rend les `.zip` existants incompatibles : le retrain `--new` est
 obligatoire.**
 
@@ -363,8 +393,10 @@ portait déjà.
 
 **Historique et décisions** : [`Implémentation/V11_audit_observation.md`](Implémentation/V11_audit_observation.md)
 (§8, §10 ; §7 pour la découpe en blocs A→E) ·
-[`V11_agent_rework.md`](Implémentation/V11_agent_rework.md) §9.2.5 (ce qui est observé des règles)
-et **§0.31** (objectifs situés, règles d'unité, couvert exact, caches) ·
+[`V11_agent_rework.md`](Implémentation/V11_agent_rework.md) §9.2.5 (ce qui est observé des règles),
+**§0.31** (objectifs situés, règles d'unité, couvert exact, caches) et **§0.32** (audit
+d'optimalité du 2026-07-28 : T-H/T-I/T-J livrés — masque de présence, géométrie unique, phase en
+one-hot ; **T-G, la tête de move dense, reste ouvert**) ·
 [`V11_entity_encoder_pointer.md`](Implémentation/V11_entity_encoder_pointer.md) (§1 constats
 mesurés, §3 architecture, §6 journal) · [`AI_OBSERVATION_Legacy.md`](AI_OBSERVATION_Legacy.md)
 (archive du pipeline mono-figurine).

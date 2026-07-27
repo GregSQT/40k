@@ -4,7 +4,7 @@
 >
 > Il décrit le pipeline **mono-figurine** (`obs_size = 359`, vecteur plat d'offsets fixes
 > `obs[N]` / `[ally_base + N]`), conservé ici pour référence historique. **Aucun agent ne
-> l'utilise** : `ArmageddonAgent` porte `obs_size = 20601` et le moteur route sur
+> l'utilise** : `ArmageddonAgent` porte `obs_size = 20626` et le moteur route sur
 > `build_squad_observation`. Son seul chemin d'accès résiduel est `pve_controller`, et comme
 > `build_observation` lève si `obs_size != 359`, ce chemin serait en erreur avec la config
 > actuelle — il est mort ou cassé (constat du 2026-07-28, non tranché).
