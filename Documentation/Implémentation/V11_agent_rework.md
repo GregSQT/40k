@@ -265,6 +265,27 @@ la clé `phase` absente lève. Le verrou existant `test_binary_tensors_hold_only
 perd son exception : `phase` était la seule dimension `_bin` non discrète du contexte, elle ne l'est
 plus. Mutation : l'encodage ordinal restauré fait rougir les 3.
 
+**Résidu fermé le 2026-07-28 (relecture utilisateur du lot).** Un **4ᵉ repli** du même chemin avait
+été *signalé mais laissé en place* :
+`model_count_at_start = max(1, int(sq.get("model_count_at_start", len(alive_mids))))`. Il masquait
+deux incohérences distinctes : le défaut `len(alive_mids)` rendait un `model_count_ratio` de **1.0
+— « escouade intacte » — sur une escouade décimée**, et le `max(1, …)` transformait un 0 de cache
+en **ratio > 1** servi tel quel au réseau. Vérifié avant durcissement : la clé est **posée pour
+chaque escouade** par `build_units_cache`
+([`shared_utils.py:1048`](../../engine/phase_handlers/shared_utils.py#L1048)) et **préservée** à
+chaque recalcul ([`:3081`](../../engine/phase_handlers/shared_utils.py#L3081)) ; le reste du moteur
+la lit **déjà sans repli** ([`:4331`](../../engine/phase_handlers/shared_utils.py#L4331),
+[`:7151`](../../engine/phase_handlers/shared_utils.py#L7151),
+[`fight_handlers.py:5175`](../../engine/phase_handlers/fight_handlers.py#L5175)) — l'observation
+était le **seul** site tolérant. Désormais `require_key` + `ValueError` explicite sur `<= 0`.
+**2 tests** (clé absente / valeur nulle), **mutation faite** : l'ancienne ligne restaurée les fait
+rougir tous les deux. 14 verts sur le fichier, 45 sur la famille observation touchée.
+
+📌 **Leçon de méthode (§0bis).** Signaler un repli dans un rapport n'est pas le traiter — c'est le
+rendre présentable. Quand un lot a pour objet de supprimer les replis d'un chemin, il les supprime
+**tous**, ou il documente pourquoi le dernier est techniquement impossible à fermer dans la
+session. « Dis-moi si tu veux que je le durcisse aussi » n'est pas une clôture.
+
 ---
 
 #### T-K — 🟠 Le COÛT GÉODÉSIQUE par cellule est calculé, puis jeté

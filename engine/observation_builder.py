@@ -1901,7 +1901,21 @@ class ObservationBuilder:
         def _b(field: str, value: bool) -> None:
             binv[unit_bin_index(field)] = 1.0 if value else 0.0
 
-        model_count_at_start = max(1, int(sq.get("model_count_at_start", len(alive_mids))))  # get allowed
+        # `model_count_at_start` est POSÉ pour chaque escouade par `build_units_cache`
+        # (`entry["model_count_at_start"] = entry["model_count"]`) et PRÉSERVÉ à chaque
+        # recalcul (`_recompute_squad_cache`) : absent, ou nul sur une escouade qu'on encode
+        # comme vivante, c'est une incohérence de cache. Les deux replis précédents la
+        # masquaient (§0.32 T-J) : `.get(…, len(alive_mids))` rendait un ratio de 1.0 —
+        # « escouade intacte » — sur une escouade décimée, et `max(1, …)` transformait un 0 en
+        # ratio > 1 servi tel quel au réseau. Le reste du moteur lit déjà cette clé sans repli
+        # (`shared_utils.py:4331`, `:7151`, `fight_handlers.py:5175`).
+        model_count_at_start = int(require_key(sq, "model_count_at_start"))
+        if model_count_at_start <= 0:
+            raise ValueError(
+                f"build_squad_observation: squad_cache[{squad_id!r}]['model_count_at_start'] = "
+                f"{model_count_at_start} pour une escouade encodee vivante "
+                f"({len(alive_mids)} figurines) — incoherence de cache."
+            )
         _c("alive_models", len(alive_mids))
         _c("hp_total", int(entry.get("HP_CUR", 0)))  # get allowed
         # VALUE vivante : somme PAR FIGURINE (exacte sur une escouade hétérogène en points).

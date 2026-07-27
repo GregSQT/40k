@@ -299,3 +299,25 @@ def test_phase_ids_match_the_engine_phase_order():
     from engine.action_decoder import GAME_PHASES
 
     assert list(OBS_PHASE_IDS) == list(GAME_PHASES)
+
+
+def test_missing_model_count_at_start_raises():
+    """Aucun repli sur l'effectif de depart (§0.32 T-J, residu ferme le 2026-07-28).
+
+    `.get(..., len(alive_mids))` rendait un `model_count_ratio` de 1.0 — « escouade intacte » —
+    sur une escouade decimee : une valeur FAUSSE servie au reseau, sans rien lever.
+    """
+    from shared.data_validation import ConfigurationError
+
+    eng = _make_engine([_unit_cfg(1, 1, [(30, 20), (30, 21)]), _unit_cfg(2, 2, [(90, 20)])])
+    del eng.game_state["squad_cache"]["1"]["model_count_at_start"]
+    with pytest.raises(ConfigurationError, match="model_count_at_start"):
+        _obs(eng)
+
+
+def test_zero_model_count_at_start_raises():
+    """`max(1, ...)` transformait un 0 de cache en `model_count_ratio` > 1."""
+    eng = _make_engine([_unit_cfg(1, 1, [(30, 20), (30, 21)]), _unit_cfg(2, 2, [(90, 20)])])
+    eng.game_state["squad_cache"]["1"]["model_count_at_start"] = 0
+    with pytest.raises(ValueError, match="model_count_at_start"):
+        _obs(eng)
