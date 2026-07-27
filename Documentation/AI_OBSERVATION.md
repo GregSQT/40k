@@ -30,6 +30,128 @@ lecture, jamais une copie de chiffres qui dériverait.
 | `self_models_cont` / `_bin` | (20, 2) / (20, 3) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement |
 | `grid` | (7, 32, 32) | grille égocentrique : murs, alliés, ennemis, EZ, objectifs, niveau, couvert |
 
+### Structure Overview
+
+Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
+`tests/unit/engine/test_squad_obs_structure_doc.py` échoue si ce bloc dérive du schéma.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 601 scalaires)    │
+├────────────────────────────────────────────────────────────────────────┤
+│  CONTEXTE GLOBAL                                                       │
+│    global_cont            (11,)                =      11               │
+│    global_bin             (22,)                =      22               │
+│                                                                        │
+│  MES ESCOUADES — ligne 0 = l'unité ACTIVE          K_ALLY_SLOTS = 8    │
+│    allies_cont            (8, 19)              =     152               │
+│    allies_bin             (8, 32)              =     256               │
+│    allies_wpn_cont        (8, 20, 13)          =   2 080               │
+│    allies_wpn_bin         (8, 20, 18)          =   2 880               │
+│    allies_types_cont      (8, 6, 5)            =     240               │
+│    allies_types_bin       (8, 6, 5)            =     240               │
+│                                                                        │
+│  ESCOUADES ENNEMIES — ordre = slots d'action     K_ENEMY_SLOTS = 20    │
+│    enemies_cont           (20, 19)             =     380               │
+│    enemies_bin            (20, 32)             =     640               │
+│    enemies_wpn_cont       (20, 20, 13)         =   5 200               │
+│    enemies_wpn_bin        (20, 20, 18)         =   7 200               │
+│    enemies_types_cont     (20, 6, 5)           =     600               │
+│    enemies_types_bin      (20, 6, 5)           =     600               │
+│                                                                        │
+│  MES FIGURINES (individuel)                        SQUAD_TOP_K = 20    │
+│    self_models_cont       (20, 2)              =      40               │
+│    self_models_bin        (20, 3)              =      60               │
+├────────────────────────────────────────────────────────────────────────┤
+│  TOTAL vectoriel (= obs_size)                      20 601              │
+│  + grid  (7, 32, 32) = 7 168, fournie À PART (non comptée)             │
+└────────────────────────────────────────────────────────────────────────┘
+
+Coût d'UNE entité = 19 + 32 (unité) + 20 × (13 + 18) (armes) + 6 × (5 + 5) (types) = 731
+   → le bloc ARMES fait 86 % du vecteur. C'est le seul bloc mémoïsé.
+```
+
+### Section Breakdown
+
+⚠️ **Repérage par NOM, jamais par index.** Les index se lisent via `global_cont_index("nom")`,
+`global_bin_index("nom")`, `unit_cont_index("nom")`, `unit_bin_index("nom")` — ils changent à
+chaque évolution du schéma, les noms non. Écrire `obs[314]` dans du code ou un test est
+exactement l'erreur que le pipeline legacy a payée.
+
+#### 1. `global_cont` — contexte continu (le seul bloc normalisé par `VecNormalize`)
+
+`turn` · `episode_steps` · `my_victory_points` · `enemy_victory_points` · `my_value_ratio` ·
+`enemy_value_ratio` · **`objective_distance_0..4`** — distance à l'hex le plus proche de chaque
+zone, en subhex bruts.
+
+#### 2. `global_bin` — contexte discret (JAMAIS normalisé)
+
+`is_my_turn` · `phase` (0 / .25 / .5 / .75 / 1) · `objective_control_0..4` (dans {−1, 0, +1}) ·
+`objective_present_0..4` · **`objective_dir_cos_0..4`** et **`objective_dir_sin_0..4`** — vecteur
+unitaire vers chaque objectif.
+
+#### 3. `*_cont` d'une unité — 19 features, MÊME schéma ami/ennemi
+
+| Groupe | Features |
+|---|---|
+| effectif et état | `alive_models`, `hp_total`, `value_alive`, `oc_total`, `model_count_ratio`, `wounded_hp_ratio` |
+| position | `col_rel`, `row_rel` (figurine la plus proche du centroïde observateur, **pas** l'ancre), `edge_distance` (bord-à-bord ⚠ non-actives seulement) |
+| datasheet | `move`, `hp_max`, `toughness`, `armor_save`, `invul_save` |
+| mouvement du tour | `moved_max`, `moved_sum` — distance de **CHEMIN**, porte la clause 3 de [HEAVY] 24.16 |
+| engagement ⚠ ACTIVE seule | `n_fight_eligible`, `n_in_enemy_ez`, `n_relayed_ez` |
+
+#### 4. `*_bin` d'une unité — 32 drapeaux, MÊME schéma ami/ennemi
+
+| Groupe | Drapeaux |
+|---|---|
+| masques | `present` (0 = slot vide ou unité morte), `is_ally`, `is_active` |
+| activation du tour | `moved`, `shot`, `fought`, `advanced`, `fled` |
+| état | `coherent` (03.03), `engaged` (03.04) |
+| terrain ⚠ ACTIVE seule | `hidden` (13.09), `gone_to_ground` (13.5), `in_cover` (13.08, branche intrinsèque) |
+| mise en place | `deploy_not_on_board`, `deploy_pre_battle`, `deploy_in_battle`, `deployed_this_turn` (clause 2 de [HEAVY]) |
+| paire ⚠ ENNEMIS seuls | `los_can_see` (06.01), `cover_vs_observer` (**13.08 exact**, ses deux branches) |
+| **règles d'unité** (13) | `rule_charge_after_advance`, `rule_charge_after_flee`, `rule_charge_impact`, `rule_closest_target_penetration`, `rule_move_after_shooting`, `rule_reactive_move`, `rule_reroll_1_save_fight`, `rule_reroll_1_tohit_fight`, `rule_reroll_1_towound`, `rule_reroll_charge`, `rule_reroll_towound_target_on_objective`, `rule_shoot_after_advance`, `rule_shoot_after_flee` |
+
+**⚠ ACTIVE seule** = à zéro pour les autres entités, masque = `is_active` ·
+**⚠ ENNEMIS seuls** = décrit une paire observateur → cible, à zéro pour tout allié.
+C'est ce qui préserve le schéma unifié : mêmes colonnes partout, remplies ou masquées.
+
+#### 5. `*_wpn_*` — un profil d'arme (10 slots de tir **puis** 10 de mêlée)
+
+- **13 continues** : `NB`, `ATK`, `STR`, `AP`, `DMG`, portée, **porteurs vivants** — ce dernier
+  distingue 1 rokkit de 9 shootas, le volume de feu étant `porteurs × NB` — puis les 5 paramètres
+  de règles (`RAPID_FIRE`, `SUSTAINED_HITS`, `MELTA`, `CLEAVE`, `BLAST`), puis le seuil `Y+` de
+  [ANTI-X] (0 = aucune règle ANTI).
+- **18 drapeaux** : 12 bits de règles (`DEVASTATING_WOUNDS`, `LETHAL_HITS`, `TORRENT`,
+  `TWIN_LINKED`, `EXTRA_ATTACKS`, `PRECISION`, `PSYCHIC`, `HAZARDOUS`, `HEAVY`, `IGNORES_COVER`,
+  `CLOSE_QUARTERS`, `ASSAULT`) + one-hot du keyword ciblé par [ANTI-X] (`INFANTRY`, `VEHICLE`,
+  `FLY`, `PSYKER`, `MONSTER`) + le **mask** du slot.
+- ⚠️ [INDIRECT FIRE] 24.19 est **délibérément absente** : la règle n'est pas implémentée, un bit
+  pour elle serait du bruit pur. Profils regroupés par identité de caractéristiques ; tout
+  dépassement de K est **logué**, jamais silencieux.
+
+#### 6. `*_types_*` — types de figurines (6 slots par unité)
+
+- **5 continues** : `hp_max`, `toughness`, `armor_save`, `invul_save`, `alive_count`.
+- **5 drapeaux** : one-hot du rôle d'allocation (règle 19) — `role_special_weapon`,
+  `role_sergeant`, `role_support`, `role_leader`, aucun bit = figurine de base — + `present`.
+
+Décrit l'escouade **entière** en quelques dimensions, au lieu de répéter 20 fois le même profil.
+
+#### 7. `self_models_*` — mes figurines (20 slots, l'irréductiblement individuel)
+
+- **2 continues** : `col_rel`, `row_rel`, relatives au centroïde de l'escouade.
+- **3 drapeaux** : `fight_eligible`, `in_enemy_ez`, `ez_relayed_by_ally`.
+
+#### 8. `grid` — 7 canaux 32×32 égocentriques
+
+`0` murs · `1` occupation alliée · `2` occupation ennemie · `3` zone d'engagement ennemie ·
+`4` objectifs · `5` niveau (étages) · `6` couvert (13.08, dilaté au rayon de socle).
+
+Demi-étendue = **budget d'Advance maximal** de l'escouade (`M + 6″`), ce qui rend la géométrie
+indépendante de `inches_to_subhex`. ⚠️ **Aucun clamp** : ce qui dépasse est écarté, pas rabattu
+sur le bord — d'où la nécessité des distances/directions d'objectif dans `global_*`.
+
 ### Les blocs logiques A→E, et ce qu'ils sont devenus
 
 L'observation a été conçue en **blocs thématiques** (`V11_audit_observation.md` §7.2 et §8 : A
