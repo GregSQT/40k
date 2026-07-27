@@ -21,7 +21,7 @@ remplaçant `max(_mover_bs)` par `int(_mover_bs)` — un `TypeError` incondition
 sans que la suite ne rougisse.
 
 Le chemin reste VIF au x1 : `services/api_server.py` et `frontend/src/hooks/useGameConfig.ts`
-exposent le board `25x21` (`inches_to_subhex: 1`) au PvP, et la training config ArmageddonAgent
+exposent le board `44x60x1` (`inches_to_subhex: 1`) au PvP, et la training config ArmageddonAgent
 porte une phase de curriculum x1. D'où un test plutôt qu'une suppression.
 
 ⚠️ Ce fichier n'a de valeur que s'il ATTEINT réellement le BFS inverse — c'est le motif §0.11
@@ -101,7 +101,7 @@ def _make_game_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
         "units_advanced": set(),
         "console_logs": [],
         "_unit_move_version": 0,
-        # Board x1 (25x21) : c'est CE réglage qui active le BFS inverse.
+        # Board x1 (44x60x1) : c'est CE réglage qui active le BFS inverse.
         "inches_to_subhex": 1,
     }
     build_units_cache(gs)

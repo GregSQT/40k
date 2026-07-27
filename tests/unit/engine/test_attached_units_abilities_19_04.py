@@ -28,7 +28,7 @@ import pytest
 
 def _scenario(units: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
-        "board_ref": "25x21",
+        "board_ref": "44x60x5",
         "primary_objectives": ["objectives_control"],
         "wall_ref": "walls-none.json",
         "units": units,

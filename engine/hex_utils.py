@@ -585,6 +585,43 @@ def _hex_projected(c: int, r: int) -> tuple:
     return hx, hy
 
 
+def downscale_cell(col: int, row: int, ratio: int) -> Tuple[int, int]:
+    """Cellule du plateau `ratio` fois plus grossier qui contient la cellule fine `(col, row)`.
+
+    Diviser col et row séparément est FAUX en odd-q : les colonnes impaires sont décalées d'une
+    demi-hauteur d'hex (`_hex_projected`), donc une division par axe ignore ce décalage et
+    déplace environ un point sur quatre d'une case (mesuré sur `terrain-mc1`).
+
+    Conversion exacte : centre projeté de la cellule fine → mise à l'échelle → cellule grossière
+    dont le centre projeté est le plus proche. On s'appuie sur `_hex_projected`, la projection
+    déjà utilisée par la rasterisation des polygones et par le rendu du plateau, donc la
+    conversion est cohérente avec la géométrie du reste du moteur.
+
+    La recherche balaie ±2 autour de l'estimation analytique : l'estimation est exacte à ±1 près
+    (les colonnes le sont exactement, les lignes à un demi-pas près), la marge couvre le reste.
+    """
+    if ratio <= 0:
+        raise ValueError(f"downscale_cell: ratio must be >= 1, got {ratio}")
+    if ratio == 1:
+        return int(col), int(row)
+    x, y = _hex_projected(int(col), int(row))
+    x /= ratio
+    y /= ratio
+    col_estimate = int(round(x / 1.5))
+    row_estimate = int(round(y / math.sqrt(3.0)))
+    best: Optional[Tuple[int, int]] = None
+    best_distance = math.inf
+    for candidate_col in range(col_estimate - 2, col_estimate + 3):
+        for candidate_row in range(row_estimate - 2, row_estimate + 3):
+            hx, hy = _hex_projected(candidate_col, candidate_row)
+            distance = (hx - x) ** 2 + (hy - y) ** 2
+            if distance < best_distance:
+                best, best_distance = (candidate_col, candidate_row), distance
+    if best is None:
+        raise RuntimeError(f"downscale_cell: aucune cellule candidate pour ({col},{row}) ratio {ratio}")
+    return best
+
+
 def _objective_rect_hexes(
     *,
     top_left: Sequence,
@@ -993,6 +1030,81 @@ def compute_los_state(
 # Pathfinding — bounded BFS / A* (§8.1–§8.3)
 # ---------------------------------------------------------------------------
 
+PATHFINDING_UNREACHABLE = 0xFFFF
+"""Sentinelle de `pathfinding_field` : cellule non atteinte dans la profondeur explorée."""
+
+
+def pathfinding_field(
+    col1: int,
+    row1: int,
+    cols: int,
+    rows: int,
+    wall_set: Set[Tuple[int, int]],
+    max_search_distance: int,
+    occupied_set: Optional[Set[Tuple[int, int]]] = None,
+) -> np.ndarray:
+    """Champ BFS : distance en hex de `(col1, row1)` vers CHAQUE cellule du plateau (§8).
+
+    Une seule passe donne toutes les cibles. C'est la forme utile ici : les appelants
+    interrogent la même source contre N cibles (obs/reward parcourent les paires d'unités) ;
+    un BFS par paire refait N fois le même parcours.
+
+    Aucun plafond de nœuds : la seule borne est `max_search_distance`, qui est une borne de
+    RÈGLE (§9.0), pas un budget de perf. Un plafond de nœuds tronque le parcours au milieu et
+    renvoie « injoignable » pour des cellules qui sont atteignables — il fausse silencieusement
+    la distance au lieu de la coûter.
+
+    Args:
+        col1, row1: Départ (autorisé hors plateau : le champ est alors entièrement injoignable).
+        cols, rows: Dimensions du plateau.
+        wall_set: Hexes infranchissables.
+        max_search_distance: Profondeur BFS maximale (§9.0 max_search_distance).
+        occupied_set: Hexes occupés par d'autres unités. Non TRAVERSABLES, mais leur distance
+            est renseignée : ils restent des destinations légales (contrat historique
+            « the destination hex is always allowed even if in occupied_set »).
+
+    Returns:
+        Tableau `uint16` de taille `cols * rows`, indexé `row * cols + col`, valant
+        `PATHFINDING_UNREACHABLE` pour toute cellule non atteinte.
+    """
+    field = np.full(cols * rows, PATHFINDING_UNREACHABLE, dtype=np.uint16)
+    if not is_in_bounds(col1, row1, cols, rows):
+        return field
+
+    occ = occupied_set or set()
+
+    field[row1 * cols + col1] = 0
+    queue: List[Tuple[int, int, int]] = [(col1, row1, 0)]
+    head = 0
+
+    while head < len(queue):
+        pcol, prow, dist = queue[head]
+        head += 1
+
+        if dist >= max_search_distance:
+            continue
+
+        offsets = _NEIGHBORS_ODD_COL if (pcol & 1) else _NEIGHBORS_EVEN_COL
+        next_dist = dist + 1
+        for dc, dr in offsets:
+            nc, nr = pcol + dc, prow + dr
+            if nc < 0 or nr < 0 or nc >= cols or nr >= rows:
+                continue
+            idx = nr * cols + nc
+            if field[idx] != PATHFINDING_UNREACHABLE:
+                continue
+            npos = (nc, nr)
+            if npos in wall_set:
+                continue
+            field[idx] = next_dist
+            # Occupé = destination atteignable mais non traversable : on note la distance
+            # sans l'empiler, donc aucun chemin ne passe à travers.
+            if npos not in occ:
+                queue.append((nc, nr, next_dist))
+
+    return field
+
+
 def pathfinding_distance(
     col1: int,
     row1: int,
@@ -1003,22 +1115,14 @@ def pathfinding_distance(
     wall_set: Set[Tuple[int, int]],
     occupied_set: Optional[Set[Tuple[int, int]]] = None,
     max_search_distance: int = 500,
-    max_open_nodes: int = 2000,
 ) -> int:
-    """BFS shortest-path distance respecting walls and occupation (§8).
+    """Distance BFS point-à-point, murs et occupation respectés (§8).
 
-    Args:
-        col1, row1: Start.
-        col2, row2: End.
-        cols, rows: Board dimensions.
-        wall_set: Impassable hexes.
-        occupied_set: Hexes occupied by other units (non-traversable).
-            The destination hex is always allowed even if in occupied_set.
-        max_search_distance: Max BFS depth (§9.0 max_search_distance).
-        max_open_nodes: Hard cap on open-set size (§8.3 budget).
+    Enveloppe de `pathfinding_field` — une seule implémentation du BFS, donc aucune dérive
+    possible entre la version point-à-point et la version champ.
 
     Returns:
-        Path distance in hex, or max_search_distance + 1 if unreachable.
+        Distance en hex, ou `max_search_distance + 1` si injoignable.
     """
     if col1 == col2 and row1 == row2:
         return 0
@@ -1026,48 +1130,14 @@ def pathfinding_distance(
     if not is_in_bounds(col1, row1, cols, rows) or not is_in_bounds(col2, row2, cols, rows):
         return max_search_distance + 1
 
-    end = (col2, row2)
-    if end in wall_set:
+    if (col2, row2) in wall_set:
         return max_search_distance + 1
 
-    occ = occupied_set or set()
-
-    visited: Dict[Tuple[int, int], int] = {(col1, row1): 0}
-    queue: List[Tuple[Tuple[int, int], int]] = [((col1, row1), 0)]
-    head = 0
-    nodes_expanded = 0
-
-    while head < len(queue):
-        pos, dist = queue[head]
-        head += 1
-        nodes_expanded += 1
-
-        if nodes_expanded > max_open_nodes:
-            break
-
-        if pos == end:
-            return dist
-
-        if dist >= max_search_distance:
-            continue
-
-        offsets = _NEIGHBORS_ODD_COL if (pos[0] & 1) else _NEIGHBORS_EVEN_COL
-        next_dist = dist + 1
-        for dc, dr in offsets:
-            nc, nr = pos[0] + dc, pos[1] + dr
-            if nc < 0 or nr < 0 or nc >= cols or nr >= rows:
-                continue
-            npos = (nc, nr)
-            if npos in visited:
-                continue
-            if npos in wall_set:
-                continue
-            if npos != end and npos in occ:
-                continue
-            visited[npos] = next_dist
-            queue.append((npos, next_dist))
-
-    return max_search_distance + 1
+    field = pathfinding_field(
+        col1, row1, cols, rows, wall_set, max_search_distance, occupied_set=occupied_set
+    )
+    dist = int(field[row2 * cols + col2])
+    return dist if dist != PATHFINDING_UNREACHABLE else max_search_distance + 1
 
 
 # ---------------------------------------------------------------------------

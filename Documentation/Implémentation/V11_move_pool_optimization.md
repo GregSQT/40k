@@ -183,7 +183,7 @@ des ennemis → mobile, non cachable.
   `board_cols`/`board_rows`/`inches_to_subhex` sont posés **une fois à l'init** du `game_state`
   ([w40k_core.py:575](../../engine/w40k_core.py#L575), [game_state.py:381](../../engine/game_state.py#L381),
   [:512](../../engine/game_state.py#L512)) et **invariants dans un run**, mais **diffèrent entre
-  runs** : training `44x60x5` (**220×300**) vs autres boards (`44x60x10`, `25x21`) de dims
+  runs** : training `44x60x5` (**220×300**) vs autres boards (`44x60x10`, `44x60x1`) de dims
   différentes. Un cache de niveau processus partagé entre deux
   environnements **sans les dims dans la clé** servirait à l'un le masque de l'autre → **pool faux
   en PvP**. C'est le risque n°1.
@@ -273,7 +273,7 @@ des ennemis → mobile, non cachable.
 3. **Non-régression PvP** : `scripts/pvp_smoke_test.py` (déjà : pool non vide, dans le board,
    commit/preview cohérents — [pvp_smoke_test.py:329-380](../../scripts/pvp_smoke_test.py#L329)).
    ⚠️ Il ne compare pas le **contenu** du pool à un oracle : il faut le compléter d'une comparaison
-   de pool avant/après sur un board de dims **différentes** du training (ex. `25x21` ou
+   de pool avant/après sur un board de dims **différentes** du training (ex. `44x60x1` ou
    `44x60x10`), pour couvrir explicitement le risque de clé §6.
 4. **Suite complète verte** + les tests move de §7.
 5. **Re-bench** `scripts/profile_move_pool.py` avant/après : chiffrer le gain réel et vérifier

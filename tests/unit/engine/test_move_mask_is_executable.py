@@ -21,6 +21,7 @@ C'est l'invariant dont la violation produisait
 `SubprocVecEnv` du training.
 """
 
+import os
 import random
 
 import pytest
@@ -73,8 +74,30 @@ def _budget_for(game_state, squad_id, cost):
     )
 
 
+@pytest.fixture(params=["board/44x60x5", "board/44x60x1"])
+def board(request):
+    """Les DEUX résolutions du plateau — le x1 n'était pas couvert.
+
+    ⚠️ Ce test n'attrape PAS la divergence de socle du x1 (socle non-rond → chemin multi-hex du
+    pool, qui évalue l'engagement ennemi depuis les socles, quand `validate_move_plan` le lit dans
+    le set dilaté `enemy_adjacent_hexes_player_N`) : vérifié par mutation, il reste vert avec le
+    défaut. Les trajectoires sont aléatoires et n'atteignent pas la configuration de façon fiable
+    — motif §0.11. C'est `test_socle_normalized_at_x1.py` qui la verrouille, en la construisant.
+    Le paramétrage ci-dessous vaut pour le reste de l'invariant, pas pour ce cas précis.
+    """
+    previous = os.environ.get("W40K_BOARD_PATH")
+    os.environ["W40K_BOARD_PATH"] = request.param
+    try:
+        yield request.param
+    finally:
+        if previous is None:
+            os.environ.pop("W40K_BOARD_PATH", None)
+        else:
+            os.environ["W40K_BOARD_PATH"] = previous
+
+
 @pytest.mark.parametrize("seed", [0, 1, 2])
-def test_every_masked_move_cell_is_executable(seed):
+def test_every_masked_move_cell_is_executable(seed, board):
     eng = _engine(seed)
     rng = random.Random(seed)
     failures = []
@@ -114,7 +137,7 @@ def test_every_masked_move_cell_is_executable(seed):
     assert move_steps > 0, "aucune phase move atteinte : le test n'a rien exercé"
     assert cells_checked > 0, "aucune cellule de move offerte : le test n'a rien exercé"
     assert not failures, (
-        f"{len(failures)}/{cells_checked} cellules offertes par le masque sont REFUSÉES par "
+        f"[{board}] {len(failures)}/{cells_checked} cellules offertes par le masque sont REFUSÉES par "
         f"validate_move_plan (incohérence masque/exécution, V11 T6-g/T6-h). "
         f"5 premières : {failures[:5]}"
     )

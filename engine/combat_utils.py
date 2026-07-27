@@ -426,9 +426,19 @@ def ranged_edge_distance_to_cell(shooter: Any, anchor_col: int, anchor_row: int,
     raise ValueError(f"Invalid metric {metric!r}, expected one of {VALID_DISTANCE_METRICS}")
 
 
+PATHFINDING_FIELD_CACHE_MAX = 128
+"""Nombre de champs BFS gardés en mémoire (cache FIFO de ``_pathfinding_field_cache``).
+
+Un champ pèse ``cols × rows × 2`` octets, soit 132 Ko sur 220×300 → 17 Mo au plafond.
+L'ensemble de travail d'une construction d'observation est le nombre d'unités vivantes
+(≤ ~80) : 128 le couvre, et les sources plus anciennes sont périmées dès que les unités
+ont bougé.
+"""
+
+
 def calculate_pathfinding_distance(col1: int, row1: int, col2: int, row2: int,
                                     game_state: Dict[str, Any],
-                                    max_search_distance: int = 50) -> int:
+                                    max_search_distance: Optional[int] = None) -> int:
     """
     Calculate actual pathfinding distance using BFS, respecting walls.
 
@@ -440,13 +450,17 @@ def calculate_pathfinding_distance(col1: int, row1: int, col2: int, row2: int,
         col1, row1: Start position
         col2, row2: End position
         game_state: Game state with wall_hexes
-        max_search_distance: Maximum BFS depth (performance limit)
+        max_search_distance: Profondeur BFS maximale, en SUBHEX. ``None`` (défaut) =
+            ``game_rules.max_search_distance``, déjà converti en subhex par w40k_core.
+            Aucun littéral ici : un défaut en dur est une valeur en pouces sur un plateau
+            en subhex, donc une distance fausse d'un facteur ``inches_to_subhex``.
 
     Returns:
         Actual path distance, or max_search_distance+1 if unreachable
 
-    PERFORMANCE: Uses game_state cache for repeated lookups.
-    Cache key: ((col1, row1), (col2, row2))
+    PERFORMANCE: mémoïse le CHAMP BFS complet par source dans
+    ``game_state["_pathfinding_field_cache"]`` — les appelants balayent les paires
+    d'unités, donc une même source sert toutes les cibles pour un seul parcours.
     """
     # Quick check: same position
     if col1 == col2 and row1 == row2:
@@ -469,51 +483,100 @@ def calculate_pathfinding_distance(col1: int, row1: int, col2: int, row2: int,
         to_idx = row2 * board_cols + col2
         return int(pathfinding_topology[from_idx, to_idx])
 
-    # On-demand BFS (Board ×10 or missing topology)
+    # On-demand BFS (boards sans topologie précalculée)
+    from shared.data_validation import require_key  # Lazy: avoid circular import
+
+    if max_search_distance is None:
+        game_rules = require_key(require_key(game_state, "config"), "game_rules")
+        max_search_distance = int(require_key(game_rules, "max_search_distance"))
+
     if not isinstance(board_cols, int) or not isinstance(board_rows, int):
         return max_search_distance + 1
 
-    # Check cache first
-    cache_key = ((col1, row1), (col2, row2))
-    if "pathfinding_distance_cache" in game_state:
-        if cache_key in game_state["pathfinding_distance_cache"]:
-            return game_state["pathfinding_distance_cache"][cache_key]
+    if not (0 <= col2 < board_cols and 0 <= row2 < board_rows):
+        return max_search_distance + 1
 
-    from engine.hex_utils import pathfinding_distance as _hex_pathfinding, build_wall_set
+    from engine.hex_utils import PATHFINDING_UNREACHABLE, build_wall_set
     wall_set = game_state.get("_wall_set_cache")
     if wall_set is None:
         wall_set = build_wall_set(game_state)
         game_state["_wall_set_cache"] = wall_set
 
-    max_open = 2000
-    config_obj = game_state.get("config")
-    if isinstance(config_obj, dict):
-        board_root = config_obj.get("board_config")
-        if isinstance(board_root, dict):
-            if "default" in board_root:
-                board_spec = board_root["default"]
-            else:
-                board_spec = board_root
-            if isinstance(board_spec, dict):
-                pf_cfg = board_spec.get("pathfinding")
-                if isinstance(pf_cfg, dict):
-                    mo = pf_cfg.get("max_open_nodes")
-                    if isinstance(mo, int) and not isinstance(mo, bool):
-                        max_open = mo
+    if (col2, row2) in wall_set:
+        return max_search_distance + 1
 
-    result = _hex_pathfinding(
-        col1, row1, col2, row2,
-        board_cols, board_rows,
-        wall_set,
-        max_search_distance=max_search_distance,
-        max_open_nodes=max_open,
+    # Symétrie : le graphe est non orienté et le franchissement ne dépend que des murs
+    # (aucun `occupied_set` ici), donc d(a,b) == d(b,a). Si le champ de la CIBLE est déjà
+    # mémoïsé, on le lit à l'envers plutôt que d'en calculer un second — c'est ce qui rend
+    # gratuit le motif « N sources, une cible fixe » (choix de destination du bot PvE).
+    field = get_pathfinding_field(game_state, col1, row1, max_search_distance, build=False)
+    if field is not None:
+        dist = int(field[row2 * board_cols + col2])
+    else:
+        reverse = get_pathfinding_field(game_state, col2, row2, max_search_distance, build=False)
+        if reverse is not None:
+            dist = int(reverse[row1 * board_cols + col1])
+        else:
+            field = get_pathfinding_field(game_state, col1, row1, max_search_distance)
+            dist = int(field[row2 * board_cols + col2])
+
+    return dist if dist != PATHFINDING_UNREACHABLE else max_search_distance + 1
+
+
+def get_pathfinding_field(
+    game_state: Dict[str, Any],
+    col: int,
+    row: int,
+    max_search_distance: Optional[int] = None,
+    build: bool = True,
+) -> Any:
+    """Champ BFS mémoïsé depuis `(col, row)` : distance vers CHAQUE cellule du plateau.
+
+    À préférer à N appels de `calculate_pathfinding_distance` quand une même source (ou une
+    même cible, la distance étant symétrique) est comparée à N points : un seul parcours
+    répond à tout le lot, là où N appels referaient N fois le même BFS.
+
+    Indexation `row * board_cols + col`, sentinelle `hex_utils.PATHFINDING_UNREACHABLE`.
+
+    Args:
+        max_search_distance: profondeur en subhex ; `None` = `game_rules.max_search_distance`.
+        build: `False` renvoie `None` si le champ n'est pas déjà en cache (aucun calcul).
+
+    Le cache vit dans `game_state["_pathfinding_field_cache"]` : les murs sont statiques sur
+    l'épisode, et w40k_core le purge au reset / à la rotation de scénario — sans quoi il
+    servirait les distances d'un plateau précédent.
+    """
+    from shared.data_validation import require_key  # Lazy: avoid circular import
+    from engine.hex_utils import build_wall_set, pathfinding_field
+
+    if max_search_distance is None:
+        game_rules = require_key(require_key(game_state, "config"), "game_rules")
+        max_search_distance = int(require_key(game_rules, "max_search_distance"))
+
+    field_cache = game_state.get("_pathfinding_field_cache")
+    if field_cache is None:
+        field_cache = {}
+        game_state["_pathfinding_field_cache"] = field_cache
+
+    field_key = (col, row, max_search_distance)
+    field = field_cache.get(field_key)
+    if field is not None or not build:
+        return field
+
+    wall_set = game_state.get("_wall_set_cache")
+    if wall_set is None:
+        wall_set = build_wall_set(game_state)
+        game_state["_wall_set_cache"] = wall_set
+
+    field = pathfinding_field(
+        col, row,
+        require_key(game_state, "board_cols"), require_key(game_state, "board_rows"),
+        wall_set, max_search_distance,
     )
-
-    if "pathfinding_distance_cache" not in game_state:
-        game_state["pathfinding_distance_cache"] = {}
-    game_state["pathfinding_distance_cache"][cache_key] = result
-
-    return result
+    if len(field_cache) >= PATHFINDING_FIELD_CACHE_MAX:
+        del field_cache[next(iter(field_cache))]
+    field_cache[field_key] = field
+    return field
 
 
 def get_hex_line(start_col: int, start_row: int, end_col: int, end_row: int) -> List[Tuple[int, int]]:

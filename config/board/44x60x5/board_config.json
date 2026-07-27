@@ -7,10 +7,6 @@
     "margin": 1,
     "chunk_size": 64,
     "hex_orientations": 6,
-    "pathfinding": {
-      "max_open_nodes": 2000,
-      "time_budget_us": 5000
-    },
     "wall_ref": "walls-none.json",
     "colors": {
       "background": "0x002200",

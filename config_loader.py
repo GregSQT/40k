@@ -210,7 +210,7 @@ class ConfigLoader:
         """Get board configuration from config/board/{paths.board}/board_config.json.
 
         W40K_BOARD_PATH env var overrides config.json paths.board (training use only).
-        Example: W40K_BOARD_PATH=board/25x21 python3 ai/train.py ...
+        Example: W40K_BOARD_PATH=board/44x60x1 python3 ai/train.py ...
         """
         board_override = os.environ.get("W40K_BOARD_PATH", "").strip()
         if board_override:

@@ -18,6 +18,8 @@ from engine.hex_utils import (
     compute_los_visibility,
     compute_los_state,
     pathfinding_distance,
+    pathfinding_field,
+    PATHFINDING_UNREACHABLE,
     build_wall_set,
     compute_occupied_hexes,
     _compute_occupied_hexes_raw,
@@ -256,9 +258,71 @@ class TestPathfinding:
         d = pathfinding_distance(-1, 0, 5, 5, 25, 21, set())
         assert d > 50
 
-    def test_max_open_nodes_budget(self):
-        d = pathfinding_distance(0, 0, 24, 20, 25, 21, set(), max_open_nodes=10)
-        assert d == 501  # budget exhausted
+    def test_far_corner_is_exact_no_node_budget(self):
+        """Aucun plafond de nœuds : le coin opposé garde sa distance réelle.
+
+        Verrouille la suppression de `max_open_nodes`, qui tronquait le BFS au milieu du
+        parcours et renvoyait « injoignable » (501) pour une cible parfaitement atteignable.
+        """
+        d = pathfinding_distance(0, 0, 24, 20, 25, 21, set())
+        assert d == hex_distance(0, 0, 24, 20)
+
+    def test_field_matches_independent_bfs_oracle(self):
+        """Compare le champ à un BFS écrit ICI.
+
+        `pathfinding_distance` est une enveloppe de `pathfinding_field` : le confronter au
+        champ ne prouverait rien. L'oracle ci-dessous est indépendant.
+        """
+        walls = {(2, 0), (2, 1), (3, 0), (7, 4), (7, 5), (7, 6)}
+
+        def oracle(start, cols, rows, wall_set, depth):
+            dist: dict[tuple[int, int], int] = {start: 0}
+            frontier = [start]
+            for d in range(1, depth + 1):
+                nxt = []
+                for cell in frontier:
+                    for n in get_neighbors(*cell):
+                        if not (0 <= n[0] < cols and 0 <= n[1] < rows):
+                            continue
+                        if n in wall_set or n in dist:
+                            continue
+                        dist[n] = d
+                        nxt.append(n)
+                if not nxt:
+                    break
+                frontier = nxt
+            return dist
+
+        field = pathfinding_field(0, 0, 25, 21, walls, 50)
+        expected = oracle((0, 0), 25, 21, walls, 50)
+        for row in range(21):
+            for col in range(25):
+                got = int(field[row * 25 + col])
+                want = expected.get((col, row), PATHFINDING_UNREACHABLE)
+                assert got == want, f"({col},{row}): champ={got} oracle={want}"
+
+    def test_distance_is_symmetric(self):
+        """d(a,b) == d(b,a) — propriété exploitée par le cache de champs de combat_utils."""
+        walls = {(2, 0), (2, 1), (3, 0), (7, 4), (7, 5), (7, 6)}
+        for a, b in (((0, 0), (10, 7)), ((4, 2), (24, 20)), ((1, 9), (8, 5))):
+            assert pathfinding_distance(
+                a[0], a[1], b[0], b[1], 25, 21, walls, max_search_distance=200
+            ) == pathfinding_distance(
+                b[0], b[1], a[0], a[1], 25, 21, walls, max_search_distance=200
+            )
+
+    def test_field_marks_unreachable_cells(self):
+        walls = set(get_neighbors(5, 5))
+        field = pathfinding_field(0, 0, 25, 21, walls, 50)
+        assert int(field[5 * 25 + 5]) == PATHFINDING_UNREACHABLE
+
+    def test_field_occupied_is_destination_but_not_traversable(self):
+        """Un hex occupé garde sa distance (destination légale) mais ne laisse pas passer."""
+        occupied = {(1, 0)}
+        walls = {(0, 1), (1, 1), (0, -1) , (1, -1)}
+        field = pathfinding_field(0, 0, 4, 2, walls, 50, occupied_set=occupied)
+        assert int(field[0 * 4 + 1]) == 1
+        assert int(field[0 * 4 + 2]) == PATHFINDING_UNREACHABLE
 
 
 class TestBuildWallSet:

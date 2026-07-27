@@ -604,6 +604,7 @@ class W40KEngine(gym.Env):
         )
         self.game_state.pop("_wall_set_cache", None)
         self.game_state.pop("_dense_wall_set_cache", None)
+        self.game_state.pop("_pathfinding_field_cache", None)
         self.game_state.pop("_obscuring_area_sets_cache", None)
         self.game_state.pop("_obscuring_hex_to_area_cache", None)
         self.game_state.pop("_unit_los_pair_cache", None)
@@ -663,9 +664,12 @@ class W40KEngine(gym.Env):
                 )
             
             obs_size = obs_params["obs_size"]  # NO DEFAULT - raise error si manquant
-            self.perception_radius = obs_params.get("perception_radius", 25)
-            self.max_nearby_units = obs_params.get("max_nearby_units", 10)
-            self.max_valid_targets = obs_params.get("max_valid_targets", 5)
+            # perception_radius / max_nearby_units / max_valid_targets ne sont PAS recopies ici :
+            # `self.training_config["observation_params"]` reste en POUCES (le deep-copy de la
+            # normalisation ci-dessus a desolidarise `self.config["observation_params"]`, seul
+            # porteur de la valeur scalee en sub-hex). Les dupliquer sur le moteur ressuscitait
+            # une seconde source de verite, en mauvaise unite et jamais relue. Source unique :
+            # `self.obs_builder`, construit sur `self.config["observation_params"]`.
         else:
             # Pas de config = erreur (pas de valeur par défaut)
             raise ValueError(
@@ -1136,6 +1140,11 @@ class W40KEngine(gym.Env):
         # activation en cours) serait donc reutilise tel quel dans l'episode suivant, au lieu
         # d'etre re-tire (09.06 : un jet par Advance).
         self.game_state.pop("_squad_advance_rolls", None)
+        # Champs BFS memoises par source (combat_utils.calculate_pathfinding_distance) : ils
+        # sont calcules sur les murs de l'episode. Les murs changent d'un episode a l'autre
+        # (train_wall_ref_weights), donc un champ survivant donnerait des distances calculees
+        # sur un AUTRE plateau — a l'obs comme au reward, sans aucun signal.
+        self.game_state.pop("_pathfinding_field_cache", None)
 
         # Reset episode-level metric accumulators
         self.episode_reward_accumulator = 0.0
@@ -6596,6 +6605,7 @@ class W40KEngine(gym.Env):
         self.game_state.pop("_unit_los_pair_cache", None)
         self.game_state.pop("_wall_set_cache", None)
         self.game_state.pop("_dense_wall_set_cache", None)
+        self.game_state.pop("_pathfinding_field_cache", None)
         self.game_state.pop("_hex_los_state_cache", None)
         self.game_state["tutorial_fight_no_death_unit_ids"] = (
             self._tutorial_fight_no_death_unit_ids

@@ -21,6 +21,39 @@ from engine.hex_utils import expand_wall_group_to_hex_list, polygon_to_hex_list
 _scenario_json_cache: Dict[str, Any] = {}
 _walls_json_cache: Dict[str, List[List[int]]] = {}
 _walls_json_mtime_ns: Dict[str, int] = {}
+# board_config.json des plateaux SOURCE (résolution native déclarée par board_ref), lus à
+# chaque chargement de terrain. Clé (chemin, mtime_ns) : édition à chaud prise en compte.
+_board_config_cache: Dict[Tuple[str, int], Dict[str, Any]] = {}
+
+def _scale_socle(base_shape: Any, base_size: Any, inches_to_subhex: int) -> Tuple[Any, Any]:
+    """Convertit le socle d'une datasheet (`BASE_SHAPE`, `BASE_SIZE` en unités ×10) vers le board.
+
+    Au-dessus de `inches_to_subhex == 1`, seule la taille change et son TYPE est porteur de
+    sens : un socle `oval` porte une PAIRE `[a, b]` que `hex_utils._socle_edge_primitives`
+    indexe et que `precompute_footprint_offsets` développe en empreinte ; `round` et `square`
+    portent un scalaire.
+
+    À `inches_to_subhex == 1`, une figurine tient dans UNE case — c'est la définition même de
+    cette résolution (`_compute_deploy_footprint` ne rend qu'un hex, `is_micro_board` est faux).
+    La forme du socle n'a alors plus de sens géométrique : le socle est **normalisé en `round`
+    de taille 1**.
+
+    Ne PAS normaliser la forme casse le moteur de deux façons opposées, l'une ou l'autre selon
+    le type laissé :
+      - taille scalaire `1` avec `BASE_SHAPE = "oval"` → `_socle_edge_primitives` indexe
+        `size[0]` sur un int : `TypeError` dès qu'une distance bord-à-bord est calculée ;
+      - taille `[1, 1]` avec `BASE_SHAPE = "oval"` → l'unité bascule sur le chemin MULTI-HEX du
+        pool de mouvement (`is_single_hex = base_size == 1` est faux), lequel évalue l'engagement
+        ennemi depuis les socles alors que `validate_move_plan` le lit dans le set dilaté
+        `enemy_adjacent_hexes_player_N`. Les deux définitions ne coïncident pas et le masque
+        propose des destinations que l'exécution refuse (« incohérence masque/exécution »).
+    """
+    if int(inches_to_subhex) <= 1:
+        return "round", 1
+    if isinstance(base_size, list):
+        return base_shape, [max(1, round(s * inches_to_subhex / 10)) for s in base_size]
+    return base_shape, max(1, round(base_size * inches_to_subhex / 10))
+
 
 # Keywords granting the "hideable" property (Benefit of Cover / Hidden rules 13.08-13.09).
 _HIDEABLE_KEYWORDS = ("infantry", "beast", "swarm")
@@ -338,6 +371,16 @@ class GameStateManager:
                     )
                 if has_wall_hexes:
                     resolved_scenario_walls = require_key(scenario_data, "wall_hexes")
+                    # Murs écrits DANS le scénario : même conversion que les murs partagés, sinon
+                    # ils resteraient les seuls en coordonnées natives sur un plateau réduit.
+                    # Conditionné à une résolution d'origine DÉCLARÉE (`board_ref` ou dossier
+                    # `config/board/<board>/scenario/`) : sans elle, aucune échelle source.
+                    if self._has_declared_source_board(scenario_file, board_ref):
+                        inline_ratio = self._board_ref_downscale_ratio(scenario_file, board_ref)
+                        if inline_ratio != 1:
+                            resolved_scenario_walls = self._downscale_terrain_data(
+                                {"walls": [{"hexes": resolved_scenario_walls}]}, inline_ratio
+                            )["walls"][0]["hexes"]
                 elif has_wall_ref:
                     resolved_scenario_walls = self._load_shared_walls_from_ref(
                         require_key(scenario_data, "wall_ref"),
@@ -584,6 +627,47 @@ class GameStateManager:
 
             basic_units = self._fold_attached_characters(basic_units, unit_registry)
 
+            # Les coordonnées de roster sont écrites dans la résolution déclarée par `board_ref`,
+            # comme le terrain du même scénario. Sans board_ref il n'y a pas d'échelle source
+            # déclarée : le scénario vit dans le dossier de son propre plateau, rien à convertir.
+            roster_downscale_ratio = 1
+            model_cohesion_hex = 0
+            floor_hexes_by_level: Dict[int, set] = {}
+            _scenario_board_ref = (
+                scenario_data.get("board_ref") if isinstance(scenario_data, dict) else None
+            )
+            if self._has_declared_source_board(scenario_file, _scenario_board_ref):
+                roster_downscale_ratio = self._board_ref_downscale_ratio(
+                    scenario_file, _scenario_board_ref
+                )
+            if roster_downscale_ratio != 1:
+                if is_micro_board:
+                    # Le placement converti raisonne PAR CASE (une figurine = une case). Sur un
+                    # plateau à empreintes multi-hex, réserver la seule case centrale laisserait
+                    # deux socles se chevaucher sans que rien ne le signale. Configuration
+                    # inatteignable aujourd'hui (les données sont en x5, la seule cible plus
+                    # grossière est x1, où une figurine tient dans une case) : on refuse
+                    # explicitement plutôt que de livrer un placement par empreinte non testé.
+                    raise ValueError(
+                        f"Scenario '{scenario_file}': conversion des positions de roster x"
+                        f"{roster_downscale_ratio} vers un plateau à empreintes multi-hex "
+                        f"(inches_to_subhex={_ish}) non supportée"
+                    )
+                # Cases couvertes par un plancher, par niveau : contrainte de placement des
+                # figurines déclarées à l'étage (`floor_height_at` lève si la case n'y est pas).
+                for _area in resolved_terrain_areas or []:
+                    for _floor in _area.get("floors", []):  # get allowed (aire sans étage)
+                        _level = int(require_key(_floor, "level"))
+                        floor_hexes_by_level.setdefault(_level, set()).update(
+                            (int(h[0]), int(h[1])) for h in require_key(_floor, "hexes")
+                        )
+                from config_loader import get_config_loader
+                _game_rules = require_key(get_config_loader().get_game_config(), "game_rules")
+                # Portée de cohérence (03.03) en POUCES dans game_config → en hex du plateau actif.
+                # C'est le déplacement maximal toléré pour dégager une figurine : au-delà, elle
+                # sortirait de sa propre escouade.
+                model_cohesion_hex = int(require_key(_game_rules, "unit_model_cohesion_range")) * _ish
+
             enhanced_units = []
             for unit_data in basic_units:
                 if "unit_type" not in unit_data:
@@ -639,6 +723,11 @@ class GameStateManager:
                     for field in required_fields:
                         if field not in unit_data:
                             raise KeyError(f"Unit missing required field '{field}': {unit_data}")
+                    if roster_downscale_ratio != 1:
+                        unit_data = self._downscale_fixed_unit(
+                            unit_data, roster_downscale_ratio, _is_valid_deploy_hex,
+                            wall_hex_set, used_hexes, model_cohesion_hex, floor_hexes_by_level,
+                        )
                     chosen_col, chosen_row = normalize_coordinates(unit_data["col"], unit_data["row"])
                     fp = _compute_deploy_footprint(chosen_col, chosen_row, base_shape, base_size)
                     # Placement FIXE : ne confiner à la zone que pour la voie legacy nommée
@@ -927,16 +1016,22 @@ class GameStateManager:
             "ICON": full_unit_data["ICON"],
             "ICON_SCALE": full_unit_data["ICON_SCALE"],
             "ILLUSTRATION_RATIO": require_key(full_unit_data, "ILLUSTRATION_RATIO"),
-            "BASE_SHAPE": require_key(full_unit_data, "BASE_SHAPE"),
+            # Socle : forme ET taille passent par `_scale_socle` (autorité unique, cf. sa
+            # docstring). À `inches_to_subhex == 1` il est normalisé en `round`/1 — une figurine
+            # tient dans une case et la forme n'a plus de sens géométrique.
+            "BASE_SHAPE": _scale_socle(
+                require_key(full_unit_data, "BASE_SHAPE"),
+                require_key(full_unit_data, "BASE_SIZE"),
+                self._get_inches_to_subhex(),
+            )[0],
             # Hauteur du modèle (pouces) : clairance sous les étages (§13.06 maison) — comparée telle
             # quelle à ``height_inches`` des floors (même unité), sans scaling subhex.
             "MODEL_HEIGHT": float(require_key(full_unit_data, "MODEL_HEIGHT")),
-            "BASE_SIZE": (
-                ([max(1, round(s * self._get_inches_to_subhex() / 10)) for s in require_key(full_unit_data, "BASE_SIZE")]
-                 if isinstance(require_key(full_unit_data, "BASE_SIZE"), list)
-                 else max(1, round(require_key(full_unit_data, "BASE_SIZE") * self._get_inches_to_subhex() / 10)))
-                if self._get_inches_to_subhex() > 1 else 1
-            ),
+            "BASE_SIZE": _scale_socle(
+                require_key(full_unit_data, "BASE_SHAPE"),
+                require_key(full_unit_data, "BASE_SIZE"),
+                self._get_inches_to_subhex(),
+            )[1],
             "orientation": orientation_u,
             "UNIT_RULES": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
             # Provenance des règles (19.04) — sources IMMUABLES dont `UNIT_RULES` est dérivé :
@@ -1026,15 +1121,11 @@ class GameStateManager:
                                 w["RNG"] = int(w["RNG"]) * _ish_local
                     # BASE_SIZE : même transformation subhex que l'unité parente
                     # (cf. enhanced_unit ci-dessus) pour un affichage cohérent.
-                    _m_base_raw = require_key(m_data, "BASE_SIZE")
-                    if _ish_local > 1:
-                        _m_base_size = (
-                            [max(1, round(s * _ish_local / 10)) for s in _m_base_raw]
-                            if isinstance(_m_base_raw, list)
-                            else max(1, round(_m_base_raw * _ish_local / 10))
-                        )
-                    else:
-                        _m_base_size = 1
+                    _m_base_shape, _m_base_size = _scale_socle(
+                        require_key(m_data, "BASE_SHAPE"),
+                        require_key(m_data, "BASE_SIZE"),
+                        _ish_local,
+                    )
                     m_spec.update({
                         "unit_type": model_unit_type,
                         "DISPLAY_NAME": require_key(m_data, "DISPLAY_NAME"),
@@ -1043,7 +1134,7 @@ class GameStateManager:
                         # Ratio d'illustration propre à la figurine : l'aperçu (UnitStatusTable) doit
                         # dimensionner l'illustration du modèle exactement comme son unité autonome.
                         "ILLUSTRATION_RATIO": require_key(m_data, "ILLUSTRATION_RATIO"),
-                        "BASE_SHAPE": require_key(m_data, "BASE_SHAPE"),
+                        "BASE_SHAPE": _m_base_shape,
                         "BASE_SIZE": _m_base_size,
                         "HP_MAX": int(require_key(m_data, "HP_MAX")),
                         "T": int(require_key(m_data, "T")),
@@ -1619,7 +1710,11 @@ class GameStateManager:
             import random as _random
             wall_ref = _random.choice(candidates).stem
         wall_path = self._resolve_shared_config_path("_walls", wall_ref, scenario_file, "wall_ref", board_ref=board_ref)
-        cache_key = str(wall_path) if only_type is None else f"{wall_path}::{only_type}"
+        # Le rapport fait partie de la CLÉ de cache : `W40K_BOARD_PATH` change en cours de
+        # processus (l'API PvP le fait par requête), donc un même fichier peut être servi à deux
+        # résolutions. Sans le rapport dans la clé, la seconde recevrait les hexes de la première.
+        ratio = self._board_ref_downscale_ratio(scenario_file, board_ref)
+        cache_key = f"{wall_path}::x{ratio}" if only_type is None else f"{wall_path}::{only_type}::x{ratio}"
         if cache_key in _walls_json_cache and cache_key in _walls_json_mtime_ns:
             if wall_path.exists():
                 try:
@@ -1641,6 +1736,9 @@ class GameStateManager:
             walls = require_key(wall_data, "walls")
             if not isinstance(walls, list):
                 raise ValueError(f"Shared walls file {wall_path} field 'walls' must be list")
+            # Conversion AVANT rasterisation : `hex_line` trace alors la ligne dans la grille
+            # cible. Réduire des hexes déjà rasterisés donnerait une ligne à trous.
+            walls = self._downscale_terrain_data({"walls": walls}, ratio)["walls"]
             result: List[List[int]] = []
             for gi, g in enumerate(walls):
                 if not isinstance(g, dict):
@@ -1661,14 +1759,244 @@ class GameStateManager:
         wall_hexes = require_key(wall_data, "wall_hexes")
         if not isinstance(wall_hexes, list):
             raise ValueError(f"Shared walls file {wall_path} field 'wall_hexes' must be list")
+        if ratio != 1:
+            wall_hexes = self._downscale_terrain_data(
+                {"walls": [{"hexes": wall_hexes}]}, ratio
+            )["walls"][0]["hexes"]
         _walls_json_cache[cache_key] = copy.deepcopy(wall_hexes)
         _walls_json_mtime_ns[cache_key] = wall_path.stat().st_mtime_ns
         return wall_hexes
 
+    def _downscale_fixed_unit(
+        self,
+        unit_data: Dict[str, Any],
+        ratio: int,
+        is_valid_hex: Any,
+        wall_hex_set: Any,
+        used_hexes: Any,
+        max_displacement: int,
+        floor_hexes_by_level: Dict[int, Any],
+    ) -> Dict[str, Any]:
+        """Convertit les positions d'une unité en placement FIXE vers un plateau plus grossier.
+
+        Renvoie une COPIE — `unit_data` peut venir d'un scénario mémoïsé, le muter ferait
+        convertir deux fois au chargement suivant.
+
+        Réduire chaque figurine séparément ne suffit pas : cinq subhex d'écart deviennent zéro
+        hex, donc les figurines d'une même escouade s'écrasent sur la même case. Chaque figurine
+        garde donc sa case réduite si elle est libre, sinon prend la case libre la plus proche,
+        dans un rayon borné par `max_displacement` (la portée de cohérence d'escouade : au-delà,
+        la figurine ne serait plus dans sa propre unité). Aucune case libre dans ce rayon =
+        erreur explicite, jamais un placement silencieusement faux.
+
+        L'invariant ancre == models[0] est préservé.
+
+        Les cases retenues sont ajoutées à `used_hexes` : à résolution native rien ne réserve les
+        cases PAR FIGURINE (seule l'empreinte de l'ancre l'est), ce qui est sans conséquence là
+        où les figurines sont espacées, mais deux escouades voisines se superposeraient ici.
+        """
+        from engine.hex_utils import downscale_cell, hex_distance
+
+        converted = copy.deepcopy(unit_data)
+        unit_id = converted.get("id")
+
+        def _place(source_col: int, source_row: int, taken: set, level: int) -> Tuple[int, int]:
+            target_col, target_row = downscale_cell(source_col, source_row, ratio)
+            # Une figurine à l'étage doit rester sur un plancher de SON niveau : les sommets des
+            # planchers et les positions sont réduits séparément, donc une case tout juste
+            # intérieure à x5 peut tomber juste dehors une fois réduite (`floor_height_at` lève).
+            allowed_cells = floor_hexes_by_level.get(int(level)) if int(level) > 0 else None
+            if int(level) > 0 and not allowed_cells:
+                raise ValueError(
+                    f"Unit {unit_id}: figurine déclarée au niveau {level} alors qu'aucun plancher "
+                    f"de ce niveau n'existe après réduction x{ratio}"
+                )
+            best: Optional[Tuple[int, int, int, int]] = None
+            for col in range(target_col - max_displacement, target_col + max_displacement + 1):
+                for row in range(target_row - max_displacement, target_row + max_displacement + 1):
+                    distance = hex_distance(target_col, target_row, col, row)
+                    if distance > max_displacement:
+                        continue
+                    if allowed_cells is not None and (col, row) not in allowed_cells:
+                        continue
+                    if not is_valid_hex(col, row):
+                        continue
+                    if wall_hex_set and (col, row) in wall_hex_set:
+                        continue
+                    if (col, row) in taken or (col, row) in used_hexes:
+                        continue
+                    # Tri déterministe : distance, puis colonne, puis ligne.
+                    candidate = (distance, col, row, 0)
+                    if best is None or candidate[:3] < best[:3]:
+                        best = candidate
+            if best is None:
+                raise ValueError(
+                    f"Unit {unit_id}: figurine en ({source_col},{source_row}) niveau {level} sans "
+                    f"case libre à <= {max_displacement} hex de ({target_col},{target_row}) après "
+                    f"réduction x{ratio} — plateau trop dense ou positions de roster à revoir"
+                )
+            return best[1], best[2]
+
+        taken: set = set()
+        anchor_cell: Optional[Tuple[int, int]] = None
+        models = converted.get("models")  # get allowed (escouade mono-figurine : champ absent)
+        if isinstance(models, list) and models:
+            for index, model in enumerate(models):
+                col, row = _place(
+                    int(require_key(model, "col")), int(require_key(model, "row")), taken,
+                    int(model.get("level", 0)),  # get allowed (champ optionnel : absent = sol)
+                )
+                model["col"], model["row"] = col, row
+                taken.add((col, row))
+                if index == 0:
+                    converted["col"], converted["row"] = col, row
+                    anchor_cell = (col, row)
+        else:
+            col, row = _place(
+                int(require_key(converted, "col")), int(require_key(converted, "row")), taken,
+                int(converted.get("level", 0)),  # get allowed (champ optionnel : absent = sol)
+            )
+            converted["col"], converted["row"] = col, row
+            taken.add((col, row))
+            anchor_cell = (col, row)
+
+        # L'ANCRE est laissée à l'appelant : c'est son empreinte (`_compute_deploy_footprint`)
+        # qu'il valide puis réserve. La réserver ici la ferait entrer en collision avec elle-même.
+        used_hexes.update(taken - {anchor_cell})
+        return converted
+
+    def _board_ref_downscale_ratio(self, scenario_file: str, board_ref: Optional[str]) -> int:
+        """Rapport d'échelle entre le plateau qui PORTE les données et le plateau ACTIF.
+
+        `board_ref` déclare la résolution native des fichiers partagés (murs, terrain) : ils sont
+        écrits en subhex de CE plateau. Le plateau actif (``W40K_BOARD_PATH``) peut être le même
+        plateau physique à une résolution plus grossière — c'est le cas d'un bench x1. Le rapport
+        est alors `ish_source / ish_actif`, et les coordonnées sont converties au chargement.
+
+        Une seule source de vérité : les fichiers de données restent écrits une fois, à leur
+        résolution native. Dupliquer un jeu de terrain par résolution ferait diverger les deux
+        copies au premier changement.
+
+        Retourne 1 quand les deux plateaux ont la même résolution (cas PvP/x5 : aucun effet).
+        Toute incohérence est une erreur explicite, jamais une conversion approximative.
+        """
+        from config_loader import get_config_loader
+
+        loader = get_config_loader()
+        active_board = loader.get_board_config()
+        active_spec = active_board.get("default", active_board)
+        active_ish = int(require_key(active_spec, "inches_to_subhex"))
+        active_cols, active_rows = loader.get_board_size()
+
+        board_dir = self._resolve_board_dir(scenario_file, board_ref, "board scale")
+        source_config_path = board_dir / "board_config.json"
+        if not source_config_path.exists():
+            raise FileNotFoundError(
+                f"Scenario '{scenario_file}' board_ref '{board_ref}' has no board_config.json "
+                f"({source_config_path}) — impossible de connaître la résolution native de ses données"
+            )
+        # Mémoïsé sur (fichier, mtime) : appelé 4 fois par reset (murs, murs denses, aires,
+        # zones), soit autant de relectures + parses JSON par épisode sans ce cache. Même
+        # invalidation par mtime que le cache de murs, pour rester éditable à chaud.
+        source_mtime = source_config_path.stat().st_mtime_ns
+        source_cache_key = (str(source_config_path), source_mtime)
+        source_board = _board_config_cache.get(source_cache_key)
+        if source_board is None:
+            with open(source_config_path, "r", encoding="utf-8-sig") as f:
+                source_board = json.load(f)
+            _board_config_cache[source_cache_key] = source_board
+        source_spec = source_board.get("default", source_board)
+        source_ish = int(require_key(source_spec, "inches_to_subhex"))
+        source_cols = int(require_key(source_spec, "cols"))
+        source_rows = int(require_key(source_spec, "rows"))
+
+        if source_ish == active_ish:
+            if (source_cols, source_rows) != (active_cols, active_rows):
+                raise ValueError(
+                    f"Scenario '{scenario_file}': board_ref '{board_ref}' fait "
+                    f"{source_cols}x{source_rows} alors que le plateau actif fait "
+                    f"{active_cols}x{active_rows} à résolution identique — les données partagées "
+                    f"seraient hors plateau"
+                )
+            return 1
+
+        if active_ish <= 0 or source_ish % active_ish != 0:
+            raise ValueError(
+                f"Scenario '{scenario_file}': board_ref '{board_ref}' est en subhex x{source_ish}, "
+                f"le plateau actif en x{active_ish} — rapport non entier, conversion impossible"
+            )
+        ratio = source_ish // active_ish
+        if (source_cols // ratio, source_rows // ratio) != (active_cols, active_rows):
+            raise ValueError(
+                f"Scenario '{scenario_file}': board_ref '{board_ref}' ({source_cols}x{source_rows} "
+                f"en x{source_ish}) ne se réduit pas au plateau actif ({active_cols}x{active_rows} "
+                f"en x{active_ish}) — ce n'est pas le même plateau physique"
+            )
+        return ratio
+
+    @staticmethod
+    def _downscale_terrain_data(terrain_data: Dict[str, Any], ratio: int) -> Dict[str, Any]:
+        """Convertit les coordonnées d'un fichier terrain vers un plateau `ratio` fois plus grossier.
+
+        Champs convertis, et EUX SEULS : `terrain[].vertices`, `terrain[].floors[].vertices`,
+        `walls[].segments`, `walls[].hexes`, `deployment_zones[].vertices`, `icons[].center`.
+        `height_inches` reste en pouces (jamais en subhex) ; `icons[].size` est une taille en
+        PIXELS, mise à l'échelle du rayon d'hex, donc multipliée par le rapport.
+
+        Un segment dont les deux extrémités se rejoignent après conversion reste un segment :
+        `hex_line` le rend en une case, donc le mur devient un hex au lieu de disparaître.
+
+        Toutes ces coordonnées sont des INDICES DE CELLULE — la rasterisation des polygones
+        projette elle aussi ses sommets avec `_hex_projected`. La conversion passe donc par
+        `downscale_cell`, qui tient compte du décalage des colonnes impaires ; diviser col et row
+        séparément déplacerait un point sur quatre d'une case.
+        """
+        if ratio == 1:
+            return terrain_data
+
+        from engine.hex_utils import downscale_cell
+
+        def _pt(p: Any) -> List[int]:
+            col, row = downscale_cell(int(p[0]), int(p[1]), ratio)
+            return [col, row]
+
+        scaled = copy.deepcopy(terrain_data)
+        for area in scaled.get("terrain", []):  # get allowed
+            if not isinstance(area, dict):
+                continue
+            if isinstance(area.get("vertices"), list):
+                area["vertices"] = [_pt(v) for v in area["vertices"]]
+            for floor in area.get("floors", []) or []:
+                if isinstance(floor, dict) and isinstance(floor.get("vertices"), list):
+                    floor["vertices"] = [_pt(v) for v in floor["vertices"]]
+        for group in scaled.get("walls", []):  # get allowed
+            if not isinstance(group, dict):
+                continue
+            if isinstance(group.get("segments"), list):
+                group["segments"] = [[_pt(seg[0]), _pt(seg[1])] for seg in group["segments"]]
+            if isinstance(group.get("hexes"), list):
+                group["hexes"] = [_pt(h) for h in group["hexes"]]
+        for zone in scaled.get("deployment_zones", []) or []:
+            if isinstance(zone, dict) and isinstance(zone.get("vertices"), list):
+                zone["vertices"] = [_pt(v) for v in zone["vertices"]]
+        for icon in scaled.get("icons", []) or []:
+            if not isinstance(icon, dict):
+                continue
+            if isinstance(icon.get("center"), list):
+                icon["center"] = _pt(icon["center"])
+            if isinstance(icon.get("size"), (int, float)) and not isinstance(icon.get("size"), bool):
+                icon["size"] = icon["size"] * ratio
+        return scaled
+
     def _read_terrain_file(
         self, terrain_ref: str, scenario_file: str, board_ref: Optional[str] = None
     ) -> Tuple[Dict[str, Any], Path]:
-        """Resolve and parse the terrain JSON file referenced by terrain_ref. Returns (data, path)."""
+        """Resolve and parse the terrain JSON file referenced by terrain_ref. Returns (data, path).
+
+        Les coordonnées sont converties vers la résolution du plateau ACTIF si celui-ci est plus
+        grossier que le plateau qui porte le fichier (cf. `_board_ref_downscale_ratio`). Point de
+        passage unique des trois lecteurs de terrain (murs, zones de déploiement, aires).
+        """
         terrain_path = self._resolve_board_dir(scenario_file, board_ref, "terrain_ref") / "terrain" / terrain_ref
         if not terrain_path.exists():
             raise FileNotFoundError(f"Terrain file not found for scenario {scenario_file}: {terrain_path}")
@@ -1677,7 +2005,8 @@ class GameStateManager:
                 terrain_data = json.load(f)
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in terrain file {terrain_path}: {e}")
-        return terrain_data, terrain_path
+        ratio = self._board_ref_downscale_ratio(scenario_file, board_ref)
+        return self._downscale_terrain_data(terrain_data, ratio), terrain_path
 
     def _load_terrain_walls_from_ref(
         self, terrain_ref: str, scenario_file: str, only_type: Optional[str] = None,
@@ -1788,6 +2117,21 @@ class GameStateManager:
             })
         floors.sort(key=lambda f: f["level"])
         return floors
+
+    @staticmethod
+    def _has_declared_source_board(scenario_file: str, board_ref: Optional[str]) -> bool:
+        """Le scénario déclare-t-il le plateau dans lequel ses coordonnées sont écrites ?
+
+        Deux déclarations équivalentes, les mêmes que celles de `_resolve_board_dir` :
+        la clé `board_ref`, ou l'appartenance à `config/board/<board>/scenario/`. Sans l'une des
+        deux, il n'y a pas d'échelle d'origine connue — donc rien à convertir.
+
+        Prédicat séparé pour que la règle vive à UN endroit : `_resolve_board_dir` lève quand
+        aucune déclaration n'existe, ce qui ne convient pas pour un simple test d'applicabilité.
+        """
+        if board_ref is not None:
+            return True
+        return Path(scenario_file).parent.name == "scenario"
 
     def _resolve_board_dir(
         self, scenario_file: str, board_ref: Optional[str], purpose: str

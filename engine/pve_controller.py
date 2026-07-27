@@ -497,9 +497,20 @@ class PvEController:
             nearest_enemy = min(enemies, key=lambda e: calculate_pathfinding_distance(unit_col, unit_row, *require_unit_position(e, game_state), game_state))
             enemy_pos = require_unit_position(nearest_enemy, game_state)
 
-            # Select move that gets closest to nearest enemy using BFS pathfinding distance
-            best_move = min(actual_moves,
-                           key=lambda dest: calculate_pathfinding_distance(dest[0], dest[1], enemy_pos[0], enemy_pos[1], game_state))
+            # Select move that gets closest to nearest enemy using BFS pathfinding distance.
+            # UN SEUL champ BFS, calculé depuis l'ennemi (le point FIXE du lot), lu pour chaque
+            # destination candidate. Interroger `calculate_pathfinding_distance` par destination
+            # ferait un parcours complet par candidat, soit tout le pool de mouvement.
+            # La sentinelle « injoignable » est la valeur uint16 maximale : les destinations
+            # hors d'atteinte se classent donc naturellement en dernier, et si aucune ne
+            # rejoint l'ennemi `min` rend la première du pool (mêmes égalités qu'avant).
+            from engine.combat_utils import get_pathfinding_field
+            enemy_field = get_pathfinding_field(game_state, enemy_pos[0], enemy_pos[1])
+            board_cols = game_state["board_cols"]
+            best_move = min(
+                actual_moves,
+                key=lambda dest: int(enemy_field[dest[1] * board_cols + dest[0]]),
+            )
             
             # Only log once per movement action
             if not hasattr(self, '_logged_moves'):

@@ -162,10 +162,10 @@ function RangeRingsIcon({ active }: { active: boolean }) {
   );
 }
 
+// Même plateau physique 44×60 à deux résolutions. Les options `x5` (board/180x156) et `x10`
+// (board/360x312) ont été retirées : ces dossiers n'existent pas, la sélection échouait.
 const BOARD_OPTIONS = [
-  { key: "x1", label: "25×21" },
-  { key: "x5", label: "360×312 (x5)" },
-  { key: "x10", label: "360×312 (x10)" },
+  { key: "x1", label: "44×60 (x1)" },
   { key: "x5_44x60", label: "44×60 (x5)" },
 ] as const;
 
@@ -197,7 +197,8 @@ function MapIcon() {
 
 function BoardResolutionPicker() {
   const [open, setOpen] = useState(false);
-  const [defaultBoard, setDefaultBoard] = useState<BoardKey>("x5");
+  // Même valeur que `defaults.test_board` de config/config.json, en attendant sa lecture.
+  const [defaultBoard, setDefaultBoard] = useState<BoardKey>("x5_44x60");
   const ref = useRef<HTMLDivElement>(null);
 
   const params = new URLSearchParams(window.location.search);

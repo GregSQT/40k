@@ -5053,7 +5053,7 @@ def _attacker_model_can_reach_squad(
     # Rule 13.09 + 13.5 (Gone to Ground) : detection évaluée PAR FIGURINE dans la boucle ci-dessous.
     target_hidden = bool(_target_unit.get("hidden")) if _target_unit else False
     base_detection_subhex = (
-        float(game_rules.get("detection_range", 15))
+        float(require_key(game_rules, "detection_range"))
         * int(require_key(game_state, "inches_to_subhex"))
     ) if target_hidden else 0.0
     detection_penalty = 3 * int(require_key(game_state, "inches_to_subhex"))

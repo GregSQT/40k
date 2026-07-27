@@ -1,3 +1,10 @@
+> ⚠️ **Document historique (2026-07-27).** Le board `25x21` a été supprimé ; les chemins de
+> murs pointent désormais `config/board/44x60x1/walls/`, où `tutorial_walls-01.json` a été
+> conservé. Les scénarios `config/tutorial/scenario_etape*.json` ne se chargent PAS en l'état,
+> pour une raison antérieure et sans rapport : ils ne déclarent pas de `board_ref` et ne sont pas
+> dans un dossier `config/board/<board>/scenario/`, donc leur `wall_ref` n'est pas résoluble
+> (contrainte V11 T4). `walls-01.json` (étape 3) n'existe pas non plus.
+
 # Didacticiel — Documentation d'implémentation
 
 **Ce document est la spec complète pour le prompt qui implémentera le didacticiel.** Les sections 2.1–2.6 et 4 décrivent le scénario en 3 étapes, les positions et l'option scripté vs simplifié.
@@ -16,7 +23,7 @@ Offrir aux nouveaux joueurs un **parcours guidé** : une partie pré-configurée
 
 ## 2. Périmètre fonctionnel et scénario en 3 étapes
 
-**Murs (étapes 1 et 2)** : Pour les scénarios **etape1** et **etape2**, utiliser les murs définis dans **`config/board/25x21/walls/tutorial_walls-01.json`** (murs extérieurs uniquement : Ext-NW, Ext-NE, Ext-SW, Ext-SE). L'intérieur reste dégagé pour la ligne de vue. L'implémentation doit soit référencer ce fichier, soit injecter les hex listés dedans dans `wall_hexes` du scénario.
+**Murs (étapes 1 et 2)** : Pour les scénarios **etape1** et **etape2**, utiliser les murs définis dans **`config/board/44x60x1/walls/tutorial_walls-01.json`** (murs extérieurs uniquement : Ext-NW, Ext-NE, Ext-SW, Ext-SE). L'intérieur reste dégagé pour la ligne de vue. L'implémentation doit soit référencer ce fichier, soit injecter les hex listés dedans dans `wall_hexes` du scénario.
 
 ### 2.1 Étape 1 — Mouvement et tir
 
@@ -52,9 +59,9 @@ Si plus tard on ajoute un vrai mode « script » (actions/dés imposés), on pou
 
 ### 2.5 Fichiers scénario (tous dans `config/tutorial/`)
 
-- **Étape 1** : `config/tutorial/scenario_etape1.json` — units : Intercessor (12, 20), Termagant (12, 0) ; **murs** : `config/board/25x21/walls/tutorial_walls-01.json` ; `objectives` optionnel.
-- **Étape 2** : `config/tutorial/scenario_etape2.json` — units : Intercessor (ex. 12, 19), **2 Hormagaunts** côté gauche et droit (ex. **(2, 9)** et **(22, 9)**) ; **murs** : même fichier `config/board/25x21/walls/tutorial_walls-01.json`.
-- **Étape 3** : `config/tutorial/scenario_etape3.json` (ou réutiliser etape1 + objectifs) — objectif Centre comme dans `scenario_pvp_test` ; un Intercessor à déplacer vers la zone ; **murs** : `config/board/25x21/walls/walls-01.json`.
+- **Étape 1** : `config/tutorial/scenario_etape1.json` — units : Intercessor (12, 20), Termagant (12, 0) ; **murs** : `config/board/44x60x1/walls/tutorial_walls-01.json` ; `objectives` optionnel.
+- **Étape 2** : `config/tutorial/scenario_etape2.json` — units : Intercessor (ex. 12, 19), **2 Hormagaunts** côté gauche et droit (ex. **(2, 9)** et **(22, 9)**) ; **murs** : même fichier `config/board/44x60x1/walls/tutorial_walls-01.json`.
+- **Étape 3** : `config/tutorial/scenario_etape3.json` (ou réutiliser etape1 + objectifs) — objectif Centre comme dans `scenario_pvp_test` ; un Intercessor à déplacer vers la zone ; **murs** : `config/board/44x60x1/walls/walls-01.json`.
 
 ### 2.6 Extensions possibles (hors MVP)
 
@@ -90,9 +97,9 @@ Tous les scénarios et le fichier d'étapes du tutoriel sont dans **`config/tuto
 
 | Fichier | Action |
 |---------|--------|
-| `config/tutorial/scenario_etape1.json` | **Créer** — Intercessor (12,20), Termagant (12,0) ; murs = `config/board/25x21/walls/tutorial_walls-01.json`. |
-| `config/tutorial/scenario_etape2.json` | **Créer** — Intercessor + 2 Hormagaunts (gauche/droite, ex. (2,9) et (22,9)) ; murs = `config/board/25x21/walls/tutorial_walls-01.json`. |
-| `config/tutorial/scenario_etape3.json` (ou réutiliser etape1 + objectifs) | **Créer** — Objectif central, 1 Intercessor ; murs = `config/board/25x21/walls/walls-01.json`. |
+| `config/tutorial/scenario_etape1.json` | **Créer** — Intercessor (12,20), Termagant (12,0) ; murs = `config/board/44x60x1/walls/tutorial_walls-01.json`. |
+| `config/tutorial/scenario_etape2.json` | **Créer** — Intercessor + 2 Hormagaunts (gauche/droite, ex. (2,9) et (22,9)) ; murs = `config/board/44x60x1/walls/tutorial_walls-01.json`. |
+| `config/tutorial/scenario_etape3.json` (ou réutiliser etape1 + objectifs) | **Créer** — Objectif central, 1 Intercessor ; murs = `config/board/44x60x1/walls/walls-01.json`. |
 | `config/tutorial/tutorial_scenario.md` | **Créer** — Source unique runtime: bloc `json tutorial-steps` (étapes) + bloc `json tutorial-ui-rules` (UI/fog/halos). |
 
 Le frontend charge `tutorial_scenario.md` depuis ce répertoire et parse les blocs JSON taggés `tutorial-steps` et `tutorial-ui-rules`.
@@ -122,7 +129,7 @@ Le frontend charge `tutorial_scenario.md` depuis ce répertoire et parse les blo
 
 Réutiliser le format des scénarios existants (voir `config/scenario_pvp.json` ou `config/scenario_pvp_test.json`). Types d'unités : `config/unit_registry.json` (Intercessor, Termagant, Hormagaunt).
 
-**Murs** : **Étapes 1 et 2** : **`config/board/25x21/walls/tutorial_walls-01.json`** (murs extérieurs Ext-NW, Ext-NE, Ext-SW, Ext-SE). **Étape 3** : **`config/board/25x21/walls/walls-01.json`**. Selon le chargement des scénarios par le moteur : soit le scénario référence le fichier, soit on construit `wall_hexes` à partir des `hexes` dans `walls[]` du fichier.
+**Murs** : **Étapes 1 et 2** : **`config/board/44x60x1/walls/tutorial_walls-01.json`** (murs extérieurs Ext-NW, Ext-NE, Ext-SW, Ext-SE). **Étape 3** : **`config/board/44x60x1/walls/walls-01.json`**. Selon le chargement des scénarios par le moteur : soit le scénario référence le fichier, soit on construit `wall_hexes` à partir des `hexes` dans `walls[]` du fichier.
 
 **Étape 1 — Exemple `config/tutorial/scenario_etape1.json`** (avec `wall_ref`, voir §10.1) :
 
@@ -140,9 +147,9 @@ Réutiliser le format des scénarios existants (voir `config/scenario_pvp.json` 
 
 (Alternative : `wall_hexes` inline, liste plate de `[col, row]` dérivée de `tutorial_walls-01.json`.)
 
-**Étape 2 — Exemple simplifié (Hormagaunts gauche et droite)** : Intercessor (12, 19), 2 Hormagaunts (2,9) et (22,9). Même source de murs : **`config/board/25x21/walls/tutorial_walls-01.json`**.
+**Étape 2 — Exemple simplifié (Hormagaunts gauche et droite)** : Intercessor (12, 19), 2 Hormagaunts (2,9) et (22,9). Même source de murs : **`config/board/44x60x1/walls/tutorial_walls-01.json`**.
 
-**Étape 3** : Réutiliser objectif Centre de `scenario_pvp_test` (hex [[12,10],[11,9],[12,9],[13,9],[13,10],[12,11],[11,10]]), 1 Intercessor à placer. **Murs** : `config/board/25x21/walls/walls-01.json`.
+**Étape 3** : Réutiliser objectif Centre de `scenario_pvp_test` (hex [[12,10],[11,9],[12,9],[13,9],[13,10],[12,11],[11,10]]), 1 Intercessor à placer. **Murs** : `config/board/44x60x1/walls/walls-01.json`.
 
 ### 4.2 Source d'étapes `config/tutorial/tutorial_scenario.md`
 
@@ -214,10 +221,10 @@ Les phases dans `gameState.phase` doivent correspondre à celles du moteur (voir
 ## 7. Ordre d'implémentation recommandé
 
 1. **Répertoire** : créer `config/tutorial/`.
-2. **Murs** : pour etape1 et etape2, utiliser `config/board/25x21/walls/tutorial_walls-01.json` (murs extérieurs).
+2. **Murs** : pour etape1 et etape2, utiliser `config/board/44x60x1/walls/tutorial_walls-01.json` (murs extérieurs).
 3. **Scénario Étape 1** : créer `config/tutorial/scenario_etape1.json` (Intercessor 12,20 ; Termagant 12,0 ; murs = tutorial_walls-01.json).
 4. **Scénario Étape 2** : créer `config/tutorial/scenario_etape2.json` (Intercessor + 2 Hormagaunts gauche/droite, ex. (2,9) et (22,9) ; murs = tutorial_walls-01.json).
-5. **Scénario Étape 3** : créer `config/tutorial/scenario_etape3.json` (objectif central + 1 Intercessor ; murs = `config/board/25x21/walls/walls-01.json`).
+5. **Scénario Étape 3** : créer `config/tutorial/scenario_etape3.json` (objectif central + 1 Intercessor ; murs = `config/board/44x60x1/walls/walls-01.json`).
 6. **Étapes/UI** : créer `config/tutorial/tutorial_scenario.md` avec blocs `tutorial-steps` et `tutorial-ui-rules` pour etape 1, 2, 3 (triggers, textes, fog/halos).
 7. **Popup** : implémenter `TutorialOverlay.tsx` (modal titre/corps/Compris/Passer).
 8. **Moteur d'étapes** : TutorialContext ou useTutorialEngine (chargement steps, triggers, transitions etape1 → etape2 → etape3).
@@ -241,7 +248,7 @@ Les phases dans `gameState.phase` doivent correspondre à celles du moteur (voir
 | Entrée utilisateur | Lien **« Tutorial »** (libellé exact) sur HomePage ; au clic → partie avec `scenario_file: config/tutorial/scenario_etape1.json`. |
 | TutorialOverlay | Composant modal (titre, corps, Compris, optionnel Passer) ; UI uniquement, pas la logique d'étapes. |
 | TutorialContext / useTutorialEngine | Moteur d'étapes : état (étape courante, steps), triggers, transitions etape1→2→3 ; charge `config/tutorial/tutorial_scenario.md` (bloc `tutorial-steps`). |
-| Murs | **Étapes 1 et 2** : `config/board/25x21/walls/tutorial_walls-01.json` (murs extérieurs). **Étape 3** : `config/board/25x21/walls/walls-01.json`. |
+| Murs | **Étapes 1 et 2** : `config/board/44x60x1/walls/tutorial_walls-01.json` (murs extérieurs). **Étape 3** : `config/board/44x60x1/walls/walls-01.json`. |
 | Étape 1 | Intercessor (12,20), Termagant (12,0). Narrative : Termagant rate, joueur avance et tue. Version simplifiée : skip tour ennemi + popup. |
 | Étape 2 | 2 Hormagaunts (gauche/droite, ex. (2,9) et (22,9)). Narrative : ils chargent, Marine -1 PV, tue un puis l’autre. Version simplifiée : Hormagaunts déjà au contact, popup « Ils viennent de charger ». |
 | Étape 3 | Objectifs (tenir la zone centrale) ; règles spéciales en option (Étape 4 ou fiches). |
@@ -255,7 +262,7 @@ Points à respecter pour que l'implémentation soit complète sans ambiguïté :
 
 ### 10.1 Murs dans les scénarios JSON
 
-Le moteur accepte **`wall_ref`** avec le **nom de fichier uniquement** (résolution depuis `config/board/25x21/walls/`). Dans les scénarios tutoriel :
+Le moteur accepte **`wall_ref`** avec le **nom de fichier uniquement** (résolution depuis `config/board/44x60x1/walls/`). Dans les scénarios tutoriel :
 
 - **Étapes 1 et 2** : `"wall_ref": "tutorial_walls-01.json"`
 - **Étape 3** : `"wall_ref": "walls-01.json"`

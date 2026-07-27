@@ -65,13 +65,9 @@ flowchart TB
 
 ### 1.2 Topologie LoS (optionnelle au build)
 
-Par défaut, les builds backend **ne régénèrent pas** la topologie LoS (~20 min sur NAS). Les fichiers pré-générés (`config/board/25x21/topology_*.npz`) sont versionnés pour des mises à jour rapides.
-
-Si vous modifiez les murs (`config/board/25x21/walls/*.json`) :
-
-1. Localement : `./scripts/build_topology.sh` ou `python scripts/los_topology_builder.py 25x21`
-2. Commit : `git add config/board/25x21/topology_*.npz && git commit -m "Update LoS topology"`
-3. Ou forcer la régénération au build : `docker build --build-arg BUILD_TOPOLOGY=1 ...`
+⚠️ **Sans objet depuis 2026-07-27** : aucun board du dépôt n'embarque de `topology_*.npz` (le
+board `25x21` qui les portait a été supprimé) et le builder n'existe plus. LoS et distances sont
+calculées à la demande. Voir `Documentation/LOS_TOPOLOGY.md`.
 
 ### 1.3 Fichiers existants
 

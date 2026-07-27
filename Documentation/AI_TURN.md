@@ -365,7 +365,7 @@ Decision factors: Unit value, importance of actions this turn, long term strateg
 
 ## 🆕 V11 COMPLIANCE MATRIX — MOVEMENT PHASE
 
-> Source de vérité : `Documentation/40k_rules`. Statut établi par lecture du code (`engine/phase_handlers/movement_handlers.py`, `config/game_config.json`). Distances exprimées en **pouces** ; conversion hex = pouces × `inches_to_subhex` (board-dépendant : 25x21→1, 44x60x5→5, 180x156→5, 360x312→10). **Ne jamais coder une équivalence pouce↔hex en dur.**
+> Source de vérité : `Documentation/40k_rules`. Statut établi par lecture du code (`engine/phase_handlers/movement_handlers.py`, `config/game_config.json`). Distances exprimées en **pouces** ; conversion hex = pouces × `inches_to_subhex` (board-dépendant : 44x60x1→1, 44x60x5→5, 44x60x10→10). **Ne jamais coder une équivalence pouce↔hex en dur.**
 
 | Règle | Contenu | Statut moteur | Mapping / notes |
 |---|---|---|---|
@@ -385,7 +385,7 @@ Decision factors: Unit value, importance of actions this turn, long term strateg
 | 03.01 | Moving (traverse alliés, pas ennemis, pas hors plateau) | ✅ | config `move.can_move_through_friendly_model` / `can_move_through_enemy_model` ; bord = bounds plateau |
 | 03.02 | Set up (déploiement) | ✅ | `deployment_handlers` |
 | 03.03 | Coherency (2″H/5″V d'≥1 modèle ; 9″H/5″V de chaque modèle ; regain en End of Turn) | 🟡 Adapté | `unit_model_cohesion_range`=2, `unit_global_cohesion_range`=9 (hex) ; composante verticale 5″ sans objet (2D) |
-| 03.04 | Engagement range = 2″H/5″V | 🟡 Adapté + ⚠️ | `engagement_zone` (hex). ⚠️ `engagement_zone=2` ne vaut 2″ que si 1 hex=1″ (board 25x21) ; sur boards fins (5/10 hex par ″) → **vérifier override par board**. Vertical 5″ sans objet (2D) |
+| 03.04 | Engagement range = 2″H/5″V | 🟡 Adapté + ⚠️ | `engagement_zone` (hex). ⚠️ `engagement_zone=2` ne vaut 2″ que si 1 hex=1″ (board 44x60x1) ; sur boards fins (5/10 hex par ″) → **vérifier override par board**. Vertical 5″ sans objet (2D) |
 | 21.02 | Surge move | ⛔ Non implémenté | aucune unité avec capacité de surge |
 | 21.03 | Flying (take to skies : −2″, ignore vertical, traverse tous modèles/terrains) | ✅ / 🟡 | `_fly_traversal_active`, malus −2″ (cf. commentaire 21.03) ; « ignore vertical » trivial en 2D |
 

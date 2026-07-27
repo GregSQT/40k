@@ -224,10 +224,12 @@ export const useGameConfig = (_boardConfigName: string = "default"): ExtendedGam
         const boardParam = isTestMode ? (urlParams.get("board") ?? DEFAULT_TEST_BOARD) : null;
         const scenarioName =
           mode === "pve_test" ? "scenario_pve_test.json" : "scenario_pvp_test.json";
+        // Dossier qui PORTE les scénarios de test : il ne suit pas la résolution jouée. `x1` et
+        // `x5_44x60` sont le même plateau 44×60 à deux résolutions, et le moteur convertit les
+        // coordonnées (cf. Documentation/Implémentation/V11_board_44x60x1.md). Les entrées
+        // `x5` -> board/180x156 et `x10` -> board/360x312 ont été retirées : dossiers inexistants.
         const boardDirMap: Record<string, string> = {
-          x1: "board/25x21",
-          x5: "board/180x156",
-          x10: "board/360x312",
+          x1: "board/44x60x5",
           x5_44x60: "board/44x60x5",
         };
         const scenarioMap: Record<string, string> = {

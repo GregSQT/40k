@@ -52,10 +52,19 @@ from services.endless_duty_runtime import (
 AUTH_DB_PATH = os.path.join(abs_parent, "config", "users.db")
 PBKDF2_ITERATIONS = 200000
 
+# Plateau JOUÉ pour chaque option de l'écran de test. `x1` et `x5_44x60` sont le MÊME plateau
+# physique 44×60 à deux résolutions ; les entrées `x5` -> board/180x156 et `x10` -> board/360x312
+# ont été retirées, ces dossiers n'existent pas (l'option était cassée à la sélection).
 BOARD_PATH_MAP = {
-    "x1": "board/25x21",
-    "x5": "board/180x156",
-    "x10": "board/360x312",
+    "x1": "board/44x60x1",
+    "x5_44x60": "board/44x60x5",
+}
+
+# Dossier qui PORTE les scénarios de test. Il ne suit pas la résolution jouée : les scénarios
+# sont écrits une seule fois, en subhex x5, et le moteur convertit leurs coordonnées (terrain,
+# murs, positions) vers le plateau actif — cf. Documentation/Implémentation/V11_board_44x60x1.md.
+TEST_SCENARIO_BOARD_MAP = {
+    "x1": "board/44x60x5",
     "x5_44x60": "board/44x60x5",
 }
 
@@ -355,6 +364,9 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
     "_choice_timing_fired_events",
     "_deployment_random_mix_forced_steps",
     "_wall_set_cache",
+    # Champs BFS par source : tableaux numpy indexés par des clés tuple — non sérialisables
+    # en JSON, et sans usage client.
+    "_pathfinding_field_cache",
     "_obscuring_area_sets_cache",
     "_obscuring_hex_to_area_cache",
     "_unit_los_pair_cache",
@@ -1473,8 +1485,14 @@ def initialize_engine(scenario_file: Optional[str] = None):
         if scenario_file is None:
             from config_loader import get_config_loader as _gcl
             _cfg = _gcl().load_config("config", force_reload=False)
-            board_path = _cfg.get("defaults", {}).get("test_board", "x5")
-            scenario_file = os.path.join("config", BOARD_PATH_MAP[board_path], "scenario", "scenario_pvp.json")
+            # Pas de littéral de repli : "x5" ne désigne plus aucune entrée des deux tables.
+            board_path = require_key(require_key(_cfg, "defaults"), "test_board")
+            if board_path not in TEST_SCENARIO_BOARD_MAP:
+                raise ValueError(
+                    f"config.json defaults.test_board = {board_path!r} : attendu l'un de "
+                    f"{sorted(TEST_SCENARIO_BOARD_MAP)}"
+                )
+            scenario_file = os.path.join("config", TEST_SCENARIO_BOARD_MAP[board_path], "scenario", "scenario_pvp.json")
         elif not isinstance(scenario_file, str):
             raise ValueError(f"scenario_file must be a string if provided (got {type(scenario_file).__name__})")
 
@@ -2085,8 +2103,15 @@ def start_game():
             if board_path is None:
                 from config_loader import get_config_loader as _gcl
                 _cfg = _gcl().load_config("config", force_reload=False)
-                board_path = _cfg.get("defaults", {}).get("test_board", "x5")
-            scenario_file = os.path.join("config", BOARD_PATH_MAP[board_path], "scenario", "scenario_pvp_test.json")
+                # Pas de littéral de repli : "x5" ne désignait plus aucune entrée depuis le
+                # retrait des options mortes, un défaut aurait donc levé un KeyError plus loin.
+                board_path = require_key(require_key(_cfg, "defaults"), "test_board")
+                if board_path not in BOARD_PATH_MAP:
+                    raise ValueError(
+                        f"config.json defaults.test_board = {board_path!r} : attendu l'un de "
+                        f"{sorted(BOARD_PATH_MAP)}"
+                    )
+            scenario_file = os.path.join("config", TEST_SCENARIO_BOARD_MAP[board_path], "scenario", "scenario_pvp_test.json")
             _prev_board = os.environ.get("W40K_BOARD_PATH")
             os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
             try:
@@ -2107,8 +2132,15 @@ def start_game():
             if board_path is None:
                 from config_loader import get_config_loader as _gcl
                 _cfg = _gcl().load_config("config", force_reload=False)
-                board_path = _cfg.get("defaults", {}).get("test_board", "x5")
-            scenario_file = os.path.join("config", BOARD_PATH_MAP[board_path], "scenario", "scenario_pve_test.json")
+                # Pas de littéral de repli : "x5" ne désignait plus aucune entrée depuis le
+                # retrait des options mortes, un défaut aurait donc levé un KeyError plus loin.
+                board_path = require_key(require_key(_cfg, "defaults"), "test_board")
+                if board_path not in BOARD_PATH_MAP:
+                    raise ValueError(
+                        f"config.json defaults.test_board = {board_path!r} : attendu l'un de "
+                        f"{sorted(BOARD_PATH_MAP)}"
+                    )
+            scenario_file = os.path.join("config", TEST_SCENARIO_BOARD_MAP[board_path], "scenario", "scenario_pve_test.json")
             _prev_board = os.environ.get("W40K_BOARD_PATH")
             os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
             try:
@@ -3772,6 +3804,43 @@ def get_board_config():
         board_dir = project_root / "config" / board_subdir
         wall_ref = board_spec.get("wall_ref")
         terrain_ref = board_spec.get("terrain_ref")
+        # Le plateau JOUÉ peut être plus grossier que celui qui PORTE les murs et le terrain
+        # (option x1 = plateau 44×60 à 1 hex = 1 pouce, données écrites en x5). Les fichiers sont
+        # alors lus dans leur dossier d'origine et convertis, comme le fait le moteur — sans quoi
+        # le rendu chercherait un dossier `walls/` inexistant sous le plateau réduit.
+        board_data_dir = board_dir
+        board_data_ratio = 1
+        if board_path_param is not None:
+            data_subdir = TEST_SCENARIO_BOARD_MAP[board_path_param]
+            board_data_dir = project_root / "config" / data_subdir
+            data_board_path = board_data_dir / "board_config.json"
+            if not data_board_path.exists():
+                raise FileNotFoundError(f"Board config not found: {data_board_path}")
+            with open(data_board_path, "r", encoding="utf-8-sig") as f:
+                data_board_spec = json.load(f)["default"]
+            played_ish = int(require_key(board_spec, "inches_to_subhex"))
+            data_ish = int(require_key(data_board_spec, "inches_to_subhex"))
+            if played_ish <= 0 or data_ish % played_ish != 0:
+                raise ValueError(
+                    f"board_path '{board_path_param}': données en subhex x{data_ish}, plateau joué "
+                    f"en x{played_ish} — rapport non entier"
+                )
+            board_data_ratio = data_ish // played_ish
+            # Même contrôle que le moteur (`_board_ref_downscale_ratio`) : sans lui, une entrée de
+            # table pointant un AUTRE plateau physique déplacerait murs et terrain en silence.
+            played_dims = (
+                int(require_key(board_spec, "cols")), int(require_key(board_spec, "rows"))
+            )
+            data_dims = (
+                int(require_key(data_board_spec, "cols")) // board_data_ratio,
+                int(require_key(data_board_spec, "rows")) // board_data_ratio,
+            )
+            if data_dims != played_dims:
+                raise ValueError(
+                    f"board_path '{board_path_param}': '{data_subdir}' réduit de x{board_data_ratio} "
+                    f"donne {data_dims[0]}x{data_dims[1]}, pas {played_dims[0]}x{played_dims[1]} — "
+                    f"ce n'est pas le même plateau physique"
+                )
 
         scenario_file_raw = request.args.get("scenario_file")
         scenario_data = None
@@ -3832,12 +3901,20 @@ def get_board_config():
             if not isinstance(scenario_wall_hexes, list):
                 raise ValueError("scenario wall_hexes must be a list")
             wall_hexes = scenario_wall_hexes
+            if board_data_ratio != 1:
+                from engine.game_state import GameStateManager as _GSM
+                wall_hexes = _GSM._downscale_terrain_data(
+                    {"walls": [{"hexes": wall_hexes}]}, board_data_ratio)["walls"][0]["hexes"]
         elif wall_ref and wall_ref.endswith(".json"):
-            wall_path = board_dir / "walls" / wall_ref
+            wall_path = board_data_dir / "walls" / wall_ref
             if not wall_path.exists():
                 raise FileNotFoundError(f"Referenced wall file not found: {wall_path}")
             with open(wall_path, "r", encoding="utf-8-sig") as f:
                 wall_data = json.load(f)
+            if board_data_ratio != 1 and "walls" in wall_data:
+                from engine.game_state import GameStateManager as _GSM
+                wall_data = {**wall_data, "walls": _GSM._downscale_terrain_data(
+                    {"walls": wall_data["walls"]}, board_data_ratio)["walls"]}
             if "walls" in wall_data:
                 wall_hexes = []
                 for gi, g in enumerate(wall_data.get("walls", [])):
@@ -3857,6 +3934,10 @@ def get_board_config():
                     wall_hexes.extend(_expand(g, path_hint=hint))
             elif "wall_hexes" in wall_data:
                 wall_hexes = wall_data["wall_hexes"]
+                if board_data_ratio != 1:
+                    from engine.game_state import GameStateManager as _GSM
+                    wall_hexes = _GSM._downscale_terrain_data(
+                        {"walls": [{"hexes": wall_hexes}]}, board_data_ratio)["walls"][0]["hexes"]
             else:
                 raise ValueError(f"Wall file {wall_path} must contain 'walls' or 'wall_hexes'")
 
@@ -3905,11 +3986,14 @@ def get_board_config():
         terrain_icons: list = []
         deployment_zones_cfg: list = []
         if terrain_ref and terrain_ref.endswith(".json"):
-            terrain_path = board_dir / "terrain" / terrain_ref
+            terrain_path = board_data_dir / "terrain" / terrain_ref
             if not terrain_path.exists():
                 raise FileNotFoundError(f"Referenced terrain file not found: {terrain_path}")
             with open(terrain_path, "r", encoding="utf-8-sig") as f:
                 terrain_data = json.load(f)
+            if board_data_ratio != 1:
+                from engine.game_state import GameStateManager as _GSM
+                terrain_data = _GSM._downscale_terrain_data(terrain_data, board_data_ratio)
             if "terrain" not in terrain_data:
                 raise ValueError(f"Terrain file {terrain_path} must contain 'terrain'")
             terrain_features = _expand_objectives(

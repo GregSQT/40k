@@ -53,11 +53,22 @@ Exemple 25×21 : `(1,20), (3,20), (5,20), ..., (23,20)` — 12 hexes.
 
 ---
 
-## Usage
+## Statut (2026-07-27)
+
+⚠️ **Mécanisme inutilisé en l'état.** Le board `25x21`, seul à embarquer des `topology_*.npz`, a
+été supprimé, et `scripts/los_topology_builder.py` n'existe plus dans le dépôt. Les branches
+`los_topology` / `pathfinding_topology` / `wall_edge_topology` du moteur restent en place — elles
+sont génériques (n'importe quel board peut fournir ses `.npz`) mais aucune donnée ne les active
+aujourd'hui : LoS et distances passent par le calcul à la demande.
+
+Régénérer la topologie pour `44x60x1` (2640² en int16 ≈ 14 Mo) serait jouable et rendrait les
+distances exactes en O(1) ; il faudrait pour cela réécrire le builder.
+
+## Usage (builder à réécrire)
 
 ```bash
-python scripts/los_topology_builder.py 25x21
-python scripts/los_topology_builder.py --cols 25 --rows 21
+python scripts/los_topology_builder.py <board>
+python scripts/los_topology_builder.py --cols 44 --rows 60
 ```
 
 Le script :

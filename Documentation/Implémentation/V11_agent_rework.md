@@ -2663,7 +2663,7 @@ un crash dépendant de la trajectoire ne se solde pas par une suite verte.
 LA priorité ; si on doit sacrifier x1, on le sacrifie. » **On n'a pas eu à le faire**, et le
 signaler faisait partie du travail : l'arbitrage était conditionnel, et la condition n'est pas
 remplie. Le chemin x1 est **vif** — [api_server.py:56](../../services/api_server.py#L56) et
-`frontend/src/hooks/useGameConfig.ts:228` exposent le board `25x21` au PvP, et
+`frontend/src/hooks/useGameConfig.ts` exposent le board `44x60x1` au PvP, et
 `ArmageddonAgent_training_config.json` porte une phase de curriculum x1. Le supprimer aurait été
 une **régression PvP sans aucun gain au x5** : le fix R6 y était déjà correct, seulement invisible
 aux tests. Traitement retenu : le **couvrir**.

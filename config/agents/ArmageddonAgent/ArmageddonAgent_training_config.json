@@ -1,6 +1,6 @@
 {
   "x1": {
-    "type": "################################################### x1 — curriculum phase 1 (board 25x21, scale ×1) ###################################################",
+    "type": "################################################### x1 — curriculum phase 1 (board 44x60x1, scale ×1) ###################################################",
     "seed": 12345,
     "total_episodes": 30000,
     "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
@@ -10,7 +10,7 @@
     "bot_eval_show_progress": true,
     "bot_eval_use_subprocess": true,
     "bot_eval_n_workers": 6,
-    "n_envs": 48,
+    "n_envs": 8,
     "model_params": {
       "policy": "MultiInputPolicy",
       "learning_rate": {
@@ -57,7 +57,7 @@
       "bot_eval_intermediate": 100,
       "bot_eval_final": 100,
       "bot_eval_worker_device": "cpu",
-      "bot_eval_task_timeout_seconds": 600,
+      "bot_eval_task_timeout_seconds": 3600,
       "save_best_robust": true,
       "save_best_robust_seed": true,
       "robust_window": 5,
@@ -108,6 +108,14 @@
       "schedule": "linear",
       "freeze_after_progress": 0.8,
       "apply_to": "agent_only"
+    },
+    "deployment_mode_schedule": {
+      "enabled": true,
+      "training_only": true,
+      "active_ratio_start": 0.0,
+      "active_ratio_end": 0.0,
+      "schedule": "linear",
+      "freeze_after_progress": 1.0
     },
     "observation_params": {
       "obs_size": 20166,
@@ -182,7 +190,7 @@
     }
   },
   "x5_append": {
-    "type": "################################################### x5 — curriculum phase 2 (board 180x156, scale ×5) ###################################################",
+    "type": "################################################### x5 — curriculum phase 2 (board 44x60x5, scale ×5) ###################################################",
     "seed": 12345,
     "total_episodes": 30000,
     "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
@@ -365,9 +373,9 @@
     }
   },
   "x5_new": {
-    "type": "################################################### x1 — curriculum phase 1 (board 25x21, scale ×1) ###################################################",
+    "type": "################################################### x5 — curriculum phase 2 (board 44x60x5, scale ×5) ###################################################",
     "seed": 12345,
-    "total_episodes": 10000,
+    "total_episodes": 5000,
     "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
     "agent_seat_mode": "random",
     "eval_episodes": 10,
@@ -375,7 +383,7 @@
     "bot_eval_show_progress": true,
     "bot_eval_use_subprocess": true,
     "bot_eval_n_workers": 6,
-    "n_envs": 48,
+    "n_envs": 8,
     "model_params": {
       "policy": "MultiInputPolicy",
       "learning_rate": {
@@ -417,9 +425,9 @@
       "checkpoint_name_prefix": "ppo_checkpoint",
       "eval_deterministic": true,
       "eval_render": false,
-      "bot_eval_freq": 2000,
+      "bot_eval_freq": 250,
       "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 20,
+      "bot_eval_intermediate": 50,
       "bot_eval_final": 100,
       "bot_eval_worker_device": "cpu",
       "bot_eval_task_timeout_seconds": 3600,
@@ -739,7 +747,7 @@
   "x5_debug": {
     "type": "################################################### X5 debug ###################################################",
     "seed": 12345,
-    "total_episodes": 7000,
+    "total_episodes": 10000,
     "total_episodes_classic----------------------": 500,
     "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
     "agent_seat_mode": "random",
@@ -758,12 +766,12 @@
       "checkpoint_name_prefix": "ppo_checkpoint",
       "eval_deterministic": true,
       "eval_render": false,
-      "bot_eval_freq": 250,
+      "bot_eval_freq": 500,
       "bot_eval_freq_normal": "-----------------------------------------------------2000",
       "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 10,
+      "bot_eval_intermediate": 100,
       "bot_eval_intermediate_normal": "-----------------------------------------------100",
-      "bot_eval_final": 10,
+      "bot_eval_final": 100,
       "bot_eval_worker_device": "cpu",
       "bot_eval_task_timeout_seconds": 600,
       "save_best_robust": false,

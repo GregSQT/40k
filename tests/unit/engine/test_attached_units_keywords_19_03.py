@@ -20,7 +20,7 @@ from pathlib import Path
 
 def _scenario(units: list) -> dict:
     return {
-        "board_ref": "25x21",
+        "board_ref": "44x60x5",
         "primary_objectives": ["objectives_control"],
         "wall_ref": "walls-none.json",
         "units": units,

@@ -1,16 +1,21 @@
 """
 Weapon Selector - AI weapon selection based on kill probability
 
-MULTIPLE_WEAPONS_IMPLEMENTATION.md: Automatic weapon selection for AI
+Doc : Documentation/Weapon_rules.md (section "Weapon Selection").
+
+Le cache `game_state["kill_probability_cache"]` est rempli EXCLUSIVEMENT a la demande : un
+miss recalcule et stocke (cf. select_best_*_weapon / get_best_weapon_for_target). Aucune
+entree absente ne vaut 0.0 et aucune cible n'est ignoree — un miss coute du CPU, jamais une
+decision faussee. Les pre-calculs de phase et le rechauffage post-mouvement ont ete supprimes
+le 2026-07-27 : aucun appelant depuis le passage au remplissage paresseux, et le second
+portait un `game_state.get("perception_radius", 25)` dont la cle n'etait ecrite nulle part
+(valeur figee a 25 POUCES, comparee a une distance en sub-hex).
 """
 
-from typing import Dict, List, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional
 from shared.data_validation import require_key
-from engine.combat_utils import calculate_hex_distance, expected_dice_value
-from engine.phase_handlers.shared_utils import (
-    is_unit_alive, get_hp_from_cache, require_hp_from_cache,
-    require_unit_position,
-)
+from engine.combat_utils import expected_dice_value
+from engine.phase_handlers.shared_utils import require_hp_from_cache
 
 
 def calculate_kill_probability(unit: Dict[str, Any], weapon: Dict[str, Any], 
@@ -249,74 +254,15 @@ def get_best_weapon_for_target(unit: Dict[str, Any], target: Dict[str, Any],
     return (weapon_index, kill_prob)
 
 
-def precompute_kill_probability_cache(game_state: Dict[str, Any], phase: str):
-    """
-    Pre-compute kill probability cache for all active units × all targets × all weapons.
-    
-    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Called in shooting_phase_start() and fight_phase_start()
-    after activation pools are created.
-    
-    Args:
-        game_state: Game state with units
-        phase: "shoot" or "fight"
-    """
-    if "units" not in game_state:
-        return
-    
-    # Initialize cache if not exists
-    if "kill_probability_cache" not in game_state:
-        game_state["kill_probability_cache"] = {}
-    
-    cache = game_state["kill_probability_cache"]
-    current_player = require_key(game_state, "current_player")
-    
-    # Get active units (current player's units)
-    units_cache = require_key(game_state, "units_cache")
-    unit_by_id = {str(u["id"]): u for u in game_state["units"]}
-    active_units = []
-    enemy_units = []
-    for unit_id, entry in units_cache.items():
-        unit = unit_by_id.get(str(unit_id))
-        if not unit:
-            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-        if entry["player"] == current_player:
-            active_units.append(unit)
-        else:
-            enemy_units.append(unit)
-    
-    for unit in active_units:
-        unit_id = str(unit["id"])
-        
-        # Get weapons based on phase
-        if phase == "shoot":
-            weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
-        elif phase == "fight":
-            weapons = unit["CC_WEAPONS"] if "CC_WEAPONS" in unit else []
-        else:
-            continue
-        
-        if not weapons:
-            continue
-        
-        for weapon_index, weapon in enumerate(weapons):
-            for target in enemy_units:
-                target_id = str(target["id"])
-                hp_cur = require_hp_from_cache(target_id, game_state)
-                
-                # PERFORMANCE: Check cache before recalculating
-                cache_key = _get_cache_key(unit_id, weapon_index, target_id, hp_cur)
-                if cache_key not in cache:
-                    # Calculate and cache only if not already cached
-                    kill_prob = calculate_kill_probability(unit, weapon, target, game_state)
-                    _store_kill_prob_in_cache(cache, unit_id, weapon_index, target_id, hp_cur, kill_prob)
-
-
 def invalidate_cache_for_target(cache: Dict[Tuple[str, int, str, int], float], target_id: str):
     """
     Invalidate all cache entries for a specific target.
-    
-    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Called after damage is dealt to a unit.
-    
+
+    Appelants reels : `_fight_on_target_damaged` (fight_handlers) uniquement. La phase de tir
+    n'invalide pas — inutile pour la correction : la cle de cache embarque `hp_cur`, donc une
+    entree perimee n'est jamais relue apres une blessure. C'est du menage memoire, pas un
+    correctif. Cf. Documentation/Weapon_rules.md (cache rempli a la demande, jamais pre-calcule).
+
     Args:
         cache: Kill probability cache
         target_id: ID of target unit (as string)
@@ -329,9 +275,9 @@ def invalidate_cache_for_target(cache: Dict[Tuple[str, int, str, int], float], t
 def invalidate_cache_for_unit(cache: Dict[Tuple[str, int, str, int], float], unit_id: str):
     """
     Invalidate all cache entries for a specific unit (unit died, can't attack anymore).
-    
-    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Called when unit dies.
-    
+
+    Appelant reel : `_fight_on_unit_destroyed` (fight_handlers) uniquement.
+
     Args:
         cache: Kill probability cache
         unit_id: ID of unit (as string)
@@ -339,107 +285,3 @@ def invalidate_cache_for_unit(cache: Dict[Tuple[str, int, str, int], float], uni
     keys_to_remove = [key for key in cache.keys() if key[0] == unit_id]
     for key in keys_to_remove:
         del cache[key]
-
-
-def recompute_cache_for_new_units_in_range(game_state: Dict[str, Any]):
-    """
-    Recompute cache for units that entered perception_radius after movement.
-    
-    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Called in movement_phase_end()
-    
-    Args:
-        game_state: Game state with units
-    """
-    if "units" not in game_state:
-        return
-    
-    perception_radius = game_state.get("perception_radius", 25)  # get allowed (config; may be absent)
-    current_player = require_key(game_state, "current_player")
-    
-    # Get active units
-    active_units = [u for u in game_state["units"] if require_key(u, "player") == current_player and is_unit_alive(str(u["id"]), game_state)]
-    
-    # Get all enemy units
-    enemy_units = [u for u in game_state["units"] if require_key(u, "player") != current_player and is_unit_alive(str(u["id"]), game_state)]
-    
-    if "kill_probability_cache" not in game_state:
-        game_state["kill_probability_cache"] = {}
-    cache = game_state["kill_probability_cache"]
-
-    for unit in active_units:
-        unit_id = str(unit["id"])
-        unit_col, unit_row = require_unit_position(unit, game_state)
-
-        from engine.combat_utils import ranged_edge_distance, get_distance_metric, socle_from_cache_entry
-        from config_loader import get_config_loader
-        _metric = get_distance_metric("ranged", get_config_loader().get_game_config())
-        _uc = require_key(game_state, "units_cache")
-        _unit_socle = socle_from_cache_entry(_uc[unit_id])
-
-        rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
-
-        for weapon_index, weapon in enumerate(rng_weapons):
-            weapon_range = require_key(weapon, "RNG")
-
-            for target in enemy_units:
-                target_id = str(target["id"])
-                target_col, target_row = require_unit_position(target, game_state)
-
-                # Perception = distance stratégique (reste HEX centre) ; portée = bord-à-bord (sélecteur).
-                perception_distance = calculate_hex_distance(unit_col, unit_row, target_col, target_row)
-                ranged_distance = ranged_edge_distance(
-                    _unit_socle, socle_from_cache_entry(_uc[target_id]), _metric
-                )
-
-                if perception_distance <= perception_radius and ranged_distance <= weapon_range:
-                    hp_cur = require_hp_from_cache(target_id, game_state)
-                    
-                    # Check if already cached
-                    if _get_kill_prob_from_cache(cache, unit_id, weapon_index, target_id, hp_cur) is None:
-                        # Calculate and cache
-                        kill_prob = calculate_kill_probability(unit, weapon, target, game_state)
-                        _store_kill_prob_in_cache(cache, unit_id, weapon_index, target_id, hp_cur, kill_prob)
-
-
-def calculate_ttk_with_weapon(unit: Dict[str, Any], weapon: Dict[str, Any],
-                              target: Dict[str, Any], game_state: Dict[str, Any]) -> float:
-    """
-    Calculate Time-To-Kill (turns) for a specific weapon against a target.
-    Returns: Number of turns (activations) needed to kill target, or 100.0 if can't kill.
-    
-    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Helper function for Features 16-17 improvements.
-    """
-    # Calculer expected_damage avec cette arme
-    hit_target = require_key(weapon, "ATK")
-    strength = require_key(weapon, "STR")
-    damage = expected_dice_value(require_key(weapon, "DMG"), "ttk_damage")
-    num_attacks = expected_dice_value(require_key(weapon, "NB"), "ttk_nb")
-    ap = require_key(weapon, "AP")
-    
-    # Calculs W40K standard
-    p_hit = max(0.0, min(1.0, (7 - hit_target) / 6.0))
-    
-    toughness = require_key(target, "T")
-    if strength >= toughness * 2:
-        p_wound = 5/6
-    elif strength > toughness:
-        p_wound = 4/6
-    elif strength == toughness:
-        p_wound = 3/6
-    else:
-        p_wound = 2/6
-    
-    armor_save = target.get("ARMOR_SAVE", 7)
-    invul_save = target.get("INVUL_SAVE", 7)
-    save_target = min(armor_save - ap, invul_save)
-    p_fail_save = max(0.0, min(1.0, (save_target - 1) / 6.0))
-    
-    # Expected damage
-    p_damage_per_attack = p_hit * p_wound * p_fail_save
-    expected_damage = num_attacks * p_damage_per_attack * damage
-    
-    if expected_damage <= 0:
-        return 100.0  # Can't kill
-    
-    hp_cur = require_hp_from_cache(str(target["id"]), game_state)
-    return hp_cur / expected_damage

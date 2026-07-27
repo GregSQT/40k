@@ -60,7 +60,7 @@ else:
 ######################################################################################################
 ##### config files
 ######################################################################################################
-        "config/board/25x21/board_config.json",  # Board Layout & Visualization
+        "config/board/44x60x5/board_config.json",  # Board Layout & Visualization
         #"config/config.json",        # Master Configuration & Paths
         "config/game_config.json",   # Game Rules & Mechanics
         #"config/scenario.json",        # Game Scenarios

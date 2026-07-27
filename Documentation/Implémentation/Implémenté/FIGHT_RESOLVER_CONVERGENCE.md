@@ -136,7 +136,7 @@ L'iso-RNG bit-à-bit est **hors d'atteinte**. Plan de validation :
    identiques statistiquement (l'identité de la figurine tuée peut différer — sans effet gameplay).
    Méthode : `python3 ai/train.py --agent CoreAgent --scenario bot --step` + `ai/analyzer.py`,
    comparer avant/après sur N épisodes.
-2. **Scénario dédié hétérogène** : `config/board/25x21/scenario/scenario_attached_unit_test.json`
+2. **Scénario dédié hétérogène** : `config/board/44x60x5/scenario/scenario_attached_unit_test.json`
    (FAIT + VALIDÉ par drive direct). Cible = unité attachée (Intercessor T4/Sv3 + CaptainTerminator
    T5/Sv2/Inv4, role leader). Résultats mesurés sur exécution réelle :
    - `_target_highest_bodyguard_toughness` = **4** (plus haute T bodyguard, 19.02 — PAS T5 leader).
