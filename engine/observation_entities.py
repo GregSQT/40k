@@ -138,18 +138,40 @@ SELF_MODEL_BIN_SIZE = len(SELF_MODEL_BIN_FIELDS)
 # Contexte global (ce qui n'appartient à aucune entité)
 # ---------------------------------------------------------------------------
 
+#: Nombre d'objectifs décrits par le contexte global. DOIT valoir `macro_intents.MAX_OBJECTIVES`
+#: (l'action space offre 3 intents de zone par objectif) — verrouillé par test de contrat.
+N_OBJECTIVE_SLOTS = 5
+
 GLOBAL_CONT_FIELDS: Tuple[str, ...] = (
     "turn", "episode_steps", "my_victory_points", "enemy_victory_points",
     "my_value_ratio", "enemy_value_ratio",
+    # Distance de l'escouade OBSERVATRICE à chaque objectif, en subhex bruts (hex le plus proche
+    # de la zone). Sans elle, un objectif hors de la grille égocentrique — dont la demi-étendue
+    # vaut le budget d'Advance, soit 12" mesuré sur le board x5 — n'existe nulle part dans
+    # l'observation, alors que 15 actions de zone le désignent : mesuré au reset, 1 à 2
+    # objectifs sur 5 seulement tombent dans la fenêtre. L'agent choisissait une destination
+    # qu'il ne percevait pas.
+    "objective_distance_0", "objective_distance_1", "objective_distance_2",
+    "objective_distance_3", "objective_distance_4",
 )
 #: `phase` est un scalaire ordonné dans [0,1] : il vit avec les drapeaux car il ne doit JAMAIS
-#: être normalisé par des statistiques glissantes (V11 §9.5).
+#: être normalisé par des statistiques glissantes (V11 §9.5). Les sin/cos de direction
+#: d'objectif sont ici pour la MÊME raison : déjà bornés dans [-1,1] et centrés, les passer à
+#: `VecNormalize` ne ferait qu'amplifier leur bruit.
 GLOBAL_BIN_FIELDS: Tuple[str, ...] = (
     "is_my_turn", "phase",
     "objective_control_0", "objective_control_1", "objective_control_2",
     "objective_control_3", "objective_control_4",
     "objective_present_0", "objective_present_1", "objective_present_2",
     "objective_present_3", "objective_present_4",
+    # Direction de l'escouade observatrice vers l'objectif (vecteur unitaire dans l'espace
+    # projeté `_hex_center`, celui de la grille et du rendu). La distance seule ne dit pas où
+    # aller ; c'est le couple des deux qui rend un objectif hors fenêtre navigable.
+    "objective_dir_cos_0", "objective_dir_sin_0",
+    "objective_dir_cos_1", "objective_dir_sin_1",
+    "objective_dir_cos_2", "objective_dir_sin_2",
+    "objective_dir_cos_3", "objective_dir_sin_3",
+    "objective_dir_cos_4", "objective_dir_sin_4",
 )
 GLOBAL_CONT_SIZE = len(GLOBAL_CONT_FIELDS)
 GLOBAL_BIN_SIZE = len(GLOBAL_BIN_FIELDS)

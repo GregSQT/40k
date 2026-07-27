@@ -1638,6 +1638,106 @@ class ObservationBuilder:
             presence.append(1.0)
         return control, presence
 
+    #: Clé du cache des hexes d'objectif, un tableau par slot (cf. `_objective_hex_arrays`).
+    OBJECTIVE_HEX_ARRAYS_KEY = "_obs_objective_hex_arrays"
+
+    def _objective_hex_arrays(
+        self, game_state: Dict[str, Any]
+    ) -> List[Tuple[np.ndarray, np.ndarray]]:
+        """Hexes de CHAQUE objectif, un couple (cols, rows) par slot. Mémoïsé par épisode.
+
+        Distinct de `_grid_static_hex_arrays`, qui agrège tous les objectifs en un seul tableau
+        pour peindre un canal : ici il faut la distance PAR objectif, donc la séparation par
+        slot. Les zones totalisent ~10 500 hexes sur le board x5 — les reconstruire à chaque
+        step reviendrait à payer, en distance, ce que la grille a déjà mémoïsé en peinture.
+        """
+        cached = game_state.get(self.OBJECTIVE_HEX_ARRAYS_KEY)  # get allowed (1er appel)
+        if cached is not None:
+            return cached
+
+        arrays: List[Tuple[np.ndarray, np.ndarray]] = []
+        for objective in require_key(game_state, "objectives"):
+            # `hexes` est REQUIS (même contrat que la rasterisation du canal objectif) : un
+            # objectif malformé doit lever, pas devenir silencieusement infiniment lointain.
+            hexes = require_key(objective, "hexes")
+            cols = np.empty(len(hexes), dtype=np.float64)
+            rows = np.empty(len(hexes), dtype=np.float64)
+            for idx, hex_entry in enumerate(hexes):
+                if isinstance(hex_entry, (list, tuple)):
+                    cols[idx], rows[idx] = float(hex_entry[0]), float(hex_entry[1])
+                else:
+                    cols[idx] = float(require_key(hex_entry, "col"))
+                    rows[idx] = float(require_key(hex_entry, "row"))
+            arrays.append((cols, rows))
+
+        game_state[self.OBJECTIVE_HEX_ARRAYS_KEY] = arrays
+        return arrays
+
+    def _squad_objective_geometry(
+        self, game_state: Dict[str, Any], cx: float, cy: float
+    ) -> Tuple[List[float], List[float], List[float]]:
+        """(distances, cos, sin) de l'escouade observatrice vers chacun des 5 slots d'objectif.
+
+        - **distance** : jusqu'à l'hex le PLUS PROCHE de la zone, en subhex bruts (une zone se
+          rejoint par son bord, pas par son centre) ; grandeur brute, comme le reste des
+          continues (V11 §9.5).
+        - **direction** : vecteur unitaire vers ce même hex, dans l'espace projeté
+          `_hex_center` — la projection déjà utilisée par la grille égocentrique et par le
+          rendu. Mesurer la distance en subhex et la direction dans la projection reste
+          cohérent : `HEX_STEP_PX` est le pas centre-à-centre de deux hexes voisins, uniforme
+          sur les 6 voisins et les 2 parités (`spatial_grid`), donc les deux espaces ne
+          diffèrent que d'un facteur d'échelle.
+
+        Slot sans objectif -> (0, 0, 0), lu comme « absent » via le bit `objective_present_i`
+        déjà émis. Escouade PILE sur un hex de l'objectif -> distance 0 et direction nulle : il
+        n'y a pas de direction à donner, et normaliser un vecteur nul serait une division par
+        zéro maquillée.
+
+        ⚠️ **Ex-aequo tranchés explicitement.** Une zone rectangulaire présente très souvent
+        deux hexes à distance égale (un de chaque côté de l'axe) : leurs directions sont alors
+        opposées en `sin`. Laisser `argmin` trancher ferait dépendre la feature de l'ordre des
+        hexes dans le fichier et du dernier bit du calcul flottant — deux choses qui n'ont
+        aucun sens de jeu. Le départage se fait donc sur le plus petit (col, row).
+        """
+        from engine.hex_utils import _hex_center
+        from engine.spatial_grid import HEX_STEP_PX
+
+        arrays = self._objective_hex_arrays(game_state)
+        ax, ay = _hex_center(int(round(cx)), int(round(cy)))
+
+        distances: List[float] = []
+        cosines: List[float] = []
+        sines: List[float] = []
+        for i in range(self.SQUAD_N_OBJECTIVE_SLOTS):
+            if i >= len(arrays) or arrays[i][0].size == 0:
+                distances.append(0.0)
+                cosines.append(0.0)
+                sines.append(0.0)
+                continue
+            cols, rows = arrays[i]
+            # Inline de `_hex_center` vectorisé — même formule, mêmes constantes (le jumeau
+            # scalaire ci-dessus sert d'oracle dans les tests).
+            hex_width = 1.5
+            xs = cols * hex_width + hex_width / 2.0
+            ys = rows * HEX_STEP_PX + (np.mod(cols, 2.0) * HEX_STEP_PX) / 2.0 + HEX_STEP_PX / 2.0
+            dx = xs - ax
+            dy = ys - ay
+            d2 = dx * dx + dy * dy
+            min_d2 = float(d2.min())
+            # Tolérance RELATIVE : deux hexes symétriques donnent le même carré à quelques ulps
+            # près, et un `==` strict retomberait sur l'aléa du dernier bit.
+            tied = np.flatnonzero(d2 <= min_d2 * (1.0 + 1e-9) + 1e-12)
+            nearest = int(tied[np.lexsort((rows[tied], cols[tied]))[0]])
+            dist_px = float(np.sqrt(d2[nearest]))
+            distances.append(dist_px / HEX_STEP_PX)
+            if dist_px <= 0.0:
+                cosines.append(0.0)
+                sines.append(0.0)
+            else:
+                cosines.append(float(dx[nearest]) / dist_px)
+                sines.append(float(dy[nearest]) / dist_px)
+        return distances, cosines, sines
+
     def _empty_squad_observation(self) -> Dict[str, np.ndarray]:
         """Observation nulle (escouade morte/absente) — mêmes clés et formes que le cas nominal."""
         return {
@@ -1971,6 +2071,14 @@ class ObservationBuilder:
         for i in range(self.SQUAD_N_OBJECTIVE_SLOTS):
             g_bin[global_bin_index(f"objective_control_{i}")] = control[i]
             g_bin[global_bin_index(f"objective_present_{i}")] = presence[i]
+        # Où est cet objectif, depuis MOI : distance (continue, brute) + direction unitaire.
+        # La grille égocentrique ne porte que ce qui tombe dans le budget d'Advance ; au-delà,
+        # ces trois nombres sont la SEULE trace d'un objectif que 3 actions de zone désignent.
+        obj_dist, obj_cos, obj_sin = self._squad_objective_geometry(game_state, cx, cy)
+        for i in range(self.SQUAD_N_OBJECTIVE_SLOTS):
+            g_cont[global_cont_index(f"objective_distance_{i}")] = obj_dist[i]
+            g_bin[global_bin_index(f"objective_dir_cos_{i}")] = obj_cos[i]
+            g_bin[global_bin_index(f"objective_dir_sin_{i}")] = obj_sin[i]
 
         # === ENGAGEMENT (règle 03.04) — une seule passe pour toutes les entités ===
         # Le test EZ exact compare des EMPREINTES (jusqu'à ~200 cases pour une grande base) :

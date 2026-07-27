@@ -1130,6 +1130,11 @@ class W40KEngine(gym.Env):
         # Grille spatiale (T1) : tableaux memoises de murs/objectifs. Sans purge, l'agent
         # observerait le terrain de l'episode precedent (corruption silencieuse de l'obs).
         self.game_state.pop("_grid_static_hex_arrays", None)
+        # Hexes d'objectif par slot (distances/directions du contexte global). Meme raison que
+        # ci-dessus : un scenario recharge change les zones, pas les cles du cache.
+        # (Le cache des profils d'armes, lui, tombe dans `build_units_cache` — il est indexe par
+        # figurines vivantes, donc lie a la reconstruction des caches, pas au scenario.)
+        self.game_state.pop(ObservationBuilder.OBJECTIVE_HEX_ARRAYS_KEY, None)
         # Cartes de cellules de move (T3) : elles portent les destinations du pool de l'episode
         # precedent. Leur tampon (ancre, phase) NE protege PAS ici — au nouvel episode l'escouade
         # peut se redeployer sur la meme ancre en phase move, le tampon coincide, et une carte
