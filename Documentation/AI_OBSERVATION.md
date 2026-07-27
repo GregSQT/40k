@@ -73,84 +73,194 @@ Coût d'UNE entité = 19 + 32 (unité) + 20 × (13 + 18) (armes) + 6 × (5 + 5) 
 
 ### Section Breakdown
 
-⚠️ **Repérage par NOM, jamais par index.** Les index se lisent via `global_cont_index("nom")`,
-`global_bin_index("nom")`, `unit_cont_index("nom")`, `unit_bin_index("nom")` — ils changent à
-chaque évolution du schéma, les noms non. Écrire `obs[314]` dans du code ou un test est
-exactement l'erreur que le pipeline legacy a payée.
+Toutes les dimensions, dans l'ordre d'émission, avec pour chacune : **la clé du `Dict`** qui la
+porte, son **index dans cette clé**, son nom et sa plage. Le titre de chaque bloc indique **qui le
+normalise** (`VecNormalize` / `EntityRunningNorm` / jamais).
 
-#### 1. `global_cont` — contexte continu (le seul bloc normalisé par `VecNormalize`)
+`[s]` = slot d'entité (0..K−1 ; pour `allies_*`, **0 = l'unité ACTIVE**) · `[w]` = slot d'arme
+(0..9 = tir, 10..19 = mêlée) · `[t]` = slot de type de figurine · `[m]` = slot de figurine.
+Une unité AMIE et une unité ENNEMIE ont **exactement** les mêmes colonnes : `[ACTIVE seule]` et
+`[ENNEMIS seuls]` marquent les features à zéro ailleurs, avec `is_active` / `is_ally` pour masque.
 
-`turn` · `episode_steps` · `my_victory_points` · `enemy_victory_points` · `my_value_ratio` ·
-`enemy_value_ratio` · **`objective_distance_0..4`** — distance à l'hex le plus proche de chaque
-zone, en subhex bruts.
+⚠️ **Ne pas recopier ces index dans du code.** Ils changent à chaque évolution du schéma —
+utiliser `global_cont_index("nom")`, `global_bin_index("nom")`, `unit_cont_index("nom")`,
+`unit_bin_index("nom")`. Les index ci-dessous sont vérifiés par
+`tests/unit/engine/test_squad_obs_structure_doc.py`, qui échoue s'ils dérivent du schéma.
 
-#### 2. `global_bin` — contexte discret (JAMAIS normalisé)
+#### `global_cont` — contexte continu  ·  VecNormalize ✓
 
-`is_my_turn` · `phase` (0 / .25 / .5 / .75 / 1) · `objective_control_0..4` (dans {−1, 0, +1}) ·
-`objective_present_0..4` · **`objective_dir_cos_0..4`** et **`objective_dir_sin_0..4`** — vecteur
-unitaire vers chaque objectif.
+```python
+global_cont[0]     = turn                                   # brut (numero de tour)
+global_cont[1]     = episode_steps                          # brut (compteur de pas)
+global_cont[2]     = my_victory_points                      # brut (VP)
+global_cont[3]     = enemy_victory_points                   # brut (VP)
+global_cont[4]     = my_value_ratio                         # 0.0-1.0 (VALUE vivante / depart)
+global_cont[5]     = enemy_value_ratio                      # 0.0-1.0 (VALUE vivante / depart)
+global_cont[6]     = objective_distance_0                   # subhex, hex le plus proche de l'objectif 0
+global_cont[7]     = objective_distance_1                   # subhex, hex le plus proche de l'objectif 1
+global_cont[8]     = objective_distance_2                   # subhex, hex le plus proche de l'objectif 2
+global_cont[9]     = objective_distance_3                   # subhex, hex le plus proche de l'objectif 3
+global_cont[10]    = objective_distance_4                   # subhex, hex le plus proche de l'objectif 4
+```
 
-#### 3. `*_cont` d'une unité — 19 features, MÊME schéma ami/ennemi
+#### `global_bin` — contexte discret  ·  jamais normalise
 
-| Groupe | Features |
-|---|---|
-| effectif et état | `alive_models`, `hp_total`, `value_alive`, `oc_total`, `model_count_ratio`, `wounded_hp_ratio` |
-| position | `col_rel`, `row_rel` (figurine la plus proche du centroïde observateur, **pas** l'ancre), `edge_distance` (bord-à-bord ⚠ non-actives seulement) |
-| datasheet | `move`, `hp_max`, `toughness`, `armor_save`, `invul_save` |
-| mouvement du tour | `moved_max`, `moved_sum` — distance de **CHEMIN**, porte la clause 3 de [HEAVY] 24.16 |
-| engagement ⚠ ACTIVE seule | `n_fight_eligible`, `n_in_enemy_ez`, `n_relayed_ez` |
+```python
+global_bin[0]      = is_my_turn                             # 0.0 / 1.0
+global_bin[1]      = phase                                  # deploiement|commande=0, move=.25, tir=.5, charge=.75, combat=1
+global_bin[2]      = objective_control_0                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
+global_bin[3]      = objective_control_1                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
+global_bin[4]      = objective_control_2                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
+global_bin[5]      = objective_control_3                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
+global_bin[6]      = objective_control_4                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
+global_bin[7]      = objective_present_0                    # 0.0 / 1.0 (objectif present au scenario)
+global_bin[8]      = objective_present_1                    # 0.0 / 1.0 (objectif present au scenario)
+global_bin[9]      = objective_present_2                    # 0.0 / 1.0 (objectif present au scenario)
+global_bin[10]     = objective_present_3                    # 0.0 / 1.0 (objectif present au scenario)
+global_bin[11]     = objective_present_4                    # 0.0 / 1.0 (objectif present au scenario)
+global_bin[12]     = objective_dir_cos_0                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
+global_bin[13]     = objective_dir_sin_0                    # -1.0..1.0
+global_bin[14]     = objective_dir_cos_1                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
+global_bin[15]     = objective_dir_sin_1                    # -1.0..1.0
+global_bin[16]     = objective_dir_cos_2                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
+global_bin[17]     = objective_dir_sin_2                    # -1.0..1.0
+global_bin[18]     = objective_dir_cos_3                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
+global_bin[19]     = objective_dir_sin_3                    # -1.0..1.0
+global_bin[20]     = objective_dir_cos_4                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
+global_bin[21]     = objective_dir_sin_4                    # -1.0..1.0
+```
 
-#### 4. `*_bin` d'une unité — 32 drapeaux, MÊME schéma ami/ennemi
+#### `allies_cont[s]` / `enemies_cont[s]` — une unite, 19 features  ·  EntityRunningNorm
 
-| Groupe | Drapeaux |
-|---|---|
-| masques | `present` (0 = slot vide ou unité morte), `is_ally`, `is_active` |
-| activation du tour | `moved`, `shot`, `fought`, `advanced`, `fled` |
-| état | `coherent` (03.03), `engaged` (03.04) |
-| terrain ⚠ ACTIVE seule | `hidden` (13.09), `gone_to_ground` (13.5), `in_cover` (13.08, branche intrinsèque) |
-| mise en place | `deploy_not_on_board`, `deploy_pre_battle`, `deploy_in_battle`, `deployed_this_turn` (clause 2 de [HEAVY]) |
-| paire ⚠ ENNEMIS seuls | `los_can_see` (06.01), `cover_vs_observer` (**13.08 exact**, ses deux branches) |
-| **règles d'unité** (13) | `rule_charge_after_advance`, `rule_charge_after_flee`, `rule_charge_impact`, `rule_closest_target_penetration`, `rule_move_after_shooting`, `rule_reactive_move`, `rule_reroll_1_save_fight`, `rule_reroll_1_tohit_fight`, `rule_reroll_1_towound`, `rule_reroll_charge`, `rule_reroll_towound_target_on_objective`, `rule_shoot_after_advance`, `rule_shoot_after_flee` |
+```python
+[s][0]     = alive_models                           # brut (figurines vivantes)
+[s][1]     = hp_total                               # brut (PV cumules)
+[s][2]     = value_alive                            # brut (points, somme par figurine)
+[s][3]     = oc_total                               # brut (OC cumule)
+[s][4]     = model_count_ratio                      # 0.0-1.0 (vivantes / depart)
+[s][5]     = wounded_hp_ratio                       # 0.0-1.0 (1.0 si aucune entamee)
+[s][6]     = col_rel                                # subhex SIGNE (vs centroide observateur)
+[s][7]     = row_rel                                # subhex SIGNE (vs centroide observateur)
+[s][8]     = edge_distance                          # subhex, bord-a-bord [ENNEMIS/ALLIES non actifs]
+[s][9]     = move                                   # brut (M de la datasheet)
+[s][10]    = hp_max                                 # brut
+[s][11]    = toughness                              # brut
+[s][12]    = armor_save                             # brut (Sv)
+[s][13]    = invul_save                             # brut (InSv, 0 = aucune)
+[s][14]    = moved_max                              # subhex, distance de CHEMIN (max sur l'escouade)
+[s][15]    = moved_sum                              # subhex, distance de CHEMIN (somme)
+[s][16]    = n_fight_eligible                       # brut [ACTIVE seule]
+[s][17]    = n_in_enemy_ez                          # brut [ACTIVE seule]
+[s][18]    = n_relayed_ez                           # brut [ACTIVE seule]
+```
 
-**⚠ ACTIVE seule** = à zéro pour les autres entités, masque = `is_active` ·
-**⚠ ENNEMIS seuls** = décrit une paire observateur → cible, à zéro pour tout allié.
-C'est ce qui préserve le schéma unifié : mêmes colonnes partout, remplies ou masquées.
+#### `allies_bin[s]` / `enemies_bin[s]` — une unite, 32 drapeaux  ·  jamais normalise
 
-#### 5. `*_wpn_*` — un profil d'arme (10 slots de tir **puis** 10 de mêlée)
+```python
+[s][0]     = present                                # 0.0 / 1.0 — masque d'entite (0 = slot vide ou morte)
+[s][1]     = is_ally                                # 0.0 / 1.0
+[s][2]     = is_active                              # 0.0 / 1.0 — masque des features [ACTIVE seule]
+[s][3]     = moved                                  # 0.0 / 1.0
+[s][4]     = shot                                   # 0.0 / 1.0
+[s][5]     = fought                                 # 0.0 / 1.0
+[s][6]     = advanced                               # 0.0 / 1.0
+[s][7]     = fled                                   # 0.0 / 1.0
+[s][8]     = coherent                               # 0.0 / 1.0 (03.03)
+[s][9]     = engaged                                # 0.0 / 1.0 (03.04)
+[s][10]    = hidden                                 # 0.0 / 1.0 (13.09) [ACTIVE seule]
+[s][11]    = gone_to_ground                         # 0.0 / 1.0 (13.5) [ACTIVE seule]
+[s][12]    = in_cover                               # 0.0 / 1.0 (13.08 branche intrinseque) [ACTIVE seule]
+[s][13]    = deploy_not_on_board                    # 0.0 / 1.0 — one-hot mise en place
+[s][14]    = deploy_pre_battle                      # 0.0 / 1.0
+[s][15]    = deploy_in_battle                       # 0.0 / 1.0
+[s][16]    = deployed_this_turn                     # 0.0 / 1.0 (clause 2 de [HEAVY] 24.16)
+[s][17]    = los_can_see                            # 0.0 / 1.0 (06.01) [ENNEMIS seuls]
+[s][18]    = cover_vs_observer                      # 0.0 / 1.0 (13.08 EXACT, 2 branches) [ENNEMIS seuls]
+[s][19]    = rule_charge_after_advance              # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][20]    = rule_charge_after_flee                 # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][21]    = rule_charge_impact                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][22]    = rule_closest_target_penetration        # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][23]    = rule_move_after_shooting               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][24]    = rule_reactive_move                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][25]    = rule_reroll_1_save_fight               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][26]    = rule_reroll_1_tohit_fight              # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][27]    = rule_reroll_1_towound                  # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][28]    = rule_reroll_charge                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][29]    = rule_reroll_towound_target_on_objective # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][30]    = rule_shoot_after_advance               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][31]    = rule_shoot_after_flee                  # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+```
 
-- **13 continues** : `NB`, `ATK`, `STR`, `AP`, `DMG`, portée, **porteurs vivants** — ce dernier
-  distingue 1 rokkit de 9 shootas, le volume de feu étant `porteurs × NB` — puis les 5 paramètres
-  de règles (`RAPID_FIRE`, `SUSTAINED_HITS`, `MELTA`, `CLEAVE`, `BLAST`), puis le seuil `Y+` de
-  [ANTI-X] (0 = aucune règle ANTI).
-- **18 drapeaux** : 12 bits de règles (`DEVASTATING_WOUNDS`, `LETHAL_HITS`, `TORRENT`,
-  `TWIN_LINKED`, `EXTRA_ATTACKS`, `PRECISION`, `PSYCHIC`, `HAZARDOUS`, `HEAVY`, `IGNORES_COVER`,
-  `CLOSE_QUARTERS`, `ASSAULT`) + one-hot du keyword ciblé par [ANTI-X] (`INFANTRY`, `VEHICLE`,
-  `FLY`, `PSYKER`, `MONSTER`) + le **mask** du slot.
-- ⚠️ [INDIRECT FIRE] 24.19 est **délibérément absente** : la règle n'est pas implémentée, un bit
-  pour elle serait du bruit pur. Profils regroupés par identité de caractéristiques ; tout
-  dépassement de K est **logué**, jamais silencieux.
+#### `*_wpn_cont[s][w]` — un profil d'arme, 13 continues  ·  EntityRunningNorm
 
-#### 6. `*_types_*` — types de figurines (6 slots par unité)
+```python
+[s][w][0]     = NB                                     # brut (caracteristique)
+[s][w][1]     = ATK                                    # brut (caracteristique)
+[s][w][2]     = STR                                    # brut (caracteristique)
+[s][w][3]     = AP                                     # brut (caracteristique)
+[s][w][4]     = DMG                                    # brut (caracteristique)
+[s][w][5]     = range                                  # subhex (portee)
+[s][w][6]     = carriers                               # brut — porteurs VIVANTS du profil
+[s][w][7]     = param_RAPID_FIRE                       # brut (0 = regle absente ; forme nue -> 0)
+[s][w][8]     = param_SUSTAINED_HITS                   # brut (0 = regle absente ; forme nue -> 0)
+[s][w][9]     = param_MELTA                            # brut (0 = regle absente ; forme nue -> 0)
+[s][w][10]    = param_CLEAVE                           # brut (0 = regle absente ; forme nue -> 0)
+[s][w][11]    = param_BLAST                            # brut (0 = regle absente ; forme nue -> 1)
+[s][w][12]    = anti_threshold                         # brut (Y+ de [ANTI-X], 0 = aucune)
+```
 
-- **5 continues** : `hp_max`, `toughness`, `armor_save`, `invul_save`, `alive_count`.
-- **5 drapeaux** : one-hot du rôle d'allocation (règle 19) — `role_special_weapon`,
-  `role_sergeant`, `role_support`, `role_leader`, aucun bit = figurine de base — + `present`.
+#### `*_wpn_bin[s][w]` — un profil d'arme, 18 drapeaux  ·  jamais normalise
 
-Décrit l'escouade **entière** en quelques dimensions, au lieu de répéter 20 fois le même profil.
+```python
+[s][w][0]     = rule_DEVASTATING_WOUNDS                # 0.0 / 1.0
+[s][w][1]     = rule_LETHAL_HITS                       # 0.0 / 1.0
+[s][w][2]     = rule_TORRENT                           # 0.0 / 1.0
+[s][w][3]     = rule_TWIN_LINKED                       # 0.0 / 1.0
+[s][w][4]     = rule_EXTRA_ATTACKS                     # 0.0 / 1.0
+[s][w][5]     = rule_PRECISION                         # 0.0 / 1.0
+[s][w][6]     = rule_PSYCHIC                           # 0.0 / 1.0
+[s][w][7]     = rule_HAZARDOUS                         # 0.0 / 1.0
+[s][w][8]     = rule_HEAVY                             # 0.0 / 1.0
+[s][w][9]     = rule_IGNORES_COVER                     # 0.0 / 1.0
+[s][w][10]    = rule_CLOSE_QUARTERS                    # 0.0 / 1.0
+[s][w][11]    = rule_ASSAULT                           # 0.0 / 1.0
+[s][w][12]    = anti_INFANTRY                          # 0.0 / 1.0 — one-hot du keyword cible par [ANTI-X]
+[s][w][13]    = anti_VEHICLE                           # 0.0 / 1.0 — one-hot du keyword cible par [ANTI-X]
+[s][w][14]    = anti_FLY                               # 0.0 / 1.0 — one-hot du keyword cible par [ANTI-X]
+[s][w][15]    = anti_PSYKER                            # 0.0 / 1.0 — one-hot du keyword cible par [ANTI-X]
+[s][w][16]    = anti_MONSTER                           # 0.0 / 1.0 — one-hot du keyword cible par [ANTI-X]
+[s][w][17]    = mask                                   # 0.0 / 1.0 — 0 = slot d'arme vide
+```
 
-#### 7. `self_models_*` — mes figurines (20 slots, l'irréductiblement individuel)
+#### `*_types_cont[s][t]` — un type de figurine, 5 continues  ·  EntityRunningNorm
 
-- **2 continues** : `col_rel`, `row_rel`, relatives au centroïde de l'escouade.
-- **3 drapeaux** : `fight_eligible`, `in_enemy_ez`, `ez_relayed_by_ally`.
+```python
+[s][t][0]     = hp_max                                 # brut
+[s][t][1]     = toughness                              # brut
+[s][t][2]     = armor_save                             # brut (Sv)
+[s][t][3]     = invul_save                             # brut (InSv, 0 = aucune)
+[s][t][4]     = alive_count                            # brut (figurines de ce type)
+```
 
-#### 8. `grid` — 7 canaux 32×32 égocentriques
+#### `*_types_bin[s][t]` — un type de figurine, 5 drapeaux  ·  jamais normalise
 
-`0` murs · `1` occupation alliée · `2` occupation ennemie · `3` zone d'engagement ennemie ·
-`4` objectifs · `5` niveau (étages) · `6` couvert (13.08, dilaté au rayon de socle).
+```python
+[s][t][0]     = role_special_weapon                    # 0.0 / 1.0 — one-hot role (regle 19)
+[s][t][1]     = role_sergeant                          # 0.0 / 1.0
+[s][t][2]     = role_support                           # 0.0 / 1.0
+[s][t][3]     = role_leader                            # 0.0 / 1.0
+[s][t][4]     = present                                # 0.0 / 1.0 — 0 = slot de type vide
+```
 
-Demi-étendue = **budget d'Advance maximal** de l'escouade (`M + 6″`), ce qui rend la géométrie
-indépendante de `inches_to_subhex`. ⚠️ **Aucun clamp** : ce qui dépasse est écarté, pas rabattu
-sur le bord — d'où la nécessité des distances/directions d'objectif dans `global_*`.
+#### `self_models_cont[m]` / `self_models_bin[m]` — mes figurines  ·  EntityRunningNorm / jamais normalise
+
+```python
+cont[m][0]     = col_rel                                # subhex SIGNE (vs centroide observateur)
+cont[m][1]     = row_rel                                # subhex SIGNE (vs centroide observateur)
+bin[m][0]      = fight_eligible                         # 0.0 / 1.0
+bin[m][1]      = in_enemy_ez                            # 0.0 / 1.0
+bin[m][2]      = ez_relayed_by_ally                     # 0.0 / 1.0
+```
 
 ### Les blocs logiques A→E, et ce qu'ils sont devenus
 

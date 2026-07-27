@@ -61,15 +61,51 @@ def test_every_schema_field_is_documented():
     missing = []
     for group, fields in groups.items():
         for field in fields:
-            # Les series indexees sont documentees par leur forme abregee (`objective_distance_0..4`,
-            # `objective_dir_cos/sin_0..4`) : on accepte le nom exact OU sa racine.
-            root = re.sub(r"_\d+$", "", field)
-            if field not in text and root not in text:
+            if field not in text:
                 missing.append(f"{group}.{field}")
     assert not missing, (
         "features absentes d'AI_OBSERVATION.md (Section Breakdown a mettre a jour) : "
         + ", ".join(missing)
     )
+
+
+def test_documented_indices_match_the_schema_order():
+    """Les INDEX ecrits dans le Section Breakdown sont ceux du schema.
+
+    Le breakdown liste chaque dimension sous la forme `cle[i] = nom` / `[s][i] = nom`. Ces index
+    sont exacts a l'ecriture et derivent des qu'une feature est inseree ailleurs qu'en fin de
+    liste — c'est precisement ce qui a rendu le layout legacy (`obs[314:346]`) mensonger. Ce test
+    les relit et les compare a l'ordre d'emission reel.
+    """
+    text = _doc()
+    checks = (
+        ("global_cont", GLOBAL_CONT_FIELDS, r"global_cont\[(\d+)\]\s*=\s*(\w+)"),
+        ("global_bin", GLOBAL_BIN_FIELDS, r"global_bin\[(\d+)\]\s*=\s*(\w+)"),
+        ("unite (allies_cont/enemies_cont, allies_bin/enemies_bin)",
+         None, r"^\[s\]\[(\d+)\]\s*=\s*(\w+)"),
+    )
+    # global_*
+    for label, fields, pattern in checks[:2]:
+        found = {int(i): name for i, name in re.findall(pattern, text)}
+        assert found, f"aucune ligne indexee trouvee pour {label}"
+        for idx, name in found.items():
+            assert idx < len(fields), f"{label}[{idx}] documente hors du schema ({len(fields)} dims)"
+            assert fields[idx] == name, (
+                f"{label}[{idx}] : la doc dit {name!r}, le schema dit {fields[idx]!r}"
+            )
+        assert len(found) == len(fields), (
+            f"{label} : {len(found)} dims documentees pour {len(fields)} dans le schema"
+        )
+
+    # unite : les deux blocs `[s][i]` couvrent UNIT_CONT puis UNIT_BIN, dans cet ordre.
+    pairs = [(int(i), n) for i, n in re.findall(r"^\[s\]\[(\d+)\]\s*=\s*(\w+)", text, re.M)]
+    expected = list(UNIT_CONT_FIELDS) + list(UNIT_BIN_FIELDS)
+    assert len(pairs) == len(expected), (
+        f"bloc unite : {len(pairs)} dims documentees pour {len(expected)} attendues "
+        f"({len(UNIT_CONT_FIELDS)} cont + {len(UNIT_BIN_FIELDS)} bin)"
+    )
+    for (idx, name), want in zip(pairs, expected):
+        assert name == want, f"bloc unite [{idx}] : la doc dit {name!r}, le schema dit {want!r}"
 
 
 def test_weapon_profile_rules_are_documented():
