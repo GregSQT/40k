@@ -181,10 +181,43 @@ MODEL_TYPE_BIN_SIZE = len(MODEL_TYPE_BIN_FIELDS)
 # Sous-registre « mes figurines » (irréductiblement individuel, unité active seule)
 # ---------------------------------------------------------------------------
 
+#: ⚠️ `col_rel` / `row_rel` sont exprimés dans la projection `_hex_center` — la MÊME que la
+#: grille égocentrique et que les directions d'objectif (V11 §0.32 T-I). Ce ne sont PAS des
+#: différences de coordonnées offset : en offset, deux voisins hexagonaux de parités de ligne
+#: différentes n'ont pas la même norme, et l'observation portait alors deux géométries.
 SELF_MODEL_CONT_FIELDS: Tuple[str, ...] = ("col_rel", "row_rel")
-SELF_MODEL_BIN_FIELDS: Tuple[str, ...] = ("fight_eligible", "in_enemy_ez", "ez_relayed_by_ally")
+#: `present` est le masque de ce bloc, et il est EXPLICITE (V11 §0.32 T-H) : une figurine posée
+#: sur le centroïde arrondi et sans aucun drapeau a une ligne entièrement nulle, donc un masque
+#: déduit de la ligne (`(|cont| + |bin|) > 0`) la comptait ABSENTE — effectif faux servi sans
+#: erreur, dans l'agrégation comme dans le dénominateur de `EntityRunningNorm`. Il est en DERNIÈRE
+#: position, comme les masques des registres d'armes et de types (`[..., -1]`).
+SELF_MODEL_BIN_FIELDS: Tuple[str, ...] = (
+    "fight_eligible", "in_enemy_ez", "ez_relayed_by_ally", "present",
+)
 SELF_MODEL_CONT_SIZE = len(SELF_MODEL_CONT_FIELDS)
 SELF_MODEL_BIN_SIZE = len(SELF_MODEL_BIN_FIELDS)
+
+_SELF_MODEL_CONT_INDEX: Dict[str, int] = {n: i for i, n in enumerate(SELF_MODEL_CONT_FIELDS)}
+_SELF_MODEL_BIN_INDEX: Dict[str, int] = {n: i for i, n in enumerate(SELF_MODEL_BIN_FIELDS)}
+
+
+def self_model_cont_index(field: str) -> int:
+    """Index d'une feature continue de figurine. Nom inconnu -> KeyError explicite."""
+    if field not in _SELF_MODEL_CONT_INDEX:
+        raise KeyError(
+            f"Feature continue de figurine inconnue : {field!r}. "
+            f"Champs : {SELF_MODEL_CONT_FIELDS}"
+        )
+    return _SELF_MODEL_CONT_INDEX[field]
+
+
+def self_model_bin_index(field: str) -> int:
+    """Index d'un drapeau de figurine. Nom inconnu -> KeyError explicite."""
+    if field not in _SELF_MODEL_BIN_INDEX:
+        raise KeyError(
+            f"Drapeau de figurine inconnu : {field!r}. Champs : {SELF_MODEL_BIN_FIELDS}"
+        )
+    return _SELF_MODEL_BIN_INDEX[field]
 
 
 # ---------------------------------------------------------------------------
@@ -207,12 +240,25 @@ GLOBAL_CONT_FIELDS: Tuple[str, ...] = (
     "objective_distance_0", "objective_distance_1", "objective_distance_2",
     "objective_distance_3", "objective_distance_4",
 )
-#: `phase` est un scalaire ordonné dans [0,1] : il vit avec les drapeaux car il ne doit JAMAIS
-#: être normalisé par des statistiques glissantes (V11 §9.5). Les sin/cos de direction
-#: d'objectif sont ici pour la MÊME raison : déjà bornés dans [-1,1] et centrés, les passer à
-#: `VecNormalize` ne ferait qu'amplifier leur bruit.
+#: Phases du moteur, dans l'ordre FIGÉ du one-hot `phase_*` de `GLOBAL_BIN_FIELDS`. DOIT valoir
+#: `engine.action_decoder.GAME_PHASES` — verrouillé par test de contrat, comme
+#: `N_OBJECTIVE_SLOTS` ↔ `macro_intents.MAX_OBJECTIVES`. La constante est recopiée ici et non
+#: importée parce que ce module est une FEUILLE (aucune dépendance) : importer `action_decoder`,
+#: qui tire tout le moteur, créerait un cycle.
+OBS_PHASE_IDS: Tuple[str, ...] = (
+    "deployment", "command", "move", "shoot", "charge", "fight",
+)
+
+#: La phase est un ONE-HOT de 6 bits (V11 §0.32 T-J). Elle vit avec les drapeaux car elle ne doit
+#: JAMAIS être normalisée par des statistiques glissantes (V11 §9.5). L'encodage ordinal précédent
+#: (0 / .25 / .5 / .75 / 1) avait deux défauts : il imposait une métrique entre phases qui n'a
+#: aucun sens, et il donnait la MÊME valeur 0.0 à `deployment` et `command` — deux phases où les
+#: ids d'action 4–8 signifient l'un « slot de déploiement », l'autre « cellule de move ».
+#: Les sin/cos de direction d'objectif sont ici pour la MÊME raison de non-normalisation : déjà
+#: bornés dans [-1,1] et centrés, les passer à `VecNormalize` ne ferait qu'amplifier leur bruit.
 GLOBAL_BIN_FIELDS: Tuple[str, ...] = (
-    "is_my_turn", "phase",
+    "is_my_turn",
+) + tuple(f"phase_{phase}" for phase in OBS_PHASE_IDS) + (
     "objective_control_0", "objective_control_1", "objective_control_2",
     "objective_control_3", "objective_control_4",
     "objective_present_0", "objective_present_1", "objective_present_2",

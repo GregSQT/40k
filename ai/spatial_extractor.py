@@ -38,10 +38,14 @@ import torch
 import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
+from engine.observation_entities import self_model_bin_index
 from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
 
 #: Familles d'unités partageant le MÊME schéma et le MÊME encodeur.
 _UNIT_FAMILIES = ("allies", "enemies")
+
+#: Index du masque de présence des figurines — LU depuis le schéma, jamais recopié.
+_SELF_MODEL_PRESENT_IDX = self_model_bin_index("present")
 
 
 class EntityRunningNorm(nn.Module):
@@ -315,11 +319,10 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
 
         sm_cont = observations["self_models_cont"]
         sm_bin = observations["self_models_bin"]
-        # Une figurine absente est zéro-paddée : son masque de présence se lit sur la ligne
-        # entière (aucune feature individuelle n'est un bit de présence).
-        sm_mask = (
-            (sm_cont.abs().sum(dim=-1) + sm_bin.abs().sum(dim=-1)) > 0
-        ).to(sm_cont.dtype)
+        # Masque LU sur le bit dédié, comme pour les armes et les types. Il est déduit de rien :
+        # une figurine sur le centroïde arrondi et sans drapeau a une ligne entièrement nulle et
+        # serait comptée absente (V11 §0.32 T-H).
+        sm_mask = sm_bin[..., _SELF_MODEL_PRESENT_IDX]
         sm_in = torch.cat([self.self_model_norm(sm_cont, sm_mask), sm_bin], dim=-1)
         sm_agg = _masked_mean_max(self.self_model_encoder(sm_in), sm_mask)
 

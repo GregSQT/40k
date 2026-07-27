@@ -13,6 +13,10 @@ from engine.combat_utils import (
     normalize_coordinates,
 )
 from engine.game_utils import get_unit_by_id
+# Projection géométrique des hexes (§0.32 T-I) : UNE seule géométrie dans l'observation — celle
+# de la grille égocentrique et des directions d'objectif. `hex_utils` est une feuille (math/numpy
+# seulement), l'import de module ne crée aucun cycle.
+from engine.hex_utils import _hex_center
 from engine.phase_handlers.shooting_handlers import _calculate_save_target, _calculate_wound_target as _calculate_wound_target_engine, compute_unit_los
 from engine.phase_handlers.shared_utils import (
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
@@ -43,6 +47,7 @@ from engine.observation_entities import (
     GLOBAL_CONT_SIZE,
     MODEL_TYPE_BIN_SIZE,
     MODEL_TYPE_CONT_SIZE,
+    OBS_PHASE_IDS,
     SELF_MODEL_BIN_SIZE,
     SELF_MODEL_CONT_SIZE,
     UNIT_BIN_SIZE,
@@ -1869,7 +1874,10 @@ class ObservationBuilder:
         squad_cache = game_state["squad_cache"]
 
         entry = units_cache[squad_id]
-        sq = squad_cache[squad_id] if squad_id in squad_cache else {}
+        # `squad_cache` est construit pour CHAQUE escouade de `squad_models`, en même temps que
+        # `units_cache` (`build_squad_cache`) : une entrée absente est une incohérence de cache, pas
+        # un cas de jeu. L'ancien `else {}` la transformait en escouade d'OC nul (§0.32 T-J).
+        sq = require_key(squad_cache, squad_id)
         unit = get_unit_by_id(str(squad_id), game_state)
         if unit is None:
             raise KeyError(f"Unit {squad_id} missing from game_state['units'] for observation")
@@ -1898,7 +1906,9 @@ class ObservationBuilder:
         _c("hp_total", int(entry.get("HP_CUR", 0)))  # get allowed
         # VALUE vivante : somme PAR FIGURINE (exacte sur une escouade hétérogène en points).
         _c("value_alive", sum(float(require_key(models_cache[mid], "VALUE")) for mid in alive_mids))
-        _c("oc_total", int(sq.get("oc_total", 0)))  # get allowed
+        # OC cumulé : REQUIS. Un défaut à 0 aurait dit « cette escouade ne prend aucun objectif »
+        # (règle 14) pour une entrée de cache incomplète, sans rien lever (§0.32 T-J).
+        _c("oc_total", int(require_key(sq, "oc_total")))
         _c("model_count_ratio", len(alive_mids) / float(model_count_at_start))
         # En 40K les pertes s'allouent une figurine à la fois : au plus une figurine est
         # partiellement blessée. Aucune entamée -> 1.0, lecture exacte du minimum (pas un repli).
@@ -1912,15 +1922,21 @@ class ObservationBuilder:
         # Position mesurée depuis la figurine la PLUS PROCHE de mon centroïde, et non depuis
         # l'ancre (V11 §9.2) : sur une escouade de 20 Boyz étalée, l'ancre peut être à l'opposé
         # de la figurine qui me menace.
-        cx, cy = ctx["cx"], ctx["cy"]
+        #
+        # Position ET choix de la figurine dans la projection `_hex_center` (§0.32 T-I) : en
+        # coordonnées offset, deux voisins hexagonaux de parités de ligne différentes n'ont pas la
+        # même norme, donc « la plus proche » et sa direction dépendaient de la parité. Même
+        # repère que la grille égocentrique et que les directions d'objectif.
+        anchor_x, anchor_y = ctx["anchor_x"], ctx["anchor_y"]
+        projected = {mid: _hex_center(int(models_cache[mid]["col"]), int(models_cache[mid]["row"]))
+                     for mid in alive_mids}
         nearest_mid = min(
             alive_mids,
-            key=lambda mid: (float(models_cache[mid]["col"]) - cx) ** 2
-            + (float(models_cache[mid]["row"]) - cy) ** 2,
+            key=lambda mid: (projected[mid][0] - anchor_x) ** 2
+            + (projected[mid][1] - anchor_y) ** 2,
         )
-        nearest = models_cache[nearest_mid]
-        _c("col_rel", float(int(nearest["col"])) - cx)
-        _c("row_rel", float(int(nearest["row"])) - cy)
+        _c("col_rel", projected[nearest_mid][0] - anchor_x)
+        _c("row_rel", projected[nearest_mid][1] - anchor_y)
         if not is_active:
             # MÊME mesure que le gate de portée du moteur (socles par-figurine), donc
             # directement comparable aux portées d'armes exposées par les profils.
@@ -2068,6 +2084,10 @@ class ObservationBuilder:
         enemy_player = 2 if active_player == 1 else 1
         cx = float(active_sq.get("centroid_col", active_entry["col"]))  # get allowed
         cy = float(active_sq.get("centroid_row", active_entry["row"]))  # get allowed
+        # Origine des positions RELATIVES, dans la projection `_hex_center` (§0.32 T-I) : la même
+        # origine que les directions d'objectif (`_squad_objective_geometry`), donc un seul repère
+        # pour tout ce que l'observation exprime « depuis moi ».
+        anchor_x, anchor_y = _hex_center(int(round(cx)), int(round(cy)))
 
         obs = self._empty_squad_observation()
 
@@ -2096,8 +2116,17 @@ class ObservationBuilder:
         g_bin[global_bin_index("is_my_turn")] = (
             1.0 if int(require_key(game_state, "current_player")) == active_player else 0.0
         )
-        phase_encoding = {"deployment": 0.0, "command": 0.0, "move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}
-        g_bin[global_bin_index("phase")] = phase_encoding.get(game_state.get("phase", "command"), 0.0)  # get allowed
+        # Phase en ONE-HOT (§0.32 T-J) : l'encodage ordinal donnait la MÊME valeur à `deployment`
+        # et `command`, alors que les ids d'action 4–8 y désignent l'un un slot de déploiement,
+        # l'autre une cellule de move. Aucun repli : une phase hors schéma LÈVE — un `.get(…, 0.0)`
+        # aurait servi « déploiement » pour une phase inconnue.
+        phase = str(require_key(game_state, "phase"))
+        if phase not in OBS_PHASE_IDS:
+            raise ValueError(
+                f"build_squad_observation: phase inconnue {phase!r}. Phases du schema "
+                f"d'observation : {OBS_PHASE_IDS} (cf. action_decoder.GAME_PHASES)."
+            )
+        g_bin[global_bin_index(f"phase_{phase}")] = 1.0
         # Objectifs : contrôle dans {-1, 0, +1} + bit de PRÉSENCE (distingue « contesté/vide »
         # d'« objectif absent du scénario », impossible à lire sur le seul 0).
         control, presence = self._squad_objective_control(game_state, active_player)
@@ -2204,11 +2233,16 @@ class ObservationBuilder:
         for k_idx in range(min(self.SQUAD_TOP_K, len(alive_mids))):
             mid = alive_mids[k_idx]
             m = models_cache[mid]
-            sm_cont[k_idx] = (float(int(m["col"])) - cx, float(int(m["row"])) - cy)
+            mx, my = _hex_center(int(m["col"]), int(m["row"]))
+            sm_cont[k_idx] = (mx - anchor_x, my - anchor_y)
             sm_bin[k_idx] = (
                 1.0 if mid in fighting_set else 0.0,
                 1.0 if in_enemy_ez[mid] else 0.0,
                 1.0 if relayed_by_mid[mid] else 0.0,
+                # Masque EXPLICITE (§0.32 T-H) : cette figurine peut n'avoir aucun drapeau et
+                # tomber pile sur le centroïde arrondi, donc une ligne entièrement nulle. Un
+                # masque déduit de la ligne la comptait absente, sans rien lever.
+                1.0,
             )
 
         ctx: Dict[str, Any] = {
@@ -2217,6 +2251,10 @@ class ObservationBuilder:
             "active_unit": active_unit,
             "cx": cx,
             "cy": cy,
+            # Origine PROJETÉE des positions relatives (§0.32 T-I), calculée une fois pour les 28
+            # entités : `_hex_center` du centroïde arrondi de l'unité observatrice.
+            "anchor_x": anchor_x,
+            "anchor_y": anchor_y,
             "current_turn": current_turn,
             "engaged_squads": engaged_squads,
             "moved_by_model": require_key(game_state, "moved_distance_by_model"),

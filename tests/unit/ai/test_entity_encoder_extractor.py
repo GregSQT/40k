@@ -138,6 +138,49 @@ def test_absent_entities_do_not_leak_into_the_aggregation(extractor):
     assert torch.count_nonzero(emb) == 0
 
 
+def test_self_model_mask_is_the_present_bit_not_the_row(extractor):
+    """V11 §0.32 T-H : le masque des figurines se lit sur le bit `present`, PAS sur la ligne.
+
+    L'extracteur déduisait la présence de `(|cont| + |bin|) > 0`, faute de bit dédié. Deux
+    conséquences, toutes deux silencieuses : une figurine à ligne nulle (sur le centroïde arrondi
+    et sans drapeau) était comptée absente, et une ligne de padding non nulle serait comptée
+    présente. On verrouille la SECONDE, qui discrimine les deux lectures : ici la ligne 5 porte des
+    continues non nulles avec `present = 0` — l'ancienne déduction en faisait une figurine, la
+    lecture du bit l'ignore. La première est verrouillée côté moteur
+    (`tests/unit/engine/test_squad_obs_geometry_phase_presence.py`).
+    """
+    from engine.observation_entities import self_model_bin_index
+
+    present_idx = self_model_bin_index("present")
+    space = _space()
+    extractor.eval()
+
+    obs = _zero_batch(space, batch=1)
+    obs["allies_bin"][:, 0, 0] = 1.0
+    obs["self_models_bin"][:, 0, present_idx] = 1.0  # une seule figurine réelle
+    with torch.no_grad():
+        reference = extractor(obs)
+
+    polluted = {k: v.clone() for k, v in obs.items()}
+    polluted["self_models_cont"][:, 5, :] = 3.0  # slot de padding, `present` reste à 0
+    with torch.no_grad():
+        got = extractor(polluted)
+
+    assert torch.allclose(reference, got, atol=1e-6), (
+        "une ligne de figurine a `present = 0` a change la sortie : le masque est deduit de la "
+        "ligne au lieu d'etre lu sur le bit de presence"
+    )
+
+    # Contre-épreuve : le MÊME bruit avec `present = 1` doit, lui, changer la sortie.
+    real = {k: v.clone() for k, v in polluted.items()}
+    real["self_models_bin"][:, 5, present_idx] = 1.0
+    with torch.no_grad():
+        changed = extractor(real)
+    assert not torch.allclose(reference, changed, atol=1e-6), (
+        "une figurine reellement presente n'a eu aucun effet : le masque ne lit rien"
+    )
+
+
 def test_running_norm_statistics_are_shared_across_slots():
     """Une seule statistique par feature, estimée sur TOUS les slots — pas une par slot."""
     norm = EntityRunningNorm(2)

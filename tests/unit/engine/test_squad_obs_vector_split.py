@@ -149,17 +149,23 @@ def test_continuous_features_are_raw(engine):
 
 
 def test_binary_tensors_hold_only_discrete_semantics(engine):
-    """Cles "_bin" : drapeaux 0/1, phase dans {0,.25,.5,.75,1}, controle d'objectif dans {-1,0,1}."""
+    """Cles "_bin" : drapeaux 0/1, phase en ONE-HOT, controle d'objectif dans {-1,0,1}.
+
+    La phase n'a plus d'exception a se faire pardonner : depuis V11 §0.32 T-J c'est un one-hot de
+    6 bits, donc reellement discret (elle valait 0/.25/.5/.75/1 et devait etre exclue de la
+    verification).
+    """
+    from engine.observation_entities import OBS_PHASE_IDS
+
     obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
-    allowed_phase = {0.0, 0.25, 0.5, 0.75, 1.0}
-    phase_idx = global_bin_index("phase")
-    assert float(obs["global_bin"][phase_idx]) in allowed_phase
+    phase_bits = [
+        float(obs["global_bin"][global_bin_index(f"phase_{phase}")]) for phase in OBS_PHASE_IDS
+    ]
+    assert sum(phase_bits) == 1.0, f"phase {phase_bits} n'est pas un one-hot"
     for key, value in obs.items():
         if not key.endswith("_bin"):
             continue
         for idx, v in enumerate(value.reshape(-1)):
-            if key == "global_bin" and idx == phase_idx:
-                continue
             assert float(v) in {-1.0, 0.0, 1.0}, f"{key}[{idx}] = {v} n'est pas discret"
 
 

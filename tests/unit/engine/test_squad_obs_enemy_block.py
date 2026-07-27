@@ -117,11 +117,17 @@ def test_position_follows_nearest_model_not_anchor():
         _unit_cfg(2, 2, [(100, 20), (102, 20), (26, 20)]),
     ])
     slot = _slot(eng)
-    # Position relative au centroide de mon escouade (20,20) -> la fig proche est a +6 col.
-    assert slot[E_COL] == pytest.approx(6.0)
-    assert slot[E_ROW] == pytest.approx(0.0)
-    # Contre-epreuve : l'ancre aurait donne +80.
-    assert slot[E_COL] != pytest.approx(80.0)
+    # Position relative au centroide de mon escouade (20,20), dans la projection `_hex_center`
+    # (V11 §0.32 T-I : une SEULE geometrie dans l'observation) -> la fig proche est a +6 colonnes,
+    # de meme parite, donc a +6 x 1.5 en x et 0 en y.
+    from engine.hex_utils import _hex_center
+
+    ax, ay = _hex_center(20, 20)
+    ex, ey = _hex_center(26, 20)
+    assert slot[E_COL] == pytest.approx(ex - ax)
+    assert slot[E_ROW] == pytest.approx(ey - ay)
+    # Contre-epreuve : l'ancre (100,20) aurait donne +80 colonnes, soit +120 en projection.
+    assert slot[E_COL] != pytest.approx(_hex_center(100, 20)[0] - ax)
 
 
 def test_distance_matches_engine_range_gate():
