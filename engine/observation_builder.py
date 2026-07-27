@@ -47,6 +47,7 @@ from engine.observation_entities import (
     SELF_MODEL_CONT_SIZE,
     UNIT_BIN_SIZE,
     UNIT_CONT_SIZE,
+    UNIT_RULE_EFFECT_IDS,
     WEAPON_PROFILE_CACHE_KEY,
     global_bin_index,
     global_cont_index,
@@ -1971,6 +1972,14 @@ class ObservationBuilder:
             "deployed_this_turn",
             deployed_on_turn is not None and int(deployed_on_turn) == ctx["current_turn"],
         )
+        # Règles d'UNITÉ en vigueur (19.04 : union escouade + characters attachés encore vivants).
+        # Émises pour TOUTE entité, amie comme ennemie : savoir qu'une escouade adverse relance
+        # ses charges ou pénètre l'armure de la cible la plus proche change l'évaluation de la
+        # menace autant que ses armes. `unit_has_rule_effect` résout les règles SOURCES vers
+        # leurs effets (une capacité nommée confère un effet technique), donc exposer les
+        # effets décrit exactement ce que le moteur applique.
+        for rule_id in UNIT_RULE_EFFECT_IDS:
+            _b(f"rule_{rule_id}", unit_has_rule_effect(unit, rule_id))
 
         if is_active:
             # État terrain (13.09 / 13.5 / 13.08) recalculé à chaud : le champ unit['hidden'] du

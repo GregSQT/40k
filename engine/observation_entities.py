@@ -63,6 +63,47 @@ UNIT_CONT_FIELDS: Tuple[str, ...] = (
     "n_relayed_ez",        # ⚠ unité ACTIVE uniquement
 )
 
+#: Règles d'UNITÉ (`config/unit_rules.json`) exposées à l'agent, dans l'ordre d'émission.
+#:
+#: Ne figurent ici que les règles à EFFET RÉEL — même critère que les règles d'armes, qui
+#: exclut délibérément [INDIRECT FIRE] : un bit pour une règle inerte est du bruit pur.
+#: Vérifié par lecture le 2026-07-27 : chacune est consultée dans un handler vif.
+#:
+#: Ce sont les EFFETS, pas les capacités nommées. `unit_has_rule_effect` résout les règles
+#: SOURCES vers eux, donc les 13 bits couvrent aussi les capacités composites des datasheets —
+#: vérifié sur les unités réelles : `cunning_hunters` → shoot_after_advance + shoot_after_flee,
+#: `targeted_intercession` → les deux rerolls to-wound, `adaptable_predators` et
+#: `target_priority` → charge_after_flee + shoot_after_flee, `aggression_imperative` →
+#: reroll_1_tohit_fight, `preservation_imperative` → reroll_1_save_fight. Exposer les sources
+#: EN PLUS serait redondant ; n'exposer que les sources manquerait les règles directes.
+#:
+#: Absents : les marqueurs de RÔLE (`leader`, `sergeant`, `support`, `special_weapon`) — le
+#: sous-registre « types de figurines » les porte déjà en one-hot ; et `adrenalised_onslaught`,
+#: qui n'est pas une règle mais un CHOIX de joueur (Aggression OU Preservation Imperative, au
+#: début de la phase de combat) : sans le mécanisme générique de décision agent (P2), elle ne
+#: produit aujourd'hui aucun effet — candidate à une tranche P3, pas à un bit d'observation.
+#:
+#: Ces bits décrivent l'union EN VIGUEUR (19.04) : une escouade menée par un character porte
+#: les règles de son leader et les perd à sa mort. C'était le sens même du trou fermé ici —
+#: l'agent subissait ces règles, chez lui comme chez l'ennemi, sans jamais les percevoir : le
+#: pipeline squad n'avait aucun champ de règle d'unité, et `unit_has_rule_effect` n'était
+#: appelée que par `build_observation`, le pipeline mono-figurine legacy.
+UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (
+    "charge_after_advance",
+    "charge_after_flee",
+    "charge_impact",
+    "closest_target_penetration",
+    "move_after_shooting",
+    "reactive_move",
+    "reroll_1_save_fight",
+    "reroll_1_tohit_fight",
+    "reroll_1_towound",
+    "reroll_charge",
+    "reroll_towound_target_on_objective",
+    "shoot_after_advance",
+    "shoot_after_flee",
+)
+
 #: Drapeaux d'une unité, dans l'ordre d'émission.
 UNIT_BIN_FIELDS: Tuple[str, ...] = (
     "present",             # masque d'entité (0 = slot vide / unité morte)
@@ -82,7 +123,7 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     "deploy_pre_battle",
     "deploy_in_battle",
     "deployed_this_turn",  # clause 2 de [HEAVY] 24.16
-)
+) + tuple(f"rule_{rule_id}" for rule_id in UNIT_RULE_EFFECT_IDS)
 
 UNIT_CONT_SIZE = len(UNIT_CONT_FIELDS)
 UNIT_BIN_SIZE = len(UNIT_BIN_FIELDS)
