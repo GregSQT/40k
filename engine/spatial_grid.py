@@ -4,7 +4,7 @@
 SOURCE UNIQUE du mapping grille<->hex. Partagee par les trois couches de la refonte
 (Documentation/Implementation/A_faire/move_action_space_spatial_rework.md) :
 
-  - T1 `engine/observation_builder.py`          : rasterisation des 6 canaux
+  - T1 `engine/observation_builder.py`          : rasterisation des canaux (`GRID_CHANNELS`)
   - T2 `engine/phase_handlers/shared_utils.py`  : projection du pool BFS -> masque
   - T3 `engine/action_decoder.py`               : cellule choisie -> destination d'ancre
 
@@ -36,10 +36,10 @@ import numpy as np
 
 from engine.hex_utils import _hex_center
 
-# --- Forme de la grille (spec §10.1 ; 7e canal : V11 §9.10) ------------------
+# --- Forme de la grille (spec §10.1 ; 7e canal : V11 §9.10 ; 8e/9e : V11 §0.32) ---
 GRID_SIZE = 32
 GRID_CELL_COUNT = GRID_SIZE * GRID_SIZE  # 1024 cellules = taille de la tete spatiale
-GRID_CHANNELS = 7
+GRID_CHANNELS = 9
 
 # Canaux (spec §10.1)
 GRID_CH_WALL = 0       # murs / obstacles infranchissables
@@ -54,6 +54,29 @@ GRID_CH_LEVEL = 5      # niveau (etages)
 # case par case : sans lui la grille ne distinguait pas un terrain couvrant d un simple
 # bloqueur de vue (V11 §5bis.4 / §9.10).
 GRID_CH_COVER = 6
+
+# V11 §0.32 T-L. La grille est EGOCENTRIQUE : elle est centree sur l escouade active, sa
+# demi-etendue est SON budget et chaque cellule jouable est une destination de SON bloc rigide.
+# Peindre cette escouade dans `GRID_CH_ALLY` avec toutes les autres unites amies la rendait
+# indistinguable d une escouade amie voisine — l agent ne pouvait pas lire la FORME de son propre
+# bloc (celle-la meme qui est translatee a l execution). `GRID_CH_ALLY` ne porte donc plus que les
+# AUTRES escouades du joueur actif.
+GRID_CH_SELF = 7
+
+# V11 §0.32 T-K. Cout GEODESIQUE (distance de CHEMIN du BFS, pas la distance a vol d oiseau) de
+# chaque cellule du pool de move, NORMALISE par la demi-etendue de la grille — c est-a-dire par le
+# budget Advance MAXIMAL, `grid_half_extent_subhex`, la meme grandeur qui definit la geometrie.
+# Le canal est donc dans [0,1] par construction et invariant d echelle comme le reste de la refonte.
+#
+# POURQUOI ce canal : c est ce cout qui arbitre normal vs advance (`classify_squad_move_type`), et
+# un advance interdit le tir non-[ASSAULT] et la charge. Il etait deja calcule a chaque activation
+# POUR LE MASQUE, puis jete : l agent voyait les murs bruts et devait refaire le BFS mentalement
+# pour savoir si la cellule visee lui coutait son tir. Le seuil normal/advance vaut
+# `M / (M + 6" x inches_to_subhex)` = `MOVE / (MOVE + 6)` — sans dimension, deductible du vecteur.
+#
+# 0 hors du pool. L ATTEIGNABILITE reste portee par le masque d action (elle n est PAS dupliquee
+# ici) : une cellule a cout 0 est soit hors pool, soit l origine meme de l escouade.
+GRID_CH_MOVE_COST = 8
 
 # Distance centre-a-centre de deux hexes voisins, dans l'espace de `_hex_center`
 # (hex_radius=1.0, flat-top). VERIFIE : uniforme sur les 6 voisins et les 2 parites.

@@ -44,7 +44,8 @@ L'observation avait **deux morceaux** donnés ensemble au réseau :
    **aujourd'hui un jeu de TENSEURS D'ENTITÉS** de **20 626** scalaires (§0.30 T-D→T-F, puis
    §0.31) ;
 2. une **grille égocentrique** de 6 images superposées centrées sur l'escouade active
-   (`build_squad_grid`) — aujourd'hui **7 canaux**.
+   (`build_squad_grid`) — aujourd'hui **9 canaux** (§9.10 a ajouté `couvert`, §0.32 `self` et
+   `coût géodésique du pool de move`).
 
 L'espace d'action associé : 1024 cases de déplacement + attendre + **20** cibles de tir (5 à
 l'époque de cet audit, cf. §0.30 T-E) + charge + fight + 15 macro (5 objectifs × 3 intentions),

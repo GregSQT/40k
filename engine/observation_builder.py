@@ -2340,8 +2340,9 @@ class ObservationBuilder:
         (spec §4.1), donc l'agent ne percevait pas les murs — le masque l'empechait de jouer
         illegal, jamais de contourner, de se couvrir ou de bloquer une ligne de vue.
 
-        Canaux (spec §10.1 + V11 §9.10) : murs, occupation alliee, occupation ennemie,
-        EZ ennemie, objectifs, niveau (etages), couvert.
+        Canaux (spec §10.1 + V11 §9.10 + V11 §0.32) : murs, occupation alliee, occupation
+        ennemie, EZ ennemie, objectifs, niveau (etages), couvert, SELF (l'escouade active seule,
+        §0.32 T-L) et COUT GEODESIQUE normalise des cellules du pool de move (§0.32 T-K).
 
         Geometrie deleguee a `engine/spatial_grid` — source UNIQUE partagee avec le masque (T2)
         et le decoder (T3). Layout (C,H,W) = convention CNN de sb3 (`NatureCNN`).
@@ -2358,7 +2359,9 @@ class ObservationBuilder:
             GRID_CH_ENEMY,
             GRID_CH_EZ,
             GRID_CH_LEVEL,
+            GRID_CH_MOVE_COST,
             GRID_CH_OBJECTIVE,
+            GRID_CH_SELF,
             GRID_CH_WALL,
             GRID_SIZE,
             cover_dilation_cells,
@@ -2440,18 +2443,29 @@ class ObservationBuilder:
         # --- Canal 0 : murs ---------------------------------------------------
         _paint_arrays(GRID_CH_WALL, *static["walls"])
 
-        # --- Canaux 1/2 : occupation alliee / ennemie -------------------------
+        # --- Canaux 1/2/7 : occupation self / alliee / ennemie ----------------
+        # V11 §0.32 T-L : l'escouade ACTIVE a son propre canal. La grille est centree sur elle et
+        # chaque cellule jouable translate SON bloc : la noyer dans le canal allie la rendait
+        # indistinguable d'une escouade amie voisine. `GRID_CH_ALLY` ne porte donc plus que les
+        # AUTRES escouades du joueur actif.
         models_cache = require_key(game_state, "models_cache")
         squad_models = require_key(game_state, "squad_models")
+        self_hexes: List[Tuple[int, int]] = []
         ally_hexes: List[Tuple[int, int]] = []
         enemy_hexes: List[Tuple[int, int]] = []
         for sid, entry in units_cache.items():
-            sink = ally_hexes if int(entry["player"]) == active_player else enemy_hexes
+            if str(sid) == str(active_squad_id):
+                sink = self_hexes
+            elif int(entry["player"]) == active_player:
+                sink = ally_hexes
+            else:
+                sink = enemy_hexes
             for mid in squad_models.get(sid, []):  # get allowed (squad sans figurine vivante)
                 model = models_cache.get(mid)
                 if model is None:
                     continue
                 sink.append((int(model["col"]), int(model["row"])))
+        _paint(GRID_CH_SELF, self_hexes)
         _paint(GRID_CH_ALLY, ally_hexes)
         _paint(GRID_CH_ENEMY, enemy_hexes)
 
@@ -2501,6 +2515,48 @@ class ObservationBuilder:
                     GRID_CH_LEVEL,
                     list(floor_hexes_at_level(terrain_areas, level)),
                     value=float(level) / max_level,
+                )
+
+        # --- Canal 8 : cout geodesique du pool de move (V11 §0.32 T-K) --------
+        # Ce cout etait deja calcule a chaque activation POUR LE MASQUE, puis jete — alors que
+        # c'est lui qui arbitre normal vs advance (`classify_squad_move_type`), donc le droit de
+        # tirer non-[ASSAULT] et de charger.
+        #
+        # GRATUIT PAR CONSTRUCTION : on relit la carte que le masque vient de memoiser
+        # (`read_squad_move_cell_map`), on n'en redemande pas une. `_build_observation` construit
+        # le masque AVANT l'obs et pour le MEME squad actif, donc aucun BFS supplementaire, et
+        # surtout aucun appel de pool avec une cle de fingerprint differente de celle du masque —
+        # ce qui aurait fait rater le cache a chaque step (le poste a 95,6 % du training, §0.22).
+        # Un recalcul independant rouvrirait aussi la divergence obs/masque/decoder.
+        #
+        # Hors phase de mouvement le canal reste a 0 : aucune activation de move n'est en cours,
+        # donc aucune destination n'existe. Peindre le pool d'une phase passee ferait croire a
+        # l'agent qu'il peut encore bouger.
+        if str(game_state.get("phase", "")).lower() == "move":  # get allowed (phase absente = hors move)
+            from engine.phase_handlers.shared_utils import read_squad_move_cell_map
+
+            cell_map = read_squad_move_cell_map(game_state, active_squad_id)
+            if cell_map:
+                cell_idxs = np.fromiter(cell_map.keys(), dtype=np.int64, count=len(cell_map))
+                costs = np.fromiter(
+                    (cost for _dest, cost in cell_map.values()),
+                    dtype=np.float32,
+                    count=len(cell_map),
+                )
+                # Borne verifiee, pas supposee : tout cout du pool est <= au budget auquel le pool
+                # a ete construit, lui-meme <= au budget Advance MAXIMAL = `half_extent`. Un
+                # depassement signifierait que la geometrie de la grille et le pool ne parlent plus
+                # du meme budget — on leve plutot que de clipper (l'espace d'obs est Box(0,1) : un
+                # clip silencieux ecraserait les destinations les plus lointaines a la meme valeur).
+                max_cost = float(costs.max())
+                if max_cost > float(half_extent):
+                    raise ValueError(
+                        f"build_squad_grid: cout de move {max_cost} > demi-etendue {half_extent} "
+                        f"pour squad {active_squad_id} — le pool et la grille ne partagent plus le "
+                        f"meme budget Advance maximal"
+                    )
+                grid[GRID_CH_MOVE_COST, cell_idxs // GRID_SIZE, cell_idxs % GRID_SIZE] = (
+                    costs / np.float32(half_extent)
                 )
 
         return grid

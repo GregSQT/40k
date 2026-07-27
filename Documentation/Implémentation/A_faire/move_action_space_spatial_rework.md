@@ -898,6 +898,7 @@ tournent pas en gym (`gym_training_mode`). **Ne pas confondre les deux chiffres.
 | grille 32×32×4 | 4 096 | **12,88 Go** | 6,44 Go |
 | **grille 32×32×6 (retenue, §10.1)** | **6 144** | 19,33 Go (limite) | **9,66 Go ✓** |
 | grille 32×32×8 | 8 192 | **25,77 Go** | 12,88 Go |
+| **grille 32×32×9 (état LIVRÉ, V11 §9.10 + §0.32)** | **9 216** | **28,98 Go** | **14,49 Go ✓** |
 
 (float32 ; transitions = `n_steps × n_envs`, soit 786 432 à 16384×48 et 393 216 à 8192×48.)
 
@@ -1006,6 +1007,16 @@ obligatoire. `ai/models/**/*.zip` ne doit jamais être modifié à la main.
    Choix utilisateur : la config matérielle actuelle ne doit pas être la limite du design. Contrepartie
    RAM absorbée par `n_steps` 16384 → **8192** en gardant `n_envs=48` (cf. §8.3 : 9,66 Go ; réduire
    `n_envs` aurait coûté du débit moteur, réduire `n_steps` ne coûte que la longueur de rollout).
+
+   ⚠️ **La liste ci-dessus est celle de la décision de 2026-07-17 ; l'état LIVRÉ est à 9 canaux.**
+   V11 §9.10 a ajouté `couvert` (6 → 7), puis V11 §0.32 a ajouté `self` (T-L) et
+   `coût géodésique du pool de move` (T-K) — 7 → **9**. `GRID_CHANNELS` dans
+   [`engine/spatial_grid.py`](../../../engine/spatial_grid.py) reste la **source unique** : ce
+   document ne fait que la commenter, il ne la fixe pas.
+   **RAM du rollout buffer, recalculée** (float32, `n_steps=8192 × n_envs=48` = 393 216 transitions,
+   la config réelle) : 32×32×9 = 9 216 floats → **14,49 Go** pour la grille, sous la limite de
+   19,33 Go de §8.3. À `n_steps=16384` il faudrait 28,98 Go : la décision « 16384 → 8192 » du
+   2026-07-17 reste donc nécessaire et suffisante pour la grille seule.
 2. ~~Normalisation : A/B testé~~ — **RE-TRANCHÉ (2026-07-17, après vérification chiffrée)** :
    `fixed_resolution` est **abandonné**, `budget_normalized` est le mode **unique** (plus de paramètre
    `grid_mode`, plus d'A/B, **un seul** réentraînement from scratch).

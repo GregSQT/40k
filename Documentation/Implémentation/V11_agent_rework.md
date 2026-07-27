@@ -62,7 +62,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | **§0.29** | Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum | 🟢 **MÉCANIQUE LIVRÉE + VALIDÉE IN-ENGINE (2026-07-22)** ; reste USAGE+MESURE (cf. « Suite » §0.29 ; win-rate rejoint §0.14, **débloqué le 2026-07-26**) | 4 | Scénario `scenario_fixed_brawl_sm_orks.json` (terrain **`terrain-mc1.json`**, 36 figurines, compositions réelles des rosters training SM+Orks) où **le champ `deployment_type` bascule** placement manuel ↔ déploiement (`"fixed"` = positions `col/row`, aucun déploiement ; `"active"` = phase de déploiement). Positions par défaut dans les bandes **dégagées de mc1** (rows 90-105 / 195-210, éditables). **+ scheduler `deployment_mode_schedule`** (opt-in) : proportion `active` **croissante par épisode** au fil du training (rampe linéaire, miroir de `deployment_random_mix`, orthogonal à lui). **+ emplacements `top`/`bottom` par figurine DANS les 4 rosters** (P1=top, P2=bottom ; siège+rotation aléatoires conservés) → le mode strict marche sur le vrai chemin roster. 3 verrous verts sur le VRAI moteur : `test_fixed_brawl_deploy_modes.py` (bascule units[]) + `test_deployment_mode_schedule.py` (bornes 0/1 + rampe) + `test_roster_fixed_positions.py` (rosters top/bottom, rotation réelle). Détail → **§0.29** ci-dessous. |
 | **§0.30** | Encodeur d'entités partagé + tête pointeur (et 6 trous trouvés le 2026-07-26) | 🟢 **LIVRÉ (2026-07-26)** — T-A→T-F faits ; ne bloque plus §0.14 | **1** | Vérification demandée par l'utilisateur après §9.2.5. **6 trous trouvés**, dont : une escouade ennemie **invisible ET intirable** dans 6 épisodes sur 10 (5 slots figés pour 6 escouades mesurées) ; le gym ignore les types de tir **10.05 / 10.06** ; au tir le gym déclare **une seule arme (index 0), une seule cible** — violation de **04.01** et **04.02** ; l'heuristique d'arme de mêlée a été **périmée par P1** (ignore ANTI-X, DEVASTATING, MELTA…). Décisions actées : renommage `PISTOL` → `CLOSE_QUARTERS`, encodeur d'entité **partagé** (unités+armes, amies+ennemies), **K=20 unités / K=10 armes**, **tête pointeur** pour le ciblage, retrain accepté. **TOUT est livré le 2026-07-26** (T-A→T-F + §1.9 + audit final) : `obs_size` 199 → **20166** *(valeur du 2026-07-26 ; état courant **20545**, cf. §0.31)*, espace d'action 1047 → **1062**. Résidu **§1.9** (volet MONSTER/VEHICLE de 10.06 côté PvP/mono) **refermé le 2026-07-26** après validation PvP de T-C par l'utilisateur — plus aucun résidu ouvert. Détail complet, mesures et journal → **[`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)**. |
 | **§0.31** | Complétude de l'observation (objectifs situés, règles d'unité) + cache des profils d'armes | 🟢 **LIVRÉ (2026-07-27)** — 3 commits, 13 tests + mutations | **1** | Audit demandé par l'utilisateur (« l'obs est-elle complète, branchée, optimale ? »). Branchement **intact**. **2 trous fermés** : (1) les objectifs n'avaient **aucune position** — mesuré, **1 à 2 sur 5** tombaient dans la fenêtre de grille alors que 15 actions de zone les désignent (`ab9baa56`) ; (2) les **règles d'unité** étaient invisibles du pipeline squad, 13 bits d'effet par entité, extinction 19.04 verrouillée (`0fb94a01`). **Perf** : profils d'armes mémoïsés, `build_squad_observation` **2,86 → 1,69 ms** (`7a84e124`). **K larges GARDÉS** (arbitrage utilisateur, généralisation future) — coût mesuré : **0 paramètre**, **0 ms de construction**, 1,39× sur le forward. `obs_size` **20166 → 20601** ⇒ le run §0.14 doit être un `--new` postérieur à ces commits. Détail → **§0.31**. |
-| **§0.32** | Optimalité de l'obs ET de la TÊTE d'action — audit du 2026-07-28 | 🟠 **OUVERT** — 6 constats ; **lot obs T-H/T-I/T-J LIVRÉ le 2026-07-28** (`deab7e03`, 13 tests + mutations, `obs_size` 20601 → **20626**) ; restent T-K/T-L (canaux) puis T-G (tête) | **2** (après le lancement du run §0.14 : T-G change la policy, donc un run en cours reste valide comme baseline) | Question de l'utilisateur : « mon obs est-elle optimale ? ». ⚠️ **Une 1re version de cette entrée affirmait « aucun manque de contenu, seulement la forme et l'aval » — FAUX et retiré le 2026-07-28** : la GRILLE a deux manques de contenu, **T-K** (le coût géodésique par cellule, déjà calculé pour le masque puis jeté — c'est lui qui arbitre normal vs advance, donc le tir et la charge) et **T-L** (l'escouade ACTIVE est peinte dans le canal allié, indistinguable des autres escouades amies sur une grille pourtant égocentrique). Ordre corrigé : lot obs (T-H/T-I/T-J) → canaux (T-K/T-L) → tête (T-G), parce que les canaux changent `GRID_CHANNELS`, donc l'entrée du CNN. **T-G (majeur)** : les 1024 logits de cellule de move sortent d'un `Linear` dense ([`pointer_policy.py:112`](../../ai/pointer_policy.py#L112)) et la carte CNN est aplatie avant la tête ([`spatial_extractor.py:228`](../../ai/spatial_extractor.py#L228)) — c'est **le défaut exact que la tête pointeur a corrigé pour 20 slots de tir, laissé sur 97 % de l'espace d'action**. **T-H** : une figurine sur le centroïde et non engagée a sa ligne `self_models_*` entièrement nulle ⇒ le masque de présence déduit par `abs().sum() > 0` la compte **absente**. **T-I** : `col_rel`/`row_rel` sont en coordonnées **offset brutes** alors que la grille et les directions d'objectif travaillent dans la projection `_hex_center`. **T-J** : `deployment` et `command` partagent la valeur `phase = 0.0`, et le décodage a un `.get(…, 0.0)`. Détail, mesures et périmètre → **§0.32**. |
+| **§0.32** | Optimalité de l'obs ET de la TÊTE d'action — audit du 2026-07-28 | 🟠 **OUVERT** — 6 constats ; **lot obs T-H/T-I/T-J LIVRÉ le 2026-07-28** (`deab7e03`, 13 tests + mutations, `obs_size` 20601 → **20626**) ; **lot canaux T-K/T-L LIVRÉ le 2026-07-28** (`GRID_CHANNELS` 7 → **9**, 11 tests + mutations, **0 appel de pool supplémentaire mesuré**, `obs_size` inchangé) ; reste T-G (tête) | **2** (après le lancement du run §0.14 : T-G change la policy, donc un run en cours reste valide comme baseline) | Question de l'utilisateur : « mon obs est-elle optimale ? ». ⚠️ **Une 1re version de cette entrée affirmait « aucun manque de contenu, seulement la forme et l'aval » — FAUX et retiré le 2026-07-28** : la GRILLE a deux manques de contenu, **T-K** (le coût géodésique par cellule, déjà calculé pour le masque puis jeté — c'est lui qui arbitre normal vs advance, donc le tir et la charge) et **T-L** (l'escouade ACTIVE est peinte dans le canal allié, indistinguable des autres escouades amies sur une grille pourtant égocentrique). Ordre corrigé : lot obs (T-H/T-I/T-J) → canaux (T-K/T-L) → tête (T-G), parce que les canaux changent `GRID_CHANNELS`, donc l'entrée du CNN. **T-G (majeur)** : les 1024 logits de cellule de move sortent d'un `Linear` dense ([`pointer_policy.py:112`](../../ai/pointer_policy.py#L112)) et la carte CNN est aplatie avant la tête ([`spatial_extractor.py:228`](../../ai/spatial_extractor.py#L228)) — c'est **le défaut exact que la tête pointeur a corrigé pour 20 slots de tir, laissé sur 97 % de l'espace d'action**. **T-H** : une figurine sur le centroïde et non engagée a sa ligne `self_models_*` entièrement nulle ⇒ le masque de présence déduit par `abs().sum() > 0` la compte **absente**. **T-I** : `col_rel`/`row_rel` sont en coordonnées **offset brutes** alors que la grille et les directions d'objectif travaillent dans la projection `_hex_center`. **T-J** : `deployment` et `command` partagent la valeur `phase = 0.0`, et le décodage a un `.get(…, 0.0)`. Détail, mesures et périmètre → **§0.32**. |
 | ~~**§0.22**~~ | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **CLOS le 2026-07-21 — décision (B) STOP à L1+L_bbox** | — | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) livrés et commités** (`ff2293e0`, `6f268d38`) — gain ovale **1,49×**, round10 1,78×, pool strictement identique ; A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. **Reliquat NON poursuivi** (ratio gain/risque mauvais, mesuré) : BFS wavefront réfuté (plus lent à move 12), L2b runs NumPy réfuté (1,1× net + complexité), numba écarté (risque segfault sur run 36 h). ⚠️ **MAJ 2026-07-22 : ce coût perf est désormais INCONTOURNABLE** — le fix de conformité move §0.25 REQUIERT une érosion géodésique par-figurine, exactement le coût que §0.22 combattait. Il refait surface en §0.27. Détail complet → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§10, §11) ; leçon de méthode → §0bis. |
 
 **MAJ 2026-07-26 : §0.27 est CORRIGÉ et §9.2.5 (observation des règles d'armes) est LIVRÉ.**
@@ -107,7 +107,7 @@ complet). Les cardinalités larges (§0.31) ne sont pas un problème : l'arbitra
 [`pointer_policy.py:70`](../../ai/pointer_policy.py#L70)), les 5 caches et leurs invalidations,
 les 3 invariants. Aucune affirmation périmée trouvée.
 
-**État du lot au 2026-07-28** : **T-H, T-I et T-J sont LIVRÉS** (`deab7e03`) — bit `present` explicite, projection `_hex_center` unique, phase en one-hot de 6 bits, et les 4 replis du chemin (`phase`, `oc_total`, `squad_cache`) supprimés. `obs_size` **20601 → 20626**. Restent ouverts **T-K** et **T-L** (contenu de la grille, donc `GRID_CHANNELS`) puis **T-G** (tête de move dense).
+**État du lot au 2026-07-28** : **T-H, T-I et T-J sont LIVRÉS** (`deab7e03`) — bit `present` explicite, projection `_hex_center` unique, phase en one-hot de 6 bits, et les 4 replis du chemin (`phase`, `oc_total`, `squad_cache`) supprimés. `obs_size` **20601 → 20626**. **T-K et T-L sont LIVRÉS à leur tour** : `GRID_CHANNELS` **7 → 9** (canal `self`, canal `coût géodésique du pool de move`), `obs_size` **inchangé** (la grille est fournie à part), **zéro appel de pool supplémentaire mesuré**. Reste ouvert **T-G** (tête de move dense).
 
 ---
 
@@ -288,41 +288,96 @@ session. « Dis-moi si tu veux que je le durcisse aussi » n'est pas une clôtur
 
 ---
 
-#### T-K — 🟠 Le COÛT GÉODÉSIQUE par cellule est calculé, puis jeté
+#### T-K — ✅ LIVRÉ (2026-07-28) — le COÛT GÉODÉSIQUE par cellule est devenu un canal
 
-[`spatial_grid.py:260`](../../engine/spatial_grid.py#L260) — `project_pool_to_grid` renvoie
-`{cell_index: ((col,row), coût_géodésique)}`. Ce coût est produit **à chaque activation, pour le
-masque**, puis **jeté** : seul le seuil `coût ≤ M` en survit, pour inférer le type de move.
+**Constat.** [`spatial_grid.py`](../../engine/spatial_grid.py) — `project_pool_to_grid` renvoie
+`{cell_index: ((col,row), coût_géodésique)}`. Ce coût était produit **à chaque activation, pour le
+masque**, puis **jeté** : seul le seuil `coût ≤ M` en survivait, pour inférer le type de move.
 
 Or c'est la quantité qui arbitre le choix le plus cher de la phase de mouvement : `coût > M`
-force un **advance**, qui interdit le tir non-[ASSAULT] et la charge. Aujourd'hui l'agent voit
-les murs bruts et doit **refaire le BFS mentalement** pour savoir si la cellule qu'il vise lui
-coûte son tir. Un canal `coût / budget` le lui dit exactement, à l'endroit exact.
+force un **advance**, qui interdit le tir non-[ASSAULT] et la charge. L'agent voyait les murs
+bruts et devait **refaire le BFS mentalement** pour savoir si la cellule qu'il visait lui coûtait
+son tir.
 
-**Correctif** : un 8ᵉ canal de grille, `coût géodésique normalisé par le budget` (0 hors pool,
-le bit d'atteignabilité restant porté par le masque d'action). Le pool est **déjà mémoïsé** par
-fingerprint ([`shared_utils.py:9281`](../../engine/phase_handlers/shared_utils.py#L9281)).
+**Correctif livré.** `GRID_CH_MOVE_COST` (canal 8) porte `coût géodésique / demi-étendue de la
+grille`. Le dénominateur est `grid_half_extent_subhex` — le budget **Advance MAXIMAL**, la MÊME
+grandeur qui définit la géométrie de la grille : le canal tient donc dans `Box(0,1)` (contrainte
+réelle de l'espace d'obs, [`w40k_core.py`](../../engine/w40k_core.py) `spaces_dict["grid"]`) et
+reste invariant d'échelle comme le reste de la refonte. Le seuil normal/advance vaut
+`M / (M + 6" × inches_to_subhex)` = `MOVE / (MOVE + 6)` — sans dimension, déductible du vecteur.
+0 hors du pool : l'atteignabilité reste portée par le masque d'action, elle n'est **pas**
+dupliquée. Hors phase de mouvement le canal est nul (aucune activation de move en cours).
+La borne `coût ≤ demi-étendue` **lève** au lieu de clipper : un clip silencieux écraserait à la
+même valeur toutes les destinations lointaines.
 
-⚠️ **Piège dimensionnant, à mesurer avant de conclure** : l'obs doit demander le pool avec le
-**même `advance_roll` et à la même `phase`** que le masque — ces deux valeurs sont DANS la clé de
-fingerprint. Une clé différente = un miss = un **BFS géodésique complet par step**, c'est-à-dire
-exactement le poste à 95,6 % du training (§0.22, dont le coût est devenu incontournable depuis
-§0.25). Mesurer le taux de hit, pas le supposer.
+⚠️ **Le piège dimensionnant a été traité par CONSTRUCTION, pas par un réglage de clé.** L'obs ne
+redemande **aucun** pool : elle relit la carte que le masque vient de mémoïser
+(`read_squad_move_cell_map`). `_build_observation` construit le masque **avant** l'obs et pour le
+**même** squad actif — donc zéro appel de pool supplémentaire, donc aucune possibilité qu'une clé
+de fingerprint diverge de celle du masque. C'est aussi ce qui garantit que obs, masque et decoder
+parlent des mêmes cellules et des mêmes coûts (test dédié).
 
-#### T-L — 🟠 Sur une grille ÉGOCENTRIQUE, l'escouade active est noyée dans le canal allié
+**Mesuré** (600 steps, `config/board/44x60x5/scenario/scenario_pvp_test.json`, seed 42,
+trajectoire strictement identique avant/après — mêmes 43 erreurs moteur, cf. note ci-dessous) :
 
-`build_squad_grid` peint le canal `GRID_CH_ALLY` avec **toutes** les unités du joueur actif :
-`sink = ally_hexes if int(entry["player"]) == active_player else enemy_hexes`
-([`observation_builder.py`](../../engine/observation_builder.py), canaux 1/2). L'escouade
-**active** y est donc indistinguable d'une escouade amie voisine — sur une grille pourtant
+| | appels de pool | hits | miss | taux de hit | `build_squad_grid` moyen |
+|---|---|---|---|---|---|
+| avant (3 passes) | **1 578** | 1 186 | 392 | **75,16 %** | 3,279 / 3,357 / 3,305 ms |
+| après (3 passes) | **1 578** | 1 186 | 392 | **75,16 %** | 3,364 / 3,398 / 3,352 ms |
+
+Le compteur d'appels de pool est **strictement identique** : c'est la mesure qui compte, plus
+forte qu'un taux de hit « ~100 % » — le canal n'ajoute pas un seul BFS géodésique, donc rien du
+poste à 95,6 % du training (§0.22). Le taux de 75,16 % est celui, **inchangé**, du cache
+préexistant. Coût de construction : **+1,7 %** en moyenne (3,314 → 3,371 ms), p50 2,868 → 2,948 ms
+(+2,8 %) — les plages avant/après se chevauchent (3,357 avant vs 3,352 après), l'écart est du même
+ordre que le bruit de mesure.
+
+#### T-L — ✅ LIVRÉ (2026-07-28) — l'escouade active a son propre canal
+
+**Constat.** `build_squad_grid` peignait le canal `GRID_CH_ALLY` avec **toutes** les unités du
+joueur actif : `sink = ally_hexes if int(entry["player"]) == active_player else enemy_hexes`.
+L'escouade **active** y était indistinguable d'une escouade amie voisine — sur une grille pourtant
 centrée sur elle, dont la demi-étendue est SON budget, et dont chaque cellule jouable est une
 destination de SON bloc rigide.
 
-**Correctif** : un canal `self` distinct (les figurines de l'escouade active), le canal allié
-gardant les autres escouades amies. Combiné à T-K, `GRID_CHANNELS` passe de 7 à 9.
+**Correctif livré.** `GRID_CH_SELF` (canal 7) porte les figurines de l'escouade active ;
+`GRID_CH_ALLY` ne porte plus que les **autres** escouades du joueur actif. Le tri se fait sur
+`active_squad_id`, pas sur le joueur : le canal suit l'activation (test dédié).
 
-⚠️ Ces deux canaux changent l'entrée du CNN : ils doivent être livrés **avant** T-G, sinon la
-tête est à retoucher deux fois.
+**`GRID_CHANNELS` passe donc de 7 à 9**, source unique
+[`engine/spatial_grid.py`](../../engine/spatial_grid.py) — vérifié : `ai/spatial_extractor.py`
+(entrée du CNN **et** contrôle de forme, qui lève toujours) et l'espace d'observation de
+`w40k_core` la lisent depuis là, aucun nombre de canaux n'est recopié. `obs_size` (vecteur)
+**inchangé à 20 626** : la grille est fournie à part dans le `Dict`.
+**RAM du rollout buffer** (float32, `n_steps=8192 × n_envs=48` = 393 216 transitions, la config
+réelle) : la grille passe de 9,66 à **14,49 Go**, sous la limite de 19,33 Go de la spec §8.3.
+
+**Tests** : 9 nouveaux dans `test_squad_grid_observation.py` (dont l'**oracle** T-K : une cellule
+derrière une barrière de murs porte le coût de contournement, pas la distance à vol d'oiseau) et
+2 dans `test_entity_encoder_extractor.py` (profondeur d'entrée du CNN lue depuis la source unique,
+forme de grille erronée qui lève). **Mutations faites** : (a) restaurer l'ancien `sink` →
+3 rouges ; (b) remplacer le coût géodésique par la distance à vol d'oiseau → 2 rouges, dont
+l'oracle. ⚠️ La 1re écriture de l'oracle **ne rougissait pas** sur (b) : elle comparait au mauvais
+hex, et l'aller-retour float32 (`coût/half` puis `×half`) suffisait à rendre la distance directe
+supérieure de 1e-6. L'oracle compare désormais à l'hex **que la cellule désigne**, avec une marge
+d'un pas de BFS.
+
+⚠️ Ces deux canaux changent l'entrée du CNN : les poids existants sont incompatibles, le run
+§0.14 doit être un `--new` postérieur à ce commit. Ils sont livrés **avant** T-G, sinon la tête
+serait à retoucher deux fois.
+
+📌 **Trouvé en passant, HORS périmètre, non traité** (rencontré en instrumentant le run de mesure,
+reproduit **sans** instrumentation, 43 occurrences sur 650 steps d'actions aléatoires légales) :
+- `execute_squad_move a échoué : squad=1008 type=normal … (incohérence masque/exécution)` —
+  « figurine 1008#0 hors budget : trajet légal contournant murs/figs > budget ». L'escouade est
+  **mono-figurine**, et `erode_move_pool_by_squad_block` court-circuite ce cas
+  (`len(alive_mids) <= 1 → return costs`, « l'ancre EST le bloc ») : l'érosion géodésique
+  par-figurine n'est donc jamais appliquée là où le pool d'ancre et `validate_move_plan`
+  divergent quand même. Piste, **non vérifiée**.
+- `_euclidean_path_distance: destination … injoignable en chemin <= 90 … alors que le plan a été
+  validé. Incohérence validation/mesure.`
+- `floor_height_at: no floor at level 1 contains cell … (figurine marquée à l'étage mais hors
+  empreinte de plancher)`.
 
 ---
 

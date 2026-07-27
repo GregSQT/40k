@@ -19,7 +19,9 @@ from engine.spatial_grid import (
     GRID_CH_ENEMY,
     GRID_CH_EZ,
     GRID_CH_LEVEL,
+    GRID_CH_MOVE_COST,
     GRID_CH_OBJECTIVE,
+    GRID_CH_SELF,
     GRID_CH_WALL,
     GRID_SIZE,
     grid_half_extent_subhex,
@@ -125,10 +127,16 @@ def test_half_extent_ignores_the_actual_advance_roll(engine):
     assert grid_half_extent_subhex(engine.game_state, "1") == before
 
 
-def test_active_squad_is_painted_on_ally_channel_at_center(engine):
+def test_active_squad_is_painted_on_self_channel_at_center(engine):
+    """V11 §0.32 T-L : l'escouade ACTIVE a son canal a elle, pas celui des allies.
+
+    La grille est centree sur elle : sans ce canal, elle etait indistinguable d'une escouade
+    amie voisine alors que c'est SON bloc que chaque cellule jouable translate.
+    """
     grid = _grid(engine)
     center = GRID_SIZE // 2
-    assert grid[GRID_CH_ALLY, center, center] == 1.0
+    assert grid[GRID_CH_SELF, center, center] == 1.0
+    assert grid[GRID_CH_ALLY, center, center] == 0.0
 
 
 def test_enemy_is_not_on_ally_channel(engine):
@@ -330,3 +338,218 @@ def test_cover_channel_is_dilated_by_base_radius():
     large = _cover_sum(16)
     assert small == 1.0, "socle d'un hex : la seule case de la zone"
     assert large > small, "grande base : la couronne alentour couvre aussi"
+
+
+# ============================================================================
+# V11 §0.32 T-L — canal SELF distinct du canal ALLIE
+# ============================================================================
+
+
+def _engine_with_friendly_neighbour(neighbour_col: int, neighbour_row: int) -> W40KEngine:
+    """Meme scenario + une SECONDE escouade du joueur 1, dans la fenetre de grille."""
+    cfg = _config(
+        [list(NEAR_WALL), list(FAR_WALL)], [{"id": "obj1", "name": "Alpha", "hexes": [[22, 22]]}]
+    )
+    cfg["units"].append(_unit_cfg(3, 1, neighbour_col, neighbour_row))
+    with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
+         patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
+        eng = W40KEngine(config=cfg)
+    eng.reset()
+    return eng
+
+
+def test_other_friendly_squad_is_on_ally_channel_not_self():
+    """T-L, contre-epreuve : l'escouade amie VOISINE reste sur le canal allie.
+
+    Le correctif ne consiste pas a vider `GRID_CH_ALLY` : il le reserve aux AUTRES escouades du
+    joueur actif. Si `self` et `ally` etaient le meme canal (bug), cette assertion et
+    `test_active_squad_is_painted_on_self_channel_at_center` ne pourraient pas etre vraies
+    en meme temps.
+    """
+    eng = _engine_with_friendly_neighbour(23, 20)
+    gs = eng.game_state
+    grid = eng.obs_builder.build_squad_grid(gs, "1")
+    cell = hex_to_cell(23, 20, ANCHOR_COL, ANCHOR_ROW, grid_half_extent_subhex(gs, "1"))
+    assert cell is not None, "fixture : l'escouade amie doit tomber dans la grille"
+    gx, gy = cell
+    assert grid[GRID_CH_ALLY, gy, gx] == 1.0, "l'escouade amie voisine est sur le canal allie"
+    assert grid[GRID_CH_SELF, gy, gx] == 0.0, "elle n'est PAS sur le canal self"
+
+    center = GRID_SIZE // 2
+    assert grid[GRID_CH_SELF, center, center] == 1.0
+    assert grid[GRID_CH_ALLY, center, center] == 0.0
+
+
+def test_self_channel_follows_the_active_squad():
+    """Le canal `self` est bien EGOCENTRIQUE : construit pour l'escouade 3, il peint l'escouade 3.
+
+    Verrouille que `self` n'est pas « le premier squad du joueur » fige, mais bien
+    `active_squad_id` — sinon le canal mentirait des que l'activation change.
+
+    Hors phase de move : en move, `build_squad_grid` exige la carte de cellules memoisee par le
+    masque (T-K), qui n'existe que pour le squad reellement active. C'est le contrat, pas un
+    contournement — ici seule la separation self/allie est en cause.
+    """
+    eng = _engine_with_friendly_neighbour(23, 20)
+    gs = eng.game_state
+    gs["phase"] = "shoot"
+    grid = eng.obs_builder.build_squad_grid(gs, "3")
+    center = GRID_SIZE // 2
+    assert grid[GRID_CH_SELF, center, center] == 1.0, "l'escouade 3 est au centre de SA grille"
+
+    cell = hex_to_cell(ANCHOR_COL, ANCHOR_ROW, 23, 20, grid_half_extent_subhex(gs, "3"))
+    assert cell is not None
+    gx, gy = cell
+    assert grid[GRID_CH_ALLY, gy, gx] == 1.0, "l'escouade 1 est devenue l'alliee"
+    assert grid[GRID_CH_SELF, gy, gx] == 0.0
+
+
+def test_enemy_is_never_on_the_self_channel(engine):
+    """L'ennemi ne fuit pas dans `self` (le tri se fait sur le squad, pas sur le joueur seul)."""
+    gs = engine.game_state
+    for cache in (gs["units_cache"]["2"], gs["models_cache"][next(iter(gs["squad_models"]["2"]))]):
+        cache["col"], cache["row"] = 26, 20
+    for unit in gs["units"]:
+        if str(unit["id"]) == "2":
+            unit["col"], unit["row"] = 26, 20
+    grid = _grid(engine)
+    cell = hex_to_cell(26, 20, ANCHOR_COL, ANCHOR_ROW, grid_half_extent_subhex(gs, "1"))
+    assert cell is not None
+    gx, gy = cell
+    assert grid[GRID_CH_ENEMY, gy, gx] == 1.0
+    assert grid[GRID_CH_SELF, gy, gx] == 0.0
+
+
+# ============================================================================
+# V11 §0.32 T-K — canal COUT GEODESIQUE
+# ============================================================================
+
+# Barriere de murs ETANCHE sur la colonne 22 (rows 17..23) : pour rejoindre l'autre cote il faut
+# la contourner par (22,16) ou (22,24). MOVE 12 -> budget normal 12, demi-etendue 18 : le detour
+# tient dans le budget, donc la cellule cible EST dans le pool — c'est ce qui rend l'oracle
+# observable (une cellule hors pool porterait 0 et ne prouverait rien).
+BARRIER_HEXES = [[22, r] for r in range(17, 24)]
+BEHIND_WALL = (26, 20)
+
+
+def _engine_behind_wall() -> W40KEngine:
+    cfg = _config(BARRIER_HEXES, [{"id": "obj1", "name": "Alpha", "hexes": [[22, 22]]}])
+    for unit in cfg["units"]:
+        unit["MOVE"] = 12
+    with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
+         patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
+        eng = W40KEngine(config=cfg)
+    eng.reset()
+    return eng
+
+
+def test_move_cost_channel_is_a_geodesic_cost_not_a_straight_line_distance():
+    """ORACLE T-K : derriere un mur, la cellule porte le cout de CONTOURNEMENT.
+
+    C'est LE point du canal. Une cellule a 6 subhex a vol d'oiseau mais atteignable seulement par
+    un detour doit porter le cout du detour : c'est lui qui arbitre normal vs advance, donc le
+    droit de tirer et de charger. Si le canal portait la distance a vol d'oiseau, il mentirait
+    exactement la ou l'agent en a besoin.
+    """
+    from engine.combat_utils import calculate_hex_distance
+    from engine.phase_handlers.shared_utils import read_squad_move_cell_map
+    from engine.spatial_grid import cell_index
+
+    eng = _engine_behind_wall()
+    gs = eng.game_state
+    half = grid_half_extent_subhex(gs, "1")
+    grid = eng.obs_builder.build_squad_grid(gs, "1")
+
+    cell = hex_to_cell(*BEHIND_WALL, ANCHOR_COL, ANCHOR_ROW, half)
+    assert cell is not None, "fixture : la cible doit tomber dans la grille"
+    gx, gy = cell
+    read_cost = float(grid[GRID_CH_MOVE_COST, gy, gx]) * half
+    assert read_cost > 0.0, "la cellule derriere le mur est atteignable : elle doit porter un cout"
+
+    # La comparaison se fait sur l'hex QUE CETTE CELLULE DESIGNE (la projection retient l'hex le
+    # plus proche du centre de cellule, pas forcement BEHIND_WALL) : comparer a la distance directe
+    # d'un AUTRE hex laisserait passer une implementation qui porterait une distance a vol d'oiseau.
+    dest, _cost = read_squad_move_cell_map(gs, "1")[cell_index(gx, gy)]
+    straight = float(calculate_hex_distance(ANCHOR_COL, ANCHOR_ROW, int(dest[0]), int(dest[1])))
+    # Marge d'UN pas : les couts du BFS sont entiers, un vrai contournement en ajoute au moins un.
+    # Un `>` nu laisserait passer une implementation qui porte la distance directe, l'aller-retour
+    # float32 (cout/half puis xhalf) suffisant a la rendre superieure de 1e-6 (verifie par mutation).
+    assert read_cost >= straight + 1.0 - 1e-3, (
+        f"cout lu {read_cost} ~= distance a vol d'oiseau {straight} vers {dest} : le canal ne "
+        f"porte pas le cout geodesique mais une distance directe"
+    )
+    assert straight <= float(calculate_hex_distance(ANCHOR_COL, ANCHOR_ROW, *BEHIND_WALL)) + 1, (
+        f"fixture : la cellule visee designe {dest}, trop loin de {BEHIND_WALL} pour prouver "
+        f"quoi que ce soit sur le contournement du mur"
+    )
+
+
+def test_move_cost_channel_is_zero_off_pool_and_on_walls():
+    """Hors pool -> 0. Les hexes de la barriere ne sont pas des destinations."""
+    eng = _engine_behind_wall()
+    gs = eng.game_state
+    half = grid_half_extent_subhex(gs, "1")
+    grid = eng.obs_builder.build_squad_grid(gs, "1")
+    checked = 0
+    for col, row in BARRIER_HEXES:
+        cell = hex_to_cell(col, row, ANCHOR_COL, ANCHOR_ROW, half)
+        assert cell is not None, f"fixture : le mur ({col},{row}) doit tomber dans la grille"
+        gx, gy = cell
+        if grid[GRID_CH_WALL, gy, gx] != 1.0:
+            continue  # cellule partagee : la projection du pool a retenu un hex libre voisin
+        checked += 1
+        assert grid[GRID_CH_MOVE_COST, gy, gx] == 0.0, f"mur ({col},{row}) porte un cout de move"
+    assert checked > 0, "fixture : aucune cellule purement murale a verifier"
+
+
+def test_move_cost_channel_is_normalised_into_the_observation_box():
+    """L'espace d'obs de la grille est Box(0,1) : le canal DOIT y tenir.
+
+    Normalise par la demi-etendue = budget Advance MAXIMAL, borne superieure de tout cout du pool
+    quel que soit le regime (normal / advance / fall back).
+    """
+    eng = _engine_behind_wall()
+    channel = eng.obs_builder.build_squad_grid(eng.game_state, "1")[GRID_CH_MOVE_COST]
+    assert float(channel.min()) >= 0.0
+    assert float(channel.max()) <= 1.0
+    assert float(channel.max()) > 0.0, "fixture : le pool doit etre non vide"
+
+
+def test_move_cost_channel_matches_the_mask_cell_map_exactly():
+    """Le canal EST la carte du masque — pas un 2e BFS.
+
+    Verrouille l'invariant qui rend T-K gratuit : l'obs relit la carte memoisee par le masque
+    (`read_squad_move_cell_map`), donc obs / masque / decoder parlent des memes cellules et des
+    memes couts. Un recalcul independant reintroduirait un BFS geodesique par step — exactement
+    le poste a 95,6 % du training (§0.22).
+    """
+    from engine.phase_handlers.shared_utils import read_squad_move_cell_map
+
+    eng = _engine_behind_wall()
+    gs = eng.game_state
+    half = grid_half_extent_subhex(gs, "1")
+    grid = eng.obs_builder.build_squad_grid(gs, "1")
+    cell_map = read_squad_move_cell_map(gs, "1")
+    assert cell_map, "fixture : la carte du masque doit etre non vide"
+
+    for cell_idx, (_dest, cost) in cell_map.items():
+        gy, gx = divmod(cell_idx, GRID_SIZE)
+        assert float(grid[GRID_CH_MOVE_COST, gy, gx]) == pytest.approx(cost / half, abs=1e-6)
+
+    painted = int((grid[GRID_CH_MOVE_COST] > 0.0).sum())
+    zero_cost_cells = sum(1 for _d, c in cell_map.values() if c <= 0.0)
+    assert painted == len(cell_map) - zero_cost_cells
+
+
+def test_move_cost_channel_is_empty_outside_the_move_phase():
+    """Hors phase de mouvement il n'y a AUCUN pool de deplacement en cours : le canal vaut 0.
+
+    Le canal decrit les destinations de l'activation de move courante. En tir, en charge ou en
+    combat, aucune n'existe — peindre le pool d'une phase passee ferait croire a l'agent qu'il
+    peut encore bouger.
+    """
+    eng = _engine_behind_wall()
+    gs = eng.game_state
+    assert float(eng.obs_builder.build_squad_grid(gs, "1")[GRID_CH_MOVE_COST].sum()) > 0.0
+    gs["phase"] = "shoot"
+    assert float(eng.obs_builder.build_squad_grid(gs, "1")[GRID_CH_MOVE_COST].sum()) == 0.0

@@ -212,6 +212,26 @@ def test_missing_key_raises():
         SpatialCombinedExtractor(incomplete, cnn_features=32)
 
 
+def test_grid_channel_count_is_read_from_the_single_source():
+    """`GRID_CHANNELS` est la SOURCE UNIQUE : l'extracteur ne code aucun nombre de canaux en dur.
+
+    V11 §0.32 (T-K/T-L) a fait passer la grille de 7 a 9 canaux. Si l'extracteur recopiait la
+    valeur, le CNN prendrait une entree d'une autre profondeur que celle produite par
+    `build_squad_grid` — un decalage silencieux de la semantique apprise.
+    """
+    assert SpatialCombinedExtractor(_space(), cnn_features=32).cnn[0].in_channels == GRID_CHANNELS
+
+
+def test_wrong_grid_shape_raises():
+    """Aucun repli : une grille d'une autre profondeur doit LEVER, pas etre rabotee."""
+    spaces = dict(_space().spaces)
+    spaces["grid"] = gym.spaces.Box(
+        low=0.0, high=1.0, shape=(GRID_CHANNELS - 1, GRID_SIZE, GRID_SIZE), dtype=np.float32
+    )
+    with pytest.raises(ValueError, match="forme de grille inattendue"):
+        SpatialCombinedExtractor(gym.spaces.Dict(spaces), cnn_features=32)
+
+
 def test_divergent_unit_schema_raises():
     """Un camp qui gagnerait une feature que l'autre n'a pas casse le partage : ça doit LEVER."""
     space = _space()

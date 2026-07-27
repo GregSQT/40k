@@ -28,7 +28,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 | `allies_types_cont` / `_bin` | (8, 6, 5) / (8, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
 | `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
 | `self_models_cont` / `_bin` | (20, 2) / (20, 4) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement, **bit de présence** |
-| `grid` | (7, 32, 32) | grille égocentrique : murs, alliés, ennemis, EZ, objectifs, niveau, couvert |
+| `grid` | (9, 32, 32) | grille égocentrique : murs, **autres** escouades amies, ennemis, EZ, objectifs, niveau, couvert, **l'escouade active seule** (§0.32 T-L), **coût géodésique du pool de move normalisé** (§0.32 T-K) |
 
 ### Structure Overview
 
@@ -303,7 +303,7 @@ vocabulaires coexistent dans la doc V11 :
 | **E** — escouades amies | `allies_[1..K-1]` | livré avec T-D : les alliés sont **agrégés** par le réseau, donc leur ordre n'a pas à être inventé |
 | *(transverse)* profils d'armes | `*_wpn_*` | même encodeur pour les deux camps ; 86 % du vecteur, et le seul bloc mémoïsé |
 | *(transverse)* règles d'unité | 13 bits dans `*_bin` | §0.31 : sur **toute** entité, amie comme ennemie (schéma unifié) |
-| *(transverse)* terrain perçu | `grid` | 7 canaux égocentriques ; **ne porte que la fenêtre** du budget d'Advance |
+| *(transverse)* terrain perçu | `grid` | **9** canaux égocentriques ; **ne porte que la fenêtre** du budget d'Advance. Depuis §0.32 : un canal `self` distinct du canal allié (T-L) et le **coût géodésique** de chaque cellule du pool de move (T-K) |
 
 ⚠️ Deux blocs sont **transverses** et non des blocs à part : les profils d'armes et les règles
 d'unité vivent DANS chaque entité, par construction du schéma unifié (invariant 1). Chercher un
