@@ -205,7 +205,7 @@ sortie). Mutation : la déduction remise en place fait rougir le test d'extracte
 
 ---
 
-#### T-I — ✅ LIVRÉ (2026-07-28, `deab7e03`) — il n'y a plus qu'UNE géométrie dans l'observation
+#### T-I — ✅ LIVRÉ (2026-07-28, `deab7e03` + `bde78380`) — il n'y a plus qu'UNE géométrie
 
 **Constat.** `col_rel` / `row_rel` — pour les **entités** comme pour les **figurines** — étaient des
 différences de coordonnées **offset brutes**, alors que tout le reste de l'obs travaille dans la
@@ -227,6 +227,14 @@ offset aurait fait dépendre de la parité *quelle* figurine est décrite, pas s
 (= √3, le pas centre-à-centre). **Tests** : isotropie sur les figurines et sur les entités, plus
 deux oracles indépendants qui recalculent `_hex_center(fig) − _hex_center(ancre)` hors du builder.
 Mutation : le retour aux offsets fait rougir les 4.
+
+**Perf mesurée** (12 figurines × 8 escouades, 200 appels) : `build_squad_observation`
+**2,212 → 2,402 ms** en première écriture — le bloc tourne pour les **28 entités** à chaque step et
+la table `{mid: _hex_center(…)}` y coûtait ~1 µs par entité pour une projection qui ne sert qu'à la
+figurine gagnante. Réécrit en une passe (`bde78380`) : **2,242 ms**, soit **+1,4 %** pour le passage
+à la projection. `_hex_center` reste la source unique de la formule — la dupliquer en inline aurait
+gagné 0,05 ms de plus pour un risque de dérive entre deux copies, sur un poste qui ne pèse pas
+(§0.22 : `MOVE_POOL_BUILD` = 95,6 % du training).
 
 ---
 
