@@ -845,9 +845,9 @@ obs_builder.build_observation(game_state)
 │
 └─ Return: numpy array shape (150,)
                      ⚠️ Ce schéma décrit un pipeline d'observation HISTORIQUE (150 floats).
-                     L'agent observe aujourd'hui un Dict de TENSEURS D'ENTITÉS (20 166
-                     scalaires + grille 7×32×32) — cf. AI_OBSERVATION.md, section
-                     « CE QUE L'AGENT OBSERVE AUJOURD'HUI ». Vérifié le 2026-07-26.
+                     L'agent observe aujourd'hui un Dict de TENSEURS D'ENTITÉS (obs_size lu
+                     depuis ObservationBuilder.SQUAD_OBS_SIZE_TARGET, + grille 7×32×32) —
+                     cf. AI_OBSERVATION.md. Vérifié le 2026-07-28.
 ```
 
 **7. Calculate Reward**

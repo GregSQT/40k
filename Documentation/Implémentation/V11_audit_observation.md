@@ -41,7 +41,8 @@ d'arme brute, et il lui manque des informations de décision que les règles exi
 L'observation avait **deux morceaux** donnés ensemble au réseau :
 
 1. un **vecteur de 108 nombres** (`build_squad_observation`) — devenu 199, puis 1011, et
-   **aujourd'hui un jeu de TENSEURS D'ENTITÉS** de **20 166** scalaires (§0.30 T-D→T-F) ;
+   **aujourd'hui un jeu de TENSEURS D'ENTITÉS** de **20 601** scalaires (§0.30 T-D→T-F, puis
+   §0.31) ;
 2. une **grille égocentrique** de 6 images superposées centrées sur l'escouade active
    (`build_squad_grid`) — aujourd'hui **7 canaux**.
 
@@ -69,8 +70,10 @@ objectif viser.** L'observation doit nourrir ces choix-là.
 > créerait une seconde source de vérité qui ne pourrait qu'avoir tort — c'est précisément ce
 > qui vient d'être constaté sur ce paragraphe.
 >
-> Lecture d'ensemble : `Documentation/AI_OBSERVATION.md`, section « CE QUE L'AGENT OBSERVE
-> AUJOURD'HUI ». Journal et mesures : `V11_entity_encoder_pointer.md` §6.
+> Lecture d'ensemble : [`AI_OBSERVATION.md`](../AI_OBSERVATION.md) — il ne décrit QUE le
+> pipeline actuel depuis le 2026-07-28 ; le vecteur plat est archivé dans
+> [`AI_OBSERVATION_Legacy.md`](../AI_OBSERVATION_Legacy.md). Journal et mesures :
+> `V11_entity_encoder_pointer.md` §6.
 >
 > Le reste de ce §1 et les §2-§6 décrivent l'état **d'avant la refonte** : ils constituent
 > l'audit qui l'a motivée, et sont conservés à ce titre. Les décisions sont en §9/§10, l'état

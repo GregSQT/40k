@@ -25,7 +25,7 @@ Les PDF `40k_rules/` (source de vérité officielle) ne sont pas audités : gard
 |---|---|
 | README.md | Liens morts vers docs supprimés + omet des docs présents. |
 | CONFIG_FILES.md | Chemin `config/scenarios/` inexistant, ancien nom d'agent. |
-| AI_OBSERVATION.md | Rédigé autour de 355 floats, le code impose 357. |
+| ~~AI_OBSERVATION.md~~ | ~~Rédigé autour de 355 floats, le code impose 357.~~ ✅ **RÉSOLU (2026-07-28)** : le fichier ne décrit plus que le pipeline SQUAD actuel (tenseurs d'entités, `obs_size` lu depuis `SQUAD_OBS_SIZE_TARGET` et non recopié) ; tout le vecteur plat est parti dans `AI_OBSERVATION_Legacy.md`. |
 | LOS_TOPOLOGY.md | Builder `los_topology_builder.py` disparu, cover refondu. |
 | phase_fight_v11.md / x1.md | Header « non implémenté » périmé — en fait codés. |
 | Distance management.md, macro_intent.md, AI_METRICS.md, self-play_organization32.md | Justes mais léger décalage (roster bots élargi, 357, snapshot unique). |

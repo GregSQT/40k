@@ -663,8 +663,8 @@ toutes les entités au lieu d'être refaite par slot. Paramètres de la policy :
 prévu en §3.4, et un slot ennemi supplémentaire ne coûtera plus de paramètres.
 
 **Documents remis à jour dans la tranche** (ils portaient un avertissement « PÉRIMÉ » au lieu
-d'une description) : `Documentation/AI_OBSERVATION.md` — section « CE QUE L'AGENT OBSERVE
-AUJOURD'HUI » réécrite sur le contrat entité, avec les trois invariants (schéma unifié, ordre
+d'une description) : `Documentation/AI_OBSERVATION.md` — réécrit sur le contrat entité
+(et scindé du legacy le 2026-07-28), avec les trois invariants (schéma unifié, ordre
 des slots ennemis, normalisation) ; `AI_TURN.md` — ancre de ligne périmée remplacée par une
 ancre de fonction.
 

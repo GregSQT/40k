@@ -10,12 +10,14 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 
 > ### 👁️ Ce que l'agent OBSERVE — descriptif complet
 >
-> **[`Documentation/AI_OBSERVATION.md`](../AI_OBSERVATION.md)**, section « CE QUE L'AGENT OBSERVE
-> AUJOURD'HUI » (en tête du fichier) : les clés et leurs formes, l'espace d'action associé, les
-> trois invariants, **qui normalise quoi** (`VecNormalize` vs `EntityRunningNorm`), **les 5 caches
-> et leur condition d'invalidation**, et l'historique d'`obs_size`.
-> ⚠️ Tout ce qui suit le bandeau `DOCUMENT STATUS` de ce fichier décrit le pipeline
-> **mono-figurine LEGACY**, pas celui sur lequel l'agent s'entraîne.
+> **[`Documentation/AI_OBSERVATION.md`](../AI_OBSERVATION.md)** — il ne décrit QUE le code actuel
+> depuis le 2026-07-28 : les clés et leurs formes, la table blocs logiques A→E ↔ clés, l'espace
+> d'action associé, les trois invariants, **qui normalise quoi** (`VecNormalize` vs
+> `EntityRunningNorm`), **les 5 caches et leur condition d'invalidation**, et l'historique
+> d'`obs_size`.
+> Le pipeline **mono-figurine legacy** (vecteur plat d'offsets `obs[N]`, features calculées) est
+> archivé à part : [`AI_OBSERVATION_Legacy.md`](../AI_OBSERVATION_Legacy.md). Aucun agent ne
+> l'utilise.
 >
 > **Source unique du contrat** (la doc en donne la lecture, jamais une copie de chiffres) :
 > [`engine/observation_entities.py`](../../engine/observation_entities.py) pour le schéma, et

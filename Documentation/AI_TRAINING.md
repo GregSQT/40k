@@ -13,13 +13,15 @@
 >
 > | | Valeur en vigueur | Source de vérité (à relire, jamais à recopier) |
 > |---|---|---|
-> | `obs_size` | **20 166** | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) ; porté par `config/agents/<agent>/<agent>_training_config.json` → `observation_params` |
+> | `obs_size` | **20 601** (2026-07-28) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) ; porté par `config/agents/<agent>/<agent>_training_config.json` → `observation_params` |
 > | espace d'action | **1 062** (1 047 micro + 15 macro) | `engine/macro_intents.py` (`TOTAL_ACTION_SIZE`), miroir de `shared_utils.SQUAD_ACTION_*` |
 >
 > - **L'observation n'est plus un vecteur** : c'est un `Dict` de **tenseurs d'entités** (chaque
 >   unité — la mienne, mes alliées, les ennemies — porte le même schéma et passe par le même
->   encodeur), plus une grille égocentrique 7×32×32. Détail : [AI_OBSERVATION.md](AI_OBSERVATION.md),
->   section « CE QUE L'AGENT OBSERVE AUJOURD'HUI ».
+>   encodeur), plus une grille égocentrique 7×32×32. Détail :
+>   [AI_OBSERVATION.md](AI_OBSERVATION.md) — qui ne décrit QUE le pipeline actuel depuis le
+>   2026-07-28 (le vecteur plat mono-figurine est archivé dans
+>   [AI_OBSERVATION_Legacy.md](AI_OBSERVATION_Legacy.md)).
 > - Espace d'action = 0-1023 cellules de la grille égocentrique, 1024 wait, **1025-1044 tir
 >   (20 slots ennemis)**, 1045 charge, 1046 fight, 1047-1061 zone intents.
 >   **Constantes nommées obligatoires** (`engine/macro_intents.py`) : un littéral d'action dans

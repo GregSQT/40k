@@ -514,7 +514,7 @@ interface Unit {
 **Observation size must be updated** — ⚠️ l'exemple ci-dessous est HISTORIQUE (2026-07-26) :
 `obs_size` ne se choisit pas à la main, il est **calculé** par
 `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` depuis le schéma d'entités
-(`engine/observation_entities.py`) et vaut aujourd'hui **20 166**. La config doit recopier cette
+(`engine/observation_entities.py`) et vaut **20 601** au 2026-07-28. La config doit recopier cette
 valeur, et un écart **lève à l'init du moteur** en citant la valeur attendue.
 
 ```json

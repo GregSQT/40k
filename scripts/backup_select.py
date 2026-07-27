@@ -126,6 +126,7 @@ else:
         "Documentation/AI_IMPLEMENTATION.md",
         "Documentation/AI_METRICS.md",
         "Documentation/AI_OBSERVATION.md",
+        "Documentation/AI_OBSERVATION_Legacy.md",
         "Documentation/AI_TARGET_SELECTION.md",
         "Documentation/AI_TRAINING.md",
         "Documentation/AI_TURN.md",
