@@ -20,7 +20,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.31` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.32` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -32,7 +32,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 
 | # | Entrée | Nature | Ordre proposé | Pourquoi cet ordre |
 |---|---|---|---|---|
-| **§0.14** | Re-mesure du run | 🟠 **DÉBLOQUÉ (2026-07-26)** — §0.27 corrigé + §9.2.5 livré ; run `--new` à lancer | **1** | 🟠 **MAJ 2026-07-22.** Run `x5_new` (10k ép., 48 envs) lancé sur moteur+analyzer désormais fiables (§0.23–§0.26). **Le training a atteint l'épisode 2000 sans un seul crash** (le fix move §0.25/§0.26 tient), MAIS le garde-fou d'éval a **arrêté le run au 1er checkpoint** : 500 ép. d'éval « failed » sur **timeout de task** (cf. **§0.27**). Aucun win-rate produit. Prérequis levés depuis le 2026-07-21 : dépendance perf §0.22 non bloquante (le run tourne), analyzer fiabilisé (§0.24). **MAJ 2026-07-26 : §0.27 est CORRIGÉ, §9.2.5 est LIVRÉ, et §0.30 (T-A→T-F) est LIVRÉ — plus aucun prérequis technique ni fonctionnel.** Le prochain run doit être un `--new` : `obs_size` 199 → 1011 → **20166** (observation en tenseurs d'entités, 20 slots ennemis, K armes 10 par registre, bloc figurines 20). |
+| **§0.14** | Re-mesure du run | 🟠 **DÉBLOQUÉ (2026-07-26)** — §0.27 corrigé + §9.2.5 livré ; run `--new` à lancer | **1** | 🟠 **MAJ 2026-07-22.** Run `x5_new` (10k ép., 48 envs) lancé sur moteur+analyzer désormais fiables (§0.23–§0.26). **Le training a atteint l'épisode 2000 sans un seul crash** (le fix move §0.25/§0.26 tient), MAIS le garde-fou d'éval a **arrêté le run au 1er checkpoint** : 500 ép. d'éval « failed » sur **timeout de task** (cf. **§0.27**). Aucun win-rate produit. Prérequis levés depuis le 2026-07-21 : dépendance perf §0.22 non bloquante (le run tourne), analyzer fiabilisé (§0.24). **MAJ 2026-07-26 : §0.27 est CORRIGÉ, §9.2.5 est LIVRÉ, et §0.30 (T-A→T-F) est LIVRÉ — plus aucun prérequis technique ni fonctionnel.** Le prochain run doit être un `--new` : `obs_size` 199 → 1011 → **20545** (tenseurs d'entités ; +géométrie des objectifs et +13 bits de règles d'unité, §0.31). |
 | ~~**§0.27**~~ | Blocage éval au checkpoint | ✅ **CORRIGÉ (2026-07-26)** — timeout≠crash + éval intermédiaire 100→20 (7 tests, mutation) | — | À l'éval intermédiaire (`bot_eval_intermediate=100` ép./bot × 5 bots = 500), **un task a dépassé le timeout de 1 h** (`bot_eval_task_timeout_seconds=3600`, durée mesurée 3675 s) → pool avorté, 500 ép. marqués `failed` → `RuntimeError` strict (§0.7). **Diagnostic (mesuré, PAS un hang) :** le cap `max_turns×400=2000` pas/épisode existe (aucun hang infini possible) ; le modèle à 2000 ép. (à peine entraîné) produit des **parties dégénérées** atteignant ce cap, et le **coût par-pas du fix géodésique §0.25** (l'érosion « load-bearing » = le coût §0.22) rend ces épisodes trop longs. Sonde : **0 ép. d'éval terminé en 2 min** sur le modèle courant (vs 17 s/ép sur un autre modèle). Fix approuvé (utilisateur) : (1) distinguer timeout vs crash dans le garde-fou (ne pas hard-stop sur lenteur, run résilient) + (2) réduire l'éval intermédiaire (100→~20), `bot_eval_final=100` gardé. **DIFFÉRÉ** : le win-rate est repoussé tant que la conformité tir (§0.28) n'est pas verrouillée. |
 | **§0.28** | Conformité tir obscuring (13.10) — soupçon | ✅ **RÉFUTÉ (2026-07-22)** — AUCUN bug, mesuré in-engine sur le vrai gate | — | Suspicion utilisateur (tir « à travers terrain » en replay) **investiguée à fond puis RÉFUTÉE**. Le vrai gate de tir gym = `build_squad_action_mask` (branche shoot, `shared_utils.py:8170`) → `_model_can_shoot_target` (`:4722`) → `_attacker_model_can_reach_squad` (`:4515`) → `_compute_visibility_with_obscuring` : **par-figurine, footprint COMPLET, obscuring-aware (13.10)**. Audit LIVE inséré au `return True` du gate : **297 tirs approuvés, 0 sans ligne socle→socle évitant l'obscuring** (`GATE_BUG=0`, `obscuring_clear_line=False=0`). Le « tir à travers terrain » = **peek légal par-figurine** (06.01 : un bord de socle voit là où le centre est masqué). ⚠️ Mes « 10 tirs illégaux confirmés » puis « 3 sur données fraîches » étaient TOUS des **FAUX POSITIFS** : scan offline centre-à-centre + reconstructions non fidèles (positions/arme/état). Détail méthode → §0bis. Fixture d'audit obscuring (cas net, bloque correctement) : commité. |
 | **§0.24** | Analyzer réaligné per-figurine | 🟢 **RÉSOLU (2026-07-22)** ; résiduel FP documenté | — | Détail intégral → **§0hist §0.24**. Résiduel non bloquant : suivi HP/mort de la **cible** pas encore per-figurine → **FP « Fight a dead unit »** (174 sur log réf, **prouvé FP** : Unit 104 tracée vivante) + off-by-1 fight/advance. |
@@ -40,14 +40,17 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | ~~**§0.25**~~ | Bug moteur : budget move per-fig en ligne droite | ✅ **CORRIGÉ (2026-07-22)** — géodésique | — | Détail → **§0hist §0.25**. Conséquence perf → **§0.27**. |
 | ~~**§0.26**~~ | Régression cache masque (clé `_unit_move_version` contournée) | ✅ **CORRIGÉ (2026-07-22)** — clé fingerprint | — | Détail → **§0hist §0.26**. |
 | **§0.29** | Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum | 🟢 **MÉCANIQUE LIVRÉE + VALIDÉE IN-ENGINE (2026-07-22)** ; reste USAGE+MESURE (cf. « Suite » §0.29 ; win-rate rejoint §0.14, **débloqué le 2026-07-26**) | 4 | Scénario `scenario_fixed_brawl_sm_orks.json` (terrain **`terrain-mc1.json`**, 36 figurines, compositions réelles des rosters training SM+Orks) où **le champ `deployment_type` bascule** placement manuel ↔ déploiement (`"fixed"` = positions `col/row`, aucun déploiement ; `"active"` = phase de déploiement). Positions par défaut dans les bandes **dégagées de mc1** (rows 90-105 / 195-210, éditables). **+ scheduler `deployment_mode_schedule`** (opt-in) : proportion `active` **croissante par épisode** au fil du training (rampe linéaire, miroir de `deployment_random_mix`, orthogonal à lui). **+ emplacements `top`/`bottom` par figurine DANS les 4 rosters** (P1=top, P2=bottom ; siège+rotation aléatoires conservés) → le mode strict marche sur le vrai chemin roster. 3 verrous verts sur le VRAI moteur : `test_fixed_brawl_deploy_modes.py` (bascule units[]) + `test_deployment_mode_schedule.py` (bornes 0/1 + rampe) + `test_roster_fixed_positions.py` (rosters top/bottom, rotation réelle). Détail → **§0.29** ci-dessous. |
-| **§0.30** | Encodeur d'entités partagé + tête pointeur (et 6 trous trouvés le 2026-07-26) | 🟢 **LIVRÉ (2026-07-26)** — T-A→T-F faits ; ne bloque plus §0.14 | **1** | Vérification demandée par l'utilisateur après §9.2.5. **6 trous trouvés**, dont : une escouade ennemie **invisible ET intirable** dans 6 épisodes sur 10 (5 slots figés pour 6 escouades mesurées) ; le gym ignore les types de tir **10.05 / 10.06** ; au tir le gym déclare **une seule arme (index 0), une seule cible** — violation de **04.01** et **04.02** ; l'heuristique d'arme de mêlée a été **périmée par P1** (ignore ANTI-X, DEVASTATING, MELTA…). Décisions actées : renommage `PISTOL` → `CLOSE_QUARTERS`, encodeur d'entité **partagé** (unités+armes, amies+ennemies), **K=20 unités / K=10 armes**, **tête pointeur** pour le ciblage, retrain accepté. **TOUT est livré le 2026-07-26** (T-A→T-F + §1.9 + audit final) : `obs_size` 199 → **20166**, espace d'action 1047 → **1062**. Résidu **§1.9** (volet MONSTER/VEHICLE de 10.06 côté PvP/mono) **refermé le 2026-07-26** après validation PvP de T-C par l'utilisateur — plus aucun résidu ouvert. Détail complet, mesures et journal → **[`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)**. |
+| **§0.30** | Encodeur d'entités partagé + tête pointeur (et 6 trous trouvés le 2026-07-26) | 🟢 **LIVRÉ (2026-07-26)** — T-A→T-F faits ; ne bloque plus §0.14 | **1** | Vérification demandée par l'utilisateur après §9.2.5. **6 trous trouvés**, dont : une escouade ennemie **invisible ET intirable** dans 6 épisodes sur 10 (5 slots figés pour 6 escouades mesurées) ; le gym ignore les types de tir **10.05 / 10.06** ; au tir le gym déclare **une seule arme (index 0), une seule cible** — violation de **04.01** et **04.02** ; l'heuristique d'arme de mêlée a été **périmée par P1** (ignore ANTI-X, DEVASTATING, MELTA…). Décisions actées : renommage `PISTOL` → `CLOSE_QUARTERS`, encodeur d'entité **partagé** (unités+armes, amies+ennemies), **K=20 unités / K=10 armes**, **tête pointeur** pour le ciblage, retrain accepté. **TOUT est livré le 2026-07-26** (T-A→T-F + §1.9 + audit final) : `obs_size` 199 → **20166** *(valeur du 2026-07-26 ; état courant **20545**, cf. §0.31)*, espace d'action 1047 → **1062**. Résidu **§1.9** (volet MONSTER/VEHICLE de 10.06 côté PvP/mono) **refermé le 2026-07-26** après validation PvP de T-C par l'utilisateur — plus aucun résidu ouvert. Détail complet, mesures et journal → **[`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)**. |
+| **§0.31** | Complétude de l'observation (objectifs situés, règles d'unité) + cache des profils d'armes | 🟢 **LIVRÉ (2026-07-27)** — 3 commits, 13 tests + mutations | **1** | Audit demandé par l'utilisateur (« l'obs est-elle complète, branchée, optimale ? »). Branchement **intact**. **2 trous fermés** : (1) les objectifs n'avaient **aucune position** — mesuré, **1 à 2 sur 5** tombaient dans la fenêtre de grille alors que 15 actions de zone les désignent (`ab9baa56`) ; (2) les **règles d'unité** étaient invisibles du pipeline squad, 13 bits d'effet par entité, extinction 19.04 verrouillée (`0fb94a01`). **Perf** : profils d'armes mémoïsés, `build_squad_observation` **2,86 → 1,69 ms** (`7a84e124`). **K larges GARDÉS** (arbitrage utilisateur, généralisation future) — coût mesuré : **0 paramètre**, **0 ms de construction**, 1,39× sur le forward. `obs_size` **20166 → 20545** ⇒ le run §0.14 doit être un `--new` postérieur à ces commits. Détail → **§0.31**. |
 | ~~**§0.22**~~ | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **CLOS le 2026-07-21 — décision (B) STOP à L1+L_bbox** | — | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) livrés et commités** (`ff2293e0`, `6f268d38`) — gain ovale **1,49×**, round10 1,78×, pool strictement identique ; A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. **Reliquat NON poursuivi** (ratio gain/risque mauvais, mesuré) : BFS wavefront réfuté (plus lent à move 12), L2b runs NumPy réfuté (1,1× net + complexité), numba écarté (risque segfault sur run 36 h). ⚠️ **MAJ 2026-07-22 : ce coût perf est désormais INCONTOURNABLE** — le fix de conformité move §0.25 REQUIERT une érosion géodésique par-figurine, exactement le coût que §0.22 combattait. Il refait surface en §0.27. Détail complet → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§10, §11) ; leçon de méthode → §0bis. |
 
 **MAJ 2026-07-26 : §0.27 est CORRIGÉ et §9.2.5 (observation des règles d'armes) est LIVRÉ.**
+**§0.31 est LIVRÉ (2026-07-27)** : objectifs situés + règles d'unité visibles + cache des
+profils d'armes ; `obs_size` **20545**, tout run antérieur est incompatible.
 **§0.30 est LIVRÉ (T-A→T-F, 2026-07-26)** : le blocage qu'il posait au run long est levé —
 l'escouade ennemie invisible et intirable, les types de tir 10.05/10.06 absents et les
 violations 04.01/04.02 au tir sont corrigés et verrouillés. Le run reste un **`--new`**
-(`obs_size` 199 → **20166**).
+(`obs_size` 199 → **20545** depuis §0.31, 2026-07-27).
 **§0.28 (conformité tir obscuring) est RÉFUTÉ — aucun bug (mesuré in-engine).**
 La nuit du 2026-07-21→22 a livré §0.23–§0.26 (logger+analyzer per-figurine, bug moteur move + régression cache),
 qui **débloquent la mesurabilité** (analyzer fiable) mais font émerger §0.27 (coût géodésique en éval).
@@ -60,6 +63,67 @@ résolues §0.15–§0.19, §0.21, **§0.22**, **§0.23**, **§0.24**, **§0.25*
 réserve de méthode sur le document lui-même (T1→T5 et section 9 n'ont **pas** été revérifiés
 ligne à ligne) et la règle de périmètre `ArmageddonAgent`.
 
+
+### 0.31 Complétude de l'observation — objectifs situés + règles d'unité visibles — ✅ LIVRÉ (2026-07-27)
+
+**Origine.** Question de l'utilisateur : « l'obs est-elle complète et complètement branchée ? »,
+puis « est-elle optimale ? ». Réponse vérifiée par lecture et **mesure in-engine**, pas par
+relecture de doc.
+
+**Branchement : intact.** `obs_size` → garde-fou strict ([w40k_core.py:688](../../engine/w40k_core.py#L688),
+aucun repli), routage vers `build_squad_observation`, espace `Dict` dérivé de `squad_obs_shapes()`,
+`SpatialCombinedExtractor` + `PointerMaskablePolicy` injectés aux 3 sites de création de modèle
+de `train.py` (les 9 `MaskablePPO(...)` sont tous en aval). Tous les slots sont réellement
+remplis. Rien de mort, rien de construit-mais-non-consommé.
+
+**Deux trous trouvés, tous deux fermés.**
+
+1. **Les objectifs n'avaient aucune POSITION** (commit `ab9baa56`). L'action space offre 3 intents
+   de zone par objectif (15 actions) et `global_bin` ne portait que contrôle + présence. La seule
+   source spatiale était le canal 4 de la grille, dont la demi-étendue vaut le budget d'Advance
+   (**12″ mesuré**) et qui écarte sans clamp tout hex hors fenêtre. **Mesure au reset : 1 à 2
+   objectifs sur 5 seulement tombaient dans la fenêtre** — l'agent désignait des objectifs qu'il
+   ne percevait pas, et ne pouvait pas apprendre à naviguer vers un objectif lointain. Ajouté :
+   distance à l'hex le plus proche de la zone (continue, subhex bruts) + direction unitaire
+   (cos/sin, avec les drapeaux — bornés et centrés, `VecNormalize` ne ferait qu'amplifier leur
+   bruit, même raison que `phase`). Ex-aequo tranchés explicitement sur le plus petit (col,row) :
+   une zone rectangulaire offre presque toujours deux hexes équidistants, de `sin` opposés —
+   `argmin` aurait fait dépendre la feature de l'ordre du fichier. **6 tests, dont un oracle
+   scalaire indépendant.**
+2. **Les règles d'UNITÉ étaient invisibles** (commit `0fb94a01`, cf. §9.2.5). 13 bits d'EFFET par
+   entité, amies ET ennemies. Ce sont les effets, pas les capacités nommées :
+   `unit_has_rule_effect` résout les sources, donc les composites des datasheets sont captées
+   (`cunning_hunters`, `targeted_intercession`, `target_priority`, `adaptable_predators`,
+   `aggression`/`preservation_imperative`). Exclus avec leur raison : les marqueurs de rôle (le
+   bloc TYPES les porte déjà) et `adrenalised_onslaught`, qui est un **choix de joueur** sans
+   effet tant que P2 n'existe pas — **candidate P3**. **19.04 verrouillé** : le bit du leader
+   attaché s'allume, puis s'éteint à sa mort. **7 tests.**
+
+**Perf, hors lot** (commit `7a84e124`) : les profils d'armes — 86 % du vecteur — étaient
+reconstruits pour les 16 entités à chaque step alors qu'ils viennent des datasheets. Mémoïsés par
+(escouade, figurines vivantes), invalidés dans `build_units_cache`. **`build_squad_observation`
+2,86 → 1,69 ms (1,69×)**, observation identique bit à bit. ⚠️ Piège traité : mémoïser sans
+mémoïser la troncature rendait **muets** les verrous « aucun cap silencieux » dès le 2ᵉ step —
+elle est donc rejouée à chaque appel.
+
+**Cardinalités : arbitrage utilisateur — les K larges sont GARDÉS.** Remplissage mesuré : 29 %
+des slots ennemis, ~25 % des slots d'armes ; maxima réels sur **22 rosters / 79 unités** :
+6 escouades, 6 profils de tir, 5 de mêlée, 4 types, 12 figurines. Les resserrer aurait divisé le
+vecteur par 2,5 — l'utilisateur les garde pour absorber des rosters plus fournis sans re-tailler
+l'obs ni retrainer. Mesuré avant de trancher : **paramètres identiques (1,14 M)**, **construction
+identique (1,92 vs 1,94 ms)**, forward extracteur **1,39×**. ⚠️ **Affirmation fausse retirée** :
+« les 12 slots de tir morts polluent l'exploration » — `build_squad_action_mask` ne lève le bit
+qu'après avoir confirmé un ennemi atteignable, donc MaskablePPO les met à `-inf` en permanence.
+
+**`obs_size` 20166 → 20181 → 20545.** Le run reste un `--new` (§0.14) ; un run x1 lancé avant ces
+commits est incompatible.
+
+**Non traité, assumé** : l'état terrain des ENNEMIS (`hidden` 13.09, `in_cover` 13.08,
+`gone_to_ground`) reste à zéro — émis pour la seule unité active
+([observation_builder.py](../../engine/observation_builder.py), bloc `if is_active`). C'est un
+vrai manque pour le choix de cible (on ne voit pas qu'une cible est couverte), mais son coût est
+un test d'empreinte par figurine et par entité à chaque step, le poste que §1.8 identifie comme
+dominant. **À mesurer avant de décider, pas à empiler.**
 
 ### 0.29 Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum — ✅ LIVRÉ + VALIDÉ IN-ENGINE (2026-07-22)
 
@@ -4881,7 +4945,7 @@ comme non normatif.
 > (déjà acté ; les `.zip` existants sont incompatibles, par construction).
 >
 > ⚠️ **MAJ 2026-07-26** : le contrat décrit ici (vecteur PLAT `vec_cont`/`vec_bin`) a été
-> REMPLACÉ par les **tenseurs d'entités** de §0.30 T-D (`obs_size` **20166**). Ce qui suit reste
+> REMPLACÉ par les **tenseurs d'entités** de §0.30 T-D (`obs_size` **20545** depuis §0.31). Ce qui suit reste
 > la spécification de CE QUI est observé (profils d'armes, règles, mise en place, distance
 > parcourue) ; la FORME, elle, se lit dans `V11_entity_encoder_pointer.md` §6 et dans l'en-tête
 > de `build_squad_observation`.
@@ -4933,7 +4997,10 @@ accesseurs de layout, pas par des index recopiés).
   K slots fixes exigerait d'inventer un ordre qu'aucune action ne consomme — cf.
   `V11_audit_observation.md` §11).
 - **Listes de longueur variable** (fin des plafonds K) : idem, c'est l'étape architecture.
-- 🔴 **Les règles d'UNITÉ (`config/unit_rules.json`) ne sont PAS observées** — constat vérifié le
+- ✅ **Les règles d'UNITÉ sont observées depuis le 2026-07-27** (§0.31, commit `0fb94a01`) —
+  13 bits d'EFFET par entité, amies ET ennemies, dans `UNIT_BIN_FIELDS`. Le constat qui suit
+  décrit l'état AVANT ce correctif ; il est conservé parce qu'il documente le motif de trou.
+- 🔴 ~~**Les règles d'UNITÉ (`config/unit_rules.json`) ne sont PAS observées**~~ — constat vérifié le
   2026-07-27, **non documenté jusqu'ici, ni comme trou ni comme choix**. Cette tranche a rendu
   visibles les règles d'**armes** (profils + drapeaux) ; les règles d'unité, elles, n'existent
   dans aucun schéma du pipeline squad : `UNIT_CONT_FIELDS`/`UNIT_BIN_FIELDS`
@@ -4951,8 +5018,7 @@ accesseurs de layout, pas par des index recopiés).
   l'agent les subit sans les percevoir, exactement le constat qui avait motivé cette section
   pour les règles d'armes. **Enjeu accru depuis 19.04** (§9.2.8) : une escouade menée par un
   character porte désormais les règles de son leader, et cette information reste invisible.
-  **Ouvert — arbitrage de périmètre à faire** : le traiter touche `observation_entities.py`,
-  donc `obs_size` et le cœur du chantier `V11_entity_encoder_pointer.md` (T-D).
+  ~~**Ouvert — arbitrage de périmètre à faire**~~ → **TRAITÉ le 2026-07-27, cf. §0.31.**
 
 ### 9.2.7 ✅ CORRIGÉ le 2026-07-26 (tranche T-B) — les types de tir 10.05 / 10.06 existent enfin pour l'agent
 

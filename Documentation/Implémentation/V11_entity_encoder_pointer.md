@@ -30,6 +30,30 @@ les numéros de ligne sont indicatifs. Re-localiser par grep avant d'éditer.
 | **T-G** | Run `--new` + win-rate (§0.14) | ⏳ **débloqué (2026-07-26)** — à lancer par l'utilisateur |
 | **résidu** | 10.06 MONSTER/VEHICLE côté PvP/mono (divergence créée par T-B) | ✅ **FAIT (2026-07-26)**, cf. §1.9 |
 | **audit** | Passe « tout est optimal et documenté ? » — 6 écarts trouvés, tous corrigés | ✅ **FAIT (2026-07-26)**, cf. journal |
+| **T-H** | Complétude de l'obs : géométrie des objectifs + règles d'unité (+ cache des profils d'armes) | ✅ **FAIT (2026-07-27)**, cf. `V11_agent_rework.md` §0.31 |
+
+⚠️ **`obs_size` courant : 20545** (20166 → 20181 objectifs → 20545 règles d'unité, 2026-07-27).
+Les tailles citées dans le journal ci-dessous sont celles du jour de leur tranche : elles
+documentent une progression, elles ne décrivent pas l'état actuel.
+
+**Cardinalités : arbitrage utilisateur du 2026-07-27 — les K larges sont GARDÉS.** Un audit a
+mesuré 29 % de remplissage des slots ennemis et ~25 % des slots d'armes sur les rosters
+d'entraînement (max réels du dépôt entier : **6 escouades**, **6 profils de tir**, **5 de
+mêlée**, **4 types**, **12 figurines**). Les réduire aurait divisé le vecteur par 2,5. Décision
+de l'utilisateur : les garder pour absorber des rosters plus fournis **sans re-tailler l'obs ni
+retrainer**. Le coût a été mesuré avant de trancher, et il valide la décision :
+
+| | K larges (20 / 10+10) | K serrés (8 / 7+6) |
+|---|---|---|
+| paramètres de l'extracteur | 1,14 M | 1,14 M — **identiques** |
+| construction d'une obs | 1,92 ms | 1,94 ms — **aucun écart** |
+| forward extracteur (batch 1024, CPU) | 248 ms | 179 ms — **1,39×** |
+
+C'est exactement la promesse de §1.8 tenue : un slot de plus coûte **zéro paramètre**, donc
+aucune capacité ni généralisation perdue. Reste un surcoût de forward, seul poste réel.
+⚠️ **Ce qui avait été avancé à tort** dans l'audit : « les 12 slots de tir morts polluent
+l'exploration ». **Faux** — `build_squad_action_mask` ne lève le bit d'un slot qu'après avoir
+confirmé qu'un ennemi réel y est atteignable, donc MaskablePPO les met à `-inf` en permanence.
 
 ---
 

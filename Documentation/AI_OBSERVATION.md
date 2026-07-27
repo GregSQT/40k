@@ -58,8 +58,16 @@ réseau généralise d'un slot à l'autre et le coût d'un slot supplémentaire 
 grille exclue — calculé par `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`. Historique : 108 (T6) →
 199 (refonte du vecteur, 2026-07-25) → 1011 (profils d'armes et règles, 2026-07-26) → 5729
 (tenseurs d'entités, T-D) → 12284 (20 slots ennemis, T-E) → 20096 (K armes = 10 par registre,
-T-F) → **20166** (plafond du bloc figurines 6 → 20, 2026-07-26). **Toute évolution du schéma change cette valeur et rend les
-`.zip` existants incompatibles : le retrain `--new` est obligatoire.**
+T-F) → 20166 (plafond du bloc figurines 6 → 20, 2026-07-26) → 20181 (géométrie des objectifs,
+2026-07-27) → **20545** (règles d'unité, 13 bits par entité, 2026-07-27). **Toute évolution du
+schéma change cette valeur et rend les `.zip` existants incompatibles : le retrain `--new` est
+obligatoire.**
+
+⚠️ **Les « 12 unit-rule flags » décrits plus bas au layout `obs[314:346]` appartiennent au
+pipeline mono-figurine LEGACY.** Lus vite, ils faisaient croire que le pipeline squad exposait
+les règles d'unité — il ne le faisait pas jusqu'au 2026-07-27. Elles y sont désormais, mais
+ailleurs : 13 bits `rule_<effet>` **par entité** (amie ET ennemie), dans `UNIT_BIN_FIELDS`
+(`engine/observation_entities.py`, source unique du schéma).
 
 **Historique et décisions** : `Documentation/Implémentation/V11_audit_observation.md` (§8, §10),
 `V11_agent_rework.md` §9.2.5, `V11_entity_encoder_pointer.md` (§1 constats mesurés, §3
