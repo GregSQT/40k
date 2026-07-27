@@ -54,6 +54,42 @@ réseau généralise d'un slot à l'autre et le coût d'un slot supplémentaire 
    (`EntityRunningNorm`) : une normalisation élément par élément donnerait à chaque slot ses
    propres échelles et annulerait le partage de poids. Les clés `_bin` ne sont jamais normalisées.
 
+### Qui normalise quoi — la règle se lit sur la CLÉ, jamais sur la dimension
+
+| Clé | Répliquée par slot ? | Normalisée par | Où c'est décidé |
+|---|---|---|---|
+| `global_cont` | non (singleton) | **`VecNormalize`** (running mean/var) | `_vec_norm_obs_keys` ([ai/train.py](../ai/train.py)) |
+| `global_bin` | non (singleton) | **jamais** | idem (hors `norm_obs_keys`) |
+| `*_cont` d'entités et `self_models_cont` | oui | **`EntityRunningNorm`**, une stat par feature **commune à tous les slots et aux deux camps** | `ENTITY_CONT_KEYS` ([observation_builder.py](../engine/observation_builder.py)) + [ai/spatial_extractor.py](../ai/spatial_extractor.py) |
+| `*_bin` d'entités | oui | **jamais** | — |
+| `grid` | — | **jamais** (canaux déjà dans [0,1]) | `_vec_norm_obs_keys` |
+
+⚠️ **`_bin` ne veut pas dire « binaire »** — il veut dire « **jamais normalisé** ». Trois groupes
+de dimensions y sont continues, et y sont **exprès** parce que des statistiques glissantes
+détruiraient leur sémantique ou amplifieraient leur bruit : `phase` (scalaire ordonné dans
+[0,1]), `objective_control_*` (dans {-1, 0, +1}), et `objective_dir_cos/sin_*` (déjà bornés et
+centrés). Ne pas « corriger » cela en les déplaçant vers `_cont`.
+
+### Ce qui est mémoïsé, et par quelle clé d'invalidation
+
+L'observation lit **cinq** caches, chacun avec sa propre condition d'invalidation. C'est le point
+le plus fragile du pipeline : un cache servi trop longtemps ne lève rien, il décrit simplement un
+état périmé (régressions V11 §0.18 et §0.26). L'inventaire est verrouillé par
+`tests/unit/engine/test_obs_caches_die_with_the_episode.py`, qui rougit si un cache d'observation
+survit à un reset — **ajouter un cache sans l'y ajouter fait échouer ce test**.
+
+| Cache | Ce qu'il porte | Clé | Invalidé par |
+|---|---|---|---|
+| `_obs_weapon_profiles_cache` | les sous-tenseurs d'armes (86 % du vecteur) | `(escouade, figurines vivantes)` | `build_units_cache` — donc à chaque perte et à chaque reset |
+| `_obs_objective_hex_arrays` | hexes de chaque objectif (distances/directions) | par épisode | bloc de purges de `reset` |
+| `_grid_static_hex_arrays` | murs / objectifs / couvert rasterisés | par épisode | idem |
+| `_obs_solid_terrain_areas` | zones contenant un mur dense (Solid 13.11) | par épisode | idem |
+| `_unit_los_pair_cache` | `los_can_see` / `cover_vs_observer` par paire | `(tireur, cible)` | **invalidation ciblée** au choke-point `_touch_unit_los` : toute écriture de position, toute perte de figurine — donc correct même quand un ennemi bouge pendant mon tour (`reactive_move`) |
+
+Le dernier est le seul à ne PAS être « par épisode » : il doit suivre chaque mouvement. Sa
+fiabilité a été vérifiée par mesure — 23 398 paires comparées au calcul non caché sur 400 steps,
+0 divergence (V11 §0.31).
+
 **`obs_size`** (config d'agent, `observation_params.obs_size`) = nombre TOTAL de scalaires,
 grille exclue — calculé par `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`. Historique : 108 (T6) →
 199 (refonte du vecteur, 2026-07-25) → 1011 (profils d'armes et règles, 2026-07-26) → 5729
