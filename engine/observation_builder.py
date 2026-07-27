@@ -1981,6 +1981,30 @@ class ObservationBuilder:
         for rule_id in UNIT_RULE_EFFECT_IDS:
             _b(f"rule_{rule_id}", unit_has_rule_effect(unit, rule_id))
 
+        if not is_ally:
+            # Couvert et visibilité de cette entité ENNEMIE vus depuis l'unité observatrice.
+            # `cover` est la valeur EXACTE de 13.08 (ses DEUX conditions alternatives, dont
+            # « pas entièrement visible pour la figurine attaquante », qui dépend du tireur) :
+            # c'est ce que la résolution applique en `-1 BS`, et rien d'autre dans l'obs ne le
+            # portait — le canal « couvert » de la grille dit où sont les cases couvrantes, mais
+            # la fenêtre égocentrique s'arrête au budget d'Advance (~12″) quand une arme porte
+            # à 24″, donc la cible tirable est souvent hors de la grille.
+            #
+            # `los_can_see` accompagne obligatoirement `cover_vs_observer` : sans lui, un couvert
+            # à 0 serait ambigu (cible invisible OU visible sans couvert) — `cover` implique
+            # `can_see` dans `compute_unit_los`.
+            #
+            # Coût : appel PAIR-CACHÉ (`_unit_los_pair_cache`), invalidé de façon ciblée par le
+            # choke-point `_touch_unit_los` à chaque écriture de position ou perte de figurine —
+            # donc correct même quand un ennemi bouge pendant mon tour (`reactive_move`). La
+            # fiabilité de ce cache a été VÉRIFIÉE par mesure, pas déduite : 23 398 paires
+            # comparées au calcul non caché sur 400 steps, 0 divergence.
+            from engine.phase_handlers.shooting_handlers import compute_unit_los
+
+            los = compute_unit_los(game_state, ctx["active_unit"], unit)
+            _b("los_can_see", bool(los["can_see"]))
+            _b("cover_vs_observer", bool(los["cover"]))
+
         if is_active:
             # État terrain (13.09 / 13.5 / 13.08) recalculé à chaud : le champ unit['hidden'] du
             # moteur n'est rafraîchi qu'au début de la phase de tir, le lire ici renverrait un
@@ -2189,6 +2213,8 @@ class ObservationBuilder:
 
         ctx: Dict[str, Any] = {
             "active_squad_id": active_squad_id,
+            # Requis par les bits de PAIRE (couvert/visibilité vus depuis l'observateur).
+            "active_unit": active_unit,
             "cx": cx,
             "cy": cy,
             "current_turn": current_turn,

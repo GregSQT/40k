@@ -123,6 +123,18 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     "deploy_pre_battle",
     "deploy_in_battle",
     "deployed_this_turn",  # clause 2 de [HEAVY] 24.16
+    # ⚠ Entités ENNEMIES uniquement (masque = `present` ET NON `is_ally`) : ces deux bits
+    # décrivent une PAIRE (l'unité observatrice → cette entité), pas l'entité seule. Ils n'ont
+    # aucun sens pour une alliée, et pour l'unité active la question n'est pas définie (contre
+    # quel tireur ?) — son couvert intrinsèque, lui, reste porté par `in_cover`.
+    #
+    # Source : `compute_unit_los(observateur, cible)`, la source AUTORITATIVE du moteur — la
+    # même que la résolution du `-1 BS` (`_cover_worsened_bs`) et que l'affichage frontend.
+    # Ne PAS réimplémenter ici la branche « toutes mes figurines dans une terrain area » de
+    # 13.08 : elle ne couvre qu'une des deux conditions alternatives, donc un bit à 0 voudrait
+    # dire « indéterminé » au lieu de « pas de couvert ».
+    "los_can_see",          # 06.01 : ≥ 1 figurine de la cible visible depuis l'observateur
+    "cover_vs_observer",    # 13.08 EXACT : la cible a le bénéfice du couvert contre mon tir
 ) + tuple(f"rule_{rule_id}" for rule_id in UNIT_RULE_EFFECT_IDS)
 
 UNIT_CONT_SIZE = len(UNIT_CONT_FIELDS)

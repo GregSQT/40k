@@ -32,7 +32,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 
 | # | Entrée | Nature | Ordre proposé | Pourquoi cet ordre |
 |---|---|---|---|---|
-| **§0.14** | Re-mesure du run | 🟠 **DÉBLOQUÉ (2026-07-26)** — §0.27 corrigé + §9.2.5 livré ; run `--new` à lancer | **1** | 🟠 **MAJ 2026-07-22.** Run `x5_new` (10k ép., 48 envs) lancé sur moteur+analyzer désormais fiables (§0.23–§0.26). **Le training a atteint l'épisode 2000 sans un seul crash** (le fix move §0.25/§0.26 tient), MAIS le garde-fou d'éval a **arrêté le run au 1er checkpoint** : 500 ép. d'éval « failed » sur **timeout de task** (cf. **§0.27**). Aucun win-rate produit. Prérequis levés depuis le 2026-07-21 : dépendance perf §0.22 non bloquante (le run tourne), analyzer fiabilisé (§0.24). **MAJ 2026-07-26 : §0.27 est CORRIGÉ, §9.2.5 est LIVRÉ, et §0.30 (T-A→T-F) est LIVRÉ — plus aucun prérequis technique ni fonctionnel.** Le prochain run doit être un `--new` : `obs_size` 199 → 1011 → **20545** (tenseurs d'entités ; +géométrie des objectifs et +13 bits de règles d'unité, §0.31). |
+| **§0.14** | Re-mesure du run | 🟠 **DÉBLOQUÉ (2026-07-26)** — §0.27 corrigé + §9.2.5 livré ; run `--new` à lancer | **1** | 🟠 **MAJ 2026-07-22.** Run `x5_new` (10k ép., 48 envs) lancé sur moteur+analyzer désormais fiables (§0.23–§0.26). **Le training a atteint l'épisode 2000 sans un seul crash** (le fix move §0.25/§0.26 tient), MAIS le garde-fou d'éval a **arrêté le run au 1er checkpoint** : 500 ép. d'éval « failed » sur **timeout de task** (cf. **§0.27**). Aucun win-rate produit. Prérequis levés depuis le 2026-07-21 : dépendance perf §0.22 non bloquante (le run tourne), analyzer fiabilisé (§0.24). **MAJ 2026-07-26 : §0.27 est CORRIGÉ, §9.2.5 est LIVRÉ, et §0.30 (T-A→T-F) est LIVRÉ — plus aucun prérequis technique ni fonctionnel.** Le prochain run doit être un `--new` : `obs_size` 199 → 1011 → **20601** (tenseurs d'entités ; +objectifs situés, +13 bits de règles d'unité, +couvert/visibilité par slot ennemi — §0.31). |
 | ~~**§0.27**~~ | Blocage éval au checkpoint | ✅ **CORRIGÉ (2026-07-26)** — timeout≠crash + éval intermédiaire 100→20 (7 tests, mutation) | — | À l'éval intermédiaire (`bot_eval_intermediate=100` ép./bot × 5 bots = 500), **un task a dépassé le timeout de 1 h** (`bot_eval_task_timeout_seconds=3600`, durée mesurée 3675 s) → pool avorté, 500 ép. marqués `failed` → `RuntimeError` strict (§0.7). **Diagnostic (mesuré, PAS un hang) :** le cap `max_turns×400=2000` pas/épisode existe (aucun hang infini possible) ; le modèle à 2000 ép. (à peine entraîné) produit des **parties dégénérées** atteignant ce cap, et le **coût par-pas du fix géodésique §0.25** (l'érosion « load-bearing » = le coût §0.22) rend ces épisodes trop longs. Sonde : **0 ép. d'éval terminé en 2 min** sur le modèle courant (vs 17 s/ép sur un autre modèle). Fix approuvé (utilisateur) : (1) distinguer timeout vs crash dans le garde-fou (ne pas hard-stop sur lenteur, run résilient) + (2) réduire l'éval intermédiaire (100→~20), `bot_eval_final=100` gardé. **DIFFÉRÉ** : le win-rate est repoussé tant que la conformité tir (§0.28) n'est pas verrouillée. |
 | **§0.28** | Conformité tir obscuring (13.10) — soupçon | ✅ **RÉFUTÉ (2026-07-22)** — AUCUN bug, mesuré in-engine sur le vrai gate | — | Suspicion utilisateur (tir « à travers terrain » en replay) **investiguée à fond puis RÉFUTÉE**. Le vrai gate de tir gym = `build_squad_action_mask` (branche shoot, `shared_utils.py:8170`) → `_model_can_shoot_target` (`:4722`) → `_attacker_model_can_reach_squad` (`:4515`) → `_compute_visibility_with_obscuring` : **par-figurine, footprint COMPLET, obscuring-aware (13.10)**. Audit LIVE inséré au `return True` du gate : **297 tirs approuvés, 0 sans ligne socle→socle évitant l'obscuring** (`GATE_BUG=0`, `obscuring_clear_line=False=0`). Le « tir à travers terrain » = **peek légal par-figurine** (06.01 : un bord de socle voit là où le centre est masqué). ⚠️ Mes « 10 tirs illégaux confirmés » puis « 3 sur données fraîches » étaient TOUS des **FAUX POSITIFS** : scan offline centre-à-centre + reconstructions non fidèles (positions/arme/état). Détail méthode → §0bis. Fixture d'audit obscuring (cas net, bloque correctement) : commité. |
 | **§0.24** | Analyzer réaligné per-figurine | 🟢 **RÉSOLU (2026-07-22)** ; résiduel FP documenté | — | Détail intégral → **§0hist §0.24**. Résiduel non bloquant : suivi HP/mort de la **cible** pas encore per-figurine → **FP « Fight a dead unit »** (174 sur log réf, **prouvé FP** : Unit 104 tracée vivante) + off-by-1 fight/advance. |
@@ -41,16 +41,16 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | ~~**§0.26**~~ | Régression cache masque (clé `_unit_move_version` contournée) | ✅ **CORRIGÉ (2026-07-22)** — clé fingerprint | — | Détail → **§0hist §0.26**. |
 | **§0.29** | Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum | 🟢 **MÉCANIQUE LIVRÉE + VALIDÉE IN-ENGINE (2026-07-22)** ; reste USAGE+MESURE (cf. « Suite » §0.29 ; win-rate rejoint §0.14, **débloqué le 2026-07-26**) | 4 | Scénario `scenario_fixed_brawl_sm_orks.json` (terrain **`terrain-mc1.json`**, 36 figurines, compositions réelles des rosters training SM+Orks) où **le champ `deployment_type` bascule** placement manuel ↔ déploiement (`"fixed"` = positions `col/row`, aucun déploiement ; `"active"` = phase de déploiement). Positions par défaut dans les bandes **dégagées de mc1** (rows 90-105 / 195-210, éditables). **+ scheduler `deployment_mode_schedule`** (opt-in) : proportion `active` **croissante par épisode** au fil du training (rampe linéaire, miroir de `deployment_random_mix`, orthogonal à lui). **+ emplacements `top`/`bottom` par figurine DANS les 4 rosters** (P1=top, P2=bottom ; siège+rotation aléatoires conservés) → le mode strict marche sur le vrai chemin roster. 3 verrous verts sur le VRAI moteur : `test_fixed_brawl_deploy_modes.py` (bascule units[]) + `test_deployment_mode_schedule.py` (bornes 0/1 + rampe) + `test_roster_fixed_positions.py` (rosters top/bottom, rotation réelle). Détail → **§0.29** ci-dessous. |
 | **§0.30** | Encodeur d'entités partagé + tête pointeur (et 6 trous trouvés le 2026-07-26) | 🟢 **LIVRÉ (2026-07-26)** — T-A→T-F faits ; ne bloque plus §0.14 | **1** | Vérification demandée par l'utilisateur après §9.2.5. **6 trous trouvés**, dont : une escouade ennemie **invisible ET intirable** dans 6 épisodes sur 10 (5 slots figés pour 6 escouades mesurées) ; le gym ignore les types de tir **10.05 / 10.06** ; au tir le gym déclare **une seule arme (index 0), une seule cible** — violation de **04.01** et **04.02** ; l'heuristique d'arme de mêlée a été **périmée par P1** (ignore ANTI-X, DEVASTATING, MELTA…). Décisions actées : renommage `PISTOL` → `CLOSE_QUARTERS`, encodeur d'entité **partagé** (unités+armes, amies+ennemies), **K=20 unités / K=10 armes**, **tête pointeur** pour le ciblage, retrain accepté. **TOUT est livré le 2026-07-26** (T-A→T-F + §1.9 + audit final) : `obs_size` 199 → **20166** *(valeur du 2026-07-26 ; état courant **20545**, cf. §0.31)*, espace d'action 1047 → **1062**. Résidu **§1.9** (volet MONSTER/VEHICLE de 10.06 côté PvP/mono) **refermé le 2026-07-26** après validation PvP de T-C par l'utilisateur — plus aucun résidu ouvert. Détail complet, mesures et journal → **[`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)**. |
-| **§0.31** | Complétude de l'observation (objectifs situés, règles d'unité) + cache des profils d'armes | 🟢 **LIVRÉ (2026-07-27)** — 3 commits, 13 tests + mutations | **1** | Audit demandé par l'utilisateur (« l'obs est-elle complète, branchée, optimale ? »). Branchement **intact**. **2 trous fermés** : (1) les objectifs n'avaient **aucune position** — mesuré, **1 à 2 sur 5** tombaient dans la fenêtre de grille alors que 15 actions de zone les désignent (`ab9baa56`) ; (2) les **règles d'unité** étaient invisibles du pipeline squad, 13 bits d'effet par entité, extinction 19.04 verrouillée (`0fb94a01`). **Perf** : profils d'armes mémoïsés, `build_squad_observation` **2,86 → 1,69 ms** (`7a84e124`). **K larges GARDÉS** (arbitrage utilisateur, généralisation future) — coût mesuré : **0 paramètre**, **0 ms de construction**, 1,39× sur le forward. `obs_size` **20166 → 20545** ⇒ le run §0.14 doit être un `--new` postérieur à ces commits. Détail → **§0.31**. |
+| **§0.31** | Complétude de l'observation (objectifs situés, règles d'unité) + cache des profils d'armes | 🟢 **LIVRÉ (2026-07-27)** — 3 commits, 13 tests + mutations | **1** | Audit demandé par l'utilisateur (« l'obs est-elle complète, branchée, optimale ? »). Branchement **intact**. **2 trous fermés** : (1) les objectifs n'avaient **aucune position** — mesuré, **1 à 2 sur 5** tombaient dans la fenêtre de grille alors que 15 actions de zone les désignent (`ab9baa56`) ; (2) les **règles d'unité** étaient invisibles du pipeline squad, 13 bits d'effet par entité, extinction 19.04 verrouillée (`0fb94a01`). **Perf** : profils d'armes mémoïsés, `build_squad_observation` **2,86 → 1,69 ms** (`7a84e124`). **K larges GARDÉS** (arbitrage utilisateur, généralisation future) — coût mesuré : **0 paramètre**, **0 ms de construction**, 1,39× sur le forward. `obs_size` **20166 → 20601** ⇒ le run §0.14 doit être un `--new` postérieur à ces commits. Détail → **§0.31**. |
 | ~~**§0.22**~~ | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **CLOS le 2026-07-21 — décision (B) STOP à L1+L_bbox** | — | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) livrés et commités** (`ff2293e0`, `6f268d38`) — gain ovale **1,49×**, round10 1,78×, pool strictement identique ; A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. **Reliquat NON poursuivi** (ratio gain/risque mauvais, mesuré) : BFS wavefront réfuté (plus lent à move 12), L2b runs NumPy réfuté (1,1× net + complexité), numba écarté (risque segfault sur run 36 h). ⚠️ **MAJ 2026-07-22 : ce coût perf est désormais INCONTOURNABLE** — le fix de conformité move §0.25 REQUIERT une érosion géodésique par-figurine, exactement le coût que §0.22 combattait. Il refait surface en §0.27. Détail complet → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§10, §11) ; leçon de méthode → §0bis. |
 
 **MAJ 2026-07-26 : §0.27 est CORRIGÉ et §9.2.5 (observation des règles d'armes) est LIVRÉ.**
 **§0.31 est LIVRÉ (2026-07-27)** : objectifs situés + règles d'unité visibles + cache des
-profils d'armes ; `obs_size` **20545**, tout run antérieur est incompatible.
+profils d'armes, couvert/visibilite exacts par slot ennemi ; `obs_size` **20601**, tout run antérieur est incompatible.
 **§0.30 est LIVRÉ (T-A→T-F, 2026-07-26)** : le blocage qu'il posait au run long est levé —
 l'escouade ennemie invisible et intirable, les types de tir 10.05/10.06 absents et les
 violations 04.01/04.02 au tir sont corrigés et verrouillés. Le run reste un **`--new`**
-(`obs_size` 199 → **20545** depuis §0.31, 2026-07-27).
+(`obs_size` 199 → **20601** depuis §0.31, 2026-07-27).
 **§0.28 (conformité tir obscuring) est RÉFUTÉ — aucun bug (mesuré in-engine).**
 La nuit du 2026-07-21→22 a livré §0.23–§0.26 (logger+analyzer per-figurine, bug moteur move + régression cache),
 qui **débloquent la mesurabilité** (analyzer fiable) mais font émerger §0.27 (coût géodésique en éval).
@@ -115,15 +115,64 @@ identique (1,92 vs 1,94 ms)**, forward extracteur **1,39×**. ⚠️ **Affirmati
 « les 12 slots de tir morts polluent l'exploration » — `build_squad_action_mask` ne lève le bit
 qu'après avoir confirmé un ennemi atteignable, donc MaskablePPO les met à `-inf` en permanence.
 
-**`obs_size` 20166 → 20181 → 20545.** Le run reste un `--new` (§0.14) ; un run x1 lancé avant ces
+**`obs_size` 20166 → 20181 → 20545 → 20601.** Le run reste un `--new` (§0.14) ; un run x1 lancé avant ces
 commits est incompatible.
 
-**Non traité, assumé** : l'état terrain des ENNEMIS (`hidden` 13.09, `in_cover` 13.08,
-`gone_to_ground`) reste à zéro — émis pour la seule unité active
-([observation_builder.py](../../engine/observation_builder.py), bloc `if is_active`). C'est un
-vrai manque pour le choix de cible (on ne voit pas qu'une cible est couverte), mais son coût est
-un test d'empreinte par figurine et par entité à chaque step, le poste que §1.8 identifie comme
-dominant. **À mesurer avant de décider, pas à empiler.**
+**Suite : état terrain des ennemis — ✅ TRAITÉ le 2026-07-27, réduit à 2 bits après lecture des
+PDF.** L'entrée disait « vrai manque pour le choix de cible, à mesurer avant de décider ». Mesuré
+et arbitré ; le manque était surestimé. Les quatre conclusions de règles, à ne pas re-dériver :
+
+1. **13.09 Hidden est PAR FIGURINE**, pas par unité : « **A model** is hidden while all of the
+   following apply **to it** : that model has the INFANTRY/BEASTS/SWARM keyword and is within a
+   terrain area that contains one or more dense terrain features ; **that model's unit** did not
+   make one or more ranged attacks during this turn or during the previous turn. » Première
+   condition par figurine, seconde au niveau de l'unité. Ses deux conditions sont
+   **intrinsèques** : la portée de détection 15″ est l'*effet* de hidden, pas sa définition — donc
+   aucun test par paire n'est requis pour l'évaluer.
+2. **05.03/05.04 : l'allocation des pertes n'exige AUCUNE visibilité.** Les groupes sont créés par
+   (W, Sv, InSv) et CHARACTER, puis « Select Model: select one model in the current allocation
+   group ; this must be a model that has lost one or more wounds if possible ». Dès qu'une unité
+   est ciblable (04), **toutes** ses figurines peuvent encaisser. ⇒ un compteur `n_hidden`
+   **n'a aucun effet de jeu** : proposé, puis **rejeté** sur cette lecture.
+3. **`hidden` d'un ennemi est largement redondant** avec le masque d'action, qui encode déjà la
+   conséquence (slot de tir à 0). Ne reste que la *cause* explicite — valeur faible. Non retenu.
+   **`gone_to_ground_ready` d'un ennemi n'est pas actionnable** pour l'attaquant. Non retenu.
+4. ⚠️ **« Les ennemis ne bougent pas pendant mon tour » est FAUX** (relevé par l'utilisateur) :
+   `reactive_move` (règle d'unité vive, Termagant) est déclenché par `maybe_resolve_reactive_move`
+   depuis `movement_handlers` — une unité adverse bouge donc pendant MA phase de mouvement. Toute
+   mémoïsation clée « par tour » est invalide ; c'est la répétition exacte du motif §0.18/§0.26.
+   (Le tir en état d'alerte, lui, n'existe pas encore : zéro occurrence d'`overwatch`.)
+
+**Ce qui est livré** : **2 bits par slot ennemi** — `los_can_see` (06.01) et `cover_vs_observer`
+(13.08 **exact**), tous deux issus de `compute_unit_los`, la source **autoritative** du moteur,
+la même que `_cover_worsened_bs` (résolution du `-1 BS`) et que l'affichage frontend.
+`los_can_see` est obligatoire pour lever l'ambiguïté du second (0 = invisible *ou* visible sans
+couvert). Émis pour les entités ennemies seulement : ces bits décrivent une PAIRE ; pour l'unité
+active, « ai-je le couvert » n'est pas défini sans choisir un tireur — son couvert intrinsèque
+reste porté par `in_cover`. `obs_size` **20545 → 20601**.
+
+⚠️ **Une première proposition — un bit intrinsèque « toutes mes figurines dans une terrain area »
+— a été ÉCARTÉE, et c'est le point technique de la tranche.** Cette condition n'est qu'**une des
+deux** branches alternatives de 13.08 : un bit à 0 aurait signifié « indéterminé », pas « pas de
+couvert ». La branche 2 (« not fully visible to the attacking model ») dépend du tireur et est
+bien atteignable — vérifié : mur partiel, `can_see=True`, `fully_visible=False`, **`cover=True`
+sans aucune terrain area**. Le proxy y répondait 0 et l'agent aurait cru tirer sans malus.
+`test_cover_via_partial_visibility_only` verrouille ce cas, et la contre-épreuve par mutation
+« remettre le proxy » le fait rougir. ⚠️ Ce test EXIGE un board micro (socle multi-hex) : avec une
+figurine sur un seul hex, `fully_visible == can_see` et la branche 2 est structurellement
+inatteignable — une première version du test l'ignorait et ne prouvait rien.
+
+**Fiabilité du pair-cache, vérifiée par mesure et non déduite.** `compute_unit_los` est
+pair-cachée ; le commentaire de `_cover_worsened_bs` affirmait « pair-cache par
+`_unit_move_version` » — **faux, et corrigé** : c'est un dict pur invalidé de façon **ciblée** par
+le choke-point `_touch_unit_los` (toute écriture de position, toute perte de figurine), ce qui
+couvre `reactive_move` par construction. Le motif §0.18/§0.26 (compteur non bumpé ⇒ cache périmé
+servi) a été écarté empiriquement : **23 398 paires comparées au calcul non caché sur 400 steps,
+0 divergence**. Surcoût par step non mesurable (sous le bruit sur 300 steps ; 18 paires en cache).
+
+**9 tests** (`test_squad_obs_enemy_cover.py`), contre-épreuves par mutation : couvert éteint →
+4 rouges ; proxy branche 1 → 1 rouge (celui de la branche 2). 178 tests verts sur la famille
+observation + LoS + cover.
 
 ### 0.29 Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum — ✅ LIVRÉ + VALIDÉ IN-ENGINE (2026-07-22)
 
@@ -4945,7 +4994,7 @@ comme non normatif.
 > (déjà acté ; les `.zip` existants sont incompatibles, par construction).
 >
 > ⚠️ **MAJ 2026-07-26** : le contrat décrit ici (vecteur PLAT `vec_cont`/`vec_bin`) a été
-> REMPLACÉ par les **tenseurs d'entités** de §0.30 T-D (`obs_size` **20545** depuis §0.31). Ce qui suit reste
+> REMPLACÉ par les **tenseurs d'entités** de §0.30 T-D (`obs_size` **20601** depuis §0.31). Ce qui suit reste
 > la spécification de CE QUI est observé (profils d'armes, règles, mise en place, distance
 > parcourue) ; la FORME, elle, se lit dans `V11_entity_encoder_pointer.md` §6 et dans l'en-tête
 > de `build_squad_observation`.

@@ -22,8 +22,8 @@ lecture, jamais une copie de chiffres qui dériverait.
 
 | Clé | Forme | Contenu |
 |---|---|---|
-| `global_cont` / `global_bin` | (6,) / (12,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, force d'usure, mon tour, phase, contrôle + présence des 5 objectifs |
-| `allies_cont` / `allies_bin` | (8, 19) / (8, 17) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades |
+| `global_cont` / `global_bin` | (11,) / (22,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, force d'usure, **distance à chacun des 5 objectifs** ; mon tour, phase, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux** |
+| `allies_cont` / `allies_bin` | (8, 19) / (8, 32) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les 32 drapeaux incluent les **13 règles d'unité en vigueur** (19.04) et, pour les ennemis seulement, `los_can_see` + `cover_vs_observer` |
 | `allies_wpn_cont` / `_bin` | (8, 20, 13) / (8, 20, 18) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants et bits/params de règles |
 | `allies_types_cont` / `_bin` | (8, 6, 5) / (8, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
 | `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
@@ -59,7 +59,7 @@ grille exclue — calculé par `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`. Histo
 199 (refonte du vecteur, 2026-07-25) → 1011 (profils d'armes et règles, 2026-07-26) → 5729
 (tenseurs d'entités, T-D) → 12284 (20 slots ennemis, T-E) → 20096 (K armes = 10 par registre,
 T-F) → 20166 (plafond du bloc figurines 6 → 20, 2026-07-26) → 20181 (géométrie des objectifs,
-2026-07-27) → **20545** (règles d'unité, 13 bits par entité, 2026-07-27). **Toute évolution du
+2026-07-27) → 20545 (règles d'unité, 13 bits par entité) → **20601** (couvert et visibilité exacts par slot ennemi, 2026-07-27). **Toute évolution du
 schéma change cette valeur et rend les `.zip` existants incompatibles : le retrain `--new` est
 obligatoire.**
 

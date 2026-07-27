@@ -6814,8 +6814,11 @@ def _cover_worsened_bs(
 
     Cover = ranged-only, niveau UNITE tout-ou-rien : « worsen the BS characteristic of
     that attack by 1 ». Source autoritative : compute_unit_los(tireur, cible)["cover"]
-    (pair-cache par _unit_move_version) = exactement la valeur affichee au frontend
-    (los_cover_cache derive du meme calcul). Clamp a 6 : un 6 non-modifie touche toujours
+    = exactement la valeur affichee au frontend (los_cover_cache derive du meme calcul) et
+    celle observee par l agent (bit `cover_vs_observer` des slots ennemis). Son pair-cache est
+    un dict pur invalide de façon CIBLEE par le choke-point `_touch_unit_los` — PAS un jet
+    global sur `_unit_move_version`, comme cette ligne l affirmait a tort jusqu au 2026-07-27.
+    Clamp a 6 : un 6 non-modifie touche toujours
     (CRITICAL HIT, 05.01), donc un BS6+ sous cover reste touche-sur-6.
 
     IGNORES COVER (24.18) : si l arme tire avec une regle [IGNORES COVER], la cible
