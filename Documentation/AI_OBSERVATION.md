@@ -30,6 +30,30 @@ lecture, jamais une copie de chiffres qui dériverait.
 | `self_models_cont` / `_bin` | (20, 2) / (20, 3) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement |
 | `grid` | (7, 32, 32) | grille égocentrique : murs, alliés, ennemis, EZ, objectifs, niveau, couvert |
 
+### Les blocs logiques A→E, et ce qu'ils sont devenus
+
+L'observation a été conçue en **blocs thématiques** (`V11_audit_observation.md` §7.2 et §8 : A
+contexte, B mon escouade, C mes figurines, D ennemis, E escouades amies). Ces blocs n'ont pas
+disparu — T-D les a matérialisés en **clés de tenseurs**. Table de passage, parce que les deux
+vocabulaires coexistent dans la doc V11 :
+
+| Bloc logique | Clé(s) actuelle(s) | Note |
+|---|---|---|
+| **A** — contexte général | `global_cont` / `global_bin` | y compris les objectifs : contrôle, présence, **et depuis §0.31 distance + direction** |
+| **B** — mon escouade | `allies_cont[0]` / `allies_bin[0]` | l'unité active est la **ligne 0** du bloc amis (contrat) ; les features « actif seulement » y sont, ailleurs à zéro |
+| **C1** — types de figurines | `allies_types_*` / `enemies_types_*` | profil défensif + rôle d'allocation + effectif du type ; décrit l'escouade ENTIÈRE sans plafonner l'effectif |
+| **C2** — mes figurines | `self_models_*` | seulement l'irréductiblement individuel : position relative, éligibilité au combat, engagement |
+| **D** — ennemis | `enemies_*` | **ordre contractuel = slots d'action de tir** ; porte depuis §0.31 `los_can_see` + `cover_vs_observer` |
+| **E** — escouades amies | `allies_[1..K-1]` | livré avec T-D : les alliés sont **agrégés** par le réseau, donc leur ordre n'a pas à être inventé |
+| *(transverse)* profils d'armes | `*_wpn_*` | même encodeur pour les deux camps ; 86 % du vecteur, et le seul bloc mémoïsé |
+| *(transverse)* règles d'unité | 13 bits dans `*_bin` | §0.31 : sur **toute** entité, amie comme ennemie (schéma unifié) |
+| *(transverse)* terrain perçu | `grid` | 7 canaux égocentriques ; **ne porte que la fenêtre** du budget d'Advance |
+
+⚠️ Deux blocs sont **transverses** et non des blocs à part : les profils d'armes et les règles
+d'unité vivent DANS chaque entité, par construction du schéma unifié (invariant 1). Chercher un
+« bloc armes » ou un « bloc règles » séparé serait chercher ce qui n'existe pas — et le
+recréerait en cassant le partage de poids.
+
 **Espace d'action** : une action de tir par slot ennemi (`SHOOT_SLOT_BASE + i`, 20 slots depuis
 T-E) ; les logits de ces actions sont produits par une **tête pointeur** (`ai/pointer_policy.py`)
 qui score `q · e_i` sur les embeddings — un slot de plus ne coûte donc aucun paramètre. Le

@@ -329,6 +329,13 @@ faudra la ré-évaluer si P2/P3 change les décisions.
 
 ## 7. Proposition d'architecture : découpe structurée du vecteur (préparée, pas encore implémentée)
 
+> ✅ **IMPLÉMENTÉE depuis T-D (2026-07-26)** — le titre « pas encore implémentée » et les offsets
+> ci-dessous décrivent l'état d'AVANT. Le principe (poids partagés par entité + pooling masqué,
+> embeddings ennemis conservés par slot) est en place, mais les **blocs sont devenus des clés de
+> tenseurs** : la table de passage bloc logique A→E ↔ clé actuelle est dans
+> [`AI_OBSERVATION.md`](../AI_OBSERVATION.md), section « Les blocs logiques A→E, et ce qu'ils
+> sont devenus ». La lire AVANT d'utiliser les offsets de §7.2, qui n'existent plus.
+
 Le vecteur 108 entre aujourd'hui **tel quel** dans un MLP dense (`SpatialCombinedExtractor.forward` =
 `cat[cnn_out, vec]`, [spatial_extractor.py:87](../../ai/spatial_extractor.py#L87)). Une couche dense
 traite chaque dimension indépendamment : elle **n'exploite pas** le fait que les 6 figurines et les
