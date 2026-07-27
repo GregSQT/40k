@@ -8,6 +8,24 @@ Date d'audit : 2026-07-14. Tous les faits ci-dessous ont été vérifiés dans l
 sont indicatifs (constaté pendant l'audit : fight_handlers.py a bougé de ~45 lignes en une
 journée). Toujours re-localiser par grep du nom avant d'éditer.
 
+> ### 👁️ Ce que l'agent OBSERVE — descriptif complet
+>
+> **[`Documentation/AI_OBSERVATION.md`](../AI_OBSERVATION.md)**, section « CE QUE L'AGENT OBSERVE
+> AUJOURD'HUI » (en tête du fichier) : les clés et leurs formes, l'espace d'action associé, les
+> trois invariants, **qui normalise quoi** (`VecNormalize` vs `EntityRunningNorm`), **les 5 caches
+> et leur condition d'invalidation**, et l'historique d'`obs_size`.
+> ⚠️ Tout ce qui suit le bandeau `DOCUMENT STATUS` de ce fichier décrit le pipeline
+> **mono-figurine LEGACY**, pas celui sur lequel l'agent s'entraîne.
+>
+> **Source unique du contrat** (la doc en donne la lecture, jamais une copie de chiffres) :
+> [`engine/observation_entities.py`](../../engine/observation_entities.py) pour le schéma, et
+> l'en-tête « OBSERVATION SQUAD — TENSEURS D'ENTITÉS » de
+> [`engine/observation_builder.py`](../../engine/observation_builder.py) pour le layout.
+>
+> **Conception et journal** : [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)
+> (encodeur partagé, tête pointeur, cardinalités) · [`V11_audit_observation.md`](V11_audit_observation.md)
+> (audit d'origine) · **§9.2.5** et **§0.31** de ce document (ce qui est observé, et pourquoi).
+
 ---
 
 ## 0. ÉTAT AU 2026-07-22 — À LIRE EN PREMIER
