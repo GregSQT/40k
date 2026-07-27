@@ -113,7 +113,18 @@ def handle_fight(
                     })
                 else:
                     # Class B : plafond d'attaques escouade = (socles vivants) × CC_NB/modèle.
-                    n_fighter_models = len(state.current_line_models.get(fighter_id, {})) or 1
+                    # Effectif de l'unite qui frappe. [MODELS:] de la ligne courante d'abord
+                    # (source de verite per-socle) ; a defaut l'effectif PERSISTANT connu de
+                    # l'analyzer, tenu a jour a chaque ligne portant le segment. `_models_segment`
+                    # rend une chaine vide quand l'unite a quitte `units_cache` avant le flush du
+                    # log (derniere figurine tuee pendant l'action) : retomber directement sur 1
+                    # sous-estimait alors le plafond d'attaques d'une escouade de 10 et fabriquait
+                    # de faux verdicts « trop d'attaques ». 1 reste la borne minimale ultime.
+                    n_fighter_models = (
+                        len(state.current_line_models.get(fighter_id, {}))  # get allowed
+                        or state.unit_models_alive.get(fighter_id, 0)  # get allowed
+                        or 1
+                    )
                     cc_nb = cc_nb_single * n_fighter_models
                     seq_key = (state.fight_phase_seq_id, fighter_id, weapon_display_name)
                     if (state.last_fight_fighter_id != fighter_id or

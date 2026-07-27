@@ -50,6 +50,11 @@ def _unit(uid: int, value: int, hp_max: int, models: List[Dict[str, Any]] | None
         "UNIT_RULES": [],
         # Mise en place (24.16 clause 2 / feature d observation) : 0 = posee avant la bataille.
         "deployed_on_turn": 0,
+        # Orientation du socle : toute unite reelle la porte (posee au chargement du scenario,
+        # game_state.py) et la LoS l exige pour orienter l empreinte du tireur. Requise ici
+        # depuis que l observation lit le couvert par slot ennemi via `compute_unit_los`
+        # (V11 §0.31) : sans elle, la fixture etait plus pauvre que l etat runtime.
+        "orientation": 0,
         "RNG_WEAPONS": [],
         "CC_WEAPONS": [],
         "selectedRngWeaponIndex": 0,

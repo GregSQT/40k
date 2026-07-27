@@ -311,7 +311,14 @@ def handle_shoot(
                 # (nb de socles vivants qui tirent) × NB par modèle. Les socles vivants sont
                 # listés dans le segment [MODELS:] de la ligne (current_line_models). Sans
                 # segment (logs anciens/synthétiques) → 1 modèle (comportement ancre legacy).
-                n_shooter_models = len(state.current_line_models.get(shooter_id, {})) or 1
+                # Jumeau tir du calcul de fight_handler : [MODELS:] de la ligne, sinon
+                # l'effectif persistant connu, sinon 1 (borne minimale). Voir fight_handler pour
+                # le cas qui rend [MODELS:] absent.
+                n_shooter_models = (
+                    len(state.current_line_models.get(shooter_id, {}))  # get allowed
+                    or state.unit_models_alive.get(shooter_id, 0)  # get allowed
+                    or 1
+                )
                 rng_nb_squad = rng_nb * n_shooter_models
                 rapid_fire_value_squad = rapid_fire_value * n_shooter_models
                 rapid_fire_bonus_window = (

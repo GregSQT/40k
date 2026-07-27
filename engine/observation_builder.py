@@ -1423,7 +1423,7 @@ class ObservationBuilder:
                 int(require_key(model, "ARMOR_SAVE")),
                 int(require_key(model, "INVUL_SAVE")),
             )
-            counts[key] = counts.get(key, 0) + 1
+            counts[key] = counts.get(key, 0) + 1  # get allowed : accumulateur, 0 = 1re occurrence
 
         def _rank(item: Tuple[Tuple[Any, int, int, int, int], int]) -> Tuple[int, int, int, int, int]:
             (role, hp_max, toughness, save, invul), _count = item

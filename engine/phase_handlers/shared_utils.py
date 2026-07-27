@@ -6789,7 +6789,11 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "turn": game_state.get("turn", 0),  # get allowed
         "phase": ctx.phase_label,
         "shooterId": attacker_squad_id_str,
-        "shooterModels": list(g.get("shooter_mids", [])),
+        # `shooter_mids` est pose a la creation de CHAQUE groupe d'armes (voir plus bas dans ce
+        # fichier, initialisation a []) et lu partout ailleurs en acces direct : un `.get` avec
+        # defaut masquait ici une absence qui ne peut pas survenir, et aurait rendu un log de
+        # tir sans tireur au lieu de lever.
+        "shooterModels": list(require_key(g, "shooter_mids")),
         "targetId": target_sid_g,
         "weaponName": weapon_name_g if weapon_name_g else None,
         "targetUnitType": tgt_unit_type_g,

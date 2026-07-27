@@ -77,7 +77,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     if _uid in state.unit_player:
                         # [MODELS:] = source de vérité du nb de figurines vivantes de _uid.
                         state.unit_models_alive[_uid] = len(_models)
-                        if state.unit_hp.get(_uid, 0) <= 0:
+                        # get allowed : l'absence EST le cas traite ici. On repare une
+                        # incoherence connue (escouade faussement retiree de `unit_hp` alors que
+                        # [MODELS:] la montre vivante) ; « absente » et « a 0 PV » demandent la
+                        # meme reparation, et lever interdirait justement de la reparer.
+                        if state.unit_hp.get(_uid, 0) <= 0:  # get allowed
                             # Escouade faussement retirée : ressusciter la figurine front à PV pleins.
                             state.unit_hp[_uid] = require_key(state.unit_hp_max_per_model, _uid)
                             state.dead_units_current_episode.discard(_uid)

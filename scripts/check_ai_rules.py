@@ -391,6 +391,13 @@ def check_fallback_anti_error(path: Path, text: str) -> List[RuleViolation]:
     for idx, line in enumerate(lines, start=1):
         if any(ac.search(line) for ac in allowed_contexts):
             continue
+        # Une ligne ENTIEREMENT commentaire ne contient aucun code executable : un `.get(k, 0)`
+        # qui y apparait documente un fallback (souvent celui qu'on vient de SUPPRIMER), il n'en
+        # est pas un. Sans ce skip, ecrire « l'ancien tgt_uc.get("col", 0) rendait (0,0) » pour
+        # expliquer une correction declenchait une violation — l'outil punissait la
+        # documentation du bon comportement.
+        if line.lstrip().startswith("#"):
+            continue
         for pattern, message in fallback_patterns:
             if pattern.search(line):
                 violations.append(RuleViolation(path, idx, message, line, "fallback_anti_error"))
@@ -424,13 +431,31 @@ def check_forbidden_terms(path: Path, text: str) -> List[RuleViolation]:
         "ne pas utiliser", "avoid fallback", "avoid workaround", "éviter",
         "pas de fallback", "pas de workaround",
         "aucun fallback", "pas un fallback", "sans fallback",
+        # Formulations rencontrees dans le depot et absentes de cette liste (2026-07-27) :
+        # elles disent toutes que le fallback N'EXISTE PAS ou a ete RETIRE.
+        "no silent fallback", "aucun repli", "pas de repli", "supprime", "supprimé",
+        "n'est pas un fallback", "sans repli",
     ]
 
+    # Suivi d'etat des docstrings : une ligne DANS une docstring ne contient aucun code
+    # executable, donc « Aucun fallback : toute donnee manquante leve » y documente
+    # l'interdiction exactement comme un `#`. Sans ce suivi, l'outil punissait la
+    # documentation du bon comportement (5 cas dans le depot au 2026-07-27). Le meme
+    # compromis est deja assume par le controle col/row (cf. l'en-tete de ce fichier).
+    # Seules les lignes portant une formulation d'INTERDICTION sont exemptees : une docstring
+    # qui PROMETTRAIT un fallback reste signalee.
+    in_docstring = False
     for idx, line in enumerate(text.splitlines(), start=1):
         stripped = line.strip()
-        # Skip full-line comments that document the prohibition
-        if stripped.startswith("#"):
-            comment_lower = stripped[1:].strip().lower()
+        was_in_docstring = in_docstring
+        for marker in ('"""', "'''"):
+            # Nombre IMPAIR de marqueurs sur la ligne => l'etat bascule.
+            if stripped.count(marker) % 2 == 1:
+                in_docstring = not in_docstring
+                break
+
+        if stripped.startswith("#") or was_in_docstring or in_docstring:
+            comment_lower = stripped.lstrip("#\"' ").lower()
             if any(term in comment_lower for term in prohibition_comment_terms):
                 continue
         # Skip lines that are documentation of the rule (allowed/exception/todo)

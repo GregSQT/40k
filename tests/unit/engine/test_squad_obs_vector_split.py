@@ -221,7 +221,11 @@ def test_vec_norm_obs_keys_targets_only_the_global_block(engine):
     """
     from ai.train import _vec_norm_obs_keys
 
-    assert _vec_norm_obs_keys(engine.observation_space) == ["global_cont"]
+    # `None` = obs Box (comportement historique « tout normaliser ») ; ce test porte sur une obs
+    # Dict, donc l'ancrer explicitement plutot que d'indexer un Optional.
+    norm_keys = _vec_norm_obs_keys(engine.observation_space)
+    assert norm_keys is not None, "obs Dict attendue (None signifie une obs Box)"
+    assert norm_keys == ["global_cont"]
     for key in ObservationBuilder.ENTITY_CONT_KEYS:
         assert key in engine.observation_space.spaces
-        assert key not in _vec_norm_obs_keys(engine.observation_space)
+        assert key not in norm_keys

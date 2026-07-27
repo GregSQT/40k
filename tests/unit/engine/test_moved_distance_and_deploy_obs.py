@@ -227,7 +227,9 @@ def test_observation_deploy_state_marks_an_arrival_this_turn():
 
     eng = _make_engine([_unit_cfg(1, 1, [(10, 10)]), _unit_cfg(2, 2, [(50, 30)])])
     eng.game_state["turn"] = 3
-    get_unit_by_id("1", eng.game_state)["deployed_on_turn"] = 3
+    unit = get_unit_by_id("1", eng.game_state)
+    assert unit is not None, "unite 1 absente du game_state"
+    unit["deployed_on_turn"] = 3
     binv = _obs(eng)["allies_bin"][0]
     assert binv[BIN_PRE_BATTLE] == pytest.approx(0.0)
     assert binv[BIN_ARRIVED_IN_BATTLE] == pytest.approx(1.0)
@@ -240,7 +242,9 @@ def test_observation_deploy_state_distinguishes_a_previous_turn_arrival():
 
     eng = _make_engine([_unit_cfg(1, 1, [(10, 10)]), _unit_cfg(2, 2, [(50, 30)])])
     eng.game_state["turn"] = 3
-    get_unit_by_id("1", eng.game_state)["deployed_on_turn"] = 2
+    unit = get_unit_by_id("1", eng.game_state)
+    assert unit is not None, "unite 1 absente du game_state"
+    unit["deployed_on_turn"] = 2
     binv = _obs(eng)["allies_bin"][0]
     assert binv[BIN_ARRIVED_IN_BATTLE] == pytest.approx(1.0)
     assert binv[BIN_SET_UP_THIS_TURN] == pytest.approx(0.0)

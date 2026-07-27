@@ -268,15 +268,15 @@ def load_analyzer_config() -> AnalyzerConfig:
     weapon_is_close_quarters_global: Dict[str, bool] = {}
     for _ut, _limits in unit_attack_limits.items():
         for _wname, _nb in _limits["rng_nb_by_weapon"].items():
-            rng_nb_by_weapon_global[_wname] = max(rng_nb_by_weapon_global.get(_wname, 0), _nb)
+            rng_nb_by_weapon_global[_wname] = max(rng_nb_by_weapon_global.get(_wname, 0), _nb)  # get allowed : max cumulatif, 0 = neutre
         for _wname, _rf in _limits["rapid_fire_by_weapon"].items():
-            rapid_fire_by_weapon_global[_wname] = max(rapid_fire_by_weapon_global.get(_wname, 0), _rf)
+            rapid_fire_by_weapon_global[_wname] = max(rapid_fire_by_weapon_global.get(_wname, 0), _rf)  # get allowed : max cumulatif, 0 = neutre
         for _wname, _nb in _limits["cc_nb_by_weapon"].items():
-            cc_nb_by_weapon_global[_wname] = max(cc_nb_by_weapon_global.get(_wname, 0), _nb)
+            cc_nb_by_weapon_global[_wname] = max(cc_nb_by_weapon_global.get(_wname, 0), _nb)  # get allowed : max cumulatif, 0 = neutre
     for _ut, _winfos in unit_weapons_cache.items():
         for _winfo in _winfos:
             _wname = _winfo["name"]
-            weapon_range_global[_wname] = max(weapon_range_global.get(_wname, 0), _winfo["range"])
+            weapon_range_global[_wname] = max(weapon_range_global.get(_wname, 0), _winfo["range"])  # get allowed : max cumulatif, 0 = neutre
             weapon_is_close_quarters_global[_wname] = weapon_is_close_quarters_global.get(_wname, False) or _winfo["is_close_quarters"]
 
     return AnalyzerConfig(

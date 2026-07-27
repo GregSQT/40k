@@ -170,7 +170,7 @@ def collect_weapon_profiles(
         # Une figurine peut décliner le MÊME profil deux fois (deux armes identiques) : elle
         # ne compte qu'une fois comme porteuse, le volume vient de NB.
         for key, weapon in {profile_identity(w): w for w in weapons}.items():
-            counts[key] = counts.get(key, 0) + 1
+            counts[key] = counts.get(key, 0) + 1  # get allowed : accumulateur, 0 = 1re occurrence
             sample.setdefault(key, weapon)
     ordered = sorted(counts.items(), key=lambda item: (-item[1], repr(item[0])))
     return [(sample[key], count) for key, count in ordered]

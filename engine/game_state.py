@@ -1966,7 +1966,10 @@ class GameStateManager:
                 continue
             if isinstance(area.get("vertices"), list):
                 area["vertices"] = [_pt(v) for v in area["vertices"]]
-            for floor in area.get("floors", []) or []:
+            # get allowed : section OPTIONNELLE du terrain (mesure 2026-07-27 : aucune aire sur
+            # 15 n'en porte dans terrain-train-01/02/03, 5 sur 15 dans mc1). Absence = terrain
+            # sans etage, pas une donnee manquante — meme lecture qu'a la L659.
+            for floor in area.get("floors", []) or []:  # get allowed
                 if isinstance(floor, dict) and isinstance(floor.get("vertices"), list):
                     floor["vertices"] = [_pt(v) for v in floor["vertices"]]
         for group in scaled.get("walls", []):  # get allowed
@@ -1976,10 +1979,12 @@ class GameStateManager:
                 group["segments"] = [[_pt(seg[0]), _pt(seg[1])] for seg in group["segments"]]
             if isinstance(group.get("hexes"), list):
                 group["hexes"] = [_pt(h) for h in group["hexes"]]
-        for zone in scaled.get("deployment_zones", []) or []:
+        # get allowed : section OPTIONNELLE (absente de terrain_obscuring_fixture.json).
+        for zone in scaled.get("deployment_zones", []) or []:  # get allowed
             if isinstance(zone, dict) and isinstance(zone.get("vertices"), list):
                 zone["vertices"] = [_pt(v) for v in zone["vertices"]]
-        for icon in scaled.get("icons", []) or []:
+        # get allowed : section OPTIONNELLE, purement decorative.
+        for icon in scaled.get("icons", []) or []:  # get allowed
             if not isinstance(icon, dict):
                 continue
             if isinstance(icon.get("center"), list):
