@@ -216,7 +216,10 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
             raise TypeError(
                 f"SpatialCombinedExtractor attend un espace Dict, recu {type(observation_space)}"
             )
-        expected_keys = ["global_cont", "global_bin", "self_models_cont", "self_models_bin", "grid"]
+        expected_keys = [
+            "global_cont", "global_bin", "self_models_cont", "self_models_bin", "grid",
+            "decision_ctx_bin", "decision_options_bin",
+        ]
         for family in _UNIT_FAMILIES:
             expected_keys += [
                 f"{family}_cont", f"{family}_bin",
@@ -265,6 +268,8 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         self.n_self_models, self.self_model_cont_dim = _shape("self_models_cont")
         self.self_model_bin_dim = _shape("self_models_bin")[1]
         global_dim = _shape("global_cont")[0] + _shape("global_bin")[0]
+        self.decision_ctx_dim = _shape("decision_ctx_bin")[0]
+        self.n_decision_options, self.decision_option_dim = _shape("decision_options_bin")
 
         weapon_agg = 2 * weapon_dim
         type_agg = 2 * type_dim
@@ -276,6 +281,12 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
             + 2 * entity_dim          # agrégation de mes autres escouades
             + 2 * entity_dim          # agrégation des ennemies (contexte)
             + model_agg
+            # Contexte de décision : quel type de choix est demandé, et un résumé de ce que les
+            # candidats offrent. Le tronc en a besoin pour la VALEUR de l'état et pour scorer
+            # les candidats en connaissance du reste de la partie (leurs embeddings par slot, eux,
+            # partent directement à la tête pointeur — cf. `decision_embeddings_slice`).
+            + self.decision_ctx_dim
+            + 2 * entity_dim
         )
         # La carte de move sort du réseau AVEC ses canaux positionnels : la tête 1x1 doit les
         # voir directement, pas seulement à travers la pile conv.
@@ -286,6 +297,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 trunk_dim
                 + self.n_enemy_slots * entity_dim
                 + move_map_channels * GRID_CELL_COUNT
+                + self.n_decision_options * entity_dim
             ),
         )
         self.trunk_dim = trunk_dim
@@ -353,6 +365,14 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 entity_dim,
             ]
         )
+        # Encodeur de CANDIDAT de décision (V11 §9.3 P2) : un seul module pour tous les slots et
+        # tous les types de décision — même raison que pour les unités et les armes. Un candidat
+        # n'a aucune sémantique de position (l'option 0 d'un prompt n'a rien à voir avec l'option 0
+        # d'un autre) : des poids par slot n'auraient RIEN à généraliser. Il sort en `entity_dim`
+        # pour que la tête pointeur le score exactement comme un slot ennemi.
+        # Aucune `EntityRunningNorm` : le registre de candidat est entièrement DISCRET (§0.32 T-J
+        # — une valeur discrète n'est jamais normalisée).
+        self.decision_encoder = _mlp([self.decision_option_dim, entity_dim, entity_dim])
 
     # -- contrat de découpe consommé par les têtes d'action (T-E, T-G) ------------
     def enemy_embeddings_slice(self) -> slice:
@@ -368,6 +388,15 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         """
         start = self.enemy_embeddings_slice().stop
         return slice(start, start + self.move_map_channels * GRID_CELL_COUNT)
+
+    def decision_embeddings_slice(self) -> slice:
+        """Tranche des embeddings de CANDIDATS de décision, PAR SLOT (V11 §9.3 P2).
+
+        Placée en DERNIER : les tranches déjà consommées par les têtes de tir et de move gardent
+        leurs bornes, un ajout en tête les aurait toutes décalées en silence.
+        """
+        start = self.move_map_slice().stop
+        return slice(start, start + self.n_decision_options * self.entity_dim)
 
     def _encode_units(self, obs: Dict[str, torch.Tensor], family: str) -> torch.Tensor:
         """Embeddings (B, K, entity_dim) d'une famille d'unités, encodeurs PARTAGÉS."""
@@ -431,6 +460,15 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         sm_in = torch.cat([self.self_model_norm(sm_cont, sm_mask), sm_bin], dim=-1)
         sm_agg = _masked_mean_max(self.self_model_encoder(sm_in), sm_mask)
 
+        # Candidats de décision : masque LU sur le bit `present` (dernier champ du registre),
+        # jamais déduit de la ligne — un candidat sans effet observé aurait une ligne nulle.
+        decision_options = observations["decision_options_bin"]
+        decision_mask = decision_options[..., -1]
+        decision_emb = self.decision_encoder(decision_options) * (
+            decision_mask > 0
+        ).to(decision_options.dtype).unsqueeze(-1)
+        decision_agg = _masked_mean_max(decision_emb, decision_mask)
+
         trunk = torch.cat(
             [
                 cnn_out,
@@ -440,6 +478,8 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 allies_agg,
                 enemies_agg,
                 sm_agg,
+                observations["decision_ctx_bin"],
+                decision_agg,
             ],
             dim=1,
         )
@@ -448,6 +488,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 trunk,
                 enemy_emb.reshape(enemy_emb.shape[0], -1),
                 move_map.reshape(move_map.shape[0], -1),
+                decision_emb.reshape(decision_emb.shape[0], -1),
             ],
             dim=1,
         )

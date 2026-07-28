@@ -22,6 +22,8 @@ import numpy as np
 
 from engine.observation_builder import ObservationBuilder
 from engine.observation_entities import (
+    DECISION_CTX_BIN_FIELDS,
+    DECISION_OPTION_BIN_FIELDS,
     GLOBAL_BIN_FIELDS,
     GLOBAL_CONT_FIELDS,
     MODEL_TYPE_BIN_FIELDS,
@@ -31,6 +33,7 @@ from engine.observation_entities import (
     UNIT_BIN_FIELDS,
     UNIT_CONT_FIELDS,
 )
+from engine.observation_entities import MAX_DECISION_OPTIONS
 from engine.observation_weapon_profiles import ANTI_KEYWORDS, WEAPON_RULE_BITS, WEAPON_RULE_PARAMS
 
 DOC = os.path.join(
@@ -57,6 +60,10 @@ def test_every_schema_field_is_documented():
         "model_type_bin": MODEL_TYPE_BIN_FIELDS,
         "self_model_cont": SELF_MODEL_CONT_FIELDS,
         "self_model_bin": SELF_MODEL_BIN_FIELDS,
+        # V11 §9.3 P2 : le bloc de decision est documente comme les autres — un candidat que la
+        # doc n'explique pas est un candidat que personne ne sait interpreter dans un step.log.
+        "decision_ctx_bin": DECISION_CTX_BIN_FIELDS,
+        "decision_option_bin": DECISION_OPTION_BIN_FIELDS,
     }
     missing = []
     for group, fields in groups.items():
@@ -168,6 +175,7 @@ def test_documented_cardinalities_match_the_code():
         ("K_ALLY_SLOTS", ObservationBuilder.K_ALLY_SLOTS),
         ("K_ENEMY_SLOTS", ObservationBuilder.K_ENEMY_SLOTS),
         ("SQUAD_TOP_K", ObservationBuilder.SQUAD_TOP_K),
+        ("MAX_DECISION_OPTIONS", MAX_DECISION_OPTIONS),
     ):
         assert re.search(rf"{name}\s*=\s*{value}\b", text), (
             f"{name} = {value} n'est pas annonce tel quel dans la doc"

@@ -319,3 +319,67 @@ def test_get_opponent_action_uses_self_play_branch_when_enabled(monkeypatch: pyt
     wrapper._episode_uses_self_play_opponent = True
     monkeypatch.setattr(wrapper, "_get_self_play_opponent_action", lambda: 9)
     assert wrapper._get_opponent_action() == 9
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# V11 §9.3 (P2) — décision agent : qui la possède, et qui la joue côté bot
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _decision_state(player: int) -> dict:
+    """`game_state` portant une décision en attente, appartenant à `player`."""
+    return {
+        "type": "rule_choice",
+        "player": player,
+        "unit_id": "u9",
+        "options": [
+            {"label": "A", "effect_ids": ("reroll_1_tohit_fight",), "payload": {}},
+            {"label": "B", "effect_ids": ("reroll_1_save_fight",), "payload": {}},
+        ],
+    }
+
+
+class _PassthroughDecoder(_DummyActionDecoder):
+    """Decodeur stub qui rend l'action telle quelle : sans lui, le tirage du bot serait masque
+    par la normalisation figee du stub de base."""
+
+    def normalize_action_input(self, raw_action, phase, source, action_space_size):
+        _ = (phase, source, action_space_size)
+        return int(raw_action)
+
+
+def _decision_mask() -> list:
+    mask = [False] * mi.TOTAL_ACTION_SIZE
+    mask[mi.CHOICE_BASE] = True
+    mask[mi.CHOICE_BASE + 1] = True
+    return mask
+
+
+def test_decision_owner_is_the_player_of_the_pending_decision() -> None:
+    """Le pool d'unités éligibles est vide pendant une décision : sans ce cas, le wrapper
+    conclurait « personne ne décide » et tenterait d'avancer une phase que la décision bloque."""
+    decoder = _DummyActionDecoder(mask=_decision_mask(), eligible=[])
+    engine = _DummyEngine(decoder=decoder)
+    engine.game_state["pending_agent_decision"] = _decision_state(player=2)
+    wrapper = BotControlledEnv(engine, bot=_DummyBot())
+    owner, has_valid_actions, eligible_count = wrapper._get_decision_owner_from_mask()
+    assert owner == 2
+    assert has_valid_actions is True
+    assert eligible_count == 0
+
+
+def test_bot_plays_its_own_decision_instead_of_waiting() -> None:
+    """La décision du camp BOT est jouée par le bot — plus par l'action de l'agent (§9.4 point 0).
+
+    Sans ce branchement, `_get_bot_action` retomberait sur `ACTION_WAIT`, action que le masque
+    d'une décision n'autorise pas.
+    """
+    decoder = _PassthroughDecoder(mask=_decision_mask(), eligible=[])
+    engine = _DummyEngine(decoder=decoder)
+    engine.game_state["pending_agent_decision"] = _decision_state(player=2)
+    wrapper = BotControlledEnv(engine, bot=_DummyBot())
+    for _ in range(20):
+        action = wrapper._get_bot_action()
+        assert action in (mi.CHOICE_BASE, mi.CHOICE_BASE + 1), (
+            "le bot doit jouer un CANDIDAT, pas une action de phase"
+        )

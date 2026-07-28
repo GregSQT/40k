@@ -82,8 +82,16 @@ def test_features_layout_exposes_the_enemy_embeddings(extractor):
 
     move = extractor.move_map_slice()
     assert move.start == sl.stop
-    assert move.stop == extractor.features_dim
     assert (move.stop - move.start) == extractor.move_map_channels * GRID_CELL_COUNT
+
+    # V11 §9.3 P2 : les embeddings de CANDIDATS de decision ferment le vecteur, derriere la
+    # carte — un ajout en tete aurait decale les deux tranches ci-dessus en silence.
+    decision = extractor.decision_embeddings_slice()
+    assert decision.start == move.stop
+    assert (decision.stop - decision.start) == (
+        extractor.n_decision_options * extractor.entity_dim
+    )
+    assert decision.stop == extractor.features_dim
 
 
 def test_forward_shape_and_finiteness(extractor):
@@ -139,7 +147,8 @@ def test_unit_encoder_is_a_single_module(extractor):
     named = dict(extractor.named_modules())
     encoders = [n for n in named if n.endswith("_encoder")]
     assert sorted(encoders) == [
-        "self_model_encoder", "type_encoder", "unit_encoder", "weapon_encoder",
+        "decision_encoder", "self_model_encoder", "type_encoder", "unit_encoder",
+        "weapon_encoder",
     ]
     assert not any("ally" in n or "enemy" in n for n in named)
 

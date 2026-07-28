@@ -29,7 +29,14 @@ from engine.observation_weapon_profiles import (
     PROFILE_CONT_SIZE,
     encode_squad_weapon_profiles,
 )
+from engine.agent_decision import read_pending_agent_decision
 from engine.observation_entities import (
+    AGENT_DECISION_TYPE_IDS,
+    DECISION_CTX_BIN_SIZE,
+    DECISION_OPTION_BIN_SIZE,
+    MAX_DECISION_OPTIONS,
+    decision_ctx_bin_index,
+    decision_option_bin_index,
     GLOBAL_BIN_SIZE,
     GLOBAL_CONT_SIZE,
     MODEL_TYPE_BIN_SIZE,
@@ -215,6 +222,10 @@ class ObservationBuilder:
             + K_MODEL_TYPES * (MODEL_TYPE_CONT_SIZE + MODEL_TYPE_BIN_SIZE)
         )
         + SQUAD_TOP_K * (SELF_MODEL_CONT_SIZE + SELF_MODEL_BIN_SIZE)
+        # Bloc « contexte de décision » (V11 §9.3 P2) : sans lui, `CHOICE_i` serait un choix à
+        # l'aveugle — exactement le défaut de la pseudo-décision qu'il remplace.
+        + DECISION_CTX_BIN_SIZE
+        + MAX_DECISION_OPTIONS * DECISION_OPTION_BIN_SIZE
     )
 
     @classmethod
@@ -241,6 +252,10 @@ class ObservationBuilder:
             "enemies_types_bin": (cls.K_ENEMY_SLOTS, cls.K_MODEL_TYPES, MODEL_TYPE_BIN_SIZE),
             "self_models_cont": (cls.SQUAD_TOP_K, SELF_MODEL_CONT_SIZE),
             "self_models_bin": (cls.SQUAD_TOP_K, SELF_MODEL_BIN_SIZE),
+            # Décision agent (§9.3 P2). ⚠ L'ORDRE DES CANDIDATS EST CONTRACTUEL, comme celui des
+            # slots ennemis : `decision_options_bin[i]` décrit le candidat que joue `CHOICE_i`.
+            "decision_ctx_bin": (DECISION_CTX_BIN_SIZE,),
+            "decision_options_bin": (MAX_DECISION_OPTIONS, DECISION_OPTION_BIN_SIZE),
         }
 
     #: Clés dont les statistiques de normalisation sont partagées entre TOUS les slots
@@ -611,6 +626,46 @@ class ObservationBuilder:
                 cosines.append(float(dx[nearest]) / dist_px)
                 sines.append(float(dy[nearest]) / dist_px)
         return distances, cosines, sines
+
+    def _encode_pending_decision(
+        self, game_state: Dict[str, Any], obs: Dict[str, np.ndarray], active_player: int
+    ) -> None:
+        """Remplit le bloc « contexte de décision » (V11 §9.3 P2).
+
+        Le bloc reste NUL — `decision_pending` à 0 — quand aucune décision n'est en attente, ou
+        quand celle en attente appartient à l'autre camp : décrire à un joueur un choix qui n'est
+        pas le sien lui ferait observer des candidats qu'aucune de ses actions ne peut jouer.
+
+        Le masque de candidat (`present`) porte le NOMBRE de candidats : les slots au-delà restent
+        à zéro et sont exclus par l'encodeur, comme un slot ennemi vide.
+        """
+        decision = read_pending_agent_decision(game_state)
+        if decision is None:
+            return
+        if int(require_key(decision, "player")) != int(active_player):
+            return
+
+        ctx = obs["decision_ctx_bin"]
+        ctx[decision_ctx_bin_index("decision_pending")] = 1.0
+        decision_type = str(require_key(decision, "type"))
+        if decision_type not in AGENT_DECISION_TYPE_IDS:
+            raise KeyError(
+                f"_encode_pending_decision: type de decision inconnu {decision_type!r}. "
+                f"Types du schema d'observation : {AGENT_DECISION_TYPE_IDS}"
+            )
+        ctx[decision_ctx_bin_index(f"decision_type_{decision_type}")] = 1.0
+
+        options = require_key(decision, "options")
+        if len(options) > MAX_DECISION_OPTIONS:
+            raise ValueError(
+                f"_encode_pending_decision: {len(options)} candidats pour "
+                f"{MAX_DECISION_OPTIONS} slots — `set_pending_agent_decision` aurait du lever."
+            )
+        opts = obs["decision_options_bin"]
+        for slot, option in enumerate(options):
+            for effect_id in require_key(option, "effect_ids"):
+                opts[slot, decision_option_bin_index(f"grants_{effect_id}")] = 1.0
+            opts[slot, decision_option_bin_index("present")] = 1.0
 
     def _empty_squad_observation(self) -> Dict[str, np.ndarray]:
         """Observation nulle (escouade morte/absente) — mêmes clés et formes que le cas nominal."""
@@ -1064,6 +1119,9 @@ class ObservationBuilder:
             g_bin[global_bin_index(f"objective_dir_cos_{i}")] = obj_cos[i]
             g_bin[global_bin_index(f"objective_dir_sin_{i}")] = obj_sin[i]
 
+        # === DÉCISION AGENT EN ATTENTE (V11 §9.3 P2) ===
+        self._encode_pending_decision(game_state, obs, active_player)
+
         # === ENGAGEMENT (règle 03.04) — une seule passe pour toutes les entités ===
         # Le test EZ exact compare des EMPREINTES (jusqu'à ~200 cases pour une grande base) :
         # on élimine d'abord les escouades trop loin pour POUVOIR engager, avec la même borne
@@ -1459,7 +1517,15 @@ class ObservationBuilder:
         # peut pas croiser le canal avec le MOVE de l'unite pour retrouver ou est cette frontiere.
         # `phase` : REQUIS, même doctrine que le vecteur (§0.32 T-J) — une phase absente doit
         # lever, pas produire silencieusement un canal de coût vide.
-        if str(require_key(game_state, "phase")).lower() == "move":
+        # Une DÉCISION AGENT en attente (§9.3 P2) arrête le moteur sur un point de choix : le
+        # masque n'expose que les `CHOICE_i`, donc aucune carte de cellules n'a été construite —
+        # et il n'y en a pas à construire, puisque aucune activation de move n'est en cours. Le
+        # canal reste à 0, exactement comme hors phase de mouvement. En construire une ici
+        # relancerait un BFS pour peindre des destinations que l'agent ne peut pas jouer.
+        if (
+            str(require_key(game_state, "phase")).lower() == "move"
+            and read_pending_agent_decision(game_state) is None
+        ):
             from engine.phase_handlers.shared_utils import (
                 _squad_is_in_enemy_er,
                 read_squad_move_cell_map,

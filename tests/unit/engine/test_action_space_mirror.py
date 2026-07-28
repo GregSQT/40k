@@ -56,8 +56,22 @@ def test_zone_intent_starts_right_after_the_micro_actions():
 
 
 def test_total_action_size():
-    assert mi.TOTAL_ACTION_SIZE == su.SQUAD_ACTION_SIZE + mi.MAX_OBJECTIVES * 3
-    assert mi.TOTAL_ACTION_SIZE == 1082
+    """L'action space se termine par les CHOICE_i du mecanisme de decision (V11 §9.3 P2)."""
+    assert mi.CHOICE_BASE == su.SQUAD_ACTION_SIZE + mi.MAX_OBJECTIVES * 3
+    assert mi.TOTAL_ACTION_SIZE == mi.CHOICE_BASE + mi.CHOICE_COUNT
+    assert mi.TOTAL_ACTION_SIZE == 1088
+
+
+def test_choice_slots_close_the_action_space():
+    """Les CHOICE ne recouvrent aucun zone intent et ferment l'espace, sans trou."""
+    assert list(mi.CHOICE_SLOTS) == list(range(mi.CHOICE_BASE, mi.TOTAL_ACTION_SIZE))
+    assert not mi.is_zone_intent_action(mi.CHOICE_BASE)
+    assert mi.is_zone_intent_action(mi.CHOICE_BASE - 1)
+    for offset in range(mi.CHOICE_COUNT):
+        assert mi.is_agent_decision_action(mi.CHOICE_BASE + offset)
+        assert mi.decode_agent_decision_action(mi.CHOICE_BASE + offset) == offset
+    assert not mi.is_agent_decision_action(mi.CHOICE_BASE - 1)
+    assert not mi.is_agent_decision_action(mi.TOTAL_ACTION_SIZE)
 
 
 def test_micro_action_ids_are_contiguous_and_unique():

@@ -356,7 +356,6 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
     "last_compliance_data",
     "units_cache_prev",
     "_best_weapon_cache",
-    "_last_raw_action_int",
     "_last_semantic_action",
     "_last_action_debug",
     "_choice_timing_fired_events",

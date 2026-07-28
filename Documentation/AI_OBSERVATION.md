@@ -40,7 +40,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 654 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 740 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (11,)                =      11               │
@@ -65,9 +65,13 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │  MES FIGURINES (individuel)                        SQUAD_TOP_K = 20    │
 │    self_models_cont       (20, 2)              =      40               │
 │    self_models_bin        (20, 4)              =      80               │
+│                                                                        │
+│  DÉCISION AGENT — candidats de CHOICE_i        MAX_DECISION_OPTIONS = 6│
+│    decision_ctx_bin       (2,)                 =       2               │
+│    decision_options_bin   (6, 14)              =      84               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      20 654              │
-│  + grid  (7, 32, 32) = 7 168, fournie À PART (non comptée)             │
+│  TOTAL vectoriel (= obs_size)                      20 740              │
+│  + grid  (9, 32, 32) = 9 216, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
 Coût d'UNE entité = 20 + 32 (unité) + 20 × (13 + 18) (armes) + 6 × (5 + 5) (types) = 732
@@ -295,6 +299,56 @@ et sans aucun drapeau : ligne entièrement nulle, donc exclue de l'agrégation E
 voisins hexagonaux de parités de ligne différentes n'avaient pas la même norme. Le choix de la
 figurine « la plus proche » d'une entité se fait dans le même repère, pour la même raison.
 
+#### `decision_ctx_bin` / `decision_options_bin[c]` — décision agent  ·  jamais normalisé
+
+Bloc du **mécanisme générique « décision agent »** (V11 §9.3, P2). Il décrit le point de choix sur
+lequel le moteur s'est arrêté — l'exact miroir d'un `waiting_for_player` PvP — et **chaque
+candidat** que les actions `CHOICE_0..5` (`macro_intents.CHOICE_SLOTS`) désignent.
+
+```python
+decision_ctx_bin[0]      = decision_pending                  # 0.0 / 1.0 — masque du bloc entier
+decision_ctx_bin[1]      = decision_type_rule_choice         # 0.0 / 1.0 — one-hot du type
+
+decision_options_bin[c][ 0] = grants_charge_after_advance                  # 0.0 / 1.0
+decision_options_bin[c][ 1] = grants_charge_after_flee                     # 0.0 / 1.0
+decision_options_bin[c][ 2] = grants_charge_impact                         # 0.0 / 1.0
+decision_options_bin[c][ 3] = grants_closest_target_penetration            # 0.0 / 1.0
+decision_options_bin[c][ 4] = grants_move_after_shooting                   # 0.0 / 1.0
+decision_options_bin[c][ 5] = grants_reactive_move                         # 0.0 / 1.0
+decision_options_bin[c][ 6] = grants_reroll_1_save_fight                   # 0.0 / 1.0
+decision_options_bin[c][ 7] = grants_reroll_1_tohit_fight                  # 0.0 / 1.0
+decision_options_bin[c][ 8] = grants_reroll_1_towound                      # 0.0 / 1.0
+decision_options_bin[c][ 9] = grants_reroll_charge                         # 0.0 / 1.0
+decision_options_bin[c][10] = grants_reroll_towound_target_on_objective    # 0.0 / 1.0
+decision_options_bin[c][11] = grants_shoot_after_advance                   # 0.0 / 1.0
+decision_options_bin[c][12] = grants_shoot_after_flee                      # 0.0 / 1.0
+decision_options_bin[c][13] = present                                        # 0.0 / 1.0 — masque de candidat
+```
+
+**Pourquoi ce bloc existe.** Sans lui, `CHOICE_i` serait un choix à l'aveugle — exactement le
+défaut de la pseudo-décision `raw_action_int % len(options)` qu'il remplace (§9.4 point 0), où
+l'agent « choisissait » via une action émise pour tout autre chose, sans jamais voir le prompt.
+
+**L'ordre des candidats est CONTRACTUEL**, comme celui des slots ennemis (invariant D1) :
+`decision_options_bin[i]` décrit le candidat que joue `CHOICE_i`. Le producteur du prompt garantit
+un ordre STABLE d'un step à l'autre — un ordre mouvant brouillerait l'assignation de crédit PPO.
+
+**Un candidat est décrit par ce qu'il ACCORDE**, dans le même vocabulaire que les drapeaux
+`rule_<id>` d'unité, pas par son index : l'option 0 d'un prompt n'a rien à voir avec l'option 0
+d'un autre. C'est aussi ce qui rend légitime l'encodeur **partagé** (`decision_encoder`) et la
+tête **pointeur** qui score les candidats (`ai/pointer_policy.py`) : le nombre de candidats est
+gratuit en paramètres, et ce que le réseau apprend d'un candidat vaut pour tous.
+
+**Le bloc reste nul** quand aucune décision n'est en attente, **ou** quand celle en attente
+appartient à l'autre camp : décrire à un joueur un choix qui n'est pas le sien lui ferait observer
+des candidats qu'aucune de ses actions ne peut jouer. `decision_pending` est le seul bit qui
+distingue « aucune décision » de « décision de type 0 ».
+
+**Aucun registre continu** : `rule_choice` n'a aucune grandeur continue à décrire, et un champ
+rempli de zéros serait une valeur par défaut sans signifiant. Les tranches P3 qui en auront besoin
+(distance d'une destination, dégâts attendus sur une cible) ouvriront `DECISION_OPTION_CONT_FIELDS`
+à ce moment-là — `obs_size` changera, donc retrain `--new`.
+
 ### Les blocs logiques A→E, et ce qu'ils sont devenus
 
 L'observation a été conçue en **blocs thématiques** (`V11_audit_observation.md` §7.2 et §8 : A
@@ -396,8 +450,9 @@ grille exclue — calculé par `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`. Histo
 T-F) → 20166 (plafond du bloc figurines 6 → 20, 2026-07-26) → 20181 (géométrie des objectifs,
 2026-07-27) → 20545 (règles d'unité, 13 bits par entité) → 20601 (couvert et visibilité exacts par
 slot ennemi, 2026-07-27) → 20626 (bit `present` par figurine + phase en one-hot de 6 bits,
-§0.32 T-H/T-J, 2026-07-28) → **20654** (`n_models_engaging` : mes figurines engagées avec chaque
-cible ennemie, support du choix de cible de mêlée, §9 P3-1, 2026-07-28). **Toute évolution du
+§0.32 T-H/T-J, 2026-07-28) → 20654 (`n_models_engaging` : mes figurines engagées avec chaque
+cible ennemie, support du choix de cible de mêlée, §9 P3-1, 2026-07-28) → **20740** (bloc
+« contexte de décision », §9.3 P2, 2026-07-28). **Toute évolution du
 schéma change cette valeur et rend les `.zip` existants incompatibles : le retrain `--new` est
 obligatoire.**
 

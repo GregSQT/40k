@@ -62,12 +62,13 @@ actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
-| **§0.14** | Re-mesure du run — win-rate par matchup | 🟠 **DÉBLOQUÉ** — aucun prérequis technique restant | **1** | Lancer le run `--new` (`obs_size` **20626**, vérifié dans le code le 2026-07-28 : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` == la valeur des 5 profils de config). ⚠️ Lire d'abord §0.33 (choix du profil : 8 envs, re-testé meilleur par l'utilisateur le 2026-07-28) ; `bot_eval_freq` est tranché (2000 assumé, encadré 🟢 ci-dessous). |
-| **[§9](V11_phaseA.md#s9)** | Phase A' — **P3 tranches 2→8** (décisions restantes) | 🟠 **1/9 livrée** (P3-1, 2026-07-28) | **2** | **P3-1 (cible de mêlée) est LIVRÉE** — branche `v11-p3-1-fight-target`, cf. **§0.41**. Elle a tranché la méthode : une décision dont les candidats sont des ENTITÉS déjà observées se paramètre en **dimension d'action + tête pointeur**, pas en `CHOICE_k` denses (la spec §9.3 date d'avant T-E/T-G). Reste P3-2→8 + P2 générique pour les décisions **non-entité** seulement. ⚠️ Le point **0 (rule-choice)** est **inerte dans le training** : à ne pas traiter en premier malgré son étiquette « le plus urgent » — cf. §0.41. |
+| **§0.14** | Re-mesure du run — win-rate par matchup | 🟠 **DÉBLOQUÉ** — aucun prérequis technique restant | **1** | Lancer le run `--new` (`obs_size` **20626**, vérifié dans le code le 2026-07-28 : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` == la valeur des 5 profils de config). ⚠️ **Son modèle devient incompatible dès le merge de §0.41 (P3-1) ET de §0.42 (P2)** — les deux changent l'observation et l'action space : relever sa mesure AVANT de merger. ⚠️ Lire d'abord §0.33 (choix du profil : 8 envs, re-testé meilleur par l'utilisateur le 2026-07-28) ; `bot_eval_freq` est tranché (2000 assumé, encadré 🟢 ci-dessous). |
+| **[§9](V11_phaseA.md#s9)** | Phase A' — **P2 livré**, **P3 tranches 2→8** (décisions restantes) | 🟠 **P3-1 + P2 + P3 point 0 LIVRÉS** (2026-07-28, sur branches) | **2** | **P3-1 (cible de mêlée)** → branche `v11-p3-1-fight-target`, cf. **§0.41** : une décision dont les candidats sont des ENTITÉS déjà observées se paramètre en **dimension d'action + tête pointeur**, pas en `CHOICE_k`. **P2 (mécanisme générique) + P3 point 0 (rule-choice)** → branche `v11-p2-agent-decision` (rebasée sur la précédente), cf. **§0.42** : `CHOICE_0..5` pour les décisions dont les candidats ne sont **pas** des entités observées ; `raw_action_int % len(options)` n'existe plus. Reste **P3-2→8**, P4, P5. ⚠️ Le point 0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice) : sa correction est structurelle, pas mesurable. |
 | **§0.38** | Code mort `_attack_sequence_rng` non supprimé — 2ᵉ moitié de P1 | 🟠 **OUVERT** (constaté 2026-07-28) | **3** | P1 prévoyait « porter les règles vers le vif **PUIS supprimer le mort** ». Le portage est fait ; la suppression **non**. Détail → §0.38. |
 | **§0.33** | Rollout buffer 46,9 Go pour 39 Go de RAM | 🟠 **CONDITIONNEL** — ne bloque que les profils à 48 envs | **4** (avant tout run 48 envs) | Vérifié 2026-07-28 dans la config : `x1`/`x5_new`/`x5_debug` = **8 envs** (passent) ; `x5_append`/`x1_debug` = **48 envs** (échouent à l'allocation). Ne pas lancer ces deux-là sans rouvrir l'entrée. |
 | **§0.29** | Scénario SM vs Orks fixed/active + scheduler | 🟢 Mécanique livrée et validée in-engine ; **reste USAGE + MESURE** | 5 | La mesure rejoint §0.14 : c'est le même run qui la produit. |
 | **§0.40** | Observation de la phase de déploiement déficiente (3 défauts vérifiés) | 🔴 **OUVERT** — chantier externe | 6 | Détail et pistes → [`observation_deploiement.md`](observation_deploiement.md) (sorti de l'audit archivé le 2026-07-28). Points 1-2 (obs ≠ unité du masque, grille centrée hors plateau) = correctifs indépendants et peu coûteux ; point 3 (décrire les hexes candidats) change `obs_size` → à séquencer avec un run `--new`. Détail → §0.40. |
+| **§0.41** | P2 livré sur la branche `v11-p2-agent-decision`, pas sur `main` | 🟠 **OUVERT** — action utilisateur | **1 bis** (juste après le run) | Merger la branche **APRÈS** la fin du run §0.14 et le relevé de sa mesure : P2 change `obs_size` (20712) ET `TOTAL_ACTION_SIZE` (1068), donc le modèle du run devient incompatible dès le merge et le run suivant DOIT être `--new`. Détail → §0.41. |
 | **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)). T2→T5 **jamais revérifiés** : ne pas s'appuyer sur leurs ✅ sans relecture. ⚠️ Sa **section** est restée en §0hist (elle y était déjà avant l'épuration) alors que sa part T2→T5 est ouverte — laissée en place plutôt que scindée, pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
 
 🟢 **TRANCHÉ le 2026-07-28 soir (arbitrage utilisateur) : `bot_eval_freq = 2000` ASSUMÉ**, pour
@@ -92,6 +93,38 @@ Le run §0.14 peut donc être lancé tel quel, sans retouche de config.
 ⚠️ **Avant de vous appuyer sur une affirmation de ce document, lire §0bis** — en particulier la
 réserve de méthode sur le document lui-même (T2→T5 et section 9 n'ont **pas** été revérifiés
 ligne à ligne) et la règle de périmètre `ArmageddonAgent`.
+
+<a id="s0.41"></a>
+### 0.41 P2 livré sur une BRANCHE, pas sur `main` — à merger APRÈS le run §0.14 — 🟠 OUVERT (2026-07-28)
+
+**Ce qui est livré.** Le mécanisme générique « décision agent » (§9.3 P2) et son pilote
+(§9.4 point 0) — détail complet et preuves en [§9.3bis](V11_phaseA.md#s9.3bis).
+
+**Pourquoi ce n'est PAS sur `main`.** Le run `--new` de §0.14 tournait au moment de
+l'implémentation (démarré le 2026-07-28 à 17 h 25). P2 change **`obs_size`** (20626 → 20712) **et**
+**`TOTAL_ACTION_SIZE`** (1062 → 1068), dans le code ET dans les 5 profils de config. Un
+sous-processus d'évaluation qui relit la config d'agent depuis le disque en cours de run aurait
+chargé un contrat d'observation incompatible avec le modèle en cours d'entraînement — c'est-à-dire
+la mort d'un run de plusieurs heures. Le travail a donc été fait dans un **worktree git isolé**
+(`/tmp/40k-p2`), sur la branche **`v11-p2-agent-decision`**, qui ne touche aucun fichier lu par le
+run.
+
+**Ce qu'il reste à faire — dans cet ordre.**
+1. **Attendre la fin du run §0.14** et récupérer sa mesure de win-rate : c'est la baseline du
+   contrat d'observation **20626 / 1062**, et la dernière qu'on aura sur ce contrat.
+2. Merger `v11-p2-agent-decision` dans `main`.
+3. **Le run suivant DOIT être `--new`** — le modèle du run §0.14 devient incompatible dès le merge
+   (obs ET action space changent). Ce n'est pas un choix : c'est le fail-fast d'`obs_size` qui le
+   rendra explicite au démarrage.
+
+⚠️ **Ne pas comparer les win-rates d'avant et d'après P2 comme s'ils mesuraient P2.** Ils
+mesureront deux contrats d'observation différents, sur un mécanisme qui ne se déclenche sur AUCUN
+roster d'entraînement (aucun SM ni Ork ne porte de rule choice — le seul du jeu est le Tyranid
+Warrior mêlée). Cf. la réserve de mesure en [§9.3bis](V11_phaseA.md#s9.3bis).
+
+**Effet de bord corrigé au passage** (trouvé par mesure, pas par lecture) : `rule_choice` était
+journalisé DEUX fois dans step.log — une écriture directe correcte, plus une tentative de flush qui
+échouait en silence sur une clé mal orthographiée. Détail en [§9.3bis](V11_phaseA.md#s9.3bis).
 
 ### 0.40 Observation du déploiement déficiente — 🔴 OUVERT, contenu dans un doc dédié (2026-07-28)
 

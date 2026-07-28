@@ -40,12 +40,16 @@ from engine.phase_handlers.shared_utils import (
 )
 from engine.macro_intents import (
     BASE_ZONE_INTENT,
+    CHOICE_BASE,
     TOTAL_ACTION_SIZE,
     MAX_OBJECTIVES,
+    decode_agent_decision_action,
+    is_agent_decision_action,
     is_zone_intent_action,
     decode_zone_intent_action,
     get_best_enemy_score_for_unit,
 )
+from engine.agent_decision import read_pending_agent_decision
 
 # Game phases - single source of truth for phase count
 GAME_PHASES = ["deployment", "command", "move", "shoot", "charge", "fight"]
@@ -172,6 +176,17 @@ class ActionDecoder:
         Advance roll : rollé ici une seule fois par activation, stocké dans game_state.
         """
         mask = np.zeros(self.total_action_size, dtype=bool)
+
+        # Décision agent en attente (V11 §9.3 P2) : elle est EXCLUSIVE. Tant qu'elle n'est pas
+        # jouée, le moteur est arrêté sur un point de choix — exactement comme le PvP l'est sur
+        # un `waiting_for_player` — et aucune action de phase n'a de sens. Le pool d'unités
+        # éligibles est vide : l'activation en cours reprendra APRÈS la décision.
+        pending_decision = read_pending_agent_decision(game_state)
+        if pending_decision is not None:
+            for option_index in range(len(require_key(pending_decision, "options"))):
+                mask[CHOICE_BASE + option_index] = True
+            return mask, []
+
         eligible_units = self._get_eligible_units_for_current_phase(game_state)
         current_phase = game_state["phase"]
 
@@ -853,6 +868,24 @@ class ActionDecoder:
         Raise sur toute incohérence — aucune valeur par défaut silencieuse.
         """
         current_phase = game_state["phase"]
+
+        # Décision agent (CHOICE_i) : elle prime sur la phase — le moteur est arrêté sur un point
+        # de choix, pas sur une action de phase. Le masque n'expose qu'elles (cf. mask ci-dessus).
+        if is_agent_decision_action(action_int):
+            pending_decision = read_pending_agent_decision(game_state)
+            if pending_decision is None:
+                raise ValueError(
+                    f"convert_squad_action: action CHOICE {action_int} sans decision en attente "
+                    "— le masque n'aurait pas du l'autoriser"
+                )
+            option_index = decode_agent_decision_action(action_int)
+            options = require_key(pending_decision, "options")
+            if option_index >= len(options):
+                raise ValueError(
+                    f"convert_squad_action: candidat {option_index} inexistant "
+                    f"({len(options)} candidats) — le masque n'aurait pas du l'autoriser"
+                )
+            return {"action": "agent_decision", "option_index": option_index}
 
         # Zone intents (26-40) : command uniquement
         if is_zone_intent_action(action_int):
