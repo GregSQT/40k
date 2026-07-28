@@ -1,335 +1,152 @@
-"""Règles spéciales d'armes — DEVASTATING_WOUNDS et HAZARDOUS dans _attack_sequence_rng."""
+"""[HAZARDOUS] 24.15 en MELEE, sur le chemin VIF (`build_manual_fight_allocation`).
 
-from __future__ import annotations
+PDF 24.15 (source de verite) : « Each time a unit is selected to shoot OR SELECTED TO FIGHT,
+after that unit has resolved all of its attacks, make a number of hazard rolls (06.03) for
+that unit equal to the number of [HAZARDOUS] weapons you selected in the Select Weapons step. »
+PDF 06.03 : « roll one D6 : on a 1-2, that roll fails and that unit suffers 1 mortal wound, or
+3 mortal wounds instead if each model in that unit is a MONSTER/VEHICLE model. »
 
-from typing import Any, Dict, List
+Ce fichier portait auparavant des tests de TIR appeles sur le code mort
+`_attack_sequence_rng` (V11 §0.38) : ils dupliquaient test_special_rules_e2e.py, ne
+touchaient jamais la melee malgre leur nom, et surtout le mort implementait HAZARDOUS
+CONTRE le PDF — un jet PAR ATTAQUE, declenche sur 1 seulement, sans blessure mortelle
+appliquee. Le volet TIR est verrouille par test_hazardous.py ; ce fichier verrouille le
+volet MELEE, que rien ne couvrait : `FIGHT_CTX.hazard_origin = "fight"` est le seul point
+de cablage de la clause « or selected to fight ».
 
-import pytest
+Sequence des des (1 attaque) : touche -> blessure -> sauvegarde, PUIS le(s) jet(s) de
+hasard. `_seq` echoue si le moteur tire plus ou moins de des que la sequence declaree.
+"""
+import random
 
-from engine.phase_handlers.shooting_handlers import _attack_sequence_rng
-from engine.phase_handlers.shared_utils import build_units_cache
+from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
 
 
-def _weapon(
-    atk: int = 4,
-    str_: int = 4,
-    ap: int = 0,
-    dmg: int = 1,
-    rules: List[str] | None = None,
-) -> Dict[str, Any]:
+def _seq(monkeypatch, rolls):
+    seq = list(rolls)
+
+    def fake(a, b):
+        assert seq, "sequence RNG epuisee : le moteur a tire plus de des que prevu"
+        return seq.pop(0)
+
+    monkeypatch.setattr(random, "randint", fake)
+    return seq
+
+
+def _kw(*names):
+    return [{"keywordId": n} for n in names]
+
+
+def _game_state(weapon_rules, *, attackers=1, attacker_keywords=("INFANTRY",), attacker_hp=3):
+    """Escouade '1' (au contact de '2') avec une arme de melee par figurine."""
+    weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
+              "WEAPON_RULES": list(weapon_rules), "display_name": "Eviscerator"}
+    models = {}
+    intents = []
+    for i in range(attackers):
+        mid = f"A{i}"
+        models[mid] = {
+            "id": mid, "squad_id": "1", "player": 0, "T": 4, "ATTACK_LEFT": 1,
+            "HP_CUR": attacker_hp, "HP_MAX": attacker_hp, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
+            "role": None, "unitType": "Fighter", "points_per_hp": 5.0, "VALUE": 10.0,
+            "col": 0, "row": 0, "UNIT_KEYWORDS": _kw(*attacker_keywords),
+            "CC_WEAPONS": [dict(weapon)],
+        }
+        intents.append({"model_id": mid, "target_unit_id": "2", "weapon_index": 0,
+                        "n_attacks_resolved": 1})
+    models["T1"] = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 9, "HP_MAX": 9,
+                    "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
+                    "points_per_hp": 5.0, "VALUE": 10.0, "col": 1, "row": 0,
+                    "UNIT_KEYWORDS": _kw("INFANTRY")}
     return {
-        "ATK": atk,
-        "STR": str_,
-        "AP": ap,
-        "DMG": dmg,
-        "NB": 1,
-        "RNG": 24,
-        "WEAPON_RULES": rules if rules is not None else ["IGNORES_COVER"],
-        "display_name": "Test Cannon",
-    }
-
-
-def _unit(uid: int, player: int, col: int, row: int, hp: int = 4) -> Dict[str, Any]:
-    return {
-        "id": uid,
-        "player": player,
-        "col": col,
-        "row": row,
-        "HP_CUR": hp,
-        "HP_MAX": hp,
-        "VALUE": 100,
-        "OC": 1,
-        "BASE_SIZE": 1,
-        "MODEL_HEIGHT": 2.5,
-        "BASE_SHAPE": "round",
-        "MOVE": 6,
-        "UNIT_RULES": [],
-        "T": 4,
-        "ARMOR_SAVE": 4,
-        "INVUL_SAVE": 7,
-        "SHOOT_LEFT": 1,
-        "ATTACK_LEFT": 1,
-        "RNG_WEAPONS": [],
-        "CC_WEAPONS": [],
-        "selectedRngWeaponIndex": 0,
-        "_rapid_fire_rule_value": 0,
-        "_rapid_fire_bonus_shot_current": False,
-    }
-
-
-def _make_game_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
-        "config": {
-            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
-            "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+        "gym_training_mode": True,
+        "turn": 1, "phase": "fight",
+        "action_logs": [], "action_log_seq": 0,
+        "models_cache": models,
+        "squad_models": {"1": [f"A{i}" for i in range(attackers)], "2": ["T1"]},
+        "squad_cache": {"1": {"model_count_at_start": attackers},
+                        "2": {"model_count_at_start": 1}},
+        "units_cache": {"1": {"col": 0, "row": 0, "VALUE": 10.0, "player": 0},
+                        "2": {"col": 1, "row": 0, "VALUE": 10.0, "player": 1}},
+        "units": [{"id": "1", "player": 0, "UNIT_KEYWORDS": _kw(*attacker_keywords)},
+                  {"id": "2", "player": 1, "UNIT_KEYWORDS": _kw("INFANTRY")}],
+        "unit_by_id": {
+            "1": {"id": "1", "player": 0, "UNIT_RULES": [], "UNIT_KEYWORDS": _kw(*attacker_keywords)},
+            "2": {"id": "2", "player": 1, "UNIT_RULES": [], "UNIT_KEYWORDS": _kw("INFANTRY")},
         },
-        "board_cols": 25,
-        "board_rows": 21,
-        "current_player": 1,
-        "phase": "shoot",
-        "wall_hexes": set(),
-        "units": units,
-        "unit_by_id": {str(u["id"]): u for u in units},
-        "console_logs": [],
-        "debug_logs": [],
-        "action_logs": [],
-        "action_log_seq": 0,
-        "turn": 1,
-        "units_moved": set(),
-        "units_advanced": set(),
-        "shoot_activation_pool": [],
-        "move_activation_pool": [],
-        "charge_activation_pool": [],
+        "objectives": [],
+        "pending_squad_fight_intents": {"1": intents},
     }
-    build_units_cache(gs)
-    return gs
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DEVASTATING_WOUNDS
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestDevastatingWoundsShoot:
-    """DEVASTATING_WOUNDS : wound critique (6) saute la sauvegarde."""
-
-    def test_wound6_save_skipped_damage_applied(self, monkeypatch):
-        """devwound_skip : wound_roll=6 + DEVASTATING_WOUNDS → save_skipped=True, dégâts appliqués."""
-        # Dice order: hit_roll, wound_roll (no HAZARDOUS → no hazardous_roll)
-        # ATK=4, hit_roll=4 → hit; wound_roll=6 → critical wound → devastating applied, save skipped
-        attacker = _unit(1, 1, 5, 10)
-        attacker["RNG_WEAPONS"] = [_weapon(atk=4, str_=4, dmg=2, rules=["IGNORES_COVER", "DEVASTATING_WOUNDS"])]
-        target = _unit(2, 2, 15, 10)
-        gs = _make_game_state([attacker, target])
-        rolls = iter([4, 6])
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(attacker, target, gs)
-        assert result["devastating_wounds_applied"] is True
-        assert result["save_skipped"] is True
-        assert result["save_skip_reason"] == "DEVASTATING_WOUNDS"
-        assert result["damage"] == 2
-
-    def test_wound5_no_devastating(self, monkeypatch):
-        """devwound_no_crit : wound_roll=5 → pas critique → pas de devastating wounds."""
-        # ATK=4, hit_roll=4, wound_roll=5 (STR=4/T=4 → wound 4+, success but not 6), save_roll=2 (fail)
-        attacker = _unit(1, 1, 5, 10)
-        attacker["RNG_WEAPONS"] = [_weapon(atk=4, str_=4, dmg=1, rules=["IGNORES_COVER", "DEVASTATING_WOUNDS"])]
-        target = _unit(2, 2, 15, 10)
-        gs = _make_game_state([attacker, target])
-        rolls = iter([4, 5, 2])  # hit=4, wound=5, save=2
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(attacker, target, gs)
-        assert result["devastating_wounds_applied"] is False
-        assert result["save_skipped"] is False
-        assert result["damage"] == 1
-
-    def test_miss_no_devastating(self, monkeypatch):
-        """devwound_miss : miss → devastating_wounds_applied=False même avec la règle."""
-        attacker = _unit(1, 1, 5, 10)
-        attacker["RNG_WEAPONS"] = [_weapon(atk=4, dmg=1, rules=["IGNORES_COVER", "DEVASTATING_WOUNDS"])]
-        target = _unit(2, 2, 15, 10)
-        gs = _make_game_state([attacker, target])
-        rolls = iter([1])  # miss
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(attacker, target, gs)
-        assert result["hit_success"] is False
-        assert result["devastating_wounds_applied"] is False
+def _hp(gs, mid):
+    return gs["models_cache"][mid]["HP_CUR"]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# HAZARDOUS
-# ─────────────────────────────────────────────────────────────────────────────
+def test_hazardous_est_jete_aussi_quand_l_unite_combat(monkeypatch):
+    """24.15 clause « or selected to fight » : le jet de hasard rate (2) coute 1 MW au combattant."""
+    seq = _seq(monkeypatch, [4, 5, 1, 2])  # touche, blessure, sauvegarde ratee, PUIS hasard = 2
+    gs = _game_state(["HAZARDOUS"])
 
-class TestHazardousShoot:
-    """HAZARDOUS : test obligatoire sur le tireur, roll=1 → triggered."""
+    build_manual_fight_allocation(gs, "1")
 
-    def test_roll1_triggered(self, monkeypatch):
-        """hazardous_trigger : hazardous_roll=1 → hazardous_triggered=True."""
-        # Dice order: hit_roll, hazardous_roll, wound_roll, save_roll
-        attacker = _unit(1, 1, 5, 10)
-        attacker["RNG_WEAPONS"] = [_weapon(atk=4, str_=4, dmg=1, rules=["IGNORES_COVER", "HAZARDOUS"])]
-        target = _unit(2, 2, 15, 10)
-        gs = _make_game_state([attacker, target])
-        rolls = iter([4, 1, 4, 2])  # hit, hazardous=1(trigger), wound, save
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(attacker, target, gs)
-        assert result["hazardous_test_required"] is True
-        assert result["hazardous_test_roll"] == 1
-        assert result["hazardous_triggered"] is True
-
-    def test_roll2_not_triggered(self, monkeypatch):
-        """hazardous_no_trigger : hazardous_roll=2 → hazardous_triggered=False."""
-        attacker = _unit(1, 1, 5, 10)
-        attacker["RNG_WEAPONS"] = [_weapon(atk=4, str_=4, dmg=1, rules=["IGNORES_COVER", "HAZARDOUS"])]
-        target = _unit(2, 2, 15, 10)
-        gs = _make_game_state([attacker, target])
-        rolls = iter([4, 2, 4, 2])  # hit, hazardous=2(safe), wound, save
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(attacker, target, gs)
-        assert result["hazardous_test_required"] is True
-        assert result["hazardous_test_roll"] == 2
-        assert result["hazardous_triggered"] is False
-
-    def test_no_hazardous_rule_no_test(self, monkeypatch):
-        """hazardous_absent : arme sans HAZARDOUS → hazardous_test_required=False."""
-        attacker = _unit(1, 1, 5, 10)
-        attacker["RNG_WEAPONS"] = [_weapon(atk=4, str_=4, dmg=1, rules=["IGNORES_COVER"])]
-        target = _unit(2, 2, 15, 10)
-        gs = _make_game_state([attacker, target])
-        rolls = iter([4, 4, 2])  # hit, wound, save
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(attacker, target, gs)
-        assert result["hazardous_test_required"] is False
-        assert result["hazardous_test_roll"] is None
-        assert result["hazardous_triggered"] is False
-
-    def test_hazardous_on_miss_still_requires_test(self, monkeypatch):
-        """hazardous_miss : miss + HAZARDOUS → hazardous_test_required=True (risque même sans toucher)."""
-        # Dice order on miss with HAZARDOUS: hit_roll, hazardous_roll
-        attacker = _unit(1, 1, 5, 10)
-        attacker["RNG_WEAPONS"] = [_weapon(atk=4, str_=4, dmg=1, rules=["IGNORES_COVER", "HAZARDOUS"])]
-        target = _unit(2, 2, 15, 10)
-        gs = _make_game_state([attacker, target])
-        rolls = iter([1, 3])  # miss, hazardous_roll=3(safe)
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(attacker, target, gs)
-        assert result["hit_success"] is False
-        assert result["hazardous_test_required"] is True
-        assert result["hazardous_triggered"] is False
+    assert _hp(gs, "A0") == 2, "hasard rate en melee : 1 blessure mortelle sur le combattant"
+    assert _hp(gs, "T1") == 8, "l attaque elle-meme a bien inflige son degat"
+    assert seq == [], "un seul jet de hasard pour une seule arme HAZARDOUS"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Combinaison DEVASTATING_WOUNDS + HAZARDOUS
-# ─────────────────────────────────────────────────────────────────────────────
+def test_hazardous_reussi_ne_coute_rien_en_melee(monkeypatch):
+    """06.03 : un 3 reussit -> aucune blessure mortelle (discrimination du seuil 1-2)."""
+    seq = _seq(monkeypatch, [4, 5, 1, 3])
+    gs = _game_state(["HAZARDOUS"])
 
-class TestDevastatingWoundsAndHazardousCombined:
-    """Règles combinées sur la même arme."""
+    build_manual_fight_allocation(gs, "1")
 
-    def test_devastating_and_hazardous_wound6_triggered(self, monkeypatch):
-        """combo_both : DEVASTATING+HAZARDOUS, hazardous_roll=1, wound_roll=6 → les deux actifs."""
-        # Dice order: hit_roll, hazardous_roll, wound_roll (devastating → pas de save_roll)
-        attacker = _unit(1, 1, 5, 10)
-        attacker["RNG_WEAPONS"] = [_weapon(atk=4, str_=4, dmg=2,
-                                           rules=["IGNORES_COVER", "DEVASTATING_WOUNDS", "HAZARDOUS"])]
-        target = _unit(2, 2, 15, 10)
-        gs = _make_game_state([attacker, target])
-        rolls = iter([4, 1, 6])  # hit, hazardous=1(trigger), wound=6(devastating)
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(attacker, target, gs)
-        assert result["devastating_wounds_applied"] is True
-        assert result["hazardous_triggered"] is True
-        assert result["save_skipped"] is True
-
-    def test_devastating_and_hazardous_hazardous_safe(self, monkeypatch):
-        """combo_hazardous_safe : DEVASTATING+HAZARDOUS, hazardous_roll=3, wound_roll=6 → devastating mais pas hazardous."""
-        attacker = _unit(1, 1, 5, 10)
-        attacker["RNG_WEAPONS"] = [_weapon(atk=4, str_=4, dmg=1,
-                                           rules=["IGNORES_COVER", "DEVASTATING_WOUNDS", "HAZARDOUS"])]
-        target = _unit(2, 2, 15, 10)
-        gs = _make_game_state([attacker, target])
-        rolls = iter([4, 3, 6])  # hit, hazardous=3(safe), wound=6(devastating)
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(attacker, target, gs)
-        assert result["devastating_wounds_applied"] is True
-        assert result["hazardous_triggered"] is False
-
-    def test_devastating_and_hazardous_no_critical_wound(self, monkeypatch):
-        """combo_no_crit : DEVASTATING+HAZARDOUS, wound_roll=5 → pas de devastating, save normal."""
-        attacker = _unit(1, 1, 5, 10)
-        attacker["RNG_WEAPONS"] = [_weapon(atk=4, str_=4, dmg=1,
-                                           rules=["IGNORES_COVER", "DEVASTATING_WOUNDS", "HAZARDOUS"])]
-        target = _unit(2, 2, 15, 10)
-        gs = _make_game_state([attacker, target])
-        rolls = iter([4, 2, 5, 2])  # hit, hazardous_roll=2, wound=5, save=2(fail)
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(attacker, target, gs)
-        assert result["devastating_wounds_applied"] is False
-        assert result["save_skipped"] is False
-        assert result["damage"] == 1
+    assert _hp(gs, "A0") == 3
+    assert seq == []
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Résultats retournés — structure de la réponse
-# ─────────────────────────────────────────────────────────────────────────────
+def test_sans_hazardous_aucun_jet_en_melee(monkeypatch):
+    """Contre-epreuve fonctionnelle : sans la regle, aucun de de hasard n est tire."""
+    seq = _seq(monkeypatch, [4, 5, 1])
+    gs = _game_state([])
 
-class TestAttackSequenceResultStructure:
-    """Vérification de la structure complète du résultat de _attack_sequence_rng."""
+    build_manual_fight_allocation(gs, "1")
 
-    def test_hit_success_fields_present(self, monkeypatch):
-        """result_fields_hit : touche réussie → tous les champs attendus présents."""
-        attacker = _unit(1, 1, 5, 10)
-        attacker["RNG_WEAPONS"] = [_weapon()]
-        target = _unit(2, 2, 15, 10)
-        gs = _make_game_state([attacker, target])
-        rolls = iter([4, 4, 2])
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(attacker, target, gs)
-        for field in ("hit_roll", "hit_target", "hit_success", "wound_roll", "wound_target",
-                      "wound_success", "save_roll", "save_target", "save_success",
-                      "damage", "attack_log", "weapon_name"):
-            assert field in result, f"Champ manquant : {field}"
+    assert _hp(gs, "A0") == 3
+    assert seq == [], "aucun de supplementaire : la sequence s arrete a la sauvegarde"
 
-    def test_miss_result_fields_present(self, monkeypatch):
-        """result_fields_miss : miss → champs obligatoires présents."""
-        attacker = _unit(1, 1, 5, 10)
-        attacker["RNG_WEAPONS"] = [_weapon()]
-        target = _unit(2, 2, 15, 10)
-        gs = _make_game_state([attacker, target])
-        rolls = iter([1])
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(attacker, target, gs)
-        assert result["hit_success"] is False
-        assert result["damage"] == 0
-        assert "attack_log" in result
 
-    def test_wound_fail_damage_is_zero(self, monkeypatch):
-        """result_wound_fail : touche mais blessure ratée → damage=0."""
-        # ATK=4, STR=2/T=4 → wound 6+, dice: hit=4(ok), wound=3(<6, fail)
-        attacker = _unit(1, 1, 5, 10)
-        attacker["RNG_WEAPONS"] = [_weapon(atk=4, str_=2, dmg=3)]
-        target = _unit(2, 2, 15, 10)
-        gs = _make_game_state([attacker, target])
-        rolls = iter([4, 3])
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(attacker, target, gs)
-        assert result["hit_success"] is True
-        assert result["wound_success"] is False
-        assert result["damage"] == 0
+def test_un_jet_par_arme_hazardous_pas_par_figurine_en_melee(monkeypatch):
+    """24.15 : deux combattants = deux armes HAZARDOUS selectionnees -> DEUX jets."""
+    seq = _seq(monkeypatch, [4, 5, 1,  4, 5, 1,  1, 1])  # 2 attaques, puis 2 hasards rates
+    gs = _game_state(["HAZARDOUS"], attackers=2)
 
-    def test_save_success_damage_is_zero(self, monkeypatch):
-        """result_save_success : save réussi → damage=0."""
-        # ATK=4, wound 4+, ARMOR_SAVE=2 (très bon) → save facile
-        attacker = _unit(1, 1, 5, 10)
-        attacker["RNG_WEAPONS"] = [_weapon(atk=4, str_=4, ap=0, dmg=3)]
-        target = _unit(2, 2, 15, 10)
-        target["ARMOR_SAVE"] = 2  # save 2+
-        gs = _make_game_state([attacker, target])
-        rolls = iter([4, 4, 5])  # hit, wound, save=5(≥2 → succeed)
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(attacker, target, gs)
-        assert result["save_success"] is True
-        assert result["damage"] == 0
+    build_manual_fight_allocation(gs, "1")
 
-    def test_attack_log_not_empty(self, monkeypatch):
-        """result_log_nonempty : attack_log toujours rempli."""
-        attacker = _unit(1, 1, 5, 10)
-        attacker["RNG_WEAPONS"] = [_weapon()]
-        target = _unit(2, 2, 15, 10)
-        gs = _make_game_state([attacker, target])
-        rolls = iter([4, 4, 2])
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(attacker, target, gs)
-        assert isinstance(result["attack_log"], str)
-        assert len(result["attack_log"]) > 0
+    assert _hp(gs, "A0") + _hp(gs, "A1") == 4, "2 armes HAZARDOUS = 2 MW (6 PV - 2)"
+    assert seq == []
 
-    def test_weapon_name_in_result(self, monkeypatch):
-        """result_weapon_name : weapon_name correspond au display_name de l'arme."""
-        attacker = _unit(1, 1, 5, 10)
-        weapon = _weapon()
-        weapon["display_name"] = "Plasma Gun"
-        attacker["RNG_WEAPONS"] = [weapon]
-        target = _unit(2, 2, 15, 10)
-        gs = _make_game_state([attacker, target])
-        rolls = iter([1])  # miss
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(attacker, target, gs)
-        assert result["weapon_name"] == "Plasma Gun"
+
+def test_trois_mw_si_toutes_les_figurines_sont_vehicules_en_melee(monkeypatch):
+    """06.03 : 3 MW au lieu d 1 si CHAQUE figurine de l unite est MONSTER/VEHICLE."""
+    _seq(monkeypatch, [4, 5, 1, 1])
+    gs = _game_state(["HAZARDOUS"], attacker_keywords=("VEHICLE",), attacker_hp=9)
+
+    build_manual_fight_allocation(gs, "1")
+
+    assert _hp(gs, "A0") == 6, "vehicule : 3 MW"
+
+
+def test_hazardous_et_devastating_sur_la_meme_arme(monkeypatch):
+    """Interaction : la blessure critique saute la sauvegarde ET le hasard est jete apres.
+
+    Les deux effets sont independants — l un porte sur la cible, l autre sur le porteur."""
+    seq = _seq(monkeypatch, [4, 6, 6, 1])  # touche, blessure CRITIQUE, save 6 (sautee), hasard rate
+    gs = _game_state(["HAZARDOUS", "DEVASTATING_WOUNDS"])
+
+    build_manual_fight_allocation(gs, "1")
+
+    assert _hp(gs, "T1") == 8, "critique DEVASTATING : degat inflige malgre la save 6"
+    assert _hp(gs, "A0") == 2, "hasard rate : 1 MW sur le porteur de l arme"
+    assert seq == []

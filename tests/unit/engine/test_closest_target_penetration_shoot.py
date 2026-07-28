@@ -95,6 +95,22 @@ def test_pas_d_effet_sur_une_cible_plus_lointaine(monkeypatch):
     assert result["display_save_th"] == 4
 
 
+def test_pas_d_effet_si_le_pool_d_eligibles_est_vide(monkeypatch):
+    """Aucune cible eligible -> aucune « plus proche » a determiner, AP inchange.
+
+    Le pool peut etre vide alors qu un intent existe (la cible declaree a pu devenir
+    ineligible entre la declaration et la resolution) : la regle ne doit pas s appliquer
+    par defaut dans ce cas."""
+    _neutralise_rng_and_cover(monkeypatch)
+    monkeypatch.setattr(shooting_handlers, "shooting_build_valid_target_pool", lambda gs, sid: [])
+    gs, _ = _game_state([{"ruleId": "closest_target_penetration"}])
+
+    result = roll_shoot_intent(gs, _intent("2"))
+
+    assert result["ap"] == -1, "pool vide : aucune amelioration de penetration"
+    assert result["display_save_th"] == 4
+
+
 def test_pas_d_effet_sans_la_regle(monkeypatch):
     """Sans la regle, meme sur la cible la plus proche ('2') -> AP inchange (-1), save_th 4."""
     _neutralise_rng_and_cover(monkeypatch)
