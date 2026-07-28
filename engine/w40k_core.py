@@ -1046,6 +1046,10 @@ class W40KEngine(gym.Env):
         # (Le cache des profils d'armes, lui, tombe dans `build_units_cache` — il est indexe par
         # figurines vivantes, donc lie a la reconstruction des caches, pas au scenario.)
         self.game_state.pop(ObservationBuilder.OBJECTIVE_HEX_ARRAYS_KEY, None)
+        # Ancre de grille des escouades pas encore posees (§0.40 point 2) : elle derive du pool
+        # de deploiement du joueur, que `_reload_scenario` remplace (autre terrain, autres zones).
+        # Sans purge, l'agent deploierait en regardant la zone de l'episode precedent.
+        self.game_state.pop("_grid_deployment_zone_anchor", None)
         # Zones de terrain contenant un mur DENSE (Solid 13.11), memoisees par
         # `_squad_terrain_flags` pour le drapeau « gone to ground pret » (13.5). Elles derivent
         # de `terrain_areas` ET de `dense_wall_hexes`, que `_reload_scenario` remplace : sans

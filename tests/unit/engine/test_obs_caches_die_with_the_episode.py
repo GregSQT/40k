@@ -39,6 +39,7 @@ OBS_CACHE_KEYS = {
     WEAPON_PROFILE_CACHE_KEY: "profils d'armes par (escouade, figurines vivantes)",
     ObservationBuilder.OBJECTIVE_HEX_ARRAYS_KEY: "hexes de chaque objectif (distances/directions)",
     "_grid_static_hex_arrays": "murs / objectifs / couvert rasterises pour la grille",
+    "_grid_deployment_zone_anchor": "ancre de grille des escouades pas encore posees (§0.40)",
     "_obs_solid_terrain_areas": "zones contenant un mur dense (Solid 13.11, gone to ground)",
     "_unit_los_pair_cache": "LoS et couvert par paire (tireur, cible)",
 }

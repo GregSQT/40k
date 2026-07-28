@@ -1340,6 +1340,80 @@ class ObservationBuilder:
     # T1 — GRILLE SPATIALE EGOCENTRIQUE (move_action_space_spatial_rework §6.2)
     # ========================================================================
 
+    @staticmethod
+    def squad_grid_anchor(game_state: Dict[str, Any], active_squad_id: str) -> Tuple[int, int]:
+        """Hex sur lequel la grille egocentrique est centree.
+
+        Cas normal : l'ancre de l'escouade (`units_cache[sid]["col"/"row"]`).
+
+        Cas §0.40 point 2 — escouade PAS ENCORE POSEE : `deployed_on_turn is None` (marqueur
+        pose par `create_unit`/`w40k_core` sous la forme `col < 0`). Elle n'a alors AUCUNE
+        position, et centrer sur (-1,-1) sortait la fenetre du plateau : murs, allies, ennemis,
+        objectifs et couvert etaient tous vides ou tronques a l'instant precis ou l'agent choisit
+        son point d'entree dans la partie. On l'ancre donc sur sa ZONE DE DEPLOIEMENT, lue telle
+        quelle dans `deployment_state["deployment_pools"]` — la MEME collection d'hexes que celle
+        ou le decodeur choisit l'hexe (`_get_valid_deployment_hexes`). Aucune geometrie n'est
+        recalculee ici, et la GEOMETRIE de la grille (`engine.spatial_grid`) est inchangee : seul
+        le point d'ancrage bouge.
+
+        Ancre = l'hex du pool le plus proche de son barycentre, pas le barycentre nu : une zone
+        concave (polygone du terrain, zone amputee par les murs) peut avoir un barycentre hors
+        zone. Memoise par joueur : le pool est statique sur la partie.
+
+        Leve si l'escouade n'est pas posee et qu'aucun pool de deploiement n'existe pour son
+        joueur — c'est un etat incoherent (une unite hors plateau sans zone ou la poser), pas un
+        cas a absorber par une position de repli.
+        """
+        units_cache = require_key(game_state, "units_cache")
+        active_entry = units_cache[active_squad_id]
+
+        unit = get_unit_by_id(str(active_squad_id), game_state)
+        if unit is None:
+            raise KeyError(
+                f"squad_grid_anchor: escouade {active_squad_id} absente de game_state['units']"
+            )
+        if require_key(unit, "deployed_on_turn") is not None:
+            return int(active_entry["col"]), int(active_entry["row"])
+
+        player = int(require_key(active_entry, "player"))
+        anchors: Optional[Dict[int, Tuple[int, int]]] = game_state.get(
+            "_grid_deployment_zone_anchor"
+        )  # get allowed (memoisation construite ici au 1er appel)
+        if anchors is None:
+            anchors = {}
+            game_state["_grid_deployment_zone_anchor"] = anchors
+        if player in anchors:
+            return anchors[player]
+
+        deployment_state = require_key(game_state, "deployment_state")
+        deployment_pools = require_key(deployment_state, "deployment_pools")
+        pool = deployment_pools.get(player, deployment_pools.get(str(player)))
+        if not pool:
+            raise KeyError(
+                f"squad_grid_anchor: escouade {active_squad_id} non deployee mais aucun pool de "
+                f"deploiement pour le joueur {player} — impossible d'ancrer la grille."
+            )
+        pool_np = np.array(
+            [
+                (int(h[0]), int(h[1]))
+                if isinstance(h, (list, tuple))
+                else (int(require_key(h, "col")), int(require_key(h, "row")))
+                for h in pool
+            ],
+            dtype=np.int64,
+        )
+        # Barycentre en coordonnees de RENDU (`_hex_center`) et non en (col,row) : la grille
+        # hexagonale est decalee d'une demi-ligne une colonne sur deux, donc une moyenne brute
+        # de (col,row) ne designe pas le centre geometrique de la zone.
+        centers = np.array(
+            [_hex_center(int(c), int(r)) for c, r in pool_np.tolist()], dtype=np.float64
+        )
+        centroid = centers.mean(axis=0)
+        nearest = int(np.argmin(((centers - centroid) ** 2).sum(axis=1)))
+        anchor = (int(pool_np[nearest, 0]), int(pool_np[nearest, 1]))
+        anchors[player] = anchor
+        return anchor
+
     def build_squad_grid(self, game_state: Dict[str, Any], active_squad_id: str) -> np.ndarray:
         """Grille egocentrique (GRID_CHANNELS, GRID_SIZE, GRID_SIZE) autour de l'escouade active.
 
@@ -1384,7 +1458,9 @@ class ObservationBuilder:
             return grid  # squad mort/absent -> grille vide (miroir de build_squad_observation)
         active_entry = units_cache[active_squad_id]
         active_player = int(active_entry["player"])
-        anchor_col, anchor_row = int(active_entry["col"]), int(active_entry["row"])
+        # §0.40 point 2 : ancre deleguee — une escouade pas encore posee est ancree sur sa zone
+        # de deploiement, sinon la fenetre tombait hors plateau et TOUS les canaux etaient vides.
+        anchor_col, anchor_row = self.squad_grid_anchor(game_state, active_squad_id)
 
         half_extent = grid_half_extent_subhex(game_state, active_squad_id)
 
