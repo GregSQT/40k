@@ -33,10 +33,11 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 
 ---
 
+<a id="s0"></a>
 ## 0. ÉTAT AU 2026-07-28 — À LIRE EN PREMIER
 
 > **Cette section ne contient QUE ce qui est ouvert et actionnable.**
-> - Ce qui est résolu est en **§0hist — Historique résolu**, **en fin de document, après §10** :
+> - Ce qui est résolu est en **§0hist — Historique résolu**, **en fin de document, après [§10](V11_eval_strategy.md#s10)** :
 >   entrées intégrales, ancres `### 0.x` inchangées, aucune preuve condensée.
 > - Les avertissements et leçons de méthode durables sont regroupés en **§0bis — Pièges et
 >   leçons de méthode**, qui en est la **copie canonique**.
@@ -400,7 +401,7 @@ modifiée**. Lancé APRÈS §0.12, donc sur le reward définitif.)
 - **2 épisodes par bot.** `bot_eval_final` vaut **2** dans la phase `x5_debug`. C'est bien
   « > 1 » comme l'exigeait cette entrée, mais **12 épisodes ne permettent aucune conclusion** :
   chaque bot est un 2W-0L / 1W-1L / 0W-2L, soit une résolution de 50 points de pourcentage.
-  Le `61.5 %` est un chiffre **indicatif**, à ne PAS reporter dans §10.6.
+  Le `61.5 %` est un chiffre **indicatif**, à ne PAS reporter dans [§10.6](V11_eval_strategy.md#s10.6).
 - **500 épisodes d'entraînement, ce n'est pas un agent entraîné.** Les phases réelles sont à
   10 000–30 000 (`x1`, `x5_new`, `x5_append`). Ce run valide le **pipeline**, pas la politique.
 - **`vs tactical: 100 %` ne vaut rien comme signal de holdout** à 2 épisodes — c'est
@@ -417,14 +418,14 @@ premier run laissait croire.
 
 **🔴 INVALIDÉ A POSTERIORI (même jour) — la rupture D de §0.12.** Ce run a tourné **avant** la
 découverte de la régression d'observation (`value_over_ttk` extrapolait le `points_per_hp` de la
-figurine d'index 0). Les deux rosters de §10.2 étant hétérogènes en points, **l'agent s'est
+figurine d'index 0). Les deux rosters de [§10.2](V11_eval_strategy.md#s10.2) étant hétérogènes en points, **l'agent s'est
 entraîné sur une observation fausse** pendant les 500 épisodes. Ce qui reste valable malgré
 tout : la **non-régression §0.11** et la **validation runtime du fix §0.13**, qui ne dépendent
 ni du reward ni de l'observation. Le score, lui, est à jeter deux fois plutôt qu'une.
 
 **Ce qui reste à faire pour fermer cette entrée** : un run sur une phase à `bot_eval_final`
 élevé (`x1`, `x5_new` et `x5_append` sont déjà à **100**) et à `total_episodes` réel, pour
-produire un win-rate **par roster** interprétable au sens de §10.6. ⚠️ Cf. **§0.15** : les
+produire un win-rate **par roster** interprétable au sens de [§10.6](V11_eval_strategy.md#s10.6). ⚠️ Cf. **§0.15** : les
 rosters `training` et `holdout_regular` étant identiques, ce win-rate mesurera la robustesse à
 l'**adversaire**, jamais au roster.
 
@@ -443,6 +444,7 @@ confirme une fois de plus la leçon §0bis « un run vert ne prouve rien » : le
 passé un `--step` de 4 épisodes puis **crashé en 1 min** sur un vrai run 48-envs (cf. §0.26) — c'est
 le run multi-env, pas le smoke, qui a validé.
 
+<a id="s0bis"></a>
 ## 0bis. Pièges et leçons de méthode — 📌 SECTION CANONIQUE
 
 > **Éditer les avertissements ICI.** Chacun est reproduit **mot pour mot** depuis son entrée
@@ -484,7 +486,7 @@ offline ne prouve rien sur la conformité.
 **⚠️ Réserve de méthode sur ce document.** Les sections §0.x reflètent ce qui a été relu et
 exécuté pendant la session du 2026-07-19 soir. **Le reste du document — T1 à T5, section 9 — n'a
 PAS été revérifié ligne à ligne contre le code.** Trois affirmations périmées y ont été trouvées
-et corrigées ce soir-là (« prochain bloqueur §10.4 » alors qu'il était résolu, « archivage des
+et corrigées ce soir-là (« prochain bloqueur [§10.4](V11_eval_strategy.md#s10.4) » alors qu'il était résolu, « archivage des
 holdouts à faire » alors qu'il l'était, « 9 échecs préexistants » alors que la suite est verte) —
 **il peut en rester d'autres du même genre**. Vérifier dans le code avant de s'appuyer sur une
 affirmation de ce document qui n'est pas datée de la session en cours.
@@ -495,7 +497,7 @@ démentis). Tant qu'elle n'est pas menée, la mise en garde ci-dessus reste plei
 ➜ **Passe menée le 2026-07-20 : voir §0.19.1.** T2/T3/T4/T5 sont verrouillés par mutation-test ;
 **T1 est repassée en ⏳** (R6 site 1 inatteignable au x5, R4 sans aucun test) ; la section 9 n'a
 jamais été marquée ✅ (c'est un plan). La réserve reste valable pour **T1/R4**, dont le
-mutation-test n'a pas pu être mené (`shared_utils.py` sous instrumentation §0.18), et pour §7/§10
+mutation-test n'a pas pu être mené (`shared_utils.py` sous instrumentation §0.18), et pour §7/[§10](V11_eval_strategy.md#s10)
 qui n'ont **pas** été audités.
 
 **Comptages de tests : le seul verdict disponible est le code de sortie (§0.-1)**
@@ -627,7 +629,7 @@ d'ancrage est appelé AVANT d'y brancher quoi que ce soit.**
 **Motif récurrent : du code correct, testé, et jamais appelé (§0.4)**
 
 > **Motif récurrent à surveiller dans ce projet** — six occurrences vérifiées à ce jour.
-> **Cinq de type « jamais appelé »** : `update_frozen_model` (§10.4),
+> **Cinq de type « jamais appelé »** : `update_frozen_model` ([§10.4](V11_eval_strategy.md#s10.4)),
 > `end_of_turn_coherency_removal` (§0.1), `_advance_to_next_player` (§0.4),
 > `game_replay_logger` (§0.8, 795 lignes + 8 tests), `log_unified_action` (§0.8). Du code
 > correct, testé, et jamais appelé. **Devant toute fonction sur laquelle repose un
@@ -705,7 +707,7 @@ python3 ai/train.py --agent ArmageddonAgent --training-config x5_debug \
 1000 épisodes → **ni « best model » ni checkpoint** ne sont jamais écrits. `model_gating_enabled`
 est `False` (le `Gate 🧱` de la barre de progression est purement décoratif) et `bot_eval_final`
 vaut **1** épisode par bot — contre 60 pour le run de §0.7. C'est un run de **validation de
-pipeline**, pas de mesure : il ne peut pas servir le critère §10.6.
+pipeline**, pas de mesure : il ne peut pas servir le critère [§10.6](V11_eval_strategy.md#s10.6).
 
 **Tout run `x5_debug` ÉCRASE le modèle canonique (§0.0)**
 
@@ -826,7 +828,7 @@ AVANT d'y lancer un entraînement.
 | 1 | §0.-1 | « la suite est VERTE : `1402 passed, 2 skipped` » | Son propre ⚠️ la déclare datée. Le document porte aussi `1407`, `1440`, `1451`, `1396`, `1398` selon l'endroit. Seul verdict fiable : le code de sortie. |
 | 2 | §5 / tableau T6-i | « ❌ test de non-régression **NON écrit** » | `tests/unit/engine/test_end_of_turn_coherency_03_03.py` **existe sur le disque** (vérifié le 2026-07-20) et §0.0 le déclare livré. |
 | 3 | §5 / tableau T6 | « le critère T6 est désormais bloqué par `CC_DMG` (§0.3) qui plante des épisodes d'évaluation » | Le portage §0.3 est fait et le run 60/60 de §0.7 le valide runtime. |
-| 4 | §10.5 (bandeau) | « ⚠️ Non validé runtime — cf. §0.3 (`CC_DMG`) » | Levé par §0.7 (`TacticalBot` 10/10 épisodes). |
+| 4 | [§10.5](V11_eval_strategy.md#s10.5) (bandeau) | « ⚠️ Non validé runtime — cf. §0.3 (`CC_DMG`) » | Levé par §0.7 (`TacticalBot` 10/10 épisodes). |
 | 5 | §0.10 | « la dette notée en **§0.0** (`--scenario bot` échoue en amont du moteur) » | Cette dette est écrite dans **§0.7**, pas §0.0. Renvoi imprécis, non corrigé. |
 | 6 | §0.12, étape 4 | « **9 tests** liés à `roster_pool_schedule` échouent indépendamment de ce travail » | ✅ **TRANCHÉ le 2026-07-20 — l'affirmation était FAUSSE.** Suite complète lancée : **1417 passed, 2 skipped, 0 failed**. Aucun échec `roster_pool_schedule`. §0.-1 avait raison : un test rouge est une régression, il n'y a pas d'échec préexistant à tolérer. |
 | 7 | §2 « État des lieux vérifié » | « Tous les imports du pipeline passent (`ai.train`, `ai.env_wrappers`, **`ai.multi_agent_trainer`**, …) » | `ai/multi_agent_trainer.py` **n'existe plus** (supprimé en §0.8, vérifié absent du disque le 2026-07-20). |
@@ -848,7 +850,7 @@ AVANT d'y lancer un entraînement.
   en éval runtime. Le réintroduire pour la seule couverture fausserait la composition d'éval
   (`combined`, poids) sans bénéfice. **Ne pas re-signaler comme un trou de couverture.**
 - **§0.16(c) — clé `holdout_hard_opponent_budget_modifier` + `build_holdout_benchmark.py` gardés
-  (2026-07-21).** Non consommés par le training actuel (2 rosters fixes, §10.2), mais **conservés
+  (2026-07-21).** Non consommés par le training actuel (2 rosters fixes, [§10.2](V11_eval_strategy.md#s10.2)), mais **conservés
   volontairement** : un holdout à armées **générées** est prévu **après la démo**. La clé est en
   attente d'usage, pas morte. **Ne pas supprimer ni la clé ni le script.**
 
@@ -2353,7 +2355,7 @@ Spec à figer à ce moment-là, principes déjà actés :
 | T3 | `train.py --step --training-config x1_debug` dépasse la résolution walls/objectives sans FileNotFoundError |
 | T4 | Les 61 scénarios se chargent (`W40KEngine(scenario_file=...)` + reset, script de balayage) ; zéro clé legacy ; sort de training_save/ statué |
 | T5 | 10 épisodes aléatoires masqués terminés sur ≥3 scénarios × sièges p1/p2 ; zéro masque vide |
-| T6 | ⚠️ *(périmée n°3 de §0bis : le blocage par `CC_DMG` est levé — §0.3 porté, run 60/60 en §0.7 — cellule conservée telle quelle, non corrigée)* Run `--new` court complet + analyzer + replay OK ; ~~win-rate vs RandomBot en progression~~ → **critère REMPLACÉ le 2026-07-19, voir section 10.6** (win-rate PAR ROSTER contre un adversaire de holdout jamais vu à l'entraînement + absence de comportement absurde en partie humaine). L'ancien critère référençait un holdout de rosters qui n'existe plus. — ⏳ **PARTIEL (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép.). ✅ Suite verte (1293) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ✅ T6-c résolu : `_process_squad_action` journalise, analyzer tourne, `1.2 erreurs shooting = 0`. ✅ **T6-d résolu** : `squad_fight` = sélection FIGHT 12.04, machine V11 déroulée par `_fight_v11_gym_settle` (ordre 12.02→12.04→12.07 respecté, snapshot posé, double activation interdite). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (bruit) — mesuré AVANT T6-d, donc sur un moteur où la mêlée était fausse ; **à re-mesurer** avec phase `x1` + `bot_evaluation` holdout vs RandomBot. ✅ **Le run TOURNE de nouveau depuis le 2026-07-19** : T6-g et T6-h sont livrés (cf. §0), x5_debug 8 workers 10/10 ép. exit 0. ❌ **Le critère T6 reste NON évaluable**, mais pour une raison DIFFÉRENTE et désormais isolée : **§10.4** — sur le chemin single-scenario, P2 joue ALÉATOIRE (`SelfPlayWrapper(frozen_model=None)`, `update_frozen_model` sans appelant). Tout win-rate mesuré aujourd'hui est du bruit. ~~C'est le prochain bloqueur.~~ **✅ §10.4 RÉSOLU le 2026-07-19** (adversaires câblés sur les 3 chemins) ; le critère T6 reste néanmoins NON évalué, désormais bloqué par `CC_DMG` (§0.3) qui plante des épisodes d'évaluation. Voir §0.0 pour l'ordre des travaux. |
+| T6 | ⚠️ *(périmée n°3 de §0bis : le blocage par `CC_DMG` est levé — §0.3 porté, run 60/60 en §0.7 — cellule conservée telle quelle, non corrigée)* Run `--new` court complet + analyzer + replay OK ; ~~win-rate vs RandomBot en progression~~ → **critère REMPLACÉ le 2026-07-19, voir section 10.6** (win-rate PAR ROSTER contre un adversaire de holdout jamais vu à l'entraînement + absence de comportement absurde en partie humaine). L'ancien critère référençait un holdout de rosters qui n'existe plus. — ⏳ **PARTIEL (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép.). ✅ Suite verte (1293) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ✅ T6-c résolu : `_process_squad_action` journalise, analyzer tourne, `1.2 erreurs shooting = 0`. ✅ **T6-d résolu** : `squad_fight` = sélection FIGHT 12.04, machine V11 déroulée par `_fight_v11_gym_settle` (ordre 12.02→12.04→12.07 respecté, snapshot posé, double activation interdite). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (bruit) — mesuré AVANT T6-d, donc sur un moteur où la mêlée était fausse ; **à re-mesurer** avec phase `x1` + `bot_evaluation` holdout vs RandomBot. ✅ **Le run TOURNE de nouveau depuis le 2026-07-19** : T6-g et T6-h sont livrés (cf. §0), x5_debug 8 workers 10/10 ép. exit 0. ❌ **Le critère T6 reste NON évaluable**, mais pour une raison DIFFÉRENTE et désormais isolée : **[§10.4](V11_eval_strategy.md#s10.4)** — sur le chemin single-scenario, P2 joue ALÉATOIRE (`SelfPlayWrapper(frozen_model=None)`, `update_frozen_model` sans appelant). Tout win-rate mesuré aujourd'hui est du bruit. ~~C'est le prochain bloqueur.~~ **✅ [§10.4](V11_eval_strategy.md#s10.4) RÉSOLU le 2026-07-19** (adversaires câblés sur les 3 chemins) ; le critère T6 reste néanmoins NON évalué, désormais bloqué par `CC_DMG` (§0.3) qui plante des épisodes d'évaluation. Voir §0.0 pour l'ordre des travaux. |
 | T6-i | ⚠️ *(périmée n°2 de §0bis : le test de non-régression existe : `test_end_of_turn_coherency_03_03.py` — cellule conservée telle quelle, non corrigée)* Une escouade rendue incohérente par des pertes est ramenée en coherency à la fin du tour (03.03), sur les **deux** chemins de fin de Fight, avant le test de limite de tour ; aucune destination du masque de move n'est rejetée pour cause de coherency — ⏳ **PARTIEL (2026-07-19 soir)** : ✅ fix livré et vérifié par run bout-en-bout (8 épisodes plantés → 2, erreur `incohérence masque/exécution` disparue, suite sans régression) ; ❌ **test de non-régression NON écrit** — §8 l'impose, c'est la tâche n°1 de §0.0 |
 | T6-f | Après le commit de déploiement, AUCUNE figurine vivante à `(-1,-1)` et ancre `units_cache` = figurine d'index minimal, sur les 3 chemins (gym, ancre imposée tutoriel, drag) — ✅ **FAIT (2026-07-19)** |
 | T6-g | Toute cellule offerte par le masque de move est exécutable : sur N épisodes aléatoires, zéro `ValueError` « incohérence masque/exécution » — et un test dédié où une escouade dont le BLOC déborde (mur / autre escouade) ne voit PAS la cellule dans son masque — ✅ **FAIT (2026-07-19)** : `test_move_pool_block_erosion.py` (+6, mur/escouade/ER sous une SŒUR, débordement plateau, non-sur-filtrage, mono-fig) ; runs x5_debug 8 workers (10/10 ép.) et mono-env x1_debug, zéro occurrence |
@@ -2534,227 +2536,8 @@ critères spécifiques de la section 6, jamais à leur place.
 ➡️ Phase A' — [§9](V11_phaseA.md) (P1→P5) a été extraite le 2026-07-28 dans
 [`V11_phaseA.md`](V11_phaseA.md).
 
-## 10. Stratégie d'entraînement et d'évaluation — DÉCISION UTILISATEUR (2026-07-19)
-
-### 10.1 Contexte et arbitrage
-
-**Objectif métier** : présenter le jeu avec une IA « acceptable » pour obtenir un financement.
-La démo oppose un **joueur humain** à l'IA, avec les **armées de la boîte de base**.
-
-**Arbitrage assumé** : l'agent n'apprendra PAS à jouer 40K, il apprendra à jouer **ces deux
-rosters**. C'est un choix délibéré pour éviter des semaines de tuning — la spécialisation réduit
-la variance de composition, donc le signal d'apprentissage est plus net et la convergence plus
-rapide. Pour une démo, un agent spécialisé est indiscernable d'un agent généraliste.
-
-⚠️ **Ne PAS « corriger » ce choix** en réintroduisant de la diversité de rosters : c'est une
-décision produit, pas un oubli.
-
-### 10.2 Rosters et matchups
-
-- **2 rosters** : Space Marines (SM) et Orks — les armées de la boîte de base, donc celles de
-  la démo. L'entraînement est aligné sur ce qui sera montré.
-- **3 matchups** : SM vs Orks, SM vs SM, Ork vs Ork.
-- Les rosters de l'ancienne banque ont été **supprimés volontairement** (commit `43eae95a`,
-  370 fichiers) : ils précédaient l'implémentation des escouades, donc obsolètes. Les nouveaux
-  sont à créer.
-
-**✅ FAIT le 2026-07-19 — agent `ArmageddonAgent`, scale `500pts`.** Les 2 rosters existent et
-le pipeline tourne de bout en bout sur eux (training + évaluation).
-
-| Quoi | Où |
-|---|---|
-| Rosters agent (training) | `config/agents/ArmageddonAgent/rosters/500pts/training/agent_training_roster_{space_marines,orks}.json` |
-| Rosters adversaire (training) | `config/agents/_p2_rosters/500pts/training/opponent_training_roster_{space_marines,orks}.json` — le dossier `500pts` n'existait pas côté P2 |
-| Scénario d'entraînement | `config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json` — `agent_roster_ref: "training_random"` (tirage 50/50, **pas de `agent_roster_seed`** : il figerait le tirage agent), `opponent_roster_ref` = liste explicite des 2 fichiers (sinon P2 tire dans tout `_p2_rosters`) |
-| Config agent | `ArmageddonAgent_training_config.json` (copie CoreAgent, `roster_pool_schedule.enabled = false` dans les **5** phases) + `ArmageddonAgent_rewards_config.json` (clé racine renommée : le moteur indexe le fichier par nom d'agent, cf. `_build_reward_configs_for_current_units`) |
-| Holdout (rosters + scénarios) | `rosters/500pts/holdout_regular/agent_holdout_regular_roster_*.json`, `_p2_rosters/500pts/holdout_regular/opponent_holdout_regular_roster_*.json`, `scenarios/holdout_regular/scenario_bot-0{1..4}.json` (les 4 matchups) |
-
-**Vérifié** : 16 resets → les 4 matchups sortent, plus aucun `roster_pool_schedule produced zero
-eligible training rosters` ; training `x5_debug` 8 workers **10/10 épisodes, exit 0** ;
-`--eval --test-episodes 2` **exit 0**, combined 0.69 sur 5 bots (le `.zip` du modèle vérifié
-intact par md5 — jamais réécrit).
-
-⚠️ **Dette assumée (décision utilisateur 2026-07-19) : le holdout est fait par DUPLICATION des
-2 rosters de training**, ce qui **contredit §10.6** (le holdout devait porter sur l'ADVERSAIRE,
-pas sur les rosters — ici l'agent est évalué sur les armées qu'il a vues à l'entraînement).
-Retenu comme point de départ, à raffiner plus tard. La voie propre est documentée : le résolveur
-accepte une ref à **split explicite** (`training/agent_training_roster_orks.json` depuis un
-scénario holdout — cf. commentaire « cross-split evaluation P1 holdout vs P2 training »,
-`_resolve_roster_ref`), ce qui permettrait de garder les mêmes armées et de ne faire porter le
-holdout que sur `TacticalBot`.
-
-⚠️ **Les points des unités Orks sont factices** : `VALUE = 70` pour TOUTES (Boyz, Gretchin,
-Warboss, WarTrakk, BigMek…). Le total « 3290 pts » du roster Orks n'a aucun sens, et le moteur
-ne valide PAS les points (`scale` n'est qu'un nom de dossier). ~~Déséquilibre réel à surveiller :
-**47 figurines côté Orks contre 23 côté SM**.~~ → chiffre périmé : **37 contre 23** depuis §0.9
-(10 Gretchin et non 20), et ce n'est pas un déséquilibre mais une identité de faction à 680 vs 680.
-
-**Bug corrigé au passage (registry d'unités)** : `LandSpeederOnslaughtGatlingCannon.ts` et
-`LandSpeederHeavyFlamer.ts` déclaraient TOUS DEUX `export class LandSpeeder`. `UnitRegistry`
-scanne les `.ts` et indexe par nom de classe → les deux s'écrasaient, `HeavyFlamer` gagnait au
-hasard de l'ordre de parcours et la variante Onslaught était **inatteignable**. Classes
-renommées (+ `NAME`, `DISPLAY_NAME`) et les deux variantes ajoutées à `config/unit_registry.json`
-ET `frontend/public/config/unit_registry.json` (159 → 161). Reste ouvert : les deux pointent vers
-`/icons/LandSpeeder.webp`, absent de `frontend/public/icons/` (cosmétique frontend).
-
-**Défaut structurel constaté (non corrigé)** : au TOUT PREMIER run d'un agent neuf, l'évaluation
-finale échoue avec `VecNormalize enabled but stats not found: <agent>/vec_normalize.pkl` — le pkl
-est écrit à la FIN du run, l'éval tourne avant. CoreAgent ne le voyait jamais (pkl hérité de mai).
-Ne se reproduit pas aux runs suivants. Si on veut le traiter : ordonnancer la sauvegarde
-VecNormalize avant l'éval finale dans `train.py`.
-
-### 10.3 Progression d'adversaires (l'axe qui porte la robustesse)
-
-Le risque dominant pour cette démo n'est PAS la composition des armées, c'est **l'écart entre
-l'adversaire d'entraînement et l'humain de la démo**. Trois niveaux, qualitativement différents :
-
-| Niveau | Nature | Limite |
-|---|---|---|
-| 1. Bots scriptés | politique **fixe** | l'agent apprend un exploit ; le win-rate monte sans que la compétence monte |
-| 2. Self-play | politique **non-stationnaire** qui s'adapte en retour | les exploits cessent de payer ; risque de catastrophic forgetting |
-| 3. MCTS | adversaire qui **cherche** | non exploitable par pattern ; coûteux |
-
-**Plan retenu** : (1) les bots scriptés → (2) introduction **progressive** du self-play →
-(3) MCTS **seulement si** la perf mesurée est insuffisante.
-
-⚠️ « Diversité d'adversaires » = diversité des **distributions de comportement**, pas nombre de
-classes de bots. Huit bots appliquant la même heuristique gloutonne ne font qu'UN adversaire du
-point de vue de l'apprentissage.
-
-**Déjà implémenté, à paramétrer et non à développer — mais UNIQUEMENT sur le chemin rotation**
-(`--scenario bot`, cf. §10.4) :
-- `training_config.bot_training.ratios` — mélange pondéré de bots
-  (`_build_training_bots_from_config`, train.py ~L91 ; 7 classes supportées, 6 pondérées dans
-  la config actuelle — `defensive_smart` n'y est pas). Configuré dans les 5 phases.
-- `training_config.opponent_mix` — self-play progressif : `self_play_ratio_start` →
-  `self_play_ratio_end`, `warmup_episodes`, snapshot publié par
-  `_publish_self_play_snapshot` (train.py ~L2854) et rechargé par mtime dans
-  `BotControlledEnv` (env_wrappers ~L515). Chaîne complète vérifiée : parse → publication →
-  rechargement. Le « progressivement » est donc de la config.
-  ⚠️ `opponent_mix` n'est PARSÉ que dans `train_with_scenario_rotation` (~L2362) —
-  `create_multi_agent_model` l'ignore totalement.
-
-### 10.4 ⚠️ Écart CODE vs PLAN à corriger avant le premier run
-
-> **Statut 2026-07-19 : ✅ RÉSOLU** — construction d'adversaires mutualisée dans
-> `build_training_opponents`, `use_bots` dérivé de la config (`bot_training`) et non du nom de
-> fichier, repli aléatoire refusé explicitement par `SelfPlayWrapper` et `make_training_env`.
-> Détail et vérification en §0. Le constat ci-dessous est conservé comme historique.
->
-> **Constat d'origine — les trois faits ci-dessous ont été
-> re-vérifiés dans le code ce jour (aucun n'a bougé). Ce n'est plus théorique : les runs de
-> validation de T6-g/T6-h (`x5_debug`, n_envs=8, `training_benchmark`) **et** le run de mise en
-> service d'`ArmageddonAgent` (§10.2) sont tous passés par la ligne 2 du tableau — donc **contre
-> un P2 aléatoire**. Ces runs prouvent que le PIPELINE tourne (zéro exception, épisodes
-> complets) ; ils ne prouvent RIEN sur l'apprentissage. C'est le bloqueur n°1, cf. §0.
-
-**Toute la machinerie d'adversaires (bots pondérés + opponent_mix) n'est câblée que sur le
-chemin ROTATION.** L'adversaire réel du chemin single-scenario dépend de `n_envs` et du NOM du
-fichier scénario — vérifié branche par branche :
-
-| Chemin | Adversaire d'entraînement RÉEL |
-|---|---|
-| `--scenario bot` (`train_with_scenario_rotation`) | ✅ `bots=training_bots` pondérés (~L2492, ~L2755) + self-play `opponent_mix` |
-| `--scenario <fichier>`, `n_envs > 1` (cas RÉEL : x5_debug = 8) | ❌ `make_training_env` appelé SANS `use_bots`/`training_bots` (~L1782) → `SelfPlayWrapper(frozen_model=None)` → **ACTIONS ALÉATOIRES UNIFORMES, en permanence** (voir ci-dessous) |
-| `--scenario <fichier>`, `n_envs == 1`, nom contenant « bot » | `GreedyBot(randomness=0.15)` EN DUR (~L1855) |
-| `--scenario <fichier>`, `n_envs == 1`, autre nom (dont `scenario_training_benchmark.json`) | ❌ `SelfPlayWrapper` → **aléatoire permanent** aussi (~L1871) |
-
-**Pourquoi « aléatoire permanent » et pas du self-play** (bug latent distinct, vérifié) :
-`SelfPlayWrapper._get_frozen_model_action` (env_wrappers ~L1237) retombe sur
-`random.choice(valid_actions)` tant que `frozen_model is None` — et
-**`update_frozen_model` n'a AUCUN appelant** dans tout `ai/` (grep = 0 ; le compteur
-`frozen_model_update_frequency = 100` de train.py ~L2690 est du code mort). Le « self-play »
-du chemin single-scenario n'en est pas : P2 joue au hasard du premier au dernier épisode.
-Ne pas confondre avec le VRAI self-play (`opponent_mix` → `BotControlledEnv`, chemin rotation),
-qui recharge un snapshot publié sur disque et fonctionne.
-
-Or `--scenario bot` est cassé en amont (rosters, cf. §0) : le chemin réellement utilisable est
-le single-scenario. **Un run x5_debug lancé aujourd'hui entraînerait donc contre un adversaire
-ALÉATOIRE, sans qu'aucun log ne le signale** — pire que « spécialisé sur GreedyBot » : un agent
-qui n'a jamais rencontré d'opposition cohérente.
-
-C'est la même famille de divergence que **T6-e** (`_turn_step_limit` absent du chemin
-single-scenario) : deux chemins de `train.py` qui ont divergé. À traiter de la même façon —
-faire passer les deux par la même construction d'adversaires (`training_bots` + `opponent_mix`
-dans `make_training_env`, qui accepte DÉJÀ ces paramètres : seul l'appel de
-`create_multi_agent_model` ne les transmet pas).
-
-### 10.5 Évaluation : le holdout porte sur l'ADVERSAIRE, pas sur les rosters
-
-> **Statut 2026-07-19 : ✅ CÂBLÉ** — `TacticalBot` est le holdout, à poids nul et exclu de tout
-> signal de sélection ; le défaut silencieux de `randomness` est supprimé. Détail en §0.
-> ⚠️ **Affirmation périmée n°4 — voir la table de §0bis** (levée par §0.7 : `TacticalBot` a joué 10/10 épisodes). Conservée telle quelle.
-> ⚠️ **Non validé runtime** — cf. §0.3 (`CC_DMG`). L'archivage des scénarios holdout était à
-> faire (voir plus bas). Le constat ci-dessous décrit l'état d'AVANT.
-
-**Constat (historique)** : les bots d'évaluation viennent de `callback_params.bot_eval_weights`
-(`_load_bot_eval_params`, bot_evaluation.py ~L168 ; itération sur `eval_weights.keys()` ~L886).
-Config actuelle, identique dans les 5 phases : `{greedy, defensive, control, aggressive_smart,
-adaptive}` — un **sous-ensemble strict des bots d'entraînement** (`bot_training.ratios` = les
-mêmes 5 + `random`). L'agent n'est donc évalué QUE contre des adversaires rencontrés à
-l'entraînement : ce win-rate mesure **l'exploitation apprise, pas la compétence**, et sera
-systématiquement optimiste par rapport au comportement face à un humain.
-
-**Décision** : le holdout est un **adversaire réservé à l'évaluation**, jamais vu en
-entraînement. Candidat déjà disponible : **`TacticalBot`** — le seul des 8 qui n'est utilisé
-nulle part (`evaluation_bots.py` L19 : « unused in training/eval »).
-
-À faire : ajouter `TacticalBot` aux bots d'évaluation, et **garantir qu'il n'entre jamais**
-dans `bot_training.ratios` (test de non-régression : l'intersection entre bots d'entraînement
-et bots de holdout est vide).
-
-Cela remplace avantageusement le holdout de rosters supprimé, et répond à la question
-« 2 ou 4 rosters » : **rester à 2**, et mettre le holdout sur l'axe adversaire.
-
-⚠️ Les 20 scénarios de `holdout_regular/` + `holdout_hard/` pointent vers des rosters supprimés :
-ils ne chargent pas. **À archiver** dans `_archive_pre_v11/`. Tant qu'ils sont là,
-`bot_eval_scenario_pool: "holdout"` (présent dans les 5 phases de
-`CoreAgent_training_config.json`) pointe sur un pool mort.
-NB — répartition VÉRIFIÉE des 9 échecs de la suite (cause relue test par test) : **8 viennent
-des scénarios TRAINING** (`agent_roster_ref: "training_random"` →
-`roster_pool_schedule produced zero eligible training rosters`, candidates=1 : le pool de
-rosters d'entraînement est quasi vide depuis le cleanup `43eae95a`) et **1 seul** d'un fichier
-de roster holdout absent. Archiver les holdouts n'en fait tomber qu'un : le gros de la
-réparation est la création des nouveaux rosters SM/Orks (§10.2) + la mise à jour des scénarios
-training qui les référencent.
-
-### 10.6 Critère de succès (remplace le critère T6 « win-rate vs RandomBot »)
-
-Le critère historique référençait une capacité qui n'existe plus (holdout de rosters). Nouveau
-critère, en deux volets — **les deux sont requis** :
-
-1. **Quantitatif** : **win-rate PAR ROSTER** contre l'adversaire de holdout (`TacticalBot`),
-   jamais rencontré à l'entraînement. Par roster, car avec seulement 2 rosters, un effondrement
-   sur l'un pendant que l'autre monte est la **signature du catastrophic forgetting** (piège
-   listé dans CLAUDE.md) et le seul garde-fou qui reste. Un win-rate agrégé le masquerait.
-2. **Qualitatif — décisif pour l'objectif démo** : **absence de comportement absurde** sur N
-   parties jouées par quelqu'un n'ayant pas travaillé sur le projet, cherchant activement à
-   surprendre l'agent (déploiement inhabituel, tactique atypique).
-
-**Pourquoi le volet 2 n'est pas optionnel** : devant un financeur, ce qui convainc est que l'IA
-paraisse *sensée* (elle va sur les objectifs, tire sur des cibles plausibles, charge quand c'est
-logique). Un agent à 45 % de victoires qui joue de façon lisible impressionne davantage qu'un
-agent à 70 % qui gagne en exploitant une faiblesse de bot et produit un coup absurde au pire
-moment. **En démo, l'incohérence coûte plus cher que la défaite.**
-
-### 10.7 MCTS — deux usages distincts, ne pas les confondre
-
-| Document | Usage | Effet |
-|---|---|---|
-| `A_faire/MCTS/MCTS_bot_final.md` | MCTS comme **adversaire d'entraînement** (fraction d'épisodes, entre bots et self-play) | améliore l'entraînement → demande un cycle complet de plus |
-| `A_faire/MCTS/MCTS_agent_implementation.md` | MCTS **dans l'agent**, à l'inférence | corrige les coups absurdes **sans retraining** |
-
-Pour l'objectif démo (§10.6 volet 2), c'est le **second** qui a le meilleur rapport
-effort/résultat : c'est l'absurdité ponctuelle qui coûte cher, et une recherche à l'inférence la
-corrige directement. Contre-argument à mesurer : la **latence** en temps réel devant un public —
-`MCTS_agent_implementation.md` note lui-même « micro à chaque activation + rollouts = beaucoup
-plus lourd » et suggère « macro + feuille value seule » comme prototype. Un MCTS macro peu
-profond, ou limité aux seules décisions critiques, suffirait probablement.
-
-**À ne PAS anticiper** : plan B après mesure. Rien ne sert de décider avant de savoir si le PPO
-spécialisé suffit.
-
----
+➡️ [§10](V11_eval_strategy.md) — stratégie d'entraînement et d'évaluation — a été extraite
+le 2026-07-28 dans [`V11_eval_strategy.md`](V11_eval_strategy.md).
 
 ## 0hist. Historique résolu
 
@@ -3370,7 +3153,8 @@ sortie). Mutation : la déduction remise en place fait rougir le test d'extracte
 différences de coordonnées **offset brutes**, alors que tout le reste de l'obs travaille dans la
 projection `_hex_center` : la grille égocentrique, qui l'a choisie **explicitement** pour éviter
 l'anisotropie de parité ([`spatial_grid.py`](../../engine/spatial_grid.py), « rasterisation
-GÉOMÉTRIQUE §10.9 »), et les directions d'objectif de §0.31. En offset, un même déplacement
+GÉOMÉTRIQUE §10.9 » — [§10.9 de `move_action_space_spatial_rework.md`](A_faire/move_action_space_spatial_rework.md)),
+et les directions d'objectif de §0.31. En offset, un même déplacement
 euclidien donne des `(Δcol, Δrow)` différents selon la parité de la ligne.
 
 **Livré.** Les deux paires sont émises dans la projection `_hex_center`, relativement à
@@ -3842,7 +3626,7 @@ RuntimeError: Bot evaluation failed episodes detected: marker=2000, failed_episo
 duration_seconds=3675.8. Training stops immediately to enforce strict evaluation reliability.
 ```
 `training_callbacks.py:2119` (`_apply_eval_results`) lève dès `total_failed_episodes > 0` (garde-fou
-strict de §0.7 : « aucune mesure §10.6 tant qu'un bug plante des épisodes »).
+strict de §0.7 : « aucune mesure [§10.6](V11_eval_strategy.md#s10.6) tant qu'un bug plante des épisodes »).
 
 **Mécanisme (mesuré, PAS supposé).**
 - Un **task d'éval** = un bot × N épisodes joués **séquentiellement dans un seul env** (sous-process).
@@ -3873,7 +3657,7 @@ l'utilisateur a clos, désormais incontournable puisque la conformité move (§0
    plus tardives (modèle meilleur → parties courtes → éval rapide) passeraient. Hypothèse à confirmer :
    l'éval s'accélère quand le modèle s'améliore.
 2. **Réduire l'éval intermédiaire** (`bot_eval_intermediate` 100 → ~20) : c'est un signal de
-   monitoring, pas la mesure §10.6 ; garder `bot_eval_final=100`. ⚠️ mais l'éval FINALE (100 ép.)
+   monitoring, pas la mesure [§10.6](V11_eval_strategy.md#s10.6) ; garder `bot_eval_final=100`. ⚠️ mais l'éval FINALE (100 ép.)
    heurtera le même mur si le modèle final produit encore des parties longues.
 3. **Accélérer le géodésique** (vectorisation NumPy du champ géodésique, cf. `V11_move_build_acceleration.md`) —
    **rouvre §0.22** (option lourde, en réserve).
@@ -4191,15 +3975,15 @@ il doit être verrouillé par un test AVANT qu'un chantier indépendant y touche
 | 3 | **Code mort : `_advance_to_next_player`** | ✅ FAIT — supprimé, avec ses **8** tests **et** l'îlot mort qu'il maintenait en vie. Voir §0.4. |
 
 **Éval relancée le 2026-07-19 après le portage — ✅ 60/60 épisodes, voir §0.7.** Elle valide le
-portage `CC_DMG` sur les 6 sites `TacticalBot` et **lève** le « §10.5 non validé runtime ». Elle a
-aussi établi que le motif d'exclusion du holdout écrit en §10.5 était **empiriquement faux**
+portage `CC_DMG` sur les 6 sites `TacticalBot` et **lève** le « [§10.5](V11_eval_strategy.md#s10.5) non validé runtime ». Elle a
+aussi établi que le motif d'exclusion du holdout écrit en [§10.5](V11_eval_strategy.md#s10.5) était **empiriquement faux**
 (`TacticalBot` n'est PAS le bot le plus fort : 0.60, 2ᵉ meilleur score) — corrigé sur place.
 Les tâches 1-3 sont commitées (`6a7a9de1`).
 
 **Reste ouvert** :
 - ~~🔴 **Déséquilibre 824 vs 690 points** (§0.6)~~ ✅ **SOLDÉ (§0.9, 2026-07-20)** : il n'y avait
   pas de déséquilibre de listes. Aux points Munitorum, **680 vs 680**. Le +19 % venait de 3 `VALUE`
-  fausses (`WarTrakk` 175 au lieu de 60 à elle seule +115). Le critère §10.6 n'est plus bloqué.
+  fausses (`WarTrakk` 175 au lieu de 60 à elle seule +115). Le critère [§10.6](V11_eval_strategy.md#s10.6) n'est plus bloqué.
 - ~~🔴 **`--scenario bot` entraîne sur le holdout** pour cet agent (§0.10)~~ ✅ **CORRIGÉ
   (2026-07-20)** : `bot`/`self` restreints à `training/`, +4 tests de non-régression.
 > ➜ **Déplacé en §0.14 (ouvert).** Rien n'a été supprimé : le contenu est intégral là-bas.
@@ -4231,9 +4015,9 @@ de l'éval, tests repointés, doc à jour. Ce qui ne l'est pas — **les 6 dette
 | # | Dette ouverte | Pourquoi ça compte |
 |---|---|---|
 | 1 | ~~**Test 03.03 non écrit**~~ ✅ **FERMÉE** | Verrouillée par `test_end_of_turn_coherency_03_03.py` (11 tests, mutation-testés). |
-| 2 | ~~**`CC_DMG` plante 2 épisodes sur 48**~~ ✅ **PORTÉ** — mais **non re-mesuré** | Le code ne lit plus les champs supprimés ; le run `--eval` qui prouve 48/48 **reste à faire**. Ne pas cocher §10.6 avant. |
+| 2 | ~~**`CC_DMG` plante 2 épisodes sur 48**~~ ✅ **PORTÉ** — mais **non re-mesuré** | Le code ne lit plus les champs supprimés ; le run `--eval` qui prouve 48/48 **reste à faire**. Ne pas cocher [§10.6](V11_eval_strategy.md#s10.6) avant. |
 | 3 | ~~**`_advance_to_next_player` toujours présent**~~ ✅ **SUPPRIMÉ** | Cf. §0.4. |
-| 4 | ~~**Déséquilibre 824 vs 690 points** (Orks/SM, +19 %)~~ ✅ **SOLDÉ (§0.9)** | Artefact de 3 `VALUE` fausses, pas un déséquilibre de listes. Points Munitorum : **680 vs 680**. §10.6 débloqué. |
+| 4 | ~~**Déséquilibre 824 vs 690 points** (Orks/SM, +19 %)~~ ✅ **SOLDÉ (§0.9)** | Artefact de 3 `VALUE` fausses, pas un déséquilibre de listes. Points Munitorum : **680 vs 680**. [§10.6](V11_eval_strategy.md#s10.6) débloqué. |
 | 5 | **Rien n'est commité** | ➜ **Déplacé en §0.17 (ouvert)** — cette dette est périssable, son état à jour est en §0.17. |
 
 | 6 | ~~🔴 **Le reward de combat ignore la `VALUE` par figurine**~~ | ➜ ✅ **FERMÉE le 2026-07-20 — voir §0.12** (A/B/C **+ D** livrés, 14 tests mutation-testés, suite 1417 verte). |
@@ -4241,7 +4025,7 @@ de l'éval, tests repointés, doc à jour. Ce qui ne l'est pas — **les 6 dette
 **⚠️ Réserve de méthode sur ce document.** Les sections §0.x reflètent ce qui a été relu et
 exécuté pendant la session du 2026-07-19 soir. **Le reste du document — T1 à T5, section 9 — n'a
 PAS été revérifié ligne à ligne contre le code.** Trois affirmations périmées y ont été trouvées
-et corrigées ce soir-là (« prochain bloqueur §10.4 » alors qu'il était résolu, « archivage des
+et corrigées ce soir-là (« prochain bloqueur [§10.4](V11_eval_strategy.md#s10.4) » alors qu'il était résolu, « archivage des
 holdouts à faire » alors qu'il l'était, « 9 échecs préexistants » alors que la suite est verte) —
 **il peut en rester d'autres du même genre**. Vérifier dans le code avant de s'appuyer sur une
 affirmation de ce document qui n'est pas datée de la session en cours.
@@ -4320,6 +4104,7 @@ C'est ce diagnostic qui a donné la root cause en un run : les 12 occurrences po
 `coherency du plan invalide (formation actuelle DEJA incoherente)`.
 
 
+<a id="s0.3"></a>
 ### 0.3 `CC_DMG` — champ légacy lu par 2 bots — ✅ PORTÉ (2026-07-19 soir)
 
 **Fait** : les **7** sites d'`ai/evaluation_bots.py` lisent désormais `RNG_WEAPONS`/`CC_WEAPONS`
@@ -4371,13 +4156,13 @@ exercé, donc il n'a pas encore pété — c'est une **mine**, pas un bug bénin
 entraînement, c'est un crash de training, pas seulement d'éval. **Le portage doit couvrir les
 deux bots.**
 
-C'est exactement la dette annoncée en §10.5 : « les autres bots ont été maintenus au fil des
+C'est exactement la dette annoncée en [§10.5](V11_eval_strategy.md#s10.5) : « les autres bots ont été maintenus au fil des
 refactors squad, celui-ci non ».
 
-**⚠️ Correction d'une affirmation portée plus haut dans ce document** : « §10.5 validé runtime »
+**⚠️ Correction d'une affirmation portée plus haut dans ce document** : « [§10.5](V11_eval_strategy.md#s10.5) validé runtime »
 a été écrit à tort. `TacticalBot` n'avait complété que **4 épisodes sur 8** (W:1 L:2 D:1), les 4
 autres ayant été attribués au bug de coherency **sans vérification**. La bonne lecture :
-**§10.5 reste NON validé runtime** tant que `TacticalBot` ne complète pas ses épisodes une fois
+**[§10.5](V11_eval_strategy.md#s10.5) reste NON validé runtime** tant que `TacticalBot` ne complète pas ses épisodes une fois
 `CC_DMG` porté. Et `0.25 sur 4 épisodes` n'est de toute façon pas une mesure.
 
 
@@ -4405,13 +4190,13 @@ tour est dans `fight_handlers` (fin de phase de Fight, deux chemins).
 
 **Et elle est couverte par des tests verts** : `tests/unit/engine/test_engine_turn_loop.py`,
 12 références. Un fichier de tests vert sur une fonction que rien n'appelle est **le même piège**
-qui a masqué `end_of_turn_coherency_removal` (§0.1) et `update_frozen_model` (§10.4) : il donne
+qui a masqué `end_of_turn_coherency_removal` (§0.1) et `update_frozen_model` ([§10.4](V11_eval_strategy.md#s10.4)) : il donne
 au lecteur suivant la certitude que le chemin est vivant et correct.
 
 ~~**À traiter** : supprimer la fonction et ses tests~~ → fait, voir en tête de §0.4.
 
 > **Motif récurrent à surveiller dans ce projet** — six occurrences vérifiées à ce jour.
-> **Cinq de type « jamais appelé »** : `update_frozen_model` (§10.4),
+> **Cinq de type « jamais appelé »** : `update_frozen_model` ([§10.4](V11_eval_strategy.md#s10.4)),
 > `end_of_turn_coherency_removal` (§0.1), `_advance_to_next_player` (§0.4),
 > `game_replay_logger` (§0.8, 795 lignes + 8 tests), `log_unified_action` (§0.8). Du code
 > correct, testé, et jamais appelé. **Devant toute fonction sur laquelle repose un
@@ -4434,9 +4219,9 @@ mais le score final était publié sans signaler la troncature.
 Le chemin **training** était déjà strict (`_apply_eval_results`, training_callbacks.py:2090-2096) :
 c'est `--eval` qui était l'anomalie. Il reprend désormais le même check et lève avant toute
 publication de score. **Décision** : ne PAS compter les crashes comme défaites — un crash moteur
-n'est pas une défaite de l'agent, ça polluerait §10.6 avec du bruit d'infrastructure.
+n'est pas une défaite de l'agent, ça polluerait [§10.6](V11_eval_strategy.md#s10.6) avec du bruit d'infrastructure.
 
-Conséquence voulue : **aucune mesure §10.6 ne passera tant qu'un bug plante des épisodes.**
+Conséquence voulue : **aucune mesure [§10.6](V11_eval_strategy.md#s10.6) ne passera tant qu'un bug plante des épisodes.**
 
 > ➜ **Déplacé en §0.16 (ouvert).** Rien n'a été supprimé : le contenu est intégral là-bas.
 
@@ -4449,7 +4234,7 @@ CoreAgent), alors que seuls 4 scénarios `holdout_regular` existent et **aucun**
 `_compute_holdout_split_metrics` retournait donc `{}` **silencieusement** : les 3 agrégats de
 split étaient morts en permanence.
 
-**Décision utilisateur** : la difficulté porte sur l'**adversaire**, pas sur le roster (§10.5).
+**Décision utilisateur** : la difficulté porte sur l'**adversaire**, pas sur le roster ([§10.5](V11_eval_strategy.md#s10.5)).
 Poussée jusqu'au bout, cette décision rend le split de scénarios **redondant** — les rosters
 `hard` seraient des copies exactes des `regular`, donc 4 scénarios byte-identiques évalués par
 les mêmes bots, et il faudrait en plus câbler un pool de bots par split qui ferait doublon avec
@@ -4457,7 +4242,7 @@ l'axe par-bot déjà en place (`bot_eval/vs_*`, `0_critical/c_holdout_tactical`)
 ont donc été **supprimées** des 5 phases : l'absence est désormais **explicite**
 (`Worst holdout hard combined: N/A`) au lieu d'être un zéro silencieux.
 
-Le critère §10.6 (win-rate **par roster**) reste servi par les scores **par scénario** : les 4
+Le critère [§10.6](V11_eval_strategy.md#s10.6) (win-rate **par roster**) reste servi par les scores **par scénario** : les 4
 scénarios holdout SONT les 4 matchups (SM/Ork × SM/Ork).
 
 > ➜ **Déplacé en §0.16 (ouvert).** Rien n'a été supprimé : le contenu est intégral là-bas.
@@ -4507,6 +4292,7 @@ la source. Composition et points à jour en **§0.9**.
 > ➜ **Déplacé en §0.15 (ouvert).** Rien n'a été supprimé : le contenu est intégral là-bas.
 
 
+<a id="s0.7"></a>
 ### 0.7 Run d'éval du 2026-07-19 (post-portage `CC_DMG`) — 60/60 épisodes
 
 ```
@@ -4533,13 +4319,13 @@ W+L+D = 10). Le fail-fast §0.5 n'a pas levé : **l'absence d'exception EST le r
 
 `Combined Score: 0.3830` — **recalculé à la main depuis les poids** (`tactical: 0.0`, les 5 autres
 sommant à 1.0) : **0.3830 exactement**. Le holdout ne pollue donc pas le score de sélection, et
-`worst_bot_score` retient bien `adaptive`, pas `tactical` : **les DEUX verrous de §10.5
+`worst_bot_score` retient bien `adaptive`, pas `tactical` : **les DEUX verrous de [§10.5](V11_eval_strategy.md#s10.5)
 fonctionnent, vérifiés par le calcul et pas seulement par lecture du code.**
 
 **Ce que ce run VALIDE** :
 - ✅ **Portage `CC_DMG`/`RNG_DMG` validé runtime** sur les **6 sites `TacticalBot`** — le bot a
   joué 10/10 épisodes entiers, contre 4/8 auparavant.
-- ✅ **§10.5 enfin validé runtime.** L'avertissement « `TacticalBot` n'a jamais été validé runtime
+- ✅ **[§10.5](V11_eval_strategy.md#s10.5) enfin validé runtime.** L'avertissement « `TacticalBot` n'a jamais été validé runtime
   sur le pipeline squad » porté plus bas dans ce document est **levé**.
 
 > ➜ **Déplacé en §0.16 (ouvert).** Rien n'a été supprimé : le contenu est intégral là-bas.
@@ -4555,7 +4341,7 @@ fonctionnent, vérifiés par le calcul et pas seulement par lecture du code.**
 `Worst holdout hard combined: N/A` s'affiche comme voulu (§0.6) : l'absence est **explicite**,
 pas un zéro silencieux. Le fix de §0.6 est donc lui aussi confirmé à l'exécution.
 
-**Ce que ce run ne débloque PAS — le critère §10.6.** Ranking par scénario :
+**Ce que ce run ne débloque PAS — le critère [§10.6](V11_eval_strategy.md#s10.6).** Ranking par scénario :
 `bot-03 = 0.805`, `bot-01 = 0.383`, `bot-04 = 0.305`, `bot-02 = 0.153`. Les 4 scénarios holdout
 SONT les 4 matchups (SM/Ork × SM/Ork) : l'écart de 0.65 entre le meilleur et le pire mélange
 **compétence de l'agent** et ~~**déséquilibre de listes** (§0.6, 824 vs 690)~~. ⚠️ **Cette dernière
@@ -4575,7 +4361,7 @@ python3 ai/train.py --agent CoreAgent --training-config x5_debug \
 → 10/10 épisodes, 8 workers `SubprocVecEnv` vivants, **zéro** `execute_squad_move a échoué : …
 incohérence masque/exécution`, exit 0. Idem en mono-env (`--step`, x1_debug). Les seules
 exceptions résiduelles du run sont dans l'**ÉVALUATION** (`bot_evaluation`) et sont la dette
-rosters connue (`roster_pool_schedule produced zero eligible training rosters`) — cf. §10.2,
+rosters connue (`roster_pool_schedule produced zero eligible training rosters`) — cf. [§10.2](V11_eval_strategy.md#s10.2),
 c'est ce qui met les win-rates à 0.00, pas le moteur.
 
 **Chemin critique — LES 2 FIXES SONT LIVRÉS** (détail en section 5, tranche T6) :
@@ -4634,7 +4420,7 @@ cube (`budget_per_model`, `require_coherency`). **Rouge sur le code d'avant les 
 (`git checkout 3886e498 -- shared_utils.py` → `ValueError: execute_squad_move a échoué : squad=103
 dest=(24,15) … incohérence masque/exécution`, sur les 3 seeds), vert après.
 
-**✅ §10.4 RÉSOLU (2026-07-19) — l'adversaire d'entraînement est câblé sur TOUS les chemins.**
+**✅ [§10.4](V11_eval_strategy.md#s10.4) RÉSOLU (2026-07-19) — l'adversaire d'entraînement est câblé sur TOUS les chemins.**
 La construction des adversaires est désormais mutualisée dans `build_training_opponents`
 (train.py), appelée par les TROIS chemins : `train_with_scenario_rotation`,
 `create_multi_agent_model` (single-scenario) et `create_model` (générique). Sur le chemin
@@ -4652,7 +4438,7 @@ vectorisé ne peut pas recevoir de frozen_model, le self-play vectorisé passe p
 Smart, 15% Adaptive` + `seat mode: random`, 8 workers, exit 0. +5 tests
 (`test_training_opponent_wiring.py`) + 1 test de refus dans `test_env_wrappers.py`.
 
-**✅ §10.5 FAIT (2026-07-19) — holdout d'évaluation `TacticalBot`.** Câblé dans la factory
+**✅ [§10.5](V11_eval_strategy.md#s10.5) FAIT (2026-07-19) — holdout d'évaluation `TacticalBot`.** Câblé dans la factory
 d'éval (`bot_evaluation.BOT_CLASSES`), dans `ALL_BOT_NAMES` (training_callbacks — sans quoi son
 score n'était ni affiché ni loggé) et dans `bot_eval_weights`/`bot_eval_randomness` des 5 phases
 des 2 agents. Deux scalaires TensorBoard : `bot_eval/vs_tactical` et
@@ -4709,7 +4495,7 @@ les autres bots avaient été maintenus au fil des refactors squad et pas lui.
 **Suite après ces deux tranches** : `9 failed, 1451 passed` — **mêmes 9 échecs préexistants**
 (dette rosters), zéro régression.
 
-**~~🔴 PROCHAIN BLOQUEUR — dette rosters (§10.2).~~ ✅ RÉSOLU (2026-07-19, commit `d2b377f0`)** —
+**~~🔴 PROCHAIN BLOQUEUR — dette rosters ([§10.2](V11_eval_strategy.md#s10.2)).~~ ✅ RÉSOLU (2026-07-19, commit `d2b377f0`)** —
 les 2 rosters SM/Orks existent sous `ArmageddonAgent` et le pipeline tourne dessus.
 **✅ Et la banque CoreAgent a été RETIRÉE le 2026-07-19 (décision utilisateur)** : les 9 échecs
 qu'elle causait n'existent plus, la suite est verte. Voir §0.-1 pour la nouvelle baseline et la
@@ -4717,7 +4503,7 @@ règle de périmètre.
 
 **Pour la suite immédiate, voir §0.0** (ordre imposé : test 03.03, puis `CC_DMG`, puis code mort).
 
-**Historique — l'ancien libellé du bloqueur §10.4 :**
+**Historique — l'ancien libellé du bloqueur [§10.4](V11_eval_strategy.md#s10.4) :**
 Re-vérifié dans le code le 2026-07-19 : `update_frozen_model` ([env_wrappers.py:1272](../../ai/env_wrappers.py#L1272))
 n'a **aucun appelant** hors son propre test ; le chemin single-scenario construit
 `SelfPlayWrapper(masked_env, frozen_model=None, ...)` ([train.py:1537](../../ai/train.py#L1537), [1871](../../ai/train.py#L1871)) ;
@@ -4731,18 +4517,18 @@ de vrais bots.)
 
 **Après ça** — ne PAS anticiper : **T7** (unification de la validation de déploiement,
 section 5). Son déclencheur « le training tourne » est désormais REMPLI, mais T7 touche le
-masque, donc l'espace d'action de l'agent, et exige une mesure avant/après — donc §10.4 d'abord.
+masque, donc l'espace d'action de l'agent, et exige une mesure avant/après — donc [§10.4](V11_eval_strategy.md#s10.4) d'abord.
 
 **⚠️ AVANT de lancer le premier vrai run, lire la section 10** (stratégie d'entraînement et
 d'évaluation, décision utilisateur 2026-07-19). Deux points bloquants y sont établis :
-- **§10.4** — toute la machinerie d'adversaires (bots pondérés + self-play `opponent_mix`)
+- **[§10.4](V11_eval_strategy.md#s10.4)** — toute la machinerie d'adversaires (bots pondérés + self-play `opponent_mix`)
   n'est câblée que sur `--scenario bot`. Le chemin single-scenario vectorisé (x5_debug,
   n_envs=8) tombe sur `SelfPlayWrapper(frozen_model=None)` dont le frozen n'est JAMAIS mis à
   jour (`update_frozen_model` : zéro appelant) → **P2 joue des actions ALÉATOIRES en
   permanence**. Comme `--scenario bot` est cassé (rosters), un run lancé aujourd'hui
   entraînerait contre du hasard **sans que rien ne le signale**. Même famille de divergence
   que T6-e.
-- **§10.6** — le critère de succès T6 a été REMPLACÉ : l'ancien (« win-rate vs RandomBot sur
+- **[§10.6](V11_eval_strategy.md#s10.6)** — le critère de succès T6 a été REMPLACÉ : l'ancien (« win-rate vs RandomBot sur
   holdout ») référence un holdout de rosters supprimé. Le holdout porte désormais sur
   l'**adversaire** (`TacticalBot`, réservé à l'évaluation), pas sur les rosters.
 
@@ -4753,7 +4539,7 @@ banque CoreAgent le 2026-07-19 : `1402 passed, 0 failed`). Constat historique :
 non résolus** (`roster_pool_schedule produced zero eligible training rosters`, fichiers de
 roster holdout absents). Baseline vérifiée par `git stash` — aucune régression des fixes ci-dessus.
 Ces rosters ont été supprimés VOLONTAIREMENT (commit `43eae95a`, obsolètes pré-escouades) : la
-réparation n'est pas « les restaurer » mais recréer 2 rosters (SM, Orks) — cf. §10.2.
+réparation n'est pas « les restaurer » mais recréer 2 rosters (SM, Orks) — cf. [§10.2](V11_eval_strategy.md#s10.2).
 
 **Dettes à connaître avant de s'y remettre** :
 - `--scenario bot` échoue en AMONT du moteur (roster) : utiliser `training_benchmark` pour
@@ -4820,6 +4606,7 @@ legacy. `--total-episodes` est **conservé** (encore lu dans le chemin d'entraî
 `create_multi_agent_model` est un **homonyme vivant** de `train.py`, sans rapport — ne pas le purger.
 
 
+<a id="s0.9"></a>
 ### 0.9 Rosters fidèles à la boîte + points Munitorum — ✅ FAIT (2026-07-20) — **§0.6 SOLDÉ**
 
 **Déclencheur** : l'utilisateur signale que la boîte Armageddon ne contient que **10 Gretchin**,
@@ -4911,7 +4698,7 @@ steps).
 `holdout_regular/` puis `holdout_hard/`** (docstring explicite de la fonction).
 
 Or les 4 scénarios `scenario_bot-01..04` d'ArmageddonAgent vivent dans **`holdout_regular/`** :
-ce sont les 4 matchups qui servent à mesurer §10.6. Mesuré : `--scenario bot` résout **5**
+ce sont les 4 matchups qui servent à mesurer [§10.6](V11_eval_strategy.md#s10.6). Mesuré : `--scenario bot` résout **5**
 scénarios pour cet agent (les 4 holdout + celui d'entraînement). **Entraîner avec ce flag revient
 donc à entraîner sur le jeu de test**, silencieusement — aucun message ne le signale.
 
@@ -4956,7 +4743,7 @@ python3 ai/train.py --agent ArmageddonAgent --training-config x5_debug \
 1000 épisodes → **ni « best model » ni checkpoint** ne sont jamais écrits. `model_gating_enabled`
 est `False` (le `Gate 🧱` de la barre de progression est purement décoratif) et `bot_eval_final`
 vaut **1** épisode par bot — contre 60 pour le run de §0.7. C'est un run de **validation de
-pipeline**, pas de mesure : il ne peut pas servir le critère §10.6.
+pipeline**, pas de mesure : il ne peut pas servir le critère [§10.6](V11_eval_strategy.md#s10.6).
 
 
 ### 0.11 Crash du training : collision intra-plan aveugle au niveau — ✅ CORRIGÉ (2026-07-20)
@@ -5197,7 +4984,7 @@ figurines** : Nob en index 0 vs index 9 ⇒ même `value_over_ttk`. **Mutation-t
 
 ⚠️ **Conséquence sur les mesures** : le run de 500 épisodes de **§0.14 a tourné AVANT ce
 correctif**, donc sur une observation fausse pour toute escouade hétérogène — c'est-à-dire pour
-les deux rosters de §10.2. Son score est à jeter pour cette raison **en plus** de celle déjà
+les deux rosters de [§10.2](V11_eval_strategy.md#s10.2). Son score est à jeter pour cette raison **en plus** de celle déjà
 notée (12 épisodes d'éval).
 
 📌 **Réserve non traitée** (hors périmètre §0.12) : la variable locale `model_count_at_start` de `_build_models_for_unit` est **inutilisée** — elle l'était déjà avant ce travail, ce n'est pas une séquelle. Non supprimée.
@@ -5241,8 +5028,8 @@ paramètre, et une valeur par défaut masque l'oubli** — interdit par CLAUDE.m
 famille T6-a / T6-b / T6-e : *migration partielle d'un chemin, un site oublié, aucun message*.
 
 **Conséquences :**
-1. **Le score `Combined 0.46` de ce run ne vaut RIEN pour §10.6** : mesuré sur le scénario
-   d'entraînement, pas sur le holdout. Le contrat §10.5 est contourné sur ce chemin.
+1. **Le score `Combined 0.46` de ce run ne vaut RIEN pour [§10.6](V11_eval_strategy.md#s10.6)** : mesuré sur le scénario
+   d'entraînement, pas sur le holdout. Le contrat [§10.5](V11_eval_strategy.md#s10.5) est contourné sur ce chemin.
 2. De toute façon, à **1 épisode par bot** (3 victoires / 3 défaites), c'est du bruit pur —
    ne pas l'interpréter même une fois le pool corrigé.
 3. Tout « best model » retenu par un gating adossé à cette éval l'aurait été sur le mauvais
@@ -5252,7 +5039,7 @@ famille T6-a / T6-b / T6-e : *migration partielle d'un chemin, un site oublié, 
 explicitement ([training_callbacks.py:1024](../../ai/training_callbacks.py#L1024)).
 
 **Pourquoi en dur plutôt que résolu depuis la config** (arbitrage tranché, ne pas rouvrir) :
-l'éval finale est une éval de **MESURE**, elle doit porter sur le holdout par contrat §10.5 —
+l'éval finale est une éval de **MESURE**, elle doit porter sur le holdout par contrat [§10.5](V11_eval_strategy.md#s10.5) —
 comme les 3 autres sites de mesure (`train.py:3012`, `:4257`, `:4646`), qui codent déjà la même
 valeur en dur. La clé de config `bot_eval_scenario_pool` n'alimente, elle, que l'éval
 **INTERMÉDIAIRE** (gating en cours d'entraînement), où un pool `training` peut se défendre.
@@ -5418,7 +5205,7 @@ un simple révélateur ; l'invariant « deux figurines vivantes d'une même esco
 jamais la même `(col, row, niveau)` » mérite alors d'être vérifié **à l'écriture**, au plus près
 du fautif, plutôt qu'au move suivant.
 
-~~⚠️ **Bloquant** : aucun run long ne va au bout de façon fiable, donc **§0.14 et le critère §10.6
+~~⚠️ **Bloquant** : aucun run long ne va au bout de façon fiable, donc **§0.14 et le critère [§10.6](V11_eval_strategy.md#s10.6)
 sont bloqués derrière cette entrée**.~~ ➜ **LEVÉ le 2026-07-20** par le correctif ci-dessus.
 §0.14 est **débloquée** — sous réserve des 2-3 runs qui restent à faire.
 
@@ -5489,14 +5276,14 @@ collision.
 > §0.6 pour la décision et sa justification.
 
 ⚠️ **Les rosters `training` et `holdout_regular` sont IDENTIQUES** (vérifié : mêmes compositions,
-mêmes totaux, aux deux emplacements). C'est cohérent avec la décision §10.5 — le holdout porte sur
+mêmes totaux, aux deux emplacements). C'est cohérent avec la décision [§10.5](V11_eval_strategy.md#s10.5) — le holdout porte sur
 l'**adversaire**, pas sur le roster — mais il faut en avoir conscience : **il n'existe aucune
 séparation de listes entre entraînement et évaluation**. Un sur-apprentissage sur les
 particularités de ces deux listes ne serait détecté par aucun des scénarios d'éval actuels.
 
 **Statut** : ✅ **TRANCHÉ le 2026-07-21 — l'utilisateur ASSUME l'identité** (« Oui : rosters
-training ≡ holdout_regular »). Le holdout porte donc **exclusivement sur l'adversaire** (§10.5),
-jamais sur le roster : c'est cohérent avec la démo de financement (2 rosters fixes SM/Orks, §10.2)
+training ≡ holdout_regular »). Le holdout porte donc **exclusivement sur l'adversaire** ([§10.5](V11_eval_strategy.md#s10.5)),
+jamais sur le roster : c'est cohérent avec la démo de financement (2 rosters fixes SM/Orks, [§10.2](V11_eval_strategy.md#s10.2))
 et avec la spécialisation assumée. **Conséquence à garder en tête** : aucun scénario d'éval ne
 détectera un sur-apprentissage sur les particularités de ces deux listes ; le win-rate par matchup
 mesure la robustesse à l'**adversaire**, pas au roster. Ce n'est pas un angle mort à corriger,
@@ -5525,7 +5312,7 @@ Réserves :
   (affichage nominal trié, suppression + avertissement quand `failed>0`, liste vide sans scores) ;
   **mutation** de la garde (`total_failed_episodes > 0` → `False`) → **1 rouge** ciblé, vert après.
 - ✅ **CORRIGÉE (2026-07-21)** — `worst_bot_name` du chemin eval-only était calculé sur **toutes**
-  les clés de `bot_eval_weights`, `tactical` **inclus**, alors que §10.5 impose son exclusion des
+  les clés de `bot_eval_weights`, `tactical` **inclus**, alors que [§10.5](V11_eval_strategy.md#s10.5) impose son exclusion des
   signaux de sélection. Le poids nul ne protégeait pas ce site (min sur des NOMS). **DEUX sites
   étaient touchés, pas un** : le eval-only ([train.py:4682](../../ai/train.py#L4682)) ET le
   `worst_bot_score` **par-scénario** de [bot_evaluation.py:1180](../../ai/bot_evaluation.py#L1180),
@@ -5549,14 +5336,14 @@ Ce site reste couvert par son **test unitaire**, ce qui est jugé suffisant. ➜
 - Le **7ᵉ site du portage** (`_best_target_slot_by_threat`) n'est couvert que par un test unitaire :
   son appelant `DefensiveSmartBot` n'est pas dans `bot_eval_weights`, donc l'éval ne le joue pas
   (`active_bot_names = tuple(eval_weights.keys())`, [bot_evaluation.py:893](../../ai/bot_evaluation.py#L893)).
-  Piège §10.5 : **une liste de poids détermine qui TOURNE, pas seulement qui COMPTE.**
+  Piège [§10.5](V11_eval_strategy.md#s10.5) : **une liste de poids détermine qui TOURNE, pas seulement qui COMPTE.**
 
 **(c) Clé de config `holdout_hard_opponent_budget_modifier` — ✅ CONSERVÉE DÉLIBÉRÉMENT (2026-07-21)**
 
 Décision utilisateur : **garder la clé ET `scripts/build_holdout_benchmark.py`.** Un holdout à armées
 **générées** est prévu **après la démo** (une fois les 2 armées focus terminées). La clé n'est donc pas
 « morte » mais **en attente d'usage** : elle n'est simplement pas consommée par le chemin de training
-actuel (2 rosters fixes, §10.2). ➜ Ni la clé ni le script ne sont supprimés ; ce n'est plus une
+actuel (2 rosters fixes, [§10.2](V11_eval_strategy.md#s10.2)). ➜ Ni la clé ni le script ne sont supprimés ; ce n'est plus une
 réserve mais un **choix assumé**. Note en §0ter.
 
 ### 0.17 Travail non commité — ✅ CLÔTURÉE (entrée périssable périmée : tout est commité, `git status` propre)
@@ -5606,7 +5393,7 @@ on a effectivement regardé :
 
 | Session | Ce qui a été trouvé en revérifiant |
 |---|---|
-| 2026-07-19 soir | **3** affirmations périmées (« prochain bloqueur §10.4 » déjà résolu ; « archivage des holdouts à faire » déjà fait ; « 9 échecs préexistants » alors que la suite est verte) |
+| 2026-07-19 soir | **3** affirmations périmées (« prochain bloqueur [§10.4](V11_eval_strategy.md#s10.4) » déjà résolu ; « archivage des holdouts à faire » déjà fait ; « 9 échecs préexistants » alors que la suite est verte) |
 | 2026-07-20 | **8** affirmations périmées recensées en §0bis, dont la n°6 (« 9 tests `roster_pool_schedule` échouent ») **démontrée fausse** par la suite complète |
 | 2026-07-20 | **§0.11 déclaré résolu ne l'est pas** (§0.18) — et le T6-i portait déjà, en 2026-07-19, le motif « code testé mais jamais appelé » |
 
