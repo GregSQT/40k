@@ -74,7 +74,9 @@ def _shot_records(gs):
 def test_devastating_critique_ignore_la_save(monkeypatch):
     """Blessure critique (6) avec DEVASTATING : save 6 (qui réussirait) SAUTÉE -> 1 dégât,
     ET le record est tagué blessure mortelle (saveSkipped + mortalWound) pour log/FNP futur."""
-    _seq(monkeypatch, [4, 6, 6])  # hit=4, wound=6 (crit), save=6
+    # 2 des : sur un critique DEVASTATING, aucune sauvegarde n est faite (24.10) — la
+    # branche sans la regle en tire 3, ce qui discrimine les deux chemins.
+    _seq(monkeypatch, [4, 6])  # hit=4, wound=6 (crit)
     gs = _game_state(["DEVASTATING_WOUNDS"])
 
     build_manual_shoot_allocation(gs, "1")
@@ -114,7 +116,7 @@ def test_blessure_non_critique_repasse_par_la_sauvegarde(monkeypatch):
 
 def test_les_degats_du_critique_sont_ceux_de_l_arme(monkeypatch):
     """La save sautee n altere pas la valeur des degats : DMG=2 retire bien 2 PV."""
-    _seq(monkeypatch, [4, 6, 6])
+    _seq(monkeypatch, [4, 6])
     gs = _game_state(["DEVASTATING_WOUNDS"], dmg=2, hp=5)
 
     build_manual_shoot_allocation(gs, "1")

@@ -7454,18 +7454,21 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     dmg_raw = g["dmg_raw"]
     rec = pw["rec"]
     save_th = save_threshold(int(m["ARMOR_SAVE"]), int(m.get("INVUL_SAVE", 7)), ap)
-    save_roll = int(pw["save_roll"])
     rec["saveTarget"] = save_th
     # DEVASTATING_WOUNDS (weapon_rules.json) : « No saving throw can be made against a critical
     # wound. » Le flag est pose au jet (blessure critique = 6 non modifie). On SAUTE la
     # comparaison de save : la blessure echoue d office, degats appliques comme une save ratee.
     _devastating = bool(pw.get("devastating"))
-    # Save reussie : roll != 1 et >= seuil. Aucun degat. (Court-circuitee si devastating.)
-    if not _devastating and save_roll != 1 and save_roll >= save_th:
-        rec["saveSuccess"] = True
-        rec["damageDealt"] = 0
-        batch["pool_index"] += 1
-        return
+    if not _devastating:
+        # Le de n existe QUE hors DEVASTATING : sur un critique, la sauvegarde n a pas ete
+        # faite (24.10), donc `pw["save_roll"]` vaut None — le lire serait une erreur.
+        save_roll = int(require_key(pw, "save_roll"))
+        # Save reussie : roll != 1 et >= seuil. Aucun degat.
+        if save_roll != 1 and save_roll >= save_th:
+            rec["saveSuccess"] = True
+            rec["damageDealt"] = 0
+            batch["pool_index"] += 1
+            return
     rec["saveSuccess"] = False
     if _devastating:
         # DEVASTATING_WOUNDS (24.10) : blessure critique -> blessure MORTELLE. Aucune save
@@ -7473,6 +7476,9 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
         # No Pain (point d accroche unique). Degats = D appliques a UNE figurine (excess perdu
         # ci-dessous, comme « max one model per critical wound »).
         rec["saveSkipped"] = True
+        # Motif de saut : consomme par le formateur du StepLogger (`Save [DEVASTATING WOUNDS]`),
+        # que l analyzer ET le replay cherchent par regex. Sans cette cle, les deux sont aveugles.
+        rec["saveSkipReason"] = "DEVASTATING_WOUNDS"
         rec["mortalWound"] = True
     summary["failed_saves"] += 1
     # Degats tires UNIQUEMENT maintenant (save echouee).

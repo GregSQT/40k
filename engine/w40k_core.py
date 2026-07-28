@@ -4999,6 +4999,13 @@ class W40KEngine(gym.Env):
         "saveRoll": "save_roll",
         "saveTarget": "save_target",
         "damageDealt": "damage_dealt",
+        # Regles d armes : sans ces cles, les branches d affichage du formateur du StepLogger
+        # sont INATTEIGNABLES, et les controles de conformite de `ai/analyzer_phases/
+        # shoot_handler.py` (qui les cherchent par regex dans la ligne) restent muets — tout
+        # comme le replay (`replayParser.ts`). Chaine verrouillee de bout en bout par
+        # tests/unit/ai/test_step_log_weapon_rule_tokens.py. Cf. V11 §0hist.38.
+        "saveSkipped": "save_skipped",
+        "saveSkipReason": "save_skip_reason",
     }
 
     def _models_segment_for_unit(self, unit_id: Any, label: str = "MODELS") -> str:

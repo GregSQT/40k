@@ -343,19 +343,29 @@ def roll_attack_pool(
                 continue
 
             wounds += 1
-            save_roll = roll_d6()
-            if save_roll == NATURAL_FAIL_ROLL and rerolls.save_1:
-                save_roll = roll_d6()
-            base_rec.update({
-                "strengthRoll": wound_roll, "strengthResult": "SUCCESS",
-                "woundTarget": wound_target, "saveRoll": save_roll, "damageDealt": 0,
-            })
-            if auto_wound:
-                base_rec["lethalHit"] = True
             # [DEVASTATING WOUNDS] 24.10 : la sequence de CETTE attaque s arrete sur une
             # blessure critique ; la cible subit D blessures mortelles, infligees APRES les
             # degats normaux (ordonnancement fait par l appelant a l allocation).
             devastating = bool(profile.devastating and is_critical_wound)
+            # « No saving throw can be MADE against a critical wound » : la sauvegarde n est
+            # pas faite du tout — aucun de tire, aucune relance, aucun `saveRoll` au record.
+            # Avant le 2026-07-29 le de etait tire PUIS jete : sans effet sur le jeu, mais il
+            # laissait dans le record une valeur que le log affichait (`Save 6(2+)` sur une
+            # blessure mortelle), ce que le controle de conformite de l analyzer classe en
+            # `devastating_wounds_incorrect`. Cf. V11 §0hist.38.
+            save_roll: Optional[int] = None
+            if not devastating:
+                save_roll = roll_d6()
+                if save_roll == NATURAL_FAIL_ROLL and rerolls.save_1:
+                    save_roll = roll_d6()
+            base_rec.update({
+                "strengthRoll": wound_roll, "strengthResult": "SUCCESS",
+                "woundTarget": wound_target, "damageDealt": 0,
+            })
+            if not devastating:
+                base_rec["saveRoll"] = save_roll
+            if auto_wound:
+                base_rec["lethalHit"] = True
             if is_critical_wound:
                 base_rec["criticalWound"] = True
             if devastating:

@@ -111,7 +111,8 @@ def _records(gs):
 
 def test_devastating_et_hazardous_les_deux_se_declenchent(monkeypatch):
     """Blessure critique (save sautee sur la CIBLE) et hasard rate (MW sur le TIREUR)."""
-    seq = _seq(monkeypatch, [4, 6, 6, 1])  # touche, blessure critique, save 6 (sautee), hasard 1
+    # 3 des seulement : la sauvegarde n est PAS faite sur un critique DEVASTATING (24.10).
+    seq = _seq(monkeypatch, [4, 6, 1])  # touche, blessure critique, hasard rate
     gs = _game_state(["DEVASTATING_WOUNDS", "HAZARDOUS"])
 
     build_manual_shoot_allocation(gs, "1")
@@ -123,7 +124,7 @@ def test_devastating_et_hazardous_les_deux_se_declenchent(monkeypatch):
 
 def test_devastating_seul_quand_le_hasard_reussit(monkeypatch):
     """Discrimination : hasard reussi (4) -> le tireur est indemne, la cible non."""
-    seq = _seq(monkeypatch, [4, 6, 6, 4])
+    seq = _seq(monkeypatch, [4, 6, 4])  # touche, blessure critique, hasard reussi
     gs = _game_state(["DEVASTATING_WOUNDS", "HAZARDOUS"])
 
     build_manual_shoot_allocation(gs, "1")
@@ -164,7 +165,7 @@ def test_hazardous_est_jete_meme_si_toutes_les_attaques_ratent(monkeypatch):
 
 def test_heavy_fait_toucher_un_de_qui_aurait_rate_puis_devastating_saute_la_save(monkeypatch):
     """BS4 ameliore a 3 par HEAVY : le 3 touche, la blessure critique saute la save 6."""
-    seq = _seq(monkeypatch, [3, 6, 6])
+    seq = _seq(monkeypatch, [3, 6])  # touche 3 (grace a HEAVY), blessure critique -> pas de save
     gs = _game_state(["HEAVY", "DEVASTATING_WOUNDS"], dmg=2)
 
     build_manual_shoot_allocation(gs, "1")

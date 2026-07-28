@@ -142,7 +142,8 @@ def test_hazardous_et_devastating_sur_la_meme_arme(monkeypatch):
     """Interaction : la blessure critique saute la sauvegarde ET le hasard est jete apres.
 
     Les deux effets sont independants — l un porte sur la cible, l autre sur le porteur."""
-    seq = _seq(monkeypatch, [4, 6, 6, 1])  # touche, blessure CRITIQUE, save 6 (sautee), hasard rate
+    # 3 des : la sauvegarde n est pas faite sur un critique DEVASTATING (24.10).
+    seq = _seq(monkeypatch, [4, 6, 1])  # touche, blessure CRITIQUE, hasard rate
     gs = _game_state(["HAZARDOUS", "DEVASTATING_WOUNDS"])
 
     build_manual_fight_allocation(gs, "1")
