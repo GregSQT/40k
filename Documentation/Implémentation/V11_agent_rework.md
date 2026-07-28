@@ -390,6 +390,7 @@ materialize_eval_refs=False, scenario_list_override=[chemin])`. Le mode holdout 
 `DEPLOYMENT`, figurines aux positions du fichier dès T1).
 
 
+<a id="s0.14"></a>
 ### 0.14 Re-mesure du run — 🟠 OUVERT : run `--new` À LANCER, aucun prérequis technique restant (màj 2026-07-28)
 
 > ⚠️ **Titre corrigé le 2026-07-28.** L'ancien (« BLOQUÉ À L'ÉVAL DU MARKER 2000 ») décrivait le
