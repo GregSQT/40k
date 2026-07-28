@@ -13,7 +13,6 @@ from engine.phase_handlers.movement_handlers import (
 )
 from engine.phase_handlers.shooting_handlers import (
     shooting_phase_start,
-    _attack_sequence_rng,
 )
 from engine.phase_handlers.fight_handlers import (
     fight_phase_start,
@@ -189,9 +188,9 @@ def _make_shoot_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
         "inches_to_subhex": 1,
     }
     build_units_cache(gs)
-    # Contrat moteur : build_unit_los_cache() peuple los_cover_cache à l'activation.
-    # Ce fixture appelle _attack_sequence_rng() en direct (hors activation) : on reproduit
-    # le cache (aucune cible en cover) pour rester déterministe sans dépendance terrain/LoS.
+    # Contrat moteur : build_unit_los_cache() peuple los_cover_cache à l'activation. Ces tests
+    # appellent les `*_phase_start` hors activation : on reproduit le cache (aucune cible en
+    # cover) pour rester déterministe sans dépendance terrain/LoS.
     for u in units:
         u["los_cover_cache"] = {str(o["id"]): False for o in units}
     return gs
@@ -224,26 +223,10 @@ class TestShootingTransition:
         shooting_phase_start(gs)
         assert "2" not in gs["shoot_activation_pool"]
 
-    def test_attack_sequence_rng_hit_returns_damage(self, monkeypatch):
-        """shoot_trans_dmg : _attack_sequence_rng avec hit+wound+fail_save → damage>0."""
-        shooter = _unit(1, 1, 5, 10)
-        shooter["RNG_WEAPONS"] = [_rng_weapon(atk=3, str_=4, ap=0, dmg=2)]
-        shooter["selectedRngWeaponIndex"] = 0
-        shooter["_rapid_fire_rule_value"] = 0
-        shooter["_is_stationary_for_heavy"] = False
-        target = _unit(2, 2, 20, 10, hp=5)
-        gs = _make_shoot_gs([shooter, target])
-        shooting_phase_start(gs)
-        # shooting_phase_start deletes these fields; re-set after
-        shooter["_rapid_fire_rule_value"] = 0
-        shooter["_rapid_fire_bonus_shot_current"] = False
-        shooter["_is_stationary_for_heavy"] = False
-        # hit=5 (≥3), wound=4 (S==T → 4+), save=2 (fail 4+) → dmg=2
-        rolls = iter([5, 4, 2])
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        result = _attack_sequence_rng(shooter, target, gs)
-        assert result["damage"] == 2
-        assert result["hit_success"] is True
+    # NOTE : « touche + blessure + sauvegarde ratée → dégâts » a quitté ce fichier avec la
+    # suppression du code mort `_attack_sequence_rng` (V11 §0.38). L'assertion vit désormais
+    # sur le chemin VIF, dans test_shoot_attack_sequence.py — ce fichier ne couvre que les
+    # TRANSITIONS de phase, pas la résolution des attaques.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
