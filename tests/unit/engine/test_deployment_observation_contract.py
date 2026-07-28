@@ -1,6 +1,9 @@
-"""V11 §0.40 points 1 & 2 — l'observation de la phase de déploiement.
+"""V11 §0.40 — l'observation de la phase de déploiement (points 1, 2, 4 et 5).
 
-Deux défauts vérifiés dans le code le 2026-07-28, corrigés ici :
+Quatre défauts vérifiés dans le code puis corrigés. Les points 4 et 5 ont été trouvés en
+VÉRIFIANT les correctifs précédents, pas en relisant la spec : chacun est le même défaut racine
+— des grandeurs géométriques calculées sur une unité qui n'est pas sur le plateau — vu une
+couche plus loin.
 
 **Point 1 — l'obs décrivait une AUTRE unité que celle sur laquelle le masque agit.**
 `_build_observation` prenait `next(iter(units_cache.keys()))` : la 1re clé du cache d'unités,
@@ -15,6 +18,16 @@ centrait la fenêtre sur (-1,-1), donc TOUS les canaux (murs, alliés, ennemis, 
 étaient vides ou tronqués à l'instant précis où l'agent choisit son point d'entrée dans la
 partie. La grille est désormais ancrée sur la ZONE DE DÉPLOIEMENT du joueur — la même collection
 d'hexes que celle où le décodeur choisit l'hexe, aucune géométrie recalculée.
+
+**Point 4 — le VECTEUR mesurait aussi depuis la sentinelle.**
+Son origine est le centroïde de l'escouade active, qui vaut (-1,-1) tant qu'elle n'est pas posée :
+distances et directions aux objectifs, et positions relatives de toutes les entités, partaient du
+coin hors plateau. L'ORDRE des objectifs en était inversé.
+
+**Point 5 — une unité pas encore mise en place se déclarait engagée au contact.**
+Toutes les unités non posées partagent la sentinelle, donc leurs empreintes se recouvrent et la
+primitive d'engagement les déclarait mutuellement engagées. Contraire à la règle 03.04
+(`Documentation/40k_rules/03 Moving.pdf`) : l'engagement range est une aire DU CHAMP DE BATAILLE.
 """
 from __future__ import annotations
 
@@ -411,6 +424,195 @@ def test_measurement_origin_is_the_centroid_once_deployed():
     )
     assert np.allclose(seen, from_centroid), (
         "hors déploiement, l'origine de mesure n'est plus le centroïde de l'escouade"
+    )
+
+
+# ============================================================================
+# POINT 5 — une unité pas encore mise en place n'est pas sur le champ de bataille
+# ============================================================================
+
+#: Features qui affirment une RELATION géométrique à l'ennemi ou au terrain. Règle 03.04
+#: (`Documentation/40k_rules/03 Moving.pdf`) : « A model's engagement range is the area OF THE
+#: BATTLEFIELD within 2" horizontally and 5" vertically of it ». Une unité pas encore mise en
+#: place n'est pas sur le champ de bataille — aucune de ces affirmations ne peut être vraie pour
+#: elle. `coherent` n'en fait PAS partie : 03.03 conditionne le test de cohérence à « if that
+#: unit is on the battlefield », il ne déclare pas incohérente une unité hors table — et 0
+#: signifierait « escouade éparpillée », une pathologie, donc un mensonge pire que le silence.
+GEOMETRIC_BIN_FIELDS = ("engaged", "los_can_see", "cover_vs_observer", "charge_reachable_max_roll")
+GEOMETRIC_CONT_FIELDS = (
+    "col_rel", "row_rel", "edge_distance",
+    "n_fight_eligible", "n_in_enemy_ez", "n_relayed_ez", "n_models_engaging",
+)
+
+
+def test_unplaced_units_assert_no_geometric_relation():
+    """Aucune feature géométrique n'est vraie pour une entité pas encore mise en place.
+
+    Mesuré avant correctif, pendant le déploiement : l'escouade active portait `engaged = 1`,
+    `n_in_enemy_ez = 6` et `n_fight_eligible = 6` — elle se croyait au contact de l'ennemi alors
+    qu'elle n'était pas sur la table — et `los_can_see = 1` sur les 6 slots ennemis, y compris
+    les 3 pas encore posés. Cause : toutes les unités non posées partagent la sentinelle
+    (-1,-1), donc leurs empreintes se recouvrent et la primitive d'engagement les déclarait
+    mutuellement engagées.
+    """
+    import engine.observation_entities as oe
+    from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
+
+    eng = _load()
+    gs = eng.game_state
+    dec = eng.action_decoder
+
+    checked = steps = 0
+    while gs.get("phase") == "deployment" and steps < 1000:
+        mask, eligible = dec.get_squad_action_mask_and_eligible_units(gs)
+        uid = str(eligible[0]["id"])
+        active_player = int(gs["units_cache"][uid]["player"])
+        obs = eng.obs_builder.build_squad_observation(gs, uid)
+
+        rows = [("allies", 0, uid)]
+        others = sorted(
+            (s for s, e in gs["units_cache"].items()
+             if int(e["player"]) == active_player and s != uid),
+            key=str,
+        )
+        rows += [("allies", i + 1, s) for i, s in enumerate(others[:7])]
+        rows += [
+            ("enemies", i, str(s))
+            for i, s in enumerate(get_enemy_slot_mapping(gs, active_player)[:20])
+            if s is not None and str(s) in gs["units_cache"]
+        ]
+
+        for prefix, slot, sid in rows:
+            unit = next(u for u in gs["units"] if str(u["id"]) == sid)
+            if unit["deployed_on_turn"] is not None:
+                continue
+            for f in GEOMETRIC_BIN_FIELDS:
+                v = float(obs[f"{prefix}_bin"][slot][oe.unit_bin_index(f)])
+                assert v == 0.0, (
+                    f"step {steps} : {sid} n'est pas sur le champ de bataille mais affirme "
+                    f"{f} = {v} (règle 03.04)"
+                )
+            for f in GEOMETRIC_CONT_FIELDS:
+                v = float(obs[f"{prefix}_cont"][slot][oe.unit_cont_index(f)])
+                assert v == 0.0, (
+                    f"step {steps} : {sid} n'est pas sur le champ de bataille mais affirme "
+                    f"{f} = {v} (règle 03.04)"
+                )
+            checked += 1
+
+        eng.step(_first_deploy_action(mask))
+        steps += 1
+
+    assert checked >= 10, f"trop peu d'entités non posées vérifiées ({checked})"
+
+
+def test_unplaced_unit_is_not_engaged_by_an_enemy_standing_near_the_sentinel():
+    """Le cas que la sentinelle rend atteignable : un ennemi POSÉ près de l'origine du plateau.
+
+    Vérifié sur ce scénario : la zone de déploiement du joueur 2 contient `(0,0)` — 81 de ses
+    hexes sont à ≤ 8 de l'origine — et l'engagement range vaut **10 subhex**. Une unité posée là
+    est donc à portée d'engagement de la sentinelle `(-1,-1)`, et une unité pas encore mise en
+    place s'y déclarerait « engagée » alors qu'elle n'est pas sur la table (03.04).
+
+    Ce test existe parce qu'une contre-épreuve par mutation l'a exigé : retirer le filtre
+    `on_battlefield` sur les escouades amies laissait la suite VERTE, l'heuristique de
+    déploiement ne posant jamais d'unité assez près du coin. Un filtre non couvert n'est pas
+    un filtre prouvé.
+    """
+    import engine.observation_entities as oe
+    from engine.combat_utils import set_unit_coordinates
+    from engine.phase_handlers.shared_utils import build_units_cache
+
+    eng = _load()
+    gs = eng.game_state
+    dec = eng.action_decoder
+
+    # Déroule jusqu'à ce qu'un ennemi soit posé ET que l'active ne le soit pas encore.
+    steps = 0
+    while gs.get("phase") == "deployment" and steps < 1000:
+        mask, eligible = dec.get_squad_action_mask_and_eligible_units(gs)
+        uid = str(eligible[0]["id"])
+        active_player = int(gs["units_cache"][uid]["player"])
+        enemies_placed = [
+            s for s, e in gs["units_cache"].items()
+            if int(e["player"]) != active_player and int(e["col"]) >= 0
+        ]
+        if enemies_placed:
+            break
+        eng.step(_first_deploy_action(mask))
+        steps += 1
+    assert enemies_placed, "aucun ennemi posé pendant le déploiement — cas non construit"
+
+    # Amène cet ennemi au contact de la sentinelle, par la voie du moteur : écrire la position
+    # puis RECONSTRUIRE les caches, comme le fait `W40KEngine` au chargement. Un simple
+    # `update_units_cache_position` laisserait `occupied_hexes_by_model` périmé, et le pruning
+    # d'engagement — qui lit précisément cette clé — éliminerait la victime : le test serait vert
+    # sans jamais construire le cas (constaté en écrivant ce test).
+    victim = sorted(enemies_placed, key=str)[0]
+    victim_unit = next(u for u in gs["units"] if str(u["id"]) == victim)
+    # Le delta se prend sur `unit["models"]` (que `build_units_cache` compare à l'ancre), pas sur
+    # `models_cache` : les deux ne portent pas les mêmes coordonnées hors d'un rebuild.
+    d_col = 0 - int(victim_unit["models"][0]["col"])
+    d_row = 0 - int(victim_unit["models"][0]["row"])
+    for m in victim_unit["models"]:
+        m["col"] = int(m["col"]) + d_col
+        m["row"] = int(m["row"]) + d_row
+    set_unit_coordinates(victim_unit, 0, 0)
+    build_units_cache(gs)
+    assert int(gs["units_cache"][victim]["col"]) == 0
+    # Le cas doit être RÉEL : la primitive moteur doit bien voir un engagement sentinelle↔(0,0).
+    from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
+
+    assert unit_entries_within_engagement_zone(
+        gs["units_cache"][uid], gs["units_cache"][victim], get_engagement_zone(gs), metric="hex"
+    ), "montage invalide : la primitive ne voit pas d'engagement, le test ne prouverait rien"
+
+    obs = eng.obs_builder.build_squad_observation(gs, uid)
+    assert float(obs["allies_bin"][0][oe.unit_bin_index("engaged")]) == 0.0, (
+        f"l'escouade {uid}, pas encore mise en place, se déclare engagée avec {victim} posé "
+        f"en (0,0) — la sentinelle (-1,-1) est à portée d'engagement (03.04)"
+    )
+    assert float(obs["allies_cont"][0][oe.unit_cont_index("n_in_enemy_ez")]) == 0.0, (
+        "ses figurines se déclarent dans la zone d'engagement ennemie sans être sur la table"
+    )
+
+
+def test_deployed_units_still_report_engagement_after_deployment():
+    """Non-régression : le filtre 03.04 ne doit rien retirer aux unités RÉELLEMENT sur la table.
+
+    Sans ce verrou, neutraliser l'engagement des unités non posées pourrait passer inaperçu s'il
+    neutralisait aussi tout le reste — le test précédent resterait vert sur une obs morte.
+    """
+    import engine.observation_entities as oe
+    from engine.spatial_relations import (
+        get_engagement_zone,
+        unit_entries_within_engagement_zone,
+    )
+
+    eng = _load()
+    gs = eng.game_state
+    dec = eng.action_decoder
+    steps = 0
+    while gs.get("phase") == "deployment" and steps < 1000:
+        mask, _ = dec.get_squad_action_mask_and_eligible_units(gs)
+        eng.step(_first_deploy_action(mask))
+        steps += 1
+
+    # Toutes les unités sont posées : le calcul d'engagement de l'obs doit être celui de la
+    # primitive moteur, escouade par escouade.
+    ez = get_engagement_zone(gs)
+    uc = gs["units_cache"]
+    uid = next(iter(uc))
+    active_player = int(uc[uid]["player"])
+    obs = eng.obs_builder.build_squad_observation(gs, uid)
+    expected = any(
+        unit_entries_within_engagement_zone(uc[uid], e, ez, metric="hex")
+        for sid, e in uc.items()
+        if int(e["player"]) != active_player
+    )
+    got = bool(obs["allies_bin"][0][oe.unit_bin_index("engaged")])
+    assert got == expected, (
+        f"escouade posée {uid} : l'obs dit engaged={got}, la primitive moteur dit {expected}"
     )
 
 

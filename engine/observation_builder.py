@@ -977,11 +977,18 @@ class ObservationBuilder:
             # donc correct même quand un ennemi bouge pendant mon tour (`reactive_move`). La
             # fiabilité de ce cache a été VÉRIFIÉE par mesure, pas déduite : 23 398 paires
             # comparées au calcul non caché sur 400 steps, 0 divergence.
-            from engine.phase_handlers.shooting_handlers import compute_unit_los
+            # §0.40 point 5 : une ligne de vue se trace entre figurines SUR le champ de bataille
+            # (06.01). Si l'observatrice ou la cible n'y est pas encore, il n'y a pas de vue à
+            # calculer — mesuré pendant le déploiement : `los_can_see = 1` sur les 6 slots
+            # ennemis, y compris les 3 pas encore posés (tous à la sentinelle, donc « visibles »
+            # depuis elle). Les deux bits restent à 0 et `deploy_not_on_board` porte la raison ;
+            # c'est aussi 28 appels LoS fantômes économisés par step de déploiement.
+            if not ctx["active_not_deployed"] and entity_deployed:
+                from engine.phase_handlers.shooting_handlers import compute_unit_los
 
-            los = compute_unit_los(game_state, ctx["active_unit"], unit)
-            _b("los_can_see", bool(los["can_see"]))
-            _b("cover_vs_observer", bool(los["cover"]))
+                los = compute_unit_los(game_state, ctx["active_unit"], unit)
+                _b("los_can_see", bool(los["can_see"]))
+                _b("cover_vs_observer", bool(los["cover"]))
 
             # Combien de MES figurines peuvent frapper CETTE cible (04.02) — support du choix de
             # cible de mêlée (V11 §9 P3-1, cf. le commentaire de `n_models_engaging`).
@@ -994,7 +1001,15 @@ class ObservationBuilder:
             # Garde par le pool 12.05 : hors pool, aucune figurine ne peut atteindre la cible
             # (le pool teste l'empreinte de l'escouade, qui contient celle de chaque figurine),
             # donc 0 sans boucler. Le coût par-figurine n'est payé qu'au contact réel.
-            if squad_id in ctx["fight_target_pool"]:
+            # §0.40 point 5 : même clause 03.04 que l'engagement — une figurine ne peut « pouvoir
+            # frapper » une cible que si les deux sont sur le champ de bataille. Sans ce garde,
+            # `n_models_engaging` annonçait 6 figurines au contact d'un ennemi pas encore posé
+            # (les deux empreintes se recouvrant sur la sentinelle).
+            if (
+                squad_id in ctx["fight_target_pool"]
+                and not ctx["active_not_deployed"]
+                and entity_deployed
+            ):
                 from engine.phase_handlers.fight_handlers import model_entry_can_fight_target
 
                 # Les empreintes synthétiques par figurine sont DÉJÀ construites plus haut
@@ -1180,8 +1195,31 @@ class ObservationBuilder:
         # on élimine d'abord les escouades trop loin pour POUVOIR engager, avec la même borne
         # conservatrice que le pruning du move (sur-approximation stricte -> résultat
         # identique). metric="hex" ÉPINGLÉ : feature d'observation IA (V11 §10).
+        #
+        # §0.40 point 5 — RÈGLE 03.04 : « A model's engagement range is the area OF THE
+        # BATTLEFIELD within 2" horizontally and 5" vertically of it » (03 Moving.pdf). Une unité
+        # pas encore mise en place n'est PAS sur le champ de bataille : elle n'a pas d'engagement
+        # range et n'entre dans celle de personne. Or toutes les unités non posées partagent la
+        # sentinelle (-1,-1), donc les empreintes se recouvrent et la primitive les déclarait
+        # mutuellement engagées — mesuré pendant le déploiement : `engaged = 1`,
+        # `n_in_enemy_ez = 6`, `n_fight_eligible = 6` sur une escouade qui n'est pas sur la table.
+        # La primitive moteur n'est pas en cause : on lui donnait des empreintes fantômes. Le
+        # filtre est donc ici, à l'appelant, en UN point — l'active exclue de `friendly_sids`
+        # rend `active_relevant_enemies` vide, donc `in_enemy_ez` et `relayed_by_mid` tombent
+        # avec, sans garde supplémentaire.
+        on_battlefield: Dict[str, bool] = {}
+        for sid in units_cache:
+            sid_unit = get_unit_by_id(str(sid), game_state)
+            if sid_unit is None:
+                raise KeyError(f"Unit {sid} missing from game_state['units'] for observation")
+            on_battlefield[str(sid)] = require_key(sid_unit, "deployed_on_turn") is not None
+
         friendly_sids = sorted(
-            (sid for sid, e in units_cache.items() if int(e["player"]) == active_player),
+            (
+                sid
+                for sid, e in units_cache.items()
+                if int(e["player"]) == active_player and on_battlefield[str(sid)]
+            ),
             key=str,
         )
         engaged_squads: set = set()
@@ -1191,9 +1229,13 @@ class ObservationBuilder:
         sid_by_entry_id: Dict[int, str] = {id(e): sid for sid, e in units_cache.items()}
         for fsid in friendly_sids:
             f_entry = units_cache[fsid]
-            relevant = self._engagement_relevant_entries(
-                game_state, f_entry, ez_zone, enemy_of_player=active_player
-            )
+            relevant = [
+                e_entry
+                for e_entry in self._engagement_relevant_entries(
+                    game_state, f_entry, ez_zone, enemy_of_player=active_player
+                )
+                if on_battlefield.get(str(sid_by_entry_id.get(id(e_entry))), False)
+            ]
             if fsid == active_squad_id:
                 active_relevant_enemies = relevant
             for e_entry in relevant:
@@ -1223,10 +1265,15 @@ class ObservationBuilder:
             active_alive_mids_raw, models_cache, squad_defence
         )
         fighting_set: set = set()
-        try:
-            fighting_set = set(get_fighting_models(game_state, active_squad_id))
-        except Exception:
-            fighting_set = set()
+        # §0.40 point 5 : escouade pas encore mise en place — aucune de ses figurines ne peut
+        # combattre (12.04 s'applique aux figurines sur le champ de bataille, cf. 03.04). Sans ce
+        # garde, `get_fighting_models` rendait les 6 figurines « éligibles au combat » parce que
+        # toutes les unités non posées se recouvrent sur la sentinelle.
+        if on_battlefield[str(active_squad_id)]:
+            try:
+                fighting_set = set(get_fighting_models(game_state, active_squad_id))
+            except Exception:
+                fighting_set = set()
         synth_by_mid: Dict[str, Dict[str, Any]] = {}
         in_enemy_ez: Dict[str, bool] = {}
         for mid in alive_mids:

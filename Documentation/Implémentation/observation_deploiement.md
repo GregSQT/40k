@@ -1,4 +1,4 @@
-# Observation de la phase de déploiement — points 1, 2 et 4 corrigés, point 3 ouvert
+# Observation de la phase de déploiement — points 1, 2, 4 et 5 corrigés, point 3 ouvert
 
 > **Origine** : extrait de [`V11_audit_observation.md`](../Implémenté/V11_audit_observation.md) §11
 > (archivé le 2026-07-28). C'était le seul point **actionnable** restant de cet audit ; il est
@@ -7,7 +7,9 @@
 > reformulé ci-dessous.
 > **Points 1 et 2 corrigés le 2026-07-28** (commits `0e0551e8` et `2893bbcb`), **point 4 corrigé le
 > 2026-07-29** — il a été découvert en vérifiant le correctif du point 2 : le vecteur d'observation
-> mesurait lui aussi depuis la sentinelle hors plateau. **Le point 3 est le seul reste.**
+> mesurait lui aussi depuis la sentinelle hors plateau. **Point 5 corrigé le 2026-07-29** — trouvé
+> en re-vérifiant le point 4 : une unité pas encore mise en place se déclarait **engagée au
+> contact** (règle 03.04). **Le point 3 est le seul reste.**
 
 ## Contexte
 
@@ -178,6 +180,56 @@ mesurée depuis l'ancre pour les entités posées, **exactement 0** pour les non
 `self_models_cont` nul avant la pose ; et non-régression : une fois le déploiement fini, l'origine
 est de nouveau le centroïde.
 
+### 5. ✅ CORRIGÉ (2026-07-29) — une unité pas encore mise en place n'est pas sur le champ de bataille
+
+**Le défaut** (trouvé en re-vérifiant le correctif du point 4, qui ne le couvrait pas). Le point 4
+a réparé les grandeurs mesurées **depuis** l'escouade ; restaient celles qui affirment une
+**relation** à l'ennemi. Mesuré pendant le déploiement, sur l'escouade active pas encore posée :
+
+| Feature | Valeur observée | Ce que ça affirme |
+|---|---|---|
+| `engaged` | **1** | elle est au contact de l'ennemi |
+| `n_in_enemy_ez` | **6** | ses 6 figurines sont dans la zone d'engagement ennemie |
+| `n_fight_eligible` | **6** | ses 6 figurines peuvent combattre |
+| `n_models_engaging` | **6** | ses 6 figurines peuvent frapper telle cible |
+| `los_can_see` | **1** sur les 6 slots ennemis | elle voit tout le monde — y compris les 3 ennemis pas encore posés |
+
+**La cause** : toutes les unités non posées partagent la sentinelle `(-1,-1)`, donc leurs
+empreintes se recouvrent et la primitive d'engagement les déclare mutuellement engagées. La
+primitive moteur n'est pas en cause : on lui donnait des empreintes fantômes.
+
+**La règle** — [`03 Moving.pdf`](../40k_rules/03%20Moving.pdf), 03.04 : « A model's engagement
+range is **the area of the battlefield** within 2" horizontally and 5" vertically of it ». Une
+unité pas encore mise en place n'est pas sur le champ de bataille : elle n'a pas d'engagement
+range et n'entre dans celle de personne. Ce n'est donc pas un défaut d'observation « esthétique »,
+c'est une affirmation **contraire à la règle**.
+
+**Ce que le code fait maintenant** : le filtre est chez l'**appelant**, en un point — un
+dictionnaire `on_battlefield` construit une fois par observation (coût mesuré : **1,9 µs**, 0,08 %
+du temps d'une observation). Les escouades non posées sortent du calcul d'engagement, des deux
+côtés ; l'active exclue rend `active_relevant_enemies` vide, donc `n_in_enemy_ez` et
+`n_relayed_ez` tombent avec, sans garde supplémentaire. Trois gardes explicites complètent :
+`get_fighting_models` n'est pas appelé pour une escouade hors table, `n_models_engaging` exige que
+les deux escouades y soient, et la LoS non plus n'est pas calculée (06.01 trace une vue entre
+figurines **sur** le champ de bataille) — ce qui économise au passage 28 appels LoS fantômes par
+step de déploiement.
+
+**`coherent` n'est PAS neutralisé**, et c'est délibéré : 03.03 conditionne le test de cohérence à
+« **if that unit is on the battlefield**, it is in coherency » — la règle ne déclare pas
+incohérente une unité hors table, elle ne lui applique pas le test. Et `0` signifierait « escouade
+éparpillée », une pathologie : un mensonge pire que le silence. La neutralisation à zéro n'est la
+bonne réponse que pour les features dont `0` veut dire « rien à affirmer ».
+
+**Verrous** : un **test-inventaire** énumère les features géométriques (`engaged`, `los_can_see`,
+`cover_vs_observer`, `charge_reachable_max_roll`, `col_rel`, `row_rel`, `edge_distance`,
+`n_fight_eligible`, `n_in_enemy_ez`, `n_relayed_ez`, `n_models_engaging`) et exige qu'elles soient
+toutes nulles pour **toute** entité non posée, à chaque step du déploiement — c'est lui qui a
+trouvé `n_models_engaging`, oublié à la première passe. Deux tests l'encadrent : un ennemi posé
+en `(0,0)` — la zone du joueur 2 contient cet hex et l'engagement range vaut 10 subhex, donc le
+cas est atteignable — ne doit PAS engager une unité restée à la sentinelle ; et après déploiement,
+l'engagement lu par l'obs doit de nouveau égaler celui de la primitive moteur, pour qu'une
+neutralisation trop large ne puisse pas passer inaperçue.
+
 ## Périmètre / séquencement
 
 - Les points **1** et **2** sont **corrigés** (2026-07-28) : ils ne changent **pas** `obs_size`
@@ -186,7 +238,7 @@ est de nouveau le centroïde.
   sur une obs fausse à cet endroit, la comparaison de win-rate déploiement avant/après n'a pas de
   sens.
 - Le point **3** est le seul reste : extension de contrat d'observation (change `obs_size` →
-  retrain `--new`). Les points 1, 2 et 4 sont livrés et ne changent PAS `obs_size`.
+  retrain `--new`). Les points 1, 2, 4 et 5 sont livrés et ne changent PAS `obs_size`.
 - Traité **séparément** de la refonte du vecteur de jeu (livrée, cf.
   [`V11_entity_encoder_pointer.md`](../V11_entity_encoder_pointer.md) et
   [`AI_OBSERVATION.md`](../../AI_OBSERVATION.md)).
