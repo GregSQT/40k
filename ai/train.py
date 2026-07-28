@@ -989,6 +989,66 @@ def build_agent_model_path(models_root: str, agent_key: str) -> str:
     model_storage_key = config_loader._resolve_agent_config_key(agent_key)
     return os.path.join(models_root, model_storage_key, f"model_{model_storage_key}.zip")
 import time  # Add time import for StepLogger timestamps
+
+#: Artefacts CANONIQUES d'un run : ceux qui portent un nom FIXE et qu'un run suivant ecraserait
+#: (ou lirait comme une reference). Les sauvegardes horodatees et les modeles nommes avec leur
+#: score (`<agent>_<seed>_robust_<score>.zip`) n'en font PAS partie : leur nom est unique, ils
+#: sont l'historique et doivent rester en place.
+def canonical_run_artifacts(model_path: str) -> list:
+    """Chemins des artefacts a nom FIXE d'un run, pour `model_path` = le modele canonique."""
+    model_dir = os.path.dirname(model_path)
+    stem = os.path.splitext(os.path.basename(model_path))[0]
+    from ai.vec_normalize_utils import get_vec_normalize_path
+
+    return [
+        model_path,                                              # model_<agent>.zip
+        get_vec_normalize_path(model_path),                      # ..._vec_normalize.pkl
+        os.path.join(model_dir, f"{stem}_robust_meta.json"),     # seuil du score robuste
+        os.path.join(model_dir, "best_model.zip"),               # meilleur modele SB3 du run
+    ]
+
+
+def archive_canonical_artifacts_for_new_run(model_path: str, log_fn=print) -> list:
+    """`--new` : ECARTE les artefacts canoniques du run precedent au lieu de les ecraser.
+
+    Deux raisons distinctes, toutes deux constatees en production (V11 §0.36) :
+
+    1. `model_<agent>_robust_meta.json` est lu par `BotEvaluationCallback` comme un SEUIL
+       (`_read_canonical_robust_score` : le modele canonique n'est mis a jour que si le nouveau
+       score robuste le depasse). Laisse en place, il impose au run NEUF de battre le score d'un
+       run precedent — mesure sur un autre modele, parfois sur un run avorte. Constate : un run
+       relance a du battre `0.457372` herite d'un run mort au marqueur 24 000.
+    2. `model_<agent>.zip` et `best_model.zip` sont ECRASES en silence par le run neuf. L'agent
+       precedent disparait sans trace, alors que c'est le seul artefact servi au PvE.
+
+    Renommage horodate `<stem>_<AAAAMMJJ-HHMM><ext>`, jamais une suppression : c'est l'agent de
+    l'utilisateur. Idempotent — un artefact absent n'est pas une erreur, et un second appel dans
+    le meme run ne fait rien (les fichiers ont deja ete deplaces).
+
+    ⚠️ Cette fonction RENOMME des `.zip` de `ai/models/`, ce que le projet interdit par defaut.
+    C'est une exception DEMANDEE explicitement par l'utilisateur (2026-07-28), et elle ne
+    supprime rien : elle empeche precisement l'ecrasement silencieux que la regle protege.
+    """
+    stamp = time.strftime("%Y%m%d-%H%M")
+    moved = []
+    for path in canonical_run_artifacts(model_path):
+        if not os.path.exists(path):
+            continue
+        stem, ext = os.path.splitext(path)
+        archived = f"{stem}_{stamp}{ext}"
+        if os.path.exists(archived):
+            raise FileExistsError(
+                f"archive_canonical_artifacts_for_new_run: {archived} existe deja — "
+                f"deux runs --new dans la meme minute, l'archivage ecraserait une sauvegarde."
+            )
+        os.rename(path, archived)
+        moved.append(archived)
+    if moved:
+        log_fn(f"📦 --new : {len(moved)} artefact(s) du run precedent archive(s) :")
+        for path in moved:
+            log_fn(f"   {os.path.basename(path)}")
+    return moved
+
 from tqdm import tqdm  # For episode progress bar
 import gymnasium as gym  # For SelfPlayWrapper to inherit from gym.Wrapper
 
@@ -1596,6 +1656,8 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     if controlled_agent_key:
         model_path = build_agent_model_path(models_root, controlled_agent_key)
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        if new_model:
+            archive_canonical_artifacts_for_new_run(model_path)
         print(f"📝 Using agent-specific model path: {model_path}")
     else:
         raise ValueError("controlled_agent_key is required to build model path")
@@ -1902,6 +1964,8 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     models_root = config.get_models_root()
     model_path = build_agent_model_path(models_root, require_present(agent_key, "agent_key"))
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    if new_model:
+        archive_canonical_artifacts_for_new_run(model_path)
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     
@@ -2465,7 +2529,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     # Get model path
     models_root = config.get_models_root()
     model_path = build_agent_model_path(models_root, agent_key)
-    
+    if new_model:
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        archive_canonical_artifacts_for_new_run(model_path, chunk_log)
+
     # Create initial model with first scenario (or load if append_training)
     chunk_log(f"📦 {'Loading existing model' if append_training else 'Creating initial model'} with first scenario...")
     
