@@ -7,10 +7,13 @@
 ## Problèmes transverses (prioritaires)
 
 1. **Feel No Pain absent partout** — 0 occurrence dans `engine/` (concerne tir ET combat).
-2. **Règles spéciales d'armes sans effet en partie réelle** — HEAVY, RAPID FIRE, TORRENT,
-   DEVASTATING_WOUNDS, LETHAL/SUSTAINED HITS, HAZARDOUS : soit absentes, soit confinées à la
-   fonction de test `_attack_sequence_rng` (`shooting_handlers.py:5935`, jamais appelée en prod).
-   Le chemin production `resolve_squad_shoot` → `_roll_squad_shot_sequence` ne les applique pas.
+2. ~~**Règles spéciales d'armes sans effet en partie réelle**~~ — **RÉSOLU** (V11 P1, puis
+   §0.38 le 2026-07-28). HEAVY, RAPID FIRE, TORRENT, DEVASTATING WOUNDS, LETHAL/SUSTAINED
+   HITS, TWIN-LINKED, ANTI-X, HAZARDOUS, MELTA, BLAST vivent dans le socle commun
+   `engine/phase_handlers/attack_sequence.py`, consommé par les deux rollers du chemin vif
+   (`shared_utils._manual_roll_intent` au tir, `fight_handlers._manual_roll_fight_intent` en
+   mêlée). La fonction de test `_attack_sequence_rng` qui les hébergeait a été supprimée, et
+   ses 6 fichiers de tests re-pointés sur le chemin vif.
 3. **Groupes d'allocation (05.03) simplifiés** — seuils to-wound/save figés sur la 1re figurine
    (`shared_utils.py:5616`) ; chemin auto fight = pool de PV unique. Unités hétérogènes /
    personnage attaché mal résolus. Correct uniquement sur le chemin PvP manuel.

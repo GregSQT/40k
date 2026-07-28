@@ -72,8 +72,8 @@ mesurés sur la suite entière.
 | `test_shooting_activation_pool.py` | 7 | `shooting_build_activation_pool` — filtres player/HP_CUR/no-targets |
 | `test_shoot_resolution.py` | 4 | `_has_valid_shooting_targets` — adjacence, pistol, fuite |
 | `test_shoot_execution.py` | 16 | HP partiel/létal/limites, cascade mort pools, `active_shooting_unit`, `is_unit_alive` |
-| `test_shoot_attack_sequence.py` | 7 | `_attack_sequence_rng` — to_hit, to_wound, save, dégâts, AP, dés fixés |
-| `test_fight_special_rules.py` | 22 | `DEVASTATING_WOUNDS` (wound=6 skip save), `HAZARDOUS` (roll=1 self-dmg), combinaisons |
+| `test_shoot_attack_sequence.py` | 12 | Séquence de tir BOUT-EN-BOUT sur le chemin vif (`build_manual_shoot_allocation`) — les 4 issues, AP, invulnérable, 05.01/05.02/05.04, jusqu'aux PV retirés |
+| `test_fight_special_rules.py` | 6 | `[HAZARDOUS]` 24.15 en MÊLÉE (`build_manual_fight_allocation`) — clause « or selected to fight », 1 jet par arme, 06.03 (1-2 → 1 MW, 3 si tout MONSTER/VEHICLE) |
 | `test_fight_activation_pools.py` | 9 | `fight_build_activation_pools` — pools charging/alternating, `units_fought` |
 | `test_fight_resolution.py` | 5 | `_fight_build_valid_target_pool` — EZ, mort, allié, multi-cibles |
 | `test_fight_execution.py` | 20 | HP management, cascade mort fight, `resolve_dice_value` (couches 5-7) |
@@ -97,12 +97,12 @@ mesurés sur la suite entière.
 | `tests/unit/engine/test_cascade_fight_subphases.py` | 9 | Cascade charge→fight : fight vide, unités adjacentes, sous-phases charging/alternating, player switch, pools nettoyés |
 | `tests/unit/engine/test_engine_init.py` | 9 | `W40KEngine.__init__` : échecs sans controlled_agent / rewards_config / board / objectives ; succès config minimale |
 | `tests/unit/engine/test_engine_reset.py` | 18 | `W40KEngine.reset()` : turn=1, game_over=False, tracking sets vidés, HP/positions restaurés, units_cache reconstruit, episode_number incrémenté |
-| `tests/unit/engine/test_special_rules_e2e.py` | 31 | Règles spéciales tir : DEVASTATING_WOUNDS (crit wound skip save), HAZARDOUS (roll=1 déclenché), HEAVY (stationnaire +1), combinaisons et structure résultat |
+| `tests/unit/engine/test_special_rules_e2e.py` | 8 | Règles spéciales de tir en INTERACTION, bout-en-bout sur le vif : DEVASTATING × HAZARDOUS, HEAVY × DEVASTATING, arme nue |
 | `tests/unit/services/test_api_integration.py` | 14 | API Flask flux réel (engine semi-réel, sans mock execute_semantic_action ni _game_state_for_json) : sérialisation JSON, champs requis, no set leak |
 | `tests/unit/engine/test_engine_step.py` | 13 | `W40KEngine.step()` : signature tuple×5, types obs/reward/terminated/truncated/info, turn_limit→terminated, pool vide→phase auto-advance |
 | `tests/unit/engine/test_game_state_contract.py` | 28 | Contrat game_state produit par `__init__` réel : clés scalaires, tracking sets, pools, structures complexes (units_cache après reset) |
 | `tests/unit/engine/test_objective_scoring.py` | 11 | `apply_primary_objective_scoring` : guard clauses, VP par condition (control_at_least_one/two, control_more_than_opponent), cap max_points, round5 phase spéciale, liste multi-objectifs |
-| `tests/unit/engine/test_unit_rules_shoot.py` | 8 | UNIT_RULES dynamiques : `reroll_1_towound`, `reroll_towound_target_on_objective`, `closest_target_penetration` |
+| `tests/unit/engine/test_unit_rules_shoot.py` | 7 | UNIT_RULES × WEAPON_RULES sur le même dé (01 Core « Re-rolls ») : abilité + [TWIN-LINKED] ne relancent jamais deux fois ; portée des abilités `to wound` |
 | `tests/unit/engine/test_activation_e2e.py` | 9 | Activation e2e via `execute_semantic_action` : routing pool, skip, game_over, tir→HP réduit, mort→units_cache cleanup, pool cleanup, units_shot, all_attack_results |
 
 #### Couverture par couche
@@ -117,7 +117,7 @@ mesurés sur la suite entière.
 | 5 — Exécution action | move, fight, shoot (primitives), socles non ronds | ✅ OK |
 | 6 — Résolution dés | `resolve_dice_value` + expected_value | ✅ OK |
 | 7 — Transitions / cascade mort | retrait pools, enemy_adjacent_hexes | ✅ OK |
-| 8 — Séquences d'attaque end-to-end | `_execute_fight_attack_sequence`, `_attack_sequence_rng` | ✅ OK |
+| 8 — Séquences d'attaque end-to-end | `_execute_fight_attack_sequence`, `attack_sequence.roll_attack_pool` (socle tir+mêlée) | ✅ OK |
 | 8b — Règles spéciales | DEVASTATING_WOUNDS, HAZARDOUS | ✅ OK |
 | 9 — Initialisation de phase | `movement/shooting/fight/charge_phase_start` | ✅ OK |
 | 10 — IA / Observations | `RewardCalculator`, `ActionDecoder`, `ObservationBuilder` | ✅ OK |

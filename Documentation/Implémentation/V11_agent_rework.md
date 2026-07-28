@@ -56,7 +56,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 
 **Épuration du 2026-07-28** : les entrées **§0.22, §0.27, §0.28, §0.31, §0.32, §0.34, §0.35, §0.36,
 §0.37** ont été descendues en **§0hist** (intégrales, ancres inchangées) — elles étaient closes mais
-occupaient encore la section « ouvert ». Ne restent ici que les **six** chantiers réellement
+occupaient encore la section « ouvert ». Ne restent ici que les **cinq** chantiers réellement
 actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist avec les autres ;
 §0.40 ajoutée le 2026-07-28, contenu externalisé dès l'ouverture).
 
@@ -64,7 +64,6 @@ actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist
 |---|---|---|---|---|
 | **§0.14** | Re-mesure du run — win-rate par matchup | 🔴 **RUN 3 ARRÊTÉ** par l'utilisateur (2026-07-28, fin de nuit) pour livrer §0.40 (points 1, 2, 4 puis 5) — il avait été lancé ~23 h 20 depuis `main` (P3-2 inclus : `obs_size` **20768**, action space **1107**, rampe de déploiement **0.0 → 0.8**) | **1** | **RUN 4 à lancer** depuis la tête de `main` (§0.40 points 1, 2, 4 et 5 inclus — vérifier `git log` plutôt que de se fier à un hash écrit ici). `obs_size` **inchangé** (20768), donc aucun contrat d'archi cassé — mais le run 3 a entraîné le déploiement sur l'observation fausse, ses mesures de déploiement ne valent rien. ⛔ **Dès qu'un run tourne, WORKING TREE GELÉ** : aucun commit de code/config, aucun checkout, aucune édition — les doc `.md` sont sûres (jamais ré-importées). Historique : 🔴 **RUN 1 mort à 20 h 20** (§0.41+§0.42 mergés pendant lui, `obs_size` changé). 🔴 **RUN 2 mort à ~21 h 45** à la 1ʳᵉ éval (600 épisodes `error` en 7,1 s) : le `git checkout` de 21 h 39 a réécrit le code sur le disque, les workers d'éval `spawn` ont reconstruit l'architecture P3-2 (`action_net [17,320]` + `charge_query_net`) pour charger un snapshot P2 (`[18,320]`, sans) → `load_state_dict` lève → `BrokenProcessPool`. Diagnostic reproduit, leçon durcie en §0bis. Points d'observation : la 1ʳᵉ éval (marqueur 2000) doit **se terminer** (§0.27) ; aucun modèle ne peut être sauvé avant 10 000 (`save_best_min_episodes`) ; le livrable est le win-rate par matchup de l'éval finale. Checkpoints 720 k et 80 k : contrats périmés, inutilisables. |
 | **[§9](V11_phaseA.md#s9)** | Phase A' — **P2 + P3 points 0/1/2 livrés**, **P3 tranches 3→8** (décisions restantes) | 🟢 **P2 + P3-0 + P3-1 + P3-2 TOUS MERGÉS sur `main`** (fast-forward du 2026-07-28 23 h ; `main` = `acd63b66`) | **2** | **P3-1 (cible de mêlée)** → §0.41 : une décision dont les candidats sont des ENTITÉS déjà observées se paramètre en **dimension d'action + tête pointeur**, pas en `CHOICE_k`. **P2 (mécanisme générique) + P3-0 (rule-choice)** → §0.42 : `CHOICE_0..5` pour les candidats qui ne sont **pas** des entités observées ; `raw_action_int % len(options)` n'existe plus. **P3-2 (cible de charge)** → §0.43 : patron P3-1, `TOTAL_ACTION_SIZE` **1107**, `obs_size` **20768**. Reste **P3-3→8** (unité à activer, allocation des pertes, pile-in/conso, move-after-shooting, FLY, optionnels), **P4**, **P5**. ⚠️ Aucune de ces 4 livraisons n'est MESURÉE : le run 3 est le premier à les entraîner. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). ⛔ Toute tranche suivante se livre dans un **`git worktree` séparé** tant que le run tourne. |
-| **§0.38** | Code mort `_attack_sequence_rng` non supprimé — 2ᵉ moitié de P1 | 🟠 **OUVERT** (constaté 2026-07-28) | **3** | P1 prévoyait « porter les règles vers le vif **PUIS supprimer le mort** ». Le portage est fait ; la suppression **non**. Détail → §0.38. |
 | **§0.33** | Rollout buffer 46,9 Go pour 39 Go de RAM | 🟠 **CONDITIONNEL** — ne bloque que les profils à 48 envs | **4** (avant tout run 48 envs) | Vérifié 2026-07-28 dans la config : `x1`/`x5_new`/`x5_debug` = **8 envs** (passent) ; `x5_append`/`x1_debug` = **48 envs** (échouent à l'allocation). Ne pas lancer ces deux-là sans rouvrir l'entrée. |
 | **§0.29** | Scénario SM vs Orks fixed/active + scheduler | 🟢 **USAGE CONFIGURÉ** le 2026-07-28 (`active_ratio_end` 0.0 → **0.8**, commit `acd63b66`) — et c'est le réglage CORRECT, cf. l'asymétrie ci-dessous | 5 | Le run 3 joue une part croissante d'épisodes en `active` (0 % au début → 80 % à la fin, `p_active = start + (end−start)·progress`, [w40k_core.py:934](../../engine/w40k_core.py#L934)). 🔴 **ASYMÉTRIE VÉRIFIÉE le 2026-07-28 23 h 30 — la rampe ne s'applique QU'À L'ENTRAÎNEMENT, jamais à l'éval.** `deployment_mode_schedule.training_only: true` + `_is_training_scenario_context()` qui exige `/scenarios/training/` dans le chemin ([w40k_core.py:693](../../engine/w40k_core.py#L693)) ⇒ les scénarios d'éval (`/scenarios/holdout_regular/`, tous en `deployment_type: "active"`) **jouent TOUJOURS une phase de déploiement**, quelle que soit la rampe. **Donc `active_ratio_end: 0.0` créait un décalage entraînement/éval** : agent entraîné 100 % en placement figé, puis noté sur des parties à déployer. La rampe à 0.8 **aligne** les deux — la remettre à 0 dégraderait la mesure. ✅ **Réserve levée les 2026-07-28 / 07-29** : les défauts 1, 2, 4 et 5 de l'observation du déploiement sont corrigés (§0.40, `obs_size` inchangé). Il reste le seul point 3 (les hexes candidats ne sont pas décrits), donc un plafond résiduel mais bien plus bas. ⚠️ Le run 3 lancé le 2026-07-28 à 23 h 20 est ANTÉRIEUR à ces correctifs : il a entraîné le déploiement sur une observation fausse. |
 | **§0.40** | Observation de la phase de déploiement — **points 1, 2, 4 et 5 corrigés**, point 3 ouvert | 🟠 **PARTIELLEMENT OUVERT** — chantier externe | 6 | **Livrés** : point 1 (`0e0551e8`, obs = unité du masque), point 2 (`2893bbcb`, grille ancrée sur la zone), point 4 (le **vecteur** mesurait aussi depuis `(-1,-1)` — l'ordre des distances aux objectifs en était **inversé**), point 5 (une unité pas encore mise en place se déclarait **engagée au contact** — contraire à 03.04). `obs_size` **inchangé** (20768) sur les quatre, donc aucun modèle invalidé. Reste le **point 3** (décrire les 5 hexes-stratégies), qui change `obs_size` → run `--new`. Détail → §0.40. |
@@ -186,38 +185,6 @@ sont pas modélisées), `obs_size` **inchangé**.
 n'est invalidé — mais le CONTENU de l'obs de déploiement change. Un agent entraîné avant ces deux
 commits a appris le déploiement sur une observation fausse : ne pas comparer sa qualité de
 déploiement à celle d'un agent entraîné après.
-
-<a id="s0.38"></a>
-### 0.38 Code mort `_attack_sequence_rng` — la 2ᵉ moitié de P1 n'a jamais été faite — 🟠 OUVERT (2026-07-28)
-
-**Ce qui est FAIT (vérifié le 2026-07-28, corrige la ligne P1 de [§9.0](V11_phaseA.md#s9.0) qui datait du 2026-07-24).**
-Les règles d'armes sont **vives** : le socle commun `engine/phase_handlers/attack_sequence.py` est
-importé par le chemin de tir vif ([shared_utils.py:7363](../../engine/phase_handlers/shared_utils.py#L7363)
-et [:8667](../../engine/phase_handlers/shared_utils.py#L8667)) **et** par le chemin de mêlée vif
-([fight_handlers.py:5227](../../engine/phase_handlers/fight_handlers.py#L5227)). [§9.0](V11_phaseA.md#s9.0) disait
-« règles écrites dans le code mort, absentes du chemin vif » : **ce n'est plus vrai**.
-
-**Ce qui reste OUVERT.** `_attack_sequence_rng`
-([shooting_handlers.py:6109](../../engine/phase_handlers/shooting_handlers.py#L6109)) **existe
-toujours** et n'a **aucun appelant de production** (grep hors `tests/` : 0). Ses seuls appelants sont
-**6 fichiers de tests** — `test_shoot_attack_sequence.py`, `test_unit_rules_shoot.py`,
-`test_special_rules_e2e.py`, `test_fight_special_rules.py`, `test_phase_transitions.py`,
-`test_closest_target_penetration_shoot.py` — qui l'appellent **en direct**.
-
-⚠️ **C'est exactement le motif que ce document existe pour interdire** (§0bis, §0.19, T6-i) : *du code
-testé mais jamais appelé*, doublé de *tests qui passent pour la mauvaise raison*. Ces ~150 assertions
-vertes ne prouvent **rien** sur le comportement du jeu : elles valident une fonction que ni le gym ni
-le PvP n'exécutent. Pire, elles **immunisent** le mort contre toute détection de code inutilisé.
-
-**Livrable attendu** : re-pointer ces 6 fichiers sur le chemin vif (`attack_sequence.py` / le gate de
-tir réel), vérifier que chaque assertion tient toujours — c'est là que se trouve la vraie valeur de la
-manœuvre, un test qui échoue en migrant signale un écart de comportement réel entre mort et vif —
-**puis** supprimer `_attack_sequence_rng` et les états résiduels que [§9.2](V11_phaseA.md#s9.2) liste (`_rapid_fire_*`, log
-`rapid_fire_bonus_shot`, branches « squad path expected »).
-
-**Pourquoi ce n'est pas cosmétique** : tant que le mort vit, toute lecture de `shooting_handlers.py`
-peut confondre les deux implémentations, et la prochaine règle d'arme risque d'être écrite dans la
-mauvaise — c'est précisément ce qui s'est produit et que [§9.0](V11_phaseA.md#s9.0) a découvert le 2026-07-24.
 
 <a id="s0.33"></a>
 ### 0.33 Rollout buffer 46,9 Go pour 39 Go de RAM — 🟠 CONDITIONNEL : bloque les profils à 48 envs, PAS le run à lancer (2026-07-28)
@@ -670,6 +637,29 @@ censé attraper. Si elle ne le fait pas rougir, le test décrit la fixture, pas 
 raisonnement vaut pour une feature d'observation : la justifier exige une **contre-épreuve à
 variable unique** (ici : même `edge_distance`, atteignabilité opposée), sinon rien ne prouve que
 le champ existant ne suffisait pas.
+
+### Migrer un test de code mort vers le vif est un AUDIT de conformité, pas un refactor (§0.38, 2026-07-28)
+
+Les 6 fichiers qui tenaient `_attack_sequence_rng` en vie portaient ~159 assertions vertes. En les
+re-pointant sur le chemin vif, **11 d'entre elles se sont mises à contredire le moteur**. Le
+réflexe naturel — assouplir l'assertion, ou « adapter le test au nouveau chemin » — aurait détruit
+le seul résultat de valeur de la manœuvre : chacune de ces 11 assertions décrivait un comportement
+**contraire au PDF**, que le code mort implémentait et que le vif avait corrigé ([HAZARDOUS] 24.15
+jeté par attaque au lieu d'une fois par arme après toutes les attaques ; [HEAVY] 24.16 avec une
+clause sur trois).
+
+**Règle** : une assertion qui rougit en migrant est un **verdict à instruire**, pas un test à
+réparer. On lit le PDF, on désigne qui a tort, et on écrit la réponse dans la doc comme un constat
+de conformité. Corollaire opérationnel : ne jamais supprimer une assertion « parce qu'elle est
+dupliquée ailleurs » sans avoir vérifié la couverture **assertion par assertion** — c'est ce
+recensement qui a fait apparaître que [HAZARDOUS] en **mêlée** n'était couvert par rien, alors même
+que le fichier censé le couvrir s'appelait `test_fight_special_rules.py` et ne testait que du tir.
+
+**Second corollaire** : un état orphelin ne se juge jamais sur la ressemblance de son nom. Les
+7 champs `_rapid_fire_*` supprimés ici étaient morts, mais [RAPID FIRE] 24.30 est bien VIVE — dans
+un autre module, sous un autre mécanisme. Symétriquement, les branches `squad path expected` que
+§9.2 listait comme résidus sont sur un chemin **vif** : les supprimer aurait dégradé une erreur
+explicite en retour silencieux. Preuve d'appelant exigée dans les deux sens, avant toute suppression.
 
 ### Une garde « de performance » non mesurée est souvent du travail EN DOUBLE (§0.43, 2026-07-28)
 
@@ -1380,6 +1370,131 @@ retirée de `test_hex_utils.py`, 3 cas résiduels dans les 2 fichiers `test_comb
 
 ⚠️ **Ne pas confondre avec le pathfinding VIVANT** : le pool de move (`movement_handlers`, BFS
 géodésique) est un autre code, jamais concerné par cette suppression.
+
+<a id="s0.38"></a>
+### 0.38 Code mort `_attack_sequence_rng` — la 2ᵉ moitié de P1 — ✅ RÉSOLU (2026-07-28)
+
+**Ce qui était en cause.** `_attack_sequence_rng` (`shooting_handlers.py`, 180 lignes) n'avait
+**aucun appelant de production** et n'était tenu en vie que par **6 fichiers de tests** qui
+l'appelaient en direct — ~159 assertions vertes qui ne prouvaient rien sur le jeu et
+**immunisaient** le mort contre toute détection de code inutilisé. Motif §0bis (« du code testé
+mais jamais appelé »), quatrième occurrence après §0.4, T6-i et §0.39.
+
+**Ce qui a été fait, dans l'ordre.** (1) Les 6 fichiers ont été re-pointés sur le chemin vif,
+(2) chaque assertion re-vérifiée, (3) **puis seulement** la fonction supprimée, (4) puis les états
+résiduels. Les 4 commits de la branche `v11-0.38-dead-code` suivent cet ordre.
+
+---
+
+#### Le résultat principal : DEUX écarts de conformité, et c'est le MORT qui avait tort
+
+C'est ce que la migration devait faire apparaître, et elle l'a fait. Aucune assertion n'a été
+assouplie : ces deux-là ont été **retirées parce que la règle leur donne tort**, PDF en main.
+
+**1. [HAZARDOUS] 24.15 + 06.03 — le mort était faux sur quatre points.**
+PDF 24.15 (lu le 2026-07-28) : « Each time a unit is selected to shoot **or selected to fight**,
+**after that unit has resolved all of its attacks**, make a number of hazard rolls (06.03) for that
+unit **equal to the number of [HAZARDOUS] weapons you selected** in the Select Weapons step. »
+PDF 06.03 : « on a **1-2**, that roll fails and that unit suffers **1 mortal wound**, or 3 mortal
+wounds instead if each model in that unit is a MONSTER/VEHICLE model. »
+
+| | code mort | PDF (= chemin vif) |
+|---|---|---|
+| Quand | pendant la séquence, **par attaque** | **après** toutes les attaques de l'unité |
+| Combien de jets | 1 par attaque | 1 **par arme HAZARDOUS sélectionnée** |
+| Seuil d'échec | 1 | **1-2** |
+| Conséquence | un booléen `hazardous_triggered`, **aucun dégât appliqué** | **1 blessure mortelle** (3 si toutes les figurines sont MONSTER/VEHICLE) |
+| Mêlée | jamais | **oui** (`FIGHT_CTX.hazard_origin="fight"`) |
+
+Le vif est conforme sur les cinq lignes. Les 11 assertions HAZARDOUS du mort (réparties sur
+`test_special_rules_e2e.py` et `test_fight_special_rules.py`) portaient donc sur un comportement
+**contraire au PDF** : elles n'ont pas été portées. Le volet TIR était déjà verrouillé par
+`test_hazardous.py` ; **le volet MÊLÉE ne l'était par rien** — c'est le trou qu'a révélé la
+migration, et `test_fight_special_rules.py` (qui malgré son nom ne testait que du tir) a été
+réécrit pour le combler : 6 tests, dont « 1 jet par arme, pas par figurine » et « 3 MW si toutes
+les figurines sont VEHICLE ».
+
+**2. [HEAVY] 24.16 — le mort ignorait deux clauses sur trois.**
+Le mort accordait le +1 dès que l'unité était absente de `units_moved`/`units_advanced`. Le PDF
+exige **trois** clauses cumulatives : *unengaged*, *pas posée sur le champ de bataille ce tour*,
+*aucune figurine n'a parcouru plus de 3"*. Le vif teste les trois depuis le 2026-07-26
+(`_heavy_unit_is_engaged`, `_unit_was_set_up_this_turn`, `moved_distance_by_model` en distance de
+chemin géodésique, comparaison **stricte** à 3"). Les assertions du mort ne pouvaient donc pas être
+portées telles quelles. La ligne HEAVY de [§9.2.1](V11_phaseA.md#s9.2.1), qui déclarait encore ces
+clauses « non implémentables faute de donnée », a été corrigée dans la foulée : la donnée existe.
+
+---
+
+#### Ce que sont devenus les 6 fichiers
+
+| Fichier | Avant | Après |
+|---|---|---|
+| `test_shoot_attack_sequence.py` | 7 tests sur le mort | **12** — séquence de tir bout-en-bout via `build_manual_shoot_allocation`, jusqu'aux PV retirés : les 4 issues, AP, invulnérable (ignore l'AP), 05.01/05.02/05.04 |
+| `test_special_rules_e2e.py` | 31 tests, dupliquaient les fichiers vifs | **8** — les **interactions** que nul autre fichier ne voit : DEVASTATING × HAZARDOUS, HEAVY × DEVASTATING, arme nue |
+| `test_fight_special_rules.py` | 22 tests de TIR malgré son nom | **6** — [HAZARDOUS] en **MÊLÉE**, volet jamais couvert |
+| `test_unit_rules_shoot.py` | 8 tests dupliquant `test_reroll_towound_shoot.py` + CTP | **7** — 01 Core « Re-rolls » : abilité d'unité **+** [TWIN-LINKED] ne relancent jamais deux fois le même dé ; portée des abilités `to wound` (ni touche ni sauvegarde) |
+| `test_phase_transitions.py` | 1 test de dégâts sur le mort | son assertion rendue à `test_shoot_attack_sequence.py` ; le fichier ne couvre plus que les transitions |
+| `test_closest_target_penetration_shoot.py` | déjà migré (2026-07-26) | + le cas « pool d'éligibles vide » |
+
+Trous comblés au passage sur les fichiers vifs existants : plancher 2 et `bs_base` de HEAVY
+(`test_heavy_shoot.py`), blessure non critique et valeur des dégâts de DEVASTATING
+(`test_devastating_wounds_shoot.py`).
+
+---
+
+#### Preuves
+
+- **109 tests verts** sur les 12 fichiers concernés (6 migrés + 6 vifs complétés), plus les 22
+  autres fichiers qui importent `shooting_handlers` — verts également.
+- **Contre-épreuve par mutation** : 7 clauses du **vif** cassées une à une, chaque fois une
+  vérification complète puis restauration. **7/7 rouges**, baseline et restauration vertes.
+
+  | Mutation du vif | Résultat |
+  |---|---|
+  | 05.02 — la blessure critique n'est plus critique | 🔴 |
+  | 24.16 — le bonus HEAVY n'est plus appliqué | 🔴 |
+  | 24.38 — [TWIN-LINKED] ne relance plus | 🔴 |
+  | 24.15 — la mêlée ne déclenche plus de jet de hasard | 🔴 |
+  | 05.04 — l'AP n'aggrave plus la sauvegarde | 🔴 |
+  | `closest_target_penetration` n'améliore plus l'AP | 🔴 |
+  | 24.10 — DEVASTATING ne saute plus la sauvegarde | 🔴 |
+
+- `grep -rn '_attack_sequence_rng' engine/ ai/ services/ tests/` → **vide** (les mentions
+  historiques dans les docstrings ont été reformulées pour ne plus citer un symbole inexistant).
+- `pyright engine/phase_handlers/shooting_handlers.py` → 0 erreur.
+
+---
+
+#### États résiduels : ce qui est traité, ce qui ne l'est pas
+
+**Traité** (`shooting_handlers.py`) : les 7 champs `_rapid_fire_*` d'activation
+(`_rapid_fire_context_weapon_index`, `_base_nb`, `_shots_fired`, `_bonus_total`, `_rule_value`,
+`_bonus_shot_current`, `_bonus_applied_by_weapon`) — initialisés puis purgés sans qu'aucun code ne
+les écrive jamais autrement qu'à 0/False — et le helper `_get_rapid_fire_parameter` (zéro appelant).
+[RAPID FIRE] 24.30 reste **vif** via `weapon_rule_parameter` dans `_manual_roll_intent` : seul le
+nom se ressemblait. **Effet de bord mesuré** : dans `_unit_has_shot_with_any_weapon`, la branche
+`_rapid_fire_shots_fired > 0` était morte et masquait le seul critère réel (arme épuisée).
+
+**NON traité, et pourquoi.** Les 7 clés `_rapid_fire_*` de `w40k_core.py` (~L1195-1201 liste de
+purge, ~L2127-2133 log de debug) et le champ de log `rapid_fire_bonus_shot` (~L3769/L3966, alimenté
+par un `attack_result.get()` que plus rien ne produit). **Blocage réel, pas un arbitrage de
+confort** : `w40k_core.py` était en cours d'édition par l'agent §0.40 pendant cette session.
+Reste **1 grep + 3 suppressions triviales** dès que §0.40 est mergée.
+
+**Conservé délibérément.** Les 4 branches `raise RuntimeError("… squad path expected")` de
+`shooting_handlers.execute_action`. §9.2 les listait comme résidus ; vérification faite, le
+dispatcher **est sur un chemin vif** ([w40k_core.py:6157](../../engine/w40k_core.py#L6157) — toute
+action de tir non `squad_*` y passe). Ces `raise` sont des gardes explicites : les retirer ferait
+retomber `activate_unit`/`shoot`/`left_click`/`invalid` sur le `else` final et transformerait une
+erreur bruyante en `{"error": "invalid_action_for_phase"}` silencieux — exactement le contraire de
+la règle « erreur explicite, jamais de fallback ».
+
+**Hors périmètre, signalé.** `wound_ability_display_name` / `ap_modifier_ability_display_name` /
+`hit_rule_modifier` : le mort les produisait pour le log, le vif ne les produit pas (il utilise des
+**tokens** `[HEAVY]`/`[COVER]`/`[HAZARD]` dans le message, cf. `_emit_squad_shoot_log`). Aucune
+règle de PDF n'est en jeu — c'est une convention d'affichage, pas une conformité. Conséquence à
+noter : **le combat log ne signale pas qu'une relance a été accordée par une abilité d'unité**.
+Les 3 clés sont encore lues par `w40k_core` (~L3754-3768) où elles valent toujours `None`.
 
 ### 0.37 Contre-audit des livraisons §0.32–§0.35 — ✅ LIVRÉ (2026-07-28)
 

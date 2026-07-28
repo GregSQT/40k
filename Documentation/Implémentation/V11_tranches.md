@@ -1573,8 +1573,9 @@ décision documentée ici).
   verrouillent le comportement corrigé.
 - **Miroir PvP** : pour tout prédicat/chemin bifurquant gym vs PvP, tester LES DEUX branches —
   le test PvP fige le comportement d'avant-fix (neutralité), le test gym fige le fix.
-- **Zéro monkeypatch de code mort** : les tests qui patchent `_attack_sequence_rng` disparaissent
-  avec lui (P1) ; aucun nouveau test ne doit s'appuyer sur du code sans site d'appel vif.
+- **Zéro monkeypatch de code mort** : fait le 2026-07-28 (§0.38) — les 6 fichiers qui patchaient
+  `_attack_sequence_rng` ont été re-pointés sur le chemin vif, puis la fonction supprimée.
+  Aucun nouveau test ne doit s'appuyer sur du code sans site d'appel vif.
 - **Déterminisme** : tout test utilisant du RNG fixe sa seed ; tout test d'ordre de candidats
   (P2/P3) vérifie la STABILITÉ de l'ordre sur deux appels identiques.
 - **Erreurs explicites testées** : chaque garde « erreur explicite, pas de fallback » ajoutée
