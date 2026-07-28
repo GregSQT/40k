@@ -3071,6 +3071,14 @@ actions dédiées plutôt que surcharge des slots tir 19-23, pour la lisibilité
 obs_size change → nouveau modèle from scratch (`--new`, déjà acté). Mettre à jour la
 `justification` de la config en même temps.
 
+⚠️ **À faire dans cette tranche : remplacer `action_net` par `Linear(320, 18)`.** L'action space
+change de toute façon (`TOTAL_ACTION_SIZE` recalculé) ; c'est le bon moment pour supprimer les
+~334 k paramètres inertes de `pointer_policy.py`. Aujourd'hui `action_net` est un `Linear(320,
+1062)` dont seules 18 colonnes sont lues (wait + charge + fight + zone intent) — les 1044
+colonnes move/tir sont écrasées par conv 1×1 et pointeur, et ne reçoivent aucun gradient (verrouillé par
+test). Remplacer par `Linear(320, 18)` et assembler manuellement dans `_action_logits`. Aucun
+autre impact sur l'initialisation orthogonale ni sur SB3 si la couche est reconstruite à l'init.
+
 ### 9.4 P3 — Branchement décision par décision (une tranche = une décision + validation)
 
 ⚠️ Les sites à remplacer sont ceux du PIPELINE VIF gym (vérifiés par contre-review), pas les
@@ -4301,7 +4309,9 @@ audit demandé après §9.2.5, **6 trous trouvés** — une escouade ennemie inv
 arme (index 0) et une seule cible déclarées au tir (violation **04.01**/**04.02**), heuristique d'arme
 de mêlée périmée par P1. Décisions actées : renommage `PISTOL` → `CLOSE_QUARTERS`, **encodeur
 d'entité partagé** (unités+armes, amies+ennemies), **K=20 unités / K=10 armes**, **tête pointeur**
-pour le ciblage, retrain accepté. Livré le 2026-07-26 (T-A→T-F + §1.9 + audit final).
+pour le ciblage, retrain accepté. Livré le 2026-07-26 (T-A→T-F + §1.9 + audit final) ;
+T-H (complétude obs : objectifs + règles d'unité) ✅ 2026-07-27 ; T-G (run `--new`, apprentissage
+confirmé) ✅ 2026-07-28.
 
 ⚠️ Les tailles citées dans les entrées d'époque (`obs_size` 20166, action 1047 → 1062) ont bougé
 depuis : valeurs vérifiées dans le code le **2026-07-28** — `obs_size` = **20626**

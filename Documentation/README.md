@@ -13,7 +13,7 @@ Les plans d'implémentation sont classés dans `Implémentation/Implémenté/` (
 | **[AI_TURN.md](AI_TURN.md)** | Règles de tour, phases, séquence d’activation, tracking, contrat de codage (V11). **Référence pour toute logique de jeu.** |
 | **[AI_IMPLEMENTATION.md](AI_IMPLEMENTATION.md)** | Architecture du moteur : modules (`w40k_core`, phase_handlers, observation, reward, action_decoder), flux, caches. |
 
-**Voir aussi** : Weapon_rules.md, Unit_rules.md, CONFIG_FILES.md, KNOWN_ANOMALIES.md.
+**Voir aussi** : Weapon_rules.md, Unit_rules.md, CONFIG_FILES.md, [Old/KNOWN_ANOMALIES.md](Old/KNOWN_ANOMALIES.md) (archivé).
 
 ---
 
@@ -33,13 +33,13 @@ Les plans d'implémentation sont classés dans `Implémentation/Implémenté/` (
 
 | Document | Rôle |
 |----------|------|
-| **[FRONTEND_UI.md](FRONTEND_UI.md)** | UI frontend : LoS hex-native, couvert, tooltips, preview de tir. |
+| **[Old/FRONTEND_UI.md](Old/FRONTEND_UI.md)** | ⚠️ **Archivé dans `Old/`** — UI frontend : LoS hex-native, couvert, tooltips, preview de tir. |
 | **[Weapon_rules.md](Weapon_rules.md)** | Système d’armes : armurerie TS, règles, sélection IA, backend/frontend. |
 | **[Unit_rules.md](Unit_rules.md)** | Règles d’unités : `unit_rules.json`, résolution, choix contextuels (dont reactive_move). |
-| **[Distance management.md](Distance%20management.md)** | Audit des calculs de distance (hex vs euclidien). |
-| **[compute_footprint_placement_mask.md](compute_footprint_placement_mask.md)** | Référence de la fonction de masque d'empreinte. |
+| **[Implémentation/Implémenté/Distance management.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/Distance%20management.md)** | Audit des calculs de distance (hex vs euclidien). |
+| **[Implémentation/Implémenté/compute_footprint_placement_mask.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/compute_footprint_placement_mask.md)** | Référence de la fonction de masque d'empreinte. |
 | **[Endless_duty.md](Endless_duty.md)** | Spec du mode Endless Duty. |
-| **[Tutorial.md](Tutorial.md)** | Spec du tutoriel (scénarios étapes 1-3). |
+| **[Old/Tutorial.md](Old/Tutorial.md)** | ⚠️ **Archivé dans `Old/`** — spec du tutoriel (scénarios étapes 1-3). |
 
 ---
 
@@ -49,7 +49,7 @@ Les plans d'implémentation sont classés dans `Implémentation/Implémenté/` (
 |----------|------|
 | **[CONFIG_FILES.md](CONFIG_FILES.md)** | Référence des fichiers de config : weapon_rules, game_config, training/rewards, scénarios, armurerie. |
 | **[TESTING.md](TESTING.md)** | Architecture des tests (`tests/unit/engine`, `tests/unit/services`). |
-| **[KNOWN_ANOMALIES.md](KNOWN_ANOMALIES.md)** | Registre des anomalies connues et de leur suivi. |
+| **[Old/KNOWN_ANOMALIES.md](Old/KNOWN_ANOMALIES.md)** | ⚠️ **Archivé dans `Old/`** — registre des anomalies connues et de leur suivi. |
 | **[Code_Compliance/](Code_Compliance/)** | Docs des outils de conformité (analyzer, check_ai_rules, hidden_action_finder). |
 | **[Prompts/](Prompts/)** | Prompts outillage réutilisables (CURSOR_SUB_AGENTS, fix_game_rules_violations). |
 
@@ -68,10 +68,29 @@ Les plans d'implémentation sont classés dans `Implémentation/Implémenté/` (
 
 ## Plans d'implémentation
 
+### Chantiers V11 EN COURS (racine `Implémentation/`)
+
+⚠️ **Ces documents n'étaient référencés nulle part dans cet index** (ajoutés le 2026-07-28) : seuls
+les deux dossiers `Implémenté/` et `A_faire/` l'étaient, alors que les chantiers **vivants** sont à
+la racine de `Implémentation/`.
+
+| Document | Rôle | État |
+|----------|------|------|
+| **[Implémentation/V11_agent_rework.md](Impl%C3%A9mentation/V11_agent_rework.md)** | **Document de pilotage du chantier V11.** État ouvert (§0), pièges et leçons de méthode canoniques (§0bis), concept d'ancre (§1bis), tranches T1→T7 (§5), Phase A' (§9), stratégie d'entraînement/évaluation (§10), historique résolu intégral (§0hist, en fin de document). | 🟠 actif — 4 entrées ouvertes |
+| **[Implémentation/V11_entity_encoder_pointer.md](Impl%C3%A9mentation/V11_entity_encoder_pointer.md)** | Encodeur d'entités partagé + tête pointeur (source de vérité de `§0.30`). | ✅ livré |
+| **[Implémentation/V11_move_build_acceleration.md](Impl%C3%A9mentation/V11_move_build_acceleration.md)** | Perf du noyau de pool de move (`§0.22`) : ce qui est livré, impasses mesurées, tâches ouvertes. | ✅ clos, 3 tâches résiduelles |
+| **[Implémentation/V11_pathfinding_exact.md](Impl%C3%A9mentation/V11_pathfinding_exact.md)** | Pathfinding exact. | — |
+| **[Implémentation/V11_refactor_plan.md](Impl%C3%A9mentation/V11_refactor_plan.md)** | Plan d'extraction de `V11_agent_rework.md` en sous-documents. | ⏸️ **plan non exécuté** ; ses numéros de ligne datent du 2026-07-21 et ne correspondent plus |
+| **[Implémentation/Replay.md](Impl%C3%A9mentation/Replay.md)** | Spec du replay. | — |
+| **[Implémentation/observation_deploiement.md](Impl%C3%A9mentation/observation_deploiement.md)** | Observation de la phase de déploiement. | — |
+
+### Archives et backlog
+
 | Dossier | Contenu |
 |---------|---------|
 | **[Implémentation/Implémenté/](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/)** | Plans/specs de features livrées (fight V11, board ×10, rosters, command phase, déploiement…). |
 | **[Implémentation/A_faire/](Impl%C3%A9mentation/A_faire/)** | Backlog : MCTS, migration PostgreSQL, squad PR4, accélérations 10x restantes. |
+| **[Old/](Old/)** | Documents archivés (FRONTEND_UI, Tutorial, KNOWN_ANOMALIES…) — ne décrivent plus le code courant. |
 
 ---
 

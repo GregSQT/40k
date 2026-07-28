@@ -27,7 +27,7 @@ les numéros de ligne sont indicatifs. Re-localiser par grep avant d'éditer.
 | **T-D** | Observation en **tenseurs d'entités** + **encodeurs partagés** | ✅ **FAIT (2026-07-26)** |
 | **T-E** | **Tête pointeur** + slots ennemis 5 → 20 (espace d'action) | ✅ **FAIT (2026-07-26)** |
 | **T-F** | K armes = 10 des deux côtés + bloc « types de figurines » ennemis | ✅ **FAIT (2026-07-26)** |
-| **T-G** | Run `--new` + win-rate (§0.14) | ⏳ **débloqué (2026-07-26)** — à lancer par l'utilisateur |
+| **T-G** | Run `--new` + win-rate (§0.14) | ✅ **FAIT (2026-07-28)** — agent en apprentissage confirmé |
 | **résidu** | 10.06 MONSTER/VEHICLE côté PvP/mono (divergence créée par T-B) | ✅ **FAIT (2026-07-26)**, cf. §1.9 |
 | **audit** | Passe « tout est optimal et documenté ? » — 6 écarts trouvés, tous corrigés | ✅ **FAIT (2026-07-26)**, cf. journal |
 | **T-H** | Complétude de l'obs : géométrie des objectifs + règles d'unité (+ cache des profils d'armes) | ✅ **FAIT (2026-07-27)**, cf. `V11_agent_rework.md` §0.31 |
@@ -857,9 +857,7 @@ il est vert au 2026-07-26.
 
 **Ce qui reste ouvert, et pourquoi ce n'est pas de la dette masquée** :
 
-- **T-G, le run `--new`** : c'est l'utilisateur qui le déclenche (36 h). Tant qu'il n'a pas
-  tourné, **aucune de ces tranches n'a de preuve de win-rate** — elles ont une preuve de
-  conformité et de forme, pas de performance. C'est le seul verdict qui manque.
+- **T-G, le run `--new`** : ✅ lancé le 2026-07-28, apprentissage confirmé par l'utilisateur.
 - **Observation de la phase de déploiement** : toujours déficiente (obs construite sur la 1ʳᵉ
   unité du cache, grille dégénérée à (-1,-1), hexes candidats non décrits). Chantier dédié
   déjà ouvert dans `V11_audit_observation.md` §11 — hors périmètre §0.30, et il exige une
