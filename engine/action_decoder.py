@@ -109,6 +109,12 @@ class ActionDecoder:
         self._deployment_pool_cache: Dict[int, Tuple[set, List[Tuple[int, int]], np.ndarray, np.ndarray, np.ndarray]] = {}
         self._wall_grid_cache: Optional[np.ndarray] = None
 
+    #: Clé du cache de SCORING du déploiement, dans le `game_state` (expositions LoS par hexe,
+    #: alliés par colonne, snapshot des unités posées). Il vit dans l'état de partie et non sur
+    #: l'instance, donc `reset_episode_caches` ne l'atteint pas : sa purge est dans le bloc de
+    #: purges d'épisode de `w40k_core`, avec les caches d'observation qui en DÉPENDENT.
+    DEPLOYMENT_SCORING_CACHE_KEY = "_deployment_scoring_cache"
+
     def reset_episode_caches(self) -> None:
         """Invalidate per-episode caches. Call on every env.reset()."""
         self._deployment_pool_cache = {}
@@ -1842,7 +1848,7 @@ class ActionDecoder:
                 flush=True,
             )
         current_snapshot = self._build_deployed_snapshot(game_state)
-        cache_key = "_deployment_scoring_cache"
+        cache_key = self.DEPLOYMENT_SCORING_CACHE_KEY
         if cache_key not in game_state:
             if _debug_mode:
                 print(

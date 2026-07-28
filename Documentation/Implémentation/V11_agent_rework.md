@@ -1388,7 +1388,14 @@ vérifiée hexe par hexe sur 33 états × 5 stratégies (le tri lexicographique 
 `max()` sur tuples, index croissant compris).
 
 **Nouveau cache** : `_deployment_slot_candidates`, ajouté à l'inventaire d'`AI_OBSERVATION.md`
-(**six → sept**) et à `test_obs_caches_die_with_the_episode.py`. Son tampon est l'état des unités
+et à `test_obs_caches_die_with_the_episode.py`. **Trou trouvé au passage** (2026-07-29, en
+vérifiant ce point) : `_deployment_scoring_cache` — celui que le bloc candidat LIT — n'était purgé
+**nulle part**. `reset_episode_caches` ne voit que les caches d'INSTANCE du décodeur, pas ceux
+posés dans le `game_state`, et son garde-fou (« le jeu d'hexes valides a-t-il changé ? ») ne mord
+pas au cas critique : un épisode interrompu AVANT la 1re pose laisse un cache dont le jeu d'hexes
+coïncide exactement avec celui du nouvel épisode — servi tel quel, il porterait les expositions LoS
+des **murs du terrain précédent**. Purgé et inscrit à l'inventaire (**six → huit** caches), rouge
+sous mutation de la purge. Son tampon est l'état des unités
 posées — qui recommence **identique** d'un épisode à l'autre : la purge au `reset` est donc
 obligatoire, le tampon seul ne suffirait pas.
 

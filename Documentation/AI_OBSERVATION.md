@@ -496,7 +496,7 @@ un one-hot, donc réellement binaire — et toujours hors normalisation.)
 
 ### Ce qui est mémoïsé, et par quelle clé d'invalidation
 
-L'observation lit **sept** caches, chacun avec sa propre condition d'invalidation. C'est le point
+L'observation lit **huit** caches, chacun avec sa propre condition d'invalidation. C'est le point
 le plus fragile du pipeline : un cache servi trop longtemps ne lève rien, il décrit simplement un
 état périmé (régressions V11 §0.18 et §0.26). L'inventaire est verrouillé par
 `tests/unit/engine/test_obs_caches_die_with_the_episode.py`, qui rougit si un cache d'observation
@@ -509,6 +509,7 @@ survit à un reset — **ajouter un cache sans l'y ajouter fait échouer ce test
 | `_grid_static_hex_arrays` | murs / objectifs / couvert rasterisés | par épisode | idem |
 | `_obs_solid_terrain_areas` | zones contenant un mur dense (Solid 13.11) | par épisode | idem |
 | `_grid_deployment_zone_anchor` | l'hex sur lequel la grille est centrée pour une escouade **pas encore posée** (V11 §0.40) | par joueur, par épisode | idem — la zone de déploiement change avec le terrain rechargé |
+| `_deployment_scoring_cache` | expositions LoS par hexe (réelle et potentielle), alliés posés par colonne, snapshot des unités posées — **lu par le bloc candidat de déploiement**, donc sa péremption deviendrait une observation fausse | `(déployeur, jeu d'hexes valides, snapshot des posées)` | mise à jour **incrémentale** à chaque pose, reconstruction complète sur dérive ; purgé au `reset` — son garde-fou ne mord pas si un épisode s'interrompt AVANT la 1re pose (le jeu d'hexes coïncide alors avec celui du nouvel épisode, murs différents compris) |
 | `_deployment_slot_candidates` | l'hexe **et le plan de formation** que chaque slot 4-8 poserait (V11 §0.40 point 3) — lu par le décodeur ET par l'observation, donc calculé une seule fois par step | `(escouade, déployeur, état des unités posées)` | le tampon change à chaque pose ; purgé au `reset` — l'état « aucune unité posée » recommence identique d'un épisode à l'autre, donc le tampon seul ne suffirait pas |
 | `_unit_los_pair_cache` | `los_can_see` / `cover_vs_observer` par paire | `(tireur, cible)` | **invalidation ciblée** au choke-point `_touch_unit_los` : toute écriture de position, toute perte de figurine — donc correct même quand un ennemi bouge pendant mon tour (`reactive_move`) |
 

@@ -22,7 +22,7 @@ import os
 
 from ai.unit_registry import UnitRegistry
 from engine.observation_builder import ObservationBuilder
-from engine.action_decoder import DEPLOY_SLOT_CANDIDATES_CACHE_KEY
+from engine.action_decoder import DEPLOY_SLOT_CANDIDATES_CACHE_KEY, ActionDecoder
 from engine.observation_entities import WEAPON_PROFILE_CACHE_KEY
 from engine.w40k_core import W40KEngine
 
@@ -43,6 +43,10 @@ OBS_CACHE_KEYS = {
     "_grid_deployment_zone_anchor": "ancre de grille des escouades pas encore posees (§0.40)",
     "_obs_solid_terrain_areas": "zones contenant un mur dense (Solid 13.11, gone to ground)",
     "_unit_los_pair_cache": "LoS et couvert par paire (tireur, cible)",
+    ActionDecoder.DEPLOYMENT_SCORING_CACHE_KEY: (
+        "scoring du deploiement (expositions LoS par hexe, allies par colonne) — LU par le bloc "
+        "candidat de l'observation, donc sa peremption deviendrait une observation fausse"
+    ),
     DEPLOY_SLOT_CANDIDATES_CACHE_KEY: (
         "hexe + plan que chaque slot 4-8 poserait (§0.40 point 3) — son tampon est l'etat des "
         "unites posees, qui recommence IDENTIQUE d'un episode a l'autre"

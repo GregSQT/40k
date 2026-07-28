@@ -161,9 +161,18 @@ La **parité de choix est exacte** avec l'implémentation scalaire — vérifié
 compris).
 
 **Nouveau cache** : `_deployment_slot_candidates`, ajouté à l'inventaire d'`AI_OBSERVATION.md`
-(six → **sept**) et à `test_obs_caches_die_with_the_episode.py`. Son tampon est l'état des unités
-posées, qui recommence **identique** au début de chaque épisode : la purge au `reset` est
-obligatoire, le tampon seul ne suffirait pas.
+et à `test_obs_caches_die_with_the_episode.py`. Son tampon est l'état des unités posées, qui
+recommence **identique** au début de chaque épisode : la purge au `reset` est obligatoire, le
+tampon seul ne suffirait pas.
+
+**Trou trouvé en vérifiant ce point** : `_deployment_scoring_cache` — celui dont ce bloc LIT les
+expositions LoS — n'était purgé **nulle part**. `reset_episode_caches` ne voit que les caches
+d'instance du décodeur, pas ceux posés dans le `game_state` ; et son garde-fou (« le jeu d'hexes
+valides a-t-il changé ? ») ne mord pas au cas critique : un épisode interrompu **avant la 1re pose**
+laisse un cache dont le jeu d'hexes coïncide exactement avec celui du nouvel épisode — servi tel
+quel, il porterait les expositions calculées sur les **murs du terrain précédent**. Purgé, inscrit à
+l'inventaire (six → **huit** caches), rouge sous mutation de la purge. Sans le point 3 il n'aurait
+faussé qu'un choix d'heuristique ; avec lui, il serait devenu une **observation** fausse.
 
 **`obs_size` 20768 → 20828** (5 profils de config alignés, `justification` incluse ; le moteur lève
 à l'init si config ≠ code). `TOTAL_ACTION_SIZE` reste **1107**.

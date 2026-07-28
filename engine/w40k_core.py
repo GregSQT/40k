@@ -1058,6 +1058,15 @@ class W40KEngine(gym.Env):
         # posees — qui recommence IDENTIQUE (aucune unite posee) a chaque episode : sans purge,
         # le 1er step du nouvel episode servirait les candidats du terrain precedent.
         self.game_state.pop(DEPLOY_SLOT_CANDIDATES_CACHE_KEY, None)
+        # Cache de SCORING du deploiement (expositions LoS par hexe, allies par colonne). Il
+        # n'etait purge NULLE PART : `reset_episode_caches` ne voit que les caches d'instance du
+        # decodeur, pas ceux poses dans le game_state. Son garde-fou (« le jeu d'hexes valides
+        # a-t-il change ? ») ne mord PAS au cas critique : un episode interrompu AVANT la 1re
+        # pose laisse un cache dont le jeu d'hexes coincide exactement avec celui du nouvel
+        # episode — servi tel quel, il porterait les expositions LoS des murs du terrain
+        # PRECEDENT. Trouve le 2026-07-29 en verifiant §0.40 point 3, qui LIT ce cache pour
+        # decrire les candidats a l'agent : la corruption y serait devenue une observation.
+        self.game_state.pop(ActionDecoder.DEPLOYMENT_SCORING_CACHE_KEY, None)
         # Zones de terrain contenant un mur DENSE (Solid 13.11), memoisees par
         # `_squad_terrain_flags` pour le drapeau « gone to ground pret » (13.5). Elles derivent
         # de `terrain_areas` ET de `dense_wall_hexes`, que `_reload_scenario` remplace : sans
