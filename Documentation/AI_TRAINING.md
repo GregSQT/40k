@@ -275,12 +275,12 @@ Toutes les features de l'observation flat sont relatives à l'unité active (qui
 | Allied units | Filtré par `unit["player"] == active_unit["player"]` | Positions/HP relatifs à l'unité active |
 | Enemy units | Filtré par `unit["player"] != active_unit["player"]` | Idem |
 | Army value diff (macro) | `my_value - enemy_value` basé sur `current_player` | `_calculate_army_value_diff()` |
-| Macro objective control_state | `+1.0`/`-1.0` recalculé à chaque observation | Cache `macro_objectives` invalidé par `build_observation()` |
+| Macro objective control_state | `+1.0`/`-1.0` rafraîchi aux frontières de phase/tour | `refresh_objective_control_on_boundary` (le cache `macro_objectives` n'existe plus) |
 | Directional helpers (friendly/enemy) | `unit["player"]` pour target_player | `_find_nearest_in_direction()` |
 
-**Invariant critique** : Pendant `build_observation()`, `game_state["current_player"] == active_unit["player"]`. Toute utilisation de `current_player` dans les helpers est donc correcte dans ce contexte.
+**Invariant critique** : Pendant `build_squad_observation()`, `game_state["current_player"] == active_unit["player"]`. Toute utilisation de `current_player` dans les helpers est donc correcte dans ce contexte.
 
-**Cache `macro_objectives`** : Ce cache contient des `control_state` relatifs au joueur courant. Il est invalidé (`game_state.pop("macro_objectives", None)`) au début de chaque `build_observation()` pour éviter qu'un calcul fait pendant le tour du bot ne pollue l'observation de l'agent.
+**Cache `macro_objectives`** : ⚠️ **supprimé le 2026-07-28** avec le pipeline mono-figurine. Il ne reste aucune occurrence de `macro_objectives` dans le code — le contrôle d'objectif est rafraîchi aux frontières de phase/tour par `GameStateManager.refresh_objective_control_on_boundary`, appelé en tête de `_build_observation`.
 
 ### Reward seat-aware
 
@@ -735,10 +735,11 @@ Règles:
     },
 
     "observation_params": {
-      "obs_size": 108,                   // V11 T6: observation SQUAD (16 global + 5 agg + 6 figs x 7 + 5 slots ennemis x 9). Les valeurs 355/323 de ce doc sont PÉRIMÉES.
-      "perception_radius": 25,           // Fog of war radius
-      "max_nearby_units": 10,            // Max units to observe
-      "max_valid_targets": 5             // Max targets to track
+      // SEULE clé de la section : recopie de ObservationBuilder.SQUAD_OBS_SIZE_TARGET (20626 au
+      // 2026-07-28). Un écart lève à l'init du moteur. perception_radius / max_nearby_units /
+      // max_valid_targets ont été SUPPRIMÉS le 2026-07-28 avec le pipeline mono-figurine :
+      // l'étendue perçue est celle de la grille égocentrique (engine/spatial_grid.py).
+      "obs_size": 20626
     },
     
     "model_params": {
@@ -1801,7 +1802,7 @@ python ai/train.py --agent <agent_key> --training-config default --rewards-confi
 - [PPO Paper (Schulman et al.)](https://arxiv.org/abs/1707.06347)
 
 ### Observation Space Internals
-- See `engine/observation_builder.py:ObservationBuilder.build_observation()` for implementation
+- See `engine/observation_builder.py:ObservationBuilder.build_squad_observation()` for implementation
 - Canonical layout reference: `Documentation/AI_OBSERVATION.md`
 - Current CoreAgent layout (`v2.4`): 355 floats = legacy 323 + rules block 32
 

@@ -50,7 +50,6 @@ def _unit_cfg(uid: int, player: int, col: int, row: int, hp: int, oc: int) -> Di
 # menace desc   : 18(10) > 6(3) > 3(2)     -> [10, 3, 2]   (DIFFERE au slot 1 et 2)
 def _config() -> Dict[str, Any]:
     obs_params = {
-        "perception_radius": 25, "max_nearby_units": 10, "max_valid_targets": 5,
         "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET,
     }
     return {

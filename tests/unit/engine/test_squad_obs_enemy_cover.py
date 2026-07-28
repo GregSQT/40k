@@ -70,7 +70,6 @@ def _unit_cfg(uid: int, player: int, positions: List[Tuple[int, int]]) -> Dict[s
 
 def _config(mine: List[Tuple[int, int]], enemy: List[Tuple[int, int]]) -> Dict[str, Any]:
     obs_params = {
-        "perception_radius": 25, "max_nearby_units": 10, "max_valid_targets": 5,
         "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET,
     }
     return {

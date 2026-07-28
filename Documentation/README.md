@@ -38,6 +38,7 @@ Les plans d'implémentation sont classés dans `Implémentation/Implémenté/` (
 | **[Unit_rules.md](Unit_rules.md)** | Règles d’unités : `unit_rules.json`, résolution, choix contextuels (dont reactive_move). |
 | **[Implémentation/Implémenté/Distance management.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/Distance%20management.md)** | Audit des calculs de distance (hex vs euclidien). |
 | **[Implémentation/Implémenté/compute_footprint_placement_mask.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/compute_footprint_placement_mask.md)** | Référence de la fonction de masque d'empreinte. |
+| **[Implémentation/Implémenté/V11_pathfinding_exact.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/V11_pathfinding_exact.md)** | ⚠️ **Code SUPPRIMÉ le 2026-07-28** — distance BFS exacte (troncature silencieuse, champ par source). Conservé pour la leçon de méthode et comme spec de reconstruction ; état en `§0.39`. |
 | **[Endless_duty.md](Endless_duty.md)** | Spec du mode Endless Duty. |
 | **[Old/Tutorial.md](Old/Tutorial.md)** | ⚠️ **Archivé dans `Old/`** — spec du tutoriel (scénarios étapes 1-3). |
 
@@ -79,7 +80,6 @@ la racine de `Implémentation/`.
 | **[Implémentation/V11_agent_rework.md](Impl%C3%A9mentation/V11_agent_rework.md)** | **Document de pilotage du chantier V11.** État ouvert (§0), pièges et leçons de méthode canoniques (§0bis), concept d'ancre (§1bis), tranches T1→T7 (§5), Phase A' (§9), stratégie d'entraînement/évaluation (§10), historique résolu intégral (§0hist, en fin de document). | 🟠 actif — 4 entrées ouvertes |
 | **[Implémentation/V11_entity_encoder_pointer.md](Impl%C3%A9mentation/V11_entity_encoder_pointer.md)** | Encodeur d'entités partagé + tête pointeur (source de vérité de `§0.30`). | ✅ livré |
 | **[Implémentation/V11_move_build_acceleration.md](Impl%C3%A9mentation/V11_move_build_acceleration.md)** | Perf du noyau de pool de move (`§0.22`) : ce qui est livré, impasses mesurées, tâches ouvertes. | ✅ clos, 3 tâches résiduelles |
-| **[Implémentation/V11_pathfinding_exact.md](Impl%C3%A9mentation/V11_pathfinding_exact.md)** | Pathfinding exact. | — |
 | **[Implémentation/V11_refactor_plan.md](Impl%C3%A9mentation/V11_refactor_plan.md)** | Plan d'extraction de `V11_agent_rework.md` en sous-documents. | ⏸️ **plan non exécuté** ; ses numéros de ligne datent du 2026-07-21 et ne correspondent plus |
 | **[Implémentation/Replay.md](Impl%C3%A9mentation/Replay.md)** | Spec du replay. | — |
 | **[Implémentation/observation_deploiement.md](Impl%C3%A9mentation/observation_deploiement.md)** | Observation de la phase de déploiement. | — |

@@ -4,7 +4,6 @@ import pytest
 
 from engine.combat_utils import (
     calculate_hex_distance,
-    calculate_pathfinding_distance,
     calculate_wound_target,
     check_los_cached,
     expected_dice_value,
@@ -83,30 +82,6 @@ def test_calculate_hex_distance_basic_cases() -> None:
     assert calculate_hex_distance(0, 0, 0, 0) == 0
     assert calculate_hex_distance(0, 0, 1, 0) == 1
     assert calculate_hex_distance(0, 0, 2, 0) >= 1
-
-
-def test_calculate_pathfinding_distance_uses_cache_and_walls() -> None:
-    game_state = {"wall_hexes": {(1, 0)}, "board_cols": 4, "board_rows": 4}
-    first = calculate_pathfinding_distance(0, 0, 2, 0, game_state, max_search_distance=10)
-    assert first > 0
-    # Le cache porte le CHAMP BFS de la source, pas la paire : une seule entrée sert
-    # toutes les cibles interrogées depuis (0,0).
-    assert list(game_state["_pathfinding_field_cache"]) == [(0, 0, 10)]
-    second = calculate_pathfinding_distance(0, 0, 2, 0, game_state, max_search_distance=10)
-    assert second == first
-    calculate_pathfinding_distance(0, 0, 3, 3, game_state, max_search_distance=10)
-    assert list(game_state["_pathfinding_field_cache"]) == [(0, 0, 10)]
-
-
-def test_calculate_pathfinding_distance_returns_unreachable_when_blocked() -> None:
-    # Block all neighbors around start (0,0) for odd-q neighborhood.
-    game_state = {
-        "wall_hexes": {(0, 1), (1, 0), (-1, 0), (-1, -1), (1, -1), (0, -1)},
-        "board_cols": 3,
-        "board_rows": 3,
-    }
-    unreachable = calculate_pathfinding_distance(0, 0, 2, 2, game_state, max_search_distance=3)
-    assert unreachable == 4
 
 
 def test_check_los_cached_returns_float_and_validates_inputs() -> None:

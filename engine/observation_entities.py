@@ -87,7 +87,7 @@ UNIT_CONT_FIELDS: Tuple[str, ...] = (
 #: les règles de son leader et les perd à sa mort. C'était le sens même du trou fermé ici —
 #: l'agent subissait ces règles, chez lui comme chez l'ennemi, sans jamais les percevoir : le
 #: pipeline squad n'avait aucun champ de règle d'unité, et `unit_has_rule_effect` n'était
-#: appelée que par `build_observation`, le pipeline mono-figurine legacy.
+#: appelée que par le pipeline mono-figurine legacy (359-d), supprimé depuis.
 UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (
     "charge_after_advance",
     "charge_after_flee",

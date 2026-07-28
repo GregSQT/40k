@@ -34,10 +34,7 @@ from _config_helpers import build_game_rules
 def _minimal_config() -> Dict[str, Any]:
     """Config minimale qui satisfait toutes les vérifications de __init__ (config fourni)."""
     obs_params = {
-        "perception_radius": 25,
-        "max_nearby_units": 10,
-        "max_valid_targets": 5,
-        "obs_size": ObservationBuilder.PHASE2_OBS_SIZE,
+        "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET,
     }
     return {
         "board": {
@@ -132,11 +129,10 @@ class TestEngineInitFailures:
     def test_stale_obs_size_raises_at_init_not_later(self):
         """`obs_size` périmé → ERREUR À L'INIT, avec la valeur attendue dans le message.
 
-        Auparavant, une taille inconnue tombait dans la branche « pipeline mono-fig legacy » et
-        construisait un `Box(obs_size)` que RIEN ne savait remplir : l'incohérence n'apparaissait
-        qu'à la première observation, sous un message parlant du pipeline 359 — alors que la
-        cause réelle est « la config porte une taille périmée ». Repli masquant, interdit par la
-        convention projet.
+        Auparavant, une taille inconnue construisait un `Box(obs_size)` que RIEN ne savait
+        remplir : l'incohérence n'apparaissait qu'à la première observation, sous un message
+        parlant d'un autre pipeline — alors que la cause réelle est « la config porte une taille
+        périmée ». Repli masquant, interdit par la convention projet.
 
         Le cas se produit VRAIMENT : le layout squad change à chaque évolution du schéma
         d'entités (rencontré le 2026-07-26 en portant le bloc figurines de 6 à 20 slots).
@@ -155,15 +151,15 @@ class TestEngineInitFailures:
             "l'erreur doit donner la valeur ATTENDUE, sinon elle n'aide pas a corriger"
         )
 
-    def test_both_real_pipelines_are_accepted(self):
-        """Contre-épreuve : les deux tailles qui désignent un pipeline réel passent."""
-        for size in (ObservationBuilder.PHASE2_OBS_SIZE, ObservationBuilder.SQUAD_OBS_SIZE_TARGET):
-            cfg = _minimal_config()
-            cfg["observation_params"]["obs_size"] = size
-            cfg["training_config"]["observation_params"]["obs_size"] = size
-            with patch("engine.w40k_core.load_weapon_damage_table", return_value={}):
-                engine = W40KEngine(config=cfg)
-            assert engine.obs_builder.obs_size == size
+    def test_real_pipeline_size_is_accepted(self):
+        """Contre-épreuve : la seule taille qui désigne un pipeline réel passe."""
+        size = ObservationBuilder.SQUAD_OBS_SIZE_TARGET
+        cfg = _minimal_config()
+        cfg["observation_params"]["obs_size"] = size
+        cfg["training_config"]["observation_params"]["obs_size"] = size
+        with patch("engine.w40k_core.load_weapon_damage_table", return_value={}):
+            engine = W40KEngine(config=cfg)
+        assert engine.obs_builder.obs_size == size
 
 
 # ─────────────────────────────────────────────────────────────────────────────

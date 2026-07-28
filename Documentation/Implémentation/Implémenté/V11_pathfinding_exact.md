@@ -1,7 +1,24 @@
 # Distance de pathfinding exacte — suppression de la troncature silencieuse
 
-**Statut :** ✅ IMPLÉMENTÉ (2026-07-27, vérifié code + mesuré)
-**Portée réelle :** bot PvE. **Pas** le pipeline d'entraînement V11 (voir §4, mesure).
+> ## ⛔ CODE SUPPRIMÉ LE 2026-07-28 — DOCUMENT D'ARCHIVE
+>
+> Le correctif décrit ci-dessous a bien été implémenté, testé et mesuré le 2026-07-27. Il a
+> ensuite été **supprimé en entier**, faute de consommateur : `calculate_pathfinding_distance`,
+> `get_pathfinding_field`, `hex_utils.pathfinding_field`, `hex_utils.pathfinding_distance`, la
+> sentinelle `PATHFINDING_UNREACHABLE`, le cache `_pathfinding_field_cache` et ses 3 purges, ses
+> déclarations dans `game_snapshots`/`api_server`, et les 22 tests. **Aucun de ces symboles
+> n'existe plus dans le code.**
+>
+> **Ce n'est pas une régression** : la chaîne était fermée sur elle-même et sa racine n'avait plus
+> aucun appelant de production — le détail du constat est en **§4**. Le moteur n'a donc plus de
+> « distance de pathfinding » générique ; le pathfinding VIVANT est celui du pool de move
+> (`movement_handlers`, BFS géodésique), qui est un autre code et n'a jamais été concerné.
+>
+> Ce document est conservé pour deux raisons : la **leçon de méthode** (§4 — vérifier qu'un
+> appelant existe AVANT de mesurer un gain) et la **spec de reconstruction**, si un bot scripté
+> réclame un jour cette primitive. Journal d'état : [`V11_agent_rework.md` §0.39](../V11_agent_rework.md#s0.39).
+
+---
 
 ---
 
@@ -92,11 +109,33 @@ d'entraînement Armageddon (board ×5, moteur nu, actions masquées aléatoires)
 ```
 
 L'observation et le reward de l'entraînement ne passent donc **jamais** par cette distance : le
-défaut ne les a pas faussés. Le consommateur vivant est le **bot PvE**
-(`pve_controller._ai_select_movement_destination`), qui choisit l'ennemi le plus proche et la
+défaut ne les a pas faussés. Le consommateur présenté ici comme vivant était le **bot PvE**
+(`pve_controller._ai_select_movement_destination`), qui choisissait l'ennemi le plus proche et la
 destination de mouvement avec cette distance : au-delà de ~5 pouces, toutes les cibles et toutes
-les destinations étaient à égalité (51), donc `min()` tranchait arbitrairement. C'est ce
-comportement-là qui est réparé.
+les destinations étaient à égalité (51), donc `min()` tranchait arbitrairement.
+
+> ### ⚠️ Correction du 2026-07-28 — ce consommateur n'existait déjà plus
+>
+> `_ai_select_movement_destination` **n'avait aucun appelant** au moment où cette section a été
+> écrite (vérifiable sur le commit d'alors : la seule occurrence du nom dans tout le dépôt était
+> sa propre `def`), et son `self._get_unit_by_id` n'était assigné nulle part — l'appeler aurait
+> levé un `TypeError`. La méthode a été supprimée avec le nettoyage du `pve_controller`.
+>
+> Conséquence à jour : la chaîne est **fermée sur elle-même** —
+> `calculate_pathfinding_distance` → `get_pathfinding_field` → `hex_utils.pathfinding_field`.
+> Chaque maillon a bien un appelant, sauf le premier : **`calculate_pathfinding_distance` n'a plus
+> aucun appelant de production** (ses seules occurrences hors `combat_utils.py` sont 3 fichiers de
+> test et un commentaire de purge dans `w40k_core`). Tout l'ensemble est donc mort, y compris
+> `hex_utils.pathfinding_distance`, dont le seul appelant restant serait un test. Les deux autres
+> consommateurs (`observation_builder`, `reward_calculator`) sont partis avec le pipeline
+> mono-figurine 359-d, supprimé le même jour.
+> Le correctif décrit ci-dessus reste juste et testé ; il ne corrige simplement **aucun
+> comportement observable aujourd'hui**.
+>
+> **Décision prise le 2026-07-28 : SUPPRESSION** (cf. l'encadré en tête du document). Le motif :
+> conserver un service moteur que rien n'appelle, mais que 22 tests verts couvrent, c'est
+> exactement le piège que §0bis traque — le mort devient indétectable, et la prochaine lecture le
+> prend pour du vif.
 
 **Coût côté entraînement** : bench A/B sur un épisode complet du scénario Armageddon (board ×5,
 même seed, ancienne sémantique réimplémentée pour comparaison) — 84,1 ms/step contre
@@ -104,7 +143,7 @@ même seed, ancienne sémantique réimplémentée pour comparaison) — 84,1 ms/
 pas la fonction.
 
 **Coût côté PvE**, mesuré sur board 220×300 (scénario Armageddon, un pool de mouvement réel de
-2195 destinations candidates) :
+2195 destinations candidates) — mesure faite sur la boucle du bot scripté, depuis supprimée :
 
 | Version | Coût d'une décision de mouvement | Exactitude |
 |---------|----------------------------------|------------|
@@ -115,17 +154,25 @@ pas la fonction.
 La ligne du milieu est le piège : mémoïser par SOURCE alors que la boucle du bot fait varier la
 source et fixe la cible transforme le gain en régression d'un facteur 38. Le correctif est de
 calculer le champ depuis le point FIXE (l'ennemi) et de lire chaque candidat dedans — c'est ce
-que fait `pve_controller._ai_select_movement_destination`, et la lecture symétrique de
-`calculate_pathfinding_distance` protège les appelants qui l'ignorent.
+que faisait `pve_controller._ai_select_movement_destination`, et la lecture symétrique de
+`calculate_pathfinding_distance` protège les appelants qui l'ignoreraient. La leçon reste valable
+pour tout futur appelant ; l'appelant mesuré, lui, n'existe plus (cf. l'encadré ci-dessus).
 
-Sujet distinct ouvert par cette mesure : les sections d'observation héritées qui portent ces
-appels semblent inertes dans le pipeline squad. Leur suppression n'a pas été traitée ici.
+Sujet ouvert par cette mesure, **traité le 2026-07-28** : les sections d'observation héritées qui
+portaient ces appels étaient bien inertes dans le pipeline squad. Elles ont été supprimées avec le
+pipeline mono-figurine 359-d (`observation_builder` : 33 méthodes ; `reward_calculator` : 13
+méthodes), et le PvE a été migré sur le contrat squad.
 
 ---
 
-## 5. Tests
+## 5. Tests — SUPPRIMÉS avec le code
 
-`tests/unit/engine/test_pathfinding_distance_exact.py` (11 cas) : profondeur issue de la config
+> `test_pathfinding_distance_exact.py` a été supprimé en entier et la classe `TestPathfinding`
+> retirée de `test_hex_utils.py` (22 cas au total) le 2026-07-28, plus les 3 cas résiduels de
+> `test_combat_utils_gaps.py` / `test_combat_utils_extended.py`. Ce qui suit décrit ce qu'ils
+> couvraient — utile seulement si la primitive est un jour reconstruite.
+
+`tests/unit/engine/test_pathfinding_distance_exact.py` (11 cas ; 22 avec `test_hex_utils.py::TestPathfinding`) : profondeur issue de la config
 scalée, borne de profondeur respectée, erreur explicite si la clé manque, absence de troncature
 au-delà de l'ancien plafond, détour par les murs conservé, cible sur mur injoignable, cache
 indexé par source et non par paire, sens inverse servi par le même champ, motif « N sources /

@@ -40,7 +40,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.39` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.38` le 2026-07-28).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.40` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.39` le 2026-07-28).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -53,7 +53,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 **Épuration du 2026-07-28** : les entrées **§0.22, §0.27, §0.28, §0.31, §0.32, §0.34, §0.35, §0.36,
 §0.37** ont été descendues en **§0hist** (intégrales, ancres inchangées) — elles étaient closes mais
 occupaient encore la section « ouvert ». Ne restent ici que les **cinq** chantiers réellement
-actionnables.
+actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist avec les autres).
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
@@ -73,8 +73,12 @@ la modification **annule** la décision documentée en §0.14 :
 |---|---|---|
 | `bot_eval_freq` | **4000** | **2000** |
 
-Les deux autres écarts du même fichier vont dans l'autre sens (les `justification` d'`obs_size` y sont
-mises à jour de « grille 32x32x7 » vers « 32x32x9 », ce qui **corrige** un texte périmé par §0.32 T-K/T-L).
+**C'est le SEUL écart qui contredit une décision.** Les autres écarts du même fichier vont dans
+l'autre sens : les `justification` d'`obs_size` sont mises à jour de « grille 32x32x7 » vers
+« 32x32x9 » (**corrige** un texte périmé par §0.32 T-K/T-L), et les clés `perception_radius` /
+`max_nearby_units` / `max_valid_targets` ont été **retirées des 5 profils** le 2026-07-28 — elles
+n'alimentaient que le pipeline mono-figurine supprimé le même jour, plus aucun code ne les lit
+(vérifié par grep sur `engine/`, `services/`, `ai/`, `config_loader.py`). Aucun impact sur le run.
 **Avant de lancer le run §0.14, trancher `bot_eval_freq` puis committer** — sinon le run tourne avec une
 cadence d'éval que le document contredit. Rappel du raisonnement §0.14 : à 2000, sur 30 000 épisodes,
 **4 évals tombent avant `save_best_min_episodes` (10 000) et ne peuvent sauvegarder aucun modèle**.
@@ -335,7 +339,9 @@ materialize_eval_refs=False, scenario_list_override=[chemin])`. Le mode holdout 
 > 2 par bot, les Combined (61,5 % / 38 % / 19,5 % / 42 %) restent **non concluants** (bruit
 > d'échantillon) — c'est le **pipeline** qui est validé, pas la politique. Un win-rate
 > interprétable exige toujours un run long à `total_episodes` réel (10-30k), aujourd'hui coûteux
-> en temps (~36 h) — c'est précisément la cible du chantier `V11_move_pool_optimization.md` (§0.22).
+> en temps (~36 h) — c'était précisément la cible du chantier §0.22, cadrage archivé
+> [`Implémenté/V11_move_pool_optimization.md`](Implémenté/V11_move_pool_optimization.md) (**clos**),
+> suite vivante [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md).
 > §0.15 étant tranché, ce win-rate mesurera la robustesse à l'**adversaire**.
 
 **Run de re-mesure du 2026-07-20 — commande exacte :**
@@ -1981,8 +1987,11 @@ legacy par-figurine, movement_handlers ~L3701/4107, charge_handlers ~L5597/5877)
    exige `fight_subphase` + les 3 pools d'activation (contrat replay), et l'action les mute.
 
 ⚠️ **Rayon PvP : NUL, vérifié.** `execute_squad_move` n'a qu'UN appelant (`_process_squad_action`)
-et `_process_squad_action` n'est appelé que depuis `step()`/`_build_observation` = gym.
-Le PvP (`services/api_server.py`) passe par `execute_semantic_action` → `_process_semantic_action`.
+et `_process_squad_action` n'est appelé que depuis `step()`/`_build_observation` = gym,
+**plus `execute_ai_turn` depuis le 2026-07-28** (le bot PvE a été migré sur le contrat squad :
+même observation, même masque, même décodeur que l'entraînement — cf. `AI_OBSERVATION_Legacy.md`).
+Le PvP humain (`services/api_server.py`) passe toujours par `execute_semantic_action` →
+`_process_semantic_action`, inchangé.
 
 **Le déploiement n'était PAS journalisé non plus** (`deployment_handlers` : grep
 `append_action_log` = 0). Conséquence mesurée et non évidente : `log_episode_start` écrit les
@@ -3404,6 +3413,51 @@ spécialisé suffit.
 > sur l'une d'elles sans la confronter au code.
 
 
+<a id="s0.39"></a>
+### 0.39 Pathfinding exact — correctif juste, aucun appelant, code SUPPRIMÉ — ✅ CLOS (2026-07-28)
+
+**Source de vérité : [`Implémenté/V11_pathfinding_exact.md`](Implémenté/V11_pathfinding_exact.md)**
+(archivé : le code qu'il décrit n'existe plus).
+
+**Ce qui est livré (2026-07-27).** `combat_utils.calculate_pathfinding_distance` ne tronque plus :
+la profondeur vient de `game_rules.max_search_distance` (déjà en subhex) et le plafond de nœuds
+(`max_open_nodes = 2000`) est supprimé. Au-delà de ~5 pouces sur board ×5, TOUTE distance valait
+auparavant « injoignable ». Ajout de `hex_utils.pathfinding_field` (champ BFS par source, mémoïsé,
+purgé aux 3 morts d'épisode) dont la forme point-à-point est une simple enveloppe. **22 tests** :
+`test_pathfinding_distance_exact.py` (11) + `test_hex_utils.py::TestPathfinding` (11), comptés le
+2026-07-28.
+
+**Ce qui s'est révélé le 2026-07-28.** Le doc désignait le bot PvE
+(`pve_controller._ai_select_movement_destination`) comme consommateur vivant. **Il ne l'était
+déjà pas** : aucun appelant dans tout le dépôt, et son `self._get_unit_by_id` n'était assigné
+nulle part (un appel aurait levé `TypeError`). Il a été supprimé avec le nettoyage du
+`pve_controller`, et les deux autres consommateurs (`observation_builder`, `reward_calculator`)
+sont partis avec le pipeline mono-figurine 359-d. **Bilan : la chaîne
+`calculate_pathfinding_distance` → `get_pathfinding_field` → `hex_utils.pathfinding_field` est
+fermée sur elle-même.** Chaque maillon a un appelant sauf le premier, qui n'en a plus aucun de
+production — donc l'ensemble est mort.
+
+⚠️ **Motif §0bis, troisième occurrence** (après T6-i et §0.38) : *du code testé mais jamais
+appelé*. Ici la variante est plus coûteuse — le correctif a été mesuré, benché et documenté comme
+réparant un comportement du bot, alors que ce comportement n'était pas atteignable. La leçon n'est
+pas « ne pas corriger » mais **vérifier qu'un appelant existe AVANT de mesurer un gain** : un
+`grep` du nom de la fonction appelante aurait suffi, et la mesure « 3,6 s → 0,062 s » n'a jamais
+décrit une exécution réelle.
+
+**Décision de l'utilisateur : SUPPRESSION** — exécutée le 2026-07-28. Retirés :
+`calculate_pathfinding_distance`, `get_pathfinding_field`, `PATHFINDING_FIELD_CACHE_MAX`
+(`combat_utils`) · `pathfinding_field`, `pathfinding_distance`, `PATHFINDING_UNREACHABLE`
+(`hex_utils`) · le cache `_pathfinding_field_cache` et ses 3 purges (`w40k_core`) · ses
+déclarations dans `game_snapshots._GS_STATIC_KEYS` et `api_server._GAME_STATE_EXCLUDE_KEYS` ·
+les 22 tests (fichier `test_pathfinding_distance_exact.py` supprimé, classe `TestPathfinding`
+retirée de `test_hex_utils.py`, 3 cas résiduels dans les 2 fichiers `test_combat_utils_*`).
+**252 lignes de moteur.** Vérifié : `pyright` 0 erreur, `check_ai_rules` et
+`hidden_action_finder` 0 erreur, fichiers de test touchés verts, smoke moteur nu complet
+(126 steps, 6 phases, épisode terminé).
+
+⚠️ **Ne pas confondre avec le pathfinding VIVANT** : le pool de move (`movement_handlers`, BFS
+géodésique) est un autre code, jamais concerné par cette suppression.
+
 ### 0.37 Contre-audit des livraisons §0.32–§0.35 — ✅ LIVRÉ (2026-07-28)
 
 **Origine.** L'utilisateur a demandé de vérifier « dans les détails » si le travail de la session
@@ -4499,7 +4553,8 @@ métrique `move_gym=hex`, celui qui domine). ✅ Tourne à toute résolution.
 
 **Diagnostic cProfile (config cachée après warmup ; board 60×80 SYNTHÉTIQUE — ⚠️ PAS le board de
 référence, qui est `config/board/44x60x5` = 220×300 subhex ; move 12, base 5, ez 12, res 5, 300
-itérations, tri `tottime`).** Proportions à re-mesurer sur 220×300, cf. `V11_move_pool_optimization.md`.
+itérations, tri `tottime`).** Proportions à re-mesurer sur 220×300, cf.
+[`Implémenté/V11_move_pool_optimization.md`](Implémenté/V11_move_pool_optimization.md) (archivé, clos).
 
 | Fonction | Part | Note |
 |---|---|---|

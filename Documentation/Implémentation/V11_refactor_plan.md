@@ -2,7 +2,10 @@
 
 > **But.** Réduire `V11_agent_rework.md` (4399 lignes / 341 Ko) à un **index d'état** (à faire / fait
 > + méthode), en sortant les chantiers clos et les axes stables dans des sous-docs, chacun avec un
-> pointeur depuis l'index. Pattern déjà validé : §0.22 → `V11_move_pool_optimization.md`.
+> pointeur depuis l'index. Pattern déjà validé : §0.22 →
+> [`Implémenté/V11_move_pool_optimization.md`](Implémenté/V11_move_pool_optimization.md) (chantier
+> clos → sous-doc **archivé** dans `Implémenté/` le 2026-07-28 ; la suite vivante reste
+> [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)).
 >
 > **Statut : PLAN, non exécuté.** À lancer HORS run et APRÈS que l'agent move_pool ait fini sa passe
 > et mis à jour le pointeur §0.22 dans `V11_agent_rework.md` (sinon édition concurrente du même
@@ -78,7 +81,7 @@ C'est le plus gros gain de taille (1373 lignes, 31 %) MAIS le plus cher et le pl
 | §0, §0bis, §0ter, §0hist | §1+§1bis+§2+§3+§4+§5+§6+§7+§8 → `V11_tranches.md` |
 | Tableau d'état + pointeurs | §9 → `V11_phaseA.md` |
 | | §10 → `V11_eval_strategy.md` |
-| | (déjà sorti : §0.22 → `V11_move_pool_optimization.md`) |
+| | (déjà sorti : §0.22 → `Implémenté/V11_move_pool_optimization.md`, archivé clos) |
 
 Total liens à recâbler sous Option A : **6 (§9) + 27 (§2-8) + 54 (§10) = 87**, moins les renvois
 INTERNES aux blocs déplacés (qui restent locaux). Les 34 liens §0hist→§10 et 19 §0hist→tranches

@@ -350,11 +350,6 @@ class W40KEngine(gym.Env):
                 self.config["charge"] = charge_cfg
                 if "charge_max_distance" in charge_cfg:
                     charge_cfg["charge_max_distance"] = int(charge_cfg["charge_max_distance"]) * _scale
-            op = self.config.get("observation_params")
-            if op and "perception_radius" in op:
-                op = copy.deepcopy(op)
-                self.config["observation_params"] = op
-                op["perception_radius"] = int(op["perception_radius"]) * _scale
             self.config["inches_to_subhex"] = _scale
         else:
             self.config["inches_to_subhex"] = 1
@@ -519,7 +514,6 @@ class W40KEngine(gym.Env):
 
         self.game_state.pop("_wall_set_cache", None)
         self.game_state.pop("_dense_wall_set_cache", None)
-        self.game_state.pop("_pathfinding_field_cache", None)
         self.game_state.pop("_obscuring_area_sets_cache", None)
         self.game_state.pop("_obscuring_hex_to_area_cache", None)
         self.game_state.pop("_unit_los_pair_cache", None)
@@ -579,12 +573,11 @@ class W40KEngine(gym.Env):
                 )
             
             obs_size = obs_params["obs_size"]  # NO DEFAULT - raise error si manquant
-            # perception_radius / max_nearby_units / max_valid_targets ne sont PAS recopies ici :
-            # `self.training_config["observation_params"]` reste en POUCES (le deep-copy de la
-            # normalisation ci-dessus a desolidarise `self.config["observation_params"]`, seul
-            # porteur de la valeur scalee en sub-hex). Les dupliquer sur le moteur ressuscitait
-            # une seconde source de verite, en mauvaise unite et jamais relue. Source unique :
-            # `self.obs_builder`, construit sur `self.config["observation_params"]`.
+            # `observation_params` ne porte plus que `obs_size` : les anciens parametres de
+            # perception (perception_radius / max_nearby_units / max_valid_targets) etaient
+            # propres au pipeline mono-figurine et ont ete supprimes avec lui (2026-07-28).
+            # L'etendue percue par l'agent est desormais celle de la grille egocentrique
+            # (`engine/spatial_grid.py`), qui est aussi celle du masque et du decodeur.
         else:
             # Pas de config = erreur (pas de valeur par défaut)
             raise ValueError(
@@ -592,21 +585,18 @@ class W40KEngine(gym.Env):
                 "No default value allowed."
             )
 
-        # `obs_size` ROUTE le pipeline d'observation : il doit donc designer un pipeline qui
-        # EXISTE. Toute autre valeur tombait auparavant dans la branche `else` ci-dessous et
-        # construisait silencieusement un Box(obs_size) que RIEN ne sait remplir : l'incoherence
-        # n'apparaissait qu'a la 1re observation, sous un message parlant du pipeline mono-fig
-        # — alors que la cause reelle est « la config porte une taille perimee ». C'est
-        # exactement le repli masquant que la convention projet interdit : le layout squad change
-        # a chaque evolution du schema d'entites, donc ce cas se produit VRAIMENT (rencontre le
-        # 2026-07-26 en portant le bloc figurines de 6 a 20 slots).
+        # `obs_size` doit designer le layout squad EN VIGUEUR. Une valeur perimee construisait
+        # auparavant un Box(obs_size) que RIEN ne sait remplir, et l'incoherence n'apparaissait
+        # qu'a la 1re observation — alors que la cause reelle est « la config porte une taille
+        # perimee ». C'est exactement le repli masquant que la convention projet interdit : le
+        # layout squad change a chaque evolution du schema d'entites, donc ce cas se produit
+        # VRAIMENT (rencontre le 2026-07-26 en portant le bloc figurines de 6 a 20 slots).
         _squad_obs_size = self.obs_builder.SQUAD_OBS_SIZE_TARGET
-        if obs_size not in (self.obs_builder.PHASE2_OBS_SIZE, _squad_obs_size):
+        if obs_size != _squad_obs_size:
             raise ValueError(
-                f"observation_params.obs_size={obs_size} ne correspond a AUCUN pipeline "
+                f"observation_params.obs_size={obs_size} ne correspond pas au pipeline "
                 f"d'observation : attendu {_squad_obs_size} (pipeline squad, taille calculee "
-                f"par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites) ou "
-                f"{self.obs_builder.PHASE2_OBS_SIZE} (pipeline mono-figurine legacy). "
+                f"par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites). "
                 f"Si le layout squad vient de changer, mettre obs_size a {_squad_obs_size} dans "
                 f"la config d'agent — et relancer un entrainement `--new` : les modeles existants "
                 f"sont incompatibles par construction."
@@ -1067,11 +1057,6 @@ class W40KEngine(gym.Env):
         # activation en cours) serait donc reutilise tel quel dans l'episode suivant, au lieu
         # d'etre re-tire (09.06 : un jet par Advance).
         self.game_state.pop("_squad_advance_rolls", None)
-        # Champs BFS memoises par source (combat_utils.calculate_pathfinding_distance) : ils
-        # sont calcules sur les murs de l'episode. Les murs changent d'un episode a l'autre
-        # (train_wall_ref_weights), donc un champ survivant donnerait des distances calculees
-        # sur un AUTRE plateau — a l'obs comme au reward, sans aucun signal.
-        self.game_state.pop("_pathfinding_field_cache", None)
 
         # Reset episode-level metric accumulators
         self.episode_reward_accumulator = 0.0
@@ -2219,9 +2204,13 @@ class W40KEngine(gym.Env):
         # Make AI decision - replaces human click
         try:
             ai_semantic_action = self.pve_controller.make_ai_decision(self.game_state, self)
-            
-            # Execute through SAME path as humans
-            result = self._process_semantic_action(ai_semantic_action)
+
+            # Execute through the SQUAD dispatcher : la decision vient de la politique squad,
+            # donc sa semantique est celle de `convert_squad_action` (squad_normal_move,
+            # squad_shoot, zone_intent...). `_process_semantic_action` ne connait pas ce
+            # vocabulaire — c'est `_process_squad_action` qui l'execute, en appelant les MEMES
+            # handlers de phase que le joueur humain.
+            result = self._process_squad_action(ai_semantic_action)
             return result
             
         except Exception as e:
@@ -4953,9 +4942,9 @@ class W40KEngine(gym.Env):
     ) -> None:
         """Transfere vers le StepLogger les action_logs produits par la derniere action squad.
 
-        V11 T6 (rupture T6-c) : le pipeline squad (`_process_squad_action`, chemin VIF du gym)
-        n'appelait AUCUN `log_action` — les 17 sites vivent dans `_process_semantic_action`
-        (chemin PvE/legacy). Resultat : step.log reduit a ses en-tetes (`Actions=0, Steps=0` sur
+        V11 T6 (rupture T6-c) : le pipeline squad (`_process_squad_action`, chemin VIF du gym et,
+        depuis le 2026-07-28, du bot PvE) n'appelait AUCUN `log_action` — les 17 sites vivent dans
+        `_process_semantic_action` (chemin du joueur humain PvP). Resultat : step.log reduit a ses en-tetes (`Actions=0, Steps=0` sur
         474/475 episodes d'un run reel) et `ai/analyzer.py` sans matiere, alors que CLAUDE.md
         fait de « --step + analyzer.py + replay » la SEULE strategie de validation du training.
 
@@ -5172,8 +5161,8 @@ class W40KEngine(gym.Env):
         `_fight_v11_auto_consolidate` : le pile-in de reference est le par-figurine du PvP, le
         par-ancre est condamne.
 
-        Chemin gym uniquement (`_process_squad_action`) : le PvP conduit la meme machine pas a
-        pas via `fight_handlers`, qui n est pas touche.
+        Chemin `_process_squad_action` (gym + bot PvE) : le PvP humain conduit la meme machine pas
+        a pas via `fight_handlers`, qui n est pas touche.
 
         Ne termine PAS la phase : le gym transitionne par l action systeme `advance_phase` quand
         le masque se vide (`fight_phase_end`), jamais par une cascade depuis une action d unite.
@@ -5471,8 +5460,8 @@ class W40KEngine(gym.Env):
                 # action et un analyzer sans matiere (cf. T6-c). Emission en miroir du payload
                 # legacy (meme type "move" + was_flee ; `move_type` porte la nuance
                 # normal/advance/fall_back pour le mapping vers le formateur du StepLogger).
-            # Chemin gym-only (`execute_squad_move` n'a qu'un appelant : ce site) -> zero
-            # impact PvP, qui passe par execute_semantic_action.
+            # `execute_squad_move` n'a qu'un appelant : ce site (gym + bot PvE) -> zero impact
+            # sur le PvP humain, qui passe par execute_semantic_action.
             _move_to_col, _move_to_row = require_unit_position(squad_id, self.game_state)
             append_action_log(
                 self.game_state,
@@ -6216,15 +6205,12 @@ class W40KEngine(gym.Env):
     
     
     def _build_observation(self):
-        """Build observation — route selon obs_size :
-           - 357 : pipeline mono-fig legacy (build_observation) -> np.ndarray
-           - squad : build_squad_observation -> Dict de tenseurs d'entites + "grid"
+        """Build observation — pipeline squad, seul pipeline existant.
 
-        Pipeline squad : l'obs est un Dict de TENSEURS D'ENTITES (V11 §0.30 T-D — une unite,
-        amie ou ennemie, y porte le meme schema de features), toujours scinde continues/discretes
-        (V11 §9.5), plus la grille egocentrique (perception du terrain, spec §4.1 / T1b). La
-        geometrie de la grille est celle de `engine.spatial_grid`, partagee avec le masque (T2)
-        et le decoder (T3).
+        L'obs est un Dict de TENSEURS D'ENTITES (V11 §0.30 T-D — une unite, amie ou ennemie, y
+        porte le meme schema de features), toujours scinde continues/discretes (V11 §9.5), plus
+        la grille egocentrique (perception du terrain, spec §4.1 / T1b). La geometrie de la
+        grille est celle de `engine.spatial_grid`, partagee avec le masque (T2) et le decoder (T3).
         """
         # Regle 14.02 : le controle d objectif est determine a la FIN de chaque phase/tour.
         # Ce point de passage est le seul commun aux 7 sites de construction d observation du
@@ -6234,24 +6220,18 @@ class W40KEngine(gym.Env):
         # no-op tant que (phase, tour) n a pas change — cf.
         # GameStateManager.refresh_objective_control_on_boundary (partage avec le PvP).
         self.state_manager.refresh_objective_control_on_boundary(self.game_state)
-        obs_size = self.obs_builder.obs_size
-        is_squad_pipeline = obs_size == self.obs_builder.SQUAD_OBS_SIZE_TARGET
 
         def _zero_obs():
-            if is_squad_pipeline:
-                from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
+            from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
 
-                obs = self.obs_builder._empty_squad_observation()
-                obs["grid"] = np.zeros((GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32)
-                return obs
-            return np.zeros(obs_size, dtype=np.float32)
+            obs = self.obs_builder._empty_squad_observation()
+            obs["grid"] = np.zeros((GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32)
+            return obs
 
         def _build_for_squad(squad_id: str):  # get allowed
-            if is_squad_pipeline:
-                obs = self.obs_builder.build_squad_observation(self.game_state, squad_id)
-                obs["grid"] = self.obs_builder.build_squad_grid(self.game_state, squad_id)
-                return obs
-            return self.obs_builder.build_observation(self.game_state)
+            obs = self.obs_builder.build_squad_observation(self.game_state, squad_id)
+            obs["grid"] = self.obs_builder.build_squad_grid(self.game_state, squad_id)
+            return obs
 
         if self.game_state.get("phase") == "deployment":
             # En deployment, l agent voit ses unites pas encore deployees. Selectionne
@@ -6290,14 +6270,6 @@ class W40KEngine(gym.Env):
             if active_squad_id is None:
                 return _zero_obs()
         return _build_for_squad(active_squad_id)
-
-    def build_macro_observation(self) -> Dict[str, Any]:
-        """Build macro observation - delegates to observation_builder."""
-        return self.obs_builder.build_macro_observation(self.game_state)
-
-    def build_observation_for_unit(self, unit_id: str) -> np.ndarray:
-        """Build observation for a specific unit without reordering pools."""
-        return self.obs_builder.build_observation_for_unit(self.game_state, unit_id)
 
     def _calculate_board_max_range(self, board_cols: int, board_rows: int) -> int:
         """
@@ -6515,7 +6487,6 @@ class W40KEngine(gym.Env):
         self.game_state.pop("_unit_los_pair_cache", None)
         self.game_state.pop("_wall_set_cache", None)
         self.game_state.pop("_dense_wall_set_cache", None)
-        self.game_state.pop("_pathfinding_field_cache", None)
         self.game_state.pop("_hex_los_state_cache", None)
         objectives = require_key(self.game_state, "objectives")
         self.game_state["macro_target_objective_index"] = 0 if objectives else None

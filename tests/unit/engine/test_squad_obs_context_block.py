@@ -104,7 +104,6 @@ def _cross_phase_boundary(engine, new_phase: str = "shoot") -> None:
 
 def _config(objectives: Any = None) -> Dict[str, Any]:
     obs_params = {
-        "perception_radius": 25, "max_nearby_units": 10, "max_valid_targets": 5,
         "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET,
     }
     objs = [{"id": "obj1", "hexes": _OBJECTIVE_HEXES}] if objectives is None else objectives

@@ -3,11 +3,16 @@
 > ## ⛔ CE DOCUMENT NE DÉCRIT PAS L'OBSERVATION ACTUELLE
 >
 > Il décrit le pipeline **mono-figurine** (`obs_size = 359`, vecteur plat d'offsets fixes
-> `obs[N]` / `[ally_base + N]`), conservé ici pour référence historique. **Aucun agent ne
-> l'utilise** : `ArmageddonAgent` porte `obs_size = 20626` et le moteur route sur
-> `build_squad_observation`. Son seul chemin d'accès résiduel est `pve_controller`, et comme
-> `build_observation` lève si `obs_size != 359`, ce chemin serait en erreur avec la config
-> actuelle — il est mort ou cassé (constat du 2026-07-28, non tranché).
+> `obs[N]` / `[ally_base + N]`), **SUPPRIMÉ du code le 2026-07-28**. Ce document n'est plus
+> qu'une archive : plus aucune de ces fonctions n'existe (`build_observation`,
+> `build_observation_for_unit`, `_encode_*`, `_calculate_danger_probability`,
+> `_get_valid_targets`, `PHASE2_OBS_SIZE`…).
+>
+> Son dernier chemin d'accès était `pve_controller`, et comme `build_observation` levait si
+> `obs_size != 359` alors qu'`ArmageddonAgent` porte `obs_size = 20626`, **le mode PvE
+> micro-modèle était en panne**. Il a été migré sur le pipeline squad le même jour : observation
+> en tenseurs d'entités, masque à 41 actions, décodage par `convert_squad_action`, exécution par
+> `_process_squad_action` — le contrat exact de l'entraînement.
 >
 > **L'observation actuelle est décrite dans [`AI_OBSERVATION.md`](AI_OBSERVATION.md).**
 >

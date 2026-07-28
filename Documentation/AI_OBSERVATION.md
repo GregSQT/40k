@@ -5,10 +5,13 @@ le seul sur lequel l'agent s'entraîne.
 
 > **Ce document ne décrit QUE le code actuel.** Le pipeline mono-figurine (`obs_size = 359`,
 > vecteur plat d'offsets `obs[N]`) a été déplacé dans
-> **[`AI_OBSERVATION_Legacy.md`](AI_OBSERVATION_Legacy.md)** le 2026-07-28. Il vivait ici sous un
-> bandeau d'avertissement, et induisait quand même en erreur à chaque lecture : ses offsets, ses
+> **[`AI_OBSERVATION_Legacy.md`](AI_OBSERVATION_Legacy.md)** le 2026-07-28, puis **SUPPRIMÉ du
+> code le même jour** : `build_observation`, `build_observation_for_unit`, leurs 33 méthodes
+> d'encodage et la constante `PHASE2_OBS_SIZE` n'existent plus. Il vivait ici sous un bandeau
+> d'avertissement, et induisait quand même en erreur à chaque lecture : ses offsets, ses
 > « 12 unit-rule flags » et ses features calculées (`ranged_favorite_target`,
-> `melee_favorite_target`…) n'existent plus. Aucun agent ne l'utilise.
+> `melee_favorite_target`…) n'existent plus. Le seul pipeline d'observation est celui décrit
+> ci-dessous — le PvE y a été migré (`pve_controller.make_ai_decision`).
 >
 > **Version** : 3.0 — tenseurs d'entités (V11 §0.30 T-D), complétée par V11 §0.31.
 > **Pipeline de training/évaluation** : `AI_TRAINING.md` (CLI, callbacks, évaluation contre bots).

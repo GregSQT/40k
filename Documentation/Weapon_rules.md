@@ -520,8 +520,7 @@ valeur, et un écart **lève à l'init du moteur** en citant la valeur attendue.
 ```json
 {
   "observation_params": {
-    "obs_size": 313,  // exemple historique — valeur réelle : ObservationBuilder.SQUAD_OBS_SIZE_TARGET
-    "perception_radius": 25
+    "obs_size": 313  // exemple historique — valeur réelle : ObservationBuilder.SQUAD_OBS_SIZE_TARGET
   }
 }
 ```

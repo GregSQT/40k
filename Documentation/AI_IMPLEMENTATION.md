@@ -201,9 +201,9 @@ engine/
 
 **Delegation Methods:**
 - `get_action_mask()` → `action_decoder.get_action_mask()`
-- `_build_observation()` → `obs_builder.build_observation()`
+- `_build_observation()` → `obs_builder.build_squad_observation()` + `build_squad_grid()`
 - `_calculate_reward()` → `reward_calculator.calculate_reward()`
-- `_convert_gym_action()` → `action_decoder.convert_gym_action()`
+- `_convert_gym_action()` → `action_decoder.convert_squad_action()`
 - `_initialize_units()` → `state_manager.initialize_units()`
 
 **Responsibilities:**
@@ -254,24 +254,17 @@ engine/
 
 **Class:** `ObservationBuilder`
 
-**Key Methods:**
-- `__init__(config)` - Initialize with perception radius
-- `build_observation(game_state)` - Build 150-float egocentric observation
-- `_get_active_unit_for_observation(game_state)` - Get unit to observe from
-- `_encode_directional_terrain(obs, active_unit, game_state, base_idx)` - Terrain encoding
-- `_encode_allied_units(obs, active_unit, game_state, base_idx)` - Allied units (relative coords)
-- `_encode_enemy_units(obs, active_unit, game_state, base_idx)` - Enemy units (relative coords)
-- `_encode_valid_targets(obs, active_unit, game_state, base_idx)` - Target selection data
+**Key Methods** (pipeline squad — contrat détaillé dans `AI_OBSERVATION.md`) :
+- `__init__(config)` - Lit `observation_params` (dont `obs_size`, source unique)
+- `build_squad_observation(game_state, active_squad_id)` - Dict de tenseurs d'entités
+- `build_squad_grid(game_state, active_squad_id)` - Grille égocentrique (9, 32, 32)
+- `squad_obs_shapes()` - Formes de chaque clé, consommées par l'espace d'observation et les tests
+- `_target_priority_score(...)` - Score de priorité de cible, partagé avec `fight_handlers`
 
-**Tactical Feature Calculations:**
-- `_calculate_combat_mix_score(unit)` - Ranged vs melee preference (0.1-0.9)
-- `_calculate_expected_damage()` - Expected damage calculation
-- `_calculate_favorite_target(unit)` - Preferred target type encoding
-- `_calculate_movement_direction(unit)` - Recent movement vector
-- `_calculate_kill_probability(shooter, target)` - Chance to kill target
-- `_calculate_danger_probability(defender, attacker)` - Threat assessment
-- `_calculate_army_weighted_threat(target, valid_targets)` - Army-wide threat priority
-- `_calculate_target_type_match(active_unit, target)` - Target type match score
+> ⚠️ Le pipeline mono-figurine (`build_observation`, `_encode_*`, `_calculate_danger_probability`,
+> `_calculate_favorite_target`…) a été **supprimé le 2026-07-28**. Les sections de ce document qui
+> décrivent une observation « 150 floats » plus bas n'ont jamais été remises à jour depuis, et
+> décrivent un code qui n'existe plus.
 
 **Utility Methods:**
 - `_check_los_cached(shooter, target, game_state)` - Line of sight with cache
@@ -813,7 +806,7 @@ Back in step():
 
 **6. Build Observation**
 ```
-obs_builder.build_observation(game_state)
+obs_builder.build_squad_observation(game_state, active_squad_id)
 │
 ├─ Get active unit (first in current activation pool)
 │
@@ -999,7 +992,7 @@ All modules receive game_state as parameter:
 │   └─ Reads: units, current_player, move_activation_pool
 │   └─ Writes: units[i]["col"], units[i]["row"], units_moved
 │
-├─> observation_builder.build_observation(game_state)
+├─> observation_builder.build_squad_observation(game_state, active_squad_id)
 │   └─ Reads: units, current_player, phase, los_cache
 │   └─ Writes: nothing (pure read)
 │

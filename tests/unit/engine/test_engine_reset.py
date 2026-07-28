@@ -27,7 +27,7 @@ from engine.w40k_core import W40KEngine
 @pytest.fixture(autouse=True)
 def mock_build_obs(monkeypatch):
     """Mocke _build_observation pour tous les tests — on ne teste pas l'obs builder ici."""
-    monkeypatch.setattr(W40KEngine, "_build_observation", lambda self: np.zeros(ObservationBuilder.PHASE2_OBS_SIZE))
+    monkeypatch.setattr(W40KEngine, "_build_observation", lambda self: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -68,10 +68,7 @@ def _unit_cfg(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
 def _minimal_config_with_units() -> Dict[str, Any]:
     """Config minimale valide avec 2 unités pour tester reset()."""
     obs_params = {
-        "perception_radius": 25,
-        "max_nearby_units": 10,
-        "max_valid_targets": 5,
-        "obs_size": ObservationBuilder.PHASE2_OBS_SIZE,
+        "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET,
     }
     return {
         "board": {

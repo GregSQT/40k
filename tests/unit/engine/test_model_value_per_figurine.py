@@ -281,8 +281,6 @@ class TestObservationEnemySquadValue:
         build_units_cache(gs)
         builder = ObservationBuilder({
             "observation_params": {
-                "perception_radius": 25, "max_nearby_units": 6,
-                "max_valid_targets": 5,
                 "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET,
             }
         })

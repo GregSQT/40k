@@ -362,9 +362,6 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
     "_choice_timing_fired_events",
     "_deployment_random_mix_forced_steps",
     "_wall_set_cache",
-    # Champs BFS par source : tableaux numpy indexés par des clés tuple — non sérialisables
-    # en JSON, et sans usage client.
-    "_pathfinding_field_cache",
     "_obscuring_area_sets_cache",
     "_obscuring_hex_to_area_cache",
     "_unit_los_pair_cache",

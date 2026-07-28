@@ -66,10 +66,7 @@ def _unit_cfg(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
 
 def _minimal_config() -> Dict[str, Any]:
     obs_params = {
-        "perception_radius": 25,
-        "max_nearby_units": 10,
-        "max_valid_targets": 5,
-        "obs_size": ObservationBuilder.PHASE2_OBS_SIZE,
+        "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET,
     }
     return {
         "board": {
@@ -118,7 +115,7 @@ def _minimal_config() -> Dict[str, Any]:
 
 @pytest.fixture(autouse=True)
 def mock_build_obs(monkeypatch):
-    monkeypatch.setattr(W40KEngine, "_build_observation", lambda self: np.zeros(ObservationBuilder.PHASE2_OBS_SIZE))
+    monkeypatch.setattr(W40KEngine, "_build_observation", lambda self: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET))
     from engine.reward_calculator import RewardCalculator
     monkeypatch.setattr(RewardCalculator, "calculate_reward", lambda self, *a, **kw: 0.0)
 

@@ -41,8 +41,7 @@ def _unit_cfg(uid: int, player: int, col: int, row: int, base_size: int = 1) -> 
 
 
 def _make_engine(base_size: int = 1, walls=None) -> W40KEngine:
-    obs_params = {"perception_radius": 25, "max_nearby_units": 10, "max_valid_targets": 5,
-                  "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET}
+    obs_params = {"obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET}
     config = {
         "board": {"default": {"cols": 60, "rows": 60, "hex_radius": 1.0, "margin": 0.0,
                               "wall_hexes": walls or [], "objectives": [], "inches_to_subhex": 1}},

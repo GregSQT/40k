@@ -6,12 +6,10 @@ pve_controller.py - PvE mode AI opponent
 import numpy as np
 import os
 from typing import Dict, Any, Optional, Tuple, List, cast
-from engine.combat_utils import calculate_hex_distance, calculate_pathfinding_distance, normalize_coordinates, get_unit_coordinates
 from engine.phase_handlers.shared_utils import is_unit_alive
 from shared.data_validation import require_key
 from engine.action_decoder import ActionValidationError
 from config_loader import get_config_loader
-from engine.macro_intents import BASE_ZONE_INTENT
 
 class PvEController:
     """Controls AI opponent in PvE mode."""
@@ -26,16 +24,13 @@ class PvEController:
         # joue en obs brutes. Resolu au CHARGEMENT (`_resolve_vec_stats_path`) : a l'inference,
         # un chemin inconnu est une erreur, jamais un repli silencieux.
         self.micro_model_vec_stats: Dict[str, Optional[str]] = {}
+        # model_path -> objet VecNormalize charge (obs Dict du pipeline squad). Cache pur : il
+        # evite de depickler les stats a chaque decision, il ne decide rien.
+        self._micro_model_vec_normalize: Dict[str, Any] = {}
         self.macro_model_key = None
         self.unit_registry = unit_registry
         self.quiet = config.get("quiet", True)
-        # Members used by model-driven selection paths, populated at runtime by the
-        # owning engine/training harness when PvE runs against a trained model.
-        self._ai_model: Any = None
-        self._build_observation: Any = None
-        self._convert_gym_action: Any = None
-        self._get_unit_by_id: Any = None
-    
+
     # ============================================================================
     # MODEL LOADING
     # ============================================================================
@@ -65,7 +60,8 @@ class PvEController:
             if not self.quiet:
                 print("PvE: Macro controller disabled (micro-only CoreAgent mode)")
             
-            # Wrap engine with ActionMasker for micro models (action space = 13)
+            # Wrap engine with ActionMasker : le masque est celui du pipeline squad
+            # (`W40KEngine.get_action_mask` -> `get_squad_action_mask_and_eligible_units`).
             def mask_fn(env):
                 return env.get_action_mask()
             masked_env = ActionMasker(engine, mask_fn)
@@ -140,25 +136,50 @@ class PvEController:
     def make_ai_decision(self, game_state: Dict[str, Any], engine) -> Dict[str, Any]:
         """
         AI decision logic - replaces human clicks with model predictions.
-        Uses SAME handler paths as humans after decision is made.
+
+        Pipeline SQUAD (V11) : observation en tenseurs d'entites + grille, masque a 41 actions,
+        decodage par `convert_squad_action`. C'est la MEME machine que l'entrainement
+        (`W40KEngine.step`) et que l'evaluation (`ai/bot_evaluation`) — un bot conduit par un
+        autre contrat que celui sur lequel la politique a ete entrainee joue autre chose que ce
+        qu'elle a appris.
+
+        L'observation est construite AVANT le masque : `_build_observation` peut avancer la phase
+        quand le pool est vide, et le masque doit decrire l'etat sur lequel le modele a decide.
         """
         if not self.micro_models:
             raise RuntimeError("Micro models not loaded for PvE")
 
-        current_phase = require_key(game_state, "phase")
-
-        action_mask, eligible_units = engine.action_decoder.get_action_mask_and_eligible_units(game_state)
-        if not eligible_units:
-            raise RuntimeError("No eligible units for PvE decision")
-        active_shooting_unit = game_state.get("active_shooting_unit")
-        if active_shooting_unit is not None:
-            selected_unit_id = str(active_shooting_unit)
-        else:
+        micro_obs = engine._build_observation()
+        action_mask, eligible_units = engine.action_decoder.get_squad_action_mask_and_eligible_units(
+            game_state
+        )
+        if not eligible_units and not action_mask.any():
+            raise RuntimeError("No eligible units and no valid action for PvE decision")
+        # Squad actif = 1er eligible, EXACTEMENT la convention de `_build_observation`, du masque
+        # et de `convert_squad_action` : en choisir un autre desynchroniserait obs, masque et
+        # decodage. La phase command n'a pas de pool (zone intents + wait uniquement) ; le squad
+        # ne sert alors qu'a resoudre le modele, d'ou le repli sur la 1re unite vivante du joueur.
+        if eligible_units:
             selected_unit_id = str(require_key(eligible_units[0], "id"))
+        else:
+            current_player = int(require_key(game_state, "current_player"))
+            units_cache = require_key(game_state, "units_cache")
+            selected_unit_id = next(
+                (
+                    str(uid)
+                    for uid, entry in units_cache.items()
+                    if int(require_key(entry, "player")) == current_player
+                    and is_unit_alive(str(uid), game_state)
+                ),
+                "",
+            )
+            if not selected_unit_id:
+                raise RuntimeError(
+                    f"No living unit for player {current_player} to resolve PvE micro model"
+                )
         micro_model, micro_model_path = self._get_micro_model_and_path_for_unit_id(
             selected_unit_id, game_state, engine
         )
-        micro_obs = engine.build_observation_for_unit(str(selected_unit_id))
         micro_obs = self._normalize_obs_for_inference(micro_obs, micro_model_path)
         micro_prediction = micro_model.predict(micro_obs, action_masks=action_mask, deterministic=True)
         if isinstance(micro_prediction, tuple) and len(micro_prediction) >= 1:
@@ -198,17 +219,12 @@ class PvEController:
         except ActionValidationError as e:
             raise RuntimeError(f"PvE action validation failed: {e}") from e
 
-        # Guard: bot must never generate zone intent actions (actions >= BASE_ZONE_INTENT)
-        if action_int >= BASE_ZONE_INTENT:
-            raise ValueError(
-                f"pve_controller generated zone intent action {action_int} — "
-                "bot must only produce actions in [0, BASE_ZONE_INTENT). "
-                "This is an invariant violation."
-            )
-
-        # Convert to semantic action using engine's method
-        semantic_action = engine.action_decoder.convert_gym_action(
-            action_int, game_state, action_mask=action_mask, eligible_units=eligible_units
+        # Aucun garde supplementaire sur la valeur de l'action : les zone intents (26-40) font
+        # partie de l'espace d'action de la politique squad et ne sont ouverts qu'en phase
+        # command, par le masque lui-meme. Le masque est l'autorite — il vient d'etre verifie par
+        # `validate_action_against_mask`, qui leve au lieu de replier sur une action « sure ».
+        semantic_action = engine.action_decoder.convert_squad_action(
+            action_int, game_state, eligible_units=eligible_units
         )
         if game_state.get("debug_mode", False):
             from engine.game_utils import add_debug_file_log
@@ -219,21 +235,10 @@ class PvEController:
                 f"[AI_DECISION DEBUG] E{episode} T{turn} P2 make_ai_decision: "
                 f"action_int={action_int} semantic_action={semantic_action}"
             )
-        
-        # Ensure AI player context
-        current_player = game_state["current_player"]
-        if current_player == 2:
-            semantic_action["unitId"] = str(selected_unit_id)
-            if game_state.get("debug_mode", False):
-                from engine.game_utils import add_debug_file_log
-                episode = game_state.get("episode_number", "?")
-                turn = game_state.get("turn", "?")
-                add_debug_file_log(
-                    game_state,
-                    f"[AI_DECISION DEBUG] E{episode} T{turn} P2 make_ai_decision: "
-                    f"macro_unitId={selected_unit_id} action_int={action_int}"
-                )
-            print(f"🔍 [AI_DECISION] Final semantic_action: {semantic_action}")
+        # Aucune reecriture de l'identite de l'unite ici : la semantique squad porte deja
+        # `squad_id` (ou `unitId` pour deploy_unit), pose par `convert_squad_action` depuis le
+        # MEME pool que le masque. Forcer `unitId` ecrasait la cible d'actions qui n'en ont pas
+        # (zone_intent, command_wait).
         return semantic_action
 
     def _evaluate_rule_choice_option_value(
@@ -247,7 +252,14 @@ class PvEController:
         micro_model, micro_model_path = self._get_micro_model_and_path_for_unit_id(
             unit_id, game_state, engine
         )
-        unit_observation = engine.build_observation_for_unit(str(unit_id))
+        # Observation CANONIQUE du pipeline squad (celle de l'escouade active), la seule sur
+        # laquelle la tete de valeur a ete entrainee. On ne construit PAS l'obs de `unit_id` a la
+        # place : la grille egocentrique relit la carte de cellules posee par le masque (§0.32
+        # T-K), qui n'existe que pour l'escouade active — la reconstruire ici ferait diverger
+        # l'obs du masque, ce que la convention interdit explicitement.
+        # La branche « pool vide -> advance_phase » de `_build_observation` est hors d'atteinte
+        # ici : un choix de regle n'est propose que pendant une activation, donc pool non vide.
+        unit_observation = engine._build_observation()
         unit_observation = self._normalize_obs_for_inference(unit_observation, micro_model_path)
         obs_tensor, _ = micro_model.policy.obs_to_tensor(unit_observation)
         import torch
@@ -325,11 +337,6 @@ class PvEController:
         if not best_display_rule_ids:
             raise ValueError(f"No best option found despite computed scores: {option_scores!r}")
         return sorted(best_display_rule_ids)[0]
-
-    def _get_micro_model_for_unit_id(self, unit_id: str, game_state: Dict[str, Any]):
-        """Get micro model for a specific unit id."""
-        model, _ = self._get_micro_model_and_path_for_unit_id(unit_id, game_state)
-        return model
 
     def _get_micro_model_and_path_for_unit_id(
         self, unit_id: str, game_state: Dict[str, Any], engine=None
@@ -417,8 +424,18 @@ class PvEController:
             print(f"PvE: aucune stat VecNormalize pour {model_path} — obs servies brutes")
         return None
 
-    def _normalize_obs_for_inference(self, obs: np.ndarray, model_path: str) -> np.ndarray:
-        """Normalise l'observation avec les stats DU modèle, résolues à son chargement.
+    def _normalize_obs_for_inference(
+        self, obs: Dict[str, np.ndarray], model_path: str
+    ) -> Dict[str, np.ndarray]:
+        """Normalise l'observation squad avec les stats DU modèle, résolues à son chargement.
+
+        L'observation du pipeline squad est un Dict de tenseurs (V11 §0.30) et VecNormalize est
+        entraînée avec `norm_obs_keys=["global_cont"]` (`ai/train._vec_norm_obs_keys`) : les
+        tenseurs d'entités sont normalisés dans l'extracteur, la grille reste brute. On délègue
+        donc à `VecNormalize.normalize_obs`, comme l'évaluation
+        (`ai/bot_evaluation._build_eval_obs_normalizer_for_worker`), au lieu de réimplémenter la
+        formule — deux implémentations dériveraient. L'objet est chargé une fois par modèle, pas
+        à chaque décision.
 
         Aucun repli : un modèle jamais passé par `_resolve_vec_stats_path` est une erreur de
         flux (l'ancien code retournait l'obs brute sous un `except Exception`, faisant jouer
@@ -428,133 +445,21 @@ class PvEController:
                 f"PvE: modèle {model_path!r} non résolu au chargement — "
                 f"_resolve_vec_stats_path n'a pas été appelé pour ce chemin."
             )
-        if self.micro_model_vec_stats[model_path] is None:
+        stats_path = self.micro_model_vec_stats[model_path]
+        if stats_path is None:
             return obs
-        from ai.vec_normalize_utils import normalize_observation_for_inference
-
-        return normalize_observation_for_inference(obs, model_path)
-    
-    def ai_select_unit(self, eligible_units: List[Dict[str, Any]], action_type: str) -> str:
-        """AI selects which unit to activate - NO MODEL CALLS to prevent recursion."""
-        if not eligible_units:
-            raise ValueError("No eligible units available for selection")
-        # Model prediction happens at api_server.py level, this just selects from eligible units
-        # For AI_TURN.md compliance: select first eligible unit deterministically
-        # The AI model determines the ACTION, not which unit to select
-        return eligible_units[0]["id"]
-    
-    def _ai_select_unit_with_model(self, eligible_units: List[Dict[str, Any]], action_type: str) -> str:
-        """Use trained DQN model to select best unit for AI player."""
-        # Get current observation
-        obs = self._build_observation()
-        
-        # Get AI action from trained model
-        try:
-            action, _ = self._ai_model.predict(obs, deterministic=True)
-            semantic_action = self._convert_gym_action(action)
-            
-            # Extract unit selection from semantic action
-            suggested_unit_id = semantic_action.get("unitId")
-            
-            # Validate AI's unit choice is in eligible list
-            eligible_ids = [str(unit["id"]) for unit in eligible_units]
-            if suggested_unit_id in eligible_ids:
-                return suggested_unit_id
-            else:
-                # AI suggested invalid unit - use first eligible
-                return eligible_units[0]["id"]
-                
-        except Exception as e:
-            import logging
-            logging.error(f"pve_controller._select_unit_from_pool failed: {str(e)} - returning first eligible unit")
-            return eligible_units[0]["id"]
-    
-    # ============================================================================
-    # ACTION SELECTION
-    # ============================================================================
-    
-    def _ai_select_movement_destination(self, unit_id: str, game_state: Dict[str, Any]) -> Tuple[int, int]:
-        """AI selects movement destination that actually moves the unit."""
-        unit = self._get_unit_by_id(unit_id)
-        if not unit:
-            raise ValueError(f"Unit not found: {unit_id}")
-        
-        from engine.phase_handlers.shared_utils import require_unit_position
-        current_pos = require_unit_position(unit, game_state)
-        
-        # Use movement handler to get valid destinations
-        from engine.phase_handlers import movement_handlers
-        valid_destinations = movement_handlers.movement_build_valid_destinations_pool(game_state, unit_id)
-        
-        # Filter out current position to force actual movement
-        actual_moves = [dest for dest in valid_destinations if dest != current_pos]
-        
-        # Filter out current position to force actual movement
-        actual_moves = [dest for dest in valid_destinations if dest != current_pos]
-        
-        # AI_TURN.md COMPLIANCE: No actual moves available -> unit must WAIT, not attempt invalid move
-        if not actual_moves:
-            raise ValueError(f"No valid movement destinations for unit {unit_id} - should use WAIT action")
-        
-        # Strategy: Move toward nearest enemy for aggressive positioning
-        # Uses BFS pathfinding to respect walls when calculating distance
-        if "units_cache" not in game_state:
-            raise KeyError("game_state missing required 'units_cache' field")
-        unit_by_id = {str(u["id"]): u for u in game_state["units"]}
-        enemies = []
-        for enemy_id, entry in game_state["units_cache"].items():
-            if entry["player"] != unit["player"]:
-                enemy = unit_by_id.get(str(enemy_id))
-                if not enemy:
-                    raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
-                enemies.append(enemy)
-
-        if enemies:
-            # Find nearest enemy using BFS pathfinding distance (respects walls)
-            from engine.phase_handlers.shared_utils import require_unit_position
-            unit_col, unit_row = require_unit_position(unit, game_state)
-            nearest_enemy = min(enemies, key=lambda e: calculate_pathfinding_distance(unit_col, unit_row, *require_unit_position(e, game_state), game_state))
-            enemy_pos = require_unit_position(nearest_enemy, game_state)
-
-            # Select move that gets closest to nearest enemy using BFS pathfinding distance.
-            # UN SEUL champ BFS, calculé depuis l'ennemi (le point FIXE du lot), lu pour chaque
-            # destination candidate. Interroger `calculate_pathfinding_distance` par destination
-            # ferait un parcours complet par candidat, soit tout le pool de mouvement.
-            # La sentinelle « injoignable » est la valeur uint16 maximale : les destinations
-            # hors d'atteinte se classent donc naturellement en dernier, et si aucune ne
-            # rejoint l'ennemi `min` rend la première du pool (mêmes égalités qu'avant).
-            from engine.combat_utils import get_pathfinding_field
-            enemy_field = get_pathfinding_field(game_state, enemy_pos[0], enemy_pos[1])
-            board_cols = game_state["board_cols"]
-            best_move = min(
-                actual_moves,
-                key=lambda dest: int(enemy_field[dest[1] * board_cols + dest[0]]),
+        if not isinstance(obs, dict):
+            raise TypeError(
+                f"PvE: observation squad attendue sous forme de dict, reçu "
+                f"{type(obs).__name__} — le pipeline mono-figurine n'existe plus."
             )
-            
-            # Only log once per movement action
-            if not hasattr(self, '_logged_moves'):
-                self._logged_moves = set()
-            
-            move_key = f"{unit_id}_{current_pos}_{best_move}"
-            if move_key not in self._logged_moves:
-                self._logged_moves.add(move_key)
-            
-            return best_move
-        else:
-            # No enemies - just take first available move
-            selected = actual_moves[0]
-            return selected
-    
-    def _ai_select_shooting_target(self, unit_id: str, game_state: Dict[str, Any]) -> str:
-        """REMOVED: Engine bypassed handler decision tree. Use handler's complete AI_TURN.md flow."""
-        raise NotImplementedError("AI shooting should use handler's decision tree, not engine shortcuts")
-    
-    def _ai_select_charge_target(self, unit_id: str, game_state: Dict[str, Any]) -> str:
-        """AI selects charge target - placeholder implementation."""
-        # TODO: Implement charge target selection
-        raise NotImplementedError("Charge target selection not implemented")
-    
-    def _ai_select_combat_target(self, unit_id: str, game_state: Dict[str, Any]) -> str:
-        """AI selects combat target - placeholder implementation."""
-        # TODO: Implement combat target selection
-        raise NotImplementedError("Combat target selection not implemented")
+        vec_normalize = self._micro_model_vec_normalize.get(model_path)
+        if vec_normalize is None:
+            import pickle
+
+            with open(stats_path, "rb") as stats_file:
+                vec_normalize = pickle.load(stats_file)
+            vec_normalize.training = False
+            vec_normalize.norm_reward = False
+            self._micro_model_vec_normalize[model_path] = vec_normalize
+        return vec_normalize.normalize_obs(obs)

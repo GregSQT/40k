@@ -10,7 +10,6 @@ import pytest
 
 from engine.combat_utils import (
     calculate_hex_distance,
-    calculate_pathfinding_distance,
     calculate_wound_target,
     check_los_cached,
     expected_dice_value,
@@ -110,16 +109,6 @@ class TestCheckLosCachedGaps:
         target = {"id": "t_unknown"}
         with pytest.raises(ValueError, match=r"los_cache missing target"):
             check_los_cached(shooter, target, {})
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# calculate_pathfinding_distance — cas position identique
-# ─────────────────────────────────────────────────────────────────────────────
-
-def test_pathfinding_distance_same_position_returns_0() -> None:
-    """pf_same : distance entre une position et elle-même = 0."""
-    gs = {"board_cols": 10, "board_rows": 10, "wall_hexes": set()}
-    assert calculate_pathfinding_distance(3, 5, 3, 5, gs) == 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────

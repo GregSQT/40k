@@ -31,9 +31,6 @@ _GS_STATIC_KEYS = frozenset({
     "terrain_areas", "objectives", "primary_objective",
     "rewards_configs", "reward_configs", "hex_los_cache",
     "_cache_instance_id",
-    # Champs BFS par source : fonction pure des murs, qui ne changent pas dans une partie.
-    # Les copier coûterait 132 Ko par champ et par snapshot, sans rien protéger.
-    "_pathfinding_field_cache",
 })
 
 # --- Attributs d'engine STATIQUES (non copiés) : managers, config, scénario, spaces --------
