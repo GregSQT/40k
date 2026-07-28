@@ -23,9 +23,10 @@
 >   2026-07-28 (le vecteur plat mono-figurine est archivé dans
 >   [AI_OBSERVATION_Legacy.md](AI_OBSERVATION_Legacy.md)).
 > - Espace d'action = 0-1023 cellules de la grille égocentrique, 1024 wait, **1025-1044 tir
->   (20 slots ennemis)**, 1045 charge, 1046 fight, 1067-1081 zone intents, **1082-1087 `CHOICE_i`**
->   (candidats de `pending_agent_decision`, V11 §9.3 P2 — EXCLUSIVES : quand une décision est en
->   attente, le masque n'expose qu'elles).
+>   (20 slots ennemis)**, 1045 charge, **1046-1065 cible de mêlée (20 slots ennemis, V11 §9 P3-1)**,
+>   1066 fight sans cible éligible, 1067-1081 zone intents, **1082-1087 `CHOICE_i`** (candidats de
+>   `pending_agent_decision`, V11 §9.3 P2 — EXCLUSIVES : quand une décision est en attente, le
+>   masque n'expose qu'elles).
 >   **Constantes nommées obligatoires** (`engine/macro_intents.py`) : un littéral d'action dans
 >   `ai/` est un bug de revue (rupture R5).
 > - `action_space_size` **n'est plus configuré** : la taille est DÉRIVÉE du moteur. Le recopier en

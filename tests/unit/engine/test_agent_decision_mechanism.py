@@ -551,3 +551,184 @@ def test_a_decision_writes_exactly_one_step_log_line(tmp_path):
     assert "rule_choice" not in W40KEngine._STEP_LOG_TYPE_MAP, (
         "le flush journaliserait une seconde fois un choix deja ecrit en direct"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. Ce que la décision coûte au reste du pipeline : reward et compteur de steps
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _reward_calculator():
+    """`RewardCalculator` sur la config d'agent REELLE : `system_penalties` en vient."""
+    from config_loader import get_config_loader
+    from engine.reward_calculator import RewardCalculator
+
+    rewards_config = get_config_loader().load_agent_rewards_config("ArmageddonAgent")
+    return RewardCalculator(
+        {"controlled_agent": "ArmageddonAgent", "controlled_player": 1, "quiet": True},
+        rewards_config,
+    )
+
+
+def test_a_decision_earns_no_reward_of_its_own():
+    """Jouer `CHOICE_i` ne rapporte RIEN par soi-même — explicitement, pas par accident.
+
+    Le crédit d'un choix vient de ses conséquences ; une prime à l'acte de choisir serait du
+    reward shaping introduit en silence, ce que §9.6 interdit. Avant cette branche explicite, la
+    neutralité tenait à la seule présence de `waiting_for_player` dans le payload.
+    """
+    gs = _game_state([_unit(1, 1, 5, 10, [])])
+    calculator = _reward_calculator()
+    # 0.0 EN DUR des deux côtés : la neutralité ne doit dépendre d'AUCUNE clé de config tunable
+    # (un `system_response` retouché rendrait les décisions coûteuses en silence).
+    for payload in (
+        {"action": "agent_decision", "unitId": "1", "player": 1, "option_index": 0},
+        {"action": "waiting_for_agent_decision", "unitId": "1", "player": 1},
+    ):
+        assert calculator.calculate_reward(True, payload, gs) == 0.0
+
+
+def test_a_decision_reward_does_not_depend_on_the_waiting_flag():
+    """Mutation de contrôle : sans `waiting_for_player`, le reward reste nul.
+
+    C'est ce test qui distingue « neutre par conception » de « neutre par effet de bord » : sur
+    l'ancien code, retirer la clé faisait tomber le payload dans le chemin « unité agissante ».
+    """
+    gs = _game_state([_unit(1, 1, 5, 10, [])])
+    calculator = _reward_calculator()
+    payload = {"action": "agent_decision", "unitId": "1", "player": 1, "option_index": 1}
+    assert "waiting_for_player" not in payload
+    assert calculator.calculate_reward(True, payload, gs) == 0.0
+
+
+def test_a_decision_increments_the_step_counter_of_the_log(tmp_path):
+    """Une décision consomme un step gym : la ligne de step.log doit l'incrémenter.
+
+    Sinon `Steps=` (compteur StepLogger) et `Total=` (compteur moteur) divergent en fin
+    d'épisode d'exactement le nombre de décisions — l'écart qui a servi à diagnostiquer T6-c.
+    Les chemins PvP/PvE, eux, ne consomment aucun step gym.
+    """
+    from ai.step_logger import StepLogger
+
+    gs = _game_state([_unit(1, 1, 5, 10, [dict(CHOICE_RULE)])])
+    engine = _engine(gs)
+    engine.step_logger = StepLogger(
+        output_file=str(tmp_path / "step.log"), enabled=True, buffer_size=1
+    )
+    _emit_fight_phase_choice(engine)
+    before = engine.step_logger.episode_step_count
+    engine._process_squad_action(engine.action_decoder.convert_squad_action(CHOICE_BASE, gs))
+    assert engine.step_logger.episode_step_count == before + 1
+
+
+def test_the_pvp_path_does_not_consume_a_gym_step(tmp_path):
+    """Le choix d'un joueur HUMAIN ne consomme aucun step gym : le compteur ne bouge pas."""
+    from ai.step_logger import StepLogger
+
+    gs = _game_state([_unit(1, 1, 5, 10, [dict(CHOICE_RULE)])])
+    gs["player_types"] = {"1": "human", "2": "ai"}
+    engine = _engine(gs, gym_training_mode=False)
+    engine.step_logger = StepLogger(
+        output_file=str(tmp_path / "step.log"), enabled=True, buffer_size=1
+    )
+    engine._initialize_rule_choice_runtime_state()
+    engine._enqueue_rule_choice_candidates(
+        trigger="phase_start", event_phase="fight", event_player=1
+    )
+    engine._emit_next_rule_choice_prompt_if_needed()
+    before = engine.step_logger.episode_step_count
+    success, _result = engine._process_squad_action(
+        {"action": "select_rule_choice", "unitId": "1", "selectedRuleId": "aggression_imperative"}
+    )
+    assert success is True
+    assert engine.step_logger.episode_step_count == before
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. Purge d'épisode — le mécanisme doit rester VIVANT après le premier épisode
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _full_engine_config() -> Dict[str, Any]:
+    """Config d'un W40KEngine COMPLET (le harnais `object.__new__` ne sait pas `reset()`)."""
+    obs_params = {"obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET}
+    model = {
+        "id": "m1", "col": 10, "row": 20, "HP_CUR": 1, "HP_MAX": 1, "T": 4,
+        "ARMOR_SAVE": 4, "INVUL_SAVE": 0, "VALUE": 7,
+    }
+    unit = {
+        "id": 1, "player": 1, "col": 10, "row": 20,
+        "unitType": "TestUnit", "DISPLAY_NAME": "Unit 1",
+        "HP_CUR": 1, "HP_MAX": 1, "MOVE": 6, "T": 4,
+        "ARMOR_SAVE": 4, "INVUL_SAVE": 0,
+        "RNG_WEAPONS": [], "CC_WEAPONS": [],
+        "UNIT_RULES": [dict(CHOICE_RULE)], "UNIT_KEYWORDS": [], "LD": 7, "OC": 1, "VALUE": 7,
+        "ICON": "test", "ICON_SCALE": 1.0, "ILLUSTRATION_RATIO": 1.0,
+        "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5,
+        "models": [dict(model)],
+    }
+    enemy = dict(unit)
+    enemy.update({"id": 2, "player": 2, "col": 60, "row": 20, "UNIT_RULES": [],
+                  "models": [dict(model, id="m2", col=60)]})
+    return {
+        "board": {"default": {"cols": 120, "rows": 80, "hex_radius": 1.0, "margin": 0.0,
+                              "wall_hexes": [], "objectives": [], "inches_to_subhex": 1}},
+        "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5,
+                       "max_base_size_hex": 35, "unit_model_cohesion_range": 2,
+                       "unit_global_cohesion_range": 9, "squad_min_neighbors": 1,
+                       "cohesion_distance_mode": "euclidean"},
+        "charge": {"charge_max_distance": 12},
+        "move": {"can_move_through_enemy_engagement_zone": True,
+                 "can_move_through_enemy_model": False,
+                 "can_move_through_friendly_model": True},
+        "pve_mode": False,
+        "controlled_player": 1,
+        "controlled_agent": "ArmageddonAgent",
+        "observation_params": obs_params,
+        "training_config": {"observation_params": obs_params, "max_turns_per_episode": 3},
+        "units": [unit, enemy],
+    }
+
+
+def test_the_choice_mechanism_survives_the_first_episode():
+    """⚠️ Le prompt DOIT être ré-émis à l'épisode suivant.
+
+    `_choice_timing_fired_events` indexe `(trigger, tour, phase, joueur, unité, règle)` — SANS le
+    numéro d'épisode. Sans purge au `reset()`, l'événement du tour 1 de l'épisode 1 fait passer
+    pour « déjà tiré » celui du tour 1 de l'épisode 2, et plus aucune décision n'est jamais
+    exposée. MESURÉ avant correction sur 3 épisodes enchaînés : 16 décisions, puis 2, puis 0 —
+    le mécanisme entier devenait inerte après le premier épisode d'un run, et aucun smoke à un
+    seul épisode ne pouvait le voir.
+    """
+    from unittest.mock import patch
+
+    with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
+         patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
+        engine = W40KEngine(config=_full_engine_config(), gym_training_mode=True)
+
+    emitted = []
+    for _episode in range(3):
+        engine.reset()
+        # L'état de choix de l'épisode précédent ne survit à AUCUN titre. Lecture par `get`
+        # (et non par `[]`) VOLONTAIRE : sous mutation du correctif, le test doit échouer sur
+        # l'assertion FONCTIONNELLE du bas (le prompt n'est plus émis), pas sur un KeyError qui
+        # ne prouverait rien du comportement.
+        assert engine.game_state.get("_choice_timing_fired_events", set()) == set()
+        assert engine.game_state.get("pending_rule_choice_queue", []) == []
+        assert engine.game_state.get("active_rule_choice_prompt") is None
+        assert read_pending_agent_decision(engine.game_state) is None
+
+        engine._enqueue_rule_choice_candidates(
+            trigger="phase_start", event_phase="fight", event_player=1
+        )
+        result = engine._emit_next_rule_choice_prompt_if_needed()
+        emitted.append(result is not None and result["action"] == "waiting_for_agent_decision")
+        # On consomme la décision pour repartir d'un état propre au prochain tour de boucle.
+        if result is not None:
+            engine._process_squad_action(
+                engine.action_decoder.convert_squad_action(CHOICE_BASE, engine.game_state)
+            )
+
+    assert emitted == [True, True, True], (
+        f"le prompt n'est pas ré-émis à chaque épisode : {emitted}"
+    )

@@ -1139,6 +1139,23 @@ class W40KEngine(gym.Env):
             "pending_shooting_phase_init": False,
             "_pile_in_toCol": None,
             "_pile_in_toRow": None,
+            # ── État des CHOIX DE RÈGLE / DÉCISIONS AGENT — purge d'épisode (V11 §9.3 P2) ──
+            # ⚠️ `_choice_timing_fired_events` est le point dur. Ses clés sont
+            # `(trigger, tour, phase, joueur, unité, règle)` — SANS le numéro d'épisode. Sans
+            # purge, un événement tiré au tour 1 de l'épisode 1 fait passer pour « déjà tiré »
+            # le même événement au tour 1 de l'épisode 2, et le prompt n'est plus JAMAIS émis.
+            # MESURÉ avant correction, 3 épisodes consécutifs dans le même moteur :
+            # 16 décisions, puis 2, puis 0. Le mécanisme de décision serait donc resté inerte
+            # après le premier épisode d'un run — « code testé mais jamais appelé », le motif
+            # que ce document existe pour interdire. Un smoke à un seul épisode ne peut pas le
+            # voir : c'est la mesure sur épisodes ENCHAÎNÉS qui l'a montré.
+            "_choice_timing_fired_events": set(),
+            # Une décision ou un prompt encore en attente appartient à la partie qui vient de
+            # finir : les laisser vivre ferait démarrer l'épisode suivant bloqué sur un choix
+            # portant sur une unité qui n'existe plus.
+            "pending_rule_choice_queue": [],
+            "active_rule_choice_prompt": None,
+            "pending_agent_decision": None,
         })
         self._configure_deployment_random_mix_for_episode()
         self.game_state["deployment_type"] = self.config.get("deployment_type")
@@ -2426,8 +2443,22 @@ class W40KEngine(gym.Env):
                 }
             )
 
-    def _record_rule_choice_action_log(self, prompt: Dict[str, Any], selected_display_rule_id: str) -> None:
-        """Record one rule choice in action_logs and step.log."""
+    def _record_rule_choice_action_log(
+        self,
+        prompt: Dict[str, Any],
+        selected_display_rule_id: str,
+        consumes_gym_step: bool = False,
+    ) -> None:
+        """Record one rule choice in action_logs and step.log.
+
+        `consumes_gym_step` : True quand le choix a été joué par une ACTION GYM (`CHOICE_i` du
+        mécanisme de décision, V11 §9.3 P2). Ce cas consomme un `step()` complet, donc un step du
+        moteur : sans ce drapeau, la ligne `Steps=` de fin d'épisode (compteur du StepLogger)
+        serait inférieure à `Total=` (compteur moteur) d'exactement le nombre de décisions, et
+        l'écart passerait pour le symptôme de §T6-c (« actions non journalisées »).
+        Les autres chemins — prompt humain PvP, résolution PvE par `pve_controller` — ne
+        consomment aucun step gym : le drapeau y reste False.
+        """
         unit_id = str(require_key(prompt, "unit_id"))
         prompt_player = int(require_key(prompt, "player"))
         registry = self._get_unit_rule_registry()
@@ -2488,7 +2519,7 @@ class W40KEngine(gym.Env):
                     phase=phase_for_log,
                     player=prompt_player,
                     success=True,
-                    step_increment=False,
+                    step_increment=consumes_gym_step,
                     action_details={
                         "current_turn": current_turn,
                         "current_episode": current_episode,
@@ -2507,9 +2538,16 @@ class W40KEngine(gym.Env):
                 )
 
     def _apply_rule_choice_selection(
-        self, prompt: Dict[str, Any], selected_display_rule_id: str
+        self,
+        prompt: Dict[str, Any],
+        selected_display_rule_id: str,
+        consumes_gym_step: bool = False,
     ) -> None:
-        """Apply one selected option to unit rule runtime state."""
+        """Apply one selected option to unit rule runtime state.
+
+        `consumes_gym_step` : cf. `_record_rule_choice_action_log` — True uniquement quand le
+        choix vient d'une action gym `CHOICE_i` (V11 §9.3 P2).
+        """
         unit_id = str(require_key(prompt, "unit_id"))
         rule_id = require_key(prompt, "rule_id")
         options = require_key(prompt, "options")
@@ -2526,7 +2564,9 @@ class W40KEngine(gym.Env):
         for rule in unit_rules:
             if require_key(rule, "ruleId") == rule_id:
                 rule["_selected_granted_rule_id"] = selected_display_rule_id
-                self._record_rule_choice_action_log(prompt, selected_display_rule_id)
+                self._record_rule_choice_action_log(
+                    prompt, selected_display_rule_id, consumes_gym_step=consumes_gym_step
+                )
                 return
         raise KeyError(f"Rule '{rule_id}' not found in UNIT_RULES for unit {unit_id}")
 
@@ -2613,7 +2653,11 @@ class W40KEngine(gym.Env):
         selected_display_rule_id = require_key(
             require_key(selected_option, "payload"), "display_rule_id"
         )
-        self._apply_rule_choice_selection(prompt, selected_display_rule_id)
+        # L'action `CHOICE_i` a consommé un step gym complet : la ligne de step.log doit
+        # l'incrémenter, sinon `Steps=` et `Total=` divergent en fin d'épisode.
+        self._apply_rule_choice_selection(
+            prompt, selected_display_rule_id, consumes_gym_step=True
+        )
         queue.pop(0)
         clear_pending_agent_decision(self.game_state)
 

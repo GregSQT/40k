@@ -697,6 +697,49 @@ par un step le rendait systématique. `rule_choice` est sorti de `_STEP_LOG_TYPE
 mapping aurait produit un doublon de chaque ligne), et un test verrouille « une décision = une
 ligne ».
 
+🔎 **CONTRE-AUDIT du 2026-07-28 (après merge) — 3 défauts trouvés dans la livraison, tous
+corrigés.** Aucun n'avait été vu par les tests de la tranche : ils tenaient à des chemins que le
+mécanisme ne traversait pas avant P2.
+
+1. 🔴 **Le mécanisme devenait INERTE après le premier épisode.** `_choice_timing_fired_events`
+   indexe `(trigger, tour, phase, joueur, unité, règle)` — **sans le numéro d'épisode** — et
+   `reset()` ne le purgeait pas. L'événement du tour 1 de l'épisode 1 faisait donc passer pour
+   « déjà tiré » celui du tour 1 de l'épisode 2. **Mesuré sur 3 épisodes enchaînés dans le même
+   moteur : 16 décisions, puis 2, puis 0.** Le défaut préexistait (le choix cessait simplement
+   d'être proposé), mais il rendait P2 sans objet dès le 2ᵉ épisode d'un run. `reset()` purge
+   désormais les 4 clés (`_choice_timing_fired_events`, la file, le prompt actif, la décision
+   pendante) ; verrouillé par test avec sa mutation.
+   ➜ **Leçon de méthode** : *un smoke à UN épisode ne peut pas voir un état qui fuit ENTRE
+   épisodes.* Le smoke initial (2 épisodes, 2 moteurs distincts) montrait 28 décisions et
+   validait un mécanisme qui, en run réel, se serait éteint après le premier épisode.
+2. 🟠 **Le reward d'une décision était neutre par ACCIDENT.** Le payload `agent_decision` tombait
+   dans le chemin « réponse système » **uniquement** parce qu'il contient la clé
+   `waiting_for_player` ; retirer cette clé l'aurait basculé dans le chemin « unité agissante »
+   (reward d'unité arbitraire, ou `ValueError`). C'est désormais une branche EXPLICITE de
+   `RewardCalculator`, à **0.0 en dur** — et non `system_penalties['system_response']`, dont un
+   futur tuning aurait rendu les décisions coûteuses sans que personne ne le décide. Deux tests,
+   dont un qui retire la clé `waiting_for_player` pour prouver que la neutralité ne tient plus à
+   elle.
+3. 🟠 **step.log : `Steps=` divergeait de `Total=`.** Une décision consomme un `step()` gym
+   complet, mais sa ligne de journal était écrite avec `step_increment=False` : le compteur du
+   StepLogger sous-comptait d'exactement le nombre de décisions, et l'écart aurait ressemblé au
+   symptôme de T6-c. Le drapeau `consumes_gym_step` distingue désormais le chemin gym (True) des
+   chemins PvP/PvE (False, aucun step gym consommé). Deux tests.
+
+Un quatrième trou, du même motif que celui déjà fermé côté bot, a été refermé par symétrie :
+`SelfPlayWrapper._get_frozen_model_action` renvoyait `ACTION_WAIT` quand le pool est vide — action
+**hors masque** pendant une décision. La branche avec `frozen_model`, elle, passe par
+`predict(action_masks=…)` et jouait déjà un `CHOICE_i` correct.
+
+⚠️ **Écart CONNU, hors périmètre P2, à traiter comme un sujet à part** : en **PvE**, un choix de
+règle n'emprunte PAS ce mécanisme. `pve_controller.select_rule_choice_with_policy` simule chaque
+option et la score avec la **tête de valeur** — une politique différente de celle que
+l'entraînement façonne désormais (la tête pointeur de candidats). Le PvE joue donc autre chose que
+ce que l'agent a appris, ce que l'en-tête de `make_ai_decision` réprouve explicitement pour les
+autres actions. Le rendre cohérent implique de faire remonter un état d'attente jusqu'à
+`services/api_server`, dont le flux n'a pas été validé en runtime dans cette session : c'est un
+chantier PvE, pas la moitié manquante de P2 (dont la spec §9.3 borne le périmètre au gym).
+
 ⚠️ **Ce qui n'est PAS mesuré, et ne peut pas l'être aujourd'hui.** §9.6 exige un win-rate ≥ tranche
 précédente. Il est **indisponible** : (1) `TOTAL_ACTION_SIZE` et `obs_size` changent tous les deux
 (comme pour P3-1), donc tout modèle existant est incompatible et la comparaison exige un retrain

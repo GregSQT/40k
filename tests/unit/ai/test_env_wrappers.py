@@ -383,3 +383,17 @@ def test_bot_plays_its_own_decision_instead_of_waiting() -> None:
         assert action in (mi.CHOICE_BASE, mi.CHOICE_BASE + 1), (
             "le bot doit jouer un CANDIDAT, pas une action de phase"
         )
+
+
+def test_self_play_opponent_plays_its_own_decision() -> None:
+    """Symétrique du bot : sans `frozen_model`, l'adversaire self-play joue un CHOICE.
+
+    `ACTION_WAIT` est hors masque quand une décision est en attente : le renvoyer lèverait à la
+    validation. Avec un `frozen_model`, la prédiction masquée choisit déjà un `CHOICE_i`.
+    """
+    decoder = _PassthroughDecoder(mask=_decision_mask(), eligible=[])
+    engine = _DummyEngine(decoder=decoder)
+    engine.game_state["pending_agent_decision"] = _decision_state(player=2)
+    wrapper = SelfPlayWrapper(engine, allow_random_opponent=True)
+    for _ in range(20):
+        assert wrapper._get_frozen_model_action() in (mi.CHOICE_BASE, mi.CHOICE_BASE + 1)

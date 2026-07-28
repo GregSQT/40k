@@ -1276,6 +1276,20 @@ class SelfPlayWrapper(gym.Wrapper):
         """
         if self.frozen_model is None:
             action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(self.engine.game_state)
+            # Décision agent en attente (V11 §9.3 P2) : le pool est vide PAR CONSTRUCTION, mais
+            # `ACTION_WAIT` est hors masque dans cet état — le renvoyer léverait. Symétrique du
+            # cas traité dans `BotControlledEnv._get_bot_action`. (La branche avec `frozen_model`
+            # passe, elle, par `predict(action_masks=…)` : elle joue naturellement un `CHOICE_i`.)
+            if read_pending_agent_decision(self.engine.game_state) is not None:
+                choice_actions = [
+                    index for index in mi.CHOICE_SLOTS if bool(action_mask[index])
+                ]
+                if not choice_actions:
+                    raise RuntimeError(
+                        "SelfPlayWrapper: decision agent en attente sans aucune action CHOICE "
+                        "autorisee par le masque."
+                    )
+                return int(random.choice(choice_actions))
             if not eligible_units:
                 # Pool empty -> advance phase via WAIT/invalid action handling
                 return mi.ACTION_WAIT

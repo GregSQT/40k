@@ -342,8 +342,11 @@ Le layout « 12 actions » décrit ci-dessous n'existe plus. L'espace d'action r
 - **1024** : wait / fin d'activation ;
 - **1025-1044** : tir sur le slot ennemi 0-19 (20 slots depuis V11 §0.30 T-E ; les logits
   viennent d'une tête pointeur, `ai/pointer_policy.py`) ;
-- **1045** : charge · **1046** : fight ;
-- **1047-1061** : zone intents (5 objectifs × 3 intentions) ;
+- **1045** : charge ;
+- **1046-1065** : **cible de mêlée**, slot ennemi 0-19 — MÊME mapping de slots que le tir
+  (V11 §9 P3-1), logits produits par une seconde tête pointeur ;
+- **1066** : fight **sans cible éligible** (12.04/12.06 : sélectionnée pour combattre, 0 attaque) ;
+- **1067-1081** : zone intents (5 objectifs × 3 intentions) ;
 - **1082-1087** : `CHOICE_0..5` — candidats de la **décision agent** (V11 §9.3 P2). Elles sont
   EXCLUSIVES : quand `game_state["pending_agent_decision"]` est posée, le masque n'expose que les
   `CHOICE_i` des candidats réels et le pool d'unités éligibles est vide, le moteur étant arrêté

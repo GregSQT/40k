@@ -565,6 +565,33 @@ des stubs (`SimpleNamespace`, `_DummyCfgLoader`, `_Cfg`), des arborescences **sy
 **Leçon de méthode** : « vérifié un par un » sur un échantillon n'est pas une vérification.
 Le seul contre-exemple était dans le répertoire non échantillonné.
 
+### Un smoke à UN épisode ne voit pas un état qui fuit ENTRE épisodes (§0.42, 2026-07-28)
+
+Le mécanisme de décision agent (§9.3 P2) a été validé par un smoke in-engine : 28 décisions
+exposées et jouées, épisodes terminés, aucun masque vide. Le smoke lançait **un épisode par
+moteur**. Le contre-audit a rejoué **3 épisodes enchaînés dans le MÊME moteur** : **16 décisions,
+puis 2, puis 0**. `_choice_timing_fired_events` indexe ses événements sans le numéro d'épisode et
+`reset()` ne le purgeait pas — le mécanisme s'éteignait après le premier épisode d'un run, sans
+qu'aucun test ni aucun smoke ne rougisse.
+
+**Règle** : tout état de `game_state` ajouté par une tranche doit être confronté au `reset()`, et
+la mesure de validation doit **enchaîner plusieurs épisodes sur le même moteur** — c'est le seul
+protocole qui montre une fuite d'état. Un compteur d'événements « déjà tirés » est le cas type :
+il est correct dans l'épisode, faux entre deux.
+
+### Un comportement obtenu par effet de bord n'est pas un comportement décidé (§0.42, 2026-07-28)
+
+Une action `agent_decision` recevait un reward de 0.0 — la valeur voulue — mais **uniquement**
+parce que son payload contient la clé `waiting_for_player`, qui la faisait classer « réponse
+système » par `RewardCalculator`. Retirer cette clé du payload l'aurait basculée dans le chemin
+« unité agissante » : reward d'unité arbitraire, ou `ValueError`. Le comportement était juste, sa
+cause était accidentelle, et rien ne l'aurait signalé.
+
+**Règle** : quand un chemin nouveau traverse un code de dispatch existant, vérifier **par quelle
+branche** il passe, pas seulement **ce qu'il rend**. Un test qui n'observe que la valeur de sortie
+ne distingue pas « par conception » de « par effet de bord » — il faut la mutation qui retire la
+cause accidentelle.
+
 ### Sur le raisonnement et la preuve
 
 

@@ -70,6 +70,25 @@ class RewardCalculator:
                 game_state['last_reward_breakdown'] = reward_breakdown
                 return penalty_reward
         
+        # DÉCISION AGENT (V11 §9.3 P2) — aucun reward propre, et c'est EXPLICITE.
+        # Le crédit d'un choix vient de ses CONSÉQUENCES (la value function les propage), pas
+        # d'un bonus attaché à l'acte de choisir : §9.6 interdit d'ajouter du reward shaping en
+        # silence, et une prime au choix pousserait l'agent vers les décisions plutôt que vers
+        # leurs effets. ⚠️ Sans cette branche, la neutralité n'était obtenue que par ACCIDENT :
+        # le payload contient `waiting_for_player`, donc il tombait dans `is_system_response`
+        # ci-dessous. Retirer cette clé du payload l'aurait basculé dans le chemin « unité
+        # agissante » — reward d'unité arbitraire, ou `ValueError` si l'unité manquait.
+        # La valeur est 0.0 EN DUR, et non `system_penalties['system_response']` : une décision
+        # n'est pas une réponse système, et un futur tuning de cette clé rendrait les décisions
+        # coûteuses ou payantes sans que personne ne l'ait décidé. Toute prime ou pénalité au
+        # choix doit être un ajout DÉLIBÉRÉ, par tranche (§9.6).
+        if isinstance(result, dict) and result.get("action") in (
+            "agent_decision", "waiting_for_agent_decision",
+        ):
+            reward_breakdown['total'] = 0.0
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return 0.0
+
         # Handle system responses (no unit-specific rewards)
         # BUT: If result contains action data (action, fromCol/toCol), it's an action that triggered
         # a phase transition, NOT a pure system response. Process it as an action.
