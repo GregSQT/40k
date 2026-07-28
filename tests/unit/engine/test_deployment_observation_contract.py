@@ -263,6 +263,157 @@ def test_deployment_grid_self_channel_is_empty_before_placement():
     )
 
 
+# ============================================================================
+# POINT 4 — origine de mesure du VECTEUR
+# ============================================================================
+
+
+def test_objective_distances_are_measured_from_the_deployment_zone():
+    """Les distances/directions aux objectifs partent de la zone, pas de la sentinelle.
+
+    Mesuré avant correctif : l'agent voyait l'objectif 0 à 38,3 (le plus proche) alors qu'il est
+    à 178,9 de sa zone, et ne voyait pas l'objectif 4 à 11,3 — l'ORDRE des objectifs était
+    inversé. Les trois actions `zone_intent` s'appuient sur ces nombres.
+    """
+    import engine.observation_entities as oe
+
+    eng = _load()
+    gs = eng.game_state
+    uid = str(eng.action_decoder.get_deployment_active_unit(gs)["id"])
+    anchor = eng.obs_builder.squad_grid_anchor(gs, uid)
+
+    obs = eng.obs_builder.build_squad_observation(gs, uid)
+    seen = np.array(
+        [obs["global_cont"][oe.global_cont_index(f"objective_distance_{i}")] for i in range(5)]
+    )
+    from_zone = np.array(
+        eng.obs_builder._squad_objective_geometry(gs, float(anchor[0]), float(anchor[1]))[0]
+    )
+    from_sentinel = np.array(eng.obs_builder._squad_objective_geometry(gs, -1.0, -1.0)[0])
+
+    assert np.allclose(seen, from_zone), (
+        f"distances vues {np.round(seen, 1)} ≠ distances depuis la zone {np.round(from_zone, 1)}"
+    )
+    # Le scénario doit réellement distinguer les deux origines, sinon le test ne prouve rien.
+    assert int(np.argmin(from_zone)) != int(np.argmin(from_sentinel)), (
+        "sur ce scénario les deux origines désignent le même objectif le plus proche — "
+        "le test ne discrimine pas"
+    )
+
+
+def test_relative_positions_are_measured_from_the_zone_and_null_for_unplaced_units():
+    """`col_rel`/`row_rel` : mesurés depuis l'ancre de zone pour les entités POSÉES, exactement
+    nuls pour celles qui ne le sont pas (leur bit `deploy_not_on_board` porte l'information).
+
+    Sans la seconde moitié, déplacer l'origine empilerait toutes les unités non posées à une
+    distance absurde au nord-ouest — elles sont toutes à la sentinelle (-1,-1).
+    """
+    import engine.observation_entities as oe
+    from engine.hex_utils import _hex_center
+
+    eng = _load()
+    gs = eng.game_state
+    dec = eng.action_decoder
+    i_col, i_row = oe.unit_cont_index("col_rel"), oe.unit_cont_index("row_rel")
+
+    # Avance jusqu'à ce que les DEUX camps aient des unités posées et d'autres non.
+    for _ in range(6):
+        mask, _ = dec.get_squad_action_mask_and_eligible_units(gs)
+        eng.step(_first_deploy_action(mask))
+    assert gs.get("phase") == "deployment", "déploiement terminé trop tôt pour ce test"
+
+    uid = str(dec.get_deployment_active_unit(gs)["id"])
+    anchor = eng.obs_builder.squad_grid_anchor(gs, uid)
+    ax, ay = _hex_center(*anchor)
+    obs = eng.obs_builder.build_squad_observation(gs, uid)
+
+    active_player = int(gs["units_cache"][uid]["player"])
+    from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
+
+    rows = [("allies_cont", 0, uid)]
+    others = sorted(
+        (s for s, e in gs["units_cache"].items() if int(e["player"]) == active_player and s != uid),
+        key=str,
+    )
+    rows += [("allies_cont", i + 1, s) for i, s in enumerate(others[:7])]
+    # Les slots ennemis vides portent None : ils sont laissés à zéro par contrat (bit `present`),
+    # ce n'est pas ce que ce test mesure.
+    rows += [
+        ("enemies_cont", i, str(s))
+        for i, s in enumerate(get_enemy_slot_mapping(gs, active_player)[:20])
+        if s is not None and str(s) in gs["units_cache"]
+    ]
+
+    checked_placed = checked_unplaced = 0
+    for key, slot, sid in rows:
+        unit = next(u for u in gs["units"] if str(u["id"]) == sid)
+        got = (float(obs[key][slot][i_col]), float(obs[key][slot][i_row]))
+        if unit["deployed_on_turn"] is None:
+            assert got == (0.0, 0.0), (
+                f"{sid} n'est pas posée mais porte une position relative {got}"
+            )
+            checked_unplaced += 1
+        else:
+            # La feature prend la figurine la PLUS PROCHE de l'origine (V11 §9.2).
+            best = min(
+                (_hex_center(int(m["col"]), int(m["row"])) for m in
+                 (gs["models_cache"][mid] for mid in gs["squad_models"][sid])),
+                key=lambda p: (p[0] - ax) ** 2 + (p[1] - ay) ** 2,
+            )
+            expected = (best[0] - ax, best[1] - ay)
+            assert np.allclose(got, expected), (
+                f"{sid} : position relative {got}, attendu {expected} depuis l'ancre {anchor}"
+            )
+            checked_placed += 1
+
+    assert checked_placed >= 3, f"trop peu d'entités posées vérifiées ({checked_placed})"
+    assert checked_unplaced >= 3, f"trop peu d'entités non posées vérifiées ({checked_unplaced})"
+
+
+def test_self_models_have_no_position_before_placement():
+    """Les figurines de l'escouade non posée ne sont nulle part : positions relatives nulles."""
+    eng = _load()
+    gs = eng.game_state
+    uid = str(eng.action_decoder.get_deployment_active_unit(gs)["id"])
+    obs = eng.obs_builder.build_squad_observation(gs, uid)
+    assert not np.any(obs["self_models_cont"]), (
+        "l'escouade pas encore posée porte des positions de figurines non nulles"
+    )
+
+
+def test_measurement_origin_is_the_centroid_once_deployed():
+    """Non-régression : une fois le déploiement fini, l'origine redevient le CENTROÏDE.
+
+    Le correctif du point 4 ne doit toucher que les escouades non posées — hors déploiement,
+    aucune unité vivante n'en est là (les réserves 20 ne sont pas modélisées).
+    """
+    import engine.observation_entities as oe
+
+    eng = _load()
+    gs = eng.game_state
+    dec = eng.action_decoder
+    steps = 0
+    while gs.get("phase") == "deployment" and steps < 1000:
+        mask, _ = dec.get_squad_action_mask_and_eligible_units(gs)
+        eng.step(_first_deploy_action(mask))
+        steps += 1
+
+    uid = next(iter(gs["units_cache"]))
+    sq = gs["squad_cache"][uid]
+    obs = eng.obs_builder.build_squad_observation(gs, uid)
+    seen = np.array(
+        [obs["global_cont"][oe.global_cont_index(f"objective_distance_{i}")] for i in range(5)]
+    )
+    from_centroid = np.array(
+        eng.obs_builder._squad_objective_geometry(
+            gs, float(sq["centroid_col"]), float(sq["centroid_row"])
+        )[0]
+    )
+    assert np.allclose(seen, from_centroid), (
+        "hors déploiement, l'origine de mesure n'est plus le centroïde de l'escouade"
+    )
+
+
 def test_squad_obs_size_target_unchanged():
     """§0.40 point 3 (décrire les hexes candidats) est HORS périmètre : `obs_size` ne bouge pas."""
     from engine.observation_builder import ObservationBuilder

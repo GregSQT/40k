@@ -1,13 +1,13 @@
-# Observation de la phase de déploiement — points 1 et 2 corrigés, points 3 et 4 ouverts
+# Observation de la phase de déploiement — points 1, 2 et 4 corrigés, point 3 ouvert
 
 > **Origine** : extrait de [`V11_audit_observation.md`](../Implémenté/V11_audit_observation.md) §11
 > (archivé le 2026-07-28). C'était le seul point **actionnable** restant de cet audit ; il est
 > sorti ici pour ne pas rester noyé en fin d'un document d'archive.
 > **Constats re-vérifiés dans le code le 2026-07-28** — le point 3 d'origine était inexact, il est
 > reformulé ci-dessous.
-> **Points 1 et 2 corrigés le 2026-07-28** (commits `0e0551e8` et `2893bbcb`). Restent ouverts le
-> point 3 et un **point 4 découvert le même jour en vérifiant le correctif du point 2** : le
-> vecteur d'observation mesure lui aussi depuis la sentinelle hors plateau.
+> **Points 1 et 2 corrigés le 2026-07-28** (commits `0e0551e8` et `2893bbcb`), **point 4 corrigé le
+> 2026-07-29** — il a été découvert en vérifiant le correctif du point 2 : le vecteur d'observation
+> mesurait lui aussi depuis la sentinelle hors plateau. **Le point 3 est le seul reste.**
 
 ## Contexte
 
@@ -114,41 +114,69 @@ En réalité les 5 slots sont **5 stratégies tactiques** évaluées sur **tous*
 stratégie N sélectionnerait, et ses caractéristiques). Aucune nouvelle géométrie à écrire — c'est
 une lecture du cache existant, donc source unique préservée.
 
-### 4. 🔴 NOUVEAU (trouvé le 2026-07-28 en vérifiant le correctif du point 2) — le VECTEUR mesure lui aussi depuis la sentinelle hors plateau
+### 4. ✅ CORRIGÉ (2026-07-29) — le vecteur mesure depuis la zone, comme la grille
 
-Le point 2 ne visait que la **grille**. En le vérifiant, on constate que le **vecteur** souffre
-exactement du même défaut, et il n'était identifié nulle part.
+**Le défaut** (trouvé le 2026-07-28 en vérifiant le correctif du point 2, il n'était identifié
+nulle part). Le point 2 ne visait que la **grille** ; le **vecteur** souffrait exactement du même
+défaut.
 
-`build_squad_observation` prend son origine de mesure dans
+`build_squad_observation` prenait son origine de mesure dans
 `anchor_x, anchor_y = _hex_center(centroid_col, centroid_row)` — le **centroïde de l'escouade
 active**, qui vaut `(-1,-1)` pour une escouade pas encore posée (vérifié :
 `squad_cache[uid]["centroid_col"/"centroid_row"] == -1.0`). Tout ce que l'observation exprime
-« depuis moi » est donc mesuré depuis le coin hors plateau :
+« depuis moi » était donc mesuré depuis le coin hors plateau :
 
 - `objective_distance_0..4` et `objective_dir_cos/sin_0..4` (contexte global) ;
 - `col_rel` / `row_rel` de **toutes** les entités alliées et ennemies (leur position relative est
   donnée par rapport à `(-1,-1)`, pas par rapport à l'endroit où l'unité va se poser).
 
-**Mesure** (scénario d'entraînement Armageddon, 1ʳᵉ unité du joueur 1, board 220×300) :
+**Mesure avant correctif** (scénario d'entraînement Armageddon, 1ʳᵉ unité du joueur 1, 220×300) :
 
 | | obj 0 | obj 1 | obj 2 | obj 3 | obj 4 |
 |---|---|---|---|---|---|
-| distances vues par l'agent (depuis `(-1,-1)`) | **38,3** | 146,4 | 142,1 | 221,3 | 255,0 |
-| distances réelles depuis sa zone (147, 249) | 178,9 | 166,3 | 70,4 | 69,4 | **11,3** |
+| distances vues par l'agent, AVANT (depuis `(-1,-1)`) | **38,3** | 146,4 | 142,1 | 221,3 | 255,0 |
+| distances vues APRÈS = réelles depuis sa zone (147, 249) | 178,9 | 166,3 | 70,4 | 69,4 | **11,3** |
 
-L'**ordre est inversé** : l'agent voit comme objectif le plus proche (38,3) celui qui est en
-réalité le plus lointain (178,9), et ne voit pas que l'objectif 4 est à 11,3 de sa zone. Les trois
-actions de zone (`zone_intent`) s'appuient sur ces mêmes nombres.
+L'**ordre était inversé** : l'agent voyait comme objectif le plus proche (38,3) celui qui est en
+réalité le plus lointain (178,9), et ne voyait pas que l'objectif 4 est à 11,3 de sa zone. Les
+trois actions de zone (`zone_intent`) s'appuient sur ces mêmes nombres.
 
-→ **Piste** : donner à `build_squad_observation` la même origine de mesure que la grille pour une
-escouade non posée, c'est-à-dire `ObservationBuilder.squad_grid_anchor` (déjà écrite, déjà testée).
-`obs_size` ne change pas. **Point de conception à arbitrer avant d'écrire** : que valent alors
-`col_rel`/`row_rel` de l'escouade active elle-même ? Aujourd'hui ils valent 0 (ses figurines sont
-à la sentinelle, donc à distance nulle de l'origine, ce qui est cohérent) ; déplacer l'origine sans
-déplacer les figurines les rendrait non nuls — l'obs prétendrait qu'elle est quelque part. C'est
-ce choix, et non la mécanique, qui rend le correctif non trivial.
+**Ce que le code fait maintenant.** L'origine de mesure d'une escouade **non posée** est
+`ObservationBuilder.squad_grid_anchor` — exactement celle de la grille (point 2). Ce n'est pas un
+repère de plus : c'est ce qui **rétablit** l'invariant déjà écrit au-dessus de ce calcul (§0.32
+T-I, « un seul repère pour tout ce que l'observation exprime *depuis moi* »). Sans cela, le
+vecteur et la grille auraient décrit deux régions différentes du plateau. Escouade posée →
+centroïde, **inchangé**.
 
-⛔ **Non corrigé** : hors du périmètre des points 1-2 confié à la session du 2026-07-28.
+**Le point de conception, tranché.** Déplacer l'origine sans rien d'autre aurait empilé toutes les
+unités **non posées** — l'active comprise — à une distance absurde au nord-ouest : leurs figurines
+sont à la sentinelle, et c'est seulement parce que l'origine ÉTAIT cette même sentinelle que la
+valeur sortait à 0 par coïncidence. Donc, pour toute entité pas encore posée :
+
+- `col_rel` / `row_rel` restent **exactement 0** — le bit `deploy_not_on_board`, écrit depuis la
+  même source `deployed_on_turn`, porte déjà l'information « pas sur le board » ;
+- `self_models_cont` de l'escouade active reste **nul** : par convention elle EST au point de
+  mesure, ce que disait déjà la valeur produite avant le correctif ;
+- `edge_distance` (distance de **socle à socle**, pas dérivée de l'origine) reste **0** quand
+  l'observatrice n'est pas posée : aucun socle n'existe côté attaquant, et 0 est déjà la valeur
+  que porte l'entité active, pour qui cette feature n'est jamais écrite. Aucune décision ne s'y
+  appuie pendant le déploiement — le masque n'y ouvre que les slots 4-8.
+
+Autrement dit, l'observation ne prétend jamais qu'une unité hors plateau est quelque part ; elle
+dit seulement, depuis la zone où l'unité va se poser, où sont les objectifs et les unités déjà
+posées.
+
+**Périmètre réel du changement** : les réserves (règle 20) ne sont pas modélisées
+(`deployment_handlers`, commentaire de `deployed_on_turn`), donc hors phase de déploiement aucune
+unité vivante n'a `deployed_on_turn is None` — l'effet est **strictement borné au déploiement**.
+`obs_size` inchangé (20768).
+
+**Verrous** (chacun rouge sous mutation de son propre volet) : distances objectifs == celles
+calculées depuis l'ancre de zone, avec contrôle que le scénario distingue bien les deux origines
+(l'objectif le plus proche n'est pas le même) ; `col_rel`/`row_rel` == figurine la plus proche
+mesurée depuis l'ancre pour les entités posées, **exactement 0** pour les non posées ;
+`self_models_cont` nul avant la pose ; et non-régression : une fois le déploiement fini, l'origine
+est de nouveau le centroïde.
 
 ## Périmètre / séquencement
 
@@ -157,11 +185,8 @@ ce choix, et non la mécanique, qui rend le correctif non trivial.
   Ils changent le CONTENU de l'observation de déploiement : un agent entraîné avant eux a appris
   sur une obs fausse à cet endroit, la comparaison de win-rate déploiement avant/après n'a pas de
   sens.
-- Restent **deux** chantiers : le point **3** (extension de contrat d'observation, change
-  `obs_size` → retrain `--new`) et le point **4**, trouvé le 2026-07-28 en vérifiant le point 2
-  (le vecteur mesure depuis la sentinelle hors plateau ; `obs_size` inchangé, mais un choix de
-  conception à trancher). Le point 4 est **indépendant** du 3 et bien moins coûteux : le traiter
-  d'abord.
+- Le point **3** est le seul reste : extension de contrat d'observation (change `obs_size` →
+  retrain `--new`). Les points 1, 2 et 4 sont livrés et ne changent PAS `obs_size`.
 - Traité **séparément** de la refonte du vecteur de jeu (livrée, cf.
   [`V11_entity_encoder_pointer.md`](../V11_entity_encoder_pointer.md) et
   [`AI_OBSERVATION.md`](../../AI_OBSERVATION.md)).

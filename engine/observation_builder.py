@@ -593,7 +593,7 @@ class ObservationBuilder:
         aucun sens de jeu. Le départage se fait donc sur le plus petit (col, row).
         """
         from engine.hex_utils import _hex_center
-        from engine.spatial_grid import HEX_STEP_PX
+        from engine.spatial_grid import HEX_STEP_PX, hex_centers_px
 
         arrays = self._objective_hex_arrays(game_state)
         ax, ay = _hex_center(int(round(cx)), int(round(cy)))
@@ -608,11 +608,11 @@ class ObservationBuilder:
                 sines.append(0.0)
                 continue
             cols, rows = arrays[i]
-            # Inline de `_hex_center` vectorisé — même formule, mêmes constantes (le jumeau
-            # scalaire ci-dessus sert d'oracle dans les tests).
-            hex_width = 1.5
-            xs = cols * hex_width + hex_width / 2.0
-            ys = rows * HEX_STEP_PX + (np.mod(cols, 2.0) * HEX_STEP_PX) / 2.0 + HEX_STEP_PX / 2.0
+            # Jumeau vectorisé de `_hex_center` — UN seul site pour cette formule
+            # (`spatial_grid.hex_centers_px`), partagé avec la rasterisation de la grille et
+            # l'ancre de zone de déploiement. Elle était inlinée ici, ce qui en faisait une
+            # troisième copie à garder synchrone à la main.
+            xs, ys = hex_centers_px(cols, rows)
             dx = xs - ax
             dy = ys - ay
             d2 = dx * dx + dy * dy
@@ -874,19 +874,32 @@ class ObservationBuilder:
         # gagnant, et ce bloc tourne pour les 28 entités à chaque step (mesuré : la table coûtait
         # 1 µs par entité de plus). `<` strict -> à égalité, la première de `alive_mids` gagne,
         # comme le `min` qu'il remplace.
+        #
+        # §0.40 point 4 : une entité PAS ENCORE POSÉE n'a pas de position — ses figurines sont
+        # toutes à la sentinelle (-1,-1). Sa position relative reste donc à 0, et le bit
+        # `deploy_not_on_board` (écrit plus bas depuis la MÊME source `deployed_on_turn`) porte
+        # l'information. La projeter donnerait un vecteur vers le coin hors plateau : avant ce
+        # correctif l'origine était elle aussi la sentinelle, donc le résultat valait 0 par
+        # coïncidence — déplacer l'origine sans traiter ce cas aurait empilé toutes les unités
+        # non posées à une distance absurde au nord-ouest.
         anchor_x, anchor_y = ctx["anchor_x"], ctx["anchor_y"]
-        nearest_d2: float = 0.0
-        nearest_x: float = 0.0
-        nearest_y: float = 0.0
-        for i, mid in enumerate(alive_mids):
-            entry_m = models_cache[mid]
-            px, py = _hex_center(int(entry_m["col"]), int(entry_m["row"]))
-            d2 = (px - anchor_x) ** 2 + (py - anchor_y) ** 2
-            if i == 0 or d2 < nearest_d2:
-                nearest_d2, nearest_x, nearest_y = d2, px, py
-        _c("col_rel", nearest_x - anchor_x)
-        _c("row_rel", nearest_y - anchor_y)
-        if not is_active:
+        entity_deployed = require_key(unit, "deployed_on_turn") is not None
+        if entity_deployed:
+            nearest_d2: float = 0.0
+            nearest_x: float = 0.0
+            nearest_y: float = 0.0
+            for i, mid in enumerate(alive_mids):
+                entry_m = models_cache[mid]
+                px, py = _hex_center(int(entry_m["col"]), int(entry_m["row"]))
+                d2 = (px - anchor_x) ** 2 + (py - anchor_y) ** 2
+                if i == 0 or d2 < nearest_d2:
+                    nearest_d2, nearest_x, nearest_y = d2, px, py
+            _c("col_rel", nearest_x - anchor_x)
+            _c("row_rel", nearest_y - anchor_y)
+        # `edge_distance` mesure des SOCLES, pas l'origine : quand l'observatrice n'est pas posée,
+        # aucun socle n'existe côté attaquant et la mesure partirait de la sentinelle. Elle reste
+        # à 0 — la valeur que porte déjà l'entité active, pour qui elle n'est jamais écrite.
+        if not is_active and not ctx["active_not_deployed"] and entity_deployed:
             # MÊME mesure que le gate de portée du moteur (socles par-figurine), donc
             # directement comparable aux portées d'armes exposées par les profils.
             from engine.phase_handlers.shared_utils import _ranged_squad_edge_distance
@@ -1084,8 +1097,23 @@ class ObservationBuilder:
         # Centroïde : REQUIS. `_compute_squad_cache_entry` le pose toujours (même escouade morte) ;
         # un repli sur l'ancre de l'unité déplacerait l'origine T-I en silence sur un cache
         # incomplet — même famille que les replis fermés en §0.32 T-J.
-        cx = float(require_key(active_sq, "centroid_col"))
-        cy = float(require_key(active_sq, "centroid_row"))
+        #
+        # §0.40 point 4 : SAUF si l'escouade n'est pas encore posée. Son centroïde vaut alors
+        # (-1,-1) — la moyenne des figurines, toutes à la sentinelle « pas sur le board ». Tout ce
+        # que l'obs exprime « depuis moi » était donc mesuré depuis un coin HORS PLATEAU : sur le
+        # scénario d'entraînement, l'agent voyait l'objectif 0 à 38,3 (le plus proche) alors qu'il
+        # est à 178,9 de sa zone, et ne voyait pas l'objectif 4 à 11,3 — l'ORDRE des objectifs
+        # était inversé, et les 3 actions de zone s'appuient sur ces nombres.
+        # L'origine devient celle de la grille (`squad_grid_anchor`, §0.40 point 2), ce qui REND
+        # l'invariant T-I ci-dessous : un seul repère pour toute l'observation. Sans cela, le
+        # vecteur et la grille décriraient deux régions différentes du plateau.
+        active_not_deployed = require_key(active_unit, "deployed_on_turn") is None
+        if active_not_deployed:
+            _anchor_col, _anchor_row = self.squad_grid_anchor(game_state, active_squad_id)
+            cx, cy = float(_anchor_col), float(_anchor_row)
+        else:
+            cx = float(require_key(active_sq, "centroid_col"))
+            cy = float(require_key(active_sq, "centroid_row"))
         # Origine des positions RELATIVES, dans la projection `_hex_center` (§0.32 T-I) : la même
         # origine que les directions d'objectif (`_squad_objective_geometry`), donc un seul repère
         # pour tout ce que l'observation exprime « depuis moi ».
@@ -1238,8 +1266,15 @@ class ObservationBuilder:
         for k_idx in range(min(self.SQUAD_TOP_K, len(alive_mids))):
             mid = alive_mids[k_idx]
             m = models_cache[mid]
-            mx, my = _hex_center(int(m["col"]), int(m["row"]))
-            sm_cont[k_idx] = (mx - anchor_x, my - anchor_y)
+            if active_not_deployed:
+                # §0.40 point 4 : escouade pas encore posée — ses figurines sont à la sentinelle,
+                # pas à un endroit du plateau. Position relative nulle : par convention elle EST
+                # au point de mesure (l'ancre de sa zone), ce que disait déjà la valeur produite
+                # avant ce correctif, quand l'origine était la sentinelle elle-même.
+                sm_cont[k_idx] = (0.0, 0.0)
+            else:
+                mx, my = _hex_center(int(m["col"]), int(m["row"]))
+                sm_cont[k_idx] = (mx - anchor_x, my - anchor_y)
             sm_bin[k_idx] = (
                 1.0 if mid in fighting_set else 0.0,
                 1.0 if in_enemy_ez[mid] else 0.0,
@@ -1267,9 +1302,15 @@ class ObservationBuilder:
             "cx": cx,
             "cy": cy,
             # Origine PROJETÉE des positions relatives (§0.32 T-I), calculée une fois pour les 28
-            # entités : `_hex_center` du centroïde arrondi de l'unité observatrice.
+            # entités : `_hex_center` du centroïde arrondi de l'unité observatrice — ou de l'ancre
+            # de sa zone de déploiement si elle n'est pas encore posée (§0.40 point 4).
             "anchor_x": anchor_x,
             "anchor_y": anchor_y,
+            # L'observatrice n'est PAS sur le plateau : rien de ce qui se mesure depuis son socle
+            # n'existe (§0.40 point 4). Les features concernées restent à 0 — c'est déjà la
+            # convention de ce vecteur pour « non applicable » (`edge_distance` de l'entité active
+            # n'est jamais écrite), et le bit `deploy_not_on_board` de la ligne 0 la porte.
+            "active_not_deployed": active_not_deployed,
             "current_turn": current_turn,
             "engaged_squads": engaged_squads,
             "moved_by_model": require_key(game_state, "moved_distance_by_model"),
