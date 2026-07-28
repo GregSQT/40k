@@ -25,13 +25,13 @@ lecture, jamais une copie de chiffres qui dériverait.
 
 | Clé | Forme | Contenu |
 |---|---|---|
-| `global_cont` / `global_bin` | (11,) / (27,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, force d'usure, **distance à chacun des 5 objectifs** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux** |
+| `global_cont` / `global_bin` | (11,) / (27,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, force d'usure, **distance à chacun des 5 objectifs** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**. ⚠️ Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, qui vaut la sentinelle `(-1,-1)` tant qu'elle n'est pas posée : **en phase de déploiement elles sont fausses** (V11 §0.40 point 4, ouvert ; la grille, elle, est corrigée) |
 | `allies_cont` / `allies_bin` | (8, 19) / (8, 33) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les 32 drapeaux incluent les **13 règles d'unité en vigueur** (19.04) et, pour les ennemis seulement, `los_can_see`, `cover_vs_observer` et `charge_reachable_max_roll` |
 | `allies_wpn_cont` / `_bin` | (8, 20, 13) / (8, 20, 18) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants et bits/params de règles |
 | `allies_types_cont` / `_bin` | (8, 6, 5) / (8, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
 | `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
 | `self_models_cont` / `_bin` | (20, 2) / (20, 4) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement, **bit de présence** |
-| `grid` | (9, 32, 32) | grille égocentrique : murs, **autres** escouades amies, ennemis, EZ, objectifs, niveau, couvert, **l'escouade active seule** (§0.32 T-L), **coût géodésique du pool de move** — encodé avec la frontière normal/advance à **0,5 exactement** (§0.32 T-K) ; escouade **engagée** : tout move est un Fall Back qui coûte le tir → toutes les cellules peintes sont **au-dessus de 0,5** (§0.37) |
+| `grid` | (9, 32, 32) | grille égocentrique : murs, **autres** escouades amies, ennemis, EZ, objectifs, niveau, couvert, **l'escouade active seule** (§0.32 T-L), **coût géodésique du pool de move** — encodé avec la frontière normal/advance à **0,5 exactement** (§0.32 T-K) ; escouade **engagée** : tout move est un Fall Back qui coûte le tir → toutes les cellules peintes sont **au-dessus de 0,5** (§0.37). **Centre de la fenêtre** (`ObservationBuilder.squad_grid_anchor`) : l'escouade active — sauf si elle n'est **pas encore posée** (`deployed_on_turn is None`, phase de déploiement), auquel cas c'est un hex de **sa zone de déploiement** ; avant V11 §0.40 la fenêtre était centrée sur la sentinelle `(-1,-1)`, donc sur une autre région du plateau |
 
 ### Structure Overview
 
@@ -428,7 +428,7 @@ un one-hot, donc réellement binaire — et toujours hors normalisation.)
 
 ### Ce qui est mémoïsé, et par quelle clé d'invalidation
 
-L'observation lit **cinq** caches, chacun avec sa propre condition d'invalidation. C'est le point
+L'observation lit **six** caches, chacun avec sa propre condition d'invalidation. C'est le point
 le plus fragile du pipeline : un cache servi trop longtemps ne lève rien, il décrit simplement un
 état périmé (régressions V11 §0.18 et §0.26). L'inventaire est verrouillé par
 `tests/unit/engine/test_obs_caches_die_with_the_episode.py`, qui rougit si un cache d'observation
@@ -440,6 +440,7 @@ survit à un reset — **ajouter un cache sans l'y ajouter fait échouer ce test
 | `_obs_objective_hex_arrays` | hexes de chaque objectif (distances/directions) | par épisode | bloc de purges de `reset` |
 | `_grid_static_hex_arrays` | murs / objectifs / couvert rasterisés | par épisode | idem |
 | `_obs_solid_terrain_areas` | zones contenant un mur dense (Solid 13.11) | par épisode | idem |
+| `_grid_deployment_zone_anchor` | l'hex sur lequel la grille est centrée pour une escouade **pas encore posée** (V11 §0.40) | par joueur, par épisode | idem — la zone de déploiement change avec le terrain rechargé |
 | `_unit_los_pair_cache` | `los_can_see` / `cover_vs_observer` par paire | `(tireur, cible)` | **invalidation ciblée** au choke-point `_touch_unit_los` : toute écriture de position, toute perte de figurine — donc correct même quand un ennemi bouge pendant mon tour (`reactive_move`) |
 
 Le dernier est le seul à ne PAS être « par épisode » : il doit suivre chaque mouvement. Sa

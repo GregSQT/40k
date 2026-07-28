@@ -67,7 +67,7 @@ actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist
 | **§0.38** | Code mort `_attack_sequence_rng` non supprimé — 2ᵉ moitié de P1 | 🟠 **OUVERT** (constaté 2026-07-28) | **3** | P1 prévoyait « porter les règles vers le vif **PUIS supprimer le mort** ». Le portage est fait ; la suppression **non**. Détail → §0.38. |
 | **§0.33** | Rollout buffer 46,9 Go pour 39 Go de RAM | 🟠 **CONDITIONNEL** — ne bloque que les profils à 48 envs | **4** (avant tout run 48 envs) | Vérifié 2026-07-28 dans la config : `x1`/`x5_new`/`x5_debug` = **8 envs** (passent) ; `x5_append`/`x1_debug` = **48 envs** (échouent à l'allocation). Ne pas lancer ces deux-là sans rouvrir l'entrée. |
 | **§0.29** | Scénario SM vs Orks fixed/active + scheduler | 🟢 **USAGE CONFIGURÉ** le 2026-07-28 (`active_ratio_end` 0.0 → **0.8**, commit `acd63b66`) — et c'est le réglage CORRECT, cf. l'asymétrie ci-dessous | 5 | Le run 3 joue une part croissante d'épisodes en `active` (0 % au début → 80 % à la fin, `p_active = start + (end−start)·progress`, [w40k_core.py:934](../../engine/w40k_core.py#L934)). 🔴 **ASYMÉTRIE VÉRIFIÉE le 2026-07-28 23 h 30 — la rampe ne s'applique QU'À L'ENTRAÎNEMENT, jamais à l'éval.** `deployment_mode_schedule.training_only: true` + `_is_training_scenario_context()` qui exige `/scenarios/training/` dans le chemin ([w40k_core.py:693](../../engine/w40k_core.py#L693)) ⇒ les scénarios d'éval (`/scenarios/holdout_regular/`, tous en `deployment_type: "active"`) **jouent TOUJOURS une phase de déploiement**, quelle que soit la rampe. **Donc `active_ratio_end: 0.0` créait un décalage entraînement/éval** : agent entraîné 100 % en placement figé, puis noté sur des parties à déployer. La rampe à 0.8 **aligne** les deux — la remettre à 0 dégraderait la mesure. ✅ **Réserve levée le 2026-07-28** : les défauts 1 et 2 de l'observation du déploiement sont corrigés (§0.40, commits `0e0551e8` / `2893bbcb`, `obs_size` inchangé). Il reste le seul point 3 (les hexes candidats ne sont pas décrits), donc un plafond résiduel mais bien plus bas. ⚠️ Le run 3 lancé le 2026-07-28 à 23 h 20 est ANTÉRIEUR à ces deux commits : il a entraîné le déploiement sur l'observation fausse. |
-| **§0.40** | Observation de la phase de déploiement — **points 1-2 corrigés**, point 3 ouvert | 🟠 **PARTIELLEMENT OUVERT** — chantier externe | 6 | **Points 1 et 2 livrés le 2026-07-28** (`0e0551e8` obs = unité du masque, `2893bbcb` grille ancrée sur la zone de déploiement) : `obs_size` **inchangé** (20768), donc aucun modèle invalidé. Reste le **point 3** seul (décrire les 5 hexes-stratégies candidats) — il change `obs_size` → à séquencer avec un run `--new`. Détail → §0.40. |
+| **§0.40** | Observation de la phase de déploiement — **points 1-2 corrigés**, points 3 et 4 ouverts | 🟠 **PARTIELLEMENT OUVERT** — chantier externe | 6 | **Points 1 et 2 livrés le 2026-07-28** (`0e0551e8` obs = unité du masque, `2893bbcb` grille ancrée sur la zone de déploiement) : `obs_size` **inchangé** (20768), donc aucun modèle invalidé. Restent le **point 4** — trouvé en vérifiant le 2 : le **vecteur** mesure aussi depuis `(-1,-1)`, l'ordre des distances aux objectifs en est **inversé** ; `obs_size` inchangé, à traiter en premier — puis le **point 3** (décrire les 5 hexes-stratégies), qui change `obs_size` → run `--new`. Détail → §0.40. |
 | **§0.42** | P2 « décision agent » | ✅ **MERGÉ** sur `main` — reste la MESURE (run 3 en cours) | — | Détail → §0.42. |
 | **§0.43** | P3-2 « cible de charge » | ✅ **MERGÉ** sur `main` le 2026-07-28 23 h (fast-forward, 8 commits, 0 conflit) — reste la MESURE (run 3 en cours) | — | La branche `v11-p3-2-charge-target` est devenue identique à `main` (supprimable). Détail → §0.43. |
 | **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)). T2→T5 **jamais revérifiés** : ne pas s'appuyer sur leurs ✅ sans relecture. ⚠️ Sa **section** est restée en §0hist (elle y était déjà avant l'épuration) alors que sa part T2→T5 est ouverte — laissée en place plutôt que scindée, pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
@@ -151,10 +151,21 @@ la règle « un contenu d'état vit à UN seul endroit ».
   **zone de déploiement** lue dans `deployment_state["deployment_pools"]`, géométrie
   `engine/spatial_grid` **inchangée** (seul l'ancrage bouge). 96 %/78 % de la zone visible après.
 
-**Reste ouvert — point 3 seul** : les 5 slots sont 5 **stratégies** évaluées sur tous les hexes
-valides, et l'obs n'en décrit aucun ; le cache de scoring du décodeur calcule déjà tout
-(`los_exposure_by_hex`, centres d'objectifs, …). C'est une extension de contrat d'obs →
-`obs_size` change → **run `--new`**.
+**Reste ouvert — deux points** :
+- **point 3** : les 5 slots sont 5 **stratégies** évaluées sur tous les hexes valides, et l'obs
+  n'en décrit aucun ; le cache de scoring du décodeur calcule déjà tout (`los_exposure_by_hex`,
+  centres d'objectifs, …). Extension de contrat d'obs → `obs_size` change → **run `--new`**.
+- **point 4, TROUVÉ le 2026-07-28 en vérifiant le correctif du point 2** (il n'était identifié
+  nulle part) : le **vecteur** mesure lui aussi depuis la sentinelle `(-1,-1)`. Son origine est
+  `_hex_center(centroid_col, centroid_row)`, et le centroïde d'une escouade non posée vaut
+  `(-1,-1)` — donc `objective_distance_*`, `objective_dir_cos/sin_*` et les `col_rel`/`row_rel`
+  de **toutes** les entités sont mesurés depuis le coin hors plateau. Mesuré : l'agent voit
+  l'objectif 0 à **38,3** (le plus proche) alors qu'il est à **178,9** de sa zone, et ne voit pas
+  l'objectif 4 qui est à **11,3** — l'ordre des objectifs est **inversé**, et les trois actions de
+  zone s'appuient sur ces nombres. `obs_size` ne change pas ; il reste un choix de conception à
+  trancher (que valent `col_rel`/`row_rel` de l'escouade active quand elle n'est nulle part ?).
+  Indépendant du point 3 et bien moins coûteux → **à traiter d'abord**. Détail et mesures →
+  [`observation_deploiement.md`](observation_deploiement.md).
 
 ⚠️ **Conséquence de mesure** : `obs_size` reste **20768** (verrouillé par test), donc aucun modèle
 n'est invalidé — mais le CONTENU de l'obs de déploiement change. Un agent entraîné avant ces deux

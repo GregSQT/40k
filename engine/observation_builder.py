@@ -1393,6 +1393,8 @@ class ObservationBuilder:
                 f"squad_grid_anchor: escouade {active_squad_id} non deployee mais aucun pool de "
                 f"deploiement pour le joueur {player} — impossible d'ancrer la grille."
             )
+        from engine.spatial_grid import hex_centers_px
+
         pool_np = np.array(
             [
                 (int(h[0]), int(h[1]))
@@ -1402,14 +1404,14 @@ class ObservationBuilder:
             ],
             dtype=np.int64,
         )
-        # Barycentre en coordonnees de RENDU (`_hex_center`) et non en (col,row) : la grille
-        # hexagonale est decalee d'une demi-ligne une colonne sur deux, donc une moyenne brute
-        # de (col,row) ne designe pas le centre geometrique de la zone.
-        centers = np.array(
-            [_hex_center(int(c), int(r)) for c, r in pool_np.tolist()], dtype=np.float64
-        )
-        centroid = centers.mean(axis=0)
-        nearest = int(np.argmin(((centers - centroid) ** 2).sum(axis=1)))
+        # Barycentre en coordonnees de RENDU et non en (col,row) : la grille hexagonale est
+        # decalee d'une demi-ligne une colonne sur deux, donc une moyenne brute de (col,row) ne
+        # designe pas le centre geometrique de la zone. Projection VECTORISEE (`hex_centers_px`,
+        # le jumeau lot de `_hex_center` deja utilise par la rasterisation) : la zone fait
+        # ~16 000 hexes, la boucle scalaire coutait 19 ms au premier appel de chaque episode.
+        px, py = hex_centers_px(pool_np[:, 0], pool_np[:, 1])
+        d2 = (px - px.mean()) ** 2 + (py - py.mean()) ** 2
+        nearest = int(np.argmin(d2))
         anchor = (int(pool_np[nearest, 0]), int(pool_np[nearest, 1]))
         anchors[player] = anchor
         return anchor

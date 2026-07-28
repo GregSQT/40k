@@ -63,6 +63,29 @@ def test_every_reachable_hex_falls_inside_the_grid(half_extent, anchor):
             )
 
 
+def test_hex_centers_px_matches_hex_center_exactly():
+    """`hex_centers_px` == `_hex_center`, hex par hex, sur les deux parites de colonne.
+
+    Ce jumeau vectorise a DEUX appelants (`hex_arrays_to_cells` pour la rasterisation, et
+    l'ancre de zone de deploiement de §0.40 point 2, qui projette ~16 000 hexes). Le test
+    d'equivalence `hex_arrays_to_cells` == `hex_to_cell` ne couvre que le premier : sans ce
+    verrou-ci, une derive de la formule ferait ancrer la grille ailleurs sans rien lever.
+    """
+    import numpy as np
+
+    from engine.hex_utils import _hex_center
+    from engine.spatial_grid import hex_centers_px
+
+    cols, rows = [], []
+    for col in range(0, 220, 7):
+        for row in range(0, 300, 11):
+            cols.append(col)
+            rows.append(row)
+    x, y = hex_centers_px(np.array(cols), np.array(rows))
+    expected = np.array([_hex_center(c, r) for c, r in zip(cols, rows)], dtype=np.float64)
+    assert np.array_equal(np.stack([x, y], axis=1), expected)
+
+
 @pytest.mark.parametrize("half_extent", [12, 60, 90])
 @pytest.mark.parametrize("anchor", [(80, 80), (81, 80)])
 def test_vectorized_projection_matches_scalar_exactly(half_extent, anchor):

@@ -229,6 +229,28 @@ def hex_to_cell(
     return gx, gy
 
 
+def hex_centers_px(
+    cols: "np.ndarray", rows: "np.ndarray"
+) -> Tuple["np.ndarray", "np.ndarray"]:
+    """Jumeau VECTORISE de `_hex_center` -> (x, y) en unites `_hex_center`.
+
+    Meme formule que `engine.hex_utils._hex_center` (hex_radius=1.0, flat-top odd-q), appliquee
+    a des tableaux. Elle etait deja inlinee dans `hex_arrays_to_cells` : la sortir ici lui donne
+    UN site, au lieu d'en ouvrir un deuxieme pour chaque nouvel appelant qui a besoin de projeter
+    un lot d'hexes (l'ancre de zone de deploiement, §0.40 point 2, en projette ~16 000).
+
+    L'equivalence avec `_hex_center` est verrouillee par test — c'est elle qui garantit que tout
+    ce qui est projete par lot atterrit au meme endroit que ce qui est projete a l'unite.
+    """
+    cols = np.asarray(cols, dtype=np.float64)
+    rows = np.asarray(rows, dtype=np.float64)
+    hex_width = 1.5
+    hex_height = HEX_STEP_PX
+    x = cols * hex_width + hex_width / 2.0
+    y = rows * hex_height + (np.mod(cols, 2.0) * hex_height) / 2.0 + hex_height / 2.0
+    return x, y
+
+
 def hex_arrays_to_cells(
     cols: "np.ndarray",
     rows: "np.ndarray",
@@ -249,14 +271,7 @@ def hex_arrays_to_cells(
     L'equivalence stricte avec `hex_to_cell` est verrouillee par test : c'est elle qui garantit
     que l'obs et le masque designent le meme hex.
     """
-    cols = np.asarray(cols, dtype=np.float64)
-    rows = np.asarray(rows, dtype=np.float64)
-
-    # Inline de `_hex_center` (hex_radius=1.0, flat-top odd-q), vectorise.
-    hex_width = 1.5
-    hex_height = HEX_STEP_PX
-    x = cols * hex_width + hex_width / 2.0
-    y = rows * hex_height + (np.mod(cols, 2.0) * hex_height) / 2.0 + hex_height / 2.0
+    x, y = hex_centers_px(cols, rows)
 
     ax, ay = _hex_center(anchor_col, anchor_row)
     w = _half_extent_px(half_extent_subhex)
