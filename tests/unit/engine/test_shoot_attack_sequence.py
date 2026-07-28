@@ -17,8 +17,6 @@ prompt — c est le meme code que le PvP, sans l aller-retour frontend.
 """
 import random
 
-import pytest
-
 from engine.phase_handlers import shooting_handlers
 from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
 
@@ -43,7 +41,7 @@ def _uc(col, row, *, player):
 
 
 def _game_state(*, bs=4, strength=4, ap=0, dmg=1, toughness=4, armor_save=4, hp=3,
-                weapon_rules=None):
+                weapon_rules=None, target_keywords=("INFANTRY",)):
     """1 tireur (escouade '1') vs 1 cible (escouade '2'), 1 attaque resolue."""
     weapon = {"BS": bs, "STR": strength, "AP": ap, "DMG": dmg, "NB": 1, "RNG": 24,
               "WEAPON_RULES": list(weapon_rules or []), "display_name": "Plasma Gun"}
@@ -62,7 +60,11 @@ def _game_state(*, bs=4, strength=4, ap=0, dmg=1, toughness=4, armor_save=4, hp=
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},
         "units_cache": {"1": _uc(0, 0, player=0), "2": _uc(9, 9, player=1)},
         "units": [{"id": "1", "player": 0}, {"id": "2", "player": 1}],
-        "unit_by_id": {"1": {"id": "1", "UNIT_RULES": []}, "2": {"id": "2", "UNIT_RULES": []}},
+        "unit_by_id": {
+            "1": {"id": "1", "UNIT_RULES": []},
+            "2": {"id": "2", "UNIT_RULES": [],
+                  "UNIT_KEYWORDS": [{"keywordId": k} for k in target_keywords]},
+        },
         "objectives": [], "units_moved": set(), "units_advanced": set(),
         "pending_squad_shoot_intents": {
             "1": [{"model_id": "A1", "target_unit_id": "2", "weapon_index": 0,
@@ -221,42 +223,82 @@ def test_le_nom_de_l_arme_est_publie_dans_le_log(monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 05.01 / 05.02 : le 1 non modifie rate toujours, le 6 non modifie reussit toujours
+# 05.01 / 05.04 : le 1 non modifie rate TOUJOURS, y compris quand le seuil vaut 1
+#
+# ⚠️ Ces deux tests n ont de contenu QUE si le seuil peut descendre a 1 : sur un seuil >= 2,
+# un 1 echoue de toute facon par comparaison, et la clause « 1 non modifie » ne porte rien
+# (contre-epreuve mutation : retirer le garde `== NATURAL_FAIL_ROLL` laisse le test VERT).
+# Les deux seuils a 1 sont ATTEIGNABLES avec les donnees du projet, d ou les profils choisis.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_un_1_non_modifie_rate_toujours_la_touche(monkeypatch):
-    """BS 2+ : un 1 rate quand meme (05.01)."""
+def test_un_1_non_modifie_rate_la_touche_meme_sur_un_seuil_de_1(monkeypatch):
+    """05.01 sur BS 1+ — profil reel : deux armes des armories declarent `ATK: 1`.
+
+    Sans la clause, 1 >= 1 toucherait. Contre-epreuve mutation : neutraliser
+    `hit_roll == NATURAL_FAIL_ROLL` dans `roll_attack_pool` -> ce test rougit."""
     seq = _seq(monkeypatch, [1])
-    gs = _game_state(bs=2)
+    gs = _game_state(bs=1)
 
     build_manual_shoot_allocation(gs, "1")
 
     assert _records(gs)[0]["hitResult"] == "MISS"
+    assert seq == [], "aucun de de blessure : la touche a rate"
+
+
+def test_une_sauvegarde_de_1_echoue_meme_sur_un_seuil_de_1(monkeypatch):
+    """05.04 sur un seuil de sauvegarde de 1+ : le 1 echoue quand meme.
+
+    Seuil 1 obtenu avec un AP **positif** sur une Sv 2+ (`save_threshold` : `armure - ap`).
+    ⚠️ Ce profil n est pas theorique : `bone_cleaver` (tyranid/armory.ts) declare `AP: 1`,
+    seule valeur d AP > 0 des armories — vraisemblablement un signe manquant, signale mais
+    non corrige ici (une correction de datasheet demande une source, absente des PDF du
+    projet qui ne portent que les regles de base). Contre-epreuve mutation : neutraliser
+    `save_roll != 1` dans `_resolve_one_manual_wound` -> ce test rougit."""
+    seq = _seq(monkeypatch, [4, 4, 1])
+    gs = _game_state(ap=1, armor_save=2, dmg=1)
+
+    build_manual_shoot_allocation(gs, "1")
+
+    assert _records(gs)[0]["saveTarget"] == 1, "AP +1 sur Sv2+ -> seuil de sauvegarde 1"
+    assert _hp(gs) == 2, "un 1 non modifie rate toujours la sauvegarde"
+    assert _records(gs)[0]["saveSuccess"] is False
     assert seq == []
 
 
-def test_un_6_non_modifie_blesse_toujours(monkeypatch):
-    """S2 vs T4 -> blessure 6+ tout juste ; mais meme S1 (blessure impossible a 6+ ?) : le 6
-    est une blessure CRITIQUE, elle passe quel que soit le seuil (05.02)."""
-    seq = _seq(monkeypatch, [4, 6, 2])
-    gs = _game_state(strength=1, toughness=10, dmg=1)
+# ─────────────────────────────────────────────────────────────────────────────
+# [ANTI-X Y+] 24.03 — CABLAGE au tir (le socle est verrouille par
+# test_weapon_rules_attack_sequence.py, la melee par test_weapon_rules_fight.py ; le tir
+# n etait couvert par RIEN avant V11 §0.38)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_anti_keyword_abaisse_le_seuil_de_blessure_critique_au_tir(monkeypatch):
+    """[ANTI-INFANTRY 5+] contre une cible INFANTRY : un 5 devient une blessure CRITIQUE,
+    donc une blessure — alors que le seuil normal (S1 vs T10) est de 6+.
+
+    C est le seul cas ou 05.02 est observable a travers le cablage de tir : `wound_threshold`
+    plafonne a 6, donc sans [ANTI] un 6 passe deja par la voie normale et la clause critique
+    ne porte rien."""
+    seq = _seq(monkeypatch, [4, 5, 2])
+    gs = _game_state(strength=1, toughness=10, weapon_rules=["ANTI_INFANTRY:5"],
+                     target_keywords=("INFANTRY",))
 
     build_manual_shoot_allocation(gs, "1")
 
     rec = _records(gs)[0]
-    assert rec["strengthResult"] == "SUCCESS", "6 non modifie = blessure critique (05.02)"
+    assert rec["strengthResult"] == "SUCCESS", "5 >= seuil ANTI 5+ -> blessure critique"
     assert rec.get("criticalWound") is True
     assert _hp(gs) == 2
     assert seq == []
 
 
-def test_une_sauvegarde_de_1_echoue_toujours(monkeypatch):
-    """05.04 : Sv2+, jet de 1 -> echec malgre le seuil atteint par valeur."""
-    seq = _seq(monkeypatch, [4, 4, 1])
-    gs = _game_state(armor_save=2, dmg=1)
+def test_anti_sans_le_keyword_sur_la_cible_ne_s_applique_pas_au_tir(monkeypatch):
+    """Discrimination : meme arme, cible VEHICLE -> le 5 reste un echec face au seuil 6+."""
+    seq = _seq(monkeypatch, [4, 5])
+    gs = _game_state(strength=1, toughness=10, weapon_rules=["ANTI_INFANTRY:5"],
+                     target_keywords=("VEHICLE",))
 
     build_manual_shoot_allocation(gs, "1")
 
-    assert _hp(gs) == 2, "un 1 non modifie rate toujours la sauvegarde"
-    assert _records(gs)[0]["saveSuccess"] is False
-    assert seq == []
+    assert _records(gs)[0]["strengthResult"] == "FAILED"
+    assert _hp(gs) == 3
+    assert seq == [], "aucune sauvegarde tiree : la blessure a echoue"

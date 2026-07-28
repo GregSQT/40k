@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-import pytest
-
 from engine.phase_handlers.movement_handlers import (
     movement_phase_start,
     movement_build_valid_destinations_pool,
@@ -67,11 +65,6 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
 def _rng_weapon(atk=3, str_=4, ap=0, dmg=1, rng=24) -> Dict[str, Any]:
     return {"ATK": atk, "STR": str_, "AP": ap, "DMG": dmg, "RNG": rng, "display_name": "Test Gun",
             "NB": 1, "WEAPON_RULES": []}
-
-
-def _cc_weapon(atk=3, str_=4, ap=0, dmg=1) -> Dict[str, Any]:
-    return {"ATK": atk, "STR": str_, "AP": ap, "DMG": dmg, "display_name": "Test Blade",
-            "NB": 1}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
