@@ -1270,10 +1270,14 @@ class ObservationBuilder:
         # garde, `get_fighting_models` rendait les 6 figurines « éligibles au combat » parce que
         # toutes les unités non posées se recouvrent sur la sentinelle.
         if on_battlefield[str(active_squad_id)]:
-            try:
-                fighting_set = set(get_fighting_models(game_state, active_squad_id))
-            except Exception:
-                fighting_set = set()
+            # Aucun `try/except` ici, et c'est vérifié plutôt que supposé : un `except Exception`
+            # traduisait TOUTE erreur en « aucune figurine ne peut combattre » — un état de jeu
+            # inventé, servi à l'agent sans trace. Les raises atteignables depuis
+            # `get_fighting_models` sur ce chemin (`models_cache`, `squad_models`,
+            # `get_engagement_zone`, `_synth_model_entry`, la primitive EZ) sont TOUS déjà
+            # déclenchés sans garde par le code qui l'entoure, sur les MÊMES données : le
+            # try/except ne protégeait rien, il ne pouvait que masquer une donnée corrompue.
+            fighting_set = set(get_fighting_models(game_state, active_squad_id))
         synth_by_mid: Dict[str, Dict[str, Any]] = {}
         in_enemy_ez: Dict[str, bool] = {}
         for mid in alive_mids:
