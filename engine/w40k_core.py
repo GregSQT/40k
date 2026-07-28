@@ -44,7 +44,7 @@ from engine.game_utils import get_unit_by_id, turn_limit_reached, get_effective_
 
 # Import NEW extracted modules
 from engine.observation_builder import ObservationBuilder
-from engine.action_decoder import ActionDecoder
+from engine.action_decoder import DEPLOY_SLOT_CANDIDATES_CACHE_KEY, ActionDecoder
 from engine.reward_calculator import RewardCalculator
 from engine.game_state import GameStateManager
 from engine.macro_intents import INTENT_INVADE, MAX_OBJECTIVES, is_zone_intent_action, decode_zone_intent_action, get_nearest_objective_zone
@@ -538,6 +538,9 @@ class W40KEngine(gym.Env):
         self.state_manager = GameStateManager(self.config, self.unit_registry)
         self.obs_builder = ObservationBuilder(self.config)
         self.action_decoder = ActionDecoder(self.config)
+        # Le bloc « candidats de déploiement » de l'observation (§0.40 point 3) LIT le décodeur :
+        # l'hexe décrit à l'agent est celui que le commit posera, jamais un second calcul.
+        self.obs_builder.action_decoder = self.action_decoder
         # Use rewards_config from config dict if not already loaded
         _rc = self.config["rewards_config"] if "rewards_config" in self.config else {}
         rewards_cfg = getattr(self, 'rewards_config', _rc)
@@ -1050,6 +1053,11 @@ class W40KEngine(gym.Env):
         # de deploiement du joueur, que `_reload_scenario` remplace (autre terrain, autres zones).
         # Sans purge, l'agent deploierait en regardant la zone de l'episode precedent.
         self.game_state.pop("_grid_deployment_zone_anchor", None)
+        # Candidats des slots de deploiement (§0.40 point 3) : l'hexe que chaque slot 4-8
+        # poserait, lu par le decodeur ET par l'observation. Son tampon est l'etat des unites
+        # posees — qui recommence IDENTIQUE (aucune unite posee) a chaque episode : sans purge,
+        # le 1er step du nouvel episode servirait les candidats du terrain precedent.
+        self.game_state.pop(DEPLOY_SLOT_CANDIDATES_CACHE_KEY, None)
         # Zones de terrain contenant un mur DENSE (Solid 13.11), memoisees par
         # `_squad_terrain_flags` pour le drapeau « gone to ground pret » (13.5). Elles derivent
         # de `terrain_areas` ET de `dense_wall_hexes`, que `_reload_scenario` remplace : sans

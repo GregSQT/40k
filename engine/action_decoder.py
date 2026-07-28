@@ -41,6 +41,9 @@ from engine.phase_handlers.shared_utils import (
 from engine.macro_intents import (
     BASE_ZONE_INTENT,
     CHOICE_BASE,
+    DEPLOY_SLOT_BASE,
+    DEPLOY_SLOT_COUNT,
+    DEPLOY_SLOTS,
     TOTAL_ACTION_SIZE,
     MAX_OBJECTIVES,
     decode_agent_decision_action,
@@ -52,6 +55,28 @@ from engine.agent_decision import read_pending_agent_decision
 
 # Game phases - single source of truth for phase count
 GAME_PHASES = ["deployment", "command", "move", "shoot", "charge", "fight"]
+
+#: Clé du `game_state` portant les candidats des slots de déploiement (V11 §0.40 point 3).
+#: Un slot OUVERT y porte l'hexe que sa stratégie choisit, le plan de formation validé qui va
+#: avec, et les grandeurs qui ont produit ce choix. Le décodeur ET l'observation la lisent :
+#: c'est ce qui garantit que l'agent voit EXACTEMENT ce que son action exécutera.
+#: Purgée au reset d'épisode (`w40k_core`) — son tampon est l'état de déploiement, qui
+#: recommence identique (aucune unité posée) d'un épisode à l'autre.
+DEPLOY_SLOT_CANDIDATES_CACHE_KEY = "_deployment_slot_candidates"
+
+
+def open_deploy_slot_count(num_valid_hexes: int) -> int:
+    """Nombre de slots de déploiement OUVERTS pour ce nombre d'hexes valides.
+
+    SOURCE UNIQUE de la question « quels slots 4-8 sont jouables ». Le masque l'appelle pour
+    ouvrir ses bits, le constructeur de candidats pour savoir combien de stratégies évaluer, et
+    l'observation en hérite par le second. Écrite en trois `min(5, n)` littéraux, cette règle
+    aurait pu dériver d'un site à l'autre — et l'observation aurait alors décrit comme jouable
+    un slot que le masque ferme (ou l'inverse), exactement le désalignement obs ↔ action D1.
+    """
+    if num_valid_hexes < 0:
+        raise ValueError(f"num_valid_hexes negatif: {num_valid_hexes}")
+    return min(DEPLOY_SLOT_COUNT, int(num_valid_hexes))
 
 class ActionValidationError(ValueError):
     """Raised when an action fails strict normalization or mask validation."""
@@ -202,8 +227,8 @@ class ActionDecoder:
                         f"Deployment deadlock: no valid hex for player {current_deployer}, "
                         f"unit {active_unit.get('id')}"
                     )
-                for i in range(min(5, num_hexes)):
-                    mask[4 + i] = True
+                for i in range(open_deploy_slot_count(num_hexes)):
+                    mask[DEPLOY_SLOT_BASE + i] = True
             return mask, eligible_units
 
         if current_phase == "command":
@@ -298,8 +323,8 @@ class ActionDecoder:
                         f"Deployment deadlock: no valid hex for player {current_deployer}, "
                         f"unit {active_unit.get('id')}"
                     )
-                for i in range(min(5, num_hexes)):
-                    mask[4 + i] = True
+                for i in range(open_deploy_slot_count(num_hexes)):
+                    mask[DEPLOY_SLOT_BASE + i] = True
             return mask
         if current_phase == "command":
             mask[11] = True
@@ -1888,6 +1913,280 @@ class ActionDecoder:
             )
         return new_cache
 
+    # ------------------------------------------------------------------
+    # Candidats des slots de déploiement (V11 §0.40 point 3)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _offset_to_cube_vec(
+        cols: "np.ndarray", rows: "np.ndarray"
+    ) -> tuple["np.ndarray", "np.ndarray", "np.ndarray"]:
+        """Jumeau VECTORISÉ de la conversion offset -> cube de `calculate_hex_distance`.
+
+        Recopié terme à terme depuis `engine.combat_utils.calculate_hex_distance` (même décalage
+        `row - ((col - (col & 1)) >> 1)`), et l'identité des deux est verrouillée par test : la
+        distance de déploiement doit rester CELLE du moteur, pas une approximation vectorielle.
+        """
+        x = cols
+        z = rows - ((cols - (cols & 1)) >> 1)
+        return x, -x - z, z
+
+    @classmethod
+    def _nearest_hex_distance_vec(
+        cls, cols: "np.ndarray", rows: "np.ndarray", refs: List[tuple[int, int]]
+    ) -> "np.ndarray":
+        """Distance hex au plus proche des `refs`, pour TOUS les hexes d'un coup.
+
+        Une liste de références vide LÈVE, comme la version scalaire qu'elle remplace : une
+        distance « infinie » servie par défaut ferait scorer toute la zone à l'identique.
+        """
+        if not refs:
+            raise ValueError("Reference hex list cannot be empty for deployment scoring")
+        x1, y1, z1 = cls._offset_to_cube_vec(cols, rows)
+        best: Optional["np.ndarray"] = None
+        for ref_col, ref_row in refs:
+            rc, rr = int(ref_col), int(ref_row)
+            z2 = rr - ((rc - (rc & 1)) >> 1)
+            x2 = rc
+            y2 = -x2 - z2
+            d = np.maximum(
+                np.maximum(np.abs(x1 - x2), np.abs(y1 - y2)), np.abs(z1 - z2)
+            )
+            best = d if best is None else np.minimum(best, d)
+        if best is None:
+            raise RuntimeError("_nearest_hex_distance_vec: refs non vide mais aucune distance")
+        return best
+
+    def _deployment_score_columns(
+        self,
+        game_state: Dict[str, Any],
+        current_deployer: int,
+        valid_hexes: List[tuple[int, int]],
+    ) -> Dict[str, Any]:
+        """Ingrédients de score, calculés UNE fois pour les 5 stratégies.
+
+        Les 5 stratégies ne diffèrent que par l'ORDRE dans lequel elles trient ces mêmes
+        grandeurs. Les recalculer par stratégie (ce que faisait la version scalaire, appelée une
+        fois par action) coûtait 5 passes sur ~14 000 hexes ; ici c'est une passe vectorisée
+        partagée. Les valeurs sont ENTIÈRES et identiques à celles de la version scalaire —
+        c'est ce qui permet à un tri lexicographique numpy de reproduire exactement l'ancien
+        `max` sur tuples.
+        """
+        cache = self._get_or_build_deployment_scoring_cache(
+            game_state, current_deployer, valid_hexes
+        )
+        ally_col_counts = require_key(cache, "ally_col_counts")
+        ally_deployed_hexes = require_key(cache, "ally_deployed_hexes")
+        los_exposure_by_hex = require_key(cache, "los_exposure_by_hex")
+        potential_los_exposure_by_hex = require_key(cache, "potential_los_exposure_by_hex")
+        raw_enemy_refs = self._get_enemy_reference_hexes(game_state, current_deployer)
+        enemy_reference_hexes = (
+            self._build_enemy_los_reference_hexes(raw_enemy_refs)
+            if len(raw_enemy_refs) > 10
+            else raw_enemy_refs
+        )
+        objective_centers = self._get_objective_centers(game_state)
+
+        hexes = np.asarray(valid_hexes, dtype=np.int64)
+        cols = hexes[:, 0]
+        rows = hexes[:, 1]
+        center_col = (int(cols.min()) + int(cols.max())) // 2
+        center_row = (int(rows.min()) + int(rows.max())) // 2
+
+        n = len(valid_hexes)
+        los = np.empty(n, dtype=np.int64)
+        potential_los = np.empty(n, dtype=np.int64)
+        cluster = np.empty(n, dtype=np.int64)
+        for i, h in enumerate(valid_hexes):
+            key = (int(h[0]), int(h[1]))
+            if key not in los_exposure_by_hex:
+                raise KeyError(f"Missing los_exposure cache entry for hex ({key[0]},{key[1]})")
+            if key not in potential_los_exposure_by_hex:
+                raise KeyError(
+                    f"Missing potential_los_exposure cache entry for hex ({key[0]},{key[1]})"
+                )
+            los[i] = los_exposure_by_hex[key]
+            potential_los[i] = potential_los_exposure_by_hex[key]
+            cluster[i] = ally_col_counts[key[0]] if key[0] in ally_col_counts else 0
+
+        nearest_enemy = self._nearest_hex_distance_vec(cols, rows, enemy_reference_hexes)
+        nearest_objective = self._nearest_hex_distance_vec(cols, rows, objective_centers)
+        if ally_deployed_hexes:
+            nearest_ally = self._nearest_hex_distance_vec(cols, rows, ally_deployed_hexes)
+        else:
+            # 0 pour TOUS : c'est déjà ce que faisait la version scalaire (aucun allié posé =
+            # aucune cohésion à mesurer), donc une constante, jamais un départage.
+            nearest_ally = np.zeros(n, dtype=np.int64)
+
+        return {
+            "cols": cols,
+            "rows": rows,
+            "center_col": center_col,
+            "center_row": center_row,
+            "nearest_enemy": nearest_enemy,
+            "nearest_objective": nearest_objective,
+            "nearest_ally": nearest_ally,
+            "has_deployed_ally": bool(ally_deployed_hexes),
+            "los": los,
+            "potential_los": potential_los,
+            "cluster": cluster,
+            "progress": (-rows if int(current_deployer) == 1 else rows),
+            "center_distance": np.abs(cols - center_col),
+        }
+
+    @staticmethod
+    def _deployment_slot_order(columns: Dict[str, Any], action_int: int) -> "np.ndarray":
+        """Ordre de préférence de la stratégie `action_int` sur tous les hexes valides.
+
+        Les 5 stratégies (4 front agressif · 5 pression sur objectif · 6 sûr/cohésion ·
+        7 flanc gauche · 8 flanc droit) sont des tris LEXICOGRAPHIQUES sur les mêmes colonnes,
+        le premier critère d'abord. `np.lexsort` trie en ASCENDANT avec la clé de FIN comme
+        critère principal : les clés sont donc négées (on cherche le maximum) et passées à
+        l'envers, l'index brut fermant la liste pour départager les ex æquo par leur ordre
+        d'apparition — exactement ce que faisait `max()`, qui rend le PREMIER maximum.
+        """
+        nearest_enemy = columns["nearest_enemy"]
+        nearest_objective = columns["nearest_objective"]
+        nearest_ally = columns["nearest_ally"]
+        los = columns["los"]
+        potential_los = columns["potential_los"]
+        cluster = columns["cluster"]
+        progress = columns["progress"]
+        center_distance = columns["center_distance"]
+        cols = columns["cols"]
+        rows = columns["rows"]
+
+        # Départage FINAL commun aux 5 stratégies (il suivait le tuple de score dans la version
+        # scalaire) : proximité au centre de la zone, en colonne puis en ligne.
+        tail = (
+            -np.abs(cols - columns["center_col"]),
+            -np.abs(rows - columns["center_row"]),
+        )
+        if action_int == DEPLOY_SLOT_BASE + 0:
+            keys = (progress, -nearest_enemy, -nearest_objective, -los, -potential_los,
+                    -cluster, -center_distance) + tail
+        elif action_int == DEPLOY_SLOT_BASE + 1:
+            keys = (-nearest_objective, -los, -potential_los, progress, -nearest_enemy,
+                    -cluster, -center_distance) + tail
+        elif action_int == DEPLOY_SLOT_BASE + 2:
+            keys = (-los, -potential_los, nearest_enemy, -nearest_objective, -nearest_ally,
+                    -cluster, -center_distance) + tail
+        elif action_int == DEPLOY_SLOT_BASE + 3:
+            keys = (-los, -potential_los, -cols, -nearest_objective, nearest_enemy,
+                    -cluster) + tail
+        elif action_int == DEPLOY_SLOT_BASE + 4:
+            keys = (-los, -potential_los, cols, -nearest_objective, nearest_enemy,
+                    -cluster) + tail
+        else:
+            raise ValueError(f"Invalid deployment action: {action_int}")
+
+        # `keys` reproduit LITTÉRALEMENT le tuple de score de la version scalaire, dont on
+        # prenait le MAXIMUM ; `np.lexsort` trie en ascendant, d'où la négation de chaque clé.
+        # L'index, lui, reste ascendant : à score égal, `max()` rendait le PREMIER hexe.
+        index = np.arange(len(cols), dtype=np.int64)
+        return np.lexsort((index,) + tuple(-key for key in reversed(keys)))
+
+    def deployment_slot_candidates(
+        self,
+        game_state: Dict[str, Any],
+        current_deployer: int,
+        unit_id: Any,
+        valid_hexes: Optional[List[tuple[int, int]]] = None,
+    ) -> Dict[int, Dict[str, Any]]:
+        """Ce que CHAQUE slot de déploiement ouvert ferait réellement, pour cette unité.
+
+        Rend `{action_int: {"hex", "plan", grandeurs de score…}}` pour les slots OUVERTS
+        (`open_deploy_slot_count`), et RIEN pour les autres — un slot fermé n'a pas de candidat
+        plausible, il est absent.
+
+        C'est la SOURCE UNIQUE du couple slot -> hexe : le décodeur y lit l'hexe qu'il commite
+        (`_select_deployment_hex_for_action`) et l'observation y lit ce qu'elle décrit à l'agent
+        (§0.40 point 3). Le point de conception est là : décrire les candidats en recalculant une
+        seconde géométrie aurait laissé l'agent choisir un slot d'après un hexe que le commit
+        n'aurait pas posé.
+
+        ⚠️ Le lien slot -> STRATÉGIE n'est pas stable en fin de déploiement : le masque n'ouvre
+        que `min(5, n_hexes)` slots, donc quand il reste moins de 5 hexes valides ce sont les
+        stratégies d'INDICES BAS qui survivent, pas les plus pertinentes. C'est précisément
+        pourquoi l'observation décrit l'EFFET de chaque slot et jamais son index.
+
+        Mémoïsé par (unité, déployeur, état des unités posées) : l'observation et le commit d'un
+        même step partagent donc un seul calcul. Le tampon est le `deployed_snapshot_version` du
+        cache de scoring — toute pose change l'état ET la liste des hexes valides.
+        """
+        unit = get_unit_by_id(str(unit_id), game_state)
+        if unit is None:
+            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+
+        snapshot_version = self._build_deployed_snapshot_version(
+            self._build_deployed_snapshot(game_state)
+        )
+        cache_key = (str(unit_id), int(current_deployer), snapshot_version)
+        store = game_state.get(DEPLOY_SLOT_CANDIDATES_CACHE_KEY)  # get allowed (1er appel)
+        if store is not None and store["key"] == cache_key:
+            return store["candidates"]
+
+        if valid_hexes is None:
+            valid_hexes = self._get_valid_deployment_hexes(
+                game_state, current_deployer, str(unit_id)
+            )
+        if not valid_hexes:
+            raise ValueError(
+                f"Deployment deadlock: no valid hex for player {current_deployer}, "
+                f"unit {unit_id}"
+            )
+
+        columns = self._deployment_score_columns(game_state, current_deployer, valid_hexes)
+        cols = columns["cols"]
+        rows = columns["rows"]
+
+        # Meilleure ancre de la stratégie DONT LA FORMATION EST EXÉCUTABLE. Le score seul ne
+        # suffit pas : `valid_hexes` ne contraint que l'ANCRE (empreinte ⊆ zone, hors mur,
+        # clearance — miroir T5), alors que le commit place TOUTES les figurines (V11 T6-f).
+        # Une ancre au bord de zone peut donc scorer 1re et n'admettre aucune formation légale ;
+        # la retourner rouvrirait le deadlock masque/commit corrigé en T5. Ce n'est PAS un repli
+        # masquant une erreur : les candidates sont ordonnées par la stratégie et on retient la
+        # meilleure qui est jouable — épuisement = erreur explicite.
+        from engine.phase_handlers.deployment_handlers import build_validated_deployment_plan
+
+        candidates: Dict[int, Dict[str, Any]] = {}
+        for slot in range(open_deploy_slot_count(len(valid_hexes))):
+            action_int = DEPLOY_SLOT_BASE + slot
+            order = self._deployment_slot_order(columns, action_int)
+            chosen: Optional[int] = None
+            plan = None
+            for idx in order:
+                i = int(idx)
+                plan = build_validated_deployment_plan(
+                    game_state, str(unit_id), int(cols[i]), int(rows[i])
+                )
+                if plan is not None:
+                    chosen = i
+                    break
+            if chosen is None:
+                raise ValueError(
+                    f"Deployment deadlock: aucune des {len(valid_hexes)} ancres valides "
+                    f"n'admet une formation légale pour l'escouade {unit_id} "
+                    f"(joueur {current_deployer})"
+                )
+            candidates[action_int] = {
+                "hex": (int(cols[chosen]), int(rows[chosen])),
+                "plan": plan,
+                "nearest_enemy_distance": int(columns["nearest_enemy"][chosen]),
+                "nearest_objective_distance": int(columns["nearest_objective"][chosen]),
+                "nearest_ally_distance": int(columns["nearest_ally"][chosen]),
+                "has_deployed_ally": columns["has_deployed_ally"],
+                "los_exposure": int(columns["los"][chosen]),
+                "potential_los_exposure": int(columns["potential_los"][chosen]),
+                "ally_col_count": int(columns["cluster"][chosen]),
+            }
+
+        game_state[DEPLOY_SLOT_CANDIDATES_CACHE_KEY] = {
+            "key": cache_key,
+            "candidates": candidates,
+        }
+        return candidates
+
     def _select_deployment_hex_for_action(
         self,
         action_int: int,
@@ -1905,153 +2204,31 @@ class ActionDecoder:
         - 6: safe/cohesion
         - 7: left flank
         - 8: right flank
+
+        LECTURE de `deployment_slot_candidates` : le choix y est fait, une fois pour les 5 slots,
+        et l'observation lit le MÊME dictionnaire (§0.40 point 3).
         """
-        if action_int not in [4, 5, 6, 7, 8]:
+        if action_int not in list(DEPLOY_SLOTS):
             raise ValueError(f"Invalid deployment action: {action_int}")
 
-        unit = get_unit_by_id(str(unit_id), game_state)
-        if unit is None:
-            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-
-        if game_state.get("debug_mode", False):
-            print(
-                "[TRAIN DEBUG] ActionDecoder._select_deployment_hex_for_action "
-                f"before _get_or_build_deployment_scoring_cache action_int={action_int} "
-                f"unit_id={unit_id} valid_hexes_n={len(valid_hexes)}",
-                flush=True,
-            )
-        cache = self._get_or_build_deployment_scoring_cache(game_state, current_deployer, valid_hexes)
-        if game_state.get("debug_mode", False):
-            print(
-                "[TRAIN DEBUG] ActionDecoder._select_deployment_hex_for_action "
-                f"after _get_or_build_deployment_scoring_cache action_int={action_int}",
-                flush=True,
-            )
-        ally_col_counts = require_key(cache, "ally_col_counts")
-        ally_deployed_hexes = require_key(cache, "ally_deployed_hexes")
-        los_exposure_by_hex = require_key(cache, "los_exposure_by_hex")
-        potential_los_exposure_by_hex = require_key(cache, "potential_los_exposure_by_hex")
-        raw_enemy_refs = self._get_enemy_reference_hexes(game_state, current_deployer)
-        enemy_reference_hexes = self._build_enemy_los_reference_hexes(raw_enemy_refs) if len(raw_enemy_refs) > 10 else raw_enemy_refs
-        objective_centers = self._get_objective_centers(game_state)
-        candidate_cols = [col for col, _ in valid_hexes]
-        candidate_rows = [row for _, row in valid_hexes]
-        center_col = (min(candidate_cols) + max(candidate_cols)) // 2
-        center_row = (min(candidate_rows) + max(candidate_rows)) // 2
-
-        def nearest_distance(col: int, row: int, refs: List[tuple[int, int]]) -> int:
-            if not refs:
-                raise ValueError("Reference hex list cannot be empty for deployment scoring")
-            return min(calculate_hex_distance(col, row, ref_col, ref_row) for ref_col, ref_row in refs)
-
-        def score_for_hex(col: int, row: int) -> tuple:
-            nearest_enemy_distance = nearest_distance(col, row, enemy_reference_hexes)
-            nearest_objective_distance = nearest_distance(col, row, objective_centers)
-            if ally_deployed_hexes:
-                nearest_ally_distance = nearest_distance(col, row, ally_deployed_hexes)
-            else:
-                nearest_ally_distance = 0
-            if (col, row) not in los_exposure_by_hex:
-                raise KeyError(f"Missing los_exposure cache entry for hex ({col},{row})")
-            if (col, row) not in potential_los_exposure_by_hex:
-                raise KeyError(f"Missing potential_los_exposure cache entry for hex ({col},{row})")
-            los_exposure = los_exposure_by_hex[(col, row)]
-            potential_los_exposure = potential_los_exposure_by_hex[(col, row)]
-            progress = -row if int(current_deployer) == 1 else row
-            center_distance = abs(col - center_col)
-            if col in ally_col_counts:
-                horizontal_cluster_penalty = ally_col_counts[col]
-            else:
-                horizontal_cluster_penalty = 0
-
-            if action_int == 4:
-                return (
-                    progress,
-                    -nearest_enemy_distance,
-                    -nearest_objective_distance,
-                    -los_exposure,
-                    -potential_los_exposure,
-                    -horizontal_cluster_penalty,
-                    -center_distance,
-                )
-            if action_int == 5:
-                return (
-                    -nearest_objective_distance,
-                    -los_exposure,
-                    -potential_los_exposure,
-                    progress,
-                    -nearest_enemy_distance,
-                    -horizontal_cluster_penalty,
-                    -center_distance,
-                )
-            if action_int == 6:
-                return (
-                    -los_exposure,
-                    -potential_los_exposure,
-                    nearest_enemy_distance,
-                    -nearest_objective_distance,
-                    -nearest_ally_distance,
-                    -horizontal_cluster_penalty,
-                    -center_distance,
-                )
-            if action_int == 7:
-                return (
-                    -los_exposure,
-                    -potential_los_exposure,
-                    -col,
-                    -nearest_objective_distance,
-                    nearest_enemy_distance,
-                    -horizontal_cluster_penalty,
-                )
-            return (
-                -los_exposure,
-                -potential_los_exposure,
-                col,
-                -nearest_objective_distance,
-                nearest_enemy_distance,
-                -horizontal_cluster_penalty,
-            )
-
-        # Meilleure ancre de la stratégie DONT LA FORMATION EST EXÉCUTABLE. Le score seul ne
-        # suffit pas : `valid_hexes` ne contraint que l'ANCRE (empreinte ⊆ zone, hors mur,
-        # clearance — miroir T5), alors que le commit place désormais TOUTES les figurines
-        # (V11 T6-f). Une ancre au bord de zone peut donc scorer 1re et n'admettre aucune
-        # formation légale ; la retourner rouvrirait le deadlock masque/commit corrigé en T5.
-        # Ce n'est PAS un repli masquant une erreur : les candidates sont ordonnées par la
-        # stratégie et on retient la meilleure qui est jouable — épuisement = erreur explicite.
-        # Coût : cas nominal = 1 passe de scoring (identique à l'ancien `max`) + 1 formation.
-        from engine.phase_handlers.deployment_handlers import (
-            build_validated_deployment_plan, store_validated_deployment_plan,
+        candidates = self.deployment_slot_candidates(
+            game_state, current_deployer, unit_id, valid_hexes
         )
+        if action_int not in candidates:
+            raise ValueError(
+                f"Deployment action {action_int} joue un slot FERMÉ : seuls "
+                f"{sorted(candidates)} sont ouverts pour {len(valid_hexes)} hexes valides."
+            )
+        candidate = candidates[action_int]
+        col, row = candidate["hex"]
 
-        scored = [
-            (
-                (
-                    score_for_hex(h[0], h[1]),
-                    -abs(h[0] - center_col),
-                    -abs(h[1] - center_row),
-                ),
-                h,
-            )
-            for h in valid_hexes
-        ]
-        while scored:
-            best_idx = max(range(len(scored)), key=lambda i: scored[i][0])
-            cand = scored[best_idx][1]
-            plan = build_validated_deployment_plan(
-                game_state, str(unit_id), int(cand[0]), int(cand[1])
-            )
-            if plan is not None:
-                # Mémoisé pour que le commit exécute CE plan sans le recalculer.
-                store_validated_deployment_plan(
-                    game_state, str(unit_id), int(cand[0]), int(cand[1]), plan
-                )
-                return cand
-            scored.pop(best_idx)
-        raise ValueError(
-            f"Deployment deadlock: aucune des {len(valid_hexes)} ancres valides n'admet une "
-            f"formation légale pour l'escouade {unit_id} (joueur {current_deployer})"
+        # Mémoisé pour que le commit exécute CE plan sans le recalculer.
+        from engine.phase_handlers.deployment_handlers import store_validated_deployment_plan
+
+        store_validated_deployment_plan(
+            game_state, str(unit_id), int(col), int(row), candidate["plan"]
         )
+        return (col, row)
     
     # ============================================================================
     # TARGET VALIDATION

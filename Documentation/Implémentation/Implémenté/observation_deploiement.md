@@ -1,6 +1,11 @@
-# Observation de la phase de déploiement — points 1, 2, 4 et 5 corrigés, point 3 ouvert
+# Observation de la phase de déploiement — LES 5 POINTS CORRIGÉS — ✅ DOCUMENT CLOS (2026-07-29)
 
-> **Origine** : extrait de [`V11_audit_observation.md`](../Implémenté/V11_audit_observation.md) §11
+> ✅ **CE DOCUMENT EST INTÉGRALEMENT CLOS.** Les cinq défauts qu'il recense sont livrés et
+> verrouillés par test. Il est archivé dans `Implémenté/` et ne porte plus aucune part ouverte ;
+> l'orchestration correspondante est descendue en §0hist de
+> [`V11_agent_rework.md`](../V11_agent_rework.md) sous son numéro §0.40.
+
+> **Origine** : extrait de [`V11_audit_observation.md`](V11_audit_observation.md) §11
 > (archivé le 2026-07-28). C'était le seul point **actionnable** restant de cet audit ; il est
 > sorti ici pour ne pas rester noyé en fin d'un document d'archive.
 > **Constats re-vérifiés dans le code le 2026-07-28** — le point 3 d'origine était inexact, il est
@@ -9,7 +14,9 @@
 > 2026-07-29** — il a été découvert en vérifiant le correctif du point 2 : le vecteur d'observation
 > mesurait lui aussi depuis la sentinelle hors plateau. **Point 5 corrigé le 2026-07-29** — trouvé
 > en re-vérifiant le point 4 : une unité pas encore mise en place se déclarait **engagée au
-> contact** (règle 03.04). **Le point 3 est le seul reste.**
+> contact** (règle 03.04). **Point 3 corrigé le 2026-07-29** — le dernier : les 5 slots sont
+> désormais décrits par l'effet de l'hexe qu'ils poseraient. C'est le seul des cinq qui change
+> `obs_size` (**20768 → 20828**), donc le seul qui impose un retrain `--new`.
 
 ## Contexte
 
@@ -88,11 +95,11 @@ visible ; canal MURS de la grille produite **égal** à une rasterisation depuis
 du câblage, pas seulement de la fonction d'ancrage) ; canal SELF vide avant la pose ; ancre
 inchangée pour une escouade posée.
 
-### 3. ⚠️ Les hexes candidats ne sont pas décrits (reformulé — l'énoncé d'origine était faux)
+### 3. ✅ CORRIGÉ (2026-07-29) — chaque slot ouvert décrit l'hexe qu'il poserait
 
-**Ce qui était écrit et qui est FAUX** : « les 5 actions = les 5 premiers hexes valides triés ».
+**Ce qui était écrit et qui était FAUX** : « les 5 actions = les 5 premiers hexes valides triés ».
 En réalité les 5 slots sont **5 stratégies tactiques** évaluées sur **tous** les hexes valides
-(`_select_deployment_hex_for_action`, [action_decoder.py](../../../engine/action_decoder.py)) :
+(~14 000 au premier step) :
 
 | Action | Stratégie |
 |---|---|
@@ -102,19 +109,84 @@ En réalité les 5 slots sont **5 stratégies tactiques** évaluées sur **tous*
 | 7 | flanc gauche |
 | 8 | flanc droit |
 
-**Ce qui reste vrai, et qui est le vrai défaut** :
-- l'observation ne décrit **aucun** des hexes que ces stratégies vont choisir (position, distance
-  aux objectifs, couvert, exposition LoS aux ennemis déjà posés) — alors que le décodeur, lui,
-  calcule déjà tout ça dans son cache de scoring (`_get_or_build_deployment_scoring_cache` :
-  `los_exposure_by_hex`, `potential_los_exposure_by_hex`, `ally_col_counts`, centres d'objectifs) ;
-- le masque n'ouvre que `min(5, num_hexes)` slots : quand il reste moins de 5 hexes valides, ce
-  sont les **stratégies d'indices bas** qui survivent, pas les plus pertinentes — le lien
-  slot ↔ stratégie n'est plus stable en fin de déploiement ;
-- le choix final de l'hexe reste une **heuristique du moteur**, pas une décision de l'agent.
+**Le défaut réel** : l'observation ne décrivait **aucun** de ces hexes. Depuis les points 1, 2 et 4
+l'agent sait quelle unité il pose, voit le terrain de sa zone et mesure tout depuis elle — mais la
+sémantique des cinq slots restait à deviner : ni position, ni distance aux objectifs, ni couvert,
+ni exposition, au moment précis où il choisit son point d'entrée dans la partie. Le décodeur, lui,
+calculait déjà tout cela dans son cache de scoring.
 
-→ **Piste** : exposer par slot le résumé déjà calculé par le cache de scoring (l'hexe que la
-stratégie N sélectionnerait, et ses caractéristiques). Aucune nouvelle géométrie à écrire — c'est
-une lecture du cache existant, donc source unique préservée.
+**Ce que le code fait maintenant.** Un bloc `deploy_cand_cont` (5, 8) / `deploy_cand_bin` (5, 4) —
+**60 scalaires** — décrit, par slot, **l'hexe que sa stratégie poserait** :
+
+| Champ | Ce qu'il porte |
+|---|---|
+| `col_rel` / `row_rel` | position de l'hexe candidat dans la projection `_hex_center`, **relativement à `squad_grid_anchor`** — le repère unique §0.32 T-I, celui de la grille et des directions d'objectif. C'est ce qui situe un candidat de flanc extrême, qui tombe **hors** de la fenêtre égocentrique (limite assumée du point 2) |
+| `objective_distance` | hex le plus proche d'un **centre** d'objectif |
+| `enemy_distance` | référence ennemie la plus proche (unités posées, sinon ancres de la zone ennemie) |
+| `ally_distance` | allié **déjà posé** le plus proche — masqué par `has_deployed_ally` |
+| `los_exposure` | nombre d'ennemis **déjà posés** qui voient cet hexe (06.01) |
+| `potential_los_exposure` | nombre d'ancres de la zone ennemie qui le voient — la menace à venir |
+| `ally_col_count` | alliés posés sur la même colonne (étalement horizontal) |
+| `has_deployed_ally` | masque d'`ally_distance` : sans lui, 0 voudrait dire à la fois « collé à un allié » et « aucun allié posé » |
+| `on_objective` / `in_cover` | 14.02 et 13.08, lus dans `_grid_static_hex_arrays` — le **même** ensemble que les canaux « objectifs » et « couvert » de la grille |
+| `present` | le slot est **ouvert par le masque** (dernier champ, convention §0.37) |
+
+**Trois points de conception, chacun verrouillé par test.**
+
+1. **Un candidat se décrit par son EFFET, jamais par son index.** Le masque n'ouvre que
+   `min(5, n_hexes)` slots. La règle vit désormais dans `open_deploy_slot_count`, **source unique**
+   appelée par les deux sites de masque et par le constructeur de candidats — elle était écrite en
+   trois `min(5, n)` littéraux. Quand il reste moins de 5 hexes valides, ce sont les stratégies
+   d'**indices bas** qui survivent : le lien slot ↔ stratégie n'est pas stable, et un réseau qui
+   aurait appris « le slot 7 va à gauche » se tromperait précisément là. Un slot **fermé** est une
+   ligne de zéros, `present` compris — jamais un candidat plausible.
+2. **Source unique, pas une seconde géométrie.** `ActionDecoder.deployment_slot_candidates` rend
+   l'hexe **et le plan de formation validé** ; `_select_deployment_hex_for_action` y lit ce qu'il
+   commite et l'observation y lit ce qu'elle décrit. Écrire une seconde géométrie aurait laissé
+   l'agent choisir un slot d'après un hexe que le commit n'aurait pas posé (motif D1).
+3. **Garde de phase**, même patron que `is_charge_phase` pour `charge_reachable_max_roll` : hors
+   déploiement le bloc est nul et **rien n'est calculé**. Il reste nul aussi pour une escouade qui
+   n'est pas celle sur laquelle le masque ouvre les slots 4-8 — décrire à une autre escouade cinq
+   candidats qu'aucune de ses actions ne pose serait le défaut du point 1 rejoué une couche plus
+   loin.
+
+**Perf — mesurée.** Décrire cinq stratégies au lieu d'en évaluer une exigeait cinq passes de
+scoring sur toute la zone : **871 ms** par step de déploiement en appelant simplement cinq fois
+l'ancienne sélection scalaire. La sélection a donc été **vectorisée** : les colonnes de score
+(distances, expositions, étalement) sont calculées **une fois** pour les cinq stratégies, qui n'en
+diffèrent que par l'ordre du tri lexicographique (`np.lexsort`). Mesure finale sur le board x5,
+3 épisodes, 33 steps de déploiement : **285 ms → 345 ms** par step, soit **+59 ms (+21 %)**.
+La **parité de choix est exacte** avec l'implémentation scalaire — vérifiée hexe par hexe sur
+33 états × 5 stratégies (le tri numpy reproduit `max()` sur tuples, départage par index croissant
+compris).
+
+**Nouveau cache** : `_deployment_slot_candidates`, ajouté à l'inventaire d'`AI_OBSERVATION.md`
+(six → **sept**) et à `test_obs_caches_die_with_the_episode.py`. Son tampon est l'état des unités
+posées, qui recommence **identique** au début de chaque épisode : la purge au `reset` est
+obligatoire, le tampon seul ne suffirait pas.
+
+**`obs_size` 20768 → 20828** (5 profils de config alignés, `justification` incluse ; le moteur lève
+à l'init si config ≠ code). `TOTAL_ACTION_SIZE` reste **1107**.
+
+**Verrous** (`tests/unit/engine/test_deployment_candidate_observation.py`, 10 tests, chacun rouge
+sous mutation de son propre volet) : le slot `i` décrit l'hexe que
+`_select_deployment_hex_for_action(4 + i)` choisirait — cache purgé avant l'interrogation, pour que
+le décodeur **recalcule** au lieu de relire ce que l'observation vient d'écrire ; les positions sont
+mesurées depuis l'ancre de zone et **diffèrent** de celles qu'aurait produites la sentinelle
+(leçon §0bis : un bloc non vide ne prouve pas qu'il regarde au bon endroit) ; distances,
+`on_objective` et `in_cover` sont recalculés depuis le `game_state` brut ; les bits `present` sont
+**exactement** les slots que le masque ouvre, y compris sous troncature forcée à 3 hexes valides ;
+le bloc est nul hors déploiement et pour une autre escouade ; et la distance hex vectorisée rend
+**exactement** `calculate_hex_distance`.
+
+⚠️ **Ce qui reste hors périmètre de ce document** (architecture de la policy, pas contrat
+d'observation) : les ids `4-8` tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`),
+donc leurs logits sortent de la **conv 1×1 de la carte**, aux cellules `(0, 4..8)` de la fenêtre
+égocentrique — pas d'une tête dédiée. Le bloc candidat atteint cette tête par le **conditionnement
+du tronc** (`move_ctx_net`), non par un pointeur. Une tête pointeur de déploiement, jumelle de
+`choice_query_net`, est le prolongement naturel ; elle exigerait de distinguer « cellule de move »
+de « slot de déploiement » sur les mêmes ids, donc de lire la phase dans la policy — décision
+utilisateur, tracée en §0.40.
 
 ### 4. ✅ CORRIGÉ (2026-07-29) — le vecteur mesure depuis la zone, comme la grille
 
@@ -198,7 +270,7 @@ a réparé les grandeurs mesurées **depuis** l'escouade ; restaient celles qui 
 empreintes se recouvrent et la primitive d'engagement les déclare mutuellement engagées. La
 primitive moteur n'est pas en cause : on lui donnait des empreintes fantômes.
 
-**La règle** — [`03 Moving.pdf`](../40k_rules/03%20Moving.pdf), 03.04 : « A model's engagement
+**La règle** — [`03 Moving.pdf`](../../40k_rules/03%20Moving.pdf), 03.04 : « A model's engagement
 range is **the area of the battlefield** within 2" horizontally and 5" vertically of it ». Une
 unité pas encore mise en place n'est pas sur le champ de bataille : elle n'a pas d'engagement
 range et n'entre dans celle de personne. Ce n'est donc pas un défaut d'observation « esthétique »,
@@ -237,8 +309,11 @@ neutralisation trop large ne puisse pas passer inaperçue.
   Ils changent le CONTENU de l'observation de déploiement : un agent entraîné avant eux a appris
   sur une obs fausse à cet endroit, la comparaison de win-rate déploiement avant/après n'a pas de
   sens.
-- Le point **3** est le seul reste : extension de contrat d'observation (change `obs_size` →
-  retrain `--new`). Les points 1, 2, 4 et 5 sont livrés et ne changent PAS `obs_size`.
+- Le point **3** est **livré** (2026-07-29). C'est le seul des cinq qui étend le contrat
+  d'observation : `obs_size` **20768 → 20828** (les 5 profils de la config d'agent portent la
+  nouvelle valeur, le moteur lève à l'init si config ≠ code). **Retrain `--new` obligatoire.**
+  `TOTAL_ACTION_SIZE` reste **1107** : l'espace d'action n'est pas touché.
+- **Ce document n'a plus aucune part ouverte** : il est clos et classé dans `Implémenté/`.
 - Traité **séparément** de la refonte du vecteur de jeu (livrée, cf.
   [`V11_entity_encoder_pointer.md`](../V11_entity_encoder_pointer.md) et
   [`AI_OBSERVATION.md`](../../AI_OBSERVATION.md)).

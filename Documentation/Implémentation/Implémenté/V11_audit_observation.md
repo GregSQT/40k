@@ -20,7 +20,7 @@
 > **Les numéros de ligne cités dans ce document sont périmés** et ne sont pas maintenus.
 >
 > **Seul point actionnable restant**, extrait dans son propre chantier :
-> [`A_faire/observation_deploiement.md`](../A_faire/observation_deploiement.md).
+> [`observation_deploiement.md`](observation_deploiement.md).
 
 > But : dire, dimension par dimension et **sans jargon**, ce que l'agent voit réellement,
 > ce qui est mort/redondant, ce qui manque. Tout est vérifié dans le code (numéros de ligne)
@@ -1055,7 +1055,7 @@ move. Canal « menace ennemie » différé.
 
 ### Chantier dédié — Observation de la phase de déploiement (déficiente, vérifié)
 
-> 📤 **DÉPLACÉ le 2026-07-28 → [`A_faire/observation_deploiement.md`](../A_faire/observation_deploiement.md).**
+> 📤 **DÉPLACÉ le 2026-07-28 → [`observation_deploiement.md`](observation_deploiement.md).**
 > C'est le seul point encore actionnable de cet audit ; il vit désormais dans son propre chantier,
 > avec les constats **re-vérifiés dans le code**. Le point 3 ci-dessous est **inexact** (les 5
 > actions sont des stratégies tactiques, pas « les 5 premiers hexes valides ») — il est corrigé

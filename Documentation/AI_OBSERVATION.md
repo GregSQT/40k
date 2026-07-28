@@ -40,7 +40,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 768 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 828 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (11,)                =      11               │
@@ -69,8 +69,12 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │  DÉCISION AGENT — candidats de CHOICE_i        MAX_DECISION_OPTIONS = 6│
 │    decision_ctx_bin       (2,)                 =       2               │
 │    decision_options_bin   (6, 14)              =      84               │
+│                                                                        │
+│  DÉPLOIEMENT — candidats des actions 4-8         N_DEPLOY_SLOTS = 5    │
+│    deploy_cand_cont       (5, 8)               =      40               │
+│    deploy_cand_bin        (5, 4)               =      20               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      20 768              │
+│  TOTAL vectoriel (= obs_size)                      20 828              │
 │  + grid  (9, 32, 32) = 9 216, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -352,6 +356,69 @@ rempli de zéros serait une valeur par défaut sans signifiant. Les tranches P3 
 (distance d'une destination, dégâts attendus sur une cible) ouvriront `DECISION_OPTION_CONT_FIELDS`
 à ce moment-là — `obs_size` changera, donc retrain `--new`.
 
+#### `deploy_cand_cont[s]` / `deploy_cand_bin[s]` — candidats de déploiement  ·  EntityRunningNorm / jamais normalisé
+
+Bloc de la **décision de déploiement** (V11 §0.40 point 3). Les 5 actions `4-8` ne sont pas « les
+5 premiers hexes valides » mais **5 stratégies** — front agressif · pression sur objectif ·
+sûr/cohésion · flanc gauche · flanc droit — évaluées sur **tous** les hexes valides de la zone
+(~14 000 au premier step). Ce bloc décrit, pour chaque slot, **l'hexe que sa stratégie poserait**.
+
+```python
+deploy_cand_cont[s][0] = col_rel                 # projection _hex_center SIGNEE, vs ancre de zone
+deploy_cand_cont[s][1] = row_rel                 # idem
+deploy_cand_cont[s][2] = objective_distance      # subhex, hex le plus proche d'un CENTRE d'objectif
+deploy_cand_cont[s][3] = enemy_distance          # subhex, reference ennemie la plus proche
+deploy_cand_cont[s][4] = ally_distance           # subhex, allie POSE le plus proche (masque ci-dessous)
+deploy_cand_cont[s][5] = los_exposure            # nb d'ennemis DEJA POSES qui voient cet hexe (06.01)
+deploy_cand_cont[s][6] = potential_los_exposure  # nb d'ancres de la zone ennemie qui le voient
+deploy_cand_cont[s][7] = ally_col_count          # nb d'allies poses sur la MEME colonne (etalement)
+deploy_cand_bin[s][0]  = has_deployed_ally       # 0.0 / 1.0 — masque d'`ally_distance`
+deploy_cand_bin[s][1]  = on_objective            # 0.0 / 1.0 — 14.02
+deploy_cand_bin[s][2]  = in_cover                # 0.0 / 1.0 — 13.08
+deploy_cand_bin[s][3]  = present                 # 0.0 / 1.0 — slot OUVERT par le masque
+```
+
+**Pourquoi ce bloc existe.** Depuis §0.40 points 1/2/4 l'agent sait quelle unité il pose, voit le
+terrain de sa zone et mesure tout depuis elle. Il ne savait toujours pas **ce que chaque slot en
+ferait** : cinq boîtes noires, sans position, sans distance, sans couvert, sans exposition — au
+moment précis où il choisit son point d'entrée dans la partie.
+
+**Un candidat est décrit par son EFFET, jamais par son index**, comme les candidats de décision
+ci-dessus. La raison est ici plus forte qu'ailleurs : le masque n'ouvre que `min(5, n_hexes)` slots
+(`open_deploy_slot_count`), donc en fin de déploiement, quand il reste moins de 5 hexes valides, ce
+sont les stratégies d'**indices bas** qui survivent. Le lien slot ↔ stratégie n'est pas stable, et
+un réseau qui aurait appris « le slot 7 va à gauche » se tromperait précisément là. L'encodeur est
+donc **partagé** entre les 5 slots (`deploy_cand_encoder`), avec une `EntityRunningNorm` commune.
+
+**L'ordre des slots est CONTRACTUEL** (invariant D1) : `deploy_cand_*[i]` décrit ce que pose
+l'action `DEPLOY_SLOT_BASE + i`. Un slot **fermé** est une ligne de zéros, `present` compris — un
+candidat plausible pour une action interdite serait pire que le silence.
+
+**Source unique, jamais un second calcul** : `ActionDecoder.deployment_slot_candidates`, celle-là
+même que le commit exécute — elle rend l'hexe **et le plan de formation validé** qui sera posé.
+Décrire les candidats depuis une géométrie parallèle aurait laissé l'agent choisir d'après un hexe
+que le moteur n'aurait pas posé (motif D1). Les grandeurs continues sortent telles quelles du cache
+de scoring du décodeur ; `on_objective` / `in_cover` sont lus dans `_grid_static_hex_arrays`, le
+MÊME ensemble que les canaux « objectifs » et « couvert » de la grille.
+
+**Garde de phase obligatoire.** Hors déploiement le bloc est entièrement nul et **rien n'est
+calculé** — même patron que `is_charge_phase` pour `charge_reachable_max_roll`. Il reste nul aussi
+pour une escouade qui n'est pas celle sur laquelle le masque ouvre les slots 4-8. Coût **mesuré**
+sur le board x5 (3 épisodes, 33 steps de déploiement) : **285 ms → 345 ms** par step de
+déploiement, soit **+59 ms** pour décrire les 5 stratégies au lieu d'en évaluer une seule. Le
+surcoût est contenu parce que la sélection a été **vectorisée** au passage (`np.lexsort` sur des
+colonnes calculées une fois pour les 5 stratégies, au lieu d'une passe scalaire par stratégie) :
+appeler 5 fois l'ancienne sélection aurait coûté **871 ms** par step. La parité de choix avec
+l'implémentation scalaire est exacte, vérifiée hexe par hexe sur 33 états × 5 stratégies.
+
+⚠️ **Ce que ce bloc ne fait PAS.** Les logits des actions `4-8` ne viennent pas d'une tête dédiée :
+ces ids tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`), donc ils sortent de la
+conv 1×1 de la carte, aux cellules `(0, 4..8)` de la fenêtre égocentrique. Ce bloc atteint cette
+tête par le **conditionnement du tronc** (`move_ctx_net`, qui peut réordonner les cellules entre
+elles), pas par un pointeur sur les candidats. Une tête pointeur de déploiement — le jumeau de
+`choice_query_net` — est le prolongement naturel ; elle touche l'architecture de la policy, pas le
+contrat d'observation, et reste à arbitrer.
+
 ### Les blocs logiques A→E, et ce qu'ils sont devenus
 
 L'observation a été conçue en **blocs thématiques** (`V11_audit_observation.md` §7.2 et §8 : A
@@ -428,7 +495,7 @@ un one-hot, donc réellement binaire — et toujours hors normalisation.)
 
 ### Ce qui est mémoïsé, et par quelle clé d'invalidation
 
-L'observation lit **six** caches, chacun avec sa propre condition d'invalidation. C'est le point
+L'observation lit **sept** caches, chacun avec sa propre condition d'invalidation. C'est le point
 le plus fragile du pipeline : un cache servi trop longtemps ne lève rien, il décrit simplement un
 état périmé (régressions V11 §0.18 et §0.26). L'inventaire est verrouillé par
 `tests/unit/engine/test_obs_caches_die_with_the_episode.py`, qui rougit si un cache d'observation
@@ -441,9 +508,10 @@ survit à un reset — **ajouter un cache sans l'y ajouter fait échouer ce test
 | `_grid_static_hex_arrays` | murs / objectifs / couvert rasterisés | par épisode | idem |
 | `_obs_solid_terrain_areas` | zones contenant un mur dense (Solid 13.11) | par épisode | idem |
 | `_grid_deployment_zone_anchor` | l'hex sur lequel la grille est centrée pour une escouade **pas encore posée** (V11 §0.40) | par joueur, par épisode | idem — la zone de déploiement change avec le terrain rechargé |
+| `_deployment_slot_candidates` | l'hexe **et le plan de formation** que chaque slot 4-8 poserait (V11 §0.40 point 3) — lu par le décodeur ET par l'observation, donc calculé une seule fois par step | `(escouade, déployeur, état des unités posées)` | le tampon change à chaque pose ; purgé au `reset` — l'état « aucune unité posée » recommence identique d'un épisode à l'autre, donc le tampon seul ne suffirait pas |
 | `_unit_los_pair_cache` | `los_can_see` / `cover_vs_observer` par paire | `(tireur, cible)` | **invalidation ciblée** au choke-point `_touch_unit_los` : toute écriture de position, toute perte de figurine — donc correct même quand un ennemi bouge pendant mon tour (`reactive_move`) |
 
-Le dernier est le seul à ne PAS être « par épisode » : il doit suivre chaque mouvement. Sa
+`_unit_los_pair_cache` est le seul à ne PAS être « par épisode » : il doit suivre chaque mouvement. Sa
 fiabilité a été vérifiée par mesure — 23 398 paires comparées au calcul non caché sur 400 steps,
 0 divergence (V11 §0.31).
 
@@ -456,8 +524,9 @@ T-F) → 20166 (plafond du bloc figurines 6 → 20, 2026-07-26) → 20181 (géom
 slot ennemi, 2026-07-27) → 20626 (bit `present` par figurine + phase en one-hot de 6 bits,
 §0.32 T-H/T-J, 2026-07-28) → 20654 (`n_models_engaging` : mes figurines engagées avec chaque
 cible ennemie, support du choix de cible de mêlée, §9 P3-1, 2026-07-28) → 20740 (bloc
-« contexte de décision », §9.3 P2, 2026-07-28) → **20768** (`charge_reachable_max_roll` :
-support du choix de cible de charge, §9 P3-2, 2026-07-28). **Toute évolution du
+« contexte de décision », §9.3 P2, 2026-07-28) → 20768 (`charge_reachable_max_roll` :
+support du choix de cible de charge, §9 P3-2, 2026-07-28) → **20828** (bloc « candidats de
+déploiement » : ce que chacune des 5 actions 4-8 poserait, §0.40 point 3, 2026-07-29). **Toute évolution du
 schéma change cette valeur et rend les `.zip` existants incompatibles : le retrain `--new` est
 obligatoire.**
 

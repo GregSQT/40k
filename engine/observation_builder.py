@@ -34,13 +34,22 @@ from engine.observation_weapon_profiles import (
     encode_squad_weapon_profiles,
 )
 from engine.agent_decision import read_pending_agent_decision
+# `macro_intents` est une FEUILLE (constantes de l'espace d'action, aucune dépendance moteur) :
+# l'importer ici ne crée pas de cycle, et c'est la seule façon d'aligner l'index de slot du bloc
+# candidat sur l'action qu'il décrit sans recopier un littéral.
+from engine.macro_intents import DEPLOY_SLOT_BASE
 from engine.observation_entities import (
     AGENT_DECISION_TYPE_IDS,
     DECISION_CTX_BIN_SIZE,
     DECISION_OPTION_BIN_SIZE,
+    DEPLOY_CAND_BIN_SIZE,
+    DEPLOY_CAND_CONT_SIZE,
     MAX_DECISION_OPTIONS,
+    N_DEPLOY_SLOTS,
     decision_ctx_bin_index,
     decision_option_bin_index,
+    deploy_cand_bin_index,
+    deploy_cand_cont_index,
     GLOBAL_BIN_SIZE,
     GLOBAL_CONT_SIZE,
     MODEL_TYPE_BIN_SIZE,
@@ -67,6 +76,12 @@ class ObservationBuilder:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.unit_registry: Optional[Any] = None
+        # Décodeur d'action, câblé par W40KEngine à l'init. Il est REQUIS par le bloc
+        # « candidats de déploiement » (§0.40 point 3), qui LIT le couple slot -> hexe au lieu
+        # de le recalculer. Laissé à None ici plutôt que construit par défaut : un second
+        # décodeur porterait ses propres caches de zone et pourrait décrire un autre hexe que
+        # celui que le moteur pose. Absent au moment où le bloc en a besoin -> erreur explicite.
+        self.action_decoder: Optional[Any] = None
         
         obs_params = config.get("observation_params")
         if not obs_params:
@@ -230,6 +245,9 @@ class ObservationBuilder:
         # l'aveugle — exactement le défaut de la pseudo-décision qu'il remplace.
         + DECISION_CTX_BIN_SIZE
         + MAX_DECISION_OPTIONS * DECISION_OPTION_BIN_SIZE
+        # Bloc « candidats de déploiement » (§0.40 point 3) : sans lui, les actions 4-8 sont
+        # cinq boîtes noires — l'agent choisit une stratégie sans voir l'hexe qu'elle pose.
+        + N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE)
     )
 
     @classmethod
@@ -260,6 +278,11 @@ class ObservationBuilder:
             # slots ennemis : `decision_options_bin[i]` décrit le candidat que joue `CHOICE_i`.
             "decision_ctx_bin": (DECISION_CTX_BIN_SIZE,),
             "decision_options_bin": (MAX_DECISION_OPTIONS, DECISION_OPTION_BIN_SIZE),
+            # Déploiement (§0.40 point 3). ⚠ L'ORDRE DES SLOTS EST CONTRACTUEL, comme celui des
+            # slots ennemis : `deploy_cand_*[i]` décrit ce que pose l'action
+            # `DEPLOY_SLOT_BASE + i`. Bloc NUL hors phase de déploiement.
+            "deploy_cand_cont": (N_DEPLOY_SLOTS, DEPLOY_CAND_CONT_SIZE),
+            "deploy_cand_bin": (N_DEPLOY_SLOTS, DEPLOY_CAND_BIN_SIZE),
         }
 
     #: Clés dont les statistiques de normalisation sont partagées entre TOUS les slots
@@ -269,6 +292,9 @@ class ObservationBuilder:
         "allies_wpn_cont", "enemies_wpn_cont",
         "allies_types_cont", "enemies_types_cont",
         "self_models_cont",
+        # Les 5 slots de déploiement portent le MÊME schéma : leurs statistiques doivent être
+        # communes, sinon « 3 ennemis me voient » n'aurait pas la même échelle selon le slot.
+        "deploy_cand_cont",
     )
 
 
@@ -670,6 +696,156 @@ class ObservationBuilder:
             for effect_id in require_key(option, "effect_ids"):
                 opts[slot, decision_option_bin_index(f"grants_{effect_id}")] = 1.0
             opts[slot, decision_option_bin_index("present")] = 1.0
+
+    def _encode_deployment_candidates(
+        self,
+        game_state: Dict[str, Any],
+        obs: Dict[str, np.ndarray],
+        active_squad_id: str,
+        anchor_x: float,
+        anchor_y: float,
+    ) -> None:
+        """Remplit le bloc « candidats de déploiement » (V11 §0.40 point 3).
+
+        Le bloc reste NUL hors phase de déploiement — GARDE DE PHASE obligatoire, même patron que
+        `is_charge_phase` pour `charge_reachable_max_roll` : hors déploiement la question n'a pas
+        de sens ET le calcul (5 tris sur toute la zone + 5 formations validées) ne doit pas être
+        payé. Il reste nul aussi quand l'escouade décrite n'est PAS celle sur laquelle le masque
+        ouvre les slots 4-8 : décrire à une escouade des candidats qu'aucune de ses actions ne
+        pose serait le défaut du point 1, une couche plus loin.
+
+        Un slot FERMÉ (moins de 5 hexes valides) reste une ligne de zéros, `present` compris —
+        jamais un candidat plausible.
+        """
+        if str(require_key(game_state, "phase")).lower() != "deployment":
+            return
+        decoder = self.action_decoder
+        if decoder is None:
+            raise RuntimeError(
+                "ObservationBuilder.action_decoder n'est pas câblé : le bloc « candidats de "
+                "déploiement » (§0.40 point 3) LIT le décodeur, seule source du couple "
+                "slot -> hexe. W40KEngine le pose à l'init ; un ObservationBuilder construit à "
+                "la main doit faire de même avant d'observer une phase de déploiement."
+            )
+        active_unit = decoder.get_deployment_active_unit(game_state)
+        if str(require_key(active_unit, "id")) != str(active_squad_id):
+            return
+
+        current_deployer = decoder._get_current_deployer(game_state)
+        candidates = decoder.deployment_slot_candidates(
+            game_state, current_deployer, str(active_squad_id)
+        )
+
+        static = self._static_hex_arrays(game_state)
+        objective_cols, objective_rows = static["objectives"]
+        cover_cols, cover_rows = static["cover"]
+
+        def _contains(cols: np.ndarray, rows: np.ndarray, col: int, row: int) -> bool:
+            if cols.size == 0:
+                return False
+            return bool(np.any((cols == col) & (rows == row)))
+
+        cand_cont = obs["deploy_cand_cont"]
+        cand_bin = obs["deploy_cand_bin"]
+        for action_int, candidate in candidates.items():
+            slot = int(action_int) - DEPLOY_SLOT_BASE
+            if not 0 <= slot < N_DEPLOY_SLOTS:
+                raise ValueError(
+                    f"_encode_deployment_candidates: slot {slot} hors des {N_DEPLOY_SLOTS} "
+                    f"decrits (action {action_int}). Le schema d'observation et l'espace "
+                    f"d'action ont divergé."
+                )
+            col, row = candidate["hex"]
+            # MÊME repère que tout ce que l'observation exprime « depuis moi » (§0.32 T-I) :
+            # l'ancre de la zone de déploiement, celle de la grille et des objectifs.
+            hx, hy = _hex_center(int(col), int(row))
+            cand_cont[slot, deploy_cand_cont_index("col_rel")] = hx - anchor_x
+            cand_cont[slot, deploy_cand_cont_index("row_rel")] = hy - anchor_y
+            cand_cont[slot, deploy_cand_cont_index("objective_distance")] = float(
+                require_key(candidate, "nearest_objective_distance")
+            )
+            cand_cont[slot, deploy_cand_cont_index("enemy_distance")] = float(
+                require_key(candidate, "nearest_enemy_distance")
+            )
+            cand_cont[slot, deploy_cand_cont_index("ally_distance")] = float(
+                require_key(candidate, "nearest_ally_distance")
+            )
+            cand_cont[slot, deploy_cand_cont_index("los_exposure")] = float(
+                require_key(candidate, "los_exposure")
+            )
+            cand_cont[slot, deploy_cand_cont_index("potential_los_exposure")] = float(
+                require_key(candidate, "potential_los_exposure")
+            )
+            cand_cont[slot, deploy_cand_cont_index("ally_col_count")] = float(
+                require_key(candidate, "ally_col_count")
+            )
+            cand_bin[slot, deploy_cand_bin_index("has_deployed_ally")] = (
+                1.0 if require_key(candidate, "has_deployed_ally") else 0.0
+            )
+            cand_bin[slot, deploy_cand_bin_index("on_objective")] = (
+                1.0 if _contains(objective_cols, objective_rows, int(col), int(row)) else 0.0
+            )
+            cand_bin[slot, deploy_cand_bin_index("in_cover")] = (
+                1.0 if _contains(cover_cols, cover_rows, int(col), int(row)) else 0.0
+            )
+            cand_bin[slot, deploy_cand_bin_index("present")] = 1.0
+
+    @staticmethod
+    def _static_hex_arrays(game_state: Dict[str, Any]) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+        """Murs / objectifs / couvert du scenario, en tableaux (cols, rows) memoises.
+
+        STATIQUES sur la partie : on les memoise une fois plutot que de reconstruire ~11 500
+        tuples Python a chaque step. Memoisation de donnees de scenario, pas un cache masquant un
+        recalcul necessaire — elle tombe au reset (`w40k_core`), verrouille par
+        `test_obs_caches_die_with_the_episode`.
+
+        SOURCE UNIQUE partagee : la rasterisation des canaux de la grille et les drapeaux
+        `on_objective` / `in_cover` des candidats de deploiement (§0.40 point 3) lisent le MEME
+        dictionnaire. Deux extractions distinctes auraient pu diverger — l'agent aurait vu un
+        candidat « a couvert » sur un hexe que la grille peint nu.
+        """
+        static: Optional[Dict[str, Tuple[np.ndarray, np.ndarray]]] = game_state.get(
+            "_grid_static_hex_arrays"
+        )  # get allowed (construit ici au 1er appel)
+        if static is not None:
+            return static
+
+        def _to_arrays(hexes) -> Tuple[np.ndarray, np.ndarray]:
+            hexes = list(hexes)
+            if not hexes:
+                return np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64)
+            return (
+                np.fromiter((h[0] for h in hexes), dtype=np.int64, count=len(hexes)),
+                np.fromiter((h[1] for h in hexes), dtype=np.int64, count=len(hexes)),
+            )
+
+        objective_hexes: List[Tuple[int, int]] = []
+        for objective in game_state.get("objectives", []):  # get allowed (scenario sans objectif)
+            # `hexes` est REQUIS : verifie sur les objectifs runtime (20/20 le portent, cles =
+            # hexes/id/name). Un acces tolerant avec defaut liste vide rendrait un objectif
+            # malforme invisible dans le canal sans que rien ne le signale.
+            for hex_entry in require_key(objective, "hexes"):
+                if isinstance(hex_entry, (list, tuple)):
+                    objective_hexes.append((int(hex_entry[0]), int(hex_entry[1])))
+                else:
+                    objective_hexes.append((int(hex_entry["col"]), int(hex_entry["row"])))
+
+        # Cases donnant le benefice du couvert (13.08) = hexes des terrain areas. MEME ensemble
+        # que celui peint en `cover_cells` par la preview de tir du moteur : une figurine
+        # hideable qui s y tient est « within a terrain area ». Statique comme les murs et les
+        # objectifs.
+        cover_hexes: List[Tuple[int, int]] = []
+        for area in game_state.get("terrain_areas", []):  # get allowed (scenario sans terrain)
+            for hex_entry in require_key(area, "hexes"):
+                cover_hexes.append((int(hex_entry[0]), int(hex_entry[1])))
+
+        static = {
+            "walls": _to_arrays(game_state.get("wall_hexes", set())),  # get allowed (board sans mur)
+            "objectives": _to_arrays(objective_hexes),
+            "cover": _to_arrays(cover_hexes),
+        }
+        game_state["_grid_static_hex_arrays"] = static
+        return static
 
     def _empty_squad_observation(self) -> Dict[str, np.ndarray]:
         """Observation nulle (escouade morte/absente) — mêmes clés et formes que le cas nominal."""
@@ -1189,6 +1365,11 @@ class ObservationBuilder:
 
         # === DÉCISION AGENT EN ATTENTE (V11 §9.3 P2) ===
         self._encode_pending_decision(game_state, obs, active_player)
+        # §0.40 point 3 — ce que chaque slot 4-8 poserait réellement. Après le contexte global :
+        # il lui faut l'origine de mesure (`anchor_x/y`), déjà établie plus haut.
+        self._encode_deployment_candidates(
+            game_state, obs, str(active_squad_id), anchor_x, anchor_y
+        )
 
         # === ENGAGEMENT (règle 03.04) — une seule passe pour toutes les entités ===
         # Le test EZ exact compare des EMPREINTES (jusqu'à ~200 cases pour une grande base) :
@@ -1574,48 +1755,7 @@ class ObservationBuilder:
             rows = np.fromiter((h[1] for h in hexes), dtype=np.int64, count=len(hexes))
             _paint_arrays(channel, cols, rows, value)
 
-        # Murs et objectifs sont STATIQUES sur la partie : on memoise leurs tableaux une fois
-        # plutot que de reconstruire ~11 500 tuples Python a chaque step. Memoisation de donnees
-        # de scenario, pas un cache masquant un recalcul necessaire.
-        static: Optional[Dict[str, Tuple[np.ndarray, np.ndarray]]] = game_state.get(
-            "_grid_static_hex_arrays"
-        )  # get allowed (construit ici au 1er appel)
-        if static is None:
-            def _to_arrays(hexes) -> Tuple[np.ndarray, np.ndarray]:
-                hexes = list(hexes)
-                if not hexes:
-                    return np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64)
-                return (
-                    np.fromiter((h[0] for h in hexes), dtype=np.int64, count=len(hexes)),
-                    np.fromiter((h[1] for h in hexes), dtype=np.int64, count=len(hexes)),
-                )
-
-            objective_hexes: List[Tuple[int, int]] = []
-            for objective in game_state.get("objectives", []):  # get allowed (scenario sans objectif)
-                # `hexes` est REQUIS : verifie sur les objectifs runtime (20/20 le portent, cles =
-                # hexes/id/name). Un acces tolerant avec defaut liste vide rendrait un objectif malforme invisible
-                # dans le canal sans que rien ne le signale.
-                for hex_entry in require_key(objective, "hexes"):
-                    if isinstance(hex_entry, (list, tuple)):
-                        objective_hexes.append((int(hex_entry[0]), int(hex_entry[1])))
-                    else:
-                        objective_hexes.append((int(hex_entry["col"]), int(hex_entry["row"])))
-
-            # Cases donnant le benefice du couvert (13.08) = hexes des terrain areas. MEME
-            # ensemble que celui peint en `cover_cells` par la preview de tir du moteur : une
-            # figurine hideable qui s y tient est « within a terrain area ». Statique comme les
-            # murs et les objectifs.
-            cover_hexes: List[Tuple[int, int]] = []
-            for area in game_state.get("terrain_areas", []):  # get allowed (scenario sans terrain)
-                for hex_entry in require_key(area, "hexes"):
-                    cover_hexes.append((int(hex_entry[0]), int(hex_entry[1])))
-
-            static = {
-                "walls": _to_arrays(game_state.get("wall_hexes", set())),  # get allowed (board sans mur)
-                "objectives": _to_arrays(objective_hexes),
-                "cover": _to_arrays(cover_hexes),
-            }
-            game_state["_grid_static_hex_arrays"] = static
+        static = self._static_hex_arrays(game_state)
 
         # --- Canal 0 : murs ---------------------------------------------------
         _paint_arrays(GRID_CH_WALL, *static["walls"])

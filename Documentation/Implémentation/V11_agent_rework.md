@@ -58,16 +58,15 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 §0.37** ont été descendues en **§0hist** (intégrales, ancres inchangées) — elles étaient closes mais
 occupaient encore la section « ouvert ». Ne restent ici que les **six** chantiers réellement
 actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist avec les autres ;
-§0.40 ajoutée le 2026-07-28, contenu externalisé dès l'ouverture).
+§0.40 ajoutée le 2026-07-28, contenu externalisé dès l'ouverture, **close et descendue en §0hist le 2026-07-29**).
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
-| **§0.14** | Re-mesure du run — win-rate par matchup | 🔴 **RUN 3 ARRÊTÉ** par l'utilisateur (2026-07-28, fin de nuit) pour livrer §0.40 (points 1, 2, 4 puis 5) — il avait été lancé ~23 h 20 depuis `main` (P3-2 inclus : `obs_size` **20768**, action space **1107**, rampe de déploiement **0.0 → 0.8**) | **1** | **RUN 4 à lancer** depuis la tête de `main` (§0.40 points 1, 2, 4 et 5 inclus — vérifier `git log` plutôt que de se fier à un hash écrit ici). `obs_size` **inchangé** (20768), donc aucun contrat d'archi cassé — mais le run 3 a entraîné le déploiement sur l'observation fausse, ses mesures de déploiement ne valent rien. ⛔ **Dès qu'un run tourne, WORKING TREE GELÉ** : aucun commit de code/config, aucun checkout, aucune édition — les doc `.md` sont sûres (jamais ré-importées). Historique : 🔴 **RUN 1 mort à 20 h 20** (§0.41+§0.42 mergés pendant lui, `obs_size` changé). 🔴 **RUN 2 mort à ~21 h 45** à la 1ʳᵉ éval (600 épisodes `error` en 7,1 s) : le `git checkout` de 21 h 39 a réécrit le code sur le disque, les workers d'éval `spawn` ont reconstruit l'architecture P3-2 (`action_net [17,320]` + `charge_query_net`) pour charger un snapshot P2 (`[18,320]`, sans) → `load_state_dict` lève → `BrokenProcessPool`. Diagnostic reproduit, leçon durcie en §0bis. Points d'observation : la 1ʳᵉ éval (marqueur 2000) doit **se terminer** (§0.27) ; aucun modèle ne peut être sauvé avant 10 000 (`save_best_min_episodes`) ; le livrable est le win-rate par matchup de l'éval finale. Checkpoints 720 k et 80 k : contrats périmés, inutilisables. |
+| **§0.14** | Re-mesure du run — win-rate par matchup | 🔴 **RUN 3 ARRÊTÉ** par l'utilisateur (2026-07-28, fin de nuit) pour livrer §0.40 (points 1, 2, 4 puis 5) — il avait été lancé ~23 h 20 depuis `main` (P3-2 inclus : `obs_size` **20768**, action space **1107**, rampe de déploiement **0.0 → 0.8**) | **1** | **RUN 4 à lancer** depuis la tête de `main` (**§0.40 CLOS, ses 5 points inclus** — vérifier `git log` plutôt que de se fier à un hash écrit ici). 🔴 **`obs_size` = 20828** (20768 + le bloc « candidats de déploiement », §0.40 point 3, 2026-07-29) : **`--new` OBLIGATOIRE**, tout modèle antérieur est incompatible par construction. `TOTAL_ACTION_SIZE` **inchangé** (1107). Le run 3 avait de toute façon entraîné le déploiement sur une observation fausse, ses mesures de déploiement ne valent rien. ⛔ **Dès qu'un run tourne, WORKING TREE GELÉ** : aucun commit de code/config, aucun checkout, aucune édition — les doc `.md` sont sûres (jamais ré-importées). Historique : 🔴 **RUN 1 mort à 20 h 20** (§0.41+§0.42 mergés pendant lui, `obs_size` changé). 🔴 **RUN 2 mort à ~21 h 45** à la 1ʳᵉ éval (600 épisodes `error` en 7,1 s) : le `git checkout` de 21 h 39 a réécrit le code sur le disque, les workers d'éval `spawn` ont reconstruit l'architecture P3-2 (`action_net [17,320]` + `charge_query_net`) pour charger un snapshot P2 (`[18,320]`, sans) → `load_state_dict` lève → `BrokenProcessPool`. Diagnostic reproduit, leçon durcie en §0bis. Points d'observation : la 1ʳᵉ éval (marqueur 2000) doit **se terminer** (§0.27) ; aucun modèle ne peut être sauvé avant 10 000 (`save_best_min_episodes`) ; le livrable est le win-rate par matchup de l'éval finale. Checkpoints 720 k et 80 k : contrats périmés, inutilisables. |
 | **[§9](V11_phaseA.md#s9)** | Phase A' — **P2 + P3 points 0/1/2 livrés**, **P3 tranches 3→8** (décisions restantes) | 🟢 **P2 + P3-0 + P3-1 + P3-2 TOUS MERGÉS sur `main`** (fast-forward du 2026-07-28 23 h ; `main` = `acd63b66`) | **2** | **P3-1 (cible de mêlée)** → §0.41 : une décision dont les candidats sont des ENTITÉS déjà observées se paramètre en **dimension d'action + tête pointeur**, pas en `CHOICE_k`. **P2 (mécanisme générique) + P3-0 (rule-choice)** → §0.42 : `CHOICE_0..5` pour les candidats qui ne sont **pas** des entités observées ; `raw_action_int % len(options)` n'existe plus. **P3-2 (cible de charge)** → §0.43 : patron P3-1, `TOTAL_ACTION_SIZE` **1107**, `obs_size` **20768**. Reste **P3-3→8** (unité à activer, allocation des pertes, pile-in/conso, move-after-shooting, FLY, optionnels), **P4**, **P5**. ⚠️ Aucune de ces 4 livraisons n'est MESURÉE : le run 3 est le premier à les entraîner. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). ⛔ Toute tranche suivante se livre dans un **`git worktree` séparé** tant que le run tourne. |
 | **§0.38** | Code mort `_attack_sequence_rng` non supprimé — 2ᵉ moitié de P1 | 🟠 **OUVERT** (constaté 2026-07-28) | **3** | P1 prévoyait « porter les règles vers le vif **PUIS supprimer le mort** ». Le portage est fait ; la suppression **non**. Détail → §0.38. |
 | **§0.33** | Rollout buffer 46,9 Go pour 39 Go de RAM | 🟠 **CONDITIONNEL** — ne bloque que les profils à 48 envs | **4** (avant tout run 48 envs) | Vérifié 2026-07-28 dans la config : `x1`/`x5_new`/`x5_debug` = **8 envs** (passent) ; `x5_append`/`x1_debug` = **48 envs** (échouent à l'allocation). Ne pas lancer ces deux-là sans rouvrir l'entrée. |
-| **§0.29** | Scénario SM vs Orks fixed/active + scheduler | 🟢 **USAGE CONFIGURÉ** le 2026-07-28 (`active_ratio_end` 0.0 → **0.8**, commit `acd63b66`) — et c'est le réglage CORRECT, cf. l'asymétrie ci-dessous | 5 | Le run 3 joue une part croissante d'épisodes en `active` (0 % au début → 80 % à la fin, `p_active = start + (end−start)·progress`, [w40k_core.py:934](../../engine/w40k_core.py#L934)). 🔴 **ASYMÉTRIE VÉRIFIÉE le 2026-07-28 23 h 30 — la rampe ne s'applique QU'À L'ENTRAÎNEMENT, jamais à l'éval.** `deployment_mode_schedule.training_only: true` + `_is_training_scenario_context()` qui exige `/scenarios/training/` dans le chemin ([w40k_core.py:693](../../engine/w40k_core.py#L693)) ⇒ les scénarios d'éval (`/scenarios/holdout_regular/`, tous en `deployment_type: "active"`) **jouent TOUJOURS une phase de déploiement**, quelle que soit la rampe. **Donc `active_ratio_end: 0.0` créait un décalage entraînement/éval** : agent entraîné 100 % en placement figé, puis noté sur des parties à déployer. La rampe à 0.8 **aligne** les deux — la remettre à 0 dégraderait la mesure. ✅ **Réserve levée les 2026-07-28 / 07-29** : les défauts 1, 2, 4 et 5 de l'observation du déploiement sont corrigés (§0.40, `obs_size` inchangé). Il reste le seul point 3 (les hexes candidats ne sont pas décrits), donc un plafond résiduel mais bien plus bas. ⚠️ Le run 3 lancé le 2026-07-28 à 23 h 20 est ANTÉRIEUR à ces correctifs : il a entraîné le déploiement sur une observation fausse. |
-| **§0.40** | Observation de la phase de déploiement — **points 1, 2, 4 et 5 corrigés**, point 3 ouvert | 🟠 **PARTIELLEMENT OUVERT** — chantier externe | 6 | **Livrés** : point 1 (`0e0551e8`, obs = unité du masque), point 2 (`2893bbcb`, grille ancrée sur la zone), point 4 (le **vecteur** mesurait aussi depuis `(-1,-1)` — l'ordre des distances aux objectifs en était **inversé**), point 5 (une unité pas encore mise en place se déclarait **engagée au contact** — contraire à 03.04). `obs_size` **inchangé** (20768) sur les quatre, donc aucun modèle invalidé. Reste le **point 3** (décrire les 5 hexes-stratégies), qui change `obs_size` → run `--new`. Détail → §0.40. |
+| **§0.29** | Scénario SM vs Orks fixed/active + scheduler | 🟢 **USAGE CONFIGURÉ** le 2026-07-28 (`active_ratio_end` 0.0 → **0.8**, commit `acd63b66`) — et c'est le réglage CORRECT, cf. l'asymétrie ci-dessous | 5 | Le run 3 joue une part croissante d'épisodes en `active` (0 % au début → 80 % à la fin, `p_active = start + (end−start)·progress`, [w40k_core.py:934](../../engine/w40k_core.py#L934)). 🔴 **ASYMÉTRIE VÉRIFIÉE le 2026-07-28 23 h 30 — la rampe ne s'applique QU'À L'ENTRAÎNEMENT, jamais à l'éval.** `deployment_mode_schedule.training_only: true` + `_is_training_scenario_context()` qui exige `/scenarios/training/` dans le chemin ([w40k_core.py:693](../../engine/w40k_core.py#L693)) ⇒ les scénarios d'éval (`/scenarios/holdout_regular/`, tous en `deployment_type: "active"`) **jouent TOUJOURS une phase de déploiement**, quelle que soit la rampe. **Donc `active_ratio_end: 0.0` créait un décalage entraînement/éval** : agent entraîné 100 % en placement figé, puis noté sur des parties à déployer. La rampe à 0.8 **aligne** les deux — la remettre à 0 dégraderait la mesure. ✅ **Réserve INTÉGRALEMENT levée le 2026-07-29** : les CINQ défauts de l'observation du déploiement sont corrigés (§0.40 clos ; le point 3, les hexes candidats, porte `obs_size` à 20828). Plus aucun plafond résiduel de ce côté. ⚠️ Le run 3 lancé le 2026-07-28 à 23 h 20 est ANTÉRIEUR à ces correctifs : il a entraîné le déploiement sur une observation fausse. |
 | **§0.42** | P2 « décision agent » | ✅ **MERGÉ** sur `main` — reste la MESURE (run 3 en cours) | — | Détail → §0.42. |
 | **§0.43** | P3-2 « cible de charge » | ✅ **MERGÉ** sur `main` le 2026-07-28 23 h (fast-forward, 8 commits, 0 conflit) — reste la MESURE (run 3 en cours) | — | La branche `v11-p3-2-charge-target` est devenue identique à `main` (supprimable). Détail → §0.43. |
 | **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)). T2→T5 **jamais revérifiés** : ne pas s'appuyer sur leurs ✅ sans relecture. ⚠️ Sa **section** est restée en §0hist (elle y était déjà avant l'épuration) alors que sa part T2→T5 est ouverte — laissée en place plutôt que scindée, pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
@@ -134,58 +133,6 @@ mêlée). Cf. la réserve de mesure en [§9.3bis](V11_phaseA.md#s9.3bis).
 **Effet de bord corrigé au passage** (trouvé par mesure, pas par lecture) : `rule_choice` était
 journalisé DEUX fois dans step.log — une écriture directe correcte, plus une tentative de flush qui
 échouait en silence sur une clé mal orthographiée. Détail en [§9.3bis](V11_phaseA.md#s9.3bis).
-
-### 0.40 Observation du déploiement — points 1, 2, 4 et 5 corrigés, point 3 ouvert — 🟠 (2026-07-29)
-
-**Le contenu d'état vit dans [`observation_deploiement.md`](observation_deploiement.md)** (extrait
-de l'audit archivé `Implémenté/V11_audit_observation.md` §11 le 2026-07-28, constats re-vérifiés
-dans le code le même jour) — cette entrée n'est que le **pointeur d'orchestration**, conformément à
-la règle « un contenu d'état vit à UN seul endroit ».
-
-**Livré le 2026-07-28** (2 commits, tests de contrat rouges sous mutation) :
-- **point 1 ✅** (`0e0551e8`) — l'obs de déploiement décrivait `next(iter(units_cache))` et non
-  l'unité du masque. Source unique désormais : `ActionDecoder.get_deployment_active_unit`, qui
-  **lève** sur pool vide au lieu de rendre une obs nulle.
-- **point 2 ✅** (`2893bbcb`) — la grille égocentrique était centrée sur la sentinelle `(-1,-1)`,
-  donc sur une autre région du plateau (0 % de la zone du joueur 1 visible). Elle est ancrée sur la
-  **zone de déploiement** lue dans `deployment_state["deployment_pools"]`, géométrie
-  `engine/spatial_grid` **inchangée** (seul l'ancrage bouge). 96 %/78 % de la zone visible après.
-
-**Livré aussi — point 5 ✅** (2026-07-29), trouvé en re-vérifiant le point 4. Le point 4 réparait ce
-qui est mesuré **depuis** l'escouade ; restaient les features qui affirment une **relation** à
-l'ennemi. Une escouade pas encore mise en place se déclarait `engaged = 1`, `n_in_enemy_ez = 6`,
-`n_fight_eligible = 6`, `n_models_engaging = 6` et `los_can_see = 1` sur les 6 slots ennemis —
-toutes les unités non posées partagent la sentinelle `(-1,-1)`, donc leurs empreintes se
-recouvrent. **C'est contraire à la règle 03.04** (`03 Moving.pdf`) : « A model's engagement range is
-the area **of the battlefield** within 2" horizontally and 5" vertically of it » — une unité hors
-table n'a pas d'engagement range. Filtre chez l'appelant, en un point (`on_battlefield`, coût mesuré
-1,9 µs = 0,08 % d'une observation) ; la primitive moteur n'est pas touchée, elle recevait des
-empreintes fantômes. `coherent` n'est délibérément PAS neutralisé (03.03 : « **if that unit is on
-the battlefield**, it is in coherency » — et 0 dirait « escouade éparpillée », un mensonge pire que
-le silence).
-
-**Reste ouvert — point 3 seul** : les 5 slots sont 5 **stratégies** évaluées sur tous les hexes
-valides, et l'obs n'en décrit aucun ; le cache de scoring du décodeur calcule déjà tout
-(`los_exposure_by_hex`, centres d'objectifs, …). Extension de contrat d'obs → `obs_size` change →
-**run `--new`**.
-
-**Livré aussi — point 4 ✅** (2026-07-29), trouvé en vérifiant le correctif du point 2 et identifié
-nulle part ailleurs : le **vecteur** mesurait lui aussi depuis la sentinelle `(-1,-1)` (son origine
-est `_hex_center(centroid_col, centroid_row)`, et le centroïde d'une escouade non posée vaut
-`(-1,-1)`). L'agent voyait l'objectif 0 à **38,3** — le plus proche — alors qu'il est à **178,9** de
-sa zone, et ne voyait pas l'objectif 4 à **11,3** : l'**ordre des objectifs était inversé**, et les
-trois actions de zone s'appuient sur ces nombres. L'origine d'une escouade non posée est désormais
-celle de la grille (`squad_grid_anchor`), ce qui **rétablit** l'invariant §0.32 T-I « un seul repère
-pour tout ce que l'obs exprime *depuis moi* ». Choix tranché : une entité pas encore posée n'a
-**aucune** position relative (`col_rel`/`row_rel`, `self_models_cont`, `edge_distance` restent nuls,
-le bit `deploy_not_on_board` porte l'information) — sans quoi déplacer l'origine les aurait toutes
-empilées à une distance absurde au nord-ouest. Effet **borné au déploiement** (les réserves 20 ne
-sont pas modélisées), `obs_size` **inchangé**.
-
-⚠️ **Conséquence de mesure** : `obs_size` reste **20768** (verrouillé par test), donc aucun modèle
-n'est invalidé — mais le CONTENU de l'obs de déploiement change. Un agent entraîné avant ces deux
-commits a appris le déploiement sur une observation fausse : ne pas comparer sa qualité de
-déploiement à celle d'un agent entraîné après.
 
 <a id="s0.38"></a>
 ### 0.38 Code mort `_attack_sequence_rng` — la 2ᵉ moitié de P1 n'a jamais été faite — 🟠 OUVERT (2026-07-28)
@@ -1131,7 +1078,7 @@ AVANT d'y lancer un entraînement.
 | [`V11_phaseA.md`](V11_phaseA.md) | **[§9](V11_phaseA.md#s9)** — Phase A' : parité de résolution des règles (P1) puis mécanisme de décision agent (P2→P5) | **vivant** |
 | [`V11_eval_strategy.md`](V11_eval_strategy.md) | **[§10](V11_eval_strategy.md#s10)** — stratégie d'entraînement et d'évaluation, rosters, holdout, win-rate par roster | **vivant** |
 | [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md) | Encodeur d'entités partagé + tête pointeur, cardinalités de l'observation, les 7 trous qu'il ferme | **vivant** |
-| [`observation_deploiement.md`](observation_deploiement.md) | Observation de la phase de déploiement — déficiente (extrait de `V11_audit_observation.md` §11) | **vivant** |
+| [`Implémenté/observation_deploiement.md`](Implémenté/observation_deploiement.md) | Observation de la phase de déploiement — les 5 défauts et leurs correctifs (extrait de `V11_audit_observation.md` §11) | **clos** (2026-07-29, §0.40 — archive) |
 | [`Replay.md`](Replay.md) | Replay : pipeline & contrat du `step.log`, registre des chantiers replay | **vivant** (outillage) |
 | [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md) | Perf du noyau `_build_multi_hex_vectorized` : périmètre, filet de validation, livré (L1 + L_bbox), impasses mesurées | **clos** (décision (B) STOP, 2026-07-21) |
 | [`Implémenté/V11_move_pool_optimization.md`](Implémenté/V11_move_pool_optimization.md) | Cadrage d'origine du chantier move pool (§0.22) | **clos** — archive, ne plus s'y fier pour l'état du code |
@@ -1335,6 +1282,114 @@ aurait planté ou, pire, mesuré faux. `main` a donc été laissé intact.
 ⚠️ **Leçon durable, reportée en §0bis** : un changement d'espace d'action ou d'observation n'est
 pas « inerte pour un run déjà lancé ». Vérifier le mode de démarrage des sous-processus
 (`fork` vs `spawn`) avant de conclure qu'un run en cours est protégé.
+
+<a id="s0.40"></a>
+### 0.40 Observation de la phase de déploiement — les 5 points ✅ LIVRÉS — ✅ CLOS (2026-07-29)
+
+**Le contenu d'état vit dans
+[`Implémenté/observation_deploiement.md`](Implémenté/observation_deploiement.md)** (extrait de
+l'audit archivé `Implémenté/V11_audit_observation.md` §11 le 2026-07-28, constats re-vérifiés dans
+le code) — cette entrée n'est que le **pointeur d'orchestration**, conformément à la règle « un
+contenu d'état vit à UN seul endroit ». Le document est **intégralement clos** et classé.
+
+**En une phrase.** L'agent déployait à l'aveugle sur cinq défauts distincts et cumulatifs : il
+décrivait une autre unité que celle qu'il posait (1), regardait une autre région du plateau (2 et
+4), s'y déclarait au contact de l'ennemi (5) — et ne voyait rien de ce que ses cinq actions
+feraient (3). Les cinq sont corrigés.
+
+**Points 1, 2, 4 et 5 — livrés les 2026-07-28 / 07-29, `obs_size` INCHANGÉ (20768).**
+- **point 1 ✅** (`0e0551e8`) — l'obs décrivait `next(iter(units_cache))` et non l'unité du masque.
+  Source unique désormais : `ActionDecoder.get_deployment_active_unit`, qui **lève** sur pool vide
+  au lieu de rendre une obs nulle.
+- **point 2 ✅** (`2893bbcb`) — la grille égocentrique était centrée sur la sentinelle `(-1,-1)`,
+  donc sur une autre région du plateau (0 % de la zone du joueur 1 visible). Elle est ancrée sur la
+  **zone de déploiement** lue dans `deployment_state["deployment_pools"]`, géométrie
+  `engine/spatial_grid` **inchangée** (seul l'ancrage bouge). 96 %/78 % de la zone visible après.
+- **point 4 ✅** (`6cc4585a`, trouvé en vérifiant le correctif du point 2) — le **vecteur** mesurait
+  lui aussi depuis la sentinelle. L'agent voyait l'objectif 0 à **38,3** — le plus proche — alors
+  qu'il est à **178,9** de sa zone, et ne voyait pas l'objectif 4 à **11,3** : l'**ordre des
+  objectifs était inversé**, et les trois actions de zone s'appuient sur ces nombres. L'origine
+  d'une escouade non posée est désormais celle de la grille (`squad_grid_anchor`), ce qui
+  **rétablit** l'invariant §0.32 T-I. Choix tranché : une entité pas encore posée n'a **aucune**
+  position relative (le bit `deploy_not_on_board` porte l'information) — sans quoi déplacer
+  l'origine les aurait toutes empilées à une distance absurde au nord-ouest.
+- **point 5 ✅** (`388d85cd`, trouvé en re-vérifiant le point 4) — une escouade pas encore mise en
+  place se déclarait `engaged = 1`, `n_in_enemy_ez = 6`, `n_fight_eligible = 6`,
+  `n_models_engaging = 6` et `los_can_see = 1` sur les 6 slots ennemis : toutes les unités non
+  posées partagent la sentinelle, donc leurs empreintes se recouvrent. **Contraire à 03.04**
+  (`03 Moving.pdf`) : l'engagement range est une aire **du champ de bataille**. Filtre chez
+  l'appelant, en un point (`on_battlefield`, 1,9 µs = 0,08 % d'une observation) ; `coherent` n'est
+  délibérément PAS neutralisé (03.03 : « **if that unit is on the battlefield**, it is in
+  coherency »).
+
+**Point 3 ✅ — livré le 2026-07-29. `obs_size` 20768 → 20828, donc RETRAIN `--new`.**
+
+Les 5 actions `4-8` ne sont pas « les 5 premiers hexes valides » (énoncé d'origine **faux**) mais
+5 **stratégies** — front agressif · pression sur objectif · sûr/cohésion · flanc gauche · flanc
+droit — évaluées sur **tous** les hexes valides (~14 000 au premier step). L'observation n'en
+décrivait **aucun** : cinq boîtes noires, au moment précis où l'agent choisit son point d'entrée.
+
+Nouveau bloc `deploy_cand_cont` (5, 8) / `deploy_cand_bin` (5, 4) — **60 scalaires** — décrit par
+slot **l'hexe que sa stratégie poserait** : position relative à l'ancre de zone (même repère T-I),
+distances au centre d'objectif / à l'ennemi / à l'allié posé le plus proches, exposition LoS réelle
+et potentielle, étalement en colonne, objectif (14.02), couvert (13.08), et le bit `present`.
+Documenté dimension par dimension dans
+[`AI_OBSERVATION.md`](../AI_OBSERVATION.md) (« Section Breakdown »).
+
+Trois points de conception, chacun verrouillé par test :
+1. **Un candidat se décrit par son EFFET, jamais par son index.** Le masque n'ouvre que
+   `min(5, n_hexes)` slots (`open_deploy_slot_count`, source unique désormais partagée par les deux
+   sites de masque et par le constructeur de candidats), donc en fin de déploiement ce sont les
+   stratégies d'**indices bas** qui survivent : le lien slot ↔ stratégie n'est pas stable. Un slot
+   FERMÉ est une ligne de zéros, `present` compris — jamais un candidat plausible.
+2. **Source unique, pas une seconde géométrie.** `ActionDecoder.deployment_slot_candidates` rend
+   l'hexe **et le plan de formation validé** ; le décodeur y lit ce qu'il commite et l'observation
+   ce qu'elle décrit. Un second calcul aurait laissé l'agent choisir d'après un hexe que le moteur
+   n'aurait pas posé (motif D1).
+3. **Garde de phase**, même patron que `is_charge_phase` : hors déploiement le bloc est nul et rien
+   n'est calculé. Il reste nul aussi pour une escouade qui n'est pas celle du masque.
+
+**Perf — mesurée, pas estimée.** Décrire 5 stratégies au lieu d'en évaluer une exigeait 5 passes de
+scoring sur toute la zone : **871 ms** par step de déploiement en appelant 5 fois l'ancienne
+sélection scalaire. La sélection a donc été **vectorisée** (colonnes de score calculées une fois
+pour les 5 stratégies, `np.lexsort` par stratégie). Résultat mesuré sur le board x5, 3 épisodes,
+33 steps de déploiement : **285 ms → 345 ms** par step, soit **+59 ms (+21 %)** pour cinq candidats
+décrits au lieu d'un seul évalué. **Parité de choix EXACTE** avec l'implémentation scalaire,
+vérifiée hexe par hexe sur 33 états × 5 stratégies (le tri lexicographique numpy reproduit le
+`max()` sur tuples, index croissant compris).
+
+**Nouveau cache** : `_deployment_slot_candidates`, ajouté à l'inventaire d'`AI_OBSERVATION.md`
+(**six → sept**) et à `test_obs_caches_die_with_the_episode.py`. Son tampon est l'état des unités
+posées — qui recommence **identique** d'un épisode à l'autre : la purge au `reset` est donc
+obligatoire, le tampon seul ne suffirait pas.
+
+**Verrous** (`test_deployment_candidate_observation.py`, 10 tests, chacun rouge sous mutation de son
+propre volet) : le slot `i` décrit l'hexe que `_select_deployment_hex_for_action(4+i)` choisirait
+(cache purgé avant l'interrogation, pour que le décodeur recalcule) ; les positions sont mesurées
+depuis l'ancre de zone et **diffèrent** de celles qu'aurait produites la sentinelle (leçon §0bis) ;
+distances, `on_objective` et `in_cover` sont recalculés depuis le `game_state` brut ; les bits
+`present` sont **exactement** les slots que le masque ouvre, y compris sous troncature forcée à
+3 hexes valides ; le bloc est nul hors déploiement et pour une autre escouade ; et la distance hex
+vectorisée rend **exactement** `calculate_hex_distance`.
+
+⚠️ **Ce que le point 3 ne fait PAS, et qui reste à arbitrer** (architecture de la policy, pas
+contrat d'observation) : les ids `4-8` tombent dans la plage des cellules de move
+(`MOVE_CELL_BASE = 0`), donc leurs logits sortent de la **conv 1×1 de la carte**, aux cellules
+`(0, 4..8)` de la fenêtre égocentrique — pas d'une tête dédiée. Le bloc candidat atteint cette tête
+par le **conditionnement du tronc** (`move_ctx_net`, qui peut réordonner les cellules entre elles),
+non par un pointeur. Une **tête pointeur de déploiement**, jumelle de `choice_query_net`, est le
+prolongement naturel ; elle exigerait de distinguer « cellule de move » de « slot de déploiement »
+sur les mêmes ids, donc de lire la phase dans la policy. Décision utilisateur.
+
+**Dette fermée au passage (même fichier).** `engine/observation_builder.py` enveloppait
+`get_fighting_models` d'un `except Exception` qui traduisait TOUTE erreur en « aucune figurine ne
+peut combattre » — un état de jeu inventé, servi sans trace. Préexistant (`fb7e83b6`, 2026-05-27,
+jamais justifié). Vérification faite avant suppression : toutes les levées atteignables sur ce
+chemin viennent de `require_key(models_cache/squad_models)`, `get_engagement_zone`,
+`_synth_model_entry` et de la primitive EZ — **chacune déjà appelée sans garde** par le code qui
+l'entoure, sur les mêmes données. Aucune condition nommée à rattraper : le `try/except` est
+supprimé, pas rétréci. Verrous : `test_obs_fighting_models_no_fallback.py` (l'appel ne lève pas sur
+une partie réelle, ~400 appels ; et une levée injectée **remonte** au lieu de devenir un zéro).
 
 <a id="s0.39"></a>
 ### 0.39 Pathfinding exact — correctif juste, aucun appelant, code SUPPRIMÉ — ✅ CLOS (2026-07-28)

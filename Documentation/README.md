@@ -82,7 +82,7 @@ la racine de `Implémentation/`.
 | **[Implémentation/V11_move_build_acceleration.md](Impl%C3%A9mentation/V11_move_build_acceleration.md)** | Perf du noyau de pool de move (`§0.22`) : ce qui est livré, impasses mesurées, tâches ouvertes. | ✅ clos, 3 tâches résiduelles |
 | **[Implémentation/V11_refactor_plan.md](Impl%C3%A9mentation/V11_refactor_plan.md)** | Plan d'extraction de `V11_agent_rework.md` en sous-documents. | ⏸️ **plan non exécuté** ; ses numéros de ligne datent du 2026-07-21 et ne correspondent plus |
 | **[Implémentation/Replay.md](Impl%C3%A9mentation/Replay.md)** | Spec du replay. | — |
-| **[Implémentation/observation_deploiement.md](Impl%C3%A9mentation/observation_deploiement.md)** | Observation de la phase de déploiement. | — |
+| **[Implémentation/Implémenté/observation_deploiement.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/observation_deploiement.md)** | Observation de la phase de déploiement : les 5 défauts et leurs correctifs (clos le 2026-07-29). | — |
 
 ### Archives et backlog
 

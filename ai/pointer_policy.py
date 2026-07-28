@@ -56,6 +56,7 @@ from engine.macro_intents import (
     CHARGE_SLOT_COUNT,
     CHOICE_BASE,
     CHOICE_COUNT,
+    DEPLOY_SLOT_COUNT,
     FIGHT_SLOT_BASE,
     FIGHT_SLOT_COUNT,
     MOVE_CELL_BASE,
@@ -174,6 +175,14 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 "applique au mecanisme de decision (§9.3 P2)."
             )
         self.n_decision_options = extractor.n_decision_options
+        # Même invariant, appliqué au déploiement (§0.40 point 3) : le bloc candidat décrit un
+        # slot par action 4-8. S'ils divergeaient, l'agent lirait la description d'un slot pour
+        # en jouer un autre — exactement le désalignement obs ↔ action D1.
+        if extractor.n_deploy_slots != DEPLOY_SLOT_COUNT:
+            raise ValueError(
+                f"Desalignement observation/action : {extractor.n_deploy_slots} candidats de "
+                f"deploiement observes contre {DEPLOY_SLOT_COUNT} slots d'action 4-8."
+            )
         self.enemy_slice = extractor.enemy_embeddings_slice()
         self.move_map_slice = extractor.move_map_slice()
         self.decision_slice = extractor.decision_embeddings_slice()

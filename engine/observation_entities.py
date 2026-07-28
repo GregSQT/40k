@@ -328,6 +328,92 @@ def decision_option_bin_index(field: str) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Décision de DÉPLOIEMENT (V11 §0.40 point 3)
+# ---------------------------------------------------------------------------
+
+#: Nombre de slots de déploiement décrits. DOIT valoir `macro_intents.DEPLOY_SLOT_COUNT` (une
+#: action 4-8 par slot) — verrouillé par test de contrat, comme `N_OBJECTIVE_SLOTS` ↔
+#: `MAX_OBJECTIVES`. La constante est recopiée ici et non importée parce que ce module est une
+#: FEUILLE (cf. `OBS_PHASE_IDS`).
+N_DEPLOY_SLOTS = 5
+
+#: Ce que le slot `i` (action `DEPLOY_SLOT_BASE + i`) POSERAIT s'il était joué.
+#:
+#: Le défaut fermé ici : les 5 actions du déploiement ne sont pas « les 5 premiers hexes
+#: valides » mais 5 STRATÉGIES (front agressif, pression sur objectif, sûr/cohésion, flanc
+#: gauche, flanc droit) évaluées sur TOUS les hexes valides — et l'observation n'en décrivait
+#: AUCUN. L'agent choisissait entre cinq boîtes noires : ni position, ni distance aux objectifs,
+#: ni couvert, ni exposition. Depuis §0.40 points 1/2/4 il sait où est sa zone et voit le terrain
+#: autour ; il ne savait toujours pas ce que chaque slot en ferait.
+#:
+#: DOCTRINE (la même que les candidats de décision §9.3 et que les slots ennemis) : un candidat
+#: se décrit par L'EFFET qu'il accorde, jamais par son index. Deux raisons ici, et la seconde est
+#: décisive : le masque n'ouvre que `min(5, n_hexes)` slots, donc en fin de déploiement ce sont
+#: les stratégies d'INDICES BAS qui survivent — le lien slot ↔ stratégie n'est pas stable, et un
+#: réseau qui aurait appris « le slot 7 va à gauche » se tromperait précisément là.
+#:
+#: SOURCE : `ActionDecoder.deployment_slot_candidates`, celle-là même que le commit exécute.
+#: Aucune géométrie n'est recalculée — décrire les candidats depuis un second calcul aurait
+#: laissé l'agent choisir d'après un hexe que le moteur n'aurait pas posé (motif D1).
+DEPLOY_CAND_CONT_FIELDS: Tuple[str, ...] = (
+    # Position de l'hexe candidat RELATIVEMENT à l'origine de mesure de l'observation
+    # (`ObservationBuilder.squad_grid_anchor`, l'ancre de la zone tant que l'unité n'est pas
+    # posée), dans la projection `_hex_center` — le repère UNIQUE de §0.32 T-I, celui de la
+    # grille et des directions d'objectif. C'est ce qui rend les candidats comparables à la
+    # fenêtre égocentrique : un candidat de flanc extrême tombe hors de la grille (limite
+    # assumée du point 2), et ces deux nombres sont alors la SEULE chose qui le situe.
+    "col_rel",
+    "row_rel",
+    # Grandeurs qui ont PRODUIT le choix de la stratégie, telles quelles (entiers, subhex) —
+    # elles sortent du cache de scoring du décodeur, pas d'un second calcul.
+    "objective_distance",       # hex le plus proche d'un CENTRE d'objectif
+    "enemy_distance",           # … d'une référence ennemie (unités posées, sinon zone ennemie)
+    "ally_distance",            # … d'un allié déjà posé (masque : `has_deployed_ally`)
+    "los_exposure",             # nb d'ennemis DÉJÀ POSÉS qui voient cet hexe (06.01)
+    "potential_los_exposure",   # nb d'ancres de la zone ennemie qui le voient (menace à venir)
+    "ally_col_count",           # nb d'alliés déjà posés sur la même colonne (étalement)
+)
+
+DEPLOY_CAND_BIN_FIELDS: Tuple[str, ...] = (
+    # Masque d'`ally_distance` : sans lui, 0 voudrait dire à la fois « collé à un allié » et
+    # « aucun allié posé », deux situations opposées pour une stratégie de cohésion.
+    "has_deployed_ally",
+    # 14.02 : l'hexe est un hexe d'objectif. 13.08 : il donne le bénéfice du couvert. Les deux
+    # viennent des MÊMES ensembles que les canaux « objectifs » et « couvert » de la grille
+    # (`_grid_static_hex_arrays`) : une lecture, pas une géométrie.
+    "on_objective",
+    "in_cover",
+    "present",  # slot OUVERT par le masque (0 = fermé) — DERNIER, convention uniforme §0.37
+)
+
+DEPLOY_CAND_CONT_SIZE = len(DEPLOY_CAND_CONT_FIELDS)
+DEPLOY_CAND_BIN_SIZE = len(DEPLOY_CAND_BIN_FIELDS)
+
+_DEPLOY_CAND_CONT_INDEX: Dict[str, int] = {n: i for i, n in enumerate(DEPLOY_CAND_CONT_FIELDS)}
+_DEPLOY_CAND_BIN_INDEX: Dict[str, int] = {n: i for i, n in enumerate(DEPLOY_CAND_BIN_FIELDS)}
+
+
+def deploy_cand_cont_index(field: str) -> int:
+    """Index d'une feature continue de candidat de déploiement. Nom inconnu -> KeyError."""
+    if field not in _DEPLOY_CAND_CONT_INDEX:
+        raise KeyError(
+            f"Feature continue de candidat de deploiement inconnue : {field!r}. "
+            f"Champs : {DEPLOY_CAND_CONT_FIELDS}"
+        )
+    return _DEPLOY_CAND_CONT_INDEX[field]
+
+
+def deploy_cand_bin_index(field: str) -> int:
+    """Index d'un drapeau de candidat de déploiement. Nom inconnu -> KeyError."""
+    if field not in _DEPLOY_CAND_BIN_INDEX:
+        raise KeyError(
+            f"Drapeau de candidat de deploiement inconnu : {field!r}. "
+            f"Champs : {DEPLOY_CAND_BIN_FIELDS}"
+        )
+    return _DEPLOY_CAND_BIN_INDEX[field]
+
+
+# ---------------------------------------------------------------------------
 # Contexte global (ce qui n'appartient à aucune entité)
 # ---------------------------------------------------------------------------
 

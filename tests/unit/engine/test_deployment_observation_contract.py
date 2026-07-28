@@ -616,8 +616,21 @@ def test_deployed_units_still_report_engagement_after_deployment():
     )
 
 
-def test_squad_obs_size_target_unchanged():
-    """§0.40 point 3 (décrire les hexes candidats) est HORS périmètre : `obs_size` ne bouge pas."""
-    from engine.observation_builder import ObservationBuilder
+def test_squad_obs_size_target_matches_the_schema():
+    """Les points 1, 2, 4 et 5 ne changent PAS `obs_size` ; le point 3, lui, l'a changé.
 
-    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 20768
+    Ce verrou valait 20768 tant que le point 3 restait ouvert : les quatre autres points ne
+    touchent QUE le contenu de l'observation de déploiement, jamais sa taille — donc aucun modèle
+    n'était invalidé par eux. Le point 3 ajoute le bloc « candidats de déploiement »
+    (5 slots x 12 scalaires) et impose, par construction, un retrain `--new`.
+    """
+    from engine.observation_builder import ObservationBuilder
+    from engine.observation_entities import (
+        DEPLOY_CAND_BIN_SIZE, DEPLOY_CAND_CONT_SIZE, N_DEPLOY_SLOTS,
+    )
+
+    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 20828
+    assert N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE) == 60, (
+        "le bloc candidat de déploiement a changé de taille : mettre à jour `obs_size` dans les "
+        "5 profils de la config d'agent, et l'historique d'AI_OBSERVATION.md"
+    )

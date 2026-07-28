@@ -24,6 +24,8 @@ from engine.observation_builder import ObservationBuilder
 from engine.observation_entities import (
     DECISION_CTX_BIN_FIELDS,
     DECISION_OPTION_BIN_FIELDS,
+    DEPLOY_CAND_BIN_FIELDS,
+    DEPLOY_CAND_CONT_FIELDS,
     GLOBAL_BIN_FIELDS,
     GLOBAL_CONT_FIELDS,
     MODEL_TYPE_BIN_FIELDS,
@@ -64,6 +66,10 @@ def test_every_schema_field_is_documented():
         # doc n'explique pas est un candidat que personne ne sait interpreter dans un step.log.
         "decision_ctx_bin": DECISION_CTX_BIN_FIELDS,
         "decision_option_bin": DECISION_OPTION_BIN_FIELDS,
+        # V11 §0.40 point 3 : meme exigence pour les candidats de deploiement — un slot que la
+        # doc n'explique pas est un slot que personne ne sait interpreter.
+        "deploy_cand_cont": DEPLOY_CAND_CONT_FIELDS,
+        "deploy_cand_bin": DEPLOY_CAND_BIN_FIELDS,
     }
     missing = []
     for group, fields in groups.items():

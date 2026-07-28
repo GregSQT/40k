@@ -219,6 +219,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         expected_keys = [
             "global_cont", "global_bin", "self_models_cont", "self_models_bin", "grid",
             "decision_ctx_bin", "decision_options_bin",
+            "deploy_cand_cont", "deploy_cand_bin",
         ]
         for family in _UNIT_FAMILIES:
             expected_keys += [
@@ -270,6 +271,8 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         global_dim = _shape("global_cont")[0] + _shape("global_bin")[0]
         self.decision_ctx_dim = _shape("decision_ctx_bin")[0]
         self.n_decision_options, self.decision_option_dim = _shape("decision_options_bin")
+        self.n_deploy_slots, self.deploy_cand_cont_dim = _shape("deploy_cand_cont")
+        self.deploy_cand_bin_dim = _shape("deploy_cand_bin")[1]
 
         weapon_agg = 2 * weapon_dim
         type_agg = 2 * type_dim
@@ -287,6 +290,13 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
             # partent directement à la tête pointeur — cf. `decision_embeddings_slice`).
             + self.decision_ctx_dim
             + 2 * entity_dim
+            # Candidats de déploiement (§0.40 point 3), APLATIS par slot et non agrégés : les
+            # logits des actions 4-8 sortent de la tête DENSE, une colonne par slot, donc le
+            # tronc doit garder l'identité du slot. L'encodeur, lui, est PARTAGÉ : ce que le
+            # réseau apprend d'un candidat (« exposé à 4 ennemis, loin de tout objectif ») sert
+            # aux cinq — c'est exactement l'argument §3.3, appliqué à un bloc que le pointeur ne
+            # lit pas.
+            + self.n_deploy_slots * entity_dim
         )
         # La carte de move sort du réseau AVEC ses canaux positionnels : la tête 1x1 doit les
         # voir directement, pas seulement à travers la pile conv.
@@ -373,6 +383,15 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         # Aucune `EntityRunningNorm` : le registre de candidat est entièrement DISCRET (§0.32 T-J
         # — une valeur discrète n'est jamais normalisée).
         self.decision_encoder = _mlp([self.decision_option_dim, entity_dim, entity_dim])
+        # Encodeur de CANDIDAT DE DÉPLOIEMENT (§0.40 point 3) : un seul module pour les 5 slots.
+        # Ses features continues sont des distances et des comptages BRUTS (subhex, nombre
+        # d'ennemis) : elles passent par une `EntityRunningNorm` à statistiques COMMUNES aux
+        # slots, comme les unités — sans quoi le même « exposé à 3 ennemis » n'aurait pas la même
+        # échelle selon le slot, et le partage de poids ne voudrait plus rien dire.
+        self.deploy_cand_norm = EntityRunningNorm(self.deploy_cand_cont_dim)
+        self.deploy_cand_encoder = _mlp(
+            [self.deploy_cand_cont_dim + self.deploy_cand_bin_dim, entity_dim, entity_dim]
+        )
 
     # -- contrat de découpe consommé par les têtes d'action (T-E, T-G) ------------
     def enemy_embeddings_slice(self) -> slice:
@@ -469,6 +488,22 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         ).to(decision_options.dtype).unsqueeze(-1)
         decision_agg = _masked_mean_max(decision_emb, decision_mask)
 
+        # Candidats de déploiement : masque LU sur le bit `present` (dernier champ), jamais
+        # déduit de la ligne — un slot FERMÉ doit rester absent, pas devenir un candidat nul mais
+        # plausible. Hors phase de déploiement le bloc entier est nul, `present` compris.
+        deploy_cand_bin = observations["deploy_cand_bin"]
+        deploy_mask = deploy_cand_bin[..., -1]
+        deploy_in = torch.cat(
+            [
+                self.deploy_cand_norm(observations["deploy_cand_cont"], deploy_mask),
+                deploy_cand_bin,
+            ],
+            dim=-1,
+        )
+        deploy_emb = self.deploy_cand_encoder(deploy_in) * (deploy_mask > 0).to(
+            deploy_in.dtype
+        ).unsqueeze(-1)
+
         trunk = torch.cat(
             [
                 cnn_out,
@@ -480,6 +515,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 sm_agg,
                 observations["decision_ctx_bin"],
                 decision_agg,
+                deploy_emb.reshape(deploy_emb.shape[0], -1),
             ],
             dim=1,
         )

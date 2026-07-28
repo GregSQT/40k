@@ -147,8 +147,8 @@ def test_unit_encoder_is_a_single_module(extractor):
     named = dict(extractor.named_modules())
     encoders = [n for n in named if n.endswith("_encoder")]
     assert sorted(encoders) == [
-        "decision_encoder", "self_model_encoder", "type_encoder", "unit_encoder",
-        "weapon_encoder",
+        "decision_encoder", "deploy_cand_encoder", "self_model_encoder", "type_encoder",
+        "unit_encoder", "weapon_encoder",
     ]
     assert not any("ally" in n or "enemy" in n for n in named)
 
