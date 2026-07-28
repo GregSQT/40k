@@ -64,19 +64,35 @@ GRID_CH_COVER = 6
 GRID_CH_SELF = 7
 
 # V11 §0.32 T-K. Cout GEODESIQUE (distance de CHEMIN du BFS, pas la distance a vol d oiseau) de
-# chaque cellule du pool de move, NORMALISE par la demi-etendue de la grille — c est-a-dire par le
-# budget Advance MAXIMAL, `grid_half_extent_subhex`, la meme grandeur qui definit la geometrie.
-# Le canal est donc dans [0,1] par construction et invariant d echelle comme le reste de la refonte.
+# chaque cellule du pool de move, encode par `normalize_move_costs` : dans [0,1], et surtout avec
+# le seuil normal/advance a `MOVE_COST_ADVANCE_THRESHOLD` EXACTEMENT, pour toute unite et toute
+# echelle de board.
 #
 # POURQUOI ce canal : c est ce cout qui arbitre normal vs advance (`classify_squad_move_type`), et
 # un advance interdit le tir non-[ASSAULT] et la charge. Il etait deja calcule a chaque activation
 # POUR LE MASQUE, puis jete : l agent voyait les murs bruts et devait refaire le BFS mentalement
-# pour savoir si la cellule visee lui coutait son tir. Le seuil normal/advance vaut
-# `M / (M + 6" x inches_to_subhex)` = `MOVE / (MOVE + 6)` — sans dimension, deductible du vecteur.
+# pour savoir si la cellule visee lui coutait son tir.
 #
 # 0 hors du pool. L ATTEIGNABILITE reste portee par le masque d action (elle n est PAS dupliquee
 # ici) : une cellule a cout 0 est soit hors pool, soit l origine meme de l escouade.
 GRID_CH_MOVE_COST = 8
+
+# Valeur du canal `GRID_CH_MOVE_COST` au budget de move NORMAL (`M`) — la frontiere normal/advance.
+#
+# POURQUOI un seuil CONSTANT plutot qu une simple division par la demi-etendue. La grille passe
+# SEULE dans le CNN (`ai/spatial_extractor.py` : `self.cnn(observations["grid"])`) et le vecteur
+# n est concatene qu APRES l aplatissement. Un canal `cout / demi-etendue` placerait la frontiere
+# a `M / (M + 6" x i2s)` = `MOVE / (MOVE + 6)`, soit 0,40 (MOVE 4") a 0,70 (MOVE 14") selon
+# l unite : pour savoir si une cellule lui coute son tir, le CNN devrait croiser le canal avec le
+# MOVE, qui ne lui parvient jamais. L information la plus utile du canal serait illisible la ou
+# elle est produite — et le deviendrait davantage avec la tete pointeur spatiale (§0.32 T-G), qui
+# scorera chaque cellule depuis son embedding CNN LOCAL.
+MOVE_COST_ADVANCE_THRESHOLD = 0.5
+
+# Tolerance d ARRONDI sur les bornes des couts geodesiques, dans `normalize_move_costs`. Tres
+# au-dessus de l erreur flottante accumulee (~1e-15 sur une somme de pas de `2/sqrt(3)`) et tres
+# en dessous d un pas hex (~1,15) : une vraie incoherence pool/grille ne peut pas s y cacher.
+_COST_BOUND_TOLERANCE = 1e-6
 
 # Distance centre-a-centre de deux hexes voisins, dans l'espace de `_hex_center`
 # (hex_radius=1.0, flat-top). VERIFIE : uniforme sur les 6 voisins et les 2 parites.
@@ -350,6 +366,72 @@ def project_pool_to_grid(
         if d2 < cur_d2 - 1e-12 or (abs(d2 - cur_d2) <= 1e-12 and (col, row) < cur_hex):
             best[idx] = (d2, (col, row), float(cost))
     return {idx: (hex_cr, cost) for idx, (_, hex_cr, cost) in best.items()}
+
+
+def normalize_move_costs(
+    costs: "np.ndarray", normal_budget: int, half_extent_subhex: int
+) -> "np.ndarray":
+    """Couts geodesiques (subhex) -> valeurs du canal `GRID_CH_MOVE_COST`, dans [0,1].
+
+    Affine PAR MORCEAUX, de sorte que la frontiere normal/advance tombe exactement sur
+    `MOVE_COST_ADVANCE_THRESHOLD` quels que soient le MOVE de l unite et l echelle du board :
+
+        cout in [0, M]  ->  [0, seuil]          (regime NORMAL)
+        cout in (M, H]  ->  (seuil, 1]          (regime ADVANCE)
+
+    ou `M` = budget de move normal (`get_squad_move_budget(..., "normal")`, la MEME grandeur que
+    `classify_squad_move_type` compare au cout) et `H` = demi-etendue de la grille = budget Advance
+    MAXIMAL (`grid_half_extent_subhex`), borne superieure de tout cout du pool.
+
+    Monotone et bijective par morceaux : rien n est perdu, seule l echelle est recalee. Une simple
+    division par `H` serait plus courte mais placerait la frontiere a `MOVE / (MOVE + 6)` — cf. le
+    commentaire de `MOVE_COST_ADVANCE_THRESHOLD` : le CNN ne voit que la grille, il ne peut pas
+    retrouver ou est cette frontiere.
+
+    Escouade ENGAGEE : le pool est construit au budget Fall Back (= M), donc tous les couts sont
+    <= M et le canal reste <= seuil. C est exact, et informatif : « aucun advance disponible ».
+    """
+    if half_extent_subhex <= 0:
+        raise ValueError(
+            f"normalize_move_costs: demi-etendue invalide ({half_extent_subhex})"
+        )
+    if normal_budget < 0 or normal_budget >= half_extent_subhex:
+        raise ValueError(
+            f"normalize_move_costs: budget normal {normal_budget} hors de [0, "
+            f"{half_extent_subhex}[ — le budget Advance maximal doit le dominer strictement"
+        )
+    costs = np.asarray(costs, dtype=np.float64)
+    if costs.size:
+        # TOLERANCE D ARRONDI, pas un repli. Les couts du BFS sont des sommes de pas de
+        # `2/sqrt(3)` : une destination pile au budget ressort a `12.000000000000005` pour un
+        # budget de 12. Le depassement mesure est de l ordre de 1e-15 ; une vraie incoherence
+        # entre le pool et la grille vaudrait au moins UN pas (~1,15), donc 1e-6 separe les deux
+        # sans ambiguite. Sous la tolerance on recale (`clip`) ; au-dela on leve.
+        # (Ce cas ne se voyait pas en float32, ou l epsilon disparaissait a l arrondi — il a ete
+        # trouve par `test_spatial_move_decode_execute`, pas par les tests de la grille.)
+        lo, hi = float(costs.min()), float(costs.max())
+        if lo < -_COST_BOUND_TOLERANCE or hi > float(half_extent_subhex) + _COST_BOUND_TOLERANCE:
+            raise ValueError(
+                f"normalize_move_costs: cout hors de [0, {half_extent_subhex}] "
+                f"(min={lo}, max={hi}) — le pool et la grille ne partagent plus le meme budget "
+                f"Advance maximal"
+            )
+        costs = np.clip(costs, 0.0, float(half_extent_subhex))
+
+    threshold = float(MOVE_COST_ADVANCE_THRESHOLD)
+    span_advance = float(half_extent_subhex - normal_budget)
+    if normal_budget == 0:
+        # Budget normal NUL (Take to the skies 21.03 sur une unite tres lente) : rester sur place
+        # est le seul « normal », toute cellule atteinte est un advance. Pas de division par zero
+        # a masquer — le regime normal est vide, on le dit.
+        out = np.where(costs > 0.0, threshold + (1.0 - threshold) * costs / span_advance, 0.0)
+    else:
+        out = np.where(
+            costs <= float(normal_budget),
+            threshold * costs / float(normal_budget),
+            threshold + (1.0 - threshold) * (costs - float(normal_budget)) / span_advance,
+        )
+    return out.astype(np.float32)
 
 
 def iter_window_hexes(

@@ -183,3 +183,91 @@ def test_project_pool_carries_geodesic_cost_not_crow_flight():
     pool = {(acol + 1, arow): 37}
     projected = project_pool_to_grid(pool, acol, arow, he)
     assert list(projected.values())[0] == ((acol + 1, arow), 37)
+
+
+# ============================================================================
+# V11 §0.32 T-K — encodage du cout de move (`normalize_move_costs`)
+# ============================================================================
+
+
+def test_normalize_move_costs_puts_the_frontier_on_the_same_constant_for_every_unit():
+    """LE contrat : `cout == M` vaut le seuil, quels que soient le MOVE et l'echelle du board.
+
+    C'est ce qui rend la frontiere normal/advance lisible par le CNN, qui ne recoit que la grille.
+    """
+    import numpy as np
+
+    from engine.spatial_grid import MOVE_COST_ADVANCE_THRESHOLD, normalize_move_costs
+
+    # (M, H) : MOVE 4" a 14" en x1 et en x5, H = M + 6" x inches_to_subhex.
+    for normal, half in ((4, 10), (6, 12), (14, 20), (20, 50), (30, 60), (70, 100)):
+        got = float(normalize_move_costs(np.array([normal]), normal, half)[0])
+        assert got == pytest.approx(MOVE_COST_ADVANCE_THRESHOLD, abs=1e-6), (
+            f"M={normal}, H={half} : frontiere a {got} au lieu de {MOVE_COST_ADVANCE_THRESHOLD}"
+        )
+
+
+def test_normalize_move_costs_spans_the_unit_interval_and_stays_monotonic():
+    """0 -> 0, budget Advance maximal -> 1, strictement croissant entre les deux."""
+    import numpy as np
+
+    from engine.spatial_grid import normalize_move_costs
+
+    normal, half = 30, 60
+    costs = np.arange(0, half + 1, dtype=np.float64)
+    out = normalize_move_costs(costs, normal, half)
+    assert float(out[0]) == pytest.approx(0.0, abs=1e-6)
+    assert float(out[-1]) == pytest.approx(1.0, abs=1e-6)
+    assert float(out.min()) >= 0.0 and float(out.max()) <= 1.0
+    assert all(float(b) > float(a) for a, b in zip(out, out[1:]))
+
+
+def test_normalize_move_costs_with_a_null_normal_budget_calls_everything_advance():
+    """Budget normal NUL (Take to the skies) : rester sur place est le seul « normal ».
+
+    Aucune division par zero masquee : le regime normal est vide et le dit.
+    """
+    import numpy as np
+
+    from engine.spatial_grid import MOVE_COST_ADVANCE_THRESHOLD, normalize_move_costs
+
+    out = normalize_move_costs(np.array([0.0, 1.0, 20.0]), 0, 20)
+    assert float(out[0]) == pytest.approx(0.0, abs=1e-6)
+    assert float(out[1]) > MOVE_COST_ADVANCE_THRESHOLD
+    assert float(out[2]) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_normalize_move_costs_absorbs_the_float_epsilon_at_the_exact_budget():
+    """REGRESSION : une destination PILE au budget ressort a `H + 5e-15` du BFS.
+
+    Les couts sont des sommes de pas de `2/sqrt(3)` : `12.000000000000005` pour un budget de 12.
+    Une borne stricte levait la — sur le vrai board, donc en plein training. La tolerance ne
+    masque rien : elle vaut 1e-6, quand une vraie incoherence pool/grille vaudrait au moins un
+    pas hex (~1,15). Trouve par `test_spatial_move_decode_execute`, invisible en float32.
+    """
+    import numpy as np
+
+    from engine.spatial_grid import normalize_move_costs
+
+    out = normalize_move_costs(np.array([12.000000000000005]), 6, 12)
+    assert float(out[0]) == pytest.approx(1.0, abs=1e-6)
+    out = normalize_move_costs(np.array([-1e-15]), 6, 12)
+    assert float(out[0]) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_normalize_move_costs_raises_instead_of_clipping():
+    """Aucun repli : un cout hors bornes ou un budget incoherent LEVE."""
+    import numpy as np
+
+    from engine.spatial_grid import normalize_move_costs
+
+    with pytest.raises(ValueError, match="cout hors de"):
+        normalize_move_costs(np.array([61.0]), 30, 60)
+    with pytest.raises(ValueError, match="cout hors de"):
+        normalize_move_costs(np.array([60.001]), 30, 60)  # au-dela de la tolerance d'arrondi
+    with pytest.raises(ValueError, match="cout hors de"):
+        normalize_move_costs(np.array([-1.0]), 30, 60)
+    with pytest.raises(ValueError, match="budget normal"):
+        normalize_move_costs(np.array([10.0]), 60, 60)
+    with pytest.raises(ValueError, match="demi-etendue invalide"):
+        normalize_move_costs(np.array([0.0]), 0, 0)

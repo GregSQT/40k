@@ -299,16 +299,29 @@ force un **advance**, qui interdit le tir non-[ASSAULT] et la charge. L'agent vo
 bruts et devait **refaire le BFS mentalement** pour savoir si la cellule qu'il visait lui coûtait
 son tir.
 
-**Correctif livré.** `GRID_CH_MOVE_COST` (canal 8) porte `coût géodésique / demi-étendue de la
-grille`. Le dénominateur est `grid_half_extent_subhex` — le budget **Advance MAXIMAL**, la MÊME
-grandeur qui définit la géométrie de la grille : le canal tient donc dans `Box(0,1)` (contrainte
-réelle de l'espace d'obs, [`w40k_core.py`](../../engine/w40k_core.py) `spaces_dict["grid"]`) et
-reste invariant d'échelle comme le reste de la refonte. Le seuil normal/advance vaut
-`M / (M + 6" × inches_to_subhex)` = `MOVE / (MOVE + 6)` — sans dimension, déductible du vecteur.
-0 hors du pool : l'atteignabilité reste portée par le masque d'action, elle n'est **pas**
-dupliquée. Hors phase de mouvement le canal est nul (aucune activation de move en cours).
-La borne `coût ≤ demi-étendue` **lève** au lieu de clipper : un clip silencieux écraserait à la
-même valeur toutes les destinations lointaines.
+**Correctif livré.** `GRID_CH_MOVE_COST` (canal 8), encodé par `normalize_move_costs`
+([`spatial_grid.py`](../../engine/spatial_grid.py), source unique) : affine **par morceaux**,
+`[0, M] → [0 ; 0,5]` et `(M, H] → (0,5 ; 1]`, où `M` est le budget de move normal et `H` la
+demi-étendue de la grille (= budget Advance MAXIMAL, borne supérieure de tout coût du pool).
+Le canal tient donc dans `Box(0,1)` — contrainte réelle de l'espace d'obs — et **la frontière
+normal/advance tombe sur 0,5 exactement, pour toute unité et toute échelle de board**.
+0 hors du pool : l'atteignabilité reste portée par le masque, elle n'est **pas** dupliquée. Hors
+phase de mouvement le canal est nul. `normalize_move_costs` **lève** sur un coût hors bornes ou un
+budget incohérent, au lieu de clipper — un clip écraserait à la même valeur toutes les
+destinations lointaines.
+
+⚠️ **Pourquoi une frontière CONSTANTE, et non une simple division par `H`.** La 1re version livrée
+divisait par `H`. Elle est **correcte mais sous-optimale**, et le défaut est structurel : la grille
+passe **seule** dans le CNN ([`spatial_extractor.py`](../../ai/spatial_extractor.py) :
+`self.cnn(observations["grid"])`), le vecteur n'est concaténé qu'**après** l'aplatissement. Avec
+`coût / H`, la frontière vaut `MOVE / (MOVE + 6)` — 0,40 pour un MOVE 4", 0,70 pour un MOVE 14" :
+pour savoir si une cellule lui coûte son tir, le CNN devrait croiser le canal avec un MOVE qui ne
+lui parvient jamais. **L'information la plus utile du canal était illisible là où elle est
+produite** — et le serait davantage avec la tête pointeur spatiale (**T-G**), qui scorera chaque
+cellule depuis son embedding CNN **local**. L'encodage par morceaux est monotone et bijectif par
+morceaux : rien n'est perdu, seule l'échelle est recalée. Escouade engagée : le pool est au budget
+Fall Back (= M), donc tout le canal reste ≤ 0,5 — exact, et informatif (« aucun advance
+disponible »).
 
 ⚠️ **Le piège dimensionnant a été traité par CONSTRUCTION, pas par un réglage de clé.** L'obs ne
 redemande **aucun** pool : elle relit la carte que le masque vient de mémoïser
@@ -328,9 +341,17 @@ trajectoire strictement identique avant/après — mêmes 43 erreurs moteur, cf.
 Le compteur d'appels de pool est **strictement identique** : c'est la mesure qui compte, plus
 forte qu'un taux de hit « ~100 % » — le canal n'ajoute pas un seul BFS géodésique, donc rien du
 poste à 95,6 % du training (§0.22). Le taux de 75,16 % est celui, **inchangé**, du cache
-préexistant. Coût de construction : **+1,7 %** en moyenne (3,314 → 3,371 ms), p50 2,868 → 2,948 ms
-(+2,8 %) — les plages avant/après se chevauchent (3,357 avant vs 3,352 après), l'écart est du même
-ordre que le bruit de mesure.
+préexistant. Coût de construction du canal lui-même : **+1,7 %** (3,314 → 3,371 ms), les plages
+avant/après se chevauchant (3,357 avant vs 3,352 après) — du même ordre que le bruit.
+
+**Coût de l'encodage par morceaux, mesuré en APPARIÉ** (les deux implémentations alternées dans le
+**même processus**, sur la même trajectoire — les passes inter-processus dérivaient avec la charge
+machine, ce qui donnait un écart de +0,16 ms non reproductible) : médiane sur 3 paires,
+**3,213 ms** (division simple) → **3,351 ms** (par morceaux), soit **+4,3 %** de
+`build_squad_grid`, ≈ **+0,2 %** d'un step. Le micro-bench isolé de `normalize_move_costs` donne
++0,007 ms sur 1 024 cellules ; le reste de l'écart n'est pas expliqué et n'a pas été poursuivi —
+le poste ne pèse pas (§0.22 : `MOVE_POOL_BUILD` = 95,6 % du training), et §0.31 a déjà tranché ce
+type d'arbitrage en faveur de la lisibilité.
 
 #### T-L — ✅ LIVRÉ (2026-07-28) — l'escouade active a son propre canal
 
@@ -352,15 +373,36 @@ destination de SON bloc rigide.
 **RAM du rollout buffer** (float32, `n_steps=8192 × n_envs=48` = 393 216 transitions, la config
 réelle) : la grille passe de 9,66 à **14,49 Go**, sous la limite de 19,33 Go de la spec §8.3.
 
-**Tests** : 9 nouveaux dans `test_squad_grid_observation.py` (dont l'**oracle** T-K : une cellule
-derrière une barrière de murs porte le coût de contournement, pas la distance à vol d'oiseau) et
-2 dans `test_entity_encoder_extractor.py` (profondeur d'entrée du CNN lue depuis la source unique,
-forme de grille erronée qui lève). **Mutations faites** : (a) restaurer l'ancien `sink` →
-3 rouges ; (b) remplacer le coût géodésique par la distance à vol d'oiseau → 2 rouges, dont
-l'oracle. ⚠️ La 1re écriture de l'oracle **ne rougissait pas** sur (b) : elle comparait au mauvais
-hex, et l'aller-retour float32 (`coût/half` puis `×half`) suffisait à rendre la distance directe
-supérieure de 1e-6. L'oracle compare désormais à l'hex **que la cellule désigne**, avec une marge
-d'un pas de BFS.
+**Tests** : 11 dans `test_squad_grid_observation.py` (dont l'**oracle** T-K et le test de frontière
+constante), 4 dans `test_spatial_grid.py` (`normalize_move_costs` : frontière identique sur 6
+couples `(M, H)` de MOVE 4" à 14" en ×1 et ×5, intervalle unité et monotonie stricte, budget normal
+nul, et les 4 façons de la faire lever) et 2 dans `test_entity_encoder_extractor.py` (profondeur
+d'entrée du CNN lue depuis la source unique, forme de grille erronée qui lève).
+**Mutations faites** : (a) restaurer l'ancien `sink` → 3 rouges ; (b) remplacer le coût géodésique
+par la distance à vol d'oiseau → 4 rouges dont l'oracle ; (c) revenir à `coût / H` → 3 rouges dont
+le test de frontière constante.
+
+⚠️ **Deux versions de l'oracle T-K ont dû être jetées, chacune démasquée par sa mutation** — c'est
+la mutation qui a fait le travail, pas la relecture :
+1. `read_cost > straight` comparé au **mauvais hex** (la projection retient l'hex le plus proche
+   du centre de cellule, pas celui qu'on vise) ;
+2. puis `read_cost >= straight + 1` : **les coûts du BFS ne sont pas entiers** — en métrique `hex`
+   un pas vaut `2/√3 ≈ 1,155` —, si bien que « distance hex + 1 » comparait deux grandeurs
+   d'unités différentes et aurait pu passer **sans aucun contournement**.
+L'oracle final est **comparatif et sans unité** : à distance à vol d'oiseau **égale**, la cellule
+derrière la barrière porte une valeur strictement supérieure à celle de son symétrique du côté
+dégagé. Il est vérifié que les deux cellules désignent bien des hexes à la même distance directe,
+sans quoi le test ne prouverait rien.
+
+🐛 **Un bug de la borne, trouvé par un test d'un AUTRE fichier.** La garde « coût ≤ demi-étendue »
+levait sur une destination **pile au budget** : les coûts sont des sommes de pas de `2/√3`, si bien
+qu'un budget de 12 ressort à `12.000000000000005`. Invisible tant que les coûts transitaient en
+float32 (l'arrondi effaçait l'epsilon), révélé par le passage en float64 — et attrapé par
+`test_spatial_move_decode_execute`, **pas** par les tests de la grille. En production cela aurait
+levé en plein training. La borne porte désormais une tolérance de `1e-6`, très au-dessus de
+l'erreur flottante (~1e-15) et très en dessous d'un pas hex (~1,15) : une vraie incohérence
+pool/grille ne peut pas s'y cacher. Test de régression dédié.
+📌 **Leçon** : lancer les fichiers de tests IMPACTÉS, pas seulement ceux qu'on écrit.
 
 ⚠️ Ces deux canaux changent l'entrée du CNN : les poids existants sont incompatibles, le run
 §0.14 doit être un `--new` postérieur à ce commit. Ils sont livrés **avant** T-G, sinon la tête

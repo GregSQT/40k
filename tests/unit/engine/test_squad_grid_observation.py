@@ -430,6 +430,8 @@ def test_enemy_is_never_on_the_self_channel(engine):
 # observable (une cellule hors pool porterait 0 et ne prouverait rien).
 BARRIER_HEXES = [[22, r] for r in range(17, 24)]
 BEHIND_WALL = (26, 20)
+# Symetrique de BEHIND_WALL par rapport a l'ancre : MEME distance a vol d'oiseau, cote degage.
+OPEN_SIDE = (14, 20)
 
 
 def _engine_behind_wall() -> W40KEngine:
@@ -459,28 +461,33 @@ def test_move_cost_channel_is_a_geodesic_cost_not_a_straight_line_distance():
     gs = eng.game_state
     half = grid_half_extent_subhex(gs, "1")
     grid = eng.obs_builder.build_squad_grid(gs, "1")
+    cell_map = read_squad_move_cell_map(gs, "1")
 
-    cell = hex_to_cell(*BEHIND_WALL, ANCHOR_COL, ANCHOR_ROW, half)
-    assert cell is not None, "fixture : la cible doit tomber dans la grille"
-    gx, gy = cell
-    read_cost = float(grid[GRID_CH_MOVE_COST, gy, gx]) * half
-    assert read_cost > 0.0, "la cellule derriere le mur est atteignable : elle doit porter un cout"
+    # Oracle COMPARATIF, a distance a vol d'oiseau EGALE : (26,20) est derriere la barriere,
+    # (14,20) est son symetrique du cote degage. Comparer deux cellules du meme canal evite toute
+    # conversion d'unite — un pas de BFS ne vaut PAS 1 dans l'echelle des couts (metrique hex), si
+    # bien qu'un seuil ecrit en « distance hex + 1 » comparerait des grandeurs differentes.
+    def _value_and_dest(target: tuple[int, int]):
+        cell = hex_to_cell(target[0], target[1], ANCHOR_COL, ANCHOR_ROW, half)
+        assert cell is not None, f"fixture : {target} doit tomber dans la grille"
+        gx, gy = cell
+        assert cell_index(gx, gy) in cell_map, f"fixture : {target} doit etre dans le pool"
+        return float(grid[GRID_CH_MOVE_COST, gy, gx]), cell_map[cell_index(gx, gy)][0]
 
-    # La comparaison se fait sur l'hex QUE CETTE CELLULE DESIGNE (la projection retient l'hex le
-    # plus proche du centre de cellule, pas forcement BEHIND_WALL) : comparer a la distance directe
-    # d'un AUTRE hex laisserait passer une implementation qui porterait une distance a vol d'oiseau.
-    dest, _cost = read_squad_move_cell_map(gs, "1")[cell_index(gx, gy)]
-    straight = float(calculate_hex_distance(ANCHOR_COL, ANCHOR_ROW, int(dest[0]), int(dest[1])))
-    # Marge d'UN pas : les couts du BFS sont entiers, un vrai contournement en ajoute au moins un.
-    # Un `>` nu laisserait passer une implementation qui porte la distance directe, l'aller-retour
-    # float32 (cout/half puis xhalf) suffisant a la rendre superieure de 1e-6 (verifie par mutation).
-    assert read_cost >= straight + 1.0 - 1e-3, (
-        f"cout lu {read_cost} ~= distance a vol d'oiseau {straight} vers {dest} : le canal ne "
-        f"porte pas le cout geodesique mais une distance directe"
+    blocked_value, blocked_dest = _value_and_dest(BEHIND_WALL)
+    open_value, open_dest = _value_and_dest(OPEN_SIDE)
+    assert blocked_value > 0.0 and open_value > 0.0
+
+    d_blocked = calculate_hex_distance(ANCHOR_COL, ANCHOR_ROW, int(blocked_dest[0]), int(blocked_dest[1]))
+    d_open = calculate_hex_distance(ANCHOR_COL, ANCHOR_ROW, int(open_dest[0]), int(open_dest[1]))
+    assert d_blocked == d_open, (
+        f"fixture : les deux cellules designent {blocked_dest} et {open_dest}, a distances directes "
+        f"{d_blocked} != {d_open} — l'oracle ne prouverait rien"
     )
-    assert straight <= float(calculate_hex_distance(ANCHOR_COL, ANCHOR_ROW, *BEHIND_WALL)) + 1, (
-        f"fixture : la cellule visee designe {dest}, trop loin de {BEHIND_WALL} pour prouver "
-        f"quoi que ce soit sur le contournement du mur"
+    assert blocked_value > open_value, (
+        f"a distance a vol d'oiseau EGALE ({d_blocked}), la cellule derriere le mur porte "
+        f"{blocked_value} et celle du cote degage {open_value} : le canal ne porte pas le cout "
+        f"geodesique mais une distance directe"
     )
 
 
@@ -515,6 +522,67 @@ def test_move_cost_channel_is_normalised_into_the_observation_box():
     assert float(channel.max()) > 0.0, "fixture : le pool doit etre non vide"
 
 
+def test_move_cost_channel_puts_the_advance_frontier_on_a_constant():
+    """LE point de l'encodage : la frontiere normal/advance est a une valeur CONSTANTE.
+
+    La grille passe SEULE dans le CNN (`spatial_extractor` : `self.cnn(observations["grid"])`), le
+    vecteur n'est concatene qu'apres l'aplatissement. Un canal `cout / demi-etendue` mettrait la
+    frontiere a `MOVE / (MOVE + 6)`, differente pour chaque unite : le CNN devrait la retrouver en
+    croisant avec un MOVE qui ne lui parvient jamais. Ici, `cout <= M` <=> `valeur <= seuil`, pour
+    toute unite et toute echelle.
+    """
+    from engine.phase_handlers.shared_utils import get_squad_move_budget, read_squad_move_cell_map
+    from engine.spatial_grid import MOVE_COST_ADVANCE_THRESHOLD
+
+    eng = _engine_behind_wall()
+    gs = eng.game_state
+    grid = eng.obs_builder.build_squad_grid(gs, "1")
+    cell_map = read_squad_move_cell_map(gs, "1")
+    normal_budget = get_squad_move_budget("1", gs, "normal")
+
+    normals = advances = 0
+    for cell_idx, (_dest, cost) in cell_map.items():
+        gy, gx = divmod(cell_idx, GRID_SIZE)
+        value = float(grid[GRID_CH_MOVE_COST, gy, gx])
+        if cost <= normal_budget:
+            normals += 1
+            assert value <= MOVE_COST_ADVANCE_THRESHOLD + 1e-6, (
+                f"cellule NORMALE (cout {cost} <= M={normal_budget}) au-dessus du seuil : {value}"
+            )
+        else:
+            advances += 1
+            assert value > MOVE_COST_ADVANCE_THRESHOLD, (
+                f"cellule ADVANCE (cout {cost} > M={normal_budget}) sous le seuil : {value}"
+            )
+    assert normals > 0 and advances > 0, (
+        f"fixture sans pouvoir de discrimination : {normals} normales / {advances} advance"
+    )
+
+
+def test_move_cost_channel_is_monotonic_in_the_geodesic_cost():
+    """Rien n'est perdu par le recalage : l'encodage reste strictement croissant en cout."""
+    from engine.phase_handlers.shared_utils import get_squad_move_budget, read_squad_move_cell_map
+
+    eng = _engine_behind_wall()
+    gs = eng.game_state
+    grid = eng.obs_builder.build_squad_grid(gs, "1")
+    normal_budget = get_squad_move_budget("1", gs, "normal")
+    assert normal_budget > 0, "fixture : budget normal nul, le test ne prouverait rien"
+
+    pairs = sorted(
+        (float(cost), float(grid[GRID_CH_MOVE_COST, cell_idx // GRID_SIZE, cell_idx % GRID_SIZE]))
+        for cell_idx, (_dest, cost) in read_squad_move_cell_map(gs, "1").items()
+    )
+    # Les couts du BFS ne sont PAS entiers (metrique hex : un pas vaut 2/sqrt(3)) et deux chemins
+    # de meme longueur peuvent differer de quelques 1e-15 : en deca de 1e-9 on exige l'egalite,
+    # au-dela la croissance stricte.
+    for (c1, v1), (c2, v2) in zip(pairs, pairs[1:]):
+        if c2 - c1 > 1e-9:
+            assert v2 > v1, f"cout {c1}->{c2} mais valeur {v1}->{v2} : encodage non monotone"
+        else:
+            assert v2 == pytest.approx(v1, abs=1e-6), "meme cout, valeurs differentes"
+
+
 def test_move_cost_channel_matches_the_mask_cell_map_exactly():
     """Le canal EST la carte du masque — pas un 2e BFS.
 
@@ -523,7 +591,8 @@ def test_move_cost_channel_matches_the_mask_cell_map_exactly():
     memes couts. Un recalcul independant reintroduirait un BFS geodesique par step — exactement
     le poste a 95,6 % du training (§0.22).
     """
-    from engine.phase_handlers.shared_utils import read_squad_move_cell_map
+    from engine.phase_handlers.shared_utils import get_squad_move_budget, read_squad_move_cell_map
+    from engine.spatial_grid import normalize_move_costs
 
     eng = _engine_behind_wall()
     gs = eng.game_state
@@ -531,10 +600,12 @@ def test_move_cost_channel_matches_the_mask_cell_map_exactly():
     grid = eng.obs_builder.build_squad_grid(gs, "1")
     cell_map = read_squad_move_cell_map(gs, "1")
     assert cell_map, "fixture : la carte du masque doit etre non vide"
+    normal_budget = get_squad_move_budget("1", gs, "normal")
 
     for cell_idx, (_dest, cost) in cell_map.items():
         gy, gx = divmod(cell_idx, GRID_SIZE)
-        assert float(grid[GRID_CH_MOVE_COST, gy, gx]) == pytest.approx(cost / half, abs=1e-6)
+        expected = float(normalize_move_costs(np.array([cost]), normal_budget, half)[0])
+        assert float(grid[GRID_CH_MOVE_COST, gy, gx]) == pytest.approx(expected, abs=1e-6)
 
     painted = int((grid[GRID_CH_MOVE_COST] > 0.0).sum())
     zero_cost_cells = sum(1 for _d, c in cell_map.values() if c <= 0.0)

@@ -2532,31 +2532,36 @@ class ObservationBuilder:
         # Hors phase de mouvement le canal reste a 0 : aucune activation de move n'est en cours,
         # donc aucune destination n'existe. Peindre le pool d'une phase passee ferait croire a
         # l'agent qu'il peut encore bouger.
+        #
+        # L'encodage est affine PAR MORCEAUX (`normalize_move_costs`) pour que la frontiere
+        # normal/advance tombe sur une valeur CONSTANTE : le CNN ne recoit que la grille, il ne
+        # peut pas croiser le canal avec le MOVE de l'unite pour retrouver ou est cette frontiere.
         if str(game_state.get("phase", "")).lower() == "move":  # get allowed (phase absente = hors move)
-            from engine.phase_handlers.shared_utils import read_squad_move_cell_map
+            from engine.phase_handlers.shared_utils import (
+                get_squad_move_budget,
+                read_squad_move_cell_map,
+            )
+            from engine.spatial_grid import normalize_move_costs
 
             cell_map = read_squad_move_cell_map(game_state, active_squad_id)
             if cell_map:
                 cell_idxs = np.fromiter(cell_map.keys(), dtype=np.int64, count=len(cell_map))
                 costs = np.fromiter(
                     (cost for _dest, cost in cell_map.values()),
-                    dtype=np.float32,
+                    dtype=np.float64,
                     count=len(cell_map),
                 )
-                # Borne verifiee, pas supposee : tout cout du pool est <= au budget auquel le pool
-                # a ete construit, lui-meme <= au budget Advance MAXIMAL = `half_extent`. Un
-                # depassement signifierait que la geometrie de la grille et le pool ne parlent plus
-                # du meme budget — on leve plutot que de clipper (l'espace d'obs est Box(0,1) : un
-                # clip silencieux ecraserait les destinations les plus lointaines a la meme valeur).
-                max_cost = float(costs.max())
-                if max_cost > float(half_extent):
-                    raise ValueError(
-                        f"build_squad_grid: cout de move {max_cost} > demi-etendue {half_extent} "
-                        f"pour squad {active_squad_id} — le pool et la grille ne partagent plus le "
-                        f"meme budget Advance maximal"
-                    )
+                # `normal_budget` vient de la MEME source que celle que `classify_squad_move_type`
+                # compare au cout dans le masque : la frontiere du canal et celle de la regle sont
+                # la meme grandeur, pas deux calculs paralleles. `normalize_move_costs` leve si un
+                # cout sort de [0, demi-etendue] — pas de clip silencieux, qui ecraserait a la meme
+                # valeur toutes les destinations les plus lointaines.
                 grid[GRID_CH_MOVE_COST, cell_idxs // GRID_SIZE, cell_idxs % GRID_SIZE] = (
-                    costs / np.float32(half_extent)
+                    normalize_move_costs(
+                        costs,
+                        get_squad_move_budget(active_squad_id, game_state, "normal"),
+                        half_extent,
+                    )
                 )
 
         return grid
