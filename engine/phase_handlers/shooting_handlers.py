@@ -3837,9 +3837,6 @@ def _get_los_visibility_state(
     _state_cache[((start_col, start_row), (end_col, end_row))] = _result
     return _result
 
-    can_see = visibility_ratio > 0.0
-    return visibility_ratio, can_see
-
 
 def _walls_around_occupied_floor(
     game_state: Dict[str, Any],
