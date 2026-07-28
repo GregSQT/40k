@@ -1196,13 +1196,10 @@ class W40KEngine(gym.Env):
                 "_move_after_shooting_resolved",
                 "_move_after_shooting_distance",
                 "_current_shoot_nb",
-                "_rapid_fire_context_weapon_index",
-                "_rapid_fire_base_nb",
-                "_rapid_fire_shots_fired",
-                "_rapid_fire_bonus_total",
-                "_rapid_fire_rule_value",
-                "_rapid_fire_bonus_shot_current",
-                "_rapid_fire_bonus_applied_by_weapon",
+                # Les 7 champs `_rapid_fire_*` ont ete retires le 2026-07-29 (V11 §0hist.38) :
+                # plus rien ne les ecrit depuis que [RAPID FIRE] 24.30 est resolu a la
+                # constitution du pool d attaques (`_manual_roll_intent`). Purger une cle que
+                # personne ne pose n a aucun effet, mais laisse croire a un etat qui existe.
             )
             for field_name in transient_shoot_fields:
                 if field_name in unit:
@@ -2127,14 +2124,7 @@ class W40KEngine(gym.Env):
                             f"'valid_target_pool_sample': {valid_target_pool_sample}, "
                             f"'shoot_activation_started': {active_unit.get('_shoot_activation_started')}, "
                             f"'manual_weapon_selected': {active_unit.get('_manual_weapon_selected')}, "
-                            f"'shooting_with_close_quarters': {active_unit.get('_shooting_with_close_quarters')}, "
-                            f"'rapid_fire_context_weapon_index': {active_unit.get('_rapid_fire_context_weapon_index')}, "
-                            f"'rapid_fire_base_nb': {active_unit.get('_rapid_fire_base_nb')}, "
-                            f"'rapid_fire_shots_fired': {active_unit.get('_rapid_fire_shots_fired')}, "
-                            f"'rapid_fire_bonus_total': {active_unit.get('_rapid_fire_bonus_total')}, "
-                            f"'rapid_fire_rule_value': {active_unit.get('_rapid_fire_rule_value')}, "
-                            f"'rapid_fire_bonus_shot_current': {active_unit.get('_rapid_fire_bonus_shot_current')}, "
-                            f"'rapid_fire_bonus_applied_by_weapon': {active_unit.get('_rapid_fire_bonus_applied_by_weapon')}"
+                            f"'shooting_with_close_quarters': {active_unit.get('_shooting_with_close_quarters')}"
                             "}"
                         )
             move_pool = len(require_key(self.game_state, "move_activation_pool"))

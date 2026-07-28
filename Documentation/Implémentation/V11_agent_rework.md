@@ -669,6 +669,20 @@ commande ; publier un chiffre repris d'un énoncé coûte la confiance dans tous
 compte se compte **par la propriété visée** (`grep -c '= la_fonction('`, `raise RuntimeError`,
 l'AST), jamais par la phrase qu'on s'attend à lire.
 
+### Un script de mutation qui restaure par `git checkout --` DÉTRUIT le travail non commité (§0.38, 2026-07-29)
+
+La contre-épreuve par mutation consiste à casser le code, relancer, puis restaurer. Restaurer avec
+`git checkout -- <fichier>` marche tant que le fichier est **commité**. Le 2026-07-29, deux salves
+ont tourné sur des correctifs **non encore commités** : chaque « restauration » a silencieusement
+ramené le fichier au dernier commit, effaçant les modifications en cours. Aucune erreur, aucun
+avertissement — le symptôme est apparu plus tard, sous la forme d'un « RESTAURÉ : rouge » en fin de
+script, alors que le vrai dégât était déjà fait.
+
+**Règle** : un harnais de mutation restaure depuis un **snapshot du contenu** pris juste avant la
+mutation, jamais depuis git. Git ignore ce qui n'est pas commité, et c'est précisément ce qu'on est
+en train d'écrire quand on teste. Corollaire : **commiter avant de lancer les mutations** — le
+commit est de toute façon la bonne granularité (un fix = ses tests), et il rend le harnais inoffensif.
+
 ### Une garde « de performance » non mesurée est souvent du travail EN DOUBLE (§0.43, 2026-07-28)
 
 `charge_reachable_max_roll` avait été écrit sous **deux** gardes : la phase de charge, et
@@ -1550,46 +1564,72 @@ silencieux — exactement le contraire de la règle « erreur explicite, jamais 
 > ressemblance de son nom ». Le recensement juste passe par `grep -c 'raise RuntimeError'` dans la
 > fonction, ou par l'AST.
 
-**Hors périmètre, mais bien plus large que « 3 clés à None » — instruit le 2026-07-29.**
+**La chaîne d'affichage des règles d'armes — constatée rompue le 2026-07-29, RÉPARÉE le même jour.**
+
 La première rédaction de cette entrée disait que le seul reliquat consommateur était `w40k_core`
-lisant 3 clés d'affichage. **C'est faux, et l'écart mérite d'être nommé** : le formateur de tir
-du StepLogger (`ai/step_logger.py::_format_replay_style_message`, branche `action_type == "shoot"`)
-a été écrit pour le contrat du MORT et il est, lui, sur un **chemin vif** — c'est lui qui écrit les
-lignes `SHOT` de `step.log`, seule matière de `ai/analyzer.py`, donc de la stratégie de validation
-du training (CLAUDE.md : « --step + analyzer.py + replay »).
+lisant 3 clés d'affichage. **C'était très en dessous de la réalité.** Le formateur de tir du
+StepLogger (`ai/step_logger.py`, branche `action_type == "shoot"`) est écrit pour le contrat du
+MORT et il est, lui, sur un **chemin vif** : c'est lui qui écrit les lignes `SHOT` de `step.log`,
+seule matière de `ai/analyzer.py` — que CLAUDE.md désigne comme la stratégie de validation du
+training — et du replay (`replayParser.ts` lit exactement les mêmes tokens).
 
-Le pont entre le moteur et ce formateur est `w40k_core._build_shot_details`, qui recopie les
-champs listés par **`_SHOT_RECORD_FIELD_MAP`** — **9 champs** : `attackRoll`, `hitResult`,
-`hitTarget`, `strengthRoll`, `strengthResult`, `woundTarget`, `saveRoll`, `saveTarget`,
-`damageDealt`. Tout ce que le vif pose EN PLUS sur le record reste au bord de la route :
+L'information traverse **quatre maillons** : `record moteur → _SHOT_RECORD_FIELD_MAP → ligne
+step.log → regex analyzer`. Chacun avait ses tests ; **aucun ne traversait la jonction**. C'est la
+cause structurelle : trois règles y sont mortes en silence, et la quatrième ajoutée demain serait
+morte pareil.
 
-| Ce que le formateur sait afficher | Champ attendu | Posé par le vif ? | Transmis ? | Effet observable |
-|---|---|---|---|---|
-| `Save [DEVASTATING WOUNDS]` | `save_skipped` + `save_skip_reason` | `saveSkipped` oui, **`saveSkipReason` jamais** | ❌ | une blessure mortelle s'affiche `Save <jet>(<seuil>)` — **un jet de sauvegarde qui n'a pas été appliqué** (cf. la 3ᵉ différence ci-dessus) |
-| `Hit 4(4+->3+) [HEAVY]` | `hit_target_base` + `hit_rule_modifier` | `bs_base`/`heavy_applied` sur l'intent, pas sur le record | ❌ | le bonus HEAVY est **invisible** dans step.log (il est correct dans le combat log PvP, via `_emit_squad_shoot_log`) |
-| `Wound 5(4+) [ABILITÉ]` | `wound_ability_display_name` | jamais | ❌ | une relance accordée par une abilité d'unité est **invisible** |
-| `[RAPID FIRE:X]` | `rapid_fire_bonus_shot` + `rapid_fire_rule_value` | jamais | ❌ | le bonus RAPID FIRE est **invisible** |
+| Règle | Ce qui manquait | Effet mesuré AVANT |
+|---|---|---|
+| [DEVASTATING WOUNDS] 24.10 | `saveSkipReason` jamais posé | la ligne affichait `Save 6(2+)` sur une blessure MORTELLE — ce que le contrôle de l'analyzer classe lui-même en `devastating_wounds_incorrect` ; et il ne le voyait pas, faute de token |
+| [HEAVY] 24.16 | `bs`/`bs_base`/`heavy_applied` n'existaient que noyés dans la chaîne `message` | compteur d'usage à **0 pour toujours** → verdict « NOT USED » permanent |
+| [RAPID FIRE] 24.30 | valeur appliquée jamais propagée | plafond de tirs resté à NB de base → **faux `shoot_over_rng_nb` sur toute activation RAPID FIRE** |
 
-Ces 4 branches de `ai/step_logger.py` sont donc **inatteignables**. Et la chaîne continue côté
-frontend : `replayParser.ts:693` cherche `/Save\s+\[DEVASTATING WOUNDS\]/` dans les lignes de
-step.log — un motif que plus rien n'émet, donc **le replay ne peut pas rendre les blessures
-mortelles**.
+**Ce qui a été livré** (3 commits, après le merge de §0.40 qui a libéré `w40k_core.py`) :
 
-🔴 **Ce n'est PAS une régression de §0.38** : `_attack_sequence_rng` n'avait aucun appelant, donc
-sa sortie n'alimentait déjà plus rien. Le seul chemin qui aurait pu l'acheminer,
-`w40k_core.attack_details` ← `attack_result` ← `all_attack_results` ← `game_state["shoot_attack_results"]`,
-est mort lui aussi : **rien n'a jamais fait d'`append` dans `shoot_attack_results`** (vérifié sur
-`main` comme sur la branche, il n'est jamais qu'assigné à `[]`). L'affichage était donc déjà perdu
-avant cette session — §0.38 n'a fait que le rendre visible en supprimant l'implémentation qui
-entretenait l'illusion que ces champs existaient quelque part.
+1. **Un test de chaîne écrit EN PREMIER, rouge** — `tests/unit/ai/test_step_log_weapon_rule_tokens.py`.
+   Il traverse les 4 maillons avec du code de production à chacun : record du vrai moteur
+   (`build_manual_shoot_allocation`, dés scriptés) → vraies `_build_shot_details` /
+   `_SHOT_RECORD_FIELD_MAP` → vrai `StepLogger.log_action` → vrai `ai.analyzer.parse_step_log`.
+   Il utilise une arme **réelle** portant les trois règles (`sternguard_bolt_rifle` : HEAVY +
+   DEVASTATING WOUNDS + RAPID FIRE:1), ce qui exerce pour de vrai les recoupements de l'analyzer
+   avec l'armurerie — une arme inventée en sortirait silencieusement.
+2. **Le correctif de conformité 24.10** : « no saving throw can be **made** » — le dé de
+   sauvegarde n'est plus tiré du tout sur une blessure critique DEVASTATING (ni relancé, ni posé
+   au record). C'était la 3ᵉ différence mort/vif ci-dessus ; sur ce point précis, **c'est le code
+   mort qui était conforme**. Effet de bord gratuit : `GameLog.tsx` affichait `Svg: ✗ (6)` sur une
+   blessure mortelle, il garde sur `saveRoll !== undefined` → corrigé aussi.
+3. **Les tokens atteignent la ligne** : `saveSkipReason`, `bs`/`bsBase`/`heavyApplied`,
+   `rapidFireApplied` publiés puis transmis.
 
-**Pourquoi ce n'est pas corrigé ici.** Le correctif tient en une entrée de dictionnaire par champ
-dans **`w40k_core.py`** (`_SHOT_RECORD_FIELD_MAP` + un `saveSkipReason` posé côté
-`_resolve_one_manual_wound`), fichier en cours d'édition par l'agent §0.40 pendant toute cette
-session. C'est un blocage d'**édition concurrente**, pas un arbitrage de confort : le travail est
-spécifié ci-dessus, il se pose dès que §0.40 est mergée. À faire dans la même passe que les 7 clés
-`_rapid_fire_*` de `w40k_core` (~L1195-1201, ~L2127-2133) et le champ `rapid_fire_bonus_shot`
-(~L3769/L3966), qui relèvent du même reliquat.
+**DEUX contrôles d'analyzer supprimés, pour la même raison que la LoS ancre-à-ancre et le
+« fight from non-adjacent »** — ils re-dérivaient depuis `step.log` une décision que le moteur
+prend et que le log ne porte pas :
+
+- **Validité de [HEAVY]** : testait `shooter in units_moved/units_advanced`, la borne
+  conservatrice du moteur d'**avant** le 2026-07-26. Le PDF accorde le bonus tant qu'aucune
+  figurine n'a parcouru **plus de 3"**. Prouvé : sur l'ancien code, un tir après un déplacement de
+  **2"** — parfaitement légal — était compté invalide. Non réparable depuis le log (distance de
+  **chemin géodésique par figurine** contre des ancres départ/arrivée). Avec lui disparaissent
+  `weapon_rule_invalid_usage` et `weapon_rule_invalid_first_lines`, désormais sans aucun écrivain.
+- **« Ce tir est-il LE tir bonus ? » de [RAPID FIRE]** : exigeait le marqueur uniquement sur les
+  tirs d'index > NB, distinction héritée du moteur mort qui résolvait les tirs un par un. 24.30
+  augmente le **nombre d'attaques** ; aucune n'est « la » bonus. Ce qui reste est le vrai
+  invariant — le **plafond de tirs** (`shoot_over_rng_nb`), que le marqueur de groupe rend enfin
+  vérifiable.
+
+**Contre-épreuve** : 7 mutations, une par maillon et par règle (moteur ne pose plus / pont ne
+transmet plus, pour chacune des 3 règles, + retour au dé tiré-puis-jeté) → **7/7 rouges**,
+restauration verte.
+
+**Reste ouvert, et c'est une feature, pas une restauration** : le nom d'abilité de relance
+(`wound_ability_display_name`) n'existe **nulle part** dans le vif, et **aucun contrôle
+d'analyzer ne l'attend**. Conséquence à connaître : le combat log ne signale pas qu'une relance a
+été accordée par une abilité d'unité. À décider séparément.
+
+Le volet **[COVER]** est dans le même état (`save_cover_applied`/`save_target_base` non
+transmis), mais aucun contrôle d'analyzer ne le lit — c'est du replay seul, et le formateur y
+attend l'ancien modèle (couvert sur la **sauvegarde**) alors que le vif l'applique sur la
+**touche**. Contrat périmé à part entière, hors de cette tranche.
 
 ### 0.37 Contre-audit des livraisons §0.32–§0.35 — ✅ LIVRÉ (2026-07-28)
 

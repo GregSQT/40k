@@ -146,10 +146,10 @@ Il existe DEUX moteurs de résolution d'attaque :
   ([shared_utils.py:5905-5993](../../engine/phase_handlers/shared_utils.py#L5905-L5993)) + `_resolve_one_manual_wound` (L6038-6114).
 - ~~**Code mort** : `_attack_sequence_rng`~~ — **SUPPRIMÉ le 2026-07-28** (§0hist.38), avec ses
   états orphelins `_rapid_fire_*` côté `shooting_handlers` et le helper mort
-  `_get_rapid_fire_parameter`. **Restent** : les 7 clés `_rapid_fire_*` de `w40k_core`
-  (~L1195-1201 liste de purge, ~L2127-2133 log de debug) et le champ de log
-  `rapid_fire_bonus_shot` (~L3769/L3966), non traités par §0.38 pour cause d'édition
-  concurrente sur ce fichier (§0.40). Les **5** branches-gardes `raise RuntimeError` de
+  `_get_rapid_fire_parameter`. **La chaîne d'affichage a été réparée le 2026-07-29** (après le
+  merge de §0.40, qui a libéré `w40k_core.py`) : [DEVASTATING WOUNDS], [HEAVY] et [RAPID FIRE]
+  atteignent de nouveau `step.log`, donc l'analyzer et le replay ; deux contrôles d'analyzer
+  périmés ont été retirés avec leurs tests de non-régression. Détail en §0hist.38. Les **5** branches-gardes `raise RuntimeError` de
   `execute_action` (`activate_unit`, `shoot`, `select_weapon`, `left_click`, `invalid` — la 3ᵉ
   échappe au grep « squad path expected », son message diffère) sont **conservées** : le dispatcher est vif ([w40k_core.py:6157](../../engine/w40k_core.py#L6157)),
   ces `raise` sont des gardes explicites et les retirer dégraderait l'erreur en
@@ -206,12 +206,13 @@ une règle implémentée (le couvert). Pour les autres : soit les implémenter (
 périmètre à valider), soit retirer leurs canaux d'observation (bruit pur pour PPO), jamais
 le statu quo silencieux.
 
-~~Suppression du code mort (fin de P1)~~ : **FAITE le 2026-07-28** — cf. **[§0hist.38](V11_agent_rework.md#s0.38)**
-pour le détail, les deux écarts de conformité trouvés en migrant les tests, les 13 mutations
-de contre-épreuve et le reliquat `w40k_core` laissé à l'agent §0.40. Le critère « grep
-`_attack_sequence_rng` vide » est atteint sur `engine/ ai/ services/ tests/` ; le critère
-`_rapid_fire_|rapid_fire_bonus_shot` l'est sur `engine/phase_handlers/` et `tests/`, pas
-encore sur `w40k_core.py`.
+~~Suppression du code mort (fin de P1)~~ : **FAITE** — cf. **[§0hist.38](V11_agent_rework.md#s0.38)**
+pour le détail, les deux écarts de conformité trouvés en migrant les tests, les 13 mutations de
+contre-épreuve, et la réparation de la chaîne d'affichage le 2026-07-29 (3 règles, 7 mutations
+supplémentaires). **Les deux critères de §9.2 sont atteints** : `grep _attack_sequence_rng` est
+vide sur `engine/ ai/ services/ tests/`, et `_rapid_fire_` ne subsiste plus que dans un
+commentaire expliquant sa suppression. Le champ de log `rapid_fire_bonus_shot` est désormais
+**produit** par le chemin vif au lieu d'être lu à vide.
 
 <a id="s9.2.1"></a>
 ### 9.2.1 Progression P1 (démarrée 2026-07-24)
