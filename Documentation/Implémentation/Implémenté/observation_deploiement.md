@@ -185,8 +185,9 @@ donc leurs logits sortent de la **conv 1×1 de la carte**, aux cellules `(0, 4..
 égocentrique — pas d'une tête dédiée. Le bloc candidat atteint cette tête par le **conditionnement
 du tronc** (`move_ctx_net`), non par un pointeur. Une tête pointeur de déploiement, jumelle de
 `choice_query_net`, est le prolongement naturel ; elle exigerait de distinguer « cellule de move »
-de « slot de déploiement » sur les mêmes ids, donc de lire la phase dans la policy — décision
-utilisateur, tracée en §0.40.
+de « slot de déploiement » sur les mêmes ids, donc de lire la phase dans la policy. Suivi en
+[`V11_agent_rework.md`](../V11_agent_rework.md#s0.44) **§0.44**, entrée OUVERTE du tableau d'état —
+arbitré le 2026-07-29 : **reporté après le run 4**.
 
 ### 4. ✅ CORRIGÉ (2026-07-29) — le vecteur mesure depuis la zone, comme la grille
 

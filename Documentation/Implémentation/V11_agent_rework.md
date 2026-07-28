@@ -69,6 +69,7 @@ actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist
 | **§0.29** | Scénario SM vs Orks fixed/active + scheduler | 🟢 **USAGE CONFIGURÉ** le 2026-07-28 (`active_ratio_end` 0.0 → **0.8**, commit `acd63b66`) — et c'est le réglage CORRECT, cf. l'asymétrie ci-dessous | 5 | Le run 3 joue une part croissante d'épisodes en `active` (0 % au début → 80 % à la fin, `p_active = start + (end−start)·progress`, [w40k_core.py:934](../../engine/w40k_core.py#L934)). 🔴 **ASYMÉTRIE VÉRIFIÉE le 2026-07-28 23 h 30 — la rampe ne s'applique QU'À L'ENTRAÎNEMENT, jamais à l'éval.** `deployment_mode_schedule.training_only: true` + `_is_training_scenario_context()` qui exige `/scenarios/training/` dans le chemin ([w40k_core.py:693](../../engine/w40k_core.py#L693)) ⇒ les scénarios d'éval (`/scenarios/holdout_regular/`, tous en `deployment_type: "active"`) **jouent TOUJOURS une phase de déploiement**, quelle que soit la rampe. **Donc `active_ratio_end: 0.0` créait un décalage entraînement/éval** : agent entraîné 100 % en placement figé, puis noté sur des parties à déployer. La rampe à 0.8 **aligne** les deux — la remettre à 0 dégraderait la mesure. ✅ **Réserve INTÉGRALEMENT levée le 2026-07-29** : les CINQ défauts de l'observation du déploiement sont corrigés (§0.40 clos ; le point 3, les hexes candidats, porte `obs_size` à 20828). Plus aucun plafond résiduel de ce côté. ⚠️ Le run 3 lancé le 2026-07-28 à 23 h 20 est ANTÉRIEUR à ces correctifs : il a entraîné le déploiement sur une observation fausse. |
 | **§0.42** | P2 « décision agent » | ✅ **MERGÉ** sur `main` — reste la MESURE (run 3 en cours) | — | Détail → §0.42. |
 | **§0.43** | P3-2 « cible de charge » | ✅ **MERGÉ** sur `main` le 2026-07-28 23 h (fast-forward, 8 commits, 0 conflit) — reste la MESURE (run 3 en cours) | — | La branche `v11-p3-2-charge-target` est devenue identique à `main` (supprimable). Détail → §0.43. |
+| **§0.44** | Tête pointeur de **déploiement** — les slots 4-8 n'ont pas de tête dédiée | 🟠 **OUVERT** — arbitré le 2026-07-29 : **REPORTÉ APRÈS LE RUN 4**, décision utilisateur | **7** (après le run 4) | §0.40 a donné à l'agent la description des 5 candidats de déploiement, mais **pas de quoi les comparer proprement** : les ids 4-8 tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`), donc leurs logits sortent de la **conv 1×1 de la carte**, aux cellules `(0, 4..8)` de la fenêtre égocentrique — pas d'une tête dédiée. Le bloc `deploy_cand_*` n'atteint cette tête que par le **conditionnement du tronc** (`move_ctx_net`), donc indirectement. Prochaine action : ajouter un `deploy_query_net`, jumeau de `choice_query_net`, qui score les 5 embeddings de candidats — ce qui oblige à distinguer « cellule de move » et « slot de déploiement » sur les mêmes ids, donc à lire la phase dans la policy. ⚠️ Touche l'architecture de la policy : **incompatible avec un run en cours** (workers d'éval en `spawn`, cf. §0bis). N'invalide PAS `obs_size`. Détail → §0.40 en §0hist. |
 | **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)). T2→T5 **jamais revérifiés** : ne pas s'appuyer sur leurs ✅ sans relecture. ⚠️ Sa **section** est restée en §0hist (elle y était déjà avant l'épuration) alors que sa part T2→T5 est ouverte — laissée en place plutôt que scindée, pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
 
 🟢 **TRANCHÉ le 2026-07-28 soir (arbitrage utilisateur) : `bot_eval_freq = 2000` ASSUMÉ**, pour
@@ -133,6 +134,34 @@ mêlée). Cf. la réserve de mesure en [§9.3bis](V11_phaseA.md#s9.3bis).
 **Effet de bord corrigé au passage** (trouvé par mesure, pas par lecture) : `rule_choice` était
 journalisé DEUX fois dans step.log — une écriture directe correcte, plus une tentative de flush qui
 échouait en silence sur une clé mal orthographiée. Détail en [§9.3bis](V11_phaseA.md#s9.3bis).
+
+<a id="s0.44"></a>
+### 0.44 Tête pointeur de déploiement — les slots 4-8 n'ont pas de tête dédiée — 🟠 OUVERT, REPORTÉ APRÈS LE RUN 4 (2026-07-29)
+
+**En une phrase.** [§0.40](#s0.40) a donné à l'agent la **description** des 5 candidats de
+déploiement ; il lui manque encore de quoi les **comparer** proprement.
+
+**Le constat, vérifié dans le code.** Les ids d'action `4-8` tombent dans la plage des cellules de
+move (`MOVE_CELL_BASE = 0`, `MOVE_CELL_COUNT = 1024`). Leurs logits sortent donc de la **conv 1×1
+de la carte** (`_move_logits`), aux cellules `(0, 4..8)` de la fenêtre égocentrique — des cellules
+qui n'ont aucun rapport avec les hexes candidats. Aucune tête ne lit les embeddings du bloc
+`deploy_cand_*` : celui-ci n'atteint la décision que par le **conditionnement du tronc**
+(`move_ctx_net`, dont la non-linéarité permet bien de réordonner les cellules entre elles, mais
+indirectement).
+
+**Ce qu'il faudrait faire.** Un `deploy_query_net`, jumeau de `choice_query_net` : le tronc émet une
+requête, on la produit scalairement contre les 5 embeddings de candidats déjà calculés par
+`deploy_cand_encoder`, et ces 5 logits **remplacent** ceux des cellules `4-8`. Le point dur est là :
+un même id signifie « cellule de move » en phase move et « slot de déploiement » en déploiement, le
+masque seul les distingue aujourd'hui. La policy devrait donc lire la **phase** (le one-hot
+`phase_deployment` de `global_bin`) pour choisir laquelle des deux têtes alimente ces colonnes.
+
+**Arbitrage utilisateur du 2026-07-29 : REPORTÉ APRÈS LE RUN 4.** Le bloc d'observation est déjà un
+gain net (l'agent ne voyait RIEN de ses candidats auparavant), et ce chantier-ci touche
+l'**architecture de la policy** — donc ⛔ **incompatible avec un run en cours** : les workers d'éval
+démarrent en `spawn` et ré-importent le code depuis le disque (leçon §0bis, qui a tué les runs 1
+et 2). Il n'invalide en revanche PAS `obs_size` : le bloc candidat reste tel quel, seule la tête
+change.
 
 <a id="s0.38"></a>
 ### 0.38 Code mort `_attack_sequence_rng` — la 2ᵉ moitié de P1 n'a jamais été faite — 🟠 OUVERT (2026-07-28)
@@ -1379,7 +1408,8 @@ contrat d'observation) : les ids `4-8` tombent dans la plage des cellules de mov
 par le **conditionnement du tronc** (`move_ctx_net`, qui peut réordonner les cellules entre elles),
 non par un pointeur. Une **tête pointeur de déploiement**, jumelle de `choice_query_net`, est le
 prolongement naturel ; elle exigerait de distinguer « cellule de move » de « slot de déploiement »
-sur les mêmes ids, donc de lire la phase dans la policy. Décision utilisateur.
+sur les mêmes ids, donc de lire la phase dans la policy. ➡️ **Suivi en [§0.44](#s0.44)** (entrée
+OUVERTE du tableau d'état) : arbitré le 2026-07-29, **reporté après le run 4**.
 
 **Dette fermée au passage (même fichier).** `engine/observation_builder.py` enveloppait
 `get_fighting_models` d'un `except Exception` qui traduisait TOUTE erreur en « aucune figurine ne

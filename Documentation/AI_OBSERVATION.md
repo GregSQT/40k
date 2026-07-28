@@ -417,7 +417,8 @@ conv 1×1 de la carte, aux cellules `(0, 4..8)` de la fenêtre égocentrique. Ce
 tête par le **conditionnement du tronc** (`move_ctx_net`, qui peut réordonner les cellules entre
 elles), pas par un pointeur sur les candidats. Une tête pointeur de déploiement — le jumeau de
 `choice_query_net` — est le prolongement naturel ; elle touche l'architecture de la policy, pas le
-contrat d'observation, et reste à arbitrer.
+contrat d'observation. Suivi en [`V11_agent_rework.md`](Implémentation/V11_agent_rework.md#s0.44)
+**§0.44** — arbitré le 2026-07-29 : **reporté après le run 4**.
 
 ### Les blocs logiques A→E, et ce qu'ils sont devenus
 
