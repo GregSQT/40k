@@ -63,6 +63,9 @@ absente (stratagèmes, CP, FNP, transports, etc. restent hors scope). Prérequis
 > ci-dessus sont périmés d'autant. Détail, preuves et mesure de coût → **§9.4bis** et
 > **[§0.43](V11_agent_rework.md#s0.43)**. ⚠️ Livré sur la branche `v11-p3-2-charge-target`,
 > **PAS mergé sur `main`** : le merge est une décision utilisateur, à ne pas prendre pendant un run.
+> 🔴 Et la bascule de branche elle-même ne l'est pas non plus : c'est elle qui a tué le 2ᵉ run
+> §0.14 du 2026-07-28. Ce que les workers `spawn` relisent est le **working tree**, pas `main` —
+> cf. la leçon durcie en [§0bis](V11_agent_rework.md#s0bis).
 
 Revérification ligne à ligne contre le code (la première ; [§0.19](V11_agent_rework.md#s0.19) ne l'avait jamais menée, cf. sa
 correction). **Aucune des cinq sous-parties n'est réellement en place**, malgré les marqueurs
