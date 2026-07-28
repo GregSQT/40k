@@ -1,8 +1,8 @@
 """closest_target_penetration au TIR dans le chemin VIF (_manual_roll_intent).
 
 Regle projet (config/unit_rules.json) : « When this unit makes a shooting attack at the
-closest eligible unit, add 1 to the weapon's penetration. » Portee du code MORT
-(_attack_sequence_rng, shooting_handlers) vers le chemin VIF partage gym/PvP.
+closest eligible unit, add 1 to the weapon's penetration. » Portee du code mort de tir
+(supprime en V11 §0.38) vers le chemin VIF partage gym/PvP.
 
 Convention AP NEGATIF (cf. save_threshold) : +1 penetration => ap -= 1 => save degradee.
 

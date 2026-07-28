@@ -6,8 +6,8 @@ that unit equal to the number of [HAZARDOUS] weapons you selected in the Select 
 PDF 06.03 : « roll one D6 : on a 1-2, that roll fails and that unit suffers 1 mortal wound, or
 3 mortal wounds instead if each model in that unit is a MONSTER/VEHICLE model. »
 
-Ce fichier portait auparavant des tests de TIR appeles sur le code mort
-`_attack_sequence_rng` (V11 §0.38) : ils dupliquaient test_special_rules_e2e.py, ne
+Ce fichier portait auparavant des tests de TIR appeles sur le code mort de
+`shooting_handlers` (supprime en V11 §0.38) : ils dupliquaient test_special_rules_e2e.py, ne
 touchaient jamais la melee malgre leur nom, et surtout le mort implementait HAZARDOUS
 CONTRE le PDF — un jet PAR ATTAQUE, declenche sur 1 seulement, sans blessure mortelle
 appliquee. Le volet TIR est verrouille par test_hazardous.py ; ce fichier verrouille le

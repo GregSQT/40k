@@ -11,7 +11,7 @@ Chaque regle prise isolement est deja couverte sur le vif : les deux abilites pa
 test_reroll_towound_shoot.py, [TWIN-LINKED] au niveau du socle par
 test_weapon_rules_attack_sequence.py, `closest_target_penetration` par
 test_closest_target_penetration_shoot.py. Ce fichier remplace la version qui appelait le
-code mort `_attack_sequence_rng` (V11 §0.38) et qui ne faisait que les dupliquer.
+code mort de tir (supprime en V11 §0.38) et qui ne faisait que les dupliquer.
 
 Verrouille aussi la PORTEE de chaque regle : une abilite `to wound` ne doit toucher ni le
 jet de touche ni celui de sauvegarde.

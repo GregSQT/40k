@@ -224,7 +224,7 @@ class TestShootingTransition:
         assert "2" not in gs["shoot_activation_pool"]
 
     # NOTE : « touche + blessure + sauvegarde ratée → dégâts » a quitté ce fichier avec la
-    # suppression du code mort `_attack_sequence_rng` (V11 §0.38). L'assertion vit désormais
+    # suppression du code mort de tir de `shooting_handlers` (V11 §0.38). L'assertion vit désormais
     # sur le chemin VIF, dans test_shoot_attack_sequence.py — ce fichier ne couvre que les
     # TRANSITIONS de phase, pas la résolution des attaques.
 

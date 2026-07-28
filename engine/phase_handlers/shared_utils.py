@@ -7321,8 +7321,8 @@ def _manual_roll_intent(
     attacker_unit = get_unit_by_id(game_state, str(attacker["squad_id"]))
     # closest_target_penetration (regle projet unit_rules.json) : +1 de penetration (AP-1,
     # convention AP negatif cf. save_threshold) quand l unite tire sur la cible ELIGIBLE la
-    # plus proche. Porte du code MORT _attack_sequence_rng (shooting_handlers) vers le chemin
-    # VIF. La distance se mesure au niveau ESCOUADE (attacker["squad_id"]) : « closest eligible
+    # plus proche. Seule implementation depuis la suppression du code mort de tir (V11 §0.38).
+    # La distance se mesure au niveau ESCOUADE (attacker["squad_id"]) : « closest eligible
     # unit » est une determination d unite (01.04, bord-a-bord via le selecteur `ranged`), pas
     # par figurine — attacker est ici une FIGURINE (models_cache), d ou le squad_id explicite.
     if attacker_unit is not None and _unit_has_rule_effect(attacker_unit, "closest_target_penetration"):

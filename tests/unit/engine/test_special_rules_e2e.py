@@ -6,7 +6,7 @@ le socle de la boucle -> test_weapon_rules_attack_sequence.py. Ce fichier verrou
 qu aucun d eux ne voit : PLUSIEURS regles portees par la MEME activation de tir, resolues
 dans le meme passage `build_manual_shoot_allocation`.
 
-Il remplace la version qui appelait le code mort `_attack_sequence_rng` (V11 §0.38).
+Il remplace la version qui appelait le code mort de tir (supprime en V11 §0.38).
 Deux ecarts du mort contre les PDF ont ete constates en migrant, et ne sont donc PAS
 reportes ici — c est le vif qui a raison :
   - [HAZARDOUS] 24.15 : le mort jetait UN de PAR ATTAQUE, pendant la sequence, declenchait

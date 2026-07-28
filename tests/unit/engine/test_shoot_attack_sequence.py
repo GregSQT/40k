@@ -1,7 +1,7 @@
 """Sequence d attaque au TIR, BOUT-EN-BOUT sur le chemin VIF (05 Attack sequence).
 
-Porte du code MORT `_attack_sequence_rng` (shooting_handlers) vers le chemin partage
-gym/PvP : `build_manual_shoot_allocation` -> `_manual_roll_intent` ->
+Porte du code mort de tir (`shooting_handlers`, supprime en V11 §0.38) vers le chemin
+partage gym/PvP : `build_manual_shoot_allocation` -> `_manual_roll_intent` ->
 `attack_sequence.roll_attack_pool` -> `_resolve_one_manual_wound`.
 
 Ce que ce fichier verrouille, et que le code mort ne prouvait pas : la sequence complete
