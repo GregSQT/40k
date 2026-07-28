@@ -63,7 +63,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | **§0.30** | Encodeur d'entités partagé + tête pointeur (et 6 trous trouvés le 2026-07-26) | 🟢 **LIVRÉ (2026-07-26)** — T-A→T-F faits ; ne bloque plus §0.14 | **1** | Vérification demandée par l'utilisateur après §9.2.5. **6 trous trouvés**, dont : une escouade ennemie **invisible ET intirable** dans 6 épisodes sur 10 (5 slots figés pour 6 escouades mesurées) ; le gym ignore les types de tir **10.05 / 10.06** ; au tir le gym déclare **une seule arme (index 0), une seule cible** — violation de **04.01** et **04.02** ; l'heuristique d'arme de mêlée a été **périmée par P1** (ignore ANTI-X, DEVASTATING, MELTA…). Décisions actées : renommage `PISTOL` → `CLOSE_QUARTERS`, encodeur d'entité **partagé** (unités+armes, amies+ennemies), **K=20 unités / K=10 armes**, **tête pointeur** pour le ciblage, retrain accepté. **TOUT est livré le 2026-07-26** (T-A→T-F + §1.9 + audit final) : `obs_size` 199 → **20166** *(valeur du 2026-07-26 ; état courant **20545**, cf. §0.31)*, espace d'action 1047 → **1062**. Résidu **§1.9** (volet MONSTER/VEHICLE de 10.06 côté PvP/mono) **refermé le 2026-07-26** après validation PvP de T-C par l'utilisateur — plus aucun résidu ouvert. Détail complet, mesures et journal → **[`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)**. |
 | **§0.31** | Complétude de l'observation (objectifs situés, règles d'unité) + cache des profils d'armes | 🟢 **LIVRÉ (2026-07-27)** — 3 commits, 13 tests + mutations | **1** | Audit demandé par l'utilisateur (« l'obs est-elle complète, branchée, optimale ? »). Branchement **intact**. **2 trous fermés** : (1) les objectifs n'avaient **aucune position** — mesuré, **1 à 2 sur 5** tombaient dans la fenêtre de grille alors que 15 actions de zone les désignent (`ab9baa56`) ; (2) les **règles d'unité** étaient invisibles du pipeline squad, 13 bits d'effet par entité, extinction 19.04 verrouillée (`0fb94a01`). **Perf** : profils d'armes mémoïsés, `build_squad_observation` **2,86 → 1,69 ms** (`7a84e124`). **K larges GARDÉS** (arbitrage utilisateur, généralisation future) — coût mesuré : **0 paramètre**, **0 ms de construction**, 1,39× sur le forward. `obs_size` **20166 → 20601** ⇒ le run §0.14 doit être un `--new` postérieur à ces commits. Détail → **§0.31**. |
 | **§0.32** | Optimalité de l'obs ET de la TÊTE d'action — audit du 2026-07-28 | 🟠 **OUVERT** — 6 constats ; **lot obs T-H/T-I/T-J LIVRÉ le 2026-07-28** (`deab7e03`, 13 tests + mutations, `obs_size` 20601 → **20626**) ; **lot canaux T-K/T-L LIVRÉ le 2026-07-28** (`GRID_CHANNELS` 7 → **9**, 11 tests + mutations, **0 appel de pool supplémentaire mesuré**, `obs_size` inchangé) ; reste T-G (tête) | **2** (après le lancement du run §0.14 : T-G change la policy, donc un run en cours reste valide comme baseline) | Question de l'utilisateur : « mon obs est-elle optimale ? ». ⚠️ **Une 1re version de cette entrée affirmait « aucun manque de contenu, seulement la forme et l'aval » — FAUX et retiré le 2026-07-28** : la GRILLE a deux manques de contenu, **T-K** (le coût géodésique par cellule, déjà calculé pour le masque puis jeté — c'est lui qui arbitre normal vs advance, donc le tir et la charge) et **T-L** (l'escouade ACTIVE est peinte dans le canal allié, indistinguable des autres escouades amies sur une grille pourtant égocentrique). Ordre corrigé : lot obs (T-H/T-I/T-J) → canaux (T-K/T-L) → tête (T-G), parce que les canaux changent `GRID_CHANNELS`, donc l'entrée du CNN. **T-G (majeur)** : les 1024 logits de cellule de move sortent d'un `Linear` dense ([`pointer_policy.py:112`](../../ai/pointer_policy.py#L112)) et la carte CNN est aplatie avant la tête ([`spatial_extractor.py:228`](../../ai/spatial_extractor.py#L228)) — c'est **le défaut exact que la tête pointeur a corrigé pour 20 slots de tir, laissé sur 97 % de l'espace d'action**. **T-H** : une figurine sur le centroïde et non engagée a sa ligne `self_models_*` entièrement nulle ⇒ le masque de présence déduit par `abs().sum() > 0` la compte **absente**. **T-I** : `col_rel`/`row_rel` sont en coordonnées **offset brutes** alors que la grille et les directions d'objectif travaillent dans la projection `_hex_center`. **T-J** : `deployment` et `command` partagent la valeur `phase = 0.0`, et le décodage a un `.get(…, 0.0)`. Détail, mesures et périmètre → **§0.32**. |
-| **§0.33** | Rollout buffer = **46,9 Go** pour **39 Go de RAM** sur les profils à 48 envs | 🔴 **BLOQUANT le run §0.14** — mesuré le 2026-07-28, aucune ligne écrite | **1** (avant tout run) | Le dimensionnement RAM de `move_action_space_spatial_rework.md` §8.3 ne compte que la GRILLE (14,49 Go à 9 canaux, « sous la limite »). Depuis §0.30/§0.31 le **vecteur pèse plus lourd que la grille** (20 626 contre 9 216 floats) et vit dans le même `DictRolloutBuffer`, alloué **d'un bloc au premier `learn()`**. Mesuré sur la config réelle : **116,6 Ko par transition** ⇒ `x5_append` et `x1_debug` (`n_envs=48 × n_steps=8192` = 393 216 transitions) = **46,9 Go**, contre **39 Go physiques / 29 Go disponibles** — l'allocation échoue avant le premier pas. `x1`, `x5_new` et `x5_debug` (`n_envs=8`) = **7,8 Go**, qui passent. ⚠️ **La ligne §0.14 dit « run x5_new, 48 envs » alors que le profil `x5_new` porte `n_envs=8`** : vérifier quel profil et quel override sont réellement lancés AVANT de relancer. Leviers (non tranchés, arbitrage utilisateur) : baisser `n_steps`, baisser `n_envs`, ou stocker la grille en `uint8`/`bool` par canal (elle est binaire sauf `level` et `move_cost`). |
+| **§0.33** | Rollout buffer = **46,9 Go** pour **39 Go de RAM** sur les profils à 48 envs | 🟠 **NE BLOQUE PAS le run lancé** (`--training-config x1` = 8 envs = 7,8 Go) ; bloque `x5_append` / `x1_debug`. **Arbitrage 2026-07-28 : aucun changement de config** | — (rouvrir avant tout run à 48 envs) | Le dimensionnement RAM de `move_action_space_spatial_rework.md` §8.3 ne compte que la GRILLE (14,49 Go à 9 canaux, « sous la limite »). Depuis §0.30/§0.31 le **vecteur pèse plus lourd que la grille** (20 626 contre 9 216 floats) et vit dans le même `DictRolloutBuffer`, alloué **d'un bloc au premier `learn()`**. Mesuré sur la config réelle : **116,6 Ko par transition** ⇒ `x5_append` et `x1_debug` (`n_envs=48 × n_steps=8192` = 393 216 transitions) = **46,9 Go**, contre **39 Go physiques / 29 Go disponibles** — l'allocation échoue avant le premier pas. `x1`, `x5_new` et `x5_debug` (`n_envs=8`) = **7,8 Go**, qui passent. ⚠️ **La ligne §0.14 dit « run x5_new, 48 envs » alors que le profil `x5_new` porte `n_envs=8`** : vérifier quel profil et quel override sont réellement lancés AVANT de relancer. ⚠️ La proposition « `n_steps` 8192 → 1024 » a été formulée puis **retirée** : le nombre de pas de gradient ne dépend pas de `n_steps`, et les ablations CoreAgent (30k ép., 48 envs) donnent 8192 pour **inférieur** à 16384. Détail et leviers réels → §0.33. |
 | ~~**§0.22**~~ | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **CLOS le 2026-07-21 — décision (B) STOP à L1+L_bbox** | — | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) livrés et commités** (`ff2293e0`, `6f268d38`) — gain ovale **1,49×**, round10 1,78×, pool strictement identique ; A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. **Reliquat NON poursuivi** (ratio gain/risque mauvais, mesuré) : BFS wavefront réfuté (plus lent à move 12), L2b runs NumPy réfuté (1,1× net + complexité), numba écarté (risque segfault sur run 36 h). ⚠️ **MAJ 2026-07-22 : ce coût perf est désormais INCONTOURNABLE** — le fix de conformité move §0.25 REQUIERT une érosion géodésique par-figurine, exactement le coût que §0.22 combattait. Il refait surface en §0.27. Détail complet → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§10, §11) ; leçon de méthode → §0bis. |
 
 **MAJ 2026-07-26 : §0.27 est CORRIGÉ et §9.2.5 (observation des règles d'armes) est LIVRÉ.**
@@ -118,11 +118,44 @@ avant le premier pas — ce n'est pas une lenteur, c'est un `MemoryError` imméd
    `n_envs=8`. **Vérifier le profil ET les overrides CLI réellement lancés** avant de conclure
    quoi que ce soit d'un OOM ou de son absence.
 
-**Leviers, non tranchés (arbitrage utilisateur).** Baisser `n_steps` (8192 est très élevé ;
-il fixe l'horizon de collecte, pas la qualité du gradient à lui seul) · baisser `n_envs` ·
-stocker la grille en `uint8` (6 de ses 9 canaux sont binaires ; `level` et `move_cost` ne le sont
-pas, un quantifié 8 bits y perdrait de la résolution — à décider, pas à supposer). Aucun de ces
-leviers n'est gratuit : ils changent la statistique du run, donc la baseline.
+**ARBITRAGE DU 2026-07-28 : aucun changement.** La commande réellement lancée porte
+`--training-config x1` ⇒ **8 envs, 7,8 Go**, dans les 29 Go disponibles. §0.33 ne bloque **pas**
+ce run. Il ne se déclenche que sur `x5_append` et `x1_debug`.
+
+⚠️ **Une recommandation « `n_steps` 8192 → 1024 » a été formulée puis RETIRÉE le même jour. La
+retenir aurait dégradé le run.** Ses deux erreurs, à ne pas refaire :
+
+1. **Argument faux.** Elle promettait « 8× plus de mises à jour, donc plus d'apprentissage ». Le
+   nombre de PAS DE GRADIENT d'un run ne dépend pas de `n_steps` : il vaut
+   `transitions_totales × n_epochs / batch_size`. `n_steps` n'arbitre que **fraîcheur contre
+   variance** — des avantages estimés sur moins de données, et donc plus bruités.
+2. **Preuve contraire déjà au dossier, non consultée** :
+   [`config/agents/CoreAgent/Training_logs.md`](../../config/agents/CoreAgent/Training_logs.md)
+   — ablations à 30k épisodes, `n_envs=48`, un seul hyperparamètre changé par run :
+
+   | Changement | Robust score | Verdict noté à l'époque |
+   |---|---|---|
+   | baseline `n_steps=16384` | **0,4857** | BEST |
+   | `n_steps` → 8 192 | 0,3808 | « rollout **trop petit** → instabilité » |
+   | `n_steps` → 32 768 | 0,4345 | mieux que 8192, sous la baseline |
+   | `batch_size` → 2048 | 0,3281 | « catastrophique, trop peu de pas de gradient par rollout » |
+
+   Sur ce projet, la direction mesurée est donc l'INVERSE : **plus gros, mieux**, avec un optimum
+   à 16 384. C'est sur CoreAgent — autre pipeline, autre observation — donc ce n'est pas une
+   preuve transférable ; c'est la **seule** preuve disponible, et elle contredit la proposition.
+
+**Le vrai enseignement de §0.33.** Le régime validé de CoreAgent — `48 × 16 384` = 786 432
+transitions — demanderait **93,9 Go** avec l'observation actuelle. **Il est devenu structurellement
+inatteignable.** Sous 29 Go, le plafond à 48 envs est `n_steps ≈ 2048` (11,7 Go) à 3072 (17,6 Go),
+soit **5 à 8× sous l'optimum mesuré**. Autrement dit : tout run à 48 envs sortira du régime validé,
+et son hyperparamétrage devra être **re-tuné**, pas hérité. Ce n'est pas un réglage à trancher au
+jugé — c'est un screening à refaire, du type de celui de
+[`TUNING_NUIT.md`](../../config/agents/CoreAgent/TUNING_NUIT.md), quand le pipeline sera stable.
+
+**Leviers, si un run à 48 envs devient nécessaire** (aucun n'est gratuit — tous déplacent la
+baseline) : baisser `n_envs` · baisser `n_steps` en sachant qu'on quitte l'optimum mesuré ·
+stocker la grille en `uint8` — qui ne suffit pas seul : elle ne pèse que 31 % de la transition,
+donc 46,9 → **36,1 Go**, encore au-dessus des 29 Go disponibles.
 
 ### 0.32 Optimalité de l'observation ET de la tête d'action — audit du 2026-07-28 — 🟠 OUVERT (T-H/T-I/T-J ✅ LIVRÉS)
 
