@@ -315,6 +315,28 @@ def test_missing_model_count_at_start_raises():
         _obs(eng)
 
 
+def test_missing_centroid_raises():
+    """Aucun repli sur le centroïde (résidu fermé le 2026-07-28) : un repli sur l'ancre de
+    l'unité déplacerait l'ORIGINE T-I de toute l'observation en silence sur un cache incomplet."""
+    from shared.data_validation import ConfigurationError
+
+    eng = _make_engine([_unit_cfg(1, 1, [(30, 20)]), _unit_cfg(2, 2, [(90, 20)])])
+    del eng.game_state["squad_cache"]["1"]["centroid_col"]
+    with pytest.raises(ConfigurationError, match="centroid_col"):
+        _obs(eng)
+
+
+def test_missing_hp_cur_raises():
+    """Aucun repli sur les PV d'escouade : `.get("HP_CUR", 0)` disait « escouade à 0 PV » pour
+    une entrée `units_cache` incomplète, sans rien lever."""
+    from shared.data_validation import ConfigurationError
+
+    eng = _make_engine([_unit_cfg(1, 1, [(30, 20)]), _unit_cfg(2, 2, [(90, 20)])])
+    del eng.game_state["units_cache"]["1"]["HP_CUR"]
+    with pytest.raises(ConfigurationError, match="HP_CUR"):
+        _obs(eng)
+
+
 def test_zero_model_count_at_start_raises():
     """`max(1, ...)` transformait un 0 de cache en `model_count_ratio` > 1."""
     eng = _make_engine([_unit_cfg(1, 1, [(30, 20), (30, 21)]), _unit_cfg(2, 2, [(90, 20)])])

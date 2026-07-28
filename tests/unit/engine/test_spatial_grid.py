@@ -201,7 +201,7 @@ def test_normalize_move_costs_puts_the_frontier_on_the_same_constant_for_every_u
 
     # (M, H) : MOVE 4" a 14" en x1 et en x5, H = M + 6" x inches_to_subhex.
     for normal, half in ((4, 10), (6, 12), (14, 20), (20, 50), (30, 60), (70, 100)):
-        got = float(normalize_move_costs(np.array([normal]), normal, half)[0])
+        got = float(normalize_move_costs(np.array([normal]), normal, half, engaged=False)[0])
         assert got == pytest.approx(MOVE_COST_ADVANCE_THRESHOLD, abs=1e-6), (
             f"M={normal}, H={half} : frontiere a {got} au lieu de {MOVE_COST_ADVANCE_THRESHOLD}"
         )
@@ -215,7 +215,7 @@ def test_normalize_move_costs_spans_the_unit_interval_and_stays_monotonic():
 
     normal, half = 30, 60
     costs = np.arange(0, half + 1, dtype=np.float64)
-    out = normalize_move_costs(costs, normal, half)
+    out = normalize_move_costs(costs, normal, half, engaged=False)
     assert float(out[0]) == pytest.approx(0.0, abs=1e-6)
     assert float(out[-1]) == pytest.approx(1.0, abs=1e-6)
     assert float(out.min()) >= 0.0 and float(out.max()) <= 1.0
@@ -231,10 +231,35 @@ def test_normalize_move_costs_with_a_null_normal_budget_calls_everything_advance
 
     from engine.spatial_grid import MOVE_COST_ADVANCE_THRESHOLD, normalize_move_costs
 
-    out = normalize_move_costs(np.array([0.0, 1.0, 20.0]), 0, 20)
+    out = normalize_move_costs(np.array([0.0, 1.0, 20.0]), 0, 20, engaged=False)
     assert float(out[0]) == pytest.approx(0.0, abs=1e-6)
     assert float(out[1]) > MOVE_COST_ADVANCE_THRESHOLD
     assert float(out[2]) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_normalize_move_costs_engaged_squad_is_encoded_above_the_threshold():
+    """Escouade ENGAGEE : tout mouvement est un Fall Back (09.05) qui coute le tir et la charge.
+
+    L'encoder sous le seuil disait « je garde mon tir » — FAUX : le CNN aurait du croiser avec
+    le canal EZ pour le corriger, exactement le croisement que ce canal existe pour eviter. La
+    semantique du seuil est uniforme : au-dessus = bouger ici coute le tir.
+    """
+    import numpy as np
+
+    from engine.spatial_grid import MOVE_COST_ADVANCE_THRESHOLD, normalize_move_costs
+
+    normal, half = 6, 12
+    costs = np.array([0.0, 1.0, 3.0, 6.0])
+    out = normalize_move_costs(costs, normal, half, engaged=True)
+    # L'origine (rester sur place = pas de Fall Back) reste a 0, non peinte.
+    assert float(out[0]) == pytest.approx(0.0, abs=1e-6)
+    # Toute cellule de cout > 0 est au-dessus du seuil, monotone, < 1 (bornee par M < H).
+    assert all(float(v) > MOVE_COST_ADVANCE_THRESHOLD for v in out[1:])
+    assert all(float(b) > float(a) for a, b in zip(out[1:], out[2:]))
+    assert float(out[-1]) < 1.0
+    # Contre-epreuve : la meme escouade NON engagee garde ces couts sous le seuil.
+    free = normalize_move_costs(costs, normal, half, engaged=False)
+    assert all(float(v) <= MOVE_COST_ADVANCE_THRESHOLD for v in free)
 
 
 def test_normalize_move_costs_absorbs_the_float_epsilon_at_the_exact_budget():
@@ -249,9 +274,9 @@ def test_normalize_move_costs_absorbs_the_float_epsilon_at_the_exact_budget():
 
     from engine.spatial_grid import normalize_move_costs
 
-    out = normalize_move_costs(np.array([12.000000000000005]), 6, 12)
+    out = normalize_move_costs(np.array([12.000000000000005]), 6, 12, engaged=False)
     assert float(out[0]) == pytest.approx(1.0, abs=1e-6)
-    out = normalize_move_costs(np.array([-1e-15]), 6, 12)
+    out = normalize_move_costs(np.array([-1e-15]), 6, 12, engaged=False)
     assert float(out[0]) == pytest.approx(0.0, abs=1e-6)
 
 
@@ -262,12 +287,12 @@ def test_normalize_move_costs_raises_instead_of_clipping():
     from engine.spatial_grid import normalize_move_costs
 
     with pytest.raises(ValueError, match="cout hors de"):
-        normalize_move_costs(np.array([61.0]), 30, 60)
+        normalize_move_costs(np.array([61.0]), 30, 60, engaged=False)
     with pytest.raises(ValueError, match="cout hors de"):
-        normalize_move_costs(np.array([60.001]), 30, 60)  # au-dela de la tolerance d'arrondi
+        normalize_move_costs(np.array([60.001]), 30, 60, engaged=False)  # au-dela de la tolerance d'arrondi
     with pytest.raises(ValueError, match="cout hors de"):
-        normalize_move_costs(np.array([-1.0]), 30, 60)
+        normalize_move_costs(np.array([-1.0]), 30, 60, engaged=False)
     with pytest.raises(ValueError, match="budget normal"):
-        normalize_move_costs(np.array([10.0]), 60, 60)
+        normalize_move_costs(np.array([10.0]), 60, 60, engaged=False)
     with pytest.raises(ValueError, match="demi-etendue invalide"):
-        normalize_move_costs(np.array([0.0]), 0, 0)
+        normalize_move_costs(np.array([0.0]), 0, 0, engaged=False)

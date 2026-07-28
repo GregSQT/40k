@@ -4782,7 +4782,7 @@ def charge_build_valid_plan(
     squad_id: str,
     target_squad_ids: List[str],
     charge_roll: int,
-) -> Optional[List[Tuple[str, int, int]]]:
+) -> Optional[List[Tuple[str, int, int, int]]]:
     """Plan de charge multi-figurines (transaction atomique, aucune ecriture cache).
 
     Ordre de traitement : par index de figurine croissant.
@@ -4793,8 +4793,16 @@ def charge_build_valid_plan(
     (regle officielle : charge legale exige ER apres deplacement). Coherency verifiee
     sur le plan final.
 
-    Retourne le plan ou None si invalide (atomic : aucune fig deplacee).
-    Le caller appelle commit_move(plan, gs, 'charge') sur succes.
+    NIVEAU ET DESCENTE (§0.34, facettes reproduites sur la charge) : une charge est un move
+    (11.04 EFFECT « moves as described in Moving (03) ») — la distance verticale descendue
+    s'ajoute donc au jet (13.06 Moving Vertically), meme deduction conservatrice que le squad
+    move rigide (`squad_descent_penalty_subhex`, max de la fig la plus haute). Et le plan PORTE
+    le niveau d'arrivee (sol, `SQUAD_RIGID_MOVE_DESTINATION_LEVEL`) : sans lui, `commit_move`
+    garde le niveau courant et une fig partie d'un etage restait marquee a l'etage sur une case
+    sans plancher -> `floor_height_at` levait a la mise a jour du cache.
+
+    Retourne le plan (4-uplets ``(mid, col, row, level)``) ou None si invalide (atomic :
+    aucune fig deplacee). Le caller appelle commit_move(plan, gs, 'charge') sur succes.
     """
     if charge_roll <= 0:
         return None
@@ -4808,7 +4816,11 @@ def charge_build_valid_plan(
         return None
 
     ish = int(require_key(game_state, "inches_to_subhex"))
-    budget = int(charge_roll) * ish
+    from engine.phase_handlers.movement_handlers import squad_descent_penalty_subhex
+
+    budget = max(0, int(charge_roll) * ish - squad_descent_penalty_subhex(game_state, squad_id))
+    if budget <= 0:
+        return None
 
     # Toutes les positions de figurines cibles
     target_positions: List[Tuple[int, int]] = []
@@ -4817,7 +4829,7 @@ def charge_build_valid_plan(
     if not target_positions:
         return None
 
-    plan: List[Tuple[str, int, int]] = []
+    plan: List[Tuple[str, int, int, int]] = []
     occupied_after: Set[Tuple[int, int]] = set()  # cellules deja reservees par ce plan
 
     for mid in mids:
@@ -4873,7 +4885,9 @@ def charge_build_valid_plan(
                 picked = (pc, pr)
         if picked is None:
             return None  # cette fig ne peut bouger legalement → charge echouee
-        plan.append((mid, picked[0], picked[1]))
+        # Niveau d'arrivee SOL, comme le plan rigide de move : le moteur ne monte jamais, et
+        # « pas de niveau » signifierait pour commit_move « garder le niveau courant » (etage).
+        plan.append((mid, picked[0], picked[1], SQUAD_RIGID_MOVE_DESTINATION_LEVEL))
         occupied_after.add(picked)
 
     # Validation finale : chaque fig finit dans l ER (bord-a-bord) d au moins un
@@ -4883,13 +4897,13 @@ def charge_build_valid_plan(
     target_entries = [
         te for te in (units_cache.get(str(t)) for t in target_squad_ids) if te is not None
     ]
-    for mid, nc, nr in plan:
+    for mid, nc, nr, _lvl in plan:
         synth = _synth_model_entry(game_state, str(squad_id), models_cache[mid], nc, nr)
         if not any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
             return None
 
     # Coherency finale
-    plan_positions = {mid: (nc, nr) for mid, nc, nr in plan}
+    plan_positions = {mid: (nc, nr) for mid, nc, nr, _lvl in plan}
     if not _validate_plan_coherency(plan_positions, game_state):
         return None
 
@@ -9186,7 +9200,9 @@ def erode_move_pool_by_squad_block(
         _geo_budget = True
         _descent = squad_descent_penalty_subhex(game_state, str(squad_id))
         _classifier_normal = get_squad_move_budget(str(squad_id), game_state, "normal")
-        _normal_exec = max(0, _classifier_normal - _descent)
+        # SOURCE UNIQUE de la frontière normal/advance (§0.34) — jamais recalculée en ligne ici,
+        # sinon une évolution de la pénalité ferait diverger l'érosion du masque en silence.
+        _normal_exec = squad_normal_move_frontier_subhex(game_state, str(squad_id))
         _in_er = _squad_is_in_enemy_er(game_state, str(squad_id))
         # Budget de construction du pool = source de vérité du régime (normal/advance/fall_back).
         # CRUCIAL : au masque, le jet d'Advance est passé en PARAMÈTRE à `build_squad_move_cell_map`

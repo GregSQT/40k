@@ -92,11 +92,27 @@ def test_load_vec_normalize_loads_and_sets_eval_flags(tmp_path, monkeypatch) -> 
     assert loaded.norm_reward is False
 
 
-def test_normalize_observation_for_inference_returns_original_when_no_file(tmp_path) -> None:
+def test_normalize_observation_for_inference_raises_when_no_file(tmp_path) -> None:
+    """Pkl absent = erreur explicite : retourner l'obs brute en silence faisait jouer un modèle
+    normalisé sur des obs brutes (décalage de distribution muet, V11 §0.35)."""
+    import pytest
+
     obs = np.array([1.0, 2.0], dtype=np.float32)
     model_path = str(tmp_path / "model.zip")
-    out = vec_normalize_utils.normalize_observation_for_inference(obs, model_path)
-    assert np.array_equal(out, obs)
+    with pytest.raises(FileNotFoundError, match=r"model_vec_normalize\.pkl"):
+        vec_normalize_utils.normalize_observation_for_inference(obs, model_path)
+
+
+def test_normalize_observation_for_inference_raises_on_stats_without_obs_rms(tmp_path) -> None:
+    """Un pkl sans `obs_rms` est corrompu ou d'une autre version : erreur, pas d'obs brute."""
+    import pytest
+
+    with open(tmp_path / "model_vec_normalize.pkl", "wb") as f:
+        pickle.dump(SimpleNamespace(norm_obs=True), f)
+    with pytest.raises(ValueError, match="obs_rms"):
+        vec_normalize_utils.normalize_observation_for_inference(
+            np.array([1.0], dtype=np.float32), str(tmp_path / "model.zip")
+        )
 
 
 def test_normalize_observation_for_inference_normalizes_with_rms_stats(tmp_path) -> None:
@@ -130,23 +146,50 @@ def test_normalize_observation_for_inference_respects_norm_obs_disabled(tmp_path
     assert np.array_equal(out, obs)
 
 
-def test_evaluation_normalizes_with_the_stats_of_the_model_it_evaluates() -> None:
-    """V11 §0.35 (2e moitié) : `vec_model_path` EST le modèle évalué, jamais le canonique.
+def test_worker_normalizer_derives_its_stats_from_the_evaluated_model(tmp_path) -> None:
+    """V11 §0.35 (2e moitié) : les stats de normalisation viennent du zip que le worker charge.
 
-    `evaluate_against_bots` construisait `vec_model_path` en dur depuis
-    `<models_root>/<agent>/model_<agent>.zip`, alors que les workers CHARGENT
-    `effective_model_path` — un snapshot temporaire en mode async. On évaluait donc un modèle
-    avec la normalisation d'un AUTRE, ce qui n'a jamais levé tant qu'un pkl traînait dans le
-    dossier des modèles. Ce test rougit si la source diverge à nouveau.
+    `evaluate_against_bots` construisait un `vec_model_path` séparé, en dur depuis
+    `<models_root>/<agent>/model_<agent>.zip`, alors que les workers chargeaient
+    `effective_model_path` — un snapshot temporaire en mode async : on évaluait un modèle avec
+    la normalisation d'un AUTRE. Le canal séparé a été SUPPRIMÉ : ce test prouve (1) qu'il
+    n'existe plus, (2) que le normalizer worker lit bien le pkl dérivé du zip du modèle, et
+    (3) qu'une obs Dict sans ce pkl lève en nommant le fichier attendu.
     """
     import inspect
 
+    import pytest
+
     from ai import bot_evaluation
 
-    src = inspect.getsource(bot_evaluation.evaluate_against_bots)
-    assert "vec_model_path = effective_model_path" in src, (
-        "les stats de normalisation doivent venir du modele EVALUE (V11 §0.35)"
+    # (1) Plus de chemin de stats séparé dans la chaîne worker : la divergence est
+    # irreprésentable, pas seulement corrigée.
+    assert "vec_model_path" not in inspect.signature(bot_evaluation._eval_worker_init).parameters
+    assert "vec_model_path" not in inspect.signature(
+        bot_evaluation._build_eval_obs_normalizer_for_worker
+    ).parameters
+
+    # (2) Chemin Box : le pkl lu est celui dérivé du ZIP du modèle évalué.
+    model_path = str(tmp_path / "eval_snapshot.zip")
+    vec_obj = SimpleNamespace(
+        obs_rms=SimpleNamespace(mean=np.array([1.0, 2.0]), var=np.array([1.0, 4.0])),
+        epsilon=1e-8,
+        clip_obs=10.0,
+        norm_obs=True,
     )
-    assert 'f"model_{base_agent_key}.zip"' not in src, (
-        "vec_model_path ne doit plus etre derive du modele canonique (V11 §0.35)"
+    with open(tmp_path / "eval_snapshot_vec_normalize.pkl", "wb") as f:
+        pickle.dump(vec_obj, f)
+    normalizer = bot_evaluation._build_eval_obs_normalizer_for_worker(
+        None, model_path, True, True
     )
+    assert normalizer is not None
+    out = normalizer(np.array([2.0, 6.0], dtype=np.float32))
+    assert np.allclose(out, np.array([1.0, 2.0], dtype=np.float32), atol=1e-5)
+
+    # (3) Chemin Dict : pkl absent = erreur explicite nommant le fichier DU modèle évalué.
+    missing = bot_evaluation._build_eval_obs_normalizer_for_worker(
+        None, str(tmp_path / "other_model.zip"), True, True
+    )
+    assert missing is not None
+    with pytest.raises(RuntimeError, match=r"other_model_vec_normalize\.pkl"):
+        missing({"global_cont": np.zeros(3, dtype=np.float32)})

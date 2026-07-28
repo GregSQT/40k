@@ -89,19 +89,31 @@ def normalize_observation_for_inference(obs: np.ndarray, model_path: str) -> np.
     Use when model was trained with VecNormalize but inference runs outside
     the training env (e.g. PvE controller with raw obs from engine).
 
-    Returns normalized obs, or original if no vec_normalize.pkl found.
+    N'appeler QUE si la normalisation est requise pour ce modele : un pkl absent ou sans stats
+    est une ERREUR explicite, jamais un retour d'obs brute. Retourner l'obs brute en silence
+    faisait jouer un modele normalise sur des obs brutes (decalage de distribution muet) —
+    exactement la classe de bug fermee par V11 §0.35. Le seul retour brut legitime est
+    `norm_obs=False` : des stats existent mais la normalisation d'obs a ete DESACTIVEE a
+    l'entrainement (choix de config, pas une absence).
     """
     import pickle
 
     save_path = get_vec_normalize_path(model_path)
     if not os.path.exists(save_path):
-        return obs
+        raise FileNotFoundError(
+            f"VecNormalize: stats absentes pour le modele evalue : {save_path}. "
+            f"Normaliser sans elles servirait des obs brutes a un modele entraine "
+            f"normalise (V11 §0.35)."
+        )
 
     with open(save_path, "rb") as f:
         vec_normalize = pickle.load(f)
 
     if not hasattr(vec_normalize, "obs_rms") or vec_normalize.obs_rms is None:
-        return obs
+        raise ValueError(
+            f"VecNormalize: {save_path} ne contient pas de stats d'observation (obs_rms) — "
+            f"fichier corrompu ou d'une autre version."
+        )
 
     obs_arr = np.array(obs, dtype=np.float32)
     if obs_arr.ndim == 1:

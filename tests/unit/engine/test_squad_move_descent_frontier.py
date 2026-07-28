@@ -198,6 +198,27 @@ def test_erosion_keeps_the_dead_band_cells_of_a_descending_squad():
         assert explain_move_plan_rejection(_plan(cell, gs), gs, constraints) is None
 
 
+def test_erosion_reads_the_single_frontier_source(monkeypatch):
+    """Verrou de CÂBLAGE : l'érosion LIT `squad_normal_move_frontier_subhex`, elle ne re-duplique
+    pas la formule `max(0, M - descente)` en ligne. Ré-inliner la formule ferait diverger
+    l'érosion du masque en silence à la prochaine évolution de la pénalité — ce test rougit."""
+    import engine.phase_handlers.shared_utils as su
+
+    gs = _gs_pair(level=1)
+    calls: List[str] = []
+    real = su.squad_normal_move_frontier_subhex
+
+    def spy(state: Dict[str, Any], squad_id: str) -> int:
+        calls.append(str(squad_id))
+        return real(state, squad_id)
+
+    monkeypatch.setattr(su, "squad_normal_move_frontier_subhex", spy)
+    su.erode_move_pool_by_squad_block(
+        gs, "1", {START: 0.0, (START[0] + 1, START[1]): 1.0}, move_budget=None
+    )
+    assert calls == ["1"], "l'érosion n'a pas lu la source unique de la frontière"
+
+
 # ── 2. Niveau de destination du plan rigide ──────────────────────────────────────────────
 
 

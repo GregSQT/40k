@@ -28,7 +28,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 | `allies_types_cont` / `_bin` | (8, 6, 5) / (8, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
 | `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
 | `self_models_cont` / `_bin` | (20, 2) / (20, 4) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement, **bit de présence** |
-| `grid` | (9, 32, 32) | grille égocentrique : murs, **autres** escouades amies, ennemis, EZ, objectifs, niveau, couvert, **l'escouade active seule** (§0.32 T-L), **coût géodésique du pool de move** — encodé avec la frontière normal/advance à **0,5 exactement** (§0.32 T-K) |
+| `grid` | (9, 32, 32) | grille égocentrique : murs, **autres** escouades amies, ennemis, EZ, objectifs, niveau, couvert, **l'escouade active seule** (§0.32 T-L), **coût géodésique du pool de move** — encodé avec la frontière normal/advance à **0,5 exactement** (§0.32 T-K) ; escouade **engagée** : tout move est un Fall Back qui coûte le tir → toutes les cellules peintes sont **au-dessus de 0,5** (§0.37) |
 
 ### Structure Overview
 
@@ -168,38 +168,38 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
 #### `allies_bin[s]` / `enemies_bin[s]` — une unite, 32 drapeaux  ·  jamais normalise
 
 ```python
-[s][0]     = present                                # 0.0 / 1.0 — masque d'entite (0 = slot vide ou morte)
-[s][1]     = is_ally                                # 0.0 / 1.0
-[s][2]     = is_active                              # 0.0 / 1.0 — masque des features [ACTIVE seule]
-[s][3]     = moved                                  # 0.0 / 1.0
-[s][4]     = shot                                   # 0.0 / 1.0
-[s][5]     = fought                                 # 0.0 / 1.0
-[s][6]     = advanced                               # 0.0 / 1.0
-[s][7]     = fled                                   # 0.0 / 1.0
-[s][8]     = coherent                               # 0.0 / 1.0 (03.03)
-[s][9]     = engaged                                # 0.0 / 1.0 (03.04)
-[s][10]    = hidden                                 # 0.0 / 1.0 (13.09) [ACTIVE seule]
-[s][11]    = gone_to_ground                         # 0.0 / 1.0 (13.5) [ACTIVE seule]
-[s][12]    = in_cover                               # 0.0 / 1.0 (13.08 branche intrinseque) [ACTIVE seule]
-[s][13]    = deploy_not_on_board                    # 0.0 / 1.0 — one-hot mise en place
-[s][14]    = deploy_pre_battle                      # 0.0 / 1.0
-[s][15]    = deploy_in_battle                       # 0.0 / 1.0
-[s][16]    = deployed_this_turn                     # 0.0 / 1.0 (clause 2 de [HEAVY] 24.16)
-[s][17]    = los_can_see                            # 0.0 / 1.0 (06.01) [ENNEMIS seuls]
-[s][18]    = cover_vs_observer                      # 0.0 / 1.0 (13.08 EXACT, 2 branches) [ENNEMIS seuls]
-[s][19]    = rule_charge_after_advance              # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][20]    = rule_charge_after_flee                 # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][21]    = rule_charge_impact                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][22]    = rule_closest_target_penetration        # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][23]    = rule_move_after_shooting               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][24]    = rule_reactive_move                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][25]    = rule_reroll_1_save_fight               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][26]    = rule_reroll_1_tohit_fight              # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][27]    = rule_reroll_1_towound                  # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][28]    = rule_reroll_charge                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][29]    = rule_reroll_towound_target_on_objective # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][30]    = rule_shoot_after_advance               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][31]    = rule_shoot_after_flee                  # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][0]     = is_ally                                # 0.0 / 1.0
+[s][1]     = is_active                              # 0.0 / 1.0 — masque des features [ACTIVE seule]
+[s][2]     = moved                                  # 0.0 / 1.0
+[s][3]     = shot                                   # 0.0 / 1.0
+[s][4]     = fought                                 # 0.0 / 1.0
+[s][5]     = advanced                               # 0.0 / 1.0
+[s][6]     = fled                                   # 0.0 / 1.0
+[s][7]     = coherent                               # 0.0 / 1.0 (03.03)
+[s][8]     = engaged                                # 0.0 / 1.0 (03.04)
+[s][9]     = hidden                                 # 0.0 / 1.0 (13.09) [ACTIVE seule]
+[s][10]    = gone_to_ground                         # 0.0 / 1.0 (13.5) [ACTIVE seule]
+[s][11]    = in_cover                               # 0.0 / 1.0 (13.08 branche intrinseque) [ACTIVE seule]
+[s][12]    = deploy_not_on_board                    # 0.0 / 1.0 — one-hot mise en place
+[s][13]    = deploy_pre_battle                      # 0.0 / 1.0
+[s][14]    = deploy_in_battle                       # 0.0 / 1.0
+[s][15]    = deployed_this_turn                     # 0.0 / 1.0 (clause 2 de [HEAVY] 24.16)
+[s][16]    = los_can_see                            # 0.0 / 1.0 (06.01) [ENNEMIS seuls]
+[s][17]    = cover_vs_observer                      # 0.0 / 1.0 (13.08 EXACT, 2 branches) [ENNEMIS seuls]
+[s][18]    = rule_charge_after_advance              # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][19]    = rule_charge_after_flee                 # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][20]    = rule_charge_impact                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][21]    = rule_closest_target_penetration        # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][22]    = rule_move_after_shooting               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][23]    = rule_reactive_move                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][24]    = rule_reroll_1_save_fight               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][25]    = rule_reroll_1_tohit_fight              # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][26]    = rule_reroll_1_towound                  # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][27]    = rule_reroll_charge                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][28]    = rule_reroll_towound_target_on_objective # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][29]    = rule_shoot_after_advance               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][30]    = rule_shoot_after_flee                  # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][31]    = present                                # 0.0 / 1.0 — masque d'entite (0 = slot vide ou morte), DERNIER comme dans tous les registres (§0.37)
 ```
 
 #### `*_wpn_cont[s][w]` — un profil d'arme, 13 continues  ·  EntityRunningNorm

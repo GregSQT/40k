@@ -33,12 +33,15 @@ from ai.spatial_extractor import (
     positional_channels,
 )
 from engine.observation_builder import ObservationBuilder
+from engine.observation_entities import unit_bin_index
 from engine.spatial_grid import (
     GRID_CELL_COUNT,
     GRID_CHANNELS,
     GRID_SIZE,
     cell_center_px,
 )
+
+_UNIT_PRESENT = unit_bin_index("present")
 
 
 def _space() -> gym.spaces.Dict:
@@ -86,7 +89,7 @@ def test_features_layout_exposes_the_enemy_embeddings(extractor):
 def test_forward_shape_and_finiteness(extractor):
     space = _space()
     obs = _zero_batch(space)
-    obs["allies_bin"][:, 0, 0] = 1.0     # l'unité active est présente
+    obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0     # l'unité active est présente
     out = extractor(obs)
     assert out.shape == (2, extractor.features_dim)
     assert torch.isfinite(out).all()
@@ -100,8 +103,8 @@ def test_the_same_weapon_encoder_serves_both_sides(extractor):
     """
     space = _space()
     obs = _zero_batch(space, batch=1)
-    obs["allies_bin"][:, 0, 0] = 1.0
-    obs["enemies_bin"][:, 0, 0] = 1.0
+    obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0
+    obs["enemies_bin"][:, 0, _UNIT_PRESENT] = 1.0
     # Même profil d'arme des deux côtés, même slot de registre.
     profile_cont = torch.arange(1.0, extractor.weapon_cont_dim + 1.0).unsqueeze(0)
     profile_bin = torch.zeros(1, extractor.weapon_bin_dim)
@@ -149,7 +152,7 @@ def test_absent_entities_do_not_leak_into_the_aggregation(extractor):
     """
     space = _space()
     obs = _zero_batch(space, batch=1)
-    obs["allies_bin"][:, 0, 0] = 1.0
+    obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0
     extractor.eval()
     with torch.no_grad():
         emb = extractor._encode_units(obs, "enemies")
@@ -174,7 +177,7 @@ def test_self_model_mask_is_the_present_bit_not_the_row(extractor):
     extractor.eval()
 
     obs = _zero_batch(space, batch=1)
-    obs["allies_bin"][:, 0, 0] = 1.0
+    obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0
     obs["self_models_bin"][:, 0, present_idx] = 1.0  # une seule figurine réelle
     with torch.no_grad():
         reference = extractor(obs)
@@ -253,7 +256,7 @@ def test_move_map_keeps_the_full_resolution(extractor):
     """
     space = _space()
     obs = _zero_batch(space, batch=2)
-    obs["allies_bin"][:, 0, 0] = 1.0
+    obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0
     extractor.eval()
     with torch.no_grad():
         out = extractor(obs)
@@ -310,7 +313,7 @@ def test_move_map_carries_the_positional_channels(extractor):
     # … et ils arrivent bien jusqu'au bout de la carte (derniers canaux, non appris).
     space = _space()
     obs = _zero_batch(space, batch=1)
-    obs["allies_bin"][:, 0, 0] = 1.0
+    obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0
     extractor.eval()
     with torch.no_grad():
         carte = extractor(obs)[:, extractor.move_map_slice()].reshape(
@@ -335,7 +338,7 @@ def test_move_map_is_not_translation_invariant(extractor):
 
     def _column(gx: int, gy: int) -> torch.Tensor:
         obs = _zero_batch(space, batch=1)
-        obs["allies_bin"][:, 0, 0] = 1.0
+        obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0
         obs["grid"][:, 0, gy, gx] = 1.0
         with torch.no_grad():
             carte = extractor(obs)[:, extractor.move_map_slice()].reshape(
@@ -414,8 +417,8 @@ def test_maskable_policy_builds_and_forwards():
         },
     )
     obs = _zero_batch(_space())
-    obs["allies_bin"][:, 0, 0] = 1.0
-    obs["enemies_bin"][:, 0, 0] = 1.0
+    obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0
+    obs["enemies_bin"][:, 0, _UNIT_PRESENT] = 1.0
     model.policy.set_training_mode(False)
     with torch.no_grad():
         actions, values, log_prob = model.policy(obs)

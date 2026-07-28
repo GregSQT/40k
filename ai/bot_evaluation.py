@@ -108,55 +108,6 @@ def _materialize_eval_scenario_refs(
     return out_path
 
 
-def _build_eval_obs_normalizer(
-    model,
-    vec_normalize_enabled: bool,
-    vec_model_path: Optional[str],
-) -> Optional[Callable[[np.ndarray], np.ndarray]]:
-    """
-    Build observation normalizer for bot evaluation.
-
-    When VecNormalize is enabled in training config, evaluation must apply the same
-    observation normalization to avoid train/eval distribution mismatch.
-    """
-    if not vec_normalize_enabled:
-        return None
-
-    train_env = model.get_env() if hasattr(model, "get_env") else None
-    if train_env is not None:
-        from stable_baselines3.common.vec_env import VecNormalize
-
-        env_cursor = train_env
-        while env_cursor is not None:
-            if isinstance(env_cursor, VecNormalize):
-                vec_env = env_cursor
-
-                def _normalize_with_live_vec(obs: np.ndarray) -> np.ndarray:
-                    obs_arr = np.asarray(obs, dtype=np.float32)
-                    if obs_arr.ndim == 1:
-                        obs_arr = obs_arr.reshape(1, -1)
-                    normalized = vec_env.normalize_obs(obs_arr)
-                    return np.asarray(normalized, dtype=np.float32).squeeze()
-
-                return _normalize_with_live_vec
-            env_cursor = getattr(env_cursor, "venv", None)
-
-    if vec_model_path:
-        from ai.vec_normalize_utils import normalize_observation_for_inference
-
-        def _normalize_with_saved_stats(obs: np.ndarray) -> np.ndarray:
-            obs_arr = np.asarray(obs, dtype=np.float32)
-            normalized = normalize_observation_for_inference(obs_arr, vec_model_path)
-            return np.asarray(normalized, dtype=np.float32)
-
-        return _normalize_with_saved_stats
-
-    raise RuntimeError(
-        "VecNormalize is enabled for this agent, but bot evaluation could not access "
-        "VecNormalize stats from model env or saved model path."
-    )
-
-
 def _load_bot_eval_params(config_loader, agent_key: str, training_config_name: str):
     """Load bot evaluation weights and randomness from agent training config."""
     if not agent_key:
@@ -433,15 +384,21 @@ def _create_eval_env(
 
 def _build_eval_obs_normalizer_for_worker(
     model,
-    vec_model_path: Optional[str],
+    model_path: Optional[str],
     vec_normalize_enabled: bool,
     vec_eval_enabled: bool,
 ) -> Optional[Callable[[np.ndarray], np.ndarray]]:
-    """Version worker : pas d'accès à l'env de training."""
+    """Version worker : pas d'accès à l'env de training.
+
+    ⚠️ V11 §0.35 — les stats sont dérivées de `model_path`, le zip que CE worker charge. Il n'y
+    a volontairement AUCUN paramètre de chemin de stats séparé : c'est cette séparation qui a
+    permis d'évaluer un modèle avec la normalisation d'un autre (l'appelant passait le canonique
+    alors que les workers chargeaient un snapshot). Divergence rendue irreprésentable.
+    """
     if not vec_normalize_enabled or not vec_eval_enabled:
         return None
-    if not vec_model_path:
-        raise RuntimeError("VecNormalize enabled but vec_model_path not provided for worker")
+    if not model_path:
+        raise RuntimeError("VecNormalize enabled but model_path not provided for worker")
     from ai.vec_normalize_utils import normalize_observation_for_inference, get_vec_normalize_path
 
     # Obs Dict (pipeline squad spatial, tenseurs d'entites V11 §0.30) : VecNormalize a ete
@@ -454,7 +411,7 @@ def _build_eval_obs_normalizer_for_worker(
     def _dict_normalizer():
         if _dict_vecnorm["obj"] is None:
             import pickle
-            pkl_path = get_vec_normalize_path(vec_model_path)
+            pkl_path = get_vec_normalize_path(model_path)
             if not os.path.exists(pkl_path):
                 raise RuntimeError(
                     f"VecNormalize enabled but stats not found for Dict obs: {pkl_path}"
@@ -472,7 +429,7 @@ def _build_eval_obs_normalizer_for_worker(
         obs_arr = np.asarray(obs, dtype=np.float32)
         if obs_arr.ndim == 1:
             obs_arr = obs_arr.reshape(1, -1)
-        normalized = normalize_observation_for_inference(obs_arr, vec_model_path)
+        normalized = normalize_observation_for_inference(obs_arr, model_path)
         return np.asarray(normalized, dtype=np.float32).squeeze()
 
     return _normalize
@@ -488,7 +445,6 @@ def _episode_seed(base_seed: int, bot_name: str, scenario_idx: int, ep_idx: int)
 def _eval_worker_init(
     model_path: str,
     worker_model_device: str,
-    vec_model_path: Optional[str],
     vec_normalize_enabled: bool,
     vec_eval_enabled: bool,
     training_config_name: str,
@@ -496,13 +452,17 @@ def _eval_worker_init(
     controlled_agent: str,
     base_agent_key: str,
 ) -> None:
-    """Appelé une fois au démarrage de chaque worker. Charge modèle + normalizer."""
+    """Appelé une fois au démarrage de chaque worker. Charge modèle + normalizer.
+
+    Les stats VecNormalize viennent du MÊME `model_path` que la politique (V11 §0.35) : un
+    worker ne peut pas normaliser avec les stats d'un autre modèle, par construction.
+    """
     global _worker_model, _worker_obs_normalizer
     from sb3_contrib import MaskablePPO
 
     _worker_model = MaskablePPO.load(model_path, device=worker_model_device)
     _worker_obs_normalizer = _build_eval_obs_normalizer_for_worker(
-        _worker_model, vec_model_path, vec_normalize_enabled, vec_eval_enabled
+        _worker_model, model_path, vec_normalize_enabled, vec_eval_enabled
     )
 
 
@@ -894,9 +854,6 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             "vec_normalize_eval.enabled is true but vec_normalize.enabled is false"
         )
 
-    # `vec_model_path` est defini PLUS BAS, depuis `effective_model_path` : les stats de
-    # normalisation doivent etre celles du modele REELLEMENT evalue (V11 §0.35).
-
     # model_path optionnel : permet d'évaluer un snapshot explicite (mode async).
     # Si absent, on sauvegarde un snapshot temporaire du modèle courant.
     _temp_model_path = None
@@ -923,218 +880,218 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         _temp_model_path = effective_model_path
 
     # ⚠️ V11 §0.35 — les stats de normalisation sont celles du modele EVALUE, jamais celles du
-    # modele canonique. Ce chemin valait `<models_root>/<agent>/model_<agent>.zip` en dur, alors
-    # que les workers chargent `effective_model_path` (un SNAPSHOT en mode async) : on evaluait un
-    # modele avec la normalisation d'un AUTRE. Ca n'a jamais leve, parce qu'un pkl trainait dans
-    # le dossier — jusqu'a ce qu'une rotation d'artefacts le supprime et arrete un run de 5 h 30
-    # au marqueur 24 000 (600/600 episodes en erreur). Les deux moities du bug : un nom de fichier
-    # partage (corrige dans `vec_normalize_utils`) et cette source divergente.
-    vec_model_path = effective_model_path
+    # modele canonique. Il n'existe plus de `vec_model_path` distinct : chaque worker derive le
+    # pkl du zip qu'il charge (`_eval_worker_init` → `get_vec_normalize_path(model_path)`).
+    # L'ancien chemin separe valait `<models_root>/<agent>/model_<agent>.zip` en dur alors que
+    # les workers chargeaient un SNAPSHOT en mode async : on evaluait un modele avec la
+    # normalisation d'un AUTRE, sans lever tant qu'un pkl trainait dans le dossier — jusqu'a ce
+    # qu'une rotation d'artefacts le supprime et arrete un run de 5 h 30 au marqueur 24 000.
 
-    bot_eval_cfg = _load_bot_eval_params(config, base_agent_key, training_config_name)
-    eval_weights = bot_eval_cfg["weights"]
-    eval_randomness = bot_eval_cfg["randomness"]
-    # V11 §10.5 : ce dict ne recopiait que greedy/defensive/control — aggressive_smart,
-    # adaptive et tactical retombaient SILENCIEUSEMENT sur 0.15 a la construction du bot,
-    # rendant leur `bot_eval_randomness` de config lettre morte. On transmet la config
-    # entiere, et l'absence d'une entree est une erreur, pas un defaut.
-    randomness_config = dict(eval_randomness)
-
-    active_bot_names = tuple(eval_weights.keys())
-
-    missing_randomness = [name for name in active_bot_names if name not in randomness_config]
-    if missing_randomness:
-        raise KeyError(
-            "callback_params.bot_eval_randomness manque une entree pour les bots ponderes "
-            f"en evaluation : {sorted(missing_randomness)}. Renseigner une valeur explicite "
-            "(aucun defaut n'est applique)."
-        )
-
-    if scenario_list_override is not None:
-        if not isinstance(scenario_list_override, list):
-            raise TypeError(
-                f"scenario_list_override must be list or None (got {type(scenario_list_override).__name__})"
-            )
-        if len(scenario_list_override) == 0:
-            raise ValueError("scenario_list_override cannot be empty")
-        scenario_list = [str(path) for path in scenario_list_override]
-        for scenario_path in scenario_list:
-            if not os.path.isfile(scenario_path):
-                raise FileNotFoundError(f"scenario_list_override contains missing file: {scenario_path}")
-    else:
-        if scenario_pool not in ("training", "holdout"):
-            raise ValueError(
-                f"scenario_pool must be 'training' or 'holdout' (got {scenario_pool!r})"
-            )
-
-        scenario_list = get_scenario_list_for_phase(
-            config,
-            base_agent_key,
-            training_config_name,
-            scenario_type=scenario_pool
-        )
-
-        if len(scenario_list) == 0:
-            expected_dir = os.path.join(
-                config.config_dir,
-                "agents",
-                base_agent_key,
-                "scenarios",
-                scenario_pool
-            )
-            raise FileNotFoundError(
-                f"No {scenario_pool} scenarios found for agent '{base_agent_key}'. "
-                f"Expected files in: {expected_dir} with naming '{base_agent_key}_*.json'."
-            )
-        scenario_list = _filter_scenarios_from_config(training_cfg, scenario_list, base_agent_key)
-
-    if n_episodes <= 0:
-        raise ValueError("n_episodes must be > 0 for bot evaluation")
-    # Calculate episodes per scenario (distribute exactly, remainder goes to first scenarios)
-    episodes_per_scenario = n_episodes // len(scenario_list)
-    extra_episodes = n_episodes % len(scenario_list)
-
-    callback_params = require_key(training_cfg, "callback_params")
-    sampling_cfg = training_cfg.get("scenario_sampling")
-    eval_wall_refs: List[str] = []
-    eval_ref_strict = False
-    if scenario_pool == "holdout" and materialize_eval_refs:
-        if not isinstance(sampling_cfg, dict):
-            raise TypeError(
-                "scenario_sampling must be an object in training config for holdout evaluation"
-            )
-        raw_eval_wall_refs = require_key(sampling_cfg, "eval_wall_refs")
-        raw_eval_ref_strict = sampling_cfg.get("eval_ref_strict", True)
-        if not isinstance(raw_eval_ref_strict, bool):
-            raise TypeError(
-                "scenario_sampling.eval_ref_strict must be boolean "
-                f"(got {type(raw_eval_ref_strict).__name__})"
-            )
-        eval_ref_strict = raw_eval_ref_strict
-        if not isinstance(raw_eval_wall_refs, list) or len(raw_eval_wall_refs) == 0:
-            raise ValueError(
-                "scenario_sampling.eval_wall_refs must be a non-empty list for holdout evaluation"
-            )
-        for raw_ref in raw_eval_wall_refs:
-            if not isinstance(raw_ref, str) or not raw_ref.strip():
-                raise ValueError(f"Invalid wall ref in scenario_sampling.eval_wall_refs: {raw_ref!r}")
-            eval_wall_refs.append(raw_ref.strip())
-
-    use_subprocess = callback_params.get("bot_eval_use_subprocess", True)
-    worker_model_device_raw = require_key(callback_params, "bot_eval_worker_device")
-    worker_model_device = str(worker_model_device_raw).strip().lower()
-    if worker_model_device not in {"cpu", "auto"}:
-        raise ValueError(
-            "callback_params.bot_eval_worker_device must be either 'cpu' or 'auto' "
-            f"(got {worker_model_device!r})"
-        )
-    if step_logger and step_logger.enabled:
-        use_subprocess = False
-    if debug_mode:
-        use_subprocess = False
-
-    n_envs = int(require_key(training_cfg, "n_envs"))
-    if n_envs <= 0:
-        raise ValueError(f"n_envs must be > 0 (got {n_envs})")
-
-    config_params = {
-        "training_config_name": training_config_name,
-        "rewards_config_name": rewards_config_name,
-        "controlled_agent": controlled_agent,
-        "base_agent_key": base_agent_key,
-        "vec_normalize_enabled": vec_normalize_enabled,
-        "vec_model_path": vec_model_path,
-        "debug_mode": debug_mode,
-        "agent_seat_mode": agent_seat_mode,
-        "agent_seat_seed": agent_seat_seed,
-    }
-    if not use_subprocess and step_logger and step_logger.enabled:
-        config_params["step_logger"] = step_logger
-
-    base_seed = 42
-    task_timeout_seconds = callback_params.get("bot_eval_task_timeout_seconds", 300)
-    n_workers = callback_params.get("bot_eval_n_workers")
-    if n_workers is None:
-        n_workers = min(n_envs, len(scenario_list) * len(active_bot_names))
-    n_workers = max(1, int(n_workers))
-
-    from config_loader import get_max_turns
-
-    tasks: List[Dict[str, Any]] = []
-    for bot_name in active_bot_names:
-        for scenario_index, scenario_file in enumerate(scenario_list):
-            scenario_name = _scenario_name_from_file(base_agent_key, scenario_file)
-            task_scenario_file = scenario_file
-            if scenario_pool == "holdout" and eval_ref_strict and materialize_eval_refs:
-                wall_ref = eval_wall_refs[(scenario_index + len(bot_name)) % len(eval_wall_refs)]
-                task_scenario_file = _materialize_eval_scenario_refs(
-                    scenario_path=scenario_file,
-                    wall_ref=wall_ref,
-                )
-            episodes_for_scenario = episodes_per_scenario + (1 if scenario_index < extra_episodes else 0)
-            if episodes_for_scenario <= 0:
-                continue
-            tasks.append({
-                "bot_name": bot_name,
-                "bot_type": bot_name,
-                "randomness_config": randomness_config,
-                "scenario_file": task_scenario_file,
-                "scenario_name": scenario_name,
-                "n_episodes": episodes_for_scenario,
-                "base_seed": base_seed,
-                "scenario_index": scenario_index,
-                "deterministic": deterministic,
-                "config_params": config_params,
-                "max_steps_per_episode": int(get_max_turns()) * 400,  # duree de bataille = game_rules.max_turns
-            })
-
-    initargs = (
-        effective_model_path,
-        worker_model_device,
-        vec_model_path,
-        vec_normalize_enabled,
-        vec_eval_enabled,
-        training_config_name,
-        rewards_config_name,
-        controlled_agent,
-        base_agent_key,
-    )
-
-    total_episodes = len(active_bot_names) * n_episodes
-    start_time = time.time() if show_progress else None
-    last_progress_line_len = 0
-
-    def _print_progress(completed_ep: int, total_ep: int) -> None:
-        """Print progress bar during eval (overwrites line)."""
-        if not show_progress or start_time is None:
-            return
-        nonlocal last_progress_line_len
-        progress_pct = (completed_ep / total_ep) * 100 if total_ep > 0 else 0
-        bar_length = bot_eval_bar_length
-        filled = int(bar_length * completed_ep / total_ep) if total_ep > 0 else 0
-        bar = '█' * filled + '░' * (bar_length - filled)
-        elapsed = time.time() - start_time
-        _mins = int(elapsed // 60)
-        _secs = int(elapsed % 60)
-        elapsed_str = f"{_mins:02d}:{_secs:02d}" if _mins < 3600 else f"{int(elapsed//3600)}:{_mins%60:02d}:{_secs:02d}"
-        speed_str = f"{completed_ep/elapsed:.2f}ep/s" if elapsed > 0 and completed_ep > 0 else "0.00ep/s"
-        if eval_progress_prefix and eval_progress_label:
-            line = f"{eval_progress_prefix}{eval_progress_label}: {progress_pct:3.0f}% {bar} {completed_ep}/{total_ep} [{elapsed_str}, {speed_str}]"
-        elif eval_progress_label:
-            line = f"{eval_progress_label}: {progress_pct:3.0f}% {bar} {completed_ep}/{total_ep} [{elapsed_str}, {speed_str}]"
-        else:
-            line = f"{progress_pct:3.0f}% {bar} {completed_ep}/{total_ep} [{elapsed_str}, {speed_str}]"
-        clear_padding = " " * max(0, last_progress_line_len - len(line))
-        sys.stdout.write(f"\r{line}{clear_padding}")
-        sys.stdout.flush()
-        last_progress_line_len = len(line)
-        if line_length_state is not None:
-            line_length_state["last_progress_line_len"] = len(line)
-
-    if show_progress:
-        _print_progress(0, total_episodes)
-
+    # Le try commence DES la preparation : toute levee entre le snapshot tempfile et la
+    # boucle des workers (config incomplete, scenario absent...) passait AVANT l'ancien
+    # try/finally et fuyait un zip+pkl orphelin dans /tmp a chaque tentative.
     try:
+        bot_eval_cfg = _load_bot_eval_params(config, base_agent_key, training_config_name)
+        eval_weights = bot_eval_cfg["weights"]
+        eval_randomness = bot_eval_cfg["randomness"]
+        # V11 §10.5 : ce dict ne recopiait que greedy/defensive/control — aggressive_smart,
+        # adaptive et tactical retombaient SILENCIEUSEMENT sur 0.15 a la construction du bot,
+        # rendant leur `bot_eval_randomness` de config lettre morte. On transmet la config
+        # entiere, et l'absence d'une entree est une erreur, pas un defaut.
+        randomness_config = dict(eval_randomness)
+
+        active_bot_names = tuple(eval_weights.keys())
+
+        missing_randomness = [name for name in active_bot_names if name not in randomness_config]
+        if missing_randomness:
+            raise KeyError(
+                "callback_params.bot_eval_randomness manque une entree pour les bots ponderes "
+                f"en evaluation : {sorted(missing_randomness)}. Renseigner une valeur explicite "
+                "(aucun defaut n'est applique)."
+            )
+
+        if scenario_list_override is not None:
+            if not isinstance(scenario_list_override, list):
+                raise TypeError(
+                    f"scenario_list_override must be list or None (got {type(scenario_list_override).__name__})"
+                )
+            if len(scenario_list_override) == 0:
+                raise ValueError("scenario_list_override cannot be empty")
+            scenario_list = [str(path) for path in scenario_list_override]
+            for scenario_path in scenario_list:
+                if not os.path.isfile(scenario_path):
+                    raise FileNotFoundError(f"scenario_list_override contains missing file: {scenario_path}")
+        else:
+            if scenario_pool not in ("training", "holdout"):
+                raise ValueError(
+                    f"scenario_pool must be 'training' or 'holdout' (got {scenario_pool!r})"
+                )
+
+            scenario_list = get_scenario_list_for_phase(
+                config,
+                base_agent_key,
+                training_config_name,
+                scenario_type=scenario_pool
+            )
+
+            if len(scenario_list) == 0:
+                expected_dir = os.path.join(
+                    config.config_dir,
+                    "agents",
+                    base_agent_key,
+                    "scenarios",
+                    scenario_pool
+                )
+                raise FileNotFoundError(
+                    f"No {scenario_pool} scenarios found for agent '{base_agent_key}'. "
+                    f"Expected files in: {expected_dir} with naming '{base_agent_key}_*.json'."
+                )
+            scenario_list = _filter_scenarios_from_config(training_cfg, scenario_list, base_agent_key)
+
+        if n_episodes <= 0:
+            raise ValueError("n_episodes must be > 0 for bot evaluation")
+        # Calculate episodes per scenario (distribute exactly, remainder goes to first scenarios)
+        episodes_per_scenario = n_episodes // len(scenario_list)
+        extra_episodes = n_episodes % len(scenario_list)
+
+        callback_params = require_key(training_cfg, "callback_params")
+        sampling_cfg = training_cfg.get("scenario_sampling")
+        eval_wall_refs: List[str] = []
+        eval_ref_strict = False
+        if scenario_pool == "holdout" and materialize_eval_refs:
+            if not isinstance(sampling_cfg, dict):
+                raise TypeError(
+                    "scenario_sampling must be an object in training config for holdout evaluation"
+                )
+            raw_eval_wall_refs = require_key(sampling_cfg, "eval_wall_refs")
+            raw_eval_ref_strict = sampling_cfg.get("eval_ref_strict", True)
+            if not isinstance(raw_eval_ref_strict, bool):
+                raise TypeError(
+                    "scenario_sampling.eval_ref_strict must be boolean "
+                    f"(got {type(raw_eval_ref_strict).__name__})"
+                )
+            eval_ref_strict = raw_eval_ref_strict
+            if not isinstance(raw_eval_wall_refs, list) or len(raw_eval_wall_refs) == 0:
+                raise ValueError(
+                    "scenario_sampling.eval_wall_refs must be a non-empty list for holdout evaluation"
+                )
+            for raw_ref in raw_eval_wall_refs:
+                if not isinstance(raw_ref, str) or not raw_ref.strip():
+                    raise ValueError(f"Invalid wall ref in scenario_sampling.eval_wall_refs: {raw_ref!r}")
+                eval_wall_refs.append(raw_ref.strip())
+
+        use_subprocess = callback_params.get("bot_eval_use_subprocess", True)
+        worker_model_device_raw = require_key(callback_params, "bot_eval_worker_device")
+        worker_model_device = str(worker_model_device_raw).strip().lower()
+        if worker_model_device not in {"cpu", "auto"}:
+            raise ValueError(
+                "callback_params.bot_eval_worker_device must be either 'cpu' or 'auto' "
+                f"(got {worker_model_device!r})"
+            )
+        if step_logger and step_logger.enabled:
+            use_subprocess = False
+        if debug_mode:
+            use_subprocess = False
+
+        n_envs = int(require_key(training_cfg, "n_envs"))
+        if n_envs <= 0:
+            raise ValueError(f"n_envs must be > 0 (got {n_envs})")
+
+        config_params = {
+            "training_config_name": training_config_name,
+            "rewards_config_name": rewards_config_name,
+            "controlled_agent": controlled_agent,
+            "base_agent_key": base_agent_key,
+            "vec_normalize_enabled": vec_normalize_enabled,
+            "debug_mode": debug_mode,
+            "agent_seat_mode": agent_seat_mode,
+            "agent_seat_seed": agent_seat_seed,
+        }
+        if not use_subprocess and step_logger and step_logger.enabled:
+            config_params["step_logger"] = step_logger
+
+        base_seed = 42
+        task_timeout_seconds = callback_params.get("bot_eval_task_timeout_seconds", 300)
+        n_workers = callback_params.get("bot_eval_n_workers")
+        if n_workers is None:
+            n_workers = min(n_envs, len(scenario_list) * len(active_bot_names))
+        n_workers = max(1, int(n_workers))
+
+        from config_loader import get_max_turns
+
+        tasks: List[Dict[str, Any]] = []
+        for bot_name in active_bot_names:
+            for scenario_index, scenario_file in enumerate(scenario_list):
+                scenario_name = _scenario_name_from_file(base_agent_key, scenario_file)
+                task_scenario_file = scenario_file
+                if scenario_pool == "holdout" and eval_ref_strict and materialize_eval_refs:
+                    wall_ref = eval_wall_refs[(scenario_index + len(bot_name)) % len(eval_wall_refs)]
+                    task_scenario_file = _materialize_eval_scenario_refs(
+                        scenario_path=scenario_file,
+                        wall_ref=wall_ref,
+                    )
+                episodes_for_scenario = episodes_per_scenario + (1 if scenario_index < extra_episodes else 0)
+                if episodes_for_scenario <= 0:
+                    continue
+                tasks.append({
+                    "bot_name": bot_name,
+                    "bot_type": bot_name,
+                    "randomness_config": randomness_config,
+                    "scenario_file": task_scenario_file,
+                    "scenario_name": scenario_name,
+                    "n_episodes": episodes_for_scenario,
+                    "base_seed": base_seed,
+                    "scenario_index": scenario_index,
+                    "deterministic": deterministic,
+                    "config_params": config_params,
+                    "max_steps_per_episode": int(get_max_turns()) * 400,  # duree de bataille = game_rules.max_turns
+                })
+
+        initargs = (
+            effective_model_path,
+            worker_model_device,
+            vec_normalize_enabled,
+            vec_eval_enabled,
+            training_config_name,
+            rewards_config_name,
+            controlled_agent,
+            base_agent_key,
+        )
+
+        total_episodes = len(active_bot_names) * n_episodes
+        start_time = time.time() if show_progress else None
+        last_progress_line_len = 0
+
+        def _print_progress(completed_ep: int, total_ep: int) -> None:
+            """Print progress bar during eval (overwrites line)."""
+            if not show_progress or start_time is None:
+                return
+            nonlocal last_progress_line_len
+            progress_pct = (completed_ep / total_ep) * 100 if total_ep > 0 else 0
+            bar_length = bot_eval_bar_length
+            filled = int(bar_length * completed_ep / total_ep) if total_ep > 0 else 0
+            bar = '█' * filled + '░' * (bar_length - filled)
+            elapsed = time.time() - start_time
+            _mins = int(elapsed // 60)
+            _secs = int(elapsed % 60)
+            elapsed_str = f"{_mins:02d}:{_secs:02d}" if _mins < 3600 else f"{int(elapsed//3600)}:{_mins%60:02d}:{_secs:02d}"
+            speed_str = f"{completed_ep/elapsed:.2f}ep/s" if elapsed > 0 and completed_ep > 0 else "0.00ep/s"
+            if eval_progress_prefix and eval_progress_label:
+                line = f"{eval_progress_prefix}{eval_progress_label}: {progress_pct:3.0f}% {bar} {completed_ep}/{total_ep} [{elapsed_str}, {speed_str}]"
+            elif eval_progress_label:
+                line = f"{eval_progress_label}: {progress_pct:3.0f}% {bar} {completed_ep}/{total_ep} [{elapsed_str}, {speed_str}]"
+            else:
+                line = f"{progress_pct:3.0f}% {bar} {completed_ep}/{total_ep} [{elapsed_str}, {speed_str}]"
+            clear_padding = " " * max(0, last_progress_line_len - len(line))
+            sys.stdout.write(f"\r{line}{clear_padding}")
+            sys.stdout.flush()
+            last_progress_line_len = len(line)
+            if line_length_state is not None:
+                line_length_state["last_progress_line_len"] = len(line)
+
+        if show_progress:
+            _print_progress(0, total_episodes)
+
         if use_subprocess and n_workers > 1:
             ctx = mp.get_context("spawn")
             with ProcessPoolExecutor(

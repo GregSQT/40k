@@ -130,33 +130,11 @@ def test_get_result_with_timeout_handles_success_timeout_and_error() -> None:
     assert "error" in be._get_result_with_timeout(FutureErr(), task)
 
 
-def test_build_eval_obs_normalizer_branches(monkeypatch: pytest.MonkeyPatch) -> None:
-    model_no_env = SimpleNamespace(get_env=lambda: None)
-    assert be._build_eval_obs_normalizer(model_no_env, vec_normalize_enabled=False, vec_model_path=None) is None
-
-    # vec enabled but no live vec and no path -> explicit runtime error
-    with pytest.raises(RuntimeError, match=r"VecNormalize is enabled"):
-        be._build_eval_obs_normalizer(model_no_env, vec_normalize_enabled=True, vec_model_path=None)
-
+def test_build_eval_obs_normalizer_for_worker_branches() -> None:
     # worker helper: disabled flags -> none; missing path -> runtime error
     assert be._build_eval_obs_normalizer_for_worker(None, None, False, True) is None
-    with pytest.raises(RuntimeError, match=r"vec_model_path not provided"):
+    with pytest.raises(RuntimeError, match=r"model_path not provided"):
         be._build_eval_obs_normalizer_for_worker(None, None, True, True)
-
-
-def test_build_eval_obs_normalizer_uses_saved_stats(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "ai.vec_normalize_utils.normalize_observation_for_inference",
-        lambda obs, path: np.asarray(obs, dtype=np.float32) + 10.0,
-    )
-    model_no_env = SimpleNamespace(get_env=lambda: None)
-    normalizer = be._build_eval_obs_normalizer(
-        model_no_env,
-        vec_normalize_enabled=True,
-        vec_model_path="/tmp/vec.pkl",
-    )
-    out = require_present(normalizer, "normalizer")(np.array([1.0, 2.0], dtype=np.float32))
-    assert np.allclose(out, np.array([11.0, 12.0], dtype=np.float32))
 
 
 def test_build_eval_obs_normalizer_for_worker_normalizes_and_squeezes(
@@ -168,7 +146,7 @@ def test_build_eval_obs_normalizer_for_worker_normalizes_and_squeezes(
     )
     normalizer = be._build_eval_obs_normalizer_for_worker(
         model=None,
-        vec_model_path="/tmp/vec.pkl",
+        model_path="/tmp/model.zip",
         vec_normalize_enabled=True,
         vec_eval_enabled=True,
     )
@@ -179,18 +157,18 @@ def test_build_eval_obs_normalizer_for_worker_normalizes_and_squeezes(
 def test_eval_worker_init_loads_model_and_normalizer(monkeypatch: pytest.MonkeyPatch) -> None:
     loaded_model = object()
     monkeypatch.setattr("sb3_contrib.MaskablePPO.load", lambda model_path, device=None: loaded_model)
+    seen_paths = []
     monkeypatch.setattr(
         be,
         "_build_eval_obs_normalizer_for_worker",
-        lambda model, vec_model_path, vec_normalize_enabled, vec_eval_enabled: (
-            lambda obs: np.asarray(obs, dtype=np.float32)
+        lambda model, model_path, vec_normalize_enabled, vec_eval_enabled: (
+            seen_paths.append(model_path) or (lambda obs: np.asarray(obs, dtype=np.float32))
         ),
     )
 
     be._eval_worker_init(
         model_path="/tmp/model.zip",
         worker_model_device="cpu",
-        vec_model_path="/tmp/vec.pkl",
         vec_normalize_enabled=True,
         vec_eval_enabled=True,
         training_config_name="suite",
@@ -200,6 +178,9 @@ def test_eval_worker_init_loads_model_and_normalizer(monkeypatch: pytest.MonkeyP
     )
     assert be._worker_model is loaded_model
     assert callable(be._worker_obs_normalizer)
+    # V11 §0.35 : le normalizer est construit sur le zip que CE worker charge — pas de canal
+    # de chemin de stats séparé qui pourrait pointer vers un autre modèle.
+    assert seen_paths == ["/tmp/model.zip"]
 
 
 def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pytest.MonkeyPatch) -> None:

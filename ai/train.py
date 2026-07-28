@@ -1411,6 +1411,24 @@ def _apply_vec_normalize(env, model_path_for_vn, vec_norm_cfg, new_model, n_envs
         env.training = True
         env.norm_reward = vec_norm_cfg.get("norm_reward", True)
         log_fn("✅ VecNormalize: loaded stats from checkpoint")
+    elif not new_model and not reset_vec_normalize:
+        # Reprise (--step) SANS stats sur disque : creer des stats neuves en silence ferait
+        # continuer un modele entraine normalise sur une distribution recalee de zero — un
+        # decalage muet, la classe de bug V11 §0.35. L'absence est une erreur explicite.
+        expected_path = get_vec_normalize_path(model_path_for_vn)
+        legacy_path = os.path.join(os.path.dirname(model_path_for_vn), "vec_normalize.pkl")
+        legacy_hint = (
+            f" Un pkl LEGACY partagé existe ({legacy_path}) : il peut appartenir à un AUTRE "
+            f"modèle du dossier — le renommer en '{os.path.basename(expected_path)}' "
+            f"explicitement si ces stats sont bien celles de ce modèle."
+            if os.path.exists(legacy_path)
+            else ""
+        )
+        raise FileNotFoundError(
+            f"VecNormalize: reprise d'entraînement demandée mais stats absentes : "
+            f"{expected_path}.{legacy_hint} Sinon, relancer avec --new (from scratch) ou "
+            f"reset_on_curriculum."
+        )
     else:
         env = VecNormalize(
             cast(Any, env),
@@ -3654,11 +3672,15 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
                     print(f"   ⚠️  Could not remove {os.path.basename(checkpoint_file)}: {e}")
             print(f"✅ Checkpoint cleanup complete")
         
-        # Also remove interrupted file if it exists
+        # Also remove interrupted file if it exists — WITH its per-model VecNormalize stats
+        # (V11 §0.35) : supprimer le zip en laissant le pkl fabrique un artefact orphelin.
         interrupted_path = model_path.replace('.zip', '_interrupted.zip')
         if os.path.exists(interrupted_path):
             try:
                 os.remove(interrupted_path)
+                interrupted_vec_path = get_vec_normalize_path(interrupted_path)
+                if os.path.exists(interrupted_vec_path):
+                    os.remove(interrupted_vec_path)
                 print(f"🧹 Removed old interrupted file")
             except Exception as e:
                 print(f"   ⚠️  Could not remove interrupted file: {e}")

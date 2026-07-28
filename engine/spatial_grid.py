@@ -369,7 +369,7 @@ def project_pool_to_grid(
 
 
 def normalize_move_costs(
-    costs: "np.ndarray", normal_budget: int, half_extent_subhex: int
+    costs: "np.ndarray", normal_budget: int, half_extent_subhex: int, *, engaged: bool
 ) -> "np.ndarray":
     """Couts geodesiques (subhex) -> valeurs du canal `GRID_CH_MOVE_COST`, dans [0,1].
 
@@ -389,8 +389,13 @@ def normalize_move_costs(
     commentaire de `MOVE_COST_ADVANCE_THRESHOLD` : le CNN ne voit que la grille, il ne peut pas
     retrouver ou est cette frontiere.
 
-    Escouade ENGAGEE : le pool est construit au budget Fall Back (= M), donc tous les couts sont
-    <= M et le canal reste <= seuil. C est exact, et informatif : « aucun advance disponible ».
+    Escouade ENGAGEE (`engaged=True`, le predicat du MASQUE `_squad_is_in_enemy_er`) : TOUT
+    mouvement est un Fall Back (09.05), qui coute le tir et la charge comme un Advance. Les couts
+    (tous <= M, budget Fall Back) sont donc encodes dans la bande (seuil, 1], jamais sous le
+    seuil : un canal <= seuil signifiait « je garde mon tir », ce qui etait FAUX pour une escouade
+    engagee — le CNN aurait du croiser avec le canal EZ pour le corriger, exactement le croisement
+    que ce canal existe pour eviter. La semantique du seuil devient uniforme : sous le seuil =
+    bouger ici est gratuit, au-dessus = bouger ici coute le tir/la charge.
     """
     if half_extent_subhex <= 0:
         raise ValueError(
@@ -421,7 +426,16 @@ def normalize_move_costs(
 
     threshold = float(MOVE_COST_ADVANCE_THRESHOLD)
     span_advance = float(half_extent_subhex - normal_budget)
-    if normal_budget == 0:
+    if engaged:
+        # Fall Back : meme bande que l Advance (le cout strategique est le meme), echelle sur la
+        # demi-etendue entiere — le pool engage est borne par M < H, donc les valeurs restent
+        # < 1 et monotones. L origine (cout 0, rester sur place = pas de Fall Back) reste a 0.
+        out = np.where(
+            costs > 0.0,
+            threshold + (1.0 - threshold) * costs / float(half_extent_subhex),
+            0.0,
+        )
+    elif normal_budget == 0:
         # Budget normal NUL (Take to the skies 21.03 sur une unite tres lente) : rester sur place
         # est le seul « normal », toute cellule atteinte est un advance. Pas de division par zero
         # a masquer — le regime normal est vide, on le dit.

@@ -47,6 +47,10 @@ from engine.macro_intents import (
 from engine.observation_builder import ObservationBuilder
 from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE, cell_index
 
+from engine.observation_entities import unit_bin_index
+
+_UNIT_PRESENT = unit_bin_index("present")
+
 
 def _space() -> gym.spaces.Dict:
     spaces = {}
@@ -81,8 +85,8 @@ def _zero_obs(batch: int = 2) -> Dict[str, np.ndarray]:
         shape = sp.shape
         assert shape is not None
         obs[key] = np.zeros((batch,) + tuple(int(d) for d in shape), dtype=np.float32)
-    obs["allies_bin"][:, 0, 0] = 1.0        # unité active présente
-    obs["enemies_bin"][:, :3, 0] = 1.0      # trois ennemis présents
+    obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0        # unité active présente
+    obs["enemies_bin"][:, :3, _UNIT_PRESENT] = 1.0      # trois ennemis présents
     obs["enemies_cont"][:, :3, 0] = 5.0
     return obs
 

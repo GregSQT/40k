@@ -5,7 +5,7 @@ pve_controller.py - PvE mode AI opponent
 
 import numpy as np
 import os
-from typing import Dict, Any, Tuple, List, cast
+from typing import Dict, Any, Optional, Tuple, List, cast
 from engine.combat_utils import calculate_hex_distance, calculate_pathfinding_distance, normalize_coordinates, get_unit_coordinates
 from engine.phase_handlers.shared_utils import is_unit_alive
 from shared.data_validation import require_key
@@ -22,6 +22,10 @@ class PvEController:
         self.macro_model = None
         self.micro_models = {}
         self.micro_model_paths = {}
+        # model_path -> chemin du pkl VecNormalize per-model (V11 §0.35), ou None si le modele
+        # joue en obs brutes. Resolu au CHARGEMENT (`_resolve_vec_stats_path`) : a l'inference,
+        # un chemin inconnu est une erreur, jamais un repli silencieux.
+        self.micro_model_vec_stats: Dict[str, Optional[str]] = {}
         self.macro_model_key = None
         self.unit_registry = unit_registry
         self.quiet = config.get("quiet", True)
@@ -83,6 +87,7 @@ class PvEController:
             
             self.micro_models = {}
             self.micro_model_paths = {}
+            self.micro_model_vec_stats = {}
             shared_micro_model_key = require_key(self.config, "controlled_agent")
             if not isinstance(shared_micro_model_key, str) or not shared_micro_model_key.strip():
                 raise ValueError(
@@ -109,6 +114,7 @@ class PvEController:
                     raise FileNotFoundError(f"Micro model required for PvE mode not found: {model_path}")
                 self.micro_models[model_key] = MaskablePPO.load(model_path, env=masked_env)
                 self.micro_model_paths[model_key] = model_path
+                self.micro_model_vec_stats[model_path] = self._resolve_vec_stats_path(model_path)
 
             # Marker to indicate PvE micro models are loaded (used by W40KEngine reset guard).
             self.ai_model = self.micro_models
@@ -399,21 +405,58 @@ class PvEController:
             )
         self.micro_models[model_key] = MaskablePPO.load(model_path, env=masked_env)
         self.micro_model_paths[model_key] = model_path
+        self.micro_model_vec_stats[model_path] = self._resolve_vec_stats_path(model_path)
         if not self.quiet:
             print(
                 f"PvE: Lazy-loaded micro model for '{model_key}' "
                 f"using shared model '{model_storage_key}'"
             )
 
+    def _resolve_vec_stats_path(self, model_path: str) -> Optional[str]:
+        """Décide AU CHARGEMENT si les obs de ce modèle seront normalisées (V11 §0.35).
+
+        - pkl per-model présent → son chemin : l'inférence normalisera avec CES stats.
+        - pkl LEGACY partagé (`vec_normalize.pkl`) présent sans per-model → erreur : il peut
+          appartenir à n'importe quel modèle du dossier, le charger rejouerait exactement le
+          bug §0.35. À migrer explicitement (renommer) si et seulement si on en est sûr.
+        - aucun pkl → None : le modèle joue en obs brutes (entraîné sans VecNormalize). C'est
+          un cas métier, pas un repli — mais on le dit, pour qu'une perte d'artefact ne passe
+          pas pour un choix.
+        """
+        from ai.vec_normalize_utils import get_vec_normalize_path
+
+        vec_path = get_vec_normalize_path(model_path)
+        if os.path.exists(vec_path):
+            return vec_path
+        legacy_path = os.path.join(os.path.dirname(model_path), "vec_normalize.pkl")
+        if os.path.exists(legacy_path):
+            raise FileNotFoundError(
+                f"PvE: stats VecNormalize per-model absentes ({vec_path}) mais un pkl LEGACY "
+                f"partagé existe ({legacy_path}). Il peut appartenir à un AUTRE modèle du "
+                f"dossier (V11 §0.35) : le renommer en "
+                f"'{os.path.basename(vec_path)}' explicitement si ces stats sont bien celles "
+                f"de ce modèle, sinon ré-entraîner."
+            )
+        if not self.quiet:
+            print(f"PvE: aucune stat VecNormalize pour {model_path} — obs servies brutes")
+        return None
+
     def _normalize_obs_for_inference(self, obs: np.ndarray, model_path: str) -> np.ndarray:
-        """Normalize observation for inference if model was trained with VecNormalize."""
-        if not model_path or not hasattr(self, "micro_model_paths"):
+        """Normalise l'observation avec les stats DU modèle, résolues à son chargement.
+
+        Aucun repli : un modèle jamais passé par `_resolve_vec_stats_path` est une erreur de
+        flux (l'ancien code retournait l'obs brute sous un `except Exception`, faisant jouer
+        en silence un modèle normalisé sur des obs brutes)."""
+        if model_path not in self.micro_model_vec_stats:
+            raise RuntimeError(
+                f"PvE: modèle {model_path!r} non résolu au chargement — "
+                f"_resolve_vec_stats_path n'a pas été appelé pour ce chemin."
+            )
+        if self.micro_model_vec_stats[model_path] is None:
             return obs
-        try:
-            from ai.vec_normalize_utils import normalize_observation_for_inference
-            return normalize_observation_for_inference(obs, model_path)
-        except Exception:
-            return obs
+        from ai.vec_normalize_utils import normalize_observation_for_inference
+
+        return normalize_observation_for_inference(obs, model_path)
     
     def ai_select_unit(self, eligible_units: List[Dict[str, Any]], action_type: str) -> str:
         """AI selects which unit to activate - NO MODEL CALLS to prevent recursion."""

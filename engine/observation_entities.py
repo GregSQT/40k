@@ -105,8 +105,10 @@ UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (
 )
 
 #: Drapeaux d'une unité, dans l'ordre d'émission.
+#: CONVENTION (uniforme depuis §0.37) : le masque `present` est le DERNIER champ de CHAQUE
+#: registre (unités, figurines self, armes, types) — il était ici en premier, seule exception,
+#: et les lecteurs positionnels (`[..., 0]` vs `[..., -1]`) portaient deux conventions.
 UNIT_BIN_FIELDS: Tuple[str, ...] = (
-    "present",             # masque d'entité (0 = slot vide / unité morte)
     "is_ally",             # 1 = mon camp, 0 = ennemi
     "is_active",           # 1 = l'unité observée (masque des features ci-dessus)
     "moved",
@@ -135,7 +137,9 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     # dire « indéterminé » au lieu de « pas de couvert ».
     "los_can_see",          # 06.01 : ≥ 1 figurine de la cible visible depuis l'observateur
     "cover_vs_observer",    # 13.08 EXACT : la cible a le bénéfice du couvert contre mon tir
-) + tuple(f"rule_{rule_id}" for rule_id in UNIT_RULE_EFFECT_IDS)
+) + tuple(f"rule_{rule_id}" for rule_id in UNIT_RULE_EFFECT_IDS) + (
+    "present",             # masque d'entité (0 = slot vide / unité morte) — DERNIER, cf. ci-dessus
+)
 
 UNIT_CONT_SIZE = len(UNIT_CONT_FIELDS)
 UNIT_BIN_SIZE = len(UNIT_BIN_FIELDS)

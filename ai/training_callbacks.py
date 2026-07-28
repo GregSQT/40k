@@ -763,11 +763,11 @@ class EpisodeBasedEvalCallback(BaseCallback):
             if self.best_model_save_path:
                 save_path = f"{self.best_model_save_path}/best_model"
                 self.model.save(save_path)
-                try:
-                    from ai.vec_normalize_utils import save_vec_normalize
-                    save_vec_normalize(self.model.get_env(), f"{save_path}.zip")
-                except Exception:
-                    pass
+                # Pas de try/except avaleur : un echec d'ECRITURE des stats doit lever ICI, pas
+                # ressortir 600 episodes plus tard comme une eval en erreur (V11 §0.35). Le
+                # retour False (env non enveloppe) = VecNormalize desactive, cas metier.
+                from ai.vec_normalize_utils import save_vec_normalize
+                save_vec_normalize(self.model.get_env(), f"{save_path}.zip")
         
         # if self.verbose > 0:
             # print(f"Episode {self.episode_count}: Eval mean reward: {mean_reward:.2f}")
@@ -1899,11 +1899,11 @@ class BotEvaluationCallback(BaseCallback):
             raise FileNotFoundError(
                 f"Model save did not produce expected .zip artifact: {model_zip_path}"
             )
-        try:
-            from ai.vec_normalize_utils import save_vec_normalize
-            save_vec_normalize(self.model.get_env(), model_zip_path)
-        except Exception:
-            pass
+        # Pas de try/except avaleur : ce snapshot alimente l'evaluation ASYNCHRONE — un echec
+        # d'ecriture des stats avale ici ressortait comme 600/600 episodes en erreur 5 h 30
+        # plus tard (V11 §0.35). Le retour False (env non enveloppe) = VecNormalize desactive.
+        from ai.vec_normalize_utils import save_vec_normalize
+        save_vec_normalize(self.model.get_env(), model_zip_path)
         return model_zip_path
 
     def _infer_agent_key(self) -> str:

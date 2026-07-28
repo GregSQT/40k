@@ -40,7 +40,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.37` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.36` le 2026-07-28).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.38` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.37` le 2026-07-28).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -63,6 +63,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | **§0.30** | Encodeur d'entités partagé + tête pointeur (et 6 trous trouvés le 2026-07-26) | 🟢 **LIVRÉ (2026-07-26)** — T-A→T-F faits ; ne bloque plus §0.14 | **1** | Vérification demandée par l'utilisateur après §9.2.5. **6 trous trouvés**, dont : une escouade ennemie **invisible ET intirable** dans 6 épisodes sur 10 (5 slots figés pour 6 escouades mesurées) ; le gym ignore les types de tir **10.05 / 10.06** ; au tir le gym déclare **une seule arme (index 0), une seule cible** — violation de **04.01** et **04.02** ; l'heuristique d'arme de mêlée a été **périmée par P1** (ignore ANTI-X, DEVASTATING, MELTA…). Décisions actées : renommage `PISTOL` → `CLOSE_QUARTERS`, encodeur d'entité **partagé** (unités+armes, amies+ennemies), **K=20 unités / K=10 armes**, **tête pointeur** pour le ciblage, retrain accepté. **TOUT est livré le 2026-07-26** (T-A→T-F + §1.9 + audit final) : `obs_size` 199 → **20166** *(valeur du 2026-07-26 ; état courant **20545**, cf. §0.31)*, espace d'action 1047 → **1062**. Résidu **§1.9** (volet MONSTER/VEHICLE de 10.06 côté PvP/mono) **refermé le 2026-07-26** après validation PvP de T-C par l'utilisateur — plus aucun résidu ouvert. Détail complet, mesures et journal → **[`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)**. |
 | **§0.31** | Complétude de l'observation (objectifs situés, règles d'unité) + cache des profils d'armes | 🟢 **LIVRÉ (2026-07-27)** — 3 commits, 13 tests + mutations | **1** | Audit demandé par l'utilisateur (« l'obs est-elle complète, branchée, optimale ? »). Branchement **intact**. **2 trous fermés** : (1) les objectifs n'avaient **aucune position** — mesuré, **1 à 2 sur 5** tombaient dans la fenêtre de grille alors que 15 actions de zone les désignent (`ab9baa56`) ; (2) les **règles d'unité** étaient invisibles du pipeline squad, 13 bits d'effet par entité, extinction 19.04 verrouillée (`0fb94a01`). **Perf** : profils d'armes mémoïsés, `build_squad_observation` **2,86 → 1,69 ms** (`7a84e124`). **K larges GARDÉS** (arbitrage utilisateur, généralisation future) — coût mesuré : **0 paramètre**, **0 ms de construction**, 1,39× sur le forward. `obs_size` **20166 → 20601** ⇒ le run §0.14 doit être un `--new` postérieur à ces commits. Détail → **§0.31**. |
 | **§0.32** | Optimalité de l'obs ET de la TÊTE d'action — audit du 2026-07-28 | 🟢 **LIVRÉ (2026-07-28)** — les 6 constats sont fermés : **lot obs T-H/T-I/T-J** (`deab7e03`, 13 tests + mutations, `obs_size` 20601 → **20626**), **lot canaux T-K/T-L** (`GRID_CHANNELS` 7 → **9**, 11 tests + mutations, **0 appel de pool supplémentaire mesuré**, `obs_size` inchangé), **tête T-G** (`b78be588`, 14 tests + 4 mutations, **+0,76 % de paramètres**, **×1,78 sur le forward**) | — | Question de l'utilisateur : « mon obs est-elle optimale ? ». ⚠️ **Une 1re version de cette entrée affirmait « aucun manque de contenu, seulement la forme et l'aval » — FAUX et retiré le 2026-07-28** : la GRILLE a deux manques de contenu, **T-K** (le coût géodésique par cellule, déjà calculé pour le masque puis jeté — c'est lui qui arbitre normal vs advance, donc le tir et la charge) et **T-L** (l'escouade ACTIVE est peinte dans le canal allié, indistinguable des autres escouades amies sur une grille pourtant égocentrique). Ordre corrigé : lot obs (T-H/T-I/T-J) → canaux (T-K/T-L) → tête (T-G), parce que les canaux changent `GRID_CHANNELS`, donc l'entrée du CNN. **T-G (majeur, LIVRÉ)** : les 1024 logits de cellule de move sortaient d'un `Linear` dense et la carte CNN était aplatie avant la tête — **le défaut exact que la tête pointeur avait corrigé pour 20 slots de tir, laissé sur 97 % de l'espace d'action**. Ils sortent désormais d'une **conv 1×1** par cellule, sur une carte conservée à 32×32, avec **canaux positionnels** et **conditionnement par le tronc** (les deux ajouts de l'amendement, sans lesquels le 1×1 serait PLUS FAIBLE que la tête dense). ⚠️ **Le gain de sample-efficiency n'est PAS mesuré** — il demande un run ; le coût, lui, l'est (×1,78 sur le forward). **T-H** : une figurine sur le centroïde et non engagée a sa ligne `self_models_*` entièrement nulle ⇒ le masque de présence déduit par `abs().sum() > 0` la compte **absente**. **T-I** : `col_rel`/`row_rel` sont en coordonnées **offset brutes** alors que la grille et les directions d'objectif travaillent dans la projection `_hex_center`. **T-J** : `deployment` et `command` partagent la valeur `phase = 0.0`, et le décodage a un `.get(…, 0.0)`. Détail, mesures et périmètre → **§0.32**. |
+| **§0.37** | Contre-audit des livraisons §0.32–§0.35 + fermeture des résidus | ✅ **LIVRÉ (2026-07-28)** — 5 audits parallèles, ~30 tests ajoutés, familles touchées vertes | — | Audit demandé par l'utilisateur (« ce qu'a fait l'autre session est-il optimal ? »). **Le fond est confirmé partout** (chiffres exacts, root causes réelles, T-G vérifié jusqu'au comptage de paramètres à l'unité) — mais 6 résidus réels, TOUS fermés : (1) **l'érosion re-dupliquait la formule de la frontière** au lieu de lire `squad_normal_move_frontier_subhex` — la « source unique » de §0.34 ne l'était que pour 3 consommateurs sur 4 ; (2) **la charge depuis un étage** avait les deux facettes de §0.34 encore ouvertes (budget au jet BRUT sans descente 13.06, plan 3-uplets → fig marquée à l'étage sur une case de sol → `floor_height_at` lève) — pile-in/conso VÉRIFIÉS déjà conformes (4-uplets par-figurine, champ multi-niveaux) ; (3) **fallbacks VecNormalize silencieux** : obs Box brute si pkl absent, `--step` recréait des stats neuves muettes, PvE jouait brut sous `except Exception`, écriture du snapshot async sous `except: pass` — tous stricts désormais, pkl LEGACY partagé détecté = erreur ; (4) **3 replis de la famille T-J survivaient** dans `observation_builder.py` (`phase` de la grille, centroïde → l'ANCRE T-I, `HP_CUR`) ; (5) **canal T-K faux pour une escouade engagée** (coûts ≤ 0,5 = « je garde mon tir » alors que tout move est un Fall Back) → encodée au-dessus du seuil, sémantique uniforme ; (6) **le canal `vec_model_path` séparé a été SUPPRIMÉ** (les workers dérivent les stats du zip qu'ils chargent — divergence irreprésentable), verrou textuel `inspect.getsource` remplacé par un test comportemental, code mort `_build_eval_obs_normalizer` supprimé, fuite tempfile fermée. Détail → §0.37. |
 | **§0.36** | `--new` héritait du **seuil de score** du run précédent, et écrasait l'agent | ✅ **CORRIGÉ (2026-07-28)** — archivage horodaté, 5 tests | — | `model_<agent>_robust_meta.json` n'est pas une trace mais un **SEUIL** ([`training_callbacks.py:2262`](../../ai/training_callbacks.py#L2262)) : le modèle canonique n'est mis à jour que si le nouveau score robuste le dépasse. Un run `--new` héritait donc du score d'un run précédent — constaté : `0.457372`, venu du run mort au marqueur 24 000 (§0.35). En prime, `model_<agent>.zip` et `best_model.zip` étaient **écrasés** sans trace. À `--new`, les artefacts à **nom fixe** sont désormais renommés `<stem>_<AAAAMMJJ-HHMM><ext>` ; les modèles nommés avec leur **score** et les checkpoints ne bougent pas (nom unique = historique). Détail → §0.36. |
 | **§0.35** | Stats VecNormalize **partagées par dossier** — run de 5 h 30 tué à 24 000/30 000 | ✅ **CORRIGÉ (2026-07-28)** — chemin PAR MODÈLE, 3 tests | — | `get_vec_normalize_path()` ignorait le nom du modèle et renvoyait toujours `<dir>/vec_normalize.pkl`. L'évaluation étant **asynchrone**, la consommation du résultat de l'éval PRÉCÉDENTE (`_remove_model_artifacts` : rotation du meilleur robuste, nettoyage du snapshot) supprimait le pkl que les workers de l'éval EN COURS chargent **paresseusement** au premier pas. Au marqueur 24 000 : **600/600 épisodes en erreur en 7 s**, garde-fou strict, run arrêté. ⚠️ Ce n'est PAS §0.27 (timeout) ni le moteur : **24 000 épisodes sans une seule exception moteur**. ⚠️ Le `robust=0.4574` sauvegardé à 20 000 est à **re-mesurer, pas à citer** : rien ne prouve que le pkl chargé était celui de ce modèle (`global_cont` fait 11 dims avant comme après §0.31/§0.32, donc un résidu se charge sans lever). Détail → §0.35. |
 | **§0.34** | `incohérence masque/exécution` sur les escouades qui DESCENDENT d'un étage (§13.06) | ✅ **CORRIGÉ (2026-07-28)** — 10 tests + 4 mutations rouges, `43 → 0` sur les mêmes 650 pas | — | Sorti de la note « hors périmètre » de §0.32. **Root cause : la frontière normal/advance était calculée sur le `MOVE` BRUT** alors que le pool ET l'exécution appliquent `M − coût de descente` — les cellules de la bande `(M − d, M]` étaient classées `normal` puis rejetées à l'exécution. Deux facettes de la même moitié d'implémentation : le plan rigide ne portait **pas de niveau d'arrivée** (figurine descendue restée marquée à l'étage → `floor_height_at`), et la mesure FLY sous métrique hex utilisait un champ **euclidien** contre une borne **cube**. ⚠️ **La piste « mono-figurine » de §0.32 était le symptôme, pas la cause** : l'érosion rattrapait la bande morte pour les escouades multi-fig en **supprimant des Advances légaux**, et ne la rattrapait pas pour les mono → crash. ⚠️ **Ce bug ne bloquait PAS le run §0.14** : mesuré à **0 occurrence** sur le scénario d'entraînement (x1 et x5) ; les 43/650 venaient de `scenario_pvp_test`, seul scénario avec une escouade à `level: 1`. Motif §0.18/§0.26. Détail → §0.34. |
@@ -88,6 +89,98 @@ résolues §0.15–§0.19, §0.21, **§0.22**, **§0.23**, **§0.24**, **§0.25*
 réserve de méthode sur le document lui-même (T1→T5 et section 9 n'ont **pas** été revérifiés
 ligne à ligne) et la règle de périmètre `ArmageddonAgent`.
 
+
+### 0.37 Contre-audit des livraisons §0.32–§0.35 — ✅ LIVRÉ (2026-07-28)
+
+**Origine.** L'utilisateur a demandé de vérifier « dans les détails » si le travail de la session
+§0.32–§0.35 était **optimal**, sur le seul code. 5 audits parallèles (obs vecteur, grille, tête
+1×1, frontière move, VecNormalize/config), chacun sommé de reproduire les affirmations dans le
+code ET de chercher les défauts restants.
+
+**Verdict global : le fond est confirmé partout.** Aucune affirmation infirmée, aucun bug
+introduit. T-G est le chantier le plus propre : nécessité des deux couches 1×1 + ReLU vérifiée
+**numériquement** sur le modèle réel (sans ReLU, le latent est constant à 7e-7 près sur les
+1024 logits), alignement des 1062 logits confronté bout à bout au masque et au décodeur,
++16 001 paramètres décomposés à l'unité. Seul invérifiable : le ×1,78 du forward (benchmark
+hors code). Mais « livré » n'était pas « optimal » : 6 résidus réels, tous fermés le jour même.
+
+1. **Érosion : la « source unique » de §0.34 ne l'était que pour 3 consommateurs sur 4.**
+   `erode_move_pool_by_squad_block` re-dupliquait `max(0, M − descente)` en ligne
+   (`shared_utils.py`) au lieu de lire `squad_normal_move_frontier_subhex` : identique
+   aujourd'hui, divergence silencieuse à la prochaine évolution de la pénalité. → l'érosion lit
+   la fonction ; verrou de CÂBLAGE par espion (`test_erosion_reads_the_single_frontier_source` :
+   ré-inliner la formule rougit).
+
+2. **Charge depuis un étage — les deux facettes de §0.34, encore ouvertes sur la charge.**
+   Une charge est un move (11.04 EFFECT « moves as described in Moving (03) », PDF lu) :
+   la distance verticale descendue s'ajoute au jet (13.06). Or `charge_build_valid_plan`
+   mesurait au jet BRUT et émettait des **3-uplets sans niveau** — « pas de niveau » =
+   `commit_move` garde le niveau courant → fig descendue restée marquée à l'étage sur une case
+   de sol → `floor_height_at` lève à la mise à jour du cache (le crash exact de §0.34,
+   facette 2). → budget `max(0, jet×ish − squad_descent_penalty_subhex)` (même déduction
+   conservatrice que le move rigide) + plan en **4-uplets** avec
+   `SQUAD_RIGID_MOVE_DESTINATION_LEVEL`. 4 tests (`test_squad_charge_descent_level.py`) : le
+   jet qui suffit au sol ne suffit plus depuis l'étage, contre-épreuves sol et gros jet.
+   ✅ **Pile-in/consolidation VÉRIFIÉS conformes, rien à faire** : plans par-figurine en
+   4-uplets (`commit_pile_in_plan`, fight_handlers), champ multi-niveaux avec coût de
+   descente facturé (`_fight_model_climb_reachable_floor_cells`) — le soupçon de l'audit ne
+   tenait pas.
+
+3. **VecNormalize : « absence = erreur explicite » n'était vrai que sur le chemin critique.**
+   Fermés : `normalize_observation_for_inference` retournait l'obs **brute** si pkl absent
+   (chemin Box) → `FileNotFoundError` ; la reprise `--step` sans stats **recréait des stats
+   neuves en silence** (décalage de distribution muet) → erreur explicite, avec mention du pkl
+   LEGACY partagé s'il traîne ; le PvE jouait brut sous **double `except Exception`** →
+   résolution **au chargement** du modèle (`_resolve_vec_stats_path` : per-model = normalise,
+   LEGACY seul = erreur, aucun = brut ET annoncé) ; l'écriture du snapshot d'éval async et du
+   best_model avalait TOUTE exception (`except: pass`) — le silence exact qui a coûté 5 h 30 à
+   §0.35 → propagation ; le pkl du modèle `_interrupted` est nettoyé avec son zip ; la fenêtre
+   de fuite tempfile (mkstemp → try 200 lignes plus bas) est fermée (le `try` commence dès la
+   préparation).
+
+4. **Le canal `vec_model_path` séparé a été SUPPRIMÉ, pas seulement corrigé.** Les workers
+   d'éval dérivent les stats du **zip qu'ils chargent** (`_eval_worker_init` →
+   `get_vec_normalize_path(model_path)`) : évaluer un modèle avec la normalisation d'un autre
+   est devenu **irreprésentable** — la 2e moitié de §0.35 ne peut plus régresser. Le verrou
+   textuel (`inspect.getsource` cherchant `vec_model_path = effective_model_path`, cassable par
+   renommage) est remplacé par un test comportemental (signature sans `vec_model_path` + le
+   normalizer lit le pkl dérivé du zip + erreur nommant le fichier attendu).
+   `_build_eval_obs_normalizer` (code mort maintenu vivant par ses tests) est supprimé.
+   `test_eval_explicit_scenario.py` **skip** désormais sur pkl absent (précondition
+   d'environnement, comme le zip), au lieu d'échouer.
+
+5. **3 replis de la famille fermée par T-J survivaient dans `observation_builder.py`** :
+   `game_state.get("phase", "")` du canal grille (phase absente = canal vide silencieux),
+   `active_sq.get("centroid_col", ancre)` — qui alimente **l'origine T-I** de toute
+   l'observation — et `entry.get("HP_CUR", 0)` (« escouade à 0 PV » sur un cache incomplet).
+   → `require_key` partout, 3 tests de levée (mêmes oracles que les fermetures T-J).
+
+6. **Canal T-K : sémantique du seuil fausse pour une escouade ENGAGÉE.** Tous ses coûts sont
+   ≤ M → canal ≤ 0,5 = « je garde mon tir », alors que tout mouvement est un **Fall Back**
+   (09.05) qui coûte le tir et la charge — le CNN aurait dû croiser avec le canal EZ,
+   exactement le croisement que T-K existe pour éviter. → `normalize_move_costs(engaged=...)`
+   (paramètre **obligatoire**, prédicat du masque `_squad_is_in_enemy_er` passé par l'obs) :
+   engagée, toute cellule peinte est **au-dessus de 0,5**. Sémantique uniforme : sous le seuil
+   = bouger est gratuit, au-dessus = bouger coûte le tir. Verrou de câblage par monkeypatch du
+   prédicat + tests unitaires (origine à 0, monotonie, < 1, contre-épreuve non engagée).
+   `AI_OBSERVATION.md` mis à jour.
+
+**Aussi actés** : `bot_eval_freq` x1 confirmé à 4000 (l'utilisateur avait remis 2000 à la main,
+revenu à 4000 après explication du garde-fou `save_best_min_episodes`).
+
+7. **Convention du bit `present` UNIFIÉE (demande utilisateur, même jour).** Le registre des
+   unités le portait en PREMIER quand self/armes/types le portent en DERNIER — bénin (index lus
+   du schéma) mais deux conventions dans le même schéma, et 3 lecteurs positionnels `[..., 0]`
+   en dur dans l'extracteur. → `present` est désormais le **DERNIER champ de CHAQUE registre**
+   (`UNIT_BIN_FIELDS`, index `[s][31]`), l'extracteur lit `unit_bin_index("present")` (plus
+   aucun index recopié), doc renumérotée, fixtures basculées sur l'index du schéma. ⚠️ C'est un
+   **changement de layout d'observation à `obs_size` CONSTANT** : un modèle antérieur se
+   chargerait sans erreur et jouerait faux. Fait dans la fenêtre où `ai/models/ArmageddonAgent/`
+   est **vide** (vérifié, aucun training en cours) — le run §0.14 devait déjà être un `--new`.
+
+**Tests** : ~30 ajoutés/remaniés (frontière 11, grille+spatial 65 dont 2 verrous neufs, charge
+descente 4, PvE VecNormalize 6, train helpers 2, vec/bot-eval 29+1 skip). Toutes les familles
+touchées vertes ; la vérification LARGE appartient à l'utilisateur.
 
 ### 0.36 `--new` héritait du seuil de score du run précédent — ✅ CORRIGÉ (2026-07-28)
 

@@ -1917,7 +1917,9 @@ class ObservationBuilder:
                 f"({len(alive_mids)} figurines) — incoherence de cache."
             )
         _c("alive_models", len(alive_mids))
-        _c("hp_total", int(entry.get("HP_CUR", 0)))  # get allowed
+        # HP_CUR : REQUIS. `build_units_cache` le pose toujours et les writers l'entretiennent —
+        # un défaut à 0 dirait « escouade à 0 PV » sur une entrée de cache incomplète (§0.32 T-J).
+        _c("hp_total", int(require_key(entry, "HP_CUR")))
         # VALUE vivante : somme PAR FIGURINE (exacte sur une escouade hétérogène en points).
         _c("value_alive", sum(float(require_key(models_cache[mid], "VALUE")) for mid in alive_mids))
         # OC cumulé : REQUIS. Un défaut à 0 aurait dit « cette escouade ne prend aucun objectif »
@@ -2102,8 +2104,11 @@ class ObservationBuilder:
         ez_zone = get_engagement_zone(game_state)
         current_turn = int(game_state.get("turn", 0))  # get allowed (etat non initialise = tour 0)
         enemy_player = 2 if active_player == 1 else 1
-        cx = float(active_sq.get("centroid_col", active_entry["col"]))  # get allowed
-        cy = float(active_sq.get("centroid_row", active_entry["row"]))  # get allowed
+        # Centroïde : REQUIS. `_compute_squad_cache_entry` le pose toujours (même escouade morte) ;
+        # un repli sur l'ancre de l'unité déplacerait l'origine T-I en silence sur un cache
+        # incomplet — même famille que les replis fermés en §0.32 T-J.
+        cx = float(require_key(active_sq, "centroid_col"))
+        cy = float(require_key(active_sq, "centroid_row"))
         # Origine des positions RELATIVES, dans la projection `_hex_center` (§0.32 T-I) : la même
         # origine que les directions d'objectif (`_squad_objective_geometry`), donc un seul repère
         # pour tout ce que l'observation exprime « depuis moi ».
@@ -2536,8 +2541,11 @@ class ObservationBuilder:
         # L'encodage est affine PAR MORCEAUX (`normalize_move_costs`) pour que la frontiere
         # normal/advance tombe sur une valeur CONSTANTE : le CNN ne recoit que la grille, il ne
         # peut pas croiser le canal avec le MOVE de l'unite pour retrouver ou est cette frontiere.
-        if str(game_state.get("phase", "")).lower() == "move":  # get allowed (phase absente = hors move)
+        # `phase` : REQUIS, même doctrine que le vecteur (§0.32 T-J) — une phase absente doit
+        # lever, pas produire silencieusement un canal de coût vide.
+        if str(require_key(game_state, "phase")).lower() == "move":
             from engine.phase_handlers.shared_utils import (
+                _squad_is_in_enemy_er,
                 read_squad_move_cell_map,
                 squad_normal_move_frontier_subhex,
             )
@@ -2561,6 +2569,10 @@ class ObservationBuilder:
                         costs,
                         squad_normal_move_frontier_subhex(game_state, active_squad_id),
                         half_extent,
+                        # Le MEME predicat d engagement que le masque (`classify_squad_move_type`
+                        # recoit in_er de `_squad_is_in_enemy_er`) : engagee, tout move est un
+                        # Fall Back qui coute le tir — encode au-dessus du seuil.
+                        engaged=_squad_is_in_enemy_er(game_state, active_squad_id),
                     )
                 )
 

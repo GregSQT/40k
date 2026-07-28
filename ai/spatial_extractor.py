@@ -57,7 +57,7 @@ import torch
 import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
-from engine.observation_entities import self_model_bin_index
+from engine.observation_entities import self_model_bin_index, unit_bin_index
 from engine.spatial_grid import GRID_CELL_COUNT, GRID_CHANNELS, GRID_SIZE
 
 #: Familles d'unités partageant le MÊME schéma et le MÊME encodeur.
@@ -66,8 +66,10 @@ _UNIT_FAMILIES = ("allies", "enemies")
 #: Canaux positionnels FIXES ajoutés à la carte de move : x, y, rayon (V11 §0.32 T-G).
 POSITIONAL_CHANNELS = 3
 
-#: Index du masque de présence des figurines — LU depuis le schéma, jamais recopié.
+#: Index des masques de présence — LUS depuis le schéma, jamais recopiés. Convention uniforme
+#: depuis §0.37 : `present` est le DERNIER champ de chaque registre.
 _SELF_MODEL_PRESENT_IDX = self_model_bin_index("present")
+_UNIT_PRESENT_IDX = unit_bin_index("present")
 
 
 class EntityRunningNorm(nn.Module):
@@ -370,7 +372,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         """Embeddings (B, K, entity_dim) d'une famille d'unités, encodeurs PARTAGÉS."""
         unit_cont = obs[f"{family}_cont"]
         unit_bin = obs[f"{family}_bin"]
-        present = unit_bin[..., 0]  # UNIT_BIN_FIELDS[0] == "present"
+        present = unit_bin[..., _UNIT_PRESENT_IDX]  # lu du schéma (dernier champ, §0.37)
         b, k = unit_cont.shape[0], unit_cont.shape[1]
 
         wpn_cont = obs[f"{family}_wpn_cont"]
@@ -408,8 +410,8 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
 
         ally_emb = self._encode_units(observations, "allies")
         enemy_emb = self._encode_units(observations, "enemies")
-        ally_present = observations["allies_bin"][..., 0]
-        enemy_present = observations["enemies_bin"][..., 0]
+        ally_present = observations["allies_bin"][..., _UNIT_PRESENT_IDX]
+        enemy_present = observations["enemies_bin"][..., _UNIT_PRESENT_IDX]
 
         # Ligne 0 = l'unité ACTIVE (contrat de l'observation) : son embedding entre SEUL dans le
         # tronc, il ne doit pas être noyé dans l'agrégation de mes autres escouades.

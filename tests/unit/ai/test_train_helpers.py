@@ -200,3 +200,25 @@ def test_device_benchmark_cache_and_resolution(tmp_path: Path, monkeypatch: pyte
     assert train.resolve_device_mode("CPU", True, 1) == ("cpu", False)
     with pytest.raises(ValueError, match=r"Invalid --mode value"):
         train.resolve_device_mode("BAD", True, 1)
+
+
+def test_apply_vec_normalize_resume_without_stats_raises(tmp_path: Path) -> None:
+    """V11 §0.35 : reprendre un entraînement sans stats sur disque doit LEVER, pas créer des
+    stats neuves en silence (le modèle continuerait sur une distribution recalée de zéro)."""
+    import ai.train as train
+
+    model_path = str(tmp_path / "model_X.zip")
+    with pytest.raises(FileNotFoundError, match=r"model_X_vec_normalize\.pkl"):
+        train._apply_vec_normalize(object(), model_path, {}, False, 2, lambda _m: None)
+
+
+def test_apply_vec_normalize_resume_names_the_legacy_pkl(tmp_path: Path) -> None:
+    """Si un `vec_normalize.pkl` LEGACY partagé traîne dans le dossier, l'erreur le nomme :
+    il peut appartenir à un autre modèle, la migration doit être un geste explicite."""
+    import ai.train as train
+
+    (tmp_path / "vec_normalize.pkl").write_bytes(b"legacy")
+    with pytest.raises(FileNotFoundError, match="LEGACY"):
+        train._apply_vec_normalize(
+            object(), str(tmp_path / "model_X.zip"), {}, False, 2, lambda _m: None
+        )

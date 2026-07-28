@@ -55,6 +55,16 @@ def test_explicit_scenario_played_as_is():
         # d'environnement, pas un contournement d'erreur.
         pytest.skip(f"modèle entraîné absent : {model_path}")
 
+    from ai.vec_normalize_utils import get_vec_normalize_path
+
+    vec_path = get_vec_normalize_path(model_path)
+    if not os.path.exists(vec_path):
+        # Même précondition d'environnement que le zip : les stats VecNormalize per-model
+        # (V11 §0.35) sont un artefact de run non versionné. Absentes, les workers lèvent
+        # (à raison — évaluer sans stats normaliserait avec celles d'un autre modèle) ; ce
+        # n'est pas ce que ce verrou teste, donc skip explicite, pas un échec.
+        pytest.skip(f"stats VecNormalize du modèle absentes : {vec_path}")
+
     from sb3_contrib import MaskablePPO
     from sb3_contrib.common.wrappers import ActionMasker
     from stable_baselines3.common.save_util import load_from_zip_file

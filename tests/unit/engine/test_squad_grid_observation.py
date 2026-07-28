@@ -604,7 +604,7 @@ def test_move_cost_channel_matches_the_mask_cell_map_exactly():
 
     for cell_idx, (_dest, cost) in cell_map.items():
         gy, gx = divmod(cell_idx, GRID_SIZE)
-        expected = float(normalize_move_costs(np.array([cost]), normal_budget, half)[0])
+        expected = float(normalize_move_costs(np.array([cost]), normal_budget, half, engaged=False)[0])
         assert float(grid[GRID_CH_MOVE_COST, gy, gx]) == pytest.approx(expected, abs=1e-6)
 
     painted = int((grid[GRID_CH_MOVE_COST] > 0.0).sum())
@@ -624,3 +624,41 @@ def test_move_cost_channel_is_empty_outside_the_move_phase():
     assert float(eng.obs_builder.build_squad_grid(gs, "1")[GRID_CH_MOVE_COST].sum()) > 0.0
     gs["phase"] = "shoot"
     assert float(eng.obs_builder.build_squad_grid(gs, "1")[GRID_CH_MOVE_COST].sum()) == 0.0
+
+
+def test_move_cost_channel_uses_the_mask_engagement_predicate(monkeypatch):
+    """Verrou de CÂBLAGE : le canal lit `_squad_is_in_enemy_er` — le prédicat du MASQUE.
+
+    Engagée, tout mouvement est un Fall Back (09.05) qui coûte le tir : chaque cellule peinte
+    passe au-dessus du seuil. Un prédicat local recalculé autrement pourrait diverger du masque.
+    """
+    import engine.phase_handlers.shared_utils as su
+
+    from engine.spatial_grid import MOVE_COST_ADVANCE_THRESHOLD
+
+    eng = _engine_behind_wall()
+    gs = eng.game_state
+    free = eng.obs_builder.build_squad_grid(gs, "1")[GRID_CH_MOVE_COST]
+    free_vals = free[free > 0.0]
+    assert (free_vals <= MOVE_COST_ADVANCE_THRESHOLD + 1e-6).any(), (
+        "fixture : non engagée, des cellules du régime normal doivent exister"
+    )
+    monkeypatch.setattr(su, "_squad_is_in_enemy_er", lambda _gs, _sid: True)
+    engaged = eng.obs_builder.build_squad_grid(gs, "1")[GRID_CH_MOVE_COST]
+    engaged_vals = engaged[engaged > 0.0]
+    assert engaged_vals.size > 0
+    assert (engaged_vals > MOVE_COST_ADVANCE_THRESHOLD).all(), (
+        "escouade engagée : toute cellule peinte doit être au-dessus du seuil (Fall Back)"
+    )
+
+
+def test_grid_requires_the_phase_key():
+    """`phase` est REQUIS par la grille comme par le vecteur (§0.32 T-J) : une phase absente
+    doit lever, pas produire silencieusement un canal de coût vide."""
+    from shared.data_validation import ConfigurationError
+
+    eng = _engine_behind_wall()
+    gs = eng.game_state
+    del gs["phase"]
+    with pytest.raises(ConfigurationError, match="phase"):
+        eng.obs_builder.build_squad_grid(gs, "1")
