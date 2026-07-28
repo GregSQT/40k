@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+from typing import Any, Dict
 from pathlib import Path
 
 import pytest
@@ -108,7 +109,7 @@ def test_engaged_snapshot_posed_at_fight_step_start(melee_scenario_file):
     assert any(snapshot.values()), f"snapshot sans aucune unité engagée: {snapshot}"
 
 
-def _fight_action(game_state, squad_id: str) -> dict:
+def _fight_action(game_state, squad_id: str) -> Dict[str, Any]:
     """Action `squad_fight` jouable pour `squad_id` : slot de la 1re cible 12.05, ou combat à vide.
 
     Reproduit le choix que le masque offre (V11 §9 P3-1), sans le deviner : le pool d'engagement
@@ -122,7 +123,9 @@ def _fight_action(game_state, squad_id: str) -> dict:
     if unit is None:
         raise KeyError(f"unit {squad_id} introuvable")
     targets = {str(t) for t in _fight_build_valid_target_pool(game_state, unit)}
-    action = {"action": "squad_fight", "squad_id": str(squad_id)}
+    # Annotation EXPLICITE : `target_slot` est un entier, les deux autres clés des chaînes.
+    # Sans elle, le dict est inféré `dict[str, str]` et l'ajout du slot ne type-checke pas.
+    action: Dict[str, Any] = {"action": "squad_fight", "squad_id": str(squad_id)}
     if not targets:
         return action
     our_player = int(game_state["units_cache"][str(squad_id)]["player"])

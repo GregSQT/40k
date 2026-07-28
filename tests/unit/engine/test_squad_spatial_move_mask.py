@@ -84,8 +84,29 @@ def engine():
 
 
 def test_mask_has_the_spatial_size(engine):
+    """Le masque couvre TOUT l'espace micro, et sa taille en est DÉRIVÉE.
+
+    La valeur était écrite en dur (1047) : elle est devenue fausse dès que §9 P3-1 a ajouté les
+    20 slots de cible de mêlée + le combat à vide, et le test rougissait sur un chiffre recopié,
+    pas sur un défaut. La composition ci-dessous dit ce que le masque doit contenir ; la valeur
+    absolue de l'action space, elle, est verrouillée là où elle a un sens —
+    `test_action_space_mirror.py`, qui la confronte au miroir `macro_intents`/`shared_utils`.
+    """
+    from engine.phase_handlers.shared_utils import (
+        SQUAD_ACTION_FIGHT_SLOT_COUNT,
+        SQUAD_ACTION_SHOOT_SLOT_COUNT,
+    )
+
     mask = build_squad_action_mask(engine.game_state, "1", None, ADVANCE_ROLL)
-    assert len(mask) == SQUAD_ACTION_SIZE == 1047
+    assert len(mask) == SQUAD_ACTION_SIZE
+    assert SQUAD_ACTION_SIZE == (
+        SQUAD_ACTION_MOVE_CELL_COUNT      # une action par cellule de la grille égocentrique
+        + 1                               # wait / fin d'activation
+        + SQUAD_ACTION_SHOOT_SLOT_COUNT   # tir, un slot ennemi par action
+        + 1                               # charge
+        + SQUAD_ACTION_FIGHT_SLOT_COUNT   # cible de mêlée, MÊMES slots ennemis (§9 P3-1)
+        + 1                               # fight sans cible éligible (12.04/12.06)
+    )
 
 
 def test_root_cause_is_dead_agent_reaches_far_beyond_one_subhex(engine):

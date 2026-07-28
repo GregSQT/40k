@@ -1670,7 +1670,7 @@ def model_entry_can_fight_target(
     game_state: Dict[str, Any],
     attacker_model_entry: Dict[str, Any],
     target_entry: Dict[str, Any],
-    engagement_zone: float,
+    engagement_zone: int,
 ) -> bool:
     """Coeur de 04.02, sur une empreinte de figurine DEJA construite.
 
