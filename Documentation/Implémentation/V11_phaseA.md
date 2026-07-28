@@ -37,6 +37,14 @@ absente (stratagèmes, CP, FNP, transports, etc. restent hors scope). Prérequis
 > **[§0.38](V11_agent_rework.md#s0.38)**. Les verdicts **P2, P3, P4, P5 du tableau restent exacts**, re-vérifiés le 2026-07-28
 > (grep `pending_agent_decision`/`CHOICE_[0-9]` = 0 ; `TOTAL_ACTION_SIZE` = 1062 ;
 > `raw_action_int % len(options)` toujours vif). Le titre « 0/5 » devient donc **0/4**.
+>
+> 🔴 **MISE À JOUR 2026-07-28 soir — les lignes P2 et P3 ci-dessous sont à leur tour PÉRIMÉES.**
+> `TOTAL_ACTION_SIZE` vaut **1082** sur la branche `v11-p3-1-fight-target` et **P3 point 1 (cible
+> de mêlée) est LIVRÉ** — non par le `CHOICE_k` de [§9.3](#s9.3), mais par une dimension d'action par slot
+> ennemi + tête pointeur, la spec P2 ayant été jugée périmée par T-E/T-G. Détail, preuves et
+> décision d'architecture → **[§0.41](V11_agent_rework.md#s0.41)**. Le grep `pending_agent_decision`/`CHOICE_[0-9]` rend
+> toujours 0, et c'est **voulu** : le mécanisme générique n'est plus la réponse pour les décisions
+> dont les candidats sont des entités. P3 est donc **1/9**, pas 0/9.
 
 Revérification ligne à ligne contre le code (la première ; [§0.19](V11_agent_rework.md#s0.19) ne l'avait jamais menée, cf. sa
 correction). **Aucune des cinq sous-parties n'est réellement en place**, malgré les marqueurs
@@ -580,6 +588,20 @@ sont strippés à la remontée, et la résolution est dynamique (pas d'union sta
 <a id="s9.3"></a>
 ### 9.3 P2 — Mécanisme générique « décision agent »
 
+> 🔴 **PORTÉE RÉDUITE le 2026-07-28 (§0.41) — lire ceci avant d'appliquer cette section.**
+> Le `CHOICE_0..K-1` décrit ci-dessous suppose des logits produits par des **colonnes denses de
+> `action_net`**. Cette section date du 2026-07-14, donc d'**avant** §0.30 T-E (tête pointeur) et
+> §0.32 T-G (tête 1x1) — qui ont supprimé ce motif : une colonne dense par rang de candidat
+> n'apprend rien des autres et ignore *ce qu'est* le candidat qu'elle score.
+> - **Candidats = entités déjà observées** (cible de mêlée, de charge, de tir, unité à activer) :
+>   ➜ **une dimension d'action par slot + tête pointeur**, PAS `CHOICE_k`. Livré et verrouillé pour
+>   la cible de mêlée (P3-1) → **[§0.41](V11_agent_rework.md#s0.41)**. C'est le patron à suivre.
+> - **Candidats non-entité** (rule-choice, FLY oui/non, pile-in oui/non) : le mécanisme générique
+>   ci-dessous reste pertinent — à ouvrir quand une telle décision est **réellement exercée par les
+>   rosters du training** (ce n'est pas le cas du rule-choice, cf. §0.41).
+> Le paragraphe `action_net → Linear(320, 18)` ci-dessous reste valide dans son principe (les
+> colonnes de move/tir/combat sont inertes) ; le compte « 18 » est périmé.
+
 Un seul mécanisme pour tous les choix joueur, au lieu d'actions ad hoc par décision :
 - quand le moteur atteint un point de choix joueur en gym, au lieu d'appeler une heuristique
   `_ai_select_*`, il pousse un `pending_agent_decision` (type + liste ORDONNÉE et STABLE de
@@ -611,11 +633,24 @@ autre impact sur l'initialisation orthogonale ni sur SB3 si la couche est recons
 heuristiques `_ai_select_*` qui ne sont que des fallbacks/chemins legacy.
 
 Ordre par valeur tactique :
-0. **Prompts rule-choice** (le plus urgent — pseudo-décision aléatoire structurelle) : en gym,
+0. 🔴 **ÉTIQUETTE « le plus urgent » PÉRIMÉE (§0.41, 2026-07-28) — ce point est INERTE dans le
+   training.** Une seule unité du projet porte un rule-choice (`TyranidWarriorMelee`, déclaré dans
+   les rosters **TS**, pas dans `config/unit_rules.json`), et aucun roster d'entraînement
+   ArmageddonAgent n'est tyranide. Le code ci-dessous est vif en PvE et dans `rule_checker`,
+   **jamais** dans le gym d'entraînement. À traiter le jour où un roster tyranide y entre — pas
+   avant, sous peine de livrer un mécanisme jamais exercé. Détail → [§0.41](V11_agent_rework.md#s0.41).
+   **Prompts rule-choice** (pseudo-décision aléatoire structurelle) : en gym,
    `_select_ai_rule_choice_option` choisit par `raw_action_int % len(options)`
    ([w40k_core.py:2494](../../engine/w40k_core.py#L2494)) — l'agent « choisit » via une action émise pour tout autre chose,
    sans voir le prompt. À remplacer par une vraie décision P2.
-1. **Cible de mêlée** — ⚠️ **MIS À JOUR le 2026-07-16 (le fix du bug `squad_fight` a déplacé ce
+1. ✅ **LIVRÉ le 2026-07-28 (branche `v11-p3-1-fight-target`) — détail → [§0.41](V11_agent_rework.md#s0.41).** La cible de
+   mêlée est désormais une **dimension d'action** (`FIGHT_SLOT` 1046-1065, un par slot ennemi,
+   + `ACTION_FIGHT_NO_TARGET` 1066 pour le combat à vide 12.04/12.06), scorée par une **tête
+   pointeur** sur les embeddings d'ennemis — pas par des `CHOICE_k` denses. Le masque n'ouvre un
+   slot que si sa cible est dans le pool 12.05, et le commit refuse tout slot hors pool.
+   `_ai_select_fight_target` reste vive pour le **PvP** uniquement. **Win-rate et regret NON
+   mesurés** (l'action space change ⇒ retrain `--new`). Historique du site ci-dessous, conservé :
+   **Cible de mêlée** — ⚠️ **MIS À JOUR le 2026-07-16 (le fix du bug `squad_fight` a déplacé ce
    site)** : la boucle `get_best_enemy_score_for_unit` de `squad_fight` **n'existe plus** — elle
    sélectionnait sa cible dans le mapping de slots gelé du tir, sans filtre de zone d'engagement
    (violation 12.05) et crashait quand ce mapping était vide (cf.
@@ -627,7 +662,8 @@ Ordre par valeur tactique :
    de config/registry — vérifié : jamais déclenché sur la suite + smoke. Retrait = backend
    partagé, arbitrage requis (cf. `A_faire/bug_pile_in_bfs_clearance_mismatch.md` §dernier).
    La boucle `get_best_enemy_score_for_unit` reste vive pour la **cible de charge** (point 2).
-   Pilote du mécanisme P2.
+   ~~Pilote du mécanisme P2.~~ → il a été le pilote, et il a **tranché la méthode** : slots +
+   pointeur, pas `CHOICE_k` (§0.41). Le point 2 (cible de charge) suit le même patron.
 2. **Cible de charge** — le site vif est la même boucle de scoring dans `convert_squad_action`
    du décodeur (action_decoder ~L917-940), PAS `charge_handlers:1506` (chemin
    `convert_gym_action`, hors gym mais encore vif en PvE via pve_controller — ne pas le

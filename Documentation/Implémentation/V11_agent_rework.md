@@ -44,7 +44,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.41` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.40` le 2026-07-28).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.42` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.41` le 2026-07-28).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -63,7 +63,7 @@ actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
 | **§0.14** | Re-mesure du run — win-rate par matchup | 🟠 **DÉBLOQUÉ** — aucun prérequis technique restant | **1** | Lancer le run `--new` (`obs_size` **20626**, vérifié dans le code le 2026-07-28 : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` == la valeur des 5 profils de config). ⚠️ Lire d'abord §0.33 (choix du profil : 8 envs, re-testé meilleur par l'utilisateur le 2026-07-28) ; `bot_eval_freq` est tranché (2000 assumé, encadré 🟢 ci-dessous). |
-| **[§9](V11_phaseA.md#s9)** | Phase A' — **P2 → P5** (mécanisme de décision agent) | 🔴 **0/4** — vérifié le 2026-07-28 | **2** | Le plus gros reste fonctionnel du document. Grep `pending_agent_decision` / `CHOICE_[0-9]` sur `engine/`+`ai/` = **0** ; `TOTAL_ACTION_SIZE` vaut toujours `BASE_ZONE_INTENT + MAX_OBJECTIVES*3` = **1062**, pas le `41+K` prévu ; la pseudo-décision aléatoire `raw_action_int % len(options)` est toujours vive ([w40k_core.py:2644](../../engine/w40k_core.py#L2644)). Détail → [§9.0](V11_phaseA.md#s9.0) (dont la ligne **P1 est périmée**, cf. §0.38). |
+| **[§9](V11_phaseA.md#s9)** | Phase A' — **P3 tranches 2→8** (décisions restantes) | 🟠 **1/9 livrée** (P3-1, 2026-07-28) | **2** | **P3-1 (cible de mêlée) est LIVRÉE** — branche `v11-p3-1-fight-target`, cf. **§0.41**. Elle a tranché la méthode : une décision dont les candidats sont des ENTITÉS déjà observées se paramètre en **dimension d'action + tête pointeur**, pas en `CHOICE_k` denses (la spec §9.3 date d'avant T-E/T-G). Reste P3-2→8 + P2 générique pour les décisions **non-entité** seulement. ⚠️ Le point **0 (rule-choice)** est **inerte dans le training** : à ne pas traiter en premier malgré son étiquette « le plus urgent » — cf. §0.41. |
 | **§0.38** | Code mort `_attack_sequence_rng` non supprimé — 2ᵉ moitié de P1 | 🟠 **OUVERT** (constaté 2026-07-28) | **3** | P1 prévoyait « porter les règles vers le vif **PUIS supprimer le mort** ». Le portage est fait ; la suppression **non**. Détail → §0.38. |
 | **§0.33** | Rollout buffer 46,9 Go pour 39 Go de RAM | 🟠 **CONDITIONNEL** — ne bloque que les profils à 48 envs | **4** (avant tout run 48 envs) | Vérifié 2026-07-28 dans la config : `x1`/`x5_new`/`x5_debug` = **8 envs** (passent) ; `x5_append`/`x1_debug` = **48 envs** (échouent à l'allocation). Ne pas lancer ces deux-là sans rouvrir l'entrée. |
 | **§0.29** | Scénario SM vs Orks fixed/active + scheduler | 🟢 Mécanique livrée et validée in-engine ; **reste USAGE + MESURE** | 5 | La mesure rejoint §0.14 : c'est le même run qui la produit. |
@@ -674,6 +674,40 @@ tirage sur quelques dizaines d'observations — refaire la mesure en grand avant
 ### Sur les runs et l'outillage
 
 
+**Un run déjà lancé n'est PAS protégé d'un changement de code : `spawn` relit le disque (§0.41, 2026-07-28)**
+
+Les workers d'entraînement sont forkés une fois au démarrage, ce qui laisse croire qu'éditer le
+code pendant un run est sans effet sur lui. **C'est faux.** `ai/bot_evaluation.py` crée ses
+workers d'évaluation avec `mp.get_context("spawn")` — un worker `spawn` **ré-importe tout le code
+depuis le disque**. Un changement d'espace d'action ou d'observation posé sur `main` pendant un
+run fait donc diverger le modèle en mémoire (ancien `TOTAL_ACTION_SIZE`) et les workers d'éval
+(nouveau) : plantage à l'évaluation suivante, ou pire, mesure fausse. **Avant de conclure qu'un
+run en cours est protégé, vérifier le mode de démarrage de CHAQUE famille de sous-processus.**
+Parade appliquée en §0.41 : livrer sur une branche, laisser `main` intact jusqu'à la fin du run.
+
+**Une spec d'action_space peut être périmée par une évolution du RÉSEAU, pas seulement du moteur (§0.41, 2026-07-28)**
+
+[§9.3](V11_phaseA.md#s9.3) prévoyait `CHOICE_0..K-1`, K colonnes denses de `action_net`, pour tout point de décision.
+Écrite le 2026-07-14, elle est antérieure à §0.30 T-E et §0.32 T-G, qui ont supprimé précisément
+ce motif (une colonne dense par rang n'apprend rien des autres et ne sait pas *ce qu'est* le
+candidat qu'elle score). **Règle** : quand les candidats d'une décision sont des ENTITÉS déjà
+encodées dans l'observation, la paramétrisation correcte est **une dimension d'action par slot,
+scorée par produit scalaire sur l'embedding** — coût nul en paramètres, alignement obs↔action
+structurel. Le mécanisme générique ne se justifie que pour les candidats **non-entité**. Corollaire
+de méthode : une spec non datée de la session en cours se relit contre l'ARCHITECTURE actuelle,
+pas seulement contre le moteur.
+
+**Un point de décision « le plus urgent » peut être INERTE dans le training réel (§0.41, 2026-07-28)**
+
+Le point 0 de [§9.4](V11_phaseA.md#s9.4) (pseudo-décision `raw_action_int % len(options)` sur les rule-choices) porte
+l'étiquette « le plus urgent » depuis le 2026-07-24. Vérification faite : **une seule** unité du
+projet porte un rule-choice (`TyranidWarriorMelee`, `usage: "or"`, déclaré dans les rosters **TS**
+— pas dans `config/unit_rules.json`, où le grep rend 0 et laisse croire à tort qu'il n'y en a
+aucun), et **aucun** roster d'entraînement ArmageddonAgent n'est tyranide. Le code est donc vif en
+PvE et dans `rule_checker`, jamais dans le training. **Avant d'ouvrir une tranche sur un point de
+décision, vérifier qu'il est réellement atteint par les ROSTERS du training** — sans quoi on livre
+un mécanisme jamais exercé, c'est-à-dire le motif §0.4 que ce document existe pour interdire.
+
 **Un run qui passe ne prouve pas une non-régression sur un crash stochastique (§0.18)**
 
 🔴 **Erreur commise le 2026-07-20, à ne pas refaire.** Un run de 500 épisodes a franchi
@@ -892,6 +926,114 @@ AVANT d'y lancer un entraînement.
 > des affirmations que leurs propres auteurs ont ensuite corrigées sur place. Ne pas s'appuyer
 > sur l'une d'elles sans la confronter au code.
 
+
+<a id="s0.41"></a>
+### 0.41 §9 P3-1 — la cible de mêlée devient une dimension d'action (slots ennemis + pointeur) — ✅ LIVRÉ, NON MESURÉ (2026-07-28)
+
+> ⚠️ **Livré sur la branche `v11-p3-1-fight-target`, PAS sur `main`** — voir « Pourquoi une
+> branche » en fin d'entrée. `main` est resté à `1bad24b3` pour ne pas casser le run §0.14 en
+> cours. **À merger quand ce run est terminé**, et le retrain suivant DOIT être `--new`.
+
+**Ce qui était en place.** `squad_fight` était une action **sans cible** : le moteur choisissait
+la cible lui-même par `_ai_select_fight_target` (lowest HP puis menace, via `RewardMapper`), au
+fond de `_process_squad_action` ([w40k_core.py](../../engine/w40k_core.py), branche `squad_fight`).
+Conséquences vérifiées par lecture : l'agent ne décidait **rien** en mêlée, et le **pool 12.05**
+(`_fight_build_valid_target_pool`) n'apparaissait **nulle part** dans le masque — le masque disait
+« je peux combattre », jamais « qui je peux frapper ».
+
+**Ce qui est livré.** La cible est portée par l'ACTION, indexée sur le **même mapping de slots
+ennemis que le tir** (`get_enemy_slot_mapping`), donc sur la **même ligne du tenseur ennemi de
+l'observation** (invariant D1) :
+
+| | Avant | Après |
+|---|---|---|
+| Action de combat | `ACTION_FIGHT` = 1046 (sans cible) | `FIGHT_SLOT` **1046-1065** (20) + `ACTION_FIGHT_NO_TARGET` **1066** |
+| `TOTAL_ACTION_SIZE` | 1062 | **1082** |
+| `obs_size` | 20626 | **20626 — INCHANGÉ** |
+| Choix de la cible | moteur (`_ai_select_fight_target`) | **agent** |
+
+- `FIGHT_SLOT_COUNT` est **dérivé** de `SHOOT_SLOT_COUNT`, jamais recopié : les désolidariser
+  ferait pointer l'action de combat `i` et l'observation `i` sur deux escouades différentes sans
+  que rien ne lève. Verrouillé par `test_action_space_mirror.py`.
+- `ACTION_FIGHT_NO_TARGET` n'est pas un cas d'erreur : 12.04/12.06 rendent une escouade éligible
+  **sans cible** (sa cible est morte, overrun). Fusionner ce cas avec un slot rendrait « frapper
+  le slot i » ambigu.
+- **Parité masque/commit dans les DEUX sens** : le masque n'ouvre un slot que si sa cible est
+  dans le pool 12.05, et n'ouvre `NO_TARGET` que si le pool est vide ; le commit refuse tout slot
+  hors pool ET tout « combat à vide » avec pool non vide. Aucun repli sur l'heuristique.
+- **Aucune troncature silencieuse** : une cible 12.05 sans slot mappé est **loguée** (`[SLOTS]`).
+  Impossible en pratique (≤ 6 escouades par camp mesurées, 20 slots), mais jamais muette.
+
+**Décision d'architecture — pourquoi PAS le `CHOICE_0..K-1` de [§9.3](V11_phaseA.md#s9.3).** La spec P2 date du
+2026-07-14, **avant** §0.30 T-E (tête pointeur de tir) et §0.32 T-G (tête 1x1 de move). Elle
+propose K actions **génériques** dont les logits sortiraient de `action_net`, une colonne dense
+par rang de candidat — c'est-à-dire exactement le défaut que T-E et T-G ont supprimé : la colonne
+« candidat 2 » n'apprend rien de la colonne « candidat 1 », et elle ne sait pas *ce qu'est* le
+candidat 2. Pour une décision dont les candidats sont des **entités déjà encodées**, la
+paramétrisation correcte est celle du tir : **une dimension d'action par slot, scorée par produit
+scalaire sur l'embedding de l'entité**. Coût en paramètres d'un slot : **zéro**. Ce que le réseau
+apprend d'un ennemi sert aux deux têtes.
+➜ **Le mécanisme `pending_agent_decision` générique reste pertinent — pour les décisions
+NON-entité seulement** (rule-choice, FLY oui/non, pile-in oui/non). Il n'est pas livré ici : le
+livrer sans décision non-entité réellement exercée en aurait fait du code jamais appelé, le motif
+que §0bis existe pour interdire.
+
+**Tête pointeur : une requête DISTINCTE, des embeddings PARTAGÉS.** `fight_query_net` est une
+seconde `Linear(latent, entity_dim)` appliquée aux mêmes embeddings que le tir. Partager la
+requête forcerait un ordre de préférence unique pour les deux phases, alors que « quel ennemi
+tirer » (portée, LoS, couvert) et « quel ennemi frapper » (valeur de la cible, riposte) ne sont
+pas la même question. Coût : `entity_dim × latent_dim` paramètres, et rien de plus.
+
+**Bots d'évaluation — changement de comportement ASSUMÉ.** `_first_fight_action_in` prend le
+premier slot ouvert, donc la cible **la plus menaçante** (les slots sont attribués par menace
+décroissante) : c'est exactement l'heuristique que ces bots appliquent déjà au tir. Ils ne passent
+donc plus par `_ai_select_fight_target` (lowest HP d'abord). ⚠️ **Les win-rates mesurés avant
+cette tranche ne sont pas comparables à ceux d'après** — la baseline adverse a changé.
+
+**Ce qui reste vif de `_ai_select_fight_target`** : le flux **PvP** (clic sans cible,
+fight_handlers ~2813, ~4969, ~5725). Le pipeline gym ne l'appelle plus.
+
+**Preuves (tests ciblés, verts — aucune suite complète lancée, c'est l'utilisateur qui la lance).**
+
+| Fichier | Résultat |
+|---|---|
+| `tests/unit/engine/test_squad_fight_target_parity.py` | **8 verts**, dont **2 gardes neuves** : slot hors pool 12.05 refusé, « combat à vide » avec pool non vide refusé. Le test de parité vérifie désormais que les slots ouverts décrivent **exactement** le pool 12.05. |
+| `tests/unit/engine/test_action_space_mirror.py` | **10 verts** (miroir `macro_intents` ↔ `shared_utils` étendu aux slots de combat ; pavage `[0, SIZE)` re-vérifié). |
+| `tests/unit/ai/test_pointer_head.py` + `test_evaluation_bots.py` + `test_fight_target_selection_no_fallback.py` | **44 verts**. `test_pointer_logit_is_slot_local` constate maintenant que perturber l'embedding du slot 1 déplace **deux** logits (tir 1 ET combat 1) — c'est le partage recherché, pas une fuite. |
+| batterie fight (`cascade_fight_subphases`, `fight_execution`, `fight_resolution`, `fight_v11_selection`, `fight_v11_orchestration`, `squad_fight_declaration`, `fight_v11_consolidation`, `fight_v11_foundations`) | **92 verts** |
+| `test_blast_cleave`, `test_extra_attacks_fight`, `test_precision` | **19 verts** |
+
+**🔴 CE QUI N'EST PAS MESURÉ, et ne peut pas l'être avant le prochain retrain.**
+1. Le **win-rate** exigé par [§9.6](V11_phaseA.md#s9.6) (« ≥ tranche précédente, sinon corriger observation/reward
+   AVANT d'empiler »). L'action space change ⇒ modèle incompatible ⇒ `--new` obligatoire.
+2. Le **regret** de la décision exigé par [§9.0bis](V11_phaseA.md#s9.0bis) réserve 1 (mesurer l'écart entre le choix
+   optimal et celui de l'heuristique auto AVANT de brancher). Il n'a **pas** été mesuré ici : la
+   décision de brancher repose sur le raisonnement (le focus-fire et l'achèvement d'unité ne sont
+   pas exprimables par « lowest HP puis menace »), pas sur une mesure. **À confronter au premier
+   run.** Si le win-rate baisse, c'est la première hypothèse à instruire.
+
+**🔴 Le point 0 de [§9.4](V11_phaseA.md#s9.4) (« rule-choice, le plus urgent ») est INERTE dans le training — vérifié.**
+`raw_action_int % len(options)` ([w40k_core.py](../../engine/w40k_core.py), `_select_ai_rule_choice_option`) ne
+s'exécute **jamais** sur les rosters d'entraînement. Chaîne de vérification, dans l'ordre :
+`grep "usage.*or\|unique"` sur `config/` = **0** (le `usage`/`choice_timing` vit dans les rosters
+TS, pas dans `config/unit_rules.json`) ; sur `frontend/src/roster/` = **un seul** porteur,
+`TyranidWarriorMelee` (`adrenalised_onslaught`, `usage: "or"`) ; les 4 rosters
+`config/agents/ArmageddonAgent/rosters/500pts/*/` ne contiennent **aucune** unité tyranide (23
+types listés, tous SM ou Orks). **Conclusion : brancher P2 sur le rule-choice aurait produit un
+mécanisme jamais exercé par le training** — le motif §0.4/§0.38 exactement. Le `% len(options)`
+reste donc vif et doit être traité **le jour où un roster tyranide entre dans le training**, ou
+pour le PvE/`rule_checker` qui, eux, l'exercent. Son étiquette « le plus urgent » de [§9.4](V11_phaseA.md#s9.4) est
+**périmée** : elle datait d'avant le choix des rosters SM/Orks (§0.29).
+
+**Pourquoi une branche et pas `main`.** Le run §0.14 tourne depuis 17h23 (`--training-config x1
+--new`, PID relevé). Ses workers d'entraînement sont forkés une fois — mais
+`ai/bot_evaluation.py` crée ses workers d'évaluation en **`mp.get_context("spawn")`**, et un
+worker `spawn` **ré-importe tout le code depuis le disque**. Avec `TOTAL_ACTION_SIZE` passé à 1082
+sur le disque et un modèle à 1062 en mémoire, la **prochaine évaluation** (`bot_eval_freq = 2000`)
+aurait planté ou, pire, mesuré faux. `main` a donc été laissé intact.
+⚠️ **Leçon durable, reportée en §0bis** : un changement d'espace d'action ou d'observation n'est
+pas « inerte pour un run déjà lancé ». Vérifier le mode de démarrage des sous-processus
+(`fork` vs `spawn`) avant de conclure qu'un run en cours est protégé.
 
 <a id="s0.39"></a>
 ### 0.39 Pathfinding exact — correctif juste, aucun appelant, code SUPPRIMÉ — ✅ CLOS (2026-07-28)
