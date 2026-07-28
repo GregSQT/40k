@@ -312,11 +312,17 @@ recréerait en cassant le partage de poids.
 
 **Espace d'action** : une action de tir par slot ennemi (`SHOOT_SLOT_BASE + i`, 20 slots depuis
 T-E) ; les logits de ces actions sont produits par une **tête pointeur** (`ai/pointer_policy.py`)
-qui score `q · e_i` sur les embeddings — un slot de plus ne coûte donc aucun paramètre. ⚠️ **Ce
-partage de poids ne vaut QUE pour les 20 logits de tir** : les 1024 logits de cellule de move
-sortent du `action_net` dense de SB3, et la carte CNN est aplatie avant de l'atteindre — cf.
-**V11 §0.32 T-G**, ouvert, le point d'optimalité le plus lourd du pipeline. Le
-mapping slot ↔ escouade est rafraîchi : les slots des escouades mortes sont rendus, et toute
+qui score `q · e_i` sur les embeddings — un slot de plus ne coûte donc aucun paramètre. **Les
+1024 logits de cellule de move ont la même propriété depuis V11 §0.32 T-G** : ils sortent d'une
+**conv 1×1** sur la colonne de features de leur cellule, prise sur une carte CNN conservée à
+résolution 32×32 (`SpatialCombinedExtractor.move_map_slice()`), et non plus d'une ligne dédiée du
+`action_net` dense. Une cellule de plus ne coûte donc, elle non plus, aucun paramètre, et
+l'alignement `cellule (gx,gy) ↔ action gy*32+gx` est **structurel** (un `reshape`) au lieu d'être
+ré-appris. Deux ajouts sont indissociables de cette tête et ne doivent jamais être retirés : les
+**canaux positionnels fixes** (x, y, rayon — une conv est invariante par translation et ne
+saurait pas que le bord de la grille est la limite d'atteignabilité) et le **conditionnement par
+le latent du tronc** (sans lui, la tête ne voit ni le tour, ni les VP, ni les objectifs hors
+fenêtre). Le mapping slot ↔ escouade est rafraîchi : les slots des escouades mortes sont rendus, et toute
 escouade vivante sans slot en reçoit un (une escouade vivante mappée ne change JAMAIS de slot).
 
 **Pourquoi ce format.** Au format plat, la première couche du réseau portait un jeu de poids

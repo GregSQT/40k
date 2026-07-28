@@ -80,7 +80,7 @@ GRID_CH_MOVE_COST = 8
 # Valeur du canal `GRID_CH_MOVE_COST` au budget de move NORMAL (`M`) — la frontiere normal/advance.
 #
 # POURQUOI un seuil CONSTANT plutot qu une simple division par la demi-etendue. La grille passe
-# SEULE dans le CNN (`ai/spatial_extractor.py` : `self.cnn(observations["grid"])`) et le vecteur
+# SEULE dans le CNN (`ai/spatial_extractor.py` : `self.cnn_stem(observations["grid"])`) et le vecteur
 # n est concatene qu APRES l aplatissement. Un canal `cout / demi-etendue` placerait la frontiere
 # a `M / (M + 6" x i2s)` = `MOVE / (MOVE + 6)`, soit 0,40 (MOVE 4") a 0,70 (MOVE 14") selon
 # l unite : pour savoir si une cellule lui coute son tir, le CNN devrait croiser le canal avec le

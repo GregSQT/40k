@@ -62,7 +62,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | **§0.29** | Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum | 🟢 **MÉCANIQUE LIVRÉE + VALIDÉE IN-ENGINE (2026-07-22)** ; reste USAGE+MESURE (cf. « Suite » §0.29 ; win-rate rejoint §0.14, **débloqué le 2026-07-26**) | 4 | Scénario `scenario_fixed_brawl_sm_orks.json` (terrain **`terrain-mc1.json`**, 36 figurines, compositions réelles des rosters training SM+Orks) où **le champ `deployment_type` bascule** placement manuel ↔ déploiement (`"fixed"` = positions `col/row`, aucun déploiement ; `"active"` = phase de déploiement). Positions par défaut dans les bandes **dégagées de mc1** (rows 90-105 / 195-210, éditables). **+ scheduler `deployment_mode_schedule`** (opt-in) : proportion `active` **croissante par épisode** au fil du training (rampe linéaire, miroir de `deployment_random_mix`, orthogonal à lui). **+ emplacements `top`/`bottom` par figurine DANS les 4 rosters** (P1=top, P2=bottom ; siège+rotation aléatoires conservés) → le mode strict marche sur le vrai chemin roster. 3 verrous verts sur le VRAI moteur : `test_fixed_brawl_deploy_modes.py` (bascule units[]) + `test_deployment_mode_schedule.py` (bornes 0/1 + rampe) + `test_roster_fixed_positions.py` (rosters top/bottom, rotation réelle). Détail → **§0.29** ci-dessous. |
 | **§0.30** | Encodeur d'entités partagé + tête pointeur (et 6 trous trouvés le 2026-07-26) | 🟢 **LIVRÉ (2026-07-26)** — T-A→T-F faits ; ne bloque plus §0.14 | **1** | Vérification demandée par l'utilisateur après §9.2.5. **6 trous trouvés**, dont : une escouade ennemie **invisible ET intirable** dans 6 épisodes sur 10 (5 slots figés pour 6 escouades mesurées) ; le gym ignore les types de tir **10.05 / 10.06** ; au tir le gym déclare **une seule arme (index 0), une seule cible** — violation de **04.01** et **04.02** ; l'heuristique d'arme de mêlée a été **périmée par P1** (ignore ANTI-X, DEVASTATING, MELTA…). Décisions actées : renommage `PISTOL` → `CLOSE_QUARTERS`, encodeur d'entité **partagé** (unités+armes, amies+ennemies), **K=20 unités / K=10 armes**, **tête pointeur** pour le ciblage, retrain accepté. **TOUT est livré le 2026-07-26** (T-A→T-F + §1.9 + audit final) : `obs_size` 199 → **20166** *(valeur du 2026-07-26 ; état courant **20545**, cf. §0.31)*, espace d'action 1047 → **1062**. Résidu **§1.9** (volet MONSTER/VEHICLE de 10.06 côté PvP/mono) **refermé le 2026-07-26** après validation PvP de T-C par l'utilisateur — plus aucun résidu ouvert. Détail complet, mesures et journal → **[`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)**. |
 | **§0.31** | Complétude de l'observation (objectifs situés, règles d'unité) + cache des profils d'armes | 🟢 **LIVRÉ (2026-07-27)** — 3 commits, 13 tests + mutations | **1** | Audit demandé par l'utilisateur (« l'obs est-elle complète, branchée, optimale ? »). Branchement **intact**. **2 trous fermés** : (1) les objectifs n'avaient **aucune position** — mesuré, **1 à 2 sur 5** tombaient dans la fenêtre de grille alors que 15 actions de zone les désignent (`ab9baa56`) ; (2) les **règles d'unité** étaient invisibles du pipeline squad, 13 bits d'effet par entité, extinction 19.04 verrouillée (`0fb94a01`). **Perf** : profils d'armes mémoïsés, `build_squad_observation` **2,86 → 1,69 ms** (`7a84e124`). **K larges GARDÉS** (arbitrage utilisateur, généralisation future) — coût mesuré : **0 paramètre**, **0 ms de construction**, 1,39× sur le forward. `obs_size` **20166 → 20601** ⇒ le run §0.14 doit être un `--new` postérieur à ces commits. Détail → **§0.31**. |
-| **§0.32** | Optimalité de l'obs ET de la TÊTE d'action — audit du 2026-07-28 | 🟠 **OUVERT** — 6 constats ; **lot obs T-H/T-I/T-J LIVRÉ le 2026-07-28** (`deab7e03`, 13 tests + mutations, `obs_size` 20601 → **20626**) ; **lot canaux T-K/T-L LIVRÉ le 2026-07-28** (`GRID_CHANNELS` 7 → **9**, 11 tests + mutations, **0 appel de pool supplémentaire mesuré**, `obs_size` inchangé) ; reste T-G (tête) | **2** (après le lancement du run §0.14 : T-G change la policy, donc un run en cours reste valide comme baseline) | Question de l'utilisateur : « mon obs est-elle optimale ? ». ⚠️ **Une 1re version de cette entrée affirmait « aucun manque de contenu, seulement la forme et l'aval » — FAUX et retiré le 2026-07-28** : la GRILLE a deux manques de contenu, **T-K** (le coût géodésique par cellule, déjà calculé pour le masque puis jeté — c'est lui qui arbitre normal vs advance, donc le tir et la charge) et **T-L** (l'escouade ACTIVE est peinte dans le canal allié, indistinguable des autres escouades amies sur une grille pourtant égocentrique). Ordre corrigé : lot obs (T-H/T-I/T-J) → canaux (T-K/T-L) → tête (T-G), parce que les canaux changent `GRID_CHANNELS`, donc l'entrée du CNN. **T-G (majeur)** : les 1024 logits de cellule de move sortent d'un `Linear` dense ([`pointer_policy.py:112`](../../ai/pointer_policy.py#L112)) et la carte CNN est aplatie avant la tête ([`spatial_extractor.py:228`](../../ai/spatial_extractor.py#L228)) — c'est **le défaut exact que la tête pointeur a corrigé pour 20 slots de tir, laissé sur 97 % de l'espace d'action**. **T-H** : une figurine sur le centroïde et non engagée a sa ligne `self_models_*` entièrement nulle ⇒ le masque de présence déduit par `abs().sum() > 0` la compte **absente**. **T-I** : `col_rel`/`row_rel` sont en coordonnées **offset brutes** alors que la grille et les directions d'objectif travaillent dans la projection `_hex_center`. **T-J** : `deployment` et `command` partagent la valeur `phase = 0.0`, et le décodage a un `.get(…, 0.0)`. Détail, mesures et périmètre → **§0.32**. |
+| **§0.32** | Optimalité de l'obs ET de la TÊTE d'action — audit du 2026-07-28 | 🟢 **LIVRÉ (2026-07-28)** — les 6 constats sont fermés : **lot obs T-H/T-I/T-J** (`deab7e03`, 13 tests + mutations, `obs_size` 20601 → **20626**), **lot canaux T-K/T-L** (`GRID_CHANNELS` 7 → **9**, 11 tests + mutations, **0 appel de pool supplémentaire mesuré**, `obs_size` inchangé), **tête T-G** (`b78be588`, 14 tests + 4 mutations, **+0,76 % de paramètres**, **×1,78 sur le forward**) | — | Question de l'utilisateur : « mon obs est-elle optimale ? ». ⚠️ **Une 1re version de cette entrée affirmait « aucun manque de contenu, seulement la forme et l'aval » — FAUX et retiré le 2026-07-28** : la GRILLE a deux manques de contenu, **T-K** (le coût géodésique par cellule, déjà calculé pour le masque puis jeté — c'est lui qui arbitre normal vs advance, donc le tir et la charge) et **T-L** (l'escouade ACTIVE est peinte dans le canal allié, indistinguable des autres escouades amies sur une grille pourtant égocentrique). Ordre corrigé : lot obs (T-H/T-I/T-J) → canaux (T-K/T-L) → tête (T-G), parce que les canaux changent `GRID_CHANNELS`, donc l'entrée du CNN. **T-G (majeur, LIVRÉ)** : les 1024 logits de cellule de move sortaient d'un `Linear` dense et la carte CNN était aplatie avant la tête — **le défaut exact que la tête pointeur avait corrigé pour 20 slots de tir, laissé sur 97 % de l'espace d'action**. Ils sortent désormais d'une **conv 1×1** par cellule, sur une carte conservée à 32×32, avec **canaux positionnels** et **conditionnement par le tronc** (les deux ajouts de l'amendement, sans lesquels le 1×1 serait PLUS FAIBLE que la tête dense). ⚠️ **Le gain de sample-efficiency n'est PAS mesuré** — il demande un run ; le coût, lui, l'est (×1,78 sur le forward). **T-H** : une figurine sur le centroïde et non engagée a sa ligne `self_models_*` entièrement nulle ⇒ le masque de présence déduit par `abs().sum() > 0` la compte **absente**. **T-I** : `col_rel`/`row_rel` sont en coordonnées **offset brutes** alors que la grille et les directions d'objectif travaillent dans la projection `_hex_center`. **T-J** : `deployment` et `command` partagent la valeur `phase = 0.0`, et le décodage a un `.get(…, 0.0)`. Détail, mesures et périmètre → **§0.32**. |
 | **§0.34** | `incohérence masque/exécution` sur les escouades qui DESCENDENT d'un étage (§13.06) | ✅ **CORRIGÉ (2026-07-28)** — 10 tests + 4 mutations rouges, `43 → 0` sur les mêmes 650 pas | — | Sorti de la note « hors périmètre » de §0.32. **Root cause : la frontière normal/advance était calculée sur le `MOVE` BRUT** alors que le pool ET l'exécution appliquent `M − coût de descente` — les cellules de la bande `(M − d, M]` étaient classées `normal` puis rejetées à l'exécution. Deux facettes de la même moitié d'implémentation : le plan rigide ne portait **pas de niveau d'arrivée** (figurine descendue restée marquée à l'étage → `floor_height_at`), et la mesure FLY sous métrique hex utilisait un champ **euclidien** contre une borne **cube**. ⚠️ **La piste « mono-figurine » de §0.32 était le symptôme, pas la cause** : l'érosion rattrapait la bande morte pour les escouades multi-fig en **supprimant des Advances légaux**, et ne la rattrapait pas pour les mono → crash. ⚠️ **Ce bug ne bloquait PAS le run §0.14** : mesuré à **0 occurrence** sur le scénario d'entraînement (x1 et x5) ; les 43/650 venaient de `scenario_pvp_test`, seul scénario avec une escouade à `level: 1`. Motif §0.18/§0.26. Détail → §0.34. |
 | **§0.33** | Rollout buffer = **46,9 Go** pour **39 Go de RAM** sur les profils à 48 envs | 🟠 **NE BLOQUE PAS le run lancé** (`--training-config x1` = 8 envs = 7,8 Go) ; bloque `x5_append` / `x1_debug`. **Arbitrage 2026-07-28 : aucun changement de config** | — (rouvrir avant tout run à 48 envs) | Le dimensionnement RAM de `move_action_space_spatial_rework.md` §8.3 ne compte que la GRILLE (14,49 Go à 9 canaux, « sous la limite »). Depuis §0.30/§0.31 le **vecteur pèse plus lourd que la grille** (20 626 contre 9 216 floats) et vit dans le même `DictRolloutBuffer`, alloué **d'un bloc au premier `learn()`**. Mesuré sur la config réelle : **116,6 Ko par transition** ⇒ `x5_append` et `x1_debug` (`n_envs=48 × n_steps=8192` = 393 216 transitions) = **46,9 Go**, contre **39 Go physiques / 29 Go disponibles** — l'allocation échoue avant le premier pas. `x1`, `x5_new` et `x5_debug` (`n_envs=8`) = **7,8 Go**, qui passent. ⚠️ **La ligne §0.14 dit « run x5_new, 48 envs » alors que le profil `x5_new` porte `n_envs=8`** : vérifier quel profil et quel override sont réellement lancés AVANT de relancer. ⚠️ La proposition « `n_steps` 8192 → 1024 » a été formulée puis **retirée** : le nombre de pas de gradient ne dépend pas de `n_steps`, et les ablations CoreAgent (30k ép., 48 envs) donnent 8192 pour **inférieur** à 16384. Détail et leviers réels → §0.33. |
 | ~~**§0.22**~~ | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **CLOS le 2026-07-21 — décision (B) STOP à L1+L_bbox** | — | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) livrés et commités** (`ff2293e0`, `6f268d38`) — gain ovale **1,49×**, round10 1,78×, pool strictement identique ; A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. **Reliquat NON poursuivi** (ratio gain/risque mauvais, mesuré) : BFS wavefront réfuté (plus lent à move 12), L2b runs NumPy réfuté (1,1× net + complexité), numba écarté (risque segfault sur run 36 h). ⚠️ **MAJ 2026-07-22 : ce coût perf est désormais INCONTOURNABLE** — le fix de conformité move §0.25 REQUIERT une érosion géodésique par-figurine, exactement le coût que §0.22 combattait. Il refait surface en §0.27. Détail complet → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§10, §11) ; leçon de méthode → §0bis. |
@@ -296,18 +296,17 @@ complet). Les cardinalités larges (§0.31) ne sont pas un problème : l'arbitra
 [`pointer_policy.py:70`](../../ai/pointer_policy.py#L70)), les 5 caches et leurs invalidations,
 les 3 invariants. Aucune affirmation périmée trouvée.
 
-**État du lot au 2026-07-28** : **T-H, T-I et T-J sont LIVRÉS** (`deab7e03`) — bit `present` explicite, projection `_hex_center` unique, phase en one-hot de 6 bits, et les 4 replis du chemin (`phase`, `oc_total`, `squad_cache`) supprimés. `obs_size` **20601 → 20626**. **T-K et T-L sont LIVRÉS à leur tour** : `GRID_CHANNELS` **7 → 9** (canal `self`, canal `coût géodésique du pool de move`), `obs_size` **inchangé** (la grille est fournie à part), **zéro appel de pool supplémentaire mesuré**. Reste ouvert **T-G** (tête de move dense).
+**État du lot au 2026-07-28** : **T-H, T-I et T-J sont LIVRÉS** (`deab7e03`) — bit `present` explicite, projection `_hex_center` unique, phase en one-hot de 6 bits, et les 4 replis du chemin (`phase`, `oc_total`, `squad_cache`) supprimés. `obs_size` **20601 → 20626**. **T-K et T-L sont LIVRÉS à leur tour** : `GRID_CHANNELS` **7 → 9** (canal `self`, canal `coût géodésique du pool de move`), `obs_size` **inchangé** (la grille est fournie à part), **zéro appel de pool supplémentaire mesuré**. **T-G est LIVRÉ le 2026-07-28** (`b78be588`) : les 1024 logits de cellule sortent d'une **conv 1×1** sur une carte CNN conservée à 32×32, avec canaux positionnels et conditionnement par le tronc (14 tests, 4 mutations, **+0,76 % de paramètres**, **×1,78 sur le forward**). **Le lot §0.32 est entièrement fermé.**
 
 ---
 
-#### T-G — 🔴 La tête de move est DENSE : le défaut du format plat, laissé sur 97 % des actions
+#### T-G — ✅ LIVRÉ (2026-07-28, `b78be588`) — la tête de move n'est plus dense
 
-**Constat vérifié.** [`pointer_policy.py:112`](../../ai/pointer_policy.py#L112) : seuls les 20
-logits de tir sortent d'un produit scalaire `q · e_i`. Les **1024 logits de cellule** sortent de
-`self.action_net(latent_pi)`, un `Linear(320 → 1062)` (net_arch `[320, 320]`, cf.
-`ArmageddonAgent_training_config.json`). En amont,
-[`spatial_extractor.py:228-239`](../../ai/spatial_extractor.py#L228-L239) fait
-`Conv → Conv(stride 2) → Conv(stride 2) → Flatten → Linear(4096, 256)` : **la carte spatiale est
+**Constat vérifié (état d'avant, corrigé par ce commit).** `pointer_policy.py` : seuls les 20
+logits de tir sortaient d'un produit scalaire `q · e_i`. Les **1024 logits de cellule** sortaient
+de `self.action_net(latent_pi)`, un `Linear(320 → 1062)` (net_arch `[320, 320]`, cf.
+`ArmageddonAgent_training_config.json`). En amont, `spatial_extractor.py` faisait
+`Conv → Conv(stride 2) → Conv(stride 2) → Flatten → Linear(4096, 256)` : **la carte spatiale était
 détruite avant d'atteindre la tête**.
 
 **Pourquoi c'est le point n°1.** C'est le raisonnement de
@@ -330,12 +329,11 @@ une tête convolutive. La policy y est spécifiée `MultiInputPolicy` + « extra
 grille » — ce qui est bien ce qui est implémenté. Le manque n'est pas une régression : il n'a
 jamais été spécifié.
 
-**Correctif proposé (à valider avant écriture) — ne touche PAS l'observation.** Conserver dans
-l'extracteur une branche CNN **non aplatie**, à résolution 32×32 (pas de stride, ou remontée par
-interpolation), et produire le logit d'une cellule par une **conv 1×1** sur sa colonne de
-features : `logit(gx,gy) = w · f[:, gy, gx]`. Le nombre de cellules devient gratuit en
-paramètres et l'alignement obs↔action devient structurel. C'est le jumeau exact de la tête
-pointeur, côté move.
+**Correctif retenu — il ne touche PAS l'observation.** Conserver dans l'extracteur une branche CNN
+**non aplatie**, à résolution 32×32 (aucun stride), et produire le logit d'une cellule par une
+**conv 1×1** sur sa colonne de features : `logit(gx,gy) = w · f[:, gy, gx]`. Le nombre de cellules
+devient gratuit en paramètres et l'alignement obs↔action devient structurel. C'est le jumeau exact
+de la tête pointeur, côté move.
 
 ⚠️ **Amendement du 2026-07-28 — la conv 1×1 SEULE serait PLUS FAIBLE que la tête dense.** La
 première rédaction de ce correctif vendait l'équivariance en translation comme un gain net. Elle
@@ -360,6 +358,102 @@ d'action custom sous `MaskablePPO` échoue **en silence** si `log_prob`, l'entro
 sont faux. Même discipline obligatoire : ne toucher QUE la valeur des logits, laisser la
 distribution, le masquage, `log_prob` et l'entropie à SB3, et vérifier contre une tête dense de
 référence sur un cas jouet (`tests/unit/ai/test_pointer_head.py` est le modèle à suivre).
+
+---
+
+##### Ce qui a été LIVRÉ (`b78be588`)
+
+**[`ai/spatial_extractor.py`](../../ai/spatial_extractor.py)** — le CNN est désormais un **stem
+commun** (`cnn_stem`, une conv 3×3 pleine résolution sur les 9 canaux) suivi de **deux branches** :
+
+| branche | forme | destination |
+|---|---|---|
+| `cnn` → `cnn_head` (inchangée) | `stride 2 ×2 → Flatten → Linear(4096, 256)` | le **tronc**, qui a besoin d'un résumé GLOBAL de la fenêtre |
+| `map_net` (nouvelle) | conv 3×3 **stride 1**, jamais aplatie | la **carte** `(16 + 3) × 32 × 32`, lue par la tête de move |
+
+La carte est concaténée en fin de vecteur de features, derrière les embeddings ennemis, et sa
+tranche est publique (`move_map_slice()`, jumelle de `enemy_embeddings_slice()`). `features_dim`
+passe de **1 926 à 21 382** — c'est un tenseur de transit, **pas** de l'observation : le rollout
+buffer ne stocke que l'obs, inchangée.
+
+**Les deux ajouts de l'amendement, tels qu'implémentés :**
+
+1. **Canaux positionnels** (`positional_channels()`) : `x`, `y`, `rayon`, en unités de
+   demi-étendue de grille, donc en unités de **budget d'Advance maximal**. Ce sont exactement les
+   coordonnées normalisées de `spatial_grid.cell_center_px` — un test le vérifie cellule par
+   cellule contre cette source unique, sans recopier la moindre constante de géométrie. `rayon = 1`
+   est la limite d'atteignabilité, pour toute unité et toute échelle de board. Ils entrent dans
+   `map_net` **et** ressortent tels quels dans la carte : la tête 1×1 y a un accès direct.
+2. **Conditionnement par le tronc**, dans [`ai/pointer_policy.py`](../../ai/pointer_policy.py) :
+   `move_cell_net` (conv 1×1 sur la carte) et `move_ctx_net` (`Linear` sur `latent_pi`) sont les
+   **deux moitiés d'une seule conv 1×1 appliquée à `[carte ; latent diffusé sur les 32×32]`**. La
+   forme factorisée est un choix de calcul, pas d'architecture : le terme du latent ne dépendant
+   pas de la cellule, le calculer une fois évite de matérialiser un tenseur
+   `(1024, 320, 32, 32)` — **1,3 Go pour diffuser une constante** — et 1024× de MACs. Un test
+   compare au bit près à la forme naïve (broadcast explicite + concat + une conv 1×1).
+
+⚠️ **Piège traité, il aurait rendu l'amendement inopérant en silence** : avec **une seule** conv
+1×1, la contribution du latent serait un décalage **identique sur les 1024 logits** — donc
+strictement invisible du softmax. Le conditionnement aurait été un no-op : la tête aurait tourné,
+appris, et n'aurait jamais rien su du tour ni des VP. D'où **deux** couches 1×1 avec une ReLU
+intercalée, et un test qui exige que changer le latent **réordonne** les cellules
+(`test_trunk_context_reorders_the_cells_it_is_not_a_uniform_shift`).
+
+**Discipline T-E respectée** : seule la **valeur** des logits change. La distribution, le masquage,
+`log_prob` et l'entropie restent ceux de SB3 (`MaskableCategorical`). Les colonnes `move` de
+`action_net` deviennent inertes, comme les colonnes `shoot` — un test le verrouille en les
+perturbant de +10 et en exigeant que rien ne bouge.
+
+**Tests (14, `tests/unit/ai/test_pointer_head.py` + `test_entity_encoder_extractor.py`).** Le plus
+important est le **test d'alignement** : un pic injecté dans la colonne `(gx, gy) = (5, 20)` de la
+carte doit déplacer le logit de l'action `cell_index = gy*32+gx` **et aucun autre**. La cellule est
+volontairement asymétrique : à `gx == gy`, une transposition passerait. Un second test refait le
+parcours **de bout en bout** depuis la grille (latent gelé, sinon le conditionnement fait bouger les
+1024 cellules — ce qui est le comportement voulu) et exige que les cellules déplacées tiennent dans
+la fenêtre 5×5 centrée sur `(gx, gy)`, le champ réceptif réel de `stem + map_net`.
+
+**Mutations, toutes vérifiées rouges :**
+
+| mutation | tests qui rougissent |
+|---|---|
+| transposer `gx`/`gy` dans la tête | alignement, champ réceptif, référence naïve |
+| retirer la ReLU de `_move_logits` | conditionnement uniforme, référence naïve |
+| annuler les canaux positionnels | invariance par translation de la carte |
+| remettre un `stride 2` dans `map_net` | résolution de la carte (+ 3 tests en cascade) |
+
+**Mesures.** Protocole de §0.30/§0.31 : config **réelle** de l'agent (`net_arch [320, 320]`,
+`cnn_features 256`), mesures **appariées** (avant = `git stash` des deux fichiers, dans le même
+processus/machine), médiane de 3 paires.
+
+| grandeur | avant | après | écart |
+|---|---|---|---|
+| paramètres de la policy | 2 117 735 | **2 133 736** | **+16 001 (+0,76 %)** — dont 10 945 de tête 1×1 et 5 056 de `map_net` |
+| `features_dim` (transit, pas l'obs) | 1 926 | **21 382** | la carte `19 × 32 × 32` |
+| forward `get_distribution`, batch 64 | 13,4 ms | **23,5 ms** | **×1,75** |
+| forward `get_distribution`, batch 1024 | 272 ms | **483 ms** | **×1,78** |
+
+Ce que remplacent ces 16 001 paramètres : **328 704** lignes de `action_net` (`(320+1) × 1024`) qui
+portaient les logits de cellule. Elles restent physiquement présentes mais **ne reçoivent plus
+aucun gradient** — choix assumé, identique à celui de T-E : conserver `action_net` entier laisse
+intacts l'initialisation orthogonale, la sauvegarde/reprise et le reste de la machinerie SB3. Le
+coût en calcul de ces colonnes mortes est ~3 % de celui de la tête de move, sous le seuil qui
+justifierait de découper `action_net`.
+
+**Partage du stem, mesuré et non déduit.** La branche carte pourrait avoir sa propre conv d'entrée.
+Sur les piles conv **isolées** (batch 256, 4 threads, 5 mesures alternées), la branche carte coûte
+**+58 %** du CNN d'avant T-G en partageant le stem contre **+98 %** en le dupliquant — 1,7× moins
+cher, et 3 056 paramètres de moins. ⚠️ Sur le forward **complet**, l'écart entre les deux variantes
+est **sous le bruit de la machine (±10 %)** : les encodeurs d'entités dominent. C'est la mesure
+isolée qui tranche ; une première rédaction de ce paragraphe annonçait « 1,91× contre 1,44× » sur
+le forward complet — **chiffre faux, tiré d'un couple de mesures bruitées, retiré**.
+
+⚠️ **NON MESURÉ, et volontairement non affirmé : le gain de sample-efficiency.** Tout ce qui précède
+mesure des paramètres et des millisecondes. Que le partage de poids entre cellules fasse
+effectivement apprendre plus vite ne se prouve **que par un run** (§0.14). Le coût, lui, est réel et
+mesuré : **×1,78 sur le forward**. Le pari reste raisonnable — §0.22 mesure `MOVE_POOL_BUILD` à
+**95,6 %** du temps de training, donc le forward n'est pas le poste dominant — mais c'est un pari,
+pas un résultat. Le run §0.14 doit être un `--new` : l'architecture de la policy change, aucun
+checkpoint antérieur ne se recharge.
 
 ---
 
@@ -503,12 +597,12 @@ destinations lointaines.
 ⚠️ **Pourquoi une frontière CONSTANTE, et non une simple division par `H`.** La 1re version livrée
 divisait par `H`. Elle est **correcte mais sous-optimale**, et le défaut est structurel : la grille
 passe **seule** dans le CNN ([`spatial_extractor.py`](../../ai/spatial_extractor.py) :
-`self.cnn(observations["grid"])`), le vecteur n'est concaténé qu'**après** l'aplatissement. Avec
+`self.cnn_stem(observations["grid"])`), le vecteur n'est concaténé qu'**après** l'aplatissement. Avec
 `coût / H`, la frontière vaut `MOVE / (MOVE + 6)` — 0,40 pour un MOVE 4", 0,70 pour un MOVE 14" :
 pour savoir si une cellule lui coûte son tir, le CNN devrait croiser le canal avec un MOVE qui ne
 lui parvient jamais. **L'information la plus utile du canal était illisible là où elle est
-produite** — et le serait davantage avec la tête pointeur spatiale (**T-G**), qui scorera chaque
-cellule depuis son embedding CNN **local**. L'encodage par morceaux est monotone et bijectif par
+produite** — et le serait plus encore depuis la tête de move (**T-G**, livrée), qui score chaque
+cellule par une conv 1×1 sur sa colonne de features CNN, donc **localement**. L'encodage par morceaux est monotone et bijectif par
 morceaux : rien n'est perdu, seule l'échelle est recalée. Escouade engagée : le pool est au budget
 Fall Back (= M), donc tout le canal reste ≤ 0,5 — exact, et informatif (« aucun advance
 disponible »).
