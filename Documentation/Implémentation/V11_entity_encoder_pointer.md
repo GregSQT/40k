@@ -83,8 +83,13 @@ SHOOT_SLOT_COUNT = 5`, et les actions de tir sont `slot 0..4`.
 - quand une escouade mappée meurt, son slot passe à `None` **définitivement** — il n'est jamais
   réattribué à celle qui n'est pas mappée.
 
-Elle reste chargeable et combattable (charge et fight sont des actions uniques dont la cible est
-résolue par le moteur). C'est donc un **plafond d'espace d'action**, silencieux, non logué.
+~~Elle reste chargeable et combattable (charge et fight sont des actions uniques dont la cible est
+résolue par le moteur).~~ 🔴 **PÉRIMÉ le 2026-07-28** : depuis §9 P3-1 (cible de mêlée) et P3-2
+(cible de charge), la cible de ces deux actions est un **slot ennemi**. Une escouade sans slot est
+donc aussi **incombattable et inchargeable** — le plafond est plus grave que ne le disait cette
+phrase. Il ne se déclenche plus en pratique (20 slots depuis T-E, ~6 escouades mesurées) et le
+dépassement est LOGUÉ (`_refresh_enemy_slot_mapping`). C'est donc toujours un **plafond d'espace
+d'action**, mais il n'est plus silencieux.
 
 ### 1.2 🔴 Le gym ignore deux types de tir entiers (10.05 et 10.06)
 
@@ -312,7 +317,9 @@ features d'unité (F_u brut, + bit is_ally) ────────────
   features globales + CNN(grille)  ─────┘                  │
                                                             ▼
                               logits de tir_i = q · e_enemy_i     (K-indépendant)
-                              logits de move / charge / fight / zone intent : têtes classiques
+                              logits de charge_i / fight_i = q_charge/q_fight · e_enemy_i  (§9 P3-1/P3-2)
+                              logits de move : conv 1x1 sur la carte (§0.32 T-G)
+                              logits de wait / fight-sans-cible / zone intent : tête dense
 ```
 
 - `E_w` est **le même** pour mes armes et celles de l'ennemi.
@@ -862,11 +869,12 @@ il est vert au 2026-07-26.
   unité du cache, grille dégénérée à (-1,-1), hexes candidats non décrits). Chantier dédié
   déjà ouvert dans `V11_audit_observation.md` §11 — hors périmètre §0.30, et il exige une
   observation SPÉCIFIQUE au déploiement, pas un ajustement.
-- **`action_net` conserve des colonnes inertes** — les logits de tir et de move sont produits
-  hors `action_net` : tir par `q · e_i` (§0.30 T-E), move par conv 1×1 (§0.32 T-G). Les
-  colonnes correspondantes ne reçoivent aucun gradient. Assumé et documenté dans
-  `pointer_policy.py` : les retirer exigerait de redimensionner la tête SB3 (initialisation
-  orthogonale + sauvegarde/reprise) pour un coût jugé insuffisant à justifier l'opération.
+- ~~**`action_net` conserve des colonnes inertes**~~ 🟢 **RÉSOLU le 2026-07-28 (§9.3 P2)** : la
+  couche EST redimensionnée à ses colonnes vives dans `_build`, avec réapplication de
+  l'initialisation orthogonale — l'opération jugée ici « d'un coût insuffisant » a été faite.
+  `action_net` vaut `Linear(latent, 17)` depuis §9 P3-2 (wait, fight-sans-cible, 15 intents de
+  zone) ; tout le reste sort de têtes à poids partagés : conv 1×1 pour les cellules, pointeurs
+  pour les slots de tir, de charge, de mêlée et les candidats de décision.
 - **Choix d'arme par l'agent (P3)** : différé, cf. §5.3 — inchangé, et désormais MESURABLE.
 - **`scripts/profile_env_step_360x312.py`** appelle le moteur avec `training_config_name="default"`,
   section qui n'existe dans **aucune** config d'agent (`config/agents/CoreAgent/` n'a plus de

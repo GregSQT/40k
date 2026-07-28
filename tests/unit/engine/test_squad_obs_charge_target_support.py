@@ -139,7 +139,11 @@ def test_zero_outside_the_charge_phase():
 
 
 def test_zero_beyond_the_declaration_range():
-    """Cible à plus de 12" : non déclarable (11.02), donc bit à 0 — et aucun plan construit."""
+    """Cible à plus de 12" : non déclarable (11.02), donc bit à 0.
+
+    Le 0 vient de `charge_build_valid_plan` lui-même, qui commence par
+    `charge_check_eligibility` : l'observation n'a PAS de pré-test à elle (il serait double).
+    """
     eng = _make_engine(_config([
         _unit_cfg(1, 1, [(26, 20)]),
         _unit_cfg(2, 2, [(60, 20)]),

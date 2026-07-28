@@ -22,11 +22,10 @@ from engine.phase_handlers.shared_utils import (
     get_fighting_models,
     # D1 : ordre des slots ennemis IDENTIQUE a l action tir/charge (source unique)
     get_enemy_slot_mapping,
-    # V11 §9 P3-2 : support du choix de cible de charge. Les DEUX oracles moteur, jamais une
-    # reimplementation — ce sont ceux qu'executent le masque d'action et le commit.
+    # V11 §9 P3-2 : support du choix de cible de charge. L'oracle moteur, jamais une
+    # reimplementation — c'est celui qu'execute le commit `squad_charge`.
     CHARGE_MAX_ROLL,
     charge_build_valid_plan,
-    charge_check_eligibility,
 )
 from engine.weapon_damage_cache import lookup_best_weapon
 from engine.observation_weapon_profiles import (
@@ -982,22 +981,6 @@ class ObservationBuilder:
             # Garde par le pool 12.05 : hors pool, aucune figurine ne peut atteindre la cible
             # (le pool teste l'empreinte de l'escouade, qui contient celle de chaque figurine),
             # donc 0 sans boucler. Le coût par-figurine n'est payé qu'au contact réel.
-            # V11 §9 P3-2 — support du choix de cible de CHARGE. Le coût (un plan de charge
-            # complet par cible) n'est payé qu'en phase de charge ET pour une cible réellement
-            # déclarable : `charge_check_eligibility` est le MÊME filtre que le masque d'action,
-            # et il écarte les 12"+ pour quelques microsecondes. Hors de là, le bit vaut 0 et son
-            # masque est le one-hot `phase_charge` du contexte global.
-            if ctx["is_charge_phase"] and charge_check_eligibility(
-                game_state, ctx["active_squad_id"], [squad_id]
-            ):
-                _b(
-                    "charge_reachable_max_roll",
-                    charge_build_valid_plan(
-                        game_state, ctx["active_squad_id"], [squad_id], CHARGE_MAX_ROLL
-                    )
-                    is not None,
-                )
-
             if squad_id in ctx["fight_target_pool"]:
                 from engine.phase_handlers.fight_handlers import model_entry_can_fight_target
 
@@ -1014,6 +997,27 @@ class ObservationBuilder:
                             game_state, synth, target_entry, ctx["engagement_zone"]
                         )
                     ),
+                )
+
+            # V11 §9 P3-2 — support du choix de cible de CHARGE.
+            #
+            # UNE seule garde, celle de la PHASE : hors charge, la question n'a pas de sens et
+            # l'appel — le plus cher de l'observation — n'est pas fait. Il n'y en a PAS de
+            # seconde sur l'éligibilité 11.02, et c'est une correction : `charge_build_valid_plan`
+            # commence lui-même par `charge_check_eligibility` et rend `None`. Un pré-test ici
+            # était donc DOUBLE pour une cible déclarable (mesuré : 4 appels pour 2 cibles) et
+            # sans gain pour une cible hors portée, qui court-circuite de toute façon.
+            #
+            # L'oracle est `charge_build_valid_plan`, la fonction MOTEUR qu'exécute le commit
+            # (`squad_charge`) : une réimplémentation annoncerait une atteignabilité que la
+            # résolution ne produirait pas.
+            if ctx["is_charge_phase"]:
+                _b(
+                    "charge_reachable_max_roll",
+                    charge_build_valid_plan(
+                        game_state, ctx["active_squad_id"], [squad_id], CHARGE_MAX_ROLL
+                    )
+                    is not None,
                 )
 
         if is_active:

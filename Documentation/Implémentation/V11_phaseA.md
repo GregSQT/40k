@@ -877,6 +877,11 @@ observées**, donc slots + pointeur, jamais `CHOICE_k` :
 - **Parité masque/commit dans les DEUX sens** : le masque n'ouvre un slot que si
   `charge_check_eligibility` est vraie pour cette cible, et le commit refuse tout slot non
   déclarable ET tout slot vide. Aucun repli sur l'heuristique.
+- ⚠️ **Le gym reste MONO-CIBLE**, et cette tranche ne le change pas. 11.04 dit « select one **or
+  more** enemy units » ; le PvP le fait (`targetIds`, `charge_handlers`), une action de charge du
+  gym ne désigne qu'**un** slot. Ce n'est pas une régression (c'était déjà le cas quand le
+  décodeur tranchait) mais, la cible étant devenue une dimension d'action, il faut le dire : la
+  déclaration multi-cibles reste au point 8 de [§9.4](#s9.4), « à statuer utilisateur ».
 - Pas de garde de troncature ici (la mêlée en a une) : la mêlée confronte **deux** sources (pool
   12.05 et mapping de slots), donc une cible légale peut n'avoir aucun slot. Ici la seule source
   des candidats **est** le mapping — une escouade ennemie sans slot est déjà loguée en amont par
@@ -901,10 +906,18 @@ qu'elle ignore : aucune case libre au contact, ER d'une escouade **non** ciblée
 MOVING), et la pénalité de descente 13.06, retranchée du jet et exposée nulle part ailleurs.
 - **Oracle unique** : `charge_build_valid_plan`, la fonction que le **commit** exécute. Une
   réimplémentation annoncerait une atteignabilité que la résolution ne produirait pas.
-- **Coût mesuré, et borné par deux gardes** : le bit n'est calculé qu'en **phase de charge** (son
-  masque est le one-hot `phase_charge`) et que pour une cible **déclarable**. Mesure sur le
-  scénario mêlée (2 cibles déclarables) : observation **1,62 ms → 3,40 ms** en phase de charge,
-  **inchangée** aux 5 autres phases. C'est le poste le plus cher de l'observation quand il
+- **UNE seule garde, celle de la PHASE** (`phase_charge`, qui est aussi le masque du bit).
+  ⚠️ **Une seconde garde, sur l'éligibilité 11.02 de la cible, a été écrite puis RETIRÉE au
+  contre-audit** : `charge_build_valid_plan` commence lui-même par `charge_check_eligibility`.
+  Le pré-test était donc **double** pour une cible déclarable et **sans gain** pour une cible
+  hors portée, qui court-circuite de toute façon. Constaté par **comptage d'appels** (déterministe,
+  contrairement au chrono) : **4 appels d'éligibilité pour 2 cibles → 2**. Le gain de temps est
+  réel mais petit (~42 µs par cible déclarable, soit 2,9 % de l'observation de charge sur cette
+  fixture — du même ordre que la variance de mesure) ; ce qui justifie le retrait est **l'absence
+  de tout cas où le pré-test gagne**, pas le chrono.
+- **Coût mesuré** (scénario mêlée, 2 cibles déclarables, minimum sur 9 séries de 40 constructions) :
+  observation **1,2 ms hors charge → 2,2 ms en phase de charge**, soit **+1,0 ms**, et
+  **inchangée aux 5 autres phases**. C'est le poste le plus cher de l'observation quand il
   s'exécute ; il n'a pas été mémoïsé faute de gain démontrable (une escouade ne construit son
   observation qu'une fois par step) et parce qu'un cache d'invalidation est précisément le motif
   qui a produit [§0.26](V11_agent_rework.md#s0.26).
@@ -912,6 +925,27 @@ MOVING), et la pénalité de descente 13.06, retranchée du jet et exposée null
   suit 11.02 (déclaration possible), le bit suit 11.04 (la charge peut aboutir). Une cible
   déclarable mais inatteignable garde son slot ouvert — l'agent a le droit de tenter, il sait
   seulement que c'est perdu d'avance.
+
+**Reward shaping du choix de cible — STATUÉ (exigence de [§9.6](#s9.6), jamais honorée jusqu'ici).**
+§9.6 impose que les heuristiques du `RewardMapper` réutilisées comme shaping des nouvelles
+décisions soient tranchées « par tranche, **jamais en silence** ». Ni P3-1 ni P3-2 ne l'avaient
+fait ; c'est réparé ici, **par lecture de la config, pas par intention** :
+- `RewardCalculator` note une charge réussie par `get_charge_priority_reward(unit, target,
+  all_targets, …)` — une fonction qui **récompense la cible** selon l'heuristique « plus haute
+  menace / plus bas PV » (`ai/reward_mapper.py`). Elle notait le choix du DÉCODEUR ; depuis cette
+  tranche, elle noterait celui de l'AGENT, ce qui l'orienterait vers l'heuristique qu'on vient
+  justement de lui retirer.
+- **Constat, vérifié dans `ArmageddonAgent_rewards_config.json`** : `charge_priority_1/2/3` valent
+  **0.0**, comme `shoot_priority_1/2/3` et `attack_priority_1/2`. La fonction rend donc exactement
+  `base_actions.charge_success` (**0.05**), **indépendamment de la cible**. Le shaping directif est
+  **INERTE** — le seul agent entraîné ne le subit pas.
+- **Décision : ne rien changer.** Retirer l'appel supprimerait un point d'extension pour un gain
+  nul, et remettre des poids non nuls guiderait l'agent vers l'heuristique — cet arbitrage
+  appartient à l'utilisateur, qui possède la config de rewards. 🔴 **Conséquence à retenir si un
+  jour ces poids repassent au-dessus de 0 : le choix de cible de l'agent serait de nouveau tiré
+  vers `damage_ratio`, et le win-rate de la tranche mesurerait le shaping, pas la décision.**
+- Le même constat vaut pour la mêlée (`get_combat_priority_reward`) et le tir
+  (`get_shooting_priority_reward`) : mêmes poids à 0.0, même conclusion.
 
 **Bots d'évaluation — changement de comportement ASSUMÉ.** `_first_charge_action_in` prend le
 premier slot ouvert, donc la cible **la plus menaçante** (les slots sont attribués par menace

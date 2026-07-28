@@ -604,13 +604,23 @@ raisonnement vaut pour une feature d'observation : la justifier exige une **cont
 variable unique** (ici : même `edge_distance`, atteignabilité opposée), sinon rien ne prouve que
 le champ existant ne suffisait pas.
 
-### Une garde de PERFORMANCE n'est pas une garde de CORRECTION — le dire (§0.43, 2026-07-28)
+### Une garde « de performance » non mesurée est souvent du travail EN DOUBLE (§0.43, 2026-07-28)
 
-`charge_reachable_max_roll` est calculé sous deux gardes : la phase de charge, et l'éligibilité
-11.02 de la cible. La seconde est **purement une garde de coût** — `charge_build_valid_plan`
-re-teste lui-même l'éligibilité et rendrait `None` de toute façon. La retirer ne casserait aucun
-test, seulement la perf. Documenter laquelle est laquelle évite qu'un futur lecteur la prenne
-pour un invariant, ou la supprime en croyant simplifier.
+`charge_reachable_max_roll` avait été écrit sous **deux** gardes : la phase de charge, et
+l'éligibilité 11.02 de la cible. La première était documentée comme une garde de coût — et la
+seconde aussi, dans les mêmes termes. Le contre-audit a mesuré : `charge_build_valid_plan`
+**commence lui-même** par `charge_check_eligibility`, donc le pré-test était **double** pour une
+cible déclarable et **sans gain** pour une cible hors portée. Il n'existait aucun cas où il
+gagnait. Il a été retiré.
+
+⚠️ Et la première rédaction de cette leçon affirmait exactement le contraire (« la seconde est
+purement une garde de coût ») : **une justification de perf écrite sans mesure peut être fausse
+au point de survivre à sa propre leçon.**
+
+**Règle** : une garde présentée comme une optimisation se justifie par une **mesure**, et la
+mesure la plus probante n'est pas le chrono (bruité, ici le gain — 42 µs par cible — était du
+même ordre que la variance) mais le **comptage d'appels**, qui est déterministe : 4 appels
+d'éligibilité pour 2 cibles disait tout. Compter avant de chronométrer.
 
 ### Un comportement obtenu par effet de bord n'est pas un comportement décidé (§0.42, 2026-07-28)
 
