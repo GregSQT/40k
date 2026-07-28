@@ -91,8 +91,6 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
         "RNG_WEAPONS": [_weapon()],
         "CC_WEAPONS": [],
         "selectedRngWeaponIndex": 0,
-        "_rapid_fire_rule_value": 0,
-        "_rapid_fire_bonus_shot_current": False,
         "unitType": "TestUnit",
         "DISPLAY_NAME": f"Unit {uid}",
     }

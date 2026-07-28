@@ -256,38 +256,6 @@ def _unit_shoots_as_monster_or_vehicle(game_state: Dict[str, Any], unit: Dict[st
     return _model_is_monster_or_vehicle(unit)
 
 
-def _get_rapid_fire_parameter(weapon: Dict[str, Any]) -> Optional[int]:
-    """Return RAPID_FIRE parameter X from weapon rules, or None if absent."""
-    if not weapon:
-        return None
-    rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
-    for rule in rules:
-        if hasattr(rule, "rule"):
-            if rule.rule == "RAPID_FIRE":
-                if rule.parameter is None:
-                    raise ValueError("RAPID_FIRE rule is missing required parameter")
-                try:
-                    value = int(rule.parameter)
-                except (TypeError, ValueError) as exc:
-                    raise ValueError(f"Invalid RAPID_FIRE parameter: {rule.parameter}") from exc
-                if value <= 0:
-                    raise ValueError(f"RAPID_FIRE parameter must be > 0, got {value}")
-                return value
-        elif isinstance(rule, str):
-            if rule == "RAPID_FIRE":
-                raise ValueError("RAPID_FIRE rule is missing required parameter")
-            if rule.startswith("RAPID_FIRE:"):
-                raw_value = rule.split(":", 1)[1]
-                try:
-                    value = int(raw_value)
-                except ValueError as exc:
-                    raise ValueError(f"Invalid RAPID_FIRE parameter: {raw_value}") from exc
-                if value <= 0:
-                    raise ValueError(f"RAPID_FIRE parameter must be > 0, got {value}")
-                return value
-    return None
-
-
 def _append_shoot_nb_roll_info_log(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -996,13 +964,6 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 "manualWeaponSelected",
                 "_shoot_activation_started",
                 "_current_shoot_nb",
-                "_rapid_fire_context_weapon_index",
-                "_rapid_fire_base_nb",
-                "_rapid_fire_shots_fired",
-                "_rapid_fire_bonus_total",
-                "_rapid_fire_rule_value",
-                "_rapid_fire_bonus_shot_current",
-                "_rapid_fire_bonus_applied_by_weapon",
             )
             for field_name in transient_shoot_state_fields:
                 if field_name in unit:
@@ -2607,15 +2568,10 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     # CLOSE_QUARTERS rule: Reset _shooting_with_close_quarters for this activation (no category restriction yet)
     # This must be done BEFORE weapon_availability_check to avoid incorrect filtering
     unit["_shooting_with_close_quarters"] = None
-    # RAPID_FIRE state is activation-scoped and must be reset at activation start.
-    unit["_rapid_fire_context_weapon_index"] = None
-    unit["_rapid_fire_base_nb"] = 0
-    unit["_rapid_fire_shots_fired"] = 0
-    unit["_rapid_fire_bonus_total"] = 0
-    unit["_rapid_fire_rule_value"] = 0
-    unit["_rapid_fire_bonus_shot_current"] = False
-    unit["_rapid_fire_bonus_applied_by_weapon"] = {}
-    
+    # [RAPID FIRE] 24.30 ne porte AUCUN etat d activation : le bonus est ajoute a la
+    # constitution du pool d attaques (`_manual_roll_intent`), a partir de l arme et de la
+    # demi-portee. Les 7 champs `_rapid_fire_*` qui vivaient ici etaient morts (V11 §0.38).
+
     # Reset weapon.shot flags for this unit at activation start
     # Each unit should be able to use all its weapons at the start of its activation
     rng_weapons = require_key(unit, "RNG_WEAPONS")
@@ -5175,20 +5131,6 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
         del unit["_move_after_shooting_distance"]
     if "_current_shoot_nb" in unit:
         del unit["_current_shoot_nb"]
-    if "_rapid_fire_context_weapon_index" in unit:
-        del unit["_rapid_fire_context_weapon_index"]
-    if "_rapid_fire_base_nb" in unit:
-        del unit["_rapid_fire_base_nb"]
-    if "_rapid_fire_shots_fired" in unit:
-        del unit["_rapid_fire_shots_fired"]
-    if "_rapid_fire_bonus_total" in unit:
-        del unit["_rapid_fire_bonus_total"]
-    if "_rapid_fire_rule_value" in unit:
-        del unit["_rapid_fire_rule_value"]
-    if "_rapid_fire_bonus_shot_current" in unit:
-        del unit["_rapid_fire_bonus_shot_current"]
-    if "_rapid_fire_bonus_applied_by_weapon" in unit:
-        del unit["_rapid_fire_bonus_applied_by_weapon"]
     if "advance_range" in unit:
         del unit["advance_range"]
     unit["SHOOT_LEFT"] = 0
@@ -5950,20 +5892,12 @@ def _unit_has_shot_with_any_weapon(unit: Dict[str, Any]) -> bool:
     """
     Check if unit has already fired at least one ranged attack in current activation.
 
-    Strict semantics:
-    - True as soon as one shot is fired in current weapon context
-      (`_rapid_fire_shots_fired > 0`), even if current weapon is not exhausted yet.
-    - True if any weapon is marked exhausted (`weapon["shot"] == 1`).
+    Semantique stricte : vrai des qu une arme est marquee epuisee (`weapon["shot"] == 1`).
+
+    Avant V11 §0.38 cette fonction lisait d abord `unit["_rapid_fire_shots_fired"]`, un
+    compteur que rien n incrementait jamais (il n etait qu initialise a 0) : la branche etait
+    morte et masquait le seul critere reel, l epuisement de l arme.
     """
-    if "_rapid_fire_shots_fired" in unit:
-        shots_fired_current_context = require_key(unit, "_rapid_fire_shots_fired")
-        if not isinstance(shots_fired_current_context, int):
-            raise TypeError(
-                f"unit['_rapid_fire_shots_fired'] must be int, "
-                f"got {type(shots_fired_current_context).__name__}"
-            )
-        if shots_fired_current_context > 0:
-            return True
     rng_weapons = require_key(unit, "RNG_WEAPONS")
     for weapon in rng_weapons:
         if require_key(weapon, "shot") == 1:
