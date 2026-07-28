@@ -6461,12 +6461,16 @@ class W40KEngine(gym.Env):
             return _build_for_squad(decision_unit_id)
 
         if self.game_state.get("phase") == "deployment":
-            # En deployment, l agent voit ses unites pas encore deployees. Selectionne
-            # la 1ere vivante. Si aucune (cas degenere), zero obs.
-            uc = self.game_state.get("units_cache", {})  # get allowed
-            if uc:
-                return _build_for_squad(next(iter(uc.keys())))
-            return _zero_obs()
+            # §0.40 point 1 : l'obs decrit l'unite SUR LAQUELLE LE MASQUE AGIT, jamais une autre.
+            # Elle lisait `next(iter(units_cache))` — la 1ere cle du cache, tous joueurs confondus
+            # et deployes compris — alors que le masque ouvre les slots 4-8 pour
+            # `deployable_units[current_deployer][0]` : l'agent decrivait A et posait B. Meme
+            # doctrine que la branche `pending_agent_decision` ci-dessus : UNE source, celle du
+            # masque (`get_deployment_active_unit`, qui leve si le pool est vide au lieu de rendre
+            # une obs nulle qui masquerait l'incoherence).
+            return _build_for_squad(
+                str(require_key(self.action_decoder.get_deployment_active_unit(self.game_state), "id"))
+            )
 
         action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
         if not eligible_units and not action_mask.any():

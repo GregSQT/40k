@@ -396,6 +396,34 @@ class ActionDecoder:
         else:
             return [11]  # Only wait for unknown phases
     
+    def get_deployment_active_unit(self, game_state: Dict[str, Any]) -> Dict[str, Any]:
+        """L'unité sur laquelle porte la décision de déploiement — SOURCE UNIQUE obs ↔ masque.
+
+        `get_squad_action_mask_and_eligible_units` ouvre les slots 4-8 pour `eligible_units[0]`,
+        c'est-à-dire la 1re unité vivante de `deployable_units[current_deployer]`. L'observation
+        DOIT décrire cette unité-là : elle lisait auparavant la 1re clé de `units_cache` (tous
+        joueurs confondus, déployés compris), donc l'agent décrivait A et posait B — défaut
+        §0.40 point 1. Ce point d'entrée public expose la MÊME dérivation, sans reconstruire les
+        hexes valides (le poste coûteux du masque).
+
+        Lève si le pool est vide : en phase de déploiement c'est un état incohérent — le masque
+        y serait tout-faux, donc injouable. Rendre une obs nulle masquerait cette incohérence.
+        """
+        phase = require_key(game_state, "phase")
+        if phase != "deployment":
+            raise ValueError(
+                f"get_deployment_active_unit appelé en phase '{phase}' — ce point d'entrée ne "
+                "décrit que la décision de déploiement."
+            )
+        eligible = self._get_eligible_units_for_current_phase(game_state)
+        if not eligible:
+            raise ValueError(
+                "get_deployment_active_unit: aucune unité déployable vivante pour le joueur "
+                f"{self._get_current_deployer(game_state)} — état incohérent "
+                "(le masque de déploiement serait vide, donc injouable)."
+            )
+        return eligible[0]
+
     def _get_eligible_units_for_current_phase(self, game_state: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Get eligible units for current phase using handler's authoritative pools.
         
