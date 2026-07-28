@@ -5058,6 +5058,20 @@ class W40KEngine(gym.Env):
         weapon_name = raw_log.get("weaponName")  # get allowed
         if weapon_name:
             details["weapon_name"] = weapon_name
+        # [HEAVY] 24.16 : proprietes de l ACTIVATION (constantes sur le groupe), pas du jet —
+        # elles viennent donc du log de groupe, pas de `shot`. Le formateur en tire
+        # `Hit 4(4+->3+) [HEAVY]`, que l analyzer et le replay cherchent par regex.
+        # Absentes en melee (ni couvert ni HEAVY) : etat metier valide.
+        if raw_log.get("heavyApplied"):  # get allowed
+            details["hit_rule_modifier"] = "HEAVY"
+            details["hit_target_base"] = raw_log.get("bsBase")  # get allowed
+        # [RAPID FIRE] 24.30 : la regle grossit le POOL d attaques du groupe, elle n est pas
+        # une propriete d un jet — le marqueur est donc porte par toutes les lignes du groupe.
+        # C est ce qui leve le plafond de tirs cote analyzer (NB de base -> NB + X).
+        _rapid_fire = raw_log.get("rapidFireApplied")  # get allowed
+        if _rapid_fire:
+            details["rapid_fire_bonus_shot"] = True
+            details["rapid_fire_rule_value"] = int(_rapid_fire)
         # Les 11 champs par-jet : la cle DOIT exister (le formateur teste `not in details`).
         for src, dst in self._SHOT_RECORD_FIELD_MAP.items():
             details[dst] = shot.get(src)  # get allowed

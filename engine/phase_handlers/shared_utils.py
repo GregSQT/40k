@@ -6872,6 +6872,16 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "target_died": g["kills"] > 0,
         "timestamp": "server_time",
         "is_ai_action": g["player"] == 1,
+        # Regles d armes en clair (pas seulement noyees dans `message`) : le step.log et le
+        # replay en tirent `Hit 4(4+->3+) [HEAVY]` et `[RAPID FIRE:X]`, et les controles de
+        # `ai/analyzer_phases/shoot_handler.py` les cherchent par regex. Sans ces cles, la
+        # ligne ne peut pas les porter et les controles restent muets. Cf. V11 §0hist.38.
+        # `bs_base` n existe QUE sur le chemin tir (pose avec `cover`) : en melee il n y a ni
+        # couvert ni [HEAVY], son absence est un etat metier valide, pas une erreur a masquer.
+        "bs": g["bs"],
+        "bsBase": g["bs_base"] if "bs_base" in g else None,
+        "heavyApplied": bool(g["heavy_applied"]),
+        "rapidFireApplied": int(g["rapid_fire_applied"]) if "rapid_fire_applied" in g else 0,
         "shootDetails": [{"shotNumber": i + 1, **s} for i, s in enumerate(g["shots"])],
     })
 
@@ -7246,10 +7256,16 @@ def _manual_roll_intent(
     # Positions figees pendant la resolution => mesurer ici == « Select Targets step ».
     from engine.utils.weapon_helpers import weapon_rule_parameter
     _rf_x = weapon_rule_parameter(weapon, "RAPID_FIRE")
+    # Valeur EFFECTIVEMENT appliquee (0 si l arme ne porte pas la regle ou si la cible est
+    # hors demi-portee) : le log de tir en tire le token `[RAPID FIRE:X]`, dont l analyzer se
+    # sert pour lever le PLAFOND de tirs de l escouade (NB de base -> NB + X). Sans lui, toute
+    # activation RAPID FIRE produisait de faux « shots over RNG_NB ». Cf. V11 §0hist.38.
+    _rapid_fire_applied = 0
     if _rf_x is not None and _target_within_half_range(
         game_state, str(attacker["squad_id"]), target_sid, weapon
     ):
         n_attacks += _rf_x
+        _rapid_fire_applied = int(_rf_x)
     if n_attacks <= 0:
         return None
     bs_base = int(weapon.get("ATK", weapon.get("BS", 4)))  # get allowed
@@ -7385,6 +7401,7 @@ def _manual_roll_intent(
         # de l arme, avec la meme primitive que le gate de tir. RNG n est exige que si l arme
         # porte la regle (seul cas ou la valeur est lue).
         "heavy_applied": _heavy_applied,
+        "rapid_fire_applied": _rapid_fire_applied,
         "precision": _weapon_precision,
         "precision_range": int(require_key(weapon, "RNG")) if _weapon_precision else None,
         "display_wth": display_wth, "display_save_th": display_save_th,
@@ -7876,6 +7893,9 @@ def _build_manual_allocation(
                 # (constante sur toute l activation), donc jamais ambigue au sein d un groupe ;
                 # `bs` est de toute facon deja dans la cle de groupe.
                 "heavy_applied": bool(r["heavy_applied"]) if "heavy_applied" in r else False,
+                # [RAPID FIRE] 24.30 : propriete du couple (arme, cible) — donc constante sur
+                # le groupe, qui est justement cle par (arme, cible). Absente en melee.
+                "rapid_fire_applied": int(r["rapid_fire_applied"]) if "rapid_fire_applied" in r else 0,
                 "precision": require_key(r, "precision"),
                 "precision_range": require_key(r, "precision_range"),
                 "display_wth": r["display_wth"], "display_save_th": r["display_save_th"],

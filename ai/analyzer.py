@@ -1054,8 +1054,11 @@ def parse_step_log(filepath: str) -> Dict:
         'rule_to_units': rule_to_units,  # rule_id -> set of unit_types (for validity)
         'weapon_rule_to_weapons': weapon_rule_to_weapons,  # rule -> set of "weapon (unit)"
         'weapon_rule_usage': defaultdict(lambda: {1: 0, 2: 0}),  # (rule, weapon_key) -> {1,2}
-        'weapon_rule_invalid_usage': defaultdict(lambda: {1: 0, 2: 0}),  # (rule, weapon_key) -> {1,2}
-        'weapon_rule_invalid_first_lines': {},  # (rule, weapon_key) -> {episode, line}
+        # NB : il n'existe plus de compteur d'usage INVALIDE. Le seul qui ait jamais existe
+        # servait [HEAVY], et re-derivait sa validite depuis units_moved — un critere que le
+        # moteur n'utilise plus depuis le 2026-07-26 et qui n'est pas reconstructible depuis
+        # step.log. Retire le 2026-07-29 (V11 §0hist.38) ; la conformite de [HEAVY] est portee
+        # par tests/unit/engine/test_heavy_shoot.py.
         'total_episodes': 0,
         'total_actions': 0,
         'episode_lengths': [],
@@ -1120,8 +1123,6 @@ def parse_step_log(filepath: str) -> Dict:
         'shoot_combi_profile_conflicts': {1: 0, 2: 0},
         'devastating_wounds_correct': {1: 0, 2: 0},
         'devastating_wounds_incorrect': {1: 0, 2: 0},
-        'rapid_fire_correct': {1: 0, 2: 0},
-        'rapid_fire_incorrect': {1: 0, 2: 0},
         'dead_unit_waiting': {1: 0, 2: 0},
         'dead_unit_skipping': {1: 0, 2: 0},
         'charge_after_flee': {1: 0, 2: 0},
@@ -1217,7 +1218,6 @@ def parse_step_log(filepath: str) -> Dict:
             'shoot_over_rng_nb': {1: None, 2: None},
             'shoot_combi_profile_conflicts': {1: None, 2: None},
             'devastating_wounds_incorrect': {1: None, 2: None},
-            'rapid_fire_incorrect': {1: None, 2: None},
             'dead_unit_waiting': {1: None, 2: None},
             'dead_unit_skipping': {1: None, 2: None},
             'charge_after_flee': {1: None, 2: None},
@@ -2806,7 +2806,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("\n" + "-" * 80)
     _wr_header()
     weapon_rule_usage = stats.get('weapon_rule_usage', defaultdict(lambda: {1: 0, 2: 0}))
-    weapon_rule_invalid_usage = require_key(stats, 'weapon_rule_invalid_usage')
     weapon_rule_to_weapons = require_key(stats, 'weapon_rule_to_weapons')
     unit_types_seen = set(require_key(stats, "unit_types_seen"))
     unit_type_suffixes = tuple(f" ({unit_type})" for unit_type in unit_types_seen)
@@ -2823,27 +2822,16 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             p1 = counts.get(1, 0)  # get allowed: optional player counts
             p2 = counts.get(2, 0)  # get allowed: optional player counts
             has_rule = weapon_key in weapon_rule_to_weapons.get(rule_name, set())
-            invalid_key = (rule_name, weapon_key)
-            if invalid_key in weapon_rule_invalid_usage:
-                invalid_counts = weapon_rule_invalid_usage[invalid_key]
-                invalid_total = invalid_counts[1] + invalid_counts[2]
-            else:
-                invalid_total = 0
-            if has_rule and (p1 + p2) == 0:
-                validite = "NOT USED"
-            elif has_rule and invalid_total == 0:
-                validite = "OK"
-            elif rule_name == "HEAVY" and invalid_total > 0:
-                validite = "INVALID (used after deplacement)"
-            else:
+            # « INVALID » ne qualifie plus qu'une chose verifiable depuis step.log : une paire
+            # (regle, arme) observee alors que l'armurerie ne la declare pas.
+            if not has_rule:
                 validite = "INVALID"
+            elif (p1 + p2) == 0:
+                validite = "NOT USED"
+            else:
+                validite = "OK"
             rule_display = rule_name.capitalize() if rule_name else rule_name
             _wr_row(rule_display, weapon_key, p1, p2, validite)
-            if rule_name == "HEAVY" and invalid_total > 0:
-                invalid_first = require_key(stats, "weapon_rule_invalid_first_lines")
-                first_err = invalid_first.get((rule_name, weapon_key))
-                if first_err:
-                    log_print(f"  First occurrence (Episode {first_err['episode']}): {first_err['line']}")
         not_used_count = sum(
             1
             for (rule_name, weapon_key) in expected_wr_keys
@@ -2869,20 +2857,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
         if bot_dw_incorrect > 0 and stats['first_error_lines']['devastating_wounds_incorrect'][2]:
             first_err = stats['first_error_lines']['devastating_wounds_incorrect'][2]
-            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-
-    agent_rf_correct = stats['rapid_fire_correct'][1]
-    bot_rf_correct = stats['rapid_fire_correct'][2]
-    _wr_row("Rapid_fire", "GLOBAL (correct)", agent_rf_correct, bot_rf_correct, "OK")
-    agent_rf_incorrect = stats['rapid_fire_incorrect'][1]
-    bot_rf_incorrect = stats['rapid_fire_incorrect'][2]
-    if (agent_rf_incorrect + bot_rf_incorrect) > 0:
-        _wr_row("Rapid_fire", "GLOBAL (incorrect)", agent_rf_incorrect, bot_rf_incorrect, "INVALID")
-        if agent_rf_incorrect > 0 and stats['first_error_lines']['rapid_fire_incorrect'][1]:
-            first_err = stats['first_error_lines']['rapid_fire_incorrect'][1]
-            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        if bot_rf_incorrect > 0 and stats['first_error_lines']['rapid_fire_incorrect'][2]:
-            first_err = stats['first_error_lines']['rapid_fire_incorrect'][2]
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
 
     incomplete_p1 = 0
@@ -3185,7 +3159,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     weapon_rule_to_weapons = stats.get('weapon_rule_to_weapons', {})  # get allowed: optional stats
     special_rule_usage_stats = require_key(stats, 'special_rule_usage')
     weapon_rule_usage_stats = require_key(stats, 'weapon_rule_usage')
-    weapon_rule_invalid_usage_stats = require_key(stats, 'weapon_rule_invalid_usage')
     unit_types_seen = set(require_key(stats, "unit_types_seen"))
     unit_type_suffixes = tuple(f" ({unit_type})" for unit_type in unit_types_seen)
     expected_weapon_rule_pairs = {
@@ -3207,12 +3180,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         1 for (rname, wkey) in weapon_rule_usage_stats.keys()
         if (rname not in weapon_rule_to_weapons) or (wkey not in weapon_rule_to_weapons[rname])
     )
-    heavy_rule_invalid_usage = sum(
-        counts[1] + counts[2]
-        for (rname, _wkey), counts in weapon_rule_invalid_usage_stats.items()
-        if rname == "HEAVY"
-    )
-    weapon_rules_invalid += heavy_rule_invalid_usage
     log_print(f"{summary_error_icon(special_rules_invalid > 0)} 1.7 Special rules usage : {special_rule_usage_total} utilisations" + (f" ({special_rules_invalid} invalid)" if special_rules_invalid > 0 else ""))
     weapon_rules_has_warning = weapon_rule_not_used_warnings > 0
     weapon_rules_status_parts: List[str] = []
@@ -3416,7 +3383,6 @@ if __name__ == "__main__":
         core_issues_total = len(stats['parse_errors']) + unit_id_mismatch_total
         weapon_rule_to_weapons = require_key(stats, 'weapon_rule_to_weapons')
         weapon_rule_usage = require_key(stats, 'weapon_rule_usage')
-        weapon_rule_invalid_usage = require_key(stats, 'weapon_rule_invalid_usage')
         unit_types_seen = set(require_key(stats, "unit_types_seen"))
         unit_type_suffixes = tuple(f" ({unit_type})" for unit_type in unit_types_seen)
         expected_weapon_rule_pairs = {
@@ -3434,12 +3400,6 @@ if __name__ == "__main__":
             1 for (rname, wkey) in weapon_rule_usage.keys()
             if (rname not in weapon_rule_to_weapons) or (wkey not in weapon_rule_to_weapons[rname])
         )
-        heavy_rule_invalid_usage = sum(
-            counts[1] + counts[2]
-            for (rname, _wkey), counts in weapon_rule_invalid_usage.items()
-            if rname == "HEAVY"
-        )
-        weapon_rules_invalid += heavy_rule_invalid_usage
         sample_action_types = ['move', 'shoot', 'advance', 'charge', 'fight']
         missing_samples = [action for action in sample_action_types if not stats['sample_actions'][action]]
         total_errors = (
