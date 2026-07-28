@@ -894,12 +894,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             "vec_normalize_eval.enabled is true but vec_normalize.enabled is false"
         )
 
-    models_root = config.get_models_root()
-    vec_model_path = os.path.join(
-        models_root,
-        base_agent_key,
-        f"model_{base_agent_key}.zip"
-    )
+    # `vec_model_path` est defini PLUS BAS, depuis `effective_model_path` : les stats de
+    # normalisation doivent etre celles du modele REELLEMENT evalue (V11 §0.35).
 
     # model_path optionnel : permet d'évaluer un snapshot explicite (mode async).
     # Si absent, on sauvegarde un snapshot temporaire du modèle courant.
@@ -915,7 +911,25 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         _fd, effective_model_path = tempfile.mkstemp(suffix=".zip")
         os.close(_fd)
         model.save(effective_model_path)
+        if vec_normalize_enabled:
+            from ai.vec_normalize_utils import save_vec_normalize
+
+            if not save_vec_normalize(model.get_env(), effective_model_path):
+                raise RuntimeError(
+                    "VecNormalize est active mais l'env du modele n'est pas enveloppe par "
+                    "VecNormalize : impossible de sauver les stats du snapshot d'evaluation. "
+                    "Evaluer sans stats normaliserait avec celles d'un AUTRE modele (V11 §0.35)."
+                )
         _temp_model_path = effective_model_path
+
+    # ⚠️ V11 §0.35 — les stats de normalisation sont celles du modele EVALUE, jamais celles du
+    # modele canonique. Ce chemin valait `<models_root>/<agent>/model_<agent>.zip` en dur, alors
+    # que les workers chargent `effective_model_path` (un SNAPSHOT en mode async) : on evaluait un
+    # modele avec la normalisation d'un AUTRE. Ca n'a jamais leve, parce qu'un pkl trainait dans
+    # le dossier — jusqu'a ce qu'une rotation d'artefacts le supprime et arrete un run de 5 h 30
+    # au marqueur 24 000 (600/600 episodes en erreur). Les deux moities du bug : un nom de fichier
+    # partage (corrige dans `vec_normalize_utils`) et cette source divergente.
+    vec_model_path = effective_model_path
 
     bot_eval_cfg = _load_bot_eval_params(config, base_agent_key, training_config_name)
     eval_weights = bot_eval_cfg["weights"]
@@ -1156,6 +1170,12 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 result = _eval_worker_task(t, progress_callback=_on_episode_completed)
                 results_list.append(result)
     finally:
+        if _temp_model_path:
+            from ai.vec_normalize_utils import get_vec_normalize_path
+
+            _temp_vec_path = get_vec_normalize_path(_temp_model_path)
+            if os.path.exists(_temp_vec_path):
+                os.remove(_temp_vec_path)
         if _temp_model_path and os.path.exists(_temp_model_path):
             try:
                 os.remove(_temp_model_path)

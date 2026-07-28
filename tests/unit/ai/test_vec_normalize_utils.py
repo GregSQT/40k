@@ -128,3 +128,25 @@ def test_normalize_observation_for_inference_respects_norm_obs_disabled(tmp_path
 
     out = vec_normalize_utils.normalize_observation_for_inference(obs, str(tmp_path / "model.zip"))
     assert np.array_equal(out, obs)
+
+
+def test_evaluation_normalizes_with_the_stats_of_the_model_it_evaluates() -> None:
+    """V11 §0.35 (2e moitié) : `vec_model_path` EST le modèle évalué, jamais le canonique.
+
+    `evaluate_against_bots` construisait `vec_model_path` en dur depuis
+    `<models_root>/<agent>/model_<agent>.zip`, alors que les workers CHARGENT
+    `effective_model_path` — un snapshot temporaire en mode async. On évaluait donc un modèle
+    avec la normalisation d'un AUTRE, ce qui n'a jamais levé tant qu'un pkl traînait dans le
+    dossier des modèles. Ce test rougit si la source diverge à nouveau.
+    """
+    import inspect
+
+    from ai import bot_evaluation
+
+    src = inspect.getsource(bot_evaluation.evaluate_against_bots)
+    assert "vec_model_path = effective_model_path" in src, (
+        "les stats de normalisation doivent venir du modele EVALUE (V11 §0.35)"
+    )
+    assert 'f"model_{base_agent_key}.zip"' not in src, (
+        "vec_model_path ne doit plus etre derive du modele canonique (V11 §0.35)"
+    )

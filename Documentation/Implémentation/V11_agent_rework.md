@@ -130,10 +130,34 @@ antérieur : `norm_obs_keys = ["global_cont"]` et `global_cont` fait 11 dimensio
 après** §0.31/§0.32, donc un pkl périmé se charge sans lever et normalise avec les mauvaises
 moyennes. **Ce score est donc à re-mesurer, pas à citer.**
 
-**Tests** : 3 dans `test_vec_normalize_utils.py`, dont celui qui vérifie que snapshot, modèle
-canonique et meilleur robuste ont **trois** chemins distincts, et celui qui refuse un
-`model_path` vide (il donnerait `_vec_normalize.pkl`, partagé de nouveau). 10 verts sur le
-fichier, 63 sur la famille éval/normalisation.
+⚠️ **LE PREMIER CORRECTIF ÉTAIT INCOMPLET — et il aurait tué le run relancé au marqueur 4000.**
+Renommer le fichier ne suffisait pas : il y avait **deux** moitiés au bug, et la seconde est la
+plus grave.
+
+`evaluate_against_bots` construisait `vec_model_path` **en dur** :
+`<models_root>/<agent>/model_<agent>.zip` — alors que les workers CHARGENT `effective_model_path`,
+qui est un **snapshot temporaire dans `/tmp`** en mode async
+(`_submit_async_eval` → `tempfile.mkstemp`). Le modèle évalué et le modèle dont on lisait les
+statistiques de normalisation étaient donc **deux modèles différents**. Ça n'a jamais levé tant
+qu'un pkl traînait dans le dossier des modèles — et quand la rotation l'a supprimé, le run est
+mort. Avec le seul renommage, plus rien n'écrivait
+`<dir>/model_<agent>_vec_normalize.pkl` avant le premier *meilleur* modèle (marqueur ≥ 10 000,
+`save_best_min_episodes`) : **l'éval du marqueur 4000 aurait levé de la même façon.**
+
+**Correctif complet** : `vec_model_path = effective_model_path`, plus l'écriture des stats à côté
+du snapshot dans le chemin non-async (`model.save()` seul ne les écrivait pas — et son absence
+lève désormais au lieu de retomber sur les stats d'un autre modèle). Le nettoyage du snapshot
+temporaire supprime aussi son pkl.
+
+📌 **Leçon de méthode (§0bis).** Renommer un fichier partagé traite le *symptôme* du partage. La
+question à poser était : « **qui écrit ce fichier, et qui le lit ?** » — les deux réponses
+désignaient des modèles différents. Le premier correctif a été écrit sans avoir suivi le chemin
+d'écriture jusqu'à `tempfile.mkstemp`.
+
+**Tests** : 4 dans `test_vec_normalize_utils.py` — trois chemins distincts pour snapshot/canonique/
+meilleur robuste, refus d'un `model_path` vide (il donnerait `_vec_normalize.pkl`, partagé de
+nouveau), et le verrou sur la source de `vec_model_path` dans `evaluate_against_bots`. 11 verts
+sur le fichier, 50 sur la famille éval/normalisation.
 
 📌 **Effet de bord connu, non masqué** : `tests/unit/ai/test_eval_explicit_scenario.py` échoue
 tant qu'aucun run n'a produit de stats dans `ai/models/ArmageddonAgent/` — il en exige un vrai
