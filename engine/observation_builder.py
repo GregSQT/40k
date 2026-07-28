@@ -704,6 +704,8 @@ class ObservationBuilder:
         active_squad_id: str,
         anchor_x: float,
         anchor_y: float,
+        *,
+        active_not_deployed: bool,
     ) -> None:
         """Remplit le bloc « candidats de déploiement » (V11 §0.40 point 3).
 
@@ -717,7 +719,16 @@ class ObservationBuilder:
         Un slot FERMÉ (moins de 5 hexes valides) reste une ligne de zéros, `present` compris —
         jamais un candidat plausible.
         """
+        # DEUX conditions, et la seconde n'est pas une précaution : une escouade DÉJÀ POSÉE ne
+        # choisit pas où se déployer, même pendant la phase de déploiement — elle n'a aucun
+        # candidat, par la règle et non par prudence. C'est la même source
+        # (`deployed_on_turn`) que le bit `deploy_not_on_board`, déjà lue par l'appelant.
+        # Elle rend la garde plus STRICTE, pas plus laxiste : l'unité que le masque déploie
+        # n'est jamais posée (verrouillé par le point 1), donc rien n'est perdu — et l'appel au
+        # décodeur est évité pour toutes les escouades déjà sur le plateau.
         if str(require_key(game_state, "phase")).lower() != "deployment":
+            return
+        if not active_not_deployed:
             return
         decoder = self.action_decoder
         if decoder is None:
@@ -1368,7 +1379,8 @@ class ObservationBuilder:
         # §0.40 point 3 — ce que chaque slot 4-8 poserait réellement. Après le contexte global :
         # il lui faut l'origine de mesure (`anchor_x/y`), déjà établie plus haut.
         self._encode_deployment_candidates(
-            game_state, obs, str(active_squad_id), anchor_x, anchor_y
+            game_state, obs, str(active_squad_id), anchor_x, anchor_y,
+            active_not_deployed=active_not_deployed,
         )
 
         # === ENGAGEMENT (règle 03.04) — une seule passe pour toutes les entités ===

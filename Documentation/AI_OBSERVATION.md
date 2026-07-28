@@ -401,9 +401,14 @@ que le moteur n'aurait pas posé (motif D1). Les grandeurs continues sortent tel
 de scoring du décodeur ; `on_objective` / `in_cover` sont lus dans `_grid_static_hex_arrays`, le
 MÊME ensemble que les canaux « objectifs » et « couvert » de la grille.
 
-**Garde de phase obligatoire.** Hors déploiement le bloc est entièrement nul et **rien n'est
-calculé** — même patron que `is_charge_phase` pour `charge_reachable_max_roll`. Il reste nul aussi
-pour une escouade qui n'est pas celle sur laquelle le masque ouvre les slots 4-8. Coût **mesuré**
+**Garde obligatoire, à DEUX conditions.** Le bloc n'est rempli que si (a) la phase est
+`deployment` — même patron que `is_charge_phase` pour `charge_reachable_max_roll` — **et** (b)
+l'escouade observée n'est **pas encore posée** (`deployed_on_turn`, la même source que le bit
+`deploy_not_on_board`). La seconde n'est pas une précaution : une unité déjà sur le champ de
+bataille ne choisit plus où se déployer, par la règle. Elle rend la garde plus STRICTE — l'unité
+que le masque déploie n'est jamais posée — et évite d'interroger le décodeur pour toutes les
+escouades déjà en place. Le bloc reste nul, enfin, pour une escouade qui n'est pas celle sur
+laquelle le masque ouvre les slots 4-8. Coût **mesuré**
 sur le board x5 (3 épisodes, 33 steps de déploiement) : **285 ms → 345 ms** par step de
 déploiement, soit **+59 ms** pour décrire les 5 stratégies au lieu d'en évaluer une seule. Le
 surcoût est contenu parce que la sélection a été **vectorisée** au passage (`np.lexsort` sur des

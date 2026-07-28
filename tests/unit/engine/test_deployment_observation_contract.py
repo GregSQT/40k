@@ -32,6 +32,7 @@ primitive d'engagement les déclarait mutuellement engagées. Contraire à la r�
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Dict
 
 import numpy as np
 import pytest
@@ -84,9 +85,12 @@ def test_deployment_observation_describes_the_unit_the_mask_acts_on():
     described: list[str] = []
     original = eng.obs_builder.build_squad_observation
 
-    def _spy(game_state, squad_id):
-        described.append(str(squad_id))
-        return original(game_state, squad_id)
+    # Signature IDENTIQUE a celle de `build_squad_observation` (nom du 2e parametre compris) :
+    # un espion qui renomme un parametre n'est plus substituable a la methode qu'il remplace, et
+    # un appel par mot-cle passerait a cote sans que le test le voie.
+    def _spy(game_state: Dict[str, Any], active_squad_id: str):
+        described.append(str(active_squad_id))
+        return original(game_state, active_squad_id)
 
     eng.obs_builder.build_squad_observation = _spy
 
@@ -528,19 +532,25 @@ def test_unplaced_unit_is_not_engaged_by_an_enemy_standing_near_the_sentinel():
     dec = eng.action_decoder
 
     # Déroule jusqu'à ce qu'un ennemi soit posé ET que l'active ne le soit pas encore.
+    # `uid` et `enemies_placed` sont liés AVANT la boucle : sortir sans être passé par le corps
+    # (phase déjà finie, garde de steps) laisserait sinon le reste du test lire des noms non
+    # définis, et l'échec sortirait en `NameError` au lieu du message qui explique le cas.
+    uid = ""
+    enemies_placed: list[str] = []
     steps = 0
     while gs.get("phase") == "deployment" and steps < 1000:
         mask, eligible = dec.get_squad_action_mask_and_eligible_units(gs)
         uid = str(eligible[0]["id"])
         active_player = int(gs["units_cache"][uid]["player"])
         enemies_placed = [
-            s for s, e in gs["units_cache"].items()
+            str(s) for s, e in gs["units_cache"].items()
             if int(e["player"]) != active_player and int(e["col"]) >= 0
         ]
         if enemies_placed:
             break
         eng.step(_first_deploy_action(mask))
         steps += 1
+    assert uid, "le déploiement ne s'est jamais ouvert — cas non construit"
     assert enemies_placed, "aucun ennemi posé pendant le déploiement — cas non construit"
 
     # Amène cet ennemi au contact de la sentinelle, par la voie du moteur : écrire la position

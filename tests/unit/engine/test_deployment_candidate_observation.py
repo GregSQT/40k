@@ -395,6 +395,66 @@ def test_the_block_is_null_outside_the_deployment_phase():
         )
 
 
+def test_an_already_placed_squad_never_queries_the_deployment_decoder(monkeypatch):
+    """Une escouade DÉJÀ POSÉE n'a aucun candidat — et le décodeur n'est même pas interrogé.
+
+    Ce n'est pas une précaution : par la règle, une unité sur le champ de bataille ne choisit pas
+    où se déployer. La garde lit `deployed_on_turn`, la MÊME source que le bit
+    `deploy_not_on_board`.
+
+    Le verrou porte sur l'ABSENCE D'APPEL, pas sur le bloc vide : le bloc serait vide de toute
+    façon (l'unité n'est pas celle du masque), donc l'assertion « bloc nul » ne distinguerait
+    rien. Ce que la garde évite, c'est d'aller demander au décodeur l'état du déploiement pour une
+    escouade que la question ne concerne pas — ce qui LÈVE sur un `game_state` dont la phase vaut
+    « deployment » sans que personne n'ait à se déployer (cas rencontré par
+    `test_squad_obs_geometry_phase_presence.py`, qui injecte les 6 phases à la main).
+    """
+    eng = _load()
+    gs = eng.game_state
+    dec = eng.action_decoder
+
+    mask, _ = dec.get_squad_action_mask_and_eligible_units(gs)
+    eng.step(_open_slots(mask)[0])
+    assert gs.get("phase") == "deployment", "le déploiement doit continuer après la 1re pose"
+
+    placed = [
+        str(u["id"]) for u in gs["units"]
+        if u["deployed_on_turn"] is not None and str(u["id"]) in gs["units_cache"]
+    ]
+    assert placed, "aucune escouade posée après un step de déploiement"
+
+    # C'est `get_deployment_active_unit` qu'il faut espionner : c'est le PREMIER appel au
+    # décodeur, celui qui lit `deployment_state` — donc celui qui lève quand cet état n'existe
+    # pas. Espionner `deployment_slot_candidates` ne distinguerait rien : on y renonce de toute
+    # façon plus loin, une fois l'unité active connue.
+    queried: list[str] = []
+    original = type(dec).get_deployment_active_unit
+
+    def _spy(self, game_state):
+        unit = original(self, game_state)
+        queried.append(str(unit["id"]))
+        return unit
+
+    monkeypatch.setattr(type(dec), "get_deployment_active_unit", _spy)
+
+    obs = eng.obs_builder.build_squad_observation(gs, placed[0])
+    assert queried == [], (
+        f"l'escouade {placed[0]} est déjà sur le plateau : observer son cas ne doit RIEN demander "
+        f"au décodeur de déploiement (appels constatés : {queried})"
+    )
+    assert not obs["deploy_cand_bin"].any()
+    assert not obs["deploy_cand_cont"].any()
+
+    # Contre-contrôle : l'escouade que le masque déploie, elle, interroge bien le décodeur —
+    # sinon ce test passerait aussi avec un bloc désactivé partout.
+    _, eligible = dec.get_squad_action_mask_and_eligible_units(gs)
+    active = str(eligible[0]["id"])
+    eng.obs_builder.build_squad_observation(gs, active)
+    assert queried == [active], (
+        f"l'escouade active {active} doit interroger le décodeur (appels : {queried})"
+    )
+
+
 def test_a_squad_the_mask_does_not_act_on_gets_no_candidates():
     """Pendant le déploiement, seule l'unité du masque est décrite avec ses candidats.
 

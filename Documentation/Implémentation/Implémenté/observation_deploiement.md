@@ -144,11 +144,17 @@ calculait déjà tout cela dans son cache de scoring.
    l'hexe **et le plan de formation validé** ; `_select_deployment_hex_for_action` y lit ce qu'il
    commite et l'observation y lit ce qu'elle décrit. Écrire une seconde géométrie aurait laissé
    l'agent choisir un slot d'après un hexe que le commit n'aurait pas posé (motif D1).
-3. **Garde de phase**, même patron que `is_charge_phase` pour `charge_reachable_max_roll` : hors
-   déploiement le bloc est nul et **rien n'est calculé**. Il reste nul aussi pour une escouade qui
-   n'est pas celle sur laquelle le masque ouvre les slots 4-8 — décrire à une autre escouade cinq
-   candidats qu'aucune de ses actions ne pose serait le défaut du point 1 rejoué une couche plus
-   loin.
+3. **Garde à DEUX conditions.** (a) la phase est `deployment` — même patron que
+   `is_charge_phase` pour `charge_reachable_max_roll` — **et** (b) l'escouade observée n'est **pas
+   encore posée** (`deployed_on_turn`, la même source que le bit `deploy_not_on_board`). La
+   seconde n'est pas une précaution : une unité déjà sur le champ de bataille ne choisit plus où
+   se déployer. Elle rend la garde plus STRICTE (l'unité que le masque déploie n'est jamais posée,
+   verrouillé par le point 1) et évite d'interroger le décodeur pour toutes les escouades déjà en
+   place — l'interroger LEVAIT sur un `game_state` dont la phase vaut « deployment » sans que
+   personne n'ait à se déployer, cas que les tests d'observation construisent en injectant les
+   6 phases à la main. Le bloc reste nul, enfin, pour une escouade qui n'est pas celle sur
+   laquelle le masque ouvre les slots 4-8 — décrire à une autre escouade cinq candidats
+   qu'aucune de ses actions ne pose serait le défaut du point 1 rejoué une couche plus loin.
 
 **Perf — mesurée.** Décrire cinq stratégies au lieu d'en évaluer une exigeait cinq passes de
 scoring sur toute la zone : **871 ms** par step de déploiement en appelant simplement cinq fois
