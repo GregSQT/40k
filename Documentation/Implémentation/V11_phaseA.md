@@ -677,6 +677,12 @@ Les niveaux/élévation restent en Phase B (scénarios plats jusque-là).
 <a id="s9.6"></a>
 ### 9.6 P5 — Validation par tranche
 
+> ⚠️ **MAJ 2026-07-28 : ne PAS utiliser `x1_debug` pour le run court.** Ce profil porte
+> `n_envs: 48` (vérifié dans la config) → `MemoryError` à l'allocation du rollout buffer
+> ([§0.33](V11_agent_rework.md#s0.33) : 46,9 Go demandés pour 29 Go disponibles). Utiliser
+> **`x5_debug`** (8 envs) tant que §0.33 n'est pas rouvert. La phrase ci-dessous date d'avant
+> cette mesure.
+
 Chaque tranche P3 : suite de tests verte + smoke 10 épisodes + run court `x1_debug` +
 win-rate vs GreedyBot ≥ tranche précédente. Si l'ajout d'un point de décision DÉGRADE le
 win-rate, la décision est mal observée ou mal récompensée → corriger avant d'empiler la
