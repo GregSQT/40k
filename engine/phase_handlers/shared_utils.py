@@ -2239,7 +2239,6 @@ def get_source_unit_rule_display_name_for_effect(
 ) -> Optional[str]:
     """Public helper returning source display name for a technical effect rule."""
     return _get_source_unit_rule_display_name_for_effect(unit, effect_rule_id)
-    return None
 
 
 def _build_reactive_move_destinations_pool(
