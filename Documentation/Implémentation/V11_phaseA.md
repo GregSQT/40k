@@ -11,9 +11,9 @@
 > **Convention.** Les renvois `§9.x` internes restent en texte nu ; les renvois vers l'index et
 > vers les autres sections sont des liens de fichier.
 >
-> ⚠️ **Lien provisoire.** Le renvoi [§8.5](V11_agent_rework.md#s8.5) pointe encore sur l'index :
-> les sections [§1](V11_agent_rework.md) à [§8](V11_agent_rework.md) y sont toujours à cette date.
-> L'étape 3 du plan les sortira dans `V11_tranches.md` et re-pointera ce lien.
+> **Sous-docs frères.** Les sections [§1](V11_tranches.md#s1) à [§8](V11_tranches.md#s8) (spec des
+> tranches) ont été sorties dans [`V11_tranches.md`](V11_tranches.md) le 2026-07-28 (étape 3 du
+> plan) ; [§10](V11_eval_strategy.md#s10) est dans [`V11_eval_strategy.md`](V11_eval_strategy.md).
 
 ---
 <a id="s9"></a>
@@ -246,7 +246,7 @@ de `test_ignores_cover.py` complété en conséquence).
 2026-07-24 (`test_deployment_per_model_commit`, `test_fight_target_selection_no_fallback`,
 `test_game_state_contract`) ont été **corrigés** (contrats périmés post-V11 — commits `38362e81`,
 `b9dc9916`). `tests/unit/` re-vérifiée verte avant la tranche rerolls ; validation complète
-post-rerolls en cours. La condition [§8.5](V11_agent_rework.md#s8.5) est donc rétablie.
+post-rerolls en cours. La condition [§8.5](V11_tranches.md#s8.5) est donc rétablie.
 
 **Session 2026-07-25 (nuit) — 4 tranches livrées + 1 différée.** Portées dans le vif, chacune
 avec test e2e + contre-épreuve mutation, suite `tests/unit/` re-vérifiée verte et commit
