@@ -62,13 +62,13 @@ actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
-| **§0.14** | Re-mesure du run — win-rate par matchup | 🟠 **DÉBLOQUÉ** — aucun prérequis technique restant | **1** | Lancer le run `--new` (`obs_size` **20626**, vérifié dans le code le 2026-07-28 : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` == la valeur des 5 profils de config). ⚠️ **PÉRIMÉ le 2026-07-28 soir : §0.41 (P3-1) et §0.42 (P2) ont été mergés PENDANT ce run**, sur décision utilisateur. `obs_size` vaut désormais **20740** et l'action space **1088** : le run en cours porte l'ancien contrat, et le prochain sera `--new` de toute façon. ⚠️ Lire d'abord §0.33 (choix du profil : 8 envs, re-testé meilleur par l'utilisateur le 2026-07-28) ; `bot_eval_freq` est tranché (2000 assumé, encadré 🟢 ci-dessous). |
+| **§0.14** | Re-mesure du run — win-rate par matchup | 🔴 **À RELANCER** — le run du 2026-07-28 est mort au merge | **1** | Relancer le run `--new` (`obs_size` **20740**, vérifié dans le code le 2026-07-28 après merge : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` == la valeur des 5 profils de config). 🔴 **CE RUN EST MORT (2026-07-28, 20 h 20)** : §0.41 (P3-1) et §0.42 (P2) ont été mergés PENDANT lui, sur décision utilisateur, et le changement d'`obs_size` l'a arrêté — conséquence attendue. **La re-mesure reste donc À FAIRE**, sur un run `--new` au contrat courant (`obs_size` **20740**, action space **1088**). Le checkpoint 720 k sauvegardé n'est pas réutilisable. ⚠️ Lire d'abord §0.33 (choix du profil : 8 envs, re-testé meilleur par l'utilisateur le 2026-07-28) ; `bot_eval_freq` est tranché (2000 assumé, encadré 🟢 ci-dessous). |
 | **[§9](V11_phaseA.md#s9)** | Phase A' — **P2 livré**, **P3 tranches 2→8** (décisions restantes) | 🟠 **P3-1 + P2 + P3 point 0 LIVRÉS et MERGÉS sur `main`** (2026-07-28) | **2** | **P3-1 (cible de mêlée)**, cf. **§0.41** : une décision dont les candidats sont des ENTITÉS déjà observées se paramètre en **dimension d'action + tête pointeur**, pas en `CHOICE_k`. **P2 (mécanisme générique) + P3 point 0 (rule-choice)**, cf. **§0.42** : `CHOICE_0..5` pour les décisions dont les candidats ne sont **pas** des entités observées ; `raw_action_int % len(options)` n'existe plus. Reste **P3-2→8**, P4, P5. ⚠️ Le point 0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice) : sa correction est structurelle, pas mesurable. |
 | **§0.38** | Code mort `_attack_sequence_rng` non supprimé — 2ᵉ moitié de P1 | 🟠 **OUVERT** (constaté 2026-07-28) | **3** | P1 prévoyait « porter les règles vers le vif **PUIS supprimer le mort** ». Le portage est fait ; la suppression **non**. Détail → §0.38. |
 | **§0.33** | Rollout buffer 46,9 Go pour 39 Go de RAM | 🟠 **CONDITIONNEL** — ne bloque que les profils à 48 envs | **4** (avant tout run 48 envs) | Vérifié 2026-07-28 dans la config : `x1`/`x5_new`/`x5_debug` = **8 envs** (passent) ; `x5_append`/`x1_debug` = **48 envs** (échouent à l'allocation). Ne pas lancer ces deux-là sans rouvrir l'entrée. |
 | **§0.29** | Scénario SM vs Orks fixed/active + scheduler | 🟢 Mécanique livrée et validée in-engine ; **reste USAGE + MESURE** | 5 | La mesure rejoint §0.14 : c'est le même run qui la produit. |
 | **§0.40** | Observation de la phase de déploiement déficiente (3 défauts vérifiés) | 🔴 **OUVERT** — chantier externe | 6 | Détail et pistes → [`observation_deploiement.md`](observation_deploiement.md) (sorti de l'audit archivé le 2026-07-28). Points 1-2 (obs ≠ unité du masque, grille centrée hors plateau) = correctifs indépendants et peu coûteux ; point 3 (décrire les hexes candidats) change `obs_size` → à séquencer avec un run `--new`. Détail → §0.40. |
-| **§0.42** | P2 « décision agent » mergé sur `main` (avec P3-1) | ✅ **MERGÉ** — reste la MESURE | — | Plus rien à merger. Le prochain run **doit** être `--new` (`obs_size` **20740**, action space **1088**). ⚠️ Merge fait PENDANT le run §0.14, sur décision utilisateur : si ce run meurt, c'est la conséquence attendue, pas un bug. Détail → §0.42. |
+| **§0.42** | P2 « décision agent » mergé sur `main` (avec P3-1) | ✅ **MERGÉ** — reste la MESURE | — | Plus rien à merger. **Relancer le run en `--new`** (`obs_size` **20740**, action space **1088**) : le run §0.14 s'est arrêté à 20 h 20 après le merge (conséquence attendue, constatée), et son checkpoint 720 k porte un contrat que plus aucun code ne construit. Détail → §0.42. |
 | **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)). T2→T5 **jamais revérifiés** : ne pas s'appuyer sur leurs ✅ sans relecture. ⚠️ Sa **section** est restée en §0hist (elle y était déjà avant l'épuration) alors que sa part T2→T5 est ouverte — laissée en place plutôt que scindée, pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
 
 🟢 **TRANCHÉ le 2026-07-28 soir (arbitrage utilisateur) : `bot_eval_freq = 2000` ASSUMÉ**, pour
@@ -108,11 +108,19 @@ config vérifiés cohérents après merge.
 
 ⚠️ **Décision utilisateur ASSUMÉE : merge pendant le run `--new` de §0.14** (démarré le 2026-07-28
 à 17 h 25). Le risque était connu et accepté : un sous-processus d'évaluation qui relit la config
-d'agent depuis le disque charge désormais un contrat d'observation **incompatible** avec le modèle
-en cours d'entraînement. **Si ce run survit, sa mesure reste exploitable comme baseline de
-l'ancien contrat ; s'il meurt, il n'y a rien à sauver — le relancer ne redonnerait pas l'ancien
-contrat, puisque le code a changé.** Ne pas re-diagnostiquer un crash de ce run comme un bug de
-P2 : c'est la conséquence attendue du changement d'`obs_size`.
+d'agent depuis le disque charge un contrat d'observation **incompatible** avec le modèle en cours
+d'entraînement.
+
+**CONSTATÉ le 2026-07-28 à 20 h 21** : le run **s'est arrêté**, dernière écriture TensorBoard à
+**20 h 20 min 27 s**, quelques minutes après le merge (20 h ~15). Dernier checkpoint sauvegardé :
+`ppo_checkpoint_720000_steps.zip` (**720 000 pas**, 20 h 08). C'est la conséquence ATTENDUE du
+changement d'`obs_size`, pas un bug de P2 ni de P3-1 — ne pas le re-diagnostiquer comme tel. La
+sortie d'erreur est restée dans le terminal du run (non redirigée vers un fichier).
+
+**Ce checkpoint n'est PAS réutilisable** : il porte l'ancien contrat (`obs_size` 20626, action
+space 1062), que plus aucun code ne sait construire. Reprendre le run est impossible ; le prochain
+doit être `--new`. La mesure de win-rate de §0.14 sur l'ancien contrat n'existera donc jamais —
+c'est le coût, accepté, de ce merge.
 
 **Conséquence, non négociable.** Le prochain run **DOIT** être `--new`. Ce n'est pas un choix :
 le fail-fast d'`obs_size` à l'init du moteur le rendra explicite au démarrage.
