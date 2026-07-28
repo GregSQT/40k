@@ -26,7 +26,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 | Clé | Forme | Contenu |
 |---|---|---|
 | `global_cont` / `global_bin` | (11,) / (27,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, force d'usure, **distance à chacun des 5 objectifs** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux** |
-| `allies_cont` / `allies_bin` | (8, 19) / (8, 32) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les 32 drapeaux incluent les **13 règles d'unité en vigueur** (19.04) et, pour les ennemis seulement, `los_can_see` + `cover_vs_observer` |
+| `allies_cont` / `allies_bin` | (8, 19) / (8, 33) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les 32 drapeaux incluent les **13 règles d'unité en vigueur** (19.04) et, pour les ennemis seulement, `los_can_see`, `cover_vs_observer` et `charge_reachable_max_roll` |
 | `allies_wpn_cont` / `_bin` | (8, 20, 13) / (8, 20, 18) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants et bits/params de règles |
 | `allies_types_cont` / `_bin` | (8, 6, 5) / (8, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
 | `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
@@ -40,7 +40,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 740 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 768 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (11,)                =      11               │
@@ -48,7 +48,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │                                                                        │
 │  MES ESCOUADES — ligne 0 = l'unité ACTIVE          K_ALLY_SLOTS = 8    │
 │    allies_cont            (8, 20)              =     160               │
-│    allies_bin             (8, 32)              =     256               │
+│    allies_bin             (8, 33)              =     264               │
 │    allies_wpn_cont        (8, 20, 13)          =   2 080               │
 │    allies_wpn_bin         (8, 20, 18)          =   2 880               │
 │    allies_types_cont      (8, 6, 5)            =     240               │
@@ -56,7 +56,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │                                                                        │
 │  ESCOUADES ENNEMIES — ordre = slots d'action     K_ENEMY_SLOTS = 20    │
 │    enemies_cont           (20, 20)             =     400               │
-│    enemies_bin            (20, 32)             =     640               │
+│    enemies_bin            (20, 33)             =     660               │
 │    enemies_wpn_cont       (20, 20, 13)         =   5 200               │
 │    enemies_wpn_bin        (20, 20, 18)         =   7 200               │
 │    enemies_types_cont     (20, 6, 5)           =     600               │
@@ -70,11 +70,11 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    decision_ctx_bin       (2,)                 =       2               │
 │    decision_options_bin   (6, 14)              =      84               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      20 740              │
+│  TOTAL vectoriel (= obs_size)                      20 768              │
 │  + grid  (9, 32, 32) = 9 216, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
-Coût d'UNE entité = 20 + 32 (unité) + 20 × (13 + 18) (armes) + 6 × (5 + 5) (types) = 732
+Coût d'UNE entité = 20 + 33 (unité) + 20 × (13 + 18) (armes) + 6 × (5 + 5) (types) = 733
    → le bloc ARMES fait 86 % du vecteur. C'est le seul bloc mémoïsé.
 ```
 
@@ -199,7 +199,10 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
 [s][15]    = deployed_this_turn                     # 0.0 / 1.0 (clause 2 de [HEAVY] 24.16)
 [s][16]    = los_can_see                            # 0.0 / 1.0 (06.01) [ENNEMIS seuls]
 [s][17]    = cover_vs_observer                      # 0.0 / 1.0 (13.08 EXACT, 2 branches) [ENNEMIS seuls]
-[s][18]    = rule_charge_after_advance              # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][18]    = charge_reachable_max_roll              # 0.0 / 1.0 — un plan de charge legal existe au jet
+                                                    #   MAXIMAL (11.02, 2D6 -> 12) [ENNEMIS seuls, phase
+                                                    #   CHARGE seule ; masque = phase_charge]
+[s][19]    = rule_charge_after_advance              # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
 [s][19]    = rule_charge_after_flee                 # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
 [s][20]    = rule_charge_impact                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
 [s][21]    = rule_closest_target_penetration        # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
@@ -362,7 +365,7 @@ vocabulaires coexistent dans la doc V11 :
 | **B** — mon escouade | `allies_cont[0]` / `allies_bin[0]` | l'unité active est la **ligne 0** du bloc amis (contrat) ; les features « actif seulement » y sont, ailleurs à zéro |
 | **C1** — types de figurines | `allies_types_*` / `enemies_types_*` | profil défensif + rôle d'allocation + effectif du type ; décrit l'escouade ENTIÈRE sans plafonner l'effectif |
 | **C2** — mes figurines | `self_models_*` | seulement l'irréductiblement individuel : position relative, éligibilité au combat, engagement |
-| **D** — ennemis | `enemies_*` | **ordre contractuel = slots d'action de tir** ; porte depuis §0.31 `los_can_see` + `cover_vs_observer` |
+| **D** — ennemis | `enemies_*` | **ordre contractuel = slots d'action de tir** ; porte depuis §0.31 `los_can_see` + `cover_vs_observer`, depuis §9 P3-2 `charge_reachable_max_roll` |
 | **E** — escouades amies | `allies_[1..K-1]` | livré avec T-D : les alliés sont **agrégés** par le réseau, donc leur ordre n'a pas à être inventé |
 | *(transverse)* profils d'armes | `*_wpn_*` | même encodeur pour les deux camps ; 86 % du vecteur, et le seul bloc mémoïsé |
 | *(transverse)* règles d'unité | 13 bits dans `*_bin` | §0.31 : sur **toute** entité, amie comme ennemie (schéma unifié) |
@@ -451,8 +454,9 @@ T-F) → 20166 (plafond du bloc figurines 6 → 20, 2026-07-26) → 20181 (géom
 2026-07-27) → 20545 (règles d'unité, 13 bits par entité) → 20601 (couvert et visibilité exacts par
 slot ennemi, 2026-07-27) → 20626 (bit `present` par figurine + phase en one-hot de 6 bits,
 §0.32 T-H/T-J, 2026-07-28) → 20654 (`n_models_engaging` : mes figurines engagées avec chaque
-cible ennemie, support du choix de cible de mêlée, §9 P3-1, 2026-07-28) → **20740** (bloc
-« contexte de décision », §9.3 P2, 2026-07-28). **Toute évolution du
+cible ennemie, support du choix de cible de mêlée, §9 P3-1, 2026-07-28) → 20740 (bloc
+« contexte de décision », §9.3 P2, 2026-07-28) → **20768** (`charge_reachable_max_roll` :
+support du choix de cible de charge, §9 P3-2, 2026-07-28). **Toute évolution du
 schéma change cette valeur et rend les `.zip` existants incompatibles : le retrain `--new` est
 obligatoire.**
 

@@ -52,6 +52,8 @@ from stable_baselines3.common.type_aliases import PyTorchObs
 
 from ai.spatial_extractor import SpatialCombinedExtractor
 from engine.macro_intents import (
+    CHARGE_SLOT_BASE,
+    CHARGE_SLOT_COUNT,
     CHOICE_BASE,
     CHOICE_COUNT,
     FIGHT_SLOT_BASE,
@@ -67,15 +69,16 @@ from engine.spatial_grid import GRID_CELL_COUNT, GRID_SIZE
 #: Largeur de la couche cachée de la tête de move, par colonne de cellule.
 MOVE_HEAD_HIDDEN = 32
 
-#: Actions produites par `action_net`, la SEULE tête dense restante : wait, charge,
-#: fight-sans-cible et les 15 intents de zone. Tout le reste vient d'une tête à poids partagés
-#: (conv 1x1 pour les cellules, pointeurs pour les slots de tir, de mêlée et les candidats de
-#: décision). Calculé, jamais écrit en dur : ajouter une famille pointée sans le décompter ici
-#: décalerait TOUS les logits qui la suivent.
+#: Actions produites par `action_net`, la SEULE tête dense restante : wait, fight-sans-cible et
+#: les 15 intents de zone. Tout le reste vient d'une tête à poids partagés (conv 1x1 pour les
+#: cellules, pointeurs pour les slots de tir, de charge, de mêlée et les candidats de décision).
+#: Calculé, jamais écrit en dur : ajouter une famille pointée sans le décompter ici décalerait
+#: TOUS les logits qui la suivent.
 DENSE_LOGIT_COUNT = (
     TOTAL_ACTION_SIZE
     - MOVE_CELL_COUNT
     - SHOOT_SLOT_COUNT
+    - CHARGE_SLOT_COUNT
     - FIGHT_SLOT_COUNT
     - CHOICE_COUNT
 )
@@ -88,8 +91,8 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     `[tronc | embeddings ennemis par slot | carte de move 32x32]`. Cette policy :
     - n'alimente le tronc MLP qu'avec la partie `tronc` (ni les embeddings ni la carte n'y
       entrent : ils y seraient de nouveau aplatis, exactement ce que le chantier supprime) ;
-    - produit les logits de tir ET de combat par `q · e_i` (deux requêtes, mêmes embeddings) et
-      les logits de cellule par une conv 1x1 ;
+    - produit les logits de tir, de charge ET de combat par `q · e_i` (trois requêtes, mêmes
+      embeddings) et les logits de cellule par une conv 1x1 ;
     - laisse TOUT le reste à SB3 (distribution masquée, log_prob, entropie, value net).
     """
 
@@ -120,6 +123,12 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 f"Desalignement observation/action : {extractor.n_enemy_slots} slots ennemis "
                 f"observes contre {SHOOT_SLOT_COUNT} actions de tir. C'est l'invariant D1."
             )
+        if extractor.n_enemy_slots != CHARGE_SLOT_COUNT:
+            raise ValueError(
+                f"Desalignement observation/action : {extractor.n_enemy_slots} slots ennemis "
+                f"observes contre {CHARGE_SLOT_COUNT} actions de charge. C'est l'invariant D1, "
+                f"cote charge (V11 §9 P3-2)."
+            )
         if extractor.n_enemy_slots != FIGHT_SLOT_COUNT:
             raise ValueError(
                 f"Desalignement observation/action : {extractor.n_enemy_slots} slots ennemis "
@@ -132,20 +141,22 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 f"{MOVE_CELL_COUNT} actions de cellule. La tete 1x1 produit UN logit par cellule."
             )
         # HYPOTHÈSE D'ASSEMBLAGE de `_action_logits` — vérifiée ici, où l'erreur est explicite,
-        # plutôt que subie sous forme de logits décalés : cellules en tête, `wait` puis les slots
-        # de tir, une colonne dense (charge), les slots de mêlée, puis le reste dense, et les
-        # CHOICE en fin d'action space.
+        # plutôt que subie sous forme de logits décalés : cellules en tête, `wait`, puis les
+        # slots de tir, de charge et de mêlée CONTIGUS, puis le reste dense, et les CHOICE en
+        # fin d'action space.
         if (
             MOVE_CELL_BASE != 0
             or SHOOT_SLOT_BASE != MOVE_CELL_COUNT + 1
-            or FIGHT_SLOT_BASE != SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT + 1
+            or CHARGE_SLOT_BASE != SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT
+            or FIGHT_SLOT_BASE != CHARGE_SLOT_BASE + CHARGE_SLOT_COUNT
             or CHOICE_BASE != TOTAL_ACTION_SIZE - CHOICE_COUNT
         ):
             raise ValueError(
                 "Disposition de l'action space inattendue : l'assemblage des logits suppose "
                 f"[cellules 0..{MOVE_CELL_COUNT - 1} | wait | tir | charge | melee | dense | "
                 f"CHOICE en fin]. Recu MOVE_CELL_BASE={MOVE_CELL_BASE}, "
-                f"SHOOT_SLOT_BASE={SHOOT_SLOT_BASE}, FIGHT_SLOT_BASE={FIGHT_SLOT_BASE}, "
+                f"SHOOT_SLOT_BASE={SHOOT_SLOT_BASE}, CHARGE_SLOT_BASE={CHARGE_SLOT_BASE}, "
+                f"FIGHT_SLOT_BASE={FIGHT_SLOT_BASE}, "
                 f"CHOICE_BASE={CHOICE_BASE}, TOTAL_ACTION_SIZE={TOTAL_ACTION_SIZE}."
             )
         self.trunk_dim = extractor.trunk_dim
@@ -181,6 +192,10 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         # `entity_dim x latent_dim` parametres et rien de plus (les embeddings, eux, restent
         # partages, donc ce que le reseau apprend d'un ennemi sert aux deux tetes).
         self.fight_query_net = nn.Linear(self.mlp_extractor.latent_dim_pi, self.entity_dim)
+        # Requete DISTINCTE pour la charge (V11 §9 P3-2), pour la MEME raison : « quel ennemi
+        # charger » depend de la distance a franchir au 2D6 et de ce que l engagement me coute au
+        # tour adverse, pas de la portee ni du couvert. Meme cout marginal, memes embeddings.
+        self.charge_query_net = nn.Linear(self.mlp_extractor.latent_dim_pi, self.entity_dim)
         # Requête DISTINCTE pour les candidats de décision (§9.3 P2) : « quel ennemi frapper » et
         # « quelle option choisir » sont deux questions différentes posées au même latent, et
         # elles ne lisent même pas les mêmes embeddings (ennemis vs candidats).
@@ -282,14 +297,14 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     ) -> torch.Tensor:
         """Logits complets, assemblés dans l'ordre des ids d'action.
 
-        Quatre têtes à poids partagés — conv 1x1 (cellules), pointeur de tir, pointeur de mêlée
-        (§9 P3-1 : deux requêtes, MÊMES embeddings d'ennemis) et pointeur de décision (candidats
-        `CHOICE_i`, §9.3 P2) — et UNE tête dense réduite à ses colonnes réellement lues
-        (`DENSE_LOGIT_COUNT` = 18) : wait, charge, fight-sans-cible, 15 intents de zone.
+        Cinq têtes à poids partagés — conv 1x1 (cellules), pointeurs de tir, de charge (§9 P3-2)
+        et de mêlée (§9 P3-1 : trois requêtes, MÊMES embeddings d'ennemis) et pointeur de
+        décision (candidats `CHOICE_i`, §9.3 P2) — et UNE tête dense réduite à ses colonnes
+        réellement lues (`DENSE_LOGIT_COUNT` = 17) : wait, fight-sans-cible, 15 intents de zone.
 
         ⚠️ L'assemblage suit l'ordre EXACT des ids (`macro_intents`) : 0-1023 cellules, 1024 wait,
-        1025-1044 tir, 1045 charge, 1046-1065 mêlée, 1066 fight-sans-cible, 1067-1081 zone,
-        1082-1087 CHOICE. Une permutation ici ferait jouer à l'agent une action autre que celle
+        1025-1044 tir, 1045-1064 charge, 1065-1084 mêlée, 1085 fight-sans-cible, 1086-1100 zone,
+        1101-1106 CHOICE. Une permutation ici ferait jouer à l'agent une action autre que celle
         qu'il évalue, sans que rien ne lève — verrouillé par test.
         """
         base = self.action_net(latent_pi)
@@ -299,6 +314,8 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         scale = self.entity_dim ** 0.5
         query = self.query_net(latent_pi).unsqueeze(1)                 # (B, 1, d)
         pointer = (query * embeddings).sum(dim=-1) / scale              # (B, K) — tir
+        charge_query = self.charge_query_net(latent_pi).unsqueeze(1)
+        charge_pointer = (charge_query * embeddings).sum(dim=-1) / scale  # (B, K) — charge
         fight_query = self.fight_query_net(latent_pi).unsqueeze(1)
         fight_pointer = (fight_query * embeddings).sum(dim=-1) / scale  # (B, K) — mêlée
         choice_query = self.choice_query_net(latent_pi).unsqueeze(1)
@@ -308,9 +325,9 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 move,
                 base[:, :1],        # wait
                 pointer,
-                base[:, 1:2],       # charge
+                charge_pointer,
                 fight_pointer,
-                base[:, 2:],        # fight-sans-cible, intents de zone
+                base[:, 1:],        # fight-sans-cible, intents de zone
                 choice,
             ],
             dim=1,

@@ -49,6 +49,21 @@ def _first_action_in(valid_actions, action_ids):
     return None
 
 
+def _first_charge_action_in(valid_actions):
+    """Action de charge du bot : cible la plus menaçante parmi les cibles déclarables (11.02).
+
+    V11 §9 P3-2 — la cible de charge est devenue une dimension d'action (un slot ennemi), comme
+    le tir et la mêlée. Les slots étant attribués par menace décroissante (`_enemy_threat_order`),
+    prendre le premier slot ouvert vaut « charger la cible la plus menaçante ».
+
+    ⚠️ Le décodeur ne tranche plus par `get_best_enemy_score_for_unit` (damage_ratio). Changement
+    de comportement ASSUMÉ des bots d'évaluation, comme pour la mêlée : les win-rates d'avant
+    cette tranche ne sont pas comparables. Il n'existe pas d'action « charger sans cible » —
+    sans cible déclarable, aucun slot n'est ouvert et le bot retombe sur WAIT.
+    """
+    return _first_action_in(valid_actions, mi.CHARGE_SLOTS)
+
+
 def _first_fight_action_in(valid_actions):
     """Action de combat du bot : cible de MELEE la plus menaçante, sinon combat à vide.
 
@@ -547,8 +562,9 @@ class ControlBot:
         if phase == "charge":
             if on_objective and WAIT_ACTION in valid_actions:
                 return WAIT_ACTION
-            if mi.ACTION_CHARGE in valid_actions:
-                return mi.ACTION_CHARGE
+            charge = _first_charge_action_in(valid_actions)
+            if charge is not None:
+                return charge
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
         if phase == "fight":
             fight = _first_fight_action_in(valid_actions)
@@ -802,8 +818,9 @@ class AggressiveSmartBot:
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         if phase == "charge":
-            if mi.ACTION_CHARGE in valid_actions:
-                return mi.ACTION_CHARGE
+            charge = _first_charge_action_in(valid_actions)
+            if charge is not None:
+                return charge
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         if phase == "fight":
@@ -1052,8 +1069,9 @@ class AdaptiveBot:
         return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
     def _charge(self, valid_actions: List[int], posture: str) -> int:
-        if posture != "winning" and mi.ACTION_CHARGE in valid_actions:
-            return mi.ACTION_CHARGE
+        charge = _first_charge_action_in(valid_actions)
+        if posture != "winning" and charge is not None:
+            return charge
         return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
     def _deploy(self, valid_actions: List[int], game_state) -> int:
@@ -1137,8 +1155,9 @@ class TacticalBot:
             shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
             if shoot is not None:  # Shoot
                 return shoot
-            if mi.ACTION_CHARGE in valid_actions:  # Charge
-                return mi.ACTION_CHARGE
+            charge = _first_charge_action_in(valid_actions)  # Charge
+            if charge is not None:
+                return charge
             fight = _first_fight_action_in(valid_actions)  # Fight
             if fight is not None:
                 return fight
@@ -1166,7 +1185,8 @@ class TacticalBot:
     def _select_charge_action(self, valid_actions: List[int], game_state: Dict) -> int:
         """Charge phase: charge if melee is advantageous."""
         # Check if charging is beneficial
-        if game_state and mi.ACTION_CHARGE in valid_actions:
+        charge = _first_charge_action_in(valid_actions)
+        if game_state and charge is not None:
             active_unit = self._get_active_unit(game_state)
             if active_unit:
                 # Charge si la melee est AVANTAGEUSE (cf. docstring de la classe).
@@ -1175,7 +1195,7 @@ class TacticalBot:
                 # Le critere porte donc sur la comparaison melee vs tir, qui est la question
                 # que le bot pose reellement.
                 if get_max_melee_damage(active_unit) > get_max_ranged_damage(active_unit):
-                    return mi.ACTION_CHARGE
+                    return charge
 
         # Skip charge if not beneficial
         if WAIT_ACTION in valid_actions:

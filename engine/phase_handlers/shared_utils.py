@@ -4677,6 +4677,11 @@ def _synth_model_entry(
 
 
 CHARGE_THRESHOLD_INCHES = 12
+#: Jet de charge MAXIMAL (11.02 etape 2 : « rolling 2D6 »). Numeriquement egal au seuil de
+#: declaration ci-dessus, mais c'est une COINCIDENCE de regles, pas la meme grandeur : l'un borne
+#: la portee de declaration, l'autre le resultat d'un de. Les confondre en une seule constante
+#: ferait suivre en silence l'un a l'autre si l'un des deux changeait.
+CHARGE_MAX_ROLL = 12
 
 
 def charge_check_eligibility(
@@ -8885,17 +8890,25 @@ SQUAD_ACTION_SHOOT_SLOT_BASE = SQUAD_ACTION_WAIT + 1  # 1025
 # les logits de tir par produit scalaire sur les embeddings : un slot de plus coute ZERO
 # parametre, la ou le format plat en coutait ~226 k (§1.8, mesure).
 SQUAD_ACTION_SHOOT_SLOT_COUNT = 20
-SQUAD_ACTION_CHARGE = SQUAD_ACTION_SHOOT_SLOT_BASE + SQUAD_ACTION_SHOOT_SLOT_COUNT  # 1045
+# V11 §9 P3-2 : la CIBLE DE CHARGE (11.02 « Declare Charge » / 11.04 « BEFORE MOVING: select
+# one or more enemy units ») devient une dimension d'action, sur le MEME mapping de slots
+# ennemis que le tir et la melee. Avant, `charge` etait une action SANS cible et le decodeur
+# tranchait par `get_best_enemy_score_for_unit` (damage_ratio) : l'agent declarait « je charge »
+# sans jamais dire QUI, et le masque ne portait qu'un bit « une charge est possible ».
+SQUAD_ACTION_CHARGE_SLOT_BASE = SQUAD_ACTION_SHOOT_SLOT_BASE + SQUAD_ACTION_SHOOT_SLOT_COUNT  # 1045
+SQUAD_ACTION_CHARGE_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20 -> 1045-1064
 # V11 §9 P3-1 : la CIBLE DE MELEE (12.05) devient une dimension d'action, indexee sur le MEME
 # mapping de slots ennemis que le tir (`get_enemy_slot_mapping`). Avant, `squad_fight` etait une
 # action sans cible et le moteur tranchait par l'heuristique `_ai_select_fight_target` : l'agent
 # ne choisissait rien, et le pool 12.05 n'apparaissait nulle part dans le masque.
 # Le compte est DERIVE de celui du tir : un slot = une ligne du tenseur ennemi (invariant D1).
-SQUAD_ACTION_FIGHT_SLOT_BASE = SQUAD_ACTION_CHARGE + 1  # 1046
-SQUAD_ACTION_FIGHT_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20 -> 1046-1065
+SQUAD_ACTION_FIGHT_SLOT_BASE = (
+    SQUAD_ACTION_CHARGE_SLOT_BASE + SQUAD_ACTION_CHARGE_SLOT_COUNT
+)  # 1065
+SQUAD_ACTION_FIGHT_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20 -> 1065-1084
 # Combat « a vide » (12.04/12.06) : selectionne pour combattre sans cible eligible. Etat legal.
-SQUAD_ACTION_FIGHT_NO_TARGET = SQUAD_ACTION_FIGHT_SLOT_BASE + SQUAD_ACTION_FIGHT_SLOT_COUNT  # 1066
-SQUAD_ACTION_SIZE = SQUAD_ACTION_FIGHT_NO_TARGET + 1  # 1067
+SQUAD_ACTION_FIGHT_NO_TARGET = SQUAD_ACTION_FIGHT_SLOT_BASE + SQUAD_ACTION_FIGHT_SLOT_COUNT  # 1085
+SQUAD_ACTION_SIZE = SQUAD_ACTION_FIGHT_NO_TARGET + 1  # 1086
 
 
 def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
@@ -9600,17 +9613,23 @@ def build_squad_action_mask(
                     mask[SQUAD_ACTION_SHOOT_SLOT_BASE + slot_i] = 1
         mask[SQUAD_ACTION_WAIT] = 1
 
-    # --- Charge phase: action 24 ---
+    # --- Charge phase: un slot par cible de charge declarable (11.02) ---
     elif phase == "charge":
-        any_charge_possible = False
-        for esid in enemy_slot_ids:
-            if esid is None:
+        # V11 §9 P3-2 — CIBLE : un slot est ouvert ssi la cible qu'il designe est declarable
+        # (`charge_check_eligibility`, la MEME fonction que le commit `squad_charge` re-verifie).
+        # Le masque dit donc « qui je peux charger », la ou il ne disait que « je peux charger ».
+        # Aucune action « charge sans cible » : 11.02 conditionne la declaration a la presence
+        # d'au moins un ennemi a 12" — sans cible, l'unite ne declare rien et seul WAIT reste.
+        #
+        # Pas de garde de troncature ici, contrairement a la melee : la melee confronte DEUX
+        # sources (le pool 12.05 et le mapping de slots), donc une cible legale peut n'avoir
+        # aucun slot. Ici la seule source des candidats EST le mapping — une escouade ennemie
+        # sans slot est deja loguee par `_refresh_enemy_slot_mapping`, en amont et une seule fois.
+        for slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_CHARGE_SLOT_COUNT]):
+            if esid is None or esid not in units_cache:
                 continue
             if charge_check_eligibility(game_state, squad_id, [esid]):
-                any_charge_possible = True
-                break
-        if any_charge_possible:
-            mask[SQUAD_ACTION_CHARGE] = 1
+                mask[SQUAD_ACTION_CHARGE_SLOT_BASE + slot_i] = 1
         mask[SQUAD_ACTION_WAIT] = 1
 
     # --- Fight phase: un slot par cible de melee eligible (12.05), ou « combat a vide » ---

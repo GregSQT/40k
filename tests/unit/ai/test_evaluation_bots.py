@@ -25,7 +25,8 @@ from ai.evaluation_bots import (
 CELL = mi.MOVE_CELL_BASE           # 0, une cellule quelconque (action non-shoot)
 SHOOT = mi.SHOOT_SLOT_BASE         # 1025
 SHOOT2 = mi.SHOOT_SLOT_BASE + 1    # 1026
-CHARGE = mi.ACTION_CHARGE          # 1030
+# V11 §9 P3-2 : la charge est un SLOT ennemi (comme le tir et la melee), plus une action nue.
+CHARGE = mi.CHARGE_SLOT_BASE       # 1045 — « charger le slot 0 »
 FIGHT_SLOT0 = mi.FIGHT_SLOT_BASE     # 1046 — frapper le slot ennemi 0
 FIGHT_EMPTY = mi.ACTION_FIGHT_NO_TARGET  # 1066 — combat a vide (12.04/12.06)
 

@@ -12,15 +12,16 @@ MAX_OBJECTIVES = 5
 # designe une CELLULE de la grille egocentrique 32x32, plus une direction 0-5. Le TYPE de move
 # (normal/advance/fall_back) n'est PAS une dimension d'action : il est infere du cout geodesique
 # de la cellule (cf. shared_utils.infer_squad_move_type).
-# 1067 micro actions (V11 §0.30 T-E : 20 slots de tir ; §9 P3-1 : 20 slots de combat) :
+# 1086 micro actions (V11 §0.30 T-E : 20 slots de tir ; §9 P3-1 : 20 slots de combat ;
+# §9 P3-2 : 20 slots de charge) :
 #   0-1023   : destination = cellule (gx,gy) de la grille egocentrique  [cell_index = gy*32+gx]
 #   1024     : wait / end activation
 #   1025-1044: shoot slot 0-19 (20)
-#   1045     : charge
-#   1046-1065: fight slot 0-19 (20) — MEME mapping de slots ennemis que le tir
-#   1066     : fight sans cible eligible (12.04/12.06 : selectionne pour combattre, 0 attaque)
-#   1067-1081: zone intents (5 objectifs x 3 intentions)
-#   1082-1087: CHOICE_0..5 — candidats de `pending_agent_decision` (V11 §9.3 P2)
+#   1045-1064: charge slot 0-19 (20) — MEME mapping de slots ennemis que le tir
+#   1065-1084: fight slot 0-19 (20) — MEME mapping de slots ennemis que le tir
+#   1085     : fight sans cible eligible (12.04/12.06 : selectionne pour combattre, 0 attaque)
+#   1086-1100: zone intents (5 objectifs x 3 intentions)
+#   1101-1106: CHOICE_0..5 — candidats de `pending_agent_decision` (V11 §9.3 P2)
 
 # --- Named squad-action ids (single source of truth for ai/). --------------
 # Miroir EXACT de engine/phase_handlers/shared_utils.py (SQUAD_ACTION_*), qui reste la source
@@ -34,23 +35,28 @@ MOVE_CELL_COUNT = 1024       # 32x32, cf. engine.spatial_grid.GRID_CELL_COUNT
 ACTION_WAIT = MOVE_CELL_BASE + MOVE_CELL_COUNT   # 1024 — wait / end activation
 SHOOT_SLOT_BASE = ACTION_WAIT + 1                # 1025
 SHOOT_SLOT_COUNT = 20        # shoot enemy slots 0-19 -> 1025-1044 (V11 T-E)
-ACTION_CHARGE = SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT  # 1045
+# V11 §9 P3-2 — la CIBLE DE CHARGE est une dimension d'action (11.02 « Declare Charge » /
+# 11.04 « BEFORE MOVING: select one or more enemy units » : la cible est un choix de JOUEUR).
+# Avant, `charge` etait une action sans cible et le decodeur tranchait par `damage_ratio` :
+# l'agent declarait « je charge » sans jamais dire QUI. Meme derivation que les slots de melee.
+CHARGE_SLOT_BASE = SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT  # 1045
+CHARGE_SLOT_COUNT = SHOOT_SLOT_COUNT                   # 20 -> 1045-1064
 # V11 §9 P3-1 — la CIBLE DE MELEE est une dimension d'action, plus une heuristique interne.
 # `FIGHT_SLOT_COUNT` est DERIVE de `SHOOT_SLOT_COUNT` : les deux familles indexent le MEME
 # mapping `get_enemy_slot_mapping` (et donc la meme ligne du tenseur ennemi de l'observation,
 # invariant D1). Les desolidariser ferait pointer l'action de combat i et l'observation i sur
 # deux escouades differentes, sans que rien ne leve.
-FIGHT_SLOT_BASE = ACTION_CHARGE + 1                 # 1046
-FIGHT_SLOT_COUNT = SHOOT_SLOT_COUNT                 # 20 -> 1046-1065
+FIGHT_SLOT_BASE = CHARGE_SLOT_BASE + CHARGE_SLOT_COUNT  # 1065
+FIGHT_SLOT_COUNT = SHOOT_SLOT_COUNT                 # 20 -> 1065-1084
 # 12.04/12.06 : une escouade selectionnee pour combattre SANS cible eligible (sa cible est
 # morte, overrun) resout un combat a vide. C'est un etat legal du jeu, pas un cas d'erreur :
 # il lui faut donc une action propre. Fusionner ce cas avec un slot rendrait « frapper le
 # slot i » ambigu (frapper i, ou ne frapper personne ?).
-ACTION_FIGHT_NO_TARGET = FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT   # 1066
+ACTION_FIGHT_NO_TARGET = FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT   # 1085
 DEPLOY_SLOT_BASE = 4
 DEPLOY_SLOT_COUNT = 5       # deployment strategy slots 0-4 -> 4-8
 
-BASE_ZONE_INTENT = ACTION_FIGHT_NO_TARGET + 1                  # 1067
+BASE_ZONE_INTENT = ACTION_FIGHT_NO_TARGET + 1                  # 1086
 # Decision agent generique (V11 §9.3 P2) : K actions `CHOICE_i` qui designent le candidat i de
 # `game_state["pending_agent_decision"]`. Elles sont EXCLUSIVES des autres (quand une decision
 # est en attente, le masque n'expose qu'elles) et communes a TOUS les types de decision : c'est
@@ -58,15 +64,16 @@ BASE_ZONE_INTENT = ACTION_FIGHT_NO_TARGET + 1                  # 1067
 # ⚠️ Elles ne concernent QUE les decisions dont les candidats ne sont PAS des entites deja
 # observees : une decision « quelle escouade ennemie » se parametre en dimension d'action +
 # pointeur (§9 P3-1, les slots de combat ci-dessus), pas en CHOICE_k.
-CHOICE_BASE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3            # 1082
+CHOICE_BASE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3            # 1101
 CHOICE_COUNT = MAX_DECISION_OPTIONS                            # 6
-TOTAL_ACTION_SIZE = CHOICE_BASE + CHOICE_COUNT                 # 1088
+TOTAL_ACTION_SIZE = CHOICE_BASE + CHOICE_COUNT                 # 1107
 
 MOVE_CELLS = range(MOVE_CELL_BASE, MOVE_CELL_BASE + MOVE_CELL_COUNT)                # 0-1023
 SHOOT_SLOTS = range(SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT)            # 1025-1044
-FIGHT_SLOTS = range(FIGHT_SLOT_BASE, FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT)            # 1046-1065
+CHARGE_SLOTS = range(CHARGE_SLOT_BASE, CHARGE_SLOT_BASE + CHARGE_SLOT_COUNT)        # 1045-1064
+FIGHT_SLOTS = range(FIGHT_SLOT_BASE, FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT)            # 1065-1084
 DEPLOY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT)        # 4-8
-CHOICE_SLOTS = range(CHOICE_BASE, CHOICE_BASE + CHOICE_COUNT)                       # 1082-1087
+CHOICE_SLOTS = range(CHOICE_BASE, CHOICE_BASE + CHOICE_COUNT)                       # 1101-1106
 
 
 def get_objective_center(obj: dict) -> tuple:

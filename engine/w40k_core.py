@@ -5417,7 +5417,6 @@ class W40KEngine(gym.Env):
             charge_build_valid_plan,
             get_enemy_slot_mapping,
         )
-        from engine.macro_intents import get_best_enemy_score_for_unit
         from engine.game_utils import add_console_log
 
         if self.game_state.get("game_over", False):
@@ -5702,10 +5701,39 @@ class W40KEngine(gym.Env):
         # ── charge ────────────────────────────────────────────────────────────
         elif action_name == "squad_charge":
             squad_id = semantic["squad_id"]
-            target_squad_id = semantic["target_squad_id"]
             from engine.phase_handlers.shared_utils import (
-                roll_charge_distance, unit_can_reroll_charge,
+                charge_check_eligibility, roll_charge_distance, unit_can_reroll_charge,
             )
+            # V11 §9 P3-2 : la cible de charge est CHOISIE PAR L AGENT, via le slot ennemi porte
+            # par l action (11.02 « Declare Charge » : la selection de la cible est un choix de
+            # joueur). Le decodeur ne tranche plus par `get_best_enemy_score_for_unit`.
+            # Parite masque/commit dans les DEUX sens : le masque n ouvre un slot que si sa cible
+            # est declarable, et le commit refuse tout slot dont la cible ne l est pas. Aucun
+            # repli sur une heuristique — une divergence est une rupture, pas un cas a absorber.
+            _charge_units_cache = require_key(self.game_state, "units_cache")
+            _charge_entry = _charge_units_cache.get(str(squad_id))
+            if _charge_entry is None:
+                raise KeyError(f"Squad {squad_id} absent de units_cache pour squad_charge")
+            target_slot = int(semantic["target_slot"])
+            enemy_slot_ids = get_enemy_slot_mapping(
+                self.game_state, int(require_key(_charge_entry, "player"))
+            )
+            if not (0 <= target_slot < len(enemy_slot_ids)):
+                raise ValueError(
+                    f"squad_charge: target_slot {target_slot} hors du mapping de slots ennemis "
+                    f"({len(enemy_slot_ids)} slots)"
+                )
+            target_squad_id = enemy_slot_ids[target_slot]
+            if target_squad_id is None:
+                raise ValueError(
+                    f"squad_charge: slot {target_slot} vide — le masque n aurait pas du l ouvrir"
+                )
+            target_squad_id = str(target_squad_id)
+            if not charge_check_eligibility(self.game_state, str(squad_id), [target_squad_id]):
+                raise ValueError(
+                    f"squad_charge: slot {target_slot} -> cible {target_squad_id} non declarable "
+                    f"(11.02) pour squad {squad_id} (rupture masque/commit)"
+                )
             charge_roll = roll_charge_distance(self.game_state, squad_id)
             plan = charge_build_valid_plan(self.game_state, squad_id, [target_squad_id], charge_roll)
             # `reroll_charge` (unit_rules.json ; 19.04 pour une unité attachée) : « it CAN reroll

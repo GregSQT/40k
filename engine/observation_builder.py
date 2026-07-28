@@ -22,6 +22,11 @@ from engine.phase_handlers.shared_utils import (
     get_fighting_models,
     # D1 : ordre des slots ennemis IDENTIQUE a l action tir/charge (source unique)
     get_enemy_slot_mapping,
+    # V11 §9 P3-2 : support du choix de cible de charge. Les DEUX oracles moteur, jamais une
+    # reimplementation — ce sont ceux qu'executent le masque d'action et le commit.
+    CHARGE_MAX_ROLL,
+    charge_build_valid_plan,
+    charge_check_eligibility,
 )
 from engine.weapon_damage_cache import lookup_best_weapon
 from engine.observation_weapon_profiles import (
@@ -977,6 +982,22 @@ class ObservationBuilder:
             # Garde par le pool 12.05 : hors pool, aucune figurine ne peut atteindre la cible
             # (le pool teste l'empreinte de l'escouade, qui contient celle de chaque figurine),
             # donc 0 sans boucler. Le coût par-figurine n'est payé qu'au contact réel.
+            # V11 §9 P3-2 — support du choix de cible de CHARGE. Le coût (un plan de charge
+            # complet par cible) n'est payé qu'en phase de charge ET pour une cible réellement
+            # déclarable : `charge_check_eligibility` est le MÊME filtre que le masque d'action,
+            # et il écarte les 12"+ pour quelques microsecondes. Hors de là, le bit vaut 0 et son
+            # masque est le one-hot `phase_charge` du contexte global.
+            if ctx["is_charge_phase"] and charge_check_eligibility(
+                game_state, ctx["active_squad_id"], [squad_id]
+            ):
+                _b(
+                    "charge_reachable_max_roll",
+                    charge_build_valid_plan(
+                        game_state, ctx["active_squad_id"], [squad_id], CHARGE_MAX_ROLL
+                    )
+                    is not None,
+                )
+
             if squad_id in ctx["fight_target_pool"]:
                 from engine.phase_handlers.fight_handlers import model_entry_can_fight_target
 
@@ -1261,6 +1282,9 @@ class ObservationBuilder:
             # l'escouade entière, qui contient celle de chaque figurine). Il sert donc de garde :
             # hors pool -> 0 sans boucler. Le coût par-figurine n'est payé qu'en mêlée réelle.
             "fight_target_pool": fight_target_pool,
+            # V11 §9 P3-2 — garde de phase du bit `charge_reachable_max_roll` : hors charge, la
+            # question n'a pas de sens et le plan (coûteux) n'est pas construit.
+            "is_charge_phase": str(require_key(game_state, "phase")).lower() == "charge",
             # Empreintes par figurine, réutilisées telles quelles pour le comptage 04.02.
             "synth_by_mid": synth_by_mid,
             "engagement_zone": ez_zone,

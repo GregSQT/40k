@@ -39,8 +39,9 @@ from ai.pointer_policy import PointerMaskablePolicy
 from ai.spatial_extractor import SpatialCombinedExtractor
 from ai.pointer_policy import DENSE_LOGIT_COUNT
 from engine.macro_intents import (
-    ACTION_CHARGE,
     ACTION_WAIT,
+    CHARGE_SLOT_BASE,
+    CHARGE_SLOT_COUNT,
     CHOICE_BASE,
     CHOICE_COUNT,
     MOVE_CELL_BASE,
@@ -128,10 +129,13 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
     scale = policy.entity_dim ** 0.5
     query = policy.query_net(latent_pi)
     pointer = torch.einsum("bd,bkd->bk", query, embeddings) / scale
-    # V11 §9 P3-1 : seconde requete, memes embeddings -> logits de CIBLE DE MELEE.
+    # V11 §9 P3-2 : seconde requete, memes embeddings -> logits de CIBLE DE CHARGE.
+    charge_query = policy.charge_query_net(latent_pi)
+    charge_pointer = torch.einsum("bd,bkd->bk", charge_query, embeddings) / scale
+    # V11 §9 P3-1 : troisieme requete, memes embeddings -> logits de CIBLE DE MELEE.
     fight_query = policy.fight_query_net(latent_pi)
     fight_pointer = torch.einsum("bd,bkd->bk", fight_query, embeddings) / scale
-    # V11 §9.3 P2 : troisieme requete, embeddings de CANDIDATS -> logits CHOICE_i.
+    # V11 §9.3 P2 : quatrieme requete, embeddings de CANDIDATS -> logits CHOICE_i.
     choice = torch.einsum(
         "bd,bkd->bk", policy.choice_query_net(latent_pi), decision_emb
     ) / scale
@@ -141,9 +145,9 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
             move,
             base[:, :1],        # wait
             pointer,
-            base[:, 1:2],       # charge
+            charge_pointer,
             fight_pointer,
-            base[:, 2:],        # fight-sans-cible, intents de zone
+            base[:, 1:],        # fight-sans-cible, intents de zone
             choice,
         ],
         dim=1,
@@ -259,9 +263,12 @@ def test_pointer_logit_is_slot_local(model):
         after = policy._action_logits(latent_pi, perturbed, move_map, decision_emb)
     diff = (after - before).abs()[0]
     changed = torch.nonzero(diff > 1e-6).flatten().tolist()
-    # Le slot 1 pilote DEUX logits depuis §9 P3-1 : « tirer sur lui » et « le frapper ». Les deux
-    # sortent du MEME embedding, par deux requetes distinctes — c'est le partage recherche.
-    assert changed == [SHOOT_SLOT_BASE + 1, FIGHT_SLOT_BASE + 1], f"logits deplaces : {changed[:5]}"
+    # Le slot 1 pilote TROIS logits depuis §9 P3-2 : « tirer sur lui », « le charger » et « le
+    # frapper ». Les trois sortent du MEME embedding, par trois requetes distinctes — c'est le
+    # partage recherche.
+    assert changed == [
+        SHOOT_SLOT_BASE + 1, CHARGE_SLOT_BASE + 1, FIGHT_SLOT_BASE + 1
+    ], f"logits deplaces : {changed[:5]}"
 
 
 def test_evaluate_actions_returns_values_log_prob_entropy(model):
@@ -495,7 +502,7 @@ def test_move_head_costs_nothing_per_cell(model):
 
 
 def test_action_net_has_no_dead_column(model):
-    """`action_net` est réduit à ses colonnes VIVES (V11 §9.3 P2 : `Linear(latent, 18)`).
+    """`action_net` est réduit à ses colonnes VIVES (V11 §9 P3-2 : `Linear(latent, 17)`).
 
     Avant P2, la couche était dimensionnée sur l'action space entier et 1050 de ses colonnes ne
     recevaient aucun gradient — ~336 k paramètres inertes. Ce test verrouille les deux moitiés de
@@ -506,10 +513,10 @@ def test_action_net_has_no_dead_column(model):
     policy = model.policy
     policy.set_training_mode(False)
     assert policy.action_net.out_features == DENSE_LOGIT_COUNT
-    # Les ids denses, dans l'ordre : wait, charge, puis tout ce qui suit les slots de melee
+    # Les ids denses, dans l'ordre : wait, puis tout ce qui suit les slots de melee
     # (fight-sans-cible + intents de zone) jusqu'aux CHOICE.
     dense_action_ids = (
-        [ACTION_WAIT, ACTION_CHARGE]
+        [ACTION_WAIT]
         + list(range(FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT, CHOICE_BASE))
     )
     assert len(dense_action_ids) == DENSE_LOGIT_COUNT
@@ -529,6 +536,70 @@ def test_action_net_has_no_dead_column(model):
         assert moved == [action_id], (
             f"la colonne dense {column} devait deplacer la seule action {action_id}, "
             f"elle a deplace {moved[:5]}"
+        )
+
+
+# ======================================================================================
+# P3-2 — tête pointeur de CHARGE : la cible de charge est un slot ennemi (V11 §9 P3-2)
+# ======================================================================================
+
+
+def test_charge_logits_come_from_the_charge_pointer(model):
+    """Les logits `CHARGE_SLOT_i` SONT `q_charge · e_i / sqrt(d)`, pas des colonnes denses.
+
+    Même raison que le tir et la mêlée : le candidat est une ENTITÉ déjà encodée, donc le slot
+    doit être scoré sur son embedding — un slot de plus coûte alors zéro paramètre.
+    """
+    policy = model.policy
+    policy.set_training_mode(False)
+    obs = _tensors(_zero_obs(batch=1))
+    with torch.no_grad():
+        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
+        latent_pi = policy.mlp_extractor.forward_actor(trunk)
+        produced = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+        expected = torch.einsum(
+            "bd,bkd->bk", policy.charge_query_net(latent_pi), embeddings
+        ) / (policy.entity_dim ** 0.5)
+    assert torch.allclose(
+        produced[:, CHARGE_SLOT_BASE:CHARGE_SLOT_BASE + CHARGE_SLOT_COUNT], expected, atol=1e-6
+    )
+
+
+def test_charge_query_is_distinct_from_shoot_and_fight(model):
+    """Trois requêtes DISTINCTES sur les mêmes embeddings — pas une seule partagée.
+
+    Partager la requête forcerait un ordre de préférence unique pour « qui tirer », « qui
+    charger » et « qui frapper », alors que ce sont trois questions différentes. La contre-épreuve
+    est structurelle : perturber la requête de charge ne doit toucher QUE les logits de charge.
+    """
+    policy = model.policy
+    policy.set_training_mode(False)
+    assert policy.charge_query_net is not policy.query_net
+    assert policy.charge_query_net is not policy.fight_query_net
+    obs = _tensors(_zero_obs(batch=1))
+    with torch.no_grad():
+        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
+        latent_pi = policy.mlp_extractor.forward_actor(trunk)
+        before = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+        policy.charge_query_net.bias.add_(1.0)
+        after = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+        policy.charge_query_net.bias.sub_(1.0)
+    changed = torch.nonzero((after - before).abs()[0] > 1e-6).flatten().tolist()
+    # Seuls les slots dont l'embedding est non nul bougent (un slot vide est masqué à zéro par
+    # l'encodeur, donc son produit scalaire l'est aussi) : on exige donc « aucun logit hors de la
+    # famille charge », et au moins un déplacé — sans quoi le test passerait sur une tête morte.
+    assert changed, "la requete de charge ne deplace AUCUN logit : tete inerte"
+    assert all(
+        CHARGE_SLOT_BASE <= action < CHARGE_SLOT_BASE + CHARGE_SLOT_COUNT for action in changed
+    ), f"la requete de charge deplace des logits hors de sa famille : {changed[:5]}"
+
+
+def test_charge_head_costs_nothing_per_slot(model):
+    """Le nombre de slots de charge est GRATUIT en paramètres."""
+    policy = model.policy
+    for parameter in policy.charge_query_net.parameters():
+        assert CHARGE_SLOT_COUNT not in tuple(parameter.shape), (
+            "un parametre de la tete de charge est dimensionne par le nombre de slots"
         )
 
 

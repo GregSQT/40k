@@ -18,11 +18,11 @@ from engine.phase_handlers.shared_utils import (
     compute_candidate_footprint,
     build_squad_action_mask,
     get_enemy_slot_mapping,
-    charge_check_eligibility,
     roll_advance_for_squad,
     # Refonte spatiale du move : action = cellule de la grille egocentrique. Constantes importees,
     # jamais de litteral nu : le plan d'actions a change (WAIT 18 -> 1024, etc.).
-    SQUAD_ACTION_CHARGE,
+    SQUAD_ACTION_CHARGE_SLOT_BASE,
+    SQUAD_ACTION_CHARGE_SLOT_COUNT,
     SQUAD_ACTION_FIGHT_NO_TARGET,
     SQUAD_ACTION_FIGHT_SLOT_BASE,
     SQUAD_ACTION_FIGHT_SLOT_COUNT,
@@ -47,7 +47,6 @@ from engine.macro_intents import (
     is_agent_decision_action,
     is_zone_intent_action,
     decode_zone_intent_action,
-    get_best_enemy_score_for_unit,
 )
 from engine.agent_decision import read_pending_agent_decision
 
@@ -997,36 +996,17 @@ class ActionDecoder:
                 "squad_id": squad_id,
             }
 
-        if action_int == SQUAD_ACTION_CHARGE:
-            units_cache = require_key(game_state, "units_cache")
-            cache_entry = units_cache.get(squad_id)
-            if cache_entry is None:
-                raise KeyError(f"Squad {squad_id} missing from units_cache")
-            our_player = int(require_key(cache_entry, "player"))
-            enemy_slots = get_enemy_slot_mapping(game_state, our_player)
-            best_target_id: Optional[str] = None
-            best_score = -1.0
-            for esid in enemy_slots:
-                if esid is None or esid not in units_cache:
-                    continue
-                if not charge_check_eligibility(game_state, squad_id, [esid]):
-                    continue
-                enemy_unit = get_unit_by_id(esid, game_state)
-                if enemy_unit is None:
-                    continue
-                score = get_best_enemy_score_for_unit(enemy_unit, game_state)
-                if score > best_score:
-                    best_score = score
-                    best_target_id = esid
-            if best_target_id is None:
-                raise ValueError(
-                    f"convert_squad_action: aucune cible chargeable pour squad {squad_id} "
-                    "— le mask aurait dû empêcher action 24"
-                )
+        if SQUAD_ACTION_CHARGE_SLOT_BASE <= action_int < (
+            SQUAD_ACTION_CHARGE_SLOT_BASE + SQUAD_ACTION_CHARGE_SLOT_COUNT
+        ):
+            # V11 §9 P3-2 : la cible de charge vient de l'ACTION. `target_slot` indexe le mapping
+            # `get_enemy_slot_mapping` — le meme que le masque et que la ligne du tenseur ennemi.
+            # La resolution slot -> escouade est faite par le moteur (`squad_charge`), qui verifie
+            # l'eligibilite 11.02 : la traduire ici en dupliquerait la regle (patron P3-1).
             return {
                 "action": "squad_charge",
                 "squad_id": squad_id,
-                "target_squad_id": best_target_id,
+                "target_slot": action_int - SQUAD_ACTION_CHARGE_SLOT_BASE,
             }
 
         if SQUAD_ACTION_FIGHT_SLOT_BASE <= action_int < (

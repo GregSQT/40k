@@ -149,6 +149,21 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     # dire « indéterminé » au lieu de « pas de couvert ».
     "los_can_see",          # 06.01 : ≥ 1 figurine de la cible visible depuis l'observateur
     "cover_vs_observer",    # 13.08 EXACT : la cible a le bénéfice du couvert contre mon tir
+    # ⚠ Entité ENNEMIE et phase de CHARGE uniquement (masque = `phase_charge` du contexte
+    # global). V11 §9 P3-2 a fait de la cible de charge une décision de l'agent ; la tête
+    # pointeur scorerait sinon des cibles sans savoir laquelle est ATTEIGNABLE.
+    #
+    # 1 ssi il existe un plan de charge LÉGAL vers cette cible au jet MAXIMAL (11.02 : 2D6, donc
+    # 12"). À 0, déclarer la charge est perdu d'avance quel que soit le jet — l'unité perd son
+    # activation entière. Rien d'autre ne le dit : `edge_distance` mesure une distance à vol
+    # d'oiseau et ignore les trois causes réelles d'échec structurel — aucune case libre au
+    # contact (cible encerclée ou collée à un mur), ER d'une escouade NON ciblée qui interdit le
+    # placement (11.04 AFTER MOVING), et surtout la pénalité de descente 13.06, qui retranche du
+    # jet une hauteur que l'observation n'expose nulle part.
+    #
+    # L'oracle est `charge_build_valid_plan`, la fonction MOTEUR qu'exécute le commit : une
+    # réimplémentation annoncerait une atteignabilité que la résolution ne produirait pas.
+    "charge_reachable_max_roll",
 ) + tuple(f"rule_{rule_id}" for rule_id in UNIT_RULE_EFFECT_IDS) + (
     "present",             # masque d'entité (0 = slot vide / unité morte) — DERNIER, cf. ci-dessus
 )

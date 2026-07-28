@@ -21,6 +21,16 @@ def test_move_cell_count_matches_the_grid():
     assert su.SQUAD_ACTION_MOVE_CELL_COUNT == GRID_CELL_COUNT
 
 
+def test_charge_slots_mirror_the_enemy_slot_mapping():
+    """V11 §9 P3-2 : une action de charge = un slot ennemi, le MEME que le tir (invariant D1).
+
+    Meme raison que pour la melee : desolidariser les comptes ferait pointer l'action de charge
+    i et la ligne i du tenseur ennemi sur deux escouades differentes, sans que rien ne leve.
+    """
+    assert mi.CHARGE_SLOT_COUNT == mi.SHOOT_SLOT_COUNT
+    assert su.SQUAD_ACTION_CHARGE_SLOT_COUNT == su.SQUAD_ACTION_SHOOT_SLOT_COUNT
+
+
 def test_fight_slots_mirror_the_enemy_slot_mapping():
     """V11 §9 P3-1 : une action de combat = un slot ennemi, le MEME que le tir (invariant D1).
 
@@ -44,7 +54,8 @@ def test_named_actions_mirror():
     assert mi.ACTION_WAIT == su.SQUAD_ACTION_WAIT
     assert mi.SHOOT_SLOT_BASE == su.SQUAD_ACTION_SHOOT_SLOT_BASE
     assert mi.SHOOT_SLOT_COUNT == su.SQUAD_ACTION_SHOOT_SLOT_COUNT
-    assert mi.ACTION_CHARGE == su.SQUAD_ACTION_CHARGE
+    assert mi.CHARGE_SLOT_BASE == su.SQUAD_ACTION_CHARGE_SLOT_BASE
+    assert mi.CHARGE_SLOT_COUNT == su.SQUAD_ACTION_CHARGE_SLOT_COUNT
     assert mi.FIGHT_SLOT_BASE == su.SQUAD_ACTION_FIGHT_SLOT_BASE
     assert mi.FIGHT_SLOT_COUNT == su.SQUAD_ACTION_FIGHT_SLOT_COUNT
     assert mi.ACTION_FIGHT_NO_TARGET == su.SQUAD_ACTION_FIGHT_NO_TARGET
@@ -59,7 +70,7 @@ def test_total_action_size():
     """L'action space se termine par les CHOICE_i du mecanisme de decision (V11 §9.3 P2)."""
     assert mi.CHOICE_BASE == su.SQUAD_ACTION_SIZE + mi.MAX_OBJECTIVES * 3
     assert mi.TOTAL_ACTION_SIZE == mi.CHOICE_BASE + mi.CHOICE_COUNT
-    assert mi.TOTAL_ACTION_SIZE == 1088
+    assert mi.TOTAL_ACTION_SIZE == 1107
 
 
 def test_choice_slots_close_the_action_space():
@@ -80,7 +91,7 @@ def test_micro_action_ids_are_contiguous_and_unique():
         list(mi.MOVE_CELLS)
         + [mi.ACTION_WAIT]
         + list(mi.SHOOT_SLOTS)
-        + [mi.ACTION_CHARGE]
+        + list(mi.CHARGE_SLOTS)
         + list(mi.FIGHT_SLOTS)
         + [mi.ACTION_FIGHT_NO_TARGET]
     )
@@ -100,7 +111,7 @@ def test_micro_actions_are_not_zone_intents():
     for action in (
         mi.MOVE_CELL_BASE,
         mi.ACTION_WAIT,
-        mi.ACTION_CHARGE,
+        mi.CHARGE_SLOT_BASE,
         mi.FIGHT_SLOT_BASE,
         mi.ACTION_FIGHT_NO_TARGET,
     ):
