@@ -62,7 +62,7 @@ actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
-| **§0.14** | Re-mesure du run — win-rate par matchup | 🟠 **DÉBLOQUÉ** — aucun prérequis technique restant | **1** | Lancer le run `--new` (`obs_size` **20626**, vérifié dans le code le 2026-07-28 : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` == la valeur des 5 profils de config). ⚠️ Lire d'abord §0.33 (choix du profil) et l'alerte de divergence de config ci-dessous. |
+| **§0.14** | Re-mesure du run — win-rate par matchup | 🟠 **DÉBLOQUÉ** — aucun prérequis technique restant | **1** | Lancer le run `--new` (`obs_size` **20626**, vérifié dans le code le 2026-07-28 : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` == la valeur des 5 profils de config). ⚠️ Lire d'abord §0.33 (choix du profil : 8 envs, re-testé meilleur par l'utilisateur le 2026-07-28) ; `bot_eval_freq` est tranché (2000 assumé, encadré 🟢 ci-dessous). |
 | **[§9](V11_phaseA.md#s9)** | Phase A' — **P2 → P5** (mécanisme de décision agent) | 🔴 **0/4** — vérifié le 2026-07-28 | **2** | Le plus gros reste fonctionnel du document. Grep `pending_agent_decision` / `CHOICE_[0-9]` sur `engine/`+`ai/` = **0** ; `TOTAL_ACTION_SIZE` vaut toujours `BASE_ZONE_INTENT + MAX_OBJECTIVES*3` = **1062**, pas le `41+K` prévu ; la pseudo-décision aléatoire `raw_action_int % len(options)` est toujours vive ([w40k_core.py:2644](../../engine/w40k_core.py#L2644)). Détail → [§9.0](V11_phaseA.md#s9.0) (dont la ligne **P1 est périmée**, cf. §0.38). |
 | **§0.38** | Code mort `_attack_sequence_rng` non supprimé — 2ᵉ moitié de P1 | 🟠 **OUVERT** (constaté 2026-07-28) | **3** | P1 prévoyait « porter les règles vers le vif **PUIS supprimer le mort** ». Le portage est fait ; la suppression **non**. Détail → §0.38. |
 | **§0.33** | Rollout buffer 46,9 Go pour 39 Go de RAM | 🟠 **CONDITIONNEL** — ne bloque que les profils à 48 envs | **4** (avant tout run 48 envs) | Vérifié 2026-07-28 dans la config : `x1`/`x5_new`/`x5_debug` = **8 envs** (passent) ; `x5_append`/`x1_debug` = **48 envs** (échouent à l'allocation). Ne pas lancer ces deux-là sans rouvrir l'entrée. |
@@ -70,25 +70,24 @@ actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist
 | **§0.40** | Observation de la phase de déploiement déficiente (3 défauts vérifiés) | 🔴 **OUVERT** — chantier externe | 6 | Détail et pistes → [`observation_deploiement.md`](observation_deploiement.md) (sorti de l'audit archivé le 2026-07-28). Points 1-2 (obs ≠ unité du masque, grille centrée hors plateau) = correctifs indépendants et peu coûteux ; point 3 (décrire les hexes candidats) change `obs_size` → à séquencer avec un run `--new`. Détail → §0.40. |
 | **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)). T2→T5 **jamais revérifiés** : ne pas s'appuyer sur leurs ✅ sans relecture. ⚠️ Sa **section** est restée en §0hist (elle y était déjà avant l'épuration) alors que sa part T2→T5 est ouverte — laissée en place plutôt que scindée, pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
 
-🔴 **ALERTE — la config commitée contredit la décision §0.14 (MAJ 2026-07-28 soir : la
-divergence a été COMMITÉE en l'état, `ea18e9ae` — l'arbitrage utilisateur reste dû).**
-`config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` porte désormais en HEAD,
-arbre propre (vérifié le 2026-07-28 soir) :
+🟢 **TRANCHÉ le 2026-07-28 soir (arbitrage utilisateur) : `bot_eval_freq = 2000` ASSUMÉ**, pour
+la **granularité des courbes de métriques**. La décision « 4000 » de §0.14 est **annulée** ;
+HEAD (`x1: 2000`, commité `ea18e9ae`) et décision sont alignés — plus rien à committer.
+Conséquence acceptée en connaissance de cause : sur 30 000 épisodes, les 4 évals des marqueurs
+< `save_best_min_episodes` (10 000) ne peuvent sauvegarder aucun modèle — coût = du temps d'éval
+« pour les courbes », aucune perte de modèle.
 
-| Clé (profil `x1`) | Décision documentée §0.14 | HEAD actuel (commité) |
+| Clé (profil `x1`) | Ancienne décision §0.14 (annulée) | HEAD = décision actuelle |
 |---|---|---|
-| `bot_eval_freq` | **4000** | **2000** |
+| `bot_eval_freq` | ~~4000~~ | **2000** |
 
-**C'est le SEUL écart qui contredit une décision.** Les autres écarts du même fichier vont dans
-l'autre sens : les `justification` d'`obs_size` sont mises à jour de « grille 32x32x7 » vers
+**C'était le SEUL écart qui contredisait une décision.** Les autres changements du même commit
+vont dans le bon sens : les `justification` d'`obs_size` sont mises à jour de « grille 32x32x7 » vers
 « 32x32x9 » (**corrige** un texte périmé par §0.32 T-K/T-L), et les clés `perception_radius` /
 `max_nearby_units` / `max_valid_targets` ont été **retirées des 5 profils** le 2026-07-28 — elles
 n'alimentaient que le pipeline mono-figurine supprimé le même jour, plus aucun code ne les lit
 (vérifié par grep sur `engine/`, `services/`, `ai/`, `config_loader.py`). Aucun impact sur le run.
-**Avant de lancer le run §0.14, trancher** : soit remettre `bot_eval_freq: 4000` (la décision
-documentée), soit assumer 2000 et amender §0.14 — sinon le run tourne avec une cadence d'éval que
-le document contredit. Rappel du raisonnement §0.14 : à 2000, sur 30 000 épisodes, **4 évals
-tombent avant `save_best_min_episodes` (10 000) et ne peuvent sauvegarder aucun modèle**.
+Le run §0.14 peut donc être lancé tel quel, sans retouche de config.
 
 ⚠️ **Avant de vous appuyer sur une affirmation de ce document, lire §0bis** — en particulier la
 réserve de méthode sur le document lui-même (T2→T5 et section 9 n'ont **pas** été revérifiés
@@ -175,6 +174,9 @@ avant le premier pas — ce n'est pas une lenteur, c'est un `MemoryError` imméd
 **ARBITRAGE DU 2026-07-28 : aucun changement.** La commande réellement lancée porte
 `--training-config x1` ⇒ **8 envs, 7,8 Go**, dans les 29 Go disponibles. §0.33 ne bloque **pas**
 ce run. Il ne se déclenche que sur `x5_append` et `x1_debug`.
+**MAJ 2026-07-28 soir (utilisateur)** : re-test effectué, **8 envs mesuré MEILLEUR** que 48 sur
+cette machine — le régime 8 envs n'est pas un pis-aller, c'est le choix retenu. Un run 48 envs
+reste conditionné au re-tuning décrit ci-dessous.
 
 ⚠️ **Une recommandation « `n_steps` 8192 → 1024 » a été formulée puis RETIRÉE le même jour. La
 retenir aurait dégradé le run.** Ses deux erreurs, à ne pas refaire :
@@ -1013,6 +1015,8 @@ hors code). Mais « livré » n'était pas « optimal » : 6 résidus réels, to
 
 **Aussi actés** : `bot_eval_freq` x1 confirmé à 4000 (l'utilisateur avait remis 2000 à la main,
 revenu à 4000 après explication du garde-fou `save_best_min_episodes`).
+> ⚠️ **MAJ 2026-07-28 soir — décision INVERSÉE** : l'utilisateur assume finalement **2000** (granularité
+> des courbes de métriques), en connaissance du garde-fou. Cf. l'encadré 🟢 en §0.
 
 7. **Convention du bit `present` UNIFIÉE (demande utilisateur, même jour).** Le registre des
    unités le portait en PREMIER quand self/armes/types le portent en DERNIER — bénin (index lus
@@ -1938,6 +1942,7 @@ poussait `unit["col"/"row"]` alors que `require_unit_position` lit `units_cache`
 > 2026-07-26**, pas comme description de l'état : le paramètre qui a réellement bougé pour le run
 > à lancer est `x1.bot_eval_freq` (2000 → 4000), et il est lui-même contredit par une
 > modification non commitée du répertoire de travail (cf. l'alerte en §0).
+> **MAJ 2026-07-28 soir : tranché dans l'autre sens — 2000 assumé et commité** (encadré 🟢 en §0).
 >
 > **Verrou** : `tests/unit/ai/test_eval_timeout_resilience.py` (**7** tests) — crash lève /
 > crash+timeout lève (le crash prime) / timeout ne lève pas et n'atteint pas le gate / timeout
