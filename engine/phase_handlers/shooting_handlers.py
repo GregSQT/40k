@@ -3644,7 +3644,7 @@ def shooting_build_valid_target_pool(
     # Store in cache
     _target_pool_cache[cache_key] = valid_target_pool
 
-    # LOS_DEBUG=1: Log topology value for each target when storing (baseline for contradiction analysis)
+    # LOS_DEBUG=1: Log LoS ratio for each target when storing (baseline for contradiction analysis)
     if os.environ.get("LOS_DEBUG") == "1" and valid_target_pool:
         import sys
         from engine.combat_utils import has_line_of_sight_coords
@@ -3659,9 +3659,9 @@ def shooting_build_valid_target_pool(
                     ratio, can_see = _get_los_visibility_state(
                         game_state, int(sc), int(sr), int(tc), int(tr)
                     )
-                    topo_str = f"topology={ratio:.6f} can_see={can_see}"
+                    topo_str = f"los={ratio:.6f} can_see={can_see}"
                 except Exception:
-                    topo_str = "topology=N/A"
+                    topo_str = "los=N/A"
                 ep = game_state.get("episode_number", "?")
                 turn = game_state.get("turn", "?")
                 msg = f"[LOS_DEBUG] cache MISS store unit={unit_id_str} target={tid} ({sc},{sr})->({tc},{tr}) has_los={has_los} {topo_str} ep={ep} turn={turn}\n"
@@ -3824,28 +3824,12 @@ def _dump_los_contradiction_diagnostic(
     if cache_key_inv in hlc:
         lines.append(f"hex_los_cache[inverse_key] = {hlc[cache_key_inv]}")
 
-    # topology (legacy) or on-demand (×10)
-    lt = game_state.get("los_topology")
-    bc, br = game_state.get("board_cols"), game_state.get("board_rows")
-    if lt is not None and bc is not None and br is not None:
-        n = bc * br
-        fi = ar_norm * bc + ac_norm
-        ti = tr_norm * bc + tc_norm
-        if 0 <= fi < n and 0 <= ti < n:
-            val_fwd = float(lt[fi, ti])
-            val_inv = float(lt[ti, fi])
-            lines.append(f"los_topology[attacker_idx, target_idx] = {val_fwd:.6f} (idx {fi}->{ti})")
-            lines.append(f"los_topology[target_idx, attacker_idx] = {val_inv:.6f} (idx {ti}->{fi})")
-        else:
-            lines.append(f"Topology indices out of bounds: fi={fi} ti={ti} n={n}")
-    elif lt is None:
-        from engine.hex_utils import compute_los_visibility
-        wall_set = _get_wall_set(game_state)
-        v_fwd = compute_los_visibility(ac_norm, ar_norm, tc_norm, tr_norm, wall_set)
-        v_inv = compute_los_visibility(tc_norm, tr_norm, ac_norm, ar_norm, wall_set)
-        lines.append(f"on-demand LoS (no topology): fwd={v_fwd:.6f} inv={v_inv:.6f}")
-    else:
-        lines.append(f"los_topology present: {lt is not None}, board_cols={bc}, board_rows={br}")
+    # LoS tracée à la demande, dans les deux sens (la trace hex n'est pas symétrique)
+    from engine.hex_utils import compute_los_visibility
+    wall_set = _get_wall_set(game_state)
+    v_fwd = compute_los_visibility(ac_norm, ar_norm, tc_norm, tr_norm, wall_set)
+    v_inv = compute_los_visibility(tc_norm, tr_norm, ac_norm, ar_norm, wall_set)
+    lines.append(f"on-demand LoS: fwd={v_fwd:.6f} inv={v_inv:.6f}")
 
     # Episode context
     lines.append(f"episode={game_state.get('episode_number')} turn={game_state.get('turn')} phase={game_state.get('phase')}")
@@ -3865,8 +3849,8 @@ def _get_los_visibility_state(
 ) -> Tuple[float, bool]:
     """Return (visibility_ratio, can_see).
 
-    Uses precomputed los_topology when available (legacy boards with .npz).
-    Falls back to on-demand hex line trace (Board ×10) via hex_utils.
+    Trace de ligne hex à la demande (``compute_los_state``), mémoïsée par paire dans
+    ``_hex_los_state_cache``.
     Binary visibility (rule 06.01): can_see = ratio > 0 (no threshold).
     """
     board_cols = game_state.get("board_cols")
@@ -3881,28 +3865,22 @@ def _get_los_visibility_state(
     ):
         return 0.0, False
 
-    los_topology = game_state.get("los_topology")
-    if los_topology is not None:
-        from_idx = start_row * board_cols + start_col
-        to_idx = end_row * board_cols + end_col
-        visibility_ratio = float(los_topology[from_idx, to_idx])
-    else:
-        _state_cache = game_state.get("_hex_los_state_cache")
-        if _state_cache is not None:
-            _ck = ((start_col, start_row), (end_col, end_row))
-            _cached = _state_cache.get(_ck)
-            if _cached is not None:
-                return _cached
-        from engine.hex_utils import compute_los_state, build_wall_set
-        wall_set = _get_wall_set(game_state)
-        _result = compute_los_state(
-            start_col, start_row, end_col, end_row, wall_set,
-        )
-        if _state_cache is None:
-            _state_cache = {}
-            game_state["_hex_los_state_cache"] = _state_cache
-        _state_cache[((start_col, start_row), (end_col, end_row))] = _result
-        return _result
+    _state_cache = game_state.get("_hex_los_state_cache")
+    if _state_cache is not None:
+        _ck = ((start_col, start_row), (end_col, end_row))
+        _cached = _state_cache.get(_ck)
+        if _cached is not None:
+            return _cached
+    from engine.hex_utils import compute_los_state, build_wall_set
+    wall_set = _get_wall_set(game_state)
+    _result = compute_los_state(
+        start_col, start_row, end_col, end_row, wall_set,
+    )
+    if _state_cache is None:
+        _state_cache = {}
+        game_state["_hex_los_state_cache"] = _state_cache
+    _state_cache[((start_col, start_row), (end_col, end_row))] = _result
+    return _result
 
     can_see = visibility_ratio > 0.0
     return visibility_ratio, can_see

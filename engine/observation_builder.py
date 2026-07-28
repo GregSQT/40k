@@ -755,7 +755,7 @@ class ObservationBuilder:
             raise KeyError(f"los_cache missing target_id={target_id} for shooter_id={shooter.get('id')}")
         return 1.0 if los_cache[target_id] else 0.0
 
-    def _has_los_from_topology(
+    def _has_los_on_demand(
         self,
         from_col: int,
         from_row: int,
@@ -765,8 +765,7 @@ class ObservationBuilder:
     ) -> bool:
         """Check LoS for observation visibility features.
 
-        Uses precomputed los_topology when available (legacy boards).
-        Falls back to on-demand hex line trace (Board ×10) via hex_utils.
+        Trace de ligne hex à la demande (``compute_los_visibility``), mur set mémoïsé.
         Returns False for out-of-bounds coordinates.
         Binary visibility (rule 06.01): visible = ratio > 0 (no threshold).
         """
@@ -781,20 +780,14 @@ class ObservationBuilder:
             and 0 <= to_row < board_rows
         ):
             return False
-        los_topology = game_state.get("los_topology")
-        if los_topology is not None:
-            from_idx = from_row * board_cols + from_col
-            to_idx = to_row * board_cols + to_col
-            visibility_ratio = float(los_topology[from_idx, to_idx])
-        else:
-            from engine.hex_utils import compute_los_visibility, build_wall_set
-            wall_set = game_state.get("_wall_set_cache")
-            if wall_set is None:
-                wall_set = build_wall_set(game_state)
-                game_state["_wall_set_cache"] = wall_set
-            visibility_ratio = compute_los_visibility(
-                from_col, from_row, to_col, to_row, wall_set,
-            )
+        from engine.hex_utils import compute_los_visibility, build_wall_set
+        wall_set = game_state.get("_wall_set_cache")
+        if wall_set is None:
+            wall_set = build_wall_set(game_state)
+            game_state["_wall_set_cache"] = wall_set
+        visibility_ratio = compute_los_visibility(
+            from_col, from_row, to_col, to_row, wall_set,
+        )
         return visibility_ratio > 0.0
 
     def _build_los_cache_for_observation(
@@ -1140,7 +1133,6 @@ class ObservationBuilder:
         if not is_unit_alive(str(active_unit["id"]), game_state):
             raise ValueError(f"Active unit for observation is not alive: unit_id={active_unit.get('id')}")
         
-        # PERF: visibility_to_allies uses los_topology directly (no los_cache rebuild needed)
         # Local positions cache - one extraction from units_cache, reused ~1M times
         units_cache = require_key(game_state, "units_cache")
         positions = {uid: (e["col"], e["row"]) for uid, e in units_cache.items()}
@@ -2964,28 +2956,11 @@ class ObservationBuilder:
             (-1, -1)   # NW
         ]
 
-        active_col, active_row = positions[str(active_unit["id"])]
-        board_cols = game_state["board_cols"]
-        board_rows = game_state["board_rows"]
-        wall_edge_topology = game_state.get("wall_edge_topology")
-
         for dir_idx, (dx, dy) in enumerate(directions):
             feature_base = base_idx + dir_idx * 4
 
-            # Wall and edge: use precomputed topology when available (PERF: avoids 8×60 wall loops + 8×4 edge lookups)
-            if (
-                wall_edge_topology is not None
-                and isinstance(board_cols, int)
-                and isinstance(board_rows, int)
-                and 0 <= active_col < board_cols
-                and 0 <= active_row < board_rows
-            ):
-                hex_idx = active_row * board_cols + active_col
-                wall_dist = float(wall_edge_topology[hex_idx, dir_idx, 0])
-                edge_dist = float(wall_edge_topology[hex_idx, dir_idx, 1])
-            else:
-                wall_dist = self._find_nearest_in_direction(active_unit, dx, dy, game_state, "wall", positions)
-                edge_dist = self._find_edge_distance(active_unit, dx, dy, game_state, positions)
+            wall_dist = self._find_nearest_in_direction(active_unit, dx, dy, game_state, "wall", positions)
+            edge_dist = self._find_edge_distance(active_unit, dx, dy, game_state, positions)
 
             friendly_dist = self._find_nearest_in_direction(active_unit, dx, dy, game_state, "friendly", positions)
             enemy_dist = self._find_nearest_in_direction(active_unit, dx, dy, game_state, "enemy", positions)
@@ -3125,7 +3100,7 @@ class ObservationBuilder:
 
         Asymmetric design: MORE complete information about enemies for tactical decisions.
 
-        Uses los_topology directly for visibility features (O(1) per pair, no los_cache needed).
+        Visibilité tracée à la demande par paire (``_has_los_on_demand``), sans los_cache.
 
         Features per enemy (22 floats):
         0. relative_col, 1. relative_row (egocentric position)
@@ -3433,12 +3408,12 @@ class ObservationBuilder:
                 
                 offensive_type = 1.0 if max_rng_range > melee_range else 0.0
                 
-                # LoS check using topology (only for enemies) - O(1), no los_cache needed
+                # LoS tracée à la demande (ennemis seulement), sans los_cache
                 has_los = 0.0
                 if is_enemy > 0.5:
                     active_col, active_row = positions[str(active_unit["id"])]
                     unit_col, unit_row = positions[str(unit["id"])]
-                    has_los = 1.0 if self._has_los_from_topology(
+                    has_los = 1.0 if self._has_los_on_demand(
                         active_col, active_row, unit_col, unit_row, game_state
                     ) else 0.0
                 

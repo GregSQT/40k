@@ -985,8 +985,7 @@ def compute_los_visibility(
     Returns 1.0 if no wall blocks the line, 0.0 if any intermediate
     cell is a wall.
 
-    For single-hex units (legacy), this is equivalent to the old topology
-    lookup. For multi-hex units, the caller should use
+    Pour une unité multi-hex, l'appelant doit utiliser
     compute_los_visibility_footprint (§7.2).
     """
     if from_col == to_col and from_row == to_row:
@@ -1008,9 +1007,8 @@ def compute_los_state(
 ) -> Tuple[float, bool]:
     """Compute (visibility_ratio, can_see) for a single-hex pair.
 
-    Drop-in replacement for _get_los_visibility_state (shooting_handlers)
-    and _has_los_from_topology (observation_builder) without needing the
-    n×n topology matrix.
+    Primitive partagée par _get_los_visibility_state (shooting_handlers)
+    et _has_los_on_demand (observation_builder).
 
     Binary visibility (rule 06.01): can_see = ratio > 0 (no threshold).
 

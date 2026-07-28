@@ -1,9 +1,9 @@
-> ⚠️ **Document historique (2026-07-27).** Le board `25x21` a été supprimé ; les chemins de
-> murs pointent désormais `config/board/44x60x1/walls/`, où `tutorial_walls-01.json` a été
-> conservé. Les scénarios `config/tutorial/scenario_etape*.json` ne se chargent PAS en l'état,
-> pour une raison antérieure et sans rapport : ils ne déclarent pas de `board_ref` et ne sont pas
-> dans un dossier `config/board/<board>/scenario/`, donc leur `wall_ref` n'est pas résoluble
-> (contrainte V11 T4). `walls-01.json` (étape 3) n'existe pas non plus.
+> ⚠️ **Document historique — fonctionnalité SUPPRIMÉE (2026-07-28).** Le mode tutoriel et les
+> guides de mode ont été retirés du dépôt : `config/tutorial/`, `TutorialProvider`,
+> `TutorialOverlay`, `tutorialUiRules`, le mode `tutorial` de l'API, la colonne
+> `users.tutorial_completed` et la redirection de premier login. Le fichier de murs
+> `config/board/44x60x1/walls/tutorial_walls-01.json` est conservé. Ce document ne décrit donc
+> plus rien d'existant — il est gardé comme spec de référence si le didacticiel est réécrit.
 
 # Didacticiel — Documentation d'implémentation
 

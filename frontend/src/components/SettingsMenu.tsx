@@ -31,8 +31,6 @@ interface SettingsMenuProps {
   onToggleStatusBadgePerModel?: (value: boolean) => void;
   retreatAlertEnabled?: boolean;
   onToggleRetreatAlert?: (value: boolean) => void;
-  modeGuidesActivated?: boolean;
-  onToggleModeGuidesActivated?: (value: boolean) => void;
   battleShockTestEnabled?: boolean;
   onToggleBattleShockTest?: (value: boolean) => void;
   deployIconBaseSizeBounded?: boolean;
@@ -169,8 +167,6 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onToggleStatusBadgePerModel,
   retreatAlertEnabled = true,
   onToggleRetreatAlert,
-  modeGuidesActivated = true,
-  onToggleModeGuidesActivated,
   battleShockTestEnabled = false,
   onToggleBattleShockTest,
   deployIconBaseSizeBounded = true,
@@ -211,7 +207,6 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     boardDisplayMode: BoardDisplayMode;
     statusBadgePerModel: boolean;
     retreatAlertEnabled: boolean;
-    modeGuidesActivated: boolean;
     battleShockTestEnabled: boolean;
     deployIconBaseSizeBounded: boolean;
     logShowCoords: boolean;
@@ -231,7 +226,6 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     boardDisplayMode,
     statusBadgePerModel,
     retreatAlertEnabled,
-    modeGuidesActivated,
     battleShockTestEnabled,
     deployIconBaseSizeBounded,
     logShowCoords,
@@ -270,8 +264,6 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
         onToggleStatusBadgePerModel(s.statusBadgePerModel);
       if (onToggleRetreatAlert && retreatAlertEnabled !== s.retreatAlertEnabled)
         onToggleRetreatAlert(s.retreatAlertEnabled);
-      if (onToggleModeGuidesActivated && modeGuidesActivated !== s.modeGuidesActivated)
-        onToggleModeGuidesActivated(s.modeGuidesActivated);
       if (onToggleBattleShockTest && battleShockTestEnabled !== s.battleShockTestEnabled)
         onToggleBattleShockTest(s.battleShockTestEnabled);
       if (
@@ -780,17 +772,6 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   description="Activé (défaut) : saute le test cible+LoS au démarrage de la phase de tir (transition move→tir rapide) ; la présence de cible est résolue à l'activation — une unité sans cible visible peut apparaître activable puis passer son tour. Désactivé : pool exact (vérifie cible à portée + LoS avant de rendre activable, pas de cercle vert inutile) mais coûte ~1,5 s par transition."
                 />
               )}
-            </CollapsibleSection>
-          )}
-
-          {onToggleModeGuidesActivated && (
-            <CollapsibleSection title="Guides">
-              <ToggleRow
-                checked={modeGuidesActivated}
-                onChange={onToggleModeGuidesActivated}
-                label="Modes guides activated"
-                description="Active les guides d'introduction PvE/PvP. Désactivé automatiquement après avoir vu un guide."
-              />
             </CollapsibleSection>
           )}
         </div>

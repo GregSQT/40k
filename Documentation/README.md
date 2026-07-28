@@ -48,7 +48,6 @@ Les plans d'implémentation sont classés dans `Implémentation/Implémenté/` (
 | Document | Rôle |
 |----------|------|
 | **[CONFIG_FILES.md](CONFIG_FILES.md)** | Référence des fichiers de config : weapon_rules, game_config, training/rewards, scénarios, armurerie. |
-| **[LOS_TOPOLOGY.md](LOS_TOPOLOGY.md)** | Topologie LoS précalculée (legacy boards). |
 | **[TESTING.md](TESTING.md)** | Architecture des tests (`tests/unit/engine`, `tests/unit/services`). |
 | **[KNOWN_ANOMALIES.md](KNOWN_ANOMALIES.md)** | Registre des anomalies connues et de leur suivi. |
 | **[Code_Compliance/](Code_Compliance/)** | Docs des outils de conformité (analyzer, check_ai_rules, hidden_action_finder). |

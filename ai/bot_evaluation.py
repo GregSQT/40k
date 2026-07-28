@@ -387,8 +387,13 @@ def _build_eval_obs_normalizer_for_worker(
     model_path: Optional[str],
     vec_normalize_enabled: bool,
     vec_eval_enabled: bool,
-) -> Optional[Callable[[np.ndarray], np.ndarray]]:
+) -> Optional[Callable[[Any], Any]]:
     """Version worker : pas d'accès à l'env de training.
+
+    Le normalizer rendu accepte les DEUX formes d'observation et rend la même : un `dict`
+    (pipeline squad, VecNormalize entraînée avec `norm_obs_keys=["global_cont"]`) ou un
+    `np.ndarray` (chemin legacy Box à plat). D'où `Callable[[Any], Any]` : une signature
+    `ndarray -> ndarray` mentirait sur le chemin Dict, qui est celui du pipeline actuel.
 
     ⚠️ V11 §0.35 — les stats sont dérivées de `model_path`, le zip que CE worker charge. Il n'y
     a volontairement AUCUN paramètre de chemin de stats séparé : c'est cette séparation qui a

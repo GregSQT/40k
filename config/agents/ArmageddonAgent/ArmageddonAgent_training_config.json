@@ -52,7 +52,7 @@
       "checkpoint_name_prefix": "ppo_checkpoint",
       "eval_deterministic": true,
       "eval_render": false,
-      "bot_eval_freq": 4000,
+      "bot_eval_freq": 2000,
       "bot_eval_use_episodes": true,
       "bot_eval_intermediate": 100,
       "bot_eval_final": 100,
@@ -122,7 +122,7 @@
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x7 restant fournie a part. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE)."
+      "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x9 (GRID_CHANNELS, engine/spatial_grid.py) restant fournie a part. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE)."
     },
     "step_log_buffer_size": 200,
     "vec_normalize": {
@@ -304,7 +304,7 @@
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x7 restant fournie a part. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE)."
+      "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x9 (GRID_CHANNELS, engine/spatial_grid.py) restant fournie a part. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE)."
     },
     "step_log_buffer_size": 200,
     "vec_normalize": {
@@ -495,7 +495,7 @@
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x7 restant fournie a part. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE)."
+      "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x9 (GRID_CHANNELS, engine/spatial_grid.py) restant fournie a part. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE)."
     },
     "step_log_buffer_size": 200,
     "vec_normalize": {
@@ -644,7 +644,7 @@
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x7 restant fournie a part. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE)."
+      "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x9 (GRID_CHANNELS, engine/spatial_grid.py) restant fournie a part. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE)."
     },
     "step_log_buffer_size": 200,
     "model_params": {
@@ -838,7 +838,7 @@
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x7 restant fournie a part. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE)."
+      "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x9 (GRID_CHANNELS, engine/spatial_grid.py) restant fournie a part. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE)."
     },
     "step_log_buffer_size": 200,
     "model_params": {

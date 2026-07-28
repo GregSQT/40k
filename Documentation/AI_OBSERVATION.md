@@ -397,7 +397,7 @@ du layout `obs[314:346]` que décrit [`AI_OBSERVATION_Legacy.md`](AI_OBSERVATION
 appartiennent au pipeline mono-figurine et ont longtemps fait croire que le pipeline squad les
 portait déjà.
 
-**Historique et décisions** : [`Implémentation/V11_audit_observation.md`](Implémentation/V11_audit_observation.md)
+**Historique et décisions** : [`Implémentation/V11_audit_observation.md`](Implémentation/Implémenté/V11_audit_observation.md)
 (§8, §10 ; §7 pour la découpe en blocs A→E) ·
 [`V11_agent_rework.md`](Implémentation/V11_agent_rework.md) §9.2.5 (ce qui est observé des règles),
 **§0.31** (objectifs situés, règles d'unité, couvert exact, caches) et **§0.32** (audit

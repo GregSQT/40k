@@ -8,7 +8,6 @@ import {
   orientationStepToRadians,
   wrapOrientationStep,
 } from "../constants/gameConfig";
-import { TUTORIAL_STEP_TITLES_INTERCESSOR_HALO, useTutorial } from "../contexts/TutorialContext";
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useSingleDoubleClick } from "../hooks/useSingleDoubleClick";
 import type {
@@ -660,7 +659,7 @@ type BoardProps = {
   onCommitDeploy?: () => void | Promise<void>;
   onCancelDeploy?: () => void;
   /** Étage courant (multi-niveaux), remonté depuis BoardWithAPI. Optionnel : fallback état interne
-   *  pour les autres call sites (BoardReplay, tutorial) où le déploiement à l'étage n'est pas piloté. */
+   *  pour les autres call sites (BoardReplay) où le déploiement à l'étage n'est pas piloté. */
   currentLevel?: number;
   onCurrentLevelChange?: (level: number) => void;
   /** Charge par-figurine (V11 11.04, Slice G) — plan provisoire des figs posées. */
@@ -876,8 +875,6 @@ type BoardProps = {
   onCancelAdvanceWarning?: () => void;
   onSkipAdvanceWarning?: () => void;
   showAdvanceWarningPopup?: boolean; // If false, skip advance warning popup
-  /** Tutoriel : masquer l’icône Advance au-dessus des unités pendant certains steps. */
-  hideAdvanceIconForTutorial?: boolean;
   boardConfigOverride?: {
     cols: number;
     rows: number;
@@ -1328,7 +1325,6 @@ export default function Board({
   onCancelAdvanceWarning: _onCancelAdvanceWarning,
   onSkipAdvanceWarning: _onSkipAdvanceWarning,
   showAdvanceWarningPopup: _showAdvanceWarningPopup = false,
-  hideAdvanceIconForTutorial = false,
   boardConfigOverride,
   wallHexesOverride,
   availableCellsOverride,
@@ -2069,7 +2065,7 @@ export default function Board({
   const [boardZoom, setBoardZoom] = useState(BOARD_ZOOM_DEFAULT);
   const [zoomControlsOpen, setZoomControlsOpen] = useState(false);
   // Étages (multi-niveaux) : niveau d'affichage courant (0 = rez-de-chaussée). Piloté par le parent
-  // (BoardWithAPI) quand fourni, sinon état interne (BoardReplay / tutorial). Le nombre d'étages vient
+  // (BoardWithAPI) quand fourni, sinon état interne (BoardReplay). Le nombre d'étages vient
   // des ``floors`` du terrain (source unique). Sans étage → maxFloorLevel = 0, bouton masqué.
   const [internalLevel, setInternalLevel] = useState(0);
   const currentLevel = currentLevelProp ?? internalLevel;
@@ -3029,100 +3025,6 @@ export default function Board({
       setWeaponSelectionMenu(null);
     }
   }, [mode, phase, fightSubPhase, squadFightPlan]);
-
-  // Tutoriel : halo autour de l'Intercessor quand la popup "Phase de mouvement" est affichée
-  const tutorial = useTutorial();
-  useLayoutEffect(() => {
-    if (!tutorial?.setSpotlightPosition) return;
-    const showSpotlight =
-      tutorial.popupVisible &&
-      tutorial.currentStep?.stepKey &&
-      (TUTORIAL_STEP_TITLES_INTERCESSOR_HALO.includes(
-        tutorial.currentStep.stepKey as (typeof TUTORIAL_STEP_TITLES_INTERCESSOR_HALO)[number]
-      ) ||
-        tutorial.currentStep?.stage === "1-14") &&
-      boardConfig &&
-      units.length > 0;
-    if (!showSpotlight) {
-      tutorial.setSpotlightPosition(null);
-      return;
-    }
-    const p1Unit = units.find((u) => Number(u.player) === 1);
-    if (!p1Unit || p1Unit.col == null || p1Unit.row == null) {
-      tutorial.setSpotlightPosition(null);
-      return;
-    }
-    const rect = canvasContainerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const HEX_RADIUS = boardConfig.hex_radius;
-    const MARGIN = boardConfig.margin;
-    const HEX_WIDTH = 1.5 * HEX_RADIUS;
-    const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
-    const HEX_HORIZ_SPACING = HEX_WIDTH;
-    const HEX_VERT_SPACING = HEX_HEIGHT;
-    const centerX = p1Unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-    const centerY =
-      p1Unit.row * HEX_VERT_SPACING +
-      ((p1Unit.col % 2) * HEX_VERT_SPACING) / 2 +
-      HEX_HEIGHT / 2 +
-      MARGIN;
-    tutorial.setSpotlightPosition({
-      shape: "circle",
-      x: rect.left + centerX,
-      y: rect.top + centerY,
-      radius: 72,
-    });
-  }, [
-    tutorial?.popupVisible,
-    tutorial?.currentStep?.stepKey,
-    tutorial?.currentStep?.stage,
-    tutorial?.setSpotlightPosition,
-    boardConfig,
-    units,
-  ]);
-
-  // Tutoriel 2-11/2-12 : halos sur les icônes Intercessor + Hormagaunts sur le board
-  useLayoutEffect(() => {
-    if (!tutorial?.setSpotlightBoardUnitPositions) return;
-    const showBoardUnitSpotlights =
-      tutorial.popupVisible &&
-      (tutorial.currentStep?.stage === "2-11" || tutorial.currentStep?.stage === "2-12") &&
-      boardConfig &&
-      units.length > 0;
-    if (!showBoardUnitSpotlights) {
-      tutorial.setSpotlightBoardUnitPositions(null);
-      return;
-    }
-    const rect = canvasContainerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const HEX_RADIUS = boardConfig.hex_radius;
-    const MARGIN = boardConfig.margin;
-    const HEX_WIDTH = 1.5 * HEX_RADIUS;
-    const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
-    const HEX_HORIZ_SPACING = HEX_WIDTH;
-    const HEX_VERT_SPACING = HEX_HEIGHT;
-    const RADIUS = 72;
-    const circles: Array<{ shape: "circle"; x: number; y: number; radius: number }> = [];
-    for (const u of units) {
-      if (u.col == null || u.row == null) continue;
-      const centerX = u.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-      const centerY =
-        u.row * HEX_VERT_SPACING + ((u.col % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
-      circles.push({
-        shape: "circle",
-        x: rect.left + centerX,
-        y: rect.top + centerY,
-        radius: RADIUS,
-      });
-    }
-    tutorial.setSpotlightBoardUnitPositions(circles.length ? circles : null);
-  }, [
-    tutorial?.popupVisible,
-    tutorial?.currentStep?.stage,
-    tutorial?.setSpotlightBoardUnitPositions,
-    boardConfig,
-    units,
-  ]);
 
   const stableBlinkingUnits = useMemo(() => {
     if (!blinkingUnits) return undefined;
@@ -8265,18 +8167,6 @@ export default function Board({
     app.renderer.events.autoPreventDefault = false;
     app.stage.position.set(canvasPaddingX, canvasPaddingTop);
 
-    // Remove previous tutorial death ghost (étape 1-25) if any
-    const existingGhost = app.stage.children.find((c) => c.name === "tutorial-death-ghost");
-    if (existingGhost) {
-      app.stage.removeChild(existingGhost);
-      if (
-        "destroy" in existingGhost &&
-        typeof (existingGhost as PIXI.Container).destroy === "function"
-      ) {
-        (existingGhost as PIXI.Container).destroy({ children: true });
-      }
-    }
-
     // ✅ CREATE PERSISTENT UI CONTAINER for target logos, charge badges, etc.
     // This container is NEVER cleaned up by drawBoard()
     // Always recreate/re-add to ensure it's on the stage
@@ -10864,35 +10754,6 @@ export default function Board({
       }
     } // end if (unitsChanged)
 
-    // ✅ TUTORIAL 1-24-* / 1-25 : ghost Termagant à l'emplacement de mort sur le board
-    if (
-      tutorial?.currentStep?.stage != null &&
-      (tutorial.currentStep.stage === "1-25" || tutorial.currentStep.stage.startsWith("1-24-")) &&
-      tutorial?.lastEnemyDeathPosition &&
-      boardConfig
-    ) {
-      const { col, row } = tutorial.lastEnemyDeathPosition;
-      const ghostCenterX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-      const ghostCenterY =
-        row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
-      const ghostContainer = new PIXI.Container();
-      ghostContainer.name = "tutorial-death-ghost";
-      const ghostSprite = PIXI.Sprite.from("/icons/Termagant_red.webp");
-      ghostSprite.anchor.set(0.5);
-      ghostSprite.position.set(ghostCenterX, ghostCenterY);
-      ghostSprite.alpha = 0.45;
-      const iconScale = boardConfig.display?.icon_scale ?? 1;
-      const targetSize = HEX_RADIUS * iconScale;
-      const tw = ghostSprite.texture?.width ?? ghostSprite.width ?? 1;
-      const th = ghostSprite.texture?.height ?? ghostSprite.height ?? 1;
-      const maxDim = Math.max(tw, th, 1);
-      const ghostScale = targetSize / maxDim;
-      ghostSprite.scale.set(ghostScale, ghostScale);
-      ghostSprite.tint = 0x888888;
-      ghostContainer.addChild(ghostSprite);
-      app.stage.addChild(ghostContainer);
-    }
-
     // ✅ CHARGE ROLL POPUP RENDERING
     if (chargeRollPopup) {
       const popupText = chargeRollPopup.tooLow
@@ -11258,7 +11119,6 @@ export default function Board({
     onSkipUnit,
     onStartMovePreview,
     shootingActivationQueue,
-    hideAdvanceIconForTutorial,
     showHexCoordinates,
     showLosDebugOverlay,
     shootingTargetId,
@@ -11274,8 +11134,6 @@ export default function Board({
     blinkVersion,
     deploymentState,
     replayActionIndex,
-    tutorial?.currentStep?.stage,
-    tutorial?.lastEnemyDeathPosition,
     movePreviewLosBlinkIds,
     movePreviewHiddenModelIds,
     movePreviewLosCoverKey,

@@ -5,8 +5,9 @@
 > (2) **registre d'état** des chantiers replay ouverts. Le code + git portent le détail ;
 > ce doc porte le *contrat* et le *statut franc* (ce qui est vraiment clos vs en l'air).
 >
-> Faits vérifiés par lecture directe le **2026-07-23**. Toute ligne citée est à revérifier
-> avant de s'y fier (le code bouge plus vite que ce doc).
+> Faits vérifiés par lecture directe le **2026-07-28** (contre-lecture intégrale du code).
+> Les repères sont donnés en **noms de symboles** (greppables), jamais en numéros de ligne :
+> ceux-ci se périment en quelques jours.
 
 ---
 
@@ -59,7 +60,7 @@ en dérive `fight_eligible_units = [attacker_id]`.
 
 Le « cercle vert autour des figs » = anneau d'**éligibilité** (`UnitRenderer.renderGreenActivationCircle`,
 appelé par figurine si `isEligible && !figGhost`). L'éligibilité vient de `BoardPvp`
-(`isEligibleForRenderingBase`, ~`BoardPvp.tsx:10062`) :
+(`isEligibleForRenderingBase`) :
 
 **Règle produit : le cercle vert cible UNIQUEMENT l'unité active** (celle qui joue l'action courante),
 dans **toutes** les phases. `BoardReplay` restreint donc `eligibleUnitIds = [replayActiveUnitId]`
@@ -70,7 +71,7 @@ dans **toutes** les phases. `BoardReplay` restreint donc `eligibleUnitIds = [rep
 |---|---|---|
 | move / charge / advance / shoot | `eligibleUnitIds = [replayActiveUnitId]` filtré par `current_player` | ✅ unité active seule |
 | **fight** (`FOUGHT`) | `gameState.fight_eligible_units = [attacker_id]` (branche fight de BoardPvp, §4.A) | ✅ unité active seule |
-| **fight** (`pile_in`/`consolidation`) | classé `phase="move"` → `eligibleUnitIds = [unit_id]` (l'unité qui bouge) | ✅ unité active seule |
+| **fight** (`pile_in`/`consolidation`) | classé `phase="fight"` (§4.C) → `fight_eligible_units = [unit_id]` (l'unité qui bouge) | ✅ unité active seule |
 
 `current_player` en replay = `action.player` pour les actions move/shoot/charge/fight
 (`BoardReplay.replayCurrentPlayer`), sinon `state.current_player`.
@@ -136,8 +137,8 @@ run réel : 205 lignes FOUGHT, toutes `[FIGHT_SUBPHASE]`, **0 FIGHT_ELIGIBLE**, 
 > Le détail ci-dessous documente le jet intermédiaire (pool complet) conservé pour mémoire des pièges.
 
 #### Jet intermédiaire (pool complet) — abandonné
-**Cause racine.** Le pool d'activation V11 = `fight_eligible_units` (`fight_handlers.py`, écrit
-`:3499`/`:5468`/`:5627`…). Le PvP live le lit (`BoardPvp.tsx:10096`). Mais `step_logger` logguait
+**Cause racine.** Le pool d'activation V11 = `fight_eligible_units` (écrit par `fight_handlers.py`).
+Le PvP live le lit (`BoardPvp.isEligibleForRenderingBase`). Mais `step_logger` logguait
 encore les 3 pools V10 (vides) et **jamais** `fight_eligible_units` → pool `[]` en replay → pas de
 cercle vert en fight.
 
@@ -170,8 +171,8 @@ cercle vert en fight.
 
 **Sémantique du pool (conforme PvP).** Le vert suit `fight_eligible_units` = pool d'activation V11
 (alternance fights-first). Il peut **exclure l'unité qui frappe** (ex. `Unit 5 FOUGHT … [FIGHT_ELIGIBLE:
-102,103,104]`) : c'est le comportement PvP, où `BoardPvp.tsx:10107` supprime même le vert sur l'unité
-active en cours d'activation. Le vert éclaire les unités sélectionnables pour l'activation suivante.
+102,103,104]`) : c'est le comportement PvP, où `BoardPvp` supprime même le vert sur l'unité active en
+cours d'activation (`suppressFightActiveEligibleGreen`). Le vert éclaire les unités sélectionnables pour l'activation suivante.
 
 **Décision de contrat.** Un ancien `step.log` (sans `FIGHT_ELIGIBLE`) n'est plus rejouable →
 **régénérer les logs** (conforme : donnée manquante = erreur explicite, pas de fallback).
@@ -204,8 +205,10 @@ vides était déjà **jeté** par le caller squad_fight.
 - Validé : grep V10 **vide** côté moteur+front(hors résidu), 97 tests moteur verts, run `--step` OK
   (FOUGHT + pile_in/conso, 0 KeyError/NameError), tsc propre.
 
-**Résidu assumé (front)** : `useEngineAPI.ts` (~L9374-9448 et type L241-243) garde des branches
-`fightSubphase === "charging"/alternating_*` **mortes en V11** (sous-phases pile_in/fight/consolidate).
+**Résidu assumé (front)** : `useEngineAPI.ts` (blocs `currentPoolSize`/`fightPool`, + champs
+`active_alternating_activation_pool`/`non_active_alternating_activation_pool` de l'interface locale)
+garde des branches `fightSubphase === "charging"/alternating_*` **mortes en V11** (les sous-phases
+V11 sont pile_in/fight/consolidate → aucune branche ne matche, on tombe dans le `else` final).
 Les nettoyer touche l'**auto-play PvP live** (currentPoolSize/hasMoreEligibleUnits) → non validable en
 headless. À reprendre avec un test PvP fight réel, en remplaçant par `fight_eligible_units`
 (déjà la source V11 vivante ailleurs dans ce hook).

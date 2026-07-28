@@ -85,13 +85,13 @@ def test_api_json_response_orjson_encodes_set_and_numpy_without_pre_walk() -> No
     assert out["arr"] == [[1, 2], [3, 4]]
 
 
-def test_game_state_for_json_removes_topology_arrays() -> None:
+def test_game_state_for_json_removes_heavy_engine_keys() -> None:
     engine_instance = _EngineStub(
-        {"los_topology": 1, "pathfinding_topology": 2, "x": 3, "terrain_areas": [], "units_cache": {}}
+        {"wall_hexes": {(1, 2)}, "weapon_damage_table": {}, "x": 3, "terrain_areas": [], "units_cache": {}}
     )
     state = api_server._game_state_for_json(engine_instance)
-    assert "los_topology" not in state
-    assert "pathfinding_topology" not in state
+    assert "wall_hexes" not in state
+    assert "weapon_damage_table" not in state
     assert state["x"] == 3
 
 

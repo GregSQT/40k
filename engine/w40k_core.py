@@ -58,73 +58,6 @@ if TYPE_CHECKING:
 # Global flag to ensure debug.log is cleared only once per training session
 _debug_log_cleared = False
 
-# PERF: In-memory cache for topology arrays (keyed by wall_id string).
-# Avoids re-reading .npz from disk every episode during scenario rotation.
-# Each entry: (los_array, pathfinding_array, wall_edge_array).
-_topology_cache: Dict[str, Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
-
-
-def _load_topology_cached(
-    wall_ref: Optional[str],
-    board_cols: int,
-    board_rows: int,
-    game_state: Dict[str, Any],
-) -> None:
-    """
-    Load precomputed LoS/pathfinding/wall_edge topology into game_state.
-
-    Uses module-level _topology_cache to avoid repeated disk I/O.
-    First call per wall_id reads from disk; subsequent calls copy from memory.
-    """
-    if not wall_ref:
-        for key in ("los_topology", "pathfinding_topology", "wall_edge_topology"):
-            game_state.pop(key, None)
-        return
-
-    wall_ref_s = str(wall_ref).strip()
-    _stem = wall_ref_s.replace(".json", "").strip()
-    if wall_ref_s.startswith("walls-") and _stem[6:].isdigit():
-        wall_id = _stem[6:]
-    else:
-        wall_id = _stem
-
-    if not wall_id:
-        for key in ("los_topology", "pathfinding_topology", "wall_edge_topology"):
-            game_state.pop(key, None)
-        return
-
-    cache_key = f"{board_cols}x{board_rows}-{wall_id}"
-
-    if cache_key not in _topology_cache:
-        from config_loader import get_config_loader
-        _board_dir = get_config_loader().get_board_dir()
-        _topology_path = _board_dir / f"topology_{cache_key}.npz"
-        if not _topology_path.exists():
-            import logging
-            logging.getLogger(__name__).info(
-                "No topology .npz for %s — using on-demand LoS/pathfinding (Board ×10 mode).",
-                cache_key,
-            )
-            for key in ("los_topology", "pathfinding_topology", "wall_edge_topology"):
-                game_state.pop(key, None)
-            return
-        try:
-            with np.load(str(_topology_path)) as topo:
-                _topology_cache[cache_key] = (
-                    topo["los"].copy(),
-                    topo["pathfinding"].copy(),
-                    topo["wall_edge"].copy(),
-                )
-        except Exception as exc:
-            raise RuntimeError(
-                f"Failed to load LoS topology from {_topology_path}: {exc}"
-            ) from exc
-
-    los, pathfinding, wall_edge = _topology_cache[cache_key]
-    game_state["los_topology"] = los
-    game_state["pathfinding_topology"] = pathfinding
-    game_state["wall_edge_topology"] = wall_edge
-
 _engine_id_counter = 0
 _engine_id_lock = threading.Lock()
 
@@ -289,16 +222,12 @@ class W40KEngine(gym.Env):
             # Sous-ensemble Solid/dense (rule 13.5 Gone to Ground). None si absent (jamais
             # de repli vers wall_hexes complet : un mur non typé n'est pas Solid-prouvable).
             self._scenario_dense_wall_hexes = scenario_result.get("dense_wall_hexes")
-            self._scenario_wall_ref = scenario_result.get("wall_ref")
             self._scenario_objectives = scenario_objectives
             self._scenario_terrain_areas = scenario_result.get("terrain_areas")
             self._scenario_primary_objective = primary_objective_config
             self._scenario_roster_info = scenario_roster_info
             self._scenario_has_random_agent_roster = bool(
                 scenario_roster_info and scenario_roster_info.get("agent_ref_randomized")
-            )
-            self._tutorial_fight_no_death_unit_ids = scenario_result.get(
-                "tutorial_fight_no_death_unit_ids"
             )
 
             # Extract scenario name from file path for logging
@@ -389,13 +318,9 @@ class W40KEngine(gym.Env):
             # métier valide, pas un fallback masquant : zéro terrain objectif = zéro objectif).
             self._scenario_wall_hexes = self.config.get("scenario_wall_hexes")
             self._scenario_dense_wall_hexes = self.config.get("scenario_dense_wall_hexes")
-            self._scenario_wall_ref = self.config.get("scenario_wall_ref")
             self._scenario_objectives = self.config.get("scenario_objectives") or []
             self._scenario_terrain_areas = self.config.get("scenario_terrain_areas")
             self._scenario_primary_objective = self.config.get("primary_objective")
-            self._tutorial_fight_no_death_unit_ids = self.config.get(
-                "tutorial_fight_no_death_unit_ids"
-            )
         
         # Scale game_rules distance values from inches to sub-hex grid units.
         # Data files keep values in inches (GW standard); the engine works in grid steps.
@@ -590,18 +515,8 @@ class W40KEngine(gym.Env):
             "terrain_areas": getattr(self, "_scenario_terrain_areas", None) or [],
             # Objectives: grouped structure with id, name, hexes (for objective control calculation)
             "objectives": self._scenario_objectives,
-            "tutorial_fight_no_death_unit_ids": getattr(
-                self, "_tutorial_fight_no_death_unit_ids", None
-            ),
         }
 
-        # Load precomputed LoS topology if wall_ref available (PERF: ~1000x faster LoS lookups)
-        # If .npz missing (Board ×10), LoS/pathfinding use on-demand calculation via hex_utils.
-        _load_topology_cached(
-            getattr(self, "_scenario_wall_ref", None),
-            board_cols, board_rows,
-            self.game_state,
-        )
         self.game_state.pop("_wall_set_cache", None)
         self.game_state.pop("_dense_wall_set_cache", None)
         self.game_state.pop("_pathfinding_field_cache", None)
@@ -6543,20 +6458,6 @@ class W40KEngine(gym.Env):
             normalized_dense_wall_hexes.add((wall_col, wall_row))
         self._scenario_dense_wall_hexes = sorted(normalized_dense_wall_hexes)
 
-        # Scenarios MUST use wall_ref (config/board/{cols}x{rows}/walls-XX.json). No inline wall_hexes.
-        scenario_wall_ref = scenario_result.get("wall_ref")
-        self._scenario_wall_ref = scenario_wall_ref
-
-        board_cols = self.game_state.get("board_cols")
-        board_rows = self.game_state.get("board_rows")
-        if isinstance(board_cols, int) and isinstance(board_rows, int):
-            _load_topology_cached(
-                scenario_wall_ref, board_cols, board_rows, self.game_state,
-            )
-        elif not scenario_wall_ref:
-            for key in ("los_topology", "pathfinding_topology", "wall_edge_topology"):
-                self.game_state.pop(key, None)
-
         self.game_state["weapon_damage_table"] = load_weapon_damage_table()
 
         # Clear target pool cache on scenario rotation (defense in depth)
@@ -6576,9 +6477,6 @@ class W40KEngine(gym.Env):
             scenario_roster_info and scenario_roster_info.get("agent_ref_randomized")
         )
         self._scenario_loaded_for_controlled_player = int(require_key(self.config, "controlled_player"))
-        self._tutorial_fight_no_death_unit_ids = scenario_result.get(
-            "tutorial_fight_no_death_unit_ids"
-        )
 
         # Extract scenario name from file path for logging
         scenario_name = scenario_file
@@ -6619,9 +6517,6 @@ class W40KEngine(gym.Env):
         self.game_state.pop("_dense_wall_set_cache", None)
         self.game_state.pop("_pathfinding_field_cache", None)
         self.game_state.pop("_hex_los_state_cache", None)
-        self.game_state["tutorial_fight_no_death_unit_ids"] = (
-            self._tutorial_fight_no_death_unit_ids
-        )
         objectives = require_key(self.game_state, "objectives")
         self.game_state["macro_target_objective_index"] = 0 if objectives else None
         self.game_state["macro_target_objective_id"] = str(require_key(objectives[0], "id")) if objectives else None

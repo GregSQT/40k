@@ -1,5 +1,27 @@
 # Audit de l'observation de l'agent (V11) — 2026-07-25
 
+> 🗄️ **ARCHIVE — GELÉE LE 2026-07-28. NE PAS UTILISER COMME SPÉCIFICATION.**
+>
+> Ce document est l'**audit qui a motivé** la refonte de l'observation, plus son journal
+> d'implémentation. Il décrit, sections §1 à §6, une observation qui **n'existe plus** (vecteur
+> plat de 108 puis 199 dimensions, features calculées, 6 canaux de grille). Il est conservé pour
+> le **pourquoi** des décisions — pourquoi `+7/+8` ont été supprimés au profit des données brutes,
+> pourquoi le canal « menace ennemie » a été abandonné, pourquoi les figurines sont agrégées mais
+> pas les ennemis. Ça ne se retrouve nulle part ailleurs.
+>
+> **État réel du code (sources vives)** :
+> - [`AI_OBSERVATION.md`](../../AI_OBSERVATION.md) — le contrat d'observation actuel ;
+> - [`V11_entity_encoder_pointer.md`](../V11_entity_encoder_pointer.md) — l'architecture livrée ;
+> - `engine/observation_entities.py` — le schéma, seule source du layout.
+>
+> Repères vérifiés au 2026-07-28, à confronter aux chiffres du corps du texte : `obs_size` =
+> **20626** (tenseurs d'entités, plus un vecteur plat), `GRID_CHANNELS` = **9**, `SQUAD_TOP_K` =
+> **20**, `SHOOT_SLOT_COUNT` = **20**, `TOTAL_ACTION_SIZE` = **1062**.
+> **Les numéros de ligne cités dans ce document sont périmés** et ne sont pas maintenus.
+>
+> **Seul point actionnable restant**, extrait dans son propre chantier :
+> [`A_faire/observation_deploiement.md`](../A_faire/observation_deploiement.md).
+
 > But : dire, dimension par dimension et **sans jargon**, ce que l'agent voit réellement,
 > ce qui est mort/redondant, ce qui manque. Tout est vérifié dans le code (numéros de ligne)
 > et croisé avec les règles `Documentation/40k_rules/`. Une section de **re-audit** en fin de
@@ -12,19 +34,19 @@
 Une première passe avait conclu : « ~9 règles d'armes sont observées mais n'ont aucun effet →
 bruit pur ». **C'est faux pour l'agent réel.** Raison :
 
-Il existe **deux** constructeurs d'observation dans [observation_builder.py](../../engine/observation_builder.py) :
+Il existe **deux** constructeurs d'observation dans [observation_builder.py](../../../engine/observation_builder.py) :
 
 | Constructeur | Taille | Contient les 32 « rule features » ? | Utilisé par ArmageddonAgent ? |
 |---|---|---|---|
-| `build_observation` (mono-figurine, ancien) | **357** | Oui (index 314, `_encode_rule_features`, [ligne 1225](../../engine/observation_builder.py#L1225)) | **NON** |
+| `build_observation` (mono-figurine, ancien) | **357** | Oui (index 314, `_encode_rule_features`, [ligne 1225](../../../engine/observation_builder.py#L1225)) | **NON** |
 | `build_squad_observation` (escouade, actuel) | **108** | **Non** (aucune) | **OUI** |
 
-Le routage est dans [w40k_core.py:6218-6237](../../engine/w40k_core.py#L6218-L6237) : il lit `obs_size`
+Le routage est dans [w40k_core.py:6218-6237](../../../engine/w40k_core.py#L6218-L6237) : il lit `obs_size`
 depuis la config et n'appelle `build_squad_observation` que si `obs_size == 108`. La config
 `ArmageddonAgent` fixe **`obs_size: 108`** dans les 5 profils
-([training_config](../../config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json#L112)).
+([training_config](../../../config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json#L112)).
 De plus `build_observation` **lève une erreur** si `obs_size != 357`
-([ligne 1094-1098](../../engine/observation_builder.py#L1094)) — donc le chemin 357 et ses 32 règles
+([ligne 1094-1098](../../../engine/observation_builder.py#L1094)) — donc le chemin 357 et ses 32 règles
 sont **du code mort pour cet agent**.
 
 **Conséquence, corrigée :** le vrai problème n'est PAS du bruit de règles observées. C'est
@@ -66,14 +88,14 @@ objectif viser.** L'observation doit nourrir ces choix-là.
 >
 > **Source unique du layout** : `engine/observation_entities.py` (schéma) et l'en-tête
 > « OBSERVATION SQUAD — TENSEURS D'ENTITÉS » de `build_squad_observation`
-> ([observation_builder.py](../../engine/observation_builder.py)), dont les formes sont
+> ([observation_builder.py](../../../engine/observation_builder.py)), dont les formes sont
 > **calculées** par `squad_obs_shapes()` et vérifiées à l'exécution. Recopier ce layout ici
 > créerait une seconde source de vérité qui ne pourrait qu'avoir tort — c'est précisément ce
 > qui vient d'être constaté sur ce paragraphe.
 >
-> Lecture d'ensemble : [`AI_OBSERVATION.md`](../AI_OBSERVATION.md) — il ne décrit QUE le
+> Lecture d'ensemble : [`AI_OBSERVATION.md`](../../AI_OBSERVATION.md) — il ne décrit QUE le
 > pipeline actuel depuis le 2026-07-28 ; le vecteur plat est archivé dans
-> [`AI_OBSERVATION_Legacy.md`](../AI_OBSERVATION_Legacy.md). Journal et mesures :
+> [`AI_OBSERVATION_Legacy.md`](../../AI_OBSERVATION_Legacy.md). Journal et mesures :
 > `V11_entity_encoder_pointer.md` §6.
 >
 > Le reste de ce §1 et les §2-§6 décrivent l'état **d'avant la refonte** : ils constituent
@@ -83,7 +105,7 @@ objectif viser.** L'observation doit nourrir ces choix-là.
 ### 1.2 La grille égocentrique — 6 images (canaux) — *7 depuis T7 (§8), avec le canal « couvert »*
 
 Centrée sur l'escouade active, chaque « pixel » = un hex. 6 couches
-([1566-1690](../../engine/observation_builder.py#L1566)) :
+([1566-1690](../../../engine/observation_builder.py#L1566)) :
 
 | Canal | En clair |
 |---|---|
@@ -128,16 +150,16 @@ point fort : elle porte murs/positions/EZ/objectifs, donc l'agent peut apprendre
 et contourner.
 
 ### 3.2 ♻️ REDONDANT — à récupérer
-- **n° 19 = doublon exact du n° 4** ([1302](../../engine/observation_builder.py#L1302) vs
-  [1335](../../engine/observation_builder.py#L1335)) : même calcul PV%. **1 dimension gaspillée.**
+- **n° 19 = doublon exact du n° 4** ([1302](../../../engine/observation_builder.py#L1302) vs
+  [1335](../../../engine/observation_builder.py#L1335)) : même calcul PV%. **1 dimension gaspillée.**
   → la réaffecter à une info utile (voir §3.4).
 
 ### 3.3 ⚠️ À CORRIGER (défauts fonctionnels)
 - **n° 11-15, repli silencieux** : `try/except: pass` sur l'encodage des objectifs
-  ([1327](../../engine/observation_builder.py#L1327)) — si les objectifs sont malformés, le canal
+  ([1327](../../../engine/observation_builder.py#L1327)) — si les objectifs sont malformés, le canal
   passe à 0 **sans erreur**. Interdit par CLAUDE.md (fallback masquant). Marqué « PR4 acceptable,
   strict en PR5 » : à rendre strict.
-- **n° +7 (rentabilité) et +8 (menace) des ennemis** ([1477-1538](../../engine/observation_builder.py#L1477)) :
+- **n° +7 (rentabilité) et +8 (menace) des ennemis** ([1477-1538](../../../engine/observation_builder.py#L1477)) :
   calculés avec **une arme échantillon** (RNG[0] de la 1ʳᵉ figurine) et **en ignorant toutes les
   règles spéciales ET le couvert**. C'est le **levier n°1** : ces deux nombres sont censés résumer
   « vaut-il le coup de tirer ça ? », mais ils ne tiennent compte ni d'`IGNORES COVER`, ni de
@@ -174,7 +196,7 @@ règle. Plus optimal : **replier l'effet des règles dans les nombres déjà pr�
 qui ne changent que les **dégâts** (`IGNORES COVER`, `DEVASTATING`, `closest_target_penetration`,
 rerolls, et plus tard LETHAL/SUSTAINED/TWIN/MELTA/ANTI) doivent entrer dans le calcul de
 **+7 (rentabilité)** et **+8 (menace)** — qui aujourd'hui les ignorent. Un seul point de code
-([1477-1538](../../engine/observation_builder.py#L1477)) corrige la perception de toutes ces
+([1477-1538](../../../engine/observation_builder.py#L1477)) corrige la perception de toutes ces
 règles d'un coup. → **le §3.3 (corriger +7/+8) est le vrai levier, pas le §3.4 « ajouter des flags ».**
 
 **R2 — Toutes les règles peuvent-elles se replier dans +7/+8 ? → NON.**
@@ -202,10 +224,10 @@ Donc une feature **LoS/couvert par ennemi pré-calculée** reste justifiée, mai
 **moindre** que le §3.3 (corriger +7/+8), car la grille en couvre une partie.
 
 **R5 — Limites de capacité des blocs (vérifié).**
-- Bloc figurines = **6 max** ([SQUAD_TOP_K](../../engine/observation_builder.py#L1248)) : une
+- Bloc figurines = **6 max** ([SQUAD_TOP_K](../../../engine/observation_builder.py#L1248)) : une
   escouade Ork Boyz (10-20) est **tronquée** — les figurines au-delà de 6 sont invisibles. Impact
   cohérence/positionnement à grande escouade. À statuer (élargir k, ou trier par pertinence).
-- Bloc ennemis = **5 max**, triés par **identifiant** ([1432-1435](../../engine/observation_builder.py#L1432)) :
+- Bloc ennemis = **5 max**, triés par **identifiant** ([1432-1435](../../../engine/observation_builder.py#L1432)) :
   tri **stable** (bon pour PPO, §9.5) mais **arbitraire** — au-delà de 5 escouades ennemies,
   certaines ne sont jamais vues, et l'ordre n'est pas « par pertinence ». Sur les rosters SM/Orks
   actuels le nombre d'escouades est probablement ≤5 (à confirmer sur les rosters réels) ; sinon
@@ -232,12 +254,12 @@ l'optimalité, on part ici des **décisions réelles** de l'agent (espace d'acti
 dérive l'information suffisante par décision. C'est le seul moyen de prouver la couverture.
 
 ### 5bis.1 Ce que l'agent décide RÉELLEMENT (vérifié)
-Espace d'action = 1047 ([macro_intents.py](../../engine/macro_intents.py)) — **1062 depuis §0.30 T-E** (les slots de tir passent de 5 à 20) :
+Espace d'action = 1047 ([macro_intents.py](../../../engine/macro_intents.py)) — **1062 depuis §0.30 T-E** (les slots de tir passent de 5 à 20) :
 - **1024** cases de la grille égocentrique = **où bouger** (phase move).
 - **wait**.
 - **5** slots de tir = **quel ennemi tirer** (parmi 5 slots).
 - **charge** (1 action) : la **cible est choisie par le moteur**, pas par l'agent
-  ([decoder 965-994](../../engine/action_decoder.py#L965)) → l'agent décide seulement charger/pas.
+  ([decoder 965-994](../../../engine/action_decoder.py#L965)) → l'agent décide seulement charger/pas.
 - **fight** (1 action) : idem, cible = pool 12.04, l'agent décide combattre/pas.
 - **15** macro = 5 objectifs × 3 intentions (invade/defend/attack).
 - **L'arme n'est PAS choisie par l'agent** (aucune action de sélection d'arme) → inutile
@@ -247,11 +269,11 @@ Espace d'action = 1047 ([macro_intents.py](../../engine/macro_intents.py)) — *
 
 **🔴 D1 — Désalignement obs/action sur les slots ennemis (défaut de CORRECTION).**
 - L'**observation** ordonne les 5 slots ennemis par `sorted(str(sid))`
-  ([1432-1435](../../engine/observation_builder.py#L1432)).
+  ([1432-1435](../../../engine/observation_builder.py#L1432)).
 - L'**action** tir/charge les ordonne par **menace HP×OC décroissante**, mapping stable figé en
-  début de partie (`init_enemy_slot_mapping`, [8406](../../engine/phase_handlers/shared_utils.py#L8406)),
-  consommé par le masque ([decoder 217](../../engine/action_decoder.py#L217)) ET l'exécution
-  ([decoder 971](../../engine/action_decoder.py#L971)).
+  début de partie (`init_enemy_slot_mapping`, [8406](../../../engine/phase_handlers/shared_utils.py#L8406)),
+  consommé par le masque ([decoder 217](../../../engine/action_decoder.py#L217)) ET l'exécution
+  ([decoder 971](../../../engine/action_decoder.py#L971)).
 - Les deux ordres **diffèrent** → « tirer slot 0 » ne vise PAS l'ennemi décrit par obs-slot-0.
   Le réseau devrait apprendre une permutation qui **dépend de l'état** (qui est alphabétiquement-i
   vs menace-i) : impossible à câbler → **le signal de choix de cible est brouillé.** C'est la
@@ -262,8 +284,8 @@ Espace d'action = 1047 ([macro_intents.py](../../engine/macro_intents.py)) — *
 **🟢 D2 — Le masque porte déjà « portée + LoS + engagement » par slot de tir.**
 Le masque n'ouvre un slot de tir que si `_model_can_shoot_target` est vrai = **au moins une
 figurine à portée (subhex) ET en ligne de vue (murs) ET cible non verrouillée**
-([shoot mask 8288-8319](../../engine/phase_handlers/shared_utils.py#L8288) →
-[_model_can_shoot_target 4766-4793](../../engine/phase_handlers/shared_utils.py#L4766)). MaskablePPO
+([shoot mask 8288-8319](../../../engine/phase_handlers/shared_utils.py#L8288) →
+[_model_can_shoot_target 4766-4793](../../../engine/phase_handlers/shared_utils.py#L4766)). MaskablePPO
 zéro-te les actions interdites → l'agent « sait » qu'il ne peut pas tirer un slot hors portée/LoS.
 **Donc ajouter portée/LoS par ennemi en observation est largement redondant** (rétrograde §3.4/prio 3
 et 6). Ce que le masque **ne** dit PAS et qui reste utile : le **degré** — demi-portée (RAPID FIRE),
@@ -291,10 +313,10 @@ un **canal de grille "couvert"** (ou distinguer light/dense) est justifié. Prio
 
 | Prio | Action | Où | Change `obs_size` ? |
 |---|---|---|---|
-| **0 🔴** | **Aligner l'ordre des slots ennemis de l'obs sur `get_enemy_slot_mapping`** (source unique tir/charge). Sans ça, le choix de cible est brouillé (D1). | [obs 1432](../../engine/observation_builder.py#L1432) | Non |
-| **1** | Rendre **+7 (rentabilité) et +8 (menace)** conscients des **règles spéciales**, du **couvert** et de la **demi-portée** (couvre IGNORES_COVER, DEVASTATING, closest_target_penetration, rerolls, RAPID FIRE…) | [1477-1538](../../engine/observation_builder.py#L1477) | Non |
-| **2** | Réemployer le **doublon n°19** → une feature utile (ex. flag `fell_back`, absent) | [1335](../../engine/observation_builder.py#L1335) | Non |
-| **3** | Rendre **strict** l'encodage objectifs (retirer `except: pass`) | [1327](../../engine/observation_builder.py#L1327) | Non |
+| **0 🔴** | **Aligner l'ordre des slots ennemis de l'obs sur `get_enemy_slot_mapping`** (source unique tir/charge). Sans ça, le choix de cible est brouillé (D1). | [obs 1432](../../../engine/observation_builder.py#L1432) | Non |
+| ~~**1**~~ | ~~Rendre **+7 (rentabilité) et +8 (menace)** conscients des règles / couvert / demi-portée~~ → **ABANDONNÉ** (§9.1) : les deux features sont **supprimées**, remplacées par les profils d'armes et les bits de règles bruts (T3 + T8). Rien à faire. | — | — |
+| **2** | Réemployer le **doublon n°19** → une feature utile (ex. flag `fell_back`, absent) | [1335](../../../engine/observation_builder.py#L1335) | Non |
+| **3** | Rendre **strict** l'encodage objectifs (retirer `except: pass`) | [1327](../../../engine/observation_builder.py#L1327) | Non |
 | **4** | Feature **HEAVY** (bonus si stationnaire) et **HAZARDOUS** (risque de se blesser) — décisions structurelles non capturées par +7/+8 | vecteur | Oui |
 | **5** | **Canal de grille « couvert »** (distinguer terrain light/dense du simple mur) pour la décision de move | grille | Oui (canaux) |
 | **6** | Statuer capacité des blocs : figurines >6 tronquées (Boyz) ; slots ennemis >5 jamais vus | §R5 | Oui |
@@ -318,8 +340,10 @@ fonctionnels** :
 
 1. 🔴 **Défaut** : slots ennemis de l'observation **désalignés** avec les slots d'action tir/charge
    (tri alphabétique vs tri par menace) → sélection de cible brouillée. **À corriger en premier.**
-2. **+7/+8 (rentabilité/menace) ignorent règles, couvert et demi-portée** → faux dès que les
-   capacités de cette nuit seront actives. **Levier central.**
+2. ~~**+7/+8 (rentabilité/menace) ignorent règles, couvert et demi-portée**~~ → conclusion
+   **renversée par le §9.1** : plutôt que de rendre ces résumés « conscients », ils ont été
+   **supprimés** et remplacés par les données brutes (profils d'armes + bits de règles, T3/T8).
+   Le « levier central » de l'audit n'a donc jamais été implémenté tel quel — c'est délibéré.
 3. **HEAVY / HAZARDOUS** (décisions structurelles) non observables.
 4. **Move** : la grille ne distingue pas le terrain **couvrant** du mur bloquant.
 
@@ -337,11 +361,11 @@ faudra la ré-évaluer si P2/P3 change les décisions.
 > ci-dessous décrivent l'état d'AVANT. Le principe (poids partagés par entité + pooling masqué,
 > embeddings ennemis conservés par slot) est en place, mais les **blocs sont devenus des clés de
 > tenseurs** : la table de passage bloc logique A→E ↔ clé actuelle est dans
-> [`AI_OBSERVATION.md`](../AI_OBSERVATION.md), section « Les blocs logiques A→E, et ce qu'ils
+> [`AI_OBSERVATION.md`](../../AI_OBSERVATION.md), section « Les blocs logiques A→E, et ce qu'ils
 > sont devenus ». La lire AVANT d'utiliser les offsets de §7.2, qui n'existent plus.
 
 Le vecteur 108 entre aujourd'hui **tel quel** dans un MLP dense (`SpatialCombinedExtractor.forward` =
-`cat[cnn_out, vec]`, [spatial_extractor.py:87](../../ai/spatial_extractor.py#L87)). Une couche dense
+`cat[cnn_out, vec]`, [spatial_extractor.py:87](../../../ai/spatial_extractor.py#L87)). Une couche dense
 traite chaque dimension indépendamment : elle **n'exploite pas** le fait que les 6 figurines et les
 5 ennemis sont des **ensembles d'entités homogènes** (mêmes 7 / 9 features par entité).
 
@@ -418,7 +442,7 @@ Périmètre exécuté : **les 3 points « débloqués par la fin du portage des 
 `obs_size` **199 → 1011** (`vec_cont` 459, `vec_bin` 552) ⇒ **retrain from scratch**.
 
 - **Profils d'armes bruts + bits/params de règles** (le trou principal, point 1) — nouveau module
-  [`engine/observation_weapon_profiles.py`](../../engine/observation_weapon_profiles.py) :
+  [`engine/observation_weapon_profiles.py`](../../../engine/observation_weapon_profiles.py) :
   encodeur **unique** partagé par mon escouade et par les slots ennemis. Un profil =
   `{NB, ATK, STR, AP, DMG, portée, nb de porteurs vivants}` + params (RAPID FIRE / SUSTAINED
   HITS / MELTA / CLEAVE / BLAST X, Y+ de ANTI) + 12 drapeaux + one-hot du **keyword ciblé par
@@ -445,7 +469,7 @@ Périmètre exécuté : **les 3 points « débloqués par la fin du portage des 
 - **D1** : `build_squad_observation` lit désormais l'ordre des slots ennemis via
   `get_enemy_slot_mapping` (mapping stable HP×OC, **même source que le masque et l'exécution**),
   au lieu de son tri local `sorted(str(sid))`. Fin du désalignement obs↔action.
-  [observation_builder.py](../../engine/observation_builder.py) (import + section 4).
+  [observation_builder.py](../../../engine/observation_builder.py) (import + section 4).
 - **fall_back** : `obs[19]` (ex-doublon exact de `obs[4]` HP%) réaffecté au flag « escouade
   repliée ce tour ? » (`units_fled`, même source que `build_squad_action_mask`).
 - **Tests** : `tests/unit/engine/test_squad_obs_enemy_slot_alignment.py` (3) — alignement obs↔mapping,
@@ -465,26 +489,26 @@ archi set-based. **Tout le reste du §10 est implémenté** : le rôle et le pro
 figurine, d'abord omis sans être signalés, ont été ajoutés en T9.
 
 **`obs_size` : 108 → 199**, réparti en `vec_cont` (119) + `vec_bin` (80). Les 5 profils de
-[ArmageddonAgent_training_config.json](../../config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json)
+[ArmageddonAgent_training_config.json](../../../config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json)
 sont à jour ; la cohérence config ↔ layout est **vérifiée à l'init du moteur** (erreur explicite
-si `obs_size ≠ CONT+BIN`, [w40k_core.py:670-690](../../engine/w40k_core.py#L670)).
+si `obs_size ≠ CONT+BIN`, [w40k_core.py:670-690](../../../engine/w40k_core.py#L670)).
 
 **T1 — deux vecteurs, valeurs brutes.** `build_squad_observation` retourne
 `{"vec_cont", "vec_bin"}` ; l'obs de l'env devient `Dict {vec_cont, vec_bin, grid}`.
 Toutes les divisions manuelles (`/5 /10 /20 /30 /100` + clamps) sont **supprimées** : elles
 saturaient (une escouade de 20 Boyz valait 1.0 comme une de 10) et faisaient double emploi avec
 `VecNormalize`, qui ne normalise plus que `vec_cont` (`norm_obs_keys`,
-[train.py:1308](../../ai/train.py#L1308)). `vec_bin` (drapeaux, phase, contrôle d'objectif) n'est
+[train.py:1308](../../../ai/train.py#L1308)). `vec_bin` (drapeaux, phase, contrôle d'objectif) n'est
 **jamais** normalisé. Bornes de `vec_cont` = ±inf (une borne 0..1 mentirait sur des PV bruts).
-Layout et constantes : [observation_builder.py:1294-1345](../../engine/observation_builder.py#L1294) ;
+Layout et constantes : [observation_builder.py:1294-1345](../../../engine/observation_builder.py#L1294) ;
 accesseurs d'offsets + vérification des bases de blocs **à chaud** (`_check_block_base`) →
 toute dérive lève au lieu de décaler une feature en silence.
-Impacts : [w40k_core.py](../../engine/w40k_core.py), [spatial_extractor.py](../../ai/spatial_extractor.py),
-[train.py](../../ai/train.py), [bot_evaluation.py](../../ai/bot_evaluation.py).
+Impacts : [w40k_core.py](../../../engine/w40k_core.py), [spatial_extractor.py](../../../ai/spatial_extractor.py),
+[train.py](../../../ai/train.py), [bot_evaluation.py](../../../ai/bot_evaluation.py).
 
 **T2 — Bloc A.** ➕ score de mission (VP mien/ennemi, même source que la condition de victoire) ;
 ➕ VALUE cumulée vivante / VALUE de départ des deux camps (`value_at_start` capturé au build des
-caches, [shared_utils.py:888](../../engine/phase_handlers/shared_utils.py#L888) — les figurines
+caches, [shared_utils.py:888](../../../engine/phase_handlers/shared_utils.py#L888) — les figurines
 mortes disparaissent de `models_cache`, la valeur initiale ne serait plus dérivable) ;
 ✏️ contrôle d'objectif = **lecture** de `objective_controllers`, l'état persistant du moteur ;
 ➕ 5 bits de présence ; ❌ `try/except: pass` supprimé ; ❌ compte d'escouades amies/ennemies
@@ -496,7 +520,7 @@ recalcul par observation, ce qui était faux au regard de 14.02.
 {effectif vivant, HP_MAX, **PV de la figurine blessée**}. ➕ profil d'escouade brut
 (MOVE / HP_MAX / T / save / invulnérable), lu sur la datasheet de l'unité.
 
-**T4 — drapeaux terrain** ([observation_builder.py:1400](../../engine/observation_builder.py#L1400)) :
+**T4 — drapeaux terrain** ([observation_builder.py:1400](../../../engine/observation_builder.py#L1400)) :
 `hidden` (13.09), `gone to ground` prêt (13.5), `à couvert` (13.08), `dans l'EZ ennemie`.
 Règles relues (PDF 13 + 13-5) : **13.08 a deux conditions alternatives**, la première
 (`INFANTRY/BEASTS/SWARM` + *within a terrain area*) **ne dépend pas de l'attaquant** — si toutes
@@ -506,7 +530,7 @@ figurine attaquante » (13.08 b, 13.5) sont **par-tireur** : ils n'ont pas de va
 escouade et restent dans `compute_unit_los`. Les trois drapeaux sont **recalculés à chaud** :
 `unit['hidden']` n'est rafraîchi qu'au début de la phase de tir, donc périmé pendant le move —
 exactement quand l'agent décide d'aller se couvrir. Géométrie mutualisée via
-`compute_models_within_terrain` ([shooting_handlers.py:1121](../../engine/phase_handlers/shooting_handlers.py#L1121)),
+`compute_models_within_terrain` ([shooting_handlers.py:1121](../../../engine/phase_handlers/shooting_handlers.py#L1121)),
 généralisation de `compute_models_in_obscuring_terrain` (qui la consomme).
 
 **T5 — contacts par figurine → EZ.** Le bord-à-bord brut (`calculate_hex_distance == 1`, ancre à
@@ -520,7 +544,7 @@ d'une escouade étalée peut être à l'opposé de la menace) ; ➕ **distance b
 mesure du gate de portée du moteur (`_ranged_squad_edge_distance`) ; ➕ VALUE vivante (somme
 par figurine) ; ➕ MOVE + profil défensif de la cible.
 
-**T7 — 7e canal de grille « couvert »** ([spatial_grid.py:56](../../engine/spatial_grid.py#L56)) :
+**T7 — 7e canal de grille « couvert »** ([spatial_grid.py:56](../../../engine/spatial_grid.py#L56)) :
 hexes des `terrain_areas`, exactement l'ensemble que le moteur peint en `cover_cells`. Le drapeau
 B2 dit *si* l'escouade est couverte, ce canal dit *où* aller se couvrir. `GRID_CHANNELS` 6 → 7
 (l'extracteur et le masque lisent la constante, aucun autre changement).
@@ -535,9 +559,9 @@ observation : coûteux (somme des OC par figurine sur 5 zones à chaque action) 
 — l'agent voyait un contrôle basculer au milieu d'une phase, alors que la règle (et le scoring des
 VP, qui lit la même source) ne le réévalue qu'à la frontière.
 Corrigé : `GameStateManager.refresh_objective_control_on_boundary`
-([game_state.py](../../engine/game_state.py)) détecte la frontière (phase, tour) et déclenche le
+([game_state.py](../../../engine/game_state.py)) détecte la frontière (phase, tour) et déclenche le
 checkpoint ; elle est appelée par le **moteur** avant toute construction d'observation
-([w40k_core.py](../../engine/w40k_core.py)) **et** par l'API PvP, qui portait jusque-là sa propre
+([w40k_core.py](../../../engine/w40k_core.py)) **et** par l'API PvP, qui portait jusque-là sa propre
 détection inline (deux sources → une). `calculate_objective_control` fait maintenant **une seule
 passe d'empreintes** pour tous les objectifs (`sum_objective_control_oc_multi`).
 Conséquences : l'observation ne calcule plus rien (lecture pure), le contrôle observé est celui du
@@ -560,7 +584,7 @@ chevauche la zone (`model_within_terrain`), pas seulement quand l'ancre y tombe 
 hexes de la zone laissait à 0 une couronne de cases pourtant couvrantes (~2 cellules de grille pour
 un socle d'infanterie de 16 subhex sur le board ×5). Le canal est désormais dilaté de
 `cover_dilation_cells(BASE_SIZE, half_extent)` cellules
-([spatial_grid.py](../../engine/spatial_grid.py)) — dilatation morphologique numpy, coût négligeable,
+([spatial_grid.py](../../../engine/spatial_grid.py)) — dilatation morphologique numpy, coût négligeable,
 exacte au grain de la grille.
 
 **T11 — le bloc figurines expose les EXCEPTIONS, plus « les 6 premières créées ».** Défaut mis en
@@ -634,7 +658,7 @@ l'invariant protégé (somme PAR FIGURINE, indépendante de l'ordre) est le mêm
 **Effet de bord traité** : `build_units_cache` recalcule `value_at_start` pour les DEUX joueurs ;
 en mode *endless duty*, `_replace_units_for_player` ne remplace qu'un camp — la référence de
 l'adversaire est désormais restaurée après le rebuild
-([endless_duty_runtime.py](../../services/endless_duty_runtime.py)), sinon ses pertes déjà subies
+([endless_duty_runtime.py](../../../services/endless_duty_runtime.py)), sinon ses pertes déjà subies
 disparaissaient de l'observation.
 
 **Chemin PvP** : `scripts/pvp_smoke_test.py --spawn-server` → **27 PASS / 0 FAIL** (les primitives
@@ -673,8 +697,13 @@ mission).
 >   ne dit pas si la pose est de CE tour, or c'est exactement ce qui supprime le bonus [HEAVY]
 >   (24.16 clause 2). Un 4ᵉ bit « posée ce tour » est ajouté ; les 3 états gardent leur sens
 >   (hors board / avant la bataille / arrivée en cours de bataille).
-> - `+7/+8` conscients des règles : ⏳ toujours à faire — c'est maintenant possible, la liste des
->   règles résolues ne bouge plus.
+> - `+7/+8` conscients des règles : ❌ **SANS OBJET — corrigé le 2026-07-28.** Ce statut disait
+>   « ⏳ toujours à faire », ce qui contredisait le §9.1 du même document et l'état du code. Les
+>   deux features ont été **supprimées** (décision §9.1, philosophie « données brutes ») et
+>   livrées en T3 : ni `value_over_ttk` ni `threat_level` n'existent dans le pipeline
+>   d'observation. Il n'y a rien à implémenter ici. (Les occurrences de `threat_level` qui
+>   subsistent dans `engine/phase_handlers/shared_utils.py` relèvent du **ciblage du bot**, pas de
+>   l'observation.)
 
 ---
 
@@ -708,14 +737,14 @@ elle **remplace** les données en perdant de l'info (péché d'`obs[20]`).
   chaque figurine. (Hétérogénéité gérée par les HP_MAX des exceptions, bloc C.)
 - **`obs[11:15]` objectifs** : contrôle maintenu dans **[−1, 1]** + **5 bits de présence** par
   objectif (distingue « contesté/vide » de « objectif absent du scénario »). Supprime le
-  `try/except: pass` masquant ([1327](../../engine/observation_builder.py#L1327)).
+  `try/except: pass` masquant ([1327](../../../engine/observation_builder.py#L1327)).
 - **Position ennemie (`+2/+3`)** : mesurer depuis la **figurine ennemie la plus proche** (pas
   l'ancre), **+ ajouter la distance** à cette figurine (les coords donnent déjà la direction ; la
   distance fig-à-fig est ce que la portée utilise).
 - **Normalisations ennemies** : taille `/10 → /20`, PV `/30 → /40` (escouades jusqu'à 20 figurines,
   ex. Boyz — le `/10` saturait).
 - **Contact par figurine (`base+5/+6`)** : bascule du **bord-à-bord brut** (`calculate_hex_distance
-  == 1`, [1407](../../engine/observation_builder.py#L1407)) vers la **présence dans l'EZ**
+  == 1`, [1407](../../../engine/observation_builder.py#L1407)) vers la **présence dans l'EZ**
   (`unit_entries_within_engagement_zone`) — le test 2D ignore la composante verticale de l'EZ
   (reliquat x1, faux dès les étages Phase B). NB : `obs[+6]` « ennemi bloqué » utilise **déjà** l'EZ,
   pas de changement.
@@ -741,9 +770,9 @@ elle **remplace** les données en perdant de l'info (péché d'`obs[20]`).
 - **Exceptions exposées individuellement** : figurines qui dévient du profil de base — **arme
   spéciale/lourde, sergent**, et **personnages attachés** (leader/support).
 - **Représentation moteur (règle 19, vérifiée)** : le perso attaché est **fusionné comme figurine**
-  de l'escouade (`attached_squad`, [game_state.py:724](../../engine/game_state.py#L724)) ; chaque
+  de l'escouade (`attached_squad`, [game_state.py:724](../../../engine/game_state.py#L724)) ; chaque
   figurine porte un **rôle** `base < special_weapon < sergeant < support < leader`
-  ([shared_utils.py:542](../../engine/phase_handlers/shared_utils.py#L542)). → le bloc figurines
+  ([shared_utils.py:542](../../../engine/phase_handlers/shared_utils.py#L542)). → le bloc figurines
   garde un **tag de rôle** + le profil **défensif** distinct des seules figurines déviantes (persos).
   Les **armes** des exceptions sont, elles, portées par l'**ensemble {profil, nb porteurs}** de 9.3
   (une arme spé = une entrée de compteur 1), pas par le bloc figurines.
@@ -767,13 +796,13 @@ est géré par le **masque d'action**, pas filtré dans l'observation.
 
 ### 9.8 Ajouts stratégiques (contexte global) — décidés 2026-07-25
 - **Score de mission (victory points)** : le state tracke `victory_points {1,2}` +
-  `primary_objective_scored_turns` ([game_state.py:2392](../../engine/game_state.py#L2392)) et le
+  `primary_objective_scored_turns` ([game_state.py:2392](../../../engine/game_state.py#L2392)) et le
   vainqueur en dépend — mais l'obs squad ne le voyait **pas**. → ajouter **mon VP / VP ennemi** (ou le
   différentiel) au Bloc A. **Trou stratégique majeur** : sans lui, l'agent ne sait pas qui gagne, donc
   ne peut pas arbitrer « je mène → défensif / je préserve » vs « je suis derrière → risques / objectifs ».
 - **VALUE cumulée amie & ennemie** (% de la valeur de départ) : force d'usure, info que le simple
   compte n'a pas. La VALUE est **par figurine** (`points_per_hp_i = VALUE_i / HP_MAX_i`,
-  [shared_utils.py:580](../../engine/phase_handlers/shared_utils.py#L580)) → cumul = **somme par
+  [shared_utils.py:580](../../../engine/phase_handlers/shared_utils.py#L580)) → cumul = **somme par
   figurine vivante**, exacte même pour une escouade hétérogène.
 - **Bloc « escouades amies »** (nouveau) : les autres escouades que l'active, **résumées** comme le
   bloc ennemi (taille, PV, position, OC, VALUE, statut). Permet à l'agent de **coordonner** ses
@@ -793,7 +822,7 @@ est géré par le **masque d'action**, pas filtré dans l'observation.
 ### 9.10 Grille — canal « couvert » (on commence par là)
 - Ajouter un **7e canal de grille** peignant les hexes qui **donnent le bénéfice du couvert**
   (terrains light/dense, 13.04/13.05 ; le moteur connaît déjà le sous-ensemble Solid/dense,
-  [w40k_core.py:281](../../engine/w40k_core.py#L281)). Pour la décision de **move** (par case), l'agent
+  [w40k_core.py:281](../../../engine/w40k_core.py#L281)). Pour la décision de **move** (par case), l'agent
   voit **où** se couvrir. Le flag « à couvert » (B2) dit *si*, ce canal dit *où*.
 - Canal « zone de menace ennemie » (où je me fais tirer dessus) : **différé** (après le couvert).
 
@@ -939,7 +968,7 @@ move. Canal « menace ennemie » différé.
 - **Plafonds** : les slots ennemis passent de 5 à **20** (tête pointeur : un slot ne coûte plus
   de paramètres), les profils d'armes à **10 par registre des deux côtés**, et les types de
   figurines existent aussi côté ennemi. Tout dépassement résiduel est **logué**.
-- Détail, mesures et verrous → [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md) §6.
+- Détail, mesures et verrous → [`V11_entity_encoder_pointer.md`](../V11_entity_encoder_pointer.md) §6.
 
 ### ✅ FAIT le 2026-07-26 — les 3 points débloqués par la fin du portage des capacités
 
@@ -983,7 +1012,7 @@ move. Canal « menace ennemie » différé.
      moment de l'implémentation, avec le bloc figurines.
 
 > 🔴 **MAJ 2026-07-26 — l'architecture est OUVERTE, avec son chantier dédié :**
-> [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md). Décisions actées : encodeur
+> [`V11_entity_encoder_pointer.md`](../V11_entity_encoder_pointer.md). Décisions actées : encodeur
 > d'entité **partagé** (unités ET armes, amies ET ennemies), **agrégation seulement pour ce
 > qu'aucune action ne désigne** (alliés, armes, types de figurines), **embeddings par slot +
 > tête pointeur** pour les ennemis (une action les désigne — c'est l'invariant D1), **K=20
@@ -1017,7 +1046,7 @@ move. Canal « menace ennemie » différé.
     (porteurs), pas l'éligibilité contextuelle (portée/LoS → masque + grille).
 - **Normalisation** : **valeurs continues brutes normalisées par `VecNormalize` ; flags binaires bruts
   NON normalisés** — séparation `vec_cont` / `vec_bin` via `norm_obs_keys=["vec_cont"]` (natif SB3,
-  [train.py:1308](../../ai/train.py#L1308)). Retire la double normalisation ET protège la sémantique des
+  [train.py:1308](../../../ai/train.py#L1308)). Retire la double normalisation ET protège la sémantique des
   flags. Coût faible → **pas de dette** (choix (ii) retenu sur (i)).
 - **Canal « menace ennemie »** : **abandonné**. Une carte statique serait fausse (l'ennemi bouge avant
   de tirer) ; la rendre juste = anticiper le move = heuristique biaisée (péché des features calculées).
@@ -1025,7 +1054,13 @@ move. Canal « menace ennemie » différé.
 - **Compte d'escouades (obs 9/10)** : **supprimé** (la VALUE cumulée le remplace avantageusement).
 
 ### Chantier dédié — Observation de la phase de déploiement (déficiente, vérifié)
-Problèmes ([w40k_core.py:6239](../../engine/w40k_core.py#L6239), [action_decoder.py:176](../../engine/action_decoder.py#L176)/1013) :
+
+> 📤 **DÉPLACÉ le 2026-07-28 → [`A_faire/observation_deploiement.md`](../A_faire/observation_deploiement.md).**
+> C'est le seul point encore actionnable de cet audit ; il vit désormais dans son propre chantier,
+> avec les constats **re-vérifiés dans le code**. Le point 3 ci-dessous est **inexact** (les 5
+> actions sont des stratégies tactiques, pas « les 5 premiers hexes valides ») — il est corrigé
+> dans le chantier extrait. Texte d'origine conservé ci-dessous pour mémoire uniquement.
+Problèmes ([w40k_core.py:6239](../../../engine/w40k_core.py#L6239), [action_decoder.py:176](../../../engine/action_decoder.py#L176)/1013) :
 1. Obs construite sur `next(iter(units_cache))` = **1ʳᵉ unité du cache, pas forcément celle déployée**.
 2. Unité à `(-1,-1)` → **grille égocentrique dégénérée** (centrée hors plateau).
 3. Les 5 actions = 5 hexes candidats **non décrits** dans l'obs (position/objectif/couvert/ennemis) et

@@ -15,7 +15,6 @@ export interface AuthSession {
   };
   permissions: AuthPermissions;
   default_redirect_mode: string;
-  tutorial_completed: boolean;
 }
 
 const AUTH_SESSION_STORAGE_KEY = "w40k_auth_session";
@@ -31,10 +30,7 @@ export const getAuthSession = (): AuthSession | null => {
     if (!parsedSession.token || !parsedSession.user || !parsedSession.permissions) {
       return null;
     }
-    return {
-      ...parsedSession,
-      tutorial_completed: parsedSession.tutorial_completed ?? true,
-    };
+    return parsedSession;
   } catch {
     return null;
   }
@@ -47,21 +43,3 @@ export const saveAuthSession = (session: AuthSession): void => {
 export const clearAuthSession = (): void => {
   localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
 };
-
-const API_BASE = "/api";
-
-export async function markTutorialComplete(): Promise<void> {
-  const session = getAuthSession();
-  if (!session?.token) return;
-
-  const res = await fetch(`${API_BASE}/auth/tutorial-complete`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${session.token}`,
-      "Content-Type": "application/json",
-    },
-  });
-  if (!res.ok) throw new Error("Failed to mark tutorial complete");
-
-  saveAuthSession({ ...session, tutorial_completed: true, default_redirect_mode: "pve" });
-}

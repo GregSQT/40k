@@ -63,11 +63,11 @@ flowchart TB
     USER --> FE
 ```
 
-### 1.2 Topologie LoS (optionnelle au build)
+### 1.2 Topologie LoS : supprimée
 
-⚠️ **Sans objet depuis 2026-07-27** : aucun board du dépôt n'embarque de `topology_*.npz` (le
-board `25x21` qui les portait a été supprimé) et le builder n'existe plus. LoS et distances sont
-calculées à la demande. Voir `Documentation/LOS_TOPOLOGY.md`.
+Le mécanisme de topologie LoS précalculée (`topology_*.npz`) n'existe plus — ni fichiers, ni
+builder, ni branches moteur (retrait 2026-07-28). LoS et distances sont calculées à la demande,
+sans étape de build.
 
 ### 1.3 Fichiers existants
 

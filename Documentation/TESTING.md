@@ -43,7 +43,7 @@ les fractionner.
 | `test_deployment_clearance_parity::test_deployment_mask_mirrors_commit_overlap_predicate` | parité masque/commit du déploiement | ~20 s |
 
 Ils étaient respectivement à **687 s** et **31 s** avant l'optimisation du 2026-07-26
-(cf. `Implémentation/V11_move_build_acceleration.md` §10). Ne pas les alléger en réduisant
+(cf. `Implémentation/V11_move_build_acceleration.md` §3.2). Ne pas les alléger en réduisant
 `MAX_STEPS` ou le nombre de seeds : à ce coût-là, la couverture d'invariant vaut plus que les
 secondes gagnées.
 

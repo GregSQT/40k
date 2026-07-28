@@ -1,37 +1,15 @@
 // frontend/src/components/BoardWithAPI.tsx
 import type React from "react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import leaderEvolutionConfig from "../../../config/endless_duty/leader_evolution.json";
 import meleeEvolutionConfig from "../../../config/endless_duty/melee_evolution.json";
 import rangeEvolutionConfig from "../../../config/endless_duty/range_evolution.json";
 import endlessDutyScenarioConfig from "../../../config/scenario_endless_duty.json";
 import unitRulesConfig from "../../../config/unit_rules.json";
 import "../App.css";
-import type { MutableRefObject } from "react";
-import { clearAuthSession, getAuthSession, markTutorialComplete } from "../auth/authStorage";
-import {
-  getTutorialUiBehavior,
-  isTutorialUiDebugModeEnabled,
-  matchesTutorialStagePattern,
-  type TutorialSpotlightId,
-} from "../config/tutorialUiRules";
-import {
-  TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT,
-  TUTORIAL_STEP_TITLE_PHASE_TIR,
-  TUTORIAL_STEP_TITLE_PHASES,
-  TUTORIAL_STEP_TITLE_ROUNDS,
-  TUTORIAL_STEP_TITLE_TURNS,
-  TUTORIAL_STEP_TITLE_WEAPON_CHOICE,
-  TUTORIAL_STEP_TITLES_HALO_LEFT,
-  TUTORIAL_STEP_TITLES_MOVE_BUTTON_HALO,
-  TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO,
-  TutorialProvider,
-  type TutorialSpotlightPosition,
-  type TutorialSpotlightRect,
-  useTutorial,
-} from "../contexts/TutorialContext";
+import { clearAuthSession, getAuthSession } from "../auth/authStorage";
 import {
   type ManualOrderGroup,
   type ManualOrderRequest,
@@ -53,7 +31,6 @@ import SharedLayout from "./SharedLayout";
 import SnapshotRewind, { type SnapshotJump } from "./SnapshotRewind";
 import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
-import TutorialOverlay from "./TutorialOverlay";
 import UnitStatusBadges from "./UnitStatusBadges";
 import { HALO_GLOW, UnitStatusTable } from "./UnitStatusTable";
 
@@ -510,1053 +487,7 @@ function buildDefaultPicksByProfile(
   return defaults;
 }
 
-/** Étapes avec halo sur le turn phase tracker : Rounds=tour, Tours=P1/P2, Phases=phases. */
-const TURN_PHASE_STEP_TITLES = [
-  TUTORIAL_STEP_TITLE_ROUNDS,
-  TUTORIAL_STEP_TITLE_TURNS,
-  TUTORIAL_STEP_TITLE_PHASES,
-] as const;
 const RETREAT_ALERT_STORAGE_KEY = "retreatAlertEnabled";
-const MODE_GUIDE_SEEN_PVE_STORAGE_KEY = "modeGuideSeen:pve";
-const MODE_GUIDE_SEEN_PVP_STORAGE_KEY = "modeGuideSeen:pvp";
-const MODE_GUIDES_ACTIVATED_STORAGE_KEY = "modeGuidesActivated";
-
-function TutorialOverlayGate(): React.ReactNode {
-  const tutorial = useTutorial();
-  const popupVisible = tutorial?.popupVisible === true;
-  const currentStep = tutorial?.currentStep ?? null;
-  const title = currentStep?.stepKey ?? "";
-  const stage = currentStep?.stage ?? "";
-  const stepFog = currentStep?.fog;
-  const forceLayout2_11 = tutorial?.currentEtape === 2 && tutorial?.gamePhase === "deployment";
-  const isStage2_11Or12 = forceLayout2_11 || stage === "2-11" || stage === "2-12";
-  const isStep1_6 = stage === "1-16";
-  const isPhaseMoveStep = TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO.includes(
-    title as (typeof TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO)[number]
-  );
-  const isTurnPhaseStep = TURN_PHASE_STEP_TITLES.includes(
-    title as (typeof TURN_PHASE_STEP_TITLES)[number]
-  );
-  const isMoveButtonStep = TUTORIAL_STEP_TITLES_MOVE_BUTTON_HALO.includes(
-    title as (typeof TUTORIAL_STEP_TITLES_MOVE_BUTTON_HALO)[number]
-  );
-  const stageMajor = parseInt((stage ?? "").split("-")[0] ?? "", 10);
-  const isFrom2_1Onwards = !Number.isNaN(stageMajor) && stageMajor >= 2;
-  const isStage124Family = stage === "1-24" || matchesTutorialStagePattern(stage, "1-24-*");
-  const isHaloLeft =
-    (TUTORIAL_STEP_TITLES_HALO_LEFT.includes(
-      title as (typeof TUTORIAL_STEP_TITLES_HALO_LEFT)[number]
-    ) ||
-      stage === "1-15" ||
-      stage === "1-16" ||
-      stage === "1-23" ||
-      isStage124Family ||
-      (isFrom2_1Onwards && !isStage2_11Or12)) &&
-    stage !== "1-14";
-  const isStep2_1 = stage === "1-21";
-  const isStep2_2 = stage === "1-22";
-  const isStep2_3 = stage === "1-23";
-  const isStep2_4 =
-    matchesTutorialStagePattern(stage, "1-24") || matchesTutorialStagePattern(stage, "1-24-*");
-  const isStep1_25 = stage === "1-25";
-  const configuredSpotlightIds = currentStep?.spotlightIds;
-  const hasConfiguredSpotlights = configuredSpotlightIds != null;
-  const hasSpotlight = (id: TutorialSpotlightId): boolean =>
-    configuredSpotlightIds?.includes(id) === true;
-  const debugMode = isTutorialUiDebugModeEnabled();
-  const lastDebugStageRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!debugMode) return;
-    if (!popupVisible || currentStep == null) return;
-    if (lastDebugStageRef.current === stage) return;
-    lastDebugStageRef.current = stage;
-  }, [debugMode, popupVisible, currentStep, stage]);
-  if (!popupVisible || currentStep == null) return null;
-  const isStep2_2Or3Or4 = isStep2_2 || isStep2_3 || isStep2_4;
-  const isShootButtonStep =
-    title === TUTORIAL_STEP_TITLE_PHASE_TIR || title === TUTORIAL_STEP_TITLE_WEAPON_CHOICE;
-  const needsTurnPhaseHalo =
-    isTurnPhaseStep ||
-    isMoveButtonStep ||
-    isShootButtonStep ||
-    stage === "1-14" ||
-    stage === "1-14" ||
-    stage === "1-15" ||
-    stage === "1-16" ||
-    stage === "1-21" ||
-    stage === "1-22" ||
-    stage === "1-23" ||
-    stage === "1-24" ||
-    matchesTutorialStagePattern(stage, "1-24-*") ||
-    stage === "1-25" ||
-    stage === "2-11" ||
-    stage === "2-12" ||
-    stage === "3-1";
-  const turnPhaseSpotlights = (
-    hasConfiguredSpotlights
-      ? hasSpotlight("turnPhase.all")
-      : needsTurnPhaseHalo
-  )
-    ? tutorial.spotlightTurnPhasePositions
-    : null;
-  const leftPanelSpotlight = (
-    hasConfiguredSpotlights
-      ? hasSpotlight("panel.left")
-      : isHaloLeft || isStage2_11Or12
-  )
-    ? tutorial.spotlightLeftPanel
-    : null;
-  const gameLogLastEntrySpotlight = (
-    hasConfiguredSpotlights
-      ? hasSpotlight("gamelog.lastEntry")
-      : isStep2_1 || isStep2_4
-  )
-    ? tutorial.spotlightGameLogLastEntry
-    : null;
-  const gameLogHeaderSpotlight = (
-    hasConfiguredSpotlights
-      ? hasSpotlight("gamelog.header")
-      : isStep2_1 || isStep2_4 || isStep1_25
-  )
-    ? tutorial.spotlightGameLogHeader
-    : null;
-  const gameLogTopEntriesSpotlights = (
-    hasConfiguredSpotlights
-      ? hasSpotlight("gamelog.last2Entries")
-      : isStep2_1 || isStep2_4 || isStep1_25
-  )
-    ? tutorial.spotlightGameLogTopEntriesPositions
-    : [];
-  /** En 1-25 : uniquement le header (ligne du haut), jamais la dernière ligne. */
-  const gameLogSpotlights =
-    stage === "1-25"
-      ? gameLogHeaderSpotlight
-        ? [gameLogHeaderSpotlight]
-        : []
-      : [
-          ...((isStep2_1 || isStep2_4) && gameLogLastEntrySpotlight
-            ? [gameLogLastEntrySpotlight]
-            : []),
-          ...((isStep2_1 || isStep2_4 || isStep1_25) && gameLogHeaderSpotlight
-            ? [gameLogHeaderSpotlight]
-            : []),
-        ];
-  const tableSpotlights = (
-    hasConfiguredSpotlights
-      ? hasSpotlight("table.p1.rangedWeapons") || hasSpotlight("table.p2.attributes")
-      : isStep2_2Or3Or4
-  )
-    ? [
-        ...(hasConfiguredSpotlights
-          ? hasSpotlight("table.p1.rangedWeapons")
-            ? (tutorial.spotlightRangedWeaponsPositions ?? [])
-            : []
-          : (tutorial.spotlightRangedWeaponsPositions ?? [])),
-        ...(hasConfiguredSpotlights
-          ? hasSpotlight("table.p2.attributes") && tutorial.spotlightEnemyUnitAttributes
-            ? [tutorial.spotlightEnemyUnitAttributes]
-            : []
-          : tutorial.spotlightEnemyUnitAttributes
-            ? [tutorial.spotlightEnemyUnitAttributes]
-            : []),
-      ]
-    : isStep1_25
-      ? (tutorial.spotlightRangedWeaponsPositions ?? [])
-      : isStep1_6
-        ? (tutorial.spotlightRangedWeaponsPositions ?? [])
-        : isPhaseMoveStep
-          ? (tutorial.spotlightTablePositions ?? [])
-          : [];
-  const p2UnitSpotlights = (
-    hasConfiguredSpotlights
-      ? hasSpotlight("table.p2.unitRows")
-      : isStage2_11Or12
-  )
-    ? (tutorial.spotlightP2UnitRowPositions ?? [])
-    : [];
-  const boardUnitSpotlights = (
-    hasConfiguredSpotlights
-      ? hasSpotlight("board.unitRows")
-      : isStage2_11Or12
-  )
-    ? (tutorial.spotlightBoardUnitPositions ?? [])
-    : [];
-  const toSpotlightRect = (element: Element | null): TutorialSpotlightRect[] => {
-    if (!(element instanceof HTMLElement)) return [];
-    const rect = element.getBoundingClientRect();
-    if (
-      !Number.isFinite(rect.width) ||
-      !Number.isFinite(rect.height) ||
-      rect.width <= 0 ||
-      rect.height <= 0
-    ) {
-      return [];
-    }
-    return [
-      {
-        shape: "rect",
-        left: rect.left,
-        top: rect.top,
-        width: rect.width,
-        height: rect.height,
-      },
-    ];
-  };
-  const guideP1ChangeRosterSpotlight = toSpotlightRect(
-    document.querySelector(".deployment-panel__change-roster--player1")
-  );
-  const guideP2ChangeRosterSpotlight = toSpotlightRect(
-    document.querySelector(".deployment-panel__change-roster--player2")
-  );
-  const guideStartDeploymentSpotlight = toSpotlightRect(
-    document.querySelector(".test-start-bar__button")
-  );
-  const guideP1RosterSpotlight = toSpotlightRect(
-    document.querySelector(".deployment-panel__roster--player1")
-  );
-  const guideP1DeploymentZoneSpotlight =
-    leftPanelSpotlight != null
-      ? [leftPanelSpotlight]
-      : toSpotlightRect(document.querySelector(".game-board-section"));
-  const spotlightCatalog: Record<TutorialSpotlightId, TutorialSpotlightPosition[]> = {
-    "board.activeUnit": tutorial.spotlightPosition ? [tutorial.spotlightPosition] : [],
-    "table.p1.nameM": (hasConfiguredSpotlights ? hasSpotlight("table.p1.nameM") : isPhaseMoveStep)
-      ? (tutorial.spotlightTablePositions ?? [])
-      : [],
-    "table.p1.rangedWeapons": tutorial.spotlightRangedWeaponsPositions ?? [],
-    "table.p2.attributes": tutorial.spotlightEnemyUnitAttributes
-      ? [tutorial.spotlightEnemyUnitAttributes]
-      : [],
-    "table.p2.unitRows": p2UnitSpotlights,
-    "board.unitRows": boardUnitSpotlights,
-    "turnPhase.all":
-      (hasConfiguredSpotlights ? hasSpotlight("turnPhase.all") : needsTurnPhaseHalo) &&
-      turnPhaseSpotlights
-        ? turnPhaseSpotlights
-        : [],
-    "panel.left":
-      (hasConfiguredSpotlights ? hasSpotlight("panel.left") : isHaloLeft || isStage2_11Or12) &&
-      leftPanelSpotlight
-        ? [leftPanelSpotlight]
-        : [],
-    "gamelog.lastEntry":
-      (isStep2_1 || isStep2_4) && gameLogLastEntrySpotlight ? [gameLogLastEntrySpotlight] : [],
-    "gamelog.header":
-      (isStep2_1 || isStep2_4 || isStep1_25) && gameLogHeaderSpotlight
-        ? [gameLogHeaderSpotlight]
-        : [],
-    "gamelog.last2Entries": gameLogTopEntriesSpotlights ?? [],
-    "guide.p1.changeRoster": guideP1ChangeRosterSpotlight,
-    "guide.p2.changeRoster": guideP2ChangeRosterSpotlight,
-    "guide.startDeployment": guideStartDeploymentSpotlight,
-    "guide.p1.deploymentZone": guideP1DeploymentZoneSpotlight,
-    "guide.p1.roster": guideP1RosterSpotlight,
-  };
-  const getSpotlightPositionsById = (id: string): TutorialSpotlightPosition[] => {
-    if (!(id in spotlightCatalog)) {
-      throw new Error(`Unknown tutorial spotlight id: ${id}`);
-    }
-    return spotlightCatalog[id as TutorialSpotlightId];
-  };
-  const legacySpotlights = [
-    tutorial.spotlightPosition ?? null,
-    ...tableSpotlights,
-    ...p2UnitSpotlights,
-    ...boardUnitSpotlights,
-    ...(needsTurnPhaseHalo && turnPhaseSpotlights ? turnPhaseSpotlights : []),
-    ...((isHaloLeft || isStage2_11Or12) && leftPanelSpotlight ? [leftPanelSpotlight] : []),
-    ...gameLogSpotlights,
-  ].filter(Boolean) as TutorialSpotlightPosition[];
-  const spotlights =
-    configuredSpotlightIds != null
-      ? configuredSpotlightIds.flatMap((id) => getSpotlightPositionsById(id))
-      : legacySpotlights;
-  const configuredAllowedClickIds = currentStep.allowedClickSpotlightIds;
-  const allowedClickSpotlights =
-    configuredAllowedClickIds != null
-      ? configuredAllowedClickIds.flatMap((id) => getSpotlightPositionsById(id))
-      : configuredSpotlightIds != null
-        ? spotlights
-        : isStep2_2
-          ? ([
-              tutorial.spotlightPosition ?? null,
-              ...(tutorial.spotlightRangedWeaponsPositions ?? []),
-              ...(needsTurnPhaseHalo && turnPhaseSpotlights ? turnPhaseSpotlights : []),
-              ...((isHaloLeft || isStage2_11Or12) && leftPanelSpotlight
-                ? [leftPanelSpotlight]
-                : []),
-              ...((isStep2_1 || isStep2_4) && gameLogLastEntrySpotlight
-                ? [gameLogLastEntrySpotlight]
-                : []),
-              ...((isStep2_1 || isStep2_4) && gameLogHeaderSpotlight
-                ? [gameLogHeaderSpotlight]
-                : []),
-            ].filter(Boolean) as TutorialSpotlightPosition[])
-          : spotlights;
-  const debugSpotlightLabels =
-    debugMode && configuredSpotlightIds != null
-      ? configuredSpotlightIds.flatMap((id) => {
-          const positions = getSpotlightPositionsById(id);
-          return positions.map((position, idx) => ({
-            id: positions.length > 1 ? `${id}[${idx}]` : id,
-            position,
-          }));
-        })
-      : [];
-
-  // 1-15 : fog rects 2 bandes. 2-11 : pas de fog rect (l'overlay masque déjà tout sauf le halo board bas).
-  // Éviter double fog en partie supérieure droite (overlay + fog droit se superposaient).
-  const fogLeft = stepFog?.leftPanel === true ? tutorial.leftPanelFogRects : null;
-  const fogRight = stepFog?.rightPanel === true ? tutorial.rightPanelFogRects : null;
-  return (
-    <TutorialOverlay
-      step={currentStep}
-      lang={tutorial.tutorialLang}
-      onLangChange={tutorial.setTutorialLang}
-      onClose={tutorial.onClosePopup}
-      onSkipTutorial={tutorial.onSkipTutorial}
-      onGoToPveMode={tutorial.onGoToPveMode}
-      onDismissPopupOnly={tutorial.onDismissPopupOnly}
-      spotlights={spotlights}
-      allowedClickSpotlights={allowedClickSpotlights}
-      fogLeftPanelRects={fogLeft}
-      fogRightPanelRects={fogRight}
-      debugSpotlightLabels={debugSpotlightLabels}
-      tutorialPopupAnchor={tutorial.spotlightTutorialPopupAnchor}
-      panelLeftSpotlightForLayout={
-        tutorial.spotlightLeftPanel?.shape === "rect" ? tutorial.spotlightLeftPanel : null
-      }
-      tableNameMSpotlightRectsForLayout={
-        stage === "1-15" && Array.isArray(tutorial.spotlightTablePositions)
-          ? tutorial.spotlightTablePositions.filter(
-              (s): s is TutorialSpotlightRect => s.shape === "rect"
-            )
-          : null
-      }
-    />
-  );
-}
-
-/** TurnPhaseTracker avec halos tutoriel (Rounds / Tours / Phases / bouton Move). */
-function TurnPhaseTrackerWithTutorial(
-  props: React.ComponentProps<typeof TurnPhaseTracker>
-): React.ReactElement {
-  const tutorial = useTutorial();
-  const title = tutorial?.popupVisible ? (tutorial?.currentStep?.stepKey ?? null) : null;
-  const stage = tutorial?.currentStep?.stage ?? "";
-  const showTurnPhaseRects =
-    tutorial?.currentStep?.spotlightIds?.includes("turnPhase.all") === true;
-  const forceLayout2_11 = tutorial?.currentEtape === 2 && tutorial?.gamePhase === "deployment";
-  const effectiveTitleForRects = showTurnPhaseRects
-    ? stage === "1-11"
-      ? TUTORIAL_STEP_TITLE_ROUNDS
-      : stage === "1-12"
-        ? TUTORIAL_STEP_TITLE_TURNS
-        : stage === "1-13"
-          ? TUTORIAL_STEP_TITLE_PHASES
-          : stage === "1-14" || stage === "1-15" || stage === "1-16"
-            ? TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT
-            : forceLayout2_11 || stage === "2-11" || stage === "2-12"
-              ? stage
-              : stage === "1-21" ||
-                  stage === "1-22" ||
-                  stage === "1-23" ||
-                  stage === "1-24" ||
-                  matchesTutorialStagePattern(stage, "1-24-*") ||
-                  stage === "1-25" ||
-                  stage === "3-1"
-                ? TUTORIAL_STEP_TITLE_PHASE_TIR
-                : (title ?? undefined)
-    : undefined;
-  useEffect(() => {
-    if (!showTurnPhaseRects && tutorial?.setSpotlightTurnPhasePositions) {
-      tutorial.setSpotlightTurnPhasePositions(null);
-    }
-    if (!showTurnPhaseRects && tutorial?.setSpotlightTutorialPopupAnchor) {
-      tutorial.setSpotlightTutorialPopupAnchor(null);
-    }
-  }, [
-    showTurnPhaseRects,
-    tutorial?.setSpotlightTurnPhasePositions,
-    tutorial?.setSpotlightTutorialPopupAnchor,
-  ]);
-  return (
-    <TurnPhaseTracker
-      {...props}
-      tutorialStepTitle={showTurnPhaseRects ? effectiveTitleForRects : undefined}
-      onTutorialRects={tutorial?.setSpotlightTurnPhasePositions}
-      onTutorialPopupAnchor={tutorial?.setSpotlightTutorialPopupAnchor}
-    />
-  );
-}
-
-/** Wrapper du PANNEAU GAUCHE (board) : rapporte son rect pour le halo (zone sans brouillard) et, en 1-15, la moitié haute pour le fog. En 2-11/2-12 : fog rect rows 0-11 (partie haute), partie basse sans fog. */
-function BoardColumnWithTutorial({
-  children,
-  boardRows = 21,
-  previewElevated = false,
-}: {
-  children: React.ReactNode;
-  boardCols?: number;
-  boardRows?: number;
-  /** En aperçu (view non destructif), élève le board au-dessus de l'overlay lecture seule
-   * (zIndex 3999) pour rester navigable (scroll/pan/zoom) — les actions restent no-opées côté moteur. */
-  previewElevated?: boolean;
-}): React.ReactElement {
-  const ref = useRef<HTMLDivElement>(null);
-  const tutorial = useTutorial();
-  const stage = tutorial?.currentStep?.stage ?? "";
-  const stepFog = tutorial?.currentStep?.fog;
-  const stageUiBehavior = stage !== "" ? getTutorialUiBehavior(stage) : null;
-  const forceNoFog = stageUiBehavior?.forceNoFog === true;
-  const forceLayout2_11 = tutorial?.currentEtape === 2 && tutorial?.gamePhase === "deployment";
-  const isStage2_11Or12 = forceLayout2_11 || stage === "2-11" || stage === "2-12";
-  const hasLeftPanelFog = stepFog?.leftPanel === true;
-  const hasBoardTopBandFog = stepFog?.boardTopBand === true;
-  const wantsPanelLeftSpotlight =
-    tutorial?.currentStep?.spotlightIds?.includes("panel.left") === true;
-  const isPhaseMoveStep = Boolean(
-    tutorial?.popupVisible &&
-      tutorial?.currentStep?.stepKey &&
-      TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO.includes(
-        tutorial.currentStep.stepKey as (typeof TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO)[number]
-      )
-  );
-  const needsMeasure =
-    wantsPanelLeftSpotlight ||
-    isPhaseMoveStep ||
-    isStage2_11Or12 ||
-    hasLeftPanelFog ||
-    hasBoardTopBandFog;
-  useLayoutEffect(() => {
-    if (!tutorial?.setSpotlightLeftPanel) return;
-    if (!needsMeasure) {
-      tutorial.setSpotlightLeftPanel(null);
-      tutorial?.setLeftPanelFogRects?.(null);
-      return;
-    }
-    let cancelled = false;
-    const measure = () => {
-      if (cancelled) return;
-      const el = ref.current?.parentElement ?? ref.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      if (r.width < 2 || r.height < 2) return;
-      const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 1920;
-      if (r.left > viewportWidth * 0.6) return;
-      if (hasLeftPanelFog && !forceNoFog) {
-        const bandHeight = r.height / 4;
-        tutorial.setSpotlightLeftPanel({
-          shape: "rect",
-          left: r.left,
-          top: r.top + r.height / 2,
-          width: r.width,
-          height: r.height / 2,
-        });
-        tutorial.setLeftPanelFogRects?.([
-          { shape: "rect", left: r.left, top: r.top, width: r.width, height: bandHeight },
-          {
-            shape: "rect",
-            left: r.left,
-            top: r.top + bandHeight,
-            width: r.width,
-            height: bandHeight,
-          },
-        ]);
-      } else if (hasBoardTopBandFog) {
-        // 2-11 uniquement : fog partie haute (rows 0-11). À partir de 2-12, plus de fog.
-        const fogRows = 12;
-        const fogHeight = r.height * Math.min(1, fogRows / Math.max(1, boardRows));
-        tutorial.setSpotlightLeftPanel({
-          shape: "rect",
-          left: r.left,
-          top: r.top + fogHeight,
-          width: r.width,
-          height: r.height - fogHeight,
-        });
-        tutorial.setLeftPanelFogRects?.(null);
-      } else if (isStage2_11Or12) {
-        // 2-12+ : plus de fog nulle part, panneau entier visible.
-        tutorial.setSpotlightLeftPanel({
-          shape: "rect",
-          left: r.left,
-          top: r.top,
-          width: r.width,
-          height: r.height,
-        });
-        tutorial.setLeftPanelFogRects?.(null);
-      } else {
-        tutorial.setSpotlightLeftPanel(
-          wantsPanelLeftSpotlight
-            ? { shape: "rect", left: r.left, top: r.top, width: r.width, height: r.height }
-            : null
-        );
-        tutorial.setLeftPanelFogRects?.(null);
-      }
-    };
-    measure();
-    const raf = requestAnimationFrame(() => {
-      if (cancelled) return;
-      measure();
-      requestAnimationFrame(() => {
-        if (!cancelled) measure();
-      });
-    });
-    const t = setTimeout(() => {
-      if (!cancelled) measure();
-    }, 30);
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(raf);
-      clearTimeout(t);
-      tutorial.setSpotlightLeftPanel(null);
-      tutorial.setLeftPanelFogRects?.(null);
-    };
-  }, [
-    needsMeasure,
-    wantsPanelLeftSpotlight,
-    hasLeftPanelFog,
-    hasBoardTopBandFog,
-    forceNoFog,
-    isStage2_11Or12,
-    boardRows,
-    tutorial?.setSpotlightLeftPanel,
-    tutorial?.setLeftPanelFogRects,
-  ]);
-  return (
-    <div
-      ref={ref}
-      className="board-column-overlay-anchor"
-      style={previewElevated ? { position: "relative", zIndex: 4000 } : undefined}
-    >
-      {children}
-    </div>
-  );
-}
-
-const GAME_LOG_LINE_HEIGHT_PX = 34;
-
-/** GameLog avec rappel du rect de la dernière ligne pour halo tutoriel 1-21 ; en 1-24 agrandit d'une ligne par tir. En 1-25 halo sur la ligne du haut (header) uniquement. */
-function GameLogWithTutorialSpotlight(
-  props: React.ComponentProps<typeof GameLog>
-): React.ReactElement {
-  const tutorial = useTutorial();
-  const stage = tutorial?.currentStep?.stage ?? "";
-  const isStep2_4 =
-    tutorial?.popupVisible &&
-    (matchesTutorialStagePattern(stage, "1-24") || matchesTutorialStagePattern(stage, "1-24-*"));
-  const isStep1_25 = tutorial?.popupVisible && stage === "1-25";
-  const shootEventCount = (props.events ?? []).filter((e) => e.type === "shoot").length;
-  const baseHeight = (props.availableHeight ?? 220) - GAME_LOG_LINE_HEIGHT_PX;
-  const availableHeight = isStep2_4
-    ? baseHeight + shootEventCount * GAME_LOG_LINE_HEIGHT_PX
-    : baseHeight;
-  const reportGameLogHeaderRect =
-    tutorial?.currentStep?.spotlightIds?.includes("gamelog.header") === true;
-  const reportGameLogLastEntryRect =
-    tutorial?.currentStep?.spotlightIds?.includes("gamelog.lastEntry") === true;
-  const reportGameLogTopTwoEntriesRects =
-    tutorial?.currentStep?.spotlightIds?.includes("gamelog.last2Entries") === true;
-  // En 1-25 : ne pas utiliser le rect "dernière ligne", pour que le halo reste sur la ligne du haut (header) uniquement
-  useEffect(() => {
-    if (isStep1_25 && tutorial?.setSpotlightGameLogLastEntry) {
-      tutorial.setSpotlightGameLogLastEntry(null);
-    }
-  }, [isStep1_25, tutorial?.setSpotlightGameLogLastEntry]);
-  useEffect(() => {
-    if (!reportGameLogTopTwoEntriesRects && tutorial?.setSpotlightGameLogTopEntriesPositions) {
-      tutorial.setSpotlightGameLogTopEntriesPositions(null);
-    }
-  }, [reportGameLogTopTwoEntriesRects, tutorial?.setSpotlightGameLogTopEntriesPositions]);
-  return (
-    <GameLog
-      {...props}
-      availableHeight={availableHeight}
-      onLastEntryRect={
-        reportGameLogLastEntryRect
-          ? (tutorial?.setSpotlightGameLogLastEntry ?? undefined)
-          : undefined
-      }
-      onHeaderRect={
-        reportGameLogHeaderRect ? (tutorial?.setSpotlightGameLogHeader ?? undefined) : undefined
-      }
-      onTopTwoEntriesRects={
-        reportGameLogTopTwoEntriesRects
-          ? (tutorial?.setSpotlightGameLogTopEntriesPositions ?? undefined)
-          : undefined
-      }
-    />
-  );
-}
-
-/** Wrapper du PANNEAU DROIT (unit-status-tables) : rapporte son rect pour le halo étape 5 ou fog 2-11. */
-function RightColumnTutorialSpotlight({
-  children,
-}: {
-  children: React.ReactNode;
-}): React.ReactElement {
-  const ref = useRef<HTMLDivElement>(null);
-  const tutorial = useTutorial();
-  const stage = tutorial?.currentStep?.stage ?? "";
-  const stepFog = tutorial?.currentStep?.fog;
-  const stageUiBehavior = stage !== "" ? getTutorialUiBehavior(stage) : null;
-  const forceNoFog = stageUiBehavior?.forceNoFog === true;
-  const forceLayout2_11 = tutorial?.currentEtape === 2 && tutorial?.gamePhase === "deployment";
-  const isStage2_11Only = forceLayout2_11 || stage === "2-11";
-  const isStage2_12Only = stage === "2-12";
-  const isStage2_13Only = stage === "2-13";
-  const forceRightPanelFog = stageUiBehavior?.forceRightPanelFog === true;
-  const shouldShowRightFog =
-    stepFog?.rightPanel === true || forceRightPanelFog || (isStage2_11Only && !forceNoFog);
-  const isPhaseMoveStep = Boolean(
-    tutorial?.popupVisible &&
-      tutorial?.currentStep?.stepKey &&
-      TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO.includes(
-        tutorial.currentStep.stepKey as (typeof TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO)[number]
-      )
-  );
-  useLayoutEffect(() => {
-    if (!tutorial?.setSpotlightRightPanel) return;
-    if (!isPhaseMoveStep && !isStage2_12Only && !isStage2_13Only) {
-      tutorial.setSpotlightRightPanel(null);
-    }
-    if (!tutorial?.setRightPanelFogRects) return;
-    if (!shouldShowRightFog) {
-      tutorial.setRightPanelFogRects(null);
-    }
-  }, [
-    isPhaseMoveStep,
-    isStage2_12Only,
-    isStage2_13Only,
-    shouldShowRightFog,
-    tutorial?.setSpotlightRightPanel,
-    tutorial?.setRightPanelFogRects,
-  ]);
-  useLayoutEffect(() => {
-    if (!tutorial?.setSpotlightRightPanel || !tutorial?.setRightPanelFogRects) return;
-    if (
-      !isPhaseMoveStep &&
-      !isStage2_11Only &&
-      !isStage2_12Only &&
-      !isStage2_13Only &&
-      !shouldShowRightFog
-    )
-      return;
-    let cancelled = false;
-    const measure = () => {
-      if (cancelled) return;
-      const el = ref.current?.parentElement ?? ref.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      if (r.width < 2 || r.height < 2) return;
-      if (isPhaseMoveStep || isStage2_12Only || isStage2_13Only) {
-        tutorial.setSpotlightRightPanel({
-          shape: "rect",
-          left: r.left,
-          top: r.top,
-          width: r.width,
-          height: r.height,
-        });
-      } else {
-        tutorial.setSpotlightRightPanel(null);
-      }
-      if (shouldShowRightFog) {
-        tutorial.setRightPanelFogRects([
-          { shape: "rect", left: r.left, top: r.top, width: r.width, height: r.height },
-        ]);
-      }
-    };
-    measure();
-    const raf = requestAnimationFrame(() => {
-      if (cancelled) return;
-      measure();
-      requestAnimationFrame(() => {
-        if (!cancelled) measure();
-      });
-    });
-    const t = setTimeout(() => {
-      if (!cancelled) measure();
-    }, 30);
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(raf);
-      clearTimeout(t);
-      tutorial.setSpotlightRightPanel(null);
-      tutorial.setRightPanelFogRects?.(null);
-    };
-  }, [
-    isPhaseMoveStep,
-    isStage2_11Only,
-    isStage2_12Only,
-    isStage2_13Only,
-    shouldShowRightFog,
-    tutorial?.setSpotlightRightPanel,
-    tutorial?.setRightPanelFogRects,
-  ]);
-  return (
-    <div ref={ref} style={{ display: "contents" }}>
-      {children}
-    </div>
-  );
-}
-
-/** BoardPvp avec interception clic Intercessor (advance_on_unit_click) et confirmation déplacement (advance_on_move_click). */
-function BoardPvpWithTutorialAdvance(
-  props: React.ComponentProps<typeof BoardPvp>
-): React.ReactElement {
-  const tutorial = useTutorial();
-  const wrappedOnSelectUnit = useCallback(
-    (unitId: number | string | null) => {
-      if (unitId != null) {
-        const unit = props.units.find((u) => u.id === unitId || u.id === Number(unitId));
-        if (
-          unit &&
-          Number(unit.player) === 2 &&
-          (tutorial?.currentStep?.stage === "1-22" || tutorial?.currentStep?.stage === "1-23")
-        ) {
-          return;
-        }
-        if (
-          tutorial?.currentStep?.advanceOnUnitClick &&
-          tutorial?.onClosePopup &&
-          Number(unit?.player) === 1
-        ) {
-          tutorial.onClosePopup();
-        }
-      }
-      props.onSelectUnit(unitId);
-    },
-    [
-      tutorial?.currentStep?.advanceOnUnitClick,
-      tutorial?.currentStep?.stage,
-      tutorial?.onClosePopup,
-      props.onSelectUnit,
-      props.units,
-    ]
-  );
-  /** Avance (1-16 → suite) à la confirmation du move (clic sur l’icône unité). */
-  const wrappedOnConfirmMove = useCallback(async () => {
-    const isStep1_6 = tutorial?.currentStep?.stage === "1-16";
-    if (isStep1_6 && tutorial?.prepareSkipNextPhaseTrigger) {
-      tutorial.prepareSkipNextPhaseTrigger();
-    }
-    await props.onConfirmMove?.();
-    if (isStep1_6 && tutorial?.onClosePopup) {
-      tutorial.onClosePopup();
-    }
-  }, [
-    props.onConfirmMove,
-    tutorial?.currentStep?.stage,
-    tutorial?.onClosePopup,
-    tutorial?.prepareSkipNextPhaseTrigger,
-  ]);
-
-  /** Avance (1-15 → 1-16) au choix de la case verte (destination), avant la confirmation. */
-  const wrappedOnStartMovePreview = useCallback(
-    (unitId: number | string, col: number | string, row: number | string) => {
-      const isStep1_5 = tutorial?.currentStep?.stage === "1-15";
-      if (isStep1_5 && tutorial?.prepareSkipNextPhaseTrigger) {
-        tutorial.prepareSkipNextPhaseTrigger();
-      }
-      props.onStartMovePreview?.(unitId, col, row);
-      if (isStep1_5 && tutorial?.onClosePopup) {
-        tutorial.onClosePopup();
-      }
-    },
-    [
-      props.onStartMovePreview,
-      tutorial?.currentStep?.stage,
-      tutorial?.onClosePopup,
-      tutorial?.prepareSkipNextPhaseTrigger,
-    ]
-  );
-
-  const wrappedOnDirectMove = useCallback(
-    async (
-      unitId: number | string,
-      col: number | string,
-      row: number | string,
-      orientation?: number
-    ) => {
-      if (tutorial?.currentStep?.advanceOnMoveClick && tutorial?.prepareSkipNextPhaseTrigger) {
-        tutorial.prepareSkipNextPhaseTrigger();
-      }
-      await props.onDirectMove?.(unitId, col, row, orientation);
-      if (tutorial?.currentStep?.advanceOnMoveClick && tutorial?.onClosePopup) {
-        tutorial.onClosePopup();
-      }
-    },
-    [
-      props.onDirectMove,
-      tutorial?.currentStep?.advanceOnMoveClick,
-      tutorial?.onClosePopup,
-      tutorial?.prepareSkipNextPhaseTrigger,
-    ]
-  );
-
-  // Avancer 1-22 → 1-23 quand le joueur ouvre le menu de sélection d’arme (clic sur l’icône)
-  const stage = tutorial?.currentStep?.stage ?? "";
-  useEffect(() => {
-    if (stage !== "1-22" || !tutorial?.currentStep?.advanceOnWeaponClick || !tutorial?.onClosePopup)
-      return;
-    const handler = () => tutorial.onClosePopup();
-    window.addEventListener("weaponMenuOpened", handler);
-    return () => window.removeEventListener("weaponMenuOpened", handler);
-  }, [stage, tutorial?.currentStep?.advanceOnWeaponClick, tutorial?.onClosePopup]);
-
-  // Avancer 1-23 → 1-24 (etc.) quand le joueur a choisi une arme dans le menu (sélection confirmée)
-  // En 1-23, n’avancer que si l’arme sélectionnée correspond à advanceOnWeaponName (ex. Bolt Rifle)
-  useEffect(() => {
-    if (stage === "1-22" || !tutorial?.currentStep?.advanceOnWeaponClick || !tutorial?.onClosePopup)
-      return;
-    const expectedWeaponName = tutorial.currentStep.advanceOnWeaponName;
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ gameState?: unknown; weaponDisplayName?: string }>).detail;
-      if (expectedWeaponName != null && expectedWeaponName !== "") {
-        const selected = (detail?.weaponDisplayName ?? "").trim();
-        if (selected !== expectedWeaponName.trim()) return;
-      }
-      tutorial.onClosePopup();
-    };
-    window.addEventListener("weaponSelected", handler);
-    return () => window.removeEventListener("weaponSelected", handler);
-  }, [
-    stage,
-    tutorial?.currentStep?.advanceOnWeaponClick,
-    tutorial?.currentStep?.advanceOnWeaponName,
-    tutorial?.onClosePopup,
-  ]);
-
-  return (
-    <BoardPvp
-      {...props}
-      onSelectUnit={wrappedOnSelectUnit}
-      onConfirmMove={
-        props.onConfirmMove != null
-          ? () => {
-              void wrappedOnConfirmMove();
-            }
-          : () => {}
-      }
-      onStartMovePreview={
-        props.onStartMovePreview != null
-          ? wrappedOnStartMovePreview
-          : (_unitId: string | number, _col: string | number, _row: string | number) => {}
-      }
-      onDirectMove={
-        props.onDirectMove != null
-          ? (
-              unitId: string | number,
-              col: string | number,
-              row: string | number,
-              orientation?: number
-            ) => {
-              void wrappedOnDirectMove(unitId, col, row, orientation);
-            }
-          : (_unitId: string | number, _col: string | number, _row: string | number) => {}
-      }
-      hideAdvanceIconForTutorial={tutorial?.currentStep?.hideAdvanceIcon ?? false}
-    />
-  );
-}
-
-/** Table joueur 1 : rendu *dans* TutorialProvider, donc useTutorial() fournit le contexte et on peut forcer expand + halo. */
-function UnitStatusTablePlayer1WithTutorial(
-  props: React.ComponentProps<typeof UnitStatusTable>
-): React.ReactElement {
-  const tutorial = useTutorial();
-  const stage = tutorial?.currentStep?.stage ?? "";
-  const wantsNameMSpotlight =
-    tutorial?.currentStep?.spotlightIds?.includes("table.p1.nameM") === true;
-  const wantsRangedWeaponsSpotlight =
-    tutorial?.currentStep?.spotlightIds?.includes("table.p1.rangedWeapons") === true;
-  const isPhaseMoveStep = Boolean(
-    tutorial?.popupVisible &&
-      tutorial?.currentStep?.stepKey &&
-      TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO.includes(
-        tutorial.currentStep.stepKey as (typeof TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO)[number]
-      )
-  );
-  const isStep1_6 = tutorial?.currentStep?.stage === "1-16";
-  const isStep2_2Or3Or4 =
-    stage === "1-22" ||
-    stage === "1-23" ||
-    matchesTutorialStagePattern(stage, "1-24") ||
-    matchesTutorialStagePattern(stage, "1-24-*");
-  const isStep1_25 = stage === "1-25";
-  const isStep2_2Or3Or4Or5 = isStep2_2Or3Or4 || isStep1_25;
-  const wrappedOnSelectUnit = useCallback(
-    (unitId: number) => {
-      if (
-        tutorial?.currentStep?.advanceOnUnitClick &&
-        tutorial?.onClosePopup &&
-        props.units.some(
-          (u) => (u.id === unitId || u.id === Number(unitId)) && Number(u.player) === 1
-        )
-      ) {
-        tutorial.onClosePopup();
-      }
-      props.onSelectUnit(unitId);
-    },
-    [
-      tutorial?.currentStep?.advanceOnUnitClick,
-      tutorial?.onClosePopup,
-      props.onSelectUnit,
-      props.units,
-    ]
-  );
-  useEffect(() => {
-    if (!wantsNameMSpotlight && tutorial?.setSpotlightTablePositions) {
-      tutorial.setSpotlightTablePositions(null);
-    }
-  }, [wantsNameMSpotlight, tutorial?.setSpotlightTablePositions]);
-  useEffect(() => {
-    if (!wantsRangedWeaponsSpotlight && tutorial?.setSpotlightRangedWeaponsPositions) {
-      tutorial.setSpotlightRangedWeaponsPositions(null);
-    }
-  }, [wantsRangedWeaponsSpotlight, tutorial?.setSpotlightRangedWeaponsPositions]);
-  return (
-    <UnitStatusTable
-      {...props}
-      onSelectUnit={wrappedOnSelectUnit}
-      tutorialForceTableExpanded={isPhaseMoveStep || isStep2_2Or3Or4Or5}
-      tutorialForceUnitIdsExpanded={isPhaseMoveStep || isStep2_2Or3Or4Or5 ? [1] : undefined}
-      onNameMColumnsRect={wantsNameMSpotlight ? tutorial?.setSpotlightTablePositions : undefined}
-      tutorialForceRangedExpandedForUnitIds={isStep1_6 || isStep2_2Or3Or4Or5 ? [1] : undefined}
-      onRangedWeaponsSectionRect={
-        wantsRangedWeaponsSpotlight ? tutorial?.setSpotlightRangedWeaponsPositions : undefined
-      }
-    />
-  );
-}
-
-/** Compare deux rects (ou null) pour éviter des setState en boucle. */
-function rectEquals(
-  a: { left: number; top: number; width: number; height: number } | null,
-  b: { left: number; top: number; width: number; height: number } | null
-): boolean {
-  if (a === b) return true;
-  if (a == null || b == null) return false;
-  return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height;
-}
-
-/** Table joueur 2 : en étapes 1-22/1-23/1-24*, force expand première unité ennemie (ex. id 2) et rapporte son rect titre + attributs pour halo. */
-function UnitStatusTablePlayer2WithTutorial(
-  props: React.ComponentProps<typeof UnitStatusTable>
-): React.ReactElement {
-  const tutorial = useTutorial();
-  const stage = tutorial?.currentStep?.stage ?? "";
-  const wantsEnemyAttributesSpotlight =
-    tutorial?.currentStep?.spotlightIds?.includes("table.p2.attributes") === true;
-  const wantsP2UnitRowsSpotlight =
-    tutorial?.currentStep?.spotlightIds?.includes("table.p2.unitRows") === true;
-  const forceLayout2_11 =
-    tutorial?.popupVisible && tutorial?.currentEtape === 2 && tutorial?.gamePhase === "deployment";
-  const isStage2_11Or12 = forceLayout2_11 || wantsP2UnitRowsSpotlight;
-  const lastRectRef = useRef<{ left: number; top: number; width: number; height: number } | null>(
-    null
-  );
-  const onUnitAttributesSectionRect = useCallback(
-    (
-      positions: Array<{
-        shape: "rect";
-        left: number;
-        top: number;
-        width: number;
-        height: number;
-      }> | null
-    ) => {
-      if (!tutorial?.setSpotlightEnemyUnitAttributes) return;
-      const next = positions?.[0] ?? null;
-      if (next && lastRectRef.current && rectEquals(next, lastRectRef.current)) return;
-      if (!next && lastRectRef.current === null) return;
-      lastRectRef.current = next;
-      tutorial.setSpotlightEnemyUnitAttributes(next);
-    },
-    [tutorial?.setSpotlightEnemyUnitAttributes]
-  );
-  useEffect(() => {
-    if (!wantsEnemyAttributesSpotlight && tutorial?.setSpotlightEnemyUnitAttributes) {
-      lastRectRef.current = null;
-      tutorial.setSpotlightEnemyUnitAttributes(null);
-    }
-  }, [wantsEnemyAttributesSpotlight, tutorial?.setSpotlightEnemyUnitAttributes]);
-  const onP2UnitRowRects = useCallback(
-    (
-      positions: Array<{
-        shape: "rect";
-        left: number;
-        top: number;
-        width: number;
-        height: number;
-      }> | null
-    ) => {
-      tutorial?.setSpotlightP2UnitRowPositions?.(positions ?? null);
-    },
-    [tutorial?.setSpotlightP2UnitRowPositions]
-  );
-
-  return (
-    <UnitStatusTable
-      {...props}
-      tutorialForceTableExpanded={wantsEnemyAttributesSpotlight || isStage2_11Or12}
-      tutorialForceUnitIdsExpanded={wantsEnemyAttributesSpotlight ? [2] : undefined}
-      tutorialForceUnitIdsCollapsed={stage === "2-11" ? [2, 3] : undefined}
-      onUnitAttributesSectionRect={
-        wantsEnemyAttributesSpotlight ? onUnitAttributesSectionRect : undefined
-      }
-      tutorialReportAttributesForUnitIds={wantsEnemyAttributesSpotlight ? [2] : undefined}
-      onP2UnitRowRects={wantsP2UnitRowsSpotlight ? onP2UnitRowRects : undefined}
-      tutorialReportP2UnitRowRects={wantsP2UnitRowsSpotlight}
-    />
-  );
-}
-
-/** Met à jour le ref des options de tir tutoriel (1-24 : 1er tir raté, puis kill forcé). */
-function TutorialShootOptionsSync({
-  getTutorialShootOptionsRef,
-}: {
-  getTutorialShootOptionsRef: MutableRefObject<() => { forceKill?: boolean; forceMiss?: boolean }>;
-}) {
-  const tutorial = useTutorial();
-  const [tutorial124FirstShotDone, setTutorial124FirstShotDone] = useState(false);
-  const stage = tutorial?.currentStep?.stage ?? "";
-  const isStage124Family =
-    matchesTutorialStagePattern(stage, "1-24") || matchesTutorialStagePattern(stage, "1-24-*");
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const d = (e as CustomEvent).detail;
-      if (d?.type === "shoot" && d?.target_died === false && isStage124Family) {
-        setTutorial124FirstShotDone(true);
-      }
-    };
-    window.addEventListener("backendLogEvent", handler);
-    return () => window.removeEventListener("backendLogEvent", handler);
-  }, [isStage124Family]);
-
-  useEffect(() => {
-    if (!isStage124Family) {
-      setTutorial124FirstShotDone(false);
-    }
-  }, [isStage124Family]);
-
-  useEffect(() => {
-    getTutorialShootOptionsRef.current = () => {
-      if (stage === "1-24" && !tutorial124FirstShotDone) {
-        return { forceMiss: true };
-      }
-      if (
-        (stage === "1-24" && tutorial124FirstShotDone) ||
-        (stage !== "1-24" && isStage124Family)
-      ) {
-        return { forceKill: true };
-      }
-      return {};
-    };
-  }, [getTutorialShootOptionsRef, isStage124Family, stage, tutorial124FirstShotDone]);
-  return null;
-}
 
 export const BoardWithAPI: React.FC = () => {
   const authSession = getAuthSession();
@@ -1567,13 +498,6 @@ export const BoardWithAPI: React.FC = () => {
   const canUseAdvanceWarning = authSession.permissions.options.show_advance_warning;
   const canUseAutoWeaponSelection = authSession.permissions.options.auto_weapon_selection;
 
-  const getTutorialShootOptionsRef = useRef<() => { forceKill?: boolean; forceMiss?: boolean }>(
-    () => ({})
-  );
-  const stopAiAfterPhaseChangeRef = useRef(false);
-  const [pauseAIForTutorial, setPauseAIForTutorial] = useState(false);
-  /** Synchrone avec shouldPauseAI du TutorialProvider (évite course : phase charge avant pause state). */
-  const tutorialPauseAiSyncRef = useRef(false);
   // Étages (multi-niveaux) : niveau d'affichage courant, remonté ici (au-dessus de useEngineAPI)
   // pour que le déploiement/move à l'étage puisse lire le niveau ciblé. Le bouton d'étage vit dans
   // BoardPvp (props ci-dessous). Ref synchronisée = lecture stable dans les callbacks du hook.
@@ -1581,9 +505,6 @@ export const BoardWithAPI: React.FC = () => {
   const currentLevelRef = useRef(0);
   currentLevelRef.current = currentLevel;
   const apiProps = useEngineAPI({
-    getTutorialShootOptionsRef,
-    stopAiAfterPhaseChangeRef,
-    onStopAfterPhaseChange: () => setPauseAIForTutorial(true),
     currentLevelRef,
   });
   const gameLog = useGameLog(apiProps.gameState?.currentTurn ?? 1);
@@ -1641,45 +562,17 @@ export const BoardWithAPI: React.FC = () => {
 
   // Detect game mode from URL
   const location = useLocation();
-  const navigate = useNavigate();
-  const isTutorialMode = location.pathname === "/game" && location.search.includes("mode=tutorial");
-  const handleTutorialComplete = useCallback(async () => {
-    try {
-      await markTutorialComplete();
-      navigate("/game?mode=pve", { replace: true });
-    } catch (err) {
-      console.error("Failed to mark tutorial complete:", err);
-    }
-  }, [navigate]);
-  const handleGoToPveMode = useCallback(async () => {
-    try {
-      await apiProps.startPveGame();
-      await markTutorialComplete();
-      navigate("/game?mode=pve", { replace: true });
-    } catch (err) {
-      console.error("Failed to go to PvE mode:", err);
-    }
-  }, [apiProps.startPveGame, navigate]);
   const gameMode = location.pathname.includes("/replay")
     ? "training"
-    : isTutorialMode
-      ? "tutorial"
-      : location.pathname === "/game" && location.search.includes("mode=endless_duty")
-        ? "endless_duty"
-        : location.pathname === "/game" && location.search.includes("mode=pvp_test")
-          ? "pvp_test"
-          : location.pathname === "/game" && location.search.includes("mode=pve_test")
+    : location.pathname === "/game" && location.search.includes("mode=endless_duty")
+      ? "endless_duty"
+      : location.pathname === "/game" && location.search.includes("mode=pvp_test")
+        ? "pvp_test"
+        : location.pathname === "/game" && location.search.includes("mode=pve_test")
+          ? "pve"
+          : location.pathname === "/game" && location.search.includes("mode=pve")
             ? "pve"
-            : location.pathname === "/game" && location.search.includes("mode=pve")
-              ? "pve"
-              : "pvp";
-  const modeGuideMode: "pve" | "pvp" | null =
-    !isTutorialMode && gameMode === "pve"
-      ? "pve"
-      : !isTutorialMode && gameMode === "pvp"
-        ? "pvp"
-        : null;
-  const [isModeGuideActive, setIsModeGuideActive] = useState(false);
+            : "pvp";
   // Snapshots temporels (rewind / playback par phase) — PvP / PvP test uniquement.
   const isSnapshotMode = gameMode === "pvp" || gameMode === "pvp_test";
   const [snapshotJump, setSnapshotJump] = useState<SnapshotJump | null>(null);
@@ -1713,8 +606,8 @@ export const BoardWithAPI: React.FC = () => {
     if (!playerTypes) {
       return false;
     }
-    // AI orchestration: PvE et tutoriel (P2 contrôlé par IA).
-    if (gameMode !== "pve" && gameMode !== "tutorial" && gameMode !== "endless_duty") {
+    // AI orchestration: PvE (P2 contrôlé par IA).
+    if (gameMode !== "pve" && gameMode !== "endless_duty") {
       return false;
     }
     return Object.values(playerTypes).some((playerType) => playerType === "ai");
@@ -2326,7 +1219,6 @@ export const BoardWithAPI: React.FC = () => {
       localStorage.getItem("statusBadgePerModel") ?? localStorage.getItem("hiddenBadgePerModel");
     const retreatAlertEnabledStr = localStorage.getItem(RETREAT_ALERT_STORAGE_KEY);
     const battleShockTestEnabledStr = localStorage.getItem("battleShockTestEnabled");
-    const modeGuidesActivatedStr = localStorage.getItem(MODE_GUIDES_ACTIVATED_STORAGE_KEY);
     const deployIconBaseSizeBoundedStr = localStorage.getItem("deployIconBaseSizeBounded");
     const shootPoolFastModeStr = localStorage.getItem("shootPoolFastMode");
     const logShowCoordsStr = localStorage.getItem("logShowCoords");
@@ -2335,9 +1227,6 @@ export const BoardWithAPI: React.FC = () => {
     const replayContainerEnabledStr = localStorage.getItem("replayContainerEnabled");
     const autoSaveEnabledStr = localStorage.getItem("autoSaveEnabled");
     const autoSaveGranularityStr = localStorage.getItem("autoSaveGranularity");
-    const pveGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVE_STORAGE_KEY) === "true";
-    const pvpGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVP_STORAGE_KEY) === "true";
-    const guidesSeenAtLeastOnce = pveGuideSeen || pvpGuideSeen;
     return {
       showAdvanceWarning:
         canUseAdvanceWarning && (showAdvanceWarningStr ? JSON.parse(showAdvanceWarningStr) : true),
@@ -2359,10 +1248,6 @@ export const BoardWithAPI: React.FC = () => {
       battleShockTestEnabled: battleShockTestEnabledStr
         ? JSON.parse(battleShockTestEnabledStr)
         : false,
-      modeGuidesActivated:
-        modeGuidesActivatedStr != null
-          ? JSON.parse(modeGuidesActivatedStr)
-          : !guidesSeenAtLeastOnce,
       deployIconBaseSizeBounded: deployIconBaseSizeBoundedStr
         ? JSON.parse(deployIconBaseSizeBoundedStr)
         : true,
@@ -2536,51 +1421,6 @@ export const BoardWithAPI: React.FC = () => {
     updateRetreatAlertSetting(value);
   };
 
-  const handleToggleModeGuidesActivated = (value: boolean) => {
-    localStorage.setItem(MODE_GUIDES_ACTIVATED_STORAGE_KEY, JSON.stringify(value));
-    if (value) {
-      localStorage.removeItem(MODE_GUIDE_SEEN_PVE_STORAGE_KEY);
-      localStorage.removeItem(MODE_GUIDE_SEEN_PVP_STORAGE_KEY);
-    }
-    setSettings((prev) => ({ ...prev, modeGuidesActivated: value }));
-    if (!value) {
-      setIsModeGuideActive(false);
-      return;
-    }
-    if (modeGuideMode != null) {
-      setIsModeGuideActive(true);
-    }
-  };
-
-  useEffect(() => {
-    if (!settings.modeGuidesActivated || modeGuideMode == null) {
-      setIsModeGuideActive(false);
-      return;
-    }
-    const key =
-      modeGuideMode === "pve" ? MODE_GUIDE_SEEN_PVE_STORAGE_KEY : MODE_GUIDE_SEEN_PVP_STORAGE_KEY;
-    const raw = localStorage.getItem(key);
-    const alreadySeen = raw != null && raw === "true";
-    setIsModeGuideActive(!alreadySeen);
-  }, [modeGuideMode, settings.modeGuidesActivated]);
-
-  const activeTutorialMode = isTutorialMode || isModeGuideActive;
-  const tutorialScenarioType: "tutorial" | "mode_guide" = isTutorialMode
-    ? "tutorial"
-    : "mode_guide";
-  const handleModeGuideComplete = useCallback(() => {
-    if (modeGuideMode == null) {
-      setIsModeGuideActive(false);
-      return;
-    }
-    const key =
-      modeGuideMode === "pve" ? MODE_GUIDE_SEEN_PVE_STORAGE_KEY : MODE_GUIDE_SEEN_PVP_STORAGE_KEY;
-    localStorage.setItem(key, "true");
-    localStorage.setItem(MODE_GUIDES_ACTIVATED_STORAGE_KEY, JSON.stringify(false));
-    setSettings((prev) => ({ ...prev, modeGuidesActivated: false }));
-    setIsModeGuideActive(false);
-  }, [modeGuideMode]);
-
   useEffect(() => {
     if (apiProps.advanceWarningPopup) {
       setAdvanceWarningDontRemind(false);
@@ -2704,16 +1544,8 @@ export const BoardWithAPI: React.FC = () => {
     // Allow multiple AI activations in same phase if there are still eligible units
     // Don't use lastProcessedTurn to block - rely on isAIProcessingRef and hasEligibleAIUnits
     // lastProcessedTurn is only used to detect turn/phase changes for reset
-    // Tutoriel 2-11/2-12/2-13 : pause IA tant que le popup est visible (Hormagaunts immobiles jusqu'au clic Suivant)
-    const tutorialPauseFromSync = isTutorialMode && tutorialPauseAiSyncRef.current;
     const shouldTriggerAI =
-      isAiEnabled &&
-      isAITurn &&
-      !isAIProcessingRef.current &&
-      gameNotOver &&
-      hasEligibleAIUnits &&
-      !pauseAIForTutorial &&
-      !tutorialPauseFromSync;
+      isAiEnabled && isAITurn && !isAIProcessingRef.current && gameNotOver && hasEligibleAIUnits;
 
     // Only log when values actually change (prevents console flooding during animations)
     const currentAICheck = {
@@ -2767,13 +1599,7 @@ export const BoardWithAPI: React.FC = () => {
             }
           }
           if (apiProps.executeAITurn) {
-            // Tutorial flow must always pause after each phase transition
-            // so the next phase popup can be displayed deterministically.
-            const mustStopAfterPhaseChange =
-              gameMode === "tutorial" ? true : stopAiAfterPhaseChangeRef.current;
-            await apiProps.executeAITurn({
-              stopAfterPhaseChange: mustStopAfterPhaseChange,
-            });
+            await apiProps.executeAITurn();
             // Don't set lastProcessedTurn here - allow multiple activations in same phase
             // lastProcessedTurn will be set when phase actually changes (via useEffect dependency)
           } else {
@@ -2793,7 +1619,7 @@ export const BoardWithAPI: React.FC = () => {
     } else if (isAiEnabled && isAITurn && !hasEligibleAIUnits) {
       // AI turn skipped - no eligible units
     }
-  }, [isAiMode, apiProps, gameMode, lastProcessedTurn, pauseAIForTutorial, isTutorialMode]);
+  }, [isAiMode, apiProps, lastProcessedTurn]);
 
   // Update lastProcessedTurn when phase/turn changes (to track phase transitions)
   useEffect(() => {
@@ -3457,7 +2283,7 @@ export const BoardWithAPI: React.FC = () => {
   };
 
   const rightColumnContent = (
-    <RightColumnTutorialSpotlight>
+    <>
       {gameConfig ? (
         <>
           {showHelper && (
@@ -3476,7 +2302,7 @@ export const BoardWithAPI: React.FC = () => {
             className="turn-phase-tracker-right"
             style={snapshotViewActive ? { position: "relative", zIndex: 4001 } : undefined}
           >
-            <TurnPhaseTrackerWithTutorial
+            <TurnPhaseTracker
               currentTurn={apiProps.gameState?.currentTurn ?? 1}
               currentPhase={apiProps.gameState?.phase ?? "move"}
               phases={
@@ -5227,7 +4053,7 @@ export const BoardWithAPI: React.FC = () => {
               </aside>
             )}
             <div className="game-log-with-illustration__log">
-              <GameLogWithTutorialSpotlight
+              <GameLog
                 events={gameLogEventsFiltered}
                 currentTurn={apiProps.gameState?.currentTurn ?? 1}
                 debugMode={settings.showDebug}
@@ -5241,7 +4067,7 @@ export const BoardWithAPI: React.FC = () => {
 
       <div className="unit-status-tables__scroll">
         <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
-          <UnitStatusTablePlayer1WithTutorial
+          <UnitStatusTable
             units={apiProps.gameState?.units ?? []}
             player={1}
             inchesToSubhex={inchesToSubhex}
@@ -5267,7 +4093,7 @@ export const BoardWithAPI: React.FC = () => {
         </ErrorBoundary>
 
         <ErrorBoundary fallback={<div>Failed to load player 2 status</div>}>
-          <UnitStatusTablePlayer2WithTutorial
+          <UnitStatusTable
             units={apiProps.gameState?.units ?? []}
             player={2}
             inchesToSubhex={inchesToSubhex}
@@ -5292,7 +4118,7 @@ export const BoardWithAPI: React.FC = () => {
           />
         </ErrorBoundary>
       </div>
-    </RightColumnTutorialSpotlight>
+    </>
   );
 
   const endlessDutyState = apiProps.endlessDutyState;
@@ -5400,19 +4226,7 @@ export const BoardWithAPI: React.FC = () => {
   };
 
   return (
-    <TutorialProvider
-      isTutorialMode={activeTutorialMode}
-      scenarioType={tutorialScenarioType}
-      guideMode={isModeGuideActive ? modeGuideMode : null}
-      gameState={apiProps.gameState ?? null}
-      startGameWithScenario={apiProps.startGameWithScenario}
-      onPauseAIChange={setPauseAIForTutorial}
-      tutorialPauseAiSyncRef={tutorialPauseAiSyncRef}
-      stopAiAfterPhaseChangeRef={stopAiAfterPhaseChangeRef}
-      onTutorialComplete={isTutorialMode ? handleTutorialComplete : handleModeGuideComplete}
-      onGoToPveMode={handleGoToPveMode}
-    >
-      <TutorialShootOptionsSync getTutorialShootOptionsRef={getTutorialShootOptionsRef} />
+    <>
       <SharedLayout
         rightColumnContent={rightColumnContent}
         onOpenSettings={handleOpenSettings}
@@ -5432,11 +4246,11 @@ export const BoardWithAPI: React.FC = () => {
         {/*
         In test deployment setup, lock gameplay interactions until Start Game! is clicked.
       */}
-        <BoardColumnWithTutorial
-          boardRows={boardConfig?.rows ?? 21}
-          previewElevated={snapshotViewActive}
+        <div
+          className="board-column-overlay-anchor"
+          style={snapshotViewActive ? { position: "relative", zIndex: 4000 } : undefined}
         >
-          <BoardPvpWithTutorialAdvance
+          <BoardPvp
             units={apiProps.units}
             loadEpoch={loadEpoch}
             currentLevel={currentLevel}
@@ -5692,7 +4506,6 @@ export const BoardWithAPI: React.FC = () => {
                     onClick={() => {
                       closeRosterPicker();
                       setTestDeploymentStarted(true);
-                      window.dispatchEvent(new Event("modeGuideStartDeployment"));
                     }}
                   >
                     Start Deployment
@@ -5700,9 +4513,8 @@ export const BoardWithAPI: React.FC = () => {
                 </div>
               </div>
             )}
-        </BoardColumnWithTutorial>
+        </div>
       </SharedLayout>
-      <TutorialOverlayGate />
       {isEndlessDutyInterWave && isEndlessDutyModalOpen && (
         // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — stopPropagation intentionnel
         <div
@@ -6859,8 +5671,6 @@ export const BoardWithAPI: React.FC = () => {
         onToggleRetreatAlert={handleToggleRetreatAlert}
         battleShockTestEnabled={settings.battleShockTestEnabled}
         onToggleBattleShockTest={handleToggleBattleShockTest}
-        modeGuidesActivated={settings.modeGuidesActivated}
-        onToggleModeGuidesActivated={handleToggleModeGuidesActivated}
         deployIconBaseSizeBounded={settings.deployIconBaseSizeBounded}
         onToggleDeployIconBaseSizeBounded={handleToggleDeployIconBaseSizeBounded}
         logShowCoords={settings.logShowCoords}
@@ -6875,6 +5685,6 @@ export const BoardWithAPI: React.FC = () => {
         onSetAutoSaveGranularity={handleSetAutoSaveGranularity}
         onDeleteSaves={handleDeleteSaves}
       />
-    </TutorialProvider>
+    </>
   );
 };

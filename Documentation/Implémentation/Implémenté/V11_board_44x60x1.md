@@ -2,6 +2,8 @@
 
 **Statut :** ✅ IMPLÉMENTÉ (2026-07-27) — plateau, conversion du terrain et des rosters, retrait
 de `25x21`. Le scénario Armageddon tourne à x1 de bout en bout, PvP et PvE de test aussi.
+Résidus fermés le 2026-07-28 : topologies précalculées retirées (§5), mode tutoriel supprimé (§5),
+double définition de la zone d'engagement mesurée sans effet (§2 bis), icônes converties (§2).
 
 **But :** mesurer une TENDANCE d'entraînement (obs, hyperparamètres, santé PPO) en quelques
 heures au lieu de ~60, sans changer de plateau physique. Le modèle produit est jetable : la
@@ -123,11 +125,30 @@ un premier correctif produisait `[1, 1]`, ce qui déplaçait le défaut au lieu 
 4 épisodes sur 10 mouraient à x1 à travers la pile d'entraînement complète (bots inclus), 12 sur 12
 passent après normalisation ; x5 inchangé.
 
-Ce que la normalisation NE traite pas, et qui reste ouvert : les deux définitions concurrentes de
-« dans la zone d'engagement ennemie » (dilatation hex du set `enemy_adjacent_hexes_player_N` d'un
-côté, calcul depuis les socles dans le pool multi-hex de l'autre). À x5 le socle-EZ est plus large
-que la dilatation, donc le pool est plus restrictif et l'invariant tient par chance de géométrie —
-**pas par construction**. Sujet distinct, non traité ici.
+Ce que la normalisation NE traite pas : les deux définitions de « dans la zone d'engagement
+ennemie » restent distinctes — dilatation hex du set `enemy_adjacent_hexes_player_N` d'un côté,
+distance bord-à-bord de socles (`entries_in_engagement_zone`, métrique `engagement` de
+`game_config.json`) dans le pool d'ancre multi-hex de l'autre. Ce n'est PAS un risque
+d'incohérence masque/exécution : le seul site où cette incohérence est fatale
+(`execute_squad_move` → `validate_move_plan`, chemin gym-only) reçoit un masque déjà érodé par
+`erode_move_pool_by_squad_block`, qui rejoue le prédicat de cellule de `validate_move_plan` —
+même helper `build_move_blocked_cells_by_level`, donc même set dilaté — sur TOUTES les figurines
+du bloc. L'inclusion `masque ⊆ exécutable` tient donc par construction (T6-g/T6-h), quoi que le
+pool d'ancre ait filtré en amont ; le prédicat de socle n'y est qu'un filtre supplémentaire, qui
+peut retirer des destinations mais jamais en offrir que la validation refuserait.
+
+Mesuré (2026-07-28), les deux définitions ne divergent nulle part où le moteur peut aller. Dès
+`base_size > 1` (ennemi socle 6, x5, `ez` = 10 subhex) la dilatation est INCLUSE dans la zone de
+socles — 469 cases contre 691, aucune case interdite par la seule dilatation — donc le prédicat
+effectif est le bord-à-bord de socles, conforme à 03.04, et l'érosion ne retranche rien de plus.
+À `base_size == 1` les deux côtés retombent sur la dilatation (chemin `is_single_hex`), donc
+cohérents entre eux ; et à x1, où la normalisation du socle rend ce cas universel, les deux
+ensembles sont IDENTIQUES (19 cases contre 19, différence symétrique vide à `ez` = 2). Le cas
+« socle 1 à x5 », seul à faire diverger dilatation et règle (36 cases trop permissives, 6 trop
+strictes), n'est atteignable par aucun roster : le plus petit `BASE_SIZE` du dépôt vaut 10 (1"),
+soit 5 subhex à x5. Unifier les deux définitions coûterait le cache global
+`enemy_adjacent_hexes_player_N` (O(1), partagé par quatre phases) sans corriger aucun
+comportement observable — non fait, délibérément.
 
 Verrou : `tests/unit/engine/test_socle_normalized_at_x1.py` construit la configuration
 (socle non-rond + ennemi à portée d'EZ) et vérifie qu'aucune destination du pool ne tombe dans la
@@ -178,10 +199,6 @@ une demi-étendue égale au budget d'Advance en subhex, soit ~1,1 pouce par cell
 x5 ; les distances sont normalisées par `inches_to_subhex` et les positions par les dimensions
 du plateau.
 
-**Limite connue** : `services/api_server.py` lit la section `icons` du terrain directement, hors
-du chemin moteur — les icônes ne sont donc pas converties pour un PvP joué sur un plateau
-rescalé. Sans effet à x5 (rapport 1), et purement décoratif.
-
 ---
 
 ## 5. Retrait de `25x21`
@@ -228,23 +245,39 @@ son contenu était **identique** à `Objectives_Control.json` (même `id`, même
 conservé sous `config/primary_objective/44x60/`. À noter, son nom était malformé — pas de point
 avant `json` — donc le glob `*.json` du loader ne l'avait jamais vu.
 
-### Topologies précalculées : non supprimées
+### Topologies précalculées : supprimées (2026-07-28)
 
-`25x21` était le seul board à embarquer des `topology_*.npz`, et
-`scripts/los_topology_builder.py` n'existe plus. Les branches `los_topology`,
-`pathfinding_topology` et `wall_edge_topology` du moteur ne sont donc plus atteintes — mais elles
-ne sont pas mortes par construction : ce sont des mécanismes **génériques**, n'importe quel board
-peut fournir ses `.npz`. Je ne les ai pas retirées : c'est une décision à part, elles touchent le
-chemin LoS chaud, et pour `44x60x1` (2640² en int16 ≈ 14 Mo) la topologie serait au contraire un
-gain — distances exactes en O(1). Signalé dans `Documentation/LOS_TOPOLOGY.md`.
+`25x21` était le seul board à embarquer des `topology_*.npz`, et `scripts/los_topology_builder.py`
+n'existe plus : plus rien ne pouvait alimenter `los_topology`, `pathfinding_topology` ni
+`wall_edge_topology`, dont les branches moteur étaient donc inatteignables. Le mécanisme entier
+est retiré — chargeur `_load_topology_cached` et son cache (`w40k_core`), branches de lecture
+(`observation_builder`, `combat_utils`, `shooting_handlers`), clés exclues du JSON client
+(`api_server`) et clés statiques de snapshot (`game_snapshots`), plus `Documentation/LOS_TOPOLOGY.md`.
+Les chemins à la demande qui servaient déjà (`compute_los_visibility`, `compute_los_state`, BFS de
+`calculate_pathfinding_distance`) sont désormais les seuls, donc zéro changement de comportement.
+`_has_los_from_topology` est renommé `_has_los_on_demand` : son nom disait le contraire de ce
+qu'il faisait.
 
-### Non traité : les scénarios de tutoriel
+### Les scénarios de tutoriel : mode supprimé (2026-07-28)
 
-`config/tutorial/scenario_etape*.json` ne se chargent pas — ils ne déclarent pas de `board_ref` et
-ne sont pas dans un dossier `config/board/<board>/scenario/`, donc leur `wall_ref` n'est pas
-résoluble (contrainte V11 T4). **Ce défaut est antérieur à ce chantier** et sans rapport avec le
-retrait de `25x21` ; leurs murs ont été conservés. `Documentation/Old/Tutorial.md` porte un
-bandeau qui le consigne.
+`config/tutorial/scenario_etape*.json` ne se chargeaient plus — pas de `board_ref` et hors d'un
+dossier `config/board/<board>/scenario/`, donc `wall_ref` non résoluble (contrainte V11 T4), défaut
+antérieur à ce chantier. Le mode tutoriel étant obsolète, il a été retiré en entier plutôt que
+réparé : `config/tutorial/`, les crochets moteur (`tutorial_fight_no_death_unit_ids`, script P2 de
+`pve_controller`, clés `_tutorial_force_*`), le mode `tutorial` de l'API et son endpoint
+`/api/auth/tutorial-complete`, la colonne `users.tutorial_completed` et la redirection de premier
+login, et côté front `TutorialProvider` / `TutorialOverlay` / `tutorialUiRules` /
+`tutorialScenarioRuntime` avec tous leurs points d'accroche (BoardWithAPI, BoardPvp,
+UnitStatusTable, GameLog, TurnPhaseTracker, SharedLayout, Routes).
+
+Les **guides de mode** (popups d'intro PvE/PvP, réglage Settings › Guides) partaient de la même
+infrastructure : ils sont supprimés avec elle, décision explicite de l'utilisateur — sans quoi
+l'overlay entier devait être conservé pour eux seuls. `tutorial_walls-01.json` reste dans
+`config/board/44x60x1/walls/`. `Documentation/Old/Tutorial.md` garde la spec, avec un bandeau
+disant que la fonctionnalité n'existe plus.
+
+Vérifié après retrait : `tsc` et `biome` verts sur le front, `pyright` vert sur les fichiers
+moteur/API touchés, `scripts/pvp_smoke_test.py` à **27 PASS / 0 FAIL**.
 
 
 ---

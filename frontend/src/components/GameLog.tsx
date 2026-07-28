@@ -176,13 +176,6 @@ export interface GameLogEvent extends BaseLogEntry {
   ruleHintByLabel?: Record<string, string>;
 }
 /** Rect viewport pour halo tutoriel (dernière ligne du log). */
-export type GameLogLastEntryRect = {
-  shape: "rect";
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-};
 
 interface GameLogProps {
   events: GameLogEvent[];
@@ -195,12 +188,6 @@ interface GameLogProps {
   logShowCoords?: boolean;
   /** Game Log : afficher le type d'unité dans les lignes tir/combat. */
   logShowType?: boolean;
-  /** Tutoriel 2-1 : rapporter le rect de la dernière ligne (la plus récente) pour halo. */
-  onLastEntryRect?: (rect: GameLogLastEntryRect | null) => void;
-  /** Tutoriel 2-1 : rapporter le rect du titre (header) du Game Log pour halo. */
-  onHeaderRect?: (rect: GameLogLastEntryRect | null) => void;
-  /** Tutoriel : rapporter les rects des 2 lignes supérieures (entrées les plus récentes). */
-  onTopTwoEntriesRects?: (rects: GameLogLastEntryRect[]) => void;
 }
 
 export const GameLog: React.FC<GameLogProps> = ({
@@ -210,14 +197,8 @@ export const GameLog: React.FC<GameLogProps> = ({
   debugMode = false,
   logShowCoords = false,
   logShowType = true,
-  onLastEntryRect,
-  onHeaderRect,
-  onTopTwoEntriesRects,
 }) => {
   const eventsContainerRef = React.useRef<HTMLDivElement>(null);
-  const lastEntryRef = React.useRef<HTMLDivElement>(null);
-  const headerRef = React.useRef<HTMLDivElement>(null);
-  const topEntryRefs = React.useRef<Array<HTMLDivElement | null>>([]);
   const [expandedEntries, setExpandedEntries] = React.useState<Set<string>>(new Set());
 
   const toggleExpanded = React.useCallback((id: string) => {
@@ -231,20 +212,6 @@ export const GameLog: React.FC<GameLogProps> = ({
       return next;
     });
   }, []);
-  const [_gameLogScrollTick, setGameLogScrollTick] = React.useState(0);
-
-  React.useLayoutEffect(() => {
-    const el = eventsContainerRef.current;
-    if (!el) return;
-    if (!onLastEntryRect && !onHeaderRect && !onTopTwoEntriesRects) return;
-    const onContainerScroll = () => {
-      setGameLogScrollTick((n) => n + 1);
-    };
-    el.addEventListener("scroll", onContainerScroll, { passive: true });
-    return () => {
-      el.removeEventListener("scroll", onContainerScroll);
-    };
-  }, [onLastEntryRect, onHeaderRect, onTopTwoEntriesRects]);
   const ruleDescriptionByLookup = React.useMemo(() => {
     const descriptions = new Map<string, string>();
 
@@ -396,7 +363,6 @@ export const GameLog: React.FC<GameLogProps> = ({
 
   // Display all events (newest first) - sort by timestamp descending, no limit
   const displayedEvents = [...events].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-  topEntryRefs.current = [];
 
   // Keep newest entry visible when new events arrive
   React.useEffect(() => {
@@ -405,66 +371,9 @@ export const GameLog: React.FC<GameLogProps> = ({
     }
   }, []);
 
-  // Tutoriel : rapporter les rects pour les halos. lastEntryRef = 1re entrée (index 0 = plus récente, en haut).
-  // Le parent utilise "Header" pour la ligne du HAUT en 1-25 : on envoie donc la 1re ligne (lastEntryRef) vers onHeaderRect.
-  React.useLayoutEffect(() => {
-    if (!onLastEntryRect) return;
-    if (!headerRef.current) {
-      onLastEntryRect(null);
-      return;
-    }
-    const rect = headerRef.current.getBoundingClientRect();
-    onLastEntryRect({
-      shape: "rect",
-      left: rect.left,
-      top: rect.top,
-      width: rect.width,
-      height: rect.height,
-    });
-    return () => onLastEntryRect(null);
-  }, [onLastEntryRect]);
-
-  React.useLayoutEffect(() => {
-    if (!onHeaderRect) return;
-    if (!lastEntryRef.current || displayedEvents.length === 0) {
-      onHeaderRect(null);
-      return;
-    }
-    const rect = lastEntryRef.current.getBoundingClientRect();
-    onHeaderRect({
-      shape: "rect",
-      left: rect.left,
-      top: rect.top,
-      width: rect.width,
-      height: rect.height,
-    });
-    return () => onHeaderRect(null);
-  }, [onHeaderRect, displayedEvents.length]);
-
-  React.useLayoutEffect(() => {
-    if (!onTopTwoEntriesRects) return;
-    const topEntryCount = Math.min(2, displayedEvents.length);
-    const topTwo = topEntryRefs.current
-      .slice(0, topEntryCount)
-      .filter((node): node is HTMLDivElement => node != null)
-      .map((node) => {
-        const rect = node.getBoundingClientRect();
-        return {
-          shape: "rect" as const,
-          left: rect.left,
-          top: rect.top,
-          width: rect.width,
-          height: rect.height,
-        };
-      });
-    onTopTwoEntriesRects(topTwo);
-    return () => onTopTwoEntriesRects([]);
-  }, [onTopTwoEntriesRects, displayedEvents.length]);
-
   return (
     <div className="game-log">
       <div
-        ref={headerRef}
         className="game-log__header"
         style={{
           backgroundColor: "#059669",
@@ -505,7 +414,7 @@ export const GameLog: React.FC<GameLogProps> = ({
               overflow: "auto",
             }}
           >
-            {displayedEvents.map((event, index) => {
+            {displayedEvents.map((event) => {
               // Check if this is a wait/skip action
               // Multiple detection methods:
               // 1. Check action_name field
@@ -538,14 +447,6 @@ export const GameLog: React.FC<GameLogProps> = ({
               return (
                 <div
                   key={event.id}
-                  ref={(node) => {
-                    if (index === 0) {
-                      lastEntryRef.current = node;
-                    }
-                    if (index < 2) {
-                      topEntryRefs.current[index] = node;
-                    }
-                  }}
                   className={`game-log-entry ${getEventTypeClass(event)} ${waitClass} ${objectiveControlClass}`}
                 >
                   <div className="game-log-entry__single-line">

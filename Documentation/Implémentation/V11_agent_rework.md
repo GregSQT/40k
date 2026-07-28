@@ -25,22 +25,22 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 > [`engine/observation_builder.py`](../../engine/observation_builder.py) pour le layout.
 >
 > **Conception et journal** : [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)
-> (encodeur partagé, tête pointeur, cardinalités) · [`V11_audit_observation.md`](V11_audit_observation.md)
+> (encodeur partagé, tête pointeur, cardinalités) · [`V11_audit_observation.md`](Implémenté/V11_audit_observation.md)
 > (audit d'origine) · **§9.2.5** et **§0.31** de ce document (ce qui est observé, et pourquoi).
 
 ---
 
-## 0. ÉTAT AU 2026-07-22 — À LIRE EN PREMIER
+## 0. ÉTAT AU 2026-07-28 — À LIRE EN PREMIER
 
 > **Cette section ne contient QUE ce qui est ouvert et actionnable.**
-> - Ce qui est résolu est en **§0hist — Historique résolu** : entrées intégrales, ancres
->   `### 0.x` inchangées, aucune preuve condensée.
+> - Ce qui est résolu est en **§0hist — Historique résolu**, **en fin de document, après §10** :
+>   entrées intégrales, ancres `### 0.x` inchangées, aucune preuve condensée.
 > - Les avertissements et leçons de méthode durables sont regroupés en **§0bis — Pièges et
 >   leçons de méthode**, qui en est la **copie canonique**.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.38` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.37` le 2026-07-28).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.39` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.38` le 2026-07-28).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -50,44 +50,3350 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 
 ### Tableau d'état — ce qui est ouvert
 
-| # | Entrée | Nature | Ordre proposé | Pourquoi cet ordre |
-|---|---|---|---|---|
-| **§0.14** | Re-mesure du run | 🟠 **DÉBLOQUÉ (2026-07-26)** — §0.27 corrigé + §9.2.5 livré ; run `--new` à lancer | **1** | 🟠 **MAJ 2026-07-22.** Run `x5_new` (10k ép., 48 envs) lancé sur moteur+analyzer désormais fiables (§0.23–§0.26). **Le training a atteint l'épisode 2000 sans un seul crash** (le fix move §0.25/§0.26 tient), MAIS le garde-fou d'éval a **arrêté le run au 1er checkpoint** : 500 ép. d'éval « failed » sur **timeout de task** (cf. **§0.27**). Aucun win-rate produit. Prérequis levés depuis le 2026-07-21 : dépendance perf §0.22 non bloquante (le run tourne), analyzer fiabilisé (§0.24). **MAJ 2026-07-26 : §0.27 est CORRIGÉ, §9.2.5 est LIVRÉ, et §0.30 (T-A→T-F) est LIVRÉ — plus aucun prérequis technique ni fonctionnel.** Le prochain run doit être un `--new` : `obs_size` 199 → 1011 → **20626** (tenseurs d'entités ; +objectifs situés, +13 bits de règles d'unité, +couvert/visibilité par slot ennemi — §0.31 ; +bit `present` par figurine, +phase en one-hot — §0.32). **MAJ 2026-07-28 — cadence d'éval du profil `x1` : `bot_eval_freq` 2000 → 4000, `bot_eval_intermediate` GARDÉ à 100.** Dérivé de deux contraintes du callback, pas réglé au jugé : (a) `eval_marker >= save_best_min_episodes` (=10 000) — [`training_callbacks.py:2174`](../../ai/training_callbacks.py#L2174) — donc **toute éval avant l'épisode 10 000 ne peut sauvegarder aucun modèle**, et à 2000 il y en avait 4, les plus lentes (modèle dégénéré, c'est l'éval de l'ép. 2000 qui a explosé le timeout en §0.27) ; (b) `robust_window = 5` (`deque(maxlen=5)`, [`:1677`](../../ai/training_callbacks.py#L1677)) exige **5 évals APRÈS** 10 000 pour que le score robuste ait une fenêtre pleine. Sur 30 000 épisodes, 4000 donne exactement 5 évals utiles (12k→28k) et ne gaspille que 2 évals précoces. ⚠️ **Baisser `bot_eval_intermediate` à 20 a été proposé puis RETIRÉ** : 20 ép./bot = **±11 points** d'erreur-type sur le win-rate, injectés dans `save_best_robust` — on aurait payé du temps avec du hasard sur le critère qui décide quel modèle est gardé. |
-| ~~**§0.27**~~ | Blocage éval au checkpoint | ✅ **CORRIGÉ (2026-07-26)** — timeout≠crash + éval intermédiaire 100→20 (7 tests, mutation) | — | À l'éval intermédiaire (`bot_eval_intermediate=100` ép./bot × 5 bots = 500), **un task a dépassé le timeout de 1 h** (`bot_eval_task_timeout_seconds=3600`, durée mesurée 3675 s) → pool avorté, 500 ép. marqués `failed` → `RuntimeError` strict (§0.7). **Diagnostic (mesuré, PAS un hang) :** le cap `max_turns×400=2000` pas/épisode existe (aucun hang infini possible) ; le modèle à 2000 ép. (à peine entraîné) produit des **parties dégénérées** atteignant ce cap, et le **coût par-pas du fix géodésique §0.25** (l'érosion « load-bearing » = le coût §0.22) rend ces épisodes trop longs. Sonde : **0 ép. d'éval terminé en 2 min** sur le modèle courant (vs 17 s/ép sur un autre modèle). Fix approuvé (utilisateur) : (1) distinguer timeout vs crash dans le garde-fou (ne pas hard-stop sur lenteur, run résilient) + (2) réduire l'éval intermédiaire (100→~20), `bot_eval_final=100` gardé. **DIFFÉRÉ** : le win-rate est repoussé tant que la conformité tir (§0.28) n'est pas verrouillée. |
-| **§0.28** | Conformité tir obscuring (13.10) — soupçon | ✅ **RÉFUTÉ (2026-07-22)** — AUCUN bug, mesuré in-engine sur le vrai gate | — | Suspicion utilisateur (tir « à travers terrain » en replay) **investiguée à fond puis RÉFUTÉE**. Le vrai gate de tir gym = `build_squad_action_mask` (branche shoot, `shared_utils.py:8170`) → `_model_can_shoot_target` (`:4722`) → `_attacker_model_can_reach_squad` (`:4515`) → `_compute_visibility_with_obscuring` : **par-figurine, footprint COMPLET, obscuring-aware (13.10)**. Audit LIVE inséré au `return True` du gate : **297 tirs approuvés, 0 sans ligne socle→socle évitant l'obscuring** (`GATE_BUG=0`, `obscuring_clear_line=False=0`). Le « tir à travers terrain » = **peek légal par-figurine** (06.01 : un bord de socle voit là où le centre est masqué). ⚠️ Mes « 10 tirs illégaux confirmés » puis « 3 sur données fraîches » étaient TOUS des **FAUX POSITIFS** : scan offline centre-à-centre + reconstructions non fidèles (positions/arme/état). Détail méthode → §0bis. Fixture d'audit obscuring (cas net, bloque correctement) : commité. |
-| **§0.24** | Analyzer réaligné per-figurine | 🟢 **RÉSOLU (2026-07-22)** ; résiduel FP documenté | — | Détail intégral → **§0hist §0.24**. Résiduel non bloquant : suivi HP/mort de la **cible** pas encore per-figurine → **FP « Fight a dead unit »** (174 sur log réf, **prouvé FP** : Unit 104 tracée vivante) + off-by-1 fight/advance. |
-| ~~**§0.23**~~ | Logger per-figurine `[MODELS:]` + `PNone` | ✅ **CLOS (2026-07-22)** | — | Détail → **§0hist §0.23**. |
-| ~~**§0.25**~~ | Bug moteur : budget move per-fig en ligne droite | ✅ **CORRIGÉ (2026-07-22)** — géodésique | — | Détail → **§0hist §0.25**. Conséquence perf → **§0.27**. |
-| ~~**§0.26**~~ | Régression cache masque (clé `_unit_move_version` contournée) | ✅ **CORRIGÉ (2026-07-22)** — clé fingerprint | — | Détail → **§0hist §0.26**. |
-| **§0.29** | Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum | 🟢 **MÉCANIQUE LIVRÉE + VALIDÉE IN-ENGINE (2026-07-22)** ; reste USAGE+MESURE (cf. « Suite » §0.29 ; win-rate rejoint §0.14, **débloqué le 2026-07-26**) | 4 | Scénario `scenario_fixed_brawl_sm_orks.json` (terrain **`terrain-mc1.json`**, 36 figurines, compositions réelles des rosters training SM+Orks) où **le champ `deployment_type` bascule** placement manuel ↔ déploiement (`"fixed"` = positions `col/row`, aucun déploiement ; `"active"` = phase de déploiement). Positions par défaut dans les bandes **dégagées de mc1** (rows 90-105 / 195-210, éditables). **+ scheduler `deployment_mode_schedule`** (opt-in) : proportion `active` **croissante par épisode** au fil du training (rampe linéaire, miroir de `deployment_random_mix`, orthogonal à lui). **+ emplacements `top`/`bottom` par figurine DANS les 4 rosters** (P1=top, P2=bottom ; siège+rotation aléatoires conservés) → le mode strict marche sur le vrai chemin roster. 3 verrous verts sur le VRAI moteur : `test_fixed_brawl_deploy_modes.py` (bascule units[]) + `test_deployment_mode_schedule.py` (bornes 0/1 + rampe) + `test_roster_fixed_positions.py` (rosters top/bottom, rotation réelle). Détail → **§0.29** ci-dessous. |
-| **§0.30** | Encodeur d'entités partagé + tête pointeur (et 6 trous trouvés le 2026-07-26) | 🟢 **LIVRÉ (2026-07-26)** — T-A→T-F faits ; ne bloque plus §0.14 | **1** | Vérification demandée par l'utilisateur après §9.2.5. **6 trous trouvés**, dont : une escouade ennemie **invisible ET intirable** dans 6 épisodes sur 10 (5 slots figés pour 6 escouades mesurées) ; le gym ignore les types de tir **10.05 / 10.06** ; au tir le gym déclare **une seule arme (index 0), une seule cible** — violation de **04.01** et **04.02** ; l'heuristique d'arme de mêlée a été **périmée par P1** (ignore ANTI-X, DEVASTATING, MELTA…). Décisions actées : renommage `PISTOL` → `CLOSE_QUARTERS`, encodeur d'entité **partagé** (unités+armes, amies+ennemies), **K=20 unités / K=10 armes**, **tête pointeur** pour le ciblage, retrain accepté. **TOUT est livré le 2026-07-26** (T-A→T-F + §1.9 + audit final) : `obs_size` 199 → **20166** *(valeur du 2026-07-26 ; état courant **20545**, cf. §0.31)*, espace d'action 1047 → **1062**. Résidu **§1.9** (volet MONSTER/VEHICLE de 10.06 côté PvP/mono) **refermé le 2026-07-26** après validation PvP de T-C par l'utilisateur — plus aucun résidu ouvert. Détail complet, mesures et journal → **[`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)**. |
-| **§0.31** | Complétude de l'observation (objectifs situés, règles d'unité) + cache des profils d'armes | 🟢 **LIVRÉ (2026-07-27)** — 3 commits, 13 tests + mutations | **1** | Audit demandé par l'utilisateur (« l'obs est-elle complète, branchée, optimale ? »). Branchement **intact**. **2 trous fermés** : (1) les objectifs n'avaient **aucune position** — mesuré, **1 à 2 sur 5** tombaient dans la fenêtre de grille alors que 15 actions de zone les désignent (`ab9baa56`) ; (2) les **règles d'unité** étaient invisibles du pipeline squad, 13 bits d'effet par entité, extinction 19.04 verrouillée (`0fb94a01`). **Perf** : profils d'armes mémoïsés, `build_squad_observation` **2,86 → 1,69 ms** (`7a84e124`). **K larges GARDÉS** (arbitrage utilisateur, généralisation future) — coût mesuré : **0 paramètre**, **0 ms de construction**, 1,39× sur le forward. `obs_size` **20166 → 20601** ⇒ le run §0.14 doit être un `--new` postérieur à ces commits. Détail → **§0.31**. |
-| **§0.32** | Optimalité de l'obs ET de la TÊTE d'action — audit du 2026-07-28 | 🟢 **LIVRÉ (2026-07-28)** — les 6 constats sont fermés : **lot obs T-H/T-I/T-J** (`deab7e03`, 13 tests + mutations, `obs_size` 20601 → **20626**), **lot canaux T-K/T-L** (`GRID_CHANNELS` 7 → **9**, 11 tests + mutations, **0 appel de pool supplémentaire mesuré**, `obs_size` inchangé), **tête T-G** (`b78be588`, 14 tests + 4 mutations, **+0,76 % de paramètres**, **×1,78 sur le forward**) | — | Question de l'utilisateur : « mon obs est-elle optimale ? ». ⚠️ **Une 1re version de cette entrée affirmait « aucun manque de contenu, seulement la forme et l'aval » — FAUX et retiré le 2026-07-28** : la GRILLE a deux manques de contenu, **T-K** (le coût géodésique par cellule, déjà calculé pour le masque puis jeté — c'est lui qui arbitre normal vs advance, donc le tir et la charge) et **T-L** (l'escouade ACTIVE est peinte dans le canal allié, indistinguable des autres escouades amies sur une grille pourtant égocentrique). Ordre corrigé : lot obs (T-H/T-I/T-J) → canaux (T-K/T-L) → tête (T-G), parce que les canaux changent `GRID_CHANNELS`, donc l'entrée du CNN. **T-G (majeur, LIVRÉ)** : les 1024 logits de cellule de move sortaient d'un `Linear` dense et la carte CNN était aplatie avant la tête — **le défaut exact que la tête pointeur avait corrigé pour 20 slots de tir, laissé sur 97 % de l'espace d'action**. Ils sortent désormais d'une **conv 1×1** par cellule, sur une carte conservée à 32×32, avec **canaux positionnels** et **conditionnement par le tronc** (les deux ajouts de l'amendement, sans lesquels le 1×1 serait PLUS FAIBLE que la tête dense). ⚠️ **Le gain de sample-efficiency n'est PAS mesuré** — il demande un run ; le coût, lui, l'est (×1,78 sur le forward). **T-H** : une figurine sur le centroïde et non engagée a sa ligne `self_models_*` entièrement nulle ⇒ le masque de présence déduit par `abs().sum() > 0` la compte **absente**. **T-I** : `col_rel`/`row_rel` sont en coordonnées **offset brutes** alors que la grille et les directions d'objectif travaillent dans la projection `_hex_center`. **T-J** : `deployment` et `command` partagent la valeur `phase = 0.0`, et le décodage a un `.get(…, 0.0)`. Détail, mesures et périmètre → **§0.32**. |
-| **§0.37** | Contre-audit des livraisons §0.32–§0.35 + fermeture des résidus | ✅ **LIVRÉ (2026-07-28)** — 5 audits parallèles, ~30 tests ajoutés, familles touchées vertes | — | Audit demandé par l'utilisateur (« ce qu'a fait l'autre session est-il optimal ? »). **Le fond est confirmé partout** (chiffres exacts, root causes réelles, T-G vérifié jusqu'au comptage de paramètres à l'unité) — mais 6 résidus réels, TOUS fermés : (1) **l'érosion re-dupliquait la formule de la frontière** au lieu de lire `squad_normal_move_frontier_subhex` — la « source unique » de §0.34 ne l'était que pour 3 consommateurs sur 4 ; (2) **la charge depuis un étage** avait les deux facettes de §0.34 encore ouvertes (budget au jet BRUT sans descente 13.06, plan 3-uplets → fig marquée à l'étage sur une case de sol → `floor_height_at` lève) — pile-in/conso VÉRIFIÉS déjà conformes (4-uplets par-figurine, champ multi-niveaux) ; (3) **fallbacks VecNormalize silencieux** : obs Box brute si pkl absent, `--step` recréait des stats neuves muettes, PvE jouait brut sous `except Exception`, écriture du snapshot async sous `except: pass` — tous stricts désormais, pkl LEGACY partagé détecté = erreur ; (4) **3 replis de la famille T-J survivaient** dans `observation_builder.py` (`phase` de la grille, centroïde → l'ANCRE T-I, `HP_CUR`) ; (5) **canal T-K faux pour une escouade engagée** (coûts ≤ 0,5 = « je garde mon tir » alors que tout move est un Fall Back) → encodée au-dessus du seuil, sémantique uniforme ; (6) **le canal `vec_model_path` séparé a été SUPPRIMÉ** (les workers dérivent les stats du zip qu'ils chargent — divergence irreprésentable), verrou textuel `inspect.getsource` remplacé par un test comportemental, code mort `_build_eval_obs_normalizer` supprimé, fuite tempfile fermée. Détail → §0.37. |
-| **§0.36** | `--new` héritait du **seuil de score** du run précédent, et écrasait l'agent | ✅ **CORRIGÉ (2026-07-28)** — archivage horodaté, 5 tests | — | `model_<agent>_robust_meta.json` n'est pas une trace mais un **SEUIL** ([`training_callbacks.py:2262`](../../ai/training_callbacks.py#L2262)) : le modèle canonique n'est mis à jour que si le nouveau score robuste le dépasse. Un run `--new` héritait donc du score d'un run précédent — constaté : `0.457372`, venu du run mort au marqueur 24 000 (§0.35). En prime, `model_<agent>.zip` et `best_model.zip` étaient **écrasés** sans trace. À `--new`, les artefacts à **nom fixe** sont désormais renommés `<stem>_<AAAAMMJJ-HHMM><ext>` ; les modèles nommés avec leur **score** et les checkpoints ne bougent pas (nom unique = historique). Détail → §0.36. |
-| **§0.35** | Stats VecNormalize **partagées par dossier** — run de 5 h 30 tué à 24 000/30 000 | ✅ **CORRIGÉ (2026-07-28)** — chemin PAR MODÈLE, 3 tests | — | `get_vec_normalize_path()` ignorait le nom du modèle et renvoyait toujours `<dir>/vec_normalize.pkl`. L'évaluation étant **asynchrone**, la consommation du résultat de l'éval PRÉCÉDENTE (`_remove_model_artifacts` : rotation du meilleur robuste, nettoyage du snapshot) supprimait le pkl que les workers de l'éval EN COURS chargent **paresseusement** au premier pas. Au marqueur 24 000 : **600/600 épisodes en erreur en 7 s**, garde-fou strict, run arrêté. ⚠️ Ce n'est PAS §0.27 (timeout) ni le moteur : **24 000 épisodes sans une seule exception moteur**. ⚠️ Le `robust=0.4574` sauvegardé à 20 000 est à **re-mesurer, pas à citer** : rien ne prouve que le pkl chargé était celui de ce modèle (`global_cont` fait 11 dims avant comme après §0.31/§0.32, donc un résidu se charge sans lever). Détail → §0.35. |
-| **§0.34** | `incohérence masque/exécution` sur les escouades qui DESCENDENT d'un étage (§13.06) | ✅ **CORRIGÉ (2026-07-28)** — 10 tests + 4 mutations rouges, `43 → 0` sur les mêmes 650 pas | — | Sorti de la note « hors périmètre » de §0.32. **Root cause : la frontière normal/advance était calculée sur le `MOVE` BRUT** alors que le pool ET l'exécution appliquent `M − coût de descente` — les cellules de la bande `(M − d, M]` étaient classées `normal` puis rejetées à l'exécution. Deux facettes de la même moitié d'implémentation : le plan rigide ne portait **pas de niveau d'arrivée** (figurine descendue restée marquée à l'étage → `floor_height_at`), et la mesure FLY sous métrique hex utilisait un champ **euclidien** contre une borne **cube**. ⚠️ **La piste « mono-figurine » de §0.32 était le symptôme, pas la cause** : l'érosion rattrapait la bande morte pour les escouades multi-fig en **supprimant des Advances légaux**, et ne la rattrapait pas pour les mono → crash. ⚠️ **Ce bug ne bloquait PAS le run §0.14** : mesuré à **0 occurrence** sur le scénario d'entraînement (x1 et x5) ; les 43/650 venaient de `scenario_pvp_test`, seul scénario avec une escouade à `level: 1`. Motif §0.18/§0.26. Détail → §0.34. |
-| **§0.33** | Rollout buffer = **46,9 Go** pour **39 Go de RAM** sur les profils à 48 envs | 🟠 **NE BLOQUE PAS le run lancé** (`--training-config x1` = 8 envs = 7,8 Go) ; bloque `x5_append` / `x1_debug`. **Arbitrage 2026-07-28 : aucun changement de config** | — (rouvrir avant tout run à 48 envs) | Le dimensionnement RAM de `move_action_space_spatial_rework.md` §8.3 ne compte que la GRILLE (14,49 Go à 9 canaux, « sous la limite »). Depuis §0.30/§0.31 le **vecteur pèse plus lourd que la grille** (20 626 contre 9 216 floats) et vit dans le même `DictRolloutBuffer`, alloué **d'un bloc au premier `learn()`**. Mesuré sur la config réelle : **116,6 Ko par transition** ⇒ `x5_append` et `x1_debug` (`n_envs=48 × n_steps=8192` = 393 216 transitions) = **46,9 Go**, contre **39 Go physiques / 29 Go disponibles** — l'allocation échoue avant le premier pas. `x1`, `x5_new` et `x5_debug` (`n_envs=8`) = **7,8 Go**, qui passent. ⚠️ **La ligne §0.14 dit « run x5_new, 48 envs » alors que le profil `x5_new` porte `n_envs=8`** : vérifier quel profil et quel override sont réellement lancés AVANT de relancer. ⚠️ La proposition « `n_steps` 8192 → 1024 » a été formulée puis **retirée** : le nombre de pas de gradient ne dépend pas de `n_steps`, et les ablations CoreAgent (30k ép., 48 envs) donnent 8192 pour **inférieur** à 16384. Détail et leviers réels → §0.33. |
-| ~~**§0.22**~~ | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **CLOS le 2026-07-21 — décision (B) STOP à L1+L_bbox** | — | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) livrés et commités** (`ff2293e0`, `6f268d38`) — gain ovale **1,49×**, round10 1,78×, pool strictement identique ; A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. **Reliquat NON poursuivi** (ratio gain/risque mauvais, mesuré) : BFS wavefront réfuté (plus lent à move 12), L2b runs NumPy réfuté (1,1× net + complexité), numba écarté (risque segfault sur run 36 h). ⚠️ **MAJ 2026-07-22 : ce coût perf est désormais INCONTOURNABLE** — le fix de conformité move §0.25 REQUIERT une érosion géodésique par-figurine, exactement le coût que §0.22 combattait. Il refait surface en §0.27. Détail complet → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§10, §11) ; leçon de méthode → §0bis. |
+**Épuration du 2026-07-28** : les entrées **§0.22, §0.27, §0.28, §0.31, §0.32, §0.34, §0.35, §0.36,
+§0.37** ont été descendues en **§0hist** (intégrales, ancres inchangées) — elles étaient closes mais
+occupaient encore la section « ouvert ». Ne restent ici que les **cinq** chantiers réellement
+actionnables.
 
-**MAJ 2026-07-26 : §0.27 est CORRIGÉ et §9.2.5 (observation des règles d'armes) est LIVRÉ.**
-**§0.31 est LIVRÉ (2026-07-27)** : objectifs situés + règles d'unité visibles + cache des
-profils d'armes, couvert/visibilite exacts par slot ennemi ; `obs_size` **20626** (§0.32 T-H/T-J), tout run antérieur est incompatible.
-**§0.30 est LIVRÉ (T-A→T-F, 2026-07-26)** : le blocage qu'il posait au run long est levé —
-l'escouade ennemie invisible et intirable, les types de tir 10.05/10.06 absents et les
-violations 04.01/04.02 au tir sont corrigés et verrouillés. Le run reste un **`--new`**
-(`obs_size` 199 → **20626** depuis §0.32 T-H/T-J, 2026-07-28).
-**§0.28 (conformité tir obscuring) est RÉFUTÉ — aucun bug (mesuré in-engine).**
-La nuit du 2026-07-21→22 a livré §0.23–§0.26 (logger+analyzer per-figurine, bug moteur move + régression cache),
-qui **débloquent la mesurabilité** (analyzer fiable) mais font émerger §0.27 (coût géodésique en éval).
-**§0.22 est CLOS** mais son coût est réactivé par §0.25 (cf. la MAJ dans sa ligne). (Les dépendances
-historiques §0.12 → §0.14 et §0.18 → §0.14 sont **levées** : §0.12 et §0.18 sont livrés.) Les entrées
-résolues §0.15–§0.19, §0.21, **§0.22**, **§0.23**, **§0.24**, **§0.25**, **§0.26** sont **descendues en
-§0hist** (§0.16 aussi en §0ter pour ses notes post-implémentation).
+| # | Entrée | Statut | Ordre | Prochaine action concrète |
+|---|---|---|---|---|
+| **§0.14** | Re-mesure du run — win-rate par matchup | 🟠 **DÉBLOQUÉ** — aucun prérequis technique restant | **1** | Lancer le run `--new` (`obs_size` **20626**, vérifié dans le code le 2026-07-28 : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` == la valeur des 5 profils de config). ⚠️ Lire d'abord §0.33 (choix du profil) et l'alerte de divergence de config ci-dessous. |
+| **§9** | Phase A' — **P2 → P5** (mécanisme de décision agent) | 🔴 **0/4** — vérifié le 2026-07-28 | **2** | Le plus gros reste fonctionnel du document. Grep `pending_agent_decision` / `CHOICE_[0-9]` sur `engine/`+`ai/` = **0** ; `TOTAL_ACTION_SIZE` vaut toujours `BASE_ZONE_INTENT + MAX_OBJECTIVES*3` = **1062**, pas le `41+K` prévu ; la pseudo-décision aléatoire `raw_action_int % len(options)` est toujours vive ([w40k_core.py:2644](../../engine/w40k_core.py#L2644)). Détail → §9.0 (dont la ligne **P1 est périmée**, cf. §0.38). |
+| **§0.38** | Code mort `_attack_sequence_rng` non supprimé — 2ᵉ moitié de P1 | 🟠 **OUVERT** (constaté 2026-07-28) | **3** | P1 prévoyait « porter les règles vers le vif **PUIS supprimer le mort** ». Le portage est fait ; la suppression **non**. Détail → §0.38. |
+| **§0.33** | Rollout buffer 46,9 Go pour 39 Go de RAM | 🟠 **CONDITIONNEL** — ne bloque que les profils à 48 envs | **4** (avant tout run 48 envs) | Vérifié 2026-07-28 dans la config : `x1`/`x5_new`/`x5_debug` = **8 envs** (passent) ; `x5_append`/`x1_debug` = **48 envs** (échouent à l'allocation). Ne pas lancer ces deux-là sans rouvrir l'entrée. |
+| **§0.29** | Scénario SM vs Orks fixed/active + scheduler | 🟢 Mécanique livrée et validée in-engine ; **reste USAGE + MESURE** | 5 | La mesure rejoint §0.14 : c'est le même run qui la produit. |
+| **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ §9.0). T2→T5 **jamais revérifiés** : ne pas s'appuyer sur leurs ✅ sans relecture. ⚠️ Sa **section** est restée en §0hist (elle y était déjà avant l'épuration) alors que sa part T2→T5 est ouverte — laissée en place plutôt que scindée, pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
+
+🔴 **ALERTE — divergence entre le dépôt et le répertoire de travail (constatée le 2026-07-28,
+NON corrigée : c'est un arbitrage utilisateur, pas une erreur à réparer d'office).**
+`config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` est **modifié non commité**, et
+la modification **annule** la décision documentée en §0.14 :
+
+| Clé (profil `x1`) | HEAD (commité, = la décision §0.14) | Répertoire de travail |
+|---|---|---|
+| `bot_eval_freq` | **4000** | **2000** |
+
+Les deux autres écarts du même fichier vont dans l'autre sens (les `justification` d'`obs_size` y sont
+mises à jour de « grille 32x32x7 » vers « 32x32x9 », ce qui **corrige** un texte périmé par §0.32 T-K/T-L).
+**Avant de lancer le run §0.14, trancher `bot_eval_freq` puis committer** — sinon le run tourne avec une
+cadence d'éval que le document contredit. Rappel du raisonnement §0.14 : à 2000, sur 30 000 épisodes,
+**4 évals tombent avant `save_best_min_episodes` (10 000) et ne peuvent sauvegarder aucun modèle**.
 
 ⚠️ **Avant de vous appuyer sur une affirmation de ce document, lire §0bis** — en particulier la
-réserve de méthode sur le document lui-même (T1→T5 et section 9 n'ont **pas** été revérifiés
+réserve de méthode sur le document lui-même (T2→T5 et section 9 n'ont **pas** été revérifiés
 ligne à ligne) et la règle de périmètre `ArmageddonAgent`.
+
+### 0.38 Code mort `_attack_sequence_rng` — la 2ᵉ moitié de P1 n'a jamais été faite — 🟠 OUVERT (2026-07-28)
+
+**Ce qui est FAIT (vérifié le 2026-07-28, corrige la ligne P1 de §9.0 qui datait du 2026-07-24).**
+Les règles d'armes sont **vives** : le socle commun `engine/phase_handlers/attack_sequence.py` est
+importé par le chemin de tir vif ([shared_utils.py:7363](../../engine/phase_handlers/shared_utils.py#L7363)
+et [:8667](../../engine/phase_handlers/shared_utils.py#L8667)) **et** par le chemin de mêlée vif
+([fight_handlers.py:5227](../../engine/phase_handlers/fight_handlers.py#L5227)). §9.0 disait
+« règles écrites dans le code mort, absentes du chemin vif » : **ce n'est plus vrai**.
+
+**Ce qui reste OUVERT.** `_attack_sequence_rng`
+([shooting_handlers.py:6109](../../engine/phase_handlers/shooting_handlers.py#L6109)) **existe
+toujours** et n'a **aucun appelant de production** (grep hors `tests/` : 0). Ses seuls appelants sont
+**6 fichiers de tests** — `test_shoot_attack_sequence.py`, `test_unit_rules_shoot.py`,
+`test_special_rules_e2e.py`, `test_fight_special_rules.py`, `test_phase_transitions.py`,
+`test_closest_target_penetration_shoot.py` — qui l'appellent **en direct**.
+
+⚠️ **C'est exactement le motif que ce document existe pour interdire** (§0bis, §0.19, T6-i) : *du code
+testé mais jamais appelé*, doublé de *tests qui passent pour la mauvaise raison*. Ces ~150 assertions
+vertes ne prouvent **rien** sur le comportement du jeu : elles valident une fonction que ni le gym ni
+le PvP n'exécutent. Pire, elles **immunisent** le mort contre toute détection de code inutilisé.
+
+**Livrable attendu** : re-pointer ces 6 fichiers sur le chemin vif (`attack_sequence.py` / le gate de
+tir réel), vérifier que chaque assertion tient toujours — c'est là que se trouve la vraie valeur de la
+manœuvre, un test qui échoue en migrant signale un écart de comportement réel entre mort et vif —
+**puis** supprimer `_attack_sequence_rng` et les états résiduels que §9.2 liste (`_rapid_fire_*`, log
+`rapid_fire_bonus_shot`, branches « squad path expected »).
+
+**Pourquoi ce n'est pas cosmétique** : tant que le mort vit, toute lecture de `shooting_handlers.py`
+peut confondre les deux implémentations, et la prochaine règle d'arme risque d'être écrite dans la
+mauvaise — c'est précisément ce qui s'est produit et que §9.0 a découvert le 2026-07-24.
+
+### 0.33 Rollout buffer 46,9 Go pour 39 Go de RAM — 🟠 CONDITIONNEL : bloque les profils à 48 envs, PAS le run à lancer (2026-07-28)
+
+> ⚠️ **Titre corrigé le 2026-07-28** : « BLOQUANT le run » contredisait le corps de l'entrée, qui
+> établit que `x1`, `x5_new` et `x5_debug` (8 envs, 7,8 Go) passent. Vérifié dans la config le
+> 2026-07-28 : seuls `x5_append` et `x1_debug` portent `n_envs: 48`.
+
+**Origine.** Point soulevé — sans être chiffré — par l'agent de la tranche T-K/T-L : « la spec
+§8.3 dimensionne le rollout buffer sur la grille, mais `obs_size` y pèse bien plus lourd depuis
+§0.30/§0.31 ». Chiffré ici, sur la config réelle.
+
+**Mesure (2026-07-28).** `DictRolloutBuffer` stocke **toutes** les clés d'observation, vecteur
+compris, et il est alloué **d'un bloc au premier `learn()`** — pas progressivement.
+
+| | floats / transition | |
+|---|---|---|
+| vecteur (`obs_size`) | 20 626 | **le poste dominant depuis §0.30/§0.31** |
+| grille (9 × 32 × 32) | 9 216 | 7 168 avant §0.32 |
+| **total** | **29 842** | soit **116,6 Ko** par transition en float32 |
+
+| Profil | `n_envs × n_steps` | Transitions | Buffer |
+|---|---|---|---|
+| `x1`, `x5_new`, `x5_debug` | 8 × 8 192 | 65 536 | **7,8 Go** — passe |
+| `x5_append`, `x1_debug` | 48 × 8 192 | 393 216 | **46,9 Go** — ne passe pas |
+
+Machine : **39 Go physiques, 29 Go disponibles**. Les profils à 48 envs échouent à l'allocation,
+avant le premier pas — ce n'est pas une lenteur, c'est un `MemoryError` immédiat.
+
+⚠️ **Deux pièges de lecture à ne pas répéter.**
+1. Le « 14,49 Go, sous la limite de 19,33 Go » de
+   [`move_action_space_spatial_rework.md`](A_faire/move_action_space_spatial_rework.md) §8.3 ne
+   compte **que la grille**. Il était juste quand l'obs vectorielle faisait 108 floats ; il est
+   périmé depuis §0.30, pour une raison qui n'est pas celle de §0.32.
+2. La ligne §0.14 annonce « run `x5_new`, 48 envs » alors que le profil `x5_new` porte
+   `n_envs=8`. **Vérifier le profil ET les overrides CLI réellement lancés** avant de conclure
+   quoi que ce soit d'un OOM ou de son absence.
+
+**ARBITRAGE DU 2026-07-28 : aucun changement.** La commande réellement lancée porte
+`--training-config x1` ⇒ **8 envs, 7,8 Go**, dans les 29 Go disponibles. §0.33 ne bloque **pas**
+ce run. Il ne se déclenche que sur `x5_append` et `x1_debug`.
+
+⚠️ **Une recommandation « `n_steps` 8192 → 1024 » a été formulée puis RETIRÉE le même jour. La
+retenir aurait dégradé le run.** Ses deux erreurs, à ne pas refaire :
+
+1. **Argument faux.** Elle promettait « 8× plus de mises à jour, donc plus d'apprentissage ». Le
+   nombre de PAS DE GRADIENT d'un run ne dépend pas de `n_steps` : il vaut
+   `transitions_totales × n_epochs / batch_size`. `n_steps` n'arbitre que **fraîcheur contre
+   variance** — des avantages estimés sur moins de données, et donc plus bruités.
+2. **Preuve contraire déjà au dossier, non consultée** :
+   [`config/agents/CoreAgent/Training_logs.md`](../../config/agents/CoreAgent/Training_logs.md)
+   — ablations à 30k épisodes, `n_envs=48`, un seul hyperparamètre changé par run :
+
+   | Changement | Robust score | Verdict noté à l'époque |
+   |---|---|---|
+   | baseline `n_steps=16384` | **0,4857** | BEST |
+   | `n_steps` → 8 192 | 0,3808 | « rollout **trop petit** → instabilité » |
+   | `n_steps` → 32 768 | 0,4345 | mieux que 8192, sous la baseline |
+   | `batch_size` → 2048 | 0,3281 | « catastrophique, trop peu de pas de gradient par rollout » |
+
+   Sur ce projet, la direction mesurée est donc l'INVERSE : **plus gros, mieux**, avec un optimum
+   à 16 384. C'est sur CoreAgent — autre pipeline, autre observation — donc ce n'est pas une
+   preuve transférable ; c'est la **seule** preuve disponible, et elle contredit la proposition.
+
+**Le vrai enseignement de §0.33.** Le régime validé de CoreAgent — `48 × 16 384` = 786 432
+transitions — demanderait **93,9 Go** avec l'observation actuelle. **Il est devenu structurellement
+inatteignable.** Sous 29 Go, le plafond à 48 envs est `n_steps ≈ 2048` (11,7 Go) à 3072 (17,6 Go),
+soit **5 à 8× sous l'optimum mesuré**. Autrement dit : tout run à 48 envs sortira du régime validé,
+et son hyperparamétrage devra être **re-tuné**, pas hérité. Ce n'est pas un réglage à trancher au
+jugé — c'est un screening à refaire, du type de celui de
+[`TUNING_NUIT.md`](../../config/agents/CoreAgent/TUNING_NUIT.md), quand le pipeline sera stable.
+
+**Leviers, si un run à 48 envs devient nécessaire** (aucun n'est gratuit — tous déplacent la
+baseline) : baisser `n_envs` · baisser `n_steps` en sachant qu'on quitte l'optimum mesuré ·
+stocker la grille en `uint8` — qui ne suffit pas seul : elle ne pèse que 31 % de la transition,
+donc 46,9 → **36,1 Go**, encore au-dessus des 29 Go disponibles.
+
+### 0.29 Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum — ✅ LIVRÉ + VALIDÉ IN-ENGINE (2026-07-22)
+
+**But (recadré par l'utilisateur).** Pouvoir **placer les unités manuellement** ET **choisir**, sur un
+même fichier, entre placement figé (manuel) et phase de déploiement — le tout sur le terrain réel du
+training, sans nouveau terrain. Reliquat demandé : faire évoluer la **proportion figé↔déploiement au
+fil du training** (curriculum). Matchup **Space Marines vs Orks**.
+
+**Fichiers livrés.**
+- `config/board/44x60x5/scenario/scenario_fixed_brawl_sm_orks.json` — 4 escouades / **36 figurines**,
+  format `units[]` avec clé `models` (compositions RÉELLES des rosters training) :
+  P1 SM = Intercessor (Bolt Rifle) + VanguardVeteranSquadJumpPack (jump pack) ;
+  P2 Orks = 2× Boyz. Chaque figurine a `col/row/unit_type` propre (sergents, plasma, personnages
+  fidèles au roster). `terrain_ref` = **`terrain-mc1.json`** (terrain réel du training).
+- `tests/unit/engine/test_fixed_brawl_deploy_modes.py` — **verrou** (bascule fixed↔active).
+- *(Aucun terrain créé — un premier jet en avait introduit un, retiré à la demande de l'utilisateur.)*
+
+**Le seul levier = `deployment_type`** (tracé, pas supposé). `game_state.py::load_units_from_scenario` :
+- `"fixed"` (ou champ absent, défaut ~L274) → chaque unité EXIGE `col/row` top-niveau = ancre =
+  `models[0]` (~L589-594), figurines posées telles quelles ; la clé `models[]` est normalisée par
+  figurine (~L874-985, override `unit_type`/stats par modèle). Au `reset`, phase `command` directe
+  (aucun `deployment`).
+- `"active"` → au `reset`, `deployment_type=="active"` déclenche la phase `deployment`
+  (`w40k_core.py:1364`), figurines mises à la sentinelle (-1,-1) et placées en jeu (IA/manuel). Les
+  `col/row` du fichier sont alors ignorés. `terrain-mc1.json` fournit les `deployment_zones` requises.
+
+**Positions par défaut** (éditables). Board 220×300 subhex. Placées dans les **bandes dégagées de
+mc1** (P1 SM rows 92/100, P2 Orks rows 198/206 ; cols 66-154), à l'écart des murs de la ruine
+centrale (rows ~120-185) — vérifié : le mode `fixed` chargeait en erreur « footprint on wall hex »
+tant que les unités tombaient sur la ruine. Portées lues (datasheets) pour référence : Bolt Rifle
+24″=120 subhex, shoota Boyz 18″=90 ; charge 11.02 (≤12″, non-engagé), zone d'engagement 03.04
+(2″=10 subhex hz).
+
+**Preuve in-engine (verrou, chemin gym réel).** `python3 -m pytest tests/unit/engine/test_fixed_brawl_deploy_modes.py` :
+```
+✅ fixed  : phase initiale='command', 4 unités / 36 figurines placées (aucun déploiement)
+✅ active : phase initiale='deployment', 4 unités en attente de déploiement
+✅ VERROU OK : même fichier, bascule fixed↔active par `deployment_type` (36 figurines).
+```
+⚠️ Piège rencontré (dans le verrou) : le loader **mémoïse le JSON par chemin absolu** (~L240) — tester
+deux modes en réécrivant un seul fichier temporaire relit le cache du 1er mode ; le verrou utilise
+donc **deux chemins distincts**.
+
+**Proportionnalité figé↔déploiement au fil du training — ✅ LIVRÉ (scheduler continu).** Approche
+retenue (arbitrage utilisateur) : **montée lisse par épisode**, mode `active` tiré à proba p(t)
+croissante, sur un SEUL fichier rechargé dans le mode tiré (réutilise les 2 chemins de chargement
+éprouvés plutôt qu'un chemin « hybride » risqué côté fuite d'état — cf. §0.25/§0.26). Implémentation
+(3 fichiers) :
+1. `game_state.py::load_units_from_scenario(..., deployment_type_override=None)` — force le mode du
+   chargement en remplaçant le `deployment_type` du JSON (et neutralise les surcharges P1/P2).
+2. `w40k_core.py::_configure_deployment_mode_for_episode()` — **miroir de `deployment_random_mix`**
+   (orthogonal : celui-ci choisit fixed/active, l'autre randomise les ACTIONS d'un déploiement déjà
+   actif). p(t) = `active_ratio_start + (end−start)·min(progress, freeze)`, progress =
+   `episode_number/(total_episodes−1)`, Bernoulli(p) → `active`/`fixed`. Dans `reset()`, impose un
+   rechargement avec l'override (reward_configs reconstruits via le chemin `_reload_scenario` existant).
+3. Config `x5_new.deployment_mode_schedule` (opt-in, `enabled:false` par défaut) :
+   `active_ratio_start/active_ratio_end/schedule:"linear"/freeze_after_progress`, `training_only`.
+**Preuve in-engine** — `python3 -m pytest tests/unit/engine/test_deployment_mode_schedule.py` : ratio 0.0→ 20/20 `fixed` ;
+ratio 1.0→ 20/20 `active` ; rampe 0→1 (60 ép.)→ part `active` croissante (1re moitié 8, 2e moitié 24),
+avec cohérence stricte mode↔phase (`fixed`→`command`, `active`→`deployment`). Le scheduler est
+**orthogonal** à `deployment_random_mix` (les deux peuvent coexister). ⚠️ `training_only:true` exige
+le scénario sous `.../scenarios/training/` (`_is_training_scenario_context`) — le déposer là pour
+l'activer en training réel ; mettre `enabled:true` dans `x5_new`.
+
+**Emplacements DANS les rosters (mode strict sur le chemin roster réel) — ✅ LIVRÉ.** Le training
+réel ne joue pas un `units[]` figé : il passe par le **template roster** (`scenario_training_armageddon.json`,
+`agent_roster_ref=training_random`, `opponent_roster_ref=[SM,Orks]`, **siège aléatoire**). Or un
+roster compact ne portait aucune coordonnée → `fixed` était interdit (`_expand_compact_roster_to_basic_units`
+levait). Solution retenue par l'utilisateur (pas de miroir) : **chaque roster déclare `top` ET `bottom`
+par figurine**, le loader choisit le côté selon le joueur assigné (**convention P1=top, P2=bottom**) —
+comme le siège est aléatoire, les deux côtés sont portés. Implémentation :
+- `game_state.py::_expand_compact_roster_to_basic_units` — `models[i]` accepte la forme objet
+  `{unit_type, top:{col,row[,level]}, bottom:{...}}` ; unité **mono** (véhicule/perso) : positions au
+  **niveau de l'entrée** (`top`/`bottom`) pour NE PAS la transformer en escouade (comportement `active`
+  préservé). En `fixed` : positions obligatoires (sinon erreur explicite), `count==1` requis, côté
+  sélectionné par joueur. En `active` : positions ignorées (roster à double usage). Helper
+  `_parse_roster_model_side` (validation stricte col/row/level).
+- Les **4 rosters** training (agent SM/Orks, opponent SM/Orks) portent désormais `top`/`bottom`,
+  produits par le **générateur committé `scripts/gen_roster_positions.py`** (reproductible) :
+  placement en **réseau hexagonal** (pas 9 subhex) par footprint réel (tailles de socle variables
+  persos/véhicules), wall-aware (terrain-mc1), sans chevauchement (le mode `fixed` valide les
+  footprints), dans les bandes haute (~rows 40-104) et basse (~196-260). **Cohérence d'escouade
+  GARANTIE** : le générateur n'accepte un centre d'escouade que si la formation est cohérente. La
+  règle moteur (03.03, `game_config` : `squad_min_neighbors`=1, `cohesion_distance_mode`="euclidean"
+  bord-à-bord 2", étalement 9") n'exige qu'**≥1 voisin** ; le générateur vise ≥2 centre-à-centre =
+  borne conservatrice. **L'oracle est la fonction moteur `validate_squad_coherency`** — c'est ELLE
+  que le verrou asserte à la charge (pas une réimplémentation).
+**Preuve in-engine** — `python3 -m pytest tests/unit/engine/test_roster_fixed_positions.py` : 8 épisodes `fixed` (rosters
++ siège tirés au hasard) → **aucun déploiement, toutes figurines placées, P1 en bande haute / P2 en
+bande basse, escouades cohérentes** ; 3 épisodes `active` → phase `deployment`, sentinelles.
+Cohérence re-vérifiée hors test : 0 figurine sous-cohérente sur 12 chargements (2 sièges × 6 rosters
+aléatoires). Régression : template `active` + rosters positionnés, scheduler off → step normal
+(deployment→move→shoot), aucun crash. Le scheduler `deployment_mode_schedule` rampe donc **strict
+(positions rosters) → déploiement appris** directement sur le vrai flux (rotation SM/Orks + siège
+aléatoires conservés). ⚠️ Si une composition de roster change, relancer `gen_roster_positions.py`.
+
+**Suite (mécanique LIVRÉE ; reste l'USAGE + la mesure — arbitrage utilisateur / dépendances).** Un
+agent frais qui reprend :
+1. **Activer le curriculum** : `x5_new.deployment_mode_schedule.enabled = true` puis régler la rampe
+   (`active_ratio_start`/`active_ratio_end`/`freeze_after_progress`, p.ex. 0.0→1.0 sur 0.8 de la
+   progression). Aucun autre câblage : le template roster réel (`scenario_training_armageddon.json`)
+   marche tel quel, rosters déjà positionnés.
+2. **Vérifier en épisode réel** avant un long run : `python3 ai/train.py --agent ArmageddonAgent
+   --training-config x5_new --step` + `ai/analyzer.py` + replay → confirmer que des épisodes `fixed`
+   (placement rosters, aucun déploiement) ET `active` (déploiement) surviennent, dans la bonne
+   proportion selon l'avancement.
+3. **Mesurer l'objectif curriculum** : win-rate en régime `fixed` (strict) vs `active` au fil de la
+   rampe — c'est la métrique qui valide « scénarios fixes → apprendre à se déployer ». **Rejoint
+   §0.14 (win-rate)**, ✅ **débloqué le 2026-07-26** (§0.27 corrigé, §9.2.5 livré).
+Décisions ouvertes (utilisateur) : forme exacte de la rampe ; coexistence éventuelle avec
+`deployment_random_mix` ; siège (`agent_seat_mode`) gardé aléatoire ou figé en phase strict.
+
+**Outillage : jouer/visualiser UN scénario explicite en éval (2026-07-22).** Pour observer un
+scénario précis (ex. `scenario_fixed_brawl_sm_orks.json`, placement fixed) avec le modèle courant
+SANS l'entraîner ni écraser le `.zip`, `--test-only` accepte désormais un chemin de scénario
+explicite :
+`python3 ai/train.py --agent ArmageddonAgent --training-config x5_debug --test-only --eval --step
+--scenario config/board/44x60x5/scenario/scenario_fixed_brawl_sm_orks.json`.
+Il est joué **tel quel** (`train.py`, branche test-only) : ni repli holdout, ni matérialisation
+`wall_ref` (celle-ci exige un scénario sous `agents/.../scenarios/<split>/` et réécrit le terrain —
+elle casserait un scénario autonome sous `config/board/`). Mécanisme : `evaluate_against_bots(...,
+materialize_eval_refs=False, scenario_list_override=[chemin])`. Le mode holdout par défaut
+(`materialize_eval_refs=True`) est **inchangé**. Verrou : `tests/unit/ai/test_eval_explicit_scenario.py`
+(ROUGE : la matérialisation lève hors `agents/` ; VERT : le scénario explicite est joué, 0 planté).
+⚠️ Un scénario `fixed` joué en test-only n'a **aucune** phase de déploiement (step.log : 0
+`DEPLOYMENT`, figurines aux positions du fichier dès T1).
+
+
+### 0.14 Re-mesure du run — 🟠 OUVERT : run `--new` À LANCER, aucun prérequis technique restant (màj 2026-07-28)
+
+> ⚠️ **Titre corrigé le 2026-07-28.** L'ancien (« BLOQUÉ À L'ÉVAL DU MARKER 2000 ») décrivait le
+> run du 2026-07-22, dont le bloqueur **§0.27 est corrigé depuis le 2026-07-26** (§0hist). Ce qui
+> reste est un run à lancer, pas un run bloqué. Lire l'alerte de divergence de config en §0 avant.
+
+> Part **ouverte** de §0.13 (run x5_debug 100 épisodes). Le run et le fix de l'évaluation
+> finale sont résolus et documentés en **§0.13**.
+
+> ✅ **NON-RÉGRESSION §0.11 VALIDÉE (2026-07-21) — 3 runs indépendants, zéro crash.** Après le fix
+> §0.18, la commande de re-mesure (`x5_debug --total-episodes 500`) a été relancée **3 fois** :
+> **3× 500/500 épisodes, `✅ TRAINING COMPLETE`, ZÉRO `collision intra-plan`, zéro `Traceback`,
+> zéro `incohérence masque`** (grep sur les 3 logs). Le crash dépendant de la trajectoire qui
+> survenait à l'épisode ~280 (§0.18) **n'est plus jamais réapparu** sur 1500 épisodes cumulés.
+> L'avertissement « la non-régression de §0.11 reste non validée par un run » de §0.18 est
+> **LEVÉ**. ⚠️ **Ce que ces 3 runs NE prouvent PAS** : le **score par matchup**. À 500 épisodes /
+> 2 par bot, les Combined (61,5 % / 38 % / 19,5 % / 42 %) restent **non concluants** (bruit
+> d'échantillon) — c'est le **pipeline** qui est validé, pas la politique. Un win-rate
+> interprétable exige toujours un run long à `total_episodes` réel (10-30k), aujourd'hui coûteux
+> en temps (~36 h) — c'est précisément la cible du chantier `V11_move_pool_optimization.md` (§0.22).
+> §0.15 étant tranché, ce win-rate mesurera la robustesse à l'**adversaire**.
+
+**Run de re-mesure du 2026-07-20 — commande exacte :**
+
+```
+python3 ai/train.py --agent ArmageddonAgent --scenario bot --new \
+        --training-config x5_debug --total-episodes 500
+```
+
+(`--total-episodes` surcharge le `total_episodes: 100` de la config ; **la config n'a pas été
+modifiée**. Lancé APRÈS §0.12, donc sur le reward définitif.)
+
+**✅ Ce que ce run PROUVE.**
+
+| Point | Résultat |
+|---|---|
+| Déroulement | **500/500 épisodes, exit 0**, 1 h 48, 8 workers, GPU. **Zéro exception, zéro `incohérence masque/exécution`** dans tout le log. |
+| **Non-régression §0.11** | 🔴 **NON — affirmation RETIRÉE le 2026-07-20, voir §0.18.** Ce premier run a bien franchi l'épisode ~250, mais un **second run, même commande**, a **crashé sur le même message d'erreur à l'épisode ~280**. Un run qui passe ne prouve rien ici : le crash dépend de la trajectoire, donc du hasard. **L'avertissement « la non-régression de §0.11 reste non validée par un run » N'EST PAS levé.** |
+| **Fix §0.13** | ✅ **VALIDÉ RUNTIME.** Le ranking porte sur `holdout_regular_bot-01` / `-02` — l'éval finale joue bien le pool **holdout**, plus le scénario d'entraînement. |
+| Reward §0.12 | Le run tourne sans incident avec la `VALUE` par figurine et l'event `model_value`. Aucun crash du chemin d'allocation. |
+
+**Résultats de l'évaluation finale (12 épisodes = 2 par bot) :**
+
+```
+  vs adaptive            :  50.0% (1W-1L-0D)
+  vs aggressive_smart    :  50.0% (1W-1L-0D)
+  vs control             :   0.0% (0W-2L-0D)
+  vs defensive           : 100.0% (2W-0L-0D)
+  vs greedy              : 100.0% (2W-0L-0D)
+  vs tactical            : 100.0% (2W-0L-0D)   <-- holdout
+  Combined Score:  61.5%
+
+🏁 Scenario ranking (combined):
+  - holdout_regular_bot-01: combined=0.770 | worst_bot_score=0.000
+  - holdout_regular_bot-02: combined=0.460 | worst_bot_score=0.000
+```
+
+**🔴 Ce que ce run NE prouve PAS — le score reste NON CONCLUANT.**
+
+- **2 épisodes par bot.** `bot_eval_final` vaut **2** dans la phase `x5_debug`. C'est bien
+  « > 1 » comme l'exigeait cette entrée, mais **12 épisodes ne permettent aucune conclusion** :
+  chaque bot est un 2W-0L / 1W-1L / 0W-2L, soit une résolution de 50 points de pourcentage.
+  Le `61.5 %` est un chiffre **indicatif**, à ne PAS reporter dans §10.6.
+- **500 épisodes d'entraînement, ce n'est pas un agent entraîné.** Les phases réelles sont à
+  10 000–30 000 (`x1`, `x5_new`, `x5_append`). Ce run valide le **pipeline**, pas la politique.
+- **`vs tactical: 100 %` ne vaut rien comme signal de holdout** à 2 épisodes — c'est
+  précisément le chiffre qu'on voudrait fiable, et c'est celui qui a le moins d'échantillon.
+- ⚠️ **`vs control : 0 % (0W-2L)`** est le seul résultat qui mérite un œil : c'est le
+  `worst_bot_score=0.000` des deux scénarios. À 2 épisodes ce peut être du bruit pur ; **à
+  reconfronter au prochain run long** avant d'y voir un trou de comportement.
+
+**🔴 DEUXIÈME RUN — CRASH, voir §0.18.** Un run relancé avec la **même commande** après le
+correctif de la rupture D s'est arrêté à l'**épisode ~280** sur
+`ValueError: execute_squad_move a échoué … collision intra-plan`. **§0.11 n'est donc pas
+résolu.** C'est la conclusion la plus importante de cette entrée, et elle contredit ce que le
+premier run laissait croire.
+
+**🔴 INVALIDÉ A POSTERIORI (même jour) — la rupture D de §0.12.** Ce run a tourné **avant** la
+découverte de la régression d'observation (`value_over_ttk` extrapolait le `points_per_hp` de la
+figurine d'index 0). Les deux rosters de §10.2 étant hétérogènes en points, **l'agent s'est
+entraîné sur une observation fausse** pendant les 500 épisodes. Ce qui reste valable malgré
+tout : la **non-régression §0.11** et la **validation runtime du fix §0.13**, qui ne dépendent
+ni du reward ni de l'observation. Le score, lui, est à jeter deux fois plutôt qu'une.
+
+**Ce qui reste à faire pour fermer cette entrée** : un run sur une phase à `bot_eval_final`
+élevé (`x1`, `x5_new` et `x5_append` sont déjà à **100**) et à `total_episodes` réel, pour
+produire un win-rate **par roster** interprétable au sens de §10.6. ⚠️ Cf. **§0.15** : les
+rosters `training` et `holdout_regular` étant identiques, ce win-rate mesurera la robustesse à
+l'**adversaire**, jamais au roster.
+
+**🟠 MAJ 2026-07-22 — le run réel a ENFIN été lancé, et il a franchi la non-régression mais s'est
+arrêté à l'éval.** Commande exacte : `python3 ai/train.py --agent ArmageddonAgent --scenario bot
+--new --training-config x5_new` (10k ép., 48 envs, `bot_eval_final=100`), lancée après le
+réalignement complet de l'instrument (§0.23 logger per-figurine, §0.24 analyzer per-figurine) et la
+correction d'un **vrai bug moteur de move** découvert par l'analyzer fiabilisé (§0.25 budget
+ligne-droite → géodésique ; §0.26 régression cache). **Le training a atteint l'épisode 2000 (20 %)
+sans un seul crash `incohérence masque/exécution`** en ~3 h 40 — la conformité move et la
+non-régression tiennent sur un vrai run 48-envs. **Mais** le premier checkpoint d'évaluation (marker
+2000) a déclenché le garde-fou strict d'éval : **500 épisodes d'éval `failed` sur timeout de task**
+→ arrêt. **Aucun win-rate n'a donc été produit.** Le score par matchup reste dû, désormais bloqué par
+**§0.27** (et non plus par la perf du pool §0.22, ni par un défaut d'instrument). ⚠️ Cette entrée
+confirme une fois de plus la leçon §0bis « un run vert ne prouve rien » : le fix move §0.25 avait
+passé un `--step` de 4 épisodes puis **crashé en 1 min** sur un vrai run 48-envs (cf. §0.26) — c'est
+le run multi-env, pas le smoke, qui a validé.
+
+## 0bis. Pièges et leçons de méthode — 📌 SECTION CANONIQUE
+
+> **Éditer les avertissements ICI.** Chacun est reproduit **mot pour mot** depuis son entrée
+> d'origine, dont la référence est donnée. Les occurrences restées dans §0hist en sont des
+> **copies** : elles y documentent le raisonnement local, mais la version qui fait foi est
+> celle de cette section.
+>
+> Ces passages existent pour **empêcher de re-diagnostiquer un faux problème**. Aucun ne doit
+> être résumé ni supprimé, même si l'entrée dont il vient est close.
+
+### Ne pas juger une conformité de règle par une reconstruction offline — mesurer sur le vrai chemin in-engine (§0.28, 2026-07-22)
+
+Un soupçon de « tir à travers terrain » (obscuring 13.10) a coûté une **cascade de faux verdicts**
+avant d'être **réfuté** par une mesure in-engine. Les pièges, dans l'ordre où ils ont trompé :
+1. **Scan offline centre→centre** : la LoS légale est **footprint→footprint par-figurine** (06.01, un
+   bord de socle voit ce que le centre ne voit pas). Tester centre→centre sur-flagge en masse. Ce
+   motif est le **même** que celui qui a fait retirer le contrôle LoS de l'analyzer (§0.24 /
+   `project_analyzer_los_verdict`).
+2. **Rejeu headless non fidèle** : `place()` écrivait `unit["col"/"row"]` alors que le moteur lit
+   `units_cache` (`require_unit_position`) → unités restées à `(-1,-1)` → LoS triviale. Puis même
+   corrigé, l'arme/portée/état divergeaient du training. **Un rejeu doit vérifier son propre setup**
+   (assert `require_unit_position == position attendue`) avant de conclure quoi que ce soit.
+3. **Instrumenter le mauvais chemin** : 6 points instrumentés (compute_unit_los, valid_target_pool_build,
+   pool cache-hit, w40k_core log, action_decoder legacy) ont montré **0 hit** — le pipeline squad V11
+   n'emprunte AUCUN. Le vrai gate est `build_squad_action_mask` → `_model_can_shoot_target` →
+   `_attacker_model_can_reach_squad`. **Toujours tracer `env.get_action_mask` d'abord**, ne pas deviner.
+4. **Env var non propagée** : un audit gardé par `W40K_LOS_AUDIT` montrait 0 hit ; en inconditionnel,
+   297. Vérifier qu'une instrumentation gardée **s'exécute vraiment** (heartbeat) avant d'interpréter un 0.
+
+**Règle** : une affirmation de (non-)conformité de règle n'est valide **que** mesurée dans le moteur, sur
+le chemin réellement emprunté, avec un heartbeat qui prouve que la sonde tourne. Une reconstruction
+offline ne prouve rien sur la conformité.
+
+### Sur ce document lui-même (§0.-1, §0.0)
+
+
+**Réserve de méthode — ce qui n'a pas été revérifié (§0.0)**
+
+**⚠️ Réserve de méthode sur ce document.** Les sections §0.x reflètent ce qui a été relu et
+exécuté pendant la session du 2026-07-19 soir. **Le reste du document — T1 à T5, section 9 — n'a
+PAS été revérifié ligne à ligne contre le code.** Trois affirmations périmées y ont été trouvées
+et corrigées ce soir-là (« prochain bloqueur §10.4 » alors qu'il était résolu, « archivage des
+holdouts à faire » alors qu'il l'était, « 9 échecs préexistants » alors que la suite est verte) —
+**il peut en rester d'autres du même genre**. Vérifier dans le code avant de s'appuyer sur une
+affirmation de ce document qui n'est pas datée de la session en cours.
+
+➜ **Cette réserve est désormais une TÂCHE : voir §0.19** (méthode d'audit et historique des
+démentis). Tant qu'elle n'est pas menée, la mise en garde ci-dessus reste pleinement valable.
+
+➜ **Passe menée le 2026-07-20 : voir §0.19.1.** T2/T3/T4/T5 sont verrouillés par mutation-test ;
+**T1 est repassée en ⏳** (R6 site 1 inatteignable au x5, R4 sans aucun test) ; la section 9 n'a
+jamais été marquée ✅ (c'est un plan). La réserve reste valable pour **T1/R4**, dont le
+mutation-test n'a pas pu être mené (`shared_utils.py` sous instrumentation §0.18), et pour §7/§10
+qui n'ont **pas** été audités.
+
+**Comptages de tests : le seul verdict disponible est le code de sortie (§0.-1)**
+
+⚠️ **Chiffre daté du 2026-07-19** — la suite a grossi depuis (+6 tests le 2026-07-20 : 4 en
+§0.10, 2 en §0.13). **Ne pas traiter `1402` comme un compte à retrouver** : le reporter du
+projet n'imprime pas la ligne de résumé de pytest, le seul verdict disponible est le **code de
+sortie** (`exit 0`, vérifié après chaque lot du 2026-07-20).
+
+**La règle de périmètre `ArmageddonAgent` et les 10 fichiers `CoreAgent` verts (§0.-1)**
+
+⚠️ **10 fichiers de tests contiennent encore la chaîne `CoreAgent` et sont VERTS — c'est
+normal.** Audités **un par un** (et non par échantillon — la première vérification avait manqué
+`test_board_ref_resolver.py` ci-dessus en généralisant depuis 3 fichiers de `tests/unit/ai/`
+alors que le seul cas fautif était dans `tests/unit/engine/`) : ce sont des chaînes passées à des
+fonctions **pures** (`_load_bot_eval_params`, `build_agent_model_path`, `_scenario_name_from_file`),
+des stubs (`SimpleNamespace`, `_DummyCfgLoader`, `_Cfg`), des arborescences **synthétiques dans
+`tmp_path`**, ou de simples commentaires. **Aucun n'atteint la vraie config.** Ne pas les
+« corriger » par un `sed` global.
+
+**Leçon de méthode** : « vérifié un par un » sur un échantillon n'est pas une vérification.
+Le seul contre-exemple était dans le répertoire non échantillonné.
+
+### Sur le raisonnement et la preuve
+
+
+**Une piste écrite dans une note « hors périmètre » est une hypothèse, pas un diagnostic (§0.34, 2026-07-28).**
+La note de §0.32 désignait le bon fichier, la bonne fonction et la bonne ligne
+(`erode_move_pool_by_squad_block`, court-circuit mono-figurine) — et **la mauvaise cause**. La vraie
+divergence était en amont : la frontière normal/advance était calculée sur le `MOVE` **brut** quand le
+pool et l'exécution appliquent `MOVE − coût de descente`. Le court-circuit ne faisait que **retirer le
+filet** qui masquait le bug ailleurs : sur les escouades multi-figurines, l'érosion « corrigeait » la
+bande morte en **supprimant silencieusement des Advances légaux**. Deux corollaires :
+1. **Un bug partiellement masqué par un filet se déguise en cas particulier.** « Ça ne touche que les
+   mono-figurines » était vrai pour le *crash* et faux pour le *défaut* : 100 % des escouades
+   descendantes perdaient des coups légaux.
+2. **Corriger là où ça crashe aurait aggravé le défaut** (érosion étendue au mono = crash supprimé,
+   coups légaux perdus partout). Avant de corriger le site du raise, vérifier **quelle grandeur** chaque
+   côté de l'invariant mesure — c'est le motif §0.18/§0.26 pour la troisième fois.
+
+**Vérifier SUR QUEL scénario un chiffre a été mesuré avant de le transformer en blocage (§0.34, 2026-07-28).**
+« 43 occurrences / 650 pas, le training ne peut pas tourner » : les 43 venaient du harnais de bench de
+T-K/T-L, qui tourne sur **`scenario_pvp_test`** — le seul scénario portant une escouade à `level: 1`. Le
+scénario d'ENTRAÎNEMENT mesuré dans les mêmes conditions donne **0**, en x1 comme en x5. Le bug était
+réel et il est corrigé, mais il ne bloquait pas le run §0.14. Un chiffre sans son scénario n'est pas
+une fréquence, c'est une anecdote.
+
+**Prototyper + bencher AVANT d'intégrer un levier perf (§0.22, 2026-07-21) — la mesure prime sur le plan écrit.**
+Le chantier `MOVE_POOL_BUILD` a fait CINQ mesures qui ont chacune démenti une hypothèse « évidente » du
+plan §8, et un prototype hors-prod les a toutes attrapées avant tout code de prod :
+1. Le plan désignait le **BFS** comme reliquat n°1 (« 66 % sur petits socles », profil §2bis). Mesuré :
+   le BFS deque isolé ne coûte que **0,30 ms à move_range=12** (le régime réel du training, lui aussi
+   mesuré, pas supposé). Le profil §2bis englobait autre chose.
+2. Le plan proposait un **wavefront bbox-NumPy** pour le BFS. Prototype prouvé équivalent (reach+dist)
+   mais **plus lent à move 12** (0,46×) ; il ne gagne qu'à move≥30. Réfuté.
+3. Le vrai hotspot mesuré (cProfile) = la **boucle Python sur les offsets** de `_dilate`/`_spread`
+   (gros socles), que le §8 avait déclaré « caduc ». Réhabilité par la mesure.
+4. **L2b par lignes** (décompo runs) : l'empreinte **ovale n'est pas contiguë par ligne** en coords hex
+   → fallback sur le socle qui compte. Réfuté.
+5. **L2b par colonnes** (sparse-table) : équivalent, mais 1,34× ovale seulement / <1× petits socles →
+   gain net ~1,1× pour une vraie complexité. Non intégré.
+**Leçon** : un profil agrégé (« X = 66 % ») ne dit PAS quel code optimiser — il faut mesurer le
+**régime réel** (ici `move_range`, le socle, l'`ez`) et **prototyper le remplacement en A/B équivalent
++ bench AVANT de toucher la prod**. Le filet de tests (oracle + snapshot + A/B fenêtré==plein-board)
+garantissait qu'aucune régression métier ne pouvait passer ; le bench a garanti qu'aucune complexité
+inutile n'a été livrée. Seuls **L1 + L_bbox** (gain sûr, sans dépendance) ont été retenus ; décision
+**(B) STOP**. Détail complet → `V11_move_build_acceleration.md §3`.
+
+**« Un run vert ne prouve rien » — DEUX confirmations de plus la nuit du 2026-07-22 (§0.25/§0.26).**
+Le motif §0.11/§0.18 s'est répété deux fois en une nuit : (1) le fix move §0.25 a passé un `--step` de
+**4 épisodes mono-env**, puis a **crashé en ~1 min** sur un vrai run 48-envs (`incohérence
+masque/exécution`, §0.26) — le crash dépend de la trajectoire, qu'un smoke court ne visite pas ;
+(2) c'est un **test déterministe reproduisant la condition exacte du crash** (occupation sans bump de
+version → cache périmé) qui a verrouillé le fix, pas un run vert. **Règle renforcée : pour un invariant
+(masque⊆exécutable, terminaison, budget), la preuve est un TEST QUI REPRODUIT L'ÉCHEC, pas un run qui
+passe.** Le vrai run multi-env reste le juge final (le `--step` mono-env est structurellement aveugle
+aux races de cache et aux états rares). Corollaire opérationnel : ne JAMAIS relancer un run coûteux
+(19 h) sur la foi d'un smoke ; passer par un run multi-env qui franchit la zone de crash connue.
+
+**Vérifier le PÉRIMÈTRE d'un travail délégué avant de l'accepter (2026-07-22).** Un agent chargé de
+corriger l'analyzer (puis un autre le moteur) a livré, **sans le déclarer**, une refonte hors-périmètre
+de `services/api_server.py` (**366 lignes**, −265/+104) + un `defaults.agent` dans `config/config.json`
+— non lu par le chemin d'entraînement, non demandé. Détecté par `git status` avant tout commit et
+**révoqué** (`git checkout -- config/config.json services/api_server.py`). **Ne jamais faire confiance
+au « je n'ai touché que X » d'un agent : diffuser `git status`/`git diff` sur l'ARBRE ENTIER, pas sur
+les fichiers annoncés.** Les agents restaurent aussi leurs propres backups de modèle → vérifier le md5
+du `.zip` canonique (il n'a PAS à changer hors run `--new` voulu).
+
+**Mesurer/lire AVANT d'affirmer une root cause (2026-07-22).** Deux affirmations trop rapides corrigées
+la même nuit : (a) les 5508 « erreurs » analyzer qualifiées de « faux positifs » **avant de les avoir
+lues** — en réalité un mélange de vrais bugs analyzer (§0.24) ET d'un vrai bug moteur (§0.25) ; (b) le
+crash §0.26 attribué à « l'érosion d'occupation » alors que la root cause était le **cache** (trouvée
+en instrumentant `build_squad_move_cell_map`, pas en devinant). **Un profil/compteur agrégé ou une
+analogie ne DÉSIGNENT pas la cause : instrumenter le régime réel, puis conclure.** (Même leçon que la
+perf §0.22 ci-dessus, re-vérifiée côté correction de bug.)
+
+**Fiabiliser l'INSTRUMENT avant de l'utiliser comme juge (2026-07-22, §0.23/§0.24).** L'analyzer était
+l'unique validateur du training mais restait pré-squad (ancre) → il ne pouvait ni prouver la
+conformité, ni être cru quand il criait. Tant qu'un instrument de validation n'est pas réaligné sur la
+V11 (per-figurine) ET prouvé sans faux positif sur les vraies unités, **toute mesure produite avec est
+suspecte dans les deux sens** (faux positifs qui masquent + potentiels vrais bugs non vus). Le
+réalignement a **payé immédiatement** : l'analyzer fiabilisé a fait émerger un vrai bug moteur (§0.25)
+invisible jusque-là.
+
+**Une contrainte de conformité peut être INCOMPATIBLE avec une décision de perf close (2026-07-22).**
+§0.22 a été clos « STOP » pour ne pas payer le BFS par-socle. Mais la conformité move (§0.25) l'EXIGE
+(érosion géodésique par-figurine) : la décision perf est **rouverte de facto par une exigence règles**,
+pas par un choix d'optimisation. Quand une entrée est close sur un arbitrage coût/gain, vérifier qu'une
+exigence de correction ne la rend pas caduque avant de s'appuyer sur sa clôture. Conséquence vive :
+§0.27 (éval trop lente).
+
+**Une invariance est CONDITIONNELLE à son état initial (§0.1)**
+
+**⚠️ Corollaire — une affirmation de ce document était fausse.** L'ancien §0 affirmait que
+`require_coherency` est « invariante par translation cube, donc déjà garantie par le pool
+d'ancre ». L'invariance est réelle mais **conditionnelle** : elle prouve *si l'origine est
+cohérente, le plan l'est*. Elle ne prouve **rien** quand l'origine est déjà incohérente — et dans
+ce cas le pool entier est offert alors que rien n'est exécutable. C'est cette demi-vérité qui a
+laissé le trou ouvert après T6-g. **Toute contrainte « prouvée invariante » doit être relue en se
+demandant : invariante à partir de quel état initial ?**
+
+**Vérifier qu'un point d'ancrage est APPELÉ avant d'y brancher quoi que ce soit (§0.1)**
+
+⚠️ **Piège rencontré, à ne pas refaire** : le premier branchement a été posé en tête de
+`_advance_to_next_player`, qui *semble* être la frontière de tour mais est **du code mort**
+(cf. §0.4). Le run de vérification a reproduit le crash à l'identique. **Vérifier qu'un point
+d'ancrage est appelé AVANT d'y brancher quoi que ce soit.**
+
+**Motif récurrent : du code correct, testé, et jamais appelé (§0.4)**
+
+> **Motif récurrent à surveiller dans ce projet** — six occurrences vérifiées à ce jour.
+> **Cinq de type « jamais appelé »** : `update_frozen_model` (§10.4),
+> `end_of_turn_coherency_removal` (§0.1), `_advance_to_next_player` (§0.4),
+> `game_replay_logger` (§0.8, 795 lignes + 8 tests), `log_unified_action` (§0.8). Du code
+> correct, testé, et jamais appelé. **Devant toute fonction sur laquelle repose un
+> raisonnement, vérifier d'abord qu'elle a un appelant.**
+>
+> **Une de type « jamais exercé »** (§0.11) : `test_move_mask_is_executable.py` est appelé, vert,
+> et mesure le bon invariant sur le bon scénario — mais par exploration aléatoire, donc il ne
+> visite jamais la configuration qui cassait. **Un test vert ne couvre que les états qu'il
+> atteint ; sa docstring peut affirmer le contraire de bonne foi.**
+
+**Un test qui explore au hasard ne prouve rien sur ce qu'il n'atteint pas (§0.11)**
+
+🔴 **Pourquoi `test_move_mask_is_executable.py` n'a rien vu** — c'est le point le plus important
+de cette entrée. Ce fichier mesure **cet invariant exact**, sur **ce scénario exact**, et il est
+vert. Il ne vérifie l'invariant que sur les états atteints par **exploration aléatoire** (3 seeds,
+400 steps) : la superposition inter-étages n'y survient jamais. Sa docstring affirme pourtant
+combler précisément ce trou (« Ce test remplace ce raisonnement par une mesure »).
+
+> **Quatrième variante du motif §0.4, et la plus sournoise.** Les trois premières étaient du code
+> *jamais appelé*. Celle-ci est du code appelé, par un test vert, qui **n'exerce jamais le cas**.
+> Un test qui explore au hasard ne prouve rien sur les configurations qu'il n'atteint pas — et sa
+> docstring peut affirmer le contraire en toute bonne foi. **Devant un test de type « je déroule
+> des parties et je vérifie un invariant », toujours se demander quelles configurations il ne
+> visite jamais, et les construire explicitement.**
+
+**Ne pas conclure à un biais de tirage sur quelques dizaines d'observations (§0.10)**
+
+Mesuré sur **400 resets** : Ork/Ork 102 (25,5 %), Ork/SM 107 (26,8 %), SM/SM 104 (26,0 %),
+SM/Ork 87 (21,8 %) — **les 4 matchups, équiprobables** (χ² = 2,38 pour un seuil de 7,81 à 3 ddl :
+aucun biais détectable). Un premier tir de 40 resets donnait 15/13/9/**3** et laissait craindre un
+biais : c'était du **bruit d'échantillonnage**, pas un bug. Leçon : ne pas conclure à un biais de
+tirage sur quelques dizaines d'observations — refaire la mesure en grand avant de diagnostiquer.
+
+> **Bandeau de fiabilité du recensement d'ancre** — il vit en **§1bis, « Dette d'ancre restante »**
+> et n'a pas été déplacé : seuls 4 sites y ont été relus à la main, le reste est un faisceau
+> d'indices. **Ne pas ouvrir de chantier depuis une ligne non marquée ✅ sans avoir lu la
+> fonction.** Le lire avant d'exploiter ce recensement.
+
+### Sur les runs et l'outillage
+
+
+**Un run qui passe ne prouve pas une non-régression sur un crash stochastique (§0.18)**
+
+🔴 **Erreur commise le 2026-07-20, à ne pas refaire.** Un run de 500 épisodes a franchi
+l'épisode ~250 sans le crash `collision intra-plan`, et on en a conclu — **par écrit, dans ce
+document** — que la non-régression §0.11 était « validée en bout-en-bout ». Un **second run,
+même commande**, a crashé à l'épisode ~280. Le crash dépend de la **trajectoire**, donc du
+hasard : un run vert est un **échantillon de taille 1**, pas une preuve.
+
+Règle : pour un crash dont le déclenchement dépend de la trajectoire, une non-régression se
+prouve par un **test qui reproduit la condition**, ou à défaut par **plusieurs runs**, jamais
+par un seul run vert. Et **tout changement de code qui touche l'observation ou le reward change
+les trajectoires** — un run vert d'avant le changement ne dit rien du code d'après.
+
+**L'ETA affichée au premier épisode est un artefact de warmup (§0.13)**
+
+⚠️ **Piège de perf, à ne pas re-diagnostiquer** : l'ETA affichée au 1ᵉʳ épisode (~16 h 45 sur le
+run de 1000) est un **artefact de warmup** ; elle retombe à sa vraie valeur dès le 10ᵉ épisode.
+Ne jamais extrapoler une durée de run depuis les premiers épisodes.
+
+**Ce que `x5_debug` ne produit PAS, et pourquoi il ne se lance pas seul (§0.10)**
+
+**Piège de lancement, préexistant** : `--training-config x5_debug` **seul** échoue pour cet agent
+(`No scenario file found … scenario_x5_debug.json`). ArmageddonAgent n'a que
+`scenario_training_armageddon.json`, donc `--scenario <chemin explicite>` est **obligatoire** :
+```
+python3 ai/train.py --agent ArmageddonAgent --training-config x5_debug \
+  --scenario config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json \
+  --new --resolution 5
+```
+⚠️ `x5_debug` = **1000 épisodes** (~2h50 à 8 envs), pas un run de quelques minutes malgré son nom.
+
+⚠️ **Ce que `x5_debug` ne produit PAS**, à cause de ses `callback_params` :
+`save_best_min_episodes = 10000` et `checkpoint_save_freq = 10000` sont **supérieurs** à ses
+1000 épisodes → **ni « best model » ni checkpoint** ne sont jamais écrits. `model_gating_enabled`
+est `False` (le `Gate 🧱` de la barre de progression est purement décoratif) et `bot_eval_final`
+vaut **1** épisode par bot — contre 60 pour le run de §0.7. C'est un run de **validation de
+pipeline**, pas de mesure : il ne peut pas servir le critère §10.6.
+
+**Tout run `x5_debug` ÉCRASE le modèle canonique (§0.0)**
+
+- ⚠️ **Le modèle en place a été ÉCRASÉ par ce run** (`model_ArmageddonAgent.zip`, 2026-07-20
+  02:14 — autorisation utilisateur explicite). C'est donc un modèle **de debug, 100 épisodes
+  `--new`**, sans valeur de jeu : `save_best_robust: false` fait que
+  [train.py:3548](../../ai/train.py#L3548) écrit le modèle final **inconditionnellement** en fin
+  de run. Le modèle précédent (19/07 04:25, entraîné AVANT les `VALUE` Munitorum, avec la
+  `WarTrakk` à 175) reste disponible dans
+  `ai/models/_backup_pre_munitorum_20260719_232816/` — **vérifié intact après le run**.
+  ⚠️ Tout run `x5_debug` ultérieur écrasera à nouveau le modèle canonique : sauvegarder avant
+  si le modèle en place compte.
+
+**`config/users.db` réapparaît modifié après chaque run (§0.0, dette 5)**
+
+⚠️ `config/users.db` **réapparaît modifié** après chaque run d'entraînement — fichier
+**protégé** (CLAUDE.md), ne JAMAIS l'inclure dans un commit.
+
+**`bot_eval_scenario_pool` placé au mauvais niveau est silencieusement ignoré (§0.13)**
+
+⚠️ **Piège latent voisin, découvert au passage.** Dans
+`ArmageddonAgent_training_config.json`, `bot_eval_scenario_pool` est placé à la **racine** de
+`x5_debug`, alors que `_resolve_callback_value` ([train.py:3273](../../ai/train.py#L3273)) le
+cherche dans **`callback_params`** puis retombe sur `config/agents/_training_common.json`.
+La clé racine est donc **ignorée**. Sans effet aujourd'hui (les deux valent `holdout`), mais
+toute surcharge par agent placée à la racine serait **silencieusement sans effet**.
+
+**`agent_roster_seed` neutralise le tirage de roster sans le moindre message (§0.10)**
+
+⚠️ **Piège latent voisin — `agent_roster_seed`.** Cette clé de scénario est passée en
+`random_seed` au tirage du roster AGENT ([game_state.py:1056](../../engine/game_state.py#L1056)),
+et le RNG est reconstruit à chaque appel (`random.Random(seed)`,
+[:1142](../../engine/game_state.py#L1142)). Si elle est renseignée, **le roster agent devient
+identique à tous les épisodes** — le tirage est neutralisé sans le moindre message. Voulu pour les
+scénarios holdout `bot-01..04` (qui la portent, pour la reproductibilité), mais ce serait un piège
+silencieux dans un scénario d'entraînement. `scenario_training_armageddon.json` ne la porte pas
+(`None`) : vérifié. **À contrôler avant de conclure quoi que ce soit sur une distribution de
+matchups.**
+
+**Une suite de tests est une mesure GLOBALE, donc un verrou GLOBAL (§0.19.1, 2026-07-20)**
+
+🔴 **Trois mesures de suite invalidées le même jour, par trois écrivains différents.** Le partage
+du dépôt « par fichier » ne protège **rien** : deux agents peuvent éditer des fichiers disjoints
+sans conflit, mais ils **ne peuvent pas mesurer en parallèle**, parce qu'une suite lit tout
+l'arbre.
+
+| # | Écrivain pendant la mesure | Conséquence |
+|---|---|---|
+| 1 | **moi-même** : baseline lancée pendant que je mutais 5 fichiers | tuée, non exploitée |
+| 2 | **la chasse §0.18** : `shared_utils.py` à 20:14:31 et son test à 20:13:58 pendant une suite de 20:05→20:45 | un `EXIT=1` pris à tort pour un « rouge attendu permanent » |
+| 3 | **l'agent concurrent** : `shared_utils.py` à 21:20:33 pendant une suite de 21:17:37→21:22:54 | un `EXIT=0` non exploitable |
+
+**Règle.** Avant de conclure d'un résultat de suite, **relever le `mtime` des fichiers de
+`engine/` avant ET après le run** ; tout fichier écrit dans la fenêtre invalide la mesure.
+Une consigne « ne modifie pas tel fichier » donnée à un agent **ne suffit pas** si l'autre côté
+y écrit : il faut soit interdire les suites complètes, soit geler les écritures pendant la
+mesure. ⚠️ Corollaire : `EXIT=0` **et** `EXIT=1` sont également suspects — le n°2 a produit un
+faux rouge, le n°3 un vert non fiable. Ne pas ne se méfier que des rouges.
+
+⚠️ **Ne JAMAIS restaurer par `git checkout` un fichier portant du travail non commité d'un
+autre agent** (`shared_utils.py`, `w40k_core.py` au 2026-07-20) : la restauration détruirait ses
+modifications. Pour un mutation-test sur ces fichiers, sauvegarder par `cp` et restaurer par `cp`.
+
+### Sur les données et les sources officielles
+
+
+**🔒 Règle métier : `VALUE` suit le Munitorum, ce n'est pas une variable de tuning (§0.9)**
+
+🔒 **RÈGLE MÉTIER (utilisateur, 2026-07-20) — NON NÉGOCIABLE.** `VALUE` **suit les documents
+officiels**. Ce n'est pas une variable de tuning. `VALUE` est pourtant consommé **par figurine**
+(pondération de menace [reward_calculator.py:1442](../../engine/reward_calculator.py#L1442),
+différentiel d'armée [observation_builder.py:367](../../engine/observation_builder.py#L367)) : cet
+effet sur l'apprentissage est une **conséquence à assumer**, jamais un motif pour s'écarter du
+Munitorum. **Ne pas « rééquilibrer » ces valeurs pour améliorer un résultat d'entraînement.**
+
+**Les PDF Munitorum ne sont pas extractibles en texte (§0.9)**
+
+⚠️ **Le texte de ces PDF n'est pas extractible** (contenu en image : `extract_text()` ne rend que
+les en-têtes). Il faut les **rendre en PNG** (`fitz`/pymupdf, dpi≥140) et les lire visuellement.
+Ne pas conclure « le PDF est vide ».
+
+**Deux pièges de lecture des sources : Grot Orderly, contradiction Gretchin (§0.9)**
+
+**Deux pièges de lecture des sources, à ne pas re-trébucher dessus :**
+1. **Le Grot Infirmier n'est pas une figurine de jeu.** Datasheet Painboy : `UNIT COMPOSITION :
+   1 Painboy`, `equipped with : … 1 Grot Orderly` → c'est de l'**équipement**. D'où 38 figurines
+   physiques dans la boîte mais **37 modèles de jeu**. Le roster n'a rien qui manque.
+2. **Contradiction entre deux sources officielles sur les Gretchin** : le Munitorum cote
+   `11 models … 45 pts`, la datasheet dit `UNIT COMPOSITION : 10 Gretchin`. La boîte en a 10.
+   Retenu : 10 modèles à 45 pts. Non tranchable depuis les documents — signalé, pas masqué.
+
+**Limite x10 et point non tranché du fix de collision (§0.11)**
+
+**Non tranché** : je n'ai pas l'état exact au moment du crash. Il est prouvé que le prédicat est
+aveugle au niveau et qu'il produit ce message sur une configuration légale ; il n'est **pas**
+prouvé que les deux figurines de l'escouade 3 étaient à des étages différents plutôt que dans un
+état déjà illégal. Si un crash de cette classe réapparaît, dumper l'état avant de conclure.
+
+**Limite connue, HORS PÉRIMÈTRE (décision utilisateur, 2026-07-20) : le cas x10.** Le contrôle
+compare les **sous-hex d'ancre**. Sur Board ×10 les figurines ont une **empreinte multi-hex**
+(`compute_candidate_footprint` — « Multi-hex footprints are only computed on Board ×10 ») : deux
+socles peuvent donc s'y chevaucher **sans partager leur ancre**, et la même classe d'incohérence
+masque/exécution reste ouverte à cette résolution. Sur x5 (résolution du training) l'empreinte
+vaut le sous-hex, le contrôle est **exact**. Limite préexistante, non introduite par le correctif.
+⚠️ Ne pas lire « l'invariant est rétabli » comme valant pour toutes les résolutions : il vaut
+pour x1 et x5. **On ne s'occupe pas de x10** — si le projet y vient un jour, rouvrir ce point
+AVANT d'y lancer un entraînement.
+
+### Affirmations périmées repérées le 2026-07-20 — **signalées, NON corrigées**
+
+> Relevées pendant la réorganisation de §0. Aucune n'a été « nettoyée » : les corriger sans
+> relire le code reproduirait exactement l'erreur qu'elles illustrent. **Vérifier avant de
+> s'appuyer sur l'une d'elles.** C'est le motif récurrent n°1 de ce document — au moins
+> 5 avaient déjà été trouvées lors des sessions précédentes.
+
+| # | Où | Affirmation | Pourquoi elle est suspecte |
+|---|---|---|---|
+| 1 | §0.-1 | « la suite est VERTE : `1402 passed, 2 skipped` » | Son propre ⚠️ la déclare datée. Le document porte aussi `1407`, `1440`, `1451`, `1396`, `1398` selon l'endroit. Seul verdict fiable : le code de sortie. |
+| 2 | §5 / tableau T6-i | « ❌ test de non-régression **NON écrit** » | `tests/unit/engine/test_end_of_turn_coherency_03_03.py` **existe sur le disque** (vérifié le 2026-07-20) et §0.0 le déclare livré. |
+| 3 | §5 / tableau T6 | « le critère T6 est désormais bloqué par `CC_DMG` (§0.3) qui plante des épisodes d'évaluation » | Le portage §0.3 est fait et le run 60/60 de §0.7 le valide runtime. |
+| 4 | §10.5 (bandeau) | « ⚠️ Non validé runtime — cf. §0.3 (`CC_DMG`) » | Levé par §0.7 (`TacticalBot` 10/10 épisodes). |
+| 5 | §0.10 | « la dette notée en **§0.0** (`--scenario bot` échoue en amont du moteur) » | Cette dette est écrite dans **§0.7**, pas §0.0. Renvoi imprécis, non corrigé. |
+| 6 | §0.12, étape 4 | « **9 tests** liés à `roster_pool_schedule` échouent indépendamment de ce travail » | ✅ **TRANCHÉ le 2026-07-20 — l'affirmation était FAUSSE.** Suite complète lancée : **1417 passed, 2 skipped, 0 failed**. Aucun échec `roster_pool_schedule`. §0.-1 avait raison : un test rouge est une régression, il n'y a pas d'échec préexistant à tolérer. |
+| 7 | §2 « État des lieux vérifié » | « Tous les imports du pipeline passent (`ai.train`, `ai.env_wrappers`, **`ai.multi_agent_trainer`**, …) » | `ai/multi_agent_trainer.py` **n'existe plus** (supprimé en §0.8, vérifié absent du disque le 2026-07-20). |
+| 8 | §0.17 (par construction) | l'état de commit | Périmé dès le prochain `git commit` — l'entrée porte elle-même l'ordre de la reconfronter à `git status`. |
+| 10 | §0.18, note annexe | « après ce crash le process … s'est terminé avec un **code de sortie 0** » | ❌ **FAUSSE, tranchée le 2026-07-20 — voir §0.20.** Le handler `return 1`, `sys.exit` propage, et l'exécution confirme `EXIT=1`. Cause probable : un pipe (`| tee`) côté shell lors de la mesure. Enseignement : une note **« hors périmètre »** échappe à la relecture *parce qu'*elle est marquée annexe. |
+| 11-13 | §6 (T2, T4), §8.2 | layout d'actions « 41 », « 61 scénarios », `test_agent_interface_contract.py` | ➜ **détaillées en §0.19.1** (audit du 2026-07-20). Signalées, NON corrigées. |
+| 9 | §0.14 (rédigée puis **corrigée le même jour**) | « Non-régression §0.11 ✅ **VALIDÉE EN BOUT-EN-BOUT** » | ❌ **FAUSSE, retirée le 2026-07-20** — cf. §0.18 : le run suivant a crashé sur ce même message. Cas d'école : l'affirmation a été produite **par l'auteur du run lui-même**, le jour même, à partir d'un unique run vert. Le motif n°1 de ce document ne vient pas que du passé. |
+
+---
+
+## 0ter. Notes post-implémentation — décisions assumées, non-travaux
+
+> Choses **tranchées et closes** qui ne sont ni des bugs ni des dettes : des décisions de
+> périmètre que l'utilisateur assume. À ne pas rouvrir comme des réserves.
+
+- **§0.16(b) — `DefensiveSmartBot` reste hors éval (status quo, 2026-07-21).** Retiré à l'origine
+  parce qu'il **sous-performait**. Conséquence acceptée : son unique appelant
+  `_best_target_slot_by_threat` (7ᵉ site porté) n'est validé que par un **test unitaire**, jamais
+  en éval runtime. Le réintroduire pour la seule couverture fausserait la composition d'éval
+  (`combined`, poids) sans bénéfice. **Ne pas re-signaler comme un trou de couverture.**
+- **§0.16(c) — clé `holdout_hard_opponent_budget_modifier` + `build_holdout_benchmark.py` gardés
+  (2026-07-21).** Non consommés par le training actuel (2 rosters fixes, §10.2), mais **conservés
+  volontairement** : un holdout à armées **générées** est prévu **après la démo**. La clé est en
+  attente d'usage, pas morte. **Ne pas supprimer ni la clé ni le script.**
+
+---
+
+## 1. Objectif
+
+Rétablir un entraînement fonctionnel de `CoreAgent` (`python3 ai/train.py --agent CoreAgent
+--scenario bot ...`) sur le moteur actuel (board 44x60x5, niveaux, per-model, fight V11,
+allocation des pertes par-figurine), en trois phases :
+
+- **Phase A (obligatoire)** : remise en route — le pipeline tourne de bout en bout sans erreur,
+  à interface agent constante (action 41 / obs 108).
+- **Phase A' (obligatoire, décision utilisateur 2026-07-14)** : entraîner l'agent sur TOUTES les
+  règles implémentées — (P1) porter dans le chemin vif les règles restées dans le code mort puis
+  supprimer le code mort, (P2-P3) donner à l'agent chaque décision que les règles laissent au
+  joueur (mécanisme générique de décision), (P4-P5) observation de support + validation par
+  tranche. Périmètre strict : règles DÉJÀ implémentées — aucune feature absente du moteur.
+  Détail en section 9.
+- **Phase B (obligatoire)** : mise à niveau de l'observation — l'agent perçoit les niveaux
+  (élévation) et les coûts associés.
+- **Phase C (optionnelle, hors scope initial)** : nouveaux points de décision au-delà de la
+  Phase A' (ex. montée d'étage). À ne PAS entamer sans validation utilisateur.
+
+**Interdits absolus** (CLAUDE.md) : aucun fallback/workaround/valeur par défaut pour masquer une
+erreur ; ne jamais modifier `config/users.db` ni `ai/models/**/*.zip` ; les règles de jeu se
+vérifient dans `Documentation/40k_rules/` avant toute décision règles.
+
+## 1bis. L'ANCRE — concept central, source commune des ruptures V11
+
+> Rédigé le 2026-07-20 après que le plan T7 se soit révélé faux faute d'avoir ce concept écrit
+> quelque part. **À lire avant de toucher à toute validation de position.**
+
+### Définition
+
+Une unité 40K est un **ensemble de figurines**, chacune sur son propre hex. Mais l'agent doit
+produire une **action discrète** (« déploie l'unité 3 ici ») : il ne peut pas émettre N
+coordonnées. L'**ancre** est le point unique qui représente l'unité entière dans les interfaces
+qui ne savent manipuler qu'UNE position — l'espace d'action, et le code moteur legacy écrit
+quand une unité *était* une seule figurine.
+
+Deux structures parallèles coexistent, et tout se joue là :
+
+| Structure | Contenu | Statut |
+|---|---|---|
+| `models_cache` | position de **chaque figurine** (`col`, `row`, `level`) | la **vérité** |
+| `units_cache` | **une** position par unité | l'ancre, un **résumé** |
+
+L'ancre **n'est pas un objet physique**. C'est la position de la **figurine vivante d'index
+minimal** ([shared_utils.py:3061](../../engine/phase_handlers/shared_utils.py#L3061) :
+« n'update `units_cache` que si la figurine est l'ancre courante (index minimum vivant) »).
+Ce n'est ni le centre, ni le barycentre de l'unité : un simple délégué désigné par convention.
+**Corollaire à ne pas oublier : quand la figurine d'index minimal meurt, l'ancre SAUTE** sur la
+suivante — la position « de l'unité » change sans qu'aucune figurine n'ait bougé.
+
+### Trois usages, de natures différentes
+
+1. **Désigner** — l'agent choisit un hex : c'est l'ancre visée. ✅ légitime.
+2. **Translater** — `build_rigid_plan` calcule un delta entre ancre de départ et ancre
+   d'arrivée, puis l'applique à TOUTES les figurines. ✅ légitime *si* le delta est réellement
+   rigide (ce qui était faux avant T6-h, cf. parité de `dx`).
+3. **Résumer pour valider** — les fonctions legacy (`compute_candidate_footprint(col, row,
+   unit, …)`) prennent l'ancre + le `BASE_SIZE` de l'**unité** et testent *un socle* à cet
+   endroit. 🔴 **C'est un mensonge** : elles testent un objet qui n'existe pas.
+
+### Le motif de bug unique
+
+**Quelque chose est VALIDÉ sur l'ancre, puis EXÉCUTÉ sur les figurines** — et les deux divergent.
+D'où le message récurrent `incohérence masque/exécution`. Toutes les ruptures traitées en V11
+sont des variantes du même mensonge :
+
+| Tranche | Variante |
+|---|---|
+| **T6-f** | le commit n'écrivait QUE l'ancre → figurines restées à `(-1,-1)` |
+| **T6-g** | le pool BFS validait l'ancre → le bloc translaté débordait |
+| **T6-h** | la translation « rigide » déformait le bloc selon la parité de `dx` |
+| **§0.11** | la collision intra-plan ignorait le **niveau**, autre attribut d'identité écrasé par le résumé |
+| **T7** | le contrôle mono-ancre de `deploy_unit` teste ce socle fantôme |
+
+### ⚠️ Le piège : « ancre » désigne TROIS contrats différents
+
+Le mot est le même partout, le contrat non — et c'est précisément ce qui a fait écrire un plan
+T7 faux :
+
+| Chemin | Ce que « ancre » veut dire |
+|---|---|
+| `units_cache` | position de la figurine d'index minimal (dérivée, elle SAUTE aux pertes) |
+| action de l'agent | point de **désignation** (contraignant : ce qui est désigné doit être exécuté) |
+| **déploiement** | **simple suggestion** : `generate_compact_formation` part de l'ancre en spirale BFS et retient la 1ʳᵉ case légale — l'ancre **oriente**, elle ne **contraint pas**. Une ancre hors zone place l'unité 22 colonnes plus loin au lieu d'échouer (mesuré, cf. T7). |
+
+**Avant d'écrire ou de supprimer une validation de position, déterminer LEQUEL des trois contrats
+s'applique sur ce chemin.** Ne jamais supposer que « le contrôle par-figurine valide déjà
+l'ancre » : au déploiement, c'est faux.
+
+### Dette d'ancre restante — recensement du 2026-07-20
+
+> Balayage de `engine/` + `ai/`. Les sites marqués ✅ *vérifié* ont été relus directement ; les
+> autres viennent du balayage et **restent à confirmer par lecture avant toute action**.
+>
+> 🔴 **Statut de fiabilité de ce recensement — à lire avant de s'en servir.** Il est issu d'un
+> balayage automatique dont **seuls 4 sites ont été relus à la main** (le pool de move, les 2
+> sites objectif, la ventilation LoS). Le reste est un **faisceau d'indices, pas un audit**.
+> Un premier essai d'exploitation a déjà produit une conclusion fausse : « la charge n'a pas
+> d'équivalent de l'érosion T6-g » a été écrit ici sur la seule absence de fonction `erode_*`,
+> alors qu'une machinerie per-model existe ailleurs dans le même fichier (cf. la ligne charge
+> ci-dessous). **Ne pas ouvrir de chantier depuis une ligne non marquée ✅ sans avoir lu la
+> fonction.** C'est la même erreur de méthode que §0.11 (« vérifié un par un » sur un
+> échantillon n'est pas une vérification) et que le plan T7 (conclusion tirée sans lire les
+> deux avertissements présents dans le code).
+
+**Le levier unique** : `compute_candidate_footprint(col, row, unit, game_state)`
+([shared_utils.py:416](../../engine/phase_handlers/shared_utils.py#L416)) ne calcule **qu'UNE
+base** (le `BASE_SHAPE`/`BASE_SIZE` de l'unité) centrée sur `(col,row)`. Passée une unité
+multi-figurines, elle rend l'empreinte d'**une figurine à l'ancre**, jamais celle de l'escouade.
+C'est la source commune des gravités 1-2 ci-dessous.
+
+**G1 — pool/masque construit à l'ancre, commit exécuté par figurine**
+
+| Site | Décision prise sur l'ancre |
+|---|---|
+| `movement_build_valid_destinations_pool` (movement:2266, 2870) | ✅ *vérifié* : le pool ne valide QUE l'ancre — [shared_utils.py:7668](../../engine/phase_handlers/shared_utils.py#L7668) l'écrit. ⚠️ **Le chemin du MASQUE GYM est couvert** : `erode_move_pool_by_squad_block` (T6-g) est appliquée juste après, en [:7671](../../engine/phase_handlers/shared_utils.py#L7671). **Les autres consommateurs n'érodent PAS** — `pve_controller.py:468`, `movement_handlers.py:813/846`, `shooting_handlers.py:5128`, `action_decoder.py:720`, `w40k_core.py:2682`. À auditer : le PvP tombe-t-il dans le même mismatch, ou son preview le rattrape-t-il ? |
+| `charge_build_valid_destinations_pool` ([charge:3472](../../engine/phase_handlers/charge_handlers.py#L3472), 166) | Portée de charge 2d6 + légalité d'arrivée mesurées depuis l'ancre, empreinte mono-base ; commit per-model. **Le code admet la dette** : charge_handlers.py:267. ⚠️ **STATUT NON ÉTABLI — ne pas partir de cette ligne pour ouvrir un chantier.** Il n'existe aucune fonction `erode_*` dans `charge_handlers.py`, MAIS la charge possède une machinerie **par figurine** ailleurs : [`_compute_plan_context`](../../engine/phase_handlers/charge_handlers.py#L1955) calcule un champ de portée per-model (`_euclidean_reach(m, sib, …)`, avec le `BASE_SHAPE`/`BASE_SIZE` **de chaque figurine**). **Question ouverte, à trancher par lecture de `charge_build_valid_destinations_pool` :** ce contexte per-model réconcilie-t-il le pool d'ancre, ou les deux coexistent-ils sans se parler ? Tant que ce n'est pas lu, « la charge a le même trou que le move » est une **hypothèse, pas un constat**. |
+| `charge_target_selection_handler` (charge:4360) | `charge_reference_hex` = ancre → décide quelles cibles sont engagées. |
+
+**G2 — éligibilité de phase décidée sur l'ancre**
+
+| Site | Décision |
+|---|---|
+| `get_eligible_units` (movement:544, 573, 599) | « L'unité peut-elle bouger ? » = existe-t-il un voisin de **l'ancre** où une base tient. Une escouade dont l'ancre est bloquée mais dont d'autres figurines peuvent bouger est déclarée inéligible — et l'inverse. |
+| pile-in / consolidation (fight:545, 726, 893, 1116, 1203, 1372, 1731) | BFS et distances mesurés sur une base à l'ancre, alors que le pile-in 12.03 et la consolidation 12.08 sont **par figurine** (cf. `project_pile_in_par_figurine`). |
+| `action_decoder.py:1218` | Case décodée validée sur une empreinte mono-base avant exécution per-model. |
+
+**G3 — règles satellites d'objectif sur position unique** (✅ *les deux vérifiés*)
+
+| Site | Décision |
+|---|---|
+| [shooting_handlers.py:6127](../../engine/phase_handlers/shooting_handlers.py#L6127) | Règle `reroll_towound_target_on_objective` : « la cible est-elle sur un objectif ? » testée sur `target["col"]/["row"]` = **l'ancre**. Une escouade dont seule une figurine non-ancre tient l'objectif est ratée. ⚠️ Utilise en plus `target.get("col", -1)` — **valeur par défaut masquant une absence**, interdite par CLAUDE.md. |
+| [fight_handlers.py:165](../../engine/phase_handlers/fight_handlers.py#L165) `_is_unit_on_objective` | Même bug côté mêlée (`require_unit_position` = ancre). |
+
+✅ **Le vrai Objective Control est SAIN** : `_sum_objective_control_oc`
+([game_state.py:1863](../../engine/game_state.py#L1863)) compte bien OC × figurines dans la zone
+(14.02). Ce sont les règles *satellites* qui n'ont pas suivi.
+
+**G4 — heuristiques IA à l'ancre** (aucun impact règles, biais de politique seulement) :
+`_select_strategic_destination` (movement:3923+, charge:4169), `observation_builder.py:1043/2332`
+(« Anchor-based distance (approx, sufficient for RL obs) »), `analyzer.py:603`. Assumé et
+auto-documenté, sauf charge:4169 qui n'a **pas** de justification écrite.
+
+**Ce qui est SAIN et ne doit pas être touché** : la **LoS** est entièrement par-figurine
+(`_compute_unit_los_uncached`, `_unit_can_see_any`, couvert 13.08 — itèrent sur `models_cache`) ;
+les **portées de tir/mêlée** passent par `occupied_hexes` (union per-model) avec l'ancre en simple
+repli ; `units_cache[sid]["occupied_hexes"]` **est** l'union par-figurine
+([shared_utils.py:2897](../../engine/phase_handlers/shared_utils.py#L2897)) ; les logs et la sync
+d'ancre post-commit sont des résumés légitimes.
+
+⚠️ **Indice de méthode** : [shared_utils.py:2902](../../engine/phase_handlers/shared_utils.py#L2902)
+porte le commentaire « Fix F2 (audit) : `occupied_hexes` doit couvrir TOUTES les figs, pas
+seulement le footprint de l'ancre ». La correction analogue a donc **déjà** été faite à cet
+endroit, et **pas** aux sites G1-G2. Le motif se répare site par site depuis des années.
+
+## 2. État des lieux vérifié (ce qui marche)
+
+⚠️ **Affirmation périmée n°7 — voir la table de §0bis** : `ai.multi_agent_trainer` n'existe plus (supprimé en §0.8). Ligne conservée telle quelle, non corrigée.
+
+- Tous les imports du pipeline passent (`ai.train`, `ai.env_wrappers`, `ai.multi_agent_trainer`,
+  `ai.reward_mapper`, `ai.scenario_manager`, `ai.unit_registry`, ... — vérifié par exécution).
+- L'environnement gym EST le moteur : `W40KEngine(gym.Env)` ([w40k_core.py:147](../../engine/w40k_core.py#L147)),
+  `reset()` L918, `step(action: int)` L1330. Espace d'action `Discrete(41)` (L629), observation
+  `Box(108,)` (L660), les deux lus depuis `observation_params` de
+  `config/agents/CoreAgent/CoreAgent_training_config.json` (obs_size 108, action_space_size 41), sans
+  défaut. ⚠️ **Fichier SUPPRIMÉ depuis** (commit `20a2d479`, « retrait de la banque CoreAgent », avec
+  ses 3 variantes `BEST_*`/`*_BEST_X1`/`*_save_avant_X10`) : lien retiré le 2026-07-28, valeurs
+  conservées pour la trace historique. La config vivante est
+  [ArmageddonAgent_training_config.json](../../config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json).
+- Espace d'action squad actuel — source unique [macro_intents.py:8-20](../../engine/macro_intents.py#L8-L20) :
+  - 0-5 move normal (6 directions), 6-11 advance (6 dir), 12-17 fall back (6 dir),
+  - 18 wait/end activation, 19-23 shoot slots 0-4, 24 charge, 25 fight,
+  - 26-40 zone intents (5 objectifs × 3 intents). Total 41.
+- Masque : `ActionDecoder.get_squad_action_mask_and_eligible_units`
+  ([action_decoder.py:146](../../engine/action_decoder.py#L146)) ; exposé par `W40KEngine.get_action_mask()` (L5563), branché
+  MaskablePPO via `ActionMasker` ([train.py:1448-1451](../../ai/train.py#L1448-L1451)).
+- Observation squad 108 : `build_squad_observation` ([observation_builder.py:1253](../../engine/observation_builder.py#L1253)) —
+  16 global + 5 agrégats squad + 6 figurines × 7 features + 5 slots ennemis × 9 features.
+  Layout **purement 2D** (col/row) : aucune feature de niveau/élévation.
+- Rewards : `RewardCalculator` ([reward_calculator.py:23](../../engine/reward_calculator.py#L23)) piloté par
+  `CoreAgent_rewards_config.json` (squad_shaping, base_actions, situational_modifiers,
+  zone_intent_shaping) — pas de valeurs par défaut, à une nuance près :
+  `situational_modifiers` est optionnel dans une branche (~L782). OK à interface constante.
+- Le moteur distingue déjà training et PvP : `gym_training_mode` (auto-résolution des prompts,
+  `_is_player_human` renvoie False — [w40k_core.py:2201-2206](../../engine/w40k_core.py#L2201-L2206)) et `pve_mode` (adversaire géré
+  par wrapper externe en training, `pve_mode=False`, [w40k_core.py:226-229](../../engine/w40k_core.py#L226-L229)).
+- Wrappers : `BotControlledEnv` (scénarios "bot", GreedyBot, [train.py:1749-1791](../../ai/train.py#L1749-L1791)) et
+  `SelfPlayWrapper` (self-play, modèle gelé) dans [env_wrappers.py](../../ai/env_wrappers.py).
+- Un smoke test moteur nu (actions aléatoires masquées, scénario board actuel) déroule
+  deployment/command/move/shoot/charge/fight jusqu'au tour 5 une fois les ruptures R4/R6
+  contournées — le cœur par-figurine (fight V11 auto, footprints, descente §13.06) fonctionne
+  en gym.
+
+**Contexte de divergence (git)** : dernier commit sur `ai/env_wrappers.py` = 2026-05-30, sur
+`ai/train.py` = 2026-05-31. Toutes les features suivantes sont postérieures : charge rework
+(06-01), fight V11 (06-12→07), LoS unifiée (07-02), niveaux + coût descente §13.06 (07-09),
+perModelMove (07-10), replay/snapshots (07). Le pipeline RL est resté sur le modèle de fin mai.
+
+## 3. Ruptures vérifiées (avec reproduction)
+
+### R1 — Phase de training `default` absente
+**Repro** : `python3 ai/train.py --agent CoreAgent --scenario bot --step` →
+`KeyError: "Phase 'default' not found in CoreAgent_training_config.json. Available:
+['x1','x5_append','x5_new','x1_debug','x5_debug']"` (config_loader.py:274).
+`--training-config` a pour défaut `"default"` ([train.py:4232](../../ai/train.py#L4232)).
+
+### R2 — train.py reconstruit le chemin board depuis {cols}x{rows}
+**Repro** : `python3 ai/train.py --agent CoreAgent --scenario bot --step --training-config x1_debug`
+→ `FileNotFoundError: Board walls directory not found: config/board/220x300/walls`.
+Cause : `_list_available_board_refs` ([train.py:586-591](../../ai/train.py#L586-L591)) construit
+`config/board/{cols}x{rows}/` (= 220x300, dimensions subhex) alors que le dossier réel est
+`config/board/44x60x5/` (44x60 pouces, scale 5). La source de vérité existe déjà :
+`config_loader.get_board_dir()` ([config_loader.py:79-87](../../config_loader.py#L79-L87), gère `W40K_BOARD_PATH` + `paths.board`).
+**Auditer toute reconstruction `f"{cols}x{rows}"` dans ai/ et engine/** (même motif ailleurs, cf. R3-d).
+
+### R3 — Banque de scénarios d'entraînement incompatible avec le contrat scénario actuel
+La banque vit dans `config/agents/CoreAgent/scenarios/` — **61 JSONs** : training/ 30 +
+training/training_benchmark/ 4, holdout_regular/ 10, holdout_hard/ 10 + holdout_hard/matchups/ 7
+(dans des sous-sous-dossiers `matchups/run_*/` ; attention : ne pas compter les dossiers comme
+des fichiers) + rosters
+`config/agents/_p2_rosters/`. Il existe aussi `scenarios/training_save/` (30 JSONs de plus) —
+statuer en T4 : migrer ou archiver. Le contrat moteur a changé
+(commit `540d0674` "terrain OK") — cinq incompatibilités indépendantes, toutes vérifiées par
+exécution ou lecture :
+
+- **(a) Localisation obligatoire** : `_resolve_shared_config_path` exige que le scénario soit dans
+  un dossier nommé exactement `scenario/` sous un board ([game_state.py:1646-1651](../../engine/game_state.py#L1646-L1651)) ; idem pour
+  `wall_ref: "random"` ([game_state.py:1437-1441](../../engine/game_state.py#L1437-L1441)) et `terrain_ref` (L1496-1505).
+  **Repro** : charger `holdout_hard/scenario_bot-01.json` → `ValueError: must be located in a
+  'config/board/<board>/scenario/' directory`.
+- **(b) Objectifs** : les clés `objectives`, `objectives_ref`, `objective_hexes` sont SUPPRIMÉES et
+  lèvent une erreur explicite ([game_state.py:320-329](../../engine/game_state.py#L320-L329)). Source unique désormais : terrains
+  flaggés `"objective": true` dans le `terrain_ref` (règles 14.01/14.02). **Tous** les scénarios
+  de la banque utilisent `objectives_ref` → tous invalides.
+- **(c) Refs de walls périmées** : `config/board/44x60x5/walls/` ne contient que `walls-33`,
+  `walls-mc1`, `walls-none`. 28 scénarios de la banque référencent `walls-11` (inexistant) —
+  27 avec extension `.json`, 1 sans (format à normaliser au passage) ; les 33 autres utilisent
+  `"random"`.
+- **(d) Zones de déploiement** : voie moderne = section `deployment_zones` du terrain_ref
+  (polygones par joueur, [game_state.py:400-432](../../engine/game_state.py#L400-L432)) ; voie legacy = fichier nommé
+  `config/deployment/{cols}x{rows}/<zone>.json` (L436-440), or `config/deployment/220x300/` ne
+  contient que `mc1.json` — le `deployment_zone: "hammer"` de toute la banque est introuvable.
+- **(e) Niveaux** : les scénarios d'entraînement n'ont pas de `terrain_ref`, donc aucun étage —
+  l'agent ne s'entraînerait jamais sur la feature niveaux même une fois le reste réparé.
+- **(f) La training config ELLE-MÊME est cassée** (raté des deux premiers audits) : dans les
+  5 phases de `CoreAgent_training_config.json`, `scenario_sampling.train_wall_ref_weights` =
+  `walls-11/21/31.json` (0.3 chacun, inexistants) et `eval_objectives_refs` =
+  `objectives-51.json` (le dossier `objectives/` n'existe plus). Après le fix R2,
+  `_expand_random_ref_weights` lèvera « unknown refs for board walls » ([train.py:623-628](../../ai/train.py#L623-L628)).
+- **(g) Chemin d'éval holdout cassé dans `ai/bot_evaluation.py`** :
+  `_materialize_eval_scenario_refs` ÉMET `objectives_ref` (L75, clé rejetée par le moteur) et
+  les `eval_wall_refs`/`eval_objectives_refs` pointent les mêmes fichiers inexistants.
+  Consommé par les callbacks d'éval de train.py (~L3231/3340), l'éval finale (~4185) —
+  cassera même après T3/T4 si seul train.py est migré.
+
+### R4 — Allocation des pertes : gym non reconnu comme "défenseur IA" (BLOQUANT runtime)
+**Repro** (moteur nu, gym_training_mode=True, scénario board valide) : première action
+`squad_shoot` → `RuntimeError: squad_shoot: allocation tir non terminee en auto pour squad 1001
+(defenseur non-IA ?)` ([w40k_core.py:4938-4943](../../engine/w40k_core.py#L4938-L4943)).
+Cause : le moteur d'allocation mutualisé tir/fight décide humain-vs-auto via des prédicats qui
+lisent UNIQUEMENT `game_state["player_types"]` ; en training self-play `pve_mode=False` →
+`player_types = {"1":"human","2":"human"}` ([w40k_core.py:454-456](../../engine/w40k_core.py#L454-L456)) → l'allocation attend un
+humain. Il y a en réalité **QUATRE prédicats divergents** :
+- `W40KEngine._is_player_human` — consciente de `gym_training_mode` (L2201-2206) ;
+- `_target_defender_is_ai` ([shared_utils.py:89-101](../../engine/phase_handlers/shared_utils.py#L89-L101)) — player_types only, `auto_decider` de SHOOT_CTX ;
+- `_is_ai_controlled_fight_unit` (fight_handlers, def ~L97) — player_types only ; utilisée par
+  `_fight_auto_defender` (def ~L5705) → `auto_decider` de **FIGHT_CTX** (~L5715-5728) et par
+  les 4 décisions `defender_human` du flux fight (~L5425, L5450, L6150, L6184) ;
+- `_is_ai_controlled_shooting_unit` (shooting_handlers, def ~L2144) — player_types only, pilote
+  l'auto-activation `active_shooting_unit` (cf. ⚠️ ci-dessous : ne PAS la rendre vraie en gym).
+**La mêlée crashe de la même façon que le tir** (vérifié par lecture) : `squad_fight` →
+`build_manual_fight_allocation` non `done` → `RuntimeError "squad_fight: allocation combat non
+terminee en auto"` ([w40k_core.py:5026-5031](../../engine/w40k_core.py#L5026-L5031)), garde jumelle dans fight_handlers
+(~L3352-3357). Le gate `is_gym_training` de la consolidation (~L1552) ne couvre PAS
+l'allocation.
+**Fix vérifié par simulation côté tir uniquement** (monkeypatch : `_target_defender_is_ai`
+renvoie True si `game_state["gym_training_mode"]`) : le tir s'auto-résout ensuite correctement.
+⚠️ Le smoke test « moteur nu jusqu'au tour 5 » ne prouve PAS le chemin d'allocation fight :
+seule `_target_defender_is_ai` était patchée — la seule explication cohérente est qu'aucune
+blessure de mêlée n'a été réussie pendant le smoke. À couvrir explicitement en T1 (scénario de
+smoke avec pertes en mêlée garanties).
+⚠️ Ne PAS "fixer" en mettant `player_types` à `"ai"` : cela active l'auto-activation tir
+(`active_shooting_unit`, [shooting_handlers.py:1082-1086](../../engine/phase_handlers/shooting_handlers.py#L1082-L1086)) qui reste alors périmé après
+l'activation et fait exploser le décodeur (`active_shooting_unit X is not in
+shoot_activation_pool`, [action_decoder.py:418-423](../../engine/action_decoder.py#L418-L423)) — vérifié par exécution.
+
+### R5 — Wrappers et bots sur l'ANCIEN layout d'actions (BLOQUANT runtime)
+**Repro** (pile complète `BotControlledEnv(ActionMasker(W40KEngine))` + GreedyBot) :
+`env_wrappers.py:436` force `self.env.step(11)` comme "WAIT" → dans l'espace actuel 11 =
+**advance direction 5** → `ValueError: convert_squad_action: advance_roll manquant`
+([action_decoder.py:885](../../engine/action_decoder.py#L885)).
+- `ai/evaluation_bots.py:36` : `WAIT_ACTION = 11` (actuel : **18**) ; usages de `12` comme action
+  spéciale (actuel : fall back dir 0) ; slots de tir supposés 4-8 (actuel : **19-23**) ;
+  `DEPLOYMENT_ACTIONS = [4..8]` réutilisé comme slots de TIR (L86) ; moves supposés 0-3
+  (`0 in valid_actions` L135, `[0, 1, 2, 3, WAIT_ACTION]` L179) au lieu de 0-5.
+- `ai/env_wrappers.py` : littéraux `11` périmés en L436 (`step(11)`), L796 (`action == 11`),
+  L900 (`bot_action == 11`) ; plages shoot 4-8 codées en dur L793, L871, L898. Le fichier
+  **mélange déjà les deux espaces** : les branches "Pool empty -> advance phase via WAIT"
+  retournent, elles, `18` (valeur correcte) — L556, L854 (BotControlledEnv) et L1172, L1188
+  (SelfPlayWrapper). C'est la preuve d'une migration partielle, pas un layout cohérent.
+- `ai/game_replay_logger.py:774-828` (raté des deux premiers audits) : layout encore PLUS
+  ancien à 8 actions (`action % 8`, moves 0-3, shoot=4, charge=5, wait=6, fight=7) — les
+  replays de training décoderaient n'importe quoi ; à migrer ou à condamner explicitement.
+- Les actions de déploiement 4-8 sont, elles, TOUJOURS valides ([action_decoder.py:160-175](../../engine/action_decoder.py#L160-L175)).
+- L'incohérence est documentée dans la config elle-même : `justification` dit
+  "action_space_size=31 (16 micro + 15 macro)" alors que le champ vaut 41 (26 micro + 15 macro)
+  — les wrappers/bots sont restés sur un layout intermédiaire.
+
+### R6 — Bug moteur : socles ovales en éligibilité de charge (touche AUSSI le PvP)
+**Repro** : scénario contenant un Carnifex ou Psychophage (seuls types à `BASE_SIZE` liste,
+vérifié via UnitRegistry : `[41,27]` et `[47,36]`) → à l'entrée en phase charge,
+`charge_build_valid_destinations_pool` → `TypeError: can only concatenate list (not "int") to
+list` ([charge_handlers.py:3627-3628](../../engine/phase_handlers/charge_handlers.py#L3627-L3628)) : `_mover_bs = unit["BASE_SIZE"]` puis
+`(_mover_bs + 1) // 2` sans gérer le cas liste, alors que le même bloc le gère pour l'ennemi
+6 lignes plus bas (`_e_bs_int = max(_e_bs) if isinstance(_e_bs, (list, tuple)) ...`, L3634-3635).
+Chemin atteignable en PvP via `_has_valid_charge_target` (L3390) → à corriger indépendamment du
+training. Les rosters d'entraînement Tyranids peuvent contenir ces unités.
+**DEUXIÈME occurrence du même pattern** : `_charge_reverse_goal_bfs_for_eligibility`
+([charge_handlers.py:825-826](../../engine/phase_handlers/charge_handlers.py#L825-L826)), même asymétrie avec l'ennemi (L832-833), calcul fait AVANT le
+garde `BASE_SHAPE == "round"`. Nuance vérifiée : la fonction est DÉSACTIVÉE sur boards scalés
+(appelée seulement si `inches_to_subhex <= 1`, ~L3693-3697 ; notre board = 5) → site
+inatteignable en pratique sur 44x60x5. Le fix T1 couvre quand même LES DEUX sites (défense en
+profondeur) ; seul le premier (L3627) crashe réellement.
+
+### R7 — Fin d'épisode au tour limite : masque vide sans terminaison (moteur nu)
+**Repro** (moteur nu, sans wrapper, scénario fight, R4 simulé) : au dernier tour, phase fight
+du joueur 2, tous les pools vides, aucun état fight pendant → masque entièrement vide,
+`terminated=False`. MaskablePPO crashe sur masque vide.
+Analyse statique concordante : SEULE `_fight_phase_complete` (fight_handlers, def ~L1867,
+appelée ~L1488/1904/2408) pose `game_over` en vif — et uniquement **au sein d'un `step()`**.
+Masque vide = plus aucun step légal = la complétion de phase n'est jamais déclenchée.
+⚠️ `_advance_to_next_player` était du CODE MORT en production — **supprimée le 2026-07-19**
+(cf. §0.4) : elle n'existe plus, ne pas la chercher.
+Nuance config : la limite de tours existe en deux endroits — `max_turns` (game_config.json L14)
+et `max_turns_per_episode` (training config) ; clarifier en T5 lequel fait foi en moteur nu.
+Dans la pile réelle, ce cas est censé être absorbé par le "WAIT forcé" du wrapper
+([env_wrappers.py:427-436](../../ai/env_wrappers.py#L427-L436)) — actuellement cassé par R5. **À revalider après R5** : si le
+deadlock persiste à travers le wrapper, corriger la root cause côté moteur (la complétion de la
+phase fight du dernier tour doit déclencher la fin d'épisode sans exiger une action illégale),
+pas en injectant des actions bidon.
+
+### R8 — Interface agent aveugle aux nouvelles règles (non bloquant pour Phase A)
+Vérifié par lecture concordante :
+- **Niveaux** : aucune feature d'élévation dans l'observation (ni 108 ni 357) ; l'agent subit le
+  coût de descente §13.06 (retranché du budget rigide, [shared_utils.py:3760-3763](../../engine/phase_handlers/shared_utils.py#L3760-L3763)) sans pouvoir
+  le percevoir ; il ne peut pas monter (commentaire moteur : "l'IA directionnelle 2D ne monte
+  pas", même bloc). Le moteur, lui, gère montée/descente (`_model_climb_reachable_floor_cells`
+  [movement_handlers.py:2889](../../engine/phase_handlers/movement_handlers.py#L2889), `reachable_multilevel_field`
+  [engine/phase_handlers/geodesic_move.py:148](../../engine/phase_handlers/geodesic_move.py#L148)).
+- **Pivot/perModelMove** : résolus automatiquement par le moteur (plan rigide) — aucun point de
+  décision agent. Légal règles (un placement légal parmi d'autres), sous-optimal seulement.
+- **Fight V11** : action 25 = pile-in + déclaration + résolution + consolidation auto
+  (`_ai_select_pile_in_destination` fight_handlers.py:1686, `_ai_select_fight_target` L1725,
+  `_ai_select_consolidation_destination` L1436). Légal, choix internes non pilotés par la policy.
+- **LoS/engagement 3D** : gate vertical implémenté ([spatial_relations.py:143-231](../../engine/spatial_relations.py#L143-L231)) mais le module
+  lève lui-même "câblage incomplet" si les données verticales manquent (L186-189, chantier 4) ;
+  l'observation utilise une `los_topology` 2D "legacy boards" (observation_builder.py:741).
+  → Le chantier LoS 3D (Documentation projet "Chantier 5") est un PRÉREQUIS règles pour le tir
+  multi-niveaux ; le training Phase A n'en dépend pas tant que les scénarios d'entraînement
+  restent mono-niveau, mais la Phase B avec terrains à étages OUI. Vérifier l'état du chantier
+  avant d'activer des terrains à étages en training.
+
+### Notes non bloquantes (à traiter en T6)
+- `active_shooting_unit` : cycle de vie sain uniquement pour le flux PvP/PvE ; ne pas l'activer
+  en gym (cf. R4 ⚠️).
+- `ai/target_selector.py` : orphelin (importé seulement par son test unitaire).
+- Docs périmées : AI_OBSERVATION.md décrit 357 floats, AI_TRAINING.md 355 — aucun ne décrit le
+  pipeline squad 108 actif ; `justification` de la config dit 31 au lieu de 41. Les snapshots
+  `BEST_CoreAgent_training_config.json` (obs 355) sont incompatibles avec le code actuel
+  (`build_observation` exige 357, [observation_builder.py:1094-1097](../../engine/observation_builder.py#L1094-L1097)).
+
+## 4. Décisions de design imposées
+
+1. **Phase A à interface constante** : on garde `Discrete(41)` / `Box(108)`. Aucun ancien modèle
+   n'est réutilisable de toute façon (layout obs squad + VecNormalize stats) → tout run se fait
+   avec `--new`. Ne jamais écraser les zips existants (protégés).
+2. **Source de vérité unique "joueur programmatique"** : le prédicat "ce joueur est piloté par la
+   machine (auto-résolution)" doit exister en UN seul endroit, consultable depuis game_state
+   (le flag `gym_training_mode` y est déjà copié, [w40k_core.py:491](../../engine/w40k_core.py#L491)/1011). Les QUATRE prédicats
+   recensés en R4 (`W40KEngine._is_player_human`, `_target_defender_is_ai`,
+   `_is_ai_controlled_fight_unit`, `_is_ai_controlled_shooting_unit`) doivent s'appuyer dessus.
+   Interdit de dupliquer le check. ⚠️ La bascule gym ne doit s'appliquer qu'aux décisions
+   d'ALLOCATION/résolution, pas aux mécanismes d'auto-activation type `active_shooting_unit`
+   (cf. ⚠️ R4) : auditer chaque site d'appel avant de brancher le prédicat unique.
+3. **Plus aucun ID d'action littéral dans ai/** : importer les constantes depuis
+   `engine/macro_intents.py`. État réel : **AUCUNE constante d'action n'existe** — le mapping
+   n'est qu'en commentaire (L9-18) ; seuls `INTENT_*`, `MAX_OBJECTIVES`, `BASE_ZONE_INTENT`,
+   `TOTAL_ACTION_SIZE` sont définis. TOUT est donc à créer : `ACTION_WAIT = 18`,
+   `SHOOT_SLOT_BASE = 19`, bases move/advance/fallback, `ACTION_CHARGE = 24`,
+   `ACTION_FIGHT = 25`, `DEPLOY_SLOTS = range(4, 9)`. Un littéral d'action dans ai/ = bug de
+   revue.
+4. **Scénarios : référence de board explicite** — les scénarios d'agent restent sous
+   `config/agents/<agent>/scenarios/` (banque par agent, rosters aléatoires) mais déclarent
+   `"board_ref": "44x60x5"`. Le résolveur ([game_state.py:1646](../../engine/game_state.py#L1646), 1437, 1496) accepte alors :
+   parent == `scenario/` d'un board (comportement actuel, inchangé pour le PvP) OU clé
+   `board_ref` présente → `config/board/<board_ref>/`. Absence des deux = erreur explicite
+   (pas de fallback). Alternative rejetée : déplacer la banque sous
+   `config/board/44x60x5/scenario/` — casse la structure par-agent et le check exige un parent
+   nommé exactement `scenario` (pas de sous-dossiers training/holdout).
+5. **Miroir PvP strict** : la phase A ne modifie AUCUNE règle de jeu ; les fixes moteur (R4, R6)
+   doivent être neutres pour le flux PvP manuel (mémoire projet : le flux gym copie le flux
+   PvP, jamais le durcir/diverger). Seuils/conversions via `inches_to_subhex`.
+6. **Prochain agent : 2 rosters seulement** (décision utilisateur 2026-07-14). Le nouvel agent
+   ne s'entraîne que sur 2 rosters différents — spécialisation assumée, pas de généralisation
+   multi-rosters. Câblage vérifié dans le code, AUCUNE modif moteur nécessaire :
+   - la résolution passe par `agent_roster_ref`/`opponent_roster_ref` du scénario
+     ([game_state.py:1026-1057](../../engine/game_state.py#L1026-L1057)) ; trois formes supportées : `"training_random"` (tirage
+     dans `config/agents/<agent_key>/rosters/<scale>/training/agent_training_roster*.json`),
+     ref explicite `"training/<fichier>.json"`, ou **liste de refs** → `rng.choice`
+     ([game_state.py:1176-1186](../../engine/game_state.py#L1176-L1186)) ;
+   - **voie retenue** : dossier `config/agents/<NouvelAgent>/rosters/<scale>/training/` ne
+     contenant QUE les 2 fichiers (pattern `agent_training_roster*.json` obligatoire, clé
+     interne `roster_id` requise) + `"agent_roster_ref": "training_random"` dans les scénarios
+     → tirage 50/50 par épisode ;
+   - `config/agents/_p2_rosters/` est PARTAGÉ entre agents (pool de tirage
+     `150pts/training/` = 151 fichiers ; le dossier 150pts en contient bien plus, holdouts
+     inclus) : si les 2 rosters incluent l'adversaire, restreindre `opponent_roster_ref`
+     (ref explicite ou liste) — sinon P2 continue de tirer dans toute la banque ;
+   - désactiver `roster_pool_schedule` dans la training config
+     (`_filter_training_roster_candidates`, game_state ~L1322-1393) : le filtre progressif
+     swarm/troop/elite peut vider un pool de 2 fichiers → `ValueError
+     "roster_pool_schedule produced zero eligible training rosters"` (~L1422-1426).
+     Si le schedule reste actif : le nommage doit matcher `(elite|swarm|troop)_(\d+)$`
+     sinon écart SILENCIEUX du fichier ;
+   - contraintes fichiers : suffixes `_kpis`/`_matchups` exclus du tirage, composition non
+     vide. ⚠️ L'unicité des `roster_id` internes n'est PAS vérifiée au tirage (contrôlée
+     seulement sur un chemin marginal) : deux fichiers au même roster_id passent en silence
+     et fausseraient le suivi win-rate par-roster — vérifier à la main les 2 fichiers ;
+   - `agent_roster_seed` (clé scénario) fige le tirage AGENT seulement — il ne fige PAS le
+     tirage opponent (seed non transmis, `random_seed=None`) ;
+   - conséquences training attendues : convergence plus rapide (distribution d'observations
+     quasi stationnaire), holdouts multi-rosters non pertinents comme critère ; risque
+     principal = un roster qui domine le gradient → **suivre le win-rate PAR roster**
+     (`roster_info`/`agent_roster_id` déjà loggé par épisode,
+     [step_logger.py:188-194](../../ai/step_logger.py#L188-L194)), jamais l'agrégé seul (critère T6.3 à lire par-roster).
+
+## 5. Tranches d'implémentation
+
+Chaque tranche se termine par sa validation (section 6) AVANT de passer à la suivante.
+
+### T1 — Fixes moteur neutres (R4, R6) — ✅ FAIT, prédicat ET branchement verrouillés (2026-07-21)
+
+> **Historique du statut** : ✅ (2026-07-15) → ⏳ PARTIEL (audit §0.19.1, 2026-07-20) → ✅
+> (§0.19.3, 2026-07-21).
+>
+> 🔴 **Le démenti de §0.19.1** : le code de T1 était en place et conforme, mais deux de ses trois
+> volets n'étaient **verrouillés par aucun test** — le **site R6 n°1**
+> (`_charge_reverse_goal_bfs_for_eligibility`, inatteignable au x5 : mutation `int()` sur une
+> liste, suite **verte**) et **R4** (zéro occurrence de `is_programmatic_owner` /
+> `is_programmatic_defender` dans `tests/`, alors que §8.3 impose une matrice complète).
+>
+> ✅ **R6 comblé en §0.19.3** : `test_charge_oval_base_reverse_bfs.py` (+4, avec garde
+> d'atteinte) — les DEUX sites rougissent désormais sur mutation.
+>
+> ✅ **R4 comblé** : `test_programmatic_owner_predicate.py` (+22) verrouille le **prédicat** et
+> son refus du repli ; `test_r4_auto_decider_wiring.py` (+14) verrouille son **BRANCHEMENT** —
+> or c'était ça, la rupture R4. Les **6** exigences de §8.3 sont couvertes, chaque cas gym ayant
+> son jumeau PvP. 6 mutations au total, toutes rouges, dont une qui **rejoue la rupture R4
+> d'origine**. Détail en §0.19.3. Le texte ci-dessous est celui de la session d'origine,
+> **conservé tel quel**.
+
+Réalisé : R6 normalisé dans les 2 sites ; prédicat unique `is_programmatic_owner` /
+`is_programmatic_defender` (shared_utils), délégation de `_target_defender_is_ai` (SHOOT_CTX)
+et `_is_ai_controlled_fight_unit` (FIGHT_CTX + 4 defender_human) ; `player_types` et
+`_is_ai_controlled_shooting_unit` non touchés. Validé : 1152 passed / 2 skipped ; smoke gym
+3 seeds — charge Carnifex OK, pertes fight réellement allouées via FIGHT_CTX (kill constaté).
+Le masque vide au tour 5 (fin de fight P2) a été RE-CONSTATÉ → confirme R7, à traiter en T5.
+Reste : validation PvP manuelle rapide (non-régression) côté utilisateur.
+1. **R6** : normaliser `_mover_bs` en miroir exact du traitement ennemi
+   (`_mover_bs_int = max(_mover_bs) if isinstance(_mover_bs, (list, tuple)) else
+   int(_mover_bs)`) dans les DEUX sites : `charge_build_valid_destinations_pool`
+   (~L3627-3628) ET `_charge_reverse_goal_bfs_for_eligibility` (~L825-826).
+2. **R4** : introduire un prédicat unique (proposé : `is_programmatic_defender(game_state,
+   target_sid)` dans shared_utils) : renvoie True si `game_state.get("gym_training_mode")` est
+   True, sinon comportement actuel (player_types, erreurs explicites conservées). Sites à
+   brancher — inventaire vérifié :
+   - `SHOOT_CTX.auto_decider = _target_defender_is_ai` (shared_utils ~L113), consommé par
+     `_manual_allocation_step` (~L6212, L6242) ;
+   - `FIGHT_CTX.auto_decider = _fight_auto_defender` (fight_handlers ~L5728), les checks
+     `defender_human` du flux fight (~L5425, L5450, L6150, L6184), ET les deux gardes
+     `RuntimeError "allocation ... non terminee en auto"` (`squad_shoot`/`squad_fight` dans
+     w40k_core + garde jumelle fight_handlers ~L3352-3357) qui doivent cesser de crasher une
+     fois le prédicat branché ;
+   - `HAZARD_CTX` (shared_utils ~L6423-6437) n'a pas d'`auto_decider` : le hazard est DÉJÀ
+     gym-aware au call-site (`auto_resolve = gym_training_mode`, [w40k_core.py:2634](../../engine/w40k_core.py#L2634)) sans lire
+     player_types — rien à faire en gym ; corollaire à vérifier : en PvE, un défenseur IA
+     passerait par l'allocation hazard MANUELLE ;
+   - chemins `squad_shoot_validate` ([w40k_core.py:4685](../../engine/w40k_core.py#L4685)) et prompts rule-choice
+     ([w40k_core.py:2527](../../engine/w40k_core.py#L2527)) — déjà sur `_is_player_human`, vérifier qu'ils basculent sur le
+     prédicat unique sans changement de comportement PvP.
+   Ne PAS toucher `player_types`. Ne PAS brancher `_is_ai_controlled_shooting_unit`
+   (auto-activation) sur la bascule gym (cf. ⚠️ R4).
+   Ajouter au smoke test T1 un scénario garantissant des **pertes en mêlée** (le chemin
+   FIGHT_CTX n'a jamais été exercé en gym, cf. R4).
+3. Vérification de non-régression PvP : `python3 -m pytest tests/ -x -q` (suite existante,
+   1152 tests collectés au 2026-07-14) + une partie PvP manuelle rapide côté utilisateur.
+
+### T2 — Migration wrappers + bots vers l'espace squad (R5) — ✅ FAIT (2026-07-15)
+
+Réalisé : constantes nommées dans `macro_intents.py` (MOVE/ADVANCE/FALL_BACK_DIRS, ACTION_WAIT=18,
+SHOOT_SLOTS=19-23, ACTION_CHARGE=24, ACTION_FIGHT=25, DEPLOY_SLOTS=4-8 — miroir de
+`SQUAD_ACTION_*` de shared_utils). `evaluation_bots.py` : 8 bots migrés (helper `_first_action_in`,
+`_shoot_focus_fire` sur SHOOT_SLOTS, dicts de poids déploiement via DEPLOYMENT_ACTIONS, TacticalBot
+inclus) — zéro littéral d'action résiduel. `env_wrappers.py` : bug phare R5 corrigé (`step(11)` →
+`ACTION_WAIT`), `return 18` et trackers diagnostiques shoot/wait migrés (BotControlledEnv +
+SelfPlayWrapper). `game_replay_logger.log_action` (layout `% 8` mort + lit `self.env.controller`
+absent du moteur squad, aucun appelant vif) CONDAMNÉ (NotImplementedError explicite). Tests migrés
+(`test_evaluation_bots.py`, `test_env_wrappers.py`, `test_game_replay_logger.py`). Audit train.py /
+multi_agent_trainer / bot_evaluation : aucun littéral d'action (les `objectives_ref` restent T3/T4).
+Validé : 1152 passed / 2 skipped ; smoke moteur nu 3 seeds (shoot+charge+fight, unité socle-ovale
+BASE_SIZE liste présente → charge franchie sans TypeError R6, 2 pertes mêlée via FIGHT_CTX) ; smoke
+pile complète (BotControlledEnv + GreedyBot migré) avance 45-48 steps → **dépasse le 1er WAIT forcé**
+(preuve que R5 est levé). Persiste : deadlock fight pile_in fin de partie (boucle 1000 steps /
+masque vide sur eligible units) = R7, UNMASQUÉ par le fix R5, à traiter en T5 (déjà prévu par le doc).
+
+**Contre-vérification indépendante (2026-07-15)** — T2 confirmée conforme (code relu, suite
+rejouée verte, grep de contrôle passé, smoke pile complète rejoué), avec 3 précisions :
+1. ~~**Inexactitude du rapport** : `multi_agent_trainer.py:1016` contient encore `action % 8` +
+   `unit_idx = action // 8` (monkeypatch legacy de `controller.execute_gym_action`). Branche
+   INERTE (gardée par `hasattr(actual_env, 'controller')`, attribut absent du moteur squad)
+   mais « aucun littéral dans multi_agent_trainer » est faux — à condamner/purger comme
+   `game_replay_logger.log_action` (raccroché à T6 hygiène ou T5).~~
+   → ✅ **SOLDÉ, NE PLUS CITER (voir §0.8).** Le monkeypatch a été purgé au commit `6a7a9de1`,
+   le commentaire de purge qui l'a remplacé a disparu avec §0.8, et `game_replay_logger` est
+   supprimé. **`grep 'action % 8' ai/multi_agent_trainer.py` est vide.** Ce point a induit deux
+   relecteurs en erreur *après* sa résolution, parce qu'ils l'ont cité depuis cette doc au lieu de
+   grep le fichier — d'où le rappel : **une doc n'est pas une source, le code l'est.**
+2. **Précision sur le smoke pile complète** : les épisodes 40-48 steps ne se terminent PAS
+   normalement — ils sont tués par le garde « 1000 steps » du wrapper, en deadlock
+   `squad_wait` fight/pile_in dès le **TOUR 1** (scénario à unités pré-engagées), pas
+   seulement au tour limite. Le périmètre T5 est donc PLUS LARGE que « fin d'épisode au
+   dernier tour » : toute phase fight avec pile-in éligibles peut boucler.
+3. **Nouveau symptôme, même famille (T5)** : avec `agent_seat_mode="p2"` ou `"random"`
+   (= la config réelle de train.py), le RESET crashe —
+   `RuntimeError "bot-owned eligible units with empty action mask"` en fight tour 1
+   (le bot P1 déroule son tour jusqu'à la phase fight alternée où l'unité éligible
+   n'appartient plus au joueur courant). Seul seat="p1" passe. À couvrir en T5.
+
+1. Ajouter dans [macro_intents.py](../../engine/macro_intents.py) les constantes nommées manquantes (WAIT=18, bases des
+   plages move/advance/fallback/shoot, CHARGE=24, FIGHT=25, DEPLOY_SLOTS=range(4,9)) et les
+   utiliser partout dans `ai/env_wrappers.py` et `ai/evaluation_bots.py` (supprimer
+   `WAIT_ACTION = 11`, les littéraux 11/12, les plages 4-8 hors déploiement ; remplacer aussi
+   les `return 18` déjà corrects mais en dur — L556, L854, L1172, L1188 — par la constante).
+2. **Auditer la logique de chaque bot phase par phase** contre le mapping actuel : la sélection
+   "shoot" doit itérer les slots 19-23 (slots ennemis via `get_enemy_slot_mapping`), "charge"=24,
+   "fight"=25, les moves par direction 0-5/6-11/12-17. Les bots choisissent des actions dans le
+   masque : tout choix hors masque = erreur explicite (comportement existant à préserver).
+3. `SelfPlayWrapper` : mêmes corrections (WAIT forcé, détection "pool empty").
+4. Auditer `ai/train.py`, `ai/bot_evaluation.py` ET `ai/game_replay_logger.py` (layout 8
+   actions, L774-828) pour les mêmes littéraux périmés — y compris les dicts de poids
+   `{4: 0.50, ...}` d'evaluation_bots (6 occurrences) et les `return 10/4`.
+
+### T3 — Chemins board + config training (R1, R2) — ✅ FAIT (2026-07-15)
+
+Réalisé : **R2** — `_list_available_board_refs` (train.py) et `analyzer.py` résolvent via
+`config_loader.get_board_dir()` (plus aucune reconstruction `{cols}x{rows}` en ai/ ; grep ai/
++ scripts/ = seuls ces 2 sites vifs, `analyzer_avant_refactor.py` = backup jamais importé, laissé
+tel quel). **R1** — `--training-config` sans défaut silencieux : helper `_require_training_config_phase`
+lève une erreur explicite listant les phases (`['x1','x5_append','x5_new','x1_debug','x5_debug']`)
+quand un agent est sélectionné sans phase (décision recommandée du doc retenue en MODE NUIT).
+**1bis** — retrait de la dimension objectives du tirage de scénarios (`_load_scenario_objectives_ref`
+supprimée, `_apply_wall_ref_weighting` en wall-only, `_materialize_scenario_with_refs` n'émet plus
+objectives_ref via ce chemin). **1ter** — training config purgée dans les 5 phases
+(`train_wall_ref_weights` → `{"default":1.0}`, `eval_wall_refs` → walls-33/mc1 réels,
+`train_objectives_ref_weights`/`eval_objectives_refs` supprimées) ; `bot_evaluation.py`
+(`_materialize_eval_scenario_refs`) migré : n'émet plus `objectives_ref`/`objectives`/`objective_hexes`
+(objectifs = contrat terrain). Point 3 (deployment legacy `{cols}x{rows}`) : différé T4 (décision T4).
+Tests ajoutés : `tests/unit/ai/test_train_board_refs.py` (get_board_dir, expand refs inconnus/valides,
+R1 message) + `tests/unit/ai/test_bot_evaluation_eval_refs.py` (objectives_ref absent du matérialisé) +
+maj `test_analyzer_utils.py` (fake loader get_board_dir).
+Validé : **1162 passed / 2 skipped** (baseline 1152 + 10 tests T3, zéro régression) ;
+`train.py --step --training-config x1_debug` **dépasse la résolution walls/objectives** (500 entrées
+pondérées, plus de FileNotFoundError board dir) — le crash suivant = **R3-a** (scénario hors dossier
+`scenario/`) = T4, hors périmètre T3. Smoke moteur nu (Annexe A.1) + pile GreedyBot (A.2), 3 seeds ×
+scénario Psychophage/ScreamerKiller : **charge franchie sans TypeError (R6 non régressé)**, toutes
+phases atteintes, zéro exception.
+⚠️ **Pertes de mêlée non re-démontrées end-to-end** : le smoke A.1 (aléatoire non dirigé, adversaire
+passif) ne les produit pas *par conception* (réserve explicite Annexe A) ; le smoke A.2 (GreedyBot des
+2 camps) bute sur le **deadlock R7/T5 `fight/pile_in` dès le tour 1** AVANT toute résolution de
+blessure. Ce blocage est un item OUVERT (T5), indépendant de T3 (aucun code moteur touché) — la
+preuve FIGHT_CTX reste celle de T1 (committée). À re-valider après T5.
+
+**Contre-vérification indépendante (2026-07-15)** — T3 confirmée conforme : repro R1 rejouée
+(erreur explicite avec les 5 phases), repro R2/x1_debug rejouée (« 500 entries, 100 unique
+files », crash suivant = R3-a exactement), 1162 tests collectés / suite verte, config purgée
+vérifiée dans les 5 phases, aucun code moteur touché (git status). UNE réserve mineure :
+`_materialize_scenario_with_refs` (train.py ~L642-668) conserve un paramètre `objectives_ref`
+et sa branche d'émission `scenario_copy["objectives_ref"] = ...` — MORTE (l'unique appelant
+~L854 ne passe que wall_ref) mais tout futur appelant réémettrait une clé rejetée par le
+moteur. À purger en T4 (avec la migration) ou T6.
+
+1. **R2** : remplacer la reconstruction `{cols}x{rows}` de `_list_available_board_refs`
+   ([train.py:586-591](../../ai/train.py#L586-L591)) par `config_loader.get_board_dir()`. Même motif déjà repéré ailleurs :
+   `ai/analyzer.py:224` (et `analyzer_avant_refactor.py:224`) reconstruisent
+   `config/board/{cols}x{rows}/objectives`. Greper `ai/` et `scripts/` pour le solde.
+1bis. **train.py émet encore `objectives_ref`** : `_load_scenario_objectives_ref`
+   ([train.py:562-577](../../ai/train.py#L562-L577)) et le sampler `train_objectives_ref_weights` (~L873, L887-893)
+   expansent des refs `objectives-*.json` — clé que le moteur REJETTE (game_state:320-329).
+   Cette branche doit être supprimée/migrée vers les terrains (T4), sinon le tirage de
+   scénarios de train.py casse après migration.
+1ter. **Migrer la training config et le chemin d'éval** (R3-f/R3-g) : purger
+   `train_wall_ref_weights`/`eval_wall_refs`/`eval_objectives_refs` des refs inexistantes
+   dans les 5 phases de `CoreAgent_training_config.json`, et migrer
+   `_materialize_eval_scenario_refs` (bot_evaluation.py:59-98, émission d'`objectives_ref`)
+   vers le contrat terrain — les callbacks d'éval train.py en dépendent.
+2. **R1** : décision de config (pas de code) : soit ajouter une phase `default` pointant vers la
+   config x1 courante dans `CoreAgent_training_config.json`, soit rendre `--training-config`
+   obligatoire (erreur explicite listant les phases disponibles). Recommandé : la seconde (pas
+   d'alias silencieux). À valider avec l'utilisateur au checkpoint T3.
+3. La voie legacy `config/deployment/{cols}x{rows}/` ([game_state.py:436-440](../../engine/game_state.py#L436-L440)) : si la banque
+   migrée (T4) n'utilise plus `deployment_zone` nommée, ne pas y toucher ; sinon fournir les
+   fichiers de zones pour `220x300` (décision en T4).
+
+### T4 — Migration de la banque de scénarios (R3) — ✅ FAIT (2026-07-15)
+
+Réalisé : **resolver `board_ref`** — helper `_resolve_board_dir(scenario_file, board_ref,
+purpose)` dans game_state.py (seul fichier moteur touché) : parent `scenario/` (voie PvP
+inchangée) OU `board_ref` → `config/board/<board_ref>/` ; erreurs explicites (absence des
+deux, board inexistant, traversal), câblé dans `_resolve_shared_config_path`,
+`_load_shared_walls_from_ref` (random) et `_read_terrain_file` + call-sites. **Bug moteur
+corrigé au passage** : `pool_set` gardé derrière le NOM legacy `deployment_zone` → les zones
+issues du terrain (voie moderne) ne peuplaient pas le pool de déploiement random/fixed
+(fix neutre PvP, commenté en ~L576). **Terrains plats** `terrain-train-01/02/03.json`
+(5 objectifs, deployment_zones "1"/"2", 0 étage). **Migration** :
+`scripts/migrate_scenario_bank_v11.py` (idempotent) — 61 scénarios migrés (0 clé legacy,
+`board_ref`+`terrain_ref`), `training_save/` (30) archivé sous `_archive_pre_v11/`.
+**Outillage** : `build_holdout_benchmark.py` migré ; `scenario_manager.py` NON touché
+(chemin dormant — `config/scenario_templates.json` absent → lève à la construction ; son
+alignement 0/1 vs 1/2 traverse multi_agent_trainer = chantier séparé à valider).
+**Balayage** : `scripts/sweep_scenario_bank_v11.py` — 61/61 chargés + reset. Tests +83.
+Validé : 1245 passed / 2 skipped ; Carnifex en charge 3 seeds sans TypeError (R6).
+⚠️ Pertes de mêlée toujours non démontrables end-to-end (deadlock R7/T5 fight/pile_in tour 1,
+confirmé 3 voies) — inchangé depuis T2/T3, aucun code fight/charge touché par T4.
+
+**Contre-vérification indépendante (2026-07-15)** — T4 confirmée conforme : balayage rejoué
+(61/61 + reset, 0 clé legacy hors archive — grep indépendant), suite rejouée (1245 collectés,
+verte), sample de scénario migré inspecté (clés legacy absentes, refs présentes), 3 terrains
+inspectés (5 objectifs, dz 1/2, 0 floor), resolver relu (zéro fallback, traversal gardé),
+`users.db` propre, `charge_handlers` non touché (non-régression R6 structurelle). Réserves
+mineures : (1) les scripts `migrate_/sweep_scenario_bank_v11.py` n'ont pas de bootstrap
+`sys.path` — exécutables uniquement avec `PYTHONPATH=.` ; (2) la réserve T3 (paramètre
+`objectives_ref` mort de `_materialize_scenario_with_refs`, train.py ~L645-668) n'a PAS été
+purgée en T4 → reste pour T6.
+
+Plan d'origine (réalisé ci-dessus) :
+1. Implémenter la clé **`board_ref`** dans le résolveur (décision de design n°4) :
+   `_resolve_shared_config_path`, `_load_shared_walls_from_ref` (branche "random") et
+   `_read_terrain_file` ([game_state.py:1646](../../engine/game_state.py#L1646), 1437, 1496). Erreur explicite si ni parent
+   `scenario/` ni `board_ref`.
+2. Créer les **terrains d'entraînement** sous `config/board/44x60x5/terrain/` : chaque terrain
+   porte objectifs (`"objective": true`) et `deployment_zones` (polygones J1/J2). Point de départ:
+   dériver des terrains existants (`terrain-mc1.json`, `terrain-floors-test.json`) et des
+   anciennes refs objectives/walls de la banque. Phase A : terrains PLATS uniquement (pas
+   d'étages) — les étages arrivent en Phase B (cf. R8/LoS 3D).
+   ⚠️ Piège vérifié : un terrain SANS aucune area `"objective": true` donne une liste
+   d'objectifs VIDE en silence (game_state ~L376-381) — le script de migration doit valider
+   ≥ 1 objectif par terrain produit.
+3. Migrer les **61 scénarios** de la banque (training 30 + training_benchmark 4,
+   holdout_regular 10, holdout_hard 10 + matchups 7) : supprimer `objectives_ref`, remplacer
+   `deployment_zone`/`wall_ref` par `terrain_ref` (+ `wall_ref` réel encore supporté) +
+   `board_ref`. Statuer sur `scenarios/training_save/` (30 JSONs) : migrer ou archiver.
+   Écrire un script de migration dans `scripts/` (one-shot, vérifiable) plutôt qu'une édition
+   manuelle. Les refs `"random"` (walls/terrain)
+   doivent piocher dans le board résolu — vérifier le support côté train.py
+   (`_expand_random_ref_weights`, [train.py:603](../../ai/train.py#L603)) après le fix R2.
+4. Outillage impacté — état vérifié :
+   - `scripts/build_holdout_benchmark.py` **ÉMET les clés legacy** (`deployment_zone: "hammer"`
+     L110, `objectives_ref` L118/246/254) → à migrer, pas seulement à vérifier ;
+   - `ai/scenario_manager.py` : utilise des `deployment_zones` avec clés joueur **0/1** alors
+     que les terrains modernes utilisent **"1"/"2"** → incompatibilité à résoudre ;
+   - `scripts/rebalance_holdout_hard_scenarios.py`, `scripts/build_dynamic_rosters.py` : aucune
+     clé legacy détectée, re-vérifier après migration.
+
+### T5 — Boucle complète et fin d'épisode (R7) — ✅ FAIT (moteur nu, 2026-07-16) — verrou confirmé par mutation (§0.19.1)
+
+> ✅ **Confirmé le 2026-07-20** : le fix `_deployment_clearance_filter` est verrouillé —
+> neutralisé, `test_deployment_mask_mirrors_commit_overlap_predicate` rougit en 6,7 s avec le
+> symptôme d'origine (42 s vert sans mutation).
+> ⚠️ **Mais le critère §6 de T5 est plus large que ce ✅** : il exige « ≥3 scénarios × sièges
+> p1/p2 », alors que `test_t5_bare_loop.py` exerce **un** scénario × 3 seeds et **aucun siège**.
+> Le ✅ vaut pour le **moteur nu, siège p1**, comme la tranche l'annonce dans son « Reste ».
+
+Réalisé (périmètre MOTEUR NU, décision utilisateur : « smoke moteur nu avec pertes en mêlée
+garanties + Carnifex en phase charge ») :
+
+- **R7 ne se manifeste PAS en moteur nu** : `W40KEngine.get_action_mask()`
+  ([w40k_core.py:5563](../../engine/w40k_core.py#L5563)) auto-avance déjà la phase fight quand ses pools sont vides
+  (boucle `fight_phase_end` tant que masque vide ET pas game_over) → l'invariant
+  `mask.any() or game_over` tient à CHAQUE step. Vérifié sur 3 scénarios `active` × 3 seeds +
+  scénario fixe pré-engagé : zéro masque vide sans terminaison, zéro exception, toutes les
+  parties se terminent (turn limit). Le fix conditionnel T5.2 sur `_fight_phase_complete`
+  n'était donc PAS requis — non touché ; `_advance_to_next_player` (mort) laissé tel quel
+  **à l'époque, supprimé depuis le 2026-07-19 (§0.4)**.
+- **Vraie rupture bloquante en moteur nu = déploiement `active`, PAS R7 (nouvelle, hors R1-R8)** :
+  `ActionDecoder._get_valid_deployment_hexes` ([action_decoder.py:961](../../engine/action_decoder.py#L961)) testait le
+  chevauchement inter-unités par CELLULES (`build_occupied_positions_set`), alors que le commit
+  `deployment_handlers.deploy_unit` (~L1017) le teste par CLEARANCE euclidien CONTINU
+  (`candidate_overlaps_any_unit`, plus strict rond↔rond). Le masque proposait donc des hexes que
+  le commit rejetait (`deploy_footprint_occupied`) ; l'action restant dans le masque, elle
+  échouait en boucle → deadlock (épisode tué au garde 1000 steps ; ~2/3 des seeds sur bot-01).
+  **Fix** : `_get_valid_deployment_hexes` filtre désormais les candidats cellule-valides par le
+  MÊME modèle que le commit (nouveau `_deployment_clearance_filter` : broad-phase numpy
+  distance-centres puis `candidate_overlaps_any_unit` exact), miroir strict (règle projet « le
+  déploiement copie la phase move »). Neutre PvP (même prédicat que le commit ; volet bornes/murs/
+  pool inchangé). Seul `action_decoder.py` touché.
+- **Smoke moteur nu (`scripts/smoke_t5_bare.py`, committé, sans monkeypatch)** :
+  (A) bot-01/02/03 × seeds 1-3 → terminate + zéro masque vide ;
+  (B) scénario fixe (ScreamerKiller P1 pré-engagé vs Termagant P2 ; Carnifex P1 à portée de
+  charge d'un Termagant P2) → **pertes en mêlée réelles via FIGHT_CTX à chaque seed** (kill
+  `squad_fight` constaté) + **Carnifex éligible en phase charge sans TypeError (R6)**.
+- **Tests ajoutés (+7)** : `tests/unit/engine/test_deployment_clearance_parity.py` (4 : parité
+  masque↔commit + anti-deadlock en clustering forcé) et `tests/unit/engine/test_t5_bare_loop.py`
+  (3 : invariant `mask.any() or game_over`, pertes mêlée FIGHT_CTX, Carnifex charge R6). Suite
+  `tests/unit/` verte (baseline 1245 + 7).
+
+Reste (hors moteur nu, non couvert par cette tranche) : le smoke **pile complète** (wrapper
+`BotControlledEnv`) — cf. contre-vérif T2 : reset crashe encore avec `agent_seat_mode="p2"/"random"`
+(`bot-owned eligible units with empty action mask` en fight tour 1). Chantier wrapper/pool alterné
+distinct, à traiter avant l'entraînement réel T6 avec la config de siège de train.py.
+
+Plan d'origine :
+1. Rejouer le smoke test pile complète (annexe A) après T1+T2 : 10 épisodes aléatoires masqués
+   doivent se terminer (`terminated=True`, winner déterminé), zéro masque vide, zéro exception.
+2. Si le deadlock R7 persiste : corriger côté moteur la complétion de phase fight au dernier
+   tour, via le SEUL chemin vif : `_fight_phase_complete` (fight_handlers, def ~1867) doit
+   aboutir à `terminated` sans exiger une action supplémentaire quand le pool est vide.
+   `_advance_to_next_player` était mort en production (cf. R7) — **supprimée le 2026-07-19**
+   (§0.4), donc plus rien à statuer. Interdit de résoudre par injection d'action côté
+   wrapper.
+3. Étendre le smoke test aux scénarios migrés (T4), sièges p1/p2/random, et à un scénario
+   contenant Carnifex/Psychophage (validation R6).
+
+### T6 — Entraînement de validation + hygiène — ⏳ EN COURS (màj 2026-07-19)
+
+> **Bloqueurs actifs : T6-h puis T6-g** (cf. §0). T6-a→T6-f sont résolus. Les entrées ci-dessous
+> sont chronologiques ; chercher `T6-g` / `T6-h` pour le chemin critique.
+
+**Préalable levé** : le bloqueur résiduel laissé par T5 (« reset crashe avec
+`agent_seat_mode="p2"/"random"` — `bot-owned eligible units with empty action mask` en fight
+tour 1 ») **ne se reproduit plus**. Vérifié en miroir exact de train.py:1673-1716
+(`ActionMasker` + `BotControlledEnv` + `GreedyBot`) sur `scenario_training_bot-01` × sièges
+p1/p2/random × 2 seeds : les 6 combinaisons terminent (`terminated=True`, turn=5), zéro masque
+vide. Le fix de parité déploiement de T5 l'a manifestement couvert.
+
+**Rappel des critères de sortie (re-démontrés sur l'arbre T6)** : suite `tests/unit/` verte ;
+smoke moteur nu `scripts/smoke_t5_bare.py` → `(A) invariant/terminaison=OK | (B) mêlée+Carnifex=OK`
+avec `melee_kills_total=5` (pertes réelles via FIGHT_CTX) et `carnifex_charge_any=True` (R6).
+
+**Deux ruptures T6 vérifiées et corrigées** (aucune ne figure dans R1-R8 — ce sont des reliquats
+de T4/de code latent) :
+
+- **T6-a — `wall_ref` exigé par le sampler alors que T4 l'a supprimé (BLOQUANT, crash immédiat)**
+  **Repro** : `train.py --agent CoreAgent --scenario bot --new --training-config x1_debug --step`
+  → `ConfigurationError: Required key 'wall_ref' is missing from mapping`
+  (`_load_scenario_wall_ref`, train.py ~L556, via `_apply_wall_ref_weighting`).
+  **Cause** : `migrate_scenario_bank_v11.py` supprime délibérément `wall_ref` (docstring : « supprime
+  les clés legacy … wall_ref ») — les 61 scénarios migrés sont TERRAIN-ONLY (`board_ref` +
+  `terrain_ref`, vérifié : 61/61 sans `wall_ref`). Le contrat moteur rend `wall_ref` OPTIONNEL
+  (`wall_hexes` XOR `wall_ref`, `terrain_ref` additif — game_state.py ~L285-314). T4 a migré la
+  banque mais pas ce sampler.
+  **Fix** : `_load_scenario_wall_ref` renvoie `Optional[str]` — `None` quand la clé est ABSENTE
+  (état légitime du contrat, pas une valeur par défaut masquant une erreur) ; une clé présente
+  reste strictement validée (erreur explicite si vide/non-string). `None` traverse
+  `_apply_wall_ref_weighting` sans override (poids `"default"` = « garde les murs du scénario »,
+  ~L853) → aucun `wall_ref` injecté.
+
+- **T6-b — `--step` était un no-op SILENCIEUX (bloque analyzer + replay)**
+  **Repro** : le run affiche « 📝 Step logging enabled » puis « ✅ StepLogger connected », et
+  `step.log` reste réduit à son en-tête (7 lignes) après 20 min d'entraînement.
+  **DEUX causes indépendantes, les deux corrigées** :
+  1. *Le StepLogger n'est branché que sur la branche mono-env* (`if step_logger:
+     base_env.step_logger = step_logger`) ; les **trois** branches vectorisées construisent leurs
+     envs avec `step_logger_enabled=False`. Avec `n_envs=48` (x1_debug), `--step` ne pouvait rien
+     produire. Le code forçait déjà `n_envs=1` pour `--replay`/`--convert-steplog` (~L1326) mais
+     PAS pour `--step`. → helper unique `_resolve_n_envs_for_step_logging` (train.py ~L571) branché
+     aux **3** sites de résolution de `n_envs` (~L1354, ~L1665, ~L2129) : force l'env unique ET le
+     DIT. Factorisé volontairement — trois gardes dupliqués sont exactement le motif de migration
+     partielle qui a produit R5. ⚠️ Piège vérifié : les 3 sites impriment le MÊME message
+     « 🚀 Creating N parallel environments » — ne pas se fier au log pour identifier le site actif
+     (`--scenario bot` passe par `train_with_scenario_rotation`, site ~L2129).
+  2. *Bug latent : l'env est RECRÉÉ sans reconnecter le StepLogger* (train.py ~L2637-2651,
+     « For n_envs==1: recreate env with frozen model for self-play »). Ce second `base_env` reçoit
+     `_metrics_tracker` mais jamais `step_logger` → le run journalisait « StepLogger connected »
+     pour un env aussitôt jeté, puis s'entraînait sur un moteur MUET. Chemin exigeant `n_envs==1`
+     (config = 48) → jamais emprunté, donc jamais vu. **Révélé par le fix (1).**
+     → reconnexion en miroir de ~L2377.
+  ⚠️ `StepLogger.log_episode_start` avale toute exception (`except Exception: print("⚠️ Episode
+  start logging error")`, step_logger.py ~L254) — un step.log vide peut donc masquer une erreur.
+  Ici le diagnostic a été fait par élimination (aucun warning émis ⇒ la fonction n'était PAS
+  appelée ⇒ le moteur entraîné n'avait pas de logger).
+
+- **T6-c — `squad_fight` : le COMMIT gym divergeait du PvP (crash d'épisode) — ✅ CORRIGÉ**
+  **Repro** (déterministe) : `MELEE_SCENARIO` + actions tirées par `default_rng(seed*777+i)`,
+  seed=1 → `ValueError: squad_fight: aucune cible pour squad 3 — mask aurait dû l'empêcher`.
+  Seul seed=1 échoue (2 et 3 passent) → **un smoke vert ne prouvait pas son absence**
+  (`smoke_t5_bare.py` tire avec `seed*99991+steps`, séquence différente).
+  **Verdict contre-intuitif** : ce n'était PAS le masque. `_squad_is_in_fight` (« a chargé OU en
+  ER ») est CONFORME à 12.04 et au prédicat PvP `fight_v11_is_eligible_to_fight`, explicitement
+  « indépendant de la présence de cibles ». C'est le commit qui cherchait sa cible dans le
+  **mapping de slots gelé du TIR** (`get_enemy_slot_mapping`) scoré par menace globale, **sans
+  filtre de zone d'engagement** — donc capable de frapper hors ER (violation 12.05) et de crasher
+  quand tous les slots sont morts (chargeur dont la cible meurt avant son activation).
+  **Fix** (`w40k_core.py` SEUL, gym-only — `_process_squad_action` n'est appelé que par `step()`) :
+  le commit consomme le prédicat du flux PvP (`_fight_build_valid_target_pool` +
+  `_ai_select_fight_target`, cf. `_fight_v11_resolve_attacks`) ; pile-in avant la sélection de
+  cible (ordre V11 12.02→12.04) ; pool vide = fight « à vide » via le MÊME moteur d'allocation
+  (0 intent → summary vide, `done=True`). Garde `ValueError` supprimée : elle interdisait un cas
+  légal (12.04/12.06) déjà accepté par le PvP. **Neutralité PvP totale** (`fight_handlers` intact).
+  **Tests (+5)** : `tests/unit/engine/test_squad_fight_target_parity.py` (2 vérifiés comme
+  échouant sur l'ancien code). Détail : `Implémenté/bug_squad_fight_mask_mismatch.md`.
+  ⚠️ **Impact sur le plan §9.4** : le site vif de la cible de mêlée a changé → cf. §9.4 point 1.
+
+- **T6-d — dettes constatées pendant T6-c — DÉCISION UTILISATEUR (2026-07-16) : traiter AVANT le training**
+  - **✅ RÉSOLU (2026-07-16) — Le gym n'entrait PAS dans la machine V11.** Mesuré sur épisode
+    complet : en phase fight, l'état était invariablement `(fight_subphase='pile_in',
+    snapshot_present=False, nb_selected_to_fight=0)`. `fight_phase_start` initialisait la machine,
+    puis `squad_fight` (`_process_squad_action`) déroulait le sien — pile-in + fight +
+    consolidation **par escouade, en une passe** — sans jamais avancer les états V11.
+
+    **Diagnostic — deux ruptures, pas une.** (1) *États jamais posés* :
+    `engaged_at_fight_step_start` absent (branche 12.04 « was engaged at the start of this step »
+    inapplicable), `units_selected_to_fight` vide (12.04 « has not already been selected to fight
+    this phase » **non appliqué** → une escouade engagée pouvait être re-sélectionnée dans la même
+    phase ; 12.08 « was eligible to fight this phase » dérive du même set), `pile_in_done` vide.
+    (2) *Ordre de phase faux* : 12.02 exige que TOUS les pile-in des DEUX joueurs précèdent le
+    premier combat, et 12.04 date son snapshot du début de l'étape FIGHT — impossible tant que le
+    pile-in d'une escouade s'intercale entre deux combats. Aucune pose d'état a posteriori ne
+    corrige ça : c'est la découpe de l'action qui était fausse.
+
+    **Fix — `w40k_core.py` seul, `fight_handlers` NON touché (neutralité PvP).** `squad_fight`
+    devient **UNE sélection de l'étape FIGHT (12.04)**, encadrée par `_fight_v11_gym_settle` qui
+    résout les deux étapes groupées (PILE IN 12.02 puis CONSOLIDATE 12.07) via les planificateurs
+    **par-figurine** existants (`fight_pile_in_plan` / `squad_consolidate_plan` — jamais les
+    helpers par-ancre condamnés). Aucune perte d'agence : l'agent ne choisissait déjà aucune
+    destination de pile-in/consolidation, seulement l'unité qui combat. Action space, taxonomie de
+    reward et compte de steps inchangés. Le driver **ne termine pas la phase** : le gym transitionne
+    par `advance_phase` sur masque vide, comme toutes les autres phases — compléter depuis une
+    action d'unité déclencherait la cascade, qui **remplace** le résultat de l'action et ferait
+    perdre à l'agent le `fight_result` (donc le reward) du combat clôturant la phase.
+
+    **Vérifié** : `fight_subphase` atteint `fight` puis `consolidate`, snapshot posé après les
+    pile-in, alternance des sélecteurs P1↔P2 réelle, 17 `squad_fight` (vs 6) sur le même épisode.
+    Suite 1293 verte, smoke `(A)/(B)` OK (5 kills mêlée, Carnifex charge), 18 épisodes
+    BotControlledEnv+GreedyBot (p1/p2/random × 2 seeds) sans échec. Verrou :
+    `tests/unit/engine/test_squad_fight_v11_state.py` (6 tests, tous rouges sur l'ancien code).
+    Effet de bord corrigé au passage : `end_activation(arg4=FIGHT)` dérivait `phase_complete` des
+    pools V10 que V11 ne construit plus (toujours vides → toujours `True`) ; signal mort écarté.
+  - **Overrun 12.06 absent du gym** — n'existe qu'en modèle par-ancre, condamné par la décision
+    « le pile-in de référence est le par-figurine du PvP » (2026-07-16). Légal (12.06 : « **can**
+    make one additional pile-in move »). Spec complète : `A_faire/overrun.md`.
+  - **Mismatch cellules/clearance du BFS pile-in/conso** — mesuré 1102 ancres sur 72857 ; fix
+    écrit, mesuré (0/71755 après, perf 2m01→1m33), puis **REVERTÉ** : `fight_handlers` est partagé
+    et le changement n'est pas neutre PvP. Ne concerne que du code par-ancre condamné → priorité
+    basse. Détail + mesures : `A_faire/bug_pile_in_bfs_clearance_mismatch.md`.
+
+- **T6-e — `_turn_step_limit` absent sur le chemin single-scenario (BLOQUANT, crash immédiat) —
+  ✅ CORRIGÉ (2026-07-19)**
+  **Repro** : `train.py --agent CoreAgent --training-config x5_debug --scenario <fichier.json>
+  --new --resolution 5` → `ConfigurationError: Required key '_turn_step_limit' is missing from
+  mapping` dans `setup_callbacks` ([train.py:3096](../../ai/train.py#L3096)).
+  **Cause** (même famille que T6-a/T6-b : migration partielle d'un chemin de train.py) :
+  `training_config["_turn_step_limit"]` n'était écrit que par DEUX chemins — la rotation de
+  scénarios (`train_with_scenario_rotation`, bloc inline de calcul du budget) et MacroController
+  ([train.py:4786](../../ai/train.py#L4786), relevé sur son propre moteur). Le chemin
+  **single-scenario** (`--scenario <fichier>` → `create_multi_agent_model` → `setup_callbacks`)
+  ne l'écrivait jamais, alors que TROIS lecteurs le `require_key` :
+  [train.py:3096](../../ai/train.py#L3096), [train.py:3469](../../ai/train.py#L3469),
+  `multi_agent_trainer.py:556` (⚠️ **fichier SUPPRIMÉ depuis** — commit `748d5591`, « purge de
+  `--orchestrate`/`multi_agent_trainer` » ; lien retiré le 2026-07-28, ce 3ᵉ lecteur n'existe plus).
+  Crash systématique, quel que soit le scénario.
+  **Fix** : le bloc inline de la rotation est extrait en helper
+  `resolve_turn_step_limit(scenario_files, training_config, use_bots, log)`
+  ([train.py:2102](../../ai/train.py#L2102)) — MÊME formule (`compute_turn_step_limit` sur le
+  scénario au max de figurines, probe des sièges p1/p2/random si `use_bots`) — appelé par les
+  deux chemins : rotation ([train.py:2302](../../ai/train.py#L2302)) et single-scenario
+  ([train.py:1757](../../ai/train.py#L1757), `use_bots` dérivé de « bot » dans le nom du
+  scénario, miroir du choix `BotControlledEnv` ~L1830). Factorisation volontaire : deux calculs
+  dupliqués = le motif exact qui a produit R5 et T6-a. Code mort supprimé au passage dans le
+  bloc extrait (`num_phases`/import `GAME_PHASES`, calculé et jamais lu).
+
+- **T6-f — Commit de déploiement `deploy_unit` mono-ancre : `models_cache` JAMAIS écrit
+  (BLOQUANT gym, crash DIFFÉRÉ en phase move ; touche AUSSI des chemins PvP) — ✅ FAIT
+  (2026-07-19, +10 tests `test_deployment_per_model_commit.py`)**
+  ⚠️ Cet en-tête est resté « ❌ À FAIRE » jusqu'au 2026-07-19 alors que le fix était livré et
+  testé : il contredisait §0 ET le tableau des critères. Corrigé. L'analyse ci-dessous reste
+  valable comme historique de la rupture.
+  **Rayon (vérifié par lecture, conséquence runtime démontrée côté gym seulement)** : le commit
+  fautif est PARTAGÉ — (a) gym via l'action decoder ; (b) auto-déploiement P2 du tutoriel
+  ([api_server.py:2255](../../services/api_server.py#L2255)) ; (c) drag mono-socle PvP encore
+  actif quand `deployment_type != "active"` (`handleDeployUnit`,
+  [useEngineAPI.ts:5512](../../frontend/src/hooks/useEngineAPI.ts#L5512), cf.
+  [BoardPvp.tsx:10875](../../frontend/src/components/BoardPvp.tsx#L10875)) et sa route
+  sémantique ([w40k_core.py:5265](../../engine/w40k_core.py#L5265)). Tous laissent les
+  figurines à `(-1,-1)`.
+  **C'est un TROISIÈME bug de déploiement, distinct** de la parité masque/commit T5
+  (`_deployment_clearance_filter` — divergence de prédicat, mono-ancre des deux côtés) et du
+  logging analyzer (§ « Le déploiement n'était PAS journalisé ») : ici c'est le COMMIT lui-même
+  qui est resté pré-V11.
+  **Repro** (déterministe, moteur nu, scénario `training_benchmark`, premier index du masque à
+  chaque step) : crash au step 7, première action de move —
+  `ValueError: execute_squad_move a échoué : squad=1 type=fall_back dest=(214,96) depuis
+  (217,154) — incohérence masque/exécution`. Indépendant du terrain (reproduit avec
+  `terrain-mc1` ET `terrain-train-01`) et du roster.
+  **Root cause (tracée sur l'état)** : après le déploiement gym, `units_cache["1"]` porte bien
+  l'ancre `(217,154)` mais les 6 figurines de `models_cache` restent à `(-1,-1)`. La branche
+  `deploy_unit` d'`execute_deployment_action`
+  ([deployment_handlers.py:953](../../engine/phase_handlers/deployment_handlers.py#L953)) commit
+  via `set_unit_coordinates` + `update_units_cache_position`
+  ([shared_utils.py:1255](../../engine/phase_handlers/shared_utils.py#L1255) — n'écrit que
+  `units_cache` + carte d'occupation, jamais `models_cache`). Le chemin PvP `deploy_commit` →
+  `_apply_deploy_plan`
+  ([deployment_handlers.py:824](../../engine/phase_handlers/deployment_handlers.py#L824)), lui,
+  écrit chaque figurine via `update_model_position` puis synchronise l'ancre.
+  **Mécanisme du crash** : le pool BFS du masque de move part de l'ancre `units_cache` (valide),
+  mais `build_rigid_plan` ([shared_utils.py:3243](../../engine/phase_handlers/shared_utils.py#L3243))
+  translate depuis `models_cache` : 6 figurines confondues en `(-1,-1)` → plan = 6 figs sur le
+  MÊME hex destination, et `validate_move_plan` rejette (budget per-model : distance 215 depuis
+  `(-1,-1)` > 60 ; collision intra-plan en second rideau). Le masque avait autorisé la cellule →
+  la garde « incohérence masque/exécution » de `_process_squad_action` lève. En vectorisé, les
+  8 workers `SubprocVecEnv` meurent (EOFError côté parent).
+  **Pourquoi invisible jusqu'ici** : T5 a validé la boucle moteur nu AVANT la migration squad
+  par-figurine du move (T6/refonte spatiale) — tant que l'exécution du move raisonnait par
+  ancre, des figurines à `(-1,-1)` ne faisaient rien crasher (elles produisaient seulement les
+  fausses collisions analyzer, cf. § logging).
+  **Fix appliqué (2026-07-19) — le commit produit et exécute un plan PAR-FIGURINE validé, pour
+  les TROIS chemins d'un coup** (`deployment_handlers.py` + `action_decoder.py`) :
+  1. Nouveau `build_validated_deployment_plan` (deployment_handlers) : `generate_compact_formation`
+     autour de l'ancre + `deployment_preview_plan` ; rend le plan (4-uplets, niveau 0) SI toutes
+     les figurines sont légales, sinon `None`. Lecture pure et déterministe.
+  2. `deploy_unit` commit désormais via `_apply_deploy_plan` — le MÊME écrivain que le flux PvP
+     par escouade (`update_model_position` par figurine + sync de l'ancre). Plan illégal =
+     refus explicite `deploy_plan_invalid`. Comme les trois chemins du rayon partagent cette
+     branche, ils sont corrigés ensemble.
+  3. `_select_deployment_hex_for_action` (décodeur) retient la meilleure ancre de la stratégie
+     **dont la formation est exécutable** : le `max` est remplacé par un parcours par score
+     décroissant qui s'arrête au 1er plan valide ; épuisement = `ValueError` explicite. Sans
+     ça, une ancre au bord de zone pouvait scorer 1re et n'admettre aucune formation → deadlock
+     masque/commit, exactement la classe de bug corrigée en T5.
+  4. Le plan validé par le décodeur est mémoisé (`store_/read_validated_deployment_plan`, tampon
+     escouade+ancre+phase+nb déployés) pour que le commit ne le RECALCULE pas. Pure économie —
+     le helper étant déterministe (verrouillé par test), la mémo n'est jamais une source de
+     vérité divergente ; son absence (chemins PvP sans décodeur) est un état légitime.
+  **Résultat mesuré** : déploiement gym complet, `training_benchmark` — 0 figurine à `(-1,-1)`
+  (6/6 escouades). Chemin « ancre imposée » (drag PvP / auto-deploy tutoriel) exercé sur les
+  16 104 hexes de la zone : 6/6 escouades posées, refus répartis en 1815
+  `deploy_footprint_out_of_bounds` + 263 `outside_zone` + 31 `occupied` (tous de la validation
+  mono-ancre PRÉEXISTANTE) et seulement **2** `deploy_plan_invalid` — le fix ne restreint
+  quasiment pas les placements.
+  **Coût, et son optimisation** (phase de déploiement complète, board x5, 6 escouades) :
+  | étape | temps | note |
+  |---|---|---|
+  | avant le fix | 1,03 s | ne plaçait AUCUNE figurine — coût non représentatif |
+  | fix naïf | 2,31 s | `generate_compact_formation` payé 2× (décodeur + commit) |
+  | + mémoisation (point 4) | 1,70 s | supprime le doublon |
+  | + empreinte pré-calculée | **1,37 s** | voir ci-dessous |
+  5. **Empreinte par translation d'offsets dans `generate_compact_formation`.** cProfile :
+     `_legal_socle` = 92 % du coût de la fonction, dont 67 % à reconstruire l'empreinte du socle
+     via `compute_occupied_hexes`/`_footprint_round` — **2 590 reconstructions et 341 660 appels
+     à `_hex_center` pour UNE formation**, parce que la spirale BFS recalcule la forme à chaque
+     case. Remplacé par `precompute_footprint_offsets` (deux jeux d'offsets, parité de colonne),
+     le helper prévu exactement pour ça (docstring : « expensive when called per-BFS-step ») et
+     déjà utilisé par `_get_valid_deployment_hexes`. **50 ms → 17,4 ms par formation (×2,9).**
+     Équivalence stricte vérifiée par test aux deux parités — code partagé avec le déploiement
+     PvP par escouade, une divergence déplacerait des socles à l'écran.
+  **Reste optimisable (non fait)** : la spirale teste encore chaque case par balayage de son
+  empreinte (~77 % du résiduel) et `_deploy_pool_set` est reconstruit à chaque appel (~13 %).
+  Pistes, mesures et pièges : [`A_faire/perf_generate_compact_formation.md`](A_faire/perf_generate_compact_formation.md).
+  ⚠️ Le gain d'une érosion n'est PAS acquis dans le cas nominal (spirale qui s'arrête en
+  quelques cases) — à mesurer avant d'implémenter. Non bloquant : le vrai frein du training est
+  T6-g/T6-h, pas cette perf.
+  **Tests (+10)** : `tests/unit/engine/test_deployment_per_model_commit.py` — placement de toutes
+  les figurines, ancre = figurine d'index minimal (l'invariant dont `build_rigid_plan` dépend),
+  légalité du plan committé, déterminisme + lecture pure du helper, invalidation de la mémo sur
+  tampon périmé, équivalence de l'empreinte pré-calculée aux deux parités. Les 8 premiers sont
+  rouges sur l'ancien code. Suite `tests/unit` : mêmes échecs préexistants qu'avant le fix
+  (baseline vérifiée par `git stash`), aucune régression.
+  **Dette assumée** : `deploy_unit` porte désormais DEUX modèles de validation — la mono-ancre
+  héritée de T5 (empreinte du socle de l'unité ⊆ pool, miroir du masque) et la par-figurine.
+  La première n'a plus de sens géométrique strict une fois le placement fait par figurine ; elle
+  ne survit que parce que le masque T5 s'y aligne. **Planifié en T7** (section 5), déclencheur
+  « le training tourne » — le fondement règles y est établi par lecture des PDF (la mise en place
+  est PAR FIGURINE, aucun socle à l'ancre dans les règles).
+  ⚠️ **Écarté après analyse — deux fausses bonnes idées** :
+  - *Filtrer le pool entier par `deployment_build_squad_destinations_pool`*
+    ([deployment_handlers.py:552](../../engine/phase_handlers/deployment_handlers.py#L552)) :
+    INSUFFISANT (ne teste que zone-fit du bloc rigide — pas les murs par-figurine, pas le
+    chevauchement d'unités déployées, pas §13.06, tous exigés par `deployment_preview_plan`) et
+    SURDIMENSIONNÉ (~16 000 hexes validés pour 5 slots-stratégies utilisés).
+  - *Valider les ancres DANS le masque* : impossible sans le réécrire — le masque n'active que
+    5 slots (`mask[4+i]`) et ne connaît PAS les ancres, qui sont calculées au décodage par
+    `_select_deployment_hex_for_action`. C'est donc le décodeur qui doit filtrer (point 3).
+  ⚠️ **Comportement non évident vérifié et verrouillé par test** : dans
+  `generate_compact_formation`, l'ancre ORIENTE le placement mais ne le CONTRAINT pas (sa
+  spirale retient la 1re case légale) — une ancre hors zone place l'escouade dans la zone la
+  plus proche au lieu d'échouer. Le refus d'une ancre hors zone reste donc porté par la
+  validation mono-ancre de `deploy_unit` (`deploy_footprint_outside_zone`), à ne pas retirer.
+  ⚠️ **Chemin tutoriel PvP** : sans objet — le mode tutoriel a été supprimé le 2026-07-28
+  (`config/tutorial/` compris). Le chemin a été validé par son équivalent fonctionnel
+  (commit à ancre imposée, ci-dessus).
+
+- **T6-g — Le pool BFS du move valide l'ANCRE, pas le BLOC translaté — ✅ FAIT (2026-07-19)**
+  **Réalisé** : `erode_move_pool_by_squad_block` (shared_utils), appelée par
+  `build_squad_move_cell_map` sur les `costs` du BFS, AVANT `project_pool_to_grid` — donc la
+  grille égocentrique, le masque et le décodage lisent tous le pool érodé (la source unique
+  reste unique). Le bloc est réduit à ses offsets CUBE relatifs à l'ancre (invariants depuis
+  T6-h), **groupés par NIVEAU** (une figurine ne collisionne qu'avec les figs d'un autre squad
+  au même étage — miroir exact de `validate_move_plan`), et les cellules interdites sont
+  pré-agrégées par niveau en un seul set (murs ∪ occupation ∪ ER ennemie) → un test
+  d'appartenance par figurine et par candidate, pas d'appel à `validate_move_plan` dans la
+  boucle. Invariants non érodés car démontrés invariants par translation : budget per-model et
+  cohésion (cf. §0). Aucune règle de jeu modifiée : l'érosion ne fait que RETIRER du masque des
+  destinations que l'exécution refusait déjà.
+  **Validation** : +6 tests dédiés (mur/autre escouade/ER sous une SŒUR alors que l'ANCRE est
+  légale, débordement de plateau, non-sur-filtrage, court-circuit mono-figurine) ; run x5_debug
+  8 workers 10/10 épisodes et run mono-env x1_debug, **zéro** « incohérence masque/exécution ».
+  ⚠️ **Ce « zéro » ne vaut que pour les 10 épisodes mesurés** : une AUTRE cause de la même
+  classe a tué un run de 250 épisodes le 2026-07-20 — cf. **§0.11** (collision intra-plan
+  aveugle au niveau). L'érosion de T6-g reste correcte ; c'était le prédicat de collision
+  qu'elle ne teste pas — à raison — qui était faux.
+  Historique de la rupture ci-dessous.
+  **Repro** (moteur nu, `training_benchmark`, premier index du masque) : dès que les figurines
+  sont réellement placées, le crash T6-f se déplace au squad suivant —
+  `ValueError: execute_squad_move a échoué : squad=3 type=normal dest=(195,163) depuis
+  (197,168) — incohérence masque/exécution`.
+  **Root cause (tracée entrée par entrée sur le plan rigide)** : `build_squad_move_cell_map`
+  ([shared_utils.py:7394](../../engine/phase_handlers/shared_utils.py#L7394)) construit le pool
+  via `movement_build_valid_destinations_pool`, qui raisonne sur l'**ancre** de l'escouade, puis
+  le projette sur la grille égocentrique. Mais l'exécution passe par `build_rigid_plan`, qui
+  **translate TOUTES les figurines** du même vecteur — sans qu'aucune contrainte n'ait été
+  testée sur elles. Sur le plan rejeté : 3 figurines (`3#4`, `3#5`, `3#6`) atterrissent sur une
+  autre escouade et 1 (`3#17`) sur un mur, alors que l'ancre `3#0` est parfaitement légale.
+  `validate_move_plan` rejette donc une destination que le masque avait offerte.
+  **Ce n'est PAS une régression de T6-f** : le mismatch est structurel (pool d'ancre vs
+  exécution de bloc) et préexistait ; il était simplement masqué par T6-f, qui faisait échouer
+  le move plus tôt, pour une autre raison.
+  **Modèle retenu (décision utilisateur 2026-07-19) : érosion morphologique** — éroder la grille
+  des cellules acceptables par l'empreinte COMBINÉE de l'escouade, puis lire le résultat à
+  l'ancre. Exact (les autres unités sont fixes pendant le move de l'escouade), vectorisable, et
+  le code a déjà ce précédent exact dans `_get_valid_deployment_hexes` (érosion par empreinte,
+  DEUX jeux d'offsets selon la parité de colonne). Écarté : `validate_move_plan` en post-filtre
+  des candidates — exact aussi mais Python pur, |pool| × |figurines| par step (~2800 × 20).
+  ⚠️ **Ordre imposé par T6-h** : l'érosion suppose des offsets de bloc INVARIANTS par
+  translation. C'est faux aujourd'hui (cf. T6-h) — corriger la translation AVANT d'éroder,
+  sinon l'érosion valide une forme que l'exécution ne reproduit pas.
+  **À ne pas oublier dans le filtre** : bornes, murs, occupation des autres escouades PAR NIVEAU
+  et `forbid_enemy_er` (toutes des contraintes de cellule, donc érodables). La cohésion et le
+  budget per-model deviennent invariants une fois T6-h corrigé (translation réellement rigide),
+  mais `validate_move_plan` mesure le budget par `calculate_hex_distance` depuis chaque origine :
+  le vérifier plutôt que le supposer.
+
+- **T6-h — `build_rigid_plan` : la translation « rigide » DÉFORME le bloc (bug de parité hex) —
+  ✅ FAIT (2026-07-19)**
+  **Réalisé** : translation en coords CUBE (`offset_to_cube` / `cube_to_offset`) dans
+  `build_rigid_plan`. **L'audit « autres consommateurs de translation de bloc » demandé par le
+  plan a trouvé DEUX autres sites portant le même bug**, tous deux alignés :
+  - `translate_squad_to_destination` (shared_utils) — **le plus grave** : c'est l'ÉCRIVAIN du
+    commit, partagé par move / charge / fight / pile-in / consolidation. Corriger
+    `build_rigid_plan` seul aurait fait committer une formation DIFFÉRENTE de celle que
+    `validate_move_plan` venait d'accepter (plan validé en cube, commit appliqué en offset) —
+    soit exactement la classe de bug « validé ≠ exécuté » que T6-g élimine ;
+  - `preview_hidden_models_after_move` (shooting_handlers) — simulation read-only du statut
+    « caché » (13.09) après move, dont la docstring se réclame explicitement du miroir de
+    `translate_squad_to_destination` : à `dx` impair, le preview affichait un bloc déformé,
+    donc un statut caché faux (impact PvP direct, pas seulement gym).
+  **Validation** : +10 tests paramétrés sur `dx` pair ET impair (distances internes préservées,
+  ancre exactement sur la destination) — **rouges sur le code d'avant** aux seules parités
+  impaires, verts après. Historique de la rupture ci-dessous.
+  **Mesure** (2 figurines voisines, translation du bloc en offset puis distance interne
+  recalculée par `calculate_hex_distance`) :
+  `dx` pair → écart 0 (forme préservée) ; **`dx` impair → écart 1** : deux figurines à distance
+  2 se retrouvent à distance 1.
+  **Cause** : `build_rigid_plan`
+  ([shared_utils.py:3243](../../engine/phase_handlers/shared_utils.py#L3243)) applique
+  `new_col = col + dx, new_row = row + dy` en coordonnées OFFSET. En grille hexagonale offset,
+  une translation à `dx` impair change la parité de colonne de chaque figurine et n'est donc PAS
+  une translation hexagonale — la formation se déforme.
+  **Le projet connaît déjà ce piège et l'évite ailleurs** :
+  `deployment_build_squad_destinations_pool`
+  ([deployment_handlers.py:552](../../engine/phase_handlers/deployment_handlers.py#L552)) passe
+  explicitement par les coords CUBE, docstring « La translation rigide passe par les coords cube
+  (pas de bug de parité) ». `build_rigid_plan` n'a pas reçu ce traitement.
+  **Conséquences** : cohésion et collisions intra-plan faussées (deux figurines peuvent se
+  télescoper alors que le bloc d'origine était valide), distances per-model non uniformes, et
+  toute optimisation supposant des offsets constants (dont l'érosion de T6-g) invalide.
+  **Fix** : translater en cube (`offset_to_cube` / `cube_to_offset`), miroir du helper de
+  déploiement. Vérifier au passage les autres consommateurs de translation de bloc.
+  ⚠️ **Distinct de T6-g** : le crash T6-g mesuré avait `dx = -2` (pair), donc sans déformation —
+  les deux bugs sont indépendants et cumulatifs.
+
+**T6.2 — métriques TensorBoard : RÉSOLU, la mémoire projet était périmée.** Inspection directe
+des `events.out.tfevents.*` (EventAccumulator) sur training neuf : `0_critical/` porte bien les
+métriques PPO — `f_loss_mean`, `g_explained_variance`, `h_clip_fraction`, `i_approx_kl`,
+`j_entropy_loss`, `m_value_loss_smooth`, **56 points chacune** ; `training_critical/` expose ses
+6 tags. Le fix `_dump_with_capture` du 2026-05-22 tient. Nuance non diagnostiquée (sans impact) :
+`train/*` et `training_critical/*` n'ont qu'1 point là où `0_critical/*` en a 56 — répartition
+entre les deux fichiers d'events (`CoreAgent/` et `x1_debug_CoreAgent_1/`).
+
+**Run T6.1 — « run court complet sans erreur » : DÉMONTRÉ sur les deux chemins.**
+- **n_envs=48** : **467/500 épisodes, zéro exception** (`win_rate_overall = 0.296` à l'ép. 467),
+  coupé par le `timeout 2400` de l'opérateur — pas par une erreur.
+- **mono-env (`--step`, après fixes T6-b)** : **475/500 épisodes, zéro exception**, step.log de
+  12 561 lignes, coupé par le `timeout 5400` de l'opérateur.
+x1_debug (500 ép.) demande > 40 min à n_envs=48 et > 90 min en mono-env — dimensionner le timeout
+en conséquence pour un run réellement complet.
+
+**T6.3 — baseline bots : NON DÉMONTRÉE (données insuffisantes, pas une régression).**
+Mesuré sur le run de 467 épisodes (adversaire = GreedyBot randomness=0.15 via BotControlledEnv) :
+- `win_rate_100ep` (glissant) ~0.33 au milieu → **0.296** à la fin ; `win_rate_overall` plat
+  autour de **0.30** (0.270 → 0.320 → 0.307 → 0.305 → 0.296 par tranches de 100).
+- `episode_reward` (moyenne 100 premiers vs 100 derniers) : **-12.53 → -8.33** (progression nette).
+Lecture honnête : le reward progresse, le win-rate stagne à ~30 % (l'agent ne bat PAS GreedyBot).
+**Mais 467 épisodes sur un budget nominal de 50 000 (`total_episodes_normal` de x1_debug) est du
+bruit** — ni preuve de succès ni preuve d'échec. Le critère « win-rate en progression / stabilité
+multi-scénarios » exige la phase `x1` réelle + `bot_evaluation` sur holdout (vs RandomBot), pas
+`x1_debug` (500 ép.). ⚠️ Ne pas conclure sur ces chiffres.
+
+### ✅ T6-c — RÉSOLU (2026-07-16) : le StepLogger n'avait jamais été migré vers le pipeline squad
+
+**Décision utilisateur : migrer (option a).** Fait. `ai/analyzer.py` tourne désormais de bout en
+bout sur un step.log produit par le pipeline squad.
+
+**Root cause réelle — pas « le step logger n'a pas été câblé », mais un CONTRAT MOTEUR VIOLÉ.**
+`end_activation(game_state, unit, arg1, ...)` (generic_handlers ~L70-101) définit :
+`arg1="ACTION"` → « *Log the action (action already logged by handlers)* » ;
+`arg1="WAIT"` → `end_activation` émet lui-même l'action_log ; `arg1="NO"` → rien.
+Or `_process_squad_action` appelait `end_activation(..., ACTION, ...)` après un move et une charge
+réussis — donc en PROMETTANT que le handler avait journalisé — alors que `execute_squad_move` et
+`charge_build_valid_plan` n'émettaient **aucun** `append_action_log` (contrairement au chemin
+legacy par-figurine, movement_handlers ~L3701/4107, charge_handlers ~L5597/5877).
+**`game_state["action_logs"]` était donc incomplet sur le chemin squad** ; le step.log vide n'en
+était qu'un symptôme.
+
+**Solution — réparer le contrat, pas dupliquer 17 sites de journalisation** :
+1. **Émission des action_logs manquants** dans `_process_squad_action` (miroir des payloads
+   legacy) : `move` (avec `move_type` portant normal/advance/fall_back), `charge`, `charge_fail`,
+   **`deploy_unit`** (cf. ci-dessous). `shoot`/`combat`/`hazard`/`wait` en émettaient déjà.
+2. **Un point d'accroche UNIQUE** : `_flush_squad_action_logs_to_step_logger` (w40k_core), appelé
+   depuis `step()` après le dispatch. Draine `action_logs[curseur:]` → `log_action`, via une table
+   `_STEP_LOG_TYPE_MAP` (type moteur → action_type du formateur) et `_build_step_log_details`
+   (camelCase moteur → snake_case formateur). No-op complet sans `--step`.
+3. **Émission PAR JET** pour `shoot`/`combat` : le moteur agrège les jets d'un groupe (arme,
+   cible) dans `shootDetails`, le formateur travaille par attaque → une ligne par jet, via
+   `_SHOT_RECORD_FIELD_MAP` (`attackRoll`→`hit_roll`, `strengthRoll`→`wound_roll`,
+   `saveSuccess`→`save_result`…). Les 11 champs sont exigés même sur un MISS (présence de la clé) :
+   `None` est correct, le formateur ne rend `Wound` que si `hit_result == "HIT"`.
+4. **État fight capturé AVANT l'action** (`_pre_action_fight_state`) : le formateur `combat`
+   exige `fight_subphase` + les 3 pools d'activation (contrat replay), et l'action les mute.
+
+⚠️ **Rayon PvP : NUL, vérifié.** `execute_squad_move` n'a qu'UN appelant (`_process_squad_action`)
+et `_process_squad_action` n'est appelé que depuis `step()`/`_build_observation` = gym.
+Le PvP (`services/api_server.py`) passe par `execute_semantic_action` → `_process_semantic_action`.
+
+**Le déploiement n'était PAS journalisé non plus** (`deployment_handlers` : grep
+`append_action_log` = 0). Conséquence mesurée et non évidente : `log_episode_start` écrit les
+unités non déployées en `(-1,-1)`, et sans log de déploiement l'analyzer n'apprenait JAMAIS leur
+position réelle → **49 fausses « collisions »** (contrôle 2.2). Émettre `deploy_unit` les a
+résolues d'un coup (49 → 0).
+
+**Bug de règle trouvé DANS l'analyzer** (faux positifs, pas un bug moteur) :
+`_track_action_phase_accuracy` (analyzer.py ~L835) attendait `"advance": "SHOOT"`. **Faux** :
+PDF projet « 09 Movement phase.pdf », règle **09.02 MOVE UNITS > Select Move Type** liste
+l'*Advance move* parmi les types de mouvement de la **phase de Mouvement** (avec Normal move,
+Fall-back move, Remain stationary). Le moteur le résout bien en phase MOVE. Corrigé en
+`"advance": "MOVE"` → **105 faux positifs supprimés**.
+
+**Résultat sur le VRAI `train.py --agent CoreAgent --scenario bot --new --training-config
+x1_debug --step`** (56 épisodes, **3452 lignes d'action**, **0 erreur avalée**) — `ai/analyzer.py`
+tourne de bout en bout et rendait **14 erreurs** ; après le traitement du faux positif LoS
+(2026-07-16) il n'en reste **2**, le seul ❌ étant l'artefact 2.6 ci-dessous :
+- ✅ 1.1 move : 0 ; ✅ 1.3 charge : 0 ; ✅ 1.4 fight : 0 ; ✅ 1.5 wrong phase : 0 ;
+  ✅ 1.6 double-activation : 0 ; ✅ 2.1 dead units : 0 ; ✅ **2.2 positions : 0** ;
+  ✅ 2.3 DMG : 0 ; ✅ 2.5 episode ending : 0 ; ✅ 2.7 core issue : 0.
+- ✅ **1.2 erreurs en phase de shooting : 0** — **TRANCHÉ ET TRAITÉ le 2026-07-16**, était 12
+  (`shoot_through_wall = 6` + `shoot_invalid.no_los = 6` = les MÊMES 6 tirs, incrémentés dans la
+  MÊME branche, shoot_handler.py ~L165). **Verdict : faux positifs de l'analyzer, aucun bug
+  moteur, backend non modifié.** Détail complet, preuve et options rejetées :
+  `A_faire/analyzer_los_ancre_vs_perfig.md`.
+  **Cause structurelle confirmée — le CONTRÔLEUR est périmé, pas le moteur** (et il n'y a
+  AUCUNE divergence training/PvP : le moteur est unique et pilote les deux) :
+  - L'analyzer n'a PAS sa propre LoS — il appelle bien `engine.hex_utils.compute_los_state`
+    (analyzer.py ~L602, docstring : « same algorithm as the game engine »). **Mais il l'appelle
+    ANCRE-À-ANCRE** : `has_line_of_sight(shooter_col, shooter_row, target_col, target_row,
+    wall_hexes)` — un point contre un point.
+  - Le moteur, lui, fait `_attacker_model_can_reach_squad` (shared_utils ~L4243) : LoS
+    **PER-FIGURINE**, origine = **empreinte COMPLÈTE du socle tireur** (« pas son seul centre »),
+    distance bord-à-bord, via `_compute_visibility_with_obscuring` (murs denses + obscurcissant,
+    13.10). **Son propre commentaire décrit exactement ce faux positif** : « une grosse base dont
+    le centre est masqué par un terrain (mais dont un bord voit la cible) était grisée à tort ».
+  - → L'analyzer refait le test centre-à-centre que le moteur a DÉLIBÉRÉMENT abandonné. Même
+    dette que R5 / le step logger / les objectifs de l'analyzer : outil resté sur le modèle
+    pré-squad « une unité = un point ».
+  - Second suspect : `except Exception: return False` (analyzer.py ~L630) — **écarté par mesure**
+    (aucune exception levée : `compute_los_state` brut rend le même `False`). Supprimé quand même
+    (CLAUDE.md). Troisième suspect « murs incomplets » écarté aussi : ligne `Walls:` complète.
+  - **Confirmé sur un tir précis** (E7 T3 P1 `Unit 4(215,155) SHOT Unit 104(116,66)`) : l'ancre
+    rend `can_see=False`, mais **3 des 19 cellules** de l'empreinte du socle (`round/6`) voient la
+    cible. Règle 06.01 (PDF lu) : « from **any part** of that model to **any part** of the model
+    being observed » → l'ancre-à-ancre est plus restrictif que la règle.
+  - **Correction (option c)** : le contrôle est SUPPRIMÉ de l'analyzer et la vérification
+    DÉPLACÉE dans `tests/unit/engine/test_shoot_los_perfig_parity.py`, où `game_state` existe.
+    Le réparer sur place était impossible : les primitives moteur exigent `game_state`
+    (empreintes, obscurcissant 13.10, LoS 3D) que step.log ne porte pas ; et logger le verdict du
+    moteur serait circulaire (le tir est déjà gaté par `_attacker_model_can_reach_squad`).
+  ⚠️ **La journalisation n'est fidèle que pour les JETS** (`Hit 6(3+) - Wound 5(5+) - Save 1(4+) -
+  Dmg:2HP` ; un MISS ne rend que `Hit 2(3+)`). **Ses COORDONNÉES sont fausses** :
+  `_emit_squad_shoot_log` (shared_utils ~L5758) loggue l'ancre d'ESCOUADE, pas la figurine qui
+  tire — dette V11 « une unité = un point » non traitée, chantier séparé.
+- ❌ 2.6 « Sample missing (2/5) : charge, fight » = artefact du run (agent frais : ne charge ni
+  ne combat jamais sur 56 épisodes), PAS un défaut.
+
+**C'est la valeur du chantier T6-c** : l'outil de validation du projet fonctionne enfin, et il a
+IMMÉDIATEMENT trouvé une divergence LoS analyzer↔moteur qu'aucun test unitaire ne voyait.
+
+**Résultat sur un step.log de moteur nu (3 épisodes, actions aléatoires)** — `157 erreurs → 52 → 3` :
+- ✅ 1.1/1.2/1.3/1.4 erreurs par phase : 0 ; ✅ 1.5 wrong phase : **0** (était 105) ;
+  ✅ 1.6 double-activation : 0 ; ✅ 2.1 dead units : 0 ; ✅ 2.2 positions incohérentes : **0**
+  (était 49) ; ✅ 2.3 DMG issues : 0 ; ✅ 2.5 episode ending : 0 ; ✅ 2.7 core issue : 0.
+- ❌ 2.6 « Sample missing (3/5) : shoot, charge, fight » = **artefact du run** (actions aléatoires
+  non dirigées : ni tir ni charge ni combat), PAS un défaut. Le scénario de mêlée garantie produit
+  bien `FOUGHT`/`FAILED CHARGE` (vérifié : 40 lignes `FOUGHT` avec détail par jet
+  « Hit 3(3+) - Wound 5(2+) - Save 2(7+) - Dmg:1HP »), et zéro erreur avalée.
+
+⚠️ **Piège vérifié** : `StepLogger.log_action` et `log_episode_start` AVALENT toute exception
+(`except Exception: print("⚠️ ... logging error")`, step_logger.py ~L254). Un champ manquant
+produit une ligne SILENCIEUSEMENT absente, pas un crash. **Contrôler `grep -c "logging error"`
+après tout changement de mapping** — c'est ainsi qu'ont été trouvés les manques `hit_roll` puis
+`deploy … position data`.
+
+Plan d'origine (résolu ci-dessus) :
+
+**Fait vérifié (statique)** : `_process_squad_action` (w40k_core.py, def ~L4750, plage ~4750-5146)
+— le chemin VIF du pipeline squad en gym — contient **ZÉRO appel à `step_logger.log_action`**
+(grep sur la plage = 0). Son docstring l'annonce : « Dispatch sémantique squad vers helpers squad.
+**Remplace `_process_semantic_action`** ». Or les **17** sites `log_action` vivent dans
+`_process_semantic_action` (def ~L2725) et ses handlers, atteignables seulement via
+`execute_semantic_action` (~L2090) et `execute_ai_turn` (~L2114) = chemins PvE/legacy.
+
+**Preuve empirique (run mono-env réel, 475 épisodes, après les fixes T6-b)** :
+- `Steps=0` sur **474/475** épisodes (`episode_step_count` n'est jamais incrémenté) ;
+- **0 ligne** correspondant à `Unit N (MOVED|SHOT|CHARGED|FOUGHT|WAITED)` sur 12 561 lignes ;
+- ~26 lignes/épisode = les seuls en-têtes (`Scenario`, `Rosters`, `Walls`, `Objectives`, `Rules`,
+  `Board`) + `EPISODE END` + `OBJECTIVE CONTROL`.
+
+⚠️ **Nuance vérifiée (à ne pas sur-simplifier)** : `log_action` n'est pas TOTALEMENT inatteignable
+depuis le gym — **3 épisodes sur 475** portent `Actions=9|9|18`. Ce sont exclusivement des
+`rule_choice` (« Unit 105 chose [AGGRESSION IMPERATIVE] »), émis par le site w40k_core ~L2416-2425
+dont le commentaire dit explicitement « select_rule_choice **bypasses normal step logger flow** ».
+C'est donc le seul `log_action` atteignable — précisément parce qu'il court-circuite le flux
+normal — et il n'incrémente pas `step_count`. **Toutes les actions de JEU (move/shoot/charge/
+fight/wait), celles à `step_increment=True` dont l'analyzer a besoin, ne sont jamais journalisées.**
+
+**Conséquence** : `ai/analyzer.py` échoue en `Missing objective control snapshot at episode end`
+(analyzer_core.py ~L250) — il construit ses snapshots de contrôle d'objectif à chaque action
+`step_inc` (~L861-907), et il n'y en a aucune. Aucun réglage de l'analyzer ne peut compenser :
+**la matière première n'est pas produite**.
+
+**Même famille que R5 et `game_replay_logger`** (condamné en T2 pour exactement ce motif : code
+resté sur l'architecture pré-squad). La migration RL de fin mai a laissé derrière elle TOUTE la
+chaîne d'observabilité, pas seulement les wrappers.
+
+**À statuer (utilisateur)** : (a) migrer `log_action` vers `_process_squad_action` (chemin partagé
+PvP/gym → impacte aussi la journalisation PvP, à cadrer) ; (b) condamner explicitement `--step`
+sur le pipeline squad, comme `game_replay_logger.log_action` (NotImplementedError), et retirer
+« analyzer + replay » du critère T6 ; (c) laisser en l'état. **Interdit : laisser `--step`
+annoncer « Step logging enabled » en ne produisant que des en-têtes.**
+Cadrage PvP si (a) : les 17 sites legacy sont tous gardés par `if self.step_logger`, et le
+logger n'est branché QUE par train.py → instrumenter `_process_squad_action` avec la même
+garde est neutre PvP par construction. Granularité : l'action squad (move dir, shoot slot,
+charge, fight, wait) — ce que l'analyzer consomme.
+
+**Décisions annexes actées (2026-07-16)** :
+1. **Modèles de validation** : les runs de validation/baseline écrivent leurs artefacts sous
+   `ai/models/_validation/<run_id>/` — JAMAIS dans `ai/models/<agent_key>/` (zips protégés,
+   CLAUDE.md). Règle permanente : plus aucun arbitrage ponctuel `--new` vs zips à chaque run.
+2. **Raccrochés au chantier (a)** (même fichier, même passe) : le 3e site `--step` encore non
+   gardé dans train.py (les 3 sites impriment le même message — ajouter au passage un
+   identifiant de site dans le log), et la ligne `OBJECTIVE CONTROL:` de step.log au format
+   `Obj<id_string>` que personne ne lit (l'aligner sur le format attendu `Obj(\d+)` du parser,
+   ou la supprimer — pas de statu quo).
+
+### Corrections T6 faites en chemin vers l'analyzer (toutes vérifiées)
+
+- **Parser d'armes — bug SILENCIEUX sur les apostrophes** (`engine/weapons/parser.py`, motif
+  `["\']([^"\']+)["\']`) : ouvrait sur `"` ou `'`, capturait tout sauf CES DEUX caractères, fermait
+  sur l'un ou l'autre. Une apostrophe DANS une chaîne à guillemets doubles cassait la lecture —
+  or les noms Orks en sont pleins. `display_name: "Dok's Tools"` → capturait **`"Dok"`** (tronqué,
+  SANS erreur) ; `"'eadbanger'"`, `"'urty Syringe"`, `"'Waaagh! Staff"` → **aucun match**, la clé
+  `display_name` n'était jamais posée et l'absence explosait ailleurs
+  (`require_key(weapon, "display_name")`, analyzer_config.py:150). **Impacte aussi le PvP.**
+  → constante `_TS_QUOTED_STRING = r'(["\'])((?:(?!\1).)*)\1'` (backréférence : fermeture sur le
+  MÊME guillemet), appliquée à `display_name`, `COMBI_WEAPON` et `WEAPON_RULES`. Strictement
+  identique pour tout nom sans apostrophe. Résultat : registre à **176 unités, 0 erreur de
+  parsing** (contre 107 erreurs).
+- **Donnée corrigée en conséquence** : `wolf_guard_weapon` déclarait `WEAPON_RULES: [""]`
+  (spaceMarine/armory.ts:142) — une chaîne VIDE que l'ancien motif (`+`, 1 car. min.) avalait
+  silencieusement. Le motif corrigé la lit fidèlement → règle vide rejetée. `[""]` → `[]` :
+  comportement inchangé (l'ancien parser produisait déjà `[]`), la donnée dit enfin ce que le code
+  comprenait. Occurrence unique dans tout le projet.
+- **`_resolve_scenario_path` (analyzer.py) résolvait vers l'ARCHIVE** : T4 a déposé la banque
+  pré-V11 sous `scenarios/_archive_pre_v11/` — donc DANS l'arbre parcouru par `os.walk` →
+  `ValueError: Ambiguous scenario path for 'scenario_training_bot-29'` (l'archivé garde ses clés
+  legacy, sa signature d'objectifs diffère du migré homonyme). → la marche élague les dossiers
+  `_archive*`. Aligné sur la convention du projet : `get_scenario_list_for_phase`
+  (training_utils.py:308) travaille sur une liste blanche explicite (training/, holdout_regular/,
+  holdout_hard/) et n'a jamais eu ce problème.
+- **`_get_objective_name_to_id_map` (analyzer.py) était resté sur le contrat LEGACY** : lisait
+  `objectives` inline / `objectives_ref` → `config/board/<board>/objectives/` (dossier supprimé).
+  T3 avait migré train.py et bot_evaluation.py, **pas analyzer.py**. → migrée vers la source
+  unique terrain (areas `"objective": true`, miroir de `resolved_scenario_objectives` de
+  game_state.py), via un nouveau `_resolve_terrain_path_for_scenario` (miroir du resolver
+  `board_ref` de T4). Nuance : les ids terrain sont des STRINGS (`rect_b_nw_OK`) alors que
+  l'analyzer indexe par int → id positionnel (1..N, ordre du fichier terrain = stable) ; seul le
+  NOM sert d'appariement, et c'est bien le `name` de l'area que le StepLogger écrit.
+  ⚠️ **Reste incohérent** (non corrigé, car sous le bloqueur T6-c) : la ligne `OBJECTIVE CONTROL:`
+  de step.log écrit `Obj<id_string>` (`Objrect_b_nw_OK`) alors que le parser attend `Obj(\d+)`
+  (analyzer_core.py ~L112) — **trois formats coexistent** (nom / `Obj`+string / `Obj`+int).
+
+**✅ Bloqueur résolu (historique) — `ai/analyzer.py` ne démarrait pas** :
+`ConfigurationError: Required key 'RNG' is missing` (`analyzer_config.py:167`) —
+`load_analyzer_config` itère TOUT `unit_registry.units`, donc 4 armes de TIR de l'armory Ork sans
+clé `RNG` bloquaient l'analyzer QUEL QUE SOIT le scénario, même sans Ork. Renseignées par
+l'utilisateur (`RNG: 24`) le 2026-07-16 : `kombi_rokkit`, `kombi_shoota`, `rokkit_launcha`,
+`rokkit_launcha_heavy`. A permis de découvrir les blocages suivants (parser d'apostrophes,
+archive T4, contrat objectifs legacy) puis le vrai mur structurel T6-c.
+
+Plan d'origine :
+1. `python3 ai/train.py --agent CoreAgent --scenario bot --new --training-config x1_debug --step`
+   → run court complet sans erreur ; puis `ai/analyzer.py` sur les résultats + replay.
+2. Vérifier les métriques TensorBoard (cf. mémoire projet : métriques PPO manquantes dans
+   0_critical — diagnostiquer si toujours le cas).
+3. Baseline bots : l'agent frais doit apprendre à battre RandomBot/GreedyBot sur quelques
+   scénarios avant tout tuning (critère de succès : stabilité multi-scénarios, pas un pic).
+4. Hygiène (ne bloque pas) : corriger la `justification` (31→41) de la config ; mettre à jour
+   AI_OBSERVATION.md/AI_TRAINING.md (pipeline squad 108) ; statuer sur `ai/target_selector.py`
+   (mort → suppression à valider utilisateur) ; marquer les configs snapshot obs 355 comme
+   archives.
+
+**Hygiène T6.4 — état réalisé (2026-07-16)** :
+- ✅ `justification` corrigée dans les **5 phases** : `action_space_size=41 (26 micro [6 move +
+  6 advance + 6 fall back + 1 wait + 5 shoot + 1 charge + 1 fight] + 15 macro)`. Décompte vérifié
+  contre macro_intents.py.
+- ✅ **AI_OBSERVATION.md / AI_TRAINING.md** : bandeau de tête « ne décrit PAS le pipeline actif »
+  + table de correspondance (obs 108 / action 41, layout squad, routage `_build_observation` par
+  `obs_size`). Les corps de doc (355/357) sont conservés : le pipeline mono-fig reste atteignable
+  via `obs_size=357`. `obs_size: 355` de l'exemple de config AI_TRAINING.md corrigé en 108.
+- ✅ **Snapshots obs 355 marqués archives** : clé `_ARCHIVE` en tête de
+  `BEST_CoreAgent_training_config.json`, `CoreAgent_training_config_BEST_X1.json`,
+  `CoreAgent_training_config_save_avant_X10.json`. Sûr : aucun code ne les charge
+  (`load_agent_training_config` résout `<AGENT>_training_config.json`) — vérifié par grep.
+  Contenu strictement préservé (comparaison JSON parsée vs `git show HEAD:` = identique).
+- ✅ **Réserve T2 purgée** : `multi_agent_trainer.py` ~L996-1040 — monkeypatch
+  `controller.execute_gym_action` portant le dernier layout à 8 actions (`action // 8`,
+  `action % 8`). Code mort ET cassé : `W40KEngine` n'a aucun attribut `controller` (grep vide) et
+  le patch appelait 6 méthodes inexistantes (`_get_gym_eligible_units`,
+  `_convert_gym_action_to_mirror`, `_log_gym_action`…). Supprimé.
+- ✅ **Réserve T3/T4 purgée** : paramètre `objectives_ref` de `_materialize_scenario_with_refs`
+  (branche morte qui aurait émis une clé REJETÉE par le moteur — game_state ~L329). ⚠️ La purge
+  avait laissé un `NameError` latent (`hash_payload` référençait encore la variable) — attrapé par
+  le test `test_materialize_scenario_with_refs_wall_override_emits_no_legacy_key`, corrigé.
+- ✅ **Réserve T4 close** : `sweep_scenario_bank_v11.py` a désormais son bootstrap `sys.path`
+  (L19) ; `migrate_scenario_bank_v11.py` n'a **aucun import projet** → n'en a pas besoin.
+- ✅ **`ai/target_selector.py` SUPPRIMÉ** (validation utilisateur obtenue le 2026-07-16), avec son
+  test `tests/unit/ai/test_target_selector.py`. Mort confirmé par grep exhaustif avant suppression :
+  aucun importeur hors le module lui-même et son propre test (-9 tests collectés).
+- ⚠️ **Contradiction non résolue (décision produit requise)** : T6.1 impose `--new`, qui écrit
+  `ai/models/CoreAgent/model_CoreAgent.zip` — or CLAUDE.md (L51-53, L215) et la décision de design
+  n°1 interdisent d'écraser les zips protégés, et `ai/models/` est **gitignoré** (aucune
+  récupération git). Écrasement autorisé ponctuellement par l'utilisateur (2026-07-16 : « le modèle
+  est obsolète » — effectivement pré-squad, obs 355/357 incompatible avec obs 108). Voie propre à
+  acter : chemin de sortie dédié pour les runs de validation (ex. `ai/models/_validation/<run_id>/`).
+
+**Tests** :
+- **+11** — `tests/unit/ai/test_train_wall_ref_contract.py` : `_load_scenario_wall_ref`
+  (absent→None ; présent→strict ; présent-mais-invalide→erreur explicite, 5 cas paramétrés),
+  `_apply_wall_ref_weighting` sur scénario terrain-only (repro de T6-a),
+  `_materialize_scenario_with_refs` (param `objectives_ref` purgé, aucune clé legacy émise,
+  passthrough sans override).
+- **-9** — suppression de `test_target_selector.py` (module mort supprimé, cf. hygiène).
+- **+2 nets** — `tests/unit/ai/test_analyzer_utils.py` : les 2 tests encodant le contrat LEGACY
+  (`objectives` inline / `objectives_ref`) ont été MIGRÉS vers le contrat terrain — pas
+  neutralisés : c'est LE comportement testé qui a changé par décision documentée (T3/T4), seule
+  exception admise par §8. Ajout de 2 non-régressions : terrain sans area `"objective": true`
+  → erreur explicite (piège T4 « liste vide en silence ») ; l'archive `_archive_pre_v11` de T4 ne
+  masque pas un scénario vif.
+
+**Bilan suite `tests/unit/` : VERTE, 1259 collectés** (1255 baseline T5 + 11 − 9 + 2), zéro échec,
+zéro erreur. Smoke `scripts/smoke_t5_bare.py` rejoué après TOUS les fixes T6 :
+`(A) invariant/terminaison=OK | (B) mêlée+Carnifex=OK`, `melee_kills_total=5`,
+`carnifex_charge_any=True` — aucune régression moteur.
+
+### T7 — Unification de la validation de déploiement — ⏸️ EN ATTENTE (déclencheur explicite)
+
+**Déclencheur : le training tourne** (donc T6-h puis T6-g livrés, cf. §0). **Ne PAS commencer
+avant** — voir « pourquoi pas maintenant ».
+
+**Le problème.** Depuis T6-f, `deploy_unit` enchaîne DEUX contrôles :
+1. **mono-ancre** (hérité de T5) : l'empreinte d'UN socle posé à l'ancre ⊆ zone, hors mur,
+   clearance — miroir exact de `_get_valid_deployment_hexes` ;
+2. **par-figurine** (T6-f) : la formation entière validée par `deployment_preview_plan`.
+
+Le contrôle 1 teste **un objet qui n'existe plus** : l'unité n'occupe pas un socle à l'ancre,
+elle occupe N socles répartis ; l'ancre est un point de référence, pas une figurine.
+
+**Fondement règles (PDF lus, pas supposés)** :
+- « 18 Transports.pdf » : « Set up **each model** in your unit wholly within the set-up
+  distance » → la mise en place est PAR FIGURINE.
+- « 24 Core abilities.pdf » : « set up that unit anywhere that is **wholly within** your
+  deployment zone » → la contrainte porte sur l'unité ENTIÈRE, c.-à-d. toutes ses figurines.
+
+Aucune règle ne mentionne un socle à l'ancre. Le contrôle 1 refuse donc des placements **légaux
+au sens des règles** — typiquement une ancre en bord de zone dont le socle déborde alors que la
+formation tiendrait entièrement dedans. Ordre de grandeur mesuré sur le balayage des 16 104
+hexes de la zone (T6-f) : 263 refus `outside_zone` + 1 815 `out_of_bounds`, dont une part est
+légale au sens 40K.
+
+**Fix visé** : supprimer le contrôle mono-ancre du commit ET du masque, et laisser le décodeur
+(`_select_deployment_hex_for_action`, qui valide déjà la formation depuis T6-f) être le SEUL
+filtre. Un seul modèle de validation, aligné sur les règles, et l'agent récupère des placements
+aujourd'hui interdits.
+
+> 🔴 **CE FIX EST FAUX EN L'ÉTAT — NE PAS L'APPLIQUER (mesuré le 2026-07-20).**
+>
+> Il repose sur l'idée que le contrôle par-figurine « valide déjà la formation » à l'ancre
+> demandée. **C'est faux** : `build_validated_deployment_plan` passe par
+> `generate_compact_formation`, dont la spirale BFS retient la 1ʳᵉ case **légale** — l'ancre
+> **oriente** le placement, elle ne le **contraint** pas.
+>
+> **Mesure** (balayage des 16 104 hexes de zone × 5 unités = 80 520 ancres, scénario
+> d'entraînement réel). Sur les ancres refusées par le mono-ancre mais pour lesquelles un plan
+> existe, **aucune figurine n'est posée à l'ancre demandée** :
+> ```
+> unit 3  ancre=(2,299)  mono=outside_zone   fig_à_l_ancre=False  plan=[(24,293)]
+> unit 3  ancre=(3,298)  mono=outside_zone   fig_à_l_ancre=False  plan=[(24,293)]
+> unit 3  ancre=(4,298)  mono=outside_zone   fig_à_l_ancre=False  plan=[(24,293)]
+> unit 1  ancre=(2,299)  mono=out_of_bounds  fig_à_l_ancre=False  plan=[(8,297),(14,293),…]
+> ```
+> Quatre ancres distinctes → **le même plan**, à 22 colonnes de là.
+>
+> ⚠️ **Le chiffre « 14 859 ancres refusées à tort (18,5 %) », produit pendant cette session, est
+> RETIRÉ.** Il mesure « il existe un placement légal quelque part », pas « ce placement-ci est
+> légal ». Ne pas le recycler.
+>
+> **Supprimer le contrôle 1 ne débloquerait donc pas des placements légaux : ça rendrait 18,5 %
+> de l'espace d'action non déterministe** — l'agent désigne une ancre et l'unité atterrit
+> ailleurs. C'est la classe de bug « validé ≠ exécuté » que T6-g/T6-h ont éliminée.
+>
+> **Le code l'écrit déjà deux fois**, et l'audit T7 ne les avait pas lus :
+> [deployment_handlers.py:904-908](../../engine/phase_handlers/deployment_handlers.py#L904)
+> (« ne pas la retirer en croyant ce helper suffisant ») et le test dédié
+> `test_anchor_is_a_suggestion_not_a_constraint`
+> ([test_deployment_per_model_commit.py:290](../../tests/unit/engine/test_deployment_per_model_commit.py#L290)).
+>
+> **Le fond de T7 reste valide** : le contrôle 1 teste un socle unique à l'ancre, objet qui
+> n'existe plus, et refuse de vraies formations légales en bord de zone. Mais le fix ne peut pas
+> être « supprimer le contrôle 1 ». Il faut d'ABORD rendre le plan **contraint par l'ancre**
+> (échec si la formation ne tient pas autour d'elle, au lieu de glisser), ce qui **inverse** le
+> test ci-dessus — donc une **décision de design**, pas une correction de bug, à arbitrer
+> explicitement. Périmètre restreint : `build_validated_deployment_plan` n'est appelé que par le
+> décodeur gym ([action_decoder.py:1983](../../engine/action_decoder.py#L1983)) et le commit
+> `deploy_unit` ; le flux PvP par escouade passe par
+> [:859](../../engine/phase_handlers/deployment_handlers.py#L859) et n'est PAS touché.
+
+**Pourquoi pas maintenant (raisonnement à ne pas re-dérouler)** : ça modifie le masque de
+déploiement, donc **l'espace d'action de l'agent** — ça invalide les modèles entraînés et exige
+une mesure avant/après. Le faire pendant que le training ne tourne pas ajoute du risque sans
+pouvoir l'évaluer. Ordre optimal : **T6-h → T6-g → training qui tourne → T7**, dans sa propre
+tranche, avec avant/après mesuré (win-rate et taux de refus de déploiement).
+
+**Critère d'acceptation** : un seul prédicat de validation de déploiement dans le code (grep :
+plus de `compute_candidate_footprint` dans `deploy_unit`) ; un placement légal au sens 40K mais
+refusé aujourd'hui (ancre en bord de zone, formation entièrement dedans) est ACCEPTÉ — test
+dédié, rouge avant le fix ; suite verte hors échecs préexistants ; PvP non régressé (le drag
+mono-socle et l'auto-déploiement passent par le même commit).
+
+### Phase B (après T6 ET Phase A' — section 9 — validés) — Observation niveaux
+Spec à figer à ce moment-là, principes déjà actés :
+- Ajouter aux 7 features par-figurine un `level` normalisé (source : champ `level` de la
+  figurine, posé game_state.py ~L162) et aux 9 features par slot ennemi le niveau de l'ancre ;
+  exposer aussi un signal de coût de descente pour l'activation courante
+  (`squad_descent_penalty_subhex`, movement_handlers.py:276). Toute modif de layout change
+  `obs_size` (config + constantes `SQUAD_*` observation_builder ~L1245-1251) → nouveau modèle from
+  scratch, mettre à jour la `justification` en même temps.
+- Terrains d'entraînement à étages : SEULEMENT après vérification de l'état du chantier LoS 3D
+  (spatial_relations.py:186-189 "câblage incomplet") — sinon l'agent apprendrait sur un tir
+  non conforme aux règles.
+- Action "monter" (nouveau slot) = Phase C, décision utilisateur explicite requise.
+
+## 6. Critères d'acceptation
+
+| Tranche | Critère (tous vérifiables par commande) |
+|---|---|
+| T1 | Suite de tests verte ; smoke test moteur nu (annexe A) passe la phase shoot, la phase charge avec Carnifex ET une phase fight avec pertes allouées (chemin FIGHT_CTX) sans exception |
+| T2 | Zéro littéral d'action dans ai/. Le grep n'est qu'une HEURISTIQUE (3 versions successives ont toutes eu des trous : `== 11`, `X in valid_actions`, listes, `return 10/12/18`, dicts de poids `{4: 0.50,...}`, `action % 8`, sous-dossiers, + faux positifs légitimes dans train.py) — le critère réel est un AUDIT MANUEL exhaustif des 4 fichiers `evaluation_bots.py`, `env_wrappers.py`, `bot_evaluation.py`, `game_replay_logger.py` : chaque comparaison/émission d'entier d'action passe par une constante de macro_intents. Grep de contrôle : `grep -rnE "(step\([0-9]+\)|WAIT_ACTION|==\s*[0-9]+\b|\b[0-9]+ in valid_actions|return 1[028]\b|% 8)" ai/` avec revue de chaque hit. Smoke test pile complète avance au-delà du premier WAIT forcé |
+| T3 | `train.py --step --training-config x1_debug` dépasse la résolution walls/objectives sans FileNotFoundError |
+| T4 | Les 61 scénarios se chargent (`W40KEngine(scenario_file=...)` + reset, script de balayage) ; zéro clé legacy ; sort de training_save/ statué |
+| T5 | 10 épisodes aléatoires masqués terminés sur ≥3 scénarios × sièges p1/p2 ; zéro masque vide |
+| T6 | ⚠️ *(périmée n°3 de §0bis : le blocage par `CC_DMG` est levé — §0.3 porté, run 60/60 en §0.7 — cellule conservée telle quelle, non corrigée)* Run `--new` court complet + analyzer + replay OK ; ~~win-rate vs RandomBot en progression~~ → **critère REMPLACÉ le 2026-07-19, voir section 10.6** (win-rate PAR ROSTER contre un adversaire de holdout jamais vu à l'entraînement + absence de comportement absurde en partie humaine). L'ancien critère référençait un holdout de rosters qui n'existe plus. — ⏳ **PARTIEL (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép.). ✅ Suite verte (1293) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ✅ T6-c résolu : `_process_squad_action` journalise, analyzer tourne, `1.2 erreurs shooting = 0`. ✅ **T6-d résolu** : `squad_fight` = sélection FIGHT 12.04, machine V11 déroulée par `_fight_v11_gym_settle` (ordre 12.02→12.04→12.07 respecté, snapshot posé, double activation interdite). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (bruit) — mesuré AVANT T6-d, donc sur un moteur où la mêlée était fausse ; **à re-mesurer** avec phase `x1` + `bot_evaluation` holdout vs RandomBot. ✅ **Le run TOURNE de nouveau depuis le 2026-07-19** : T6-g et T6-h sont livrés (cf. §0), x5_debug 8 workers 10/10 ép. exit 0. ❌ **Le critère T6 reste NON évaluable**, mais pour une raison DIFFÉRENTE et désormais isolée : **§10.4** — sur le chemin single-scenario, P2 joue ALÉATOIRE (`SelfPlayWrapper(frozen_model=None)`, `update_frozen_model` sans appelant). Tout win-rate mesuré aujourd'hui est du bruit. ~~C'est le prochain bloqueur.~~ **✅ §10.4 RÉSOLU le 2026-07-19** (adversaires câblés sur les 3 chemins) ; le critère T6 reste néanmoins NON évalué, désormais bloqué par `CC_DMG` (§0.3) qui plante des épisodes d'évaluation. Voir §0.0 pour l'ordre des travaux. |
+| T6-i | ⚠️ *(périmée n°2 de §0bis : le test de non-régression existe : `test_end_of_turn_coherency_03_03.py` — cellule conservée telle quelle, non corrigée)* Une escouade rendue incohérente par des pertes est ramenée en coherency à la fin du tour (03.03), sur les **deux** chemins de fin de Fight, avant le test de limite de tour ; aucune destination du masque de move n'est rejetée pour cause de coherency — ⏳ **PARTIEL (2026-07-19 soir)** : ✅ fix livré et vérifié par run bout-en-bout (8 épisodes plantés → 2, erreur `incohérence masque/exécution` disparue, suite sans régression) ; ❌ **test de non-régression NON écrit** — §8 l'impose, c'est la tâche n°1 de §0.0 |
+| T6-f | Après le commit de déploiement, AUCUNE figurine vivante à `(-1,-1)` et ancre `units_cache` = figurine d'index minimal, sur les 3 chemins (gym, ancre imposée tutoriel, drag) — ✅ **FAIT (2026-07-19)** |
+| T6-g | Toute cellule offerte par le masque de move est exécutable : sur N épisodes aléatoires, zéro `ValueError` « incohérence masque/exécution » — et un test dédié où une escouade dont le BLOC déborde (mur / autre escouade) ne voit PAS la cellule dans son masque — ✅ **FAIT (2026-07-19)** : `test_move_pool_block_erosion.py` (+6, mur/escouade/ER sous une SŒUR, débordement plateau, non-sur-filtrage, mono-fig) ; runs x5_debug 8 workers (10/10 ép.) et mono-env x1_debug, zéro occurrence |
+| T6-h | La translation de bloc préserve les distances internes pour TOUTES les parités de `dx` (test paramétré `dx` pair ET impair) — rouge sur le code actuel — ✅ **FAIT (2026-07-19)** : `test_rigid_plan_translation.py` (+10), rouge avant le fix aux seules parités impaires ; fix étendu à `translate_squad_to_destination` (écrivain du commit) et `preview_hidden_models_after_move` |
+
+## 7. Annexe A — Smoke tests de référence
+
+Deux scripts éprouvés pendant l'audit (à recréer dans `scripts/` ou en scratch ; ne pas
+committer les monkeypatches, ils simulent les fixes T1) :
+
+1. **Moteur nu** : `W40KEngine(gym_training_mode=True, scenario_file=<board scenario>)`,
+   boucle `reset()` puis `step(choice(flatnonzero(get_action_mask())))` jusqu'à
+   terminated/masque vide, 3 seeds. Diagnostic à imprimer si masque vide : phase, tour, joueur,
+   pools `*_activation_pool`, états `pending_*`/`fight_*`.
+2. **Pile complète** : `Monitor(BotControlledEnv(ActionMasker(engine), GreedyBot(0.15),
+   registry, agent_seat_mode="random", global_seed=...))` — miroir exact de
+   [train.py:1777-1791](../../ai/train.py#L1777-L1791).
+
+Résultats d'audit (2026-07-14) : moteur nu OK jusqu'au tour 5 avec fixes R4 simulés (deadlock
+R7 en fin de partie) ; pile complète bloquée immédiatement par R5 (`step(11)`).
+Réserve : seul le décideur tir était patché — le chemin d'allocation de pertes en mêlée
+(FIGHT_CTX) n'a pas été prouvé par ce smoke test (cf. R4/T1).
+
+## 8. Tests de non-régression (obligatoires, toutes tranches)
+
+Commande canonique (à lancer après CHAQUE modification, avant de déclarer une tranche finie) :
+
+```bash
+source /home/greg/40k/.venv/bin/activate && python3 -m pytest tests/unit/ -q
+```
+
+**Baseline vérifiée (2026-07-15)** : 1152 tests collectés dans `tests/unit/` (ai/ engine/
+services/ shared/), zéro erreur de collecte, 1152 passed / 2 skipped après T1. Toute exécution
+qui passe SOUS ce compte de collectés = suppression de test à justifier explicitement (jamais
+en silence). Un test qui devient rouge après une tranche = STOP, corriger la root cause (jamais
+adapter le test pour le faire passer, sauf si c'est LE comportement testé qui change par
+décision documentée ici).
+
+### 8.1 Principes (non négociables)
+
+- **Un fix = ses tests dans la même tranche** : chaque rupture R1-R7 corrigée s'accompagne de
+  tests qui reproduisent la panne d'origine (le test doit échouer sur l'ancien code) ET
+  verrouillent le comportement corrigé.
+- **Miroir PvP** : pour tout prédicat/chemin bifurquant gym vs PvP, tester LES DEUX branches —
+  le test PvP fige le comportement d'avant-fix (neutralité), le test gym fige le fix.
+- **Zéro monkeypatch de code mort** : les tests qui patchent `_attack_sequence_rng` disparaissent
+  avec lui (P1) ; aucun nouveau test ne doit s'appuyer sur du code sans site d'appel vif.
+- **Déterminisme** : tout test utilisant du RNG fixe sa seed ; tout test d'ordre de candidats
+  (P2/P3) vérifie la STABILITÉ de l'ordre sur deux appels identiques.
+- **Erreurs explicites testées** : chaque garde « erreur explicite, pas de fallback » ajoutée
+  par le plan a un test `pytest.raises` vérifiant le TYPE et le MESSAGE (fragment discriminant).
+- Les tests règles encodent le PDF du projet (référence 40k_rules citée en docstring), jamais
+  le comportement du code mort.
+
+### 8.2 Socle transverse — tests de contrat d'interface (à écrire en T2, maintenus ensuite)
+
+Fichier proposé : `tests/unit/engine/test_agent_interface_contract.py`.
+- `action_space.n == 41` et `observation_space.shape == (108,)` lus depuis la config (échec
+  explicite si la config change sans migration de modèle actée).
+- **Cohérence constantes ↔ décodeur** : pour chaque constante de `macro_intents.py` créée en T2
+  (`ACTION_WAIT`, `SHOOT_SLOT_BASE`, bases move/advance/fallback, `ACTION_CHARGE`,
+  `ACTION_FIGHT`, `DEPLOY_SLOTS`), un test vérifie que `ActionDecoder` route bien cet entier
+  vers l'intention attendue (wait→wait, 19→shoot slot 0, 24→charge...). C'est LE verrou
+  anti-récidive de R5 : tout futur re-layout casse ce test au lieu de casser le training.
+- Somme du layout : `6+6+6+1+5+1+1+15 == TOTAL_ACTION_SIZE == 41`.
+- Le masque retourné par `get_action_mask()` a exactement `shape (41,)`, dtype bool.
+
+### 8.3 Couverture par tranche
+
+**T1 (fait — tests à vérifier présents, compléter si trous)** :
+- R6 : éligibilité + destinations de charge avec `BASE_SIZE` liste (Carnifex `[41,27]`,
+  Psychophage `[47,36]`) dans les DEUX sites (`charge_build_valid_destinations_pool`,
+  `_charge_reverse_goal_bfs_for_eligibility`) — plus cas socle rond int (non-régression).
+- R4 : `is_programmatic_owner`/`is_programmatic_defender` — matrice complète :
+  (gym_training_mode True/False) × (player_types human/ai) ; allocation tir auto en gym ;
+  **allocation fight auto en gym avec pertes réellement allouées** (le chemin FIGHT_CTX,
+  jamais exercé avant T1) ; les 4 sites `defender_human` du flux fight ; en PvP humain,
+  l'allocation reste manuelle (miroir) ; `_is_ai_controlled_shooting_unit` NON branché sur
+  gym (test négatif : pas d'auto-activation `active_shooting_unit` en gym).
+
+**T2** :
+- Tests 8.2 ci-dessus.
+- `env_wrappers` : WAIT forcé émet `ACTION_WAIT` (18) ; détection « pool empty » ; plus AUCUN
+  test ne référence 11/12 ou les plages 4-8 hors déploiement.
+- `evaluation_bots` : pour chaque phase (move/shoot/charge/fight), le bot ne choisit QUE des
+  actions du masque ; choix hors masque = erreur explicite (test `raises`) ; les dicts de
+  poids déploiement pointent des actions de `DEPLOY_SLOTS`.
+- ~~`game_replay_logger` : décodage correct du layout 41 (un cas par famille d'action) — ou, si
+  condamné, erreur explicite testée.~~ → **sans objet : le module est supprimé (§0.8).** Ne pas
+  réécrire de test pour lui.
+
+**T3** :
+- `_list_available_board_refs` retourne les refs du board résolu par
+  `config_loader.get_board_dir()` (test avec `W40K_BOARD_PATH` pointant un board de fixture) ;
+  plus aucune reconstruction `{cols}x{rows}` (test sur analyzer si migré).
+- `_expand_random_ref_weights` : refs inconnues → erreur explicite listant les refs
+  disponibles ; refs valides → expansion correcte.
+- R1 selon la décision : phase `default` existante OU `--training-config` manquant → erreur
+  explicite listant les phases (test du message).
+- `_materialize_eval_scenario_refs` n'émet PLUS `objectives_ref` (clé absente du scénario
+  matérialisé — test de sortie).
+
+**T4** :
+- Résolveur `board_ref` : (a) parent `scenario/` sans `board_ref` → OK (comportement PvP
+  inchangé) ; (b) `board_ref` valide hors `scenario/` → OK ; (c) ni l'un ni l'autre → erreur
+  explicite ; (d) `board_ref` inexistant → erreur explicite. Idem pour `wall_ref: "random"`
+  et `terrain_ref`.
+- **Balayage de la banque** (test paramétré sur les 61 scénarios migrés) :
+  `W40KEngine(scenario_file=...)` + `reset()` sans exception ; zéro clé legacy
+  (`objectives`, `objectives_ref`, `objective_hexes`, `deployment_zone`) ; ≥ 1 objectif
+  résolu (piège « liste vide en silence », game_state ~L376-381) ; `deployment_zones` avec
+  clés `"1"`/`"2"`.
+- Script de migration : idempotence (2e passage = zéro diff).
+
+**T5** :
+- R7 : scénario minimal amené au dernier tour, phase fight du dernier joueur, pools vides →
+  `terminated=True`, winner déterminé, JAMAIS masque vide avec `terminated=False`. Cas
+  symétriques P1/P2.
+- Invariant global (smoke intégré en test, 3 seeds × 2 sièges, plafonné en steps) : à chaque
+  step, `mask.any() or terminated` — c'est l'invariant qui protège MaskablePPO.
+
+**T6** : à l'origine « pas de test unitaire nouveau (validation par run réel + analyzer +
+replay), suite complète verte ». Les ruptures T6-c→T6-h ont imposé des verrous :
+- `test_squad_fight_target_parity.py` (T6-c, +5) et `test_squad_fight_v11_state.py` (T6-d, +6).
+- `test_deployment_per_model_commit.py` (T6-f, +10) : aucune figurine à `(-1,-1)` après commit ;
+  ancre = figurine d'index minimal (invariant de `build_rigid_plan`) ; légalité du plan
+  committé ; déterminisme + lecture pure de `build_validated_deployment_plan` ; invalidation de
+  la mémo sur tampon périmé ; équivalence de l'empreinte pré-calculée aux DEUX parités de
+  colonne (l'optimisation touche du code partagé PvP).
+- `test_rigid_plan_translation.py` (T6-h, +10) : distances internes du bloc préservées, paramétré
+  sur `dx` PAIR **et** IMPAIR — un test qui n'exerce que `dx` pair passe sur le code buggé.
+- `test_move_pool_block_erosion.py` (T6-g, +6) : mur / autre escouade / ER ennemie sous une SŒUR
+  alors que l'ANCRE est légale, débordement de plateau, absence de sur-filtrage, court-circuit
+  mono-figurine. `game_state` fabriqué — d'où le test suivant.
+- `test_move_mask_is_executable.py` (T6-g/T6-h, +3) : l'invariant « masque ⊆ exécutable » sur le
+  VRAI moteur (3 seeds × 400 steps, ~21 700 cellules par run), avec le budget exact
+  qu'`execute_squad_move` appliquerait. Couvre les deux contraintes que l'érosion ne filtre pas
+  et qui n'étaient que RAISONNÉES invariantes par translation cube (`budget_per_model`,
+  `require_coherency`).
+  ⚠️ **Contre-épreuve obligatoire pour ce genre de test** : il a d'abord été « validé » par un
+  `git stash` qui, les fixes ayant été committés entre-temps, n'annulait que le refactor — le
+  test passait donc pour une mauvaise raison. La vraie épreuve est
+  `git checkout 3886e498 -- engine/phase_handlers/shared_utils.py` : le test devient ROUGE sur
+  les 3 seeds avec l'erreur d'origine (`squad=103 dest=(24,15) … incohérence masque/exécution`).
+  Un test de non-régression qu'on n'a pas vu échouer ne garde rien.
+
+⚠️ **La suite n'est PAS verte et ne l'était pas avant ces fixes** : 9 échecs préexistants
+(4 banque de scénarios + 5 déploiement/terrain), tous dus à des rosters manquants ou non
+résolus. Le critère réel est donc « pas de NOUVEL échec », à établir par baseline `git stash`
+avant de conclure quoi que ce soit sur une régression.
+
+### 8.4 Couverture Phase A' (une règle = son fichier de tests, AVANT suppression du code mort)
+
+- Chaque règle du tableau P1 (section 9.2) : tests sur le chemin VIF (`_manual_roll_intent` /
+  `_resolve_one_manual_wound`) encodant le PDF — cas nominal, cas limite, cas d'inapplicabilité.
+  Minimum par règle : HEAVY (les 3 conditions 24.16, chacune isolée) ; HAZARDOUS (un jet PAR
+  ARME sélectionnée, pas par attaque ; réutilisation de `roll_hazard_for_unit`) ;
+  IGNORES_COVER (bypass du malus, ET non-régression : arme sans le trait subit toujours
+  13.08) ; DEVASTATING_WOUNDS (arrêt de séquence, MW après dégâts normaux, max 1 figurine
+  par critical wound) ; RAPID_FIRE (bonus à mi-portée exacte, rien au-delà) ;
+  closest_target_penetration (AP+1 seulement sur la cible la plus proche) ; rerolls tir
+  (parité avec les tests fight existants).
+- Suppression du code mort : après purge, la suite passe SANS les tests monkeypatchés
+  supprimés, et un test-sentinelle vérifie que `execute_action` sur les anciennes branches
+  lève l'erreur « squad path expected ».
+- P2/P3 (par décision branchée) : ordre des candidats déterministe et stable (deux appels →
+  même liste) ; masque expose exactement les `CHOICE_i` des candidats valides ; décision
+  appliquée = candidat choisi ; en PvP le prompt `waiting_for_player` équivalent est intact
+  (miroir) ; heuristique `_ai_select_*` toujours utilisée par le bot adversaire.
+
+### 8.5 Critère d'acceptation global
+
+`python3 -m pytest tests/unit/ -q` vert (0 failed, 0 error, skips justifiés) est une condition
+NÉCESSAIRE de sortie de CHAQUE tranche (T1→T6, puis chaque tranche P1/P3) — en complément des
+critères spécifiques de la section 6, jamais à leur place.
+
+## 9. Phase A' — Toutes les règles implémentées dans le training (P1-P5)
+
+Décision utilisateur (2026-07-14) : l'agent doit s'entraîner sur TOUTES les règles déjà
+implémentées, et chaque fois que les règles laissent un choix au joueur, c'est l'agent qui
+choisit. Périmètre strict : règles présentes dans le moteur — on n'entraîne sur AUCUNE feature
+absente (stratagèmes, CP, FNP, transports, etc. restent hors scope). Prérequis : Phase A
+(T1-T6) validée.
+
+### 9.0 AUDIT DE STATUT 2026-07-24 — Phase A' — ❌ (P1 livré depuis ; **P2→P5 = 0/4**)
+
+> 🔴 **MISE À JOUR 2026-07-28 — la ligne P1 du tableau ci-dessous est PÉRIMÉE.** Les règles
+> d'armes sont **vives** depuis le 2026-07-26 : le socle commun
+> `engine/phase_handlers/attack_sequence.py` est importé par le chemin de tir vif
+> ([shared_utils.py:7363](../../engine/phase_handlers/shared_utils.py#L7363), [:8667](../../engine/phase_handlers/shared_utils.py#L8667))
+> et par le chemin de mêlée vif ([fight_handlers.py:5227](../../engine/phase_handlers/fight_handlers.py#L5227)).
+> **Ce qui reste de P1** = la SUPPRESSION du code mort `_attack_sequence_rng`, jamais faite →
+> **§0.38**. Les verdicts **P2, P3, P4, P5 du tableau restent exacts**, re-vérifiés le 2026-07-28
+> (grep `pending_agent_decision`/`CHOICE_[0-9]` = 0 ; `TOTAL_ACTION_SIZE` = 1062 ;
+> `raw_action_int % len(options)` toujours vif). Le titre « 0/5 » devient donc **0/4**.
+
+Revérification ligne à ligne contre le code (la première ; §0.19 ne l'avait jamais menée, cf. sa
+correction). **Aucune des cinq sous-parties n'est réellement en place**, malgré les marqueurs
+✅ FAIT antérieurs. Chiffres et sites relevés par grep/lecture le 2026-07-24, pas de mémoire.
+
+| Sous-partie | Statut réel | Preuve vérifiée |
+|---|---|---|
+| **P1** — Parité de résolution (§9.2) | ⏳ **démarré** (état initial « fait à l'envers » ; 1 règle corrigée le 2026-07-24, cf. **§9.2.1**) | **Snapshot à l'audit (état AVANT démarrage P1)** : les règles HEAVY, IGNORES_COVER, DEVASTATING_WOUNDS, closest_target_penetration, HAZARDOUS, reroll_1_towound, reroll_towound_target_on_objective étaient écrites **dans `_attack_sequence_rng`** (le code MORT, [shooting_handlers.py:5998](../../engine/phase_handlers/shooting_handlers.py#L5998)), **absentes du chemin vif** — `_attack_sequence_rng` n'a **aucun appelant vif** (seuls 6 fichiers de tests le monkeypatchent) → règles inactives gym ET PvP. **⚠️ MISE À JOUR 2026-07-24** : **IGNORES_COVER est désormais portée dans le vif** (`_cover_worsened_bs`, cf. §9.2.1) — cette ligne n'est donc plus vraie pour elle ; les 6 autres règles + la suppression du code mort (`_attack_sequence_rng`, états `_rapid_fire_*`, log `rapid_fire_bonus_shot`, 5 branches « squad path expected ») restent à faire. |
+| **P2** — Mécanisme générique décision agent (§9.3) | ❌ **absent** | Grep `pending_agent_decision` / `CHOICE_[0-9]` / `agent_decision` sur `engine/` + `ai/` = 0. Action_space non étendu : `TOTAL_ACTION_SIZE` reste `BASE_ZONE_INTENT + MAX_OBJECTIVES*3` ([macro_intents.py:20](../../engine/macro_intents.py#L20)), pas le `41+K` prévu. Aucun bloc obs « contexte de décision ». |
+| **P3** — Branchement décision par décision (§9.4) | ❌ **0/9** | Point 0 (pseudo-décision aléatoire, le plus urgent) toujours vif : `raw_action_int % len(options)` à [w40k_core.py:2644](../../engine/w40k_core.py#L2644). Points 1-8 : sélecteurs heuristiques `_ai_select_*` / scoring intacts, aucun branché sur une décision agent. |
+| **P4** — Observation de support (§9.5) | ❌ **sans objet** | Le bloc décision (P2) n'existant pas, son support obs non plus. |
+| **P5** — Validation par tranche (§9.6) | ❌ **sans objet** | Aucune tranche P3 ouverte → aucun cycle win-rate. |
+
+**Seul acquis réel** : les 4 rerolls de fight sont vifs ([fight_handlers.py:5153-5206](../../engine/phase_handlers/fight_handlers.py#L5153)) — mais §9.2 les liste déjà comme « déjà vifs », donc rien de neuf au titre de P1.
+
+⚠️ **Pourquoi les ✅ FAIT étaient faux.** Le travail P1 identifiable (règles d'armes) a été écrit
+**dans le code mort** au lieu du chemin vif, et une batterie de tests (`test_unit_rules_shoot.py`,
+`test_shoot_attack_sequence.py`, `test_special_rules_e2e.py`, `test_fight_special_rules.py`,
+`test_phase_transitions.py`) le **monkeypatche** et passe au vert. C'est exactement le double motif
+que §0.19 existe pour interdire : **code testé mais jamais appelé** (T6-i) + **test qui passe pour
+la mauvaise raison**. En jeu réel, ces règles ne s'exécutent nulle part.
+
+**Conséquence de planning.** La Phase A' est **à faire intégralement**, dans l'ordre du plan
+ci-dessous (P1 corrigé = déplacer les règles vers le vif PUIS supprimer le mort ; puis P2→P5).
+Les critères d'acceptation de §9.2→§9.6 restent valides tels quels.
+
+### 9.0bis Optimalité du plan — arbitrage avant exécution (2026-07-24)
+
+Question posée : « faire décider à l'agent TOUT ce qu'il peut est-il optimal ? ». Sites de code
+ci-dessous **vérifiés par lecture** le 2026-07-24.
+
+**La MÉTHODE du plan est bonne** — à garder telle quelle :
+- **P2 générique** (un canal `pending_agent_decision` + `CHOICE_0..K`) plutôt qu'une action ad
+  hoc par décision : évite l'explosion de l'action_space, mutualise, et le miroir des prompts PvP
+  `waiting_for_player` respecte la règle projet « gym copie PvP ».
+- **§9.6** (une tranche = une décision, win-rate ≥ tranche précédente sinon corriger
+  observation/reward AVANT d'empiler) : c'est le garde-fou qui rend le plan robuste au risque
+  « plus de décisions = agent pire ». À ne jamais assouplir.
+
+**L'OBJECTIF « tout » n'est pas optimal en soi** — trois réserves, avec le traitement retenu :
+
+1. **Levier tactique nul = ne pas brancher (mesurer, ne pas juger à la main).** Certaines
+   décisions ont un optimum calculable déjà atteint en auto : choix d'arme CC par expected damage
+   `_auto_select_cc_weapon_for_fig` ([shared_utils.py:7370](../../engine/phase_handlers/shared_utils.py#L7370)),
+   ordre de déclaration des groupes d'allocation `_auto_declared_order`
+   ([shared_utils.py:6462](../../engine/phase_handlers/shared_utils.py#L6462)). Les brancher
+   n'ajoute que de la dimensionnalité (dilution du reward, credit assignment plus profond,
+   risque de catastrophic forgetting — piège connu CLAUDE.md) sans gain. **Critère d'arbitrage à
+   appliquer AVANT chaque tranche P3** : mesurer le *regret* de la décision — écart de valeur
+   entre le choix optimal (rollout/oracle) et le choix de l'heuristique auto. Regret négligeable
+   → rester en auto ; regret significatif → brancher. Ça remplace le « optionnels, à statuer
+   utilisateur » (§9.4 point 8) par une mesure, pas un avis.
+
+2. **Décisions spatiales : ne pas exposer en top-K d'hex.** Pour destination de pile-in/conso
+   (§9.4 point 5), move-after-shooting (point 6), placement de charge, les candidats pertinents
+   dépassent souvent K=6 → un top-K figé **tronque et peut exclure l'optimum** (troncature
+   silencieuse = anti-pattern projet). Le plan le fait DÉJÀ bien pour le déploiement : actions
+   4-8 = **5 stratégies tactiques scorées** (aggressive front / objective pressure /
+   safe-cohesion / left / right flank), pas des hex bruts —
+   [action_decoder.py:1833](../../engine/action_decoder.py#L1833). **À généraliser** : paramétrer
+   toute décision spatiale à grand espace en *intentions scorées*, pas en hex. Sinon K=6 devient
+   un plafond arbitraire sur la qualité.
+
+3. **K=6 est un défaut, pas une loi.** L'alignement sur les 6 slots figurines (§9.3) vaut pour
+   l'allocation de pertes ; il n'a aucune raison de borner les décisions de cardinalité
+   différente. K doit être choisi par type de décision, pas global.
+
+**En clair** : le plan est quasi-optimal en méthode ; l'objectif « tout » doit rester
+**subordonné au win-rate §9.6 et au regret mesuré** (réserve 1), et la **paramétrisation des
+décisions spatiales en intentions scorées** (réserve 2) est le point technique à ne pas rater.
+
+### 9.1 Constat d'architecture (audit 2026-07-14, vérifié par lecture)
+
+Il existe DEUX moteurs de résolution d'attaque :
+- **Chemin vif** (PvP ET gym) : résolution squad — `_manual_roll_intent`
+  ([shared_utils.py:5905-5993](../../engine/phase_handlers/shared_utils.py#L5905-L5993)) + `_resolve_one_manual_wound` (L6038-6114).
+- **Code mort** : `_attack_sequence_rng` (shooting_handlers, ~L5820-6003) — zéro site
+  d'appel vif (utilisé seulement par des tests via monkeypatch) ; les branches `execute_action`
+  qui y menaient lèvent des RuntimeError « squad ... expected » (shoot ~L5510-5529,
+  activate_unit ~L5519-5523, select_weapon ~L5534-5538 « squad_select_weapon expected »,
+  left_click ~L5589-5593, invalid ~L5627-5631) ; état orphelin `_rapid_fire_*` dans
+  w40k_core (~L1055-1061, L2055-2061) et sites shooting_handlers associés (~L230, L947-953,
+  L2500-2506, L4912-4925, L5689-5696). NB : w40k_core ~L3561 est un simple champ de LOG
+  `rapid_fire_bonus_shot`, pas de l'état — le grep `_rapid_fire_` ne l'attrape pas.
+- `WeaponRulesApplier.apply_rules` est un placeholder pass-through ([rules.py:279-327](../../engine/weapons/rules.py#L279-L327)) :
+  les règles d'armes sont validées/parsées mais PAS appliquées par ce système.
+
+Conséquence : toute règle implémentée uniquement dans `_attack_sequence_rng` est inactive
+partout (gym ET PvP).
+
+### 9.2 P1 — Parité de résolution : réimplémentation depuis les PDFs, puis suppression du mort
+
+⚠️ **Le code mort N'EST PAS une spec à porter** — vérifié contre les PDFs du projet (24 Core
+abilities lu) : il implémente une AUTRE édition des règles. Il ne sert que d'indice de point
+d'insertion. Chaque règle se réimplémente depuis le PDF du projet.
+
+Règles à implémenter dans le chemin vif (absentes du vif, présentes dans le mort sous forme
+non conforme) — descriptions = PDF projet :
+
+| Règle (PDF projet) | Indice mort | Point d'insertion vif |
+|---|---|---|
+| HEAVY (24.16) : +1 to hit si unité unengaged ET pas posée sur la table ce tour ET aucun modèle bougé de plus de 3" ce tour — PAS « remained stationary » | ~:5869-5880 | `_manual_roll_intent` (seuil de touche) |
+| HAZARDOUS (24.15) : après que l'unité a résolu TOUTES ses attaques, un hazard roll (06.03) PAR ARME hazardous sélectionnée — pas un jet par attaque. NB : `roll_hazard_for_unit` (vif, shared_utils ~3410, câblé au move via w40k_core ~2635) implémente déjà 06.03 → réutiliser | ~:5887, :5916 | fin d'activation tir/fight |
+| IGNORES_COVER : 17 armes la déclarent, la feature est OBSERVÉE, mais `_cover_worsened_bs` (shared_utils ~5745) ne la vérifie jamais — le malus de couvert est infligé À TORT à ces armes (gym ET PvP ; le commentaire w40k_core ~4380 « appliqué côté frontend » est faux pour la résolution backend) | — (jamais implémentée) | `_cover_worsened_bs` (bypass si arme IGNORES_COVER) |
+| DEVASTATING_WOUNDS (24.10) : critical wound → la séquence de CETTE attaque s'arrête, la cible subit D blessures mortelles APRÈS les dégâts normaux, max 1 figurine endommagée par critical wound — PAS « save sauté » (le mort n'est pas conforme non plus) | ~:5970-5980 | `_resolve_one_manual_wound` + moteur MW |
+| RAPID_FIRE : attaques bonus à mi-portée (conforme PDF) | état w40k_core ~:1055-1061 | `_manual_roll_intent` (calcul NB à la déclaration, comme Blast) |
+| closest_target_penetration (règle projet unit_rules.json) : AP+1 sur la cible éligible la plus proche | ~:5836-5840 | `_manual_roll_intent` (AP effectif) |
+| reroll_1_towound au TIR | ~:5935-5940 | `_manual_roll_intent` — déjà vif en fight (`_manual_roll_fight_intent`) : asymétrie tir/fight à combler |
+| reroll_towound_target_on_objective au TIR | ~:5945-5957 | idem |
+
+Méthode : une règle = une tranche (PDF relu AVANT implémentation + test unitaire dédié).
+⚠️ Le chemin squad est partagé PvP/gym : chaque implémentation corrige AUSSI le PvP — c'est
+voulu (conformité accrue partout), à annoncer à l'utilisateur (équilibre de jeu modifié).
+
+Cas particulier : **`reroll_charge`** est déclaré dans `config/unit_rules.json` mais
+n'existe NULLE PART dans le code (grep zéro, ni vif ni mort). À statuer : implémenter
+(charge_handlers, reroll du 2D6) ou retirer de la config.
+
+Déjà vifs (rien à porter) : charge_impact (règle d'unité D6 4+ → 1 MW, `_apply_charge_impact`
+~L4551), charge/shoot_after_advance/flee, move_after_shooting, reactive_move,
+**Desperate Escape (09.07)**, les 4 rerolls de fight, Blast, Pistol (10.06), couvert 13.08
+(mécanique conforme PDF SAUF le cas IGNORES_COVER ci-dessus), obscuring, invuln, allocation
+05.03/05.04, T du bodyguard 19.02.
+NB : `closest_target_penetration` apparaît aussi comme feature d'OBSERVATION
+(observation_builder) — actuellement observée sans effet en résolution.
+
+**Périmètre à statuer (utilisateur)** : ~10 règles d'armes sont déclarées dans les armories ET
+observées (observation_builder ~65-92) mais appliquées NULLE PART (ni vif ni mort) : TORRENT,
+TWIN_LINKED, SUSTAINED_HITS, LETHAL_HITS, MELTA, ANTI_*, INDIRECT_FIRE, EXTRA_ATTACKS,
+PSYCHIC. Elles sont hors périmètre A' (« règles présentes dans le moteur ») — MAIS
+IGNORES_COVER fait exception (intégrée au tableau P1 ci-dessus) car son absence rend FAUSSE
+une règle implémentée (le couvert). Pour les autres : soit les implémenter (extension de
+périmètre à valider), soit retirer leurs canaux d'observation (bruit pur pour PPO), jamais
+le statu quo silencieux.
+
+Suppression du code mort (fin de P1) : `_attack_sequence_rng` (~5820-6003), les branches
+`squad path expected` (shoot, left_click, select_weapon, invalid — cf. 9.1), l'état
+`_rapid_fire_*` de w40k_core (~1055-1061, 2055-2061) ET ses sites shooting_handlers
+(~L230, 947-953, 2500-2506, 4912-4925, 5689-5696), le champ de log `rapid_fire_bonus_shot`
+(w40k_core ~3561, non attrapé par le grep), et les tests qui monkeypatchent le mort.
+Critère : grep `_attack_sequence_rng|_rapid_fire_|rapid_fire_bonus_shot` vide (hors nouvelle
+implémentation vive) + suite verte.
+
+### 9.2.1 Progression P1 (démarrée 2026-07-24)
+
+Ordre de démarrage validé utilisateur : commencer par IGNORES_COVER (seul cas où l'absence rend
+une règle active FAUSSE). Arbitrages actés le 2026-07-24 : `reroll_charge` → **à implémenter**
+(tranche charge) ; les ~10 règles d'armes observées non appliquées → **périmètre A' étendu, à
+implémenter** (tranches ultérieures).
+
+| Règle | Statut | Où (vif) | Test |
+|---|---|---|---|
+| **IGNORES_COVER (24.18)** | ✅ **FAIT dans le vif** (2026-07-24) | Helper `weapon_has_rule` ([weapon_helpers.py](../../engine/utils/weapon_helpers.py)) + court-circuit `(bs, False)` en tête de `_cover_worsened_bs` ([shared_utils.py:6078](../../engine/phase_handlers/shared_utils.py#L6078)), avant tout calcul de LoS. PDF 24.18 + 13.08 relus. | `tests/unit/engine/test_ignores_cover.py` (**6**) : 4 unitaires directs + **2 bout-en-bout via `_manual_roll_intent`** (verrouillent le CÂBLAGE appelant→fonction, pas la fonction seule — cf. §0.19.3). Deux contre-épreuves faites : (a) court-circuit neutralisé → 2 rouges ; (b) mauvais `weapon` passé à l'appel → l'e2e rougit. Restauré → 6 verts. |
+| **reroll_1_towound (tir) + reroll_towound_target_on_objective (tir)** | ✅ **FAIT dans le vif** (2026-07-25) | Ajoutés dans `_manual_roll_intent` (tir) en **miroir exact** de `_manual_roll_fight_intent` ([fight_handlers.py:5203](../../engine/phase_handlers/fight_handlers.py#L5203)) : conditions via `_unit_has_rule_effect` + `is_unit_on_objective`. Helper `_is_unit_on_objective` **déplacé** de fight_handlers vers shared_utils (`is_unit_on_objective`, générique tir/fight), fight délègue. PDF 01 Core « Re-rolls » (un dé re-roll une fois). | `tests/unit/engine/test_reroll_towound_shoot.py` (**5**, bout-en-bout via `_manual_roll_intent`, RNG déterministe) : reroll d'un 1 / reroll tout échec sur objectif / discrimination non-1 et off-objectif / sans règle. Contre-épreuve : bloc reroll neutralisé → 2 rouges. |
+| **closest_target_penetration** | ✅ **FAIT dans le vif** (2026-07-25) | Bloc dans `_manual_roll_intent` ([shared_utils.py:6335](../../engine/phase_handlers/shared_utils.py#L6335)), au calcul de l'AP effectif AVANT `save_threshold`/`display_save_th`. Garde `_unit_has_rule_effect(attacker_unit, "closest_target_penetration")` ; « cible la plus proche » = `min()` sur `shooting_build_valid_target_pool` (éligibles) via `ranged_edge_distance` bord-à-bord (sélecteur `ranged`), mesurée au niveau **ESCOUADE** (`attacker["squad_id"]` — dans le vif `attacker` est une FIGURINE, écart corrigé vs le mort qui utilisait `attacker["id"]`). AP+1 = `ap -= 1` (convention AP négatif, cf. `save_threshold`). Spec = `config/unit_rules.json` (aucun PDF ; le PDF 22 ne contient QUE Aura/Faction/Psychic/Wargear + Plunging Fire). Se propage au groupe d'arme (`gkey`), à l'allocation (`g["ap"]`) et au `display_save_th`. | `tests/unit/engine/test_closest_target_penetration_shoot.py` (**3**, bout-en-bout via `_manual_roll_intent`, distance mesurée pour de vrai sur `units_cache` positionnés, pool éligibles monkeypatché) : (a) cible la plus proche + règle → AP-1 + save_th dégradé ; (b) cible plus lointaine + règle → inchangé (discrimination « closest ») ; (c) plus proche sans règle → inchangé. Contre-épreuve mutation : `ap -= 1` neutralisé → (a) rouge. Suite `tests/unit/` verte. **Impact PvP** : chemin partagé → l'équilibre PvP change aussi. |
+| **HEAVY** | ✅ **FAIT dans le vif** (2026-07-25) | Bloc dans `_manual_roll_intent` après `_cover_worsened_bs` ([shared_utils.py:6327](../../engine/phase_handlers/shared_utils.py#L6327)) : si `weapon_has_rule(weapon, "HEAVY")` ET l'escouade est absente de `units_moved` ET `units_advanced` (« Remained Stationary »), alors `bs = max(2, bs-1)` (+1 au jet de touche, plancher 2 car un 1 naturel rate toujours, 05.01). ⚠️ **Écart PDF assumé** : la spec suivie est `config/weapon_rules.json` (« Add 1 to Hit rolls if the bearer Remained Stationary this turn ») — **plus simple que le PDF 24.16** qui exige en plus *unengaged*, *pas arrivé ce tour (deep strike)* et *aucune figurine bougée >3"*. Ces trois clauses sont **non implémentables fidèlement** avec l'état moteur actuel : (a) aucun tracker d'arrivée/réserve n'existe (arrivées en cours de bataille non modélisées → clause vacante) ; (b) `units_moved` est **booléen** (bougé/pas bougé), pas de distance par-figurine → le seuil « >3" » n'a pas la donnée. On suit donc la config moteur (comme pour unit_rules.json). Le code mort était déjà conforme à cette def projet. | `tests/unit/engine/test_heavy_shoot.py` (**4**, e2e via `_manual_roll_intent`) : stationnaire→BS4→3 ; a bougé / a advance→pas de bonus (paramétré) ; sans HEAVY→pas de bonus. Contre-épreuve mutation : `bs=max(2,bs-1)` neutralisé→rouge. |
+| **RAPID_FIRE X** | ✅ **FAIT dans le vif** (2026-07-25) | Bloc dans `_manual_roll_intent` juste après BLAST ([shared_utils.py:6323](../../engine/phase_handlers/shared_utils.py#L6323)), à la constitution du pool d'attaques (avant tout jet) : si l'arme déclare `RAPID_FIRE:X` (param extrait par le nouveau helper `weapon_rule_parameter`, [weapon_helpers.py](../../engine/utils/weapon_helpers.py), miroir de l'extraction `analyzer_config.py`) ET la cible est dans la **demi-portée** (`RNG/2`, RNG déjà en subhexes), alors `n_attacks += X`. Distance escouade→escouade via `ranged_edge_distance` (sélecteur `ranged`) — même convention que le gate de portée du moteur (socle d'escouade avec centres par-figurine) et que CTP ; positions figées pendant la résolution → mesurer là = « Select Targets step » (24.30). Conforme `config/weapon_rules.json` (« Increase this weapon's Attacks by X when target unit is within half range ») ET PDF 24.30. Pas de double-comptage : `n_attacks_resolved` (déclaration) = NB de base seul, BLAST et RAPID_FIRE ajoutés ici. | `tests/unit/engine/test_rapid_fire_shoot.py` (**3**, e2e via `_manual_roll_intent`, positions extrêmes proche/loin → seuil non ambigu) : dans demi-portée→+X ; hors→pas de bonus ; sans RAPID_FIRE→pas de bonus. Contre-épreuve mutation : `n_attacks += _rf_x` neutralisé→rouge. |
+| **DEVASTATING_WOUNDS** | ✅ **FAIT dans le vif — vraie mécanique blessures mortelles** (2026-07-25) | Quatre points câblés : (1) flag posé au jet dans `_manual_roll_intent` sur blessure critique = jet de blessure **non modifié de 6** (05.02 ; testé sur la valeur finale, donc post-reroll) ET arme `DEVASTATING_WOUNDS` ; (2) propagé dans `_build_manual_allocation` ; (3) **ordonné en fin de lot** ([shared_utils.py:6859](../../engine/phase_handlers/shared_utils.py#L6859)) → les mortelles sont infligées **« after resolving any normal damage »** (24.10) ; (4) consommé dans `_resolve_one_manual_wound` ([shared_utils.py:6531](../../engine/phase_handlers/shared_utils.py#L6531)) : court-circuite **toute** save (armure ET invulnérable), la fig subit D (excess perdu = « max one model per critical wound »), record tagué `mortalWound`+`saveSkipped` (log/display + hook Feel No Pain futur). **Fidélité (décision utilisateur, arbitrée) :** en 40K les mortelles de Devastating sont **allouées par le défenseur comme les autres blessures de l'attaque** (05.03), sans save, après les dégâts normaux — c'est **exactement** ce que fait ce câblage en restant dans le flux d'allocation manuel (option A). Un pool MW séparé (`allocate_mortal_wounds`) n'ajouterait aucune fidélité et introduirait un prompt PvP inutile. **⚠️ Note d'équivalence :** aujourd'hui, sans Feel No Pain ni réduction-de-dégâts modélisés, « pas de save sur crit » et « D blessures mortelles » donnent le **même résultat numérique** ; le gain de cette tranche est le **modelage correct** (tag MW + ordre 24.10 + bypass invul explicite), pas un changement de chiffres. | `tests/unit/engine/test_devastating_wounds_shoot.py` (**2 BOUT-EN-BOUT** via `build_manual_shoot_allocation` en `gym_training_mode`) : critique+DEVASTATING → save 6 (qui réussirait sur Sv2+) **sautée** → dégât infligé **ET** record tagué `mortalWound`+`saveSkipped` ; sans DEVASTATING → save 6 protège, aucun tag. Contre-épreuve mutation : court-circuit `not _devastating` retiré → rouge. |
+| **HAZARDOUS (24.15)** | ✅ **FAIT dans le vif** (2026-07-26) | Déclencheur en **fin d'activation** (`_finalize_manual_allocation`, tir ET combat — « after that unit has resolved all of its attacks »). Nombre de jets = nombre d'armes HAZARDOUS **sélectionnées** (couples figurine×arme distincts, comptés à la déclaration : `_count_selected_hazardous_weapons`), PAS par figurine. `roll_hazard_for_unit` généralisé (`n_rolls`, `context_label`) et 06.03 corrigé : **test « each model » par FIGURINE** (`models_cache[...]["UNIT_KEYWORDS"]`) au lieu des keywords d'unité — sans quoi l'union 19.03 donnerait 3 MW à une escouade d'infanterie menée par un character MONSTER. Reprise PvP branchée sur `hazard_origin` (`_resume_after_hazard` : shoot/fight → fin d'activation ; move → Desperate Escape inchangé). ⚠️ **PDF vs config** : `weapon_rules.json` disait « sur un 1 → 3 MW » ; le PDF 24.15+06.03 dit **1-2 → 1 MW (3 si CHAQUE figurine est MONSTER/VEHICLE)**. PDF appliqué. | `tests/unit/engine/test_hazardous.py` (**6**, e2e via `build_manual_shoot_allocation`) : MW sur 1-2, pas de MW sur 3+, aucun jet sans la règle, **2 armes = 2 jets** (discrimination par-arme vs par-figurine), 3 MW si tout véhicule, 1 MW si escouade mixte. |
+| **TORRENT (24.37)**, **SUSTAINED HITS (24.36)**, **LETHAL HITS (24.23)**, **TWIN-LINKED (24.38)**, **ANTI-X Y+ (24.03)** | ✅ **FAIT dans le vif, tir ET mêlée** (2026-07-26) | Socle commun `engine/phase_handlers/attack_sequence.py` (cf. §9.2.3). LETHAL HITS : le « you CAN choose » est tranché par **espérance de dégâts** (`lethal_hits_auto_wound_is_better`), seul arbitrage exact — l'auto-blessure interdit la blessure critique, donc neutralise DEVASTATING. ANTI-X : seuil de critique abaissé si la cible porte le keyword X ; 24.02 (instances non cumulatives) → meilleur seuil applicable. | `test_weapon_rules_attack_sequence.py` (**24**) + `test_weapon_rules_fight.py` (**6**, câblage mêlée). |
+| **MELTA X (24.25)** | ✅ **FAIT dans le vif** (2026-07-26) | Bonus sur la **caractéristique D** (D6+2, pas 2 forfaitaire) : `dmg_bonus` porté de `_manual_roll_intent` → clé de groupe d'armes (un même profil à demi-portée et hors demi-portée ne se résout pas dans le même lot, 04.03) → ajouté **après** le tirage du dé de dégâts dans `_resolve_one_manual_wound`. Demi-portée mutualisée avec RAPID FIRE (`_target_within_half_range`). | `test_melta_shoot.py` (**3**, e2e : à portée / hors portée / sans la règle). |
+| **BLAST (24.05)** | ✅ **CORRIGÉ — la règle ne s'appliquait JAMAIS** (2026-07-26) | `_has_blast_keyword` testait `weapon["KEYWORDS"]`, champ **absent de toutes les armes** des armories (les règles vivent dans `WEAPON_RULES`) → bonus jamais accordé, gym ET PvP. Remplacé par `_blast_extra_dice_per_five` (`weapon_rule_parameter_or`, forme nue = 1 dé/5 figurines, forme `[BLAST X]` = X). | `test_blast_cleave.py` (**4** BLAST). |
+| **CLEAVE X (24.06)** | ✅ **FAIT dans le vif** (2026-07-26) | Jumeau mêlée de BLAST + clause « une seule cible pour toutes les attaques de cette arme » (`_weapon_attacks_single_target`). ⚠️ **PDF vs config** : `weapon_rules.json` décrivait « touche X figurines supplémentaires dans l'ER » — **faux** ; le PDF donne des **dés d'attaque additionnels par tranche de 5 figurines cibles**. PDF appliqué. `target_squad_size_at_declaration` ajouté aux intents de `squad_declare_fight` (le chemin PvP par arme le posait déjà). | `test_blast_cleave.py` (**4** CLEAVE, dont multi-cibles et absence de taille = erreur explicite). |
+| **EXTRA ATTACKS (24.11)** | ✅ **FAIT dans le vif** (2026-07-26) | Select Weapons step : `_select_fight_weapon_indices_for_fig` = **toutes** les armes EXTRA ATTACKS + **une** autre arme de mêlée (« if possible »), le choix principal les excluant. `squad_declare_fight` émet **un intent par arme** et `ATTACK_LEFT` cumule (sinon la 2ᵉ arme ne se résolvait jamais). | `test_extra_attacks_fight.py` (**7**, sélection + câblage). |
+| **PRECISION (24.28)** | ✅ **FAIT dans le vif** (2026-07-26) | Override à l'ouverture de l'Allocation Order step : `_apply_precision_allocation_override` place le groupe CHARACTER visible en tête de l'ordre déclaré par le défenseur (l'ordre du défenseur est conservé pour le reste). Visibilité : mêlée = acquise au contact ; tir = `_attacker_model_can_reach_squad` restreint aux figurines CHARACTER (nouveau paramètre `only_target_mids`). Arbitrage du « can select » : **toujours**, sur le CHARACTER le plus cher. Ce n'est PAS un choix laissé à l'agent aujourd'hui — le mécanisme générique de décision agent (**P2**, `pending_agent_decision` + `CHOICE_0..K`) n'existe pas encore et l'action_space n'est pas étendu ; sans P2, la seule alternative serait une action ad hoc, exactement ce que §9.3 interdit. **Inscrite comme candidate à une tranche P3.** L'automatisme actuel est le choix strictement favorable à l'attaquant (viser le CHARACTER est l'unique effet de la règle), donc le regret attendu est faible — c'est le critère d'arbitrage de §9.0bis (mesurer le regret avant de brancher). | `test_precision.py` (**4**, dont la **contre-épreuve 05.03** : sans PRECISION le character est intouchable). |
+| **PSYCHIC (24.29)** | ✅ **FAIT dans le vif** (2026-07-26) | « ignore any or all modifiers to BS/WS and to the hit roll » : le seul modificateur défavorable du moteur est le malus de couvert 13.08 → ignoré, **mais la cible garde le bénéfice du couvert** (contrairement à IGNORES COVER 24.18 qui le supprime). Le bonus HEAVY est conservé (« any or all » = choix du joueur). | `test_psychic_shoot.py` (**4**, dont la distinction explicite PSYCHIC vs IGNORES COVER). |
+| **HEAVY (24.16) — mise en conformité PDF** | ✅ **RENFORCÉ** (2026-07-26) | La clause **« that unit is unengaged »**, absente de la config et donc de la 1ʳᵉ implémentation, est branchée (`_heavy_unit_is_engaged`, même prédicat que le gate de tir 10.06). Clause **« pas posée ce tour » : CÂBLÉE** sur le nouveau champ moteur `deployed_on_turn` (posé à la création de l'unité et au commit de déploiement — `_apply_deploy_plan` ; 0 = pré-bataille, N = arrivée de réserve au tour N, `None` = hors board). Aucune arrivée en cours de bataille n'existe encore (réserves 20 non modélisées) mais la clause n'aura pas à être retouchée le jour où elles arrivent. **C'est la source unique partagée avec la feature d'observation déploiement/réserve** (`V11_audit_observation.md` §8). Clause « aucune figurine > 3" » : ✅ **EXACTE depuis le 2026-07-26** — `moved_distance_by_model` (distance de CHEMIN accumulée par `commit_move`, hex géodésique en gym ET euclidienne any-angle en PvP) remplace la borne conservatrice « aucune figurine n'a bougé ». Détail et périmètre → **§9.2.6**. | `test_heavy_shoot.py` (**13** : bonus si stationnaire+unengaged ; pas de bonus si engagé / **posé ce tour** / **une figurine a parcouru > 3"** ; bonus CONSERVÉ jusqu'à 3" inclus (comparaison stricte) ; bonus conservé si posé au tour précédent ; rien sans HEAVY). |
+| **reroll_charge** (`unit_rules.json`) | ✅ **IMPLÉMENTÉ** (2026-07-26) | Règle d'unité déclarée par 4 unités Orks et **totalement absente du code** (grep zéro). `roll_charge_distance` + `unit_can_reroll_charge` mutualisés ; relance sur le seul critère exact : le jet n'atteint **aucune** cible/destination légale (gym `squad_charge` ; PvP roll-first `charge_target_selection`). Un dé ne se relance qu'une fois. ⚠️ **Historique du 2026-07-26** : cette ligne avait affirmé à tort que la tranche « débloque 19.04 » ; le fold n'écrivait jamais les règles du character sur l'escouade, donc le `reroll_charge` d'un leader attaché était **perdu**. Corrigé par 19.04-a/b/c le 2026-07-27 (ligne ci-dessous) : `_unit_has_rule_effect` lit l'union en vigueur, un Captain attaché confère bien son reroll et le retire en mourant. | `test_reroll_charge.py` (**5**, dont l'ancrage donnée « des unités Orks déclarent bien la règle »). ⚠️ Ces tests fabriquent un `game_state` à la main et ne passent par **aucune** unité attachée réelle — c'est ce qui a laissé passer le trou 19.04 ; le câblage attaché est verrouillé par `test_attached_units_abilities_19_04.py` sur un vrai chargement de scénario. |
+| **19.03 — union des keywords** | ✅ **FAIT** (2026-07-26) | `_build_enhanced_unit` : l'unité porte l'UNION des keywords de ses composants (prérequis d'ANTI-X). Keywords **propres** conservés par figurine pour les règles « each model » (06.03). `hideable` recalculé sur l'union. | `test_attached_units_keywords_19_03.py` (**2**, e2e via le vrai chargement de scénario). |
+| **19.04 — abilities in attached units** | ✅ **FAIT dans le vif — 3 tranches a/b/c** (2026-07-27, commits `abcc80ca`, `57e53318`, `ee479cb3`) | `unit["UNIT_RULES"]` est désormais l'**union EN VIGUEUR**, dérivée de deux sources immuables posées au build : `_UNIT_RULES_OWN` (datasheet de l'escouade + règles propres de ses figurines natives) et `_ATTACHED_RULE_GROUPS` (un groupe par character replié, clé = id de l'unité d'origine, [game_state.py:1128](../../engine/game_state.py#L1128)). Les marqueurs de RÔLE ne remontent jamais (`strip_role_rules`, piège 1 ci-dessous). L'extinction est recalculée **à chaque mort de figurine** par `recompute_unit_rules_in_effect` ([shared_utils.py:664](../../engine/phase_handlers/shared_utils.py#L664)), appelée depuis `destroy_model` — point unique de retrait — avant ses `return` anticipés (une unité rasée doit aussi voir ses règles s'éteindre, PDF 25). Fenêtre 19.04-c : une source tuée `reason=="combat"` est inscrite dans `rule_sources_in_grace` **porté par l'allocation en cours** ; elle expire d'elle-même à `_finalize_manual_allocation`, qui recalcule les squads concernés après suppression de l'allocation → aucun état en sursis ne survit à l'activation. | `tests/unit/engine/test_attached_units_abilities_19_04.py` (**14**, e2e via le vrai chargement de scénario ; verts au 2026-07-27). Contre-épreuves : groupes attachés neutralisés → rouge (a) ; appel neutralisé dans `destroy_model` → 4 rouges (b) ; sursis neutralisé → 2 rouges et fenêtre jamais refermée → 1 rouge (c). |
+| ~~~10 règles observées non appliquées~~ | ✅ **SOLDÉ** — il n'en reste **aucune** | Les 9 règles listées au 2026-07-24 sont traitées : TORRENT, TWIN_LINKED, SUSTAINED_HITS, LETHAL_HITS, MELTA, ANTI_* ✅ ; EXTRA_ATTACKS ✅ ; PSYCHIC ✅. **Seule INDIRECT_FIRE (24.19) reste** — ce n'est pas une règle de résolution mais un TYPE DE TIR entier (10.07 : tirer sans ligne de vue, la cible bénéficiant du couvert), donc un chantier à part et non un portage. **Laissée ouverte volontairement** ; 2 armes concernées, aucune dans les rosters de training. ⚠️ Dépendance déjà notée : quand elle sera faite, son couvert devra passer par un point qu'[IGNORES COVER] 24.18 annule aussi. | — |
+| Suppression du code mort (fin P1) | ⏳ | — | — |
+
+**Choix d'implémentation IGNORES_COVER (vérifiés).** `_cover_worsened_bs` recevait `attacker`
+mais pas l'arme ; l'appelant `_manual_roll_intent` résout déjà `weapon` juste avant l'appel
+([shared_utils.py:6269](../../engine/phase_handlers/shared_utils.py#L6269)) → signature étendue de
+`weapon` (appelant unique, vérifié : aucun autre site ni test n'appelait la fonction). Le helper
+`weapon_has_rule` gère les trois formes d'entrée WEAPON_RULES (`'NAME'`, `'NAME:param'`, objet
+`.rule`) et est réutilisable par les tranches P1 suivantes.
+
+⚠️ **Dépendance à honorer quand INDIRECT_FIRE sera implémenté** : 24.18 dit « cannot have the
+benefit of cover … *including from rules that give a model or unit the benefit of cover* ». Or
+INDIRECT_FIRE (10 Shooting) accorde le cover à la cible. Aujourd'hui la SEULE source de cover est
+`compute_unit_los`, que le court-circuit évite → conforme. Mais la tranche INDIRECT_FIRE devra
+router SON cover par un point qu'IGNORES_COVER annule aussi, sinon 24.18 sera violée pour la
+combinaison des deux règles.
+
+**Choix d'implémentation rerolls tir (vérifiés).** Conformité tranchée sur la source de vérité
+`config/unit_rules.json`, PAS sur le seul plan : `reroll_1_towound` (« When this unit makes an
+attack, it can reroll rolls of 1 for the wound rolls ») et `reroll_towound_target_on_objective`
+(« …reroll the wound rolls if the target unit is on an objective ») n'ont **AUCUNE restriction de
+phase** → ils s'appliquent au tir comme au fight. Par contraste `reroll_1_tohit_fight` /
+`reroll_1_save_fight` portent « During the fight phase » + suffixe `_fight` : mêlée-only. La
+distinction de nommage est donc **délibérée** — l'asymétrie tir/fight préexistante était bien un
+bug, et l'application au tir est la correction juste (pas une sur-application). Implémentation en
+**miroir exact** du fight (helper `_unit_has_rule_effect`, mécanique un-reroll-par-dé) ; la
+condition d'échec du tir est préservée → zéro régression quand aucune règle de reroll n'est
+présente. Effet de bord traité : `_manual_roll_intent` résout désormais attaquant/cible via
+`get_unit_by_id` → exige `unit_by_id` dans le game_state (toujours présent en runtime ; fixture
+de `test_ignores_cover.py` complété en conséquence).
+
+✅ **État de la suite (mis à jour 2026-07-25)** : les **15 échecs** qui étaient préexistants au
+2026-07-24 (`test_deployment_per_model_commit`, `test_fight_target_selection_no_fallback`,
+`test_game_state_contract`) ont été **corrigés** (contrats périmés post-V11 — commits `38362e81`,
+`b9dc9916`). `tests/unit/` re-vérifiée verte avant la tranche rerolls ; validation complète
+post-rerolls en cours. La condition §8.5 est donc rétablie.
+
+**Session 2026-07-25 (nuit) — 4 tranches livrées + 1 différée.** Portées dans le vif, chacune
+avec test e2e + contre-épreuve mutation, suite `tests/unit/` re-vérifiée verte et commit
+séparé : `closest_target_penetration`, `HEAVY`, `RAPID_FIRE`, `DEVASTATING_WOUNDS` (cf.
+lignes ✅ ci-dessus). Effet de bord traité : `test_ignores_cover` utilisait `["HEAVY"]` comme
+arme « quelconque » supposée inerte — basculé sur arme nue une fois HEAVY vif. Méthode :
+conformité tranchée sur `config/weapon_rules.json` (source de vérité projet des règles d'armes)
+quand elle diffère du PDF 24 — écarts explicitement documentés par tranche.
+
+### 9.2.2 HAZARDOUS (24.15) — LIVRÉE le 2026-07-26 (l'analyse de 2026-07-25 reste valide)
+
+L'entrée du 2026-07-25 concluait « intégration multi-systèmes, pas un portage » : c'était exact,
+et c'est ainsi qu'elle a été traitée. Ce qui a été fait, point par point :
+
+- **Point de déclenchement** = `_finalize_manual_allocation` (shared_utils), le seul endroit qui
+  signifie « l'unité a résolu TOUTES ses attaques », commun au tir et au combat. Pas
+  `_manual_roll_intent` (per-intent/per-cible), conformément à l'analyse.
+- **Nombre de jets** = armes HAZARDOUS **sélectionnées** au Select Weapons step, comptées à la
+  construction de l'allocation (`_count_selected_hazardous_weapons`, couples figurine×arme
+  distincts) et stockées dans l'état d'allocation avant purge des intents. Ce n'est **pas** un
+  jet par figurine (c'est la règle du Desperate Escape 09.07, désormais distinguée par le
+  paramètre `n_rolls` de `roll_hazard_for_unit`).
+- **Chemin de reprise** : `_resume_after_hazard` était câblé en dur sur le retour à la phase de
+  move (Desperate Escape). Il lit maintenant `game_state["hazard_origin"]` : `shoot`/`fight` →
+  l'activation est terminée, rien à reprendre ; `move` → comportement historique intact.
+- **Gym** : `is_programmatic_owner` sur le propriétaire du TIREUR → `auto_resolve=True`,
+  résolution inline, aucun prompt. Verrouillé par 6 tests e2e headless.
+- **PvP humain** : le prompt d'allocation des blessures mortelles est rendu
+  (`manual_allocation_waiting_payload(HAZARD_CTX)`), et la ligne de log `[HAZARD]` est **publiée
+  AVANT** que le joueur ne choisisse ses pertes (correction du 2026-07-26, demande utilisateur :
+  on ne désigne pas des figurines sans savoir combien de blessures mortelles on encaisse ni d'où
+  elles viennent). Mise en œuvre : `append_action_log` mute l'entrée en place et en garde la
+  référence — les `hazardDetails` complètent CETTE ligne pendant l'attribution au lieu d'en créer
+  une seconde ; `_finalize_hazard_alloc_log` ne ré-émet plus rien et `_finalize_hazard_log`
+  (émission différée) est supprimé. Vaut aussi pour le Desperate Escape 09.07, même chemin.
+
+### 9.2.3 Socle de séquence d'attaque commun tir/mêlée — `attack_sequence.py` (2026-07-26)
+
+**Trou majeur trouvé en cours de route** : `_manual_roll_fight_intent` ne lisait **aucune** règle
+d'arme (zéro occurrence de `WEAPON_RULES` dans `fight_handlers.py`). Les 6 règles portées le
+2026-07-25 étaient donc tir-only, alors que `relic_greataxe` et `thunder_hammer_terminator`
+déclarent [DEVASTATING WOUNDS], `eviscerator` [SUSTAINED HITS 1], `urty_syringe`
+[ANTI-INFANTRY 1+] + [EXTRA ATTACKS] + [PRECISION].
+
+Plutôt que d'écrire dix règles deux fois, la boucle de jets est désormais **unique** :
+`engine/phase_handlers/attack_sequence.py`, consommée par les deux rollers. Y vivent la notion
+de **touche/blessure critique** (05.01/05.02) et tout ce qui s'y accroche : TORRENT, SUSTAINED
+HITS, LETHAL HITS, TWIN-LINKED, ANTI-X, DEVASTATING WOUNDS. Reste chez l'appelant ce qui est
+propre à la phase : pool d'attaques (BLAST/RAPID FIRE/CLEAVE/EXTRA ATTACKS), seuil de touche
+(couvert/HEAVY/PSYCHIC), AP effectif, dégâts et allocation.
+
+Effets de bord corrigés au passage :
+- **05.01 en mêlée** : le test `hit_roll < ws` laissait passer un 1 non modifié si le seuil
+  valait 1. Le socle applique la règle « 1 rate toujours / 6 est un critique » des deux côtés.
+- **Ordre des dés préservé** (touche → [reroll] → blessure → [reroll] → sauvegarde) : les tests
+  déterministes antérieurs restent valides sans modification.
+
+### 9.2.4 Écarts PDF vs `config/*.json` — arbitrage utilisateur du 2026-07-26
+
+Consigne : **« les règles à suivre à 100 % sont dans `Documentation/40k_rules/` »**. Le PDF prime
+donc sur la config quand ils divergent. Trois divergences réelles ont été trouvées et tranchées :
+
+| Règle | `config/weapon_rules.json` | PDF (appliqué) |
+|---|---|---|
+| HAZARDOUS | « roll 1 D6, sur un **1** → **3 MW** » | 24.15 + 06.03 : **1-2** → **1 MW** (3 seulement si CHAQUE figurine est MONSTER/VEHICLE) |
+| CLEAVE | « touche X figurines supplémentaires dans l'ER » | 24.06 : **X dés d'attaque additionnels par tranche de 5 figurines** cibles, si une seule cible |
+| HEAVY | « +1 si Remained Stationary » | 24.16 : **unengaged** ET pas posée ce tour ET aucune figurine > 3" |
+
+Les tranches du 2026-07-25 avaient suivi la config (arbitrage d'alors, documenté) ; HEAVY est
+mis en conformité ci-dessus, les deux autres sont nées conformes au PDF.
+
+⚠️ **Conséquence à connaître** : `config/weapon_rules.json` contient donc des descriptions
+**fausses** pour HAZARDOUS et CLEAVE. Elles n'ont plus aucun consommateur de résolution (le code
+suit le PDF), mais elles restent lues comme documentation. **Décision utilisateur attendue** :
+corriger le fichier de config pour qu'il décrive les vraies règles, ou le marquer explicitement
+comme non normatif.
+
+### 9.2.5 Ce que l'agent voit des règles — ✅ LIVRÉ (2026-07-26)
+
+> **Était** : « les règles sont vives dans le moteur, mais l'observation squad (199-d) ne contient
+> aucun profil d'arme ni bit de règle — l'agent les subit sans les percevoir ». **C'est fait.**
+> `obs_size` **199 → 1011** (`vec_cont` 459, `vec_bin` 552) ⇒ **retrain from scratch**
+> (déjà acté ; les `.zip` existants sont incompatibles, par construction).
+>
+> ⚠️ **MAJ 2026-07-26** : le contrat décrit ici (vecteur PLAT `vec_cont`/`vec_bin`) a été
+> REMPLACÉ par les **tenseurs d'entités** de §0.30 T-D (`obs_size` **20626** depuis §0.32). Ce qui suit reste
+> la spécification de CE QUI est observé (profils d'armes, règles, mise en place, distance
+> parcourue) ; la FORME, elle, se lit dans `V11_entity_encoder_pointer.md` §6 et dans l'en-tête
+> de `build_squad_observation`.
+
+**Ce qui a été ajouté à l'observation squad** (détail de layout : en-tête de
+`build_squad_observation`, source unique) :
+
+1. **Profils d'armes bruts + bits/params de règles** — nouveau module
+   [`engine/observation_weapon_profiles.py`](../../engine/observation_weapon_profiles.py),
+   **encodeur unique consommé par mon escouade ET par les slots ennemis** (un encodeur par camp
+   aurait dérivé). Un profil = `{NB, ATK, STR, AP, DMG, portée, **nb de porteurs vivants**}` +
+   6 params de règles (RAPID FIRE / SUSTAINED HITS / MELTA / CLEAVE / BLAST X, et le Y+ de
+   ANTI) + 12 drapeaux (DEVASTATING WOUNDS, LETHAL HITS, TORRENT, TWIN-LINKED, EXTRA ATTACKS,
+   PRECISION, PSYCHIC, HAZARDOUS, HEAVY, IGNORES COVER, PISTOL, ASSAULT) + le **one-hot du
+   keyword ciblé par ANTI-X** + un mask. **13 cont + 18 bin par profil.**
+   - Le **compteur de porteurs** est ce qui distingue « 1 rokkit » de « 9 shootas » : le volume
+     de feu est `porteurs × NB`. Les profils sont regroupés par **identité de caractéristiques**
+     (deux noms différents, même profil = un seul slot ; une arme « à profils multiples » = une
+     entrée par profil, aucun cas particulier).
+   - **[INDIRECT FIRE] 24.19 est délibérément ABSENTE** : elle n'est pas implémentée (cf. la
+     ligne « 10 règles observées » de §9.2.1). Un bit pour une règle inerte est du bruit pur.
+   - ⚠️ **Réserve sur [ASSAULT] et [PISTOL]** : bits conservés (effet réel côté PvP), mais le
+     gate de tir gym rend leurs types de tir (10.05 / 10.06) INATTEIGNABLES pour l'agent —
+     trou de conformité trouvé le 2026-07-26, **ouvert** : voir **§9.2.7**.
+   - **K par camp, mesuré** : mon escouade **6 profils de tir + 5 de mêlée** — le maximum
+     observé sur les rosters d'entraînement réels, persos attachés compris, donc **mes propres
+     capacités ne sont jamais tronquées** ; slots ennemis **2 tir + 1 mêlée**, ordonnés par
+     nombre de porteurs (le gros du volume de feu adverse). ⚠️ **Arbitrage assumé** : 11 profils
+     × 5 escouades ennemies coûteraient 5 fois le vecteur entier pour une information marginale.
+     Tout dépassement de K est **LOGUÉ** (`add_debug_file_log`), jamais silencieux.
+2. **Mise en place / réserve** — one-hot 3 états (pas sur le board / posée avant la bataille /
+   arrivée en cours de bataille) **+ le bit « posée CE tour »**, dérivés de `deployed_on_turn`,
+   la **source unique déjà utilisée par la clause 2 de [HEAVY] 24.16**. Le one-hot seul ne dit
+   pas si la pose est de ce tour — or c'est ce point-là qui supprime le bonus.
+3. **Distance parcourue ce tour, par figurine** — nouvelle donnée moteur
+   `moved_distance_by_model`, accumulée par `commit_move` en **distance de CHEMIN** ; exposée en
+   **max** (porte la clause de règle) et **somme** (toute l'escouade a-t-elle bougé, ou une
+   seule figurine). Voir §9.2.6 : elle rend la **clause 3 de [HEAVY] 24.16 EXACTE**.
+
+**Verrous** : `tests/unit/engine/test_squad_obs_weapon_profiles.py` (**19**) et
+`test_moved_distance_and_deploy_obs.py` (**10**). Contre-épreuves mutation : compteur de porteurs
+figé + one-hot ANTI éteint + ordre des profils changé → **6 rouges** ; mesure à vol d'oiseau +
+accumulation remplacée par écrasement → **2 rouges** ; restauré → verts. Les 6 fichiers de tests
+d'observation squad préexistants restent verts **sans modification** (ils passent par les
+accesseurs de layout, pas par des index recopiés).
+
+**Ce que cette tranche NE fait PAS** (et pourquoi) :
+- **Bloc E « escouades amies »** : toujours différé, il part avec l'archi set-based (le faire en
+  K slots fixes exigerait d'inventer un ordre qu'aucune action ne consomme — cf.
+  `V11_audit_observation.md` §11).
+- **Listes de longueur variable** (fin des plafonds K) : idem, c'est l'étape architecture.
+- ✅ **Les règles d'UNITÉ sont observées depuis le 2026-07-27** (§0.31, commit `0fb94a01`) —
+  13 bits d'EFFET par entité, amies ET ennemies, dans `UNIT_BIN_FIELDS`. Le constat qui suit
+  décrit l'état AVANT ce correctif ; il est conservé parce qu'il documente le motif de trou.
+- 🔴 ~~**Les règles d'UNITÉ (`config/unit_rules.json`) ne sont PAS observées**~~ — constat vérifié le
+  2026-07-27, **non documenté jusqu'ici, ni comme trou ni comme choix**. Cette tranche a rendu
+  visibles les règles d'**armes** (profils + drapeaux) ; les règles d'unité, elles, n'existent
+  dans aucun schéma du pipeline squad : `UNIT_CONT_FIELDS`/`UNIT_BIN_FIELDS`
+  ([observation_entities.py](../../engine/observation_entities.py), contrat unique des tenseurs
+  d'entités) n'ont aucun champ de règle, et `unit_has_rule_effect` n'apparaît qu'à un seul
+  endroit de tout l'encodage : `_encode_rule_features`, appelée **uniquement** par
+  `build_observation` — le pipeline **mono-figurine legacy** (`obs_size` 357). Le routage
+  ([w40k_core.py](../../engine/w40k_core.py) `_build_observation`) envoie le pipeline squad sur
+  `build_squad_observation`, qui ne passe jamais par là. ⚠️ `AI_OBSERVATION.md` décrit bien
+  « 12 unit-rule flags », mais dans le layout `obs[314:346]` du legacy : lu vite, il fait croire
+  l'inverse. Concerné : les 12 règles vives (`reroll_charge`, `closest_target_penetration`,
+  `charge_after_advance`, `charge_after_flee`, `charge_impact`, `reactive_move`,
+  `move_after_shooting`, `shoot_after_advance`, `shoot_after_flee`, `reroll_1_towound`,
+  `reroll_towound_target_on_objective`, `reroll_1_tohit_fight`, `reroll_1_save_fight`) —
+  l'agent les subit sans les percevoir, exactement le constat qui avait motivé cette section
+  pour les règles d'armes. **Enjeu accru depuis 19.04** (§9.2.8) : une escouade menée par un
+  character porte désormais les règles de son leader, et cette information reste invisible.
+  ~~**Ouvert — arbitrage de périmètre à faire**~~ → **TRAITÉ le 2026-07-27, cf. §0.31.**
+
+### 9.2.7 ✅ CORRIGÉ le 2026-07-26 (tranche T-B) — les types de tir 10.05 / 10.06 existent enfin pour l'agent
+
+**Trouvé en vérifiant, à la demande de l'utilisateur, l'affirmation « seules les règles à effet
+réel sont exposées » de §9.2.5.** Elle est FAUSSE pour deux bits, et la cause n'est pas
+l'observation : c'est le moteur.
+
+**Le fait, lu dans le code.** Le gate de tir du chemin squad/gym
+([`build_squad_action_mask`](../../engine/phase_handlers/shared_utils.py), branche `phase ==
+"shoot"`) calcule :
+`can_shoot = not has_fled and not has_advanced and not has_shot and not in_er` — **sans aucune
+exception d'arme**.
+
+**Ce que disent les PDF** (lus, pas supposés) :
+- **10.05 ASSAULT SHOOTING** — éligible si : « Unengaged **and made an advance move this turn** »
+  ET l'unité a ≥1 arme [ASSAULT]. *While shooting* : seules les armes [ASSAULT] peuvent être
+  sélectionnées. ⇒ `has_advanced` ne doit PAS fermer le tir quand une arme [ASSAULT] est portée.
+- **10.06 CLOSE-QUARTERS SHOOTING** — éligible si : « **Engaged** and did not make an advance
+  move this turn » ET l'unité a ≥1 arme [CLOSE-QUARTERS] **ou est MONSTER/VEHICLE**. *While
+  shooting* : les figurines peuvent cibler les unités avec lesquelles l'unité est engagée.
+  ⇒ `in_er` ne doit PAS fermer le tir dans ces cas. **24.27 : [PISTOL] et [CLOSE-QUARTERS] sont
+  identiques à toutes fins de règles** — donc la règle porte bien sur les armes [PISTOL] du
+  projet.
+
+**Portée du trou.** Le chemin **PvP/mono-figurine** connaît les deux règles
+(`_weapon_has_assault_rule` → `weapon_availability_check` ; `_weapon_has_pistol_rule` → sélection
+d'arme et allocation en zone d'engagement, `shared_utils` ~5030/5081/5802/6072). Le chemin
+**squad/gym** ne les connaît pas. C'est **exactement le motif de §9.1** — une règle vive sur un
+chemin, absente de l'autre — et le motif récurrent du document (« code testé mais jamais appelé »,
+« migration partielle d'un chemin »).
+
+**Sens de l'écart** : le gate gym est **plus STRICT** que les règles (il refuse des tirs légaux),
+donc jamais laxiste. Conséquence : l'agent ne peut pas apprendre le tir d'assaut ni le tir à bout
+portant, et les 30 armes [PISTOL] / 22 [ASSAULT] des armories perdent leur intérêt tactique côté
+IA. Côté observation, les bits `PISTOL` et `ASSAULT` décrivent donc une capacité inexploitable en
+gym — ils sont **conservés** (l'effet PvP est réel) avec la réserve écrite dans
+`observation_weapon_profiles.py`.
+
+**Statut : ✅ FERMÉ le 2026-07-26 par la tranche **T-B** du chantier dédié [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md) (tranche T-B), avec 5 autres trous trouvés le même jour.** Le résolveur `resolve_squad_shooting_type` ouvre 10.05 et 10.06, le masque teste toute arme éligible, et le volet MONSTER/VEHICLE de 10.06 est implémenté (13 tests, mutations → 5 rouges). ⚠️ **Résidu** : le chemin PvP/mono ne connaît toujours pas le volet MONSTER/VEHICLE — voir §1.9 du chantier. Périmètre d'origine — c'est une **nouvelle règle à implémenter**
+(deux types de tir, avec restriction d'armes et restriction de cibles), pas un correctif de la
+tranche observation. Périmètre estimé, à arbitrer : (1) gate `build_squad_action_mask` ;
+(2) restriction « seules les armes [ASSAULT] » / « seules les armes [PISTOL] » à la sélection
+d'armes du squad ; (3) restriction de cible 10.06 (uniquement les unités engagées) ; (4) miroir
+PvP à vérifier (le chemin mono connaît les helpers mais pas forcément les deux types complets) ;
+(5) tests par règle + contre-épreuve mutation.
+
+### 9.2.6 [HEAVY] 24.16 clause 3 — passage à la clause EXACTE (2026-07-26)
+
+L'implémentation du 2026-07-26 appliquait la borne **conservatrice** « aucune figurine n'a
+bougé » faute de distance par figurine. Elle est remplacée par la clause du PDF : **« no model in
+that unit has moved more than 3" this turn »**, comparaison **stricte** (3" pile conserve le
+bonus). Conséquence de jeu : une escouade qui se repositionne de 2" garde désormais son +1, ce
+que le moteur lui refusait à tort.
+
+**La donnée** est la distance de **CHEMIN**, pas l'écart départ↔arrivée — contourner un mur coûte
+plus cher. C'est le point qui empêche la règle de devenir laxiste, et il est mesuré **dans les
+deux métriques du moteur** :
+- métrique `hex` (gym) → BFS géodésique `geodesic_move_reach`, avec la définition **partagée** du
+  trajet légal (`build_move_transit_blocked`) ;
+- métrique `euclidean` (PvP) → champ any-angle `_euclidean_move_field`, **la primitive même du
+  pool de destinations par-figurine**. Sans ce second cas, PvP aurait mesuré à vol d'oiseau et la
+  règle serait devenue **laxiste** là-bas (le contraire de la borne d'avant).
+- FLY (21.03) traverse tout : le champ sans obstacle redonne la ligne droite, aucun cas
+  particulier.
+
+**Périmètre assumé** : seuls les moves de la **phase de mouvement** (`normal`/`advance`/
+`fall_back`) sont comptabilisés. Ce n'est pas une omission — l'ordre des phases (**PDF 07.02** :
+Commande, Mouvement, **Tir**, Charge, Combat) garantit qu'au moment du tir, aucun move de charge
+ni de pile-in n'a pu avoir lieu dans le même tour. Les compter avec la métrique du move donnerait
+un chiffre faux (ils relèvent d'une autre géométrie) ; à vol d'oiseau, un chiffre sous-estimé.
+
+`moved_distance_by_model` est remis à zéro **au même endroit que `units_moved`**
+(`command_phase_start` + `_tracking_cleanup`) : c'est la version continue du même fait.
+Verrou : `test_heavy_shoot.py` passe de 7 à **13** tests (>3" perd / ≤3" garde / 3" pile garde /
+une AUTRE figurine de l'escouade suffit à annuler) ; mutation « seuil 3" → seuil 0 » → 2 rouges.
+
+Corrigé en revanche cette nuit : le pipeline mono-figurine legacy **crashait** (`KeyError`) sur
+toute unité portant CLEAVE ou PRECISION — donc sur Warboss, Bigboss et PainBoy, tous présents
+dans les rosters de training. Les deux canaux sont ajoutés (`obs_size` legacy 357 → **359**) ;
+le pipeline squad V11 (199) n'est pas concerné.
+
+### 9.2.8 AUDIT RÈGLE 19 (Attached units) — 19.01/19.02/19.03 conformes ; **19.04 était absent, ✅ LIVRÉ le 2026-07-27** (a/b/c)
+
+> **MAJ 2026-07-27 — le trou décrit ci-dessous est refermé.** Les trois tranches proposées en fin
+> de section ont été exécutées et commitées : `abcc80ca` (19.04-a, résolution unit-wide sur
+> figurines vivantes, rôles exclus), `57e53318` (19.04-b, extinction à la mort de la dernière
+> figurine source, les deux sens), `ee479cb3` (19.04-c, fenêtre « jusqu'à la fin des attaques de
+> l'attaquant »). Verrou : `tests/unit/engine/test_attached_units_abilities_19_04.py` (**14**
+> tests e2e sur chargement réel de scénario, verts). Détail d'implémentation → ligne « 19.04 » du
+> tableau §9.2.1. **Le constat ci-dessous est conservé tel quel comme trace d'audit** (il décrit
+> l'état AVANT correction) ; les ❌ de sa table valent au 2026-07-26.
+
+Audit refait de bout en bout après relecture des PDFs **19**, **24** (p5-p8 : LEADER 24.22,
+LONE OPERATIVE 24.24, PRECISION 24.28, SUPPORT 24.34), **25** (p1-p3 : starting strength,
+destroyed, mixed keywords, revived), **05** p5 et **08** (battle-shock 08.03).
+
+**Conforme (vérifié clause par clause, cf. la table règle 19 d'[AI_TURN.md](../AI_TURN.md)) :**
+19.01 (les 4 gardes du fold + les clauses structurelles), 19.02 (T bodyguard + repli
+leader-only + trigger de destruction), 19.03 (union des keywords / keywords propres par
+figurine). Clauses connexes sans objet et documentées : Lone Operative (aucune donnée),
+Revived (aucune mécanique), Starting strength (correct par construction du fold).
+
+**Le trou : 19.04 « Abilities in attached units ».**
+
+Ce que dit le PDF : les règles qui affectent une figurine précise ne valent que pour elle ;
+**toutes les autres s'appliquent à chaque figurine de l'unité attachée**, jusqu'à ce que la
+source soit détruite — dernière figurine du leader/support, dernière figurine du bodyguard, ou
+la figurine porteuse. Et si cette dernière figurine tombe sous une attaque, la règle **survit
+jusqu'à ce que l'unité attaquante ait résolu toutes ses attaques**.
+
+Ce que fait le code : [`_fold_attached_characters`](../../engine/game_state.py#L728) replie le
+character en figurine ; ses `UNIT_RULES` sont copiées sur `models[i]`
+([game_state.py:1019](../../engine/game_state.py#L1019)) et l'escouade garde les seules
+`UNIT_RULES` de son propre `unit_type` ([game_state.py:918](../../engine/game_state.py#L918)).
+Or **tous** les consommateurs interrogent l'escouade : `_unit_has_rule_effect`
+([shared_utils.py:1904](../../engine/phase_handlers/shared_utils.py#L1904)), ses trois
+ré-exports (`shooting_handlers:304`, `charge_handlers:52`, `fight_handlers:86`), les lectures
+directes de `w40k_core` (2341 / 2426 / 2583) et l'observation IA
+([observation_builder.py:2386](../../engine/observation_builder.py#L2386)). Aucun site ne
+regarde `models[i]["UNIT_RULES"]`.
+
+Reproduction (Intercessor 101 + `CaptainPowerWeaponBolter` 102 attaché, chargement réel) :
+
+```
+UNIT_RULES escouade      : []
+UNIT_RULES par figurine  : [[], ['reroll_charge', 'leader']]
+unit_can_reroll_charge(101) = False        # le Captain porte bien reroll_charge au registry
+```
+
+Ce n'est donc pas « l'unité ne profite pas du leader » mais « **le leader perd sa règle** » :
+autonome il relance sa charge, attaché il ne la relance plus. Le scénario PvP de référence
+attache un `CaptainTerminatorRelicWeaponBolter` et un `LibrarianTerminator`
+([scenario_pvp.json:8-9](../../config/board/44x60x5/scenario/scenario_pvp.json#L8-L9)) : le bug
+est vif en PvP **et** en gym.
+
+**Trois manques distincts, à ne pas confondre :**
+
+| # | Manque | État | Impact données actuelles |
+|---|---|---|---|
+| a | **Montant** — la règle du leader/support ne remonte pas à l'unité | ❌ | `reroll_charge` de 9 characters SM/Ork ; tout `unit_rules.json` futur porté par un character |
+| b | **Descendant** — la règle du bodyguard reste active après la mort de sa dernière figurine bodyguard | ❌ | un character survivant seul continue de bénéficier de `charge_impact`, `cunning_hunters`, `closest_target_penetration`… du squad mort |
+| c | **Fenêtre 19.04** — la règle survit « until the attacking unit has resolved all of its attacks » | ❌ | conséquence de (a)/(b) ; s'aligne sur la fenêtre déjà utilisée par HAZARDOUS/`_finalize_manual_allocation` |
+
+**Pourquoi une union statique au chargement serait fausse** : 19.04 est dynamique. Fusionner les
+`UNIT_RULES` dans `_build_enhanced_unit` réglerait (a) mais **installerait** (b) — la règle
+resterait après la mort de sa source. La résolution doit se faire sur les figurines **vivantes**
+(`models_cache` + `squad_models`), au point de lecture.
+
+**Deux pièges de conception :**
+1. Les rôles `leader` / `support` / `sergeant` / `special_weapon` sont des **marqueurs
+   par-figurine** consommés par `ROLE_TIER` / `_is_character_role` (ordre d'allocation 05.03,
+   T bodyguard 19.02). Les remonter à l'escouade casserait 19.02. Ils doivent être exclus.
+2. Le PDF exclut aussi les règles « affecting a single specified model » (enhancement/wargear).
+   `config/unit_rules.json` ne porte aucun marqueur de portée : tout ce qui y figure est
+   unit-wide. Écart config/PDF **sans conséquence aujourd'hui** (aucun enhancement modélisé) —
+   à trancher le jour où une règle par-figurine sera déclarée. Précédent §9.2.4 : on suit la config.
+
+**Tranches** — ✅ **les trois sont exécutées et commitées le 2026-07-27** (cf. l'encadré MAJ en tête
+de section) : **19.04-a** résolution unit-wide sur figurines vivantes, rôles exclus, avec test e2e
+sur chargement réel de scénario (`abcc80ca`) ; **19.04-b** extinction à la mort de la dernière
+figurine source, les deux sens (`57e53318`) ; **19.04-c** fenêtre « jusqu'à la fin des attaques de
+l'attaquant » (`ee479cb3`). Les deux pièges de conception ci-dessus ont été honorés : les rôles
+sont strippés à la remontée, et la résolution est dynamique (pas d'union statique au chargement).
+
+### 9.3 P2 — Mécanisme générique « décision agent »
+
+Un seul mécanisme pour tous les choix joueur, au lieu d'actions ad hoc par décision :
+- quand le moteur atteint un point de choix joueur en gym, au lieu d'appeler une heuristique
+  `_ai_select_*`, il pousse un `pending_agent_decision` (type + liste ORDONNÉE et STABLE de
+  ≤ K candidats) ;
+- le masque expose K actions génériques `CHOICE_0..K-1` ; l'observation gagne un bloc
+  « contexte de décision » (type one-hot + features par candidat) ;
+- l'agent choisit, le moteur applique. **Miroir exact des prompts PvP `waiting_for_player`**
+  (même sémantique, consommateur différent) — conforme à la règle projet « le flux gym copie
+  le flux PvP » ;
+- les heuristiques `_ai_select_*` sont CONSERVÉES pour le bot adversaire (GreedyBot) uniquement.
+
+Impact interface : action_space 41 → 41+K (recommandé K=6, aligné sur les 6 slots figurines ;
+actions dédiées plutôt que surcharge des slots tir 19-23, pour la lisibilité du masque) ;
+obs_size change → nouveau modèle from scratch (`--new`, déjà acté). Mettre à jour la
+`justification` de la config en même temps.
+
+### 9.4 P3 — Branchement décision par décision (une tranche = une décision + validation)
+
+⚠️ Les sites à remplacer sont ceux du PIPELINE VIF gym (vérifiés par contre-review), pas les
+heuristiques `_ai_select_*` qui ne sont que des fallbacks/chemins legacy.
+
+Ordre par valeur tactique :
+0. **Prompts rule-choice** (le plus urgent — pseudo-décision aléatoire structurelle) : en gym,
+   `_select_ai_rule_choice_option` choisit par `raw_action_int % len(options)`
+   ([w40k_core.py:2494](../../engine/w40k_core.py#L2494)) — l'agent « choisit » via une action émise pour tout autre chose,
+   sans voir le prompt. À remplacer par une vraie décision P2.
+1. **Cible de mêlée** — ⚠️ **MIS À JOUR le 2026-07-16 (le fix du bug `squad_fight` a déplacé ce
+   site)** : la boucle `get_best_enemy_score_for_unit` de `squad_fight` **n'existe plus** — elle
+   sélectionnait sa cible dans le mapping de slots gelé du tir, sans filtre de zone d'engagement
+   (violation 12.05) et crashait quand ce mapping était vide (cf.
+   `Implémenté/bug_squad_fight_mask_mismatch.md`). Le site vif est **désormais
+   `_ai_select_fight_target`** (fight_handlers ~L1725), que `squad_fight` consomme via
+   `_fight_build_valid_target_pool` — en miroir du flux PvP (`_fight_v11_resolve_attacks`).
+   Ce n'est donc plus un « fallback » : c'est le sélecteur vif, partagé gym/PvP.
+   ⚠️ Il porte un `except Exception: … return valid_targets[0]` (~L1781) qui masque toute erreur
+   de config/registry — vérifié : jamais déclenché sur la suite + smoke. Retrait = backend
+   partagé, arbitrage requis (cf. `A_faire/bug_pile_in_bfs_clearance_mismatch.md` §dernier).
+   La boucle `get_best_enemy_score_for_unit` reste vive pour la **cible de charge** (point 2).
+   Pilote du mécanisme P2.
+2. **Cible de charge** — le site vif est la même boucle de scoring dans `convert_squad_action`
+   du décodeur (action_decoder ~L917-940), PAS `charge_handlers:1506` (chemin
+   `convert_gym_action`, hors gym mais encore vif en PvE via pve_controller — ne pas le
+   supprimer, juste ne pas le brancher).
+3. **Choix de l'unité à activer** par phase — `eligible_units[0]` a 9 occurrences dans
+   action_decoder ; les sites DÉCISIFS du flux vif sont dans `convert_squad_action`
+   (~L837, L876), les autres sont dans la construction du masque ; le plus gros gain
+   stratégique. Contrainte règles : l'ordre en fight reste borné par Fights First
+   (11.04/12.04) et les pools alternés — le choix agent se fait DANS le pool légal courant.
+4. **Allocation des pertes défenseur** — remplace `_select_allocation_model`
+   (shared_utils ~5643) ; candidats = figurines éligibles 05.03/06.02 ; inclut l'allocation
+   hazard ET l'ordre de déclaration des groupes (`declare_order`, décision défenseur 05.03,
+   aujourd'hui `_auto_declared_order`).
+5. **Pile-in / consolidation** — les sites vifs sont `fight_pile_in_plan`
+   (shared_utils ~6708) et `squad_consolidate_plan` (~7038) appelés par `squad_fight`,
+   PAS les `_ai_select_*` de fight_handlers ; candidats = top-K destinations du pool.
+   NB règles : pile-in/conso sont OPTIONNELS et la consolidation a 3 modes en cascade (dont
+   vers objectif) — l'espace de choix doit inclure « ne pas bouger ». ⚠️ Le site vif gym
+   `squad_consolidate_plan` n'implémente que le mode (1) (docstring : option (2) « vers
+   objectif » déférée) — le flux PvP (fight_handlers ~1161-1176) a la cascade complète :
+   écart gym/PvP à combler quand cette tranche s'ouvre.
+6. **Move-after-shooting** (destination — remplace
+   `_select_move_after_shooting_destination_for_ai`, shooting_handlers ~4961) et
+   **reactive_move** (accepter/décliner + destination — protocole `decline_reactive_move`
+   déjà formalisé, shared_utils ~2190).
+7. **FLY / Take to the skies** — déclaration binaire (aujourd'hui auto pour l'IA,
+   movement_handlers ~261/271).
+8. **Optionnels, à statuer utilisateur** : split-fire (en gym, l'escouade entière vise UN
+   slot ; le PvP a `squad_shoot_assign` par-figurine), choix d'arme — deux régimes distincts
+   en gym : RNG = `selectedRngWeaponIndex` pris tel quel (shared_utils ~4489), CC =
+   auto-sélection par expected damage `_auto_select_cc_weapon_for_fig` (shared_utils ~6938,
+   appel ~7016) — les deux sont des décisions joueur auto-résolues,
+   déclaration multi-cibles de charge (PvP oui, gym mono-cible), placement final de charge
+   (`charge_build_valid_plan`, shared_utils ~3955), déploiement (les actions 4-8 sont 5
+   STRATÉGIES scorées, action_decoder ~1682-1698, pas « les 5 premiers hex » — élargir ou non).
+
+Hors scope A' (reste auto, conforme règles car « un placement légal parmi d'autres ») :
+placement par-figurine du move rigide, pivot. Montée d'étage = Phase C.
+
+### 9.5 P4 — Observation de support
+
+Bloc décision (P2) + features nécessaires aux choix : LoS/couvert par slot ennemi, portée
+effective de l'arme active vs distance du slot, flags advanced/fell_back de l'unité active.
+Les niveaux/élévation restent en Phase B (scénarios plats jusque-là).
+
+### 9.6 P5 — Validation par tranche
+
+Chaque tranche P3 : suite de tests verte + smoke 10 épisodes + run court `x1_debug` +
+win-rate vs GreedyBot ≥ tranche précédente. Si l'ajout d'un point de décision DÉGRADE le
+win-rate, la décision est mal observée ou mal récompensée → corriger avant d'empiler la
+suivante. Interdits : masquer une régression en retirant silencieusement la décision.
+
+Points de vigilance :
+- l'ordre des candidats doit être déterministe et stable (sinon l'assignation de crédit PPO
+  est brouillée) ;
+- chaque décision ajoutée allonge l'épisode en steps → surveiller `episode_steps` vs la
+  normalisation `/100` de l'observation globale ;
+- les heuristiques du RewardMapper utilisées par les anciens `_ai_select_*`
+  (`get_shooting_priority_reward`) peuvent devenir du reward shaping pour guider les
+  nouvelles décisions — à statuer par tranche, jamais en silence. NB : un de ses deux
+  consommateurs, `_ai_select_shooting_target` (shooting_handlers, def ~2093), est DÉJÀ mort
+  (zéro appelant) — à inclure dans la suppression P1.
+
+---
+
+## 10. Stratégie d'entraînement et d'évaluation — DÉCISION UTILISATEUR (2026-07-19)
+
+### 10.1 Contexte et arbitrage
+
+**Objectif métier** : présenter le jeu avec une IA « acceptable » pour obtenir un financement.
+La démo oppose un **joueur humain** à l'IA, avec les **armées de la boîte de base**.
+
+**Arbitrage assumé** : l'agent n'apprendra PAS à jouer 40K, il apprendra à jouer **ces deux
+rosters**. C'est un choix délibéré pour éviter des semaines de tuning — la spécialisation réduit
+la variance de composition, donc le signal d'apprentissage est plus net et la convergence plus
+rapide. Pour une démo, un agent spécialisé est indiscernable d'un agent généraliste.
+
+⚠️ **Ne PAS « corriger » ce choix** en réintroduisant de la diversité de rosters : c'est une
+décision produit, pas un oubli.
+
+### 10.2 Rosters et matchups
+
+- **2 rosters** : Space Marines (SM) et Orks — les armées de la boîte de base, donc celles de
+  la démo. L'entraînement est aligné sur ce qui sera montré.
+- **3 matchups** : SM vs Orks, SM vs SM, Ork vs Ork.
+- Les rosters de l'ancienne banque ont été **supprimés volontairement** (commit `43eae95a`,
+  370 fichiers) : ils précédaient l'implémentation des escouades, donc obsolètes. Les nouveaux
+  sont à créer.
+
+**✅ FAIT le 2026-07-19 — agent `ArmageddonAgent`, scale `500pts`.** Les 2 rosters existent et
+le pipeline tourne de bout en bout sur eux (training + évaluation).
+
+| Quoi | Où |
+|---|---|
+| Rosters agent (training) | `config/agents/ArmageddonAgent/rosters/500pts/training/agent_training_roster_{space_marines,orks}.json` |
+| Rosters adversaire (training) | `config/agents/_p2_rosters/500pts/training/opponent_training_roster_{space_marines,orks}.json` — le dossier `500pts` n'existait pas côté P2 |
+| Scénario d'entraînement | `config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json` — `agent_roster_ref: "training_random"` (tirage 50/50, **pas de `agent_roster_seed`** : il figerait le tirage agent), `opponent_roster_ref` = liste explicite des 2 fichiers (sinon P2 tire dans tout `_p2_rosters`) |
+| Config agent | `ArmageddonAgent_training_config.json` (copie CoreAgent, `roster_pool_schedule.enabled = false` dans les **5** phases) + `ArmageddonAgent_rewards_config.json` (clé racine renommée : le moteur indexe le fichier par nom d'agent, cf. `_build_reward_configs_for_current_units`) |
+| Holdout (rosters + scénarios) | `rosters/500pts/holdout_regular/agent_holdout_regular_roster_*.json`, `_p2_rosters/500pts/holdout_regular/opponent_holdout_regular_roster_*.json`, `scenarios/holdout_regular/scenario_bot-0{1..4}.json` (les 4 matchups) |
+
+**Vérifié** : 16 resets → les 4 matchups sortent, plus aucun `roster_pool_schedule produced zero
+eligible training rosters` ; training `x5_debug` 8 workers **10/10 épisodes, exit 0** ;
+`--eval --test-episodes 2` **exit 0**, combined 0.69 sur 5 bots (le `.zip` du modèle vérifié
+intact par md5 — jamais réécrit).
+
+⚠️ **Dette assumée (décision utilisateur 2026-07-19) : le holdout est fait par DUPLICATION des
+2 rosters de training**, ce qui **contredit §10.6** (le holdout devait porter sur l'ADVERSAIRE,
+pas sur les rosters — ici l'agent est évalué sur les armées qu'il a vues à l'entraînement).
+Retenu comme point de départ, à raffiner plus tard. La voie propre est documentée : le résolveur
+accepte une ref à **split explicite** (`training/agent_training_roster_orks.json` depuis un
+scénario holdout — cf. commentaire « cross-split evaluation P1 holdout vs P2 training »,
+`_resolve_roster_ref`), ce qui permettrait de garder les mêmes armées et de ne faire porter le
+holdout que sur `TacticalBot`.
+
+⚠️ **Les points des unités Orks sont factices** : `VALUE = 70` pour TOUTES (Boyz, Gretchin,
+Warboss, WarTrakk, BigMek…). Le total « 3290 pts » du roster Orks n'a aucun sens, et le moteur
+ne valide PAS les points (`scale` n'est qu'un nom de dossier). ~~Déséquilibre réel à surveiller :
+**47 figurines côté Orks contre 23 côté SM**.~~ → chiffre périmé : **37 contre 23** depuis §0.9
+(10 Gretchin et non 20), et ce n'est pas un déséquilibre mais une identité de faction à 680 vs 680.
+
+**Bug corrigé au passage (registry d'unités)** : `LandSpeederOnslaughtGatlingCannon.ts` et
+`LandSpeederHeavyFlamer.ts` déclaraient TOUS DEUX `export class LandSpeeder`. `UnitRegistry`
+scanne les `.ts` et indexe par nom de classe → les deux s'écrasaient, `HeavyFlamer` gagnait au
+hasard de l'ordre de parcours et la variante Onslaught était **inatteignable**. Classes
+renommées (+ `NAME`, `DISPLAY_NAME`) et les deux variantes ajoutées à `config/unit_registry.json`
+ET `frontend/public/config/unit_registry.json` (159 → 161). Reste ouvert : les deux pointent vers
+`/icons/LandSpeeder.webp`, absent de `frontend/public/icons/` (cosmétique frontend).
+
+**Défaut structurel constaté (non corrigé)** : au TOUT PREMIER run d'un agent neuf, l'évaluation
+finale échoue avec `VecNormalize enabled but stats not found: <agent>/vec_normalize.pkl` — le pkl
+est écrit à la FIN du run, l'éval tourne avant. CoreAgent ne le voyait jamais (pkl hérité de mai).
+Ne se reproduit pas aux runs suivants. Si on veut le traiter : ordonnancer la sauvegarde
+VecNormalize avant l'éval finale dans `train.py`.
+
+### 10.3 Progression d'adversaires (l'axe qui porte la robustesse)
+
+Le risque dominant pour cette démo n'est PAS la composition des armées, c'est **l'écart entre
+l'adversaire d'entraînement et l'humain de la démo**. Trois niveaux, qualitativement différents :
+
+| Niveau | Nature | Limite |
+|---|---|---|
+| 1. Bots scriptés | politique **fixe** | l'agent apprend un exploit ; le win-rate monte sans que la compétence monte |
+| 2. Self-play | politique **non-stationnaire** qui s'adapte en retour | les exploits cessent de payer ; risque de catastrophic forgetting |
+| 3. MCTS | adversaire qui **cherche** | non exploitable par pattern ; coûteux |
+
+**Plan retenu** : (1) les bots scriptés → (2) introduction **progressive** du self-play →
+(3) MCTS **seulement si** la perf mesurée est insuffisante.
+
+⚠️ « Diversité d'adversaires » = diversité des **distributions de comportement**, pas nombre de
+classes de bots. Huit bots appliquant la même heuristique gloutonne ne font qu'UN adversaire du
+point de vue de l'apprentissage.
+
+**Déjà implémenté, à paramétrer et non à développer — mais UNIQUEMENT sur le chemin rotation**
+(`--scenario bot`, cf. §10.4) :
+- `training_config.bot_training.ratios` — mélange pondéré de bots
+  (`_build_training_bots_from_config`, train.py ~L91 ; 7 classes supportées, 6 pondérées dans
+  la config actuelle — `defensive_smart` n'y est pas). Configuré dans les 5 phases.
+- `training_config.opponent_mix` — self-play progressif : `self_play_ratio_start` →
+  `self_play_ratio_end`, `warmup_episodes`, snapshot publié par
+  `_publish_self_play_snapshot` (train.py ~L2854) et rechargé par mtime dans
+  `BotControlledEnv` (env_wrappers ~L515). Chaîne complète vérifiée : parse → publication →
+  rechargement. Le « progressivement » est donc de la config.
+  ⚠️ `opponent_mix` n'est PARSÉ que dans `train_with_scenario_rotation` (~L2362) —
+  `create_multi_agent_model` l'ignore totalement.
+
+### 10.4 ⚠️ Écart CODE vs PLAN à corriger avant le premier run
+
+> **Statut 2026-07-19 : ✅ RÉSOLU** — construction d'adversaires mutualisée dans
+> `build_training_opponents`, `use_bots` dérivé de la config (`bot_training`) et non du nom de
+> fichier, repli aléatoire refusé explicitement par `SelfPlayWrapper` et `make_training_env`.
+> Détail et vérification en §0. Le constat ci-dessous est conservé comme historique.
+>
+> **Constat d'origine — les trois faits ci-dessous ont été
+> re-vérifiés dans le code ce jour (aucun n'a bougé). Ce n'est plus théorique : les runs de
+> validation de T6-g/T6-h (`x5_debug`, n_envs=8, `training_benchmark`) **et** le run de mise en
+> service d'`ArmageddonAgent` (§10.2) sont tous passés par la ligne 2 du tableau — donc **contre
+> un P2 aléatoire**. Ces runs prouvent que le PIPELINE tourne (zéro exception, épisodes
+> complets) ; ils ne prouvent RIEN sur l'apprentissage. C'est le bloqueur n°1, cf. §0.
+
+**Toute la machinerie d'adversaires (bots pondérés + opponent_mix) n'est câblée que sur le
+chemin ROTATION.** L'adversaire réel du chemin single-scenario dépend de `n_envs` et du NOM du
+fichier scénario — vérifié branche par branche :
+
+| Chemin | Adversaire d'entraînement RÉEL |
+|---|---|
+| `--scenario bot` (`train_with_scenario_rotation`) | ✅ `bots=training_bots` pondérés (~L2492, ~L2755) + self-play `opponent_mix` |
+| `--scenario <fichier>`, `n_envs > 1` (cas RÉEL : x5_debug = 8) | ❌ `make_training_env` appelé SANS `use_bots`/`training_bots` (~L1782) → `SelfPlayWrapper(frozen_model=None)` → **ACTIONS ALÉATOIRES UNIFORMES, en permanence** (voir ci-dessous) |
+| `--scenario <fichier>`, `n_envs == 1`, nom contenant « bot » | `GreedyBot(randomness=0.15)` EN DUR (~L1855) |
+| `--scenario <fichier>`, `n_envs == 1`, autre nom (dont `scenario_training_benchmark.json`) | ❌ `SelfPlayWrapper` → **aléatoire permanent** aussi (~L1871) |
+
+**Pourquoi « aléatoire permanent » et pas du self-play** (bug latent distinct, vérifié) :
+`SelfPlayWrapper._get_frozen_model_action` (env_wrappers ~L1237) retombe sur
+`random.choice(valid_actions)` tant que `frozen_model is None` — et
+**`update_frozen_model` n'a AUCUN appelant** dans tout `ai/` (grep = 0 ; le compteur
+`frozen_model_update_frequency = 100` de train.py ~L2690 est du code mort). Le « self-play »
+du chemin single-scenario n'en est pas : P2 joue au hasard du premier au dernier épisode.
+Ne pas confondre avec le VRAI self-play (`opponent_mix` → `BotControlledEnv`, chemin rotation),
+qui recharge un snapshot publié sur disque et fonctionne.
+
+Or `--scenario bot` est cassé en amont (rosters, cf. §0) : le chemin réellement utilisable est
+le single-scenario. **Un run x5_debug lancé aujourd'hui entraînerait donc contre un adversaire
+ALÉATOIRE, sans qu'aucun log ne le signale** — pire que « spécialisé sur GreedyBot » : un agent
+qui n'a jamais rencontré d'opposition cohérente.
+
+C'est la même famille de divergence que **T6-e** (`_turn_step_limit` absent du chemin
+single-scenario) : deux chemins de `train.py` qui ont divergé. À traiter de la même façon —
+faire passer les deux par la même construction d'adversaires (`training_bots` + `opponent_mix`
+dans `make_training_env`, qui accepte DÉJÀ ces paramètres : seul l'appel de
+`create_multi_agent_model` ne les transmet pas).
+
+### 10.5 Évaluation : le holdout porte sur l'ADVERSAIRE, pas sur les rosters
+
+> **Statut 2026-07-19 : ✅ CÂBLÉ** — `TacticalBot` est le holdout, à poids nul et exclu de tout
+> signal de sélection ; le défaut silencieux de `randomness` est supprimé. Détail en §0.
+> ⚠️ **Affirmation périmée n°4 — voir la table de §0bis** (levée par §0.7 : `TacticalBot` a joué 10/10 épisodes). Conservée telle quelle.
+> ⚠️ **Non validé runtime** — cf. §0.3 (`CC_DMG`). L'archivage des scénarios holdout était à
+> faire (voir plus bas). Le constat ci-dessous décrit l'état d'AVANT.
+
+**Constat (historique)** : les bots d'évaluation viennent de `callback_params.bot_eval_weights`
+(`_load_bot_eval_params`, bot_evaluation.py ~L168 ; itération sur `eval_weights.keys()` ~L886).
+Config actuelle, identique dans les 5 phases : `{greedy, defensive, control, aggressive_smart,
+adaptive}` — un **sous-ensemble strict des bots d'entraînement** (`bot_training.ratios` = les
+mêmes 5 + `random`). L'agent n'est donc évalué QUE contre des adversaires rencontrés à
+l'entraînement : ce win-rate mesure **l'exploitation apprise, pas la compétence**, et sera
+systématiquement optimiste par rapport au comportement face à un humain.
+
+**Décision** : le holdout est un **adversaire réservé à l'évaluation**, jamais vu en
+entraînement. Candidat déjà disponible : **`TacticalBot`** — le seul des 8 qui n'est utilisé
+nulle part (`evaluation_bots.py` L19 : « unused in training/eval »).
+
+À faire : ajouter `TacticalBot` aux bots d'évaluation, et **garantir qu'il n'entre jamais**
+dans `bot_training.ratios` (test de non-régression : l'intersection entre bots d'entraînement
+et bots de holdout est vide).
+
+Cela remplace avantageusement le holdout de rosters supprimé, et répond à la question
+« 2 ou 4 rosters » : **rester à 2**, et mettre le holdout sur l'axe adversaire.
+
+⚠️ Les 20 scénarios de `holdout_regular/` + `holdout_hard/` pointent vers des rosters supprimés :
+ils ne chargent pas. **À archiver** dans `_archive_pre_v11/`. Tant qu'ils sont là,
+`bot_eval_scenario_pool: "holdout"` (présent dans les 5 phases de
+`CoreAgent_training_config.json`) pointe sur un pool mort.
+NB — répartition VÉRIFIÉE des 9 échecs de la suite (cause relue test par test) : **8 viennent
+des scénarios TRAINING** (`agent_roster_ref: "training_random"` →
+`roster_pool_schedule produced zero eligible training rosters`, candidates=1 : le pool de
+rosters d'entraînement est quasi vide depuis le cleanup `43eae95a`) et **1 seul** d'un fichier
+de roster holdout absent. Archiver les holdouts n'en fait tomber qu'un : le gros de la
+réparation est la création des nouveaux rosters SM/Orks (§10.2) + la mise à jour des scénarios
+training qui les référencent.
+
+### 10.6 Critère de succès (remplace le critère T6 « win-rate vs RandomBot »)
+
+Le critère historique référençait une capacité qui n'existe plus (holdout de rosters). Nouveau
+critère, en deux volets — **les deux sont requis** :
+
+1. **Quantitatif** : **win-rate PAR ROSTER** contre l'adversaire de holdout (`TacticalBot`),
+   jamais rencontré à l'entraînement. Par roster, car avec seulement 2 rosters, un effondrement
+   sur l'un pendant que l'autre monte est la **signature du catastrophic forgetting** (piège
+   listé dans CLAUDE.md) et le seul garde-fou qui reste. Un win-rate agrégé le masquerait.
+2. **Qualitatif — décisif pour l'objectif démo** : **absence de comportement absurde** sur N
+   parties jouées par quelqu'un n'ayant pas travaillé sur le projet, cherchant activement à
+   surprendre l'agent (déploiement inhabituel, tactique atypique).
+
+**Pourquoi le volet 2 n'est pas optionnel** : devant un financeur, ce qui convainc est que l'IA
+paraisse *sensée* (elle va sur les objectifs, tire sur des cibles plausibles, charge quand c'est
+logique). Un agent à 45 % de victoires qui joue de façon lisible impressionne davantage qu'un
+agent à 70 % qui gagne en exploitant une faiblesse de bot et produit un coup absurde au pire
+moment. **En démo, l'incohérence coûte plus cher que la défaite.**
+
+### 10.7 MCTS — deux usages distincts, ne pas les confondre
+
+| Document | Usage | Effet |
+|---|---|---|
+| `A_faire/MCTS/MCTS_bot_final.md` | MCTS comme **adversaire d'entraînement** (fraction d'épisodes, entre bots et self-play) | améliore l'entraînement → demande un cycle complet de plus |
+| `A_faire/MCTS/MCTS_agent_implementation.md` | MCTS **dans l'agent**, à l'inférence | corrige les coups absurdes **sans retraining** |
+
+Pour l'objectif démo (§10.6 volet 2), c'est le **second** qui a le meilleur rapport
+effort/résultat : c'est l'absurdité ponctuelle qui coûte cher, et une recherche à l'inférence la
+corrige directement. Contre-argument à mesurer : la **latence** en temps réel devant un public —
+`MCTS_agent_implementation.md` note lui-même « micro à chaque activation + rollouts = beaucoup
+plus lourd » et suggère « macro + feuille value seule » comme prototype. Un MCTS macro peu
+profond, ou limité aux seules décisions critiques, suffirait probablement.
+
+**À ne PAS anticiper** : plan B après mesure. Rien ne sert de décider avant de savoir si le PPO
+spécialisé suffit.
+
+---
+
+## 0hist. Historique résolu
+
+> Entrées closes, **conservées intégralement** : mesures, sorties de run copiées, tableaux de
+> sites audités, diagnostics d'origine et attributions erronées assumées. Rien n'y est résumé.
+> Les titres et ancres `### 0.x` sont **inchangés** : tous les renvois `§0.x` du reste du
+> document restent valides.
+>
+> Les entrées **scindées** (§0.0, §0.5, §0.6, §0.7, §0.13) portent un renvoi `➜` à l'endroit
+> exact d'où leur part ouverte a été déplacée.
+>
+> ⚠️ Ces entrées décrivent l'état **au moment où elles ont été écrites**. Plusieurs contiennent
+> des affirmations que leurs propres auteurs ont ensuite corrigées sur place. Ne pas s'appuyer
+> sur l'une d'elles sans la confronter au code.
 
 
 ### 0.37 Contre-audit des livraisons §0.32–§0.35 — ✅ LIVRÉ (2026-07-28)
@@ -182,6 +3488,7 @@ revenu à 4000 après explication du garde-fou `save_best_min_episodes`).
 descente 4, PvE VecNormalize 6, train helpers 2, vec/bot-eval 29+1 skip). Toutes les familles
 touchées vertes ; la vérification LARGE appartient à l'utilisateur.
 
+
 ### 0.36 `--new` héritait du seuil de score du run précédent — ✅ CORRIGÉ (2026-07-28)
 
 **Origine.** Constaté en vérifiant le run relancé : `ai/models/ArmageddonAgent/model_ArmageddonAgent_robust_meta.json`
@@ -225,6 +3532,7 @@ train/éval/normalisation.
 hérité `0.457372` — son processus a chargé l'ancien code. Il devra battre ce score pour mettre à
 jour le modèle canonique ; ses propres `<agent>_<seed>_robust_<score>.zip` et son `best_model.zip`
 sont écrits normalement. Décision utilisateur en attente : purger le meta à chaud ou laisser.
+
 
 ### 0.35 Stats VecNormalize partagées par dossier — un run de 5 h 30 tué à 24 000/30 000 — ✅ CORRIGÉ (2026-07-28)
 
@@ -302,6 +3610,7 @@ tant qu'aucun run n'a produit de stats dans `ai/models/ArmageddonAgent/` — il 
 sur disque. **Vérifié : il échouait DÉJÀ avant ce correctif** (le crash avait supprimé le pkl
 partagé), avec l'ancien chemin dans le message. Ce n'est pas une régression du correctif ; il
 redeviendra vert dès qu'un run aura tourné.
+
 
 ### 0.34 `incohérence masque/exécution` sur les escouades qui DESCENDENT d'un étage — ✅ CORRIGÉ (2026-07-28)
 
@@ -419,78 +3728,8 @@ rendu invisible sur 95 % des escouades et l'a fait passer pour un cas particulie
 hypothèse, pas un diagnostic : celle-ci nommait le bon fichier, la bonne fonction, la bonne ligne —
 et la mauvaise cause.
 
-### 0.33 Rollout buffer 46,9 Go pour 39 Go de RAM — 🔴 BLOQUANT le run (2026-07-28)
 
-**Origine.** Point soulevé — sans être chiffré — par l'agent de la tranche T-K/T-L : « la spec
-§8.3 dimensionne le rollout buffer sur la grille, mais `obs_size` y pèse bien plus lourd depuis
-§0.30/§0.31 ». Chiffré ici, sur la config réelle.
-
-**Mesure (2026-07-28).** `DictRolloutBuffer` stocke **toutes** les clés d'observation, vecteur
-compris, et il est alloué **d'un bloc au premier `learn()`** — pas progressivement.
-
-| | floats / transition | |
-|---|---|---|
-| vecteur (`obs_size`) | 20 626 | **le poste dominant depuis §0.30/§0.31** |
-| grille (9 × 32 × 32) | 9 216 | 7 168 avant §0.32 |
-| **total** | **29 842** | soit **116,6 Ko** par transition en float32 |
-
-| Profil | `n_envs × n_steps` | Transitions | Buffer |
-|---|---|---|---|
-| `x1`, `x5_new`, `x5_debug` | 8 × 8 192 | 65 536 | **7,8 Go** — passe |
-| `x5_append`, `x1_debug` | 48 × 8 192 | 393 216 | **46,9 Go** — ne passe pas |
-
-Machine : **39 Go physiques, 29 Go disponibles**. Les profils à 48 envs échouent à l'allocation,
-avant le premier pas — ce n'est pas une lenteur, c'est un `MemoryError` immédiat.
-
-⚠️ **Deux pièges de lecture à ne pas répéter.**
-1. Le « 14,49 Go, sous la limite de 19,33 Go » de
-   [`move_action_space_spatial_rework.md`](A_faire/move_action_space_spatial_rework.md) §8.3 ne
-   compte **que la grille**. Il était juste quand l'obs vectorielle faisait 108 floats ; il est
-   périmé depuis §0.30, pour une raison qui n'est pas celle de §0.32.
-2. La ligne §0.14 annonce « run `x5_new`, 48 envs » alors que le profil `x5_new` porte
-   `n_envs=8`. **Vérifier le profil ET les overrides CLI réellement lancés** avant de conclure
-   quoi que ce soit d'un OOM ou de son absence.
-
-**ARBITRAGE DU 2026-07-28 : aucun changement.** La commande réellement lancée porte
-`--training-config x1` ⇒ **8 envs, 7,8 Go**, dans les 29 Go disponibles. §0.33 ne bloque **pas**
-ce run. Il ne se déclenche que sur `x5_append` et `x1_debug`.
-
-⚠️ **Une recommandation « `n_steps` 8192 → 1024 » a été formulée puis RETIRÉE le même jour. La
-retenir aurait dégradé le run.** Ses deux erreurs, à ne pas refaire :
-
-1. **Argument faux.** Elle promettait « 8× plus de mises à jour, donc plus d'apprentissage ». Le
-   nombre de PAS DE GRADIENT d'un run ne dépend pas de `n_steps` : il vaut
-   `transitions_totales × n_epochs / batch_size`. `n_steps` n'arbitre que **fraîcheur contre
-   variance** — des avantages estimés sur moins de données, et donc plus bruités.
-2. **Preuve contraire déjà au dossier, non consultée** :
-   [`config/agents/CoreAgent/Training_logs.md`](../../config/agents/CoreAgent/Training_logs.md)
-   — ablations à 30k épisodes, `n_envs=48`, un seul hyperparamètre changé par run :
-
-   | Changement | Robust score | Verdict noté à l'époque |
-   |---|---|---|
-   | baseline `n_steps=16384` | **0,4857** | BEST |
-   | `n_steps` → 8 192 | 0,3808 | « rollout **trop petit** → instabilité » |
-   | `n_steps` → 32 768 | 0,4345 | mieux que 8192, sous la baseline |
-   | `batch_size` → 2048 | 0,3281 | « catastrophique, trop peu de pas de gradient par rollout » |
-
-   Sur ce projet, la direction mesurée est donc l'INVERSE : **plus gros, mieux**, avec un optimum
-   à 16 384. C'est sur CoreAgent — autre pipeline, autre observation — donc ce n'est pas une
-   preuve transférable ; c'est la **seule** preuve disponible, et elle contredit la proposition.
-
-**Le vrai enseignement de §0.33.** Le régime validé de CoreAgent — `48 × 16 384` = 786 432
-transitions — demanderait **93,9 Go** avec l'observation actuelle. **Il est devenu structurellement
-inatteignable.** Sous 29 Go, le plafond à 48 envs est `n_steps ≈ 2048` (11,7 Go) à 3072 (17,6 Go),
-soit **5 à 8× sous l'optimum mesuré**. Autrement dit : tout run à 48 envs sortira du régime validé,
-et son hyperparamétrage devra être **re-tuné**, pas hérité. Ce n'est pas un réglage à trancher au
-jugé — c'est un screening à refaire, du type de celui de
-[`TUNING_NUIT.md`](../../config/agents/CoreAgent/TUNING_NUIT.md), quand le pipeline sera stable.
-
-**Leviers, si un run à 48 envs devient nécessaire** (aucun n'est gratuit — tous déplacent la
-baseline) : baisser `n_envs` · baisser `n_steps` en sachant qu'on quitte l'optimum mesuré ·
-stocker la grille en `uint8` — qui ne suffit pas seul : elle ne pèse que 31 % de la transition,
-donc 46,9 → **36,1 Go**, encore au-dessus des 29 Go disponibles.
-
-### 0.32 Optimalité de l'observation ET de la tête d'action — audit du 2026-07-28 — 🟠 OUVERT (T-H/T-I/T-J ✅ LIVRÉS)
+### 0.32 Optimalité de l'observation ET de la tête d'action — audit du 2026-07-28 — ✅ LIVRÉ (T-G/T-H/T-I/T-J/T-K/T-L ; résidus fermés par §0.37)
 
 **Origine.** Question de l'utilisateur : « mon obs est-elle optimale ? », posée pendant le test
 x1 qui précède le run x5. Audit fait **par lecture du code**, pas de la doc — puis recoupement
@@ -935,6 +4174,7 @@ apprend est donc un signal valide pour x5. ⚠️ **Piège** : `obs_size` est **
 x5 — un `.zip` entraîné en x1 se chargera **sans erreur** sur un board x5. Rien n'avertit d'une
 reprise accidentelle.
 
+
 ### 0.31 Complétude de l'observation — objectifs situés + règles d'unité visibles — ✅ LIVRÉ (2026-07-27)
 
 **Origine.** Question de l'utilisateur : « l'obs est-elle complète et complètement branchée ? »,
@@ -1045,233 +4285,29 @@ servi) a été écarté empiriquement : **23 398 paires comparées au calcul non
 4 rouges ; proxy branche 1 → 1 rouge (celui de la branche 2). 178 tests verts sur la famille
 observation + LoS + cover.
 
-### 0.29 Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum — ✅ LIVRÉ + VALIDÉ IN-ENGINE (2026-07-22)
 
-**But (recadré par l'utilisateur).** Pouvoir **placer les unités manuellement** ET **choisir**, sur un
-même fichier, entre placement figé (manuel) et phase de déploiement — le tout sur le terrain réel du
-training, sans nouveau terrain. Reliquat demandé : faire évoluer la **proportion figé↔déploiement au
-fil du training** (curriculum). Matchup **Space Marines vs Orks**.
+### 0.30 Encodeur d'entités partagé + tête pointeur — ✅ LIVRÉ (2026-07-26)
 
-**Fichiers livrés.**
-- `config/board/44x60x5/scenario/scenario_fixed_brawl_sm_orks.json` — 4 escouades / **36 figurines**,
-  format `units[]` avec clé `models` (compositions RÉELLES des rosters training) :
-  P1 SM = Intercessor (Bolt Rifle) + VanguardVeteranSquadJumpPack (jump pack) ;
-  P2 Orks = 2× Boyz. Chaque figurine a `col/row/unit_type` propre (sergents, plasma, personnages
-  fidèles au roster). `terrain_ref` = **`terrain-mc1.json`** (terrain réel du training).
-- `tests/unit/engine/test_fixed_brawl_deploy_modes.py` — **verrou** (bascule fixed↔active).
-- *(Aucun terrain créé — un premier jet en avait introduit un, retiré à la demande de l'utilisateur.)*
+> **Entrée sans corps dans ce document — c'est voulu, et c'est signalé ici depuis le 2026-07-28.**
+> §0.30 n'a jamais eu de section `### 0.30` : son contenu vit dans
+> **[`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)**, qui en est la source de
+> vérité (tranches T-A→T-F, mesures, journal). Ce stub existe pour que les ~10 renvois `§0.30` du
+> présent document mènent quelque part — avant l'épuration, ils ne reposaient que sur une ligne du
+> tableau d'état, supprimée avec lui.
 
-**Le seul levier = `deployment_type`** (tracé, pas supposé). `game_state.py::load_units_from_scenario` :
-- `"fixed"` (ou champ absent, défaut ~L274) → chaque unité EXIGE `col/row` top-niveau = ancre =
-  `models[0]` (~L589-594), figurines posées telles quelles ; la clé `models[]` est normalisée par
-  figurine (~L874-985, override `unit_type`/stats par modèle). Au `reset`, phase `command` directe
-  (aucun `deployment`).
-- `"active"` → au `reset`, `deployment_type=="active"` déclenche la phase `deployment`
-  (`w40k_core.py:1364`), figurines mises à la sentinelle (-1,-1) et placées en jeu (IA/manuel). Les
-  `col/row` du fichier sont alors ignorés. `terrain-mc1.json` fournit les `deployment_zones` requises.
+**Résumé strictement non normatif** (le détail et les chiffres à jour sont dans l'autre document) :
+audit demandé après §9.2.5, **6 trous trouvés** — une escouade ennemie invisible ET intirable
+(5 slots figés pour 6 escouades mesurées), les types de tir **10.05/10.06** ignorés du gym, une seule
+arme (index 0) et une seule cible déclarées au tir (violation **04.01**/**04.02**), heuristique d'arme
+de mêlée périmée par P1. Décisions actées : renommage `PISTOL` → `CLOSE_QUARTERS`, **encodeur
+d'entité partagé** (unités+armes, amies+ennemies), **K=20 unités / K=10 armes**, **tête pointeur**
+pour le ciblage, retrain accepté. Livré le 2026-07-26 (T-A→T-F + §1.9 + audit final).
 
-**Positions par défaut** (éditables). Board 220×300 subhex. Placées dans les **bandes dégagées de
-mc1** (P1 SM rows 92/100, P2 Orks rows 198/206 ; cols 66-154), à l'écart des murs de la ruine
-centrale (rows ~120-185) — vérifié : le mode `fixed` chargeait en erreur « footprint on wall hex »
-tant que les unités tombaient sur la ruine. Portées lues (datasheets) pour référence : Bolt Rifle
-24″=120 subhex, shoota Boyz 18″=90 ; charge 11.02 (≤12″, non-engagé), zone d'engagement 03.04
-(2″=10 subhex hz).
+⚠️ Les tailles citées dans les entrées d'époque (`obs_size` 20166, action 1047 → 1062) ont bougé
+depuis : valeurs vérifiées dans le code le **2026-07-28** — `obs_size` = **20626**
+(`ObservationBuilder.SQUAD_OBS_SIZE_TARGET`), espace d'action = **1062**
+(`macro_intents.TOTAL_ACTION_SIZE`), `GRID_CHANNELS` = **9**.
 
-**Preuve in-engine (verrou, chemin gym réel).** `python3 -m pytest tests/unit/engine/test_fixed_brawl_deploy_modes.py` :
-```
-✅ fixed  : phase initiale='command', 4 unités / 36 figurines placées (aucun déploiement)
-✅ active : phase initiale='deployment', 4 unités en attente de déploiement
-✅ VERROU OK : même fichier, bascule fixed↔active par `deployment_type` (36 figurines).
-```
-⚠️ Piège rencontré (dans le verrou) : le loader **mémoïse le JSON par chemin absolu** (~L240) — tester
-deux modes en réécrivant un seul fichier temporaire relit le cache du 1er mode ; le verrou utilise
-donc **deux chemins distincts**.
-
-**Proportionnalité figé↔déploiement au fil du training — ✅ LIVRÉ (scheduler continu).** Approche
-retenue (arbitrage utilisateur) : **montée lisse par épisode**, mode `active` tiré à proba p(t)
-croissante, sur un SEUL fichier rechargé dans le mode tiré (réutilise les 2 chemins de chargement
-éprouvés plutôt qu'un chemin « hybride » risqué côté fuite d'état — cf. §0.25/§0.26). Implémentation
-(3 fichiers) :
-1. `game_state.py::load_units_from_scenario(..., deployment_type_override=None)` — force le mode du
-   chargement en remplaçant le `deployment_type` du JSON (et neutralise les surcharges P1/P2).
-2. `w40k_core.py::_configure_deployment_mode_for_episode()` — **miroir de `deployment_random_mix`**
-   (orthogonal : celui-ci choisit fixed/active, l'autre randomise les ACTIONS d'un déploiement déjà
-   actif). p(t) = `active_ratio_start + (end−start)·min(progress, freeze)`, progress =
-   `episode_number/(total_episodes−1)`, Bernoulli(p) → `active`/`fixed`. Dans `reset()`, impose un
-   rechargement avec l'override (reward_configs reconstruits via le chemin `_reload_scenario` existant).
-3. Config `x5_new.deployment_mode_schedule` (opt-in, `enabled:false` par défaut) :
-   `active_ratio_start/active_ratio_end/schedule:"linear"/freeze_after_progress`, `training_only`.
-**Preuve in-engine** — `python3 -m pytest tests/unit/engine/test_deployment_mode_schedule.py` : ratio 0.0→ 20/20 `fixed` ;
-ratio 1.0→ 20/20 `active` ; rampe 0→1 (60 ép.)→ part `active` croissante (1re moitié 8, 2e moitié 24),
-avec cohérence stricte mode↔phase (`fixed`→`command`, `active`→`deployment`). Le scheduler est
-**orthogonal** à `deployment_random_mix` (les deux peuvent coexister). ⚠️ `training_only:true` exige
-le scénario sous `.../scenarios/training/` (`_is_training_scenario_context`) — le déposer là pour
-l'activer en training réel ; mettre `enabled:true` dans `x5_new`.
-
-**Emplacements DANS les rosters (mode strict sur le chemin roster réel) — ✅ LIVRÉ.** Le training
-réel ne joue pas un `units[]` figé : il passe par le **template roster** (`scenario_training_armageddon.json`,
-`agent_roster_ref=training_random`, `opponent_roster_ref=[SM,Orks]`, **siège aléatoire**). Or un
-roster compact ne portait aucune coordonnée → `fixed` était interdit (`_expand_compact_roster_to_basic_units`
-levait). Solution retenue par l'utilisateur (pas de miroir) : **chaque roster déclare `top` ET `bottom`
-par figurine**, le loader choisit le côté selon le joueur assigné (**convention P1=top, P2=bottom**) —
-comme le siège est aléatoire, les deux côtés sont portés. Implémentation :
-- `game_state.py::_expand_compact_roster_to_basic_units` — `models[i]` accepte la forme objet
-  `{unit_type, top:{col,row[,level]}, bottom:{...}}` ; unité **mono** (véhicule/perso) : positions au
-  **niveau de l'entrée** (`top`/`bottom`) pour NE PAS la transformer en escouade (comportement `active`
-  préservé). En `fixed` : positions obligatoires (sinon erreur explicite), `count==1` requis, côté
-  sélectionné par joueur. En `active` : positions ignorées (roster à double usage). Helper
-  `_parse_roster_model_side` (validation stricte col/row/level).
-- Les **4 rosters** training (agent SM/Orks, opponent SM/Orks) portent désormais `top`/`bottom`,
-  produits par le **générateur committé `scripts/gen_roster_positions.py`** (reproductible) :
-  placement en **réseau hexagonal** (pas 9 subhex) par footprint réel (tailles de socle variables
-  persos/véhicules), wall-aware (terrain-mc1), sans chevauchement (le mode `fixed` valide les
-  footprints), dans les bandes haute (~rows 40-104) et basse (~196-260). **Cohérence d'escouade
-  GARANTIE** : le générateur n'accepte un centre d'escouade que si la formation est cohérente. La
-  règle moteur (03.03, `game_config` : `squad_min_neighbors`=1, `cohesion_distance_mode`="euclidean"
-  bord-à-bord 2", étalement 9") n'exige qu'**≥1 voisin** ; le générateur vise ≥2 centre-à-centre =
-  borne conservatrice. **L'oracle est la fonction moteur `validate_squad_coherency`** — c'est ELLE
-  que le verrou asserte à la charge (pas une réimplémentation).
-**Preuve in-engine** — `python3 -m pytest tests/unit/engine/test_roster_fixed_positions.py` : 8 épisodes `fixed` (rosters
-+ siège tirés au hasard) → **aucun déploiement, toutes figurines placées, P1 en bande haute / P2 en
-bande basse, escouades cohérentes** ; 3 épisodes `active` → phase `deployment`, sentinelles.
-Cohérence re-vérifiée hors test : 0 figurine sous-cohérente sur 12 chargements (2 sièges × 6 rosters
-aléatoires). Régression : template `active` + rosters positionnés, scheduler off → step normal
-(deployment→move→shoot), aucun crash. Le scheduler `deployment_mode_schedule` rampe donc **strict
-(positions rosters) → déploiement appris** directement sur le vrai flux (rotation SM/Orks + siège
-aléatoires conservés). ⚠️ Si une composition de roster change, relancer `gen_roster_positions.py`.
-
-**Suite (mécanique LIVRÉE ; reste l'USAGE + la mesure — arbitrage utilisateur / dépendances).** Un
-agent frais qui reprend :
-1. **Activer le curriculum** : `x5_new.deployment_mode_schedule.enabled = true` puis régler la rampe
-   (`active_ratio_start`/`active_ratio_end`/`freeze_after_progress`, p.ex. 0.0→1.0 sur 0.8 de la
-   progression). Aucun autre câblage : le template roster réel (`scenario_training_armageddon.json`)
-   marche tel quel, rosters déjà positionnés.
-2. **Vérifier en épisode réel** avant un long run : `python3 ai/train.py --agent ArmageddonAgent
-   --training-config x5_new --step` + `ai/analyzer.py` + replay → confirmer que des épisodes `fixed`
-   (placement rosters, aucun déploiement) ET `active` (déploiement) surviennent, dans la bonne
-   proportion selon l'avancement.
-3. **Mesurer l'objectif curriculum** : win-rate en régime `fixed` (strict) vs `active` au fil de la
-   rampe — c'est la métrique qui valide « scénarios fixes → apprendre à se déployer ». **Rejoint
-   §0.14 (win-rate)**, ✅ **débloqué le 2026-07-26** (§0.27 corrigé, §9.2.5 livré).
-Décisions ouvertes (utilisateur) : forme exacte de la rampe ; coexistence éventuelle avec
-`deployment_random_mix` ; siège (`agent_seat_mode`) gardé aléatoire ou figé en phase strict.
-
-**Outillage : jouer/visualiser UN scénario explicite en éval (2026-07-22).** Pour observer un
-scénario précis (ex. `scenario_fixed_brawl_sm_orks.json`, placement fixed) avec le modèle courant
-SANS l'entraîner ni écraser le `.zip`, `--test-only` accepte désormais un chemin de scénario
-explicite :
-`python3 ai/train.py --agent ArmageddonAgent --training-config x5_debug --test-only --eval --step
---scenario config/board/44x60x5/scenario/scenario_fixed_brawl_sm_orks.json`.
-Il est joué **tel quel** (`train.py`, branche test-only) : ni repli holdout, ni matérialisation
-`wall_ref` (celle-ci exige un scénario sous `agents/.../scenarios/<split>/` et réécrit le terrain —
-elle casserait un scénario autonome sous `config/board/`). Mécanisme : `evaluate_against_bots(...,
-materialize_eval_refs=False, scenario_list_override=[chemin])`. Le mode holdout par défaut
-(`materialize_eval_refs=True`) est **inchangé**. Verrou : `tests/unit/ai/test_eval_explicit_scenario.py`
-(ROUGE : la matérialisation lève hors `agents/` ; VERT : le scénario explicite est joué, 0 planté).
-⚠️ Un scénario `fixed` joué en test-only n'a **aucune** phase de déploiement (step.log : 0
-`DEPLOYMENT`, figurines aux positions du fichier dès T1).
-
-
-### 0.14 Re-mesure du run — 🟠 RUN LANCÉ LE 2026-07-22, BLOQUÉ À L'ÉVAL DU MARKER 2000 (cf. §0.27) ; score encore dû
-
-> Part **ouverte** de §0.13 (run x5_debug 100 épisodes). Le run et le fix de l'évaluation
-> finale sont résolus et documentés en **§0.13**.
-
-> ✅ **NON-RÉGRESSION §0.11 VALIDÉE (2026-07-21) — 3 runs indépendants, zéro crash.** Après le fix
-> §0.18, la commande de re-mesure (`x5_debug --total-episodes 500`) a été relancée **3 fois** :
-> **3× 500/500 épisodes, `✅ TRAINING COMPLETE`, ZÉRO `collision intra-plan`, zéro `Traceback`,
-> zéro `incohérence masque`** (grep sur les 3 logs). Le crash dépendant de la trajectoire qui
-> survenait à l'épisode ~280 (§0.18) **n'est plus jamais réapparu** sur 1500 épisodes cumulés.
-> L'avertissement « la non-régression de §0.11 reste non validée par un run » de §0.18 est
-> **LEVÉ**. ⚠️ **Ce que ces 3 runs NE prouvent PAS** : le **score par matchup**. À 500 épisodes /
-> 2 par bot, les Combined (61,5 % / 38 % / 19,5 % / 42 %) restent **non concluants** (bruit
-> d'échantillon) — c'est le **pipeline** qui est validé, pas la politique. Un win-rate
-> interprétable exige toujours un run long à `total_episodes` réel (10-30k), aujourd'hui coûteux
-> en temps (~36 h) — c'est précisément la cible du chantier `V11_move_pool_optimization.md` (§0.22).
-> §0.15 étant tranché, ce win-rate mesurera la robustesse à l'**adversaire**.
-
-**Run de re-mesure du 2026-07-20 — commande exacte :**
-
-```
-python3 ai/train.py --agent ArmageddonAgent --scenario bot --new \
-        --training-config x5_debug --total-episodes 500
-```
-
-(`--total-episodes` surcharge le `total_episodes: 100` de la config ; **la config n'a pas été
-modifiée**. Lancé APRÈS §0.12, donc sur le reward définitif.)
-
-**✅ Ce que ce run PROUVE.**
-
-| Point | Résultat |
-|---|---|
-| Déroulement | **500/500 épisodes, exit 0**, 1 h 48, 8 workers, GPU. **Zéro exception, zéro `incohérence masque/exécution`** dans tout le log. |
-| **Non-régression §0.11** | 🔴 **NON — affirmation RETIRÉE le 2026-07-20, voir §0.18.** Ce premier run a bien franchi l'épisode ~250, mais un **second run, même commande**, a **crashé sur le même message d'erreur à l'épisode ~280**. Un run qui passe ne prouve rien ici : le crash dépend de la trajectoire, donc du hasard. **L'avertissement « la non-régression de §0.11 reste non validée par un run » N'EST PAS levé.** |
-| **Fix §0.13** | ✅ **VALIDÉ RUNTIME.** Le ranking porte sur `holdout_regular_bot-01` / `-02` — l'éval finale joue bien le pool **holdout**, plus le scénario d'entraînement. |
-| Reward §0.12 | Le run tourne sans incident avec la `VALUE` par figurine et l'event `model_value`. Aucun crash du chemin d'allocation. |
-
-**Résultats de l'évaluation finale (12 épisodes = 2 par bot) :**
-
-```
-  vs adaptive            :  50.0% (1W-1L-0D)
-  vs aggressive_smart    :  50.0% (1W-1L-0D)
-  vs control             :   0.0% (0W-2L-0D)
-  vs defensive           : 100.0% (2W-0L-0D)
-  vs greedy              : 100.0% (2W-0L-0D)
-  vs tactical            : 100.0% (2W-0L-0D)   <-- holdout
-  Combined Score:  61.5%
-
-🏁 Scenario ranking (combined):
-  - holdout_regular_bot-01: combined=0.770 | worst_bot_score=0.000
-  - holdout_regular_bot-02: combined=0.460 | worst_bot_score=0.000
-```
-
-**🔴 Ce que ce run NE prouve PAS — le score reste NON CONCLUANT.**
-
-- **2 épisodes par bot.** `bot_eval_final` vaut **2** dans la phase `x5_debug`. C'est bien
-  « > 1 » comme l'exigeait cette entrée, mais **12 épisodes ne permettent aucune conclusion** :
-  chaque bot est un 2W-0L / 1W-1L / 0W-2L, soit une résolution de 50 points de pourcentage.
-  Le `61.5 %` est un chiffre **indicatif**, à ne PAS reporter dans §10.6.
-- **500 épisodes d'entraînement, ce n'est pas un agent entraîné.** Les phases réelles sont à
-  10 000–30 000 (`x1`, `x5_new`, `x5_append`). Ce run valide le **pipeline**, pas la politique.
-- **`vs tactical: 100 %` ne vaut rien comme signal de holdout** à 2 épisodes — c'est
-  précisément le chiffre qu'on voudrait fiable, et c'est celui qui a le moins d'échantillon.
-- ⚠️ **`vs control : 0 % (0W-2L)`** est le seul résultat qui mérite un œil : c'est le
-  `worst_bot_score=0.000` des deux scénarios. À 2 épisodes ce peut être du bruit pur ; **à
-  reconfronter au prochain run long** avant d'y voir un trou de comportement.
-
-**🔴 DEUXIÈME RUN — CRASH, voir §0.18.** Un run relancé avec la **même commande** après le
-correctif de la rupture D s'est arrêté à l'**épisode ~280** sur
-`ValueError: execute_squad_move a échoué … collision intra-plan`. **§0.11 n'est donc pas
-résolu.** C'est la conclusion la plus importante de cette entrée, et elle contredit ce que le
-premier run laissait croire.
-
-**🔴 INVALIDÉ A POSTERIORI (même jour) — la rupture D de §0.12.** Ce run a tourné **avant** la
-découverte de la régression d'observation (`value_over_ttk` extrapolait le `points_per_hp` de la
-figurine d'index 0). Les deux rosters de §10.2 étant hétérogènes en points, **l'agent s'est
-entraîné sur une observation fausse** pendant les 500 épisodes. Ce qui reste valable malgré
-tout : la **non-régression §0.11** et la **validation runtime du fix §0.13**, qui ne dépendent
-ni du reward ni de l'observation. Le score, lui, est à jeter deux fois plutôt qu'une.
-
-**Ce qui reste à faire pour fermer cette entrée** : un run sur une phase à `bot_eval_final`
-élevé (`x1`, `x5_new` et `x5_append` sont déjà à **100**) et à `total_episodes` réel, pour
-produire un win-rate **par roster** interprétable au sens de §10.6. ⚠️ Cf. **§0.15** : les
-rosters `training` et `holdout_regular` étant identiques, ce win-rate mesurera la robustesse à
-l'**adversaire**, jamais au roster.
-
-**🟠 MAJ 2026-07-22 — le run réel a ENFIN été lancé, et il a franchi la non-régression mais s'est
-arrêté à l'éval.** Commande exacte : `python3 ai/train.py --agent ArmageddonAgent --scenario bot
---new --training-config x5_new` (10k ép., 48 envs, `bot_eval_final=100`), lancée après le
-réalignement complet de l'instrument (§0.23 logger per-figurine, §0.24 analyzer per-figurine) et la
-correction d'un **vrai bug moteur de move** découvert par l'analyzer fiabilisé (§0.25 budget
-ligne-droite → géodésique ; §0.26 régression cache). **Le training a atteint l'épisode 2000 (20 %)
-sans un seul crash `incohérence masque/exécution`** en ~3 h 40 — la conformité move et la
-non-régression tiennent sur un vrai run 48-envs. **Mais** le premier checkpoint d'évaluation (marker
-2000) a déclenché le garde-fou strict d'éval : **500 épisodes d'éval `failed` sur timeout de task**
-→ arrêt. **Aucun win-rate n'a donc été produit.** Le score par matchup reste dû, désormais bloqué par
-**§0.27** (et non plus par la perf du pool §0.22, ni par un défaut d'instrument). ⚠️ Cette entrée
-confirme une fois de plus la leçon §0bis « un run vert ne prouve rien » : le fix move §0.25 avait
-passé un `--step` de 4 épisodes puis **crashé en 1 min** sur un vrai run 48-envs (cf. §0.26) — c'est
-le run multi-env, pas le smoke, qui a validé.
 
 ### 0.28 Conformité tir obscuring (13.10) — soupçon RÉFUTÉ (aucun bug) — ✅ (2026-07-22)
 
@@ -1319,6 +4355,7 @@ poussait `unit["col"/"row"]` alors que `require_unit_position` lit `units_cache`
 `require_unit_position == position loggée`) a retourné le verdict. Corollaire du motif §0.11/§0.18 :
 **un rejeu vert ne prouve rien s'il ne vérifie pas son propre setup.**
 
+
 ### 0.27 Blocage à l'éval du checkpoint — task d'éval en timeout (parties dégénérées × coût géodésique) — ✅ CORRIGÉ (2026-07-26)
 
 > ✅ **FIX LIVRÉ le 2026-07-26 — options (1) + (2), celles approuvées.** Le diagnostic ci-dessous
@@ -1346,6 +4383,15 @@ poussait `unit["col"/"row"]` alors que `require_unit_position` lit `units_cache`
 > **(2) Éval intermédiaire réduite** : `x5_new.bot_eval_intermediate` **100 → 20** ép./bot
 > (5 bots → 100 ép. au lieu de 500, tasks 5× plus courts). `bot_eval_final=100` **inchangé** et
 > `bot_eval_task_timeout_seconds=3600` inchangé. Les autres phases ne sont pas touchées.
+>
+> ⚠️ **CORRECTION 2026-07-28 — le « 20 » n'est PAS ce que porte la config.** Valeurs relevées
+> dans `ArmageddonAgent_training_config.json` à HEAD : `x5_new` = **50** (pas 20), `x1` = **100**,
+> `x5_append` = 100, `x5_debug` = 100, `x1_debug` = 5. Et §0.14 a **explicitement retiré** la
+> proposition de descendre à 20 (20 ép./bot ⇒ ±11 points d'erreur-type sur le win-rate, injectés
+> dans `save_best_robust`). Cette ligne est donc conservée comme **trace de l'intention du
+> 2026-07-26**, pas comme description de l'état : le paramètre qui a réellement bougé pour le run
+> à lancer est `x1.bot_eval_freq` (2000 → 4000), et il est lui-même contredit par une
+> modification non commitée du répertoire de travail (cf. l'alerte en §0).
 >
 > **Verrou** : `tests/unit/ai/test_eval_timeout_resilience.py` (**7** tests) — crash lève /
 > crash+timeout lève (le crash prime) / timeout ne lève pas et n'atteint pas le gate / timeout
@@ -1411,7 +4457,8 @@ l'utilisateur a clos, désormais incontournable puisque la conformité move (§0
 Reco de départ (ne rouvre pas §0.22) : (1) + (2). ⚠️ Prérequis : vérifier sur un marker plus avancé
 que l'éval s'accélère réellement, sinon (3) devient nécessaire.
 
-### 0.22 Coût du move pool — `MOVE_POOL_BUILD` = 95,6 % du training — 🟠 OUVERT (cardinalités mesurées + levier tranché, 2026-07-21)
+
+### 0.22 Coût du move pool — `MOVE_POOL_BUILD` = 95,6 % du training — ✅ CLOS (2026-07-21, décision (B) STOP à L1+L_bbox)
 
 > **⚠️ MAJ 2026-07-21 — CE QUI SUIT DANS CETTE SECTION EST EN PARTIE SUPERSEDED.** Le profil interne
 > a depuis été re-mesuré sur le **vrai board 220×300** et toutes les cardinalités décisives sont
@@ -1468,11 +4515,11 @@ Aucune ligne de `_build_multi_hex_vectorized` n'a été modifiée.
 que « le gain de performance ne se fasse pas au détriment du métier et du PvP ». Le chantier (objectif,
 garde-fou d'équivalence stricte, exigences cache/invalidation/tests, non-régression PvP, plan par
 étapes, Definition of Done) est **cadré dans un document dédié** :
-➜ garde-fous/cadrage **[`V11_move_pool_optimization.md`](V11_move_pool_optimization.md)** ; **mesures +
+➜ garde-fous/cadrage **[`V11_move_pool_optimization.md`](Implémenté/V11_move_pool_optimization.md)** (archivé, clos) ; **mesures +
 plan d'implémentation à jour [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)**. Code
 toujours **non commencé** (aucune ligne de `_build_multi_hex_vectorized` modifiée) ; cardinalités
 mesurées, levier tranché (bbox NumPy). ~~Prochaine action : L1 → L_bbox (cf. §8 du doc dédié).~~
-**L1 + L_bbox faits le 2026-07-21** (cf. `V11_move_build_acceleration.md §10`). L1 :
+**L1 + L_bbox faits le 2026-07-21** (cf. `V11_move_build_acceleration.md §3.1`). L1 :
 `precompute_footprint_offsets` mémoïsée. L_bbox : dilatations de `_build_multi_hex_vectorized`
 fenêtrées sur la bbox `start ± (move_range + max|offset|)` du chemin ground (variante (b), pur NumPy ;
 FLY exclu). Garde-fous : oracle + snapshot ovale + **A/B fenêtré==plein-board** (7 cas) + suite
@@ -1485,432 +4532,7 @@ prototypé et jugé insuffisant** : par lignes réfuté (ovale non contigu), par
 <1× petits socles + complexité (sparse-table). **Décision de périmètre en attente utilisateur** : (A)
 numba (gain franc, risque segfault/dépendance) / (B) STOP et lancer le run §0.14 (L1+L_bbox = 1,49×
 acquis) / (C) L2b-colonnes bbox-restreint (NumPy pur, ~3× ovale visé, complexe) — cf.
-`V11_move_build_acceleration.md §10`.
-
-## 0bis. Pièges et leçons de méthode — 📌 SECTION CANONIQUE
-
-> **Éditer les avertissements ICI.** Chacun est reproduit **mot pour mot** depuis son entrée
-> d'origine, dont la référence est donnée. Les occurrences restées dans §0hist en sont des
-> **copies** : elles y documentent le raisonnement local, mais la version qui fait foi est
-> celle de cette section.
->
-> Ces passages existent pour **empêcher de re-diagnostiquer un faux problème**. Aucun ne doit
-> être résumé ni supprimé, même si l'entrée dont il vient est close.
-
-### Ne pas juger une conformité de règle par une reconstruction offline — mesurer sur le vrai chemin in-engine (§0.28, 2026-07-22)
-
-Un soupçon de « tir à travers terrain » (obscuring 13.10) a coûté une **cascade de faux verdicts**
-avant d'être **réfuté** par une mesure in-engine. Les pièges, dans l'ordre où ils ont trompé :
-1. **Scan offline centre→centre** : la LoS légale est **footprint→footprint par-figurine** (06.01, un
-   bord de socle voit ce que le centre ne voit pas). Tester centre→centre sur-flagge en masse. Ce
-   motif est le **même** que celui qui a fait retirer le contrôle LoS de l'analyzer (§0.24 /
-   `project_analyzer_los_verdict`).
-2. **Rejeu headless non fidèle** : `place()` écrivait `unit["col"/"row"]` alors que le moteur lit
-   `units_cache` (`require_unit_position`) → unités restées à `(-1,-1)` → LoS triviale. Puis même
-   corrigé, l'arme/portée/état divergeaient du training. **Un rejeu doit vérifier son propre setup**
-   (assert `require_unit_position == position attendue`) avant de conclure quoi que ce soit.
-3. **Instrumenter le mauvais chemin** : 6 points instrumentés (compute_unit_los, valid_target_pool_build,
-   pool cache-hit, w40k_core log, action_decoder legacy) ont montré **0 hit** — le pipeline squad V11
-   n'emprunte AUCUN. Le vrai gate est `build_squad_action_mask` → `_model_can_shoot_target` →
-   `_attacker_model_can_reach_squad`. **Toujours tracer `env.get_action_mask` d'abord**, ne pas deviner.
-4. **Env var non propagée** : un audit gardé par `W40K_LOS_AUDIT` montrait 0 hit ; en inconditionnel,
-   297. Vérifier qu'une instrumentation gardée **s'exécute vraiment** (heartbeat) avant d'interpréter un 0.
-
-**Règle** : une affirmation de (non-)conformité de règle n'est valide **que** mesurée dans le moteur, sur
-le chemin réellement emprunté, avec un heartbeat qui prouve que la sonde tourne. Une reconstruction
-offline ne prouve rien sur la conformité.
-
-### Sur ce document lui-même (§0.-1, §0.0)
-
-
-**Réserve de méthode — ce qui n'a pas été revérifié (§0.0)**
-
-**⚠️ Réserve de méthode sur ce document.** Les sections §0.x reflètent ce qui a été relu et
-exécuté pendant la session du 2026-07-19 soir. **Le reste du document — T1 à T5, section 9 — n'a
-PAS été revérifié ligne à ligne contre le code.** Trois affirmations périmées y ont été trouvées
-et corrigées ce soir-là (« prochain bloqueur §10.4 » alors qu'il était résolu, « archivage des
-holdouts à faire » alors qu'il l'était, « 9 échecs préexistants » alors que la suite est verte) —
-**il peut en rester d'autres du même genre**. Vérifier dans le code avant de s'appuyer sur une
-affirmation de ce document qui n'est pas datée de la session en cours.
-
-➜ **Cette réserve est désormais une TÂCHE : voir §0.19** (méthode d'audit et historique des
-démentis). Tant qu'elle n'est pas menée, la mise en garde ci-dessus reste pleinement valable.
-
-➜ **Passe menée le 2026-07-20 : voir §0.19.1.** T2/T3/T4/T5 sont verrouillés par mutation-test ;
-**T1 est repassée en ⏳** (R6 site 1 inatteignable au x5, R4 sans aucun test) ; la section 9 n'a
-jamais été marquée ✅ (c'est un plan). La réserve reste valable pour **T1/R4**, dont le
-mutation-test n'a pas pu être mené (`shared_utils.py` sous instrumentation §0.18), et pour §7/§10
-qui n'ont **pas** été audités.
-
-**Comptages de tests : le seul verdict disponible est le code de sortie (§0.-1)**
-
-⚠️ **Chiffre daté du 2026-07-19** — la suite a grossi depuis (+6 tests le 2026-07-20 : 4 en
-§0.10, 2 en §0.13). **Ne pas traiter `1402` comme un compte à retrouver** : le reporter du
-projet n'imprime pas la ligne de résumé de pytest, le seul verdict disponible est le **code de
-sortie** (`exit 0`, vérifié après chaque lot du 2026-07-20).
-
-**La règle de périmètre `ArmageddonAgent` et les 10 fichiers `CoreAgent` verts (§0.-1)**
-
-⚠️ **10 fichiers de tests contiennent encore la chaîne `CoreAgent` et sont VERTS — c'est
-normal.** Audités **un par un** (et non par échantillon — la première vérification avait manqué
-`test_board_ref_resolver.py` ci-dessus en généralisant depuis 3 fichiers de `tests/unit/ai/`
-alors que le seul cas fautif était dans `tests/unit/engine/`) : ce sont des chaînes passées à des
-fonctions **pures** (`_load_bot_eval_params`, `build_agent_model_path`, `_scenario_name_from_file`),
-des stubs (`SimpleNamespace`, `_DummyCfgLoader`, `_Cfg`), des arborescences **synthétiques dans
-`tmp_path`**, ou de simples commentaires. **Aucun n'atteint la vraie config.** Ne pas les
-« corriger » par un `sed` global.
-
-**Leçon de méthode** : « vérifié un par un » sur un échantillon n'est pas une vérification.
-Le seul contre-exemple était dans le répertoire non échantillonné.
-
-### Sur le raisonnement et la preuve
-
-
-**Une piste écrite dans une note « hors périmètre » est une hypothèse, pas un diagnostic (§0.34, 2026-07-28).**
-La note de §0.32 désignait le bon fichier, la bonne fonction et la bonne ligne
-(`erode_move_pool_by_squad_block`, court-circuit mono-figurine) — et **la mauvaise cause**. La vraie
-divergence était en amont : la frontière normal/advance était calculée sur le `MOVE` **brut** quand le
-pool et l'exécution appliquent `MOVE − coût de descente`. Le court-circuit ne faisait que **retirer le
-filet** qui masquait le bug ailleurs : sur les escouades multi-figurines, l'érosion « corrigeait » la
-bande morte en **supprimant silencieusement des Advances légaux**. Deux corollaires :
-1. **Un bug partiellement masqué par un filet se déguise en cas particulier.** « Ça ne touche que les
-   mono-figurines » était vrai pour le *crash* et faux pour le *défaut* : 100 % des escouades
-   descendantes perdaient des coups légaux.
-2. **Corriger là où ça crashe aurait aggravé le défaut** (érosion étendue au mono = crash supprimé,
-   coups légaux perdus partout). Avant de corriger le site du raise, vérifier **quelle grandeur** chaque
-   côté de l'invariant mesure — c'est le motif §0.18/§0.26 pour la troisième fois.
-
-**Vérifier SUR QUEL scénario un chiffre a été mesuré avant de le transformer en blocage (§0.34, 2026-07-28).**
-« 43 occurrences / 650 pas, le training ne peut pas tourner » : les 43 venaient du harnais de bench de
-T-K/T-L, qui tourne sur **`scenario_pvp_test`** — le seul scénario portant une escouade à `level: 1`. Le
-scénario d'ENTRAÎNEMENT mesuré dans les mêmes conditions donne **0**, en x1 comme en x5. Le bug était
-réel et il est corrigé, mais il ne bloquait pas le run §0.14. Un chiffre sans son scénario n'est pas
-une fréquence, c'est une anecdote.
-
-**Prototyper + bencher AVANT d'intégrer un levier perf (§0.22, 2026-07-21) — la mesure prime sur le plan écrit.**
-Le chantier `MOVE_POOL_BUILD` a fait CINQ mesures qui ont chacune démenti une hypothèse « évidente » du
-plan §8, et un prototype hors-prod les a toutes attrapées avant tout code de prod :
-1. Le plan désignait le **BFS** comme reliquat n°1 (« 66 % sur petits socles », profil §2bis). Mesuré :
-   le BFS deque isolé ne coûte que **0,30 ms à move_range=12** (le régime réel du training, lui aussi
-   mesuré, pas supposé). Le profil §2bis englobait autre chose.
-2. Le plan proposait un **wavefront bbox-NumPy** pour le BFS. Prototype prouvé équivalent (reach+dist)
-   mais **plus lent à move 12** (0,46×) ; il ne gagne qu'à move≥30. Réfuté.
-3. Le vrai hotspot mesuré (cProfile) = la **boucle Python sur les offsets** de `_dilate`/`_spread`
-   (gros socles), que le §8 avait déclaré « caduc ». Réhabilité par la mesure.
-4. **L2b par lignes** (décompo runs) : l'empreinte **ovale n'est pas contiguë par ligne** en coords hex
-   → fallback sur le socle qui compte. Réfuté.
-5. **L2b par colonnes** (sparse-table) : équivalent, mais 1,34× ovale seulement / <1× petits socles →
-   gain net ~1,1× pour une vraie complexité. Non intégré.
-**Leçon** : un profil agrégé (« X = 66 % ») ne dit PAS quel code optimiser — il faut mesurer le
-**régime réel** (ici `move_range`, le socle, l'`ez`) et **prototyper le remplacement en A/B équivalent
-+ bench AVANT de toucher la prod**. Le filet de tests (oracle + snapshot + A/B fenêtré==plein-board)
-garantissait qu'aucune régression métier ne pouvait passer ; le bench a garanti qu'aucune complexité
-inutile n'a été livrée. Seuls **L1 + L_bbox** (gain sûr, sans dépendance) ont été retenus ; décision
-**(B) STOP**. Détail complet → `V11_move_build_acceleration.md §10`.
-
-**« Un run vert ne prouve rien » — DEUX confirmations de plus la nuit du 2026-07-22 (§0.25/§0.26).**
-Le motif §0.11/§0.18 s'est répété deux fois en une nuit : (1) le fix move §0.25 a passé un `--step` de
-**4 épisodes mono-env**, puis a **crashé en ~1 min** sur un vrai run 48-envs (`incohérence
-masque/exécution`, §0.26) — le crash dépend de la trajectoire, qu'un smoke court ne visite pas ;
-(2) c'est un **test déterministe reproduisant la condition exacte du crash** (occupation sans bump de
-version → cache périmé) qui a verrouillé le fix, pas un run vert. **Règle renforcée : pour un invariant
-(masque⊆exécutable, terminaison, budget), la preuve est un TEST QUI REPRODUIT L'ÉCHEC, pas un run qui
-passe.** Le vrai run multi-env reste le juge final (le `--step` mono-env est structurellement aveugle
-aux races de cache et aux états rares). Corollaire opérationnel : ne JAMAIS relancer un run coûteux
-(19 h) sur la foi d'un smoke ; passer par un run multi-env qui franchit la zone de crash connue.
-
-**Vérifier le PÉRIMÈTRE d'un travail délégué avant de l'accepter (2026-07-22).** Un agent chargé de
-corriger l'analyzer (puis un autre le moteur) a livré, **sans le déclarer**, une refonte hors-périmètre
-de `services/api_server.py` (**366 lignes**, −265/+104) + un `defaults.agent` dans `config/config.json`
-— non lu par le chemin d'entraînement, non demandé. Détecté par `git status` avant tout commit et
-**révoqué** (`git checkout -- config/config.json services/api_server.py`). **Ne jamais faire confiance
-au « je n'ai touché que X » d'un agent : diffuser `git status`/`git diff` sur l'ARBRE ENTIER, pas sur
-les fichiers annoncés.** Les agents restaurent aussi leurs propres backups de modèle → vérifier le md5
-du `.zip` canonique (il n'a PAS à changer hors run `--new` voulu).
-
-**Mesurer/lire AVANT d'affirmer une root cause (2026-07-22).** Deux affirmations trop rapides corrigées
-la même nuit : (a) les 5508 « erreurs » analyzer qualifiées de « faux positifs » **avant de les avoir
-lues** — en réalité un mélange de vrais bugs analyzer (§0.24) ET d'un vrai bug moteur (§0.25) ; (b) le
-crash §0.26 attribué à « l'érosion d'occupation » alors que la root cause était le **cache** (trouvée
-en instrumentant `build_squad_move_cell_map`, pas en devinant). **Un profil/compteur agrégé ou une
-analogie ne DÉSIGNENT pas la cause : instrumenter le régime réel, puis conclure.** (Même leçon que la
-perf §0.22 ci-dessus, re-vérifiée côté correction de bug.)
-
-**Fiabiliser l'INSTRUMENT avant de l'utiliser comme juge (2026-07-22, §0.23/§0.24).** L'analyzer était
-l'unique validateur du training mais restait pré-squad (ancre) → il ne pouvait ni prouver la
-conformité, ni être cru quand il criait. Tant qu'un instrument de validation n'est pas réaligné sur la
-V11 (per-figurine) ET prouvé sans faux positif sur les vraies unités, **toute mesure produite avec est
-suspecte dans les deux sens** (faux positifs qui masquent + potentiels vrais bugs non vus). Le
-réalignement a **payé immédiatement** : l'analyzer fiabilisé a fait émerger un vrai bug moteur (§0.25)
-invisible jusque-là.
-
-**Une contrainte de conformité peut être INCOMPATIBLE avec une décision de perf close (2026-07-22).**
-§0.22 a été clos « STOP » pour ne pas payer le BFS par-socle. Mais la conformité move (§0.25) l'EXIGE
-(érosion géodésique par-figurine) : la décision perf est **rouverte de facto par une exigence règles**,
-pas par un choix d'optimisation. Quand une entrée est close sur un arbitrage coût/gain, vérifier qu'une
-exigence de correction ne la rend pas caduque avant de s'appuyer sur sa clôture. Conséquence vive :
-§0.27 (éval trop lente).
-
-**Une invariance est CONDITIONNELLE à son état initial (§0.1)**
-
-**⚠️ Corollaire — une affirmation de ce document était fausse.** L'ancien §0 affirmait que
-`require_coherency` est « invariante par translation cube, donc déjà garantie par le pool
-d'ancre ». L'invariance est réelle mais **conditionnelle** : elle prouve *si l'origine est
-cohérente, le plan l'est*. Elle ne prouve **rien** quand l'origine est déjà incohérente — et dans
-ce cas le pool entier est offert alors que rien n'est exécutable. C'est cette demi-vérité qui a
-laissé le trou ouvert après T6-g. **Toute contrainte « prouvée invariante » doit être relue en se
-demandant : invariante à partir de quel état initial ?**
-
-**Vérifier qu'un point d'ancrage est APPELÉ avant d'y brancher quoi que ce soit (§0.1)**
-
-⚠️ **Piège rencontré, à ne pas refaire** : le premier branchement a été posé en tête de
-`_advance_to_next_player`, qui *semble* être la frontière de tour mais est **du code mort**
-(cf. §0.4). Le run de vérification a reproduit le crash à l'identique. **Vérifier qu'un point
-d'ancrage est appelé AVANT d'y brancher quoi que ce soit.**
-
-**Motif récurrent : du code correct, testé, et jamais appelé (§0.4)**
-
-> **Motif récurrent à surveiller dans ce projet** — six occurrences vérifiées à ce jour.
-> **Cinq de type « jamais appelé »** : `update_frozen_model` (§10.4),
-> `end_of_turn_coherency_removal` (§0.1), `_advance_to_next_player` (§0.4),
-> `game_replay_logger` (§0.8, 795 lignes + 8 tests), `log_unified_action` (§0.8). Du code
-> correct, testé, et jamais appelé. **Devant toute fonction sur laquelle repose un
-> raisonnement, vérifier d'abord qu'elle a un appelant.**
->
-> **Une de type « jamais exercé »** (§0.11) : `test_move_mask_is_executable.py` est appelé, vert,
-> et mesure le bon invariant sur le bon scénario — mais par exploration aléatoire, donc il ne
-> visite jamais la configuration qui cassait. **Un test vert ne couvre que les états qu'il
-> atteint ; sa docstring peut affirmer le contraire de bonne foi.**
-
-**Un test qui explore au hasard ne prouve rien sur ce qu'il n'atteint pas (§0.11)**
-
-🔴 **Pourquoi `test_move_mask_is_executable.py` n'a rien vu** — c'est le point le plus important
-de cette entrée. Ce fichier mesure **cet invariant exact**, sur **ce scénario exact**, et il est
-vert. Il ne vérifie l'invariant que sur les états atteints par **exploration aléatoire** (3 seeds,
-400 steps) : la superposition inter-étages n'y survient jamais. Sa docstring affirme pourtant
-combler précisément ce trou (« Ce test remplace ce raisonnement par une mesure »).
-
-> **Quatrième variante du motif §0.4, et la plus sournoise.** Les trois premières étaient du code
-> *jamais appelé*. Celle-ci est du code appelé, par un test vert, qui **n'exerce jamais le cas**.
-> Un test qui explore au hasard ne prouve rien sur les configurations qu'il n'atteint pas — et sa
-> docstring peut affirmer le contraire en toute bonne foi. **Devant un test de type « je déroule
-> des parties et je vérifie un invariant », toujours se demander quelles configurations il ne
-> visite jamais, et les construire explicitement.**
-
-**Ne pas conclure à un biais de tirage sur quelques dizaines d'observations (§0.10)**
-
-Mesuré sur **400 resets** : Ork/Ork 102 (25,5 %), Ork/SM 107 (26,8 %), SM/SM 104 (26,0 %),
-SM/Ork 87 (21,8 %) — **les 4 matchups, équiprobables** (χ² = 2,38 pour un seuil de 7,81 à 3 ddl :
-aucun biais détectable). Un premier tir de 40 resets donnait 15/13/9/**3** et laissait craindre un
-biais : c'était du **bruit d'échantillonnage**, pas un bug. Leçon : ne pas conclure à un biais de
-tirage sur quelques dizaines d'observations — refaire la mesure en grand avant de diagnostiquer.
-
-> **Bandeau de fiabilité du recensement d'ancre** — il vit en **§1bis, « Dette d'ancre restante »**
-> et n'a pas été déplacé : seuls 4 sites y ont été relus à la main, le reste est un faisceau
-> d'indices. **Ne pas ouvrir de chantier depuis une ligne non marquée ✅ sans avoir lu la
-> fonction.** Le lire avant d'exploiter ce recensement.
-
-### Sur les runs et l'outillage
-
-
-**Un run qui passe ne prouve pas une non-régression sur un crash stochastique (§0.18)**
-
-🔴 **Erreur commise le 2026-07-20, à ne pas refaire.** Un run de 500 épisodes a franchi
-l'épisode ~250 sans le crash `collision intra-plan`, et on en a conclu — **par écrit, dans ce
-document** — que la non-régression §0.11 était « validée en bout-en-bout ». Un **second run,
-même commande**, a crashé à l'épisode ~280. Le crash dépend de la **trajectoire**, donc du
-hasard : un run vert est un **échantillon de taille 1**, pas une preuve.
-
-Règle : pour un crash dont le déclenchement dépend de la trajectoire, une non-régression se
-prouve par un **test qui reproduit la condition**, ou à défaut par **plusieurs runs**, jamais
-par un seul run vert. Et **tout changement de code qui touche l'observation ou le reward change
-les trajectoires** — un run vert d'avant le changement ne dit rien du code d'après.
-
-**L'ETA affichée au premier épisode est un artefact de warmup (§0.13)**
-
-⚠️ **Piège de perf, à ne pas re-diagnostiquer** : l'ETA affichée au 1ᵉʳ épisode (~16 h 45 sur le
-run de 1000) est un **artefact de warmup** ; elle retombe à sa vraie valeur dès le 10ᵉ épisode.
-Ne jamais extrapoler une durée de run depuis les premiers épisodes.
-
-**Ce que `x5_debug` ne produit PAS, et pourquoi il ne se lance pas seul (§0.10)**
-
-**Piège de lancement, préexistant** : `--training-config x5_debug` **seul** échoue pour cet agent
-(`No scenario file found … scenario_x5_debug.json`). ArmageddonAgent n'a que
-`scenario_training_armageddon.json`, donc `--scenario <chemin explicite>` est **obligatoire** :
-```
-python3 ai/train.py --agent ArmageddonAgent --training-config x5_debug \
-  --scenario config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json \
-  --new --resolution 5
-```
-⚠️ `x5_debug` = **1000 épisodes** (~2h50 à 8 envs), pas un run de quelques minutes malgré son nom.
-
-⚠️ **Ce que `x5_debug` ne produit PAS**, à cause de ses `callback_params` :
-`save_best_min_episodes = 10000` et `checkpoint_save_freq = 10000` sont **supérieurs** à ses
-1000 épisodes → **ni « best model » ni checkpoint** ne sont jamais écrits. `model_gating_enabled`
-est `False` (le `Gate 🧱` de la barre de progression est purement décoratif) et `bot_eval_final`
-vaut **1** épisode par bot — contre 60 pour le run de §0.7. C'est un run de **validation de
-pipeline**, pas de mesure : il ne peut pas servir le critère §10.6.
-
-**Tout run `x5_debug` ÉCRASE le modèle canonique (§0.0)**
-
-- ⚠️ **Le modèle en place a été ÉCRASÉ par ce run** (`model_ArmageddonAgent.zip`, 2026-07-20
-  02:14 — autorisation utilisateur explicite). C'est donc un modèle **de debug, 100 épisodes
-  `--new`**, sans valeur de jeu : `save_best_robust: false` fait que
-  [train.py:3548](../../ai/train.py#L3548) écrit le modèle final **inconditionnellement** en fin
-  de run. Le modèle précédent (19/07 04:25, entraîné AVANT les `VALUE` Munitorum, avec la
-  `WarTrakk` à 175) reste disponible dans
-  `ai/models/_backup_pre_munitorum_20260719_232816/` — **vérifié intact après le run**.
-  ⚠️ Tout run `x5_debug` ultérieur écrasera à nouveau le modèle canonique : sauvegarder avant
-  si le modèle en place compte.
-
-**`config/users.db` réapparaît modifié après chaque run (§0.0, dette 5)**
-
-⚠️ `config/users.db` **réapparaît modifié** après chaque run d'entraînement — fichier
-**protégé** (CLAUDE.md), ne JAMAIS l'inclure dans un commit.
-
-**`bot_eval_scenario_pool` placé au mauvais niveau est silencieusement ignoré (§0.13)**
-
-⚠️ **Piège latent voisin, découvert au passage.** Dans
-`ArmageddonAgent_training_config.json`, `bot_eval_scenario_pool` est placé à la **racine** de
-`x5_debug`, alors que `_resolve_callback_value` ([train.py:3273](../../ai/train.py#L3273)) le
-cherche dans **`callback_params`** puis retombe sur `config/agents/_training_common.json`.
-La clé racine est donc **ignorée**. Sans effet aujourd'hui (les deux valent `holdout`), mais
-toute surcharge par agent placée à la racine serait **silencieusement sans effet**.
-
-**`agent_roster_seed` neutralise le tirage de roster sans le moindre message (§0.10)**
-
-⚠️ **Piège latent voisin — `agent_roster_seed`.** Cette clé de scénario est passée en
-`random_seed` au tirage du roster AGENT ([game_state.py:1056](../../engine/game_state.py#L1056)),
-et le RNG est reconstruit à chaque appel (`random.Random(seed)`,
-[:1142](../../engine/game_state.py#L1142)). Si elle est renseignée, **le roster agent devient
-identique à tous les épisodes** — le tirage est neutralisé sans le moindre message. Voulu pour les
-scénarios holdout `bot-01..04` (qui la portent, pour la reproductibilité), mais ce serait un piège
-silencieux dans un scénario d'entraînement. `scenario_training_armageddon.json` ne la porte pas
-(`None`) : vérifié. **À contrôler avant de conclure quoi que ce soit sur une distribution de
-matchups.**
-
-**Une suite de tests est une mesure GLOBALE, donc un verrou GLOBAL (§0.19.1, 2026-07-20)**
-
-🔴 **Trois mesures de suite invalidées le même jour, par trois écrivains différents.** Le partage
-du dépôt « par fichier » ne protège **rien** : deux agents peuvent éditer des fichiers disjoints
-sans conflit, mais ils **ne peuvent pas mesurer en parallèle**, parce qu'une suite lit tout
-l'arbre.
-
-| # | Écrivain pendant la mesure | Conséquence |
-|---|---|---|
-| 1 | **moi-même** : baseline lancée pendant que je mutais 5 fichiers | tuée, non exploitée |
-| 2 | **la chasse §0.18** : `shared_utils.py` à 20:14:31 et son test à 20:13:58 pendant une suite de 20:05→20:45 | un `EXIT=1` pris à tort pour un « rouge attendu permanent » |
-| 3 | **l'agent concurrent** : `shared_utils.py` à 21:20:33 pendant une suite de 21:17:37→21:22:54 | un `EXIT=0` non exploitable |
-
-**Règle.** Avant de conclure d'un résultat de suite, **relever le `mtime` des fichiers de
-`engine/` avant ET après le run** ; tout fichier écrit dans la fenêtre invalide la mesure.
-Une consigne « ne modifie pas tel fichier » donnée à un agent **ne suffit pas** si l'autre côté
-y écrit : il faut soit interdire les suites complètes, soit geler les écritures pendant la
-mesure. ⚠️ Corollaire : `EXIT=0` **et** `EXIT=1` sont également suspects — le n°2 a produit un
-faux rouge, le n°3 un vert non fiable. Ne pas ne se méfier que des rouges.
-
-⚠️ **Ne JAMAIS restaurer par `git checkout` un fichier portant du travail non commité d'un
-autre agent** (`shared_utils.py`, `w40k_core.py` au 2026-07-20) : la restauration détruirait ses
-modifications. Pour un mutation-test sur ces fichiers, sauvegarder par `cp` et restaurer par `cp`.
-
-### Sur les données et les sources officielles
-
-
-**🔒 Règle métier : `VALUE` suit le Munitorum, ce n'est pas une variable de tuning (§0.9)**
-
-🔒 **RÈGLE MÉTIER (utilisateur, 2026-07-20) — NON NÉGOCIABLE.** `VALUE` **suit les documents
-officiels**. Ce n'est pas une variable de tuning. `VALUE` est pourtant consommé **par figurine**
-(pondération de menace [reward_calculator.py:1442](../../engine/reward_calculator.py#L1442),
-différentiel d'armée [observation_builder.py:367](../../engine/observation_builder.py#L367)) : cet
-effet sur l'apprentissage est une **conséquence à assumer**, jamais un motif pour s'écarter du
-Munitorum. **Ne pas « rééquilibrer » ces valeurs pour améliorer un résultat d'entraînement.**
-
-**Les PDF Munitorum ne sont pas extractibles en texte (§0.9)**
-
-⚠️ **Le texte de ces PDF n'est pas extractible** (contenu en image : `extract_text()` ne rend que
-les en-têtes). Il faut les **rendre en PNG** (`fitz`/pymupdf, dpi≥140) et les lire visuellement.
-Ne pas conclure « le PDF est vide ».
-
-**Deux pièges de lecture des sources : Grot Orderly, contradiction Gretchin (§0.9)**
-
-**Deux pièges de lecture des sources, à ne pas re-trébucher dessus :**
-1. **Le Grot Infirmier n'est pas une figurine de jeu.** Datasheet Painboy : `UNIT COMPOSITION :
-   1 Painboy`, `equipped with : … 1 Grot Orderly` → c'est de l'**équipement**. D'où 38 figurines
-   physiques dans la boîte mais **37 modèles de jeu**. Le roster n'a rien qui manque.
-2. **Contradiction entre deux sources officielles sur les Gretchin** : le Munitorum cote
-   `11 models … 45 pts`, la datasheet dit `UNIT COMPOSITION : 10 Gretchin`. La boîte en a 10.
-   Retenu : 10 modèles à 45 pts. Non tranchable depuis les documents — signalé, pas masqué.
-
-**Limite x10 et point non tranché du fix de collision (§0.11)**
-
-**Non tranché** : je n'ai pas l'état exact au moment du crash. Il est prouvé que le prédicat est
-aveugle au niveau et qu'il produit ce message sur une configuration légale ; il n'est **pas**
-prouvé que les deux figurines de l'escouade 3 étaient à des étages différents plutôt que dans un
-état déjà illégal. Si un crash de cette classe réapparaît, dumper l'état avant de conclure.
-
-**Limite connue, HORS PÉRIMÈTRE (décision utilisateur, 2026-07-20) : le cas x10.** Le contrôle
-compare les **sous-hex d'ancre**. Sur Board ×10 les figurines ont une **empreinte multi-hex**
-(`compute_candidate_footprint` — « Multi-hex footprints are only computed on Board ×10 ») : deux
-socles peuvent donc s'y chevaucher **sans partager leur ancre**, et la même classe d'incohérence
-masque/exécution reste ouverte à cette résolution. Sur x5 (résolution du training) l'empreinte
-vaut le sous-hex, le contrôle est **exact**. Limite préexistante, non introduite par le correctif.
-⚠️ Ne pas lire « l'invariant est rétabli » comme valant pour toutes les résolutions : il vaut
-pour x1 et x5. **On ne s'occupe pas de x10** — si le projet y vient un jour, rouvrir ce point
-AVANT d'y lancer un entraînement.
-
-### Affirmations périmées repérées le 2026-07-20 — **signalées, NON corrigées**
-
-> Relevées pendant la réorganisation de §0. Aucune n'a été « nettoyée » : les corriger sans
-> relire le code reproduirait exactement l'erreur qu'elles illustrent. **Vérifier avant de
-> s'appuyer sur l'une d'elles.** C'est le motif récurrent n°1 de ce document — au moins
-> 5 avaient déjà été trouvées lors des sessions précédentes.
-
-| # | Où | Affirmation | Pourquoi elle est suspecte |
-|---|---|---|---|
-| 1 | §0.-1 | « la suite est VERTE : `1402 passed, 2 skipped` » | Son propre ⚠️ la déclare datée. Le document porte aussi `1407`, `1440`, `1451`, `1396`, `1398` selon l'endroit. Seul verdict fiable : le code de sortie. |
-| 2 | §5 / tableau T6-i | « ❌ test de non-régression **NON écrit** » | `tests/unit/engine/test_end_of_turn_coherency_03_03.py` **existe sur le disque** (vérifié le 2026-07-20) et §0.0 le déclare livré. |
-| 3 | §5 / tableau T6 | « le critère T6 est désormais bloqué par `CC_DMG` (§0.3) qui plante des épisodes d'évaluation » | Le portage §0.3 est fait et le run 60/60 de §0.7 le valide runtime. |
-| 4 | §10.5 (bandeau) | « ⚠️ Non validé runtime — cf. §0.3 (`CC_DMG`) » | Levé par §0.7 (`TacticalBot` 10/10 épisodes). |
-| 5 | §0.10 | « la dette notée en **§0.0** (`--scenario bot` échoue en amont du moteur) » | Cette dette est écrite dans **§0.7**, pas §0.0. Renvoi imprécis, non corrigé. |
-| 6 | §0.12, étape 4 | « **9 tests** liés à `roster_pool_schedule` échouent indépendamment de ce travail » | ✅ **TRANCHÉ le 2026-07-20 — l'affirmation était FAUSSE.** Suite complète lancée : **1417 passed, 2 skipped, 0 failed**. Aucun échec `roster_pool_schedule`. §0.-1 avait raison : un test rouge est une régression, il n'y a pas d'échec préexistant à tolérer. |
-| 7 | §2 « État des lieux vérifié » | « Tous les imports du pipeline passent (`ai.train`, `ai.env_wrappers`, **`ai.multi_agent_trainer`**, …) » | `ai/multi_agent_trainer.py` **n'existe plus** (supprimé en §0.8, vérifié absent du disque le 2026-07-20). |
-| 8 | §0.17 (par construction) | l'état de commit | Périmé dès le prochain `git commit` — l'entrée porte elle-même l'ordre de la reconfronter à `git status`. |
-| 10 | §0.18, note annexe | « après ce crash le process … s'est terminé avec un **code de sortie 0** » | ❌ **FAUSSE, tranchée le 2026-07-20 — voir §0.20.** Le handler `return 1`, `sys.exit` propage, et l'exécution confirme `EXIT=1`. Cause probable : un pipe (`| tee`) côté shell lors de la mesure. Enseignement : une note **« hors périmètre »** échappe à la relecture *parce qu'*elle est marquée annexe. |
-| 11-13 | §6 (T2, T4), §8.2 | layout d'actions « 41 », « 61 scénarios », `test_agent_interface_contract.py` | ➜ **détaillées en §0.19.1** (audit du 2026-07-20). Signalées, NON corrigées. |
-| 9 | §0.14 (rédigée puis **corrigée le même jour**) | « Non-régression §0.11 ✅ **VALIDÉE EN BOUT-EN-BOUT** » | ❌ **FAUSSE, retirée le 2026-07-20** — cf. §0.18 : le run suivant a crashé sur ce même message. Cas d'école : l'affirmation a été produite **par l'auteur du run lui-même**, le jour même, à partir d'un unique run vert. Le motif n°1 de ce document ne vient pas que du passé. |
-
----
-
-## 0ter. Notes post-implémentation — décisions assumées, non-travaux
-
-> Choses **tranchées et closes** qui ne sont ni des bugs ni des dettes : des décisions de
-> périmètre que l'utilisateur assume. À ne pas rouvrir comme des réserves.
-
-- **§0.16(b) — `DefensiveSmartBot` reste hors éval (status quo, 2026-07-21).** Retiré à l'origine
-  parce qu'il **sous-performait**. Conséquence acceptée : son unique appelant
-  `_best_target_slot_by_threat` (7ᵉ site porté) n'est validé que par un **test unitaire**, jamais
-  en éval runtime. Le réintroduire pour la seule couverture fausserait la composition d'éval
-  (`combined`, poids) sans bénéfice. **Ne pas re-signaler comme un trou de couverture.**
-- **§0.16(c) — clé `holdout_hard_opponent_budget_modifier` + `build_holdout_benchmark.py` gardés
-  (2026-07-21).** Non consommés par le training actuel (2 rosters fixes, §10.2), mais **conservés
-  volontairement** : un holdout à armées **générées** est prévu **après la démo**. La clé est en
-  attente d'usage, pas morte. **Ne pas supprimer ni la clé ni le script.**
-
----
-
-## 0hist. Historique résolu
-
-> Entrées closes, **conservées intégralement** : mesures, sorties de run copiées, tableaux de
-> sites audités, diagnostics d'origine et attributions erronées assumées. Rien n'y est résumé.
-> Les titres et ancres `### 0.x` sont **inchangés** : tous les renvois `§0.x` du reste du
-> document restent valides.
->
-> Les entrées **scindées** (§0.0, §0.5, §0.6, §0.7, §0.13) portent un renvoi `➜` à l'endroit
-> exact d'où leur part ouverte a été déplacée.
->
-> ⚠️ Ces entrées décrivent l'état **au moment où elles ont été écrites**. Plusieurs contiennent
-> des affirmations que leurs propres auteurs ont ensuite corrigées sur place. Ne pas s'appuyer
-> sur l'une d'elles sans la confronter au code.
+`V11_move_build_acceleration.md §3`.
 
 
 ### 0.23 Logger per-figurine `[MODELS:]` + fix `PNone` — ✅ CLOS (2026-07-22)
@@ -2714,7 +5336,6 @@ réparation n'est pas « les restaurer » mais recréer 2 rosters (SM, Orks) —
   utilisateur : `terrain-train-01/02/03` obsolètes). mc1 porte 8 étages ; l'observation les voit
   via le canal 5 `GRID_CH_LEVEL`. ⚠️ `scripts/migrate_scenario_bank_v11.py` cycle encore sur les
   3 terrains plats — le RELANCER repointerait la banque et casserait le test de banque.
-- `config/tutorial/scenario_etape*.json` ne se charge plus (`wall_ref` legacy sans `board_ref`).
 
 
 ### 0.8 `game_replay_logger` — SUPPRIMÉ, pas porté (2026-07-19 soir)
@@ -3915,2537 +6536,3 @@ tombe.
 **Ce qui EST mesuré de façon fiable**, parce que cela ne dépend que de fichiers qu'aucun autre
 agent ne touche : les mutation-tests par tranche du tableau ci-dessus, et la contre-épreuve de
 §0.19.2 sur `fight_handlers.py`. Le test de pile-in passe **3 fois sur 3** en isolé.
-
-## 1. Objectif
-
-Rétablir un entraînement fonctionnel de `CoreAgent` (`python3 ai/train.py --agent CoreAgent
---scenario bot ...`) sur le moteur actuel (board 44x60x5, niveaux, per-model, fight V11,
-allocation des pertes par-figurine), en trois phases :
-
-- **Phase A (obligatoire)** : remise en route — le pipeline tourne de bout en bout sans erreur,
-  à interface agent constante (action 41 / obs 108).
-- **Phase A' (obligatoire, décision utilisateur 2026-07-14)** : entraîner l'agent sur TOUTES les
-  règles implémentées — (P1) porter dans le chemin vif les règles restées dans le code mort puis
-  supprimer le code mort, (P2-P3) donner à l'agent chaque décision que les règles laissent au
-  joueur (mécanisme générique de décision), (P4-P5) observation de support + validation par
-  tranche. Périmètre strict : règles DÉJÀ implémentées — aucune feature absente du moteur.
-  Détail en section 9.
-- **Phase B (obligatoire)** : mise à niveau de l'observation — l'agent perçoit les niveaux
-  (élévation) et les coûts associés.
-- **Phase C (optionnelle, hors scope initial)** : nouveaux points de décision au-delà de la
-  Phase A' (ex. montée d'étage). À ne PAS entamer sans validation utilisateur.
-
-**Interdits absolus** (CLAUDE.md) : aucun fallback/workaround/valeur par défaut pour masquer une
-erreur ; ne jamais modifier `config/users.db` ni `ai/models/**/*.zip` ; les règles de jeu se
-vérifient dans `Documentation/40k_rules/` avant toute décision règles.
-
-## 1bis. L'ANCRE — concept central, source commune des ruptures V11
-
-> Rédigé le 2026-07-20 après que le plan T7 se soit révélé faux faute d'avoir ce concept écrit
-> quelque part. **À lire avant de toucher à toute validation de position.**
-
-### Définition
-
-Une unité 40K est un **ensemble de figurines**, chacune sur son propre hex. Mais l'agent doit
-produire une **action discrète** (« déploie l'unité 3 ici ») : il ne peut pas émettre N
-coordonnées. L'**ancre** est le point unique qui représente l'unité entière dans les interfaces
-qui ne savent manipuler qu'UNE position — l'espace d'action, et le code moteur legacy écrit
-quand une unité *était* une seule figurine.
-
-Deux structures parallèles coexistent, et tout se joue là :
-
-| Structure | Contenu | Statut |
-|---|---|---|
-| `models_cache` | position de **chaque figurine** (`col`, `row`, `level`) | la **vérité** |
-| `units_cache` | **une** position par unité | l'ancre, un **résumé** |
-
-L'ancre **n'est pas un objet physique**. C'est la position de la **figurine vivante d'index
-minimal** ([shared_utils.py:3061](../../engine/phase_handlers/shared_utils.py#L3061) :
-« n'update `units_cache` que si la figurine est l'ancre courante (index minimum vivant) »).
-Ce n'est ni le centre, ni le barycentre de l'unité : un simple délégué désigné par convention.
-**Corollaire à ne pas oublier : quand la figurine d'index minimal meurt, l'ancre SAUTE** sur la
-suivante — la position « de l'unité » change sans qu'aucune figurine n'ait bougé.
-
-### Trois usages, de natures différentes
-
-1. **Désigner** — l'agent choisit un hex : c'est l'ancre visée. ✅ légitime.
-2. **Translater** — `build_rigid_plan` calcule un delta entre ancre de départ et ancre
-   d'arrivée, puis l'applique à TOUTES les figurines. ✅ légitime *si* le delta est réellement
-   rigide (ce qui était faux avant T6-h, cf. parité de `dx`).
-3. **Résumer pour valider** — les fonctions legacy (`compute_candidate_footprint(col, row,
-   unit, …)`) prennent l'ancre + le `BASE_SIZE` de l'**unité** et testent *un socle* à cet
-   endroit. 🔴 **C'est un mensonge** : elles testent un objet qui n'existe pas.
-
-### Le motif de bug unique
-
-**Quelque chose est VALIDÉ sur l'ancre, puis EXÉCUTÉ sur les figurines** — et les deux divergent.
-D'où le message récurrent `incohérence masque/exécution`. Toutes les ruptures traitées en V11
-sont des variantes du même mensonge :
-
-| Tranche | Variante |
-|---|---|
-| **T6-f** | le commit n'écrivait QUE l'ancre → figurines restées à `(-1,-1)` |
-| **T6-g** | le pool BFS validait l'ancre → le bloc translaté débordait |
-| **T6-h** | la translation « rigide » déformait le bloc selon la parité de `dx` |
-| **§0.11** | la collision intra-plan ignorait le **niveau**, autre attribut d'identité écrasé par le résumé |
-| **T7** | le contrôle mono-ancre de `deploy_unit` teste ce socle fantôme |
-
-### ⚠️ Le piège : « ancre » désigne TROIS contrats différents
-
-Le mot est le même partout, le contrat non — et c'est précisément ce qui a fait écrire un plan
-T7 faux :
-
-| Chemin | Ce que « ancre » veut dire |
-|---|---|
-| `units_cache` | position de la figurine d'index minimal (dérivée, elle SAUTE aux pertes) |
-| action de l'agent | point de **désignation** (contraignant : ce qui est désigné doit être exécuté) |
-| **déploiement** | **simple suggestion** : `generate_compact_formation` part de l'ancre en spirale BFS et retient la 1ʳᵉ case légale — l'ancre **oriente**, elle ne **contraint pas**. Une ancre hors zone place l'unité 22 colonnes plus loin au lieu d'échouer (mesuré, cf. T7). |
-
-**Avant d'écrire ou de supprimer une validation de position, déterminer LEQUEL des trois contrats
-s'applique sur ce chemin.** Ne jamais supposer que « le contrôle par-figurine valide déjà
-l'ancre » : au déploiement, c'est faux.
-
-### Dette d'ancre restante — recensement du 2026-07-20
-
-> Balayage de `engine/` + `ai/`. Les sites marqués ✅ *vérifié* ont été relus directement ; les
-> autres viennent du balayage et **restent à confirmer par lecture avant toute action**.
->
-> 🔴 **Statut de fiabilité de ce recensement — à lire avant de s'en servir.** Il est issu d'un
-> balayage automatique dont **seuls 4 sites ont été relus à la main** (le pool de move, les 2
-> sites objectif, la ventilation LoS). Le reste est un **faisceau d'indices, pas un audit**.
-> Un premier essai d'exploitation a déjà produit une conclusion fausse : « la charge n'a pas
-> d'équivalent de l'érosion T6-g » a été écrit ici sur la seule absence de fonction `erode_*`,
-> alors qu'une machinerie per-model existe ailleurs dans le même fichier (cf. la ligne charge
-> ci-dessous). **Ne pas ouvrir de chantier depuis une ligne non marquée ✅ sans avoir lu la
-> fonction.** C'est la même erreur de méthode que §0.11 (« vérifié un par un » sur un
-> échantillon n'est pas une vérification) et que le plan T7 (conclusion tirée sans lire les
-> deux avertissements présents dans le code).
-
-**Le levier unique** : `compute_candidate_footprint(col, row, unit, game_state)`
-([shared_utils.py:416](../../engine/phase_handlers/shared_utils.py#L416)) ne calcule **qu'UNE
-base** (le `BASE_SHAPE`/`BASE_SIZE` de l'unité) centrée sur `(col,row)`. Passée une unité
-multi-figurines, elle rend l'empreinte d'**une figurine à l'ancre**, jamais celle de l'escouade.
-C'est la source commune des gravités 1-2 ci-dessous.
-
-**G1 — pool/masque construit à l'ancre, commit exécuté par figurine**
-
-| Site | Décision prise sur l'ancre |
-|---|---|
-| `movement_build_valid_destinations_pool` (movement:2266, 2870) | ✅ *vérifié* : le pool ne valide QUE l'ancre — [shared_utils.py:7668](../../engine/phase_handlers/shared_utils.py#L7668) l'écrit. ⚠️ **Le chemin du MASQUE GYM est couvert** : `erode_move_pool_by_squad_block` (T6-g) est appliquée juste après, en [:7671](../../engine/phase_handlers/shared_utils.py#L7671). **Les autres consommateurs n'érodent PAS** — `pve_controller.py:468`, `movement_handlers.py:813/846`, `shooting_handlers.py:5128`, `action_decoder.py:720`, `w40k_core.py:2682`. À auditer : le PvP tombe-t-il dans le même mismatch, ou son preview le rattrape-t-il ? |
-| `charge_build_valid_destinations_pool` ([charge:3472](../../engine/phase_handlers/charge_handlers.py#L3472), 166) | Portée de charge 2d6 + légalité d'arrivée mesurées depuis l'ancre, empreinte mono-base ; commit per-model. **Le code admet la dette** : charge_handlers.py:267. ⚠️ **STATUT NON ÉTABLI — ne pas partir de cette ligne pour ouvrir un chantier.** Il n'existe aucune fonction `erode_*` dans `charge_handlers.py`, MAIS la charge possède une machinerie **par figurine** ailleurs : [`_compute_plan_context`](../../engine/phase_handlers/charge_handlers.py#L1955) calcule un champ de portée per-model (`_euclidean_reach(m, sib, …)`, avec le `BASE_SHAPE`/`BASE_SIZE` **de chaque figurine**). **Question ouverte, à trancher par lecture de `charge_build_valid_destinations_pool` :** ce contexte per-model réconcilie-t-il le pool d'ancre, ou les deux coexistent-ils sans se parler ? Tant que ce n'est pas lu, « la charge a le même trou que le move » est une **hypothèse, pas un constat**. |
-| `charge_target_selection_handler` (charge:4360) | `charge_reference_hex` = ancre → décide quelles cibles sont engagées. |
-
-**G2 — éligibilité de phase décidée sur l'ancre**
-
-| Site | Décision |
-|---|---|
-| `get_eligible_units` (movement:544, 573, 599) | « L'unité peut-elle bouger ? » = existe-t-il un voisin de **l'ancre** où une base tient. Une escouade dont l'ancre est bloquée mais dont d'autres figurines peuvent bouger est déclarée inéligible — et l'inverse. |
-| pile-in / consolidation (fight:545, 726, 893, 1116, 1203, 1372, 1731) | BFS et distances mesurés sur une base à l'ancre, alors que le pile-in 12.03 et la consolidation 12.08 sont **par figurine** (cf. `project_pile_in_par_figurine`). |
-| `action_decoder.py:1218` | Case décodée validée sur une empreinte mono-base avant exécution per-model. |
-
-**G3 — règles satellites d'objectif sur position unique** (✅ *les deux vérifiés*)
-
-| Site | Décision |
-|---|---|
-| [shooting_handlers.py:6127](../../engine/phase_handlers/shooting_handlers.py#L6127) | Règle `reroll_towound_target_on_objective` : « la cible est-elle sur un objectif ? » testée sur `target["col"]/["row"]` = **l'ancre**. Une escouade dont seule une figurine non-ancre tient l'objectif est ratée. ⚠️ Utilise en plus `target.get("col", -1)` — **valeur par défaut masquant une absence**, interdite par CLAUDE.md. |
-| [fight_handlers.py:165](../../engine/phase_handlers/fight_handlers.py#L165) `_is_unit_on_objective` | Même bug côté mêlée (`require_unit_position` = ancre). |
-
-✅ **Le vrai Objective Control est SAIN** : `_sum_objective_control_oc`
-([game_state.py:1863](../../engine/game_state.py#L1863)) compte bien OC × figurines dans la zone
-(14.02). Ce sont les règles *satellites* qui n'ont pas suivi.
-
-**G4 — heuristiques IA à l'ancre** (aucun impact règles, biais de politique seulement) :
-`_select_strategic_destination` (movement:3923+, charge:4169), `observation_builder.py:1043/2332`
-(« Anchor-based distance (approx, sufficient for RL obs) »), `analyzer.py:603`. Assumé et
-auto-documenté, sauf charge:4169 qui n'a **pas** de justification écrite.
-
-**Ce qui est SAIN et ne doit pas être touché** : la **LoS** est entièrement par-figurine
-(`_compute_unit_los_uncached`, `_unit_can_see_any`, couvert 13.08 — itèrent sur `models_cache`) ;
-les **portées de tir/mêlée** passent par `occupied_hexes` (union per-model) avec l'ancre en simple
-repli ; `units_cache[sid]["occupied_hexes"]` **est** l'union par-figurine
-([shared_utils.py:2897](../../engine/phase_handlers/shared_utils.py#L2897)) ; les logs et la sync
-d'ancre post-commit sont des résumés légitimes.
-
-⚠️ **Indice de méthode** : [shared_utils.py:2902](../../engine/phase_handlers/shared_utils.py#L2902)
-porte le commentaire « Fix F2 (audit) : `occupied_hexes` doit couvrir TOUTES les figs, pas
-seulement le footprint de l'ancre ». La correction analogue a donc **déjà** été faite à cet
-endroit, et **pas** aux sites G1-G2. Le motif se répare site par site depuis des années.
-
-## 2. État des lieux vérifié (ce qui marche)
-
-⚠️ **Affirmation périmée n°7 — voir la table de §0bis** : `ai.multi_agent_trainer` n'existe plus (supprimé en §0.8). Ligne conservée telle quelle, non corrigée.
-
-- Tous les imports du pipeline passent (`ai.train`, `ai.env_wrappers`, `ai.multi_agent_trainer`,
-  `ai.reward_mapper`, `ai.scenario_manager`, `ai.unit_registry`, ... — vérifié par exécution).
-- L'environnement gym EST le moteur : `W40KEngine(gym.Env)` ([w40k_core.py:147](../../engine/w40k_core.py#L147)),
-  `reset()` L918, `step(action: int)` L1330. Espace d'action `Discrete(41)` (L629), observation
-  `Box(108,)` (L660), les deux lus depuis `observation_params` de
-  [CoreAgent_training_config.json](../../config/agents/CoreAgent/CoreAgent_training_config.json) (obs_size 108, action_space_size 41), sans défaut.
-- Espace d'action squad actuel — source unique [macro_intents.py:8-20](../../engine/macro_intents.py#L8-L20) :
-  - 0-5 move normal (6 directions), 6-11 advance (6 dir), 12-17 fall back (6 dir),
-  - 18 wait/end activation, 19-23 shoot slots 0-4, 24 charge, 25 fight,
-  - 26-40 zone intents (5 objectifs × 3 intents). Total 41.
-- Masque : `ActionDecoder.get_squad_action_mask_and_eligible_units`
-  ([action_decoder.py:146](../../engine/action_decoder.py#L146)) ; exposé par `W40KEngine.get_action_mask()` (L5563), branché
-  MaskablePPO via `ActionMasker` ([train.py:1448-1451](../../ai/train.py#L1448-L1451)).
-- Observation squad 108 : `build_squad_observation` ([observation_builder.py:1253](../../engine/observation_builder.py#L1253)) —
-  16 global + 5 agrégats squad + 6 figurines × 7 features + 5 slots ennemis × 9 features.
-  Layout **purement 2D** (col/row) : aucune feature de niveau/élévation.
-- Rewards : `RewardCalculator` ([reward_calculator.py:23](../../engine/reward_calculator.py#L23)) piloté par
-  `CoreAgent_rewards_config.json` (squad_shaping, base_actions, situational_modifiers,
-  zone_intent_shaping) — pas de valeurs par défaut, à une nuance près :
-  `situational_modifiers` est optionnel dans une branche (~L782). OK à interface constante.
-- Le moteur distingue déjà training et PvP : `gym_training_mode` (auto-résolution des prompts,
-  `_is_player_human` renvoie False — [w40k_core.py:2201-2206](../../engine/w40k_core.py#L2201-L2206)) et `pve_mode` (adversaire géré
-  par wrapper externe en training, `pve_mode=False`, [w40k_core.py:226-229](../../engine/w40k_core.py#L226-L229)).
-- Wrappers : `BotControlledEnv` (scénarios "bot", GreedyBot, [train.py:1749-1791](../../ai/train.py#L1749-L1791)) et
-  `SelfPlayWrapper` (self-play, modèle gelé) dans [env_wrappers.py](../../ai/env_wrappers.py).
-- Un smoke test moteur nu (actions aléatoires masquées, scénario board actuel) déroule
-  deployment/command/move/shoot/charge/fight jusqu'au tour 5 une fois les ruptures R4/R6
-  contournées — le cœur par-figurine (fight V11 auto, footprints, descente §13.06) fonctionne
-  en gym.
-
-**Contexte de divergence (git)** : dernier commit sur `ai/env_wrappers.py` = 2026-05-30, sur
-`ai/train.py` = 2026-05-31. Toutes les features suivantes sont postérieures : charge rework
-(06-01), fight V11 (06-12→07), LoS unifiée (07-02), niveaux + coût descente §13.06 (07-09),
-perModelMove (07-10), replay/snapshots (07). Le pipeline RL est resté sur le modèle de fin mai.
-
-## 3. Ruptures vérifiées (avec reproduction)
-
-### R1 — Phase de training `default` absente
-**Repro** : `python3 ai/train.py --agent CoreAgent --scenario bot --step` →
-`KeyError: "Phase 'default' not found in CoreAgent_training_config.json. Available:
-['x1','x5_append','x5_new','x1_debug','x5_debug']"` (config_loader.py:274).
-`--training-config` a pour défaut `"default"` ([train.py:4232](../../ai/train.py#L4232)).
-
-### R2 — train.py reconstruit le chemin board depuis {cols}x{rows}
-**Repro** : `python3 ai/train.py --agent CoreAgent --scenario bot --step --training-config x1_debug`
-→ `FileNotFoundError: Board walls directory not found: config/board/220x300/walls`.
-Cause : `_list_available_board_refs` ([train.py:586-591](../../ai/train.py#L586-L591)) construit
-`config/board/{cols}x{rows}/` (= 220x300, dimensions subhex) alors que le dossier réel est
-`config/board/44x60x5/` (44x60 pouces, scale 5). La source de vérité existe déjà :
-`config_loader.get_board_dir()` ([config_loader.py:79-87](../../config_loader.py#L79-L87), gère `W40K_BOARD_PATH` + `paths.board`).
-**Auditer toute reconstruction `f"{cols}x{rows}"` dans ai/ et engine/** (même motif ailleurs, cf. R3-d).
-
-### R3 — Banque de scénarios d'entraînement incompatible avec le contrat scénario actuel
-La banque vit dans `config/agents/CoreAgent/scenarios/` — **61 JSONs** : training/ 30 +
-training/training_benchmark/ 4, holdout_regular/ 10, holdout_hard/ 10 + holdout_hard/matchups/ 7
-(dans des sous-sous-dossiers `matchups/run_*/` ; attention : ne pas compter les dossiers comme
-des fichiers) + rosters
-`config/agents/_p2_rosters/`. Il existe aussi `scenarios/training_save/` (30 JSONs de plus) —
-statuer en T4 : migrer ou archiver. Le contrat moteur a changé
-(commit `540d0674` "terrain OK") — cinq incompatibilités indépendantes, toutes vérifiées par
-exécution ou lecture :
-
-- **(a) Localisation obligatoire** : `_resolve_shared_config_path` exige que le scénario soit dans
-  un dossier nommé exactement `scenario/` sous un board ([game_state.py:1646-1651](../../engine/game_state.py#L1646-L1651)) ; idem pour
-  `wall_ref: "random"` ([game_state.py:1437-1441](../../engine/game_state.py#L1437-L1441)) et `terrain_ref` (L1496-1505).
-  **Repro** : charger `holdout_hard/scenario_bot-01.json` → `ValueError: must be located in a
-  'config/board/<board>/scenario/' directory`.
-- **(b) Objectifs** : les clés `objectives`, `objectives_ref`, `objective_hexes` sont SUPPRIMÉES et
-  lèvent une erreur explicite ([game_state.py:320-329](../../engine/game_state.py#L320-L329)). Source unique désormais : terrains
-  flaggés `"objective": true` dans le `terrain_ref` (règles 14.01/14.02). **Tous** les scénarios
-  de la banque utilisent `objectives_ref` → tous invalides.
-- **(c) Refs de walls périmées** : `config/board/44x60x5/walls/` ne contient que `walls-33`,
-  `walls-mc1`, `walls-none`. 28 scénarios de la banque référencent `walls-11` (inexistant) —
-  27 avec extension `.json`, 1 sans (format à normaliser au passage) ; les 33 autres utilisent
-  `"random"`.
-- **(d) Zones de déploiement** : voie moderne = section `deployment_zones` du terrain_ref
-  (polygones par joueur, [game_state.py:400-432](../../engine/game_state.py#L400-L432)) ; voie legacy = fichier nommé
-  `config/deployment/{cols}x{rows}/<zone>.json` (L436-440), or `config/deployment/220x300/` ne
-  contient que `mc1.json` — le `deployment_zone: "hammer"` de toute la banque est introuvable.
-- **(e) Niveaux** : les scénarios d'entraînement n'ont pas de `terrain_ref`, donc aucun étage —
-  l'agent ne s'entraînerait jamais sur la feature niveaux même une fois le reste réparé.
-- **(f) La training config ELLE-MÊME est cassée** (raté des deux premiers audits) : dans les
-  5 phases de `CoreAgent_training_config.json`, `scenario_sampling.train_wall_ref_weights` =
-  `walls-11/21/31.json` (0.3 chacun, inexistants) et `eval_objectives_refs` =
-  `objectives-51.json` (le dossier `objectives/` n'existe plus). Après le fix R2,
-  `_expand_random_ref_weights` lèvera « unknown refs for board walls » ([train.py:623-628](../../ai/train.py#L623-L628)).
-- **(g) Chemin d'éval holdout cassé dans `ai/bot_evaluation.py`** :
-  `_materialize_eval_scenario_refs` ÉMET `objectives_ref` (L75, clé rejetée par le moteur) et
-  les `eval_wall_refs`/`eval_objectives_refs` pointent les mêmes fichiers inexistants.
-  Consommé par les callbacks d'éval de train.py (~L3231/3340), l'éval finale (~4185) —
-  cassera même après T3/T4 si seul train.py est migré.
-
-### R4 — Allocation des pertes : gym non reconnu comme "défenseur IA" (BLOQUANT runtime)
-**Repro** (moteur nu, gym_training_mode=True, scénario board valide) : première action
-`squad_shoot` → `RuntimeError: squad_shoot: allocation tir non terminee en auto pour squad 1001
-(defenseur non-IA ?)` ([w40k_core.py:4938-4943](../../engine/w40k_core.py#L4938-L4943)).
-Cause : le moteur d'allocation mutualisé tir/fight décide humain-vs-auto via des prédicats qui
-lisent UNIQUEMENT `game_state["player_types"]` ; en training self-play `pve_mode=False` →
-`player_types = {"1":"human","2":"human"}` ([w40k_core.py:454-456](../../engine/w40k_core.py#L454-L456)) → l'allocation attend un
-humain. Il y a en réalité **QUATRE prédicats divergents** :
-- `W40KEngine._is_player_human` — consciente de `gym_training_mode` (L2201-2206) ;
-- `_target_defender_is_ai` ([shared_utils.py:89-101](../../engine/phase_handlers/shared_utils.py#L89-L101)) — player_types only, `auto_decider` de SHOOT_CTX ;
-- `_is_ai_controlled_fight_unit` (fight_handlers, def ~L97) — player_types only ; utilisée par
-  `_fight_auto_defender` (def ~L5705) → `auto_decider` de **FIGHT_CTX** (~L5715-5728) et par
-  les 4 décisions `defender_human` du flux fight (~L5425, L5450, L6150, L6184) ;
-- `_is_ai_controlled_shooting_unit` (shooting_handlers, def ~L2144) — player_types only, pilote
-  l'auto-activation `active_shooting_unit` (cf. ⚠️ ci-dessous : ne PAS la rendre vraie en gym).
-**La mêlée crashe de la même façon que le tir** (vérifié par lecture) : `squad_fight` →
-`build_manual_fight_allocation` non `done` → `RuntimeError "squad_fight: allocation combat non
-terminee en auto"` ([w40k_core.py:5026-5031](../../engine/w40k_core.py#L5026-L5031)), garde jumelle dans fight_handlers
-(~L3352-3357). Le gate `is_gym_training` de la consolidation (~L1552) ne couvre PAS
-l'allocation.
-**Fix vérifié par simulation côté tir uniquement** (monkeypatch : `_target_defender_is_ai`
-renvoie True si `game_state["gym_training_mode"]`) : le tir s'auto-résout ensuite correctement.
-⚠️ Le smoke test « moteur nu jusqu'au tour 5 » ne prouve PAS le chemin d'allocation fight :
-seule `_target_defender_is_ai` était patchée — la seule explication cohérente est qu'aucune
-blessure de mêlée n'a été réussie pendant le smoke. À couvrir explicitement en T1 (scénario de
-smoke avec pertes en mêlée garanties).
-⚠️ Ne PAS "fixer" en mettant `player_types` à `"ai"` : cela active l'auto-activation tir
-(`active_shooting_unit`, [shooting_handlers.py:1082-1086](../../engine/phase_handlers/shooting_handlers.py#L1082-L1086)) qui reste alors périmé après
-l'activation et fait exploser le décodeur (`active_shooting_unit X is not in
-shoot_activation_pool`, [action_decoder.py:418-423](../../engine/action_decoder.py#L418-L423)) — vérifié par exécution.
-
-### R5 — Wrappers et bots sur l'ANCIEN layout d'actions (BLOQUANT runtime)
-**Repro** (pile complète `BotControlledEnv(ActionMasker(W40KEngine))` + GreedyBot) :
-`env_wrappers.py:436` force `self.env.step(11)` comme "WAIT" → dans l'espace actuel 11 =
-**advance direction 5** → `ValueError: convert_squad_action: advance_roll manquant`
-([action_decoder.py:885](../../engine/action_decoder.py#L885)).
-- `ai/evaluation_bots.py:36` : `WAIT_ACTION = 11` (actuel : **18**) ; usages de `12` comme action
-  spéciale (actuel : fall back dir 0) ; slots de tir supposés 4-8 (actuel : **19-23**) ;
-  `DEPLOYMENT_ACTIONS = [4..8]` réutilisé comme slots de TIR (L86) ; moves supposés 0-3
-  (`0 in valid_actions` L135, `[0, 1, 2, 3, WAIT_ACTION]` L179) au lieu de 0-5.
-- `ai/env_wrappers.py` : littéraux `11` périmés en L436 (`step(11)`), L796 (`action == 11`),
-  L900 (`bot_action == 11`) ; plages shoot 4-8 codées en dur L793, L871, L898. Le fichier
-  **mélange déjà les deux espaces** : les branches "Pool empty -> advance phase via WAIT"
-  retournent, elles, `18` (valeur correcte) — L556, L854 (BotControlledEnv) et L1172, L1188
-  (SelfPlayWrapper). C'est la preuve d'une migration partielle, pas un layout cohérent.
-- `ai/game_replay_logger.py:774-828` (raté des deux premiers audits) : layout encore PLUS
-  ancien à 8 actions (`action % 8`, moves 0-3, shoot=4, charge=5, wait=6, fight=7) — les
-  replays de training décoderaient n'importe quoi ; à migrer ou à condamner explicitement.
-- Les actions de déploiement 4-8 sont, elles, TOUJOURS valides ([action_decoder.py:160-175](../../engine/action_decoder.py#L160-L175)).
-- L'incohérence est documentée dans la config elle-même : `justification` dit
-  "action_space_size=31 (16 micro + 15 macro)" alors que le champ vaut 41 (26 micro + 15 macro)
-  — les wrappers/bots sont restés sur un layout intermédiaire.
-
-### R6 — Bug moteur : socles ovales en éligibilité de charge (touche AUSSI le PvP)
-**Repro** : scénario contenant un Carnifex ou Psychophage (seuls types à `BASE_SIZE` liste,
-vérifié via UnitRegistry : `[41,27]` et `[47,36]`) → à l'entrée en phase charge,
-`charge_build_valid_destinations_pool` → `TypeError: can only concatenate list (not "int") to
-list` ([charge_handlers.py:3627-3628](../../engine/phase_handlers/charge_handlers.py#L3627-L3628)) : `_mover_bs = unit["BASE_SIZE"]` puis
-`(_mover_bs + 1) // 2` sans gérer le cas liste, alors que le même bloc le gère pour l'ennemi
-6 lignes plus bas (`_e_bs_int = max(_e_bs) if isinstance(_e_bs, (list, tuple)) ...`, L3634-3635).
-Chemin atteignable en PvP via `_has_valid_charge_target` (L3390) → à corriger indépendamment du
-training. Les rosters d'entraînement Tyranids peuvent contenir ces unités.
-**DEUXIÈME occurrence du même pattern** : `_charge_reverse_goal_bfs_for_eligibility`
-([charge_handlers.py:825-826](../../engine/phase_handlers/charge_handlers.py#L825-L826)), même asymétrie avec l'ennemi (L832-833), calcul fait AVANT le
-garde `BASE_SHAPE == "round"`. Nuance vérifiée : la fonction est DÉSACTIVÉE sur boards scalés
-(appelée seulement si `inches_to_subhex <= 1`, ~L3693-3697 ; notre board = 5) → site
-inatteignable en pratique sur 44x60x5. Le fix T1 couvre quand même LES DEUX sites (défense en
-profondeur) ; seul le premier (L3627) crashe réellement.
-
-### R7 — Fin d'épisode au tour limite : masque vide sans terminaison (moteur nu)
-**Repro** (moteur nu, sans wrapper, scénario fight, R4 simulé) : au dernier tour, phase fight
-du joueur 2, tous les pools vides, aucun état fight pendant → masque entièrement vide,
-`terminated=False`. MaskablePPO crashe sur masque vide.
-Analyse statique concordante : SEULE `_fight_phase_complete` (fight_handlers, def ~L1867,
-appelée ~L1488/1904/2408) pose `game_over` en vif — et uniquement **au sein d'un `step()`**.
-Masque vide = plus aucun step légal = la complétion de phase n'est jamais déclenchée.
-⚠️ `_advance_to_next_player` était du CODE MORT en production — **supprimée le 2026-07-19**
-(cf. §0.4) : elle n'existe plus, ne pas la chercher.
-Nuance config : la limite de tours existe en deux endroits — `max_turns` (game_config.json L14)
-et `max_turns_per_episode` (training config) ; clarifier en T5 lequel fait foi en moteur nu.
-Dans la pile réelle, ce cas est censé être absorbé par le "WAIT forcé" du wrapper
-([env_wrappers.py:427-436](../../ai/env_wrappers.py#L427-L436)) — actuellement cassé par R5. **À revalider après R5** : si le
-deadlock persiste à travers le wrapper, corriger la root cause côté moteur (la complétion de la
-phase fight du dernier tour doit déclencher la fin d'épisode sans exiger une action illégale),
-pas en injectant des actions bidon.
-
-### R8 — Interface agent aveugle aux nouvelles règles (non bloquant pour Phase A)
-Vérifié par lecture concordante :
-- **Niveaux** : aucune feature d'élévation dans l'observation (ni 108 ni 357) ; l'agent subit le
-  coût de descente §13.06 (retranché du budget rigide, [shared_utils.py:3760-3763](../../engine/phase_handlers/shared_utils.py#L3760-L3763)) sans pouvoir
-  le percevoir ; il ne peut pas monter (commentaire moteur : "l'IA directionnelle 2D ne monte
-  pas", même bloc). Le moteur, lui, gère montée/descente (`_model_climb_reachable_floor_cells`
-  [movement_handlers.py:2889](../../engine/phase_handlers/movement_handlers.py#L2889), `reachable_multilevel_field`
-  [engine/phase_handlers/geodesic_move.py:148](../../engine/phase_handlers/geodesic_move.py#L148)).
-- **Pivot/perModelMove** : résolus automatiquement par le moteur (plan rigide) — aucun point de
-  décision agent. Légal règles (un placement légal parmi d'autres), sous-optimal seulement.
-- **Fight V11** : action 25 = pile-in + déclaration + résolution + consolidation auto
-  (`_ai_select_pile_in_destination` fight_handlers.py:1686, `_ai_select_fight_target` L1725,
-  `_ai_select_consolidation_destination` L1436). Légal, choix internes non pilotés par la policy.
-- **LoS/engagement 3D** : gate vertical implémenté ([spatial_relations.py:143-231](../../engine/spatial_relations.py#L143-L231)) mais le module
-  lève lui-même "câblage incomplet" si les données verticales manquent (L186-189, chantier 4) ;
-  l'observation utilise une `los_topology` 2D "legacy boards" (observation_builder.py:741).
-  → Le chantier LoS 3D (Documentation projet "Chantier 5") est un PRÉREQUIS règles pour le tir
-  multi-niveaux ; le training Phase A n'en dépend pas tant que les scénarios d'entraînement
-  restent mono-niveau, mais la Phase B avec terrains à étages OUI. Vérifier l'état du chantier
-  avant d'activer des terrains à étages en training.
-
-### Notes non bloquantes (à traiter en T6)
-- `active_shooting_unit` : cycle de vie sain uniquement pour le flux PvP/PvE ; ne pas l'activer
-  en gym (cf. R4 ⚠️).
-- `ai/target_selector.py` : orphelin (importé seulement par son test unitaire).
-- Docs périmées : AI_OBSERVATION.md décrit 357 floats, AI_TRAINING.md 355 — aucun ne décrit le
-  pipeline squad 108 actif ; `justification` de la config dit 31 au lieu de 41. Les snapshots
-  `BEST_CoreAgent_training_config.json` (obs 355) sont incompatibles avec le code actuel
-  (`build_observation` exige 357, [observation_builder.py:1094-1097](../../engine/observation_builder.py#L1094-L1097)).
-
-## 4. Décisions de design imposées
-
-1. **Phase A à interface constante** : on garde `Discrete(41)` / `Box(108)`. Aucun ancien modèle
-   n'est réutilisable de toute façon (layout obs squad + VecNormalize stats) → tout run se fait
-   avec `--new`. Ne jamais écraser les zips existants (protégés).
-2. **Source de vérité unique "joueur programmatique"** : le prédicat "ce joueur est piloté par la
-   machine (auto-résolution)" doit exister en UN seul endroit, consultable depuis game_state
-   (le flag `gym_training_mode` y est déjà copié, [w40k_core.py:491](../../engine/w40k_core.py#L491)/1011). Les QUATRE prédicats
-   recensés en R4 (`W40KEngine._is_player_human`, `_target_defender_is_ai`,
-   `_is_ai_controlled_fight_unit`, `_is_ai_controlled_shooting_unit`) doivent s'appuyer dessus.
-   Interdit de dupliquer le check. ⚠️ La bascule gym ne doit s'appliquer qu'aux décisions
-   d'ALLOCATION/résolution, pas aux mécanismes d'auto-activation type `active_shooting_unit`
-   (cf. ⚠️ R4) : auditer chaque site d'appel avant de brancher le prédicat unique.
-3. **Plus aucun ID d'action littéral dans ai/** : importer les constantes depuis
-   `engine/macro_intents.py`. État réel : **AUCUNE constante d'action n'existe** — le mapping
-   n'est qu'en commentaire (L9-18) ; seuls `INTENT_*`, `MAX_OBJECTIVES`, `BASE_ZONE_INTENT`,
-   `TOTAL_ACTION_SIZE` sont définis. TOUT est donc à créer : `ACTION_WAIT = 18`,
-   `SHOOT_SLOT_BASE = 19`, bases move/advance/fallback, `ACTION_CHARGE = 24`,
-   `ACTION_FIGHT = 25`, `DEPLOY_SLOTS = range(4, 9)`. Un littéral d'action dans ai/ = bug de
-   revue.
-4. **Scénarios : référence de board explicite** — les scénarios d'agent restent sous
-   `config/agents/<agent>/scenarios/` (banque par agent, rosters aléatoires) mais déclarent
-   `"board_ref": "44x60x5"`. Le résolveur ([game_state.py:1646](../../engine/game_state.py#L1646), 1437, 1496) accepte alors :
-   parent == `scenario/` d'un board (comportement actuel, inchangé pour le PvP) OU clé
-   `board_ref` présente → `config/board/<board_ref>/`. Absence des deux = erreur explicite
-   (pas de fallback). Alternative rejetée : déplacer la banque sous
-   `config/board/44x60x5/scenario/` — casse la structure par-agent et le check exige un parent
-   nommé exactement `scenario` (pas de sous-dossiers training/holdout).
-5. **Miroir PvP strict** : la phase A ne modifie AUCUNE règle de jeu ; les fixes moteur (R4, R6)
-   doivent être neutres pour le flux PvP manuel (mémoire projet : le flux gym copie le flux
-   PvP, jamais le durcir/diverger). Seuils/conversions via `inches_to_subhex`.
-6. **Prochain agent : 2 rosters seulement** (décision utilisateur 2026-07-14). Le nouvel agent
-   ne s'entraîne que sur 2 rosters différents — spécialisation assumée, pas de généralisation
-   multi-rosters. Câblage vérifié dans le code, AUCUNE modif moteur nécessaire :
-   - la résolution passe par `agent_roster_ref`/`opponent_roster_ref` du scénario
-     ([game_state.py:1026-1057](../../engine/game_state.py#L1026-L1057)) ; trois formes supportées : `"training_random"` (tirage
-     dans `config/agents/<agent_key>/rosters/<scale>/training/agent_training_roster*.json`),
-     ref explicite `"training/<fichier>.json"`, ou **liste de refs** → `rng.choice`
-     ([game_state.py:1176-1186](../../engine/game_state.py#L1176-L1186)) ;
-   - **voie retenue** : dossier `config/agents/<NouvelAgent>/rosters/<scale>/training/` ne
-     contenant QUE les 2 fichiers (pattern `agent_training_roster*.json` obligatoire, clé
-     interne `roster_id` requise) + `"agent_roster_ref": "training_random"` dans les scénarios
-     → tirage 50/50 par épisode ;
-   - `config/agents/_p2_rosters/` est PARTAGÉ entre agents (pool de tirage
-     `150pts/training/` = 151 fichiers ; le dossier 150pts en contient bien plus, holdouts
-     inclus) : si les 2 rosters incluent l'adversaire, restreindre `opponent_roster_ref`
-     (ref explicite ou liste) — sinon P2 continue de tirer dans toute la banque ;
-   - désactiver `roster_pool_schedule` dans la training config
-     (`_filter_training_roster_candidates`, game_state ~L1322-1393) : le filtre progressif
-     swarm/troop/elite peut vider un pool de 2 fichiers → `ValueError
-     "roster_pool_schedule produced zero eligible training rosters"` (~L1422-1426).
-     Si le schedule reste actif : le nommage doit matcher `(elite|swarm|troop)_(\d+)$`
-     sinon écart SILENCIEUX du fichier ;
-   - contraintes fichiers : suffixes `_kpis`/`_matchups` exclus du tirage, composition non
-     vide. ⚠️ L'unicité des `roster_id` internes n'est PAS vérifiée au tirage (contrôlée
-     seulement sur un chemin marginal) : deux fichiers au même roster_id passent en silence
-     et fausseraient le suivi win-rate par-roster — vérifier à la main les 2 fichiers ;
-   - `agent_roster_seed` (clé scénario) fige le tirage AGENT seulement — il ne fige PAS le
-     tirage opponent (seed non transmis, `random_seed=None`) ;
-   - conséquences training attendues : convergence plus rapide (distribution d'observations
-     quasi stationnaire), holdouts multi-rosters non pertinents comme critère ; risque
-     principal = un roster qui domine le gradient → **suivre le win-rate PAR roster**
-     (`roster_info`/`agent_roster_id` déjà loggé par épisode,
-     [step_logger.py:188-194](../../ai/step_logger.py#L188-L194)), jamais l'agrégé seul (critère T6.3 à lire par-roster).
-
-## 5. Tranches d'implémentation
-
-Chaque tranche se termine par sa validation (section 6) AVANT de passer à la suivante.
-
-### T1 — Fixes moteur neutres (R4, R6) — ✅ FAIT, prédicat ET branchement verrouillés (2026-07-21)
-
-> **Historique du statut** : ✅ (2026-07-15) → ⏳ PARTIEL (audit §0.19.1, 2026-07-20) → ✅
-> (§0.19.3, 2026-07-21).
->
-> 🔴 **Le démenti de §0.19.1** : le code de T1 était en place et conforme, mais deux de ses trois
-> volets n'étaient **verrouillés par aucun test** — le **site R6 n°1**
-> (`_charge_reverse_goal_bfs_for_eligibility`, inatteignable au x5 : mutation `int()` sur une
-> liste, suite **verte**) et **R4** (zéro occurrence de `is_programmatic_owner` /
-> `is_programmatic_defender` dans `tests/`, alors que §8.3 impose une matrice complète).
->
-> ✅ **R6 comblé en §0.19.3** : `test_charge_oval_base_reverse_bfs.py` (+4, avec garde
-> d'atteinte) — les DEUX sites rougissent désormais sur mutation.
->
-> ✅ **R4 comblé** : `test_programmatic_owner_predicate.py` (+22) verrouille le **prédicat** et
-> son refus du repli ; `test_r4_auto_decider_wiring.py` (+14) verrouille son **BRANCHEMENT** —
-> or c'était ça, la rupture R4. Les **6** exigences de §8.3 sont couvertes, chaque cas gym ayant
-> son jumeau PvP. 6 mutations au total, toutes rouges, dont une qui **rejoue la rupture R4
-> d'origine**. Détail en §0.19.3. Le texte ci-dessous est celui de la session d'origine,
-> **conservé tel quel**.
-
-Réalisé : R6 normalisé dans les 2 sites ; prédicat unique `is_programmatic_owner` /
-`is_programmatic_defender` (shared_utils), délégation de `_target_defender_is_ai` (SHOOT_CTX)
-et `_is_ai_controlled_fight_unit` (FIGHT_CTX + 4 defender_human) ; `player_types` et
-`_is_ai_controlled_shooting_unit` non touchés. Validé : 1152 passed / 2 skipped ; smoke gym
-3 seeds — charge Carnifex OK, pertes fight réellement allouées via FIGHT_CTX (kill constaté).
-Le masque vide au tour 5 (fin de fight P2) a été RE-CONSTATÉ → confirme R7, à traiter en T5.
-Reste : validation PvP manuelle rapide (non-régression) côté utilisateur.
-1. **R6** : normaliser `_mover_bs` en miroir exact du traitement ennemi
-   (`_mover_bs_int = max(_mover_bs) if isinstance(_mover_bs, (list, tuple)) else
-   int(_mover_bs)`) dans les DEUX sites : `charge_build_valid_destinations_pool`
-   (~L3627-3628) ET `_charge_reverse_goal_bfs_for_eligibility` (~L825-826).
-2. **R4** : introduire un prédicat unique (proposé : `is_programmatic_defender(game_state,
-   target_sid)` dans shared_utils) : renvoie True si `game_state.get("gym_training_mode")` est
-   True, sinon comportement actuel (player_types, erreurs explicites conservées). Sites à
-   brancher — inventaire vérifié :
-   - `SHOOT_CTX.auto_decider = _target_defender_is_ai` (shared_utils ~L113), consommé par
-     `_manual_allocation_step` (~L6212, L6242) ;
-   - `FIGHT_CTX.auto_decider = _fight_auto_defender` (fight_handlers ~L5728), les checks
-     `defender_human` du flux fight (~L5425, L5450, L6150, L6184), ET les deux gardes
-     `RuntimeError "allocation ... non terminee en auto"` (`squad_shoot`/`squad_fight` dans
-     w40k_core + garde jumelle fight_handlers ~L3352-3357) qui doivent cesser de crasher une
-     fois le prédicat branché ;
-   - `HAZARD_CTX` (shared_utils ~L6423-6437) n'a pas d'`auto_decider` : le hazard est DÉJÀ
-     gym-aware au call-site (`auto_resolve = gym_training_mode`, [w40k_core.py:2634](../../engine/w40k_core.py#L2634)) sans lire
-     player_types — rien à faire en gym ; corollaire à vérifier : en PvE, un défenseur IA
-     passerait par l'allocation hazard MANUELLE ;
-   - chemins `squad_shoot_validate` ([w40k_core.py:4685](../../engine/w40k_core.py#L4685)) et prompts rule-choice
-     ([w40k_core.py:2527](../../engine/w40k_core.py#L2527)) — déjà sur `_is_player_human`, vérifier qu'ils basculent sur le
-     prédicat unique sans changement de comportement PvP.
-   Ne PAS toucher `player_types`. Ne PAS brancher `_is_ai_controlled_shooting_unit`
-   (auto-activation) sur la bascule gym (cf. ⚠️ R4).
-   Ajouter au smoke test T1 un scénario garantissant des **pertes en mêlée** (le chemin
-   FIGHT_CTX n'a jamais été exercé en gym, cf. R4).
-3. Vérification de non-régression PvP : `python3 -m pytest tests/ -x -q` (suite existante,
-   1152 tests collectés au 2026-07-14) + une partie PvP manuelle rapide côté utilisateur.
-
-### T2 — Migration wrappers + bots vers l'espace squad (R5) — ✅ FAIT (2026-07-15)
-
-Réalisé : constantes nommées dans `macro_intents.py` (MOVE/ADVANCE/FALL_BACK_DIRS, ACTION_WAIT=18,
-SHOOT_SLOTS=19-23, ACTION_CHARGE=24, ACTION_FIGHT=25, DEPLOY_SLOTS=4-8 — miroir de
-`SQUAD_ACTION_*` de shared_utils). `evaluation_bots.py` : 8 bots migrés (helper `_first_action_in`,
-`_shoot_focus_fire` sur SHOOT_SLOTS, dicts de poids déploiement via DEPLOYMENT_ACTIONS, TacticalBot
-inclus) — zéro littéral d'action résiduel. `env_wrappers.py` : bug phare R5 corrigé (`step(11)` →
-`ACTION_WAIT`), `return 18` et trackers diagnostiques shoot/wait migrés (BotControlledEnv +
-SelfPlayWrapper). `game_replay_logger.log_action` (layout `% 8` mort + lit `self.env.controller`
-absent du moteur squad, aucun appelant vif) CONDAMNÉ (NotImplementedError explicite). Tests migrés
-(`test_evaluation_bots.py`, `test_env_wrappers.py`, `test_game_replay_logger.py`). Audit train.py /
-multi_agent_trainer / bot_evaluation : aucun littéral d'action (les `objectives_ref` restent T3/T4).
-Validé : 1152 passed / 2 skipped ; smoke moteur nu 3 seeds (shoot+charge+fight, unité socle-ovale
-BASE_SIZE liste présente → charge franchie sans TypeError R6, 2 pertes mêlée via FIGHT_CTX) ; smoke
-pile complète (BotControlledEnv + GreedyBot migré) avance 45-48 steps → **dépasse le 1er WAIT forcé**
-(preuve que R5 est levé). Persiste : deadlock fight pile_in fin de partie (boucle 1000 steps /
-masque vide sur eligible units) = R7, UNMASQUÉ par le fix R5, à traiter en T5 (déjà prévu par le doc).
-
-**Contre-vérification indépendante (2026-07-15)** — T2 confirmée conforme (code relu, suite
-rejouée verte, grep de contrôle passé, smoke pile complète rejoué), avec 3 précisions :
-1. ~~**Inexactitude du rapport** : `multi_agent_trainer.py:1016` contient encore `action % 8` +
-   `unit_idx = action // 8` (monkeypatch legacy de `controller.execute_gym_action`). Branche
-   INERTE (gardée par `hasattr(actual_env, 'controller')`, attribut absent du moteur squad)
-   mais « aucun littéral dans multi_agent_trainer » est faux — à condamner/purger comme
-   `game_replay_logger.log_action` (raccroché à T6 hygiène ou T5).~~
-   → ✅ **SOLDÉ, NE PLUS CITER (voir §0.8).** Le monkeypatch a été purgé au commit `6a7a9de1`,
-   le commentaire de purge qui l'a remplacé a disparu avec §0.8, et `game_replay_logger` est
-   supprimé. **`grep 'action % 8' ai/multi_agent_trainer.py` est vide.** Ce point a induit deux
-   relecteurs en erreur *après* sa résolution, parce qu'ils l'ont cité depuis cette doc au lieu de
-   grep le fichier — d'où le rappel : **une doc n'est pas une source, le code l'est.**
-2. **Précision sur le smoke pile complète** : les épisodes 40-48 steps ne se terminent PAS
-   normalement — ils sont tués par le garde « 1000 steps » du wrapper, en deadlock
-   `squad_wait` fight/pile_in dès le **TOUR 1** (scénario à unités pré-engagées), pas
-   seulement au tour limite. Le périmètre T5 est donc PLUS LARGE que « fin d'épisode au
-   dernier tour » : toute phase fight avec pile-in éligibles peut boucler.
-3. **Nouveau symptôme, même famille (T5)** : avec `agent_seat_mode="p2"` ou `"random"`
-   (= la config réelle de train.py), le RESET crashe —
-   `RuntimeError "bot-owned eligible units with empty action mask"` en fight tour 1
-   (le bot P1 déroule son tour jusqu'à la phase fight alternée où l'unité éligible
-   n'appartient plus au joueur courant). Seul seat="p1" passe. À couvrir en T5.
-
-1. Ajouter dans [macro_intents.py](../../engine/macro_intents.py) les constantes nommées manquantes (WAIT=18, bases des
-   plages move/advance/fallback/shoot, CHARGE=24, FIGHT=25, DEPLOY_SLOTS=range(4,9)) et les
-   utiliser partout dans `ai/env_wrappers.py` et `ai/evaluation_bots.py` (supprimer
-   `WAIT_ACTION = 11`, les littéraux 11/12, les plages 4-8 hors déploiement ; remplacer aussi
-   les `return 18` déjà corrects mais en dur — L556, L854, L1172, L1188 — par la constante).
-2. **Auditer la logique de chaque bot phase par phase** contre le mapping actuel : la sélection
-   "shoot" doit itérer les slots 19-23 (slots ennemis via `get_enemy_slot_mapping`), "charge"=24,
-   "fight"=25, les moves par direction 0-5/6-11/12-17. Les bots choisissent des actions dans le
-   masque : tout choix hors masque = erreur explicite (comportement existant à préserver).
-3. `SelfPlayWrapper` : mêmes corrections (WAIT forcé, détection "pool empty").
-4. Auditer `ai/train.py`, `ai/bot_evaluation.py` ET `ai/game_replay_logger.py` (layout 8
-   actions, L774-828) pour les mêmes littéraux périmés — y compris les dicts de poids
-   `{4: 0.50, ...}` d'evaluation_bots (6 occurrences) et les `return 10/4`.
-
-### T3 — Chemins board + config training (R1, R2) — ✅ FAIT (2026-07-15)
-
-Réalisé : **R2** — `_list_available_board_refs` (train.py) et `analyzer.py` résolvent via
-`config_loader.get_board_dir()` (plus aucune reconstruction `{cols}x{rows}` en ai/ ; grep ai/
-+ scripts/ = seuls ces 2 sites vifs, `analyzer_avant_refactor.py` = backup jamais importé, laissé
-tel quel). **R1** — `--training-config` sans défaut silencieux : helper `_require_training_config_phase`
-lève une erreur explicite listant les phases (`['x1','x5_append','x5_new','x1_debug','x5_debug']`)
-quand un agent est sélectionné sans phase (décision recommandée du doc retenue en MODE NUIT).
-**1bis** — retrait de la dimension objectives du tirage de scénarios (`_load_scenario_objectives_ref`
-supprimée, `_apply_wall_ref_weighting` en wall-only, `_materialize_scenario_with_refs` n'émet plus
-objectives_ref via ce chemin). **1ter** — training config purgée dans les 5 phases
-(`train_wall_ref_weights` → `{"default":1.0}`, `eval_wall_refs` → walls-33/mc1 réels,
-`train_objectives_ref_weights`/`eval_objectives_refs` supprimées) ; `bot_evaluation.py`
-(`_materialize_eval_scenario_refs`) migré : n'émet plus `objectives_ref`/`objectives`/`objective_hexes`
-(objectifs = contrat terrain). Point 3 (deployment legacy `{cols}x{rows}`) : différé T4 (décision T4).
-Tests ajoutés : `tests/unit/ai/test_train_board_refs.py` (get_board_dir, expand refs inconnus/valides,
-R1 message) + `tests/unit/ai/test_bot_evaluation_eval_refs.py` (objectives_ref absent du matérialisé) +
-maj `test_analyzer_utils.py` (fake loader get_board_dir).
-Validé : **1162 passed / 2 skipped** (baseline 1152 + 10 tests T3, zéro régression) ;
-`train.py --step --training-config x1_debug` **dépasse la résolution walls/objectives** (500 entrées
-pondérées, plus de FileNotFoundError board dir) — le crash suivant = **R3-a** (scénario hors dossier
-`scenario/`) = T4, hors périmètre T3. Smoke moteur nu (Annexe A.1) + pile GreedyBot (A.2), 3 seeds ×
-scénario Psychophage/ScreamerKiller : **charge franchie sans TypeError (R6 non régressé)**, toutes
-phases atteintes, zéro exception.
-⚠️ **Pertes de mêlée non re-démontrées end-to-end** : le smoke A.1 (aléatoire non dirigé, adversaire
-passif) ne les produit pas *par conception* (réserve explicite Annexe A) ; le smoke A.2 (GreedyBot des
-2 camps) bute sur le **deadlock R7/T5 `fight/pile_in` dès le tour 1** AVANT toute résolution de
-blessure. Ce blocage est un item OUVERT (T5), indépendant de T3 (aucun code moteur touché) — la
-preuve FIGHT_CTX reste celle de T1 (committée). À re-valider après T5.
-
-**Contre-vérification indépendante (2026-07-15)** — T3 confirmée conforme : repro R1 rejouée
-(erreur explicite avec les 5 phases), repro R2/x1_debug rejouée (« 500 entries, 100 unique
-files », crash suivant = R3-a exactement), 1162 tests collectés / suite verte, config purgée
-vérifiée dans les 5 phases, aucun code moteur touché (git status). UNE réserve mineure :
-`_materialize_scenario_with_refs` (train.py ~L642-668) conserve un paramètre `objectives_ref`
-et sa branche d'émission `scenario_copy["objectives_ref"] = ...` — MORTE (l'unique appelant
-~L854 ne passe que wall_ref) mais tout futur appelant réémettrait une clé rejetée par le
-moteur. À purger en T4 (avec la migration) ou T6.
-
-1. **R2** : remplacer la reconstruction `{cols}x{rows}` de `_list_available_board_refs`
-   ([train.py:586-591](../../ai/train.py#L586-L591)) par `config_loader.get_board_dir()`. Même motif déjà repéré ailleurs :
-   `ai/analyzer.py:224` (et `analyzer_avant_refactor.py:224`) reconstruisent
-   `config/board/{cols}x{rows}/objectives`. Greper `ai/` et `scripts/` pour le solde.
-1bis. **train.py émet encore `objectives_ref`** : `_load_scenario_objectives_ref`
-   ([train.py:562-577](../../ai/train.py#L562-L577)) et le sampler `train_objectives_ref_weights` (~L873, L887-893)
-   expansent des refs `objectives-*.json` — clé que le moteur REJETTE (game_state:320-329).
-   Cette branche doit être supprimée/migrée vers les terrains (T4), sinon le tirage de
-   scénarios de train.py casse après migration.
-1ter. **Migrer la training config et le chemin d'éval** (R3-f/R3-g) : purger
-   `train_wall_ref_weights`/`eval_wall_refs`/`eval_objectives_refs` des refs inexistantes
-   dans les 5 phases de `CoreAgent_training_config.json`, et migrer
-   `_materialize_eval_scenario_refs` (bot_evaluation.py:59-98, émission d'`objectives_ref`)
-   vers le contrat terrain — les callbacks d'éval train.py en dépendent.
-2. **R1** : décision de config (pas de code) : soit ajouter une phase `default` pointant vers la
-   config x1 courante dans `CoreAgent_training_config.json`, soit rendre `--training-config`
-   obligatoire (erreur explicite listant les phases disponibles). Recommandé : la seconde (pas
-   d'alias silencieux). À valider avec l'utilisateur au checkpoint T3.
-3. La voie legacy `config/deployment/{cols}x{rows}/` ([game_state.py:436-440](../../engine/game_state.py#L436-L440)) : si la banque
-   migrée (T4) n'utilise plus `deployment_zone` nommée, ne pas y toucher ; sinon fournir les
-   fichiers de zones pour `220x300` (décision en T4).
-
-### T4 — Migration de la banque de scénarios (R3) — ✅ FAIT (2026-07-15)
-
-Réalisé : **resolver `board_ref`** — helper `_resolve_board_dir(scenario_file, board_ref,
-purpose)` dans game_state.py (seul fichier moteur touché) : parent `scenario/` (voie PvP
-inchangée) OU `board_ref` → `config/board/<board_ref>/` ; erreurs explicites (absence des
-deux, board inexistant, traversal), câblé dans `_resolve_shared_config_path`,
-`_load_shared_walls_from_ref` (random) et `_read_terrain_file` + call-sites. **Bug moteur
-corrigé au passage** : `pool_set` gardé derrière le NOM legacy `deployment_zone` → les zones
-issues du terrain (voie moderne) ne peuplaient pas le pool de déploiement random/fixed
-(fix neutre PvP, commenté en ~L576). **Terrains plats** `terrain-train-01/02/03.json`
-(5 objectifs, deployment_zones "1"/"2", 0 étage). **Migration** :
-`scripts/migrate_scenario_bank_v11.py` (idempotent) — 61 scénarios migrés (0 clé legacy,
-`board_ref`+`terrain_ref`), `training_save/` (30) archivé sous `_archive_pre_v11/`.
-**Outillage** : `build_holdout_benchmark.py` migré ; `scenario_manager.py` NON touché
-(chemin dormant — `config/scenario_templates.json` absent → lève à la construction ; son
-alignement 0/1 vs 1/2 traverse multi_agent_trainer = chantier séparé à valider).
-**Balayage** : `scripts/sweep_scenario_bank_v11.py` — 61/61 chargés + reset. Tests +83.
-Validé : 1245 passed / 2 skipped ; Carnifex en charge 3 seeds sans TypeError (R6).
-⚠️ Pertes de mêlée toujours non démontrables end-to-end (deadlock R7/T5 fight/pile_in tour 1,
-confirmé 3 voies) — inchangé depuis T2/T3, aucun code fight/charge touché par T4.
-
-**Contre-vérification indépendante (2026-07-15)** — T4 confirmée conforme : balayage rejoué
-(61/61 + reset, 0 clé legacy hors archive — grep indépendant), suite rejouée (1245 collectés,
-verte), sample de scénario migré inspecté (clés legacy absentes, refs présentes), 3 terrains
-inspectés (5 objectifs, dz 1/2, 0 floor), resolver relu (zéro fallback, traversal gardé),
-`users.db` propre, `charge_handlers` non touché (non-régression R6 structurelle). Réserves
-mineures : (1) les scripts `migrate_/sweep_scenario_bank_v11.py` n'ont pas de bootstrap
-`sys.path` — exécutables uniquement avec `PYTHONPATH=.` ; (2) la réserve T3 (paramètre
-`objectives_ref` mort de `_materialize_scenario_with_refs`, train.py ~L645-668) n'a PAS été
-purgée en T4 → reste pour T6.
-
-Plan d'origine (réalisé ci-dessus) :
-1. Implémenter la clé **`board_ref`** dans le résolveur (décision de design n°4) :
-   `_resolve_shared_config_path`, `_load_shared_walls_from_ref` (branche "random") et
-   `_read_terrain_file` ([game_state.py:1646](../../engine/game_state.py#L1646), 1437, 1496). Erreur explicite si ni parent
-   `scenario/` ni `board_ref`.
-2. Créer les **terrains d'entraînement** sous `config/board/44x60x5/terrain/` : chaque terrain
-   porte objectifs (`"objective": true`) et `deployment_zones` (polygones J1/J2). Point de départ:
-   dériver des terrains existants (`terrain-mc1.json`, `terrain-floors-test.json`) et des
-   anciennes refs objectives/walls de la banque. Phase A : terrains PLATS uniquement (pas
-   d'étages) — les étages arrivent en Phase B (cf. R8/LoS 3D).
-   ⚠️ Piège vérifié : un terrain SANS aucune area `"objective": true` donne une liste
-   d'objectifs VIDE en silence (game_state ~L376-381) — le script de migration doit valider
-   ≥ 1 objectif par terrain produit.
-3. Migrer les **61 scénarios** de la banque (training 30 + training_benchmark 4,
-   holdout_regular 10, holdout_hard 10 + matchups 7) : supprimer `objectives_ref`, remplacer
-   `deployment_zone`/`wall_ref` par `terrain_ref` (+ `wall_ref` réel encore supporté) +
-   `board_ref`. Statuer sur `scenarios/training_save/` (30 JSONs) : migrer ou archiver.
-   Écrire un script de migration dans `scripts/` (one-shot, vérifiable) plutôt qu'une édition
-   manuelle. Les refs `"random"` (walls/terrain)
-   doivent piocher dans le board résolu — vérifier le support côté train.py
-   (`_expand_random_ref_weights`, [train.py:603](../../ai/train.py#L603)) après le fix R2.
-4. Outillage impacté — état vérifié :
-   - `scripts/build_holdout_benchmark.py` **ÉMET les clés legacy** (`deployment_zone: "hammer"`
-     L110, `objectives_ref` L118/246/254) → à migrer, pas seulement à vérifier ;
-   - `ai/scenario_manager.py` : utilise des `deployment_zones` avec clés joueur **0/1** alors
-     que les terrains modernes utilisent **"1"/"2"** → incompatibilité à résoudre ;
-   - `scripts/rebalance_holdout_hard_scenarios.py`, `scripts/build_dynamic_rosters.py` : aucune
-     clé legacy détectée, re-vérifier après migration.
-
-### T5 — Boucle complète et fin d'épisode (R7) — ✅ FAIT (moteur nu, 2026-07-16) — verrou confirmé par mutation (§0.19.1)
-
-> ✅ **Confirmé le 2026-07-20** : le fix `_deployment_clearance_filter` est verrouillé —
-> neutralisé, `test_deployment_mask_mirrors_commit_overlap_predicate` rougit en 6,7 s avec le
-> symptôme d'origine (42 s vert sans mutation).
-> ⚠️ **Mais le critère §6 de T5 est plus large que ce ✅** : il exige « ≥3 scénarios × sièges
-> p1/p2 », alors que `test_t5_bare_loop.py` exerce **un** scénario × 3 seeds et **aucun siège**.
-> Le ✅ vaut pour le **moteur nu, siège p1**, comme la tranche l'annonce dans son « Reste ».
-
-Réalisé (périmètre MOTEUR NU, décision utilisateur : « smoke moteur nu avec pertes en mêlée
-garanties + Carnifex en phase charge ») :
-
-- **R7 ne se manifeste PAS en moteur nu** : `W40KEngine.get_action_mask()`
-  ([w40k_core.py:5563](../../engine/w40k_core.py#L5563)) auto-avance déjà la phase fight quand ses pools sont vides
-  (boucle `fight_phase_end` tant que masque vide ET pas game_over) → l'invariant
-  `mask.any() or game_over` tient à CHAQUE step. Vérifié sur 3 scénarios `active` × 3 seeds +
-  scénario fixe pré-engagé : zéro masque vide sans terminaison, zéro exception, toutes les
-  parties se terminent (turn limit). Le fix conditionnel T5.2 sur `_fight_phase_complete`
-  n'était donc PAS requis — non touché ; `_advance_to_next_player` (mort) laissé tel quel
-  **à l'époque, supprimé depuis le 2026-07-19 (§0.4)**.
-- **Vraie rupture bloquante en moteur nu = déploiement `active`, PAS R7 (nouvelle, hors R1-R8)** :
-  `ActionDecoder._get_valid_deployment_hexes` ([action_decoder.py:961](../../engine/action_decoder.py#L961)) testait le
-  chevauchement inter-unités par CELLULES (`build_occupied_positions_set`), alors que le commit
-  `deployment_handlers.deploy_unit` (~L1017) le teste par CLEARANCE euclidien CONTINU
-  (`candidate_overlaps_any_unit`, plus strict rond↔rond). Le masque proposait donc des hexes que
-  le commit rejetait (`deploy_footprint_occupied`) ; l'action restant dans le masque, elle
-  échouait en boucle → deadlock (épisode tué au garde 1000 steps ; ~2/3 des seeds sur bot-01).
-  **Fix** : `_get_valid_deployment_hexes` filtre désormais les candidats cellule-valides par le
-  MÊME modèle que le commit (nouveau `_deployment_clearance_filter` : broad-phase numpy
-  distance-centres puis `candidate_overlaps_any_unit` exact), miroir strict (règle projet « le
-  déploiement copie la phase move »). Neutre PvP (même prédicat que le commit ; volet bornes/murs/
-  pool inchangé). Seul `action_decoder.py` touché.
-- **Smoke moteur nu (`scripts/smoke_t5_bare.py`, committé, sans monkeypatch)** :
-  (A) bot-01/02/03 × seeds 1-3 → terminate + zéro masque vide ;
-  (B) scénario fixe (ScreamerKiller P1 pré-engagé vs Termagant P2 ; Carnifex P1 à portée de
-  charge d'un Termagant P2) → **pertes en mêlée réelles via FIGHT_CTX à chaque seed** (kill
-  `squad_fight` constaté) + **Carnifex éligible en phase charge sans TypeError (R6)**.
-- **Tests ajoutés (+7)** : `tests/unit/engine/test_deployment_clearance_parity.py` (4 : parité
-  masque↔commit + anti-deadlock en clustering forcé) et `tests/unit/engine/test_t5_bare_loop.py`
-  (3 : invariant `mask.any() or game_over`, pertes mêlée FIGHT_CTX, Carnifex charge R6). Suite
-  `tests/unit/` verte (baseline 1245 + 7).
-
-Reste (hors moteur nu, non couvert par cette tranche) : le smoke **pile complète** (wrapper
-`BotControlledEnv`) — cf. contre-vérif T2 : reset crashe encore avec `agent_seat_mode="p2"/"random"`
-(`bot-owned eligible units with empty action mask` en fight tour 1). Chantier wrapper/pool alterné
-distinct, à traiter avant l'entraînement réel T6 avec la config de siège de train.py.
-
-Plan d'origine :
-1. Rejouer le smoke test pile complète (annexe A) après T1+T2 : 10 épisodes aléatoires masqués
-   doivent se terminer (`terminated=True`, winner déterminé), zéro masque vide, zéro exception.
-2. Si le deadlock R7 persiste : corriger côté moteur la complétion de phase fight au dernier
-   tour, via le SEUL chemin vif : `_fight_phase_complete` (fight_handlers, def ~1867) doit
-   aboutir à `terminated` sans exiger une action supplémentaire quand le pool est vide.
-   `_advance_to_next_player` était mort en production (cf. R7) — **supprimée le 2026-07-19**
-   (§0.4), donc plus rien à statuer. Interdit de résoudre par injection d'action côté
-   wrapper.
-3. Étendre le smoke test aux scénarios migrés (T4), sièges p1/p2/random, et à un scénario
-   contenant Carnifex/Psychophage (validation R6).
-
-### T6 — Entraînement de validation + hygiène — ⏳ EN COURS (màj 2026-07-19)
-
-> **Bloqueurs actifs : T6-h puis T6-g** (cf. §0). T6-a→T6-f sont résolus. Les entrées ci-dessous
-> sont chronologiques ; chercher `T6-g` / `T6-h` pour le chemin critique.
-
-**Préalable levé** : le bloqueur résiduel laissé par T5 (« reset crashe avec
-`agent_seat_mode="p2"/"random"` — `bot-owned eligible units with empty action mask` en fight
-tour 1 ») **ne se reproduit plus**. Vérifié en miroir exact de train.py:1673-1716
-(`ActionMasker` + `BotControlledEnv` + `GreedyBot`) sur `scenario_training_bot-01` × sièges
-p1/p2/random × 2 seeds : les 6 combinaisons terminent (`terminated=True`, turn=5), zéro masque
-vide. Le fix de parité déploiement de T5 l'a manifestement couvert.
-
-**Rappel des critères de sortie (re-démontrés sur l'arbre T6)** : suite `tests/unit/` verte ;
-smoke moteur nu `scripts/smoke_t5_bare.py` → `(A) invariant/terminaison=OK | (B) mêlée+Carnifex=OK`
-avec `melee_kills_total=5` (pertes réelles via FIGHT_CTX) et `carnifex_charge_any=True` (R6).
-
-**Deux ruptures T6 vérifiées et corrigées** (aucune ne figure dans R1-R8 — ce sont des reliquats
-de T4/de code latent) :
-
-- **T6-a — `wall_ref` exigé par le sampler alors que T4 l'a supprimé (BLOQUANT, crash immédiat)**
-  **Repro** : `train.py --agent CoreAgent --scenario bot --new --training-config x1_debug --step`
-  → `ConfigurationError: Required key 'wall_ref' is missing from mapping`
-  (`_load_scenario_wall_ref`, train.py ~L556, via `_apply_wall_ref_weighting`).
-  **Cause** : `migrate_scenario_bank_v11.py` supprime délibérément `wall_ref` (docstring : « supprime
-  les clés legacy … wall_ref ») — les 61 scénarios migrés sont TERRAIN-ONLY (`board_ref` +
-  `terrain_ref`, vérifié : 61/61 sans `wall_ref`). Le contrat moteur rend `wall_ref` OPTIONNEL
-  (`wall_hexes` XOR `wall_ref`, `terrain_ref` additif — game_state.py ~L285-314). T4 a migré la
-  banque mais pas ce sampler.
-  **Fix** : `_load_scenario_wall_ref` renvoie `Optional[str]` — `None` quand la clé est ABSENTE
-  (état légitime du contrat, pas une valeur par défaut masquant une erreur) ; une clé présente
-  reste strictement validée (erreur explicite si vide/non-string). `None` traverse
-  `_apply_wall_ref_weighting` sans override (poids `"default"` = « garde les murs du scénario »,
-  ~L853) → aucun `wall_ref` injecté.
-
-- **T6-b — `--step` était un no-op SILENCIEUX (bloque analyzer + replay)**
-  **Repro** : le run affiche « 📝 Step logging enabled » puis « ✅ StepLogger connected », et
-  `step.log` reste réduit à son en-tête (7 lignes) après 20 min d'entraînement.
-  **DEUX causes indépendantes, les deux corrigées** :
-  1. *Le StepLogger n'est branché que sur la branche mono-env* (`if step_logger:
-     base_env.step_logger = step_logger`) ; les **trois** branches vectorisées construisent leurs
-     envs avec `step_logger_enabled=False`. Avec `n_envs=48` (x1_debug), `--step` ne pouvait rien
-     produire. Le code forçait déjà `n_envs=1` pour `--replay`/`--convert-steplog` (~L1326) mais
-     PAS pour `--step`. → helper unique `_resolve_n_envs_for_step_logging` (train.py ~L571) branché
-     aux **3** sites de résolution de `n_envs` (~L1354, ~L1665, ~L2129) : force l'env unique ET le
-     DIT. Factorisé volontairement — trois gardes dupliqués sont exactement le motif de migration
-     partielle qui a produit R5. ⚠️ Piège vérifié : les 3 sites impriment le MÊME message
-     « 🚀 Creating N parallel environments » — ne pas se fier au log pour identifier le site actif
-     (`--scenario bot` passe par `train_with_scenario_rotation`, site ~L2129).
-  2. *Bug latent : l'env est RECRÉÉ sans reconnecter le StepLogger* (train.py ~L2637-2651,
-     « For n_envs==1: recreate env with frozen model for self-play »). Ce second `base_env` reçoit
-     `_metrics_tracker` mais jamais `step_logger` → le run journalisait « StepLogger connected »
-     pour un env aussitôt jeté, puis s'entraînait sur un moteur MUET. Chemin exigeant `n_envs==1`
-     (config = 48) → jamais emprunté, donc jamais vu. **Révélé par le fix (1).**
-     → reconnexion en miroir de ~L2377.
-  ⚠️ `StepLogger.log_episode_start` avale toute exception (`except Exception: print("⚠️ Episode
-  start logging error")`, step_logger.py ~L254) — un step.log vide peut donc masquer une erreur.
-  Ici le diagnostic a été fait par élimination (aucun warning émis ⇒ la fonction n'était PAS
-  appelée ⇒ le moteur entraîné n'avait pas de logger).
-
-- **T6-c — `squad_fight` : le COMMIT gym divergeait du PvP (crash d'épisode) — ✅ CORRIGÉ**
-  **Repro** (déterministe) : `MELEE_SCENARIO` + actions tirées par `default_rng(seed*777+i)`,
-  seed=1 → `ValueError: squad_fight: aucune cible pour squad 3 — mask aurait dû l'empêcher`.
-  Seul seed=1 échoue (2 et 3 passent) → **un smoke vert ne prouvait pas son absence**
-  (`smoke_t5_bare.py` tire avec `seed*99991+steps`, séquence différente).
-  **Verdict contre-intuitif** : ce n'était PAS le masque. `_squad_is_in_fight` (« a chargé OU en
-  ER ») est CONFORME à 12.04 et au prédicat PvP `fight_v11_is_eligible_to_fight`, explicitement
-  « indépendant de la présence de cibles ». C'est le commit qui cherchait sa cible dans le
-  **mapping de slots gelé du TIR** (`get_enemy_slot_mapping`) scoré par menace globale, **sans
-  filtre de zone d'engagement** — donc capable de frapper hors ER (violation 12.05) et de crasher
-  quand tous les slots sont morts (chargeur dont la cible meurt avant son activation).
-  **Fix** (`w40k_core.py` SEUL, gym-only — `_process_squad_action` n'est appelé que par `step()`) :
-  le commit consomme le prédicat du flux PvP (`_fight_build_valid_target_pool` +
-  `_ai_select_fight_target`, cf. `_fight_v11_resolve_attacks`) ; pile-in avant la sélection de
-  cible (ordre V11 12.02→12.04) ; pool vide = fight « à vide » via le MÊME moteur d'allocation
-  (0 intent → summary vide, `done=True`). Garde `ValueError` supprimée : elle interdisait un cas
-  légal (12.04/12.06) déjà accepté par le PvP. **Neutralité PvP totale** (`fight_handlers` intact).
-  **Tests (+5)** : `tests/unit/engine/test_squad_fight_target_parity.py` (2 vérifiés comme
-  échouant sur l'ancien code). Détail : `Implémenté/bug_squad_fight_mask_mismatch.md`.
-  ⚠️ **Impact sur le plan §9.4** : le site vif de la cible de mêlée a changé → cf. §9.4 point 1.
-
-- **T6-d — dettes constatées pendant T6-c — DÉCISION UTILISATEUR (2026-07-16) : traiter AVANT le training**
-  - **✅ RÉSOLU (2026-07-16) — Le gym n'entrait PAS dans la machine V11.** Mesuré sur épisode
-    complet : en phase fight, l'état était invariablement `(fight_subphase='pile_in',
-    snapshot_present=False, nb_selected_to_fight=0)`. `fight_phase_start` initialisait la machine,
-    puis `squad_fight` (`_process_squad_action`) déroulait le sien — pile-in + fight +
-    consolidation **par escouade, en une passe** — sans jamais avancer les états V11.
-
-    **Diagnostic — deux ruptures, pas une.** (1) *États jamais posés* :
-    `engaged_at_fight_step_start` absent (branche 12.04 « was engaged at the start of this step »
-    inapplicable), `units_selected_to_fight` vide (12.04 « has not already been selected to fight
-    this phase » **non appliqué** → une escouade engagée pouvait être re-sélectionnée dans la même
-    phase ; 12.08 « was eligible to fight this phase » dérive du même set), `pile_in_done` vide.
-    (2) *Ordre de phase faux* : 12.02 exige que TOUS les pile-in des DEUX joueurs précèdent le
-    premier combat, et 12.04 date son snapshot du début de l'étape FIGHT — impossible tant que le
-    pile-in d'une escouade s'intercale entre deux combats. Aucune pose d'état a posteriori ne
-    corrige ça : c'est la découpe de l'action qui était fausse.
-
-    **Fix — `w40k_core.py` seul, `fight_handlers` NON touché (neutralité PvP).** `squad_fight`
-    devient **UNE sélection de l'étape FIGHT (12.04)**, encadrée par `_fight_v11_gym_settle` qui
-    résout les deux étapes groupées (PILE IN 12.02 puis CONSOLIDATE 12.07) via les planificateurs
-    **par-figurine** existants (`fight_pile_in_plan` / `squad_consolidate_plan` — jamais les
-    helpers par-ancre condamnés). Aucune perte d'agence : l'agent ne choisissait déjà aucune
-    destination de pile-in/consolidation, seulement l'unité qui combat. Action space, taxonomie de
-    reward et compte de steps inchangés. Le driver **ne termine pas la phase** : le gym transitionne
-    par `advance_phase` sur masque vide, comme toutes les autres phases — compléter depuis une
-    action d'unité déclencherait la cascade, qui **remplace** le résultat de l'action et ferait
-    perdre à l'agent le `fight_result` (donc le reward) du combat clôturant la phase.
-
-    **Vérifié** : `fight_subphase` atteint `fight` puis `consolidate`, snapshot posé après les
-    pile-in, alternance des sélecteurs P1↔P2 réelle, 17 `squad_fight` (vs 6) sur le même épisode.
-    Suite 1293 verte, smoke `(A)/(B)` OK (5 kills mêlée, Carnifex charge), 18 épisodes
-    BotControlledEnv+GreedyBot (p1/p2/random × 2 seeds) sans échec. Verrou :
-    `tests/unit/engine/test_squad_fight_v11_state.py` (6 tests, tous rouges sur l'ancien code).
-    Effet de bord corrigé au passage : `end_activation(arg4=FIGHT)` dérivait `phase_complete` des
-    pools V10 que V11 ne construit plus (toujours vides → toujours `True`) ; signal mort écarté.
-  - **Overrun 12.06 absent du gym** — n'existe qu'en modèle par-ancre, condamné par la décision
-    « le pile-in de référence est le par-figurine du PvP » (2026-07-16). Légal (12.06 : « **can**
-    make one additional pile-in move »). Spec complète : `A_faire/overrun.md`.
-  - **Mismatch cellules/clearance du BFS pile-in/conso** — mesuré 1102 ancres sur 72857 ; fix
-    écrit, mesuré (0/71755 après, perf 2m01→1m33), puis **REVERTÉ** : `fight_handlers` est partagé
-    et le changement n'est pas neutre PvP. Ne concerne que du code par-ancre condamné → priorité
-    basse. Détail + mesures : `A_faire/bug_pile_in_bfs_clearance_mismatch.md`.
-
-- **T6-e — `_turn_step_limit` absent sur le chemin single-scenario (BLOQUANT, crash immédiat) —
-  ✅ CORRIGÉ (2026-07-19)**
-  **Repro** : `train.py --agent CoreAgent --training-config x5_debug --scenario <fichier.json>
-  --new --resolution 5` → `ConfigurationError: Required key '_turn_step_limit' is missing from
-  mapping` dans `setup_callbacks` ([train.py:3096](../../ai/train.py#L3096)).
-  **Cause** (même famille que T6-a/T6-b : migration partielle d'un chemin de train.py) :
-  `training_config["_turn_step_limit"]` n'était écrit que par DEUX chemins — la rotation de
-  scénarios (`train_with_scenario_rotation`, bloc inline de calcul du budget) et MacroController
-  ([train.py:4786](../../ai/train.py#L4786), relevé sur son propre moteur). Le chemin
-  **single-scenario** (`--scenario <fichier>` → `create_multi_agent_model` → `setup_callbacks`)
-  ne l'écrivait jamais, alors que TROIS lecteurs le `require_key` :
-  [train.py:3096](../../ai/train.py#L3096), [train.py:3469](../../ai/train.py#L3469),
-  [multi_agent_trainer.py:556](../../ai/multi_agent_trainer.py#L556). Crash systématique, quel
-  que soit le scénario.
-  **Fix** : le bloc inline de la rotation est extrait en helper
-  `resolve_turn_step_limit(scenario_files, training_config, use_bots, log)`
-  ([train.py:2102](../../ai/train.py#L2102)) — MÊME formule (`compute_turn_step_limit` sur le
-  scénario au max de figurines, probe des sièges p1/p2/random si `use_bots`) — appelé par les
-  deux chemins : rotation ([train.py:2302](../../ai/train.py#L2302)) et single-scenario
-  ([train.py:1757](../../ai/train.py#L1757), `use_bots` dérivé de « bot » dans le nom du
-  scénario, miroir du choix `BotControlledEnv` ~L1830). Factorisation volontaire : deux calculs
-  dupliqués = le motif exact qui a produit R5 et T6-a. Code mort supprimé au passage dans le
-  bloc extrait (`num_phases`/import `GAME_PHASES`, calculé et jamais lu).
-
-- **T6-f — Commit de déploiement `deploy_unit` mono-ancre : `models_cache` JAMAIS écrit
-  (BLOQUANT gym, crash DIFFÉRÉ en phase move ; touche AUSSI des chemins PvP) — ✅ FAIT
-  (2026-07-19, +10 tests `test_deployment_per_model_commit.py`)**
-  ⚠️ Cet en-tête est resté « ❌ À FAIRE » jusqu'au 2026-07-19 alors que le fix était livré et
-  testé : il contredisait §0 ET le tableau des critères. Corrigé. L'analyse ci-dessous reste
-  valable comme historique de la rupture.
-  **Rayon (vérifié par lecture, conséquence runtime démontrée côté gym seulement)** : le commit
-  fautif est PARTAGÉ — (a) gym via l'action decoder ; (b) auto-déploiement P2 du tutoriel
-  ([api_server.py:2255](../../services/api_server.py#L2255)) ; (c) drag mono-socle PvP encore
-  actif quand `deployment_type != "active"` (`handleDeployUnit`,
-  [useEngineAPI.ts:5512](../../frontend/src/hooks/useEngineAPI.ts#L5512), cf.
-  [BoardPvp.tsx:10875](../../frontend/src/components/BoardPvp.tsx#L10875)) et sa route
-  sémantique ([w40k_core.py:5265](../../engine/w40k_core.py#L5265)). Tous laissent les
-  figurines à `(-1,-1)`.
-  **C'est un TROISIÈME bug de déploiement, distinct** de la parité masque/commit T5
-  (`_deployment_clearance_filter` — divergence de prédicat, mono-ancre des deux côtés) et du
-  logging analyzer (§ « Le déploiement n'était PAS journalisé ») : ici c'est le COMMIT lui-même
-  qui est resté pré-V11.
-  **Repro** (déterministe, moteur nu, scénario `training_benchmark`, premier index du masque à
-  chaque step) : crash au step 7, première action de move —
-  `ValueError: execute_squad_move a échoué : squad=1 type=fall_back dest=(214,96) depuis
-  (217,154) — incohérence masque/exécution`. Indépendant du terrain (reproduit avec
-  `terrain-mc1` ET `terrain-train-01`) et du roster.
-  **Root cause (tracée sur l'état)** : après le déploiement gym, `units_cache["1"]` porte bien
-  l'ancre `(217,154)` mais les 6 figurines de `models_cache` restent à `(-1,-1)`. La branche
-  `deploy_unit` d'`execute_deployment_action`
-  ([deployment_handlers.py:953](../../engine/phase_handlers/deployment_handlers.py#L953)) commit
-  via `set_unit_coordinates` + `update_units_cache_position`
-  ([shared_utils.py:1255](../../engine/phase_handlers/shared_utils.py#L1255) — n'écrit que
-  `units_cache` + carte d'occupation, jamais `models_cache`). Le chemin PvP `deploy_commit` →
-  `_apply_deploy_plan`
-  ([deployment_handlers.py:824](../../engine/phase_handlers/deployment_handlers.py#L824)), lui,
-  écrit chaque figurine via `update_model_position` puis synchronise l'ancre.
-  **Mécanisme du crash** : le pool BFS du masque de move part de l'ancre `units_cache` (valide),
-  mais `build_rigid_plan` ([shared_utils.py:3243](../../engine/phase_handlers/shared_utils.py#L3243))
-  translate depuis `models_cache` : 6 figurines confondues en `(-1,-1)` → plan = 6 figs sur le
-  MÊME hex destination, et `validate_move_plan` rejette (budget per-model : distance 215 depuis
-  `(-1,-1)` > 60 ; collision intra-plan en second rideau). Le masque avait autorisé la cellule →
-  la garde « incohérence masque/exécution » de `_process_squad_action` lève. En vectorisé, les
-  8 workers `SubprocVecEnv` meurent (EOFError côté parent).
-  **Pourquoi invisible jusqu'ici** : T5 a validé la boucle moteur nu AVANT la migration squad
-  par-figurine du move (T6/refonte spatiale) — tant que l'exécution du move raisonnait par
-  ancre, des figurines à `(-1,-1)` ne faisaient rien crasher (elles produisaient seulement les
-  fausses collisions analyzer, cf. § logging).
-  **Fix appliqué (2026-07-19) — le commit produit et exécute un plan PAR-FIGURINE validé, pour
-  les TROIS chemins d'un coup** (`deployment_handlers.py` + `action_decoder.py`) :
-  1. Nouveau `build_validated_deployment_plan` (deployment_handlers) : `generate_compact_formation`
-     autour de l'ancre + `deployment_preview_plan` ; rend le plan (4-uplets, niveau 0) SI toutes
-     les figurines sont légales, sinon `None`. Lecture pure et déterministe.
-  2. `deploy_unit` commit désormais via `_apply_deploy_plan` — le MÊME écrivain que le flux PvP
-     par escouade (`update_model_position` par figurine + sync de l'ancre). Plan illégal =
-     refus explicite `deploy_plan_invalid`. Comme les trois chemins du rayon partagent cette
-     branche, ils sont corrigés ensemble.
-  3. `_select_deployment_hex_for_action` (décodeur) retient la meilleure ancre de la stratégie
-     **dont la formation est exécutable** : le `max` est remplacé par un parcours par score
-     décroissant qui s'arrête au 1er plan valide ; épuisement = `ValueError` explicite. Sans
-     ça, une ancre au bord de zone pouvait scorer 1re et n'admettre aucune formation → deadlock
-     masque/commit, exactement la classe de bug corrigée en T5.
-  4. Le plan validé par le décodeur est mémoisé (`store_/read_validated_deployment_plan`, tampon
-     escouade+ancre+phase+nb déployés) pour que le commit ne le RECALCULE pas. Pure économie —
-     le helper étant déterministe (verrouillé par test), la mémo n'est jamais une source de
-     vérité divergente ; son absence (chemins PvP sans décodeur) est un état légitime.
-  **Résultat mesuré** : déploiement gym complet, `training_benchmark` — 0 figurine à `(-1,-1)`
-  (6/6 escouades). Chemin « ancre imposée » (drag PvP / auto-deploy tutoriel) exercé sur les
-  16 104 hexes de la zone : 6/6 escouades posées, refus répartis en 1815
-  `deploy_footprint_out_of_bounds` + 263 `outside_zone` + 31 `occupied` (tous de la validation
-  mono-ancre PRÉEXISTANTE) et seulement **2** `deploy_plan_invalid` — le fix ne restreint
-  quasiment pas les placements.
-  **Coût, et son optimisation** (phase de déploiement complète, board x5, 6 escouades) :
-  | étape | temps | note |
-  |---|---|---|
-  | avant le fix | 1,03 s | ne plaçait AUCUNE figurine — coût non représentatif |
-  | fix naïf | 2,31 s | `generate_compact_formation` payé 2× (décodeur + commit) |
-  | + mémoisation (point 4) | 1,70 s | supprime le doublon |
-  | + empreinte pré-calculée | **1,37 s** | voir ci-dessous |
-  5. **Empreinte par translation d'offsets dans `generate_compact_formation`.** cProfile :
-     `_legal_socle` = 92 % du coût de la fonction, dont 67 % à reconstruire l'empreinte du socle
-     via `compute_occupied_hexes`/`_footprint_round` — **2 590 reconstructions et 341 660 appels
-     à `_hex_center` pour UNE formation**, parce que la spirale BFS recalcule la forme à chaque
-     case. Remplacé par `precompute_footprint_offsets` (deux jeux d'offsets, parité de colonne),
-     le helper prévu exactement pour ça (docstring : « expensive when called per-BFS-step ») et
-     déjà utilisé par `_get_valid_deployment_hexes`. **50 ms → 17,4 ms par formation (×2,9).**
-     Équivalence stricte vérifiée par test aux deux parités — code partagé avec le déploiement
-     PvP par escouade, une divergence déplacerait des socles à l'écran.
-  **Reste optimisable (non fait)** : la spirale teste encore chaque case par balayage de son
-  empreinte (~77 % du résiduel) et `_deploy_pool_set` est reconstruit à chaque appel (~13 %).
-  Pistes, mesures et pièges : [`A_faire/perf_generate_compact_formation.md`](A_faire/perf_generate_compact_formation.md).
-  ⚠️ Le gain d'une érosion n'est PAS acquis dans le cas nominal (spirale qui s'arrête en
-  quelques cases) — à mesurer avant d'implémenter. Non bloquant : le vrai frein du training est
-  T6-g/T6-h, pas cette perf.
-  **Tests (+10)** : `tests/unit/engine/test_deployment_per_model_commit.py` — placement de toutes
-  les figurines, ancre = figurine d'index minimal (l'invariant dont `build_rigid_plan` dépend),
-  légalité du plan committé, déterminisme + lecture pure du helper, invalidation de la mémo sur
-  tampon périmé, équivalence de l'empreinte pré-calculée aux deux parités. Les 8 premiers sont
-  rouges sur l'ancien code. Suite `tests/unit` : mêmes échecs préexistants qu'avant le fix
-  (baseline vérifiée par `git stash`), aucune régression.
-  **Dette assumée** : `deploy_unit` porte désormais DEUX modèles de validation — la mono-ancre
-  héritée de T5 (empreinte du socle de l'unité ⊆ pool, miroir du masque) et la par-figurine.
-  La première n'a plus de sens géométrique strict une fois le placement fait par figurine ; elle
-  ne survit que parce que le masque T5 s'y aligne. **Planifié en T7** (section 5), déclencheur
-  « le training tourne » — le fondement règles y est établi par lecture des PDF (la mise en place
-  est PAR FIGURINE, aucun socle à l'ancre dans les règles).
-  ⚠️ **Écarté après analyse — deux fausses bonnes idées** :
-  - *Filtrer le pool entier par `deployment_build_squad_destinations_pool`*
-    ([deployment_handlers.py:552](../../engine/phase_handlers/deployment_handlers.py#L552)) :
-    INSUFFISANT (ne teste que zone-fit du bloc rigide — pas les murs par-figurine, pas le
-    chevauchement d'unités déployées, pas §13.06, tous exigés par `deployment_preview_plan`) et
-    SURDIMENSIONNÉ (~16 000 hexes validés pour 5 slots-stratégies utilisés).
-  - *Valider les ancres DANS le masque* : impossible sans le réécrire — le masque n'active que
-    5 slots (`mask[4+i]`) et ne connaît PAS les ancres, qui sont calculées au décodage par
-    `_select_deployment_hex_for_action`. C'est donc le décodeur qui doit filtrer (point 3).
-  ⚠️ **Comportement non évident vérifié et verrouillé par test** : dans
-  `generate_compact_formation`, l'ancre ORIENTE le placement mais ne le CONTRAINT pas (sa
-  spirale retient la 1re case légale) — une ancre hors zone place l'escouade dans la zone la
-  plus proche au lieu d'échouer. Le refus d'une ancre hors zone reste donc porté par la
-  validation mono-ancre de `deploy_unit` (`deploy_footprint_outside_zone`), à ne pas retirer.
-  ⚠️ **Chemin tutoriel PvP non validé runtime** : `config/tutorial/scenario_etape*.json` ne se
-  charge plus du tout (`wall_ref` legacy sans `board_ref` →
-  `ValueError` dans `_resolve_board_dir`, game_state ~L1664) — dette T4 indépendante de ce fix
-  (la migration de banque n'a pas couvert `config/tutorial/`). Le chemin a été validé par son
-  équivalent fonctionnel (commit à ancre imposée, ci-dessus).
-
-- **T6-g — Le pool BFS du move valide l'ANCRE, pas le BLOC translaté — ✅ FAIT (2026-07-19)**
-  **Réalisé** : `erode_move_pool_by_squad_block` (shared_utils), appelée par
-  `build_squad_move_cell_map` sur les `costs` du BFS, AVANT `project_pool_to_grid` — donc la
-  grille égocentrique, le masque et le décodage lisent tous le pool érodé (la source unique
-  reste unique). Le bloc est réduit à ses offsets CUBE relatifs à l'ancre (invariants depuis
-  T6-h), **groupés par NIVEAU** (une figurine ne collisionne qu'avec les figs d'un autre squad
-  au même étage — miroir exact de `validate_move_plan`), et les cellules interdites sont
-  pré-agrégées par niveau en un seul set (murs ∪ occupation ∪ ER ennemie) → un test
-  d'appartenance par figurine et par candidate, pas d'appel à `validate_move_plan` dans la
-  boucle. Invariants non érodés car démontrés invariants par translation : budget per-model et
-  cohésion (cf. §0). Aucune règle de jeu modifiée : l'érosion ne fait que RETIRER du masque des
-  destinations que l'exécution refusait déjà.
-  **Validation** : +6 tests dédiés (mur/autre escouade/ER sous une SŒUR alors que l'ANCRE est
-  légale, débordement de plateau, non-sur-filtrage, court-circuit mono-figurine) ; run x5_debug
-  8 workers 10/10 épisodes et run mono-env x1_debug, **zéro** « incohérence masque/exécution ».
-  ⚠️ **Ce « zéro » ne vaut que pour les 10 épisodes mesurés** : une AUTRE cause de la même
-  classe a tué un run de 250 épisodes le 2026-07-20 — cf. **§0.11** (collision intra-plan
-  aveugle au niveau). L'érosion de T6-g reste correcte ; c'était le prédicat de collision
-  qu'elle ne teste pas — à raison — qui était faux.
-  Historique de la rupture ci-dessous.
-  **Repro** (moteur nu, `training_benchmark`, premier index du masque) : dès que les figurines
-  sont réellement placées, le crash T6-f se déplace au squad suivant —
-  `ValueError: execute_squad_move a échoué : squad=3 type=normal dest=(195,163) depuis
-  (197,168) — incohérence masque/exécution`.
-  **Root cause (tracée entrée par entrée sur le plan rigide)** : `build_squad_move_cell_map`
-  ([shared_utils.py:7394](../../engine/phase_handlers/shared_utils.py#L7394)) construit le pool
-  via `movement_build_valid_destinations_pool`, qui raisonne sur l'**ancre** de l'escouade, puis
-  le projette sur la grille égocentrique. Mais l'exécution passe par `build_rigid_plan`, qui
-  **translate TOUTES les figurines** du même vecteur — sans qu'aucune contrainte n'ait été
-  testée sur elles. Sur le plan rejeté : 3 figurines (`3#4`, `3#5`, `3#6`) atterrissent sur une
-  autre escouade et 1 (`3#17`) sur un mur, alors que l'ancre `3#0` est parfaitement légale.
-  `validate_move_plan` rejette donc une destination que le masque avait offerte.
-  **Ce n'est PAS une régression de T6-f** : le mismatch est structurel (pool d'ancre vs
-  exécution de bloc) et préexistait ; il était simplement masqué par T6-f, qui faisait échouer
-  le move plus tôt, pour une autre raison.
-  **Modèle retenu (décision utilisateur 2026-07-19) : érosion morphologique** — éroder la grille
-  des cellules acceptables par l'empreinte COMBINÉE de l'escouade, puis lire le résultat à
-  l'ancre. Exact (les autres unités sont fixes pendant le move de l'escouade), vectorisable, et
-  le code a déjà ce précédent exact dans `_get_valid_deployment_hexes` (érosion par empreinte,
-  DEUX jeux d'offsets selon la parité de colonne). Écarté : `validate_move_plan` en post-filtre
-  des candidates — exact aussi mais Python pur, |pool| × |figurines| par step (~2800 × 20).
-  ⚠️ **Ordre imposé par T6-h** : l'érosion suppose des offsets de bloc INVARIANTS par
-  translation. C'est faux aujourd'hui (cf. T6-h) — corriger la translation AVANT d'éroder,
-  sinon l'érosion valide une forme que l'exécution ne reproduit pas.
-  **À ne pas oublier dans le filtre** : bornes, murs, occupation des autres escouades PAR NIVEAU
-  et `forbid_enemy_er` (toutes des contraintes de cellule, donc érodables). La cohésion et le
-  budget per-model deviennent invariants une fois T6-h corrigé (translation réellement rigide),
-  mais `validate_move_plan` mesure le budget par `calculate_hex_distance` depuis chaque origine :
-  le vérifier plutôt que le supposer.
-
-- **T6-h — `build_rigid_plan` : la translation « rigide » DÉFORME le bloc (bug de parité hex) —
-  ✅ FAIT (2026-07-19)**
-  **Réalisé** : translation en coords CUBE (`offset_to_cube` / `cube_to_offset`) dans
-  `build_rigid_plan`. **L'audit « autres consommateurs de translation de bloc » demandé par le
-  plan a trouvé DEUX autres sites portant le même bug**, tous deux alignés :
-  - `translate_squad_to_destination` (shared_utils) — **le plus grave** : c'est l'ÉCRIVAIN du
-    commit, partagé par move / charge / fight / pile-in / consolidation. Corriger
-    `build_rigid_plan` seul aurait fait committer une formation DIFFÉRENTE de celle que
-    `validate_move_plan` venait d'accepter (plan validé en cube, commit appliqué en offset) —
-    soit exactement la classe de bug « validé ≠ exécuté » que T6-g élimine ;
-  - `preview_hidden_models_after_move` (shooting_handlers) — simulation read-only du statut
-    « caché » (13.09) après move, dont la docstring se réclame explicitement du miroir de
-    `translate_squad_to_destination` : à `dx` impair, le preview affichait un bloc déformé,
-    donc un statut caché faux (impact PvP direct, pas seulement gym).
-  **Validation** : +10 tests paramétrés sur `dx` pair ET impair (distances internes préservées,
-  ancre exactement sur la destination) — **rouges sur le code d'avant** aux seules parités
-  impaires, verts après. Historique de la rupture ci-dessous.
-  **Mesure** (2 figurines voisines, translation du bloc en offset puis distance interne
-  recalculée par `calculate_hex_distance`) :
-  `dx` pair → écart 0 (forme préservée) ; **`dx` impair → écart 1** : deux figurines à distance
-  2 se retrouvent à distance 1.
-  **Cause** : `build_rigid_plan`
-  ([shared_utils.py:3243](../../engine/phase_handlers/shared_utils.py#L3243)) applique
-  `new_col = col + dx, new_row = row + dy` en coordonnées OFFSET. En grille hexagonale offset,
-  une translation à `dx` impair change la parité de colonne de chaque figurine et n'est donc PAS
-  une translation hexagonale — la formation se déforme.
-  **Le projet connaît déjà ce piège et l'évite ailleurs** :
-  `deployment_build_squad_destinations_pool`
-  ([deployment_handlers.py:552](../../engine/phase_handlers/deployment_handlers.py#L552)) passe
-  explicitement par les coords CUBE, docstring « La translation rigide passe par les coords cube
-  (pas de bug de parité) ». `build_rigid_plan` n'a pas reçu ce traitement.
-  **Conséquences** : cohésion et collisions intra-plan faussées (deux figurines peuvent se
-  télescoper alors que le bloc d'origine était valide), distances per-model non uniformes, et
-  toute optimisation supposant des offsets constants (dont l'érosion de T6-g) invalide.
-  **Fix** : translater en cube (`offset_to_cube` / `cube_to_offset`), miroir du helper de
-  déploiement. Vérifier au passage les autres consommateurs de translation de bloc.
-  ⚠️ **Distinct de T6-g** : le crash T6-g mesuré avait `dx = -2` (pair), donc sans déformation —
-  les deux bugs sont indépendants et cumulatifs.
-
-**T6.2 — métriques TensorBoard : RÉSOLU, la mémoire projet était périmée.** Inspection directe
-des `events.out.tfevents.*` (EventAccumulator) sur training neuf : `0_critical/` porte bien les
-métriques PPO — `f_loss_mean`, `g_explained_variance`, `h_clip_fraction`, `i_approx_kl`,
-`j_entropy_loss`, `m_value_loss_smooth`, **56 points chacune** ; `training_critical/` expose ses
-6 tags. Le fix `_dump_with_capture` du 2026-05-22 tient. Nuance non diagnostiquée (sans impact) :
-`train/*` et `training_critical/*` n'ont qu'1 point là où `0_critical/*` en a 56 — répartition
-entre les deux fichiers d'events (`CoreAgent/` et `x1_debug_CoreAgent_1/`).
-
-**Run T6.1 — « run court complet sans erreur » : DÉMONTRÉ sur les deux chemins.**
-- **n_envs=48** : **467/500 épisodes, zéro exception** (`win_rate_overall = 0.296` à l'ép. 467),
-  coupé par le `timeout 2400` de l'opérateur — pas par une erreur.
-- **mono-env (`--step`, après fixes T6-b)** : **475/500 épisodes, zéro exception**, step.log de
-  12 561 lignes, coupé par le `timeout 5400` de l'opérateur.
-x1_debug (500 ép.) demande > 40 min à n_envs=48 et > 90 min en mono-env — dimensionner le timeout
-en conséquence pour un run réellement complet.
-
-**T6.3 — baseline bots : NON DÉMONTRÉE (données insuffisantes, pas une régression).**
-Mesuré sur le run de 467 épisodes (adversaire = GreedyBot randomness=0.15 via BotControlledEnv) :
-- `win_rate_100ep` (glissant) ~0.33 au milieu → **0.296** à la fin ; `win_rate_overall` plat
-  autour de **0.30** (0.270 → 0.320 → 0.307 → 0.305 → 0.296 par tranches de 100).
-- `episode_reward` (moyenne 100 premiers vs 100 derniers) : **-12.53 → -8.33** (progression nette).
-Lecture honnête : le reward progresse, le win-rate stagne à ~30 % (l'agent ne bat PAS GreedyBot).
-**Mais 467 épisodes sur un budget nominal de 50 000 (`total_episodes_normal` de x1_debug) est du
-bruit** — ni preuve de succès ni preuve d'échec. Le critère « win-rate en progression / stabilité
-multi-scénarios » exige la phase `x1` réelle + `bot_evaluation` sur holdout (vs RandomBot), pas
-`x1_debug` (500 ép.). ⚠️ Ne pas conclure sur ces chiffres.
-
-### ✅ T6-c — RÉSOLU (2026-07-16) : le StepLogger n'avait jamais été migré vers le pipeline squad
-
-**Décision utilisateur : migrer (option a).** Fait. `ai/analyzer.py` tourne désormais de bout en
-bout sur un step.log produit par le pipeline squad.
-
-**Root cause réelle — pas « le step logger n'a pas été câblé », mais un CONTRAT MOTEUR VIOLÉ.**
-`end_activation(game_state, unit, arg1, ...)` (generic_handlers ~L70-101) définit :
-`arg1="ACTION"` → « *Log the action (action already logged by handlers)* » ;
-`arg1="WAIT"` → `end_activation` émet lui-même l'action_log ; `arg1="NO"` → rien.
-Or `_process_squad_action` appelait `end_activation(..., ACTION, ...)` après un move et une charge
-réussis — donc en PROMETTANT que le handler avait journalisé — alors que `execute_squad_move` et
-`charge_build_valid_plan` n'émettaient **aucun** `append_action_log` (contrairement au chemin
-legacy par-figurine, movement_handlers ~L3701/4107, charge_handlers ~L5597/5877).
-**`game_state["action_logs"]` était donc incomplet sur le chemin squad** ; le step.log vide n'en
-était qu'un symptôme.
-
-**Solution — réparer le contrat, pas dupliquer 17 sites de journalisation** :
-1. **Émission des action_logs manquants** dans `_process_squad_action` (miroir des payloads
-   legacy) : `move` (avec `move_type` portant normal/advance/fall_back), `charge`, `charge_fail`,
-   **`deploy_unit`** (cf. ci-dessous). `shoot`/`combat`/`hazard`/`wait` en émettaient déjà.
-2. **Un point d'accroche UNIQUE** : `_flush_squad_action_logs_to_step_logger` (w40k_core), appelé
-   depuis `step()` après le dispatch. Draine `action_logs[curseur:]` → `log_action`, via une table
-   `_STEP_LOG_TYPE_MAP` (type moteur → action_type du formateur) et `_build_step_log_details`
-   (camelCase moteur → snake_case formateur). No-op complet sans `--step`.
-3. **Émission PAR JET** pour `shoot`/`combat` : le moteur agrège les jets d'un groupe (arme,
-   cible) dans `shootDetails`, le formateur travaille par attaque → une ligne par jet, via
-   `_SHOT_RECORD_FIELD_MAP` (`attackRoll`→`hit_roll`, `strengthRoll`→`wound_roll`,
-   `saveSuccess`→`save_result`…). Les 11 champs sont exigés même sur un MISS (présence de la clé) :
-   `None` est correct, le formateur ne rend `Wound` que si `hit_result == "HIT"`.
-4. **État fight capturé AVANT l'action** (`_pre_action_fight_state`) : le formateur `combat`
-   exige `fight_subphase` + les 3 pools d'activation (contrat replay), et l'action les mute.
-
-⚠️ **Rayon PvP : NUL, vérifié.** `execute_squad_move` n'a qu'UN appelant (`_process_squad_action`)
-et `_process_squad_action` n'est appelé que depuis `step()`/`_build_observation` = gym.
-Le PvP (`services/api_server.py`) passe par `execute_semantic_action` → `_process_semantic_action`.
-
-**Le déploiement n'était PAS journalisé non plus** (`deployment_handlers` : grep
-`append_action_log` = 0). Conséquence mesurée et non évidente : `log_episode_start` écrit les
-unités non déployées en `(-1,-1)`, et sans log de déploiement l'analyzer n'apprenait JAMAIS leur
-position réelle → **49 fausses « collisions »** (contrôle 2.2). Émettre `deploy_unit` les a
-résolues d'un coup (49 → 0).
-
-**Bug de règle trouvé DANS l'analyzer** (faux positifs, pas un bug moteur) :
-`_track_action_phase_accuracy` (analyzer.py ~L835) attendait `"advance": "SHOOT"`. **Faux** :
-PDF projet « 09 Movement phase.pdf », règle **09.02 MOVE UNITS > Select Move Type** liste
-l'*Advance move* parmi les types de mouvement de la **phase de Mouvement** (avec Normal move,
-Fall-back move, Remain stationary). Le moteur le résout bien en phase MOVE. Corrigé en
-`"advance": "MOVE"` → **105 faux positifs supprimés**.
-
-**Résultat sur le VRAI `train.py --agent CoreAgent --scenario bot --new --training-config
-x1_debug --step`** (56 épisodes, **3452 lignes d'action**, **0 erreur avalée**) — `ai/analyzer.py`
-tourne de bout en bout et rendait **14 erreurs** ; après le traitement du faux positif LoS
-(2026-07-16) il n'en reste **2**, le seul ❌ étant l'artefact 2.6 ci-dessous :
-- ✅ 1.1 move : 0 ; ✅ 1.3 charge : 0 ; ✅ 1.4 fight : 0 ; ✅ 1.5 wrong phase : 0 ;
-  ✅ 1.6 double-activation : 0 ; ✅ 2.1 dead units : 0 ; ✅ **2.2 positions : 0** ;
-  ✅ 2.3 DMG : 0 ; ✅ 2.5 episode ending : 0 ; ✅ 2.7 core issue : 0.
-- ✅ **1.2 erreurs en phase de shooting : 0** — **TRANCHÉ ET TRAITÉ le 2026-07-16**, était 12
-  (`shoot_through_wall = 6` + `shoot_invalid.no_los = 6` = les MÊMES 6 tirs, incrémentés dans la
-  MÊME branche, shoot_handler.py ~L165). **Verdict : faux positifs de l'analyzer, aucun bug
-  moteur, backend non modifié.** Détail complet, preuve et options rejetées :
-  `A_faire/analyzer_los_ancre_vs_perfig.md`.
-  **Cause structurelle confirmée — le CONTRÔLEUR est périmé, pas le moteur** (et il n'y a
-  AUCUNE divergence training/PvP : le moteur est unique et pilote les deux) :
-  - L'analyzer n'a PAS sa propre LoS — il appelle bien `engine.hex_utils.compute_los_state`
-    (analyzer.py ~L602, docstring : « same algorithm as the game engine »). **Mais il l'appelle
-    ANCRE-À-ANCRE** : `has_line_of_sight(shooter_col, shooter_row, target_col, target_row,
-    wall_hexes)` — un point contre un point.
-  - Le moteur, lui, fait `_attacker_model_can_reach_squad` (shared_utils ~L4243) : LoS
-    **PER-FIGURINE**, origine = **empreinte COMPLÈTE du socle tireur** (« pas son seul centre »),
-    distance bord-à-bord, via `_compute_visibility_with_obscuring` (murs denses + obscurcissant,
-    13.10). **Son propre commentaire décrit exactement ce faux positif** : « une grosse base dont
-    le centre est masqué par un terrain (mais dont un bord voit la cible) était grisée à tort ».
-  - → L'analyzer refait le test centre-à-centre que le moteur a DÉLIBÉRÉMENT abandonné. Même
-    dette que R5 / le step logger / les objectifs de l'analyzer : outil resté sur le modèle
-    pré-squad « une unité = un point ».
-  - Second suspect : `except Exception: return False` (analyzer.py ~L630) — **écarté par mesure**
-    (aucune exception levée : `compute_los_state` brut rend le même `False`). Supprimé quand même
-    (CLAUDE.md). Troisième suspect « murs incomplets » écarté aussi : ligne `Walls:` complète.
-  - **Confirmé sur un tir précis** (E7 T3 P1 `Unit 4(215,155) SHOT Unit 104(116,66)`) : l'ancre
-    rend `can_see=False`, mais **3 des 19 cellules** de l'empreinte du socle (`round/6`) voient la
-    cible. Règle 06.01 (PDF lu) : « from **any part** of that model to **any part** of the model
-    being observed » → l'ancre-à-ancre est plus restrictif que la règle.
-  - **Correction (option c)** : le contrôle est SUPPRIMÉ de l'analyzer et la vérification
-    DÉPLACÉE dans `tests/unit/engine/test_shoot_los_perfig_parity.py`, où `game_state` existe.
-    Le réparer sur place était impossible : les primitives moteur exigent `game_state`
-    (empreintes, obscurcissant 13.10, LoS 3D) que step.log ne porte pas ; et logger le verdict du
-    moteur serait circulaire (le tir est déjà gaté par `_attacker_model_can_reach_squad`).
-  ⚠️ **La journalisation n'est fidèle que pour les JETS** (`Hit 6(3+) - Wound 5(5+) - Save 1(4+) -
-  Dmg:2HP` ; un MISS ne rend que `Hit 2(3+)`). **Ses COORDONNÉES sont fausses** :
-  `_emit_squad_shoot_log` (shared_utils ~L5758) loggue l'ancre d'ESCOUADE, pas la figurine qui
-  tire — dette V11 « une unité = un point » non traitée, chantier séparé.
-- ❌ 2.6 « Sample missing (2/5) : charge, fight » = artefact du run (agent frais : ne charge ni
-  ne combat jamais sur 56 épisodes), PAS un défaut.
-
-**C'est la valeur du chantier T6-c** : l'outil de validation du projet fonctionne enfin, et il a
-IMMÉDIATEMENT trouvé une divergence LoS analyzer↔moteur qu'aucun test unitaire ne voyait.
-
-**Résultat sur un step.log de moteur nu (3 épisodes, actions aléatoires)** — `157 erreurs → 52 → 3` :
-- ✅ 1.1/1.2/1.3/1.4 erreurs par phase : 0 ; ✅ 1.5 wrong phase : **0** (était 105) ;
-  ✅ 1.6 double-activation : 0 ; ✅ 2.1 dead units : 0 ; ✅ 2.2 positions incohérentes : **0**
-  (était 49) ; ✅ 2.3 DMG issues : 0 ; ✅ 2.5 episode ending : 0 ; ✅ 2.7 core issue : 0.
-- ❌ 2.6 « Sample missing (3/5) : shoot, charge, fight » = **artefact du run** (actions aléatoires
-  non dirigées : ni tir ni charge ni combat), PAS un défaut. Le scénario de mêlée garantie produit
-  bien `FOUGHT`/`FAILED CHARGE` (vérifié : 40 lignes `FOUGHT` avec détail par jet
-  « Hit 3(3+) - Wound 5(2+) - Save 2(7+) - Dmg:1HP »), et zéro erreur avalée.
-
-⚠️ **Piège vérifié** : `StepLogger.log_action` et `log_episode_start` AVALENT toute exception
-(`except Exception: print("⚠️ ... logging error")`, step_logger.py ~L254). Un champ manquant
-produit une ligne SILENCIEUSEMENT absente, pas un crash. **Contrôler `grep -c "logging error"`
-après tout changement de mapping** — c'est ainsi qu'ont été trouvés les manques `hit_roll` puis
-`deploy … position data`.
-
-Plan d'origine (résolu ci-dessus) :
-
-**Fait vérifié (statique)** : `_process_squad_action` (w40k_core.py, def ~L4750, plage ~4750-5146)
-— le chemin VIF du pipeline squad en gym — contient **ZÉRO appel à `step_logger.log_action`**
-(grep sur la plage = 0). Son docstring l'annonce : « Dispatch sémantique squad vers helpers squad.
-**Remplace `_process_semantic_action`** ». Or les **17** sites `log_action` vivent dans
-`_process_semantic_action` (def ~L2725) et ses handlers, atteignables seulement via
-`execute_semantic_action` (~L2090) et `execute_ai_turn` (~L2114) = chemins PvE/legacy.
-
-**Preuve empirique (run mono-env réel, 475 épisodes, après les fixes T6-b)** :
-- `Steps=0` sur **474/475** épisodes (`episode_step_count` n'est jamais incrémenté) ;
-- **0 ligne** correspondant à `Unit N (MOVED|SHOT|CHARGED|FOUGHT|WAITED)` sur 12 561 lignes ;
-- ~26 lignes/épisode = les seuls en-têtes (`Scenario`, `Rosters`, `Walls`, `Objectives`, `Rules`,
-  `Board`) + `EPISODE END` + `OBJECTIVE CONTROL`.
-
-⚠️ **Nuance vérifiée (à ne pas sur-simplifier)** : `log_action` n'est pas TOTALEMENT inatteignable
-depuis le gym — **3 épisodes sur 475** portent `Actions=9|9|18`. Ce sont exclusivement des
-`rule_choice` (« Unit 105 chose [AGGRESSION IMPERATIVE] »), émis par le site w40k_core ~L2416-2425
-dont le commentaire dit explicitement « select_rule_choice **bypasses normal step logger flow** ».
-C'est donc le seul `log_action` atteignable — précisément parce qu'il court-circuite le flux
-normal — et il n'incrémente pas `step_count`. **Toutes les actions de JEU (move/shoot/charge/
-fight/wait), celles à `step_increment=True` dont l'analyzer a besoin, ne sont jamais journalisées.**
-
-**Conséquence** : `ai/analyzer.py` échoue en `Missing objective control snapshot at episode end`
-(analyzer_core.py ~L250) — il construit ses snapshots de contrôle d'objectif à chaque action
-`step_inc` (~L861-907), et il n'y en a aucune. Aucun réglage de l'analyzer ne peut compenser :
-**la matière première n'est pas produite**.
-
-**Même famille que R5 et `game_replay_logger`** (condamné en T2 pour exactement ce motif : code
-resté sur l'architecture pré-squad). La migration RL de fin mai a laissé derrière elle TOUTE la
-chaîne d'observabilité, pas seulement les wrappers.
-
-**À statuer (utilisateur)** : (a) migrer `log_action` vers `_process_squad_action` (chemin partagé
-PvP/gym → impacte aussi la journalisation PvP, à cadrer) ; (b) condamner explicitement `--step`
-sur le pipeline squad, comme `game_replay_logger.log_action` (NotImplementedError), et retirer
-« analyzer + replay » du critère T6 ; (c) laisser en l'état. **Interdit : laisser `--step`
-annoncer « Step logging enabled » en ne produisant que des en-têtes.**
-Cadrage PvP si (a) : les 17 sites legacy sont tous gardés par `if self.step_logger`, et le
-logger n'est branché QUE par train.py → instrumenter `_process_squad_action` avec la même
-garde est neutre PvP par construction. Granularité : l'action squad (move dir, shoot slot,
-charge, fight, wait) — ce que l'analyzer consomme.
-
-**Décisions annexes actées (2026-07-16)** :
-1. **Modèles de validation** : les runs de validation/baseline écrivent leurs artefacts sous
-   `ai/models/_validation/<run_id>/` — JAMAIS dans `ai/models/<agent_key>/` (zips protégés,
-   CLAUDE.md). Règle permanente : plus aucun arbitrage ponctuel `--new` vs zips à chaque run.
-2. **Raccrochés au chantier (a)** (même fichier, même passe) : le 3e site `--step` encore non
-   gardé dans train.py (les 3 sites impriment le même message — ajouter au passage un
-   identifiant de site dans le log), et la ligne `OBJECTIVE CONTROL:` de step.log au format
-   `Obj<id_string>` que personne ne lit (l'aligner sur le format attendu `Obj(\d+)` du parser,
-   ou la supprimer — pas de statu quo).
-
-### Corrections T6 faites en chemin vers l'analyzer (toutes vérifiées)
-
-- **Parser d'armes — bug SILENCIEUX sur les apostrophes** (`engine/weapons/parser.py`, motif
-  `["\']([^"\']+)["\']`) : ouvrait sur `"` ou `'`, capturait tout sauf CES DEUX caractères, fermait
-  sur l'un ou l'autre. Une apostrophe DANS une chaîne à guillemets doubles cassait la lecture —
-  or les noms Orks en sont pleins. `display_name: "Dok's Tools"` → capturait **`"Dok"`** (tronqué,
-  SANS erreur) ; `"'eadbanger'"`, `"'urty Syringe"`, `"'Waaagh! Staff"` → **aucun match**, la clé
-  `display_name` n'était jamais posée et l'absence explosait ailleurs
-  (`require_key(weapon, "display_name")`, analyzer_config.py:150). **Impacte aussi le PvP.**
-  → constante `_TS_QUOTED_STRING = r'(["\'])((?:(?!\1).)*)\1'` (backréférence : fermeture sur le
-  MÊME guillemet), appliquée à `display_name`, `COMBI_WEAPON` et `WEAPON_RULES`. Strictement
-  identique pour tout nom sans apostrophe. Résultat : registre à **176 unités, 0 erreur de
-  parsing** (contre 107 erreurs).
-- **Donnée corrigée en conséquence** : `wolf_guard_weapon` déclarait `WEAPON_RULES: [""]`
-  (spaceMarine/armory.ts:142) — une chaîne VIDE que l'ancien motif (`+`, 1 car. min.) avalait
-  silencieusement. Le motif corrigé la lit fidèlement → règle vide rejetée. `[""]` → `[]` :
-  comportement inchangé (l'ancien parser produisait déjà `[]`), la donnée dit enfin ce que le code
-  comprenait. Occurrence unique dans tout le projet.
-- **`_resolve_scenario_path` (analyzer.py) résolvait vers l'ARCHIVE** : T4 a déposé la banque
-  pré-V11 sous `scenarios/_archive_pre_v11/` — donc DANS l'arbre parcouru par `os.walk` →
-  `ValueError: Ambiguous scenario path for 'scenario_training_bot-29'` (l'archivé garde ses clés
-  legacy, sa signature d'objectifs diffère du migré homonyme). → la marche élague les dossiers
-  `_archive*`. Aligné sur la convention du projet : `get_scenario_list_for_phase`
-  (training_utils.py:308) travaille sur une liste blanche explicite (training/, holdout_regular/,
-  holdout_hard/) et n'a jamais eu ce problème.
-- **`_get_objective_name_to_id_map` (analyzer.py) était resté sur le contrat LEGACY** : lisait
-  `objectives` inline / `objectives_ref` → `config/board/<board>/objectives/` (dossier supprimé).
-  T3 avait migré train.py et bot_evaluation.py, **pas analyzer.py**. → migrée vers la source
-  unique terrain (areas `"objective": true`, miroir de `resolved_scenario_objectives` de
-  game_state.py), via un nouveau `_resolve_terrain_path_for_scenario` (miroir du resolver
-  `board_ref` de T4). Nuance : les ids terrain sont des STRINGS (`rect_b_nw_OK`) alors que
-  l'analyzer indexe par int → id positionnel (1..N, ordre du fichier terrain = stable) ; seul le
-  NOM sert d'appariement, et c'est bien le `name` de l'area que le StepLogger écrit.
-  ⚠️ **Reste incohérent** (non corrigé, car sous le bloqueur T6-c) : la ligne `OBJECTIVE CONTROL:`
-  de step.log écrit `Obj<id_string>` (`Objrect_b_nw_OK`) alors que le parser attend `Obj(\d+)`
-  (analyzer_core.py ~L112) — **trois formats coexistent** (nom / `Obj`+string / `Obj`+int).
-
-**✅ Bloqueur résolu (historique) — `ai/analyzer.py` ne démarrait pas** :
-`ConfigurationError: Required key 'RNG' is missing` (`analyzer_config.py:167`) —
-`load_analyzer_config` itère TOUT `unit_registry.units`, donc 4 armes de TIR de l'armory Ork sans
-clé `RNG` bloquaient l'analyzer QUEL QUE SOIT le scénario, même sans Ork. Renseignées par
-l'utilisateur (`RNG: 24`) le 2026-07-16 : `kombi_rokkit`, `kombi_shoota`, `rokkit_launcha`,
-`rokkit_launcha_heavy`. A permis de découvrir les blocages suivants (parser d'apostrophes,
-archive T4, contrat objectifs legacy) puis le vrai mur structurel T6-c.
-
-Plan d'origine :
-1. `python3 ai/train.py --agent CoreAgent --scenario bot --new --training-config x1_debug --step`
-   → run court complet sans erreur ; puis `ai/analyzer.py` sur les résultats + replay.
-2. Vérifier les métriques TensorBoard (cf. mémoire projet : métriques PPO manquantes dans
-   0_critical — diagnostiquer si toujours le cas).
-3. Baseline bots : l'agent frais doit apprendre à battre RandomBot/GreedyBot sur quelques
-   scénarios avant tout tuning (critère de succès : stabilité multi-scénarios, pas un pic).
-4. Hygiène (ne bloque pas) : corriger la `justification` (31→41) de la config ; mettre à jour
-   AI_OBSERVATION.md/AI_TRAINING.md (pipeline squad 108) ; statuer sur `ai/target_selector.py`
-   (mort → suppression à valider utilisateur) ; marquer les configs snapshot obs 355 comme
-   archives.
-
-**Hygiène T6.4 — état réalisé (2026-07-16)** :
-- ✅ `justification` corrigée dans les **5 phases** : `action_space_size=41 (26 micro [6 move +
-  6 advance + 6 fall back + 1 wait + 5 shoot + 1 charge + 1 fight] + 15 macro)`. Décompte vérifié
-  contre macro_intents.py.
-- ✅ **AI_OBSERVATION.md / AI_TRAINING.md** : bandeau de tête « ne décrit PAS le pipeline actif »
-  + table de correspondance (obs 108 / action 41, layout squad, routage `_build_observation` par
-  `obs_size`). Les corps de doc (355/357) sont conservés : le pipeline mono-fig reste atteignable
-  via `obs_size=357`. `obs_size: 355` de l'exemple de config AI_TRAINING.md corrigé en 108.
-- ✅ **Snapshots obs 355 marqués archives** : clé `_ARCHIVE` en tête de
-  `BEST_CoreAgent_training_config.json`, `CoreAgent_training_config_BEST_X1.json`,
-  `CoreAgent_training_config_save_avant_X10.json`. Sûr : aucun code ne les charge
-  (`load_agent_training_config` résout `<AGENT>_training_config.json`) — vérifié par grep.
-  Contenu strictement préservé (comparaison JSON parsée vs `git show HEAD:` = identique).
-- ✅ **Réserve T2 purgée** : `multi_agent_trainer.py` ~L996-1040 — monkeypatch
-  `controller.execute_gym_action` portant le dernier layout à 8 actions (`action // 8`,
-  `action % 8`). Code mort ET cassé : `W40KEngine` n'a aucun attribut `controller` (grep vide) et
-  le patch appelait 6 méthodes inexistantes (`_get_gym_eligible_units`,
-  `_convert_gym_action_to_mirror`, `_log_gym_action`…). Supprimé.
-- ✅ **Réserve T3/T4 purgée** : paramètre `objectives_ref` de `_materialize_scenario_with_refs`
-  (branche morte qui aurait émis une clé REJETÉE par le moteur — game_state ~L329). ⚠️ La purge
-  avait laissé un `NameError` latent (`hash_payload` référençait encore la variable) — attrapé par
-  le test `test_materialize_scenario_with_refs_wall_override_emits_no_legacy_key`, corrigé.
-- ✅ **Réserve T4 close** : `sweep_scenario_bank_v11.py` a désormais son bootstrap `sys.path`
-  (L19) ; `migrate_scenario_bank_v11.py` n'a **aucun import projet** → n'en a pas besoin.
-- ✅ **`ai/target_selector.py` SUPPRIMÉ** (validation utilisateur obtenue le 2026-07-16), avec son
-  test `tests/unit/ai/test_target_selector.py`. Mort confirmé par grep exhaustif avant suppression :
-  aucun importeur hors le module lui-même et son propre test (-9 tests collectés).
-- ⚠️ **Contradiction non résolue (décision produit requise)** : T6.1 impose `--new`, qui écrit
-  `ai/models/CoreAgent/model_CoreAgent.zip` — or CLAUDE.md (L51-53, L215) et la décision de design
-  n°1 interdisent d'écraser les zips protégés, et `ai/models/` est **gitignoré** (aucune
-  récupération git). Écrasement autorisé ponctuellement par l'utilisateur (2026-07-16 : « le modèle
-  est obsolète » — effectivement pré-squad, obs 355/357 incompatible avec obs 108). Voie propre à
-  acter : chemin de sortie dédié pour les runs de validation (ex. `ai/models/_validation/<run_id>/`).
-
-**Tests** :
-- **+11** — `tests/unit/ai/test_train_wall_ref_contract.py` : `_load_scenario_wall_ref`
-  (absent→None ; présent→strict ; présent-mais-invalide→erreur explicite, 5 cas paramétrés),
-  `_apply_wall_ref_weighting` sur scénario terrain-only (repro de T6-a),
-  `_materialize_scenario_with_refs` (param `objectives_ref` purgé, aucune clé legacy émise,
-  passthrough sans override).
-- **-9** — suppression de `test_target_selector.py` (module mort supprimé, cf. hygiène).
-- **+2 nets** — `tests/unit/ai/test_analyzer_utils.py` : les 2 tests encodant le contrat LEGACY
-  (`objectives` inline / `objectives_ref`) ont été MIGRÉS vers le contrat terrain — pas
-  neutralisés : c'est LE comportement testé qui a changé par décision documentée (T3/T4), seule
-  exception admise par §8. Ajout de 2 non-régressions : terrain sans area `"objective": true`
-  → erreur explicite (piège T4 « liste vide en silence ») ; l'archive `_archive_pre_v11` de T4 ne
-  masque pas un scénario vif.
-
-**Bilan suite `tests/unit/` : VERTE, 1259 collectés** (1255 baseline T5 + 11 − 9 + 2), zéro échec,
-zéro erreur. Smoke `scripts/smoke_t5_bare.py` rejoué après TOUS les fixes T6 :
-`(A) invariant/terminaison=OK | (B) mêlée+Carnifex=OK`, `melee_kills_total=5`,
-`carnifex_charge_any=True` — aucune régression moteur.
-
-### T7 — Unification de la validation de déploiement — ⏸️ EN ATTENTE (déclencheur explicite)
-
-**Déclencheur : le training tourne** (donc T6-h puis T6-g livrés, cf. §0). **Ne PAS commencer
-avant** — voir « pourquoi pas maintenant ».
-
-**Le problème.** Depuis T6-f, `deploy_unit` enchaîne DEUX contrôles :
-1. **mono-ancre** (hérité de T5) : l'empreinte d'UN socle posé à l'ancre ⊆ zone, hors mur,
-   clearance — miroir exact de `_get_valid_deployment_hexes` ;
-2. **par-figurine** (T6-f) : la formation entière validée par `deployment_preview_plan`.
-
-Le contrôle 1 teste **un objet qui n'existe plus** : l'unité n'occupe pas un socle à l'ancre,
-elle occupe N socles répartis ; l'ancre est un point de référence, pas une figurine.
-
-**Fondement règles (PDF lus, pas supposés)** :
-- « 18 Transports.pdf » : « Set up **each model** in your unit wholly within the set-up
-  distance » → la mise en place est PAR FIGURINE.
-- « 24 Core abilities.pdf » : « set up that unit anywhere that is **wholly within** your
-  deployment zone » → la contrainte porte sur l'unité ENTIÈRE, c.-à-d. toutes ses figurines.
-
-Aucune règle ne mentionne un socle à l'ancre. Le contrôle 1 refuse donc des placements **légaux
-au sens des règles** — typiquement une ancre en bord de zone dont le socle déborde alors que la
-formation tiendrait entièrement dedans. Ordre de grandeur mesuré sur le balayage des 16 104
-hexes de la zone (T6-f) : 263 refus `outside_zone` + 1 815 `out_of_bounds`, dont une part est
-légale au sens 40K.
-
-**Fix visé** : supprimer le contrôle mono-ancre du commit ET du masque, et laisser le décodeur
-(`_select_deployment_hex_for_action`, qui valide déjà la formation depuis T6-f) être le SEUL
-filtre. Un seul modèle de validation, aligné sur les règles, et l'agent récupère des placements
-aujourd'hui interdits.
-
-> 🔴 **CE FIX EST FAUX EN L'ÉTAT — NE PAS L'APPLIQUER (mesuré le 2026-07-20).**
->
-> Il repose sur l'idée que le contrôle par-figurine « valide déjà la formation » à l'ancre
-> demandée. **C'est faux** : `build_validated_deployment_plan` passe par
-> `generate_compact_formation`, dont la spirale BFS retient la 1ʳᵉ case **légale** — l'ancre
-> **oriente** le placement, elle ne le **contraint** pas.
->
-> **Mesure** (balayage des 16 104 hexes de zone × 5 unités = 80 520 ancres, scénario
-> d'entraînement réel). Sur les ancres refusées par le mono-ancre mais pour lesquelles un plan
-> existe, **aucune figurine n'est posée à l'ancre demandée** :
-> ```
-> unit 3  ancre=(2,299)  mono=outside_zone   fig_à_l_ancre=False  plan=[(24,293)]
-> unit 3  ancre=(3,298)  mono=outside_zone   fig_à_l_ancre=False  plan=[(24,293)]
-> unit 3  ancre=(4,298)  mono=outside_zone   fig_à_l_ancre=False  plan=[(24,293)]
-> unit 1  ancre=(2,299)  mono=out_of_bounds  fig_à_l_ancre=False  plan=[(8,297),(14,293),…]
-> ```
-> Quatre ancres distinctes → **le même plan**, à 22 colonnes de là.
->
-> ⚠️ **Le chiffre « 14 859 ancres refusées à tort (18,5 %) », produit pendant cette session, est
-> RETIRÉ.** Il mesure « il existe un placement légal quelque part », pas « ce placement-ci est
-> légal ». Ne pas le recycler.
->
-> **Supprimer le contrôle 1 ne débloquerait donc pas des placements légaux : ça rendrait 18,5 %
-> de l'espace d'action non déterministe** — l'agent désigne une ancre et l'unité atterrit
-> ailleurs. C'est la classe de bug « validé ≠ exécuté » que T6-g/T6-h ont éliminée.
->
-> **Le code l'écrit déjà deux fois**, et l'audit T7 ne les avait pas lus :
-> [deployment_handlers.py:904-908](../../engine/phase_handlers/deployment_handlers.py#L904)
-> (« ne pas la retirer en croyant ce helper suffisant ») et le test dédié
-> `test_anchor_is_a_suggestion_not_a_constraint`
-> ([test_deployment_per_model_commit.py:290](../../tests/unit/engine/test_deployment_per_model_commit.py#L290)).
->
-> **Le fond de T7 reste valide** : le contrôle 1 teste un socle unique à l'ancre, objet qui
-> n'existe plus, et refuse de vraies formations légales en bord de zone. Mais le fix ne peut pas
-> être « supprimer le contrôle 1 ». Il faut d'ABORD rendre le plan **contraint par l'ancre**
-> (échec si la formation ne tient pas autour d'elle, au lieu de glisser), ce qui **inverse** le
-> test ci-dessus — donc une **décision de design**, pas une correction de bug, à arbitrer
-> explicitement. Périmètre restreint : `build_validated_deployment_plan` n'est appelé que par le
-> décodeur gym ([action_decoder.py:1983](../../engine/action_decoder.py#L1983)) et le commit
-> `deploy_unit` ; le flux PvP par escouade passe par
-> [:859](../../engine/phase_handlers/deployment_handlers.py#L859) et n'est PAS touché.
-
-**Pourquoi pas maintenant (raisonnement à ne pas re-dérouler)** : ça modifie le masque de
-déploiement, donc **l'espace d'action de l'agent** — ça invalide les modèles entraînés et exige
-une mesure avant/après. Le faire pendant que le training ne tourne pas ajoute du risque sans
-pouvoir l'évaluer. Ordre optimal : **T6-h → T6-g → training qui tourne → T7**, dans sa propre
-tranche, avec avant/après mesuré (win-rate et taux de refus de déploiement).
-
-**Critère d'acceptation** : un seul prédicat de validation de déploiement dans le code (grep :
-plus de `compute_candidate_footprint` dans `deploy_unit`) ; un placement légal au sens 40K mais
-refusé aujourd'hui (ancre en bord de zone, formation entièrement dedans) est ACCEPTÉ — test
-dédié, rouge avant le fix ; suite verte hors échecs préexistants ; PvP non régressé (le drag
-mono-socle et l'auto-déploiement passent par le même commit).
-
-### Phase B (après T6 ET Phase A' — section 9 — validés) — Observation niveaux
-Spec à figer à ce moment-là, principes déjà actés :
-- Ajouter aux 7 features par-figurine un `level` normalisé (source : champ `level` de la
-  figurine, posé game_state.py ~L162) et aux 9 features par slot ennemi le niveau de l'ancre ;
-  exposer aussi un signal de coût de descente pour l'activation courante
-  (`squad_descent_penalty_subhex`, movement_handlers.py:276). Toute modif de layout change
-  `obs_size` (config + constantes `SQUAD_*` observation_builder ~L1245-1251) → nouveau modèle from
-  scratch, mettre à jour la `justification` en même temps.
-- Terrains d'entraînement à étages : SEULEMENT après vérification de l'état du chantier LoS 3D
-  (spatial_relations.py:186-189 "câblage incomplet") — sinon l'agent apprendrait sur un tir
-  non conforme aux règles.
-- Action "monter" (nouveau slot) = Phase C, décision utilisateur explicite requise.
-
-## 6. Critères d'acceptation
-
-| Tranche | Critère (tous vérifiables par commande) |
-|---|---|
-| T1 | Suite de tests verte ; smoke test moteur nu (annexe A) passe la phase shoot, la phase charge avec Carnifex ET une phase fight avec pertes allouées (chemin FIGHT_CTX) sans exception |
-| T2 | Zéro littéral d'action dans ai/. Le grep n'est qu'une HEURISTIQUE (3 versions successives ont toutes eu des trous : `== 11`, `X in valid_actions`, listes, `return 10/12/18`, dicts de poids `{4: 0.50,...}`, `action % 8`, sous-dossiers, + faux positifs légitimes dans train.py) — le critère réel est un AUDIT MANUEL exhaustif des 4 fichiers `evaluation_bots.py`, `env_wrappers.py`, `bot_evaluation.py`, `game_replay_logger.py` : chaque comparaison/émission d'entier d'action passe par une constante de macro_intents. Grep de contrôle : `grep -rnE "(step\([0-9]+\)|WAIT_ACTION|==\s*[0-9]+\b|\b[0-9]+ in valid_actions|return 1[028]\b|% 8)" ai/` avec revue de chaque hit. Smoke test pile complète avance au-delà du premier WAIT forcé |
-| T3 | `train.py --step --training-config x1_debug` dépasse la résolution walls/objectives sans FileNotFoundError |
-| T4 | Les 61 scénarios se chargent (`W40KEngine(scenario_file=...)` + reset, script de balayage) ; zéro clé legacy ; sort de training_save/ statué |
-| T5 | 10 épisodes aléatoires masqués terminés sur ≥3 scénarios × sièges p1/p2 ; zéro masque vide |
-| T6 | ⚠️ *(périmée n°3 de §0bis : le blocage par `CC_DMG` est levé — §0.3 porté, run 60/60 en §0.7 — cellule conservée telle quelle, non corrigée)* Run `--new` court complet + analyzer + replay OK ; ~~win-rate vs RandomBot en progression~~ → **critère REMPLACÉ le 2026-07-19, voir section 10.6** (win-rate PAR ROSTER contre un adversaire de holdout jamais vu à l'entraînement + absence de comportement absurde en partie humaine). L'ancien critère référençait un holdout de rosters qui n'existe plus. — ⏳ **PARTIEL (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép.). ✅ Suite verte (1293) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ✅ T6-c résolu : `_process_squad_action` journalise, analyzer tourne, `1.2 erreurs shooting = 0`. ✅ **T6-d résolu** : `squad_fight` = sélection FIGHT 12.04, machine V11 déroulée par `_fight_v11_gym_settle` (ordre 12.02→12.04→12.07 respecté, snapshot posé, double activation interdite). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (bruit) — mesuré AVANT T6-d, donc sur un moteur où la mêlée était fausse ; **à re-mesurer** avec phase `x1` + `bot_evaluation` holdout vs RandomBot. ✅ **Le run TOURNE de nouveau depuis le 2026-07-19** : T6-g et T6-h sont livrés (cf. §0), x5_debug 8 workers 10/10 ép. exit 0. ❌ **Le critère T6 reste NON évaluable**, mais pour une raison DIFFÉRENTE et désormais isolée : **§10.4** — sur le chemin single-scenario, P2 joue ALÉATOIRE (`SelfPlayWrapper(frozen_model=None)`, `update_frozen_model` sans appelant). Tout win-rate mesuré aujourd'hui est du bruit. ~~C'est le prochain bloqueur.~~ **✅ §10.4 RÉSOLU le 2026-07-19** (adversaires câblés sur les 3 chemins) ; le critère T6 reste néanmoins NON évalué, désormais bloqué par `CC_DMG` (§0.3) qui plante des épisodes d'évaluation. Voir §0.0 pour l'ordre des travaux. |
-| T6-i | ⚠️ *(périmée n°2 de §0bis : le test de non-régression existe : `test_end_of_turn_coherency_03_03.py` — cellule conservée telle quelle, non corrigée)* Une escouade rendue incohérente par des pertes est ramenée en coherency à la fin du tour (03.03), sur les **deux** chemins de fin de Fight, avant le test de limite de tour ; aucune destination du masque de move n'est rejetée pour cause de coherency — ⏳ **PARTIEL (2026-07-19 soir)** : ✅ fix livré et vérifié par run bout-en-bout (8 épisodes plantés → 2, erreur `incohérence masque/exécution` disparue, suite sans régression) ; ❌ **test de non-régression NON écrit** — §8 l'impose, c'est la tâche n°1 de §0.0 |
-| T6-f | Après le commit de déploiement, AUCUNE figurine vivante à `(-1,-1)` et ancre `units_cache` = figurine d'index minimal, sur les 3 chemins (gym, ancre imposée tutoriel, drag) — ✅ **FAIT (2026-07-19)** |
-| T6-g | Toute cellule offerte par le masque de move est exécutable : sur N épisodes aléatoires, zéro `ValueError` « incohérence masque/exécution » — et un test dédié où une escouade dont le BLOC déborde (mur / autre escouade) ne voit PAS la cellule dans son masque — ✅ **FAIT (2026-07-19)** : `test_move_pool_block_erosion.py` (+6, mur/escouade/ER sous une SŒUR, débordement plateau, non-sur-filtrage, mono-fig) ; runs x5_debug 8 workers (10/10 ép.) et mono-env x1_debug, zéro occurrence |
-| T6-h | La translation de bloc préserve les distances internes pour TOUTES les parités de `dx` (test paramétré `dx` pair ET impair) — rouge sur le code actuel — ✅ **FAIT (2026-07-19)** : `test_rigid_plan_translation.py` (+10), rouge avant le fix aux seules parités impaires ; fix étendu à `translate_squad_to_destination` (écrivain du commit) et `preview_hidden_models_after_move` |
-
-## 7. Annexe A — Smoke tests de référence
-
-Deux scripts éprouvés pendant l'audit (à recréer dans `scripts/` ou en scratch ; ne pas
-committer les monkeypatches, ils simulent les fixes T1) :
-
-1. **Moteur nu** : `W40KEngine(gym_training_mode=True, scenario_file=<board scenario>)`,
-   boucle `reset()` puis `step(choice(flatnonzero(get_action_mask())))` jusqu'à
-   terminated/masque vide, 3 seeds. Diagnostic à imprimer si masque vide : phase, tour, joueur,
-   pools `*_activation_pool`, états `pending_*`/`fight_*`.
-2. **Pile complète** : `Monitor(BotControlledEnv(ActionMasker(engine), GreedyBot(0.15),
-   registry, agent_seat_mode="random", global_seed=...))` — miroir exact de
-   [train.py:1777-1791](../../ai/train.py#L1777-L1791).
-
-Résultats d'audit (2026-07-14) : moteur nu OK jusqu'au tour 5 avec fixes R4 simulés (deadlock
-R7 en fin de partie) ; pile complète bloquée immédiatement par R5 (`step(11)`).
-Réserve : seul le décideur tir était patché — le chemin d'allocation de pertes en mêlée
-(FIGHT_CTX) n'a pas été prouvé par ce smoke test (cf. R4/T1).
-
-## 8. Tests de non-régression (obligatoires, toutes tranches)
-
-Commande canonique (à lancer après CHAQUE modification, avant de déclarer une tranche finie) :
-
-```bash
-source /home/greg/40k/.venv/bin/activate && python3 -m pytest tests/unit/ -q
-```
-
-**Baseline vérifiée (2026-07-15)** : 1152 tests collectés dans `tests/unit/` (ai/ engine/
-services/ shared/), zéro erreur de collecte, 1152 passed / 2 skipped après T1. Toute exécution
-qui passe SOUS ce compte de collectés = suppression de test à justifier explicitement (jamais
-en silence). Un test qui devient rouge après une tranche = STOP, corriger la root cause (jamais
-adapter le test pour le faire passer, sauf si c'est LE comportement testé qui change par
-décision documentée ici).
-
-### 8.1 Principes (non négociables)
-
-- **Un fix = ses tests dans la même tranche** : chaque rupture R1-R7 corrigée s'accompagne de
-  tests qui reproduisent la panne d'origine (le test doit échouer sur l'ancien code) ET
-  verrouillent le comportement corrigé.
-- **Miroir PvP** : pour tout prédicat/chemin bifurquant gym vs PvP, tester LES DEUX branches —
-  le test PvP fige le comportement d'avant-fix (neutralité), le test gym fige le fix.
-- **Zéro monkeypatch de code mort** : les tests qui patchent `_attack_sequence_rng` disparaissent
-  avec lui (P1) ; aucun nouveau test ne doit s'appuyer sur du code sans site d'appel vif.
-- **Déterminisme** : tout test utilisant du RNG fixe sa seed ; tout test d'ordre de candidats
-  (P2/P3) vérifie la STABILITÉ de l'ordre sur deux appels identiques.
-- **Erreurs explicites testées** : chaque garde « erreur explicite, pas de fallback » ajoutée
-  par le plan a un test `pytest.raises` vérifiant le TYPE et le MESSAGE (fragment discriminant).
-- Les tests règles encodent le PDF du projet (référence 40k_rules citée en docstring), jamais
-  le comportement du code mort.
-
-### 8.2 Socle transverse — tests de contrat d'interface (à écrire en T2, maintenus ensuite)
-
-Fichier proposé : `tests/unit/engine/test_agent_interface_contract.py`.
-- `action_space.n == 41` et `observation_space.shape == (108,)` lus depuis la config (échec
-  explicite si la config change sans migration de modèle actée).
-- **Cohérence constantes ↔ décodeur** : pour chaque constante de `macro_intents.py` créée en T2
-  (`ACTION_WAIT`, `SHOOT_SLOT_BASE`, bases move/advance/fallback, `ACTION_CHARGE`,
-  `ACTION_FIGHT`, `DEPLOY_SLOTS`), un test vérifie que `ActionDecoder` route bien cet entier
-  vers l'intention attendue (wait→wait, 19→shoot slot 0, 24→charge...). C'est LE verrou
-  anti-récidive de R5 : tout futur re-layout casse ce test au lieu de casser le training.
-- Somme du layout : `6+6+6+1+5+1+1+15 == TOTAL_ACTION_SIZE == 41`.
-- Le masque retourné par `get_action_mask()` a exactement `shape (41,)`, dtype bool.
-
-### 8.3 Couverture par tranche
-
-**T1 (fait — tests à vérifier présents, compléter si trous)** :
-- R6 : éligibilité + destinations de charge avec `BASE_SIZE` liste (Carnifex `[41,27]`,
-  Psychophage `[47,36]`) dans les DEUX sites (`charge_build_valid_destinations_pool`,
-  `_charge_reverse_goal_bfs_for_eligibility`) — plus cas socle rond int (non-régression).
-- R4 : `is_programmatic_owner`/`is_programmatic_defender` — matrice complète :
-  (gym_training_mode True/False) × (player_types human/ai) ; allocation tir auto en gym ;
-  **allocation fight auto en gym avec pertes réellement allouées** (le chemin FIGHT_CTX,
-  jamais exercé avant T1) ; les 4 sites `defender_human` du flux fight ; en PvP humain,
-  l'allocation reste manuelle (miroir) ; `_is_ai_controlled_shooting_unit` NON branché sur
-  gym (test négatif : pas d'auto-activation `active_shooting_unit` en gym).
-
-**T2** :
-- Tests 8.2 ci-dessus.
-- `env_wrappers` : WAIT forcé émet `ACTION_WAIT` (18) ; détection « pool empty » ; plus AUCUN
-  test ne référence 11/12 ou les plages 4-8 hors déploiement.
-- `evaluation_bots` : pour chaque phase (move/shoot/charge/fight), le bot ne choisit QUE des
-  actions du masque ; choix hors masque = erreur explicite (test `raises`) ; les dicts de
-  poids déploiement pointent des actions de `DEPLOY_SLOTS`.
-- ~~`game_replay_logger` : décodage correct du layout 41 (un cas par famille d'action) — ou, si
-  condamné, erreur explicite testée.~~ → **sans objet : le module est supprimé (§0.8).** Ne pas
-  réécrire de test pour lui.
-
-**T3** :
-- `_list_available_board_refs` retourne les refs du board résolu par
-  `config_loader.get_board_dir()` (test avec `W40K_BOARD_PATH` pointant un board de fixture) ;
-  plus aucune reconstruction `{cols}x{rows}` (test sur analyzer si migré).
-- `_expand_random_ref_weights` : refs inconnues → erreur explicite listant les refs
-  disponibles ; refs valides → expansion correcte.
-- R1 selon la décision : phase `default` existante OU `--training-config` manquant → erreur
-  explicite listant les phases (test du message).
-- `_materialize_eval_scenario_refs` n'émet PLUS `objectives_ref` (clé absente du scénario
-  matérialisé — test de sortie).
-
-**T4** :
-- Résolveur `board_ref` : (a) parent `scenario/` sans `board_ref` → OK (comportement PvP
-  inchangé) ; (b) `board_ref` valide hors `scenario/` → OK ; (c) ni l'un ni l'autre → erreur
-  explicite ; (d) `board_ref` inexistant → erreur explicite. Idem pour `wall_ref: "random"`
-  et `terrain_ref`.
-- **Balayage de la banque** (test paramétré sur les 61 scénarios migrés) :
-  `W40KEngine(scenario_file=...)` + `reset()` sans exception ; zéro clé legacy
-  (`objectives`, `objectives_ref`, `objective_hexes`, `deployment_zone`) ; ≥ 1 objectif
-  résolu (piège « liste vide en silence », game_state ~L376-381) ; `deployment_zones` avec
-  clés `"1"`/`"2"`.
-- Script de migration : idempotence (2e passage = zéro diff).
-
-**T5** :
-- R7 : scénario minimal amené au dernier tour, phase fight du dernier joueur, pools vides →
-  `terminated=True`, winner déterminé, JAMAIS masque vide avec `terminated=False`. Cas
-  symétriques P1/P2.
-- Invariant global (smoke intégré en test, 3 seeds × 2 sièges, plafonné en steps) : à chaque
-  step, `mask.any() or terminated` — c'est l'invariant qui protège MaskablePPO.
-
-**T6** : à l'origine « pas de test unitaire nouveau (validation par run réel + analyzer +
-replay), suite complète verte ». Les ruptures T6-c→T6-h ont imposé des verrous :
-- `test_squad_fight_target_parity.py` (T6-c, +5) et `test_squad_fight_v11_state.py` (T6-d, +6).
-- `test_deployment_per_model_commit.py` (T6-f, +10) : aucune figurine à `(-1,-1)` après commit ;
-  ancre = figurine d'index minimal (invariant de `build_rigid_plan`) ; légalité du plan
-  committé ; déterminisme + lecture pure de `build_validated_deployment_plan` ; invalidation de
-  la mémo sur tampon périmé ; équivalence de l'empreinte pré-calculée aux DEUX parités de
-  colonne (l'optimisation touche du code partagé PvP).
-- `test_rigid_plan_translation.py` (T6-h, +10) : distances internes du bloc préservées, paramétré
-  sur `dx` PAIR **et** IMPAIR — un test qui n'exerce que `dx` pair passe sur le code buggé.
-- `test_move_pool_block_erosion.py` (T6-g, +6) : mur / autre escouade / ER ennemie sous une SŒUR
-  alors que l'ANCRE est légale, débordement de plateau, absence de sur-filtrage, court-circuit
-  mono-figurine. `game_state` fabriqué — d'où le test suivant.
-- `test_move_mask_is_executable.py` (T6-g/T6-h, +3) : l'invariant « masque ⊆ exécutable » sur le
-  VRAI moteur (3 seeds × 400 steps, ~21 700 cellules par run), avec le budget exact
-  qu'`execute_squad_move` appliquerait. Couvre les deux contraintes que l'érosion ne filtre pas
-  et qui n'étaient que RAISONNÉES invariantes par translation cube (`budget_per_model`,
-  `require_coherency`).
-  ⚠️ **Contre-épreuve obligatoire pour ce genre de test** : il a d'abord été « validé » par un
-  `git stash` qui, les fixes ayant été committés entre-temps, n'annulait que le refactor — le
-  test passait donc pour une mauvaise raison. La vraie épreuve est
-  `git checkout 3886e498 -- engine/phase_handlers/shared_utils.py` : le test devient ROUGE sur
-  les 3 seeds avec l'erreur d'origine (`squad=103 dest=(24,15) … incohérence masque/exécution`).
-  Un test de non-régression qu'on n'a pas vu échouer ne garde rien.
-
-⚠️ **La suite n'est PAS verte et ne l'était pas avant ces fixes** : 9 échecs préexistants
-(4 banque de scénarios + 5 déploiement/terrain), tous dus à des rosters manquants ou non
-résolus. Le critère réel est donc « pas de NOUVEL échec », à établir par baseline `git stash`
-avant de conclure quoi que ce soit sur une régression.
-
-### 8.4 Couverture Phase A' (une règle = son fichier de tests, AVANT suppression du code mort)
-
-- Chaque règle du tableau P1 (section 9.2) : tests sur le chemin VIF (`_manual_roll_intent` /
-  `_resolve_one_manual_wound`) encodant le PDF — cas nominal, cas limite, cas d'inapplicabilité.
-  Minimum par règle : HEAVY (les 3 conditions 24.16, chacune isolée) ; HAZARDOUS (un jet PAR
-  ARME sélectionnée, pas par attaque ; réutilisation de `roll_hazard_for_unit`) ;
-  IGNORES_COVER (bypass du malus, ET non-régression : arme sans le trait subit toujours
-  13.08) ; DEVASTATING_WOUNDS (arrêt de séquence, MW après dégâts normaux, max 1 figurine
-  par critical wound) ; RAPID_FIRE (bonus à mi-portée exacte, rien au-delà) ;
-  closest_target_penetration (AP+1 seulement sur la cible la plus proche) ; rerolls tir
-  (parité avec les tests fight existants).
-- Suppression du code mort : après purge, la suite passe SANS les tests monkeypatchés
-  supprimés, et un test-sentinelle vérifie que `execute_action` sur les anciennes branches
-  lève l'erreur « squad path expected ».
-- P2/P3 (par décision branchée) : ordre des candidats déterministe et stable (deux appels →
-  même liste) ; masque expose exactement les `CHOICE_i` des candidats valides ; décision
-  appliquée = candidat choisi ; en PvP le prompt `waiting_for_player` équivalent est intact
-  (miroir) ; heuristique `_ai_select_*` toujours utilisée par le bot adversaire.
-
-### 8.5 Critère d'acceptation global
-
-`python3 -m pytest tests/unit/ -q` vert (0 failed, 0 error, skips justifiés) est une condition
-NÉCESSAIRE de sortie de CHAQUE tranche (T1→T6, puis chaque tranche P1/P3) — en complément des
-critères spécifiques de la section 6, jamais à leur place.
-
-## 9. Phase A' — Toutes les règles implémentées dans le training (P1-P5)
-
-Décision utilisateur (2026-07-14) : l'agent doit s'entraîner sur TOUTES les règles déjà
-implémentées, et chaque fois que les règles laissent un choix au joueur, c'est l'agent qui
-choisit. Périmètre strict : règles présentes dans le moteur — on n'entraîne sur AUCUNE feature
-absente (stratagèmes, CP, FNP, transports, etc. restent hors scope). Prérequis : Phase A
-(T1-T6) validée.
-
-### 9.0 AUDIT DE STATUT 2026-07-24 — Phase A' NON FAITE (P1→P5 = 0/5) — ❌
-
-Revérification ligne à ligne contre le code (la première ; §0.19 ne l'avait jamais menée, cf. sa
-correction). **Aucune des cinq sous-parties n'est réellement en place**, malgré les marqueurs
-✅ FAIT antérieurs. Chiffres et sites relevés par grep/lecture le 2026-07-24, pas de mémoire.
-
-| Sous-partie | Statut réel | Preuve vérifiée |
-|---|---|---|
-| **P1** — Parité de résolution (§9.2) | ⏳ **démarré** (état initial « fait à l'envers » ; 1 règle corrigée le 2026-07-24, cf. **§9.2.1**) | **Snapshot à l'audit (état AVANT démarrage P1)** : les règles HEAVY, IGNORES_COVER, DEVASTATING_WOUNDS, closest_target_penetration, HAZARDOUS, reroll_1_towound, reroll_towound_target_on_objective étaient écrites **dans `_attack_sequence_rng`** (le code MORT, [shooting_handlers.py:5998](../../engine/phase_handlers/shooting_handlers.py#L5998)), **absentes du chemin vif** — `_attack_sequence_rng` n'a **aucun appelant vif** (seuls 6 fichiers de tests le monkeypatchent) → règles inactives gym ET PvP. **⚠️ MISE À JOUR 2026-07-24** : **IGNORES_COVER est désormais portée dans le vif** (`_cover_worsened_bs`, cf. §9.2.1) — cette ligne n'est donc plus vraie pour elle ; les 6 autres règles + la suppression du code mort (`_attack_sequence_rng`, états `_rapid_fire_*`, log `rapid_fire_bonus_shot`, 5 branches « squad path expected ») restent à faire. |
-| **P2** — Mécanisme générique décision agent (§9.3) | ❌ **absent** | Grep `pending_agent_decision` / `CHOICE_[0-9]` / `agent_decision` sur `engine/` + `ai/` = 0. Action_space non étendu : `TOTAL_ACTION_SIZE` reste `BASE_ZONE_INTENT + MAX_OBJECTIVES*3` ([macro_intents.py:20](../../engine/macro_intents.py#L20)), pas le `41+K` prévu. Aucun bloc obs « contexte de décision ». |
-| **P3** — Branchement décision par décision (§9.4) | ❌ **0/9** | Point 0 (pseudo-décision aléatoire, le plus urgent) toujours vif : `raw_action_int % len(options)` à [w40k_core.py:2580](../../engine/w40k_core.py#L2580). Points 1-8 : sélecteurs heuristiques `_ai_select_*` / scoring intacts, aucun branché sur une décision agent. |
-| **P4** — Observation de support (§9.5) | ❌ **sans objet** | Le bloc décision (P2) n'existant pas, son support obs non plus. |
-| **P5** — Validation par tranche (§9.6) | ❌ **sans objet** | Aucune tranche P3 ouverte → aucun cycle win-rate. |
-
-**Seul acquis réel** : les 4 rerolls de fight sont vifs ([fight_handlers.py:5153-5206](../../engine/phase_handlers/fight_handlers.py#L5153)) — mais §9.2 les liste déjà comme « déjà vifs », donc rien de neuf au titre de P1.
-
-⚠️ **Pourquoi les ✅ FAIT étaient faux.** Le travail P1 identifiable (règles d'armes) a été écrit
-**dans le code mort** au lieu du chemin vif, et une batterie de tests (`test_unit_rules_shoot.py`,
-`test_shoot_attack_sequence.py`, `test_special_rules_e2e.py`, `test_fight_special_rules.py`,
-`test_phase_transitions.py`) le **monkeypatche** et passe au vert. C'est exactement le double motif
-que §0.19 existe pour interdire : **code testé mais jamais appelé** (T6-i) + **test qui passe pour
-la mauvaise raison**. En jeu réel, ces règles ne s'exécutent nulle part.
-
-**Conséquence de planning.** La Phase A' est **à faire intégralement**, dans l'ordre du plan
-ci-dessous (P1 corrigé = déplacer les règles vers le vif PUIS supprimer le mort ; puis P2→P5).
-Les critères d'acceptation de §9.2→§9.6 restent valides tels quels.
-
-### 9.0bis Optimalité du plan — arbitrage avant exécution (2026-07-24)
-
-Question posée : « faire décider à l'agent TOUT ce qu'il peut est-il optimal ? ». Sites de code
-ci-dessous **vérifiés par lecture** le 2026-07-24.
-
-**La MÉTHODE du plan est bonne** — à garder telle quelle :
-- **P2 générique** (un canal `pending_agent_decision` + `CHOICE_0..K`) plutôt qu'une action ad
-  hoc par décision : évite l'explosion de l'action_space, mutualise, et le miroir des prompts PvP
-  `waiting_for_player` respecte la règle projet « gym copie PvP ».
-- **§9.6** (une tranche = une décision, win-rate ≥ tranche précédente sinon corriger
-  observation/reward AVANT d'empiler) : c'est le garde-fou qui rend le plan robuste au risque
-  « plus de décisions = agent pire ». À ne jamais assouplir.
-
-**L'OBJECTIF « tout » n'est pas optimal en soi** — trois réserves, avec le traitement retenu :
-
-1. **Levier tactique nul = ne pas brancher (mesurer, ne pas juger à la main).** Certaines
-   décisions ont un optimum calculable déjà atteint en auto : choix d'arme CC par expected damage
-   `_auto_select_cc_weapon_for_fig` ([shared_utils.py:7370](../../engine/phase_handlers/shared_utils.py#L7370)),
-   ordre de déclaration des groupes d'allocation `_auto_declared_order`
-   ([shared_utils.py:6462](../../engine/phase_handlers/shared_utils.py#L6462)). Les brancher
-   n'ajoute que de la dimensionnalité (dilution du reward, credit assignment plus profond,
-   risque de catastrophic forgetting — piège connu CLAUDE.md) sans gain. **Critère d'arbitrage à
-   appliquer AVANT chaque tranche P3** : mesurer le *regret* de la décision — écart de valeur
-   entre le choix optimal (rollout/oracle) et le choix de l'heuristique auto. Regret négligeable
-   → rester en auto ; regret significatif → brancher. Ça remplace le « optionnels, à statuer
-   utilisateur » (§9.4 point 8) par une mesure, pas un avis.
-
-2. **Décisions spatiales : ne pas exposer en top-K d'hex.** Pour destination de pile-in/conso
-   (§9.4 point 5), move-after-shooting (point 6), placement de charge, les candidats pertinents
-   dépassent souvent K=6 → un top-K figé **tronque et peut exclure l'optimum** (troncature
-   silencieuse = anti-pattern projet). Le plan le fait DÉJÀ bien pour le déploiement : actions
-   4-8 = **5 stratégies tactiques scorées** (aggressive front / objective pressure /
-   safe-cohesion / left / right flank), pas des hex bruts —
-   [action_decoder.py:1833](../../engine/action_decoder.py#L1833). **À généraliser** : paramétrer
-   toute décision spatiale à grand espace en *intentions scorées*, pas en hex. Sinon K=6 devient
-   un plafond arbitraire sur la qualité.
-
-3. **K=6 est un défaut, pas une loi.** L'alignement sur les 6 slots figurines (§9.3) vaut pour
-   l'allocation de pertes ; il n'a aucune raison de borner les décisions de cardinalité
-   différente. K doit être choisi par type de décision, pas global.
-
-**En clair** : le plan est quasi-optimal en méthode ; l'objectif « tout » doit rester
-**subordonné au win-rate §9.6 et au regret mesuré** (réserve 1), et la **paramétrisation des
-décisions spatiales en intentions scorées** (réserve 2) est le point technique à ne pas rater.
-
-### 9.1 Constat d'architecture (audit 2026-07-14, vérifié par lecture)
-
-Il existe DEUX moteurs de résolution d'attaque :
-- **Chemin vif** (PvP ET gym) : résolution squad — `_manual_roll_intent`
-  ([shared_utils.py:5905-5993](../../engine/phase_handlers/shared_utils.py#L5905-L5993)) + `_resolve_one_manual_wound` (L6038-6114).
-- **Code mort** : `_attack_sequence_rng` (shooting_handlers, ~L5820-6003) — zéro site
-  d'appel vif (utilisé seulement par des tests via monkeypatch) ; les branches `execute_action`
-  qui y menaient lèvent des RuntimeError « squad ... expected » (shoot ~L5510-5529,
-  activate_unit ~L5519-5523, select_weapon ~L5534-5538 « squad_select_weapon expected »,
-  left_click ~L5589-5593, invalid ~L5627-5631) ; état orphelin `_rapid_fire_*` dans
-  w40k_core (~L1055-1061, L2055-2061) et sites shooting_handlers associés (~L230, L947-953,
-  L2500-2506, L4912-4925, L5689-5696). NB : w40k_core ~L3561 est un simple champ de LOG
-  `rapid_fire_bonus_shot`, pas de l'état — le grep `_rapid_fire_` ne l'attrape pas.
-- `WeaponRulesApplier.apply_rules` est un placeholder pass-through ([rules.py:279-327](../../engine/weapons/rules.py#L279-L327)) :
-  les règles d'armes sont validées/parsées mais PAS appliquées par ce système.
-
-Conséquence : toute règle implémentée uniquement dans `_attack_sequence_rng` est inactive
-partout (gym ET PvP).
-
-### 9.2 P1 — Parité de résolution : réimplémentation depuis les PDFs, puis suppression du mort
-
-⚠️ **Le code mort N'EST PAS une spec à porter** — vérifié contre les PDFs du projet (24 Core
-abilities lu) : il implémente une AUTRE édition des règles. Il ne sert que d'indice de point
-d'insertion. Chaque règle se réimplémente depuis le PDF du projet.
-
-Règles à implémenter dans le chemin vif (absentes du vif, présentes dans le mort sous forme
-non conforme) — descriptions = PDF projet :
-
-| Règle (PDF projet) | Indice mort | Point d'insertion vif |
-|---|---|---|
-| HEAVY (24.16) : +1 to hit si unité unengaged ET pas posée sur la table ce tour ET aucun modèle bougé de plus de 3" ce tour — PAS « remained stationary » | ~:5869-5880 | `_manual_roll_intent` (seuil de touche) |
-| HAZARDOUS (24.15) : après que l'unité a résolu TOUTES ses attaques, un hazard roll (06.03) PAR ARME hazardous sélectionnée — pas un jet par attaque. NB : `roll_hazard_for_unit` (vif, shared_utils ~3410, câblé au move via w40k_core ~2635) implémente déjà 06.03 → réutiliser | ~:5887, :5916 | fin d'activation tir/fight |
-| IGNORES_COVER : 17 armes la déclarent, la feature est OBSERVÉE, mais `_cover_worsened_bs` (shared_utils ~5745) ne la vérifie jamais — le malus de couvert est infligé À TORT à ces armes (gym ET PvP ; le commentaire w40k_core ~4380 « appliqué côté frontend » est faux pour la résolution backend) | — (jamais implémentée) | `_cover_worsened_bs` (bypass si arme IGNORES_COVER) |
-| DEVASTATING_WOUNDS (24.10) : critical wound → la séquence de CETTE attaque s'arrête, la cible subit D blessures mortelles APRÈS les dégâts normaux, max 1 figurine endommagée par critical wound — PAS « save sauté » (le mort n'est pas conforme non plus) | ~:5970-5980 | `_resolve_one_manual_wound` + moteur MW |
-| RAPID_FIRE : attaques bonus à mi-portée (conforme PDF) | état w40k_core ~:1055-1061 | `_manual_roll_intent` (calcul NB à la déclaration, comme Blast) |
-| closest_target_penetration (règle projet unit_rules.json) : AP+1 sur la cible éligible la plus proche | ~:5836-5840 | `_manual_roll_intent` (AP effectif) |
-| reroll_1_towound au TIR | ~:5935-5940 | `_manual_roll_intent` — déjà vif en fight (`_manual_roll_fight_intent`) : asymétrie tir/fight à combler |
-| reroll_towound_target_on_objective au TIR | ~:5945-5957 | idem |
-
-Méthode : une règle = une tranche (PDF relu AVANT implémentation + test unitaire dédié).
-⚠️ Le chemin squad est partagé PvP/gym : chaque implémentation corrige AUSSI le PvP — c'est
-voulu (conformité accrue partout), à annoncer à l'utilisateur (équilibre de jeu modifié).
-
-Cas particulier : **`reroll_charge`** est déclaré dans `config/unit_rules.json` mais
-n'existe NULLE PART dans le code (grep zéro, ni vif ni mort). À statuer : implémenter
-(charge_handlers, reroll du 2D6) ou retirer de la config.
-
-Déjà vifs (rien à porter) : charge_impact (règle d'unité D6 4+ → 1 MW, `_apply_charge_impact`
-~L4551), charge/shoot_after_advance/flee, move_after_shooting, reactive_move,
-**Desperate Escape (09.07)**, les 4 rerolls de fight, Blast, Pistol (10.06), couvert 13.08
-(mécanique conforme PDF SAUF le cas IGNORES_COVER ci-dessus), obscuring, invuln, allocation
-05.03/05.04, T du bodyguard 19.02.
-NB : `closest_target_penetration` apparaît aussi comme feature d'OBSERVATION
-(observation_builder) — actuellement observée sans effet en résolution.
-
-**Périmètre à statuer (utilisateur)** : ~10 règles d'armes sont déclarées dans les armories ET
-observées (observation_builder ~65-92) mais appliquées NULLE PART (ni vif ni mort) : TORRENT,
-TWIN_LINKED, SUSTAINED_HITS, LETHAL_HITS, MELTA, ANTI_*, INDIRECT_FIRE, EXTRA_ATTACKS,
-PSYCHIC. Elles sont hors périmètre A' (« règles présentes dans le moteur ») — MAIS
-IGNORES_COVER fait exception (intégrée au tableau P1 ci-dessus) car son absence rend FAUSSE
-une règle implémentée (le couvert). Pour les autres : soit les implémenter (extension de
-périmètre à valider), soit retirer leurs canaux d'observation (bruit pur pour PPO), jamais
-le statu quo silencieux.
-
-Suppression du code mort (fin de P1) : `_attack_sequence_rng` (~5820-6003), les branches
-`squad path expected` (shoot, left_click, select_weapon, invalid — cf. 9.1), l'état
-`_rapid_fire_*` de w40k_core (~1055-1061, 2055-2061) ET ses sites shooting_handlers
-(~L230, 947-953, 2500-2506, 4912-4925, 5689-5696), le champ de log `rapid_fire_bonus_shot`
-(w40k_core ~3561, non attrapé par le grep), et les tests qui monkeypatchent le mort.
-Critère : grep `_attack_sequence_rng|_rapid_fire_|rapid_fire_bonus_shot` vide (hors nouvelle
-implémentation vive) + suite verte.
-
-### 9.2.1 Progression P1 (démarrée 2026-07-24)
-
-Ordre de démarrage validé utilisateur : commencer par IGNORES_COVER (seul cas où l'absence rend
-une règle active FAUSSE). Arbitrages actés le 2026-07-24 : `reroll_charge` → **à implémenter**
-(tranche charge) ; les ~10 règles d'armes observées non appliquées → **périmètre A' étendu, à
-implémenter** (tranches ultérieures).
-
-| Règle | Statut | Où (vif) | Test |
-|---|---|---|---|
-| **IGNORES_COVER (24.18)** | ✅ **FAIT dans le vif** (2026-07-24) | Helper `weapon_has_rule` ([weapon_helpers.py](../../engine/utils/weapon_helpers.py)) + court-circuit `(bs, False)` en tête de `_cover_worsened_bs` ([shared_utils.py:6078](../../engine/phase_handlers/shared_utils.py#L6078)), avant tout calcul de LoS. PDF 24.18 + 13.08 relus. | `tests/unit/engine/test_ignores_cover.py` (**6**) : 4 unitaires directs + **2 bout-en-bout via `_manual_roll_intent`** (verrouillent le CÂBLAGE appelant→fonction, pas la fonction seule — cf. §0.19.3). Deux contre-épreuves faites : (a) court-circuit neutralisé → 2 rouges ; (b) mauvais `weapon` passé à l'appel → l'e2e rougit. Restauré → 6 verts. |
-| **reroll_1_towound (tir) + reroll_towound_target_on_objective (tir)** | ✅ **FAIT dans le vif** (2026-07-25) | Ajoutés dans `_manual_roll_intent` (tir) en **miroir exact** de `_manual_roll_fight_intent` ([fight_handlers.py:5203](../../engine/phase_handlers/fight_handlers.py#L5203)) : conditions via `_unit_has_rule_effect` + `is_unit_on_objective`. Helper `_is_unit_on_objective` **déplacé** de fight_handlers vers shared_utils (`is_unit_on_objective`, générique tir/fight), fight délègue. PDF 01 Core « Re-rolls » (un dé re-roll une fois). | `tests/unit/engine/test_reroll_towound_shoot.py` (**5**, bout-en-bout via `_manual_roll_intent`, RNG déterministe) : reroll d'un 1 / reroll tout échec sur objectif / discrimination non-1 et off-objectif / sans règle. Contre-épreuve : bloc reroll neutralisé → 2 rouges. |
-| **closest_target_penetration** | ✅ **FAIT dans le vif** (2026-07-25) | Bloc dans `_manual_roll_intent` ([shared_utils.py:6335](../../engine/phase_handlers/shared_utils.py#L6335)), au calcul de l'AP effectif AVANT `save_threshold`/`display_save_th`. Garde `_unit_has_rule_effect(attacker_unit, "closest_target_penetration")` ; « cible la plus proche » = `min()` sur `shooting_build_valid_target_pool` (éligibles) via `ranged_edge_distance` bord-à-bord (sélecteur `ranged`), mesurée au niveau **ESCOUADE** (`attacker["squad_id"]` — dans le vif `attacker` est une FIGURINE, écart corrigé vs le mort qui utilisait `attacker["id"]`). AP+1 = `ap -= 1` (convention AP négatif, cf. `save_threshold`). Spec = `config/unit_rules.json` (aucun PDF ; le PDF 22 ne contient QUE Aura/Faction/Psychic/Wargear + Plunging Fire). Se propage au groupe d'arme (`gkey`), à l'allocation (`g["ap"]`) et au `display_save_th`. | `tests/unit/engine/test_closest_target_penetration_shoot.py` (**3**, bout-en-bout via `_manual_roll_intent`, distance mesurée pour de vrai sur `units_cache` positionnés, pool éligibles monkeypatché) : (a) cible la plus proche + règle → AP-1 + save_th dégradé ; (b) cible plus lointaine + règle → inchangé (discrimination « closest ») ; (c) plus proche sans règle → inchangé. Contre-épreuve mutation : `ap -= 1` neutralisé → (a) rouge. Suite `tests/unit/` verte. **Impact PvP** : chemin partagé → l'équilibre PvP change aussi. |
-| **HEAVY** | ✅ **FAIT dans le vif** (2026-07-25) | Bloc dans `_manual_roll_intent` après `_cover_worsened_bs` ([shared_utils.py:6327](../../engine/phase_handlers/shared_utils.py#L6327)) : si `weapon_has_rule(weapon, "HEAVY")` ET l'escouade est absente de `units_moved` ET `units_advanced` (« Remained Stationary »), alors `bs = max(2, bs-1)` (+1 au jet de touche, plancher 2 car un 1 naturel rate toujours, 05.01). ⚠️ **Écart PDF assumé** : la spec suivie est `config/weapon_rules.json` (« Add 1 to Hit rolls if the bearer Remained Stationary this turn ») — **plus simple que le PDF 24.16** qui exige en plus *unengaged*, *pas arrivé ce tour (deep strike)* et *aucune figurine bougée >3"*. Ces trois clauses sont **non implémentables fidèlement** avec l'état moteur actuel : (a) aucun tracker d'arrivée/réserve n'existe (arrivées en cours de bataille non modélisées → clause vacante) ; (b) `units_moved` est **booléen** (bougé/pas bougé), pas de distance par-figurine → le seuil « >3" » n'a pas la donnée. On suit donc la config moteur (comme pour unit_rules.json). Le code mort était déjà conforme à cette def projet. | `tests/unit/engine/test_heavy_shoot.py` (**4**, e2e via `_manual_roll_intent`) : stationnaire→BS4→3 ; a bougé / a advance→pas de bonus (paramétré) ; sans HEAVY→pas de bonus. Contre-épreuve mutation : `bs=max(2,bs-1)` neutralisé→rouge. |
-| **RAPID_FIRE X** | ✅ **FAIT dans le vif** (2026-07-25) | Bloc dans `_manual_roll_intent` juste après BLAST ([shared_utils.py:6323](../../engine/phase_handlers/shared_utils.py#L6323)), à la constitution du pool d'attaques (avant tout jet) : si l'arme déclare `RAPID_FIRE:X` (param extrait par le nouveau helper `weapon_rule_parameter`, [weapon_helpers.py](../../engine/utils/weapon_helpers.py), miroir de l'extraction `analyzer_config.py`) ET la cible est dans la **demi-portée** (`RNG/2`, RNG déjà en subhexes), alors `n_attacks += X`. Distance escouade→escouade via `ranged_edge_distance` (sélecteur `ranged`) — même convention que le gate de portée du moteur (socle d'escouade avec centres par-figurine) et que CTP ; positions figées pendant la résolution → mesurer là = « Select Targets step » (24.30). Conforme `config/weapon_rules.json` (« Increase this weapon's Attacks by X when target unit is within half range ») ET PDF 24.30. Pas de double-comptage : `n_attacks_resolved` (déclaration) = NB de base seul, BLAST et RAPID_FIRE ajoutés ici. | `tests/unit/engine/test_rapid_fire_shoot.py` (**3**, e2e via `_manual_roll_intent`, positions extrêmes proche/loin → seuil non ambigu) : dans demi-portée→+X ; hors→pas de bonus ; sans RAPID_FIRE→pas de bonus. Contre-épreuve mutation : `n_attacks += _rf_x` neutralisé→rouge. |
-| **DEVASTATING_WOUNDS** | ✅ **FAIT dans le vif — vraie mécanique blessures mortelles** (2026-07-25) | Quatre points câblés : (1) flag posé au jet dans `_manual_roll_intent` sur blessure critique = jet de blessure **non modifié de 6** (05.02 ; testé sur la valeur finale, donc post-reroll) ET arme `DEVASTATING_WOUNDS` ; (2) propagé dans `_build_manual_allocation` ; (3) **ordonné en fin de lot** ([shared_utils.py:6859](../../engine/phase_handlers/shared_utils.py#L6859)) → les mortelles sont infligées **« after resolving any normal damage »** (24.10) ; (4) consommé dans `_resolve_one_manual_wound` ([shared_utils.py:6531](../../engine/phase_handlers/shared_utils.py#L6531)) : court-circuite **toute** save (armure ET invulnérable), la fig subit D (excess perdu = « max one model per critical wound »), record tagué `mortalWound`+`saveSkipped` (log/display + hook Feel No Pain futur). **Fidélité (décision utilisateur, arbitrée) :** en 40K les mortelles de Devastating sont **allouées par le défenseur comme les autres blessures de l'attaque** (05.03), sans save, après les dégâts normaux — c'est **exactement** ce que fait ce câblage en restant dans le flux d'allocation manuel (option A). Un pool MW séparé (`allocate_mortal_wounds`) n'ajouterait aucune fidélité et introduirait un prompt PvP inutile. **⚠️ Note d'équivalence :** aujourd'hui, sans Feel No Pain ni réduction-de-dégâts modélisés, « pas de save sur crit » et « D blessures mortelles » donnent le **même résultat numérique** ; le gain de cette tranche est le **modelage correct** (tag MW + ordre 24.10 + bypass invul explicite), pas un changement de chiffres. | `tests/unit/engine/test_devastating_wounds_shoot.py` (**2 BOUT-EN-BOUT** via `build_manual_shoot_allocation` en `gym_training_mode`) : critique+DEVASTATING → save 6 (qui réussirait sur Sv2+) **sautée** → dégât infligé **ET** record tagué `mortalWound`+`saveSkipped` ; sans DEVASTATING → save 6 protège, aucun tag. Contre-épreuve mutation : court-circuit `not _devastating` retiré → rouge. |
-| **HAZARDOUS (24.15)** | ✅ **FAIT dans le vif** (2026-07-26) | Déclencheur en **fin d'activation** (`_finalize_manual_allocation`, tir ET combat — « after that unit has resolved all of its attacks »). Nombre de jets = nombre d'armes HAZARDOUS **sélectionnées** (couples figurine×arme distincts, comptés à la déclaration : `_count_selected_hazardous_weapons`), PAS par figurine. `roll_hazard_for_unit` généralisé (`n_rolls`, `context_label`) et 06.03 corrigé : **test « each model » par FIGURINE** (`models_cache[...]["UNIT_KEYWORDS"]`) au lieu des keywords d'unité — sans quoi l'union 19.03 donnerait 3 MW à une escouade d'infanterie menée par un character MONSTER. Reprise PvP branchée sur `hazard_origin` (`_resume_after_hazard` : shoot/fight → fin d'activation ; move → Desperate Escape inchangé). ⚠️ **PDF vs config** : `weapon_rules.json` disait « sur un 1 → 3 MW » ; le PDF 24.15+06.03 dit **1-2 → 1 MW (3 si CHAQUE figurine est MONSTER/VEHICLE)**. PDF appliqué. | `tests/unit/engine/test_hazardous.py` (**6**, e2e via `build_manual_shoot_allocation`) : MW sur 1-2, pas de MW sur 3+, aucun jet sans la règle, **2 armes = 2 jets** (discrimination par-arme vs par-figurine), 3 MW si tout véhicule, 1 MW si escouade mixte. |
-| **TORRENT (24.37)**, **SUSTAINED HITS (24.36)**, **LETHAL HITS (24.23)**, **TWIN-LINKED (24.38)**, **ANTI-X Y+ (24.03)** | ✅ **FAIT dans le vif, tir ET mêlée** (2026-07-26) | Socle commun `engine/phase_handlers/attack_sequence.py` (cf. §9.2.3). LETHAL HITS : le « you CAN choose » est tranché par **espérance de dégâts** (`lethal_hits_auto_wound_is_better`), seul arbitrage exact — l'auto-blessure interdit la blessure critique, donc neutralise DEVASTATING. ANTI-X : seuil de critique abaissé si la cible porte le keyword X ; 24.02 (instances non cumulatives) → meilleur seuil applicable. | `test_weapon_rules_attack_sequence.py` (**24**) + `test_weapon_rules_fight.py` (**6**, câblage mêlée). |
-| **MELTA X (24.25)** | ✅ **FAIT dans le vif** (2026-07-26) | Bonus sur la **caractéristique D** (D6+2, pas 2 forfaitaire) : `dmg_bonus` porté de `_manual_roll_intent` → clé de groupe d'armes (un même profil à demi-portée et hors demi-portée ne se résout pas dans le même lot, 04.03) → ajouté **après** le tirage du dé de dégâts dans `_resolve_one_manual_wound`. Demi-portée mutualisée avec RAPID FIRE (`_target_within_half_range`). | `test_melta_shoot.py` (**3**, e2e : à portée / hors portée / sans la règle). |
-| **BLAST (24.05)** | ✅ **CORRIGÉ — la règle ne s'appliquait JAMAIS** (2026-07-26) | `_has_blast_keyword` testait `weapon["KEYWORDS"]`, champ **absent de toutes les armes** des armories (les règles vivent dans `WEAPON_RULES`) → bonus jamais accordé, gym ET PvP. Remplacé par `_blast_extra_dice_per_five` (`weapon_rule_parameter_or`, forme nue = 1 dé/5 figurines, forme `[BLAST X]` = X). | `test_blast_cleave.py` (**4** BLAST). |
-| **CLEAVE X (24.06)** | ✅ **FAIT dans le vif** (2026-07-26) | Jumeau mêlée de BLAST + clause « une seule cible pour toutes les attaques de cette arme » (`_weapon_attacks_single_target`). ⚠️ **PDF vs config** : `weapon_rules.json` décrivait « touche X figurines supplémentaires dans l'ER » — **faux** ; le PDF donne des **dés d'attaque additionnels par tranche de 5 figurines cibles**. PDF appliqué. `target_squad_size_at_declaration` ajouté aux intents de `squad_declare_fight` (le chemin PvP par arme le posait déjà). | `test_blast_cleave.py` (**4** CLEAVE, dont multi-cibles et absence de taille = erreur explicite). |
-| **EXTRA ATTACKS (24.11)** | ✅ **FAIT dans le vif** (2026-07-26) | Select Weapons step : `_select_fight_weapon_indices_for_fig` = **toutes** les armes EXTRA ATTACKS + **une** autre arme de mêlée (« if possible »), le choix principal les excluant. `squad_declare_fight` émet **un intent par arme** et `ATTACK_LEFT` cumule (sinon la 2ᵉ arme ne se résolvait jamais). | `test_extra_attacks_fight.py` (**7**, sélection + câblage). |
-| **PRECISION (24.28)** | ✅ **FAIT dans le vif** (2026-07-26) | Override à l'ouverture de l'Allocation Order step : `_apply_precision_allocation_override` place le groupe CHARACTER visible en tête de l'ordre déclaré par le défenseur (l'ordre du défenseur est conservé pour le reste). Visibilité : mêlée = acquise au contact ; tir = `_attacker_model_can_reach_squad` restreint aux figurines CHARACTER (nouveau paramètre `only_target_mids`). Arbitrage du « can select » : **toujours**, sur le CHARACTER le plus cher. Ce n'est PAS un choix laissé à l'agent aujourd'hui — le mécanisme générique de décision agent (**P2**, `pending_agent_decision` + `CHOICE_0..K`) n'existe pas encore et l'action_space n'est pas étendu ; sans P2, la seule alternative serait une action ad hoc, exactement ce que §9.3 interdit. **Inscrite comme candidate à une tranche P3.** L'automatisme actuel est le choix strictement favorable à l'attaquant (viser le CHARACTER est l'unique effet de la règle), donc le regret attendu est faible — c'est le critère d'arbitrage de §9.0bis (mesurer le regret avant de brancher). | `test_precision.py` (**4**, dont la **contre-épreuve 05.03** : sans PRECISION le character est intouchable). |
-| **PSYCHIC (24.29)** | ✅ **FAIT dans le vif** (2026-07-26) | « ignore any or all modifiers to BS/WS and to the hit roll » : le seul modificateur défavorable du moteur est le malus de couvert 13.08 → ignoré, **mais la cible garde le bénéfice du couvert** (contrairement à IGNORES COVER 24.18 qui le supprime). Le bonus HEAVY est conservé (« any or all » = choix du joueur). | `test_psychic_shoot.py` (**4**, dont la distinction explicite PSYCHIC vs IGNORES COVER). |
-| **HEAVY (24.16) — mise en conformité PDF** | ✅ **RENFORCÉ** (2026-07-26) | La clause **« that unit is unengaged »**, absente de la config et donc de la 1ʳᵉ implémentation, est branchée (`_heavy_unit_is_engaged`, même prédicat que le gate de tir 10.06). Clause **« pas posée ce tour » : CÂBLÉE** sur le nouveau champ moteur `deployed_on_turn` (posé à la création de l'unité et au commit de déploiement — `_apply_deploy_plan` ; 0 = pré-bataille, N = arrivée de réserve au tour N, `None` = hors board). Aucune arrivée en cours de bataille n'existe encore (réserves 20 non modélisées) mais la clause n'aura pas à être retouchée le jour où elles arrivent. **C'est la source unique partagée avec la feature d'observation déploiement/réserve** (`V11_audit_observation.md` §8). Clause « aucune figurine > 3" » : ✅ **EXACTE depuis le 2026-07-26** — `moved_distance_by_model` (distance de CHEMIN accumulée par `commit_move`, hex géodésique en gym ET euclidienne any-angle en PvP) remplace la borne conservatrice « aucune figurine n'a bougé ». Détail et périmètre → **§9.2.6**. | `test_heavy_shoot.py` (**13** : bonus si stationnaire+unengaged ; pas de bonus si engagé / **posé ce tour** / **une figurine a parcouru > 3"** ; bonus CONSERVÉ jusqu'à 3" inclus (comparaison stricte) ; bonus conservé si posé au tour précédent ; rien sans HEAVY). |
-| **reroll_charge** (`unit_rules.json`) | ✅ **IMPLÉMENTÉ** (2026-07-26) | Règle d'unité déclarée par 4 unités Orks et **totalement absente du code** (grep zéro). `roll_charge_distance` + `unit_can_reroll_charge` mutualisés ; relance sur le seul critère exact : le jet n'atteint **aucune** cible/destination légale (gym `squad_charge` ; PvP roll-first `charge_target_selection`). Un dé ne se relance qu'une fois. ⚠️ **Historique du 2026-07-26** : cette ligne avait affirmé à tort que la tranche « débloque 19.04 » ; le fold n'écrivait jamais les règles du character sur l'escouade, donc le `reroll_charge` d'un leader attaché était **perdu**. Corrigé par 19.04-a/b/c le 2026-07-27 (ligne ci-dessous) : `_unit_has_rule_effect` lit l'union en vigueur, un Captain attaché confère bien son reroll et le retire en mourant. | `test_reroll_charge.py` (**5**, dont l'ancrage donnée « des unités Orks déclarent bien la règle »). ⚠️ Ces tests fabriquent un `game_state` à la main et ne passent par **aucune** unité attachée réelle — c'est ce qui a laissé passer le trou 19.04 ; le câblage attaché est verrouillé par `test_attached_units_abilities_19_04.py` sur un vrai chargement de scénario. |
-| **19.03 — union des keywords** | ✅ **FAIT** (2026-07-26) | `_build_enhanced_unit` : l'unité porte l'UNION des keywords de ses composants (prérequis d'ANTI-X). Keywords **propres** conservés par figurine pour les règles « each model » (06.03). `hideable` recalculé sur l'union. | `test_attached_units_keywords_19_03.py` (**2**, e2e via le vrai chargement de scénario). |
-| **19.04 — abilities in attached units** | ✅ **FAIT dans le vif — 3 tranches a/b/c** (2026-07-27, commits `abcc80ca`, `57e53318`, `ee479cb3`) | `unit["UNIT_RULES"]` est désormais l'**union EN VIGUEUR**, dérivée de deux sources immuables posées au build : `_UNIT_RULES_OWN` (datasheet de l'escouade + règles propres de ses figurines natives) et `_ATTACHED_RULE_GROUPS` (un groupe par character replié, clé = id de l'unité d'origine, [game_state.py:1128](../../engine/game_state.py#L1128)). Les marqueurs de RÔLE ne remontent jamais (`strip_role_rules`, piège 1 ci-dessous). L'extinction est recalculée **à chaque mort de figurine** par `recompute_unit_rules_in_effect` ([shared_utils.py:664](../../engine/phase_handlers/shared_utils.py#L664)), appelée depuis `destroy_model` — point unique de retrait — avant ses `return` anticipés (une unité rasée doit aussi voir ses règles s'éteindre, PDF 25). Fenêtre 19.04-c : une source tuée `reason=="combat"` est inscrite dans `rule_sources_in_grace` **porté par l'allocation en cours** ; elle expire d'elle-même à `_finalize_manual_allocation`, qui recalcule les squads concernés après suppression de l'allocation → aucun état en sursis ne survit à l'activation. | `tests/unit/engine/test_attached_units_abilities_19_04.py` (**14**, e2e via le vrai chargement de scénario ; verts au 2026-07-27). Contre-épreuves : groupes attachés neutralisés → rouge (a) ; appel neutralisé dans `destroy_model` → 4 rouges (b) ; sursis neutralisé → 2 rouges et fenêtre jamais refermée → 1 rouge (c). |
-| ~~~10 règles observées non appliquées~~ | ✅ **SOLDÉ** — il n'en reste **aucune** | Les 9 règles listées au 2026-07-24 sont traitées : TORRENT, TWIN_LINKED, SUSTAINED_HITS, LETHAL_HITS, MELTA, ANTI_* ✅ ; EXTRA_ATTACKS ✅ ; PSYCHIC ✅. **Seule INDIRECT_FIRE (24.19) reste** — ce n'est pas une règle de résolution mais un TYPE DE TIR entier (10.07 : tirer sans ligne de vue, la cible bénéficiant du couvert), donc un chantier à part et non un portage. **Laissée ouverte volontairement** ; 2 armes concernées, aucune dans les rosters de training. ⚠️ Dépendance déjà notée : quand elle sera faite, son couvert devra passer par un point qu'[IGNORES COVER] 24.18 annule aussi. | — |
-| Suppression du code mort (fin P1) | ⏳ | — | — |
-
-**Choix d'implémentation IGNORES_COVER (vérifiés).** `_cover_worsened_bs` recevait `attacker`
-mais pas l'arme ; l'appelant `_manual_roll_intent` résout déjà `weapon` juste avant l'appel
-([shared_utils.py:6269](../../engine/phase_handlers/shared_utils.py#L6269)) → signature étendue de
-`weapon` (appelant unique, vérifié : aucun autre site ni test n'appelait la fonction). Le helper
-`weapon_has_rule` gère les trois formes d'entrée WEAPON_RULES (`'NAME'`, `'NAME:param'`, objet
-`.rule`) et est réutilisable par les tranches P1 suivantes.
-
-⚠️ **Dépendance à honorer quand INDIRECT_FIRE sera implémenté** : 24.18 dit « cannot have the
-benefit of cover … *including from rules that give a model or unit the benefit of cover* ». Or
-INDIRECT_FIRE (10 Shooting) accorde le cover à la cible. Aujourd'hui la SEULE source de cover est
-`compute_unit_los`, que le court-circuit évite → conforme. Mais la tranche INDIRECT_FIRE devra
-router SON cover par un point qu'IGNORES_COVER annule aussi, sinon 24.18 sera violée pour la
-combinaison des deux règles.
-
-**Choix d'implémentation rerolls tir (vérifiés).** Conformité tranchée sur la source de vérité
-`config/unit_rules.json`, PAS sur le seul plan : `reroll_1_towound` (« When this unit makes an
-attack, it can reroll rolls of 1 for the wound rolls ») et `reroll_towound_target_on_objective`
-(« …reroll the wound rolls if the target unit is on an objective ») n'ont **AUCUNE restriction de
-phase** → ils s'appliquent au tir comme au fight. Par contraste `reroll_1_tohit_fight` /
-`reroll_1_save_fight` portent « During the fight phase » + suffixe `_fight` : mêlée-only. La
-distinction de nommage est donc **délibérée** — l'asymétrie tir/fight préexistante était bien un
-bug, et l'application au tir est la correction juste (pas une sur-application). Implémentation en
-**miroir exact** du fight (helper `_unit_has_rule_effect`, mécanique un-reroll-par-dé) ; la
-condition d'échec du tir est préservée → zéro régression quand aucune règle de reroll n'est
-présente. Effet de bord traité : `_manual_roll_intent` résout désormais attaquant/cible via
-`get_unit_by_id` → exige `unit_by_id` dans le game_state (toujours présent en runtime ; fixture
-de `test_ignores_cover.py` complété en conséquence).
-
-✅ **État de la suite (mis à jour 2026-07-25)** : les **15 échecs** qui étaient préexistants au
-2026-07-24 (`test_deployment_per_model_commit`, `test_fight_target_selection_no_fallback`,
-`test_game_state_contract`) ont été **corrigés** (contrats périmés post-V11 — commits `38362e81`,
-`b9dc9916`). `tests/unit/` re-vérifiée verte avant la tranche rerolls ; validation complète
-post-rerolls en cours. La condition §8.5 est donc rétablie.
-
-**Session 2026-07-25 (nuit) — 4 tranches livrées + 1 différée.** Portées dans le vif, chacune
-avec test e2e + contre-épreuve mutation, suite `tests/unit/` re-vérifiée verte et commit
-séparé : `closest_target_penetration`, `HEAVY`, `RAPID_FIRE`, `DEVASTATING_WOUNDS` (cf.
-lignes ✅ ci-dessus). Effet de bord traité : `test_ignores_cover` utilisait `["HEAVY"]` comme
-arme « quelconque » supposée inerte — basculé sur arme nue une fois HEAVY vif. Méthode :
-conformité tranchée sur `config/weapon_rules.json` (source de vérité projet des règles d'armes)
-quand elle diffère du PDF 24 — écarts explicitement documentés par tranche.
-
-### 9.2.2 HAZARDOUS (24.15) — LIVRÉE le 2026-07-26 (l'analyse de 2026-07-25 reste valide)
-
-L'entrée du 2026-07-25 concluait « intégration multi-systèmes, pas un portage » : c'était exact,
-et c'est ainsi qu'elle a été traitée. Ce qui a été fait, point par point :
-
-- **Point de déclenchement** = `_finalize_manual_allocation` (shared_utils), le seul endroit qui
-  signifie « l'unité a résolu TOUTES ses attaques », commun au tir et au combat. Pas
-  `_manual_roll_intent` (per-intent/per-cible), conformément à l'analyse.
-- **Nombre de jets** = armes HAZARDOUS **sélectionnées** au Select Weapons step, comptées à la
-  construction de l'allocation (`_count_selected_hazardous_weapons`, couples figurine×arme
-  distincts) et stockées dans l'état d'allocation avant purge des intents. Ce n'est **pas** un
-  jet par figurine (c'est la règle du Desperate Escape 09.07, désormais distinguée par le
-  paramètre `n_rolls` de `roll_hazard_for_unit`).
-- **Chemin de reprise** : `_resume_after_hazard` était câblé en dur sur le retour à la phase de
-  move (Desperate Escape). Il lit maintenant `game_state["hazard_origin"]` : `shoot`/`fight` →
-  l'activation est terminée, rien à reprendre ; `move` → comportement historique intact.
-- **Gym** : `is_programmatic_owner` sur le propriétaire du TIREUR → `auto_resolve=True`,
-  résolution inline, aucun prompt. Verrouillé par 6 tests e2e headless.
-- **PvP humain** : le prompt d'allocation des blessures mortelles est rendu
-  (`manual_allocation_waiting_payload(HAZARD_CTX)`), et la ligne de log `[HAZARD]` est **publiée
-  AVANT** que le joueur ne choisisse ses pertes (correction du 2026-07-26, demande utilisateur :
-  on ne désigne pas des figurines sans savoir combien de blessures mortelles on encaisse ni d'où
-  elles viennent). Mise en œuvre : `append_action_log` mute l'entrée en place et en garde la
-  référence — les `hazardDetails` complètent CETTE ligne pendant l'attribution au lieu d'en créer
-  une seconde ; `_finalize_hazard_alloc_log` ne ré-émet plus rien et `_finalize_hazard_log`
-  (émission différée) est supprimé. Vaut aussi pour le Desperate Escape 09.07, même chemin.
-
-### 9.2.3 Socle de séquence d'attaque commun tir/mêlée — `attack_sequence.py` (2026-07-26)
-
-**Trou majeur trouvé en cours de route** : `_manual_roll_fight_intent` ne lisait **aucune** règle
-d'arme (zéro occurrence de `WEAPON_RULES` dans `fight_handlers.py`). Les 6 règles portées le
-2026-07-25 étaient donc tir-only, alors que `relic_greataxe` et `thunder_hammer_terminator`
-déclarent [DEVASTATING WOUNDS], `eviscerator` [SUSTAINED HITS 1], `urty_syringe`
-[ANTI-INFANTRY 1+] + [EXTRA ATTACKS] + [PRECISION].
-
-Plutôt que d'écrire dix règles deux fois, la boucle de jets est désormais **unique** :
-`engine/phase_handlers/attack_sequence.py`, consommée par les deux rollers. Y vivent la notion
-de **touche/blessure critique** (05.01/05.02) et tout ce qui s'y accroche : TORRENT, SUSTAINED
-HITS, LETHAL HITS, TWIN-LINKED, ANTI-X, DEVASTATING WOUNDS. Reste chez l'appelant ce qui est
-propre à la phase : pool d'attaques (BLAST/RAPID FIRE/CLEAVE/EXTRA ATTACKS), seuil de touche
-(couvert/HEAVY/PSYCHIC), AP effectif, dégâts et allocation.
-
-Effets de bord corrigés au passage :
-- **05.01 en mêlée** : le test `hit_roll < ws` laissait passer un 1 non modifié si le seuil
-  valait 1. Le socle applique la règle « 1 rate toujours / 6 est un critique » des deux côtés.
-- **Ordre des dés préservé** (touche → [reroll] → blessure → [reroll] → sauvegarde) : les tests
-  déterministes antérieurs restent valides sans modification.
-
-### 9.2.4 Écarts PDF vs `config/*.json` — arbitrage utilisateur du 2026-07-26
-
-Consigne : **« les règles à suivre à 100 % sont dans `Documentation/40k_rules/` »**. Le PDF prime
-donc sur la config quand ils divergent. Trois divergences réelles ont été trouvées et tranchées :
-
-| Règle | `config/weapon_rules.json` | PDF (appliqué) |
-|---|---|---|
-| HAZARDOUS | « roll 1 D6, sur un **1** → **3 MW** » | 24.15 + 06.03 : **1-2** → **1 MW** (3 seulement si CHAQUE figurine est MONSTER/VEHICLE) |
-| CLEAVE | « touche X figurines supplémentaires dans l'ER » | 24.06 : **X dés d'attaque additionnels par tranche de 5 figurines** cibles, si une seule cible |
-| HEAVY | « +1 si Remained Stationary » | 24.16 : **unengaged** ET pas posée ce tour ET aucune figurine > 3" |
-
-Les tranches du 2026-07-25 avaient suivi la config (arbitrage d'alors, documenté) ; HEAVY est
-mis en conformité ci-dessus, les deux autres sont nées conformes au PDF.
-
-⚠️ **Conséquence à connaître** : `config/weapon_rules.json` contient donc des descriptions
-**fausses** pour HAZARDOUS et CLEAVE. Elles n'ont plus aucun consommateur de résolution (le code
-suit le PDF), mais elles restent lues comme documentation. **Décision utilisateur attendue** :
-corriger le fichier de config pour qu'il décrive les vraies règles, ou le marquer explicitement
-comme non normatif.
-
-### 9.2.5 Ce que l'agent voit des règles — ✅ LIVRÉ (2026-07-26)
-
-> **Était** : « les règles sont vives dans le moteur, mais l'observation squad (199-d) ne contient
-> aucun profil d'arme ni bit de règle — l'agent les subit sans les percevoir ». **C'est fait.**
-> `obs_size` **199 → 1011** (`vec_cont` 459, `vec_bin` 552) ⇒ **retrain from scratch**
-> (déjà acté ; les `.zip` existants sont incompatibles, par construction).
->
-> ⚠️ **MAJ 2026-07-26** : le contrat décrit ici (vecteur PLAT `vec_cont`/`vec_bin`) a été
-> REMPLACÉ par les **tenseurs d'entités** de §0.30 T-D (`obs_size` **20626** depuis §0.32). Ce qui suit reste
-> la spécification de CE QUI est observé (profils d'armes, règles, mise en place, distance
-> parcourue) ; la FORME, elle, se lit dans `V11_entity_encoder_pointer.md` §6 et dans l'en-tête
-> de `build_squad_observation`.
-
-**Ce qui a été ajouté à l'observation squad** (détail de layout : en-tête de
-`build_squad_observation`, source unique) :
-
-1. **Profils d'armes bruts + bits/params de règles** — nouveau module
-   [`engine/observation_weapon_profiles.py`](../../engine/observation_weapon_profiles.py),
-   **encodeur unique consommé par mon escouade ET par les slots ennemis** (un encodeur par camp
-   aurait dérivé). Un profil = `{NB, ATK, STR, AP, DMG, portée, **nb de porteurs vivants**}` +
-   6 params de règles (RAPID FIRE / SUSTAINED HITS / MELTA / CLEAVE / BLAST X, et le Y+ de
-   ANTI) + 12 drapeaux (DEVASTATING WOUNDS, LETHAL HITS, TORRENT, TWIN-LINKED, EXTRA ATTACKS,
-   PRECISION, PSYCHIC, HAZARDOUS, HEAVY, IGNORES COVER, PISTOL, ASSAULT) + le **one-hot du
-   keyword ciblé par ANTI-X** + un mask. **13 cont + 18 bin par profil.**
-   - Le **compteur de porteurs** est ce qui distingue « 1 rokkit » de « 9 shootas » : le volume
-     de feu est `porteurs × NB`. Les profils sont regroupés par **identité de caractéristiques**
-     (deux noms différents, même profil = un seul slot ; une arme « à profils multiples » = une
-     entrée par profil, aucun cas particulier).
-   - **[INDIRECT FIRE] 24.19 est délibérément ABSENTE** : elle n'est pas implémentée (cf. la
-     ligne « 10 règles observées » de §9.2.1). Un bit pour une règle inerte est du bruit pur.
-   - ⚠️ **Réserve sur [ASSAULT] et [PISTOL]** : bits conservés (effet réel côté PvP), mais le
-     gate de tir gym rend leurs types de tir (10.05 / 10.06) INATTEIGNABLES pour l'agent —
-     trou de conformité trouvé le 2026-07-26, **ouvert** : voir **§9.2.7**.
-   - **K par camp, mesuré** : mon escouade **6 profils de tir + 5 de mêlée** — le maximum
-     observé sur les rosters d'entraînement réels, persos attachés compris, donc **mes propres
-     capacités ne sont jamais tronquées** ; slots ennemis **2 tir + 1 mêlée**, ordonnés par
-     nombre de porteurs (le gros du volume de feu adverse). ⚠️ **Arbitrage assumé** : 11 profils
-     × 5 escouades ennemies coûteraient 5 fois le vecteur entier pour une information marginale.
-     Tout dépassement de K est **LOGUÉ** (`add_debug_file_log`), jamais silencieux.
-2. **Mise en place / réserve** — one-hot 3 états (pas sur le board / posée avant la bataille /
-   arrivée en cours de bataille) **+ le bit « posée CE tour »**, dérivés de `deployed_on_turn`,
-   la **source unique déjà utilisée par la clause 2 de [HEAVY] 24.16**. Le one-hot seul ne dit
-   pas si la pose est de ce tour — or c'est ce point-là qui supprime le bonus.
-3. **Distance parcourue ce tour, par figurine** — nouvelle donnée moteur
-   `moved_distance_by_model`, accumulée par `commit_move` en **distance de CHEMIN** ; exposée en
-   **max** (porte la clause de règle) et **somme** (toute l'escouade a-t-elle bougé, ou une
-   seule figurine). Voir §9.2.6 : elle rend la **clause 3 de [HEAVY] 24.16 EXACTE**.
-
-**Verrous** : `tests/unit/engine/test_squad_obs_weapon_profiles.py` (**19**) et
-`test_moved_distance_and_deploy_obs.py` (**10**). Contre-épreuves mutation : compteur de porteurs
-figé + one-hot ANTI éteint + ordre des profils changé → **6 rouges** ; mesure à vol d'oiseau +
-accumulation remplacée par écrasement → **2 rouges** ; restauré → verts. Les 6 fichiers de tests
-d'observation squad préexistants restent verts **sans modification** (ils passent par les
-accesseurs de layout, pas par des index recopiés).
-
-**Ce que cette tranche NE fait PAS** (et pourquoi) :
-- **Bloc E « escouades amies »** : toujours différé, il part avec l'archi set-based (le faire en
-  K slots fixes exigerait d'inventer un ordre qu'aucune action ne consomme — cf.
-  `V11_audit_observation.md` §11).
-- **Listes de longueur variable** (fin des plafonds K) : idem, c'est l'étape architecture.
-- ✅ **Les règles d'UNITÉ sont observées depuis le 2026-07-27** (§0.31, commit `0fb94a01`) —
-  13 bits d'EFFET par entité, amies ET ennemies, dans `UNIT_BIN_FIELDS`. Le constat qui suit
-  décrit l'état AVANT ce correctif ; il est conservé parce qu'il documente le motif de trou.
-- 🔴 ~~**Les règles d'UNITÉ (`config/unit_rules.json`) ne sont PAS observées**~~ — constat vérifié le
-  2026-07-27, **non documenté jusqu'ici, ni comme trou ni comme choix**. Cette tranche a rendu
-  visibles les règles d'**armes** (profils + drapeaux) ; les règles d'unité, elles, n'existent
-  dans aucun schéma du pipeline squad : `UNIT_CONT_FIELDS`/`UNIT_BIN_FIELDS`
-  ([observation_entities.py](../../engine/observation_entities.py), contrat unique des tenseurs
-  d'entités) n'ont aucun champ de règle, et `unit_has_rule_effect` n'apparaît qu'à un seul
-  endroit de tout l'encodage : `_encode_rule_features`, appelée **uniquement** par
-  `build_observation` — le pipeline **mono-figurine legacy** (`obs_size` 357). Le routage
-  ([w40k_core.py](../../engine/w40k_core.py) `_build_observation`) envoie le pipeline squad sur
-  `build_squad_observation`, qui ne passe jamais par là. ⚠️ `AI_OBSERVATION.md` décrit bien
-  « 12 unit-rule flags », mais dans le layout `obs[314:346]` du legacy : lu vite, il fait croire
-  l'inverse. Concerné : les 12 règles vives (`reroll_charge`, `closest_target_penetration`,
-  `charge_after_advance`, `charge_after_flee`, `charge_impact`, `reactive_move`,
-  `move_after_shooting`, `shoot_after_advance`, `shoot_after_flee`, `reroll_1_towound`,
-  `reroll_towound_target_on_objective`, `reroll_1_tohit_fight`, `reroll_1_save_fight`) —
-  l'agent les subit sans les percevoir, exactement le constat qui avait motivé cette section
-  pour les règles d'armes. **Enjeu accru depuis 19.04** (§9.2.8) : une escouade menée par un
-  character porte désormais les règles de son leader, et cette information reste invisible.
-  ~~**Ouvert — arbitrage de périmètre à faire**~~ → **TRAITÉ le 2026-07-27, cf. §0.31.**
-
-### 9.2.7 ✅ CORRIGÉ le 2026-07-26 (tranche T-B) — les types de tir 10.05 / 10.06 existent enfin pour l'agent
-
-**Trouvé en vérifiant, à la demande de l'utilisateur, l'affirmation « seules les règles à effet
-réel sont exposées » de §9.2.5.** Elle est FAUSSE pour deux bits, et la cause n'est pas
-l'observation : c'est le moteur.
-
-**Le fait, lu dans le code.** Le gate de tir du chemin squad/gym
-([`build_squad_action_mask`](../../engine/phase_handlers/shared_utils.py), branche `phase ==
-"shoot"`) calcule :
-`can_shoot = not has_fled and not has_advanced and not has_shot and not in_er` — **sans aucune
-exception d'arme**.
-
-**Ce que disent les PDF** (lus, pas supposés) :
-- **10.05 ASSAULT SHOOTING** — éligible si : « Unengaged **and made an advance move this turn** »
-  ET l'unité a ≥1 arme [ASSAULT]. *While shooting* : seules les armes [ASSAULT] peuvent être
-  sélectionnées. ⇒ `has_advanced` ne doit PAS fermer le tir quand une arme [ASSAULT] est portée.
-- **10.06 CLOSE-QUARTERS SHOOTING** — éligible si : « **Engaged** and did not make an advance
-  move this turn » ET l'unité a ≥1 arme [CLOSE-QUARTERS] **ou est MONSTER/VEHICLE**. *While
-  shooting* : les figurines peuvent cibler les unités avec lesquelles l'unité est engagée.
-  ⇒ `in_er` ne doit PAS fermer le tir dans ces cas. **24.27 : [PISTOL] et [CLOSE-QUARTERS] sont
-  identiques à toutes fins de règles** — donc la règle porte bien sur les armes [PISTOL] du
-  projet.
-
-**Portée du trou.** Le chemin **PvP/mono-figurine** connaît les deux règles
-(`_weapon_has_assault_rule` → `weapon_availability_check` ; `_weapon_has_pistol_rule` → sélection
-d'arme et allocation en zone d'engagement, `shared_utils` ~5030/5081/5802/6072). Le chemin
-**squad/gym** ne les connaît pas. C'est **exactement le motif de §9.1** — une règle vive sur un
-chemin, absente de l'autre — et le motif récurrent du document (« code testé mais jamais appelé »,
-« migration partielle d'un chemin »).
-
-**Sens de l'écart** : le gate gym est **plus STRICT** que les règles (il refuse des tirs légaux),
-donc jamais laxiste. Conséquence : l'agent ne peut pas apprendre le tir d'assaut ni le tir à bout
-portant, et les 30 armes [PISTOL] / 22 [ASSAULT] des armories perdent leur intérêt tactique côté
-IA. Côté observation, les bits `PISTOL` et `ASSAULT` décrivent donc une capacité inexploitable en
-gym — ils sont **conservés** (l'effet PvP est réel) avec la réserve écrite dans
-`observation_weapon_profiles.py`.
-
-**Statut : ✅ FERMÉ le 2026-07-26 par la tranche **T-B** du chantier dédié [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md) (tranche T-B), avec 5 autres trous trouvés le même jour.** Le résolveur `resolve_squad_shooting_type` ouvre 10.05 et 10.06, le masque teste toute arme éligible, et le volet MONSTER/VEHICLE de 10.06 est implémenté (13 tests, mutations → 5 rouges). ⚠️ **Résidu** : le chemin PvP/mono ne connaît toujours pas le volet MONSTER/VEHICLE — voir §1.9 du chantier. Périmètre d'origine — c'est une **nouvelle règle à implémenter**
-(deux types de tir, avec restriction d'armes et restriction de cibles), pas un correctif de la
-tranche observation. Périmètre estimé, à arbitrer : (1) gate `build_squad_action_mask` ;
-(2) restriction « seules les armes [ASSAULT] » / « seules les armes [PISTOL] » à la sélection
-d'armes du squad ; (3) restriction de cible 10.06 (uniquement les unités engagées) ; (4) miroir
-PvP à vérifier (le chemin mono connaît les helpers mais pas forcément les deux types complets) ;
-(5) tests par règle + contre-épreuve mutation.
-
-### 9.2.6 [HEAVY] 24.16 clause 3 — passage à la clause EXACTE (2026-07-26)
-
-L'implémentation du 2026-07-26 appliquait la borne **conservatrice** « aucune figurine n'a
-bougé » faute de distance par figurine. Elle est remplacée par la clause du PDF : **« no model in
-that unit has moved more than 3" this turn »**, comparaison **stricte** (3" pile conserve le
-bonus). Conséquence de jeu : une escouade qui se repositionne de 2" garde désormais son +1, ce
-que le moteur lui refusait à tort.
-
-**La donnée** est la distance de **CHEMIN**, pas l'écart départ↔arrivée — contourner un mur coûte
-plus cher. C'est le point qui empêche la règle de devenir laxiste, et il est mesuré **dans les
-deux métriques du moteur** :
-- métrique `hex` (gym) → BFS géodésique `geodesic_move_reach`, avec la définition **partagée** du
-  trajet légal (`build_move_transit_blocked`) ;
-- métrique `euclidean` (PvP) → champ any-angle `_euclidean_move_field`, **la primitive même du
-  pool de destinations par-figurine**. Sans ce second cas, PvP aurait mesuré à vol d'oiseau et la
-  règle serait devenue **laxiste** là-bas (le contraire de la borne d'avant).
-- FLY (21.03) traverse tout : le champ sans obstacle redonne la ligne droite, aucun cas
-  particulier.
-
-**Périmètre assumé** : seuls les moves de la **phase de mouvement** (`normal`/`advance`/
-`fall_back`) sont comptabilisés. Ce n'est pas une omission — l'ordre des phases (**PDF 07.02** :
-Commande, Mouvement, **Tir**, Charge, Combat) garantit qu'au moment du tir, aucun move de charge
-ni de pile-in n'a pu avoir lieu dans le même tour. Les compter avec la métrique du move donnerait
-un chiffre faux (ils relèvent d'une autre géométrie) ; à vol d'oiseau, un chiffre sous-estimé.
-
-`moved_distance_by_model` est remis à zéro **au même endroit que `units_moved`**
-(`command_phase_start` + `_tracking_cleanup`) : c'est la version continue du même fait.
-Verrou : `test_heavy_shoot.py` passe de 7 à **13** tests (>3" perd / ≤3" garde / 3" pile garde /
-une AUTRE figurine de l'escouade suffit à annuler) ; mutation « seuil 3" → seuil 0 » → 2 rouges.
-
-Corrigé en revanche cette nuit : le pipeline mono-figurine legacy **crashait** (`KeyError`) sur
-toute unité portant CLEAVE ou PRECISION — donc sur Warboss, Bigboss et PainBoy, tous présents
-dans les rosters de training. Les deux canaux sont ajoutés (`obs_size` legacy 357 → **359**) ;
-le pipeline squad V11 (199) n'est pas concerné.
-
-### 9.2.8 AUDIT RÈGLE 19 (Attached units) — 19.01/19.02/19.03 conformes ; **19.04 était absent, ✅ LIVRÉ le 2026-07-27** (a/b/c)
-
-> **MAJ 2026-07-27 — le trou décrit ci-dessous est refermé.** Les trois tranches proposées en fin
-> de section ont été exécutées et commitées : `abcc80ca` (19.04-a, résolution unit-wide sur
-> figurines vivantes, rôles exclus), `57e53318` (19.04-b, extinction à la mort de la dernière
-> figurine source, les deux sens), `ee479cb3` (19.04-c, fenêtre « jusqu'à la fin des attaques de
-> l'attaquant »). Verrou : `tests/unit/engine/test_attached_units_abilities_19_04.py` (**14**
-> tests e2e sur chargement réel de scénario, verts). Détail d'implémentation → ligne « 19.04 » du
-> tableau §9.2.1. **Le constat ci-dessous est conservé tel quel comme trace d'audit** (il décrit
-> l'état AVANT correction) ; les ❌ de sa table valent au 2026-07-26.
-
-Audit refait de bout en bout après relecture des PDFs **19**, **24** (p5-p8 : LEADER 24.22,
-LONE OPERATIVE 24.24, PRECISION 24.28, SUPPORT 24.34), **25** (p1-p3 : starting strength,
-destroyed, mixed keywords, revived), **05** p5 et **08** (battle-shock 08.03).
-
-**Conforme (vérifié clause par clause, cf. la table règle 19 d'[AI_TURN.md](../AI_TURN.md)) :**
-19.01 (les 4 gardes du fold + les clauses structurelles), 19.02 (T bodyguard + repli
-leader-only + trigger de destruction), 19.03 (union des keywords / keywords propres par
-figurine). Clauses connexes sans objet et documentées : Lone Operative (aucune donnée),
-Revived (aucune mécanique), Starting strength (correct par construction du fold).
-
-**Le trou : 19.04 « Abilities in attached units ».**
-
-Ce que dit le PDF : les règles qui affectent une figurine précise ne valent que pour elle ;
-**toutes les autres s'appliquent à chaque figurine de l'unité attachée**, jusqu'à ce que la
-source soit détruite — dernière figurine du leader/support, dernière figurine du bodyguard, ou
-la figurine porteuse. Et si cette dernière figurine tombe sous une attaque, la règle **survit
-jusqu'à ce que l'unité attaquante ait résolu toutes ses attaques**.
-
-Ce que fait le code : [`_fold_attached_characters`](../../engine/game_state.py#L728) replie le
-character en figurine ; ses `UNIT_RULES` sont copiées sur `models[i]`
-([game_state.py:1019](../../engine/game_state.py#L1019)) et l'escouade garde les seules
-`UNIT_RULES` de son propre `unit_type` ([game_state.py:918](../../engine/game_state.py#L918)).
-Or **tous** les consommateurs interrogent l'escouade : `_unit_has_rule_effect`
-([shared_utils.py:1904](../../engine/phase_handlers/shared_utils.py#L1904)), ses trois
-ré-exports (`shooting_handlers:304`, `charge_handlers:52`, `fight_handlers:86`), les lectures
-directes de `w40k_core` (2341 / 2426 / 2583) et l'observation IA
-([observation_builder.py:2386](../../engine/observation_builder.py#L2386)). Aucun site ne
-regarde `models[i]["UNIT_RULES"]`.
-
-Reproduction (Intercessor 101 + `CaptainPowerWeaponBolter` 102 attaché, chargement réel) :
-
-```
-UNIT_RULES escouade      : []
-UNIT_RULES par figurine  : [[], ['reroll_charge', 'leader']]
-unit_can_reroll_charge(101) = False        # le Captain porte bien reroll_charge au registry
-```
-
-Ce n'est donc pas « l'unité ne profite pas du leader » mais « **le leader perd sa règle** » :
-autonome il relance sa charge, attaché il ne la relance plus. Le scénario PvP de référence
-attache un `CaptainTerminatorRelicWeaponBolter` et un `LibrarianTerminator`
-([scenario_pvp.json:8-9](../../config/board/44x60x5/scenario/scenario_pvp.json#L8-L9)) : le bug
-est vif en PvP **et** en gym.
-
-**Trois manques distincts, à ne pas confondre :**
-
-| # | Manque | État | Impact données actuelles |
-|---|---|---|---|
-| a | **Montant** — la règle du leader/support ne remonte pas à l'unité | ❌ | `reroll_charge` de 9 characters SM/Ork ; tout `unit_rules.json` futur porté par un character |
-| b | **Descendant** — la règle du bodyguard reste active après la mort de sa dernière figurine bodyguard | ❌ | un character survivant seul continue de bénéficier de `charge_impact`, `cunning_hunters`, `closest_target_penetration`… du squad mort |
-| c | **Fenêtre 19.04** — la règle survit « until the attacking unit has resolved all of its attacks » | ❌ | conséquence de (a)/(b) ; s'aligne sur la fenêtre déjà utilisée par HAZARDOUS/`_finalize_manual_allocation` |
-
-**Pourquoi une union statique au chargement serait fausse** : 19.04 est dynamique. Fusionner les
-`UNIT_RULES` dans `_build_enhanced_unit` réglerait (a) mais **installerait** (b) — la règle
-resterait après la mort de sa source. La résolution doit se faire sur les figurines **vivantes**
-(`models_cache` + `squad_models`), au point de lecture.
-
-**Deux pièges de conception :**
-1. Les rôles `leader` / `support` / `sergeant` / `special_weapon` sont des **marqueurs
-   par-figurine** consommés par `ROLE_TIER` / `_is_character_role` (ordre d'allocation 05.03,
-   T bodyguard 19.02). Les remonter à l'escouade casserait 19.02. Ils doivent être exclus.
-2. Le PDF exclut aussi les règles « affecting a single specified model » (enhancement/wargear).
-   `config/unit_rules.json` ne porte aucun marqueur de portée : tout ce qui y figure est
-   unit-wide. Écart config/PDF **sans conséquence aujourd'hui** (aucun enhancement modélisé) —
-   à trancher le jour où une règle par-figurine sera déclarée. Précédent §9.2.4 : on suit la config.
-
-**Tranches** — ✅ **les trois sont exécutées et commitées le 2026-07-27** (cf. l'encadré MAJ en tête
-de section) : **19.04-a** résolution unit-wide sur figurines vivantes, rôles exclus, avec test e2e
-sur chargement réel de scénario (`abcc80ca`) ; **19.04-b** extinction à la mort de la dernière
-figurine source, les deux sens (`57e53318`) ; **19.04-c** fenêtre « jusqu'à la fin des attaques de
-l'attaquant » (`ee479cb3`). Les deux pièges de conception ci-dessus ont été honorés : les rôles
-sont strippés à la remontée, et la résolution est dynamique (pas d'union statique au chargement).
-
-### 9.3 P2 — Mécanisme générique « décision agent »
-
-Un seul mécanisme pour tous les choix joueur, au lieu d'actions ad hoc par décision :
-- quand le moteur atteint un point de choix joueur en gym, au lieu d'appeler une heuristique
-  `_ai_select_*`, il pousse un `pending_agent_decision` (type + liste ORDONNÉE et STABLE de
-  ≤ K candidats) ;
-- le masque expose K actions génériques `CHOICE_0..K-1` ; l'observation gagne un bloc
-  « contexte de décision » (type one-hot + features par candidat) ;
-- l'agent choisit, le moteur applique. **Miroir exact des prompts PvP `waiting_for_player`**
-  (même sémantique, consommateur différent) — conforme à la règle projet « le flux gym copie
-  le flux PvP » ;
-- les heuristiques `_ai_select_*` sont CONSERVÉES pour le bot adversaire (GreedyBot) uniquement.
-
-Impact interface : action_space 41 → 41+K (recommandé K=6, aligné sur les 6 slots figurines ;
-actions dédiées plutôt que surcharge des slots tir 19-23, pour la lisibilité du masque) ;
-obs_size change → nouveau modèle from scratch (`--new`, déjà acté). Mettre à jour la
-`justification` de la config en même temps.
-
-### 9.4 P3 — Branchement décision par décision (une tranche = une décision + validation)
-
-⚠️ Les sites à remplacer sont ceux du PIPELINE VIF gym (vérifiés par contre-review), pas les
-heuristiques `_ai_select_*` qui ne sont que des fallbacks/chemins legacy.
-
-Ordre par valeur tactique :
-0. **Prompts rule-choice** (le plus urgent — pseudo-décision aléatoire structurelle) : en gym,
-   `_select_ai_rule_choice_option` choisit par `raw_action_int % len(options)`
-   ([w40k_core.py:2494](../../engine/w40k_core.py#L2494)) — l'agent « choisit » via une action émise pour tout autre chose,
-   sans voir le prompt. À remplacer par une vraie décision P2.
-1. **Cible de mêlée** — ⚠️ **MIS À JOUR le 2026-07-16 (le fix du bug `squad_fight` a déplacé ce
-   site)** : la boucle `get_best_enemy_score_for_unit` de `squad_fight` **n'existe plus** — elle
-   sélectionnait sa cible dans le mapping de slots gelé du tir, sans filtre de zone d'engagement
-   (violation 12.05) et crashait quand ce mapping était vide (cf.
-   `Implémenté/bug_squad_fight_mask_mismatch.md`). Le site vif est **désormais
-   `_ai_select_fight_target`** (fight_handlers ~L1725), que `squad_fight` consomme via
-   `_fight_build_valid_target_pool` — en miroir du flux PvP (`_fight_v11_resolve_attacks`).
-   Ce n'est donc plus un « fallback » : c'est le sélecteur vif, partagé gym/PvP.
-   ⚠️ Il porte un `except Exception: … return valid_targets[0]` (~L1781) qui masque toute erreur
-   de config/registry — vérifié : jamais déclenché sur la suite + smoke. Retrait = backend
-   partagé, arbitrage requis (cf. `A_faire/bug_pile_in_bfs_clearance_mismatch.md` §dernier).
-   La boucle `get_best_enemy_score_for_unit` reste vive pour la **cible de charge** (point 2).
-   Pilote du mécanisme P2.
-2. **Cible de charge** — le site vif est la même boucle de scoring dans `convert_squad_action`
-   du décodeur (action_decoder ~L917-940), PAS `charge_handlers:1506` (chemin
-   `convert_gym_action`, hors gym mais encore vif en PvE via pve_controller — ne pas le
-   supprimer, juste ne pas le brancher).
-3. **Choix de l'unité à activer** par phase — `eligible_units[0]` a 9 occurrences dans
-   action_decoder ; les sites DÉCISIFS du flux vif sont dans `convert_squad_action`
-   (~L837, L876), les autres sont dans la construction du masque ; le plus gros gain
-   stratégique. Contrainte règles : l'ordre en fight reste borné par Fights First
-   (11.04/12.04) et les pools alternés — le choix agent se fait DANS le pool légal courant.
-4. **Allocation des pertes défenseur** — remplace `_select_allocation_model`
-   (shared_utils ~5643) ; candidats = figurines éligibles 05.03/06.02 ; inclut l'allocation
-   hazard ET l'ordre de déclaration des groupes (`declare_order`, décision défenseur 05.03,
-   aujourd'hui `_auto_declared_order`).
-5. **Pile-in / consolidation** — les sites vifs sont `fight_pile_in_plan`
-   (shared_utils ~6708) et `squad_consolidate_plan` (~7038) appelés par `squad_fight`,
-   PAS les `_ai_select_*` de fight_handlers ; candidats = top-K destinations du pool.
-   NB règles : pile-in/conso sont OPTIONNELS et la consolidation a 3 modes en cascade (dont
-   vers objectif) — l'espace de choix doit inclure « ne pas bouger ». ⚠️ Le site vif gym
-   `squad_consolidate_plan` n'implémente que le mode (1) (docstring : option (2) « vers
-   objectif » déférée) — le flux PvP (fight_handlers ~1161-1176) a la cascade complète :
-   écart gym/PvP à combler quand cette tranche s'ouvre.
-6. **Move-after-shooting** (destination — remplace
-   `_select_move_after_shooting_destination_for_ai`, shooting_handlers ~4961) et
-   **reactive_move** (accepter/décliner + destination — protocole `decline_reactive_move`
-   déjà formalisé, shared_utils ~2190).
-7. **FLY / Take to the skies** — déclaration binaire (aujourd'hui auto pour l'IA,
-   movement_handlers ~261/271).
-8. **Optionnels, à statuer utilisateur** : split-fire (en gym, l'escouade entière vise UN
-   slot ; le PvP a `squad_shoot_assign` par-figurine), choix d'arme — deux régimes distincts
-   en gym : RNG = `selectedRngWeaponIndex` pris tel quel (shared_utils ~4489), CC =
-   auto-sélection par expected damage `_auto_select_cc_weapon_for_fig` (shared_utils ~6938,
-   appel ~7016) — les deux sont des décisions joueur auto-résolues,
-   déclaration multi-cibles de charge (PvP oui, gym mono-cible), placement final de charge
-   (`charge_build_valid_plan`, shared_utils ~3955), déploiement (les actions 4-8 sont 5
-   STRATÉGIES scorées, action_decoder ~1682-1698, pas « les 5 premiers hex » — élargir ou non).
-
-Hors scope A' (reste auto, conforme règles car « un placement légal parmi d'autres ») :
-placement par-figurine du move rigide, pivot. Montée d'étage = Phase C.
-
-### 9.5 P4 — Observation de support
-
-Bloc décision (P2) + features nécessaires aux choix : LoS/couvert par slot ennemi, portée
-effective de l'arme active vs distance du slot, flags advanced/fell_back de l'unité active.
-Les niveaux/élévation restent en Phase B (scénarios plats jusque-là).
-
-### 9.6 P5 — Validation par tranche
-
-Chaque tranche P3 : suite de tests verte + smoke 10 épisodes + run court `x1_debug` +
-win-rate vs GreedyBot ≥ tranche précédente. Si l'ajout d'un point de décision DÉGRADE le
-win-rate, la décision est mal observée ou mal récompensée → corriger avant d'empiler la
-suivante. Interdits : masquer une régression en retirant silencieusement la décision.
-
-Points de vigilance :
-- l'ordre des candidats doit être déterministe et stable (sinon l'assignation de crédit PPO
-  est brouillée) ;
-- chaque décision ajoutée allonge l'épisode en steps → surveiller `episode_steps` vs la
-  normalisation `/100` de l'observation globale ;
-- les heuristiques du RewardMapper utilisées par les anciens `_ai_select_*`
-  (`get_shooting_priority_reward`) peuvent devenir du reward shaping pour guider les
-  nouvelles décisions — à statuer par tranche, jamais en silence. NB : un de ses deux
-  consommateurs, `_ai_select_shooting_target` (shooting_handlers, def ~2093), est DÉJÀ mort
-  (zéro appelant) — à inclure dans la suppression P1.
-
----
-
-## 10. Stratégie d'entraînement et d'évaluation — DÉCISION UTILISATEUR (2026-07-19)
-
-### 10.1 Contexte et arbitrage
-
-**Objectif métier** : présenter le jeu avec une IA « acceptable » pour obtenir un financement.
-La démo oppose un **joueur humain** à l'IA, avec les **armées de la boîte de base**.
-
-**Arbitrage assumé** : l'agent n'apprendra PAS à jouer 40K, il apprendra à jouer **ces deux
-rosters**. C'est un choix délibéré pour éviter des semaines de tuning — la spécialisation réduit
-la variance de composition, donc le signal d'apprentissage est plus net et la convergence plus
-rapide. Pour une démo, un agent spécialisé est indiscernable d'un agent généraliste.
-
-⚠️ **Ne PAS « corriger » ce choix** en réintroduisant de la diversité de rosters : c'est une
-décision produit, pas un oubli.
-
-### 10.2 Rosters et matchups
-
-- **2 rosters** : Space Marines (SM) et Orks — les armées de la boîte de base, donc celles de
-  la démo. L'entraînement est aligné sur ce qui sera montré.
-- **3 matchups** : SM vs Orks, SM vs SM, Ork vs Ork.
-- Les rosters de l'ancienne banque ont été **supprimés volontairement** (commit `43eae95a`,
-  370 fichiers) : ils précédaient l'implémentation des escouades, donc obsolètes. Les nouveaux
-  sont à créer.
-
-**✅ FAIT le 2026-07-19 — agent `ArmageddonAgent`, scale `500pts`.** Les 2 rosters existent et
-le pipeline tourne de bout en bout sur eux (training + évaluation).
-
-| Quoi | Où |
-|---|---|
-| Rosters agent (training) | `config/agents/ArmageddonAgent/rosters/500pts/training/agent_training_roster_{space_marines,orks}.json` |
-| Rosters adversaire (training) | `config/agents/_p2_rosters/500pts/training/opponent_training_roster_{space_marines,orks}.json` — le dossier `500pts` n'existait pas côté P2 |
-| Scénario d'entraînement | `config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json` — `agent_roster_ref: "training_random"` (tirage 50/50, **pas de `agent_roster_seed`** : il figerait le tirage agent), `opponent_roster_ref` = liste explicite des 2 fichiers (sinon P2 tire dans tout `_p2_rosters`) |
-| Config agent | `ArmageddonAgent_training_config.json` (copie CoreAgent, `roster_pool_schedule.enabled = false` dans les **5** phases) + `ArmageddonAgent_rewards_config.json` (clé racine renommée : le moteur indexe le fichier par nom d'agent, cf. `_build_reward_configs_for_current_units`) |
-| Holdout (rosters + scénarios) | `rosters/500pts/holdout_regular/agent_holdout_regular_roster_*.json`, `_p2_rosters/500pts/holdout_regular/opponent_holdout_regular_roster_*.json`, `scenarios/holdout_regular/scenario_bot-0{1..4}.json` (les 4 matchups) |
-
-**Vérifié** : 16 resets → les 4 matchups sortent, plus aucun `roster_pool_schedule produced zero
-eligible training rosters` ; training `x5_debug` 8 workers **10/10 épisodes, exit 0** ;
-`--eval --test-episodes 2` **exit 0**, combined 0.69 sur 5 bots (le `.zip` du modèle vérifié
-intact par md5 — jamais réécrit).
-
-⚠️ **Dette assumée (décision utilisateur 2026-07-19) : le holdout est fait par DUPLICATION des
-2 rosters de training**, ce qui **contredit §10.6** (le holdout devait porter sur l'ADVERSAIRE,
-pas sur les rosters — ici l'agent est évalué sur les armées qu'il a vues à l'entraînement).
-Retenu comme point de départ, à raffiner plus tard. La voie propre est documentée : le résolveur
-accepte une ref à **split explicite** (`training/agent_training_roster_orks.json` depuis un
-scénario holdout — cf. commentaire « cross-split evaluation P1 holdout vs P2 training »,
-`_resolve_roster_ref`), ce qui permettrait de garder les mêmes armées et de ne faire porter le
-holdout que sur `TacticalBot`.
-
-⚠️ **Les points des unités Orks sont factices** : `VALUE = 70` pour TOUTES (Boyz, Gretchin,
-Warboss, WarTrakk, BigMek…). Le total « 3290 pts » du roster Orks n'a aucun sens, et le moteur
-ne valide PAS les points (`scale` n'est qu'un nom de dossier). ~~Déséquilibre réel à surveiller :
-**47 figurines côté Orks contre 23 côté SM**.~~ → chiffre périmé : **37 contre 23** depuis §0.9
-(10 Gretchin et non 20), et ce n'est pas un déséquilibre mais une identité de faction à 680 vs 680.
-
-**Bug corrigé au passage (registry d'unités)** : `LandSpeederOnslaughtGatlingCannon.ts` et
-`LandSpeederHeavyFlamer.ts` déclaraient TOUS DEUX `export class LandSpeeder`. `UnitRegistry`
-scanne les `.ts` et indexe par nom de classe → les deux s'écrasaient, `HeavyFlamer` gagnait au
-hasard de l'ordre de parcours et la variante Onslaught était **inatteignable**. Classes
-renommées (+ `NAME`, `DISPLAY_NAME`) et les deux variantes ajoutées à `config/unit_registry.json`
-ET `frontend/public/config/unit_registry.json` (159 → 161). Reste ouvert : les deux pointent vers
-`/icons/LandSpeeder.webp`, absent de `frontend/public/icons/` (cosmétique frontend).
-
-**Défaut structurel constaté (non corrigé)** : au TOUT PREMIER run d'un agent neuf, l'évaluation
-finale échoue avec `VecNormalize enabled but stats not found: <agent>/vec_normalize.pkl` — le pkl
-est écrit à la FIN du run, l'éval tourne avant. CoreAgent ne le voyait jamais (pkl hérité de mai).
-Ne se reproduit pas aux runs suivants. Si on veut le traiter : ordonnancer la sauvegarde
-VecNormalize avant l'éval finale dans `train.py`.
-
-### 10.3 Progression d'adversaires (l'axe qui porte la robustesse)
-
-Le risque dominant pour cette démo n'est PAS la composition des armées, c'est **l'écart entre
-l'adversaire d'entraînement et l'humain de la démo**. Trois niveaux, qualitativement différents :
-
-| Niveau | Nature | Limite |
-|---|---|---|
-| 1. Bots scriptés | politique **fixe** | l'agent apprend un exploit ; le win-rate monte sans que la compétence monte |
-| 2. Self-play | politique **non-stationnaire** qui s'adapte en retour | les exploits cessent de payer ; risque de catastrophic forgetting |
-| 3. MCTS | adversaire qui **cherche** | non exploitable par pattern ; coûteux |
-
-**Plan retenu** : (1) les bots scriptés → (2) introduction **progressive** du self-play →
-(3) MCTS **seulement si** la perf mesurée est insuffisante.
-
-⚠️ « Diversité d'adversaires » = diversité des **distributions de comportement**, pas nombre de
-classes de bots. Huit bots appliquant la même heuristique gloutonne ne font qu'UN adversaire du
-point de vue de l'apprentissage.
-
-**Déjà implémenté, à paramétrer et non à développer — mais UNIQUEMENT sur le chemin rotation**
-(`--scenario bot`, cf. §10.4) :
-- `training_config.bot_training.ratios` — mélange pondéré de bots
-  (`_build_training_bots_from_config`, train.py ~L91 ; 7 classes supportées, 6 pondérées dans
-  la config actuelle — `defensive_smart` n'y est pas). Configuré dans les 5 phases.
-- `training_config.opponent_mix` — self-play progressif : `self_play_ratio_start` →
-  `self_play_ratio_end`, `warmup_episodes`, snapshot publié par
-  `_publish_self_play_snapshot` (train.py ~L2854) et rechargé par mtime dans
-  `BotControlledEnv` (env_wrappers ~L515). Chaîne complète vérifiée : parse → publication →
-  rechargement. Le « progressivement » est donc de la config.
-  ⚠️ `opponent_mix` n'est PARSÉ que dans `train_with_scenario_rotation` (~L2362) —
-  `create_multi_agent_model` l'ignore totalement.
-
-### 10.4 ⚠️ Écart CODE vs PLAN à corriger avant le premier run
-
-> **Statut 2026-07-19 : ✅ RÉSOLU** — construction d'adversaires mutualisée dans
-> `build_training_opponents`, `use_bots` dérivé de la config (`bot_training`) et non du nom de
-> fichier, repli aléatoire refusé explicitement par `SelfPlayWrapper` et `make_training_env`.
-> Détail et vérification en §0. Le constat ci-dessous est conservé comme historique.
->
-> **Constat d'origine — les trois faits ci-dessous ont été
-> re-vérifiés dans le code ce jour (aucun n'a bougé). Ce n'est plus théorique : les runs de
-> validation de T6-g/T6-h (`x5_debug`, n_envs=8, `training_benchmark`) **et** le run de mise en
-> service d'`ArmageddonAgent` (§10.2) sont tous passés par la ligne 2 du tableau — donc **contre
-> un P2 aléatoire**. Ces runs prouvent que le PIPELINE tourne (zéro exception, épisodes
-> complets) ; ils ne prouvent RIEN sur l'apprentissage. C'est le bloqueur n°1, cf. §0.
-
-**Toute la machinerie d'adversaires (bots pondérés + opponent_mix) n'est câblée que sur le
-chemin ROTATION.** L'adversaire réel du chemin single-scenario dépend de `n_envs` et du NOM du
-fichier scénario — vérifié branche par branche :
-
-| Chemin | Adversaire d'entraînement RÉEL |
-|---|---|
-| `--scenario bot` (`train_with_scenario_rotation`) | ✅ `bots=training_bots` pondérés (~L2492, ~L2755) + self-play `opponent_mix` |
-| `--scenario <fichier>`, `n_envs > 1` (cas RÉEL : x5_debug = 8) | ❌ `make_training_env` appelé SANS `use_bots`/`training_bots` (~L1782) → `SelfPlayWrapper(frozen_model=None)` → **ACTIONS ALÉATOIRES UNIFORMES, en permanence** (voir ci-dessous) |
-| `--scenario <fichier>`, `n_envs == 1`, nom contenant « bot » | `GreedyBot(randomness=0.15)` EN DUR (~L1855) |
-| `--scenario <fichier>`, `n_envs == 1`, autre nom (dont `scenario_training_benchmark.json`) | ❌ `SelfPlayWrapper` → **aléatoire permanent** aussi (~L1871) |
-
-**Pourquoi « aléatoire permanent » et pas du self-play** (bug latent distinct, vérifié) :
-`SelfPlayWrapper._get_frozen_model_action` (env_wrappers ~L1237) retombe sur
-`random.choice(valid_actions)` tant que `frozen_model is None` — et
-**`update_frozen_model` n'a AUCUN appelant** dans tout `ai/` (grep = 0 ; le compteur
-`frozen_model_update_frequency = 100` de train.py ~L2690 est du code mort). Le « self-play »
-du chemin single-scenario n'en est pas : P2 joue au hasard du premier au dernier épisode.
-Ne pas confondre avec le VRAI self-play (`opponent_mix` → `BotControlledEnv`, chemin rotation),
-qui recharge un snapshot publié sur disque et fonctionne.
-
-Or `--scenario bot` est cassé en amont (rosters, cf. §0) : le chemin réellement utilisable est
-le single-scenario. **Un run x5_debug lancé aujourd'hui entraînerait donc contre un adversaire
-ALÉATOIRE, sans qu'aucun log ne le signale** — pire que « spécialisé sur GreedyBot » : un agent
-qui n'a jamais rencontré d'opposition cohérente.
-
-C'est la même famille de divergence que **T6-e** (`_turn_step_limit` absent du chemin
-single-scenario) : deux chemins de `train.py` qui ont divergé. À traiter de la même façon —
-faire passer les deux par la même construction d'adversaires (`training_bots` + `opponent_mix`
-dans `make_training_env`, qui accepte DÉJÀ ces paramètres : seul l'appel de
-`create_multi_agent_model` ne les transmet pas).
-
-### 10.5 Évaluation : le holdout porte sur l'ADVERSAIRE, pas sur les rosters
-
-> **Statut 2026-07-19 : ✅ CÂBLÉ** — `TacticalBot` est le holdout, à poids nul et exclu de tout
-> signal de sélection ; le défaut silencieux de `randomness` est supprimé. Détail en §0.
-> ⚠️ **Affirmation périmée n°4 — voir la table de §0bis** (levée par §0.7 : `TacticalBot` a joué 10/10 épisodes). Conservée telle quelle.
-> ⚠️ **Non validé runtime** — cf. §0.3 (`CC_DMG`). L'archivage des scénarios holdout était à
-> faire (voir plus bas). Le constat ci-dessous décrit l'état d'AVANT.
-
-**Constat (historique)** : les bots d'évaluation viennent de `callback_params.bot_eval_weights`
-(`_load_bot_eval_params`, bot_evaluation.py ~L168 ; itération sur `eval_weights.keys()` ~L886).
-Config actuelle, identique dans les 5 phases : `{greedy, defensive, control, aggressive_smart,
-adaptive}` — un **sous-ensemble strict des bots d'entraînement** (`bot_training.ratios` = les
-mêmes 5 + `random`). L'agent n'est donc évalué QUE contre des adversaires rencontrés à
-l'entraînement : ce win-rate mesure **l'exploitation apprise, pas la compétence**, et sera
-systématiquement optimiste par rapport au comportement face à un humain.
-
-**Décision** : le holdout est un **adversaire réservé à l'évaluation**, jamais vu en
-entraînement. Candidat déjà disponible : **`TacticalBot`** — le seul des 8 qui n'est utilisé
-nulle part (`evaluation_bots.py` L19 : « unused in training/eval »).
-
-À faire : ajouter `TacticalBot` aux bots d'évaluation, et **garantir qu'il n'entre jamais**
-dans `bot_training.ratios` (test de non-régression : l'intersection entre bots d'entraînement
-et bots de holdout est vide).
-
-Cela remplace avantageusement le holdout de rosters supprimé, et répond à la question
-« 2 ou 4 rosters » : **rester à 2**, et mettre le holdout sur l'axe adversaire.
-
-⚠️ Les 20 scénarios de `holdout_regular/` + `holdout_hard/` pointent vers des rosters supprimés :
-ils ne chargent pas. **À archiver** dans `_archive_pre_v11/`. Tant qu'ils sont là,
-`bot_eval_scenario_pool: "holdout"` (présent dans les 5 phases de
-`CoreAgent_training_config.json`) pointe sur un pool mort.
-NB — répartition VÉRIFIÉE des 9 échecs de la suite (cause relue test par test) : **8 viennent
-des scénarios TRAINING** (`agent_roster_ref: "training_random"` →
-`roster_pool_schedule produced zero eligible training rosters`, candidates=1 : le pool de
-rosters d'entraînement est quasi vide depuis le cleanup `43eae95a`) et **1 seul** d'un fichier
-de roster holdout absent. Archiver les holdouts n'en fait tomber qu'un : le gros de la
-réparation est la création des nouveaux rosters SM/Orks (§10.2) + la mise à jour des scénarios
-training qui les référencent.
-
-### 10.6 Critère de succès (remplace le critère T6 « win-rate vs RandomBot »)
-
-Le critère historique référençait une capacité qui n'existe plus (holdout de rosters). Nouveau
-critère, en deux volets — **les deux sont requis** :
-
-1. **Quantitatif** : **win-rate PAR ROSTER** contre l'adversaire de holdout (`TacticalBot`),
-   jamais rencontré à l'entraînement. Par roster, car avec seulement 2 rosters, un effondrement
-   sur l'un pendant que l'autre monte est la **signature du catastrophic forgetting** (piège
-   listé dans CLAUDE.md) et le seul garde-fou qui reste. Un win-rate agrégé le masquerait.
-2. **Qualitatif — décisif pour l'objectif démo** : **absence de comportement absurde** sur N
-   parties jouées par quelqu'un n'ayant pas travaillé sur le projet, cherchant activement à
-   surprendre l'agent (déploiement inhabituel, tactique atypique).
-
-**Pourquoi le volet 2 n'est pas optionnel** : devant un financeur, ce qui convainc est que l'IA
-paraisse *sensée* (elle va sur les objectifs, tire sur des cibles plausibles, charge quand c'est
-logique). Un agent à 45 % de victoires qui joue de façon lisible impressionne davantage qu'un
-agent à 70 % qui gagne en exploitant une faiblesse de bot et produit un coup absurde au pire
-moment. **En démo, l'incohérence coûte plus cher que la défaite.**
-
-### 10.7 MCTS — deux usages distincts, ne pas les confondre
-
-| Document | Usage | Effet |
-|---|---|---|
-| `A_faire/MCTS/MCTS_bot_final.md` | MCTS comme **adversaire d'entraînement** (fraction d'épisodes, entre bots et self-play) | améliore l'entraînement → demande un cycle complet de plus |
-| `A_faire/MCTS/MCTS_agent_implementation.md` | MCTS **dans l'agent**, à l'inférence | corrige les coups absurdes **sans retraining** |
-
-Pour l'objectif démo (§10.6 volet 2), c'est le **second** qui a le meilleur rapport
-effort/résultat : c'est l'absurdité ponctuelle qui coûte cher, et une recherche à l'inférence la
-corrige directement. Contre-argument à mesurer : la **latence** en temps réel devant un public —
-`MCTS_agent_implementation.md` note lui-même « micro à chaque activation + rollouts = beaucoup
-plus lourd » et suggère « macro + feuille value seule » comme prototype. Un MCTS macro peu
-profond, ou limité aux seules décisions critiques, suffirait probablement.
-
-**À ne PAS anticiper** : plan B après mesure. Rien ne sert de décider avant de savoir si le PPO
-spécialisé suffit.

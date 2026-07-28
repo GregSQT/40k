@@ -463,12 +463,6 @@ export interface ManualOrderRequest {
 }
 
 export interface UseEngineAPIOptions {
-  /** Ref à un getter appelé avant envoi d'un tir (left_click enemy) ; si forceKill, le backend force la mort de la cible (tutoriel 1-24, 2e tir). */
-  getTutorialShootOptionsRef?: MutableRefObject<() => { forceKill?: boolean; forceMiss?: boolean }>;
-  /** Tutoriel étape 2 (2-11/2-12/2-13) : arrêter la boucle AI après chaque phase pour permettre pause entre move/shoot/charge. */
-  stopAiAfterPhaseChangeRef?: MutableRefObject<boolean>;
-  /** Appelé immédiatement quand on break pour changement de phase ; permet de mettre pauseAI à true avant que le useEffect ne re-déclenche l'IA. */
-  onStopAfterPhaseChange?: () => void;
   /** Étage courant (multi-niveaux) : niveau de destination pour le déploiement/move à l'étage.
    *  Ref (pas valeur) pour rester stable dans les callbacks. 0 = sol → plans 3-uplets inchangés. */
   currentLevelRef?: MutableRefObject<number>;
@@ -498,8 +492,6 @@ const deriveShootTargets = (
 };
 
 export const useEngineAPI = (options?: UseEngineAPIOptions) => {
-  const stopAiAfterPhaseChangeRef = options?.stopAiAfterPhaseChangeRef;
-  const onStopAfterPhaseChange = options?.onStopAfterPhaseChange;
   const currentLevelRef = options?.currentLevelRef;
   const [gameState, setGameState] = useState<APIGameState | null>(null);
   const [endlessDutyState, setEndlessDutyState] = useState<EndlessDutyState | null>(null);
@@ -1085,26 +1077,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         const isEndlessDutyMode = mode === "endless_duty";
         const isPvETestMode = mode === "pve_test";
         const isPvPTestMode = mode === "pvp_test";
-        const isTutorialMode = mode === "tutorial";
-        const requestedModeCode = isTutorialMode
-          ? "pve"
-          : isEndlessDutyMode
-            ? "endless_duty"
-            : isPvETestMode
-              ? "pve_test"
-              : isPvEMode
-                ? "pve"
-                : isPvPTestMode
-                  ? "pvp_test"
-                  : "pvp";
+        const requestedModeCode = isEndlessDutyMode
+          ? "endless_duty"
+          : isPvETestMode
+            ? "pve_test"
+            : isPvEMode
+              ? "pve"
+              : isPvPTestMode
+                ? "pvp_test"
+                : "pvp";
 
         const requestPayload: Record<string, unknown> = {
-          pve_mode: isPvEMode || isPvETestMode || isTutorialMode || isEndlessDutyMode,
+          pve_mode: isPvEMode || isPvETestMode || isEndlessDutyMode,
           mode_code: requestedModeCode,
         };
-        if (isTutorialMode) {
-          requestPayload.scenario_file = "config/tutorial/scenario_etape1.json";
-        } else if (isEndlessDutyMode) {
+        if (isEndlessDutyMode) {
           requestPayload.scenario_file = "config/scenario_endless_duty.json";
         } else if (isPvPTestMode) {
           requestPayload.scenario_file = "config/scenario_pvp_test.json";
@@ -1170,7 +1157,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     startGame();
   }, []);
 
-  /** Relance une partie avec le scénario donné (utilisé par le tutoriel pour etape2/etape3). options.preserveP1PositionsFrom : état de jeu à partir duquel garder les positions des unités P1. skipLoading : ne pas afficher l'écran de chargement (évite de démonter TutorialProvider pendant la transition). */
+  /** Relance une partie avec le scénario donné. options.preserveP1PositionsFrom : état de jeu à partir duquel garder les positions des unités P1. skipLoading : ne pas afficher l'écran de chargement. */
   const startGameWithScenario = useCallback(
     async (
       scenarioFile: string,
@@ -8408,14 +8395,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     // V11 multi-cibles : cibles toggleées en mode chargeTargetSelect (voile violet + activation bouton Charge)
     chargePreviewTargetIds,
     // Add AI turn execution for PvE mode
-    executeAITurn: async (options?: { stopAfterPhaseChange?: boolean }) => {
+    executeAITurn: async () => {
       if (aiTurnInProgress) {
         return;
       }
       aiTurnInProgress = true;
-
-      const stopAfterPhase =
-        options?.stopAfterPhaseChange ?? stopAiAfterPhaseChangeRef?.current ?? false;
 
       // Check if AI has eligible units in current phase FIRST
       const phaseCheck = gameState.phase;
@@ -8715,33 +8699,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         const maxIterations = 25; // Allow larger armies (e.g. 12+ units in move phase)
         let lastPoolSize = -1;
         let samePoolSizeCount = 0;
-        const initialPhase = gameState.phase;
-        if (initialPhase === "fight") {
+        if (gameState.phase === "fight") {
           const fs = gameState.fight_subphase;
           if (fs == null || fs === "") {
             throw new Error("Missing fight_subphase at executeAITurn start while phase is fight");
           }
         }
-        const initialFightSubphase = initialPhase === "fight" ? gameState.fight_subphase : null;
-
-        const shouldStopTutorialBoundary = (gs: APIGameState | undefined): boolean => {
-          if (!stopAfterPhase || !gs) return false;
-          if (gs.phase !== initialPhase) return true;
-          if (initialPhase === "fight" && gs.phase === "fight") {
-            const ns = gs.fight_subphase;
-            if (ns == null || ns === "") {
-              throw new Error(
-                "Missing fight_subphase in fight phase during AI turn (tutorial boundary)"
-              );
-            }
-            if (initialFightSubphase == null || initialFightSubphase === "") {
-              throw new Error("Missing initial fight_subphase for tutorial boundary");
-            }
-            return ns !== initialFightSubphase;
-          }
-          return false;
-        };
-
         while (iteration < maxIterations) {
           iteration++;
 
@@ -8953,11 +8916,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setEndlessDutyState(
               (activationData.endless_duty_state as EndlessDutyState | undefined) ?? null
             );
-            // Tutoriel étape 2 : arrêter après chaque phase ou changement de fight_subphase (2-14 / 2-15)
-            if (stopAfterPhase && shouldStopTutorialBoundary(activationData.game_state)) {
-              onStopAfterPhaseChange?.();
-              break;
-            }
           }
 
           // Step 2: Check if we got a preview response requiring decision
@@ -9305,11 +9263,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               if (decisionData.result?.phase_complete) {
                 break;
               }
-              // Tutoriel étape 2 : arrêter après chaque phase ou changement de fight_subphase
-              if (stopAfterPhase && shouldStopTutorialBoundary(decisionData.game_state)) {
-                onStopAfterPhaseChange?.();
-                break;
-              }
             } else {
               break;
             }
@@ -9323,11 +9276,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
             // Check if phase complete after unit completion
             if (activationData.result?.phase_complete) {
-              break;
-            }
-            // Tutoriel étape 2 : arrêter après chaque phase ou changement de fight_subphase
-            if (stopAfterPhase && shouldStopTutorialBoundary(activationData.game_state)) {
-              onStopAfterPhaseChange?.();
               break;
             }
           } else if (
@@ -9365,11 +9313,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   totalUnitsProcessed++;
 
                   if (skipData.result?.phase_complete) {
-                    break;
-                  }
-                  // Tutoriel étape 2 : arrêter après chaque phase ou changement de fight_subphase
-                  if (stopAfterPhase && shouldStopTutorialBoundary(skipData.game_state)) {
-                    onStopAfterPhaseChange?.();
                     break;
                   }
                 }

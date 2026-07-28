@@ -67,7 +67,7 @@ def _gs(wall: Iterable[Tuple[int, int]], *, fly: bool = False) -> Dict[str, Any]
     }
 
 
-def _rigid_plan(col: int, row: int, gs: Dict[str, Any]) -> List[Tuple[str, int, int]]:
+def _rigid_plan(col: int, row: int, gs: Dict[str, Any]) -> List[Tuple[str, int, int, int]]:
     """Plan rigide de l'escouade '1' — ``None`` signifierait une escouade sans figurine vivante,
     ce qu'aucune fixture de ce module ne construit : on échoue au lieu de le propager."""
     plan = build_rigid_plan(col, row, "1", gs)

@@ -10,7 +10,6 @@ import sqlite3
 import sys
 import time
 import traceback
-import yaml
 from pathlib import Path
 import hashlib
 import secrets
@@ -62,7 +61,7 @@ BOARD_PATH_MAP = {
 
 # Dossier qui PORTE les scénarios de test. Il ne suit pas la résolution jouée : les scénarios
 # sont écrits une seule fois, en subhex x5, et le moteur convertit leurs coordonnées (terrain,
-# murs, positions) vers le plateau actif — cf. Documentation/Implémentation/V11_board_44x60x1.md.
+# murs, positions) vers le plateau actif — cf. Documentation/Implémentation/Implémenté/V11_board_44x60x1.md.
 TEST_SCENARIO_BOARD_MAP = {
     "x1": "board/44x60x5",
     "x5_44x60": "board/44x60x5",
@@ -321,7 +320,6 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
     # (le front l'accumule en live via action_logs) ; le Game Log est reconstruit (champ top-level
     # game_log_history) seulement aux réponses de Load / rewind du replay.
     "log_delta",
-    "los_topology", "pathfinding_topology", "wall_edge_topology",
     "wall_hexes",
     # Table statique moteur (config/weapon_damage_table.json) — le client web n’en a pas besoin ;
     # le moteur garde ``game_state["weapon_damage_table"]`` en mémoire pour les règles.
@@ -373,8 +371,6 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
     "_shooting_phase_initialized",
     "_fight_consolidation_ctx",
     "_fight_pile_in_ctx",
-    "_tutorial_force_kill_this_shot",
-    "_tutorial_force_miss_this_shot",
     "console_logs",
 })
 
@@ -598,7 +594,7 @@ def _game_state_for_json(
 ) -> Dict[str, Any]:
     """Return game_state dict with internal/heavy fields excluded.
 
-    Strips topology arrays, large sets (wall_hexes, occupied_positions,
+    Strips large sets (wall_hexes, occupied_positions,
     enemy_adjacent_hexes, los_cache), champs moteur inutiles au client, et
     ``move_preview_border`` (non consommé par l’UI ; la preview move repose sur
     ``valid_move_destinations_pool`` et ``move_preview_footprint_zone`` / span).
@@ -907,8 +903,7 @@ def _get_authenticated_user_or_response():
     try:
         row = connection.execute(
             """
-            SELECT u.id AS user_id, u.login AS login, p.id AS profile_id, p.code AS profile_code,
-                   COALESCE(u.tutorial_completed, 0) AS tutorial_completed
+            SELECT u.id AS user_id, u.login AS login, p.id AS profile_id, p.code AS profile_code
             FROM sessions s
             JOIN users u ON u.id = s.user_id
             JOIN profiles p ON p.id = u.profile_id
@@ -999,12 +994,6 @@ def initialize_auth_db() -> None:
             );
             """
         )
-        # Migration: add tutorial_completed for first-login → tutorial flow
-        try:
-            cursor.execute("ALTER TABLE users ADD COLUMN tutorial_completed INTEGER DEFAULT 0")
-        except sqlite3.OperationalError:
-            pass  # Column already exists
-
         cursor.execute(
             "INSERT OR IGNORE INTO profiles (code, label) VALUES (?, ?)",
             ("base", "Joueur Base"),
@@ -1028,10 +1017,6 @@ def initialize_auth_db() -> None:
         cursor.execute(
             "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
             ("pvp_test", "Player vs Player Test"),
-        )
-        cursor.execute(
-            "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
-            ("tutorial", "Tutoriel"),
         )
         cursor.execute(
             "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
@@ -1077,10 +1062,6 @@ def initialize_auth_db() -> None:
             "SELECT id FROM game_modes WHERE code = ?",
             ("pvp_test",),
         ).fetchone()
-        tutorial_row = cursor.execute(
-            "SELECT id FROM game_modes WHERE code = ?",
-            ("tutorial",),
-        ).fetchone()
         endless_duty_row = cursor.execute(
             "SELECT id FROM game_modes WHERE code = ?",
             (ED_MODE_CODE,),
@@ -1090,7 +1071,6 @@ def initialize_auth_db() -> None:
             or pve_test_row is None
             or pvp_row is None
             or pvp_test_row is None
-            or tutorial_row is None
             or endless_duty_row is None
         ):
             raise RuntimeError("Failed to seed required game modes")
@@ -1113,10 +1093,6 @@ def initialize_auth_db() -> None:
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
-            (profile_id, tutorial_row["id"]),
-        )
-        cursor.execute(
-            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
             (profile_id, endless_duty_row["id"]),
         )
         cursor.execute(
@@ -1134,10 +1110,6 @@ def initialize_auth_db() -> None:
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
             (admin_profile_id, pvp_test_row["id"]),
-        )
-        cursor.execute(
-            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
-            (admin_profile_id, tutorial_row["id"]),
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
@@ -1522,7 +1494,6 @@ def initialize_engine(scenario_file: Optional[str] = None):
         scenario_primary_objective_id = scenario_result.get("primary_objective")
         scenario_wall_hexes = scenario_result.get("wall_hexes")
         scenario_dense_wall_hexes = scenario_result.get("dense_wall_hexes")
-        scenario_wall_ref = scenario_result.get("wall_ref")
         scenario_objectives = scenario_result.get("objectives")
         scenario_deployment_type = scenario_result.get("deployment_type")
         scenario_deployment_type_by_player = scenario_result.get("deployment_type_by_player")
@@ -1555,16 +1526,12 @@ def initialize_engine(scenario_file: Optional[str] = None):
             "primary_objective": primary_objective_config,
             "scenario_wall_hexes": scenario_wall_hexes,
             "scenario_dense_wall_hexes": scenario_dense_wall_hexes,
-            "scenario_wall_ref": scenario_wall_ref,
             "scenario_objectives": scenario_objectives,
             "scenario_terrain_areas": scenario_result.get("terrain_areas"),
             "deployment_type": scenario_deployment_type,
             "deployment_type_by_player": scenario_deployment_type_by_player,
             "deployment_zone": scenario_deployment_zone,
             "deployment_pools": scenario_deployment_pools,
-            "tutorial_fight_no_death_unit_ids": scenario_result.get(
-                "tutorial_fight_no_death_unit_ids"
-            ),
         }
         
         # Determine which agents are in the scenario
@@ -1697,7 +1664,6 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
         scenario_primary_objective_id = scenario_result.get("primary_objective")
         scenario_wall_hexes = scenario_result.get("wall_hexes")
         scenario_dense_wall_hexes = scenario_result.get("dense_wall_hexes")
-        scenario_wall_ref = scenario_result.get("wall_ref")
         scenario_objectives = scenario_result.get("objectives")
         scenario_deployment_type = scenario_result.get("deployment_type")
         scenario_deployment_type_by_player = scenario_result.get("deployment_type_by_player")
@@ -1730,16 +1696,12 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
             "primary_objective": primary_objective_config,
             "scenario_wall_hexes": scenario_wall_hexes,
             "scenario_dense_wall_hexes": scenario_dense_wall_hexes,
-            "scenario_wall_ref": scenario_wall_ref,
             "scenario_objectives": scenario_objectives,
             "scenario_terrain_areas": scenario_result.get("terrain_areas"),
             "deployment_type": scenario_deployment_type,
             "deployment_type_by_player": scenario_deployment_type_by_player,
             "deployment_zone": scenario_deployment_zone,
             "deployment_pools": scenario_deployment_pools,
-            "tutorial_fight_no_death_unit_ids": scenario_result.get(
-                "tutorial_fight_no_death_unit_ids"
-            ),
         }
         
         # Determine which agents are in the scenario
@@ -1928,8 +1890,7 @@ def login_user():
     try:
         user_row = connection.execute(
             """
-            SELECT u.id AS user_id, u.login, u.password_hash, p.id AS profile_id, p.code AS profile_code,
-                   COALESCE(u.tutorial_completed, 0) AS tutorial_completed
+            SELECT u.id AS user_id, u.login, u.password_hash, p.id AS profile_id, p.code AS profile_code
             FROM users u
             JOIN profiles p ON p.id = u.profile_id
             WHERE u.login = ?
@@ -1950,7 +1911,6 @@ def login_user():
         permissions = _resolve_permissions_for_profile(connection, user_row["profile_id"])
         connection.commit()
 
-        tutorial_completed = bool(dict(user_row).get("tutorial_completed", 0))
         return jsonify(
             {
                 "success": True,
@@ -1961,34 +1921,11 @@ def login_user():
                     "profile": user_row["profile_code"],
                 },
                 "permissions": permissions,
-                "default_redirect_mode": "tutorial" if not tutorial_completed else "pve",
-                "tutorial_completed": tutorial_completed,
+                "default_redirect_mode": "pve",
             }
         )
     finally:
         connection.close()
-
-
-@app.route('/api/auth/tutorial-complete', methods=['POST'])
-def tutorial_complete():
-    """Mark the current user's tutorial as completed (called when user finishes or skips tutorial)."""
-    user_row, error_response = _get_authenticated_user_or_response()
-    if error_response is not None:
-        return error_response
-    if user_row is None:
-        return jsonify({"success": False, "error": "authentication failed"}), 401
-
-    connection = _get_auth_db_connection()
-    try:
-        connection.execute(
-            "UPDATE users SET tutorial_completed = 1 WHERE id = ?",
-            (user_row["user_id"],),
-        )
-        connection.commit()
-    finally:
-        connection.close()
-
-    return jsonify({"success": True, "tutorial_completed": True})
 
 
 @app.route('/api/auth/me', methods=['GET'])
@@ -2006,7 +1943,6 @@ def current_user():
     finally:
         connection.close()
 
-    tutorial_completed = bool(dict(user_row).get("tutorial_completed", 0))
     return jsonify(
         {
             "success": True,
@@ -2016,8 +1952,7 @@ def current_user():
                 "profile": user_row["profile_code"],
             },
             "permissions": permissions,
-            "default_redirect_mode": "tutorial" if not tutorial_completed else "pve",
-            "tutorial_completed": tutorial_completed,
+            "default_redirect_mode": "pve",
         }
     )
 
@@ -3735,25 +3670,6 @@ def delete_saves():
     """Supprime toutes les saves manuelles/auto (fichiers de logs/pvp_saves/)."""
     deleted = _SAVE_STORE.delete_all()
     return api_json_response({"success": True, "deleted": deleted})
-
-
-@app.route('/api/config/tutorial/steps', methods=['GET'])
-def get_tutorial_steps():
-    """Serve tutorial steps from tutorial_scenario.yaml (single source of truth)."""
-    project_root = Path(__file__).resolve().parent.parent
-    path = project_root / "config" / "tutorial" / "tutorial_scenario.yaml"
-    if not path.exists():
-        return jsonify({"success": False, "error": "tutorial_scenario.yaml not found"}), 404
-
-    with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    if not isinstance(data, dict) or "steps" not in data or not isinstance(data["steps"], list):
-        return jsonify({
-            "success": False,
-            "error": "tutorial_scenario.yaml must be an object with a steps[] array"
-        }), 500
-
-    return jsonify({"steps": data["steps"]})
 
 
 @app.route('/api/config/defaults', methods=['GET'])

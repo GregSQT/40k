@@ -11,7 +11,7 @@ les numéros de ligne sont indicatifs. Re-localiser par grep avant d'éditer.
 > **Documents liés**
 > - [`V11_agent_rework.md`](V11_agent_rework.md) — §9.2.5 (observation des règles, livré), §9.2.7
 >   (trou 10.05/10.06), §9.3 (P2, mécanisme générique de décision), §9.0bis (critère du *regret*).
-> - [`V11_audit_observation.md`](V11_audit_observation.md) — §7 (découpe structurée du vecteur),
+> - [`V11_audit_observation.md`](Implémenté/V11_audit_observation.md) — §7 (découpe structurée du vecteur),
 >   §9.9 (raisonner en ensembles), §11 (reste à faire). Ce document **exécute** le « Niveau 1/2 »
 >   que §7.3 laissait en réserve.
 
@@ -864,10 +864,11 @@ il est vert au 2026-07-26.
   unité du cache, grille dégénérée à (-1,-1), hexes candidats non décrits). Chantier dédié
   déjà ouvert dans `V11_audit_observation.md` §11 — hors périmètre §0.30, et il exige une
   observation SPÉCIFIQUE au déploiement, pas un ajustement.
-- **`action_net` conserve 20 colonnes inertes** (les logits de tir sont produits par le
-  pointeur). Assumé et documenté dans `pointer_policy.py` : les retirer exigerait de
-  redimensionner la tête d'action de SB3, donc de toucher l'initialisation orthogonale et la
-  sauvegarde/reprise, pour ~6 k paramètres qui ne reçoivent aucun gradient.
+- **`action_net` conserve des colonnes inertes** — les logits de tir et de move sont produits
+  hors `action_net` : tir par `q · e_i` (§0.30 T-E), move par conv 1×1 (§0.32 T-G). Les
+  colonnes correspondantes ne reçoivent aucun gradient. Assumé et documenté dans
+  `pointer_policy.py` : les retirer exigerait de redimensionner la tête SB3 (initialisation
+  orthogonale + sauvegarde/reprise) pour un coût jugé insuffisant à justifier l'opération.
 - **Choix d'arme par l'agent (P3)** : différé, cf. §5.3 — inchangé, et désormais MESURABLE.
 - **`scripts/profile_env_step_360x312.py`** appelle le moteur avec `training_config_name="default"`,
   section qui n'existe dans **aucune** config d'agent (`config/agents/CoreAgent/` n'a plus de
@@ -877,3 +878,17 @@ il est vert au 2026-07-26.
 - **Corps de `AI_IMPLEMENTATION.md`** : les deux blocs faux sur l'espace d'action et la forme de
   l'observation sont corrigés, mais le récit d'architecture de ce document est antérieur à V10 et
   n'a pas été relu ligne à ligne. Le remettre à niveau est un chantier en soi, à arbitrer.
+
+### 2026-07-28 — §0.37 : convention `present` unifiée dans `UNIT_BIN_FIELDS`
+
+Résidu fermé par le contre-audit §0.32–§0.35. `UNIT_BIN_FIELDS` plaçait `present` en **position 0**,
+toutes les autres familles (figurines self, armes, types) le plaçaient en **dernière position** — deux
+conventions pour la même sémantique. Depuis §0.37, `present` est le **dernier** champ de CHAQUE
+registre. `UNIT_BIN_SIZE` est inchangé (le champ n'a pas été ajouté ni retiré). L'extracteur lit
+désormais l'index via `unit_bin_index("present")` au lieu de `[..., 0]` codé en dur.
+
+Impact sur ce document : le T-D journal dit « 17 drapeaux » — c'était exact à l'époque de T-D,
+**avant** T-H (règles d'unité, couvert/visibilité) qui a porté `UNIT_BIN_SIZE` à 32. Ces chiffres
+sont historiques et ne décrivent pas l'état courant ; `obs_size = 20626` et `UNIT_BIN_SIZE = 32`
+sont les valeurs en vigueur (source : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` et
+`observation_entities.UNIT_BIN_SIZE`).

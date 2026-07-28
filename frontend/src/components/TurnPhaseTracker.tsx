@@ -1,36 +1,6 @@
 // frontend/src/components/TurnPhaseTracker.tsx
 import type React from "react";
-import { useLayoutEffect, useRef } from "react";
-import type { TutorialSpotlightPosition } from "../contexts/TutorialContext";
-import {
-  TUTORIAL_STEP_TITLE_1_14_PHASE_MOUVEMENT,
-  TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT,
-  TUTORIAL_STEP_TITLE_PHASE_TIR,
-  TUTORIAL_STEP_TITLE_PHASES,
-  TUTORIAL_STEP_TITLE_ROUNDS,
-  TUTORIAL_STEP_TITLE_TURNS,
-} from "../contexts/TutorialContext";
 import TooltipWrapper from "./TooltipWrapper";
-
-function rectFromEl(el: HTMLElement | null, pad: number): TutorialSpotlightPosition | null {
-  if (!el) return null;
-  const r = el.getBoundingClientRect();
-  if (r.width < 2 || r.height < 2) return null;
-  return {
-    shape: "rect",
-    left: r.left - pad,
-    top: r.top - pad,
-    width: r.width + pad * 2,
-    height: r.height + pad * 2,
-  };
-}
-
-/** Le TurnPhaseTracker est dans le panneau droit : rect.left doit être > 40% viewport. */
-function isTurnPhaseTrackerRect(rect: TutorialSpotlightPosition): boolean {
-  if (rect.shape !== "rect") return true;
-  const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 1920;
-  return rect.left > viewportWidth * 0.4;
-}
 
 interface TurnPhaseTrackerProps {
   currentTurn: number;
@@ -50,15 +20,7 @@ interface TurnPhaseTrackerProps {
   fightAtkPlayer?: number; // Joueur (1/2) qui doit faire attaquer une unité → libellé + couleur
   onFightAtk?: () => void; // Active la 1ère unité éligible du joueur concerné
   onSkipFight?: () => void; // Skippe toutes les attaques (2 joueurs) → consolidation directe
-  /** Titre de l'étape tutoriel en cours (Rounds / Tours / Phases) pour halos. */
-  tutorialStepTitle?: string | null;
-  /** Callback pour rapporter les rects viewport des zones à mettre en halo. */
-  onTutorialRects?: (pos: TutorialSpotlightPosition[] | null) => void;
-  /** Ancrage popups 1-11 (round 1), 1-12 (P1), 1-13 (Move) : centre du bouton + bas de bande. */
-  onTutorialPopupAnchor?: (pos: { centerX: number; bottomY: number } | null) => void;
 }
-
-const PAD = 4;
 
 export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   currentTurn,
@@ -78,115 +40,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   fightAtkPlayer,
   onFightAtk,
   onSkipFight,
-  tutorialStepTitle,
-  onTutorialRects,
-  onTutorialPopupAnchor,
 }) => {
-  const turnSectionRef = useRef<HTMLDivElement>(null);
-  const roundsContentRef = useRef<HTMLDivElement>(null);
-  const firstRoundTurnButtonRef = useRef<HTMLButtonElement | null>(null);
-  const p1ButtonRef = useRef<HTMLButtonElement>(null);
-  const p2ButtonRef = useRef<HTMLButtonElement>(null);
-  const phasesContainerRef = useRef<HTMLDivElement>(null);
-  const phasesContentRef = useRef<HTMLDivElement>(null);
-  const movePhaseButtonRef = useRef<HTMLButtonElement | null>(null);
-  const shootPhaseButtonRef = useRef<HTMLButtonElement | null>(null);
-
-  useLayoutEffect(() => {
-    if (!onTutorialRects || !tutorialStepTitle) {
-      onTutorialRects?.(null);
-      onTutorialPopupAnchor?.(null);
-      return;
-    }
-    const measure = () => {
-      let rects: TutorialSpotlightPosition[] | null = null;
-      let anchorPos: { centerX: number; bottomY: number } | null = null;
-      if (tutorialStepTitle === TUTORIAL_STEP_TITLE_ROUNDS) {
-        const r = rectFromEl(roundsContentRef.current, PAD);
-        rects = r && isTurnPhaseTrackerRect(r) ? [r] : null;
-        const strip = roundsContentRef.current;
-        const btn = firstRoundTurnButtonRef.current;
-        if (strip && btn && rects) {
-          const br = btn.getBoundingClientRect();
-          anchorPos = {
-            centerX: br.left + br.width / 2,
-            bottomY: strip.getBoundingClientRect().bottom,
-          };
-        }
-      } else if (tutorialStepTitle === TUTORIAL_STEP_TITLE_TURNS) {
-        const r1 = rectFromEl(p1ButtonRef.current, PAD);
-        const r2 = rectFromEl(p2ButtonRef.current, PAD);
-        const out: TutorialSpotlightPosition[] = [];
-        if (r1 && isTurnPhaseTrackerRect(r1)) out.push(r1);
-        if (r2 && isTurnPhaseTrackerRect(r2)) out.push(r2);
-        rects = out.length ? out : null;
-        const p1 = p1ButtonRef.current;
-        if (p1) {
-          const br = p1.getBoundingClientRect();
-          anchorPos = {
-            centerX: br.left + br.width / 2,
-            bottomY: br.bottom,
-          };
-        }
-      } else if (tutorialStepTitle === TUTORIAL_STEP_TITLE_PHASES) {
-        const r = rectFromEl(phasesContentRef.current, PAD);
-        rects = r && isTurnPhaseTrackerRect(r) ? [r] : null;
-        const moveBtn = movePhaseButtonRef.current;
-        const strip = phasesContentRef.current;
-        if (moveBtn && strip) {
-          const br = moveBtn.getBoundingClientRect();
-          anchorPos = {
-            centerX: br.left + br.width / 2,
-            bottomY: strip.getBoundingClientRect().bottom,
-          };
-        }
-      } else if (
-        tutorialStepTitle === TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT ||
-        tutorialStepTitle === TUTORIAL_STEP_TITLE_1_14_PHASE_MOUVEMENT
-      ) {
-        const r = rectFromEl(movePhaseButtonRef.current, PAD);
-        rects = r && isTurnPhaseTrackerRect(r) ? [r] : null;
-      } else if (tutorialStepTitle === "2-11" || tutorialStepTitle === "2-12") {
-        const rTurn = rectFromEl(roundsContentRef.current, PAD);
-        const rP2 = rectFromEl(p2ButtonRef.current, PAD);
-        const rMove = rectFromEl(movePhaseButtonRef.current, PAD);
-        const out: TutorialSpotlightPosition[] = [];
-        if (rTurn && isTurnPhaseTrackerRect(rTurn)) out.push(rTurn);
-        if (rP2 && isTurnPhaseTrackerRect(rP2)) out.push(rP2);
-        if (rMove && isTurnPhaseTrackerRect(rMove)) out.push(rMove);
-        rects = out.length ? out : null;
-      } else if (tutorialStepTitle === TUTORIAL_STEP_TITLE_PHASE_TIR) {
-        const rMove = rectFromEl(movePhaseButtonRef.current, PAD);
-        const rShoot = rectFromEl(shootPhaseButtonRef.current, PAD);
-        const out: TutorialSpotlightPosition[] = [];
-        if (rMove && isTurnPhaseTrackerRect(rMove)) out.push(rMove);
-        if (rShoot && isTurnPhaseTrackerRect(rShoot)) out.push(rShoot);
-        rects = out.length ? out : null;
-      }
-      onTutorialPopupAnchor?.(anchorPos);
-      onTutorialRects(rects);
-    };
-    measure();
-    let cancelled = false;
-    const raf = requestAnimationFrame(() => {
-      if (cancelled) return;
-      measure();
-      requestAnimationFrame(() => {
-        if (cancelled) return;
-        measure();
-        setTimeout(() => {
-          if (!cancelled) measure();
-        }, 30);
-      });
-    });
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(raf);
-      onTutorialRects?.(null);
-      onTutorialPopupAnchor?.(null);
-    };
-  }, [tutorialStepTitle, onTutorialRects, onTutorialPopupAnchor]);
-
   // Validate required props (raise errors for missing data)
   if (!phases || phases.length === 0) {
     throw new Error("TurnPhaseTracker: phases array is required and cannot be empty");
@@ -448,7 +302,6 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
         }}
       >
         <div
-          ref={turnSectionRef}
           style={{
             display: "flex",
             gap: "2px",
@@ -458,7 +311,6 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
           }}
         >
           <div
-            ref={roundsContentRef}
             style={{
               display: "inline-flex",
               gap: "2px",
@@ -486,7 +338,6 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
 
               return (
                 <button
-                  ref={turn === 1 ? firstRoundTurnButtonRef : undefined}
                   type="button"
                   key={turn}
                   style={style}
@@ -505,7 +356,6 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
             style={{ display: "flex", gap: "2px", alignItems: "center", justifyContent: "center" }}
           >
             <button
-              ref={p1ButtonRef}
               type="button"
               style={getPlayerStyle(1, current_player === 1, !!onPlayerClick)}
               onClick={() => onPlayerClick?.(1)}
@@ -526,7 +376,6 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
               </TooltipWrapper>
             )}
             <button
-              ref={p2ButtonRef}
               type="button"
               style={getPlayerStyle(2, current_player === 2, !!onPlayerClick)}
               onClick={() => onPlayerClick?.(2)}
@@ -537,12 +386,8 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
           </div>
         )}
         <div style={{ flex: 1 }} />
-        <div
-          ref={phasesContainerRef}
-          style={{ display: "flex", gap: "2px", flex: "0 0 auto", justifyContent: "flex-end" }}
-        >
+        <div style={{ display: "flex", gap: "2px", flex: "0 0 auto", justifyContent: "flex-end" }}>
           <div
-            ref={phasesContentRef}
             style={{
               display: "inline-flex",
               gap: "2px",
@@ -555,18 +400,9 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
               .map((phase) => {
                 const status = getPhaseStatus(phase);
                 const style = getPhaseStyle(phase, status, !!onPhaseClick);
-                const isMovePhase = phase === "move";
-                const isShootPhase = phase === "shoot";
 
                 return (
                   <button
-                    ref={
-                      isMovePhase
-                        ? movePhaseButtonRef
-                        : isShootPhase
-                          ? shootPhaseButtonRef
-                          : undefined
-                    }
                     type="button"
                     key={phase}
                     className="phase-btn"

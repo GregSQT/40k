@@ -26,7 +26,6 @@ PHASE_ORDER: Tuple[str, ...] = ("deployment", "command", "move", "shoot", "charg
 # Uniquement des clés RÉELLEMENT invariantes pendant une partie OU des caches purs sûrs à
 # garder vivants. Sur-lister ici = bug de restore ; sous-lister = simple surcoût de copie.
 _GS_STATIC_KEYS = frozenset({
-    "los_topology", "pathfinding_topology", "wall_edge_topology",
     "wall_hexes", "dense_wall_hexes", "weapon_damage_table", "config",
     "board_cols", "board_rows", "inches_to_subhex", "max_range",
     "terrain_areas", "objectives", "primary_objective",

@@ -4,11 +4,8 @@ import {
   type Dispatch,
   memo,
   type ReactElement,
-  type RefObject,
   type SetStateAction,
-  useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -628,72 +625,12 @@ interface UnitStatusTableProps {
   guidedFocusUnitId?: UnitId | null;
   clickedUnitId?: UnitId | null;
   onSelectUnit: (unitId: UnitId) => void;
-  gameMode?: "pvp" | "pvp_test" | "pve" | "training" | "tutorial" | "endless_duty";
+  gameMode?: "pvp" | "pvp_test" | "pve" | "training" | "endless_duty";
   isReplay?: boolean;
   /** Facteur subhex du board : MOVE/portées sont stockés ×inches_to_subhex, on les reconvertit en pouces pour l'affichage. */
   inchesToSubhex?: number;
   victoryPoints?: number;
   onCollapseChange?: (collapsed: boolean) => void;
-  /** En mode tutoriel : forcer la table dépliée pour voir les colonnes. */
-  tutorialForceTableExpanded?: boolean;
-  /** En mode tutoriel : forcer ces unités à avoir la ligne stats dépliée (ex. Intercessor id 1). */
-  tutorialForceUnitIdsExpanded?: UnitId[];
-  /** En mode tutoriel (étape 2-11) : forcer ces unités à avoir la ligne stats repliée (ex. Hormagaunts id 2 et 3). */
-  tutorialForceUnitIdsCollapsed?: UnitId[];
-  /** En mode tutoriel : rapporter les positions viewport [colonne Name, colonne M] pour les halos. */
-  onNameMColumnsRect?:
-    | ((
-        positions: Array<{
-          shape: "rect";
-          left: number;
-          top: number;
-          width: number;
-          height: number;
-        }> | null
-      ) => void)
-    | null;
-  /** En mode tutoriel (étape 1-6) : forcer ces unités à avoir la section RANGED WEAPON(S) dépliée. */
-  tutorialForceRangedExpandedForUnitIds?: UnitId[];
-  /** En mode tutoriel (étape 1-6) : rapporter le rect viewport de la section RANGED WEAPON(S) pour les halos. */
-  onRangedWeaponsSectionRect?:
-    | ((
-        positions: Array<{
-          shape: "rect";
-          left: number;
-          top: number;
-          width: number;
-          height: number;
-        }> | null
-      ) => void)
-    | null;
-  /** En mode tutoriel (étape 2-2) : rapporter le rect viewport ligne attributs + titre pour une unité cible (ex. Termagant). */
-  onUnitAttributesSectionRect?:
-    | ((
-        positions: Array<{
-          shape: "rect";
-          left: number;
-          top: number;
-          width: number;
-          height: number;
-        }> | null
-      ) => void)
-    | null;
-  /** En mode tutoriel (étape 2-2) : ids des unités pour lesquelles rapporter la section attributs (titre + ligne). */
-  tutorialReportAttributesForUnitIds?: UnitId[];
-  /** En mode tutoriel (étape 2-11/2-12) : rapporter les rects des lignes des unités P2 pour halos. */
-  onP2UnitRowRects?:
-    | ((
-        positions: Array<{
-          shape: "rect";
-          left: number;
-          top: number;
-          width: number;
-          height: number;
-        }> | null
-      ) => void)
-    | null;
-  /** En mode tutoriel (étape 2-11/2-12) : activer le rapport des rects P2. */
-  tutorialReportP2UnitRowRects?: boolean;
   /** Preview plateau : forcer cette unité et ses armes à être visibles tant que l'illustration est affichée. */
   detailPreviewUnitId?: UnitId | null;
   /** Phase courante : en "deployment" + deployment_type "active", on filtre les unités déployables. */
@@ -721,75 +658,10 @@ interface UnitRowProps {
   showUnitRules: boolean;
   /** Inspection : index du modèle (dans ``unit.models``) à afficher dans la ligne dépliée, ou null. */
   inspectedModelIndex: number | null;
-  /** Tutoriel : rapporter les positions viewport [colonne Name, colonne M] pour deux halos (unité ciblée, ex. Intercessor id 1). */
-  reportNameMRect?:
-    | ((
-        positions: Array<{
-          shape: "rect";
-          left: number;
-          top: number;
-          width: number;
-          height: number;
-        }> | null
-      ) => void)
-    | null;
-  /** Refs des cellules d'en-tête Name et M (pour étendre le halo sur la ligne de titre). */
-  nameHeaderRef?: RefObject<HTMLTableCellElement | null>;
-  mHeaderRef?: RefObject<HTMLTableCellElement | null>;
-  /** Tutoriel 1-6 : rapporter le rect viewport de la table RANGED WEAPON(S) pour le halo. */
-  reportRangedWeaponsRect?:
-    | ((
-        positions: Array<{
-          shape: "rect";
-          left: number;
-          top: number;
-          width: number;
-          height: number;
-        }> | null
-      ) => void)
-    | null;
-  /** Tutoriel 2-11/2-12 : rapporter le rect viewport de la ligne unité pour halo P2. Signature (unitId, rect) pour éviter recréation de callback par unité. */
-  reportUnitRowRect?:
-    | ((
-        unitId: UnitId,
-        rect: {
-          shape: "rect";
-          left: number;
-          top: number;
-          width: number;
-          height: number;
-        } | null
-      ) => void)
-    | null;
-  /** Tutoriel 2-2 : rapporter le rect viewport (ligne titre + ligne attributs) pour le halo. */
-  reportUnitAttributesRect?:
-    | ((
-        positions: Array<{
-          shape: "rect";
-          left: number;
-          top: number;
-          width: number;
-          height: number;
-        }> | null
-      ) => void)
-    | null;
-  /** Ref de la ligne d'en-tête du tableau (pour union avec la ligne unité). */
-  tableHeaderRowRef?: RefObject<HTMLTableRowElement | null>;
   /** Preview plateau : encadrer la ligne principale + sections armes lorsque l’illustration détail est affichée. */
   isDetailPreviewHighlight?: boolean;
   /** Facteur subhex pour reconvertir MOVE/portées en pouces à l'affichage. */
   inchesToSubhex: number;
-}
-
-function unionRect(
-  a: DOMRect,
-  b: DOMRect
-): { left: number; top: number; width: number; height: number } {
-  const left = Math.min(a.left, b.left);
-  const top = Math.min(a.top, b.top);
-  const right = Math.max(a.right, b.right);
-  const bottom = Math.max(a.bottom, b.bottom);
-  return { left, top, width: right - left, height: bottom - top };
 }
 
 const UnitRow = memo<UnitRowProps>(
@@ -806,205 +678,9 @@ const UnitRow = memo<UnitRowProps>(
     onToggleMeleeExpand,
     showUnitRules,
     inspectedModelIndex,
-    reportNameMRect,
-    nameHeaderRef,
-    mHeaderRef,
-    reportRangedWeaponsRect,
-    reportUnitRowRect,
-    reportUnitAttributesRect,
-    tableHeaderRowRef,
     isDetailPreviewHighlight = false,
     inchesToSubhex,
   }) => {
-    const nameCellRef = useRef<HTMLTableCellElement>(null);
-    const mCellRef = useRef<HTMLTableCellElement>(null);
-    const unitRowRef = useRef<HTMLTableRowElement>(null);
-
-    const reportRect = useCallback(() => {
-      if (!reportNameMRect) return;
-      const nameEl = nameCellRef.current;
-      const mEl = mCellRef.current;
-      if (!nameEl || !mEl) {
-        reportNameMRect(null);
-        return;
-      }
-      const padding = 6;
-      const nameData = nameEl.getBoundingClientRect();
-      const mData = mEl.getBoundingClientRect();
-      const nameHead = nameHeaderRef?.current?.getBoundingClientRect();
-      const mHead = mHeaderRef?.current?.getBoundingClientRect();
-      const nameRect = nameHead
-        ? unionRect(nameData, nameHead)
-        : {
-            left: nameData.left,
-            top: nameData.top,
-            width: nameData.width,
-            height: nameData.height,
-          };
-      const mRect = mHead
-        ? unionRect(mData, mHead)
-        : { left: mData.left, top: mData.top, width: mData.width, height: mData.height };
-      // Ne pas envoyer de rects invalides (éléments cachés/collapsed → getBoundingClientRect 0,0,0,0)
-      const minSize = 4;
-      if (
-        nameRect.width < minSize ||
-        nameRect.height < minSize ||
-        mRect.width < minSize ||
-        mRect.height < minSize
-      ) {
-        reportNameMRect(null);
-        return;
-      }
-      reportNameMRect([
-        {
-          shape: "rect",
-          left: nameRect.left - padding,
-          top: nameRect.top - padding,
-          width: nameRect.width + padding * 2,
-          height: nameRect.height + padding * 2,
-        },
-        {
-          shape: "rect",
-          left: mRect.left - padding,
-          top: mRect.top - padding,
-          width: mRect.width + padding * 2,
-          height: mRect.height + padding * 2,
-        },
-      ]);
-    }, [reportNameMRect, nameHeaderRef, mHeaderRef]);
-
-    useLayoutEffect(() => {
-      if (!reportNameMRect) return;
-      reportRect();
-      let t1: number;
-      let t2: number | undefined;
-      t1 = requestAnimationFrame(() => {
-        reportRect();
-        t2 = requestAnimationFrame(() => reportRect());
-      });
-      const t = setTimeout(() => reportRect(), 30);
-      return () => {
-        cancelAnimationFrame(t1);
-        if (t2 != null) cancelAnimationFrame(t2);
-        clearTimeout(t);
-        reportNameMRect(null);
-      };
-    }, [reportNameMRect, reportRect]);
-
-    const rangedTableRef = useRef<HTMLTableElement>(null);
-    useLayoutEffect(() => {
-      if (!reportRangedWeaponsRect || !isUnitExpanded || !isRangedExpanded) {
-        if (reportRangedWeaponsRect) reportRangedWeaponsRect(null);
-        return;
-      }
-      const el = rangedTableRef.current;
-      if (!el) {
-        reportRangedWeaponsRect(null);
-        return;
-      }
-      let cancelled = false;
-      const measure = () => {
-        if (cancelled) return;
-        const r = el.getBoundingClientRect();
-        if (r.width < 2 || r.height < 2) {
-          reportRangedWeaponsRect(null);
-          return;
-        }
-        reportRangedWeaponsRect([
-          { shape: "rect", left: r.left, top: r.top, width: r.width, height: r.height },
-        ]);
-      };
-      measure();
-      const raf = requestAnimationFrame(() => {
-        if (!cancelled) measure();
-        requestAnimationFrame(() => {
-          if (!cancelled) measure();
-        });
-      });
-      const t = setTimeout(() => {
-        if (!cancelled) measure();
-      }, 30);
-      return () => {
-        cancelled = true;
-        cancelAnimationFrame(raf);
-        clearTimeout(t);
-        reportRangedWeaponsRect(null);
-      };
-    }, [reportRangedWeaponsRect, isUnitExpanded, isRangedExpanded]);
-
-    // Tutoriel 2-2 : rapporter union (ligne titre + ligne attributs) pour halo
-    const reportAttributesRect = useCallback(() => {
-      if (!reportUnitAttributesRect || !tableHeaderRowRef?.current || !unitRowRef.current) {
-        if (reportUnitAttributesRect) reportUnitAttributesRect(null);
-        return;
-      }
-      const headerR = tableHeaderRowRef.current.getBoundingClientRect();
-      const rowR = unitRowRef.current.getBoundingClientRect();
-      const u = unionRect(headerR, rowR);
-      const padding = 4;
-      const minSize = 4;
-      if (u.width < minSize || u.height < minSize) {
-        reportUnitAttributesRect(null);
-        return;
-      }
-      reportUnitAttributesRect([
-        {
-          shape: "rect",
-          left: u.left - padding,
-          top: u.top - padding,
-          width: u.width + padding * 2,
-          height: u.height + padding * 2,
-        },
-      ]);
-    }, [reportUnitAttributesRect, tableHeaderRowRef]);
-    useLayoutEffect(() => {
-      if (!reportUnitAttributesRect) return;
-      reportAttributesRect();
-      const t1 = requestAnimationFrame(() => {
-        reportAttributesRect();
-        requestAnimationFrame(reportAttributesRect);
-      });
-      const t = setTimeout(reportAttributesRect, 30);
-      return () => {
-        cancelAnimationFrame(t1);
-        clearTimeout(t);
-        reportUnitAttributesRect(null);
-      };
-    }, [reportUnitAttributesRect, reportAttributesRect]);
-
-    // Tutoriel 2-11/2-12 : rapporter le rect de la ligne unité pour halo P2
-    const reportRowRect = useCallback(() => {
-      if (!reportUnitRowRect || !unitRowRef.current) return;
-      const r = unitRowRef.current.getBoundingClientRect();
-      const pad = 4;
-      const minSize = 4;
-      if (r.width < minSize || r.height < minSize) {
-        reportUnitRowRect(unit.id, null);
-        return;
-      }
-      reportUnitRowRect(unit.id, {
-        shape: "rect",
-        left: r.left - pad,
-        top: r.top - pad,
-        width: r.width + pad * 2,
-        height: r.height + pad * 2,
-      });
-    }, [reportUnitRowRect, unit.id]);
-    useLayoutEffect(() => {
-      if (!reportUnitRowRect) return;
-      reportRowRect();
-      const t1 = requestAnimationFrame(() => {
-        reportRowRect();
-        requestAnimationFrame(reportRowRect);
-      });
-      const t = setTimeout(reportRowRect, 30);
-      return () => {
-        cancelAnimationFrame(t1);
-        clearTimeout(t);
-        reportUnitRowRect(unit.id, null);
-      };
-    }, [reportUnitRowRect, reportRowRect, unit.id]);
-
     if (!unit.HP_MAX) {
       throw new Error(`Unit ${unit.id} missing required HP_MAX field`);
     }
@@ -1063,7 +739,6 @@ const UnitRow = memo<UnitRowProps>(
           </colgroup>
           <tbody>
             <tr
-              ref={unitRowRef}
               className="unit-status-row"
               onClick={() => onSelect(unit.id)}
               style={{ cursor: "pointer" }}
@@ -1125,7 +800,6 @@ const UnitRow = memo<UnitRowProps>(
 
               {/* Name */}
               <td
-                ref={nameCellRef}
                 className="unit-status-cell unit-status-cell--type"
                 style={{
                   fontWeight: "bold",
@@ -1197,7 +871,6 @@ const UnitRow = memo<UnitRowProps>(
 
               {/* M (Movement) */}
               <td
-                ref={mCellRef}
                 className="unit-status-cell unit-status-cell--stat"
                 style={{
                   textAlign: "center",
@@ -1284,7 +957,6 @@ const UnitRow = memo<UnitRowProps>(
             {/* RANGE WEAPON(S) Table */}
             {rngWeapons.length > 0 && (
               <table
-                ref={rangedTableRef}
                 style={{
                   width: "calc(100% - 16px)",
                   borderCollapse: "collapse",
@@ -1785,49 +1457,9 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     inchesToSubhex = 1,
     victoryPoints,
     onCollapseChange,
-    tutorialForceTableExpanded = false,
-    tutorialForceUnitIdsExpanded,
-    tutorialForceUnitIdsCollapsed,
-    onNameMColumnsRect,
-    tutorialForceRangedExpandedForUnitIds,
-    onRangedWeaponsSectionRect,
-    onUnitAttributesSectionRect,
-    tutorialReportAttributesForUnitIds,
-    onP2UnitRowRects,
-    tutorialReportP2UnitRowRects = false,
     detailPreviewUnitId = null,
     inspectedModel = null,
   }) => {
-    const nameHeaderRef = useRef<HTMLTableCellElement>(null);
-    const mHeaderRef = useRef<HTMLTableCellElement>(null);
-    const tableHeaderRowRef = useRef<HTMLTableRowElement>(null);
-    const p2UnitRectsRef = useRef<
-      Map<UnitId, { shape: "rect"; left: number; top: number; width: number; height: number }>
-    >(new Map());
-
-    const handleP2UnitRowRect = useCallback(
-      (
-        unitId: UnitId,
-        rect: { shape: "rect"; left: number; top: number; width: number; height: number } | null
-      ) => {
-        if (!onP2UnitRowRects) return;
-        if (rect) {
-          p2UnitRectsRef.current.set(unitId, rect);
-        } else {
-          p2UnitRectsRef.current.delete(unitId);
-        }
-        onP2UnitRowRects(Array.from(p2UnitRectsRef.current.values()));
-      },
-      [onP2UnitRowRects]
-    );
-
-    useEffect(() => {
-      if (!tutorialReportP2UnitRowRects && onP2UnitRowRects) {
-        p2UnitRectsRef.current.clear();
-        onP2UnitRowRects(null);
-      }
-    }, [tutorialReportP2UnitRowRects, onP2UnitRowRects]);
-
     // Collapse/expand state for entire table
     const [isCollapsed, setIsCollapsed] = useState(true);
 
@@ -1933,56 +1565,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
           buildUnitProfiles(unit).length >= 2
       );
     const effectiveCollapsed =
-      tutorialForceTableExpanded || isDetailPreviewInThisTable || isInspectInThisTable
-        ? false
-        : isCollapsed;
-
-    useEffect(() => {
-      if (tutorialForceTableExpanded && isCollapsed) {
-        setIsCollapsed(false);
-        onCollapseChange?.(false);
-      }
-    }, [tutorialForceTableExpanded, isCollapsed, onCollapseChange]);
-
-    useEffect(() => {
-      if (tutorialForceUnitIdsExpanded && tutorialForceUnitIdsExpanded.length > 0) {
-        setExpandedUnits((prev) => {
-          const next = new Set(prev);
-          for (const id of tutorialForceUnitIdsExpanded) {
-            next.add(id);
-          }
-          return next;
-        });
-      }
-    }, [tutorialForceUnitIdsExpanded]);
-
-    useEffect(() => {
-      if (tutorialForceUnitIdsCollapsed && tutorialForceUnitIdsCollapsed.length > 0) {
-        setExpandedUnits((prev) => {
-          const next = new Set(prev);
-          for (const id of tutorialForceUnitIdsCollapsed) {
-            next.delete(id);
-          }
-          return next;
-        });
-      }
-    }, [tutorialForceUnitIdsCollapsed]);
-
-    useEffect(() => {
-      if (
-        tutorialForceRangedExpandedForUnitIds &&
-        tutorialForceRangedExpandedForUnitIds.length > 0 &&
-        player === 1
-      ) {
-        setExpandedRanged((prev) => {
-          const next = new Set(prev);
-          for (const id of tutorialForceRangedExpandedForUnitIds) {
-            next.add(id);
-          }
-          return next;
-        });
-      }
-    }, [tutorialForceRangedExpandedForUnitIds, player]);
+      isDetailPreviewInThisTable || isInspectInThisTable ? false : isCollapsed;
 
     // Filter units for this player and exclude dead units ; preview plateau : unité ciblée en tête de liste
     const playerUnits = useMemo(() => {
@@ -2122,7 +1705,6 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                 <button
                   type="button"
                   onClick={() => {
-                    if (tutorialForceTableExpanded) return;
                     const newCollapsed = !isCollapsed;
                     setIsCollapsed(newCollapsed);
                     onCollapseChange?.(newCollapsed);
@@ -2184,7 +1766,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                 <col style={{ width: "70px" }} />
               </colgroup>
               <thead>
-                <tr ref={tableHeaderRowRef} className="unit-status-header">
+                <tr className="unit-status-header">
                   <th
                     className="unit-status-header-cell"
                     style={{
@@ -2209,7 +1791,6 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                     ID
                   </th>
                   <th
-                    ref={nameHeaderRef}
                     className="unit-status-header-cell"
                     style={{
                       padding: "6px 8px",
@@ -2234,7 +1815,6 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                     HP
                   </th>
                   <th
-                    ref={mHeaderRef}
                     className="unit-status-header-cell"
                     style={{
                       padding: "6px 8px",
@@ -2341,36 +1921,6 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                   isMeleeExpanded={isDetailPreviewUnit || expandedMelee.has(unit.id)}
                   onToggleMeleeExpand={toggleMeleeExpand}
                   showUnitRules={!isDetailPreviewInThisTable || isDetailPreviewUnit}
-                  reportNameMRect={
-                    player === 1 && onNameMColumnsRect && (String(unit.id) === "1" || unit.id === 1)
-                      ? onNameMColumnsRect
-                      : undefined
-                  }
-                  nameHeaderRef={nameHeaderRef}
-                  mHeaderRef={mHeaderRef}
-                  reportRangedWeaponsRect={
-                    player === 1 &&
-                    onRangedWeaponsSectionRect &&
-                    tutorialForceRangedExpandedForUnitIds?.some(
-                      (id) => String(unit.id) === String(id) || unit.id === id
-                    )
-                      ? onRangedWeaponsSectionRect
-                      : undefined
-                  }
-                  reportUnitAttributesRect={
-                    onUnitAttributesSectionRect &&
-                    tutorialReportAttributesForUnitIds?.some(
-                      (id) => String(unit.id) === String(id) || unit.id === id
-                    )
-                      ? onUnitAttributesSectionRect
-                      : undefined
-                  }
-                  reportUnitRowRect={
-                    player === 2 && tutorialReportP2UnitRowRects && onP2UnitRowRects
-                      ? handleP2UnitRowRect
-                      : undefined
-                  }
-                  tableHeaderRowRef={tableHeaderRowRef}
                   isDetailPreviewHighlight={isDetailPreviewUnit}
                   inchesToSubhex={inchesToSubhex}
                 />

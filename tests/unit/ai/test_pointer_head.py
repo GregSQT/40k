@@ -403,6 +403,7 @@ def test_move_head_matches_the_naive_broadcast_reference(model):
                 dim=1,
             )
         )
+        assert naive.bias is not None, "Conv2d construit avec bias=True (défaut)"
         naive.bias.copy_(policy.move_cell_net.bias + policy.move_ctx_net.bias)
         reference = policy.move_out_net(torch.relu(naive(stacked))).reshape(
             batch, MOVE_CELL_COUNT

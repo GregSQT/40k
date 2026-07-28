@@ -2,7 +2,6 @@
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { getAuthSession } from "../auth/authStorage";
 import { ErrorBoundary } from "./ErrorBoundary";
 import TooltipWrapper from "./TooltipWrapper";
 
@@ -322,8 +321,6 @@ const Navigation: React.FC<NavigationProps> = ({
   }, [measureModeActive]);
 
   const location = useLocation();
-  const authSession = getAuthSession();
-  const tutorialCompleted = authSession?.tutorial_completed ?? true;
 
   const getButtonClass = (path: string) => {
     const isPvPTestMode =
@@ -333,14 +330,6 @@ const Navigation: React.FC<NavigationProps> = ({
       location.pathname === "/game" && location.search.includes("mode=endless_duty");
     const isPvETestMode =
       location.pathname === "/game" && location.search.includes("mode=pve_test");
-    const isTutorialMode =
-      location.pathname === "/game" && location.search.includes("mode=tutorial");
-
-    // Handle Tutorial mode
-    if (path === "/game?mode=tutorial") {
-      return `nav-button ${isTutorialMode ? "nav-button--active" : "nav-button--inactive"}`;
-    }
-
     // Handle PvE mode detection via query parameter
     if (path === "/game?mode=pve") {
       return `nav-button ${isPvEMode ? "nav-button--active" : "nav-button--inactive"}`;
@@ -368,8 +357,7 @@ const Navigation: React.FC<NavigationProps> = ({
         !isPvPTestMode &&
         !isPvEMode &&
         !isEndlessDutyMode &&
-        !isPvETestMode &&
-        !isTutorialMode;
+        !isPvETestMode;
       return `nav-button ${isPvPMode ? "nav-button--active" : "nav-button--inactive"}`;
     }
 
@@ -387,68 +375,48 @@ const Navigation: React.FC<NavigationProps> = ({
       }}
     >
       <nav className="navigation">
-        {!tutorialCompleted && (
-          <button
-            type="button"
-            onClick={() => (window.location.href = "/game?mode=tutorial")}
-            className={getButtonClass("/game?mode=tutorial")}
-          >
-            Tutorial
-          </button>
-        )}
-        {tutorialCompleted && (
-          <>
-            <button
-              type="button"
-              onClick={() => (window.location.href = "/game")}
-              className={getButtonClass("/game")}
-            >
-              PvP
-            </button>
-            <button
-              type="button"
-              onClick={() => (window.location.href = "/game?mode=pve")}
-              className={getButtonClass("/game?mode=pve")}
-            >
-              PvE
-            </button>
-            <button
-              type="button"
-              onClick={() => (window.location.href = "/game?mode=endless_duty")}
-              className={getButtonClass("/game?mode=endless_duty")}
-            >
-              Endless Duty
-            </button>
-            <button
-              type="button"
-              onClick={() => (window.location.href = "/game?mode=tutorial")}
-              className={getButtonClass("/game?mode=tutorial")}
-            >
-              Tutorial
-            </button>
-            <button
-              type="button"
-              onClick={() => (window.location.href = "/game?mode=pvp_test")}
-              className={getButtonClass("/game?mode=pvp_test")}
-            >
-              PvP Test
-            </button>
-            <button
-              type="button"
-              onClick={() => (window.location.href = "/game?mode=pve_test")}
-              className={getButtonClass("/game?mode=pve_test")}
-            >
-              PvE Test
-            </button>
-            <button
-              type="button"
-              onClick={() => (window.location.href = "/game?mode=replay")}
-              className={getButtonClass("/replay")}
-            >
-              Replay
-            </button>
-          </>
-        )}
+        <button
+          type="button"
+          onClick={() => (window.location.href = "/game")}
+          className={getButtonClass("/game")}
+        >
+          PvP
+        </button>
+        <button
+          type="button"
+          onClick={() => (window.location.href = "/game?mode=pve")}
+          className={getButtonClass("/game?mode=pve")}
+        >
+          PvE
+        </button>
+        <button
+          type="button"
+          onClick={() => (window.location.href = "/game?mode=endless_duty")}
+          className={getButtonClass("/game?mode=endless_duty")}
+        >
+          Endless Duty
+        </button>
+        <button
+          type="button"
+          onClick={() => (window.location.href = "/game?mode=pvp_test")}
+          className={getButtonClass("/game?mode=pvp_test")}
+        >
+          PvP Test
+        </button>
+        <button
+          type="button"
+          onClick={() => (window.location.href = "/game?mode=pve_test")}
+          className={getButtonClass("/game?mode=pve_test")}
+        >
+          PvE Test
+        </button>
+        <button
+          type="button"
+          onClick={() => (window.location.href = "/game?mode=replay")}
+          className={getButtonClass("/replay")}
+        >
+          Replay
+        </button>
       </nav>
 
       {onOpenSettings && (

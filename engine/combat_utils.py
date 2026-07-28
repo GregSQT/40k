@@ -466,24 +466,9 @@ def calculate_pathfinding_distance(col1: int, row1: int, col2: int, row2: int,
     if col1 == col2 and row1 == row2:
         return 0
 
-    # Precomputed topology lookup (O(1) — legacy boards with .npz)
-    pathfinding_topology = game_state.get("pathfinding_topology")
     board_cols = game_state["board_cols"]
     board_rows = game_state["board_rows"]
-    if (
-        pathfinding_topology is not None
-        and isinstance(board_cols, int)
-        and isinstance(board_rows, int)
-        and 0 <= col1 < board_cols
-        and 0 <= row1 < board_rows
-        and 0 <= col2 < board_cols
-        and 0 <= row2 < board_rows
-    ):
-        from_idx = row1 * board_cols + col1
-        to_idx = row2 * board_cols + col2
-        return int(pathfinding_topology[from_idx, to_idx])
 
-    # On-demand BFS (boards sans topologie précalculée)
     from shared.data_validation import require_key  # Lazy: avoid circular import
 
     if max_search_distance is None:
@@ -673,16 +658,16 @@ def _trace_hex_los(
     result: bool,
     game_state: Dict[str, Any],
 ) -> None:
-    """Trace hex LoS for LOS_DEBUG=1. Logs event, coords, result, and topology value."""
+    """Trace hex LoS for LOS_DEBUG=1. Logs event, coords, result, and LoS ratio."""
     import sys
     try:
         from engine.phase_handlers import shooting_handlers
         ratio, can_see = shooting_handlers._get_los_visibility_state(
             game_state, from_col, from_row, to_col, to_row
         )
-        topo_str = f"topology={ratio:.6f} can_see={can_see}"
+        topo_str = f"los={ratio:.6f} can_see={can_see}"
     except Exception:
-        topo_str = "topology=N/A"
+        topo_str = "los=N/A"
     ep = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")
     pid = os.getpid()

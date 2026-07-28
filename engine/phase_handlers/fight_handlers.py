@@ -1941,21 +1941,6 @@ def _handle_fight_postpone(game_state: Dict[str, Any], unit: Dict[str, Any]) -> 
         }
 
 
-def _tutorial_fight_lethal_save_prevented(
-    game_state: Dict[str, Any], target_unit_id: str
-) -> bool:
-    """True if scenario lists this unit: a failed save that would kill is treated as success."""
-    ids = game_state.get("tutorial_fight_no_death_unit_ids")
-    if ids is None:
-        return False
-    if not isinstance(ids, frozenset):
-        raise TypeError(
-            "tutorial_fight_no_death_unit_ids must be frozenset or None, "
-            f"got {type(ids).__name__}"
-        )
-    return str(target_unit_id) in ids
-
-
 def _calculate_save_target(target: Dict[str, Any], ap: int) -> int:
     """Calculate save target with AP modifier and invulnerable save"""
     # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access

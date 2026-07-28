@@ -11,8 +11,7 @@ const RootRedirect = () => {
   if (!authSession) {
     return <Navigate to="/auth" replace />;
   }
-  const mode = authSession.tutorial_completed ? authSession.default_redirect_mode : "tutorial";
-  return <Navigate to={`/game?mode=${mode}`} replace />;
+  return <Navigate to={`/game?mode=${authSession.default_redirect_mode}`} replace />;
 };
 
 const ProtectedGameRoute = () => {
@@ -26,10 +25,6 @@ const ProtectedGameRoute = () => {
   const modeFromQuery = new URLSearchParams(location.search).get("mode");
   const requestedMode = modeFromQuery ?? "pve";
 
-  if (!authSession.tutorial_completed && requestedMode !== "tutorial") {
-    return <Navigate to="/game?mode=tutorial" replace />;
-  }
-
   if (requestedMode === "replay") {
     return <Navigate to="/replay" replace />;
   }
@@ -37,9 +32,7 @@ const ProtectedGameRoute = () => {
   const isRequestedModeAllowed =
     allowedModes.includes(requestedMode) ||
     (requestedMode === "endless_duty" && allowedModes.includes("pve")) ||
-    ((requestedMode === "pvp_test" ||
-      requestedMode === "pve_test" ||
-      requestedMode === "tutorial") &&
+    ((requestedMode === "pvp_test" || requestedMode === "pve_test") &&
       allowedModes.includes("test"));
   if (!isRequestedModeAllowed) {
     const fallbackMode = allowedModes.includes("pve")
@@ -62,9 +55,6 @@ const ProtectedReplayRoute = () => {
   const authSession = getAuthSession();
   if (!authSession) {
     return <Navigate to="/auth" replace />;
-  }
-  if (!authSession.tutorial_completed) {
-    return <Navigate to="/game?mode=tutorial" replace />;
   }
   return <BoardReplay />;
 };
