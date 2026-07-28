@@ -6881,6 +6881,7 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "bs": g["bs"],
         "bsBase": g["bs_base"] if "bs_base" in g else None,
         "heavyApplied": bool(g["heavy_applied"]),
+        "cover": bool(g["cover"]) if "cover" in g else False,
         "rapidFireApplied": int(g["rapid_fire_applied"]) if "rapid_fire_applied" in g else 0,
         "shootDetails": [{"shotNumber": i + 1, **s} for i, s in enumerate(g["shots"])],
     })
@@ -7393,6 +7394,34 @@ def _manual_roll_intent(
         rerolls=RerollProfile(wound_1=reroll_wound1, wound_any_fail=reroll_wound_obj),
         roll_d6=lambda: random.randint(1, 6),
     )
+    # Nom de l ABILITE qui a ouvert chaque relance de blessure. Le socle rend la CAUSE
+    # (`wound_1` / `wound_any_fail` / `twin_linked`) ; seules les deux premieres sont des
+    # abilites d unite, et leur nom d affichage est celui de la REGLE SOURCE qui accorde
+    # l effet (ex. « Targeted Intercession » pour l effet `reroll_1_towound`). `twin_linked`
+    # est une regle d ARME, deja identifiee par ailleurs : aucun nom d abilite.
+    _effect_by_cause = {
+        "wound_1": "reroll_1_towound" if reroll_wound1 else None,
+        "wound_any_fail": "reroll_towound_target_on_objective" if reroll_wound_obj else None,
+    }
+    _ability_by_cause: Dict[str, Optional[str]] = {}
+    for _rec in rolled["shot_records"]:
+        _cause = _rec.pop("woundRerollCause", None)  # get allowed
+        if not _cause or attacker_unit is None:
+            continue
+        if _cause not in _ability_by_cause:
+            # Resolution PARESSEUSE, et memoisee sur l intent : on ne lit le nom d affichage
+            # que si une relance a REELLEMENT eu lieu. `get_source_unit_rule_display_name_for_effect`
+            # exige un `displayName` non vide sur la regle source (contrat deja porteur ailleurs
+            # en production) — inutile de l exiger d une unite dont aucune relance n a joue.
+            _effect = _effect_by_cause.get(_cause)  # get allowed
+            _ability_by_cause[_cause] = (
+                get_source_unit_rule_display_name_for_effect(attacker_unit, _effect)
+                if _effect else None
+            )
+        _ability = _ability_by_cause[_cause]
+        if _ability:
+            _rec["woundAbility"] = str(_ability)
+
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": bs, "bs_base": bs_base, "cover": cover, "ap": ap,

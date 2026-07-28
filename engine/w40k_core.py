@@ -4996,6 +4996,9 @@ class W40KEngine(gym.Env):
         # tests/unit/ai/test_step_log_weapon_rule_tokens.py. Cf. V11 §0hist.38.
         "saveSkipped": "save_skipped",
         "saveSkipReason": "save_skip_reason",
+        # Nom de l abilite d unite qui a ouvert la relance de blessure, quand elle a
+        # EFFECTIVEMENT eu lieu (le socle trace la cause, `_manual_roll_intent` la nomme).
+        "woundAbility": "wound_ability_display_name",
     }
 
     def _models_segment_for_unit(self, unit_id: Any, label: str = "MODELS") -> str:
@@ -5054,6 +5057,13 @@ class W40KEngine(gym.Env):
         # Absentes en melee (ni couvert ni HEAVY) : etat metier valide.
         if raw_log.get("heavyApplied"):  # get allowed
             details["hit_rule_modifier"] = "HEAVY"
+            details["hit_target_base"] = raw_log.get("bsBase")  # get allowed
+        # Benefit of Cover 13.08 : dans CE moteur le couvert degrade le SEUIL DE TOUCHE
+        # (`_cover_worsened_bs`), pas la sauvegarde — le token va donc du cote de la touche,
+        # comme [HEAVY]. Le formateur du StepLogger portait l ancien modele (couvert sur la
+        # sauvegarde, `save_cover_applied`/`save_target_base`), que plus rien n alimentait.
+        elif raw_log.get("cover"):  # get allowed
+            details["hit_rule_modifier"] = "COVER"
             details["hit_target_base"] = raw_log.get("bsBase")  # get allowed
         # [RAPID FIRE] 24.30 : la regle grossit le POOL d attaques du groupe, elle n est pas
         # une propriete d un jet — le marqueur est donc porte par toutes les lignes du groupe.

@@ -22,6 +22,13 @@ from engine.phase_handlers import shooting_handlers
 from tests.unit.engine._roll_helpers import roll_shoot_intent
 
 
+# Une regle d unite qui ACCORDE un effet doit porter un `displayName` non vide : le moteur le
+# lit pour nommer l abilite dans le combat log quand la relance a lieu (contrat de
+# `get_source_unit_rule_display_name_for_effect`).
+_INTERCESSION = {"ruleId": "reroll_1_towound", "displayName": "Targeted Intercession"}
+_OBJECTIVE = {"ruleId": "reroll_towound_target_on_objective", "displayName": "Objective Mastery"}
+
+
 def _seq(monkeypatch, rolls):
     seq = list(rolls)
 
@@ -65,7 +72,7 @@ def test_abilite_et_twin_linked_ne_relancent_pas_deux_fois(monkeypatch):
     La relance rend 3 (toujours un echec vs 4+) : si les deux sources se cumulaient, un
     troisieme de serait tire — `_seq` le detecterait (sequence epuisee)."""
     seq = _seq(monkeypatch, [4, 1, 3])  # touche, blessure=1, UNE relance -> 3 (echec)
-    gs, intent = _game_state([{"ruleId": "reroll_1_towound"}], ["TWIN_LINKED"])
+    gs, intent = _game_state([_INTERCESSION], ["TWIN_LINKED"])
 
     result = roll_shoot_intent(gs, intent)
 
@@ -77,7 +84,7 @@ def test_abilite_et_twin_linked_ne_relancent_pas_deux_fois(monkeypatch):
 def test_objectif_et_twin_linked_ne_relancent_pas_deux_fois(monkeypatch):
     """Idem avec `reroll_towound_target_on_objective` (cible sur objectif) + [TWIN-LINKED]."""
     seq = _seq(monkeypatch, [4, 2, 3])
-    gs, intent = _game_state([{"ruleId": "reroll_towound_target_on_objective"}], ["TWIN_LINKED"],
+    gs, intent = _game_state([_OBJECTIVE], ["TWIN_LINKED"],
                              target_col=5, target_row=5)
 
     result = roll_shoot_intent(gs, intent)

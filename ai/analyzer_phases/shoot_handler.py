@@ -143,9 +143,14 @@ def handle_shoot(
             if stats['first_error_lines']['shoot_after_flee'][player] is None:
                 stats['first_error_lines']['shoot_after_flee'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
 
-    # RULE METRICS: Targeted Intercession reroll (shooting)
+    # RULE METRICS: relance de blessure accordee par une ABILITE d unite.
+    # Le token est le nom d affichage de la REGLE SOURCE, entre CROCHETS — convention de tous
+    # les tokens du projet ([HEAVY], [COVER], [HAZARD]...), a laquelle le frontend accroche ses
+    # tooltips. L ancienne regex cherchait `(TARGETED_INTERCESSION)` entre PARENTHESES avec un
+    # underscore : une forme que le formateur n'a jamais produite, donc un compteur bloque a 0
+    # (V11 §0hist.38). Espace ou underscore acceptes, le nom venant de la config.
     shooter_unit_type_for_reroll = require_key(state.unit_types, shooter_id)
-    if re.search(r'\(TARGETED_INTERCESSION\)', action_desc, re.IGNORECASE):
+    if re.search(r'\[TARGETED[ _]INTERCESSION\]', action_desc, re.IGNORECASE):
         key = ("reroll_1_towound", shooter_unit_type_for_reroll)
         stats['special_rule_usage'][key][player] += 1
         key = ("reroll_towound_target_on_objective", shooter_unit_type_for_reroll)

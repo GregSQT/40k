@@ -56,7 +56,8 @@ def _uc(col, row, *, player, models=None):
     return entry
 
 
-def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1):
+def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
+                unit_rules=(), cover=False):
     """Tireur '1' vs cible '101', 1 attaque, en `gym_training_mode` (allocation auto)."""
     weapon = {"BS": 3, "STR": 4, "AP": -1, "DMG": 1, "NB": 2, "RNG": WEAPON_RANGE,
               "WEAPON_RULES": list(weapon_rules), "display_name": WEAPON_NAME}
@@ -78,7 +79,7 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1):
                   {"id": "101", "player": 1, "unitType": "AssaultIntercessor"}],
         # `deployed_on_turn` : clause 2 de [HEAVY] 24.16 (« not set up this turn »), lue par
         # le moteur. 0 = posée avant la bataille.
-        "unit_by_id": {"1": {"id": "1", "UNIT_RULES": [], "deployed_on_turn": 0},
+        "unit_by_id": {"1": {"id": "1", "UNIT_RULES": list(unit_rules), "deployed_on_turn": 0},
                        "101": {"id": "101", "UNIT_RULES": [], "deployed_on_turn": 0}},
         "objectives": [], "units_moved": set(), "units_advanced": set(),
         "inches_to_subhex": 5,
@@ -90,7 +91,8 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1):
     }
 
 
-def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, target=TARGET, n_attacks=1):
+def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, target=TARGET,
+                      n_attacks=1, unit_rules=(), cover=False):
     """Fait jouer UN tir par le vrai moteur et rend (game_state, action_log de type 'shoot')."""
     seq = list(rolls)
 
@@ -99,13 +101,14 @@ def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, tar
         return seq.pop(0)
 
     monkeypatch.setattr(random, "randint", fake)
-    monkeypatch.setattr(shooting_handlers, "compute_unit_los", lambda gs, s, t: {"cover": False})
+    monkeypatch.setattr(shooting_handlers, "compute_unit_los", lambda gs, s, t: {"cover": cover})
     monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
 
     monkeypatch.setattr(
         shooting_handlers, "_is_adjacent_to_enemy_within_cc_range", lambda gs, u: False
     )
-    gs = _game_state(weapon_rules, moved_inches=moved_inches, target=target, n_attacks=n_attacks)
+    gs = _game_state(weapon_rules, moved_inches=moved_inches, target=target,
+                     n_attacks=n_attacks, unit_rules=unit_rules, cover=cover)
     build_manual_shoot_allocation(gs, "1")
     shoot_logs = [l for l in gs["action_logs"] if l.get("type") == "shoot"]
     assert shoot_logs, "le moteur n'a émis aucun log de tir"
@@ -329,3 +332,73 @@ def test_le_controle_per_shot_du_tir_bonus_est_supprime(monkeypatch, tmp_path):
 
     assert "rapid_fire_correct" not in stats
     assert "rapid_fire_incorrect" not in stats
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Abilité d'unité (relance de blessure) — le token est le nom de la RÈGLE SOURCE
+# ─────────────────────────────────────────────────────────────────────────────
+
+TARGETED_INTERCESSION = {
+    "ruleId": "targeted_intercession",
+    "displayName": "Targeted Intercession",
+    "grants_rule_ids": ["reroll_1_towound"],
+    "usage": "and",
+}
+
+
+def test_le_nom_de_l_abilite_apparait_quand_la_relance_a_lieu(monkeypatch, tmp_path):
+    """Une blessure de 1 relancée par `reroll_1_towound` → le log nomme l'abilité SOURCE.
+
+    C'est le nom que l'analyzer compte comme usage de la règle (`special_rule_usage`), et
+    auquel le frontend accroche son tooltip."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], [3, 1, 5, 2],  # touche, blessure=1, relance=5, save
+                                    unit_rules=[TARGETED_INTERCESSION])
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "[TARGETED INTERCESSION]" in line, line
+
+
+def test_pas_de_nom_quand_aucune_relance_n_a_lieu(monkeypatch, tmp_path):
+    """Discrimination : l'abilité est PRÉSENTE mais la blessure passe du premier coup — rien
+    n'a été relancé, donc rien à signaler. Un token posé sur la simple présence de la règle
+    ferait compter un usage qui n'a pas eu lieu."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], [3, 5, 2],  # blessure=5, aucune relance
+                                    unit_rules=[TARGETED_INTERCESSION])
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "TARGETED INTERCESSION" not in line, line
+
+
+def test_l_analyzer_compte_l_usage_de_l_abilite(monkeypatch, tmp_path):
+    """Maillon 4 : l'usage de la règle de relance est enfin comptabilisé."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], [3, 1, 5, 2],
+                                    unit_rules=[TARGETED_INTERCESSION])
+    stats = _analyzer_stats(tmp_path, _step_log_line(tmp_path, gs, raw_log))
+
+    usage = {k: v for k, v in stats["special_rule_usage"].items() if k[0] == "reroll_1_towound"}
+    assert usage and any(sum(v.values()) > 0 for v in usage.values()), (
+        "aucun usage compté : la chaîne moteur → step.log → analyzer est rompue"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [COVER] 13.08 — dans CE moteur le couvert dégrade le SEUIL DE TOUCHE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_le_token_cover_est_rendu_du_cote_de_la_touche(monkeypatch, tmp_path):
+    """13.08 : `_cover_worsened_bs` dégrade le seuil de touche de 1. Le token doit donc
+    accompagner la TOUCHE, comme [HEAVY] — et non la sauvegarde, modèle du code mort."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], [4, 4, 2], cover=True)
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "[COVER]" in line, line
+    assert "3+->4+" in line, f"seuil dégradé attendu du côté touche : {line}"
+    assert "Save 2(3+)" in line, f"la sauvegarde ne doit pas porter le couvert : {line}"
+
+
+def test_sans_couvert_aucun_token(monkeypatch, tmp_path):
+    """Contre-épreuve fonctionnelle."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], [4, 4, 2], cover=False)
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "COVER" not in line, line

@@ -1621,15 +1621,36 @@ prend et que le log ne porte pas :
 transmet plus, pour chacune des 3 règles, + retour au dé tiré-puis-jeté) → **7/7 rouges**,
 restauration verte.
 
-**Reste ouvert, et c'est une feature, pas une restauration** : le nom d'abilité de relance
-(`wound_ability_display_name`) n'existe **nulle part** dans le vif, et **aucun contrôle
-d'analyzer ne l'attend**. Conséquence à connaître : le combat log ne signale pas qu'une relance a
-été accordée par une abilité d'unité. À décider séparément.
+**Deux volets d'abord écartés à tort, puis livrés le 2026-07-29.** Je les avais exclus en
+affirmant que « aucun contrôle d'analyzer ne les attend ». **Vérification faite, c'était faux
+pour le premier** — et la justification du second était mal chiffrée.
 
-Le volet **[COVER]** est dans le même état (`save_cover_applied`/`save_target_base` non
-transmis), mais aucun contrôle d'analyzer ne le lit — c'est du replay seul, et le formateur y
-attend l'ancien modèle (couvert sur la **sauvegarde**) alors que le vif l'applique sur la
-**touche**. Contrat périmé à part entière, hors de cette tranche.
+- **Nom d'abilité de relance.** [shoot_handler.py:148](../../ai/analyzer_phases/shoot_handler.py#L148)
+  compte `special_rule_usage[("reroll_1_towound", type)]` sur un token de nom d'abilité. Il
+  n'était jamais émis → les deux règles de relance affichaient **0 utilisation en permanence**
+  pour les unités qui les déclarent, alors que le vif les applique. Réparé : le socle trace
+  désormais la **cause** de chaque relance (`wound_1` / `wound_any_fail` / `twin_linked`),
+  `_manual_roll_intent` la nomme via la règle SOURCE (résolution **paresseuse** : on ne lit le
+  `displayName` que si une relance a réellement eu lieu), le pont la transmet. La regex de
+  l'analyzer cherchait `(TARGETED_INTERCESSION)` — parenthèses et underscore, une forme que le
+  formateur n'a jamais produite ; elle suit maintenant la convention du projet, `[NOM]` entre
+  crochets, celle à laquelle le frontend accroche ses tooltips.
+- **[COVER] 13.08.** Chiffré avant de décider : **ça ne cassait rien** — aucun log existant ne
+  contient le token, l'analyzer n'a ni contrôle de couvert ni regex `Hit`, et le `->` dans la
+  partie Hit existait déjà depuis le correctif [HEAVY]. Le token est désormais rendu **du côté
+  de la touche**, là où ce moteur applique la règle (`_cover_worsened_bs` dégrade le seuil de
+  touche), avec le tooltip déjà enregistré dans `GameLog.tsx`. L'ancienne branche « couvert sur
+  la sauvegarde » (`save_cover_applied` / `save_target_base`) est supprimée des **deux**
+  formateurs — en mêlée elle était morte deux fois, la règle y étant inapplicable (ranged-only).
+
+**Dette de miroir soldée côté frontend** : `replayParser.ts` parsait `save_cover_applied`,
+`save_target_base`, `heavy_applied`, `rapid_fire_bonus_shot` et `rapid_fire_rule_value` —
+**cinq champs sans aucun consommateur** dans tout `frontend/src`. C'était l'exacte image de ce
+que §0.38 a supprimé côté backend. Retirés ; l'information passe de toute façon par
+`log_message`, que `GameLog` affiche tel quel avec ses tooltips. `tsc` et `biome` verts.
+
+**Contre-épreuve finale : 12 mutations de chaîne, 12 rouges** (moteur / pont, pour chacune des
+cinq règles, plus le retour au dé tiré-puis-jeté).
 
 ### 0.37 Contre-audit des livraisons §0.32–§0.35 — ✅ LIVRÉ (2026-07-28)
 

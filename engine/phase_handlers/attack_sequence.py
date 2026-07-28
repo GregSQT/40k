@@ -307,6 +307,11 @@ def roll_attack_pool(
                 profile.lethal_hits and critical_hit_here
                 and lethal_hits_auto_wound_is_better(profile, wound_target, save_threshold_value)
             )
+            # Cause de la relance de blessure, quand il y en a une : `wound_1` /
+            # `wound_any_fail` (abilites d UNITE) ou `twin_linked` (regle d ARME). L appelant en
+            # tire le nom d abilite affiche dans le log — sans cette trace, il sait seulement
+            # que la relance etait POSSIBLE, jamais qu elle a EU LIEU. Cf. V11 §0hist.38.
+            wound_reroll_cause: Optional[str] = None
             if auto_wound:
                 # [LETHAL HITS] 24.23 : blessure automatique, AUCUN jet de blessure -> aucune
                 # blessure critique possible (donc pas de DEVASTATING sur cette attaque).
@@ -328,11 +333,22 @@ def roll_attack_pool(
                     or profile.twin_linked
                 )
                 if not wound_success and may_reroll:
+                    # Meme ordre de priorite que `may_reroll` ci-dessus : le miroir exact, pour
+                    # que la cause enregistree soit bien celle qui a ouvert la relance.
+                    if wound_roll == NATURAL_FAIL_ROLL and rerolls.wound_1:
+                        wound_reroll_cause = "wound_1"
+                    elif rerolls.wound_any_fail:
+                        wound_reroll_cause = "wound_any_fail"
+                    else:
+                        wound_reroll_cause = "twin_linked"
                     wound_roll = roll_d6()
                     is_critical_wound = wound_roll >= profile.crit_wound_on
                     wound_success = is_critical_wound or (
                         wound_roll != NATURAL_FAIL_ROLL and wound_roll >= wound_target
                     )
+
+            if wound_reroll_cause is not None:
+                base_rec["woundRerollCause"] = wound_reroll_cause
 
             if not wound_success:
                 base_rec.update({

@@ -15,6 +15,13 @@ from engine.phase_handlers import shooting_handlers
 from tests.unit.engine._roll_helpers import roll_shoot_intent
 
 
+# Une regle d unite qui ACCORDE un effet doit porter un `displayName` non vide : le moteur le
+# lit pour nommer l abilite dans le combat log (contrat de
+# `get_source_unit_rule_display_name_for_effect`, deja porteur ailleurs en production). Les
+# fixtures minimales `{"ruleId": ...}` decrivaient une regle invalide.
+_TARGETED_INTERCESSION = {"ruleId": "reroll_1_towound", "displayName": "Targeted Intercession"}
+
+
 def _seq_randint(monkeypatch, rolls):
     """Force random.randint a rendre `rolls` dans l'ordre (_manual_roll_intent fait
     `import random` local -> on patche le module random lui-meme)."""
@@ -57,7 +64,7 @@ def _game_state(unit_rules, target_col=9, target_row=9):
 def test_reroll_1_towound_rerolls_a_failed_1(monkeypatch):
     """reroll_1_towound : wound=1 (echec) -> reroll=6 (succes). wth=4 (S4 vs T4)."""
     seq = _seq_randint(monkeypatch, [4, 1, 6, 2])  # hit, wound=1, reroll=6, save
-    gs, intent = _game_state([{"ruleId": "reroll_1_towound"}])
+    gs, intent = _game_state([_TARGETED_INTERCESSION])
 
     result = roll_shoot_intent(gs, intent)
 
@@ -93,7 +100,8 @@ def test_reroll_1_towound_ignores_non_1_failure(monkeypatch):
 def test_reroll_towound_on_objective_rerolls_any_failure(monkeypatch):
     """reroll_towound_target_on_objective : cible sur objectif -> reroll de TOUT echec (ici 3)."""
     seq = _seq_randint(monkeypatch, [4, 3, 5, 2])  # hit, wound=3 (echec), reroll=5 (succes), save
-    gs, intent = _game_state([{"ruleId": "reroll_towound_target_on_objective"}], target_col=5, target_row=5)
+    gs, intent = _game_state([dict(_TARGETED_INTERCESSION, ruleId="reroll_towound_target_on_objective")],
+                             target_col=5, target_row=5)
 
     result = roll_shoot_intent(gs, intent)
 
