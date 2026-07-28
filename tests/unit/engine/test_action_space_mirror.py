@@ -21,6 +21,16 @@ def test_move_cell_count_matches_the_grid():
     assert su.SQUAD_ACTION_MOVE_CELL_COUNT == GRID_CELL_COUNT
 
 
+def test_fight_slots_mirror_the_enemy_slot_mapping():
+    """V11 §9 P3-1 : une action de combat = un slot ennemi, le MEME que le tir (invariant D1).
+
+    Les desolidariser ferait pointer l'action de combat i et la ligne i du tenseur ennemi sur
+    deux escouades differentes, sans que rien ne leve.
+    """
+    assert mi.FIGHT_SLOT_COUNT == mi.SHOOT_SLOT_COUNT
+    assert su.SQUAD_ACTION_FIGHT_SLOT_COUNT == su.SQUAD_ACTION_SHOOT_SLOT_COUNT
+
+
 def test_shoot_slot_count_covers_the_measured_worst_case():
     """§1.1 : 5 slots pour 6 escouades mesurees = une unite invisible ET intirable.
 
@@ -35,7 +45,9 @@ def test_named_actions_mirror():
     assert mi.SHOOT_SLOT_BASE == su.SQUAD_ACTION_SHOOT_SLOT_BASE
     assert mi.SHOOT_SLOT_COUNT == su.SQUAD_ACTION_SHOOT_SLOT_COUNT
     assert mi.ACTION_CHARGE == su.SQUAD_ACTION_CHARGE
-    assert mi.ACTION_FIGHT == su.SQUAD_ACTION_FIGHT
+    assert mi.FIGHT_SLOT_BASE == su.SQUAD_ACTION_FIGHT_SLOT_BASE
+    assert mi.FIGHT_SLOT_COUNT == su.SQUAD_ACTION_FIGHT_SLOT_COUNT
+    assert mi.ACTION_FIGHT_NO_TARGET == su.SQUAD_ACTION_FIGHT_NO_TARGET
 
 
 def test_zone_intent_starts_right_after_the_micro_actions():
@@ -44,13 +56,34 @@ def test_zone_intent_starts_right_after_the_micro_actions():
 
 
 def test_total_action_size():
-    assert mi.TOTAL_ACTION_SIZE == su.SQUAD_ACTION_SIZE + mi.MAX_OBJECTIVES * 3
-    assert mi.TOTAL_ACTION_SIZE == 1062
+    """L'action space se termine par les CHOICE_i du mecanisme de decision (V11 §9.3 P2)."""
+    assert mi.CHOICE_BASE == su.SQUAD_ACTION_SIZE + mi.MAX_OBJECTIVES * 3
+    assert mi.TOTAL_ACTION_SIZE == mi.CHOICE_BASE + mi.CHOICE_COUNT
+    assert mi.TOTAL_ACTION_SIZE == 1088
+
+
+def test_choice_slots_close_the_action_space():
+    """Les CHOICE ne recouvrent aucun zone intent et ferment l'espace, sans trou."""
+    assert list(mi.CHOICE_SLOTS) == list(range(mi.CHOICE_BASE, mi.TOTAL_ACTION_SIZE))
+    assert not mi.is_zone_intent_action(mi.CHOICE_BASE)
+    assert mi.is_zone_intent_action(mi.CHOICE_BASE - 1)
+    for offset in range(mi.CHOICE_COUNT):
+        assert mi.is_agent_decision_action(mi.CHOICE_BASE + offset)
+        assert mi.decode_agent_decision_action(mi.CHOICE_BASE + offset) == offset
+    assert not mi.is_agent_decision_action(mi.CHOICE_BASE - 1)
+    assert not mi.is_agent_decision_action(mi.TOTAL_ACTION_SIZE)
 
 
 def test_micro_action_ids_are_contiguous_and_unique():
     """Chaque id micro est utilisé une fois et une seule : pas de collision d'action."""
-    ids = list(mi.MOVE_CELLS) + [mi.ACTION_WAIT] + list(mi.SHOOT_SLOTS) + [mi.ACTION_CHARGE, mi.ACTION_FIGHT]
+    ids = (
+        list(mi.MOVE_CELLS)
+        + [mi.ACTION_WAIT]
+        + list(mi.SHOOT_SLOTS)
+        + [mi.ACTION_CHARGE]
+        + list(mi.FIGHT_SLOTS)
+        + [mi.ACTION_FIGHT_NO_TARGET]
+    )
     assert len(ids) == len(set(ids)), "collision d'id d'action"
     assert sorted(ids) == list(range(su.SQUAD_ACTION_SIZE)), "les ids micro ne pavent pas [0, SIZE)"
 
@@ -64,5 +97,11 @@ def test_zone_intent_decoding_roundtrip():
 
 
 def test_micro_actions_are_not_zone_intents():
-    for action in (mi.MOVE_CELL_BASE, mi.ACTION_WAIT, mi.ACTION_CHARGE, mi.ACTION_FIGHT):
+    for action in (
+        mi.MOVE_CELL_BASE,
+        mi.ACTION_WAIT,
+        mi.ACTION_CHARGE,
+        mi.FIGHT_SLOT_BASE,
+        mi.ACTION_FIGHT_NO_TARGET,
+    ):
         assert not mi.is_zone_intent_action(action)

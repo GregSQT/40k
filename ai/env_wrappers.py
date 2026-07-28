@@ -18,6 +18,7 @@ import hashlib
 import numpy as np
 from shared.data_validation import require_key, require_present
 from engine.action_decoder import ActionValidationError
+from engine.agent_decision import read_pending_agent_decision
 from engine import macro_intents as mi
 
 if TYPE_CHECKING:
@@ -311,6 +312,21 @@ class BotControlledEnv(gym.Wrapper):
             (decision_owner, has_valid_actions, eligible_count)
             - decision_owner: 1|2 when eligible units exist, None when no eligible unit
         """
+        # Décision agent en attente (V11 §9.3 P2) : le pool d'unités éligibles est vide par
+        # construction (le moteur est arrêté sur un point de choix), mais la décision APPARTIENT à
+        # un joueur — celui du prompt. Sans ce cas, le wrapper conclurait « personne ne décide »
+        # et tenterait de faire avancer une phase que la décision bloque.
+        pending_decision = read_pending_agent_decision(self.engine.game_state)
+        if pending_decision is not None:
+            action_mask = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(
+                self.engine.game_state
+            )[0]
+            return (
+                int(require_key(pending_decision, "player")),
+                bool(np.any(np.asarray(action_mask, dtype=bool))),
+                0,
+            )
+
         action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(
             self.engine.game_state
         )
@@ -914,6 +930,20 @@ class BotControlledEnv(gym.Wrapper):
     def _get_bot_action(self, debug=False) -> int:
         game_state = self.engine.game_state
         action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(game_state)
+        # Décision agent du camp BOT (V11 §9.3 P2) : le bot la joue par son propre tirage, comme
+        # tout choix qu'il ne modélise pas. C'était jusqu'ici l'action de l'AGENT qui la tranchait
+        # (`raw_action_int % len(options)`) — l'agent décidait à la place de son adversaire.
+        pending_decision = read_pending_agent_decision(game_state)
+        if pending_decision is not None:
+            choice_actions = [
+                index for index in mi.CHOICE_SLOTS if bool(action_mask[index])
+            ]
+            if not choice_actions:
+                raise RuntimeError(
+                    "BotControlledEnv: decision agent en attente sans aucune action CHOICE "
+                    "autorisee par le masque."
+                )
+            return int(random.choice(choice_actions))
         if not eligible_units:
             # Pool empty -> advance phase via WAIT/invalid action handling
             return mi.ACTION_WAIT

@@ -15,7 +15,7 @@ C'est ce qui a permis de passer les slots ennemis de 5 à 20 et de refermer §1.
 ennemie invisible et intirable dans la majorité des épisodes).
 
 **Move (V11 §0.32 T-G).** Le même défaut valait pour les **1024 logits de cellule**, soit 97 %
-de l'espace d'action : ils sortaient d'un `Linear(320 -> 1062)` dense, une ligne de poids par
+de l'espace d'action : ils sortaient du `Linear(320 -> TOTAL_ACTION_SIZE)` dense, une ligne par
 cellule, aucun partage entre deux cellules voisines, et la carte CNN aplatie avant la tête. Ils
 sortent désormais d'une **conv 1x1 sur la colonne de features de la cellule**, prise sur la
 carte NON aplatie que `SpatialCombinedExtractor` conserve à résolution 32x32. Le nombre de
@@ -39,6 +39,7 @@ logits ; la distribution, le masquage, `log_prob` et l'entropie restent ceux de 
 de référence sur un cas jouet, tir ET move.
 """
 
+from functools import partial
 from typing import Any, Optional, Tuple
 
 import numpy as np
@@ -51,15 +52,33 @@ from stable_baselines3.common.type_aliases import PyTorchObs
 
 from ai.spatial_extractor import SpatialCombinedExtractor
 from engine.macro_intents import (
+    CHOICE_BASE,
+    CHOICE_COUNT,
+    FIGHT_SLOT_BASE,
+    FIGHT_SLOT_COUNT,
     MOVE_CELL_BASE,
     MOVE_CELL_COUNT,
     SHOOT_SLOT_BASE,
     SHOOT_SLOT_COUNT,
+    TOTAL_ACTION_SIZE,
 )
 from engine.spatial_grid import GRID_CELL_COUNT, GRID_SIZE
 
 #: Largeur de la couche cachée de la tête de move, par colonne de cellule.
 MOVE_HEAD_HIDDEN = 32
+
+#: Actions produites par `action_net`, la SEULE tête dense restante : wait, charge,
+#: fight-sans-cible et les 15 intents de zone. Tout le reste vient d'une tête à poids partagés
+#: (conv 1x1 pour les cellules, pointeurs pour les slots de tir, de mêlée et les candidats de
+#: décision). Calculé, jamais écrit en dur : ajouter une famille pointée sans le décompter ici
+#: décalerait TOUS les logits qui la suivent.
+DENSE_LOGIT_COUNT = (
+    TOTAL_ACTION_SIZE
+    - MOVE_CELL_COUNT
+    - SHOOT_SLOT_COUNT
+    - FIGHT_SLOT_COUNT
+    - CHOICE_COUNT
+)
 
 
 class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
@@ -69,7 +88,8 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     `[tronc | embeddings ennemis par slot | carte de move 32x32]`. Cette policy :
     - n'alimente le tronc MLP qu'avec la partie `tronc` (ni les embeddings ni la carte n'y
       entrent : ils y seraient de nouveau aplatis, exactement ce que le chantier supprime) ;
-    - produit les logits de tir par `q · e_i` et les logits de cellule par une conv 1x1 ;
+    - produit les logits de tir ET de combat par `q · e_i` (deux requêtes, mêmes embeddings) et
+      les logits de cellule par une conv 1x1 ;
     - laisse TOUT le reste à SB3 (distribution masquée, log_prob, entropie, value net).
     """
 
@@ -100,10 +120,33 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 f"Desalignement observation/action : {extractor.n_enemy_slots} slots ennemis "
                 f"observes contre {SHOOT_SLOT_COUNT} actions de tir. C'est l'invariant D1."
             )
+        if extractor.n_enemy_slots != FIGHT_SLOT_COUNT:
+            raise ValueError(
+                f"Desalignement observation/action : {extractor.n_enemy_slots} slots ennemis "
+                f"observes contre {FIGHT_SLOT_COUNT} actions de combat. C'est l'invariant D1, "
+                f"cote melee (V11 §9 P3-1)."
+            )
         if GRID_CELL_COUNT != MOVE_CELL_COUNT:
             raise ValueError(
                 f"Desalignement grille/action : {GRID_CELL_COUNT} cellules de grille contre "
                 f"{MOVE_CELL_COUNT} actions de cellule. La tete 1x1 produit UN logit par cellule."
+            )
+        # HYPOTHÈSE D'ASSEMBLAGE de `_action_logits` — vérifiée ici, où l'erreur est explicite,
+        # plutôt que subie sous forme de logits décalés : cellules en tête, `wait` puis les slots
+        # de tir, une colonne dense (charge), les slots de mêlée, puis le reste dense, et les
+        # CHOICE en fin d'action space.
+        if (
+            MOVE_CELL_BASE != 0
+            or SHOOT_SLOT_BASE != MOVE_CELL_COUNT + 1
+            or FIGHT_SLOT_BASE != SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT + 1
+            or CHOICE_BASE != TOTAL_ACTION_SIZE - CHOICE_COUNT
+        ):
+            raise ValueError(
+                "Disposition de l'action space inattendue : l'assemblage des logits suppose "
+                f"[cellules 0..{MOVE_CELL_COUNT - 1} | wait | tir | charge | melee | dense | "
+                f"CHOICE en fin]. Recu MOVE_CELL_BASE={MOVE_CELL_BASE}, "
+                f"SHOOT_SLOT_BASE={SHOOT_SLOT_BASE}, FIGHT_SLOT_BASE={FIGHT_SLOT_BASE}, "
+                f"CHOICE_BASE={CHOICE_BASE}, TOTAL_ACTION_SIZE={TOTAL_ACTION_SIZE}."
             )
         self.trunk_dim = extractor.trunk_dim
         self.entity_dim = extractor.entity_dim
@@ -113,8 +156,16 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         # dériver de la disposition réelle sans que rien ne lève, et la tête scorerait des
         # colonnes qui ne sont pas des cellules). L'extracteur n'est pas stocké : le référencer
         # depuis la policy le ferait enregistrer une seconde fois dans le `state_dict`.
+        if extractor.n_decision_options != CHOICE_COUNT:
+            raise ValueError(
+                f"Desalignement observation/action : {extractor.n_decision_options} candidats de "
+                f"decision observes contre {CHOICE_COUNT} actions CHOICE. C'est l'invariant D1 "
+                "applique au mecanisme de decision (§9.3 P2)."
+            )
+        self.n_decision_options = extractor.n_decision_options
         self.enemy_slice = extractor.enemy_embeddings_slice()
         self.move_map_slice = extractor.move_map_slice()
+        self.decision_slice = extractor.decision_embeddings_slice()
         self.mlp_extractor = MlpExtractor(
             self.trunk_dim,
             net_arch=self.net_arch,
@@ -122,6 +173,18 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
             device=self.device,
         )
         self.query_net = nn.Linear(self.mlp_extractor.latent_dim_pi, self.entity_dim)
+        # Requete DISTINCTE pour la melee (V11 §9 P3-1). Les deux tetes lisent les MEMES
+        # embeddings d'ennemis — c'est tout l'interet du pointeur — mais « quel ennemi tirer » et
+        # « quel ennemi frapper » ne sont pas la meme question : portee, couvert et LoS pesent
+        # pour l'un, la valeur de la cible et sa capacite de riposte pour l'autre. Partager la
+        # requete forcerait un seul ordre de preference pour les deux phases ; la dupliquer coute
+        # `entity_dim x latent_dim` parametres et rien de plus (les embeddings, eux, restent
+        # partages, donc ce que le reseau apprend d'un ennemi sert aux deux tetes).
+        self.fight_query_net = nn.Linear(self.mlp_extractor.latent_dim_pi, self.entity_dim)
+        # Requête DISTINCTE pour les candidats de décision (§9.3 P2) : « quel ennemi frapper » et
+        # « quelle option choisir » sont deux questions différentes posées au même latent, et
+        # elles ne lisent même pas les mêmes embeddings (ennemis vs candidats).
+        self.choice_query_net = nn.Linear(self.mlp_extractor.latent_dim_pi, self.entity_dim)
 
         # --- Tête de move : conv 1x1 sur [colonne de la cellule | latent diffusé] -------------
         # `move_cell_net` et `move_ctx_net` sont les DEUX MOITIÉS d'une seule et même conv 1x1
@@ -144,11 +207,37 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         self.move_ctx_net = nn.Linear(self.mlp_extractor.latent_dim_pi, MOVE_HEAD_HIDDEN)
         self.move_out_net = nn.Conv2d(MOVE_HEAD_HIDDEN, 1, kernel_size=1)
 
+    def _build(self, lr_schedule: Any) -> None:
+        """Construit la policy SB3, puis RÉDUIT `action_net` aux seules colonnes qu'elle produit.
+
+        SB3 dimensionne `action_net` sur l'action space entier. Depuis T-E et T-G, 1050 de ses
+        1068 colonnes ne sont jamais lues (cellules, slots de tir) et, depuis P2, les 6 colonnes
+        CHOICE non plus : ce sont ~336 k paramètres qui ne reçoivent aucun gradient. La couche est
+        donc reconstruite ici à sa taille utile (`DENSE_LOGIT_COUNT`), AVANT la création de
+        l'optimiseur — sans quoi l'optimiseur référencerait les paramètres de l'ancienne couche.
+        L'initialisation orthogonale de SB3 (gain 0,01 sur la tête d'action) est réappliquée à
+        l'identique.
+        """
+        super()._build(lr_schedule)
+        self.action_net = nn.Linear(self.mlp_extractor.latent_dim_pi, DENSE_LOGIT_COUNT).to(
+            self.device
+        )
+        if self.ortho_init:
+            self.action_net.apply(partial(self.init_weights, gain=0.01))
+        # Même construction que `ActorCriticPolicy._build` : mêmes classe, mêmes kwargs, même
+        # learning rate initial. `lr` passe par les kwargs (et non en argument nommé) parce que la
+        # signature générique de `torch.optim.Optimizer` ne le déclare pas — SB3 y met un
+        # `type: ignore`, ici le dict évite l'exception au typage sans rien changer à l'appel.
+        optimizer_kwargs = dict(self.optimizer_kwargs)
+        optimizer_kwargs["lr"] = lr_schedule(1)
+        self.optimizer = self.optimizer_class(self.parameters(), **optimizer_kwargs)
+
     # -- découpe du vecteur de features ------------------------------------
     def _split_features(
         self, obs: PyTorchObs
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """(tronc, embeddings ennemis (B, K, d), carte de move (B, C, 32, 32)).
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """(tronc, embeddings ennemis (B, K, d), carte de move (B, C, 32, 32),
+        embeddings de candidats de décision (B, C_dec, d)).
 
         Contrat de `SpatialCombinedExtractor`, dont les tranches ont été lues au build.
         """
@@ -166,7 +255,10 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         move_map = features[:, self.move_map_slice].reshape(
             batch, self.move_map_channels, GRID_SIZE, GRID_SIZE
         )
-        return trunk, embeddings, move_map
+        decision_emb = features[:, self.decision_slice].reshape(
+            batch, self.n_decision_options, self.entity_dim
+        )
+        return trunk, embeddings, move_map, decision_emb
 
     def _move_logits(self, latent_pi: torch.Tensor, move_map: torch.Tensor) -> torch.Tensor:
         """Logits de cellule (B, 1024) — une conv 1x1 par colonne, conditionnée par le tronc.
@@ -182,33 +274,44 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         return self.move_out_net(torch.relu(hidden)).reshape(latent_pi.shape[0], MOVE_CELL_COUNT)
 
     def _action_logits(
-        self, latent_pi: torch.Tensor, embeddings: torch.Tensor, move_map: torch.Tensor
+        self,
+        latent_pi: torch.Tensor,
+        embeddings: torch.Tensor,
+        move_map: torch.Tensor,
+        decision_emb: torch.Tensor,
     ) -> torch.Tensor:
-        """Logits complets : cellules par conv 1x1, tir par `q · e_i`, le reste par `action_net`.
+        """Logits complets, assemblés dans l'ordre des ids d'action.
 
-        Les colonnes de `action_net` correspondant aux cellules de move et aux slots de tir ne
-        sont jamais lues — elles ne reçoivent donc aucun gradient et restent à leur
-        initialisation. C'est assumé : conserver `action_net` entier laisse intacts
-        l'initialisation orthogonale, la sauvegarde/reprise et le reste de la machinerie SB3.
-        Coût mesuré : ~334 k paramètres inertes (aucun gradient, donc aucun effet sur
-        l'apprentissage) et un produit matrice-vecteur 1062 colonnes au lieu de 18, soit ~3 %
-        du coût de la tête de move — sous le seuil qui justifierait de découper `action_net`.
+        Quatre têtes à poids partagés — conv 1x1 (cellules), pointeur de tir, pointeur de mêlée
+        (§9 P3-1 : deux requêtes, MÊMES embeddings d'ennemis) et pointeur de décision (candidats
+        `CHOICE_i`, §9.3 P2) — et UNE tête dense réduite à ses colonnes réellement lues
+        (`DENSE_LOGIT_COUNT` = 18) : wait, charge, fight-sans-cible, 15 intents de zone.
+
+        ⚠️ L'assemblage suit l'ordre EXACT des ids (`macro_intents`) : 0-1023 cellules, 1024 wait,
+        1025-1044 tir, 1045 charge, 1046-1065 mêlée, 1066 fight-sans-cible, 1067-1081 zone,
+        1082-1087 CHOICE. Une permutation ici ferait jouer à l'agent une action autre que celle
+        qu'il évalue, sans que rien ne lève — verrouillé par test.
         """
         base = self.action_net(latent_pi)
         move = self._move_logits(latent_pi, move_map)
-        query = self.query_net(latent_pi).unsqueeze(1)                 # (B, 1, d)
         # Mise à l'échelle 1/sqrt(d), comme une attention : sans elle, la variance des logits
         # croît avec la dimension d'embedding et la politique démarre quasi déterministe.
-        pointer = (query * embeddings).sum(dim=-1) / (self.entity_dim ** 0.5)  # (B, K)
-        move_end = MOVE_CELL_BASE + MOVE_CELL_COUNT
-        shoot_end = SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT
+        scale = self.entity_dim ** 0.5
+        query = self.query_net(latent_pi).unsqueeze(1)                 # (B, 1, d)
+        pointer = (query * embeddings).sum(dim=-1) / scale              # (B, K) — tir
+        fight_query = self.fight_query_net(latent_pi).unsqueeze(1)
+        fight_pointer = (fight_query * embeddings).sum(dim=-1) / scale  # (B, K) — mêlée
+        choice_query = self.choice_query_net(latent_pi).unsqueeze(1)
+        choice = (choice_query * decision_emb).sum(dim=-1) / scale      # (B, K_candidats)
         return torch.cat(
             [
-                base[:, :MOVE_CELL_BASE],
                 move,
-                base[:, move_end:SHOOT_SLOT_BASE],
+                base[:, :1],        # wait
                 pointer,
-                base[:, shoot_end:],
+                base[:, 1:2],       # charge
+                fight_pointer,
+                base[:, 2:],        # fight-sans-cible, intents de zone
+                choice,
             ],
             dim=1,
         )
@@ -218,10 +321,11 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         latent_pi: torch.Tensor,
         embeddings: torch.Tensor,
         move_map: torch.Tensor,
+        decision_emb: torch.Tensor,
         action_masks: Optional[np.ndarray],
     ) -> MaskableDistribution:
         distribution = self.action_dist.proba_distribution(
-            action_logits=self._action_logits(latent_pi, embeddings, move_map)
+            action_logits=self._action_logits(latent_pi, embeddings, move_map, decision_emb)
         )
         if action_masks is not None:
             distribution.apply_masking(action_masks)
@@ -234,10 +338,12 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         deterministic: bool = False,
         action_masks: Optional[np.ndarray] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        trunk, embeddings, move_map = self._split_features(obs)
+        trunk, embeddings, move_map, decision_emb = self._split_features(obs)
         latent_pi, latent_vf = self.mlp_extractor(trunk)
         values = self.value_net(latent_vf)
-        distribution = self._distribution_from(latent_pi, embeddings, move_map, action_masks)
+        distribution = self._distribution_from(
+            latent_pi, embeddings, move_map, decision_emb, action_masks
+        )
         actions = distribution.get_actions(deterministic=deterministic)
         log_prob = distribution.log_prob(actions)
         return actions, values, log_prob
@@ -245,12 +351,14 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     def get_distribution(
         self, obs: PyTorchObs, action_masks: Optional[np.ndarray] = None
     ) -> MaskableDistribution:
-        trunk, embeddings, move_map = self._split_features(obs)
+        trunk, embeddings, move_map, decision_emb = self._split_features(obs)
         latent_pi = self.mlp_extractor.forward_actor(trunk)
-        return self._distribution_from(latent_pi, embeddings, move_map, action_masks)
+        return self._distribution_from(
+            latent_pi, embeddings, move_map, decision_emb, action_masks
+        )
 
     def predict_values(self, obs: PyTorchObs) -> torch.Tensor:
-        trunk, _embeddings, _move_map = self._split_features(obs)
+        trunk, _embeddings, _move_map, _decision_emb = self._split_features(obs)
         return self.value_net(self.mlp_extractor.forward_critic(trunk))
 
     def evaluate_actions(
@@ -262,7 +370,9 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         """⚠️ Ordre de retour SB3 : (values, log_prob, entropy) — l'inverser sabote la mise à
         jour PPO en silence (le ratio et l'avantage seraient calculés sur les mauvaises
         quantités). Verrouillé par `test_pointer_head.py`."""
-        trunk, embeddings, move_map = self._split_features(obs)
+        trunk, embeddings, move_map, decision_emb = self._split_features(obs)
         latent_pi, latent_vf = self.mlp_extractor(trunk)
-        distribution = self._distribution_from(latent_pi, embeddings, move_map, action_masks)
+        distribution = self._distribution_from(
+            latent_pi, embeddings, move_map, decision_emb, action_masks
+        )
         return self.value_net(latent_vf), distribution.log_prob(actions), distribution.entropy()

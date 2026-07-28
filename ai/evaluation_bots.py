@@ -49,6 +49,26 @@ def _first_action_in(valid_actions, action_ids):
     return None
 
 
+def _first_fight_action_in(valid_actions):
+    """Action de combat du bot : cible de MELEE la plus menaçante, sinon combat à vide.
+
+    V11 §9 P3-1 — la cible de mêlée est devenue une dimension d'action (un slot ennemi), comme
+    le tir. Les slots étant attribués par menace décroissante (`_enemy_threat_order`), prendre le
+    premier slot ouvert vaut « frapper la cible la plus menaçante » : c'est EXACTEMENT
+    l'heuristique que ces bots appliquent déjà au tir (`_first_action_in(mi.SHOOT_SLOTS)`).
+
+    ⚠️ Le bot ne passe plus par `_ai_select_fight_target` (lowest HP puis menace, via
+    RewardMapper) : le moteur ne choisit plus de cible en gym. Changement de comportement ASSUMÉ
+    des bots d'évaluation — les win-rates d'avant cette tranche ne sont pas comparables.
+    """
+    fight = _first_action_in(valid_actions, mi.FIGHT_SLOTS)
+    if fight is not None:
+        return fight
+    if mi.ACTION_FIGHT_NO_TARGET in valid_actions:
+        return mi.ACTION_FIGHT_NO_TARGET
+    return None
+
+
 # --- Heuristiques de destination (refonte spatiale du move, spec §T4) --------
 # En move spatial, le TYPE de move (normal/advance/fall_back) est INFERE du cout geodesique par
 # le moteur (shared_utils.infer_squad_move_type) : le bot ne choisit plus qu'une DESTINATION
@@ -531,8 +551,9 @@ class ControlBot:
                 return mi.ACTION_CHARGE
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
         if phase == "fight":
-            if mi.ACTION_FIGHT in valid_actions:
-                return mi.ACTION_FIGHT
+            fight = _first_fight_action_in(valid_actions)
+            if fight is not None:
+                return fight
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         return valid_actions[0]
@@ -786,8 +807,9 @@ class AggressiveSmartBot:
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         if phase == "fight":
-            if mi.ACTION_FIGHT in valid_actions:
-                return mi.ACTION_FIGHT
+            fight = _first_fight_action_in(valid_actions)
+            if fight is not None:
+                return fight
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         return valid_actions[0]
@@ -883,8 +905,9 @@ class DefensiveSmartBot:
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         if phase == "fight":
-            if mi.ACTION_FIGHT in valid_actions:
-                return mi.ACTION_FIGHT
+            fight = _first_fight_action_in(valid_actions)
+            if fight is not None:
+                return fight
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         return valid_actions[0]
@@ -979,8 +1002,9 @@ class AdaptiveBot:
         if phase == "charge":
             return self._charge(valid_actions, posture)
         if phase == "fight":
-            if mi.ACTION_FIGHT in valid_actions:
-                return mi.ACTION_FIGHT
+            fight = _first_fight_action_in(valid_actions)
+            if fight is not None:
+                return fight
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         return valid_actions[0]
@@ -1115,8 +1139,9 @@ class TacticalBot:
                 return shoot
             if mi.ACTION_CHARGE in valid_actions:  # Charge
                 return mi.ACTION_CHARGE
-            if mi.ACTION_FIGHT in valid_actions:  # Fight
-                return mi.ACTION_FIGHT
+            fight = _first_fight_action_in(valid_actions)  # Fight
+            if fight is not None:
+                return fight
             return valid_actions[0]
 
     def _select_move_action(self, valid_actions: List[int], game_state: Optional[Dict]) -> int:
@@ -1159,8 +1184,9 @@ class TacticalBot:
 
     def _select_fight_action(self, valid_actions: List[int], game_state: Optional[Dict]) -> int:
         """Fight phase: always fight when in melee."""
-        if mi.ACTION_FIGHT in valid_actions:  # Fight
-            return mi.ACTION_FIGHT
+        fight = _first_fight_action_in(valid_actions)  # Fight
+        if fight is not None:
+            return fight
         if WAIT_ACTION in valid_actions:  # Wait
             return WAIT_ACTION
         return valid_actions[0] if valid_actions else WAIT_ACTION

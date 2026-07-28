@@ -334,7 +334,7 @@ engine/
 **Action Space — ⚠️ PÉRIMÉ, corrigé le 2026-07-26 (vérifié dans le code) :**
 
 Le layout « 12 actions » décrit ci-dessous n'existe plus. L'espace d'action réel vaut
-**1 062** actions (`engine/macro_intents.py::TOTAL_ACTION_SIZE`, miroir verrouillé par
+**1 088** actions (`engine/macro_intents.py::TOTAL_ACTION_SIZE`, miroir verrouillé par
 `tests/unit/engine/test_action_space_mirror.py`) :
 
 - **0-1023** : destination = cellule de la grille égocentrique 32×32 (le TYPE de move —
@@ -343,7 +343,11 @@ Le layout « 12 actions » décrit ci-dessous n'existe plus. L'espace d'action r
 - **1025-1044** : tir sur le slot ennemi 0-19 (20 slots depuis V11 §0.30 T-E ; les logits
   viennent d'une tête pointeur, `ai/pointer_policy.py`) ;
 - **1045** : charge · **1046** : fight ;
-- **1047-1061** : zone intents (5 objectifs × 3 intentions).
+- **1047-1061** : zone intents (5 objectifs × 3 intentions) ;
+- **1082-1087** : `CHOICE_0..5` — candidats de la **décision agent** (V11 §9.3 P2). Elles sont
+  EXCLUSIVES : quand `game_state["pending_agent_decision"]` est posée, le masque n'expose que les
+  `CHOICE_i` des candidats réels et le pool d'unités éligibles est vide, le moteur étant arrêté
+  sur un point de choix joueur (miroir du `waiting_for_player` PvP).
 
 Le masque est construit par `build_squad_action_mask` (`shared_utils`), source unique partagée
 avec le décodeur.

@@ -61,6 +61,18 @@ UNIT_CONT_FIELDS: Tuple[str, ...] = (
     "n_fight_eligible",    # ⚠ unité ACTIVE uniquement (masque = is_active)
     "n_in_enemy_ez",       # ⚠ unité ACTIVE uniquement
     "n_relayed_ez",        # ⚠ unité ACTIVE uniquement
+    # ⚠ Entités ENNEMIES uniquement (comme `los_can_see` / `cover_vs_observer`) : c'est une
+    # grandeur de PAIRE (mon escouade → cette cible), pas une propriété de la cible.
+    #
+    # Combien de MES figurines vivantes sont engagées avec cette escouade (04.02), donc
+    # combien peuvent réellement porter des attaques contre elle. V11 §9 P3-1 a fait de la
+    # cible de mêlée une décision de l'agent ; sans ce champ, la tête pointeur choisirait
+    # une cible sans savoir avec quelle FORCE elle serait frappée — or c'est le premier
+    # facteur du choix : engagée par 8 figurines ou par 1, la même cible ne vaut pas la même
+    # chose. `n_fight_eligible` ne le dit pas : il agrège sur toutes les cibles à la fois.
+    # `edge_distance` non plus : la distance à l'escouade ne dit rien du nombre de figurines
+    # qui atteignent l'ennemi (05.03/04.02 s'évaluent par figurine, pas par ancre).
+    "n_models_engaging",
 )
 
 #: Règles d'UNITÉ (`config/unit_rules.json`) exposées à l'agent, dans l'ordre d'émission.
@@ -222,6 +234,82 @@ def self_model_bin_index(field: str) -> int:
             f"Drapeau de figurine inconnu : {field!r}. Champs : {SELF_MODEL_BIN_FIELDS}"
         )
     return _SELF_MODEL_BIN_INDEX[field]
+
+
+# ---------------------------------------------------------------------------
+# Décision agent (V11 §9.3 — P2, mécanisme générique « décision agent »)
+# ---------------------------------------------------------------------------
+
+#: Types de points de décision exposés à l'agent, ordre FIGÉ du one-hot de contexte.
+#: Une seule entrée aujourd'hui (`rule_choice`, le pilote P3 point 0) ; les tranches P3
+#: suivantes (cible de mêlée, allocation de pertes…) s'ajoutent ICI, jamais en dupliquant le
+#: mécanisme. Ajouter un type change `DECISION_CTX_BIN_SIZE`, donc `obs_size` : retrain `--new`.
+AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice",)
+
+#: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
+#: (`macro_intents.CHOICE_SLOTS`). Il vaut 6, l'alignement retenu par §9.3 sur les 6 slots
+#: figurines. ⚠️ Ce n'est PAS une troncature silencieuse : une décision qui présenterait plus de
+#: K candidats LÈVE (`agent_decision.set_pending_agent_decision`), conformément à la réserve 2 de
+#: §9.0bis — une décision à grand espace se paramètre en INTENTIONS scorées, pas en top-K tronqué.
+MAX_DECISION_OPTIONS = 6
+
+#: Contexte de la décision (ce qui n'appartient à aucun candidat). Discret : jamais normalisé.
+#: `decision_pending` vaut 0 tant qu'aucune décision n'est en attente POUR L'OBSERVATEUR — c'est
+#: le masque du bloc entier, et l'unique bit qui distingue « pas de décision » de « décision de
+#: type 0 ». Le nombre de candidats n'y figure pas : il est porté, candidat par candidat, par le
+#: masque `present` du registre ci-dessous.
+DECISION_CTX_BIN_FIELDS: Tuple[str, ...] = ("decision_pending",) + tuple(
+    f"decision_type_{decision_type}" for decision_type in AGENT_DECISION_TYPE_IDS
+)
+
+#: Un CANDIDAT de décision, MÊME schéma pour tous les types (comme une unité, cf. §3.3) : c'est
+#: ce qui permet à un encodeur PARTAGÉ de le lire et à la tête pointeur de le scorer, donc au
+#: réseau de généraliser d'un slot de candidat à l'autre.
+#:
+#: Pour `rule_choice`, un candidat EST la règle qu'il accorde : le décrire par le one-hot de son
+#: effet (le MÊME vocabulaire `UNIT_RULE_EFFECT_IDS` que les drapeaux `rule_*` d'unité, §0.31)
+#: dit à l'agent CE QU'IL GAGNE. Un index de candidat, lui, ne dit rien : l'ordre des options
+#: dépend du prompt.
+#:
+#: Aucun champ CONTINU n'existe aujourd'hui : `rule_choice` n'a aucune grandeur continue à
+#: décrire, et en inventer une, remplie de zéros, serait une valeur par défaut sans signifiant.
+#: Les tranches P3 qui en auront besoin (distance d'une destination, dégâts attendus sur une
+#: cible) ouvriront un registre `DECISION_OPTION_CONT_FIELDS` à ce moment-là.
+DECISION_OPTION_BIN_FIELDS: Tuple[str, ...] = tuple(
+    f"grants_{rule_id}" for rule_id in UNIT_RULE_EFFECT_IDS
+) + (
+    "present",  # masque de candidat (0 = slot vide) — DERNIER, convention uniforme §0.37
+)
+
+DECISION_CTX_BIN_SIZE = len(DECISION_CTX_BIN_FIELDS)
+DECISION_OPTION_BIN_SIZE = len(DECISION_OPTION_BIN_FIELDS)
+
+_DECISION_CTX_BIN_INDEX: Dict[str, int] = {
+    name: i for i, name in enumerate(DECISION_CTX_BIN_FIELDS)
+}
+_DECISION_OPTION_BIN_INDEX: Dict[str, int] = {
+    name: i for i, name in enumerate(DECISION_OPTION_BIN_FIELDS)
+}
+
+
+def decision_ctx_bin_index(field: str) -> int:
+    """Index d'un drapeau de contexte de décision. Nom inconnu -> KeyError explicite."""
+    if field not in _DECISION_CTX_BIN_INDEX:
+        raise KeyError(
+            f"Drapeau de contexte de décision inconnu : {field!r}. "
+            f"Champs : {DECISION_CTX_BIN_FIELDS}"
+        )
+    return _DECISION_CTX_BIN_INDEX[field]
+
+
+def decision_option_bin_index(field: str) -> int:
+    """Index d'un drapeau de candidat de décision. Nom inconnu -> KeyError explicite."""
+    if field not in _DECISION_OPTION_BIN_INDEX:
+        raise KeyError(
+            f"Drapeau de candidat de décision inconnu : {field!r}. "
+            f"Champs : {DECISION_OPTION_BIN_FIELDS}"
+        )
+    return _DECISION_OPTION_BIN_INDEX[field]
 
 
 # ---------------------------------------------------------------------------

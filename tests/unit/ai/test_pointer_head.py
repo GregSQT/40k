@@ -37,9 +37,16 @@ from sb3_contrib.common.maskable.distributions import MaskableCategorical
 
 from ai.pointer_policy import PointerMaskablePolicy
 from ai.spatial_extractor import SpatialCombinedExtractor
+from ai.pointer_policy import DENSE_LOGIT_COUNT
 from engine.macro_intents import (
+    ACTION_CHARGE,
+    ACTION_WAIT,
+    CHOICE_BASE,
+    CHOICE_COUNT,
     MOVE_CELL_BASE,
     MOVE_CELL_COUNT,
+    FIGHT_SLOT_BASE,
+    FIGHT_SLOT_COUNT,
     SHOOT_SLOT_BASE,
     SHOOT_SLOT_COUNT,
     TOTAL_ACTION_SIZE,
@@ -47,9 +54,10 @@ from engine.macro_intents import (
 from engine.observation_builder import ObservationBuilder
 from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE, cell_index
 
-from engine.observation_entities import unit_bin_index
+from engine.observation_entities import decision_option_bin_index, unit_bin_index
 
 _UNIT_PRESENT = unit_bin_index("present")
+_OPTION_PRESENT = decision_option_bin_index("present")
 
 
 def _space() -> gym.spaces.Dict:
@@ -88,6 +96,10 @@ def _zero_obs(batch: int = 2) -> Dict[str, np.ndarray]:
     obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0        # unité active présente
     obs["enemies_bin"][:, :3, _UNIT_PRESENT] = 1.0      # trois ennemis présents
     obs["enemies_cont"][:, :3, 0] = 5.0
+    # Deux candidats de decision presents (§9.3 P2) : le jumeau exact des slots ennemis.
+    obs["decision_options_bin"][:, :2, _OPTION_PRESENT] = 1.0
+    obs["decision_options_bin"][:, 0, 0] = 1.0
+    obs["decision_options_bin"][:, 1, 1] = 1.0
     return obs
 
 
@@ -110,21 +122,29 @@ def model() -> MaskablePPO:
 
 def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
     """Recalcul indépendant : (logits attendus, logits du pointeur seul, latent_pi)."""
-    trunk, embeddings, move_map = policy._split_features(obs)
+    trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
     latent_pi = policy.mlp_extractor.forward_actor(trunk)
     base = policy.action_net(latent_pi)
+    scale = policy.entity_dim ** 0.5
     query = policy.query_net(latent_pi)
-    pointer = torch.einsum("bd,bkd->bk", query, embeddings) / (policy.entity_dim ** 0.5)
+    pointer = torch.einsum("bd,bkd->bk", query, embeddings) / scale
+    # V11 §9 P3-1 : seconde requete, memes embeddings -> logits de CIBLE DE MELEE.
+    fight_query = policy.fight_query_net(latent_pi)
+    fight_pointer = torch.einsum("bd,bkd->bk", fight_query, embeddings) / scale
+    # V11 §9.3 P2 : troisieme requete, embeddings de CANDIDATS -> logits CHOICE_i.
+    choice = torch.einsum(
+        "bd,bkd->bk", policy.choice_query_net(latent_pi), decision_emb
+    ) / scale
     move = policy._move_logits(latent_pi, move_map)
-    move_end = MOVE_CELL_BASE + MOVE_CELL_COUNT
-    end = SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT
     expected = torch.cat(
         [
-            base[:, :MOVE_CELL_BASE],
             move,
-            base[:, move_end:SHOOT_SLOT_BASE],
+            base[:, :1],        # wait
             pointer,
-            base[:, end:],
+            base[:, 1:2],       # charge
+            fight_pointer,
+            base[:, 2:],        # fight-sans-cible, intents de zone
+            choice,
         ],
         dim=1,
     )
@@ -138,18 +158,15 @@ def test_shoot_logits_come_from_the_dot_product(model):
     obs = _tensors(_zero_obs())
     with torch.no_grad():
         expected, _pointer, latent_pi = _manual_logits(policy, obs)
-        trunk, embeddings, move_map = policy._split_features(obs)
+        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
         produced = policy._action_logits(
-            policy.mlp_extractor.forward_actor(trunk), embeddings, move_map
+            policy.mlp_extractor.forward_actor(trunk), embeddings, move_map, decision_emb
         )
     assert torch.allclose(produced, expected, atol=1e-6)
-    # Le segment entre le move et le tir (l'action `wait`) n'a pas été touché.
-    move_end = MOVE_CELL_BASE + MOVE_CELL_COUNT
+    # L'action `wait`, entre le move et le tir, vient bien de la PREMIERE colonne dense.
     with torch.no_grad():
         base = policy.action_net(latent_pi)
-    assert torch.allclose(
-        produced[:, move_end:SHOOT_SLOT_BASE], base[:, move_end:SHOOT_SLOT_BASE], atol=1e-6
-    )
+    assert torch.allclose(produced[:, ACTION_WAIT], base[:, 0], atol=1e-6)
 
 
 def test_pointer_matches_a_dense_reference_head(model):
@@ -162,9 +179,9 @@ def test_pointer_matches_a_dense_reference_head(model):
     policy.set_training_mode(False)
     obs = _tensors(_zero_obs(batch=1))
     with torch.no_grad():
-        trunk, embeddings, move_map = policy._split_features(obs)
+        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
         latent_pi = policy.mlp_extractor.forward_actor(trunk)
-        pointer = policy._action_logits(latent_pi, embeddings, move_map)[
+        pointer = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)[
             :, SHOOT_SLOT_BASE:SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT
         ]
 
@@ -181,7 +198,7 @@ def test_pointer_matches_a_dense_reference_head(model):
     # … et les grandeurs que PPO consomme sont identiques des deux côtés.
     masks = np.ones((1, TOTAL_ACTION_SIZE), dtype=bool)
     with torch.no_grad():
-        full = policy._action_logits(latent_pi, embeddings, move_map)
+        full = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
         reference = torch.cat(
             [
                 full[:, :SHOOT_SLOT_BASE],
@@ -190,7 +207,9 @@ def test_pointer_matches_a_dense_reference_head(model):
             ],
             dim=1,
         )
-        dist_pointer = policy._distribution_from(latent_pi, embeddings, move_map, masks)
+        dist_pointer = policy._distribution_from(
+            latent_pi, embeddings, move_map, decision_emb, masks
+        )
         ref_dist = MaskableCategorical(logits=reference, masks=masks)
         actions = torch.arange(TOTAL_ACTION_SIZE)
         for a in (0, SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + 2, TOTAL_ACTION_SIZE - 1):
@@ -232,15 +251,17 @@ def test_pointer_logit_is_slot_local(model):
     policy.set_training_mode(False)
     obs = _tensors(_zero_obs(batch=1))
     with torch.no_grad():
-        trunk, embeddings, move_map = policy._split_features(obs)
+        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
         latent_pi = policy.mlp_extractor.forward_actor(trunk)
-        before = policy._action_logits(latent_pi, embeddings, move_map)
+        before = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
         perturbed = embeddings.clone()
         perturbed[:, 1] += 1.0
-        after = policy._action_logits(latent_pi, perturbed, move_map)
+        after = policy._action_logits(latent_pi, perturbed, move_map, decision_emb)
     diff = (after - before).abs()[0]
     changed = torch.nonzero(diff > 1e-6).flatten().tolist()
-    assert changed == [SHOOT_SLOT_BASE + 1], f"logits deplaces : {changed[:5]}"
+    # Le slot 1 pilote DEUX logits depuis §9 P3-1 : « tirer sur lui » et « le frapper ». Les deux
+    # sortent du MEME embedding, par deux requetes distinctes — c'est le partage recherche.
+    assert changed == [SHOOT_SLOT_BASE + 1, FIGHT_SLOT_BASE + 1], f"logits deplaces : {changed[:5]}"
 
 
 def test_evaluate_actions_returns_values_log_prob_entropy(model):
@@ -283,6 +304,9 @@ def test_learning_step_runs_end_to_end(model):
     assert model.policy.query_net.weight.grad is not None, (
         "la matrice de requete du pointeur ne recoit PAS de gradient"
     )
+    assert model.policy.choice_query_net.weight.grad is not None, (
+        "la requete du pointeur de DECISION ne recoit PAS de gradient (§9.3 P2)"
+    )
     # T-G : les trois modules de la tête de move sont dans le graphe eux aussi. Une tête
     # branchée « à côté » (logits recalculés puis écrasés par `action_net`) passerait tous les
     # tests de forme et n'apprendrait jamais.
@@ -310,8 +334,8 @@ def _grid_spike_move_logits(policy, gx: int, gy: int, channel: int = 0):
     spiked = {k: v.clone() for k, v in obs.items()}
     spiked["grid"][:, channel, gy, gx] = 1.0     # indexation [canal, gy, gx] du builder
     with torch.no_grad():
-        trunk, _emb, move_map = policy._split_features(obs)
-        _trunk, _emb2, spiked_map = policy._split_features(spiked)
+        trunk, _emb, move_map, _dec = policy._split_features(obs)
+        _trunk, _emb2, spiked_map, _dec2 = policy._split_features(spiked)
         latent_pi = policy.mlp_extractor.forward_actor(trunk)
         return (
             policy._move_logits(latent_pi, move_map),
@@ -336,12 +360,12 @@ def test_move_logit_is_cell_local(model):
     obs = _tensors(_zero_obs(batch=1))
     gx, gy = 5, 20
     with torch.no_grad():
-        trunk, embeddings, move_map = policy._split_features(obs)
+        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
         latent_pi = policy.mlp_extractor.forward_actor(trunk)
-        before = policy._action_logits(latent_pi, embeddings, move_map)
+        before = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
         perturbed = move_map.clone()
         perturbed[:, :, gy, gx] += 5.0
-        after = policy._action_logits(latent_pi, embeddings, perturbed)
+        after = policy._action_logits(latent_pi, embeddings, perturbed, decision_emb)
     diff = (after - before).abs()[0]
     changed = torch.nonzero(diff > 1e-6).flatten().tolist()
     assert changed == [MOVE_CELL_BASE + cell_index(gx, gy)], (
@@ -385,7 +409,7 @@ def test_move_head_matches_the_naive_broadcast_reference(model):
     policy.set_training_mode(False)
     obs = _tensors(_zero_obs(batch=2))
     with torch.no_grad():
-        trunk, _embeddings, move_map = policy._split_features(obs)
+        trunk, _embeddings, move_map, _decision_emb = policy._split_features(obs)
         latent_pi = policy.mlp_extractor.forward_actor(trunk)
         produced = policy._move_logits(latent_pi, move_map)
 
@@ -429,7 +453,7 @@ def test_trunk_context_reorders_the_cells_it_is_not_a_uniform_shift(model):
     policy.set_training_mode(False)
     obs = _tensors(_zero_obs(batch=1))
     with torch.no_grad():
-        trunk, _embeddings, move_map = policy._split_features(obs)
+        trunk, _embeddings, move_map, _decision_emb = policy._split_features(obs)
         latent_pi = policy.mlp_extractor.forward_actor(trunk)
         # Une carte NON dégénérée : sinon toutes les cellules sont identiques et aucune tête,
         # même correcte, ne pourrait les réordonner.
@@ -470,24 +494,99 @@ def test_move_head_costs_nothing_per_cell(model):
             )
 
 
-def test_move_logits_do_not_come_from_action_net(model):
-    """Les colonnes `move` de `action_net` sont MORTES : les toucher ne doit rien changer.
+def test_action_net_has_no_dead_column(model):
+    """`action_net` est réduit à ses colonnes VIVES (V11 §9.3 P2 : `Linear(latent, 18)`).
 
-    Symétrique du contrat du pointeur de tir. Si la tête 1x1 était branchée « à côté » et que
-    `action_net` reprenait la main, ce test le verrait immédiatement.
+    Avant P2, la couche était dimensionnée sur l'action space entier et 1050 de ses colonnes ne
+    recevaient aucun gradient — ~336 k paramètres inertes. Ce test verrouille les deux moitiés de
+    la propriété : la taille EST celle des actions denses, et CHACUNE de ces colonnes déplace
+    réellement le logit qu'elle est censée produire (une colonne morte signalerait un assemblage
+    qui l'ignore).
+    """
+    policy = model.policy
+    policy.set_training_mode(False)
+    assert policy.action_net.out_features == DENSE_LOGIT_COUNT
+    # Les ids denses, dans l'ordre : wait, charge, puis tout ce qui suit les slots de melee
+    # (fight-sans-cible + intents de zone) jusqu'aux CHOICE.
+    dense_action_ids = (
+        [ACTION_WAIT, ACTION_CHARGE]
+        + list(range(FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT, CHOICE_BASE))
+    )
+    assert len(dense_action_ids) == DENSE_LOGIT_COUNT
+    obs = _tensors(_zero_obs(batch=1))
+    with torch.no_grad():
+        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
+        latent_pi = policy.mlp_extractor.forward_actor(trunk)
+    # Logits BRUTS : ceux de la distribution sont renormalisés, donc TOUS bougent des qu'un seul
+    # change — la localité y serait invisible.
+    for column, action_id in enumerate(dense_action_ids):
+        with torch.no_grad():
+            before = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+            policy.action_net.bias[column].add_(10.0)
+            after = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+            policy.action_net.bias[column].sub_(10.0)
+        moved = torch.nonzero((after - before).abs()[0] > 1e-6).flatten().tolist()
+        assert moved == [action_id], (
+            f"la colonne dense {column} devait deplacer la seule action {action_id}, "
+            f"elle a deplace {moved[:5]}"
+        )
+
+
+# ======================================================================================
+# P2 — tête pointeur de DÉCISION : les candidats de `pending_agent_decision` (V11 §9.3)
+# ======================================================================================
+
+
+def test_choice_logits_come_from_the_decision_pointer(model):
+    """Les logits `CHOICE_i` SONT `q_choice · c_i / sqrt(d)`, pas des colonnes denses.
+
+    Même raison que pour le tir : l'option `i` d'un prompt n'a rien à voir avec l'option `i` d'un
+    autre, donc une ligne de poids par slot n'aurait RIEN à généraliser.
     """
     policy = model.policy
     policy.set_training_mode(False)
     obs = _tensors(_zero_obs(batch=1))
-    move_end = MOVE_CELL_BASE + MOVE_CELL_COUNT
     with torch.no_grad():
-        before = policy.get_distribution(obs).distribution.logits
-        policy.action_net.weight[MOVE_CELL_BASE:move_end].add_(10.0)
-        policy.action_net.bias[MOVE_CELL_BASE:move_end].add_(10.0)
-        after = policy.get_distribution(obs).distribution.logits
-    assert torch.allclose(before, after, atol=1e-6), (
-        "les logits de cellule bougent avec `action_net` : la tete dense est encore en service"
+        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
+        latent_pi = policy.mlp_extractor.forward_actor(trunk)
+        produced = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+        expected = torch.einsum(
+            "bd,bkd->bk", policy.choice_query_net(latent_pi), decision_emb
+        ) / (policy.entity_dim ** 0.5)
+    assert torch.allclose(
+        produced[:, CHOICE_BASE:CHOICE_BASE + CHOICE_COUNT], expected, atol=1e-6
     )
+
+
+def test_choice_logit_is_candidate_local(model):
+    """⚠️ TEST D'ALIGNEMENT `CHOICE_i` <-> candidat `i`.
+
+    L'ordre des candidats est CONTRACTUEL (§9.6) : `decision_options_bin[i]` décrit le candidat
+    que joue `CHOICE_i`. Une permutation ici ferait appliquer au moteur une option autre que celle
+    que l'agent a évaluée, sans que rien ne lève.
+    """
+    policy = model.policy
+    policy.set_training_mode(False)
+    obs = _tensors(_zero_obs(batch=1))
+    with torch.no_grad():
+        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
+        latent_pi = policy.mlp_extractor.forward_actor(trunk)
+        before = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+        perturbed = decision_emb.clone()
+        perturbed[:, 1] += 1.0
+        after = policy._action_logits(latent_pi, embeddings, move_map, perturbed)
+    changed = torch.nonzero((after - before).abs()[0] > 1e-6).flatten().tolist()
+    assert changed == [CHOICE_BASE + 1], f"logits deplaces : {changed[:5]}"
+
+
+def test_choice_head_costs_nothing_per_candidate(model):
+    """Le nombre de candidats est GRATUIT en paramètres : aucun poids n'est indexé par le slot."""
+    policy = model.policy
+    for module in (policy.choice_query_net, policy.features_extractor.decision_encoder):
+        for parameter in module.parameters():
+            assert CHOICE_COUNT not in tuple(parameter.shape), (
+                "un parametre de la tete de decision est dimensionne par le nombre de candidats"
+            )
 
 
 def test_pointer_requires_the_entity_extractor():

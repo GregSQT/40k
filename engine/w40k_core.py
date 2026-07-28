@@ -48,6 +48,12 @@ from engine.action_decoder import ActionDecoder
 from engine.reward_calculator import RewardCalculator
 from engine.game_state import GameStateManager
 from engine.macro_intents import INTENT_INVADE, MAX_OBJECTIVES, is_zone_intent_action, decode_zone_intent_action, get_nearest_objective_zone
+from engine.agent_decision import (
+    clear_pending_agent_decision,
+    initialize_agent_decision_state,
+    read_pending_agent_decision,
+    set_pending_agent_decision,
+)
 from engine.pve_controller import PvEController
 
 from typing import TYPE_CHECKING
@@ -1627,8 +1633,7 @@ class W40KEngine(gym.Env):
                 )
             self.game_state["_deployment_random_mix_forced_steps"] = forced_steps + 1
         
-        # Normalize raw action once and keep it in game_state for deterministic
-        # policy-driven rule-choice resolution in gym training mode.
+        # Normalize raw action once.
         if self.game_state.get("debug_mode", False):
             print(
                 "[TRAIN DEBUG] W40KEngine.step before normalize_action_input "
@@ -1647,7 +1652,6 @@ class W40KEngine(gym.Env):
                 f"phase={self.game_state.get('phase', '?')} action_int={action_int}",
                 flush=True,
             )
-        self.game_state["_last_raw_action_int"] = action_int
 
         # Convert gym integer action to semantic action (reuse precomputed mask+eligible_units)
         if self.game_state.get("debug_mode", False):
@@ -2221,6 +2225,7 @@ class W40KEngine(gym.Env):
 
     def _initialize_rule_choice_runtime_state(self) -> None:
         """Initialize in-memory state for timing-based rule choices."""
+        initialize_agent_decision_state(self.game_state)
         if "pending_rule_choice_queue" not in self.game_state:
             self.game_state["pending_rule_choice_queue"] = []
         if "active_rule_choice_prompt" not in self.game_state:
@@ -2525,6 +2530,109 @@ class W40KEngine(gym.Env):
                 return
         raise KeyError(f"Rule '{rule_id}' not found in UNIT_RULES for unit {unit_id}")
 
+    def _push_rule_choice_agent_decision(self, prompt: Dict[str, Any]) -> Dict[str, Any]:
+        """Expose un prompt de rule choice à l'agent (V11 §9.3 P2) et rend la main.
+
+        Miroir EXACT du `waiting_for_player` PvP : le moteur s'arrête sur le point de choix au
+        lieu de le trancher pour l'agent. L'ordre des candidats est celui du prompt — donc celui
+        de `grants_rule_ids` dans la datasheet, STABLE d'un step à l'autre (contrat §9.6).
+
+        Remplace `raw_action_int % len(options)` (§9.4 point 0) : l'agent « choisissait » via une
+        action émise pour tout autre chose, sans voir le prompt.
+        """
+        options = require_key(prompt, "options")
+        if not isinstance(options, list) or not options:
+            raise ValueError(f"Agent rule choice requires non-empty options list, got: {options!r}")
+
+        decision_options: List[Dict[str, Any]] = []
+        for option in options:
+            display_rule_id = require_key(option, "display_rule_id")
+            technical_rule_id = require_key(option, "technical_rule_id")
+            decision_options.append(
+                {
+                    "label": require_key(option, "label"),
+                    # Ce que le candidat ACCORDE, dans le vocabulaire d'observation des règles
+                    # d'unité (§0.31) : c'est la seule description qui ait un sens pour l'agent.
+                    "effect_ids": (str(technical_rule_id),),
+                    "payload": {"display_rule_id": str(display_rule_id)},
+                }
+            )
+        set_pending_agent_decision(
+            self.game_state,
+            decision_type="rule_choice",
+            player=int(require_key(prompt, "player")),
+            unit_id=str(require_key(prompt, "unit_id")),
+            options=decision_options,
+        )
+        return {
+            "action": "waiting_for_agent_decision",
+            "waiting_for_player": True,
+            "decision_type": "rule_choice",
+            "rule_choice_prompt": prompt,
+            "unitId": require_key(prompt, "unit_id"),
+            "player": int(require_key(prompt, "player")),
+        }
+
+    def _handle_agent_decision_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """Applique le candidat choisi par l'agent (action `CHOICE_i`), puis reprend le moteur."""
+        decision = read_pending_agent_decision(self.game_state)
+        if decision is None:
+            return False, {"error": "no_pending_agent_decision"}
+        option_index = require_key(action, "option_index")
+        if not isinstance(option_index, int) or isinstance(option_index, bool):
+            raise TypeError(
+                f"agent_decision requiert un 'option_index' entier, recu {option_index!r}"
+            )
+        options = require_key(decision, "options")
+        if option_index < 0 or option_index >= len(options):
+            raise ValueError(
+                f"agent_decision: candidat {option_index} hors des {len(options)} candidats "
+                "— le masque n'aurait pas du l'autoriser"
+            )
+        decision_type = require_key(decision, "type")
+        selected_option = options[option_index]
+
+        if decision_type != "rule_choice":
+            raise NotImplementedError(
+                f"agent_decision: type '{decision_type}' declare mais sans application moteur. "
+                "Chaque type ajoute a AGENT_DECISION_TYPE_IDS doit etre branche ICI."
+            )
+
+        queue = require_key(self.game_state, "pending_rule_choice_queue")
+        if not isinstance(queue, list) or not queue:
+            raise RuntimeError(
+                "agent_decision: decision 'rule_choice' en attente alors que la file de prompts "
+                "est vide — l'etat de choix a ete efface sans effacer la decision."
+            )
+        prompt = queue[0]
+        if str(require_key(prompt, "unit_id")) != str(require_key(decision, "unit_id")):
+            raise RuntimeError(
+                f"agent_decision: la decision porte sur l'unite {decision['unit_id']} mais la file "
+                f"presente {prompt['unit_id']} — les deux etats ont divergé."
+            )
+        selected_display_rule_id = require_key(
+            require_key(selected_option, "payload"), "display_rule_id"
+        )
+        self._apply_rule_choice_selection(prompt, selected_display_rule_id)
+        queue.pop(0)
+        clear_pending_agent_decision(self.game_state)
+
+        # Un même événement peut avoir empilé plusieurs prompts : le suivant repose immédiatement
+        # une décision, et le moteur rend de nouveau la main.
+        next_prompt_result = self._emit_next_rule_choice_prompt_if_needed()
+        if next_prompt_result is not None:
+            return True, next_prompt_result
+        return True, {
+            "action": "agent_decision",
+            "waiting_for_player": False,
+            "decision_type": decision_type,
+            "unitId": require_key(decision, "unit_id"),
+            "player": int(require_key(decision, "player")),
+            "option_index": option_index,
+            "selectedRuleId": selected_display_rule_id,
+            "success": True,
+        }
+
     def _select_ai_rule_choice_option(self, prompt: Dict[str, Any]) -> str:
         """
         Select one rule-choice option for AI players using trained policy.
@@ -2532,27 +2640,6 @@ class W40KEngine(gym.Env):
         options = require_key(prompt, "options")
         if not isinstance(options, list) or not options:
             raise ValueError(f"AI rule choice requires non-empty options list, got: {options!r}")
-
-        if self.gym_training_mode:
-            raw_action_int = require_key(self.game_state, "_last_raw_action_int")
-            if not isinstance(raw_action_int, int):
-                raise TypeError(
-                    f"game_state['_last_raw_action_int'] must be int during gym training rule choice, "
-                    f"got {type(raw_action_int).__name__}"
-                )
-            if raw_action_int < 0:
-                raise ValueError(
-                    f"game_state['_last_raw_action_int'] must be >= 0 during gym training rule choice, "
-                    f"got {raw_action_int}"
-                )
-            selected_option_index = raw_action_int % len(options)
-            selected_option = options[selected_option_index]
-            selected_display_rule_id = require_key(selected_option, "display_rule_id")
-            if not isinstance(selected_display_rule_id, str) or not selected_display_rule_id.strip():
-                raise ValueError(
-                    f"Invalid display_rule_id in selected training rule choice option: {selected_option!r}"
-                )
-            return selected_display_rule_id.strip()
 
         if not hasattr(self, "pve_controller"):
             raise RuntimeError("AI rule choice requires pve_controller to be initialized")
@@ -2588,6 +2675,14 @@ class W40KEngine(gym.Env):
                     "unitId": require_key(prompt, "unit_id"),
                     "player": prompt_player,
                 }
+
+            if self.gym_training_mode:
+                # Gym : le choix appartient à celui qui joue ce siège (agent OU bot adversaire —
+                # tous deux passent par le masque). Le moteur rend la main au lieu de trancher.
+                # `active_rule_choice_prompt` reste None : c'est l'état du prompt HUMAIN, et le
+                # poser ici court-circuiterait `_process_squad_action` avant l'action CHOICE.
+                self.game_state["active_rule_choice_prompt"] = None
+                return self._push_rule_choice_agent_decision(prompt)
 
             # AI side: policy-based option selection (no heuristic default behavior).
             selected_display_rule_id = self._select_ai_rule_choice_option(prompt)
@@ -4819,7 +4914,15 @@ class W40KEngine(gym.Env):
         "pile_in": "pile_in",
         "consolidation": "consolidation",
         "wait": "wait",
-        "rule_choice": "rule_choice",
+        # ⚠️ `rule_choice` N'EST PAS ici : `_record_rule_choice_action_log` écrit DÉJÀ sa ligne
+        # directement dans step.log, au moment où le choix est appliqué. Le laisser dans ce
+        # mapping le journalisait une SECONDE fois — et cette seconde tentative échouait toujours,
+        # en silence (`Rule_choice action missing required selected_rule_name`) : l'action_log
+        # moteur porte la clé `selectedRuleName`, que `_build_step_log_details` ne lit pas.
+        # Le défaut était latent tant que les choix étaient appliqués hors de la fenêtre de flush
+        # (cascade de `_build_observation`) ; le mécanisme de décision (§9.3 P2) les fait passer
+        # par un step, donc par le flush, et le rendait systématique. Mesuré : 16 erreurs avalées
+        # pour 16 choix. Corriger le mapping aurait produit un DOUBLON de chaque ligne.
         "move_after_shooting": "move_after_shooting",
         "deploy_unit": "deploy_unit",
     }
@@ -5281,6 +5384,12 @@ class W40KEngine(gym.Env):
         if semantic.get("action") == "select_rule_choice":
             return self._handle_select_rule_choice_action(semantic)
 
+        # Décision agent (V11 §9.3 P2) : traitée AVANT le court-circuit `active_rule_choice_prompt`
+        # et avant toute action de phase — c'est la seule action légale tant qu'une décision est
+        # en attente, et c'est elle qui débloque le moteur.
+        if semantic.get("action") == "agent_decision":
+            return self._handle_agent_decision_action(semantic)
+
         active_prompt = self.game_state.get("active_rule_choice_prompt")
         if active_prompt is not None:
             return True, {
@@ -5675,7 +5784,6 @@ class W40KEngine(gym.Env):
             # garanti en training -> auto_decider headless -> resolution complete (done).
             from engine.phase_handlers.fight_handlers import (
                 build_manual_fight_allocation,
-                _ai_select_fight_target,
                 _fight_build_valid_target_pool,
                 _fight_v11_register_selection,
                 fight_v11_current_pool,
@@ -5711,10 +5819,43 @@ class W40KEngine(gym.Env):
             # meme si sa cible est morte -> overrun 12.06 sans cible). Le PvP le resout en
             # 0 attaque ; le gym en fait autant, via le MEME moteur (0 intent declare ->
             # summary vide, done=True). Aucun dict fabrique a la main.
-            targets = _fight_build_valid_target_pool(self.game_state, unit)
-            best_target_id = (
-                _ai_select_fight_target(self.game_state, squad_id, targets) if targets else None
-            )
+            targets = [str(t) for t in _fight_build_valid_target_pool(self.game_state, unit)]
+
+            # V11 §9 P3-1 : la cible est CHOISIE PAR L AGENT, via le slot ennemi porte par
+            # l action. `_ai_select_fight_target` ne tranche plus rien ici — elle reste vive pour
+            # le flux PvP (clic sans cible) et pour les bots, jamais pour le pipeline gym.
+            # Parite masque/commit, dans les DEUX sens : le masque n ouvre un slot que si sa cible
+            # est dans le pool 12.05, et n ouvre `FIGHT_NO_TARGET` que si le pool est vide. Toute
+            # divergence est une rupture, pas un cas a absorber par un repli sur une heuristique.
+            if "target_slot" in semantic:
+                if not targets:
+                    raise ValueError(
+                        f"squad_fight: slot de cible recu pour squad {squad_id} alors que le pool "
+                        f"12.05 est VIDE (rupture masque/commit)"
+                    )
+                target_slot = int(semantic["target_slot"])
+                enemy_slot_ids = get_enemy_slot_mapping(
+                    self.game_state, int(require_key(cache_entry, "player"))
+                )
+                if not (0 <= target_slot < len(enemy_slot_ids)):
+                    raise ValueError(
+                        f"squad_fight: target_slot {target_slot} hors du mapping de slots ennemis "
+                        f"({len(enemy_slot_ids)} slots)"
+                    )
+                best_target_id = enemy_slot_ids[target_slot]
+                if best_target_id is None or str(best_target_id) not in targets:
+                    raise ValueError(
+                        f"squad_fight: slot {target_slot} -> cible {best_target_id!r} hors du pool "
+                        f"de combat 12.05 {targets} pour squad {squad_id} (rupture masque/commit)"
+                    )
+                best_target_id = str(best_target_id)
+            else:
+                if targets:
+                    raise ValueError(
+                        f"squad_fight: action « combat a vide » recue pour squad {squad_id} alors "
+                        f"que le pool 12.05 offre {targets} (rupture masque/commit)"
+                    )
+                best_target_id = None
 
             squad_fight_unit_activation_start(self.game_state, squad_id)
             if best_target_id is not None:
@@ -6232,6 +6373,20 @@ class W40KEngine(gym.Env):
             obs = self.obs_builder.build_squad_observation(self.game_state, squad_id)
             obs["grid"] = self.obs_builder.build_squad_grid(self.game_state, squad_id)
             return obs
+
+        # Décision agent en attente (V11 §9.3 P2) : l'observateur est l'unité SUR LAQUELLE porte
+        # la décision — c'est elle que les candidats concernent. La prendre ailleurs décrirait un
+        # contexte étranger au choix demandé (le défaut §0.40 point 1, à ne pas reproduire ici).
+        pending_decision = read_pending_agent_decision(self.game_state)
+        if pending_decision is not None:
+            decision_unit_id = str(require_key(pending_decision, "unit_id"))
+            units_cache = require_key(self.game_state, "units_cache")
+            if decision_unit_id not in units_cache:
+                raise KeyError(
+                    f"_build_observation: unite {decision_unit_id} de la decision en attente "
+                    "absente de units_cache — la decision survit a son unite."
+                )
+            return _build_for_squad(decision_unit_id)
 
         if self.game_state.get("phase") == "deployment":
             # En deployment, l agent voit ses unites pas encore deployees. Selectionne
