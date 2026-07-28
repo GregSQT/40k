@@ -52,7 +52,7 @@ absente (stratagèmes, CP, FNP, transports, etc. restent hors scope). Prérequis
 > `raw_action_int % len(options)` n'existe plus** : le grep qui la trouvait à `w40k_core.py:2644`
 > rend désormais 0. Les lignes **P2 et P3 du tableau ci-dessous sont donc PÉRIMÉES** pour ces deux
 > points ; P3 points 1→8 et P4/P5 restent exacts. Détail → **§9.3bis**. `TOTAL_ACTION_SIZE` vaut
-> **1068** (1062 + 6 CHOICE) et `obs_size` **20712** : tout modèle antérieur est incompatible
+> **1088** (1082 + 6 CHOICE) et `obs_size` **20740** : tout modèle antérieur est incompatible
 > (retrain `--new`), et **aucune mesure de win-rate n'existe encore** pour ce changement.
 
 Revérification ligne à ligne contre le code (la première ; [§0.19](V11_agent_rework.md#s0.19) ne l'avait jamais menée, cf. sa
@@ -650,13 +650,13 @@ porte `{type, player, unit_id, options[]}`, où chaque candidat est
 - **un effet hors du vocabulaire d'observation (`UNIT_RULE_EFFECT_IDS`) → erreur**, plutôt qu'un
   candidat décrit par un vecteur nul que l'agent ne pourrait pas distinguer.
 
-**L'action space** : `CHOICE_BASE = 1062`, `CHOICE_COUNT = 6`, `TOTAL_ACTION_SIZE = 1068`
+**L'action space** : `CHOICE_BASE = 1082`, `CHOICE_COUNT = 6`, `TOTAL_ACTION_SIZE = 1088`
 (`engine/macro_intents.py`). Quand une décision est en attente, le masque n'expose **que** les
 `CHOICE_i` correspondant aux candidats réels, et le pool d'unités éligibles est vide : le moteur
 est arrêté sur le point de choix, exactement comme le PvP l'est sur un `waiting_for_player`.
 
 **L'observation** : `decision_ctx_bin` (2) + `decision_options_bin` (6 × 14) →
-`obs_size` **20626 → 20712**. Un candidat est décrit par **l'effet qu'il accorde**, dans le même
+`obs_size` **20654 → 20740** (20654 = valeur après P3-1). Un candidat est décrit par **l'effet qu'il accorde**, dans le même
 vocabulaire que les drapeaux `rule_*` d'unité — pas par son index, qui ne veut rien dire d'un
 prompt à l'autre. Le bloc reste nul quand la décision appartient à l'autre camp. Détail complet →
 [`AI_OBSERVATION.md`](../AI_OBSERVATION.md), section `decision_ctx_bin`.
@@ -666,10 +666,10 @@ des embeddings produits par un encodeur PARTAGÉ entre tous les slots de candida
 raisonnement que le pointeur de tir (T-E) : le nombre de candidats est gratuit en paramètres, et
 une ligne de poids par slot n'aurait rien à généraliser.
 
-**`action_net` est passé de `Linear(320, 1062)` à `Linear(320, 18)`**, comme §9.3 le demandait.
-Mesuré sur la config réelle (`x5_debug`, `net_arch [320,320]`, `cnn_features 256`) : la policy
-passe de **2 133 736** à **1 907 476** paramètres, soit **−226 260** — l'économie de 335 k colonnes
-inertes moins le coût du bloc de décision. Un test vérifie que **chacune** des 18 colonnes
+**`action_net` est passé de `Linear(320, 1082)` à `Linear(320, 18)`**, comme §9.3 le demandait.
+Mesuré sur la config réelle (`x5_debug`, `net_arch [320,320]`, `cnn_features 256`), branche P3-1
+comme base : la policy passe de **2 160 828** à **1 928 148** paramètres, soit **−232 680** —
+l'économie des ~341 k colonnes inertes moins le coût du bloc de décision. Un test vérifie que **chacune** des 18 colonnes
 restantes déplace le logit qu'elle est censée produire, et lui seul.
 
 **Le pilote (P3 point 0)** : en gym, un prompt de rule choice n'est plus tranché par le moteur. Il
@@ -696,8 +696,9 @@ mapping aurait produit un doublon de chaque ligne), et un test verrouille « une
 ligne ».
 
 ⚠️ **Ce qui n'est PAS mesuré, et ne peut pas l'être aujourd'hui.** §9.6 exige un win-rate ≥ tranche
-précédente. Il est **indisponible** : (1) `TOTAL_ACTION_SIZE` et `obs_size` changent tous les deux,
-donc tout modèle existant est incompatible et la comparaison exige un retrain `--new` complet ;
+précédente. Il est **indisponible** : (1) `TOTAL_ACTION_SIZE` et `obs_size` changent tous les deux
+(comme pour P3-1), donc tout modèle existant est incompatible et la comparaison exige un retrain
+`--new` complet ;
 (2) **aucun roster d'entraînement (SM/Orks) ne porte de rule choice** — sur ces scénarios, le
 mécanisme ne se déclenche jamais, et son effet sur le win-rate est **structurellement nul**. Ce
 qu'il apporte est l'**infrastructure** des tranches P3 1→8, qui elles auront un effet mesurable.

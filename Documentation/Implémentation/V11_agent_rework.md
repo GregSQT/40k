@@ -68,7 +68,7 @@ actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist
 | **§0.33** | Rollout buffer 46,9 Go pour 39 Go de RAM | 🟠 **CONDITIONNEL** — ne bloque que les profils à 48 envs | **4** (avant tout run 48 envs) | Vérifié 2026-07-28 dans la config : `x1`/`x5_new`/`x5_debug` = **8 envs** (passent) ; `x5_append`/`x1_debug` = **48 envs** (échouent à l'allocation). Ne pas lancer ces deux-là sans rouvrir l'entrée. |
 | **§0.29** | Scénario SM vs Orks fixed/active + scheduler | 🟢 Mécanique livrée et validée in-engine ; **reste USAGE + MESURE** | 5 | La mesure rejoint §0.14 : c'est le même run qui la produit. |
 | **§0.40** | Observation de la phase de déploiement déficiente (3 défauts vérifiés) | 🔴 **OUVERT** — chantier externe | 6 | Détail et pistes → [`observation_deploiement.md`](observation_deploiement.md) (sorti de l'audit archivé le 2026-07-28). Points 1-2 (obs ≠ unité du masque, grille centrée hors plateau) = correctifs indépendants et peu coûteux ; point 3 (décrire les hexes candidats) change `obs_size` → à séquencer avec un run `--new`. Détail → §0.40. |
-| **§0.42** | P2 livré sur la branche `v11-p2-agent-decision`, pas sur `main` | 🟠 **OUVERT** — action utilisateur | **1 bis** (juste après le run) | Merger la branche **APRÈS** la fin du run §0.14 et le relevé de sa mesure : P2 change `obs_size` (20712) ET `TOTAL_ACTION_SIZE` (1068), donc le modèle du run devient incompatible dès le merge et le run suivant DOIT être `--new`. Détail → §0.42. |
+| **§0.42** | P2 livré sur la branche `v11-p2-agent-decision`, pas sur `main` | 🟠 **OUVERT** — action utilisateur | **1 bis** (juste après le run) | Merger la branche **APRÈS** la fin du run §0.14 et le relevé de sa mesure : P2 change `obs_size` (20740) ET `TOTAL_ACTION_SIZE` (1088), donc le modèle du run devient incompatible dès le merge et le run suivant DOIT être `--new`. Détail → §0.42. |
 | **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)). T2→T5 **jamais revérifiés** : ne pas s'appuyer sur leurs ✅ sans relecture. ⚠️ Sa **section** est restée en §0hist (elle y était déjà avant l'épuration) alors que sa part T2→T5 est ouverte — laissée en place plutôt que scindée, pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
 
 🟢 **TRANCHÉ le 2026-07-28 soir (arbitrage utilisateur) : `bot_eval_freq = 2000` ASSUMÉ**, pour
@@ -101,8 +101,9 @@ ligne à ligne) et la règle de périmètre `ArmageddonAgent`.
 (§9.4 point 0) — détail complet et preuves en [§9.3bis](V11_phaseA.md#s9.3bis).
 
 **Pourquoi ce n'est PAS sur `main`.** Le run `--new` de §0.14 tournait au moment de
-l'implémentation (démarré le 2026-07-28 à 17 h 25). P2 change **`obs_size`** (20626 → 20712) **et**
-**`TOTAL_ACTION_SIZE`** (1062 → 1068), dans le code ET dans les 5 profils de config. Un
+l'implémentation (démarré le 2026-07-28 à 17 h 25). P2 change **`obs_size`** (20654 → 20740) **et**
+**`TOTAL_ACTION_SIZE`** (1082 → 1088) — les deux valeurs de départ étant celles de **P3-1**, sur
+laquelle cette branche est REBASÉE (elle n'est donc mergeable qu'après elle, ou avec elle). Un
 sous-processus d'évaluation qui relit la config d'agent depuis le disque en cours de run aurait
 chargé un contrat d'observation incompatible avec le modèle en cours d'entraînement — c'est-à-dire
 la mort d'un run de plusieurs heures. Le travail a donc été fait dans un **worktree git isolé**
@@ -112,7 +113,8 @@ run.
 **Ce qu'il reste à faire — dans cet ordre.**
 1. **Attendre la fin du run §0.14** et récupérer sa mesure de win-rate : c'est la baseline du
    contrat d'observation **20626 / 1062**, et la dernière qu'on aura sur ce contrat.
-2. Merger `v11-p2-agent-decision` dans `main`.
+2. Merger **`v11-p3-1-fight-target` d'abord**, puis `v11-p2-agent-decision` (rebasée dessus, les
+   conflits d'action space sont déjà résolus dans cette branche).
 3. **Le run suivant DOIT être `--new`** — le modèle du run §0.14 devient incompatible dès le merge
    (obs ET action space changent). Ce n'est pas un choix : c'est le fail-fast d'`obs_size` qui le
    rendra explicite au démarrage.
