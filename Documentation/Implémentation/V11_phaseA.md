@@ -207,7 +207,7 @@ périmètre à valider), soit retirer leurs canaux d'observation (bruit pur pour
 le statu quo silencieux.
 
 ~~Suppression du code mort (fin de P1)~~ : **FAITE le 2026-07-28** — cf. **[§0hist.38](V11_agent_rework.md#s0.38)**
-pour le détail, les deux écarts de conformité trouvés en migrant les tests, les 7 mutations
+pour le détail, les deux écarts de conformité trouvés en migrant les tests, les 13 mutations
 de contre-épreuve et le reliquat `w40k_core` laissé à l'agent §0.40. Le critère « grep
 `_attack_sequence_rng` vide » est atteint sur `engine/ ai/ services/ tests/` ; le critère
 `_rapid_fire_|rapid_fire_bonus_shot` l'est sur `engine/phase_handlers/` et `tests/`, pas

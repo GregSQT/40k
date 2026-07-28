@@ -640,7 +640,7 @@ le champ existant ne suffisait pas.
 
 ### Migrer un test de code mort vers le vif est un AUDIT de conformité, pas un refactor (§0.38, 2026-07-28)
 
-Les 6 fichiers qui tenaient `_attack_sequence_rng` en vie portaient ~159 assertions vertes. En les
+Les 5 fichiers qui tenaient `_attack_sequence_rng` en vie portaient 138 assertions vertes. En les
 re-pointant sur le chemin vif, **11 d'entre elles se sont mises à contredire le moteur**. Le
 réflexe naturel — assouplir l'assertion, ou « adapter le test au nouveau chemin » — aurait détruit
 le seul résultat de valeur de la manœuvre : chacune de ces 11 assertions décrivait un comportement
