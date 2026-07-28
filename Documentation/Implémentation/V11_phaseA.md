@@ -39,7 +39,7 @@ absente (stratagèmes, CP, FNP, transports, etc. restent hors scope). Prérequis
 > `raw_action_int % len(options)` toujours vif). Le titre « 0/5 » devient donc **0/4**.
 >
 > 🔴 **MISE À JOUR 2026-07-28 soir — les lignes P2 et P3 ci-dessous sont à leur tour PÉRIMÉES.**
-> `TOTAL_ACTION_SIZE` vaut **1082** sur la branche `v11-p3-1-fight-target` et **P3 point 1 (cible
+> `TOTAL_ACTION_SIZE` vaut **1088 sur `main`** (1082 après P3-1, + 6 `CHOICE_i` avec P2) et **P3 point 1 (cible
 > de mêlée) est LIVRÉ** — non par le `CHOICE_k` de [§9.3](#s9.3), mais par une dimension d'action par slot
 > ennemi + tête pointeur, la spec P2 ayant été jugée périmée par T-E/T-G. Détail, preuves et
 > décision d'architecture → **[§0.41](V11_agent_rework.md#s0.41)**. Le grep `pending_agent_decision`/`CHOICE_[0-9]` rend
@@ -51,7 +51,8 @@ absente (stratagèmes, CP, FNP, transports, etc. restent hors scope). Prérequis
 > d'observation « contexte de décision », tête pointeur de candidats) et la **pseudo-décision
 > `raw_action_int % len(options)` n'existe plus** : le grep qui la trouvait à `w40k_core.py:2644`
 > rend désormais 0. Les lignes **P2 et P3 du tableau ci-dessous sont donc PÉRIMÉES** pour ces deux
-> points ; P3 points 1→8 et P4/P5 restent exacts. Détail → **§9.3bis**. `TOTAL_ACTION_SIZE` vaut
+> points ; P3 points 2→8 et P4/P5 restent exacts (le point 1 est livré, cf. ci-dessus).
+> **Mergé sur `main` le 2026-07-28 soir.** Détail → **§9.3bis**. `TOTAL_ACTION_SIZE` vaut
 > **1088** (1082 + 6 CHOICE) et `obs_size` **20740** : tout modèle antérieur est incompatible
 > (retrain `--new`), et **aucune mesure de win-rate n'existe encore** pour ce changement.
 
@@ -638,7 +639,8 @@ autre impact sur l'initialisation orthogonale ni sur SB3 si la couche est recons
 <a id="s9.3bis"></a>
 ### 9.3bis P2 — CE QUI A ÉTÉ LIVRÉ (2026-07-28)
 
-**Livré tel que spécifié en §9.3**, plus le pilote P3 point 0. Ce qui suit décrit le code en
+**Livré tel que spécifié en §9.3**, plus le pilote P3 point 0, et **mergé sur `main`** le
+2026-07-28 (rebasé sur P3-1, dont il reprend l'action space). Ce qui suit décrit le code en
 place, vérifié par tests et par mesure in-engine — pas une intention.
 
 **Le mécanisme** (`engine/agent_decision.py`, ~150 lignes). `game_state["pending_agent_decision"]`
@@ -727,7 +729,7 @@ Ordre par valeur tactique :
    `rule_checker` et tout futur roster tyranide en bénéficient) ; son effet sur le win-rate est
    **nul par construction**. Ce que P2 apporte vraiment est le mécanisme réutilisable par les
    décisions **non-entité** des tranches suivantes.
-1. ✅ **LIVRÉ le 2026-07-28 (branche `v11-p3-1-fight-target`) — détail → [§0.41](V11_agent_rework.md#s0.41).** La cible de
+1. ✅ **LIVRÉ le 2026-07-28 (mergé sur `main` le soir même) — détail → [§0.41](V11_agent_rework.md#s0.41).** La cible de
    mêlée est désormais une **dimension d'action** (`FIGHT_SLOT` 1046-1065, un par slot ennemi,
    + `ACTION_FIGHT_NO_TARGET` 1066 pour le combat à vide 12.04/12.06), scorée par une **tête
    pointeur** sur les embeddings d'ennemis — pas par des `CHOICE_k` denses. Le masque n'ouvre un
