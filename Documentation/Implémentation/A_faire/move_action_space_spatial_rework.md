@@ -182,6 +182,12 @@ géométrie**. À ne pas présenter comme un « miroir exact du PvP ».
 > (`SHOOT_SLOT_BASE = 1025`, `CHARGE = 1045`, `FIGHT = 1046`, `BASE_ZONE_INTENT = 1047`,
 > `TOTAL_ACTION_SIZE = 1047 + 5×3 = 1062`). Le constat ci-dessous décrit l'état à
 > l'investigation.
+> ⚠️ **Ces chiffres s'arrêtent à T-E et sont eux-mêmes PÉRIMÉS depuis le 2026-07-28** : la cible
+> de mêlée (§9 P3-1), les `CHOICE_i` (§9.3 P2) puis la cible de charge (§9 P3-2) ont porté
+> `TOTAL_ACTION_SIZE` à **1107** et `SQUAD_ACTION_SIZE` à **1086** — `CHARGE` n'est plus un id
+> unique mais 20 slots (1045-1064), `FIGHT` 20 autres (1065-1084). La seule source qui ne périme
+> pas est `engine/macro_intents.py`, confrontée à `shared_utils` par
+> `tests/unit/engine/test_action_space_mirror.py`.
 > **L'exigence de synchronisation, elle, reste valable et est maintenant VÉRIFIÉE par test**
 > (`tests/unit/engine/test_action_space_mirror.py`) — elle ne l'était par rien.
 
@@ -335,9 +341,12 @@ actuel devient incompatible.
   `SHOOT_SLOT_BASE=1025`, puis charge et fight → **`SQUAD_ACTION_SIZE = 1032`** à l'époque de
   T2b (5 slots de tir). ⚠️ **MàJ V11 §0.30 T-E (2026-07-26)** : 20 slots de tir → `CHARGE=1045`,
   `FIGHT=1046`, **`SQUAD_ACTION_SIZE = 1047`**, `BASE_ZONE_INTENT=1047`,
-  **`TOTAL_ACTION_SIZE = 1062`**. Le miroir §4.5, que
+  **`TOTAL_ACTION_SIZE = 1062`**. ⚠️ **Périmé depuis le 2026-07-28** (§9 P3-1, §9.3 P2, §9 P3-2) :
+  `SQUAD_ACTION_SIZE = 1086`, `TOTAL_ACTION_SIZE = 1107`, et `CHARGE`/`FIGHT` sont devenus des
+  familles de 20 slots chacune. Le miroir §4.5, que
   la spec imposait mais que **rien ne vérifiait**, est désormais verrouillé par test
-  (`tests/unit/engine/test_action_space_mirror.py`).
+  (`tests/unit/engine/test_action_space_mirror.py`) — c'est lui, et non ce document, qui dit la
+  valeur courante.
 - `build_squad_move_cell_map()` : **source unique** du masque ET du décodage → un mismatch
   masque/exécution devient structurellement impossible (vérifié : `test_mask_bits_match_the_cell_map_exactly`).
 - `infer_squad_move_type()` : type déduit du coût géodésique (§6.2), jamais d'une dimension d'action.
