@@ -1663,7 +1663,32 @@ def _model_can_fight_target(
         game_state, str(attacker_squad_id), attacker_model,
         int(attacker_model["col"]), int(attacker_model["row"])
     )
-    return unit_entries_within_engagement_zone(synth, target_entry, ez)
+    return model_entry_can_fight_target(game_state, synth, target_entry, ez)
+
+
+def model_entry_can_fight_target(
+    game_state: Dict[str, Any],
+    attacker_model_entry: Dict[str, Any],
+    target_entry: Dict[str, Any],
+    engagement_zone: float,
+) -> bool:
+    """Coeur de 04.02, sur une empreinte de figurine DEJA construite.
+
+    Extrait de `_model_can_fight_target` (qui en est desormais le wrapper) pour les appelants
+    qui possedent deja l'entree synthetique : `_synth_model_entry` reconstruit une empreinte a
+    chaque appel, ce qui domine le cout quand on teste N figurines contre M cibles —
+    l'observation le fait a CHAQUE step (V11 §9 P3-1, `n_models_engaging`). Mesure : le test
+    d'engagement seul coute ~10x moins que le test + la reconstruction.
+
+    ⚠️ C'est le MEME predicat, pas une copie : les deux fonctions partagent ce corps. Le
+    dupliquer cote observation l'aurait laisse diverger de la resolution (une metrique differente
+    et l'obs annoncerait un volume d'attaques que le combat ne produit pas).
+    """
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+
+    return unit_entries_within_engagement_zone(
+        attacker_model_entry, target_entry, engagement_zone
+    )
 
 
 def _model_can_fight_target_with_weapon(

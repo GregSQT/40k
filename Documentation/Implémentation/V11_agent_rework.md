@@ -697,6 +697,31 @@ structurel. Le mécanisme générique ne se justifie que pour les candidats **no
 de méthode : une spec non datée de la session en cours se relit contre l'ARCHITECTURE actuelle,
 pas seulement contre le moteur.
 
+**Rendre un choix à l'agent sans lui donner de quoi le faire, c'est une demi-tranche (§0.41, 2026-07-28)**
+
+P3-1 a d'abord été livrée « complète » : action, masque, tête pointeur, tests verts. Elle ne
+l'était pas. L'agent choisissait sa cible de mêlée **sans voir combien de ses figurines pouvaient
+la frapper** — le premier facteur du choix. Deux champs voisins donnaient l'illusion de la
+couvrir : `n_fight_eligible` (mais il AGRÈGE sur toutes les cibles) et `edge_distance` (mais il
+mesure l'ESCOUADE, alors que 04.02 s'évalue par figurine). **Règle : toute tranche P3 se termine
+par la question « avec quelle information l'agent tranche-t-il ? », et la réponse se prouve par un
+test de DISCRIMINATION** — deux candidats que la nouvelle feature sépare et que les champs
+existants confondent. Sans ce test, « la feature existe » ne dit pas « la décision est observable ».
+Corollaire de séquencement : quand une tranche impose déjà un retrain (action space), le coût
+marginal d'ajouter la feature d'observation qui lui manque est **nul** — c'est le moment de la
+livrer, pas une tranche plus tard.
+
+**Un oracle partagé ne doit pas imposer son coût de mise en forme à tous ses appelants (§0.41, 2026-07-28)**
+
+`_model_can_fight_target` (prédicat 04.02) reconstruit l'empreinte synthétique de la figurine à
+chaque appel. Correct pour la résolution d'attaque, ruineux pour l'observation, qui possède déjà
+ces empreintes et teste N figurines × M cibles à CHAQUE step : **41,7 µs/appel contre 4,5 µs** une
+fois l'empreinte fournie (9,2×), soit 2,50 ms au lieu de 0,27 ms sur le pire cas réaliste — pour
+une observation qui coûte 2,5 ms au total. La parade n'est PAS de recopier le prédicat côté
+appelant (il divergerait sur la métrique, et l'obs annoncerait un volume d'attaques que le combat
+ne produit pas) : c'est d'**extraire le cœur en une fonction qui accepte la donnée déjà mise en
+forme**, et de faire de l'ancienne signature son wrapper. Un seul corps, deux points d'entrée.
+
 **Un point de décision « le plus urgent » peut être INERTE dans le training réel (§0.41, 2026-07-28)**
 
 Le point 0 de [§9.4](V11_phaseA.md#s9.4) (pseudo-décision `raw_action_int % len(options)` sur les rule-choices) porte
@@ -931,8 +956,9 @@ AVANT d'y lancer un entraînement.
 ### 0.41 §9 P3-1 — la cible de mêlée devient une dimension d'action (slots ennemis + pointeur) — ✅ LIVRÉ, NON MESURÉ (2026-07-28)
 
 > ⚠️ **Livré sur la branche `v11-p3-1-fight-target`, PAS sur `main`** — voir « Pourquoi une
-> branche » en fin d'entrée. `main` est resté à `1bad24b3` pour ne pas casser le run §0.14 en
-> cours. **À merger quand ce run est terminé**, et le retrain suivant DOIT être `--new`.
+> branche » en fin d'entrée. `main` est resté intact pour ne pas casser le run §0.14 en cours.
+> **À merger quand ce run est terminé**, et le retrain suivant DOIT être `--new` (l'action space
+> ET l'observation changent).
 
 **Ce qui était en place.** `squad_fight` était une action **sans cible** : le moteur choisissait
 la cible lui-même par `_ai_select_fight_target` (lowest HP puis menace, via `RewardMapper`), au
@@ -949,7 +975,7 @@ l'observation** (invariant D1) :
 |---|---|---|
 | Action de combat | `ACTION_FIGHT` = 1046 (sans cible) | `FIGHT_SLOT` **1046-1065** (20) + `ACTION_FIGHT_NO_TARGET` **1066** |
 | `TOTAL_ACTION_SIZE` | 1062 | **1082** |
-| `obs_size` | 20626 | **20626 — INCHANGÉ** |
+| `obs_size` | 20626 | **20654** (`n_models_engaging`, cf. P4 ci-dessous) |
 | Choix de la cible | moteur (`_ai_select_fight_target`) | **agent** |
 
 - `FIGHT_SLOT_COUNT` est **dérivé** de `SHOOT_SLOT_COUNT`, jamais recopié : les désolidariser
@@ -978,6 +1004,32 @@ NON-entité seulement** (rule-choice, FLY oui/non, pile-in oui/non). Il n'est pa
 livrer sans décision non-entité réellement exercée en aurait fait du code jamais appelé, le motif
 que §0bis existe pour interdire.
 
+**P4 (observation de support) — `n_models_engaging`, sans quoi la tranche était incomplète.**
+[§9.5](V11_phaseA.md#s9.5) exige « les features nécessaires aux choix ». Une fois la cible devenue une décision, il
+manquait la principale : **combien de MES figurines peuvent frapper CETTE cible** (04.02) — donc
+avec quelle force je la frappe. La tête pointeur aurait scoré des cibles sans le savoir. Aucun
+champ existant ne le disait, et c'est vérifié par test, pas supposé :
+- `n_fight_eligible` **agrège sur toutes les cibles** : à deux ennemis engagés il rend la même
+  valeur pour les deux (contre-épreuve dans `test_field_discriminates_between_two_engaged_enemies`) ;
+- `edge_distance` mesure l'**escouade entière** : à distance d'ancre égale, deux cibles peuvent
+  mobiliser un nombre très différent de figurines (04.02 s'évalue par figurine, pas par ancre).
+
+C'est une grandeur de **paire**, comme `los_can_see` : émise sur les entités ENNEMIES seulement,
+0 sur les alliées. `obs_size` **20626 → 20654** (+1 feature × 28 entités), les 5 profils de config
+sont alignés — coût de retrain **marginal nul**, l'action space l'imposait déjà.
+
+⚠️ **Oracle unique, et perf mesurée.** Le comptage appelle le prédicat MOTEUR de déclaration
+d'attaque, jamais une réimplémentation (une métrique divergente ferait annoncer à l'obs un volume
+d'attaques que la résolution ne produit pas). Mais `_model_can_fight_target` **reconstruit
+l'empreinte synthétique** de la figurine à chaque appel, alors que `build_squad_observation` les a
+déjà toutes construites — et l'observation est bâtie à CHAQUE step. Son cœur a donc été extrait en
+`model_entry_can_fight_target(game_state, entrée_déjà_construite, cible, ez)`, dont
+`_model_can_fight_target` est désormais le **wrapper** : même prédicat, un seul corps.
+**Mesuré** : 41,7 µs/appel avec reconstruction contre **4,5 µs** sans, soit **9,2×**. Sur le pire
+cas réaliste (20 figurines × 3 cibles) : **2,50 ms → 0,27 ms**, à comparer aux ~2,5 ms que coûte
+l'observation entière. Sans cette factorisation, la feature aurait à elle seule doublé le coût de
+l'observation.
+
 **Tête pointeur : une requête DISTINCTE, des embeddings PARTAGÉS.** `fight_query_net` est une
 seconde `Linear(latent, entity_dim)` appliquée aux mêmes embeddings que le tir. Partager la
 requête forcerait un ordre de préférence unique pour les deux phases, alors que « quel ennemi
@@ -1002,6 +1054,12 @@ fight_handlers ~2813, ~4969, ~5725). Le pipeline gym ne l'appelle plus.
 | `tests/unit/ai/test_pointer_head.py` + `test_evaluation_bots.py` + `test_fight_target_selection_no_fallback.py` | **44 verts**. `test_pointer_logit_is_slot_local` constate maintenant que perturber l'embedding du slot 1 déplace **deux** logits (tir 1 ET combat 1) — c'est le partage recherché, pas une fuite. |
 | batterie fight (`cascade_fight_subphases`, `fight_execution`, `fight_resolution`, `fight_v11_selection`, `fight_v11_orchestration`, `squad_fight_declaration`, `fight_v11_consolidation`, `fight_v11_foundations`) | **92 verts** |
 | `test_blast_cleave`, `test_extra_attacks_fight`, `test_precision` | **19 verts** |
+| `tests/unit/engine/test_squad_obs_fight_target_support.py` (**neuf**) | **6 verts** — verrou de `n_models_engaging` : comptage exact, **discrimination entre deux cibles engagées** (avec la contre-épreuve sur `n_fight_eligible`), accord avec l'oracle moteur, 0 hors portée, 0 sur les alliées, et **parité obs↔masque** (`n_models_engaging > 0` ⟺ le masque ouvre le slot). |
+| batterie observation (`structure_doc`, `enemy_block`, `enemy_cover`, `model_engagement`, `vector_split`, `enemy_slot_alignment`, `observation_builder`, `entity_obs_equivalence`, `entity_encoder_extractor`) | **72 verts** |
+
+⚠️ `test_squad_obs_structure_doc.py` verrouille la **documentation** : `Documentation/AI_OBSERVATION.md`
+(Structure Overview, layout `enemies_cont`, historique d'`obs_size`) a dû être mis à jour, sans quoi
+ces tests échouent. C'est ce qui garantit que le schéma documenté et le schéma calculé coïncident.
 
 **🔴 CE QUI N'EST PAS MESURÉ, et ne peut pas l'être avant le prochain retrain.**
 1. Le **win-rate** exigé par [§9.6](V11_phaseA.md#s9.6) (« ≥ tranche précédente, sinon corriger observation/reward

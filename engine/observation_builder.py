@@ -911,6 +911,35 @@ class ObservationBuilder:
             _b("los_can_see", bool(los["can_see"]))
             _b("cover_vs_observer", bool(los["cover"]))
 
+            # Combien de MES figurines peuvent frapper CETTE cible (04.02) — support du choix de
+            # cible de mêlée (V11 §9 P3-1, cf. le commentaire de `n_models_engaging`).
+            #
+            # L'oracle est `_model_can_fight_target`, la fonction MOTEUR qu'emprunte la
+            # déclaration d'attaque (`FIGHT_DECLARE_CTX.can_target`) : réimplémenter le test
+            # d'engagement ici en ferait une seconde copie, libre de diverger sur la métrique —
+            # le comptage annoncerait alors un volume d'attaques que la résolution ne produit pas.
+            #
+            # Garde par le pool 12.05 : hors pool, aucune figurine ne peut atteindre la cible
+            # (le pool teste l'empreinte de l'escouade, qui contient celle de chaque figurine),
+            # donc 0 sans boucler. Le coût par-figurine n'est payé qu'au contact réel.
+            if squad_id in ctx["fight_target_pool"]:
+                from engine.phase_handlers.fight_handlers import model_entry_can_fight_target
+
+                # Les empreintes synthétiques par figurine sont DÉJÀ construites plus haut
+                # (`synth_by_mid`, pour les drapeaux d'engagement) : on les repasse au prédicat
+                # au lieu de les reconstruire. Mesuré : la reconstruction pesait ~10x le test.
+                target_entry = require_key(game_state, "units_cache")[squad_id]
+                _c(
+                    "n_models_engaging",
+                    sum(
+                        1
+                        for synth in ctx["synth_by_mid"].values()
+                        if model_entry_can_fight_target(
+                            game_state, synth, target_entry, ctx["engagement_zone"]
+                        )
+                    ),
+                )
+
         if is_active:
             # État terrain (13.09 / 13.5 / 13.08) recalculé à chaud : le champ unit['hidden'] du
             # moteur n'est rafraîchi qu'au début de la phase de tir, le lire ici renverrait un
@@ -1138,6 +1167,16 @@ class ObservationBuilder:
                 1.0,
             )
 
+        # V11 §9 P3-1 — pool de cibles de mêlée de l'unité active (12.05). MÊME fonction que le
+        # masque d'action (`build_squad_action_mask`, phase fight) : l'observation et le masque
+        # doivent décrire le même ensemble de cibles, sinon l'agent verrait « frappable » ce que
+        # le masque interdit. Sert aussi de garde au comptage par-figurine ci-dessous.
+        from engine.phase_handlers.fight_handlers import _fight_build_valid_target_pool
+
+        fight_target_pool = {
+            str(t) for t in _fight_build_valid_target_pool(game_state, active_unit)
+        }
+
         ctx: Dict[str, Any] = {
             "active_squad_id": active_squad_id,
             # Requis par les bits de PAIRE (couvert/visibilité vus depuis l'observateur).
@@ -1158,6 +1197,15 @@ class ObservationBuilder:
             "n_fight_eligible": sum(1 for mid in alive_mids if mid in fighting_set),
             "n_in_enemy_ez": sum(1 for mid in alive_mids if in_enemy_ez[mid]),
             "n_relayed_ez": sum(1 for mid in alive_mids if relayed_by_mid[mid]),
+            # V11 §9 P3-1 — support du choix de cible de mêlée (`n_models_engaging`).
+            # Le pool 12.05 est la MÊME source que le masque d'action : un ennemi qui n'y est
+            # pas ne peut être frappé par AUCUNE de mes figurines (le pool teste l'empreinte de
+            # l'escouade entière, qui contient celle de chaque figurine). Il sert donc de garde :
+            # hors pool -> 0 sans boucler. Le coût par-figurine n'est payé qu'en mêlée réelle.
+            "fight_target_pool": fight_target_pool,
+            # Empreintes par figurine, réutilisées telles quelles pour le comptage 04.02.
+            "synth_by_mid": synth_by_mid,
+            "engagement_zone": ez_zone,
         }
 
         def _write_entity(prefix: str, row: int, sid: str, *, is_ally: bool, is_active: bool) -> None:

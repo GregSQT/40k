@@ -61,6 +61,18 @@ UNIT_CONT_FIELDS: Tuple[str, ...] = (
     "n_fight_eligible",    # ⚠ unité ACTIVE uniquement (masque = is_active)
     "n_in_enemy_ez",       # ⚠ unité ACTIVE uniquement
     "n_relayed_ez",        # ⚠ unité ACTIVE uniquement
+    # ⚠ Entités ENNEMIES uniquement (comme `los_can_see` / `cover_vs_observer`) : c'est une
+    # grandeur de PAIRE (mon escouade → cette cible), pas une propriété de la cible.
+    #
+    # Combien de MES figurines vivantes sont engagées avec cette escouade (04.02), donc
+    # combien peuvent réellement porter des attaques contre elle. V11 §9 P3-1 a fait de la
+    # cible de mêlée une décision de l'agent ; sans ce champ, la tête pointeur choisirait
+    # une cible sans savoir avec quelle FORCE elle serait frappée — or c'est le premier
+    # facteur du choix : engagée par 8 figurines ou par 1, la même cible ne vaut pas la même
+    # chose. `n_fight_eligible` ne le dit pas : il agrège sur toutes les cibles à la fois.
+    # `edge_distance` non plus : la distance à l'escouade ne dit rien du nombre de figurines
+    # qui atteignent l'ennemi (05.03/04.02 s'évaluent par figurine, pas par ancre).
+    "n_models_engaging",
 )
 
 #: Règles d'UNITÉ (`config/unit_rules.json`) exposées à l'agent, dans l'ordre d'émission.

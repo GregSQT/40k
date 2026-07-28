@@ -40,14 +40,14 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 626 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 654 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (11,)                =      11               │
 │    global_bin             (27,)                =      27               │
 │                                                                        │
 │  MES ESCOUADES — ligne 0 = l'unité ACTIVE          K_ALLY_SLOTS = 8    │
-│    allies_cont            (8, 19)              =     152               │
+│    allies_cont            (8, 20)              =     160               │
 │    allies_bin             (8, 32)              =     256               │
 │    allies_wpn_cont        (8, 20, 13)          =   2 080               │
 │    allies_wpn_bin         (8, 20, 18)          =   2 880               │
@@ -55,7 +55,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    allies_types_bin       (8, 6, 5)            =     240               │
 │                                                                        │
 │  ESCOUADES ENNEMIES — ordre = slots d'action     K_ENEMY_SLOTS = 20    │
-│    enemies_cont           (20, 19)             =     380               │
+│    enemies_cont           (20, 20)             =     400               │
 │    enemies_bin            (20, 32)             =     640               │
 │    enemies_wpn_cont       (20, 20, 13)         =   5 200               │
 │    enemies_wpn_bin        (20, 20, 18)         =   7 200               │
@@ -66,11 +66,11 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    self_models_cont       (20, 2)              =      40               │
 │    self_models_bin        (20, 4)              =      80               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      20 626              │
+│  TOTAL vectoriel (= obs_size)                      20 654              │
 │  + grid  (7, 32, 32) = 7 168, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
-Coût d'UNE entité = 19 + 32 (unité) + 20 × (13 + 18) (armes) + 6 × (5 + 5) (types) = 731
+Coût d'UNE entité = 20 + 32 (unité) + 20 × (13 + 18) (armes) + 6 × (5 + 5) (types) = 732
    → le bloc ARMES fait 86 % du vecteur. C'est le seul bloc mémoïsé.
 ```
 
@@ -144,7 +144,7 @@ deux phases où les ids d'action 4–8 signifient l'un « slot de déploiement �
 move » — le seul indice restant était indirect. Une phase hors des 6 **lève** ; il n'y a plus de
 `.get(…, 0.0)`.
 
-#### `allies_cont[s]` / `enemies_cont[s]` — une unite, 19 features  ·  EntityRunningNorm
+#### `allies_cont[s]` / `enemies_cont[s]` — une unite, 20 features  ·  EntityRunningNorm
 
 ```python
 [s][0]     = alive_models                           # brut (figurines vivantes)
@@ -166,6 +166,12 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
 [s][16]    = n_fight_eligible                       # brut [ACTIVE seule]
 [s][17]    = n_in_enemy_ez                          # brut [ACTIVE seule]
 [s][18]    = n_relayed_ez                           # brut [ACTIVE seule]
+[s][19]    = n_models_engaging                      # brut [ENNEMIS seuls] — mes figurines
+                                                    #   engagees avec CETTE cible (04.02).
+                                                    #   Grandeur de PAIRE, comme los_can_see.
+                                                    #   Support du choix de cible de melee
+                                                    #   (V11 §9 P3-1) : combien d'attaques je
+                                                    #   porte reellement contre elle.
 ```
 
 #### `allies_bin[s]` / `enemies_bin[s]` — une unite, 32 drapeaux  ·  jamais normalise
@@ -389,8 +395,9 @@ grille exclue — calculé par `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`. Histo
 (tenseurs d'entités, T-D) → 12284 (20 slots ennemis, T-E) → 20096 (K armes = 10 par registre,
 T-F) → 20166 (plafond du bloc figurines 6 → 20, 2026-07-26) → 20181 (géométrie des objectifs,
 2026-07-27) → 20545 (règles d'unité, 13 bits par entité) → 20601 (couvert et visibilité exacts par
-slot ennemi, 2026-07-27) → **20626** (bit `present` par figurine + phase en one-hot de 6 bits,
-§0.32 T-H/T-J, 2026-07-28). **Toute évolution du
+slot ennemi, 2026-07-27) → 20626 (bit `present` par figurine + phase en one-hot de 6 bits,
+§0.32 T-H/T-J, 2026-07-28) → **20654** (`n_models_engaging` : mes figurines engagées avec chaque
+cible ennemie, support du choix de cible de mêlée, §9 P3-1, 2026-07-28). **Toute évolution du
 schéma change cette valeur et rend les `.zip` existants incompatibles : le retrain `--new` est
 obligatoire.**
 

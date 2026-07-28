@@ -118,7 +118,7 @@
       "freeze_after_progress": 1.0
     },
     "observation_params": {
-      "obs_size": 20626,
+      "obs_size": 20654,
       "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x9 (GRID_CHANNELS, engine/spatial_grid.py) restant fournie a part. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE). perception_radius / max_nearby_units / max_valid_targets NE SONT PLUS configures non plus : ils n'alimentaient que le pipeline mono-figurine, supprime le 2026-07-28. Ce que l'agent percoit du terrain est la grille egocentrique (engine/spatial_grid.py), dont la geometrie est partagee avec le masque et le decodeur."
     },
     "step_log_buffer_size": 200,
@@ -297,7 +297,7 @@
       "apply_to": "agent_only"
     },
     "observation_params": {
-      "obs_size": 20626,
+      "obs_size": 20654,
       "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x9 (GRID_CHANNELS, engine/spatial_grid.py) restant fournie a part. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE). perception_radius / max_nearby_units / max_valid_targets NE SONT PLUS configures non plus : ils n'alimentaient que le pipeline mono-figurine, supprime le 2026-07-28. Ce que l'agent percoit du terrain est la grille egocentrique (engine/spatial_grid.py), dont la geometrie est partagee avec le masque et le decodeur."
     },
     "step_log_buffer_size": 200,
@@ -485,7 +485,7 @@
       "freeze_after_progress": 1.0
     },
     "observation_params": {
-      "obs_size": 20626,
+      "obs_size": 20654,
       "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x9 (GRID_CHANNELS, engine/spatial_grid.py) restant fournie a part. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE). perception_radius / max_nearby_units / max_valid_targets NE SONT PLUS configures non plus : ils n'alimentaient que le pipeline mono-figurine, supprime le 2026-07-28. Ce que l'agent percoit du terrain est la grille egocentrique (engine/spatial_grid.py), dont la geometrie est partagee avec le masque et le decodeur."
     },
     "step_log_buffer_size": 200,
@@ -631,7 +631,7 @@
       "apply_to": "agent_only"
     },
     "observation_params": {
-      "obs_size": 20626,
+      "obs_size": 20654,
       "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x9 (GRID_CHANNELS, engine/spatial_grid.py) restant fournie a part. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE). perception_radius / max_nearby_units / max_valid_targets NE SONT PLUS configures non plus : ils n'alimentaient que le pipeline mono-figurine, supprime le 2026-07-28. Ce que l'agent percoit du terrain est la grille egocentrique (engine/spatial_grid.py), dont la geometrie est partagee avec le masque et le decodeur."
     },
     "step_log_buffer_size": 200,
@@ -822,7 +822,7 @@
       "apply_to": "agent_only"
     },
     "observation_params": {
-      "obs_size": 20626,
+      "obs_size": 20654,
       "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x9 (GRID_CHANNELS, engine/spatial_grid.py) restant fournie a part. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE). perception_radius / max_nearby_units / max_valid_targets NE SONT PLUS configures non plus : ils n'alimentaient que le pipeline mono-figurine, supprime le 2026-07-28. Ce que l'agent percoit du terrain est la grille egocentrique (engine/spatial_grid.py), dont la geometrie est partagee avec le masque et le decodeur."
     },
     "step_log_buffer_size": 200,
