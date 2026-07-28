@@ -52,7 +52,7 @@
       "checkpoint_name_prefix": "ppo_checkpoint",
       "eval_deterministic": true,
       "eval_render": false,
-      "bot_eval_freq": 2000,
+      "bot_eval_freq": 4000,
       "bot_eval_use_episodes": true,
       "bot_eval_intermediate": 100,
       "bot_eval_final": 100,
