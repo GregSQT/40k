@@ -2538,8 +2538,8 @@ class ObservationBuilder:
         # peut pas croiser le canal avec le MOVE de l'unite pour retrouver ou est cette frontiere.
         if str(game_state.get("phase", "")).lower() == "move":  # get allowed (phase absente = hors move)
             from engine.phase_handlers.shared_utils import (
-                get_squad_move_budget,
                 read_squad_move_cell_map,
+                squad_normal_move_frontier_subhex,
             )
             from engine.spatial_grid import normalize_move_costs
 
@@ -2559,7 +2559,7 @@ class ObservationBuilder:
                 grid[GRID_CH_MOVE_COST, cell_idxs // GRID_SIZE, cell_idxs % GRID_SIZE] = (
                     normalize_move_costs(
                         costs,
-                        get_squad_move_budget(active_squad_id, game_state, "normal"),
+                        squad_normal_move_frontier_subhex(game_state, active_squad_id),
                         half_extent,
                     )
                 )

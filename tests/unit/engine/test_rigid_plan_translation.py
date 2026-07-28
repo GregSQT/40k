@@ -16,7 +16,10 @@ Le fix translate en coordonnées CUBE, miroir de
 import pytest
 
 from engine.hex_utils import hex_distance
-from engine.phase_handlers.shared_utils import build_rigid_plan
+from engine.phase_handlers.shared_utils import (
+    SQUAD_RIGID_MOVE_DESTINATION_LEVEL,
+    build_rigid_plan,
+)
 
 
 def _game_state(positions):
@@ -53,7 +56,7 @@ def test_rigid_plan_preserves_internal_distances(dest):
     gs = _game_state(BLOCK)
     plan = build_rigid_plan(dest[0], dest[1], "1", gs)
     assert plan is not None
-    new_pos = {mid: (col, row) for mid, col, row in plan}
+    new_pos = {mid: (col, row) for mid, col, row, _lvl in plan}
     assert set(new_pos) == set(BLOCK)
 
     mids = sorted(BLOCK)
@@ -73,6 +76,9 @@ def test_rigid_plan_anchor_lands_on_destination(dest):
     gs = _game_state(BLOCK)
     plan = build_rigid_plan(dest[0], dest[1], "1", gs)
     assert plan is not None
-    anchor_mid, anchor_col, anchor_row = plan[0]
+    anchor_mid, anchor_col, anchor_row, anchor_level = plan[0]
     assert anchor_mid == "1#0"
     assert (anchor_col, anchor_row) == dest
+    # §0.34 : le squad move rigide atterrit au SOL — le niveau est porté par le plan, jamais
+    # laissé implicite (sinon `commit_move` conserve le niveau d'origine).
+    assert anchor_level == SQUAD_RIGID_MOVE_DESTINATION_LEVEL

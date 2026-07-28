@@ -2288,6 +2288,7 @@ def movement_build_valid_destinations_pool(
     *,
     move_budget_override: Optional[int] = None,
     out_costs: Optional[Dict[Tuple[int, int], float]] = None,
+    destination_level: Optional[int] = None,
 ) -> List[Tuple[int, int]]:
     """
     Build valid movement destinations using BFS pathfinding.
@@ -2298,6 +2299,14 @@ def movement_build_valid_destinations_pool(
 
     Paramètres de la refonte spatiale (§7 T2/T3, §10.5) — **purement additifs** : quand les deux
     valent ``None``, le comportement est strictement celui d'avant. Le PvP ne les passe jamais.
+
+    ``destination_level`` : niveau auquel la légalité des cellules (occupation amie/ennemie) est
+    évaluée. ``None`` = niveau de l'unité (PvP/preview : elle reste à son étage). Le squad move
+    rigide du gym passe ``0`` : ses destinations sont TOUJOURS au sol (ce chemin ``read_only``
+    retourne avant le bloc multi-niveaux), et le coût vertical est facturé par le malus de descente
+    ci-dessous. Sans ce paramètre, une escouade partie d'un étage voyait son pool filtré par
+    l'occupation de SON étage alors que la validation d'exécution la teste au sol — deux grandeurs
+    différentes des deux côtés de l'invariant « masque ⊆ exécutable » (§0.34).
 
     ``move_budget_override`` : force le budget (subhex) au lieu de le dériver de
     ``_advance_roll_for``. Nécessaire au gym : le masque a besoin du pool au budget **Advance**
@@ -2376,7 +2385,10 @@ def movement_build_valid_destinations_pool(
     # Collision niveau-consciente : les figs d'un AUTRE niveau que le mover ne bloquent pas (étages
     # différents ne se chevauchent pas). Niveau du mover = niveau de l'unité (ancre). Tout au niveau 0
     # aujourd'hui → filtre par 0 == comportement historique (zéro régression).
-    _mover_level = int(unit.get("level", 0))  # get allowed
+    _mover_level = (
+        int(destination_level) if destination_level is not None
+        else int(unit.get("level", 0))  # get allowed
+    )
     occupied_positions = build_occupied_positions_set(
         game_state, exclude_unit_id=unit_id_str, level=_mover_level
     )

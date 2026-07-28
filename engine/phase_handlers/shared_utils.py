@@ -3688,12 +3688,23 @@ def geodesic_move_reach(
     return field
 
 
+# Le squad move rigide du gym atterrit TOUJOURS au SOL : en `read_only` le pool d'ancre
+# retourne avant son bloc multi-niveaux (`movement_build_valid_destinations_pool`), donc toutes ses
+# destinations sont des cases de niveau 0, et le coût vertical d'une figurine partant d'un étage est
+# facturé au budget par `squad_descent_penalty_subhex` (§13.06). Les consommateurs du plan (pool,
+# érosion, validation, mesure, commit) doivent donc raisonner sur CE niveau, pas sur le niveau
+# d'ORIGINE des figurines. Sans cela (§0.34) : la figurine descendue restait marquée à l'étage
+# (`floor_height_at` lève « hors empreinte de plancher ») et sa destination était testée contre
+# l'occupation d'un AUTRE étage que celui où elle atterrit.
+SQUAD_RIGID_MOVE_DESTINATION_LEVEL = 0
+
+
 def build_rigid_plan(
     anchor_dest_col: int,
     anchor_dest_row: int,
     squad_id: str,
     game_state: Dict[str, Any],
-) -> Optional[List[Tuple[str, int, int]]]:
+) -> Optional[List[Tuple[str, int, int, int]]]:
     """Translation rigide depuis l'ancre — Normal/Advance/Fall Back.
 
     L ancre = figurine vivante de plus petit index (cf. _recompute_squad_anchor).
@@ -3702,7 +3713,11 @@ def build_rigid_plan(
     translation a dx impair change la parite de colonne de chaque figurine et DEFORME le
     bloc (deux figs a distance 2 se retrouvent a distance 1).
 
-    Returns list[(model_id, new_col, new_row)] ou None si squad sans figurine vivante.
+    Returns list[(model_id, new_col, new_row, niveau_sol)] ou None si squad sans figurine vivante.
+    Le 4e element est TOUJOURS `SQUAD_RIGID_MOVE_DESTINATION_LEVEL` : ce move atterrit au sol (cf.
+    la constante). L'omettre laissait `commit_move` conserver le niveau d'origine (« absence = garder
+    le niveau courant ») et une figurine partie d'un etage restait marquee a l'etage hors de toute
+    empreinte de plancher (§0.34).
     AUCUNE validation ici — voir validate_move_plan.
     """
     from engine.hex_utils import offset_to_cube, cube_to_offset
@@ -3720,12 +3735,12 @@ def build_rigid_plan(
     ax, ay, az = offset_to_cube(anchor_origin_col, anchor_origin_row)
     bx, by, bz = offset_to_cube(dest_col, dest_row)
     dcx, dcy, dcz = bx - ax, by - ay, bz - az
-    plan: List[Tuple[str, int, int]] = []
+    plan: List[Tuple[str, int, int, int]] = []
     for mid in alive_mids:
         m = models_cache[mid]
         mx, my, mz = offset_to_cube(int(m["col"]), int(m["row"]))
         new_col, new_row = cube_to_offset(mx + dcx, my + dcy, mz + dcz)
-        plan.append((mid, int(new_col), int(new_row)))
+        plan.append((mid, int(new_col), int(new_row), SQUAD_RIGID_MOVE_DESTINATION_LEVEL))
     return plan
 
 
@@ -3746,30 +3761,45 @@ def _validate_plan_coherency(
     return _positions_in_coherency(models, game_state)
 
 
-def move_uses_geodesic_distance(game_state: Dict[str, Any], squad_id: str) -> bool:
-    """La distance de move de cette escouade se mesure-t-elle en CHEMIN (BFS géodésique) ?
+def move_plan_distance_mode(game_state: Dict[str, Any], squad_id: str) -> str:
+    """GÉOMÉTRIE de la distance de move d'une escouade — `geodesic` | `cube` | `euclidean`.
 
-    Source UNIQUE du choix de métrique, partagée par la validation d'un plan
-    (`explain_move_plan_rejection`) et par la comptabilisation de la distance parcourue
-    (`move_plan_path_distances`). Deux cas où la distance à vol d'oiseau est EXACTE, donc où
-    le BFS est inutile — ce ne sont pas des replis, ce sont des géométries différentes :
-      - FLY actif (Take to the skies 21.03) : la traversée ignore murs et figurines → le
-        trajet légal EST la ligne droite ;
-      - métrique euclidienne (PvP) : le trajet légal est euclidien, déjà borné par le pool
-        par-figurine, pas par le prédicat hex.
+    Source UNIQUE, partagée par la validation d'un plan (`explain_move_plan_rejection`) et par la
+    comptabilisation de la distance parcourue (`move_plan_path_distances`). Ce ne sont pas des
+    replis : ce sont trois géométries différentes, et les deux côtés DOIVENT mesurer la même.
+
+      - `euclidean` — métrique euclidienne (PvP) : le trajet légal est any-angle, déjà borné par
+        le pool par-figurine, pas par le prédicat hex.
+      - `cube` — métrique hex + FLY actif (Take to the skies 21.03) : la traversée ignore murs et
+        figurines, donc le trajet légal EST la ligne d'hexes, et sa longueur est la distance cube.
+      - `geodesic` — métrique hex au sol : le trajet contourne murs et figurines → BFS.
+
+    ⚠️ `cube` et `euclidean` ne sont PAS interchangeables (§0.34). Un pas d'hexagone vaut `1,5` en
+    unités `_hex_center` vers l'est mais `sqrt(3) ≈ 1,732` vers le sud : convertir un budget en
+    PAS vers un budget euclidien par `× 1,5` sous-estime de 15 % un trajet en colonne, et une
+    destination validée à `distance cube <= budget` ressortait « injoignable » de la mesure
+    euclidienne (`_euclidean_path_distance`).
     """
     from engine.phase_handlers.movement_handlers import (
         _fly_traversal_active,
         _move_distance_metric,
     )
 
-    # Métrique AVANT l'unité (cf. érosion) : euclidien / non-hex → cube-exact, pas de lecture d'unité.
+    # Métrique AVANT l'unité (cf. érosion) : euclidien / non-hex → pas de lecture d'unité.
     if _move_distance_metric(game_state) != "hex":
-        return False
+        return "euclidean"
     _unit_obj = get_unit_by_id(game_state, str(squad_id))
-    return not (
-        _unit_obj is not None and _fly_traversal_active(game_state, _unit_obj, str(squad_id))
-    )
+    if _unit_obj is not None and _fly_traversal_active(game_state, _unit_obj, str(squad_id)):
+        return "cube"
+    return "geodesic"
+
+
+def move_uses_geodesic_distance(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """La distance de move de cette escouade se mesure-t-elle en CHEMIN (BFS géodésique) ?
+
+    Prédicat booléen construit sur `move_plan_distance_mode` — une seule implémentation du choix.
+    """
+    return move_plan_distance_mode(game_state, squad_id) == "geodesic"
 
 
 # Bornes SUPÉRIEURES du budget d'un move, par type, en POUCES. Elles ne servent qu'à borner
@@ -3875,7 +3905,8 @@ def move_plan_path_distances(
         raise KeyError(f"move_plan_path_distances: figurine {plan[0][0]} absente de models_cache")
     squad_id = str(first["squad_id"])
     player = int(first["player"])
-    use_geodesic = move_uses_geodesic_distance(game_state, squad_id)
+    _mode = move_plan_distance_mode(game_state, squad_id)
+    use_geodesic = _mode == "geodesic"
     bound = _move_distance_field_bound(game_state, squad_id, move_type)
 
     distances: Dict[str, float] = {}
@@ -3889,9 +3920,21 @@ def move_plan_path_distances(
         o_col, o_row = int(model["col"]), int(model["row"])
         n_col, n_row = int(entry[1]), int(entry[2])
         o_level = int(require_key(model, "level"))
-        if not use_geodesic:
-            # Métrique EUCLIDIENNE (PvP) ou FLY. FLY (21.03) traverse tout : la ligne droite EST
-            # le trajet. En euclidien au sol, le trajet contourne les obstacles — on mesure donc
+        # Niveau du TRAJET = niveau CIBLE du plan (4e élément), miroir exact de la validation
+        # (`explain_move_plan_rejection`) : mesurer le chemin d'une figurine qui descend parmi les
+        # obstacles de son étage de DÉPART mesurerait une autre grandeur que celle validée (§0.34).
+        _path_level = int(entry[3]) if len(entry) >= 4 and entry[3] is not None else o_level
+        if _mode == "cube":
+            # Métrique hex + FLY (21.03) : la traversée ignore murs et figurines, donc le trajet
+            # EST la ligne d'hexes et sa longueur est la distance cube — EXACTEMENT la grandeur
+            # que `explain_move_plan_rejection` vient de borner (`calculate_hex_distance`). La
+            # mesurer avec le champ euclidien mesurerait une AUTRE grandeur : un pas vers le sud
+            # vaut `sqrt(3)` unités `_hex_center` contre `1,5` vers l'est, si bien qu'un plan
+            # validé ressortait « injoignable » de sa propre mesure (§0.34).
+            distances[mid] = float(calculate_hex_distance(o_col, o_row, n_col, n_row))
+            continue
+        if _mode == "euclidean":
+            # Métrique EUCLIDIENNE (PvP) : le trajet contourne les obstacles — on mesure donc
             # avec la MEME primitive any-angle que le pool par-figurine
             # (`_euclidean_move_field`), sans quoi un contournement de mur serait sous-compte et
             # [HEAVY] 24.16 deviendrait LAXISTE en PvP.
@@ -3899,15 +3942,15 @@ def move_plan_path_distances(
                 game_state, squad_id, player, model, (n_col, n_row), o_level, bound
             )
             continue
-        if o_level not in transit_by_level:
-            transit_by_level[o_level] = build_move_transit_blocked(
-                game_state, squad_id, player, o_level
+        if _path_level not in transit_by_level:
+            transit_by_level[_path_level] = build_move_transit_blocked(
+                game_state, squad_id, player, _path_level
             )
-        fkey = (squad_id, player, o_col, o_row, o_level, bound)
+        fkey = (squad_id, player, o_col, o_row, _path_level, bound)
         field = fields.get(fkey)
         if field is None:
             field = geodesic_move_reach(
-                o_col, o_row, bound, transit_by_level[o_level], board_cols, board_rows
+                o_col, o_row, bound, transit_by_level[_path_level], board_cols, board_rows
             )
             fields[fkey] = field
         path = field.get((n_col, n_row))
@@ -4052,17 +4095,21 @@ def explain_move_plan_rejection(
                         f"({o_col},{o_row}) > budget_per_model={budget}"
                     )
             else:
-                _origin_level = int(require_key(models_cache[mid], "level"))
-                if _origin_level not in _transit_by_level:
-                    _transit_by_level[_origin_level] = build_move_transit_blocked(
-                        game_state, squad_id, player, _origin_level
+                # Transit du niveau CIBLE, pas du niveau d'origine : une figurine qui descend
+                # (squad move rigide, destination sol) chemine parmi les obstacles du SOL, et
+                # c'est ce meme niveau que le pool d'ancre du masque a utilise. Origine == cible
+                # dans tous les autres cas, donc aucun changement ailleurs (§0.34).
+                _path_level = level
+                if _path_level not in _transit_by_level:
+                    _transit_by_level[_path_level] = build_move_transit_blocked(
+                        game_state, squad_id, player, _path_level
                     )
-                _fkey = (str(squad_id), int(player), o_col, o_row, _origin_level, budget)
+                _fkey = (str(squad_id), int(player), o_col, o_row, _path_level, budget)
                 _field = _geo_fields.get(_fkey)
                 if _field is None:
                     _field = geodesic_move_reach(
                         o_col, o_row, budget,
-                        _transit_by_level[_origin_level], board_cols, board_rows,
+                        _transit_by_level[_path_level], board_cols, board_rows,
                     )
                     _geo_fields[_fkey] = _field
                 _pdist = _field.get(cell)
@@ -8861,6 +8908,33 @@ def squad_advance_or_fall_back_allowed(game_state: Dict[str, Any], squad_id: str
     )
 
 
+def squad_normal_move_frontier_subhex(game_state: Dict[str, Any], squad_id: str) -> int:
+    """Budget de move NORMAL réellement EXÉCUTABLE (subhex) = la frontière normal/advance.
+
+    SOURCE UNIQUE de cette frontière, partagée par les quatre consommateurs qui doivent la voir
+    identique : le masque (`build_squad_action_mask`), le décodeur (`infer_squad_move_type`),
+    l'érosion du pool (`erode_move_pool_by_squad_block`) et le canal de coût de l'observation
+    (`normalize_move_costs`).
+
+    `get_squad_move_budget(..., "normal")` seul NE SUFFIT PAS : le squad move rigide atterrit au
+    sol, donc `resolve_squad_move_constraints` retranche le coût de descente §13.06 (et le pool
+    l'a lui aussi déjà retranché de son budget de construction). Classer une cellule avec `M`
+    alors que l'exécution la valide avec `M - descente` produit une bande morte `(M - d, M]` de
+    cellules classées `normal` mais INEXÉCUTABLES en normal → `incohérence masque/exécution`
+    (§0.34). Elles relèvent d'un Advance, et c'est ce que cette frontière dit.
+
+    Rendu à `max(0, ...)` par `resolve_squad_move_constraints` : une descente qui dépasse M donne
+    une frontière nulle — toute destination exige alors un Advance, ce qui est exact.
+    """
+    from engine.phase_handlers.movement_handlers import squad_descent_penalty_subhex
+
+    return max(
+        0,
+        get_squad_move_budget(str(squad_id), game_state, "normal")
+        - squad_descent_penalty_subhex(game_state, str(squad_id)),
+    )
+
+
 def classify_squad_move_type(
     in_enemy_er: bool, normal_budget: int, geodesic_cost: float
 ) -> str:
@@ -8870,6 +8944,10 @@ def classify_squad_move_type(
       s'excluent donc mutuellement — aucun choix a faire).
     - cout <= M        -> `normal`
     - cout > M         -> `advance`  (09.06 : distance max = M + jet)
+
+    `normal_budget` = le budget normal EXÉCUTABLE (`squad_normal_move_frontier_subhex`), coût de
+    descente §13.06 déduit — la MEME grandeur que celle que l'exécution valide. Passer `M` brut
+    rouvre la bande morte de §0.34.
 
     Le cout est la distance de CHEMIN (regle 03), pas la distance a vol d'oiseau : une cellule
     proche mais atteignable seulement en contournant un mur peut exiger un Advance.
@@ -8903,7 +8981,7 @@ def infer_squad_move_type(
     """
     return classify_squad_move_type(
         _squad_is_in_enemy_er(game_state, squad_id),
-        get_squad_move_budget(squad_id, game_state, "normal"),
+        squad_normal_move_frontier_subhex(game_state, squad_id),
         geodesic_cost,
     )
 
@@ -9019,7 +9097,13 @@ def erode_move_pool_by_squad_block(
     squad_models = require_key(game_state, "squad_models")
     alive_mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
     if len(alive_mids) <= 1:
-        # Mono-figurine : l'ancre EST le bloc, le pool d'ancre est déjà exact.
+        # Mono-figurine : l'ancre EST le bloc (offset nul), et son coût de pool borne déjà son
+        # trajet par le budget que l'exécution appliquera — depuis §0.34 la frontière
+        # normal/advance du masque est le budget EXÉCUTABLE (`squad_normal_move_frontier_subhex`,
+        # descente §13.06 déduite), la même que celle de `resolve_squad_move_constraints`. Cette
+        # égalité est la CONDITION de ce court-circuit : tant qu'elle tient, l'érosion est un
+        # no-op ici (test `test_mono_model_squad_descending_is_executable`). Quand elle était
+        # fausse, ce `return` laissait passer la bande morte et le gym crashait.
         return costs
 
     anchor = models_cache[alive_mids[0]]
@@ -9032,7 +9116,11 @@ def erode_move_pool_by_squad_block(
         m = models_cache[mid]
         mx, my, mz = offset_to_cube(int(m["col"]), int(m["row"]))
         off = (mx - ax, my - ay, mz - az)
-        lvl = int(require_key(m, "level"))
+        # Niveau d'ARRIVÉE (sol) et non d'origine : c'est là que la figurine atterrit, donc c'est
+        # cette occupation-là qui la bloque et ce transit-là qu'elle emprunte — miroir de
+        # `build_rigid_plan` / `validate_move_plan` / du pool d'ancre (§0.34). Identique au niveau
+        # d'origine pour toute escouade déjà au sol, c'est-à-dire partout ailleurs.
+        lvl = SQUAD_RIGID_MOVE_DESTINATION_LEVEL
         offsets_by_level.setdefault(lvl, []).append(off)
         models_geo.append((int(m["col"]), int(m["row"]), lvl, off))
 
@@ -9187,7 +9275,11 @@ def erode_move_pool_by_squad_block(
             # de move (classify_squad_move_type sur le coût d'ancre) : normal/fall_back → M,
             # advance → M + jet. Chaque figurine contrainte doit atteindre sa destination translatée
             # dans ce budget en distance de CHEMIN (sinon `validate_move_plan` lèverait à l'exécution).
-            if _in_er or cost <= _classifier_normal:
+            # La frontière est `_normal_exec` (= M - descente §13.06), PAS `_classifier_normal` :
+            # c'est celle du masque et du décodeur (`squad_normal_move_frontier_subhex`). Comparer
+            # à M classait `normal` des cellules de la bande `(M - d, M]` puis les érodait comme
+            # hors budget — elles relèvent d'un Advance et sont désormais gardées (§0.34).
+            if _in_er or cost <= _normal_exec:
                 _exec_b = _normal_exec
             else:
                 _exec_b = _advance_exec if _advance_exec is not None else _normal_exec
@@ -9294,8 +9386,12 @@ def build_squad_move_cell_map(
     # Take to the skies 21.03) et le pool le traite deja — il renvoie simplement zero destination,
     # donc zero cellule jouable. Ajouter une garde reviendrait a court-circuiter le moteur.
     costs: Dict[Tuple[int, int], float] = {}
+    # `destination_level` : le squad move rigide atterrit au SOL (cf.
+    # `SQUAD_RIGID_MOVE_DESTINATION_LEVEL`) — la légalité des cellules doit donc être évaluée
+    # au niveau 0, celui que `validate_move_plan` appliquera, et non à l'étage de départ (§0.34).
     movement_build_valid_destinations_pool(
-        game_state, squad_id, read_only=True, move_budget_override=budget, out_costs=costs
+        game_state, squad_id, read_only=True, move_budget_override=budget, out_costs=costs,
+        destination_level=SQUAD_RIGID_MOVE_DESTINATION_LEVEL,
     )
 
     # T6-g : le pool ci-dessus ne valide que l'ANCRE ; l'execution translate tout le BLOC.
@@ -9419,7 +9515,9 @@ def build_squad_action_mask(
             )
             # Invariants de l'escouade resolus UNE fois : les reresoudre par cellule coutait 48%
             # du masque (scan de `units` + empreintes d'engagement a chaque appel).
-            normal_budget = get_squad_move_budget(squad_id, game_state, "normal")
+            # Frontiere = budget normal EXECUTABLE (descente §13.06 deduite), la meme grandeur que
+            # `resolve_squad_move_constraints` valide a l'execution (§0.34).
+            normal_budget = squad_normal_move_frontier_subhex(game_state, squad_id)
             for cell_idx, (_dest, cost) in cell_map.items():
                 # Type classe par `classify_squad_move_type`, la MEME regle que le decoder (T3)
                 # appliquera pour executer la cellule. La rejouer en ligne ici (`cost >

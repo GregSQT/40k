@@ -379,9 +379,10 @@ def normalize_move_costs(
         cout in [0, M]  ->  [0, seuil]          (regime NORMAL)
         cout in (M, H]  ->  (seuil, 1]          (regime ADVANCE)
 
-    ou `M` = budget de move normal (`get_squad_move_budget(..., "normal")`, la MEME grandeur que
-    `classify_squad_move_type` compare au cout) et `H` = demi-etendue de la grille = budget Advance
-    MAXIMAL (`grid_half_extent_subhex`), borne superieure de tout cout du pool.
+    ou `M` = budget de move normal EXECUTABLE (`squad_normal_move_frontier_subhex` : le MOVE moins
+    le cout de descente §13.06 — la MEME grandeur que `classify_squad_move_type` compare au cout,
+    cf. §0.34) et `H` = demi-etendue de la grille = budget Advance MAXIMAL
+    (`grid_half_extent_subhex`), borne superieure de tout cout du pool.
 
     Monotone et bijective par morceaux : rien n est perdu, seule l echelle est recalee. Une simple
     division par `H` serait plus courte mais placerait la frontiere a `MOVE / (MOVE + 6)` — cf. le

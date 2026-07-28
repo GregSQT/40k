@@ -40,7 +40,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.34` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.33` le 2026-07-28).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.35` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.34` le 2026-07-28).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -63,6 +63,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | **§0.30** | Encodeur d'entités partagé + tête pointeur (et 6 trous trouvés le 2026-07-26) | 🟢 **LIVRÉ (2026-07-26)** — T-A→T-F faits ; ne bloque plus §0.14 | **1** | Vérification demandée par l'utilisateur après §9.2.5. **6 trous trouvés**, dont : une escouade ennemie **invisible ET intirable** dans 6 épisodes sur 10 (5 slots figés pour 6 escouades mesurées) ; le gym ignore les types de tir **10.05 / 10.06** ; au tir le gym déclare **une seule arme (index 0), une seule cible** — violation de **04.01** et **04.02** ; l'heuristique d'arme de mêlée a été **périmée par P1** (ignore ANTI-X, DEVASTATING, MELTA…). Décisions actées : renommage `PISTOL` → `CLOSE_QUARTERS`, encodeur d'entité **partagé** (unités+armes, amies+ennemies), **K=20 unités / K=10 armes**, **tête pointeur** pour le ciblage, retrain accepté. **TOUT est livré le 2026-07-26** (T-A→T-F + §1.9 + audit final) : `obs_size` 199 → **20166** *(valeur du 2026-07-26 ; état courant **20545**, cf. §0.31)*, espace d'action 1047 → **1062**. Résidu **§1.9** (volet MONSTER/VEHICLE de 10.06 côté PvP/mono) **refermé le 2026-07-26** après validation PvP de T-C par l'utilisateur — plus aucun résidu ouvert. Détail complet, mesures et journal → **[`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)**. |
 | **§0.31** | Complétude de l'observation (objectifs situés, règles d'unité) + cache des profils d'armes | 🟢 **LIVRÉ (2026-07-27)** — 3 commits, 13 tests + mutations | **1** | Audit demandé par l'utilisateur (« l'obs est-elle complète, branchée, optimale ? »). Branchement **intact**. **2 trous fermés** : (1) les objectifs n'avaient **aucune position** — mesuré, **1 à 2 sur 5** tombaient dans la fenêtre de grille alors que 15 actions de zone les désignent (`ab9baa56`) ; (2) les **règles d'unité** étaient invisibles du pipeline squad, 13 bits d'effet par entité, extinction 19.04 verrouillée (`0fb94a01`). **Perf** : profils d'armes mémoïsés, `build_squad_observation` **2,86 → 1,69 ms** (`7a84e124`). **K larges GARDÉS** (arbitrage utilisateur, généralisation future) — coût mesuré : **0 paramètre**, **0 ms de construction**, 1,39× sur le forward. `obs_size` **20166 → 20601** ⇒ le run §0.14 doit être un `--new` postérieur à ces commits. Détail → **§0.31**. |
 | **§0.32** | Optimalité de l'obs ET de la TÊTE d'action — audit du 2026-07-28 | 🟠 **OUVERT** — 6 constats ; **lot obs T-H/T-I/T-J LIVRÉ le 2026-07-28** (`deab7e03`, 13 tests + mutations, `obs_size` 20601 → **20626**) ; **lot canaux T-K/T-L LIVRÉ le 2026-07-28** (`GRID_CHANNELS` 7 → **9**, 11 tests + mutations, **0 appel de pool supplémentaire mesuré**, `obs_size` inchangé) ; reste T-G (tête) | **2** (après le lancement du run §0.14 : T-G change la policy, donc un run en cours reste valide comme baseline) | Question de l'utilisateur : « mon obs est-elle optimale ? ». ⚠️ **Une 1re version de cette entrée affirmait « aucun manque de contenu, seulement la forme et l'aval » — FAUX et retiré le 2026-07-28** : la GRILLE a deux manques de contenu, **T-K** (le coût géodésique par cellule, déjà calculé pour le masque puis jeté — c'est lui qui arbitre normal vs advance, donc le tir et la charge) et **T-L** (l'escouade ACTIVE est peinte dans le canal allié, indistinguable des autres escouades amies sur une grille pourtant égocentrique). Ordre corrigé : lot obs (T-H/T-I/T-J) → canaux (T-K/T-L) → tête (T-G), parce que les canaux changent `GRID_CHANNELS`, donc l'entrée du CNN. **T-G (majeur)** : les 1024 logits de cellule de move sortent d'un `Linear` dense ([`pointer_policy.py:112`](../../ai/pointer_policy.py#L112)) et la carte CNN est aplatie avant la tête ([`spatial_extractor.py:228`](../../ai/spatial_extractor.py#L228)) — c'est **le défaut exact que la tête pointeur a corrigé pour 20 slots de tir, laissé sur 97 % de l'espace d'action**. **T-H** : une figurine sur le centroïde et non engagée a sa ligne `self_models_*` entièrement nulle ⇒ le masque de présence déduit par `abs().sum() > 0` la compte **absente**. **T-I** : `col_rel`/`row_rel` sont en coordonnées **offset brutes** alors que la grille et les directions d'objectif travaillent dans la projection `_hex_center`. **T-J** : `deployment` et `command` partagent la valeur `phase = 0.0`, et le décodage a un `.get(…, 0.0)`. Détail, mesures et périmètre → **§0.32**. |
+| **§0.34** | `incohérence masque/exécution` sur les escouades qui DESCENDENT d'un étage (§13.06) | ✅ **CORRIGÉ (2026-07-28)** — 10 tests + 4 mutations rouges, `43 → 0` sur les mêmes 650 pas | — | Sorti de la note « hors périmètre » de §0.32. **Root cause : la frontière normal/advance était calculée sur le `MOVE` BRUT** alors que le pool ET l'exécution appliquent `M − coût de descente` — les cellules de la bande `(M − d, M]` étaient classées `normal` puis rejetées à l'exécution. Deux facettes de la même moitié d'implémentation : le plan rigide ne portait **pas de niveau d'arrivée** (figurine descendue restée marquée à l'étage → `floor_height_at`), et la mesure FLY sous métrique hex utilisait un champ **euclidien** contre une borne **cube**. ⚠️ **La piste « mono-figurine » de §0.32 était le symptôme, pas la cause** : l'érosion rattrapait la bande morte pour les escouades multi-fig en **supprimant des Advances légaux**, et ne la rattrapait pas pour les mono → crash. ⚠️ **Ce bug ne bloquait PAS le run §0.14** : mesuré à **0 occurrence** sur le scénario d'entraînement (x1 et x5) ; les 43/650 venaient de `scenario_pvp_test`, seul scénario avec une escouade à `level: 1`. Motif §0.18/§0.26. Détail → §0.34. |
 | **§0.33** | Rollout buffer = **46,9 Go** pour **39 Go de RAM** sur les profils à 48 envs | 🟠 **NE BLOQUE PAS le run lancé** (`--training-config x1` = 8 envs = 7,8 Go) ; bloque `x5_append` / `x1_debug`. **Arbitrage 2026-07-28 : aucun changement de config** | — (rouvrir avant tout run à 48 envs) | Le dimensionnement RAM de `move_action_space_spatial_rework.md` §8.3 ne compte que la GRILLE (14,49 Go à 9 canaux, « sous la limite »). Depuis §0.30/§0.31 le **vecteur pèse plus lourd que la grille** (20 626 contre 9 216 floats) et vit dans le même `DictRolloutBuffer`, alloué **d'un bloc au premier `learn()`**. Mesuré sur la config réelle : **116,6 Ko par transition** ⇒ `x5_append` et `x1_debug` (`n_envs=48 × n_steps=8192` = 393 216 transitions) = **46,9 Go**, contre **39 Go physiques / 29 Go disponibles** — l'allocation échoue avant le premier pas. `x1`, `x5_new` et `x5_debug` (`n_envs=8`) = **7,8 Go**, qui passent. ⚠️ **La ligne §0.14 dit « run x5_new, 48 envs » alors que le profil `x5_new` porte `n_envs=8`** : vérifier quel profil et quel override sont réellement lancés AVANT de relancer. ⚠️ La proposition « `n_steps` 8192 → 1024 » a été formulée puis **retirée** : le nombre de pas de gradient ne dépend pas de `n_steps`, et les ablations CoreAgent (30k ép., 48 envs) donnent 8192 pour **inférieur** à 16384. Détail et leviers réels → §0.33. |
 | ~~**§0.22**~~ | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **CLOS le 2026-07-21 — décision (B) STOP à L1+L_bbox** | — | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) livrés et commités** (`ff2293e0`, `6f268d38`) — gain ovale **1,49×**, round10 1,78×, pool strictement identique ; A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. **Reliquat NON poursuivi** (ratio gain/risque mauvais, mesuré) : BFS wavefront réfuté (plus lent à move 12), L2b runs NumPy réfuté (1,1× net + complexité), numba écarté (risque segfault sur run 36 h). ⚠️ **MAJ 2026-07-22 : ce coût perf est désormais INCONTOURNABLE** — le fix de conformité move §0.25 REQUIERT une érosion géodésique par-figurine, exactement le coût que §0.22 combattait. Il refait surface en §0.27. Détail complet → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§10, §11) ; leçon de méthode → §0bis. |
 
@@ -85,6 +86,122 @@ résolues §0.15–§0.19, §0.21, **§0.22**, **§0.23**, **§0.24**, **§0.25*
 réserve de méthode sur le document lui-même (T1→T5 et section 9 n'ont **pas** été revérifiés
 ligne à ligne) et la règle de périmètre `ArmageddonAgent`.
 
+
+### 0.34 `incohérence masque/exécution` sur les escouades qui DESCENDENT d'un étage — ✅ CORRIGÉ (2026-07-28)
+
+**Origine.** La note « Trouvé en passant, HORS périmètre » de §0.32 : `execute_squad_move a échoué :
+squad=1008 type=normal … figurine 1008#0 hors budget : trajet légal contournant murs/figs >
+budget`, **43 occurrences sur 650 pas** d'actions aléatoires légales, plus deux erreurs voisines
+(`_euclidean_path_distance … injoignable`, `floor_height_at: no floor at level 1`). Rien ne les
+attrape dans `step()` : l'exception sort de `env.step`, le worker `SubprocVecEnv` meurt.
+
+**Repro (AVANT tout fix, condition n°1 de la méthode).** Le chiffre de §0.32 vient du harnais de
+mesure de T-K/T-L, pas du scénario d'entraînement : `config/board/44x60x5/scenario/scenario_pvp_test.json`,
+**seed 42**, actions légales aléatoires, reset après chaque exception. Reproduit **à l'identique :
+43 occurrences / 650 pas** (`execute_squad_move` 23, `floor_height_at` 16, `_euclidean_path_distance` 4).
+⚠️ **Le scénario d'entraînement, lui, n'a produit AUCUNE occurrence** (650 pas en `--resolution 1`,
+seed 12345, avant tout fix) : ce bug ne bloquait pas le run §0.14 par lui-même. L'affirmation
+« le training ne peut pas tourner » est donc **fausse**, et elle a été énoncée avant de vérifier
+sur quel scénario le 43/650 avait été mesuré (leçon §0bis).
+
+⚠️ **Mais la raison de cette immunité n'est PAS « le terrain d'entraînement n'a pas d'étage » —
+il en a.** `terrain-mc1.json`, le terrain du scénario d'entraînement, porte **5 zones avec un
+étage `level: 1` à 3″**. L'immunité est **structurelle**, et il faut la connaître comme telle :
+
+- la **mise en place** du gym construit une formation **au sol** — `deployment_preview_plan` a
+  `level: int = 0` par défaut et le plan est un 4-uplet `(mid, col, row, level=0)`
+  ([`deployment_handlers.py:889`](../../engine/phase_handlers/deployment_handlers.py#L889)) ;
+- le **squad move** rigide atterrit toujours au sol :
+  `SQUAD_RIGID_MOVE_DESTINATION_LEVEL = 0`
+  ([`shared_utils.py:3699`](../../engine/phase_handlers/shared_utils.py#L3699)).
+
+Aucune escouade du gym ne peut donc **atteindre** un étage : elle n'y est que si un scénario l'y
+**pose** (`level: 1` dans les positions fixes), ce que fait `scenario_pvp_test`. C'est vrai quel
+que soit le nombre d'étages du terrain.
+
+📌 **Corollaire à ne pas perdre.** Le jour où le gym gagne des destinations d'étage — la
+**Phase B « Observation niveaux »** de ce document, et `_multilevel_floor_destinations` qui existe
+déjà — cette immunité **disparaît sans que rien ne le signale**, et toute la classe §0.34 redevient
+atteignable en training. Les 10 tests de `test_squad_move_descent_frontier.py` sont ce qui
+l'empêchera : ils ne dépendent pas du scénario, ils posent l'escouade à l'étage eux-mêmes.
+
+**Root cause — UNE grandeur mesurée différemment de chaque côté, à trois endroits.**
+Le squad move rigide du gym atterrit **toujours au sol** (le pool `read_only` retourne avant son
+bloc multi-niveaux), et le coût vertical §13.06 est facturé en retranchant `squad_descent_penalty_subhex`
+du budget. Trois consommateurs l'ignoraient :
+
+| # | Divergence | Site | Occurrences |
+|---|---|---|---|
+| 1 | **Frontière normal/advance** : `classify_squad_move_type` reçoit `get_squad_move_budget(…, "normal")` = `M` **brut**, alors que le pool a construit ses destinations à `M − descente` et que `resolve_squad_move_constraints` valide à `M − descente`. Les coûts de la bande `(M − d, M]` sont classés `normal` puis **rejetés** à l'exécution. | [`shared_utils.py:8906`](../../engine/phase_handlers/shared_utils.py#L8906) (décodeur), `:9421` (masque), [`observation_builder.py:2560`](../../engine/observation_builder.py#L2560) (canal T-K), `:9221` (érosion) | 23 |
+| 2 | **Niveau d'arrivée** : `build_rigid_plan` n'émettait pas de 4ᵉ élément, et « pas de niveau » signifie pour `commit_move` « **garder** le niveau courant ». La figurine descendue restait marquée `level=1` sur une case de sol → `floor_height_at` lève ; et sa destination était testée contre l'occupation d'un **autre étage** que celui où elle atterrit. | [`shared_utils.py:3691`](../../engine/phase_handlers/shared_utils.py#L3691) | 16 |
+| 3 | **Mesure FLY sous métrique hex** : la validation borne la distance **CUBE** (`calculate_hex_distance`), la comptabilisation mesurait un champ **EUCLIDIEN** avec une borne convertie par `× 1,5`. Or un pas d'hexagone vaut `1,5` vers l'est mais `sqrt(3) ≈ 1,732` vers le sud : un plan validé ressortait « injoignable » de sa propre mesure. | [`shared_utils.py:3937`](../../engine/phase_handlers/shared_utils.py#L3937) | 4 |
+
+**Mesure qui NOMME la ligne** (probe in-engine, aucune reconstruction offline — leçon §0bis) :
+```
+squad 1008 : M_normal=30  descente=15  advance_roll=1
+budget de POOL avant descente = 35 ; move_range réel du pool = 20
+COÛT géodésique de la cellule choisie = 19.0
+frontière utilisée par classify = M_normal = 30  -> type déduit = normal
+budget que l'EXÉCUTION applique (normal) = M - descente = 15      => 19 > 15, rejet
+```
+
+**⚠️ La piste de §0.32 était le SYMPTÔME, pas la cause.** « `erode_move_pool_by_squad_block`
+court-circuite le mono-figurine » est exact, mais ce n'est pas la root cause : l'érosion
+**rattrapait** la bande morte pour les escouades multi-figurines — en **supprimant du masque des
+Advances parfaitement légaux**, silencieusement. Le mono-figurine n'avait pas ce filet, donc il
+crashait. Corriger l'érosion seule aurait supprimé le crash **en aggravant** la perte de coups
+légaux. Le court-circuit mono est **conservé** (perf) : il est valide *parce que* la frontière est
+désormais le budget exécutable — condition écrite dans son commentaire et verrouillée par test.
+
+**Correctif — source unique de la frontière.** `squad_normal_move_frontier_subhex(game_state,
+squad_id)` = `max(0, M − descente)`, lue par les **quatre** consommateurs (masque, décodeur,
+érosion, canal de coût de l'obs). Plus `SQUAD_RIGID_MOVE_DESTINATION_LEVEL = 0` porté par
+`build_rigid_plan`, propagé au pool (`destination_level`), à l'érosion, à la validation et à la
+mesure (niveau de **trajet** = niveau **cible**, pas d'origine). Plus `move_plan_distance_mode`
+(`geodesic` | `cube` | `euclidean`), qui remplace le booléen `move_uses_geodesic_distance` — lequel
+confondait deux géométries incompatibles sous un même `False`.
+
+**Effet fonctionnel (au-delà du crash).** Une escouade qui descend d'un étage récupère ses
+destinations de la bande `(M − d, M]`, désormais jouables **en Advance** — elles étaient soit
+inexécutables (mono), soit absentes du masque (multi). Conformité 09.06 : un déplacement que le
+budget Normal ne couvre pas EST un Advance.
+
+**Verrous.** `tests/unit/engine/test_squad_move_descent_frontier.py` — **10 tests**, dont
+l'invariant « masque ⊆ exécutable » sur le cas mono-figurine descendant, et la non-érosion de la
+bande morte sur le cas multi-figurines. **4 mutations vérifiées ROUGES**, une par ligne corrigée ;
+celle de la frontière rejoue **le message d'erreur de production mot pour mot**
+(`figurine 1#0 hors budget : … trajet legal contournant murs/figs > budget`).
+
+**Re-mesure (2026-07-28).**
+
+| Trajectoire (650 pas chacune) | Avant | Après |
+|---|---|---|
+| `scenario_pvp_test` x5, seed 42 — **la mesure d'origine, protocole identique** | **43** (23 + 16 + 4) | **0** |
+| `scenario_pvp_test` x5, seed 7 | — | **0** |
+| `scenario_pvp_test` x5, seed 1234 | — | **0** |
+| `scenario_training_armageddon` x1 | **0** (seed 12345) | **0** (seed 42) |
+
+Total après fix : **2 600 pas d'actions légales aléatoires, 0 exception moteur.**
+
+Fichiers : `engine/phase_handlers/shared_utils.py`, `engine/phase_handlers/movement_handlers.py`,
+`engine/observation_builder.py`, `tests/unit/engine/test_rigid_plan_translation.py` (contrat du
+plan à 4 éléments), `tests/unit/engine/test_squad_move_descent_frontier.py` (neuf).
+Tests impactés relancés verts (leçon §0.32 : lancer les fichiers IMPACTÉS, pas seulement les
+neufs) : `test_move_mask_is_executable`, `test_move_budget_geodesic`, `test_squad_spatial_move_mask`,
+`test_move_pool_block_erosion`, `test_rigid_plan_translation`, `test_move_plan_intra_squad_levels`,
+`test_charge3d_floors_integration`, `test_spatial_grid`, `test_squad_grid_observation`,
+`test_deployment_per_model_commit`. Pyright : 0 erreur.
+
+📌 **Rattachement au motif §0.18 / §0.26.** Troisième occurrence de la même famille : *deux côtés
+d'un invariant qui croient mesurer la même chose*. §0.18 = un écrivain qui ne teste pas la cellule
+qu'il occupe ; §0.26 = un cache clé sur un compteur contournable ; §0.34 = une frontière calculée
+sur le budget **nominal** quand l'exécution applique le budget **effectif**. À chaque fois, le
+correctif est le même : **une seule fonction produit la grandeur**, et les deux côtés l'appellent.
+Nouveauté de §0.34 : le bug était **partiellement masqué par un filet** (l'érosion), ce qui l'a
+rendu invisible sur 95 % des escouades et l'a fait passer pour un cas particulier « mono-figurine ».
+📌 **Leçon de méthode (→ §0bis).** Une piste écrite dans une note « hors périmètre » est une
+hypothèse, pas un diagnostic : celle-ci nommait le bon fichier, la bonne fonction, la bonne ligne —
+et la mauvaise cause.
 
 ### 0.33 Rollout buffer 46,9 Go pour 39 Go de RAM — 🔴 BLOQUANT le run (2026-07-28)
 
@@ -373,7 +490,8 @@ son tir.
 
 **Correctif livré.** `GRID_CH_MOVE_COST` (canal 8), encodé par `normalize_move_costs`
 ([`spatial_grid.py`](../../engine/spatial_grid.py), source unique) : affine **par morceaux**,
-`[0, M] → [0 ; 0,5]` et `(M, H] → (0,5 ; 1]`, où `M` est le budget de move normal et `H` la
+`[0, M] → [0 ; 0,5]` et `(M, H] → (0,5 ; 1]`, où `M` est le budget de move normal — **exécutable**,
+c'est-à-dire coût de descente §13.06 déduit, depuis §0.34 — et `H` la
 demi-étendue de la grille (= budget Advance MAXIMAL, borne supérieure de tout coût du pool).
 Le canal tient donc dans `Box(0,1)` — contrainte réelle de l'espace d'obs — et **la frontière
 normal/advance tombe sur 0,5 exactement, pour toute unité et toute échelle de board**.
@@ -1137,6 +1255,27 @@ Le seul contre-exemple était dans le répertoire non échantillonné.
 
 ### Sur le raisonnement et la preuve
 
+
+**Une piste écrite dans une note « hors périmètre » est une hypothèse, pas un diagnostic (§0.34, 2026-07-28).**
+La note de §0.32 désignait le bon fichier, la bonne fonction et la bonne ligne
+(`erode_move_pool_by_squad_block`, court-circuit mono-figurine) — et **la mauvaise cause**. La vraie
+divergence était en amont : la frontière normal/advance était calculée sur le `MOVE` **brut** quand le
+pool et l'exécution appliquent `MOVE − coût de descente`. Le court-circuit ne faisait que **retirer le
+filet** qui masquait le bug ailleurs : sur les escouades multi-figurines, l'érosion « corrigeait » la
+bande morte en **supprimant silencieusement des Advances légaux**. Deux corollaires :
+1. **Un bug partiellement masqué par un filet se déguise en cas particulier.** « Ça ne touche que les
+   mono-figurines » était vrai pour le *crash* et faux pour le *défaut* : 100 % des escouades
+   descendantes perdaient des coups légaux.
+2. **Corriger là où ça crashe aurait aggravé le défaut** (érosion étendue au mono = crash supprimé,
+   coups légaux perdus partout). Avant de corriger le site du raise, vérifier **quelle grandeur** chaque
+   côté de l'invariant mesure — c'est le motif §0.18/§0.26 pour la troisième fois.
+
+**Vérifier SUR QUEL scénario un chiffre a été mesuré avant de le transformer en blocage (§0.34, 2026-07-28).**
+« 43 occurrences / 650 pas, le training ne peut pas tourner » : les 43 venaient du harnais de bench de
+T-K/T-L, qui tourne sur **`scenario_pvp_test`** — le seul scénario portant une escouade à `level: 1`. Le
+scénario d'ENTRAÎNEMENT mesuré dans les mêmes conditions donne **0**, en x1 comme en x5. Le bug était
+réel et il est corrigé, mais il ne bloquait pas le run §0.14. Un chiffre sans son scénario n'est pas
+une fréquence, c'est une anecdote.
 
 **Prototyper + bencher AVANT d'intégrer un levier perf (§0.22, 2026-07-21) — la mesure prime sur le plan écrit.**
 Le chantier `MOVE_POOL_BUILD` a fait CINQ mesures qui ont chacune démenti une hypothèse « évidente » du
