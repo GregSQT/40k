@@ -62,12 +62,12 @@ actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
-| **§0.14** | Re-mesure du run — win-rate par matchup | 🟢 **RUN 3 EN COURS** — lancé le 2026-07-28 ~23 h 20 depuis `main` (P3-2 inclus : `obs_size` **20768**, action space **1107**, rampe de déploiement **0.0 → 0.8**), arbre propre | **1** | ⛔ **WORKING TREE GELÉ jusqu'à la fin de ce run** : aucun commit de code/config, aucun checkout, aucune édition — les doc `.md` sont sûres (jamais ré-importées). Historique : 🔴 **RUN 1 mort à 20 h 20** (§0.41+§0.42 mergés pendant lui, `obs_size` changé). 🔴 **RUN 2 mort à ~21 h 45** à la 1ʳᵉ éval (600 épisodes `error` en 7,1 s) : le `git checkout` de 21 h 39 a réécrit le code sur le disque, les workers d'éval `spawn` ont reconstruit l'architecture P3-2 (`action_net [17,320]` + `charge_query_net`) pour charger un snapshot P2 (`[18,320]`, sans) → `load_state_dict` lève → `BrokenProcessPool`. Diagnostic reproduit, leçon durcie en §0bis. Points d'observation : la 1ʳᵉ éval (marqueur 2000) doit **se terminer** (§0.27) ; aucun modèle ne peut être sauvé avant 10 000 (`save_best_min_episodes`) ; le livrable est le win-rate par matchup de l'éval finale. Checkpoints 720 k et 80 k : contrats périmés, inutilisables. |
+| **§0.14** | Re-mesure du run — win-rate par matchup | 🔴 **RUN 3 ARRÊTÉ** par l'utilisateur (2026-07-28, fin de nuit) pour livrer §0.40 points 1-2 — il avait été lancé ~23 h 20 depuis `main` (P3-2 inclus : `obs_size` **20768**, action space **1107**, rampe de déploiement **0.0 → 0.8**) | **1** | **RUN 4 à lancer** depuis `main` = `2893bbcb` (§0.40 points 1-2 inclus). `obs_size` **inchangé** (20768), donc aucun contrat d'archi cassé — mais le run 3 a entraîné le déploiement sur l'observation fausse, ses mesures de déploiement ne valent rien. ⛔ **Dès qu'un run tourne, WORKING TREE GELÉ** : aucun commit de code/config, aucun checkout, aucune édition — les doc `.md` sont sûres (jamais ré-importées). Historique : 🔴 **RUN 1 mort à 20 h 20** (§0.41+§0.42 mergés pendant lui, `obs_size` changé). 🔴 **RUN 2 mort à ~21 h 45** à la 1ʳᵉ éval (600 épisodes `error` en 7,1 s) : le `git checkout` de 21 h 39 a réécrit le code sur le disque, les workers d'éval `spawn` ont reconstruit l'architecture P3-2 (`action_net [17,320]` + `charge_query_net`) pour charger un snapshot P2 (`[18,320]`, sans) → `load_state_dict` lève → `BrokenProcessPool`. Diagnostic reproduit, leçon durcie en §0bis. Points d'observation : la 1ʳᵉ éval (marqueur 2000) doit **se terminer** (§0.27) ; aucun modèle ne peut être sauvé avant 10 000 (`save_best_min_episodes`) ; le livrable est le win-rate par matchup de l'éval finale. Checkpoints 720 k et 80 k : contrats périmés, inutilisables. |
 | **[§9](V11_phaseA.md#s9)** | Phase A' — **P2 + P3 points 0/1/2 livrés**, **P3 tranches 3→8** (décisions restantes) | 🟢 **P2 + P3-0 + P3-1 + P3-2 TOUS MERGÉS sur `main`** (fast-forward du 2026-07-28 23 h ; `main` = `acd63b66`) | **2** | **P3-1 (cible de mêlée)** → §0.41 : une décision dont les candidats sont des ENTITÉS déjà observées se paramètre en **dimension d'action + tête pointeur**, pas en `CHOICE_k`. **P2 (mécanisme générique) + P3-0 (rule-choice)** → §0.42 : `CHOICE_0..5` pour les candidats qui ne sont **pas** des entités observées ; `raw_action_int % len(options)` n'existe plus. **P3-2 (cible de charge)** → §0.43 : patron P3-1, `TOTAL_ACTION_SIZE` **1107**, `obs_size` **20768**. Reste **P3-3→8** (unité à activer, allocation des pertes, pile-in/conso, move-after-shooting, FLY, optionnels), **P4**, **P5**. ⚠️ Aucune de ces 4 livraisons n'est MESURÉE : le run 3 est le premier à les entraîner. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). ⛔ Toute tranche suivante se livre dans un **`git worktree` séparé** tant que le run tourne. |
 | **§0.38** | Code mort `_attack_sequence_rng` non supprimé — 2ᵉ moitié de P1 | 🟠 **OUVERT** (constaté 2026-07-28) | **3** | P1 prévoyait « porter les règles vers le vif **PUIS supprimer le mort** ». Le portage est fait ; la suppression **non**. Détail → §0.38. |
 | **§0.33** | Rollout buffer 46,9 Go pour 39 Go de RAM | 🟠 **CONDITIONNEL** — ne bloque que les profils à 48 envs | **4** (avant tout run 48 envs) | Vérifié 2026-07-28 dans la config : `x1`/`x5_new`/`x5_debug` = **8 envs** (passent) ; `x5_append`/`x1_debug` = **48 envs** (échouent à l'allocation). Ne pas lancer ces deux-là sans rouvrir l'entrée. |
-| **§0.29** | Scénario SM vs Orks fixed/active + scheduler | 🟢 **USAGE CONFIGURÉ** le 2026-07-28 (`active_ratio_end` 0.0 → **0.8**, commit `acd63b66`) — et c'est le réglage CORRECT, cf. l'asymétrie ci-dessous | 5 | Le run 3 joue une part croissante d'épisodes en `active` (0 % au début → 80 % à la fin, `p_active = start + (end−start)·progress`, [w40k_core.py:934](../../engine/w40k_core.py#L934)). 🔴 **ASYMÉTRIE VÉRIFIÉE le 2026-07-28 23 h 30 — la rampe ne s'applique QU'À L'ENTRAÎNEMENT, jamais à l'éval.** `deployment_mode_schedule.training_only: true` + `_is_training_scenario_context()` qui exige `/scenarios/training/` dans le chemin ([w40k_core.py:693](../../engine/w40k_core.py#L693)) ⇒ les scénarios d'éval (`/scenarios/holdout_regular/`, tous en `deployment_type: "active"`) **jouent TOUJOURS une phase de déploiement**, quelle que soit la rampe. **Donc `active_ratio_end: 0.0` créait un décalage entraînement/éval** : agent entraîné 100 % en placement figé, puis noté sur des parties à déployer. La rampe à 0.8 **aligne** les deux — la remettre à 0 dégraderait la mesure. ⚠️ Réserve qui subsiste (et qui préexistait) : l'observation du déploiement est défaillante (§0.40, défauts 1-2 vérifiés, non corrigés), donc la qualité du déploiement appris est plafonnée par l'observation, pas par la politique. Traiter §0.40 améliore les DEUX régimes. |
-| **§0.40** | Observation de la phase de déploiement déficiente (3 défauts vérifiés) | 🔴 **OUVERT** — chantier externe | 6 | Détail et pistes → [`observation_deploiement.md`](observation_deploiement.md) (sorti de l'audit archivé le 2026-07-28). Points 1-2 (obs ≠ unité du masque, grille centrée hors plateau) = correctifs indépendants et peu coûteux ; point 3 (décrire les hexes candidats) change `obs_size` → à séquencer avec un run `--new`. Détail → §0.40. |
+| **§0.29** | Scénario SM vs Orks fixed/active + scheduler | 🟢 **USAGE CONFIGURÉ** le 2026-07-28 (`active_ratio_end` 0.0 → **0.8**, commit `acd63b66`) — et c'est le réglage CORRECT, cf. l'asymétrie ci-dessous | 5 | Le run 3 joue une part croissante d'épisodes en `active` (0 % au début → 80 % à la fin, `p_active = start + (end−start)·progress`, [w40k_core.py:934](../../engine/w40k_core.py#L934)). 🔴 **ASYMÉTRIE VÉRIFIÉE le 2026-07-28 23 h 30 — la rampe ne s'applique QU'À L'ENTRAÎNEMENT, jamais à l'éval.** `deployment_mode_schedule.training_only: true` + `_is_training_scenario_context()` qui exige `/scenarios/training/` dans le chemin ([w40k_core.py:693](../../engine/w40k_core.py#L693)) ⇒ les scénarios d'éval (`/scenarios/holdout_regular/`, tous en `deployment_type: "active"`) **jouent TOUJOURS une phase de déploiement**, quelle que soit la rampe. **Donc `active_ratio_end: 0.0` créait un décalage entraînement/éval** : agent entraîné 100 % en placement figé, puis noté sur des parties à déployer. La rampe à 0.8 **aligne** les deux — la remettre à 0 dégraderait la mesure. ✅ **Réserve levée le 2026-07-28** : les défauts 1 et 2 de l'observation du déploiement sont corrigés (§0.40, commits `0e0551e8` / `2893bbcb`, `obs_size` inchangé). Il reste le seul point 3 (les hexes candidats ne sont pas décrits), donc un plafond résiduel mais bien plus bas. ⚠️ Le run 3 lancé le 2026-07-28 à 23 h 20 est ANTÉRIEUR à ces deux commits : il a entraîné le déploiement sur l'observation fausse. |
+| **§0.40** | Observation de la phase de déploiement — **points 1-2 corrigés**, point 3 ouvert | 🟠 **PARTIELLEMENT OUVERT** — chantier externe | 6 | **Points 1 et 2 livrés le 2026-07-28** (`0e0551e8` obs = unité du masque, `2893bbcb` grille ancrée sur la zone de déploiement) : `obs_size` **inchangé** (20768), donc aucun modèle invalidé. Reste le **point 3** seul (décrire les 5 hexes-stratégies candidats) — il change `obs_size` → à séquencer avec un run `--new`. Détail → §0.40. |
 | **§0.42** | P2 « décision agent » | ✅ **MERGÉ** sur `main` — reste la MESURE (run 3 en cours) | — | Détail → §0.42. |
 | **§0.43** | P3-2 « cible de charge » | ✅ **MERGÉ** sur `main` le 2026-07-28 23 h (fast-forward, 8 commits, 0 conflit) — reste la MESURE (run 3 en cours) | — | La branche `v11-p3-2-charge-target` est devenue identique à `main` (supprimable). Détail → §0.43. |
 | **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)). T2→T5 **jamais revérifiés** : ne pas s'appuyer sur leurs ✅ sans relecture. ⚠️ Sa **section** est restée en §0hist (elle y était déjà avant l'épuration) alors que sa part T2→T5 est ouverte — laissée en place plutôt que scindée, pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
@@ -135,15 +135,31 @@ mêlée). Cf. la réserve de mesure en [§9.3bis](V11_phaseA.md#s9.3bis).
 journalisé DEUX fois dans step.log — une écriture directe correcte, plus une tentative de flush qui
 échouait en silence sur une clé mal orthographiée. Détail en [§9.3bis](V11_phaseA.md#s9.3bis).
 
-### 0.40 Observation du déploiement déficiente — 🔴 OUVERT, contenu dans un doc dédié (2026-07-28)
+### 0.40 Observation du déploiement — points 1-2 corrigés, point 3 ouvert — 🟠 (2026-07-28)
 
 **Le contenu d'état vit dans [`observation_deploiement.md`](observation_deploiement.md)** (extrait
 de l'audit archivé `Implémenté/V11_audit_observation.md` §11 le 2026-07-28, constats re-vérifiés
 dans le code le même jour) — cette entrée n'est que le **pointeur d'orchestration**, conformément à
-la règle « un contenu d'état vit à UN seul endroit ». Résumé : (1) l'obs de déploiement décrit
-`next(iter(units_cache))`, pas l'unité du masque ; (2) grille égocentrique centrée hors plateau
-(sentinelle négative) ; (3) les 5 slots-stratégies ne sont pas décrits dans l'obs. Points 1-2 :
-correctifs indépendants ; point 3 : extension de contrat d'obs (`obs_size` change → retrain `--new`).
+la règle « un contenu d'état vit à UN seul endroit ».
+
+**Livré le 2026-07-28** (2 commits, tests de contrat rouges sous mutation) :
+- **point 1 ✅** (`0e0551e8`) — l'obs de déploiement décrivait `next(iter(units_cache))` et non
+  l'unité du masque. Source unique désormais : `ActionDecoder.get_deployment_active_unit`, qui
+  **lève** sur pool vide au lieu de rendre une obs nulle.
+- **point 2 ✅** (`2893bbcb`) — la grille égocentrique était centrée sur la sentinelle `(-1,-1)`,
+  donc sur une autre région du plateau (0 % de la zone du joueur 1 visible). Elle est ancrée sur la
+  **zone de déploiement** lue dans `deployment_state["deployment_pools"]`, géométrie
+  `engine/spatial_grid` **inchangée** (seul l'ancrage bouge). 96 %/78 % de la zone visible après.
+
+**Reste ouvert — point 3 seul** : les 5 slots sont 5 **stratégies** évaluées sur tous les hexes
+valides, et l'obs n'en décrit aucun ; le cache de scoring du décodeur calcule déjà tout
+(`los_exposure_by_hex`, centres d'objectifs, …). C'est une extension de contrat d'obs →
+`obs_size` change → **run `--new`**.
+
+⚠️ **Conséquence de mesure** : `obs_size` reste **20768** (verrouillé par test), donc aucun modèle
+n'est invalidé — mais le CONTENU de l'obs de déploiement change. Un agent entraîné avant ces deux
+commits a appris le déploiement sur une observation fausse : ne pas comparer sa qualité de
+déploiement à celle d'un agent entraîné après.
 
 <a id="s0.38"></a>
 ### 0.38 Code mort `_attack_sequence_rng` — la 2ᵉ moitié de P1 n'a jamais été faite — 🟠 OUVERT (2026-07-28)
@@ -508,6 +524,30 @@ le run multi-env, pas le smoke, qui a validé.
 >
 > Ces passages existent pour **empêcher de re-diagnostiquer un faux problème**. Aucun ne doit
 > être résumé ni supprimé, même si l'entrée dont il vient est close.
+
+### Un canal d'observation NON VIDE ne prouve pas qu'il regarde au bon endroit (§0.40, 2026-07-28)
+
+Écrit en corrigeant l'ancre de la grille égocentrique pendant le déploiement (§0.40 point 2).
+Le premier verrou écrit était : *« pendant le déploiement, le canal murs et le canal objectifs de
+la grille ne sont pas vides »*. Il était **vert AVANT le correctif** — donc il ne prouvait rien.
+
+**Pourquoi** : le board fait 220×300 et la fenêtre égocentrique en couvre ±90. Ancrée sur la
+sentinelle `(-1,-1)`, elle montrait le coin `(0,0)` du plateau — une région pleine de murs et
+d'objectifs, simplement **pas celle où l'unité allait se poser** (la zone du joueur 1 commence à la
+ligne 151). Une ancre fausse ne produit pas une grille vide : elle produit une grille **plausible
+et fausse**, exactement le motif d'erreur le plus difficile à voir en lecture.
+
+**Ce qui verrouille vraiment** — deux assertions, pas une :
+1. une grandeur **quantifiée et comparable** (ici : la part des hexes de la zone de déploiement qui
+   tombent dans la fenêtre — 0 %/25 % avant, 96 %/78 % après) plutôt qu'un `.any()` ;
+2. une **égalité exacte** entre le canal produit et une rasterisation indépendante depuis l'ancre
+   attendue. C'est elle, et elle seule, qui verrouille le **câblage** dans `build_squad_grid` :
+   tester la fonction d'ancrage isolément laissait passer la mutation qui remettait l'ancienne
+   ancre à l'appel.
+
+**Règle** : un test d'observation spatiale doit affirmer **où** la fenêtre regarde, jamais
+seulement **qu'elle contient quelque chose**. Et tout verrou d'obs se valide par mutation : casser
+le correctif, exiger le rouge, restaurer, exiger le vert.
 
 ### Ne pas juger une conformité de règle par une reconstruction offline — mesurer sur le vrai chemin in-engine (§0.28, 2026-07-22)
 

@@ -1,10 +1,12 @@
-# Observation de la phase de déploiement — déficiente (chantier ouvert)
+# Observation de la phase de déploiement — points 1 et 2 corrigés, point 3 ouvert
 
 > **Origine** : extrait de [`V11_audit_observation.md`](../Implémenté/V11_audit_observation.md) §11
 > (archivé le 2026-07-28). C'était le seul point **actionnable** restant de cet audit ; il est
 > sorti ici pour ne pas rester noyé en fin d'un document d'archive.
 > **Constats re-vérifiés dans le code le 2026-07-28** — le point 3 d'origine était inexact, il est
 > reformulé ci-dessous.
+> **Points 1 et 2 corrigés le 2026-07-28** (commits `0e0551e8` et `2893bbcb`) ; le point 3 reste
+> le seul chantier ouvert de ce document.
 
 ## Contexte
 
@@ -19,36 +21,69 @@ L'espace d'action du déploiement = **5 slots** (`DEPLOY_SLOT_BASE = 4`, `DEPLOY
 
 ## Les défauts (vérifiés)
 
-### 1. 🔴 L'observation décrit une unité qui n'est pas forcément celle qu'on déploie
+### 1. ✅ CORRIGÉ (2026-07-28, `0e0551e8`) — l'obs décrit l'unité sur laquelle le masque agit
 
-`_build_observation` construit l'obs pour `next(iter(units_cache.keys()))` — la **première clé du
-cache d'unités**, tous joueurs confondus, déployées comme non déployées
-([w40k_core.py](../../../engine/w40k_core.py), branche `phase == "deployment"`).
+**Le défaut** : `_build_observation` construisait l'obs pour `next(iter(units_cache.keys()))` — la
+première clé du cache d'unités, tous joueurs confondus, déployées comme non déployées — alors que
+le masque ouvre les slots 4-8 pour `eligible_units[0]`, issu de
+`deployment_state["deployable_units"][current_deployer]`. Rien ne garantissait que les deux
+désignent la même unité : l'agent décrivait A et posait B (motif D1). **Vérifié en test** : dès le
+2ᵉ step de déploiement, l'obs décrivait l'unité `1` (joueur 1) pendant que le masque agissait sur
+`101` (joueur 2).
 
-Le masque d'action, lui, prend `eligible_units[0]`, issu de
-`deployment_state["deployable_units"][current_deployer]`
-([action_decoder.py](../../../engine/action_decoder.py),
-`_get_eligible_units_for_current_phase` / `build_action_mask`).
+**Ce que le code fait maintenant** : `ActionDecoder.get_deployment_active_unit(game_state)` est le
+point d'entrée unique — même dérivation que le masque
+(`_get_eligible_units_for_current_phase`, pool du déployeur courant filtré vivant), sans
+reconstruire les hexes valides (le poste coûteux du masque). La branche `deployment` de
+`_build_observation` l'appelle, exactement comme la branche `pending_agent_decision` juste
+au-dessus prend l'unité de la décision.
 
-**Rien ne garantit que les deux désignent la même unité.** C'est le même motif de défaut que D1
-(désalignement obs ↔ action) corrigé pour les slots ennemis : l'agent décrit A et agit sur B.
-→ **Correctif minimal, indépendant du reste** : faire lire à l'obs la même source que le masque
-(`deployable_units[current_deployer][0]`), source unique.
+**Cas dégénéré (pool vide)** : `get_deployment_active_unit` **lève**, il ne rend pas d'obs nulle.
+Une obs de zéros décrirait un plateau vide à un agent à qui l'on demande quand même d'agir, et le
+masque correspondant serait tout-faux — donc injouable. Le `_zero_obs()` précédent masquait cet
+état incohérent au lieu de le signaler.
 
-### 2. 🔴 Grille égocentrique dégénérée (centrée hors plateau)
+**Verrou** : `tests/unit/engine/test_deployment_observation_contract.py` — à chaque état de
+déploiement, l'unité passée à `build_squad_observation` (espionnée, donc littéralement celle
+décrite) est celle du masque, appartient au joueur qui déploie, et n'est pas déjà posée.
 
-Une unité non déployée a une position négative : `create_unit` écrit
-`"deployed_on_turn": None if int(config["col"]) < 0 else 0`
-([game_state.py](../../../engine/game_state.py)) — `col < 0` **est** le marqueur « pas sur le
-board ». Or `build_squad_grid` centre la grille sur `active_entry["col"] / ["row"]`
-([observation_builder.py](../../../engine/observation_builder.py)).
+### 2. ✅ CORRIGÉ (2026-07-28, `2893bbcb`) — la grille est ancrée sur la zone de déploiement
 
-→ La grille est centrée sur des coordonnées hors plateau : tous les canaux (murs, alliés, ennemis,
-objectifs, couvert, coût de move) sont vides ou tronqués. L'agent ne voit **pas le terrain** au
-moment précis où il choisit son point d'entrée dans la partie.
+**Le défaut** : une unité non déployée porte `deployed_on_turn is None`, marqueur écrit sous la
+forme `col < 0` (`create_unit`, [game_state.py](../../../engine/game_state.py)). `build_squad_grid`
+centrait la fenêtre égocentrique sur ce `(-1,-1)`. **Mesuré** sur le board 220×300 : la zone du
+joueur 1 s'étend des lignes 151 à 299, la fenêtre (demi-étendue 90) montrait le coin `(0,0)` —
+**0 %** de la zone de déploiement visible (25 % pour le joueur 2), et le canal SELF peint sur
+l'ancre bidon. L'agent ne voyait pas le terrain où il allait se poser.
 
-→ **Piste** : centrer la grille sur la **zone de déploiement** du joueur (ou sur le barycentre des
-hexes candidats) au lieu de l'ancre de l'unité, tant que `deployed_on_turn is None`.
+**Ce que le code fait maintenant** : `ObservationBuilder.squad_grid_anchor(game_state, squad_id)`
+(statique, publique donc testable) rend l'ancre de la grille. Escouade posée → son `col/row`,
+inchangé. Escouade **pas encore posée** → un hex de sa **zone de déploiement**, lue telle quelle
+dans `deployment_state["deployment_pools"]` — la MÊME collection d'hexes que celle où le décodeur
+choisit l'hexe (`_get_valid_deployment_hexes`), donc aucune géométrie recalculée. L'ancre est l'hex
+du pool le plus proche du barycentre (calculé en coordonnées de rendu `_hex_center`, pas en
+`(col,row)` brut : la grille hexagonale décale d'une demi-ligne une colonne sur deux), ce qui la
+garde **dans** la zone même quand celle-ci est concave. Elle lève si le pool manque : une unité
+hors plateau sans zone où la poser est un état incohérent.
+
+La **géométrie** de la grille (`engine/spatial_grid`, source unique partagée avec le masque et le
+décodeur) est **inchangée** — seul le point d'ancrage bouge. L'ancre est mémoïsée par joueur
+(`_grid_deployment_zone_anchor`, pool statique sur la partie) et **purgée au reset** comme les
+autres caches d'obs, sinon l'agent déploierait en regardant la zone de l'épisode précédent.
+
+**Résultat mesuré** : 96 % (joueur 1) et 78 % (joueur 2) des hexes de la zone tombent désormais
+dans la fenêtre, contre 0 % et 25 % avant.
+
+**Limite assumée** (géométrie, pas ancrage) : la demi-étendue de la grille vaut le budget Advance
+maximal de l'escouade, alors que la zone de déploiement est plus large qu'elle — les hexes de
+**flanc extrêmes** (les stratégies 7 et 8) restent hors champ. Les élargir supposerait de changer
+la géométrie partagée avec le masque et le décodeur ; c'est le point 3 qui décrit ces hexes
+directement, sans toucher à la grille.
+
+**Verrous** (mêmes fichiers de test) : ancre sur le plateau ET dans le pool ; ≥ 50 % de la zone
+visible ; canal MURS de la grille produite **égal** à une rasterisation depuis cette ancre (verrou
+du câblage, pas seulement de la fonction d'ancrage) ; canal SELF vide avant la pose ; ancre
+inchangée pour une escouade posée.
 
 ### 3. ⚠️ Les hexes candidats ne sont pas décrits (reformulé — l'énoncé d'origine était faux)
 
@@ -80,8 +115,13 @@ une lecture du cache existant, donc source unique préservée.
 
 ## Périmètre / séquencement
 
-- Les points **1** et **2** sont des corrections indépendantes et peu coûteuses ; le point **3**
-  est une extension de contrat d'observation (change `obs_size` → retrain).
+- Les points **1** et **2** sont **corrigés** (2026-07-28) : ils ne changent **pas** `obs_size`
+  (`SQUAD_OBS_SIZE_TARGET` = **20768**, verrouillé par test), donc ils n'invalident aucun modèle.
+  Ils changent le CONTENU de l'observation de déploiement : un agent entraîné avant eux a appris
+  sur une obs fausse à cet endroit, la comparaison de win-rate déploiement avant/après n'a pas de
+  sens.
+- Le point **3** est le seul reste : extension de contrat d'observation (change `obs_size` →
+  retrain `--new`).
 - Traité **séparément** de la refonte du vecteur de jeu (livrée, cf.
   [`V11_entity_encoder_pointer.md`](../V11_entity_encoder_pointer.md) et
   [`AI_OBSERVATION.md`](../../AI_OBSERVATION.md)).
