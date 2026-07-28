@@ -598,17 +598,17 @@ sont strippés à la remontée, et la résolution est dynamique (pas d'union sta
 <a id="s9.3"></a>
 ### 9.3 P2 — Mécanisme générique « décision agent » — ✅ LIVRÉ (2026-07-28, cf. §9.3bis)
 
-> 🔴 **PORTÉE RÉDUITE le 2026-07-28 (§0.41) — lire ceci avant d'appliquer cette section.**
+> 🔴 **PORTÉE RÉDUITE le 2026-07-28 ([§0.41](V11_agent_rework.md#s0.41)) — lire ceci avant d'appliquer cette section.**
 > Le `CHOICE_0..K-1` décrit ci-dessous suppose des logits produits par des **colonnes denses de
-> `action_net`**. Cette section date du 2026-07-14, donc d'**avant** §0.30 T-E (tête pointeur) et
-> §0.32 T-G (tête 1x1) — qui ont supprimé ce motif : une colonne dense par rang de candidat
+> `action_net`**. Cette section date du 2026-07-14, donc d'**avant** [§0.30](V11_agent_rework.md#s0.30) T-E (tête pointeur) et
+> [§0.32](V11_agent_rework.md#s0.32) T-G (tête 1x1) — qui ont supprimé ce motif : une colonne dense par rang de candidat
 > n'apprend rien des autres et ignore *ce qu'est* le candidat qu'elle score.
 > - **Candidats = entités déjà observées** (cible de mêlée, de charge, de tir, unité à activer) :
 >   ➜ **une dimension d'action par slot + tête pointeur**, PAS `CHOICE_k`. Livré et verrouillé pour
 >   la cible de mêlée (P3-1) → **[§0.41](V11_agent_rework.md#s0.41)**. C'est le patron à suivre.
 > - **Candidats non-entité** (rule-choice, FLY oui/non, pile-in oui/non) : le mécanisme générique
 >   ci-dessous reste pertinent — à ouvrir quand une telle décision est **réellement exercée par les
->   rosters du training** (ce n'est pas le cas du rule-choice, cf. §0.41).
+>   rosters du training** (ce n'est pas le cas du rule-choice, cf. [§0.41](V11_agent_rework.md#s0.41)).
 > Le paragraphe `action_net → Linear(320, 18)` ci-dessous reste valide dans son principe (les
 > colonnes de move/tir/combat sont inertes) ; le compte « 18 » est périmé.
 
@@ -683,7 +683,7 @@ de son adversaire. Hors gym (PvP humain, PvE `pve_controller`), le flux est **in
 (`tests/unit/engine/test_agent_decision_mechanism.py`) + tête d'action
 (`tests/unit/ai/test_pointer_head.py`, 3 tests neufs dont l'alignement `CHOICE_i` ↔ candidat `i`) +
 wrapper (`tests/unit/ai/test_env_wrappers.py`, 2 tests). **Mesure in-engine** (le seul verdict qui
-compte, §0bis) : sur le scénario Tyranid Warrior mêlée — le SEUL roster du jeu portant un rule
+compte, [§0bis](V11_agent_rework.md#s0bis)) : sur le scénario Tyranid Warrior mêlée — le SEUL roster du jeu portant un rule
 choice — **28 décisions exposées et jouées via `CHOICE_i`** sur 2 épisodes, tous terminés, aucun
 masque vide ; sur le scénario d'entraînement réel (SM/Orks), 3 épisodes terminés, **0 décision**,
 flux nominal intact. Un `MaskablePPO` complet (policy + extracteur + config d'agent réelle)
@@ -765,7 +765,7 @@ Ordre par valeur tactique :
    n'existe plus, ni la clé `_last_raw_action_int` qui l'alimentait : le prompt est poussé comme
    `pending_agent_decision`, l'agent le voit dans son observation et le joue par `CHOICE_i` ; le
    choix du camp bot est joué par le bot.
-   🔴 **Son étiquette « le plus urgent » était PÉRIMÉE (§0.41) et le reste : ce point est INERTE
+   🔴 **Son étiquette « le plus urgent » était PÉRIMÉE ([§0.41](V11_agent_rework.md#s0.41)) et le reste : ce point est INERTE
    dans le training.** Une seule unité du projet porte un rule-choice (`TyranidWarriorMelee`,
    déclaré dans les rosters **TS**, pas dans `config/unit_rules.json`), et aucun roster
    d'entraînement ArmageddonAgent n'est tyranide. La correction est **structurelle** (le PvE, le
@@ -792,7 +792,7 @@ Ordre par valeur tactique :
    partagé, arbitrage requis (cf. `A_faire/bug_pile_in_bfs_clearance_mismatch.md` §dernier).
    La boucle `get_best_enemy_score_for_unit` reste vive pour la **cible de charge** (point 2).
    ~~Pilote du mécanisme P2.~~ → il a été le pilote, et il a **tranché la méthode** : slots +
-   pointeur, pas `CHOICE_k` (§0.41). Le point 2 (cible de charge) suit le même patron.
+   pointeur, pas `CHOICE_k` ([§0.41](V11_agent_rework.md#s0.41)). Le point 2 (cible de charge) suit le même patron.
 2. **Cible de charge** — le site vif est la même boucle de scoring dans `convert_squad_action`
    du décodeur (action_decoder ~L917-940), PAS `charge_handlers:1506` (chemin
    `convert_gym_action`, hors gym mais encore vif en PvE via pve_controller — ne pas le
@@ -845,7 +845,7 @@ Les niveaux/élévation restent en Phase B (scénarios plats jusque-là).
 > ⚠️ **MAJ 2026-07-28 : ne PAS utiliser `x1_debug` pour le run court.** Ce profil porte
 > `n_envs: 48` (vérifié dans la config) → `MemoryError` à l'allocation du rollout buffer
 > ([§0.33](V11_agent_rework.md#s0.33) : 46,9 Go demandés pour 29 Go disponibles). Utiliser
-> **`x5_debug`** (8 envs) tant que §0.33 n'est pas rouvert. La phrase ci-dessous date d'avant
+> **`x5_debug`** (8 envs) tant que [§0.33](V11_agent_rework.md#s0.33) n'est pas rouvert. La phrase ci-dessous date d'avant
 > cette mesure.
 
 Chaque tranche P3 : suite de tests verte + smoke 10 épisodes + run court `x1_debug` +

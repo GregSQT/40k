@@ -97,8 +97,8 @@ ligne à ligne) et la règle de périmètre `ArmageddonAgent`.
 <a id="s0.42"></a>
 ### 0.42 P2 « décision agent » — ✅ MERGÉ SUR `main` le 2026-07-28 (avec P3-1), NON MESURÉ
 
-**Ce qui est livré.** Le mécanisme générique « décision agent » (§9.3 P2) et son pilote
-(§9.4 point 0) — détail complet et preuves en [§9.3bis](V11_phaseA.md#s9.3bis).
+**Ce qui est livré.** Le mécanisme générique « décision agent » ([§9.3](V11_phaseA.md#s9.3) P2) et son pilote
+([§9.4](V11_phaseA.md#s9.4) point 0) — détail complet et preuves en [§9.3bis](V11_phaseA.md#s9.3bis).
 
 **État du merge (2026-07-28 soir).** `v11-p2-agent-decision` était **rebasée** sur
 `v11-p3-1-fight-target` (dont les changements d'action space entraient en conflit avec les siens,
@@ -176,6 +176,7 @@ manœuvre, un test qui échoue en migrant signale un écart de comportement rée
 peut confondre les deux implémentations, et la prochaine règle d'arme risque d'être écrite dans la
 mauvaise — c'est précisément ce qui s'est produit et que [§9.0](V11_phaseA.md#s9.0) a découvert le 2026-07-24.
 
+<a id="s0.33"></a>
 ### 0.33 Rollout buffer 46,9 Go pour 39 Go de RAM — 🟠 CONDITIONNEL : bloque les profils à 48 envs, PAS le run à lancer (2026-07-28)
 
 > ⚠️ **Titre corrigé le 2026-07-28** : « BLOQUANT le run » contredisait le corps de l'entrée, qui
@@ -567,7 +568,7 @@ Le seul contre-exemple était dans le répertoire non échantillonné.
 
 ### Un smoke à UN épisode ne voit pas un état qui fuit ENTRE épisodes (§0.42, 2026-07-28)
 
-Le mécanisme de décision agent (§9.3 P2) a été validé par un smoke in-engine : 28 décisions
+Le mécanisme de décision agent ([§9.3](V11_phaseA.md#s9.3) P2) a été validé par un smoke in-engine : 28 décisions
 exposées et jouées, épisodes terminés, aucun masque vide. Le smoke lançait **un épisode par
 moteur**. Le contre-audit a rejoué **3 épisodes enchaînés dans le MÊME moteur** : **16 décisions,
 puis 2, puis 0**. `_choice_timing_fired_events` indexe ses événements sans le numéro d'épisode et
@@ -1021,7 +1022,7 @@ AVANT d'y lancer un entraînement.
 
 
 <a id="s0.41"></a>
-### 0.41 §9 P3-1 — la cible de mêlée devient une dimension d'action (slots ennemis + pointeur) — ✅ LIVRÉ, NON MESURÉ (2026-07-28)
+### 0.41 [§9](V11_phaseA.md#s9) P3-1 — la cible de mêlée devient une dimension d'action (slots ennemis + pointeur) — ✅ LIVRÉ, NON MESURÉ (2026-07-28)
 
 > ✅ **MERGÉ sur `main` le 2026-07-28 soir**, en même temps que §0.42 (P2, rebasée dessus) et
 > **pendant** le run §0.14, sur décision utilisateur. Le passage « Pourquoi une branche » en fin
