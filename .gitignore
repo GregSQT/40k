@@ -122,6 +122,10 @@ ai/temp/
 config.local.json
 config/.device_benchmark.json
 config/local/
+
+# Base de données
+config/users.db
+
 ai/scenario_local.json
 ai/session_scenarios/
 
