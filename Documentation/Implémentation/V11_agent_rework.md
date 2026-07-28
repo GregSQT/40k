@@ -44,7 +44,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.42` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.41` le 2026-07-28).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.43` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.42` le 2026-07-28).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -68,7 +68,7 @@ actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist
 | **§0.33** | Rollout buffer 46,9 Go pour 39 Go de RAM | 🟠 **CONDITIONNEL** — ne bloque que les profils à 48 envs | **4** (avant tout run 48 envs) | Vérifié 2026-07-28 dans la config : `x1`/`x5_new`/`x5_debug` = **8 envs** (passent) ; `x5_append`/`x1_debug` = **48 envs** (échouent à l'allocation). Ne pas lancer ces deux-là sans rouvrir l'entrée. |
 | **§0.29** | Scénario SM vs Orks fixed/active + scheduler | 🟢 Mécanique livrée et validée in-engine ; **reste USAGE + MESURE** | 5 | La mesure rejoint §0.14 : c'est le même run qui la produit. |
 | **§0.40** | Observation de la phase de déploiement déficiente (3 défauts vérifiés) | 🔴 **OUVERT** — chantier externe | 6 | Détail et pistes → [`observation_deploiement.md`](observation_deploiement.md) (sorti de l'audit archivé le 2026-07-28). Points 1-2 (obs ≠ unité du masque, grille centrée hors plateau) = correctifs indépendants et peu coûteux ; point 3 (décrire les hexes candidats) change `obs_size` → à séquencer avec un run `--new`. Détail → §0.40. |
-| **§0.41** | P2 livré sur la branche `v11-p2-agent-decision`, pas sur `main` | 🟠 **OUVERT** — action utilisateur | **1 bis** (juste après le run) | Merger la branche **APRÈS** la fin du run §0.14 et le relevé de sa mesure : P2 change `obs_size` (20712) ET `TOTAL_ACTION_SIZE` (1068), donc le modèle du run devient incompatible dès le merge et le run suivant DOIT être `--new`. Détail → §0.41. |
+| **§0.42** | P2 livré sur la branche `v11-p2-agent-decision`, pas sur `main` | 🟠 **OUVERT** — action utilisateur | **1 bis** (juste après le run) | Merger la branche **APRÈS** la fin du run §0.14 et le relevé de sa mesure : P2 change `obs_size` (20712) ET `TOTAL_ACTION_SIZE` (1068), donc le modèle du run devient incompatible dès le merge et le run suivant DOIT être `--new`. Détail → §0.42. |
 | **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)). T2→T5 **jamais revérifiés** : ne pas s'appuyer sur leurs ✅ sans relecture. ⚠️ Sa **section** est restée en §0hist (elle y était déjà avant l'épuration) alors que sa part T2→T5 est ouverte — laissée en place plutôt que scindée, pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
 
 🟢 **TRANCHÉ le 2026-07-28 soir (arbitrage utilisateur) : `bot_eval_freq = 2000` ASSUMÉ**, pour
@@ -94,8 +94,8 @@ Le run §0.14 peut donc être lancé tel quel, sans retouche de config.
 réserve de méthode sur le document lui-même (T2→T5 et section 9 n'ont **pas** été revérifiés
 ligne à ligne) et la règle de périmètre `ArmageddonAgent`.
 
-<a id="s0.41"></a>
-### 0.41 P2 livré sur une BRANCHE, pas sur `main` — à merger APRÈS le run §0.14 — 🟠 OUVERT (2026-07-28)
+<a id="s0.42"></a>
+### 0.42 P2 livré sur une BRANCHE, pas sur `main` — à merger APRÈS le run §0.14 — 🟠 OUVERT (2026-07-28)
 
 **Ce qui est livré.** Le mécanisme générique « décision agent » (§9.3 P2) et son pilote
 (§9.4 point 0) — détail complet et preuves en [§9.3bis](V11_phaseA.md#s9.3bis).
