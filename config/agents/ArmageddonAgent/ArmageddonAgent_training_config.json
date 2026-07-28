@@ -113,7 +113,7 @@
       "enabled": true,
       "training_only": true,
       "active_ratio_start": 0.0,
-      "active_ratio_end": 0.0,
+      "active_ratio_end": 0.8,
       "schedule": "linear",
       "freeze_after_progress": 1.0
     },
