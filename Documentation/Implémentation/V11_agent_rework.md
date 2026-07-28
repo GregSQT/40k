@@ -40,7 +40,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.35` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.34` le 2026-07-28).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.36` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.35` le 2026-07-28).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -63,6 +63,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | **§0.30** | Encodeur d'entités partagé + tête pointeur (et 6 trous trouvés le 2026-07-26) | 🟢 **LIVRÉ (2026-07-26)** — T-A→T-F faits ; ne bloque plus §0.14 | **1** | Vérification demandée par l'utilisateur après §9.2.5. **6 trous trouvés**, dont : une escouade ennemie **invisible ET intirable** dans 6 épisodes sur 10 (5 slots figés pour 6 escouades mesurées) ; le gym ignore les types de tir **10.05 / 10.06** ; au tir le gym déclare **une seule arme (index 0), une seule cible** — violation de **04.01** et **04.02** ; l'heuristique d'arme de mêlée a été **périmée par P1** (ignore ANTI-X, DEVASTATING, MELTA…). Décisions actées : renommage `PISTOL` → `CLOSE_QUARTERS`, encodeur d'entité **partagé** (unités+armes, amies+ennemies), **K=20 unités / K=10 armes**, **tête pointeur** pour le ciblage, retrain accepté. **TOUT est livré le 2026-07-26** (T-A→T-F + §1.9 + audit final) : `obs_size` 199 → **20166** *(valeur du 2026-07-26 ; état courant **20545**, cf. §0.31)*, espace d'action 1047 → **1062**. Résidu **§1.9** (volet MONSTER/VEHICLE de 10.06 côté PvP/mono) **refermé le 2026-07-26** après validation PvP de T-C par l'utilisateur — plus aucun résidu ouvert. Détail complet, mesures et journal → **[`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)**. |
 | **§0.31** | Complétude de l'observation (objectifs situés, règles d'unité) + cache des profils d'armes | 🟢 **LIVRÉ (2026-07-27)** — 3 commits, 13 tests + mutations | **1** | Audit demandé par l'utilisateur (« l'obs est-elle complète, branchée, optimale ? »). Branchement **intact**. **2 trous fermés** : (1) les objectifs n'avaient **aucune position** — mesuré, **1 à 2 sur 5** tombaient dans la fenêtre de grille alors que 15 actions de zone les désignent (`ab9baa56`) ; (2) les **règles d'unité** étaient invisibles du pipeline squad, 13 bits d'effet par entité, extinction 19.04 verrouillée (`0fb94a01`). **Perf** : profils d'armes mémoïsés, `build_squad_observation` **2,86 → 1,69 ms** (`7a84e124`). **K larges GARDÉS** (arbitrage utilisateur, généralisation future) — coût mesuré : **0 paramètre**, **0 ms de construction**, 1,39× sur le forward. `obs_size` **20166 → 20601** ⇒ le run §0.14 doit être un `--new` postérieur à ces commits. Détail → **§0.31**. |
 | **§0.32** | Optimalité de l'obs ET de la TÊTE d'action — audit du 2026-07-28 | 🟢 **LIVRÉ (2026-07-28)** — les 6 constats sont fermés : **lot obs T-H/T-I/T-J** (`deab7e03`, 13 tests + mutations, `obs_size` 20601 → **20626**), **lot canaux T-K/T-L** (`GRID_CHANNELS` 7 → **9**, 11 tests + mutations, **0 appel de pool supplémentaire mesuré**, `obs_size` inchangé), **tête T-G** (`b78be588`, 14 tests + 4 mutations, **+0,76 % de paramètres**, **×1,78 sur le forward**) | — | Question de l'utilisateur : « mon obs est-elle optimale ? ». ⚠️ **Une 1re version de cette entrée affirmait « aucun manque de contenu, seulement la forme et l'aval » — FAUX et retiré le 2026-07-28** : la GRILLE a deux manques de contenu, **T-K** (le coût géodésique par cellule, déjà calculé pour le masque puis jeté — c'est lui qui arbitre normal vs advance, donc le tir et la charge) et **T-L** (l'escouade ACTIVE est peinte dans le canal allié, indistinguable des autres escouades amies sur une grille pourtant égocentrique). Ordre corrigé : lot obs (T-H/T-I/T-J) → canaux (T-K/T-L) → tête (T-G), parce que les canaux changent `GRID_CHANNELS`, donc l'entrée du CNN. **T-G (majeur, LIVRÉ)** : les 1024 logits de cellule de move sortaient d'un `Linear` dense et la carte CNN était aplatie avant la tête — **le défaut exact que la tête pointeur avait corrigé pour 20 slots de tir, laissé sur 97 % de l'espace d'action**. Ils sortent désormais d'une **conv 1×1** par cellule, sur une carte conservée à 32×32, avec **canaux positionnels** et **conditionnement par le tronc** (les deux ajouts de l'amendement, sans lesquels le 1×1 serait PLUS FAIBLE que la tête dense). ⚠️ **Le gain de sample-efficiency n'est PAS mesuré** — il demande un run ; le coût, lui, l'est (×1,78 sur le forward). **T-H** : une figurine sur le centroïde et non engagée a sa ligne `self_models_*` entièrement nulle ⇒ le masque de présence déduit par `abs().sum() > 0` la compte **absente**. **T-I** : `col_rel`/`row_rel` sont en coordonnées **offset brutes** alors que la grille et les directions d'objectif travaillent dans la projection `_hex_center`. **T-J** : `deployment` et `command` partagent la valeur `phase = 0.0`, et le décodage a un `.get(…, 0.0)`. Détail, mesures et périmètre → **§0.32**. |
+| **§0.35** | Stats VecNormalize **partagées par dossier** — run de 5 h 30 tué à 24 000/30 000 | ✅ **CORRIGÉ (2026-07-28)** — chemin PAR MODÈLE, 3 tests | — | `get_vec_normalize_path()` ignorait le nom du modèle et renvoyait toujours `<dir>/vec_normalize.pkl`. L'évaluation étant **asynchrone**, la consommation du résultat de l'éval PRÉCÉDENTE (`_remove_model_artifacts` : rotation du meilleur robuste, nettoyage du snapshot) supprimait le pkl que les workers de l'éval EN COURS chargent **paresseusement** au premier pas. Au marqueur 24 000 : **600/600 épisodes en erreur en 7 s**, garde-fou strict, run arrêté. ⚠️ Ce n'est PAS §0.27 (timeout) ni le moteur : **24 000 épisodes sans une seule exception moteur**. ⚠️ Le `robust=0.4574` sauvegardé à 20 000 est à **re-mesurer, pas à citer** : rien ne prouve que le pkl chargé était celui de ce modèle (`global_cont` fait 11 dims avant comme après §0.31/§0.32, donc un résidu se charge sans lever). Détail → §0.35. |
 | **§0.34** | `incohérence masque/exécution` sur les escouades qui DESCENDENT d'un étage (§13.06) | ✅ **CORRIGÉ (2026-07-28)** — 10 tests + 4 mutations rouges, `43 → 0` sur les mêmes 650 pas | — | Sorti de la note « hors périmètre » de §0.32. **Root cause : la frontière normal/advance était calculée sur le `MOVE` BRUT** alors que le pool ET l'exécution appliquent `M − coût de descente` — les cellules de la bande `(M − d, M]` étaient classées `normal` puis rejetées à l'exécution. Deux facettes de la même moitié d'implémentation : le plan rigide ne portait **pas de niveau d'arrivée** (figurine descendue restée marquée à l'étage → `floor_height_at`), et la mesure FLY sous métrique hex utilisait un champ **euclidien** contre une borne **cube**. ⚠️ **La piste « mono-figurine » de §0.32 était le symptôme, pas la cause** : l'érosion rattrapait la bande morte pour les escouades multi-fig en **supprimant des Advances légaux**, et ne la rattrapait pas pour les mono → crash. ⚠️ **Ce bug ne bloquait PAS le run §0.14** : mesuré à **0 occurrence** sur le scénario d'entraînement (x1 et x5) ; les 43/650 venaient de `scenario_pvp_test`, seul scénario avec une escouade à `level: 1`. Motif §0.18/§0.26. Détail → §0.34. |
 | **§0.33** | Rollout buffer = **46,9 Go** pour **39 Go de RAM** sur les profils à 48 envs | 🟠 **NE BLOQUE PAS le run lancé** (`--training-config x1` = 8 envs = 7,8 Go) ; bloque `x5_append` / `x1_debug`. **Arbitrage 2026-07-28 : aucun changement de config** | — (rouvrir avant tout run à 48 envs) | Le dimensionnement RAM de `move_action_space_spatial_rework.md` §8.3 ne compte que la GRILLE (14,49 Go à 9 canaux, « sous la limite »). Depuis §0.30/§0.31 le **vecteur pèse plus lourd que la grille** (20 626 contre 9 216 floats) et vit dans le même `DictRolloutBuffer`, alloué **d'un bloc au premier `learn()`**. Mesuré sur la config réelle : **116,6 Ko par transition** ⇒ `x5_append` et `x1_debug` (`n_envs=48 × n_steps=8192` = 393 216 transitions) = **46,9 Go**, contre **39 Go physiques / 29 Go disponibles** — l'allocation échoue avant le premier pas. `x1`, `x5_new` et `x5_debug` (`n_envs=8`) = **7,8 Go**, qui passent. ⚠️ **La ligne §0.14 dit « run x5_new, 48 envs » alors que le profil `x5_new` porte `n_envs=8`** : vérifier quel profil et quel override sont réellement lancés AVANT de relancer. ⚠️ La proposition « `n_steps` 8192 → 1024 » a été formulée puis **retirée** : le nombre de pas de gradient ne dépend pas de `n_steps`, et les ablations CoreAgent (30k ép., 48 envs) donnent 8192 pour **inférieur** à 16384. Détail et leviers réels → §0.33. |
 | ~~**§0.22**~~ | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **CLOS le 2026-07-21 — décision (B) STOP à L1+L_bbox** | — | **L1 (mémoïsation footprint) + L_bbox (dilatations fenêtrées bbox `move_range`, pur NumPy, FLY exclu) livrés et commités** (`ff2293e0`, `6f268d38`) — gain ovale **1,49×**, round10 1,78×, pool strictement identique ; A/B fenêtré==plein-board + oracle + snapshot ovale + suite verte. **Reliquat NON poursuivi** (ratio gain/risque mauvais, mesuré) : BFS wavefront réfuté (plus lent à move 12), L2b runs NumPy réfuté (1,1× net + complexité), numba écarté (risque segfault sur run 36 h). ⚠️ **MAJ 2026-07-22 : ce coût perf est désormais INCONTOURNABLE** — le fix de conformité move §0.25 REQUIERT une érosion géodésique par-figurine, exactement le coût que §0.22 combattait. Il refait surface en §0.27. Détail complet → **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§10, §11) ; leçon de méthode → §0bis. |
@@ -86,6 +87,59 @@ résolues §0.15–§0.19, §0.21, **§0.22**, **§0.23**, **§0.24**, **§0.25*
 réserve de méthode sur le document lui-même (T1→T5 et section 9 n'ont **pas** été revérifiés
 ligne à ligne) et la règle de périmètre `ArmageddonAgent`.
 
+
+### 0.35 Stats VecNormalize partagées par dossier — un run de 5 h 30 tué à 24 000/30 000 — ✅ CORRIGÉ (2026-07-28)
+
+**Symptôme.** Run `x1` lancé après §0.32/§0.34. **24 000 épisodes sur 30 000 en 5 h 30, sans une
+seule exception moteur** — puis arrêt net :
+
+```
+RuntimeError: VecNormalize enabled but stats not found for Dict obs:
+  /home/greg/40k/ai/models/ArmageddonAgent/vec_normalize.pkl
+RuntimeError: Bot evaluation crashed episodes detected: marker=24000,
+  error_episodes=600, timeout_episodes=0, duration_seconds=7.0
+```
+
+**Ce n'est PAS §0.27** (là c'était un *timeout*, ici 600 épisodes en **erreur** en **7 s**), et ce
+n'est pas le moteur : les évaluations des marqueurs 4000 → 20 000 avaient réussi, et celle de
+20 000 avait **sauvegardé un meilleur modèle** (`ArmageddonAgent_12345_robust_0.4574.zip`).
+
+**Root cause — un nom de fichier UNIQUE par dossier, pas par modèle.**
+`get_vec_normalize_path()` ignorait le nom du modèle et renvoyait toujours
+`<dir>/vec_normalize.pkl`. Or `BotEvaluationCallback` évalue en **asynchrone** :
+
+1. `_launch_async_eval` sauve un snapshot **et ses stats** — donc écrit `<dir>/vec_normalize.pkl` ;
+2. les workers chargent ce pkl **PARESSEUSEMENT**, au premier pas de leur premier épisode ;
+3. pendant ce temps, la consommation du résultat de l'évaluation **PRÉCÉDENTE** appelle
+   `_remove_model_artifacts` (rotation du meilleur modèle robuste, nettoyage legacy, nettoyage du
+   snapshot) — qui supprime `<dir>/vec_normalize.pkl`, **le fichier des autres**.
+
+Tant qu'aucune rotation ne tombait entre l'écriture et la lecture, ça passait. Au marqueur 24 000,
+la rotation déclenchée par le nouveau meilleur modèle de 20 000 est passée entre les deux :
+600/600 épisodes ont échoué **en 7 s**, et le garde-fou strict a arrêté le run.
+
+**Correctif : un chemin PAR MODÈLE** — `<dir>/<nom_du_zip>_vec_normalize.pkl`. Retirer les
+artefacts d'un modèle ne peut plus détruire les stats d'un autre : c'est correct **par
+construction**, pas par ordonnancement. **Aucun repli sur l'ancien nom partagé** — servir les
+stats d'un autre modèle est précisément le bug qu'on ferme.
+
+⚠️ **Ce que ce bug laisse comme doute, à ne PAS présenter comme un résultat.** Le
+`robust=0.4574` du modèle sauvegardé à 20 000 a été mesuré avec le pkl trouvé à ce moment-là dans
+le dossier. Rien ne prouve que ces stats étaient celles de CE modèle plutôt qu'un résidu d'un run
+antérieur : `norm_obs_keys = ["global_cont"]` et `global_cont` fait 11 dimensions **avant comme
+après** §0.31/§0.32, donc un pkl périmé se charge sans lever et normalise avec les mauvaises
+moyennes. **Ce score est donc à re-mesurer, pas à citer.**
+
+**Tests** : 3 dans `test_vec_normalize_utils.py`, dont celui qui vérifie que snapshot, modèle
+canonique et meilleur robuste ont **trois** chemins distincts, et celui qui refuse un
+`model_path` vide (il donnerait `_vec_normalize.pkl`, partagé de nouveau). 10 verts sur le
+fichier, 63 sur la famille éval/normalisation.
+
+📌 **Effet de bord connu, non masqué** : `tests/unit/ai/test_eval_explicit_scenario.py` échoue
+tant qu'aucun run n'a produit de stats dans `ai/models/ArmageddonAgent/` — il en exige un vrai
+sur disque. **Vérifié : il échouait DÉJÀ avant ce correctif** (le crash avait supprimé le pkl
+partagé), avec l'ancien chemin dans le message. Ce n'est pas une régression du correctif ; il
+redeviendra vert dès qu'un run aura tourné.
 
 ### 0.34 `incohérence masque/exécution` sur les escouades qui DESCENDENT d'un étage — ✅ CORRIGÉ (2026-07-28)
 

@@ -12,13 +12,35 @@ import os
 import numpy as np
 from typing import Optional, Any
 
-VEC_NORMALIZE_FILENAME = "vec_normalize.pkl"
+VEC_NORMALIZE_SUFFIX = "_vec_normalize.pkl"
 
 
 def get_vec_normalize_path(model_path: str) -> str:
-    """Get path to vec_normalize.pkl for a model."""
+    """Chemin des stats VecNormalize d'UN modele : `<dir>/<nom_du_zip>_vec_normalize.pkl`.
+
+    ⚠️ Ce chemin depend du NOM du modele, et ce n'est pas cosmetique (V11 §0.35).
+
+    Il a longtemps valu `<dir>/vec_normalize.pkl` — un fichier UNIQUE partage par tous les
+    modeles d'un meme dossier : le snapshot d'evaluation, les checkpoints, le meilleur modele
+    robuste et le modele canonique ecrivaient et supprimaient tous LE MEME fichier. Or
+    `BotEvaluationCallback` evalue en ASYNCHRONE : il sauve un snapshot (donc les stats), lance
+    des workers qui chargent le pkl PARESSEUSEMENT au premier pas, puis consomme le resultat de
+    l'evaluation PRECEDENTE — et cette consommation appelle `_remove_model_artifacts`, qui
+    supprimait les stats que les workers de l'evaluation EN COURS n'avaient pas encore lues.
+    Resultat mesure : 600/600 episodes d'evaluation en erreur en 7 s au marqueur 24 000, et le
+    garde-fou strict a arrete un run de 5 h 30.
+
+    Un nom par modele rend la suppression correcte PAR CONSTRUCTION : retirer les artefacts d'un
+    modele ne peut plus detruire les stats d'un autre. Aucun repli sur l'ancien nom partage :
+    servir les stats d'un AUTRE modele est exactement le bug qu'on ferme.
+    """
+    if not model_path:
+        raise ValueError("get_vec_normalize_path: model_path vide")
     model_dir = os.path.dirname(model_path)
-    return os.path.join(model_dir, VEC_NORMALIZE_FILENAME)
+    stem = os.path.splitext(os.path.basename(model_path))[0]
+    if not stem:
+        raise ValueError(f"get_vec_normalize_path: model_path sans nom de fichier : {model_path!r}")
+    return os.path.join(model_dir, f"{stem}{VEC_NORMALIZE_SUFFIX}")
 
 
 def save_vec_normalize(env: Any, model_path: str) -> bool:
