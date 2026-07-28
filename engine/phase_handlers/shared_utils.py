@@ -8886,8 +8886,16 @@ SQUAD_ACTION_SHOOT_SLOT_BASE = SQUAD_ACTION_WAIT + 1  # 1025
 # parametre, la ou le format plat en coutait ~226 k (§1.8, mesure).
 SQUAD_ACTION_SHOOT_SLOT_COUNT = 20
 SQUAD_ACTION_CHARGE = SQUAD_ACTION_SHOOT_SLOT_BASE + SQUAD_ACTION_SHOOT_SLOT_COUNT  # 1045
-SQUAD_ACTION_FIGHT = SQUAD_ACTION_CHARGE + 1  # 1046
-SQUAD_ACTION_SIZE = SQUAD_ACTION_FIGHT + 1  # 1047
+# V11 §9 P3-1 : la CIBLE DE MELEE (12.05) devient une dimension d'action, indexee sur le MEME
+# mapping de slots ennemis que le tir (`get_enemy_slot_mapping`). Avant, `squad_fight` etait une
+# action sans cible et le moteur tranchait par l'heuristique `_ai_select_fight_target` : l'agent
+# ne choisissait rien, et le pool 12.05 n'apparaissait nulle part dans le masque.
+# Le compte est DERIVE de celui du tir : un slot = une ligne du tenseur ennemi (invariant D1).
+SQUAD_ACTION_FIGHT_SLOT_BASE = SQUAD_ACTION_CHARGE + 1  # 1046
+SQUAD_ACTION_FIGHT_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20 -> 1046-1065
+# Combat « a vide » (12.04/12.06) : selectionne pour combattre sans cible eligible. Etat legal.
+SQUAD_ACTION_FIGHT_NO_TARGET = SQUAD_ACTION_FIGHT_SLOT_BASE + SQUAD_ACTION_FIGHT_SLOT_COUNT  # 1066
+SQUAD_ACTION_SIZE = SQUAD_ACTION_FIGHT_NO_TARGET + 1  # 1067
 
 
 def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
@@ -9605,7 +9613,7 @@ def build_squad_action_mask(
             mask[SQUAD_ACTION_CHARGE] = 1
         mask[SQUAD_ACTION_WAIT] = 1
 
-    # --- Fight phase: action FIGHT ---
+    # --- Fight phase: un slot par cible de melee eligible (12.05), ou « combat a vide » ---
     elif phase == "fight":
         # Parite masque/commit : le bit FIGHT reflete EXACTEMENT le pool de selection 12.04
         # (`fight_v11_current_pool`), la MEME source que le commit (`_process_squad_action` ->
@@ -9618,12 +9626,41 @@ def build_squad_action_mask(
         # pendant la sous-phase FIGHT (poppe en fin d etape) et `fight_v11_current_pool` le lit via
         # require_key : d ou la garde de sous-phase, comme le commit l exige — pas de `.get()` de
         # contournement.
-        from engine.phase_handlers.fight_handlers import fight_v11_current_pool
+        from engine.phase_handlers.fight_handlers import (
+            _fight_build_valid_target_pool,
+            fight_v11_current_pool,
+        )
         if (
             game_state.get("fight_subphase") == "fight"
             and squad_id in fight_v11_current_pool(game_state)
         ):
-            mask[SQUAD_ACTION_FIGHT] = 1
+            # V11 §9 P3-1 — CIBLE : le pool 12.05 (`_fight_build_valid_target_pool`) est la MEME
+            # source que le commit (`_process_squad_action` -> squad_fight), qui refuse une cible
+            # hors pool. Un slot est ouvert ssi l'escouade qu'il designe y figure : le masque dit
+            # donc exactement « qui je peux frapper », la ou il ne disait que « je peux frapper ».
+            unit = get_unit_by_id(game_state, squad_id)
+            if unit is None:
+                raise KeyError(f"Squad {squad_id} eligible au combat mais introuvable dans units")
+            fight_targets = set(str(t) for t in _fight_build_valid_target_pool(game_state, unit))
+            opened = 0
+            for slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT]):
+                if esid is not None and str(esid) in fight_targets:
+                    mask[SQUAD_ACTION_FIGHT_SLOT_BASE + slot_i] = 1
+                    opened += 1
+            if opened == 0:
+                # Aucune cible : combat a vide (12.04/12.06). C'est un etat legal — l'escouade
+                # DOIT pouvoir se declarer, sans quoi elle resterait eligible sans action et la
+                # sous-phase ne se draine jamais (boucle infinie, meme motif que ci-dessus).
+                mask[SQUAD_ACTION_FIGHT_NO_TARGET] = 1
+            elif opened < len(fight_targets):
+                # Une cible legale sans slot serait INFRAPPABLE : troncature silencieuse interdite.
+                from engine.game_utils import add_debug_file_log
+
+                add_debug_file_log(
+                    game_state,
+                    f"[SLOTS] escouade {squad_id} : {len(fight_targets)} cibles de melee 12.05 "
+                    f"pour {opened} slot(s) ennemi(s) mappe(s) — cible(s) infrappable(s).",
+                )
         else:
             mask[SQUAD_ACTION_WAIT] = 1
 

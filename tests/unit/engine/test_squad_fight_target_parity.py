@@ -35,7 +35,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from smoke_t5_bare import MELEE_SCENARIO  # noqa: E402
 
-from engine.macro_intents import ACTION_FIGHT  # noqa: E402
+from engine.macro_intents import ACTION_FIGHT_NO_TARGET  # noqa: E402
 
 
 def _engine(scenario_file: str, seed: int):
@@ -118,7 +118,7 @@ def test_charged_squad_without_target_fights_empty(melee_scenario_file):
 
     empty_slots: List[Optional[str]] = [None] * 5
     mask = build_squad_action_mask(gs, squad_id, enemy_slot_ids=empty_slots)
-    assert mask[ACTION_FIGHT] == 1, "12.04 : une escouade qui a chargé reste éligible au combat"
+    assert mask[ACTION_FIGHT_NO_TARGET] == 1, "12.04 : chargeuse sans cible -> combat à vide"
 
     _enter_fight_phase(eng)
     ok, result = eng._process_squad_action({"action": "squad_fight", "squad_id": squad_id})
@@ -129,8 +129,14 @@ def test_charged_squad_without_target_fights_empty(melee_scenario_file):
 
 
 def test_commit_target_comes_from_engagement_pool(melee_scenario_file):
-    """La cible retenue par le commit appartient au pool ER du flux PvP (12.05), jamais à un
-    ennemi hors zone d'engagement pêché dans le mapping de slots gelé du tir."""
+    """La cible commitée est CELLE que désigne le slot joué, et elle appartient au pool ER 12.05.
+
+    ⚠️ Depuis V11 §9 P3-1 la cible n'est plus choisie par le moteur (`_ai_select_fight_target`)
+    mais portée par l'action (`target_slot`, index du mapping de slots ennemis). Le test vérifie
+    donc les deux bouts : le slot joué désigne bien la cible attendue, ET cette cible est dans le
+    pool d'engagement — l'ancienne rupture (cible pêchée dans le mapping du tir, hors ER) reste
+    impossible parce que le moteur refuse tout slot hors pool.
+    """
     from engine.game_utils import get_unit_by_id
 
     from shared.data_validation import require_present
@@ -161,11 +167,102 @@ def test_commit_target_comes_from_engagement_pool(melee_scenario_file):
     ]
     assert candidates, "au moins une escouade sélectionnable (12.04) a une cible en ER"
     squad_id = str(candidates[0])
-    pool_before = set(_fight_build_valid_target_pool(gs, require_present(get_unit_by_id(squad_id, gs), f"unit {squad_id}")))
+    pool_before = set(
+        str(t)
+        for t in _fight_build_valid_target_pool(
+            gs, require_present(get_unit_by_id(squad_id, gs), f"unit {squad_id}")
+        )
+    )
 
-    ok, result = eng._process_squad_action({"action": "squad_fight", "squad_id": squad_id})
+    # Le masque n'ouvre que les slots dont la cible est dans le pool 12.05 : on joue l'un d'eux.
+    from engine.macro_intents import FIGHT_SLOT_BASE
+    from engine.phase_handlers.shared_utils import build_squad_action_mask, get_enemy_slot_mapping
+
+    our_player = int(gs["units_cache"][squad_id]["player"])
+    slot_map = get_enemy_slot_mapping(gs, our_player)
+    mask = build_squad_action_mask(gs, squad_id, enemy_slot_ids=slot_map)
+    open_slots = [i for i, sid in enumerate(slot_map) if mask[FIGHT_SLOT_BASE + i] == 1]
+    assert open_slots, "le masque doit ouvrir un slot par cible 12.05"
+    assert {str(slot_map[i]) for i in open_slots} == pool_before, (
+        "les slots ouverts décrivent EXACTEMENT le pool d'engagement 12.05"
+    )
+
+    chosen_slot = open_slots[0]
+    expected_target = str(slot_map[chosen_slot])
+    ok, result = eng._process_squad_action(
+        {"action": "squad_fight", "squad_id": squad_id, "target_slot": chosen_slot}
+    )
     assert ok is True
+    assert result["target_squad_id"] == expected_target, "le commit frappe la cible du slot joué"
     assert result["target_squad_id"] in pool_before
+
+
+def test_commit_refuses_slot_outside_engagement_pool(melee_scenario_file):
+    """Un slot ennemi HORS pool 12.05 est refusé — jamais absorbé par un repli sur l'heuristique.
+
+    C'est la garde qui rend la nouvelle dimension d'action sûre : sans elle, un slot pointant un
+    ennemi hors zone d'engagement ferait combattre à distance (violation 12.05) sans rien lever.
+    """
+    from engine.game_utils import get_unit_by_id
+    from shared.data_validation import require_present
+    from engine.phase_handlers.fight_handlers import (
+        _fight_build_valid_target_pool,
+        fight_v11_current_pool,
+    )
+    from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
+
+    eng = _engine(melee_scenario_file, seed=1)
+    gs = eng.game_state
+    gs["phase"] = "fight"
+    gs["units_fought"] = set()
+    _enter_fight_phase(eng)
+
+    candidates = [
+        sid for sid in fight_v11_current_pool(gs)
+        if _fight_build_valid_target_pool(gs, require_present(get_unit_by_id(str(sid), gs), f"unit {sid}"))
+    ]
+    assert candidates
+    squad_id = str(candidates[0])
+    pool = {str(t) for t in _fight_build_valid_target_pool(
+        gs, require_present(get_unit_by_id(squad_id, gs), f"unit {squad_id}")
+    )}
+    our_player = int(gs["units_cache"][squad_id]["player"])
+    slot_map = get_enemy_slot_mapping(gs, our_player)
+    bad_slots = [i for i, sid in enumerate(slot_map) if sid is None or str(sid) not in pool]
+    assert bad_slots, "le mapping compte au moins un slot vide ou hors ER"
+
+    with pytest.raises(ValueError, match="hors du pool de combat 12.05"):
+        eng._process_squad_action(
+            {"action": "squad_fight", "squad_id": squad_id, "target_slot": bad_slots[0]}
+        )
+
+
+def test_commit_refuses_empty_fight_when_targets_exist(melee_scenario_file):
+    """`ACTION_FIGHT_NO_TARGET` avec un pool 12.05 NON vide est une rupture masque/commit.
+
+    Sans cette garde, l'agent pourrait esquiver le combat en se déclarant « sans cible » alors
+    qu'il est engagé — 12.04 l'oblige à combattre, et le masque ne lui offre pas ce choix.
+    """
+    from engine.game_utils import get_unit_by_id
+    from shared.data_validation import require_present
+    from engine.phase_handlers.fight_handlers import (
+        _fight_build_valid_target_pool,
+        fight_v11_current_pool,
+    )
+
+    eng = _engine(melee_scenario_file, seed=1)
+    gs = eng.game_state
+    gs["phase"] = "fight"
+    gs["units_fought"] = set()
+    _enter_fight_phase(eng)
+
+    candidates = [
+        sid for sid in fight_v11_current_pool(gs)
+        if _fight_build_valid_target_pool(gs, require_present(get_unit_by_id(str(sid), gs), f"unit {sid}"))
+    ]
+    assert candidates
+    with pytest.raises(ValueError, match="combat a vide"):
+        eng._process_squad_action({"action": "squad_fight", "squad_id": str(candidates[0])})
 
 
 def test_snapshot_engaged_unit_with_dead_enemy_offers_fight_and_breaks_loop(melee_scenario_file):
@@ -212,7 +309,7 @@ def test_snapshot_engaged_unit_with_dead_enemy_offers_fight_and_breaks_loop(mele
     assert squad_id in fight_v11_current_pool(gs)
     slots: List[Optional[str]] = [None] * 5
     mask = build_squad_action_mask(gs, squad_id, enemy_slot_ids=slots)
-    assert mask[ACTION_FIGHT] == 1, "12.04 : engagée au début de l'étape reste éligible (snapshot)"
+    assert mask[ACTION_FIGHT_NO_TARGET] == 1, "12.04 : engagée au snapshot, sans cible -> combat à vide"
     assert mask[ACTION_WAIT] == 0, "une escouade actionnable au FIGHT ne reçoit pas WAIT"
 
     # Commit : résolution à vide (aucun ennemi), sélection enregistrée, sortie du pool.

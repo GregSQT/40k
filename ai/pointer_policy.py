@@ -15,7 +15,7 @@ C'est ce qui a permis de passer les slots ennemis de 5 à 20 et de refermer §1.
 ennemie invisible et intirable dans la majorité des épisodes).
 
 **Move (V11 §0.32 T-G).** Le même défaut valait pour les **1024 logits de cellule**, soit 97 %
-de l'espace d'action : ils sortaient d'un `Linear(320 -> 1062)` dense, une ligne de poids par
+de l'espace d'action : ils sortaient du `Linear(320 -> TOTAL_ACTION_SIZE)` dense, une ligne par
 cellule, aucun partage entre deux cellules voisines, et la carte CNN aplatie avant la tête. Ils
 sortent désormais d'une **conv 1x1 sur la colonne de features de la cellule**, prise sur la
 carte NON aplatie que `SpatialCombinedExtractor` conserve à résolution 32x32. Le nombre de
@@ -51,6 +51,8 @@ from stable_baselines3.common.type_aliases import PyTorchObs
 
 from ai.spatial_extractor import SpatialCombinedExtractor
 from engine.macro_intents import (
+    FIGHT_SLOT_BASE,
+    FIGHT_SLOT_COUNT,
     MOVE_CELL_BASE,
     MOVE_CELL_COUNT,
     SHOOT_SLOT_BASE,
@@ -69,7 +71,8 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     `[tronc | embeddings ennemis par slot | carte de move 32x32]`. Cette policy :
     - n'alimente le tronc MLP qu'avec la partie `tronc` (ni les embeddings ni la carte n'y
       entrent : ils y seraient de nouveau aplatis, exactement ce que le chantier supprime) ;
-    - produit les logits de tir par `q · e_i` et les logits de cellule par une conv 1x1 ;
+    - produit les logits de tir ET de combat par `q · e_i` (deux requêtes, mêmes embeddings) et
+      les logits de cellule par une conv 1x1 ;
     - laisse TOUT le reste à SB3 (distribution masquée, log_prob, entropie, value net).
     """
 
@@ -100,6 +103,12 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 f"Desalignement observation/action : {extractor.n_enemy_slots} slots ennemis "
                 f"observes contre {SHOOT_SLOT_COUNT} actions de tir. C'est l'invariant D1."
             )
+        if extractor.n_enemy_slots != FIGHT_SLOT_COUNT:
+            raise ValueError(
+                f"Desalignement observation/action : {extractor.n_enemy_slots} slots ennemis "
+                f"observes contre {FIGHT_SLOT_COUNT} actions de combat. C'est l'invariant D1, "
+                f"cote melee (V11 §9 P3-1)."
+            )
         if GRID_CELL_COUNT != MOVE_CELL_COUNT:
             raise ValueError(
                 f"Desalignement grille/action : {GRID_CELL_COUNT} cellules de grille contre "
@@ -122,6 +131,14 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
             device=self.device,
         )
         self.query_net = nn.Linear(self.mlp_extractor.latent_dim_pi, self.entity_dim)
+        # Requete DISTINCTE pour la melee (V11 §9 P3-1). Les deux tetes lisent les MEMES
+        # embeddings d'ennemis — c'est tout l'interet du pointeur — mais « quel ennemi tirer » et
+        # « quel ennemi frapper » ne sont pas la meme question : portee, couvert et LoS pesent
+        # pour l'un, la valeur de la cible et sa capacite de riposte pour l'autre. Partager la
+        # requete forcerait un seul ordre de preference pour les deux phases ; la dupliquer coute
+        # `entity_dim x latent_dim` parametres et rien de plus (les embeddings, eux, restent
+        # partages, donc ce que le reseau apprend d'un ennemi sert aux deux tetes).
+        self.fight_query_net = nn.Linear(self.mlp_extractor.latent_dim_pi, self.entity_dim)
 
         # --- Tête de move : conv 1x1 sur [colonne de la cellule | latent diffusé] -------------
         # `move_cell_net` et `move_ctx_net` sont les DEUX MOITIÉS d'une seule et même conv 1x1
@@ -184,31 +201,37 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     def _action_logits(
         self, latent_pi: torch.Tensor, embeddings: torch.Tensor, move_map: torch.Tensor
     ) -> torch.Tensor:
-        """Logits complets : cellules par conv 1x1, tir par `q · e_i`, le reste par `action_net`.
+        """Logits complets : cellules par conv 1x1, tir ET combat par `q · e_i`, reste par `action_net`.
 
-        Les colonnes de `action_net` correspondant aux cellules de move et aux slots de tir ne
-        sont jamais lues — elles ne reçoivent donc aucun gradient et restent à leur
-        initialisation. C'est assumé : conserver `action_net` entier laisse intacts
+        Les colonnes de `action_net` correspondant aux cellules de move, aux slots de tir et aux
+        slots de combat ne sont jamais lues — elles ne reçoivent donc aucun gradient et restent à
+        leur initialisation. C'est assumé : conserver `action_net` entier laisse intacts
         l'initialisation orthogonale, la sauvegarde/reprise et le reste de la machinerie SB3.
         Coût mesuré : ~334 k paramètres inertes (aucun gradient, donc aucun effet sur
-        l'apprentissage) et un produit matrice-vecteur 1062 colonnes au lieu de 18, soit ~3 %
+        l'apprentissage) et un produit matrice-vecteur 1082 colonnes au lieu de 18, soit ~3 %
         du coût de la tête de move — sous le seuil qui justifierait de découper `action_net`.
         """
         base = self.action_net(latent_pi)
         move = self._move_logits(latent_pi, move_map)
-        query = self.query_net(latent_pi).unsqueeze(1)                 # (B, 1, d)
         # Mise à l'échelle 1/sqrt(d), comme une attention : sans elle, la variance des logits
         # croît avec la dimension d'embedding et la politique démarre quasi déterministe.
-        pointer = (query * embeddings).sum(dim=-1) / (self.entity_dim ** 0.5)  # (B, K)
+        scale = self.entity_dim ** 0.5
+        query = self.query_net(latent_pi).unsqueeze(1)                 # (B, 1, d)
+        pointer = (query * embeddings).sum(dim=-1) / scale             # (B, K) — tir
+        fight_query = self.fight_query_net(latent_pi).unsqueeze(1)
+        fight_pointer = (fight_query * embeddings).sum(dim=-1) / scale  # (B, K) — mêlée
         move_end = MOVE_CELL_BASE + MOVE_CELL_COUNT
         shoot_end = SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT
+        fight_end = FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT
         return torch.cat(
             [
                 base[:, :MOVE_CELL_BASE],
                 move,
                 base[:, move_end:SHOOT_SLOT_BASE],
                 pointer,
-                base[:, shoot_end:],
+                base[:, shoot_end:FIGHT_SLOT_BASE],
+                fight_pointer,
+                base[:, fight_end:],
             ],
             dim=1,
         )

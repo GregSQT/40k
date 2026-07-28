@@ -10,12 +10,13 @@ MAX_OBJECTIVES = 5
 # designe une CELLULE de la grille egocentrique 32x32, plus une direction 0-5. Le TYPE de move
 # (normal/advance/fall_back) n'est PAS une dimension d'action : il est infere du cout geodesique
 # de la cellule (cf. shared_utils.infer_squad_move_type).
-# 1047 micro actions (V11 §0.30 T-E : 20 slots de tir au lieu de 5) :
+# 1067 micro actions (V11 §0.30 T-E : 20 slots de tir ; §9 P3-1 : 20 slots de combat) :
 #   0-1023   : destination = cellule (gx,gy) de la grille egocentrique  [cell_index = gy*32+gx]
 #   1024     : wait / end activation
 #   1025-1044: shoot slot 0-19 (20)
 #   1045     : charge
-#   1046     : fight
+#   1046-1065: fight slot 0-19 (20) — MEME mapping de slots ennemis que le tir
+#   1066     : fight sans cible eligible (12.04/12.06 : selectionne pour combattre, 0 attaque)
 
 # --- Named squad-action ids (single source of truth for ai/). --------------
 # Miroir EXACT de engine/phase_handlers/shared_utils.py (SQUAD_ACTION_*), qui reste la source
@@ -30,15 +31,27 @@ ACTION_WAIT = MOVE_CELL_BASE + MOVE_CELL_COUNT   # 1024 — wait / end activatio
 SHOOT_SLOT_BASE = ACTION_WAIT + 1                # 1025
 SHOOT_SLOT_COUNT = 20        # shoot enemy slots 0-19 -> 1025-1044 (V11 T-E)
 ACTION_CHARGE = SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT  # 1045
-ACTION_FIGHT = ACTION_CHARGE + 1                    # 1046
+# V11 §9 P3-1 — la CIBLE DE MELEE est une dimension d'action, plus une heuristique interne.
+# `FIGHT_SLOT_COUNT` est DERIVE de `SHOOT_SLOT_COUNT` : les deux familles indexent le MEME
+# mapping `get_enemy_slot_mapping` (et donc la meme ligne du tenseur ennemi de l'observation,
+# invariant D1). Les desolidariser ferait pointer l'action de combat i et l'observation i sur
+# deux escouades differentes, sans que rien ne leve.
+FIGHT_SLOT_BASE = ACTION_CHARGE + 1                 # 1046
+FIGHT_SLOT_COUNT = SHOOT_SLOT_COUNT                 # 20 -> 1046-1065
+# 12.04/12.06 : une escouade selectionnee pour combattre SANS cible eligible (sa cible est
+# morte, overrun) resout un combat a vide. C'est un etat legal du jeu, pas un cas d'erreur :
+# il lui faut donc une action propre. Fusionner ce cas avec un slot rendrait « frapper le
+# slot i » ambigu (frapper i, ou ne frapper personne ?).
+ACTION_FIGHT_NO_TARGET = FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT   # 1066
 DEPLOY_SLOT_BASE = 4
 DEPLOY_SLOT_COUNT = 5       # deployment strategy slots 0-4 -> 4-8
 
-BASE_ZONE_INTENT = ACTION_FIGHT + 1                            # 1047
-TOTAL_ACTION_SIZE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3      # 1062
+BASE_ZONE_INTENT = ACTION_FIGHT_NO_TARGET + 1                  # 1067
+TOTAL_ACTION_SIZE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3      # 1082
 
 MOVE_CELLS = range(MOVE_CELL_BASE, MOVE_CELL_BASE + MOVE_CELL_COUNT)                # 0-1023
 SHOOT_SLOTS = range(SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT)            # 1025-1044
+FIGHT_SLOTS = range(FIGHT_SLOT_BASE, FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT)            # 1046-1065
 DEPLOY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT)        # 4-8
 
 

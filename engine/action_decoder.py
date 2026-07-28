@@ -23,7 +23,9 @@ from engine.phase_handlers.shared_utils import (
     # Refonte spatiale du move : action = cellule de la grille egocentrique. Constantes importees,
     # jamais de litteral nu : le plan d'actions a change (WAIT 18 -> 1024, etc.).
     SQUAD_ACTION_CHARGE,
-    SQUAD_ACTION_FIGHT,
+    SQUAD_ACTION_FIGHT_NO_TARGET,
+    SQUAD_ACTION_FIGHT_SLOT_BASE,
+    SQUAD_ACTION_FIGHT_SLOT_COUNT,
     SQUAD_ACTION_MOVE_CELL_BASE,
     SQUAD_ACTION_MOVE_CELL_COUNT,
     SQUAD_ACTION_SHOOT_SLOT_BASE,
@@ -994,7 +996,22 @@ class ActionDecoder:
                 "target_squad_id": best_target_id,
             }
 
-        if action_int == SQUAD_ACTION_FIGHT:
+        if SQUAD_ACTION_FIGHT_SLOT_BASE <= action_int < (
+            SQUAD_ACTION_FIGHT_SLOT_BASE + SQUAD_ACTION_FIGHT_SLOT_COUNT
+        ):
+            # V11 §9 P3-1 : la cible de melee vient de l'ACTION. `target_slot` indexe le mapping
+            # `get_enemy_slot_mapping` — le meme que le masque et que la ligne du tenseur ennemi.
+            # La resolution slot -> escouade est faite par le moteur (`squad_fight`), qui verifie
+            # l'appartenance au pool 12.05 : la traduire ici en dupliquerait la regle.
+            return {
+                "action": "squad_fight",
+                "squad_id": squad_id,
+                "target_slot": action_int - SQUAD_ACTION_FIGHT_SLOT_BASE,
+            }
+
+        if action_int == SQUAD_ACTION_FIGHT_NO_TARGET:
+            # Combat a vide (12.04/12.06) : aucune cible eligible. `target_slot` absent — le
+            # moteur exige alors un pool 12.05 VIDE (parite masque/commit).
             return {"action": "squad_fight", "squad_id": squad_id}
 
         raise ValueError(

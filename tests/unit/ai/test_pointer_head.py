@@ -40,6 +40,8 @@ from ai.spatial_extractor import SpatialCombinedExtractor
 from engine.macro_intents import (
     MOVE_CELL_BASE,
     MOVE_CELL_COUNT,
+    FIGHT_SLOT_BASE,
+    FIGHT_SLOT_COUNT,
     SHOOT_SLOT_BASE,
     SHOOT_SLOT_COUNT,
     TOTAL_ACTION_SIZE,
@@ -113,18 +115,25 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
     trunk, embeddings, move_map = policy._split_features(obs)
     latent_pi = policy.mlp_extractor.forward_actor(trunk)
     base = policy.action_net(latent_pi)
+    scale = policy.entity_dim ** 0.5
     query = policy.query_net(latent_pi)
-    pointer = torch.einsum("bd,bkd->bk", query, embeddings) / (policy.entity_dim ** 0.5)
+    pointer = torch.einsum("bd,bkd->bk", query, embeddings) / scale
+    # V11 §9 P3-1 : seconde requete, memes embeddings -> logits de CIBLE DE MELEE.
+    fight_query = policy.fight_query_net(latent_pi)
+    fight_pointer = torch.einsum("bd,bkd->bk", fight_query, embeddings) / scale
     move = policy._move_logits(latent_pi, move_map)
     move_end = MOVE_CELL_BASE + MOVE_CELL_COUNT
     end = SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT
+    fight_end = FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT
     expected = torch.cat(
         [
             base[:, :MOVE_CELL_BASE],
             move,
             base[:, move_end:SHOOT_SLOT_BASE],
             pointer,
-            base[:, end:],
+            base[:, end:FIGHT_SLOT_BASE],
+            fight_pointer,
+            base[:, fight_end:],
         ],
         dim=1,
     )
@@ -240,7 +249,9 @@ def test_pointer_logit_is_slot_local(model):
         after = policy._action_logits(latent_pi, perturbed, move_map)
     diff = (after - before).abs()[0]
     changed = torch.nonzero(diff > 1e-6).flatten().tolist()
-    assert changed == [SHOOT_SLOT_BASE + 1], f"logits deplaces : {changed[:5]}"
+    # Le slot 1 pilote DEUX logits depuis §9 P3-1 : « tirer sur lui » et « le frapper ». Les deux
+    # sortent du MEME embedding, par deux requetes distinctes — c'est le partage recherche.
+    assert changed == [SHOOT_SLOT_BASE + 1, FIGHT_SLOT_BASE + 1], f"logits deplaces : {changed[:5]}"
 
 
 def test_evaluate_actions_returns_values_log_prob_entropy(model):

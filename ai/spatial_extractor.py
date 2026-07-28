@@ -21,7 +21,8 @@ ennemis PAR SLOT sont conservés et concaténés en fin de vecteur de features �
 obs-slot-i ↔ action-slot-i (fix D1) et le point d'accroche de la tête pointeur (T-E), qui les
 lira par `enemy_embeddings_slice()`.
 
-MÊME RAISONNEMENT POUR LA GRILLE (V11 §0.32 T-G) : 1024 des 1062 actions désignent une CELLULE.
+MÊME RAISONNEMENT POUR LA GRILLE (V11 §0.32 T-G) : 1024 des 1082 actions désignent une CELLULE
+(1082 depuis §9 P3-1, qui a ajouté les 20 slots de cible de mêlée + le combat à vide).
 Aplatir la carte CNN avant la tête, c'est refaire côté move exactement ce que le format plat
 faisait côté tir. Une seconde branche CNN, à résolution PLEINE (32x32, aucun stride), est donc
 conservée et concaténée elle aussi en fin de vecteur (`move_map_slice()`) : la tête de move

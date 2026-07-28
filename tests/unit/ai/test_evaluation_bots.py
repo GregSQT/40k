@@ -26,7 +26,8 @@ CELL = mi.MOVE_CELL_BASE           # 0, une cellule quelconque (action non-shoot
 SHOOT = mi.SHOOT_SLOT_BASE         # 1025
 SHOOT2 = mi.SHOOT_SLOT_BASE + 1    # 1026
 CHARGE = mi.ACTION_CHARGE          # 1030
-FIGHT = mi.ACTION_FIGHT            # 1031
+FIGHT_SLOT0 = mi.FIGHT_SLOT_BASE     # 1046 — frapper le slot ennemi 0
+FIGHT_EMPTY = mi.ACTION_FIGHT_NO_TARGET  # 1066 — combat a vide (12.04/12.06)
 
 
 def _dmg(rng: float = 0.0, cc: float = 0.0) -> dict:
@@ -198,7 +199,10 @@ def test_tactical_bot_phase_action_selection() -> None:
     assert bot.select_action([SHOOT, WAIT_ACTION], phase="shoot") == SHOOT
     # No living active unit -> charge skipped -> WAIT
     assert bot.select_action([CHARGE, WAIT_ACTION], phase="charge", game_state={"current_player": 0, "units": []}) == WAIT_ACTION
-    assert bot.select_action([FIGHT, WAIT_ACTION], phase="fight") == FIGHT
+    # V11 §9 P3-1 : le bot frappe le slot ennemi ouvert le plus menacant (menace decroissante).
+    assert bot.select_action([FIGHT_SLOT0, WAIT_ACTION], phase="fight") == FIGHT_SLOT0
+    # Sans cible eligible, il se declare « a vide » plutot que d'attendre (12.04).
+    assert bot.select_action([FIGHT_EMPTY, WAIT_ACTION], phase="fight") == FIGHT_EMPTY
 
 
 def test_tactical_bot_select_shooting_target_scoring(monkeypatch: pytest.MonkeyPatch) -> None:

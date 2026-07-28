@@ -5675,7 +5675,6 @@ class W40KEngine(gym.Env):
             # garanti en training -> auto_decider headless -> resolution complete (done).
             from engine.phase_handlers.fight_handlers import (
                 build_manual_fight_allocation,
-                _ai_select_fight_target,
                 _fight_build_valid_target_pool,
                 _fight_v11_register_selection,
                 fight_v11_current_pool,
@@ -5711,10 +5710,43 @@ class W40KEngine(gym.Env):
             # meme si sa cible est morte -> overrun 12.06 sans cible). Le PvP le resout en
             # 0 attaque ; le gym en fait autant, via le MEME moteur (0 intent declare ->
             # summary vide, done=True). Aucun dict fabrique a la main.
-            targets = _fight_build_valid_target_pool(self.game_state, unit)
-            best_target_id = (
-                _ai_select_fight_target(self.game_state, squad_id, targets) if targets else None
-            )
+            targets = [str(t) for t in _fight_build_valid_target_pool(self.game_state, unit)]
+
+            # V11 §9 P3-1 : la cible est CHOISIE PAR L AGENT, via le slot ennemi porte par
+            # l action. `_ai_select_fight_target` ne tranche plus rien ici — elle reste vive pour
+            # le flux PvP (clic sans cible) et pour les bots, jamais pour le pipeline gym.
+            # Parite masque/commit, dans les DEUX sens : le masque n ouvre un slot que si sa cible
+            # est dans le pool 12.05, et n ouvre `FIGHT_NO_TARGET` que si le pool est vide. Toute
+            # divergence est une rupture, pas un cas a absorber par un repli sur une heuristique.
+            if "target_slot" in semantic:
+                if not targets:
+                    raise ValueError(
+                        f"squad_fight: slot de cible recu pour squad {squad_id} alors que le pool "
+                        f"12.05 est VIDE (rupture masque/commit)"
+                    )
+                target_slot = int(semantic["target_slot"])
+                enemy_slot_ids = get_enemy_slot_mapping(
+                    self.game_state, int(require_key(cache_entry, "player"))
+                )
+                if not (0 <= target_slot < len(enemy_slot_ids)):
+                    raise ValueError(
+                        f"squad_fight: target_slot {target_slot} hors du mapping de slots ennemis "
+                        f"({len(enemy_slot_ids)} slots)"
+                    )
+                best_target_id = enemy_slot_ids[target_slot]
+                if best_target_id is None or str(best_target_id) not in targets:
+                    raise ValueError(
+                        f"squad_fight: slot {target_slot} -> cible {best_target_id!r} hors du pool "
+                        f"de combat 12.05 {targets} pour squad {squad_id} (rupture masque/commit)"
+                    )
+                best_target_id = str(best_target_id)
+            else:
+                if targets:
+                    raise ValueError(
+                        f"squad_fight: action « combat a vide » recue pour squad {squad_id} alors "
+                        f"que le pool 12.05 offre {targets} (rupture masque/commit)"
+                    )
+                best_target_id = None
 
             squad_fight_unit_activation_start(self.game_state, squad_id)
             if best_target_id is not None:

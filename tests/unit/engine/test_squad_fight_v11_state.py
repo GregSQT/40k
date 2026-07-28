@@ -108,6 +108,32 @@ def test_engaged_snapshot_posed_at_fight_step_start(melee_scenario_file):
     assert any(snapshot.values()), f"snapshot sans aucune unité engagée: {snapshot}"
 
 
+def _fight_action(game_state, squad_id: str) -> dict:
+    """Action `squad_fight` jouable pour `squad_id` : slot de la 1re cible 12.05, ou combat à vide.
+
+    Reproduit le choix que le masque offre (V11 §9 P3-1), sans le deviner : le pool d'engagement
+    et le mapping de slots sont ceux que `build_squad_action_mask` consulte.
+    """
+    from engine.game_utils import get_unit_by_id
+    from engine.phase_handlers.fight_handlers import _fight_build_valid_target_pool
+    from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
+
+    unit = get_unit_by_id(str(squad_id), game_state)
+    if unit is None:
+        raise KeyError(f"unit {squad_id} introuvable")
+    targets = {str(t) for t in _fight_build_valid_target_pool(game_state, unit)}
+    action = {"action": "squad_fight", "squad_id": str(squad_id)}
+    if not targets:
+        return action
+    our_player = int(game_state["units_cache"][str(squad_id)]["player"])
+    slot_map = get_enemy_slot_mapping(game_state, our_player)
+    for slot_i, esid in enumerate(slot_map):
+        if esid is not None and str(esid) in targets:
+            action["target_slot"] = slot_i
+            return action
+    raise AssertionError(f"cible 12.05 {targets} sans slot ennemi mappé")
+
+
 def test_squad_fight_registers_selection_and_cannot_fight_twice(melee_scenario_file):
     """12.04 : « has not already been selected to fight this phase ».
 
@@ -122,7 +148,9 @@ def test_squad_fight_registers_selection_and_cannot_fight_twice(melee_scenario_f
     assert pool, "l'étape FIGHT doit proposer au moins une sélection"
     squad_id = str(pool[0])
 
-    ok, _result = eng._process_squad_action({"action": "squad_fight", "squad_id": squad_id})
+    # V11 §9 P3-1 : la cible de mêlée est portée par l'action. On la choisit comme le pipeline
+    # réel — via le pool 12.05 et le mapping de slots, la même source que le masque.
+    ok, _result = eng._process_squad_action(_fight_action(gs, squad_id))
     assert ok is True
     assert squad_id in {str(x) for x in gs["units_selected_to_fight"]}
     assert squad_id not in [str(x) for x in fight_v11_current_pool(gs)]
