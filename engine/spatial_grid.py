@@ -85,8 +85,8 @@ GRID_CH_MOVE_COST = 8
 # a `M / (M + 6" x i2s)` = `MOVE / (MOVE + 6)`, soit 0,40 (MOVE 4") a 0,70 (MOVE 14") selon
 # l unite : pour savoir si une cellule lui coute son tir, le CNN devrait croiser le canal avec le
 # MOVE, qui ne lui parvient jamais. L information la plus utile du canal serait illisible la ou
-# elle est produite — et le deviendrait davantage avec la tete pointeur spatiale (§0.32 T-G), qui
-# scorera chaque cellule depuis son embedding CNN LOCAL.
+# elle est produite — et le serait plus encore depuis la tete de move (§0.32 T-G, LIVREE), qui
+# score chaque cellule par une conv 1x1 sur sa colonne de features CNN, donc LOCALEMENT.
 MOVE_COST_ADVANCE_THRESHOLD = 0.5
 
 # Tolerance d ARRONDI sur les bornes des couts geodesiques, dans `normalize_move_costs`. Tres

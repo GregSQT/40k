@@ -21,6 +21,25 @@ ennemis PAR SLOT sont conservés et concaténés en fin de vecteur de features �
 obs-slot-i ↔ action-slot-i (fix D1) et le point d'accroche de la tête pointeur (T-E), qui les
 lira par `enemy_embeddings_slice()`.
 
+MÊME RAISONNEMENT POUR LA GRILLE (V11 §0.32 T-G) : 1024 des 1062 actions désignent une CELLULE.
+Aplatir la carte CNN avant la tête, c'est refaire côté move exactement ce que le format plat
+faisait côté tir. Une seconde branche CNN, à résolution PLEINE (32x32, aucun stride), est donc
+conservée et concaténée elle aussi en fin de vecteur (`move_map_slice()`) : la tête de move
+(`ai/pointer_policy.py`) y applique une conv 1x1, une colonne de features par cellule.
+La branche aplatie (`self.cnn` -> `cnn_head`) reste : elle alimente le tronc, qui a besoin d'un
+resume GLOBAL de la fenetre, pas d'une carte. Les deux branches partagent le STEM (`cnn_stem`),
+la premiere convolution pleine resolution : la dupliquer ferait recalculer les memes features de
+bas niveau (bords de murs, contours d'EZ) que les deux branches veulent de toute facon
+identiques. Mesure ci-dessous.
+
+⚠️ CANAUX POSITIONNELS (amendement §0.32 T-G) : la carte porte 3 canaux fixes (x, y, rayon),
+sans quoi la tete 1x1 serait STRICTEMENT PLUS FAIBLE que la tete dense qu'elle remplace. La
+grille est egocentrique et normalisee par le budget d'Advance : la semantique d'une cellule
+depend de son RAYON (centre = mon bloc, |r| = 1 = limite d'atteignabilite). Une convolution est
+invariante par translation, donc incapable d'exprimer « le centre n'est pas le bord » — alors
+que la tete dense, elle, sait ou est chaque cellule. Ces canaux sont l'exact jumeau de
+`spatial_grid.cell_center_px` en coordonnees normalisees (verrouille par test).
+
 Normalisation (point dur identifié §4 T-D) : `VecNormalize` normalise ÉLÉMENT PAR ÉLÉMENT ;
 appliqué aux tenseurs d'entités, chaque slot aurait ses propres statistiques et le même encodeur
 verrait des échelles différentes selon le slot — ce qui annulerait le partage de poids. Les clés
@@ -39,10 +58,13 @@ import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 from engine.observation_entities import self_model_bin_index
-from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
+from engine.spatial_grid import GRID_CELL_COUNT, GRID_CHANNELS, GRID_SIZE
 
 #: Familles d'unités partageant le MÊME schéma et le MÊME encodeur.
 _UNIT_FAMILIES = ("allies", "enemies")
+
+#: Canaux positionnels FIXES ajoutés à la carte de move : x, y, rayon (V11 §0.32 T-G).
+POSITIONAL_CHANNELS = 3
 
 #: Index du masque de présence des figurines — LU depuis le schéma, jamais recopié.
 _SELF_MODEL_PRESENT_IDX = self_model_bin_index("present")
@@ -116,6 +138,28 @@ def _mlp(sizes: Sequence[int]) -> nn.Sequential:
     return nn.Sequential(*layers)
 
 
+def positional_channels() -> torch.Tensor:
+    """Canaux positionnels FIXES de la grille égocentrique : (1, 3, GRID_SIZE, GRID_SIZE).
+
+    Canal 0 = x, canal 1 = y, canal 2 = rayon — TOUS en unités de demi-étendue de grille, donc
+    en unités de **budget d'Advance maximal** de l'escouade (`grid_half_extent_subhex`). Ce sont
+    exactement les coordonnées normalisées de `spatial_grid.cell_center_px` :
+
+        x(gx) = ((gx + 0.5) / GRID_SIZE) * 2 - 1        (idem y avec gy)
+
+    donc `rayon = 1.0` est la limite d'atteignabilité, quelle que soit l'unité et quelle que soit
+    l'échelle du board. C'est CETTE grandeur qu'une conv 1x1 seule ne pourrait pas reconstruire
+    (invariance par translation), et que la tête dense qu'on remplace connaissait par construction.
+
+    Convention d'indexation : dim 1 = `gy`, dim 2 = `gx` — celle de `build_squad_grid`
+    (`grid[channel][gy, gx]`) et celle de `cell_index = gy * GRID_SIZE + gx`.
+    """
+    coord = (torch.arange(GRID_SIZE, dtype=torch.float32) + 0.5) / GRID_SIZE * 2.0 - 1.0
+    y, x = torch.meshgrid(coord, coord, indexing="ij")
+    radius = torch.sqrt(x * x + y * y)
+    return torch.stack([x, y, radius], dim=0).unsqueeze(0)
+
+
 def _masked_mean_max(emb: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     """Agrégation MASQUÉE d'un ensemble d'embeddings : concat(moyenne, max).
 
@@ -135,13 +179,16 @@ def _masked_mean_max(emb: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 class SpatialCombinedExtractor(BaseFeaturesExtractor):
     """CNN sur "grid" + encodeurs d'entités PARTAGÉS + agrégation masquée.
 
-    Sortie (dans cet ordre — contrat consommé par la tête pointeur de T-E) :
+    Sortie (dans cet ordre — contrat consommé par les têtes de `ai/pointer_policy.py`) :
 
-        [ trunk_features (self.trunk_dim) | embeddings ennemis PAR SLOT (K_e × entity_dim) ]
+        [ trunk_features (self.trunk_dim)
+        | embeddings ennemis PAR SLOT (K_e × entity_dim)          -> tête pointeur de TIR (T-E)
+        | carte de move NON aplatie (move_map_channels × 32 × 32) -> tête 1x1 de MOVE (T-G) ]
 
     `cnn_features` : dimension de la sortie CNN. OBLIGATOIRE, sans défaut — la valeur vient de
     la config JSON de l'agent (`model_params.policy_kwargs.features_extractor_kwargs`).
-    `entity_dim` / `weapon_dim` / `type_dim` / `model_dim` : largeurs des encodeurs partagés.
+    `entity_dim` / `weapon_dim` / `type_dim` / `model_dim` / `map_channels` : largeurs des
+    encodeurs partagés et de la branche carte.
     """
 
     def __init__(
@@ -152,10 +199,15 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         weapon_dim: int = 32,
         type_dim: int = 16,
         model_dim: int = 16,
+        map_channels: int = 16,
     ):
         if not isinstance(cnn_features, int) or cnn_features <= 0:
             raise ValueError(
                 f"SpatialCombinedExtractor : cnn_features doit etre un entier > 0, recu {cnn_features!r}"
+            )
+        if not isinstance(map_channels, int) or map_channels <= 0:
+            raise ValueError(
+                f"SpatialCombinedExtractor : map_channels doit etre un entier > 0, recu {map_channels!r}"
             )
         if not isinstance(observation_space, gym.spaces.Dict):
             raise TypeError(
@@ -222,16 +274,37 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
             + 2 * entity_dim          # agrégation des ennemies (contexte)
             + model_agg
         )
+        # La carte de move sort du réseau AVEC ses canaux positionnels : la tête 1x1 doit les
+        # voir directement, pas seulement à travers la pile conv.
+        move_map_channels = map_channels + POSITIONAL_CHANNELS
         super().__init__(
             observation_space,
-            features_dim=trunk_dim + self.n_enemy_slots * entity_dim,
+            features_dim=(
+                trunk_dim
+                + self.n_enemy_slots * entity_dim
+                + move_map_channels * GRID_CELL_COUNT
+            ),
         )
         self.trunk_dim = trunk_dim
         self.entity_dim = entity_dim
+        self.map_channels = map_channels
+        self.move_map_channels = move_map_channels
 
-        self.cnn = nn.Sequential(
+        # --- CNN : un STEM commun à pleine résolution, puis deux branches (V11 §0.32 T-G) ---
+        # Le stem est la première convolution, celle qui lit les 9 canaux bruts en 32x32. Elle
+        # servait déjà au tronc ; la branche carte la RÉUTILISE au lieu d'en recréer une jumelle.
+        # MESURÉ (piles conv isolées, batch 256, 4 threads, 5 mesures alternées) : par rapport au
+        # CNN d'avant T-G, la branche carte coûte +58 % en partageant le stem contre +98 % en le
+        # dupliquant — 1,7x moins cher, et 3 056 paramètres de moins. Sur le forward COMPLET,
+        # l'écart entre les deux variantes est SOUS le bruit de la machine (±10 %) : les encodeurs
+        # d'entités dominent. C'est la mesure isolée qui tranche, pas la mesure de bout en bout.
+        self.cnn_stem = nn.Sequential(
             nn.Conv2d(GRID_CHANNELS, 32, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
+        )
+        # Branche TRONC : sous-échantillonnée puis aplatie — c'est un résumé GLOBAL de la fenêtre,
+        # pas une carte. Elle reste strictement ce qu'elle était.
+        self.cnn = nn.Sequential(
             nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
@@ -239,8 +312,22 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
             nn.Flatten(),
         )
         with torch.no_grad():
-            n_flatten = self.cnn(torch.zeros(1, GRID_CHANNELS, GRID_SIZE, GRID_SIZE)).shape[1]
+            n_flatten = self.cnn(torch.zeros(1, 32, GRID_SIZE, GRID_SIZE)).shape[1]
         self.cnn_head = nn.Sequential(nn.Linear(n_flatten, cnn_features), nn.ReLU())
+
+        # Branche CARTE : résolution PLEINE, aucun stride, jamais aplatie. Le stride est ce qui
+        # détruit la correspondance cellule <-> action : après deux stride 2, une colonne de
+        # features couvre 16 cellules et ne peut plus en scorer une seule. Stem 3x3 + cette
+        # couche 3x3 -> champ réceptif 5x5 par cellule : de quoi lire son voisinage (murs, EZ,
+        # couvert) ; tout ce qui dépasse ce voisinage arrive par le CONDITIONNEMENT de la tête
+        # (latent du tronc), pas par cette pile.
+        self.register_buffer("pos_channels", positional_channels())
+        self.map_net = nn.Sequential(
+            nn.Conv2d(
+                32 + POSITIONAL_CHANNELS, map_channels, kernel_size=3, stride=1, padding=1
+            ),
+            nn.ReLU(),
+        )
 
         # --- Normalisations partagées (une par famille de features, PAS une par camp) ---
         self.unit_norm = EntityRunningNorm(self.unit_cont_dim)
@@ -264,10 +351,20 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
             ]
         )
 
-    # -- contrat de découpe consommé par la tête pointeur (T-E) ------------------
+    # -- contrat de découpe consommé par les têtes d'action (T-E, T-G) ------------
     def enemy_embeddings_slice(self) -> slice:
         """Tranche des embeddings ennemis PAR SLOT dans le vecteur de features."""
         return slice(self.trunk_dim, self.trunk_dim + self.n_enemy_slots * self.entity_dim)
+
+    def move_map_slice(self) -> slice:
+        """Tranche de la carte de move APLATIE dans le vecteur de features.
+
+        Aplatie SEULEMENT pour transiter (le contrat SB3 d'un extracteur est un tenseur 2D) ; la
+        tête la remet en (B, C, GRID_SIZE, GRID_SIZE) avant d'y appliquer sa conv 1x1. Rien n'est
+        mélangé entre cellules au passage — c'est un `reshape`, pas un `Linear`.
+        """
+        start = self.enemy_embeddings_slice().stop
+        return slice(start, start + self.move_map_channels * GRID_CELL_COUNT)
 
     def _encode_units(self, obs: Dict[str, torch.Tensor], family: str) -> torch.Tensor:
         """Embeddings (B, K, entity_dim) d'une famille d'unités, encodeurs PARTAGÉS."""
@@ -302,7 +399,12 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         return self.unit_encoder(unit_in) * (present > 0).to(unit_in.dtype).unsqueeze(-1)
 
     def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
-        cnn_out = self.cnn_head(self.cnn(observations["grid"]))
+        grid = observations["grid"]
+        stem = self.cnn_stem(grid)
+        cnn_out = self.cnn_head(self.cnn(stem))
+
+        pos = self.pos_channels.expand(grid.shape[0], -1, -1, -1)
+        move_map = torch.cat([self.map_net(torch.cat([stem, pos], dim=1)), pos], dim=1)
 
         ally_emb = self._encode_units(observations, "allies")
         enemy_emb = self._encode_units(observations, "enemies")
@@ -338,4 +440,11 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
             ],
             dim=1,
         )
-        return torch.cat([trunk, enemy_emb.reshape(enemy_emb.shape[0], -1)], dim=1)
+        return torch.cat(
+            [
+                trunk,
+                enemy_emb.reshape(enemy_emb.shape[0], -1),
+                move_map.reshape(move_map.shape[0], -1),
+            ],
+            dim=1,
+        )

@@ -26,9 +26,19 @@ import numpy as np
 import pytest
 import torch
 
-from ai.spatial_extractor import EntityRunningNorm, SpatialCombinedExtractor
+from ai.spatial_extractor import (
+    POSITIONAL_CHANNELS,
+    EntityRunningNorm,
+    SpatialCombinedExtractor,
+    positional_channels,
+)
 from engine.observation_builder import ObservationBuilder
-from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
+from engine.spatial_grid import (
+    GRID_CELL_COUNT,
+    GRID_CHANNELS,
+    GRID_SIZE,
+    cell_center_px,
+)
 
 
 def _space() -> gym.spaces.Dict:
@@ -58,11 +68,19 @@ def extractor() -> SpatialCombinedExtractor:
 
 
 def test_features_layout_exposes_the_enemy_embeddings(extractor):
-    """Contrat de sortie : [tronc | embeddings ennemis par slot] — la tranche est publique."""
+    """Contrat de sortie : [tronc | embeddings ennemis | carte de move] — tranches publiques.
+
+    V11 §0.32 T-G : la carte NON aplatie s'ajoute derrière les embeddings ennemis. Les deux
+    tranches sont lues par `ai/pointer_policy.py` au build, jamais recalculées de son côté.
+    """
     sl = extractor.enemy_embeddings_slice()
     assert sl.start == extractor.trunk_dim
-    assert sl.stop == extractor.features_dim
     assert (sl.stop - sl.start) == extractor.n_enemy_slots * extractor.entity_dim
+
+    move = extractor.move_map_slice()
+    assert move.start == sl.stop
+    assert move.stop == extractor.features_dim
+    assert (move.stop - move.start) == extractor.move_map_channels * GRID_CELL_COUNT
 
 
 def test_forward_shape_and_finiteness(extractor):
@@ -218,8 +236,127 @@ def test_grid_channel_count_is_read_from_the_single_source():
     V11 §0.32 (T-K/T-L) a fait passer la grille de 7 a 9 canaux. Si l'extracteur recopiait la
     valeur, le CNN prendrait une entree d'une autre profondeur que celle produite par
     `build_squad_grid` — un decalage silencieux de la semantique apprise.
+
+    C'est le STEM qui lit la grille brute depuis T-G : les branches tronc et carte partent de lui.
     """
-    assert SpatialCombinedExtractor(_space(), cnn_features=32).cnn[0].in_channels == GRID_CHANNELS
+    extractor = SpatialCombinedExtractor(_space(), cnn_features=32)
+    assert extractor.cnn_stem[0].in_channels == GRID_CHANNELS
+    assert extractor.cnn[0].in_channels == extractor.cnn_stem[0].out_channels
+
+
+def test_move_map_keeps_the_full_resolution(extractor):
+    """V11 §0.32 T-G : la carte de move sort en 32x32, sans le moindre stride.
+
+    C'est le stride qui détruit la correspondance cellule <-> action : après deux stride 2, une
+    colonne de features couvre 16 cellules et ne peut plus en scorer une seule. La branche
+    APLATIE du tronc, elle, garde ses strides — les deux coexistent.
+    """
+    space = _space()
+    obs = _zero_batch(space, batch=2)
+    obs["allies_bin"][:, 0, 0] = 1.0
+    extractor.eval()
+    with torch.no_grad():
+        out = extractor(obs)
+    carte = out[:, extractor.move_map_slice()].reshape(
+        2, extractor.move_map_channels, GRID_SIZE, GRID_SIZE
+    )
+    assert carte.shape == (2, extractor.move_map_channels, GRID_SIZE, GRID_SIZE)
+    assert torch.isfinite(carte).all()
+    for conv in extractor.map_net:
+        if isinstance(conv, torch.nn.Conv2d):
+            assert conv.stride == (1, 1), "un stride dans la branche carte casse l'alignement"
+
+
+def test_move_map_carries_the_positional_channels(extractor):
+    """Les canaux positionnels sont DANS la carte, et valent ceux de `cell_center_px`.
+
+    Amendement §0.32 T-G : sans eux, la conv 1x1 serait invariante par translation, donc
+    strictement plus faible que la tête dense qu'elle remplace — incapable d'exprimer « le
+    centre n'est pas le bord » sur une grille égocentrique normalisée par le budget d'Advance.
+
+    On les vérifie contre `spatial_grid.cell_center_px`, la source unique de la géométrie : x et
+    y sont l'offset de la cellule par rapport à l'ancre, en unités de demi-étendue. Un `rayon`
+    de 1,0 est donc EXACTEMENT la limite d'atteignabilité, pour toute unité et toute échelle.
+    """
+    pos = positional_channels()
+    assert pos.shape == (1, POSITIONAL_CHANNELS, GRID_SIZE, GRID_SIZE)
+
+    anchor_col, anchor_row, half_extent = 30, 20, 24
+    # Ancre et demi-étendue RECONSTRUITES depuis `cell_center_px` (deux cellules opposées, deux
+    # inconnues) : aucune constante de géométrie n'est recopiée ici.
+    x0, y0 = cell_center_px(0, 0, anchor_col, anchor_row, half_extent)
+    x1, y1 = cell_center_px(GRID_SIZE - 1, GRID_SIZE - 1, anchor_col, anchor_row, half_extent)
+    span = GRID_SIZE / (2.0 * (GRID_SIZE - 1.0))
+    width_x, width_y = (x1 - x0) * span, (y1 - y0) * span
+    ax = x0 + (1.0 - 1.0 / GRID_SIZE) * width_x
+    ay = y0 + (1.0 - 1.0 / GRID_SIZE) * width_y
+
+    for gx, gy in ((0, 0), (5, 20), (GRID_SIZE - 1, GRID_SIZE - 1), (16, 16)):
+        cx, cy = cell_center_px(gx, gy, anchor_col, anchor_row, half_extent)
+        expected_x = (cx - ax) / width_x
+        expected_y = (cy - ay) / width_y
+        assert pos[0, 0, gy, gx].item() == pytest.approx(expected_x, abs=1e-5)
+        assert pos[0, 1, gy, gx].item() == pytest.approx(expected_y, abs=1e-5)
+        assert pos[0, 2, gy, gx].item() == pytest.approx(
+            float(np.hypot(expected_x, expected_y)), abs=1e-5
+        )
+    # Sémantique du rayon : ~0 au centre (mon bloc), ~1 au bord de la fenêtre (limite
+    # d'atteignabilité). La grille étant paire, aucune cellule ne tombe exactement sur 0 ni sur 1.
+    half = GRID_SIZE // 2
+    assert pos[0, 2, half, half].item() < 0.05
+    assert pos[0, 2, half, GRID_SIZE - 1].item() == pytest.approx(1.0, abs=0.05)
+    assert pos[0, 2, half, half].item() < pos[0, 2, half, GRID_SIZE - 1].item()
+
+    # … et ils arrivent bien jusqu'au bout de la carte (derniers canaux, non appris).
+    space = _space()
+    obs = _zero_batch(space, batch=1)
+    obs["allies_bin"][:, 0, 0] = 1.0
+    extractor.eval()
+    with torch.no_grad():
+        carte = extractor(obs)[:, extractor.move_map_slice()].reshape(
+            1, extractor.move_map_channels, GRID_SIZE, GRID_SIZE
+        )
+    assert torch.allclose(carte[:, -POSITIONAL_CHANNELS:], pos, atol=1e-6), (
+        "les canaux positionnels n'atteignent pas la tete : la conv 1x1 serait invariante par "
+        "translation, donc plus faible que la tete dense qu'elle remplace"
+    )
+
+
+def test_move_map_is_not_translation_invariant(extractor):
+    """Contre-épreuve du point précédent : la MÊME configuration locale, deux rayons.
+
+    Un pic identique au centre et au bord doit produire des colonnes DIFFÉRENTES. Sans canaux
+    positionnels, une convolution donnerait strictement la même réponse aux deux endroits — et
+    l'agent ne pourrait plus distinguer « je bouge à peine » de « je pousse mon Advance au
+    maximum », alors que c'est cette distinction qui lui coûte son tir.
+    """
+    space = _space()
+    extractor.eval()
+
+    def _column(gx: int, gy: int) -> torch.Tensor:
+        obs = _zero_batch(space, batch=1)
+        obs["allies_bin"][:, 0, 0] = 1.0
+        obs["grid"][:, 0, gy, gx] = 1.0
+        with torch.no_grad():
+            carte = extractor(obs)[:, extractor.move_map_slice()].reshape(
+                1, extractor.move_map_channels, GRID_SIZE, GRID_SIZE
+            )
+        # On exclut les canaux positionnels eux-mêmes : c'est la RÉPONSE APPRISE qui doit
+        # différer, pas seulement les trois canaux ajoutés à la fin.
+        return carte[0, : -POSITIONAL_CHANNELS, gy, gx]
+
+    centre = _column(GRID_SIZE // 2, GRID_SIZE // 2)
+    bord = _column(1, 1)
+    assert not torch.allclose(centre, bord, atol=1e-5), (
+        "la carte repond identiquement au centre et au bord : les canaux positionnels ne sont "
+        "pas lus par la pile conv"
+    )
+
+
+def test_map_channels_must_be_positive():
+    """Aucune valeur par défaut masquant une erreur : une largeur de carte absurde doit LEVER."""
+    with pytest.raises(ValueError, match="map_channels"):
+        SpatialCombinedExtractor(_space(), cnn_features=32, map_channels=0)
 
 
 def test_wrong_grid_shape_raises():
