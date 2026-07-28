@@ -2585,6 +2585,7 @@ analyzer : le BFS analyzer bloque aussi les figurines AMIES en transit, que le m
 moteur) ; tests `tests/unit/engine/test_move_budget_geodesic.py` (8) + `test_move_pool_block_erosion`
 (6) + `test_move_mask_is_executable` verts ; **run réel 48-envs franchit 2000 ép. sans crash**.
 
+<a id="s0.26"></a>
 ### 0.26 Régression `incohérence masque/exécution` sur advance (cache de masque périmé) — ✅ CORRIGÉ (2026-07-22, clé fingerprint)
 
 **Symptôme.** Le premier vrai run après le fix §0.25 a **crashé en ~1 min** (rollout 48-envs) :

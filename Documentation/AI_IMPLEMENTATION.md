@@ -334,7 +334,7 @@ engine/
 **Action Space — ⚠️ PÉRIMÉ, corrigé le 2026-07-26 (vérifié dans le code) :**
 
 Le layout « 12 actions » décrit ci-dessous n'existe plus. L'espace d'action réel vaut
-**1 088** actions (`engine/macro_intents.py::TOTAL_ACTION_SIZE`, miroir verrouillé par
+**1 107** actions (`engine/macro_intents.py::TOTAL_ACTION_SIZE`, miroir verrouillé par
 `tests/unit/engine/test_action_space_mirror.py`) :
 
 - **0-1023** : destination = cellule de la grille égocentrique 32×32 (le TYPE de move —
@@ -342,12 +342,14 @@ Le layout « 12 actions » décrit ci-dessous n'existe plus. L'espace d'action r
 - **1024** : wait / fin d'activation ;
 - **1025-1044** : tir sur le slot ennemi 0-19 (20 slots depuis V11 §0.30 T-E ; les logits
   viennent d'une tête pointeur, `ai/pointer_policy.py`) ;
-- **1045** : charge ;
-- **1046-1065** : **cible de mêlée**, slot ennemi 0-19 — MÊME mapping de slots que le tir
-  (V11 §9 P3-1), logits produits par une seconde tête pointeur ;
-- **1066** : fight **sans cible éligible** (12.04/12.06 : sélectionnée pour combattre, 0 attaque) ;
-- **1067-1081** : zone intents (5 objectifs × 3 intentions) ;
-- **1082-1087** : `CHOICE_0..5` — candidats de la **décision agent** (V11 §9.3 P2). Elles sont
+- **1045-1064** : **cible de charge**, slot ennemi 0-19 — MÊME mapping de slots que le tir
+  (V11 §9 P3-2), logits produits par une tête pointeur. Il n'existe PAS de « charge sans
+  cible » : 11.02 conditionne la déclaration à la présence d'un ennemi à 12" ;
+- **1065-1084** : **cible de mêlée**, slot ennemi 0-19 — MÊME mapping de slots que le tir
+  (V11 §9 P3-1), logits produits par une autre tête pointeur ;
+- **1085** : fight **sans cible éligible** (12.04/12.06 : sélectionnée pour combattre, 0 attaque) ;
+- **1086-1100** : zone intents (5 objectifs × 3 intentions) ;
+- **1101-1106** : `CHOICE_0..5` — candidats de la **décision agent** (V11 §9.3 P2). Elles sont
   EXCLUSIVES : quand `game_state["pending_agent_decision"]` est posée, le masque n'expose que les
   `CHOICE_i` des candidats réels et le pool d'unités éligibles est vide, le moteur étant arrêté
   sur un point de choix joueur (miroir du `waiting_for_player` PvP).

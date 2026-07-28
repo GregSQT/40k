@@ -39,7 +39,8 @@ absente (stratagèmes, CP, FNP, transports, etc. restent hors scope). Prérequis
 > `raw_action_int % len(options)` toujours vif). Le titre « 0/5 » devient donc **0/4**.
 >
 > 🔴 **MISE À JOUR 2026-07-28 soir — les lignes P2 et P3 ci-dessous sont à leur tour PÉRIMÉES.**
-> `TOTAL_ACTION_SIZE` vaut **1088 sur `main`** (1082 après P3-1, + 6 `CHOICE_i` avec P2) et **P3 point 1 (cible
+> `TOTAL_ACTION_SIZE` vaut **1088 sur `main`** (1082 après P3-1, + 6 `CHOICE_i` avec P2 ; **1107 sur
+> la branche `v11-p3-2-charge-target`, cf. §9.4bis**) et **P3 point 1 (cible
 > de mêlée) est LIVRÉ** — non par le `CHOICE_k` de [§9.3](#s9.3), mais par une dimension d'action par slot
 > ennemi + tête pointeur, la spec P2 ayant été jugée périmée par T-E/T-G. Détail, preuves et
 > décision d'architecture → **[§0.41](V11_agent_rework.md#s0.41)**. Le grep `pending_agent_decision`/`CHOICE_[0-9]` rend
@@ -52,9 +53,16 @@ absente (stratagèmes, CP, FNP, transports, etc. restent hors scope). Prérequis
 > `raw_action_int % len(options)` n'existe plus** : le grep qui la trouvait à `w40k_core.py:2644`
 > rend désormais 0. Les lignes **P2 et P3 du tableau ci-dessous sont donc PÉRIMÉES** pour ces deux
 > points ; P3 points 2→8 et P4/P5 restent exacts (le point 1 est livré, cf. ci-dessus).
-> **Mergé sur `main` le 2026-07-28 soir.** Détail → **§9.3bis**. `TOTAL_ACTION_SIZE` vaut
+> **Mergé sur `main` le 2026-07-28 soir.** Détail → **§9.3bis**. `TOTAL_ACTION_SIZE` valait alors
 > **1088** (1082 + 6 CHOICE) et `obs_size` **20740** : tout modèle antérieur est incompatible
 > (retrain `--new`), et **aucune mesure de win-rate n'existe encore** pour ce changement.
+
+> 🟢 **MISE À JOUR 2026-07-28 (nuit) — P3 point 2 (cible de CHARGE) est LIVRÉ**, sur le patron
+> P3-1 (dimension d'action par slot ennemi + tête pointeur), avec son P4 (`charge_reachable_max_roll`).
+> P3 passe donc à **3/9**. `TOTAL_ACTION_SIZE` vaut **1107** et `obs_size` **20768** — les chiffres
+> ci-dessus sont périmés d'autant. Détail, preuves et mesure de coût → **§9.4bis** et
+> **[§0.43](V11_agent_rework.md#s0.43)**. ⚠️ Livré sur la branche `v11-p3-2-charge-target`,
+> **PAS mergé sur `main`** : le merge est une décision utilisateur, à ne pas prendre pendant un run.
 
 Revérification ligne à ligne contre le code (la première ; [§0.19](V11_agent_rework.md#s0.19) ne l'avait jamais menée, cf. sa
 correction). **Aucune des cinq sous-parties n'est réellement en place**, malgré les marqueurs
@@ -793,10 +801,15 @@ Ordre par valeur tactique :
    La boucle `get_best_enemy_score_for_unit` reste vive pour la **cible de charge** (point 2).
    ~~Pilote du mécanisme P2.~~ → il a été le pilote, et il a **tranché la méthode** : slots +
    pointeur, pas `CHOICE_k` ([§0.41](V11_agent_rework.md#s0.41)). Le point 2 (cible de charge) suit le même patron.
-2. **Cible de charge** — le site vif est la même boucle de scoring dans `convert_squad_action`
-   du décodeur (action_decoder ~L917-940), PAS `charge_handlers:1506` (chemin
-   `convert_gym_action`, hors gym mais encore vif en PvE via pve_controller — ne pas le
-   supprimer, juste ne pas le brancher).
+2. ✅ **LIVRÉ le 2026-07-28 (nuit) — détail → [§9.4bis](#s9.4bis) et [§0.43](V11_agent_rework.md#s0.43).**
+   La cible de charge est désormais une **dimension d'action** (`CHARGE_SLOT` 1045-1064, un par
+   slot ennemi), scorée par une **tête pointeur** sur les embeddings d'ennemis — même patron que
+   P3-1, pas des `CHOICE_k`. Le masque n'ouvre un slot que si sa cible est déclarable (11.02) et
+   le commit refuse tout slot non déclarable. ⚠️ **Sur la branche `v11-p3-2-charge-target`,
+   PAS sur `main`.** Historique du site, conservé : le site vif était la boucle de scoring
+   `get_best_enemy_score_for_unit` dans `convert_squad_action` du décodeur (action_decoder
+   ~L1000-1030), PAS `charge_handlers:1506` (chemin `convert_gym_action`, hors gym mais encore
+   vif en PvE via pve_controller — non touché, comme prévu).
 3. **Choix de l'unité à activer** par phase — `eligible_units[0]` a 9 occurrences dans
    action_decoder ; les sites DÉCISIFS du flux vif sont dans `convert_squad_action`
    (~L837, L876), les autres sont dans la construction du masque ; le plus gros gain
@@ -831,6 +844,113 @@ Ordre par valeur tactique :
 
 Hors scope A' (reste auto, conforme règles car « un placement légal parmi d'autres ») :
 placement par-figurine du move rigide, pivot. Montée d'étage = Phase C.
+
+<a id="s9.4bis"></a>
+### 9.4bis P3 point 2 — CE QUI A ÉTÉ LIVRÉ (2026-07-28, branche `v11-p3-2-charge-target`)
+
+**Ce qui était en place.** `charge` était une action **nue** (un seul id, 1045). Le masque disait
+« une charge est possible » ; c'est le **décodeur** qui choisissait la cible, en scorant chaque
+ennemi déclarable par `get_best_enemy_score_for_unit` (damage_ratio). L'agent déclarait donc une
+charge **sans jamais dire qui** — alors que 11.02 (« Declare Charge ») et 11.04 (« BEFORE MOVING:
+select one or more enemy units ») font de la sélection de la cible un choix de **joueur**, lu dans
+le PDF `11 Charge phase.pdf` avant écriture.
+
+**Ce qui est livré.** Même patron que P3-1, à l'identique — les candidats sont des **entités déjà
+observées**, donc slots + pointeur, jamais `CHOICE_k` :
+
+| | Avant | Après |
+|---|---|---|
+| Action de charge | `ACTION_CHARGE` = 1045 (sans cible) | `CHARGE_SLOT` **1045-1064** (20) |
+| `TOTAL_ACTION_SIZE` | 1088 | **1107** |
+| `obs_size` | 20740 | **20768** (`charge_reachable_max_roll`) |
+| Choix de la cible | décodeur (`damage_ratio`) | **agent** |
+
+- `CHARGE_SLOT_COUNT` est **dérivé** de `SHOOT_SLOT_COUNT`, comme celui de la mêlée : un slot =
+  une ligne du tenseur ennemi (invariant D1). Verrouillé par `test_action_space_mirror.py`.
+- **Aucune action « charge sans cible »**, contrairement au combat : 12.04/12.06 rendent une
+  escouade éligible sans cible (combat à vide), mais 11.02 conditionne la **déclaration** à la
+  présence d'un ennemi à 12". Sans cible, aucun slot n'est ouvert et seul WAIT reste — la charge
+  restant **optionnelle**, WAIT est ouvert dans tous les cas.
+- **Parité masque/commit dans les DEUX sens** : le masque n'ouvre un slot que si
+  `charge_check_eligibility` est vraie pour cette cible, et le commit refuse tout slot non
+  déclarable ET tout slot vide. Aucun repli sur l'heuristique.
+- Pas de garde de troncature ici (la mêlée en a une) : la mêlée confronte **deux** sources (pool
+  12.05 et mapping de slots), donc une cible légale peut n'avoir aucun slot. Ici la seule source
+  des candidats **est** le mapping — une escouade ennemie sans slot est déjà loguée en amont par
+  `_refresh_enemy_slot_mapping`, une seule fois.
+
+**Tête pointeur : une troisième requête, des embeddings PARTAGÉS.** `charge_query_net` est une
+`Linear(latent, entity_dim)` de plus, appliquée aux **mêmes** embeddings que le tir et la mêlée.
+La dupliquer coûte `entity_dim × latent_dim` paramètres et rien d'autre ; la partager forcerait un
+ordre de préférence unique alors que « qui tirer » (portée, LoS, couvert), « qui charger »
+(distance à franchir au 2D6, ce que l'engagement me coûte au tour adverse) et « qui frapper »
+(valeur de la cible, riposte) sont trois questions différentes. `action_net` passe de
+`Linear(320, 18)` à `Linear(320, 17)` — la colonne dense « charge » disparaît.
+
+**P4 (observation de support) — `charge_reachable_max_roll`, sans quoi la tranche était incomplète.**
+Un bit par entité **ennemie** : 1 ssi un plan de charge **légal** existe vers cette cible au jet
+**maximal** (11.02 étape 2, 2D6 → 12). Une charge ratée coûte l'**activation entière** de l'unité
+(11.02 étape 3). Aucun champ existant ne le disait — et ce n'est pas supposé, c'est verrouillé par
+une contre-épreuve : `edge_distance` mesure à vol d'oiseau et rend la **même valeur** pour une
+cible atteignable et pour la même cible cernée de murs
+(`test_zero_when_the_target_has_no_legal_landing_hex`). Les trois causes d'échec structurel
+qu'elle ignore : aucune case libre au contact, ER d'une escouade **non** ciblée (11.04 AFTER
+MOVING), et la pénalité de descente 13.06, retranchée du jet et exposée nulle part ailleurs.
+- **Oracle unique** : `charge_build_valid_plan`, la fonction que le **commit** exécute. Une
+  réimplémentation annoncerait une atteignabilité que la résolution ne produirait pas.
+- **Coût mesuré, et borné par deux gardes** : le bit n'est calculé qu'en **phase de charge** (son
+  masque est le one-hot `phase_charge`) et que pour une cible **déclarable**. Mesure sur le
+  scénario mêlée (2 cibles déclarables) : observation **1,62 ms → 3,40 ms** en phase de charge,
+  **inchangée** aux 5 autres phases. C'est le poste le plus cher de l'observation quand il
+  s'exécute ; il n'a pas été mémoïsé faute de gain démontrable (une escouade ne construit son
+  observation qu'une fois par step) et parce qu'un cache d'invalidation est précisément le motif
+  qui a produit [§0.26](V11_agent_rework.md#s0.26).
+- La parité obs↔masque est une **implication**, pas une équivalence, et c'est voulu : le masque
+  suit 11.02 (déclaration possible), le bit suit 11.04 (la charge peut aboutir). Une cible
+  déclarable mais inatteignable garde son slot ouvert — l'agent a le droit de tenter, il sait
+  seulement que c'est perdu d'avance.
+
+**Bots d'évaluation — changement de comportement ASSUMÉ.** `_first_charge_action_in` prend le
+premier slot ouvert, donc la cible **la plus menaçante** (les slots sont attribués par menace
+décroissante) : la même heuristique qu'ils appliquent déjà au tir et à la mêlée. Ils ne passent
+donc plus par le `damage_ratio` du décodeur. ⚠️ **Les win-rates mesurés avant cette tranche ne
+sont pas comparables à ceux d'après** — la baseline adverse a changé, comme pour P3-1.
+
+**Ce qui reste vif de l'ancien chemin** : `charge_handlers` et le flux **PvP/PvE**, non touchés.
+`get_best_enemy_score_for_unit` reste utilisée par les intents de zone (`get_best_enemy_global`,
+`get_best_enemy_score`) ; ses deux imports devenus morts (`action_decoder`, `w40k_core`) ont été
+supprimés.
+
+**Preuves (tests ciblés, verts — aucune suite complète lancée, c'est l'utilisateur qui la lance).**
+
+| Fichier | Résultat |
+|---|---|
+| `tests/unit/engine/test_squad_charge_target_parity.py` (**neuf**) | **9 verts** : parité masque/commit sur 3 seeds en marche aléatoire, slots ouverts == cibles déclarables (avec la contre-épreuve « cible éloignée → son slot se ferme »), cible commitée = celle du slot joué (le **dernier** déclarable, pas le premier), refus d'un slot non déclarable, refus d'un slot vide, alignement décodeur `id → slot`, absence de « charge à vide ». |
+| `tests/unit/engine/test_squad_obs_charge_target_support.py` (**neuf**) | **7 verts** — verrou de `charge_reachable_max_roll` : cible atteignable, 0 hors phase de charge, 0 au-delà de 12", **0 sur une cible cernée de murs à `edge_distance` identique**, accord avec l'oracle moteur, 0 sur les alliées, implication obs → masque. |
+| `tests/unit/ai/test_pointer_head.py` | **20 verts**, dont **3 neufs** (logits de charge issus du pointeur, requête distincte de celles du tir et de la mêlée, coût nul par slot). `test_pointer_logit_is_slot_local` constate maintenant que perturber l'embedding du slot 1 déplace **trois** logits — c'est le partage recherché. |
+| `test_action_space_mirror.py` / `test_evaluation_bots.py` | **12** / **17 verts** (miroir étendu aux slots de charge, pavage `[0, SIZE)` re-vérifié). |
+| batteries charge (`charge_execution`, `charge_resolution`, `charge_eligibility`, `squad_charge_descent_level`, `charge_oval_base_reverse_bfs`) | **46 verts** |
+| batteries boucle moteur (`execute_semantic_action`, `phase_transitions`, `engine_step`, `engine_full_loop`, `t5_bare_loop`, `cross_phase_cascade`) | **71 verts** |
+| batterie observation (`structure_doc`, `vector_split`, `enemy_block`, `enemy_cover`, `model_engagement`, `enemy_slot_alignment`, `observation_builder`, `entity_obs_equivalence`, `entity_encoder_extractor`, `fight_target_support`) | **67 verts** |
+
+**Mutation-tests menés** (un test qui passe du premier coup peut passer pour la mauvaise raison) :
+masque sans filtre d'éligibilité → 3 tests rouges ; commit sans garde d'éligibilité → 1 rouge ;
+décodeur décalé d'un slot → 3 rouges.
+
+**Mesure in-engine** (le seul verdict qui compte, [§0bis](V11_agent_rework.md#s0bis)) : **3 épisodes
+ENCHAÎNÉS dans le MÊME moteur** (leçon [§0.42](V11_agent_rework.md#s0.42) — un smoke à un épisode ne voit pas une fuite
+d'état), sur le scénario mêlée et sur le scénario d'entraînement réel. Slots de charge exposés et
+joués, **plusieurs slots distincts** exercés, tous les épisodes terminés, **aucun masque vide**.
+Contre-épreuve explicite de fuite d'état : comptage identique en moteur **neuf** et en moteur
+**réutilisé** pour chacun des 3 épisodes.
+
+**🔴 CE QUI N'EST PAS MESURÉ, et ne peut pas l'être avant le prochain retrain.**
+1. Le **win-rate** exigé par [§9.6](#s9.6). `TOTAL_ACTION_SIZE` **et** `obs_size` changent ⇒ tout
+   modèle existant est incompatible ⇒ `--new` obligatoire.
+2. Le **regret** de la décision ([§9.0bis](#s9.0bis) réserve 1) : non mesuré, comme pour P3-1. La
+   décision de brancher repose sur le raisonnement — « la cible la plus rentable au damage_ratio »
+   ignore la probabilité de réussir la charge, ce que l'agent peut désormais arbitrer — pas sur une
+   mesure. **À confronter au premier run** : si le win-rate baisse, c'est la première hypothèse.
 
 <a id="s9.5"></a>
 ### 9.5 P4 — Observation de support
