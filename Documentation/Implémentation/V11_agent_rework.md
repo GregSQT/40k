@@ -37,7 +37,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 ## 0. ÉTAT AU 2026-07-28 — À LIRE EN PREMIER
 
 > **Cette section ne contient QUE ce qui est ouvert et actionnable.**
-> - Ce qui est résolu est en **§0hist — Historique résolu**, **en fin de document, après [§10](V11_eval_strategy.md#s10)** :
+> - Ce qui est résolu est en **§0hist — Historique résolu**, **en fin de document, après les [Pointeurs](#pointeurs)** :
 >   entrées intégrales, ancres `### 0.x` inchangées, aucune preuve condensée.
 > - Les avertissements et leçons de méthode durables sont regroupés en **§0bis — Pièges et
 >   leçons de méthode**, qui en est la **copie canonique**.
@@ -856,12 +856,24 @@ AVANT d'y lancer un entraînement.
 
 ---
 
+<a id="pointeurs"></a>
+## Pointeurs — où vit la spec (ce document ne garde que l'ÉTAT)
 
-➡️ Phase A' — [§9](V11_phaseA.md) (P1→P5) a été extraite le 2026-07-28 dans
-[`V11_phaseA.md`](V11_phaseA.md).
+> Les sections **1 à 10** de la spec ont été extraites le **2026-07-28** dans trois sous-docs
+> (plan [`V11_refactor_plan.md`](V11_refactor_plan.md), étapes 1→3). Ce fichier ne conserve que
+> l'**index d'état** : §0 (ouvert et actionnable), §0bis (pièges canoniques), §0ter (non-travaux)
+> et §0hist (historique résolu, intégral). **Contenu déplacé tel quel, aucune réécriture.**
 
-➡️ [§10](V11_eval_strategy.md) — stratégie d'entraînement et d'évaluation — a été extraite
-le 2026-07-28 dans [`V11_eval_strategy.md`](V11_eval_strategy.md).
+| Document | Contenu | État |
+|---|---|---|
+| [`V11_tranches.md`](V11_tranches.md) | **[§1](V11_tranches.md#s1) → [§8](V11_tranches.md#s8)** — objectif, l'ANCRE, état des lieux, ruptures R1→R8, décisions de design, tranches T1→T7 + Phase B, critères d'acceptation, smoke tests, tests de non-régression | **vivant** (T6-h/T6-g ouverts, cf. [§0.0](#s0.0)) |
+| [`V11_phaseA.md`](V11_phaseA.md) | **[§9](V11_phaseA.md#s9)** — Phase A' : parité de résolution des règles (P1) puis mécanisme de décision agent (P2→P5) | **vivant** |
+| [`V11_eval_strategy.md`](V11_eval_strategy.md) | **[§10](V11_eval_strategy.md#s10)** — stratégie d'entraînement et d'évaluation, rosters, holdout, win-rate par roster | **vivant** |
+| [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md) | Encodeur d'entités partagé + tête pointeur, cardinalités de l'observation, les 7 trous qu'il ferme | **vivant** |
+| [`observation_deploiement.md`](observation_deploiement.md) | Observation de la phase de déploiement — déficiente (extrait de `V11_audit_observation.md` §11) | **vivant** |
+| [`Replay.md`](Replay.md) | Replay : pipeline & contrat du `step.log`, registre des chantiers replay | **vivant** (outillage) |
+| [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md) | Perf du noyau `_build_multi_hex_vectorized` : périmètre, filet de validation, livré (L1 + L_bbox), impasses mesurées | **clos** (décision (B) STOP, 2026-07-21) |
+| [`Implémenté/V11_move_pool_optimization.md`](Implémenté/V11_move_pool_optimization.md) | Cadrage d'origine du chantier move pool (§0.22) | **clos** — archive, ne plus s'y fier pour l'état du code |
 
 ## 0hist. Historique résolu
 

@@ -31,14 +31,13 @@
 
 ## 2. Structure actuelle (frontières mesurées le 2026-07-28)
 
+> **AVANCEMENT — ✅ PLAN TERMINÉ le 2026-07-28.** Étapes **1** (`db75417e`), **2** (`5e93fedd`),
+> **3** (`cb77f6a6`) et **4** (ce commit). Index passé de **6618 → 4094 lignes** ; **2524 lignes**
+> sorties dans 3 sous-docs. Le tableau ci-dessous est celui d'AVANT extraction, conservé comme
+> trace de la mesure d'origine.
+
 | Lignes | Section | Destin |
 |---|---|---|
-> **AVANCEMENT.** Étapes **1 (§9 → `V11_phaseA.md`)** et **2 (§10 → `V11_eval_strategy.md`)**
-> **FAITES le 2026-07-28** (commits `db75417e`, `5e93fedd`). Index passé de **6618 → 5753 lignes**.
-> Garde-fou revenu à sa baseline après chaque étape. Reste : étapes **3** et **4** (une session
-> dédiée). Les numéros de ligne du tableau ci-dessous sont ceux d'AVANT extraction — re-localiser
-> par grep.
-
 | 1-35 | Titre + encadré pointeurs | reste (index) |
 | 36-444 | §0 État (tableau + entrées ouvertes, dont §0.40) | reste |
 | 445-838 | §0bis Pièges/leçons (canonique) | reste |
@@ -108,7 +107,19 @@ désambiguïsée), **8 sortants** (`§0`×4, `§0bis`, `§0.3`, `§0.7`, `§0.9`
 - ⚠️ `grep -n '§10'` matche aussi `§10.x` — c'est voulu ; il ne matche PAS `§1.x` (vérifier
   qu'aucun `§1 `/`§1bis` n'est capturé par une regex trop large).
 
-### Étape 3 — `V11_tranches.md` (§1→§8) — le gros morceau
+### Étape 3 — `V11_tranches.md` (§1→§8) — ✅ FAITE le 2026-07-28 (commit `cb77f6a6`)
+
+Réalisé : **1676 lignes** déplacées telles quelles (index 5753 → 4077), ancres `s1`, `s1bis`,
+`s2`→`s8`, `s8.1`→`s8.5`. **24 lignes** de renvois entrants recâblées dans l'index (majorant 53 =
+renvois, pas lignes ; plusieurs `§x` par ligne). Sortants du sous-doc : tous les `§0.x` pointés sur
+l'index (ancres `s0.0`, `s0.4`, `s0.8`, `s0.11`, `s0.19.1` ajoutées côté index), `§9`/`§10` sur les
+sous-docs frères, plus 4 renvois en clair (« section 9 », « section 10.6 », « section 9.2 »).
+Liens provisoires de l'étape 1 (`§8.5`, `§1`, `§8` dans `V11_phaseA.md`) **re-pointés** sur
+`V11_tranches.md` ; l'encadré « Lien provisoire » est remplacé par un encadré « Sous-docs frères ».
+Faux positifs **désambiguïsés en nommant leur fichier** sur la ligne (§8.3 de
+`move_action_space_spatial_rework.md`, §8/§2/§2bis de `V11_move_build_acceleration.md`) — ils
+n'étaient pas signalés avant l'extraction parce qu'une ancre locale homonyme les absorbait.
+
 - Périmètre : ~1680 lignes déplacées, 53+29 liens + re-pointage des liens provisoires des
   étapes 1-2. Contexte : MOYEN (~130 Ko lus). Ça tient dans une session d'agent, mais ne rien
   faire d'autre dans cette session.
@@ -117,7 +128,16 @@ désambiguïsée), **8 sortants** (`§0`×4, `§0bis`, `§0.3`, `§0.7`, `§0.9`
 - Recâblage entrants : grep séparés `§1bis`, `§[2-8]` (mot-frontière), `T[1-7] ` si cité comme
   ancre — puis tri manuel des faux positifs (PDF 24.16, §8.3 d'autres fichiers, etc.).
 
-### Étape 4 — Réécriture de la tête de l'index + garde-fou final
+### Étape 4 — Réécriture de la tête de l'index + garde-fou final — ✅ FAITE le 2026-07-28
+
+Réalisé : section **« Pointeurs — où vit la spec »** (ancre `#pointeurs`) posée à l'emplacement
+libéré par §1→§10, avec les **8 documents** (3 sous-docs neufs + `V11_entity_encoder_pointer.md`
++ `observation_deploiement.md` + `Replay.md` + `V11_move_build_acceleration.md` +
+`Implémenté/V11_move_pool_optimization.md`), une ligne par doc : rôle + état vivant/clos. Le renvoi
+de tête « §0hist est après §10 » est re-pointé sur les Pointeurs. Index final : **4094 lignes**
+(≈ 4050 attendues). Garde-fou global : **19 hits, tous faux positifs nommant leur fichier**
+(cf. §6). Sous-docs : `V11_tranches.md` **1709**, `V11_phaseA.md`, `V11_eval_strategy.md`.
+
 - Dans `V11_agent_rework.md` : remplacer les sections parties par une section « Pointeurs » :
   les 3 sous-docs neufs + `V11_entity_encoder_pointer.md` + `V11_move_build_acceleration.md` +
   `Implémenté/V11_move_pool_optimization.md` + `observation_deploiement.md` + `Replay.md`.
@@ -160,7 +180,13 @@ positifs « §x.y d'un autre fichier nommé dans la phrase » sont tolérés s'i
 `V11_move_build_acceleration.md` citée avec son contexte — toute sortie AU-DELÀ de cette
 baseline est une régression introduite par l'extraction.
 **Après étapes 1-2 : 6 hits** = les 3 de baseline + les 3 faux positifs de `V11_phaseA.md`
-(`§8`, `§6`, `§1.9`, chacun citant son fichier) — aucun lien mort introduit.)
+(`§8`, `§6`, `§1.9`, chacun citant son fichier) — aucun lien mort introduit.
+**APRÈS ÉTAPES 3-4 — baseline finale : 19 hits, tous faux positifs, chacun nommant son fichier
+sur sa propre ligne** — 16 dans `V11_agent_rework.md` (`§8.3` ×2 de
+`move_action_space_spatial_rework.md` ; `§2`, `§2bis` ×3, `§3` ×2, `§3.1`, `§8` ×4 de
+`V11_move_build_acceleration.md` ; `§1.8`, `§1.9`, `§6.2` d'autres chantiers) et 3 dans
+`V11_phaseA.md` (`§8`, `§6`, `§1.9`). **Aucun lien mort.** Toute sortie AU-DELÀ de ces 19 est
+une régression.)
 
 ## 7. Budget contexte / quota — quelles étapes pour un seul agent ?
 
