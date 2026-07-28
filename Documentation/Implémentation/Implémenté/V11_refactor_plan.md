@@ -3,12 +3,12 @@
 > **But.** Réduire `V11_agent_rework.md` (**6603 lignes / 531 Ko** au 2026-07-28) à un **index
 > d'état** (à faire / fait + méthode + historique), en sortant la **spec** (§1→§10) dans 3
 > sous-docs pointés depuis l'index. Pattern déjà validé : §0.22 →
-> [`Implémenté/V11_move_pool_optimization.md`](Implémenté/V11_move_pool_optimization.md).
+> [`Implémenté/V11_move_pool_optimization.md`](V11_move_pool_optimization.md).
 >
-> **Statut : PRÊT À EXÉCUTER (remis à jour le 2026-07-28).** Le prérequis « attendre la passe
-> move_pool » de la version du 2026-07-21 est **levé** (§0.22 clos, pointeur recâblé). Seule
-> contrainte de timing restante : **hors run d'entraînement** et **un seul agent à la fois** sur
-> ce fichier.
+> **Statut : ✅ TERMINÉ le 2026-07-28, archivé dans `Implémenté/`.** Les 4 étapes sont exécutées
+> (commits `db75417e`, `5e93fedd`, `cb77f6a6`, `5d1f1ab6`) — détail et baselines dans les étapes
+> ci-dessous. Ce document ne sert plus qu'à retracer la méthode ; l'état vivant est dans
+> [`V11_agent_rework.md`](../V11_agent_rework.md) (section Pointeurs).
 >
 > **Décision Option A — TRANCHÉE le 2026-07-21, inchangée** : l'historique (§0hist) RESTE dans
 > l'index. On n'extrait que la spec §1→§10. L'historique EST l'inventaire du fait.

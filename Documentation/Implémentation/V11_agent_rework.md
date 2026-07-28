@@ -70,12 +70,12 @@ actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist
 | **§0.40** | Observation de la phase de déploiement déficiente (3 défauts vérifiés) | 🔴 **OUVERT** — chantier externe | 6 | Détail et pistes → [`observation_deploiement.md`](observation_deploiement.md) (sorti de l'audit archivé le 2026-07-28). Points 1-2 (obs ≠ unité du masque, grille centrée hors plateau) = correctifs indépendants et peu coûteux ; point 3 (décrire les hexes candidats) change `obs_size` → à séquencer avec un run `--new`. Détail → §0.40. |
 | **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)). T2→T5 **jamais revérifiés** : ne pas s'appuyer sur leurs ✅ sans relecture. ⚠️ Sa **section** est restée en §0hist (elle y était déjà avant l'épuration) alors que sa part T2→T5 est ouverte — laissée en place plutôt que scindée, pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
 
-🔴 **ALERTE — divergence entre le dépôt et le répertoire de travail (constatée le 2026-07-28,
-NON corrigée : c'est un arbitrage utilisateur, pas une erreur à réparer d'office).**
-`config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` est **modifié non commité**, et
-la modification **annule** la décision documentée en §0.14 :
+🔴 **ALERTE — la config commitée contredit la décision §0.14 (MAJ 2026-07-28 soir : la
+divergence a été COMMITÉE en l'état, `ea18e9ae` — l'arbitrage utilisateur reste dû).**
+`config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` porte désormais en HEAD,
+arbre propre (vérifié le 2026-07-28 soir) :
 
-| Clé (profil `x1`) | HEAD (commité, = la décision §0.14) | Répertoire de travail |
+| Clé (profil `x1`) | Décision documentée §0.14 | HEAD actuel (commité) |
 |---|---|---|
 | `bot_eval_freq` | **4000** | **2000** |
 
@@ -85,9 +85,10 @@ l'autre sens : les `justification` d'`obs_size` sont mises à jour de « grille 
 `max_nearby_units` / `max_valid_targets` ont été **retirées des 5 profils** le 2026-07-28 — elles
 n'alimentaient que le pipeline mono-figurine supprimé le même jour, plus aucun code ne les lit
 (vérifié par grep sur `engine/`, `services/`, `ai/`, `config_loader.py`). Aucun impact sur le run.
-**Avant de lancer le run §0.14, trancher `bot_eval_freq` puis committer** — sinon le run tourne avec une
-cadence d'éval que le document contredit. Rappel du raisonnement §0.14 : à 2000, sur 30 000 épisodes,
-**4 évals tombent avant `save_best_min_episodes` (10 000) et ne peuvent sauvegarder aucun modèle**.
+**Avant de lancer le run §0.14, trancher** : soit remettre `bot_eval_freq: 4000` (la décision
+documentée), soit assumer 2000 et amender §0.14 — sinon le run tourne avec une cadence d'éval que
+le document contredit. Rappel du raisonnement §0.14 : à 2000, sur 30 000 épisodes, **4 évals
+tombent avant `save_best_min_episodes` (10 000) et ne peuvent sauvegarder aucun modèle**.
 
 ⚠️ **Avant de vous appuyer sur une affirmation de ce document, lire §0bis** — en particulier la
 réserve de méthode sur le document lui-même (T2→T5 et section 9 n'ont **pas** été revérifiés
@@ -860,7 +861,7 @@ AVANT d'y lancer un entraînement.
 ## Pointeurs — où vit la spec (ce document ne garde que l'ÉTAT)
 
 > Les sections **1 à 10** de la spec ont été extraites le **2026-07-28** dans trois sous-docs
-> (plan [`V11_refactor_plan.md`](V11_refactor_plan.md), étapes 1→3). Ce fichier ne conserve que
+> (plan [`V11_refactor_plan.md`](Implémenté/V11_refactor_plan.md), étapes 1→3). Ce fichier ne conserve que
 > l'**index d'état** : §0 (ouvert et actionnable), §0bis (pièges canoniques), §0ter (non-travaux)
 > et §0hist (historique résolu, intégral). **Contenu déplacé tel quel, aucune réécriture.**
 

@@ -1,7 +1,7 @@
 # V11 — Phase A' : toutes les règles implémentées dans le training (P1-P5)
 
 > **Origine.** Section §9 extraite de [`V11_agent_rework.md`](V11_agent_rework.md) le 2026-07-28
-> (plan [`V11_refactor_plan.md`](V11_refactor_plan.md), étape 1). Contenu déplacé **tel quel**,
+> (plan [`V11_refactor_plan.md`](Implémenté/V11_refactor_plan.md), étape 1). Contenu déplacé **tel quel**,
 > aucune réécriture.
 >
 > **Rôle.** Spécification de la Phase A' : parité de résolution des règles (P1) puis mécanisme de

@@ -1,7 +1,7 @@
 # V11_tranches.md — Spec V11 : objectif, ancre, ruptures, tranches T1→T7, critères, tests
 
 > **Origine.** Sections **§1 → §8** extraites de [`V11_agent_rework.md`](V11_agent_rework.md) le
-> **2026-07-28** (étape 3 de [`V11_refactor_plan.md`](V11_refactor_plan.md)), **sans aucune
+> **2026-07-28** (étape 3 de [`V11_refactor_plan.md`](Implémenté/V11_refactor_plan.md)), **sans aucune
 > réécriture** : blocs déplacés tels quels, seuls les liens ont été recâblés.
 >
 > **Rôle.** La **spec** V11 : objectif, concept d'ANCRE, ruptures R1→R8, décisions de design,

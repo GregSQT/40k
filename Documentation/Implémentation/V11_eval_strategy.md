@@ -1,7 +1,7 @@
 # V11 — Stratégie d'entraînement et d'évaluation
 
 > **Origine.** Section §10 extraite de [`V11_agent_rework.md`](V11_agent_rework.md) le 2026-07-28
-> (plan [`V11_refactor_plan.md`](V11_refactor_plan.md), étape 2). Contenu déplacé **tel quel**,
+> (plan [`V11_refactor_plan.md`](Implémenté/V11_refactor_plan.md), étape 2). Contenu déplacé **tel quel**,
 > aucune réécriture.
 >
 > **Rôle.** Décision utilisateur du 2026-07-19 : rosters, progression d'adversaires, holdout,
