@@ -44,7 +44,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.43` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.42` le 2026-07-28).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.44` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -62,13 +62,14 @@ actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
-| **§0.14** | Re-mesure du run — win-rate par matchup | 🔴 **À RELANCER** — le run du 2026-07-28 est mort au merge | **1** | Relancer le run `--new` (`obs_size` **20740**, vérifié dans le code le 2026-07-28 après merge : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` == la valeur des 5 profils de config). 🔴 **CE RUN EST MORT (2026-07-28, 20 h 20)** : §0.41 (P3-1) et §0.42 (P2) ont été mergés PENDANT lui, sur décision utilisateur, et le changement d'`obs_size` l'a arrêté — conséquence attendue. **La re-mesure reste donc À FAIRE**, sur un run `--new` au contrat courant (`obs_size` **20740**, action space **1088**). Le checkpoint 720 k sauvegardé n'est pas réutilisable. ⚠️ Lire d'abord §0.33 (choix du profil : 8 envs, re-testé meilleur par l'utilisateur le 2026-07-28) ; `bot_eval_freq` est tranché (2000 assumé, encadré 🟢 ci-dessous). |
-| **[§9](V11_phaseA.md#s9)** | Phase A' — **P2 livré**, **P3 tranches 2→8** (décisions restantes) | 🟠 **P3-1 + P2 + P3 point 0 LIVRÉS et MERGÉS sur `main`** (2026-07-28) | **2** | **P3-1 (cible de mêlée)**, cf. **§0.41** : une décision dont les candidats sont des ENTITÉS déjà observées se paramètre en **dimension d'action + tête pointeur**, pas en `CHOICE_k`. **P2 (mécanisme générique) + P3 point 0 (rule-choice)**, cf. **§0.42** : `CHOICE_0..5` pour les décisions dont les candidats ne sont **pas** des entités observées ; `raw_action_int % len(options)` n'existe plus. Reste **P3-2→8**, P4, P5. ⚠️ Le point 0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice) : sa correction est structurelle, pas mesurable. |
+| **§0.14** | Re-mesure du run — win-rate par matchup | 🔴 **À RELANCER** — **DEUX** runs morts le 2026-07-28, les deux tués par une modification du working tree pendant qu'ils tournaient | **1** | 🔴 **RUN 1 mort à 20 h 20** : §0.41 (P3-1) et §0.42 (P2) mergés PENDANT lui (décision utilisateur), changement d'`obs_size` → arrêt. 🔴 **RUN 2 mort à ~21 h 45**, à la PREMIÈRE éval (marqueur 2000, 600 épisodes `error` en 7,1 s) : le `git checkout` de la branche P3-2 à 21 h 39 a réécrit le code **sur le disque** ; les workers d'éval démarrent en `spawn`, ont donc reconstruit l'architecture P3-2 (`action_net [17,320]` + `charge_query_net`) pour charger un snapshot P2 (`[18,320]`, sans) → `load_state_dict` lève → `BrokenProcessPool`. Diagnostic **reproduit** le 2026-07-28 23 h, leçon durcie en §0bis. **AVANT DE RELANCER** : (a) `git rev-parse --abbrev-ref HEAD` + `git status` — le working tree doit être sur la branche VOULUE et propre ; (b) trancher si le run embarque P3-2 (branche `v11-p3-2-charge-target` : `obs_size` **20768**, action space **1107**, config alignée, tests verts) ou non (`main` : **20740** / **1088**) ; (c) **geler le working tree** pour toute la durée du run — aucun commit, aucun checkout, aucune édition. ⚠️ Lire aussi §0.33 (profil : 8 envs) ; `bot_eval_freq` est tranché (2000 assumé, encadré 🟢 ci-dessous). Les checkpoints 720 k et 80 k portent des contrats que plus aucun code ne construit. |
+| **[§9](V11_phaseA.md#s9)** | Phase A' — **P2 + P3 points 0/1/2 livrés**, **P3 tranches 3→8** (décisions restantes) | 🟠 **P3-1 + P2 + P3 point 0 MERGÉS sur `main`** ; **P3-2 livré sur BRANCHE, non mergé** (2026-07-28) | **2** | **P3-1 (cible de mêlée)**, cf. **§0.41** : une décision dont les candidats sont des ENTITÉS déjà observées se paramètre en **dimension d'action + tête pointeur**, pas en `CHOICE_k`. **P2 (mécanisme générique) + P3 point 0 (rule-choice)**, cf. **§0.42** : `CHOICE_0..5` pour les décisions dont les candidats ne sont **pas** des entités observées ; `raw_action_int % len(options)` n'existe plus. **P3-2 (cible de charge)**, cf. **§0.43** : même patron que P3-1, `TOTAL_ACTION_SIZE` **1107**, `obs_size` **20768** — 🔴 **sur la branche `v11-p3-2-charge-target`, à merger sur décision utilisateur et JAMAIS pendant un run**. Reste **P3-3→8**, P4, P5. ⚠️ Le point 0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice) : sa correction est structurelle, pas mesurable. |
 | **§0.38** | Code mort `_attack_sequence_rng` non supprimé — 2ᵉ moitié de P1 | 🟠 **OUVERT** (constaté 2026-07-28) | **3** | P1 prévoyait « porter les règles vers le vif **PUIS supprimer le mort** ». Le portage est fait ; la suppression **non**. Détail → §0.38. |
 | **§0.33** | Rollout buffer 46,9 Go pour 39 Go de RAM | 🟠 **CONDITIONNEL** — ne bloque que les profils à 48 envs | **4** (avant tout run 48 envs) | Vérifié 2026-07-28 dans la config : `x1`/`x5_new`/`x5_debug` = **8 envs** (passent) ; `x5_append`/`x1_debug` = **48 envs** (échouent à l'allocation). Ne pas lancer ces deux-là sans rouvrir l'entrée. |
 | **§0.29** | Scénario SM vs Orks fixed/active + scheduler | 🟠 Mécanique livrée et validée in-engine ; **l'USAGE n'est PAS configuré** | 5 | 🔴 **CORRIGÉ le 2026-07-28 soir : le run §0.14 NE produira PAS cette mesure.** Relevé dans `x1` : `deployment_mode_schedule` est `enabled: true` mais avec `active_ratio_start = active_ratio_end = 0.0` ⇒ `p_active = 0` à tout épisode (`_configure_deployment_mode_for_episode`, [w40k_core.py:934-937](../../engine/w40k_core.py#L934)) ⇒ **100 % des épisodes en `fixed`, aucune phase de déploiement jouée**. L'ancienne rédaction (« la mesure rejoint §0.14 : c'est le même run qui la produit ») était **fausse**. Pour l'obtenir : régler la rampe (p.ex. `0.0 → 1.0`, `freeze_after_progress: 0.8`) AVANT de lancer — décision utilisateur. Corollaire : tant que la rampe est plate à 0, **§0.40 (observation du déploiement) n'a aucun effet sur ce run**. |
 | **§0.40** | Observation de la phase de déploiement déficiente (3 défauts vérifiés) | 🔴 **OUVERT** — chantier externe | 6 | Détail et pistes → [`observation_deploiement.md`](observation_deploiement.md) (sorti de l'audit archivé le 2026-07-28). Points 1-2 (obs ≠ unité du masque, grille centrée hors plateau) = correctifs indépendants et peu coûteux ; point 3 (décrire les hexes candidats) change `obs_size` → à séquencer avec un run `--new`. Détail → §0.40. |
 | **§0.42** | P2 « décision agent » mergé sur `main` (avec P3-1) | ✅ **MERGÉ** — reste la MESURE | — | Plus rien à merger. **Relancer le run en `--new`** (`obs_size` **20740**, action space **1088**) : le run §0.14 s'est arrêté à 20 h 20 après le merge (conséquence attendue, constatée), et son checkpoint 720 k porte un contrat que plus aucun code ne construit. Détail → §0.42. |
+| **§0.43** | P3-2 « cible de charge » livré sur branche | ✅ **LIVRÉ** — reste le MERGE (décision utilisateur) puis la MESURE | — | La branche `v11-p3-2-charge-target` porte `TOTAL_ACTION_SIZE` **1107** et `obs_size` **20768**. ⚠️ **Ne pas merger pendant un run** : les workers d'évaluation démarrent en `spawn` et relisent le code du disque (leçon §0.41 / §0.42). Le working tree a été rendu à `main` en fin de session. Détail → §0.43. |
 | **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)). T2→T5 **jamais revérifiés** : ne pas s'appuyer sur leurs ✅ sans relecture. ⚠️ Sa **section** est restée en §0hist (elle y était déjà avant l'épuration) alors que sa part T2→T5 est ouverte — laissée en place plutôt que scindée, pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
 
 🟢 **TRANCHÉ le 2026-07-28 soir (arbitrage utilisateur) : `bot_eval_freq = 2000` ASSUMÉ**, pour
@@ -587,6 +588,30 @@ la mesure de validation doit **enchaîner plusieurs épisodes sur le même moteu
 protocole qui montre une fuite d'état. Un compteur d'événements « déjà tirés » est le cas type :
 il est correct dans l'épisode, faux entre deux.
 
+### Un test qui passe du premier coup n'est pas encore un verrou (§0.43, 2026-07-28)
+
+Les 8 premiers tests de parité masque/commit de la cible de charge sont passés **au premier
+essai**. Trois mutations ont été appliquées pour vérifier qu'ils mordaient : masque sans filtre
+d'éligibilité, commit sans garde d'éligibilité, décodeur décalé d'un slot — les trois ont bien
+rougi. Mais l'une d'elles a révélé qu'un test **ne discriminait pas** : « les slots ouverts ==
+les cibles déclarables » était vrai trivialement, parce que *toutes* les cibles mappées du
+scénario étaient à portée. Il a fallu **fabriquer** le cas contraire (éloigner une cible au-delà
+de 12" et vérifier que son slot se ferme) pour que l'assertion ait un contenu.
+
+**Règle** : quand un test neuf passe sans avoir jamais échoué, appliquer la mutation qu'il est
+censé attraper. Si elle ne le fait pas rougir, le test décrit la fixture, pas le code. Le même
+raisonnement vaut pour une feature d'observation : la justifier exige une **contre-épreuve à
+variable unique** (ici : même `edge_distance`, atteignabilité opposée), sinon rien ne prouve que
+le champ existant ne suffisait pas.
+
+### Une garde de PERFORMANCE n'est pas une garde de CORRECTION — le dire (§0.43, 2026-07-28)
+
+`charge_reachable_max_roll` est calculé sous deux gardes : la phase de charge, et l'éligibilité
+11.02 de la cible. La seconde est **purement une garde de coût** — `charge_build_valid_plan`
+re-teste lui-même l'éligibilité et rendrait `None` de toute façon. La retirer ne casserait aucun
+test, seulement la perf. Documenter laquelle est laquelle évite qu'un futur lecteur la prenne
+pour un invariant, ou la supprime en croyant simplifier.
+
 ### Un comportement obtenu par effet de bord n'est pas un comportement décidé (§0.42, 2026-07-28)
 
 Une action `agent_decision` recevait un reward de 0.0 — la valeur voulue — mais **uniquement**
@@ -760,6 +785,27 @@ run fait donc diverger le modèle en mémoire (ancien `TOTAL_ACTION_SIZE`) et le
 (nouveau) : plantage à l'évaluation suivante, ou pire, mesure fausse. **Avant de conclure qu'un
 run en cours est protégé, vérifier le mode de démarrage de CHAQUE famille de sous-processus.**
 Parade appliquée en §0.41 : livrer sur une branche, laisser `main` intact jusqu'à la fin du run.
+
+> 🔴 **PARADE INSUFFISANTE — la leçon a coûté un SECOND run le 2026-07-28 (§0.43).** « Laisser
+> `main` intact » ne protège rien : ce que les workers `spawn` relisent, c'est le **WORKING
+> TREE**, pas la branche `main`. P3-2 a été correctement livré sur `v11-p3-2-charge-target`
+> (jamais mergé, vérifié : `main` est resté sur le commit P2) — mais le working tree est **resté
+> checkouté sur cette branche**. Le `git checkout` de 21 h 39 a donc réécrit sur le disque
+> `pointer_policy.py`, `macro_intents.py` et le JSON de config pendant que le run tournait.
+> **Diagnostic reproduit** : le snapshot d'éval portait `action_net [18, 320]` sans
+> `charge_query_net` (architecture P2, celle du process en mémoire) ; les workers ont reconstruit
+> `action_net [17, 320]` **avec** `charge_query_net` (architecture P3-2, celle du disque) →
+> `load_state_dict` lève dans l'`initializer` du pool → `BrokenProcessPool` → 600 épisodes
+> `error` en 7,1 s → le garde-fou strict d'éval arrête le training.
+> **Règle qui remplace la précédente** : pendant un run, le working tree est **GELÉ**. Ni commit,
+> ni checkout, ni édition — quelle que soit la branche. Un agent qui doit livrer travaille dans un
+> **worktree git séparé** (`git worktree add`), pas par bascule de branche.
+> **Défaut d'observabilité à traiter** (non fait) : `BrokenProcessPool` a **avalé** la vraie
+> exception ; le log ne donnait que « error_episodes=600 », sans cause. Il a fallu réexécuter
+> `_eval_worker_init` à la main pour la voir. Tant que l'init du worker passe par l'`initializer`
+> du pool, toute panne de worker sera indiagnosticable depuis le log — l'initialiser
+> **paresseusement dans la tâche** ferait remonter le message réel par le chemin d'erreur
+> par-tâche qui existe déjà.
 
 **Une spec d'action_space peut être périmée par une évolution du RÉSEAU, pas seulement du moteur (§0.41, 2026-07-28)**
 
@@ -1014,6 +1060,50 @@ AVANT d'y lancer un entraînement.
 | [`Implémenté/V11_move_pool_optimization.md`](Implémenté/V11_move_pool_optimization.md) | Cadrage d'origine du chantier move pool (§0.22) | **clos** — archive, ne plus s'y fier pour l'état du code |
 
 ## 0hist. Historique résolu
+
+<a id="s0.43"></a>
+### 0.43 [§9](V11_phaseA.md#s9) P3-2 — la cible de charge devient une dimension d'action (slots ennemis + pointeur) — ✅ LIVRÉ, NON MERGÉ, NON MESURÉ (2026-07-28)
+
+**Contenu d'état complet en [§9.4bis](V11_phaseA.md#s9.4bis)** (ce que le code fait, preuves,
+mesures) — conformément à la règle « un contenu d'état vit à UN seul endroit ». Cette entrée porte
+l'**orchestration** : ce qu'il reste à décider et ce qu'il ne faut pas re-diagnostiquer.
+
+**En une phrase.** `charge` était une action nue et c'est le **décodeur** qui choisissait la cible
+(`get_best_enemy_score_for_unit`, damage_ratio) ; la cible est désormais portée par l'action
+(`CHARGE_SLOT` 1045-1064, un par slot ennemi), scorée par une **tête pointeur**, avec parité
+masque/commit dans les deux sens et un bit d'observation de support
+(`charge_reachable_max_roll`). `TOTAL_ACTION_SIZE` **1088 → 1107**, `obs_size` **20740 → 20768**,
+5 profils de config alignés.
+
+🔴 **CE QUI N'EST PAS FAIT, et pourquoi.**
+1. **Le merge sur `main`.** La livraison est sur la branche **`v11-p3-2-charge-target`**. C'est
+   une **décision utilisateur**, pas un oubli : §0.41 et §0.42 ont établi qu'un changement
+   d'action space ou d'observation **n'est pas inerte pour un run déjà lancé** (les workers
+   d'évaluation démarrent en `spawn` et ré-importent le code **depuis le disque**), et le run
+   §0.14 du 2026-07-28 en est mort.
+   > 🔴 **AFFIRMATION FAUSSE, CORRIGÉE le 2026-07-28 23 h : « Le working tree a été rendu à
+   > `main` en fin de session » est DÉMENTI par le dépôt.** `git rev-parse --abbrev-ref HEAD`
+   > rend **`v11-p3-2-charge-target`** : le working tree est resté sur la branche. C'est
+   > **précisément ce qui a tué le second run §0.14** — le `git checkout` de 21 h 39 a réécrit
+   > `pointer_policy.py`/`macro_intents.py`/le JSON de config **sur le disque**, pendant que le
+   > run tournait avec l'architecture P2 en mémoire. Voir la leçon durcie en §0bis : le danger
+   > n'est PAS « merger sur `main` », c'est **toute modification du working tree**, checkout
+   > compris. Avant de lancer un run, vérifier la branche courante ET `git status`.
+2. **Le win-rate** exigé par [§9.6](V11_phaseA.md#s9.6). Indisponible : l'action space **et**
+   l'observation changent ⇒ tout modèle existant est incompatible ⇒ retrain `--new`.
+3. **Le regret** de la décision ([§9.0bis](V11_phaseA.md#s9.0bis) réserve 1) : non mesuré, comme
+   pour P3-1. **À confronter au premier run** — si le win-rate baisse, c'est la première
+   hypothèse à instruire.
+
+⚠️ **Ne pas re-diagnostiquer.** Les **bots d'évaluation ont changé de comportement**, comme à
+P3-1 : ils prennent le premier slot de charge ouvert, donc la cible la plus menaçante, au lieu du
+`damage_ratio` du décodeur. **Les win-rates d'avant cette tranche ne sont pas comparables à ceux
+d'après** — la baseline adverse a changé.
+
+⚠️ **Une modification de `ArmageddonAgent_training_config.json` (`active_ratio_end` 0.0 → 0.8) est
+apparue dans le working tree pendant cette session, sans être de cette tranche** ; elle a été
+délibérément **laissée non commitée**, seul `obs_size` a été commité. À reprendre par son auteur.
+
 
 > Entrées closes, **conservées intégralement** : mesures, sorties de run copiées, tableaux de
 > sites audités, diagnostics d'origine et attributions erronées assumées. Rien n'y est résumé.
