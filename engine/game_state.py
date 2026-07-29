@@ -2568,7 +2568,11 @@ class GameStateManager:
             obj_id = objective["id"]
             obj_id_key = str(obj_id)
 
-            # Rule 14.02: sum OC of all models whose footprint centre is within the area.
+            # Rule 14.02 : somme des OC des figurines dont l'empreinte de socle RECOUVRE la
+            # zone (un hexe commun suffit — ce n'est PAS un test sur le centre du socle),
+            # figurines mortes exclues. Les unites battle-shocked n'y contribuent rien :
+            # 01.07 met l'OC de toutes leurs figurines a '-' (02.02). Detail dans
+            # ``sum_objective_control_oc``, seule implementation.
             player_1_oc, player_2_oc = oc_sums[obj_index]
 
             # Get current controller from persistent state; explicit init when first seeing this objective
@@ -2736,7 +2740,11 @@ class GameStateManager:
             obj_id_key = str(obj_id)
             obj_hexes = require_key(objective, "hexes")
             hex_set = {normalize_coordinates(h[0], h[1]) for h in obj_hexes}
-            # Rule 14.02: sum OC of all models whose footprint centre is within the area.
+            # Rule 14.02 : somme des OC des figurines dont l'empreinte de socle RECOUVRE la
+            # zone (un hexe commun suffit — ce n'est PAS un test sur le centre du socle),
+            # figurines mortes exclues. Les unites battle-shocked n'y contribuent rien :
+            # 01.07 met l'OC de toutes leurs figurines a '-' (02.02). Detail dans
+            # ``sum_objective_control_oc``, seule implementation.
             player_1_oc, player_2_oc = self._sum_objective_control_oc(game_state, hex_set)
 
             if obj_id_key not in objective_controllers:

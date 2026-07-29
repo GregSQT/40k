@@ -83,7 +83,7 @@ mesurés sur la suite entière.
 | `test_reactive_move.py` | 18 | `maybe_resolve_reactive_move` : déclenchement, distance 9 hexes, reentrance, cleanup, logs |
 | `test_phase_start.py` | 18 | `movement_phase_start`, `shooting_phase_start`, `fight_phase_start` — phase, cache, pools |
 | `test_phase_transitions.py` | 14 | Transitions end-to-end move→shoot→fight : phase_start, BFS, attack sequence, kill |
-| `test_reward_calculator.py` | 23 | `_calculate_wound_target`, `_calculate_expected_damage`, `_determine_winner` |
+| `test_reward_calculator.py` | 8 | `_determine_winner` ; `_calculate_on_objective_reward` — le bonus « sur objectif » n'est PAS versé à une escouade battle-shocked (01.07 : OC de toutes ses figurines à '-', elle ne peut rien prendre). Compte relevé par collecte réelle : le 23 précédent, et la mention de `_calculate_wound_target` / `_calculate_expected_damage` (absents de ce fichier), étaient périmés |
 | `test_action_decoder.py` | 54 | `normalize_action_input`, `validate_action_against_mask`, `convert_gym_action` (5 phases + fight sub-phases), edge cases |
 | `test_observation_builder.py` | 22 | `ObservationBuilder.__init__`, wound_target, expected_damage, favorite_target |
 | `test_engine_turn_loop.py` | 24 | `W40KEngine._check_game_over`, `GameStateManager.determine_winner` (les 8 tests de `_advance_to_next_player` ont été supprimés avec la méthode, code mort — cf. V11 §0.4) |
@@ -103,7 +103,9 @@ mesurés sur la suite entière.
 | `tests/unit/services/test_api_integration.py` | 14 | API Flask flux réel (engine semi-réel, sans mock execute_semantic_action ni _game_state_for_json) : sérialisation JSON, champs requis, no set leak |
 | `tests/unit/engine/test_engine_step.py` | 13 | `W40KEngine.step()` : signature tuple×5, types obs/reward/terminated/truncated/info, turn_limit→terminated, pool vide→phase auto-advance |
 | `tests/unit/engine/test_game_state_contract.py` | 28 | Contrat game_state produit par `__init__` réel : clés scalaires, tracking sets, pools, structures complexes (units_cache après reset) |
-| `tests/unit/engine/test_objective_scoring.py` | 11 | `apply_primary_objective_scoring` : guard clauses, VP par condition (control_at_least_one/two, control_more_than_opponent), cap max_points, round5 phase spéciale, liste multi-objectifs |
+| `tests/unit/engine/test_objective_scoring.py` | 15 | `apply_primary_objective_scoring` : guard clauses, VP par condition (control_at_least_one/two, control_more_than_opponent), cap max_points, round5 phase spéciale, liste multi-objectifs ; **battle-shock (01.07)** : une unité sous le choc n'apporte aucun OC, bascule l'objectif à l'adversaire, ne marque plus de VP, et l'absence du champ `battle_shocked` lève (aucune valeur par défaut) |
+| `tests/unit/engine/test_command_phase.py` | 16 | `command_phase_start` en isolation et via `W40KEngine.reset()` ; **sonde vive battle-shock** : vrai moteur, demi-effectif, dés forcés → l'étape 08.03 pose elle-même le drapeau et le décompte 14.02 du moteur tombe à zéro (la sonde échoue si elle ne voit pas le contrôle exister avant le choc) |
+| `tests/unit/services/test_unit_builders_battle_shock.py` | 3 | Contrat des constructeurs d'unités hors moteur : `_build_units_from_army_config` (change_roster) et `_build_unit_from_registry` (spawn endless duty) posent toujours `battle_shocked`, que `sum_objective_control_oc_multi` lit sans défaut |
 | `tests/unit/engine/test_unit_rules_shoot.py` | 7 | UNIT_RULES × WEAPON_RULES sur le même dé (01 Core « Re-rolls ») : abilité + [TWIN-LINKED] ne relancent jamais deux fois ; portée des abilités `to wound` |
 | `tests/unit/engine/test_activation_e2e.py` | 9 | Activation e2e via `execute_semantic_action` : routing pool, skip, game_over, tir→HP réduit, mort→units_cache cleanup, pool cleanup, units_shot, all_attack_results |
 
