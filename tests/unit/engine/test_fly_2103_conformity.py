@@ -146,6 +146,7 @@ def _fly_gs(
     inches_to_subhex: int = 1,
     walls: bool = True,
     phase: str = "move",
+    wall_override: Any = None,
 ) -> Dict[str, Any]:
     """`game_state` minimal centré sur une unique escouade FLY d'un seul modèle."""
     unit: Dict[str, Any] = {
@@ -172,7 +173,10 @@ def _fly_gs(
         "board_rows": 21,
         "current_player": 1,
         "phase": phase,
-        "wall_hexes": set(_WALL_RING) if walls else set(),
+        "wall_hexes": (
+            set(wall_override) if wall_override is not None
+            else (set(_WALL_RING) if walls else set())
+        ),
         "units": [unit],
         "unit_by_id": {"1": unit},
         "move_activation_pool": [],
@@ -254,6 +258,45 @@ def test_training_flight_crosses_the_wall_and_pays_for_it():
     grounded = _fly_gs(move=5, gym=True, declared=False)
     grounded["unit_by_id"]["1"]["UNIT_KEYWORDS"] = []
     assert movement_build_valid_destinations_pool(grounded, "1") == []
+
+
+def test_move_eligibility_is_bounded_by_the_real_budget_not_the_raw_move_stat():
+    """Invariant masque ⊆ exécutable (§0.34) : une escouade n'est déclarée ÉLIGIBLE au mouvement
+    que si son pool de destinations est non vide.
+
+    Le piège que ce test verrouille : `get_eligible_units` bornait sa recherche sur la
+    caractéristique `MOVE` brute, alors que le pool d'une unité volante est construit sur
+    `MOVE - 2"` (21.03). Une unité FLY murée jusqu'à la distance `M - 2` et libre au-delà était
+    donc annoncée éligible avec un pool VIDE.
+    """
+    from engine.hex_utils import hex_distance
+    from engine.phase_handlers.movement_handlers import get_eligible_units
+
+    move = 5  # budget réel en vol : 5 - 2 = 3
+    # Mur plein du disque de rayon 3 autour du départ (départ exclu) : toute destination à portée
+    # du budget RÉEL est un mur ; les premières cases libres sont à 4, dans la bande (3, 5].
+    walled = {
+        (c, r)
+        for c in range(25)
+        for r in range(21)
+        if hex_distance(c, r, _START[0], _START[1]) <= move - 2
+        and (c, r) != _START
+    }
+
+    gs = _fly_gs(move=move, gym=True, declared=False, wall_override=walled)
+    pool = movement_build_valid_destinations_pool(gs, "1")
+    assert pool == [], "pré-condition : le budget réel (3) ne sort pas du mur"
+    assert "1" not in get_eligible_units(gs), (
+        "unité déclarée éligible avec un pool vide — l'éligibilité est bornée par MOVE brut "
+        "au lieu du budget réel"
+    )
+
+    # Témoin actif : avec 2" de plus, le budget réel franchit le mur et l'unité redevient
+    # éligible. Sans ce témoin, l'assertion ci-dessus passerait aussi si `get_eligible_units`
+    # ne rendait jamais personne.
+    gs_ok = _fly_gs(move=move + 2, gym=True, declared=False, wall_override=walled)
+    assert movement_build_valid_destinations_pool(gs_ok, "1") != []
+    assert "1" in get_eligible_units(gs_ok)
 
 
 def test_take_to_the_skies_does_not_leak_outside_the_moves_2103_covers():

@@ -338,6 +338,25 @@ def _fly_traversal_active(game_state: Dict[str, Any], unit: Dict[str, Any], unit
     return took_to_the_skies(game_state, unit, unit_id, charge=(phase == "charge"))
 
 
+def squad_move_pool_budget_subhex(game_state: Dict[str, Any], squad_id: str) -> int:
+    """Budget (subhex) du mouvement que cette escouade s'apprête RÉELLEMENT à faire.
+
+    SOURCE UNIQUE de la borne des destinations : régime Advance si un jet a été tiré pour elle,
+    sinon normal/fall-back — et dans les deux cas le malus Take to the skies (-2", 21.03) que
+    `get_squad_move_budget` applique.
+
+    Extraite de `movement_build_valid_destinations_pool` pour que l'ÉLIGIBILITÉ (`get_eligible_units`)
+    borne sa recherche exactement comme le pool : bornée sur la caractéristique `MOVE` brute, elle
+    déclarait éligible une unité volante dont toutes les destinations légales tombent dans la bande
+    `(M - 2", M]` — donc avec un pool vide. C'est la classe d'incohérence masque/exécution que
+    §0.34 pourchasse.
+    """
+    _adv_roll = _advance_roll_for(str(squad_id), game_state)
+    if _adv_roll is not None:
+        return get_squad_move_budget(str(squad_id), game_state, "advance", advance_roll=_adv_roll)
+    return get_squad_move_budget(str(squad_id), game_state, "normal")
+
+
 def squad_descent_penalty_subhex(game_state: Dict[str, Any], squad_id: str) -> int:
     """Coût de descente (§13.06) à retrancher du budget d'un squad move RIGIDE (destination sol).
 
@@ -586,12 +605,21 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
             raise ValueError(f"Unit {unit_id} not found in game_state while building move eligibility")
         has_fly_keyword = _unit_has_keyword(unit_obj, "fly")
 
-        # Normalize MOVE to int for range checks
+        # Normalize MOVE to int for range checks (validation de la donnée de datasheet)
         move_range_raw = require_key(unit_obj, "MOVE")
         try:
-            move_range = int(move_range_raw)
+            move_stat = int(move_range_raw)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"Invalid MOVE value for unit {unit_id}: {move_range_raw!r}") from exc
+        if move_stat <= 0:
+            continue
+
+        # Borne de la recherche d'éligibilité = budget RÉEL du move, PAS la caractéristique brute.
+        # `MOVE` et le budget diffèrent dès que l'unité prend les airs (-2", 21.03) : borner sur
+        # `MOVE` déclarerait éligible une unité volante dont la seule destination légale est dans
+        # la bande `(M - 2", M]`, que le pool refusera ensuite — masque ⊄ exécutable (§0.34).
+        # MÊME fonction que celle dont le pool tire sa borne : les deux ne peuvent plus diverger.
+        move_range = squad_move_pool_budget_subhex(game_state, str(unit_id))
         if move_range <= 0:
             continue
 
@@ -2423,12 +2451,7 @@ def movement_build_valid_destinations_pool(
             )
         move_range = int(move_budget_override)
     else:
-        _adv_roll = _advance_roll_for(str(unit_id), game_state)
-        if _adv_roll is not None:
-            move_range = get_squad_move_budget(str(unit_id), game_state, "advance", advance_roll=_adv_roll)
-        else:
-            # Normal/fall-back via budget unique : applique aussi le malus Take to the skies (-2", Règles 21.03).
-            move_range = get_squad_move_budget(str(unit_id), game_state, "normal")
+        move_range = squad_move_pool_budget_subhex(game_state, str(unit_id))
     # Normalize coordinates to int - raises error if invalid
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
