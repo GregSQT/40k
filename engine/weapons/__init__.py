@@ -4,7 +4,10 @@ engine.weapons - Weapon parsing, rules, and validation
 This module provides weapon data and weapon rules functionality:
 - Parse TypeScript armory files (single source of truth)
 - Validate weapon rules (RAPID_FIRE, MELTA, etc.)
-- Apply weapon rules during gameplay (Phase 2)
+
+Ce paquet CHARGE et VALIDE le catalogue de regles d'armes ; il ne les APPLIQUE pas.
+L'application en jeu passe par `engine/utils/weapon_helpers` + les handlers de phase
+(cf. la pierre tombale de `WeaponRulesApplier` dans rules.py, 2026-07-29).
 
 PUBLIC API:
   From parser.py:
@@ -20,7 +23,6 @@ PUBLIC API:
     - validate_weapon_rules_field() - Validate weapon WEAPON_RULES field
     - WeaponRulesRegistry - Rules registry class
     - ParsedWeaponRule - Parsed rule object
-    - WeaponRulesApplier - Rule application (Phase 2)
 
 USAGE:
   # Get weapons from armory
@@ -50,7 +52,6 @@ from engine.weapons.parser import (
 from engine.weapons.rules import (
     WeaponRulesRegistry,
     ParsedWeaponRule,
-    WeaponRulesApplier,
     get_weapon_rules_registry,
     reset_weapon_rules_registry,
     parse_weapon_rule,
@@ -67,7 +68,6 @@ __all__ = [
     # Rules
     "WeaponRulesRegistry",
     "ParsedWeaponRule",
-    "WeaponRulesApplier",
     "get_weapon_rules_registry",
     "reset_weapon_rules_registry",
     "parse_weapon_rule",

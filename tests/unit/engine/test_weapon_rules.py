@@ -77,12 +77,11 @@ def test_validate_weapon_rules_field_enforces_array_and_required_key(tmp_path: P
         rules.validate_weapon_rules_field({"display_name": "x", "WEAPON_RULES": "ASSAULT"}, registry)
 
 
-def test_weapon_rules_applier_passes_through_context() -> None:
-    applier = rules.WeaponRulesApplier()
-    dummy_rule = rules.ParsedWeaponRule("ASSAULT", None, {"name": "Assault", "description": "", "has_parameter": False})
-    context = {"shots": 2}
-    result = applier.apply_rules({"_parsed_rules": [dummy_rule]}, context)
-    assert result == context
+# 2026-07-29 — `test_weapon_rules_applier_passes_through_context` a ete SUPPRIME avec la
+# classe `WeaponRulesApplier` (cf. pierre tombale dans engine/weapons/rules.py). Il
+# n'assertait qu'une chose : que l'applicateur renvoyait son contexte inchange. Verrouiller
+# une inaction donnait a du code mort une apparence de couverture. L'application reelle des
+# regles d'armes est testee la ou elle vit : tests de `attack_sequence` / tir / melee.
 
 
 def test_registry_singleton_reset() -> None:

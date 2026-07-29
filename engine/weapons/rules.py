@@ -257,72 +257,24 @@ def validate_weapon_rules_field(weapon: Dict[str, Any], registry: WeaponRulesReg
     return parse_weapon_rules(rule_strings, registry)
 
 
-class WeaponRulesApplier:
-    """
-    Applies weapon rules during gameplay.
-    
-    This class will contain methods for applying specific rule logic
-    (e.g., modifying shot count, damage, target validation).
-    
-    Phase 2 implementation - currently a placeholder.
-
-    Note:
-        Cette classe ne consulte PAS le registre : `_apply_single_rule` n'a aucun
-        handler et les regles d'armes vivantes sont appliquees ailleurs
-        (`engine/utils/weapon_helpers.weapon_has_rule` + `attack_sequence`).
-        Le constructeur ne prend donc aucune dependance : en ajouter une que
-        personne ne lit serait un contrat mensonger.
-    """
-
-    def apply_rules(self, weapon: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Apply weapon rules in a given combat context.
-        
-        Args:
-            weapon: Weapon dict with WEAPON_RULES field
-            context: Combat context (shooter, target, distance, etc.)
-            
-        Returns:
-            Modified context with rule effects applied
-            
-        Note:
-            Phase 2 implementation - specific rule logic to be added.
-        """
-        # Parse weapon rules
-        parsed_rules = require_key(weapon, "_parsed_rules")
-        
-        # Apply each rule in order
-        for rule in parsed_rules:
-            context = self._apply_single_rule(rule, weapon, context)
-        
-        return context
-    
-    def _apply_single_rule(self, rule: ParsedWeaponRule, weapon: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Apply a single weapon rule.
-        
-        This method will dispatch to specific rule implementations.
-        
-        Args:
-            rule: Parsed weapon rule
-            weapon: Weapon dict
-            context: Combat context
-            
-        Returns:
-            Modified context
-            
-        Note:
-            Phase 2 implementation - specific rule handlers to be added.
-        """
-        # Phase 2: Add specific rule implementations here
-        # Examples:
-        # if rule.rule == "RAPID_FIRE":
-        #     return self._apply_rapid_fire(rule, weapon, context)
-        # elif rule.rule == "MELTA":
-        #     return self._apply_melta(rule, weapon, context)
-        
-        # For now, just pass through unchanged
-        return context
+# 2026-07-29 — la classe `WeaponRulesApplier` (et ses methodes `apply_rules` /
+# `_apply_single_rule`) a ete SUPPRIMEE. Elle se presentait comme l'applicateur des regles
+# d'armes en jeu ("Phase 2 implementation"), mais `_apply_single_rule` n'a jamais recu le
+# moindre handler : elle renvoyait `context` inchange, et aucun code de production ne l'a
+# jamais instanciee. Seul son test l'appelait, en verrouillant justement le fait qu'elle ne
+# faisait rien — ce qui lui donnait une apparence de vie.
+#
+# POURQUOI ELLE EST MORTE : son objet a ete livre ailleurs, sans qu'on revienne la cabler.
+# L'application effective des regles d'armes passe aujourd'hui par
+# `engine/utils/weapon_helpers.weapon_has_rule` / `weapon_rule_parameter`, consommes par
+# `engine/phase_handlers/attack_sequence.py` (SUSTAINED_HITS, LETHAL_HITS,
+# DEVASTATING_WOUNDS, TWIN_LINKED, TORRENT, HAZARDOUS), `shooting_handlers.py`,
+# `fight_handlers.py` et `engine/observation_weapon_profiles.py`.
+#
+# OU ALLER AUJOURD'HUI : pour APPLIQUER une regle -> `weapon_helpers` + le handler de phase
+# concerne. Ce module-ci ne fait que CHARGER et VALIDER le catalogue
+# (`config/weapon_rules.json`) au chargement des armes : registre, parsing, fail-fast.
+# Ne pas reintroduire ici un applicateur pass-through.
 
 
 # Global singleton registry

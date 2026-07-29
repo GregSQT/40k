@@ -154,8 +154,12 @@ Il existe DEUX moteurs de résolution d'attaque :
   échappe au grep « squad path expected », son message diffère) sont **conservées** : le dispatcher est vif ([w40k_core.py:6157](../../engine/w40k_core.py#L6157)),
   ces `raise` sont des gardes explicites et les retirer dégraderait l'erreur en
   `invalid_action_for_phase` silencieux.
-- `WeaponRulesApplier.apply_rules` est un placeholder pass-through ([rules.py:279-327](../../engine/weapons/rules.py#L279-L327)) :
-  les règles d'armes sont validées/parsées mais PAS appliquées par ce système.
+- ~~`WeaponRulesApplier.apply_rules` est un placeholder pass-through~~ — **classe SUPPRIMÉE le
+  2026-07-29** (pierre tombale dans [rules.py](../../engine/weapons/rules.py)). Le constat de fond
+  est inchangé et confirmé : `engine/weapons/` valide/parse les règles d'armes mais ne les
+  applique PAS ; l'application vit dans `engine/utils/weapon_helpers` + les handlers de phase.
+  Ce n'était pas un point d'extension en attente : son objet avait déjà été livré ailleurs, sans
+  qu'on revienne la câbler ni la supprimer.
 
 Conséquence : toute règle implémentée uniquement dans `_attack_sequence_rng` est inactive
 partout (gym ET PvP).

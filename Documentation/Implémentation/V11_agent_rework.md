@@ -5857,6 +5857,13 @@ toujours pas `IGNORES_COVER` ([shared_utils.py:5980-6005](../../engine/phase_han
 le `except Exception: … return valid_targets[0]` de `_ai_select_fight_target` toujours présent.
 **Seules les références de ligne ont dérivé** (~+200 à +350 lignes) — signalées, non corrigées.
 
+> **Mise à jour 2026-07-29 (archive — le constat ci-dessus n'est pas réécrit, il était exact
+> à sa date).** Le point « `apply_rules` / `_apply_single_rule` toujours `return context`
+> pass-through » est CLOS : la classe `WeaponRulesApplier` qui les portait a été SUPPRIMÉE
+> (aucune instanciation en production, seul son test l'appelait pour verrouiller son inaction).
+> Le lien `rules.py:279-327` ci-dessus ne pointe donc plus sur rien — voir la pierre tombale en
+> fin de `engine/weapons/rules.py`. Les autres points de ce paragraphe restent ouverts.
+
 **Trois affirmations périmées repérées, SIGNALÉES et NON corrigées** (elles rejoignent le
 tableau de §0bis) :
 
