@@ -4,13 +4,17 @@
 Rien ne le vérifiait : neuf `cast` l'affirmaient au typage (hex_utils, terrain_utils,
 movement_handlers) et deux gardes correctes existaient sans être branchées.
 
-L'invariant est désormais validé UNE FOIS, à la frontière où la donnée entre dans le moteur
+L'invariant est validé à la frontière où la donnée entre dans le moteur
 (`game_state._scale_socle`, chargement de datasheet, et `GameStateManager.create_unit` pour
 les unités construites hors chargement), avec une erreur qui NOMME l'unité et les deux
-valeurs incohérentes. Les accesseurs `Socle.scalar_size` / `Socle.oval_size` remplacent les
-`cast` : ils lisent l'étiquette au lieu de l'affirmer.
+valeurs incohérentes.
 
-Ces tests redeviennent ROUGES si la validation de frontière ou un accesseur est retiré.
+Le type du socle est ensuite SCINDÉ : `RoundSocle` / `SquareSocle` / `OvalSocle` portent
+chacun le type exact de `base_size`, et `Socle(...)` est la fabrique qui choisit la classe
+d'après l'étiquette. L'invariant n'est plus « vérifié à la lecture » (accesseurs
+`scalar_size` / `oval_size`, supprimés) : un socle incohérent ne peut plus EXISTER.
+
+Ces tests redeviennent ROUGES si la validation de frontière ou la fabrique est retirée.
 Le dernier verrouille la donnée réelle : toutes les datasheets utilisées par les scénarios
 respectent l'invariant (174 `round` scalaires + 5 `oval` paires sur l'ensemble du roster).
 """
@@ -22,7 +26,9 @@ from pathlib import Path
 import pytest
 
 from engine.game_state import GameStateManager, _scale_socle
-from engine.hex_utils import Socle, require_base_size
+from engine.hex_utils import (
+    OvalSocle, RoundSocle, Socle, SquareSocle, require_base_size,
+)
 
 _ROOT = Path(__file__).parents[3]
 
@@ -116,37 +122,85 @@ def test_create_unit_accepte_les_deux_formes_coherentes():
 
 
 # --------------------------------------------------------------------------------------
-# Accesseurs du Socle (ex-`cast`)
+# Frontière 3 : la fabrique `Socle(...)` — l'invariant devient impossible à violer
 # --------------------------------------------------------------------------------------
 
-def test_socle_scalar_size_refuse_une_paire():
-    socle = Socle(shape="round", base_size=[13, 20], col=0, row=0)
+@pytest.mark.parametrize(
+    "shape,size,classe_attendue",
+    [
+        ("round", 13, RoundSocle),
+        ("square", 8, SquareSocle),
+        ("oval", [13, 20], OvalSocle),
+    ],
+)
+def test_la_fabrique_choisit_la_classe_de_l_etiquette(shape, size, classe_attendue):
+    """`BASE_SHAPE` ne décrit plus la forme « à côté » de la taille : elle CHOISIT le type."""
+    socle = Socle(shape=shape, base_size=size, col=0, row=0)
+
+    assert type(socle) is classe_attendue
+    assert socle.shape == shape
+    # `base_size` ne se lit QUE sur une classe concrète : le typage l'exige, ce test aussi.
+    assert isinstance(socle, (RoundSocle, SquareSocle, OvalSocle))
+    assert socle.base_size == size
+
+
+@pytest.mark.parametrize(
+    "shape,size,extrait",
+    [
+        ("round", [13, 20], "[13, 20]"),
+        ("square", [13, 20], "[13, 20]"),
+        ("oval", 13, "13"),
+        ("oval", [13], "[13]"),            # paire incomplète
+        ("oval", [13, 20, 4], "[13, 20"),  # triplet
+        ("oval", (13, 20), "(13, 20)"),    # tuple : la donnée moteur est une liste
+        ("round", True, "True"),           # `bool` est un `int` pour isinstance, jamais un diamètre
+    ],
+)
+def test_la_fabrique_refuse_une_taille_qui_contredit_l_etiquette(shape, size, extrait):
+    """Aucun socle incohérent ne peut EXISTER : le refus est à la construction, pas au calcul."""
     with pytest.raises(TypeError) as exc:
-        socle.scalar_size()
-    assert "[13, 20]" in str(exc.value)
+        Socle(shape=shape, base_size=size, col=0, row=0)
+
+    assert shape in str(exc.value) and extrait in str(exc.value)
 
 
-def test_socle_oval_size_refuse_un_scalaire():
-    socle = Socle(shape="oval", base_size=13, col=0, row=0)
-    with pytest.raises(TypeError) as exc:
-        socle.oval_size()
-    assert "13" in str(exc.value)
+def test_la_fabrique_refuse_une_forme_inconnue():
+    with pytest.raises(ValueError) as exc:
+        Socle(shape="hexagone", base_size=13, col=0, row=0)
+
+    assert "hexagone" in str(exc.value)
 
 
-def test_socle_accesseurs_rendent_la_valeur_attendue():
-    assert Socle(shape="round", base_size=13, col=0, row=0).scalar_size() == 13
-    assert Socle(shape="oval", base_size=[13, 20], col=0, row=0).oval_size() == [13, 20]
+def test_with_model_centers_conserve_la_classe_concrete():
+    """`_replace` du NamedTuple pouvait produire n'importe quoi ; ici on repasse par la
+    fabrique, donc l'étiquette et la taille restent liées."""
+    rond = Socle(shape="round", base_size=13, col=0, row=0, fp={(0, 0)})
+    ovale = Socle(shape="oval", base_size=[13, 20], col=0, row=0, fp={(0, 0)})
+
+    rond2 = rond.with_model_centers([(1, 1), (2, 2)])
+    ovale2 = ovale.with_model_centers([(1, 1)])
+
+    assert type(rond2) is RoundSocle and rond2.base_size == 13
+    assert type(ovale2) is OvalSocle and ovale2.base_size == [13, 20]
+    assert rond2.model_centers == [(1, 1), (2, 2)] and rond2.fp == {(0, 0)}
+    assert rond.model_centers is None  # l'original n'est pas muté
 
 
-def test_distance_bord_a_bord_sur_socle_incoherent_leve():
-    """Le cast rendait ce cas silencieux OU tardif ; il est maintenant explicite au premier
-    calcul géométrique."""
-    from engine.hex_utils import euclidean_edge_distance
+def test_la_geometrie_ne_relit_plus_l_etiquette():
+    """Contre-épreuve du gain : le chemin chaud rond↔rond est choisi par la CLASSE, et un
+    socle ovale y échappe — sans qu'aucun accesseur ne relise `shape`."""
+    from engine.hex_utils import euclidean_edge_distance, footprints_overlap
 
     a = Socle(shape="round", base_size=13, col=0, row=0)
-    b = Socle(shape="round", base_size=[13, 20], col=5, row=0)
-    with pytest.raises(TypeError):
-        euclidean_edge_distance(a, b)
+    b = Socle(shape="round", base_size=13, col=40, row=4)
+    ovale = Socle(shape="oval", base_size=[13, 20], col=1, row=0, fp={(1, 0)})
+
+    assert not hasattr(a, "scalar_size") and not hasattr(ovale, "oval_size")
+    assert euclidean_edge_distance(a, b) > 0.0
+    assert footprints_overlap(a, a)
+    # Paire mixte : méthode empreinte, `fp` requis des deux côtés.
+    with pytest.raises(ValueError):
+        footprints_overlap(a, ovale)
 
 
 # --------------------------------------------------------------------------------------
