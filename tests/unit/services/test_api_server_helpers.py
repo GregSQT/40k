@@ -1,11 +1,10 @@
 import sqlite3
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, Optional, Tuple, cast
 
 import pytest
 
 from ai.unit_registry import UnitRegistry
 from services import api_server
-from engine.w40k_core import W40KEngine
 from shared.data_validation import require_present
 
 
@@ -290,17 +289,19 @@ def test_sync_units_hp_from_cache_applies_cache_and_sets_zero_for_dead() -> None
 
 def test_build_and_attach_player_types_for_pve() -> None:
     assert api_server._build_player_types(True, "pve") == {"1": "human", "2": "ai"}
+    # Pas de `cast` : `_attach_player_types` declare son besoin reel (`_PlayerTypesSource`),
+    # que ce stub satisfait structurellement — donc pyright VERIFIE le stub au lieu de le croire.
     engine_instance = _EngineStub({}, current_mode_code="pve")
     serializable_state: Dict[str, Any] = {}
-    api_server._attach_player_types(serializable_state, cast(W40KEngine, engine_instance))
+    api_server._attach_player_types(serializable_state, engine_instance)
     assert serializable_state["player_types"]["2"] == "ai"
-    assert cast(Dict[str, Any], getattr(engine_instance, "game_state"))["current_mode_code"] == "pve"
+    assert engine_instance.game_state["current_mode_code"] == "pve"
 
 
 def test_attach_player_types_rejects_invalid_mode() -> None:
     engine_instance = _EngineStub({}, current_mode_code="invalid")
     with pytest.raises(ValueError, match=r"Unsupported current_mode_code"):
-        api_server._attach_player_types({}, cast(W40KEngine, engine_instance))
+        api_server._attach_player_types({}, engine_instance)
 
 
 def test_hash_and_verify_password_roundtrip_and_failures() -> None:
@@ -361,11 +362,20 @@ def test_get_activation_pool_key_for_phase_and_invalid() -> None:
 
 def test_execute_end_phase_action_returns_wrong_player_error() -> None:
     class DummyEngine:
+        """Mauvais joueur : le helper doit sortir AVANT de piloter le moteur.
+
+        `execute_semantic_action` est declare (le contrat `_EndPhaseEngine` l'exige) mais leve :
+        le test verrouille ainsi qu'aucune action n'est executee sur le mauvais joueur.
+        """
+
         def __init__(self) -> None:
-            self.game_state = {"phase": "move", "current_player": 1}
+            self.game_state: Dict[str, Any] = {"phase": "move", "current_player": 1}
+
+        def execute_semantic_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+            raise AssertionError(f"aucune action ne doit etre executee pour le mauvais joueur : {action}")
 
     engine_instance = DummyEngine()
-    success, result = api_server._execute_end_phase_action(cast(W40KEngine, engine_instance), {"player": 2})
+    success, result = api_server._execute_end_phase_action(engine_instance, {"player": 2})
     assert success is False
     assert result["error"] == "wrong_player_end_phase"
 
@@ -373,13 +383,13 @@ def test_execute_end_phase_action_returns_wrong_player_error() -> None:
 def test_execute_end_phase_action_processes_pool_and_advances_phase() -> None:
     class DummyEngine:
         def __init__(self) -> None:
-            self.game_state = {
+            self.game_state: Dict[str, Any] = {
                 "phase": "move",
                 "current_player": 1,
                 "move_activation_pool": ["u1"],
             }
 
-        def execute_semantic_action(self, action):
+        def execute_semantic_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
             if action["action"] == "skip":
                 self.game_state["move_activation_pool"] = []
                 return True, {"action": "skip", "unitId": action["unitId"]}
@@ -388,7 +398,7 @@ def test_execute_end_phase_action_processes_pool_and_advances_phase() -> None:
                 return True, {"phase": "shoot"}
             raise AssertionError("Unexpected action")
 
-    success, result = api_server._execute_end_phase_action(cast(W40KEngine, DummyEngine()), {"player": 1})
+    success, result = api_server._execute_end_phase_action(DummyEngine(), {"player": 1})
     assert success is True
     assert result["action"] == "end_phase"
 

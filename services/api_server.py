@@ -582,8 +582,105 @@ def _reconstruct_game_log(party_name: Optional[str], up_to_key: Optional[tuple],
     return log
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CONTRATS MOTEUR DES HELPERS DE L'API
+#
+# Chaque helper declare ce qu'il lit REELLEMENT du moteur, pas `W40KEngine` par habitude.
+# Une annotation plus large que le besoin ne protege rien : elle force les tests a
+# `cast(W40KEngine, faux_moteur)`, et le cast ETEINT la verification au lieu de la faire.
+# Les protocoles ci-dessous sont donc les seules dependances vraies, etablies par lecture
+# de chaque corps et de sa chaine d'appel.
+#
+# Tous en `@property` (lecture seule) plutot qu'en attribut : un protocole a attribut est
+# INVARIANT, ce qui rejetterait tout porteur dont l'attribut a un type plus precis, alors
+# que ces helpers n'en font qu'une lecture. Le dict `game_state`, lui, reste mute en place
+# (affectation de cle) — ce qu'une property autorise sans reserve.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _UnitDataSource(Protocol):
+    """La SEULE chose que les deux constructeurs d'unites demandent a un registre.
+
+    Verifie sur toute la chaine d'appel du format scenario, pas seulement en surface :
+    `_fold_attached_characters` (game_state.py l.850, 858) et `_build_enhanced_unit`
+    (l.1088) ne touchent au registre que par `get_unit_data`.
+    """
+
+    def get_unit_data(self, unit_type: str) -> Dict[str, Any]: ...
+
+
+class _UnitRegistryHolder(Protocol):
+    """Ce que `_build_units_from_army_config` et `_build_units_from_scenario_army` lisent
+    REELLEMENT de leur moteur.
+
+    Annoncer `W40KEngine` mentait : ni l'une ni l'autre ne touche `game_state`, un manager
+    ou une methode du moteur — uniquement `unit_registry`. La version « format scenario »
+    a l'air plus gourmande parce qu'elle passe par un `GameStateManager`, mais elle le
+    CONSTRUIT elle-meme et lui passe le registre : le moteur appelant n'y entre pas. Un
+    protocole COMMUN, donc, plutot que deux declarations paralleles qui divergeraient.
+
+    Lecture seule (`@property`) et non `Optional[...]` en attribut mutable : un protocole a
+    attribut est invariant, ce qui rejetterait tout porteur dont le registre a un type plus
+    precis — alors que les deux fonctions n'en font qu'une lecture.
+    """
+
+    @property
+    def unit_registry(self) -> Optional[_UnitDataSource]: ...
+
+
+class _GameStateHolder(Protocol):
+    """Porteur d'un `game_state`. Base commune aux trois contrats suivants."""
+
+    @property
+    def game_state(self) -> Dict[str, Any]: ...
+
+
+class _ObjectiveControlRefresher(Protocol):
+    """Ce que `_game_state_for_json` demande au `state_manager` : la frontiere 14.02, rien d'autre."""
+
+    def refresh_objective_control_on_boundary(self, game_state: Dict[str, Any]) -> bool: ...
+
+
+class _SerializableGameSource(_GameStateHolder, Protocol):
+    """Ce que `_game_state_for_json` lit reellement : `game_state` + le refresh 14.02.
+
+    Ce parametre n'avait AUCUNE annotation : implicitement `Any`, donc aucun faux moteur
+    n'etait verifie (d'ou l'absence de `cast` cote test — un `Any` accepte tout). Le
+    declarer ferme le trou sans rien exiger de plus que ce que le corps consomme.
+    """
+
+    @property
+    def state_manager(self) -> _ObjectiveControlRefresher: ...
+
+
+class _PlayerTypesSource(_GameStateHolder, Protocol):
+    """Ce que `_attach_player_types` lit reellement : le mode courant + `game_state`.
+
+    Un cran plus large que `_UnitRegistryHolder` (deux membres au lieu d'un), mais toujours
+    tres loin d'un moteur : aucune methode appelee, aucun manager, aucun handler.
+    `current_mode_code` est `Optional[str]` parce que le moteur l'initialise a None
+    (w40k_core.py l.117) — le helper leve explicitement tant qu'il n'est pas renseigne.
+    """
+
+    @property
+    def current_mode_code(self) -> Optional[str]: ...
+
+
+class _EndPhaseEngine(_GameStateHolder, Protocol):
+    """Ce que `_execute_end_phase_action` consomme : `game_state` + `execute_semantic_action`.
+
+    Contrat le plus riche de la famille, car ce helper PILOTE le moteur (skip par unite puis
+    `advance_phase`) au lieu de seulement le lire. Il reste malgre tout descriptible : une
+    methode publique et un dict. Ni `state_manager`, ni handler, ni `unit_registry`, ni
+    espace gym n'y entrent — ni directement, ni via `execute_semantic_action`, dont le
+    helper ne consomme que le `Tuple[bool, Dict[str, Any]]` retourne.
+    """
+
+    def execute_semantic_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]: ...
+
+
 def _game_state_for_json(
-    engine_instance,
+    engine_instance: _SerializableGameSource,
     *,
     for_post_action: bool = False,
     mask_loops_client_hash: Optional[str] = None,
@@ -771,11 +868,15 @@ def _serialize_captured_view(engine_instance, captured_state: Dict[str, Any]) ->
     return serializable
 
 
-def _attach_player_types(serializable_state: Dict[str, Any], engine_instance: W40KEngine) -> None:
+def _attach_player_types(serializable_state: Dict[str, Any], engine_instance: _PlayerTypesSource) -> None:
     """
     Ensure player_types is present in both engine.game_state and serialized response.
+
+    Lecture directe et non `getattr(..., None)` : le protocole GARANTIT l'attribut, donc le
+    defaut None n'aurait plus servi qu'a transformer un porteur invalide en `ValueError`
+    trompeuse au lieu de l'`AttributeError` qui nomme le vrai probleme.
     """
-    current_mode_code = getattr(engine_instance, "current_mode_code", None)
+    current_mode_code = engine_instance.current_mode_code
     if not isinstance(current_mode_code, str) or not current_mode_code:
         raise ValueError("engine.current_mode_code is required to derive player_types")
     if current_mode_code not in {"pvp", "pvp_test", "pve", "pve_test", ED_MODE_CODE}:
@@ -2749,14 +2850,21 @@ def _get_activation_pool_key_for_phase(phase: str) -> str:
     raise ValueError(f"end_phase is not supported for phase '{phase}'")
 
 
-def _execute_end_phase_action(engine_instance: W40KEngine, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+def _execute_end_phase_action(engine_instance: _EndPhaseEngine, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     End current phase by applying WAIT/SKIP end_activation to all remaining units in pool.
     Supports move/shoot/charge phases. For fight, delegates to advance_phase.
+
+    `engine_instance.game_state` et non `require_key(engine_instance.__dict__, "game_state")` :
+    `game_state` est un simple attribut d'instance du moteur (w40k_core.py l.435), il n'existe
+    aucune property ni `__getattr__` a contourner (verifie dans engine/ et services/). Passer
+    par `__dict__` ne faisait donc que rendre le dict `Any` — et une boucle qui pilote la fin
+    de phase sur un `Any` n'est verifiee nulle part. La reference reste capturee UNE fois : la
+    boucle relit ce meme dict apres chaque `skip`, exactement comme avant.
     """
     from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
 
-    game_state = require_key(engine_instance.__dict__, "game_state")
+    game_state = engine_instance.game_state
     current_phase = require_key(game_state, "phase")
     current_player = require_key(game_state, "current_player")
 
@@ -2995,36 +3103,6 @@ def _list_armies() -> list[Dict[str, Any]]:
             }
         )
     return armies
-
-
-class _UnitDataSource(Protocol):
-    """La SEULE chose que les deux constructeurs d'unites demandent a un registre.
-
-    Verifie sur toute la chaine d'appel du format scenario, pas seulement en surface :
-    `_fold_attached_characters` (game_state.py l.850, 858) et `_build_enhanced_unit`
-    (l.1088) ne touchent au registre que par `get_unit_data`.
-    """
-
-    def get_unit_data(self, unit_type: str) -> Dict[str, Any]: ...
-
-
-class _UnitRegistryHolder(Protocol):
-    """Ce que `_build_units_from_army_config` et `_build_units_from_scenario_army` lisent
-    REELLEMENT de leur moteur.
-
-    Annoncer `W40KEngine` mentait : ni l'une ni l'autre ne touche `game_state`, un manager
-    ou une methode du moteur — uniquement `unit_registry`. La version « format scenario »
-    a l'air plus gourmande parce qu'elle passe par un `GameStateManager`, mais elle le
-    CONSTRUIT elle-meme et lui passe le registre : le moteur appelant n'y entre pas. Un
-    protocole COMMUN, donc, plutot que deux declarations paralleles qui divergeraient.
-
-    Lecture seule (`@property`) et non `Optional[...]` en attribut mutable : un protocole a
-    attribut est invariant, ce qui rejetterait tout porteur dont le registre a un type plus
-    precis — alors que les deux fonctions n'en font qu'une lecture.
-    """
-
-    @property
-    def unit_registry(self) -> Optional[_UnitDataSource]: ...
 
 
 def _build_units_from_army_config(
