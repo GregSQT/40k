@@ -174,21 +174,27 @@ class ActionDecoder:
     # ACTION MASKING
     # ============================================================================
     
-    def get_action_mask_and_eligible_units(self, game_state: Dict[str, Any]) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
-        """Return (mask, eligible_units) — masque de l'ANCIEN espace d'actions (0-15).
-
-        ⚠️ SURVIVANCE TEMPORAIRE. Le pipeline de production (`W40KEngine.step`,
-        `pve_controller`, `ai/env_wrappers`) passe exclusivement par
-        `get_squad_action_mask_and_eligible_units` + `convert_squad_action`. Le décodeur qui
-        savait lire ce masque (`convert_gym_action`) a été supprimé : ce masque ne décrit donc
-        plus aucun espace d'action décodable.
-        Seul appelant restant : `scripts/roster_matchup_stats.py` (corrigé sur la branche
-        `v11-0.47-eval-tooling-mask`). Dès que ce site est migré, cette méthode et
-        `_build_mask_for_units` sont du code mort et doivent être supprimées.
-        """
-        eligible_units = self._get_eligible_units_for_current_phase(game_state)
-        mask = self._build_mask_for_units(game_state["phase"], eligible_units, game_state)
-        return mask, eligible_units
+    # ── PIERRE TOMBALE — masque et décodeur de l'ANCIEN espace d'actions (2026-07-29) ──────
+    # Ont vécu ici, et sont morts ensemble :
+    #   `convert_gym_action`            décodeur de l'espace 0-15, en dur (4-8 = tir, 9 = charge,
+    #                                   10 = fight, 11 = wait) alors que l'espace réel fait 1107
+    #   `_get_valid_actions_for_phase`  sa table de plages par phase
+    #   `get_action_mask`               wrapper de `get_action_mask_and_eligible_units`
+    #   `get_action_mask_for_unit`      variante par unité, sans aucun appelant
+    #   `get_action_mask_and_eligible_units` + `_build_mask_for_units`  le masque 0-15 lui-même
+    #
+    # POURQUOI ils étaient morts : la production est passée au pipeline squad
+    # (`get_squad_action_mask_and_eligible_units` + `convert_squad_action`) sans que l'ancien
+    # chemin soit retiré. Aucun appelant de production ne subsistait ; seuls ~25 tests le
+    # maintenaient vert. Le dernier appelant réel était un outil d'ÉVALUATION
+    # (`scripts/roster_matchup_stats.py`), à qui ce masque périmé servait un espace d'actions
+    # que le modèle ne parlait plus — un faux muet, pas une erreur.
+    #
+    # LEÇON (§0bis) : deux masques coexistants sans décodeur commun ne divergent pas bruyamment,
+    # ils divergent en silence. Le verrou qui interdit la récidive est la parité masque↔décodeur
+    # de `tests/unit/engine/test_agent_interface_contract.py` : tout entier ouvert par le masque
+    # DOIT être décodable, et tout entier fermé DOIT lever.
+    # ─────────────────────────────────────────────────────────────────────────────────────────
 
     def get_squad_action_mask_and_eligible_units(
         self, game_state: Dict[str, Any]
@@ -289,118 +295,6 @@ class ActionDecoder:
                 mask[i] = True
 
         return mask, eligible_units
-
-    def _build_mask_for_units(
-        self,
-        current_phase: str,
-        eligible_units: List[Dict[str, Any]],
-        game_state: Dict[str, Any],
-    ) -> np.ndarray:
-        """Build action mask for provided eligible_units list."""
-        mask = np.zeros(self.total_action_size, dtype=bool)
-        if not eligible_units:
-            # No units can act - phase should auto-advance
-            # CRITICAL: Fight phase has no wait action - return all False mask
-            # to trigger auto-advance in w40k_core.step()
-            if current_phase == "fight":
-                return mask
-            # Command phase: fall through to its handler (zone intents require eligible_units=[])
-            if current_phase != "command":
-                mask[11] = True
-                return mask
-
-        if current_phase == "deployment":
-            active_unit = eligible_units[0] if eligible_units else None
-            if active_unit:
-                current_deployer = self._get_current_deployer(game_state)
-                valid_hexes = self._get_valid_deployment_hexes(
-                    game_state,
-                    current_deployer,
-                    str(require_key(active_unit, "id")),
-                )
-                num_hexes = len(valid_hexes)
-                if num_hexes == 0:
-                    raise ValueError(
-                        f"Deployment deadlock: no valid hex for player {current_deployer}, "
-                        f"unit {active_unit.get('id')}"
-                    )
-                for i in range(open_deploy_slot_count(num_hexes)):
-                    mask[DEPLOY_SLOT_BASE + i] = True
-            return mask
-        if current_phase == "command":
-            mask[11] = True
-            # Activate zone intent actions if free steps remain
-            free_steps = game_state["zone_intent_free_steps_remaining"]
-            if free_steps > 0:
-                objectives = game_state["objectives"]
-                num_zones = min(len(objectives), MAX_OBJECTIVES)
-                for zone_idx in range(num_zones):
-                    for intent_val in range(3):
-                        action_idx = BASE_ZONE_INTENT + zone_idx * 3 + intent_val
-                        if action_idx < TOTAL_ACTION_SIZE:
-                            mask[action_idx] = True
-            return mask
-        elif current_phase == "move":
-            mask[[0, 1, 2, 3]] = True
-            mask[11] = True
-        elif current_phase == "shoot":
-            active_unit = eligible_units[0] if eligible_units else None
-            if active_unit:
-                if game_state.get("debug_mode", False):
-                    from engine.game_utils import add_debug_file_log
-                    episode = game_state.get("episode_number", "?")
-                    turn = game_state.get("turn", "?")
-                    current_player = game_state.get("current_player", "?")
-                    active_shooting_unit = game_state.get("active_shooting_unit")
-                    shoot_pool = game_state.get("shoot_activation_pool")
-                    add_debug_file_log(
-                        game_state,
-                        f"[MASK DEBUG] E{episode} T{turn} P{current_player} shoot mask: "
-                        f"active_unit={active_unit.get('id')} active_shooting_unit={active_shooting_unit} "
-                        f"valid_target_pool={active_unit.get('valid_target_pool')} "
-                        f"shoot_activation_pool={shoot_pool}"
-                    )
-                if "valid_target_pool" not in active_unit or active_unit.get("valid_target_pool") is None:
-                    if active_unit.get("_shoot_activation_started", False):
-                        raise ValueError(
-                            "valid_target_pool missing after shooting activation start; "
-                            f"unit_id={active_unit.get('id')}"
-                        )
-                    from engine.phase_handlers.shooting_handlers import shooting_build_valid_target_pool
-                    shooting_build_valid_target_pool(game_state, str(active_unit.get("id")))
-                valid_targets = active_unit.get("valid_target_pool")
-                if valid_targets is not None:
-                    num_targets = len(valid_targets)
-                    if num_targets > 0:
-                        for i in range(min(5, num_targets)):
-                            mask[4 + i] = True
-            mask[11] = True
-        elif current_phase == "charge":
-            active_unit = eligible_units[0] if eligible_units else None
-            if active_unit:
-                active_charge_unit = game_state.get("active_charge_unit")
-                if active_charge_unit == active_unit["id"]:
-                    if "pending_charge_targets" in game_state:
-                        valid_targets = game_state["pending_charge_targets"]
-                        num_targets = len(valid_targets)
-                        if num_targets > 0:
-                            for i in range(min(5, num_targets)):
-                                mask[4 + i] = True
-                    elif "valid_charge_destinations_pool" in game_state and game_state.get("valid_charge_destinations_pool"):
-                        valid_destinations = require_key(game_state, "valid_charge_destinations_pool")
-                        num_destinations = len(valid_destinations)
-                        if num_destinations > 0:
-                            for i in range(min(5, num_destinations)):
-                                mask[4 + i] = True
-                    else:
-                        mask[9] = True
-                else:
-                    mask[9] = True
-            mask[11] = True
-        elif current_phase == "fight":
-            if eligible_units:
-                mask[10] = True
-        return mask
 
     def get_deployment_active_unit(self, game_state: Dict[str, Any]) -> Dict[str, Any]:
         """L'unité sur laquelle porte la décision de déploiement — SOURCE UNIQUE obs ↔ masque.

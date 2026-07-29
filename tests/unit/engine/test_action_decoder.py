@@ -228,70 +228,6 @@ class TestValidateActionAgainstMask:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Masque legacy (_build_mask_for_units) — phase shoot
-#
-# ⚠️ Ce masque decrit l'ANCIEN espace d'actions (0-15) et n'a plus de decodeur. Il ne survit
-# que pour `scripts/roster_matchup_stats.py` ; quand ce site sera migre, ces cas partiront avec
-# `get_action_mask_and_eligible_units`.
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestLegacyMaskShoot:
-    def _make_gs(self) -> Dict[str, Any]:
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
-        gs = _build_gs(units, "shoot", current_player=1)
-        # Enrich unit 1 with required shoot fields (in-place, same dict object)
-        units[0]["valid_target_pool"] = []
-        units[0]["_can_advance"] = False
-        units[0]["_shoot_activation_started"] = False
-        gs["shoot_activation_pool"] = ["1"]
-        gs["active_shooting_unit"] = None
-        gs["units_advanced"] = set()
-        return gs
-
-    def _make_gs_can_advance(self) -> Dict[str, Any]:
-        """Game state with _can_advance=True for unit 1."""
-        gs = self._make_gs()
-        gs["units"][0]["_can_advance"] = True
-        return gs
-
-    def test_advance_slots_all_masked_when_cannot_advance(self):
-        """mask_shoot_no_adv : _can_advance=False → mask[12..15]=False."""
-        d = _make_decoder()
-        gs = self._make_gs()  # _can_advance=False
-        mask, _ = d.get_action_mask_and_eligible_units(gs)
-        # Taille derivee du moteur (macro_intents.TOTAL_ACTION_SIZE), plus de la config : le
-        # masque legacy n'occupe que ses indices bas, la longueur du tableau ne le concerne pas.
-        assert len(mask) == TOTAL_ACTION_SIZE
-        for slot in [12, 13, 14, 15]:
-            assert bool(mask[slot]) is False, f"mask[{slot}] should be False when cannot advance"
-
-    def test_advance_slots_masked_in_shoot_even_when_can_advance(self):
-        """Advance déplacé en phase move (afae93e9) : les slots 12-15 de l'ancien schéma restent
-        masqués en shoot même si _can_advance=True (plus décodables en phase tir)."""
-        d = _make_decoder()
-        gs = self._make_gs_can_advance()
-        gs["shoot_activation_pool"] = ["1"]
-        gs["active_shooting_unit"] = "1"
-        mask, _ = d.get_action_mask_and_eligible_units(gs)
-        # Taille derivee du moteur (macro_intents.TOTAL_ACTION_SIZE), plus de la config : le
-        # masque legacy n'occupe que ses indices bas, la longueur du tableau ne le concerne pas.
-        assert len(mask) == TOTAL_ACTION_SIZE
-        for slot in [12, 13, 14, 15]:
-            assert bool(mask[slot]) is False, f"legacy advance slot {slot} retiré en shoot (advance→move)"
-
-    def test_advance_slots_masked_when_already_advanced(self):
-        """mask_shoot_adv_done : unité déjà avancée → mask[12..15]=False."""
-        d = _make_decoder()
-        gs = self._make_gs_can_advance()
-        gs["units_advanced"] = {"1"}
-        gs["shoot_activation_pool"] = ["1"]
-        gs["active_shooting_unit"] = "1"
-        mask, _ = d.get_action_mask_and_eligible_units(gs)
-        for slot in [12, 13, 14, 15]:
-            assert bool(mask[slot]) is False, f"mask[{slot}] should be False when already advanced"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # normalize_action_input — cas limites et taille d'action space
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -336,66 +272,6 @@ class TestActionSpaceSizeAndEdgeCases:
         d = _make_decoder()
         with pytest.raises(ActionValidationError, match="invalid_type"):
             d.normalize_action_input("5", "move", "gym", 13)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Masque legacy (_build_mask_for_units) — fight / move / charge
-#
-# ⚠️ Meme reserve que TestLegacyMaskShoot : masque de l'ANCIEN espace d'actions, sans decodeur.
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestLegacyMaskFight:
-
-    def test_fight_mask_has_action10_when_units_eligible(self):
-        """mask_fight_10 : unité éligible en fight → mask[10]=True."""
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 15, 10)]
-        gs = _build_gs(units, "fight", current_player=1)
-        # État fight V11 : unité 1 a chargé → éligible.
-        gs["fight_subphase"] = "fight"
-        gs["fight_step"] = "remaining"
-        gs["fight_selector"] = 1
-        gs["engaged_at_fight_step_start"] = {}
-        gs["units_selected_to_fight"] = set()
-        gs["units_charged"] = {"1"}
-        d = _make_decoder()
-        mask, _ = d.get_action_mask_and_eligible_units(gs)
-        assert bool(mask[10]) is True
-
-    def test_fight_mask_all_false_when_no_units(self):
-        """mask_fight_empty : pas d'unités éligibles → tous False."""
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 15, 10)]
-        gs = _build_gs(units, "fight", current_player=1)
-        gs["fight_subphase"] = "alternating"
-        gs["charging_activation_pool"] = []
-        gs["active_alternating_activation_pool"] = []
-        gs["non_active_alternating_activation_pool"] = []  # vide
-        d = _make_decoder()
-        mask, _ = d.get_action_mask_and_eligible_units(gs)
-        assert not any(mask)
-
-    def test_move_mask_enables_directions_and_wait(self):
-        """mask_move : phase move → mask[0-3]=True, mask[11]=True."""
-        units = [_unit(1, 1, 5, 10)]
-        gs = _build_gs(units, "move")
-        gs["move_activation_pool"] = [1]
-        d = _make_decoder()
-        mask, _ = d.get_action_mask_and_eligible_units(gs)
-        for i in range(4):
-            assert bool(mask[i]) is True
-        assert bool(mask[11]) is True
-
-    def test_charge_mask_enables_9_and_wait(self):
-        """mask_charge : phase charge → mask[9]=True, mask[11]=True."""
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 15, 10)]
-        gs = _build_gs(units, "charge")
-        gs["charge_activation_pool"] = [1]
-        gs["active_charge_unit"] = None
-        gs["units_fled"] = set()
-        gs["units_cannot_charge"] = set()
-        d = _make_decoder()
-        mask, _ = d.get_action_mask_and_eligible_units(gs)
-        assert bool(mask[9]) is True
-        assert bool(mask[11]) is True
 
 
 # ─────────────────────────────────────────────────────────────────────────────

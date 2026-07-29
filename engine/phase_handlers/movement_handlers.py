@@ -12,7 +12,7 @@ import math
 import numpy as np
 from collections import deque, OrderedDict
 from .generic_handlers import end_activation, _log_with_context
-from shared.data_validation import require_key, require_present
+from shared.data_validation import require_key
 from engine.action_log_utils import append_action_log
 from engine.combat_utils import (
     calculate_hex_distance,
@@ -127,6 +127,23 @@ def _hex_radius_upper_for_engagement_prune(base_span: int) -> int:
     """Majorant (grille hex) du rayon empreinte depuis l’ancre — borne conservatrice pour la prune."""
     s = max(1, int(base_span))
     return max(1, (s + 1) // 2)
+
+
+# ── PIERRE TOMBALE — heuristique de destination de l'ancien espace d'actions (2026-07-29) ─────
+# Ont vécu ici :
+#   `_select_strategic_destination`     4 stratégies (0 = agressif, 1 = tactique, 2 = défensif,
+#                                       3 = objectif) qui CHOISISSAIENT la destination à la place
+#                                       de l'agent, pour les actions de move 0-3 de l'espace 0-15
+#   `_build_objective_distance_cache`   son cache de distances aux objectifs, sans autre client
+#
+# POURQUOI elles étaient mortes : la refonte spatiale du move (§6.2) a fait de la DESTINATION une
+# dimension d'action (1024 cellules de la grille égocentrique). L'agent désigne désormais la
+# cellule ; plus rien n'a à la deviner pour lui. Leur unique appelant était `convert_gym_action`,
+# décodeur de l'ancien espace, supprimé le même jour (cf. `engine/action_decoder.py`).
+#
+# ⚠️ NE PAS confondre avec `charge_handlers._select_strategic_destination` : jumeau de nom, autre
+# fichier, autre cycle de vie.
+# ──────────────────────────────────────────────────────────────────────────────────────────────
 
 
 def _enemy_items_within_move_engagement_horizon(

@@ -14,10 +14,9 @@ class _DummyActionDecoder:
         self._normalized_action = normalized_action
         self._raise_validation = raise_validation
 
-    def get_action_mask_and_eligible_units(self, game_state):
-        _ = game_state
-        return self._mask, self._eligible
-
+    # `get_action_mask_and_eligible_units` a été retiré de cette stub avec la méthode qu'elle
+    # imitait (masque de l'ancien espace 0-15, supprimé le 2026-07-29 — cf. la pierre tombale
+    # d'`engine/action_decoder.py`). Le pipeline squad est le seul chemin.
     def get_squad_action_mask_and_eligible_units(self, game_state):
         _ = game_state
         return self._mask, self._eligible
