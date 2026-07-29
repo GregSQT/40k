@@ -39,7 +39,6 @@ from engine.combat_utils import (
     resolve_dice_value,
     get_unit_by_id,
     set_unit_coordinates,
-    DiceValue,
 )
 
 # end_activation / _handle_shooting_end_activation argument constants (AI_TURN.md)
@@ -5521,10 +5520,9 @@ def _resolve_intent_nb(
     w = weapons[weapon_idx]
     if not (isinstance(w, dict) and "NB" in w):
         return 0
-    try:
-        return int(resolve_dice_value(w["NB"], roll_label))
-    except Exception:
-        return int(w["NB"]) if isinstance(w["NB"], (int, float)) else 1
+    # Aucun repli silencieux : une valeur de NB non resoluble est une donnee d arme invalide,
+    # elle doit lever (l ancien try/except la remplacait par 1 en silence).
+    return int(resolve_dice_value(w["NB"], roll_label))
 
 
 def declare_attack_model(
@@ -7295,11 +7293,11 @@ def _manual_roll_intent(
     if "n_attacks_resolved" in intent:
         n_attacks = int(intent["n_attacks_resolved"])
     else:
-        nb_raw = weapon.get("NB", 1)  # get allowed
-        try:
-            n_attacks = resolve_dice_value(nb_raw, f"squad_shoot_attacks_{attacker_mid}")
-        except Exception:
-            n_attacks = int(nb_raw) if isinstance(nb_raw, (int, float)) else 1
+        # Aucun repli silencieux : NB absent ou non resoluble = donnee d arme invalide, elle
+        # doit lever (l ancien defaut 1 + try/except la remplacait par 1 attaque en silence).
+        n_attacks = resolve_dice_value(
+            require_key(weapon, "NB"), f"squad_shoot_attacks_{attacker_mid}"
+        )
     # [BLAST] 24.05 : des additionnels selon la taille de la cible AU SELECT TARGETS STEP
     # (d ou la taille capturee a la declaration, et non la taille courante).
     _blast_x = _blast_extra_dice_per_five(weapon)
@@ -7374,7 +7372,9 @@ def _manual_roll_intent(
                 _cq_malus_applied = True
     strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))  # get allowed
     ap = int(weapon.get("AP", 0))  # get allowed
-    dmg_raw = weapon.get("DMG", 1)  # get allowed
+    # Aucun repli silencieux : DMG absent = donnee d arme invalide (require_key leve), la
+    # valeur elle-meme est resolue a l application des degats (_resolve_one_manual_wound).
+    dmg_raw = require_key(weapon, "DMG")
     # [MELTA X] 24.25 : « if the target unit was within half range of that weapon in the Select
     # Targets step, until the attacking unit's attacks have been resolved, add X to that
     # weapon's D characteristic. » Le bonus porte sur la CARACTERISTIQUE (D6+2, pas 2 degats
@@ -7585,10 +7585,10 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
         rec["mortalWound"] = True
     summary["failed_saves"] += 1
     # Degats tires UNIQUEMENT maintenant (save echouee).
-    try:
-        dmg = resolve_dice_value(cast(DiceValue, dmg_raw), f"squad_shoot_dmg_{pw['attacker_mid']}")
-    except Exception:
-        dmg = int(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1
+    # Aucun repli silencieux : une valeur de DMG non resoluble est une donnee d arme invalide,
+    # elle doit lever (l ancien try/except la remplacait par 1 en silence, et avalait au passage
+    # le KeyError d un lot d attaques mal forme). Le tag nomme la figurine attaquante.
+    dmg = resolve_dice_value(dmg_raw, f"squad_shoot_dmg_{require_key(pw, 'attacker_mid')}")
     # [MELTA X] 24.25 : X s ajoute a la caracteristique D -> apres le tirage du de de degats
     # (D6+2, jamais 2 forfaitaire). 0 pour toute arme sans MELTA ou hors demi-portee.
     dmg += int(require_key(g, "dmg_bonus"))
@@ -8870,10 +8870,11 @@ def squad_declare_fight(
             if 0 <= chosen_idx < len(weapons):
                 w = weapons[chosen_idx]
                 if isinstance(w, dict) and "NB" in w:
-                    try:
-                        n_attacks_resolved = int(resolve_dice_value(w["NB"], f"squad_declare_fight_NB_{mid}"))
-                    except Exception:
-                        n_attacks_resolved = int(w["NB"]) if isinstance(w["NB"], (int, float)) else 1
+                    # Aucun repli silencieux : une valeur de NB non resoluble est une donnee
+                    # d arme invalide, elle doit lever (l ancien try/except la remplacait par 1).
+                    n_attacks_resolved = int(
+                        resolve_dice_value(w["NB"], f"squad_declare_fight_NB_{mid}")
+                    )
             total_attacks += n_attacks_resolved
             intents.append({
                 "model_id": mid,
