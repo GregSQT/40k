@@ -59,7 +59,7 @@ import glob
 import shutil
 import random
 from pathlib import Path
-from typing import Callable, Dict, List, Tuple, Any, Optional, Set, cast
+from typing import Callable, Dict, List, Literal, Tuple, Any, Optional, Set, Union, cast, overload
 
 # Fix import paths - Add both script dir and project root
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -84,8 +84,9 @@ MASKABLE_PPO_AVAILABLE = True
 
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback, CallbackList
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecNormalize
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecNormalize, VecEnv  # VecEnv : resout la forward-ref de GymEnv pour get_type_hints()
 from stable_baselines3.common.utils import get_schedule_fn  # Convert float hyperparameters to callable schedules
+from stable_baselines3.common.type_aliases import GymEnv
 
 
 def _build_training_bots_from_config(training_config):
@@ -2520,6 +2521,38 @@ def build_training_opponents(
     return opponents
 
 
+TrainRunResult = Tuple[bool, MaskablePPO, GymEnv]
+TrainRunResultWithInfo = Tuple[bool, MaskablePPO, GymEnv, Dict[str, Any]]
+
+
+@overload
+def train_with_scenario_rotation(config, agent_key, training_config_name, rewards_config_name,
+                                 scenario_list, total_episodes,
+                                 new_model=..., append_training=..., use_bots=..., debug_mode=...,
+                                 device_mode: Optional[str] = ...,
+                                 training_config_override: Optional[Dict[str, Any]] = ...,
+                                 callback_total_episodes_override: Optional[int] = ...,
+                                 callback_global_episode_offset: int = ...,
+                                 callback_phase_episode_offset: int = ...,
+                                 phase_label: Optional[str] = ...,
+                                 silent_chunk: bool = ...,
+                                 return_run_info: Literal[False] = ...) -> TrainRunResult: ...
+
+
+@overload
+def train_with_scenario_rotation(config, agent_key, training_config_name, rewards_config_name,
+                                 scenario_list, total_episodes,
+                                 new_model=..., append_training=..., use_bots=..., debug_mode=...,
+                                 device_mode: Optional[str] = ...,
+                                 training_config_override: Optional[Dict[str, Any]] = ...,
+                                 callback_total_episodes_override: Optional[int] = ...,
+                                 callback_global_episode_offset: int = ...,
+                                 callback_phase_episode_offset: int = ...,
+                                 phase_label: Optional[str] = ...,
+                                 silent_chunk: bool = ...,
+                                 *, return_run_info: Literal[True]) -> TrainRunResultWithInfo: ...
+
+
 def train_with_scenario_rotation(config, agent_key, training_config_name, rewards_config_name,
                                  scenario_list, total_episodes,
                                  new_model=False, append_training=False, use_bots=False, debug_mode=False,
@@ -2530,7 +2563,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                                  callback_phase_episode_offset: int = 0,
                                  phase_label: Optional[str] = None,
                                  silent_chunk: bool = False,
-                                 return_run_info: bool = False):
+                                 return_run_info: bool = False) -> Union[TrainRunResult, TrainRunResultWithInfo]:
     """Train model with random scenario selection per episode.
     
     Args:
@@ -2545,8 +2578,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         use_bots: If True, use bots for Player 1 instead of self-play frozen model
 
     Returns:
-        Tuple of (success: bool, final_model, final_env) by default.
-        If return_run_info=True, returns (success, final_model, final_env, run_info).
+        TrainRunResult = (success, final_model, final_env) par defaut.
+        TrainRunResultWithInfo = (success, final_model, final_env, run_info) si
+        return_run_info=True. Les deux formes sont declarees par @overload
+        ci-dessus : l'appelant n'a donc plus a caster le resultat.
     """
     def chunk_log(message: str) -> None:
         if not silent_chunk:
@@ -4223,7 +4258,7 @@ def train_with_curriculum(
             if not is_last_phase:
                 chunk_callback_params["save_best_robust"] = False
 
-            success, model, env, run_info = cast(Tuple[Any, Any, Any, Any], train_with_scenario_rotation(
+            success, model, env, run_info = train_with_scenario_rotation(
                 config=config,
                 agent_key=agent_key,
                 training_config_name=training_config_name,
@@ -4242,7 +4277,7 @@ def train_with_curriculum(
                 phase_label=phase_label,
                 silent_chunk=True,
                 return_run_info=True
-            ))
+            )
             if not success:
                 return False, model, env
 
@@ -5022,7 +5057,7 @@ def main():
                     total_episodes = training_config["total_episodes"]
                     print(f"📊 Using total_episodes from config: {total_episodes}")
 
-                success, model, env = cast(Tuple[Any, Any, Any], train_with_scenario_rotation(
+                success, model, env = train_with_scenario_rotation(
                     config=config,
                     agent_key=args.agent,
                     training_config_name=args.training_config,
@@ -5034,7 +5069,7 @@ def main():
                     debug_mode=args.debug,
                     use_bots=True,
                     device_mode=args.mode
-                ))
+                )
                 if success and args.test_episodes > 0:
                     test_trained_model(
                         model,
@@ -5094,7 +5129,7 @@ def main():
                 phase_cfg = require_key(curriculum_phases, args.scenario)
                 total_episodes = int(require_key(phase_cfg, "max_episodes_in_phase"))
 
-                success, model, env = cast(Tuple[Any, Any, Any], train_with_scenario_rotation(
+                success, model, env = train_with_scenario_rotation(
                     config=config,
                     agent_key=args.agent,
                     training_config_name=args.training_config,
@@ -5106,7 +5141,7 @@ def main():
                     debug_mode=args.debug,
                     use_bots=True,
                     device_mode=args.mode
-                ))
+                )
 
                 if success and args.test_episodes > 0:
                     test_trained_model(
@@ -5154,7 +5189,7 @@ def main():
                 # Always use scenario rotation path for self/bot/all modes,
                 # even when a single scenario is available.
                 # This keeps random wall/objective ref materialization consistent.
-                success, model, env = cast(Tuple[Any, Any, Any], train_with_scenario_rotation(
+                success, model, env = train_with_scenario_rotation(
                     config=config,
                     agent_key=args.agent,
                     training_config_name=args.training_config,
@@ -5166,7 +5201,7 @@ def main():
                     debug_mode=args.debug,
                     use_bots=(args.scenario == "bot"),
                     device_mode=args.mode
-                ))
+                )
 
                 if success and args.test_episodes > 0:
                     test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config, debug_mode=args.debug)
