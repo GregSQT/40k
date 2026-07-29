@@ -559,7 +559,17 @@ def _run_matchup_episodes(
             model_obs = np.asarray(model_obs, dtype=np.float32)
             if model_obs.ndim == 1:
                 model_obs = model_obs.reshape(1, -1)
-            action_masks, _ = env.engine.action_decoder.get_action_mask_and_eligible_units(env.engine.game_state)
+            # MEME chemin que la production (ai/bot_evaluation.py:523) : le masque servi au
+            # modele doit etre celui de la semantique SQUAD que `env.step` decode. La voie
+            # legacy `action_decoder.get_action_mask_and_eligible_units` construit l'ancien
+            # layout (mask[9]=charge, mask[10]=fight, mask[11]=wait, mask[4+i]=tir) et a la
+            # meme longueur (total_action_size) : l'erreur etait donc silencieuse.
+            # `engine.get_action_mask()` fait de plus avancer la phase de combat quand le
+            # masque sort vide — sans quoi la boucle d'evaluation se bloquerait sur un masque
+            # tout a False.
+            action_masks = np.asarray(env.engine.get_action_mask(), dtype=bool)
+            if action_masks.ndim == 1:
+                action_masks = action_masks.reshape(1, -1)
             action, _ = model.predict(model_obs, action_masks=action_masks, deterministic=True)
             action_scalar = int(np.asarray(action).flat[0])
             obs, _, terminated, truncated, info = env.step(action_scalar)
