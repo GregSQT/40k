@@ -32,6 +32,13 @@ Fonctionnalité choisie : **validation de la conformité du moteur aux règles m
 | Fichier produit | `step.log` (traces détaillées de chaque step : phase, action, unité, cible, etc.) |
 | Commande d’analyse | `python ai/analyzer.py step.log` |
 
+> **Note du 2026-07-29.** La commande de génération portait à l’origine l’option
+> `--macro-eval-mode micro`, retirée ici pour que la commande reste rejouable : l’option a été
+> supprimée en même temps que l’agent `MacroController`, dont la branche levait
+> `NotImplementedError` sans condition. Elle était sans effet sur ce run — elle ne pilotait que
+> l’évaluation du `MacroController`, jamais celle d’un agent micro comme
+> `Infantry_Troop_RangedTroop`. Le résultat consigné ci-dessous est donc inchangé.
+
 ### Résultat attendu
 
 - **Analyzer** : 0 violations pour les phases mouvement, tir, charge, combat (comportement conforme à AI_TURN.md).

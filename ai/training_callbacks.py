@@ -6,7 +6,6 @@ Contains:
 - LearningRateScheduleCallback: Linearly reduce learning rate during training
 - EntropyScheduleCallback: Linearly reduce entropy coefficient during training
 - EpisodeTerminationCallback: Terminate training after exact episode count
-- EpisodeBasedEvalCallback: Episode-counting evaluation callback
 - MetricsCollectionCallback: Collect training metrics for W40KMetricsTracker
 - BotEvaluationCallback: Test agent against evaluation bots with best model saving
 
@@ -79,7 +78,6 @@ __all__ = [
     'LearningRateScheduleCallback',
     'EntropyScheduleCallback',
     'EpisodeTerminationCallback',
-    'EpisodeBasedEvalCallback',
     'MetricsCollectionCallback',
     'BotEvaluationCallback'
 ]
@@ -566,195 +564,14 @@ class EpisodeTerminationCallback(BaseCallback):
 
         return True
 
-class EpisodeBasedEvalCallback(BaseCallback):
-    """Episode-counting evaluation callback - triggers every N episodes, not timesteps."""
-    
-    def __init__(self, eval_env, episodes_per_eval=10, n_eval_episodes=5, 
-                 best_model_save_path=None, log_path=None, deterministic=True, verbose=0):
-        super().__init__(verbose)
-        self.eval_env = eval_env
-        self.episodes_per_eval = episodes_per_eval
-        self.n_eval_episodes = n_eval_episodes
-        self.best_model_save_path = best_model_save_path
-        self.log_path = log_path
-        self.deterministic = deterministic
-        
-        # Episode tracking
-        self.episode_count = 0
-        self.last_eval_episode = 0
-        self.best_mean_reward = -float('inf')
-        self.win_rate_history = []
-        self.loss_history = []
-        self.gradient_norm_history = []
-        self.max_history = 20  # Keep last 20 evaluations for smoothing
-        self.max_loss_history = 100  # Keep more loss values for better smoothing
-        
-    def _on_step(self) -> bool:
-        # Track training metrics for smoothing
-        if hasattr(self.model, 'logger') and hasattr(self.model.logger, 'name_to_value'):
-            logger_data = self.model.logger.name_to_value
-            
-            # Track loss
-            if 'train/loss' in logger_data:
-                current_loss = logger_data['train/loss']
-                self.loss_history.append(current_loss)
-                if len(self.loss_history) > self.max_loss_history:
-                    self.loss_history.pop(0)
-                
-                if len(self.loss_history) > 5:
-                    loss_mean = sum(self.loss_history) / len(self.loss_history)
-                    self.model.logger.record("train/loss_mean", loss_mean)
-            
-            # Le suivi des Q-values (metrique train/q_value_mean) occupait cette place. Il etait
-            # garde par `hasattr(self.model, 'q_net')` : seul un algorithme value-based (DQN) a
-            # un q_net. Le projet n'instancie que MaskablePPO, un actor-critic — la branche
-            # n'etait jamais entree et la courbe n'a jamais rien recu. Rien d'autre ne lisait
-            # self.q_value_history, supprime avec.
-
-            # Track gradient norm if available
-            if hasattr(self.model, 'policy') and hasattr(self.model.policy, 'parameters'):
-                try:
-                    total_norm = 0.0
-                    param_count = 0
-                    for p in self.model.policy.parameters():
-                        if p.grad is not None:
-                            param_norm = p.grad.data.norm(2)
-                            total_norm += param_norm.item() ** 2
-                            param_count += 1
-                    
-                    if param_count > 0:
-                        gradient_norm = (total_norm ** 0.5)
-                        self.gradient_norm_history.append(gradient_norm)
-                        if len(self.gradient_norm_history) > self.max_loss_history:
-                            self.gradient_norm_history.pop(0)
-                        
-                        if len(self.gradient_norm_history) > 5:
-                            grad_norm_mean = sum(self.gradient_norm_history) / len(self.gradient_norm_history)
-                            self.model.logger.record("train/gradient_norm", grad_norm_mean)
-                except Exception:
-                    pass  # Gradient tracking is optional
-            
-            # Dump all metrics
-            if len(self.loss_history) > 5:
-                self.model.logger.dump(step=self.model.num_timesteps)
-        
-        # Check for episode completion
-        if hasattr(self, 'locals') and 'dones' in self.locals and 'infos' in self.locals:
-            for i, done in enumerate(self.locals['dones']):
-                if done and i < len(self.locals['infos']):
-                    info = self.locals['infos'][i]
-                    if 'episode' in info:
-                        self.episode_count += 1
-                        
-                        # Check if it's time for evaluation
-                        episodes_since_eval = self.episode_count - self.last_eval_episode
-                        if episodes_since_eval >= self.episodes_per_eval:
-                            self._run_evaluation()
-                            self.last_eval_episode = self.episode_count
-                            
-        return True
-    
-    def _run_evaluation(self):
-        """Run evaluation episodes and log results to tensorboard."""
-        episode_rewards = []
-        episode_lengths = []
-        wins = 0
-        
-        # Garde anti-runaway : on interroge le moteur d'evaluation lui-meme plutot que de
-        # recalculer depuis la config, pour que ce plafond soit exactement celui auquel le
-        # moteur tronque. Un plafond local plus bas couperait des episodes encore valides,
-        # et le silence d'un tel arret fausserait le win-rate.
-        eval_engine = self.eval_env.unwrapped
-        if not hasattr(eval_engine, "_get_episode_step_limit"):
-            raise AttributeError(
-                f"eval_env.unwrapped ({type(eval_engine).__name__}) exposes no "
-                f"_get_episode_step_limit: cannot align the evaluation runaway guard "
-                f"with the engine's own limit."
-            )
-
-        for eval_episode in range(self.n_eval_episodes):
-            obs, info = self.eval_env.reset()
-            episode_reward = 0
-            episode_length = 0
-            done = False
-            final_info = None
-
-            while not done:
-                action, _ = self.model.predict(obs, deterministic=self.deterministic)
-                obs, reward, terminated, truncated, info = self.eval_env.step(action)
-                episode_reward += reward
-                episode_length += 1
-                done = terminated or truncated
-                if done:
-                    final_info = info
-                elif (
-                    eval_engine._get_episode_step_limit() is not None
-                    and episode_length > eval_engine._get_episode_step_limit()
-                ):
-                    # Sortir silencieusement ici produirait des metriques d'evaluation
-                    # tronquees et non signalees (final_info=None, win-rate fausse).
-                    raise RuntimeError(
-                        f"Evaluation episode exceeded {eval_engine._get_episode_step_limit()} steps without "
-                        f"terminating (eval_episode={eval_episode}). The engine truncates at "
-                        f"the same limit, so reaching it here means the episode never returned "
-                        f"terminated/truncated — engine or wrapper bug, not a long game."
-                    )
-
-            episode_rewards.append(episode_reward)
-            episode_lengths.append(episode_length)
-
-            # Seat-aware win tracking: agent wins when winner matches controlled_player.
-            if final_info and 'winner' in final_info:
-                winner = require_key(final_info, 'winner')
-                controlled_player = int(require_key(final_info, 'controlled_player'))
-                if winner == controlled_player:
-                    wins += 1
-        
-        # Calculate statistics
-        mean_reward = sum(episode_rewards) / len(episode_rewards)
-        mean_ep_length = sum(episode_lengths) / len(episode_lengths)
-        win_rate = wins / self.n_eval_episodes if self.n_eval_episodes > 0 else 0.0
-        
-        # Track win rate history for smoothing
-        self.win_rate_history.append(win_rate)
-        if len(self.win_rate_history) > self.max_history:
-            self.win_rate_history.pop(0)
-        
-        # Calculate smoothed win rate (mean of recent evaluations)
-        win_rate_mean = sum(self.win_rate_history) / len(self.win_rate_history)
-        
-        # Log to model's tensorboard logger directly
-        if hasattr(self.model, 'logger') and self.model.logger:
-            self.model.logger.record("eval/mean_reward", mean_reward)
-            self.model.logger.record("eval/mean_ep_length", mean_ep_length)
-            self.model.logger.record("eval/win_rate", win_rate)
-            self.model.logger.record("eval/win_rate_mean", win_rate_mean)
-            self.model.logger.record("eval/episode", self.episode_count)
-            self.model.logger.dump(step=self.model.num_timesteps)
-        else:
-            # Use callback logger when model has no logger
-            self.logger.record("eval/mean_reward", mean_reward)
-            self.logger.record("eval/mean_ep_length", mean_ep_length)
-            self.logger.record("eval/win_rate", win_rate)
-            self.logger.dump(step=self.num_timesteps)
-        
-        # if self.verbose > 0:
-            # print(f"Episode {self.episode_count}: Eval mean reward: {mean_reward:.2f}, Win rate: {win_rate:.1%}")
-        
-        # Save best model
-        if mean_reward > self.best_mean_reward:
-            self.best_mean_reward = mean_reward
-            if self.best_model_save_path:
-                save_path = f"{self.best_model_save_path}/best_model"
-                self.model.save(save_path)
-                # Pas de try/except avaleur : un echec d'ECRITURE des stats doit lever ICI, pas
-                # ressortir 600 episodes plus tard comme une eval en erreur (V11 §0.35). Le
-                # retour False (env non enveloppe) = VecNormalize desactive, cas metier.
-                from ai.vec_normalize_utils import save_vec_normalize
-                save_vec_normalize(self.model.get_env(), f"{save_path}.zip")
-        
-        # if self.verbose > 0:
-            # print(f"Episode {self.episode_count}: Eval mean reward: {mean_reward:.2f}")
+# La classe EpisodeBasedEvalCallback (evaluation declenchee tous les N episodes plutot que tous
+# les N pas) occupait cette place. Elle etait exportee dans __all__ et importee par ai/train.py,
+# mais JAMAIS instanciee — preuve dans les quatre directions : aucun `EpisodeBasedEvalCallback(`
+# dans le depot, aucune sous-classe ni acces par attribut, aucune mention dans les configs JSON
+# ni construction de callback par nom (les seuls getattr sur un callback visent l'instance
+# bot_eval_callback deja construite, par attribut litteral), et un unique import sans usage.
+# L'evaluation periodique reelle est faite par BotEvaluationCallback, qui sait deja compter en
+# episodes (use_episode_freq) : c'est la qu'il faut regarder, pas ici.
 
 
 class MetricsCollectionCallback(BaseCallback):
@@ -1158,7 +975,8 @@ class MetricsCollectionCallback(BaseCallback):
                 # tactical_bonuses, situational, penalties et total — rien d'autre.
 
         # Le suivi periodique des Q-values (train/q_value_mean_smooth, toutes les 100 etapes)
-        # occupait cette place. Meme raison que le bloc equivalent de EpisodeBasedEvalCallback :
+        # occupait cette place. Meme raison que son jumeau d'EpisodeBasedEvalCallback (classe
+        # depuis supprimee, voir la trace plus haut dans ce fichier) :
         # il etait garde par `hasattr(self.model, 'q_net')`, et seul MaskablePPO est instancie
         # dans ce projet — un actor-critic, sans q_net. Le commentaire qui l'accompagnait
         # l'admettait deja. self.q_value_history / max_q_value_history partent avec lui.

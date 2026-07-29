@@ -773,17 +773,16 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
     # Import evaluation bots for testing
     eval_wall_start = time.time()
-    try:
-        from ai.evaluation_bots import (
-            RandomBot, GreedyBot, DefensiveBot, ControlBot,
-            AggressiveSmartBot, DefensiveSmartBot, AdaptiveBot,
-        )
-        EVALUATION_BOTS_AVAILABLE = True
-    except ImportError:
-        EVALUATION_BOTS_AVAILABLE = False
-
-    if not EVALUATION_BOTS_AVAILABLE:
-        return {}
+    # Import inconditionnel. Un try/except ImportError posait ici un drapeau
+    # EVALUATION_BOTS_AVAILABLE, suivi d'un `if not ...: return {}` — troisieme copie du meme
+    # motif (les deux autres sont parties de ai/training_callbacks.py et ai/train.py).
+    # ai/evaluation_bots.py est dans le depot, ce n'est pas une dependance optionnelle, et il ne
+    # cree aucun cycle. Le drapeau valait toujours True ; le repli `return {}` aurait rendu une
+    # evaluation vide au lieu de lever, ce qui est exactement ce qu'on ne veut pas ici.
+    from ai.evaluation_bots import (
+        RandomBot, GreedyBot, DefensiveBot, ControlBot,
+        AggressiveSmartBot, DefensiveSmartBot, AdaptiveBot,
+    )
 
     # Import scenario utilities from training_utils
     from ai.training_utils import get_scenario_list_for_phase
