@@ -11,7 +11,7 @@ Membership is answered by testing hex appartenance against the precomputed
 ``hexes`` sets — same odd-q projection as objectives and the frontend renderer,
 so a unit "within a terrain area" matches exactly what the player sees on board.
 """
-from typing import Any, Dict, List, Optional, Set, Tuple, cast
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from shared.data_validation import require_key
 
@@ -182,9 +182,14 @@ def footprint_within_floor(
     non modélisable ici : non représentée (surface d'étage supposée plane).
     """
     if base_shape == "round" and floor_polys is not None:
-        from engine.hex_utils import _hex_center, round_base_radius_norm, disc_within_any_polygon
+        from engine.hex_utils import (
+            _hex_center, round_base_radius_norm, disc_within_any_polygon,
+            require_scalar_base_size,
+        )
         cx, cy = _hex_center(int(col), int(row))
-        r = round_base_radius_norm(cast(float, base_size))
+        r = round_base_radius_norm(
+            require_scalar_base_size(base_shape, base_size, "footprint_within_floor")
+        )
         return disc_within_any_polygon(cx, cy, r, floor_polys)
     if not floor_hexes:
         return False
@@ -288,9 +293,14 @@ def model_within_terrain(
     if not areas:
         return False
     if base_shape == "round":
-        from engine.hex_utils import _hex_center, round_base_radius_norm, disc_overlaps_polygon
+        from engine.hex_utils import (
+            _hex_center, round_base_radius_norm, disc_overlaps_polygon,
+            require_scalar_base_size,
+        )
         cx, cy = _hex_center(int(col), int(row))
-        r = round_base_radius_norm(cast(float, base_size))
+        r = round_base_radius_norm(
+            require_scalar_base_size(base_shape, base_size, "model_within_terrain")
+        )
         for area in areas:
             poly = [_hex_center(int(v[0]), int(v[1])) for v in require_key(area, "polygon_vertices")]
             if disc_overlaps_polygon(cx, cy, r, poly):

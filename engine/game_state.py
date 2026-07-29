@@ -15,7 +15,9 @@ from engine.combat_utils import normalize_coordinates, get_unit_coordinates, res
 from engine.phase_handlers.shared_utils import (
     is_unit_alive, _derive_model_role, compute_unit_rules_in_effect, strip_role_rules,
 )
-from engine.hex_utils import expand_wall_group_to_hex_list, polygon_to_hex_list
+from engine.hex_utils import (
+    expand_wall_group_to_hex_list, polygon_to_hex_list, require_base_size,
+)
 
 # PERF: In-memory caches to avoid repeated disk I/O during scenario rotation.
 _scenario_json_cache: Dict[str, Any] = {}
@@ -25,8 +27,17 @@ _walls_json_mtime_ns: Dict[str, int] = {}
 # chaque chargement de terrain. Clé (chemin, mtime_ns) : édition à chaud prise en compte.
 _board_config_cache: Dict[Tuple[str, int], Dict[str, Any]] = {}
 
-def _scale_socle(base_shape: Any, base_size: Any, inches_to_subhex: int) -> Tuple[Any, Any]:
+def _scale_socle(
+    base_shape: Any, base_size: Any, inches_to_subhex: int, context: str
+) -> Tuple[Any, Any]:
     """Convertit le socle d'une datasheet (`BASE_SHAPE`, `BASE_SIZE` en unités ×10) vers le board.
+
+    FRONTIÈRE DE VALIDATION de l'invariant du socle : `BASE_SHAPE` est l'étiquette qui
+    DÉTERMINE le type de `BASE_SIZE` (`round`/`square` → scalaire, `oval` → paire). C'est ici
+    que la datasheet entre dans le moteur, donc ici que le couple est vérifié — une fois —
+    par `hex_utils.require_base_size`, qui nomme l'unité (`context`) et les deux valeurs
+    incohérentes. Tout le reste du moteur (Socle, empreintes, masques) consomme la donnée
+    déjà validée : il n'y a pas à re-garder chaque site géométrique.
 
     Au-dessus de `inches_to_subhex == 1`, seule la taille change et son TYPE est porteur de
     sens : un socle `oval` porte une PAIRE `[a, b]` que `hex_utils._socle_edge_primitives`
@@ -48,11 +59,12 @@ def _scale_socle(base_shape: Any, base_size: Any, inches_to_subhex: int) -> Tupl
         `enemy_adjacent_hexes_player_N`. Les deux définitions ne coïncident pas et le masque
         propose des destinations que l'exécution refuse (« incohérence masque/exécution »).
     """
+    validated = require_base_size(base_shape, base_size, context)
     if int(inches_to_subhex) <= 1:
         return "round", 1
-    if isinstance(base_size, list):
-        return base_shape, [max(1, round(s * inches_to_subhex / 10)) for s in base_size]
-    return base_shape, max(1, round(base_size * inches_to_subhex / 10))
+    if isinstance(validated, list):
+        return base_shape, [max(1, round(s * inches_to_subhex / 10)) for s in validated]
+    return base_shape, max(1, round(validated * inches_to_subhex / 10))
 
 
 # Keywords granting the "hideable" property (Benefit of Cover / Hidden rules 13.08-13.09).
@@ -229,8 +241,17 @@ class GameStateManager:
             "ICON": config["ICON"],
             "ICON_SCALE": config["ICON_SCALE"],
             "ILLUSTRATION_RATIO": require_key(config, "ILLUSTRATION_RATIO"),
+            # Second (et dernier) point d'entrée d'un socle dans le moteur : `create_unit`
+            # reçoit du DÉJÀ-SCALÉ (cf. commentaire ci-dessus), donc pas de `_scale_socle`
+            # ici — mais l'invariant (BASE_SHAPE ↔ type de BASE_SIZE) est verifié comme à
+            # l'autre frontière, sinon une unité construite par l'API ou une fixture
+            # entrerait sans garde.
             "BASE_SHAPE": require_key(config, "BASE_SHAPE"),
-            "BASE_SIZE": require_key(config, "BASE_SIZE"),
+            "BASE_SIZE": require_base_size(
+                require_key(config, "BASE_SHAPE"),
+                require_key(config, "BASE_SIZE"),
+                f"create_unit {config['unitType']} (id {config['id']})",
+            ),
             # Hauteur modèle (pouces) : clairance sous les étages (§13.06 maison). Fournie par
             # _build_enhanced_unit (autorité) / build army API → recopiée ici (builder central).
             "MODEL_HEIGHT": float(require_key(config, "MODEL_HEIGHT")),
@@ -683,13 +704,17 @@ class GameStateManager:
                 except Exception as e:
                     raise ValueError(f"Failed to get unit data for '{unit_type}': {e}")
 
-                base_shape = require_key(full_unit_data, "BASE_SHAPE")
-                base_size = require_key(full_unit_data, "BASE_SIZE")
-                if is_micro_board:
-                    if isinstance(base_size, list):
-                        base_size = [max(1, round(s * _ish / 10)) for s in base_size]
-                    else:
-                        base_size = max(1, round(base_size * _ish / 10))
+                # Socle du placement de déploiement : MÊME autorité que l'unité construite
+                # ensuite (`_build_enhanced_unit`). L'ancien bloc dupliquait la formule de
+                # scaling sous `if is_micro_board` ; à `inches_to_subhex == 1`
+                # `_compute_deploy_footprint` ne rend de toute façon qu'un hex, donc la
+                # normalisation `round`/1 de `_scale_socle` y est équivalente.
+                base_shape, base_size = _scale_socle(
+                    require_key(full_unit_data, "BASE_SHAPE"),
+                    require_key(full_unit_data, "BASE_SIZE"),
+                    _ish,
+                    f"datasheet {unit_type} (déploiement)",
+                )
                 player_deployment_type = deployment_type_by_player[int(unit_player)]
                 pool_set = set()
                 # deploy_pools est peuplé soit par les deployment_zones du terrain (voie moderne,
@@ -972,6 +997,16 @@ class GameStateManager:
         else:
             orientation_u = 0
 
+        # Socle de l'unité : converti ET validé une seule fois (l'appel était fait deux fois,
+        # une par champ). `context` nomme l'unité pour qu'une datasheet incohérente
+        # (ex. `oval` avec un BASE_SIZE scalaire) soit identifiable au chargement.
+        _u_base_shape, _u_base_size = _scale_socle(
+            require_key(full_unit_data, "BASE_SHAPE"),
+            require_key(full_unit_data, "BASE_SIZE"),
+            self._get_inches_to_subhex(),
+            f"datasheet {unit_type} (unité {unit_data['id']})",
+        )
+
         enhanced_unit = {
             "id": str(unit_data["id"]),
             "player": unit_player,
@@ -1001,19 +1036,11 @@ class GameStateManager:
             # Socle : forme ET taille passent par `_scale_socle` (autorité unique, cf. sa
             # docstring). À `inches_to_subhex == 1` il est normalisé en `round`/1 — une figurine
             # tient dans une case et la forme n'a plus de sens géométrique.
-            "BASE_SHAPE": _scale_socle(
-                require_key(full_unit_data, "BASE_SHAPE"),
-                require_key(full_unit_data, "BASE_SIZE"),
-                self._get_inches_to_subhex(),
-            )[0],
+            "BASE_SHAPE": _u_base_shape,
             # Hauteur du modèle (pouces) : clairance sous les étages (§13.06 maison) — comparée telle
             # quelle à ``height_inches`` des floors (même unité), sans scaling subhex.
             "MODEL_HEIGHT": float(require_key(full_unit_data, "MODEL_HEIGHT")),
-            "BASE_SIZE": _scale_socle(
-                require_key(full_unit_data, "BASE_SHAPE"),
-                require_key(full_unit_data, "BASE_SIZE"),
-                self._get_inches_to_subhex(),
-            )[1],
+            "BASE_SIZE": _u_base_size,
             "orientation": orientation_u,
             "UNIT_RULES": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
             # Provenance des règles (19.04) — sources IMMUABLES dont `UNIT_RULES` est dérivé :
@@ -1107,6 +1134,8 @@ class GameStateManager:
                         require_key(m_data, "BASE_SHAPE"),
                         require_key(m_data, "BASE_SIZE"),
                         _ish_local,
+                        f"datasheet {model_unit_type} "
+                        f"(figurine {idx} de l'unité {unit_data.get('id')})",
                     )
                     m_spec.update({
                         "unit_type": model_unit_type,
