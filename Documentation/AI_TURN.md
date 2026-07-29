@@ -1379,7 +1379,9 @@ ASSERT: game_state["units_cache"] exists (doit être construit au reset)
 
 **Weapon abilities (24.03-24.38) — reconnu au registry vs appliqué en résolution**
 
-> ⚠️ `WeaponRulesRegistry._apply_single_rule` est un **stub pass-through** : être reconnu au registry n'implique PAS être appliqué dans la séquence de résolution.
+> ⚠️ Être reconnu au registry n'implique PAS être appliqué dans la séquence de résolution : `engine/weapons/` **charge et valide** le catalogue `config/weapon_rules.json`, il ne l'applique pas. L'application vit dans `engine/utils/weapon_helpers` + les handlers de phase (`attack_sequence`, tir, mêlée). La colonne « Appliqué » ci-dessous est donc la seule qui fasse foi.
+>
+> (2026-07-29 — cet avertissement citait auparavant un stub pass-through `_apply_single_rule` ; la classe `WeaponRulesApplier` qui le portait a été SUPPRIMÉE, cf. la pierre tombale dans `engine/weapons/rules.py`. L'avertissement reste valable, sa cause était juste ailleurs.)
 
 | Ability | Registry | Appliqué | Note |
 |---|---|---|---|
