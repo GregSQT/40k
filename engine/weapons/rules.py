@@ -265,17 +265,15 @@ class WeaponRulesApplier:
     (e.g., modifying shot count, damage, target validation).
     
     Phase 2 implementation - currently a placeholder.
+
+    Note:
+        Cette classe ne consulte PAS le registre : `_apply_single_rule` n'a aucun
+        handler et les regles d'armes vivantes sont appliquees ailleurs
+        (`engine/utils/weapon_helpers.weapon_has_rule` + `attack_sequence`).
+        Le constructeur ne prend donc aucune dependance : en ajouter une que
+        personne ne lit serait un contrat mensonger.
     """
-    
-    def __init__(self, registry: WeaponRulesRegistry):
-        """
-        Initialize weapon rules applier.
-        
-        Args:
-            registry: Weapon rules registry
-        """
-        self.registry = registry
-    
+
     def apply_rules(self, weapon: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         """
         Apply weapon rules in a given combat context.

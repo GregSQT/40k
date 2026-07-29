@@ -1,7 +1,7 @@
 from concurrent.futures import ProcessPoolExecutor
 from itertools import chain, repeat
 from types import SimpleNamespace
-from typing import cast
+from typing import List
 
 import numpy as np
 import pytest
@@ -414,21 +414,24 @@ def test_collect_parallel_results_with_timeouts_aborts_pool_on_hung_task(
     monkeypatch.setattr(be, "wait", _fake_wait)
     monkeypatch.setattr(be.time, "monotonic", lambda: next(monotonic_values))
 
-    force_called = {"v": False}
-    monkeypatch.setattr(be, "_force_terminate_process_pool", lambda pool: force_called.__setitem__("v", True))
+    terminated: List[ProcessPoolExecutor] = []
+    monkeypatch.setattr(be, "_force_terminate_process_pool", terminated.append)
 
     task_map = {
         done_future: {"bot_name": "random", "scenario_name": "training_bot-1", "scenario_file": "/tmp/a.json", "n_episodes": 1},
         hung_future: {"bot_name": "greedy", "scenario_file": "/tmp/hung.json", "n_episodes": 3},
     }
 
-    out = be._collect_parallel_results_with_timeouts(
-        pool=cast(ProcessPoolExecutor, object()),
-        future_to_task=task_map,
-        task_timeout_seconds=1,
-    )
+    # Vrai ProcessPoolExecutor (aucun worker n'est lance tant qu'on ne submit rien) :
+    # `pool` n'est pas un parametre mort, il est reforwarde a _force_terminate_process_pool.
+    with ProcessPoolExecutor(max_workers=1) as pool:
+        out = be._collect_parallel_results_with_timeouts(
+            pool=pool,
+            future_to_task=task_map,
+            task_timeout_seconds=1,
+        )
+        assert terminated == [pool]
 
-    assert force_called["v"] is True
     assert any(r.get("bot_name") == "random" and r.get("wins") == 1 for r in out)
     timed_out = [r for r in out if r.get("bot_name") == "greedy" and r.get("timeout") is True]
     assert len(timed_out) == 1
@@ -436,9 +439,10 @@ def test_collect_parallel_results_with_timeouts_aborts_pool_on_hung_task(
 
 
 def test_collect_parallel_results_with_timeouts_rejects_non_positive_timeout() -> None:
-    with pytest.raises(ValueError, match=r"must be > 0"):
-        be._collect_parallel_results_with_timeouts(
-            pool=cast(ProcessPoolExecutor, object()),
-            future_to_task={},
-            task_timeout_seconds=0,
-        )
+    with ProcessPoolExecutor(max_workers=1) as pool:
+        with pytest.raises(ValueError, match=r"must be > 0"):
+            be._collect_parallel_results_with_timeouts(
+                pool=pool,
+                future_to_task={},
+                task_timeout_seconds=0,
+            )
