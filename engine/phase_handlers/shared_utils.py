@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from engine.hex_utils import Socle
 
 from shared.data_validation import require_key
-from engine.utils.weapon_helpers import weapon_has_rule
+from engine.utils.weapon_helpers import melee_weapons, ranged_weapons, weapon_has_rule
 
 # --- Type de plan de mouvement (source unique) ---------------------------------
 # Une entrée positionne UNE figurine : (model_id, col, row), (model_id, col, row, level) OU
@@ -827,6 +827,12 @@ def _build_models_for_unit(
                 if "UNIT_KEYWORDS" in unit
                 else {}
             ),
+            # DEFAUT CONSERVE, et ce n'en est pas un : motif d'OVERRIDE par figurine. La
+            # valeur de repli n'est pas une liste vide mais l'armement de L'UNITE — une
+            # figurine qui ne surcharge pas ses armes herite de celles de son escouade.
+            # C'est ce que le scenario exprime en ne declarant la cle que pour les figurines
+            # atypiques (sergent, porteur d'arme speciale). Rien n'est masque : la valeur
+            # heritee, elle, vient de `require_key(unit, ...)` en amont.
             "RNG_WEAPONS": copy.deepcopy(spec.get("RNG_WEAPONS", rng_weapons)),
             "CC_WEAPONS": copy.deepcopy(spec.get("CC_WEAPONS", cc_weapons)),
             "selectedRngWeaponIndex": spec.get("selectedRngWeaponIndex", selected_rng),
@@ -1575,7 +1581,7 @@ def check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any]
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has melee weapons
             from engine.utils.weapon_helpers import get_selected_melee_weapon
             has_melee = False
-            if unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0:
+            if melee_weapons(unit):
                 melee_weapon = get_selected_melee_weapon(unit)
                 if melee_weapon and expected_dice_value(require_key(melee_weapon, "DMG"), "melee_charge_dmg") > 0:
                     has_melee = True
@@ -1612,12 +1618,12 @@ def calculate_target_priority_score(unit: Dict[str, Any], target: Dict[str, Any]
     target_rng_dmg = expected_dice_value(require_key(target_rng_weapon, "DMG"), "target_rng_dmg") if target_rng_weapon else 0
     target_cc_dmg = expected_dice_value(require_key(target_cc_weapon, "DMG"), "target_cc_dmg") if target_cc_weapon else 0
     # Also check all weapons for max threat
-    if target.get("RNG_WEAPONS"):
+    if ranged_weapons(target):
         target_rng_dmg = max(
             target_rng_dmg,
             max(expected_dice_value(require_key(w, "DMG"), "target_rng_dmg_pool") for w in target["RNG_WEAPONS"])
         )
-    if target.get("CC_WEAPONS"):
+    if melee_weapons(target):
         target_cc_dmg = max(
             target_cc_dmg,
             max(expected_dice_value(require_key(w, "DMG"), "target_cc_dmg_pool") for w in target["CC_WEAPONS"])
@@ -1630,7 +1636,7 @@ def calculate_target_priority_score(unit: Dict[str, Any], target: Dict[str, Any]
     
     # Calculate if unit can kill target in 1 phase (use selected weapon or first weapon)
     unit_rng_weapon = get_selected_ranged_weapon(unit)
-    if not unit_rng_weapon and unit.get("RNG_WEAPONS"):
+    if not unit_rng_weapon and ranged_weapons(unit):
         unit_rng_weapon = unit["RNG_WEAPONS"][0]
     unit_rng_dmg = expected_dice_value(require_key(unit_rng_weapon, "DMG"), "unit_rng_dmg") if unit_rng_weapon else 0
     can_kill_1_phase = target_hp <= unit_rng_dmg
@@ -1690,12 +1696,12 @@ def enrich_unit_for_reward_mapper(unit: Dict[str, Any], game_state: Dict[str, An
     rng_dmg = expected_dice_value(require_key(unit_rng_weapon, "DMG"), "enrich_rng_dmg") if unit_rng_weapon else 0
     cc_dmg = expected_dice_value(require_key(unit_cc_weapon, "DMG"), "enrich_cc_dmg") if unit_cc_weapon else 0
     # Also check all weapons for max DMG
-    if unit.get("RNG_WEAPONS"):
+    if ranged_weapons(unit):
         rng_dmg = max(
             rng_dmg,
             max(expected_dice_value(require_key(w, "DMG"), "enrich_rng_dmg_pool") for w in unit["RNG_WEAPONS"])
         )
-    if unit.get("CC_WEAPONS"):
+    if melee_weapons(unit):
         cc_dmg = max(
             cc_dmg,
             max(expected_dice_value(require_key(w, "DMG"), "enrich_cc_dmg_pool") for w in unit["CC_WEAPONS"])
@@ -5056,7 +5062,7 @@ def squad_shooting_unit_activation_start(
         m = models_cache.get(mid)
         if m is None:
             continue
-        weapons = m.get("RNG_WEAPONS", [])  # get allowed
+        weapons = ranged_weapons(m)
         sel = m.get("selectedRngWeaponIndex")
         if weapons and sel is not None and 0 <= int(sel) < len(weapons):
             w = weapons[int(sel)]
@@ -5309,7 +5315,7 @@ def _model_can_shoot_target(
     """
     if int(attacker_model.get("SHOOT_LEFT", 0)) <= 0:  # get allowed
         return False
-    weapons = attacker_model.get("RNG_WEAPONS", [])  # get allowed
+    weapons = ranged_weapons(attacker_model)
     sel = attacker_model.get("selectedRngWeaponIndex")
     if not weapons or sel is None or not (0 <= int(sel) < len(weapons)):
         return False
@@ -5400,7 +5406,7 @@ def squad_declare_shoot(
         m = models_cache.get(mid)
         if m is None:
             continue
-        weapons = m.get("RNG_WEAPONS", [])  # get allowed
+        weapons = ranged_weapons(m)
         # 04.01 « You can select ONE OR MORE ranged weapons that model has » : on declare
         # TOUTES les armes utilisables, pas la seule `selectedRngWeaponIndex` (qui vaut 0
         # pendant toute la partie en gym — ce champ n est ecrit que par le flux PvP manuel).
@@ -6001,7 +6007,7 @@ def squad_model_valid_targets(
     if m is None:
         raise ValueError(f"Model {attacker_model_id!r} not alive (absent de models_cache)")
     attacker_player = int(m["player"])
-    weapons = m.get("RNG_WEAPONS", [])  # get allowed
+    weapons = ranged_weapons(m)
     valid: List[str] = []
     for sid, mids in squad_models.items():
         if sid == attacker_squad_id:
@@ -6090,7 +6096,7 @@ def squad_shoot_los_overview(
     free_count = 0
     for mid in alive:
         m = models_cache[mid]
-        weapons = m.get("RNG_WEAPONS", [])  # get allowed
+        weapons = ranged_weapons(m)
         declared_w = declared_by_model.get(mid, set())  # get allowed
         # Une arme est consommee des qu UN de ses profils exclusifs (COMBI_WEAPON) est
         # declare : on groupe donc par arme physique, pas par profil.
@@ -6252,7 +6258,7 @@ def resolve_squad_shooting_type(
         return any(
             predicate(w)
             for m in alive
-            for w in m.get("RNG_WEAPONS", [])  # get allowed
+            for w in ranged_weapons(m)
             # `RNG > 0` reste un filtre METIER (arme de tir utilisable) ; la portee elle-meme
             # est requise : les 243 profils de RNG_WEAPONS la portent.
             if isinstance(w, dict) and int(require_key(w, "RNG")) > 0
@@ -6312,7 +6318,7 @@ def squad_model_shootable_weapon_indices(
     if unit is None:
         return []
     out: List[int] = []
-    for idx, weapon in enumerate(model.get("RNG_WEAPONS", [])):  # get allowed
+    for idx, weapon in enumerate(ranged_weapons(model)):
         # Idem : le filtre porte sur la VALEUR de portee, jamais sur son absence.
         if not isinstance(weapon, dict) or int(require_key(weapon, "RNG")) <= 0:
             continue
@@ -6334,7 +6340,7 @@ def _model_can_shoot_target_with_weapon(
     figurine tire CHACUNE de ses armes une fois (split fire), SHOOT_LEFT etant le
     NB d une seule arme et donc inadapte comme garde multi-armes.
     """
-    weapons = attacker_model.get("RNG_WEAPONS", [])  # get allowed
+    weapons = ranged_weapons(attacker_model)
     if not (0 <= int(weapon_index) < len(weapons)):
         return False
     weapon = weapons[int(weapon_index)]
@@ -6529,7 +6535,7 @@ def squad_shoot_menu_weapons(
         m = models_cache.get(str(it["model_id"]))
         if m is None:
             continue
-        ws = m.get("RNG_WEAPONS", [])  # get allowed
+        ws = ranged_weapons(m)
         wi = int(it["weapon_index"])
         if 0 <= wi < len(ws) and isinstance(ws[wi], dict):
             if weapon_has_rule(ws[wi], "CLOSE_QUARTERS"):
@@ -6550,7 +6556,7 @@ def squad_shoot_menu_weapons(
             m = models_cache.get(mid)
             if m is None:
                 continue
-            weapons = m.get("RNG_WEAPONS", [])  # get allowed
+            weapons = ranged_weapons(m)
             local_idx = next(
                 (i for i, ww in enumerate(weapons) if isinstance(ww, dict) and ww.get("code") == code),
                 None,
@@ -7231,7 +7237,7 @@ def _manual_roll_intent(
             "player": int(require_key(_tgt_uc, "player")),
         }
     weapon_index = int(intent.get("weapon_index", 0))  # get allowed
-    weapons = attacker.get("RNG_WEAPONS", [])  # get allowed
+    weapons = ranged_weapons(attacker)
     if not (0 <= weapon_index < len(weapons)):
         return None
     weapon = weapons[weapon_index]
@@ -8296,7 +8302,7 @@ def squad_fight_unit_activation_start(
         m = models_cache.get(mid)
         if m is None:
             continue
-        weapons = m.get("CC_WEAPONS", [])  # get allowed
+        weapons = melee_weapons(m)
         sel = m.get("selectedCcWeaponIndex")
         if weapons and sel is not None and 0 <= int(sel) < len(weapons):
             w = weapons[int(sel)]
@@ -8697,7 +8703,7 @@ def get_fighting_models(game_state: Dict[str, Any], squad_id: str) -> List[str]:
 
 def _extra_attacks_weapon_indices(attacker: Dict[str, Any]) -> List[int]:
     """Indices des armes de melee [EXTRA ATTACKS] 24.11 de la figurine (ordre stable)."""
-    weapons = attacker.get("CC_WEAPONS", [])  # get allowed
+    weapons = melee_weapons(attacker)
     return [
         idx for idx, w in enumerate(weapons)
         if isinstance(w, dict) and weapon_has_rule(w, "EXTRA_ATTACKS")
@@ -8720,7 +8726,7 @@ def _select_fight_weapon_indices_for_fig(
     `selectedCcWeaponIndex`), puis les armes EXTRA ATTACKS. Liste vide si la figurine n a
     aucune arme de melee.
     """
-    weapons = attacker.get("CC_WEAPONS", [])  # get allowed
+    weapons = melee_weapons(attacker)
     if not weapons:
         return []
     extra = _extra_attacks_weapon_indices(attacker)
@@ -8757,7 +8763,7 @@ def _auto_select_cc_weapon_for_fig(
         expected_damage_per_attack,
     )
 
-    weapons = attacker.get("CC_WEAPONS", [])  # get allowed
+    weapons = melee_weapons(attacker)
     if not weapons:
         return None
     best_idx: Optional[int] = None
@@ -8840,7 +8846,7 @@ def squad_declare_fight(
         if not selected_indices:
             continue
         m["selectedCcWeaponIndex"] = selected_indices[0]
-        weapons = m.get("CC_WEAPONS", [])  # get allowed
+        weapons = melee_weapons(m)
         total_attacks = 0
         for chosen_idx in selected_indices:
             # F3 fix (audit) : resoudre NB UNE SEULE FOIS, stocker dans intent.
