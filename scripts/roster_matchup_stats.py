@@ -496,6 +496,8 @@ def _run_matchup_episodes(
     )
     from sb3_contrib.common.wrappers import ActionMasker
     from ai.unit_registry import UnitRegistry
+    from config_loader import get_max_turns
+    from shared.data_validation import require_key
 
     unit_registry = UnitRegistry()
     W40KEngine, _ = setup_imports()
@@ -503,7 +505,6 @@ def _run_matchup_episodes(
         raise ValueError(f"opponent_mode must be 'bot' or 'agent' (got {opponent_mode!r})")
     if agent_seat_mode not in {"p1", "p2"}:
         raise ValueError(f"agent_seat_mode must be 'p1' or 'p2' (got {agent_seat_mode!r})")
-    controlled_winner_id = 1 if agent_seat_mode == "p1" else 2
 
     BOT_CLASSES = {
         "random": RandomBot,
@@ -560,17 +561,29 @@ def _run_matchup_episodes(
         )
 
     model = MaskablePPO.load(model_path, env=env)
+    # Meme source que la reference (ai/bot_evaluation.py:1052) : la duree de bataille vient de
+    # game_rules.max_turns via config_loader.get_max_turns(). Aucun plafond en dur, aucune
+    # valeur par defaut : si la config ne porte pas max_turns, get_max_turns leve.
+    max_steps_per_episode = int(get_max_turns()) * 400
     wins, losses, draws = 0, 0, 0
     for ep in range(n_episodes):
         ep_seed = (seed + ep * 1000) % (2**31)
         random.seed(ep_seed)
+        np.random.seed(ep_seed)  # ai/bot_evaluation.py:515-516 : les DEUX generateurs sont poses.
         obs, info = env.reset(seed=ep_seed)
         done = False
-        while not done:
+        step_count = 0
+        while not done and step_count < max_steps_per_episode:
             model_obs = obs_normalizer(obs) if obs_normalizer is not None else obs
-            model_obs = np.asarray(model_obs, dtype=np.float32)
-            if model_obs.ndim == 1:
-                model_obs = model_obs.reshape(1, -1)
+            # Obs Dict (MultiInputPolicy + CNN) : predict la gere nativement, ne pas aplatir.
+            # Copie conforme de ai/bot_evaluation.py:526-533. L'obs du pipeline squad est un
+            # gym.spaces.Dict : l'aplatir levait avant meme d'atteindre le masque.
+            if isinstance(model_obs, dict):
+                model_input = model_obs
+            else:
+                model_input = np.asarray(model_obs, dtype=np.float32)
+                if model_input.ndim == 1:
+                    model_input = model_input.reshape(1, -1)
             # MEME chemin que la production (ai/bot_evaluation.py:523) : le masque servi au
             # modele doit etre celui de la semantique SQUAD que `env.step` decode. La voie
             # legacy `action_decoder.get_action_mask_and_eligible_units` construit l'ancien
@@ -582,12 +595,17 @@ def _run_matchup_episodes(
             action_masks = np.asarray(env.engine.get_action_mask(), dtype=bool)
             if action_masks.ndim == 1:
                 action_masks = action_masks.reshape(1, -1)
-            action, _ = model.predict(model_obs, action_masks=action_masks, deterministic=True)
+            action, _ = model.predict(model_input, action_masks=action_masks, deterministic=True)
             action_scalar = int(np.asarray(action).flat[0])
             obs, _, terminated, truncated, info = env.step(action_scalar)
             done = bool(terminated or truncated)
+            step_count += 1
         winner = info.get("winner")
-        if winner == controlled_winner_id:
+        # ai/bot_evaluation.py:543 : le siege controle est LU dans l'info rendue par l'env, pas
+        # recalcule ici. Un identifiant recalcule localement peut diverger silencieusement du
+        # siege reellement joue (BotControlledEnv gere l'alternance des sieges).
+        controlled_player = require_key(info, "controlled_player")
+        if winner == controlled_player:
             wins += 1
         elif winner == -1:
             draws += 1
@@ -598,25 +616,28 @@ def _run_matchup_episodes(
 
 
 def _build_obs_normalizer(agent_key: str, training_config_name: str, model_path: str):
-    """Build observation normalizer if VecNormalize is enabled."""
-    import numpy as np
+    """Build observation normalizer if VecNormalize is enabled.
+
+    Le normalizer lui-meme n'est PAS reecrit ici : c'est celui de la reference,
+    `ai/bot_evaluation._build_eval_obs_normalizer_for_worker` (ai/bot_evaluation.py:385-440),
+    seul a traiter l'obs Dict du pipeline squad (`normalize_obs` sur "global_cont", :432-433)
+    autant que le chemin legacy Box a plat. Une copie locale re-divergerait silencieusement —
+    c'est exactement ce qui s'etait produit : elle aplatissait l'obs Dict.
+    Ce script ne garde que la LECTURE des drapeaux dans la config d'agent.
+    """
     from shared.data_validation import require_key
-    from ai.vec_normalize_utils import normalize_observation_for_inference
+    from ai.bot_evaluation import _build_eval_obs_normalizer_for_worker
 
     config = __import__("config_loader", fromlist=["get_config_loader"]).get_config_loader()
     training_cfg = config.load_agent_training_config(agent_key, training_config_name)
     vec_cfg = require_key(training_cfg, "vec_normalize")
     vec_eval_cfg = require_key(training_cfg, "vec_normalize_eval")
-    if not vec_cfg.get("enabled") or not vec_eval_cfg.get("enabled"):
-        return None
-
-    def _normalize(obs):
-        obs_arr = np.asarray(obs, dtype=np.float32)
-        if obs_arr.ndim == 1:
-            obs_arr = obs_arr.reshape(1, -1)
-        return normalize_observation_for_inference(obs_arr, model_path).squeeze()
-
-    return _normalize
+    return _build_eval_obs_normalizer_for_worker(
+        None,
+        model_path,
+        bool(vec_cfg.get("enabled")),
+        bool(vec_eval_cfg.get("enabled")),
+    )
 
 
 def main() -> None:
