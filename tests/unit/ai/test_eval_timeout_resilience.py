@@ -62,7 +62,7 @@ def test_crash_still_stops_training(monkeypatch: pytest.MonkeyPatch) -> None:
     def _must_not_run(*_a: Any, **_k: Any) -> bool:
         raise AssertionError("le gate ne doit pas etre atteint quand un episode a plante")
 
-    callback._evaluate_model_gate = _must_not_run  # type: ignore[assignment]
+    callback._evaluate_model_gate = _must_not_run
 
     with pytest.raises(RuntimeError, match="crashed episodes"):
         callback._apply_eval_results(_results(failed=100, timeout=0, error=100), eval_marker=2000)
@@ -71,7 +71,7 @@ def test_crash_still_stops_training(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_crash_stops_even_when_mixed_with_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """Timeout + crash simultanes : le crash prime, le training s'arrete."""
     callback = _make_callback(monkeypatch)
-    callback._evaluate_model_gate = lambda *_a, **_k: True  # type: ignore[assignment]
+    callback._evaluate_model_gate = lambda *_a, **_k: True
 
     with pytest.raises(RuntimeError, match="crashed episodes"):
         callback._apply_eval_results(_results(failed=500, timeout=400, error=100), eval_marker=2000)
@@ -84,7 +84,7 @@ def test_timeout_does_not_stop_training(monkeypatch: pytest.MonkeyPatch, capsys:
     def _must_not_run(*_a: Any, **_k: Any) -> bool:
         raise AssertionError("une eval non fiable ne doit alimenter aucun gate")
 
-    callback._evaluate_model_gate = _must_not_run  # type: ignore[assignment]
+    callback._evaluate_model_gate = _must_not_run
 
     callback._apply_eval_results(_results(failed=500, timeout=500, error=0), eval_marker=2000)
 
@@ -98,7 +98,7 @@ def test_timeout_does_not_stop_training(monkeypatch: pytest.MonkeyPatch, capsys:
 def test_timeout_logs_a_counter_and_no_win_rate_metric(monkeypatch: pytest.MonkeyPatch) -> None:
     """Sur timeout : un compteur de diagnostic est loggue, mais AUCUN win-rate ne l'est."""
     callback = _make_callback(monkeypatch)
-    callback._evaluate_model_gate = lambda *_a, **_k: True  # type: ignore[assignment]
+    callback._evaluate_model_gate = lambda *_a, **_k: True
 
     scalars: List[Any] = []
 
@@ -133,7 +133,7 @@ def test_clean_eval_still_reaches_the_gate(monkeypatch: pytest.MonkeyPatch) -> N
     class _GateReached(Exception):
         pass
 
-    callback._evaluate_model_gate = _gate  # type: ignore[assignment]
+    callback._evaluate_model_gate = _gate
 
     with pytest.raises(_GateReached):
         callback._apply_eval_results(_results(failed=0, timeout=0, error=0), eval_marker=2000)

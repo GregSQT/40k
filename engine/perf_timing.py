@@ -136,7 +136,7 @@ import functools
 import io
 import os
 import sys
-from typing import Any, Callable, Dict, Optional, TypeVar
+from typing import Any, Callable, Dict, Optional, TypeVar, cast
 
 _PERF_ENV_TRUE = frozenset({"1", "true", "yes"})
 _PERF_WRITE_ERROR_LOGGED = False
@@ -381,7 +381,11 @@ def profile_move_pool_build(fn: F) -> F:
             pr.disable()
             append_cprofile_dump(pr, fn.__name__, unit_id=str(unit_id))
 
-    return wrapper  # type: ignore[return-value]
+    # `cast` justifie : `functools.wraps` conserve la signature de `fn` a l'execution, mais le
+    # systeme de types ne sait pas exprimer « le wrapper a exactement le type F de l'entree » —
+    # il voit un `_Wrapped[...]`. Lacune connue du typage des decorateurs generiques, pas un
+    # defaut du code : le decorateur ne change ni les arguments ni la valeur de retour.
+    return cast(F, wrapper)
 
 
 if __name__ == "__main__":

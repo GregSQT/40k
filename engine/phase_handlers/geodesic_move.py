@@ -133,10 +133,14 @@ def _build_level_transitions(
             tx, ty = _hex_center(t[0], t[1])
             for g in [t] + list(get_neighbors(t[0], t[1])):
                 gc, gr = g
-                if lower == 0:
+                # `lower_hexes is None` <=> `lower == 0` (le sol, ou tout hex in-bounds est
+                # valide) : c'est ainsi qu'il est construit trois lignes plus haut. Tester
+                # l'ensemble plutot que le niveau donne exactement le meme branchement, mais
+                # rend le `not in` prouvable — l'ignore precedent taisait un `in` sur Optional.
+                if lower_hexes is None:
                     if gc < 0 or gr < 0 or gc >= board_cols or gr >= board_rows:
                         continue
-                elif g not in lower_hexes:  # type: ignore[operator]
+                elif g not in lower_hexes:
                     continue
                 gx, gy = _hex_center(gc, gr)
                 cost = math.hypot(tx - gx, ty - gy) + vcost

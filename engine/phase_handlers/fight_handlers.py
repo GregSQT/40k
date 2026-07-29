@@ -3933,6 +3933,8 @@ def pile_in_autoplace_plan(
                 rows.append(base_rows + k); cols.append(e_i)
         n_rows = base_rows + len(conflict_pairs)
         A = coo_matrix(([1.0] * len(rows), (rows, cols)), shape=(n_rows, n))
+        # Bornes vectorielles (une par ligne du systeme) : les stubs scipy declarent `lb`/`ub`
+        # en `float` alors que l'API accepte un tableau. Lacune du typage externe, pas du code.
         lc = LinearConstraint(A, np.zeros(n_rows), np.ones(n_rows))  # type: ignore[arg-type]
         max_pd = max((e[2] for e in edges), default=0) + 1
         max_df = max((all_slots[e[1]][4] for e in edges), default=0) + 1

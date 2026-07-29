@@ -458,6 +458,12 @@ def test_observation_follows_the_unit_of_the_decision():
     """L'observateur est l'unité SUR LAQUELLE porte le choix, pas la première venue."""
     gs = _game_state([_unit(1, 1, 5, 10, []), _unit(2, 1, 7, 10, [])])
     engine = _engine(gs)
+    # Sourdine assumee : `state_manager` est declare `GameStateManager` sur W40KEngine, et ce
+    # test substitue une doublure qui n'expose QUE `refresh_objective_control_on_boundary` —
+    # la seule methode que `_build_observation` appelle ici. Construire un vrai
+    # GameStateManager (config + registre + plateau) pour ce seul appel rendrait le test
+    # dependant de tout l'etat qu'il n'observe pas. pyright signale donc un ecart reel et
+    # voulu, pas un defaut du code de production.
     engine.state_manager = _StubStateManager()  # pyright: ignore[reportAttributeAccessIssue]
     set_pending_agent_decision(
         gs, decision_type="rule_choice", player=1, unit_id="2", options=_two_options()
