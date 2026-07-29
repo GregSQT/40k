@@ -717,165 +717,27 @@ def weapon_availability_check(
 
     return available_weapons
 
-def _get_available_weapons_for_selection(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    current_weapon_is_close_quarters: Optional[bool] = None,
-    exclude_used: bool = True,
-    has_advanced: bool = False
-) -> List[Dict[str, Any]]:
-    """
-    DEPRECATED: This function is kept for backward compatibility.
-    Use weapon_availability_check() instead.
-    
-    Get list of available weapons for selection, filtered by:
-    - Range: weapon must have at least one target in range
-    - LoS: weapon must have at least one target with line of sight
-    - ASSAULT rule: if unit advanced
-    - CLOSE_QUARTERS rule: category (CLOSE_QUARTERS or non-CLOSE_QUARTERS)
-    - Used weapons: if exclude_used=True, exclude weapons with weapon.shot = 1
-    
-    Returns:
-        List of dicts with keys: index, weapon, can_use, reason
-    """
-    available_weapons = []
-    rng_weapons = require_key(unit, "RNG_WEAPONS")
-    
-    # Build valid targets for range/LoS checking
-    # We'll check each weapon individually
-    unit_id = unit["id"]
-    
-    for idx, weapon in enumerate(rng_weapons):
-        can_use = True
-        reason = None
-        
-        # Check weapon.shot flag
-        if exclude_used:
-            weapon_shot = require_key(weapon, "shot")
-            if weapon_shot == 1:
-                can_use = False
-                reason = "Weapon already used (weapon.shot = 1)"
-                available_weapons.append({
-                    "index": idx,
-                    "weapon": _serialize_weapon_for_json(weapon),
-                    "can_use": can_use,
-                    "reason": reason
-                })
-                continue
-        
-        # Check ASSAULT rule if unit advanced
-        if has_advanced:
-            if not weapon_has_rule(weapon, "ASSAULT"):
-                can_use = False
-                reason = "No ASSAULT rule (cannot shoot after advancing)"
-                available_weapons.append({
-                    "index": idx,
-                    "weapon": _serialize_weapon_for_json(weapon),
-                    "can_use": can_use,
-                    "reason": reason
-                })
-                continue
-        
-        # Check CLOSE_QUARTERS rule category
-        # Only apply CLOSE_QUARTERS filter if unit has already fired (current_weapon_is_close_quarters is not None)
-        # If None, unit hasn't fired yet, so all weapons should be selectable
-        weapon_rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
-        is_close_quarters = "CLOSE_QUARTERS" in weapon_rules
-        
-        if current_weapon_is_close_quarters is not None:
-            if current_weapon_is_close_quarters:
-                # If current weapon is CLOSE_QUARTERS, can only select other CLOSE_QUARTERS weapons
-                if not is_close_quarters:
-                    can_use = False
-                    reason = "Cannot mix CLOSE_QUARTERS with non-CLOSE_QUARTERS weapons"
-                    available_weapons.append({
-                        "index": idx,
-                        "weapon": _serialize_weapon_for_json(weapon),
-                        "can_use": can_use,
-                        "reason": reason
-                    })
-                    continue
-            else:
-                # If current weapon is not CLOSE_QUARTERS, exclude CLOSE_QUARTERS weapons
-                if is_close_quarters:
-                    can_use = False
-                    reason = "Cannot mix non-CLOSE_QUARTERS with CLOSE_QUARTERS weapons"
-                    available_weapons.append({
-                        "index": idx,
-                        "weapon": _serialize_weapon_for_json(weapon),
-                        "can_use": can_use,
-                        "reason": reason
-                    })
-                    continue
-        
-        # Check if weapon has at least one valid target (range + LoS)
-        weapon_has_valid_target = False
-        weapon_range = require_key(weapon, "RNG")
-        
-        # Skip if weapon has no range
-        if weapon_range <= 0:
-            can_use = False
-            reason = "Weapon has no range"
-            available_weapons.append({
-                "index": idx,
-                "weapon": _serialize_weapon_for_json(weapon),
-                "can_use": can_use,
-                "reason": reason
-            })
-            continue
-        
-        from engine.combat_utils import ranged_edge_distance
-        from engine.hex_utils import Socle
-        _metric2 = _ranged_distance_metric()
-        units_cache = require_key(game_state, "units_cache")
-        unit_player = int(unit["player"]) if unit["player"] is not None else None
-        unit_col, unit_row = require_unit_position(unit, game_state)
-        _uid2 = str(unit["id"])
-        _ue2 = units_cache.get(_uid2)
-        if _ue2 is None:
-            raise KeyError(f"Shooter {_uid2} not in units_cache")
-        _shooter_socle2 = _socle_from_entry(_ue2)
-        for enemy_id, cache_entry in units_cache.items():
-            enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
-            if enemy_player != unit_player:
-                enemy = get_unit_by_id(game_state, enemy_id)
-                if enemy is None:
-                    raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
-                distance = ranged_edge_distance(
-                    _shooter_socle2, _socle_from_entry(cache_entry), _metric2, max_distance=weapon_range
-                )
-                if distance > weapon_range:
-                    continue
-                
-                # Check if target is valid (LoS, melee, etc.)
-                # Create temporary unit with only this weapon for validation
-                # Use dict() constructor to create a proper copy
-                temp_unit = dict(unit)
-                temp_unit["RNG_WEAPONS"] = [weapon]
-                temp_unit["selectedRngWeaponIndex"] = 0
-                
-                try:
-                    if _is_valid_shooting_target(game_state, temp_unit, enemy):
-                        weapon_has_valid_target = True
-                        break
-                except (KeyError, IndexError, AttributeError) as e:
-                    # If validation fails, skip this weapon
-                    can_use = False
-                    reason = f"Validation error: {str(e)}"
-                    break
-        
-        if not weapon_has_valid_target:
-            can_use = False
-            reason = "No valid targets in range or line of sight"
-        
-        available_weapons.append({
-            "index": idx,
-            "weapon": _serialize_weapon_for_json(weapon),
-            "can_use": can_use,
-            "reason": reason
-        })
-    
-    return available_weapons
+# 2026-07-29 — `_get_available_weapons_for_selection` a ete SUPPRIMEE (~160 lignes).
+# Elle etait marquee DEPRECATED dans sa propre docstring (« Use weapon_availability_check()
+# instead ») et n'avait AUCUN appelant : ni appel direct, ni import, ni mention dans une chaine,
+# ni dispatch dynamique (le moteur ne dispatche que par `if name == "<litteral>"`), ni route
+# d'API. Le menu d'armes du PvP est servi par `squad_shoot_menu_weapons` (shared_utils) et par
+# les charges de `squad_shoot_activate` / `squad_select_weapon` — jamais par elle.
+#
+# CE N'ETAIT PAS UNE FONCTIONNALITE JAMAIS BRANCHEE : aucune de ses regles ne lui etait propre.
+# Ses cinq filtres (arme deja tiree `shot == 1`, ASSAULT apres advance, categorie
+# [CLOSE-QUARTERS], portee nulle, portee + LoS) sont TOUS couverts par
+# `weapon_availability_check` (ci-dessus), qui est un sur-ensemble strict : elle y ajoute le
+# verrou de profil COMBI_WEAPON, les deux volets de 10.06 (MONSTER/VEHICLE), la regle [BLAST]
+# sur unite engagee, le blocage par tir ami et le cache de precalcul ennemi.
+#
+# La rebrancher aurait ete une REGRESSION de regles, pas un gain : son melange
+# [CLOSE-QUARTERS] ignorait l'exclusion MONSTER/VEHICLE de 24.07 (SIDEARMS) ; elle testait
+# `"CLOSE_QUARTERS" in weapon["WEAPON_RULES"]` en brut (sensible a la casse, aveugle aux formes
+# parametrees) au lieu de `weapon_has_rule` ; elle portait le 3e repli laxiste
+# `"WEAPON_RULES" in weapon else []` ; et elle convertissait KeyError/IndexError/AttributeError
+# en simple chaine `reason`, masquant des erreurs de validation au lieu de les laisser remonter.
+
 
 def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
