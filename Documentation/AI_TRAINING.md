@@ -88,6 +88,7 @@
 - [Bot Evaluation System](#-bot-evaluation-system)
   - [Bot Types](#bot-types)
   - [Evaluation Commands](#evaluation-commands)
+  - [⚠️ `ai/bot_evaluation.py` est LA boucle d'évaluation de référence](#️-aibot_evaluationpy-est-la-boucle-dévaluation-de-référence)
   - [Win Rate Benchmarks](#win-rate-benchmarks)
 - [Anti-Overfitting Strategies](#️-anti-overfitting-strategies)
   - [The Problem: Pattern Exploitation](#the-problem-pattern-exploitation-vs-robust-tactics)
@@ -1051,6 +1052,44 @@ python ai/train.py --agent <agent_key> --scenario bot --eval --test-episodes 20
   - deadline par tâche (`bot_eval_task_timeout_seconds`),
   - arrêt forcé du pool si timeout détecté,
   - marquage des tâches restantes en timeout (`failed_episodes`).
+
+### ⚠️ `ai/bot_evaluation.py` est LA boucle d'évaluation de référence
+
+**Règle : aucun autre outil ne réécrit une boucle d'évaluation. Il réutilise celle-ci, ou il
+en copie le contenu en l'assumant comme une dette qui divergera.**
+
+Une boucle d'évaluation est une suite de décisions invisibles — quelle observation on sert au
+modèle, d'où vient le masque d'actions, quand on arrête un épisode, comment on lit le
+résultat. Aucune de ces décisions ne lève quand elle est fausse : elle produit un chiffre.
+C'est ce qui rend la copie particulièrement toxique ici — un outil de statistiques qui a
+divergé continue de rendre des taux de victoire d'apparence normale.
+
+Ce n'est pas théorique : `scripts/roster_matchup_stats.py` avait été écrit en copiant cette
+boucle, et **la copie a divergé deux fois**. Au moment où on l'a rouvert (V11 0.47), elle
+servait au modèle un masque de l'ancien layout d'actions pendant que `step` en décodait un
+autre — même longueur, donc aucune erreur, seulement des statistiques fausses — et elle
+aplatissait l'observation devenue un `Dict`, ce qui la faisait lever avant même d'arriver au
+masque. Le normalizer d'observation, lui aussi recopié localement, avait divergé de la même
+façon. Quatre points de divergence au total sur une boucle d'une trentaine de lignes.
+
+Les décisions qui doivent être identiques partout (référence :
+`_eval_worker_task` et `_build_eval_obs_normalizer_for_worker`) :
+
+| Décision | Voie unique | Ce qu'on obtient en divergeant |
+|---|---|---|
+| Observation | obs `Dict` servie telle quelle à `predict` (jamais aplatie) | exception au premier pas, ou tenseurs corrompus |
+| Normalisation | `_build_eval_obs_normalizer_for_worker` (traite `Dict` **et** `Box`) | obs non normalisée ou aplatie |
+| Masque d'actions | `W40KEngine.get_action_mask` (sémantique SQUAD, fait avancer la phase de combat sur masque vide) | actions autorisées qui ne correspondent pas à celles jouées |
+| Plafond de pas | dérivé de `config_loader.get_max_turns` | boucle infinie, ou épisodes coupés arbitrairement |
+| Siège contrôlé | `require_key(info, "controlled_player")` | victoires comptées pour l'adversaire |
+| Épisode tronqué | compté à part (`failed_episodes`), hors du taux de victoire | défaites fabriquées à partir de parties inachevées |
+
+Corollaire : toute correction apportée à cette boucle doit être répercutée dans ses copies
+connues, et inversement. Le défaut `info.get("winner")` — qui comptait en défaite un épisode
+dont le vainqueur manquait — existait dans les deux et a été corrigé dans les deux.
+
+Copies connues à ce jour : `scripts/roster_matchup_stats.py` (`_run_single_episode`), alignée
+et verrouillée par `tests/unit/scripts/test_roster_matchup_eval_loop.py`.
 
 **Eval parameters** (`callback_params`) :
 - fréquence/volume: `bot_eval_freq`, `bot_eval_intermediate`, `bot_eval_final`, `bot_eval_use_episodes`
