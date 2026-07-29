@@ -3,7 +3,7 @@
 ai/replay_converter.py - Steplog to replay conversion functions
 
 Contains:
-- extract_scenario_name_for_replay: Extract scenario name for replay filename
+- resolve_agent_bot_scenario: Resolve the bot scenario a replay must be rebuilt against
 - convert_steplog_to_replay: Convert existing steplog file to replay JSON
 - generate_steplog_and_replay: Generate steplog and replay from training run
 - parse_steplog_file: Parse steplog file into structured data
@@ -18,7 +18,6 @@ import os
 import re
 import json
 from datetime import datetime
-from typing import Dict, List, Any, Optional, cast
 
 from shared.data_validation import require_key
 
@@ -29,7 +28,7 @@ from config_loader import get_config_loader
 from sb3_contrib import MaskablePPO  # CRITICAL: Use MaskablePPO, not PPO - all trained models use action masking
 
 __all__ = [
-    'extract_scenario_name_for_replay',
+    'resolve_agent_bot_scenario',
     'convert_steplog_to_replay',
     'generate_steplog_and_replay',
     'parse_steplog_file',
@@ -38,39 +37,53 @@ __all__ = [
     'convert_to_replay_format'
 ]
 
-def extract_scenario_name_for_replay():
-    """Extract scenario name for replay filename from scenario template name."""
-    # Check if generate_steplog_and_replay stored template name
-    if hasattr(extract_scenario_name_for_replay, '_current_template_name') and cast(Any, extract_scenario_name_for_replay)._current_template_name:
-        return cast(Any, extract_scenario_name_for_replay)._current_template_name
+def resolve_agent_bot_scenario(config, agent_name):
+    """Resolve the bot scenario file a replay must be rebuilt against, for one agent.
 
-    # Check if convert_to_replay_format detected template name
-    if hasattr(convert_to_replay_format, '_detected_template_name') and cast(Any, convert_to_replay_format)._detected_template_name:
-        return cast(Any, convert_to_replay_format)._detected_template_name
-    
-    # Use scenario name from filename if template not available
-    return "scenario"   
+    Le replay reconstruit l'etat initial depuis le scenario : sans lui, il ne connait ni
+    les unites ni leurs positions de depart. Il n'y a donc pas de valeur par defaut
+    possible — l'appelant doit fournir un agent.
+    """
+    if not agent_name:
+        raise ValueError("--agent required: the replay needs the agent's bot scenario to rebuild unit data")
 
-def convert_steplog_to_replay(steplog_path):
-    """Convert existing steplog file to replay JSON format."""
+    from ai.training_utils import get_scenario_list_for_phase
+
+    scenario_list = get_scenario_list_for_phase(config, agent_name, "bot")
+    if not scenario_list:
+        raise RuntimeError(f"No bot scenarios found for agent {agent_name}")
+
+    return scenario_list[0]
+
+def convert_steplog_to_replay(steplog_path, scenario_file):
+    """Convert existing steplog file to replay JSON format.
+
+    Args:
+        steplog_path: steplog file to parse.
+        scenario_file: scenario the steplog was produced on, used to rebuild the initial state.
+    """
     import re
     from datetime import datetime
-    
+
     if not os.path.exists(steplog_path):
         raise FileNotFoundError(f"Steplog file not found: {steplog_path}")
-    
+
     print(f"🔄 Converting steplog: {steplog_path}")
-    
+
     # Parse steplog file
     steplog_data = parse_steplog_file(steplog_path)
-    
+
     # Convert to replay format
-    replay_data = convert_to_replay_format(steplog_data)
-    
-    # Generate output filename with scenario name
-    scenario_name = extract_scenario_name_for_replay()
-    output_file = f"ai/event_log/replay_{scenario_name}.json"
-    
+    replay_data = convert_to_replay_format(steplog_data, scenario_file)
+
+    # Nom de sortie constant. `extract_scenario_name_for_replay()` occupait cette ligne :
+    # elle consultait deux attributs de fonction (`_current_template_name` sur elle-meme,
+    # `_detected_template_name` sur `convert_to_replay_format`) censes porter un nom de
+    # "scenario template". Aucun code de production n'a jamais ecrit ces attributs — seuls
+    # les tests les posaient — donc la fonction retournait toujours "scenario". Les templates
+    # de scenarios ont disparu avec le ScenarioManager ; il n'y a plus rien a lire.
+    output_file = "ai/event_log/replay_scenario.json"
+
     # Ensure output directory exists
     os.makedirs("ai/event_log", exist_ok=True)
     
@@ -134,21 +147,9 @@ def generate_steplog_and_replay(config, args):
         
         # Use actual bot scenarios instead of generating dynamic ones
         # This ensures the scenario matches what the model was trained on
-        from ai.training_utils import get_scenario_list_for_phase
+        bot_scenario_file = resolve_agent_bot_scenario(config, args.agent)
+        print(f"Using bot scenario: {os.path.basename(bot_scenario_file)}")
 
-        agent_name = args.agent
-        scenario_list = get_scenario_list_for_phase(config, agent_name, "bot")
-
-        if not scenario_list:
-            raise RuntimeError(f"No bot scenarios found for agent {agent_name}")
-
-        # Use the first bot scenario
-        temp_scenario_file = scenario_list[0]
-        print(f"Using bot scenario: {os.path.basename(temp_scenario_file)}")
-
-        # Store scenario file path for replay converter
-        cast(Any, convert_to_replay_format)._scenario_file = temp_scenario_file
-        
         # Test-only mode requires agent parameter
         if not args.agent:
             raise ValueError("--agent parameter required for test-only mode")
@@ -162,7 +163,7 @@ def generate_steplog_and_replay(config, args):
             training_config_name=args.training_config,
             controlled_agent=args.agent,  # Required for agent-specific rewards
             active_agents=None,
-            scenario_file=temp_scenario_file,
+            scenario_file=bot_scenario_file,
             unit_registry=unit_registry,
             quiet=True,
             gym_training_mode=True
@@ -195,21 +196,19 @@ def generate_steplog_and_replay(config, args):
         # Step 4: Convert steplog to replay
         print("🔄 Converting steplog to replay format...")
         
-        success = convert_steplog_to_replay(temp_steplog)
-        
+        success = convert_steplog_to_replay(temp_steplog, bot_scenario_file)
+
         # Step 5: Cleanup temporary files
         if os.path.exists(temp_steplog):
             os.remove(temp_steplog)
             print("🧹 Cleaned up temporary steplog file")
-        
-        # Clean up temporary scenario file
-        if 'temp_scenario_file' in locals() and os.path.exists(temp_scenario_file):
-            os.remove(temp_scenario_file)
-        
-        # Clean up template name context
-        if hasattr(extract_scenario_name_for_replay, '_current_template_name'):
-            delattr(extract_scenario_name_for_replay, '_current_template_name')
-        
+
+        # Le scenario n'est PAS supprime ici. Ce bloc effacait autrefois un scenario genere a
+        # la volee ; depuis que la source est `get_scenario_list_for_phase`, le chemin designe
+        # un vrai fichier versionne de config/agents/<agent>/scenarios/training/ — le supprimer
+        # amputait le jeu d'entrainement. Le nettoyage du contexte de template a disparu avec
+        # les attributs de fonction qui le portaient : l'etat passe maintenant par parametre.
+
         # Restore original step logger
         globals()['step_logger'] = original_step_logger
         
@@ -430,16 +429,22 @@ def calculate_episode_reward_from_actions(actions, winner):
     
     return base_reward + efficiency_bonus
 
-def convert_to_replay_format(steplog_data):
-    """Convert parsed steplog data to frontend-compatible replay format."""
+def convert_to_replay_format(steplog_data, scenario_file):
+    """Convert parsed steplog data to frontend-compatible replay format.
+
+    Args:
+        steplog_data: parsed steplog (actions, max_turn, units_positions).
+        scenario_file: scenario the steplog was produced on; source of the initial unit data.
+    """
     from datetime import datetime
     from ai.unit_registry import UnitRegistry
-    
+
     print(f"🔄 Converting to replay format...")
-    
-    # Store agent info for filename generation
-    cast(Any, convert_to_replay_format)._detected_agents = None
-    
+
+    # Un attribut `_detected_agents` etait remis a None ici "pour la generation du nom de
+    # fichier" : il n'a jamais ete relu nulle part, et le nom de fichier ne depend d'aucun
+    # agent. Supprime avec l'etat fantome porte par les attributs de fonction.
+
     actions = steplog_data['actions']
     max_turn = steplog_data['max_turn']
     
@@ -453,11 +458,10 @@ def convert_to_replay_format(steplog_data):
     board_cols, board_rows = config.get_board_size()
     board_size = [board_cols, board_rows]
     
-    # Load scenario for units data - use stored path from generate_steplog_and_replay
-    if hasattr(convert_to_replay_format, '_scenario_file') and cast(Any, convert_to_replay_format)._scenario_file:
-        scenario_file = cast(Any, convert_to_replay_format)._scenario_file
-    else:
-        scenario_file = os.path.join(config.config_dir, "scenario.json")
+    # Le chemin du scenario arrive par parametre. Il transitait avant par un attribut pose sur
+    # cet objet fonction (`convert_to_replay_format._scenario_file`) : jamais remis a zero entre
+    # deux conversions du meme processus, et double d'un repli sur `config/scenario.json`, un
+    # fichier qui n'existe pas dans le depot.
     if not os.path.exists(scenario_file):
         raise FileNotFoundError(f"Scenario file not found: {scenario_file}")
     

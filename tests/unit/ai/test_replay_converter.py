@@ -8,18 +8,11 @@ from ai import replay_converter
 from shared.data_validation import require_present
 
 
-def test_extract_scenario_name_for_replay_prioritizes_stored_template_name(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(replay_converter.extract_scenario_name_for_replay, "_current_template_name", "my-template", raising=False)
-    assert replay_converter.extract_scenario_name_for_replay() == "my-template"
-
-
-def test_extract_scenario_name_for_replay_falls_back_to_detected_and_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    if hasattr(replay_converter.extract_scenario_name_for_replay, "_current_template_name"):
-        delattr(replay_converter.extract_scenario_name_for_replay, "_current_template_name")
-    monkeypatch.setattr(replay_converter.convert_to_replay_format, "_detected_template_name", "detected-template", raising=False)
-    assert replay_converter.extract_scenario_name_for_replay() == "detected-template"
-    setattr(replay_converter.convert_to_replay_format, "_detected_template_name", None)
-    assert replay_converter.extract_scenario_name_for_replay() == "scenario"
+# Les deux tests qui occupaient cette place verrouillaient `extract_scenario_name_for_replay` :
+# ils posaient eux-memes `_current_template_name` / `_detected_template_name` sur les objets
+# fonction, puis verifiaient que la fonction les relisait. Aucun code de production n'ecrivait
+# ces attributs — les tests etaient le seul producteur, donc la seule assurance qu'ils donnaient
+# etait sur eux-memes. Fonction et attributs supprimes ; le nom de sortie est constant.
 
 
 def test_parse_action_message_handles_move_shoot_combat_charge_wait() -> None:
@@ -103,7 +96,6 @@ def test_convert_to_replay_format_builds_initial_state_from_scenario(tmp_path: P
 
     monkeypatch.setattr("ai.unit_registry.UnitRegistry", DummyRegistry)
     monkeypatch.setattr("ai.replay_converter.get_config_loader", lambda: DummyConfig())
-    monkeypatch.setattr(replay_converter.convert_to_replay_format, "_scenario_file", str(scenario_file), raising=False)
 
     steplog_data = {
         "actions": [{"type": "move", "unitId": 1}],
@@ -111,7 +103,7 @@ def test_convert_to_replay_format_builds_initial_state_from_scenario(tmp_path: P
         "units_positions": {1: {"col": 3, "row": 3}, 2: {"col": 2, "row": 1}},
     }
 
-    replay = replay_converter.convert_to_replay_format(steplog_data)
+    replay = replay_converter.convert_to_replay_format(steplog_data, str(scenario_file))
     assert replay["game_info"]["total_turns"] == 3
     assert replay["initial_state"]["board_size"] == [20, 20]
     assert len(replay["initial_state"]["units"]) == 2
@@ -135,15 +127,16 @@ def test_convert_to_replay_format_raises_when_units_positions_missing(monkeypatc
     scenario_file.write_text(json.dumps({"units": []}), encoding="utf-8")
     monkeypatch.setattr("ai.unit_registry.UnitRegistry", DummyRegistry)
     monkeypatch.setattr("ai.replay_converter.get_config_loader", lambda: DummyConfig())
-    monkeypatch.setattr(replay_converter.convert_to_replay_format, "_scenario_file", str(scenario_file), raising=False)
 
     with pytest.raises(ValueError, match=r"No unit position data found"):
-        replay_converter.convert_to_replay_format({"actions": [], "max_turn": 1, "units_positions": {}})
+        replay_converter.convert_to_replay_format(
+            {"actions": [], "max_turn": 1, "units_positions": {}}, str(scenario_file)
+        )
 
 
 def test_convert_steplog_to_replay_raises_when_input_missing(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match=r"Steplog file not found"):
-        replay_converter.convert_steplog_to_replay(str(tmp_path / "missing.log"))
+        replay_converter.convert_steplog_to_replay(str(tmp_path / "missing.log"), str(tmp_path / "s.json"))
 
 
 def test_convert_steplog_to_replay_writes_output_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -153,13 +146,135 @@ def test_convert_steplog_to_replay_writes_output_file(tmp_path: Path, monkeypatc
     monkeypatch.setattr(
         replay_converter,
         "convert_to_replay_format",
-        lambda data: {"combat_log": [], "game_states": [], "game_info": {"total_turns": 1}},
+        lambda data, scenario_file: {"combat_log": [], "game_states": [], "game_info": {"total_turns": 1}},
     )
-    monkeypatch.setattr(replay_converter, "extract_scenario_name_for_replay", lambda: "unit-test")
     monkeypatch.chdir(tmp_path)
-    assert replay_converter.convert_steplog_to_replay(str(steplog)) is True
-    out_file = tmp_path / "ai" / "event_log" / "replay_unit-test.json"
+    assert replay_converter.convert_steplog_to_replay(str(steplog), str(tmp_path / "s.json")) is True
+    out_file = tmp_path / "ai" / "event_log" / "replay_scenario.json"
     assert out_file.exists()
+
+
+def test_two_conversions_in_one_process_each_use_their_own_scenario(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le scenario ne fuit pas d'une conversion a la suivante (ex-attribut de fonction).
+
+    Avant correction, `convert_to_replay_format._scenario_file` etait pose une fois et jamais
+    remis a zero par le bloc de nettoyage : la seconde conversion du meme processus relisait le
+    scenario de la premiere — un chemin par ailleurs efface par ce meme nettoyage.
+    """
+    class DummyRegistry:
+        def get_unit_data(self, unit_type):
+            _ = unit_type
+            return {"HP_MAX": 1, "MOVE": 6}
+
+    class DummyConfig:
+        config_dir = str(tmp_path)
+
+        @staticmethod
+        def get_board_size():
+            return (10, 10)
+
+    monkeypatch.setattr("ai.unit_registry.UnitRegistry", DummyRegistry)
+    monkeypatch.setattr("ai.replay_converter.get_config_loader", lambda: DummyConfig())
+
+    def _write(name: str, unit_id: int) -> Path:
+        path = tmp_path / name
+        path.write_text(
+            json.dumps({"units": [{"id": unit_id, "unit_type": "Intercessor", "player": 1, "col": 1, "row": 1}]}),
+            encoding="utf-8",
+        )
+        return path
+
+    first = _write("scenario_a.json", 11)
+    second = _write("scenario_b.json", 22)
+    steplog_data = {"actions": [], "max_turn": 1, "units_positions": {11: {"col": 1, "row": 1}}}
+
+    replay_a = replay_converter.convert_to_replay_format(steplog_data, str(first))
+    replay_b = replay_converter.convert_to_replay_format(steplog_data, str(second))
+
+    assert [u["id"] for u in replay_a["initial_state"]["units"]] == [11]
+    assert [u["id"] for u in replay_b["initial_state"]["units"]] == [22]
+
+
+def test_generate_steplog_and_replay_keeps_the_bot_scenario_on_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le scenario bot est un fichier versionne : le workflow ne doit jamais l'effacer.
+
+    Le bloc de nettoyage appelait `os.remove` dessus, heritage du temps ou le scenario etait
+    genere a la volee. Depuis `get_scenario_list_for_phase`, le chemin designe un vrai fichier
+    de config/agents/<agent>/scenarios/training/ : le supprimer amputait le jeu d'entrainement.
+    """
+    scenario = tmp_path / "scenario_bot.json"
+    scenario.write_text(json.dumps({"units": []}), encoding="utf-8")
+    model_file = tmp_path / "models" / "CoreAgent" / "model_CoreAgent.zip"
+    model_file.parent.mkdir(parents=True)
+    model_file.write_text("dummy", encoding="utf-8")
+
+    class _Engine:
+        def __init__(self, **kwargs):
+            _ = kwargs
+            self.step_logger = None
+
+        def reset(self):
+            return None, {}
+
+        def step(self, action):
+            _ = action
+            return None, 0.0, True, False, {}
+
+        def close(self):
+            pass
+
+    class _Model:
+        @staticmethod
+        def load(path, env):
+            _ = path, env
+            return _Model()
+
+        def predict(self, obs, deterministic):
+            _ = obs, deterministic
+            return 0, None
+
+    class _Cfg:
+        def load_agent_training_config(self, agent, training_config):
+            _ = agent, training_config
+            return {"step_log_buffer_size": 1}
+
+        def get_models_root(self):
+            return str(tmp_path / "models")
+
+        def get_max_turns(self):
+            return 5
+
+    converted: list = []
+    monkeypatch.setattr(replay_converter, "resolve_agent_bot_scenario", lambda config, agent: str(scenario))
+    monkeypatch.setattr(replay_converter, "setup_imports", lambda: (_Engine, None))
+    monkeypatch.setattr(replay_converter, "MaskablePPO", _Model)
+    monkeypatch.setattr("ai.unit_registry.UnitRegistry", lambda: object())
+    monkeypatch.setattr(
+        replay_converter,
+        "convert_steplog_to_replay",
+        lambda steplog, scenario_file: converted.append(scenario_file) or True,
+    )
+    monkeypatch.chdir(tmp_path)
+
+    args = SimpleNamespace(
+        agent="CoreAgent",
+        training_config="default",
+        rewards_config="CoreAgent",
+        model=None,
+        test_episodes=1,
+    )
+    assert replay_converter.generate_steplog_and_replay(config=_Cfg(), args=args) is True
+    assert converted == [str(scenario)]
+    assert scenario.exists(), "le scenario bot versionne a ete efface par le nettoyage"
+
+
+def test_resolve_agent_bot_scenario_requires_an_agent() -> None:
+    with pytest.raises(ValueError, match=r"--agent required"):
+        replay_converter.resolve_agent_bot_scenario(SimpleNamespace(), None)
 
 
 def test_generate_steplog_and_replay_returns_false_without_agent() -> None:

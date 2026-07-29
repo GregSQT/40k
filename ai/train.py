@@ -1391,7 +1391,7 @@ def _apply_param_overrides(config: dict, overrides: Optional[List[List[str]]], l
 
 # Replay converter (extracted to ai/replay_converter.py)
 from ai.replay_converter import (
-    extract_scenario_name_for_replay,
+    resolve_agent_bot_scenario,
     convert_steplog_to_replay,
     generate_steplog_and_replay,
     parse_steplog_file,
@@ -4638,7 +4638,14 @@ def main():
         
         # Convert existing steplog mode
         if args.convert_steplog:
-            success = convert_steplog_to_replay(args.convert_steplog)
+            # Le scenario est resolu depuis --agent, comme pour --replay. Il transitait avant par
+            # un attribut de fonction que ce chemin ne posait jamais, donc il retombait sur
+            # `config/scenario.json` : un fichier absent du depot, et donc un FileNotFoundError
+            # systematique. --agent est desormais requis, et l'erreur le dit.
+            success = convert_steplog_to_replay(
+                args.convert_steplog,
+                resolve_agent_bot_scenario(config, args.agent),
+            )
             return 0 if success else 1
 
         # Generate steplog AND convert to replay (one-shot mode)
