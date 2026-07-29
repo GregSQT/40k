@@ -45,8 +45,7 @@ qui rend le projet de l'utilisateur faisable.
 
 | Fichier | Ligne | Fonction | Métrique | Usage |
 |---------|-------|----------|----------|-------|
-| engine/combat_utils.py | 115-140 | `is_hex_adjacent_to_enemy()` | Adjacence (set pré-calculé) | Vérif contact ennemi |
-| engine/combat_utils.py | 142-183 | `get_hex_neighbors()` | 6 voisins odd-q | Voisins directs |
+| engine/combat_utils.py | 118-159 | `get_hex_neighbors()` | 6 voisins odd-q | Voisins directs |
 | engine/hex_utils.py | 40-47 / 49-60 | `get_neighbors()` / `get_neighbors_bounded()` | 6 voisins odd-q | Voisins (bornés ou non) |
 | engine/phase_handlers/generic_handlers.py | 431-445 | `_is_adjacent_to_enemy_for_fight()` | Adjacence + footprint | Éligibilité combat |
 | engine/phase_handlers/shared_utils.py | 1307-1440 | `build_enemy_adjacent_hexes()` & co. | Voisins d'empreintes ennemies | Cache adjacence engagement |

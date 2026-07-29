@@ -1092,73 +1092,6 @@ def _update_occupation_map(
             occ_map[cell] = unit_id
 
 
-def update_units_cache_unit(
-    game_state: Dict[str, Any],
-    unit_id: str,
-    col: int,
-    row: int,
-    hp_cur: int,
-    player: int
-) -> None:
-    """
-    Update or insert a unit entry in units_cache.
-    
-    If hp_cur <= 0, removes the entry (unit dead; single source of truth).
-    Coordinates are normalized before storage.
-    
-    Args:
-        game_state: Game state with "units_cache"
-        unit_id: Unit ID (str)
-        col: Column coordinate
-        row: Row coordinate
-        hp_cur: Current HP (0 for dead)
-        player: Player number (1 or 2)
-        
-    Returns:
-        None (updates game_state["units_cache"])
-    """
-    if "units_cache" not in game_state:
-        raise KeyError("units_cache must exist before updating (call build_units_cache at reset)")
-    
-    # Normalize coordinates
-    norm_col, norm_row = normalize_coordinates(col, row)
-    effective_hp = max(0, int(hp_cur))
-    
-    # Update or insert (if hp_cur <= 0, remove instead)
-    if effective_hp <= 0:
-        remove_from_units_cache(game_state, unit_id)
-        return
-    
-    old_entry = game_state["units_cache"].get(unit_id)
-    if old_entry is None:
-        raise KeyError(f"Unit {unit_id} not found in units_cache — cannot update HP for unknown unit")
-    base_shape = old_entry["BASE_SHAPE"]
-    base_size = old_entry["BASE_SIZE"]
-    if old_entry and "orientation" in old_entry:
-        orient_val = int(require_key(old_entry, "orientation"))
-    else:
-        orient_val = 0
-    unit_stub = {
-        "BASE_SHAPE": base_shape,
-        "BASE_SIZE": base_size,
-        "orientation": orient_val,
-    }
-    new_occupied = _compute_unit_occupied_hexes(norm_col, norm_row, unit_stub, game_state)
-    
-    _update_occupation_map(game_state, unit_id, old_entry, new_occupied)
-    
-    game_state["units_cache"][unit_id] = {
-        "col": norm_col,
-        "row": norm_row,
-        "HP_CUR": effective_hp,
-        "player": player,
-        "BASE_SHAPE": base_shape,
-        "BASE_SIZE": base_size,
-        "orientation": orient_val,
-        "occupied_hexes": new_occupied,
-    }
-
-
 def _remove_unit_from_all_activation_pools(game_state: Dict[str, Any], unit_id_str: str) -> None:
     """
     Remove a unit from all activation pools (move, shoot, charge, fight).
@@ -1469,28 +1402,31 @@ def update_units_cache_position(game_state: Dict[str, Any], unit_id: str, col: i
     
     Convenience function for use after set_unit_coordinates.
     Retrieves HP_CUR and player from existing entry.
-    
+
+    Les coordonnees sont prises TELLES QUELLES : tous les appelants (moteur de mouvement,
+    resync d'ancre d'escouade, previews de tir) fournissent deja des `int`, et l'entree du
+    cache est lue plus loin comme un `int`. Normaliser ici rendrait le cache tolerant a des
+    coordonnees mal typees au lieu de les faire echouer chez l'appelant qui les fabrique.
+
     Args:
         game_state: Game state with "units_cache"
-        unit_id: Unit ID (str)
+        unit_id: Unit ID (str) — cle exacte de units_cache, aucune conversion
         col: New column coordinate
         row: New row coordinate
-        
+
     Returns:
         None (updates game_state["units_cache"])
     """
     if "units_cache" not in game_state:
         raise KeyError("units_cache must exist (call build_units_cache at reset)")
-    
+
     entry = game_state["units_cache"].get(unit_id)
     if entry is None:
         return
-    
+
     old_col = entry.get("col")
     old_row = entry.get("row")
 
-    norm_col, norm_row = normalize_coordinates(col, row)
-    
     if "orientation" in entry:
         orient_val = int(require_key(entry, "orientation"))
     else:
@@ -1500,11 +1436,11 @@ def update_units_cache_position(game_state: Dict[str, Any], unit_id: str, col: i
         "BASE_SIZE": entry["BASE_SIZE"],
         "orientation": orient_val,
     }
-    new_occupied = _compute_unit_occupied_hexes(norm_col, norm_row, unit_stub, game_state)
+    new_occupied = _compute_unit_occupied_hexes(col, row, unit_stub, game_state)
     _update_occupation_map(game_state, unit_id, entry, new_occupied)
 
-    entry["col"] = norm_col
-    entry["row"] = norm_row
+    entry["col"] = col
+    entry["row"] = row
     entry["occupied_hexes"] = new_occupied
 
     # Mono-figurine : la fig unique EST à l'ancre → resync sa position (occupied_hexes_by_model
@@ -1518,11 +1454,11 @@ def update_units_cache_position(game_state: Dict[str, Any], unit_id: str, col: i
         model_ids = squad_models.get(unit_id)
         if isinstance(model_ids, (list, tuple)) and len(model_ids) == 1:
             mid = model_ids[0]
-            entry["occupied_hexes_by_model"] = {mid: (norm_col, norm_row)}
+            entry["occupied_hexes_by_model"] = {mid: (col, row)}
             models_cache = game_state.get("models_cache")
             if isinstance(models_cache, dict) and mid in models_cache:
-                models_cache[mid]["col"] = norm_col
-                models_cache[mid]["row"] = norm_row
+                models_cache[mid]["col"] = col
+                models_cache[mid]["row"] = row
 
     if game_state.get("debug_mode", False):
         episode = game_state.get("episode_number", "?")
@@ -1533,7 +1469,7 @@ def update_units_cache_position(game_state: Dict[str, Any], unit_id: str, col: i
         add_debug_file_log(
             game_state,
             f"[UNITS_CACHE POSITION_UPDATE] E{episode} T{turn} {phase} unit_id={unit_id} "
-            f"old=({old_col},{old_row}) new=({norm_col},{norm_row}) caller={caller}"
+            f"old=({old_col},{old_row}) new=({col},{row}) caller={caller}"
         )
 
     # Choke-point LoS (a′) : toute écriture d'ancre invalide les caches LoS de l'unité.

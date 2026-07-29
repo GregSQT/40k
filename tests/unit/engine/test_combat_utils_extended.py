@@ -1,5 +1,3 @@
-from typing import cast
-
 import pytest
 
 from engine.combat_utils import (
@@ -9,7 +7,6 @@ from engine.combat_utils import (
     expected_dice_value,
     get_hex_neighbors,
     get_unit_by_id,
-    is_hex_adjacent_to_enemy,
     normalize_coordinate,
     normalize_coordinates,
     resolve_dice_value,
@@ -46,12 +43,6 @@ def test_get_unit_by_id_requires_index_and_looks_up_by_str_id() -> None:
     assert get_unit_by_id(game_state, "13") is None
     with pytest.raises(Exception):
         get_unit_by_id({}, "12")
-
-
-def test_is_hex_adjacent_to_enemy_normalizes_and_checks_membership() -> None:
-    enemy_adjacent_hexes = {(3, 4)}
-    assert is_hex_adjacent_to_enemy(cast(int, "3.0"), cast(int, 4.0), 1, enemy_adjacent_hexes) is True
-    assert is_hex_adjacent_to_enemy(1, 1, 1, enemy_adjacent_hexes) is False
 
 
 def test_get_hex_neighbors_even_and_odd_columns() -> None:

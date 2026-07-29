@@ -1,4 +1,4 @@
-from typing import Any, Dict, cast
+from typing import Any, Dict
 
 import pytest
 
@@ -7,7 +7,6 @@ from engine.phase_handlers.shared_utils import (
     get_unit_position,
     require_unit_position,
     update_units_cache_position,
-    update_units_cache_unit,
 )
 
 
@@ -93,7 +92,7 @@ def test_require_unit_position_raises_when_unit_absent_from_cache() -> None:
         require_unit_position("missing", game_state)
 
 
-def test_update_units_cache_position_updates_existing_entry_with_normalization() -> None:
+def test_update_units_cache_position_updates_existing_entry() -> None:
     game_state = {
         "units_cache": {
             "u1": {"col": 1, "row": 2, "HP_CUR": 3, "player": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5},
@@ -105,10 +104,11 @@ def test_update_units_cache_position_updates_existing_entry_with_normalization()
         "_unit_move_version": 0,
     }
 
-    update_units_cache_position(game_state, "u1", cast(int, "6.0"), cast(int, 8.0))
+    update_units_cache_position(game_state, "u1", 6, 8)
 
     assert game_state["units_cache"]["u1"]["col"] == 6
     assert game_state["units_cache"]["u1"]["row"] == 8
+    assert game_state["units_cache"]["u1"]["occupied_hexes"] == {(6, 8)}
     assert game_state["units_cache"]["u1"]["HP_CUR"] == 3
     assert game_state["units_cache"]["u1"]["player"] == 1
 
@@ -121,28 +121,8 @@ def test_update_units_cache_position_is_noop_when_unit_absent() -> None:
     assert game_state["units_cache"] == {}
 
 
-def test_update_units_cache_unit_updates_existing_entry() -> None:
-    game_state = {"units_cache": {
-        "u9": {"col": 1, "row": 1, "HP_CUR": 10, "player": 2, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5},
-    }, "config": {
-        "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
-        "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
-    }}
-
-    update_units_cache_unit(game_state, "u9", cast(int, "2"), cast(int, "3.0"), 4, 2)
-
-    entry = game_state["units_cache"]["u9"]
-    assert entry["col"] == 2
-    assert entry["row"] == 3
-    assert entry["HP_CUR"] == 4
-    assert entry["player"] == 2
-    assert entry["BASE_SHAPE"] == "round"
-    assert entry["BASE_SIZE"] == 1
-    assert entry["occupied_hexes"] == {(2, 3)}
-
-
-def test_update_units_cache_unit_raises_when_cache_missing() -> None:
+def test_update_units_cache_position_raises_when_cache_missing() -> None:
     game_state = {}
 
-    with pytest.raises(KeyError, match=r"units_cache must exist before updating"):
-        update_units_cache_unit(game_state, "u1", 1, 1, 1, 1)
+    with pytest.raises(KeyError, match=r"units_cache must exist"):
+        update_units_cache_position(game_state, "u1", 1, 1)
