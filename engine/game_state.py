@@ -2568,7 +2568,11 @@ class GameStateManager:
             obj_id = objective["id"]
             obj_id_key = str(obj_id)
 
-            # Rule 14.02: sum OC of all models whose footprint centre is within the area.
+            # Rule 14.02 : somme des OC des figurines dont l'empreinte de socle RECOUVRE la
+            # zone (un hexe commun suffit — ce n'est PAS un test sur le centre du socle),
+            # figurines mortes exclues. Les unites battle-shocked n'y contribuent rien :
+            # 01.07 met l'OC de toutes leurs figurines a '-' (02.02). Detail dans
+            # ``sum_objective_control_oc``, seule implementation.
             player_1_oc, player_2_oc = oc_sums[obj_index]
 
             # Get current controller from persistent state; explicit init when first seeing this objective
@@ -2736,7 +2740,11 @@ class GameStateManager:
             obj_id_key = str(obj_id)
             obj_hexes = require_key(objective, "hexes")
             hex_set = {normalize_coordinates(h[0], h[1]) for h in obj_hexes}
-            # Rule 14.02: sum OC of all models whose footprint centre is within the area.
+            # Rule 14.02 : somme des OC des figurines dont l'empreinte de socle RECOUVRE la
+            # zone (un hexe commun suffit — ce n'est PAS un test sur le centre du socle),
+            # figurines mortes exclues. Les unites battle-shocked n'y contribuent rien :
+            # 01.07 met l'OC de toutes leurs figurines a '-' (02.02). Detail dans
+            # ``sum_objective_control_oc``, seule implementation.
             player_1_oc, player_2_oc = self._sum_objective_control_oc(game_state, hex_set)
 
             if obj_id_key not in objective_controllers:
@@ -2968,14 +2976,18 @@ def sum_objective_control_oc(
 
     Une figurine compte des qu UNE case de son empreinte de socle recouvre ``hex_set`` ; elle
     apporte alors la caracteristique OC de son unite (l OC est par figurine). Les figurines
-    mortes (absentes de models_cache) et les unites a OC 0 sont ignorees.
+    mortes (absentes de models_cache), les unites a OC 0 et les unites battle-shocked
+    (01.07 : OC de toutes leurs figurines modifie a '-') sont ignorees.
 
-    Fonction module-level : SOURCE UNIQUE partagee par le controle d objectif du moteur
-    (``StateManager._sum_objective_control_oc`` / ``calculate_objective_control``) et par
-    l observation de l agent (V11 §9.2), qui comparait auparavant la seule ANCRE de chaque
-    unite au hex_set — une regle differente de celle du moteur. Lecture pure : aucun etat
-    n est mute (contrairement a ``calculate_objective_control``, qui met a jour
-    ``objective_controllers``), donc appelable depuis la construction d une observation.
+    Fonction module-level : SOURCE UNIQUE du controle d objectif du moteur
+    (``StateManager._sum_objective_control_oc`` / ``calculate_objective_control``).
+    L observation de l agent ne l appelle PAS : ``ObservationBuilder._squad_objective_control``
+    relit ``objective_controllers``, l etat persistant qu ecrit ``calculate_objective_control``
+    (14.02 : le controle est fige a la fin de chaque phase et de chaque tour, pas recalcule en
+    continu). La source reste donc unique, par lecture d etat et non par appel partage.
+
+    Lecture pure : aucun etat n est mute (contrairement a ``calculate_objective_control``, qui
+    met a jour ``objective_controllers``).
     """
     return sum_objective_control_oc_multi(game_state, [hex_set])[0]
 
@@ -3007,6 +3019,13 @@ def sum_objective_control_oc_multi(
         unit = unit_by_id.get(str(unit_id))
         if not unit:
             raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+        # Regle 01.07 : tant qu une unite est battle-shocked, la caracteristique OC de TOUTES
+        # ses figurines est modifiee a '-' (02.02) — « unable to control objectives at all ».
+        # Le drapeau est porte par l unite (roll_battle_shock, etape 08.03), donc l escouade
+        # entiere n apporte AUCUN controle (14.02). Cle exigee : elle est posee a la
+        # construction de chaque unite ; son absence est un etat corrompu, pas un defaut.
+        if bool(require_key(unit, "battle_shocked")):
+            continue
         oc = require_key(unit, "OC")
         if oc <= 0:
             continue

@@ -3058,6 +3058,10 @@ def _build_units_from_army_config(
                     "UNIT_KEYWORDS": copy.deepcopy(require_key(unit_data, "UNIT_KEYWORDS")),
                     "SHOOT_LEFT": shoot_left,
                     "ATTACK_LEFT": attack_left,
+                    # Battle-shock state (regle 01.07) — meme contrat que create_unit /
+                    # _build_enhanced_unit : le champ existe des la construction (le controle
+                    # d objectif 14.02 le lit sans defaut).
+                    "battle_shocked": False,
                 }
             )
     return built_units, next_unit_id

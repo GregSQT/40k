@@ -1186,6 +1186,13 @@ class RewardCalculator:
         unit = get_unit_by_id(str(result.get("unitId", "")), game_state)
         if not unit or int(require_key(unit, "player")) != controlled_player:
             return 0.0
+        # Regle 01.07 : une unite battle-shocked a l OC de toutes ses figurines modifie a '-'
+        # (02.02) — elle ne peut PAS prendre l objectif sur lequel elle se pose (14.02, cf.
+        # sum_objective_control_oc_multi). Ce bonus paie la PROGRESSION vers un controle ;
+        # le verser ici apprendrait a l agent qu occuper une zone avec une escouade sous le
+        # choc rapporte, alors que le decompte moteur l ignore entierement.
+        if bool(require_key(unit, "battle_shocked")):
+            return 0.0
         to_col = result.get("toCol")
         to_row = result.get("toRow")
         if to_col is None or to_row is None:
