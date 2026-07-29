@@ -746,6 +746,8 @@ cette refonte à tomber dans ce piège (terrain T1, cartes T3, jets T3).
   s'applique plus).
 - `ai/training_callbacks.py` : le q-value tracking (mort pour MaskablePPO, gardé par `hasattr q_net`)
   ne touche plus `.shape` d'un espace Dict.
+  **Périmé** : ce tracking a depuis été supprimé, précisément parce qu'il était mort. Voir la trace
+  laissée dans `ai/training_callbacks.py` à la place des deux blocs `q_net`.
 - `config/.../CoreAgent_training_config.json` : `policy` `MlpPolicy` → `MultiInputPolicy`,
   `n_steps` 16384 → **8192** sur les **5 profils** (§8.3, RAM du rollout buffer).
 

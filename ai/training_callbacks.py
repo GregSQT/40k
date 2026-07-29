@@ -32,17 +32,14 @@ from shared.data_validation import require_key, require_present
 from ai.vec_normalize_utils import get_vec_normalize_path
 from config_loader import get_config_loader
 
-# Import evaluation bots for testing - flag used by print_final_training_summary
-try:
-    from ai.evaluation_bots import (
-        RandomBot, GreedyBot, DefensiveBot, ControlBot,
-        AggressiveSmartBot, DefensiveSmartBot, AdaptiveBot,
-    )
-    EVALUATION_BOTS_AVAILABLE = True
-except ImportError:
-    EVALUATION_BOTS_AVAILABLE = False
-    RandomBot = GreedyBot = DefensiveBot = ControlBot = None
-    AggressiveSmartBot = DefensiveSmartBot = AdaptiveBot = None
+# Les sept classes de bots d'evaluation etaient importees ici sous try/except ImportError, avec
+# un drapeau EVALUATION_BOTS_AVAILABLE qui gardait trois blocs. Cette protection n'avait pas de
+# raison d'etre : ai/evaluation_bots.py est dans le depot, ce n'est pas une dependance optionnelle,
+# et il n'y a pas de cycle d'import a eviter (il ne tire que engine/* et shared/*, et engine
+# n'importe ai que paresseusement, jamais ai.training_callbacks ni ai.evaluation_bots). Le drapeau
+# valait donc toujours True, et les gardes etaient du code mort deguise en robustesse.
+# Aucune des sept classes n'est plus referencee ici : les adversaires d'evaluation sont instancies
+# par ai/bot_evaluation.evaluate_against_bots, importe la ou il sert.
 
 # V11 §10.5 : adversaires RESERVES a l'evaluation, jamais rencontres a l'entrainement.
 # Ils sont mesures et affiches, mais exclus de TOUT signal de selection de modele
@@ -588,7 +585,6 @@ class EpisodeBasedEvalCallback(BaseCallback):
         self.best_mean_reward = -float('inf')
         self.win_rate_history = []
         self.loss_history = []
-        self.q_value_history = []
         self.gradient_norm_history = []
         self.max_history = 20  # Keep last 20 evaluations for smoothing
         self.max_loss_history = 100  # Keep more loss values for better smoothing
@@ -609,24 +605,12 @@ class EpisodeBasedEvalCallback(BaseCallback):
                     loss_mean = sum(self.loss_history) / len(self.loss_history)
                     self.model.logger.record("train/loss_mean", loss_mean)
             
-            # Track Q-values if available
-            if hasattr(self.model, 'q_net') and hasattr(self, 'locals') and 'obs' in self.locals:
-                try:
-                    import torch
-                    obs_tensor = torch.FloatTensor(self.locals['obs']).to(self.model.device)
-                    with torch.no_grad():
-                        q_values = cast(Any, self.model).q_net(obs_tensor)
-                        mean_q_value = q_values.mean().item()
-                        self.q_value_history.append(mean_q_value)
-                        if len(self.q_value_history) > self.max_loss_history:
-                            self.q_value_history.pop(0)
-                        
-                        if len(self.q_value_history) > 5:
-                            q_value_mean = sum(self.q_value_history) / len(self.q_value_history)
-                            self.model.logger.record("train/q_value_mean", q_value_mean)
-                except Exception:
-                    pass  # Q-value tracking is optional
-            
+            # Le suivi des Q-values (metrique train/q_value_mean) occupait cette place. Il etait
+            # garde par `hasattr(self.model, 'q_net')` : seul un algorithme value-based (DQN) a
+            # un q_net. Le projet n'instancie que MaskablePPO, un actor-critic — la branche
+            # n'etait jamais entree et la courbe n'a jamais rien recu. Rien d'autre ne lisait
+            # self.q_value_history, supprime avec.
+
             # Track gradient norm if available
             if hasattr(self.model, 'policy') and hasattr(self.model.policy, 'parameters'):
                 try:
@@ -822,9 +806,6 @@ class MetricsCollectionCallback(BaseCallback):
         self.immediate_reward_ratio_history = []
         self.max_reward_ratio_history = 50  # Keep last 50 episodes
         
-        # Q-value tracking with history
-        self.q_value_history = []
-        self.max_q_value_history = 100  # Keep last 100 Q-value samples
         self.episode_observation_phase_data = {
             'shoot': {
                 'best_kill_probability': [],
@@ -931,7 +912,7 @@ class MetricsCollectionCallback(BaseCallback):
     def print_final_training_summary(self, model=None, training_config=None, training_config_name=None, rewards_config_name=None):
         """Print comprehensive training summary with final bot evaluation"""
         
-        if EVALUATION_BOTS_AVAILABLE and model and training_config and training_config_name and rewards_config_name:
+        if model and training_config and training_config_name and rewards_config_name:
             # Extract n_episodes from config
             if 'callback_params' not in training_config:
                 raise KeyError("training_config missing required 'callback_params' field")
@@ -1164,43 +1145,13 @@ class MetricsCollectionCallback(BaseCallback):
                 self.episode_reward_components['penalties'] += require_key(reward_breakdown, 'penalties')
                 if 'position_score' in reward_breakdown and self.metrics_tracker:
                     self.metrics_tracker.log_position_score(reward_breakdown['position_score'])
-        
-        # Simple Q-value tracking every 100 steps
-        if self.model.num_timesteps % 100 == 0 and hasattr(self.model, 'q_net'):
-            try:
-                # Use a simple dummy observation if locals not available
-                if hasattr(self, 'locals') and 'obs' in self.locals:
-                    obs_tensor = torch.FloatTensor(self.locals['obs']).to(self.model.device)
-                else:
-                    # Create dummy observation matching env observation space.
-                    # Obs Dict (pipeline squad spatial, T1b) : pas de q_net (MaskablePPO est
-                    # actor-critic, ce bloc est garde par hasattr q_net) -> on n'y entre pas ;
-                    # on evite malgre tout le .shape d'un espace Dict (qui vaut None).
-                    obs_space = self.model.observation_space
-                    if isinstance(obs_space, gym.spaces.Dict):
-                        raise RuntimeError("q_value tracking indisponible sur obs Dict")
-                    dummy_obs = torch.zeros((1, require_present(obs_space.shape, "observation_space.shape")[0])).to(self.model.device)
-                    obs_tensor = dummy_obs
-                
-                with torch.no_grad():
-                    q_values = cast(Any, self.model).q_net(obs_tensor)
-                    mean_q_value = q_values.mean().item()
-                    
-                    # Track history
-                    self.q_value_history.append(mean_q_value)
-                    if len(self.q_value_history) > self.max_q_value_history:
-                        self.q_value_history.pop(0)
-                    
-                    # Calculate smoothed mean
-                    q_value_mean = sum(self.q_value_history) / len(self.q_value_history)
-                    
-                    # Log single metrics
-                    if hasattr(self.model, 'logger') and self.model.logger:
-                        self.model.logger.record('train/q_value_mean_smooth', q_value_mean)
-                        self.model.logger.dump(step=self.model.num_timesteps)
-            except Exception as e:
-                pass  # Q-value tracking is optional
-        
+
+        # Le suivi periodique des Q-values (train/q_value_mean_smooth, toutes les 100 etapes)
+        # occupait cette place. Meme raison que le bloc equivalent de EpisodeBasedEvalCallback :
+        # il etait garde par `hasattr(self.model, 'q_net')`, et seul MaskablePPO est instancie
+        # dans ce projet — un actor-critic, sans q_net. Le commentaire qui l'accompagnait
+        # l'admettait deja. self.q_value_history / max_q_value_history partent avec lui.
+
         # Log training step data
         step_data = {}
         if hasattr(self.model, 'learning_rate'):
@@ -1214,9 +1165,12 @@ class MetricsCollectionCallback(BaseCallback):
         if hasattr(self.model, 'logger') and hasattr(self.model.logger, 'name_to_value'):
             if 'train/loss' in self.model.logger.name_to_value:
                 step_data['loss'] = self.model.logger.name_to_value['train/loss']
-        if hasattr(self.model, 'exploration_rate'):
-            step_data['exploration_rate'] = cast(Any, self.model).exploration_rate
-        
+        # `if hasattr(self.model, 'exploration_rate'): step_data['exploration_rate'] = ...`
+        # occupait cette place. exploration_rate est l'epsilon d'une politique epsilon-greedy
+        # (DQN) : MaskablePPO explore par l'entropie de sa politique, il n'a pas cet attribut.
+        # La cle n'etait donc jamais posee, et la courbe training_diagnostic/exploration_rate
+        # cote metrics_tracker n'a jamais rien recu.
+
         if step_data:
             cast(Any, self.metrics_tracker).log_training_step(step_data)
         
@@ -1702,15 +1656,11 @@ class BotEvaluationCallback(BaseCallback):
             "curriculum_phase_width"
         )
 
-        if EVALUATION_BOTS_AVAILABLE:
-            # Initialize bots with stochasticity to prevent overfitting (15% random actions)
-            self.bots = {
-                'random': cast(Any, RandomBot)(),
-                'greedy': cast(Any, GreedyBot)(randomness=0.15),
-                'defensive': cast(Any, DefensiveBot)(randomness=0.15)
-            }
-        else:
-            self.bots = {}
+        # Un dictionnaire self.bots (random / greedy / defensive, instancies avec 15% d'actions
+        # aleatoires) etait construit ici. Personne ne le relisait : l'evaluation instancie ses
+        # propres adversaires dans ai/bot_evaluation.evaluate_against_bots, appele par
+        # _evaluate_against_bots. Trois casts servaient a contourner le fait que les classes
+        # etaient declarees Optional par l'import protege ci-dessus, lui aussi supprime.
 
     def _update_learning_status_display(self, circle: str) -> None:
         """Update consecutive status streak shown in progress bar."""
@@ -2314,9 +2264,6 @@ class BotEvaluationCallback(BaseCallback):
         )
 
     def _on_step(self) -> bool:
-        if not EVALUATION_BOTS_AVAILABLE:
-            return True
-
         # Determine if we should evaluate based on mode
         should_evaluate = False
         eval_marker = self.num_timesteps
