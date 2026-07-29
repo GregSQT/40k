@@ -1,36 +1,56 @@
 from collections import deque
-from typing import cast
+from typing import Any, Dict, List, Tuple, cast
 
 import pytest
-from torch.utils.tensorboard.writer import SummaryWriter
 
 import ai.metrics_tracker as mt
 from ai.metrics_tracker import TrainingMonitor, W40KMetricsTracker, create_metrics_tracker
 
 
 class _DummyWriter:
-    def __init__(self):
-        self.scalars = []
+    """Doublure du writer TensorBoard, TYPEE : c'est ce qui rend le controle portant.
+
+    Une doublure aux parametres implicitement `Any` satisferait n'importe quel protocole —
+    le vert serait vacant. Ici l'affectation `t.writer = _DummyWriter()` est verifiee contre
+    `MetricsWriter` (ai/metrics_tracker.py), donc toute derive du contrat echoue.
+    `add_custom_scalars` est declare bien qu'aucun test de ce fichier ne l'appelle : il fait
+    partie des quatre methodes du contrat, l'omettre rendrait la doublure non conforme.
+    """
+
+    def __init__(self) -> None:
+        self.scalars: List[Tuple[str, float, int]] = []
+        self.custom_layouts: List[Dict[str, Any]] = []
         self.flushed = 0
         self.closed = 0
 
-    def add_scalar(self, key, value, step):
+    def add_scalar(self, key: str, value: float, step: int, /) -> None:
         self.scalars.append((key, value, step))
 
-    def flush(self):
+    def add_custom_scalars(self, layout: Dict[str, Any], /) -> None:
+        self.custom_layouts.append(layout)
+
+    def flush(self) -> None:
         self.flushed += 1
 
-    def close(self):
+    def close(self) -> None:
         self.closed += 1
 
 
 def _dw(t: W40KMetricsTracker) -> _DummyWriter:
-    return cast(_DummyWriter, t.writer)
+    """Relit la doublure posee par `_tracker_stub`.
+
+    `assert isinstance` et non `cast` : le cast affirmait sans verifier, dans le sens retour
+    d'un aller-retour qui trahissait l'absence de type. Ici le retrecissement est REEL, donc
+    un stub qui poserait un autre writer echouerait au lieu de passer silencieusement.
+    """
+    writer = t.writer
+    assert isinstance(writer, _DummyWriter)
+    return writer
 
 
 def _tracker_stub() -> W40KMetricsTracker:
     t = W40KMetricsTracker.__new__(W40KMetricsTracker)
-    t.writer = cast(SummaryWriter, _DummyWriter())
+    t.writer = _DummyWriter()
     t.episode_count = 12
     t.step_count = 0
     t.win_rate_window = deque([1.0] * 12, maxlen=100)
