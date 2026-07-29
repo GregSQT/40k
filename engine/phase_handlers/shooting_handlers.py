@@ -17,6 +17,7 @@ from engine.combat_utils import (
     set_unit_coordinates,
 )
 from shared.data_validation import require_key, require_present
+from engine.utils.weapon_helpers import weapon_has_rule
 from engine.action_log_utils import append_action_log
 from .shared_utils import (
     calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge,
@@ -183,49 +184,25 @@ def _serialize_weapon_for_json(weapon: Dict[str, Any]) -> Dict[str, Any]:
     return serialized
 
 
-# 2026-07-29 — les deux helpers ci-dessous GARDENT leur branche `hasattr(rule, 'rule')`, alors
-# qu'elle est prouvee inatteignable comme les autres (aucun `ParsedWeaponRule` ne peut plus
-# exister hors du parseur d'armurerie). RAISON DE LES GARDER, et c'est une raison de sursis, pas
-# d'approbation : contrairement a `weapon_has_rule` / `_rule_entries`, ces deux fonctions n'ont
-# AUCUN `else: raise` — une entree inattendue y est silencieusement ignoree et renvoie False.
-# Retirer la branche seule y transformerait donc une branche morte en FAUX SILENCIEUX, sur le
-# chemin chaud du tir (~20 appelants dans shooting_handlers + shared_utils).
+# 2026-07-29 — `_weapon_has_assault_rule` et `_weapon_has_close_quarters_rule` ont ete
+# SUPPRIMEES. C'etaient des DOUBLONS laxistes de
+# `engine/utils/weapon_helpers.weapon_has_rule(weapon, "ASSAULT" | "CLOSE_QUARTERS")`, dont elles
+# s'ecartaient par deux replis muets : `if not weapon: return False` et
+# `weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []`. Une arme depourvue de la cle y
+# devenait « n'a pas la regle » au lieu de lever — exactement le repli anti-erreur interdit ici.
 #
-# Le vrai defaut est ailleurs : ces deux fonctions sont des DOUBLONS laxistes de
-# `engine/utils/weapon_helpers.weapon_has_rule(weapon, "ASSAULT" | "CLOSE_QUARTERS")`. Elles s'en
-# ecartent par deux replis muets — `if not weapon: return False` et `"WEAPON_RULES" in weapon
-# else []` — la ou `weapon_has_rule` exige la cle (require_key) et leve. La correction propre est
-# de les supprimer et de deleguer ; c'est un changement de COMPORTEMENT sur le chemin du tir
-# (erreur explicite la ou l'on renvoyait False), donc un arbitrage, pas un nettoyage.
-# Ne pas retirer la branche objet sans traiter les replis muets dans le meme mouvement.
-def _weapon_has_assault_rule(weapon: Dict[str, Any]) -> bool:
-    """Check if weapon has ASSAULT rule allowing shooting after advance."""
-    if not weapon:
-        return False
-    rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
-    # Handle both ParsedWeaponRule objects and strings
-    for rule in rules:
-        if hasattr(rule, 'rule'):  # ParsedWeaponRule object
-            if rule.rule == "ASSAULT":
-                return True
-        elif rule == "ASSAULT":  # String
-            return True
-    return False
-
-
-def _weapon_has_close_quarters_rule(weapon: Dict[str, Any]) -> bool:
-    """Check if weapon has CLOSE_QUARTERS rule."""
-    if not weapon:
-        return False
-    rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
-    # Handle both ParsedWeaponRule objects and strings
-    for rule in rules:
-        if hasattr(rule, 'rule'):  # ParsedWeaponRule object
-            if rule.rule == "CLOSE_QUARTERS":
-                return True
-        elif rule == "CLOSE_QUARTERS":  # String
-            return True
-    return False
+# Revue des 24 sites d'appel avant suppression : AUCUN ne s'appuyait sur le laxisme. Les armes y
+# arrivent toujours d'une iteration sur `require_key(unit, "RNG_WEAPONS")`, d'un
+# `require_key(w, "weapon")` ou derriere une garde `isinstance(w, dict)` ; et sur plusieurs
+# chemins le MEME objet est deja passe a `weapon_has_rule(..., "BLAST")` (strict) dans le meme
+# bloc — shooting_handlers l.674/678, shared_utils l.5396/5400 et l.6415/6419. Le seul argument
+# qui pouvait valoir None etait deja ecarte par son appelant (`bool(selected_weapon and ...)`).
+#
+# Consequence ASSUMEE : une arme sans WEAPON_RULES leve desormais explicitement sur le chemin du
+# tir au lieu de repondre False en silence. Les armes des rosters reels des deux factions ont ete
+# verifiees : toutes portent la cle, et les seules formes presentes sont « ASSAULT » et
+# « CLOSE_QUARTERS » exactes — le remplacement est iso-comportement sur les donnees reelles.
+# Ne pas reintroduire de helper local : appeler `weapon_has_rule` directement.
 
 
 def _unit_shoots_as_monster_or_vehicle(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
@@ -355,7 +332,7 @@ def _get_required_rule_int_argument(
 
 def _can_unit_shoot_after_advance_with_weapon(unit: Dict[str, Any], weapon: Dict[str, Any]) -> bool:
     """Return True if unit is allowed to shoot after advance with this weapon."""
-    if _weapon_has_assault_rule(weapon):
+    if weapon_has_rule(weapon, "ASSAULT"):
         return True
     return _unit_has_rule(unit, "shoot_after_advance")
 
@@ -595,7 +572,7 @@ def weapon_availability_check(
                 #   - MONSTER/VEHICLE : « you can select ANY of that model's ranged weapons »,
                 #     au prix d'un -1 au jet de touche appliqué à la RÉSOLUTION
                 #     (`_manual_roll_intent`, shared_utils) — pas ici.
-                if not _weapon_has_close_quarters_rule(weapon) and not _unit_shoots_as_monster_or_vehicle(
+                if not weapon_has_rule(weapon, "CLOSE_QUARTERS") and not _unit_shoots_as_monster_or_vehicle(
                     game_state, unit
                 ):
                     can_use = False
@@ -632,7 +609,7 @@ def weapon_availability_check(
             and unit["_shooting_with_close_quarters"] is not None
             and not _unit_shoots_as_monster_or_vehicle(game_state, unit)
         ):
-            weapon_is_close_quarters = _weapon_has_close_quarters_rule(weapon)
+            weapon_is_close_quarters = weapon_has_rule(weapon, "CLOSE_QUARTERS")
             
             if unit["_shooting_with_close_quarters"]:
                 # Unit fired with CLOSE_QUARTERS weapon, can only select other CLOSE_QUARTERS weapons
@@ -671,9 +648,8 @@ def weapon_availability_check(
                 from engine.spatial_relations import get_engagement_zone
 
                 melee_range = get_engagement_zone(game_state)
-                weapon_is_close_quarters = _weapon_has_close_quarters_rule(weapon)
+                weapon_is_close_quarters = weapon_has_rule(weapon, "CLOSE_QUARTERS")
                 shooter_engaged = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
-                from engine.utils.weapon_helpers import weapon_has_rule
 
                 weapon_is_blast = weapon_has_rule(weapon, "BLAST")
 
@@ -789,7 +765,7 @@ def _get_available_weapons_for_selection(
         
         # Check ASSAULT rule if unit advanced
         if has_advanced:
-            if not _weapon_has_assault_rule(weapon):
+            if not weapon_has_rule(weapon, "ASSAULT"):
                 can_use = False
                 reason = "No ASSAULT rule (cannot shoot after advancing)"
                 available_weapons.append({
@@ -1006,7 +982,7 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
                         # If adjacent, prioritize CLOSE_QUARTERS weapons
                         if is_adjacent:
                             close_quarters_weapons = [
-                                w for w in usable_weapons if _weapon_has_close_quarters_rule(require_key(w, "weapon"))
+                                w for w in usable_weapons if weapon_has_rule(require_key(w, "weapon"), "CLOSE_QUARTERS")
                             ]
                             if close_quarters_weapons:
                                 first_weapon = close_quarters_weapons[0]
@@ -2325,7 +2301,7 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
             firable_weapons = [w for w in rng_weapons if require_key(w, "RNG") > 0]
         else:
             firable_weapons = [w for w in rng_weapons
-                               if require_key(w, "RNG") > 0 and _weapon_has_close_quarters_rule(w)]
+                               if require_key(w, "RNG") > 0 and weapon_has_rule(w, "CLOSE_QUARTERS")]
     elif has_advanced:
         # Non-engagé et ayant avancé : seules les armes ASSAULT (ou shoot_after_advance) tirent (10.05).
         firable_weapons = [w for w in rng_weapons
@@ -2430,7 +2406,7 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
         shooter_entry, target_entry, melee_range
     )
     selected_weapon = get_selected_ranged_weapon(shooter)
-    weapon_is_close_quarters = bool(selected_weapon and _weapon_has_close_quarters_rule(selected_weapon))
+    weapon_is_close_quarters = bool(selected_weapon and weapon_has_rule(selected_weapon, "CLOSE_QUARTERS"))
     shooter_is_engaged = _is_adjacent_to_enemy_within_cc_range(game_state, shooter)
 
     # 10.06 « WHILE SHOOTING », deux volets — MÊME découpe que le chemin par-figurine
@@ -2441,7 +2417,6 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     #    [BLAST] « still cannot target a unit your unit is engaged with ».
     if shooter_is_engaged:
         if _unit_shoots_as_monster_or_vehicle(game_state, shooter):
-            from engine.utils.weapon_helpers import weapon_has_rule
 
             if (
                 selected_weapon
@@ -2705,7 +2680,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
             non_close_quarters_weapons = []
             for w in usable_weapons:
                 weapon = require_key(w, "weapon")
-                if _weapon_has_close_quarters_rule(weapon):
+                if weapon_has_rule(weapon, "CLOSE_QUARTERS"):
                     close_quarters_weapons.append(w)
                 else:
                     non_close_quarters_weapons.append(w)
@@ -3030,7 +3005,7 @@ def valid_target_pool_build(
             for weapon_idx in usable_weapon_indices:
                 if weapon_idx < len(rng_weapons):
                     weapon = rng_weapons[weapon_idx]
-                    if _weapon_has_close_quarters_rule(weapon):
+                    if weapon_has_rule(weapon, "CLOSE_QUARTERS"):
                         has_close_quarters_weapon = True
                         break
             

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from engine.hex_utils import Socle
 
 from shared.data_validation import require_key
+from engine.utils.weapon_helpers import weapon_has_rule
 
 # --- Type de plan de mouvement (source unique) ---------------------------------
 # Une entrée positionne UNE figurine : (model_id, col, row), (model_id, col, row, level) OU
@@ -5382,8 +5383,6 @@ def _model_can_shoot_target(
     if range_subhex <= 0:
         return False
     # Import lazy : shooting_handlers importe shared_utils (eviter le cycle).
-    from engine.phase_handlers.shooting_handlers import _weapon_has_close_quarters_rule
-    from engine.utils.weapon_helpers import weapon_has_rule
 
     ac = int(attacker_model["col"])
     ar = int(attacker_model["row"])
@@ -5393,7 +5392,7 @@ def _model_can_shoot_target(
         game_state,
         str(attacker_model["squad_id"]),
         target_squad_id,
-        _weapon_has_close_quarters_rule(weapon),
+        weapon_has_rule(weapon, "CLOSE_QUARTERS"),
         attacker_model,
         weapon_has_rule(weapon, "BLAST"),
     ):
@@ -5485,9 +5484,8 @@ def squad_declare_shoot(
         # risque) — c est precisement pourquoi ce choix est un candidat P3, mesurable une fois
         # ce defaut correct (V11_entity_encoder_pointer.md §5.3).
         if not _model_is_monster_or_vehicle(m):
-            from engine.phase_handlers.shooting_handlers import _weapon_has_close_quarters_rule
-
-            cq = [(i, t) for i, t in usable if _weapon_has_close_quarters_rule(weapons[i])]
+        
+            cq = [(i, t) for i, t in usable if weapon_has_rule(weapons[i], "CLOSE_QUARTERS")]
             other = [(i, t) for i, t in usable if (i, t) not in cq]
             if cq and other:
                 usable = cq if len(cq) > len(other) else other
@@ -6133,10 +6131,7 @@ def squad_shoot_los_overview(
 
     # Engagement au niveau escouade (regle 10.06) : si l escouade est engagee, ses figs
     # ne peuvent tirer QU avec une arme Close-quarters (portee plus courte, donc PAS widx_max).
-    from engine.phase_handlers.shooting_handlers import (
-        _weapon_has_close_quarters_rule,
-        _is_adjacent_to_enemy_within_cc_range,
-    )
+    from engine.phase_handlers.shooting_handlers import _is_adjacent_to_enemy_within_cc_range
     shooter_unit = get_unit_by_id(game_state, attacker_squad_id)
     squad_engaged = shooter_unit is not None and _is_adjacent_to_enemy_within_cc_range(
         game_state, shooter_unit
@@ -6162,7 +6157,7 @@ def squad_shoot_los_overview(
         # portee. La LoS (raycasting) ne depend pas de l arme et reach est monotone en
         # portee, d ou 1 seul test/ennemi (l arme la plus permissive du cas).
         if squad_engaged:
-            close_quarters_free = [w for w in free_weapons if _weapon_has_close_quarters_rule(weapons[w])]
+            close_quarters_free = [w for w in free_weapons if weapon_has_rule(weapons[w], "CLOSE_QUARTERS")]
             if not close_quarters_free:
                 continue  # engagee sans pistolet → ne peut rien viser au tir
             test_widx = close_quarters_free[0]
@@ -6281,7 +6276,6 @@ def resolve_squad_shooting_type(
     """
     from engine.phase_handlers.shooting_handlers import (
         _can_unit_shoot_after_advance_with_weapon,
-        _weapon_has_close_quarters_rule,
         _unit_has_rule,
     )
 
@@ -6316,7 +6310,7 @@ def resolve_squad_shooting_type(
     if engaged:
         if has_advanced:
             return None  # 10.06 exige « did not make an advance move this turn »
-        if _any_weapon(_weapon_has_close_quarters_rule) or any(
+        if _any_weapon(lambda w: weapon_has_rule(w, "CLOSE_QUARTERS")) or any(
             _model_is_monster_or_vehicle(m) for m in alive
         ):
             return SHOOTING_TYPE_CLOSE_QUARTERS
@@ -6343,10 +6337,7 @@ def shooting_type_allows_weapon(
       [CLOSE-QUARTERS] weapons ». Une figurine MONSTER/VEHICLE, elle, peut selectionner
       n importe quelle arme — au prix d un -1 au jet de touche (applique a la resolution).
     """
-    from engine.phase_handlers.shooting_handlers import (
-        _can_unit_shoot_after_advance_with_weapon,
-        _weapon_has_close_quarters_rule,
-    )
+    from engine.phase_handlers.shooting_handlers import _can_unit_shoot_after_advance_with_weapon
 
     if shooting_type == SHOOTING_TYPE_NORMAL:
         return True
@@ -6355,7 +6346,7 @@ def shooting_type_allows_weapon(
     if shooting_type == SHOOTING_TYPE_CLOSE_QUARTERS:
         if _model_is_monster_or_vehicle(model):
             return True
-        return _weapon_has_close_quarters_rule(weapon)
+        return weapon_has_rule(weapon, "CLOSE_QUARTERS")
     raise ValueError(f"shooting_type inconnu : {shooting_type!r}")
 
 
@@ -6401,8 +6392,6 @@ def _model_can_shoot_target_with_weapon(
     range_subhex = int(weapon["RNG"])
     if range_subhex <= 0:
         return False
-    from engine.phase_handlers.shooting_handlers import _weapon_has_close_quarters_rule
-    from engine.utils.weapon_helpers import weapon_has_rule
 
     ac = int(attacker_model["col"])
     ar = int(attacker_model["row"])
@@ -6412,7 +6401,7 @@ def _model_can_shoot_target_with_weapon(
         game_state,
         str(attacker_model["squad_id"]),
         target_squad_id,
-        _weapon_has_close_quarters_rule(weapon),
+        weapon_has_rule(weapon, "CLOSE_QUARTERS"),
         attacker_model,
         weapon_has_rule(weapon, "BLAST"),
     ):
@@ -6579,7 +6568,6 @@ def squad_shoot_menu_weapons(
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     init_pending_intents(game_state)
-    from engine.phase_handlers.shooting_handlers import _weapon_has_close_quarters_rule
 
     # Type d arme deja engage par l unite (Close-quarters vs non-Close-quarters) — via les declarations.
     intents = game_state["pending_squad_shoot_intents"].get(attacker_squad_id, [])  # get allowed
@@ -6592,7 +6580,7 @@ def squad_shoot_menu_weapons(
         ws = m.get("RNG_WEAPONS", [])  # get allowed
         wi = int(it["weapon_index"])
         if 0 <= wi < len(ws) and isinstance(ws[wi], dict):
-            if _weapon_has_close_quarters_rule(ws[wi]):
+            if weapon_has_rule(ws[wi], "CLOSE_QUARTERS"):
                 declared_close_quarters = True
             else:
                 declared_non_close_quarters = True
@@ -6604,7 +6592,7 @@ def squad_shoot_menu_weapons(
     result: List[Dict[str, Any]] = []
     for idx, w in enumerate(_union_weapons(game_state, "RNG_WEAPONS", attacker_squad_id)):
         code = w["code"]
-        is_close_quarters = _weapon_has_close_quarters_rule(w)
+        is_close_quarters = weapon_has_rule(w, "CLOSE_QUARTERS")
         usable = False
         for mid in mids:
             m = models_cache.get(mid)
@@ -6966,7 +6954,6 @@ def _cover_worsened_bs(
     Retourne (bs_effectif, cover). Aucun repli : si une unite est introuvable c est
     un bug -> erreur explicite.
     """
-    from engine.utils.weapon_helpers import weapon_has_rule
     if weapon_has_rule(weapon, "IGNORES_COVER"):
         return bs, False
     from engine.phase_handlers.shooting_handlers import compute_unit_los, _get_unit_by_id
@@ -7345,7 +7332,6 @@ def _manual_roll_intent(
     #      contourner un mur coute plus cher que l ecart depart<->arrivee). C est la clause EXACTE
     #      du PDF : une escouade qui s est repositionnee de 2" garde son bonus, ce que la borne
     #      conservatrice d avant (« aucune figurine n a bouge ») lui refusait a tort.
-    from engine.utils.weapon_helpers import weapon_has_rule
     # Trace d affichage : le bonus a-t-il ETE APPLIQUE (pas « l arme declare HEAVY ») ? Le log
     # de tir en tire le token [HEAVY], comme [COVER] pour le couvert.
     _heavy_applied = False
@@ -7898,7 +7884,6 @@ def _count_selected_hazardous_weapons(
     declaree sur deux cibles n en fait qu un (24.02 : les instances ne se cumulent pas).
     """
     models_cache = require_key(game_state, "models_cache")
-    from engine.utils.weapon_helpers import weapon_has_rule
     selected = set()
     for intent in intents:
         mid = str(require_key(intent, "model_id"))
@@ -8725,7 +8710,6 @@ def get_fighting_models(game_state: Dict[str, Any], squad_id: str) -> List[str]:
 
 def _extra_attacks_weapon_indices(attacker: Dict[str, Any]) -> List[int]:
     """Indices des armes de melee [EXTRA ATTACKS] 24.11 de la figurine (ordre stable)."""
-    from engine.utils.weapon_helpers import weapon_has_rule
     weapons = attacker.get("CC_WEAPONS", [])  # get allowed
     return [
         idx for idx, w in enumerate(weapons)

@@ -37,7 +37,12 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 2) -> Dict[str, A
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
-        "RNG_WEAPONS": [{"RNG": 24, "SHOTS": "1", "STRENGTH": 4, "AP": 0, "DAMAGE": 1}],
+        # WEAPON_RULES: [] — « aucune regle », explicitement. L'ancienne fixture OMETTAIT la cle
+        # et ne « marchait » que grace au repli laxiste de `_weapon_has_close_quarters_rule`,
+        # supprime le 2026-07-29. Le parseur d'armurerie exige deja la cle sur les donnees reelles
+        # (« use [] if none »), donc une arme sans cle n'existe pas en production.
+        "RNG_WEAPONS": [{"RNG": 24, "SHOTS": "1", "STRENGTH": 4, "AP": 0, "DAMAGE": 1,
+                         "WEAPON_RULES": []}],
         "CC_WEAPONS": [],
     }
 
@@ -213,3 +218,44 @@ class TestMultiHexShootingInvariants:
         assert "1" in gs["shoot_activation_pool"], (
             "small-base shooter not in EZ must be in shoot pool"
         )
+
+
+def test_weapon_without_weapon_rules_raises_instead_of_silently_having_no_rule() -> None:
+    """Garde anti-retour des replis laxistes supprimes le 2026-07-29.
+
+    `_weapon_has_assault_rule` / `_weapon_has_close_quarters_rule` toleraient une arme
+    depourvue de `WEAPON_RULES` (`"WEAPON_RULES" in weapon else []`) et une arme falsy
+    (`if not weapon: return False`). Une donnee d'arme malformee devenait donc « n'a pas la
+    regle » en SILENCE, sur le chemin du tir. Le tir delegue desormais a
+    `engine/utils/weapon_helpers.weapon_has_rule`, qui exige la cle et leve.
+
+    Ce test rougit si quelqu'un reintroduit un predicat laxiste (helper local, `.get()` avec
+    valeur par defaut, `if not weapon`) : l'erreur explicite redeviendrait un False muet.
+    """
+    from shared.data_validation import ConfigurationError
+
+    malformed = {**_unit(1, 1, 5, 10), "BASE_SIZE": 25, "MODEL_HEIGHT": 2.5}
+    # Arme SANS WEAPON_RULES : impossible en production (le parseur d'armurerie leve deja),
+    # donc seule une regression de code peut amener un tel dict jusqu'ici.
+    malformed["RNG_WEAPONS"] = [{"RNG": 24, "SHOTS": "1", "STRENGTH": 4, "AP": 0, "DAMAGE": 1}]
+    units = [malformed, {**_unit(2, 2, 30, 10), "BASE_SIZE": 25, "MODEL_HEIGHT": 2.5}]
+    gs = _make_game_state(units, current_player=1)
+
+    with pytest.raises(ConfigurationError, match=r"WEAPON_RULES"):
+        shooting_build_activation_pool(gs)
+
+
+def test_weapon_rules_present_but_empty_is_a_valid_absence_of_rule() -> None:
+    """Contre-epreuve : `WEAPON_RULES: []` (« aucune regle ») reste parfaitement valide.
+
+    C'est la forme que le parseur d'armurerie impose aux donnees reelles (« use [] if none »).
+    Sans ce test, la garde ci-dessus pourrait etre satisfaite par un code qui leverait sur TOUTE
+    arme sans regle — ce qui casserait le jeu au lieu de le durcir.
+    """
+    units = [
+        {**_unit(1, 1, 5, 10), "BASE_SIZE": 25, "MODEL_HEIGHT": 2.5},
+        {**_unit(2, 2, 30, 10), "BASE_SIZE": 25, "MODEL_HEIGHT": 2.5},
+    ]
+    gs = _make_game_state(units, current_player=1)
+    shooting_build_activation_pool(gs)  # ne leve pas
+    assert "1" not in gs["shoot_activation_pool"]
