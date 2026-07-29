@@ -114,11 +114,15 @@ class TestMovementBFSResolution:
     def test_fly_unit_traverses_wall_ring(self):
         """bfs_fly : anneau de murs autour de (5,10) — unité FLY l'ignore en traversée, sol bloqué.
 
-        Résultats mesurés : FLY=30 destinations (hexes hors de l'anneau), sol=0.
+        21.03 : la traversée est la contrepartie d'une déclaration « take to the skies » qui coûte
+        2" sur la distance maximale. L'unité volante part donc de MOVE=5 pour disposer des mêmes
+        3 subhexes EFFECTIFS que l'unité au sol — sans quoi on ne comparerait pas la traversée mais
+        deux budgets différents. (Avant la conformité 21.03, l'unité IA traversait avec MOVE=3 sans
+        rien payer : c'est précisément le défaut corrigé.)
         """
         wall_ring = {(5, 9), (6, 10), (6, 11), (5, 11), (4, 11), (4, 10)}
 
-        units_fly = [_unit(1, 1, 5, 10, move=3, fly=True)]
+        units_fly = [_unit(1, 1, 5, 10, move=5, fly=True)]
         gs_fly = _make_game_state(units_fly, wall_hexes=wall_ring)
         result_fly = movement_build_valid_destinations_pool(gs_fly, "1")
 

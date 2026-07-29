@@ -250,8 +250,12 @@ def test_fly_move_is_measured_with_the_cube_distance_it_was_validated_with(d_row
     """FLY + métrique hex : la mesure doit rendre la distance CUBE, celle que la validation
     borne. Mesurée avec le champ euclidien, un déplacement en RANGÉES (pas de `sqrt(3)` contre
     une borne convertie par `× 1,5`) ressortait « injoignable » alors que le plan était valide.
+
+    MOVE=14 et non 12 : 21.03 retranche 2" à la distance maximale d'une unité qui prend les airs,
+    donc le budget effectif vaut bien 12 — celui que ce test veut éprouver jusqu'à `d_row=12`.
+    (Avant la conformité 21.03, l'unité IA volait sans payer et 12 suffisait.)
     """
-    gs = _gs(level=0, fly=True, move=12)
+    gs = _gs(level=0, fly=True, move=14)
     dest = (START[0], START[1] + d_row)
     plan = _plan(dest, gs)
     constraints = resolve_squad_move_constraints("1", gs, "normal")

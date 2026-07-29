@@ -202,6 +202,14 @@ def _unit_has_keyword(unit: Dict[str, Any], keyword_id: str) -> bool:
     Return True if UNIT_KEYWORDS contains keyword_id.
 
     UNIT_KEYWORDS entries must be objects with a `keywordId` field.
+
+    Comparaison INSENSIBLE À LA CASSE (et aux espaces de bord), comme TOUS les autres lecteurs
+    de `keywordId` du moteur (`game_state.py` FLOOR_CAPABLE/HIDEABLE, `shared_utils` compute_hideable,
+    `attack_sequence` ANTI-X, `analyzer_config`, et le front `BoardWithAPI`). Le corpus de rosters
+    est mixte : `keywordId: "fly"` (16 fichiers) ET `keywordId: "FLY"` (6 fichiers). Une égalité
+    stricte perdait SILENCIEUSEMENT le keyword des 6 seconds — dont cinq types du roster
+    d'entraînement d'ArmageddonAgent. La convention de lecture est donc normalisée ici aussi :
+    c'est la lecture qui portait l'exception, pas la donnée.
     """
     unit_keywords = unit.get("UNIT_KEYWORDS")
     if unit_keywords is None:
@@ -215,28 +223,167 @@ def _unit_has_keyword(unit: Dict[str, Any], keyword_id: str) -> bool:
             raise ValueError(
                 f"UNIT_KEYWORDS entries must be objects for unit {unit.get('id')}: {keyword_entry!r}"
             )
-        keyword_value = keyword_entry.get("keywordId")
-        if keyword_value == keyword_id:
+        # Même traitement que l'entrée non-objet ci-dessus : une entrée sans `keywordId` (ou nul)
+        # est une donnée cassée, pas un keyword absent. L'avaler en silence ferait répondre
+        # « cette unité ne vole pas » à une question à laquelle la donnée ne permet pas de
+        # répondre. C'est aussi ce que font les autres lecteurs (`require_key` dans
+        # `shared_utils.compute_hideable`, `game_state.py`) et le chargeur `ai/unit_registry.py`.
+        if keyword_entry.get("keywordId") is None:
+            raise ValueError(
+                f"UNIT_KEYWORDS entries must carry a non-null keywordId for unit "
+                f"{unit.get('id')}: {keyword_entry!r}"
+            )
+        keyword_value = keyword_entry["keywordId"]
+        if str(keyword_value).strip().lower() == str(keyword_id).strip().lower():
             return True
     return False
 
 
-def _fly_traversal_active(game_state: Dict[str, Any], unit: Dict[str, Any], unit_id: Any) -> bool:
-    """Take to the skies (Règles 21.03) : la traversée FLY (murs/figurines + ignore vertical) est
-    active si l'unité a le keyword fly ET :
-    - hors phase de mouvement, ou unité IA (gym / PvE joueur 2) → vol auto legacy (inchangé) ;
-    - en phase move pour un joueur humain → seulement si le vol a été déclaré (units_took_to_skies).
-    Source unique partagée par le pool d'ancre, le reachable par-figurine et le log de move.
+def unit_is_ai_controlled(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """L'unité est-elle pilotée par le modèle (gym d'entraînement, ou joueur 2 en PvE) ?
+
+    Aucune déclaration humaine ne peut lui parvenir : c'est la politique moteur de
+    ``took_to_the_skies`` qui tranche pour elle.
+    """
+    is_gym = bool(game_state.get("gym_training_mode", False))
+    is_pve = bool(game_state.get("pve_mode", False)) or bool(game_state.get("is_pve_mode", False))
+    return is_gym or (is_pve and int(require_key(unit, "player")) == 2)
+
+
+#: Phase moteur → (est-ce le mouvement de charge ?, set de déclarations « take to the skies »).
+#: 21.03 énumère EXACTEMENT les mouvements couverts : « a normal, advance, fall-back or charge
+#: move ». Un pile-in ou une consolidation (12) n'y figurent pas et ne peuvent donc pas prendre les
+#: airs — d'où l'absence volontaire de clé pour ces phases (et non une valeur par défaut permissive).
+#:
+#: Table réellement CONSOMMÉE des deux côtés : le drapeau `charge` par `_fly_traversal_active`
+#: (qui en déduit le mouvement de la phase en cours) et le nom du set par `took_to_the_skies`.
+#: La corriger a donc un effet — c'est la seule description du couplage phase / mouvement / set.
+_TAKE_TO_THE_SKIES_BY_PHASE: Dict[str, Tuple[bool, str]] = {
+    "move": (False, "units_took_to_skies"),      # normal / advance / fall-back
+    "charge": (True, "units_took_to_skies_charge"),
+}
+
+
+def take_to_the_skies_applies_to_phase(game_state: Dict[str, Any], *, charge: bool) -> bool:
+    """La déclaration 21.03 concerne-t-elle le mouvement que la phase en cours résout ?
+
+    GARDE COMMUNE au malus de -2" (`get_squad_move_budget`) et à la traversée
+    (`_fly_traversal_active`). Sans elle du côté du budget, le budget de move d'une unité volante
+    resterait amputé de 2" en phases de tir, de charge et de combat — où aucun move normal n'est
+    résolu et où aucune traversée n'est active. L'échelle de la grille égocentrique
+    (`grid_half_extent_subhex`, appelée à chaque phase) en dépend directement.
+    """
+    entry = _TAKE_TO_THE_SKIES_BY_PHASE.get(str(game_state.get("phase", "")))  # get allowed
+    return entry is not None and entry[0] is charge
+
+
+def took_to_the_skies(
+    game_state: Dict[str, Any], unit: Dict[str, Any], unit_id: Any, *, charge: bool
+) -> bool:
+    """21.03 — l'unité a-t-elle déclaré « take to the skies » pour le mouvement EN COURS ?
+
+    C'est la SOURCE UNIQUE de la déclaration : le malus de -2" sur la distance maximale et la
+    traversée (murs, figurines, terrain, distance verticale) en découlent tous les deux. Les
+    dissocier laisserait rejouer le défaut d'origine — une traversée gratuite.
+
+    - Sans le keyword FLY : jamais.
+    - Unité pilotée par le modèle (gym / PvE J2) : **déclare systématiquement**. Politique moteur
+      explicite — voir ci-dessous, elle a un coût chiffré et une alternative écartée.
+    - Joueur humain : uniquement si la déclaration a été posée (``movement_set_fly_mode_handler`` /
+      ``charge_set_fly_mode_handler``), dans le set propre au type de mouvement.
+
+    POURQUOI UNE CONSTANTE POUR L'IA, ET CE QU'ELLE COÛTE
+    -----------------------------------------------------
+    21.03 fait de la prise d'altitude une DÉCISION du joueur actif, par mouvement. L'agent n'a pas
+    de canal pour la prendre : l'exposer suppose une entrée d'observation et une action de choix,
+    donc un changement du contrat d'observation. L'arbitrage utilisateur du 2026-07-29 range ce
+    travail dans le lot de ré-entraînement et exige que le présent correctif de conformité ne casse
+    aucun contrat — il ne peut donc pas être fait ici. (Les numéros de section §0.48/§0.49 cités en
+    relecture ne sont pas vérifiables depuis ce worktree : `V11_agent_rework.md` s'y arrête à §0.45
+    et annonce « prochaine entrée libre : 0.46 ». La substance de l'arbitrage est reprise telle
+    qu'elle a été relayée, sa numérotation ne l'est pas.)
+
+    En attendant, la constante retenue est « déclarer toujours ». Ce n'est PAS le choix évident
+    entre deux constantes : une troisième option existe, et elle est écartée pour des raisons
+    précises, pas parce qu'elle serait hors sujet.
+
+    * « ne jamais déclarer » : le keyword FLY deviendrait inerte pour l'agent. Les cinq types
+      volants du roster d'entraînement d'ArmageddonAgent perdraient la capacité que la règle leur
+      donne, et le défaut « le vol de charge est refusé à l'IA » serait reconduit sous un autre nom.
+    * « déclarer ssi la traversée élargit strictement l'atteignable » — l'option dérivée proposée
+      en relecture. Elle resterait bien une fonction pure de l'état et ne toucherait aucun contrat.
+      Elle est écartée pour deux raisons, et non parce qu'elle serait irréalisable :
+        1. son critère n'est pas bien défini tel quel. Les deux pools ne sont pas emboîtés : voler
+           GAGNE les cellules derrière les murs et PERD la couronne extérieure (budget amputé de
+           2"). Aucun des deux ensembles ne contient l'autre en général, donc « élargit strictement »
+           ne les départage pas — il faudrait une règle de départage supplémentaire, c'est-à-dire
+           réintroduire un jugement de valeur, celui-là même que 21.03 confie au joueur ;
+        2. elle coûte un second BFS de pool par escouade volante et par construction de masque,
+           sur le chemin le plus chaud du move (le cache de pool existe précisément pour éviter ce
+           BFS), pour un gain que rien ne mesure aujourd'hui.
+      Une heuristique interne qui *ressemble* à une décision serait par ailleurs le pire état pour
+      le lot de ré-entraînement : l'agent apprendrait contre une politique que personne n'énonce.
+    * « déclarer toujours » : état de jeu toujours légal (21.03 autorise la déclaration à chaque
+      mouvement), capacité conservée et FACTURÉE au prix légal, politique énonçable en une phrase.
+
+    COÛT ASSUMÉ, chiffré sur le roster d'entraînement d'ArmageddonAgent (board 44x60x5,
+    `inches_to_subhex = 5`, donc 2" = 10 subhex) :
+      - VanguardVeteranSquadJumpPack / ...Plasma / ...Sergeant / ChaplainJumpPack, MOVE 12" :
+        12" -> 10" à chaque mouvement, soit **-16,7 %** de distance ;
+      - LandSpeederOnslaughtGatlingCannon / LandSpeederHeavyFlamer, MOVE 14" :
+        14" -> 12", soit **-14,3 %** ;
+      - en charge, le malus porte sur le jet : 2D6 d'espérance 7" -> 5", soit **-28,6 %** de
+        distance moyenne, et une chute correspondante du taux de charges réussies.
+    Ce coût est payé EN PERMANENCE, y compris en terrain découvert où prendre les airs est
+    strictement dominé — c'est exactement ce qu'une décision confiée à l'agent supprimerait.
+
+    Enfin, être une fonction PURE de l'état (et non un écrit dans un set) fait voir cette
+    déclaration à l'identique par le masque, l'observation et l'exécution : aucun risque de
+    séquencement, contrairement à une déclaration posée après la construction du pool.
     """
     if not _unit_has_keyword(unit, "fly"):
         return False
-    in_move_phase = game_state.get("phase") == "move"
-    is_gym = bool(game_state.get("gym_training_mode", False))
-    is_pve = bool(game_state.get("pve_mode", False)) or bool(game_state.get("is_pve_mode", False))
-    is_ai_unit = is_gym or (is_pve and int(require_key(unit, "player")) == 2)
-    if not (in_move_phase and not is_ai_unit):
+    if unit_is_ai_controlled(game_state, unit):
         return True
-    return str(unit_id) in game_state.get("units_took_to_skies", set())
+    _, set_key = _TAKE_TO_THE_SKIES_BY_PHASE["charge" if charge else "move"]
+    return str(unit_id) in game_state.get(set_key, set())
+
+
+def _fly_traversal_active(game_state: Dict[str, Any], unit: Dict[str, Any], unit_id: Any) -> bool:
+    """Take to the skies (Règles 21.03) : la traversée FLY (murs/figurines/terrain + ignore de la
+    distance verticale) est active si et seulement si le vol a été DÉCLARÉ pour le mouvement en
+    cours — la traversée est la contrepartie des 2" retranchés, jamais un acquis du keyword.
+
+    La phase désigne le mouvement en cours, donc le set de déclaration à lire. Hors des mouvements
+    énumérés par 21.03 (move / charge), la règle ne s'applique pas : pas de traversée.
+
+    Source unique partagée par le pool d'ancre, le reachable par-figurine, le coût de descente et
+    le log de move.
+    """
+    entry = _TAKE_TO_THE_SKIES_BY_PHASE.get(str(game_state.get("phase", "")))  # get allowed
+    if entry is None:
+        return False
+    charge, _ = entry
+    return took_to_the_skies(game_state, unit, unit_id, charge=charge)
+
+
+def squad_move_pool_budget_subhex(game_state: Dict[str, Any], squad_id: str) -> int:
+    """Budget (subhex) du mouvement que cette escouade s'apprête RÉELLEMENT à faire.
+
+    SOURCE UNIQUE de la borne des destinations : régime Advance si un jet a été tiré pour elle,
+    sinon normal/fall-back — et dans les deux cas le malus Take to the skies (-2", 21.03) que
+    `get_squad_move_budget` applique.
+
+    Extraite de `movement_build_valid_destinations_pool` pour que l'ÉLIGIBILITÉ (`get_eligible_units`)
+    borne sa recherche exactement comme le pool : bornée sur la caractéristique `MOVE` brute, elle
+    déclarait éligible une unité volante dont toutes les destinations légales tombent dans la bande
+    `(M - 2", M]` — donc avec un pool vide. C'est la classe d'incohérence masque/exécution que
+    §0.34 pourchasse.
+    """
+    _adv_roll = _advance_roll_for(str(squad_id), game_state)
+    if _adv_roll is not None:
+        return get_squad_move_budget(str(squad_id), game_state, "advance", advance_roll=_adv_roll)
+    return get_squad_move_budget(str(squad_id), game_state, "normal")
 
 
 def squad_descent_penalty_subhex(game_state: Dict[str, Any], squad_id: str) -> int:
@@ -487,12 +634,21 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
             raise ValueError(f"Unit {unit_id} not found in game_state while building move eligibility")
         has_fly_keyword = _unit_has_keyword(unit_obj, "fly")
 
-        # Normalize MOVE to int for range checks
+        # Normalize MOVE to int for range checks (validation de la donnée de datasheet)
         move_range_raw = require_key(unit_obj, "MOVE")
         try:
-            move_range = int(move_range_raw)
+            move_stat = int(move_range_raw)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"Invalid MOVE value for unit {unit_id}: {move_range_raw!r}") from exc
+        if move_stat <= 0:
+            continue
+
+        # Borne de la recherche d'éligibilité = budget RÉEL du move, PAS la caractéristique brute.
+        # `MOVE` et le budget diffèrent dès que l'unité prend les airs (-2", 21.03) : borner sur
+        # `MOVE` déclarerait éligible une unité volante dont la seule destination légale est dans
+        # la bande `(M - 2", M]`, que le pool refusera ensuite — masque ⊄ exécutable (§0.34).
+        # MÊME fonction que celle dont le pool tire sa borne : les deux ne peuvent plus diverger.
+        move_range = squad_move_pool_budget_subhex(game_state, str(unit_id))
         if move_range <= 0:
             continue
 
@@ -2324,12 +2480,7 @@ def movement_build_valid_destinations_pool(
             )
         move_range = int(move_budget_override)
     else:
-        _adv_roll = _advance_roll_for(str(unit_id), game_state)
-        if _adv_roll is not None:
-            move_range = get_squad_move_budget(str(unit_id), game_state, "advance", advance_roll=_adv_roll)
-        else:
-            # Normal/fall-back via budget unique : applique aussi le malus Take to the skies (-2", Règles 21.03).
-            move_range = get_squad_move_budget(str(unit_id), game_state, "normal")
+        move_range = squad_move_pool_budget_subhex(game_state, str(unit_id))
     # Normalize coordinates to int - raises error if invalid
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
@@ -2436,8 +2587,10 @@ def movement_build_valid_destinations_pool(
 
     _m_prep_end = _perf_clock.perf_counter() if _pt else None
 
-    # Take to the skies (Règles 21.03) : en phase move, une unité FLY ne traverse murs/figurines
-    # QUE si le joueur a déclaré le vol. Logique partagée via _fly_traversal_active.
+    # Take to the skies (Règles 21.03) : une unité FLY ne traverse murs/figurines QUE si le vol est
+    # déclaré pour le mouvement en cours. Qui déclare : le joueur humain via le handler dédié ;
+    # pour une unité pilotée par le modèle, `took_to_the_skies` tranche (politique moteur, cf. sa
+    # docstring). Logique partagée via _fly_traversal_active.
     _fly_active = _fly_traversal_active(game_state, unit, unit_id)
 
     # Squad move rigide (destination sol) : si des figs partent de l'étage, retrancher le coût de
@@ -3240,8 +3393,11 @@ def movement_build_model_destinations_pool(
     other_occupied = other_occ_by_level.get(view_level, set())
     same_squad_occupied = same_squad_occ_by_level.get(view_level, set())
 
-    # Take to the skies (Règles 21.03) : traversée FLY active seulement si vol déclaré (phase move,
-    # humain) — sinon BFS sol. Pilote le reachable par-figurine ET, via lui, la validation au commit.
+    # Take to the skies (Règles 21.03) : traversée FLY active seulement si le vol est déclaré pour le
+    # mouvement en cours — sinon BFS sol. Vaut pour les DEUX mouvements que 21.03 couvre ici, le move
+    # et la charge : `_fly_traversal_active` lit le set de déclarations de la phase courante, et pour
+    # une unité pilotée par le modèle c'est `took_to_the_skies` qui tranche.
+    # Pilote le reachable par-figurine ET, via lui, la validation au commit.
     has_fly = _fly_traversal_active(game_state, unit, squad_id)
 
     # Desperate Escape : unité battle-shocked tentant un fall-back depuis l'ER ennemie.
