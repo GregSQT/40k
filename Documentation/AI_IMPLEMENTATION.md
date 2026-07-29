@@ -200,7 +200,7 @@ engine/
 - `_determine_winner()` - Determine winner or draw
 
 **Delegation Methods:**
-- `get_action_mask()` → `action_decoder.get_action_mask()`
+- `get_action_mask()` → `action_decoder.get_squad_action_mask_and_eligible_units()`
 - `_build_observation()` → `obs_builder.build_squad_observation()` + `build_squad_grid()`
 - `_calculate_reward()` → `reward_calculator.calculate_reward()`
 - `_convert_gym_action()` → `action_decoder.convert_squad_action()`
@@ -324,12 +324,17 @@ engine/
 
 **Key Methods:**
 - `__init__(config)` - Initialize decoder
-- `get_action_mask(game_state)` - Return boolean mask (12 actions)
-- `convert_gym_action(action, game_state)` - Convert int→semantic action
-- `_get_valid_actions_for_phase(phase)` - Get valid action IDs for phase
+- `get_squad_action_mask_and_eligible_units(game_state)` - Return (mask, eligible_units) sur l'espace d'actions courant (`macro_intents.TOTAL_ACTION_SIZE`)
+- `convert_squad_action(action_int, game_state)` - Convert int→semantic action (seul décodeur ; `convert_gym_action`, décodeur de l'ancien espace 0-15, a été supprimé — code mort)
 - `_get_eligible_units_for_current_phase(game_state)` - Get units from activation pool
-- `get_all_valid_targets(unit, game_state)` - Get all possible targets
-- `can_melee_units_charge_target(target, game_state)` - Check charge possibility
+- ~~`get_all_valid_targets(unit, game_state)`~~ et ~~`can_melee_units_charge_target(target, game_state)`~~
+  — **supprimées le 2026-07-29**, code mort sans aucun appelant (pierre tombale dans
+  `engine/action_decoder.py`). Les pools de cibles réels sont construits par les handlers de
+  phase et exposés à l'agent par les slots de cible du masque.
+
+> ⚠️ Cette liste décrit ce qui a été ÉCRIT, pas ce que la production appelle. Deux des méthodes
+> qu'elle présentait comme « Key Methods » n'avaient aucun appelant. Vérifier par `grep` avant de
+> s'appuyer sur une entrée.
 
 **Action Space — ⚠️ PÉRIMÉ, corrigé le 2026-07-26 (vérifié dans le code) :**
 
@@ -738,20 +743,43 @@ W40KEngine.step(action: int)
 ├─ Check turn limit (training_config.max_turns_per_episode)
 ├─ Check game_over status
 │
+├─ BUILD MASK (une seule fois, réutilisé au décodage)
+│  └─> action_decoder.get_squad_action_mask_and_eligible_units(game_state)
+│      mémorise au passage la carte de cellules de move et le jet d'Advance,
+│      que le décodeur RELIT (il ne les reconstruit jamais : ce serait rouvrir
+│      la divergence masque/exécution)
+│
 └─ CONVERT ACTION
-   └─> action_decoder.convert_gym_action(action, game_state)
+   └─> action_decoder.convert_squad_action(action_int, game_state, eligible_units)
        │
-       ├─ Get action mask to validate
-       ├─ Get eligible units from activation pool
-       ├─ Map integer to semantic action:
-       │  • 0-3 → movement directions
-       │  • 4-8 → shoot target slots
-       │  • 9 → charge
-       │  • 10 → fight
-       │  • 11 → wait
+       ├─ Map integer to semantic action (layout : engine/macro_intents.py,
+       │  TOTAL_ACTION_SIZE = 1107) :
+       │  • 0-1023    → cellule de la grille égocentrique 32×32 (la DESTINATION
+       │                est une dimension d'action ; le type normal/advance/
+       │                fall_back est INFÉRÉ du coût géodésique, cf. §6.2)
+       │  • 1024      → wait / fin d'activation (command_wait en phase command)
+       │  • 1025-1044 → shoot, slot de cible 0-19
+       │  • 1045-1064 → charge, slot de cible 0-19  (même mapping de slots)
+       │  • 1065-1084 → fight,  slot de cible 0-19  (même mapping de slots)
+       │  • 1085      → fight sans cible éligible (12.04/12.06, combat à vide)
+       │  • 1086-1100 → zone intents (5 objectifs × 3 intentions), command only
+       │  • 1101-1106 → CHOICE_0..5, candidats de `pending_agent_decision`
+       │  • 4-8       → EN PHASE DEPLOYMENT uniquement : slots de déploiement.
+       │                Ces ids sont AUSSI des cellules de move : c'est la phase
+       │                qui désambiguïse (cf. §0.44)
        │
-       └─ Return: {"action": "move", "unitId": "u1", "destCol": 5, "destRow": 3}
+       └─ Return: {"action": "squad_normal_move", "squad_id": "1",
+                   "destCol": 5, "destRow": 3}
 ```
+
+> ⚠️ Toute intention non prévue LÈVE — aucun repli silencieux sur une action plausible. Le
+> routage entier → intention est verrouillé cas par cas, et la parité masque↔décodeur (tout
+> entier ouvert par le masque est décodable, tout entier fermé lève) par
+> `tests/unit/engine/test_agent_interface_contract.py`.
+>
+> `convert_gym_action` et le masque 0-15 qui l'accompagnait ont été **supprimés le 2026-07-29**
+> (code mort — pierre tombale dans `engine/action_decoder.py`). Si tu lis encore un mapping
+> « 0-3 move / 4-8 shoot / 9 charge / 10 fight / 11 wait » quelque part, il est périmé.
 
 **2. Process Semantic Action**
 ```

@@ -12,7 +12,7 @@ import math
 import numpy as np
 from collections import deque, OrderedDict
 from .generic_handlers import end_activation, _log_with_context
-from shared.data_validation import require_key, require_present
+from shared.data_validation import require_key
 from engine.action_log_utils import append_action_log
 from engine.combat_utils import (
     calculate_hex_distance,
@@ -129,55 +129,21 @@ def _hex_radius_upper_for_engagement_prune(base_span: int) -> int:
     return max(1, (s + 1) // 2)
 
 
-def _build_objective_distance_cache(
-    game_state: Dict[str, Any],
-) -> Tuple[List[Set[Tuple[int, int]]], List[Tuple[int, int]]]:
-    """Build exact objective distance refs with boundary reduction for move strategy 3."""
-    cached = game_state.get("_objective_distance_cache")
-    objectives = game_state.get("objectives")
-    if (
-        isinstance(cached, dict)
-        and cached.get("objectives_ref") is objectives
-        and isinstance(cached.get("objective_hex_sets"), list)
-        and isinstance(cached.get("boundary_hexes"), list)
-    ):
-        return cached["objective_hex_sets"], cached["boundary_hexes"]
-
-    objective_hex_sets: List[Set[Tuple[int, int]]] = []
-    boundary_union: Set[Tuple[int, int]] = set()
-
-    if isinstance(objectives, list):
-        for obj in objectives:
-            if not isinstance(obj, dict):
-                continue
-            raw_hexes = obj.get("hexes")
-            if not isinstance(raw_hexes, list):
-                continue
-
-            objective_hex_set: Set[Tuple[int, int]] = set()
-            for raw_hex in raw_hexes:
-                if isinstance(raw_hex, dict):
-                    objective_hex_set.add((int(raw_hex["col"]), int(raw_hex["row"])))
-                elif isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
-                    objective_hex_set.add((int(raw_hex[0]), int(raw_hex[1])))
-
-            if not objective_hex_set:
-                continue
-
-            objective_hex_sets.append(objective_hex_set)
-            for hex_pos in objective_hex_set:
-                for neighbor in get_hex_neighbors(hex_pos[0], hex_pos[1]):
-                    if neighbor not in objective_hex_set:
-                        boundary_union.add(hex_pos)
-                        break
-
-    boundary_hexes = list(boundary_union)
-    game_state["_objective_distance_cache"] = {
-        "objectives_ref": objectives,
-        "objective_hex_sets": objective_hex_sets,
-        "boundary_hexes": boundary_hexes,
-    }
-    return objective_hex_sets, boundary_hexes
+# ── PIERRE TOMBALE — heuristique de destination de l'ancien espace d'actions (2026-07-29) ─────
+# Ont vécu ici :
+#   `_select_strategic_destination`     4 stratégies (0 = agressif, 1 = tactique, 2 = défensif,
+#                                       3 = objectif) qui CHOISISSAIENT la destination à la place
+#                                       de l'agent, pour les actions de move 0-3 de l'espace 0-15
+#   `_build_objective_distance_cache`   son cache de distances aux objectifs, sans autre client
+#
+# POURQUOI elles étaient mortes : la refonte spatiale du move (§6.2) a fait de la DESTINATION une
+# dimension d'action (1024 cellules de la grille égocentrique). L'agent désigne désormais la
+# cellule ; plus rien n'a à la deviner pour lui. Leur unique appelant était `convert_gym_action`,
+# décodeur de l'ancien espace, supprimé le même jour (cf. `engine/action_decoder.py`).
+#
+# ⚠️ NE PAS confondre avec `charge_handlers._select_strategic_destination` : jumeau de nom, autre
+# fichier, autre cycle de vie.
+# ──────────────────────────────────────────────────────────────────────────────────────────────
 
 
 def _enemy_items_within_move_engagement_horizon(
@@ -3971,131 +3937,6 @@ def movement_commit_move_plan_handler(
         }
     )
     return True, result
-
-
-def _select_strategic_destination(
-    strategy_id: int,
-    valid_destinations: List[Tuple[int, int]],
-    unit: Dict[str, Any],
-    game_state: Dict[str, Any]
-) -> Tuple[int, int]:
-    """
-    Select movement destination based on strategic heuristic.
-    AI_TURN.md COMPLIANCE: Pure stateless function with direct field access.
-
-    Args:
-        strategy_id: 0=aggressive, 1=tactical, 2=defensive, 3=objective
-        valid_destinations: List of valid (col, row) tuples from BFS
-        unit: Unit dict with position and stats
-        game_state: Full game state for enemy detection
-
-    Returns:
-        Selected destination (col, row)
-    """
-    from engine.utils.weapon_helpers import get_max_ranged_range
-
-    # Direct field access with validation
-    if "units" not in game_state:
-        raise KeyError("game_state missing required 'units' field")
-    if "col" not in unit or "row" not in unit:
-        raise KeyError(f"Unit missing required position fields: {unit}")
-    if "player" not in unit:
-        raise KeyError(f"Unit missing required 'player' field: {unit}")
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of RNG_RNG
-    if not unit.get("RNG_WEAPONS") and not unit.get("CC_WEAPONS"):
-        raise KeyError(f"Unit missing required 'RNG_WEAPONS' or 'CC_WEAPONS' field: {unit}")
-
-    # If no destinations, return current position
-    if not valid_destinations:
-        return require_unit_position(unit, game_state)
-
-    # Get enemy units (units_cache = source of truth for living units)
-    units_cache = require_key(game_state, "units_cache")
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
-    enemy_units = [enemy_id for enemy_id, cache_entry in units_cache.items()
-                   if int(cache_entry["player"]) != unit_player]
-
-    # If no enemies, just pick first destination
-    if not enemy_units:
-        return valid_destinations[0]
-
-    # Pre-extract enemy anchor positions once — O(1) per enemy, O(1) distance checks below.
-    # Using anchor-to-anchor distance (centre hex) instead of footprint-to-footprint BFS:
-    # for round units, footprint distance = centre_distance - r_mover - r_enemy, so the
-    # constant offset doesn't change which destination ranks best. Valid for RL heuristics.
-    from engine.combat_utils import calculate_hex_distance as _chd
-    enemy_anchors = [
-        (int(units_cache[str(eid)]["col"]), int(units_cache[str(eid)]["row"]))
-        for eid in enemy_units
-    ]
-
-    # STRATEGY 0: AGGRESSIVE - Move closest to nearest enemy
-    # O(m + n): find nearest enemy to current position, then pick destination closest to it.
-    if strategy_id == 0:
-        unit_col, unit_row = int(unit["col"]), int(unit["row"])
-        nearest_ec, nearest_er = min(enemy_anchors, key=lambda e: _chd(unit_col, unit_row, e[0], e[1]))
-        return min(valid_destinations, key=lambda d: _chd(d[0], d[1], nearest_ec, nearest_er))
-
-    # STRATEGY 1: TACTICAL - Move to position with most enemies in shooting range
-    # O(k × m) with k ≤ _MAX_TACTICAL_POOL to cap cost on large destination sets.
-    elif strategy_id == 1:
-        _MAX_TACTICAL_POOL = 400
-        candidates = valid_destinations
-        if len(candidates) > _MAX_TACTICAL_POOL:
-            step = len(candidates) // _MAX_TACTICAL_POOL
-            candidates = candidates[::step]
-        weapon_range = get_max_ranged_range(unit)
-        best_dest = candidates[0]
-        max_targets = 0
-        for dest in candidates:
-            targets_in_range = sum(
-                1 for ec, er in enemy_anchors
-                if _chd(dest[0], dest[1], ec, er) <= weapon_range
-            )
-            if targets_in_range > max_targets:
-                max_targets = targets_in_range
-                best_dest = dest
-        return best_dest
-
-    # STRATEGY 2: DEFENSIVE - Move farthest from all enemies
-    # O(m + n): approximate with enemy centroid — maximise distance from centroid.
-    elif strategy_id == 2:
-        n_e = len(enemy_anchors)
-        cent_c = sum(e[0] for e in enemy_anchors) / n_e
-        cent_r = sum(e[1] for e in enemy_anchors) / n_e
-        return max(valid_destinations, key=lambda d: (d[0] - cent_c) ** 2 + (d[1] - cent_r) ** 2)
-
-    # STRATEGY 3: OBJECTIVE - Move toward nearest uncontrolled objective (prefer capture over hold)
-    else:
-        objective_hex_sets, _ = _build_objective_distance_cache(game_state)
-        if objective_hex_sets:
-            unit_col, unit_row = int(require_present(unit["col"], "unit.col")), int(require_present(unit["row"], "unit.row"))
-            unit_player = int(require_present(unit["player"], "unit.player"))
-            objective_controllers = require_key(game_state, "objective_controllers")
-            objectives = require_key(game_state, "objectives")
-
-            # Prefer objectives not already controlled by this player
-            uncontrolled_sets = [
-                hs for i, hs in enumerate(objective_hex_sets)
-                if i < len(objectives) and objective_controllers.get(str(objectives[i]["id"])) != unit_player
-            ]
-            candidate_sets = uncontrolled_sets if uncontrolled_sets else objective_hex_sets
-
-            best_obj_set = min(
-                candidate_sets,
-                key=lambda hs: min(_chd(unit_col, unit_row, hc, hr) for hc, hr in hs)
-            )
-            # If any destination is on that objective, take it immediately
-            for dest in valid_destinations:
-                if dest in best_obj_set:
-                    return dest
-            # Otherwise move toward the centroid of that objective's hexes
-            n = len(best_obj_set)
-            centroid_c = sum(hc for hc, hr in best_obj_set) / n
-            centroid_r = sum(hr for hc, hr in best_obj_set) / n
-            return min(valid_destinations, key=lambda d: (d[0] - centroid_c) ** 2 + (d[1] - centroid_r) ** 2)
-
-        return valid_destinations[0]
 
 
 def movement_preview(valid_destinations: List[Tuple[int, int]]) -> Dict[str, Any]:

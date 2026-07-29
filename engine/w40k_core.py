@@ -1598,7 +1598,7 @@ class W40KEngine(gym.Env):
         
         # CRITICAL FIX: Auto-advance phase when no valid actions exist
         # This handles the case where fight phase pools are empty
-        # PERF: compute mask+eligible_units once, reuse for convert_gym_action
+        # PERF: compute mask+eligible_units once, reuse for convert_squad_action
         action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
         if self.game_state.get("debug_mode", False):
             from engine.game_utils import add_debug_file_log
@@ -1691,7 +1691,7 @@ class W40KEngine(gym.Env):
         # Convert gym integer action to semantic action (reuse precomputed mask+eligible_units)
         if self.game_state.get("debug_mode", False):
             print(
-                "[TRAIN DEBUG] W40KEngine.step before convert_gym_action "
+                "[TRAIN DEBUG] W40KEngine.step before convert_squad_action "
                 f"phase={self.game_state.get('phase', '?')} action_int={action_int}",
                 flush=True,
             )
@@ -1700,7 +1700,7 @@ class W40KEngine(gym.Env):
         )
         if self.game_state.get("debug_mode", False):
             print(
-                "[TRAIN DEBUG] W40KEngine.step after convert_gym_action "
+                "[TRAIN DEBUG] W40KEngine.step after convert_squad_action "
                 f"phase={self.game_state.get('phase', '?')} semantic_action={semantic_action}",
                 flush=True,
             )

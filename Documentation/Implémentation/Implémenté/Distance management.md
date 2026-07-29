@@ -82,7 +82,6 @@ qui rend le projet de l'utilisateur faisable.
 | Fichier | Ligne | Fonction | Métrique | Usage |
 |---------|-------|----------|----------|-------|
 | engine/observation_builder.py | 682-695 | calcul move_distance | Hex cube | Observation : distance parcourue |
-| engine/phase_handlers/movement_handlers.py | 120-170 | `_build_objective_distance_cache()` | Pathfinding | Cache distances objectifs |
 | ai/analyzer_phases/move_handler.py | 358-380 | calcul fly_distance | Hex cube | Move fly : distance droite |
 
 ## 7. BACKEND — Charge (charge phase)
@@ -205,7 +204,7 @@ par-dessus les coordonnées hex.
 
 1. **Murs / pathfinding (le vrai piège).**
    Aujourd'hui la distance max de move et de charge = **pathfinding BFS qui
-   contourne les murs** (`_charge_bfs_max_distance`, `_build_objective_distance_cache`).
+   contourne les murs** (`_charge_bfs_max_distance`).
    L'euclidien pur ignore les murs → une unité pourrait « atteindre » une case à
    travers un mur. Il faut décider :
    - soit euclidien **uniquement** pour la portée droite (tir), et garder le
@@ -674,7 +673,10 @@ la métrique suit le run analysé.
 - ✅ **Grep de contrôle fait (2026-07-04)** : aucun call-site de portée/budget tir/move/charge/EZ n'appelle
   `calculate_hex_distance`. Les occurrences restantes (~77) sont toutes de la dette hex assumée (tableau
   ci-dessous) : observations/reward (§10), prune `_enemy_items_within_move_engagement_horizon` (superset),
-  ranking RL `_select_strategic_destination`, adjacence/contact, consolidation/pile-in (§20.7).
+  ~~ranking RL `_select_strategic_destination`~~ (movement_handlers : **supprimé le 2026-07-29**,
+  code mort — la destination est devenue une dimension d'action, cf. la pierre tombale dans
+  `engine/phase_handlers/movement_handlers.py` ; le jumeau de `charge_handlers` a suivi),
+  adjacence/contact, consolidation/pile-in (§20.7).
 - ✅ **Orphelins supprimés (2026-07-04)** : `_fight_enemy_footprint_distances` + `enemy_footprint_distances`
   (Étape 6 nettoyage tests) ; `_is_hex_adjacent_to_enemy` + `_compute_charge_preview_zone` (charge_handlers).
 - ✅ **Clé `distance_metric` documentée** (ci-dessous).

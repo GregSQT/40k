@@ -9,7 +9,6 @@ import os
 import pickle
 import time
 from typing import Dict, List, Any, Optional, Tuple
-from shared.data_validation import require_present
 from shared.data_validation import require_key
 from engine.game_utils import get_unit_by_id
 from engine.combat_utils import calculate_hex_distance, get_unit_coordinates, has_line_of_sight
@@ -175,25 +174,29 @@ class ActionDecoder:
     # ACTION MASKING
     # ============================================================================
     
-    def get_action_mask_and_eligible_units(self, game_state: Dict[str, Any]) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
-        """Return (mask, eligible_units). PERF: avoids recomputing eligible_units when both are needed."""
-        eligible_units = self._get_eligible_units_for_current_phase(game_state)
-        mask = self._build_mask_for_units(game_state["phase"], eligible_units, game_state)
-        return mask, eligible_units
-
-    def get_action_mask_for_unit(self, game_state: Dict[str, Any], unit_id: str) -> tuple:
-        """Return (mask, [unit]) for a specific unit without reordering pools."""
-        current_phase = game_state["phase"]
-        eligible_units = self._get_eligible_units_for_current_phase(game_state)
-        selected_unit = None
-        for unit in eligible_units:
-            if str(unit.get("id")) == str(unit_id):
-                selected_unit = unit
-                break
-        if selected_unit is None:
-            raise ValueError(f"Unit {unit_id} is not eligible in phase '{current_phase}'")
-        mask = self._build_mask_for_units(current_phase, [selected_unit], game_state)
-        return mask, [selected_unit]
+    # ── PIERRE TOMBALE — masque et décodeur de l'ANCIEN espace d'actions (2026-07-29) ──────
+    # Ont vécu ici, et sont morts ensemble :
+    #   `convert_gym_action`            décodeur de l'espace 0-15, en dur (4-8 = tir, 9 = charge,
+    #                                   10 = fight, 11 = wait) alors que l'espace réel fait 1107
+    #   `_get_valid_actions_for_phase`  sa table de plages par phase
+    #   `get_action_mask`               wrapper de `get_action_mask_and_eligible_units`
+    #   `get_action_mask_for_unit`      variante par unité, sans aucun appelant
+    #   `get_action_mask_and_eligible_units` + `_build_mask_for_units`  le masque 0-15 lui-même
+    #
+    # POURQUOI ils étaient morts : la production est passée au pipeline squad
+    # (`get_squad_action_mask_and_eligible_units` + `convert_squad_action`) sans que l'ancien
+    # chemin soit retiré. Aucun appelant de production ne subsistait ; seuls ~25 tests le
+    # maintenaient vert. Le dernier appelant réel était un outil d'ÉVALUATION
+    # (`scripts/roster_matchup_stats.py`), à qui ce masque périmé servait un espace d'actions
+    # que le modèle ne parlait plus — un faux muet, pas une erreur.
+    #
+    # RÈGLE : dès qu'il existe DEUX constructeurs de masque pour un même agent, l'un des deux est
+    # déjà mort ou le deviendra sans bruit — ils ne divergent pas bruyamment, ils divergent en
+    # silence (même longueur de masque, donc rien ne lève). Le verrou anti-récidive est la parité
+    # masque↔décodeur de `tests/unit/engine/test_agent_interface_contract.py` : tout entier
+    # ouvert par le masque DOIT être décodable ; le rejet d'un entier fermé est verrouillé une
+    # couche plus haut, dans `validate_action_against_mask`.
+    # ─────────────────────────────────────────────────────────────────────────────────────────
 
     def get_squad_action_mask_and_eligible_units(
         self, game_state: Dict[str, Any]
@@ -295,138 +298,6 @@ class ActionDecoder:
 
         return mask, eligible_units
 
-    def _build_mask_for_units(
-        self,
-        current_phase: str,
-        eligible_units: List[Dict[str, Any]],
-        game_state: Dict[str, Any],
-    ) -> np.ndarray:
-        """Build action mask for provided eligible_units list."""
-        mask = np.zeros(self.total_action_size, dtype=bool)
-        if not eligible_units:
-            # No units can act - phase should auto-advance
-            # CRITICAL: Fight phase has no wait action - return all False mask
-            # to trigger auto-advance in w40k_core.step()
-            if current_phase == "fight":
-                return mask
-            # Command phase: fall through to its handler (zone intents require eligible_units=[])
-            if current_phase != "command":
-                mask[11] = True
-                return mask
-
-        if current_phase == "deployment":
-            active_unit = eligible_units[0] if eligible_units else None
-            if active_unit:
-                current_deployer = self._get_current_deployer(game_state)
-                valid_hexes = self._get_valid_deployment_hexes(
-                    game_state,
-                    current_deployer,
-                    str(require_key(active_unit, "id")),
-                )
-                num_hexes = len(valid_hexes)
-                if num_hexes == 0:
-                    raise ValueError(
-                        f"Deployment deadlock: no valid hex for player {current_deployer}, "
-                        f"unit {active_unit.get('id')}"
-                    )
-                for i in range(open_deploy_slot_count(num_hexes)):
-                    mask[DEPLOY_SLOT_BASE + i] = True
-            return mask
-        if current_phase == "command":
-            mask[11] = True
-            # Activate zone intent actions if free steps remain
-            free_steps = game_state["zone_intent_free_steps_remaining"]
-            if free_steps > 0:
-                objectives = game_state["objectives"]
-                num_zones = min(len(objectives), MAX_OBJECTIVES)
-                for zone_idx in range(num_zones):
-                    for intent_val in range(3):
-                        action_idx = BASE_ZONE_INTENT + zone_idx * 3 + intent_val
-                        if action_idx < TOTAL_ACTION_SIZE:
-                            mask[action_idx] = True
-            return mask
-        elif current_phase == "move":
-            mask[[0, 1, 2, 3]] = True
-            mask[11] = True
-        elif current_phase == "shoot":
-            active_unit = eligible_units[0] if eligible_units else None
-            if active_unit:
-                if game_state.get("debug_mode", False):
-                    from engine.game_utils import add_debug_file_log
-                    episode = game_state.get("episode_number", "?")
-                    turn = game_state.get("turn", "?")
-                    current_player = game_state.get("current_player", "?")
-                    active_shooting_unit = game_state.get("active_shooting_unit")
-                    shoot_pool = game_state.get("shoot_activation_pool")
-                    add_debug_file_log(
-                        game_state,
-                        f"[MASK DEBUG] E{episode} T{turn} P{current_player} shoot mask: "
-                        f"active_unit={active_unit.get('id')} active_shooting_unit={active_shooting_unit} "
-                        f"valid_target_pool={active_unit.get('valid_target_pool')} "
-                        f"shoot_activation_pool={shoot_pool}"
-                    )
-                if "valid_target_pool" not in active_unit or active_unit.get("valid_target_pool") is None:
-                    if active_unit.get("_shoot_activation_started", False):
-                        raise ValueError(
-                            "valid_target_pool missing after shooting activation start; "
-                            f"unit_id={active_unit.get('id')}"
-                        )
-                    from engine.phase_handlers.shooting_handlers import shooting_build_valid_target_pool
-                    shooting_build_valid_target_pool(game_state, str(active_unit.get("id")))
-                valid_targets = active_unit.get("valid_target_pool")
-                if valid_targets is not None:
-                    num_targets = len(valid_targets)
-                    if num_targets > 0:
-                        for i in range(min(5, num_targets)):
-                            mask[4 + i] = True
-            mask[11] = True
-        elif current_phase == "charge":
-            active_unit = eligible_units[0] if eligible_units else None
-            if active_unit:
-                active_charge_unit = game_state.get("active_charge_unit")
-                if active_charge_unit == active_unit["id"]:
-                    if "pending_charge_targets" in game_state:
-                        valid_targets = game_state["pending_charge_targets"]
-                        num_targets = len(valid_targets)
-                        if num_targets > 0:
-                            for i in range(min(5, num_targets)):
-                                mask[4 + i] = True
-                    elif "valid_charge_destinations_pool" in game_state and game_state.get("valid_charge_destinations_pool"):
-                        valid_destinations = require_key(game_state, "valid_charge_destinations_pool")
-                        num_destinations = len(valid_destinations)
-                        if num_destinations > 0:
-                            for i in range(min(5, num_destinations)):
-                                mask[4 + i] = True
-                    else:
-                        mask[9] = True
-                else:
-                    mask[9] = True
-            mask[11] = True
-        elif current_phase == "fight":
-            if eligible_units:
-                mask[10] = True
-        return mask
-
-    def get_action_mask(self, game_state: Dict[str, Any]) -> np.ndarray:
-        """Return action mask with dynamic target slot masking - True = valid action."""
-        mask, _ = self.get_action_mask_and_eligible_units(game_state)
-        return mask
-    
-    def _get_valid_actions_for_phase(self, phase: str) -> List[int]:
-        """Get valid action types for current phase with target selection support."""
-        if phase == "deployment":
-            return [4, 5, 6, 7, 8]  # Deployment hex slots 0-4
-        if phase == "move":
-            return [0, 1, 2, 3, 11]  # Move directions + wait
-        elif phase == "shoot":
-            return [4, 5, 6, 7, 8, 11]  # Target slots 0-4 + wait (advance se joue en phase de mouvement)
-        elif phase == "charge":
-            return [9, 11]  # Charge + wait
-        elif phase == "fight":
-            return [10]  # Fight only - NO WAIT in fight phase
-        else:
-            return [11]  # Only wait for unknown phases
-    
     def get_deployment_active_unit(self, game_state: Dict[str, Any]) -> Dict[str, Any]:
         """L'unité sur laquelle porte la décision de déploiement — SOURCE UNIQUE obs ↔ masque.
 
@@ -667,253 +538,6 @@ class ActionDecoder:
                 },
             )
     
-    def convert_gym_action(
-        self,
-        action: int,
-        game_state: Dict[str, Any],
-        action_mask: Optional[np.ndarray] = None,
-        eligible_units: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
-        """Convert gym integer action to semantic action with target selection support.
-        PERF: When action_mask and eligible_units are provided (e.g. from step), avoids recomputing them."""
-        current_phase = game_state["phase"]
-        action_int = self.normalize_action_input(
-            raw_action=action,
-            phase=current_phase,
-            source="gym",
-            action_space_size=self.total_action_size,
-        )
-
-        # Zone intent actions (16-30): only valid in command phase
-        if is_zone_intent_action(action_int):
-            if current_phase != "command":
-                return {
-                    "action": "invalid",
-                    "error": f"zone_intent_action_{action_int}_forbidden_in_{current_phase}_phase",
-                }
-            zone_idx, intent_value = decode_zone_intent_action(action_int)
-            return {
-                "action": "zone_intent",
-                "zone_idx": zone_idx,
-                "intent_value": intent_value,
-            }
-
-        # Use provided mask/units or compute (e.g. PvE, other callers)
-        if action_mask is None or eligible_units is None:
-            action_mask, eligible_units = self.get_action_mask_and_eligible_units(game_state)
-
-        # Validate action against mask - convert invalid actions to SKIP
-        if not action_mask[action_int]:
-            # Return invalid action for training penalty and proper pool management
-            if eligible_units:
-                selected_unit_id = eligible_units[0]["id"]
-                return {
-                    "action": "invalid", 
-                    "error": f"forbidden_in_{current_phase}_phase", 
-                    "unitId": selected_unit_id,
-                    "attempted_action": action_int,
-                    "end_activation_required": True
-                }
-            else:
-                return {"action": "advance_phase", "from": current_phase, "reason": "no_eligible_units"}
-
-        if not eligible_units:
-            # No eligible units - signal phase advance needed
-            current_phase = game_state["phase"]
-            return {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
-        
-        # GUARANTEED UNIT SELECTION - use first eligible unit directly
-        selected_unit_id = eligible_units[0]["id"]
-        
-        if current_phase == "deployment":
-            if action_int in [4, 5, 6, 7, 8]:
-                current_deployer = self._get_current_deployer(game_state)
-                if game_state.get("debug_mode", False):
-                    print(
-                        "[TRAIN DEBUG] ActionDecoder.convert_gym_action before _get_valid_deployment_hexes "
-                        f"action_int={action_int} current_deployer={current_deployer}",
-                        flush=True,
-                    )
-                valid_hexes = self._get_valid_deployment_hexes(
-                    game_state,
-                    current_deployer,
-                    str(selected_unit_id),
-                )
-                if game_state.get("debug_mode", False):
-                    print(
-                        "[TRAIN DEBUG] ActionDecoder.convert_gym_action after _get_valid_deployment_hexes "
-                        f"action_int={action_int} valid_hexes_n={len(valid_hexes)}",
-                        flush=True,
-                    )
-                if not valid_hexes:
-                    return {
-                        "action": "invalid",
-                        "error": "no_valid_deployment_hexes",
-                        "unitId": selected_unit_id,
-                        "attempted_action": action_int,
-                        "end_activation_required": False,
-                    }
-                if game_state.get("debug_mode", False):
-                    print(
-                        "[TRAIN DEBUG] ActionDecoder.convert_gym_action before _select_deployment_hex_for_action "
-                        f"action_int={action_int} unit_id={selected_unit_id}",
-                        flush=True,
-                    )
-                dest_col, dest_row = self._select_deployment_hex_for_action(
-                    action_int=action_int,
-                    unit_id=selected_unit_id,
-                    game_state=game_state,
-                    current_deployer=current_deployer,
-                    valid_hexes=valid_hexes,
-                )
-                if game_state.get("debug_mode", False):
-                    print(
-                        "[TRAIN DEBUG] ActionDecoder.convert_gym_action after _select_deployment_hex_for_action "
-                        f"action_int={action_int} dest=({dest_col},{dest_row})",
-                        flush=True,
-                    )
-                return {
-                    "action": "deploy_unit",
-                    "unitId": selected_unit_id,
-                    "destCol": dest_col,
-                    "destRow": dest_row,
-                }
-        if current_phase == "move":
-            if action_int in [0, 1, 2, 3]:  # Move with strategic heuristic
-                # Actions 0-3 map to movement strategies:
-                # 0 = aggressive (toward enemies)
-                # 1 = tactical (shooting position)
-                # 2 = defensive (away from enemies)
-                # 3 = objective (toward nearest objective)
-
-                # Get unit to activate and build destinations
-                from engine.phase_handlers import movement_handlers
-                unit = require_present(get_unit_by_id(selected_unit_id, game_state), f"unit {selected_unit_id}")
-
-                # Activate unit first so execute_action skips the redundant BFS rebuild
-                movement_handlers.movement_unit_activation_start(game_state, selected_unit_id)
-                movement_handlers.movement_build_valid_destinations_pool(game_state, selected_unit_id)
-                valid_destinations = require_key(game_state, "valid_move_destinations_pool")
-
-                if not valid_destinations:
-                    # No valid moves - skip
-                    return {"action": "skip", "unitId": selected_unit_id}
-
-                # Use strategic selector to pick destination
-                dest_col, dest_row = movement_handlers._select_strategic_destination(
-                    action_int,
-                    valid_destinations,
-                    unit,
-                    game_state
-                )
-
-                return {
-                    "action": "move",
-                    "unitId": selected_unit_id,
-                    "destCol": dest_col,
-                    "destRow": dest_row
-                }
-            elif action_int == 11:  # WAIT - agent chooses not to move
-                return {"action": "skip", "unitId": selected_unit_id}
-                
-        elif current_phase == "shoot":
-            if action_int in [4, 5, 6, 7, 8]:  # Shoot target slots 0-4
-                target_slot = action_int - 4  # Convert to slot index (0-4)
-                
-                # PERFORMANCE: Use cached pool from unit activation instead of recalculating
-                # Pool is built at activation and after advance; it must be available here
-                # Pool is automatically updated when targets die (dead targets are removed, shooting_handlers.py line 3183)
-                selected_unit = get_unit_by_id(selected_unit_id, game_state)
-                if not selected_unit:
-                    raise ValueError(f"Selected unit not found for shooting: unit_id={selected_unit_id}")
-                valid_targets = require_key(selected_unit, "valid_target_pool")
-                if valid_targets is None:
-                    raise ValueError(f"valid_target_pool is None for unit: unit_id={selected_unit_id}")
-                
-                # CRITICAL: Validate target slot is within valid range
-                if target_slot < len(valid_targets):
-                    target_id = valid_targets[target_slot]
-                    
-                    # Debug: Log first few target selections
-                    if game_state["turn"] == 1 and not hasattr(self, '_target_logged'):
-                        self._target_logged = True
-                    
-                    return {
-                        "action": "shoot",
-                        "unitId": selected_unit_id,
-                        "targetId": target_id
-                    }
-                else:
-                    return {
-                        "action": "wait",
-                        "unitId": selected_unit_id,
-                        "invalid_action_penalty": True,
-                        "attempted_action": action_int
-                    }
-                    
-            elif action_int == 11:  # WAIT - agent chooses not to shoot
-                return {"action": "wait", "unitId": selected_unit_id}
-
-        elif current_phase == "charge":
-            active_charge_unit = game_state.get("active_charge_unit")
-            
-            # Check if unit is activated and waiting for target selection
-            if active_charge_unit == selected_unit_id and "pending_charge_targets" in game_state:
-                valid_targets = game_state["pending_charge_targets"]
-                if action_int in [4, 5, 6, 7, 8]:  # Target slots 0-4
-                    target_slot = action_int - 4
-                    if target_slot < len(valid_targets):
-                        target_id = valid_targets[target_slot]["id"]
-                        return {
-                            "action": "charge",
-                            "unitId": selected_unit_id,
-                            "targetId": target_id
-                        }
-                    else:
-                        return {
-                            "action": "invalid",
-                            "unitId": selected_unit_id,
-                            "error": "invalid_target_slot",
-                            "attempted_action": action_int
-                        }
-            
-            # Check if unit is activated and waiting for destination selection (after target and roll)
-            if active_charge_unit == selected_unit_id and "valid_charge_destinations_pool" in game_state:
-                valid_destinations = require_key(game_state, "valid_charge_destinations_pool")
-                if valid_destinations and action_int in [4, 5, 6, 7, 8]:
-                    # Destination selection (gym mode auto-selects, but allow manual for consistency)
-                    dest_slot = action_int - 4
-                    if dest_slot < len(valid_destinations):
-                        dest_col, dest_row = valid_destinations[dest_slot]
-                        return {
-                            "action": "charge",
-                            "unitId": selected_unit_id,
-                            "destCol": dest_col,
-                            "destRow": dest_row
-                        }
-            
-            if action_int == 9:  # Charge action - activates unit or triggers charge
-                return {
-                    "action": "charge",
-                    "unitId": selected_unit_id
-                }
-            elif action_int == 11:  # WAIT - agent chooses not to charge
-                return {"action": "skip", "unitId": selected_unit_id}
-                
-        elif current_phase == "fight":
-            if action_int == 10:  # Fight action - handler selects target internally
-                return {
-                    "action": "fight",
-                    "unitId": selected_unit_id
-                }
-        
-        valid_actions = self._get_valid_actions_for_phase(current_phase)
-        if action_int not in valid_actions:
-            return {"action": "invalid", "error": f"action_{action_int}_forbidden_in_{current_phase}_phase"}
-        
-        # SKIP is system response when no valid actions possible (not agent choice)
-        return {"action": "skip", "reason": "no_valid_action_found"}
-
     def convert_squad_action(
         self,
         action_int: int,
@@ -2236,53 +1860,20 @@ class ActionDecoder:
         )
         return (col, row)
     
-    # ============================================================================
-    # TARGET VALIDATION
-    # ============================================================================
-    
-    def get_all_valid_targets(self, unit: Dict[str, Any], game_state: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Get all valid targets for unit based on current phase."""
-        targets = []
-        units_cache = require_key(game_state, "units_cache")
-        unit_player = int(unit["player"]) if unit["player"] is not None else None
-        for enemy_id, cache_entry in units_cache.items():
-            if int(cache_entry["player"]) != unit_player:
-                enemy = get_unit_by_id(enemy_id, game_state)
-                if enemy is None:
-                    raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
-                targets.append(enemy)
-        return targets
-    
-    def can_melee_units_charge_target(self, target: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
-        """Check if any friendly melee units can charge this target."""
-        current_player = game_state["current_player"]
-        
-        units_cache = require_key(game_state, "units_cache")
-        for unit_id, cache_entry in units_cache.items():
-            if cache_entry["player"] == current_player:
-                unit = get_unit_by_id(unit_id, game_state)
-                if unit is None:
-                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-                if (unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0 and
-                    any(require_key(w, "DMG") > 0 for w in unit["CC_WEAPONS"])):  # Has melee capability
-                    
-                    # Simple charge range check (2d6 movement + unit MOVE)
-                    if "MOVE" not in unit:
-                        raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
-                    from shared.data_validation import require_key as _rk
-                    from engine.hex_utils import min_distance_between_sets as _mds
-                    _gr = _rk(_rk(game_state, "config"), "game_rules")
-                    max_charge_range = unit["MOVE"] + _rk(_rk(game_state["config"], "charge"), "charge_max_distance")
-                    _cache = _rk(game_state, "units_cache")
-                    _ue = _cache.get(str(unit["id"]))
-                    _te = _cache.get(str(target["id"]))
-                    _uc = get_unit_coordinates(unit)
-                    _tc = get_unit_coordinates(target)
-                    unit_fp = _ue.get("occupied_hexes", {_uc}) if _ue else {_uc}
-                    target_fp = _te.get("occupied_hexes", {_tc}) if _te else {_tc}
-                    distance = _mds(unit_fp, target_fp, max_distance=max_charge_range)
-
-                    if distance <= max_charge_range:
-                        return True
-        
-        return False
+    # ── PIERRE TOMBALE — « TARGET VALIDATION » de l'ancien décodeur (2026-07-29) ──────────────
+    # Ont vécu ici :
+    #   `get_all_valid_targets`          rendait TOUS les ennemis vivants, sans filtre de phase
+    #                                    malgré sa docstring (« based on current phase »)
+    #   `can_melee_units_charge_target`  « un allié de mêlée pourrait-il charger cette cible ? »,
+    #                                    portée de charge approximée par `MOVE + charge_max_distance`
+    #
+    # POURQUOI elles étaient mortes : aucun appelant, nulle part (ni moteur, ni ai/, ni scripts,
+    # ni services). Les pools de cibles réels sont construits par les handlers de phase
+    # (`shooting_build_valid_target_pool`, pools 11.02 / 12.05) et exposés à l'agent par les
+    # slots de cible du masque ; le reward a sa PROPRE `_get_all_valid_targets`
+    # (`engine/reward_calculator.py`), qui n'a jamais eu de rapport avec celles-ci.
+    #
+    # RÈGLE : ces deux méthodes étaient présentées comme « Key Methods » dans
+    # `Documentation/AI_IMPLEMENTATION.md` — une doc d'API décrit ce qu'on a écrit, jamais ce que
+    # la production appelle. Elle ne vaut pas preuve de vie.
+    # ─────────────────────────────────────────────────────────────────────────────────────────
