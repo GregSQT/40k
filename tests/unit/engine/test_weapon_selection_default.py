@@ -177,7 +177,7 @@ def test_target_size_is_captured_per_weapon() -> None:
 
 def test_close_quarters_and_other_weapons_are_not_mixed() -> None:
     """24.07 (SIDEARMS) : hors MONSTER/VEHICLE, une figurine choisit une famille, pas les deux."""
-    from engine.phase_handlers.shooting_handlers import _weapon_has_close_quarters_rule
+    from engine.utils.weapon_helpers import weapon_has_rule
 
     eng = _engine([
         _unit_cfg(1, 1, [(10, 10)], rng_weapons=[
@@ -188,7 +188,7 @@ def test_close_quarters_and_other_weapons_are_not_mixed() -> None:
     ])
     intents = _declare(eng, "2", ["2"])
     weapons = eng.game_state["models_cache"]["1#0"]["RNG_WEAPONS"]
-    families = {_weapon_has_close_quarters_rule(weapons[i["weapon_index"]]) for i in intents}
+    families = {weapon_has_rule(weapons[i["weapon_index"]], "CLOSE_QUARTERS") for i in intents}
     assert len(families) == 1, "une figurine ne melange pas [CLOSE-QUARTERS] et ses autres armes"
 
 

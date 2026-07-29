@@ -117,11 +117,16 @@ def test_weapon_display_names_are_untouched() -> None:
 
 
 def test_engine_predicate_is_renamed_and_live() -> None:
-    """Le prédicat moteur porte le nouveau nom ET reconnaît la règle renommée."""
-    from engine.phase_handlers.shooting_handlers import _weapon_has_close_quarters_rule
+    """Le prédicat moteur reconnaît la règle renommée.
 
-    assert _weapon_has_close_quarters_rule({"WEAPON_RULES": ["CLOSE_QUARTERS"]}) is True
-    assert _weapon_has_close_quarters_rule({"WEAPON_RULES": ["ASSAULT"]}) is False
+    2026-07-29 — le prédicat visé n'est plus `_weapon_has_close_quarters_rule` (doublon laxiste
+    supprimé) mais `weapon_has_rule(weapon, "CLOSE_QUARTERS")`, auquel le tir délègue désormais.
+    L'assertion de fond est inchangée : c'est le nouvel identifiant qui déclenche, pas l'ancien.
+    """
+    from engine.utils.weapon_helpers import weapon_has_rule
+
+    assert weapon_has_rule({"WEAPON_RULES": ["CLOSE_QUARTERS"]}, "CLOSE_QUARTERS") is True
+    assert weapon_has_rule({"WEAPON_RULES": ["ASSAULT"]}, "CLOSE_QUARTERS") is False
     # L'ancien identifiant ne doit plus rien déclencher : sinon une armory non migrée
     # continuerait de « marcher » et la migration se déferait en silence.
-    assert _weapon_has_close_quarters_rule({"WEAPON_RULES": ["PISTOL"]}) is False
+    assert weapon_has_rule({"WEAPON_RULES": ["PISTOL"]}, "CLOSE_QUARTERS") is False
