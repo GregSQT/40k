@@ -1312,8 +1312,11 @@ class ActionDecoder:
                     hex_los_cache[((enemy_col, enemy_row), (vc, vr))] = r
                     if r:
                         los_exposure_by_hex[(vc, vr)] += 1
-            if _debug_mode:
-                los_exposure_total_s = time.perf_counter() - _t_los0  # type: ignore[operator]
+            # On teste le CHRONO, pas le drapeau : c'est la meme condition (`_t_los0` n'est pose
+            # que si `_debug_mode`), mais celle-ci se prouve — l'ignore precedent ne faisait que
+            # taire la soustraction sur un Optional.
+            if _t_los0 is not None:
+                los_exposure_total_s = time.perf_counter() - _t_los0
 
             # --- Batch potential LoS from reference hexes ---
             _t_potential0 = time.perf_counter() if _debug_mode else None
@@ -1334,8 +1337,9 @@ class ActionDecoder:
                     potential_los_cache_for_topology[(vc, vr)] = int(potential_counts[i])
             for col, row in valid_hexes:
                 potential_los_exposure_by_hex[(col, row)] = potential_los_cache_for_topology[(int(col), int(row))]
-            if _debug_mode:
-                potential_los_total_s = time.perf_counter() - _t_potential0  # type: ignore[operator]
+            # Idem : le chrono lui-meme est la preuve que le mode debug etait actif.
+            if _t_potential0 is not None:
+                potential_los_total_s = time.perf_counter() - _t_potential0
         if _debug_mode and _t_cache0 is not None:
             print(
                 "[TRAIN DEBUG] ActionDecoder._build_deployment_scoring_cache after los maps "

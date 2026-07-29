@@ -348,7 +348,7 @@ def test_downscale_refuses_a_multi_hex_footprint_board(gsm, board_x5, tmp_path) 
     )
     # Aucune paire de plateaux du dépôt ne produit ce cas (x10 ÷ 2 donne 180x156, pas 220x300) :
     # le rapport est donc forcé ici pour exercer la garde elle-même.
-    manager._board_ref_downscale_ratio = lambda *_args, **_kwargs: 2  # type: ignore[method-assign]
+    manager._board_ref_downscale_ratio = lambda *_args, **_kwargs: 2
     with pytest.raises(ValueError, match="empreintes multi-hex"):
         manager.load_units_from_scenario(str(path), UnitRegistry())
 

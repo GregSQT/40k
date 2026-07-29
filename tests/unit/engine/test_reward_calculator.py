@@ -98,7 +98,7 @@ def _objective_calculator() -> RewardCalculator:
         unit_registry=None,
         state_manager=None,
     )
-    rc._get_unit_reward_config = lambda unit: {  # type: ignore[method-assign]
+    rc._get_unit_reward_config = lambda unit: {
         "objective_rewards": {"on_objective_bonus": 2.5}
     }
     return rc

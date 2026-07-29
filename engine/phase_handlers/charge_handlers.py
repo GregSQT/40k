@@ -5216,6 +5216,10 @@ def charge_autoplace_plan(
                 rows.append(base_rows + k); cols.append(e_i)
         n_pack = base_rows + len(conflict_pairs)
         A = coo_matrix(([1.0] * len(rows), (rows, cols)), shape=(n_pack, nvar))
+        # Les stubs scipy declarent `lb`/`ub` en `float` alors que l'API accepte officiellement
+        # un tableau (une borne par ligne) — c'est meme l'usage normal pour un systeme de
+        # contraintes. Lacune du typage externe, pas du code : le vecteur est bien ce qu'attend
+        # `milp`. Idem ligne suivante et dans fight_handlers (meme empaquetage).
         constraints = [LinearConstraint(A, np.zeros(n_pack), np.ones(n_pack))]  # type: ignore[arg-type]
         # (4) Couverture DURE : chaque cible déclarée présente reçoit ≥ 1 fig l'engageant.
         if cover:
@@ -5228,6 +5232,7 @@ def charge_autoplace_plan(
             if crows:
                 ncov = len(present_target_ids)
                 Ac = coo_matrix(([1.0] * len(crows), (crows, ccols)), shape=(ncov, nvar))
+                # Bornes vectorielles : meme lacune de stubs scipy que ci-dessus.
                 constraints.append(LinearConstraint(Ac, np.ones(ncov), np.full(ncov, float(nvar))))  # type: ignore[arg-type]
         max_pd = max((e[2] for e in edges), default=0) + 1
         max_dt = max((all_slots[e[1]][3] for e in edges), default=0) + 1
