@@ -561,7 +561,7 @@ def _run_single_episode(
     return "loss"
 
 
-def _run_matchup_episodes(
+def _build_eval_env(
     scenario_file: str,
     agent_key: str,
     model_path: str,
@@ -572,16 +572,15 @@ def _run_matchup_episodes(
     eval_bot_name: str,
     eval_bot_randomness: float,
     agent_seat_mode: str,
-    obs_normalizer=None,
-    seed: int = 42,
-) -> Tuple[int, int, int, int]:
-    """Run n_episodes with model vs bot, return (wins, losses, draws, failed_episodes).
+):
+    """Construit l'environnement d'evaluation (moteur -> ActionMasker -> BotControlledEnv).
 
-    `failed_episodes` compte les episodes TRONQUES par le plafond de pas, jamais melanges aux
-    resultats de parties : meme separation que `failed_episodes` dans la reference
-    (ai/bot_evaluation.py:557), qui sert la a decider `eval_reliable` (:1192).
+    Extrait de `_run_matchup_episodes` pour que le cablage du siege soit verifiable avec des
+    doublures, sans construire de moteur. `agent_seat_mode` est transmis dans LES DEUX modes
+    d'adversaire : il etait valide puis oublie en mode bot, ou le wrapper retombait sur son
+    defaut "p1" (`BotControlledEnv.__init__`, param `agent_seat_mode`) — l'option existait,
+    etait documentee, et n'avait aucun effet.
     """
-    from sb3_contrib import MaskablePPO
     from ai.training_utils import setup_imports
     from ai.env_wrappers import BotControlledEnv
     from ai.evaluation_bots import (
@@ -590,7 +589,6 @@ def _run_matchup_episodes(
     )
     from sb3_contrib.common.wrappers import ActionMasker
     from ai.unit_registry import UnitRegistry
-    from config_loader import get_max_turns
 
     unit_registry = UnitRegistry()
     W40KEngine, _ = setup_imports()
@@ -631,7 +629,12 @@ def _run_matchup_episodes(
             bot = RandomBot()
         else:
             bot = BOT_CLASSES[eval_bot_name](randomness=float(eval_bot_randomness))
-        env = BotControlledEnv(masked_env, bot, unit_registry)
+        env = BotControlledEnv(
+            masked_env,
+            bot,
+            unit_registry,
+            agent_seat_mode=agent_seat_mode,
+        )
     else:
         # Force self-play opponent every episode (agent vs agent), snapshot taken from model_path.
         # A fallback bot list is required by BotControlledEnv signature, but ratio=1.0 ensures
@@ -652,7 +655,44 @@ def _run_matchup_episodes(
             self_play_snapshot_device="cpu",
             self_play_deterministic=True,
         )
+    return env
 
+
+def _run_matchup_episodes(
+    scenario_file: str,
+    agent_key: str,
+    model_path: str,
+    training_config_name: str,
+    rewards_config_name: str,
+    n_episodes: int,
+    opponent_mode: str,
+    eval_bot_name: str,
+    eval_bot_randomness: float,
+    agent_seat_mode: str,
+    obs_normalizer=None,
+    seed: int = 42,
+) -> Tuple[int, int, int, int]:
+    """Run n_episodes with model vs bot, return (wins, losses, draws, failed_episodes).
+
+    `failed_episodes` compte les episodes TRONQUES par le plafond de pas, jamais melanges aux
+    resultats de parties : meme separation que `failed_episodes` dans la reference
+    (`ai/bot_evaluation._eval_worker_task`), qui s'en sert pour decider `eval_reliable`.
+    """
+    from sb3_contrib import MaskablePPO
+    from config_loader import get_max_turns
+
+    env = _build_eval_env(
+        scenario_file=scenario_file,
+        agent_key=agent_key,
+        model_path=model_path,
+        training_config_name=training_config_name,
+        rewards_config_name=rewards_config_name,
+        n_episodes=n_episodes,
+        opponent_mode=opponent_mode,
+        eval_bot_name=eval_bot_name,
+        eval_bot_randomness=eval_bot_randomness,
+        agent_seat_mode=agent_seat_mode,
+    )
     model = MaskablePPO.load(model_path, env=env)
     # Meme source que la reference (ai/bot_evaluation.py:1052) : la duree de bataille vient de
     # game_rules.max_turns via config_loader.get_max_turns(). Aucun plafond en dur, aucune

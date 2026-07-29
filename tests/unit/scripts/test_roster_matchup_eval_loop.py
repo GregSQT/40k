@@ -298,3 +298,73 @@ def test_obs_normalizer_delegates_to_reference(script, monkeypatch):
     result = script._build_obs_normalizer("AnyAgent", "default", "/tmp/model.zip")
     assert result is sentinel, "le normalizer n'est plus celui de la reference"
     assert seen["args"] == (None, "/tmp/model.zip", True, True)
+
+
+# --------------------------------------------------------------------------------------
+# Cablage du siege de l'agent (--agent-seat-mode)
+# --------------------------------------------------------------------------------------
+
+
+class _SeatRecorder:
+    """Faux BotControlledEnv : retient les arguments de construction."""
+
+    calls: list = []
+
+    def __init__(self, *args, **kwargs):
+        type(self).calls.append({"args": args, "kwargs": kwargs})
+
+
+def _patch_env_dependencies(monkeypatch):
+    """Neutralise moteur, registre et wrapper : on ne teste QUE le cablage des arguments."""
+    import ai.env_wrappers as env_wrappers
+    import ai.training_utils as training_utils
+    import ai.unit_registry as unit_registry_mod
+    import sb3_contrib.common.wrappers as sb3_wrappers
+
+    _SeatRecorder.calls = []
+    monkeypatch.setattr(env_wrappers, "BotControlledEnv", _SeatRecorder)
+    monkeypatch.setattr(unit_registry_mod, "UnitRegistry", lambda *a, **k: object())
+    monkeypatch.setattr(training_utils, "setup_imports", lambda: (lambda **kwargs: object(), None))
+    monkeypatch.setattr(sb3_wrappers, "ActionMasker", lambda env, fn: env)
+    return _SeatRecorder
+
+
+def _build_env(script, opponent_mode, seat_mode):
+    return script._build_eval_env(
+        scenario_file="/tmp/scenario.json",
+        agent_key="AnyAgent",
+        model_path="/tmp/model.zip",
+        training_config_name="default",
+        rewards_config_name="default",
+        n_episodes=3,
+        opponent_mode=opponent_mode,
+        eval_bot_name="greedy",
+        eval_bot_randomness=0.0,
+        agent_seat_mode=seat_mode,
+    )
+
+
+@pytest.mark.parametrize("opponent_mode", ["bot", "agent"])
+@pytest.mark.parametrize("seat_mode", ["p1", "p2"])
+def test_agent_seat_mode_is_wired_in_both_opponent_modes(
+    script, monkeypatch, opponent_mode, seat_mode
+):
+    """`--agent-seat-mode` etait valide puis jamais transmis en mode bot : le wrapper
+    retombait sur son defaut "p1" et l'option ne servait a rien. Les deux modes
+    d'adversaire doivent la transmettre a l'identique."""
+    recorder = _patch_env_dependencies(monkeypatch)
+    _build_env(script, opponent_mode, seat_mode)
+
+    assert len(recorder.calls) == 1
+    kwargs = recorder.calls[0]["kwargs"]
+    assert kwargs.get("agent_seat_mode") == seat_mode, (
+        f"mode {opponent_mode!r} : agent_seat_mode absent ou faux "
+        f"({kwargs.get('agent_seat_mode')!r})"
+    )
+
+
+def test_agent_seat_mode_is_validated_before_use(script, monkeypatch):
+    """Une valeur hors 'p1'/'p2' leve, plutot que d'atteindre le wrapper."""
+    _patch_env_dependencies(monkeypatch)
+    with pytest.raises(ValueError, match="agent_seat_mode"):
+        _build_env(script, "bot", "p3")
