@@ -39,6 +39,7 @@ import pytest
 from engine.phase_handlers import charge_handlers
 from engine.phase_handlers.charge_handlers import charge_build_valid_destinations_pool
 from engine.phase_handlers.shared_utils import build_units_cache
+from tests._state_invariants import turn_state_invariants
 
 
 def _board_config() -> Dict[str, Any]:
@@ -86,7 +87,7 @@ def _unit(
 
 
 def _make_game_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": _board_config(),
         "board_cols": 25,
         "board_rows": 21,

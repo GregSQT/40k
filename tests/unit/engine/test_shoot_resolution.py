@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 
 from engine.phase_handlers.shooting_handlers import _has_valid_shooting_targets
 from engine.phase_handlers.shared_utils import build_units_cache
+from tests._state_invariants import turn_state_invariants
 
 
 def _weapon(close_quarters: bool = False, rng: int = 24) -> Dict[str, Any]:
@@ -47,7 +48,7 @@ def _unit(uid: int, player: int, col: int, row: int, close_quarters: bool = Fals
 
 
 def _make_game_state(units: List[Dict[str, Any]], units_fled=None) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": {
             "game_rules": {"engagement_zone": 10, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},

@@ -9,6 +9,7 @@ from engine.phase_handlers.charge_handlers import (
     charge_build_valid_destinations_pool,
 )
 from engine.phase_handlers.shared_utils import build_units_cache
+from tests._state_invariants import turn_state_invariants
 
 
 def _unit(uid: str, player: int, col: int, row: int) -> Dict[str, Any]:
@@ -43,7 +44,7 @@ def _make_game_state(
     board_cols: int = 40,
     board_rows: int = 30,
 ) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": {
             "game_rules": {
                 "engagement_zone": 1,

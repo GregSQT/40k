@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 
 from engine.phase_handlers.movement_handlers import _attempt_movement_to_destination
 from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache
+from tests._state_invariants import turn_state_invariants
 
 
 def _unit(uid: int, player: int, col: int, row: int, base_size: int = 1) -> Dict[str, Any]:
@@ -39,7 +40,7 @@ def _make_game_state(
     current_player: int = 1,
     engagement_zone: int = 1,
 ) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": {
             "game_rules": {"engagement_zone": engagement_zone, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},

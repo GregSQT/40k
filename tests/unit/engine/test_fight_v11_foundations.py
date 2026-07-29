@@ -25,6 +25,7 @@ from engine.phase_handlers.fight_handlers import (
     pile_in_select_targets_12_03,
     pile_in_move_destinations_12_03,
 )
+from tests._state_invariants import turn_state_invariants
 
 
 def _make_gs(
@@ -63,7 +64,7 @@ def _make_gs(
             "orientation": 0,
             "HP_CUR": u.get("HP_CUR", 1),
         }
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "inches_to_subhex": scale,
         "board_cols": board_cols,
         "board_rows": board_rows,

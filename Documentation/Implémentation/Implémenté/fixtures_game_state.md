@@ -1,7 +1,8 @@
-# Les fixtures de test fabriquent un `game_state` que la production ne produit jamais
+# Les fixtures de test fabriquaient un `game_state` que la production ne produit jamais
 
-**Ouvert le 2026-07-29.** Backlog — inventaire mesuré, chantier NON commencé.
-Décision d'architecture en attente (voir §4) : elle appartient à l'utilisateur.
+**Ouvert le 2026-07-29. Livré le 2026-07-29.**
+Décision d'architecture prise par l'utilisateur (§4) : socle minimal, liste **répliquée** +
+test de conformité. Périmètre exécuté : volets 1 et 2.
 
 ---
 
@@ -21,20 +22,14 @@ Le réflexe naturel — assouplir la lecture en `.get("units_advanced", set())` 
 choix possible : il aurait fait passer **toutes** les unités pour « n'ayant pas avancé », donc
 **désactivé 10.05** au lieu de le vérifier, en silence. `require_key` ne s'était pas trompé : il
 venait de révéler que la fixture `_make_gs` construisait un `game_state` **impossible en
-production**. Le moteur, lui, pose toujours la clé (`w40k_core`, dict d'init, 63 clés).
-
-Correctif appliqué le jour même : `_make_gs` pose `units_advanced: set()`. 21 tests réparés.
-**Ce document traite la cause, pas ce symptôme.**
+production**.
 
 ## 2. L'inventaire (mesuré à l'AST, 2026-07-29)
 
-Référence : le dict d'init du `game_state` dans `w40k_core` — **63 clés**, dont **19 d'état de
-tour** (`units_*`, `advance_rolls`, `reactive_*`, `last_move_*`, `reaction_window_active`).
-
 Balayage de `tests/` : tout dict littéral portant `units` + `phase` (ou `units` + `board_cols`).
 
-> **62 `game_state` littéraux, répartis dans 51 fichiers.
-> AUCUN ne pose les 19 invariants. La médiane est à 17 invariants manquants sur 19.**
+> **62 `game_state` littéraux, répartis dans 51 fichiers. AUCUN ne posait les invariants
+> d'état de tour. La médiane était à 17 manquants sur 19.**
 
 | Invariant manquant | Fixtures concernées |
 |---|---|
@@ -48,60 +43,88 @@ Balayage de `tests/` : tout dict littéral portant `units` + `phase` (ou `units`
 | `units_fled` | 40 |
 | `units_advanced`, `units_moved` | 37 |
 
-Fichiers les plus exposés : `test_movement_pool_build.py` (4 fixtures, 19/19 manquants),
-`test_phase_start.py` (3), `test_phase_transitions.py` (3), `test_engine_turn_loop.py` (2),
-`test_model_value_per_figurine.py` (2), `test_move_budget_geodesic.py` (2),
-`test_fly_2103_conformity.py` (2).
+## 3. Deux corrections à la prémisse, trouvées en instruisant
 
-## 3. Le vrai danger n'est pas le crash
+**(a) Le dict d'`__init__` n'est PAS la référence.** `w40k_core.py:435-530` ne pose que **15** des
+invariants : `units_advanced`, `advance_rolls`, `units_took_to_skies` et
+`units_took_to_skies_charge` n'existent que dans le dict de `reset()` (`w40k_core.py:1139-1183`),
+et `__init__` n'appelle jamais `reset()`. Aucun bug de production — tout chemin réel passe par
+`engine.reset()` (`api_server.py:2213`, `:3382`) — mais **un socle dérivé de l'init aurait été
+amputé de `units_advanced`**, la clé même de l'incident 10.05.
 
-Comment la **production** lit chacune de ces clés décide de ce qui arrive à une fixture qui l'omet :
+**(b) Il y a 20 invariants, pas 19.** Le filet « reset() ne pose rien hors du socle » a fait
+apparaître `units_fought` : posé par `command_phase_start` (`command_handlers.py:51`) et non par
+`reset()`, mais présent dans tout `game_state` de production (la cascade command suit le reset) et
+lu en `require_key` par la phase fight (`fight_handlers.py:1557`, `:1580`, `:1601`). Il est dans
+le socle. `units_cache` / `units_cache_prev` sont au contraire des **vues dérivées** des unités,
+explicitement hors socle.
 
-| Mode de lecture en production | Ce qui se passe | Exemples |
-|---|---|---|
-| `require_key(...)` ou `gs["..."]` | **erreur immédiate** — le test devient rouge et le dit | `units_advanced` (10 `require_key`), `units_fled` (7), `units_cannot_charge` (3) |
-| `.get("...", <défaut>)` **sans aucun `require_key`** | **silence** — le test observe un comportement faux et reste **vert** | `units_shot_previous_turn` (4 `.get`), `units_attacked` (1) |
+## 4. Décision d'architecture retenue
 
-C'est le second cas qui justifie ce chantier. L'épisode `units_advanced` s'est **bien** terminé
-précisément parce que la lecture était bruyante. À l'inverse, `units_shot_previous_turn` est absent
-des **62** fixtures et n'est lu que par `.get` avec défaut : **aucun test ne peut aujourd'hui
-observer un comportement correct qui en dépend**, et rien ne le signalera.
+**Socle minimal, liste répliquée, conformité verrouillée par test.**
 
-> ⚠️ Nuance à ne pas gommer : plusieurs clés ont **les deux** modes de lecture selon le chemin
-> (`units_charged` : 1 `.get` mais 8 accès directs ; `units_moved` : 2 et 10). Pour celles-là le
-> silence est **partiel** — il dépend du chemin emprunté. Ne pas les classer « sûres ».
+`tests/_state_invariants.py` expose `turn_state_invariants()` (20 clés, valeurs exactes du
+`game_state` post-reset) et `TURN_STATE_KEYS`. Chaque fixture le fusionne en tête de son littéral,
+donc **ses propres clés gagnent** :
 
-## 4. La décision d'architecture — À ARBITRER AVANT LA PREMIÈRE LIGNE
+```python
+gs = {**turn_state_invariants(), "phase": "shoot", "units_advanced": {"3"}, ...}
+```
 
-**Un constructeur unique, ou un socle d'invariants que chaque fixture spécialise ?**
+Le constructeur unique a été écarté : les 62 fixtures divergent sur la config, les rosters et les
+caches pré-construits (`test_movement_pool_build.py:80` vs `test_phase_start.py:47`) — un builder
+les couvrant toutes aurait dû reproduire `_initialize_units` et les caches, soit un second moteur
+à maintenir, pour un problème qui ne portait que sur l'état de tour.
 
-Les 62 fixtures divergent beaucoup (plateaux, phases, rosters, caches pré-construits). Un builder
-unique assez riche pour toutes les couvrir **deviendrait un second moteur à maintenir**, et sa
-dérive par rapport au vrai `game_state` reproduirait le problème un cran plus loin.
+La liste est **répliquée** (pas dérivée : une fixture unitaire ne peut pas construire un engine
+complet), et la dérive est fermée par trois tests dans
+`tests/unit/engine/test_engine_reset.py::TestTurnStateInvariantsConformity` :
+socle ⊆ post-reset, valeurs identiques, et le filet inverse (aucun invariant du moteur hors socle).
 
-La piste à instruire en premier : un socle minimal qui pose **les 19 invariants d'état de tour et
-rien d'autre**, que chaque fixture fusionne avec son propre littéral. Faible surface, pas de
-duplication du moteur. Mais c'est une piste, **pas une décision prise**.
+Placement en `tests/` racine : `from tests._state_invariants import …` fonctionne partout
+(`pythonpath = .`), y compris pour les 5 fixtures hors `tests/unit/engine/`.
 
-Question ouverte associée : ce socle doit-il **dériver** de l'init de `w40k_core` (garantie
-d'alignement, couplage fort) ou **répliquer** la liste (indépendance, dérive possible) ? Un test
-comparant les deux ensembles de clés réglerait la dérive sans le couplage — à évaluer.
+## 5. Volet 1 — poser le socle : neutre, et pourquoi
 
-## 5. Emplacement
+Les 62 fixtures ont été fusionnées avec le socle (51 fichiers). **Aucun test n'a changé de
+verdict**, et ce n'est pas une chance : toutes les lectures silencieuses de production ont un
+défaut **égal** à la valeur du socle — `set()` partout (`observation_builder.py:1122-1126`,
+`shooting_handlers.py:1019-1021`, `shared_utils.py:9697-9700`) ; la seule exception,
+`reactive_macro_order_current_window`, lève explicitement (`shared_utils.py:2298-2300`).
 
-`tests/unit/engine/` a déjà `conftest.py`, `_config_helpers.py`, `_roll_helpers.py` : l'ossature
-existe. **5** des 62 fixtures sont hors `tests/unit/engine/` (`tests/unit/ai/test_evaluation_bots.py`,
-`tests/unit/ai/test_step_log_weapon_rule_tokens.py`, `tests/unit/services/test_api_endpoints.py`,
-`tests/unit/services/test_endless_duty_value_baseline.py`,
-`tests/unit/services/test_api_integration.py`) — la portée du socle doit être décidée en
-conséquence, mais le gros du parc est bien sous `tests/unit/engine/`.
+> **Conséquence à ne pas gommer : le socle ne répare aucun faux-vert.** Il aligne l'état des tests
+> sur la production et supprime la classe « crash-surprise à la prochaine `require_key` ». Le
+> faux-vert vient d'ailleurs : d'un test qui **devrait** peupler une clé pour exercer une règle et
+> ne le fait pas. Lui donner `set()` ne le corrige pas — c'est le volet 2.
 
-## 6. Ce qui n'a PAS été instruit
+## 6. Volet 2 — les règles réellement non verrouillées
 
-- **Combien de tests observent aujourd'hui un comportement faux** à cause d'un invariant manquant
-  lu en `.get`. L'inventaire dit qui est exposé, **pas** qui est effectivement faux. C'est le
-  vrai travail, et il ne peut pas être mécanique : il demande de lire ce que chaque test prétend
-  vérifier. **Ne pas confondre « exposé » et « cassé ».**
-- Si des fixtures omettent des clés **hors** des 19 d'état de tour (les 44 autres de l'init).
-- Les fixtures qui ne construisent pas un dict littéral (usines, `conftest`, factories) — le
-  balayage ne les voit pas. Le chiffre 62 est un **plancher**, pas un total.
+Mesure : combien de sites de `tests/` peuplent chaque invariant à une valeur **non vide**. Trois
+trous nets, tous fermés, chacun prouvé rouge avant d'être rétabli.
+
+| Trou | Mesure | Verrou posé | Mutation qui le rougit |
+|---|---|---|---|
+| **13.09 Hidden, membre « ni au tour précédent »** — `units_shot_previous_turn` absente des 62 fixtures, lue par 3 `.get` de `shooting_handlers` ; seul le drapeau d'observation était couvert (`test_squad_obs_terrain_flags.py:200`), pas le moteur de tir ni le preview | 1 site | `tests/unit/engine/test_hidden_1309_previous_turn.py` (3 tests : statut réel, preview, contre-épreuve) | la fixture omet la clé → `hidden` reste `True` : le demi-13.09 silencieux |
+| **Les 5 bits d'état de tour de l'observation** (`moved`, `shot`, `fought`, `advanced`, `fled`) : aucun n'était vérifié allumé — une permutation du mapping bit↔clé sortait une obs fausse sans qu'une assertion bouge | `units_attacked` : 0 site | `tests/unit/engine/test_squad_obs_turn_state_bits.py` (7 tests, « ce bit et lui seul ») | (a) clé omise → bit éteint ; (b) `fought` recâblé sur `units_shot` dans le moteur → 2 tests rouges |
+| **`reactive_mode="macro"`** : branche entière de `_select_reactive_unit_order` jamais exercée (0 occurrence de `"macro"` dans `tests/`), ordre et erreurs explicites compris | 0 site | `tests/unit/engine/test_reactive_move.py::TestSelectReactiveUnitOrder` (5 tests) | macro retombant sur le tri par id → 3 tests rouges |
+
+La règle 13.09 a été relue dans `Documentation/40k_rules/13 Terrain.pdf` avant d'écrire le verrou :
+« That model's unit did not make one or more ranged attacks **during this turn or during the
+previous turn** ».
+
+## 7. Vérifications faites, et ce qui ne l'est pas
+
+**Fait :** les 51 fichiers modifiés + les 3 nouveaux lancés et verts ; `pyright` propre sur les 54
+fichiers touchés ; le scanner AST reconfirme 62/62 fixtures fusionnées ; chaque verrou prouvé
+rouge par mutation puis rétabli (`git status` propre sur `engine/` après chaque preuve).
+
+**Non fait / limites :**
+- La suite complète appartient à l'utilisateur — elle n'a pas été lancée ici.
+- L'état vert **avant** modification n'a pas été remesuré (dépôt propre au départ) ; la neutralité
+  du volet 1 est établie par la lecture des défauts de production, pas par un avant/après.
+- **Le chiffre 62 reste un plancher** : le balayage ne voit que les dicts littéraux, pas les
+  usines / `conftest` / factories.
+- Les **44 autres clés** du dict d'init (hors état de tour) n'ont pas été instruites.
+- Les invariants restants sont exercés non vides quelque part (7 à 53 sites chacun) mais leur
+  couverture n'a pas été auditée règle par règle : `reactive_decision_payload` (0 site non vide)
+  et `units_took_to_skies_charge` (5) sont les plus faibles après ceux traités ci-dessus.

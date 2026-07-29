@@ -8,6 +8,7 @@ import pytest
 
 from engine.phase_handlers.shooting_handlers import shooting_build_activation_pool
 from engine.phase_handlers.shared_utils import build_units_cache
+from tests._state_invariants import turn_state_invariants
 
 
 def _board_config() -> Dict[str, Any]:
@@ -51,7 +52,7 @@ def _make_game_state(
     units: List[Dict[str, Any]],
     current_player: int = 1,
 ) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": _board_config(),
         "board_cols": 25,
         "board_rows": 21,

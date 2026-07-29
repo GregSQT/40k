@@ -16,6 +16,7 @@ from ai.evaluation_bots import (
     TacticalBot,
     _select_weighted_deployment_action,
 )
+from tests._state_invariants import turn_state_invariants
 
 # Espace d'action squad SPATIAL (macro_intents, refonte move_action_space_spatial_rework §6.2) :
 #   0-1023 cellules de la grille egocentrique, 1024 wait, 1025-1029 shoot, 1030 charge, 1031 fight,
@@ -468,7 +469,7 @@ def _slot_gs(phase: str, enemies: dict, order: list, current_player=None, object
         enemy = {"id": eid, "player": FOE, "col": 5 + i, "row": 1, **fields}
         units.append(enemy)
         units_cache[eid] = dict(enemy)
-    gs = {
+    gs = {**turn_state_invariants(),
         "phase": phase,
         "current_player": current_player,
         "turn": 1,

@@ -9,6 +9,7 @@ import pytest
 
 import services.api_server as api_server
 from services.api_server import app
+from tests._state_invariants import turn_state_invariants
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +38,7 @@ class TestGetGameState:
     def test_engine_initialized_returns_200(self, monkeypatch):
         """state_ok : engine initialisé → 200 + success=True + game_state présent."""
         mock_engine = MagicMock()
-        mock_engine.game_state = {
+        mock_engine.game_state = {**turn_state_invariants(),
             "phase": "move",
             "current_player": 1,
             "turn": 1,

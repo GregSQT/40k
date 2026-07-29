@@ -18,6 +18,7 @@ from engine.phase_handlers.fight_handlers import (
     fight_v11_enter_consolidate,
     fight_v11_grouped_next,
 )
+from tests._state_invariants import turn_state_invariants
 
 
 def _make_gs(
@@ -39,7 +40,7 @@ def _make_gs(
             "col": u["col"], "row": u["row"], "player": u["player"],
             "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round", "orientation": 0, "HP_CUR": 1,
         }
-    return {
+    return {**turn_state_invariants(),
         "inches_to_subhex": 1, "board_cols": 40, "board_rows": 40,
         "config": {"game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "consolidation_trigger_range": 3}},
         "units": norm_units, "units_cache": units_cache, "wall_hexes": set(),

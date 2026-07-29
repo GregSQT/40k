@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 
 from engine.phase_handlers.shared_utils import fight_pile_in_plan, squad_consolidate_plan
+from tests._state_invariants import turn_state_invariants
 
 
 def _real_game_rules() -> Dict[str, Any]:
@@ -55,7 +56,7 @@ def _make_gs(
             "MODEL_HEIGHT": 2.5, "HP_CUR": 1,
             "occupied_hexes": {p for p in positions},
         }
-    return {
+    return {**turn_state_invariants(),
         "inches_to_subhex": 1, "board_cols": 40, "board_rows": 40,
         "wall_hexes": set(walls or ()), "models_cache": models_cache,
         "squad_models": squad_models, "units_cache": units_cache,

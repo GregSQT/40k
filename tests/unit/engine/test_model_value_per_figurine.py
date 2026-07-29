@@ -22,6 +22,7 @@ import pytest
 from engine.phase_handlers.shared_utils import build_units_cache
 from shared.data_validation import ConfigurationError
 from engine.reward_calculator import RewardCalculator
+from tests._state_invariants import turn_state_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -74,7 +75,7 @@ _GAME_RULES = json.loads(
 
 
 def _models_cache(unit: Dict[str, Any]) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": {
             "game_rules": {**_GAME_RULES, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
@@ -259,7 +260,7 @@ class TestObservationEnemySquadValue:
         enemy = _unit(2, value=75, hp_max=1, models=enemy_models)
         enemy["player"] = 2
 
-        gs: Dict[str, Any] = {
+        gs: Dict[str, Any] = {**turn_state_invariants(),
             "config": {
                 "game_rules": {**_GAME_RULES, "max_base_size_hex": 35},
                 "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},

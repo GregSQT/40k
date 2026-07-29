@@ -36,6 +36,7 @@ from engine.phase_handlers.shared_utils import (
     resolve_squad_move_constraints,
     squad_normal_move_frontier_subhex,
 )
+from tests._state_invariants import turn_state_invariants
 
 MOVE = 6
 FLOOR_HEIGHT_INCHES = 3.0
@@ -64,7 +65,7 @@ def _gs(*, level: int, fly: bool = False, move: int = MOVE) -> Dict[str, Any]:
     }
     # Plancher de niveau 1 couvrant la case de départ (sinon `floor_height_at` lève, cf. bug 2).
     floor_hexes = [[START[0] + dc, START[1] + dr] for dc in (-1, 0, 1) for dr in (-1, 0, 1)]
-    return {
+    return {**turn_state_invariants(),
         "models_cache": models_cache,
         "squad_models": {"1": ["1#0"]},
         "units_cache": {"1": {"col": START[0], "row": START[1], "player": 1,

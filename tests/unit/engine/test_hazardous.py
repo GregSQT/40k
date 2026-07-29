@@ -22,6 +22,7 @@ import pytest
 
 from engine.phase_handlers import shooting_handlers
 from engine.phase_handlers.shared_utils import build_manual_shoot_allocation, roll_hazard_for_unit
+from tests._state_invariants import turn_state_invariants
 
 
 def _seq(monkeypatch, rolls):
@@ -66,7 +67,7 @@ def _game_state(weapon_rules, *, shooters=1, shooter_keywords=("INFANTRY",)):
                     "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
                     "points_per_hp": 5.0, "VALUE": 10.0, "col": 9, "row": 9,
                     "UNIT_KEYWORDS": _kw("INFANTRY")}
-    return {
+    return {**turn_state_invariants(),
         "gym_training_mode": True,
         # Zone d'engagement : exigee des que le moteur resout un type de tir (10.04-10.06),
         # ce que fait desormais [CLOSE-QUARTERS] pour les figurines MONSTER/VEHICLE.

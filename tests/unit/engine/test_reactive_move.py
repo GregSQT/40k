@@ -7,9 +7,11 @@ from typing import Any, Dict, List
 import pytest
 
 from engine.phase_handlers.shared_utils import (
+    _select_reactive_unit_order,
     build_units_cache,
     maybe_resolve_reactive_move,
 )
+from tests._state_invariants import turn_state_invariants
 
 
 def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, Any]:
@@ -44,7 +46,7 @@ def _unit_with_reactive(uid: int, player: int, col: int, row: int) -> Dict[str, 
 
 
 def _make_game_state(units: List[Dict[str, Any]], current_player: int = 1) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": {
             "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
@@ -263,3 +265,73 @@ class TestMaybeResolveReactiveMoveEdgeCases:
         monkeypatch.setattr("random.randint", lambda a, b: 5)
         result = maybe_resolve_reactive_move(gs, "1", 4, 10, 5, 10, "move", "normal")
         assert result["triggered"] is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ordre d'activation de la fenêtre de réaction — mode macro
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSelectReactiveUnitOrder:
+    """``reactive_mode="macro"`` : branche entière jamais exercée jusqu'ici.
+
+    En micro l'ordre est le tri par id ; en macro il vient de
+    ``reactive_macro_order_current_window``. Cette clé est absente des fixtures littérales et
+    n'était peuplée nulle part : un ordre macro ignoré aurait activé les unités dans le mauvais
+    ordre sans qu'aucun test ne bouge. Les tests ci-dessous distinguent les deux modes en
+    choisissant un ordre macro **différent** du tri par id — sinon micro et macro seraient
+    indiscernables.
+    """
+
+    def _eligible(self):
+        return [_unit(1, 2, 5, 10), _unit(2, 2, 6, 10), _unit(3, 2, 7, 10)]
+
+    def test_micro_orders_by_id(self):
+        """reactive_order_micro : mode micro → tri par id, l'ordre macro est ignoré."""
+        gs = _make_game_state(self._eligible())
+        gs["reactive_macro_order_current_window"] = ["3", "1", "2"]
+
+        ordered = _select_reactive_unit_order(gs, list(reversed(self._eligible())))
+
+        assert [str(u["id"]) for u in ordered] == ["1", "2", "3"]
+
+    def test_macro_follows_declared_order(self):
+        """reactive_order_macro : mode macro → l'ordre déclaré prime sur le tri par id."""
+        eligible = self._eligible()
+        gs = _make_game_state(eligible)
+        gs["reactive_mode"] = "macro"
+        gs["reactive_macro_order_current_window"] = ["3", "1", "2"]
+
+        ordered = _select_reactive_unit_order(gs, eligible)
+
+        assert [str(u["id"]) for u in ordered] == ["3", "1", "2"]
+
+    def test_macro_empty_order_raises(self):
+        """reactive_order_macro_vide : en macro, un ordre vide est une erreur explicite.
+
+        C'est la valeur du socle : elle ne doit surtout pas être prise pour « aucune contrainte ».
+        """
+        eligible = self._eligible()
+        gs = _make_game_state(eligible)
+        gs["reactive_mode"] = "macro"
+
+        with pytest.raises(ValueError, match="macro order cannot be empty"):
+            _select_reactive_unit_order(gs, eligible)
+
+    def test_macro_order_with_non_eligible_unit_raises(self):
+        """reactive_order_macro_intrus : un id hors fenêtre est refusé, pas ignoré."""
+        eligible = self._eligible()
+        gs = _make_game_state(eligible)
+        gs["reactive_mode"] = "macro"
+        gs["reactive_macro_order_current_window"] = ["3", "99"]
+
+        with pytest.raises(ValueError, match="unit_id=99 not eligible"):
+            _select_reactive_unit_order(gs, eligible)
+
+    def test_unknown_mode_raises(self):
+        """reactive_order_mode_inconnu : un mode hors {micro, macro} est refusé."""
+        eligible = self._eligible()
+        gs = _make_game_state(eligible)
+        gs["reactive_mode"] = "meso"
+
+        with pytest.raises(ValueError, match="Unsupported reactive_mode"):
+            _select_reactive_unit_order(gs, eligible)

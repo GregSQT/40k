@@ -19,6 +19,7 @@ from engine.phase_handlers.shared_utils import (
     compute_candidate_footprint,
     is_footprint_placement_valid,
 )
+from tests._state_invariants import turn_state_invariants
 
 
 def _board_config() -> Dict[str, Any]:
@@ -71,7 +72,7 @@ def _make_game_state(
     board_cols: int = 25,
     board_rows: int = 21,
 ) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": _board_config(),
         "board_cols": board_cols,
         "board_rows": board_rows,

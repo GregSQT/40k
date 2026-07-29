@@ -24,6 +24,7 @@ import random
 
 from engine.phase_handlers import shooting_handlers
 from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
+from tests._state_invariants import turn_state_invariants
 
 
 def _seq(monkeypatch, rolls):
@@ -67,7 +68,7 @@ def _game_state(weapon_rules, *, bs=4, dmg=1, moved_inches=0.0, shooter_hp=3, ta
               "HP_CUR": target_hp, "HP_MAX": target_hp, "ARMOR_SAVE": 2, "INVUL_SAVE": 7,
               "role": None, "unitType": "Grunt", "points_per_hp": 5.0, "VALUE": 10.0,
               "col": 9, "row": 9, "UNIT_KEYWORDS": _kw("INFANTRY")}
-    return {
+    return {**turn_state_invariants(),
         "gym_training_mode": True,
         "config": {"game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5}},
         "turn": 2, "phase": "shoot",

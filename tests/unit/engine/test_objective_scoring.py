@@ -15,6 +15,7 @@ from engine.game_state import GameStateManager
 from engine.phase_handlers.shared_utils import build_units_cache
 from engine.combat_utils import normalize_coordinates
 from shared.data_validation import ConfigurationError
+from tests._state_invariants import turn_state_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -106,7 +107,7 @@ def _make_gs(
     primary_objective=None,
 ) -> Dict[str, Any]:
     objectives = [{"id": 1, "name": "Alpha", "hexes": [[5, 5]]}]
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
         "turn": turn,

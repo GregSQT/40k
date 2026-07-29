@@ -23,6 +23,7 @@ from engine.phase_handlers.shared_utils import (
 )
 
 from _config_helpers import build_game_rules, build_move_rules
+from tests._state_invariants import turn_state_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -72,7 +73,7 @@ def _rng_weapon(atk=3, str_=4, ap=0, dmg=1, rng=24) -> Dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _make_move_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": _base_config(),
         "board_cols": 25,
         "board_rows": 21,
@@ -154,7 +155,7 @@ class TestMovementTransition:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _make_shoot_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": _base_config(),
         "board_cols": 25,
         "board_rows": 21,
@@ -227,7 +228,7 @@ class TestShootingTransition:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _make_fight_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": _base_config(),
         "board_cols": 25,
         "board_rows": 21,

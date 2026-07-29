@@ -14,6 +14,7 @@ from engine.phase_handlers.shared_utils import (
     is_unit_alive,
     update_units_cache_hp,
 )
+from tests._state_invariants import turn_state_invariants
 
 
 def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, Any]:
@@ -42,7 +43,7 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
 
 
 def _make_game_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": {
             "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},

@@ -77,7 +77,7 @@ def test_movement_engagement_violates_enemy_cache_items_matches_full_scan() -> N
             "BASE_SHAPE": "round",
         },
     ]]
-    game_state: Dict[str, Any] = {
+    game_state: Dict[str, Any] = {**turn_state_invariants(),
         "config": _board_config(),
         "board_cols": 40,
         "board_rows": 40,
@@ -191,7 +191,7 @@ def test_pruned_enemy_horizon_matches_full_scan_with_far_dummy_enemy() -> None:
             "BASE_SHAPE": "round",
         },
     ]]
-    game_state: Dict[str, Any] = {
+    game_state: Dict[str, Any] = {**turn_state_invariants(),
         "config": _board_config(),
         "board_cols": 80,
         "board_rows": 80,
@@ -275,7 +275,7 @@ def _run_pool(
         "move": build_move_rules(),
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
     }
-    game_state: Dict[str, Any] = {
+    game_state: Dict[str, Any] = {**turn_state_invariants(),
         "config": config,
         "board_cols": board_cols,
         "board_rows": board_rows,
@@ -561,6 +561,7 @@ def test_hex_oracle_test_actually_reaches_build_multi_hex_vectorized(monkeypatch
 # Régénération (si le pool change LÉGITIMEMENT) : imprimer len + sha256[:16] de sorted(set(pool))
 # et de sorted(fz), et reporter ici — jamais éditer à l'aveugle.
 import hashlib
+from tests._state_invariants import turn_state_invariants
 
 _OVAL_SNAPSHOT = {
     # orientation -> (pool_len, pool_sha16, fz_len, fz_sha16)
@@ -745,7 +746,7 @@ def test_movement_build_valid_destinations_pool_deterministic() -> None:
             "BASE_SHAPE": "round",
         },
     ]]
-    game_state: Dict[str, Any] = {
+    game_state: Dict[str, Any] = {**turn_state_invariants(),
         "config": {
             "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5},
             "move": build_move_rules(),

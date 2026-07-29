@@ -17,6 +17,7 @@ Test BOUT-EN-BOUT en mêlée via `build_manual_fight_allocation` (gym auto).
 import random
 
 from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
+from tests._state_invariants import turn_state_invariants
 
 
 def _seq(monkeypatch, rolls):
@@ -43,7 +44,7 @@ def _game_state(weapon_rules):
               "points_per_hp": 20.0, "VALUE": 80.0, "col": 1, "row": 1}
     intent = {"model_id": "A1", "target_unit_id": "2", "weapon_index": 0,
               "n_attacks_resolved": 1, "target_squad_size_at_declaration": 2}
-    return {
+    return {**turn_state_invariants(),
         "gym_training_mode": True,
         "turn": 1, "phase": "fight",
         "action_logs": [], "action_log_seq": 0,

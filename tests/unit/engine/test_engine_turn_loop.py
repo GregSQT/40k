@@ -17,6 +17,7 @@ import pytest
 from engine.w40k_core import W40KEngine
 from engine.game_state import GameStateManager
 from engine.phase_handlers.shared_utils import build_units_cache
+from tests._state_invariants import turn_state_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -38,7 +39,7 @@ def _minimal_gs(
     max_turns: int = 5,
     unlimited_turns: bool = False,
 ) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         # Duree de bataille : game_rules.max_turns est la SOURCE UNIQUE (regle 40k).
         # 'unlimited_turns' est le seul echappatoire (Endless Duty, base sur des vagues).
         "unlimited_turns": unlimited_turns,
@@ -181,7 +182,7 @@ def _make_gs_for_winner(
         units.append(_unit_entry(uid, 2, value=p2_unit_value))
         uid += 1
 
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": config,
         "board_cols": 25,
         "board_rows": 21,

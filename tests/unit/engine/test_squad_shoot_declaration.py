@@ -41,6 +41,7 @@ from engine.phase_handlers.shared_utils import (
     squad_union_weapons,
     _weapon_group_key,
 )
+from tests._state_invariants import turn_state_invariants
 
 # Armes reelles de l'armory (teste aussi la propagation du champ `code` par le parser).
 STORM = get_weapons("SpaceMarine", ["storm_bolter"])[0]
@@ -80,7 +81,7 @@ def _unit(
 
 
 def _make_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": {
             "game_rules": {**_GAME_RULES, "engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},

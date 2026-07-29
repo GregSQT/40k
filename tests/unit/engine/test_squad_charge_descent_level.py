@@ -20,6 +20,7 @@ from engine.phase_handlers.shared_utils import (
     SQUAD_RIGID_MOVE_DESTINATION_LEVEL,
     charge_build_valid_plan,
 )
+from tests._state_invariants import turn_state_invariants
 
 FLOOR_HEIGHT_INCHES = 3.0
 START = (10, 20)
@@ -39,7 +40,7 @@ def _gs(*, level: int) -> Dict[str, Any]:
         "level": 0,
     }
     floor_hexes = [[START[0] + dc, START[1] + dr] for dc in (-1, 0, 1) for dr in (-1, 0, 1)]
-    return {
+    return {**turn_state_invariants(),
         "models_cache": {
             "1#0": {"col": START[0], "row": START[1], "level": level, "player": 1,
                     "squad_id": "1", "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1,

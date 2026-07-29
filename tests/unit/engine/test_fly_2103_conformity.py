@@ -44,6 +44,7 @@ from engine.phase_handlers.shared_utils import (
     charge_build_valid_plan,
     get_squad_move_budget,
 )
+from tests._state_invariants import turn_state_invariants
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -170,7 +171,7 @@ def _fly_gs(
         "UNIT_KEYWORDS": [{"keywordId": "FLY"}],
         "UNIT_RULES": [],
     }
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": {
             "game_rules": {
                 "engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35,
@@ -376,7 +377,7 @@ def _charge_gs(*, fly: bool, level: int = 0, gym: bool = True) -> Dict[str, Any]
     floor_hexes = [
         [_CHARGE_START[0] + dc, _CHARGE_START[1] + dr] for dc in (-1, 0, 1) for dr in (-1, 0, 1)
     ]
-    return {
+    return {**turn_state_invariants(),
         "models_cache": {
             "1#0": {"col": _CHARGE_START[0], "row": _CHARGE_START[1], "level": level,
                     "player": 1, "squad_id": "1", "HP_CUR": 1, "BASE_SHAPE": "round",

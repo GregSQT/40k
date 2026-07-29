@@ -8,6 +8,7 @@ from engine.phase_handlers.movement_handlers import movement_build_valid_destina
 from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache
 
 from _config_helpers import build_move_rules
+from tests._state_invariants import turn_state_invariants
 
 
 def _unit(uid: int, player: int, col: int, row: int, move: int = 3, fly: bool = False) -> Dict[str, Any]:
@@ -43,7 +44,7 @@ def _make_game_state(
     wall_hexes=None,
     engagement_zone: int = 1,
 ) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": {
             "game_rules": {"engagement_zone": engagement_zone, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "move": build_move_rules(),

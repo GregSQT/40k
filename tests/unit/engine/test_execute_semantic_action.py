@@ -16,6 +16,7 @@ from engine.w40k_core import W40KEngine
 from engine.phase_handlers.shared_utils import build_units_cache, build_enemy_adjacent_hexes
 
 from _config_helpers import build_move_rules
+from tests._state_invariants import turn_state_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -68,7 +69,7 @@ def _unit(uid: str, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
 
 def _make_move_gs(units: List[Dict[str, Any]], phase: str = "move") -> Dict[str, Any]:
     """Game-state minimal complet pour la phase move."""
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": _base_config(),
         "board_cols": 25,
         "board_rows": 21,

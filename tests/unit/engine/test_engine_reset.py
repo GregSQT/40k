@@ -22,6 +22,7 @@ import pytest
 
 from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
+from tests._state_invariants import TURN_STATE_KEYS, turn_state_invariants
 
 
 @pytest.fixture(autouse=True)
@@ -302,3 +303,67 @@ class TestEngineResetPools:
         engine.reset()
 
         assert engine.game_state["action_logs"] == []
+
+
+class TestTurnStateInvariantsConformity:
+    """Verrou de dérive du socle ``tests/_state_invariants.py``.
+
+    Le socle **réplique** la liste des invariants d'état de tour au lieu de la dériver du moteur
+    (les fixtures unitaires ne peuvent pas construire un engine complet). Ces deux tests sont ce
+    qui empêche la copie de diverger : ils comparent le socle à ce que ``reset()`` produit
+    réellement. Si le moteur ajoute, retire ou renomme un invariant, ils rougissent ici — pas dans
+    62 fixtures silencieuses.
+    """
+
+    def test_socle_keys_all_posed_by_reset(self):
+        """conformity_keys : les 20 clés du socle existent toutes dans le game_state après reset()."""
+        engine = _make_engine()
+
+        engine.reset()
+
+        absentes = sorted(k for k in TURN_STATE_KEYS if k not in engine.game_state)
+        assert absentes == [], f"Le socle réplique des clés que reset() ne pose pas : {absentes}"
+
+    def test_socle_values_match_reset(self):
+        """conformity_values : chaque valeur du socle == la valeur posée par reset()."""
+        engine = _make_engine()
+
+        engine.reset()
+
+        socle = turn_state_invariants()
+        # Les clés absentes du game_state sont le sujet du test précédent : ici on ne juge que
+        # les valeurs, sinon une clé fantôme dans le socle remonterait en KeyError illisible.
+        divergentes = {
+            k: (v, engine.game_state[k])
+            for k, v in socle.items()
+            if k in engine.game_state
+            and (engine.game_state[k] != v or type(engine.game_state[k]) is not type(v))
+        }
+        assert divergentes == {}, f"Socle désaligné de reset() : {divergentes}"
+
+    def test_reset_poses_no_unknown_turn_state_key(self):
+        """conformity_exhaustive : reset() ne pose aucun invariant d'état de tour hors du socle.
+
+        Filet de dérive inverse : une 20ᵉ clé ``units_*`` / ``reactive_*`` / ``last_move_*``
+        ajoutée au moteur doit entrer dans le socle, sinon les fixtures recommencent à décrire
+        un état impossible.
+        """
+        engine = _make_engine()
+
+        engine.reset()
+
+        # ``units_cache`` / ``units_cache_prev`` sont des vues dérivées des unités
+        # (``build_units_cache``, snapshot de mouvement), pas de l'état de tour : une fixture qui
+        # en a besoin les construit, elle ne les hérite pas d'un socle.
+        DERIVE = {"units_cache", "units_cache_prev"}
+        candidates = {
+            k for k in engine.game_state
+            if k.startswith(("units_", "reactive_", "last_move_", "advance_", "reaction_"))
+        }
+        hors_socle = sorted(
+            k for k in candidates
+            if k not in TURN_STATE_KEYS and k not in DERIVE and not k.startswith("_")
+        )
+        assert hors_socle == [], (
+            f"reset() pose des invariants d'état de tour absents du socle : {hors_socle}"
+        )

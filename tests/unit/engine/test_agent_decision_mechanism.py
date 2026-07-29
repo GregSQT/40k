@@ -45,6 +45,7 @@ from engine.phase_handlers.shared_utils import (
 from engine.w40k_core import W40KEngine
 
 from _config_helpers import build_move_rules
+from tests._state_invariants import turn_state_invariants
 
 #: Le SEUL choix de règle du jeu aujourd'hui (Tyranid Warrior mêlée) : `adrenalised_onslaught`
 #: accorde `aggression_imperative` (alias de `reroll_1_tohit_fight`) OU `preservation_imperative`
@@ -110,7 +111,7 @@ def _unit(uid: int, player: int, col: int, row: int, rules: List[Dict[str, Any]]
 
 
 def _game_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": _config(),
         "board_cols": 25,
         "board_rows": 21,

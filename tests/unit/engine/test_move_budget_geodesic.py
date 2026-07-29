@@ -25,6 +25,7 @@ from engine.phase_handlers.shared_utils import (
     erode_move_pool_by_squad_block,
     explain_move_plan_rejection,
 )
+from tests._state_invariants import turn_state_invariants
 
 WALL = {(11, r) for r in range(6, 15)}
 ANCHOR_DEST = (7, 10)
@@ -43,7 +44,7 @@ def _gs(wall: Iterable[Tuple[int, int]], *, fly: bool = False) -> Dict[str, Any]
         "1#1": {"col": 10, "row": 10, "level": 0, "player": 1, "squad_id": "1", "HP_CUR": 1,
                 "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0},
     }
-    return {
+    return {**turn_state_invariants(),
         "models_cache": models_cache,
         "squad_models": {"1": ["1#0", "1#1"]},
         "units_cache": {"1": {"col": 5, "row": 10, "player": 1, "occupied_hexes": set(),
@@ -199,7 +200,7 @@ def _gym_state_for_cellmap() -> Dict[str, Any]:
         "id": 1, "player": 1, "col": 10, "row": 10, "MOVE": 3, "HP_CUR": 1,
         "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": [],
     }
-    return {
+    return {**turn_state_invariants(),
         "models_cache": {
             "1#0": {"col": 10, "row": 10, "level": 0, "player": 1, "squad_id": "1",
                     "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0},

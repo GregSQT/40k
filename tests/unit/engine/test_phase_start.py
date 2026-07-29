@@ -10,6 +10,7 @@ from engine.phase_handlers.movement_handlers import movement_phase_start
 from engine.phase_handlers.shooting_handlers import shooting_phase_start
 from engine.phase_handlers.fight_handlers import fight_phase_start
 from engine.phase_handlers.shared_utils import build_units_cache
+from tests._state_invariants import turn_state_invariants
 
 
 def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, Any]:
@@ -45,7 +46,7 @@ def _base_config() -> Dict[str, Any]:
 
 
 def _make_movement_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": _base_config(),
         "board_cols": 25,
         "board_rows": 21,
@@ -72,7 +73,7 @@ def _make_movement_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def _make_shooting_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": _base_config(),
         "board_cols": 25,
         "board_rows": 21,
@@ -101,7 +102,7 @@ def _make_shooting_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def _make_fight_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": _base_config(),
         "board_cols": 25,
         "board_rows": 21,

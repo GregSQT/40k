@@ -24,6 +24,7 @@ import pytest
 
 from engine.phase_handlers import charge_handlers as ch
 from engine.phase_handlers.shared_utils import build_units_cache
+from tests._state_invariants import turn_state_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -44,7 +45,7 @@ def _unit(uid: str, player: int, models: Sequence[Tuple[int, int]]) -> Dict[str,
 
 
 def _make_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": {
             "game_rules": {
                 # Déjà en sous-hex (w40k_core pré-scale à l'init) ; ici inches_to_subhex=1.

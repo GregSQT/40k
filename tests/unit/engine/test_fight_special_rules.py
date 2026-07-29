@@ -20,6 +20,7 @@ hasard. `_seq` echoue si le moteur tire plus ou moins de des que la sequence dec
 import random
 
 from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
+from tests._state_invariants import turn_state_invariants
 
 
 def _seq(monkeypatch, rolls):
@@ -58,7 +59,7 @@ def _game_state(weapon_rules, *, attackers=1, attacker_keywords=("INFANTRY",), a
                     "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
                     "points_per_hp": 5.0, "VALUE": 10.0, "col": 1, "row": 0,
                     "UNIT_KEYWORDS": _kw("INFANTRY")}
-    return {
+    return {**turn_state_invariants(),
         "gym_training_mode": True,
         "turn": 1, "phase": "fight",
         "action_logs": [], "action_log_seq": 0,

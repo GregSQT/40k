@@ -34,6 +34,7 @@ from engine.phase_handlers.shared_utils import (
     build_manual_shoot_allocation,
     squad_declare_fight,
 )
+from tests._state_invariants import turn_state_invariants
 
 
 def _seq(monkeypatch, rolls):
@@ -61,7 +62,7 @@ def _game_state(weapon):
     target = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 20, "HP_MAX": 20,
               "ARMOR_SAVE": 7, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
               "points_per_hp": 5.0, "VALUE": 10.0, "col": 0, "row": 1}
-    return {
+    return {**turn_state_invariants(),
         "gym_training_mode": True,
         "turn": 1, "phase": "shoot",
         "action_logs": [], "action_log_seq": 0,

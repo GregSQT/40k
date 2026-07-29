@@ -14,6 +14,7 @@ import pytest
 from engine.action_decoder import ActionDecoder, ActionValidationError
 from engine.macro_intents import TOTAL_ACTION_SIZE
 from engine.phase_handlers.shared_utils import build_units_cache
+from tests._state_invariants import turn_state_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -57,7 +58,7 @@ def _base_config() -> Dict[str, Any]:
 
 
 def _build_gs(units: List[Dict[str, Any]], phase: str, current_player: int = 1) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "phase": phase,
         "current_player": current_player,
         "board_cols": 25,

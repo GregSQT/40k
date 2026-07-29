@@ -41,6 +41,7 @@ from engine.phase_handlers.fight_handlers import (
     squad_undeclare_fight_weapon_qty,
     squad_union_cc_weapons,
 )
+from tests._state_invariants import turn_state_invariants
 
 # Armes de melee reelles de l'armory (teste aussi la propagation du champ `code`).
 CCW = get_weapons("SpaceMarine", ["close_combat_weapon"])[0]
@@ -84,7 +85,7 @@ def _unit(
 
 
 def _make_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": {
             "game_rules": {**_GAME_RULES, "engagement_zone": 2, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},

@@ -28,6 +28,7 @@ import pytest
 
 from engine.phase_handlers import shooting_handlers
 from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
+from tests._state_invariants import turn_state_invariants
 
 
 # Unité et arme RÉELLES du roster Space Marines. `sternguard_bolt_rifle` est le seul profil
@@ -66,7 +67,7 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
     target_model = {"id": "101#0", "squad_id": "101", "player": 1, "T": 4, "HP_CUR": 9, "HP_MAX": 9,
                     "ARMOR_SAVE": 2, "INVUL_SAVE": 7, "role": None, "unitType": "AssaultIntercessor",
                     "points_per_hp": 5.0, "VALUE": 10.0, "col": target[0], "row": target[1]}
-    return {
+    return {**turn_state_invariants(),
         "gym_training_mode": True,
         "turn": 1, "phase": "shoot",
         "action_logs": [], "action_log_seq": 0,

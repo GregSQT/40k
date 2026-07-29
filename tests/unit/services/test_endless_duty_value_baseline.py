@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Tuple
 
 from engine.phase_handlers.shared_utils import build_units_cache, destroy_model
 from services.endless_duty_runtime import _replace_units_for_player
+from tests._state_invariants import turn_state_invariants
 
 _GAME_RULES = {
     "engagement_zone": 1,
@@ -56,7 +57,7 @@ def _unit(uid: int, player: int, positions: List[Tuple[int, int]], value: int) -
 
 
 def _gs() -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": {"game_rules": _GAME_RULES, "board": {"default": {"hex_radius": 1.0, "margin": 0.0}}},
         "board_cols": 80, "board_rows": 80, "wall_hexes": set(), "terrain_areas": [],
         "objectives": [], "inches_to_subhex": 1, "_unit_move_version": 0,

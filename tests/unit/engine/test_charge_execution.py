@@ -12,6 +12,7 @@ from engine.phase_handlers.charge_handlers import (
     charge_build_valid_destinations_pool,
 )
 from engine.phase_handlers.shared_utils import build_units_cache
+from tests._state_invariants import turn_state_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -58,7 +59,7 @@ def _config() -> Dict[str, Any]:
 
 
 def _make_gs(units: List[Dict[str, Any]], current_player: int = 1) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
+    gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": _config(),
         "board_cols": 25,
         "board_rows": 21,

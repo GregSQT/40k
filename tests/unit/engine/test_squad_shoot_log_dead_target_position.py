@@ -24,6 +24,7 @@ from typing import Any, Dict
 import pytest
 
 from engine.phase_handlers.shared_utils import SHOOT_CTX, _emit_squad_shoot_log
+from tests._state_invariants import turn_state_invariants
 
 
 TARGET_COL, TARGET_ROW = 5, 7
@@ -157,7 +158,7 @@ def _live_shoot_state() -> Dict[str, Any]:
         return {"BASE_SHAPE": "round", "BASE_SIZE": 1, "col": col, "row": row,
                 "occupied_hexes": set(), "VALUE": 10.0, "player": player}
 
-    return {
+    return {**turn_state_invariants(),
         "gym_training_mode": True,
         "turn": 1, "phase": "shoot",
         "action_logs": [], "action_log_seq": 0,
