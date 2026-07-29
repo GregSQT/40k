@@ -4133,9 +4133,40 @@ def explain_move_plan_rejection(
                 if mid in models_cache
             }
             origin_coherent = _validate_plan_coherency(current, game_state)
+            # Positions PAR FIGURINE, avec le flag de coherency avant/apres translation. Sans
+            # elles, « plan incoherent / formation actuelle coherente » est un message
+            # AUTO-CONTRADICTOIRE : la coherency ne depend que des positions relatives, que la
+            # translation cube preserve (verifie sur tout le board, negatifs inclus). Une
+            # occurrence sans les positions n'est donc pas diagnosticable — elle oblige a
+            # relancer des heures d'entrainement pour esperer la revoir.
+            ordered = [mid for mid in plan_positions if mid in models_cache]
+            cur_flags = coherency_violation_flags(
+                [dict(models_cache[mid]) for mid in ordered], game_state
+            )
+            new_flags = coherency_violation_flags(
+                [
+                    {
+                        **models_cache[mid],
+                        "col": plan_positions[mid][0],
+                        "row": plan_positions[mid][1],
+                    }
+                    for mid in ordered
+                ],
+                game_state,
+            )
+            detail = " ; ".join(
+                f"{mid} ({models_cache[mid]['col']},{models_cache[mid]['row']})"
+                f"->({plan_positions[mid][0]},{plan_positions[mid][1]})"
+                f" base={models_cache[mid]['BASE_SIZE']}"
+                f" lvl={models_cache[mid]['level']}"
+                f" coh={'X' if cur_flags[i] else '.'}{'X' if new_flags[i] else '.'}"
+                for i, mid in enumerate(ordered)
+            )
             return (
                 "coherency du plan invalide "
                 f"(formation actuelle {'coherente' if origin_coherent else 'DEJA incoherente'})"
+                f" — {len(ordered)} figurines"
+                f" [id (col,row)actuel->(col,row)planifie base lvl coh=avant/apres] : {detail}"
             )
 
     return None
