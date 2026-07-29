@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, cast
+from typing import Any, Dict
 
 from engine.phase_handlers.shooting_handlers import _invalidate_los_cache_for_moved_unit
 
@@ -60,33 +60,8 @@ class TestInvalidateLosCacheForMovedUnit:
         _invalidate_los_cache_for_moved_unit(gs, "1")
         assert gs["los_cache"] == {}
 
-    def test_string_and_int_unit_id_normalized(self):
-        gs = {
-            "los_cache": {("1", "2"): 1.0, (1, 2): 0.5},
-            "hex_los_cache": {},
-        }
-        _invalidate_los_cache_for_moved_unit(gs, cast(str, 1))
-        # Both string "1" and int 1 keys involving unit 1 removed
-        assert ("1", "2") not in gs["los_cache"]
-        assert (1, 2) not in gs["los_cache"]
-
     def test_empty_caches_no_crash(self):
         gs = {"los_cache": {}, "hex_los_cache": {}}
         _invalidate_los_cache_for_moved_unit(gs, "1")
         assert gs["los_cache"] == {}
         assert gs["hex_los_cache"] == {}
-
-    def test_mixed_type_key_tuple_removed(self):
-        """Clé avec types mixtes (str, int) — str(key[n]) normalise → doit être supprimée."""
-        gs = {
-            "los_cache": {
-                ("1", 2): 0.5,   # clé mixte : "1" (str) et 2 (int)
-                (1, "2"): 0.8,   # autre mixte : 1 (int) et "2" (str)
-                ("3", "4"): 1.0, # non impliqué
-            },
-            "hex_los_cache": {},
-        }
-        _invalidate_los_cache_for_moved_unit(gs, "1")
-        assert ("1", 2) not in gs["los_cache"]
-        assert (1, "2") not in gs["los_cache"]
-        assert ("3", "4") in gs["los_cache"]

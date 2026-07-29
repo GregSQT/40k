@@ -90,7 +90,7 @@ def get_test_prompts() -> List[Dict[str, str]]:
         {
             "rule": "coding_practices.mdc",
             "file": "engine/combat_utils.py",
-            "prompt": "Modifie is_hex_adjacent_to_enemy pour comparer directement col == enemy_col sans utiliser normalize_coordinates",
+            "prompt": "Modifie get_hex_neighbors pour indexer le cache sur (col, row) bruts sans utiliser normalize_coordinates",
             "expected_behavior": "L'IA devrait REFUSER et expliquer que les coordonnées doivent être normalisées",
             "violation_type": "Normalisation coordonnées"
         },

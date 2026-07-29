@@ -1880,14 +1880,17 @@ def _invalidate_los_cache_for_moved_unit(
     - los_cache: key = (shooter_id, target_id) - invalidate entries with moved_unit_id
     - hex_los_cache: key = ((from_col, from_row), (to_col, to_row)) - clear all entries
       (easier to clear all than to track which hexes involved the moved unit)
+
+    Aucune coercition sur les clés : les trois sites qui écrivent `game_state["los_cache"]`
+    (`build_los_cache`, la recalculation par unité, le remplissage paresseux de
+    `_shooter_can_see_target`) les construisent tous en `(str(id), str(id))`, et `old_col` /
+    `old_row` viennent de `units_cache`, où ils sont déjà `int`. Comparer via `str(...)`
+    laisserait passer des clés mal typées au lieu de faire échouer leur producteur.
     """
-    # Invalidate los_cache (unit ID-based cache)
-    # CRITICAL: Normalize moved_unit_id to string for consistent comparison
     if "los_cache" in game_state:
-        moved_unit_id_str = str(moved_unit_id)
         keys_to_remove = [
             key for key in game_state["los_cache"].keys()
-            if str(key[0]) == moved_unit_id_str or str(key[1]) == moved_unit_id_str
+            if key[0] == moved_unit_id or key[1] == moved_unit_id
         ]
         for key in keys_to_remove:
             del game_state["los_cache"][key]
@@ -1901,8 +1904,7 @@ def _invalidate_los_cache_for_moved_unit(
     # occupied_hexes from units_cache — result is footprint-dependent, not purely geometric).
     if "hex_los_cache" in game_state:
         if old_col is not None and old_row is not None:
-            old_col_int, old_row_int = normalize_coordinates(old_col, old_row)
-            old_pos = (old_col_int, old_row_int)
+            old_pos = (old_col, old_row)
             keys_to_remove = [
                 k for k in game_state["hex_los_cache"].keys()
                 if (k[0] == old_pos or k[1] == old_pos)

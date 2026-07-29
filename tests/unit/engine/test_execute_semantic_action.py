@@ -41,7 +41,7 @@ def _base_config() -> Dict[str, Any]:
     }
 
 
-def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, Any]:
+def _unit(uid: str, player: int, col: int, row: int, hp: int = 3) -> Dict[str, Any]:
     return {
         "id": uid,
         "player": player,
@@ -145,7 +145,7 @@ def _bare_engine(gs: Dict[str, Any]) -> W40KEngine:
 class TestExecuteSemanticActionGameOver:
     def test_game_over_blocks_all_actions(self):
         """esa_game_over : game_over=True → (False, {error: 'game_over'}) pour tout action."""
-        units = [_unit(1, 1, 5, 10)]
+        units = [_unit("1", 1, 5, 10)]
         gs = _make_move_gs(units)
         gs["game_over"] = True
         gs["winner"] = 1
@@ -158,7 +158,7 @@ class TestExecuteSemanticActionGameOver:
 
     def test_game_over_returns_winner(self):
         """esa_game_over_winner : résultat contient le gagnant."""
-        units = [_unit(1, 1, 5, 10)]
+        units = [_unit("1", 1, 5, 10)]
         gs = _make_move_gs(units)
         gs["game_over"] = True
         gs["winner"] = 2
@@ -172,7 +172,7 @@ class TestExecuteSemanticActionGameOver:
 class TestExecuteSemanticActionSkip:
     def test_skip_removes_unit_from_pool(self):
         """esa_skip_pool : action 'skip' → unité retirée du move_activation_pool."""
-        units = [_unit(1, 1, 5, 10)]
+        units = [_unit("1", 1, 5, 10)]
         gs = _make_move_gs(units)
         gs["move_activation_pool"] = ["1"]
         engine = _bare_engine(gs)
@@ -184,7 +184,7 @@ class TestExecuteSemanticActionSkip:
 
     def test_skip_returns_skip_action(self):
         """esa_skip_action : result['action'] == 'skip'."""
-        units = [_unit(1, 1, 5, 10)]
+        units = [_unit("1", 1, 5, 10)]
         gs = _make_move_gs(units)
         gs["move_activation_pool"] = ["1"]
         engine = _bare_engine(gs)
@@ -196,7 +196,7 @@ class TestExecuteSemanticActionSkip:
 
     def test_skip_game_state_unchanged_phase(self):
         """esa_skip_phase_intact : skip n'avance pas la phase si pool non vide après."""
-        units = [_unit(1, 1, 5, 10), _unit(2, 1, 8, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 1, 8, 10)]
         gs = _make_move_gs(units)
         gs["move_activation_pool"] = ["1", "2"]
         engine = _bare_engine(gs)
@@ -211,7 +211,7 @@ class TestExecuteSemanticActionSkip:
 class TestExecuteSemanticActionMove:
     def test_move_valid_destination_updates_position(self):
         """esa_move_pos : move vers dest valide → position unité mise à jour."""
-        units = [_unit(1, 1, 5, 10)]
+        units = [_unit("1", 1, 5, 10)]
         gs = _make_move_gs(units)
         gs["move_activation_pool"] = ["1"]
         engine = _bare_engine(gs)
@@ -229,7 +229,7 @@ class TestExecuteSemanticActionMove:
 
     def test_move_valid_destination_marks_unit_moved(self):
         """esa_move_units_moved : move réussi → unité dans units_moved."""
-        units = [_unit(1, 1, 5, 10)]
+        units = [_unit("1", 1, 5, 10)]
         gs = _make_move_gs(units)
         gs["move_activation_pool"] = ["1"]
         engine = _bare_engine(gs)
@@ -242,7 +242,7 @@ class TestExecuteSemanticActionMove:
 
     def test_move_invalid_destination_returns_error(self):
         """esa_move_invalid_dest : destination hors BFS → (False, {error: 'invalid_destination'})."""
-        units = [_unit(1, 1, 5, 10)]
+        units = [_unit("1", 1, 5, 10)]
         gs = _make_move_gs(units)
         gs["move_activation_pool"] = ["1"]
         engine = _bare_engine(gs)
@@ -256,7 +256,7 @@ class TestExecuteSemanticActionMove:
 
     def test_move_invalid_destination_preserves_position(self):
         """esa_move_invalid_pos_unchanged : destination invalide → position inchangée."""
-        units = [_unit(1, 1, 5, 10)]
+        units = [_unit("1", 1, 5, 10)]
         gs = _make_move_gs(units)
         gs["move_activation_pool"] = ["1"]
         engine = _bare_engine(gs)
@@ -275,11 +275,11 @@ class TestExecuteSemanticActionAdvancePhase:
     def test_advance_phase_from_move_transitions_to_shoot(self):
         """esa_advance_phase : advance_phase from=move → phase passe à 'shoot'."""
         # Un tireur P1 + ennemi P2 pour que le pool tir soit non vide (cascade stoppe)
-        shooter = _unit(1, 1, 5, 10)
+        shooter = _unit("1", 1, 5, 10)
         shooter["RNG_WEAPONS"] = [
             {"ATK": 2, "STR": 4, "AP": 0, "DMG": 1, "RNG": 24, "NB": 1, "WEAPON_RULES": []}
         ]
-        enemy = _unit(2, 2, 20, 10)
+        enemy = _unit("2", 2, 20, 10)
         units = [shooter, enemy]
         gs = _make_move_gs(units)
         gs["move_activation_pool"] = []  # Pool vide → phase_complete
@@ -298,7 +298,7 @@ class TestExecuteSemanticActionAdvancePhase:
 
     def test_advance_phase_result_has_phase_complete(self):
         """esa_advance_phase_flag : advance_phase → result contient phase_complete=True."""
-        units = [_unit(1, 1, 5, 10)]
+        units = [_unit("1", 1, 5, 10)]
         gs = _make_move_gs(units)
         gs["move_activation_pool"] = []
         gs["units_shot"] = set()
@@ -358,7 +358,7 @@ class TestExecuteSemanticActionShoot:
 
     def test_shoot_unit_not_in_pool_returns_unit_not_eligible(self):
         """esa_shoot_not_in_pool : unitId absent du shoot_activation_pool → error 'unit_not_eligible'."""
-        units = [_unit(1, 1, 5, 10), _unit(2, 1, 8, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 1, 8, 10)]
         gs = _make_shoot_gs(units)
         gs["shoot_activation_pool"] = ["2"]  # Unit 1 absent du pool
         engine = _bare_shoot_engine(gs)
@@ -370,7 +370,7 @@ class TestExecuteSemanticActionShoot:
 
     def test_shoot_routes_to_handler_not_invalid_phase(self):
         """esa_shoot_routing : phase='shoot' → pas d'erreur 'invalid_phase' (routing correct)."""
-        units = [_unit(1, 1, 5, 10), _unit(2, 1, 8, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 1, 8, 10)]
         gs = _make_shoot_gs(units)
         gs["shoot_activation_pool"] = ["2"]  # Pool non vide, unit 1 absent
         engine = _bare_shoot_engine(gs)
@@ -382,7 +382,7 @@ class TestExecuteSemanticActionShoot:
 
     def test_shoot_pool_empty_returns_success_with_phase_complete(self):
         """esa_shoot_empty_pool : shoot_activation_pool vide → success=True, phase transition."""
-        units = [_unit(1, 1, 5, 10)]
+        units = [_unit("1", 1, 5, 10)]
         gs = _make_shoot_gs(units)
         gs["shoot_activation_pool"] = []  # Pool vide
         engine = _bare_shoot_engine(gs)
@@ -404,7 +404,7 @@ class TestExecuteSemanticActionFight:
     def test_fight_v11_auto_drives_and_selects(self):
         """esa_fight_v11_auto : action fight (mode auto) pilote la machine V11 et sélectionne."""
         from engine.phase_handlers.fight_handlers import fight_phase_start
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]  # engagés
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 6, 10)]  # engagés
         gs = _make_fight_gs(units)
         gs["current_player"] = 1
         gs["current_mode_code"] = "pve"  # auto autorisé
@@ -425,7 +425,7 @@ class TestExecuteSemanticActionFight:
     def test_fight_v11_manual_ineligible_unit_no_resolution(self):
         """esa_fight_v11_manual : unité non éligible → aucune résolution (V11 ne combat que l'éligible)."""
         from engine.phase_handlers.fight_handlers import fight_phase_start
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]  # aucun engagé, aucun chargé
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 20, 10)]  # aucun engagé, aucun chargé
         gs = _make_fight_gs(units)
         gs["current_player"] = 1
         gs["current_mode_code"] = "pvp_test"  # manuel
@@ -439,7 +439,7 @@ class TestExecuteSemanticActionFight:
 
     def test_fight_routing_not_invalid_phase(self):
         """esa_fight_routing : phase='fight' → routing correct vers fight handler (pas 'invalid_phase')."""
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 20, 10)]
         gs = _make_fight_gs(units)
         gs["fight_subphase"] = "alternating_active"
         gs["fight_alternating_turn"] = "active"
@@ -455,7 +455,7 @@ class TestExecuteSemanticActionFight:
 class TestExecuteSemanticActionInvalidPhase:
     def test_unknown_phase_returns_error(self):
         """esa_invalid_phase : phase inconnue → (False, {error: 'invalid_phase'})."""
-        units = [_unit(1, 1, 5, 10)]
+        units = [_unit("1", 1, 5, 10)]
         gs = _make_move_gs(units, phase="nonexistent_phase")
         engine = _bare_engine(gs)
 
@@ -467,7 +467,7 @@ class TestExecuteSemanticActionInvalidPhase:
 
     def test_unknown_action_type_in_move_phase(self):
         """esa_unknown_action : action type inconnu en phase move → error, game_state intact."""
-        units = [_unit(1, 1, 5, 10)]
+        units = [_unit("1", 1, 5, 10)]
         gs = _make_move_gs(units)
         gs["move_activation_pool"] = ["1"]
         engine = _bare_engine(gs)

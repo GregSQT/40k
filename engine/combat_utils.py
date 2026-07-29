@@ -4,7 +4,7 @@ combat_utils.py - Pure utility functions for combat calculations
 """
 
 import os
-from typing import Dict, List, Tuple, Any, Optional, Set, Union
+from typing import Dict, List, Tuple, Any, Optional, Union
 
 # NOTE: Do not import is_unit_alive at top level — causes circular import
 # (combat_utils → shared_utils → phase_handlers → generic_handlers → combat_utils).
@@ -96,11 +96,14 @@ def get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[st
     """
     Get unit by ID from game state.
 
-    Handles int/string ID mismatches by comparing both sides as strings.
+    Les identifiants d'unite sont des `str` de bout en bout : `GameState` les stringifie a la
+    construction (`"id": str(unit_data["id"])`) et l'index `unit_by_id` est cle par `str(u["id"])`.
+    Aucune conversion ici : passer autre chose qu'un `str` est un bug de l'appelant, pas un cas
+    a rattraper silencieusement (une coercition rendrait le lookup faussement tolerant).
 
     Args:
         game_state: Game state dictionary with "unit_by_id" index
-        unit_id: Unit ID to find (int or string)
+        unit_id: Unit ID to find (str, comme dans game_state["units"])
 
     Returns:
         Unit dictionary if found, None otherwise
@@ -109,34 +112,7 @@ def get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[st
     """
     from shared.data_validation import require_key  # Lazy: avoid circular import
     unit_by_id = require_key(game_state, "unit_by_id")
-    return unit_by_id.get(str(unit_id))
-
-
-def is_hex_adjacent_to_enemy(col: int, row: int, player: int,
-                              enemy_adjacent_hexes: Set[Tuple[int, int]]) -> bool:
-    """
-    Check if hex position is adjacent to any enemy unit.
-    
-    Uses pre-computed enemy_adjacent_hexes set for O(1) lookup.
-    
-    Args:
-        col: Column coordinate
-        row: Row coordinate
-        player: Player ID checking adjacency
-        enemy_adjacent_hexes: Pre-computed set of hexes adjacent to enemies
-    
-    Returns:
-        True if hex is adjacent to an enemy, False otherwise
-    
-    Raises:
-        ValueError: If enemy_adjacent_hexes is None
-    """
-    if enemy_adjacent_hexes is None:
-        raise ValueError("enemy_adjacent_hexes must be provided - use build_enemy_adjacent_hexes() first")
-    
-    # Normalize coordinates to int
-    col_int, row_int = normalize_coordinates(col, row)
-    return (col_int, row_int) in enemy_adjacent_hexes
+    return unit_by_id.get(unit_id)
 
 
 _HEX_NEIGHBORS_CACHE: Dict[Tuple[int, int], Tuple[Tuple[int, int], ...]] = {}
