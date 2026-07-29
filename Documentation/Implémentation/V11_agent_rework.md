@@ -1251,10 +1251,15 @@ comptant attributs, alias d'import et chaînes littérales pour les accès dynam
 seul `_save_scenario_templates` disparaît, **aucune fonction rendue orpheline** par la suppression.
 Aucune contre-épreuve par mutation n'est due : **aucun comportement n'est conservé**.
 
-⚠️ **Effet de bord découvert en route** : `scripts/backup_select.py` **s'exécute à l'import**
-(aucune garde `if __name__ == "__main__"`) — un simple `import scripts.backup_select` lance une
-sauvegarde vers un chemin Windows et écrit un `.zip` dans le dépôt. Artefacts supprimés, fichier
-laissé tel quel (hors périmètre), mais **ne jamais l'importer pour le vérifier** : le lire.
+**Effet de bord découvert en route, ✅ CORRIGÉ.** `scripts/backup_select.py` **s'exécutait à
+l'import** (aucune garde `if __name__ == "__main__"`) : un simple `import scripts.backup_select`,
+fait pour vérifier que la ligne retirée ne cassait rien, a lancé une sauvegarde vers un chemin
+Windows et écrit un `.zip` **dans le dépôt**. Les 39 lignes à effet (`makedirs`, `copy2`,
+`make_archive`) sont désormais dans `run_backup()`, appelée sous garde `__main__` ; les 276 lignes
+de déclaration (liste des fichiers) restent au niveau module. Vérifié : `import scripts.backup_select`
+ne produit **aucun** fichier (`git status` ne montre que le source modifié), `pyright` 0 erreur.
+Le premier réflexe avait été de documenter le piège au lieu de le corriger — c'est précisément
+ce que la règle « clôture complète » interdit.
 
 ⚠️ **Motif §0bis, quatrième occurrence** — *du code testé mais jamais appelé* (après T6-i, §0.38 et
 §0.39). Variante propre à ce dossier : les 9 tests instanciaient la classe par

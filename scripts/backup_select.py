@@ -274,43 +274,50 @@ else:
 
     ]
 
-logfile = os.path.join(DEST_ROOT, "backup.log")
-os.makedirs(DEST_ROOT, exist_ok=True)
+def run_backup() -> None:
+    """Effectue la sauvegarde. Isole du niveau module : importer ce fichier ne doit
+    RIEN copier ni zipper (un import suffisait auparavant a ecrire dans le depot)."""
+    logfile = os.path.join(DEST_ROOT, "backup.log")
+    os.makedirs(DEST_ROOT, exist_ok=True)
 
-ok_count = 0
-fail_count = 0
-with open(logfile, "a", encoding="utf-8") as log:
-    log.write(f"\n---- Backup run: {datetime.datetime.now()} ----\n")
-    for file_rel in files_to_copy:
-        src = os.path.join(ROOT, file_rel)
-        filename = os.path.basename(file_rel)
+    ok_count = 0
+    fail_count = 0
+    with open(logfile, "a", encoding="utf-8") as log:
+        log.write(f"\n---- Backup run: {datetime.datetime.now()} ----\n")
+        for file_rel in files_to_copy:
+            src = os.path.join(ROOT, file_rel)
+            filename = os.path.basename(file_rel)
         
-        # Handle duplicate filenames by prefixing with folder name
-        #if filename in ["config.json", "scenario.json", "game_config.json"]:
-        #    folder_prefix = os.path.dirname(file_rel).replace("/", "_").replace("\\", "_")
-        #    filename = f"{folder_prefix}_{filename}"
+            # Handle duplicate filenames by prefixing with folder name
+            #if filename in ["config.json", "scenario.json", "game_config.json"]:
+            #    folder_prefix = os.path.dirname(file_rel).replace("/", "_").replace("\\", "_")
+            #    filename = f"{folder_prefix}_{filename}"
         
-        dest = os.path.join(DEST_ROOT, filename)
-        if not os.path.exists(src):
-            msg = f"ERROR: Source file does not exist: {src}"
+            dest = os.path.join(DEST_ROOT, filename)
+            if not os.path.exists(src):
+                msg = f"ERROR: Source file does not exist: {src}"
+                print(msg)
+                log.write(msg + "\n")
+                fail_count += 1
+                continue
+            # No need to create subdirectories - saving to root only
+            shutil.copy2(src, dest)
+            msg = f"Copied {src} -> {dest}"
             print(msg)
             log.write(msg + "\n")
-            fail_count += 1
-            continue
-        # No need to create subdirectories - saving to root only
-        shutil.copy2(src, dest)
-        msg = f"Copied {src} -> {dest}"
-        print(msg)
-        log.write(msg + "\n")
-        ok_count += 1
+            ok_count += 1
 
-    log.write(f"Backup finished. Success: {ok_count} | Failed: {fail_count}\n")
+        log.write(f"Backup finished. Success: {ok_count} | Failed: {fail_count}\n")
 
-print(f"Backup complete. Success: {ok_count} | Failed: {fail_count}")
-print(f"Log written to: {logfile}")
+    print(f"Backup complete. Success: {ok_count} | Failed: {fail_count}")
+    print(f"Log written to: {logfile}")
 
-# Zip the backup folder
-zip_path = shutil.make_archive(DEST_ROOT, 'zip', DEST_ROOT)
-print(f"Zipped backup folder to: {zip_path}")
-with open(logfile, "a", encoding="utf-8") as log:
-    log.write(f"Zipped backup folder to: {zip_path}\n")
+    # Zip the backup folder
+    zip_path = shutil.make_archive(DEST_ROOT, 'zip', DEST_ROOT)
+    print(f"Zipped backup folder to: {zip_path}")
+    with open(logfile, "a", encoding="utf-8") as log:
+        log.write(f"Zipped backup folder to: {zip_path}\n")
+
+
+if __name__ == "__main__":
+    run_backup()
