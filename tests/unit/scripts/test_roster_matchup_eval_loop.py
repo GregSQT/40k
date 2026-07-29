@@ -196,12 +196,34 @@ def test_mask_comes_from_engine_not_from_legacy_decoder(script):
 
 def test_episode_stops_at_step_cap(script):
     """Env qui ne termine jamais : la boucle doit s'arreter exactement au plafond."""
-    env = FakeEnv(steps_before_done=None, final_info={"winner": 1, "controlled_player": 2})
+    env = FakeEnv(steps_before_done=None, final_info={"winner": None, "controlled_player": 2})
     model = FakeModel()
     outcome = _run(script, env, model, max_steps=5)
     assert env.step_calls == 5, f"la boucle a fait {env.step_calls} pas au lieu de 5"
     assert len(model.received_obs) == 5
-    assert outcome == "loss"
+    assert outcome == "failed"
+
+
+def test_truncated_episode_is_never_counted_as_a_game(script):
+    """Un episode tronque par le plafond n'est ni gagne, ni perdu, ni nul : la partie n'a
+    jamais fini. Le classer produirait une statistique fausse. Meme si le dernier pas a
+    laisse un `winner` exploitable dans l'info, il ne doit pas etre lu."""
+    for stale_winner in (1, 2, -1):
+        env = FakeEnv(
+            steps_before_done=None,
+            final_info={"winner": stale_winner, "controlled_player": 2},
+        )
+        assert _run(script, env, FakeModel(), max_steps=3) == "failed", (
+            f"episode tronque classe comme une partie finie (winner residuel={stale_winner})"
+        )
+
+
+def test_terminated_episode_without_winner_is_an_explicit_error(script):
+    """Le moteur ne termine JAMAIS sans vainqueur (engine/w40k_core.py:1906 et :2163).
+    Un `winner` None sur un episode termine est une incoherence, pas une defaite."""
+    env = FakeEnv(steps_before_done=1, final_info={"winner": None, "controlled_player": 2})
+    with pytest.raises(ValueError, match="winner"):
+        _run(script, env, FakeModel())
 
 
 def test_winner_is_read_from_engine_info(script):

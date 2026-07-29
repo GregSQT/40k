@@ -478,12 +478,18 @@ def _run_single_episode(
     max_steps_per_episode: int,
     ep_seed: int,
 ) -> str:
-    """Joue UN episode et rend "win", "loss" ou "draw".
+    """Joue UN episode et rend "win", "loss", "draw" ou "failed".
 
     Extrait de `_run_matchup_episodes` pour etre exercable avec des doublures (env et modele
     factices), sans faire tourner de partie. C'est la seule partie qui DECIDE : quelle
     observation et quel masque sont servis au modele, quand l'episode s'arrete, et comment le
     resultat est lu. Calquee sur la boucle de reference `ai/bot_evaluation.py:513-549`.
+
+    "failed" = episode TRONQUE par le plafond de pas : la partie n'a jamais atteint sa fin,
+    le moteur n'a donc pas de vainqueur a designer (`info["winner"]` vaut None hors
+    terminaison, engine/w40k_core.py:2050). Le classer gagne/perdu/nul fabriquerait une
+    statistique. La reference tient le meme compte separe sous le nom `failed_episodes`
+    (ai/bot_evaluation.py:557, agrege en :1184 et arbitre `eval_reliable` en :1192).
     """
     import numpy as np
     from shared.data_validation import require_key
@@ -521,11 +527,25 @@ def _run_single_episode(
         obs, _, terminated, truncated, info = env.step(action_scalar)
         done = bool(terminated or truncated)
         step_count += 1
+    if not done:
+        # Sortie par le plafond de pas : la partie est INACHEVEE. Aucun resultat n'en est
+        # deductible — la compter en defaite (ce que faisait le code) ou en nul biaiserait le
+        # taux de victoire sans laisser de trace.
+        return "failed"
     # Pas de `info.get("winner")` : un `None` de repli n'est ni `controlled_player` ni -1,
     # l'episode serait compte en DEFAITE alors que la donnee manque. Le moteur ecrit toujours
     # la cle (engine/w40k_core.py:1906 partie terminee, :2050 partie en cours) : son absence
     # est une anomalie d'environnement, pas un cas de jeu.
     winner = require_key(info, "winner")
+    if winner is None:
+        # Episode termine SANS vainqueur : le moteur n'en produit jamais (partie finie ->
+        # vainqueur reel engine/w40k_core.py:1906 ; troncature moteur -> -1, :2163). Un None
+        # ici veut dire que l'env ment sur sa terminaison ; le compter en defaite masquerait
+        # le probleme dans la statistique.
+        raise ValueError(
+            "Episode termine avec info['winner'] = None : l'environnement signale une fin de "
+            "partie sans vainqueur, ce que le moteur ne produit jamais."
+        )
     # ai/bot_evaluation.py:543 : le siege controle est LU dans l'info rendue par l'env, pas
     # recalcule ici. Un identifiant recalcule localement peut diverger silencieusement du
     # siege reellement joue (BotControlledEnv gere l'alternance des sieges).
@@ -550,8 +570,13 @@ def _run_matchup_episodes(
     agent_seat_mode: str,
     obs_normalizer=None,
     seed: int = 42,
-) -> Tuple[int, int, int]:
-    """Run n_episodes with model vs bot, return (wins, losses, draws)."""
+) -> Tuple[int, int, int, int]:
+    """Run n_episodes with model vs bot, return (wins, losses, draws, failed_episodes).
+
+    `failed_episodes` compte les episodes TRONQUES par le plafond de pas, jamais melanges aux
+    resultats de parties : meme separation que `failed_episodes` dans la reference
+    (ai/bot_evaluation.py:557), qui sert la a decider `eval_reliable` (:1192).
+    """
     from sb3_contrib import MaskablePPO
     from ai.training_utils import setup_imports
     from ai.env_wrappers import BotControlledEnv
@@ -629,7 +654,7 @@ def _run_matchup_episodes(
     # game_rules.max_turns via config_loader.get_max_turns(). Aucun plafond en dur, aucune
     # valeur par defaut : si la config ne porte pas max_turns, get_max_turns leve.
     max_steps_per_episode = int(get_max_turns()) * 400
-    wins, losses, draws = 0, 0, 0
+    wins, losses, draws, failed = 0, 0, 0, 0
     for ep in range(n_episodes):
         outcome = _run_single_episode(
             env=env,
@@ -642,10 +667,12 @@ def _run_matchup_episodes(
             wins += 1
         elif outcome == "draw":
             draws += 1
+        elif outcome == "failed":
+            failed += 1
         else:
             losses += 1
     env.close()
-    return wins, losses, draws
+    return wins, losses, draws, failed
 
 
 def _build_obs_normalizer(agent_key: str, training_config_name: str, model_path: str):
@@ -1037,7 +1064,7 @@ def _run_one_split(
             scenario_path = str(scenario_file)
             print(f"[{current}/{total_matchups}] {p1_id} vs {p2_id}...", end=" ", flush=True)
             if args.opponent_mode == "agent" and bool(args.agent_seat_bidirectional):
-                wins_p1, losses_p1, draws_p1 = _run_matchup_episodes(
+                wins_p1, losses_p1, draws_p1, failed_p1 = _run_matchup_episodes(
                     scenario_path,
                     args.agent,
                     model_path,
@@ -1050,7 +1077,7 @@ def _run_one_split(
                     agent_seat_mode="p1",
                     obs_normalizer=obs_normalizer,
                 )
-                wins_p2, losses_p2, draws_p2 = _run_matchup_episodes(
+                wins_p2, losses_p2, draws_p2, failed_p2 = _run_matchup_episodes(
                     scenario_path,
                     args.agent,
                     model_path,
@@ -1066,8 +1093,9 @@ def _run_one_split(
                 wins = wins_p1 + wins_p2
                 losses = losses_p1 + losses_p2
                 draws = draws_p1 + draws_p2
+                failed = failed_p1 + failed_p2
             else:
-                wins, losses, draws = _run_matchup_episodes(
+                wins, losses, draws, failed = _run_matchup_episodes(
                     scenario_path,
                     args.agent,
                     model_path,
@@ -1080,19 +1108,33 @@ def _run_one_split(
                     agent_seat_mode=str(args.agent_seat_mode),
                     obs_normalizer=obs_normalizer,
                 )
+            # Les episodes tronques sont EXCLUS du denominateur : ce ne sont pas des parties.
             total = wins + losses + draws
-            win_rate = wins / total if total > 0 else 0.0
+            if total == 0:
+                raise RuntimeError(
+                    f"Matchup {p1_id} vs {p2_id} : aucun episode n'est alle au bout "
+                    f"({failed} tronque(s) sur {args.episodes}). Aucun taux de victoire n'en "
+                    f"est deductible — un 0.0 de repli serait une statistique inventee."
+                )
+            win_rate = wins / total
             matchups[p1_id][p2_id] = {
                 "wins": wins,
                 "losses": losses,
                 "draws": draws,
+                # Meme nom que la reference (ai/bot_evaluation.py:557) : episodes tronques par
+                # le plafond de pas, hors du calcul du taux de victoire.
+                "failed_episodes": failed,
                 "win_rate": round(win_rate, 4),
             }
             matchup_elapsed = time.perf_counter() - matchup_start
             total_matchup_seconds += matchup_elapsed
             avg_matchup_seconds = total_matchup_seconds / float(current)
             avg_matchup_text = f"{avg_matchup_seconds:.3f}".replace(".", ",")
-            print(f"WR={win_rate:.2%} ({wins}W-{losses}L-{draws}D) | avg: {avg_matchup_text}s")
+            failed_text = f" | ⚠️ {failed} tronque(s)" if failed else ""
+            print(
+                f"WR={win_rate:.2%} ({wins}W-{losses}L-{draws}D){failed_text} "
+                f"| avg: {avg_matchup_text}s"
+            )
             try:
                 scenario_file.unlink()
             except OSError:
