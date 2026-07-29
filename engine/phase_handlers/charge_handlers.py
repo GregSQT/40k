@@ -52,7 +52,7 @@ def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
     return shared_unit_has_rule_effect(unit, rule_id)
 
 
-def _charge_fly_declared(game_state: Dict[str, Any], unit: Dict[str, Any], unit_id: Any) -> bool:
+def _charge_fly_declared(game_state: Dict[str, Any], unit: Dict[str, Any], unit_id: str) -> bool:
     """True si le vol de charge (take to the skies, 21.03) est DÉCLARÉ pour ce mouvement.
 
     Délègue à la SOURCE UNIQUE partagée avec la phase de mouvement (`took_to_the_skies`) : c'est
@@ -68,7 +68,7 @@ def _charge_fly_declared(game_state: Dict[str, Any], unit: Dict[str, Any], unit_
 def _charge_fly_active(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
-    unit_id: Any,
+    unit_id: str,
     *,
     for_eligibility: bool = False,
 ) -> bool:
@@ -92,7 +92,7 @@ def _charge_fly_active(
     return _charge_fly_declared(game_state, unit, unit_id)
 
 
-def _charge_budget_subhex(game_state: Dict[str, Any], unit_id: Any, charge_roll_inches: int) -> int:
+def _charge_budget_subhex(game_state: Dict[str, Any], unit_id: str, charge_roll_inches: int) -> int:
     """Budget de mouvement de charge en sous-hex = jet 2D6 (pouces) × ``inches_to_subhex``, moins
     2" (Règles 21.03) si le vol est déclaré pour ce mouvement. Source unique des sites de calcul de
     distance de charge — y compris `charge_build_valid_plan`, le chemin d'exécution de l'agent.
@@ -4942,7 +4942,7 @@ def charge_autoplace_plan(
         nontarget_entries = []
 
     obstacle_socles = _charge_obstacle_socles(game_state, str(squad_id), level=0)
-    fly_active = False if disable_fly else _charge_fly_active(game_state, unit, str(squad_id))
+    fly_active = False if disable_fly else _charge_fly_active(game_state, unit, squad_id)
     traverse_blocked = set() if fly_active else (walls | ground_enemy_blocked)
 
     def _socle(mid: str, c: int, r: int) -> Any:
@@ -5385,7 +5385,7 @@ def charge_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, action
         return False, {"error": "unit_cannot_fly", "unitId": unit["id"]}
 
     tts = game_state.setdefault("units_took_to_skies_charge", set())
-    uid = str(unit_id)
+    uid = unit_id
     if uid in tts:
         tts.discard(uid)
         declared = False

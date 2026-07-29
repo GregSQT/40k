@@ -242,8 +242,8 @@ def _entries_in_engagement_zone_3d(
             vertical_gap = max(0.0, max(lo_a, lo_b) - min(hi_a, hi_b))
             if vertical_gap > vertical_zone_inches:
                 continue
-            socle_a = base_a._replace(model_centers=centers_a)
-            socle_b = base_b._replace(model_centers=centers_b)
+            socle_a = base_a.with_model_centers(centers_a)
+            socle_b = base_b.with_model_centers(centers_b)
             if euclidean_edge_distance(socle_a, socle_b) <= threshold:
                 return True
     return False

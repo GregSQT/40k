@@ -16,11 +16,12 @@ from typing import (
     Dict,
     Iterator,
     List,
-    NamedTuple,
+    Literal,
     Optional,
     Sequence,
     Set,
     Tuple,
+    overload,
 )
 
 import numpy as np
@@ -1526,8 +1527,12 @@ def require_scalar_base_size(base_shape: str, base_size: Any, context: str) -> i
     `BASE_SHAPE` est l'étiquette qui DÉTERMINE le type de `BASE_SIZE` : `round`/`square`
     portent un diamètre scalaire, `oval` une paire `[grand axe, petit axe]`. Le couple est
     validé UNE fois à la frontière de chargement (`game_state._scale_socle` /
-    `GameStateManager.create_unit`) ; ces accesseurs ne font que rendre l'étiquette lisible
-    par le typage statique — là où le code écrivait un `cast` non prouvé.
+    `GameStateManager.create_unit`).
+
+    Ces gardes servent aux sites qui manipulent le couple BRUT (`units_cache`, datasheet) :
+    elles transforment un `Any` de dictionnaire en valeur typée. Un SOCLE, lui, n'en a plus
+    besoin : la fabrique ``Socle(...)`` choisit la classe concrète et c'est elle qui porte
+    le type exact de `base_size`.
     """
     if isinstance(base_size, bool) or not isinstance(base_size, int):
         raise TypeError(
@@ -1567,13 +1572,28 @@ def require_base_size(base_shape: str, base_size: Any, context: str) -> "int | l
     )
 
 
-class Socle(NamedTuple):
+class Socle:
     """Socle d'une figurine (ou empreinte d'une escouade) pour les tests de distance.
+
+    UNION ÉTIQUETÉE, pas un enregistrement plat : `BASE_SHAPE` ne décrit pas seulement la
+    forme, elle DÉTERMINE le type de la taille (`round`/`square` → diamètre scalaire,
+    `oval` → paire `[grand axe, petit axe]`). Cette classe ne porte donc QUE ce qui est
+    indépendant de la forme ; `base_size` vit sur les trois classes concrètes
+    ``RoundSocle`` / ``SquareSocle`` / ``OvalSocle``, chacune avec son type exact. On ne
+    peut pas lire une taille de socle sans savoir de quelle forme il s'agit — le
+    vérificateur l'impose au lieu qu'un `cast` l'affirme.
+
+    ``Socle(...)`` est la FABRIQUE : elle choisit la classe concrète d'après ``shape`` et
+    refuse une taille qui contredit l'étiquette. Il n'existe donc aucune instance dont
+    l'étiquette et la taille se contredisent — l'invariant n'est plus « vérifié », il est
+    impossible à violer. La classe de base n'est jamais instanciée telle quelle.
+    Les sites de lecture rétrécissent par ``type(s) is RoundSocle`` /
+    ``isinstance(s, OvalSocle)``, un test que le chemin chaud faisait DÉJÀ sur ``shape``.
 
     ``fp`` (empreinte = cellules occupées) n'est nécessaire que pour la méthode
     empreinte (toute paire impliquant une base non ronde). Pour une paire ronde↔ronde
     MONO-figurine, le test est purement géométrique (centre + base_size) et ``fp`` peut
-    rester None. ``base_size`` : diamètre (round/square) ou [major, minor] (oval).
+    rester None.
 
     ``model_centers`` : centres (col,row) de CHAQUE figurine vivante de l'escouade
     (source : ``occupied_hexes_by_model``). Requis pour mesurer une distance bord-à-bord
@@ -1581,21 +1601,168 @@ class Socle(NamedTuple):
     mesurerait jusqu'à la seule figurine-ancre (règle 01.04 : point le plus proche des
     socles). ``None`` ou liste à 1 élément → mono-figurine, comportement historique.
     """
+    __slots__ = ("shape", "col", "row", "fp", "model_centers", "orientation")
+
     shape: str
-    base_size: "int | list[int]"
     col: int
     row: int
-    fp: Optional[Set[Tuple[int, int]]] = None
-    model_centers: Optional[List[Tuple[int, int]]] = None
-    orientation: int = 0
+    fp: Optional[Set[Tuple[int, int]]]
+    model_centers: Optional[List[Tuple[int, int]]]
+    orientation: int
 
-    def scalar_size(self) -> int:
-        """Diamètre du socle, pour les formes qui en portent un (`round`/`square`)."""
-        return require_scalar_base_size(self.shape, self.base_size, "Socle")
+    @overload
+    def __new__(
+        cls, shape: Literal["round"], base_size: int, col: int, row: int,
+        fp: Optional[Set[Tuple[int, int]]] = None,
+        model_centers: Optional[List[Tuple[int, int]]] = None,
+        orientation: int = 0,
+    ) -> "RoundSocle": ...
 
-    def oval_size(self) -> List[int]:
-        """Paire `[grand axe, petit axe]` du socle `oval`."""
-        return require_oval_base_size(self.base_size, "Socle")
+    @overload
+    def __new__(
+        cls, shape: Literal["square"], base_size: int, col: int, row: int,
+        fp: Optional[Set[Tuple[int, int]]] = None,
+        model_centers: Optional[List[Tuple[int, int]]] = None,
+        orientation: int = 0,
+    ) -> "SquareSocle": ...
+
+    @overload
+    def __new__(
+        cls, shape: Literal["oval"], base_size: List[int], col: int, row: int,
+        fp: Optional[Set[Tuple[int, int]]] = None,
+        model_centers: Optional[List[Tuple[int, int]]] = None,
+        orientation: int = 0,
+    ) -> "OvalSocle": ...
+
+    @overload
+    def __new__(
+        cls, shape: str, base_size: "int | List[int]", col: int, row: int,
+        fp: Optional[Set[Tuple[int, int]]] = None,
+        model_centers: Optional[List[Tuple[int, int]]] = None,
+        orientation: int = 0,
+    ) -> "Socle": ...
+
+    def __new__(
+        cls, shape: str, base_size: "int | List[int]", col: int, row: int,
+        fp: Optional[Set[Tuple[int, int]]] = None,
+        model_centers: Optional[List[Tuple[int, int]]] = None,
+        orientation: int = 0,
+    ) -> "Socle":
+        """Choisit la classe concrète d'après l'étiquette et vérifie la taille associée.
+
+        Les tests sont écrits `type(x) is int` / `type(x) is list` (et non `isinstance`)
+        pour la même raison que ``require_scalar_base_size`` excluait explicitement `bool` :
+        `True` est un `int` pour `isinstance`, jamais un diamètre.
+        """
+        obj: "Socle"
+        if shape == "round":
+            if type(base_size) is not int:
+                raise TypeError(
+                    f"Socle: BASE_SHAPE 'round' exige un BASE_SIZE entier (diamètre), "
+                    f"reçu {base_size!r}"
+                )
+            obj = object.__new__(RoundSocle)
+            obj.shape = "round"
+            obj.base_size = base_size
+        elif shape == "oval":
+            if (
+                type(base_size) is not list
+                or len(base_size) != 2
+                or type(base_size[0]) is not int
+                or type(base_size[1]) is not int
+            ):
+                raise TypeError(
+                    f"Socle: BASE_SHAPE 'oval' exige un BASE_SIZE [grand axe, petit axe] "
+                    f"d'entiers, reçu {base_size!r}"
+                )
+            obj = object.__new__(OvalSocle)
+            obj.shape = "oval"
+            obj.base_size = base_size
+        elif shape == "square":
+            if type(base_size) is not int:
+                raise TypeError(
+                    f"Socle: BASE_SHAPE 'square' exige un BASE_SIZE entier (diamètre), "
+                    f"reçu {base_size!r}"
+                )
+            obj = object.__new__(SquareSocle)
+            obj.shape = "square"
+            obj.base_size = base_size
+        else:
+            raise ValueError(
+                f"Socle: BASE_SHAPE inconnue {shape!r} (attendu 'round', 'square' ou 'oval')"
+            )
+        obj.col = col
+        obj.row = row
+        obj.fp = fp
+        obj.model_centers = model_centers
+        obj.orientation = orientation
+        return obj
+
+    def _size_value(self) -> "int | List[int]":
+        """Taille du socle dans sa forme élargie — sert UNIQUEMENT à repasser par la fabrique.
+
+        Élargir le type est correct ici et seulement ici : la valeur retourne
+        immédiatement dans ``Socle(...)``, qui la ré-étiquette. Aucun calcul géométrique
+        ne passe par ce chemin (ils lisent ``base_size`` sur la classe concrète).
+        """
+        raise NotImplementedError(f"{type(self).__name__}._size_value")
+
+    def bounding_radius(self) -> float:
+        """Rayon englobant du socle (unités ``_hex_center``) — cf. ``bounding_radius_norm``."""
+        raise NotImplementedError(f"{type(self).__name__}.bounding_radius")
+
+    def with_model_centers(self, centers: List[Tuple[int, int]]) -> "Socle":
+        """Même socle, autres centres de figurines (repasse par la fabrique)."""
+        return Socle(
+            self.shape, self._size_value(), self.col, self.row,
+            self.fp, centers, self.orientation,
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__name__}(shape={self.shape!r}, base_size={self._size_value()!r}, "
+            f"col={self.col!r}, row={self.row!r}, orientation={self.orientation!r})"
+        )
+
+
+class RoundSocle(Socle):
+    """Socle rond : ``base_size`` est le diamètre."""
+    __slots__ = ("base_size",)
+
+    base_size: int
+
+    def _size_value(self) -> int:
+        return self.base_size
+
+    def bounding_radius(self) -> float:
+        return (max(1, self.base_size) / 2.0) * _FOOTPRINT_SIZE_SCALE
+
+
+class SquareSocle(Socle):
+    """Socle carré : ``base_size`` est le côté."""
+    __slots__ = ("base_size",)
+
+    base_size: int
+
+    def _size_value(self) -> int:
+        return self.base_size
+
+    def bounding_radius(self) -> float:
+        return (max(1, self.base_size) / 2.0) * _FOOTPRINT_SIZE_SCALE
+
+
+class OvalSocle(Socle):
+    """Socle ovale : ``base_size`` est la paire ``[grand axe, petit axe]``."""
+    __slots__ = ("base_size",)
+
+    base_size: List[int]
+
+    def _size_value(self) -> List[int]:
+        return self.base_size
+
+    def bounding_radius(self) -> float:
+        # Conservateur (broad-phase) : la plus grande dimension, cf. bounding_radius_norm.
+        return (max(1, max(self.base_size)) / 2.0) * _FOOTPRINT_SIZE_SCALE
 
 
 def bounding_radius_norm(shape: str, base_size: "int | list[int]") -> float:
@@ -1622,16 +1789,16 @@ def footprints_overlap(a: Socle, b: Socle) -> bool:
     méthode empreinte : pour une paire ronde le test précis est déjà O(1), une broad-phase
     y serait redondante.
     """
-    if a.shape == "round" and b.shape == "round":
+    if type(a) is RoundSocle and type(b) is RoundSocle:
         gap = euclidean_edge_clearance_round_round(
-            a.col, a.row, a.scalar_size(), b.col, b.row, b.scalar_size()
+            a.col, a.row, a.base_size, b.col, b.row, b.base_size
         )
         return gap < -_OVERLAP_TOL
     # Méthode empreinte (au moins une base non ronde) : broad-phase, puis intersection.
     cxa, cya = _hex_center(a.col, a.row)
     cxb, cyb = _hex_center(b.col, b.row)
     d = math.hypot(cxb - cxa, cyb - cya)
-    reach = bounding_radius_norm(a.shape, a.base_size) + bounding_radius_norm(b.shape, b.base_size)
+    reach = a.bounding_radius() + b.bounding_radius()
     if d > reach + _OVERLAP_TOL:
         return False
     if a.fp is None or b.fp is None:
@@ -1655,16 +1822,16 @@ def _socle_edge_primitives(s: Socle) -> List[Tuple]:
     """
     centers = s.model_centers if s.model_centers else [(s.col, s.row)]
     prims: List[Tuple] = []
-    if s.shape == "round":
-        r = round_base_radius_norm(s.scalar_size())
+    if type(s) is RoundSocle:
+        r = round_base_radius_norm(s.base_size)
         for c, rr in centers:
             cx, cy = _hex_center(int(c), int(rr))
             prims.append(("c", cx, cy, r))
         return prims
     ang = s.orientation * _ORIENTATION_STEP_RAD
     cos_a, sin_a = math.cos(ang), math.sin(ang)
-    if s.shape == "oval":
-        size = s.oval_size()
+    if type(s) is OvalSocle:
+        size = s.base_size
         aa = (size[0] / 2.0) * _FOOTPRINT_SIZE_SCALE
         bb = (size[1] / 2.0) * _FOOTPRINT_SIZE_SCALE
         local = [
@@ -1672,11 +1839,13 @@ def _socle_edge_primitives(s: Socle) -> List[Tuple]:
              bb * math.sin(2.0 * math.pi * k / _OVAL_EDGE_SAMPLES))
             for k in range(_OVAL_EDGE_SAMPLES)
         ]
-    elif s.shape == "square":
-        half = (s.scalar_size() / 2.0) * _FOOTPRINT_SIZE_SCALE
+    elif type(s) is SquareSocle:
+        half = (s.base_size / 2.0) * _FOOTPRINT_SIZE_SCALE
         local = [(-half, -half), (half, -half), (half, half), (-half, half)]
     else:
-        raise ValueError(f"euclidean_edge_distance: forme de socle inconnue {s.shape!r}")
+        # Inatteignable via la fabrique (elle n'émet que les trois classes concrètes) ;
+        # seul un `object.__new__` direct sur la classe de base y mènerait.
+        raise ValueError(f"euclidean_edge_distance: socle sans forme concrète {s!r}")
     for c, rr in centers:
         cx, cy = _hex_center(int(c), int(rr))
         prims.append(("p", [
@@ -1756,15 +1925,15 @@ def euclidean_edge_distance(a: Socle, b: Socle) -> float:
     Pour comparer à une portée en subhexes, l'appelant convertit le seuil :
     ``distance <= rng_subhex * ENGAGEMENT_NORM_HEX_WIDTH``.
     """
-    if a.shape == "round" and b.shape == "round":
+    if type(a) is RoundSocle and type(b) is RoundSocle:
         # Règle 01.04 : distance au point le plus proche des socles. Pour une escouade
         # multi-figurines, on prend le min du clearance bord-à-bord sur chaque paire de
         # figurines (centres réels), pas seulement l'ancre. Mono-figurine → une seule paire
         # = comportement historique.
         centers_a = a.model_centers if a.model_centers else [(a.col, a.row)]
         centers_b = b.model_centers if b.model_centers else [(b.col, b.row)]
-        base_a = a.scalar_size()
-        base_b = b.scalar_size()
+        base_a = a.base_size
+        base_b = b.base_size
         best = math.inf
         for ca, ra in centers_a:
             for cb, rb in centers_b:
