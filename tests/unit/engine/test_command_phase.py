@@ -205,3 +205,78 @@ class TestCommandPhaseViaEngine:
         eng.reset()
         for field in ("units_moved", "units_shot", "units_charged", "units_fought"):
             assert eng.game_state[field] == set(), f"{field} non vide après reset"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests — chemin VIF battle-shock → contrôle d'objectif (01.07 + 08.03 + 14.02)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_PRIMARY_OBJECTIVE_CFG: Dict[str, Any] = {
+    "id": "obj1",
+    "control": {"method": "oc_sum_greater", "control_method": "default", "tie_behavior": "no_control"},
+    "scoring": {"start_turn": 1, "max_points_per_turn": 5, "rules": []},
+    "timing": {"default_phase": "command", "round5_second_player_phase": "fight"},
+}
+
+
+def _engine_with_unit_on_objective() -> W40KEngine:
+    """Vrai moteur, unité 1 (joueur 1, OC 1) posée sur l'objectif (5,5)."""
+    eng = _make_engine()
+    eng.reset()
+    gs = eng.game_state
+    gs["objectives"] = [{"id": "obj1", "name": "Alpha", "hexes": [[5, 5]]}]
+    gs["primary_objective"] = _PRIMARY_OBJECTIVE_CFG
+    gs["objective_controllers"] = {}
+    gs["current_player"] = 1
+    unit = gs["unit_by_id"]["1"]
+    unit["col"], unit["row"] = 5, 5
+    # Unité mono-figurine : build_units_cache régénère models_cache depuis la position de
+    # l'unité, donc la figurine suit son ancre.
+    build_units_cache(gs)
+    return eng
+
+
+class TestBattleShockObjectiveControlLive:
+    """Sonde de bout en bout : PAS de drapeau posé à la main. Le moteur réel fait le roll
+    08.03, et c'est son propre décompte 14.02 qui doit tomber à zéro (règle 01.07)."""
+
+    def test_engine_battle_shock_removes_objective_control(self):
+        """cmd_bshock_live : demi-effectif → roll 08.03 raté → l'unité ne tient plus l'objectif."""
+        from engine.game_state import GameStateManager
+
+        eng = _engine_with_unit_on_objective()
+        gs = eng.game_state
+        mgr = GameStateManager(gs["config"])
+
+        # Garde-fou de la sonde : si l'unité n'était PAS comptée avant le choc, le test ne
+        # prouverait rien. On EXIGE de voir le contrôle exister d'abord.
+        before = mgr.calculate_objective_control(gs)
+        assert before["obj1"]["player_1_oc"] == 1, "sonde aveugle : contrôle absent avant le choc"
+        assert before["obj1"]["controller"] == 1
+
+        # Demi-effectif réel (mono-figurine : HP_CUR <= HP_MAX/2) → le moteur DOIT rouler (08.03).
+        unit = gs["unit_by_id"]["1"]
+        unit["HP_CUR"] = 1
+        build_units_cache(gs)
+
+        # Dés forcés au minimum : 2 < LD 7 → échec du battle-shock roll (01.07).
+        with patch("random.randint", return_value=1):
+            command_handlers.command_phase_start(gs)
+
+        assert unit["battle_shocked"] is True, "le moteur n'a pas appliqué l'étape 08.03"
+
+        gs["objective_controllers"] = {}
+        after = mgr.calculate_objective_control(gs)
+        assert after["obj1"]["player_1_oc"] == 0
+        assert after["obj1"]["controller"] is None
+
+    def test_engine_units_all_carry_battle_shocked_field(self):
+        """cmd_bshock_field : le constructeur d'unités du moteur pose toujours le champ lu
+        sans défaut par le contrôle d'objectif."""
+        eng = _make_engine()
+        eng.reset()
+        units = eng.game_state["units"]
+        assert units, "moteur sans unités : test aveugle"
+        for unit in units:
+            assert "battle_shocked" in unit, f"unité {unit['id']} sans champ battle_shocked"
+            assert unit["battle_shocked"] is False
