@@ -10,8 +10,21 @@ d'actions (0-15) sans que quoi que ce soit ne se plaigne, et pourquoi le décode
 Chaque cas ci-dessous APPELLE `ActionDecoder.convert_squad_action` — le seul décodeur vivant — et
 vérifie l'intention obtenue. Aucun cas ne se contente de comparer deux constantes.
 
-Les états de jeu viennent d'un moteur RÉEL (`W40KEngine`), pas d'un dict fabriqué : un
-`game_state` bricolé peut satisfaire un décodeur qui aurait cessé d'être branché sur le moteur.
+**Provenance des états — exactement, sans promesse en trop.** Tout part de `W40KEngine.reset()`,
+donc d'un `game_state` que le moteur a réellement construit ; aucun dict fabriqué à la main.
+Deux régimes, et il faut savoir lequel on lit :
+
+- `driven_state` — le moteur est JOUÉ en actions masquées jusqu'à la phase visée. L'état est
+  intégralement cohérent (pools d'activation, carte de cellules mémorisée par le masque, jet
+  d'Advance). C'est ce que la production donne au décodeur. Utilisé par les cas de mouvement et
+  par la parité masque↔décodeur.
+- `phase_state` — copie de l'état post-`reset` dont le champ `phase` est réécrit. C'est un
+  raccourci ASSUMÉ, et il n'est légitime que parce que le décodeur, pour ces familles-là, ne lit
+  **que** `eligible_units[0]["id"]` : les slots de tir/charge/mêlée ne consultent ni pool ni
+  masque (§9 P3-1/P3-2 — la résolution slot → escouade appartient au moteur, la dupliquer ici
+  réécrirait la règle). Réécrire `phase` ne peut donc pas fabriquer un routage qui n'existerait
+  pas. Le prix de ce raccourci : ces cas ne prouvent rien sur la cohérence de l'état, seulement
+  sur le routage — c'est la parité masque↔décodeur qui couvre l'autre moitié.
 
 Table verrouillée (entier → intention) :
 
@@ -28,6 +41,22 @@ Table verrouillée (entier → intention) :
 | `BASE_ZONE_INTENT + 3*zone + intent`      | `zone_intent(zone, intent)`                     |
 | `CHOICE_BASE + i`                         | `agent_decision`, `option_index == i`           |
 | `DEPLOY_SLOT_BASE + s`, phase deployment  | `deploy_unit` sur l'hex de la stratégie `s`     |
+| `4..8` HORS déploiement                   | cellule de move — PAS `deploy_unit`             |
+
+**La propriété qui couvre la classe entière** (`TestMaskDecoderParity`) : pour chaque phase
+atteinte en jouant le moteur, **tout entier ouvert par le masque doit être décodable sans
+lever**. C'est elle, et non l'énumération ci-dessus, qui attrape un masque périmé, une base
+décalée ou une famille d'actions orpheline — sans qu'il faille avoir pensé au cas.
+
+⚠️ La réciproque « tout entier FERMÉ par le masque doit lever au décodage » est **fausse par
+construction, et c'est délibéré** : `convert_squad_action` ne consulte aucun masque pour les
+familles à slot. `SHOOT_SLOT_BASE + 3` rend `{squad_shoot, target_slot: 3}` quelle que soit la
+phase et quel que soit le masque — la vérification d'éligibilité appartient au moteur
+(`squad_shoot` / `squad_charge` / `squad_fight` valident contre leurs pools 11.02 / 12.05), et la
+dupliquer dans le décodeur réécrirait la règle à deux endroits. Le rejet d'une action hors masque
+a donc lieu **une couche plus haut**, dans `validate_action_against_mask`, appelée par
+`W40KEngine.step` et `pve_controller` avant tout décodage. C'est cette couche-là que
+`test_action_outside_the_mask_is_rejected_before_decoding` verrouille — pas le décodeur.
 
 Les gardes sont verrouillées au même titre que les routages : un zone intent hors command, une
 action CHOICE sans décision en attente, un entier au-delà de l'espace et un entier hors
@@ -46,6 +75,7 @@ from typing import Any, Dict, List, Tuple
 
 import pytest
 
+from engine.action_decoder import ActionValidationError
 from engine.agent_decision import set_pending_agent_decision
 from engine.macro_intents import (
     ACTION_FIGHT_NO_TARGET,
@@ -64,6 +94,7 @@ from engine.macro_intents import (
     MOVE_CELL_COUNT,
     SHOOT_SLOT_BASE,
     SHOOT_SLOT_COUNT,
+    TOTAL_ACTION_SIZE,
 )
 from engine.phase_handlers.shared_utils import (
     MOVE_CELL_MAP_CACHE_KEY,
@@ -105,34 +136,78 @@ def deployment_state() -> Tuple[Any, Dict[str, Any]]:
     return engine.action_decoder, engine.game_state
 
 
-@pytest.fixture(scope="module")
-def move_state() -> Tuple[Any, Dict[str, Any], str, int, Tuple[int, int]]:
-    """Moteur amené en phase move par actions masquées : (decoder, gs, squad_id, cell, dest).
+#: Nombre de pas de jeu joués pour explorer les phases. Volontairement borné : le CPU est
+#: partagé, et les phases visées sont atteintes bien avant.
+DRIVE_STEPS = 400
 
-    La cellule rendue est une cellule RÉELLEMENT offerte par le masque, relue dans la carte que
-    le masque a mémorisée — donc exactement ce que la production donnerait au décodeur.
+#: Phases dont la parité masque↔décodeur DOIT être mesurée. Si l'une cesse d'être atteinte, le
+#: test de parité se viderait en silence — d'où la garde `test_parity_covers_the_real_phases`.
+REQUIRED_PHASES = ("deployment", "command", "move", "shoot")
+
+
+@pytest.fixture(scope="module")
+def driven() -> Dict[str, Any]:
+    """Joue le moteur en actions masquées et capture ce que la PRODUCTION donne au décodeur.
+
+    Rend :
+      - `by_phase[phase] = (game_state, mask)` — première occurrence de chaque phase, copiée ;
+      - `move_pick` = (squad_id, cell_idx, dest) d'une cellule RÉELLEMENT offerte par le masque,
+        relue dans la carte que le masque a mémorisée.
+
+    Un seul moteur pour tout le fichier : la construction domine le coût.
     """
     engine = _new_engine()
     rng = random.Random(0)
-    for _ in range(300):
+    by_phase: Dict[str, Tuple[Dict[str, Any], Any]] = {}
+    move_pick = None
+
+    for _ in range(DRIVE_STEPS):
+        if move_pick is not None and all(p in by_phase for p in REQUIRED_PHASES):
+            break  # tout est capturé : ne pas jouer un pas de plus
+
         mask = engine.get_action_mask()
         game_state = engine.game_state
-        if game_state["phase"] == "move":
+        phase = game_state["phase"]
+
+        valid = [i for i, v in enumerate(mask) if v]
+        if not valid:
+            # Masque vide = auto-avance de phase (pools épuisés) : `W40KEngine.step` la déclenche
+            # AVANT de lire l'action, qui est donc ignorée. C'est un état légal, pas une panne —
+            # et il ne se capture pas : il n'ouvre aucune action à confronter au décodeur.
+            _obs, _r, terminated, truncated, _info = engine.step(0)
+            if terminated or truncated:
+                break
+            continue
+
+        if phase not in by_phase:
+            by_phase[phase] = (copy.deepcopy(game_state), mask.copy())
+
+        if move_pick is None and phase == "move":
             for squad_id, stored in (game_state.get(MOVE_CELL_MAP_CACHE_KEY) or {}).items():
                 cell_map = stored["map"]
                 if cell_map:
                     cell_idx = sorted(cell_map)[0]
-                    return (
-                        engine.action_decoder,
-                        game_state,
+                    move_pick = (
+                        copy.deepcopy(game_state),
                         str(squad_id),
                         cell_idx,
                         cell_map[cell_idx][0],
                     )
-        valid = [i for i, v in enumerate(mask) if v]
-        assert valid, f"aucune action valide en phase {game_state['phase']}"
-        engine.step(rng.choice(valid))
-    pytest.fail("phase move avec carte de cellules jamais atteinte en 300 steps")
+                    break
+
+        _obs, _r, terminated, truncated, _info = engine.step(rng.choice(valid))
+        if terminated or truncated:
+            break
+
+    assert move_pick is not None, "phase move avec carte de cellules jamais atteinte"
+    return {"decoder": engine.action_decoder, "by_phase": by_phase, "move_pick": move_pick}
+
+
+@pytest.fixture(scope="module")
+def move_state(driven) -> Tuple[Any, Dict[str, Any], str, int, Tuple[int, int]]:
+    """(decoder, gs, squad_id, cell_idx, dest) — état de phase move réellement joué."""
+    game_state, squad_id, cell_idx, dest = driven["move_pick"]
+    return driven["decoder"], game_state, squad_id, cell_idx, dest
 
 
 @pytest.fixture
@@ -160,6 +235,12 @@ def _eligible(game_state: Dict[str, Any], squad_id: str) -> List[Dict[str, Any]]
         if str(unit["id"]) == squad_id:
             return [unit]
     raise KeyError(f"escouade {squad_id} absente de game_state['units']")
+
+
+def _anchor(game_state: Dict[str, Any], squad_id: str) -> Tuple[int, int]:
+    """Ancre courante de l'escouade — `store_squad_move_cell_map` tamponne la carte dessus."""
+    unit = game_state["unit_by_id"][squad_id]
+    return int(unit["col"]), int(unit["row"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -197,6 +278,67 @@ def test_last_move_cell_is_still_a_move_and_not_the_wait_action(move_state):
     )
     assert result["action"] in MOVE_ACTIONS, result
     assert (result["destCol"], result["destRow"]) == (anchor_col, anchor_row)
+
+
+def test_first_move_cell_is_a_move_and_not_a_deployment_slot(move_state):
+    """`MOVE_CELL_BASE + 0` — borne BASSE de la famille move, et début de la zone 4-8 ambiguë."""
+    decoder, game_state, squad_id, _cell_idx, _dest = move_state
+    game_state = copy.deepcopy(game_state)
+    anchor = _anchor(game_state, squad_id)
+    store_squad_move_cell_map(game_state, squad_id, {0: (anchor, 0.0)})
+    result = decoder.convert_squad_action(
+        MOVE_CELL_BASE, game_state, eligible_units=_eligible(game_state, squad_id)
+    )
+    assert result["action"] in MOVE_ACTIONS, result
+    assert (result["destCol"], result["destRow"]) == anchor
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Le chevauchement 4-8 — l'ambiguïté la plus dangereuse de l'espace d'actions
+#
+# Les identifiants `DEPLOY_SLOT_BASE..DEPLOY_SLOT_BASE + 4` (4-8) sont AUSSI des cellules de
+# move : `MOVE_CELL_BASE` vaut 0. Rien dans l'entier ne dit lequel des deux il désigne — SEULE
+# la phase tranche (cf. §0.44, qui documente le coût de ce partage côté policy). Un jour où la
+# garde de phase du décodeur se déplacerait, l'agent déploierait en croyant se déplacer.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("slot", list(range(DEPLOY_SLOT_COUNT)))
+def test_deploy_slot_ids_decode_as_move_cells_outside_deployment(move_state, slot):
+    """Hors déploiement, `4..8` sont des CELLULES DE MOVE — jamais `deploy_unit`."""
+    decoder, game_state, squad_id, _cell_idx, _dest = move_state
+    game_state = copy.deepcopy(game_state)
+    anchor = _anchor(game_state, squad_id)
+    action_int = DEPLOY_SLOT_BASE + slot
+    store_squad_move_cell_map(game_state, squad_id, {action_int - MOVE_CELL_BASE: (anchor, 0.0)})
+    result = decoder.convert_squad_action(
+        action_int, game_state, eligible_units=_eligible(game_state, squad_id)
+    )
+    assert result["action"] in MOVE_ACTIONS, result
+    assert result["action"] != "deploy_unit"
+    assert (result["destCol"], result["destRow"]) == anchor
+
+
+def test_the_same_id_means_two_different_things_in_the_two_phases(move_state, deployment_state):
+    """Le MÊME entier rend deux intentions distinctes selon la phase — c'est le contrat.
+
+    Si ce test devenait vert avec une seule et même intention des deux côtés, c'est que la
+    désambiguïsation par la phase aurait disparu.
+    """
+    decoder, move_gs, squad_id, _cell_idx, _dest = move_state
+    move_gs = copy.deepcopy(move_gs)
+    anchor = _anchor(move_gs, squad_id)
+    store_squad_move_cell_map(move_gs, squad_id, {DEPLOY_SLOT_BASE: (anchor, 0.0)})
+    as_move = decoder.convert_squad_action(
+        DEPLOY_SLOT_BASE, move_gs, eligible_units=_eligible(move_gs, squad_id)
+    )
+
+    deploy_decoder, deploy_gs = deployment_state
+    as_deploy = deploy_decoder.convert_squad_action(DEPLOY_SLOT_BASE, deploy_gs)
+
+    assert as_move["action"] in MOVE_ACTIONS
+    assert as_deploy["action"] == "deploy_unit"
+    assert as_move["action"] != as_deploy["action"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -308,7 +450,7 @@ def test_zone_intent_outside_command_phase_raises(phase_state):
         )
 
 
-@pytest.mark.parametrize("option_index", [0, 1])
+@pytest.mark.parametrize("option_index", [0, 1, CHOICE_COUNT - 1])
 def test_choice_action_routes_to_that_option(phase_state, option_index):
     """`CHOICE_BASE + i` → `agent_decision` sur le candidat `i` de la décision en attente.
 
@@ -321,9 +463,15 @@ def test_choice_action_routes_to_that_option(phase_state, option_index):
         decision_type="rule_choice",
         player=1,
         unit_id=squad_id,
+        # CHOICE_COUNT candidats : c'est le seul montage qui rend le DERNIER `CHOICE_i`
+        # atteignable, donc qui teste la borne haute de l'espace d'actions.
         options=[
-            {"label": "A", "effect_ids": ("reroll_1_tohit_fight",), "payload": {"x": 0}},
-            {"label": "B", "effect_ids": ("reroll_1_save_fight",), "payload": {"x": 1}},
+            {
+                "label": f"option {i}",
+                "effect_ids": ("reroll_1_tohit_fight",) if i % 2 == 0 else ("reroll_1_save_fight",),
+                "payload": {"x": i},
+            }
+            for i in range(CHOICE_COUNT)
         ],
     )
     result = decoder.convert_squad_action(
@@ -357,8 +505,8 @@ def test_choice_slot_count_matches_the_action_space_tail(phase_state):
 # ─────────────────────────────────────────────────────────────────────────────
 # Slots de déploiement — `DEPLOY_SLOT_BASE + s`
 #
-# Ces entiers (4-8) sont AUSSI des cellules de move : c'est la phase qui désambiguïse. Le verrou
-# porte donc sur les deux lectures — move ci-dessus, déploiement ici.
+# La lecture « cellule de move » des mêmes entiers est testée plus haut
+# (`test_deploy_slot_ids_decode_as_move_cells_outside_deployment`).
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -392,3 +540,86 @@ def test_action_outside_the_deployment_slots_raises_in_deployment(deployment_sta
     decoder, game_state = deployment_state
     with pytest.raises(ValueError, match="invalide en phase deployment"):
         decoder.convert_squad_action(DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT, game_state)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PARITÉ MASQUE ↔ DÉCODEUR — la propriété qui couvre la classe entière
+#
+# Les cas ci-dessus énumèrent des familles ; celui-ci n'énumère rien. Il prend le masque que la
+# PRODUCTION construit, à chaque phase réellement atteinte, et exige que TOUT entier qu'il ouvre
+# soit décodable. C'est la propriété que le défaut d'origine violait : un masque de l'ancien
+# espace, servi à un modèle qui parlait le nouveau, ouvrait des entiers que le décodeur vivant
+# n'aurait pas su router — et rien ne levait, parce que personne ne confrontait les deux.
+#
+# Elle attrape aussi ce qu'aucune énumération ne verrait venir : une base décalée, une famille
+# d'actions ajoutée au masque sans branche de décodage, un masque qui déborde l'espace.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestMaskDecoderParity:
+    def test_parity_covers_the_real_phases(self, driven):
+        """Garde anti-vacuité : sans elle, la parité passerait sur zéro phase sans rien dire."""
+        missing = [p for p in REQUIRED_PHASES if p not in driven["by_phase"]]
+        assert not missing, (
+            f"phases jamais atteintes en {DRIVE_STEPS} pas : {missing} — la parité ne les "
+            f"mesure donc pas. Corriger le pilotage, pas la liste."
+        )
+        # Largeur, pas seulement présence : un masque réduit à « wait » dans chaque phase
+        # satisferait la ligne ci-dessus tout en ne confrontant plus rien. Mesuré à 103 actions
+        # (81 en move, 16 en command, 5 en deployment, 1 en shoot) ; le seuil garde de la marge
+        # pour ne pas dépendre du tirage.
+        total_open = sum(int(mask.sum()) for _gs, mask in driven["by_phase"].values())
+        assert total_open >= 50, (
+            f"seulement {total_open} actions ouvertes au total : la parité est devenue "
+            f"quasi vide et ne prouve plus grand-chose."
+        )
+
+    @pytest.mark.parametrize("phase", REQUIRED_PHASES)
+    def test_every_masked_action_is_decodable(self, driven, phase):
+        """Tout entier OUVERT par le masque se décode sans lever, dans la phase où il est ouvert."""
+        decoder = driven["decoder"]
+        game_state, mask = driven["by_phase"][phase]
+        game_state = copy.deepcopy(game_state)
+
+        assert len(mask) == TOTAL_ACTION_SIZE, (
+            f"masque de longueur {len(mask)} pour un espace de {TOTAL_ACTION_SIZE} actions"
+        )
+        open_actions = [int(i) for i, v in enumerate(mask) if v]
+        assert open_actions, f"masque vide en phase {phase}"
+
+        failures = []
+        for action_int in open_actions:
+            try:
+                intent = decoder.convert_squad_action(action_int, game_state)
+            except Exception as exc:  # noqa: BLE001 — on rapporte, on ne masque pas
+                failures.append(f"{action_int} → {type(exc).__name__}: {exc}")
+                continue
+            if not isinstance(intent, dict) or "action" not in intent:
+                failures.append(f"{action_int} → intention sans clé 'action' : {intent!r}")
+
+        assert not failures, (
+            f"phase {phase} : {len(failures)}/{len(open_actions)} actions OUVERTES par le masque "
+            f"sont indécodables — le masque et le décodeur ne parlent pas le même espace.\n"
+            + "\n".join(failures[:10])
+        )
+
+    def test_action_outside_the_mask_is_rejected_before_decoding(self, driven):
+        """La réciproque vit UNE COUCHE PLUS HAUT — et c'est délibéré.
+
+        `convert_squad_action` ne consulte aucun masque pour les familles à slot : la
+        vérification d'éligibilité appartient au moteur (§9 P3-1/P3-2), la dupliquer dans le
+        décodeur réécrirait la règle à deux endroits. Le rejet d'une action hors masque est donc
+        fait par `validate_action_against_mask`, que `W40KEngine.step` et `pve_controller`
+        appellent AVANT tout décodage. C'est cette garde-là qu'on verrouille ici : sans elle,
+        « tout entier ouvert est décodable » laisserait passer n'importe quel entier fermé.
+        """
+        decoder = driven["decoder"]
+        game_state, mask = driven["by_phase"]["move"]
+        closed = [int(i) for i, v in enumerate(mask) if not v]
+        assert closed, "masque entièrement ouvert : le cas testé n'existe pas"
+
+        with pytest.raises(ActionValidationError) as exc:
+            decoder.validate_action_against_mask(
+                closed[0], mask, game_state["phase"], "test_parity"
+            )
+        assert exc.value.code == "masked_out"
