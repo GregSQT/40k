@@ -28,6 +28,19 @@ _GAME_RULES = {
 
 
 def _unit(uid: int, player: int, positions: List[Tuple[int, int]], value: int) -> Dict[str, Any]:
+    """⚠️ Unité FABRIQUÉE À LA MAIN — elle ne prouve rien sur le mode Endless Duty réel.
+
+    Ce dict porte `BASE_SHAPE`, `BASE_SIZE`, `orientation` et un `VALUE` non nul. En production,
+    l'unité qui arrive dans `_replace_units_for_player` vient de `_build_unit_from_registry`, qui
+    **n'émet aucun de ces champs de socle** et dont le `VALUE` vaut 0 pour le leader de départ.
+    Ce helper compense donc exactement les trous qui empêchent le mode de démarrer : c'est la
+    raison pour laquelle la panne est restée invisible jusqu'au 2026-07-29.
+
+    Ce test reste légitime — il verrouille la logique de `value_at_start` de
+    `_replace_units_for_player`, pas la construction d'unité. Le vrai état du mode est mesuré et
+    verrouillé par `test_endless_duty_is_broken.py`, et documenté dans
+    `Documentation/Implémentation/A_faire/Endless_duty.md`.
+    """
     return {
         "id": uid, "player": player, "col": positions[0][0], "row": positions[0][1],
         "unitType": "TestUnit", "DISPLAY_NAME": f"Unit {uid}",
