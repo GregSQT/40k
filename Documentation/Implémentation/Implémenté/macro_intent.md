@@ -114,6 +114,13 @@ def _encode_macro_intent_context(game_state, active_unit):
 
 **Pour ATTACK** : candidat 1 = ennemi scoré (damage_ratio), candidat 2 = objectif. L'agent apprend s'il vaut mieux engager ou capturer selon le contexte.
 
+> ⚠️ **PÉRIMÉ depuis V11 §0.43 / §9 P3-1/P3-2** — `get_best_enemy_global` / `get_best_enemy_score` /
+> `get_best_enemy_score_for_unit` **n'existent plus** dans `engine/macro_intents.py` : cette heuristique
+> par `damage_ratio` tranchait la cible à la place de l'agent, alors que la cible (charge 11.02/11.04,
+> mêlée 12.05) est désormais une **dimension d'action** (slots ennemis, tête pointeur). Les trois
+> paragraphes ci-dessous décrivent l'ancien candidat 1 d'ATTACK et sont conservés comme mémoire de
+> conception, pas comme description du code actuel.
+
 **Candidat 1 pour ATTACK — toujours global** : `get_best_enemy_global(game_state)` retourne le meilleur ennemi vivant toutes zones confondues (critère : damage_ratio). Il n'y a pas de filtrage par zone. Le `zone_idx` sert uniquement à choisir *sur quelle zone* poser l'intent ATTACK — pas à restreindre la cible de navigation.
 
 **Comportement sans ennemi vivant** : le jeu peut continuer jusqu'au tour 5 sans ennemis. Si `get_best_enemy_global` ne trouve aucun ennemi vivant, elle retourne la position de l'objectif de la zone — comportement identique à INVADE. Ce n'est pas un fallback défensif : c'est un comportement métier explicite documenté ici. Dans l'implémentation, ce cas doit être commenté comme tel dans `macro_intents.py` (`# No enemy alive: navigate to zone objective, game may continue to turn 5`). `get_best_enemy_score` retourne `0.0` dans ce cas.

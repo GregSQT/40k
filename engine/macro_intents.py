@@ -137,79 +137,11 @@ def get_nearest_objective_zone(active_unit: dict, game_state: dict) -> int:
     return best_idx
 
 
-def get_best_enemy_global(game_state: dict, zone_idx: int):
-    """Return (col, row) of best enemy (highest damage_ratio). Falls back to zone objective if no enemy alive."""
-    cache = game_state.get("_cached_best_enemy_global")
-    if cache is not None and zone_idx in cache:
-        return cache[zone_idx]
-
-    from engine.phase_handlers.shared_utils import is_unit_alive
-    current_player = game_state["current_player"]
-    fallback_col, fallback_row = get_objective_center(game_state["objectives"][zone_idx])
-
-    best_unit = None
-    best_score = -1.0
-    for unit in game_state["units"]:
-        if unit.get("player") == current_player:
-            continue
-        if not is_unit_alive(str(unit["id"]), game_state):
-            continue
-        score = get_best_enemy_score_for_unit(unit, game_state)
-        if score > best_score:
-            best_score = score
-            best_unit = unit
-
-    result = (best_unit["col"], best_unit["row"]) if best_unit is not None else (fallback_col, fallback_row)
-    if "_cached_best_enemy_global" not in game_state:
-        game_state["_cached_best_enemy_global"] = {}
-    game_state["_cached_best_enemy_global"][zone_idx] = result
-    return result
-
-
-def get_best_enemy_score(game_state: dict) -> float:
-    """Return damage_ratio of best enemy. Returns 0.0 if no enemy alive."""
-    cached = game_state.get("_cached_best_enemy_score")
-    if cached is not None:
-        return cached
-
-    from engine.phase_handlers.shared_utils import is_unit_alive
-    current_player = game_state["current_player"]
-    best_score = 0.0
-    for unit in game_state["units"]:
-        if unit.get("player") == current_player:
-            continue
-        if not is_unit_alive(str(unit["id"]), game_state):
-            continue
-        score = get_best_enemy_score_for_unit(unit, game_state)
-        if score > best_score:
-            best_score = score
-    game_state["_cached_best_enemy_score"] = best_score
-    return best_score
-
-
-def get_best_enemy_score_for_unit(unit: dict, game_state: dict) -> float:
-    """Compute damage_ratio = expected_damage / hp_remaining for a unit."""
-    from engine.weapon_damage_cache import lookup_best_weapon
-    from engine.phase_handlers.shared_utils import get_hp_from_cache, is_unit_alive
-    hp = get_hp_from_cache(str(unit["id"]), game_state)
-    if not hp or hp <= 0:
-        return 0.0
-    cache = game_state.get("_best_weapon_cache")
-    if not cache:
-        return 0.0
-    unit_id = str(unit["id"])
-    current_player = game_state.get("current_player")
-    max_dmg = 0.0
-    for target in game_state["units"]:
-        if target.get("player") != current_player:
-            continue
-        if not is_unit_alive(str(target["id"]), game_state):
-            continue
-        target_id = str(target["id"])
-        _, ranged_dmg = lookup_best_weapon(cache, unit_id, target_id, True)
-        _, melee_dmg = lookup_best_weapon(cache, unit_id, target_id, False)
-        max_dmg = max(max_dmg, ranged_dmg, melee_dmg)
-    return max_dmg / hp
+# V11 §0.43 — les heuristiques de menace par `damage_ratio` (`get_best_enemy_global`,
+# `get_best_enemy_score`, `get_best_enemy_score_for_unit`) ont ete SUPPRIMEES : elles
+# tranchaient la cible (de charge, de melee) a la place de l'agent. Depuis §9 P3-1/P3-2, la
+# cible est une DIMENSION D'ACTION (un slot ennemi, cf. CHARGE_SLOTS / FIGHT_SLOTS ci-dessus)
+# scoree par la tete pointeur. Aucune heuristique de repli ne doit revenir ici.
 
 
 def get_objective_control(zone_idx: int, game_state: dict) -> float:
