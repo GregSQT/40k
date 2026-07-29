@@ -26,6 +26,38 @@ Usage:
   python scripts/roster_matchup_stats.py --agent Infantry_Troop_RangedSwarm [--scale 100pts] [--episodes 30]
   python scripts/roster_matchup_stats.py --agent Infantry_Troop_RangedSwarm --p1-benchmark p1_training_roster-01
   python scripts/roster_matchup_stats.py --agent Infantry_Troop_RangedSwarm --all-splits --episodes 100
+
+--------------------------------------------------------------------------------------
+Etat (V11 0.47) — cet outil etait MORT et a ete remis en service
+--------------------------------------------------------------------------------------
+Il ne pouvait plus tourner depuis la refonte de l'observation : sa boucle aplatissait l'obs,
+devenue un `gym.spaces.Dict` (pipeline squad), et levait avant meme de servir le masque —
+masque qui, lui, etait celui de l'ANCIEN layout d'actions et n'aurait produit que des
+statistiques silencieusement fausses. Les scenarios qu'il ecrivait portaient en outre des
+cles que le moteur rejette.
+
+Trois regles a respecter en le modifiant :
+
+1. La boucle d'evaluation N'EST PAS autonome : elle est calquee sur `ai/bot_evaluation.py`,
+   la boucle d'evaluation de REFERENCE (cf. Documentation/AI_TRAINING.md, section
+   "Evaluation"). Obs Dict servie telle quelle, masque via `W40KEngine.get_action_mask`,
+   plafond de pas derive de `config_loader.get_max_turns`, siege lu dans
+   `info["controlled_player"]`, episodes tronques comptes a part (`failed_episodes`), jamais
+   melanges aux resultats de parties. Toute divergence avec la reference est un bug en
+   sursis : ce fichier en a deja accumule quatre, plus une copie locale du normalizer
+   d'observation qui avait elle aussi diverge (il delegue desormais a la reference).
+
+2. Les scenarios ecrits suivent le contrat V11 : `board_ref` + `terrain_ref` (le terrain porte
+   murs, aires d'objectifs et zones de deploiement). Aucune cle legacy — `objectives_ref`,
+   `wall_ref`, `deployment_zone` — le moteur leve sur la premiere. Modele de reference :
+   `scripts/build_holdout_benchmark.py`.
+
+3. Aucun repli sur une donnee manquante : cet outil ne produit que des statistiques, un
+   chiffre invente y est pire qu'un arret. Les lectures d'`info` passent par `require_key`,
+   un matchup dont aucun episode n'aboutit leve au lieu de rendre un taux de victoire de 0.
+
+Comportement verrouille par tests/unit/scripts/test_roster_matchup_eval_loop.py et
+tests/unit/scripts/test_roster_matchup_scenario_contract.py.
 """
 
 import argparse
@@ -288,16 +320,28 @@ def _collect_p2_rosters(scale: str, split: str) -> List[Tuple[str, str]]:
     return refs
 
 
-def _build_scenario_template(scale: str, split: str, wall_ref: str, objectives_ref: str) -> Dict[str, Any]:
-    """Base scenario template for matchup scenarios."""
+def _build_scenario_template(scale: str, board_ref: str, terrain_ref: str) -> Dict[str, Any]:
+    """Base scenario template for matchup scenarios.
+
+    Pas de parametre `split` : il n'apparait dans aucune cle du scenario. Le moteur le deduit
+    du CHEMIN du fichier ("/scenarios/training/", "/scenarios/holdout_*/",
+    `GameStateManager._load_units_from_roster_refs`), chemin que l'appelant construit deja.
+
+    Contrat moteur V11 (meme forme que `_build_scenarios` dans
+    scripts/build_holdout_benchmark.py) : murs, aires d'objectifs et zones de deploiement
+    viennent TOUS du `terrain_ref`, resolu sous `config/board/<board_ref>/terrain/`
+    (`GameStateManager.load_units_from_scenario`, qui delegue a `_resolve_board_dir`).
+    Aucune cle legacy : `objectives_ref` est explicitement rejetee par le moteur (meme
+    fonction, garde sur les cles d'objectifs supprimees) et `deployment_zone` est inutile des
+    lors que le terrain porte une section `deployment_zones`.
+    """
     return {
-        "deployment_zone": "hammer",
         "deployment_type": "active",
         "scale": scale,
         "p1_roster_seed": 42,
-        "wall_ref": wall_ref,
         "primary_objectives": ["objectives_control"],
-        "objectives_ref": objectives_ref,
+        "board_ref": board_ref,
+        "terrain_ref": terrain_ref,
     }
 
 
@@ -382,7 +426,9 @@ def _extract_rule_checker_units() -> Tuple[List[str], List[Dict[str, Any]], List
     return selected_sorted, selected_details, rejected_rows
 
 
-def _generate_rule_checker_artifacts(agent_key: str, scale: str) -> None:
+def _generate_rule_checker_artifacts(
+    agent_key: str, scale: str, board_ref: str, terrain_ref: str
+) -> None:
     """
     Generate dedicated rule-checker scenarios + manifest in config/rule_checker.
     """
@@ -408,13 +454,17 @@ def _generate_rule_checker_artifacts(agent_key: str, scale: str) -> None:
         for p2_unit in selected_units:
             scenario_name = f"scenario_rule_checker_bot-{scenario_index:03d}.json"
             scenario_path = scenarios_dir / scenario_name
+            # Meme contrat V11 que _build_scenario_template : murs + objectifs + zones de
+            # deploiement viennent du terrain_ref. Les anciennes refs (walls-01.json /
+            # objectives-01.json) n'existent nulle part sous config/board/, et
+            # `objectives_ref` est rejetee par le moteur
+            # (`GameStateManager.load_units_from_scenario`).
             scenario_payload = {
-                "deployment_zone": "hammer",
                 "deployment_type": "active",
                 "scale": scale,
-                "wall_ref": "walls-01.json",
                 "primary_objectives": ["objectives_control"],
-                "objectives_ref": "objectives-01.json",
+                "board_ref": board_ref,
+                "terrain_ref": terrain_ref,
                 "units": [
                     {"id": 1, "unit_type": p1_unit, "player": 1},
                     {"id": 2, "unit_type": p1_unit, "player": 1},
@@ -459,7 +509,93 @@ def _generate_rule_checker_artifacts(agent_key: str, scale: str) -> None:
     print(f"🧾 Rejected audit: {rejected_path}")
 
 
-def _run_matchup_episodes(
+def _run_single_episode(
+    env,
+    model,
+    obs_normalizer,
+    max_steps_per_episode: int,
+    ep_seed: int,
+) -> str:
+    """Joue UN episode et rend "win", "loss", "draw" ou "failed".
+
+    Extrait de `_run_matchup_episodes` pour etre exercable avec des doublures (env et modele
+    factices), sans faire tourner de partie. C'est la seule partie qui DECIDE : quelle
+    observation et quel masque sont servis au modele, quand l'episode s'arrete, et comment le
+    resultat est lu. Calquee sur la boucle de reference `ai/bot_evaluation._eval_worker_task`.
+
+    "failed" = episode TRONQUE par le plafond de pas : la partie n'a jamais atteint sa fin,
+    le moteur n'a donc pas de vainqueur a designer (`info["winner"]` vaut None hors
+    terminaison, `W40KEngine.step`). Le classer gagne/perdu/nul fabriquerait une statistique.
+    La reference tient le meme compte separe sous le nom `failed_episodes`
+    (`_eval_worker_task`, agrege par `evaluate_against_bots` qui en tire `eval_reliable`).
+    """
+    import numpy as np
+    from shared.data_validation import require_key
+
+    # `ai/bot_evaluation._eval_worker_task` : les DEUX generateurs sont poses.
+    random.seed(ep_seed)
+    np.random.seed(ep_seed)
+    obs, info = env.reset(seed=ep_seed)
+    done = False
+    step_count = 0
+    while not done and step_count < max_steps_per_episode:
+        model_obs = obs_normalizer(obs) if obs_normalizer is not None else obs
+        # Obs Dict (MultiInputPolicy + CNN) : predict la gere nativement, ne pas aplatir.
+        # Copie conforme de `ai/bot_evaluation._eval_worker_task`. L'obs du pipeline squad est un
+        # gym.spaces.Dict : l'aplatir levait avant meme d'atteindre le masque.
+        if isinstance(model_obs, dict):
+            model_input = model_obs
+        else:
+            model_input = np.asarray(model_obs, dtype=np.float32)
+            if model_input.ndim == 1:
+                model_input = model_input.reshape(1, -1)
+        # MEME chemin que la production (`ai/bot_evaluation._eval_worker_task`) : le masque servi au
+        # modele doit etre celui de la semantique SQUAD que `env.step` decode. La voie
+        # legacy `action_decoder.get_action_mask_and_eligible_units` construit l'ancien
+        # layout (mask[9]=charge, mask[10]=fight, mask[11]=wait, mask[4+i]=tir) et a la
+        # meme longueur (total_action_size) : l'erreur etait donc silencieuse.
+        # `engine.get_action_mask()` fait de plus avancer la phase de combat quand le
+        # masque sort vide — sans quoi la boucle d'evaluation se bloquerait sur un masque
+        # tout a False.
+        action_masks = np.asarray(env.engine.get_action_mask(), dtype=bool)
+        if action_masks.ndim == 1:
+            action_masks = action_masks.reshape(1, -1)
+        action, _ = model.predict(model_input, action_masks=action_masks, deterministic=True)
+        action_scalar = int(np.asarray(action).flat[0])
+        obs, _, terminated, truncated, info = env.step(action_scalar)
+        done = bool(terminated or truncated)
+        step_count += 1
+    if not done:
+        # Sortie par le plafond de pas : la partie est INACHEVEE. Aucun resultat n'en est
+        # deductible — la compter en defaite (ce que faisait le code) ou en nul biaiserait le
+        # taux de victoire sans laisser de trace.
+        return "failed"
+    # Pas de `info.get("winner")` : un `None` de repli n'est ni `controlled_player` ni -1,
+    # l'episode serait compte en DEFAITE alors que la donnee manque. Le moteur ecrit toujours
+    # la cle dans `W40KEngine.step`, partie terminee comme partie en cours : son absence est
+    # une anomalie d'environnement, pas un cas de jeu.
+    winner = require_key(info, "winner")
+    if winner is None:
+        # Episode termine SANS vainqueur : le moteur n'en produit jamais (`W40KEngine.step`
+        # pose un vainqueur reel a la terminaison, et -1 sur sa propre troncature). Un None
+        # ici veut dire que l'env ment sur sa terminaison ; le compter en defaite masquerait
+        # le probleme dans la statistique.
+        raise ValueError(
+            "Episode termine avec info['winner'] = None : l'environnement signale une fin de "
+            "partie sans vainqueur, ce que le moteur ne produit jamais."
+        )
+    # `ai/bot_evaluation._eval_worker_task` : le siege controle est LU dans l'info rendue par l'env, pas
+    # recalcule ici. Un identifiant recalcule localement peut diverger silencieusement du
+    # siege reellement joue (BotControlledEnv gere l'alternance des sieges).
+    controlled_player = require_key(info, "controlled_player")
+    if winner == controlled_player:
+        return "win"
+    if winner == -1:
+        return "draw"
+    return "loss"
+
+
+def _build_eval_env(
     scenario_file: str,
     agent_key: str,
     model_path: str,
@@ -470,12 +606,15 @@ def _run_matchup_episodes(
     eval_bot_name: str,
     eval_bot_randomness: float,
     agent_seat_mode: str,
-    obs_normalizer=None,
-    seed: int = 42,
-) -> Tuple[int, int, int]:
-    """Run n_episodes with model vs bot, return (wins, losses, draws)."""
-    import numpy as np
-    from sb3_contrib import MaskablePPO
+):
+    """Construit l'environnement d'evaluation (moteur -> ActionMasker -> BotControlledEnv).
+
+    Extrait de `_run_matchup_episodes` pour que le cablage du siege soit verifiable avec des
+    doublures, sans construire de moteur. `agent_seat_mode` est transmis dans LES DEUX modes
+    d'adversaire : il etait valide puis oublie en mode bot, ou le wrapper retombait sur son
+    defaut "p1" (`BotControlledEnv.__init__`, param `agent_seat_mode`) — l'option existait,
+    etait documentee, et n'avait aucun effet.
+    """
     from ai.training_utils import setup_imports
     from ai.env_wrappers import BotControlledEnv
     from ai.evaluation_bots import (
@@ -491,7 +630,6 @@ def _run_matchup_episodes(
         raise ValueError(f"opponent_mode must be 'bot' or 'agent' (got {opponent_mode!r})")
     if agent_seat_mode not in {"p1", "p2"}:
         raise ValueError(f"agent_seat_mode must be 'p1' or 'p2' (got {agent_seat_mode!r})")
-    controlled_winner_id = 1 if agent_seat_mode == "p1" else 2
 
     BOT_CLASSES = {
         "random": RandomBot,
@@ -525,7 +663,12 @@ def _run_matchup_episodes(
             bot = RandomBot()
         else:
             bot = BOT_CLASSES[eval_bot_name](randomness=float(eval_bot_randomness))
-        env = BotControlledEnv(masked_env, bot, unit_registry)
+        env = BotControlledEnv(
+            masked_env,
+            bot,
+            unit_registry,
+            agent_seat_mode=agent_seat_mode,
+        )
     else:
         # Force self-play opponent every episode (agent vs agent), snapshot taken from model_path.
         # A fallback bot list is required by BotControlledEnv signature, but ratio=1.0 ensures
@@ -546,58 +689,103 @@ def _run_matchup_episodes(
             self_play_snapshot_device="cpu",
             self_play_deterministic=True,
         )
+    return env
 
+
+def _run_matchup_episodes(
+    scenario_file: str,
+    agent_key: str,
+    model_path: str,
+    training_config_name: str,
+    rewards_config_name: str,
+    n_episodes: int,
+    opponent_mode: str,
+    eval_bot_name: str,
+    eval_bot_randomness: float,
+    agent_seat_mode: str,
+    obs_normalizer=None,
+    seed: int = 42,
+) -> Tuple[int, int, int, int]:
+    """Run n_episodes with model vs bot, return (wins, losses, draws, failed_episodes).
+
+    `failed_episodes` compte les episodes TRONQUES par le plafond de pas, jamais melanges aux
+    resultats de parties : meme separation que `failed_episodes` dans la reference
+    (`ai/bot_evaluation._eval_worker_task`), qui s'en sert pour decider `eval_reliable`.
+    """
+    from sb3_contrib import MaskablePPO
+    from config_loader import get_max_turns
+
+    env = _build_eval_env(
+        scenario_file=scenario_file,
+        agent_key=agent_key,
+        model_path=model_path,
+        training_config_name=training_config_name,
+        rewards_config_name=rewards_config_name,
+        n_episodes=n_episodes,
+        opponent_mode=opponent_mode,
+        eval_bot_name=eval_bot_name,
+        eval_bot_randomness=eval_bot_randomness,
+        agent_seat_mode=agent_seat_mode,
+    )
     model = MaskablePPO.load(model_path, env=env)
-    wins, losses, draws = 0, 0, 0
+    # Meme source que la reference (`ai/bot_evaluation.evaluate_against_bots`, qui pose la cle
+    # "max_steps_per_episode" des taches d'evaluation) : la duree de bataille vient de
+    # game_rules.max_turns via config_loader.get_max_turns(). Aucun plafond en dur, aucune
+    # valeur par defaut : si la config ne porte pas max_turns, get_max_turns leve.
+    max_steps_per_episode = int(get_max_turns()) * 400
+    wins, losses, draws, failed = 0, 0, 0, 0
     for ep in range(n_episodes):
-        ep_seed = (seed + ep * 1000) % (2**31)
-        random.seed(ep_seed)
-        obs, info = env.reset(seed=ep_seed)
-        done = False
-        while not done:
-            model_obs = obs_normalizer(obs) if obs_normalizer is not None else obs
-            model_obs = np.asarray(model_obs, dtype=np.float32)
-            if model_obs.ndim == 1:
-                model_obs = model_obs.reshape(1, -1)
-            action_masks, _ = env.engine.action_decoder.get_action_mask_and_eligible_units(env.engine.game_state)
-            action, _ = model.predict(model_obs, action_masks=action_masks, deterministic=True)
-            action_scalar = int(np.asarray(action).flat[0])
-            obs, _, terminated, truncated, info = env.step(action_scalar)
-            done = bool(terminated or truncated)
-        winner = info.get("winner")
-        if winner == controlled_winner_id:
+        outcome = _run_single_episode(
+            env=env,
+            model=model,
+            obs_normalizer=obs_normalizer,
+            max_steps_per_episode=max_steps_per_episode,
+            ep_seed=(seed + ep * 1000) % (2**31),
+        )
+        if outcome == "win":
             wins += 1
-        elif winner == -1:
+        elif outcome == "draw":
             draws += 1
+        elif outcome == "failed":
+            failed += 1
         else:
             losses += 1
     env.close()
-    return wins, losses, draws
+    return wins, losses, draws, failed
 
 
 def _build_obs_normalizer(agent_key: str, training_config_name: str, model_path: str):
-    """Build observation normalizer if VecNormalize is enabled."""
-    import numpy as np
+    """Build observation normalizer if VecNormalize is enabled.
+
+    Le normalizer lui-meme n'est PAS reecrit ici : c'est celui de la reference,
+    `ai/bot_evaluation._build_eval_obs_normalizer_for_worker`, seul a traiter l'obs Dict du
+    pipeline squad (`normalize_obs` sur "global_cont") autant que le chemin legacy Box a plat.
+    Une copie locale re-divergerait silencieusement —
+    c'est exactement ce qui s'etait produit : elle aplatissait l'obs Dict.
+    Ce script ne garde que la LECTURE des drapeaux dans la config d'agent.
+    """
     from shared.data_validation import require_key
-    from ai.vec_normalize_utils import normalize_observation_for_inference
+    from ai.bot_evaluation import _build_eval_obs_normalizer_for_worker
 
     config = __import__("config_loader", fromlist=["get_config_loader"]).get_config_loader()
     training_cfg = config.load_agent_training_config(agent_key, training_config_name)
     vec_cfg = require_key(training_cfg, "vec_normalize")
     vec_eval_cfg = require_key(training_cfg, "vec_normalize_eval")
-    if not vec_cfg.get("enabled") or not vec_eval_cfg.get("enabled"):
-        return None
-
-    def _normalize(obs):
-        obs_arr = np.asarray(obs, dtype=np.float32)
-        if obs_arr.ndim == 1:
-            obs_arr = obs_arr.reshape(1, -1)
-        return normalize_observation_for_inference(obs_arr, model_path).squeeze()
-
-    return _normalize
+    return _build_eval_obs_normalizer_for_worker(
+        None,
+        model_path,
+        bool(vec_cfg.get("enabled")),
+        bool(vec_eval_cfg.get("enabled")),
+    )
 
 
-def main() -> None:
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Construit le parseur de la ligne de commande.
+
+    Extrait de `main()` pour que les valeurs par defaut soient interrogeables sur le parseur
+    REELLEMENT construit (`parser.get_default(...)`), au lieu d'etre relues dans le texte du
+    source — une lecture qui casse a la premiere reformulation et ne prouve rien.
+    """
     parser = argparse.ArgumentParser(description="Collect roster matchup statistics")
     parser.add_argument("--agent", required=True, help="Agent key (e.g. Infantry_Troop_RangedSwarm)")
     parser.add_argument("--scale", default="100pts", help="Roster scale")
@@ -634,10 +822,16 @@ def main() -> None:
                     help="Split to load P2 benchmark from (e.g. holdout). Default: same as --split")
     parser.add_argument("--all-splits", action="store_true",
                     help="Run for training, holdout_regular, and holdout_hard (output: <split>_matchups.json each)")
-    parser.add_argument("--wall-ref", default="walls-11.json",
-                    help="Wall ref for generated matchup scenarios")
-    parser.add_argument("--objectives-ref", default="objectives-51.json",
-                    help="Objectives ref for generated matchup scenarios")
+    parser.add_argument("--board-ref", default="44x60x5",
+                    help="Board de reference des scenarios generes (config/board/<board_ref>/). "
+                         "Defaut 44x60x5 : le board de la banque de scenarios par-agent, celui "
+                         "qu'emploie aussi scripts/build_holdout_benchmark.py")
+    parser.add_argument("--terrain-ref", default="terrain-mc1.json",
+                    help="Terrain des scenarios generes (config/board/<board_ref>/terrain/<terrain_ref>) "
+                         "— il porte les murs, les aires d'objectifs et les zones de deploiement. "
+                         "Defaut terrain-mc1.json : le terrain des scenarios vivants de la banque, "
+                         "verifie porteur d'aires \"objective\": true et d'une section "
+                         "deployment_zones, les deux prerequis du contrat V11")
     parser.add_argument(
         "--opponent-mode",
         choices=["bot", "agent"],
@@ -722,10 +916,19 @@ def main() -> None:
         default=None,
         help="Écrire un JSON partiel au lieu de fusionner dans la matrice complète",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> None:
+    args = _build_arg_parser().parse_args()
 
     if args.rule_checker:
-        _generate_rule_checker_artifacts(agent_key=args.agent, scale=args.scale)
+        _generate_rule_checker_artifacts(
+            agent_key=args.agent,
+            scale=args.scale,
+            board_ref=args.board_ref,
+            terrain_ref=args.terrain_ref,
+        )
         return
 
     owners_norm = list(dict.fromkeys(getattr(args, "quantile_owners", None) or []))
@@ -929,9 +1132,8 @@ def _run_one_split(
     run_matchup_dir.mkdir(parents=True, exist_ok=True)
     template = _build_scenario_template(
         args.scale,
-        current_split,
-        args.wall_ref,
-        args.objectives_ref,
+        args.board_ref,
+        args.terrain_ref,
     )
     obs_normalizer = _build_obs_normalizer(args.agent, args.training_config, model_path)
 
@@ -955,7 +1157,7 @@ def _run_one_split(
             scenario_path = str(scenario_file)
             print(f"[{current}/{total_matchups}] {p1_id} vs {p2_id}...", end=" ", flush=True)
             if args.opponent_mode == "agent" and bool(args.agent_seat_bidirectional):
-                wins_p1, losses_p1, draws_p1 = _run_matchup_episodes(
+                wins_p1, losses_p1, draws_p1, failed_p1 = _run_matchup_episodes(
                     scenario_path,
                     args.agent,
                     model_path,
@@ -968,7 +1170,7 @@ def _run_one_split(
                     agent_seat_mode="p1",
                     obs_normalizer=obs_normalizer,
                 )
-                wins_p2, losses_p2, draws_p2 = _run_matchup_episodes(
+                wins_p2, losses_p2, draws_p2, failed_p2 = _run_matchup_episodes(
                     scenario_path,
                     args.agent,
                     model_path,
@@ -984,8 +1186,9 @@ def _run_one_split(
                 wins = wins_p1 + wins_p2
                 losses = losses_p1 + losses_p2
                 draws = draws_p1 + draws_p2
+                failed = failed_p1 + failed_p2
             else:
-                wins, losses, draws = _run_matchup_episodes(
+                wins, losses, draws, failed = _run_matchup_episodes(
                     scenario_path,
                     args.agent,
                     model_path,
@@ -998,19 +1201,33 @@ def _run_one_split(
                     agent_seat_mode=str(args.agent_seat_mode),
                     obs_normalizer=obs_normalizer,
                 )
+            # Les episodes tronques sont EXCLUS du denominateur : ce ne sont pas des parties.
             total = wins + losses + draws
-            win_rate = wins / total if total > 0 else 0.0
+            if total == 0:
+                raise RuntimeError(
+                    f"Matchup {p1_id} vs {p2_id} : aucun episode n'est alle au bout "
+                    f"({failed} tronque(s) sur {args.episodes}). Aucun taux de victoire n'en "
+                    f"est deductible — un 0.0 de repli serait une statistique inventee."
+                )
+            win_rate = wins / total
             matchups[p1_id][p2_id] = {
                 "wins": wins,
                 "losses": losses,
                 "draws": draws,
+                # Meme nom que la reference (`ai/bot_evaluation._eval_worker_task`) : episodes tronques par
+                # le plafond de pas, hors du calcul du taux de victoire.
+                "failed_episodes": failed,
                 "win_rate": round(win_rate, 4),
             }
             matchup_elapsed = time.perf_counter() - matchup_start
             total_matchup_seconds += matchup_elapsed
             avg_matchup_seconds = total_matchup_seconds / float(current)
             avg_matchup_text = f"{avg_matchup_seconds:.3f}".replace(".", ",")
-            print(f"WR={win_rate:.2%} ({wins}W-{losses}L-{draws}D) | avg: {avg_matchup_text}s")
+            failed_text = f" | ⚠️ {failed} tronque(s)" if failed else ""
+            print(
+                f"WR={win_rate:.2%} ({wins}W-{losses}L-{draws}D){failed_text} "
+                f"| avg: {avg_matchup_text}s"
+            )
             try:
                 scenario_file.unlink()
             except OSError:

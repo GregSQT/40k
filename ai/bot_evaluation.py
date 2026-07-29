@@ -539,7 +539,11 @@ def _eval_worker_task(
             obs, reward, terminated, truncated, info = env.step(action_scalar)
             done = bool(terminated or truncated)
             step_count += 1
-        winner = info.get("winner")
+        # Pas de `info.get("winner")` : un `None` de repli n'est ni `controlled_player` ni -1,
+        # l'episode serait compte en DEFAITE alors que la donnee manque. Le moteur ecrit
+        # toujours la cle dans `W40KEngine.step`, partie terminee comme partie en cours :
+        # son absence est une anomalie d'environnement, pas un cas de jeu.
+        winner = require_key(info, "winner")
         controlled_player = require_key(info, "controlled_player")
         if winner == controlled_player:
             wins += 1

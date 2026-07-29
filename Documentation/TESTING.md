@@ -139,6 +139,26 @@ mesurés sur la suite entière.
 | 22 — UNIT_RULES dynamiques (tir) | reroll_1_towound, reroll_towound_on_obj, closest_target_penetration | ✅ OK |
 | 23 — Activation e2e complète | tir→HP→mort→cleanup pool via execute_semantic_action | ✅ OK |
 
+### Python — `tests/unit/scripts/`
+
+**Ce qu'on met ici** : les tests des outils de `scripts/` — générateurs de scénarios, collecte
+de statistiques, migrations de banque. Ces outils ne sont pas le moteur : ils **écrivent des
+fichiers de configuration** et **produisent des chiffres**, deux choses qui échouent en
+silence. Un scénario au mauvais contrat n'est découvert qu'au chargement, un taux de victoire
+faux n'est jamais découvert du tout.
+
+Contrainte propre au répertoire : **un test de `scripts/` ne fait jamais tourner de partie**.
+Ces outils lancent des épisodes complets ; les exercer réellement volerait le CPU d'un
+entraînement en cours et rendrait la suite inutilisable. On teste donc les fonctions qui
+décident, avec des doublures (faux environnement, faux modèle) — pas le script de bout en
+bout. Corollaire : ce qui compte doit être extrait dans une fonction appelable, sinon il
+n'est pas testable.
+
+| Fichier | Tests | Ce qui est couvert |
+|---|---|---|
+| `tests/unit/scripts/test_roster_matchup_eval_loop.py` | 18 | Boucle d'évaluation de `roster_matchup_stats.py`, exercée avec un faux env (obs `Dict` + masque) et un faux modèle qui enregistre ce qu'il reçoit : obs `Dict` servie non aplatie, chemin legacy `Box` converti en float32/batch, masque venant de `engine.get_action_mask` (voie legacy jamais lue), arrêt exact au plafond de pas, épisode tronqué compté `failed` et jamais en partie, vainqueur et siège lus dans `info` (absence → erreur explicite), les deux générateurs aléatoires graînés, normalizer délégué à `ai/bot_evaluation.py`, `--agent-seat-mode` transmis dans les modes bot **et** agent |
+| `tests/unit/scripts/test_roster_matchup_scenario_contract.py` | 5 | Contrat V11 des scénarios écrits par `roster_matchup_stats.py` : aucune clé legacy (`objectives_ref`, `wall_ref`, `deployment_zone`), `board_ref`/`terrain_ref` présents, défauts CLI lus sur le parseur réel et pointant des fichiers existants, terrain par défaut porteur d'aires `objective: true` et de `deployment_zones` |
+
 ### Frontend — `frontend/src/utils/`
 
 **68 tests**
