@@ -4621,7 +4621,7 @@ def main():
         step_logger = StepLogger(
             os.path.join(project_root, "step.log"),
             enabled=args.step,
-            buffer_size=cast(int, step_log_buffer_size),
+            buffer_size=step_log_buffer_size,
             debug_mode=args.debug,
         )
         
