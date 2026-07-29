@@ -306,6 +306,41 @@ def test_take_to_the_skies_does_not_leak_outside_the_moves_2103_covers():
     assert _fly_traversal_active(gs, gs["unit_by_id"]["1"], "1") is False
 
 
+def test_a_move_declaration_does_not_grant_traversal_during_the_charge_phase():
+    """Les deux déclarations sont DISJOINTES : `units_took_to_skies` vaut pour le move, pas pour
+    la charge. Un humain qui a pris les airs en phase de mouvement n'a rien déclaré pour sa charge.
+
+    Verrouille la branche que `_fly_traversal_active` a gagnée : un mutant qui écrirait
+    `charge=False` en dur lirait le set du move et accorderait la traversée à tort.
+    """
+    gs = _fly_gs(move=5, gym=False, declared=True, phase="charge")
+    unit = gs["unit_by_id"]["1"]
+    assert gs["units_took_to_skies"] == {"1"} and gs["units_took_to_skies_charge"] == set()
+    assert _fly_traversal_active(gs, unit, "1") is False
+
+    # Et symétriquement : la déclaration de CHARGE, elle, l'accorde.
+    gs["units_took_to_skies_charge"] = {"1"}
+    assert _fly_traversal_active(gs, unit, "1") is True
+
+
+@pytest.mark.parametrize("phase", ["shoot", "charge", "fight"])
+def test_the_two_inch_malus_does_not_shrink_the_budget_outside_the_move_phase(phase):
+    """21.03 retranche 2" « while resolving THAT move ». Hors phase de mouvement aucun move
+    normal/advance/fall-back n'est résolu : le budget interrogé (échelle de la grille égocentrique
+    via `grid_half_extent_subhex`, appelée à CHAQUE phase) ne doit pas être amputé.
+
+    Garde symétrique de celle de `_fly_traversal_active` : sans elle, l'échelle de la grille d'une
+    unité volante rétrécissait de 2" en tir, charge et combat, là où aucune traversée n'est active.
+    """
+    move = 10
+    in_move = _fly_gs(move=move, gym=True, declared=True, walls=False, phase="move")
+    off_move = _fly_gs(move=move, gym=True, declared=True, walls=False, phase=phase)
+    assert get_squad_move_budget("1", in_move, "normal") == move - 2
+    assert get_squad_move_budget("1", off_move, "normal") == move
+    # Le malus et la traversée répondent à la même garde de phase.
+    assert _fly_traversal_active(off_move, off_move["unit_by_id"]["1"], "1") is (phase == "charge")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. 21.03 nomme le CHARGE MOVE : l'IA y a droit, et au même prix
 # ─────────────────────────────────────────────────────────────────────────────

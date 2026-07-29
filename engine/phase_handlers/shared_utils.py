@@ -4543,10 +4543,20 @@ def get_squad_move_budget(
     # SOURCE UNIQUE de la déclaration (`took_to_the_skies`) : le malus et la traversée
     # (`_fly_traversal_active`) DOIVENT sortir du même prédicat, sinon on rejoue le défaut
     # d'origine — une unité qui traverse murs et figurines sans payer les 2".
-    from engine.phase_handlers.movement_handlers import took_to_the_skies
+    # MÊME garde de phase que la traversée (`take_to_the_skies_applies_to_phase`) : 21.03 retranche
+    # 2" « while resolving THAT move ». Hors de la phase de mouvement, aucun move normal/advance/
+    # fall-back n'est résolu et la question est purement hypothétique — `grid_half_extent_subhex`
+    # l'appelle à chaque phase pour l'échelle de la grille égocentrique. Sans la garde, cette
+    # échelle serait amputée de 2" en tir, charge et combat, où aucune traversée n'est active.
+    from engine.phase_handlers.movement_handlers import (
+        take_to_the_skies_applies_to_phase,
+        took_to_the_skies,
+    )
 
     tts_penalty = 0
-    if took_to_the_skies(game_state, unit, str(squad_id), charge=False):
+    if take_to_the_skies_applies_to_phase(game_state, charge=False) and took_to_the_skies(
+        game_state, unit, str(squad_id), charge=False
+    ):
         ish = int(require_key(game_state, "inches_to_subhex"))
         tts_penalty = 2 * ish
     if move_type == "advance":
@@ -9495,14 +9505,21 @@ def build_squad_move_cell_map(
     ))
     _unit_obj_fp = get_unit_by_id(game_state, squad_id)
     _bshock = bool(_unit_obj_fp.get("battle_shocked", False)) if _unit_obj_fp else False  # get allowed
-    from engine.phase_handlers.movement_handlers import took_to_the_skies as _tts_fp
+    from engine.phase_handlers.movement_handlers import (
+        take_to_the_skies_applies_to_phase as _tts_phase_fp,
+        took_to_the_skies as _tts_fp,
+    )
 
     _fp_key = (
         advance_roll,
-        # MÊME prédicat que le budget et la traversée (`took_to_the_skies`) : lire directement le
-        # set raterait la déclaration DÉRIVÉE des unités pilotées par le modèle, et le cache
-        # servirait un pool construit sous un autre régime de vol.
-        bool(_unit_obj_fp is not None and _tts_fp(game_state, _unit_obj_fp, str(squad_id), charge=False)),
+        # MÊME expression que le budget (garde de phase incluse) : lire directement le set raterait
+        # la déclaration DÉRIVÉE des unités pilotées par le modèle, et omettre la garde ferait
+        # varier la clé là où le budget, lui, ne varie pas.
+        bool(
+            _unit_obj_fp is not None
+            and _tts_phase_fp(game_state, charge=False)
+            and _tts_fp(game_state, _unit_obj_fp, str(squad_id), charge=False)
+        ),
         str(game_state.get("phase", "")),  # get allowed
         _bshock,
         hash(_units_fp),

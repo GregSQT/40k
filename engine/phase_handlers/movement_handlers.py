@@ -276,14 +276,31 @@ def unit_is_ai_controlled(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     return is_gym or (is_pve and int(require_key(unit, "player")) == 2)
 
 
-#: Set de déclarations « take to the skies » par type de mouvement. 21.03 énumère EXACTEMENT les
-#: mouvements couverts : « a normal, advance, fall-back or charge move ». Un pile-in ou une
-#: consolidation (12) n'y figurent pas et ne peuvent donc pas prendre les airs — d'où l'absence
-#: volontaire de clé pour ces phases (et non une valeur par défaut permissive).
-_TAKE_TO_THE_SKIES_SET_BY_PHASE = {
-    "move": "units_took_to_skies",      # normal / advance / fall-back
-    "charge": "units_took_to_skies_charge",
+#: Phase moteur → (est-ce le mouvement de charge ?, set de déclarations « take to the skies »).
+#: 21.03 énumère EXACTEMENT les mouvements couverts : « a normal, advance, fall-back or charge
+#: move ». Un pile-in ou une consolidation (12) n'y figurent pas et ne peuvent donc pas prendre les
+#: airs — d'où l'absence volontaire de clé pour ces phases (et non une valeur par défaut permissive).
+#:
+#: Table réellement CONSOMMÉE des deux côtés : le drapeau `charge` par `_fly_traversal_active`
+#: (qui en déduit le mouvement de la phase en cours) et le nom du set par `took_to_the_skies`.
+#: La corriger a donc un effet — c'est la seule description du couplage phase / mouvement / set.
+_TAKE_TO_THE_SKIES_BY_PHASE: Dict[str, Tuple[bool, str]] = {
+    "move": (False, "units_took_to_skies"),      # normal / advance / fall-back
+    "charge": (True, "units_took_to_skies_charge"),
 }
+
+
+def take_to_the_skies_applies_to_phase(game_state: Dict[str, Any], *, charge: bool) -> bool:
+    """La déclaration 21.03 concerne-t-elle le mouvement que la phase en cours résout ?
+
+    GARDE COMMUNE au malus de -2" (`get_squad_move_budget`) et à la traversée
+    (`_fly_traversal_active`). Sans elle du côté du budget, le budget de move d'une unité volante
+    resterait amputé de 2" en phases de tir, de charge et de combat — où aucun move normal n'est
+    résolu et où aucune traversée n'est active. L'échelle de la grille égocentrique
+    (`grid_half_extent_subhex`, appelée à chaque phase) en dépend directement.
+    """
+    entry = _TAKE_TO_THE_SKIES_BY_PHASE.get(str(game_state.get("phase", "")))  # get allowed
+    return entry is not None and entry[0] is charge
 
 
 def took_to_the_skies(
@@ -316,7 +333,7 @@ def took_to_the_skies(
         return False
     if unit_is_ai_controlled(game_state, unit):
         return True
-    set_key = "units_took_to_skies_charge" if charge else "units_took_to_skies"
+    _, set_key = _TAKE_TO_THE_SKIES_BY_PHASE["charge" if charge else "move"]
     return str(unit_id) in game_state.get(set_key, set())
 
 
@@ -331,11 +348,11 @@ def _fly_traversal_active(game_state: Dict[str, Any], unit: Dict[str, Any], unit
     Source unique partagée par le pool d'ancre, le reachable par-figurine, le coût de descente et
     le log de move.
     """
-    phase = str(game_state.get("phase", ""))
-    set_key = _TAKE_TO_THE_SKIES_SET_BY_PHASE.get(phase)
-    if set_key is None:
+    entry = _TAKE_TO_THE_SKIES_BY_PHASE.get(str(game_state.get("phase", "")))  # get allowed
+    if entry is None:
         return False
-    return took_to_the_skies(game_state, unit, unit_id, charge=(phase == "charge"))
+    charge, _ = entry
+    return took_to_the_skies(game_state, unit, unit_id, charge=charge)
 
 
 def squad_move_pool_budget_subhex(game_state: Dict[str, Any], squad_id: str) -> int:
