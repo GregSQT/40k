@@ -1593,6 +1593,14 @@ def update_units_cache_hp(game_state: Dict[str, Any], unit_id: str, new_hp_cur: 
     entry = game_state["units_cache"].get(unit_id_str)
     if entry is None:
         return
+    # V11 §0.46 (commit 2d6bd2a8) — ce chemin invalidait ici « _cached_best_enemy_score » et
+    # « _cached_best_enemy_global » (les PV changent, donc le damage_ratio change). Ce n'est PAS
+    # une invalidation oubliee : les deux cles n'ont plus ni ecrivain ni lecteur depuis que les
+    # heuristiques de menace de macro_intents (get_best_enemy_global / get_best_enemy_score /
+    # get_best_enemy_score_for_unit) ont ete supprimees — la cible est une dimension d'action
+    # (§9 P3-1/P3-2). Attention : « _best_weapon_cache » est un AUTRE cache, toujours vif
+    # (weapon_damage_cache -> w40k_core, observation_builder), et il ne depend pas des PV : il
+    # est bati une fois par reset d'episode et n'a rien a faire ici.
     if effective_hp <= 0:
         from engine.game_utils import add_debug_file_log
         episode = game_state.get("episode_number", "?")

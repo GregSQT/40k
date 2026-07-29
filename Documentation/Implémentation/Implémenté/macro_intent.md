@@ -3,6 +3,27 @@
 > **Status** : IMPLÉMENTÉ  
 > **Lien** : `AI_OBSERVATION.md` §9 (obs[346:357]), `AI_TURN.md` (phases), `AI_IMPLEMENTATION.md` (handlers)
 
+> ⚠️ **BANDEAU DE DOCUMENT — le candidat ATTACK décrit ici n'existe plus (V11 §0.43 / §9 P3-1/P3-2,
+> commit `2d6bd2a8`).** `get_best_enemy_global`, `get_best_enemy_score` et
+> `get_best_enemy_score_for_unit` ont été **supprimées** de `engine/macro_intents.py` : cette
+> heuristique par `damage_ratio` tranchait la cible à la place de l'agent, alors que la cible
+> (charge 11.02/11.04, mêlée 12.05) est désormais une **dimension d'action** (slots ennemis
+> `CHARGE_SLOT_BASE`/`FIGHT_SLOT_BASE`, scorés par la tête pointeur).
+> **Ce bandeau couvre TOUT le document**, et en particulier :
+> - l'exemple de code de la section *Observation* (candidat 1 d'ATTACK) : ces appels ne
+>   compilent plus ;
+> - les paragraphes « Candidat 1 pour ATTACK — toujours global » et « Comportement sans ennemi
+>   vivant » ;
+> - la table *Fichiers à modifier*, dont la ligne 3 **prescrit de créer ces fonctions** : cette
+>   prescription est CADUQUE, ne pas la réexécuter. La même table renvoie à `convert_gym_action`
+>   pour le décodage des zone intents ; le décodage vif est `is_zone_intent_action` /
+>   `decode_zone_intent_action` (`w40k_core`), et `convert_gym_action` est lui-même en cours de
+>   suppression sur une autre branche.
+>
+> Le reste (design des zones, intents INVADE/DEFEND/ATTACK, `get_objective_control`,
+> `get_nearest_objective_zone`, free steps) reste vif. Le document est conservé comme mémoire de
+> conception.
+
 ---
 
 ## Contexte
@@ -114,12 +135,8 @@ def _encode_macro_intent_context(game_state, active_unit):
 
 **Pour ATTACK** : candidat 1 = ennemi scoré (damage_ratio), candidat 2 = objectif. L'agent apprend s'il vaut mieux engager ou capturer selon le contexte.
 
-> ⚠️ **PÉRIMÉ depuis V11 §0.43 / §9 P3-1/P3-2** — `get_best_enemy_global` / `get_best_enemy_score` /
-> `get_best_enemy_score_for_unit` **n'existent plus** dans `engine/macro_intents.py` : cette heuristique
-> par `damage_ratio` tranchait la cible à la place de l'agent, alors que la cible (charge 11.02/11.04,
-> mêlée 12.05) est désormais une **dimension d'action** (slots ennemis, tête pointeur). Les trois
-> paragraphes ci-dessous décrivent l'ancien candidat 1 d'ATTACK et sont conservés comme mémoire de
-> conception, pas comme description du code actuel.
+> ⚠️ **PÉRIMÉ** — voir le bandeau en tête de document : les fonctions citées ci-dessous n'existent
+> plus (V11 §0.43, commit `2d6bd2a8`).
 
 **Candidat 1 pour ATTACK — toujours global** : `get_best_enemy_global(game_state)` retourne le meilleur ennemi vivant toutes zones confondues (critère : damage_ratio). Il n'y a pas de filtrage par zone. Le `zone_idx` sert uniquement à choisir *sur quelle zone* poser l'intent ATTACK — pas à restreindre la cible de navigation.
 
