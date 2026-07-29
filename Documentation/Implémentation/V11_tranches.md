@@ -154,9 +154,26 @@ C'est la source commune des gravités 1-2 ci-dessous.
 | [shooting_handlers.py:6127](../../engine/phase_handlers/shooting_handlers.py#L6127) | Règle `reroll_towound_target_on_objective` : « la cible est-elle sur un objectif ? » testée sur `target["col"]/["row"]` = **l'ancre**. Une escouade dont seule une figurine non-ancre tient l'objectif est ratée. ⚠️ Utilise en plus `target.get("col", -1)` — **valeur par défaut masquant une absence**, interdite par CLAUDE.md. |
 | [fight_handlers.py:165](../../engine/phase_handlers/fight_handlers.py#L165) `_is_unit_on_objective` | Même bug côté mêlée (`require_unit_position` = ancre). |
 
-✅ **Le vrai Objective Control est SAIN** : `_sum_objective_control_oc`
+~~✅ **Le vrai Objective Control est SAIN** : `_sum_objective_control_oc`
 ([game_state.py:1863](../../engine/game_state.py#L1863)) compte bien OC × figurines dans la zone
-(14.02). Ce sont les règles *satellites* qui n'ont pas suivi.
+(14.02). Ce sont les règles *satellites* qui n'ont pas suivi.~~
+
+⛔ **AFFIRMATION FAUSSE, CORRIGÉE LE 2026-07-29** (§0.50 de [`V11_agent_rework.md`](V11_agent_rework.md#s0.50),
+branche `v11-battle-shock-oc`, commit `4be41919`). Le décompte était ✅ conforme à **14.02**
+(OC × figurines dont l'empreinte recouvre la zone) mais ⛔ **PAS conforme à 01.07** : `battle_shocked`
+n'était jamais consulté, alors que la règle met l'OC de toutes les figurines d'une unité choquée à
+« - » — donc à zéro (02.02, et le diagramme p.53 de `14 Objectives.pdf` tranche le cas
+explicitement). Une unité démoralisée tenait ses objectifs normalement.
+
+⚠️ **C'est cette phrase qui a rendu le défaut invisible** : un « SAIN » non borné, prononcé sur UNE
+règle, a été lu comme un verdict sur le contrôle d'objectif en général. Leçon durcie en §0bis de
+[`V11_agent_rework.md`](V11_agent_rework.md#s0bis) : un verdict de conformité se borne à la règle
+vérifiée et énumère les règles satellites qui la modifient ; un ✅ exige plus de justification qu'un
+🔴, parce que personne ne va le revérifier.
+
+📍 Le pointeur ci-dessus est lui aussi périmé : la source unique actuelle est
+`sum_objective_control_oc_multi` ([game_state.py:2983](../../engine/game_state.py#L2983)), dont
+`_sum_objective_control_oc` n'est plus qu'une délégation d'une ligne.
 
 **G4 — heuristiques IA à l'ancre** (aucun impact règles, biais de politique seulement) :
 `_select_strategic_destination` (movement:3923+, charge:4169), `observation_builder.py:1043/2332`
