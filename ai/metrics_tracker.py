@@ -133,9 +133,14 @@ class W40KMetricsTracker:
             'penalties': []
         }
 
-        # NEW: Position score tracking (Phase 2+ movement rewards)
-        self.position_scores = []  # Raw position_score values per move action
-        
+        # L'accumulateur self.position_scores occupait cette place, avec log_position_score et
+        # les deux courbes qu'il alimentait (game_tactical/avg_position_score,
+        # combat/a_position_score). Il n'a plus de producteur depuis le commit 329d140e
+        # "move reward deleted" (2026-02-01), qui a supprime la recompense de mouvement basee
+        # sur calculate_position_score, la cle position_score du reward_breakdown et 17 lignes
+        # de Documentation/AI_METRICS.md. Le dernier appelant (ai/training_callbacks.py) est
+        # tombe a son tour. Suppression cote produit deja actee : rien a rebrancher.
+
         # NEW: AI_TURN.md compliance tracking
         self.compliance_data = {
             'units_per_step': [],
@@ -575,10 +580,12 @@ class W40KMetricsTracker:
         """Log training step metrics - exploration rate and loss"""
         self.step_count += 1
         
-        # TRAINING DIAGNOSTIC: Exploration rate - Learning balance (exploration vs exploitation)
-        if 'exploration_rate' in step_data:
-            self.writer.add_scalar('training_diagnostic/exploration_rate', step_data['exploration_rate'], self.step_count)
-        
+        # La courbe training_diagnostic/exploration_rate occupait cette place. exploration_rate
+        # est l'epsilon d'une politique epsilon-greedy (DQN) ; le depot n'instancie que
+        # MaskablePPO, un actor-critic qui explore par l'entropie de sa politique et n'a pas cet
+        # attribut. L'unique producteur de la cle (ai/training_callbacks.py, garde par
+        # hasattr(model, 'exploration_rate')) n'etait donc jamais entre, et a ete supprime.
+
         # TRAINING DETAILED: General loss - Neural network training loss
         if 'loss' in step_data:
             self.writer.add_scalar('training_detailed/loss', step_data['loss'], self.step_count)
@@ -644,35 +651,6 @@ class W40KMetricsTracker:
 
         # NOTE: 0_game/d_obj_rewards is computed in log_tactical_metrics from controlled_objective_samples
         # (reliable source, bypasses broken episode_reward_components chain with n_envs=48)
-
-    def log_position_score(self, position_score: float):
-        """Log raw position_score from movement rewards (Phase 2+ positioning metric).
-
-        This tracks the pre-scaled offensive_value from movement actions.
-        Higher values = unit moved to position with better shooting potential.
-
-        Le garde `if position_score is None: return` a ete SUPPRIME, pas elargi en
-        `Optional[float]` : c'etait du code mort. L'unique appelant reel
-        (ai/training_callbacks.py l.1166) passe `reward_breakdown['position_score']` sous garde
-        `'position_score' in reward_breakdown`, et le dict producteur
-        (engine/reward_calculator.py l.31) ne porte que base_actions / result_bonuses /
-        tactical_bonuses / situational / penalties / total. Aucun None ne peut donc arriver ici,
-        et un `Optional[float]` aurait invente un cas d'usage pour justifier le garde au lieu de
-        le supprimer.
-
-        Args:
-            position_score: Raw position_score value (before position_reward_scale)
-        """
-        self.position_scores.append(position_score)
-
-        # Keep last 1000 position scores
-        if len(self.position_scores) > 1000:
-            self.position_scores.pop(0)
-
-        # Log rolling average every 10 moves
-        if len(self.position_scores) >= 10 and len(self.position_scores) % 10 == 0:
-            avg_position_score = float(np.mean(self.position_scores[-100:]))  # Last 100 moves
-            self.writer.add_scalar('game_tactical/avg_position_score', avg_position_score, self.episode_count)
 
     def log_aiturn_compliance(self, compliance_data: Dict[str, Any]):
         """Log AI_TURN.md compliance validation metrics.
@@ -871,11 +849,11 @@ class W40KMetricsTracker:
 
         # Log smoothed combat metrics (20-episode rolling average)
         # Prefixes control TensorBoard sort order:
-        # a_position_score, b_shoot_kills, c_charge_successes, d_melee_kills, e_victory_points_cumulative_mean
-        # a) Position score (movement quality)
-        if len(self.position_scores) >= 1:
-            position_score_smooth = self._calculate_smoothed_metric(self.position_scores, window_size=200)
-            self.writer.add_scalar('combat/a_position_score', position_score_smooth, self.episode_count)
+        # b_shoot_kills, c_charge_successes, d_melee_kills, e_victory_points_cumulative_mean
+        # Le prefixe a_ est libre : combat/a_position_score occupait cette place et a ete
+        # supprime avec l'accumulateur position_scores (voir la trace dans __init__). Le
+        # renumerotage b..e n'a pas ete fait pour ne pas casser la continuite des courbes
+        # existantes dans TensorBoard.
 
         # b) Shoot kills + g_kill_rewards + l_melee_kills are now logged in log_tactical_metrics (reliable source)
 
@@ -1029,7 +1007,7 @@ class W40KMetricsTracker:
         - 0_game/h_value_trade_ratio        - VALUE destroyed / VALUE lost
         - 0_critical/m_value_loss_smooth   - Smoothed critic loss
 
-        NOTE: position_score moved to combat/ category
+        NOTE: position_score a ete supprime (voir la trace dans __init__), pas deplace.
         """
         
         # Minimum data requirement (lowered to 1 for immediate feedback)
@@ -1050,8 +1028,6 @@ class W40KMetricsTracker:
         if len(self.all_episode_rewards) >= 1:
             reward_smooth = self._calculate_smoothed_metric(self.all_episode_rewards, window_size=500)
             self.writer.add_scalar('0_critical/e_episode_reward_smooth', reward_smooth, self.episode_count)
-
-        # NOTE: position_score moved to combat/ category
 
         # ==========================================
         # PPO HEALTH (5 metrics)

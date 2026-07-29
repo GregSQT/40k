@@ -74,7 +74,6 @@ def _tracker_stub() -> W40KMetricsTracker:
         "situational": [],
         "penalties": [],
     }
-    t.position_scores = []
     t.compliance_data = {
         "units_per_step": [],
         "phase_end_reasons": [],
@@ -215,13 +214,11 @@ def test_log_reward_decomposition_validation_and_trimming() -> None:
     assert len(t.reward_components["base_actions"]) == 100
 
 
-def test_log_position_score_and_close() -> None:
+# test_log_position_score_and_close occupait cette place. Il verrouillait log_position_score et
+# la courbe game_tactical/avg_position_score, supprimees faute de producteur depuis le commit
+# 329d140e "move reward deleted". Seule la partie utile est conservee ci-dessous : close().
+def test_close_closes_the_writer() -> None:
     t = _tracker_stub()
-    assert t.position_scores == []
-    for i in range(10):
-        t.log_position_score(float(i))
-    assert len(t.position_scores) == 10
-    assert any(k == "game_tactical/avg_position_score" for k, _, _ in _dw(t).scalars)
     t.close()
     assert _dw(t).closed == 1
 
@@ -401,9 +398,10 @@ def test_log_tactical_metrics_forcing_validation_errors() -> None:
 
 def test_log_training_step_records_optional_fields() -> None:
     t = _tracker_stub()
-    t.log_training_step({"exploration_rate": 0.2, "loss": 1.3, "learning_rate": 3e-4})
+    # exploration_rate a ete retire de step_data et de log_training_step : c'est l'epsilon d'une
+    # politique epsilon-greedy (DQN), et seul MaskablePPO est instancie ici.
+    t.log_training_step({"loss": 1.3, "learning_rate": 3e-4})
     keys = [k for k, _, _ in _dw(t).scalars]
-    assert "training_diagnostic/exploration_rate" in keys
     assert "training_detailed/loss" in keys
     assert "training_diagnostic/learning_rate" in keys
     assert t.step_count == 1
