@@ -653,6 +653,9 @@ issues du terrain (voie moderne) ne peuplaient pas le pool de déploiement rando
 **Outillage** : `build_holdout_benchmark.py` migré ; `scenario_manager.py` NON touché
 (chemin dormant — `config/scenario_templates.json` absent → lève à la construction ; son
 alignement 0/1 vs 1/2 traverse multi_agent_trainer = chantier séparé à valider).
+> ⚠️ **Périmé depuis le 2026-07-29** : « chemin dormant » était en fait du **code mort**, et
+> `ai/scenario_manager.py` a été **supprimé** — l'alignement 0/1 vs 1/2 n'a plus d'objet.
+> Cf. [§0.45](V11_agent_rework.md#s0.45).
 **Balayage** : `scripts/sweep_scenario_bank_v11.py` — 61/61 chargés + reset. Tests +83.
 Validé : 1245 passed / 2 skipped ; Carnifex en charge 3 seeds sans TypeError (R6).
 ⚠️ Pertes de mêlée toujours non démontrables end-to-end (deadlock R7/T5 fight/pile_in tour 1,
@@ -692,8 +695,9 @@ Plan d'origine (réalisé ci-dessus) :
 4. Outillage impacté — état vérifié :
    - `scripts/build_holdout_benchmark.py` **ÉMET les clés legacy** (`deployment_zone: "hammer"`
      L110, `objectives_ref` L118/246/254) → à migrer, pas seulement à vérifier ;
-   - `ai/scenario_manager.py` : utilise des `deployment_zones` avec clés joueur **0/1** alors
-     que les terrains modernes utilisent **"1"/"2"** → incompatibilité à résoudre ;
+   - ~~`ai/scenario_manager.py` : utilise des `deployment_zones` avec clés joueur **0/1** alors
+     que les terrains modernes utilisent **"1"/"2"** → incompatibilité à résoudre~~ **SANS OBJET
+     depuis le 2026-07-29 : le fichier a été supprimé** (code mort, [§0.45](V11_agent_rework.md#s0.45)) ;
    - `scripts/rebalance_holdout_hard_scenarios.py`, `scripts/build_dynamic_rosters.py` : aucune
      clé legacy détectée, re-vérifier après migration.
 
