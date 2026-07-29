@@ -164,6 +164,14 @@ class W40KEngine(gym.Env):
             self.training_config = config_loader.load_agent_training_config(base_agent_key, training_config_name)
             if not self.training_config:
                 raise RuntimeError(f"Failed to load training configuration for agent {controlled_agent}, phase {training_config_name}")
+            # PROFIL d'entraînement chargé depuis config/agents/<agent>/<agent>_training_config.json :
+            # le contrat complet des schedulers y est EXIGÉ (cf.
+            # _configure_deployment_mode_for_episode). Les autres chemins de construction (API/PvP)
+            # ne fournissent qu'un fragment (observation_params) et n'ont pas d'épisodes à ramper.
+            self._training_config_is_agent_profile = True
+            # Le nom de phase n'était posé que sur le chemin API : sans lui, tout message d'erreur
+            # portant sur le profil chargé ne peut pas dire DE QUEL profil il parle.
+            self.training_config_name = training_config_name
             
             # Load base configuration
             board_config = config_loader.get_board_config()
@@ -292,6 +300,9 @@ class W40KEngine(gym.Env):
             
             # CRITICAL: Extract training_config from config dict for observation_params access
             # API server provides training_configs dict with agent keys, or training_config_name to select phase
+            # Ce chemin ne charge PAS un profil d'entraînement complet (cf. l'autre branche) :
+            # les schedulers par épisode n'y sont pas exigibles.
+            self._training_config_is_agent_profile = False
             if "training_configs" in config and training_config_name:
                 # Multi-agent config: extract specific agent's training config
                 agent_keys = config["agent_keys"] if "agent_keys" in config else []
@@ -859,6 +870,20 @@ class W40KEngine(gym.Env):
             return None
         cfg = self.training_config.get("deployment_mode_schedule")
         if cfg is None:
+            # Un PROFIL d'entraînement DOIT porter le bloc. Le rendre optionnel désactivait la
+            # rampe en silence : deux profils (`x5_append`, `x1_debug`) ont ainsi entraîné un
+            # agent qui ne se déploie jamais, puis l'ont noté sur des parties à déployer —
+            # l'évaluation impose TOUJOURS une phase de déploiement. Absence = erreur explicite,
+            # jamais une valeur par défaut.
+            if self._training_config_is_agent_profile:
+                raise KeyError(
+                    "training_config.deployment_mode_schedule est OBLIGATOIRE dans un profil "
+                    f"d'entraînement (profil '{self.training_config_name}'). Sans ce bloc la "
+                    "rampe de déploiement est silencieusement désactivée : l'agent n'apprend "
+                    "jamais à se déployer alors que l'évaluation l'exige. Clés attendues : "
+                    "enabled, training_only, active_ratio_start, active_ratio_end, schedule, "
+                    "freeze_after_progress."
+                )
             return None
         if not isinstance(cfg, dict):
             raise TypeError(
