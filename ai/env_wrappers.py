@@ -24,9 +24,61 @@ from engine import macro_intents as mi
 if TYPE_CHECKING:
     from engine.w40k_core import W40KEngine
 
-__all__ = ['BotControlledEnv', 'SelfPlayWrapper']
+__all__ = ['BotControlledEnv', 'SelfPlayWrapper', 'unwrap_engine']
 PLAYER_ONE_ID = 1
 PLAYER_TWO_ID = 2
+
+# Membres du moteur que CES wrappers utilisent sur `self.engine`. C'est le contrat exact
+# verifie par `unwrap_engine` : rien de plus (on n'exige pas ce qu'on n'appelle pas), rien de
+# moins (chaque acces d'ici est couvert). Toute nouvelle utilisation de `self.engine.<x>` dans
+# ce module doit etre ajoutee ici, sinon la verification cesse de prouver ce qu'elle affirme.
+ENGINE_CONTRACT_ATTRS = (
+    "game_state",
+    "action_decoder",
+    "config",
+    "get_turn_step_limit",
+    "_build_observation",
+    "_check_game_over",
+    "_determine_winner_with_method",
+)
+
+
+def unwrap_engine(env: Any, owner: str) -> "W40KEngine":
+    """Deballe la pile de wrappers gym jusqu'au moteur, et PROUVE ce qu'elle trouve.
+
+    L'ordre d'emballage (`BotControlledEnv(ActionMasker(W40KEngine))`, idem pour
+    `SelfPlayWrapper`) n'est garanti nulle part : il est reconstruit a l'identique sur huit
+    sites d'appel (ai/train.py, ai/training_utils.py, ai/bot_evaluation.py,
+    scripts/roster_matchup_stats.py). Les deux deballages precedents en tiraient une
+    affirmation jamais verifiee (`cast("W40KEngine", ...)`), et divergeaient meme entre eux :
+    l'un pelait UN niveau, l'autre TOUS. Si l'ordre changeait, l'erreur ne surgissait pas ici
+    mais au premier attribut manquant, des couches plus loin.
+
+    On pele donc tous les `gym.Wrapper` (un env non emballe est un cas legitime : les tests
+    passent le moteur nu), puis on verifie que le noyau expose bien ENGINE_CONTRACT_ATTRS.
+    A defaut : erreur explicite nommant la pile traversee, le type atteint et les membres
+    manquants — jamais de repli silencieux.
+
+    Cout : O(profondeur de la pile), une seule fois par `__init__` de wrapper. Aucun cout sur
+    le chemin chaud — `self.engine` est resolu a la construction, jamais par pas de simulation.
+    """
+    stack = []
+    current = env
+    while isinstance(current, gym.Wrapper):
+        stack.append(type(current).__name__)
+        current = current.env
+    missing = [attr for attr in ENGINE_CONTRACT_ATTRS if not hasattr(current, attr)]
+    if missing:
+        traversed = " -> ".join(stack + [type(current).__name__]) if stack else type(current).__name__
+        raise TypeError(
+            f"{owner}: le deballage de la pile gym ({traversed}) atteint "
+            f"{type(current).__name__}, qui n'honore pas le contrat moteur : membres manquants "
+            f"{missing}. Attendu : un W40KEngine (ou un double de test exposant "
+            f"{list(ENGINE_CONTRACT_ATTRS)})."
+        )
+    # `cast` justifie : les sept membres que ce module utilise viennent d'etre verifies un a un
+    # sur l'objet reellement atteint, et le noyau n'est plus un gym.Wrapper.
+    return cast("W40KEngine", current)
 
 
 class BotControlledEnv(gym.Wrapper):
@@ -184,9 +236,9 @@ class BotControlledEnv(gym.Wrapper):
             self._self_play_snapshot_refresh_episodes = 1
             self._self_play_snapshot_device = "auto"
 
-        # Unwrap ActionMasker to get actual engine
+        # Deballage verifie de la pile gym (cf. unwrap_engine).
         # self.env is set by gym.Wrapper.__init__ to base_env
-        self.engine: "W40KEngine" = cast("W40KEngine", getattr(self.env, 'env', self.env))
+        self.engine: "W40KEngine" = unwrap_engine(self.env, "BotControlledEnv")
 
         # DIAGNOSTIC: Track shoot phase decisions FOR BOT
         self.shoot_opportunities = 0  # Times shoot was available
@@ -1091,12 +1143,10 @@ class SelfPlayWrapper(gym.Wrapper):
         self.episodes_since_update = 0
         self.total_episodes = 0
 
-        # Unwrap to get actual W40KEngine
+        # Deballage verifie de la pile gym (cf. unwrap_engine).
         # Wrapping order: SelfPlayWrapper(ActionMasker(W40KEngine))
         # self.env is set by gym.Wrapper.__init__ to base_env (ActionMasker)
-        self.engine: "W40KEngine" = cast("W40KEngine", self.env)
-        while hasattr(self.engine, 'env'):
-            self.engine = cast("W40KEngine", getattr(self.engine, 'env'))
+        self.engine: "W40KEngine" = unwrap_engine(self.env, "SelfPlayWrapper")
 
         # Episode tracking
         self.episode_reward = 0.0

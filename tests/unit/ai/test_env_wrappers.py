@@ -4,7 +4,12 @@ import gymnasium as gym
 import numpy as np
 import pytest
 
-from ai.env_wrappers import BotControlledEnv, SelfPlayWrapper
+from ai.env_wrappers import (
+    ENGINE_CONTRACT_ATTRS,
+    BotControlledEnv,
+    SelfPlayWrapper,
+    unwrap_engine,
+)
 from engine.action_decoder import ActionValidationError
 from engine import macro_intents as mi
 
@@ -70,6 +75,14 @@ class _DummyEngine(gym.Env):
 
     def _determine_winner_with_method(self):
         return None, None
+
+    def get_turn_step_limit(self) -> int:
+        """Plafond anti-runaway d'un tour, comme `W40KEngine.get_turn_step_limit`.
+
+        Fait partie du contrat moteur verifie par `unwrap_engine` : un double qui ne l'expose
+        pas n'est pas un moteur pour ces wrappers, et le deballage doit le refuser.
+        """
+        return 200
 
     def close(self):
         return None
@@ -422,3 +435,82 @@ def test_self_play_opponent_plays_its_own_decision() -> None:
     wrapper = SelfPlayWrapper(engine, allow_random_opponent=True)
     for _ in range(20):
         assert wrapper._get_frozen_model_action() in (mi.CHOICE_BASE, mi.CHOICE_BASE + 1)
+
+
+class _NotAnEngine(gym.Env):
+    """Noyau qui n'honore PAS le contrat moteur : ni `game_state`, ni le reste."""
+
+    metadata = {}
+
+    def reset(self, *, seed=None, options=None):
+        _ = (seed, options)
+        return np.zeros((4,), dtype=np.float32), {}
+
+    def step(self, action):
+        _ = action
+        return np.zeros((4,), dtype=np.float32), 0.0, False, False, {}
+
+
+class _PassthroughWrapper(gym.Wrapper):
+    """Wrapper quelconque, pour simuler un changement d'ordre d'emballage."""
+
+
+def test_unwrap_engine_peels_every_wrapper_layer() -> None:
+    """Le déballage descend jusqu'au moteur quelle que soit la PROFONDEUR de la pile.
+
+    Les deux déballages précédents divergeaient : l'un pelait un seul niveau, l'autre tous.
+    Ajouter un wrapper entre le moteur et `BotControlledEnv` faisait donc silencieusement
+    pointer `self.engine` sur un wrapper — l'erreur ne serait apparue qu'au premier attribut
+    manquant, très loin de la cause.
+    """
+    engine = _DummyEngine()
+    stack = _PassthroughWrapper(_PassthroughWrapper(engine))
+    assert unwrap_engine(stack, "test") is engine
+    assert unwrap_engine(engine, "test") is engine, "un env non emballé est un cas légitime"
+
+
+def test_unwrap_engine_names_what_it_found() -> None:
+    """Quand l'affirmation est fausse, l'erreur nomme la pile, le type atteint et le manquant."""
+    stack = _PassthroughWrapper(_NotAnEngine())
+    with pytest.raises(TypeError) as excinfo:
+        unwrap_engine(stack, "BotControlledEnv")
+    message = str(excinfo.value)
+    assert "BotControlledEnv" in message
+    assert "_PassthroughWrapper -> _NotAnEngine" in message
+    assert "game_state" in message
+
+
+def test_engine_contract_covers_every_engine_access() -> None:
+    """`ENGINE_CONTRACT_ATTRS` doit couvrir TOUS les `self.engine.<x>` du module.
+
+    Sinon la vérification cesse de prouver ce qu'elle affirme : un membre utilisé mais non
+    listé retomberait sur un AttributeError tardif, exactement ce que le cast faisait.
+    """
+    import ast
+    import inspect
+
+    import ai.env_wrappers as env_wrappers
+
+    source = inspect.getsource(env_wrappers)
+    used = {
+        node.attr
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "engine"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "self"
+    }
+    assert used, "aucun accès self.engine.<x> détecté : le balayage AST est cassé"
+    assert used <= set(ENGINE_CONTRACT_ATTRS), (
+        f"membres du moteur utilisés mais non vérifiés par unwrap_engine : "
+        f"{sorted(used - set(ENGINE_CONTRACT_ATTRS))}"
+    )
+
+
+def test_wrappers_refuse_a_core_that_is_not_an_engine() -> None:
+    """Les deux wrappers refusent à la CONSTRUCTION un noyau hors contrat."""
+    with pytest.raises(TypeError, match="n'honore pas le contrat moteur"):
+        BotControlledEnv(_PassthroughWrapper(_NotAnEngine()), bot=_DummyBot())
+    with pytest.raises(TypeError, match="n'honore pas le contrat moteur"):
+        SelfPlayWrapper(_PassthroughWrapper(_NotAnEngine()), allow_random_opponent=True)
