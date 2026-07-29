@@ -594,8 +594,7 @@ def _charge_bfs_max_distance(
         return rid
 
     units_cache = require_key(game_state, "units_cache")
-    uid = str(unit_id)
-    ue = units_cache.get(uid)
+    ue = units_cache.get(unit_id)
     if not ue:
         return rid
 
@@ -1221,6 +1220,13 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
     # AI_TURN.md COMPLIANCE: Direct field access - no defaults
     if "action" not in action:
         raise KeyError(f"Action missing required 'action' field: {action}")
+    # `unit_id` est DÉCLARÉ ici, à la frontière où l'action non typée (JSON du front, dict de
+    # test, décodeur gym) entre dans le moteur. C'est cette déclaration — pas un `str()` répété
+    # chez chaque appelé — qui fait vérifier par pyright les passages vers les fonctions de
+    # charge, toutes déclarées `unit_id: str`. La garde d'éligibilité ci-dessous la CONFIRME à
+    # l'exécution : `charge_activation_pool` est une `List[str]` (`get_eligible_units`), donc
+    # un id non-`str` n'y appartient jamais et ressort en `unit_not_eligible`.
+    unit_id: Optional[str]
     if "unitId" not in action:
         action_type = action["action"]
         unit_id = None  # Allow None for gym training auto-selection
@@ -1258,7 +1264,10 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         )
 
     # Validate unit is eligible (keep for validation, remove only after successful action)
-    if unit_id not in game_state["charge_activation_pool"]:
+    # ``unit_id is None`` ne change RIEN au comportement (`None not in pool` sortait déjà par
+    # ce même retour) : il rend la garde lisible par le typage, qui en déduit `str` pour tout
+    # l'aval — c'est ce qui remplace les `str(unit_id)` défensifs des fonctions appelées.
+    if unit_id is None or unit_id not in game_state["charge_activation_pool"]:
         return False, {"error": "unit_not_eligible", "unitId": unit_id, "action": action_type}
 
     # Get unit object for processing
@@ -1295,7 +1304,7 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
     if (
         action_type == "left_click"
         and _act_cu is not None
-        and str(_act_cu) == str(unit_id)
+        and str(_act_cu) == unit_id
         and "targetId" not in action
         and "targetIds" not in action
         and "destCol" not in action
@@ -1352,7 +1361,7 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         mode = action.get("mode", "offensive")
         if mode not in ("offensive", "defensive"):
             return False, {"error": f"charge_autoplace invalid mode {mode!r}", "action": action}
-        out = charge_autoplace_plan(game_state, str(unit_id), mode=mode)
+        out = charge_autoplace_plan(game_state, unit_id, mode=mode)
         return True, {"action": "charge_autoplace", "unitId": unit_id, **out}
 
     elif action_type == "charge_plan_state":
@@ -1385,7 +1394,7 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         active_charge_unit = game_state.get("active_charge_unit")
         if active_charge_unit != unit_id:
             pool_ids = [str(u) for u in require_key(game_state, "charge_activation_pool")]
-            if str(unit_id) in pool_ids:
+            if unit_id in pool_ids:
                 # Unit in charge pool but not activated (e.g. API end_phase without activate_unit).
                 # Match active-unit skip: had_valid_destinations=True (AI_TURN.md line 515 path).
                 return _handle_skip_action(game_state, active_unit, had_valid_destinations=True)
@@ -1605,7 +1614,7 @@ def _charge_obstacle_socles(
     models_cache = require_key(game_state, "models_cache")
     out: List[Any] = []
     for entry in models_cache.values():
-        if str(entry["squad_id"]) == str(exclude_unit_id):
+        if str(entry["squad_id"]) == exclude_unit_id:
             continue
         if level is not None and int(entry.get("level", 0)) != int(level):  # get allowed (sol par défaut)
             continue
@@ -1668,7 +1677,7 @@ def charge_build_model_destinations_pool(
     from .shared_utils import get_engagement_zone
 
     models_cache = require_key(game_state, "models_cache")
-    model = models_cache.get(str(model_id))
+    model = models_cache.get(model_id)
     if model is None:
         raise KeyError(f"charge_build_model_destinations_pool: model {model_id} not in models_cache")
     squad_id = str(model["squad_id"])
@@ -1710,7 +1719,7 @@ def charge_build_model_destinations_pool(
     sibling_socles: List[Any] = []
     squad_models = require_key(game_state, "squad_models")
     for mid in require_key(squad_models, squad_id):
-        if str(mid) == str(model_id):
+        if str(mid) == model_id:
             continue
         sib = models_cache.get(str(mid))
         if sib is None:
@@ -1994,7 +2003,7 @@ def _compute_plan_context(
     squad_models = require_key(game_state, "squad_models")
     models_cache = require_key(game_state, "models_cache")
     units_cache = require_key(game_state, "units_cache")
-    alive = [m for m in require_key(squad_models, str(unit_id)) if m in models_cache]
+    alive = [m for m in require_key(squad_models, unit_id) if m in models_cache]
     placed = {str(k) for k in provisional_plan}
     unplaced = [str(m) for m in alive if str(m) not in placed]
 
@@ -2102,7 +2111,7 @@ def _compute_plan_context(
         from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH, precompute_footprint_offsets
         from engine.phase_handlers.geodesic_move import _euclidean_move_field
         start = (start_col, start_row)
-        _key = (str(m), start_col, start_row, int(budget), bool(fly_active), _cm_mv)
+        _key = (m, start_col, start_row, int(budget), bool(fly_active), _cm_mv)
         field = _cm_field_cache.get(_key)
         if field is None:
             shape = sib["BASE_SHAPE"]
@@ -2191,7 +2200,7 @@ def _compute_plan_context(
                 # Chargeur DÉJÀ en hauteur : reach SOL = champ multi-niveaux (level 0), descente §13.06
                 # facturée sur le jet. Mêmes obstacles sol que ``_euclidean_reach`` (path_blocked).
                 _gd = _charge_model_multilevel_reachable_cells(
-                    game_state, unit, str(unit_id), sib, (sc, sr), int(budget), {0},
+                    game_state, unit, unit_id, sib, (sc, sr), int(budget), {0},
                     path_blocked, _terrain_areas_ctx, start_level=_start_eff,
                 ).get(0, {})  # get allowed (niveau inatteignable = aucune case)
                 reach_by_model[m] = list(_gd.keys())
@@ -2412,7 +2421,7 @@ def _compute_plan_context(
             if sib is None:
                 continue
             fdist = _charge_model_climb_reachable_floor_cells(
-                game_state, unit, str(unit_id), sib,
+                game_state, unit, unit_id, sib,
                 (int(sib["col"]), int(sib["row"])), int(budget), int(view_level),
                 _ground_obs, terrain_areas, start_level=start_eff_by_model.get(m, 0),  # get allowed (modèle non classé = sol)
             )
@@ -2446,7 +2455,7 @@ def _compute_plan_context(
                     ):
                         continue
                     synth = _synth_model_entry(
-                        game_state, str(unit_id), rep_model, cc, rr, level=int(view_level)
+                        game_state, unit_id, rep_model, cc, rr, level=int(view_level)
                     )
                     # AFTER MOVING : aucun engagement avec un ennemi NON déclaré (3D).
                     if any(
@@ -2494,7 +2503,7 @@ def _compute_plan_context(
              int(provisional_plan[m][2]) if len(provisional_plan[m]) >= 3 else 0)
             for m in alive
         ]
-        _prev = charge_preview_move_plan(game_state, str(unit_id), full_plan, target_ids)
+        _prev = charge_preview_move_plan(game_state, unit_id, full_plan, target_ids)
         can_validate = _prev["can_validate"]
         preview_per_model = _prev["per_model"]
         coherency_ok = _prev["coherency_ok"]
@@ -2574,7 +2583,7 @@ def _charge_pool_clip_under_floor(
         _hex_center, round_base_radius_norm, disc_overlaps_polygon, compute_occupied_hexes,
     )
     models_cache = require_key(game_state, "models_cache")
-    model = models_cache.get(str(model_id))
+    model = models_cache.get(model_id)
     if model is None:
         return pool
     terrain_areas = game_state.get("terrain_areas", [])  # get allowed (board sans terrain)
@@ -2647,16 +2656,16 @@ def charge_model_plan_state(
         "satisfied_targets": [],
         "unsatisfied_targets": [],
     }
-    unit = get_unit_by_id(game_state, str(unit_id))
+    unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return empty
-    if "charge_target_selections" not in game_state or str(unit_id) not in game_state["charge_target_selections"]:
+    if "charge_target_selections" not in game_state or unit_id not in game_state["charge_target_selections"]:
         return empty
-    if "charge_roll_values" not in game_state or str(unit_id) not in game_state["charge_roll_values"]:
+    if "charge_roll_values" not in game_state or unit_id not in game_state["charge_roll_values"]:
         return empty
-    _stored = game_state["charge_target_selections"][str(unit_id)]
+    _stored = game_state["charge_target_selections"][unit_id]
     target_ids = list(_stored) if isinstance(_stored, (list, tuple)) else [_stored]
-    _charge_roll = game_state["charge_roll_values"][str(unit_id)]
+    _charge_roll = game_state["charge_roll_values"][unit_id]
     # Take to the skies (21.03) : -2" sur la distance max de charge si le vol est déclaré.
     roll_subhex = _charge_budget_subhex(game_state, unit_id, _charge_roll)
     # Take to the skies (21.03) : vol actif → BFS/champ de distance ignorent tout (traversée libre).
@@ -2674,7 +2683,7 @@ def charge_model_plan_state(
     # ``int(level)`` (niveau de VUE) est dans la sig : le ctx est désormais niveau-conscient (destinations
     # d'étage 3b) → un changement d'étage recalcule le ctx (rare : clic sur le bouton d'étage).
     sig = (
-        str(unit_id),
+        unit_id,
         tuple(sorted(provisional_plan.items())),
         game_state["_unit_move_version"],
         bool(fly_active),
@@ -2840,7 +2849,7 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_dis
 
     _bvt_cache = game_state.setdefault("_charge_build_valid_targets_cache", {})
     _move_version = game_state["_unit_move_version"]
-    _bvt_key = (str(unit_id), _move_version, max_distance)
+    _bvt_key = (unit_id, _move_version, max_distance)
     if _bvt_key in _bvt_cache:
         if _perf and _t_bvt0 is not None:
             append_perf_timing_line(
@@ -4301,7 +4310,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         _t_bfs0 = time.perf_counter() if _perf else None
         bfs_reachable = charge_build_valid_destinations_pool(
             game_state,
-            str(unit_id),
+            unit_id,
             int(charge_roll_subhex),
             target_ids=target_ids,
         )
@@ -4311,7 +4320,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         )
         # Hex de référence = case du chargeur la plus proche de l'union des empreintes cibles.
         _uc = require_key(game_state, "units_cache")
-        _ue = _uc.get(str(unit_id))
+        _ue = _uc.get(unit_id)
         if _ue:
             _charger_fp = set(_ue.get("occupied_hexes") or {(int(_ue["col"]), int(_ue["row"]))})
             _union_tfp: Set[Tuple[int, int]] = set()
@@ -4420,7 +4429,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         # ``display_zone_set`` sert uniquement à énumérer les ancres candidates ; l'UI ne doit
         # pas montrer des hex « théoriques » où le socle ne peut pas tenir.
         display_union = _charge_footprint_union_for_anchors(
-            game_state, str(unit_id), valid_pool
+            game_state, unit_id, valid_pool
         )
         display_hexes = [[int(c), int(r)] for (c, r) in display_union]
 
@@ -4583,7 +4592,7 @@ def _charge_model_pos_is_closer(
     from .shared_utils import get_engagement_zone
 
     models_cache = require_key(game_state, "models_cache")
-    model = models_cache.get(str(model_id))
+    model = models_cache.get(model_id)
     if model is None:
         return False
     ez = int(get_engagement_zone(game_state))
@@ -4619,7 +4628,7 @@ def _charge_model_pos_is_closer(
     sibling_socles: List[Any] = []
     squad_models = require_key(game_state, "squad_models")
     for mid in require_key(squad_models, squad_id):
-        if str(mid) == str(model_id):
+        if str(mid) == model_id:
             continue
         sib = models_cache.get(str(mid))
         if sib is None:
@@ -4726,7 +4735,7 @@ def charge_preview_move_plan(
         get_min_neighbors,
     )
 
-    unit = get_unit_by_id(game_state, str(squad_id))
+    unit = get_unit_by_id(game_state, squad_id)
     empty = {
         "per_model": {},
         "can_validate": False,
@@ -4745,7 +4754,7 @@ def charge_preview_move_plan(
     n = len(norm)
     if n == 0:
         return empty
-    roll = game_state["charge_roll_values"].get(str(squad_id))
+    roll = game_state["charge_roll_values"].get(squad_id)
     if roll is None:
         return empty
     # Take to the skies (21.03) : -2" sur la distance max de charge si le vol est déclaré.
@@ -4873,7 +4882,7 @@ def charge_autoplace_plan(
     if mode not in ("offensive", "defensive"):
         raise ValueError(f"charge_autoplace_plan: mode invalide {mode!r}")
 
-    unit = get_unit_by_id(game_state, str(squad_id))
+    unit = get_unit_by_id(game_state, squad_id)
     if not unit:
         return {"plan": []}
 
@@ -4886,7 +4895,7 @@ def charge_autoplace_plan(
         if not target_ids:
             raise ValueError(f"charge_autoplace_plan: target_ids_override vide pour {squad_id}")
     else:
-        stored = require_key(game_state, "charge_target_selections").get(str(squad_id))
+        stored = require_key(game_state, "charge_target_selections").get(squad_id)
         if stored is None:
             raise ValueError(f"charge_autoplace_plan: aucune cible déclarée pour {squad_id}")
         target_ids = [str(t) for t in (stored if isinstance(stored, (list, tuple)) else [stored])]
@@ -4894,7 +4903,7 @@ def charge_autoplace_plan(
     if budget_override is not None:
         budget = int(budget_override)
     else:
-        roll = require_key(game_state, "charge_roll_values").get(str(squad_id))
+        roll = require_key(game_state, "charge_roll_values").get(squad_id)
         if roll is None:
             raise ValueError(f"charge_autoplace_plan: jet de charge absent pour {squad_id}")
         budget = int(_charge_budget_subhex(game_state, squad_id, roll))
@@ -4905,7 +4914,7 @@ def charge_autoplace_plan(
     walls = set(game_state.get("wall_hexes", set()))
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    alive = [str(m) for m in require_key(squad_models, str(squad_id)) if str(m) in models_cache]
+    alive = [str(m) for m in require_key(squad_models, squad_id) if str(m) in models_cache]
     if not alive:
         return {"plan": []}
 
@@ -4941,7 +4950,7 @@ def charge_autoplace_plan(
     if allow_nontarget_engagement:
         nontarget_entries = []
 
-    obstacle_socles = _charge_obstacle_socles(game_state, str(squad_id), level=0)
+    obstacle_socles = _charge_obstacle_socles(game_state, squad_id, level=0)
     fly_active = False if disable_fly else _charge_fly_active(game_state, unit, squad_id)
     traverse_blocked = set() if fly_active else (walls | ground_enemy_blocked)
 
@@ -4955,7 +4964,7 @@ def charge_autoplace_plan(
         return min(min_distance_between_sets(fp, tfp) for tfp in all_target_fps)
 
     def _engages_nontarget(mid: str, c: int, r: int) -> bool:
-        synth = _synth_model_entry(game_state, str(squad_id), models_cache[mid], int(c), int(r), level=0)  # 3a sol
+        synth = _synth_model_entry(game_state, squad_id, models_cache[mid], int(c), int(r), level=0)  # 3a sol
         return any(
             unit_entries_within_engagement_zone(synth, ne, ez, vertical_zone_inches=_charge_vertical_zone(game_state))
             for ne in nontarget_entries
@@ -5087,7 +5096,7 @@ def charge_autoplace_plan(
                 continue
             fps = set(fp)
             synth = (
-                _synth_model_entry(game_state, str(squad_id), rep, c, r, level=0)  # 3a : candidat au sol
+                _synth_model_entry(game_state, squad_id, rep, c, r, level=0)  # 3a : candidat au sol
                 if need_synth else None
             )
             eng = frozenset(
@@ -5475,7 +5484,7 @@ def charge_commit_move_plan_handler(
     # Le plan doit couvrir exactement les figs vivantes de l'escouade.
     squad_models = require_key(game_state, "squad_models")
     models_cache = require_key(game_state, "models_cache")
-    alive = {m for m in require_key(squad_models, str(unit_id)) if m in models_cache}
+    alive = {m for m in require_key(squad_models, unit_id) if m in models_cache}
     plan_ids = {mid for mid, *_ in plan}
     if plan_ids != alive:
         return False, {
@@ -5485,7 +5494,7 @@ def charge_commit_move_plan_handler(
             "got": sorted(plan_ids),
         }
 
-    preview = charge_preview_move_plan(game_state, str(unit_id), plan, target_ids)
+    preview = charge_preview_move_plan(game_state, unit_id, plan, target_ids)
     if not preview["can_validate"]:
         return False, {
             "error": "invalid_charge_plan",
@@ -5508,7 +5517,7 @@ def charge_commit_move_plan_handler(
 
     commit_move(plan, game_state, "charge")  # pose per-modèle + units_charged.add
 
-    entry = require_key(game_state, "units_cache").get(str(unit_id))
+    entry = require_key(game_state, "units_cache").get(unit_id)
     if entry is not None:
         set_unit_coordinates(unit, int(entry["col"]), int(entry["row"]))
         # Sync niveau de l'ancre (étages) vers la liste units, miroir du commit move (:3490) :
