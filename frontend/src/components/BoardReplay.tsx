@@ -621,6 +621,26 @@ export const BoardReplay: React.FC = () => {
     const objectiveControllers: Record<string, number | null> = {};
     const controlMethod = primaryObjectiveConfig.control.control_method;
 
+    // ⚠️ TROISIÈME VÉRITÉ PARALLÈLE DU CONTRÔLE D'OBJECTIF — DIVERGE DU MOTEUR (14.02).
+    // Le moteur fait foi (`sum_objective_control_oc_multi`, engine/game_state.py) ; ce calcul
+    // local en diffère sur DEUX points, et les points de victoire affichés ici peuvent donc
+    // ne PAS être ceux que le moteur a réellement attribués :
+    //   1. ANCRE vs EMPREINTE : on teste `unit.col,unit.row`, le moteur teste l'empreinte de
+    //      socle de CHAQUE figurine vivante — écart préexistant sur toute escouade multi-fig.
+    //   2. BATTLE-SHOCK (01.07) : le moteur met à zéro l'OC de toute unité battle-shocked
+    //      (« OC of all of its models is modified to '-' », 02.02) ; ici c'est impossible à
+    //      reproduire — l'information N'EXISTE PAS dans le step.log dont ce replay est
+    //      intégralement dérivé (`replayParser.ts`) : le type d'événement `battle_shock` n'a
+    //      pas de formateur dans `_STEP_LOG_TYPE_MAP` (cf. w40k_core, et le test
+    //      tests/unit/engine/test_squad_step_logging.py::
+    //      test_type_without_formatter_is_skipped_not_crashed qui verrouille cet abandon).
+    //      La seule ligne de contrôle journalisée est le récapitulatif de FIN d'épisode
+    //      (`OBJECTIVE CONTROL: Obj{id}:P1_OC=…`, ai/step_logger.py::log_episode_end), qui ne
+    //      permet pas de reconstituer un décompte par tour.
+    // CORRECTION VISÉE (hors périmètre du correctif 01.07) : supprimer ce calcul et lire
+    // l'état journalisé par le moteur — ce qui exige d'ABORD de journaliser le contrôle par
+    // phase/tour dans le step.log, puis de le parser. Tant que ce n'est pas fait, les VP
+    // affichés par le replay ne sont pas une source de vérité.
     const computeControlCounts = (state: ReplayGameState): { p1: number; p2: number } => {
       const objectives = state.objectives ?? currentEpisode.initial_state.objectives;
       if (!objectives) {
@@ -1189,6 +1209,8 @@ export const BoardReplay: React.FC = () => {
       ) {
         return;
       }
+      // ⚠️ Même divergence que `computeControlCounts` ci-dessus (ancre vs empreinte, et
+      // battle-shock 01.07 absent du step.log) : ce décompte n'est PAS celui du moteur.
       for (const obj of objectives) {
         const hexSet = new Set(obj.hexes.map((h) => `${h.col},${h.row}`));
         let p1_oc = 0;
