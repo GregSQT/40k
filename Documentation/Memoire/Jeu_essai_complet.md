@@ -28,7 +28,7 @@ Fonctionnalité choisie : **validation de la conformité du moteur aux règles m
 
 | Élément | Détail |
 |--------|--------|
-| Commande de génération du log | `python ai/train.py --agent Infantry_Troop_RangedTroop --training-config default --rewards-config Infantry_Troop_RangedTroop --scenario default --test-only --macro-eval-mode micro --test-episodes 100 --step` |
+| Commande de génération du log | `python ai/train.py --agent Infantry_Troop_RangedTroop --training-config default --rewards-config Infantry_Troop_RangedTroop --scenario default --test-only --test-episodes 100 --step` |
 | Fichier produit | `step.log` (traces détaillées de chaque step : phase, action, unité, cible, etc.) |
 | Commande d’analyse | `python ai/analyzer.py step.log` |
 

@@ -1127,7 +1127,6 @@ def _get_progress_bar_width(config_key: str) -> int:
             "training_width",
             "bot_eval_width",
             "curriculum_phase_width",
-            "macro_eval_width",
         ):
             width = require_key(progress_bar_cfg, key)
             if not isinstance(width, int) or isinstance(width, bool):
@@ -1391,7 +1390,7 @@ def _apply_param_overrides(config: dict, overrides: Optional[List[List[str]]], l
 
 # Replay converter (extracted to ai/replay_converter.py)
 from ai.replay_converter import (
-    extract_scenario_name_for_replay,
+    resolve_agent_bot_scenario,
     convert_steplog_to_replay,
     generate_steplog_and_replay,
     parse_steplog_file,
@@ -2229,81 +2228,21 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     return model, env, training_config, model_path
 
 
-def create_macro_controller_model(config, training_config_name, rewards_config_name,
-                                  agent_key, new_model=False, append_training=False,
-                                  scenario_override=None, debug_mode=False, device_mode: Optional[str] = None):
-    """Phase 1 macro controller — removed in Phase 2. Use create_model() instead."""
-    raise NotImplementedError(
-        "create_macro_controller_model is a Phase 1 artifact and has been removed. "
-        "Phase 2 uses the unified micro agent (create_model) with zone intent actions."
-    )
+# MacroController (agent "macro" de Phase 1) a ete retire ici. Occupaient cette place :
+#   - create_macro_controller_model / _build_macro_eval_env : deux fonctions qui levaient
+#     NotImplementedError sans condition depuis le passage en Phase 2, et dont les appels
+#     etaient habilles par un cast en quadruplet. La branche --agent MacroController ne
+#     pouvait donc que planter : une option de ligne de commande qui promet et ne tient pas.
+#   - _evaluate_macro_model et son afficheur _print_eval_progress, tous deux appeles
+#     uniquement depuis ces branches macro.
+# Preuve de mort au-dela des stubs : ai/macro_training_env.py (les wrappers macro) n'existe
+# pas, config/agents/MacroController/ (config + scenarios + modele) n'existe pas, et rien
+# ne lisait les chemins macro_controller_config_* de config/config.json. La documentation
+# qui presentait ce mode comme "implemente aujourd'hui" (Documentation/AI_TRAINING.md) a ete
+# corrigee dans le meme mouvement.
+# Phase 2 : l'agent micro unifie (create_model) porte l'intention de zone. Il n'y a pas de
+# remplacant a chercher, il n'y a plus qu'un seul agent.
 
-
-def _build_macro_eval_env(config, training_config_name, rewards_config_name, agent_key,
-                          scenario_override, debug_mode, bot=None):
-    """Phase 1 macro eval env — removed in Phase 2."""
-    raise NotImplementedError(
-        "_build_macro_eval_env is a Phase 1 artifact and has been removed. "
-        "Phase 2 uses the unified micro agent with zone intent actions."
-    )
-
-
-def _print_eval_progress(completed, total, start_time, label):
-    progress_pct = (completed / total) * 100
-    bar_length = _get_progress_bar_width("macro_eval_width")
-    filled = int(bar_length * completed / total)
-    bar = '█' * filled + '░' * (bar_length - filled)
-
-    elapsed = time.time() - start_time
-    avg_time = elapsed / completed if completed > 0 else 0
-    remaining = total - completed
-    eta = avg_time * remaining
-
-    def format_time(seconds):
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        secs = int(seconds % 60)
-        if hours > 0:
-            return f"{hours}:{minutes:02d}:{secs:02d}"
-        return f"{minutes}:{secs:02d}"
-
-    elapsed_str = format_time(elapsed)
-    eta_str = format_time(eta)
-    speed = completed / elapsed if elapsed > 0 else 0
-    speed_str = f"{speed:.2f}ep/s" if speed >= 0.01 else f"{speed * 60:.1f}ep/m"
-
-    sys.stdout.write(f"\r{progress_pct:3.0f}% {bar} {completed}/{total} {label} [{elapsed_str}<{eta_str}, {speed_str}]")
-    sys.stdout.flush()
-
-
-def _evaluate_macro_model(model, env, n_episodes, macro_player, deterministic=True, progress_state=None, label=""):
-    wins = 0
-    losses = 0
-    draws = 0
-    for _ in range(n_episodes):
-        obs, _info = env.reset()
-        done = False
-        info: Any = {}
-        while not done:
-            action_masks = env.get_action_mask()
-            action, _ = model.predict(obs, action_masks=action_masks, deterministic=deterministic)
-            obs, _reward, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
-        winner = None
-        if isinstance(info, dict):
-            winner = info.get("winner")
-        if winner is None:
-            winner, _win_method = env.engine._determine_winner_with_method()
-        if winner == macro_player:
-            wins += 1
-        elif winner in (1, 2):
-            losses += 1
-        else:
-            draws += 1
-        if progress_state is not None:
-            progress_state["completed"] += 1
-            _print_eval_progress(progress_state["completed"], progress_state["total"], progress_state["start_time"], label)
-    return wins, losses, draws
 
 def resolve_turn_step_limit(
     scenario_files: List[str],
@@ -4522,8 +4461,8 @@ def main():
                        help="Scenario template name from scenario_templates.json for replay generation")
     parser.add_argument("--scenario", type=str, default="default",
                        help="Scenario (default: default; use 'bot' for bot training, 'phase1' for curriculum, etc.)")
-    parser.add_argument("--macro-eval-mode", type=str, choices=["micro", "bot"], default="micro",
-                       help="MacroController evaluation mode: micro (vs trained agents) or bot (vs evaluation bots)")
+    # --macro-eval-mode retire : il ne pilotait que les branches --agent MacroController,
+    # elles-memes supprimees (voir la trace au-dessus de resolve_turn_step_limit).
     parser.add_argument("--mode", type=str, default=None,
                        help="Force training device: CPU or GPU (case-insensitive). If omitted, auto-selects based on network size and GPU availability.")
     parser.add_argument("--rule-checker", action="store_true",
@@ -4638,7 +4577,14 @@ def main():
         
         # Convert existing steplog mode
         if args.convert_steplog:
-            success = convert_steplog_to_replay(args.convert_steplog)
+            # Le scenario est resolu depuis --agent, comme pour --replay. Il transitait avant par
+            # un attribut de fonction que ce chemin ne posait jamais, donc il retombait sur
+            # `config/scenario.json` : un fichier absent du depot, et donc un FileNotFoundError
+            # systematique. --agent est desormais requis, et l'erreur le dit.
+            success = convert_steplog_to_replay(
+                args.convert_steplog,
+                resolve_agent_bot_scenario(config, args.agent),
+            )
             return 0 if success else 1
 
         # Generate steplog AND convert to replay (one-shot mode)
@@ -4651,110 +4597,10 @@ def main():
             if not args.agent:
                 raise ValueError("--agent parameter required for --test-only mode")
 
-            if args.agent == "MacroController":
-                if args.scenario in ("all", "self", "bot"):
-                    raise ValueError("MacroController test-only does not support scenario rotation modes")
+            # La branche --test-only --agent MacroController a ete retiree ici : elle
+            # appelait _build_macro_eval_env, qui levait NotImplementedError sans condition.
+            # Voir la trace au-dessus de resolve_turn_step_limit.
 
-                models_root = config.get_models_root()
-                model_path = build_agent_model_path(models_root, args.agent)
-                if not os.path.exists(model_path):
-                    print(f"❌ Model not found: {model_path}")
-                    return 1
-                model = MaskablePPO.load(model_path)
-
-                training_config = config.load_agent_training_config(args.agent, args.training_config)
-                macro_player = require_key(training_config, "macro_player")
-                episodes_per_bot = args.test_episodes if args.test_episodes else require_key(training_config, "eval_episodes")
-
-                if args.macro_eval_mode == "bot":
-                    from ai.evaluation_bots import RandomBot, GreedyBot, DefensiveBot
-                    bots = {
-                        "random": RandomBot(),
-                        "greedy": GreedyBot(randomness=0.15),
-                        "defensive": DefensiveBot(randomness=0.15)
-                    }
-                    results = {}
-                    total_episodes = episodes_per_bot * len(bots)
-                    progress_state = {
-                        "completed": 0,
-                        "total": total_episodes,
-                        "start_time": time.time()
-                    }
-                    print("\n" + "="*80)
-                    print("🎯 RUNNING BOT EVALUATION")
-                    print(f"Episodes per bot: {episodes_per_bot} (Total: {total_episodes})")
-                    print("="*80)
-                    for bot_name, bot in bots.items():
-                        env = _build_macro_eval_env(
-                            config,
-                            args.training_config,
-                            args.rewards_config,
-                            agent_key=args.agent,
-                            scenario_override=args.scenario,
-                            debug_mode=args.debug,
-                            bot=bot
-                        )
-                        if step_logger and step_logger.enabled:
-                            step_logger.current_bot_name = bot_name
-                        wins, losses, draws = _evaluate_macro_model(
-                            model,
-                            env,
-                            episodes_per_bot,
-                            macro_player,
-                            deterministic=True,
-                            progress_state=progress_state,
-                            label=f"vs {bot_name.capitalize()}Bot [macro]"
-                        )
-                        results[bot_name] = wins / max(1, (wins + losses + draws))
-                        results[f"{bot_name}_wins"] = wins
-                        results[f"{bot_name}_losses"] = losses
-                        results[f"{bot_name}_draws"] = draws
-                    combined = (results["random"] + results["greedy"] + results["defensive"]) / 3
-                    results["combined"] = combined
-                    sys.stdout.write("\n")
-
-                    print("\n" + "="*80)
-                    print("📊 BOT EVALUATION RESULTS")
-                    print("="*80)
-                    for bot_name in bots:
-                        wr = results[bot_name]
-                        print(f"vs {bot_name:20s}: {wr:.2f} (W:{results[f'{bot_name}_wins']} L:{results[f'{bot_name}_losses']} D:{results[f'{bot_name}_draws']})")
-                    print(f"\nCombined Score:   {results['combined']:.2f}")
-                    print("="*80 + "\n")
-                    return 0
-
-                env = _build_macro_eval_env(
-                    config,
-                    args.training_config,
-                    args.rewards_config,
-                    agent_key=args.agent,
-                    scenario_override=args.scenario,
-                    debug_mode=args.debug,
-                    bot=None
-                )
-                progress_state = {
-                    "completed": 0,
-                    "total": episodes_per_bot,
-                    "start_time": time.time()
-                }
-                wins, losses, draws = _evaluate_macro_model(
-                    model,
-                    env,
-                    episodes_per_bot,
-                    macro_player,
-                    deterministic=True,
-                    progress_state=progress_state,
-                    label="macro-vs-micro"
-                )
-                sys.stdout.write("\n")
-                print("\n" + "="*80)
-                print("📊 MACRO vs MICRO RESULTS")
-                print("="*80)
-                total = wins + losses + draws
-                print(f"W:{wins} L:{losses} D:{draws} (Total: {total})")
-                print("="*80 + "\n")
-                return 0
-            
             # Load existing model
             models_root = config.get_models_root()
             model_path = build_agent_model_path(models_root, args.agent)
@@ -4992,52 +4838,11 @@ def main():
 
         # Single agent training mode
         elif args.agent:
-            if args.rule_checker and args.agent == "MacroController":
-                raise ValueError("--rule-checker is not supported for MacroController")
-
-            if args.agent == "MacroController":
-                if args.scenario in ("self", "bot"):
-                    raise ValueError("MacroController supports --scenario all, but not self/bot modes")
-
-                model, env, training_config, model_path = cast(Tuple[Any, Any, Any, Any], create_macro_controller_model(
-                    config,
-                    args.training_config,
-                    args.rewards_config,
-                    agent_key=args.agent,
-                    new_model=args.new,
-                    append_training=args.append,
-                    scenario_override=args.scenario,
-                    debug_mode=args.debug,
-                    device_mode=args.mode
-                ))
-
-                # MacroController n'emprunte pas la rotation de scenarios : le budget par
-                # tour est releve sur son propre moteur, deja construit et reset, pour
-                # rester la MEME valeur que celle qui tronquera les episodes.
-                training_config["_turn_step_limit"] = env.unwrapped.get_turn_step_limit()
-
-                callbacks = setup_callbacks(
-                    config, model_path, training_config, args.training_config,
-                    agent=args.agent, rewards_config_name=args.rewards_config
-                )
-
-                success = train_model(
-                    model,
-                    training_config,
-                    callbacks,
-                    model_path,
-                    args.training_config,
-                    args.rewards_config,
-                    controlled_agent=args.rewards_config
-                )
-
-                if success:
-                    if args.test_episodes > 0:
-                        test_trained_model(model, args.test_episodes, args.training_config, debug_mode=args.debug)
-                    else:
-                        print("📊 Skipping testing (--test-episodes 0)")
-                    return 0
-                return 1
+            # La branche d'entrainement --agent MacroController a ete retiree ici : elle
+            # appelait create_macro_controller_model, qui levait NotImplementedError sans
+            # condition, sous un cast qui l'habillait en quadruplet. Ses deux gardes
+            # (--rule-checker interdit, --scenario self/bot interdits) tombent avec elle.
+            # Voir la trace au-dessus de resolve_turn_step_limit.
 
             if args.rule_checker:
                 scenario_list = _load_rule_checker_scenarios(project_root)
