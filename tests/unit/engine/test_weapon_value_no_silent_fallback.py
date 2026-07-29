@@ -15,6 +15,14 @@ Trois autres sites du fichier portaient exactement le meme repli sur le NOMBRE d
 
 Un test prouve l autre moitie du contrat : TOUTES les valeurs de D presentes dans les
 rosters (1, 2, 3, 4, D3, D6, D6+1) passent sans lever.
+
+SECONDE PASSE — les CARACTERISTIQUES de jet (`ATK`, `STR`, `AP`, `RNG`, et `T` /
+`ARMOR_SAVE` / `INVUL_SAVE` cote cible) portaient le meme defaut sous une autre forme :
+`weapon.get("ATK", weapon.get("BS", 4))`, `weapon.get("AP", 0)`, `t_sample.get("T", 4)`...
+Ces valeurs de repli (4, 0, 7) sont des valeurs de jeu PLAUSIBLES : une donnee absente ne
+produisait ni erreur ni resultat aberrant, juste une partie jouee avec de fausses
+caracteristiques. Elles sont desormais requises, et le dernier test prouve sur les rosters
+reels que chaque cle est presente partout ou le moteur la lit.
 """
 import random
 
@@ -72,7 +80,7 @@ def _game_state(weapon):
 
 
 def _weapon(**overrides):
-    w = {"BS": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
+    w = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
          "WEAPON_RULES": [], "display_name": "Bolter"}
     w.update(overrides)
     return w
@@ -208,3 +216,132 @@ def test_declaration_de_combat_resout_les_nb_valides(monkeypatch):
     intents = squad_declare_fight(gs, "1", "2")
 
     assert sum(i["n_attacks_resolved"] for i in intents) == 4
+
+
+def test_resolve_intent_nb_leve_sur_index_hors_limites():
+    """« 0 attaque » n est pas une reponse a un index d arme invalide : tous les appelants
+    derivent l index de la liste d armes, un depassement est un defaut de construction."""
+    with pytest.raises(IndexError) as exc:
+        _resolve_intent_nb([{"NB": 2}], 3, "shoot_declare_model_NB_A1")
+
+    assert "3" in str(exc.value) and "shoot_declare_model_NB_A1" in str(exc.value)
+
+
+def test_resolve_intent_nb_leve_sur_profil_non_dict():
+    with pytest.raises(TypeError) as exc:
+        _resolve_intent_nb(["pas un profil"], 0, "shoot_declare_model_NB_A1")
+
+    assert "shoot_declare_model_NB_A1" in str(exc.value)
+
+
+def test_resolve_intent_nb_leve_sur_nb_absent():
+    with pytest.raises(Exception) as exc:
+        _resolve_intent_nb([{"DMG": 1}], 0, "shoot_declare_model_NB_A1")
+
+    assert "NB" in str(exc.value)
+
+
+# --------------------------------------------------------------------------------------
+# Caracteristiques de jet : les replis « plausibles » (ATK 4, STR 4, AP 0, T 4, Sv 7)
+# --------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("cle", ["ATK", "STR", "AP"])
+def test_caracteristique_d_arme_absente_leve_au_tir(monkeypatch, cle):
+    """ATK/STR/AP manquants valaient 4/4/0 : des caracteristiques d arme credibles."""
+    weapon = _weapon()
+    del weapon[cle]
+    _seq(monkeypatch, [4, 5, 1])
+    gs = _game_state(weapon)
+
+    with pytest.raises(Exception) as exc:
+        build_manual_shoot_allocation(gs, "1")
+
+    assert cle in str(exc.value)
+    assert gs["models_cache"]["T1"]["HP_CUR"] == 20
+
+
+def test_invul_save_absente_leve_au_tir(monkeypatch):
+    """« Pas de sauvegarde invulnerable » s ecrit 7 DANS LA DONNEE (179/179 datasheets) :
+    l absence de la cle est un defaut, pas le cas metier « aucune invulnerable »."""
+    _seq(monkeypatch, [4, 5, 1])
+    gs = _game_state(_weapon())
+    del gs["models_cache"]["T1"]["INVUL_SAVE"]
+
+    with pytest.raises(Exception) as exc:
+        build_manual_shoot_allocation(gs, "1")
+
+    assert "INVUL_SAVE" in str(exc.value)
+
+
+@pytest.mark.parametrize("cle", ["T", "ARMOR_SAVE", "INVUL_SAVE"])
+def test_caracteristique_defensive_absente_leve_en_melee(monkeypatch, cle):
+    """`squad_declare_fight` lisait T/Sv/InSv de la cible avec 4/7/7 par defaut."""
+    monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid: ["A1"])
+    gs = _fight_state([_ccw("Choppa", 3, [])])
+    del gs["models_cache"]["T1"][cle]
+
+    with pytest.raises(Exception) as exc:
+        squad_declare_fight(gs, "1", "2")
+
+    assert cle in str(exc.value)
+
+
+@pytest.mark.parametrize("cle", ["ATK", "STR", "AP"])
+def test_caracteristique_d_arme_absente_leve_a_la_selection_melee(monkeypatch, cle):
+    """Meme regle dans l heuristique de choix d arme CC (ex-`w.get("ATK", w.get("WS", 4))`)."""
+    monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid: ["A1"])
+    weapon = _ccw("Choppa", 3, [])
+    del weapon[cle]
+    gs = _fight_state([weapon])
+
+    with pytest.raises(Exception) as exc:
+        squad_declare_fight(gs, "1", "2")
+
+    assert cle in str(exc.value)
+
+
+def test_portee_d_arme_de_tir_absente_leve():
+    """`_build_weapon_availability_enemy_precheck` ignorait en silence une arme sans RNG :
+    l unite pouvait perdre sa portee maximale reelle et ne plus voir ses cibles."""
+    from engine.phase_handlers.shooting_handlers import _build_weapon_availability_enemy_precheck
+
+    gs = _game_state(_weapon())
+    unit = {"id": "1", "player": 0, "col": 0, "row": 0}
+    weapon_sans_rng = _weapon()
+    del weapon_sans_rng["RNG"]
+
+    with pytest.raises(Exception) as exc:
+        _build_weapon_availability_enemy_precheck(gs, unit, [weapon_sans_rng])
+
+    assert "RNG" in str(exc.value)
+
+
+def test_toutes_les_cles_lues_sont_presentes_dans_les_rosters():
+    """Preuve que ces cles peuvent etre exigees : elles sont portees par TOUTE la donnee.
+
+    Les profils d armes sont resolus (`getWeapons`) pour les 179 datasheets, y compris les 18
+    unites `endlessDuty` — ils sont donc tous verifies. Les caracteristiques de FIGURINE de ces
+    18 unites sont des references statiques non resolues (cf. test_socle_invariant) : la cle
+    existe, seule sa valeur est une chaine, et le moteur de combat ne les lit jamais.
+    """
+    from ai.unit_registry import UnitRegistry
+
+    registry = UnitRegistry()
+    n_rng = n_cc = n_units = 0
+    for name, data in registry.units.items():
+        n_units += 1
+        for cle in ("T", "ARMOR_SAVE", "INVUL_SAVE"):
+            assert cle in data, f"{name} n a pas de {cle}"
+        for w in data["RNG_WEAPONS"]:
+            n_rng += 1
+            for cle in ("RNG", "NB", "ATK", "STR", "AP", "DMG"):
+                assert cle in w, f"{name}/{w.get('display_name')} (tir) n a pas de {cle}"
+        for w in data["CC_WEAPONS"]:
+            n_cc += 1
+            for cle in ("NB", "ATK", "STR", "AP", "DMG"):
+                assert cle in w, f"{name}/{w.get('display_name')} (melee) n a pas de {cle}"
+            # `RNG` n est PAS exige en melee : une arme de corps a corps n a pas de portee.
+            # C est la raison metier pour laquelle seul `RNG_WEAPONS` peut l exiger.
+            assert "RNG" not in w
+
+    assert (n_units, n_rng, n_cc) == (179, 243, 185)

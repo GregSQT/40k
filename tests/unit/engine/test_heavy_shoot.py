@@ -49,7 +49,7 @@ INCHES_TO_SUBHEX = 5
 
 def _game_state(weapon_rules, *, moved_inches=0.0, deployed_on_turn=0, bs=4):
     """1 tireur (escouade '1', BS4 par defaut) + 1 cible. `moved_inches` = distance parcourue par A1."""
-    weapon = {"BS": bs, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "WEAPON_RULES": weapon_rules, "display_name": "Gun"}
+    weapon = {"ATK": bs, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "WEAPON_RULES": weapon_rules, "display_name": "Gun"}
     attacker = {"id": "A1", "squad_id": "1", "T": 4, "player": 0, "RNG_WEAPONS": [weapon]}
     target_model = {"id": "T1", "T": 4, "HP_CUR": 2, "HP_MAX": 2, "ARMOR_SAVE": 3,
                     "INVUL_SAVE": 7, "role": None, "unitType": "Grunt", "player": 1}

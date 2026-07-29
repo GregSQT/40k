@@ -43,7 +43,7 @@ def _uc(col, row, *, player):
 def _game_state(*, bs=4, strength=4, ap=0, dmg=1, toughness=4, armor_save=4, hp=3,
                 weapon_rules=None, target_keywords=("INFANTRY",)):
     """1 tireur (escouade '1') vs 1 cible (escouade '2'), 1 attaque resolue."""
-    weapon = {"BS": bs, "STR": strength, "AP": ap, "DMG": dmg, "NB": 1, "RNG": 24,
+    weapon = {"ATK": bs, "STR": strength, "AP": ap, "DMG": dmg, "NB": 1, "RNG": 24,
               "WEAPON_RULES": list(weapon_rules or []), "display_name": "Plasma Gun"}
     attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
                 "col": 0, "row": 0, "RNG_WEAPONS": [weapon]}

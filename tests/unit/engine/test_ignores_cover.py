@@ -18,7 +18,7 @@ from engine.phase_handlers.shared_utils import _cover_worsened_bs, _manual_roll_
 def _minimal_shoot_game_state(weapon_rules):
     """game_state minimal pour exercer _manual_roll_intent end-to-end (1 tireur, 1 cible)."""
     weapon = {
-        "BS": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
+        "ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
         "WEAPON_RULES": weapon_rules, "display_name": "Test Gun",
     }
     attacker = {"id": "A1", "squad_id": "1", "T": 4, "RNG_WEAPONS": [weapon]}

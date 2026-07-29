@@ -428,14 +428,16 @@ def _build_weapon_availability_enemy_precheck(
 
     _ranged_metric = _ranged_distance_metric()
 
+    # Portée maximale des armes de TIR de l'unité. Aucun repli silencieux : `RNG` est porté
+    # par les 243 profils d'armes de tir des rosters — une arme rangée sans portée est une
+    # donnee d'arme invalide, pas une arme à ignorer (l'ancien `except Exception: continue`
+    # la faisait disparaître du calcul, et l'unité pouvait perdre sa portée maximale réelle).
+    # `RNG` n'est absent que des armes de MÊLÉE, qui ne sont pas dans `RNG_WEAPONS`.
     max_rng = 0
     for w in rng_weapons:
-        try:
-            r = require_key(w, "RNG")
-            if r > max_rng:
-                max_rng = r
-        except Exception:
-            continue
+        r = int(require_key(w, "RNG"))
+        if r > max_rng:
+            max_rng = r
     if max_rng <= 0:
         return []
 
@@ -3451,13 +3453,14 @@ def shooting_build_valid_target_pool(
             if entry:
                 tc, tr = entry["col"], entry["row"]
                 has_los = has_line_of_sight_coords(int(sc), int(sr), int(tc), int(tr), game_state)
-                try:
-                    ratio, can_see = _get_los_visibility_state(
-                        game_state, int(sc), int(sr), int(tc), int(tr)
-                    )
-                    topo_str = f"los={ratio:.6f} can_see={can_see}"
-                except Exception:
-                    topo_str = "los=N/A"
+                # Instrument de diagnostic : il ne rattrape RIEN. L'ancien
+                # `except Exception: topo_str = "los=N/A"` masquait la panne de la primitive
+                # que ce log existe précisément pour observer — un diagnostic qui avale ses
+                # propres erreurs ne diagnostique plus rien.
+                ratio, can_see = _get_los_visibility_state(
+                    game_state, int(sc), int(sr), int(tc), int(tr)
+                )
+                topo_str = f"los={ratio:.6f} can_see={can_see}"
                 ep = game_state.get("episode_number", "?")
                 turn = game_state.get("turn", "?")
                 msg = f"[LOS_DEBUG] cache MISS store unit={unit_id_str} target={tid} ({sc},{sr})->({tc},{tr}) has_los={has_los} {topo_str} ep={ep} turn={turn}\n"

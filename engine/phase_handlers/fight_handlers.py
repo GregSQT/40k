@@ -920,7 +920,17 @@ def _fight_prepare_footprint_offsets(
     """
     Pré-calcule les offsets d'empreinte pair/impair pour accélérer le BFS de consolidation.
 
-    Retourne ``None`` si le plateau est legacy / 1-hex / en erreur ; l'appelant doit alors utiliser ``compute_candidate_footprint``.
+    Retourne ``None`` quand il n'y a PAS de chemin rapide à préparer : plateau legacy
+    (``engagement_zone <= 1``) ou socle tenant dans une case (``BASE_SIZE == 1``) — dans ces
+    deux cas l'empreinte est le seul hex central et ``_candidate_footprint_fight`` la calcule
+    directement. ``None`` ne signifie donc JAMAIS « échec » : aucune erreur n'est rattrapée ici.
+
+    Aucun repli silencieux : l'ancien ``except Exception: cache[key] = None`` avalait le
+    ``TypeError`` d'un socle incohérent (BASE_SHAPE/BASE_SIZE) ET le MÉMORISAIT — l'unité
+    était alors traitée « sans empreinte rapide » pour toute la partie, sans le moindre
+    signal. Il n'apportait rien : le chemin lent (``compute_candidate_footprint`` ->
+    ``compute_occupied_hexes``) appelle exactement la même primitive et lève la même erreur,
+    simplement plus loin de sa cause.
     """
     cache: Dict[Tuple[str, int], FightFootprintOffsetPair] = game_state.setdefault("_fight_fp_offset_pair_cache", {})
     uid = str(unit["id"])
@@ -930,23 +940,22 @@ def _fight_prepare_footprint_offsets(
         return cache[cache_key]
 
     from .shared_utils import get_engagement_zone
+    from engine.hex_utils import precompute_footprint_offsets, require_base_size
 
     ez = get_engagement_zone(game_state)
-    bs = unit["BASE_SIZE"]
+    # Socle lu par la garde partagée (même primitive que les masques de mouvement) : elle
+    # NOMME l'unité, là où `precompute_footprint_offsets` ne connaît que la forme et la taille.
+    shape = require_key(unit, "BASE_SHAPE")
+    bs = require_base_size(
+        shape, require_key(unit, "BASE_SIZE"), f"fight footprint unit {uid}"
+    )
     if ez <= 1 or bs == 1:
         cache[cache_key] = None
         return None
-    try:
-        from engine.hex_utils import precompute_footprint_offsets
-
-        shape = unit["BASE_SHAPE"]
-        off_e, off_o = precompute_footprint_offsets(shape, bs, orient)
-        out: FightFootprintOffsetPair = (off_e, off_o)
-        cache[cache_key] = out
-        return out
-    except Exception:
-        cache[cache_key] = None
-        return None
+    off_e, off_o = precompute_footprint_offsets(shape, bs, orient)
+    out: FightFootprintOffsetPair = (off_e, off_o)
+    cache[cache_key] = out
+    return out
 
 
 def _candidate_footprint_fight(
@@ -5209,8 +5218,11 @@ def _manual_roll_fight_intent(
     if n_attacks <= 0:
         return None
     ws = int(weapon["ATK"])
-    strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))
-    ap = int(weapon.get("AP", 0))  # get allowed
+    # Jumeau melee du tir : `STR`/`AP` sont portes par les 185 profils de melee des rosters.
+    # L ancien enchainement retombait sur `S` (fossile), puis sur l ENDURANCE DE L ATTAQUANT
+    # (caracteristique de figurine, sans rapport avec l arme), puis sur 4 ; `AP` sur 0.
+    strength = int(require_key(weapon, "STR"))
+    ap = int(require_key(weapon, "AP"))
     dmg_raw = require_key(weapon, "DMG")
     alive0 = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
     if not alive0:
@@ -5218,7 +5230,9 @@ def _manual_roll_fight_intent(
     wth = _calculate_wound_target(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
     first_alive = models_cache[alive0[0]]
     display_wth = wth
-    display_save_th = save_threshold(int(first_alive["ARMOR_SAVE"]), int(first_alive.get("INVUL_SAVE", 7)), ap)
+    display_save_th = save_threshold(
+        int(first_alive["ARMOR_SAVE"]), int(require_key(first_alive, "INVUL_SAVE")), ap
+    )
     weapon_name = weapon.get("display_name", weapon.get("NAME", weapon.get("name", "")))  # get allowed
     # Conditions de reroll (constantes pour cet intent : abilities UNITE, pas figurine).
     # `attacker` est une figurine (models_cache) ; les UNIT_RULES sont sur l unite.

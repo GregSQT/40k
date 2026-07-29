@@ -150,6 +150,60 @@ def test_distance_bord_a_bord_sur_socle_incoherent_leve():
 
 
 # --------------------------------------------------------------------------------------
+# Consommateur du socle : le cache d'empreinte du combat
+# --------------------------------------------------------------------------------------
+
+def _fight_gs():
+    """`engagement_zone > 1` : le préparateur d'offsets prend le chemin multi-hex."""
+    return {
+        "config": {
+            "game_rules": {
+                "engagement_zone": 5, "engagement_zone_vertical": 5, "max_base_size_hex": 35,
+            },
+            "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+        },
+    }
+
+
+def test_cache_d_empreinte_fight_leve_au_lieu_de_memoriser_l_echec():
+    """Le pire des replis : `except Exception: cache[key] = None` n'ignorait pas l'erreur,
+    il la MÉMORISAIT — l'unité restait « sans empreinte rapide » pour toute la partie."""
+    from engine.phase_handlers.fight_handlers import _fight_prepare_footprint_offsets
+
+    gs = _fight_gs()
+    unit = {"id": "7", "orientation": 0, "BASE_SHAPE": "oval", "BASE_SIZE": 13}
+
+    with pytest.raises(TypeError) as exc:
+        _fight_prepare_footprint_offsets(unit, gs)
+
+    assert "fight footprint unit 7" in str(exc.value)   # l'unité est nommée
+    assert "oval" in str(exc.value) and "13" in str(exc.value)
+    # Et rien n'a été mémorisé : le prochain appel relèvera au lieu de servir un None.
+    assert gs.get("_fight_fp_offset_pair_cache") == {}
+
+
+def test_cache_d_empreinte_fight_none_reste_le_cas_metier_1_hex():
+    """`None` garde son sens légitime : socle d'un hex -> pas de chemin rapide à préparer."""
+    from engine.phase_handlers.fight_handlers import _fight_prepare_footprint_offsets
+
+    gs = _fight_gs()
+    unit = {"id": "7", "orientation": 0, "BASE_SHAPE": "round", "BASE_SIZE": 1}
+
+    assert _fight_prepare_footprint_offsets(unit, gs) is None
+
+
+def test_cache_d_empreinte_fight_calcule_les_offsets_d_un_socle_valide():
+    from engine.phase_handlers.fight_handlers import _fight_prepare_footprint_offsets
+
+    gs = _fight_gs()
+    unit = {"id": "7", "orientation": 0, "BASE_SHAPE": "round", "BASE_SIZE": 3}
+
+    pair = _fight_prepare_footprint_offsets(unit, gs)
+
+    assert pair is not None and len(pair) == 2 and pair[0] and pair[1]
+
+
+# --------------------------------------------------------------------------------------
 # Donnée réelle : les rosters respectent l'invariant
 # --------------------------------------------------------------------------------------
 

@@ -53,7 +53,7 @@ def _shooter_model(mid, weapon, *, keywords=("INFANTRY",)):
 
 
 def _game_state(weapon_rules, *, shooters=1, shooter_keywords=("INFANTRY",)):
-    weapon = {"BS": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
+    weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
               "WEAPON_RULES": list(weapon_rules), "display_name": "Plasma"}
     models = {}
     intents = []

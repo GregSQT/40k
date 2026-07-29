@@ -5446,17 +5446,29 @@ def _resolve_intent_nb(
 ) -> int:
     """Resout le NB d une arme UNE SEULE FOIS a la declaration (fix audit F3).
 
-    Retourne 0 si l index est hors limites ou l arme n a pas de NB. Le label sert
-    uniquement de tag debug a resolve_dice_value (aucun impact sur le RNG).
+    Le label sert de tag debug a resolve_dice_value (aucun impact sur le RNG) ET nomme la
+    figurine + l arme dans les erreurs ci-dessous.
+
+    Aucun repli silencieux, a aucun des trois etages : tous les appelants derivent
+    `weapon_idx` de la liste `weapons` elle-meme (enumerate / index selectionne deja
+    valide par le controle d eligibilite), et les 428 profils d armes des rosters portent
+    tous `NB`. Un index hors limites, un profil qui n est pas un dict ou un `NB` absent
+    sont donc des defauts de construction de l intent — les anciens `return 0` les
+    transformaient en « declaration a 0 attaque », c est-a-dire une activation qui ne
+    resout rien, sans le moindre signal.
     """
     if not (0 <= weapon_idx < len(weapons)):
-        return 0
+        raise IndexError(
+            f"{roll_label}: index d arme {weapon_idx} hors limites "
+            f"({len(weapons)} arme(s) sur la figurine)"
+        )
     w = weapons[weapon_idx]
-    if not (isinstance(w, dict) and "NB" in w):
-        return 0
-    # Aucun repli silencieux : une valeur de NB non resoluble est une donnee d arme invalide,
-    # elle doit lever (l ancien try/except la remplacait par 1 en silence).
-    return int(resolve_dice_value(w["NB"], roll_label))
+    if not isinstance(w, dict):
+        raise TypeError(
+            f"{roll_label}: l arme {weapon_idx} n est pas un profil d arme "
+            f"(recu {type(w).__name__}: {w!r})"
+        )
+    return int(resolve_dice_value(require_key(w, "NB"), roll_label))
 
 
 def declare_attack_model(
@@ -6238,7 +6250,9 @@ def resolve_squad_shooting_type(
             predicate(w)
             for m in alive
             for w in m.get("RNG_WEAPONS", [])  # get allowed
-            if isinstance(w, dict) and int(w.get("RNG", 0)) > 0  # get allowed
+            # `RNG > 0` reste un filtre METIER (arme de tir utilisable) ; la portee elle-meme
+            # est requise : les 243 profils de RNG_WEAPONS la portent.
+            if isinstance(w, dict) and int(require_key(w, "RNG")) > 0
         )
 
     if engaged:
@@ -6296,7 +6310,8 @@ def squad_model_shootable_weapon_indices(
         return []
     out: List[int] = []
     for idx, weapon in enumerate(model.get("RNG_WEAPONS", [])):  # get allowed
-        if not isinstance(weapon, dict) or int(weapon.get("RNG", 0)) <= 0:  # get allowed
+        # Idem : le filtre porte sur la VALEUR de portee, jamais sur son absence.
+        if not isinstance(weapon, dict) or int(require_key(weapon, "RNG")) <= 0:
             continue
         if shooting_type_allows_weapon(shooting_type, unit, model, weapon):
             out.append(idx)
@@ -6951,7 +6966,9 @@ def _build_alloc_groups(game_state: Dict[str, Any], target_sid: str) -> List[Dic
         if _is_character_role(e.get("role")):
             char_models.append(m)
             continue
-        key = (int(e["HP_MAX"]), int(e["ARMOR_SAVE"]), int(e.get("INVUL_SAVE", 7)))
+        # `INVUL_SAVE` est TOUJOURS porte par la figurine : « pas de sauvegarde invulnerable »
+        # s ecrit 7 DANS LA DONNEE (179/179 datasheets), ce n est pas un defaut de lecture.
+        key = (int(e["HP_MAX"]), int(e["ARMOR_SAVE"]), int(require_key(e, "INVUL_SAVE")))
         if key not in non_char:
             non_char[key] = []
             non_char_order.append(key)
@@ -6973,7 +6990,8 @@ def _build_alloc_groups(game_state: Dict[str, Any], target_sid: str) -> List[Dic
         groups.append({
             "group_id": len(groups), "is_character": True, "role": e.get("role"),
             "unit_type": e.get("unitType"),  # get allowed
-            "W": int(e["HP_MAX"]), "Sv": int(e["ARMOR_SAVE"]), "InSv": int(e.get("INVUL_SAVE", 7)),
+            "W": int(e["HP_MAX"]), "Sv": int(e["ARMOR_SAVE"]),
+            "InSv": int(require_key(e, "INVUL_SAVE")),
             "model_ids": [m],
         })
     return groups
@@ -7247,7 +7265,10 @@ def _manual_roll_intent(
         _rapid_fire_applied = int(_rf_x)
     if n_attacks <= 0:
         return None
-    bs_base = int(weapon.get("ATK", weapon.get("BS", 4)))  # get allowed
+    # Caracteristique de tir (BS) : la clef de l armory est `ATK` (243/243 profils de tir la
+    # portent) — `BS` etait une orthographe fossile, et le defaut `4` transformait une arme
+    # sans caracteristique en arme moyenne PLAUSIBLE, donc indetectable a l oeil.
+    bs_base = int(require_key(weapon, "ATK"))
     bs, cover = _cover_worsened_bs(game_state, attacker, target_sid, bs_base, weapon)
     # [HEAVY] 24.16 (PDF, source de verite) : « In your Shooting phase, each time an attack is
     # made with a [HEAVY] weapon, add 1 to the hit roll if ALL of the following apply to the
@@ -7292,8 +7313,12 @@ def _manual_roll_intent(
             if not (weapon_has_rule(weapon, "CLOSE_QUARTERS") and _cq_engaged_target):
                 bs = min(6, bs + 1)
                 _cq_malus_applied = True
-    strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))  # get allowed
-    ap = int(weapon.get("AP", 0))  # get allowed
+    # Force et penetration de l ARME : `STR`/`AP` sont portes par les 428 profils des rosters.
+    # L ancien enchainement retombait sur `S` (fossile) puis sur la ENDURANCE DE L ATTAQUANT
+    # (une caracteristique de figurine, sans rapport) puis sur 4 ; `AP` retombait sur 0, soit
+    # « arme sans penetration » — deux valeurs de jeu parfaitement plausibles.
+    strength = int(require_key(weapon, "STR"))
+    ap = int(require_key(weapon, "AP"))
     # Aucun repli silencieux : DMG absent = donnee d arme invalide (require_key leve), la
     # valeur elle-meme est resolue a l application des degats (_resolve_one_manual_wound).
     dmg_raw = require_key(weapon, "DMG")
@@ -7342,7 +7367,9 @@ def _manual_roll_intent(
     wth = wound_threshold(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
     first_alive = models_cache[alive0[0]]
     display_wth = wth
-    display_save_th = save_threshold(int(first_alive["ARMOR_SAVE"]), int(first_alive.get("INVUL_SAVE", 7)), ap)
+    display_save_th = save_threshold(
+        int(first_alive["ARMOR_SAVE"]), int(require_key(first_alive, "INVUL_SAVE")), ap
+    )
     weapon_name = weapon.get("display_name", weapon.get("NAME", weapon.get("name", "")))  # get allowed
     # Rerolls to-wound au TIR (abilities UNITE, constantes pour l intent) — miroir exact du
     # fight (_manual_roll_fight_intent) : reroll_1_towound = reroll d un dé de blessure = 1 ;
@@ -7478,7 +7505,7 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     ap = int(g["ap"])
     dmg_raw = g["dmg_raw"]
     rec = pw["rec"]
-    save_th = save_threshold(int(m["ARMOR_SAVE"]), int(m.get("INVUL_SAVE", 7)), ap)
+    save_th = save_threshold(int(m["ARMOR_SAVE"]), int(require_key(m, "INVUL_SAVE")), ap)
     rec["saveTarget"] = save_th
     # DEVASTATING_WOUNDS (weapon_rules.json) : « No saving throw can be made against a critical
     # wound. » Le flag est pose au jet (blessure critique = 6 non modifie). On SAUTE la
@@ -8714,9 +8741,13 @@ def _auto_select_cc_weapon_for_fig(
     for idx, w in enumerate(weapons):
         if not isinstance(w, dict) or idx in excluded_indices:
             continue
-        ws = int(w.get("ATK", w.get("WS", 4)))  # WS via ATK convention
-        s = int(w.get("STR", w.get("S", 4)))
-        ap = int(w.get("AP", 0))  # get allowed
+        # Caracteristiques de l arme de melee : `ATK` (convention projet pour la CC), `STR`,
+        # `AP` sont portes par les 185 profils de melee des rosters. Les orthographes `WS`/`S`
+        # n existent nulle part dans la donnee, et les defauts 4/4/0 etaient des valeurs de jeu
+        # plausibles : une arme mal formee marquait un score credible au lieu de lever.
+        ws = int(require_key(w, "ATK"))
+        s = int(require_key(w, "STR"))
+        ap = int(require_key(w, "AP"))
         # Aucun repli silencieux : une valeur de DMG non resoluble est une donnee d arme
         # invalide, elle doit lever (l ancien try/except la remplacait par 1.0 en silence).
         dmg = float(expected_dice_value(require_key(w, "DMG"), "auto_select_cc_dmg"))
@@ -8764,9 +8795,12 @@ def squad_declare_fight(
     if not target_alive:
         return []  # cible deja wipe
     t_sample = models_cache[target_alive[0]]
-    target_t = int(t_sample.get("T", 4))
-    target_sv = int(t_sample.get("ARMOR_SAVE", 7))
-    target_invul = int(t_sample.get("INVUL_SAVE", 7))
+    # Caracteristiques defensives de la cible, lues sur une figurine REELLE du models_cache :
+    # les 179 datasheets portent T / ARMOR_SAVE / INVUL_SAVE. Les defauts 4/7/7 decrivaient
+    # une figurine moyenne sans sauvegarde — plausible, donc invisible en cas de donnee absente.
+    target_t = int(require_key(t_sample, "T"))
+    target_sv = int(require_key(t_sample, "ARMOR_SAVE"))
+    target_invul = int(require_key(t_sample, "INVUL_SAVE"))
 
     fighting = get_fighting_models(game_state, attacker_squad_id)
     intents: List[Dict[str, Any]] = game_state["pending_squad_fight_intents"][attacker_squad_id]

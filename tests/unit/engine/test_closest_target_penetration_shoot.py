@@ -46,7 +46,7 @@ def _uc_entry(col, row, *, value=10.0, player=1):
 def _game_state(unit_rules):
     """1 tireur (escouade '1' en (0,0)) ; cible '2' PROCHE en (0,3), cible '3' LOINTAINE en (0,10).
     Arme AP=-1 (=> save_th 4+ sur Sv3), pas de regle d arme speciale."""
-    weapon = {"BS": 3, "STR": 4, "AP": -1, "DMG": 1, "NB": 1, "WEAPON_RULES": [], "display_name": "Gun"}
+    weapon = {"ATK": 3, "STR": 4, "AP": -1, "DMG": 1, "NB": 1, "WEAPON_RULES": [], "display_name": "Gun"}
     attacker = {"id": "A1", "squad_id": "1", "T": 4, "player": 0, "RNG_WEAPONS": [weapon]}
     attacker_unit = {"id": "1", "UNIT_RULES": unit_rules}
 
