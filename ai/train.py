@@ -1174,6 +1174,56 @@ def _write_tensorboard_run_meta(model_path: str, run_dir: str) -> None:
         json.dump(payload, f, indent=2)
 
 
+class VecNormalizeCheckpointCallback(CheckpointCallback):
+    """Checkpoint periodique qui ecrit AUSSI les stats VecNormalize du checkpoint.
+
+    Sans ce pkl jumeau un `ppo_checkpoint_*_steps.zip` est INEXPLOITABLE pour reprendre un
+    entrainement : la reprise exige `<stem>_vec_normalize.pkl` (V11 §0.35) et echoue
+    explicitement s'il manque — le seul artefact reprenable etait le `_interrupted` du Ctrl-C.
+    `save_vecnormalize=True` de SB3 ne convient pas : il ecrit
+    `<prefix>_vecnormalize_<n>_steps.pkl`, un nom que `get_vec_normalize_path` ne resout pas.
+    """
+
+    def _on_step(self) -> bool:
+        continue_training = super()._on_step()
+        if self.save_freq > 0 and self.n_calls % self.save_freq == 0:
+            save_vec_normalize(self.model.get_env(), self._checkpoint_path(extension="zip"))
+        return continue_training
+
+
+class RotatingCheckpointCallback(VecNormalizeCheckpointCallback):
+    """Checkpoint callback that keeps only the most recent N checkpoints."""
+
+    def __init__(self, max_checkpoints: int, **kwargs):
+        super().__init__(**kwargs)
+        self.max_checkpoints = max_checkpoints
+
+    def _cleanup_old_checkpoints(self) -> None:
+        pattern = os.path.join(self.save_path, f"{self.name_prefix}_*_steps.zip")
+        # Tri sur le NOMBRE DE PAS, pas sur mtime : plusieurs checkpoints ecrits dans la meme
+        # granularite d'horloge se departageraient arbitrairement, et c'est bien le plus ancien
+        # en pas — pas en date de fichier — qu'il faut retirer.
+        checkpoint_files = sorted(
+            glob.glob(pattern),
+            key=lambda p: int(os.path.basename(p)[len(self.name_prefix) + 1:-len("_steps.zip")]),
+            reverse=True,
+        )
+        for old_checkpoint in checkpoint_files[self.max_checkpoints:]:
+            if os.path.exists(old_checkpoint):
+                os.remove(old_checkpoint)
+            # Le pkl jumeau part avec son zip : le laisser fabriquerait un artefact
+            # orphelin qu'un futur checkpoint de meme nom servirait a tort (V11 §0.35).
+            old_vec_path = get_vec_normalize_path(old_checkpoint)
+            if os.path.exists(old_vec_path):
+                os.remove(old_vec_path)
+
+    def _on_step(self) -> bool:
+        continue_training = super()._on_step()
+        if self.save_freq > 0 and self.n_calls % self.save_freq == 0:
+            self._cleanup_old_checkpoints()
+        return continue_training
+
+
 def _promote_checkpoint_for_resume(
     checkpoint_path: str, agent_key: str, config_loader: Any, log_fn=print
 ) -> str:
@@ -3377,22 +3427,6 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     if "checkpoint_name_prefix" not in callback_params:
         raise KeyError("callback_params missing required 'checkpoint_name_prefix' field")
         
-    class VecNormalizeCheckpointCallback(CheckpointCallback):
-        """Checkpoint periodique qui ecrit AUSSI les stats VecNormalize du checkpoint.
-
-        Sans ce pkl jumeau un `ppo_checkpoint_*_steps.zip` est INEXPLOITABLE pour reprendre un
-        entrainement : la reprise exige `<stem>_vec_normalize.pkl` (V11 §0.35) et echoue
-        explicitement s'il manque — le seul artefact reprenable etait le `_interrupted` du Ctrl-C.
-        `save_vecnormalize=True` de SB3 ne convient pas : il ecrit
-        `<prefix>_vecnormalize_<n>_steps.pkl`, un nom que `get_vec_normalize_path` ne resout pas.
-        """
-
-        def _on_step(self) -> bool:
-            continue_training = super()._on_step()
-            if self.save_freq > 0 and self.n_calls % self.save_freq == 0:
-                save_vec_normalize(self.model.get_env(), self._checkpoint_path(extension="zip"))
-            return continue_training
-
     max_checkpoints = callback_params.get("max_checkpoints")
     if max_checkpoints is not None:
         if not isinstance(max_checkpoints, int) or isinstance(max_checkpoints, bool):
@@ -3404,35 +3438,6 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             raise ValueError(
                 f"callback_params.max_checkpoints must be > 0 when provided (got {max_checkpoints})"
             )
-
-        class RotatingCheckpointCallback(VecNormalizeCheckpointCallback):
-            """Checkpoint callback that keeps only the most recent N checkpoints."""
-
-            def __init__(self, max_checkpoints: int, **kwargs):
-                super().__init__(**kwargs)
-                self.max_checkpoints = max_checkpoints
-
-            def _cleanup_old_checkpoints(self) -> None:
-                pattern = os.path.join(self.save_path, f"{self.name_prefix}_*_steps.zip")
-                checkpoint_files = sorted(
-                    glob.glob(pattern),
-                    key=lambda p: os.path.getmtime(p),
-                    reverse=True,
-                )
-                for old_checkpoint in checkpoint_files[self.max_checkpoints:]:
-                    if os.path.exists(old_checkpoint):
-                        os.remove(old_checkpoint)
-                    # Le pkl jumeau part avec son zip : le laisser fabriquerait un artefact
-                    # orphelin qu'un futur checkpoint de meme nom servirait a tort (V11 §0.35).
-                    old_vec_path = get_vec_normalize_path(old_checkpoint)
-                    if os.path.exists(old_vec_path):
-                        os.remove(old_vec_path)
-
-            def _on_step(self) -> bool:
-                continue_training = super()._on_step()
-                if self.save_freq > 0 and self.n_calls % self.save_freq == 0:
-                    self._cleanup_old_checkpoints()
-                return continue_training
 
         checkpoint_callback = RotatingCheckpointCallback(
             max_checkpoints=max_checkpoints,

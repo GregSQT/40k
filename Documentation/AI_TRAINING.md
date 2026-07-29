@@ -140,6 +140,21 @@ python ai/train.py --agent <agent_key> --training-config default --rewards-confi
 ```
 (Le chemin du modèle est dérivé de l’agent : `ai/models/<agent_key>/model_<agent_key>.zip`.)
 
+### Reprendre depuis un checkpoint périodique
+```bash
+python ai/train.py --agent <agent_key> --training-config default --scenario bot \
+  --resume-from ai/models/<agent_key>/ppo_checkpoint_640000_steps.zip
+```
+`--resume-from` installe le checkpoint **et ses stats VecNormalize** (`<stem>_vec_normalize.pkl`,
+écrit par le callback de checkpoint) au chemin canonique du modèle, écarte l’ancien modèle en
+`model_<agent_key>_pre_resume_<horodatage>.zip` au lieu de l’écraser, ouvre un **run TensorBoard
+neuf** (le checkpoint est un point antérieur : prolonger l’ancien run ferait reculer les steps),
+puis active `--append`. Exclusif avec `--new`.
+
+Un checkpoint sans son `.pkl` de stats (produits par une version antérieure du callback) n’est
+**pas** reprenable : la commande échoue explicitement plutôt que de servir les stats d’un autre
+modèle, ce qui décalerait silencieusement la normalisation (V11 §0.35).
+
 ### Key Paths
 - **Training Configs**: `config/agents/<agent_name>/<agent_name>_training_config.json`
 - **Reward Configs**: `config/agents/<agent_name>/<agent_name>_rewards_config.json` (par agent)
@@ -177,7 +192,8 @@ Cette section décrit comment le training est structuré (qui appelle quoi). Pou
   - `--training-config <name>` : clé du bloc dans `*_training_config.json` (ex. `default`, `debug`).
   - `--rewards-config <name>` : en pratique le même que `--agent` ou un alias ; utilisé comme `rewards_config_name` et pour charger `*_rewards_config.json`.
   - `--scenario <name>` : scénario ou mode (`bot`, `default`, `phase1`, etc.). Avec `bot`, l’adversaire est un mix configurable de 7 bots (Tier 1 : Random, Greedy, Defensive, Control ; Tier 2 : AggressiveSmart, DefensiveSmart, Adaptive).
-- **Options utiles** : `--step` (écrit `step.log`), `--test-only` (pas d’apprentissage, évaluation uniquement), `--eval` (alias de `--test-only`), `--test-episodes N`, `--append` (reprendre un modèle existant), `--new-model` (partir de zéro).
+- **Options utiles** : `--step` (écrit `step.log`), `--test-only` (pas d’apprentissage, évaluation uniquement), `--eval` (alias de `--test-only`), `--test-episodes N`, `--append` (reprendre un modèle existant), `--resume-from <checkpoint.zip>`
+(reprendre depuis un checkpoint périodique), `--new-model` (partir de zéro).
 
 ### Chargement de la config
 
@@ -1827,7 +1843,8 @@ python ai/train.py --agent <agent_key> --training-config default --rewards-confi
 # Training commands (replace <agent_key> e.g. Infantry_Troop_RangedTroop)
 python ai/train.py --agent <agent_key> --training-config debug --rewards-config <agent_key> --scenario bot    # Fast test
 python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot  # Standard training
-python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --append  # Continue from checkpoint
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --append  # Continue le modèle canonique
+python ai/train.py --agent <agent_key> --scenario bot --resume-from ai/models/<agent_key>/ppo_checkpoint_640000_steps.zip  # Reprend un checkpoint
 python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --step    # With step logging
 python ai/train.py --agent <agent_key> --scenario bot --device cpu   # Force CPU
 
