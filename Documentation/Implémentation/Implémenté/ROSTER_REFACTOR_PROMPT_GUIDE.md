@@ -95,7 +95,8 @@ Recommandation: implémenter directement le format compact si possible.
 - `ai/train.py`
   - scenario rotation: compatibilite avec scenarios minces,
   - logs explicites du couple roster choisi (P1/P2).
-- Eventuellement `ai/training_utils.py` / `ai/scenario_manager.py`
+- Eventuellement `ai/training_utils.py` / ~~`ai/scenario_manager.py`~~ (supprimé le 2026-07-29,
+  code mort — [§0.45](../V11_agent_rework.md#s0.45))
   - selon le point d'integration choisi pour assembler les scenarios.
 - Documentation:
   - `Documentation/AI_TRAINING.md` (format scenario + chemins canoniques),

@@ -44,7 +44,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.44` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.46` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.45` le 2026-07-29).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -58,7 +58,9 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 §0.37** ont été descendues en **§0hist** (intégrales, ancres inchangées) — elles étaient closes mais
 occupaient encore la section « ouvert ». Ne restent ici que les **six** chantiers réellement
 actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist avec les autres ;
-§0.40 ajoutée le 2026-07-28, contenu externalisé dès l'ouverture, **close et descendue en §0hist le 2026-07-29**).
+§0.40 ajoutée le 2026-07-28, contenu externalisé dès l'ouverture, **close et descendue en §0hist le 2026-07-29** ;
+**§0.45** ouverte et close le 2026-07-29 — suppression de `ai/scenario_manager.py`, écrite directement en §0hist,
+donc absente de ce tableau).
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
@@ -526,6 +528,28 @@ le run multi-env, pas le smoke, qui a validé.
 >
 > Ces passages existent pour **empêcher de re-diagnostiquer un faux problème**. Aucun ne doit
 > être résumé ni supprimé, même si l'entrée dont il vient est close.
+
+### Un test qui contourne `__init__` atteste que la production ne peut pas construire l'objet (§0.45, 2026-07-29)
+
+Écrit en supprimant `ai/scenario_manager.py`. Ses **9 tests** commençaient tous par le même stub :
+
+```python
+manager = ScenarioManager.__new__(ScenarioManager)   # constructeur JAMAIS appelé
+manager.scenario_templates = {...}                    # etat injecte a la main
+```
+
+Le constructeur était contourné pour une raison précise : il **lève**. `_load_scenario_templates`
+exige `config/scenario_templates.json`, absent du dépôt, et refuse tout fallback. Autrement dit
+`ScenarioManager(…)` était **inconstructible en production depuis toujours**, et les tests
+mesuraient un objet que le code applicatif ne pouvait pas obtenir. Ils étaient verts, et ils
+n'ont jamais couvert un chemin exécutable.
+
+**Règle** : `__new__`, `object.__setattr__`, un `MagicMock` substitué au constructeur, ou tout
+montage qui saute l'initialisation réelle, sont des **indices de code mort**, pas des astuces de
+test. Avant de les accepter, exiger la réponse à : *quel appelant de production construit cet
+objet, et cette construction réussit-elle ?* Si la réponse est « aucun » ou « elle lève », le
+sujet n'est pas le test — c'est la cible. Corollaire pour l'audit de code mort : **un compte de
+tests verts n'est pas une preuve de vie**.
 
 ### Un canal d'observation NON VIDE ne prouve pas qu'il regarde au bon endroit (§0.40, 2026-07-28)
 
@@ -1068,7 +1092,7 @@ AVANT d'y lancer un entraînement.
 | 4 | [§10.5](V11_eval_strategy.md#s10.5) (bandeau) | « ⚠️ Non validé runtime — cf. §0.3 (`CC_DMG`) » | Levé par §0.7 (`TacticalBot` 10/10 épisodes). |
 | 5 | §0.10 | « la dette notée en **§0.0** (`--scenario bot` échoue en amont du moteur) » | Cette dette est écrite dans **§0.7**, pas §0.0. Renvoi imprécis, non corrigé. |
 | 6 | §0.12, étape 4 | « **9 tests** liés à `roster_pool_schedule` échouent indépendamment de ce travail » | ✅ **TRANCHÉ le 2026-07-20 — l'affirmation était FAUSSE.** Suite complète lancée : **1417 passed, 2 skipped, 0 failed**. Aucun échec `roster_pool_schedule`. §0.-1 avait raison : un test rouge est une régression, il n'y a pas d'échec préexistant à tolérer. |
-| 7 | [§2](V11_tranches.md#s2) « État des lieux vérifié » | « Tous les imports du pipeline passent (`ai.train`, `ai.env_wrappers`, **`ai.multi_agent_trainer`**, …) » | `ai/multi_agent_trainer.py` **n'existe plus** (supprimé en §0.8, vérifié absent du disque le 2026-07-20). |
+| 7 | [§2](V11_tranches.md#s2) « État des lieux vérifié » | « Tous les imports du pipeline passent (`ai.train`, `ai.env_wrappers`, **`ai.multi_agent_trainer`**, **`ai.scenario_manager`**, …) » | `ai/multi_agent_trainer.py` **n'existe plus** (supprimé en §0.8, vérifié absent du disque le 2026-07-20) ; `ai/scenario_manager.py` non plus (supprimé le 2026-07-29, §0.45). Deux des modules cités comme preuve de santé du pipeline étaient du code mort. |
 | 8 | §0.17 (par construction) | l'état de commit | Périmé dès le prochain `git commit` — l'entrée porte elle-même l'ordre de la reconfronter à `git status`. |
 | 10 | §0.18, note annexe | « après ce crash le process … s'est terminé avec un **code de sortie 0** » | ❌ **FAUSSE, tranchée le 2026-07-20 — voir §0.20.** Le handler `return 1`, `sys.exit` propage, et l'exécution confirme `EXIT=1`. Cause probable : un pipe (`| tee`) côté shell lors de la mesure. Enseignement : une note **« hors périmètre »** échappe à la relecture *parce qu'*elle est marquée annexe. |
 | 11-13 | [§6](V11_tranches.md#s6) (T2, T4), [§8.2](V11_tranches.md#s8.2) | layout d'actions « 41 », « 61 scénarios », `test_agent_interface_contract.py` | ➜ **détaillées en §0.19.1** (audit du 2026-07-20). Signalées, NON corrigées. |
@@ -1170,6 +1194,77 @@ délibérément **laissée non commitée**, seul `obs_size` a été commité. À
 > des affirmations que leurs propres auteurs ont ensuite corrigées sur place. Ne pas s'appuyer
 > sur l'une d'elles sans la confronter au code.
 
+
+<a id="s0.45"></a>
+### 0.45 `ai/scenario_manager.py` — générateur de scénarios abandonné par la production, SUPPRIMÉ — ✅ CLOS (2026-07-29)
+
+**Ce qui a été supprimé.** `ai/scenario_manager.py` (**635 lignes**, classe `ScenarioManager`
++ dataclass `ScenarioTemplate` + une fonction `test_scenario_manager()` sous `__main__`) et son
+fichier de tests `tests/unit/ai/test_scenario_manager.py` (**203 lignes, 9 tests**). Avec eux :
+l'import `from ai.scenario_manager import ScenarioManager` de `ai/train.py`, la fonction
+`test_scenario_manager_integration()` (36 lignes), le flag CLI `--test-integration` et son
+aiguillage dans `main()`, l'import mort de `ai/replay_converter.py:133`, l'entrée
+`"ai/scenario_manager.py"` de `scripts/backup_select.py` et la ligne `--cov=ai/scenario_manager.py`
+de `.github/workflows/unit-tests.yml`. **Décision utilisateur : le flag `--test-integration`
+n'est pas utilisé** → option « suppression », pas « conservation des 3 méthodes exercées ».
+
+**Pourquoi c'était mort — le fait décisif, vérifié par exécution le 2026-07-29.** Le seul chemin
+de production (`--test-integration`) **ne pouvait pas s'exécuter** : `_load_scenario_templates`
+exige `config/scenario_templates.json`, **ce fichier n'existe pas dans le dépôt**, et la branche
+`else` lève explicitement (`FileNotFoundError: … No fallbacks allowed - file must exist`).
+Reproduit en chargeant le module supprimé depuis `git show HEAD~1` :
+
+```
+CONSTRUCTION LEVE: FileNotFoundError: Scenario templates not found at
+  <repo>/config/scenario_templates.json. No fallbacks allowed - file must exist.
+```
+
+Autrement dit `ScenarioManager(…)` levait **au constructeur** ; le diagnostic attrapait
+l'exception, imprimait `❌ Integration test failed` et rendait 1. Les « 3 méthodes exercées par
+la production » ne l'étaient donc jamais. Ce point était déjà connu — [`V11_tranches.md` T4](V11_tranches.md)
+écrivait « chemin dormant — `config/scenario_templates.json` absent → lève à la construction » —
+mais il avait été classé « chantier séparé à valider » au lieu de « code mort ».
+
+**Le deuxième aveu, dans le code lui-même.** Le seul consommateur applicatif,
+`ai/replay_converter.py`, importait la classe **sans jamais s'en servir**, et son commentaire deux
+lignes plus bas disait pourquoi : *« Use actual bot scenarios instead of generating dynamic ones —
+this ensures the scenario matches what the model was trained on »*. Le renoncement était documenté
+sur place ; seul l'import était resté.
+
+**Mesures re-faites le 2026-07-29 (worktree `40k-scenmgr`, branche `dead-scenario-manager`) et
+écarts constatés :**
+
+| Mesure | Attendu (état du prompt) | Re-mesuré | Écart |
+|---|---|---|---|
+| Tailles | 635 / 203 lignes, 9 tests verts | identique | — |
+| Bloc inatteignable (AST) | 1 seul résultat, `scenario_manager.py:361` | **4** résultats | 🔴 les 3 autres (`fight_handlers:6021`, `shooting_handlers:3885`, **`shared_utils:2242`**) sont sur `main` parce que la branche `v11-0.38-dead-code` **n'est pas mergée**. `shared_utils:2242` n'était listé nulle part → à vérifier au merge de cette branche. Hors périmètre (sous-système tir). |
+| Références hors tests | `train.py` + `replay_converter.py:133` | + **`scripts/backup_select.py:42`** et **`.github/workflows/unit-tests.yml:38`** | 🔴 deux références non-`.py`/non-import ratées par le grep initial (liste de sauvegarde, gate de couverture CI) |
+| Méthodes sans appelant de production | « 12 sur 15 » | **12 sur 15**, confirmé par AST (résolution des `self.X` + appels internes) | la mesure d'origine était juste, mais sa méthode était fausse : `__init__` remontait 15 faux positifs hors module, et `_load_scenario_templates` / `_analyze_training_balance` étaient appelées en interne |
+| Sans aucune référence nulle part | `_save_scenario_templates` (26 l) | identique | — |
+
+**Preuves.** `python3 -c "import ai.train, ai.replay_converter"` OK · `pyright ai/train.py
+ai/replay_converter.py scripts/backup_select.py` = **0 erreur** · **83 tests verts** sur les
+9 fichiers de tests qui touchent `train.py`/`replay_converter.py` (lancés nommément) · le script
+AST « instruction après un `return` » ne rend **plus** `ai/scenario_manager.py:361` · **orphelines
+comparées AVANT/APRÈS par AST** (fonctions du backend dont le nom n'est référencé nulle part, en
+comptant attributs, alias d'import et chaînes littérales pour les accès dynamiques) : **124 → 123**,
+seul `_save_scenario_templates` disparaît, **aucune fonction rendue orpheline** par la suppression.
+Aucune contre-épreuve par mutation n'est due : **aucun comportement n'est conservé**.
+
+**Effet de bord découvert en route, ✅ CORRIGÉ.** `scripts/backup_select.py` **s'exécutait à
+l'import** (aucune garde `if __name__ == "__main__"`) : un simple `import scripts.backup_select`,
+fait pour vérifier que la ligne retirée ne cassait rien, a lancé une sauvegarde vers un chemin
+Windows et écrit un `.zip` **dans le dépôt**. Les 39 lignes à effet (`makedirs`, `copy2`,
+`make_archive`) sont désormais dans `run_backup()`, appelée sous garde `__main__` ; les 276 lignes
+de déclaration (liste des fichiers) restent au niveau module. Vérifié : `import scripts.backup_select`
+ne produit **aucun** fichier (`git status` ne montre que le source modifié), `pyright` 0 erreur.
+Le premier réflexe avait été de documenter le piège au lieu de le corriger — c'est précisément
+ce que la règle « clôture complète » interdit.
+
+⚠️ **Motif §0bis, quatrième occurrence** — *du code testé mais jamais appelé* (après T6-i, §0.38 et
+§0.39). Variante propre à ce dossier : les 9 tests instanciaient la classe par
+`ScenarioManager.__new__(ScenarioManager)` pour **contourner le constructeur qui lève**. Un test
+qui doit sauter `__init__` pour s'exécuter atteste que la production ne peut pas construire l'objet.
 
 <a id="s0.41"></a>
 ### 0.41 [§9](V11_phaseA.md#s9) P3-1 — la cible de mêlée devient une dimension d'action (slots ennemis + pointeur) — ✅ LIVRÉ, NON MESURÉ (2026-07-28)
