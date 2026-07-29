@@ -288,16 +288,23 @@ def _collect_p2_rosters(scale: str, split: str) -> List[Tuple[str, str]]:
     return refs
 
 
-def _build_scenario_template(scale: str, split: str, wall_ref: str, objectives_ref: str) -> Dict[str, Any]:
-    """Base scenario template for matchup scenarios."""
+def _build_scenario_template(scale: str, split: str, board_ref: str, terrain_ref: str) -> Dict[str, Any]:
+    """Base scenario template for matchup scenarios.
+
+    Contrat moteur V11 (meme forme que scripts/build_holdout_benchmark.py:117-126) : murs,
+    aires d'objectifs et zones de deploiement viennent TOUS du `terrain_ref`, resolu sous
+    `config/board/<board_ref>/terrain/` (engine/game_state.py:396-415, :2123-2153).
+    Aucune cle legacy : `objectives_ref` est explicitement rejetee par le moteur
+    (engine/game_state.py:420-426) et `deployment_zone` est inutile des lors que le terrain
+    porte une section `deployment_zones` (engine/game_state.py:437-442, :695-697).
+    """
     return {
-        "deployment_zone": "hammer",
         "deployment_type": "active",
         "scale": scale,
         "p1_roster_seed": 42,
-        "wall_ref": wall_ref,
         "primary_objectives": ["objectives_control"],
-        "objectives_ref": objectives_ref,
+        "board_ref": board_ref,
+        "terrain_ref": terrain_ref,
     }
 
 
@@ -382,7 +389,9 @@ def _extract_rule_checker_units() -> Tuple[List[str], List[Dict[str, Any]], List
     return selected_sorted, selected_details, rejected_rows
 
 
-def _generate_rule_checker_artifacts(agent_key: str, scale: str) -> None:
+def _generate_rule_checker_artifacts(
+    agent_key: str, scale: str, board_ref: str, terrain_ref: str
+) -> None:
     """
     Generate dedicated rule-checker scenarios + manifest in config/rule_checker.
     """
@@ -408,13 +417,16 @@ def _generate_rule_checker_artifacts(agent_key: str, scale: str) -> None:
         for p2_unit in selected_units:
             scenario_name = f"scenario_rule_checker_bot-{scenario_index:03d}.json"
             scenario_path = scenarios_dir / scenario_name
+            # Meme contrat V11 que _build_scenario_template : murs + objectifs + zones de
+            # deploiement viennent du terrain_ref. Les anciennes refs (walls-01.json /
+            # objectives-01.json) n'existent nulle part sous config/board/, et
+            # `objectives_ref` est rejetee par le moteur (engine/game_state.py:420-426).
             scenario_payload = {
-                "deployment_zone": "hammer",
                 "deployment_type": "active",
                 "scale": scale,
-                "wall_ref": "walls-01.json",
                 "primary_objectives": ["objectives_control"],
-                "objectives_ref": "objectives-01.json",
+                "board_ref": board_ref,
+                "terrain_ref": terrain_ref,
                 "units": [
                     {"id": 1, "unit_type": p1_unit, "player": 1},
                     {"id": 2, "unit_type": p1_unit, "player": 1},
@@ -644,10 +656,11 @@ def main() -> None:
                     help="Split to load P2 benchmark from (e.g. holdout). Default: same as --split")
     parser.add_argument("--all-splits", action="store_true",
                     help="Run for training, holdout_regular, and holdout_hard (output: <split>_matchups.json each)")
-    parser.add_argument("--wall-ref", default="walls-11.json",
-                    help="Wall ref for generated matchup scenarios")
-    parser.add_argument("--objectives-ref", default="objectives-51.json",
-                    help="Objectives ref for generated matchup scenarios")
+    parser.add_argument("--board-ref", default="44x60x5",
+                    help="Board de reference des scenarios generes (config/board/<board_ref>/)")
+    parser.add_argument("--terrain-ref", default="terrain-mc1.json",
+                    help="Terrain des scenarios generes (config/board/<board_ref>/terrain/<terrain_ref>) "
+                         "— il porte les murs, les aires d'objectifs et les zones de deploiement")
     parser.add_argument(
         "--opponent-mode",
         choices=["bot", "agent"],
@@ -735,7 +748,12 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.rule_checker:
-        _generate_rule_checker_artifacts(agent_key=args.agent, scale=args.scale)
+        _generate_rule_checker_artifacts(
+            agent_key=args.agent,
+            scale=args.scale,
+            board_ref=args.board_ref,
+            terrain_ref=args.terrain_ref,
+        )
         return
 
     owners_norm = list(dict.fromkeys(getattr(args, "quantile_owners", None) or []))
@@ -940,8 +958,8 @@ def _run_one_split(
     template = _build_scenario_template(
         args.scale,
         current_split,
-        args.wall_ref,
-        args.objectives_ref,
+        args.board_ref,
+        args.terrain_ref,
     )
     obs_normalizer = _build_obs_normalizer(args.agent, args.training_config, model_path)
 
