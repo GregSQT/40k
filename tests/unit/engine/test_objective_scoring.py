@@ -105,7 +105,7 @@ def _make_gs(
     current_player: int = 1,
     primary_objective=None,
 ) -> Dict[str, Any]:
-    objectives = [{"id": "obj1", "name": "Alpha", "hexes": [[5, 5]]}]
+    objectives = [{"id": 1, "name": "Alpha", "hexes": [[5, 5]]}]
     gs: Dict[str, Any] = {
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
@@ -319,15 +319,15 @@ class TestBattleShockObjectiveControl:
 
         gs_normal = _make_gs([_unit(1, 1, 5, 5, oc=2)], turn=2, primary_objective=obj)
         control_normal = mgr.calculate_objective_control(gs_normal)
-        assert control_normal["obj1"]["player_1_oc"] == 2
-        assert control_normal["obj1"]["controller"] == 1
+        assert control_normal[1]["player_1_oc"] == 2
+        assert control_normal[1]["controller"] == 1
 
         gs_shocked = _make_gs(
             [_unit(1, 1, 5, 5, oc=2, battle_shocked=True)], turn=2, primary_objective=obj
         )
         control_shocked = mgr.calculate_objective_control(gs_shocked)
-        assert control_shocked["obj1"]["player_1_oc"] == 0
-        assert control_shocked["obj1"]["controller"] is None
+        assert control_shocked[1]["player_1_oc"] == 0
+        assert control_shocked[1]["controller"] is None
 
     def test_battle_shock_flips_objective_to_opponent(self):
         """OC 3 sous choc vs OC 1 adverse : l'objectif passe à l'adversaire."""
@@ -341,9 +341,9 @@ class TestBattleShockObjectiveControl:
 
         control = mgr.calculate_objective_control(gs)
 
-        assert control["obj1"]["player_1_oc"] == 0
-        assert control["obj1"]["player_2_oc"] == 1
-        assert control["obj1"]["controller"] == 2
+        assert control[1]["player_1_oc"] == 0
+        assert control[1]["player_2_oc"] == 1
+        assert control[1]["controller"] == 2
 
     def test_battle_shocked_unit_scores_no_victory_points(self):
         """Conséquence sur la partie : plus de VP « control_at_least_one » sous le choc."""

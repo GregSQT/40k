@@ -154,7 +154,14 @@ def test_missing_block_in_an_agent_profile_is_an_explicit_error() -> None:
     """
     env = _make_env(0.0, 0.8, 100)
     assert env._training_config_is_agent_profile is True
-    del env.training_config["deployment_mode_schedule"]
+    # `W40KEngine.training_config` est legitimement Optional : le chemin API/PvP peut n'en
+    # charger aucun (w40k_core l.316/330), et `_configure_deployment_mode_for_episode` rend
+    # alors None sans lever. Ici c'est `_make_env` qui a POSE le profil : on l'affirme, sinon
+    # le `del` ci-dessous echouerait pour la mauvaise raison et le test ne prouverait rien
+    # sur le contrat vise (bloc manquant DANS un profil).
+    profile_config = env.training_config
+    assert profile_config is not None, "_make_env n'a pas injecte de profil d'entrainement"
+    del profile_config["deployment_mode_schedule"]
 
     with pytest.raises(KeyError, match="deployment_mode_schedule est OBLIGATOIRE"):
         env._configure_deployment_mode_for_episode()

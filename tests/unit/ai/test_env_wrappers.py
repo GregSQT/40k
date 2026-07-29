@@ -1,3 +1,5 @@
+from typing import Any, Dict, List, Tuple
+
 import gymnasium as gym
 import numpy as np
 import pytest
@@ -74,11 +76,26 @@ class _DummyEngine(gym.Env):
 
 
 class _DummyBot:
-    def __init__(self, action=4):
-        self._action = action
+    """Doublure FIDELE au contrat exige par `BotControlledEnv._get_bot_action`.
 
-    def select_action(self, valid_actions):
-        _ = valid_actions
+    Meme surface que les bots reels (`ai/evaluation_bots.py` : RandomBot, GreedyBot,
+    DefensiveBot, ControlBot, ...) : `select_action_with_state(valid_actions, game_state,
+    active_unit) -> int`. La doublure precedente n'exposait qu'un `select_action(valid_actions)`
+    qui n'existe sur AUCUN bot de production — le wrapper ne l'a jamais appele, et le test
+    couvrait un chemin imaginaire.
+
+    Les arguments recus sont enregistres : c'est la seule facon de verifier que le wrapper
+    transmet bien l'escouade ACTIVEE (`eligible_units[0]`) et les seules actions du masque.
+    """
+
+    def __init__(self, action: int = 4) -> None:
+        self._action = action
+        self.received: List[Tuple[List[int], Dict[str, Any], Dict[str, Any]]] = []
+
+    def select_action_with_state(
+        self, valid_actions: List[int], game_state: Dict[str, Any], active_unit: Dict[str, Any]
+    ) -> int:
+        self.received.append((list(valid_actions), game_state, active_unit))
         return self._action
 
 
@@ -142,14 +159,23 @@ def test_get_bot_action_tracks_shoot_stats_and_returns_normalized_action() -> No
     slot = mi.SHOOT_SLOT_BASE  # 19
     mask = [False] * mi.TOTAL_ACTION_SIZE
     mask[slot] = True
-    decoder = _DummyActionDecoder(mask=mask, eligible=[{"id": "u1", "player": 2}], normalized_action=slot)
+    eligible = [{"id": "u1", "player": 2}]
+    decoder = _DummyActionDecoder(mask=mask, eligible=eligible, normalized_action=slot)
     engine = _DummyEngine(decoder=decoder)
     engine.game_state["phase"] = "shoot"
-    wrapper = BotControlledEnv(engine, bot=_DummyBot(action=slot))
+    bot = _DummyBot(action=slot)
+    wrapper = BotControlledEnv(engine, bot=bot)
     action = wrapper._get_bot_action()
     assert action == slot
     assert wrapper.shoot_opportunities == 1
     assert wrapper.shoot_actions == 1
+    # Le wrapper a bien consulte le bot par le contrat reel, avec les SEULES actions du masque
+    # et l'escouade ACTIVEE (`eligible_units[0]`) — pas `current_player`, pas un slot devine.
+    assert len(bot.received) == 1
+    seen_actions, seen_state, seen_unit = bot.received[0]
+    assert seen_actions == [slot]
+    assert seen_state is engine.game_state
+    assert seen_unit is eligible[0]
 
 
 def test_get_bot_action_converts_validation_error_to_runtime_error() -> None:

@@ -46,7 +46,7 @@ def _make_cmd_gs() -> Dict[str, Any]:
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
         "primary_objective": None,
-        "objectives": [{"id": "obj1", "hexes": [[5, 5]]}],
+        "objectives": [{"id": 1, "hexes": [[5, 5]]}],
     }
     build_units_cache(gs)
     return gs
@@ -79,7 +79,7 @@ def _minimal_config() -> Dict[str, Any]:
     return {
         "board": {"default": {"cols": 15, "rows": 13, "hex_radius": 1.0,
                                "margin": 0.0, "wall_hexes": [],
-                               "objectives": [{"id": "obj1", "name": "Alpha",
+                               "objectives": [{"id": 1, "name": "Alpha",
                                                "hexes": [[5, 5]]}],
                                "inches_to_subhex": 1}},
         "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
@@ -224,7 +224,7 @@ def _engine_with_unit_on_objective() -> W40KEngine:
     eng = _make_engine()
     eng.reset()
     gs = eng.game_state
-    gs["objectives"] = [{"id": "obj1", "name": "Alpha", "hexes": [[5, 5]]}]
+    gs["objectives"] = [{"id": 1, "name": "Alpha", "hexes": [[5, 5]]}]
     gs["primary_objective"] = _PRIMARY_OBJECTIVE_CFG
     gs["objective_controllers"] = {}
     gs["current_player"] = 1
@@ -251,8 +251,8 @@ class TestBattleShockObjectiveControlLive:
         # Garde-fou de la sonde : si l'unité n'était PAS comptée avant le choc, le test ne
         # prouverait rien. On EXIGE de voir le contrôle exister d'abord.
         before = mgr.calculate_objective_control(gs)
-        assert before["obj1"]["player_1_oc"] == 1, "sonde aveugle : contrôle absent avant le choc"
-        assert before["obj1"]["controller"] == 1
+        assert before[1]["player_1_oc"] == 1, "sonde aveugle : contrôle absent avant le choc"
+        assert before[1]["controller"] == 1
 
         # Demi-effectif réel (mono-figurine : HP_CUR <= HP_MAX/2) → le moteur DOIT rouler (08.03).
         unit = gs["unit_by_id"]["1"]
@@ -267,8 +267,8 @@ class TestBattleShockObjectiveControlLive:
 
         gs["objective_controllers"] = {}
         after = mgr.calculate_objective_control(gs)
-        assert after["obj1"]["player_1_oc"] == 0
-        assert after["obj1"]["controller"] is None
+        assert after[1]["player_1_oc"] == 0
+        assert after[1]["controller"] is None
 
     def test_engine_units_all_carry_battle_shocked_field(self):
         """cmd_bshock_field : le constructeur d'unités du moteur pose toujours le champ lu

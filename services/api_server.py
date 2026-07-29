@@ -17,7 +17,7 @@ import copy
 from functools import wraps
 from threading import RLock
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Tuple
 from uuid import UUID
 from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
@@ -2997,14 +2997,37 @@ def _list_armies() -> list[Dict[str, Any]]:
     return armies
 
 
+class _UnitDataSource(Protocol):
+    """La SEULE chose que `_build_units_from_army_config` demande a un registre d'unites."""
+
+    def get_unit_data(self, unit_type: str) -> Dict[str, Any]: ...
+
+
+class _UnitRegistryHolder(Protocol):
+    """Ce que `_build_units_from_army_config` lit REELLEMENT de son moteur.
+
+    Annoncer `W40KEngine` mentait : la fonction ne touche ni `game_state`, ni les managers,
+    ni la moindre methode du moteur — uniquement `unit_registry.get_unit_data`. Le type
+    honnete est cette exigence-la, et elle est desormais explicite pour tout appelant
+    (`W40KEngine` la satisfait structurellement, sans declaration a ajouter).
+
+    Lecture seule (`@property`) et non `Optional[...]` en attribut mutable : un protocole a
+    attribut est invariant, ce qui rejetterait tout porteur dont le registre a un type plus
+    precis — alors que la fonction n'en fait qu'une lecture.
+    """
+
+    @property
+    def unit_registry(self) -> Optional[_UnitDataSource]: ...
+
+
 def _build_units_from_army_config(
     army_cfg: Dict[str, Any],
     player: int,
     next_unit_id: int,
-    engine_instance: W40KEngine,
+    engine_instance: _UnitRegistryHolder,
 ) -> Tuple[list[Dict[str, Any]], int]:
     """Build full engine units for one player from army config."""
-    if not hasattr(engine_instance, "unit_registry") or engine_instance.unit_registry is None:
+    if engine_instance.unit_registry is None:
         raise ValueError("engine.unit_registry is required to build units from army config")
 
     built_units: list[Dict[str, Any]] = []
