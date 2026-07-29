@@ -1111,10 +1111,14 @@ class MetricsCollectionCallback(BaseCallback):
                         if intent_value is not None:
                             self.metrics_tracker.log_zone_intent_step(int(intent_value))
 
-                    # Track damage from combat results
-                    if is_controlled_action and 'totalDamage' in info:
-                        damage_dealt = info['totalDamage']
-                        self.episode_tactical_data['damage_dealt'] += damage_dealt
+                    # `if 'totalDamage' in info: episode_tactical_data['damage_dealt'] += ...`
+                    # occupait cette place. Aucun producteur : `totalDamage` n'est ecrit nulle
+                    # part cote Python (info vient de result.copy(), et aucun handler ne pose
+                    # cette cle). Meme defaut silencieux que position_score. La valeur etait de
+                    # toute facon ecrasee a la fin de l'episode par le `episode_tactical_data`
+                    # du moteur (voir .update(info['tactical_data']) plus bas), ou damage_dealt
+                    # est initialise a 0 et jamais incremente non plus : la courbe
+                    # game_detailed/damage_dealt, gardee par `> 0`, n'a jamais ete emise.
 
                     # CHARGE SUCCESS TRACKING: Log successful charges (optional per step)
                     if is_controlled_action and info.get('charge_succeeded', False):  # get allowed
