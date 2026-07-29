@@ -1977,6 +1977,61 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['shoot_kills'] = shoot_kills
             self.episode_tactical_data['melee_kills'] = melee_kills
 
+            # Volume de combat et attrition, meme source action_logs (seat-aware).
+            #
+            # Ces quatre compteurs etaient DECLARES et jamais incrementes depuis le commit
+            # fe1df7d8 « metrics OK » (2025-10-25), qui a deplace episode_tactical_data du
+            # callback vers le moteur : le deplacement a reimplemente valid_actions /
+            # invalid_actions / units_lost / units_killed, mais pas ceux-ci, tout en supprimant
+            # leur calcul cote callback dans le meme diff. Cinq courbes muettes pendant neuf
+            # mois (damage_dealt, damage_received, accuracy, damage_efficiency), sans erreur
+            # pour le signaler : leurs consommateurs sont gardes par `> 0`, donc une courbe
+            # absente ne se distingue pas d'un agent qui ne se bat jamais.
+            #
+            # POURQUOI ICI, et pas au point ou chaque attaque se resout : les deux endroits de
+            # ce fichier qui construisent un dictionnaire par attaque (attack_details, pour le
+            # step.log) sont a l'interieur de
+            # `if (self.step_logger and self.step_logger.enabled)`. Y incrementer rendrait les
+            # compteurs dependants de --step : nuls a l'entrainement normal, non nuls en debug.
+            # Et `result["all_attack_results"]`, l'autre canal, ne remonte JAMAIS jusqu'a step()
+            # dans le pipeline squad V11 (mesure sur partie reelle : 0 step sur un episode
+            # complet). action_logs est la source que reward_calculator et shoot_kills/
+            # melee_kills utilisent deja, elle est remise a zero par reset() et jamais purgee
+            # en cours d'episode : une passe unique ici ne peut pas double-compter.
+            #
+            # DEFINITION : shots_fired / hits comptent le TIR seul (`type == "shoot"`), comme
+            # a l'origine et comme le vocabulaire 40K l'impose — accuracy = precision au tir
+            # (BS), que melanger avec la melee (WS) rendrait ininterpretable. Les deux viennent
+            # du meme filtre, donc hits <= shots_fired par construction. damage_dealt et
+            # damage_received, eux, couvrent tir ET melee : c'est l'attrition totale.
+            shots_fired = 0
+            hits = 0
+            damage_dealt = 0
+            damage_received = 0
+            for log in action_logs:
+                log_type = log.get("type")
+                if log_type not in ("shoot", "combat"):
+                    continue
+                by_controlled = int(require_key(log, "player")) == controlled_player
+                # `damage` est la perte de PV reellement appliquee a la cible pour cette
+                # activation (verifie sur partie reelle : la somme par attaquant egale
+                # exactement les PV perdus par le camp d'en face).
+                log_damage = int(require_key(log, "damage"))
+                if by_controlled:
+                    damage_dealt += log_damage
+                else:
+                    damage_received += log_damage
+                if log_type != "shoot" or not by_controlled:
+                    continue
+                for shot in require_key(log, "shootDetails"):
+                    shots_fired += 1
+                    if require_key(shot, "hitResult") == "HIT":
+                        hits += 1
+            self.episode_tactical_data['shots_fired'] = shots_fired
+            self.episode_tactical_data['hits'] = hits
+            self.episode_tactical_data['damage_dealt'] = damage_dealt
+            self.episode_tactical_data['damage_received'] = damage_received
+
             # VALUE attrition metrics (episode-level): destroyed enemy value and lost ally value.
             units = require_key(self.game_state, "units")
             total_ally_value = 0.0
