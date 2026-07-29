@@ -144,7 +144,7 @@ def _best_slot_action(
 
 def _score_threat(sid: str, entry: Dict[str, Any], game_state: Dict[str, Any]) -> Optional[float]:
     """Menace de la cible : meilleur degat attendu, tir ou melee (meme mesure que
-    `_best_target_slot_by_threat` et que RewardMapper._get_unit_threat)."""
+    RewardMapper._get_unit_threat)."""
     return max(get_max_ranged_damage(entry), get_max_melee_damage(entry))
 
 
@@ -810,81 +810,32 @@ class ControlBot:
 # PALIER 2 — Smart bots with focus-fire, advance and charge awareness
 # ---------------------------------------------------------------------------
 
-def _find_active_unit_for_bot(
-    game_state: Dict[str, Any], current_player: int
-) -> Optional[Dict[str, Any]]:
-    """Return the active eligible unit for *current_player* (first alive)."""
-    for unit in require_key(game_state, "units"):
-        if unit["player"] == current_player and is_unit_alive(str(unit["id"]), game_state):
-            return unit
-    return None
-
-
-def _best_target_slot_by_hp(
-    active_unit: Dict[str, Any], game_state: Dict[str, Any]
-) -> Optional[int]:
-    """Return the target slot index of the lowest-HP target, or None.
-
-    L'intervalle de slots est celui de `macro_intents.SHOOT_SLOTS` (20 depuis V11 T-E), jamais
-    un litteral : le recopier ici en creerait une seconde verite.
-    """
-    pool = active_unit.get("valid_target_pool")
-    if not pool:
-        return None
-    best_slot = 0
-    best_hp = float("inf")
-    for slot, target_id in enumerate(pool):
-        hp = get_hp_from_cache(str(target_id), game_state)
-        if hp is not None and hp < best_hp:
-            best_hp = hp
-            best_slot = slot
-    return best_slot
-
-
-def _best_target_slot_by_threat(
-    active_unit: Dict[str, Any], game_state: Dict[str, Any]
-) -> Optional[int]:
-    """Return the target slot of the highest-threat enemy (most damage output)."""
-    pool = active_unit.get("valid_target_pool")
-    if not pool:
-        return None
-    best_slot = 0
-    best_threat = -1.0
-    units_cache = require_key(game_state, "units_cache")
-    for slot, target_id in enumerate(pool):
-        tid = str(target_id)
-        hp = get_hp_from_cache(tid, game_state)
-        if hp is None:
-            continue
-        cache_entry = units_cache.get(tid)
-        if cache_entry is None:
-            continue
-        # MULTIPLE_WEAPONS_IMPLEMENTATION.md : RNG_DMG/CC_DMG ont ete SUPPRIMES du contrat
-        # d'unite. La menace se calcule desormais sur les tableaux d'armes (NB x DMG attendu),
-        # meme source que RewardMapper._get_unit_threat.
-        threat = max(get_max_ranged_damage(cache_entry), get_max_melee_damage(cache_entry))
-        if threat > best_threat:
-            best_threat = threat
-            best_slot = slot
-    return best_slot
-
-
 def _shoot_focus_fire(
     valid_actions: List[int],
-    active_unit: Optional[Dict[str, Any]],
     game_state: Dict[str, Any],
-    target_fn=_best_target_slot_by_hp,
+    score_fn=_score_wounded,
 ) -> int:
-    """Pick the shoot action (19-23) for the best target, else the first available shoot slot."""
-    if active_unit is not None:
-        slot = target_fn(active_unit, game_state)
-        if slot is not None:
-            action = mi.SHOOT_SLOT_BASE + slot
-            if action in valid_actions:
-                return action
-    shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
-    if shoot is not None:
-        return shoot
+    """Action de tir sur la cible qui maximise `score_fn`, sinon WAIT (aucun slot ouvert).
+
+    ⚠️ ROOT CAUSE CORRIGEE — le focus-fire etait DEBRANCHE. L'ancienne implementation cherchait
+    le meilleur index dans `active_unit["valid_target_pool"]` (le pool de tir de l'unite, construit
+    par `shooting_build_valid_target_pool`) et l'utilisait comme INDEX DE SLOT
+    (`SHOOT_SLOT_BASE + slot`). Or le masque ouvre `SHOOT_SLOT_BASE + slot_i` ou `slot_i` indexe
+    `get_enemy_slot_mapping` (ordre : menace decroissante, stable sur la partie) : deux listes
+    d'ordre ET de contenu differents. Le bot tirait donc sur une cible legale AUTRE que celle que
+    son critere avait designee, et la garde `if action in valid_actions` masquait la divergence
+    au lieu de la reveler. La cible est desormais lue sur le mapping, MEME source que le masque.
+
+    L'unite active n'est plus un parametre : le mapping est par JOUEUR, pas par escouade. Les bots
+    n'ont d'ailleurs pas acces a l'unite reellement activee (`eligible_units[0]` cote wrapper) —
+    ils devinaient « la premiere unite vivante du joueur », qui pouvait etre une AUTRE escouade,
+    donc un pool de cibles etranger a l'activation en cours.
+    """
+    action = _best_slot_action(
+        valid_actions, mi.SHOOT_SLOTS, mi.SHOOT_SLOT_BASE, game_state, score_fn
+    )
+    if action is not None:
+        return action
     return WAIT_ACTION
 
 
@@ -954,14 +905,12 @@ class AggressiveSmartBot:
         if phase == "deployment":
             return self._deploy(valid_actions, game_state)
 
-        current_player = require_key(game_state, "current_player")
-        active = _find_active_unit_for_bot(game_state, current_player)
-
         # La phase move est routee par le wrapper vers select_movement_destination.
 
         if phase == "shoot":
             if any(a in valid_actions for a in mi.SHOOT_SLOTS):
-                return _shoot_focus_fire(valid_actions, active, game_state, _best_target_slot_by_hp)
+                # Agressif : focus-fire de l'escouade la plus ENTAMEE (maximiser les kills).
+                return _shoot_focus_fire(valid_actions, game_state, _score_wounded)
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         if phase == "charge":
@@ -1055,14 +1004,12 @@ class DefensiveSmartBot:
         if phase == "deployment":
             return self._deploy(valid_actions, game_state)
 
-        current_player = require_key(game_state, "current_player")
-        active = _find_active_unit_for_bot(game_state, current_player)
-
         # La phase move est routee par le wrapper vers select_movement_destination (repli).
 
         if phase == "shoot":
             if any(a in valid_actions for a in mi.SHOOT_SLOTS):
-                return _shoot_focus_fire(valid_actions, active, game_state, _best_target_slot_by_threat)
+                # Defensif : focus-fire de l'escouade la plus MENACANTE (neutraliser les degats).
+                return _shoot_focus_fire(valid_actions, game_state, _score_threat)
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         if phase == "charge":
@@ -1156,13 +1103,12 @@ class AdaptiveBot:
             return self._deploy(valid_actions, game_state)
 
         current_player = require_key(game_state, "current_player")
-        active = _find_active_unit_for_bot(game_state, current_player)
         turn = int(game_state.get("turn", 1))
         posture = self._evaluate_posture(game_state, current_player, turn)
 
         # La phase move est routee par le wrapper vers select_movement_destination (posture).
         if phase == "shoot":
-            return self._shoot(valid_actions, active, game_state, posture)
+            return self._shoot(valid_actions, game_state, posture)
         if phase == "charge":
             return self._charge(valid_actions, posture)
         if phase == "fight":
@@ -1207,12 +1153,12 @@ class AdaptiveBot:
     def _shoot(
         self,
         valid_actions: List[int],
-        active: Optional[Dict[str, Any]],
         game_state: Dict[str, Any],
         posture: str,
     ) -> int:
         if any(a in valid_actions for a in mi.SHOOT_SLOTS):
-            return _shoot_focus_fire(valid_actions, active, game_state, _best_target_slot_by_hp)
+            # Adaptatif : focus-fire de l'escouade la plus ENTAMEE, quelle que soit la posture.
+            return _shoot_focus_fire(valid_actions, game_state, _score_wounded)
         return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
     def _charge(self, valid_actions: List[int], posture: str) -> int:

@@ -316,8 +316,11 @@ def test_aggressive_smart_bot_movement_and_combat(monkeypatch: pytest.MonkeyPatc
     # Shoot with no targets -> wait
     shoot_gs = {**combat_gs, "phase": "shoot"}
     assert bot.select_action_with_state([CELL, WAIT_ACTION], shoot_gs) == WAIT_ACTION
-    # Shoot with targets -> picks first target slot
-    assert bot.select_action_with_state([SHOOT, SHOOT2, WAIT_ACTION], shoot_gs) == SHOOT
+    # Shoot with targets -> focus-fire de la cible designee par le critere (ici HP egaux et
+    # mapping [e0, e1] : le slot 0 l'emporte au premier arrive a score egal).
+    monkeypatch.setattr(eb, "get_hp_from_cache", lambda uid, gs_: 5)
+    targets_gs = _slot_gs("shoot", {"e0": _dmg(rng=1, cc=1), "e1": _dmg(rng=1, cc=1)}, ["e0", "e1"])
+    assert bot.select_action_with_state([SHOOT, SHOOT2, WAIT_ACTION], targets_gs) == SHOOT
 
 
 def test_defensive_smart_bot_movement_and_no_charge(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -381,30 +384,18 @@ def test_adaptive_bot_charge_posture(monkeypatch: pytest.MonkeyPatch) -> None:
 # pas le training. Ces tests exercent les deux bots concernes sur des unites au contrat ACTUEL
 # (sans les champs supprimes) : ils sont rouges sur le code d'avant le portage.
 
-def _threat_gs(entries):
-    """game_state pour les selections par menace : units + units_cache alignes."""
-    units = [dict(e) for e in entries]
-    return {
-        "current_player": 0,
-        "phase": "shoot",
-        "units": units,
-        "units_cache": {str(u["id"]): dict(u) for u in units},
-    }
-
-
 def test_threat_focus_fire_without_legacy_damage_fields(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`_best_target_slot_by_threat` (DefensiveSmartBot) : menace lue sur RNG_WEAPONS/CC_WEAPONS."""
-    gs = _threat_gs([
-        {"id": "1", "player": 0, "col": 1, "row": 1, **_dmg(rng=2, cc=1)},
-        {"id": "e1", "player": 1, "col": 3, "row": 1, **_dmg(rng=1, cc=1)},
-        {"id": "e2", "player": 1, "col": 4, "row": 1, **_dmg(rng=1, cc=6)},
-    ])
-    gs["units"][0]["valid_target_pool"] = ["e1", "e2"]
+    """Menace lue sur RNG_WEAPONS/CC_WEAPONS (les champs RNG_DMG/CC_DMG ont ete supprimes)."""
+    gs = _slot_gs(
+        "shoot",
+        {"e_weak": _dmg(rng=1, cc=1), "e_strong": _dmg(rng=1, cc=6)},
+        ["e_weak", "e_strong"],
+    )
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
     monkeypatch.setattr(eb, "get_hp_from_cache", lambda uid, gs_: 5)
 
     bot = DefensiveSmartBot(randomness=0.0)
-    # slot 1 = e2, la plus menacante (6 en melee vs 1 en tir pour e1).
+    # slot 1 = e_strong, la plus menacante (6 en melee vs 1 en tir pour e_weak).
     assert bot.select_action_with_state([SHOOT, SHOOT2, WAIT_ACTION], gs) == SHOOT2
 
 
@@ -523,3 +514,59 @@ def test_slot_mapping_divergence_is_explicit(monkeypatch: pytest.MonkeyPatch) ->
     gs = _slot_gs("fight", {"e_weak": _dmg(rng=1, cc=1)}, ["e_weak"])
     with pytest.raises(RuntimeError, match=r"sans escouade ennemie"):
         DefensiveBot(randomness=0.0).select_action_with_state([FIGHT_SLOT0, FIGHT_SLOT1], gs)
+
+
+# --- Tir des smart bots : le slot vise est celui du MAPPING, pas un index de pool de tir -------
+#
+# Defaut corrige : le focus-fire cherchait le meilleur index dans
+# `active_unit["valid_target_pool"]` et s'en servait comme index de SLOT, alors que le masque
+# indexe `get_enemy_slot_mapping`. Les cas ci-dessous donnent au pool l'ordre INVERSE du mapping :
+# l'ancien code vise le slot 0 (donc la mauvaise escouade), le nouveau le slot 1.
+
+def test_smart_bots_shoot_the_slot_designated_by_their_criterion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
+    monkeypatch.setattr(eb, "get_hp_from_cache", lambda uid, gs_: 5 if uid == "e_full" else 2)
+
+    # Menace (DefensiveSmartBot) : mapping [faible, forte] -> slot 1 ; pool inverse [forte, faible].
+    gs_threat = _slot_gs(
+        "shoot",
+        {"e_weak": _dmg(rng=1, cc=1), "e_strong": _dmg(rng=2, cc=8)},
+        ["e_weak", "e_strong"],
+    )
+    gs_threat["units"][0]["valid_target_pool"] = ["e_strong", "e_weak"]
+    assert (
+        DefensiveSmartBot(randomness=0.0).select_action_with_state(
+            [SHOOT, SHOOT2, WAIT_ACTION], gs_threat
+        )
+        == SHOOT2
+    )
+
+    # HP (AggressiveSmartBot, AdaptiveBot) : mapping [pleine, entamee] -> slot 1 ; pool inverse.
+    gs_hp = _slot_gs(
+        "shoot",
+        {"e_full": _dmg(rng=1, cc=1), "e_hurt": _dmg(rng=1, cc=1)},
+        ["e_full", "e_hurt"],
+    )
+    gs_hp["units"][0]["valid_target_pool"] = ["e_hurt", "e_full"]
+    assert (
+        AggressiveSmartBot(randomness=0.0).select_action_with_state(
+            [SHOOT, SHOOT2, WAIT_ACTION], gs_hp
+        )
+        == SHOOT2
+    )
+    assert (
+        AdaptiveBot(randomness=0.0).select_action_with_state([SHOOT, SHOOT2, WAIT_ACTION], gs_hp)
+        == SHOOT2
+    )
+
+
+def test_smart_bot_shoot_slot_mapping_divergence_is_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Slot de tir ouvert sans escouade en face : erreur explicite, pas un tir sur un autre."""
+    monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
+    gs = _slot_gs("shoot", {"e_weak": _dmg(rng=1, cc=1)}, ["e_weak"])
+    with pytest.raises(RuntimeError, match=r"sans escouade ennemie"):
+        AggressiveSmartBot(randomness=0.0).select_action_with_state([SHOOT, SHOOT2], gs)
