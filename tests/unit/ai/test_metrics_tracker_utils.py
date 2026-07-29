@@ -1,5 +1,5 @@
 from collections import deque
-from typing import Any, Dict, List, Tuple, cast
+from typing import Any, Dict, List, Tuple
 
 import pytest
 
@@ -217,7 +217,6 @@ def test_log_reward_decomposition_validation_and_trimming() -> None:
 
 def test_log_position_score_and_close() -> None:
     t = _tracker_stub()
-    t.log_position_score(cast(float, None))
     assert t.position_scores == []
     for i in range(10):
         t.log_position_score(float(i))

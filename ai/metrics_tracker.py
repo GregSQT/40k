@@ -651,12 +651,18 @@ class W40KMetricsTracker:
         This tracks the pre-scaled offensive_value from movement actions.
         Higher values = unit moved to position with better shooting potential.
 
+        Le garde `if position_score is None: return` a ete SUPPRIME, pas elargi en
+        `Optional[float]` : c'etait du code mort. L'unique appelant reel
+        (ai/training_callbacks.py l.1166) passe `reward_breakdown['position_score']` sous garde
+        `'position_score' in reward_breakdown`, et le dict producteur
+        (engine/reward_calculator.py l.31) ne porte que base_actions / result_bonuses /
+        tactical_bonuses / situational / penalties / total. Aucun None ne peut donc arriver ici,
+        et un `Optional[float]` aurait invente un cas d'usage pour justifier le garde au lieu de
+        le supprimer.
+
         Args:
             position_score: Raw position_score value (before position_reward_scale)
         """
-        if position_score is None:
-            return
-
         self.position_scores.append(position_score)
 
         # Keep last 1000 position scores
