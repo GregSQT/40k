@@ -203,7 +203,10 @@ def test_tactical_bot_is_instantiable_by_the_evaluation_factory() -> None:
     from ai.evaluation_bots import TacticalBot
 
     bot = TacticalBot(randomness=0.05)
-    assert bot.select_action([]) is not None
+    # Contrat exige par BotControlledEnv : decision d'action (avec l'escouade activee) et
+    # destination de deplacement. `select_action` (aveugle, sans etat) a ete supprimee.
+    assert hasattr(bot, "select_action_with_state")
+    assert hasattr(bot, "select_movement_destination")
 
 
 # --- V11 §0.16(a) : le ranking ne doit PAS s'afficher quand l'eval est non fiable ---

@@ -42,47 +42,22 @@ DEPLOYMENT_ACTIONS = list(mi.DEPLOY_SLOTS)   # 4-8 (slots de déploiement)
 WAIT_ACTION = mi.ACTION_WAIT                 # 18
 
 
-def _first_action_in(valid_actions, action_ids):
-    """Retourne la première action de action_ids présente dans valid_actions, sinon None."""
-    for a in action_ids:
-        if a in valid_actions:
-            return a
-    return None
+def _has_action_in(valid_actions, action_ids) -> bool:
+    """True si au moins une action de `action_ids` est ouverte par le masque."""
+    return any(a in valid_actions for a in action_ids)
 
 
-def _first_charge_action_in(valid_actions):
-    """Action de charge du bot : cible la plus menaçante parmi les cibles déclarables (11.02).
-
-    V11 §9 P3-2 — la cible de charge est devenue une dimension d'action (un slot ennemi), comme
-    le tir et la mêlée. Les slots étant attribués par menace décroissante (`_enemy_threat_order`),
-    prendre le premier slot ouvert vaut « charger la cible la plus menaçante ».
-
-    ⚠️ Le décodeur ne tranche plus par `get_best_enemy_score_for_unit` (damage_ratio). Changement
-    de comportement ASSUMÉ des bots d'évaluation, comme pour la mêlée : les win-rates d'avant
-    cette tranche ne sont pas comparables. Il n'existe pas d'action « charger sans cible » —
-    sans cible déclarable, aucun slot n'est ouvert et le bot retombe sur WAIT.
-    """
-    return _first_action_in(valid_actions, mi.CHARGE_SLOTS)
-
-
-def _first_fight_action_in(valid_actions):
-    """Action de combat du bot : cible de MELEE la plus menaçante, sinon combat à vide.
-
-    V11 §9 P3-1 — la cible de mêlée est devenue une dimension d'action (un slot ennemi), comme
-    le tir. Les slots étant attribués par menace décroissante (`_enemy_threat_order`), prendre le
-    premier slot ouvert vaut « frapper la cible la plus menaçante » : c'est EXACTEMENT
-    l'heuristique que ces bots appliquent déjà au tir (`_first_action_in(mi.SHOOT_SLOTS)`).
-
-    ⚠️ Le bot ne passe plus par `_ai_select_fight_target` (lowest HP puis menace, via
-    RewardMapper) : le moteur ne choisit plus de cible en gym. Changement de comportement ASSUMÉ
-    des bots d'évaluation — les win-rates d'avant cette tranche ne sont pas comparables.
-    """
-    fight = _first_action_in(valid_actions, mi.FIGHT_SLOTS)
-    if fight is not None:
-        return fight
-    if mi.ACTION_FIGHT_NO_TARGET in valid_actions:
-        return mi.ACTION_FIGHT_NO_TARGET
-    return None
+# ⚠️ HISTORIQUE — « le premier slot ouvert = la cible la plus menacante » etait FAUX.
+# Les helpers `_first_charge_action_in` / `_first_fight_action_in` justifiaient le choix du
+# premier slot par l'ordre de `_enemy_threat_order`. Trois raisons de rejeter cette caution :
+#   1. `_enemy_threat_order` trie par PV x controle d'objectif (HP_CUR x OC_TOTAL), une mesure
+#      de VALEUR D'OBJECTIF — pas de dangerosite ; les scores de menace des bots portent, eux,
+#      sur les degats attendus (`get_max_ranged_damage` / `get_max_melee_damage`).
+#   2. `_refresh_enemy_slot_mapping` garantit qu'une escouade vivante GARDE son slot : l'ordre
+#      est fige a l'attribution et ne reflete plus aucun classement des la premiere mort, un
+#      slot libere etant repris par n'importe quelle escouade non mappee.
+#   3. L'ordre des slots est un detail d'implementation du masque, pas une doctrine de bot.
+# Tout choix de cible passe donc par un critere explicite (`_best_slot_action`).
 
 
 # --- Choix de cible par CRITERE EXPLICITE (jamais par ordre de tri) ----------
@@ -182,11 +157,56 @@ def _score_threat(sid: str, entry: Dict[str, Any], game_state: Dict[str, Any]) -
 
 
 def _score_wounded(sid: str, entry: Dict[str, Any], game_state: Dict[str, Any]) -> Optional[float]:
-    """Cible la plus entamee : score = -HP (meme critere que GreedyBot.select_shooting_target)."""
+    """Cible la plus ENTAMEE : score = -HP (focus fire, doctrine greedy/agressive)."""
     hp = get_hp_from_cache(sid, game_state)
     if hp is None:
         raise RuntimeError(f"Cible {sid} ouverte par le masque mais absente du cache de HP.")
     return -float(hp)
+
+
+def _score_objective_proximity(
+    sid: str, entry: Dict[str, Any], game_state: Dict[str, Any]
+) -> Optional[float]:
+    """Cible la plus proche d'un objectif (doctrine de CONTROLE : frapper qui conteste).
+
+    Score = -distance-hex a l'objectif le plus proche. Sans objectif sur la table la doctrine
+    n'a pas d'objet : on retombe sur la menace, jamais sur un ordre de liste.
+    """
+    objectives = game_state.get("objectives")
+    if not objectives:
+        return _score_threat(sid, entry, game_state)
+    col, row = int(entry["col"]), int(entry["row"])
+    return -float(
+        min(
+            calculate_hex_distance(col, row, *mi.get_objective_center(obj))
+            for obj in objectives
+        )
+    )
+
+
+def _score_killable_then_wounded(attacker: Dict[str, Any], melee: bool):
+    """Critere de TacticalBot : tuable ce tour > peu de PV > menace elevee.
+
+    Ferme sur l'ATTAQUANT (ses degats attendus decident de « tuable »), d'ou la fabrique :
+    `_best_slot_action` ne passe que la CIBLE a son `score_fn`.
+    """
+    our_damage = get_max_melee_damage(attacker) if melee else get_max_ranged_damage(attacker)
+
+    def _score(sid: str, entry: Dict[str, Any], game_state: Dict[str, Any]) -> Optional[float]:
+        hp = get_hp_from_cache(sid, game_state)
+        if hp is None:
+            raise RuntimeError(f"Cible {sid} ouverte par le masque mais absente du cache de HP.")
+        threat = max(get_max_ranged_damage(entry), get_max_melee_damage(entry))
+        return (1000.0 if hp <= our_damage else 0.0) + (10.0 - float(hp)) * 10.0 + threat * 5.0
+
+    return _score
+
+
+def _score_silence_the_guns(
+    sid: str, entry: Dict[str, Any], game_state: Dict[str, Any]
+) -> Optional[float]:
+    """Cible de charge de TacticalBot : l'escouade de TIR la plus dangereuse (la faire taire)."""
+    return get_max_ranged_damage(entry)
 
 
 def _score_melee_threat_only(
@@ -342,11 +362,6 @@ def _select_weighted_deployment_action(
 class RandomBot:
     """Picks random valid actions, but prioritizes shooting when available"""
 
-    def select_action(self, valid_actions: List[int]) -> int:
-        if not valid_actions:
-            raise ValueError("RandomBot.select_action requires at least one valid action")
-        return random.choice(valid_actions)
-
     def select_action_with_state(
         self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
     ) -> int:
@@ -379,9 +394,6 @@ class RandomBot:
             return require_unit_position(unit, game_state)
         return get_unit_coordinates(unit)
 
-    def select_shooting_target(self, valid_targets: List[str]) -> str:
-        return random.choice(valid_targets) if valid_targets else ""
-
 
 class GreedyBot:
     """Shoots nearest enemy, moves toward closest target"""
@@ -398,18 +410,6 @@ class GreedyBot:
         self._deployment_last_action: Optional[int] = None
         self._deployment_repeat_count = 0
         self._deployment_episode_marker: Optional[Any] = None
-
-    def select_action(self, valid_actions: List[int]) -> int:
-        # Add randomness to prevent overfitting
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_actions) if valid_actions else WAIT_ACTION
-
-        # Repli stateless (jamais utilise en move : le move passe par
-        # select_movement_destination). Prefer shoot > wait/first.
-        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
-        if shoot is not None:
-            return shoot
-        return valid_actions[0] if valid_actions else WAIT_ACTION
 
     def select_action_with_state(
         self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
@@ -447,24 +447,23 @@ class GreedyBot:
                 self._deployment_last_action = chosen
                 self._deployment_repeat_count = 1
             return chosen
+        # Doctrine greedy : ACHEVER. Tir, charge et melee visent l'escouade la plus ENTAMEE —
+        # un seul critere, le meme partout, jamais l'ordre des slots.
         if phase == "shoot":
-            shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
-            if shoot is not None:
-                return shoot
-            if WAIT_ACTION in valid_actions:
-                return WAIT_ACTION
-            return valid_actions[0]
+            if _has_action_in(valid_actions, mi.SHOOT_SLOTS):
+                return _shoot_focus_fire(valid_actions, game_state, active_unit, _score_wounded)
+            return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
+        if phase == "charge":
+            charge = _charge_action_by(valid_actions, game_state, active_unit, _score_wounded)
+            if charge is not None:
+                return charge
+            return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
         if phase == "fight":
-            # Doctrine greedy : ACHEVER. La cible frappee est la plus entamee (focus fire), le
-            # meme critere que son tir (`select_shooting_target`) — plus l'accident d'ordre de
-            # tri de `valid_actions[0]`, qui designait le slot ennemi d'indice le plus bas.
             fight = _fight_action_by(valid_actions, game_state, active_unit, _score_wounded)
             if fight is not None:
                 return fight
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
-        if WAIT_ACTION in valid_actions and len(valid_actions) > 1:
-            return valid_actions[0] if valid_actions[0] != WAIT_ACTION else valid_actions[1]
-        return valid_actions[0]
+        return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
         """Greedy : pousse vers l'ennemi le plus proche (poussee offensive)."""
@@ -480,42 +479,6 @@ class GreedyBot:
         if game_state is None:
             return valid_destinations[0]
         return _dest_toward_enemies(valid_destinations, unit, game_state)
-
-    def select_shooting_target(self, valid_targets: List[str], game_state=None) -> str:
-        """
-        Greedy target selection: prioritize low HP enemies.
-        If game_state provided, actually check HP. Otherwise use first target.
-        """
-        if not valid_targets:
-            return ""
-
-        # Add randomness to target selection
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_targets)
-
-        if game_state:
-            min_hp = float('inf')
-            best_target = valid_targets[0]
-
-            for target_id in valid_targets:
-                target = self._get_unit_by_id(game_state, target_id)
-                if target and is_unit_alive(str(target["id"]), game_state):
-                    hp = get_hp_from_cache(str(target["id"]), game_state)
-                    if hp is not None and hp < min_hp:
-                        min_hp = hp
-                        best_target = target_id
-
-            return best_target
-
-        return valid_targets[0]
-    
-    def _get_unit_by_id(self, game_state, unit_id: str):
-        """Helper to find unit by ID."""
-        for unit in require_key(game_state, 'units'):
-            if str(unit['id']) == str(unit_id):
-                return unit
-        return None
-
 
 class DefensiveBot:
     """Prioritizes survival, maintains distance, contre-charge les menaces de melee.
@@ -537,19 +500,6 @@ class DefensiveBot:
         self._deployment_repeat_count = 0
         self._deployment_episode_marker: Optional[Any] = None
 
-    def select_action(self, valid_actions: List[int]) -> int:
-        # Add randomness to prevent overfitting
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_actions) if valid_actions else WAIT_ACTION
-
-        # Conservative: shoot when possible, otherwise wait
-        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
-        if shoot is not None:
-            return shoot
-        if WAIT_ACTION in valid_actions:
-            return WAIT_ACTION
-        return valid_actions[0] if valid_actions else WAIT_ACTION
-    
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
         """Defensif : s'eloigne de l'ennemi le plus proche (maintien de distance)."""
         if not valid_destinations:
@@ -565,17 +515,6 @@ class DefensiveBot:
             return valid_destinations[0]
         return _dest_away_from_enemies(valid_destinations, unit, game_state)
 
-    def select_shooting_target(self, valid_targets: List[str]) -> str:
-        if not valid_targets:
-            return ""
-
-        # Add randomness to target selection
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_targets)
-
-        # Shoot first available target
-        return valid_targets[0]
-    
     def select_action_with_state(
         self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
     ) -> int:
@@ -625,29 +564,26 @@ class DefensiveBot:
         # La phase move est routee par le wrapper vers select_movement_destination (repli
         # geometrique) : cette methode ne la traite plus.
 
+        # Doctrine defensive : NEUTRALISER LA SOURCE DE DEGATS — tir et melee visent la cible
+        # la PLUS MENACANTE (c'est ce que la docstring de la methode promettait deja), la charge
+        # obeit a la contre-charge (`_charge_action`).
         if phase == "shoot":
-            shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
-            if shoot is not None:
-                return shoot
-            if WAIT_ACTION in valid_actions:
-                return WAIT_ACTION
-            return valid_actions[0]
+            if _has_action_in(valid_actions, mi.SHOOT_SLOTS):
+                return _shoot_focus_fire(valid_actions, game_state, active_unit, _score_threat)
+            return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         if phase == "charge":
             return self._charge_action(valid_actions, game_state, active_unit)
 
         if phase == "fight":
-            # Doctrine defensive : NEUTRALISER LA SOURCE DE DEGATS. La cible frappee est la plus
-            # menacante (meme mesure que le focus-fire de DefensiveSmartBot), plus le slot
-            # d'indice le plus bas que renvoyait `valid_actions[0]`.
             fight = _fight_action_by(valid_actions, game_state, active_unit, _score_threat)
             if fight is not None:
                 return fight
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
-        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
-        if nearby_threats > 0 and shoot is not None:
-            return shoot
+        # Hors phase d'action : sous la menace, tirer si le masque l'autorise ; sinon tenir.
+        if nearby_threats > 0 and _has_action_in(valid_actions, mi.SHOOT_SLOTS):
+            return _shoot_focus_fire(valid_actions, game_state, active_unit, _score_threat)
 
         if WAIT_ACTION in valid_actions:
             return WAIT_ACTION
@@ -722,17 +658,6 @@ class ControlBot:
         self._deployment_repeat_count = 0
         self._deployment_episode_marker: Optional[Any] = None
 
-    def select_action(self, valid_actions: List[int]) -> int:
-        """Action selection when only the valid action list is available (no game_state)."""
-        if not valid_actions:
-            return WAIT_ACTION
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_actions)
-        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
-        if shoot is not None:
-            return shoot
-        return valid_actions[0]
-
     def select_action_with_state(
         self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
     ) -> int:
@@ -753,22 +678,29 @@ class ControlBot:
         # joueur (la selection 12.04 alterne entre les camps).
         on_objective = self._is_on_objective(active_unit, game_state)
 
+        # Doctrine de CONTROLE : frapper qui CONTESTE, c'est-a-dire la cible la plus proche d'un
+        # objectif (`_score_objective_proximity`) — tir, charge et melee alignes sur le meme
+        # critere, conformement a la docstring de la classe.
         if phase == "shoot":
-            return self._shoot_action(valid_actions)
+            return self._shoot_action(valid_actions, game_state, active_unit)
         if phase == "charge":
             if on_objective and WAIT_ACTION in valid_actions:
                 return WAIT_ACTION
-            charge = _first_charge_action_in(valid_actions)
+            charge = _charge_action_by(
+                valid_actions, game_state, active_unit, _score_objective_proximity
+            )
             if charge is not None:
                 return charge
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
         if phase == "fight":
-            fight = _first_fight_action_in(valid_actions)
+            fight = _fight_action_by(
+                valid_actions, game_state, active_unit, _score_objective_proximity
+            )
             if fight is not None:
                 return fight
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
-        return valid_actions[0]
+        return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
     def _deployment_action(self, valid_actions: List[int], game_state) -> int:
         """Deploy with bias toward objectives."""
@@ -816,11 +748,14 @@ class ControlBot:
             return require_unit_position(unit, game_state)
         return _dest_toward_objective(valid_destinations, unit, game_state)
 
-    def _shoot_action(self, valid_actions: List[int]) -> int:
-        """Shoot whenever possible."""
-        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
-        if shoot is not None:
-            return shoot
+    def _shoot_action(
+        self, valid_actions: List[int], game_state: Dict[str, Any], active_unit: Dict[str, Any]
+    ) -> int:
+        """Tirer des que possible, sur l'escouade qui conteste le plus pres d'un objectif."""
+        if _has_action_in(valid_actions, mi.SHOOT_SLOTS):
+            return _shoot_focus_fire(
+                valid_actions, game_state, active_unit, _score_objective_proximity
+            )
         if WAIT_ACTION in valid_actions:
             return WAIT_ACTION
         return valid_actions[0]
@@ -925,16 +860,6 @@ class AggressiveSmartBot:
         self._deployment_repeat_count = 0
         self._deployment_episode_marker: Optional[Any] = None
 
-    def select_action(self, valid_actions: List[int]) -> int:
-        if not valid_actions:
-            return WAIT_ACTION
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_actions)
-        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
-        if shoot is not None:
-            return shoot
-        return valid_actions[0]
-
     def select_action_with_state(
         self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
     ) -> int:
@@ -957,18 +882,20 @@ class AggressiveSmartBot:
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         if phase == "charge":
-            charge = _first_charge_action_in(valid_actions)
+            # Agressif : il charge des qu'il peut, sur l'escouade la plus ENTAMEE — meme critere
+            # que son tir et sa melee (maximiser les kills).
+            charge = _charge_action_by(valid_actions, game_state, active_unit, _score_wounded)
             if charge is not None:
                 return charge
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         if phase == "fight":
-            fight = _first_fight_action_in(valid_actions)
+            fight = _fight_action_by(valid_actions, game_state, active_unit, _score_wounded)
             if fight is not None:
                 return fight
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
-        return valid_actions[0]
+        return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
         """Agressif : pousse toujours vers l'ennemi le plus proche."""
@@ -1024,18 +951,6 @@ class DefensiveSmartBot:
         self._deployment_repeat_count = 0
         self._deployment_episode_marker: Optional[Any] = None
 
-    def select_action(self, valid_actions: List[int]) -> int:
-        if not valid_actions:
-            return WAIT_ACTION
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_actions)
-        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
-        if shoot is not None:
-            return shoot
-        if WAIT_ACTION in valid_actions:
-            return WAIT_ACTION
-        return valid_actions[0]
-
     def select_action_with_state(
         self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
     ) -> int:
@@ -1061,12 +976,13 @@ class DefensiveSmartBot:
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         if phase == "fight":
-            fight = _first_fight_action_in(valid_actions)
+            # Defensif : neutraliser la source de degats, meme critere que son tir.
+            fight = _fight_action_by(valid_actions, game_state, active_unit, _score_threat)
             if fight is not None:
                 return fight
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
-        return valid_actions[0]
+        return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
         """Defensif : garde ses distances, s'eloigne de l'ennemi le plus proche."""
@@ -1126,16 +1042,6 @@ class AdaptiveBot:
         self._deployment_repeat_count = 0
         self._deployment_episode_marker: Optional[Any] = None
 
-    def select_action(self, valid_actions: List[int]) -> int:
-        if not valid_actions:
-            return WAIT_ACTION
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_actions)
-        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
-        if shoot is not None:
-            return shoot
-        return valid_actions[0]
-
     def select_action_with_state(
         self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
     ) -> int:
@@ -1159,14 +1065,14 @@ class AdaptiveBot:
         if phase == "shoot":
             return self._shoot(valid_actions, game_state, active_unit, posture)
         if phase == "charge":
-            return self._charge(valid_actions, posture)
+            return self._charge(valid_actions, game_state, active_unit, posture)
         if phase == "fight":
-            fight = _first_fight_action_in(valid_actions)
+            fight = _fight_action_by(valid_actions, game_state, active_unit, _score_wounded)
             if fight is not None:
                 return fight
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
-        return valid_actions[0]
+        return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
     def _evaluate_posture(self, game_state: Dict[str, Any], player: int, turn: int) -> str:
         """Return 'early', 'winning', or 'losing'."""
@@ -1213,9 +1119,19 @@ class AdaptiveBot:
             return _shoot_focus_fire(valid_actions, game_state, active_unit, _score_wounded)
         return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
-    def _charge(self, valid_actions: List[int], posture: str) -> int:
-        charge = _first_charge_action_in(valid_actions)
-        if posture != "winning" and charge is not None:
+    def _charge(
+        self,
+        valid_actions: List[int],
+        game_state: Dict[str, Any],
+        active_unit: Dict[str, Any],
+        posture: str,
+    ) -> int:
+        """En posture defensive (« winning »), on ne charge pas ; sinon on charge l'escouade la
+        plus ENTAMEE, meme critere que le tir et la melee de ce bot."""
+        if posture == "winning":
+            return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
+        charge = _charge_action_by(valid_actions, game_state, active_unit, _score_wounded)
+        if charge is not None:
             return charge
         return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
@@ -1270,91 +1186,84 @@ class TacticalBot:
         """
         self.randomness = max(0.0, min(1.0, randomness))
 
-    def select_action(self, valid_actions: List[int], game_state: Optional[Dict] = None, phase: Optional[str] = None) -> int:
-        """
-        Select action based on current phase and game state.
+    def select_action_with_state(
+        self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
+    ) -> int:
+        """Politique par phase du bot tactique (HOLDOUT d'evaluation, cf. docstring de module).
 
-        Args:
-            valid_actions: List of valid action indices
-            game_state: Current game state (required for smart decisions)
-            phase: Current phase ('move', 'shoot', 'charge', 'fight')
+        ⚠️ CETTE METHODE N'EXISTAIT PAS : le wrapper teste `hasattr(bot,
+        'select_action_with_state')` et, faute de l'avoir, appelait `select_action(valid_actions)`
+        avec UN seul argument — donc `phase=None` et `game_state=None`, c'est-a-dire la branche
+        « phase inconnue » pour TOUTE la partie. Le bot le plus difficile du panel jouait ainsi
+        « premier slot de tir, sinon premier slot de charge, sinon premier slot de melee », et
+        aucune de ses heuristiques de phase n'etait jamais atteinte. Elles le sont desormais.
         """
         if not valid_actions:
-            return WAIT_ACTION  # Wait
+            return WAIT_ACTION
+        phase = require_key(game_state, "phase")
 
-        # Random action for diversity
         if self.randomness > 0 and random.random() < self.randomness:
             return random.choice(valid_actions)
 
-        # Phase-specific logic
-        if phase == 'move':
-            return self._select_move_action(valid_actions, game_state)
-        elif phase == 'shoot':
-            return self._select_shoot_action(valid_actions, game_state)
-        elif phase == 'charge':
-            return self._select_charge_action(valid_actions, require_present(game_state, "game_state"))
-        elif phase == 'fight':
-            return self._select_fight_action(valid_actions, game_state)
-        else:
-            # Prefer combat actions when phase is unknown
-            shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
-            if shoot is not None:  # Shoot
-                return shoot
-            charge = _first_charge_action_in(valid_actions)  # Charge
-            if charge is not None:
-                return charge
-            fight = _first_fight_action_in(valid_actions)  # Fight
-            if fight is not None:
-                return fight
-            return valid_actions[0]
+        # La phase move est routee par le wrapper vers select_movement_destination.
+        if phase == "shoot":
+            return self._select_shoot_action(valid_actions, game_state, active_unit)
+        if phase == "charge":
+            return self._select_charge_action(valid_actions, game_state, active_unit)
+        if phase == "fight":
+            return self._select_fight_action(valid_actions, game_state, active_unit)
+        return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
-    def _select_move_action(self, valid_actions: List[int], game_state: Optional[Dict]) -> int:
-        """Movement phase (repli stateless). Le move spatial passe par
-        select_movement_destination : ici on prefere agir plutot qu'attendre."""
-        non_wait = [a for a in valid_actions if a != WAIT_ACTION]
-        if non_wait:
-            return non_wait[0]
-        if WAIT_ACTION in valid_actions:  # Wait
-            return WAIT_ACTION
-        return valid_actions[0] if valid_actions else WAIT_ACTION
-
-    def _select_shoot_action(self, valid_actions: List[int], game_state: Optional[Dict]) -> int:
-        """Shooting phase: always shoot if targets available."""
-        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
-        if shoot is not None:  # Shoot
-            return shoot
-        if WAIT_ACTION in valid_actions:  # Wait/Skip
-            return WAIT_ACTION
-        return valid_actions[0] if valid_actions else WAIT_ACTION
-
-    def _select_charge_action(self, valid_actions: List[int], game_state: Dict) -> int:
-        """Charge phase: charge if melee is advantageous."""
-        # Check if charging is beneficial
-        charge = _first_charge_action_in(valid_actions)
-        if game_state and charge is not None:
-            active_unit = self._get_active_unit(game_state)
-            if active_unit:
-                # Charge si la melee est AVANTAGEUSE (cf. docstring de la classe).
-                # L'ancien critere `CC_DMG >= 2` portait sur un degat PAR TOUCHE d'un champ
-                # supprime ; transpose tel quel sur NB x DMG il serait vrai presque toujours.
-                # Le critere porte donc sur la comparaison melee vs tir, qui est la question
-                # que le bot pose reellement.
-                if get_max_melee_damage(active_unit) > get_max_ranged_damage(active_unit):
-                    return charge
-
-        # Skip charge if not beneficial
+    def _select_shoot_action(
+        self, valid_actions: List[int], game_state: Dict[str, Any], active_unit: Dict[str, Any]
+    ) -> int:
+        """Tir : toujours tirer si une cible est ouverte ; cible tuable > entamee > menacante."""
+        if _has_action_in(valid_actions, mi.SHOOT_SLOTS):
+            return _shoot_focus_fire(
+                valid_actions,
+                game_state,
+                active_unit,
+                _score_killable_then_wounded(active_unit, melee=False),
+            )
         if WAIT_ACTION in valid_actions:
             return WAIT_ACTION
-        return valid_actions[0] if valid_actions else WAIT_ACTION
+        return valid_actions[0]
 
-    def _select_fight_action(self, valid_actions: List[int], game_state: Optional[Dict]) -> int:
-        """Fight phase: always fight when in melee."""
-        fight = _first_fight_action_in(valid_actions)  # Fight
+    def _select_charge_action(
+        self, valid_actions: List[int], game_state: Dict[str, Any], active_unit: Dict[str, Any]
+    ) -> int:
+        """Charge si la melee est AVANTAGEUSE, sur l'escouade de tir la plus dangereuse.
+
+        Deux decisions distinctes, comme le disait deja la docstring de la classe : le SI porte
+        sur l'attaquant (melee attendue > tir attendu), le QUI sur la cible (faire taire les
+        armes de tir adverses). L'ancien critere `CC_DMG >= 2` portait sur un degat PAR TOUCHE
+        d'un champ supprime du contrat d'unite.
+        """
+        if get_max_melee_damage(active_unit) > get_max_ranged_damage(active_unit):
+            charge = _charge_action_by(
+                valid_actions, game_state, active_unit, _score_silence_the_guns
+            )
+            if charge is not None:
+                return charge
+        if WAIT_ACTION in valid_actions:
+            return WAIT_ACTION
+        return valid_actions[0]
+
+    def _select_fight_action(
+        self, valid_actions: List[int], game_state: Dict[str, Any], active_unit: Dict[str, Any]
+    ) -> int:
+        """Melee : toujours combattre ; meme critere qu'au tir, sur les degats de MELEE."""
+        fight = _fight_action_by(
+            valid_actions,
+            game_state,
+            active_unit,
+            _score_killable_then_wounded(active_unit, melee=True),
+        )
         if fight is not None:
             return fight
-        if WAIT_ACTION in valid_actions:  # Wait
+        if WAIT_ACTION in valid_actions:
             return WAIT_ACTION
-        return valid_actions[0] if valid_actions else WAIT_ACTION
+        return valid_actions[0]
 
     def select_movement_destination(self, unit: Dict, valid_destinations: List[Tuple[int, int]],
                                      game_state: Optional[Dict] = None) -> Tuple[int, int]:
@@ -1392,125 +1301,6 @@ class TacticalBot:
 
         # Otherwise, move toward optimal shooting range
         return self._find_best_offensive_position(unit, valid_destinations, nearest_enemy, game_state)
-
-    def select_shooting_target(self, valid_targets: List[str], game_state: Optional[Dict] = None) -> str:
-        """
-        Select best shooting target.
-
-        Priority:
-        1. Target that can be killed this turn (HP <= our damage)
-        2. Lowest HP target (focus fire)
-        3. Highest threat target (highest damage output)
-        """
-        if not valid_targets:
-            return ""
-
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_targets)
-
-        if not game_state:
-            return valid_targets[0]
-
-        active_unit = self._get_active_unit(game_state)
-        if not active_unit:
-            return valid_targets[0]
-
-        # Degats de tir attendus sur une phase (NB x DMG) — comparables a des HP, donc le test
-        # `hp <= our_damage` ci-dessous est plus juste qu'avec l'ancien degat par touche.
-        our_damage = get_max_ranged_damage(active_unit)
-        best_target = valid_targets[0]
-        best_score = -float('inf')
-
-        for target_id in valid_targets:
-            target = self._get_unit_by_id(game_state, target_id)
-            if not target or not is_unit_alive(str(target["id"]), game_state):
-                continue
-
-            hp = get_hp_from_cache(str(target["id"]), game_state)
-            if hp is None:
-                continue
-            threat = max(get_max_ranged_damage(target), get_max_melee_damage(target))
-
-            # Scoring: killable > low HP > high threat
-            score = 0
-            if hp <= our_damage:
-                score += 1000  # Can kill
-            score += (10 - hp) * 10  # Lower HP = higher score
-            score += threat * 5  # Higher threat = higher score
-
-            if score > best_score:
-                best_score = score
-                best_target = target_id
-
-        return best_target
-
-    def select_charge_target(self, valid_targets: List[str], game_state: Optional[Dict] = None) -> str:
-        """
-        Select best charge target.
-
-        Priority:
-        1. Target that can be killed in melee
-        2. Highest threat ranged unit (silence their guns)
-        """
-        if not valid_targets:
-            return ""
-
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_targets)
-
-        if not game_state:
-            return valid_targets[0]
-
-        active_unit = self._get_active_unit(game_state)
-        if not active_unit:
-            return valid_targets[0]
-
-        our_melee_damage = get_max_melee_damage(active_unit)
-        best_target = valid_targets[0]
-        best_score = -float('inf')
-
-        for target_id in valid_targets:
-            target = self._get_unit_by_id(game_state, target_id)
-            if not target or not is_unit_alive(str(target["id"]), game_state):
-                continue
-
-            hp = get_hp_from_cache(str(target["id"]), game_state)
-            if hp is None:
-                continue
-            ranged_threat = get_max_ranged_damage(target)
-
-            # Scoring: killable > high ranged threat
-            score = 0
-            if hp <= our_melee_damage:
-                score += 1000  # Can kill in melee
-            score += ranged_threat * 20  # Prioritize silencing ranged units
-
-            if score > best_score:
-                best_score = score
-                best_target = target_id
-
-        return best_target
-
-    def select_fight_target(self, valid_targets: List[str], game_state: Optional[Dict] = None) -> str:
-        """Select best melee target - same logic as shooting but for melee."""
-        return self.select_shooting_target(valid_targets, game_state)
-
-    # Helper methods
-
-    def _get_active_unit(self, game_state: Dict) -> Optional[Dict]:
-        """Get the currently active unit."""
-        current_player = require_key(game_state, 'current_player')
-        for unit in require_key(game_state, 'units'):
-            if unit.get('player') == current_player and is_unit_alive(str(unit.get("id")), game_state):
-                return unit
-        return None
-
-    def _get_unit_by_id(self, game_state: Dict, unit_id: str) -> Optional[Dict]:
-        """Find unit by ID."""
-        for unit in require_key(game_state, 'units'):
-            if str(unit.get('id')) == str(unit_id):
-                return unit
-        return None
 
     def _find_nearest_enemy(self, unit: Dict, game_state: Dict) -> Optional[Dict]:
         """Find nearest enemy unit."""
