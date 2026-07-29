@@ -200,6 +200,28 @@ class TestShootingPhaseStart:
         shooting_phase_start(gs)
         assert gs["weapon_rule"] == 1
 
+    def test_weapon_rule_jamais_lu_avec_un_defaut(self):
+        """`weapon_rule` a UN seul poseur (`shooting_phase_start`, ci-dessus) et trois
+        consommateurs qui exigent la clé (`require_key` / `KeyError` explicite). Un quatrième
+        la lisait avec `.get("weapon_rule", 1)` — DANS `shooting_phase_start` lui-même, 60
+        lignes après l'avoir écrite : le défaut rétablissait une valeur déjà garantie et
+        aurait masqué sans bruit une divergence d'initialisation.
+
+        Ce contrôle est sur la SOURCE parce que l'état fautif est inatteignable par
+        construction : il n'y a pas d'exécution à mettre en scène, seulement une écriture à
+        interdire. Il redevient rouge si un `.get` à défaut réapparaît.
+
+        Seule exception, explicite : l'initialisation de simulation de la preview de MOVE
+        (`if "weapon_rule" not in gs: gs["weapon_rule"] = 1`), qui monte un état de tir sur
+        une COPIE avant que la phase de tir n'ait commencé — elle n'utilise pas `.get`.
+        """
+        from pathlib import Path
+
+        from engine.phase_handlers import shooting_handlers
+
+        source = Path(str(shooting_handlers.__file__)).read_text(encoding="utf-8")
+        assert '.get("weapon_rule"' not in source
+
     def test_units_cache_present(self):
         """shoot_start_cache : units_cache présent après shooting_phase_start."""
         units = [_unit(1, 1, 5, 10)]
