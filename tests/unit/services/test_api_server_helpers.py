@@ -1,8 +1,9 @@
 import sqlite3
-from typing import Any, Dict, cast
+from typing import Any, Dict, Optional, cast
 
 import pytest
 
+from ai.unit_registry import UnitRegistry
 from services import api_server
 from engine.w40k_core import W40KEngine
 from shared.data_validation import require_present
@@ -41,7 +42,7 @@ class _EngineStub:
         game_state: Dict[str, Any],
         *,
         current_mode_code: str = "pvp",
-        unit_registry: Any = None,
+        unit_registry: Optional[UnitRegistry] = None,
     ) -> None:
         self.game_state = game_state
         self.current_mode_code = current_mode_code
@@ -449,8 +450,6 @@ def test_build_units_from_scenario_army_folds_attached_characters() -> None:
     import json
     from pathlib import Path
 
-    from ai.unit_registry import UnitRegistry
-
     army_path = (
         Path(__file__).resolve().parents[3]
         / "config/board/44x60x5/scenario/scenario_pvp.json"
@@ -460,7 +459,9 @@ def test_build_units_from_scenario_army_folds_attached_characters() -> None:
     attached_count = sum(1 for u in raw_units if "attached_squad" in u)
     assert attached_count > 0, "fixture invalide : ce scenario doit porter des characters attaches"
 
-    engine_instance = cast(W40KEngine, _EngineStub({}, unit_registry=UnitRegistry()))
+    # Pas de `cast` : `_build_units_from_scenario_army` declare desormais son besoin reel
+    # (`_UnitRegistryHolder`), que ce stub satisfait structurellement.
+    engine_instance = _EngineStub({}, unit_registry=UnitRegistry())
 
     built, next_id = api_server._build_units_from_scenario_army(engine_instance, army_cfg, 1, 1)
 
@@ -473,6 +474,6 @@ def test_build_units_from_scenario_army_folds_attached_characters() -> None:
 
 def test_build_units_from_scenario_army_requires_unit_registry() -> None:
     """Sans registre, on leve explicitement au lieu de construire des unites incompletes."""
-    engine_instance = cast(W40KEngine, _EngineStub({}, unit_registry=None))
+    engine_instance = _EngineStub({}, unit_registry=None)
     with pytest.raises(ValueError, match=r"unit_registry is required"):
         api_server._build_units_from_scenario_army(engine_instance, {"units": []}, 1, 1)

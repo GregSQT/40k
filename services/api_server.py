@@ -2998,22 +2998,29 @@ def _list_armies() -> list[Dict[str, Any]]:
 
 
 class _UnitDataSource(Protocol):
-    """La SEULE chose que `_build_units_from_army_config` demande a un registre d'unites."""
+    """La SEULE chose que les deux constructeurs d'unites demandent a un registre.
+
+    Verifie sur toute la chaine d'appel du format scenario, pas seulement en surface :
+    `_fold_attached_characters` (game_state.py l.850, 858) et `_build_enhanced_unit`
+    (l.1088) ne touchent au registre que par `get_unit_data`.
+    """
 
     def get_unit_data(self, unit_type: str) -> Dict[str, Any]: ...
 
 
 class _UnitRegistryHolder(Protocol):
-    """Ce que `_build_units_from_army_config` lit REELLEMENT de son moteur.
+    """Ce que `_build_units_from_army_config` et `_build_units_from_scenario_army` lisent
+    REELLEMENT de leur moteur.
 
-    Annoncer `W40KEngine` mentait : la fonction ne touche ni `game_state`, ni les managers,
-    ni la moindre methode du moteur — uniquement `unit_registry.get_unit_data`. Le type
-    honnete est cette exigence-la, et elle est desormais explicite pour tout appelant
-    (`W40KEngine` la satisfait structurellement, sans declaration a ajouter).
+    Annoncer `W40KEngine` mentait : ni l'une ni l'autre ne touche `game_state`, un manager
+    ou une methode du moteur — uniquement `unit_registry`. La version « format scenario »
+    a l'air plus gourmande parce qu'elle passe par un `GameStateManager`, mais elle le
+    CONSTRUIT elle-meme et lui passe le registre : le moteur appelant n'y entre pas. Un
+    protocole COMMUN, donc, plutot que deux declarations paralleles qui divergeraient.
 
     Lecture seule (`@property`) et non `Optional[...]` en attribut mutable : un protocole a
     attribut est invariant, ce qui rejetterait tout porteur dont le registre a un type plus
-    precis — alors que la fonction n'en fait qu'une lecture.
+    precis — alors que les deux fonctions n'en font qu'une lecture.
     """
 
     @property
@@ -3091,7 +3098,7 @@ def _build_units_from_army_config(
 
 
 def _build_units_from_scenario_army(
-    engine_instance: W40KEngine,
+    engine_instance: _UnitRegistryHolder,
     army_cfg: Dict[str, Any],
     player: int,
     next_unit_id: int,
@@ -3104,8 +3111,13 @@ def _build_units_from_scenario_army(
     characters attachés qu'au chargement d'une partie — aucune logique dupliquée.
     Déploiement actif : positions sentinelles ``-1,-1`` (le joueur place ensuite).
     Les unités sont réaffectées au joueur cible et renumérotées (l'appelant compacte).
+
+    Même exigence que sa soeur ``_build_units_from_army_config``, d'où le protocole
+    commun : le ``GameStateManager`` utilisé ici est CONSTRUIT sur place, et les deux
+    briques moteur recoivent le registre en argument explicite. Rien du moteur appelant
+    n'est lu en dehors de ``unit_registry``.
     """
-    if not hasattr(engine_instance, "unit_registry") or engine_instance.unit_registry is None:
+    if engine_instance.unit_registry is None:
         raise ValueError("engine.unit_registry is required to build units from scenario army")
     from engine.game_state import GameStateManager
     from config_loader import get_config_loader
