@@ -149,9 +149,11 @@ def test_le_log_de_tir_affiche_le_token_heavy(monkeypatch):
         r = roll_shoot_intent(gs, intent)
         gs.update({"units": [{"id": "1", "unitType": "Shooter"}, {"id": "2", "unitType": "Grunt"}],
                    "action_logs": [], "action_log_seq": 0, "turn": 2})
-        gs["units_cache"]["1"] = {"col": 0, "row": 0}
         group = {
             "weapon_name": "Gun", "target_sid": "2", "attacker_squad_id": "1",
+            # Les DEUX positions sont capturées à la création du groupe (cf.
+            # test_squad_shoot_log_dead_target_position) : l'émission ne relit plus units_cache.
+            "attacker_col": 0, "attacker_row": 0,
             "target_col": 9, "target_row": 9, "attacks": 1, "damage": 0, "kills": 0,
             "bs": r["bs"], "display_wth": r["display_wth"], "display_save_th": r["display_save_th"],
             "heavy_applied": r["heavy_applied"], "shooter_mids": ["A1"], "shots": [],

@@ -179,3 +179,78 @@ def test_une_seule_figurine_vehicule_ne_suffit_pas(monkeypatch):
     wounds = roll_hazard_for_unit("1", gs, True, n_rolls=1, context_label="Hazardous")
 
     assert wounds == 1, "escouade mixte : 1 MW, pas 3"
+
+
+def test_hazard_details_portent_la_position_reelle_de_la_figurine(monkeypatch):
+    """`hazardDetails` alimente le journal (analyzer + replay) : la position de la figurine
+    perdue est CAPTUREE avant destruction, et lue sans repli.
+
+    L ancien `m.get("col")` rendait `None` en silence si la cle manquait — une position
+    d analyse absente plutot qu une erreur. Toute figurine du `models_cache` porte col/row.
+    """
+    from engine.phase_handlers.shared_utils import roll_hazard_for_unit
+
+    gs = _game_state(["HAZARDOUS"])
+    gs["models_cache"]["A0"].update({"col": 7, "row": 11})
+    monkeypatch.setattr(random, "randint", lambda a, b: 1)  # jet rate
+
+    roll_hazard_for_unit("1", gs, True, n_rolls=1, context_label="Hazardous")
+
+    hazard_log = next(l for l in gs["action_logs"] if l.get("type") == "hazard")
+    details = hazard_log["hazardDetails"]
+    assert details and (details[0]["col"], details[0]["row"]) == (7, 11)
+
+
+def test_hazard_details_levent_si_la_figurine_n_a_pas_de_position(monkeypatch):
+    """Contre-epreuve : sans col/row, on leve au lieu de journaliser `None`."""
+    import pytest
+
+    from engine.phase_handlers.shared_utils import roll_hazard_for_unit
+
+    gs = _game_state(["HAZARDOUS"])
+    del gs["models_cache"]["A0"]["col"]
+    monkeypatch.setattr(random, "randint", lambda a, b: 1)
+
+    with pytest.raises(Exception) as exc:
+        roll_hazard_for_unit("1", gs, True, n_rolls=1, context_label="Hazardous")
+
+    assert "col" in str(exc.value)
+
+
+def _hazard_manual_alloc(gs):
+    """Structures minimales attendues par `_resolve_one_hazard_wound` (chemin defenseur
+    humain), telles que `build_manual_hazard_allocation` les construit."""
+    alloc = {
+        "summary": {"failed_saves": 0, "damage_total": 0, "models_killed": 0},
+        "hazard_details": [],
+    }
+    batch = {"current_model_id": "A0", "pool_index": 0}
+    return alloc, batch
+
+
+def test_hazard_details_manuel_portent_aussi_la_position_reelle():
+    """Le chemin MANUEL (defenseur humain) a son propre constructeur de record : meme regle."""
+    from engine.phase_handlers.shared_utils import HAZARD_CTX, _resolve_one_hazard_wound
+
+    gs = _game_state(["HAZARDOUS"])
+    gs["models_cache"]["A0"].update({"col": 7, "row": 11})
+    alloc, batch = _hazard_manual_alloc(gs)
+
+    _resolve_one_hazard_wound(gs, alloc, batch, HAZARD_CTX)
+
+    assert (alloc["hazard_details"][0]["col"], alloc["hazard_details"][0]["row"]) == (7, 11)
+
+
+def test_hazard_details_manuel_levent_sans_position():
+    import pytest
+
+    from engine.phase_handlers.shared_utils import HAZARD_CTX, _resolve_one_hazard_wound
+
+    gs = _game_state(["HAZARDOUS"])
+    del gs["models_cache"]["A0"]["row"]
+    alloc, batch = _hazard_manual_alloc(gs)
+
+    with pytest.raises(Exception) as exc:
+        _resolve_one_hazard_wound(gs, alloc, batch, HAZARD_CTX)
+
+    assert "row" in str(exc.value)
