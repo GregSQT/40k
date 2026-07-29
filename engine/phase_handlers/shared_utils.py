@@ -4538,10 +4538,15 @@ def get_squad_move_budget(
     if unit is None:
         raise KeyError(f"get_squad_move_budget: squad {squad_id} not in game_state['units']")
     move_stat = int(require_key(unit, "MOVE"))
-    # Take to the skies (Règles 21.03) : si l'escouade a déclaré le vol ce tour, retrancher 2"
-    # de la distance max du move (normal/advance/fall_back). Le malus est en subhexes comme MOVE.
+    # Take to the skies (Règles 21.03) : si l'escouade a déclaré le vol pour ce move, retrancher 2"
+    # de la distance max (normal/advance/fall_back). Le malus est en subhexes comme MOVE.
+    # SOURCE UNIQUE de la déclaration (`took_to_the_skies`) : le malus et la traversée
+    # (`_fly_traversal_active`) DOIVENT sortir du même prédicat, sinon on rejoue le défaut
+    # d'origine — une unité qui traverse murs et figurines sans payer les 2".
+    from engine.phase_handlers.movement_handlers import took_to_the_skies
+
     tts_penalty = 0
-    if str(squad_id) in game_state.get("units_took_to_skies", set()):
+    if took_to_the_skies(game_state, unit, str(squad_id), charge=False):
         ish = int(require_key(game_state, "inches_to_subhex"))
         tts_penalty = 2 * ish
     if move_type == "advance":
@@ -9484,9 +9489,14 @@ def build_squad_move_cell_map(
     ))
     _unit_obj_fp = get_unit_by_id(game_state, squad_id)
     _bshock = bool(_unit_obj_fp.get("battle_shocked", False)) if _unit_obj_fp else False  # get allowed
+    from engine.phase_handlers.movement_handlers import took_to_the_skies as _tts_fp
+
     _fp_key = (
         advance_roll,
-        str(squad_id) in game_state.get("units_took_to_skies", set()),  # get allowed
+        # MÊME prédicat que le budget et la traversée (`took_to_the_skies`) : lire directement le
+        # set raterait la déclaration DÉRIVÉE des unités pilotées par le modèle, et le cache
+        # servirait un pool construit sous un autre régime de vol.
+        bool(_unit_obj_fp is not None and _tts_fp(game_state, _unit_obj_fp, str(squad_id), charge=False)),
         str(game_state.get("phase", "")),  # get allowed
         _bshock,
         hash(_units_fp),

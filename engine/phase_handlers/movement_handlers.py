@@ -265,22 +265,77 @@ def _unit_has_keyword(unit: Dict[str, Any], keyword_id: str) -> bool:
     return False
 
 
-def _fly_traversal_active(game_state: Dict[str, Any], unit: Dict[str, Any], unit_id: Any) -> bool:
-    """Take to the skies (Règles 21.03) : la traversée FLY (murs/figurines + ignore vertical) est
-    active si l'unité a le keyword fly ET :
-    - hors phase de mouvement, ou unité IA (gym / PvE joueur 2) → vol auto legacy (inchangé) ;
-    - en phase move pour un joueur humain → seulement si le vol a été déclaré (units_took_to_skies).
-    Source unique partagée par le pool d'ancre, le reachable par-figurine et le log de move.
+def unit_is_ai_controlled(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """L'unité est-elle pilotée par le modèle (gym d'entraînement, ou joueur 2 en PvE) ?
+
+    Aucune déclaration humaine ne peut lui parvenir : c'est la politique moteur de
+    ``took_to_the_skies`` qui tranche pour elle.
+    """
+    is_gym = bool(game_state.get("gym_training_mode", False))
+    is_pve = bool(game_state.get("pve_mode", False)) or bool(game_state.get("is_pve_mode", False))
+    return is_gym or (is_pve and int(require_key(unit, "player")) == 2)
+
+
+#: Set de déclarations « take to the skies » par type de mouvement. 21.03 énumère EXACTEMENT les
+#: mouvements couverts : « a normal, advance, fall-back or charge move ». Un pile-in ou une
+#: consolidation (12) n'y figurent pas et ne peuvent donc pas prendre les airs — d'où l'absence
+#: volontaire de clé pour ces phases (et non une valeur par défaut permissive).
+_TAKE_TO_THE_SKIES_SET_BY_PHASE = {
+    "move": "units_took_to_skies",      # normal / advance / fall-back
+    "charge": "units_took_to_skies_charge",
+}
+
+
+def took_to_the_skies(
+    game_state: Dict[str, Any], unit: Dict[str, Any], unit_id: Any, *, charge: bool
+) -> bool:
+    """21.03 — l'unité a-t-elle déclaré « take to the skies » pour le mouvement EN COURS ?
+
+    C'est la SOURCE UNIQUE de la déclaration : le malus de -2" sur la distance maximale et la
+    traversée (murs, figurines, terrain, distance verticale) en découlent tous les deux. Les
+    dissocier laisserait rejouer le défaut d'origine — une traversée gratuite.
+
+    - Sans le keyword FLY : jamais.
+    - Unité pilotée par le modèle (gym / PvE J2) : **déclare systématiquement**. C'est une
+      POLITIQUE MOTEUR EXPLICITE, assumée en attendant que la déclaration devienne une décision
+      offerte à l'agent (chantier « décision générique », qui changera le contrat d'observation).
+      Elle est retenue parce que c'est la moins fausse des deux constantes possibles :
+        * « ne jamais déclarer » rendrait le keyword FLY totalement inerte pour l'agent — les
+          unités à réacteurs et le Land Speeder d'ArmageddonAgent perdraient la capacité que la
+          règle leur donne, ce qui n'est pas plus conforme, seulement muet ;
+        * « toujours déclarer » conserve la capacité et la FACTURE au prix légal (-2"), ce qui
+          est un état de jeu toujours légal (21.03 autorise la déclaration à chaque move) et le
+          plus petit écart au comportement actuel.
+      Étant une fonction PURE de l'état (pas un écrit dans un set), elle est vue identiquement par
+      le masque, l'observation et l'exécution : aucun risque de séquencement, contrairement à une
+      déclaration posée après la construction du pool de cellules atteignables.
+    - Joueur humain : uniquement si la déclaration a été posée (``movement_set_fly_mode_handler`` /
+      ``charge_set_fly_mode_handler``), dans le set propre au type de mouvement.
     """
     if not _unit_has_keyword(unit, "fly"):
         return False
-    in_move_phase = game_state.get("phase") == "move"
-    is_gym = bool(game_state.get("gym_training_mode", False))
-    is_pve = bool(game_state.get("pve_mode", False)) or bool(game_state.get("is_pve_mode", False))
-    is_ai_unit = is_gym or (is_pve and int(require_key(unit, "player")) == 2)
-    if not (in_move_phase and not is_ai_unit):
+    if unit_is_ai_controlled(game_state, unit):
         return True
-    return str(unit_id) in game_state.get("units_took_to_skies", set())
+    set_key = "units_took_to_skies_charge" if charge else "units_took_to_skies"
+    return str(unit_id) in game_state.get(set_key, set())
+
+
+def _fly_traversal_active(game_state: Dict[str, Any], unit: Dict[str, Any], unit_id: Any) -> bool:
+    """Take to the skies (Règles 21.03) : la traversée FLY (murs/figurines/terrain + ignore de la
+    distance verticale) est active si et seulement si le vol a été DÉCLARÉ pour le mouvement en
+    cours — la traversée est la contrepartie des 2" retranchés, jamais un acquis du keyword.
+
+    La phase désigne le mouvement en cours, donc le set de déclaration à lire. Hors des mouvements
+    énumérés par 21.03 (move / charge), la règle ne s'applique pas : pas de traversée.
+
+    Source unique partagée par le pool d'ancre, le reachable par-figurine, le coût de descente et
+    le log de move.
+    """
+    phase = str(game_state.get("phase", ""))
+    set_key = _TAKE_TO_THE_SKIES_SET_BY_PHASE.get(phase)
+    if set_key is None:
+        return False
+    return took_to_the_skies(game_state, unit, unit_id, charge=(phase == "charge"))
 
 
 def squad_descent_penalty_subhex(game_state: Dict[str, Any], squad_id: str) -> int:
