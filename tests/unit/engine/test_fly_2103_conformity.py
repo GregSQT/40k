@@ -129,6 +129,15 @@ def test_absent_fly_keyword_is_not_invented():
     )
 
 
+@pytest.mark.parametrize("broken", [{}, {"keywordId": None}, {"keyword": "FLY"}])
+def test_a_malformed_keyword_entry_raises_instead_of_answering_no(broken):
+    """Une entrée sans `keywordId` exploitable est une donnée cassée, pas un keyword absent —
+    même traitement que l'entrée non-objet, qui lève déjà. Répondre « cette unité ne vole pas »
+    serait une valeur par défaut masquant une erreur."""
+    with pytest.raises(ValueError, match="non-null keywordId"):
+        _unit_has_keyword({"id": "u", "UNIT_KEYWORDS": [broken]}, "fly")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. La traversée est la CONTREPARTIE d'une déclaration qui coûte 2"
 # ─────────────────────────────────────────────────────────────────────────────

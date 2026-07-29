@@ -257,9 +257,17 @@ def _unit_has_keyword(unit: Dict[str, Any], keyword_id: str) -> bool:
             raise ValueError(
                 f"UNIT_KEYWORDS entries must be objects for unit {unit.get('id')}: {keyword_entry!r}"
             )
-        keyword_value = keyword_entry.get("keywordId")
-        if keyword_value is None:
-            continue
+        # Même traitement que l'entrée non-objet ci-dessus : une entrée sans `keywordId` (ou nul)
+        # est une donnée cassée, pas un keyword absent. L'avaler en silence ferait répondre
+        # « cette unité ne vole pas » à une question à laquelle la donnée ne permet pas de
+        # répondre. C'est aussi ce que font les autres lecteurs (`require_key` dans
+        # `shared_utils.compute_hideable`, `game_state.py`) et le chargeur `ai/unit_registry.py`.
+        if keyword_entry.get("keywordId") is None:
+            raise ValueError(
+                f"UNIT_KEYWORDS entries must carry a non-null keywordId for unit "
+                f"{unit.get('id')}: {keyword_entry!r}"
+            )
+        keyword_value = keyword_entry["keywordId"]
         if str(keyword_value).strip().lower() == str(keyword_id).strip().lower():
             return True
     return False
