@@ -267,7 +267,7 @@ def take_to_the_skies_applies_to_phase(game_state: Dict[str, Any], *, charge: bo
 
 
 def took_to_the_skies(
-    game_state: Dict[str, Any], unit: Dict[str, Any], unit_id: Any, *, charge: bool
+    game_state: Dict[str, Any], unit: Dict[str, Any], unit_id: str, *, charge: bool
 ) -> bool:
     """21.03 — l'unité a-t-elle déclaré « take to the skies » pour le mouvement EN COURS ?
 
@@ -335,10 +335,10 @@ def took_to_the_skies(
     if unit_is_ai_controlled(game_state, unit):
         return True
     _, set_key = _TAKE_TO_THE_SKIES_BY_PHASE["charge" if charge else "move"]
-    return str(unit_id) in game_state.get(set_key, set())
+    return unit_id in game_state.get(set_key, set())
 
 
-def _fly_traversal_active(game_state: Dict[str, Any], unit: Dict[str, Any], unit_id: Any) -> bool:
+def _fly_traversal_active(game_state: Dict[str, Any], unit: Dict[str, Any], unit_id: str) -> bool:
     """Take to the skies (Règles 21.03) : la traversée FLY (murs/figurines/terrain + ignore de la
     distance verticale) est active si et seulement si le vol a été DÉCLARÉ pour le mouvement en
     cours — la traversée est la contrepartie des 2" retranchés, jamais un acquis du keyword.
@@ -946,7 +946,7 @@ def movement_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, acti
         return False, {"error": "unit_cannot_fly", "unitId": unit["id"]}
 
     tts = game_state.setdefault("units_took_to_skies", set())
-    uid = str(unit_id)
+    uid = unit_id
     if uid in tts:
         tts.discard(uid)
         declared = False
