@@ -262,6 +262,8 @@ délicat à cause des murs).
   multi-hex du pool d'ancre (preview escouade), socles **non-ronds** (oval/square) dans les
   deux pools via empreinte discrète orientée. RESTE : miroir replay TS, branches legacy
   single-hex du pool d'ancre (X1 / `base_size==1`), gym (`move_gym=hex` par choix).
+  → **Le "RESTE" X1 est CLOS (2026-07-29)** : le x1 ne bascule PAS en euclidien, il reste hex par
+  décision (cf. « RÉSOLUTION x1 » dans Décisions actées). Seul le miroir replay TS reste ouvert.
   Détail complet dans la section « Étape 4 » plus bas.
 - **Étape 5 — Migration CHARGE** : ✅ FAIT et **entièrement soldée (2026-07-04)** — les 3 cas de
   validation restants sont couverts (multi-cibles V11 runtime OK, take-to-the-skies §20.12, coins de
@@ -284,8 +286,11 @@ délicat à cause des murs).
   frontend déjà euclidien (anneaux ×1.5, rien à faire). Backend hex byte-identique jusqu'au flip, suite
   tests/ 100% (fight_v11 pinnés hex via conftest scopé, 2 tests spatial hex pinnés `metric="hex"`).
   **Validation runtime PvP : OK (2026-07-04, « ça semble bon »).** RESTE : RETRAIN IA (pas de split gym
-  → training passe euclidien). Dette assumée : `build_enemy_adjacent_hexes` reste hex pour `ez<=1`
-  (legacy X1). Décision différée : métrique EZ de l'analyzer (hex vs suit-le-run).
+  → training passe euclidien). ~~Dette assumée : `build_enemy_adjacent_hexes` reste hex pour `ez<=1`
+  (legacy X1)~~ → **SOLDÉE le 2026-07-29** par le point de bascule de résolution (cf. « RÉSOLUTION x1 »
+  dans Décisions actées) : la garde `ez<=1` ne se déclenchait de toute façon plus depuis que
+  `engagement_zone` vaut 2". Décision différée : métrique EZ de l'analyzer (hex vs suit-le-run) —
+  sans objet tant que les runs sont à x1, où TOUT est hex des deux côtés.
 
 ### Décisions actées
 - **Zone d'engagement (EZ)** : ~~NON touchée → reste hex partout~~ **DÉCISION RÉVISÉE
@@ -343,6 +348,44 @@ délicat à cause des murs).
   visibility graph (exact mais O(n²) + pas de champ) : meilleur compromis
   fidélité / perf / **sync front-back gratuite** (même LoS des deux côtés).
 - **Tir** : portée droite en euclidien (pas de pathfinding).
+- **RÉSOLUTION x1 → TOUT HEX, point de bascule UNIQUE (2026-07-29)** — arbitrage utilisateur :
+  « pas d'euclidien en x1 ; x1 n'est là que pour valider la configuration ; NE PAS toucher au x5 ».
+  À `inches_to_subhex <= 1` une figurine tient dans UNE case (`game_state._scale_socle` normalise le
+  socle en `round`/1) : aucune mesure continue n'y a de sens. `spatial_relations.geometry_is_hex`
+  est le SEUL juge de la résolution (critère unique `inches_to_subhex`, jamais `ez`), et les quatre
+  sélecteurs de métrique le consultent — `engagement_distance_metric`, `_move_distance_metric`,
+  `_charge_distance_metric`, `_ranged_distance_metric`. La clé de config est lue ET validée avant
+  l'override : une valeur invalide lève à x1 comme ailleurs. **x5 inchangé** (mesuré : engagement /
+  move / charge / ranged y restent euclidean, overlap hex).
+  ⚠️ CE QUI A RENDU CE CORRECTIF NÉCESSAIRE : le moteur identifiait « board x1 » par `ez <= 1`,
+  disséminé dans ~15 sites. `7aaecaf9` (2026-06-03) a fait passer `game_rules.engagement_zone` de
+  1" à 2" → à x1, `ez = 2` : **toutes ces gardes ont cessé de se déclencher**, silencieusement, et
+  le x1 est reparti en euclidien là où ce document dit hex. Deux crashes « incohérence
+  masque/exécution » en training en sont sortis (pool FLY, coherency d'escouade). Les gardes ont été
+  réécrites en `geometry_is_hex(...)`, la ligne « Dette assumée : `build_enemy_adjacent_hexes` reste
+  hex pour `ez<=1` (legacy X1) » de l'Étape 7 est donc SOLDÉE — et elle n'était de toute façon plus
+  vraie depuis le 2026-06-03.
+- **Coherency 03.03 — unifiée et alignée sur la résolution (2026-07-29)** : PDF lu — « within 2" of
+  at least one other model » (1re puce), « within 9" of **every other** model » (2e puce), 5"
+  verticaux sur les deux. Décisions actées avec l'utilisateur :
+  - **1re puce = CONNEXITÉ** (une seule chaîne) : précision d'arbitre / FAQ, plus stricte que le
+    littéral « ≥ 1 voisin ». Appliquée dans les DEUX modes (le mode 'footprint' ne la faisait pas).
+  - **2e puce = PAR PAIRES**, jamais un cercle d'étalement (celui-ci était mal posé : plusieurs
+    paires à distance maximale exactement égale → verdict dépendant de la position absolue de
+    l'escouade). Verrou : `test_coherency_translation_invariance.py`.
+  - **Métrique par résolution** : `geometry_is_hex` → 'footprint' (hex centre-à-centre) à x1,
+    mode de config ('euclidean', bord d'empreinte) à x5+.
+  - **Source UNIQUE** `coherency_violation_flags` : les deux copies inline de `charge_handlers` et
+    `fight_handlers` (pile-in / consolidation), qui ignoraient `cohesion_distance_mode` ET la
+    connexité, sont supprimées. L'enforcement au commit passe par `can_validate` (move, charge,
+    pile-in, consolidation) — inchangé structurellement, mais désormais sur la MÊME règle partout.
+  - **Placement initial** : `_downscale_fixed_unit` (roster x5 → plateau x1) pose une formation
+    connexe par construction et vérifie l'écart max en sortie. C'était le seul chemin de placement
+    sans contrôle, et il livrait des escouades DÉJÀ incohérentes → crash du training au 1er move.
+    Verrou : `test_roster_downscale_coherency.py`.
+  - **Restent ouverts** : les 5" verticaux (non mesurés, à câbler avec le chantier étages) et le
+    cercle de 9" dessiné par le front (`BoardPvp.drawCohesionHalos`), qui n'est plus le critère du
+    backend.
 
 ### Périmètre — ce qui bascule vs ce qui reste
 

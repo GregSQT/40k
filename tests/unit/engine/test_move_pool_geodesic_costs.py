@@ -109,9 +109,16 @@ def test_out_costs_are_geodesic_and_within_budget(engine):
 
 
 def test_out_costs_exceed_crow_flight_when_a_wall_forces_a_detour():
-    """Regle 03 : la distance d'un move est celle du CHEMIN. Un mur doit renchérir le cout."""
-    # Mur vertical devant l'ancre, avec une seule ouverture loin -> detour force.
-    wall = [[27, r] for r in range(20, 31)]
+    """Regle 03 : la distance d'un move est celle du CHEMIN. Un mur doit renchérir le cout.
+
+    Le mur doit etre CONTOURNABLE dans le budget (MOVE 6) : la doublure tourne a
+    `inches_to_subhex == 1`, donc en geometrie HEX (`spatial_relations.geometry_is_hex`, point de
+    bascule unique de la resolution) et le cout est une longueur de CHEMIN en pas d'hexagone. Un
+    mur de 11 cases enfermait toutes les destinations atteignables du meme cote : aucune ne
+    contournait, donc aucune ne coutait plus que le vol d'oiseau et le test ne mesurait rien —
+    il ne passait que par la geometrie euclidienne any-angle, que le x1 n'utilise pas.
+    """
+    wall = [[26, r] for r in range(23, 28)]
     eng = _make_engine(walls=wall)
     gs = eng.game_state
     costs: Dict = {}

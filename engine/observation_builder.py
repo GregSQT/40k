@@ -1558,7 +1558,7 @@ class ObservationBuilder:
             "current_turn": current_turn,
             "engaged_squads": engaged_squads,
             "moved_by_model": require_key(game_state, "moved_distance_by_model"),
-            "ranged_metric": _ranged_distance_metric(),
+            "ranged_metric": _ranged_distance_metric(game_state),
             "active_socle": socle_from_cache_entry(active_entry),
             # Compteurs sur l'escouade ENTIÈRE : l'état de combat ne dépend pas du plafond du
             # bloc figurines (une escouade de 20 Boyz dont 12 sont engagées le dit).

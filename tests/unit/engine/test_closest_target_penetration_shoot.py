@@ -30,7 +30,9 @@ def _neutralise_rng_and_cover(monkeypatch):
     monkeypatch.setattr(shooting_handlers, "compute_unit_los", lambda gs, s, t: {"cover": False})
     monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
     # Metrique de distance forcee euclidienne (bases rondes) : test independant de game_config.
-    monkeypatch.setattr(shooting_handlers, "_ranged_distance_metric", lambda: "euclidean")
+    monkeypatch.setattr(
+        shooting_handlers, "_ranged_distance_metric", lambda *args, **kwargs: "euclidean"
+    )
     # Pool d eligibles = les deux escouades ennemies (evite LoS/portee reelles).
     monkeypatch.setattr(shooting_handlers, "shooting_build_valid_target_pool", lambda gs, sid: ["2", "3"])
 

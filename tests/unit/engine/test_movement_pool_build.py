@@ -86,7 +86,12 @@ def test_movement_engagement_violates_enemy_cache_items_matches_full_scan() -> N
         "wall_hexes": set(),
         "units": units,
         "unit_by_id": _make_unit_by_id(units),
-        "inches_to_subhex": 1,
+        # `_board_config` declare engagement_zone = 10 sous-hex, soit 2" x 5 : la resolution de
+        # cette doublure est donc x5, pas x1. Declarer `inches_to_subhex: 1` avec ez=10 decrivait
+        # un board impossible, et depuis la bascule de resolution unique
+        # (`spatial_relations.geometry_is_hex`) cela routait la geometrie en hex alors que le test
+        # mesure justement les chemins euclidiens/multi-hex du x5.
+        "inches_to_subhex": 5,
     }
     build_units_cache(game_state)
     units_cache = require_key(game_state, "units_cache")
@@ -200,7 +205,7 @@ def test_pruned_enemy_horizon_matches_full_scan_with_far_dummy_enemy() -> None:
         "wall_hexes": set(),
         "units": units,
         "unit_by_id": _make_unit_by_id(units),
-        "inches_to_subhex": 1,
+        "inches_to_subhex": 5,  # ez=10 = 2" x 5 (cf. _board_config)
     }
     build_units_cache(game_state)
     units_cache = require_key(game_state, "units_cache")
@@ -284,7 +289,10 @@ def _run_pool(
         "wall_hexes": walls or set(),
         "units": units,
         "unit_by_id": _make_unit_by_id(units),
-        "inches_to_subhex": 1,
+        # Resolution DEDUITE de l'EZ demandee : ez = 2" x inches_to_subhex (regle 03.04). ez=10
+        # decrit donc un board x5, ez=1 le board legacy. La coherence des deux est desormais
+        # observable : `spatial_relations.geometry_is_hex` route la geometrie sur la resolution.
+        "inches_to_subhex": max(1, ez // 2),
     }
     if gym:
         game_state["gym_training_mode"] = True

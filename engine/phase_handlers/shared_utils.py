@@ -41,6 +41,11 @@ from engine.combat_utils import (
     get_unit_by_id,
     set_unit_coordinates,
 )
+# Bascule UNIQUE de la résolution (`inches_to_subhex <= 1` → géométrie hex). Import de MODULE :
+# `_compute_unit_occupied_hexes` la consulte dans des boucles chaudes (empreintes, masques), et un
+# import local y coûterait un lookup `sys.modules` par appel. `spatial_relations` n'importe rien de
+# ce module au niveau global → aucun cycle.
+from engine.spatial_relations import geometry_is_hex
 
 # end_activation / _handle_shooting_end_activation argument constants (AI_TURN.md)
 ACTION = "ACTION"
@@ -311,13 +316,19 @@ def _compute_unit_occupied_hexes(
 ) -> Set[Tuple[int, int]]:
     """Compute occupied_hexes for a unit based on its BASE_SHAPE and BASE_SIZE.
 
-    Multi-hex footprints are only computed on Board ×10 (engagement_zone > 1).
-    On legacy boards (engagement_zone=1), all units occupy a single cell.
+    Empreinte multi-hex uniquement au-dessus de ``inches_to_subhex == 1``. À x1, UNE figurine tient
+    dans UNE case quelle que soit la taille de son socle — c'est la définition de cette résolution
+    (``game_state._scale_socle`` y normalise déjà le socle en ``round``/1) et le point de bascule
+    unique ``spatial_relations.geometry_is_hex`` en est le seul juge.
+
+    ⚠️ La garde était ``ez <= 1``, un PROXY de « board x1 » devenu faux le 2026-06-03 quand
+    ``game_rules.engagement_zone`` est passé de 1" à 2" (à x1, ``ez = 2``). Elle ne se déclenchait
+    plus, et seule la clause ``base_size == 1`` la remplaçait — par chance, la normalisation du
+    socle la rend vraie à x1.
     """
     if game_state is None:
         return {(col, row)}
-    ez = get_engagement_zone(game_state)
-    if ez <= 1:
+    if geometry_is_hex(game_state):
         return {(col, row)}
     base_shape = unit["BASE_SHAPE"]
     base_size = unit["BASE_SIZE"]
@@ -2823,6 +2834,15 @@ def coherency_violation_flags(
       - 'footprint' : distance hex empreinte-a-empreinte (min_distance_between_sets) ; etalement =
         aucune paire > 9".
     Unite <= 1 fig : jamais en violation.
+
+    ⚠️ RESOLUTION : le mode configure vaut pour les boards ou une figurine occupe PLUSIEURS cases
+    (x5 et au-dela), ou « bord a bord » a un sens geometrique. A `inches_to_subhex <= 1` une figurine
+    tient dans UNE case quelle que soit la taille de son socle : la coherency s'y mesure de CENTRE
+    D'HEX a centre d'hex, soit le mode 'footprint' (empreintes mono-cellule). MEME point de bascule
+    que move / charge / EZ / tir : `spatial_relations.geometry_is_hex`, dont le SEUL critere est
+    `inches_to_subhex`. Le mode euclidien a x1 mesurait une geometrie continue sur une grille
+    d'entiers et y tolerait un voisin jusqu'a ~3,2 hexes (2" x sqrt(3), MOINS deux rayons de socle),
+    la ou la regle a cette resolution est 2 cases.
     """
     n = len(models)
     if n <= 1:
@@ -2832,6 +2852,8 @@ def coherency_violation_flags(
     min_neighbors = get_min_neighbors(game_state)
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
     mode = require_key(game_rules, "cohesion_distance_mode")
+    if geometry_is_hex(game_state):
+        mode = "footprint"
     if mode == "euclidean":
         return _coherency_flags_euclidean(models, coh, coh_max, min_neighbors)
     if mode == "footprint":
@@ -2849,14 +2871,66 @@ def _positions_in_coherency(
     return not any(coherency_violation_flags(models, game_state))
 
 
+def _coherency_verdict(
+    neighbor: List[List[bool]], too_far: List[bool], min_neighbors: int
+) -> List[bool]:
+    """VERDICT UNIQUE de la coherency 03.03, commun aux deux metriques.
+
+    Entrees deja mesurees par la metrique appelante :
+      - ``neighbor[i][j]`` : les figs i et j sont a <= ``coh`` bord-a-bord (2") ;
+      - ``too_far[i]``     : la fig i a AU MOINS une soeur a plus de ``coh_max`` (9").
+
+    Regles appliquees :
+      - 1re puce — « within 2" of at least one other model » (03.03), precisee par la FAQ :
+        l'escouade doit former UNE SEULE CHAINE. On calcule donc les composantes connexes du graphe
+        des voisins et on met en violation les figs du composant MINORITAIRE. `min_neighbors`
+        (`game_rules.squad_min_neighbors`) reste applique en plus : degre minimal exige par fig.
+        A 1, il est implique par la connexite (une fig isolee est un composant de taille 1).
+      - 2e puce — « within 9" of EVERY other model » (03.03) : critere PAR PAIRES. Ce n'est PAS un
+        cercle d'etalement ; l'ancienne version en dessinait un, centre sur la paire la plus
+        eloignee, ce qui rendait le verdict dependant de la position absolue de l'escouade (plusieurs
+        paires a distance maximale exactement egale, departagees par le bruit flottant) et cassait
+        l'invariance par translation dont dependent `erode_move_pool_by_squad_block` et
+        `explain_move_plan_rejection`.
+
+    Le 5" VERTICAL des deux puces n'est pas mesure (coherency 2D) — a cabler avec le chantier etages.
+    """
+    n = len(neighbor)
+    comp = [-1] * n
+    num_comp = 0
+    for s in range(n):
+        if comp[s] != -1:
+            continue
+        stack = [s]
+        comp[s] = num_comp
+        while stack:
+            k = stack.pop()
+            for nb in range(n):
+                if neighbor[k][nb] and comp[nb] == -1:
+                    comp[nb] = num_comp
+                    stack.append(nb)
+        num_comp += 1
+    comp_size: Dict[int, int] = {}
+    for c in comp:
+        comp_size[c] = comp_size.get(c, 0) + 1  # fallback allowed — compteur d'accumulation (0 = valeur initiale, pas un masquage)
+    flags = [False] * n
+    for i in range(n):
+        if comp_size[comp[i]] * 2 <= n:
+            flags[i] = True
+            continue
+        if sum(1 for j in range(n) if j != i and neighbor[i][j]) < min_neighbors:
+            flags[i] = True
+            continue
+        if too_far[i]:
+            flags[i] = True
+    return flags
+
+
 def _coherency_flags_euclidean(
     models: List[Dict[str, Any]], coh: int, coh_max: int, min_neighbors: int
 ) -> List[bool]:
-    """Flags par-fig en distance EUCLIDIENNE centre-a-centre, reproduisant la geometrie de rendu
-    (hexCenter, hex_radius=1) pour coincider avec les halos a l'ecran.
-      - 1re puce : >= min_neighbors voisin bord-a-bord (<= coh, soit 2" entre bords de base).
-      - 2e puce  : chaque fig dans le cercle de rayon coh_max/2 centre sur le barycentre (<= 9").
-    """
+    """Distances bord-a-bord EUCLIDIENNES (geometrie de rendu, hexCenter, hex_radius=1) puis
+    `_coherency_verdict` — le verdict est partage avec le mode 'footprint', seule la mesure change."""
     from math import hypot
     sqrt3 = 3.0 ** 0.5
     n = len(models)
@@ -2871,56 +2945,18 @@ def _coherency_flags_euclidean(
 
     pts = [cart(m) for m in models]
     radii = [base_radius(m) for m in models]
-    model_range = coh * sqrt3              # 2" en unites de rendu (hex_radius=1)
-    global_radius = coh_max * sqrt3 / 2.0  # cercle d'etalement (Ø = 9")
-    # Centre du cercle = milieu des 2 figs les plus eloignees (diametre d'etalement), pas le barycentre.
-    bx, by = pts[0]
-    max_d2 = -1.0
-    for i in range(n):
-        for j in range(i + 1, n):
-            dx = pts[i][0] - pts[j][0]
-            dy = pts[i][1] - pts[j][1]
-            d2 = dx * dx + dy * dy
-            if d2 > max_d2:
-                max_d2 = d2
-                bx = (pts[i][0] + pts[j][0]) / 2.0
-                by = (pts[i][1] + pts[j][1]) / 2.0
-    # 1re puce : CONNEXITE. Graphe d'adjacence (paires a <= model bord-a-bord), puis composantes
-    # connexes. L'unite doit former une seule chaine : les figs hors du composant majoritaire sont
-    # en violation (rupture de chaine), meme si chacune a un voisin dans son sous-groupe.
-    adj = [[False] * n for _ in range(n)]
+    model_range = coh * sqrt3      # 2" en unites de rendu (hex_radius=1)
+    global_range = coh_max * sqrt3  # ecart max fig-a-fig (9"), bord a bord
+    neighbor = [[False] * n for _ in range(n)]
+    too_far = [False] * n
     for i in range(n):
         for j in range(i + 1, n):
             d = hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]) - radii[i] - radii[j]
             if d <= model_range:
-                adj[i][j] = adj[j][i] = True
-    comp = [-1] * n
-    num_comp = 0
-    for s in range(n):
-        if comp[s] != -1:
-            continue
-        stack = [s]
-        comp[s] = num_comp
-        while stack:
-            k = stack.pop()
-            for nb in range(n):
-                if adj[k][nb] and comp[nb] == -1:
-                    comp[nb] = num_comp
-                    stack.append(nb)
-        num_comp += 1
-    comp_size: Dict[int, int] = {}
-    for c in comp:
-        comp_size[c] = comp_size.get(c, 0) + 1  # fallback allowed — compteur d'accumulation (0 = valeur initiale, pas un masquage)
-    flags = [False] * n
-    for i in range(n):
-        # 1re puce : composant minoritaire (rupture de chaine) = violation.
-        if comp_size[comp[i]] * 2 <= n:
-            flags[i] = True
-            continue
-        # 2e puce : hors du cercle d'etalement — mesure depuis le bord de base (hex le plus proche).
-        if hypot(pts[i][0] - bx, pts[i][1] - by) - radii[i] > global_radius:
-            flags[i] = True
-    return flags
+                neighbor[i][j] = neighbor[j][i] = True
+            if d > global_range:
+                too_far[i] = too_far[j] = True
+    return _coherency_verdict(neighbor, too_far, min_neighbors)
 
 
 def _coherency_flags_footprint(
@@ -2930,26 +2966,32 @@ def _coherency_flags_footprint(
     coh_max: int,
     min_neighbors: int,
 ) -> List[bool]:
-    """Flags par-fig en distance HEX empreinte-a-empreinte (« closest part of base », 01.04) via
-    min_distance_between_sets. 2e puce : au moins une autre fig a > coh_max."""
+    """Distances HEX empreinte-a-empreinte (« closest part of base », 01.04) via
+    ``min_distance_between_sets``, puis `_coherency_verdict` — MEME verdict que le mode euclidien
+    (connexite + paires), seule la mesure change. A x1 les empreintes sont mono-cellule, donc c'est
+    la distance hex de centre a centre.
+
+    ⚠️ Ce mode n'appliquait PAS la connexite (juste « >= min_neighbors voisin ») : deux paquets
+    disjoints y passaient, alors que la FAQ exige UNE SEULE CHAINE. Les deux modes divergeaient donc
+    sur la 1re puce, et les copies inline de charge/fight (supprimees) reproduisaient la version
+    permissive — d'ou des formations acceptees par un pile-in puis refusees par le move."""
     from engine.hex_utils import min_distance_between_sets
     n = len(models)
     footprints = [
         _compute_unit_occupied_hexes(int(m["col"]), int(m["row"]), m, game_state)
         for m in models
     ]
-    neighbor_count = [0] * n
+    neighbor = [[False] * n for _ in range(n)]
     too_far = [False] * n
     for i in range(n):
         for j in range(i + 1, n):
             d = min_distance_between_sets(footprints[i], footprints[j], max_distance=coh_max)
             if d <= coh:
-                neighbor_count[i] += 1
-                neighbor_count[j] += 1
+                neighbor[i][j] = neighbor[j][i] = True
             if d > coh_max:
                 too_far[i] = True
                 too_far[j] = True
-    return [neighbor_count[i] < min_neighbors or too_far[i] for i in range(n)]
+    return _coherency_verdict(neighbor, too_far, min_neighbors)
 
 
 def is_base_to_base(col_a: int, row_a: int, col_b: int, row_b: int) -> bool:
@@ -5145,7 +5187,7 @@ def _attacker_model_can_reach_squad(
     from engine.hex_utils import Socle
     from engine.combat_utils import ranged_edge_distance
     from engine.phase_handlers.shooting_handlers import _ranged_distance_metric
-    metric = _ranged_distance_metric()
+    metric = _ranged_distance_metric(game_state)
     shooter_hexes = list(_compute_unit_occupied_hexes(ac, ar, attacker_model, game_state))
     ignored_wall_hexes = _walls_around_occupied_floor(game_state, attacker_model, shooter_hexes)
     shooter_socle = Socle(
@@ -7139,7 +7181,7 @@ def _ranged_squad_edge_distance(
     uc = require_key(game_state, "units_cache")
     if metric is None:
         from engine.phase_handlers.shooting_handlers import _ranged_distance_metric
-        metric = _ranged_distance_metric()
+        metric = _ranged_distance_metric(game_state)
     if attacker_socle is None:
         attacker_socle = socle_from_cache_entry(uc[str(attacker_sid)])
     tgt = str(target_sid)
@@ -7418,7 +7460,7 @@ def _manual_roll_intent(
         if _ctp_pool:
             # metric + socle attaquant precalcules UNE fois puis injectes : la mesure vers chaque
             # cible du pool ne relit ni la config ni ne reconstruit le socle attaquant.
-            _ctp_metric = _ranged_distance_metric()
+            _ctp_metric = _ranged_distance_metric(game_state)
             _ctp_attacker_socle = socle_from_cache_entry(require_key(game_state, "units_cache")[_ctp_attacker_sid])
             _closest = min(_ctp_pool, key=lambda uid: _ranged_squad_edge_distance(
                 game_state, _ctp_attacker_sid, uid, metric=_ctp_metric, attacker_socle=_ctp_attacker_socle))

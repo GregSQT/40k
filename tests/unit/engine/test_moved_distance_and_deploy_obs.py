@@ -90,19 +90,22 @@ def _make_engine(units: List[Dict[str, Any]], walls: List[Tuple[int, int]] | Non
 
 
 def _straight(a: Tuple[int, int], b: Tuple[int, int]) -> float:
-    """Oracle INDÉPENDANT : distance euclidienne centre-à-centre, en subhex.
+    """Oracle INDÉPENDANT : distance de chemin sans obstacle, en pas d'hexagone.
 
-    Le moteur mesure le move en métrique euclidienne hors gym (`distance_metric["move"]`), et
-    sur une grille hex offset deux centres voisins ne sont pas à 1.0 subhex l'un de l'autre
-    selon la direction. On recalcule donc la géométrie ici plutôt que d'écrire un littéral.
+    Cette doublure tourne à `inches_to_subhex == 1`, où la géométrie du jeu est HEXAGONALE
+    (`spatial_relations.geometry_is_hex` — une figurine tient dans une case, donc aucune mesure
+    continue n'y a de sens). Le moteur y mesure le move en pas d'hexagone, métrique gym ou non :
+    l'oracle est donc la distance cube, pas la distance euclidienne centre-à-centre.
+
+    ⚠️ L'oracle ÉTAIT euclidien (`_hex_center` + `math.dist`), ce qui décrivait la métrique
+    `distance_metric["move"]` d'un board x5. À x1 les deux ne coïncident que sur un déplacement
+    en colonnes de parité constante — deux des tests de ce fichier passaient par cette
+    coïncidence, et deux autres échouaient sur le zig-zag de parité (3 colonnes = 3 pas hex,
+    mais 3,055 subhex euclidiens).
     """
-    import math
+    from engine.combat_utils import calculate_hex_distance
 
-    from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH, _hex_center
-
-    ax, ay = _hex_center(a[0], a[1])
-    bx, by = _hex_center(b[0], b[1])
-    return math.dist((ax, ay), (bx, by)) / ENGAGEMENT_NORM_HEX_WIDTH
+    return float(calculate_hex_distance(a[0], a[1], b[0], b[1]))
 
 
 def test_commit_move_records_straight_line_distance_without_obstacle():
@@ -117,7 +120,11 @@ def test_commit_move_records_straight_line_distance_without_obstacle():
 
 
 def test_commit_move_records_hex_path_distance_in_gym_metric():
-    """En métrique gym (`hex`), la distance est le BFS géodésique en pas — entier."""
+    """Clé gym (`move_gym`) : la distance est le BFS géodésique en pas — entier.
+
+    À x1 la métrique PvP est hex elle aussi (bascule de résolution) : ce test ne distingue donc
+    plus les deux clés, il vérifie que le chemin gym passe bien par le même compteur.
+    """
     from engine.phase_handlers.shared_utils import commit_move
 
     eng = _make_engine([_unit_cfg(1, 1, [(10, 10)]), _unit_cfg(2, 2, [(50, 30)])])

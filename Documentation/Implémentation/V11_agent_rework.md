@@ -1274,9 +1274,11 @@ comme le siège est aléatoire, les deux côtés sont portés. Implémentation :
   persos/véhicules), wall-aware (terrain-mc1), sans chevauchement (le mode `fixed` valide les
   footprints), dans les bandes haute (~rows 40-104) et basse (~196-260). **Cohérence d'escouade
   GARANTIE** : le générateur n'accepte un centre d'escouade que si la formation est cohérente. La
-  règle moteur (03.03, `game_config` : `squad_min_neighbors`=1, `cohesion_distance_mode`="euclidean"
-  bord-à-bord 2", étalement 9") n'exige qu'**≥1 voisin** ; le générateur vise ≥2 centre-à-centre =
-  borne conservatrice. **L'oracle est la fonction moteur `validate_squad_coherency`** — c'est ELLE
+  règle moteur (03.03) exige **la CONNEXITÉ** (une seule chaîne — précision d'arbitre/FAQ) plus
+  « à 9" de CHAQUE autre figurine », mesurée en hex centre-à-centre à x1 et bord d'empreinte à x5+
+  (bascule de résolution `spatial_relations.geometry_is_hex`, 2026-07-29) ; `squad_min_neighbors`=1
+  reste un degré minimal, et `cohesion_distance_mode`="euclidean" ne vaut plus que pour x5 et
+  au-delà. Le générateur vise ≥2 centre-à-centre = borne conservatrice. **L'oracle est la fonction moteur `validate_squad_coherency`** — c'est ELLE
   que le verrou asserte à la charge (pas une réimplémentation).
 **Preuve in-engine** — `python3 -m pytest tests/unit/engine/test_roster_fixed_positions.py` : 8 épisodes `fixed` (rosters
 + siège tirés au hasard) → **aucun déploiement, toutes figurines placées, P1 en bande haute / P2 en
@@ -1828,6 +1830,17 @@ cohérente, le plan l'est*. Elle ne prouve **rien** quand l'origine est déjà i
 ce cas le pool entier est offert alors que rien n'est exécutable. C'est cette demi-vérité qui a
 laissé le trou ouvert après T6-g. **Toute contrainte « prouvée invariante » doit être relue en se
 demandant : invariante à partir de quel état initial ?**
+
+**Suite (2026-07-29) — les DEUX moitiés sont fermées.** (a) L'invariance elle-même était FAUSSE en
+mode euclidien : la 2e puce de 03.03 centrait un cercle sur « la paire la plus éloignée », or
+plusieurs paires sont souvent à distance maximale EXACTEMENT égale sur grille hex → le centre, donc
+le verdict d'une figurine au bord, était départagé par le bruit flottant, qui change avec la position
+absolue de l'escouade. Critère passé PAR PAIRES (ce que dit le PDF) ; verrou
+`test_coherency_translation_invariance.py`. (b) L'état initial était réellement incohérent : la
+réduction de roster x5→x1 (`_downscale_fixed_unit`) décalait chaque figurine indépendamment, borne
+PAR FIGURINE qui ne dit rien de la formation. Elle pose maintenant une chaîne connexe par
+construction ; verrou `test_roster_downscale_coherency.py`. C'était le SEUL chemin de placement du
+moteur sans contrôle de cohérence.
 
 **Vérifier qu'un point d'ancrage est APPELÉ avant d'y brancher quoi que ce soit (§0.1)**
 

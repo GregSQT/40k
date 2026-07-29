@@ -265,6 +265,10 @@ def test_tactical_bot_movement_position_helpers(monkeypatch: pytest.MonkeyPatch)
             {"id": "e2", "player": FOE, "col": 10, "row": 10, **_dmg(rng=3, cc=1)},
         ],
         "units_cache": {},
+        # `inches_to_subhex` EST la résolution du moteur (`spatial_relations.geometry_is_hex`) : une
+        # doublure qui l'omet hérite de celle du board ambiant, donc d'une géométrie multi-hex qui
+        # exigerait un socle sur chaque unité. Board legacy ici (ez=1) → x1.
+        "inches_to_subhex": 1,
         "config": {
             "game_rules": {
                 "engagement_zone": 1,
@@ -452,6 +456,21 @@ FIGHT_SLOT1 = mi.FIGHT_SLOT_BASE + 1
 K_ENEMY_SLOTS = len(mi.SHOOT_SLOTS)
 
 
+def _cache_entry(unit: dict) -> dict:
+    """Entree units_cache FIDELE au moteur : etat spatial/vital SEULEMENT.
+
+    `build_units_cache` (engine/phase_handlers/shared_utils.py) ne recopie jamais RNG_WEAPONS /
+    CC_WEAPONS dans le cache. Une doublure qui clonait l'unite entiere rendait les bots de menace
+    verts en test et explosifs en training (« Required key 'RNG_WEAPONS' is missing »).
+    """
+    return {
+        "col": unit["col"],
+        "row": unit["row"],
+        "player": unit["player"],
+        "occupied_hexes": {(unit["col"], unit["row"])},
+    }
+
+
 def _slot_gs(phase: str, enemies: dict, order: list, current_player=None, objectives=None) -> dict:
     """game_state minimal pour les selections par slot ennemi.
 
@@ -464,11 +483,11 @@ def _slot_gs(phase: str, enemies: dict, order: list, current_player=None, object
         current_player = ACTING
     ours = {"id": "1", "player": ACTING, "col": 1, "row": 1, **_dmg(rng=2, cc=2)}
     units = [ours]
-    units_cache = {"1": dict(ours)}
+    units_cache = {"1": _cache_entry(ours)}
     for i, (eid, fields) in enumerate(enemies.items()):
         enemy = {"id": eid, "player": FOE, "col": 5 + i, "row": 1, **fields}
         units.append(enemy)
-        units_cache[eid] = dict(enemy)
+        units_cache[eid] = _cache_entry(enemy)
     gs = {**turn_state_invariants(),
         "phase": phase,
         "current_player": current_player,

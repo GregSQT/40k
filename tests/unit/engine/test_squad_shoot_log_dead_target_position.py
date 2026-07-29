@@ -188,7 +188,7 @@ def test_journal_porte_les_deux_positions_reelles_bout_en_bout(monkeypatch) -> N
     monkeypatch.setattr(random, "randint", lambda a, b: rolls.pop(0))
     monkeypatch.setattr(shooting_handlers, "compute_unit_los", lambda gs, s, t: {"cover": False})
     monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
-    monkeypatch.setattr(shooting_handlers, "_ranged_distance_metric", lambda: "euclidean")
+    monkeypatch.setattr(shooting_handlers, "_ranged_distance_metric", lambda *args, **kwargs: "euclidean")
 
     gs = _live_shoot_state()
     build_manual_shoot_allocation(gs, "1")

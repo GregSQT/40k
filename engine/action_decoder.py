@@ -793,7 +793,10 @@ class ActionDecoder:
         # applique donc ce MÊME modèle en post-filtre (`_deployment_clearance_filter`),
         # sinon le masque proposerait des hexes que `deploy_unit` rejette (deadlock
         # `deploy_footprint_occupied`). Convention projet : le déploiement copie la phase move.
-        if ez <= 1 or base_size == 1:
+        # Empreinte mono-hex : géométrie hex (x1 — 1 fig = 1 case, `geometry_is_hex`) ou socle de
+        # taille 1. Le prédicat était `ez <= 1`, qui ne désigne plus le x1 depuis que l'EZ vaut 2".
+        from engine.spatial_relations import geometry_is_hex
+        if geometry_is_hex(game_state) or base_size == 1:
             # Single-hex footprint: pool + murs (le chevauchement passe par le clearance)
             cell_valid = [
                 (col, row) for col, row in normalized_pool

@@ -575,10 +575,12 @@ def _fight_build_pile_in_valid_destinations(
     _bfs_wall_hexes: Set[Tuple[int, int]] = game_state.get("wall_hexes", set())
 
     from engine.hex_utils import precompute_footprint_offsets
-    from engine.phase_handlers.shared_utils import get_engagement_zone as _get_ez
-    _bfs_ez = _get_ez(game_state)
+    from engine.spatial_relations import geometry_is_hex
+
+    # Socle mono-hex : géométrie hex (x1, `geometry_is_hex` — 1 fig = 1 case) ou socle de taille 1.
+    # Le prédicat était `ez <= 1`, qui ne désigne plus le x1 depuis que l'EZ vaut 2".
     _bfs_base_size = unit["BASE_SIZE"]
-    _bfs_single_hex = (_bfs_ez <= 1 or _bfs_base_size == 1)
+    _bfs_single_hex = (geometry_is_hex(game_state) or _bfs_base_size == 1)
     _bfs_off_e: Tuple[Tuple[int, int], ...] = ()
     _bfs_off_o: Tuple[Tuple[int, int], ...] = ()
 
@@ -941,17 +943,17 @@ def _fight_prepare_footprint_offsets(
     if cache_key in cache:
         return cache[cache_key]
 
-    from .shared_utils import get_engagement_zone
     from engine.hex_utils import precompute_footprint_offsets, require_base_size
 
-    ez = get_engagement_zone(game_state)
     # Socle lu par la garde partagée (même primitive que les masques de mouvement) : elle
     # NOMME l'unité, là où `precompute_footprint_offsets` ne connaît que la forme et la taille.
     shape = require_key(unit, "BASE_SHAPE")
     bs = require_base_size(
         shape, require_key(unit, "BASE_SIZE"), f"fight footprint unit {uid}"
     )
-    if ez <= 1 or bs == 1:
+    from engine.spatial_relations import geometry_is_hex
+
+    if geometry_is_hex(game_state) or bs == 1:
         cache[cache_key] = None
         return None
     off_e, off_o = precompute_footprint_offsets(shape, bs, orient)
@@ -3325,9 +3327,7 @@ def _fight_pile_in_preview_plan(
     from engine.spatial_relations import unit_entries_within_engagement_zone
     from .shared_utils import (
         get_engagement_zone,
-        get_coherency_subhex,
-        get_cohesion_max_subhex,
-        get_min_neighbors,
+        coherency_violation_flags,
     )
     from .charge_handlers import (
         _charge_prepare_footprint_offsets,
@@ -3374,29 +3374,23 @@ def _fight_pile_in_preview_plan(
         )["closer"]
         per_model[mid] = [c, r] in pool
 
-    # 2) Cohésion 03.03 (empreinte-à-empreinte, mêmes 2 puces que le move).
+    # Empreintes par-figurine du plan : consommées par les contrôles d'engagement ci-dessous
+    # (la cohésion, elle, passe par la source unique juste en dessous).
     fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
     fps = [_candidate_footprint_charge(c, r, unit, game_state, fp_pair) for _, c, r, _ in norm]
-    coh = get_coherency_subhex(game_state)
-    coh_max = get_cohesion_max_subhex(game_state)
-    min_nb = get_min_neighbors(game_state)
-    coherency_ok = True
-    if n > 1:
-        neigh = [0] * n
-        too_far = [False] * n
-        for i in range(n):
-            for j in range(i + 1, n):
-                d = min_distance_between_sets(fps[i], fps[j], max_distance=coh_max)
-                if d <= coh:
-                    neigh[i] += 1
-                    neigh[j] += 1
-                if d > coh_max:
-                    too_far[i] = True
-                    too_far[j] = True
-        for i in range(n):
-            if neigh[i] < min_nb or too_far[i]:
-                coherency_ok = False
-                break
+
+    # 2) Cohésion 03.03 — SOURCE UNIQUE `coherency_violation_flags` (move, déploiement, charge et
+    # combat mesurent désormais la MÊME chose). Cette section était une COPIE inline des deux puces,
+    # qui ignorait `cohesion_distance_mode` ET la connexité : deux paquets disjoints y passaient, si
+    # bien qu'un pile-in pouvait committer une formation que la phase de move refusait ensuite de
+    # déplacer (« formation actuelle DÉJÀ incohérente »).
+    _mc_coh = require_key(game_state, "models_cache")
+    coherency_ok = not any(
+        coherency_violation_flags(
+            [{**_mc_coh[str(mid)], "col": int(c), "row": int(r)} for mid, c, r, _lv in norm],
+            game_state,
+        )
+    )
 
     # 3) AFTER (12.03) : escouade engagée (niveau unité, « Your unit must be engaged ») +
     # engagements de départ conservés PAR FIGURINE (« each model that started this move engaged
@@ -4516,9 +4510,7 @@ def _fight_consolidation_preview_plan(
     from engine.spatial_relations import unit_entries_within_engagement_zone
     from .shared_utils import (
         get_engagement_zone,
-        get_coherency_subhex,
-        get_cohesion_max_subhex,
-        get_min_neighbors,
+        coherency_violation_flags,
     )
     from .charge_handlers import (
         _charge_prepare_footprint_offsets,
@@ -4568,29 +4560,23 @@ def _fight_consolidation_preview_plan(
         )["closer"]
         per_model[mid] = [c, r] in pool
 
-    # 2) Cohésion 03.03 (empreinte-à-empreinte, mêmes 2 puces que le move).
+    # Empreintes par-figurine du plan : consommées par les contrôles d'engagement ci-dessous
+    # (la cohésion, elle, passe par la source unique juste en dessous).
     fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
     fps = [_candidate_footprint_charge(c, r, unit, game_state, fp_pair) for _, c, r, _ in norm]
-    coh = get_coherency_subhex(game_state)
-    coh_max = get_cohesion_max_subhex(game_state)
-    min_nb = get_min_neighbors(game_state)
-    coherency_ok = True
-    if n > 1:
-        neigh = [0] * n
-        too_far = [False] * n
-        for i in range(n):
-            for j in range(i + 1, n):
-                d = min_distance_between_sets(fps[i], fps[j], max_distance=coh_max)
-                if d <= coh:
-                    neigh[i] += 1
-                    neigh[j] += 1
-                if d > coh_max:
-                    too_far[i] = True
-                    too_far[j] = True
-        for i in range(n):
-            if neigh[i] < min_nb or too_far[i]:
-                coherency_ok = False
-                break
+
+    # 2) Cohésion 03.03 — SOURCE UNIQUE `coherency_violation_flags` (move, déploiement, charge et
+    # combat mesurent désormais la MÊME chose). Cette section était une COPIE inline des deux puces,
+    # qui ignorait `cohesion_distance_mode` ET la connexité : deux paquets disjoints y passaient, si
+    # bien qu'un pile-in pouvait committer une formation que la phase de move refusait ensuite de
+    # déplacer (« formation actuelle DÉJÀ incohérente »).
+    _mc_coh = require_key(game_state, "models_cache")
+    coherency_ok = not any(
+        coherency_violation_flags(
+            [{**_mc_coh[str(mid)], "col": int(c), "row": int(r)} for mid, c, r, _lv in norm],
+            game_state,
+        )
+    )
 
     # 3) AFTER (12.08) au niveau unité, selon le mode.
     union_fp: Set[Tuple[int, int]] = set()

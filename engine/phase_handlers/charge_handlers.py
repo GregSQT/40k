@@ -143,14 +143,15 @@ def _charge_prepare_footprint_offsets(
     if uid in cache:
         return cache[uid]
 
-    from .shared_utils import get_engagement_zone
+    from engine.spatial_relations import geometry_is_hex
 
-    ez = get_engagement_zone(game_state)
+    # Socle mono-hex : géométrie hex (x1 — 1 fig = 1 case) ou socle de taille 1 → aucun offset
+    # d'empreinte à précalculer. Le prédicat était `ez <= 1`, qui ne désigne plus le x1.
     bs = unit["BASE_SIZE"]
-    if ez <= 1 or bs == 1:
+    if geometry_is_hex(game_state) or bs == 1:
         cache[uid] = None
         return None
-    # Cas métier « pas d'offsets » déjà traité au-dessus (ez <= 1 ou base 1). Ici le calcul
+    # Cas métier « pas d'offsets » déjà traité au-dessus (géométrie hex ou base 1). Ici le calcul
     # doit aboutir : aucune capture d'exception (BASE_SHAPE/orientation manquants ou erreur de
     # calcul = bug → laisser remonter, pas de fallback None masquant).
     from engine.hex_utils import precompute_footprint_offsets
@@ -191,11 +192,13 @@ def _charge_offsets_for_base(
     key = (shape, tuple(base_size) if isinstance(base_size, (list, tuple)) else base_size, int(orientation))
     if key in cache:
         return cache[key]
-    ez = get_engagement_zone(game_state)
-    if ez <= 1 or base_size == 1:
+    from engine.spatial_relations import geometry_is_hex
+
+    # Idem : socle mono-hex → pas d'offsets (cf. `_charge_prepare_footprint_offsets`).
+    if geometry_is_hex(game_state) or base_size == 1:
         cache[key] = None
         return None
-    # Cas métier « pas d'offsets » déjà traité au-dessus (ez <= 1 ou base 1). Ici le calcul doit
+    # Cas métier « pas d'offsets » déjà traité au-dessus (géométrie hex ou base 1). Ici le calcul doit
     # aboutir : aucune capture d'exception (erreur de calcul = bug → remonter, pas de fallback None).
     from engine.hex_utils import precompute_footprint_offsets
     off_e, off_o = precompute_footprint_offsets(shape, cast("int | list[int]", base_size), int(orientation))
@@ -563,7 +566,11 @@ def _charge_distance_metric(game_state: Dict[str, Any]) -> str:
         raise ValueError(
             f"Invalid distance_metric['{key}'] = {metric!r}, expected one of {VALID_DISTANCE_METRICS}"
         )
-    return metric
+    # Miroir de `_move_distance_metric` : la RÉSOLUTION prime sur la config (point de bascule
+    # unique `spatial_relations.geometry_is_hex`) — à x1 la géométrie du jeu est hex.
+    from engine.spatial_relations import geometry_is_hex
+
+    return "hex" if geometry_is_hex(game_state) else metric
 
 
 def _charge_bfs_max_distance(
@@ -4593,9 +4600,7 @@ def charge_preview_move_plan(
     from engine.spatial_relations import unit_entries_within_engagement_zone
     from .shared_utils import (
         get_engagement_zone,
-        get_coherency_subhex,
-        get_cohesion_max_subhex,
-        get_min_neighbors,
+        coherency_violation_flags,
     )
 
     unit = get_unit_by_id(game_state, squad_id)
@@ -4636,32 +4641,20 @@ def charge_preview_move_plan(
             dest_level=lv,
         )
 
-    # 2) Cohésion (identique au move : 1re puce voisins < min, 2e puce une fig à > coh_max).
-    #    Empreintes PAR-FIGURINE (chaque fig a sa base).
+    # 2) Cohésion 03.03 — SOURCE UNIQUE `coherency_violation_flags` (move, déploiement, charge et
+    # combat mesurent la MÊME chose). C'était une COPIE inline des deux puces, qui ignorait
+    # `cohesion_distance_mode` ET la connexité (deux paquets disjoints passaient).
+    # Empreintes par-figurine conservées : les contrôles d'engagement ci-dessous les consomment.
     _mc_cohesion = require_key(game_state, "models_cache")
     fps = [_charge_model_footprint(game_state, _mc_cohesion[str(mid)], c, r) for mid, c, r, _lv in norm]
-    coh = get_coherency_subhex(game_state)
-    coh_max = get_cohesion_max_subhex(game_state)
-    min_nb = get_min_neighbors(game_state)
-    neigh = [0] * n
-    too_far = [False] * n
-    for i in range(n):
-        for j in range(i + 1, n):
-            d = min_distance_between_sets(fps[i], fps[j], max_distance=coh_max)
-            if d <= coh:
-                neigh[i] += 1
-                neigh[j] += 1
-            if d > coh_max:
-                too_far[i] = True
-                too_far[j] = True
     # Cohésion exposée SÉPARÉMENT de per_model (miroir pile-in : le voile rouge par-fig ne montre que
     # la légalité budget/closer ; la cohésion est un état d'UNITÉ remonté au Check, pas par figurine).
-    coherency_ok = True
-    if n > 1:
-        for i in range(n):
-            if neigh[i] < min_nb or too_far[i]:
-                coherency_ok = False
-                break
+    coherency_ok = not any(
+        coherency_violation_flags(
+            [{**_mc_cohesion[str(mid)], "col": int(c), "row": int(r)} for mid, c, r, _lv in norm],
+            game_state,
+        )
+    )
 
     # 3) engaged_all : chaque cible déclarée est engagée par au moins une figurine.
     ez = int(get_engagement_zone(game_state))
@@ -4911,7 +4904,7 @@ def charge_autoplace_plan(
     # groupe avec la base du modèle représentatif. Le synth euclidien utilise ``_synth_model_entry``
     # (base modèle), source unique partagée avec le halo et la phase fight.
     from engine.spatial_relations import engagement_distance_metric
-    _eng_metric = engagement_distance_metric()
+    _eng_metric = engagement_distance_metric(game_state)
     _vz_auto = _charge_vertical_zone(game_state)  # engagement 3D (§03.04) — branche euclidienne (gameplay)
 
     def _entry_engage_struct(entry: Dict[str, Any], charger_shape: str) -> Tuple[str, Any]:

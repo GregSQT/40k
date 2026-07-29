@@ -99,12 +99,21 @@ def _target_slot_entries(
     game_state: Dict[str, Any],
     active_unit: Dict[str, Any],
 ) -> List[Tuple[int, str, Dict[str, Any]]]:
-    """[(action, squad_id ennemi, entree units_cache)] pour les slots ouverts par le masque."""
+    """[(action, squad_id ennemi, UNITE de game_state["units"])] pour les slots ouverts par le masque.
+
+    ⚠️ L'unite rendue est la DATASHEET (`game_state["units"]`), PAS l'entree `units_cache` :
+    `build_units_cache` ne recopie que l'etat spatial et vital (col/row/level/HP_CUR/player/
+    VALUE/socle/empreintes) — jamais RNG_WEAPONS/CC_WEAPONS. Rendre l'entree de cache faisait
+    donc lever `get_max_ranged_damage` (« Required key 'RNG_WEAPONS' is missing ») des qu'un bot
+    de menace ouvrait un slot. La presence dans `units_cache` reste la preuve de VIE (les morts
+    en sont retires), et toute lecture de POSITION passe par le cache, jamais par la datasheet.
+    """
     open_actions = [a for a in valid_actions if a in slots]
     if not open_actions:
         return []
     mapping = get_enemy_slot_mapping(game_state, _acting_player(game_state, active_unit))
     units_cache = require_key(game_state, "units_cache")
+    units_by_id = {str(require_key(u, "id")): u for u in require_key(game_state, "units")}
     entries: List[Tuple[int, str, Dict[str, Any]]] = []
     for action in open_actions:
         slot = action - slot_base
@@ -114,12 +123,17 @@ def _target_slot_entries(
                 f"dans get_enemy_slot_mapping : masque et mapping ont diverge."
             )
         sid = str(mapping[slot])
-        entry = units_cache.get(sid)
-        if entry is None:
+        if sid not in units_cache:
             raise RuntimeError(
                 f"Escouade ennemie {sid} du slot {slot} absente de units_cache."
             )
-        entries.append((action, sid, entry))
+        unit = units_by_id.get(sid)
+        if unit is None:
+            raise RuntimeError(
+                f"Escouade ennemie {sid} du slot {slot} absente de game_state['units'] : "
+                f"impossible d'en lire la datasheet (armes)."
+            )
+        entries.append((action, sid, unit))
     return entries
 
 
@@ -175,7 +189,8 @@ def _score_objective_proximity(
     objectives = game_state.get("objectives")
     if not objectives:
         return _score_threat(sid, entry, game_state)
-    col, row = int(entry["col"]), int(entry["row"])
+    # Position = units_cache (source de verite spatiale), jamais le col/row de la datasheet.
+    col, row = require_unit_position(sid, game_state)
     return -float(
         min(
             calculate_hex_distance(col, row, *mi.get_objective_center(obj))

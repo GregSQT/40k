@@ -407,11 +407,24 @@ def _socle_from_entry(entry: Dict[str, Any]):
     )
 
 
-def _ranged_distance_metric() -> str:
-    """Métrique de portée tir (``hex``|``euclidean``) — sélecteur unique, source game_config.json."""
+def _ranged_distance_metric(game_state: Optional[Dict[str, Any]] = None) -> str:
+    """Métrique de portée tir (``hex``|``euclidean``) — sélecteur unique, source game_config.json.
+
+    La RÉSOLUTION prime sur la config : à ``inches_to_subhex <= 1`` la géométrie du jeu est
+    hexagonale (point de bascule unique ``spatial_relations.geometry_is_hex``, même règle que
+    move / charge / EZ). Le x1 ne sert qu'à valider la configuration — aucune mesure continue n'y
+    a de sens, une figurine y tenant dans une case. La clé de config est lue ET validée d'abord,
+    pour qu'une valeur invalide lève à x1 comme ailleurs ; le x5 (euclidien) est inchangé.
+
+    ``game_state`` optionnel : les call-sites qui ne l'ont pas laissent ``geometry_is_hex`` relire
+    la résolution depuis le même config-loader que la métrique.
+    """
     from config_loader import get_config_loader
     from engine.combat_utils import get_distance_metric
-    return get_distance_metric("ranged", get_config_loader().get_game_config())
+    from engine.spatial_relations import geometry_is_hex
+
+    metric = get_distance_metric("ranged", get_config_loader().get_game_config())
+    return "hex" if geometry_is_hex(game_state) else metric
 
 
 def _build_weapon_availability_enemy_precheck(
@@ -426,7 +439,7 @@ def _build_weapon_availability_enemy_precheck(
     from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
     from engine.combat_utils import ranged_edge_distance
 
-    _ranged_metric = _ranged_distance_metric()
+    _ranged_metric = _ranged_distance_metric(game_state)
 
     # Portée maximale des armes de TIR de l'unité. Aucun repli silencieux : `RNG` est porté
     # par les 243 profils d'armes de tir des rosters — une arme rangée sans portée est une
@@ -1200,7 +1213,7 @@ def build_unit_los_cache(
         _cull_shooter_entry = units_cache.get(unit_id)
         if _cull_shooter_entry is None:
             raise KeyError(f"Unit {unit_id} not in units_cache (dead or absent)")
-        _cull_ctx = (_socle_from_entry(_cull_shooter_entry), _ranged_distance_metric(), max_target_range)
+        _cull_ctx = (_socle_from_entry(_cull_shooter_entry), _ranged_distance_metric(game_state), max_target_range)
 
     # Calculate LoS for each enemy in units_cache (only alive enemies — dead must not appear in pool).
     # All visibility/cover is delegated to compute_unit_los() — the single source of truth.
@@ -1608,7 +1621,7 @@ def build_hidden_too_far_by_unit_id(
     read-only, relatif au tireur actif. Réutilise ``unit['los_cache']`` (build_unit_los_cache).
     """
     from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
-    _ranged_metric = _ranged_distance_metric()
+    _ranged_metric = _ranged_distance_metric(game_state)
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
     detection_range_subhex = (
         float(require_key(game_rules, "detection_range"))
@@ -1701,7 +1714,7 @@ def build_hidden_detection_info_by_unit_id(
     hidden_enemy_out_of_detection). Rétro-compat : build_hidden_too_far_by_unit_id reste inchangé.
     """
     from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
-    _ranged_metric = _ranged_distance_metric()
+    _ranged_metric = _ranged_distance_metric(game_state)
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
     detection_range_subhex = (
         float(require_key(game_rules, "detection_range"))
@@ -2650,7 +2663,7 @@ def valid_target_pool_build(
 
     from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
     from engine.hex_utils import Socle
-    _ranged_metric_pool = _ranged_distance_metric()
+    _ranged_metric_pool = _ranged_distance_metric(game_state)
 
     # Perform weapon_availability_check(arg1, arg2, arg3) -> Build weapon_available_pool
     if precomputed_weapon_available_pool is not None:
@@ -3286,7 +3299,7 @@ def shooting_build_valid_target_pool(
     # Portée tir en euclidien bord-à-bord (sélecteur `ranged`) : la distance de
     # tie-break de priorité suit la même métrique que le gate de portée.
     from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
-    _ranged_metric_prio = _ranged_distance_metric()
+    _ranged_metric_prio = _ranged_distance_metric(game_state)
     _units_cache_prio = require_key(game_state, "units_cache")
     _shooter_socle_prio = socle_from_cache_entry(_units_cache_prio[unit_id_str])
     for target_id in filtered_targets:
@@ -4455,7 +4468,7 @@ def hidden_enemy_out_of_detection(
     from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
     penalty = 3 * int(require_key(game_state, "inches_to_subhex"))
     dense_wall_set = _get_dense_wall_set(game_state)
-    metric = _ranged_distance_metric()
+    metric = _ranged_distance_metric(game_state)
     gym_training = bool(
         game_state.get("gym_training_mode", False)
         or require_key(game_state, "config").get("gym_training_mode", False)
@@ -4703,7 +4716,7 @@ def _update_unit_los_preview_data(
     sc, sr = int(shooter_col), int(shooter_row)
     from engine.hex_utils import Socle
     from engine.combat_utils import ranged_edge_distance_to_cell
-    _preview_metric = _ranged_distance_metric()
+    _preview_metric = _ranged_distance_metric(game_state)
     _preview_socle = Socle(
         unit["BASE_SHAPE"], unit["BASE_SIZE"], sc, sr,
         {(int(c), int(r)) for c, r in _shooter_hexes},
@@ -5048,7 +5061,7 @@ def _select_move_after_shooting_destination_for_ai(
         ranged_edge_distance_to_cell,
         socle_from_cache_entry,
     )
-    metric = _ranged_distance_metric()
+    metric = _ranged_distance_metric(game_state)
     unit_socle = socle_from_cache_entry(units_cache[str(unit["id"])])
     nearest_enemy_id = min(
         enemies,

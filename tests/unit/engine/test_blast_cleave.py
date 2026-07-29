@@ -23,7 +23,7 @@ def _neutralise(monkeypatch):
     monkeypatch.setattr(random, "randint", lambda a, b: 4)
     monkeypatch.setattr(shooting_handlers, "compute_unit_los", lambda gs, s, t: {"cover": False})
     monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
-    monkeypatch.setattr(shooting_handlers, "_ranged_distance_metric", lambda: "euclidean")
+    monkeypatch.setattr(shooting_handlers, "_ranged_distance_metric", lambda *args, **kwargs: "euclidean")
 
 
 def _uc(col, row, *, player=1):

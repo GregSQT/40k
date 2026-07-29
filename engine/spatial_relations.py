@@ -104,6 +104,36 @@ def _entry_is_multi_figure(cache_entry: Dict[str, Any]) -> bool:
     return len(occ) > single_count
 
 
+def geometry_is_hex(game_state: Optional[Dict[str, Any]] = None) -> bool:
+    """POINT DE BASCULE UNIQUE de la résolution : la géométrie du jeu est-elle HEXAGONALE ?
+
+    Vrai ssi ``inches_to_subhex <= 1``. À cette résolution une figurine tient dans UNE case —
+    c'est la définition du board x1, et ``game_state._scale_socle`` y normalise déjà le socle en
+    ``round``/1 pour la même raison. Mesurer une distance CONTINUE (euclidienne, bord à bord)
+    entre des socles réduits à un point de grille n'a pas de sens : la géométrie est hex, donc
+    move / charge / EZ / coherency s'y mesurent en hex. Au-dessus (x5 et plus), le socle occupe
+    plusieurs cases, « bord à bord » a un sens, et la métrique configurée s'applique.
+
+    SEUL critère de résolution du moteur : ``inches_to_subhex``. Le prédicat historique
+    ``ez <= 1`` disséminé dans ~15 sites était un PROXY de « board x1 » — il a cessé d'en être un
+    le 2026-06-03 (`7aaecaf9`), quand ``game_rules.engagement_zone`` est passé de 1" à 2" : à x1,
+    ``ez = 2 × 1 = 2``, donc ces gardes ne se déclenchent plus et le x1 est reparti en euclidien
+    sans que rien ne le dise. Deux crashes « incohérence masque/exécution » en sont sortis (pool
+    FLY, coherency d'escouade).
+
+    ``game_state`` absent : la résolution est relue depuis le MÊME config-loader que la métrique
+    (``get_board_config``), ce qui permet aux ~60 call-sites de la primitive
+    ``unit_entries_within_engagement_zone`` de rester inchangés. Aucun défaut caché : clé absente
+    → erreur explicite (CLAUDE.md).
+    """
+    if game_state is not None and "inches_to_subhex" in game_state:
+        return int(game_state["inches_to_subhex"]) <= 1
+    from config_loader import get_config_loader
+
+    board = require_key(get_config_loader().get_board_config(), "default")
+    return int(require_key(board, "inches_to_subhex")) <= 1
+
+
 def engagement_distance_metric(game_state: Optional[Dict[str, Any]] = None) -> str:
     """Métrique de la zone d'engagement (``hex``|``euclidean``) — sélecteur UNIQUE (Étape 7).
 
@@ -113,11 +143,16 @@ def engagement_distance_metric(game_state: Optional[Dict[str, Any]] = None) -> s
     global (``game_state`` non requis) → la primitive canonique ``unit_entries_within_engagement_zone``
     peut résoudre la métrique sans toucher ses ~60 call-sites. Aucun défaut caché : section/clé/valeur
     invalide → erreur explicite (CLAUDE.md).
+
+    La RÉSOLUTION primer sur la config : à ``inches_to_subhex <= 1`` la géométrie est hex
+    (cf. ``geometry_is_hex``). La clé de config reste lue et validée — une valeur invalide doit
+    lever à x1 comme ailleurs, pas être court-circuitée par la résolution.
     """
     from config_loader import get_config_loader
     from engine.combat_utils import get_distance_metric
 
-    return get_distance_metric("engagement", get_config_loader().get_game_config())
+    metric = get_distance_metric("engagement", get_config_loader().get_game_config())
+    return "hex" if geometry_is_hex(game_state) else metric
 
 
 def entries_in_engagement_zone(
@@ -148,12 +183,8 @@ def entries_in_engagement_zone(
       déjà par-fig). Tout au sol des deux côtés → une seule classe verticale → résultat identique au 2D.
     """
     if vertical_zone_inches is not None:
-        if metric != "euclidean":
-            raise ValueError(
-                f"vertical engagement gate (3D) supporté uniquement en métrique 'euclidean', reçu {metric!r}"
-            )
         return _entries_in_engagement_zone_3d(
-            first_entry, second_entry, engagement_zone, float(vertical_zone_inches)
+            first_entry, second_entry, engagement_zone, float(vertical_zone_inches), metric
         )
     if metric == "hex":
         first_fp = _cache_entry_footprint(first_entry)
@@ -221,20 +252,52 @@ def _entries_in_engagement_zone_3d(
     second_entry: Dict[str, Any],
     engagement_zone: int,
     vertical_zone_inches: float,
+    metric: str,
 ) -> bool:
-    """Engagement 3D euclidien par paire de figurines (cf. ``entries_in_engagement_zone``).
+    """Engagement 3D par paire de figurines (cf. ``entries_in_engagement_zone``).
 
     Pour chaque paire de classes verticales (hauteur de plancher) des deux unités, on applique
     d'abord le **gate vertical** (séparation des intervalles ``[plancher, plancher+MODEL_HEIGHT]``),
-    puis — seulement si la paire passe — le **test horizontal** euclidien inchangé sur le sous-socle
-    restreint aux centres de cette classe (réutilise ``euclidean_edge_distance``)."""
+    puis — seulement si la paire passe — le **test horizontal** de la métrique courante, restreint
+    aux centres de cette classe.
+
+    Le gate vertical est INDÉPENDANT de la métrique horizontale (§03.04 : 2" horizontal ET 5"
+    vertical). Cette fonction levait « supporté uniquement en métrique euclidean » : c'était vrai de
+    l'implémentation, pas de la règle, et à x1 — où la géométrie est hex
+    (``geometry_is_hex``) — l'éligibilité de charge tombait dessus. Le test horizontal hex est le
+    même que celui du chemin 2D (distance d'empreinte ≤ ez), calculé sur les empreintes des seules
+    figurines de la classe verticale."""
     from engine.combat_utils import socle_from_cache_entry
+    from engine.hex_utils import compute_occupied_hexes
 
     a_classes, a_height = _vertical_classes(first_entry)
     b_classes, b_height = _vertical_classes(second_entry)
     threshold = engagement_minimum_clearance_norm(engagement_zone)
-    base_a = socle_from_cache_entry(first_entry)
-    base_b = socle_from_cache_entry(second_entry)
+    if metric not in ("hex", "euclidean"):
+        raise ValueError(f"Invalid engagement metric {metric!r}, expected 'hex' or 'euclidean'")
+    hex_metric = metric == "hex"
+    # Socles complets : seul le chemin euclidien les consomme (le hex mesure des empreintes).
+    base_a = None if hex_metric else socle_from_cache_entry(first_entry)
+    base_b = None if hex_metric else socle_from_cache_entry(second_entry)
+
+    def _class_footprint(entry: Dict[str, Any], centers: List[Tuple[int, int]]) -> Set[Tuple[int, int]]:
+        shape = require_key(entry, "BASE_SHAPE")
+        size = require_key(entry, "BASE_SIZE")
+        orient = int(entry.get("orientation", 0))  # fallback allowed — entrées synthétiques sans facing
+        cells: Set[Tuple[int, int]] = set()
+        for c, r in centers:
+            cells |= set(compute_occupied_hexes(int(c), int(r), shape, size, orient))
+        return cells
+
+    # Empreintes par classe verticale calculées UNE fois : une classe de A est comparée à toutes
+    # les classes de B, donc les recalculer dans la boucle interne les refabriquerait |B| fois.
+    fps_a: Dict[float, Set[Tuple[int, int]]] = (
+        {f: _class_footprint(first_entry, c) for f, c in a_classes.items()} if hex_metric else {}
+    )
+    fps_b: Dict[float, Set[Tuple[int, int]]] = (
+        {f: _class_footprint(second_entry, c) for f, c in b_classes.items()} if hex_metric else {}
+    )
+
     for floor_a, centers_a in a_classes.items():
         lo_a, hi_a = floor_a, floor_a + a_height
         for floor_b, centers_b in b_classes.items():
@@ -242,6 +305,13 @@ def _entries_in_engagement_zone_3d(
             vertical_gap = max(0.0, max(lo_a, lo_b) - min(hi_a, hi_b))
             if vertical_gap > vertical_zone_inches:
                 continue
+            if hex_metric:
+                if min_distance_between_sets(
+                    fps_a[floor_a], fps_b[floor_b], max_distance=engagement_zone
+                ) <= engagement_zone:
+                    return True
+                continue
+            assert base_a is not None and base_b is not None  # métrique euclidienne (cf. ci-dessus)
             socle_a = base_a.with_model_centers(centers_a)
             socle_b = base_b.with_model_centers(centers_b)
             if euclidean_edge_distance(socle_a, socle_b) <= threshold:
@@ -316,8 +386,16 @@ def move_anchor_violates_engagement_clearance(
     """Return True when a move anchor violates the C/clearance engagement contract."""
     mover_id = str(require_key(mover, "id"))
     mover_player = int(require_key(mover, "player"))
+    metric = engagement_distance_metric(game_state)
 
-    if engagement_zone_ez <= 1:
+    # Géométrie HEX (x1, ou config ``engagement:"hex"``) : l'EZ EST l'ensemble pré-dilaté
+    # ``enemy_adjacent_hexes_player_N``. C'est la MÊME source que l'exécution
+    # (``build_move_blocked_cells_by_level`` → ``validate_move_plan`` / érosion du pool), donc
+    # « masque ⊆ exécutable » tient par construction et non par une inclusion numérique.
+    # ⚠️ La condition était ``engagement_zone_ez <= 1``, un proxy de « board x1 » devenu faux le
+    # 2026-06-03 (engagement_zone 1" → 2") : à x1 cette branche ne se déclenchait plus et le pool
+    # partait en euclidien face à une exécution hex — cf. ``geometry_is_hex``.
+    if metric == "hex":
         if enemy_adjacent_hexes is None:
             ck = f"enemy_adjacent_hexes_player_{mover_player}"
             adjacent_hexes: Set[Tuple[int, int]] = require_key(game_state, ck)
@@ -328,10 +406,8 @@ def move_anchor_violates_engagement_clearance(
                 return True
         return False
 
-    # Métrique d'engagement unifiée (Étape 7.1) : routée via le switch pairwise. Config hex
-    # (défaut) → distance d'empreinte, byte-identique à l'historique. Le mover candidat est
-    # synthétisé en entrée-cache (empreinte candidate + socle du mover) pour alimenter le switch.
-    metric = engagement_distance_metric()
+    # Métrique d'engagement unifiée (Étape 7.1) : routée via le switch pairwise. Le mover candidat
+    # est synthétisé en entrée-cache (empreinte candidate + socle du mover) pour alimenter le switch.
     mover_entry = {
         "BASE_SHAPE": require_key(mover, "BASE_SHAPE"),
         "BASE_SIZE": require_key(mover, "BASE_SIZE"),

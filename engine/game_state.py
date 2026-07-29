@@ -653,6 +653,7 @@ class GameStateManager:
             # déclarée : le scénario vit dans le dossier de son propre plateau, rien à convertir.
             roster_downscale_ratio = 1
             model_cohesion_hex = 0
+            global_cohesion_hex = 0
             floor_hexes_by_level: Dict[int, set] = {}
             _scenario_board_ref = (
                 scenario_data.get("board_ref") if isinstance(scenario_data, dict) else None
@@ -688,6 +689,8 @@ class GameStateManager:
                 # C'est le déplacement maximal toléré pour dégager une figurine : au-delà, elle
                 # sortirait de sa propre escouade.
                 model_cohesion_hex = int(require_key(_game_rules, "unit_model_cohesion_range")) * _ish
+                # 2e puce (03.03) : écart max fig-à-fig, vérifié en sortie de conversion.
+                global_cohesion_hex = int(require_key(_game_rules, "unit_global_cohesion_range")) * _ish
 
             enhanced_units = []
             for unit_data in basic_units:
@@ -751,7 +754,8 @@ class GameStateManager:
                     if roster_downscale_ratio != 1:
                         unit_data = self._downscale_fixed_unit(
                             unit_data, roster_downscale_ratio, _is_valid_deploy_hex,
-                            wall_hex_set, used_hexes, model_cohesion_hex, floor_hexes_by_level,
+                            wall_hex_set, used_hexes, model_cohesion_hex, global_cohesion_hex,
+                            floor_hexes_by_level,
                         )
                     chosen_col, chosen_row = normalize_coordinates(unit_data["col"], unit_data["row"])
                     fp = _compute_deploy_footprint(chosen_col, chosen_row, base_shape, base_size)
@@ -1786,6 +1790,7 @@ class GameStateManager:
         wall_hex_set: Any,
         used_hexes: Any,
         max_displacement: int,
+        max_spread: int,
         floor_hexes_by_level: Dict[int, Any],
     ) -> Dict[str, Any]:
         """Convertit les positions d'une unité en placement FIXE vers un plateau plus grossier.
@@ -1800,6 +1805,20 @@ class GameStateManager:
         la figurine ne serait plus dans sa propre unité). Aucune case libre dans ce rayon =
         erreur explicite, jamais un placement silencieusement faux.
 
+        ⚠️ COHERENCY 03.03 PAR CONSTRUCTION : borner le déplacement de CHAQUE figurine par
+        `max_displacement` ne suffit pas à rendre la FORMATION cohérente — deux figurines peuvent
+        s'écarter de 2 hexes en sens opposés et finir à 4 ou 5 l'une de l'autre. C'est ce qui
+        arrivait : l'escouade sortait du chargement déjà incohérente (mesuré : une figurine à 3
+        hexes de toutes ses sœurs), et la phase de move refusait ensuite de la déplacer —
+        `execute_squad_move` levait « coherency du plan invalide (formation actuelle DEJA
+        incoherente) » et le worker de training mourait. C'était le SEUL chemin de placement sans
+        contrôle de cohérence (déploiement, move, charge, pile-in et consolidation valident tous).
+        Chaque figurine après la première doit donc atterrir à `max_displacement` (= la portée de la
+        1re puce) d'une figurine DÉJÀ posée de son escouade : la formation est connexe par
+        construction, ce que la FAQ exige (une seule chaîne). La 2e puce (écart max 9") est
+        vérifiée en sortie — un roster que la réduction étale au-delà est une donnée à corriger,
+        pas un état à livrer en silence.
+
         L'invariant ancre == models[0] est préservé.
 
         Les cases retenues sont ajoutées à `used_hexes` : à résolution native rien ne réserve les
@@ -1811,7 +1830,13 @@ class GameStateManager:
         converted = copy.deepcopy(unit_data)
         unit_id = converted.get("id")
 
-        def _place(source_col: int, source_row: int, taken: set, level: int) -> Tuple[int, int]:
+        def _place(
+            source_col: int, source_row: int, taken: set, level: int,
+            attach_to: Optional[set] = None,
+        ) -> Tuple[int, int]:
+            """Case réduite pour une figurine. ``attach_to`` (cases déjà posées de l'escouade,
+            ``None`` pour la 1re) impose la connexité : la case retenue est à <=
+            ``max_displacement`` de l'une d'elles."""
             target_col, target_row = downscale_cell(source_col, source_row, ratio)
             # Une figurine à l'étage doit rester sur un plancher de SON niveau : les sommets des
             # planchers et les positions sont réduits séparément, donc une case tout juste
@@ -1822,29 +1847,42 @@ class GameStateManager:
                     f"Unit {unit_id}: figurine déclarée au niveau {level} alors qu'aucun plancher "
                     f"de ce niveau n'existe après réduction x{ratio}"
                 )
+            # Le rayon de recherche s'élargit tant qu'aucune case ne satisfait TOUTES les
+            # contraintes (libre + connexe à l'escouade). Élargir déplace une figurine ; ne pas
+            # élargir livrerait une formation illégale — le premier est réparable, le second non.
             best: Optional[Tuple[int, int, int, int]] = None
-            for col in range(target_col - max_displacement, target_col + max_displacement + 1):
-                for row in range(target_row - max_displacement, target_row + max_displacement + 1):
-                    distance = hex_distance(target_col, target_row, col, row)
-                    if distance > max_displacement:
-                        continue
-                    if allowed_cells is not None and (col, row) not in allowed_cells:
-                        continue
-                    if not is_valid_hex(col, row):
-                        continue
-                    if wall_hex_set and (col, row) in wall_hex_set:
-                        continue
-                    if (col, row) in taken or (col, row) in used_hexes:
-                        continue
-                    # Tri déterministe : distance, puis colonne, puis ligne.
-                    candidate = (distance, col, row, 0)
-                    if best is None or candidate[:3] < best[:3]:
-                        best = candidate
+            radius = max_displacement
+            while best is None and radius <= max_displacement * 4:
+                for col in range(target_col - radius, target_col + radius + 1):
+                    for row in range(target_row - radius, target_row + radius + 1):
+                        distance = hex_distance(target_col, target_row, col, row)
+                        if distance > radius:
+                            continue
+                        if allowed_cells is not None and (col, row) not in allowed_cells:
+                            continue
+                        if not is_valid_hex(col, row):
+                            continue
+                        if wall_hex_set and (col, row) in wall_hex_set:
+                            continue
+                        if (col, row) in taken or (col, row) in used_hexes:
+                            continue
+                        # Connexité 03.03 (1re puce) : rattachement à une sœur déjà posée.
+                        if attach_to is not None and not any(
+                            hex_distance(col, row, ac, ar) <= max_displacement
+                            for ac, ar in attach_to
+                        ):
+                            continue
+                        # Tri déterministe : distance, puis colonne, puis ligne.
+                        candidate = (distance, col, row, 0)
+                        if best is None or candidate[:3] < best[:3]:
+                            best = candidate
+                radius += max_displacement
             if best is None:
                 raise ValueError(
                     f"Unit {unit_id}: figurine en ({source_col},{source_row}) niveau {level} sans "
-                    f"case libre à <= {max_displacement} hex de ({target_col},{target_row}) après "
-                    f"réduction x{ratio} — plateau trop dense ou positions de roster à revoir"
+                    f"case libre ET cohérente (<= {max_displacement} hex d'une sœur déjà posée) "
+                    f"autour de ({target_col},{target_row}) après réduction x{ratio} — plateau trop "
+                    f"dense ou positions de roster à revoir"
                 )
             return best[1], best[2]
 
@@ -1856,6 +1894,7 @@ class GameStateManager:
                 col, row = _place(
                     int(require_key(model, "col")), int(require_key(model, "row")), taken,
                     int(model.get("level", 0)),  # get allowed (champ optionnel : absent = sol)
+                    attach_to=(taken if index > 0 else None),
                 )
                 model["col"], model["row"] = col, row
                 taken.add((col, row))
@@ -1871,6 +1910,19 @@ class GameStateManager:
             taken.add((col, row))
             anchor_cell = (col, row)
 
+        # 2e puce de 03.03 (« à 9" de CHAQUE autre modèle ») : la connexité posée ci-dessus ne la
+        # garantit pas — une chaîne de 2 hexes par maillon peut s'étirer au-delà. Un roster que la
+        # réduction étale autant est une donnée à corriger, donc erreur explicite et nommée.
+        if len(taken) > 1:
+            cells = sorted(taken)
+            for i, (c1, r1) in enumerate(cells):
+                for c2, r2 in cells[i + 1:]:
+                    if hex_distance(c1, r1, c2, r2) > max_spread:
+                        raise ValueError(
+                            f"Unit {unit_id}: après réduction x{ratio}, les figurines ({c1},{r1}) et "
+                            f"({c2},{r2}) sont à plus de {max_spread} hex — 2e puce de la coherency "
+                            f"03.03 violée. Positions de roster à revoir."
+                        )
         # L'ANCRE est laissée à l'appelant : c'est son empreinte (`_compute_deploy_footprint`)
         # qu'il valide puis réserve. La réserver ici la ferait entrer en collision avec elle-même.
         used_hexes.update(taken - {anchor_cell})

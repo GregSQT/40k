@@ -53,6 +53,9 @@ from engine.hex_utils import (
     round_base_radius_norm,
 )
 from engine.phase_handlers.geodesic_move import _euclidean_move_field, reachable_multilevel_field
+# Bascule UNIQUE de la résolution (`inches_to_subhex <= 1` → géométrie hex). Alias court : ce
+# module la lit dans des boucles chaudes (pool d'ancre, éligibilité), pas seulement en préambule.
+from engine.spatial_relations import geometry_is_hex as _geometry_is_hex
 from engine.hex_union_boundary_polygon import (
     compute_move_preview_mask_loops_world,
     _board_hex_radius_margin,
@@ -686,10 +689,10 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
                         candidate_fp,
                         game_state,
                         occupied_positions,
-                        enemy_adjacent_hexes if ez_elig <= 1 else None,
+                        enemy_adjacent_hexes,
                     )
                     if base_ok and (
-                        ez_elig <= 1
+                        _geometry_is_hex(game_state)
                         or not _movement_engagement_violates(
                             game_state,
                             unit_obj,
@@ -712,10 +715,10 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
                     candidate_fp,
                     game_state,
                     occupied_positions,
-                    enemy_adjacent_hexes if ez_elig <= 1 else None,
+                    enemy_adjacent_hexes,
                 )
                 if base_ok and (
-                    ez_elig <= 1
+                    _geometry_is_hex(game_state)
                     or not _movement_engagement_violates(
                         game_state,
                         unit_obj,
@@ -1521,7 +1524,7 @@ def _compute_mover_ez_forbidden_mask(
     (``_euclidean_mover_ez_forbidden_mask``) ; ``"hex"`` (défaut) → dilatation hex ci-dessous.
     """
     from engine.spatial_relations import engagement_distance_metric
-    if engagement_distance_metric() == "euclidean":
+    if engagement_distance_metric(game_state) == "euclidean":
         return _euclidean_mover_ez_forbidden_mask(unit, enemy_items, ez, board_cols, board_rows)
 
     from engine.hex_utils import (
@@ -2095,7 +2098,12 @@ def _move_distance_metric(game_state: Dict[str, Any]) -> str:
         raise ValueError(
             f"Invalid distance_metric['{key}'] = {metric!r}, expected one of {VALID_DISTANCE_METRICS}"
         )
-    return metric
+    # La RÉSOLUTION prime sur la config : à `inches_to_subhex <= 1` la géométrie est hex
+    # (point de bascule unique `spatial_relations.geometry_is_hex`). La clé de config est lue et
+    # validée d'abord — une valeur invalide doit lever à x1 comme ailleurs.
+    from engine.spatial_relations import geometry_is_hex
+
+    return "hex" if geometry_is_hex(game_state) else metric
 
 
 def _filter_ground_anchors_vectorized(
@@ -2624,8 +2632,10 @@ def movement_build_valid_destinations_pool(
         _fly_walls = game_state.get("wall_hexes", set())
         _fly_occupied = occupied_positions
 
+        # Socle mono-hex : géométrie hex (x1) ou socle de taille 1 — cf. `_geometry_is_hex`, qui
+        # remplace l'ancien `ez <= 1` (devenu faux à x1 quand l'EZ est passée à 2").
         _fly_base_size = unit["BASE_SIZE"]
-        _fly_single_hex = (ez <= 1 or _fly_base_size == 1)
+        _fly_single_hex = (_geometry_is_hex(game_state) or _fly_base_size == 1)
 
         _fly_off_even: Tuple[Tuple[int, int], ...] = ()
         _fly_off_odd: Tuple[Tuple[int, int], ...] = ()
@@ -2706,24 +2716,33 @@ def movement_build_valid_destinations_pool(
                 )
             return valid_destinations
 
-        # Precompute per-enemy proximity thresholds to skip engagement check for distant hexes.
-        _fly_enemy_proximity_filter: Optional[List[Tuple[int, int, int]]] = None
-        _fly_ez_prox_set: Optional[Set[Tuple[int, int]]] = None
-        if ez > 1 and _enemy_items_for_engagement_ez is not None:
-            from engine.hex_utils import dilate_hex_set as _dilate_hex_set
-            _fly_mover_r = _hex_radius_upper_for_engagement_prune(_move_preview_footprint_span(unit))
-            _fly_ez_i = int(ez)
-            _fly_prox_list: List[Tuple[int, int, int]] = []
-            for _, _fce in _enemy_items_for_engagement_ez:
-                _fec = int(require_key(_fce, "col"))
-                _fer = int(require_key(_fce, "row"))
-                _fe_r = _hex_radius_upper_for_engagement_prune(_move_preview_footprint_span(_fce))
-                _fly_prox_list.append((_fec, _fer, _fly_ez_i + _fly_mover_r + _fe_r + 1))
-            _fly_enemy_proximity_filter = _fly_prox_list
-            _fly_ez_prox_set = set()
-            for _fec, _fer, _feth in _fly_prox_list:
-                _fly_ez_prox_set |= _dilate_hex_set({(_fec, _fer)}, _feth, _fly_bcols, _fly_brows)
-                _fly_ez_prox_set.add((_fec, _fer))
+        # ── EZ de destination, chemin FLY mono-hex : la MÊME source que l'exécution ────────────
+        # ⚠️ ROOT CAUSE CORRIGÉE (deux fois de suite au même endroit, d'où ce commentaire long).
+        # Ce chemin est celui d'un socle mono-hex, c'est-à-dire `inches_to_subhex == 1` : à cette
+        # résolution une figurine tient dans UNE case et la géométrie du jeu est HEXAGONALE
+        # (`game_state._scale_socle` normalise le socle en `round`/1 précisément pour ça). L'EZ y
+        # est donc l'ensemble hex `enemy_adjacent_hexes_player_N` — exactement ce que lisent
+        # `validate_move_plan` / `erode_move_pool_by_squad_block`, et ce que font déjà les DEUX
+        # autres branches mono-hex de cette fonction (BFS sol, champ euclidien).
+        #
+        # L'ancien code appelait ici `_movement_engagement_violates` (métrique `engagement`, donc
+        # EUCLIDIENNE) sous une fenêtre de PRUNE dilatée depuis la seule ANCRE ennemie. Deux
+        # défauts cumulés :
+        #   1. hors fenêtre, l'engagement n'était PAS testé — une escouade ennemie étalée (Boyz,
+        #      Termagants) a des figurines à plusieurs hexes de son ancre, et les cases voisines de
+        #      CES figurines passaient sans contrôle (régression introduite par `6f495de1`
+        #      « gain de perfs », 2026-05-19 ; le jumeau
+        #      `_enemy_items_within_move_engagement_horizon` a reçu le correctif par-figurine le
+        #      2026-06-03, celui-ci a été oublié) ;
+        #   2. même prune corrigée, le prédicat restait euclidien face à une exécution hex — deux
+        #      définitions d'une même règle, donc un invariant « masque ⊆ exécutable » qui ne tenait
+        #      que par la taille des socles du moment.
+        # Le masque offrait donc des destinations inexécutables et le training mourait sur
+        # « incohérence masque/exécution ». Lire `_enemy_adj` supprime les deux défauts d'un coup,
+        # rend la prune inutile (une appartenance à un set est déjà O(1)) et aligne FLY sur le sol.
+        #
+        # x5 et au-delà : les socles y sont multi-hex, donc ce chemin n'est pas emprunté — la
+        # branche vectorisée conserve la géométrie euclidienne (`_compute_mover_ez_forbidden_mask`).
 
         _m_bfs_start = _perf_clock.perf_counter() if _pt else None
         _sx = start_col
@@ -2743,29 +2762,14 @@ def movement_build_valid_destinations_pool(
                 # FLY ignore murs/figurines en traversée (21.03) : la distance de chemin EST la
                 # cube-distance, que cette boucle énumère déjà via (_dx, _dy).
                 _fly_cost = float(max(abs(_dx), abs(_dy), abs(_dx + _dy)))
-                if nb in _fly_walls or nb in _fly_occupied:
+                # Destination jamais sur une case occupée (03.01) ni dans l'EZ ennemie (unengaged
+                # 09.05) — `_enemy_adj` : MÊME ensemble que l'exécution, cf. le bloc ci-dessus.
+                if nb in _fly_walls or nb in _fly_occupied or nb in enemy_adjacent_hexes:
                     fly_rejected_footprint += 1
                 else:
-                    if _fly_ez_prox_set is not None and nb not in _fly_ez_prox_set:
-                        valid_destinations.append(nb)
-                        if out_costs is not None:
-                            out_costs[nb] = _fly_cost
-                    elif not _movement_engagement_violates(
-                        game_state,
-                        unit,
-                        nc,
-                        nr,
-                        {(nc, nr)},
-                        units_cache,
-                        enemy_adjacent_hexes if ez <= 1 else None,
-                        enemy_cache_items=_enemy_items_for_engagement_ez,
-                        engagement_zone_ez=ez,
-                    ):
-                        valid_destinations.append(nb)
-                        if out_costs is not None:
-                            out_costs[nb] = _fly_cost
-                    else:
-                        fly_rejected_footprint += 1
+                    valid_destinations.append(nb)
+                    if out_costs is not None:
+                        out_costs[nb] = _fly_cost
         _m_bfs_end = _perf_clock.perf_counter() if _pt else None
         if read_only:
             return valid_destinations
@@ -2823,7 +2827,8 @@ def movement_build_valid_destinations_pool(
     board_rows = require_key(game_state, "board_rows")
     wall_hexes_set = game_state.get("wall_hexes", set())
     base_size = unit["BASE_SIZE"]
-    is_single_hex = (ez <= 1 or base_size == 1)
+    # Socle mono-hex : géométrie hex (x1) ou socle de taille 1 (même prédicat que la branche FLY).
+    is_single_hex = (_geometry_is_hex(game_state) or base_size == 1)
 
     # Étape 4.1 : champ géodésique euclidien (any-angle) LIMITÉ au socle rond mono-hex
     # (base_size == 1), ground. Multi-hex / non-rond / fly restent sur le BFS hex → Étape 4b.
@@ -3090,7 +3095,7 @@ def movement_build_valid_destinations_pool(
                             r,
                             compute_candidate_footprint(c, r, unit, game_state),
                             units_cache,
-                            enemy_adjacent_hexes if ez <= 1 else None,
+                            enemy_adjacent_hexes,
                             enemy_cache_items=_enemy_items_for_engagement_ez,
                             engagement_zone_ez=ez,
                         )

@@ -6,9 +6,18 @@ from engine.spatial_relations import (
 )
 
 
-def test_move_clearance_legacy_uses_enemy_adjacent_hexes_membership() -> None:
+def test_move_clearance_hex_geometry_uses_enemy_adjacent_hexes_membership() -> None:
+    """Géométrie HEX (`inches_to_subhex <= 1`) → appartenance à l'ensemble pré-dilaté.
+
+    C'est la MÊME source que l'exécution (`build_move_blocked_cells_by_level` →
+    `validate_move_plan` / érosion du pool), d'où l'invariant « masque ⊆ exécutable » par
+    construction. La branche était choisie par `engagement_zone_ez <= 1`, un proxy de « board x1 »
+    devenu faux quand `engagement_zone` est passé de 1" à 2" ; elle l'est désormais par la
+    résolution (`spatial_relations.geometry_is_hex`), dont le seul critère est `inches_to_subhex`.
+    """
     mover = {"id": "u1", "player": 1}
     game_state = {
+        "inches_to_subhex": 1,
         "enemy_adjacent_hexes_player_1": {(2, 2)},
     }
 
@@ -21,7 +30,7 @@ def test_move_clearance_legacy_uses_enemy_adjacent_hexes_membership() -> None:
         units_cache={},
         enemy_adjacent_hexes=None,
         enemy_cache_items=[],
-        engagement_zone_ez=1,
+        engagement_zone_ez=2,
     ) is True
 
     assert move_anchor_violates_engagement_clearance(
@@ -33,7 +42,7 @@ def test_move_clearance_legacy_uses_enemy_adjacent_hexes_membership() -> None:
         units_cache={},
         enemy_adjacent_hexes={(2, 2)},
         enemy_cache_items=[],
-        engagement_zone_ez=1,
+        engagement_zone_ez=2,
     ) is False
 
 
@@ -132,33 +141,42 @@ def test_round_round_engagement_uses_hex_footprint_not_euclidean_clearance(monke
     ) is False
 
 
-def test_move_clearance_non_round_uses_hex_footprint_distance(monkeypatch) -> None:
-    # Chemin HEX explicite : move_anchor_violates lit engagement_distance_metric() (euclidien en prod
-    # depuis 7.6) → on épingle hex pour valider la branche empreinte non-ronde. En euclidien, la même
-    # config donnerait cell-min (~3.46 norm > 3.0 = ez×1.5 → False), couvert ailleurs.
+def test_move_clearance_hex_metric_ignores_socle_shape(monkeypatch) -> None:
+    """Métrique hex épinglée par CONFIG (pas par la résolution) : même routage que le x1.
+
+    En hex, l'EZ est l'ensemble dilaté — la forme du socle n'entre plus dans la décision, puisque
+    la dilatation a déjà été faite depuis les empreintes ennemies (`build_enemy_adjacent_hexes`).
+    C'est ce qui garantit que le pool et `validate_move_plan` lisent le MÊME ensemble. La distance
+    d'empreinte hex pour une paire non-ronde, elle, est couverte au niveau de la primitive
+    (`test_round_round_engagement_uses_hex_footprint_not_euclidean_clearance`).
+    """
     monkeypatch.setattr(
         "engine.spatial_relations.engagement_distance_metric",
         lambda *args, **kwargs: "hex",
     )
     mover = {"id": "u1", "player": 1, "BASE_SHAPE": "oval", "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5}
-    enemy_entry = {
-        "col": 0,
-        "row": 2,
-        "player": 2,
-        "BASE_SHAPE": "oval",
-        "BASE_SIZE": 2,
-        "MODEL_HEIGHT": 2.5,
-        "occupied_hexes": {(0, 2)},
-    }
 
+    # (0,0) est à distance hex 2 de l'ennemi (0,2) : il est donc dans la dilatation de rayon ez=2.
     assert move_anchor_violates_engagement_clearance(
-        {},
+        {"enemy_adjacent_hexes_player_1": {(0, 0), (0, 1)}},
         mover,
         0,
         0,
         {(0, 0)},
-        units_cache={"enemy": enemy_entry},
+        units_cache={},
         enemy_adjacent_hexes=None,
-        enemy_cache_items=[("enemy", enemy_entry)],
+        enemy_cache_items=[],
         engagement_zone_ez=2,
     ) is True
+
+    assert move_anchor_violates_engagement_clearance(
+        {"enemy_adjacent_hexes_player_1": {(0, 1)}},
+        mover,
+        0,
+        0,
+        {(0, 0)},
+        units_cache={},
+        enemy_adjacent_hexes=None,
+        enemy_cache_items=[],
+        engagement_zone_ez=2,
+    ) is False
