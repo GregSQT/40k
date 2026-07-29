@@ -13,7 +13,7 @@
 >
 > | | Valeur en vigueur | Source de vérité (à relire, jamais à recopier) |
 > |---|---|---|
-> | `obs_size` | **20 768** (2026-07-28, V11 §9 P3-2 — `charge_reachable_max_roll`) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) ; porté par `config/agents/<agent>/<agent>_training_config.json` → `observation_params` |
+> | `obs_size` | **20 828** (2026-07-29, V11 §0.40 point 3 — bloc « candidats de déploiement ») | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) ; porté par `config/agents/<agent>/<agent>_training_config.json` → `observation_params` |
 > | espace d'action | **1 107** (1 086 micro + 15 macro + **6 `CHOICE_i`**, V11 §9 P3-2) | `engine/macro_intents.py` (`TOTAL_ACTION_SIZE`), miroir de `shared_utils.SQUAD_ACTION_*` |
 >
 > - **L'observation n'est plus un vecteur** : c'est un `Dict` de **tenseurs d'entités** (chaque
@@ -739,11 +739,12 @@ Règles:
     },
 
     "observation_params": {
-      // SEULE clé de la section : recopie de ObservationBuilder.SQUAD_OBS_SIZE_TARGET (20626 au
-      // 2026-07-28). Un écart lève à l'init du moteur. perception_radius / max_nearby_units /
-      // max_valid_targets ont été SUPPRIMÉS le 2026-07-28 avec le pipeline mono-figurine :
-      // l'étendue perçue est celle de la grille égocentrique (engine/spatial_grid.py).
-      "obs_size": 20626
+      // SEULE clé de la section : recopie de ObservationBuilder.SQUAD_OBS_SIZE_TARGET (20828 au
+      // 2026-07-29 — VALEUR À RELIRE dans le code, jamais à recopier d'ici). Un écart lève à
+      // l'init du moteur. perception_radius / max_nearby_units / max_valid_targets ont été
+      // SUPPRIMÉS le 2026-07-28 avec le pipeline mono-figurine : l'étendue perçue est celle de
+      // la grille égocentrique (engine/spatial_grid.py).
+      "obs_size": 20828
     },
     
     "model_params": {
