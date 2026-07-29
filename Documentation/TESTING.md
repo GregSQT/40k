@@ -84,7 +84,7 @@ mesurés sur la suite entière.
 | `test_phase_start.py` | 18 | `movement_phase_start`, `shooting_phase_start`, `fight_phase_start` — phase, cache, pools |
 | `test_phase_transitions.py` | 14 | Transitions end-to-end move→shoot→fight : phase_start, BFS, attack sequence, kill |
 | `test_reward_calculator.py` | 23 | `_calculate_wound_target`, `_calculate_expected_damage`, `_determine_winner` |
-| `test_action_decoder.py` | 54 | `normalize_action_input`, `validate_action_against_mask`, `convert_gym_action` (5 phases + fight sub-phases), edge cases |
+| `test_action_decoder.py` | 34 | `normalize_action_input`, `validate_action_against_mask`, masque legacy `_build_mask_for_units`, sélection d'hex de déploiement (les cas `convert_gym_action` sont partis avec le décodeur mort) |
 | `test_observation_builder.py` | 22 | `ObservationBuilder.__init__`, wound_target, expected_damage, favorite_target |
 | `test_engine_turn_loop.py` | 24 | `W40KEngine._check_game_over`, `GameStateManager.determine_winner` (les 8 tests de `_advance_to_next_player` ont été supprimés avec la méthode, code mort — cf. V11 §0.4) |
 | `test_los_cache_invalidation.py` | 7 | `_invalidate_los_cache_for_moved_unit` — invalidation sélective/totale |

@@ -1,4 +1,8 @@
-"""Tests unitaires — ActionDecoder : normalize, validate_mask, convert_gym_action."""
+"""Tests unitaires — ActionDecoder : normalize, validate_mask, masque legacy, hex de deploiement.
+
+`convert_gym_action` (decodeur de l'ANCIEN espace d'actions) a ete supprime : le decodeur vivant
+est `convert_squad_action`, verrouille par `test_agent_interface_contract.py`.
+"""
 
 from __future__ import annotations
 
@@ -224,44 +228,14 @@ class TestValidateActionAgainstMask:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# convert_gym_action — move phase
+# Masque legacy (_build_mask_for_units) — phase shoot
+#
+# ⚠️ Ce masque decrit l'ANCIEN espace d'actions (0-15) et n'a plus de decodeur. Il ne survit
+# que pour `scripts/roster_matchup_stats.py` ; quand ce site sera migre, ces cas partiront avec
+# `get_action_mask_and_eligible_units`.
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestConvertGymActionMove:
-    def _make_gs(self) -> Dict[str, Any]:
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
-        gs = _build_gs(units, "move", current_player=1)
-        gs["move_activation_pool"] = [1]
-        gs["units_moved"] = set()
-        gs["units_fled"] = set()
-        return gs
-
-    def test_wait_returns_skip(self):
-        """conv_move_wait : action=11 (wait) → {action: skip}."""
-        d = _make_decoder()
-        result = d.convert_gym_action(11, self._make_gs())
-        assert result["action"] == "skip"
-        assert "unitId" in result
-
-    def test_fight_action_invalid_in_move(self):
-        """conv_move_fight_invalid : action=10 (fight) interdit en move → invalid."""
-        d = _make_decoder()
-        result = d.convert_gym_action(10, self._make_gs())
-        assert result["action"] == "invalid"
-        assert "forbidden_in_move_phase" in result.get("error", "")
-
-    def test_invalid_action_has_unit_id(self):
-        """conv_move_invalid_uid : action invalide contient unitId."""
-        d = _make_decoder()
-        result = d.convert_gym_action(10, self._make_gs())
-        assert "unitId" in result
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# convert_gym_action — shoot phase
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestConvertGymActionShoot:
+class TestLegacyMaskShoot:
     def _make_gs(self) -> Dict[str, Any]:
         units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
         gs = _build_gs(units, "shoot", current_player=1)
@@ -274,77 +248,17 @@ class TestConvertGymActionShoot:
         gs["units_advanced"] = set()
         return gs
 
-    def test_wait_returns_wait(self):
-        """conv_shoot_wait : action=11 → {action: wait}."""
-        d = _make_decoder()
-        result = d.convert_gym_action(11, self._make_gs())
-        assert result["action"] == "wait"
-        assert result.get("unitId") is not None
-
-    def test_invalid_fight_action_in_shoot(self):
-        """conv_shoot_fight_invalid : action=10 interdit en shoot → invalid."""
-        d = _make_decoder()
-        result = d.convert_gym_action(10, self._make_gs())
-        assert result["action"] == "invalid"
-
     def _make_gs_can_advance(self) -> Dict[str, Any]:
         """Game state with _can_advance=True for unit 1."""
         gs = self._make_gs()
         gs["units"][0]["_can_advance"] = True
         return gs
 
-    def _make_advance_mask(self) -> np.ndarray:
-        """Mask with advance slots 12-15 enabled (bypass real mask computation)."""
-        mask = np.zeros(31, dtype=bool)
-        mask[11] = True  # wait
-        mask[12] = mask[13] = mask[14] = mask[15] = True
-        return mask
-
-    # Refonte de l'espace d'action (commit afae93e9) : advance est déplacé en phase MOVE et
-    # décodé via build_squad_action_mask (squad_mask_26). L'ancien schéma advance-en-slots 12-15
-    # de la phase TIR n'existe plus → ces slots retournent désormais "invalid" en shoot. Les tests
-    # ci-dessous verrouillent cette suppression (garde-fou anti-régression du confinement à move).
-    def test_advance_slot_12_invalid_in_shoot(self):
-        """slot 12 (ancien advance) → invalid en shoot (advance déplacé en move)."""
-        d = _make_decoder()
-        gs = self._make_gs_can_advance()
-        mask = self._make_advance_mask()
-        eligible = [gs["units"][0]]
-        result = d.convert_gym_action(12, gs, action_mask=mask, eligible_units=eligible)
-        assert result["action"] == "invalid"
-
-    def test_advance_slot_13_invalid_in_shoot(self):
-        """slot 13 (ancien advance) → invalid en shoot (advance déplacé en move)."""
-        d = _make_decoder()
-        gs = self._make_gs_can_advance()
-        mask = self._make_advance_mask()
-        eligible = [gs["units"][0]]
-        result = d.convert_gym_action(13, gs, action_mask=mask, eligible_units=eligible)
-        assert result["action"] == "invalid"
-
-    def test_advance_slot_14_invalid_in_shoot(self):
-        """slot 14 (ancien advance) → invalid en shoot (advance déplacé en move)."""
-        d = _make_decoder()
-        gs = self._make_gs_can_advance()
-        mask = self._make_advance_mask()
-        eligible = [gs["units"][0]]
-        result = d.convert_gym_action(14, gs, action_mask=mask, eligible_units=eligible)
-        assert result["action"] == "invalid"
-
-    def test_advance_slot_15_invalid_in_shoot(self):
-        """slot 15 (ancien advance) → invalid en shoot (advance déplacé en move)."""
-        d = _make_decoder()
-        gs = self._make_gs_can_advance()
-        mask = self._make_advance_mask()
-        eligible = [gs["units"][0]]
-        result = d.convert_gym_action(15, gs, action_mask=mask, eligible_units=eligible)
-        assert result["action"] == "invalid"
-
     def test_advance_slots_all_masked_when_cannot_advance(self):
         """mask_shoot_no_adv : _can_advance=False → mask[12..15]=False."""
         d = _make_decoder()
         gs = self._make_gs()  # _can_advance=False
-        mask = d.get_action_mask(gs)
+        mask, _ = d.get_action_mask_and_eligible_units(gs)
         # Taille derivee du moteur (macro_intents.TOTAL_ACTION_SIZE), plus de la config : le
         # masque legacy n'occupe que ses indices bas, la longueur du tableau ne le concerne pas.
         assert len(mask) == TOTAL_ACTION_SIZE
@@ -358,7 +272,7 @@ class TestConvertGymActionShoot:
         gs = self._make_gs_can_advance()
         gs["shoot_activation_pool"] = ["1"]
         gs["active_shooting_unit"] = "1"
-        mask = d.get_action_mask(gs)
+        mask, _ = d.get_action_mask_and_eligible_units(gs)
         # Taille derivee du moteur (macro_intents.TOTAL_ACTION_SIZE), plus de la config : le
         # masque legacy n'occupe que ses indices bas, la longueur du tableau ne le concerne pas.
         assert len(mask) == TOTAL_ACTION_SIZE
@@ -372,98 +286,16 @@ class TestConvertGymActionShoot:
         gs["units_advanced"] = {"1"}
         gs["shoot_activation_pool"] = ["1"]
         gs["active_shooting_unit"] = "1"
-        mask = d.get_action_mask(gs)
+        mask, _ = d.get_action_mask_and_eligible_units(gs)
         for slot in [12, 13, 14, 15]:
             assert bool(mask[slot]) is False, f"mask[{slot}] should be False when already advanced"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# convert_gym_action — fight phase
+# normalize_action_input — cas limites et taille d'action space
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestConvertGymActionFight:
-    def _make_gs(self) -> Dict[str, Any]:
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]  # engagés (dist 1)
-        gs = _build_gs(units, "fight", current_player=1)
-        # État fight V11 : unité 1 engagée → éligible (machine de sélection).
-        gs["fight_subphase"] = "fight"
-        gs["fight_step"] = "remaining"
-        gs["fight_selector"] = 1
-        gs["engaged_at_fight_step_start"] = {"1": True, "2": True}
-        gs["units_selected_to_fight"] = set()
-        gs["units_charged"] = set()
-        return gs
-
-    def test_fight_action_10_returns_fight(self):
-        """conv_fight_10 : action=10 en fight → {action: fight}."""
-        d = _make_decoder()
-        result = d.convert_gym_action(10, self._make_gs())
-        assert result["action"] == "fight"
-        assert "unitId" in result
-
-    def test_fight_unit_id_is_first_eligible(self):
-        """conv_fight_uid : unitId correspond à la première unité éligible."""
-        d = _make_decoder()
-        gs = self._make_gs()
-        result = d.convert_gym_action(10, gs)
-        assert str(result["unitId"]) == "1"
-
-    def test_move_action_invalid_in_fight(self):
-        """conv_fight_move_invalid : action=0 (move) interdit en fight → invalid."""
-        d = _make_decoder()
-        result = d.convert_gym_action(0, self._make_gs())
-        assert result["action"] == "invalid"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# convert_gym_action — charge phase
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestConvertGymActionCharge:
-    def _make_gs(self) -> Dict[str, Any]:
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 15, 10)]
-        gs = _build_gs(units, "charge", current_player=1)
-        gs["charge_activation_pool"] = [1]
-        gs["active_charge_unit"] = None
-        gs["units_fled"] = set()
-        gs["units_cannot_charge"] = set()
-        return gs
-
-    def test_charge_action_9_returns_charge(self):
-        """conv_charge_9 : action=9 → {action: charge}."""
-        d = _make_decoder()
-        result = d.convert_gym_action(9, self._make_gs())
-        assert result["action"] == "charge"
-        assert "unitId" in result
-
-    def test_wait_in_charge_returns_skip(self):
-        """conv_charge_wait : action=11 → {action: skip}."""
-        d = _make_decoder()
-        result = d.convert_gym_action(11, self._make_gs())
-        assert result["action"] == "skip"
-
-    def test_fight_action_invalid_in_charge(self):
-        """conv_charge_fight_invalid : action=10 (fight) interdit en charge → invalid."""
-        d = _make_decoder()
-        result = d.convert_gym_action(10, self._make_gs())
-        assert result["action"] == "invalid"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# convert_gym_action — phase inconnue / cas limites
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestConvertGymActionEdgeCases:
-
-    def test_unknown_phase_returns_advance_phase_when_no_units(self):
-        """conv_unknown_no_units : phase inconnue, pas d'unités → advance_phase."""
-        units = [_unit(1, 1, 5, 10)]
-        gs = _build_gs(units, "move")
-        gs["phase"] = "command"  # phase sans pool
-        d = _make_decoder()
-        result = d.convert_gym_action(11, gs)
-        # Pas d'unités éligibles en command → advance_phase
-        assert result["action"] in ("advance_phase", "skip")
+class TestActionSpaceSizeAndEdgeCases:
 
     def test_action_space_size_is_derived_from_the_engine_not_the_config(self):
         """La taille de l'action space vient du plan d'actions du moteur, pas de la config.
@@ -507,10 +339,12 @@ class TestConvertGymActionEdgeCases:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# get_action_mask — fight phase mask
+# Masque legacy (_build_mask_for_units) — fight / move / charge
+#
+# ⚠️ Meme reserve que TestLegacyMaskShoot : masque de l'ANCIEN espace d'actions, sans decodeur.
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestGetActionMaskFight:
+class TestLegacyMaskFight:
 
     def test_fight_mask_has_action10_when_units_eligible(self):
         """mask_fight_10 : unité éligible en fight → mask[10]=True."""
@@ -524,7 +358,7 @@ class TestGetActionMaskFight:
         gs["units_selected_to_fight"] = set()
         gs["units_charged"] = {"1"}
         d = _make_decoder()
-        mask = d.get_action_mask(gs)
+        mask, _ = d.get_action_mask_and_eligible_units(gs)
         assert bool(mask[10]) is True
 
     def test_fight_mask_all_false_when_no_units(self):
@@ -536,7 +370,7 @@ class TestGetActionMaskFight:
         gs["active_alternating_activation_pool"] = []
         gs["non_active_alternating_activation_pool"] = []  # vide
         d = _make_decoder()
-        mask = d.get_action_mask(gs)
+        mask, _ = d.get_action_mask_and_eligible_units(gs)
         assert not any(mask)
 
     def test_move_mask_enables_directions_and_wait(self):
@@ -545,7 +379,7 @@ class TestGetActionMaskFight:
         gs = _build_gs(units, "move")
         gs["move_activation_pool"] = [1]
         d = _make_decoder()
-        mask = d.get_action_mask(gs)
+        mask, _ = d.get_action_mask_and_eligible_units(gs)
         for i in range(4):
             assert bool(mask[i]) is True
         assert bool(mask[11]) is True
@@ -559,78 +393,9 @@ class TestGetActionMaskFight:
         gs["units_fled"] = set()
         gs["units_cannot_charge"] = set()
         d = _make_decoder()
-        mask = d.get_action_mask(gs)
+        mask, _ = d.get_action_mask_and_eligible_units(gs)
         assert bool(mask[9]) is True
         assert bool(mask[11]) is True
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# convert_gym_action — fight phase, sous-phases alternating
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestConvertGymActionFightAlternating:
-    """Fight sous-phases alternating/alternating_non_active/alternating_active."""
-
-    def _make_gs(self, subphase: str, pool: List[int]) -> Dict[str, Any]:
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 15, 10)]
-        gs = _build_gs(units, "fight", current_player=1)
-        # V11 : sous-phase fight unique ; les unités du pool sont rendues éligibles (chargées).
-        # Le paramètre `subphase` (legacy V10) est ignoré.
-        gs["fight_subphase"] = "fight"
-        gs["fight_step"] = "remaining"
-        gs["fight_selector"] = 1
-        gs["engaged_at_fight_step_start"] = {}
-        gs["units_selected_to_fight"] = set()
-        gs["units_charged"] = {str(u) for u in pool}
-        return gs
-
-    def test_subphase_alternating_action10_returns_fight(self):
-        """alt_fight : fight_subphase='alternating', action=10 → {action: fight}."""
-        d = _make_decoder()
-        gs = self._make_gs("alternating", [1])
-        result = d.convert_gym_action(10, gs)
-        assert result["action"] == "fight"
-        assert "unitId" in result
-
-    def test_subphase_alternating_non_active_action10_returns_fight(self):
-        """alt_non_active_fight : fight_subphase='alternating_non_active', action=10 → {action: fight}."""
-        d = _make_decoder()
-        gs = self._make_gs("alternating_non_active", [1])
-        result = d.convert_gym_action(10, gs)
-        assert result["action"] == "fight"
-        assert str(result["unitId"]) == "1"
-
-    def test_subphase_alternating_active_action10_returns_fight(self):
-        """alt_active_fight : fight_subphase='alternating_active', action=10 → {action: fight}."""
-        d = _make_decoder()
-        gs = self._make_gs("alternating_active", [1])
-        gs["active_alternating_activation_pool"] = [1]
-        result = d.convert_gym_action(10, gs)
-        assert result["action"] == "fight"
-
-    def test_subphase_alternating_empty_pool_advance_phase(self):
-        """alt_empty : pool vide en fight alternating → advance_phase."""
-        d = _make_decoder()
-        gs = self._make_gs("alternating", [])  # pool vide
-        result = d.convert_gym_action(10, gs)
-        assert result["action"] == "advance_phase"
-
-    def test_subphase_alternating_dead_unit_not_eligible(self):
-        """alt_dead : unité morte dans le pool → filtrée → advance_phase."""
-        d = _make_decoder()
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 15, 10)]
-        units[0]["HP_CUR"] = 0  # unité 1 est morte
-        gs = _build_gs(units, "fight", current_player=1)
-        gs["fight_subphase"] = "alternating"
-        gs["charging_activation_pool"] = []
-        gs["active_alternating_activation_pool"] = []
-        gs["non_active_alternating_activation_pool"] = [1]  # uid 1 dans le pool, mais HP=0
-        # Mettre à jour units_cache HP à 0
-        from engine.phase_handlers.shared_utils import update_units_cache_hp
-        update_units_cache_hp(gs, "1", 0)
-        result = d.convert_gym_action(10, gs)
-        # L'unité morte est filtrée → pool vide → advance_phase
-        assert result["action"] == "advance_phase"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

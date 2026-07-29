@@ -82,7 +82,6 @@ qui rend le projet de l'utilisateur faisable.
 | Fichier | Ligne | Fonction | Métrique | Usage |
 |---------|-------|----------|----------|-------|
 | engine/observation_builder.py | 682-695 | calcul move_distance | Hex cube | Observation : distance parcourue |
-| engine/phase_handlers/movement_handlers.py | 120-170 | `_build_objective_distance_cache()` | Pathfinding | Cache distances objectifs |
 | ai/analyzer_phases/move_handler.py | 358-380 | calcul fly_distance | Hex cube | Move fly : distance droite |
 
 ## 7. BACKEND — Charge (charge phase)
@@ -205,7 +204,7 @@ par-dessus les coordonnées hex.
 
 1. **Murs / pathfinding (le vrai piège).**
    Aujourd'hui la distance max de move et de charge = **pathfinding BFS qui
-   contourne les murs** (`_charge_bfs_max_distance`, `_build_objective_distance_cache`).
+   contourne les murs** (`_charge_bfs_max_distance`).
    L'euclidien pur ignore les murs → une unité pourrait « atteindre » une case à
    travers un mur. Il faut décider :
    - soit euclidien **uniquement** pour la portée droite (tir), et garder le

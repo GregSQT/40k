@@ -200,7 +200,7 @@ engine/
 - `_determine_winner()` - Determine winner or draw
 
 **Delegation Methods:**
-- `get_action_mask()` → `action_decoder.get_action_mask()`
+- `get_action_mask()` → `action_decoder.get_squad_action_mask_and_eligible_units()`
 - `_build_observation()` → `obs_builder.build_squad_observation()` + `build_squad_grid()`
 - `_calculate_reward()` → `reward_calculator.calculate_reward()`
 - `_convert_gym_action()` → `action_decoder.convert_squad_action()`
@@ -324,9 +324,8 @@ engine/
 
 **Key Methods:**
 - `__init__(config)` - Initialize decoder
-- `get_action_mask(game_state)` - Return boolean mask (12 actions)
-- `convert_gym_action(action, game_state)` - Convert int→semantic action
-- `_get_valid_actions_for_phase(phase)` - Get valid action IDs for phase
+- `get_squad_action_mask_and_eligible_units(game_state)` - Return (mask, eligible_units) sur l'espace d'actions courant (`macro_intents.TOTAL_ACTION_SIZE`)
+- `convert_squad_action(action_int, game_state)` - Convert int→semantic action (seul décodeur ; `convert_gym_action`, décodeur de l'ancien espace 0-15, a été supprimé — code mort)
 - `_get_eligible_units_for_current_phase(game_state)` - Get units from activation pool
 - `get_all_valid_targets(unit, game_state)` - Get all possible targets
 - `can_melee_units_charge_target(target, game_state)` - Check charge possibility
