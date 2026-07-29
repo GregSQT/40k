@@ -4855,10 +4855,16 @@ def charge_build_valid_plan(
     if not mids:
         return None
 
-    ish = int(require_key(game_state, "inches_to_subhex"))
+    from engine.phase_handlers.charge_handlers import _charge_budget_subhex
     from engine.phase_handlers.movement_handlers import squad_descent_penalty_subhex
 
-    budget = max(0, int(charge_roll) * ish - squad_descent_penalty_subhex(game_state, squad_id))
+    # Budget = jet 2D6 en subhex MOINS 2" si le vol est déclaré (21.03). Le calcul passe par
+    # `_charge_budget_subhex`, source unique des budgets de charge : recalculer `roll × ish` en
+    # ligne ici laissait le chemin d'exécution de l'agent (`squad_charge`) ignorer le malus, alors
+    # que `squad_descent_penalty_subhex` lui accordait déjà l'ignore vertical du vol — soit
+    # exactement le défaut « traversée gratuite », rejoué en phase de charge.
+    budget = max(0, _charge_budget_subhex(game_state, squad_id, int(charge_roll))
+                 - squad_descent_penalty_subhex(game_state, squad_id))
     if budget <= 0:
         return None
 

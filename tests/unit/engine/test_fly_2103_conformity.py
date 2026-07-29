@@ -41,6 +41,7 @@ from engine.phase_handlers.movement_handlers import (
 from engine.phase_handlers.shared_utils import (
     build_enemy_adjacent_hexes,
     build_units_cache,
+    charge_build_valid_plan,
     get_squad_move_budget,
 )
 
@@ -260,3 +261,185 @@ def test_take_to_the_skies_does_not_leak_outside_the_moves_2103_covers():
     consolidation (phase fight) n'en font pas partie : pas de traversée hors de ces mouvements."""
     gs = _fly_gs(move=5, gym=True, declared=True, phase="fight")
     assert _fly_traversal_active(gs, gs["unit_by_id"]["1"], "1") is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. 21.03 nomme le CHARGE MOVE : l'IA y a droit, et au même prix
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CHARGE_START = (10, 20)
+_CHARGE_ENEMY = (14, 20)  # 4 hexes → le B2B le plus proche est à 3 hexes de trajet
+_FLOOR_HEIGHT_INCHES = 3.0
+
+
+def _charge_gs(*, fly: bool, level: int = 0, gym: bool = True) -> Dict[str, Any]:
+    """`game_state` minimal pour `charge_build_valid_plan` — le chemin d'exécution de l'agent
+    (`w40k_core.squad_charge`). `inches_to_subhex = 1`, plancher de niveau 1 haut de 3"."""
+    # Casse MAJUSCULE : celle du vrai roster d'ArmageddonAgent.
+    keywords = [{"keywordId": "FLY"}] if fly else []
+    charger = {
+        "id": 1, "player": 1, "col": _CHARGE_START[0], "row": _CHARGE_START[1], "MOVE": 6,
+        "HP_CUR": 1, "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": keywords,
+        "level": level,
+    }
+    target = {
+        "id": 2, "player": 2, "col": _CHARGE_ENEMY[0], "row": _CHARGE_ENEMY[1], "MOVE": 6,
+        "HP_CUR": 1, "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": [], "level": 0,
+    }
+    floor_hexes = [
+        [_CHARGE_START[0] + dc, _CHARGE_START[1] + dr] for dc in (-1, 0, 1) for dr in (-1, 0, 1)
+    ]
+    return {
+        "models_cache": {
+            "1#0": {"col": _CHARGE_START[0], "row": _CHARGE_START[1], "level": level,
+                    "player": 1, "squad_id": "1", "HP_CUR": 1, "BASE_SHAPE": "round",
+                    "BASE_SIZE": 1, "orientation": 0},
+            "2#0": {"col": _CHARGE_ENEMY[0], "row": _CHARGE_ENEMY[1], "level": 0,
+                    "player": 2, "squad_id": "2", "HP_CUR": 1, "BASE_SHAPE": "round",
+                    "BASE_SIZE": 1, "orientation": 0},
+        },
+        "squad_models": {"1": ["1#0"], "2": ["2#0"]},
+        "units_cache": {
+            "1": {"col": _CHARGE_START[0], "row": _CHARGE_START[1], "player": 1,
+                  "occupied_hexes": {_CHARGE_START}, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+            "2": {"col": _CHARGE_ENEMY[0], "row": _CHARGE_ENEMY[1], "player": 2,
+                  "occupied_hexes": {_CHARGE_ENEMY}, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+        },
+        "units": [charger, target],
+        "unit_by_id": {"1": charger, "2": target},
+        "board_cols": 44, "board_rows": 60,
+        "wall_hexes": set(),
+        "enemy_adjacent_hexes_player_1": set(),
+        "config": {
+            "game_rules": {"engagement_zone": 1, "unit_model_cohesion_range": 2,
+                           "unit_global_cohesion_range": 9,
+                           "cohesion_distance_mode": "euclidean", "squad_min_neighbors": 1},
+        },
+        "phase": "charge",
+        "gym_training_mode": gym,
+        "inches_to_subhex": 1,
+        "units_took_to_skies": set(),
+        "units_took_to_skies_charge": set(),
+        "units_advanced": set(),
+        "units_fled": set(),
+        "current_player": 1,
+        "terrain_areas": [
+            {"floors": [{"level": 1, "height_inches": _FLOOR_HEIGHT_INCHES,
+                         "hexes": floor_hexes}]},
+        ],
+    }
+
+
+def test_ai_flying_unit_can_take_to_the_skies_on_a_charge():
+    """21.03 : « Each time a FLYING unit is selected to make a normal, advance, fall-back or
+    CHARGE move [...] the active player can declare that it will take to the skies. » Le vol de
+    charge était refusé à toute unité pilotée par le modèle."""
+    from engine.phase_handlers.charge_handlers import _charge_fly_active
+
+    gs = _charge_gs(fly=True)
+    assert _charge_fly_active(gs, gs["unit_by_id"]["1"], "1") is True
+
+    grounded = _charge_gs(fly=False)
+    assert _charge_fly_active(grounded, grounded["unit_by_id"]["1"], "1") is False
+
+
+def test_ai_charge_flight_pays_the_two_inches_on_the_execution_path():
+    """Sur `charge_build_valid_plan` — la fonction qu'exécute `squad_charge`, donc l'agent — le
+    vol de charge coûte 2" comme n'importe quelle prise d'altitude. Un jet qui suffit au sol ne
+    suffit plus en vol ; il faut 2" de plus."""
+    # Trajet requis jusqu'au B2B : 3 subhex.
+    assert charge_build_valid_plan(_charge_gs(fly=False), "1", ["2"], 3) is not None
+    assert charge_build_valid_plan(_charge_gs(fly=True), "1", ["2"], 3) is None
+    assert charge_build_valid_plan(_charge_gs(fly=True), "1", ["2"], 5) is not None
+
+
+def test_ai_charge_flight_ignores_vertical_distance_but_still_pays():
+    """Depuis un étage : le vol supprime le coût de descente (« Ignore all vertical distance »)
+    et facture 2". Les deux effets sortent de la MÊME déclaration."""
+    # Descente = 3 subhex (plancher de niveau 1 haut de 3"), trajet = 3 subhex.
+    # Au sol : jet 5 → budget 5 - 3 = 2 < 3 → impossible.
+    assert charge_build_valid_plan(_charge_gs(fly=False, level=1), "1", ["2"], 5) is None
+    # En vol : jet 5 → budget 5 - 2 (skies) - 0 (vertical ignoré) = 3 → possible.
+    assert charge_build_valid_plan(_charge_gs(fly=True, level=1), "1", ["2"], 5) is not None
+    # Mais le vol ne rend pas la charge gratuite : jet 4 → budget 2 < 3.
+    assert charge_build_valid_plan(_charge_gs(fly=True, level=1), "1", ["2"], 4) is None
+
+
+def test_human_charge_flight_still_requires_an_explicit_declaration():
+    """Le joueur humain, lui, déclare : sans déclaration, pas de vol de charge."""
+    from engine.phase_handlers.charge_handlers import _charge_fly_active
+
+    gs = _charge_gs(fly=True, gym=False)
+    assert _charge_fly_active(gs, gs["unit_by_id"]["1"], "1") is False
+    gs["units_took_to_skies_charge"] = {"1"}
+    assert _charge_fly_active(gs, gs["unit_by_id"]["1"], "1") is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. Preuve IN-ENGINE — pas une reconstruction hors moteur
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ARMAGEDDON_TRAINING_SCENARIO = (
+    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json"
+)
+
+
+def test_in_engine_armageddon_flying_units_fly_and_pay_for_it():
+    """Sur le VRAI chemin : un `W40KEngine` construit sur le scénario d'entraînement
+    d'ArmageddonAgent, avec `gym_training_mode=True` — exactement ce que passe
+    `ai/training_utils.py`. Aucune reconstruction hors moteur.
+
+    La sonde ÉCHOUE si elle n'a rien vu : « aucune violation » ne peut pas vouloir dire « la
+    sonde n'a rien regardé ». Le scénario tire son roster au sort (`training_random`) parmi
+    deux ; on rejoue jusqu'à rencontrer celui qui porte les unités à réacteurs.
+    """
+    from ai.unit_registry import UnitRegistry
+    from engine.phase_handlers.charge_handlers import _charge_fly_active
+    from engine.w40k_core import W40KEngine
+
+    env = W40KEngine(
+        rewards_config="default",
+        training_config_name="x1",
+        controlled_agent="ArmageddonAgent",
+        active_agents=None,
+        scenario_file=_ARMAGEDDON_TRAINING_SCENARIO,
+        unit_registry=UnitRegistry(),
+        quiet=True,
+        gym_training_mode=True,
+    )
+
+    inspected = 0
+    flying_seen: Dict[str, Tuple[int, int]] = {}
+    for _ in range(25):
+        if flying_seen:
+            break
+        env.reset()
+        gs = env.game_state
+        assert gs["gym_training_mode"] is True, "le flag d'entraînement n'atteint pas game_state"
+        ish = int(gs["inches_to_subhex"])
+        for unit in gs["units"]:
+            inspected += 1
+            if not _unit_has_keyword(unit, "fly"):
+                continue
+            uid = str(unit["id"])
+            utype = str(unit["unitType"])
+
+            # 1. Reconnue volante → la déclaration 21.03 est active, en move ET en charge.
+            for phase, charge in (("move", False), ("charge", True)):
+                gs["phase"] = phase
+                assert took_to_the_skies(gs, unit, uid, charge=charge) is True, f"{utype}/{phase}"
+                assert _fly_traversal_active(gs, unit, uid) is True, f"{utype}/{phase}"
+            gs["phase"] = "charge"
+            assert _charge_fly_active(gs, unit, uid) is True, utype
+
+            # 2. Et elle PAIE : 2 POUCES convertis par `inches_to_subhex`.
+            gs["phase"] = "move"
+            budget = get_squad_move_budget(uid, gs, "normal")
+            assert budget == max(0, int(unit["MOVE"]) - 2 * ish), utype
+            flying_seen[utype] = (int(unit["MOVE"]), budget)
+
+    assert inspected > 0, "SONDE MUETTE : aucune unité inspectée"
+    assert flying_seen, (
+        f"SONDE MUETTE : aucune unité volante rencontrée en 25 tirages de roster "
+        f"({inspected} unités inspectées)"
+    )

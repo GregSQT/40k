@@ -52,16 +52,17 @@ def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
     return shared_unit_has_rule_effect(unit, rule_id)
 
 
-def _charge_is_ai_unit(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
-    """IA gym / PvE joueur 2 : pilotée par le modèle, jamais de déclaration humaine de vol."""
-    is_gym = bool(game_state.get("gym_training_mode", False))
-    is_pve = bool(game_state.get("pve_mode", False)) or bool(game_state.get("is_pve_mode", False))
-    return is_gym or (is_pve and int(require_key(unit, "player")) == 2)
+def _charge_fly_declared(game_state: Dict[str, Any], unit: Dict[str, Any], unit_id: Any) -> bool:
+    """True si le vol de charge (take to the skies, 21.03) est DÉCLARÉ pour ce mouvement.
 
+    Délègue à la SOURCE UNIQUE partagée avec la phase de mouvement (`took_to_the_skies`) : c'est
+    elle qui tranche aussi pour les unités pilotées par le modèle, lesquelles ne peuvent recevoir
+    aucune déclaration humaine. 21.03 nomme explicitement le *charge move* — l'IA y a donc droit
+    au même titre qu'en mouvement, et au même prix.
+    """
+    from .movement_handlers import took_to_the_skies
 
-def _charge_fly_declared(game_state: Dict[str, Any], unit_id: Any) -> bool:
-    """True si le vol de charge (take to the skies) a été DÉCLARÉ pour cette unité ce tour."""
-    return str(unit_id) in game_state.get("units_took_to_skies_charge", set())
+    return took_to_the_skies(game_state, unit, unit_id, charge=True)
 
 
 def _charge_fly_active(
@@ -73,29 +74,37 @@ def _charge_fly_active(
 ) -> bool:
     """Take to the skies en CHARGE (Règles 21.03) : la traversée FLY (murs + figurines + ignore
     vertical) est active si l'unité a le keyword fly ET :
-    - IA (gym / PvE J2) → JAMAIS (comportement de charge IA inchangé, pas de régression training) ;
-    - humain, ``for_eligibility`` → toujours (l'éligibilité est généreuse : la charge est proposée
-      si une cible est atteignable par les airs, même avant déclaration) ;
-    - humain, mouvement réel → seulement si le vol a été déclaré (``units_took_to_skies_charge``).
+    - ``for_eligibility`` → toujours (l'éligibilité est généreuse : 21.03 laisse le joueur libre de
+      déclarer à chaque charge, donc la charge doit être PROPOSÉE si une cible est atteignable par
+      les airs, même avant déclaration) ;
+    - mouvement réel → seulement si le vol est déclaré pour ce mouvement (``_charge_fly_declared``,
+      qui délègue à la source unique `took_to_the_skies`).
     Source unique partagée par les 4 BFS de charge et le pool d'éligibilité.
+
+    21.03 énumère le *charge move* : une unité pilotée par le modèle y a droit comme en mouvement.
+    Le cas « IA → JAMAIS » qui figurait ici privait l'agent d'une règle du jeu.
     """
     from .movement_handlers import _unit_has_keyword
     if not _unit_has_keyword(unit, "fly"):
         return False
-    if _charge_is_ai_unit(game_state, unit):
-        return False
     if for_eligibility:
         return True
-    return _charge_fly_declared(game_state, unit_id)
+    return _charge_fly_declared(game_state, unit, unit_id)
 
 
 def _charge_budget_subhex(game_state: Dict[str, Any], unit_id: Any, charge_roll_inches: int) -> int:
     """Budget de mouvement de charge en sous-hex = jet 2D6 (pouces) × ``inches_to_subhex``, moins
-    2" (Règles 21.03) si le vol a été DÉCLARÉ pour cette unité. Source unique des 4 sites de calcul
-    de distance de charge. Le malus ne s'applique qu'à la déclaration humaine (l'IA ne déclare pas)."""
+    2" (Règles 21.03) si le vol est déclaré pour ce mouvement. Source unique des sites de calcul de
+    distance de charge — y compris `charge_build_valid_plan`, le chemin d'exécution de l'agent.
+
+    La déclaration lue est celle de `_charge_fly_active` : traverser et payer sont indissociables.
+    """
+    unit = get_unit_by_id(game_state, unit_id)
+    if unit is None:
+        raise KeyError(f"_charge_budget_subhex: unité {unit_id!r} introuvable")
     ish = int(game_state["inches_to_subhex"])
     budget = int(charge_roll_inches) * ish
-    if _charge_fly_declared(game_state, unit_id):
+    if _charge_fly_declared(game_state, unit, unit_id):
         budget -= 2 * ish
     return max(0, budget)
 
