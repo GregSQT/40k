@@ -65,6 +65,7 @@ mesurés sur la suite entière.
 | `test_movement_pool_build.py` | 7 | `movement_build_valid_destinations_pool`, `_movement_engagement_violates` |
 | `test_move_eligibility.py` | 12 | `get_eligible_units` (move), activation pool, `movement_preview`, `movement_clear_preview` |
 | `test_move_resolution.py` | 5 | BFS destinations : plateau vide, murs, alliés, EZ, unité FLY |
+| `test_fly_2103_conformity.py` | 31 | **Take to the skies (21.03)** : mot-clé FLY insensible à la casse sur le VRAI roster d'ArmageddonAgent chargé par `UnitRegistry` ; malus de 2″ converti par `inches_to_subhex` ; invariant « traversée ⟺ 2″ payés » (jamais dissociables) ; couverture move ET charge, exclusion de pile-in/consolidation ; éligibilité au move bornée par le budget réel et non par `MOVE` brut (masque ⊆ exécutable, §0.34) ; garde de phase du malus ; **preuve in-engine** sur `scenario_training_armageddon.json` avec sonde qui échoue si elle n'a rien vu |
 | `test_move_execution.py` | 16 | `_attempt_movement_to_destination` : position, cache, flee, EZ, enemy_adjacent_hexes + socles non ronds |
 | `test_charge_eligibility.py` | 9 | `get_eligible_units` (charge) — filtres player/EZ/fled/cannot_charge/advanced/no-target |
 | `test_charge_resolution.py` | — | BFS destinations charge |

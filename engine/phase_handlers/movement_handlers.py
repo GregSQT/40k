@@ -2621,8 +2621,10 @@ def movement_build_valid_destinations_pool(
 
     _m_prep_end = _perf_clock.perf_counter() if _pt else None
 
-    # Take to the skies (Règles 21.03) : en phase move, une unité FLY ne traverse murs/figurines
-    # QUE si le joueur a déclaré le vol. Logique partagée via _fly_traversal_active.
+    # Take to the skies (Règles 21.03) : une unité FLY ne traverse murs/figurines QUE si le vol est
+    # déclaré pour le mouvement en cours. Qui déclare : le joueur humain via le handler dédié ;
+    # pour une unité pilotée par le modèle, `took_to_the_skies` tranche (politique moteur, cf. sa
+    # docstring). Logique partagée via _fly_traversal_active.
     _fly_active = _fly_traversal_active(game_state, unit, unit_id)
 
     # Squad move rigide (destination sol) : si des figs partent de l'étage, retrancher le coût de
@@ -3425,8 +3427,11 @@ def movement_build_model_destinations_pool(
     other_occupied = other_occ_by_level.get(view_level, set())
     same_squad_occupied = same_squad_occ_by_level.get(view_level, set())
 
-    # Take to the skies (Règles 21.03) : traversée FLY active seulement si vol déclaré (phase move,
-    # humain) — sinon BFS sol. Pilote le reachable par-figurine ET, via lui, la validation au commit.
+    # Take to the skies (Règles 21.03) : traversée FLY active seulement si le vol est déclaré pour le
+    # mouvement en cours — sinon BFS sol. Vaut pour les DEUX mouvements que 21.03 couvre ici, le move
+    # et la charge : `_fly_traversal_active` lit le set de déclarations de la phase courante, et pour
+    # une unité pilotée par le modèle c'est `took_to_the_skies` qui tranche.
+    # Pilote le reachable par-figurine ET, via lui, la validation au commit.
     has_fly = _fly_traversal_active(game_state, unit, squad_id)
 
     # Desperate Escape : unité battle-shocked tentant un fall-back depuis l'ER ennemie.
