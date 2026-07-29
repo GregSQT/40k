@@ -39,7 +39,6 @@ else:
     ### ai/
         "ai/evaluation_bots.py",
         "ai/metrics_tracker.py",
-        "ai/scenario_manager.py",
         "ai/target_selection_monitor.py",
         "ai/train.py",
         "ai/unit_registry.py",

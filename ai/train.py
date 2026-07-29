@@ -970,7 +970,6 @@ def _load_rule_checker_scenarios(project_root_path: str) -> List[str]:
 
 
 # Multi-agent orchestration imports
-from ai.scenario_manager import ScenarioManager
 from config_loader import get_config_loader, get_max_turns
 import torch
 
@@ -3761,45 +3760,6 @@ def test_trained_model(model, num_episodes, training_config_name="default", agen
     env.close()
     return win_rate, avg_reward
 
-def test_scenario_manager_integration():
-    """Test scenario manager integration."""
-    print("🧪 Testing Scenario Manager Integration")
-    print("=" * 50)
-    
-    try:
-        config = get_config_loader()
-        
-        # Test unit registry integration
-        unit_registry = UnitRegistry()
-        
-        # Test scenario manager
-        scenario_manager = ScenarioManager(config, unit_registry)
-        print(f"✅ ScenarioManager initialized with {len(scenario_manager.get_available_templates())} templates")
-        agents = unit_registry.get_required_models()
-        print(f"✅ UnitRegistry found {len(agents)} agents: {agents}")
-        
-        # Test scenario generation
-        if len(agents) >= 2:
-            template_name = scenario_manager.get_available_templates()[0]
-            scenario = scenario_manager.generate_training_scenario(
-                template_name, agents[0], agents[1]
-            )
-            print(f"✅ Generated scenario with {len(scenario['units'])} units")
-        
-        # Test training rotation
-        rotation = scenario_manager.get_balanced_training_rotation(100)
-        print(f"✅ Generated training rotation with {len(rotation)} matchups")
-        
-        print("🎉 Scenario manager integration tests passed!")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Integration test failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-
 def _get_curriculum_log_path(agent_key: str) -> str:
     """Return the curriculum log path for an agent."""
     return os.path.join(project_root, "logs", f"{agent_key}.curriculum.log")
@@ -4425,8 +4385,6 @@ def main():
                        help="Train specific agent (e.g., 'SpaceMarine_Ranged')")
     parser.add_argument("--total-episodes", type=int, default=None,
                        help="Total episodes for training (overrides config file value)")
-    parser.add_argument("--test-integration", action="store_true",
-                       help="Test scenario manager integration")
     parser.add_argument("--step", action="store_true",
                        help="Enable step-by-step action logging to step.log")
     parser.add_argument("--convert-steplog", type=str, metavar="STEPLOG_FILE",
@@ -4556,13 +4514,8 @@ def main():
             success = generate_steplog_and_replay(config, args)
             return 0 if success else 1
 
-        # Test integration if requested
-        if args.test_integration:
-            success = test_scenario_manager_integration()
-            return 0 if success else 1
-        
         # Test-only mode - check BEFORE training
-        elif args.test_only:
+        if args.test_only:
             if not args.agent:
                 raise ValueError("--agent parameter required for --test-only mode")
 

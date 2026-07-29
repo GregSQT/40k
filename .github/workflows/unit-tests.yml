@@ -35,7 +35,6 @@ jobs:
             --cov=shared \
             --cov=services \
             --cov=ai/reward_mapper.py \
-            --cov=ai/scenario_manager.py \
             --cov=ai/replay_converter.py \
             --cov=ai/metrics_tracker.py \
             --cov=ai/game_replay_logger.py \

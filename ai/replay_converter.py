@@ -130,7 +130,6 @@ def generate_steplog_and_replay(config, args):
         
         W40KEngine, _ = setup_imports()
         from ai.unit_registry import UnitRegistry
-        from ai.scenario_manager import ScenarioManager
         unit_registry = UnitRegistry()
         
         # Use actual bot scenarios instead of generating dynamic ones
