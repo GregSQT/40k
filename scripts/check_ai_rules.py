@@ -357,6 +357,36 @@ def check_coordinate_normalization(path: Path, text: str) -> List[RuleViolation]
     return violations
 
 
+def iter_lines_with_docstring_state(text: str):
+    """Rend `(idx, line, stripped, in_doc)` pour chaque ligne, `in_doc` = la ligne est DANS
+    une docstring (ouvrante et fermante comprises).
+
+    SOURCE UNIQUE du suivi d'etat, partagee par `check_fallback_anti_error` et
+    `check_forbidden_terms`. Les deux en avaient besoin ; une seule l'avait, et la
+    divergence a produit un faux positif (2026-07-29) : `check_fallback_anti_error`
+    n'ecartait que les lignes `#`, donc une docstring qui CITE le motif supprime pour
+    expliquer sa correction etait signalee comme si elle l'appliquait. Recopier ce suivi
+    dans chaque regle, c'etait garantir qu'il diverge a nouveau.
+
+    Detection : un nombre IMPAIR de marqueurs sur une ligne fait basculer l'etat.
+
+    Cas que ce comptage seul RATE, traite a part : la docstring tenant sur UNE ligne
+    (`\"\"\"texte\"\"\"`). Ses deux marqueurs se comptent sur la meme ligne, le total est PAIR,
+    l'etat ne bascule pas — la ligne passait donc pour du code. Une ligne dont la forme nue
+    COMMENCE par un marqueur est du texte, qu'elle ferme sa docstring ou non.
+    """
+    in_docstring = False
+    for idx, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        was_in_docstring = in_docstring
+        opens_with_marker = stripped.startswith('"""') or stripped.startswith("'''")
+        for marker in ('"""', "'''"):
+            if stripped.count(marker) % 2 == 1:
+                in_docstring = not in_docstring
+                break
+        yield idx, line, stripped, (was_in_docstring or in_docstring or opens_with_marker)
+
+
 def check_fallback_anti_error(path: Path, text: str) -> List[RuleViolation]:
     """
     Detect anti-error fallbacks.
@@ -388,15 +418,23 @@ def check_fallback_anti_error(path: Path, text: str) -> List[RuleViolation]:
         re.compile(r'#\s*exception.*get', re.IGNORECASE),
     ]
 
-    for idx, line in enumerate(lines, start=1):
+    for idx, line, stripped, in_doc in iter_lines_with_docstring_state(text):
         if any(ac.search(line) for ac in allowed_contexts):
             continue
-        # Une ligne ENTIEREMENT commentaire ne contient aucun code executable : un `.get(k, 0)`
-        # qui y apparait documente un fallback (souvent celui qu'on vient de SUPPRIMER), il n'en
-        # est pas un. Sans ce skip, ecrire « l'ancien tgt_uc.get("col", 0) rendait (0,0) » pour
-        # expliquer une correction declenchait une violation — l'outil punissait la
-        # documentation du bon comportement.
-        if line.lstrip().startswith("#"):
+        # Une ligne ENTIEREMENT commentaire ou DANS une docstring ne contient aucun code
+        # executable : un `.get(k, 0)` qui y apparait documente un fallback (souvent celui
+        # qu'on vient de SUPPRIMER), il n'en est pas un. Sans ce skip, ecrire « l'ancien
+        # tgt_uc.get("col", 0) rendait (0,0) » pour expliquer une correction declenchait une
+        # violation — l'outil punissait la documentation du bon comportement.
+        #
+        # ⚠️ Doctrine DIFFERENTE de `check_forbidden_terms`, et c'est voulu. Cette regle-ci
+        # cherche une SYNTAXE de code (`.get(x, [])`) : citee dans du texte, elle ne s'execute
+        # jamais, l'exemption est donc inconditionnelle. La regle voisine cherche des MOTS
+        # (« fallback », « magic number ») : une docstring qui PROMET un fallback est un fait de
+        # conception, elle n'y est donc exemptee que si elle porte une formulation d'interdiction.
+        # Compromis assume, identique a celui deja acte pour `#` : une docstring qui promettrait
+        # un fallback en le donnant sous forme de code n'est pas attrapee ici.
+        if stripped.startswith("#") or in_doc:
             continue
         for pattern, message in fallback_patterns:
             if pattern.search(line):
@@ -443,18 +481,11 @@ def check_forbidden_terms(path: Path, text: str) -> List[RuleViolation]:
     # documentation du bon comportement (5 cas dans le depot au 2026-07-27). Le meme
     # compromis est deja assume par le controle col/row (cf. l'en-tete de ce fichier).
     # Seules les lignes portant une formulation d'INTERDICTION sont exemptees : une docstring
-    # qui PROMETTRAIT un fallback reste signalee.
-    in_docstring = False
-    for idx, line in enumerate(text.splitlines(), start=1):
-        stripped = line.strip()
-        was_in_docstring = in_docstring
-        for marker in ('"""', "'''"):
-            # Nombre IMPAIR de marqueurs sur la ligne => l'etat bascule.
-            if stripped.count(marker) % 2 == 1:
-                in_docstring = not in_docstring
-                break
-
-        if stripped.startswith("#") or was_in_docstring or in_docstring:
+    # qui PROMETTRAIT un fallback reste signalee. Le suivi lui-meme vit desormais dans
+    # `iter_lines_with_docstring_state` (source unique) : le dupliquer ici est ce qui avait
+    # laisse `check_fallback_anti_error` sans ce traitement.
+    for idx, line, stripped, in_doc in iter_lines_with_docstring_state(text):
+        if stripped.startswith("#") or in_doc:
             comment_lower = stripped.lstrip("#\"' ").lower()
             if any(term in comment_lower for term in prohibition_comment_terms):
                 continue
