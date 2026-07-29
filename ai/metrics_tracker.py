@@ -35,9 +35,42 @@ import numpy as np
 from collections import deque
 from torch.utils.tensorboard.writer import SummaryWriter
 import os
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Protocol
 from shared.data_validation import require_key
 from config_loader import get_config_loader
+
+
+class MetricsWriter(Protocol):
+    """Les QUATRE methodes que le tracker demande a son writer TensorBoard.
+
+    Releve exhaustif des usages de `self.writer` (tracker) et de
+    `metrics_tracker.writer` (ai/training_callbacks.py l.958, 2149, 2231) : `add_scalar`,
+    `add_custom_scalars`, `flush`, `close`. Rien d'autre — ni `add_histogram`, ni
+    `add_graph`, ni `log_dir`, ni le contexte de fichier d'evenements.
+
+    Annoncer `SummaryWriter` obligeait chaque test a un cast dans les DEUX sens sur le meme
+    attribut (`cast(SummaryWriter, doublure)` en ecriture, `cast(_DummyWriter, t.writer)` en
+    relecture) : l'aller-retour est la marque d'un type absent, pas d'un type trop faible.
+
+    Parametres positionnels seuls (`/`) : le protocole ne contraint que ce que les appels
+    utilisent reellement. `SummaryWriter.add_scalar` les nomme `tag, scalar_value,
+    global_step`, une doublure les nommerait autrement — imposer des noms rejetterait des
+    porteurs valides sans rien verifier de plus.
+
+    Conformite du vrai writer verifiee par pyright a l'affectation
+    `self.writer: MetricsWriter = SummaryWriter(...)`, pas par declaration : un protocole que
+    seule la doublure honorerait ne vaudrait rien. Nuance a connaitre : torch n'annote pas ces
+    methodes, donc seuls les NOMS et l'arite sont reellement contraints cote SummaryWriter.
+    """
+
+    def add_scalar(self, tag: str, scalar_value: float, global_step: int, /) -> None: ...
+
+    def add_custom_scalars(self, layout: Dict[str, Any], /) -> None: ...
+
+    def flush(self) -> None: ...
+
+    def close(self) -> None: ...
+
 
 class W40KMetricsTracker:
     """
@@ -55,7 +88,7 @@ class W40KMetricsTracker:
     ):
         self.agent_key = agent_key
         self.log_dir = os.path.join(log_dir, agent_key)
-        self.writer = SummaryWriter(self.log_dir)
+        self.writer: MetricsWriter = SummaryWriter(self.log_dir)
         self._setup_custom_scalars_layout()
 
         # Load reward values from agent rewards config (avoid hardcoding training variables)
@@ -282,12 +315,12 @@ class W40KMetricsTracker:
             self.episode_reward_winner_pairs.append((total_reward, outcome_flag))
             
             # Calculate cumulative win rate over ENTIRE training
-            cumulative_win_rate = np.mean(self.all_episode_wins)
+            cumulative_win_rate = float(np.mean(self.all_episode_wins))
             self.writer.add_scalar('game_critical/win_rate_overall', cumulative_win_rate, self.episode_count)
             
             # GAME CRITICAL: Rolling win rate (recent 100 episodes) - PRIMARY METRIC
             if len(self.win_rate_window) >= 10:
-                rolling_win_rate = np.mean(self.win_rate_window)
+                rolling_win_rate = float(np.mean(self.win_rate_window))
                 self.writer.add_scalar('game_critical/win_rate_100ep', rolling_win_rate, self.episode_count)
 
             # SEAT-AWARE: cumulative win rates by controlled seat + global
@@ -618,12 +651,18 @@ class W40KMetricsTracker:
         This tracks the pre-scaled offensive_value from movement actions.
         Higher values = unit moved to position with better shooting potential.
 
+        Le garde `if position_score is None: return` a ete SUPPRIME, pas elargi en
+        `Optional[float]` : c'etait du code mort. L'unique appelant reel
+        (ai/training_callbacks.py l.1166) passe `reward_breakdown['position_score']` sous garde
+        `'position_score' in reward_breakdown`, et le dict producteur
+        (engine/reward_calculator.py l.31) ne porte que base_actions / result_bonuses /
+        tactical_bonuses / situational / penalties / total. Aucun None ne peut donc arriver ici,
+        et un `Optional[float]` aurait invente un cas d'usage pour justifier le garde au lieu de
+        le supprimer.
+
         Args:
             position_score: Raw position_score value (before position_reward_scale)
         """
-        if position_score is None:
-            return
-
         self.position_scores.append(position_score)
 
         # Keep last 1000 position scores
@@ -632,7 +671,7 @@ class W40KMetricsTracker:
 
         # Log rolling average every 10 moves
         if len(self.position_scores) >= 10 and len(self.position_scores) % 10 == 0:
-            avg_position_score = np.mean(self.position_scores[-100:])  # Last 100 moves
+            avg_position_score = float(np.mean(self.position_scores[-100:]))  # Last 100 moves
             self.writer.add_scalar('game_tactical/avg_position_score', avg_position_score, self.episode_count)
 
     def log_aiturn_compliance(self, compliance_data: Dict[str, Any]):
@@ -650,7 +689,7 @@ class W40KMetricsTracker:
         if len(self.compliance_data['units_per_step']) > 1000:
             self.compliance_data['units_per_step'].pop(0)
         
-        avg_units_per_step = np.mean(self.compliance_data['units_per_step'])
+        avg_units_per_step = float(np.mean(self.compliance_data['units_per_step']))
         self.writer.add_scalar('game_detailed/aiturn_units_per_step', avg_units_per_step, self.episode_count)
         
         # GAME DETAILED: Phase end reason
@@ -664,7 +703,7 @@ class W40KMetricsTracker:
             self.compliance_data['phase_end_reasons'].pop(0)
         
         if self.compliance_data['phase_end_reasons']:
-            eligibility_rate = np.mean(self.compliance_data['phase_end_reasons'])
+            eligibility_rate = float(np.mean(self.compliance_data['phase_end_reasons']))
             self.writer.add_scalar('game_detailed/aiturn_eligibility_based_ends', eligibility_rate, self.episode_count)
         
         # GAME DETAILED: Tracking violations
@@ -1004,7 +1043,7 @@ class W40KMetricsTracker:
         
         # 1. Win Rate (100-episode rolling window) - SORTS FIRST alphabetically
         if len(self.win_rate_window) >= 1:
-            win_rate = np.mean(self.win_rate_window)
+            win_rate = float(np.mean(self.win_rate_window))
             self.writer.add_scalar('0_critical/d_win_rate_100ep', win_rate, self.episode_count)
 
         # 2. Episode Reward (smoothed) - Training signal strength
