@@ -41,7 +41,7 @@ def _seq_randint(monkeypatch, rolls):
 def _game_state(unit_rules, target_col=9, target_row=9):
     """1 tireur (arme sans regle speciale) + 1 cible ; objectif en (5,5).
     target_col/row = (5,5) -> cible sur objectif, sinon hors objectif."""
-    weapon = {"BS": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "WEAPON_RULES": [], "display_name": "Gun"}
+    weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "WEAPON_RULES": [], "display_name": "Gun"}
     attacker = {"id": "A1", "squad_id": "1", "T": 4, "RNG_WEAPONS": [weapon]}
     attacker_unit = {"id": "1", "UNIT_RULES": unit_rules}
     target_model = {

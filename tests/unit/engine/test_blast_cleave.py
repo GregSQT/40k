@@ -34,7 +34,7 @@ def _uc(col, row, *, player=1):
 # ------------------------------------------------------------------------------ BLAST (tir)
 
 def _shoot_state(weapon_rules, *, target_size):
-    weapon = {"BS": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
+    weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
               "WEAPON_RULES": list(weapon_rules), "display_name": "Launcher"}
     attacker = {"id": "A1", "squad_id": "1", "T": 4, "player": 0, "RNG_WEAPONS": [weapon]}
     gs = {

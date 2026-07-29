@@ -38,7 +38,7 @@ def _uc(col, row, *, player):
 
 def _game_state(weapon_rules, *, target_row):
     """Tireur '1' en (0,0), arme RNG 24 (demi-portee 12) DMG 1. Cible '2' HP 5, Sv 7 (aucune)."""
-    weapon = {"BS": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
+    weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
               "WEAPON_RULES": weapon_rules, "display_name": "Melta"}
     attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
                 "col": 0, "row": 0, "RNG_WEAPONS": [weapon]}

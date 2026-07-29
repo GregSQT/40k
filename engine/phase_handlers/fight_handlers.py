@@ -5218,8 +5218,11 @@ def _manual_roll_fight_intent(
     if n_attacks <= 0:
         return None
     ws = int(weapon["ATK"])
-    strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))
-    ap = int(weapon.get("AP", 0))  # get allowed
+    # Jumeau melee du tir : `STR`/`AP` sont portes par les 185 profils de melee des rosters.
+    # L ancien enchainement retombait sur `S` (fossile), puis sur l ENDURANCE DE L ATTAQUANT
+    # (caracteristique de figurine, sans rapport avec l arme), puis sur 4 ; `AP` sur 0.
+    strength = int(require_key(weapon, "STR"))
+    ap = int(require_key(weapon, "AP"))
     dmg_raw = require_key(weapon, "DMG")
     alive0 = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
     if not alive0:
@@ -5227,7 +5230,9 @@ def _manual_roll_fight_intent(
     wth = _calculate_wound_target(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
     first_alive = models_cache[alive0[0]]
     display_wth = wth
-    display_save_th = save_threshold(int(first_alive["ARMOR_SAVE"]), int(first_alive.get("INVUL_SAVE", 7)), ap)
+    display_save_th = save_threshold(
+        int(first_alive["ARMOR_SAVE"]), int(require_key(first_alive, "INVUL_SAVE")), ap
+    )
     weapon_name = weapon.get("display_name", weapon.get("NAME", weapon.get("name", "")))  # get allowed
     # Conditions de reroll (constantes pour cet intent : abilities UNITE, pas figurine).
     # `attacker` est une figurine (models_cache) ; les UNIT_RULES sont sur l unite.

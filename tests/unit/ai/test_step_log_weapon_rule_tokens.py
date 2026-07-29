@@ -59,7 +59,7 @@ def _uc(col, row, *, player, models=None):
 def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
                 unit_rules=(), cover=False):
     """Tireur '1' vs cible '101', 1 attaque, en `gym_training_mode` (allocation auto)."""
-    weapon = {"BS": 3, "STR": 4, "AP": -1, "DMG": 1, "NB": 2, "RNG": WEAPON_RANGE,
+    weapon = {"ATK": 3, "STR": 4, "AP": -1, "DMG": 1, "NB": 2, "RNG": WEAPON_RANGE,
               "WEAPON_RULES": list(weapon_rules), "display_name": WEAPON_NAME}
     attacker = {"id": "1#0", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
                 "col": SHOOTER[0], "row": SHOOTER[1], "RNG_WEAPONS": [weapon]}
