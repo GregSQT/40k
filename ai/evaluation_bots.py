@@ -26,12 +26,12 @@ All bots implement all 4 phases: MOVE, SHOOT, CHARGE, FIGHT
 
 import random
 from typing import Dict, List, Tuple, Any, Optional
-from shared.data_validation import require_key, require_present
+from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
 from engine.hex_utils import min_distance_between_sets
 from engine.phase_handlers.shared_utils import (
     is_unit_alive, get_hp_from_cache,
-    get_unit_position, require_unit_position,
+    require_unit_position,
     compute_candidate_footprint, get_enemy_slot_mapping,
 )
 from engine import macro_intents as mi
