@@ -824,7 +824,11 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 advance_status = 1 if has_advanced else 0
                 adjacent_status = 1 if is_adjacent else 0
                 
-                weapon_rule = game_state.get("weapon_rule", 1)
+                # `weapon_rule` est pose par CETTE fonction quelques lignes plus haut : le lire
+                # avec un defaut re-etablissait ici une valeur deja garantie, et aurait masque
+                # sans bruit une divergence si l initialisation venait a changer. Les autres
+                # consommateurs exigent deja la cle (require_key / KeyError explicite).
+                weapon_rule = require_key(game_state, "weapon_rule")
 
                 if not is_adjacent and advance_status == 0:
                     selected_idx = next(
@@ -1421,6 +1425,11 @@ def preview_shoot_valid_targets_from_position(
     _preview_perf_deepcopy_t0 = time.perf_counter()
     gs = copy.deepcopy(game_state, _preview_share_memo)
     _preview_perf_after_deepcopy = time.perf_counter()
+    # Preview de la phase de MOVE : elle simule une future activation de tir alors que
+    # `shooting_phase_start` (seul poseur de `weapon_rule`) n a pas encore tourne. Cette
+    # initialisation est donc un MONTAGE de simulation sur la copie `gs`, au meme titre que
+    # `weapon["shot"] = 0` juste en dessous — pas un defaut qui rattraperait une absence
+    # anormale dans l etat reel (l etat reel, lui, exige la cle).
     if "weapon_rule" not in gs:
         gs["weapon_rule"] = 1
 

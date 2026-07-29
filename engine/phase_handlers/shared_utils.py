@@ -4323,8 +4323,11 @@ def allocate_mortal_wounds(
             )
         target = eligibles[0]
         new_hp = int(models_cache[target]["HP_CUR"]) - 1
-        col = models_cache[target].get("col")  # get allowed
-        row = models_cache[target].get("row")  # get allowed
+        # Jumeau AUTO de `_resolve_one_hazard_wound` : meme record, meme exigence. La position
+        # est capturee AVANT destroy (intention metier) mais REQUISE (elle part dans
+        # `hazardDetails`, donc dans l analyse et le replay) — `.get` y glissait un `None`.
+        col = int(require_key(models_cache[target], "col"))
+        row = int(require_key(models_cache[target], "row"))
         if new_hp <= 0:
             destroy_model(game_state, target, reason="hazard")
             died = True
@@ -6804,16 +6807,19 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
     weapon_name_g = g["weapon_name"]
     target_sid_g = g["target_sid"]
     attacker_squad_id_str = g["attacker_squad_id"]
-    sq_uc = game_state.get("units_cache", {}).get(attacker_squad_id_str, {})  # get allowed
     tgt_unit = next((u for u in game_state["units"] if str(u["id"]) == target_sid_g), None)
     tgt_unit_type_g = tgt_unit.get("unitType") if tgt_unit else None
     atk_unit = next((u for u in game_state["units"] if str(u["id"]) == attacker_squad_id_str), None)
     atk_unit_type_g = atk_unit.get("unitType") if atk_unit else None
-    ac = int(sq_uc.get("col", 0))  # get allowed
-    ar = int(sq_uc.get("row", 0))  # get allowed
-    # Position cible = ancre capturée à la création du groupe (cible alors vivante). Ne PAS
-    # relire units_cache ici : l'émission est différée en fin d'allocation, après le retrait
-    # d'une éventuelle escouade détruite → l'ancien tgt_uc.get("col", 0) rendait (0,0).
+    # Positions ATTAQUANT et CIBLE = ancres capturées à la création du groupe, au moment où
+    # l'attaque est déclarée. Ne PAS relire units_cache ici : l'émission est différée en fin
+    # d'allocation, après le retrait d'une éventuelle escouade détruite → l'ancien
+    # `tgt_uc.get("col", 0)` rendait (0,0), et son jumeau attaquant
+    # `game_state.get("units_cache", {}).get(sid, {}).get("col", 0)` faisait de même — (0,0)
+    # est une case RÉELLE du plateau, donc une position d'analyse fausse et indétectable
+    # dans step.log (que l'analyzer lit et que le replay rejoue).
+    ac = int(require_key(g, "attacker_col"))
+    ar = int(require_key(g, "attacker_row"))
     tc = int(require_key(g, "target_col"))
     tr = int(require_key(g, "target_row"))
     weapon_suffix = f" [{weapon_name_g}]" if weapon_name_g else ""
@@ -7556,8 +7562,12 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     model_value = float(require_key(m, "VALUE"))
     target_player = int(require_key(m, "player"))
     unit_type = m.get("unitType")  # get allowed
-    col = m.get("col")  # get allowed
-    row = m.get("row")  # get allowed
+    # Position de la figurine TOUCHEE, capturee AVANT une eventuelle destruction : elle part
+    # dans `shootDetails` du log (step.log + replay). Toute figurine du models_cache porte
+    # col/row (construits par `_build_models_for_unit` avec require_key) : l ancien `.get`
+    # rendait un `None` silencieux dans la donnee d analyse au lieu de lever.
+    col = int(require_key(m, "col"))
+    row = int(require_key(m, "row"))
     g["damage"] += dmg_dealt
     summary["damage_total"] += dmg_dealt
     rec["damageDealt"] = dmg_dealt
@@ -7913,8 +7923,17 @@ def _build_manual_allocation(
             # différée relit units_cache après un éventuel retrait de l'escouade détruite et
             # tombait sur (0,0) (fallback anti-erreur supprimé).
             _tgt_uc_live = require_key(require_key(game_state, "units_cache"), target_sid)
+            # JUMEAU de la capture ci-dessus, pour l ATTAQUANT : meme emission differee, donc
+            # meme exigence. `_emit_squad_shoot_log` relisait units_cache et retombait sur
+            # (0,0) — une case reelle du plateau — pour une escouade absente. Le squad_id est
+            # requis (toute figurine du models_cache le porte) : sans lui, la cle de lecture
+            # elle-meme etait devinee a partir de l id de figurine.
+            _atk_sid = str(require_key(attacker, "squad_id"))
+            _atk_uc_live = require_key(require_key(game_state, "units_cache"), _atk_sid)
             _grp = {
-                "attacker_squad_id": str(attacker.get("squad_id", attacker_mid)),
+                "attacker_squad_id": _atk_sid,
+                "attacker_col": int(require_key(_atk_uc_live, "col")),
+                "attacker_row": int(require_key(_atk_uc_live, "row")),
                 "weapon_name": weapon_name, "weapon_names": [weapon_name], "target_sid": target_sid,
                 "target_col": int(require_key(_tgt_uc_live, "col")),
                 "target_row": int(require_key(_tgt_uc_live, "row")),
@@ -7933,7 +7952,10 @@ def _build_manual_allocation(
                 "precision": require_key(r, "precision"),
                 "precision_range": require_key(r, "precision_range"),
                 "display_wth": r["display_wth"], "display_save_th": r["display_save_th"],
-                "player": int(attacker.get("player", 0)),  # get allowed
+                # Joueur proprietaire du tireur : toute figurine du models_cache le porte.
+                # Le defaut `0` en faisait un log attribue au joueur 0 (et `is_ai_action`
+                # calcule dessus), sans qu aucun consommateur puisse le distinguer d un vrai.
+                "player": int(require_key(attacker, "player")),
                 "attacks": 0, "damage": 0, "kills": 0, "killed_model_ids": [], "shots": [],
                 # Figs de l escouade ayant EFFECTIVEMENT tire dans ce groupe (arme/cible). Source de
                 # verite du cercle vert + cone LoS par-fig cote replay : c est le model_id resolu par
@@ -8040,8 +8062,10 @@ def _resolve_one_hazard_wound(
     summary = alloc["summary"]
     cur = batch["current_model_id"]
     m = models_cache[cur]
-    col = m.get("col")  # get allowed
-    row = m.get("row")  # get allowed
+    # Meme regle que le tir : position capturee AVANT destroy, mais REQUISE (elle alimente
+    # `hazardDetails` du log, donc l analyse et le replay).
+    col = int(require_key(m, "col"))
+    row = int(require_key(m, "row"))
     hp_before = int(m["HP_CUR"])
     new_hp = hp_before - 1
     destroyed = new_hp <= 0
