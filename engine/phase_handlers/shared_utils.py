@@ -8309,6 +8309,20 @@ def squad_fight_unit_activation_start(
     game_state["pending_squad_fight_intents"][squad_id] = []
 
 
+def squad_fight_restart_activation(game_state: Dict[str, Any], squad_id: str) -> None:
+    """Ouvre une activation fight en ECRASANT une declaration precedente non resolue.
+
+    Reservee aux chemins de resolution directe (clic sur une cible), qui redeclarent
+    TOUTES les figurines eligibles contre cette cible : ils REMPLACENT donc ce que le
+    flux manuel par-figurine avait declare, ils ne s y ajoutent pas. Sans cette
+    liberation explicite, squad_fight_unit_activation_start leve
+    assert_no_pending_fight_intent — la sentinelle a raison, c est l appelant qui doit
+    dire qu il repart de zero. Jumeau du cancel implicite de squad_shoot_activate.
+    """
+    clear_pending_fight_intent(game_state, squad_id)
+    squad_fight_unit_activation_start(game_state, squad_id)
+
+
 def squad_fight_activation_order(
     game_state: Dict[str, Any], active_player: int
 ) -> List[Tuple[str, str]]:

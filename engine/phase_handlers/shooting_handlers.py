@@ -4869,7 +4869,17 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     shoot_pool = require_key(game_state, "shoot_activation_pool")
     add_debug_file_log(game_state, f"[POOL PRE-TRANSITION] E{episode} T{turn} shoot shoot_activation_pool={shoot_pool}")
     game_state["shoot_activation_pool"] = []
-    
+
+    # Purge de securite : une declaration de tir ne survit jamais a sa phase. Le joueur
+    # peut legitimement laisser une ou plusieurs activations en plan (il compare les
+    # cibles de plusieurs unites puis passe a autre chose) : ce n est pas une anomalie,
+    # mais ces pendings poisonneraient la phase de tir du tour suivant
+    # (assert_no_pending_shoot_intent). On ne leve donc PAS, on nettoie.
+    if "pending_squad_shoot_intents" in game_state:
+        game_state["pending_squad_shoot_intents"] = {}
+    if "active_shooting_unit" in game_state:
+        del game_state["active_shooting_unit"]
+
     # PERFORMANCE: Clear LoS cache at phase end (will rebuild next shooting phase)
     if "los_cache" in game_state:
         game_state["los_cache"] = {}

@@ -17,9 +17,17 @@
 > **Aucun fallback, aucune valeur par défaut masquant une erreur** — un champ absent = FAIL explicite.
 > **Aucune règle 40k assertée sans référence** au PDF `Documentation/40k_rules/` (ex. 09.07 déjà utilisé).
 
-> **Statut (2026-07-18)** : Couche A **T1 FAIT** (`scripts/pvp_smoke_test.py`, 27 checks verts :
-> sanity state, move mono-figurine complet, transition move→shoot, pool shoot + exclusion fuyardes
-> 09.07, cibles LoS overview). Le reste de ce document est À FAIRE.
+> **Statut (2026-07-29)** : Couche A — **T1, T2, T3, T4, T5, T6, T7b FAITS**.
+> - **T1** (`scripts/pvp_smoke_test.py`, 27 checks verts) : smoke test de la vraie stack HTTP
+>   (réseau + auth + serveur réel). Conservé tel quel, il ne grossit plus (cf. §0.5).
+> - **T2/T3/T4/T5/T6/T7b** : `tests/integration/pvp/`, 6 fichiers, pyright propre.
+>   Hors de `pytest tests/unit/` : ils ne sont PAS dans la commande de vérification large.
+> - Le fuzzing T7b a trouvé une anomalie réelle dès sa 3ᵉ seed ; elle est corrigée, ainsi que
+>   son jumeau en mêlée et l'anomalie « id inconnu ». L'allowlist du fuzzing est VIDE (§0.6).
+> - Deux anomalies de RÈGLES restent ouvertes et verrouillées par une sentinelle
+>   (§0.6.4 tir après advance, §0.6.5 PV des personnages attachés) : leur correction touche
+>   des briques partagées avec le gym, elle est soumise à arbitrage.
+> - Reste À FAIRE : T2b, T3a, T7, et toutes les couches B et C.
 
 ---
 
@@ -32,7 +40,8 @@
   redémarrait le serveur en boucle sous WSL2 et effaçait la partie — fixé aussi dans
   `services/api_server.py` : `debug=False`, `127.0.0.1`).
 - Résultats typés PASS/FAIL/SKIP, exit code exploitable en CI/script.
-- Partie de référence : `mode_code=pvp_test` (board 44x60x5, 41 unités, phase initiale move, P1).
+- Partie de référence : `mode_code=pvp_test` (board 44x60x5, 42 unités / 123 figurines, phase
+  initiale move, P1 ; 21 unités au pool de move, 5 engagées dès le départ).
 
 ### 0.2 Contrats API appris (à réutiliser tels quels)
 - Toutes les actions passent par `POST /api/game/action` ; état par `GET /api/game/state`.
@@ -42,6 +51,9 @@
   (`squad_shoot_activate`, puis `squad_shoot_los_overview` pour les cibles).
 - HP : `unit.HP_CUR` = total escouade HORS leader attaché ; HP par figurine dans `models_cache` ;
   `squad_models[uid]` = liste des ids de figurines (`"6#0"`, …).
+  ATTENTION : cette convention n'est tenue QUE tant qu'aucune figurine n'est morte — après la
+  première perte le total est recalculé personnages compris, et il AUGMENTE (anomalie §0.6.5).
+  Toute vérification de PV doit donc se faire figurine par figurine, via `models_cache`.
 - Leviers de test déterministes déjà exposés par l'API :
   - `charge_roll_override` (remplace le jet 2D6 de charge) ;
   - `shoot_pool_require_los` (mode pool de tir exact vs transition rapide).
@@ -56,23 +68,197 @@
 - Points d'accroche déjà présents (bridges fonctionnels) : `window.boardUnitDoubleClickHandler`,
   `window.cancelChargeHandler`, `window.cancelAdvanceHandler`, CustomEvents `boardUnitDoubleClick`.
 
+### 0.5 Couche A — deux harnais, deux rôles (décision 2026-07-29)
+
+La couche A est désormais écrite en **tests pytest in-process** (`tests/integration/pvp/`),
+et non plus en extension du script HTTP. Raison mesurée dans le code :
+
+- **Déterminisme.** Tous les jets du moteur passent par le `random` global du stdlib
+  (`combat_utils.py:46`, `charge_handlers.py:4269`, `shared_utils.py:4450`, `roll_d6` injecté
+  dans `attack_sequence`). Aucun `np.random`, `secrets`, `uuid4` ni `time.time()` dans
+  `phase_handlers/`. Le `deterministic_seed` autouse de `tests/conftest.py` seede donc le
+  moteur lui-même — impossible depuis un client HTTP, qui vit dans un autre process.
+  C'est ce qui permettra à T4/T5/T6 d'asserter des valeurs exactes plutôt que des invariants.
+- **Coût.** Démarrage d'une partie `pvp_test` : **1,0 s** in-process contre 7,6 s en HTTP
+  (spawn du serveur compris). Une partie complète jusqu'à `game_over` : 595 actions, 64 s.
+- **Isolation.** Seul `/api/game/start` exige une auth (`api_server.py:2086`) ; `/action` et
+  `/state` n'en ont aucune. La fixture injecte l'auth et les permissions : `config/users.db`
+  n'est jamais ouverte. Elle coupe aussi la persistance disque — à l'import, `api_server`
+  charge `logs/save_config.json`, qui active snapshots et autosave en usage normal.
+
+**Le script HTTP reste** : il est le seul à couvrir le réseau, l'auth réelle et le serveur
+Flask complet. Il garde ses 27 checks et n'est plus étendu ; toute nouvelle tranche va en
+pytest. Pas de duplication.
+
+Socle livré dans `tests/integration/pvp/` :
+- `conftest.py` : `GameClient` (act/try_act/refresh, pools, drain, `play_nominal`), fixtures
+  `game` (invariants armés) et `game_unchecked`.
+- `invariants.py` : les invariants T2, revalidés après **chaque** action par `GameClient`.
+
+Contrats API relevés à cette occasion (à réutiliser) :
+- Refus métier = HTTP 200 + `success:false` + motif machine dans **`result.error`**
+  (`unit_not_eligible`, `invalid_destination`, `invalid_action_for_phase`,
+  `plan_models_mismatch`) — il n'y a PAS de clé `error` au premier niveau.
+- `max_turns` et `pve_mode` ne sont servis que par `/api/game/start`, jamais par `/state`
+  ni `/action` : comparer deux états issus de sources différentes crée de faux diffs.
+- `units_fled` ⊆ `units_moved` (`movement_handlers.py:1292`) : un fall-back reste une
+  sélection pour bouger (09.02).
+- Un `move` sur une unité non activée **auto-active** l'unité puis traite la destination
+  (`movement_handlers.py:819-841`) : un refus de destination laisse donc un preview posé.
+- Phase fight : chaque sous-phase a son verbe de sortie (`end_pile_in`, `skip_fight`,
+  `end_consolidation`). Tout autre verbe y est un **no-op renvoyant `success:true`** —
+  piège à boucle infinie pour tout pilote automatique.
+
+Contrats relevés pendant T4/T5/T6 (2026-07-29) :
+- `charge_roll_override` et `shoot_pool_require_los` voyagent au PREMIER niveau du corps de
+  l'action (`api_server.py:2386-2392`), pas dans un sous-objet. L'override de charge est lu
+  à l'ACTIVATION de l'unité (11.02 : le jet précède la déclaration des cibles) et mémorisé
+  dans `charge_roll_values` : une même unité ne peut pas être ré-activée avec un autre jet
+  dans la même phase.
+- Résolution d'un tir/combat avec défenseur humain, DEUX temps distincts :
+  `..._declare_order` (ordre des groupes de figurines, 05.03 — demandé seulement si la cible
+  a plusieurs groupes) puis un `..._allocate_model`/`..._manual_alloc` PAR BLESSURE (05.04).
+  L'activation ne se termine qu'au dernier clic.
+- Les lots d'attaques (`bs`, `bs_base`, `cover`, `heavy_applied`, `rapid_fire_applied`, jets
+  détaillés) ne sont exposés que TANT QU'une blessure reste à allouer
+  (`game_state["pending_shoot_allocation"]`). Une salve sans sauvegarde ratée termine
+  l'activation sans jamais publier ces lots.
+- `pile_in_autoplace` exige un `targetId` (focus de l'optimisation), `consolidate_autoplace`
+  et `charge_autoplace` non.
+- `end_pile_in` doit être envoyé DEUX fois pour quitter la sous-phase : 12.02 fait jouer le
+  pile-in par le joueur actif puis par son adversaire, chaque moitié se fermant elle-même.
+- En phase de tir, l'état n'expose AUCUN booléen d'engagement : le seul juge est la géométrie
+  (empreinte à empreinte vs `get_engagement_zone`). Les tests classent donc les unités avec
+  la brique du moteur et n'assertent que la sortie de l'API.
+
+### 0.6 Anomalies trouvées (2026-07-29)
+
+Les trois anomalies de ROBUSTESSE (HTTP 500) sont corrigées : l'allowlist
+`KNOWN_SERVER_ERRORS` du fuzzing est **vide**, plus aucune 500 n'est tolérée nulle part, et
+les sentinelles correspondantes ont été remplacées par des tests du comportement corrigé.
+Deux anomalies de RÈGLES (§0.6.4 et §0.6.5) restent OUVERTES : leur correction touche des
+briques partagées avec le gym (masques d'action, observation de l'agent), le périmètre relève
+d'un arbitrage. Chacune est verrouillée par une sentinelle `@pytest.mark.anomaly` qui
+échouera le jour de la correction.
+
+1. **Id d'unité inexistant → HTTP 500** au lieu d'un refus métier. **CORRIGÉ**.
+   La levée était dans le pré-traitement du step_logger (`_process_semantic_action`,
+   `w40k_core.py`), qui récupère l'unité avant l'action pour logger sa position et son
+   joueur — pas dans la logique de jeu. Le motif `unit_not_found` existait déjà dans une
+   dizaine de handlers (`movement_handlers.py:797`, `shooting_handlers.py:5429`…) : c'était
+   le dispatch central qui était incohérent avec eux.
+   Correctif appliqué : id inconnu de `units` ET `units_cache` ET `squad_models` → refus
+   métier `unit_not_found`, HTTP 200, motif dans `result.error` ; id connu de `units_cache`
+   ou `squad_models` mais absent de `units` → `KeyError` conservée (vraie incohérence d'état
+   interne, elle doit rester bruyante). Le traceback exposé en 500 est conservé (serveur de
+   dev, utile au debug).
+   NB : le second cas n'est **pas atteignable par l'API** — `units_cache ⊆ units` est un
+   invariant vérifié après CHAQUE action (`invariants.py`, fermeture référentielle), y
+   compris sur la partie complète et le fuzzing. Aucun test ne le provoque donc : le
+   fabriquer demanderait de truquer le `game_state`, ce qui ne prouverait rien du contrat
+   de l'API. C'est précisément le sens de la distinction : ce chemin ne doit jamais arriver.
+   Test : `test_invariants.py::test_unknown_unit_id_is_a_clean_business_refusal`
+   (réutilise `_assert_inert`, donc state strictement inchangé).
+2. **Ré-activation d'une escouade en tir → HTTP 500** (trouvée par le fuzzing T7b).
+   **CORRIGÉ**.
+   Forme la plus courte, mesurée : **deux clics** sur la MÊME escouade suffisent
+   (`squad_shoot_activate` ×2). Formes voisines : A → B → re-clic A (comparer les cibles de
+   deux unités avant de choisir) ; et la variante inter-tours (activation abandonnée, le
+   pending survit au changement de tour).
+   Cause : `active_shooting_unit` est un SINGLETON, écrasé à chaque activation sans libérer
+   le pending de l'escouade précédente, qui devenait orphelin — inaccessible mais présent.
+   `assert_no_pending_shoot_intent` (`shared_utils.py`) levait alors au retour sur elle.
+   Le front ne protège pas de ce chemin : `useEngineAPI.handleStartSquadModelShoot`
+   n'envoie **pas** de `squad_shoot_cancel` avant d'activer une autre unité (son
+   `squadShootActivatingRef` ne garde que contre le double-clic *concurrent*, et il est
+   relâché dès la réponse). Le bug était donc atteignable à la souris, pas seulement par API.
+   Correctif appliqué (2 points) :
+   - **cancel implicite** dans le dispatch `squad_shoot_activate` (`w40k_core.py`) : toute
+     activation en cours est libérée (`clear_pending_shoot_intent` + `active_shooting_unit`)
+     avant d'en ouvrir une nouvelle, y compris quand c'est la même escouade. Ses
+     déclarations d'armes sont perdues — c'était déjà le cas de fait. Mémoriser puis
+     restaurer les déclarations de l'escouade quittée est une évolution fonctionnelle
+     séparée, hors périmètre.
+   - **purge de sécurité** en fin de phase de tir (`_shooting_phase_complete`) : les
+     pendings résiduels et `active_shooting_unit` sont vidés. On ne lève PAS : laisser
+     plusieurs activations en plan est un état NORMAL du flux (le joueur explore les cibles
+     de plusieurs unités).
+   Ce qui n'a **pas** été fait, à dessein : aucun `pop` défensif dans
+   `squad_shooting_unit_activation_start` (la sentinelle reste entière) ; rien ajouté dans
+   la résolution, qui purge déjà les intents (`_build_manual_allocation`,
+   `shared_utils.py:8043`, via `ctx.intents_key` — commun au tir et à la mêlée).
+   Tests : `test_shoot.py::TestShootActivationLifecycle` (3 tests).
+3. **Jumeau en mêlée → HTTP 500** (cherché après le correctif du tir, trouvé). **CORRIGÉ**.
+   Forme minimale : sous-phase `fight`, `activate_unit` A → `squad_fight_assign` (le flux
+   manuel par-figurine ouvre l'activation via `_fight_ensure_activation_started`) → clic
+   direct sur la cible (`fight`). Ce dernier chemin appelait
+   `squad_fight_unit_activation_start` sans libérer le pending →
+   `assert_no_pending_fight_intent`.
+   Correctif appliqué : `squad_fight_restart_activation` (`shared_utils.py`) — libère puis
+   ouvre — sur les 4 chemins de **résolution directe**, qui redéclarent TOUTE l'escouade et
+   remplacent donc les déclarations manuelles au lieu de s'y ajouter (`fight_handlers.py`
+   dispatch FIGHT, branche New Foes, `_fight_v11_resolve_attacks`, et le chemin gym
+   `squad_fight` de `w40k_core.py`). Plus la purge symétrique en fin de phase
+   (`_fight_v11_phase_complete`).
+   Tests : `test_fight.py::TestFightActivationRestart` (2 tests).
+4. **Tir d'une arme non-[ASSAULT] après un advance** — PDF 10.05. **OUVERT** (trouvée en T4).
+   Mesuré : une escouade qui a avancé et possède au moins une arme [ASSAULT] entre bien dans
+   le pool de tir (10.05), mais le flux d'escouade lui laisse ensuite DÉCLARER et RÉSOUDRE
+   ses armes non-[ASSAULT] (ex. unité 1008 : `bolt_pistol` tiré après advance).
+   PDF 10.05, WHILE SHOOTING : « You can only select [ASSAULT] weapons to make attacks with ».
+   Root cause : l'éligibilité par arme du flux d'escouade
+   (`_model_can_shoot_target_with_weapon`, shared_utils.py) ne teste que portée, LoS et
+   engagement (10.06) — elle ignore `units_advanced`. Les deux autres chemins l'appliquent
+   pourtant : `weapon_availability_check` (shooting_handlers.py:560, mono-figurine) et
+   `_unit_can_shoot` (niveau POOL, d'où l'exclusion correcte d'une unité sans [ASSAULT]).
+   Correctif attendu : porter la restriction 10.05 (avec l'exception `shoot_after_advance`)
+   dans l'éligibilité par arme partagée, au même endroit que l'exclusion 10.06 déjà présente.
+   NON APPLIQUÉ : cette brique alimente aussi les masques d'action du gym — les modèles
+   entraînés ont appris la version permissive. Le périmètre relève d'un arbitrage.
+   Sentinelle : `test_shoot.py::test_a_non_assault_weapon_is_still_firable_after_an_advance`.
+5. **PV d'unité : la convention « hors personnage attaché » n'est pas tenue après la première
+   perte** (PDF 19). **OUVERT** (trouvée en T6).
+   §0.2 documente la convention : `unit["HP_CUR"]` = total d'escouade HORS leader attaché.
+   Elle est bien appliquée au démarrage (`nb_figurines × PV_du_profil_de_base`) : 5 unités
+   sur 42 divergent alors de la somme réelle de leurs figurines (ex. 111 : 21 annoncés pour
+   26 répartis, Librarian 5 PV + Captain 6 PV).
+   Le défaut est la SUITE : dès la première figurine tuée, le moteur recalcule le total sur
+   les survivantes, personnages COMPRIS — les PV de l'unité AUGMENTENT (21 → 23 en tuant une
+   figurine à 3 PV). La grandeur change donc de définition en cours de partie ; tout lecteur
+   du total d'unité (score, observation de l'agent, tri de cibles) compare des choux et des
+   carottes selon qu'une perte a eu lieu ou non.
+   Correctif attendu : dériver `HP_CUR`/`HP_MAX` d'unité de la somme des figurines vivantes
+   de `models_cache`, à la construction comme après chaque perte — la source qui sert déjà
+   après la première mort. Impact observation/reward de l'agent → arbitrage.
+   Sentinelle : `test_invariants.py::test_unit_hitpoints_ignore_attached_characters`.
+   À la correction : promouvoir l'égalité en invariant transversal dans `invariants.py`.
+
 ---
 
-## Couche A — Tests API exhaustifs (extension de `pvp_smoke_test.py`)
+## Couche A — Tests API exhaustifs (`tests/integration/pvp/`)
 
 Objectif : dérouler UNE partie scriptée qui traverse toutes les phases des deux joueurs sur
 plusieurs tours, avec des checks par phase + des invariants transversaux revalidés après CHAQUE action.
 
-### T2 — Invariants transversaux (à revalider après chaque action)
-- Ids uniques ; HP figurines bornés ; positions dans le board ; cohérence `units` ↔ `units_cache`
-  ↔ `models_cache` ↔ `squad_models`.
-- Tout pool (`move/shoot/charge/command_activation_pool`, `fight_*`) ⊆ unités vivantes du bon joueur.
-- Une unité ne peut jamais être dans 2 états contradictoires (`units_moved` ∩ pool = ∅, etc.).
-- Toute action refusée doit laisser le state INCHANGÉ (comparaison avant/après sur les champs de jeu).
-- `phase` ∈ {deployment, command, move, shoot, charge, fight} (les 6 handlers de
-  `engine/phase_handlers/`) et séquence 07 (battle round) respectée, y compris l'alternance de
-  joueur et l'incrément de tour. NB : `pvp_test` démarre en move ; le flux deployment/command
-  se teste en mode `pvp` (T3a/T2b).
+### T2 — Invariants transversaux (à revalider après chaque action) — **FAIT**
+`invariants.py` + `test_invariants.py` (10 tests). Armés sur chaque action par `GameClient`.
+- [x] Ids uniques ; HP figurines bornés ; positions dans le board (unités ET figurines).
+- [x] Cohérence référentielle `units` ↔ `units_cache` ↔ `models_cache` ↔ `squad_models`
+      (fermeture dans les deux sens, `squad_id` de chaque figurine cohérent).
+- [x] Tout pool ⊆ unités vivantes ; appartenance au joueur actif pour
+      `move/shoot/charge/command_activation_pool`. Les pools de fight en sont exclus : par
+      construction, l'alternance 12.01-12.03 y fait figurer les unités des DEUX joueurs.
+- [x] États contradictoires : pool ∩ `units_moved`/`units_shot`/`units_charged` = ∅ ;
+      `units_fled` ⊆ `units_moved`.
+- [x] Action refusée → state STRICTEMENT inchangé (diff champ à champ), motif dans
+      `result.error`, jamais de 500 (hors anomalie §0.6.1).
+      Exception documentée : `move` sans activation préalable auto-active l'unité
+      (`movement_handlers.py:819-841`) — le test vérifie alors qu'elle n'a ni bougé ni
+      quitté le pool.
+- [x] `phase` ∈ {deployment, command, move, shoot, charge, fight}, `current_player` ∈ {1,2},
+      `turn` ≥ 1. Séquence 07 (alternance + incrément de tour) vérifiée par T7b.
+      NB : `pvp_test` démarre en move ; le flux deployment/command se teste en mode `pvp`
+      (T3a/T2b), toujours à faire.
 
 ### T2b — Phase command + réactions
 Champs relevés : `command_activation_pool`, `reaction_window_active`, `reactive_decision_mode`,
@@ -102,93 +288,164 @@ fonctions de pool par figurine, jamais de logique durcie/divergente.
 Actions front relevées : `preview_move_plan`, `move_model_destinations` (BFS par figurine, avec
 `provisional_plan`, `level`, `orientation`), `commit_move_plan`, `advance`, `wait`, `left_click`,
 `right_click`.
-- [ ] Activation d'une escouade multi-figurines → destinations PAR FIGURINE
-      (`move_model_destinations`), plan provisoire, commit → positions par figurine mises à jour,
-      cohérence d'escouade (06.02) respectée, sortie du pool.
-- [ ] Distance : aucune destination au-delà de `MOVE` (en subhex via `inches_to_subhex` — jamais de
-      seuil en pouces recodé en dur), coût de descente §13.06 inclus.
-- [ ] Advance (09.06) : jet d'advance présent, portée = M + jet, unité marquée `units_advanced`,
-      puis EXCLUE du pool de charge et du tir (armes non Assault — vérifier la règle exacte dans
-      le PDF 10 avant d'asserter).
-- [ ] Fall-back (09.07) : unité engagée → destinations qui désengagent uniquement ; marquée
-      `units_fled` ; exclue de shoot ET charge ce tour.
+**FAIT** (`test_move.py`, 10 tests) — sauf les 3 dernières lignes.
+- [x] Pool complet en début de phase = toutes les unités vivantes du joueur actif (09.02).
+- [x] Activation d'une escouade multi-figurines → destinations PAR FIGURINE
+      (`move_model_destinations`), plan provisoire (une sœur posée retire sa case du pool des
+      suivantes), `preview_move_plan` (`coherency_ok`/`can_validate`/`per_model`), commit →
+      positions par figurine mises à jour, sortie du pool, réactivation refusée.
+- [x] Plan incomplet → `plan_models_mismatch`, unité conservée dans le pool.
+- [x] Distance : aucune destination au-delà de `MOVE` (09.05). Borne assertée en hexes —
+      chaque pas de BFS coûtant ≥ 1 subhex, `hex_distance ≤ MOVE` est vrai quel que soit le
+      coût du terrain. Le coût de descente §13.06 n'est PAS encore vérifié séparément.
+- [x] Advance (09.06) : jet ∈ 1..6, portée étendue et bornée par `M + jet × inches_to_subhex`,
+      unité marquée `units_advanced`, puis EXCLUE du pool de charge.
+      NB : le PDF 09.06 n'interdit PAS de tirer après un advance (il n'interdit que charge et
+      action) — la restriction de tir relève des règles d'armes (Assault), à traiter en T4.
+- [x] Fall-back (09.07) : unité engagée → marquée `units_fled` (et `units_moved`), exclue du
+      pool de tir ET du pool de charge, et absente de `fight_eligible_units` (désengagée).
 - [ ] Pivot/orientation : `orientation` passée au BFS → empreinte honorée (EZ 2", collisions).
 - [ ] Étages : `level` ≠ 0 → pool niveau-conscient (unité 1008 du scénario, level 1).
 - [ ] Rejets : move hors pool de destinations → erreur explicite, state inchangé.
 
-### T4 — Shoot : par arme et par figurine
+### T4 — Shoot : par arme et par figurine — **FAIT** (`test_shoot.py`, 14 tests)
 Actions relevées : `squad_shoot_select_model`, `squad_shoot_assign_weapon_qty`,
 `squad_shoot_weapon_qty_max`, `squad_shoot_unassign`, `squad_shoot_unassign_weapon`,
 `squad_shoot_validate`, `squad_shoot_cancel`, `squad_shoot_allocate_model`, `move_after_shooting`.
-- [ ] Sélection d'une figurine → armes disponibles correctes (RNG_WEAPONS), cibles par arme
-      (portée + LoS 3D — chemin `_attacker_model_can_reach_squad`, cf. mémoire LoS).
-- [ ] Assignation de quantités par arme/cible, unassign, validate → résolution : dégâts appliqués,
-      HP figurines décrémentés, morts retirés de `units_cache`/`models_cache`, allocation des pertes
-      (`squad_shoot_allocate_model`) conforme au moteur d'allocation mutualisé.
-- [ ] Cover : `cover_by_unit_id` de `squad_shoot_los_overview` vs règle 13 (lire le PDF avant d'asserter).
-- [ ] Unité engagée : seules les armes Pistol tirables (PDF 10 à lire avant d'asserter).
-- [ ] `shoot_pool_require_los` true/false → même résultat final (deux modes, un seul verdict légal).
-- [ ] Rejets : tirer 2× avec la même arme, cibler un allié, cibler hors LoS → erreurs explicites.
-- [ ] `move_after_shooting` : disponible uniquement pour les unités/règles qui y donnent droit
-      (lire la règle exacte avant d'asserter), distance bornée, state tracé.
-- [ ] Unités cachées (`hidden`, `hideable`, `hidden_models`, gone to ground — PDF 13/13-5) :
-      détection 12"/15" (`hidden_detection_info_by_unit_id`), une unité cachée non détectée
-      n'apparaît JAMAIS dans les cibles ni dans les données envoyées au front adverse.
+- [x] Cycle de vie de l'activation : cancel implicite A→B→A, re-clic sur la même escouade,
+      activation abandonnée purgée en fin de phase (§0.6.2).
+- [x] `squad_shoot_los_overview` : `cover_by_unit_id` et `count_by_unit_id` couvrent EXACTEMENT
+      `valid_targets` ; cibles toutes ennemies et vivantes ; `1 ≤ count ≤ squad_alive_count`.
+- [x] `squad_shoot_select_model` : l'union des cibles par figurine == les cibles d'escouade
+      (04.01, le tir est par figurine), et aucune figurine ne voit au-delà.
+- [x] Unité engagée (10.06) : seules les armes [CLOSE-QUARTERS] sont `can_use`, et les cibles
+      se limitent aux ennemis avec lesquels l'unité est engagée. Vérifié sur les 3 unités
+      engagées du tour 1 (1011, 7, 1009).
+- [x] Advance (10.04/10.05) : une unité sans arme [ASSAULT] qui a avancé quitte le pool de tir.
+      ANOMALIE OUVERTE §0.6.4 : avec une arme [ASSAULT], ses armes NON-[ASSAULT] restent
+      déclarables et résolvables.
+- [x] Quantités : `squad_shoot_weapon_qty_max` == `m` du menu cible-d'abord == nombre de
+      figurines du voile vert ; `count > qty_max` → refus `cannot_shoot` sans déclaration
+      résiduelle ; `count == qty_max` → une déclaration par figurine distincte.
+- [x] Unassign, les trois granularités : par (arme, cible) `squad_shoot_unassign_weapon_qty`,
+      par figurine `squad_shoot_unassign`, et par INDEX d'arme `squad_shoot_unassign_weapon`
+      (celle qu'utilise le front pour le remplacement de profil combi). La borne
+      `qty_max` revient à son état initial dans chaque cas.
+- [x] Cancel : l'escouade retourne au pool sans déclaration (10.02 : pas encore « sélectionnée
+      pour tirer »).
+- [x] Résolution : allocation manuelle par le défenseur (05.04) figurine par figurine, PV
+      décrémentés dans `models_cache`, morts retirés du cache, `attacks ≥ hits ≥ wounds ≥
+      failed_saves`, `units_shot` alimenté, sortie du pool, pending libéré.
+- [x] Cover (13.08) : `bs == min(6, bs_base + 1)` si couvert, `bs == bs_base` sinon — mesuré
+      sur les lots d'attaques exposés par l'allocation, en écartant les modificateurs
+      concurrents ([HEAVY] 24, [IGNORES COVER] 24.18, volet MONSTER/VEHICLE de 10.06).
+- [x] Unités cachées (13.09) : une unité cachée hors de sa portée de détection n'apparaît
+      JAMAIS dans `valid_targets` ; `detection_inches` ∈ {15 (13.09), 12 (gone to ground)} ;
+      toute unité listée dans `hidden_detection_info_by_unit_id` est bien `hidden`.
+      NB : le PvP est en hotseat, `/state` n'est pas filtré par joueur — c'est donc bien la
+      liste des cibles (et le blink qu'elle alimente) qui porte la confidentialité.
+- [ ] `shoot_pool_require_los` true/false : NON couvert. Le drapeau ne change pas le verdict
+      légal, il change le COÛT de la transition move→shoot (pool exact au build vs cible
+      résolue à l'activation, `shooting_handlers.py:2196`). Un test d'équivalence des deux
+      modes coûte ~1,5 s de transition par phase : à faire dans une passe dédiée.
+- [ ] `move_after_shooting` : INATTEIGNABLE avec ce roster. La règle existe
+      (`config/unit_rules.json`) mais AUCUNE unité de `config/unit_definitions.json` ne la
+      porte — il n'y a rien à déclencher. À couvrir le jour où une unité l'obtient.
+- [ ] `shoot` (verbe mono-figurine) : le flux PvP passe exclusivement par le chemin escouade
+      (`squad_shoot_*`) ; le verbe `shoot` appartient au chemin gym. Hors couche A PvP.
 
-### T5 — Charge
+### T5 — Charge — **FAIT** (`test_charge.py`, 8 tests)
 Actions relevées : `charge`, `charge_plan_state`, `commit_charge_plan`, `charge_autoplace`,
 `take_to_skies`, `charge_roll_override`, `force_charged`, annulation via `right_click`
 (`window.cancelChargeHandler`).
-- [ ] Pool charge : exclut `units_advanced`, `units_fled` (09.06/09.07), unités déjà engagées
-      (PDF 11 à lire pour la liste exacte d'éligibilité 11.02).
-- [ ] `charge_roll_override` : jet forcé N → cibles atteignables ssi distance ≤ N ; override à 2 →
-      échec de charge tracé, unité sortie du pool sans bouger.
-- [ ] Déclaration multi-cibles, mouvement de charge par figurine : chaque figurine finit en EZ
-      (11.04), cohérence d'escouade maintenue.
-- [ ] `units_charged` alimenté ; fight phase : les chargeurs frappent en premier (12.02 — lire PDF).
-- [ ] Plan de charge par figurine : `charge_plan_state`/`commit_charge_plan` cohérents avec le
-      flux manuel PvP ; `charge_autoplace` produit un placement légal identique aux règles du
-      plan manuel (jamais plus permissif).
-- [ ] `take_to_skies` (règle 21, flying/surging — lire le PDF avant d'asserter) :
-      `units_took_to_skies`/`units_took_to_skies_charge` alimentés, restrictions induites.
+- [x] Pool 11.02 : unités vivantes du joueur actif, jamais `units_advanced` ni `units_fled`,
+      jamais une unité déjà engagée, toujours un ennemi à 12" ou moins (mesuré empreinte à
+      empreinte, pas d'ancre à ancre).
+- [x] Une unité qui a avancé est exclue du pool de charge (09.06 + 11.02).
+- [x] `charge_roll_override` : le jet forcé est bien celui utilisé (4, 8, 12) et aucune cible
+      déclarable n'exige un déplacement supérieur au budget. Le budget nécessaire est
+      `distance − zone d'engagement` : l'unité s'arrête à la zone, et elle ne peut pas y être
+      déjà (encadré FAILED CHARGES de 11.02).
+- [x] Jet à 2 → `charge_failed`, unité sortie du pool, AUCUNE figurine déplacée, pas de
+      `units_charged`, pas d'engagement créé.
+- [x] Charge committée (11.04 AFTER MOVING) : l'unité engage TOUTES ses cibles déclarées et
+      AUCUN ennemi non déclaré ; elle s'est rapprochée ; `units_charged` alimenté ; sortie du pool.
+- [x] Plan par figurine : `charge_plan_state` (phase, `eligible_models`, `unsatisfied_targets`,
+      `can_validate`) ; un plan hors pool est refusé en 200, l'unité reste au pool sans bouger.
+      `charge_autoplace` produit un plan couvrant TOUTES les figurines, accepté au commit.
+- Contrat mesuré, à ne pas confondre avec la lettre de 11.04 : le moteur n'offre que les
+  cibles qu'il peut réellement ENGAGER (empreinte finale légale). Des ennemis à portée du jet
+  sont donc écartés faute de placement — c'est le résultat correct (11.04 exige l'engagement
+  de toutes les cibles), mais cela rend le sens « toute cible à portée est déclarable »
+  non-assertable.
+- [ ] `take_to_skies` (21.03) et `force_charged` : non couverts (aucune unité FLY éligible
+      rencontrée dans le scénario au tour testé). À reprendre avec un roster qui en contient.
 
-### T6 — Fight
+### T6 — Fight — **FAIT** (`test_fight.py`, 7 tests)
 Actions relevées : `fight`, `skip_fight`, `squad_fight_assign`, `squad_fight_assign_weapon`,
 `squad_fight_validate`, `squad_fight_manual_alloc`, `squad_hazard_allocate_model`,
 `hazard_confirm`, pile-in : `pile_in_plan_state`, `pile_in_autoplace`, `commit_pile_in_plan`,
 `end_pile_in` ; consolidation : `consolidation_plan_state`, `consolidation_select_target`,
 `consolidation_select_objective`, `consolidate_autoplace`, `commit_consolidation_plan`,
 `cancel_consolidation`, `end_consolidation`.
-- [ ] Sous-phases (`fight_subphase`) : ordre charged-first puis alternance (12.01-12.03),
-      `fight_eligible_units` conforme au pool 12.04 (cf. mémoire T6-d : une sélection = une action).
-- [ ] Pile-in 3" par figurine (12.06, modèle par-figurine du PvP — le par-ancre est condamné),
-      multi-niveaux, coût de descente §13.06.
-- [ ] Attribution des attaques par arme/figurine (cible-d'abord, jumeau du tir), validate →
-      dégâts, allocation manuelle des pertes (`squad_fight_manual_alloc`).
-- [ ] Consolidation 3" (12.08) par figurine, modes mutuellement exclusifs (cible/objectif —
-      `consolidation_select_target`/`_select_objective`), autoplace == mêmes règles que le plan
-      manuel, annulation propre (`cancel_consolidation`).
-- [ ] Mort d'une unité en mêlée : retrait complet, l'adversaire re-devient éligible ou pas selon 12.
-- [ ] Fin de phase → nouveau battle round : joueur, tour, VP objectifs (`objective_controllers`,
-      OC par unité, PDF 14).
+- [x] Redémarrage d'activation : `squad_fight_assign` puis clic-cible direct (le clic redéclare
+      toute l'escouade) ; déclaration abandonnée purgée en fin de phase (§0.6.3).
+- [x] Sous-phases : le verbe de sortie d'une AUTRE sous-phase est un no-op `success:true` qui
+      ne fait pas avancer la phase (piège à boucle infinie, vérifié explicitement).
+      `end_pile_in` doit être envoyé DEUX fois : 12.02 fait jouer le pile-in par les deux
+      joueurs successivement, chaque moitié se ferme par son propre verbe.
+- [x] Éligibilité 12.04 : toute unité éligible est engagée ou a chargé ce tour, et aucune n'a
+      déjà été sélectionnée pour combattre.
+- [x] Pile-in 12.03 : `pile_in_model_move` (modèle par figurine), `pile_in_targets` == tous les
+      ennemis engagés, aucun déplacement au-delà de 3", engagements conservés après commit.
+      `pile_in_autoplace` exige un `targetId` (focus ILP), contrairement à `consolidate_autoplace`.
+- [x] Résolution 12.05 : déclaration par figurine/arme, puis DEUX temps côté défenseur —
+      `squad_fight_declare_order` (ordre des groupes, 05.03, demandé seulement si la cible a
+      plusieurs groupes) puis `squad_fight_manual_alloc` par blessure (05.04). PV décrémentés
+      par figurine, morts retirés du cache, unité consommée (`units_selected_to_fight`,
+      retirée de `fight_eligible_units`), déclarations libérées.
+- [x] Consolidation 12.08 : une unité engagée est en mode `ongoing` IMPOSÉ, ses cibles sont
+      tous ses ennemis engagés, les modes concurrents ne proposent rien
+      (`awaiting_target_selection`/`awaiting_objective_selection` faux, candidats vides),
+      aucun déplacement au-delà de 3", engagements conservés après commit.
+- [ ] Modes `engaging` / `objective` de la consolidation (`consolidation_select_target`,
+      `consolidation_select_objective`, `cancel_consolidation`) : non couverts. 12.08 les rend
+      mutuellement exclusifs et subordonnés — une unité engagée ne peut PAS y accéder, et
+      toutes les unités éligibles à la consolidation du tour testé sont engagées. Il faut un
+      scénario où une unité survit à la mort de son adversaire pour les atteindre.
+- [ ] `squad_hazard_allocate_model` / `hazard_confirm` (24.15) : non couverts — aucune arme
+      [HAZARDOUS] déclarée dans les combats testés.
+- [ ] Mort d'une unité en mêlée (retrait complet, ré-éligibilité de l'adversaire selon 12) :
+      non couvert isolément ; le retrait des FIGURINES l'est.
 
 ### T7 — Fin de partie et systèmes annexes (API)
-- [ ] Victoire : `game_over`, `winner`, VP corrects sur une partie scriptée jusqu'au bout.
+- [x] Victoire : `game_over`, `winner`, VP corrects sur une partie scriptée jusqu'au bout
+      (couvert par T7b `test_a_whole_game_stays_coherent_until_game_over` : 595 actions, la
+      partie va au bout, tours croissants et bornés par `max_turns`, les deux joueurs jouent
+      chaque tour, `winner` cohérent avec les VP).
 - [ ] Battle-shock : `force_battle_shock` + tests LD/OC (PDF 01.07/08).
 - [ ] Snapshots/rewind : `GET /api/game/snapshots`, `timeline`, `snapshot/restore` → l'état restauré
       est STRICTEMENT égal au state d'origine (diff JSON champ à champ).
 - [ ] Save/load : `game/save` + `save/load` → même égalité stricte.
 - [ ] Auth : accès sans token → 401 ; mode non autorisé → 403.
 
-### T7b — Fuzzing par invariants (la vraie garantie d'exhaustivité)
-Les tranches T2-T7 testent des scénarios CONNUS ; le fuzzing couvre les enchaînements imprévus.
-- [ ] Agent aléatoire : à chaque étape, tirer une action LÉGALE au hasard (pools + vocabulaire de
-      la phase), l'exécuter, revalider TOUS les invariants T2 après chaque action. Seed fixée et
-      rejouable (`--seed N`), log des actions → tout crash/violation est reproductible.
-- [ ] Fuzzing négatif : injecter des actions ILLÉGALES aléatoires (mauvais joueur, mauvaise phase,
-      ids inexistants, coordonnées absurdes) → 100 % rejetées, state inchangé, jamais de 500.
-- [ ] Budget : N parties complètes par run (ex. 20), sur plusieurs boards (`--board x1/x5`).
-- [ ] Chaque violation trouvée devient un check nommé permanent dans la tranche concernée.
+### T7b — Fuzzing par invariants (la vraie garantie d'exhaustivité) — **FAIT**
+`test_fuzzing.py` (6 tests). Les tranches T2-T7 testent des scénarios CONNUS ; le fuzzing
+couvre les enchaînements imprévus.
+- [x] Partie complète jusqu'à `game_over`, invariants revalidés après chaque action.
+- [x] Agent aléatoire : 2/3 d'actions nominales (pour que la partie progresse), 1/3 tirées du
+      vocabulaire de la phase courante ; invariants T2 après chaque action ; 3 seeds. Le
+      tirage utilise son propre `random.Random(seed)` pour ne pas déplacer la séquence de dés
+      du moteur — le journal des 8 dernières actions est affiché en cas d'échec.
+- [x] Fuzzing négatif : actions illégales sur des ids VALIDES → refusées avec motif, state
+      inchangé, jamais de 500 ; 2 seeds. Restreint à move/shoot/charge, dont le dispatch
+      refuse explicitement : en fight, tout verbe hors sous-phase est un no-op à
+      `success:true` (§0.5), un refus ne peut donc pas y être exigé. Les ids inexistants sont
+      exclus : ils relèvent de l'anomalie §0.6.1, déjà verrouillée.
+- [x] Chaque violation trouvée devient un check nommé permanent : appliqué dès le premier run
+      (anomalie §0.6.2, trouvée à la seed 3).
+- [ ] Budget : N parties complètes par run (ex. 20), sur plusieurs boards. Aujourd'hui 1 partie
+      complète + 5 marches aléatoires bornées à 120/40 actions (~2 min à `-n 4`).
 
 ### Hors périmètre de ce document (à décider séparément)
 - **Tutoriel** (BoardPvpWithTutorialAdvance, `/api/config/tutorial/steps`, scénarios étape N) :
@@ -273,49 +530,55 @@ en build normal) :
 ## Matrice de couverture — les 58 actions du front
 
 Vocabulaire complet relevé dans `useEngineAPI.ts` (`action: "..."`). Une action sans tranche = trou
-de couverture. État : ✅ testée (T1 fait), sinon tranche cible.
+de couverture. État : ✅ testée (T1/T2/T3/T4/T5/T6/T7b faits), sinon tranche cible. Les cases annotées
+« inatteignable / mode inaccessible » sont des trous de DONNÉES (aucune unité du roster ne
+déclenche la règle), pas des oublis : cf. le détail dans la tranche correspondante.
+
+NB : `move_squad_unplaced_destinations` (pools de toutes les figs non posées en un appel,
+`api_server.py:2497`) manque à cette liste — à couvrir en T3 également.
 
 | Action | Tranche | Action | Tranche |
 |---|---|---|---|
 | `activate_unit` (move) | ✅ T1 | `squad_shoot_activate` | ✅ T1 |
 | `move` | ✅ T1 | `squad_shoot_los_overview` | ✅ T1 |
 | `skip` | ✅ T1 | `squad_shoot_cancel` | ✅ T1 |
-| `advance_phase` | ✅ T1 | `squad_shoot_select_model` | T4 |
-| `advance` | T3 | `squad_shoot_assign_weapon_qty` | T4 |
-| `wait` | T3 | `squad_shoot_weapon_qty_max` | T4 |
-| `preview_move_plan` | T3 | `squad_shoot_unassign` | T4 |
-| `move_model_destinations` | T3 | `squad_shoot_unassign_weapon` | T4 |
-| `commit_move_plan` | T3 | `squad_shoot_validate` | T4 |
-| `left_click` | T3 | `squad_shoot_allocate_model` | T4 |
-| `right_click` | T3/T5 | `move_after_shooting` | T4 |
-| `end_phase` | T3 | `shoot` | T4 |
-| `deploy_unit` | T3a | `charge` | T5 |
-| `deploy_preview` | T3a | `charge_plan_state` | T5 |
-| `deploy_generate_formation` | T3a | `commit_charge_plan` | T5 |
-| `deploy_model_destinations` | T3a | `charge_autoplace` | T5 |
+| `advance_phase` | ✅ T1 | `squad_shoot_select_model` | ✅ T4 |
+| `advance` | ✅ T3 | `squad_shoot_assign_weapon_qty` | ✅ T4 |
+| `wait` | T3 | `squad_shoot_weapon_qty_max` | ✅ T4 |
+| `preview_move_plan` | ✅ T3 | `squad_shoot_unassign` | ✅ T4 |
+| `move_model_destinations` | ✅ T3 | `squad_shoot_unassign_weapon` | ✅ T4 |
+| (hors liste) `squad_shoot_assign_weapon` | ✅ T4 | (hors liste) `squad_shoot_unassign_weapon_qty` | ✅ T4 |
+| `commit_move_plan` | ✅ T3 | `squad_shoot_validate` | ✅ T4 |
+| `left_click` | T3 | `squad_shoot_allocate_model` | ✅ T4 |
+| `right_click` | T3/T5 | `move_after_shooting` | T4 — inatteignable (aucune unité ne porte la règle) |
+| `end_phase` | T3 | `shoot` | hors périmètre (chemin gym) |
+| `deploy_unit` | T3a | `charge` | ✅ T5 |
+| `deploy_preview` | T3a | `charge_plan_state` | ✅ T5 |
+| `deploy_generate_formation` | T3a | `commit_charge_plan` | ✅ T5 |
+| `deploy_model_destinations` | T3a | `charge_autoplace` | ✅ T5 |
 | `deploy_squad_destinations` | T3a | `take_to_skies` | T5 |
 | `deploy_commit` | T3a | `force_charged` | T5 |
-| `change_roster` | T3a | `fight` | T6 |
-| `select_rule_choice` | T2b | `skip_fight` | T6 |
-| `force_battle_shock` | T2b/T7 | `squad_fight_assign` | T6 |
-| `pile_in_plan_state` | T6 | `squad_fight_assign_weapon` | T6 |
-| `pile_in_autoplace` | T6 | `squad_fight_validate` | T6 |
-| `commit_pile_in_plan` | T6 | `squad_fight_manual_alloc` | T6 |
-| `end_pile_in` | T6 | `squad_hazard_allocate_model` | T6 |
-| `consolidation_plan_state` | T6 | `hazard_confirm` | T6 |
-| `consolidation_select_target` | T6 | `end_consolidation` | T6 |
-| `consolidation_select_objective` | T6 | `cancel_consolidation` | T6 |
-| `consolidate_autoplace` | T6 | `endless_duty_status` | hors périmètre |
-| `commit_consolidation_plan` | T6 | `endless_duty_commit` | hors périmètre |
+| `change_roster` | T3a | `fight` | ✅ T6 |
+| `select_rule_choice` | T2b | `skip_fight` | ✅ T6 |
+| `force_battle_shock` | T2b/T7 | `squad_fight_assign` | ✅ T6 |
+| `pile_in_plan_state` | ✅ T6 | `squad_fight_assign_weapon` | T6 (variante par arme) |
+| `pile_in_autoplace` | ✅ T6 | `squad_fight_validate` | ✅ T6 |
+| `commit_pile_in_plan` | ✅ T6 | `squad_fight_manual_alloc` | ✅ T6 |
+| `end_pile_in` | ✅ T6 | `squad_hazard_allocate_model` | T6 — aucune arme [HAZARDOUS] rencontrée |
+| `consolidation_plan_state` | ✅ T6 | `hazard_confirm` | T6 — idem |
+| `consolidation_select_target` | T6 — mode inaccessible si engagée (12.08) | `end_consolidation` | ✅ T6 |
+| `consolidation_select_objective` | T6 — idem | `cancel_consolidation` | T6 — idem |
+| `consolidate_autoplace` | ✅ T6 | `endless_duty_status` | hors périmètre |
+| `commit_consolidation_plan` | ✅ T6 | `endless_duty_commit` | hors périmètre |
 
 ## Ordre de réalisation conseillé et coûts
 
 | Étape | Contenu | Coût estimé | Valeur |
 |---|---|---|---|
-| T2-T3 | Invariants + move escouade/advance/fall-back (API) | faible | haute — cœur du jeu |
-| T5-T6 | Charge + fight (API) | moyen | haute — zone à bugs historique |
-| T4 | Shoot par arme/figurine + unités cachées (API) | moyen | haute |
-| T7b | Fuzzing par invariants | faible (réutilise T2) | très haute — couvre l'imprévu |
+| ~~T2-T3~~ | ✅ FAIT — invariants + move escouade/advance/fall-back (API) | faible | haute — cœur du jeu |
+| ~~T5-T6~~ | ✅ FAIT — charge + fight (API) | moyen | haute — zone à bugs historique |
+| ~~T4~~ | ✅ FAIT — shoot par arme/figurine + unités cachées (API) | moyen | haute |
+| ~~T7b~~ | ✅ FAIT — fuzzing par invariants (1 anomalie trouvée au 1er run) | faible (réutilise T2) | très haute — couvre l'imprévu |
 | T2b, T3a | Command/réactions + déploiement (API) | moyen | moyenne |
 | T7 | Snapshots/save/fin de partie (API) | faible | moyenne |
 | T8-T10 | vitest hook + utils + composants DOM | moyen | moyenne |

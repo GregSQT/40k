@@ -3155,6 +3155,21 @@ class W40KEngine(gym.Env):
         if unit_id:
             pre_unit = self._get_unit_by_id(str(unit_id))
             if not pre_unit:
+                # Saisie invalide vs incoherence d etat. Un id que le moteur ne connait
+                # NULLE PART vient du client : c est un refus metier, comme dans la
+                # dizaine de handlers qui renvoient deja `unit_not_found`. Ce
+                # pre-traitement (capture de position pour le step_logger) n a aucune
+                # raison d etre plus dur que la logique de jeu qu il precede.
+                # A l inverse, un id present dans units_cache ou squad_models mais absent
+                # de units est une vraie rupture de coherence interne : elle doit rester
+                # bruyante.
+                key = str(unit_id)
+                known_elsewhere = (
+                    key in require_key(self.game_state, "units_cache")
+                    or key in require_key(self.game_state, "squad_models")
+                )
+                if not known_elsewhere:
+                    return False, {"error": "unit_not_found", "unitId": key}
                 raise KeyError(f"Unit {unit_id} missing from game_state['units']")
             pre_action_player = require_key(pre_unit, "player")
             if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
@@ -4715,6 +4730,18 @@ class W40KEngine(gym.Env):
             return build_hidden_detection_info_by_unit_id(self.game_state, unit_obj)
 
         if name == "squad_shoot_activate":
+            # Cancel implicite de l activation en cours. active_shooting_unit est un
+            # singleton : des que le joueur active une autre escouade (ou reactive la
+            # meme), la precedente devient inaccessible. Le front n envoie PAS de
+            # squad_shoot_cancel avant d activer (useEngineAPI.handleStartSquadModelShoot),
+            # ce qui laissait son pending orphelin et faisait lever
+            # assert_no_pending_shoot_intent au retour sur elle. On libere donc ici
+            # exactement ce que squad_shoot_cancel aurait libere : ses declarations
+            # d armes sont perdues, comme elles l etaient deja de fait.
+            previous_active = self.game_state.get("active_shooting_unit")
+            if previous_active is not None:
+                clear_pending_shoot_intent(self.game_state, str(previous_active))
+                del self.game_state["active_shooting_unit"]
             squad_shooting_unit_activation_start(self.game_state, squad_id)
             self.game_state["active_shooting_unit"] = squad_id
             unit = get_unit_by_id(squad_id, self.game_state)
@@ -5559,7 +5586,7 @@ class W40KEngine(gym.Env):
             squad_declare_shoot,
             squad_lock_shoot,
             build_manual_shoot_allocation,
-            squad_fight_unit_activation_start,
+            squad_fight_restart_activation,
             squad_declare_fight,
             commit_move,
             charge_build_valid_plan,
@@ -6077,7 +6104,7 @@ class W40KEngine(gym.Env):
                     )
                 best_target_id = None
 
-            squad_fight_unit_activation_start(self.game_state, squad_id)
+            squad_fight_restart_activation(self.game_state, squad_id)
             if best_target_id is not None:
                 squad_declare_fight(self.game_state, squad_id, best_target_id)
             _fight_alloc = build_manual_fight_allocation(self.game_state, squad_id)

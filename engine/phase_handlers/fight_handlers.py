@@ -57,6 +57,7 @@ from .shared_utils import (
     save_threshold,
     get_fighting_models,
     squad_fight_unit_activation_start,
+    squad_fight_restart_activation,
     squad_declare_fight,
     DeclareAttackCtx,
     declare_attack_model,
@@ -2771,6 +2772,12 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["fight_selector"] = None
     game_state["fight_eligible_units"] = []
     game_state["active_fight_unit"] = None
+    # Purge de securite, jumelle de celle du tir : une declaration d attaque ne survit
+    # jamais a sa phase. Laisser une activation en plan est un geste NORMAL du joueur
+    # (il declare, puis change d avis et sort de la sous-phase) ; on ne leve donc pas,
+    # mais le pending doit mourir ici, sinon il empoisonne la melee du tour suivant.
+    if "pending_squad_fight_intents" in game_state:
+        game_state["pending_squad_fight_intents"] = {}
     add_console_log(game_state, "FIGHT PHASE COMPLETE (V11)")
 
     # Etape End of Turn — REGAINING COHERENCY (03.03). Fight est la DERNIERE phase du tour :
@@ -2853,7 +2860,7 @@ def _fight_v11_resolve_attacks(
     # Déclaration per-figurine + allocation via le moteur groupes (jumeau du chemin
     # training w40k_core). Le hook FIGHT_CTX.on_unit_destroyed retire la cible morte des
     # pools de combat (équivalent de l'ancien _remove_dead_unit_from_fight_pools).
-    squad_fight_unit_activation_start(game_state, unit_id)
+    squad_fight_restart_activation(game_state, unit_id)
     squad_declare_fight(game_state, unit_id, tid)
     alloc = build_manual_fight_allocation(game_state, unit_id)
     if not alloc.get("done"):
@@ -5008,7 +5015,8 @@ def _fight_v11_consolidation_new_foes_step(
         game_state["active_fight_unit"] = None
         _fight_v11_log(game_state, f"NEW FOE {active} -> cible {target_id} (clic={pref}) defenseur_humain={defender_human}")
         if defender_human:
-            squad_fight_unit_activation_start(game_state, active)
+            # Meme regle qu au dispatch FIGHT : le clic-cible repart de zero.
+            squad_fight_restart_activation(game_state, active)
             squad_declare_fight(game_state, active, target_id)
             alloc_result = build_manual_fight_allocation(game_state, active)
             if alloc_result.get("waiting_for_player"):
@@ -5771,7 +5779,9 @@ def _fight_v11_manual_step(
                 game_state["active_fight_unit"] = None
                 if defender_human:
                     # Defenseur humain (§G) : allocation manuelle des pertes (par-figurine).
-                    squad_fight_unit_activation_start(game_state, sel)
+                    # restart_ : le clic-cible redeclare toute l escouade, il ecrase donc
+                    # ce que squad_fight_assign avait pu declarer avant lui.
+                    squad_fight_restart_activation(game_state, sel)
                     squad_declare_fight(game_state, sel, target_id)
                     alloc_result = build_manual_fight_allocation(game_state, sel)
                     _fight_v11_log(
