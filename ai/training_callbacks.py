@@ -1143,8 +1143,15 @@ class MetricsCollectionCallback(BaseCallback):
                 self.episode_reward_components['tactical_bonuses'] += require_key(reward_breakdown, 'tactical_bonuses')
                 self.episode_reward_components['situational'] += require_key(reward_breakdown, 'situational')
                 self.episode_reward_components['penalties'] += require_key(reward_breakdown, 'penalties')
-                if 'position_score' in reward_breakdown and self.metrics_tracker:
-                    self.metrics_tracker.log_position_score(reward_breakdown['position_score'])
+                # `if 'position_score' in reward_breakdown: log_position_score(...)` occupait la
+                # ligne suivante. La cle n'existe plus : elle etait ecrite par la recompense de
+                # mouvement basee sur calculate_position_score (offensive_value moins menace
+                # defensive ponderee), supprimee de engine/reward_calculator.py par le commit
+                # 329d140e "move reward deleted" (2026-02-01) avec la metrique correspondante.
+                # Le garde etait reste cote consommateur, silencieux : une courbe
+                # game_tactical/avg_position_score vide ne se distingue pas d'une courbe nulle.
+                # Le seul producteur de reward_breakdown ecrit base_actions, result_bonuses,
+                # tactical_bonuses, situational, penalties et total — rien d'autre.
 
         # Le suivi periodique des Q-values (train/q_value_mean_smooth, toutes les 100 etapes)
         # occupait cette place. Meme raison que le bloc equivalent de EpisodeBasedEvalCallback :
