@@ -1084,7 +1084,12 @@ from ai.training_utils import (
     describe_expected_bot_self_scenario_files,
     ensure_scenario
 )
-from ai.vec_normalize_utils import save_vec_normalize, load_vec_normalize, get_vec_normalize_path
+from ai.vec_normalize_utils import (
+    save_vec_normalize,
+    load_vec_normalize,
+    get_vec_normalize_path,
+    VEC_NORMALIZE_SUFFIX,
+)
 
 from shared.data_validation import require_key, require_present
 
@@ -1167,6 +1172,57 @@ def _write_tensorboard_run_meta(model_path: str, run_dir: str) -> None:
     payload = {"run_dir": run_dir}
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
+
+
+def _promote_checkpoint_for_resume(
+    checkpoint_path: str, agent_key: str, config_loader: Any, log_fn=print
+) -> str:
+    """`--resume-from` : installe un checkpoint au chemin CANONIQUE du modele, puis rend la main.
+
+    `--append` recharge toujours `model_<agent>.zip` (il n'existe pas de chemin de modele
+    parametrable pour l'entrainement) : reprendre depuis un checkpoint consiste donc a l'y
+    installer AVEC ses stats VecNormalize. Leur absence est une erreur explicite, jamais un
+    repli sur les stats d'un autre modele : ce serait un decalage muet de normalisation
+    (V11 §0.35).
+
+    Le modele canonique deja en place est ECARTE, pas ecrase (meme principe que `--new`), et le
+    run TensorBoard est remis a neuf : un checkpoint est un point ANTERIEUR, prolonger le run qui
+    l'a produit ferait reculer les steps dans les courbes.
+    """
+    if not agent_key:
+        raise ValueError("--resume-from exige --agent (chemin du modele canonique inconnu sinon)")
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"--resume-from : checkpoint introuvable : {checkpoint_path}")
+    checkpoint_vec_path = get_vec_normalize_path(checkpoint_path)
+    if not os.path.exists(checkpoint_vec_path):
+        raise FileNotFoundError(
+            f"--resume-from : stats VecNormalize absentes pour ce checkpoint : "
+            f"{checkpoint_vec_path}. Les checkpoints ecrits avant que le callback ne sauve ses "
+            f"stats n'en ont pas : ils ne sont pas reprenables."
+        )
+
+    model_path = build_agent_model_path(config_loader.get_models_root(), agent_key)
+    if os.path.abspath(checkpoint_path) == os.path.abspath(model_path):
+        raise ValueError(
+            f"--resume-from : le checkpoint EST deja le modele canonique ({model_path}). "
+            f"Utiliser --append seul."
+        )
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+
+    if os.path.exists(model_path):
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        stem = os.path.splitext(model_path)[0]
+        shutil.move(model_path, f"{stem}_pre_resume_{stamp}.zip")
+        previous_vec_path = get_vec_normalize_path(model_path)
+        if os.path.exists(previous_vec_path):
+            shutil.move(previous_vec_path, f"{stem}_pre_resume_{stamp}{VEC_NORMALIZE_SUFFIX}")
+        log_fn(f"📦 --resume-from : modele canonique precedent ecarte -> {stem}_pre_resume_{stamp}.zip")
+
+    shutil.copy2(checkpoint_path, model_path)
+    shutil.copy2(checkpoint_vec_path, get_vec_normalize_path(model_path))
+    _write_tensorboard_run_meta(model_path, "")
+    log_fn(f"♻️  --resume-from : {os.path.basename(checkpoint_path)} installe en {model_path}")
+    return model_path
 
 
 def _resolve_tensorboard_run_dir(
@@ -3321,6 +3377,22 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     if "checkpoint_name_prefix" not in callback_params:
         raise KeyError("callback_params missing required 'checkpoint_name_prefix' field")
         
+    class VecNormalizeCheckpointCallback(CheckpointCallback):
+        """Checkpoint periodique qui ecrit AUSSI les stats VecNormalize du checkpoint.
+
+        Sans ce pkl jumeau un `ppo_checkpoint_*_steps.zip` est INEXPLOITABLE pour reprendre un
+        entrainement : la reprise exige `<stem>_vec_normalize.pkl` (V11 §0.35) et echoue
+        explicitement s'il manque — le seul artefact reprenable etait le `_interrupted` du Ctrl-C.
+        `save_vecnormalize=True` de SB3 ne convient pas : il ecrit
+        `<prefix>_vecnormalize_<n>_steps.pkl`, un nom que `get_vec_normalize_path` ne resout pas.
+        """
+
+        def _on_step(self) -> bool:
+            continue_training = super()._on_step()
+            if self.save_freq > 0 and self.n_calls % self.save_freq == 0:
+                save_vec_normalize(self.model.get_env(), self._checkpoint_path(extension="zip"))
+            return continue_training
+
     max_checkpoints = callback_params.get("max_checkpoints")
     if max_checkpoints is not None:
         if not isinstance(max_checkpoints, int) or isinstance(max_checkpoints, bool):
@@ -3333,7 +3405,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                 f"callback_params.max_checkpoints must be > 0 when provided (got {max_checkpoints})"
             )
 
-        class RotatingCheckpointCallback(CheckpointCallback):
+        class RotatingCheckpointCallback(VecNormalizeCheckpointCallback):
             """Checkpoint callback that keeps only the most recent N checkpoints."""
 
             def __init__(self, max_checkpoints: int, **kwargs):
@@ -3350,6 +3422,11 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                 for old_checkpoint in checkpoint_files[self.max_checkpoints:]:
                     if os.path.exists(old_checkpoint):
                         os.remove(old_checkpoint)
+                    # Le pkl jumeau part avec son zip : le laisser fabriquerait un artefact
+                    # orphelin qu'un futur checkpoint de meme nom servirait a tort (V11 §0.35).
+                    old_vec_path = get_vec_normalize_path(old_checkpoint)
+                    if os.path.exists(old_vec_path):
+                        os.remove(old_vec_path)
 
             def _on_step(self) -> bool:
                 continue_training = super()._on_step()
@@ -3665,6 +3742,9 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
             for checkpoint_file in checkpoint_files:
                 try:
                     os.remove(checkpoint_file)
+                    checkpoint_vec_path = get_vec_normalize_path(checkpoint_file)
+                    if os.path.exists(checkpoint_vec_path):
+                        os.remove(checkpoint_vec_path)
                     if verbose := 0:  # Only log if verbose
                         print(f"   Removed: {os.path.basename(checkpoint_file)}")
                 except Exception as e:
@@ -4373,8 +4453,13 @@ def main():
                        help="Rewards config (default: same as --agent when agent set, else 'default')")
     parser.add_argument("--new", action="store_true", 
                        help="Force creation of new model")
-    parser.add_argument("--append", action="store_true", 
+    parser.add_argument("--append", action="store_true",
                        help="Continue training existing model")
+    parser.add_argument("--resume-from", type=str, default=None, metavar="CHECKPOINT_ZIP",
+                       help="Reprendre l'entrainement depuis un checkpoint (ex: "
+                            "ai/models/<agent>/ppo_checkpoint_640000_steps.zip). Le checkpoint et "
+                            "ses stats VecNormalize sont installes au chemin canonique du modele "
+                            "(l'ancien est ecarte, pas ecrase) puis --append est active.")
     parser.add_argument("--test-only", action="store_true", 
                        help="Only test existing model, don't train")
     parser.add_argument("--eval", action="store_true",
@@ -4420,6 +4505,11 @@ def main():
     if args.resolution is not None:
         os.environ["W40K_BOARD_PATH"] = _RESOLUTION_TO_BOARD[args.resolution]
     args.test_only = args.test_only or args.eval
+
+    if args.resume_from:
+        if args.new:
+            raise ValueError("--resume-from et --new sont exclusifs (--new repartirait de zero)")
+        args.append = True
 
     # Default rewards-config to agent when agent is set (simplifies: --agent X implies rewards X)
     if args.rewards_config is None:
@@ -4477,6 +4567,8 @@ def main():
         
         # Setup environment and configuration (before step_logger to read step_log_buffer_size)
         config = get_config_loader()
+        if args.resume_from:
+            _promote_checkpoint_for_resume(args.resume_from, args.agent, config)
         if args.step and not args.agent:
             raise ValueError("--step requires --agent to read step_log_buffer_size from agent training config")
         _require_training_config_phase(config, args.agent, args.training_config)

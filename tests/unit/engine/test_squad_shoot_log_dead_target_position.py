@@ -59,6 +59,13 @@ def _weapon_group() -> Dict[str, Any]:
         "killed_model_ids": ["2#0"],
         "shooter_mids": ["1#0"],
         "shots": [{"targetCol": TARGET_COL, "targetRow": TARGET_ROW}],
+        # [HEAVY] 24.16 / [RAPID FIRE] 24.30 : la couche d'allocation pose ces deux clés sur
+        # TOUS les groupes, tir comme mêlée (shared_utils.py, construction de `_grp` :
+        # `bool(r["heavy_applied"]) if "heavy_applied" in r else False`) — en mêlée elles
+        # valent simplement False/0. Les omettre ici rendait le stub infidèle à son propre
+        # docstring et faisait lever l'émission, qui les lit en accès direct à juste titre.
+        "heavy_applied": False,
+        "rapid_fire_applied": 0,
     }
 
 
