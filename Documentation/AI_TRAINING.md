@@ -184,7 +184,7 @@ Cette section décrit comment le training est structuré (qui appelle quoi). Pou
 
 ### Point d’entrée et CLI
 
-- **Script** : `ai/train.py`. Tous les modes (entraînement, test-only, macro, convert-steplog) partent de ce script.
+- **Script** : `ai/train.py`. Tous les modes (entraînement, test-only, convert-steplog) partent de ce script.
   ⚠️ Le mode `orchestrate` (`--orchestrate`, `--multi-agent`, `--max-concurrent`, `--training-phase`)
   a été **supprimé** le 2026-07-19 avec `ai/multi_agent_trainer.py` : legacy pré-squad qui chargeait
   les modèles en `DQN.load` alors que tous les `.zip` sont MaskablePPO. Cf. V11_agent_rework §0.8.
@@ -364,34 +364,26 @@ python ai/train.py --agent CoreAgent --eval --param agent_seat_mode p2 --test-ep
 
 ---
 
-## 🧭 MACRO TRAINING STATUS
+## 🧭 MACRO TRAINING — SUPPRIMÉ
 
-### Implémente aujourd'hui
+**Il n'y a plus d'agent macro. `--agent MacroController` n'existe plus, et `--macro-eval-mode`
+non plus.** L'intention de zone est portée par l'agent micro unifié (`create_model`), qui est
+le seul agent entraîné.
 
-Cette section couvre uniquement ce qui est actuellement supporté côté code.
+Cette section décrivait le mode macro comme « implémenté aujourd'hui » : c'était faux depuis le
+passage en Phase 2. Aucun des éléments qu'elle listait n'existait dans le dépôt —
+`ai/macro_training_env.py`, `config/agents/MacroController/` (config, scénarios, modèle) ; et
+`create_macro_controller_model` / `_build_macro_eval_env` levaient `NotImplementedError` sans
+condition, donc la commande de lancement documentée ci-dessous plantait systématiquement.
 
-- **Entrée CLI unique** : `ai/train.py` gère les modes macro et micro.
-- **Wrappers macro** : `ai/macro_training_env.py` (`MacroTrainingWrapper`, `MacroVsBotWrapper`).
-- **Config macro** : `config/agents/MacroController/MacroController_training_config.json`.
-- **Scénarios macro** : `config/agents/MacroController/scenarios/*.json`.
-- **Modes d'évaluation macro** :
-  - `--macro-eval-mode micro` : macro vs pipeline micro.
-  - `--macro-eval-mode bot` : macro vs bots d'évaluation.
-- **Lancement macro (exemple)** :
-  ```bash
-  python ai/train.py --agent MacroController --training-config default --rewards-config MacroController --scenario all --new
-  ```
+Le code correspondant a été retiré de `ai/train.py` (voir la trace au-dessus de
+`resolve_turn_step_limit`), ainsi que les chemins `macro_controller_config_*` et la largeur de
+barre `macro_eval_width` de `config/config.json`, que plus rien ne lisait.
 
-### Recommandations / non implémente
-
-> **⚠️ IMPORTANT**
-> Les éléments ci-dessous sont des recommandations de design/process et ne sont pas garantis comme implémentés partout.
-> Le document détaillé a été déplacé vers `Documentation/TODO/Macro_agent.md`.
-
-- Structuration macro complète en `scenarios/training` + `scenarios/holdout_regular` + `scenarios/holdout_hard`.
-- Couverture de scénarios plus large (volumétrie et variété topologique).
-- Stratégie “1 macro-agent par armée”.
-- Pipeline de validation robuste orienté holdout + multi-bots + fenêtre temporelle.
+Les recommandations de design macro qui suivaient (structuration holdout, volumétrie de
+scénarios, « 1 macro-agent par armée », pipeline de validation multi-bots) renvoyaient à
+`Documentation/TODO/Macro_agent.md`, un fichier qui n'existe pas non plus. Il n'y a donc aucun
+chantier macro ouvert : relancer le sujet demande une décision produit, pas une reprise de code.
 
 ---
 
