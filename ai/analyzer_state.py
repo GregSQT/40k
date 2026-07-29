@@ -3,7 +3,7 @@ AnalyzerState — état partagé entre les handlers de parse_step_log.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from ai.analyzer_perfig import Base
 
@@ -21,7 +21,6 @@ class AnalyzerState:
     episode_actions: int = 0
     last_turn: int = 0
     episode_start_time: Optional[int] = None
-    episode_step_index: int = 0
 
     # Suivi unités
     # Modèle HP par-figurine (05 Attack sequence) : unit_hp[uid] = PV de la figurine
@@ -47,8 +46,9 @@ class AnalyzerState:
 
     # Board
     wall_hexes: Set[Tuple[int, int]] = field(default_factory=set)
-    objective_hexes: Dict[int, Set[Tuple[int, int]]] = field(default_factory=dict)
-    objective_controllers: Dict[int, Optional[int]] = field(default_factory=dict)
+    # `objective_hexes` / `objective_controllers` ont disparu avec le recalcul du contrôle
+    # d'objectif côté analyzer (par ancre, sans battle-shock). L'état 14.02 est celui du moteur,
+    # lu dans la ligne `T{tour} OBJECTIVE CONTROL:` du step.log — cf. Replay.md §2.3.
 
     # Suivi morts
     unit_deaths: List = field(default_factory=list)
@@ -91,11 +91,12 @@ class AnalyzerState:
     phase_activation_seen: Dict[Tuple[int, str, int], Set[str]] = field(default_factory=dict)
     reactive_activation_counts: Dict[Tuple[int, int, int], Dict[str, int]] = field(default_factory=dict)
     fight_phase_seq_id: int = 0
-    last_objective_snapshot: Optional[Dict[int, Dict[str, Any]]] = None
-    seen_turn_player: Set[Tuple[int, int]] = field(default_factory=set)
+    # Points de victoire de l'épisode : recopiés du dernier instantané moteur, jamais calculés.
     episode_victory_points: Dict[int, int] = field(default_factory=dict)
-    scored_turns: Set[Tuple[str, int, int]] = field(default_factory=set)
-    primary_objective_configs: List[Dict[str, Any]] = field(default_factory=list)
+    # L'épisode a-t-il livré au moins un instantané `OBJECTIVE CONTROL` / déclaré des objectifs ?
+    # Les deux ensemble distinguent « scénario sans zone » (légitime) de « journal périmé ».
+    objective_control_seen: bool = False
+    objectives_declared: bool = False
     selected_choice_by_unit_source: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
 

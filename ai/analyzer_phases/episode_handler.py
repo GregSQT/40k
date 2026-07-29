@@ -39,7 +39,6 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.current_episode_num = stats['total_episodes']
     state.episode_turn = 0
     state.episode_actions = 0
-    state.episode_step_index = 0
     state.episode_start_time = parse_timestamp_to_seconds(line)
     stats['current_episode_deaths'] = []
     stats['wounded_enemies'] = {1: set(), 2: set()}
@@ -51,8 +50,6 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.unit_types = {}
     state.unit_move = {}
     state.wall_hexes = set()
-    state.objective_hexes = {}
-    state.objective_controllers = {}
     state.positions_at_turn_start = {}
     state.positions_at_move_phase_start = {}
     state.dead_units_current_episode = set()
@@ -76,12 +73,9 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.unit_deaths = []
     state.unit_kill_context = {}
     state.phase_activation_seen = {}
-    stats['objective_control_history'][state.current_episode_num] = []
-    state.last_objective_snapshot = None
-    state.seen_turn_player = set()
     state.episode_victory_points = {PLAYER_ONE_ID: 0, PLAYER_TWO_ID: 0}
-    state.scored_turns = set()
-    state.primary_objective_configs = []
+    state.objective_control_seen = False
+    state.objectives_declared = False
     state.selected_choice_by_unit_source = {}
     state.positions_by_model = {}
     state.current_line_models = {}

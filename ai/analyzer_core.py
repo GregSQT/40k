@@ -4,7 +4,7 @@ Utilise AnalyzerState (state) et AnalyzerConfig (config) pour tout état mutable
 """
 
 import re
-from typing import Dict, List, Tuple, Optional
+from typing import Optional
 
 from shared.data_validation import require_key, require_present
 from engine.combat_utils import calculate_hex_distance
@@ -25,14 +25,10 @@ PLAYER_TWO_ID = 2
 def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
     """Execute the main parsing loop. Modifies state.stats in-place."""
     from ai.analyzer import (
-        _get_primary_objective_ids_for_scenario,
-        _get_objective_name_to_id_map,
         _apply_damage_and_handle_death,
         _track_unit_reappearance,
         _position_cache_set,
         _position_cache_remove,
-        _calculate_objective_control_snapshot,
-        _calculate_primary_objective_points,
         _get_unit_hp_value,
         _track_action_phase_accuracy,
         _debug_log,
@@ -43,7 +39,6 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
         _build_enemy_adjacent_hexes,
         _bfs_shortest_path_length,
         has_line_of_sight,
-        normalize_coordinates,
         parse_timestamp_to_seconds,
     )
 
@@ -105,11 +100,22 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             scenario_match = re.search(r'Scenario: (.+)$', line)
             if scenario_match:
                 state.current_scenario = scenario_match.group(1).strip()
-                primary_objective_ids = _get_primary_objective_ids_for_scenario(state.current_scenario)
-                state.primary_objective_configs = [
-                    config.config_loader.load_primary_objective_config(obj_id)
-                    for obj_id in primary_objective_ids
-                ]
+                continue
+
+            # Instantané 14.02 écrit par le MOTEUR (cf. Documentation/Implémentation/Replay.md
+            # §2.3) : SOURCE DE VÉRITÉ des points de victoire et du contrôle d'objectif.
+            #   [hh:mm:ss] T{tour} OBJECTIVE CONTROL: VP1=… VP2=… ZONES=…
+            # Ne matche PAS le récapitulatif de fin d'épisode ([ts] OBJECTIVE CONTROL:
+            # Obj{id}:P1_OC=…), qui n'a ni T{tour} ni VP1= — cf. la même distinction dans
+            # replayParser.ts. Les VP écrasent (et non accumulent) : le moteur journalise un
+            # TOTAL courant, pas un delta.
+            objective_control_match = re.search(
+                r'\bT(\d+) OBJECTIVE CONTROL: VP1=(-?\d+) VP2=(-?\d+) ZONES=', line
+            )
+            if objective_control_match:
+                state.episode_victory_points[PLAYER_ONE_ID] = int(objective_control_match.group(2))
+                state.episode_victory_points[PLAYER_TWO_ID] = int(objective_control_match.group(3))
+                state.objective_control_seen = True
                 continue
 
             # Parse walls
@@ -122,7 +128,16 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         state.wall_hexes.add((col, row))
                 continue
 
-            # Parse objectives
+            # Ligne `Objectives:` : elle ne sert plus qu'à savoir si la partie DÉCLARE des
+            # objectifs. Le bloc qui vivait ici reconstruisait `state.objective_hexes` (zone →
+            # hexes) pour resommer l'OC à chaque action ; ce calcul est supprimé — il sommait par
+            # ANCRE d'escouade là où le moteur somme par empreinte de socle (14.02), ignorait le
+            # battle-shock (01.07) et évaluait à un moment qui n'est pas une frontière de phase.
+            # Le contrôle et les points de victoire sont désormais LUS de la ligne
+            # `T{tour} OBJECTIVE CONTROL:` que le moteur journalise (Replay.md §2.3).
+            # Il emportait avec lui l'appariement nom → id positionnel
+            # (`_get_objective_name_to_id_map`, supprimé) : plus rien n'a besoin d'un id d'objectif
+            # côté analyzer, seul l'état moteur compte.
             objectives_match = re.search(r'Objectives:\s*(.+)$', line)
             if objectives_match:
                 objectives_payload = objectives_match.group(1).strip()
@@ -130,62 +145,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     raise ValueError(
                         f"Objectives line missing payload in episode {state.current_episode_num}: {line.strip()[:200]}"
                     )
-                state.objective_hexes = {}
-                # For temp scenarios (name contains __<hash>), the objectives file is gone;
-                # build name→id from position so we can still parse the log.
-                _inline_name_to_id: Dict[str, int] = {}
-                _inline_next_id: int = 1
-                for entry in objectives_payload.split('|'):
-                    entry = entry.strip()
-                    if not entry:
-                        raise ValueError(
-                            f"Objectives line contains empty entry in episode {state.current_episode_num}: {line.strip()[:200]}"
-                        )
-                    if ':' not in entry:
-                        raise ValueError(
-                            f"Objectives entry missing ':' in episode {state.current_episode_num}: {entry}"
-                        )
-                    name_part, hex_part = entry.split(':', 1)
-                    name_part = name_part.strip()
-                    obj_id_match = re.match(r'Obj(\d+)$', name_part)
-                    if obj_id_match:
-                        obj_id = int(obj_id_match.group(1))
-                    else:
-                        objective_name_map = _get_objective_name_to_id_map(state.current_scenario)
-                        if name_part in objective_name_map:
-                            obj_id = objective_name_map[name_part]
-                        else:
-                            # Temp scenario: assign sequential id from position in this line.
-                            if name_part not in _inline_name_to_id:
-                                _inline_name_to_id[name_part] = _inline_next_id
-                                _inline_next_id += 1
-                            obj_id = _inline_name_to_id[name_part]
-                    if obj_id in state.objective_hexes:
-                        raise ValueError(
-                            f"Duplicate objective id {obj_id} in episode {state.current_episode_num}"
-                        )
-                    hexes: List[Tuple[int, int]] = []
-                    for hex_str in hex_part.split(';'):
-                        hex_str = hex_str.strip()
-                        if not hex_str:
-                            raise ValueError(
-                                f"Empty objective hex in episode {state.current_episode_num}: {entry}"
-                            )
-                        coord_match = re.match(r'\((\d+),\s*(\d+)\)', hex_str)
-                        if not coord_match:
-                            raise ValueError(
-                                f"Invalid objective hex '{hex_str}' in episode {state.current_episode_num}"
-                            )
-                        col, row = normalize_coordinates(
-                            int(coord_match.group(1)),
-                            int(coord_match.group(2)),
-                        )
-                        hexes.append((col, row))
-                    if not hexes:
-                        raise ValueError(
-                            f"Objective {obj_id} has no hexes in episode {state.current_episode_num}"
-                        )
-                    state.objective_hexes[obj_id] = set(hexes)
+                state.objectives_declared = objectives_payload != 'none'
                 continue
 
             # Parse unit starting positions
@@ -293,24 +253,12 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             'line': line.strip()[:100]
                         })
 
-                if state.primary_objective_configs:
-                    if state.last_objective_snapshot is None:
-                        raise ValueError(
-                            f"Missing objective control snapshot at episode end {state.current_episode_num}"
-                        )
-                    if state.last_turn == 5 and state.last_player == PLAYER_TWO_ID:
-                        for cfg in state.primary_objective_configs:
-                            objective_id = require_key(cfg, "id")
-                            score_key = (objective_id, state.last_turn, PLAYER_TWO_ID)
-                            if score_key in state.scored_turns:
-                                continue
-                            points = _calculate_primary_objective_points(
-                                state.last_objective_snapshot,
-                                cfg,
-                                PLAYER_TWO_ID
-                            )
-                            state.episode_victory_points[PLAYER_TWO_ID] += points
-                            state.scored_turns.add(score_key)
+                # Points de victoire = ceux du MOTEUR, lus dans le dernier instantané
+                # `OBJECTIVE CONTROL` de l'épisode. Le barème (fenêtre de score, cas T5/joueur 2,
+                # plafond par tour, conditions) vivait ici en double de
+                # `StateManager.apply_primary_objective_scoring` : il est supprimé, le moteur
+                # étant seul à décider ce qui est marqué.
+                if state.objective_control_seen:
                     stats['victory_points_by_episode'][state.current_episode_num] = {
                         PLAYER_ONE_ID: state.episode_victory_points[PLAYER_ONE_ID],
                         PLAYER_TWO_ID: state.episode_victory_points[PLAYER_TWO_ID],
@@ -320,6 +268,14 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     )
                     stats['victory_points_values'][PLAYER_TWO_ID].append(
                         state.episode_victory_points[PLAYER_TWO_ID]
+                    )
+                elif state.objectives_declared:
+                    # Journal antérieur au format : mêmes règles que le replay
+                    # (`replayParser.ts`) — on ne devine pas des VP, on demande la régénération.
+                    raise ValueError(
+                        f"Episode {state.current_episode_num} declares objectives but carries no "
+                        f"'T<turn> OBJECTIVE CONTROL:' snapshot. Regenerate step.log: victory "
+                        f"points are read from the engine, no longer recomputed by the analyzer."
                     )
 
                 stats['current_episode_deaths'] = []
@@ -934,53 +890,14 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 else:
                     action_type = 'other'
 
-                if step_inc:
-                    if not state.objective_hexes:
-                        raise ValueError(
-                            f"Objectives not parsed before step action in episode {state.current_episode_num}: "
-                            f"{line.strip()[:200]}"
-                        )
-                    state.episode_step_index += 1
-                    snapshot = _calculate_objective_control_snapshot(
-                        state.objective_hexes,
-                        state.objective_controllers,
-                        state.unit_positions,
-                        state.unit_player,
-                        state.unit_types,
-                        config.unit_registry,
-                    )
-                    stats['objective_control_history'][state.current_episode_num].append({
-                        "step_index": state.episode_step_index,
-                        "control": snapshot,
-                    })
-                    if not state.primary_objective_configs:
-                        raise ValueError(
-                            f"Primary objectives not loaded before step action in episode {state.current_episode_num}"
-                        )
-                    turn_player_key = (turn, player)
-                    if turn >= 2 and turn_player_key not in state.seen_turn_player:
-                        if turn == 5 and player == PLAYER_TWO_ID:
-                            state.seen_turn_player.add(turn_player_key)
-                        else:
-                            if state.last_objective_snapshot is None:
-                                raise ValueError(
-                                    f"Missing objective control snapshot before scoring "
-                                    f"(episode {state.current_episode_num}, turn {turn}, player {player})"
-                                )
-                            for cfg in state.primary_objective_configs:
-                                objective_id = require_key(cfg, "id")
-                                score_key = (objective_id, turn, player)
-                                if score_key in state.scored_turns:
-                                    continue
-                                points = _calculate_primary_objective_points(
-                                    state.last_objective_snapshot,
-                                    cfg,
-                                    player
-                                )
-                                state.episode_victory_points[player] += points
-                                state.scored_turns.add(score_key)
-                            state.seen_turn_player.add(turn_player_key)
-                    state.last_objective_snapshot = snapshot
+                # Ici vivait un recalcul du contrôle d'objectif à CHAQUE action `step_inc`,
+                # suivi d'une seconde implémentation du barème primaire. Les deux sont supprimés :
+                # ils sommaient l'OC par ANCRE d'escouade (le moteur somme par empreinte de socle,
+                # 14.02), ignoraient le battle-shock (01.07 : OC de toutes les figurines à '-'),
+                # et évaluaient à chaque action alors que le contrôle est figé en fin de phase.
+                # Les VP viennent maintenant de la ligne `T{tour} OBJECTIVE CONTROL:` du moteur
+                # (lue plus haut) ; l'historique `objective_control_history` qu'ils alimentaient
+                # n'avait AUCUN lecteur dans tout le dépôt.
 
                 stats['actions_by_type'][action_type] += 1
                 stats['actions_by_player'][player][action_type] += 1

@@ -49,6 +49,36 @@ pile_in/fight/consolidate ; parsé, requis). **Aucun pool n'est loggué** : le c
 cible la seule unité active, qui est déjà l'**attaquant** de la ligne (`Unit X FOUGHT …`). Le parser
 en dérive `fight_eligible_units = [attacker_id]`.
 
+### 2.3 Contrôle d'objectif & points de victoire — **état moteur, jamais recalculé**
+Ligne dédiée, écrite **hors action** (elle n'appartient à aucune ligne de jeu) :
+
+```
+[hh:mm:ss] T{tour} OBJECTIVE CONTROL: VP1={vp} VP2={vp} ZONES={nom}:Ctrl={1|2|none}|{nom}:Ctrl=…
+```
+
+- **Producteur** : `StepLogger.log_objective_control_snapshot`, appelé par
+  `W40KEngine._log_objective_control_snapshot_if_changed` depuis `_build_observation` — émission
+  **à chaque changement** de `objective_controllers` **ou** de `victory_points` (le contrôle bouge
+  à la frontière de phase 14.02, les VP bougent dans les handlers `apply_primary_objective_scoring`
+  des phases command/fight : un déclencheur unique en manquerait un). Passe par le **buffer**, comme
+  `log_action` : une écriture directe s'intercalerait avant des actions non encore vidées.
+- **Clé de zone** = le **nom**, exactement celui de la ligne `Objectives:` (unique
+  `StepLogger._objective_display_name`, partagé par les deux lignes). ⚠️ À ne pas confondre avec le
+  récapitulatif de **fin d'épisode** `OBJECTIVE CONTROL: Obj{id}:P1_OC=…` (ni `T{tour}`, ni `VP1=`),
+  que le parseur ignore délibérément.
+- **Consommation** : `replayParser.ts` horodate chaque instantané par le nombre d'actions déjà lues
+  et le pose sur l'état correspondant (`state.objective_control`) ; `BoardReplay.tsx` le lit tel
+  quel pour les VP **et** la coloration des hexes.
+- **Pourquoi c'est journalisé et non recalculé** : le navigateur ne peut reproduire ni l'empreinte
+  de socle par figurine (14.02, `sum_objective_control_oc_multi`) ni le battle-shock (01.07 : OC de
+  toutes les figurines à `'-'`, 02.02) — ce drapeau n'existe nulle part dans le `step.log`. Le
+  calcul local qui vivait dans `BoardReplay` en divergeait : **2 zones sur 5** avaient un
+  contrôleur différent du moteur sur l'état final d'une vraie partie mesurée le 2026-07-29.
+- **Décision de contrat** : un `step.log` qui déclare des objectifs **sans** aucune ligne
+  `OBJECTIVE CONTROL` n'est plus rejouable — le parseur lève et demande la régénération (même règle
+  que `FIGHT_ELIGIBLE`, §4.A). Un scénario **sans objectif** n'écrit aucun instantané et reste
+  rejouable.
+
 > **Historique.** Avant : `[CHARGING_POOL] [ACTIVE_ALT_POOL] [NON_ACTIVE_ALT_POOL]` (pools V10, vides)
 > → pool vide en replay → pas de cercle vert. Un jet intermédiaire a loggué le pool V11 complet
 > (`[FIGHT_ELIGIBLE:…]`), mais il éclairait **toutes** les unités activables. Choix produit retenu :
@@ -113,6 +143,7 @@ en bout :
 | C | `pile_in` / `consolidation` classés en **phase `move`** | **fait (2026-07-23)** | — |
 | — | Replay per-figurine (segments MODELS/TARGET_MODELS) | **fait** (commits `81e56c35`, `4ea850c3`) | — |
 | — | Détail par-figurine (bouton +) move/advance/charge/reactive | **fait** (`4ea850c3`) | — |
+| D | Contrôle d'objectif & VP lus du moteur (fin du recalcul navigateur) | **fait (2026-07-29)** — unit + vitest + tsc + run réel ; visuel browser à confirmer | Confirmer VP et coloration des zones dans un replay (§4.D) ; **jumeau restant** : `ai/analyzer_core.py` recalcule encore à l'ancre |
 
 ### 4.A — Cercle vert fight ✅ FAIT (2026-07-23)
 **Décision produit (finale).** En replay fight, le cercle vert cible **UNIQUEMENT l'unité activée**
@@ -184,6 +215,61 @@ cours d'activation (`suppressFightActiveEligibleGreen`). Le vert éclaire les un
 236 lignes FOUGHT, **toutes** avec `[FIGHT_ELIGIBLE:…]` non vide, 0 vide, 0 « Step logging error » ;
 `vitest replayParser` 4/4 ; `tsc` propre. **Reste :** confirmer visuellement le cercle vert en fight
 dans un replay browser (le `step.log` régénéré le permet).
+
+### 4.D — Contrôle d'objectif & VP : lus du moteur ✅ FAIT (2026-07-29)
+**Défaut.** `BoardReplay.tsx` portait **deux** `useMemo` qui resommaient l'OC dans le navigateur
+(points de victoire *et* coloration des hexes). Quatre divergences avec le moteur, dont deux
+irrattrapables côté client : somme par **ancre** au lieu de l'empreinte de socle ; **battle-shock**
+(01.07) absent du `step.log` ; **moment d'évaluation** (le contrôle est figé en fin de phase/tour,
+14.02, pas à la 1ʳᵉ action d'un couple joueur/tour) ; **barème de scoring** ré-implémenté alors que
+`StateManager.apply_primary_objective_scoring` fait foi. Mesuré sur une vraie partie : 2 zones sur 5
+avec un contrôleur différent.
+
+**Implémenté :**
+1. `ai/step_logger.py` : `log_objective_control_snapshot` (format §2.3) + `_objective_display_name`
+   factorisé avec la ligne `Objectives:` — une seule règle de clé pour les deux lignes.
+2. `engine/w40k_core.py` : `_log_objective_control_snapshot_if_changed`, appelé dans
+   `_build_observation` juste après `refresh_objective_control_on_boundary`.
+3. `engine/w40k_core.py` (`reset`) : purge de `_objective_control_last_boundary` — **défaut jumeau
+   trouvé en chemin**, la frontière de l'épisode précédent (`fight`, T5) déclenchait un checkpoint
+   14.02 au premier build d'obs du nouvel épisode, figeant des contrôleurs avant toute fin de phase.
+   Purge aussi du mémo d'écriture, sinon l'instantané initial du nouvel épisode sautait.
+4. `frontend/src/utils/replayParser.ts` : parse, horodate par nombre d'actions lues, pose sur
+   `state.objective_control` ; **rejette** un journal à objectifs sans instantané.
+5. `frontend/src/components/BoardReplay.tsx` : les deux `useMemo` supprimés (−440 lignes), lecture
+   directe de l'instantané.
+6. Verrous : `test_step_logger.py` (format, parité de clé, contrôleur inattendu, passage par le
+   buffer), `test_squad_step_logging.py` (émission sur changement, déduplication, no-op),
+   `test_engine_step.py` (purges d'épisode), `replayParser.test.ts` (attachement timeline,
+   récapitulatif de fin ignoré, zone malformée, rejet d'un journal périmé).
+
+**Validation (2026-07-29).** pytest des 4 fichiers touchés vert, pyright 0 erreur, vitest 11/11,
+tsc + biome propres ; run réel headless (ArmageddonAgent, épisode complet) → 10 lignes
+`OBJECTIVE CONTROL`, 5 zones appariées par nom, VP 0→35/35, rejouées par le vrai parseur.
+Chaque verrou a été mis au ROUGE en remettant le défaut, puis rétabli (10 mutations).
+**Reste :** confirmer visuellement VP + coloration des zones dans un replay browser.
+
+**Jumeau analyzer — ✅ TRAITÉ dans la foulée (2026-07-29).** `ai/analyzer_core.py` refaisait le même
+calcul fautif à chaque action `step_inc` (somme par **ancre**, sans battle-shock, hors frontière
+14.02) puis ré-implémentait le barème primaire. **Écart mesuré sur le MÊME log réel : l'analyzer
+annonçait `P1=60 / P2=20` là où le moteur avait attribué `35/35`** — une partie nulle rapportée
+comme un raz-de-marée P1.
+Les VP viennent maintenant de la ligne `T{tour} OBJECTIVE CONTROL:` (dernier instantané de
+l'épisode ; le moteur journalise un **total**, pas un delta). Sont supprimés, sans appelant restant :
+`_calculate_objective_control_snapshot`, `_calculate_primary_objective_points`,
+`_get_objective_name_to_id_map`, `_resolve_terrain_path_for_scenario`,
+`_get_primary_objective_ids_for_scenario`, leurs deux caches, `_resolve_scenario_path`, le champ
+`objective_control_history` (**écrit, jamais lu** dans tout le dépôt), et les champs d'état
+`objective_hexes` / `objective_controllers` / `last_objective_snapshot` / `scored_turns` /
+`seen_turn_player` / `primary_objective_configs` / `episode_step_index`.
+Effet de bord bienvenu : l'appariement nom → id positionnel disparaît, donc **la coexistence de
+trois formats d'identifiant d'objectif** signalée dans `V11_tranches.md` n'a plus lieu d'être côté
+analyzer. Même contrat que le replay : un journal qui déclare des objectifs sans instantané est
+**rejeté** (régénérer), un scénario sans zone reste analysable.
+Verrous : `tests/unit/ai/test_analyzer_utils.py` (VP = dernier instantané et non une accumulation,
+récapitulatif de fin d'épisode ignoré, rejet d'un journal périmé, scénario sans zone accepté) —
+4 mutations mises au rouge puis rétablies. `pyright ai/`, `hidden_action_finder.py` et
+`check_ai_rules.py` propres.
 
 ### 4.B — Purge legacy V10 du `game_state` — ✅ MOTEUR FAIT (2026-07-23), résidu front
 **Audit.** Les 3 pools étaient inertes en V11 : machine V10 (`fight_build_activation_pools`,

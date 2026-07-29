@@ -121,6 +121,15 @@ const validateReplayRules = (rules: ReplayRules, episodeNumber: number): void =>
   }
 };
 
+// Etat 14.02 tel que le MOTEUR l'a calcule, lu dans les lignes `OBJECTIVE CONTROL` du step.log
+// (ai/step_logger.py::log_objective_control_snapshot). Rien n'est recalcule ici : cote navigateur
+// ni l'empreinte de socle par figurine ni le battle-shock (01.07) ne sont reconstituables.
+export interface ReplayObjectiveControl {
+  // Nom de zone (meme cle que `objectives[].name`) -> joueur controlant, ou null.
+  controllers: Record<string, number | null>;
+  victory_points: { 1: number; 2: number };
+}
+
 interface ReplayGameState {
   [key: string]: unknown;
   episode_steps?: number;
@@ -129,6 +138,7 @@ interface ReplayGameState {
   walls?: Array<{ col: number; row: number }>;
   objectives?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>;
   rules?: ReplayRules;
+  objective_control?: ReplayObjectiveControl;
 }
 
 // Temporary interface for parsing (has additional properties)
@@ -158,6 +168,10 @@ interface ReplayEpisodeDuringParsing {
   deployed_unit_ids: Set<number>;
   walls: Array<{ col: number; row: number }>;
   objectives: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>;
+  // Instantanes moteur du controle d'objectif, horodates par le NOMBRE d'actions deja lues au
+  // moment ou la ligne apparait dans le journal. C'est ce compteur qui les replace sur la
+  // timeline du replay, qui est indexee par action.
+  objective_control_snapshots: Array<{ after_actions: number; control: ReplayObjectiveControl }>;
   rules?: ReplayRules;
   board: {
     cols: number;
@@ -297,12 +311,45 @@ export function parse_log_file_from_text(text: string): ReplayData {
         bot_name: "Unknown",
         walls: [],
         objectives: [],
+        objective_control_snapshots: [],
         board: null,
       };
       continue;
     }
 
     if (!currentEpisode) continue;
+
+    // Instantane 14.02 ecrit par le MOTEUR (ai/step_logger.py::log_objective_control_snapshot) :
+    //   [12:00:00] T3 OBJECTIVE CONTROL: VP1=5 VP2=2 ZONES=West:Ctrl=1|North:Ctrl=none
+    // A ne pas confondre avec le recapitulatif de fin d'episode ([ts] OBJECTIVE CONTROL:
+    // Obj1:P1_OC=...), qui n'a ni `T{tour}` ni `VP1=` — d'ou l'ancrage strict de ce motif.
+    const objectiveControlMatch = trimmed.match(
+      /\bT(\d+) OBJECTIVE CONTROL: VP1=(-?\d+) VP2=(-?\d+) ZONES=(.*)$/
+    );
+    if (objectiveControlMatch) {
+      const controllers: Record<string, number | null> = {};
+      const zonesStr = objectiveControlMatch[4];
+      if (zonesStr.length > 0) {
+        for (const zone of zonesStr.split("|")) {
+          const zoneMatch = zone.match(/^(.+):Ctrl=(none|1|2)$/);
+          if (!zoneMatch) {
+            throw new Error(`Malformed OBJECTIVE CONTROL zone in step.log: "${zone}"`);
+          }
+          controllers[zoneMatch[1]] = zoneMatch[2] === "none" ? null : parseInt(zoneMatch[2], 10);
+        }
+      }
+      currentEpisode.objective_control_snapshots.push({
+        after_actions: currentEpisode.actions.length,
+        control: {
+          controllers,
+          victory_points: {
+            1: parseInt(objectiveControlMatch[2], 10),
+            2: parseInt(objectiveControlMatch[3], 10),
+          },
+        },
+      });
+      continue;
+    }
 
     // Scenario name
     const scenarioMatch = trimmed.match(/Scenario: (.+)/);
@@ -1151,6 +1198,33 @@ export function parse_log_file_from_text(text: string): ReplayData {
     const p2Type = /bot/i.test(episode.bot_name) ? "bot" : "ai";
     const episodePlayerTypes: Record<string, "human" | "ai" | "bot"> = { "1": "ai", "2": p2Type };
 
+    // Replacement des instantanes moteur sur la timeline indexee par action : l'etat porte le
+    // DERNIER instantane ecrit avant ou a ce point. Tant qu'aucun n'a ete lu, le champ reste
+    // absent — le replay affiche « pas de donnee » plutot que d'inventer un controle.
+    const controlSnapshots = episode.objective_control_snapshots;
+    // Parseur strict (cf. Documentation/Implémentation/Replay.md §2) : un journal qui déclare des
+    // objectifs SANS instantané de contrôle est antérieur à ce format. Le rejouer afficherait des
+    // points de victoire vides sans dire pourquoi — et le contrôle n'est plus recalculable ici.
+    if (episode.objectives.length > 0 && controlSnapshots.length === 0) {
+      throw new Error(
+        `Replay step.log without OBJECTIVE CONTROL snapshot (episode ${episode.episode_num}) ` +
+          `while ${episode.objectives.length} objectives are declared. Regenerate step.log: ` +
+          `objective control and victory points are now read from the engine, not recomputed.`
+      );
+    }
+    let controlCursor = 0;
+    let currentControl: ReplayObjectiveControl | undefined;
+    const advanceControlTo = (actionsConsumed: number): void => {
+      while (
+        controlCursor < controlSnapshots.length &&
+        controlSnapshots[controlCursor].after_actions <= actionsConsumed
+      ) {
+        currentControl = controlSnapshots[controlCursor].control;
+        controlCursor += 1;
+      }
+    };
+    advanceControlTo(0);
+
     const initialState = {
       units: initialUnits,
       walls: episode.walls || [],
@@ -1160,6 +1234,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       current_player: 1,
       phase: "move",
       player_types: episodePlayerTypes,
+      ...(currentControl ? { objective_control: currentControl } : {}),
     };
 
     // Build states
@@ -1183,7 +1258,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
     // Track units to remove after they've been shown as dead
     const unitsToRemove = new Set<number>();
 
-    for (const action of episode.actions) {
+    for (const [actionIndex, action] of episode.actions.entries()) {
       // Clear isJustKilled flag and remove units that were killed in the previous action
       unitsToRemove.forEach((unitId) => {
         if (currentUnits[unitId]) {
@@ -1411,6 +1486,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       if (Number.isNaN(turnNumber)) {
         throw new Error(`Invalid turn value in step.log action: ${action.turn}`);
       }
+      advanceControlTo(actionIndex + 1);
       states.push({
         units: stateUnits,
         walls: episode.walls || [],
@@ -1421,6 +1497,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
         phase,
         action,
         player_types: episodePlayerTypes,
+        ...(currentControl ? { objective_control: currentControl } : {}),
         ...fightStateFields,
       });
     }

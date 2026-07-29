@@ -53,6 +53,65 @@ class StepLogger:
                 f.write("=" * 80 + "\n\n")
             print(f"📝 Step logging enabled: {self.output_file}")
     
+    @staticmethod
+    def _objective_display_name(objective) -> str:
+        """Cle d'une zone d'objectif dans le step.log.
+
+        MEME cle pour la ligne `Objectives:` (geometrie, ecrite au demarrage d'episode) et pour
+        les instantanes `OBJECTIVE CONTROL` (controle, ecrits en cours de partie) : le replay
+        apparie les deux par ce nom (`replayParser.ts`). Deux calculs de cle divergents
+        casseraient l'appariement en silence — d'ou l'unique implementation.
+        """
+        if "name" in objective:  # `in` allowed — le nom est optionnel dans les scenarios
+            return objective["name"]
+        return f"Obj{require_key(objective, 'id')}"
+
+    def log_objective_control_snapshot(self, turn, objectives, objective_controllers, victory_points):
+        """Instantane FAISANT FOI du controle d'objectif et des points de victoire (regle 14.02).
+
+        Ecrit l'etat que le MOTEUR a calcule (`objective_controllers` et `victory_points` du
+        game_state), jamais un recalcul. Le replay le relit tel quel au lieu de resommer les OC
+        cote navigateur : ni l'empreinte de socle par figurine (14.02) ni le drapeau
+        `battle_shocked` (01.07 / 02.02, qui annule l'OC de toute l'escouade) ne sont
+        reconstituables depuis le step.log, donc tout calcul cote client diverge par nature.
+
+        Passe par `log_buffer` comme `log_action` : une ecriture directe dans le fichier
+        s'intercalerait AVANT des actions encore bufferisees, et le replay lit ce journal dans
+        l'ordre — l'instantane se retrouverait attache au mauvais point de la partie.
+
+        Pas de `try/except` ici, contrairement au reste du module : cette ligne est la source de
+        verite du replay. Une exception avalee produirait un flux d'instantanes tronque, donc un
+        controle affiche perime — exactement le defaut que cette ligne corrige.
+        """
+        if not self.enabled:
+            return
+
+        timestamp = time.strftime("%H:%M:%S", time.localtime())
+        zone_entries = []
+        for objective in objectives:
+            obj_id = str(require_key(objective, "id"))
+            # get allowed : une cle absente = objectif jamais evalue (aucune frontiere de phase
+            # franchie, 14.02) — c'est l'etat « personne ne controle », que le moteur lui-meme
+            # initialise a None dans `calculate_objective_control`.
+            controller = objective_controllers.get(obj_id)
+            if controller is None:
+                ctrl = "none"
+            elif int(controller) in (1, 2):
+                ctrl = str(int(controller))
+            else:
+                raise ValueError(f"Unexpected objective controller for {obj_id}: {controller!r}")
+            zone_entries.append(f"{self._objective_display_name(objective)}:Ctrl={ctrl}")
+
+        vp1 = require_key(victory_points, 1)
+        vp2 = require_key(victory_points, 2)
+        line = (
+            f"[{timestamp}] T{turn} OBJECTIVE CONTROL: "
+            f"VP1={vp1} VP2={vp2} ZONES={'|'.join(zone_entries)}\n"
+        )
+        self.log_buffer.append(line)
+        if len(self.log_buffer) >= self.buffer_size:
+            self._flush_buffer()
+
     def log_action(self, unit_id, action_type, phase, player, success, step_increment, action_details=None):
         """Log action with step increment information using clear format.
 
@@ -234,10 +293,7 @@ class StepLogger:
                 if objectives:
                     obj_strs = []
                     for obj in objectives:
-                        if "name" in obj:
-                            name = obj["name"]
-                        else:
-                            name = f"Obj{require_key(obj, 'id')}"
+                        name = self._objective_display_name(obj)
                         hexes = require_key(obj, "hexes")
                         hex_coords = ";".join([f"({h[0]},{h[1]})" for h in hexes])
                         obj_strs.append(f"{name}:{hex_coords}")

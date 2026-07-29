@@ -885,9 +885,27 @@ payait encore une escouade choquée pour occuper une case qu'elle ne peut **pas*
 apprenait une association fausse — même lecture stricte que le moteur), `ea8e9f16` (verrous sur les
 producteurs du drapeau et sur le chemin vif du choc), `b8932f52` (**3ᵉ vérité parallèle signalée,
 non corrigeable ici** : `BoardReplay.computeControlCounts` recalcule le contrôle dans le front, à
-l'ancre **et** sans battle-shock ; la suppression au profit de l'état journalisé est **impossible en
-l'état**, le `step.log` ne portant aucune information de battle-shock — le type `battle_shock` n'a
-pas de formateur dans `_STEP_LOG_TYPE_MAP`).
+l'ancre **et** sans battle-shock).
+
+✅ **Cette 3ᵉ vérité parallèle est SUPPRIMÉE (2026-07-29).** Le constat « impossible en l'état, le
+`step.log` ne porte aucune information de battle-shock » posait le problème à l'envers : il n'a
+jamais fallu **reconstituer** le battle-shock côté navigateur, il fallait cesser d'y recalculer quoi
+que ce soit. Le moteur journalise désormais **son** état 14.02 —
+`StepLogger.log_objective_control_snapshot`, appelé par
+`W40KEngine._log_objective_control_snapshot_if_changed` à chaque changement de
+`objective_controllers` **ou** de `victory_points` — sous la forme
+`T{tour} OBJECTIVE CONTROL: VP1=… VP2=… ZONES=<nom>:Ctrl=…|…` (clé = le **nom de zone**, celui de
+la ligne `Objectives:`, via l'unique `StepLogger._objective_display_name`). `replayParser.ts`
+l'attache à chaque état de la timeline et `BoardReplay.tsx` le lit tel quel : les deux `useMemo`
+qui resommaient l'OC (points de victoire **et** coloration des hexes) sont supprimés, avec eux le
+barème de scoring ré-implémenté une seconde fois côté front.
+**Écart mesuré avant correction** (vraie partie ArmageddonAgent, état final) : **2 zones sur 5**
+avaient un contrôleur différent entre le moteur (empreinte de socle) et le calcul par ancre du
+navigateur — p. ex. `rect b NW` 9 d'OC moteur contre 3 à l'ancre.
+Corrigé au passage, même famille : `reset()` ne purgeait pas `_objective_control_last_boundary`, si
+bien que la frontière de l'épisode **précédent** (`fight`, T5) déclenchait un checkpoint 14.02 au
+tout premier build d'observation du nouvel épisode — des contrôleurs figés avant qu'aucune phase se
+soit terminée.
 
 **1. La règle, lue dans les PDF.** [`01 Core concepts.pdf`](../40k_rules) §01.07 : « *While a unit
 is battle-shocked: ▪ The Objective Control (OC) characteristic of all of its models is modified to
@@ -989,7 +1007,7 @@ terminé, avec ses tests ciblés.**
 | `v11-0.47-eval-tooling-mask` | outil de stats par matchup : masque legacy, **obs Dict aplatie (l'outil ne démarrait pas)**, plafond de pas, vainqueur recalculé, scénarios au contrat legacy, `--agent-seat-mode` sans effet | 10 | `cc3b5713` | [§0.47](#s0.47) É1 **et** É6 |
 | `v11-0.47-dead-decoder-and-interface-lock` | suppression de `convert_gym_action` **+ du masque de l'ancien espace** + 3 symboles morts préexistants, **+** verrou d'interface `test_agent_interface_contract.py` | 4 | `f0ed563a` | [§0.47](#s0.47) É2+É3 |
 | `v11-pre-lot-eval-baseline` | bots d'éval (contre-charge du défensif, cibles hors ordre de tri, focus-fire rebranché, joueur dérivé de l'escouade activée) **+** rampe de déploiement sur les 5 profils | 4 | `d0183afe` | [§0.47](#s0.47) **É4** + [§0.46](#s0.46) **pt 2** |
-| `v11-battle-shock-oc` | conformité 01.07 : contrôle d'objectif, **+ bonus de reward « sur objectif »**, docstring, verrous des producteurs du drapeau, 3ᵉ vérité parallèle du replay signalée | 5 | `b8932f52` | [§0.50](#s0.50) |
+| `v11-battle-shock-oc` | conformité 01.07 : contrôle d'objectif, **+ bonus de reward « sur objectif »**, docstring, verrous des producteurs du drapeau, 3ᵉ vérité parallèle du replay signalée **puis supprimée** (contrôle/VP journalisés par le moteur, 2026-07-29) | 5 | `b8932f52` | [§0.50](#s0.50) |
 | `v11-fly-2103-conformity` | conformité 21.03 (casse du mot-clé, traversée payante, vol de charge, garde de phase, donnée corrompue, justification de la politique moteur) | 8 | `4c88ec60` | [§0.49](#s0.49) |
 
 ⚠️ **Le renvoi de `v11-pre-lot-eval-baseline` vers §0.48 était FAUX** (corrigé le 2026-07-29) : §0.48

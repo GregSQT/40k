@@ -16,113 +16,6 @@ def test_max_dice_value_valid_and_invalid() -> None:
         an.max_dice_value("D8", "ctx")
 
 
-def _write_terrain(tmp_path: Path, filename: str, areas: list) -> Path:
-    """Terrain sous config/board/44x60x5/terrain/ (contrat board_ref de V11 T4)."""
-    terrain_dir = tmp_path / "config" / "board" / "44x60x5" / "terrain"
-    terrain_dir.mkdir(parents=True, exist_ok=True)
-    path = terrain_dir / filename
-    path.write_text(json.dumps({"terrain_id": "t", "terrain": areas}), encoding="utf-8")
-    return path
-
-
-def test_resolve_scenario_path_and_objective_maps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """V11 T6 : la table nom->id vient du TERRAIN (areas "objective": true), plus du scénario.
-
-    T3/T4 ont fait des terrains la source UNIQUE des objectifs (14.01/14.02) ; les clés legacy
-    'objectives'/'objectives_ref' sont rejetées par le moteur. Ce test encode le contrat actuel
-    (il échouait avant la migration de `_get_objective_name_to_id_map`).
-    """
-    monkeypatch.setattr(an, "project_root", str(tmp_path))
-    _write_terrain(tmp_path, "terrain-train-01.json", [
-        {"id": "wall_a", "name": "mur A", "hexes": []},                      # pas un objectif
-        {"id": "rect_b_nw_OK", "name": "alpha", "objective": True, "hexes": []},
-        {"id": "rect_b_ne_OK", "name": "beta", "objective": True, "hexes": []},
-    ])
-    scenario = tmp_path / "scenario_test.json"
-    scenario.write_text(
-        '{"board_ref":"44x60x5","terrain_ref":"terrain-train-01.json","primary_objectives":["obj1"]}',
-        encoding="utf-8",
-    )
-    assert an._resolve_scenario_path("scenario_test") == str(scenario)
-
-    an._scenario_objective_name_to_id_cache.clear()
-    mapping = an._get_objective_name_to_id_map("scenario_test")
-    # Id positionnel (1..N) dans l'ordre de déclaration du terrain ; les areas non-objectif
-    # sont ignorées. Le NOM est la clé d'appariement avec la ligne "Objectives:" de step.log.
-    assert mapping == {"alpha": 1, "beta": 2}
-
-    an._scenario_primary_objective_ids_cache.clear()
-    primary_ids = an._get_primary_objective_ids_for_scenario("scenario_test")
-    assert primary_ids == ["obj1"]
-
-
-def test_get_objective_name_to_id_map_legacy_scenario_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Un scénario au contrat LEGACY (objectives_ref, sans terrain_ref) -> erreur explicite.
-
-    Remplace l'ancien test `..._via_objectives_ref` : ce chemin n'existe plus (le dossier
-    config/board/<board>/objectives/ a été supprimé en T3). Pas de fallback silencieux.
-    """
-    monkeypatch.setattr(an, "project_root", str(tmp_path))
-    scenario = tmp_path / "scenario_ref.json"
-    scenario.write_text('{"objectives_ref":"demo"}', encoding="utf-8")
-
-    an._scenario_objective_name_to_id_cache.clear()
-    with pytest.raises(ValueError, match=r"no valid 'terrain_ref'"):
-        an._get_objective_name_to_id_map("scenario_ref")
-
-
-def test_get_objective_name_to_id_map_terrain_without_objective_raises(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Piège documenté (T4) : un terrain sans area "objective": true -> erreur, pas liste vide."""
-    monkeypatch.setattr(an, "project_root", str(tmp_path))
-    _write_terrain(tmp_path, "terrain-flat.json", [{"id": "wall_a", "name": "mur A", "hexes": []}])
-    scenario = tmp_path / "scenario_noobj.json"
-    scenario.write_text(
-        '{"board_ref":"44x60x5","terrain_ref":"terrain-flat.json"}', encoding="utf-8"
-    )
-
-    an._scenario_objective_name_to_id_cache.clear()
-    with pytest.raises(ValueError, match=r'declares no area with "objective": true'):
-        an._get_objective_name_to_id_map("scenario_noobj")
-
-
-def test_resolve_scenario_path_skips_archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """V11 T6 : l'archive pré-V11 de T4 ne doit JAMAIS masquer un scénario vif.
-
-    T4 a déposé la banque pré-V11 sous `scenarios/_archive_pre_v11/`, DANS l'arbre parcouru par
-    `_resolve_scenario_path` -> `Ambiguous scenario path`. La marche élague les dossiers _archive*.
-    """
-    monkeypatch.setattr(an, "project_root", str(tmp_path))
-    live = tmp_path / "config" / "agents" / "CoreAgent" / "scenarios" / "training"
-    live.mkdir(parents=True)
-    (live / "scenario_dup.json").write_text('{"board_ref":"44x60x5"}', encoding="utf-8")
-
-    archived = tmp_path / "config" / "agents" / "CoreAgent" / "scenarios" / "_archive_pre_v11" / "training_save"
-    archived.mkdir(parents=True)
-    (archived / "scenario_dup.json").write_text('{"objectives_ref":"legacy"}', encoding="utf-8")
-
-    assert an._resolve_scenario_path("scenario_dup") == str(live / "scenario_dup.json")
-
-
-def test_calculate_primary_objective_points_and_invalid_condition() -> None:
-    control = {1: {"controller": 1}, 2: {"controller": 2}, 3: {"controller": 1}}
-    cfg = {
-        "scoring": {
-            "max_points_per_turn": 5,
-            "rules": [
-                {"condition": "control_at_least_one", "points": 2},
-                {"condition": "control_at_least_two", "points": 2},
-                {"condition": "control_more_than_opponent", "points": 2},
-            ],
-        }
-    }
-    assert an._calculate_primary_objective_points(control, cfg, player_id=1) == 5
-    cfg["scoring"]["rules"] = [{"condition": "unknown", "points": 1}]
-    with pytest.raises(ValueError, match=r"Unsupported primary objective condition"):
-        an._calculate_primary_objective_points(control, cfg, player_id=1)
-
-
 def test_unit_hp_and_damage_helpers() -> None:
     stats = {
         "parse_errors": [],
@@ -282,23 +175,6 @@ def test_adjacency_and_position_cache_helpers() -> None:
     assert "u1" not in cache
 
 
-def test_objective_control_snapshot() -> None:
-    objective_hexes = {1: {(1, 1)}}
-    objective_controllers: Dict[int, Optional[int]] = {1: None}
-    unit_positions = {"u1": (1, 1), "u2": (2, 2)}
-    unit_player = {"u1": 1, "u2": 2}
-    unit_types = {"u1": "A", "u2": "B"}
-
-    class _Registry:
-        units = {"A": {"OC": 2}, "B": {"OC": 1}}
-
-    snap = an._calculate_objective_control_snapshot(
-        objective_hexes, objective_controllers, unit_positions, unit_player, unit_types, _Registry()
-    )
-    assert snap[1]["player_1_oc"] == 2
-    assert snap[1]["controller"] == 1
-
-
 @pytest.mark.parametrize(
     "fn_name,line,expected",
     [
@@ -405,3 +281,81 @@ def test_advance_is_expected_in_move_phase_rule_09_02() -> None:
                                ("move_after_shooting", "SHOOT")):
         an._track_action_phase_accuracy(stats, action_type, phase, 1, "line")
         assert stats["action_phase_accuracy"][action_type]["wrong"] == 0, action_type
+
+
+# ── Points de victoire : LUS de l'instantané moteur, jamais recalculés (2026-07-29) ──
+# Vivaient ici 6 tests sur `_resolve_scenario_path`, `_get_objective_name_to_id_map`,
+# `_calculate_primary_objective_points` et `_calculate_objective_control_snapshot`. Ces fonctions
+# sont supprimées : elles ne servaient qu'à reconstruire le contrôle d'objectif à l'ANCRE, sans
+# battle-shock (01.07) et hors des frontières 14.02. Mesuré sur une vraie partie : l'analyzer
+# annonçait P1=60 / P2=20 là où le moteur avait attribué 35/35.
+
+
+_LOG_HEAD = [
+    "=== STEP-BY-STEP ACTION LOG ===",
+    "[12:00:00] === EPISODE 1 START ===",
+    "[12:00:00] Scenario: scenario_demo",
+    "[12:00:00] Walls: none",
+]
+_LOG_END = (
+    "[12:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, "
+    "Total=0, Duration=1.000s"
+)
+
+
+def _write_log(tmp_path: Path, lines: list) -> str:
+    path = tmp_path / "step.log"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def test_victory_points_come_from_engine_snapshot(tmp_path: Path) -> None:
+    """Le DERNIER instantané de l'épisode fait foi : les VP sont un total courant, pas un delta."""
+    log = _write_log(tmp_path, _LOG_HEAD + [
+        "[12:00:00] Objectives: West:(1,1)|North:(5,5)",
+        "[12:00:01] T1 OBJECTIVE CONTROL: VP1=0 VP2=0 ZONES=West:Ctrl=none|North:Ctrl=none",
+        # VP non nuls AVANT le dernier instantané : une accumulation (au lieu d'un écrasement)
+        # donnerait 17/9 au lieu de 12/7 — le moteur journalise un TOTAL, pas un delta.
+        "[12:00:03] T2 OBJECTIVE CONTROL: VP1=5 VP2=2 ZONES=West:Ctrl=1|North:Ctrl=none",
+        "[12:00:05] T3 OBJECTIVE CONTROL: VP1=12 VP2=7 ZONES=West:Ctrl=1|North:Ctrl=2",
+        _LOG_END,
+    ])
+    stats = an.parse_step_log(log)
+    assert stats["victory_points_by_episode"][1] == {1: 12, 2: 7}
+    assert stats["victory_points_values"][1] == [12]
+    assert stats["victory_points_values"][2] == [7]
+
+
+def test_end_of_episode_recap_is_not_read_as_a_snapshot(tmp_path: Path) -> None:
+    """`[ts] OBJECTIVE CONTROL: Obj1:P1_OC=…` n'a ni T{tour} ni VP1= : il doit être ignoré,
+    sinon il écraserait les VP par un format qui n'en porte pas."""
+    log = _write_log(tmp_path, _LOG_HEAD + [
+        "[12:00:00] Objectives: West:(1,1)",
+        "[12:00:05] T3 OBJECTIVE CONTROL: VP1=12 VP2=7 ZONES=West:Ctrl=1",
+        "[12:00:08] OBJECTIVE CONTROL: Objwest:P1_OC=9,P2_OC=0,Ctrl=1",
+        _LOG_END,
+    ])
+    stats = an.parse_step_log(log)
+    assert stats["victory_points_by_episode"][1] == {1: 12, 2: 7}
+
+
+def test_log_with_objectives_but_no_snapshot_is_rejected(tmp_path: Path) -> None:
+    """Journal antérieur au format : erreur explicite qui demande la régénération, pas des VP
+    devinés (même contrat que le replay, cf. replayParser.ts)."""
+    log = _write_log(tmp_path, _LOG_HEAD + [
+        "[12:00:00] Objectives: West:(1,1)",
+        _LOG_END,
+    ])
+    with pytest.raises(ValueError, match=r"no 'T<turn> OBJECTIVE CONTROL:' snapshot"):
+        an.parse_step_log(log)
+
+
+def test_log_without_objectives_is_accepted(tmp_path: Path) -> None:
+    """Un scénario sans zone n'écrit aucun instantané : ce n'est pas un journal périmé."""
+    log = _write_log(tmp_path, _LOG_HEAD + [
+        "[12:00:00] Objectives: none",
+        _LOG_END,
+    ])
+    stats = an.parse_step_log(log)
+    assert stats["victory_points_values"][1] == []
+    assert stats["victory_points_values"][2] == []

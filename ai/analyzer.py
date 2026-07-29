@@ -8,7 +8,6 @@ import sys
 import os
 import re
 import math
-import json
 from collections import defaultdict, Counter
 from typing import Dict, List, Tuple, Set, Optional, Any
 
@@ -21,7 +20,6 @@ if project_root not in sys.path:
 from engine.combat_utils import (
     calculate_hex_distance,
     get_hex_neighbors,
-    normalize_coordinates,
 )
 from shared.data_validation import require_key
 
@@ -114,8 +112,6 @@ def max_dice_value(value: Any, context: str) -> int:
 
 # Global variable for debug log file
 _debug_log_file = None
-_scenario_objective_name_to_id_cache: Dict[str, Dict[str, int]] = {}
-_scenario_primary_objective_ids_cache: Dict[str, List[str]] = {}
 
 
 def _debug_log(message: str) -> None:
@@ -126,256 +122,22 @@ def _debug_log(message: str) -> None:
         _debug_log_file.flush()
 
 
-def _resolve_scenario_path(scenario_name: str) -> str:
-    """Resolve scenario path from scenario name (no fallbacks)."""
-    if not scenario_name or scenario_name == "Unknown":
-        raise ValueError("Scenario name is missing or unknown; cannot resolve objectives mapping")
-    # Temporary ref-mixed scenarios have suffix "__<hash>" — strip it to find the base file.
-    base_name = scenario_name.split("__", 1)[0] if "__" in scenario_name else scenario_name
-    candidate_names = [base_name]
-    if not base_name.endswith(".json"):
-        candidate_names.append(f"{base_name}.json")
-    candidate_paths = []
-    for name in candidate_names:
-        candidate_paths.append(os.path.join(project_root, name))
-        candidate_paths.append(os.path.join(project_root, "config", name))
-    existing_paths = [path for path in candidate_paths if os.path.exists(path)]
-    if len(existing_paths) == 1:
-        return existing_paths[0]
-    if len(existing_paths) > 1:
-        raise ValueError(f"Ambiguous scenario path for '{scenario_name}': {existing_paths}")
-    # Rule-checker scenarios are generated in config/rule_checker/scenarios.
-    rule_checker_root = os.path.join(project_root, "config", "rule_checker", "scenarios")
-    if os.path.exists(rule_checker_root):
-        rule_checker_matches = []
-        for name in candidate_names:
-            candidate = os.path.join(rule_checker_root, name)
-            if os.path.exists(candidate):
-                rule_checker_matches.append(candidate)
-        if len(rule_checker_matches) == 1:
-            return rule_checker_matches[0]
-        if len(rule_checker_matches) > 1:
-            raise ValueError(
-                f"Ambiguous scenario path for '{scenario_name}' in rule_checker scenarios: {rule_checker_matches}"
-            )
-    scenarios_root = os.path.join(project_root, "config", "agents")
-    if os.path.exists(scenarios_root):
-        matches = []
-        for root, dirs, files in os.walk(scenarios_root):
-            # V11 T6 : ne JAMAIS résoudre vers une archive. T4 a déposé la banque pré-V11 sous
-            # `scenarios/_archive_pre_v11/` (backup, "exclu du tirage") — donc DANS l'arbre
-            # parcouru ici. Un scénario archivé porte encore ses clés legacy (objectives_ref),
-            # sa signature d'objectifs diffère du scénario migré homonyme, et la résolution
-            # échouait en `Ambiguous scenario path`. La découverte de scénarios du training
-            # (`get_scenario_list_for_phase`, training_utils.py) n'a jamais ce problème : elle
-            # travaille sur une liste blanche explicite (training/, holdout_regular/,
-            # holdout_hard/). On aligne ce resolver : une archive ne masque pas un scénario vif.
-            dirs[:] = [d for d in dirs if not d.startswith("_archive")]
-            root_parts = set(os.path.normpath(root).split(os.sep))
-            if "scenarios" not in root_parts:
-                continue
-            for name in candidate_names:
-                if name in files:
-                    matches.append(os.path.join(root, name))
-        if len(matches) == 1:
-            return matches[0]
-        if len(matches) > 1:
-            sorted_matches = sorted(matches)
-            parsed_by_path: Dict[str, Any] = {}
-            for match_path in sorted_matches:
-                with open(match_path, "r", encoding="utf-8-sig") as match_file:
-                    parsed_by_path[match_path] = json.load(match_file)
-
-            objective_signature_by_path: Dict[str, Any] = {}
-            for match_path in sorted_matches:
-                payload = parsed_by_path[match_path]
-                objective_signature_by_path[match_path] = {
-                    "objectives": payload.get("objectives"),
-                    "objectives_ref": payload.get("objectives_ref"),
-                    "primary_objective": payload.get("primary_objective"),
-                    "primary_objectives": payload.get("primary_objectives"),
-                }
-
-            reference_path = sorted_matches[0]
-            reference_signature = objective_signature_by_path[reference_path]
-            same_objective_signature = all(
-                objective_signature_by_path[path] == reference_signature
-                for path in sorted_matches[1:]
-            )
-            if same_objective_signature:
-                _debug_log(
-                    f"[ANALYZER INFO] Scenario '{scenario_name}' has {len(sorted_matches)} "
-                    f"matches with identical objective signature; using canonical path: {reference_path}"
-                )
-                return reference_path
-            raise ValueError(f"Ambiguous scenario path for '{scenario_name}': {matches}")
-    raise FileNotFoundError(f"Scenario file not found for '{scenario_name}'")
-
-
-def _resolve_terrain_path_for_scenario(scenario_name: str, scenario_path: str, scenario_data: Dict) -> str:
-    """Resolve a scenario's terrain file, mirroring the engine resolver (game_state.py).
-
-    Contrat V11 T4 : `terrain_ref` (nom de fichier) + `board_ref` (nom du dossier board) →
-    `config/board/<board_ref>/terrain/<terrain_ref>`. `board_ref` absent = voie PvP legacy
-    (scenario sous `config/board/<board>/scenario/`) → on remonte au board parent.
-    """
-    terrain_ref = scenario_data.get("terrain_ref")
-    if not isinstance(terrain_ref, str) or not terrain_ref.strip():
-        raise ValueError(
-            f"Scenario '{scenario_name}' has no valid 'terrain_ref': {scenario_path}. "
-            "Depuis V11 T3/T4 les objectifs ont pour source UNIQUE les terrains "
-            "flaggés \"objective\": true (règles 14.01/14.02) ; les clés legacy "
-            "'objectives'/'objectives_ref'/'objective_hexes' sont rejetées par le moteur."
-        )
-    normalized_ref = terrain_ref.strip().replace("\\", "/")
-    if normalized_ref.startswith("/") or "/" in normalized_ref or "\\" in terrain_ref:
-        raise ValueError(
-            f"Scenario '{scenario_name}' terrain_ref must be a filename only, got '{terrain_ref}'"
-        )
-    if not normalized_ref.endswith(".json"):
-        normalized_ref = f"{normalized_ref}.json"
-
-    board_ref = scenario_data.get("board_ref")
-    if isinstance(board_ref, str) and board_ref.strip():
-        if "/" in board_ref or "\\" in board_ref or board_ref.strip().startswith("."):
-            raise ValueError(f"Scenario '{scenario_name}' has unsafe board_ref '{board_ref}'")
-        board_dir = os.path.join(project_root, "config", "board", board_ref.strip())
-    else:
-        # Voie legacy : .../config/board/<board>/scenario/<file>.json
-        parent = os.path.dirname(os.path.abspath(scenario_path))
-        if os.path.basename(parent) != "scenario":
-            raise ValueError(
-                f"Scenario '{scenario_name}' has no 'board_ref' and is not located in a "
-                f"'config/board/<board>/scenario/' directory: {scenario_path}"
-            )
-        board_dir = os.path.dirname(parent)
-    terrain_path = os.path.join(board_dir, "terrain", normalized_ref)
-    if not os.path.isfile(terrain_path):
-        raise FileNotFoundError(
-            f"Scenario '{scenario_name}' terrain_ref file not found: {terrain_path}"
-        )
-    return terrain_path
-
-
-def _get_objective_name_to_id_map(scenario_name: str) -> Dict[str, int]:
-    """Build objective name->id mapping from the scenario's TERRAIN (V11 T6).
-
-    Source UNIQUE des objectifs depuis V11 T3/T4 : les areas du `terrain_ref` portant
-    `"objective": true` (règles 14.01/14.02) — miroir de `resolved_scenario_objectives`
-    (game_state.py). Avant ce fix, cette fonction lisait encore le contrat LEGACY
-    (`objectives` inline / `objectives_ref` → `config/board/<board>/objectives/`) : T3 a migré
-    train.py et bot_evaluation.py, mais pas analyzer.py — d'où
-    `ValueError: missing objectives list and valid objectives_ref` sur toute la banque migrée.
-
-    L'id retourné est un ENTIER positionnel (1..N, ordre de déclaration du terrain) : les ids
-    terrain sont des STRINGS (`rect_b_nw_OK`) alors que le contrat interne de l'analyzer indexe
-    `state.objective_hexes` par int. L'ordre du terrain est stable et déterministe (fichier),
-    donc le mapping l'est aussi. Seul le NOM sert d'appariement avec la ligne `Objectives:`
-    de step.log — c'est bien le `name` de l'area que le StepLogger écrit.
-    """
-    scenario_path = _resolve_scenario_path(scenario_name)
-    if scenario_path in _scenario_objective_name_to_id_cache:
-        return _scenario_objective_name_to_id_cache[scenario_path]
-    with open(scenario_path, "r", encoding="utf-8-sig") as f:
-        scenario_data = json.load(f)
-
-    terrain_path = _resolve_terrain_path_for_scenario(scenario_name, scenario_path, scenario_data)
-    with open(terrain_path, "r", encoding="utf-8-sig") as terrain_file:
-        terrain_data = json.load(terrain_file)
-    areas = terrain_data.get("terrain")
-    if not isinstance(areas, list):
-        raise ValueError(f"Terrain '{terrain_path}' has no 'terrain' area list")
-
-    objective_areas = [a for a in areas if isinstance(a, dict) and a.get("objective") is True]
-    if not objective_areas:
-        # Piège documenté (V11 T4) : un terrain sans area objective donne une liste VIDE en
-        # silence côté moteur. Ici c'est une erreur explicite — un scénario d'entraînement sans
-        # objectif ne peut pas être analysé (le scoring primaire porte sur les objectifs).
-        raise ValueError(
-            f"Scenario '{scenario_name}' terrain '{os.path.basename(terrain_path)}' declares no "
-            f"area with \"objective\": true: {terrain_path}"
-        )
-
-    mapping: Dict[str, int] = {}
-    for position, area in enumerate(objective_areas, start=1):
-        if "name" not in area and "id" not in area:
-            raise KeyError(f"Objective area missing both 'name' and 'id' in {terrain_path}: {area}")
-        name = str(area.get("name", area.get("id"))).strip()
-        if not name:
-            raise ValueError(f"Objective area has empty name in {terrain_path}: {area}")
-        if name in mapping:
-            raise ValueError(f"Duplicate objective name '{name}' in {terrain_path}")
-        mapping[name] = position
-    _scenario_objective_name_to_id_cache[scenario_path] = mapping
-    return mapping
-
-
-def _get_primary_objective_ids_for_scenario(scenario_name: str) -> List[str]:
-    """Load primary objective ids list from scenario file (no fallbacks)."""
-    scenario_path = _resolve_scenario_path(scenario_name)
-    if scenario_path in _scenario_primary_objective_ids_cache:
-        return list(_scenario_primary_objective_ids_cache[scenario_path])
-    with open(scenario_path, "r", encoding="utf-8-sig") as f:
-        scenario_data = json.load(f)
-    if "primary_objectives" in scenario_data:
-        primary_ids = scenario_data["primary_objectives"]
-    elif "primary_objective" in scenario_data:
-        primary_ids = [scenario_data["primary_objective"]]
-    else:
-        raise KeyError(
-            f"Scenario '{scenario_name}' missing primary_objectives (or primary_objective): {scenario_path}"
-        )
-    if not isinstance(primary_ids, list) or not primary_ids:
-        raise ValueError(
-            f"Scenario '{scenario_name}' has invalid primary_objectives: {primary_ids!r}"
-        )
-    normalized_ids = []
-    for obj_id in primary_ids:
-        if not obj_id:
-            raise ValueError(
-                f"Scenario '{scenario_name}' has empty primary objective id: {primary_ids!r}"
-            )
-        normalized_ids.append(str(obj_id))
-    _scenario_primary_objective_ids_cache[scenario_path] = normalized_ids
-    return list(normalized_ids)
-
-
-def _calculate_primary_objective_points(
-    control_snapshot: Dict[int, Dict[str, Any]],
-    primary_objective_cfg: Dict[str, Any],
-    player_id: int
-) -> int:
-    """Calculate primary objective points for a player from control snapshot."""
-    scoring_cfg = require_key(primary_objective_cfg, "scoring")
-    max_points_per_turn = require_key(scoring_cfg, "max_points_per_turn")
-    rules = require_key(scoring_cfg, "rules")
-
-    counts = {PLAYER_ONE_ID: 0, PLAYER_TWO_ID: 0}
-    for _, data in control_snapshot.items():
-        controller = require_key(data, "controller")
-        if controller in counts:
-            counts[controller] += 1
-
-    opponent_id = PLAYER_ONE_ID if player_id == PLAYER_TWO_ID else PLAYER_TWO_ID
-    total_points = 0
-    for rule in rules:
-        condition = require_key(rule, "condition")
-        points = require_key(rule, "points")
-        if condition == "control_at_least_one":
-            if counts[player_id] >= 1:
-                total_points += points
-        elif condition == "control_at_least_two":
-            if counts[player_id] >= 2:
-                total_points += points
-        elif condition == "control_more_than_opponent":
-            if counts[player_id] > counts[opponent_id]:
-                total_points += points
-        else:
-            raise ValueError(f"Unsupported primary objective condition: {condition}")
-
-    if total_points > max_points_per_turn:
-        total_points = max_points_per_turn
-    return total_points
+# ── Résolution de scénario & contrôle d'objectif : SUPPRIMÉS (2026-07-29) ──
+# Vivaient ici cinq fonctions et deux caches qui n'ont plus aucun appelant :
+#   _resolve_scenario_path, _resolve_terrain_path_for_scenario,
+#   _get_objective_name_to_id_map, _get_primary_objective_ids_for_scenario,
+#   _calculate_primary_objective_points  (+ _calculate_objective_control_snapshot, plus bas)
+# Elles n'existaient QUE pour reconstruire le contrôle d'objectif et re-marquer les points
+# de victoire depuis le step.log. Ce calcul était faux par construction : somme de l'OC par
+# ANCRE d'escouade alors que le moteur somme par empreinte de socle (14.02,
+# sum_objective_control_oc_multi), sans le battle-shock (01.07 : OC de toutes les figurines
+# à '-', 02.02), et à chaque action alors que le contrôle est figé en fin de phase/tour.
+# Le moteur journalise désormais son état (`T{tour} OBJECTIVE CONTROL: VP1=… VP2=… ZONES=…`,
+# StepLogger.log_objective_control_snapshot) et analyzer_core.py le lit tel quel.
+# Conséquence directe : l'appariement nom → id positionnel via le terrain disparaît, et avec
+# lui la coexistence de trois formats d'identifiant d'objectif signalée dans V11_tranches.md.
+# Pour retrouver la résolution d'un chemin de scénario, le point d'entrée vivant est
+# `config_loader` (utilisé par train.py, bot_evaluation.py et le moteur).
 
 
 def _get_unit_hp_value(
@@ -970,57 +732,6 @@ def _position_cache_remove(cache: Dict[str, Tuple[int, int]], unit_id: str) -> N
         del cache[unit_id]
 
 
-def _calculate_objective_control_snapshot(
-    objective_hexes: Dict[int, Set[Tuple[int, int]]],
-    objective_controllers: Dict[int, Optional[int]],
-    unit_positions: Dict[str, Tuple[int, int]],
-    unit_player: Dict[str, int],
-    unit_types: Dict[str, str],
-    unit_registry: Any,
-) -> Dict[int, Dict[str, Any]]:
-    """
-    Calculate persistent objective control snapshot for analyzer history.
-    """
-    snapshot: Dict[int, Dict[str, Any]] = {}
-    for obj_id, hexes in objective_hexes.items():
-        player_1_oc = 0
-        player_2_oc = 0
-        for unit_id, unit_pos in unit_positions.items():
-            normalized_pos = normalize_coordinates(unit_pos[0], unit_pos[1])
-            if normalized_pos in hexes:
-                unit_type = require_key(unit_types, unit_id)
-                unit_data = require_key(unit_registry.units, unit_type)
-                oc = require_key(unit_data, "OC")
-                unit_player_id = require_key(unit_player, unit_id)
-                unit_player_int = int(unit_player_id)
-                if unit_player_int == PLAYER_ONE_ID:
-                    player_1_oc += oc
-                elif unit_player_int == PLAYER_TWO_ID:
-                    player_2_oc += oc
-                else:
-                    raise ValueError(
-                        f"Unexpected unit player id {unit_player_id} for unit {unit_id}"
-                    )
-
-        if obj_id not in objective_controllers:
-            objective_controllers[obj_id] = None
-        current_controller = objective_controllers[obj_id]
-        new_controller = current_controller
-        if player_1_oc > player_2_oc:
-            new_controller = PLAYER_ONE_ID
-        elif player_2_oc > player_1_oc:
-            new_controller = PLAYER_TWO_ID
-        objective_controllers[obj_id] = new_controller
-
-        snapshot[obj_id] = {
-            "player_1_oc": player_1_oc,
-            "player_2_oc": player_2_oc,
-            "controller": new_controller,
-        }
-
-    return snapshot
-
-
 def parse_step_log(filepath: str) -> Dict:
     """Parse step.log and extract statistics with rule validation."""
     
@@ -1280,7 +991,6 @@ def parse_step_log(filepath: str) -> Dict:
         'episodes_without_end': [],
         'episodes_without_method': [],
         'episode_durations': [],  # List of (episode_num, duration_seconds) tuples
-        'objective_control_history': {},
         'sample_actions': {
             'move': None,
             'shoot': None,

@@ -275,3 +275,79 @@ def test_unknown_action_type_raises_and_phase_transition_logs(tmp_path: Path) ->
     enabled_logger.log_phase_transition("move", "shoot", player=1, turn_number=3)
     content = _read_text(output_file)
     assert "T3 P1 SHOOT phase Start" in content
+
+
+# ── Instantané 14.02 : contrôle d'objectif + points de victoire (source du replay) ──
+
+
+def _objectives() -> list:
+    return [
+        {"id": 1, "name": "West", "hexes": [[2, 10]]},
+        {"id": 2, "name": "North", "hexes": [[12, 1]]},
+        {"id": 3, "hexes": [[22, 10]]},  # sans nom -> clé "Obj3"
+    ]
+
+
+def test_objective_control_snapshot_writes_engine_state(tmp_path: Path) -> None:
+    output_file = tmp_path / "step.log"
+    logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=1)
+    logger.log_objective_control_snapshot(
+        3, _objectives(), {"1": 1, "2": None, "3": 2}, {1: 5, 2: 2}
+    )
+    content = _read_text(output_file)
+    assert (
+        "T3 OBJECTIVE CONTROL: VP1=5 VP2=2 ZONES=West:Ctrl=1|North:Ctrl=none|Obj3:Ctrl=2"
+        in content
+    )
+
+
+def test_objective_control_snapshot_key_matches_objectives_line(tmp_path: Path) -> None:
+    # Le replay apparie zones et géométrie par ce nom : les deux lignes DOIVENT employer la
+    # même clé, y compris pour un objectif sans nom.
+    output_file = tmp_path / "step.log"
+    logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=1)
+    logger.log_episode_start(
+        [],
+        "scenario",
+        walls=None,
+        objectives=_objectives(),
+        primary_objective_config=None,
+        board_config={"cols": 1, "rows": 1, "inches_to_subhex": 1, "hex_radius": 1, "margin": 1},
+    )
+    logger.log_objective_control_snapshot(1, _objectives(), {}, {1: 0, 2: 0})
+    content = _read_text(output_file)
+    geometry_names = [
+        group.split(":")[0]
+        for group in content.split("Objectives: ")[1].split("\n")[0].split("|")
+    ]
+    zones = content.split("ZONES=")[1].split("\n")[0]
+    control_names = [zone.split(":")[0] for zone in zones.split("|")]
+    assert geometry_names == control_names == ["West", "North", "Obj3"]
+
+
+def test_objective_control_snapshot_missing_controller_is_uncontrolled(tmp_path: Path) -> None:
+    # Aucune frontière de phase franchie (14.02) : le moteur n'a pas encore d'entrée pour la zone.
+    output_file = tmp_path / "step.log"
+    logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=1)
+    logger.log_objective_control_snapshot(1, _objectives(), {}, {1: 0, 2: 0})
+    assert "ZONES=West:Ctrl=none|North:Ctrl=none|Obj3:Ctrl=none" in _read_text(output_file)
+
+
+def test_objective_control_snapshot_rejects_unexpected_controller(tmp_path: Path) -> None:
+    # Pas de valeur de repli : un contrôleur inattendu doit NOMMER ce qu'il a rencontré.
+    output_file = tmp_path / "step.log"
+    logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=1)
+    with pytest.raises(ValueError, match=r"Unexpected objective controller for 1: 7"):
+        logger.log_objective_control_snapshot(1, _objectives(), {"1": 7}, {1: 0, 2: 0})
+
+
+def test_objective_control_snapshot_goes_through_buffer(tmp_path: Path) -> None:
+    # Ordre du journal : le replay place l'instantané d'après le nombre d'actions déjà lues.
+    # Une écriture directe le ferait passer AVANT des actions encore bufferisées.
+    output_file = tmp_path / "step.log"
+    logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=99)
+    logger.log_objective_control_snapshot(1, _objectives(), {}, {1: 0, 2: 0})
+    assert "OBJECTIVE CONTROL" not in _read_text(output_file)
+    assert any("OBJECTIVE CONTROL" in line for line in logger.log_buffer)
+    logger._flush_buffer()
+    assert "OBJECTIVE CONTROL" in _read_text(output_file)

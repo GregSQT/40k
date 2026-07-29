@@ -232,3 +232,92 @@ def test_deploy_unit_is_mapped():
     # Le formateur deploy_unit EXIGE start_pos ET end_pos.
     assert details["start_pos"] == (-1, -1)
     assert details["end_pos"] == (12, 34)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Instantané 14.02 : contrôle d'objectif + points de victoire journalisés
+#
+# Le replay affichait un contrôle RECALCULÉ dans le navigateur (par ancre d'escouade, sans
+# battle-shock 01.07), donc des points de victoire différents de ceux attribués. Il lit
+# désormais l'état du moteur ; ces tests verrouillent la production de cet état.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _FakeSnapshotLogger:
+    def __init__(self, enabled: bool = True) -> None:
+        self.enabled = enabled
+        self.snapshots: List[Dict[str, Any]] = []
+
+    def log_objective_control_snapshot(self, turn, objectives, controllers, victory_points) -> None:
+        self.snapshots.append(
+            {
+                "turn": turn,
+                "objectives": objectives,
+                "controllers": dict(controllers),
+                "victory_points": dict(victory_points),
+            }
+        )
+
+
+def _snapshot_engine(logger: Any, controllers: Dict[str, Any], vp: Dict[int, int]) -> W40KEngine:
+    eng = object.__new__(W40KEngine)
+    eng.game_state = {
+        "objectives": [{"id": 1, "name": "Alpha", "hexes": [[5, 5]]}],
+        "objective_controllers": controllers,
+        "victory_points": vp,
+        "turn": 2,
+    }
+    eng.step_logger = logger
+    return eng
+
+
+def test_objective_snapshot_noop_without_logger():
+    eng = _snapshot_engine(None, {"1": 1}, {1: 0, 2: 0})
+    eng._log_objective_control_snapshot_if_changed()  # ne doit pas lever
+
+
+def test_objective_snapshot_noop_when_logger_disabled():
+    logger = _FakeSnapshotLogger(enabled=False)
+    eng = _snapshot_engine(logger, {"1": 1}, {1: 0, 2: 0})
+    eng._log_objective_control_snapshot_if_changed()
+    assert logger.snapshots == []
+
+
+def test_objective_snapshot_noop_without_objectives():
+    """Scénario sans objectif : rien à journaliser, et surtout pas une ligne vide."""
+    logger = _FakeSnapshotLogger()
+    eng = _snapshot_engine(logger, {}, {1: 0, 2: 0})
+    eng.game_state["objectives"] = []
+    eng._log_objective_control_snapshot_if_changed()
+    assert logger.snapshots == []
+
+
+def test_objective_snapshot_emitted_once_then_deduplicated():
+    logger = _FakeSnapshotLogger()
+    eng = _snapshot_engine(logger, {"1": 1}, {1: 3, 2: 0})
+    eng._log_objective_control_snapshot_if_changed()
+    eng._log_objective_control_snapshot_if_changed()
+    assert len(logger.snapshots) == 1
+    assert logger.snapshots[0]["controllers"] == {"1": 1}
+    assert logger.snapshots[0]["victory_points"] == {1: 3, 2: 0}
+    assert logger.snapshots[0]["turn"] == 2
+
+
+def test_objective_snapshot_reemitted_when_controller_changes():
+    logger = _FakeSnapshotLogger()
+    eng = _snapshot_engine(logger, {"1": 1}, {1: 3, 2: 0})
+    eng._log_objective_control_snapshot_if_changed()
+    eng.game_state["objective_controllers"]["1"] = 2
+    eng._log_objective_control_snapshot_if_changed()
+    assert [s["controllers"] for s in logger.snapshots] == [{"1": 1}, {"1": 2}]
+
+
+def test_objective_snapshot_reemitted_when_victory_points_change():
+    """Les VP bougent DANS les handlers (apply_primary_objective_scoring), pas à la frontière de
+    phase : un déclencheur limité au contrôle les manquerait."""
+    logger = _FakeSnapshotLogger()
+    eng = _snapshot_engine(logger, {"1": 1}, {1: 3, 2: 0})
+    eng._log_objective_control_snapshot_if_changed()
+    eng.game_state["victory_points"][1] = 8
+    eng._log_objective_control_snapshot_if_changed()
+    assert [s["victory_points"][1] for s in logger.snapshots] == [3, 8]

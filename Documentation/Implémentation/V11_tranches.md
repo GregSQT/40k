@@ -1372,8 +1372,14 @@ charge, fight, wait) — ce que l'analyzer consomme.
   l'analyzer indexe par int → id positionnel (1..N, ordre du fichier terrain = stable) ; seul le
   NOM sert d'appariement, et c'est bien le `name` de l'area que le StepLogger écrit.
   ⚠️ **Reste incohérent** (non corrigé, car sous le bloqueur T6-c) : la ligne `OBJECTIVE CONTROL:`
-  de step.log écrit `Obj<id_string>` (`Objrect_b_nw_OK`) alors que le parser attend `Obj(\d+)`
+  de FIN D'ÉPISODE écrit `Obj<id_string>` (`Objrect_b_nw_OK`) alors que le parser attend `Obj(\d+)`
   (analyzer_core.py ~L112) — **trois formats coexistent** (nom / `Obj`+string / `Obj`+int).
+  ✅ **Résolu le 2026-07-29** : l'analyzer ne construit plus aucun id d'objectif. Il lit les
+  instantanés `T{tour} OBJECTIVE CONTROL: VP1=… ZONES=…` du moteur (indexés par **nom de zone**,
+  la même clé que la ligne `Objectives:`) et `_get_objective_name_to_id_map` est supprimée avec
+  tout l'appariement positionnel. Les trois formats ne coexistent plus : seul subsiste le
+  récapitulatif de fin d'épisode `Obj<id_string>`, que plus personne ne parse.
+  Détail → `Replay.md` §4.D.
 
 **✅ Bloqueur résolu (historique) — `ai/analyzer.py` ne démarrait pas** :
 `ConfigurationError: Required key 'RNG' is missing` (`analyzer_config.py:167`) —

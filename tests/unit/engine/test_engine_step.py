@@ -302,3 +302,33 @@ class TestStepGameOver:
 
         # Phase advance automatique doit avoir eu lieu
         assert info.get("phase_auto_advanced") is True or engine.game_state["phase"] != "fight"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Purges d'épisode des mémos de contrôle d'objectif (14.02)
+#
+# `game_state` est le MÊME objet d'un reset à l'autre : ce qui est mémoïsé par épisode doit
+# mourir dans reset(), sinon il survit sans que rien ne le signale.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestObjectiveControlEpisodeMemos:
+    def test_reset_purges_last_boundary_memo(self):
+        """Sans purge, la frontière porte encore ("fight", 5) de l'épisode précédent : au premier
+        build d'obs du nouvel épisode, (phase, tour) diffère, le checkpoint 14.02 se déclenche et
+        fige des contrôleurs AVANT que la moindre phase se soit terminée."""
+        engine = _make_engine()
+        engine.reset()
+        engine.game_state["_objective_control_last_boundary"] = ("fight", 5)
+        engine.reset()
+        assert "_objective_control_last_boundary" not in engine.game_state
+
+    def test_reset_purges_logged_snapshot_memo(self):
+        """Ce mémo évite de réécrire une ligne OBJECTIVE CONTROL identique. Survivant à l'épisode,
+        il ferait SAUTER l'instantané initial du nouvel épisode (mêmes contrôleurs vides, mêmes VP
+        à 0) et le replay démarrerait sans aucune donnée de contrôle."""
+        engine = _make_engine()
+        engine.reset()
+        engine.game_state[W40KEngine.OBJECTIVE_CONTROL_LOGGED_KEY] = ((), 0, 0)
+        engine.reset()
+        assert W40KEngine.OBJECTIVE_CONTROL_LOGGED_KEY not in engine.game_state

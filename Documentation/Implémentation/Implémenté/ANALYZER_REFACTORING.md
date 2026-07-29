@@ -59,8 +59,10 @@ class AnalyzerState:
 
     # Board
     wall_hexes: Set[Tuple[int, int]]
-    objective_hexes: Dict[int, Set[Tuple[int, int]]]
-    objective_controllers: Dict[int, Optional[int]]
+    # `objective_hexes` / `objective_controllers` figuraient ici : SUPPRIMÉS le 2026-07-29 avec le
+    # recalcul du contrôle d'objectif côté analyzer (somme par ancre, sans battle-shock). L'état
+    # 14.02 est celui du MOTEUR, lu dans la ligne `T{tour} OBJECTIVE CONTROL:` du step.log.
+    # Cf. Documentation/Implémentation/Replay.md §2.3 et §4.D.
 
     # Tracking actions
     units_moved: Set[str]

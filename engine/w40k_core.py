@@ -1109,6 +1109,17 @@ class W40KEngine(gym.Env):
         # activation en cours) serait donc reutilise tel quel dans l'episode suivant, au lieu
         # d'etre re-tire (09.06 : un jet par Advance).
         self.game_state.pop("_squad_advance_rolls", None)
+        # Derniere frontiere de phase/tour vue par `refresh_objective_control_on_boundary`. Sans
+        # purge, elle porte encore ("fight", 5) de l'episode precedent : au premier build d'obs du
+        # nouvel episode, (phase, tour) differe, le checkpoint 14.02 se declenche et fige des
+        # controleurs AVANT que la moindre phase se soit terminee — alors que la methode documente
+        # l'inverse (« debut de bataille : aucune frontiere franchie → aucun objectif controle »).
+        self.game_state.pop("_objective_control_last_boundary", None)
+        # Dernier instantane de controle/VP ecrit dans step.log. Il ne sert qu'a eviter de reecrire
+        # une ligne identique ; survivant a l'episode, il ferait SAUTER l'instantane initial du
+        # nouvel episode (memes controleurs vides et memes VP a 0), et le replay demarrerait sans
+        # aucune donnee de controle.
+        self.game_state.pop(self.OBJECTIVE_CONTROL_LOGGED_KEY, None)
 
         # Reset episode-level metric accumulators
         self.episode_reward_accumulator = 0.0
@@ -5398,6 +5409,46 @@ class W40KEngine(gym.Env):
         return action_mask
     
     
+    OBJECTIVE_CONTROL_LOGGED_KEY = "_objective_control_last_logged"
+
+    def _log_objective_control_snapshot_if_changed(self) -> None:
+        """Journalise dans step.log l'etat 14.02 du moteur (controleurs + VP) quand il CHANGE.
+
+        POURQUOI : le replay affichait un controle d'objectif RECALCULE dans le navigateur
+        (`BoardReplay.tsx`), par ancre d'escouade et sans le battle-shock — deux ecarts
+        irrattrapables cote client (l'empreinte de socle et le drapeau `battle_shocked` n'existent
+        pas dans le step.log), donc des points de victoire affiches differents de ceux attribues.
+        Il lit desormais CET instantane, seul etat faisant foi.
+
+        Declenchement sur CHANGEMENT plutot qu'a la seule frontiere de phase : le controle bouge a
+        la frontiere (`refresh_objective_control_on_boundary`, juste au-dessus) mais les points de
+        victoire bougent DANS les handlers (`apply_primary_objective_scoring`, phases command et
+        fight). Un declencheur unique manquerait l'un ou l'autre.
+        """
+        step_logger = getattr(self, "step_logger", None)
+        if step_logger is None or not step_logger.enabled:
+            return
+        objectives = self.game_state.get("objectives")  # get allowed : scenario sans objectif
+        if not objectives:
+            return
+        controllers = require_key(self.game_state, "objective_controllers")
+        victory_points = require_key(self.game_state, "victory_points")
+        snapshot = (
+            tuple(sorted((str(k), v) for k, v in controllers.items())),
+            require_key(victory_points, 1),
+            require_key(victory_points, 2),
+        )
+        # get allowed : absent au tout premier passage de l'episode (cle purgee au reset)
+        if snapshot == self.game_state.get(self.OBJECTIVE_CONTROL_LOGGED_KEY):
+            return
+        self.game_state[self.OBJECTIVE_CONTROL_LOGGED_KEY] = snapshot
+        step_logger.log_objective_control_snapshot(
+            require_key(self.game_state, "turn"),
+            objectives,
+            controllers,
+            victory_points,
+        )
+
     def _build_observation(self):
         """Build observation — pipeline squad, seul pipeline existant.
 
@@ -5414,6 +5465,7 @@ class W40KEngine(gym.Env):
         # no-op tant que (phase, tour) n a pas change — cf.
         # GameStateManager.refresh_objective_control_on_boundary (partage avec le PvP).
         self.state_manager.refresh_objective_control_on_boundary(self.game_state)
+        self._log_objective_control_snapshot_if_changed()
 
         def _zero_obs():
             from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE

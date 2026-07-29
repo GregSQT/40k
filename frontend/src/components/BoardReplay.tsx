@@ -16,7 +16,7 @@ import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { computeHexReachable } from "../utils/replayHexReachable";
 // Source unique du type d'action de replay : celui que produit le parseur (pas de copie locale
 // qui dérive silencieusement quand le parseur gagne un champ).
-import type { ReplayAction } from "../utils/replayParser";
+import type { ReplayAction, ReplayObjectiveControl } from "../utils/replayParser";
 import {
   getDiceAverage,
   getSelectedMeleeWeapon,
@@ -67,6 +67,9 @@ interface ReplayGameState extends Omit<GameState, "episode_steps"> {
   walls?: Array<{ col: number; row: number }>;
   objectives?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>;
   rules?: ReplayRules;
+  // Etat 14.02 calcule par le MOTEUR, transporte par le step.log. Absent tant qu'aucun
+  // instantane n'a ete lu (avant la premiere frontiere de phase de l'episode).
+  objective_control?: ReplayObjectiveControl;
 }
 
 interface ReplayEpisode {
@@ -503,403 +506,64 @@ export const BoardReplay: React.FC = () => {
   const currentEpisode =
     selectedEpisode !== null && replayData ? replayData.episodes[selectedEpisode - 1] : null;
 
-  const replayVictoryPoints = useMemo(() => {
+  // ── CONTRÔLE D'OBJECTIF ET POINTS DE VICTOIRE : LUS DU MOTEUR, JAMAIS RECALCULÉS ──
+  // Les deux `useMemo` qui vivaient ici resommaient l'OC dans le navigateur. Ils divergeaient du
+  // moteur (14.02) de façon irrattrapable côté client :
+  //   1. ANCRE vs EMPREINTE : ils testaient `unit.col,unit.row`, le moteur teste l'empreinte de
+  //      socle de CHAQUE figurine vivante (`sum_objective_control_oc_multi`, engine/game_state.py)
+  //      — écart sur toute escouade multi-figurines.
+  //   2. BATTLE-SHOCK (01.07) : le moteur met l'OC de toutes les figurines d'une unité
+  //      battle-shocked à '-' (02.02) ; le drapeau `battle_shocked` n'existe nulle part dans le
+  //      step.log, donc aucun calcul local ne pouvait le reproduire.
+  //   3. MOMENT D'ÉVALUATION : le contrôle est figé à la FIN de chaque phase et de chaque tour
+  //      (14.02), pas à la première action d'un couple (joueur, tour) comme le faisait ce code.
+  //   4. BARÈME : les points de victoire sont attribués par
+  //      `StateManager.apply_primary_objective_scoring` ; le barème était ici ré-implémenté une
+  //      seconde fois (fenêtre de score, plafond par tour, conditions).
+  // Le moteur journalise désormais son état à chaque changement
+  // (`ai/step_logger.py::log_objective_control_snapshot`, appelé par
+  // `W40KEngine._log_objective_control_snapshot_if_changed`) et `replayParser.ts` l'attache à
+  // chaque état de la timeline. Ne PAS réintroduire de calcul local ici : ce serait recréer la
+  // vérité parallèle que ce remplacement supprime.
+  const currentObjectiveControl = useMemo((): ReplayObjectiveControl | null => {
     if (!currentEpisode) {
       return null;
     }
-    if (!unitRegistryReady) {
-      return null;
-    }
+    const stateIndex = Math.min(currentActionIndex, currentEpisode.states.length);
+    const state =
+      stateIndex > 0 ? currentEpisode.states[stateIndex - 1] : currentEpisode.initial_state;
+    return state?.objective_control ?? null;
+  }, [currentEpisode, currentActionIndex]);
 
-    const rules = currentEpisode.initial_state.rules;
-    if (!rules) {
-      throw new Error("Replay rules missing: victory points cannot be computed");
-    }
+  // null tant que le journal n'a livré aucun instantané : l'affichage montre alors « pas de
+  // donnée » au lieu d'un score inventé.
+  const replayVictoryPoints = currentObjectiveControl
+    ? currentObjectiveControl.victory_points
+    : null;
 
-    const primaryObjectiveConfig = Array.isArray(rules.primary_objective)
-      ? rules.primary_objective[0]
-      : rules.primary_objective;
-
-    if (!primaryObjectiveConfig) {
-      throw new Error("primary_objective missing in replay rules");
-    }
-
-    if (!primaryObjectiveConfig.scoring || !Array.isArray(primaryObjectiveConfig.scoring.rules)) {
-      throw new Error("primary_objective.scoring.rules is required for victory points");
-    }
-
-    if (!primaryObjectiveConfig.timing) {
-      throw new Error("primary_objective.timing is required for victory points");
-    }
-
-    if (!primaryObjectiveConfig.control) {
-      throw new Error("primary_objective.control is required for victory points");
-    }
-
-    if (primaryObjectiveConfig.control.method !== "oc_sum_greater") {
-      throw new Error(
-        `Unsupported objective control method: ${primaryObjectiveConfig.control.method}`
-      );
-    }
-
-    if (!primaryObjectiveConfig.control.control_method) {
-      throw new Error("primary_objective.control.control_method is required for victory points");
-    }
-
-    if (!["secured", "default"].includes(primaryObjectiveConfig.control.control_method)) {
-      throw new Error(
-        `Unsupported control_method: ${primaryObjectiveConfig.control.control_method}`
-      );
-    }
-
-    if (primaryObjectiveConfig.control.tie_behavior !== "no_control") {
-      throw new Error(
-        `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
-      );
-    }
-
-    if (typeof primaryObjectiveConfig.scoring.start_turn !== "number") {
-      throw new Error("primary_objective.scoring.start_turn must be a number");
-    }
-
-    if (typeof primaryObjectiveConfig.scoring.max_points_per_turn !== "number") {
-      throw new Error("primary_objective.scoring.max_points_per_turn must be a number");
-    }
-
-    if (typeof primaryObjectiveConfig.timing.round5_second_player_phase !== "string") {
-      throw new Error("primary_objective.timing.round5_second_player_phase must be a string");
-    }
-
-    const parseTurnValue = (turnValue: string): number => {
-      const parsed = parseInt(turnValue.replace("T", ""), 10);
-      if (Number.isNaN(parsed)) {
-        throw new Error(`Invalid turn value in replay action: ${turnValue}`);
-      }
-      return parsed;
-    };
-
-    const isScoringWindowAction = (
-      action: ReplayAction,
-      actionIndex: number,
-      turn: number,
-      player: number
-    ): boolean => {
-      if (turn < primaryObjectiveConfig.scoring.start_turn) {
-        return false;
-      }
-
-      if (
-        player === 2 &&
-        turn === 5 &&
-        primaryObjectiveConfig.timing.round5_second_player_phase === "fight"
-      ) {
-        if (action.type !== "fight") {
-          return false;
-        }
-        for (let i = 0; i < actionIndex; i++) {
-          const previousAction = currentEpisode.actions[i];
-          const previousTurn = parseTurnValue(previousAction.turn);
-          if (
-            previousTurn === turn &&
-            previousAction.player === player &&
-            previousAction.type === "fight"
-          ) {
-            return false;
-          }
-        }
-        return true;
-      }
-
-      if (actionIndex === 0) {
-        return true;
-      }
-      const previousAction = currentEpisode.actions[actionIndex - 1];
-      const previousTurn = parseTurnValue(previousAction.turn);
-      return previousTurn !== turn || previousAction.player !== player;
-    };
-
-    const objectiveControllers: Record<string, number | null> = {};
-    const controlMethod = primaryObjectiveConfig.control.control_method;
-
-    // ⚠️ TROISIÈME VÉRITÉ PARALLÈLE DU CONTRÔLE D'OBJECTIF — DIVERGE DU MOTEUR (14.02).
-    // Le moteur fait foi (`sum_objective_control_oc_multi`, engine/game_state.py) ; ce calcul
-    // local en diffère sur DEUX points, et les points de victoire affichés ici peuvent donc
-    // ne PAS être ceux que le moteur a réellement attribués :
-    //   1. ANCRE vs EMPREINTE : on teste `unit.col,unit.row`, le moteur teste l'empreinte de
-    //      socle de CHAQUE figurine vivante — écart préexistant sur toute escouade multi-fig.
-    //   2. BATTLE-SHOCK (01.07) : le moteur met à zéro l'OC de toute unité battle-shocked
-    //      (« OC of all of its models is modified to '-' », 02.02) ; ici c'est impossible à
-    //      reproduire — l'information N'EXISTE PAS dans le step.log dont ce replay est
-    //      intégralement dérivé (`replayParser.ts`) : le type d'événement `battle_shock` n'a
-    //      pas de formateur dans `_STEP_LOG_TYPE_MAP` (cf. w40k_core, et le test
-    //      tests/unit/engine/test_squad_step_logging.py::
-    //      test_type_without_formatter_is_skipped_not_crashed qui verrouille cet abandon).
-    //      La seule ligne de contrôle journalisée est le récapitulatif de FIN d'épisode
-    //      (`OBJECTIVE CONTROL: Obj{id}:P1_OC=…`, ai/step_logger.py::log_episode_end), qui ne
-    //      permet pas de reconstituer un décompte par tour.
-    // CORRECTION VISÉE (hors périmètre du correctif 01.07) : supprimer ce calcul et lire
-    // l'état journalisé par le moteur — ce qui exige d'ABORD de journaliser le contrôle par
-    // phase/tour dans le step.log, puis de le parser. Tant que ce n'est pas fait, les VP
-    // affichés par le replay ne sont pas une source de vérité.
-    const computeControlCounts = (state: ReplayGameState): { p1: number; p2: number } => {
-      const objectives = state.objectives ?? currentEpisode.initial_state.objectives;
-      if (!objectives) {
-        throw new Error("Replay objectives missing: victory points cannot be computed");
-      }
-
-      const ocByPosition: Record<string, { p1: number; p2: number }> = {};
-      const enrichedUnits = enrichUnitsWithStats(
-        state.units || [],
-        currentEpisode.board.inches_to_subhex
-      );
-      for (const unit of enrichedUnits) {
-        if ((unit.HP_CUR ?? 0) <= 0) {
-          continue;
-        }
-        if (unit.OC === undefined) {
-          throw new Error(`Unit ${unit.id} missing required OC field`);
-        }
-        const key = `${unit.col},${unit.row}`;
-        const entry = ocByPosition[key] ?? { p1: 0, p2: 0 };
-        if (unit.player === 1) {
-          entry.p1 += unit.OC;
-        } else if (unit.player === 2) {
-          entry.p2 += unit.OC;
-        } else {
-          throw new Error(`Unsupported player id in unit ${unit.id}: ${unit.player}`);
-        }
-        ocByPosition[key] = entry;
-      }
-
-      let p1Control = 0;
-      let p2Control = 0;
-      for (const objective of objectives) {
-        if (!objective.hexes) {
-          throw new Error(`Objective ${objective.name || "unknown"} missing hexes`);
-        }
-        if (!objective.name) {
-          throw new Error("Objective name is required for control tracking");
-        }
-        let p1Oc = 0;
-        let p2Oc = 0;
-        for (const hex of objective.hexes) {
-          const entry = ocByPosition[`${hex.col},${hex.row}`];
-          if (entry) {
-            p1Oc += entry.p1;
-            p2Oc += entry.p2;
-          }
-        }
-        const prevController = objectiveControllers[objective.name] ?? null;
-        let newController = controlMethod === "secured" ? prevController : null;
-        if (p1Oc > p2Oc) {
-          newController = 1;
-        } else if (p2Oc > p1Oc) {
-          newController = 2;
-        } else if (controlMethod === "secured" && prevController === null) {
-          if (primaryObjectiveConfig.control.tie_behavior === "no_control") {
-            newController = null;
-          } else {
-            throw new Error(
-              `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
-            );
-          }
-        } else if (controlMethod === "default") {
-          if (primaryObjectiveConfig.control.tie_behavior !== "no_control") {
-            throw new Error(
-              `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
-            );
-          }
-        }
-
-        objectiveControllers[objective.name] = newController;
-        if (newController === 1) {
-          p1Control += 1;
-        } else if (newController === 2) {
-          p2Control += 1;
-        }
-      }
-
-      return { p1: p1Control, p2: p2Control };
-    };
-
-    const computeScoreForTurn = (state: ReplayGameState, player: 1 | 2, turn: number): number => {
-      const startTurn = primaryObjectiveConfig.scoring.start_turn;
-      const maxPoints = primaryObjectiveConfig.scoring.max_points_per_turn;
-
-      if (turn < startTurn) {
-        return 0;
-      }
-
-      const { p1, p2 } = computeControlCounts(state);
-      const playerCount = player === 1 ? p1 : p2;
-      const opponentCount = player === 1 ? p2 : p1;
-
-      let points = 0;
-      for (const rule of primaryObjectiveConfig.scoring.rules) {
-        if (!rule || typeof rule.points !== "number" || !rule.condition) {
-          throw new Error("Invalid scoring rule in primary_objective");
-        }
-        if (rule.condition === "control_at_least_one") {
-          if (playerCount >= 1) {
-            points += rule.points;
-          }
-        } else if (rule.condition === "control_at_least_two") {
-          if (playerCount >= 2) {
-            points += rule.points;
-          }
-        } else if (rule.condition === "control_more_than_opponent") {
-          if (playerCount > opponentCount) {
-            points += rule.points;
-          }
-        } else {
-          throw new Error(`Unsupported scoring condition: ${rule.condition}`);
-        }
-      }
-
-      return Math.min(points, maxPoints);
-    };
-
-    const victoryPoints = { 1: 0, 2: 0 };
-    const scoredTurns = new Set<string>();
-    let lastTurn5StateForP2: ReplayGameState | null = null;
-
-    const limit = Math.min(currentActionIndex, currentEpisode.actions.length);
-    for (let i = 0; i < limit; i++) {
-      const action = currentEpisode.actions[i];
-      const turn = parseTurnValue(action.turn);
-      const player = action.player;
-      const stateBeforeAction =
-        i === 0 ? currentEpisode.initial_state : currentEpisode.states[i - 1];
-      const stateAfterAction = currentEpisode.states[i];
-      if (!stateAfterAction) {
-        throw new Error(`Missing replay state for action index ${i}`);
-      }
-
-      if (isScoringWindowAction(action, i, turn, player) && !scoredTurns.has(`${player}-${turn}`)) {
-        if (player !== 1 && player !== 2) {
-          throw new Error(`Unsupported player id in replay action: ${player}`);
-        }
-        victoryPoints[player] += computeScoreForTurn(
-          stateBeforeAction as ReplayGameState,
-          player as 1 | 2,
-          turn
-        );
-        scoredTurns.add(`${player}-${turn}`);
-      }
-
-      if (turn === 5 && player === 2) {
-        lastTurn5StateForP2 = stateAfterAction as ReplayGameState;
-      }
-    }
-
-    if (
-      primaryObjectiveConfig.timing.round5_second_player_phase === "fight" &&
-      !scoredTurns.has("2-5") &&
-      lastTurn5StateForP2
-    ) {
-      victoryPoints[2] += computeScoreForTurn(lastTurn5StateForP2, 2, 5);
-      scoredTurns.add("2-5");
-    }
-
-    return victoryPoints;
-  }, [currentEpisode, currentActionIndex, enrichUnitsWithStats, unitRegistryReady]);
-
-  // Pre-compute objective control state at currentActionIndex (hexKey → player | null).
-  // Required for accurate backward navigation in sticky mode: the ref-based heuristic in
-  // BoardPvp resets on rollback and loses historical control, so we provide a ground-truth
-  // snapshot derived from replaying all actions up to the current index.
+  // hexKey → joueur contrôlant, projeté depuis les zones nommées de l'instantané moteur.
   const replayObjectiveControlMap = useMemo((): Record<string, number | null> => {
-    if (!currentEpisode || !unitRegistryReady) return {};
-    const rules = currentEpisode.initial_state.rules;
-    if (!rules?.primary_objective) return {};
-    const primaryObjective = rules.primary_objective;
-    const cfg = Array.isArray(primaryObjective) ? primaryObjective[0] : primaryObjective;
-    if (!cfg) return {};
-    const startTurn = cfg.scoring?.start_turn;
-    const controlMethod = cfg.control?.control_method;
-    const tieBehavior = cfg.control?.tie_behavior;
-    const round5Phase = cfg.timing?.round5_second_player_phase;
-    if (startTurn == null || !controlMethod || !tieBehavior || !round5Phase) return {};
-
-    const controllers: Record<string, number | null> = {};
-
-    for (let i = 0; i < currentActionIndex; i++) {
-      const action = currentEpisode.actions[i];
-      if (!action) break;
-      const turn = parseInt(action.turn.replace("T", ""), 10);
-      if (Number.isNaN(turn) || turn < startTurn) continue;
-      // Skip T5 P2 actions that are not the first fight (same logic as isObjectiveScoringWindow)
-      if (turn === 5 && action.player === 2 && round5Phase === "fight") {
-        if (action.type !== "fight") continue;
-        let alreadyFought = false;
-        for (let j = 0; j < i; j++) {
-          const prev = currentEpisode.actions[j];
-          if (
-            parseInt(prev.turn.replace("T", ""), 10) === 5 &&
-            prev.player === 2 &&
-            prev.type === "fight"
-          ) {
-            alreadyFought = true;
-            break;
-          }
-        }
-        if (alreadyFought) continue;
-      } else {
-        // Only process at the first action of each (player, turn) pair
-        if (i > 0) {
-          const prev = currentEpisode.actions[i - 1];
-          const prevTurn = parseInt(prev.turn.replace("T", ""), 10);
-          if (prevTurn === turn && prev.player === action.player) continue;
-        }
-      }
-
-      const stateAfterAction = currentEpisode.states[i];
-      if (!stateAfterAction?.units) continue;
-      const objectives =
-        stateAfterAction.objectives || currentEpisode.initial_state.objectives || [];
-      if (objectives.length === 0) continue;
-
-      const enrichedUnits = enrichUnitsWithStats(
-        stateAfterAction.units as Unit[],
-        currentEpisode.board.inches_to_subhex
-      );
-      for (const obj of objectives) {
-        if (!obj.name) continue;
-        const hexSet = new Set(obj.hexes.map((h) => `${h.col},${h.row}`));
-        let p1_oc = 0;
-        let p2_oc = 0;
-        for (const unit of enrichedUnits) {
-          if (unit.id < 0 || unit.HP_CUR <= 0) continue;
-          if (hexSet.has(`${unit.col},${unit.row}`)) {
-            const oc = unit.OC ?? 0;
-            if (unit.player === 1) p1_oc += oc;
-            else p2_oc += oc;
-          }
-        }
-        const prev = controllers[obj.name] ?? null;
-        let newController = controlMethod === "secured" ? prev : null;
-        if (p1_oc > p2_oc) newController = 1;
-        else if (p2_oc > p1_oc) newController = 2;
-        else if (controlMethod === "secured" && prev === null && tieBehavior === "no_control")
-          newController = null;
-        controllers[obj.name] = newController;
-      }
+    if (!currentEpisode || !currentObjectiveControl) {
+      return {};
     }
-
-    // Convert zone-name → player to hexKey → player
-    const objectives =
-      (currentActionIndex > 0 ? currentEpisode.states[currentActionIndex - 1]?.objectives : null) ||
-      currentEpisode.initial_state.objectives ||
-      [];
+    const objectives = currentEpisode.initial_state.objectives;
+    if (!objectives) {
+      return {};
+    }
     const map: Record<string, number | null> = {};
-    for (const obj of objectives) {
-      const c = controllers[obj.name] ?? null;
-      for (const h of obj.hexes) {
-        map[`${h.col},${h.row}`] = c;
+    for (const objective of objectives) {
+      if (!(objective.name in currentObjectiveControl.controllers)) {
+        throw new Error(
+          `Objective "${objective.name}" absent de l'instantané OBJECTIVE CONTROL du step.log`
+        );
+      }
+      const controller = currentObjectiveControl.controllers[objective.name];
+      for (const hex of objective.hexes) {
+        map[`${hex.col},${hex.row}`] = controller;
       }
     }
     return map;
-  }, [currentEpisode, currentActionIndex, unitRegistryReady, enrichUnitsWithStats]);
+  }, [currentEpisode, currentObjectiveControl]);
 
   // Get current action for move preview
   const currentActionIndexClamped =
