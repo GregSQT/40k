@@ -48,16 +48,27 @@ export const TEST_ARMORY: Record<string, Weapon> = {
     )
 
     monkeypatch.setattr("engine.weapons.parser.get_weapon_rules_registry", lambda: object())
-    monkeypatch.setattr(
-        "engine.weapons.parser.validate_weapon_rules_field",
-        lambda weapon, registry: ["parsed-rule"],
-    )
+    validated: list[dict] = []
+
+    def _spy_validate(weapon, registry):
+        validated.append(weapon)
+        return ["parsed-rule"]
+
+    monkeypatch.setattr("engine.weapons.parser.validate_weapon_rules_field", _spy_validate)
 
     weapons = parser._parse_armory_file(armory_path)
     assert "plasma" in weapons
     assert weapons["plasma"]["NB"] == "2D6"
     assert weapons["plasma"]["DMG"] == "D6+1"
-    assert weapons["plasma"]["_parsed_rules"] == ["parsed-rule"]
+
+    # Le fail-fast est l'APPEL de validation : il doit rester, sur chaque arme.
+    assert [w["display_name"] for w in validated] == ["Plasma Gun"]
+    # ...mais son retour ne doit PAS etre re-stocke sur l'arme. `_parsed_rules` etait le canal
+    # d'entree du defunt WeaponRulesApplier ; la clé n'a aucun lecteur et ne doit pas revenir
+    # (elle forcerait api_server a l'exclure de nouveau pour ne pas la faire fuiter). Ce test
+    # rougit si quelqu'un remet un cache sur le dict d'arme.
+    assert "_parsed_rules" not in weapons["plasma"]
+    assert not [k for k in weapons["plasma"] if k.startswith("_parsed")]
 
 
 def test_parse_armory_file_requires_weapon_rules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

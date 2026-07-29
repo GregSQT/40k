@@ -174,10 +174,20 @@ class ArmoryParser:
             weapon['WEAPON_RULES'] = rule_strings
             
             # VALIDATE WEAPON_RULES: Parse and validate all rules (fail-fast)
+            #
+            # 2026-07-29 — la mise en cache du resultat sur `weapon['_parsed_rules']` a ete
+            # SUPPRIMEE. C'etait le canal d'entree de `WeaponRulesApplier.apply_rules`
+            # (`require_key(weapon, "_parsed_rules")`), classe elle-meme supprimee le meme jour :
+            # la clé n'avait plus aucun lecteur. Elle n'apportait aucune information nouvelle
+            # (strictement derivable de `weapon['WEAPON_RULES']` + le registre), pesait dans
+            # chaque dict d'arme et forcait `services/api_server.py` a l'exclure explicitement
+            # pour ne pas la faire fuiter dans chaque reponse JSON.
+            #
+            # Ce qui est utile ici, c'est l'APPEL, pas son retour : `validate_weapon_rules_field`
+            # leve sur une regle inconnue ou un parametre invalide. C'est le fail-fast au
+            # chargement de l'armurerie, il est conserve. Ne pas re-stocker le retour.
             try:
-                parsed_rules = validate_weapon_rules_field(weapon, rules_registry)
-                # Cache parsed rules on weapon for performance
-                weapon['_parsed_rules'] = parsed_rules
+                validate_weapon_rules_field(weapon, rules_registry)
             except Exception as e:
                 # Add context about which weapon failed
                 weapon_name = weapon.get('display_name', weapon_code)
