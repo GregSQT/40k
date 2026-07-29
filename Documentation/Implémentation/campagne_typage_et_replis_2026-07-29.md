@@ -265,7 +265,32 @@ en commentaire** (`ai/pointer_policy.py:254`) ⇒ **9 sourdines réelles**, tout
   toutes formes confondues — cohérent avec « 160 redondantes », non probant.
 - **Priorité : basse.** Explicitement **moins prioritaire que §3.3**.
 
-### 3.3 🔴 Sept fonctions de la surface PvP manuelle n'ont AUCUN test — **recommandation la plus forte**
+### 3.3 ✅ TRAITÉ le 2026-07-29 — et la prémisse ci-dessous était **fausse**
+
+> **Correction mesurée (2026-07-29).** L'instrumentation qui a produit ce constat n'a tourné que sur
+> **20 fichiers de tests moteur** : elle n'a jamais joué `tests/integration/pvp/`. Réinstrumentées sur
+> ce répertoire, **6 des 7 fonctions SONT appelées** par
+> [`tests/integration/pvp/test_charge.py`](../../tests/integration/pvp/test_charge.py) —
+> `charge_build_valid_targets` 6 appels, `charge_target_selection_handler` /
+> `charge_preview_move_plan` / `charge_commit_move_plan_handler` / `_charge_model_pos_is_closer`
+> 2 chacune, `charge_autoplace_plan` 1. Couverture ligne mesurée : **62 % à 89 %**.
+> Seule `charge_build_model_destinations_pool` était à **1 %** (voir §3.5 : supprimée).
+>
+> **Le vrai défaut n'était donc pas « aucun test » mais « seulement le chemin nominal »** : une
+> escouade mono-figurine qui charge une cible unique et réussit. **Tous les trous étaient du côté du
+> refus** — « end closer » (11.04 WHILE MOVING), interdiction d'engager un non-cible (11.04 AFTER
+> MOVING), cohérence d'unité (03.03), couverture du plan par toutes les figurines vivantes, jet
+> raté non consommé, entrées manquantes de l'autoplace. Une correction fausse sur ces branches
+> passait au vert.
+>
+> **Livré** : [`tests/unit/engine/test_charge_manual_surface.py`](../../tests/unit/engine/test_charge_manual_surface.py)
+> — 27 tests sur plateau nu (1 sous-hex = 1", bases 1 hex), chacun construisant sa situation et
+> vérifiant ses prémisses avant d'observer le refus. **26 mutations rejouées une par une : les 26
+> font rougir le test visé** (dont 2 contrôles positifs, pour qu'un « refuse tout » ne passe pas).
+>
+> Le constat original est conservé ci-dessous, tel qu'il a été écrit.
+
+### 3.3 (constat d'origine) 🔴 Sept fonctions de la surface PvP manuelle n'ont AUCUN test
 
 - **Où** : `engine/phase_handlers/charge_handlers.py` —
   `charge_autoplace_plan`, `charge_preview_move_plan`, `charge_commit_move_plan_handler`,
@@ -296,17 +321,25 @@ en commentaire** (`ai/pointer_policy.py:254`) ⇒ **9 sourdines réelles**, tout
 occurrences** pour `occupied_hexes` ; les relevés ci-dessus sont ceux du working tree au moment de
 la rédaction (fichiers moteur modifiés par l'utilisateur). L'écart n'est pas instruit.
 
-### 3.5 🟠 `charge_build_model_destinations_pool` n'a aucun appelant — **non instruit**
+### 3.5 ✅ `charge_build_model_destinations_pool` — **instruit puis SUPPRIMÉ** (2026-07-29)
 
-- **Où** : [`engine/phase_handlers/charge_handlers.py:1650`](../../engine/phase_handlers/charge_handlers.py#L1650).
-- **Constat re-vérifié** : `grep` sur `.py` / `.ts` / `.tsx` ne rend que **sa définition (l.1650)**,
-  **son propre message d'erreur (l.1682)** et **une mention dans un commentaire (l.4721)** qui
-  affirme au contraire que « la légalité par-fig réutilise `charge_build_model_destinations_pool` ».
-- **Statut** : **probablement mort — NON INSTRUIT.** Le patron de preuve en quatre directions de
-  §2.6 n'a **pas** été appliqué (pas de recherche par chaîne/réflexion, pas d'audit des routes
-  d'API). La contradiction du commentaire l.4721 n'est pas résolue : soit le commentaire est
-  périmé, soit un chemin d'appel a été manqué.
-- **Effort** : faible pour l'instruction (le patron §2.6 est écrit), inconnu pour la suite.
+- **Preuve en quatre directions (patron §2.6), appliquée** :
+  (a) aucun appel ni import — `grep` sur `.py`/`.ts`/`.tsx` ne rendait que sa définition, son propre
+  message d'erreur et le commentaire l.4721 ;
+  (b) aucune référence par chaîne ni réflexion — le seul `getattr` dynamique du dépôt
+  (`ai/bot_evaluation.py:608`) porte sur un pool de processus ;
+  (c) **aucune route d'API** — tout le trafic de charge passe par `/api/game/action` → `w40k_core` →
+  `charge_handlers.execute_action`, dont le dispatch (chaîne `if/elif` explicite) ne le nomme pas ;
+  `api_server.py` n'appelle que les jumeaux **move** et **deployment** du même nom ;
+  (d) documentation — `stage.md` le déclarait déjà CODE MORT.
+- **Mesuré** : **0 appel** sous instrumentation de la suite de charge (unitaires + intégration PvP),
+  1 % de couverture ligne — contre 62-89 % pour les six autres fonctions de §3.3.
+- **Contradiction du commentaire l.4721 : tranchée.** Le commentaire était **périmé** — le code de
+  `charge_preview_move_plan` appelle `_charge_model_pos_is_closer`, jamais le pool. Commentaire
+  corrigé, puis fonction supprimée (148 lignes) avec une trace à l'emplacement du retrait.
+- **Raison de fond de ne pas la rebrancher** : elle était restée **2D** (plan provisoire en 2-uplet,
+  `level=0` codé en dur) alors que les deux chemins vivants sont niveau-conscients. La ressusciter
+  aurait régressé la charge d'étage (§03.04).
 
 ### 3.6 🟠 Un cache-miss avalé en silence dans le calcul de distance de charge
 

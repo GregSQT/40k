@@ -1648,152 +1648,14 @@ def _charge_model_placement_overlaps(
     return False
 
 
-def charge_build_model_destinations_pool(
-    game_state: Dict[str, Any],
-    model_id: str,
-    target_ids: List[str],
-    charge_roll_subhex: int,
-    provisional_plan: Optional[Dict[str, Tuple[int, int]]] = None,
-) -> Dict[str, Any]:
-    """Pool de destinations par-figurine pour le mouvement de charge (V11, move par-figurine).
-
-    BFS d'UNE figurine du squad chargeur dans le budget = jet de charge (sous-hex), sans
-    traverser murs ni figs (ennemies, alliées, coéquipières). ``provisional_plan``
-    ({model_id: (col, row)}) remplace les positions des coéquipières déjà posées dans le plan UI
-    (recompute temps réel). Contrairement au move, l'EZ ennemie n'est PAS interdite (une charge
-    finit dans l'EZ des cibles déclarées).
-
-    Chaque destination valide est classée selon 11.04 WHILE MOVING ; toute destination où la
-    figurine engagerait un ennemi NON déclaré est exclue (AFTER MOVING : aucun non-cible) :
-      - within_1 : la figurine finit à <= 1" d'au moins une cible déclarée
-      - engaged  : la figurine finit engagée (<= EZ) d'au moins une cible déclarée
-      - closer   : la figurine finit plus proche d'au moins une cible qu'à son départ (= pool légal de base)
-
-    within_1 ⊆ engaged ⊆ closer. Retour : {"within_1", "engaged", "closer"} (listes de [col, row]).
-    Lecture pure (aucune écriture permanente dans game_state).
-    """
-    from collections import deque
-    from engine.hex_utils import min_distance_between_sets
-    from engine.spatial_relations import unit_entries_within_engagement_zone
-    from .shared_utils import get_engagement_zone
-
-    models_cache = require_key(game_state, "models_cache")
-    model = models_cache.get(model_id)
-    if model is None:
-        raise KeyError(f"charge_build_model_destinations_pool: model {model_id} not in models_cache")
-    squad_id = str(model["squad_id"])
-    unit = get_unit_by_id(game_state, squad_id)
-    empty = {"within_1": [], "engaged": [], "closer": []}
-    if not unit:
-        return empty
-
-    ez = int(get_engagement_zone(game_state))
-    within_1_zone = int(game_state["inches_to_subhex"])  # 1" en sous-hex
-    budget = int(charge_roll_subhex)
-
-    board_cols = int(require_key(game_state, "board_cols"))
-    board_rows = int(require_key(game_state, "board_rows"))
-    wall_hexes = game_state.get("wall_hexes", set())
-    player = int(model["player"])
-    units_cache = require_key(game_state, "units_cache")
-
-    # Cibles déclarées (entrées + empreintes) et ennemis NON déclarés (exclusion d'engagement).
-    declared = {str(t) for t in target_ids}
-    target_entries: List[Dict[str, Any]] = []
-    target_fps: List[Set[Tuple[int, int]]] = []
-    nontarget_entries: List[Dict[str, Any]] = []
-    for eid, entry in units_cache.items():
-        if int(entry["player"]) != player:
-            occ = entry.get("occupied_hexes")
-            cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
-            if str(eid) in declared:
-                target_entries.append(entry)
-                target_fps.append(cells)
-            else:
-                nontarget_entries.append(entry)
-    if not target_entries:
-        return empty
-
-    # Coéquipières : collision PAR-FIGURINE — chaque fig (et la fig mobile) utilise SA propre base
-    # (models_cache), pas celle de l'unité (cf. personnage attaché à plus grande base). Le plan
-    # provisoire override les figs déjà posées.
-    sibling_socles: List[Any] = []
-    squad_models = require_key(game_state, "squad_models")
-    for mid in require_key(squad_models, squad_id):
-        if str(mid) == model_id:
-            continue
-        sib = models_cache.get(str(mid))
-        if sib is None:
-            continue
-        if provisional_plan and str(mid) in provisional_plan:
-            pc, pr = provisional_plan[str(mid)]
-        else:
-            pc, pr = int(sib["col"]), int(sib["row"])
-        sibling_socles.append(_charge_model_socle(game_state, sib, int(pc), int(pr)))
-
-    # 03.01 : une figurine se déplace À TRAVERS les figs amies, mais PAS à travers les ennemies (ni
-    # les murs). Chemin au sol = murs + ennemis AU SOL (niveau 0) seulement ; les amis (coéquipières +
-    # autres unités amies) ne bloquent pas le passage. Blocage par-figurine niveau 0 : une fig ennemie à
-    # l'étage ne gêne pas un chargeur au sol (03.04 engagement 3D), contrairement à l'union tous niveaux
-    # du units_cache qui durcirait le sol sous une cible en hauteur.
-    path_blocked = set(wall_hexes) | build_enemy_occupied_positions_set(game_state, current_player=player, level=0)
-    # 03 « Ending a move » : le non-chevauchement final (murs + unités + coéquipières) est délégué à
-    # _charge_model_placement_overlaps (clearance continu rond↔rond, méthode empreinte).
-    # Take to the skies (21.03) : si le vol est actif, la traversée ignore tout ; seul le placement
-    # final (``cand_fp & end_blocked``) reste interdit d'overlap. Sinon, traversée sol classique.
-    fly_active = _charge_fly_active(game_state, unit, squad_id)
-    traverse_blocked = set() if fly_active else path_blocked
-
-    start_col, start_row = int(model["col"]), int(model["row"])
-    start_fp = _charge_model_footprint(game_state, model, start_col, start_row)
-    start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
-
-    # BFS centre-à-centre dans le budget : ne traverse ni mur ni fig ENNEMIE (amies traversables, vol = tout).
-    visited: Set[Tuple[int, int]] = {(start_col, start_row)}
-    reachable: List[Tuple[int, int]] = []
-    queue: deque = deque([(start_col, start_row, 0)])
-    while queue:
-        c, r, d = queue.popleft()
-        if d >= budget:
-            continue
-        for nc, nr in get_hex_neighbors(c, r):
-            if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
-                continue
-            cell = (nc, nr)
-            if cell in visited or cell in traverse_blocked:
-                continue
-            visited.add(cell)
-            queue.append((nc, nr, d + 1))
-            reachable.append(cell)
-
-    within_1: List[List[int]] = []
-    engaged: List[List[int]] = []
-    closer: List[List[int]] = []
-    obstacle_socles = _charge_obstacle_socles(game_state, squad_id, level=0)
-    _walls = set(wall_hexes)
-    for cc, rr in reachable:
-        cand_socle = _charge_model_socle(game_state, model, cc, rr)
-        cand_fp = cand_socle.fp
-        if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
-            continue
-        if _charge_model_placement_overlaps(cand_socle, obstacle_socles, sibling_socles, _walls):
-            continue
-        d_min = min(
-            min_distance_between_sets(cand_fp, tfp, max_distance=start_min) for tfp in target_fps
-        )
-        if d_min >= start_min:
-            continue  # WHILE MOVING : doit finir plus proche d'au moins une cible
-        synth = _synth_model_entry(game_state, squad_id, model, cc, rr, level=0)  # 3a : fig au sol
-        _vz = _charge_vertical_zone(game_state)
-        if any(unit_entries_within_engagement_zone(synth, ne, ez, vertical_zone_inches=_vz) for ne in nontarget_entries):
-            continue  # AFTER MOVING : aucun engagement avec un ennemi non déclaré
-        closer.append([cc, rr])
-        if any(unit_entries_within_engagement_zone(synth, te, ez, vertical_zone_inches=_vz) for te in target_entries):
-            engaged.append([cc, rr])
-        if any(unit_entries_within_engagement_zone(synth, te, within_1_zone, vertical_zone_inches=_vz) for te in target_entries):
-            within_1.append([cc, rr])
-
-    return {"within_1": within_1, "engaged": engaged, "closer": closer}
+# `charge_build_model_destinations_pool` a été supprimé ici (2026-07-29). Il construisait le pool
+# de destinations d'UNE figurine de charge (within_1/engaged/closer) mais n'avait plus AUCUN
+# appelant : le pool interactif du front passe par `charge_model_plan_state` → `_compute_plan_context`,
+# et la validation d'une position isolée par `_charge_model_pos_is_closer`. Il était de surcroît
+# resté 2D (plan provisoire en 2-uplet, `level=0` codé en dur) là où les deux vivants sont
+# niveau-conscients : le rebrancher aurait régressé la charge d'étage (§03.04). Preuve de mort :
+# aucun appel/import, aucune référence par chaîne ni réflexion, aucune route d'API (le dispatch
+# `execute_action` ne le nomme pas), et 0 appel mesuré sous la suite de charge.
 
 
 def _charge_qualifying(
@@ -4719,9 +4581,9 @@ def charge_preview_move_plan(
     """Dry-run d'un plan de charge par-figurine (11.04 WHILE/AFTER MOVING). Lecture pure.
 
     ``plan`` = liste de ``[model_id, col, row]`` couvrant TOUTES les figs vivantes. Source unique
-    de vérité : la légalité par-fig réutilise ``charge_build_model_destinations_pool`` (mêmes
-    contraintes que le cercle violet : budget = jet, pas de traversée, finit plus proche, n'engage
-    aucun non-cible), avec les autres figs du plan en positions provisoires. On ajoute :
+    de vérité : la légalité par-fig délègue à ``_charge_model_pos_is_closer`` (mêmes contraintes
+    que le cercle violet : budget = jet, pas de traversée, finit plus proche, n'engage aucun
+    non-cible), avec les autres figs du plan en positions provisoires. On ajoute :
       - cohésion 03.03 (mêmes 2 puces que le move, empreinte-à-empreinte) ;
       - engaged_all : chaque cible déclarée est engagée par >=1 fig (AFTER MOVING).
 

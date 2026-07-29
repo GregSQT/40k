@@ -24,9 +24,10 @@
 >   Hors de `pytest tests/unit/` : ils ne sont PAS dans la commande de vérification large.
 > - Le fuzzing T7b a trouvé une anomalie réelle dès sa 3ᵉ seed ; elle est corrigée, ainsi que
 >   son jumeau en mêlée et l'anomalie « id inconnu ». L'allowlist du fuzzing est VIDE (§0.6).
-> - Deux anomalies de RÈGLES restent ouvertes et verrouillées par une sentinelle
->   (§0.6.4 tir après advance, §0.6.5 PV des personnages attachés) : leur correction touche
->   des briques partagées avec le gym, elle est soumise à arbitrage.
+> - Les deux anomalies de RÈGLES trouvées en T4/T6 sont elles aussi CORRIGÉES (§0.6.4 tir
+>   après advance, §0.6.5 PV des personnages attachés) : arbitrage rendu le 2026-07-29 —
+>   « les règles doivent être suivies ». Le masque gym appliquait déjà 10.05 ; seule la
+>   correction des PV touche l'observation de l'agent → ré-entraînement à prévoir de ce fait.
 > - Reste À FAIRE : T2b, T3a, T7, et toutes les couches B et C.
 
 ---
@@ -49,11 +50,11 @@
   réponse `{phase_complete: true, reason: "pool_empty", next_phase: ...}`.
 - Phase shoot : le moteur REJETTE `activate_unit` — chemin escouade obligatoire
   (`squad_shoot_activate`, puis `squad_shoot_los_overview` pour les cibles).
-- HP : `unit.HP_CUR` = total escouade HORS leader attaché ; HP par figurine dans `models_cache` ;
-  `squad_models[uid]` = liste des ids de figurines (`"6#0"`, …).
-  ATTENTION : cette convention n'est tenue QUE tant qu'aucune figurine n'est morte — après la
-  première perte le total est recalculé personnages compris, et il AUGMENTE (anomalie §0.6.5).
-  Toute vérification de PV doit donc se faire figurine par figurine, via `models_cache`.
+- HP : `unit.HP_CUR` = somme des PV des figurines VIVANTES, personnages attachés compris, à
+  tout instant (corrigé le 2026-07-29, §0.6.5 — la convention « hors leader attaché » relevée
+  en T1 n'était tenue qu'avant la première perte et ne vaut plus). HP par figurine dans
+  `models_cache` ; `squad_models[uid]` = liste des ids de figurines (`"6#0"`, …).
+  NB : `unit.HP_MAX` reste le profil de BASE (une figurine), pas un total d'escouade.
 - Leviers de test déterministes déjà exposés par l'API :
   - `charge_roll_override` (remplace le jet 2D6 de charge) ;
   - `shoot_pool_require_los` (mode pool de tir exact vs transition rapide).
@@ -131,15 +132,14 @@ Contrats relevés pendant T4/T5/T6 (2026-07-29) :
   (empreinte à empreinte vs `get_engagement_zone`). Les tests classent donc les unités avec
   la brique du moteur et n'assertent que la sortie de l'API.
 
-### 0.6 Anomalies trouvées (2026-07-29)
+### 0.6 Anomalies trouvées — toutes CORRIGÉES (2026-07-29)
 
-Les trois anomalies de ROBUSTESSE (HTTP 500) sont corrigées : l'allowlist
-`KNOWN_SERVER_ERRORS` du fuzzing est **vide**, plus aucune 500 n'est tolérée nulle part, et
-les sentinelles correspondantes ont été remplacées par des tests du comportement corrigé.
-Deux anomalies de RÈGLES (§0.6.4 et §0.6.5) restent OUVERTES : leur correction touche des
-briques partagées avec le gym (masques d'action, observation de l'agent), le périmètre relève
-d'un arbitrage. Chacune est verrouillée par une sentinelle `@pytest.mark.anomaly` qui
-échouera le jour de la correction.
+Trois de ROBUSTESSE (HTTP 500) et deux de RÈGLES. L'allowlist `KNOWN_SERVER_ERRORS` du
+fuzzing est **vide**, plus aucune 500 n'est tolérée nulle part, et il ne reste AUCUN test
+`@pytest.mark.anomaly` en couche A : chaque sentinelle a été remplacée par un test du
+comportement corrigé. Arbitrage rendu sur les deux corrections de règles : les règles
+priment. Le masque d'action du gym appliquait déjà 10.05 (§0.6.4) ; c'est la correction des
+PV (§0.6.5), qui entre dans l'observation, qui impose un ré-entraînement.
 
 1. **Id d'unité inexistant → HTTP 500** au lieu d'un refus métier. **CORRIGÉ**.
    La levée était dans le pré-traitement du step_logger (`_process_semantic_action`,
@@ -201,7 +201,7 @@ d'un arbitrage. Chacune est verrouillée par une sentinelle `@pytest.mark.anomal
    `squad_fight` de `w40k_core.py`). Plus la purge symétrique en fin de phase
    (`_fight_v11_phase_complete`).
    Tests : `test_fight.py::TestFightActivationRestart` (2 tests).
-4. **Tir d'une arme non-[ASSAULT] après un advance** — PDF 10.05. **OUVERT** (trouvée en T4).
+4. **Tir d'une arme non-[ASSAULT] après un advance** — PDF 10.05. **CORRIGÉ** (trouvée en T4).
    Mesuré : une escouade qui a avancé et possède au moins une arme [ASSAULT] entre bien dans
    le pool de tir (10.05), mais le flux d'escouade lui laisse ensuite DÉCLARER et RÉSOUDRE
    ses armes non-[ASSAULT] (ex. unité 1008 : `bolt_pistol` tiré après advance).
@@ -211,14 +211,35 @@ d'un arbitrage. Chacune est verrouillée par une sentinelle `@pytest.mark.anomal
    engagement (10.06) — elle ignore `units_advanced`. Les deux autres chemins l'appliquent
    pourtant : `weapon_availability_check` (shooting_handlers.py:560, mono-figurine) et
    `_unit_can_shoot` (niveau POOL, d'où l'exclusion correcte d'une unité sans [ASSAULT]).
-   Correctif attendu : porter la restriction 10.05 (avec l'exception `shoot_after_advance`)
-   dans l'éligibilité par arme partagée, au même endroit que l'exclusion 10.06 déjà présente.
-   NON APPLIQUÉ : cette brique alimente aussi les masques d'action du gym — les modèles
-   entraînés ont appris la version permissive. Le périmètre relève d'un arbitrage.
-   Sentinelle : `test_shoot.py::test_a_non_assault_weapon_is_still_firable_after_an_advance`.
-5. **PV d'unité : la convention « hors personnage attaché » n'est pas tenue après la première
-   perte** (PDF 19). **OUVERT** (trouvée en T6).
-   §0.2 documente la convention : `unit["HP_CUR"]` = total d'escouade HORS leader attaché.
+   Correctif appliqué : `_advance_blocks_weapon` (shared_utils.py) — même critère et même
+   fonction que le chemin mono-figurine (`_can_unit_shoot_after_advance_with_weapon`), donc
+   l'exception `shoot_after_advance` reste honorée — appelée dans les DEUX points
+   d'éligibilité par arme du flux d'escouade : `_model_can_shoot_target` (arme sélectionnée)
+   et `_model_can_shoot_target_with_weapon` (arme précise). Tout en découle : menu
+   `can_use`, menu cible-d'abord, `qty_max`, voile vert et déclaration.
+   Troisième point, trouvé en relisant le correctif : `squad_shoot_los_overview` choisissait
+   son ARME DE TEST (une seule, la plus longue portée, la LoS ne dépendant pas de l'arme)
+   sans regarder le type de tir — juste « engagée → un [CLOSE-QUARTERS] ». Une escouade ayant
+   avancé aurait donc testé une arme non-[ASSAULT], désormais bloquée, et n'aurait affiché
+   AUCUNE cible. Corrigé en déléguant à `resolve_squad_shooting_type` +
+   `shooting_type_allows_weapon`, l'autorité déjà utilisée par le masque gym. Effet de bord
+   bienvenu : le volet MONSTER/VEHICLE de 10.06 (« you can select any of that model's ranged
+   weapons ») y est désormais honoré, là où un véhicule engagé sans arme [CLOSE-QUARTERS]
+   était privé de cibles.
+   NON VÉRIFIABLE sur `pvp_test` : aucune unité du roster n'a d'arme non-[ASSAULT] plus
+   longue que son [ASSAULT], et aucun véhicule n'est engagé au tour testé. Ces deux
+   comportements sont donc corrects par construction mais non verrouillés par un test —
+   à couvrir avec un roster qui les produit.
+   IMPACT GYM : nul pour cette règle. Le masque de l'agent appliquait DÉJÀ 10.05
+   (`resolve_squad_shooting_type` + `squad_model_shootable_weapon_indices`, action_mask) ;
+   c'est le flux d'escouade PvP qui était en retard sur lui. Aucun ré-entraînement de ce
+   fait.
+   Test : `test_shoot.py::test_only_assault_weapons_are_firable_after_an_advance`
+   (menu, menu cible-d'abord ET refus de la déclaration directe).
+5. **PV d'unité : la convention « hors personnage attaché » n'était pas tenue après la
+   première perte** (PDF 19). **CORRIGÉ** (trouvée en T6).
+   §0.2 documentait alors la convention : `unit["HP_CUR"]` = total d'escouade HORS leader
+   attaché.
    Elle est bien appliquée au démarrage (`nb_figurines × PV_du_profil_de_base`) : 5 unités
    sur 42 divergent alors de la somme réelle de leurs figurines (ex. 111 : 21 annoncés pour
    26 répartis, Librarian 5 PV + Captain 6 PV).
@@ -227,11 +248,16 @@ d'un arbitrage. Chacune est verrouillée par une sentinelle `@pytest.mark.anomal
    figurine à 3 PV). La grandeur change donc de définition en cours de partie ; tout lecteur
    du total d'unité (score, observation de l'agent, tri de cibles) compare des choux et des
    carottes selon qu'une perte a eu lieu ou non.
-   Correctif attendu : dériver `HP_CUR`/`HP_MAX` d'unité de la somme des figurines vivantes
-   de `models_cache`, à la construction comme après chaque perte — la source qui sert déjà
-   après la première mort. Impact observation/reward de l'agent → arbitrage.
-   Sentinelle : `test_invariants.py::test_unit_hitpoints_ignore_attached_characters`.
-   À la correction : promouvoir l'égalité en invariant transversal dans `invariants.py`.
+   Correctif appliqué : au réveil de l'épisode (`w40k_core`), `HP_CUR` d'unité = somme des
+   `HP_MAX` PAR FIGURINE, avec la même convention que le constructeur de `models_cache`
+   (`spec.get("HP_MAX", hp_max)`, shared_utils.py:778) pour les figurines sans override.
+   La formule fautive était `HP_MAX * model_count`, où `unit["HP_MAX"]` porte le profil de
+   BASE ; `game_state.py:1240` calculait déjà le bon total, c'est le réveil qui l'écrasait.
+   Une seule définition désormais, celle des figurines, identique avant et après la première
+   perte. IMPACT GYM : le total d'unité entre dans l'observation et les agrégats de valeur
+   (avantage matériel, attrition) → c'est LA correction qui justifie un ré-entraînement.
+   L'égalité est promue INVARIANT transversal (`invariants.py::_assert_hp_squad_sum`, sans
+   plus aucune exception) : elle est revalidée après CHAQUE action de toute la couche A.
 
 ---
 
@@ -243,6 +269,7 @@ plusieurs tours, avec des checks par phase + des invariants transversaux revalid
 ### T2 — Invariants transversaux (à revalider après chaque action) — **FAIT**
 `invariants.py` + `test_invariants.py` (10 tests). Armés sur chaque action par `GameClient`.
 - [x] Ids uniques ; HP figurines bornés ; positions dans le board (unités ET figurines).
+- [x] HP d'unité == somme des PV de ses figurines vivantes, SANS exception (§0.6.5).
 - [x] Cohérence référentielle `units` ↔ `units_cache` ↔ `models_cache` ↔ `squad_models`
       (fermeture dans les deux sens, `squad_id` de chaque figurine cohérent).
 - [x] Tout pool ⊆ unités vivantes ; appartenance au joueur actif pour
@@ -321,9 +348,10 @@ Actions relevées : `squad_shoot_select_model`, `squad_shoot_assign_weapon_qty`,
 - [x] Unité engagée (10.06) : seules les armes [CLOSE-QUARTERS] sont `can_use`, et les cibles
       se limitent aux ennemis avec lesquels l'unité est engagée. Vérifié sur les 3 unités
       engagées du tour 1 (1011, 7, 1009).
-- [x] Advance (10.04/10.05) : une unité sans arme [ASSAULT] qui a avancé quitte le pool de tir.
-      ANOMALIE OUVERTE §0.6.4 : avec une arme [ASSAULT], ses armes NON-[ASSAULT] restent
-      déclarables et résolvables.
+- [x] Advance (10.04/10.05) : une unité sans arme [ASSAULT] qui a avancé quitte le pool de
+      tir ; avec une [ASSAULT] elle y reste, mais SEULES ses armes [ASSAULT] sont proposées
+      (menu, menu cible-d'abord) et la déclaration directe d'une autre est refusée
+      (`cannot_shoot`). Corrigé en §0.6.4.
 - [x] Quantités : `squad_shoot_weapon_qty_max` == `m` du menu cible-d'abord == nombre de
       figurines du voile vert ; `count > qty_max` → refus `cannot_shoot` sans déclaration
       résiduelle ; `count == qty_max` → une déclaration par figurine distincte.

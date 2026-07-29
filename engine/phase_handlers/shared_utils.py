@@ -5298,6 +5298,36 @@ def _shoot_engagement_blocks_target(
     return False
 
 
+def _advance_blocks_weapon(
+    game_state: Dict[str, Any], squad_id: str, weapon: Dict[str, Any]
+) -> bool:
+    """10.05 : apres un advance, une arme non-[ASSAULT] ne peut PAS etre selectionnee.
+
+    « ASSAULT SHOOTING 10.05 — WHILE SHOOTING: You can only select [ASSAULT] weapons to
+    make attacks with. » Le tir normal (10.04) exige de son cote « did not make an advance
+    move this turn » : une unite qui a avance ne dispose donc d aucun autre type de tir.
+
+    Meme critere que le chemin mono-figurine (weapon_availability_check) et que le masque
+    gym (shooting_type_allows_weapon sous SHOOTING_TYPE_ASSAULT), via la meme fonction
+    feuille : l exception `shoot_after_advance` (regle d unite) reste honoree.
+
+    Volet ADVANCE seulement, a dessein : le volet arme de 10.06 est deja porte par
+    `_shoot_engagement_blocks_target` (appele juste apres, avec les restrictions de CIBLE
+    qui vont avec), et 10.04 ne restreint aucune arme. Verifier ici le type de tir complet
+    dupliquerait 10.06 au lieu de le partager.
+    """
+    if squad_id not in require_key(game_state, "units_advanced"):
+        return False
+    from engine.phase_handlers.shooting_handlers import (
+        _can_unit_shoot_after_advance_with_weapon,
+        _get_unit_by_id,
+    )
+    unit = _get_unit_by_id(game_state, squad_id)
+    if unit is None:
+        raise KeyError(f"10.05: escouade {squad_id!r} absente de game_state['units']")
+    return not _can_unit_shoot_after_advance_with_weapon(unit, weapon)
+
+
 def _model_can_shoot_target(
     game_state: Dict[str, Any], attacker_model: Dict[str, Any], target_squad_id: str
 ) -> bool:
@@ -5327,6 +5357,8 @@ def _model_can_shoot_target(
     if range_subhex <= 0:
         return False
     # Import lazy : shooting_handlers importe shared_utils (eviter le cycle).
+    if _advance_blocks_weapon(game_state, str(attacker_model["squad_id"]), weapon):
+        return False
 
     ac = int(attacker_model["col"])
     ar = int(attacker_model["row"])
@@ -6084,13 +6116,27 @@ def squad_shoot_los_overview(
     attacker_player = int(models_cache[alive[0]]["player"]) if alive else None
     enemy_sids = _enemy_squad_ids(game_state, attacker_player) if attacker_player is not None else []
 
-    # Engagement au niveau escouade (regle 10.06) : si l escouade est engagee, ses figs
-    # ne peuvent tirer QU avec une arme Close-quarters (portee plus courte, donc PAS widx_max).
-    from engine.phase_handlers.shooting_handlers import _is_adjacent_to_enemy_within_cc_range
+    # Type de tir applicable (10.04 / 10.05 / 10.06) : c est lui qui dit quelles armes sont
+    # SELECTIONNABLES, donc lesquelles peuvent servir d arme de test ci-dessous. Meme
+    # autorite que le masque gym (resolve_squad_shooting_type + shooting_type_allows_weapon) :
+    # cette fonction ne redecide rien, sinon elle diverge — c est ce qui se produisait avec
+    # son ancien test « engagee => un Close-quarters », qui ignorait 10.05 (une escouade ayant
+    # avance aurait teste son arme la plus longue, non-[ASSAULT], et n aurait vu AUCUNE cible)
+    # et le volet MONSTER/VEHICLE de 10.06 (« you can select any of that model s ranged
+    # weapons »), qui privait de cibles un vehicule engage sans arme Close-quarters.
     shooter_unit = get_unit_by_id(game_state, attacker_squad_id)
-    squad_engaged = shooter_unit is not None and _is_adjacent_to_enemy_within_cc_range(
-        game_state, shooter_unit
+    shooting_type = (
+        resolve_squad_shooting_type(game_state, attacker_squad_id)
+        if shooter_unit is not None
+        else None
     )
+    if shooting_type is None:
+        return {
+            "valid_targets": [],
+            "count_by_unit_id": {},
+            "squad_alive_count": len(alive),
+            "squad_free_count": 0,
+        }
 
     count: Dict[str, int] = {}
     free_count = 0
@@ -6108,16 +6154,17 @@ def squad_shoot_los_overview(
         if not free_weapons:
             continue  # fig entierement affectee → hors blink et hors decompte
         free_count += 1
-        # Arme de test : engagee → un Close-quarters libre (seul autorise) ; sinon → plus longue
-        # portee. La LoS (raycasting) ne depend pas de l arme et reach est monotone en
-        # portee, d ou 1 seul test/ennemi (l arme la plus permissive du cas).
-        if squad_engaged:
-            close_quarters_free = [w for w in free_weapons if weapon_has_rule(weapons[w], "CLOSE_QUARTERS")]
-            if not close_quarters_free:
-                continue  # engagee sans pistolet → ne peut rien viser au tir
-            test_widx = close_quarters_free[0]
-        else:
-            test_widx = max(free_weapons, key=lambda w: _weapon_range_subhex(weapons[w]))
+        # Arme de test = la plus longue portee parmi les armes libres SELECTIONNABLES sous le
+        # type de tir applicable. La LoS (raycasting) ne depend pas de l arme et `reach` est
+        # monotone en portee : un seul test par ennemi suffit, avec l arme la plus permissive
+        # du cas. Aucune arme selectionnable → la figurine ne vise rien.
+        selectable = [
+            w for w in free_weapons
+            if shooting_type_allows_weapon(shooting_type, shooter_unit, m, weapons[w])
+        ]
+        if not selectable:
+            continue
+        test_widx = max(selectable, key=lambda w: _weapon_range_subhex(weapons[w]))
         for sid in enemy_sids:
             if _model_can_shoot_target_with_weapon(game_state, m, sid, test_widx):
                 count[sid] = count.get(sid, 0) + 1  # get allowed
@@ -6349,6 +6396,8 @@ def _model_can_shoot_target_with_weapon(
     # weapon["RNG"] est DEJA en subhexes (cf. _model_can_shoot_target).
     range_subhex = int(weapon["RNG"])
     if range_subhex <= 0:
+        return False
+    if _advance_blocks_weapon(game_state, str(attacker_model["squad_id"]), weapon):
         return False
 
     ac = int(attacker_model["col"])

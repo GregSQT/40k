@@ -879,8 +879,9 @@ le modèle + LoS 3D est le vrai chantier.
           - **Piège métrique** : le chemin 3D d'étage est **euclidean-only** (métrique gameplay `charge`) ; l'env
             de training (`charge_gym`) est `hex` (RL 2D) → le sous-test pool bascule `gym_training_mode=False`
             pour exercer le vrai chemin PvP. Le champ climb lui-même est euclidien par nature.
-          - **`charge_build_model_destinations_pool` (L1619) est du CODE MORT** (zéro appelant prod/test) — le
-            pool interactif du front passe par `charge_model_plan_state` → `_compute_plan_context`.
+          - **`charge_build_model_destinations_pool` : SUPPRIMÉ le 2026-07-29** (était du code mort, zéro
+            appelant prod/test) — le pool interactif du front passe par `charge_model_plan_state` →
+            `_compute_plan_context`, et la légalité d'une position isolée par `_charge_model_pos_is_closer`.
           - **Affichage mono-niveau (clarté)** : `charge_model_plan_state` ne renvoie au front QUE les ancres
             du **niveau de vue** courant (`pool = [a for a in pool if a[2] == level]`). Une charge finissant
             AU SOL en engageant une cible surélevée (3a, engagement 3D ≤5" vertical §03.04) reste **légale**
@@ -1499,14 +1500,14 @@ constructeurs de pool, mais la **traversée** ne l'était nulle part.
 - **Corrigé** : la traversée sol et les obstacles-sol du climb bloquent désormais sur les ennemis **de
   niveau 0 uniquement**, via le helper partagé `build_enemy_occupied_positions_set(..., level=0)` (source
   par-figurine `models_cache`, déjà utilisé par le move et le fight §7.4 — **aucun doublon**).
-- **Appliqué aux 4 constructeurs** de pool sol de charge
+- **Appliqué aux constructeurs** de pool sol de charge
   ([charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py)) :
-  `charge_build_model_destinations_pool` (pool per-figurine PvP), `_compute_plan_context` (contexte mémoïsé
-  + obstacles-sol du climb), `_charge_model_pos_is_closer` (validation d'une destination) et
-  `charge_autoplace_plan` (autoplace).
-- **Complément** : `_charge_obstacle_socles(..., level=0)` ajouté sur les 2 constructeurs où il manquait
-  (pool per-figurine + autoplace ; déjà présent dans les 2 autres) → placement final cohérent sur les
-  4 flux.
+  `_compute_plan_context` (contexte mémoïsé + obstacles-sol du climb), `_charge_model_pos_is_closer`
+  (validation d'une destination) et `charge_autoplace_plan` (autoplace). Le 4e de l'époque,
+  `charge_build_model_destinations_pool`, a été **supprimé le 2026-07-29** (code mort).
+- **Complément** : `_charge_obstacle_socles(..., level=0)` ajouté sur les constructeurs où il manquait
+  (pool per-figurine — depuis supprimé — et autoplace ; déjà présent dans les autres) → placement final
+  cohérent sur tous les flux vivants.
 - **Conforme aux règles (PDF vérifié)** : engagement = **2" horizontal ET 5" vertical** (`03.04`) ; finir
   sous une cible à l'étage est légal et compte comme engagement si l'écart vertical ≤ 5", déjà géré par le
   gate 3D `entries_in_engagement_zone`. Seuls les sets de **blocage** ont changé ; cibles (`target_fps`) et

@@ -340,53 +340,59 @@ class TestShootingTypes:
             "une unité ayant avancé sans arme [ASSAULT] ne peut relever d'aucun type de tir"
         )
 
-    @pytest.mark.anomaly
-    def test_a_non_assault_weapon_is_still_firable_after_an_advance(self, game):
-        """t4_anomalie_10_05 : après un advance, une arme NON-[ASSAULT] tire quand même.
+    def test_only_assault_weapons_are_firable_after_an_advance(self, game):
+        """t4_10_05_assault : après un advance, SEULES les armes [ASSAULT] tirent.
 
-        ANOMALIE (sentinelle). PDF 10.05, « WHILE SHOOTING: You can only select [ASSAULT]
-        weapons to make attacks with ». Mesuré : une escouade qui a avancé et possède une
-        arme [ASSAULT] entre bien dans le pool (10.05), mais le flux d'escouade lui laisse
-        ensuite déclarer ET résoudre ses armes non-[ASSAULT].
-
-        Root cause : l'éligibilité par arme du flux d'escouade
-        (``_model_can_shoot_target_with_weapon``, shared_utils.py) ne teste que portée, LoS
-        et engagement (10.06) ; elle ignore ``units_advanced``. Le chemin mono-figurine, lui,
-        applique la règle (``weapon_availability_check``, shooting_handlers.py:560, motif
-        « Cannot shoot after advance without ASSAULT or shoot_after_advance »), et
-        ``_unit_can_shoot`` l'applique aussi au niveau du POOL — d'où une unité correctement
-        exclue quand elle n'a aucune [ASSAULT], mais permissive dès qu'elle en a une.
-
-        Correctif attendu : porter la restriction 10.05 dans l'éligibilité par arme partagée
-        (avec l'exception ``shoot_after_advance``), au même point que l'exclusion 10.06 déjà
-        présente. NON APPLIQUÉ ici : cette brique alimente aussi les masques d'action du gym
-        (les modèles entraînés l'ont apprise permissive) — le périmètre de la correction est
-        une décision de l'utilisateur, pas de la tranche T4.
-
-        Quand ce sera corrigé, ce test échouera : le supprimer et remplacer par un test qui
-        vérifie le refus de déclaration.
+        PDF 10.05, WHILE SHOOTING : « You can only select [ASSAULT] weapons to make attacks
+        with. » Le tir normal 10.04 exige de son côté « did not make an advance move this
+        turn » : une unité qui a avancé ne relève d'aucun autre type de tir, ses autres armes
+        sont donc hors-jeu pour la phase — au menu comme à la déclaration.
         """
         advanced = "1008"  # Intercessor : bolt_rifle [ASSAULT] + bolt_pistol [CLOSE-QUARTERS]
+        weapons = game.unit(advanced)["RNG_WEAPONS"]
+        assert any("ASSAULT" in w["WEAPON_RULES"] for w in weapons), "l'unité doit avoir une [ASSAULT]"
+        assert any("ASSAULT" not in w["WEAPON_RULES"] for w in weapons), (
+            "l'unité doit aussi avoir une arme non-[ASSAULT], sinon le test ne prouve rien"
+        )
         game.act("activate_unit", unitId=advanced)
         game.act("advance", unitId=advanced)
         while game.phase == "move" and game.pool("move_activation_pool"):
             game.act("skip", unitId=game.pool("move_activation_pool")[0])
         game.act("advance_phase")
-        assert advanced in game.pool("shoot_activation_pool"), "10.05 : l'unité a une [ASSAULT]"
+        assert advanced in game.pool("shoot_activation_pool"), (
+            "10.05 : l'unité a une [ASSAULT], elle reste éligible au tir"
+        )
 
-        game.act("squad_shoot_activate", unitId=advanced)
+        activation = game.act("squad_shoot_activate", unitId=advanced)["result"]
+        usable = [w for w in activation["available_weapons"] if w["can_use"]]
+        assert usable, "aucune arme utilisable alors que l'unité a une [ASSAULT]"
+        for weapon in usable:
+            assert "ASSAULT" in weapon["weapon"]["WEAPON_RULES"], (
+                f"arme non-[ASSAULT] {weapon['weapon']['code']} proposée après un advance (10.05)"
+            )
+
         target = game.act("squad_shoot_los_overview", unitId=advanced)["result"]["valid_targets"][0]
-        weapons = game.act(
+        offered = game.act(
             "squad_shoot_weapons_for_target", unitId=advanced, targetId=target
         )["result"]["weapons"]
-        non_assault = [w for w in weapons if "ASSAULT" not in w["weapon"]["WEAPON_RULES"]]
-        assert non_assault, "aucune arme non-[ASSAULT] proposée : l'anomalie est corrigée"
+        assert offered, "aucune arme proposée pour la cible"
+        for weapon in offered:
+            assert "ASSAULT" in weapon["weapon"]["WEAPON_RULES"], (
+                f"arme non-[ASSAULT] {weapon['code']} déclarable après un advance (10.05)"
+            )
 
-        accepted, _body = game.try_act(
-            "squad_shoot_assign_weapon_qty",
-            unitId=advanced, weaponCode=non_assault[0]["code"], count=1, targetId=target,
+        # Et la déclaration directe d'une arme non-[ASSAULT] est refusée, pas seulement cachée.
+        non_assault = next(
+            w for w in activation["available_weapons"]
+            if "ASSAULT" not in w["weapon"]["WEAPON_RULES"]
         )
-        assert accepted, "la déclaration est refusée : l'anomalie est corrigée, supprimer ce test"
+        accepted, body = game.try_act(
+            "squad_shoot_assign_weapon_qty",
+            unitId=advanced, weaponCode=non_assault["weapon"]["code"], count=1, targetId=target,
+        )
+        assert not accepted, "une arme non-[ASSAULT] a été déclarée après un advance (10.05)"
+        assert body["result"]["error"] == "cannot_shoot"
+        assert game.state["pending_squad_shoot_intents"][advanced] == []
 
 
 class TestWeaponAssignment:

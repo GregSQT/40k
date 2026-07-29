@@ -78,18 +78,18 @@ def _assert_hp_bounds(state: Dict[str, Any], context: str) -> None:
 
 
 def _assert_hp_squad_sum(state: Dict[str, Any], context: str) -> None:
-    """HP d'unité == somme des figurines, pour les escouades homogènes seulement.
+    """HP d'unité == somme des PV de ses figurines vivantes, SANS exception.
 
-    Avec un leader attaché (unitType différent dans models_cache), le HP_CUR d'unité ne
-    compte pas le leader : l'égalité ne s'applique pas et n'est donc pas assertée là.
+    Une seule définition du total, tenue à tout instant : celle des figurines. L'égalité
+    valait autrefois pour les seules escouades homogènes — un personnage attaché (PDF 19)
+    n'était pas compté au départ, puis l'était après la première perte, si bien que les PV
+    d'une unité AUGMENTAIENT quand une figurine mourait. Corrigé au réveil de l'épisode
+    (w40k_core, HP_CUR = somme des HP_MAX par figurine), donc asserté partout.
     """
     models_cache = state["models_cache"]
     for unit in state["units"]:
-        model_ids = state["squad_models"][str(unit["id"])]
+        model_ids = [m for m in state["squad_models"][str(unit["id"])] if m in models_cache]
         if not model_ids:
-            continue
-        types = {models_cache[m]["unitType"] for m in model_ids}
-        if len(types) != 1:
             continue
         total = sum(models_cache[m]["HP_CUR"] for m in model_ids)
         if total != unit["HP_CUR"]:
