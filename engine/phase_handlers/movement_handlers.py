@@ -321,21 +321,59 @@ def took_to_the_skies(
     dissocier laisserait rejouer le défaut d'origine — une traversée gratuite.
 
     - Sans le keyword FLY : jamais.
-    - Unité pilotée par le modèle (gym / PvE J2) : **déclare systématiquement**. C'est une
-      POLITIQUE MOTEUR EXPLICITE, assumée en attendant que la déclaration devienne une décision
-      offerte à l'agent (chantier « décision générique », qui changera le contrat d'observation).
-      Elle est retenue parce que c'est la moins fausse des deux constantes possibles :
-        * « ne jamais déclarer » rendrait le keyword FLY totalement inerte pour l'agent — les
-          unités à réacteurs et le Land Speeder d'ArmageddonAgent perdraient la capacité que la
-          règle leur donne, ce qui n'est pas plus conforme, seulement muet ;
-        * « toujours déclarer » conserve la capacité et la FACTURE au prix légal (-2"), ce qui
-          est un état de jeu toujours légal (21.03 autorise la déclaration à chaque move) et le
-          plus petit écart au comportement actuel.
-      Étant une fonction PURE de l'état (pas un écrit dans un set), elle est vue identiquement par
-      le masque, l'observation et l'exécution : aucun risque de séquencement, contrairement à une
-      déclaration posée après la construction du pool de cellules atteignables.
+    - Unité pilotée par le modèle (gym / PvE J2) : **déclare systématiquement**. Politique moteur
+      explicite — voir ci-dessous, elle a un coût chiffré et une alternative écartée.
     - Joueur humain : uniquement si la déclaration a été posée (``movement_set_fly_mode_handler`` /
       ``charge_set_fly_mode_handler``), dans le set propre au type de mouvement.
+
+    POURQUOI UNE CONSTANTE POUR L'IA, ET CE QU'ELLE COÛTE
+    -----------------------------------------------------
+    21.03 fait de la prise d'altitude une DÉCISION du joueur actif, par mouvement. L'agent n'a pas
+    de canal pour la prendre : l'exposer suppose une entrée d'observation et une action de choix,
+    donc un changement du contrat d'observation. L'arbitrage utilisateur du 2026-07-29 range ce
+    travail dans le lot de ré-entraînement et exige que le présent correctif de conformité ne casse
+    aucun contrat — il ne peut donc pas être fait ici. (Les numéros de section §0.48/§0.49 cités en
+    relecture ne sont pas vérifiables depuis ce worktree : `V11_agent_rework.md` s'y arrête à §0.45
+    et annonce « prochaine entrée libre : 0.46 ». La substance de l'arbitrage est reprise telle
+    qu'elle a été relayée, sa numérotation ne l'est pas.)
+
+    En attendant, la constante retenue est « déclarer toujours ». Ce n'est PAS le choix évident
+    entre deux constantes : une troisième option existe, et elle est écartée pour des raisons
+    précises, pas parce qu'elle serait hors sujet.
+
+    * « ne jamais déclarer » : le keyword FLY deviendrait inerte pour l'agent. Les cinq types
+      volants du roster d'entraînement d'ArmageddonAgent perdraient la capacité que la règle leur
+      donne, et le défaut « le vol de charge est refusé à l'IA » serait reconduit sous un autre nom.
+    * « déclarer ssi la traversée élargit strictement l'atteignable » — l'option dérivée proposée
+      en relecture. Elle resterait bien une fonction pure de l'état et ne toucherait aucun contrat.
+      Elle est écartée pour deux raisons, et non parce qu'elle serait irréalisable :
+        1. son critère n'est pas bien défini tel quel. Les deux pools ne sont pas emboîtés : voler
+           GAGNE les cellules derrière les murs et PERD la couronne extérieure (budget amputé de
+           2"). Aucun des deux ensembles ne contient l'autre en général, donc « élargit strictement »
+           ne les départage pas — il faudrait une règle de départage supplémentaire, c'est-à-dire
+           réintroduire un jugement de valeur, celui-là même que 21.03 confie au joueur ;
+        2. elle coûte un second BFS de pool par escouade volante et par construction de masque,
+           sur le chemin le plus chaud du move (le cache de pool existe précisément pour éviter ce
+           BFS), pour un gain que rien ne mesure aujourd'hui.
+      Une heuristique interne qui *ressemble* à une décision serait par ailleurs le pire état pour
+      le lot de ré-entraînement : l'agent apprendrait contre une politique que personne n'énonce.
+    * « déclarer toujours » : état de jeu toujours légal (21.03 autorise la déclaration à chaque
+      mouvement), capacité conservée et FACTURÉE au prix légal, politique énonçable en une phrase.
+
+    COÛT ASSUMÉ, chiffré sur le roster d'entraînement d'ArmageddonAgent (board 44x60x5,
+    `inches_to_subhex = 5`, donc 2" = 10 subhex) :
+      - VanguardVeteranSquadJumpPack / ...Plasma / ...Sergeant / ChaplainJumpPack, MOVE 12" :
+        12" -> 10" à chaque mouvement, soit **-16,7 %** de distance ;
+      - LandSpeederOnslaughtGatlingCannon / LandSpeederHeavyFlamer, MOVE 14" :
+        14" -> 12", soit **-14,3 %** ;
+      - en charge, le malus porte sur le jet : 2D6 d'espérance 7" -> 5", soit **-28,6 %** de
+        distance moyenne, et une chute correspondante du taux de charges réussies.
+    Ce coût est payé EN PERMANENCE, y compris en terrain découvert où prendre les airs est
+    strictement dominé — c'est exactement ce qu'une décision confiée à l'agent supprimerait.
+
+    Enfin, être une fonction PURE de l'état (et non un écrit dans un set) fait voir cette
+    déclaration à l'identique par le masque, l'observation et l'exécution : aucun risque de
+    séquencement, contrairement à une déclaration posée après la construction du pool.
     """
     if not _unit_has_keyword(unit, "fly"):
         return False
