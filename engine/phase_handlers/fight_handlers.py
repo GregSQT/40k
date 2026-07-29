@@ -17,6 +17,7 @@ from collections import deque
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
 from shared.data_validation import require_key
+from engine.utils.weapon_helpers import melee_weapons
 from engine.action_log_utils import append_action_log
 from engine.game_utils import add_console_log, safe_print
 from engine.combat_utils import (
@@ -1711,7 +1712,7 @@ def _model_can_fight_target_with_weapon(
     """Eligibilite per-arme melee : la fig possede l arme CC `weapon_index` ET est
     engagee avec la cible. Les armes de melee n ont pas de portee : la validite se
     reduit a l engagement (cf. _model_can_fight_target)."""
-    weapons = attacker_model.get("CC_WEAPONS", [])  # get allowed
+    weapons = melee_weapons(attacker_model)
     if not (0 <= int(weapon_index) < len(weapons)):
         return False
     if not isinstance(weapons[int(weapon_index)], dict):
@@ -1868,7 +1869,7 @@ def squad_fight_menu_weapons(
             m = models_cache.get(mid)
             if m is None:
                 continue
-            weapons = m.get("CC_WEAPONS", [])  # get allowed
+            weapons = melee_weapons(m)
             local_idx = next(
                 (i for i, ww in enumerate(weapons) if isinstance(ww, dict) and ww.get("code") == code),
                 None,
@@ -2845,7 +2846,7 @@ def _fight_v11_resolve_attacks(
     l'inférence ``unitId`` de w40k_core). Liste vide = fight « à vide ».
     """
     unit_id = str(require_key(unit, "id"))
-    if not (unit.get("CC_WEAPONS") or []):
+    if not (melee_weapons(unit) or []):
         return []
 
     targets = _fight_build_valid_target_pool(game_state, unit)
@@ -5205,7 +5206,7 @@ def _manual_roll_fight_intent(
             "player": int(require_key(_tgt_uc, "player")),
         }
     weapon_index = int(intent.get("weapon_index", 0))  # get allowed
-    weapons = attacker.get("CC_WEAPONS", [])  # get allowed
+    weapons = melee_weapons(attacker)
     if not (0 <= weapon_index < len(weapons)):
         return None
     weapon = weapons[weapon_index]

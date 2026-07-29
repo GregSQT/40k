@@ -193,6 +193,10 @@ def load_unit_definitions_from_ts(unit_registry):
                 unit_stats["CC_WEAPONS"] = get_weapons(faction, codes)
             
             # Initialiser selectedWeaponIndex
+            # `.get` LEGITIME ici, contrairement aux gestionnaires de phase : `unit_stats` est
+            # construit INCREMENTALEMENT juste au-dessus, et la cle n'est posee que si le
+            # fichier TS declare les codes d'armes correspondants. Le test porte donc sur
+            # « ai-je pose cette cle ? », pas sur « cette unite a-t-elle une arme ? ».
             if unit_stats.get("RNG_WEAPONS"):
                 unit_stats["selectedRngWeaponIndex"] = 0
             if unit_stats.get("CC_WEAPONS"):
@@ -245,6 +249,10 @@ def load_scenario_units(unit_definitions, scenario_path=None):
         # Get unit definition and merge with scenario position data
         unit_def = unit_definitions[unit_type]
         
+        # `.get` LEGITIME, meme raison qu'a la construction : `unit_def` sort du parseur TS
+        # de CE fichier (`load_unit_definitions_from_ts`), qui ne pose la cle que si le
+        # fichier de datasheet declare les codes d'armes. Ce n'est pas une entite du moteur
+        # (celles-la portent toujours les deux collections, cf. engine/utils/weapon_helpers).
         # Extract SHOOT_LEFT from RNG_WEAPONS[0] if exists
         shoot_left = 0
         if unit_def.get("RNG_WEAPONS") and len(unit_def["RNG_WEAPONS"]) > 0:

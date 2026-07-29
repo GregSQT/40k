@@ -13,6 +13,7 @@ from collections import deque
 from typing import Dict, List, Tuple, Set, Optional, Any, FrozenSet, Sequence, Mapping, cast
 from .generic_handlers import end_activation
 from shared.data_validation import require_key, require_present
+from engine.utils.weapon_helpers import melee_weapons, ranged_weapons
 from engine.action_log_utils import append_action_log
 from engine.hex_utils import hex_distance as _hex_distance
 from engine.game_utils import add_console_log, safe_print, add_debug_file_log
@@ -1573,14 +1574,14 @@ def _ai_select_charge_target_pve(game_state: Dict[str, Any], unit: Dict[str, Any
         # Priority 2: Highest threat
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate threat from all weapons
         melee_threat = 0.0
-        if t.get("CC_WEAPONS"):
+        if melee_weapons(t):
             # Calculate max threat from all melee weapons
             for weapon in t["CC_WEAPONS"]:
                 threat = require_key(weapon, "STR") * expected_dice_value(require_key(weapon, "NB"), "charge_melee_nb")
                 melee_threat = max(melee_threat, threat)
         
         ranged_threat = 0.0
-        if t.get("RNG_WEAPONS"):
+        if ranged_weapons(t):
             # Calculate max threat from all ranged weapons
             for weapon in t["RNG_WEAPONS"]:
                 threat = require_key(weapon, "STR") * expected_dice_value(require_key(weapon, "NB"), "charge_ranged_nb")

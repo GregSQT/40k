@@ -17,7 +17,7 @@ from engine.combat_utils import (
     set_unit_coordinates,
 )
 from shared.data_validation import require_key, require_present
-from engine.utils.weapon_helpers import weapon_has_rule
+from engine.utils.weapon_helpers import ranged_weapons, weapon_has_rule
 from engine.action_log_utils import append_action_log
 from .shared_utils import (
     calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge,
@@ -1379,7 +1379,7 @@ def preview_shoot_valid_targets_from_position(
         return empty_preview
     if not game_state.get("units_cache"):
         return empty_preview
-    if not unit.get("RNG_WEAPONS"):
+    if not ranged_weapons(unit):
         return empty_preview
 
     _preview_perf_t0 = time.perf_counter()

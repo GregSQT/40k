@@ -19,6 +19,7 @@ from typing import Dict, List, Tuple, Set, Optional, Any, Union
 from shared.data_validation import require_key, require_present
 from engine.combat_utils import calculate_hex_distance, normalize_coordinates, resolve_dice_value, set_unit_coordinates
 from engine.weapon_damage_cache import load_weapon_damage_table, stamp_weapon_keys, build_best_weapon_cache
+from engine.utils.weapon_helpers import melee_weapons, ranged_weapons
 
 # Phase handlers (existing - keep these)
 from engine.phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers, command_handlers, deployment_handlers
@@ -1265,7 +1266,7 @@ class W40KEngine(gym.Env):
                     require_key(selected_rng_weapon, "NB"),
                     "reset_shoot_left",
                 )
-            elif unit.get("RNG_WEAPONS") and len(unit["RNG_WEAPONS"]) > 0:
+            elif ranged_weapons(unit):
                 unit["SHOOT_LEFT"] = resolve_dice_value(
                     require_key(unit["RNG_WEAPONS"][0], "NB"),
                     "reset_shoot_left_fallback",
@@ -1280,7 +1281,7 @@ class W40KEngine(gym.Env):
                     require_key(selected_cc_weapon, "NB"),
                     "reset_attack_left",
                 )
-            elif unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0:
+            elif melee_weapons(unit):
                 unit["ATTACK_LEFT"] = resolve_dice_value(
                     require_key(unit["CC_WEAPONS"][0], "NB"),
                     "reset_attack_left_fallback",
@@ -2189,7 +2190,7 @@ class W40KEngine(gym.Env):
                                 selected_weapon_index = None
 
                         selected_weapon_name = None
-                        rng_weapons = active_unit.get("RNG_WEAPONS")
+                        rng_weapons = ranged_weapons(active_unit)
                         if (
                             isinstance(rng_weapons, list)
                             and selected_weapon_index is not None

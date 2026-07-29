@@ -4,9 +4,54 @@ Weapon Helper Functions
 MULTIPLE_WEAPONS_IMPLEMENTATION.md: Helper functions for accessing weapon data
 """
 
-from typing import Dict, Optional, Any
+from typing import Any, Dict, List, Optional
 from shared.data_validation import require_key
 from engine.combat_utils import expected_dice_value
+
+
+def ranged_weapons(entity: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Profils d'armes de TIR portes par une unite OU une figurine (`RNG_WEAPONS`).
+
+    LISTE VIDE = l'entite n'a pas d'arme de tir. C'est un CAS METIER REEL, et il est ecrit
+    dans la donnee : 21 des 179 datasheets des rosters declarent `RNG_WEAPONS: []`
+    (Genestealer, Hormagaunt, Assault Terminator... les unites de melee pure).
+
+    CLE ABSENTE = entite mal construite. Tous les constructeurs posent la cle
+    inconditionnellement : `create_unit` et `_build_enhanced_unit` (moteur),
+    `_build_models_for_unit` (figurines du models_cache), `_build_units_from_army_config`
+    (API) et le spawn Endless Duty. Une entite sans la cle n'est donc pas une unite sans
+    arme : c'est un dictionnaire incomplet.
+
+    L'ancien `entity.get("RNG_WEAPONS", [])` dissemine dans les gestionnaires de phase
+    CONFONDAIT les deux : une figurine incomplete se comportait exactement comme un
+    Genestealer. Cet accesseur les separe — et il porte la justification UNE fois, au lieu
+    de la recopier a une trentaine de sites d'appel.
+
+    Meme doctrine que `get_max_ranged_range` / `get_max_ranged_damage` de ce module, qui
+    exigent deja la cle et traitent la liste vide comme un etat valide.
+    """
+    weapons = require_key(entity, "RNG_WEAPONS")
+    if not isinstance(weapons, list):
+        raise TypeError(
+            f"RNG_WEAPONS must be a list, got {type(weapons).__name__} "
+            f"for entity {entity.get('id', '?')}"
+        )
+    return weapons
+
+
+def melee_weapons(entity: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Profils d'armes de MELEE portes par une unite OU une figurine (`CC_WEAPONS`).
+
+    Jumeau exact de `ranged_weapons` : liste vide = pas d'arme de melee (cas metier reel,
+    1 datasheet sur 179 : Mucolid) ; cle absente = entite mal construite.
+    """
+    weapons = require_key(entity, "CC_WEAPONS")
+    if not isinstance(weapons, list):
+        raise TypeError(
+            f"CC_WEAPONS must be a list, got {type(weapons).__name__} "
+            f"for entity {entity.get('id', '?')}"
+        )
+    return weapons
 
 
 def weapon_has_rule(weapon: Dict[str, Any], rule_id: str) -> bool:
