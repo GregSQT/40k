@@ -236,6 +236,14 @@ def _unit_has_keyword(unit: Dict[str, Any], keyword_id: str) -> bool:
     Return True if UNIT_KEYWORDS contains keyword_id.
 
     UNIT_KEYWORDS entries must be objects with a `keywordId` field.
+
+    Comparaison INSENSIBLE À LA CASSE (et aux espaces de bord), comme TOUS les autres lecteurs
+    de `keywordId` du moteur (`game_state.py` FLOOR_CAPABLE/HIDEABLE, `shared_utils` compute_hideable,
+    `attack_sequence` ANTI-X, `analyzer_config`, et le front `BoardWithAPI`). Le corpus de rosters
+    est mixte : `keywordId: "fly"` (16 fichiers) ET `keywordId: "FLY"` (6 fichiers). Une égalité
+    stricte perdait SILENCIEUSEMENT le keyword des 6 seconds — dont cinq types du roster
+    d'entraînement d'ArmageddonAgent. La convention de lecture est donc normalisée ici aussi :
+    c'est la lecture qui portait l'exception, pas la donnée.
     """
     unit_keywords = unit.get("UNIT_KEYWORDS")
     if unit_keywords is None:
@@ -250,7 +258,9 @@ def _unit_has_keyword(unit: Dict[str, Any], keyword_id: str) -> bool:
                 f"UNIT_KEYWORDS entries must be objects for unit {unit.get('id')}: {keyword_entry!r}"
             )
         keyword_value = keyword_entry.get("keywordId")
-        if keyword_value == keyword_id:
+        if keyword_value is None:
+            continue
+        if str(keyword_value).strip().lower() == str(keyword_id).strip().lower():
             return True
     return False
 
