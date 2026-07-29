@@ -190,10 +190,12 @@ class ActionDecoder:
     # (`scripts/roster_matchup_stats.py`), à qui ce masque périmé servait un espace d'actions
     # que le modèle ne parlait plus — un faux muet, pas une erreur.
     #
-    # LEÇON (§0bis) : deux masques coexistants sans décodeur commun ne divergent pas bruyamment,
-    # ils divergent en silence. Le verrou qui interdit la récidive est la parité masque↔décodeur
-    # de `tests/unit/engine/test_agent_interface_contract.py` : tout entier ouvert par le masque
-    # DOIT être décodable, et tout entier fermé DOIT lever.
+    # RÈGLE : dès qu'il existe DEUX constructeurs de masque pour un même agent, l'un des deux est
+    # déjà mort ou le deviendra sans bruit — ils ne divergent pas bruyamment, ils divergent en
+    # silence (même longueur de masque, donc rien ne lève). Le verrou anti-récidive est la parité
+    # masque↔décodeur de `tests/unit/engine/test_agent_interface_contract.py` : tout entier
+    # ouvert par le masque DOIT être décodable ; le rejet d'un entier fermé est verrouillé une
+    # couche plus haut, dans `validate_action_against_mask`.
     # ─────────────────────────────────────────────────────────────────────────────────────────
 
     def get_squad_action_mask_and_eligible_units(
@@ -1871,7 +1873,7 @@ class ActionDecoder:
     # slots de cible du masque ; le reward a sa PROPRE `_get_all_valid_targets`
     # (`engine/reward_calculator.py`), qui n'a jamais eu de rapport avec celles-ci.
     #
-    # LEÇON (§0bis) : ces deux méthodes étaient présentées comme « Key Methods » dans
+    # RÈGLE : ces deux méthodes étaient présentées comme « Key Methods » dans
     # `Documentation/AI_IMPLEMENTATION.md` — une doc d'API décrit ce qu'on a écrit, jamais ce que
     # la production appelle. Elle ne vaut pas preuve de vie.
     # ─────────────────────────────────────────────────────────────────────────────────────────

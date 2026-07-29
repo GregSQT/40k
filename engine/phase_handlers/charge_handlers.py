@@ -4145,7 +4145,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 # second couvrait le premier. La cible de charge est depuis une dimension d'action (§9 P3-2,
 # `SQUAD_ACTION_CHARGE_SLOT_BASE`), donc plus rien n'a à la deviner.
 #
-# LEÇON (§0bis) : un symbole DUPLIQUÉ sous le même nom dans deux modules masque sa propre mort —
+# RÈGLE : un symbole DUPLIQUÉ sous le même nom dans deux modules masque sa propre mort —
 # le grep qui devrait le dénoncer trouve toujours « des » appelants. Vérifier par module, pas
 # par nom.
 # ──────────────────────────────────────────────────────────────────────────────────────────────
