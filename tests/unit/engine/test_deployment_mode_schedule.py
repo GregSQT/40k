@@ -15,10 +15,16 @@ jamais collecté par la suite.
 
 from __future__ import annotations
 
+import json
 import os
+
+import pytest
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 SCENARIO = os.path.join(PROJECT_ROOT, "config/board/44x60x5/scenario/scenario_fixed_brawl_sm_orks.json")
+AGENT_CONFIG = os.path.join(
+    PROJECT_ROOT, "config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json"
+)
 
 
 def _make_env(start: float, end: float, total_episodes: int, freeze: float = 1.0):
@@ -84,3 +90,75 @@ def test_linear_ramp_increases_active_share():
     first = sum(1 for m in modes[:30] if m == "active")
     second = sum(1 for m in modes[30:] if m == "active")
     assert second > first, f"rampe non croissante : 1re moitié={first} >= 2e moitié={second}"
+
+
+# --- Le VRAI fichier de config : aucun profil ne doit perdre la rampe --------------------------
+#
+# `x5_append` et `x1_debug` n'avaient AUCUN bloc, `x5_new` et `x5_debug` finissaient à 0.0 : ils
+# entraînaient un agent qui ne se déploie jamais, puis le notaient sur des parties à déployer
+# (l'évaluation impose TOUJOURS une phase de déploiement). Aucun test ne lisait ce fichier.
+
+with open(AGENT_CONFIG, encoding="utf-8-sig") as _f:
+    PROFILES = {k: v for k, v in json.load(_f).items() if isinstance(v, dict)}
+
+# Contrat lu dans `W40KEngine._configure_deployment_mode_for_episode` : toutes ces clés y passent
+# par `require_key`, sans aucune valeur par défaut.
+SCHEDULE_KEYS = {
+    "enabled",
+    "training_only",
+    "active_ratio_start",
+    "active_ratio_end",
+    "schedule",
+    "freeze_after_progress",
+}
+
+
+@pytest.mark.parametrize("profile_name", sorted(PROFILES))
+def test_every_profile_carries_the_deployment_ramp(profile_name: str) -> None:
+    """Chaque profil porte le bloc, au réglage de référence (celui de `x1`)."""
+    profile = PROFILES[profile_name]
+    assert "deployment_mode_schedule" in profile, (
+        f"profil '{profile_name}' sans deployment_mode_schedule : la rampe serait désactivée "
+        f"en silence et l'agent n'apprendrait jamais à se déployer."
+    )
+    cfg = profile["deployment_mode_schedule"]
+    # `justification` : convention du fichier (cf. `observation_params.justification`). Elle porte
+    # le raisonnement d'asymétrie entraînement/évaluation, qui ne doit pas vivre que dans le code.
+    assert set(cfg) == SCHEDULE_KEYS | {"justification"}
+    assert "EVALUATION IMPOSE TOUJOURS" in cfg["justification"]
+    assert cfg["enabled"] is True
+    assert cfg["training_only"] is True
+    assert cfg["active_ratio_start"] == 0.0
+    assert cfg["active_ratio_end"] == 0.8, (
+        f"profil '{profile_name}' : une rampe qui finit à {cfg['active_ratio_end']} n'apprend "
+        f"pas le déploiement."
+    )
+    assert cfg["schedule"] == "linear"
+    assert cfg["freeze_after_progress"] == 1.0
+    # `total_episodes` est le dénominateur de la rampe : le scheduler lève sans lui.
+    assert isinstance(profile["total_episodes"], int) and profile["total_episodes"] > 0
+
+
+def test_all_profiles_share_the_same_ramp() -> None:
+    """Les cinq profils portent EXACTEMENT le même bloc : aucune dérive possible entre eux."""
+    blocks = {name: p.get("deployment_mode_schedule") for name, p in PROFILES.items()}
+    assert len(PROFILES) == 5, f"profils attendus : 5, trouvés {sorted(PROFILES)}"
+    assert len({json.dumps(b, sort_keys=True) for b in blocks.values()}) == 1, blocks
+
+
+def test_missing_block_in_an_agent_profile_is_an_explicit_error() -> None:
+    """Un profil d'entraînement SANS bloc lève ; un fragment de config API n'est pas concerné.
+
+    C'est le mécanisme qui a laissé deux profils diverger : `.get(...)` puis `return None`
+    désactivait la rampe sans erreur ni trace.
+    """
+    env = _make_env(0.0, 0.8, 100)
+    assert env._training_config_is_agent_profile is True
+    del env.training_config["deployment_mode_schedule"]
+
+    with pytest.raises(KeyError, match="deployment_mode_schedule est OBLIGATOIRE"):
+        env._configure_deployment_mode_for_episode()
+
+    # Chemin API/PvP (fragment de config, pas de profil) : absence légitime, pas d'erreur.
+    env._training_config_is_agent_profile = False
+    assert env._configure_deployment_mode_for_episode() is None

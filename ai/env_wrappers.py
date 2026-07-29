@@ -973,10 +973,23 @@ class BotControlledEnv(gym.Wrapper):
             # DESTINATION via son heuristique (select_movement_destination), et on la traduit en
             # cellule via la carte MEMOISEE par le moteur au masque (spatial_grid = source unique).
             bot_choice = self._select_bot_move_action(game_state, eligible_units[0], valid_actions)
-        elif hasattr(self.bot, 'select_action_with_state'):
-            bot_choice = self.bot.select_action_with_state(valid_actions, game_state)
         else:
-            bot_choice = self.bot.select_action(valid_actions)
+            if not hasattr(self.bot, "select_action_with_state"):
+                # Meme contrat que `select_movement_destination` ci-dessus : un bot qui ne voit
+                # ni l'etat ni l'escouade activee ne peut choisir qu'au hasard ou par ordre de
+                # slot. Erreur explicite plutot qu'un repli silencieux sur une politique aveugle.
+                raise RuntimeError(
+                    f"Bot {type(self.bot).__name__} n'implemente pas select_action_with_state, "
+                    f"requis pour toute decision hors deplacement."
+                )
+            # L'escouade activee est TRANSMISE au bot : c'est elle (et non `current_player`) qui
+            # determine le joueur dont le masque est construit — cf.
+            # `get_squad_action_mask_and_eligible_units`, `our_player` lu dans
+            # `units_cache[eligible_units[0]["id"]]`. En phase de combat, la selection 12.04
+            # alterne entre les camps : le bot peut etre selecteur SANS etre joueur courant.
+            bot_choice = self.bot.select_action_with_state(
+                valid_actions, game_state, eligible_units[0]
+            )
 
         try:
             bot_action = self.engine.action_decoder.normalize_action_input(
