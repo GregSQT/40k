@@ -529,24 +529,34 @@ class TestAutoplaceFallbacks:
                 f"{mid} n'a pas fini plus proche de la cible : {before[mid]} → {after}"
             )
 
-    def test_an_impossible_coverage_still_returns_a_full_plan_and_names_the_gap(self):
-        """Repli « couverture impossible » : quand le budget ne permet à AUCUNE figurine
-        d'engager la cible, l'ILP relâche la contrainte dure au lieu d'échouer. Le plan sort
-        complet, et c'est le Check — pas l'autoplace — qui nomme la cible non engagée.
+    def test_an_impossible_full_coverage_does_not_abort_the_plan(self):
+        """Couverture dure infaisable : deux cibles déclarées, une seule atteignable.
 
-        Un autoplace qui lèverait ou rendrait un plan vide priverait le joueur de l'avancée
-        partielle à laquelle 11.04 WHILE MOVING lui donne droit.
+        La contrainte (4) de l'ILP — chaque cible reçoit ≥ 1 figurine qui l'engage — ne peut pas
+        être satisfaite. L'autoplace NE RENONCE PAS : il rend un plan complet et légal, engage la
+        cible atteignable, et laisse le Check nommer l'autre. Renoncer priverait le joueur d'une
+        charge partielle que 11.04 WHILE MOVING lui accorde.
+
+        Portée du verrou, mesurée : ce test tient si l'autoplace abandonne (plan vide), pas s'il
+        se contente de retirer la contrainte (4). Dans cette configuration le repli « traînards »
+        atteint l'engagement à lui seul — l'effet propre du second passage ILP n'est pas
+        observable ici et n'est donc pas revendiqué.
         """
-        gs = self._gs([(10, 10), (10, 11)], (16, 10), 3)
+        gs = _make_gs([
+            _unit("1", 1, [(10, 10), (10, 11)]),
+            _unit("2", 2, [(16, 10)]),    # atteignable avec un jet de 6
+            _unit("3", 2, [(45, 45)]),    # hors de portée : rend la couverture dure infaisable
+        ])
+        _activated(gs, "1", 6)
+        gs["charge_target_selections"]["1"] = ["2", "3"]
 
         plan = ch.charge_autoplace_plan(gs, "1", mode="offensive")["plan"]
 
         assert {str(e[0]) for e in plan} == {"1#0", "1#1"}, "plan incomplet malgré le repli"
-        check = ch.charge_preview_move_plan(gs, "1", [tuple(e) for e in plan], ["2"])
+        check = ch.charge_preview_move_plan(gs, "1", [tuple(e) for e in plan], ["2", "3"])
         assert all(check["per_model"].values()), (
             f"le repli a produit une position illégale : {check['per_model']}"
         )
-        assert check["engaged_all"] is False, (
-            "prémisse : avec ce budget la cible ne peut pas être engagée"
+        assert check["missing_targets"] == ["3"], (
+            f"la cible atteignable doit être engagée et elle seule manquer : {check['missing_targets']}"
         )
-        assert check["missing_targets"] == ["2"], "le Check ne nomme pas la cible non engagée"

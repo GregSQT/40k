@@ -336,9 +336,20 @@ en commentaire** (`ai/pointer_policy.py:254`) ⇒ **9 sourdines réelles**, tout
 > passait au vert.
 >
 > **Livré** : [`tests/unit/engine/test_charge_manual_surface.py`](../../tests/unit/engine/test_charge_manual_surface.py)
-> — 27 tests sur plateau nu (1 sous-hex = 1", bases 1 hex), chacun construisant sa situation et
-> vérifiant ses prémisses avant d'observer le refus. **26 mutations rejouées une par une : les 26
-> font rougir le test visé** (dont 2 contrôles positifs, pour qu'un « refuse tout » ne passe pas).
+> — 29 tests sur plateau nu (1 sous-hex = 1", bases 1 hex), chacun construisant sa situation et
+> vérifiant ses prémisses avant d'observer le refus ; plus 1 test de charge d'étage ajouté à
+> [`test_charge3d_floors_integration.py`](../../tests/unit/engine/test_charge3d_floors_integration.py)
+> (la branche `dest_level >= 1` de `_charge_model_pos_is_closer` passe par le champ climb §13.06,
+> pas par le BFS 2D — elle décidait de toute charge d'étage sans aucun test).
+> **28 mutations rejouées une par une : les 28 font rougir le test visé** (dont 2 contrôles
+> positifs, pour qu'un « refuse tout » ne passe pas).
+>
+> ⚠️ **Une portée de verrou volontairement bornée, parce qu'elle a été mesurée** :
+> `test_an_impossible_full_coverage_does_not_abort_the_plan` tient si l'autoplace **abandonne**
+> (plan vide), pas s'il retire seulement la contrainte de couverture dure — dans la configuration
+> montée, le repli « traînards » atteint l'engagement à lui seul, donc l'effet propre du second
+> passage ILP (`_solve(cover=False)`) **n'est pas observable et n'est pas revendiqué**. Le test le
+> dit dans sa docstring. C'est la seule branche des 6 fonctions dont l'effet reste non isolé.
 >
 > Le constat original est conservé ci-dessous, tel qu'il a été écrit.
 

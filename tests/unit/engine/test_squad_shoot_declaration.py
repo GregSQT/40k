@@ -96,6 +96,11 @@ def _make_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
         "console_logs": [],
         "debug_logs": [],
         "inches_to_subhex": 1,
+        # Invariant du game_state, pose par le moteur a la construction (w40k_core, avec ses
+        # jumeaux units_shot/units_charged/...). Sans lui, 10.05 (`_advance_blocks_weapon`)
+        # levait ConfigurationError : la fixture fabriquait un etat impossible en production.
+        # Vide = aucune unite n'a avance, l'etat que ces tests de declaration observent.
+        "units_advanced": set(),
     }
     build_units_cache(gs)
     init_pending_intents(gs)
