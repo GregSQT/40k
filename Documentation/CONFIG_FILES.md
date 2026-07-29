@@ -226,6 +226,40 @@ elle est désormais pilotée par `defaults.agent_key`.
 
 See training config files for complete field list.
 
+### `deployment_mode_schedule` — rampe de déploiement (bloc OBLIGATOIRE)
+
+Décide, épisode par épisode, si la partie est rejouée en placement **fixe** (positions du
+scénario) ou en **déploiement actif** (l'agent place lui-même ses figurines). La probabilité de
+« actif » monte linéairement de `active_ratio_start` à `active_ratio_end` sur la durée du run.
+
+À ne pas confondre avec `deployment_random_mix`, son voisin immédiat dans le fichier, qui
+randomise les **actions** d'un déploiement déjà actif.
+
+| Clé | Type | Contrainte |
+|---|---|---|
+| `enabled` | bool | — |
+| `training_only` | bool | `true` : la rampe ne s'applique qu'aux scénarios du split `training` |
+| `active_ratio_start` | number | ∈ [0,1] — probabilité de déploiement actif au **début** du run |
+| `active_ratio_end` | number | ∈ [0,1] — probabilité à la **fin** |
+| `schedule` | string | exactement `"linear"` |
+| `freeze_after_progress` | number | ∈ [0,1] — progression au-delà de laquelle la rampe est gelée |
+
+Le dénominateur de la progression est `total_episodes` (même profil, entier > 0).
+
+**Si le bloc manque dans un profil d'entraînement, le moteur LÈVE** (`KeyError`, au premier
+`reset()` — donc au démarrage du run). C'est délibéré : jusqu'au 2026-07-29 l'absence
+désactivait la rampe **en silence**, ce qui a laissé deux profils (`x5_append`, `x1_debug`) la
+perdre entièrement et deux autres (`x5_new`, `x5_debug`) finir à `0.0`. Ces profils entraînaient
+un agent qui ne se déploie jamais, puis le **notaient sur des parties à déployer** :
+l'évaluation, elle, impose toujours une phase de déploiement. Sur les chemins API/PvP, qui ne
+fournissent qu'un fragment de config (`observation_params`) et n'ont pas d'épisodes à ramper,
+l'absence reste légitime et ne lève pas.
+
+Réglage de référence des cinq profils `ArmageddonAgent` : `0.0 → 0.8`, `linear`,
+`freeze_after_progress: 1.0`. Chaque bloc porte un champ `justification` (même convention que
+`observation_params.justification`). Verrou : `tests/unit/engine/test_deployment_mode_schedule.py`
+lit le vrai fichier et vérifie les cinq profils.
+
 ---
 
 ## Scenario Files

@@ -396,7 +396,12 @@ class RandomBot:
 
 
 class GreedyBot:
-    """Shoots nearest enemy, moves toward closest target"""
+    """Pousse vers l'ennemi le plus proche et ACHEVE les cibles entamees.
+
+    Critere de cible unique aux trois phases d'action (tir, charge, melee) : l'escouade la plus
+    ENTAMEE (`_score_wounded`), lue sur le mapping de slots ennemis — jamais sur l'ordre des
+    slots. Deplacement : vers l'ennemi le plus proche.
+    """
 
     def __init__(self, randomness: float = 0.0):
         """

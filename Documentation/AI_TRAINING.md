@@ -983,6 +983,40 @@ Ce document couvre le **monitoring de base** (TensorBoard, 0_critical/, indicate
 
 ### Bot Types
 
+> ⚠️ **Fiches refaites le 2026-07-29 (branche `v11-pre-lot-eval-baseline`). Toute mesure
+> d'évaluation ANTÉRIEURE à cette date porte sur des bots différents de ceux décrits ici, et
+> n'est pas comparable aux mesures postérieures.** Trois défauts corrigés à cette date :
+> 1. `DefensiveBot` **ne chargeait jamais** — sa branche terminale était « si l'attente est
+>    disponible, attendre », or le masque de la phase de charge arme WAIT inconditionnellement.
+>    Il pesait 0.23 du score d'évaluation.
+> 2. Le **focus-fire des bots Tier 2 était débranché** : le critère (plus bas PV / plus menaçant)
+>    cherchait le meilleur index dans le *pool de tir de l'unité* et s'en servait comme index de
+>    *slot d'action*, deux listes d'ordre et de contenu différents. Les lignes « Focus fire: … »
+>    des fiches d'avant cette date étaient donc **fausses** : ces bots tiraient sur une cible
+>    légale, mais autre que celle que leur critère désignait.
+> 3. `TacticalBot` **n'exposait pas `select_action_with_state`** : le wrapper l'appelait sans
+>    phase ni état, si bien qu'aucune de ses heuristiques de phase n'était atteinte — le bot le
+>    plus difficile du panel jouait « premier slot ouvert ».
+>
+> **Critère de cible = définition de l'adversaire.** Chaque bot choisit désormais sa cible (tir,
+> charge, mêlée) par un critère explicite appliqué au mapping slot → escouade ennemie
+> (`get_enemy_slot_mapping`, la même source que le masque), et jamais par l'ordre des slots :
+> cet ordre est figé à l'attribution et ne classe rien après la première mort.
+
+| Bot | Critère de cible (tir / charge / mêlée) |
+|---|---|
+| RandomBot | aléatoire (doctrine) |
+| GreedyBot | la plus **entamée** (achever) — identique aux trois phases |
+| DefensiveBot | la plus **menaçante** au tir et en mêlée ; charge : voir contre-charge ci-dessous |
+| ControlBot | celle qui **conteste** — la plus proche d'un objectif — aux trois phases |
+| AggressiveSmartBot | la plus **entamée** |
+| DefensiveSmartBot | la plus **menaçante** (ne charge jamais) |
+| AdaptiveBot | la plus **entamée** |
+| TacticalBot | **tuable ce tour > peu de PV > menace élevée** ; charge : l'escouade de **tir** la plus dangereuse |
+
+« Menaçante » = meilleur dégât attendu (tir ou mêlée, `NB × DMG`), même mesure que
+`RewardMapper._get_unit_threat`. « Entamée » = PV courants les plus bas.
+
 #### Tier 1 — Bots simples (comportement fixe)
 
 **RandomBot (Easiest)**
@@ -991,18 +1025,27 @@ Ce document couvre le **monitoring de base** (TensorBoard, 0_critical/, indicate
 - Baseline: Any competent agent should win 90%+
 
 **GreedyBot (Medium)**
-- Always shoots nearest enemy, moves aggressively (action 0)
+- Pousse vers l'ennemi le plus proche ; tire dès qu'il peut
+- **Doctrine de combat : ACHEVER** — tir, charge et mêlée visent l'escouade la plus entamée
+- Charge désormais explicitement (sa charge résultait avant de la branche terminale)
 - Basic threat: Tests if agent learned shooting
 - **Supports randomness parameter** (0.0-0.3)
 
 **DefensiveBot (Medium-Hard)**
-- Moves defensively (action 2) when threatened, waits otherwise
-- Shoots first available target systematically
+- Se replie (s'éloigne de l'ennemi le plus proche) et tire sur la cible la plus **menaçante**
+- **CONTRE-CHARGE (nouveau)** : il ne cherche pas la mêlée, il refuse de la subir. Quand une
+  escouade ennemie de mêlée (dégât de mêlée > dégât de tir) est déjà déclarable comme cible de
+  charge (11.02), elle viendra au contact de toute façon ; la laisser charger lui offrirait
+  Fights First (12.04, « It made a charge move this turn »). Il prend donc les devants sur la
+  plus dangereuse au corps à corps. Face à une escouade de tir : il tient sa ligne (WAIT)
+- Mêlée : frappe la plus **menaçante** (neutraliser la source de dégâts)
 - Tests tactical patience and positioning
 - **Supports randomness parameter** (0.0-0.3)
 
 **ControlBot (Medium)**
 - Moves toward objectives (action 3) when off-objective, holds position once on
+- **Cible celle qui conteste** : la plus proche d'un objectif, au tir comme en charge et en mêlée
+- Ne charge pas s'il tient déjà un objectif (il le garde)
 - Objective-focused: Tests if agent can contest/control objectives
 - **Supports randomness parameter** (0.0-0.3)
 
@@ -1010,20 +1053,38 @@ Ce document couvre le **monitoring de base** (TensorBoard, 0_critical/, indicate
 
 **AggressiveSmartBot (Hard)**
 - Aggressive movement (action 0), always charges (action 9), advances (action 12) if no targets
-- Focus fire: lowest-HP enemy (achever les cibles faibles)
+- Focus fire: lowest-HP enemy (achever les cibles faibles) — **effectif depuis le 2026-07-29
+  seulement** (cf. encadré : le critère existait mais visait un autre slot)
+- Charge et mêlée alignées sur le même critère (la plus entamée)
 - Forces l'agent à apprendre advance et charge par exposition
 
 **DefensiveSmartBot (Hard)**
 - Defensive movement (action 2) if threatened, tactical (action 1) otherwise
 - Never charges or advances — purely positional
-- Focus fire: highest-threat enemy (neutraliser les menaces)
+- Focus fire: highest-threat enemy (neutraliser les menaces) — **effectif depuis le 2026-07-29
+  seulement** (cf. encadré)
+- Mêlée : même critère que son tir (la plus menaçante)
 - Tests if agent can beat a cautious, threat-aware opponent
 
-**AdaptiveBot (Hardest)**
+**AdaptiveBot (Hardest des Tier 2)**
 - Adapts strategy based on game state (early/winning/losing postures)
 - Early: objective movement (action 3); Winning: defensive; Losing: aggressive + charge
-- Focus fire: lowest-HP enemy
+- Focus fire: lowest-HP enemy — **effectif depuis le 2026-07-29 seulement** (cf. encadré)
+- Charge et mêlée alignées sur le même critère ; la posture « winning » interdit la charge
+- ⚠️ Sa posture comparait ses objectifs à ceux du joueur `1 - player`, qui n'existe pas (le
+  moteur ne connaît que les joueurs 1 et 2) : elle était donc « winning » dès qu'il tenait un
+  objectif, quoi que fasse l'adversaire. Corrigé le 2026-07-29
 - The most challenging bot — tests full adaptive tactical learning
+
+**TacticalBot (holdout d'évaluation, V11 §10.5)**
+- Utilisé UNIQUEMENT en évaluation, jamais dans `bot_training.ratios`, exclu de tout signal de
+  sélection de modèle
+- Depuis le 2026-07-29 il expose `select_action_with_state` : ses heuristiques de phase sont
+  enfin atteintes (cf. encadré, point 3)
+- Tir et mêlée : **tuable ce tour > peu de PV > menace élevée**
+- Charge : seulement si la mêlée est avantageuse pour l'attaquant (dégât de mêlée attendu >
+  dégât de tir attendu), et alors sur l'escouade de **tir** la plus dangereuse (faire taire les
+  armes adverses)
 
 ### Evaluation Commands
 

@@ -115,7 +115,8 @@
       "active_ratio_start": 0.0,
       "active_ratio_end": 0.8,
       "schedule": "linear",
-      "freeze_after_progress": 1.0
+      "freeze_after_progress": 1.0,
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les cinq profils portent le meme reglage 0.0 -> 0.8 depuis le 2026-07-29 (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0). 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les cinq profils."
     },
     "observation_params": {
       "obs_size": 20828,
@@ -302,7 +303,8 @@
       "active_ratio_start": 0.0,
       "active_ratio_end": 0.8,
       "schedule": "linear",
-      "freeze_after_progress": 1.0
+      "freeze_after_progress": 1.0,
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les cinq profils portent le meme reglage 0.0 -> 0.8 depuis le 2026-07-29 (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0). 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les cinq profils."
     },
     "observation_params": {
       "obs_size": 20828,
@@ -490,7 +492,8 @@
       "active_ratio_start": 0.0,
       "active_ratio_end": 0.8,
       "schedule": "linear",
-      "freeze_after_progress": 1.0
+      "freeze_after_progress": 1.0,
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les cinq profils portent le meme reglage 0.0 -> 0.8 depuis le 2026-07-29 (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0). 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les cinq profils."
     },
     "observation_params": {
       "obs_size": 20828,
@@ -644,7 +647,8 @@
       "active_ratio_start": 0.0,
       "active_ratio_end": 0.8,
       "schedule": "linear",
-      "freeze_after_progress": 1.0
+      "freeze_after_progress": 1.0,
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les cinq profils portent le meme reglage 0.0 -> 0.8 depuis le 2026-07-29 (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0). 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les cinq profils."
     },
     "observation_params": {
       "obs_size": 20828,
@@ -820,14 +824,6 @@
         }
       }
     },
-    "deployment_mode_schedule": {
-      "enabled": true,
-      "training_only": true,
-      "active_ratio_start": 0.0,
-      "active_ratio_end": 0.8,
-      "schedule": "linear",
-      "freeze_after_progress": 1.0
-    },
     "deployment_random_mix": {
       "enabled": false,
       "training_only": true,
@@ -836,6 +832,15 @@
       "schedule": "linear",
       "freeze_after_progress": 0.8,
       "apply_to": "agent_only"
+    },
+    "deployment_mode_schedule": {
+      "enabled": true,
+      "training_only": true,
+      "active_ratio_start": 0.0,
+      "active_ratio_end": 0.8,
+      "schedule": "linear",
+      "freeze_after_progress": 1.0,
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les cinq profils portent le meme reglage 0.0 -> 0.8 depuis le 2026-07-29 (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0). 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les cinq profils."
     },
     "observation_params": {
       "obs_size": 20828,

@@ -74,6 +74,9 @@ mesurés sur la suite entière.
 | `test_shoot_execution.py` | 16 | HP partiel/létal/limites, cascade mort pools, `active_shooting_unit`, `is_unit_alive` |
 | `tests/unit/ai/test_step_log_weapon_rule_tokens.py` | 15 | **Chaîne moteur → step.log → analyzer** pour [DEVASTATING WOUNDS], [HEAVY], [RAPID FIRE], [COVER] et les abilités de relance : le maillon de jonction que rien ne testait (V11 §0hist.38) |
 | `tests/unit/ai/test_analyzer_no_heavy_after_move_false_positive.py` | 3 | L'analyzer n'invente plus d'usage invalide de [HEAVY] après un déplacement ≤ 3" |
+| `tests/unit/ai/test_evaluation_bots.py` | 27 | **Bots d'évaluation** : critère de cible explicite (jamais l'ordre des slots), joueur dérivé de l'escouade ACTIVÉE et non de `current_player` (la sélection 12.04 alterne), contre-charge du `DefensiveBot`, divergence masque/mapping = erreur explicite |
+| `tests/unit/ai/test_eval_holdout_opponent.py` | 12 | Holdout d'évaluation (V11 §10.5) : `TacticalBot` hors `bot_training.ratios`, contrat exigé par `BotControlledEnv`, ranking masqué si l'éval n'est pas fiable |
+| `tests/unit/engine/test_deployment_mode_schedule.py` | 10 | Scheduler fixed↔active sur le VRAI moteur (bornes 0.0/1.0, rampe croissante) **+ lecture du vrai fichier de config** : les 5 profils portent la rampe, bloc manquant dans un profil = erreur explicite |
 | `test_shoot_attack_sequence.py` | 13 | Séquence de tir BOUT-EN-BOUT sur le chemin vif (`build_manual_shoot_allocation`) — les 4 issues, AP, invulnérable, 05.01/05.04 sur seuil 1, **[ANTI-X] au tir** (câblage couvert par rien avant), jusqu'aux PV retirés |
 | `test_fight_special_rules.py` | 6 | `[HAZARDOUS]` 24.15 en MÊLÉE (`build_manual_fight_allocation`) — clause « or selected to fight », 1 jet par arme, 06.03 (1-2 → 1 MW, 3 si tout MONSTER/VEHICLE) |
 | `test_fight_activation_pools.py` | 9 | `fight_build_activation_pools` — pools charging/alternating, `units_fought` |

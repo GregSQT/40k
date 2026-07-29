@@ -122,7 +122,10 @@ def test_every_profile_carries_the_deployment_ramp(profile_name: str) -> None:
         f"en silence et l'agent n'apprendrait jamais à se déployer."
     )
     cfg = profile["deployment_mode_schedule"]
-    assert set(cfg) == SCHEDULE_KEYS
+    # `justification` : convention du fichier (cf. `observation_params.justification`). Elle porte
+    # le raisonnement d'asymétrie entraînement/évaluation, qui ne doit pas vivre que dans le code.
+    assert set(cfg) == SCHEDULE_KEYS | {"justification"}
+    assert "EVALUATION IMPOSE TOUJOURS" in cfg["justification"]
     assert cfg["enabled"] is True
     assert cfg["training_only"] is True
     assert cfg["active_ratio_start"] == 0.0
