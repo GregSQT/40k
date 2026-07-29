@@ -803,7 +803,11 @@ Ordre par valeur tactique :
    ⚠️ Il porte un `except Exception: … return valid_targets[0]` (~L1781) qui masque toute erreur
    de config/registry — vérifié : jamais déclenché sur la suite + smoke. Retrait = backend
    partagé, arbitrage requis (cf. `A_faire/bug_pile_in_bfs_clearance_mismatch.md` §dernier).
-   La boucle `get_best_enemy_score_for_unit` reste vive pour la **cible de charge** (point 2).
+   ~~La boucle `get_best_enemy_score_for_unit` reste vive pour la **cible de charge** (point 2).~~
+   ⚠️ **PLUS VRAI depuis le commit `2d6bd2a8` (V11 §0.46)** : le point 2 ayant fait de la cible de
+   charge une dimension d'action, `get_best_enemy_score_for_unit` n'avait plus aucun appelant de
+   production et a été **supprimée** de `engine/macro_intents.py`, avec
+   `get_best_enemy_global` / `get_best_enemy_score` qui étaient ses seuls appelants restants.
    ~~Pilote du mécanisme P2.~~ → il a été le pilote, et il a **tranché la méthode** : slots +
    pointeur, pas `CHOICE_k` ([§0.41](V11_agent_rework.md#s0.41)). Le point 2 (cible de charge) suit le même patron.
 2. ✅ **LIVRÉ le 2026-07-28 (nuit) — détail → [§9.4bis](#s9.4bis) et [§0.43](V11_agent_rework.md#s0.43).**
@@ -956,9 +960,14 @@ donc plus par le `damage_ratio` du décodeur. ⚠️ **Les win-rates mesurés av
 sont pas comparables à ceux d'après** — la baseline adverse a changé, comme pour P3-1.
 
 **Ce qui reste vif de l'ancien chemin** : `charge_handlers` et le flux **PvP/PvE**, non touchés.
-`get_best_enemy_score_for_unit` reste utilisée par les intents de zone (`get_best_enemy_global`,
-`get_best_enemy_score`) ; ses deux imports devenus morts (`action_decoder`, `w40k_core`) ont été
+~~`get_best_enemy_score_for_unit` reste utilisée par les intents de zone (`get_best_enemy_global`,
+`get_best_enemy_score`) ;~~ ses deux imports devenus morts (`action_decoder`, `w40k_core`) ont été
 supprimés.
+⚠️ **PLUS VRAI depuis le commit `2d6bd2a8` (V11 §0.46)** : `get_best_enemy_global` et
+`get_best_enemy_score` étaient elles-mêmes sans appelant (les intents de zone ne les appelaient
+plus), donc les **trois** fonctions ont été supprimées de `engine/macro_intents.py`, ainsi que
+les caches `_cached_best_enemy_global` / `_cached_best_enemy_score` qui n'existaient que pour
+elles. `_best_weapon_cache` reste vif (obs builder, `w40k_core`, `api_server`).
 
 **Preuves (tests ciblés, verts — aucune suite complète lancée, c'est l'utilisateur qui la lance).**
 
