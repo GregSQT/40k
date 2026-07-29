@@ -471,6 +471,68 @@ def _generate_rule_checker_artifacts(
     print(f"🧾 Rejected audit: {rejected_path}")
 
 
+def _run_single_episode(
+    env,
+    model,
+    obs_normalizer,
+    max_steps_per_episode: int,
+    ep_seed: int,
+) -> str:
+    """Joue UN episode et rend "win", "loss" ou "draw".
+
+    Extrait de `_run_matchup_episodes` pour etre exercable avec des doublures (env et modele
+    factices), sans faire tourner de partie. C'est la seule partie qui DECIDE : quelle
+    observation et quel masque sont servis au modele, quand l'episode s'arrete, et comment le
+    resultat est lu. Calquee sur la boucle de reference `ai/bot_evaluation.py:513-549`.
+    """
+    import numpy as np
+    from shared.data_validation import require_key
+
+    # ai/bot_evaluation.py:515-516 : les DEUX generateurs sont poses.
+    random.seed(ep_seed)
+    np.random.seed(ep_seed)
+    obs, info = env.reset(seed=ep_seed)
+    done = False
+    step_count = 0
+    while not done and step_count < max_steps_per_episode:
+        model_obs = obs_normalizer(obs) if obs_normalizer is not None else obs
+        # Obs Dict (MultiInputPolicy + CNN) : predict la gere nativement, ne pas aplatir.
+        # Copie conforme de ai/bot_evaluation.py:526-533. L'obs du pipeline squad est un
+        # gym.spaces.Dict : l'aplatir levait avant meme d'atteindre le masque.
+        if isinstance(model_obs, dict):
+            model_input = model_obs
+        else:
+            model_input = np.asarray(model_obs, dtype=np.float32)
+            if model_input.ndim == 1:
+                model_input = model_input.reshape(1, -1)
+        # MEME chemin que la production (ai/bot_evaluation.py:523) : le masque servi au
+        # modele doit etre celui de la semantique SQUAD que `env.step` decode. La voie
+        # legacy `action_decoder.get_action_mask_and_eligible_units` construit l'ancien
+        # layout (mask[9]=charge, mask[10]=fight, mask[11]=wait, mask[4+i]=tir) et a la
+        # meme longueur (total_action_size) : l'erreur etait donc silencieuse.
+        # `engine.get_action_mask()` fait de plus avancer la phase de combat quand le
+        # masque sort vide — sans quoi la boucle d'evaluation se bloquerait sur un masque
+        # tout a False.
+        action_masks = np.asarray(env.engine.get_action_mask(), dtype=bool)
+        if action_masks.ndim == 1:
+            action_masks = action_masks.reshape(1, -1)
+        action, _ = model.predict(model_input, action_masks=action_masks, deterministic=True)
+        action_scalar = int(np.asarray(action).flat[0])
+        obs, _, terminated, truncated, info = env.step(action_scalar)
+        done = bool(terminated or truncated)
+        step_count += 1
+    winner = info.get("winner")
+    # ai/bot_evaluation.py:543 : le siege controle est LU dans l'info rendue par l'env, pas
+    # recalcule ici. Un identifiant recalcule localement peut diverger silencieusement du
+    # siege reellement joue (BotControlledEnv gere l'alternance des sieges).
+    controlled_player = require_key(info, "controlled_player")
+    if winner == controlled_player:
+        return "win"
+    if winner == -1:
+        return "draw"
+    return "loss"
+
+
 def _run_matchup_episodes(
     scenario_file: str,
     agent_key: str,
@@ -486,7 +548,6 @@ def _run_matchup_episodes(
     seed: int = 42,
 ) -> Tuple[int, int, int]:
     """Run n_episodes with model vs bot, return (wins, losses, draws)."""
-    import numpy as np
     from sb3_contrib import MaskablePPO
     from ai.training_utils import setup_imports
     from ai.env_wrappers import BotControlledEnv
@@ -497,7 +558,6 @@ def _run_matchup_episodes(
     from sb3_contrib.common.wrappers import ActionMasker
     from ai.unit_registry import UnitRegistry
     from config_loader import get_max_turns
-    from shared.data_validation import require_key
 
     unit_registry = UnitRegistry()
     W40KEngine, _ = setup_imports()
@@ -567,47 +627,16 @@ def _run_matchup_episodes(
     max_steps_per_episode = int(get_max_turns()) * 400
     wins, losses, draws = 0, 0, 0
     for ep in range(n_episodes):
-        ep_seed = (seed + ep * 1000) % (2**31)
-        random.seed(ep_seed)
-        np.random.seed(ep_seed)  # ai/bot_evaluation.py:515-516 : les DEUX generateurs sont poses.
-        obs, info = env.reset(seed=ep_seed)
-        done = False
-        step_count = 0
-        while not done and step_count < max_steps_per_episode:
-            model_obs = obs_normalizer(obs) if obs_normalizer is not None else obs
-            # Obs Dict (MultiInputPolicy + CNN) : predict la gere nativement, ne pas aplatir.
-            # Copie conforme de ai/bot_evaluation.py:526-533. L'obs du pipeline squad est un
-            # gym.spaces.Dict : l'aplatir levait avant meme d'atteindre le masque.
-            if isinstance(model_obs, dict):
-                model_input = model_obs
-            else:
-                model_input = np.asarray(model_obs, dtype=np.float32)
-                if model_input.ndim == 1:
-                    model_input = model_input.reshape(1, -1)
-            # MEME chemin que la production (ai/bot_evaluation.py:523) : le masque servi au
-            # modele doit etre celui de la semantique SQUAD que `env.step` decode. La voie
-            # legacy `action_decoder.get_action_mask_and_eligible_units` construit l'ancien
-            # layout (mask[9]=charge, mask[10]=fight, mask[11]=wait, mask[4+i]=tir) et a la
-            # meme longueur (total_action_size) : l'erreur etait donc silencieuse.
-            # `engine.get_action_mask()` fait de plus avancer la phase de combat quand le
-            # masque sort vide — sans quoi la boucle d'evaluation se bloquerait sur un masque
-            # tout a False.
-            action_masks = np.asarray(env.engine.get_action_mask(), dtype=bool)
-            if action_masks.ndim == 1:
-                action_masks = action_masks.reshape(1, -1)
-            action, _ = model.predict(model_input, action_masks=action_masks, deterministic=True)
-            action_scalar = int(np.asarray(action).flat[0])
-            obs, _, terminated, truncated, info = env.step(action_scalar)
-            done = bool(terminated or truncated)
-            step_count += 1
-        winner = info.get("winner")
-        # ai/bot_evaluation.py:543 : le siege controle est LU dans l'info rendue par l'env, pas
-        # recalcule ici. Un identifiant recalcule localement peut diverger silencieusement du
-        # siege reellement joue (BotControlledEnv gere l'alternance des sieges).
-        controlled_player = require_key(info, "controlled_player")
-        if winner == controlled_player:
+        outcome = _run_single_episode(
+            env=env,
+            model=model,
+            obs_normalizer=obs_normalizer,
+            max_steps_per_episode=max_steps_per_episode,
+            ep_seed=(seed + ep * 1000) % (2**31),
+        )
+        if outcome == "win":
             wins += 1
-        elif winner == -1:
+        elif outcome == "draw":
             draws += 1
         else:
             losses += 1
