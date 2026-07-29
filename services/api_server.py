@@ -113,14 +113,15 @@ def _orjson_default(obj: Any) -> Any:
             return list(obj)
     except ImportError:
         pass
-    try:
-        from engine.weapons.rules import ParsedWeaponRule
-        if isinstance(obj, ParsedWeaponRule):
-            if obj.parameter is not None:
-                return f"{obj.rule}:{obj.parameter}"
-            return obj.rule
-    except ImportError:
-        pass
+    # 2026-07-29 — la branche `isinstance(obj, ParsedWeaponRule)` a ete SUPPRIMEE ici.
+    # Le perimetre de ce `default` est homogene : types STDLIB/NUMPY qu'orjson ne connait pas
+    # (datetime, UUID, bytes, ndarray, set, Path, deque). `ParsedWeaponRule` y etait le SEUL type
+    # metier — un cas particulier greffe, pas un contrat « cet encodeur sait serialiser le
+    # domaine ». Le retirer restaure l'homogeneite au lieu de creer une asymetrie.
+    # Il est de toute facon inatteignable : `ParsedWeaponRule` n'est construit qu'en
+    # `engine/weapons/rules.py` (parse_weapon_rule), dont l'unique chemin de production
+    # (`engine/weapons/parser.py`) jette le retour depuis la suppression de `_parsed_rules`.
+    # Aucune instance ne survit donc dans le processus, donc aucune ne peut atteindre un payload.
     if hasattr(obj, "__dict__") and not isinstance(obj, type):
         return obj.__dict__
     raise TypeError(f"Object of type {type(obj).__name__!r} is not JSON serializable")
@@ -270,15 +271,9 @@ def make_json_serializable(obj, _ancestors: Optional[frozenset] = None, _path: s
     except ImportError:
         pass
 
-    # Handle ParsedWeaponRule objects
-    try:
-        from engine.weapons.rules import ParsedWeaponRule
-        if isinstance(obj, ParsedWeaponRule):
-            if obj.parameter is not None:
-                return f"{obj.rule}:{obj.parameter}"
-            return obj.rule
-    except ImportError:
-        pass
+    # 2026-07-29 — branche `isinstance(obj, ParsedWeaponRule)` SUPPRIMEE, meme raison que dans
+    # `_orjson_default` : le type n'est plus constructible hors du parseur d'armurerie, qui jette
+    # son resultat. Ce convertisseur ne traite plus que numpy + les conteneurs standards.
 
     if isinstance(obj, (dict, list, set, frozenset)):
         oid = id(obj)

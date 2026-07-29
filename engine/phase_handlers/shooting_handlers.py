@@ -160,42 +160,44 @@ def _move_los_preview_cache_key(
 
 
 def _serialize_weapon_for_json(weapon: Dict[str, Any]) -> Dict[str, Any]:
+    """Copie d'une arme destinee a une charge utile JSON (``available_weapons[].weapon``).
+
+    Copie SUPERFICIELLE, plus une copie des listes de premier niveau (``WEAPON_RULES``...) :
+    la reponse API ne doit jamais aliaser les listes du dict d'arme du moteur, sinon une
+    mutation cote moteur se refleterait dans une charge deja construite.
+
+    2026-07-29 — les branches `isinstance(..., ParsedWeaponRule)` (sur la valeur ET sur chaque
+    element de liste) ont ete SUPPRIMEES. Leur domaine est borne et prouve : ce dict d'arme ne
+    peut plus contenir d'objet `ParsedWeaponRule`. Ce type n'est construit qu'en
+    `engine/weapons/rules.py` (`parse_weapon_rule`) ; son unique chemin de production,
+    `engine/weapons/parser.py`, jette desormais le retour de la validation. `WEAPON_RULES` ne
+    contient que des chaines, partout dans le depot. Verifie aussi au runtime : apres parsing des
+    153 armes des deux factions, zero instance vivante dans le tas du processus.
     """
-    Convert weapon dict to JSON-serializable format.
-    Converts ParsedWeaponRule objects in WEAPON_RULES to strings.
-    Recursively handles all fields to ensure complete serialization.
-    """
-    from engine.weapons.rules import ParsedWeaponRule
-    
-    serialized = {}
-    
-    # Recursively convert all fields
+    serialized: Dict[str, Any] = {}
     for key, value in weapon.items():
-        if isinstance(value, ParsedWeaponRule):
-            # Convert ParsedWeaponRule to string
-            if value.parameter is not None:
-                serialized[key] = f"{value.rule}:{value.parameter}"
-            else:
-                serialized[key] = value.rule
-        elif isinstance(value, list):
-            # Convert list elements (e.g., WEAPON_RULES)
-            serialized_list = []
-            for item in value:
-                if isinstance(item, ParsedWeaponRule):
-                    if item.parameter is not None:
-                        serialized_list.append(f"{item.rule}:{item.parameter}")
-                    else:
-                        serialized_list.append(item.rule)
-                else:
-                    serialized_list.append(item)
-            serialized[key] = serialized_list
+        if isinstance(value, list):
+            serialized[key] = list(value)
         else:
-            # Copy other fields as-is
             serialized[key] = value
-    
     return serialized
 
 
+# 2026-07-29 — les deux helpers ci-dessous GARDENT leur branche `hasattr(rule, 'rule')`, alors
+# qu'elle est prouvee inatteignable comme les autres (aucun `ParsedWeaponRule` ne peut plus
+# exister hors du parseur d'armurerie). RAISON DE LES GARDER, et c'est une raison de sursis, pas
+# d'approbation : contrairement a `weapon_has_rule` / `_rule_entries`, ces deux fonctions n'ont
+# AUCUN `else: raise` — une entree inattendue y est silencieusement ignoree et renvoie False.
+# Retirer la branche seule y transformerait donc une branche morte en FAUX SILENCIEUX, sur le
+# chemin chaud du tir (~20 appelants dans shooting_handlers + shared_utils).
+#
+# Le vrai defaut est ailleurs : ces deux fonctions sont des DOUBLONS laxistes de
+# `engine/utils/weapon_helpers.weapon_has_rule(weapon, "ASSAULT" | "CLOSE_QUARTERS")`. Elles s'en
+# ecartent par deux replis muets — `if not weapon: return False` et `"WEAPON_RULES" in weapon
+# else []` — la ou `weapon_has_rule` exige la cle (require_key) et leve. La correction propre est
+# de les supprimer et de deleguer ; c'est un changement de COMPORTEMENT sur le chemin du tir
+# (erreur explicite la ou l'on renvoyait False), donc un arbitrage, pas un nettoyage.
+# Ne pas retirer la branche objet sans traiter les replis muets dans le meme mouvement.
 def _weapon_has_assault_rule(weapon: Dict[str, Any]) -> bool:
     """Check if weapon has ASSAULT rule allowing shooting after advance."""
     if not weapon:

@@ -92,8 +92,13 @@ MELEE_KEY = "CC_WEAPONS"
 def _rule_entries(weapon: Dict[str, Any]) -> Tuple[Tuple[str, Optional[int]], ...]:
     """Règles déclarées par l'arme, sous forme canonique ((NOM, paramètre|None), …), triée.
 
-    Gère les trois formes runtime de `WEAPON_RULES` (chaîne nue, chaîne `NOM:param`, objet
-    `ParsedWeaponRule`) — même contrat que `weapon_has_rule`, dont c'est le pendant « liste ».
+    Gère les deux formes de `WEAPON_RULES` (chaîne nue, chaîne `NOM:param`) — même contrat que
+    `weapon_has_rule`, dont c'est le pendant « liste ».
+
+    2026-07-29 — la branche objet `ParsedWeaponRule` a été SUPPRIMÉE ici en même temps que dans
+    `weapon_has_rule`, dont ce docstring revendique le contrat : la laisser aurait rendu cette
+    revendication fausse. Le type n'est plus constructible hors du parseur d'armurerie, qui jette
+    son résultat. Toute entrée non-chaîne tombe dans le `raise TypeError` ci-dessous.
     """
     rules = require_key(weapon, "WEAPON_RULES")
     if not isinstance(rules, list):
@@ -103,10 +108,7 @@ def _rule_entries(weapon: Dict[str, Any]) -> Tuple[Tuple[str, Optional[int]], ..
         )
     out: List[Tuple[str, Optional[int]]] = []
     for entry in rules:
-        if hasattr(entry, "rule"):
-            name = str(getattr(entry, "rule")).strip().upper()
-            raw_param = getattr(entry, "parameter", None)
-        elif isinstance(entry, str):
+        if isinstance(entry, str):
             head, _, tail = entry.partition(":")
             name = head.strip().upper()
             raw_param = tail.strip() if tail else None
