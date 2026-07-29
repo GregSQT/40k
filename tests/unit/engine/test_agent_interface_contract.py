@@ -27,8 +27,8 @@ Deux régimes, et il faut savoir lequel on lit :
   sur le routage — c'est la parité masque↔décodeur qui couvre l'autre moitié.
 
 Dans les deux régimes, les réglages par-épisode dont ce fichier a besoin sont **épinglés sur
-l'instance** (`ENGINE_PINS`), jamais lus depuis la config : voir le commentaire de `ENGINE_PINS`
-pour la panne que cette précaution répare.
+l'instance** (`_config_helpers.pin_active_deployment`), jamais lus depuis la config : voir la
+docstring de ce helper pour la panne que cette précaution répare.
 
 Table verrouillée (entier → intention) :
 
@@ -79,6 +79,7 @@ from typing import Any, Dict, List, Tuple
 
 import pytest
 
+from _config_helpers import assert_deployment_phase, pin_active_deployment
 from engine.action_decoder import ActionValidationError
 from engine.agent_decision import set_pending_agent_decision
 from engine.macro_intents import (
@@ -113,46 +114,6 @@ SCENARIO = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_a
 MOVE_ACTIONS = {"squad_normal_move", "squad_advance", "squad_fall_back"}
 
 
-#: Réglages par-épisode que ce fichier ÉPINGLE au lieu de les subir, injectés dans le
-#: `training_config` de l'INSTANCE (jamais dans le fichier de config, qui porte une décision
-#: utilisateur). Même technique que `tests/unit/engine/test_deployment_mode_schedule.py`, qui
-#: pilote ce mécanisme depuis le test.
-#:
-#: POURQUOI : la version précédente de ce fixture n'épinglait rien et tenait la phase de
-#: déploiement pour acquise. Elle ne l'obtenait en fait que parce que `x1_debug` ne portait
-#: AUCUN bloc `deployment_mode_schedule` — le mode retombait alors sur le JSON du scénario. Le
-#: jour où les cinq profils ont reçu ce bloc avec `active_ratio_start: 0.0`, le premier épisode
-#: est passé en placement figé et le fichier entier est tombé. Un test ne doit pas dépendre de
-#: l'ABSENCE d'une configuration : il doit déclarer l'état de jeu qu'il exige.
-ENGINE_PINS: Dict[str, Dict[str, Any]] = {
-    # Déploiement ACTIF garanti, à tous les épisodes. `start == end` rend le tirage indépendant
-    # de la progression, donc de `total_episodes` — une dépendance de moins.
-    # `training_only: false` affranchit du split de chemin (`/scenarios/training/`), pour que
-    # déplacer le scénario ne rejoue pas la même panne.
-    "deployment_mode_schedule": {
-        "enabled": True,
-        "training_only": False,
-        "active_ratio_start": 1.0,
-        "active_ratio_end": 1.0,
-        "schedule": "linear",
-        "freeze_after_progress": 1.0,
-    },
-    # Épinglé À L'ARRÊT : activé, `_should_force_random_deployment_action` REMPLACE l'action
-    # choisie par une action valide tirée au hasard. Le pilotage cesserait d'être reproductible
-    # — sans rien casser de visible, donc sans qu'on le remarque. Il est `false` dans le profil
-    # aujourd'hui ; c'est exactement le genre de valeur qui change sous nos pieds.
-    "deployment_random_mix": {
-        "enabled": False,
-        "training_only": False,
-        "force_random_ratio_start": 0.0,
-        "force_random_ratio_end": 0.0,
-        "schedule": "linear",
-        "freeze_after_progress": 1.0,
-        "apply_to": "agent_only",
-    },
-}
-
-
 def _new_engine():
     from ai.unit_registry import UnitRegistry
     from engine.w40k_core import W40KEngine
@@ -166,12 +127,9 @@ def _new_engine():
         quiet=True,
         gym_training_mode=True,
     )
-    # Copie défensive AVANT écriture : `training_config` peut être l'objet même que sert le
-    # cache de configuration. Le muter en place contaminerait les autres tests du process.
-    assert engine.training_config is not None, "profil d'entraînement non chargé"
-    engine.training_config = dict(engine.training_config)
-    engine.training_config.update(ENGINE_PINS)
-    # Les réglages ci-dessus sont lus PAR ÉPISODE, donc l'injection doit précéder le `reset`.
+    # Déploiement actif garanti + `deployment_random_mix` à l'arrêt. Lus PAR ÉPISODE, donc
+    # l'épinglage doit précéder le `reset`. Le POURQUOI est dans `_config_helpers`.
+    pin_active_deployment(engine)
     engine.reset(seed=0)
     return engine
 
@@ -185,11 +143,7 @@ def deployment_state() -> Tuple[Any, Dict[str, Any]]:
     décodent les identifiants 4-8 contre un `deployment_state` que le moteur a rempli lui-même.
     """
     engine = _new_engine()
-    assert engine.game_state["phase"] == "deployment", (
-        f"phase {engine.game_state['phase']!r} au lieu de 'deployment' malgré "
-        f"`deployment_mode_schedule` épinglé à active_ratio 1.0. Le mécanisme de sélection du "
-        f"mode de déploiement a changé : réaligner ENGINE_PINS, ne pas contourner l'assertion."
-    )
+    assert_deployment_phase(engine)
     return engine.action_decoder, engine.game_state
 
 

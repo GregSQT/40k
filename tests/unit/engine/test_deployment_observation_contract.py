@@ -37,6 +37,8 @@ from typing import Any, Dict
 import numpy as np
 import pytest
 
+from _config_helpers import assert_deployment_phase, pin_active_deployment
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCENARIO = (
     PROJECT_ROOT
@@ -54,10 +56,12 @@ def _load(seed: int = 0):
         controlled_agent="ArmageddonAgent", scenario_file=str(SCENARIO),
         unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
     )
+    # Déploiement ACTIF garanti. Lu par épisode → doit précéder le `reset`. Le scénario, la
+    # graine et la géométrie sont inchangés : seul le tirage du MODE est forcé à la valeur que
+    # ce fichier a toujours supposée. POURQUOI dans `_config_helpers.pin_active_deployment`.
+    pin_active_deployment(eng)
     eng.reset(seed=seed)
-    assert eng.game_state.get("phase") == "deployment", (
-        "le scénario doit démarrer en déploiement actif — sinon ce fichier ne teste rien"
-    )
+    assert_deployment_phase(eng)  # sinon ce fichier ne teste rien
     return eng
 
 
