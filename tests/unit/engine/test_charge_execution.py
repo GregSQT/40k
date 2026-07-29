@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, cast
+from typing import Any, Dict, List
 
 import pytest
 
@@ -18,7 +18,7 @@ from engine.phase_handlers.shared_utils import build_units_cache
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
+def _unit(uid: str, player: int, col: int, row: int) -> Dict[str, Any]:
     return {
         "id": uid,
         "player": player,
@@ -95,7 +95,7 @@ class TestChargePhaseStart:
             "engine.phase_handlers.charge_handlers.charge_build_activation_pool",
             self._mock_pool(["1"]),
         )
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 20, 10)]
         gs = _make_gs(units)
         charge_phase_start(gs)
         assert gs["phase"] == "charge"
@@ -106,7 +106,7 @@ class TestChargePhaseStart:
             "engine.phase_handlers.charge_handlers.charge_build_activation_pool",
             self._mock_pool(["1"]),
         )
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 20, 10)]
         gs = _make_gs(units)
         gs["valid_charge_destinations_pool"] = [(1, 2), (3, 4)]
         charge_phase_start(gs)
@@ -118,7 +118,7 @@ class TestChargePhaseStart:
             "engine.phase_handlers.charge_handlers.charge_build_activation_pool",
             self._mock_pool(["1"]),
         )
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 20, 10)]
         gs = _make_gs(units)
         gs["active_charge_unit"] = "1"
         charge_phase_start(gs)
@@ -130,7 +130,7 @@ class TestChargePhaseStart:
             "engine.phase_handlers.charge_handlers.charge_build_activation_pool",
             self._mock_pool(["1"]),
         )
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 20, 10)]
         gs = _make_gs(units)
         charge_phase_start(gs)
         assert gs["charge_roll_values"] == {}
@@ -141,7 +141,7 @@ class TestChargePhaseStart:
             "engine.phase_handlers.charge_handlers.charge_build_activation_pool",
             self._mock_pool(["1"]),
         )
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 20, 10)]
         gs = _make_gs(units)
         gs["pending_charge_targets"] = [{"id": "2"}]
         charge_phase_start(gs)
@@ -153,7 +153,7 @@ class TestChargePhaseStart:
             "engine.phase_handlers.charge_handlers.charge_build_activation_pool",
             self._mock_pool(["1"]),
         )
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 20, 10)]
         gs = _make_gs(units)
         charge_phase_start(gs)
         assert "enemy_adjacent_hexes_player_1" in gs
@@ -164,7 +164,7 @@ class TestChargePhaseStart:
             "engine.phase_handlers.charge_handlers.charge_build_activation_pool",
             self._mock_pool(["1"]),
         )
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 20, 10)]
         gs = _make_gs(units)
         result = charge_phase_start(gs)
         assert result.get("phase_initialized") is True
@@ -180,7 +180,7 @@ class TestChargePhaseStart:
             "engine.phase_handlers.charge_handlers.charge_phase_end",
             lambda gs: {"phase_complete": True, "next_phase": "fight"},
         )
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 20, 10)]
         gs = _make_gs(units)
         result = charge_phase_start(gs)
         assert result.get("phase_complete") is True
@@ -191,7 +191,7 @@ class TestChargePhaseStart:
             "engine.phase_handlers.charge_handlers.charge_build_activation_pool",
             self._mock_pool(["1", "2"]),
         )
-        units = [_unit(1, 1, 5, 10), _unit(2, 1, 8, 10), _unit(3, 2, 20, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 1, 8, 10), _unit("3", 2, 20, 10)]
         gs = _make_gs(units)
         result = charge_phase_start(gs)
         assert result.get("eligible_units") == 2
@@ -213,7 +213,7 @@ class TestHasValidChargeTarget:
             "engine.phase_handlers.charge_handlers.charge_build_valid_destinations_pool",
             lambda gs, uid, roll, **kwargs: [(5, 11)],
         )
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 8, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 8, 10)]
         gs = _make_gs(units)
         gs["gym_training_mode"] = True
         assert _has_valid_charge_target(gs, units[0]) is True
@@ -224,7 +224,7 @@ class TestHasValidChargeTarget:
             "engine.phase_handlers.charge_handlers.charge_build_valid_destinations_pool",
             lambda gs, uid, roll, **kwargs: [],
         )
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 8, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 8, 10)]
         gs = _make_gs(units)
         gs["gym_training_mode"] = True
         assert _has_valid_charge_target(gs, units[0]) is False
@@ -239,7 +239,7 @@ class TestHasValidChargeTarget:
             "engine.phase_handlers.charge_handlers.charge_build_valid_destinations_pool",
             raise_err,
         )
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 8, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 8, 10)]
         gs = _make_gs(units)
         gs["gym_training_mode"] = True
         with pytest.raises(RuntimeError, match="BFS failure"):
@@ -259,37 +259,37 @@ class TestChargeBuildValidDestinationsPool:
 
     def test_unit_not_found_returns_empty(self):
         """charge_pool_no_unit : unité inconnue → pool vide."""
-        units = [_unit(1, 1, 5, 10)]
+        units = [_unit("1", 1, 5, 10)]
         gs = self._make_pool_gs(units)
-        result = charge_build_valid_destinations_pool(gs, cast(str, 99), 12)
+        result = charge_build_valid_destinations_pool(gs, "99", 12)
         assert result == []
 
     def test_no_enemies_returns_empty(self):
         """charge_pool_no_enemies : aucun ennemi → pool vide."""
-        units = [_unit(1, 1, 5, 10), _unit(2, 1, 8, 10)]  # both player 1
+        units = [_unit("1", 1, 5, 10), _unit("2", 1, 8, 10)]  # both player 1
         gs = self._make_pool_gs(units)
-        result = charge_build_valid_destinations_pool(gs, cast(str, 1), 12)
+        result = charge_build_valid_destinations_pool(gs, "1", 12)
         assert result == []
 
     def test_enemy_far_beyond_roll_returns_empty(self):
         """charge_pool_oob : ennemi très loin + roll=2 → pool vide."""
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 24, 10)]  # far right of 25-col board
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 24, 10)]  # far right of 25-col board
         gs = self._make_pool_gs(units)
-        result = charge_build_valid_destinations_pool(gs, cast(str, 1), 2)
+        result = charge_build_valid_destinations_pool(gs, "1", 2)
         assert result == []
 
     def test_close_enemy_large_roll_nonempty_pool(self):
         """charge_pool_hit : ennemi proche + roll=12 → destinations valides trouvées."""
         # Charger at (5,10), enemy at (9,10) — distance ~4 hexes, roll=12 ample
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 9, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 9, 10)]
         gs = self._make_pool_gs(units)
-        result = charge_build_valid_destinations_pool(gs, cast(str, 1), 12)
+        result = charge_build_valid_destinations_pool(gs, "1", 12)
         assert len(result) > 0
 
     def test_result_is_list_of_tuples(self):
         """charge_pool_type : résultat est une liste de tuples (col, row)."""
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 9, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 9, 10)]
         gs = self._make_pool_gs(units)
-        result = charge_build_valid_destinations_pool(gs, cast(str, 1), 12)
+        result = charge_build_valid_destinations_pool(gs, "1", 12)
         if result:
             assert all(isinstance(d, tuple) and len(d) == 2 for d in result)

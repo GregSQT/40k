@@ -96,11 +96,14 @@ def get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[st
     """
     Get unit by ID from game state.
 
-    Handles int/string ID mismatches by comparing both sides as strings.
+    Les identifiants d'unite sont des `str` de bout en bout : `GameState` les stringifie a la
+    construction (`"id": str(unit_data["id"])`) et l'index `unit_by_id` est cle par `str(u["id"])`.
+    Aucune conversion ici : passer autre chose qu'un `str` est un bug de l'appelant, pas un cas
+    a rattraper silencieusement (une coercition rendrait le lookup faussement tolerant).
 
     Args:
         game_state: Game state dictionary with "unit_by_id" index
-        unit_id: Unit ID to find (int or string)
+        unit_id: Unit ID to find (str, comme dans game_state["units"])
 
     Returns:
         Unit dictionary if found, None otherwise
@@ -109,7 +112,7 @@ def get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[st
     """
     from shared.data_validation import require_key  # Lazy: avoid circular import
     unit_by_id = require_key(game_state, "unit_by_id")
-    return unit_by_id.get(str(unit_id))
+    return unit_by_id.get(unit_id)
 
 
 def is_hex_adjacent_to_enemy(col: int, row: int, player: int,

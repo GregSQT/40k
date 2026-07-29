@@ -11,7 +11,7 @@ from engine.phase_handlers.charge_handlers import (
 from engine.phase_handlers.shared_utils import build_units_cache
 
 
-def _unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
+def _unit(uid: str, player: int, col: int, row: int) -> Dict[str, Any]:
     return {
         "id": uid,
         "player": player,
@@ -77,14 +77,14 @@ class TestChargeResolution:
     def test_target_in_charge_range_eligible(self):
         """charge_in_range : ennemi à hex-dist=10, charge_max=12 → cible valide."""
         # Charger en (5,10), ennemi en (15,10) — dist BFS ≈ 10 ≤ 12 → reachable
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 15, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 15, 10)]
         gs = _make_game_state(units)
         assert _has_valid_charge_target(gs, units[0]) is True
 
     def test_target_out_of_charge_range_not_eligible(self):
         """charge_out_of_range : ennemi à hex-dist=15, charge_max=12 → non éligible."""
         # Charger en (5,10), ennemi en (20,10) — dist BFS ≈ 15 > 12 → not reachable
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 20, 10)]
         gs = _make_game_state(units)
         assert _has_valid_charge_target(gs, units[0]) is False
 
@@ -97,7 +97,7 @@ class TestChargeResolution:
         - gym/hex : éligibilité via **BFS pathfinding** → le mur bloque le chemin (contournement
           au-delà de la portée de charge) → non éligible.
         """
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 10, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 10, 10)]
         wall_col = {(7, r) for r in range(0, 21)}
 
         # Euclidien (PvP, défaut) : ligne droite, mur non bloquant pour l'éligibilité.
@@ -119,7 +119,7 @@ class TestChargeResolution:
         enemy3 en (25,10) → hors portée (False).
         _has_valid_charge_target retourne True (au moins un ennemi atteignable).
         """
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 15, 10), _unit(3, 2, 25, 10)]
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 15, 10), _unit("3", 2, 25, 10)]
         gs = _make_game_state(units)
 
         # Vérification globale : au moins un ennemi atteignable

@@ -40,9 +40,10 @@ def test_expected_dice_value_known_mappings_and_invalid() -> None:
         expected_dice_value("3D6", "ctx")
 
 
-def test_get_unit_by_id_requires_index_and_handles_string_lookup() -> None:
-    game_state = {"unit_by_id": {"12": {"id": 12}}}
-    assert get_unit_by_id(game_state, cast(str, 12)) == {"id": 12}
+def test_get_unit_by_id_requires_index_and_looks_up_by_str_id() -> None:
+    game_state = {"unit_by_id": {"12": {"id": "12"}}}
+    assert get_unit_by_id(game_state, "12") == {"id": "12"}
+    assert get_unit_by_id(game_state, "13") is None
     with pytest.raises(Exception):
         get_unit_by_id({}, "12")
 
