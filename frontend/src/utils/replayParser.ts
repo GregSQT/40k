@@ -24,14 +24,9 @@ export interface ReplayAction {
   wound_target?: number;
   save_roll?: number;
   save_target?: number;
-  save_target_base?: number;
-  save_cover_applied?: boolean;
   save_skipped?: boolean;
   save_skip_reason?: string;
   devastating_wounds_applied?: boolean;
-  rapid_fire_bonus_shot?: boolean;
-  rapid_fire_rule_value?: number;
-  heavy_applied?: boolean;
   hazardous_test_roll?: number;
   hazardous_triggered?: boolean;
   hazardous_self_died?: boolean;
@@ -689,11 +684,8 @@ export function parse_log_file_from_text(text: string): ReplayData {
         const hitMatch = trimmed.match(/Hit\s+(\d+)\((\d+)\+(?:->(\d+)\+)?\)/);
         const woundMatch = trimmed.match(/Wound\s+(\d+)\((\d+)\+\)/);
         const saveMatch = trimmed.match(/Save\s+(\d+)\((\d+)\+(?:->(\d+)\+)?\)(?:\s+\[COVER\])?/);
-        const saveCoverMatch = trimmed.match(/\[COVER\]/);
         const saveSkippedMatch = trimmed.match(/Save\s+\[DEVASTATING WOUNDS\]/);
-        const rapidFireMatch = trimmed.match(/\[RAPID(?: |_)?FIRE:(\d+)\]/);
         const devastatingWoundsMatch = trimmed.match(/\[DEVASTATING WOUNDS\]/);
-        const heavyMatch = trimmed.match(/\[HEAVY\]/);
         const hazardousRollMatch = trimmed.match(/\[HAZARDOUS\]\s+Roll:(\d+)/i);
         // Extract reward from format: [R:+53.2] or [R:-10.0]
         const rewardMatch = trimmed.match(/\[R:([+-]?\d+\.?\d*)\]/);
@@ -741,13 +733,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
           }
           if (saveMatch) {
             action.save_roll = parseInt(saveMatch[1], 10);
-            if (saveMatch[3]) {
-              action.save_target_base = parseInt(saveMatch[2], 10);
-              action.save_target = parseInt(saveMatch[3], 10);
-            } else {
-              action.save_target = parseInt(saveMatch[2], 10);
-            }
-            action.save_cover_applied = !!saveCoverMatch;
+            action.save_target = parseInt(saveMatch[2], 10);
             action.save_result = "SAVED";
           }
           if (saveSkippedMatch) {
@@ -756,13 +742,6 @@ export function parse_log_file_from_text(text: string): ReplayData {
             if (devastatingWoundsMatch) {
               action.devastating_wounds_applied = true;
             }
-          }
-          if (rapidFireMatch) {
-            action.rapid_fire_bonus_shot = true;
-            action.rapid_fire_rule_value = parseInt(rapidFireMatch[1], 10);
-          }
-          if (heavyMatch) {
-            action.heavy_applied = true;
           }
           if (hazardousRollMatch) {
             action.hazardous_test_roll = parseInt(hazardousRollMatch[1], 10);
@@ -1033,7 +1012,6 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const hitMatch = trimmed.match(/Hit\s+(\d+)\((\d+)\+\)/);
       const woundMatch = trimmed.match(/Wound\s+(\d+)\((\d+)\+\)/);
       const saveMatch = trimmed.match(/Save\s+(\d+)\((\d+)\+(?:->(\d+)\+)?\)(?:\s+\[COVER\])?/);
-      const saveCoverMatch = trimmed.match(/\[COVER\]/);
       const dmgMatch = trimmed.match(/Dmg:(\d+)HP/);
 
       const action: ReplayAction = {
@@ -1069,13 +1047,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       }
       if (saveMatch) {
         action.save_roll = parseInt(saveMatch[1], 10);
-        if (saveMatch[3]) {
-          action.save_target_base = parseInt(saveMatch[2], 10);
-          action.save_target = parseInt(saveMatch[3], 10);
-        } else {
-          action.save_target = parseInt(saveMatch[2], 10);
-        }
-        action.save_cover_applied = !!saveCoverMatch;
+        action.save_target = parseInt(saveMatch[2], 10);
         action.save_result = "SAVED";
       }
 

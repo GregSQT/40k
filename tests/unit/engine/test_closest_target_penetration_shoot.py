@@ -1,8 +1,8 @@
 """closest_target_penetration au TIR dans le chemin VIF (_manual_roll_intent).
 
 Regle projet (config/unit_rules.json) : « When this unit makes a shooting attack at the
-closest eligible unit, add 1 to the weapon's penetration. » Portee du code MORT
-(_attack_sequence_rng, shooting_handlers) vers le chemin VIF partage gym/PvP.
+closest eligible unit, add 1 to the weapon's penetration. » Portee du code mort de tir
+(supprime en V11 §0.38) vers le chemin VIF partage gym/PvP.
 
 Convention AP NEGATIF (cf. save_threshold) : +1 penetration => ap -= 1 => save degradee.
 
@@ -92,6 +92,22 @@ def test_pas_d_effet_sur_une_cible_plus_lointaine(monkeypatch):
     result = roll_shoot_intent(gs, _intent("3"))
 
     assert result["ap"] == -1, "seule la cible la plus proche beneficie du bonus"
+    assert result["display_save_th"] == 4
+
+
+def test_pas_d_effet_si_le_pool_d_eligibles_est_vide(monkeypatch):
+    """Aucune cible eligible -> aucune « plus proche » a determiner, AP inchange.
+
+    Le pool peut etre vide alors qu un intent existe (la cible declaree a pu devenir
+    ineligible entre la declaration et la resolution) : la regle ne doit pas s appliquer
+    par defaut dans ce cas."""
+    _neutralise_rng_and_cover(monkeypatch)
+    monkeypatch.setattr(shooting_handlers, "shooting_build_valid_target_pool", lambda gs, sid: [])
+    gs, _ = _game_state([{"ruleId": "closest_target_penetration"}])
+
+    result = roll_shoot_intent(gs, _intent("2"))
+
+    assert result["ap"] == -1, "pool vide : aucune amelioration de penetration"
     assert result["display_save_th"] == 4
 
 

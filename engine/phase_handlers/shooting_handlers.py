@@ -32,7 +32,6 @@ from .shared_utils import (
     build_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
     is_placement_valid_with_clearance,
     _compute_unit_occupied_hexes,
-    wound_threshold, save_threshold,
 )
 
 # ============================================================================
@@ -255,38 +254,6 @@ def _unit_shoots_as_monster_or_vehicle(game_state: Dict[str, Any], unit: Dict[st
         if alive:
             return all(_model_is_monster_or_vehicle(m) for m in alive)
     return _model_is_monster_or_vehicle(unit)
-
-
-def _get_rapid_fire_parameter(weapon: Dict[str, Any]) -> Optional[int]:
-    """Return RAPID_FIRE parameter X from weapon rules, or None if absent."""
-    if not weapon:
-        return None
-    rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
-    for rule in rules:
-        if hasattr(rule, "rule"):
-            if rule.rule == "RAPID_FIRE":
-                if rule.parameter is None:
-                    raise ValueError("RAPID_FIRE rule is missing required parameter")
-                try:
-                    value = int(rule.parameter)
-                except (TypeError, ValueError) as exc:
-                    raise ValueError(f"Invalid RAPID_FIRE parameter: {rule.parameter}") from exc
-                if value <= 0:
-                    raise ValueError(f"RAPID_FIRE parameter must be > 0, got {value}")
-                return value
-        elif isinstance(rule, str):
-            if rule == "RAPID_FIRE":
-                raise ValueError("RAPID_FIRE rule is missing required parameter")
-            if rule.startswith("RAPID_FIRE:"):
-                raw_value = rule.split(":", 1)[1]
-                try:
-                    value = int(raw_value)
-                except ValueError as exc:
-                    raise ValueError(f"Invalid RAPID_FIRE parameter: {raw_value}") from exc
-                if value <= 0:
-                    raise ValueError(f"RAPID_FIRE parameter must be > 0, got {value}")
-                return value
-    return None
 
 
 def _append_shoot_nb_roll_info_log(
@@ -997,13 +964,6 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 "manualWeaponSelected",
                 "_shoot_activation_started",
                 "_current_shoot_nb",
-                "_rapid_fire_context_weapon_index",
-                "_rapid_fire_base_nb",
-                "_rapid_fire_shots_fired",
-                "_rapid_fire_bonus_total",
-                "_rapid_fire_rule_value",
-                "_rapid_fire_bonus_shot_current",
-                "_rapid_fire_bonus_applied_by_weapon",
             )
             for field_name in transient_shoot_state_fields:
                 if field_name in unit:
@@ -2608,15 +2568,10 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     # CLOSE_QUARTERS rule: Reset _shooting_with_close_quarters for this activation (no category restriction yet)
     # This must be done BEFORE weapon_availability_check to avoid incorrect filtering
     unit["_shooting_with_close_quarters"] = None
-    # RAPID_FIRE state is activation-scoped and must be reset at activation start.
-    unit["_rapid_fire_context_weapon_index"] = None
-    unit["_rapid_fire_base_nb"] = 0
-    unit["_rapid_fire_shots_fired"] = 0
-    unit["_rapid_fire_bonus_total"] = 0
-    unit["_rapid_fire_rule_value"] = 0
-    unit["_rapid_fire_bonus_shot_current"] = False
-    unit["_rapid_fire_bonus_applied_by_weapon"] = {}
-    
+    # [RAPID FIRE] 24.30 ne porte AUCUN etat d activation : le bonus est ajoute a la
+    # constitution du pool d attaques (`_manual_roll_intent`), a partir de l arme et de la
+    # demi-portee. Les 7 champs `_rapid_fire_*` qui vivaient ici etaient morts (V11 §0.38).
+
     # Reset weapon.shot flags for this unit at activation start
     # Each unit should be able to use all its weapons at the start of its activation
     rng_weapons = require_key(unit, "RNG_WEAPONS")
@@ -3881,9 +3836,6 @@ def _get_los_visibility_state(
         game_state["_hex_los_state_cache"] = _state_cache
     _state_cache[((start_col, start_row), (end_col, end_row))] = _result
     return _result
-
-    can_see = visibility_ratio > 0.0
-    return visibility_ratio, can_see
 
 
 def _walls_around_occupied_floor(
@@ -5176,20 +5128,6 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
         del unit["_move_after_shooting_distance"]
     if "_current_shoot_nb" in unit:
         del unit["_current_shoot_nb"]
-    if "_rapid_fire_context_weapon_index" in unit:
-        del unit["_rapid_fire_context_weapon_index"]
-    if "_rapid_fire_base_nb" in unit:
-        del unit["_rapid_fire_base_nb"]
-    if "_rapid_fire_shots_fired" in unit:
-        del unit["_rapid_fire_shots_fired"]
-    if "_rapid_fire_bonus_total" in unit:
-        del unit["_rapid_fire_bonus_total"]
-    if "_rapid_fire_rule_value" in unit:
-        del unit["_rapid_fire_rule_value"]
-    if "_rapid_fire_bonus_shot_current" in unit:
-        del unit["_rapid_fire_bonus_shot_current"]
-    if "_rapid_fire_bonus_applied_by_weapon" in unit:
-        del unit["_rapid_fire_bonus_applied_by_weapon"]
     if "advance_range" in unit:
         del unit["advance_range"]
     unit["SHOOT_LEFT"] = 0
@@ -5951,20 +5889,12 @@ def _unit_has_shot_with_any_weapon(unit: Dict[str, Any]) -> bool:
     """
     Check if unit has already fired at least one ranged attack in current activation.
 
-    Strict semantics:
-    - True as soon as one shot is fired in current weapon context
-      (`_rapid_fire_shots_fired > 0`), even if current weapon is not exhausted yet.
-    - True if any weapon is marked exhausted (`weapon["shot"] == 1`).
+    Semantique stricte : vrai des qu une arme est marquee epuisee (`weapon["shot"] == 1`).
+
+    Avant V11 §0.38 cette fonction lisait d abord `unit["_rapid_fire_shots_fired"]`, un
+    compteur que rien n incrementait jamais (il n etait qu initialise a 0) : la branche etait
+    morte et masquait le seul critere reel, l epuisement de l arme.
     """
-    if "_rapid_fire_shots_fired" in unit:
-        shots_fired_current_context = require_key(unit, "_rapid_fire_shots_fired")
-        if not isinstance(shots_fired_current_context, int):
-            raise TypeError(
-                f"unit['_rapid_fire_shots_fired'] must be int, "
-                f"got {type(shots_fired_current_context).__name__}"
-            )
-        if shots_fired_current_context > 0:
-            return True
     rng_weapons = require_key(unit, "RNG_WEAPONS")
     for weapon in rng_weapons:
         if require_key(weapon, "shot") == 1:
@@ -6076,195 +6006,3 @@ def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[s
     """
     unit_by_id = require_key(game_state, "unit_by_id")
     return unit_by_id.get(str(unit_id))
-
-
-# ============================================================================
-# ADVANCE_IMPLEMENTATION: Advance action handler
-# ============================================================================
-
-
-
-def _attack_sequence_rng(
-    attacker: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]
-) -> Dict[str, Any]:
-    """Séquence d'une attaque complète avec règles spéciales. Utilisé par les tests via monkeypatch de random.randint.
-
-    Ordre des jets : hit → hazardous (si HAZARDOUS) → wound (si hit) → reroll wound (si règle) → save (si wound non-critique).
-    """
-    import random
-
-    weapon_index = int(require_key(attacker, "selectedRngWeaponIndex"))
-    weapon = attacker["RNG_WEAPONS"][weapon_index]
-    weapon_rules = [r.upper() for r in (weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else [])]
-    unit_rules: List[Dict[str, Any]] = require_key(attacker, "UNIT_RULES")
-    weapon_name: str = weapon.get("display_name", weapon.get("NAME", weapon.get("name", "")))
-    attacker_id = str(attacker["id"])
-
-    # AP de base, potentiellement amélioré par closest_target_penetration
-    ap = int(weapon["AP"] if "AP" in weapon else 0)
-    ap_modifier_ability_display_name: Optional[str] = None
-    try:
-        ctp_rule = next(r for r in unit_rules if r.get("ruleId") == "closest_target_penetration")
-    except StopIteration:
-        ctp_rule = None
-    if ctp_rule:
-        pool = shooting_build_valid_target_pool(game_state, attacker_id)
-        target_id_str = str(target["id"])
-        if pool:
-            # « Cible la plus proche » = mesure bord-à-bord (règle 01.04), euclidienne
-            # via le sélecteur `ranged` — cohérent avec le gate de portée tir.
-            from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
-            _ctp_metric = _ranged_distance_metric()
-            _ctp_cache = require_key(game_state, "units_cache")
-            _attacker_socle = socle_from_cache_entry(_ctp_cache[attacker_id])
-            def _dist(uid: str) -> float:
-                if uid not in _ctp_cache:
-                    raise KeyError(f"_attack_sequence_rng: unit {uid} not in units_cache")
-                return ranged_edge_distance(
-                    _attacker_socle, socle_from_cache_entry(_ctp_cache[uid]), _ctp_metric
-                )
-            closest_id = min(pool, key=_dist)
-            if closest_id == target_id_str:
-                ap = ap - 1
-                ap_modifier_ability_display_name = ctp_rule.get("displayName", "").upper()
-
-    # Stats de base
-    bs = int(weapon.get("ATK", weapon.get("BS", 4)))
-    strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))
-    dmg_raw = weapon.get("DMG", 1)
-
-    # HEAVY : réduit le seuil de touche de 1 si l'attaquant n'a pas bougé
-    has_heavy = "HEAVY" in weapon_rules
-    attacker_moved = (
-        attacker_id in game_state.get("units_moved", set())
-        or attacker_id in game_state.get("units_advanced", set())
-    )
-    hit_target_base = bs
-    hit_rule_modifier: Optional[str] = None
-    effective_bs = bs
-    if has_heavy and not attacker_moved:
-        effective_bs = max(2, bs - 1)
-        hit_rule_modifier = "HEAVY"
-    hit_target = effective_bs
-
-    # Seuils
-    wth = wound_threshold(strength, int(target["T"]))
-    save_th = save_threshold(int(target["ARMOR_SAVE"]), int(target.get("INVUL_SAVE", 7)), ap)
-
-    has_hazardous = "HAZARDOUS" in weapon_rules
-    has_devastating = "DEVASTATING_WOUNDS" in weapon_rules
-
-    def _base_result(**overrides: Any) -> Dict[str, Any]:
-        base: Dict[str, Any] = {
-            "hit_success": False, "wound_success": False, "save_success": False, "damage": 0,
-            "hit_roll": None, "hit_target": hit_target, "hit_target_base": hit_target_base,
-            "hit_rule_modifier": hit_rule_modifier,
-            "wound_roll": None, "wound_target": wth, "wound_ability_display_name": None,
-            "save_roll": 0, "save_target": save_th, "save_skipped": False, "save_skip_reason": None,
-            "critical_wound_unmodified": False, "devastating_wounds_applied": False,
-            "hazardous_test_required": has_hazardous, "hazardous_test_roll": None, "hazardous_triggered": False,
-            "ap_modifier_ability_display_name": ap_modifier_ability_display_name,
-            "weapon_name": weapon_name,
-        }
-        base.update(overrides)
-        parts = [f"HIT:{base.get('hit_roll','?')}/{hit_target}"]
-        if base.get("wound_roll") is not None:
-            parts.append(f"WOUND:{base['wound_roll']}/{wth}")
-        if base.get("save_roll"):
-            parts.append(f"SAVE:{base['save_roll']}/{save_th}")
-        parts.append(f"DMG:{base['damage']}")
-        base["attack_log"] = " ".join(parts)
-        base["devastating_wounds_flag"] = base["devastating_wounds_applied"]
-        return base
-
-    # 1. Jet de touche
-    hit_roll = random.randint(1, 6)
-
-    # 2. Jet HAZARDOUS (même en cas de miss)
-    hazardous_test_roll: Optional[int] = None
-    hazardous_triggered = False
-    if has_hazardous:
-        hazardous_test_roll = random.randint(1, 6)
-        hazardous_triggered = hazardous_test_roll == 1
-
-    hit_success = hit_roll != 1 and hit_roll >= effective_bs
-    if not hit_success:
-        return _base_result(
-            hit_success=False, hit_roll=hit_roll,
-            hazardous_test_roll=hazardous_test_roll, hazardous_triggered=hazardous_triggered,
-        )
-
-    # 3. Jet de blessure (avec reroll éventuel)
-    wound_roll = random.randint(1, 6)
-    wound_ability_display_name: Optional[str] = None
-
-    try:
-        reroll1 = next(r for r in unit_rules if r.get("ruleId") == "reroll_1_towound")
-    except StopIteration:
-        reroll1 = None
-    if reroll1 and wound_roll == 1:
-        wound_roll = random.randint(1, 6)
-        wound_ability_display_name = reroll1.get("displayName", "").upper()
-
-    wound_success_pre = wound_roll != 1 and wound_roll >= wth
-    if not wound_success_pre:
-        try:
-            reroll_obj = next(r for r in unit_rules if r.get("ruleId") == "reroll_towound_target_on_objective")
-        except StopIteration:
-            reroll_obj = None
-        if reroll_obj:
-            target_col, target_row = int(target.get("col", -1)), int(target.get("row", -1))
-            on_obj = any(
-                [target_col, target_row] == list(h)[:2]
-                for obj in require_key(game_state, "objectives")
-                for h in require_key(obj, "hexes")
-            )
-            if on_obj:
-                wound_roll = random.randint(1, 6)
-                wound_ability_display_name = reroll_obj.get("displayName", "").upper()
-
-    wound_success = wound_roll != 1 and wound_roll >= wth
-    critical_wound = wound_roll == 6
-
-    if not wound_success:
-        return _base_result(
-            hit_success=True, hit_roll=hit_roll,
-            wound_roll=wound_roll, wound_ability_display_name=wound_ability_display_name,
-            critical_wound_unmodified=critical_wound,
-            hazardous_test_roll=hazardous_test_roll, hazardous_triggered=hazardous_triggered,
-        )
-
-    # 4. DEVASTATING_WOUNDS : blessure critique (6) → save sauté
-    if has_devastating and critical_wound:
-        try:
-            dmg = resolve_dice_value(dmg_raw, f"attack_seq_dmg_{attacker_id}")
-        except Exception:
-            dmg = int(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1
-        return _base_result(
-            hit_success=True, wound_success=True, save_success=False, damage=dmg,
-            hit_roll=hit_roll,
-            wound_roll=wound_roll, wound_ability_display_name=wound_ability_display_name,
-            save_roll=0, save_skipped=True, save_skip_reason="DEVASTATING_WOUNDS",
-            critical_wound_unmodified=True, devastating_wounds_applied=True,
-            hazardous_test_roll=hazardous_test_roll, hazardous_triggered=hazardous_triggered,
-        )
-
-    # 5. Jet de sauvegarde
-    save_roll = random.randint(1, 6)
-    save_success = save_roll != 1 and save_roll >= save_th
-
-    damage = 0
-    if not save_success:
-        try:
-            damage = resolve_dice_value(dmg_raw, f"attack_seq_dmg_{attacker_id}")
-        except Exception:
-            damage = int(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1
-
-    return _base_result(
-        hit_success=True, wound_success=True, save_success=save_success, damage=damage,
-        hit_roll=hit_roll,
-        wound_roll=wound_roll, wound_ability_display_name=wound_ability_display_name,
-        save_roll=save_roll, save_skipped=False,
-        critical_wound_unmodified=critical_wound, devastating_wounds_applied=False,
-        hazardous_test_roll=hazardous_test_roll, hazardous_triggered=hazardous_triggered,
-    )

@@ -1213,13 +1213,10 @@ class W40KEngine(gym.Env):
                 "_move_after_shooting_resolved",
                 "_move_after_shooting_distance",
                 "_current_shoot_nb",
-                "_rapid_fire_context_weapon_index",
-                "_rapid_fire_base_nb",
-                "_rapid_fire_shots_fired",
-                "_rapid_fire_bonus_total",
-                "_rapid_fire_rule_value",
-                "_rapid_fire_bonus_shot_current",
-                "_rapid_fire_bonus_applied_by_weapon",
+                # Les 7 champs `_rapid_fire_*` ont ete retires le 2026-07-29 (V11 §0hist.38) :
+                # plus rien ne les ecrit depuis que [RAPID FIRE] 24.30 est resolu a la
+                # constitution du pool d attaques (`_manual_roll_intent`). Purger une cle que
+                # personne ne pose n a aucun effet, mais laisse croire a un etat qui existe.
             )
             for field_name in transient_shoot_fields:
                 if field_name in unit:
@@ -2144,14 +2141,7 @@ class W40KEngine(gym.Env):
                             f"'valid_target_pool_sample': {valid_target_pool_sample}, "
                             f"'shoot_activation_started': {active_unit.get('_shoot_activation_started')}, "
                             f"'manual_weapon_selected': {active_unit.get('_manual_weapon_selected')}, "
-                            f"'shooting_with_close_quarters': {active_unit.get('_shooting_with_close_quarters')}, "
-                            f"'rapid_fire_context_weapon_index': {active_unit.get('_rapid_fire_context_weapon_index')}, "
-                            f"'rapid_fire_base_nb': {active_unit.get('_rapid_fire_base_nb')}, "
-                            f"'rapid_fire_shots_fired': {active_unit.get('_rapid_fire_shots_fired')}, "
-                            f"'rapid_fire_bonus_total': {active_unit.get('_rapid_fire_bonus_total')}, "
-                            f"'rapid_fire_rule_value': {active_unit.get('_rapid_fire_rule_value')}, "
-                            f"'rapid_fire_bonus_shot_current': {active_unit.get('_rapid_fire_bonus_shot_current')}, "
-                            f"'rapid_fire_bonus_applied_by_weapon': {active_unit.get('_rapid_fire_bonus_applied_by_weapon')}"
+                            f"'shooting_with_close_quarters': {active_unit.get('_shooting_with_close_quarters')}"
                             "}"
                         )
             move_pool = len(require_key(self.game_state, "move_activation_pool"))
@@ -5016,6 +5006,16 @@ class W40KEngine(gym.Env):
         "saveRoll": "save_roll",
         "saveTarget": "save_target",
         "damageDealt": "damage_dealt",
+        # Regles d armes : sans ces cles, les branches d affichage du formateur du StepLogger
+        # sont INATTEIGNABLES, et les controles de conformite de `ai/analyzer_phases/
+        # shoot_handler.py` (qui les cherchent par regex dans la ligne) restent muets — tout
+        # comme le replay (`replayParser.ts`). Chaine verrouillee de bout en bout par
+        # tests/unit/ai/test_step_log_weapon_rule_tokens.py. Cf. V11 §0hist.38.
+        "saveSkipped": "save_skipped",
+        "saveSkipReason": "save_skip_reason",
+        # Nom de l abilite d unite qui a ouvert la relance de blessure, quand elle a
+        # EFFECTIVEMENT eu lieu (le socle trace la cause, `_manual_roll_intent` la nomme).
+        "woundAbility": "wound_ability_display_name",
     }
 
     def _models_segment_for_unit(self, unit_id: Any, label: str = "MODELS") -> str:
@@ -5068,6 +5068,27 @@ class W40KEngine(gym.Env):
         weapon_name = raw_log.get("weaponName")  # get allowed
         if weapon_name:
             details["weapon_name"] = weapon_name
+        # [HEAVY] 24.16 : proprietes de l ACTIVATION (constantes sur le groupe), pas du jet —
+        # elles viennent donc du log de groupe, pas de `shot`. Le formateur en tire
+        # `Hit 4(4+->3+) [HEAVY]`, que l analyzer et le replay cherchent par regex.
+        # Absentes en melee (ni couvert ni HEAVY) : etat metier valide.
+        if raw_log.get("heavyApplied"):  # get allowed
+            details["hit_rule_modifier"] = "HEAVY"
+            details["hit_target_base"] = raw_log.get("bsBase")  # get allowed
+        # Benefit of Cover 13.08 : dans CE moteur le couvert degrade le SEUIL DE TOUCHE
+        # (`_cover_worsened_bs`), pas la sauvegarde — le token va donc du cote de la touche,
+        # comme [HEAVY]. Le formateur du StepLogger portait l ancien modele (couvert sur la
+        # sauvegarde, `save_cover_applied`/`save_target_base`), que plus rien n alimentait.
+        elif raw_log.get("cover"):  # get allowed
+            details["hit_rule_modifier"] = "COVER"
+            details["hit_target_base"] = raw_log.get("bsBase")  # get allowed
+        # [RAPID FIRE] 24.30 : la regle grossit le POOL d attaques du groupe, elle n est pas
+        # une propriete d un jet — le marqueur est donc porte par toutes les lignes du groupe.
+        # C est ce qui leve le plafond de tirs cote analyzer (NB de base -> NB + X).
+        _rapid_fire = raw_log.get("rapidFireApplied")  # get allowed
+        if _rapid_fire:
+            details["rapid_fire_bonus_shot"] = True
+            details["rapid_fire_rule_value"] = int(_rapid_fire)
         # Les 11 champs par-jet : la cle DOIT exister (le formateur teste `not in details`).
         for src, dst in self._SHOT_RECORD_FIELD_MAP.items():
             details[dst] = shot.get(src)  # get allowed

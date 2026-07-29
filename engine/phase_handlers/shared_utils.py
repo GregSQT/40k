@@ -2239,7 +2239,6 @@ def get_source_unit_rule_display_name_for_effect(
 ) -> Optional[str]:
     """Public helper returning source display name for a technical effect rule."""
     return _get_source_unit_rule_display_name_for_effect(unit, effect_rule_id)
-    return None
 
 
 def _build_reactive_move_destinations_pool(
@@ -6903,6 +6902,17 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "target_died": g["kills"] > 0,
         "timestamp": "server_time",
         "is_ai_action": g["player"] == 1,
+        # Regles d armes en clair (pas seulement noyees dans `message`) : le step.log et le
+        # replay en tirent `Hit 4(4+->3+) [HEAVY]` et `[RAPID FIRE:X]`, et les controles de
+        # `ai/analyzer_phases/shoot_handler.py` les cherchent par regex. Sans ces cles, la
+        # ligne ne peut pas les porter et les controles restent muets. Cf. V11 §0hist.38.
+        # `bs_base` n existe QUE sur le chemin tir (pose avec `cover`) : en melee il n y a ni
+        # couvert ni [HEAVY], son absence est un etat metier valide, pas une erreur a masquer.
+        "bs": g["bs"],
+        "bsBase": g["bs_base"] if "bs_base" in g else None,
+        "heavyApplied": bool(g["heavy_applied"]),
+        "cover": bool(g["cover"]) if "cover" in g else False,
+        "rapidFireApplied": int(g["rapid_fire_applied"]) if "rapid_fire_applied" in g else 0,
         "shootDetails": [{"shotNumber": i + 1, **s} for i, s in enumerate(g["shots"])],
     })
 
@@ -7277,10 +7287,16 @@ def _manual_roll_intent(
     # Positions figees pendant la resolution => mesurer ici == « Select Targets step ».
     from engine.utils.weapon_helpers import weapon_rule_parameter
     _rf_x = weapon_rule_parameter(weapon, "RAPID_FIRE")
+    # Valeur EFFECTIVEMENT appliquee (0 si l arme ne porte pas la regle ou si la cible est
+    # hors demi-portee) : le log de tir en tire le token `[RAPID FIRE:X]`, dont l analyzer se
+    # sert pour lever le PLAFOND de tirs de l escouade (NB de base -> NB + X). Sans lui, toute
+    # activation RAPID FIRE produisait de faux « shots over RNG_NB ». Cf. V11 §0hist.38.
+    _rapid_fire_applied = 0
     if _rf_x is not None and _target_within_half_range(
         game_state, str(attacker["squad_id"]), target_sid, weapon
     ):
         n_attacks += _rf_x
+        _rapid_fire_applied = int(_rf_x)
     if n_attacks <= 0:
         return None
     bs_base = int(weapon.get("ATK", weapon.get("BS", 4)))  # get allowed
@@ -7352,8 +7368,8 @@ def _manual_roll_intent(
     attacker_unit = get_unit_by_id(game_state, str(attacker["squad_id"]))
     # closest_target_penetration (regle projet unit_rules.json) : +1 de penetration (AP-1,
     # convention AP negatif cf. save_threshold) quand l unite tire sur la cible ELIGIBLE la
-    # plus proche. Porte du code MORT _attack_sequence_rng (shooting_handlers) vers le chemin
-    # VIF. La distance se mesure au niveau ESCOUADE (attacker["squad_id"]) : « closest eligible
+    # plus proche. Seule implementation depuis la suppression du code mort de tir (V11 §0.38).
+    # La distance se mesure au niveau ESCOUADE (attacker["squad_id"]) : « closest eligible
     # unit » est une determination d unite (01.04, bord-a-bord via le selecteur `ranged`), pas
     # par figurine — attacker est ici une FIGURINE (models_cache), d ou le squad_id explicite.
     if attacker_unit is not None and _unit_has_rule_effect(attacker_unit, "closest_target_penetration"):
@@ -7408,6 +7424,34 @@ def _manual_roll_intent(
         rerolls=RerollProfile(wound_1=reroll_wound1, wound_any_fail=reroll_wound_obj),
         roll_d6=lambda: random.randint(1, 6),
     )
+    # Nom de l ABILITE qui a ouvert chaque relance de blessure. Le socle rend la CAUSE
+    # (`wound_1` / `wound_any_fail` / `twin_linked`) ; seules les deux premieres sont des
+    # abilites d unite, et leur nom d affichage est celui de la REGLE SOURCE qui accorde
+    # l effet (ex. « Targeted Intercession » pour l effet `reroll_1_towound`). `twin_linked`
+    # est une regle d ARME, deja identifiee par ailleurs : aucun nom d abilite.
+    _effect_by_cause = {
+        "wound_1": "reroll_1_towound" if reroll_wound1 else None,
+        "wound_any_fail": "reroll_towound_target_on_objective" if reroll_wound_obj else None,
+    }
+    _ability_by_cause: Dict[str, Optional[str]] = {}
+    for _rec in rolled["shot_records"]:
+        _cause = _rec.pop("woundRerollCause", None)  # get allowed
+        if not _cause or attacker_unit is None:
+            continue
+        if _cause not in _ability_by_cause:
+            # Resolution PARESSEUSE, et memoisee sur l intent : on ne lit le nom d affichage
+            # que si une relance a REELLEMENT eu lieu. `get_source_unit_rule_display_name_for_effect`
+            # exige un `displayName` non vide sur la regle source (contrat deja porteur ailleurs
+            # en production) — inutile de l exiger d une unite dont aucune relance n a joue.
+            _effect = _effect_by_cause.get(_cause)  # get allowed
+            _ability_by_cause[_cause] = (
+                get_source_unit_rule_display_name_for_effect(attacker_unit, _effect)
+                if _effect else None
+            )
+        _ability = _ability_by_cause[_cause]
+        if _ability:
+            _rec["woundAbility"] = str(_ability)
+
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": bs, "bs_base": bs_base, "cover": cover, "ap": ap,
@@ -7416,6 +7460,7 @@ def _manual_roll_intent(
         # de l arme, avec la meme primitive que le gate de tir. RNG n est exige que si l arme
         # porte la regle (seul cas ou la valeur est lue).
         "heavy_applied": _heavy_applied,
+        "rapid_fire_applied": _rapid_fire_applied,
         "precision": _weapon_precision,
         "precision_range": int(require_key(weapon, "RNG")) if _weapon_precision else None,
         "display_wth": display_wth, "display_save_th": display_save_th,
@@ -7485,18 +7530,21 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     dmg_raw = g["dmg_raw"]
     rec = pw["rec"]
     save_th = save_threshold(int(m["ARMOR_SAVE"]), int(m.get("INVUL_SAVE", 7)), ap)
-    save_roll = int(pw["save_roll"])
     rec["saveTarget"] = save_th
     # DEVASTATING_WOUNDS (weapon_rules.json) : « No saving throw can be made against a critical
     # wound. » Le flag est pose au jet (blessure critique = 6 non modifie). On SAUTE la
     # comparaison de save : la blessure echoue d office, degats appliques comme une save ratee.
     _devastating = bool(pw.get("devastating"))
-    # Save reussie : roll != 1 et >= seuil. Aucun degat. (Court-circuitee si devastating.)
-    if not _devastating and save_roll != 1 and save_roll >= save_th:
-        rec["saveSuccess"] = True
-        rec["damageDealt"] = 0
-        batch["pool_index"] += 1
-        return
+    if not _devastating:
+        # Le de n existe QUE hors DEVASTATING : sur un critique, la sauvegarde n a pas ete
+        # faite (24.10), donc `pw["save_roll"]` vaut None — le lire serait une erreur.
+        save_roll = int(require_key(pw, "save_roll"))
+        # Save reussie : roll != 1 et >= seuil. Aucun degat.
+        if save_roll != 1 and save_roll >= save_th:
+            rec["saveSuccess"] = True
+            rec["damageDealt"] = 0
+            batch["pool_index"] += 1
+            return
     rec["saveSuccess"] = False
     if _devastating:
         # DEVASTATING_WOUNDS (24.10) : blessure critique -> blessure MORTELLE. Aucune save
@@ -7504,6 +7552,9 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
         # No Pain (point d accroche unique). Degats = D appliques a UNE figurine (excess perdu
         # ci-dessous, comme « max one model per critical wound »).
         rec["saveSkipped"] = True
+        # Motif de saut : consomme par le formateur du StepLogger (`Save [DEVASTATING WOUNDS]`),
+        # que l analyzer ET le replay cherchent par regex. Sans cette cle, les deux sont aveugles.
+        rec["saveSkipReason"] = "DEVASTATING_WOUNDS"
         rec["mortalWound"] = True
     summary["failed_saves"] += 1
     # Degats tires UNIQUEMENT maintenant (save echouee).
@@ -7901,6 +7952,9 @@ def _build_manual_allocation(
                 # (constante sur toute l activation), donc jamais ambigue au sein d un groupe ;
                 # `bs` est de toute facon deja dans la cle de groupe.
                 "heavy_applied": bool(r["heavy_applied"]) if "heavy_applied" in r else False,
+                # [RAPID FIRE] 24.30 : propriete du couple (arme, cible) — donc constante sur
+                # le groupe, qui est justement cle par (arme, cible). Absente en melee.
+                "rapid_fire_applied": int(r["rapid_fire_applied"]) if "rapid_fire_applied" in r else 0,
                 "precision": require_key(r, "precision"),
                 "precision_range": require_key(r, "precision_range"),
                 "display_wth": r["display_wth"], "display_save_th": r["display_save_th"],

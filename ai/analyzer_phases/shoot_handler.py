@@ -143,9 +143,14 @@ def handle_shoot(
             if stats['first_error_lines']['shoot_after_flee'][player] is None:
                 stats['first_error_lines']['shoot_after_flee'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
 
-    # RULE METRICS: Targeted Intercession reroll (shooting)
+    # RULE METRICS: relance de blessure accordee par une ABILITE d unite.
+    # Le token est le nom d affichage de la REGLE SOURCE, entre CROCHETS — convention de tous
+    # les tokens du projet ([HEAVY], [COVER], [HAZARD]...), a laquelle le frontend accroche ses
+    # tooltips. L ancienne regex cherchait `(TARGETED_INTERCESSION)` entre PARENTHESES avec un
+    # underscore : une forme que le formateur n'a jamais produite, donc un compteur bloque a 0
+    # (V11 §0hist.38). Espace ou underscore acceptes, le nom venant de la config.
     shooter_unit_type_for_reroll = require_key(state.unit_types, shooter_id)
-    if re.search(r'\(TARGETED_INTERCESSION\)', action_desc, re.IGNORECASE):
+    if re.search(r'\[TARGETED[ _]INTERCESSION\]', action_desc, re.IGNORECASE):
         key = ("reroll_1_towound", shooter_unit_type_for_reroll)
         stats['special_rule_usage'][key][player] += 1
         key = ("reroll_towound_target_on_objective", shooter_unit_type_for_reroll)
@@ -321,24 +326,18 @@ def handle_shoot(
                 )
                 rng_nb_squad = rng_nb * n_shooter_models
                 rapid_fire_value_squad = rapid_fire_value * n_shooter_models
-                rapid_fire_bonus_window = (
-                    rapid_fire_value > 0
-                    and current_shot_index > rng_nb_squad
-                    and current_shot_index <= (rng_nb_squad + rapid_fire_value_squad)
-                )
-                rapid_fire_marker_valid = (
-                    rapid_fire_match is not None
-                    and rapid_fire_bonus_for_this_shot > 0
-                )
-                if rapid_fire_bonus_window and rapid_fire_marker_valid:
-                    stats['rapid_fire_correct'][shooter_player_for_stats] += 1
-                elif rapid_fire_bonus_window != rapid_fire_marker_valid:
-                    stats['rapid_fire_incorrect'][shooter_player_for_stats] += 1
-                    if stats['first_error_lines']['rapid_fire_incorrect'][shooter_player_for_stats] is None:
-                        stats['first_error_lines']['rapid_fire_incorrect'][shooter_player_for_stats] = {
-                            'episode': state.current_episode_num,
-                            'line': line.strip(),
-                        }
+                # [RAPID FIRE] 24.30 — le controle per-shot « ce tir est-il LE tir bonus ? »
+                # a ete SUPPRIME le 2026-07-29 (V11 §0hist.38). Il exigeait que le marqueur
+                # n'apparaisse QUE sur les tirs d'index > NB de base : une distinction heritee
+                # du moteur mort, qui resolvait les tirs un par un. Le moteur resout desormais
+                # un POOL d'attaques — 24.30 dit « increase this weapon's ATTACKS by X », et
+                # rien ne distingue une attaque d'une autre. Exiger du log qu'il designe « la »
+                # attaque bonus, c'est exiger une information qui n'existe pas.
+                # Ce qui reste, et qui est le VRAI invariant : le PLAFOND de tirs ci-dessous
+                # (`shoot_over_rng_nb`), que le marqueur de groupe rend enfin verifiable —
+                # sans lui, le plafond restait a NB de base et toute activation RAPID FIRE
+                # produisait des faux « shots over RNG_NB ».
+                # Non-regression : tests/unit/ai/test_step_log_weapon_rule_tokens.py
                 max_allowed_shots = rng_nb_squad + (
                     rapid_fire_value_squad if rapid_fire_bonus_for_this_shot > 0 else 0
                 )
@@ -542,16 +541,18 @@ def handle_shoot(
                 key = ("CLOSE_QUARTERS", weapon_key)
                 stats['weapon_rule_usage'][key][pl_int] += 1
         if heavy_applied_in_log:
-            key = ("HEAVY", weapon_key)
-            stats['weapon_rule_usage'][key][pl_int] += 1
-            moved_ids = {str(uid) for uid in state.units_moved}
-            advanced_ids = {str(uid) for uid in state.units_advanced}
-            heavy_valid = str(shooter_id) not in moved_ids and str(shooter_id) not in advanced_ids
-            if not heavy_valid:
-                stats['weapon_rule_invalid_usage'][key][pl_int] += 1
-                invalid_first = require_key(stats, "weapon_rule_invalid_first_lines")
-                if key not in invalid_first:
-                    invalid_first[key] = {'episode': state.current_episode_num, 'line': line.strip()}
+            # [HEAVY] 24.16 — USAGE seulement, jamais VALIDITE. Le contrôle de validité
+            # (`shooter in units_moved/units_advanced` → invalide) a été SUPPRIMÉ le
+            # 2026-07-29 : c'était la borne conservatrice du moteur d'AVANT le 2026-07-26,
+            # devenue un générateur de faux positifs. Le PDF autorise le bonus tant qu'aucune
+            # figurine n'a parcouru PLUS DE 3" — un déplacement de 2" le conserve, et le
+            # moteur l'accorde. Le critère n'est pas reconstructible depuis step.log (distance
+            # de CHEMIN géodésique PAR FIGURINE contre des ancres départ/arrivée), et le token
+            # n'est émis que si le moteur a APPLIQUÉ le bonus après avoir testé ses trois
+            # clauses : re-dériver à côté ne peut que contredire l'autorité.
+            # Vérification portée par tests/unit/engine/test_heavy_shoot.py.
+            # Non-régression : tests/unit/ai/test_analyzer_no_heavy_after_move_false_positive.py
+            stats['weapon_rule_usage'][("HEAVY", weapon_key)][pl_int] += 1
 
     # Target priority analysis
     stats['target_priority'][player]['total_shots'] += 1

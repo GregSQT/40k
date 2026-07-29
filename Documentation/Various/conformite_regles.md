@@ -7,10 +7,13 @@
 ## Problèmes transverses (prioritaires)
 
 1. **Feel No Pain absent partout** — 0 occurrence dans `engine/` (concerne tir ET combat).
-2. **Règles spéciales d'armes sans effet en partie réelle** — HEAVY, RAPID FIRE, TORRENT,
-   DEVASTATING_WOUNDS, LETHAL/SUSTAINED HITS, HAZARDOUS : soit absentes, soit confinées à la
-   fonction de test `_attack_sequence_rng` (`shooting_handlers.py:5935`, jamais appelée en prod).
-   Le chemin production `resolve_squad_shoot` → `_roll_squad_shot_sequence` ne les applique pas.
+2. ~~**Règles spéciales d'armes sans effet en partie réelle**~~ — **RÉSOLU** (V11 P1, puis
+   §0.38 le 2026-07-28). HEAVY, RAPID FIRE, TORRENT, DEVASTATING WOUNDS, LETHAL/SUSTAINED
+   HITS, TWIN-LINKED, ANTI-X, HAZARDOUS, MELTA, BLAST vivent dans le socle commun
+   `engine/phase_handlers/attack_sequence.py`, consommé par les deux rollers du chemin vif
+   (`shared_utils._manual_roll_intent` au tir, `fight_handlers._manual_roll_fight_intent` en
+   mêlée). La fonction de test `_attack_sequence_rng` qui les hébergeait a été supprimée, et
+   ses 5 fichiers de tests re-pointés sur le chemin vif.
 3. **Groupes d'allocation (05.03) simplifiés** — seuils to-wound/save figés sur la 1re figurine
    (`shared_utils.py:5616`) ; chemin auto fight = pool de PV unique. Unités hétérogènes /
    personnage attaché mal résolus. Correct uniquement sur le chemin PvP manuel.
@@ -73,9 +76,9 @@ réel dépasse le budget. → classé ⚠️ (non exploitable en jeu normal), pa
 | Sélection cible (LoS + portée + ennemi + non-engagé + pistolet) | ✅ | `shooting_handlers.py:2154-2268` |
 | Split fire (cible par arme), BLAST, COVER | ✅ | `shared_utils.py:4265/5263/5515` |
 | Feel No Pain | ❌ | Absent |
-| HEAVY, DEVASTATING_WOUNDS, HAZARDOUS, rerolls | ⚠️❌ | Chemin test uniquement (`shooting_handlers.py:5935`), inactifs en prod |
-| RAPID FIRE | ❌ | `_get_rapid_fire_parameter:230` jamais appelé |
-| TORRENT (auto-hit), LETHAL/SUSTAINED (crit 6) | ❌ | Absents |
+| HEAVY, DEVASTATING_WOUNDS, HAZARDOUS, rerolls | ✅ (2026-07-28, §0.38) | Vifs : HEAVY et les rerolls dans `_manual_roll_intent`, DEVASTATING dans `attack_sequence.roll_attack_pool` + `_resolve_one_manual_wound`, HAZARDOUS en fin d'activation (tir ET mêlée) |
+| RAPID FIRE | ✅ (2026-07-25) | `weapon_rule_parameter(weapon, "RAPID_FIRE")` dans `_manual_roll_intent`, à la constitution du pool d'attaques. L'ancien helper `_get_rapid_fire_parameter`, jamais appelé, a été supprimé (§0.38) |
+| TORRENT (auto-hit), LETHAL/SUSTAINED (crit 6), TWIN-LINKED, ANTI-X, MELTA | ✅ (2026-07-26) | `attack_sequence.py`, socle commun tir + mêlée |
 | Groupes d'allocation (05.03) | ⚠️ | Seuils figés sur 1re figurine (`shared_utils.py:5616`) |
 | Indirect / Close-quarters MONSTER-VEHICLE (−1 hit) | ❌ | Absents |
 
@@ -111,7 +114,7 @@ réel dépasse le budget. → classé ⚠️ (non exploitable en jeu normal), pa
 |---|---|---|
 | Command | Battle-shock ✅ | Command Points / stratagèmes absents |
 | Move | ✅ solide | Regaining Coherency fin de tour non câblé, 3D non modélisée |
-| Shoot | table blessures/save ✅ | **Règles d'armes + FNP inactifs en prod** |
+| Shoot | table blessures/save ✅, **règles d'armes vives (§0.38) et visibles dans step.log/analyzer/replay depuis le 2026-07-29** | **FNP absent** ; INDIRECT FIRE (24.19) non traité ; le nom d'abilité de relance n'est pas journalisé (feature, cf. §0hist.38) |
 | Charge | ✅ le plus conforme | Overwatch/Heroic (hors scope) |
 | Fight | ✅ V11 complet | Print debug en prod, chemin auto = pool PV unique, FNP |
 

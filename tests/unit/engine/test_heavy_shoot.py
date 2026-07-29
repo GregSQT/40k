@@ -47,9 +47,9 @@ def _neutralise(monkeypatch, *, engaged=False):
 INCHES_TO_SUBHEX = 5
 
 
-def _game_state(weapon_rules, *, moved_inches=0.0, deployed_on_turn=0):
-    """1 tireur (escouade '1', BS4) + 1 cible. `moved_inches` = distance parcourue par A1."""
-    weapon = {"BS": 4, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "WEAPON_RULES": weapon_rules, "display_name": "Gun"}
+def _game_state(weapon_rules, *, moved_inches=0.0, deployed_on_turn=0, bs=4):
+    """1 tireur (escouade '1', BS4 par defaut) + 1 cible. `moved_inches` = distance parcourue par A1."""
+    weapon = {"BS": bs, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "WEAPON_RULES": weapon_rules, "display_name": "Gun"}
     attacker = {"id": "A1", "squad_id": "1", "T": 4, "player": 0, "RNG_WEAPONS": [weapon]}
     target_model = {"id": "T1", "T": 4, "HP_CUR": 2, "HP_MAX": 2, "ARMOR_SAVE": 3,
                     "INVUL_SAVE": 7, "role": None, "unitType": "Grunt", "player": 1}
@@ -165,6 +165,25 @@ def test_le_log_de_tir_affiche_le_token_heavy(monkeypatch):
 
     assert "Hit:3+ [HEAVY]" in stationnaire, stationnaire
     assert "[HEAVY]" not in apres_mouvement, apres_mouvement
+
+
+def test_heavy_ne_descend_jamais_le_seuil_sous_2(monkeypatch):
+    """Plancher 05.01 : BS 2+ ameliore de 1 resterait 1+, or un 1 non modifie rate TOUJOURS.
+    Le seuil effectif reste donc 2, et le seuil de BASE (affichage) n est pas altere."""
+    _neutralise(monkeypatch)
+    gs, intent = _game_state(["HEAVY"], bs=2)
+    result = roll_shoot_intent(gs, intent)
+    assert result["bs"] == 2, "max(2, bs-1) : le bonus ne cree pas de seuil 1+"
+    assert result["bs_base"] == 2, "le seuil de base reste celui de l arme"
+    assert result["heavy_applied"] is True, "le bonus est bien APPLIQUE, il est juste plafonne"
+
+
+def test_le_seuil_de_base_est_conserve_quand_heavy_ameliore(monkeypatch):
+    """`bs` (effectif) et `bs_base` (arme) sont distincts : le log affiche l amelioration."""
+    _neutralise(monkeypatch)
+    gs, intent = _game_state(["HEAVY"])
+    result = roll_shoot_intent(gs, intent)
+    assert (result["bs"], result["bs_base"]) == (3, 4)
 
 
 def test_sans_heavy_pas_de_bonus(monkeypatch):

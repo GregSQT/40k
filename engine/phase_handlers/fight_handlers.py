@@ -6017,5 +6017,3 @@ def execute_action(  # noqa: F811 (V11 override of V10)
     if _is_fight_auto_execution_allowed(game_state):
         return _fight_v11_auto_step(game_state, config)
     return _fight_v11_manual_step(game_state, unit, action, config)
-
-    return False

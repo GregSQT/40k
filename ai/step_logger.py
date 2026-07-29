@@ -492,8 +492,6 @@ class StepLogger:
             hit_rule_modifier = details.get("hit_rule_modifier")
             wound_target = details["wound_target"]
             save_target = details["save_target"]
-            save_target_base = details.get("save_target_base")
-            save_cover_applied = bool(details.get("save_cover_applied", False))
             save_skipped = bool(details.get("save_skipped", False))
             save_skip_reason = details.get("save_skip_reason")
             rapid_fire_bonus_shot = bool(details.get("rapid_fire_bonus_shot", False))
@@ -528,8 +526,15 @@ class StepLogger:
                 base_msg = f"{unit_label} SHOT{shot_tags_suffix} {target_label} with [{weapon_name}]"
             else:
                 base_msg = f"{unit_label} SHOT{shot_tags_suffix} {target_label}"
-            hit_rule_suffix = " [HEAVY]" if hit_rule_modifier == "HEAVY" else ""
-            if hit_rule_modifier == "HEAVY" and isinstance(hit_target_base, int):
+            # Tokens du cote TOUCHE : [HEAVY] 24.16 (+1 au jet) et [COVER] 13.08 (-1 au jet —
+            # dans ce moteur le couvert degrade le SEUIL DE TOUCHE, pas la sauvegarde, cf.
+            # `_cover_worsened_bs`). Meme mecanique pour les deux : token + affichage
+            # `base+->effectif+`. Le frontend y accroche le tooltip de la regle (GameLog.tsx),
+            # l analyzer y compte l usage.
+            hit_rule_suffix = (
+                f" [{hit_rule_modifier}]" if hit_rule_modifier in ("HEAVY", "COVER") else ""
+            )
+            if hit_rule_modifier in ("HEAVY", "COVER") and isinstance(hit_target_base, int):
                 hit_target_display = f"{hit_target_base}+->{hit_target}+"
             else:
                 hit_target_display = f"{hit_target}+"
@@ -546,22 +551,17 @@ class StepLogger:
                         detail_parts.append("Save [DEVASTATING WOUNDS]")
                         detail_parts.append(f"Dmg:{damage}HP")
                     else:
-                        if save_cover_applied:
-                            if not isinstance(save_target_base, int):
-                                raise KeyError(
-                                    "Shoot action missing required save_target_base when save_cover_applied is True"
-                                )
-                            save_target_display = f"{save_target_base}+->{save_target}+"
-                        else:
-                            save_target_display = f"{save_target}+"
-                        save_part = f"Save {save_roll}({save_target_display})"
+                        # Le couvert ne touche PAS la sauvegarde dans ce moteur : 13.08 y
+                        # degrade le SEUIL DE TOUCHE (`_cover_worsened_bs`), et le token
+                        # [COVER] est rendu de ce cote-la (plus haut). L ancienne branche
+                        # `save_cover_applied` / `save_target_base` portait le modele du code
+                        # mort de tir et n avait plus aucun producteur (V11 §0hist.38).
+                        save_part = f"Save {save_roll}({save_target}+)"
                         if (
                             isinstance(ap_modifier_ability_display_name, str)
                             and ap_modifier_ability_display_name.strip()
                         ):
                             save_part += f" [{ap_modifier_ability_display_name.strip().upper()}]"
-                        if save_cover_applied:
-                            save_part += " [COVER]"
                         detail_parts.append(save_part)
                         if save_result == "FAIL":
                             detail_parts.append(f"Dmg:{damage}HP")
@@ -729,8 +729,9 @@ class StepLogger:
             hit_target = details["hit_target"]
             wound_target = details["wound_target"]
             save_target = details["save_target"]
-            save_target_base = details.get("save_target_base")
-            save_cover_applied = bool(details.get("save_cover_applied", False))
+            # Pas de couvert en melee : 13.08 (« Benefit of Cover ») est ranged-only. Les
+            # variables `save_cover_applied` / `save_target_base` de cette branche etaient
+            # mortes deux fois — regle inapplicable ET plus aucun producteur (V11 §0hist.38).
             wound_ability_display_name = details.get("wound_ability_display_name")
             
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
@@ -758,18 +759,7 @@ class StepLogger:
                 
                 # Only show save if wound succeeded  
                 if wound_result in ("WOUND", "SUCCESS"):
-                    if save_cover_applied:
-                        if not isinstance(save_target_base, int):
-                            raise KeyError(
-                                "Combat action missing required save_target_base when save_cover_applied is True"
-                            )
-                        save_target_display = f"{save_target_base}+->{save_target}+"
-                    else:
-                        save_target_display = f"{save_target}+"
-                    save_part = f"Save {save_roll}({save_target_display})"
-                    if save_cover_applied:
-                        save_part += " [COVER]"
-                    detail_parts.append(save_part)
+                    detail_parts.append(f"Save {save_roll}({save_target}+)")
                     
                     # Show damage if save failed (even if damage is 0, it should be logged)
                     if save_result == "FAIL":

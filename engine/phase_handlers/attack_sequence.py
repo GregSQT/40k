@@ -307,6 +307,11 @@ def roll_attack_pool(
                 profile.lethal_hits and critical_hit_here
                 and lethal_hits_auto_wound_is_better(profile, wound_target, save_threshold_value)
             )
+            # Cause de la relance de blessure, quand il y en a une : `wound_1` /
+            # `wound_any_fail` (abilites d UNITE) ou `twin_linked` (regle d ARME). L appelant en
+            # tire le nom d abilite affiche dans le log — sans cette trace, il sait seulement
+            # que la relance etait POSSIBLE, jamais qu elle a EU LIEU. Cf. V11 §0hist.38.
+            wound_reroll_cause: Optional[str] = None
             if auto_wound:
                 # [LETHAL HITS] 24.23 : blessure automatique, AUCUN jet de blessure -> aucune
                 # blessure critique possible (donc pas de DEVASTATING sur cette attaque).
@@ -328,11 +333,22 @@ def roll_attack_pool(
                     or profile.twin_linked
                 )
                 if not wound_success and may_reroll:
+                    # Meme ordre de priorite que `may_reroll` ci-dessus : le miroir exact, pour
+                    # que la cause enregistree soit bien celle qui a ouvert la relance.
+                    if wound_roll == NATURAL_FAIL_ROLL and rerolls.wound_1:
+                        wound_reroll_cause = "wound_1"
+                    elif rerolls.wound_any_fail:
+                        wound_reroll_cause = "wound_any_fail"
+                    else:
+                        wound_reroll_cause = "twin_linked"
                     wound_roll = roll_d6()
                     is_critical_wound = wound_roll >= profile.crit_wound_on
                     wound_success = is_critical_wound or (
                         wound_roll != NATURAL_FAIL_ROLL and wound_roll >= wound_target
                     )
+
+            if wound_reroll_cause is not None:
+                base_rec["woundRerollCause"] = wound_reroll_cause
 
             if not wound_success:
                 base_rec.update({
@@ -343,19 +359,29 @@ def roll_attack_pool(
                 continue
 
             wounds += 1
-            save_roll = roll_d6()
-            if save_roll == NATURAL_FAIL_ROLL and rerolls.save_1:
-                save_roll = roll_d6()
-            base_rec.update({
-                "strengthRoll": wound_roll, "strengthResult": "SUCCESS",
-                "woundTarget": wound_target, "saveRoll": save_roll, "damageDealt": 0,
-            })
-            if auto_wound:
-                base_rec["lethalHit"] = True
             # [DEVASTATING WOUNDS] 24.10 : la sequence de CETTE attaque s arrete sur une
             # blessure critique ; la cible subit D blessures mortelles, infligees APRES les
             # degats normaux (ordonnancement fait par l appelant a l allocation).
             devastating = bool(profile.devastating and is_critical_wound)
+            # « No saving throw can be MADE against a critical wound » : la sauvegarde n est
+            # pas faite du tout — aucun de tire, aucune relance, aucun `saveRoll` au record.
+            # Avant le 2026-07-29 le de etait tire PUIS jete : sans effet sur le jeu, mais il
+            # laissait dans le record une valeur que le log affichait (`Save 6(2+)` sur une
+            # blessure mortelle), ce que le controle de conformite de l analyzer classe en
+            # `devastating_wounds_incorrect`. Cf. V11 §0hist.38.
+            save_roll: Optional[int] = None
+            if not devastating:
+                save_roll = roll_d6()
+                if save_roll == NATURAL_FAIL_ROLL and rerolls.save_1:
+                    save_roll = roll_d6()
+            base_rec.update({
+                "strengthRoll": wound_roll, "strengthResult": "SUCCESS",
+                "woundTarget": wound_target, "damageDealt": 0,
+            })
+            if not devastating:
+                base_rec["saveRoll"] = save_roll
+            if auto_wound:
+                base_rec["lethalHit"] = True
             if is_critical_wound:
                 base_rec["criticalWound"] = True
             if devastating:
