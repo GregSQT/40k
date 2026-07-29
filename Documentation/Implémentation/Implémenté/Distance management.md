@@ -673,7 +673,10 @@ la métrique suit le run analysé.
 - ✅ **Grep de contrôle fait (2026-07-04)** : aucun call-site de portée/budget tir/move/charge/EZ n'appelle
   `calculate_hex_distance`. Les occurrences restantes (~77) sont toutes de la dette hex assumée (tableau
   ci-dessous) : observations/reward (§10), prune `_enemy_items_within_move_engagement_horizon` (superset),
-  ranking RL `_select_strategic_destination`, adjacence/contact, consolidation/pile-in (§20.7).
+  ~~ranking RL `_select_strategic_destination`~~ (movement_handlers : **supprimé le 2026-07-29**,
+  code mort — la destination est devenue une dimension d'action, cf. la pierre tombale dans
+  `engine/phase_handlers/movement_handlers.py` ; le jumeau de `charge_handlers` a suivi),
+  adjacence/contact, consolidation/pile-in (§20.7).
 - ✅ **Orphelins supprimés (2026-07-04)** : `_fight_enemy_footprint_distances` + `enemy_footprint_distances`
   (Étape 6 nettoyage tests) ; `_is_hex_adjacent_to_enemy` + `_compute_charge_preview_zone` (charge_handlers).
 - ✅ **Clé `distance_metric` documentée** (ci-dessous).

@@ -1858,53 +1858,20 @@ class ActionDecoder:
         )
         return (col, row)
     
-    # ============================================================================
-    # TARGET VALIDATION
-    # ============================================================================
-    
-    def get_all_valid_targets(self, unit: Dict[str, Any], game_state: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Get all valid targets for unit based on current phase."""
-        targets = []
-        units_cache = require_key(game_state, "units_cache")
-        unit_player = int(unit["player"]) if unit["player"] is not None else None
-        for enemy_id, cache_entry in units_cache.items():
-            if int(cache_entry["player"]) != unit_player:
-                enemy = get_unit_by_id(enemy_id, game_state)
-                if enemy is None:
-                    raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
-                targets.append(enemy)
-        return targets
-    
-    def can_melee_units_charge_target(self, target: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
-        """Check if any friendly melee units can charge this target."""
-        current_player = game_state["current_player"]
-        
-        units_cache = require_key(game_state, "units_cache")
-        for unit_id, cache_entry in units_cache.items():
-            if cache_entry["player"] == current_player:
-                unit = get_unit_by_id(unit_id, game_state)
-                if unit is None:
-                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-                if (unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0 and
-                    any(require_key(w, "DMG") > 0 for w in unit["CC_WEAPONS"])):  # Has melee capability
-                    
-                    # Simple charge range check (2d6 movement + unit MOVE)
-                    if "MOVE" not in unit:
-                        raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
-                    from shared.data_validation import require_key as _rk
-                    from engine.hex_utils import min_distance_between_sets as _mds
-                    _gr = _rk(_rk(game_state, "config"), "game_rules")
-                    max_charge_range = unit["MOVE"] + _rk(_rk(game_state["config"], "charge"), "charge_max_distance")
-                    _cache = _rk(game_state, "units_cache")
-                    _ue = _cache.get(str(unit["id"]))
-                    _te = _cache.get(str(target["id"]))
-                    _uc = get_unit_coordinates(unit)
-                    _tc = get_unit_coordinates(target)
-                    unit_fp = _ue.get("occupied_hexes", {_uc}) if _ue else {_uc}
-                    target_fp = _te.get("occupied_hexes", {_tc}) if _te else {_tc}
-                    distance = _mds(unit_fp, target_fp, max_distance=max_charge_range)
-
-                    if distance <= max_charge_range:
-                        return True
-        
-        return False
+    # ── PIERRE TOMBALE — « TARGET VALIDATION » de l'ancien décodeur (2026-07-29) ──────────────
+    # Ont vécu ici :
+    #   `get_all_valid_targets`          rendait TOUS les ennemis vivants, sans filtre de phase
+    #                                    malgré sa docstring (« based on current phase »)
+    #   `can_melee_units_charge_target`  « un allié de mêlée pourrait-il charger cette cible ? »,
+    #                                    portée de charge approximée par `MOVE + charge_max_distance`
+    #
+    # POURQUOI elles étaient mortes : aucun appelant, nulle part (ni moteur, ni ai/, ni scripts,
+    # ni services). Les pools de cibles réels sont construits par les handlers de phase
+    # (`shooting_build_valid_target_pool`, pools 11.02 / 12.05) et exposés à l'agent par les
+    # slots de cible du masque ; le reward a sa PROPRE `_get_all_valid_targets`
+    # (`engine/reward_calculator.py`), qui n'a jamais eu de rapport avec celles-ci.
+    #
+    # LEÇON (§0bis) : ces deux méthodes étaient présentées comme « Key Methods » dans
+    # `Documentation/AI_IMPLEMENTATION.md` — une doc d'API décrit ce qu'on a écrit, jamais ce que
+    # la production appelle. Elle ne vaut pas preuve de vie.
+    # ─────────────────────────────────────────────────────────────────────────────────────────

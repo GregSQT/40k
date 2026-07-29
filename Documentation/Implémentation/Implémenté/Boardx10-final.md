@@ -727,7 +727,7 @@ Après la migration Board×10 (socles multi-cellules, `occupied_hexes`), un audi
 | `engine/observation_builder.py` | ~901 | `_calculate_danger_probability` | `can_use_melee = distance <= melee_range` centre-centre |
 | `engine/observation_builder.py` | ~1958 | encode phase FIGHT | `is_valid = distance <= melee_range` centre-centre |
 | `engine/observation_builder.py` | ~1055 | `_can_melee_units_charge_target` | pathfinding centre→centre pour éligibilité charge |
-| `engine/action_decoder.py` | ~1511 | `can_melee_units_charge_target` | `distance <= max_charge_range` centre-centre |
+| ~~`engine/action_decoder.py`~~ | ~~~1511~~ | ~~`can_melee_units_charge_target`~~ | Sans objet : **fonction supprimée le 2026-07-29** (code mort, aucun appelant) |
 | `engine/reward_calculator.py` | ~1051 | `_calculate_expected_damage` | `can_use_melee = distance <= melee_range` centre-centre |
 
 #### Tier 2 — Importants (impact sur comportement bot adversaire)

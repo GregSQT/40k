@@ -159,9 +159,13 @@ C'est la source commune des gravités 1-2 ci-dessous.
 (14.02). Ce sont les règles *satellites* qui n'ont pas suivi.
 
 **G4 — heuristiques IA à l'ancre** (aucun impact règles, biais de politique seulement) :
-`_select_strategic_destination` (movement:3923+, charge:4169), `observation_builder.py:1043/2332`
+~~`_select_strategic_destination` (movement:3923+, charge:4169)~~ — **les DEUX supprimées le
+2026-07-29**, code mort (la destination de move et la cible de charge sont devenues des
+dimensions d'action ; pierres tombales dans `movement_handlers.py` et `charge_handlers.py`).
+Restent : `observation_builder.py:1043/2332`
 (« Anchor-based distance (approx, sufficient for RL obs) »), `analyzer.py:603`. Assumé et
-auto-documenté, sauf charge:4169 qui n'a **pas** de justification écrite.
+auto-documenté. (La réserve « charge:4169 n'a **pas** de justification écrite » est sans objet
+depuis la suppression : le code qu'elle visait n'existe plus.)
 
 **Ce qui est SAIN et ne doit pas être touché** : la **LoS** est entièrement par-figurine
 (`_compute_unit_los_uncached`, `_unit_can_see_any`, couvert 13.08 — itèrent sur `models_cache`) ;

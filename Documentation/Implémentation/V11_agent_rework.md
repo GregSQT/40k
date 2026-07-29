@@ -44,7 +44,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.46` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.45` le 2026-07-29).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.48` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.47` le 2026-07-29). ⚠️ `0.46` est pris par la branche parallèle `v11-0.46-dead-code-charge-heuristic` (elle ne touche pas ce fichier : renuméroter ici si son entrée arrive plus tard).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -60,7 +60,8 @@ occupaient encore la section « ouvert ». Ne restent ici que les **cinq** chant
 actionnables (§0.39, ouverte puis close le même jour, est descendue en §0hist avec les autres ;
 §0.40 ajoutée le 2026-07-28, contenu externalisé dès l'ouverture, **close et descendue en §0hist le 2026-07-29** ;
 **§0.45** ouverte et close le 2026-07-29 — suppression de `ai/scenario_manager.py`, écrite directement en §0hist,
-donc absente de ce tableau).
+donc absente de ce tableau ; **§0.47** idem le 2026-07-29 — suppression du décodeur et du masque de l'ancien
+espace d'actions, leçon écrite en §0bis, donc absente de ce tableau).
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
@@ -495,6 +496,38 @@ le run multi-env, pas le smoke, qui a validé.
 >
 > Ces passages existent pour **empêcher de re-diagnostiquer un faux problème**. Aucun ne doit
 > être résumé ni supprimé, même si l'entrée dont il vient est close.
+
+### Deux masques sans décodeur commun divergent EN SILENCE (§0.47, 2026-07-29)
+
+Écrit en supprimant le décodeur `convert_gym_action` et le masque de l'ancien espace d'actions
+(0-15) qui l'accompagnait. Les deux étaient morts pour la production depuis la bascule au
+pipeline squad (`get_squad_action_mask_and_eligible_units` + `convert_squad_action`, espace
+**1107**), mais leur dernier appelant réel était un outil d'**évaluation**,
+`scripts/roster_matchup_stats.py`, qui servait au modèle un masque de l'ANCIEN espace. Le modèle
+recevait donc des actions légales dans un vocabulaire qu'il ne parlait plus. **Rien n'a levé** :
+les deux masques ont la même longueur (elle vient de `TOTAL_ACTION_SIZE`), et un masque périmé
+n'est pas un masque invalide — c'est un masque *faux*. La mesure d'évaluation était fausse, en
+silence, pour une durée inconnue.
+
+**Ce qui aurait dû l'attraper ne pouvait pas.** `tests/unit/engine/test_action_space_mirror.py`
+compare les constantes de `macro_intents` à celles de `shared_utils` — **entre elles**, sans
+jamais appeler le décodeur. Un miroir parfaitement cohérent ne dit rien du ROUTAGE. Et les ~25
+tests qui exerçaient `convert_gym_action` étaient verts : ils testaient soigneusement une
+fonction que plus personne n'appelait.
+
+**Règle** : dès qu'il existe **deux** constructeurs de masque pour un même agent, l'un des deux
+est déjà mort ou le deviendra sans bruit. Le verrou n'est pas de comparer les constantes, c'est
+la **parité masque↔décodeur** : *tout entier ouvert par le masque doit être décodable sans lever,
+tout entier fermé doit lever*. Cette propriété attrape la classe entière — masque périmé, base
+décalée, famille d'actions orpheline — sans énumérer les familles à la main. Elle est en place
+dans `tests/unit/engine/test_agent_interface_contract.py` (V11 §8.2).
+
+**Corollaire d'audit** (confirmé le même jour sur trois autres symboles) : une doc d'API décrit
+ce qu'on a écrit, jamais ce que la production appelle — `AI_IMPLEMENTATION.md` présentait
+`get_all_valid_targets` et `can_melee_units_charge_target` comme « Key Methods » alors qu'aucune
+n'avait d'appelant. Et un symbole **dupliqué sous le même nom dans deux modules**
+(`_select_strategic_destination`, movement + charge) masque sa propre mort : le grep qui devrait
+le dénoncer trouve toujours « des » appelants. Vérifier par module, pas par nom.
 
 ### Un test qui contourne `__init__` atteste que la production ne peut pas construire l'objet (§0.45, 2026-07-29)
 

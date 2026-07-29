@@ -4135,118 +4135,20 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
 
 
-def _select_strategic_destination(
-    strategy_id: int,
-    valid_destinations: List[Tuple[int, int]],
-    unit: Dict[str, Any],
-    game_state: Dict[str, Any]
-) -> Tuple[int, int]:
-    """
-    Select movement destination based on strategic heuristic.
-    AI_TURN.md COMPLIANCE: Pure stateless function with direct field access.
-
-    Args:
-        strategy_id: 0=aggressive, 1=tactical, 2=defensive, 3=random
-        valid_destinations: List of valid (col, row) tuples from BFS
-        unit: Unit dict with position and stats
-        game_state: Full game state for enemy detection
-
-    Returns:
-        Selected destination (col, row)
-    """
-    from engine.combat_utils import has_line_of_sight
-
-    # Direct field access with validation
-    if "units" not in game_state:
-        raise KeyError("game_state missing required 'units' field")
-    if "col" not in unit or "row" not in unit:
-        raise KeyError(f"Unit missing required position fields: {unit}")
-    if "player" not in unit:
-        raise KeyError(f"Unit missing required 'player' field: {unit}")
-    if "RNG_RNG" not in unit:
-        raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
-
-    # If no destinations, return current position
-    if not valid_destinations:
-        return require_unit_position(unit, game_state)
-
-    # Get enemy units
-    # AI_TURN.md COMPLIANCE: Direct field access with validation
-    units_cache = require_key(game_state, "units_cache")
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
-    enemy_units = [enemy_id for enemy_id, cache_entry in units_cache.items()
-                   if int(cache_entry["player"]) != unit_player]
-
-    # If no enemies, just pick first destination
-    if not enemy_units:
-        return valid_destinations[0]
-
-    # Pre-build enemy positions from cache (avoids repeated require_unit_position calls)
-    enemy_positions = {eid: (units_cache[str(eid)]["col"], units_cache[str(eid)]["row"]) for eid in enemy_units}
-
-    # STRATEGY 0: AGGRESSIVE - Move closest to nearest enemy
-    if strategy_id == 0:
-        best_dest = valid_destinations[0]
-        min_dist_to_enemy = float('inf')
-
-        for dest in valid_destinations:
-            # Find distance to nearest enemy from this destination
-            for enemy_id in enemy_units:
-                enemy_col, enemy_row = enemy_positions[enemy_id]
-                dist = _calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
-                if dist < min_dist_to_enemy:
-                    min_dist_to_enemy = dist
-                    best_dest = dest
-
-        return best_dest
-
-    # STRATEGY 1: TACTICAL - Move to position with most enemies in shooting range
-    elif strategy_id == 1:
-        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
-        from engine.utils.weapon_helpers import get_max_ranged_range
-        weapon_range = get_max_ranged_range(unit)
-        best_dest = valid_destinations[0]
-        max_targets = 0
-
-        for dest in valid_destinations:
-            targets_in_range = 0
-            for enemy_id in enemy_units:
-                enemy_col, enemy_row = enemy_positions[enemy_id]
-                dist = _calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
-                if dist <= weapon_range:
-                    # Check LoS (simplified - assumes LoS if in range for now)
-                    targets_in_range += 1
-
-            if targets_in_range > max_targets:
-                max_targets = targets_in_range
-                best_dest = dest
-
-        return best_dest
-
-    # STRATEGY 2: DEFENSIVE - Move farthest from all enemies
-    elif strategy_id == 2:
-        best_dest = valid_destinations[0]
-        max_min_dist = 0
-
-        for dest in valid_destinations:
-            # Find distance to nearest enemy (we want to maximize this)
-            min_dist_to_any_enemy = float('inf')
-            for enemy_id in enemy_units:
-                enemy_col, enemy_row = enemy_positions[enemy_id]
-                dist = _calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
-                if dist < min_dist_to_any_enemy:
-                    min_dist_to_any_enemy = dist
-
-            if min_dist_to_any_enemy > max_min_dist:
-                max_min_dist = min_dist_to_any_enemy
-                best_dest = dest
-
-        return best_dest
-
-    # STRATEGY 3: RANDOM - Pick random destination for exploration
-    else:
-        import random
-        return random.choice(valid_destinations)
+# ── PIERRE TOMBALE — jumeau charge de l'heuristique de destination (2026-07-29) ────────────────
+# A vécu ici : `_select_strategic_destination`, copie quasi identique de celle de
+# `movement_handlers` (mêmes 4 stratégies agressif/tactique/défensif/objectif), qui choisissait
+# la destination de charge à la place de l'agent.
+#
+# POURQUOI elle était morte : elle n'a JAMAIS eu d'appelant dans ce fichier — le duplicat a
+# survécu à la mort de son modèle parce qu'un grep sur le nom rendait deux résultats et que le
+# second couvrait le premier. La cible de charge est depuis une dimension d'action (§9 P3-2,
+# `SQUAD_ACTION_CHARGE_SLOT_BASE`), donc plus rien n'a à la deviner.
+#
+# LEÇON (§0bis) : un symbole DUPLIQUÉ sous le même nom dans deux modules masque sa propre mort —
+# le grep qui devrait le dénoncer trouve toujours « des » appelants. Vérifier par module, pas
+# par nom.
+# ──────────────────────────────────────────────────────────────────────────────────────────────
 
 
 def charge_preview(valid_destinations: List[Tuple[int, int]]) -> Dict[str, Any]:
