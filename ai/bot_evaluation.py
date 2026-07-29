@@ -541,7 +541,7 @@ def _eval_worker_task(
             step_count += 1
         # Pas de `info.get("winner")` : un `None` de repli n'est ni `controlled_player` ni -1,
         # l'episode serait compte en DEFAITE alors que la donnee manque. Le moteur ecrit
-        # toujours la cle (engine/w40k_core.py:1906 partie terminee, :2050 partie en cours) :
+        # toujours la cle dans `W40KEngine.step`, partie terminee comme partie en cours :
         # son absence est une anomalie d'environnement, pas un cas de jeu.
         winner = require_key(info, "winner")
         controlled_player = require_key(info, "controlled_player")

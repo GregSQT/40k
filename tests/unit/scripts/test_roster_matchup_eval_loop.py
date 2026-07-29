@@ -2,7 +2,7 @@
 
 La boucle avait diverge de la reference vivante ai/bot_evaluation.py sur quatre points, dont
 un la rendait totalement inutilisable : l'observation du pipeline squad est un
-`gym.spaces.Dict` (engine/w40k_core.py:639) et la boucle l'aplatissait, ce qui levait avant
+`gym.spaces.Dict` (espace declare par `W40KEngine.__init__`) et la boucle l'aplatissait, ce qui levait avant
 meme d'atteindre le masque d'actions.
 
 `_run_single_episode` est exercee ici avec des DOUBLURES (env et modele factices) : aucun
@@ -106,7 +106,7 @@ class FakeEnv:
             and self.step_calls >= self._steps_before_done
         )
         # Le moteur ecrit "controlled_player" dans l'info de CHAQUE step
-        # (engine/w40k_core.py:1870) : la doublure fait pareil, sinon l'arret au plafond
+        # (`W40KEngine.step`) : la doublure fait pareil, sinon l'arret au plafond
         # (episode non termine) lirait une info que le moteur ne rend jamais.
         return self._obs, 0.0, done, False, self._final_info
 
@@ -219,7 +219,8 @@ def test_truncated_episode_is_never_counted_as_a_game(script):
 
 
 def test_terminated_episode_without_winner_is_an_explicit_error(script):
-    """Le moteur ne termine JAMAIS sans vainqueur (engine/w40k_core.py:1906 et :2163).
+    """Le moteur ne termine JAMAIS sans vainqueur (`W40KEngine.step` : vainqueur reel a la
+    terminaison, -1 sur sa propre troncature).
     Un `winner` None sur un episode termine est une incoherence, pas une defaite."""
     env = FakeEnv(steps_before_done=1, final_info={"winner": None, "controlled_player": 2})
     with pytest.raises(ValueError, match="winner"):

@@ -26,6 +26,38 @@ Usage:
   python scripts/roster_matchup_stats.py --agent Infantry_Troop_RangedSwarm [--scale 100pts] [--episodes 30]
   python scripts/roster_matchup_stats.py --agent Infantry_Troop_RangedSwarm --p1-benchmark p1_training_roster-01
   python scripts/roster_matchup_stats.py --agent Infantry_Troop_RangedSwarm --all-splits --episodes 100
+
+--------------------------------------------------------------------------------------
+Etat (V11 0.47) — cet outil etait MORT et a ete remis en service
+--------------------------------------------------------------------------------------
+Il ne pouvait plus tourner depuis la refonte de l'observation : sa boucle aplatissait l'obs,
+devenue un `gym.spaces.Dict` (pipeline squad), et levait avant meme de servir le masque —
+masque qui, lui, etait celui de l'ANCIEN layout d'actions et n'aurait produit que des
+statistiques silencieusement fausses. Les scenarios qu'il ecrivait portaient en outre des
+cles que le moteur rejette.
+
+Trois regles a respecter en le modifiant :
+
+1. La boucle d'evaluation N'EST PAS autonome : elle est calquee sur `ai/bot_evaluation.py`,
+   la boucle d'evaluation de REFERENCE (cf. Documentation/AI_TRAINING.md, section
+   "Evaluation"). Obs Dict servie telle quelle, masque via `W40KEngine.get_action_mask`,
+   plafond de pas derive de `config_loader.get_max_turns`, siege lu dans
+   `info["controlled_player"]`, episodes tronques comptes a part (`failed_episodes`), jamais
+   melanges aux resultats de parties. Toute divergence avec la reference est un bug en
+   sursis : ce fichier en a deja accumule quatre, plus une copie locale du normalizer
+   d'observation qui avait elle aussi diverge (il delegue desormais a la reference).
+
+2. Les scenarios ecrits suivent le contrat V11 : `board_ref` + `terrain_ref` (le terrain porte
+   murs, aires d'objectifs et zones de deploiement). Aucune cle legacy — `objectives_ref`,
+   `wall_ref`, `deployment_zone` — le moteur leve sur la premiere. Modele de reference :
+   `scripts/build_holdout_benchmark.py`.
+
+3. Aucun repli sur une donnee manquante : cet outil ne produit que des statistiques, un
+   chiffre invente y est pire qu'un arret. Les lectures d'`info` passent par `require_key`,
+   un matchup dont aucun episode n'aboutit leve au lieu de rendre un taux de victoire de 0.
+
+Comportement verrouille par tests/unit/scripts/test_roster_matchup_eval_loop.py et
+tests/unit/scripts/test_roster_matchup_scenario_contract.py.
 """
 
 import argparse
@@ -293,14 +325,15 @@ def _build_scenario_template(scale: str, board_ref: str, terrain_ref: str) -> Di
 
     Pas de parametre `split` : il n'apparait dans aucune cle du scenario. Le moteur le deduit
     du CHEMIN du fichier ("/scenarios/training/", "/scenarios/holdout_*/",
-    engine/game_state.py:1248-1256), chemin que l'appelant construit deja.
+    `GameStateManager._load_units_from_roster_refs`), chemin que l'appelant construit deja.
 
-    Contrat moteur V11 (meme forme que scripts/build_holdout_benchmark.py:117-126) : murs,
-    aires d'objectifs et zones de deploiement viennent TOUS du `terrain_ref`, resolu sous
-    `config/board/<board_ref>/terrain/` (engine/game_state.py:396-415, :2123-2153).
-    Aucune cle legacy : `objectives_ref` est explicitement rejetee par le moteur
-    (engine/game_state.py:420-426) et `deployment_zone` est inutile des lors que le terrain
-    porte une section `deployment_zones` (engine/game_state.py:437-442, :695-697).
+    Contrat moteur V11 (meme forme que `_build_scenarios` dans
+    scripts/build_holdout_benchmark.py) : murs, aires d'objectifs et zones de deploiement
+    viennent TOUS du `terrain_ref`, resolu sous `config/board/<board_ref>/terrain/`
+    (`GameStateManager.load_units_from_scenario`, qui delegue a `_resolve_board_dir`).
+    Aucune cle legacy : `objectives_ref` est explicitement rejetee par le moteur (meme
+    fonction, garde sur les cles d'objectifs supprimees) et `deployment_zone` est inutile des
+    lors que le terrain porte une section `deployment_zones`.
     """
     return {
         "deployment_type": "active",
@@ -424,7 +457,8 @@ def _generate_rule_checker_artifacts(
             # Meme contrat V11 que _build_scenario_template : murs + objectifs + zones de
             # deploiement viennent du terrain_ref. Les anciennes refs (walls-01.json /
             # objectives-01.json) n'existent nulle part sous config/board/, et
-            # `objectives_ref` est rejetee par le moteur (engine/game_state.py:420-426).
+            # `objectives_ref` est rejetee par le moteur
+            # (`GameStateManager.load_units_from_scenario`).
             scenario_payload = {
                 "deployment_type": "active",
                 "scale": scale,
@@ -487,18 +521,18 @@ def _run_single_episode(
     Extrait de `_run_matchup_episodes` pour etre exercable avec des doublures (env et modele
     factices), sans faire tourner de partie. C'est la seule partie qui DECIDE : quelle
     observation et quel masque sont servis au modele, quand l'episode s'arrete, et comment le
-    resultat est lu. Calquee sur la boucle de reference `ai/bot_evaluation.py:513-549`.
+    resultat est lu. Calquee sur la boucle de reference `ai/bot_evaluation._eval_worker_task`.
 
     "failed" = episode TRONQUE par le plafond de pas : la partie n'a jamais atteint sa fin,
     le moteur n'a donc pas de vainqueur a designer (`info["winner"]` vaut None hors
-    terminaison, engine/w40k_core.py:2050). Le classer gagne/perdu/nul fabriquerait une
-    statistique. La reference tient le meme compte separe sous le nom `failed_episodes`
-    (ai/bot_evaluation.py:557, agrege en :1184 et arbitre `eval_reliable` en :1192).
+    terminaison, `W40KEngine.step`). Le classer gagne/perdu/nul fabriquerait une statistique.
+    La reference tient le meme compte separe sous le nom `failed_episodes`
+    (`_eval_worker_task`, agrege par `evaluate_against_bots` qui en tire `eval_reliable`).
     """
     import numpy as np
     from shared.data_validation import require_key
 
-    # ai/bot_evaluation.py:515-516 : les DEUX generateurs sont poses.
+    # `ai/bot_evaluation._eval_worker_task` : les DEUX generateurs sont poses.
     random.seed(ep_seed)
     np.random.seed(ep_seed)
     obs, info = env.reset(seed=ep_seed)
@@ -507,7 +541,7 @@ def _run_single_episode(
     while not done and step_count < max_steps_per_episode:
         model_obs = obs_normalizer(obs) if obs_normalizer is not None else obs
         # Obs Dict (MultiInputPolicy + CNN) : predict la gere nativement, ne pas aplatir.
-        # Copie conforme de ai/bot_evaluation.py:526-533. L'obs du pipeline squad est un
+        # Copie conforme de `ai/bot_evaluation._eval_worker_task`. L'obs du pipeline squad est un
         # gym.spaces.Dict : l'aplatir levait avant meme d'atteindre le masque.
         if isinstance(model_obs, dict):
             model_input = model_obs
@@ -515,7 +549,7 @@ def _run_single_episode(
             model_input = np.asarray(model_obs, dtype=np.float32)
             if model_input.ndim == 1:
                 model_input = model_input.reshape(1, -1)
-        # MEME chemin que la production (ai/bot_evaluation.py:523) : le masque servi au
+        # MEME chemin que la production (`ai/bot_evaluation._eval_worker_task`) : le masque servi au
         # modele doit etre celui de la semantique SQUAD que `env.step` decode. La voie
         # legacy `action_decoder.get_action_mask_and_eligible_units` construit l'ancien
         # layout (mask[9]=charge, mask[10]=fight, mask[11]=wait, mask[4+i]=tir) et a la
@@ -538,19 +572,19 @@ def _run_single_episode(
         return "failed"
     # Pas de `info.get("winner")` : un `None` de repli n'est ni `controlled_player` ni -1,
     # l'episode serait compte en DEFAITE alors que la donnee manque. Le moteur ecrit toujours
-    # la cle (engine/w40k_core.py:1906 partie terminee, :2050 partie en cours) : son absence
-    # est une anomalie d'environnement, pas un cas de jeu.
+    # la cle dans `W40KEngine.step`, partie terminee comme partie en cours : son absence est
+    # une anomalie d'environnement, pas un cas de jeu.
     winner = require_key(info, "winner")
     if winner is None:
-        # Episode termine SANS vainqueur : le moteur n'en produit jamais (partie finie ->
-        # vainqueur reel engine/w40k_core.py:1906 ; troncature moteur -> -1, :2163). Un None
+        # Episode termine SANS vainqueur : le moteur n'en produit jamais (`W40KEngine.step`
+        # pose un vainqueur reel a la terminaison, et -1 sur sa propre troncature). Un None
         # ici veut dire que l'env ment sur sa terminaison ; le compter en defaite masquerait
         # le probleme dans la statistique.
         raise ValueError(
             "Episode termine avec info['winner'] = None : l'environnement signale une fin de "
             "partie sans vainqueur, ce que le moteur ne produit jamais."
         )
-    # ai/bot_evaluation.py:543 : le siege controle est LU dans l'info rendue par l'env, pas
+    # `ai/bot_evaluation._eval_worker_task` : le siege controle est LU dans l'info rendue par l'env, pas
     # recalcule ici. Un identifiant recalcule localement peut diverger silencieusement du
     # siege reellement joue (BotControlledEnv gere l'alternance des sieges).
     controlled_player = require_key(info, "controlled_player")
@@ -694,7 +728,8 @@ def _run_matchup_episodes(
         agent_seat_mode=agent_seat_mode,
     )
     model = MaskablePPO.load(model_path, env=env)
-    # Meme source que la reference (ai/bot_evaluation.py:1052) : la duree de bataille vient de
+    # Meme source que la reference (`ai/bot_evaluation.evaluate_against_bots`, qui pose la cle
+    # "max_steps_per_episode" des taches d'evaluation) : la duree de bataille vient de
     # game_rules.max_turns via config_loader.get_max_turns(). Aucun plafond en dur, aucune
     # valeur par defaut : si la config ne porte pas max_turns, get_max_turns leve.
     max_steps_per_episode = int(get_max_turns()) * 400
@@ -723,9 +758,9 @@ def _build_obs_normalizer(agent_key: str, training_config_name: str, model_path:
     """Build observation normalizer if VecNormalize is enabled.
 
     Le normalizer lui-meme n'est PAS reecrit ici : c'est celui de la reference,
-    `ai/bot_evaluation._build_eval_obs_normalizer_for_worker` (ai/bot_evaluation.py:385-440),
-    seul a traiter l'obs Dict du pipeline squad (`normalize_obs` sur "global_cont", :432-433)
-    autant que le chemin legacy Box a plat. Une copie locale re-divergerait silencieusement —
+    `ai/bot_evaluation._build_eval_obs_normalizer_for_worker`, seul a traiter l'obs Dict du
+    pipeline squad (`normalize_obs` sur "global_cont") autant que le chemin legacy Box a plat.
+    Une copie locale re-divergerait silencieusement —
     c'est exactement ce qui s'etait produit : elle aplatissait l'obs Dict.
     Ce script ne garde que la LECTURE des drapeaux dans la config d'agent.
     """
@@ -788,10 +823,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--all-splits", action="store_true",
                     help="Run for training, holdout_regular, and holdout_hard (output: <split>_matchups.json each)")
     parser.add_argument("--board-ref", default="44x60x5",
-                    help="Board de reference des scenarios generes (config/board/<board_ref>/)")
+                    help="Board de reference des scenarios generes (config/board/<board_ref>/). "
+                         "Defaut 44x60x5 : le board de la banque de scenarios par-agent, celui "
+                         "qu'emploie aussi scripts/build_holdout_benchmark.py")
     parser.add_argument("--terrain-ref", default="terrain-mc1.json",
                     help="Terrain des scenarios generes (config/board/<board_ref>/terrain/<terrain_ref>) "
-                         "— il porte les murs, les aires d'objectifs et les zones de deploiement")
+                         "— il porte les murs, les aires d'objectifs et les zones de deploiement. "
+                         "Defaut terrain-mc1.json : le terrain des scenarios vivants de la banque, "
+                         "verifie porteur d'aires \"objective\": true et d'une section "
+                         "deployment_zones, les deux prerequis du contrat V11")
     parser.add_argument(
         "--opponent-mode",
         choices=["bot", "agent"],
@@ -1174,7 +1214,7 @@ def _run_one_split(
                 "wins": wins,
                 "losses": losses,
                 "draws": draws,
-                # Meme nom que la reference (ai/bot_evaluation.py:557) : episodes tronques par
+                # Meme nom que la reference (`ai/bot_evaluation._eval_worker_task`) : episodes tronques par
                 # le plafond de pas, hors du calcul du taux de victoire.
                 "failed_episodes": failed,
                 "win_rate": round(win_rate, 4),
