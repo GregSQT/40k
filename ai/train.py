@@ -69,12 +69,14 @@ sys.path.insert(0, project_root)
 from ai.unit_registry import UnitRegistry
 sys.path.insert(0, project_root)
 
-# Import evaluation bots for testing
-try:
-    from ai.evaluation_bots import RandomBot, GreedyBot, DefensiveBot
-    EVALUATION_BOTS_AVAILABLE = True
-except ImportError:
-    EVALUATION_BOTS_AVAILABLE = False
+# Un import de RandomBot / GreedyBot / DefensiveBot sous try/except ImportError, avec un drapeau
+# EVALUATION_BOTS_AVAILABLE, occupait cette place. Jumeau exact de celui deja retire de
+# ai/training_callbacks.py : ai/evaluation_bots.py est dans le depot, ce n'est pas une dependance
+# optionnelle, et il n'y a pas de cycle a eviter (il ne tire que engine/* et shared/*, et engine
+# n'importe ai que paresseusement). Le drapeau valait donc toujours True et ses trois gardes
+# etaient morts. Les trois noms importes ici n'etaient de toute facon jamais utilises au niveau
+# module : les bots d'entrainement sont construits par _build_training_bots_from_config, qui
+# importe les sept classes localement et sans condition.
 
 # Import MaskablePPO - enforces action masking during training
 from sb3_contrib import MaskablePPO
@@ -1067,7 +1069,6 @@ from ai.training_callbacks import (
     LearningRateScheduleCallback,
     EntropyScheduleCallback,
     EpisodeTerminationCallback,
-    EpisodeBasedEvalCallback,
     MetricsCollectionCallback,
     BotEvaluationCallback,
     selection_worst_bot,
@@ -2350,9 +2351,6 @@ def build_training_opponents(
     if not use_bots:
         return opponents
 
-    if not EVALUATION_BOTS_AVAILABLE:
-        raise ImportError("Evaluation bots not available but use_bots=True")
-
     opponents["training_bots"] = _build_training_bots_from_config(training_config)
     agent_seat_mode = require_key(training_config, "agent_seat_mode")
     if agent_seat_mode not in {"p1", "p2", "random"}:
@@ -3180,95 +3178,98 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         print(f"{'='*80}\n")
 
     # Run final comprehensive bot evaluation
-    if EVALUATION_BOTS_AVAILABLE:
-        _debug_train_marker("before final comprehensive bot evaluation")
-        n_final = require_key(training_config, "_bot_eval_final")
-        if not isinstance(n_final, int) or isinstance(n_final, bool) or n_final < 0:
-            raise ValueError(
-                f"Resolved bot_eval_final must be an integer >= 0 (got {n_final!r})"
+    # Le garde `if EVALUATION_BOTS_AVAILABLE:` qui enveloppait ce bloc a ete retire : le
+    # drapeau valait toujours True (voir la trace en tete de fichier). Il n'a jamais empeche
+    # cette evaluation finale de tourner ; il la rendait seulement silencieusement optionnelle
+    # au typage.
+    _debug_train_marker("before final comprehensive bot evaluation")
+    n_final = require_key(training_config, "_bot_eval_final")
+    if not isinstance(n_final, int) or isinstance(n_final, bool) or n_final < 0:
+        raise ValueError(
+            f"Resolved bot_eval_final must be an integer >= 0 (got {n_final!r})"
+        )
+    if n_final <= 0:
+        if not silent_chunk:
+            print("ℹ️  Final bot evaluation skipped (bot_eval_final=0)")
+    else:
+            print(f"\n{'='*80}")
+            print(f"🤖 FINAL BOT EVALUATION ({n_final} episodes per bot across all scenarios)")
+            print(f"{'='*80}\n")
+
+            bot_results = evaluate_against_bots(
+                model=model,
+                training_config_name=training_config_name,
+                rewards_config_name=rewards_config_name,
+                n_episodes=n_final,
+                controlled_agent=effective_agent_key,
+                show_progress=True,
+                deterministic=True,
+                step_logger=step_logger,
+                scenario_pool="holdout",
             )
-        if n_final <= 0:
-            if not silent_chunk:
-                print("ℹ️  Final bot evaluation skipped (bot_eval_final=0)")
-        else:
-                print(f"\n{'='*80}")
-                print(f"🤖 FINAL BOT EVALUATION ({n_final} episodes per bot across all scenarios)")
-                print(f"{'='*80}\n")
 
-                bot_results = evaluate_against_bots(
-                    model=model,
-                    training_config_name=training_config_name,
-                    rewards_config_name=rewards_config_name,
-                    n_episodes=n_final,
-                    controlled_agent=effective_agent_key,
-                    show_progress=True,
-                    deterministic=True,
-                    step_logger=step_logger,
-                    scenario_pool="holdout",
+            # Log final results to metrics tracker
+            if metrics_tracker and bot_results:
+                known_bot_keys = (
+                    "random",
+                    "greedy",
+                    "defensive",
+                    "control",
+                    "aggressive_smart",
+                    "defensive_smart",
+                    "adaptive",
+                    "tactical",  # V11 §10.5 : holdout d'evaluation
                 )
-
-                # Log final results to metrics tracker
-                if metrics_tracker and bot_results:
-                    known_bot_keys = (
-                        "random",
-                        "greedy",
-                        "defensive",
-                        "control",
-                        "aggressive_smart",
-                        "defensive_smart",
-                        "adaptive",
-                        "tactical",  # V11 §10.5 : holdout d'evaluation
+                available_bot_keys = [key for key in known_bot_keys if key in bot_results]
+                if len(available_bot_keys) == 0:
+                    raise ValueError(
+                        "Final bot evaluation did not return any known bot score keys. "
+                        f"Expected at least one of: {known_bot_keys}"
                     )
-                    available_bot_keys = [key for key in known_bot_keys if key in bot_results]
-                    if len(available_bot_keys) == 0:
-                        raise ValueError(
-                            "Final bot evaluation did not return any known bot score keys. "
-                            f"Expected at least one of: {known_bot_keys}"
+                final_bot_results = {
+                    key: float(require_key(bot_results, key))
+                    for key in available_bot_keys
+                }
+                final_bot_results["combined"] = float(require_key(bot_results, "combined"))
+                metrics_tracker.log_bot_evaluations(final_bot_results)
+                holdout_split_metrics = {
+                    key: float(require_key(bot_results, key))
+                    for key in (
+                        'holdout_regular_mean',
+                        'holdout_hard_mean',
+                        'holdout_overall_mean',
+                    )
+                    if key in bot_results
+                }
+                if holdout_split_metrics:
+                    metrics_tracker.log_holdout_split_metrics(holdout_split_metrics)
+                scenario_split_scores = bot_results.get("scenario_split_scores")
+                if scenario_split_scores is not None:
+                    if not isinstance(scenario_split_scores, dict):
+                        raise TypeError(
+                            f"bot_results.scenario_split_scores must be dict "
+                            f"(got {type(scenario_split_scores).__name__})"
                         )
-                    final_bot_results = {
-                        key: float(require_key(bot_results, key))
-                        for key in available_bot_keys
-                    }
-                    final_bot_results["combined"] = float(require_key(bot_results, "combined"))
-                    metrics_tracker.log_bot_evaluations(final_bot_results)
-                    holdout_split_metrics = {
-                        key: float(require_key(bot_results, key))
-                        for key in (
-                            'holdout_regular_mean',
-                            'holdout_hard_mean',
-                            'holdout_overall_mean',
-                        )
-                        if key in bot_results
-                    }
-                    if holdout_split_metrics:
-                        metrics_tracker.log_holdout_split_metrics(holdout_split_metrics)
-                    scenario_split_scores = bot_results.get("scenario_split_scores")
-                    if scenario_split_scores is not None:
-                        if not isinstance(scenario_split_scores, dict):
-                            raise TypeError(
-                                f"bot_results.scenario_split_scores must be dict "
-                                f"(got {type(scenario_split_scores).__name__})"
-                            )
-                        metrics_tracker.log_scenario_split_scores(scenario_split_scores)
+                    metrics_tracker.log_scenario_split_scores(scenario_split_scores)
 
-                # Print summary
-                print(f"\n{'='*80}")
-                print(f"📊 FINAL BOT EVALUATION RESULTS")
-                print(f"{'='*80}")
-                if bot_results:
-                    for bot_name in sorted(bot_results.keys()):
-                        if bot_name.endswith(('_wins', '_losses', '_draws', '_episodes')) or bot_name in ('combined', 'worst_bot_score', 'worst_bot_name', 'eval_reliable', 'eval_duration_seconds', 'total_failed_episodes'):
-                            continue
-                        if isinstance(bot_results[bot_name], (int, float)):
-                            win_rate = bot_results[bot_name] * 100
-                            wins = bot_results.get(f'{bot_name}_wins', '?')
-                            losses = bot_results.get(f'{bot_name}_losses', '?')
-                            draws = bot_results.get(f'{bot_name}_draws', '?')
-                            print(f"  vs {bot_name:20s}: {win_rate:5.1f}% ({wins}W-{losses}L-{draws}D)")
+            # Print summary
+            print(f"\n{'='*80}")
+            print(f"📊 FINAL BOT EVALUATION RESULTS")
+            print(f"{'='*80}")
+            if bot_results:
+                for bot_name in sorted(bot_results.keys()):
+                    if bot_name.endswith(('_wins', '_losses', '_draws', '_episodes')) or bot_name in ('combined', 'worst_bot_score', 'worst_bot_name', 'eval_reliable', 'eval_duration_seconds', 'total_failed_episodes'):
+                        continue
+                    if isinstance(bot_results[bot_name], (int, float)):
+                        win_rate = bot_results[bot_name] * 100
+                        wins = bot_results.get(f'{bot_name}_wins', '?')
+                        losses = bot_results.get(f'{bot_name}_losses', '?')
+                        draws = bot_results.get(f'{bot_name}_draws', '?')
+                        print(f"  vs {bot_name:20s}: {win_rate:5.1f}% ({wins}W-{losses}L-{draws}D)")
 
-                    combined = require_key(bot_results, 'combined') * 100
-                    print(f"  Combined Score: {combined:5.1f}%")
-                print(f"{'='*80}\n")
+                combined = require_key(bot_results, 'combined') * 100
+                print(f"  Combined Score: {combined:5.1f}%")
+            print(f"{'='*80}\n")
 
     run_info: Dict[str, Any] = {}
     bot_eval_callback = next(
@@ -3428,195 +3429,196 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     callbacks.append(checkpoint_callback)
     
     # Add enhanced bot evaluation callback (replaces standard EvalCallback)
-    if EVALUATION_BOTS_AVAILABLE:
-        # Resolve nested callback params that can explicitly inherit from shared training config.
-        shared_training_config = cfg.load_training_common_config()
+    # Le garde `if EVALUATION_BOTS_AVAILABLE:` et sa branche `else` ont ete retires : le
+    # drapeau valait toujours True (voir la trace en tete de fichier). L'else avertissait
+    # « Evaluation bots not available - no evaluation metrics / Install evaluation_bots.py »
+    # pour un fichier qui est dans le depot ; surtout, si le drapeau avait pu etre faux, ce
+    # garde aurait silencieusement prive l'entrainement de sa callback d'evaluation.
+    # Resolve nested callback params that can explicitly inherit from shared training config.
+    shared_training_config = cfg.load_training_common_config()
 
-        def _resolve_callback_value(key: str) -> Any:
-            value = callback_params[key] if key in callback_params else None
-            if value is not None:
-                return value
-            if key not in shared_training_config:
-                raise KeyError(
-                    f"callback_params.{key} is missing/null and config/agents/_training_common.json "
-                    f"does not define '{key}'"
-                )
-            shared_value = shared_training_config[key]
-            if shared_value is None:
-                raise ValueError(
-                    f"Invalid shared value for callback_params.{key}: "
-                    f"config/agents/_training_common.json defines null"
-                )
-            return shared_value
-
-        # Read bot evaluation parameters from config
-        bot_eval_freq = _resolve_callback_value("bot_eval_freq")
-        bot_n_episodes_intermediate = _resolve_callback_value("bot_eval_intermediate")
-        bot_eval_use_episodes = require_key(callback_params, "bot_eval_use_episodes")
-        eval_deterministic = require_key(callback_params, "eval_deterministic")
-        if not isinstance(bot_eval_freq, int) or isinstance(bot_eval_freq, bool) or bot_eval_freq <= 0:
-            raise ValueError(
-                f"callback_params.bot_eval_freq must be a positive integer "
-                f"(got {bot_eval_freq!r})"
+    def _resolve_callback_value(key: str) -> Any:
+        value = callback_params[key] if key in callback_params else None
+        if value is not None:
+            return value
+        if key not in shared_training_config:
+            raise KeyError(
+                f"callback_params.{key} is missing/null and config/agents/_training_common.json "
+                f"does not define '{key}'"
             )
-        if (
-            not isinstance(bot_n_episodes_intermediate, int)
-            or isinstance(bot_n_episodes_intermediate, bool)
-            or bot_n_episodes_intermediate < 0
+        shared_value = shared_training_config[key]
+        if shared_value is None:
+            raise ValueError(
+                f"Invalid shared value for callback_params.{key}: "
+                f"config/agents/_training_common.json defines null"
+            )
+        return shared_value
+
+    # Read bot evaluation parameters from config
+    bot_eval_freq = _resolve_callback_value("bot_eval_freq")
+    bot_n_episodes_intermediate = _resolve_callback_value("bot_eval_intermediate")
+    bot_eval_use_episodes = require_key(callback_params, "bot_eval_use_episodes")
+    eval_deterministic = require_key(callback_params, "eval_deterministic")
+    if not isinstance(bot_eval_freq, int) or isinstance(bot_eval_freq, bool) or bot_eval_freq <= 0:
+        raise ValueError(
+            f"callback_params.bot_eval_freq must be a positive integer "
+            f"(got {bot_eval_freq!r})"
+        )
+    if (
+        not isinstance(bot_n_episodes_intermediate, int)
+        or isinstance(bot_n_episodes_intermediate, bool)
+        or bot_n_episodes_intermediate < 0
+    ):
+        raise ValueError(
+            f"callback_params.bot_eval_intermediate must be an integer >= 0 "
+            f"(got {bot_n_episodes_intermediate!r})"
+        )
+    if not isinstance(bot_eval_use_episodes, bool):
+        raise ValueError(
+            f"callback_params.bot_eval_use_episodes must be boolean "
+            f"(got {type(bot_eval_use_episodes).__name__})"
+        )
+    if not isinstance(eval_deterministic, bool):
+        raise ValueError(
+            f"callback_params.eval_deterministic must be boolean "
+            f"(got {type(eval_deterministic).__name__})"
+        )
+    bot_eval_scenario_pool = str(_resolve_callback_value("bot_eval_scenario_pool"))
+    bot_eval_show_progress = bool(_resolve_callback_value("bot_eval_show_progress"))
+    if not isinstance(bot_eval_show_progress, bool):
+        raise ValueError(
+            f"callback_params.bot_eval_show_progress must be boolean "
+            f"(got {type(bot_eval_show_progress).__name__})"
+        )
+    save_best_robust = bool(_resolve_callback_value("save_best_robust"))
+    model_gating_enabled = bool(_resolve_callback_value("model_gating_enabled"))
+    model_gating_min_combined = None
+    model_gating_min_worst_bot = None
+    model_gating_min_worst_scenario_combined = None
+    if model_gating_enabled or save_best_robust:
+        if model_gating_enabled:
+            model_gating_min_combined = float(_resolve_callback_value("model_gating_min_combined"))
+        model_gating_min_worst_bot = float(_resolve_callback_value("model_gating_min_worst_bot"))
+        model_gating_min_worst_scenario_combined = float(
+            _resolve_callback_value("model_gating_min_worst_scenario_combined")
+        )
+        for key, value in (
+            *(
+                [("model_gating_min_combined", model_gating_min_combined)]
+                if model_gating_enabled
+                else []
+            ),
+            ("model_gating_min_worst_bot", model_gating_min_worst_bot),
+            ("model_gating_min_worst_scenario_combined", model_gating_min_worst_scenario_combined),
         ):
-            raise ValueError(
-                f"callback_params.bot_eval_intermediate must be an integer >= 0 "
-                f"(got {bot_n_episodes_intermediate!r})"
-            )
-        if not isinstance(bot_eval_use_episodes, bool):
-            raise ValueError(
-                f"callback_params.bot_eval_use_episodes must be boolean "
-                f"(got {type(bot_eval_use_episodes).__name__})"
-            )
-        if not isinstance(eval_deterministic, bool):
-            raise ValueError(
-                f"callback_params.eval_deterministic must be boolean "
-                f"(got {type(eval_deterministic).__name__})"
-            )
-        bot_eval_scenario_pool = str(_resolve_callback_value("bot_eval_scenario_pool"))
-        bot_eval_show_progress = bool(_resolve_callback_value("bot_eval_show_progress"))
-        if not isinstance(bot_eval_show_progress, bool):
-            raise ValueError(
-                f"callback_params.bot_eval_show_progress must be boolean "
-                f"(got {type(bot_eval_show_progress).__name__})"
-            )
-        save_best_robust = bool(_resolve_callback_value("save_best_robust"))
-        model_gating_enabled = bool(_resolve_callback_value("model_gating_enabled"))
-        model_gating_min_combined = None
-        model_gating_min_worst_bot = None
-        model_gating_min_worst_scenario_combined = None
-        if model_gating_enabled or save_best_robust:
-            if model_gating_enabled:
-                model_gating_min_combined = float(_resolve_callback_value("model_gating_min_combined"))
-            model_gating_min_worst_bot = float(_resolve_callback_value("model_gating_min_worst_bot"))
-            model_gating_min_worst_scenario_combined = float(
-                _resolve_callback_value("model_gating_min_worst_scenario_combined")
-            )
-            for key, value in (
-                *(
-                    [("model_gating_min_combined", model_gating_min_combined)]
-                    if model_gating_enabled
-                    else []
-                ),
-                ("model_gating_min_worst_bot", model_gating_min_worst_bot),
-                ("model_gating_min_worst_scenario_combined", model_gating_min_worst_scenario_combined),
-            ):
-                value_f = require_present(value, key)
-                if value_f < 0.0 or value_f > 1.0:
-                    raise ValueError(
-                        f"callback_params.{key} must be between 0.0 and 1.0 (got {value_f})"
-                    )
-        robust_window = 3
-        robust_drawdown_penalty = 0.5
-        robust_penalty_bot = 0.0
-        robust_penalty_hard = 0.0
-        save_best_robust_seed = False
-        robust_seed_value: Optional[int] = None
-        if save_best_robust:
-            robust_window = int(_resolve_callback_value("robust_window"))
-            robust_drawdown_penalty = float(_resolve_callback_value("robust_drawdown_penalty"))
-            save_best_robust_seed = bool(callback_params.get("save_best_robust_seed", False))
-            if save_best_robust_seed:
-                if "agent_seat_seed" in training_config:
-                    seed_raw = require_key(training_config, "agent_seat_seed")
-                elif "seed" in training_config:
-                    seed_raw = require_key(training_config, "seed")
-                else:
-                    raise KeyError(
-                        "callback_params.save_best_robust_seed=true requires "
-                        "'agent_seat_seed' or 'seed' in training config"
-                    )
-                if not isinstance(seed_raw, int) or isinstance(seed_raw, bool):
-                    raise ValueError(
-                        "Seed used for robust filename must be an integer "
-                        f"(got {type(seed_raw).__name__})"
-                    )
-                robust_seed_value = int(seed_raw)
-            robust_penalty_bot = float(require_key(callback_params, "robust_penalty_bot"))
-            robust_penalty_hard = float(require_key(callback_params, "robust_penalty_hard"))
-            if robust_penalty_bot < 0.0:
+            value_f = require_present(value, key)
+            if value_f < 0.0 or value_f > 1.0:
                 raise ValueError(
-                    f"robust_penalty_bot must be >= 0.0 (got {robust_penalty_bot})"
+                    f"callback_params.{key} must be between 0.0 and 1.0 (got {value_f})"
                 )
-            if robust_penalty_hard < 0.0:
+    robust_window = 3
+    robust_drawdown_penalty = 0.5
+    robust_penalty_bot = 0.0
+    robust_penalty_hard = 0.0
+    save_best_robust_seed = False
+    robust_seed_value: Optional[int] = None
+    if save_best_robust:
+        robust_window = int(_resolve_callback_value("robust_window"))
+        robust_drawdown_penalty = float(_resolve_callback_value("robust_drawdown_penalty"))
+        save_best_robust_seed = bool(callback_params.get("save_best_robust_seed", False))
+        if save_best_robust_seed:
+            if "agent_seat_seed" in training_config:
+                seed_raw = require_key(training_config, "agent_seat_seed")
+            elif "seed" in training_config:
+                seed_raw = require_key(training_config, "seed")
+            else:
+                raise KeyError(
+                    "callback_params.save_best_robust_seed=true requires "
+                    "'agent_seat_seed' or 'seed' in training config"
+                )
+            if not isinstance(seed_raw, int) or isinstance(seed_raw, bool):
                 raise ValueError(
-                    f"robust_penalty_hard must be >= 0.0 (got {robust_penalty_hard})"
+                    "Seed used for robust filename must be an integer "
+                    f"(got {type(seed_raw).__name__})"
                 )
-            if robust_window <= 0:
-                raise ValueError(
-                    f"callback_params.robust_window must be > 0 (got {robust_window})"
-                )
-            if bot_eval_use_episodes:
-                expected_evals = int(total_eps) // int(bot_eval_freq)
-                if expected_evals <= 0:
-                    raise ValueError(
-                        "Invalid robust-eval configuration: save_best_robust=true but no bot evaluation "
-                        f"will run in this phase (total_episodes={int(total_eps)}, "
-                        f"bot_eval_freq={int(bot_eval_freq)}). "
-                        "Reduce bot_eval_freq or increase total_episodes."
-                    )
-                if expected_evals < robust_window:
-                    raise ValueError(
-                        "Invalid robust-eval configuration: save_best_robust=true but "
-                        f"robust_window={robust_window} requires at least {robust_window} evaluations, "
-                        f"while this phase can run at most {expected_evals} "
-                        f"(total_episodes={int(total_eps)}, bot_eval_freq={int(bot_eval_freq)}). "
-                        "Reduce robust_window, reduce bot_eval_freq, or increase total_episodes."
-                    )
-        
-        # Store final eval count for use after training completes
-        training_config["_bot_eval_final"] = _resolve_callback_value("bot_eval_final")
-        
-        if not rewards_config_name:
-            raise KeyError("setup_callbacks requires rewards_config_name for BotEvaluationCallback")
-        if bot_n_episodes_intermediate <= 0:
-            if not silent_logs:
-                print("ℹ️  Intermediate bot evaluation skipped (bot_eval_intermediate=0)")
-        else:
-            bot_eval_callback = BotEvaluationCallback(
-                eval_freq=bot_eval_freq,
-                n_eval_episodes=bot_n_episodes_intermediate,
-                best_model_save_path=os.path.dirname(model_path),
-                metrics_tracker=metrics_tracker,
-                use_episode_freq=bot_eval_use_episodes,
-                verbose=1,
-                training_config_name=training_config_name,
-                rewards_config_name=rewards_config_name,
-                scenario_pool=bot_eval_scenario_pool,
-                save_best_robust=save_best_robust,
-                save_best_robust_seed=save_best_robust_seed,
-                robust_seed_value=robust_seed_value,
-                robust_window=robust_window,
-                robust_drawdown_penalty=robust_drawdown_penalty,
-                robust_penalty_bot=robust_penalty_bot,
-                robust_penalty_hard=robust_penalty_hard,
-                model_gating_enabled=model_gating_enabled,
-                model_gating_min_combined=model_gating_min_combined,
-                model_gating_min_worst_bot=model_gating_min_worst_bot,
-                model_gating_min_worst_scenario_combined=model_gating_min_worst_scenario_combined,
-                gate_display_state=training_config.get("_gate_display_state"),
-                eval_deterministic=eval_deterministic,
-                final_summary_target_episodes=total_eps,
-                initial_episode_marker=max(0, int(global_episode_offset)),
-                show_eval_progress=bot_eval_show_progress,
-                phase_progress_total_episodes=(int(total_eps) if phase_label else None),
-                phase_progress_episode_offset=(int(phase_episode_offset) if phase_label else 0),
-                early_stopping_patience=int(callback_params["early_stopping_patience"]),
-                save_best_min_episodes=int(callback_params["save_best_min_episodes"]),
+            robust_seed_value = int(seed_raw)
+        robust_penalty_bot = float(require_key(callback_params, "robust_penalty_bot"))
+        robust_penalty_hard = float(require_key(callback_params, "robust_penalty_hard"))
+        if robust_penalty_bot < 0.0:
+            raise ValueError(
+                f"robust_penalty_bot must be >= 0.0 (got {robust_penalty_bot})"
             )
-            callbacks.append(bot_eval_callback)
-        
-        freq_unit = "episodes" if bot_eval_use_episodes else "timesteps"
-    else:
+        if robust_penalty_hard < 0.0:
+            raise ValueError(
+                f"robust_penalty_hard must be >= 0.0 (got {robust_penalty_hard})"
+            )
+        if robust_window <= 0:
+            raise ValueError(
+                f"callback_params.robust_window must be > 0 (got {robust_window})"
+            )
+        if bot_eval_use_episodes:
+            expected_evals = int(total_eps) // int(bot_eval_freq)
+            if expected_evals <= 0:
+                raise ValueError(
+                    "Invalid robust-eval configuration: save_best_robust=true but no bot evaluation "
+                    f"will run in this phase (total_episodes={int(total_eps)}, "
+                    f"bot_eval_freq={int(bot_eval_freq)}). "
+                    "Reduce bot_eval_freq or increase total_episodes."
+                )
+            if expected_evals < robust_window:
+                raise ValueError(
+                    "Invalid robust-eval configuration: save_best_robust=true but "
+                    f"robust_window={robust_window} requires at least {robust_window} evaluations, "
+                    f"while this phase can run at most {expected_evals} "
+                    f"(total_episodes={int(total_eps)}, bot_eval_freq={int(bot_eval_freq)}). "
+                    "Reduce robust_window, reduce bot_eval_freq, or increase total_episodes."
+                )
+
+    # Store final eval count for use after training completes
+    training_config["_bot_eval_final"] = _resolve_callback_value("bot_eval_final")
+
+    if not rewards_config_name:
+        raise KeyError("setup_callbacks requires rewards_config_name for BotEvaluationCallback")
+    if bot_n_episodes_intermediate <= 0:
         if not silent_logs:
-            print("⚠️ Evaluation bots not available - no evaluation metrics")
-            print("   Install evaluation_bots.py to enable progress tracking")
-    
+            print("ℹ️  Intermediate bot evaluation skipped (bot_eval_intermediate=0)")
+    else:
+        bot_eval_callback = BotEvaluationCallback(
+            eval_freq=bot_eval_freq,
+            n_eval_episodes=bot_n_episodes_intermediate,
+            best_model_save_path=os.path.dirname(model_path),
+            metrics_tracker=metrics_tracker,
+            use_episode_freq=bot_eval_use_episodes,
+            verbose=1,
+            training_config_name=training_config_name,
+            rewards_config_name=rewards_config_name,
+            scenario_pool=bot_eval_scenario_pool,
+            save_best_robust=save_best_robust,
+            save_best_robust_seed=save_best_robust_seed,
+            robust_seed_value=robust_seed_value,
+            robust_window=robust_window,
+            robust_drawdown_penalty=robust_drawdown_penalty,
+            robust_penalty_bot=robust_penalty_bot,
+            robust_penalty_hard=robust_penalty_hard,
+            model_gating_enabled=model_gating_enabled,
+            model_gating_min_combined=model_gating_min_combined,
+            model_gating_min_worst_bot=model_gating_min_worst_bot,
+            model_gating_min_worst_scenario_combined=model_gating_min_worst_scenario_combined,
+            gate_display_state=training_config.get("_gate_display_state"),
+            eval_deterministic=eval_deterministic,
+            final_summary_target_episodes=total_eps,
+            initial_episode_marker=max(0, int(global_episode_offset)),
+            show_eval_progress=bot_eval_show_progress,
+            phase_progress_total_episodes=(int(total_eps) if phase_label else None),
+            phase_progress_episode_offset=(int(phase_episode_offset) if phase_label else 0),
+            early_stopping_patience=int(callback_params["early_stopping_patience"]),
+            save_best_min_episodes=int(callback_params["save_best_min_episodes"]),
+        )
+        callbacks.append(bot_eval_callback)
+
+    # `freq_unit = "episodes" if bot_eval_use_episodes else "timesteps"` occupait cette ligne :
+    # variable locale assignee et jamais lue, vestige d'un message de log disparu.
+
     return callbacks
 
 def train_model(model, training_config, callbacks, model_path, training_config_name, rewards_config_name, controlled_agent=None):
