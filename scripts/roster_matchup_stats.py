@@ -288,8 +288,12 @@ def _collect_p2_rosters(scale: str, split: str) -> List[Tuple[str, str]]:
     return refs
 
 
-def _build_scenario_template(scale: str, split: str, board_ref: str, terrain_ref: str) -> Dict[str, Any]:
+def _build_scenario_template(scale: str, board_ref: str, terrain_ref: str) -> Dict[str, Any]:
     """Base scenario template for matchup scenarios.
+
+    Pas de parametre `split` : il n'apparait dans aucune cle du scenario. Le moteur le deduit
+    du CHEMIN du fichier ("/scenarios/training/", "/scenarios/holdout_*/",
+    engine/game_state.py:1248-1256), chemin que l'appelant construit deja.
 
     Contrat moteur V11 (meme forme que scripts/build_holdout_benchmark.py:117-126) : murs,
     aires d'objectifs et zones de deploiement viennent TOUS du `terrain_ref`, resolu sous
@@ -1048,7 +1052,6 @@ def _run_one_split(
     run_matchup_dir.mkdir(parents=True, exist_ok=True)
     template = _build_scenario_template(
         args.scale,
-        current_split,
         args.board_ref,
         args.terrain_ref,
     )

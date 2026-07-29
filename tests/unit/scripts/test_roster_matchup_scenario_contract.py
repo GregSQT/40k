@@ -34,13 +34,13 @@ def module():
 
 
 def test_scenario_template_has_no_legacy_key(module):
-    template = module._build_scenario_template("100pts", "training", "44x60x5", "terrain-mc1.json")
+    template = module._build_scenario_template("100pts", "44x60x5", "terrain-mc1.json")
     for key in LEGACY_KEYS:
         assert key not in template, f"cle legacy '{key}' encore emise par _build_scenario_template"
 
 
 def test_scenario_template_declares_board_and_terrain(module):
-    template = module._build_scenario_template("100pts", "training", "44x60x5", "terrain-mc1.json")
+    template = module._build_scenario_template("100pts", "44x60x5", "terrain-mc1.json")
     assert template["board_ref"] == "44x60x5"
     assert template["terrain_ref"] == "terrain-mc1.json"
 
