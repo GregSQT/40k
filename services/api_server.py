@@ -376,11 +376,14 @@ _UNITS_CACHE_FRONTEND_KEYS = ("col", "row", "level", "HP_CUR", "player", "orient
 # Clés moteur internes par unité / par arme, non consommées par l'UI web (le grep frontend est vide).
 # Filtrées de la réponse JSON (allège chaque POST /action : roster complet × armes), conservées côté moteur.
 _UNIT_EXCLUDE_KEYS_FOR_API = frozenset({"_wdc_def_key", "_precheck_cache"})
-_WEAPON_EXCLUDE_KEYS_FOR_API = frozenset({"_wdc_off_key", "_parsed_rules"})
+# 2026-07-29 — ``_parsed_rules`` a été RETIRÉ de cette liste : le parseur d'armurerie ne l'écrit
+# plus (cache du défunt ``WeaponRulesApplier``, sans lecteur). ``_wdc_off_key`` reste, lui : il est
+# vif, écrit et relu par ``engine/weapon_damage_cache.py``.
+_WEAPON_EXCLUDE_KEYS_FOR_API = frozenset({"_wdc_off_key"})
 
 
 def _slim_weapon_for_api(weapon: Any) -> Any:
-    """Copie d'une arme sans les clés moteur internes (``_wdc_off_key``, ``_parsed_rules``)."""
+    """Copie d'une arme sans les clés moteur internes (``_wdc_off_key``)."""
     if not isinstance(weapon, dict):
         return weapon
     return {k: v for k, v in weapon.items() if k not in _WEAPON_EXCLUDE_KEYS_FOR_API}
