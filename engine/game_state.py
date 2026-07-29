@@ -2968,7 +2968,8 @@ def sum_objective_control_oc(
 
     Une figurine compte des qu UNE case de son empreinte de socle recouvre ``hex_set`` ; elle
     apporte alors la caracteristique OC de son unite (l OC est par figurine). Les figurines
-    mortes (absentes de models_cache) et les unites a OC 0 sont ignorees.
+    mortes (absentes de models_cache), les unites a OC 0 et les unites battle-shocked
+    (01.07 : OC de toutes leurs figurines modifie a '-') sont ignorees.
 
     Fonction module-level : SOURCE UNIQUE partagee par le controle d objectif du moteur
     (``StateManager._sum_objective_control_oc`` / ``calculate_objective_control``) et par
@@ -3007,6 +3008,13 @@ def sum_objective_control_oc_multi(
         unit = unit_by_id.get(str(unit_id))
         if not unit:
             raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+        # Regle 01.07 : tant qu une unite est battle-shocked, la caracteristique OC de TOUTES
+        # ses figurines est modifiee a '-' (02.02) — « unable to control objectives at all ».
+        # Le drapeau est porte par l unite (roll_battle_shock, etape 08.03), donc l escouade
+        # entiere n apporte AUCUN controle (14.02). Cle exigee : elle est posee a la
+        # construction de chaque unite ; son absence est un etat corrompu, pas un defaut.
+        if bool(require_key(unit, "battle_shocked")):
+            continue
         oc = require_key(unit, "OC")
         if oc <= 0:
             continue

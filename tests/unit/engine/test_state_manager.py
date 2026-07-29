@@ -38,6 +38,9 @@ def _sm(config: Dict[str, Any] | None = None) -> GameStateManager:
 
 def _raw_unit(uid: int, player: int, value: int = 100) -> Dict[str, Any]:
     return {"id": uid, "player": player, "col": uid, "row": 0,
+            # Règle 01.07 : champ posé dès la construction d'une unité, lu SANS défaut
+            # par le contrôle d'objectif (14.02).
+            "battle_shocked": False,
             "HP_CUR": 3, "HP_MAX": 3, "VALUE": value, "OC": 1,
             "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
             "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,

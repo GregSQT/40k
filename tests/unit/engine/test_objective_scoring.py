@@ -14,6 +14,7 @@ import pytest
 from engine.game_state import GameStateManager
 from engine.phase_handlers.shared_utils import build_units_cache
 from engine.combat_utils import normalize_coordinates
+from shared.data_validation import ConfigurationError
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -62,9 +63,20 @@ def _primary_objective(
     }
 
 
-def _unit(uid: int, player: int, col: int, row: int, oc: int = 1) -> Dict[str, Any]:
+def _unit(
+    uid: int,
+    player: int,
+    col: int,
+    row: int,
+    oc: int = 1,
+    battle_shocked: bool = False,
+) -> Dict[str, Any]:
     return {
         "id": uid,
+        # Règle 01.07 : champ posé dès la construction d'une unité (create_unit /
+        # _build_enhanced_unit), lu SANS défaut par le contrôle d'objectif 14.02.
+        "battle_shocked": battle_shocked,
+        "LD": 7,
         "player": player,
         "col": col,
         "row": row,
@@ -288,3 +300,75 @@ class TestObjectiveScoringList:
         mgr.apply_primary_objective_scoring(gs, "command")
 
         assert gs["victory_points"][1] == 3  # 1 + 2
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests — battle-shock et contrôle d'objectif (règle 01.07 + 14.02)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestBattleShockObjectiveControl:
+    """01.07 : « While a unit is battle-shocked: the Objective Control (OC) characteristic of
+    all of its models is modified to '-' (02.02) », et 02.02 : « If a model has an OC
+    characteristic of '-' it is unable to control objectives at all ». Une unité sous le choc
+    n'apporte donc AUCUN OC au décompte 14.02."""
+
+    def test_battle_shocked_unit_contributes_no_oc(self):
+        """La MÊME unité sur l'objectif : hors choc elle apporte son OC, sous choc rien."""
+        mgr = _make_manager()
+        obj = _primary_objective()
+
+        gs_normal = _make_gs([_unit(1, 1, 5, 5, oc=2)], turn=2, primary_objective=obj)
+        control_normal = mgr.calculate_objective_control(gs_normal)
+        assert control_normal["obj1"]["player_1_oc"] == 2
+        assert control_normal["obj1"]["controller"] == 1
+
+        gs_shocked = _make_gs(
+            [_unit(1, 1, 5, 5, oc=2, battle_shocked=True)], turn=2, primary_objective=obj
+        )
+        control_shocked = mgr.calculate_objective_control(gs_shocked)
+        assert control_shocked["obj1"]["player_1_oc"] == 0
+        assert control_shocked["obj1"]["controller"] is None
+
+    def test_battle_shock_flips_objective_to_opponent(self):
+        """OC 3 sous choc vs OC 1 adverse : l'objectif passe à l'adversaire."""
+        mgr = _make_manager()
+        obj = _primary_objective(control_method="default")
+        units = [
+            _unit(1, 1, 5, 5, oc=3, battle_shocked=True),
+            _unit(2, 2, 5, 5, oc=1),
+        ]
+        gs = _make_gs(units, turn=2, primary_objective=obj)
+
+        control = mgr.calculate_objective_control(gs)
+
+        assert control["obj1"]["player_1_oc"] == 0
+        assert control["obj1"]["player_2_oc"] == 1
+        assert control["obj1"]["controller"] == 2
+
+    def test_battle_shocked_unit_scores_no_victory_points(self):
+        """Conséquence sur la partie : plus de VP « control_at_least_one » sous le choc."""
+        mgr = _make_manager()
+        obj = _primary_objective(
+            conditions=[{"condition": "control_at_least_one", "points": 1}]
+        )
+        gs = _make_gs(
+            [_unit(1, 1, 5, 5, battle_shocked=True)],
+            turn=2,
+            current_player=1,
+            primary_objective=obj,
+        )
+
+        mgr.apply_primary_objective_scoring(gs, "command")
+
+        assert gs["victory_points"][1] == 0
+
+    def test_missing_battle_shocked_field_raises(self):
+        """Aucun défaut : une unité sans le champ est un état corrompu → erreur explicite."""
+        mgr = _make_manager()
+        obj = _primary_objective()
+        unit = _unit(1, 1, 5, 5)
+        del unit["battle_shocked"]
+        gs = _make_gs([unit], turn=2, primary_objective=obj)
+
+        with pytest.raises(ConfigurationError, match="battle_shocked"):
+            mgr.calculate_objective_control(gs)
