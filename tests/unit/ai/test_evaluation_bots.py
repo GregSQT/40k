@@ -61,23 +61,43 @@ def _patch_move_geometry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(eb, "min_distance_between_sets", _manhattan)
 
 
+# ⚠️ Le moteur ne connait que les joueurs 1 et 2 : `current_player` hors {1,2} leve
+# (fight_handlers `_normalize_current_player` et fin de phase de combat), et le wrapper pose
+# `bot_player = 2 if controlled_player == 1 else 1`. Toute doublure joue donc 1 vs 2 : une
+# doublure en 0/1 rendait indetectables les fautes de derivation du camp adverse (`3 - player`).
+ACTING = 1
+FOE = 2
+
+
+def _act(bot, valid_actions, gs, active=None):
+    """Appelle le bot comme le wrapper : l'escouade ACTIVEE est fournie, jamais devinee.
+
+    `env_wrappers._get_bot_action` passe `eligible_units[0]`, la MEME escouade dont le masque
+    a ete construit. Par defaut on prend la premiere unite de la doublure ; le cas ou le
+    selecteur n'est pas le joueur courant passe `active` explicitement.
+    """
+    if active is None:
+        active = gs["units"][0]
+    return bot.select_action_with_state(valid_actions, gs, active)
+
+
 def _move_gs(unit_hex=(0, 0), enemy_hex=(10, 0), objectives=None):
     ucol, urow = unit_hex
     ecol, erow = enemy_hex
     gs = {
-        "current_player": 0,
+        "current_player": ACTING,
         "units": [
-            {"id": "1", "player": 0, "col": ucol, "row": urow},
-            {"id": "e", "player": 1, "col": ecol, "row": erow},
+            {"id": "1", "player": ACTING, "col": ucol, "row": urow},
+            {"id": "e", "player": FOE, "col": ecol, "row": erow},
         ],
         "units_cache": {
-            "1": {"col": ucol, "row": urow, "player": 0, "occupied_hexes": [(ucol, urow)]},
-            "e": {"col": ecol, "row": erow, "player": 1, "occupied_hexes": [(ecol, erow)]},
+            "1": {"col": ucol, "row": urow, "player": ACTING, "occupied_hexes": [(ucol, urow)]},
+            "e": {"col": ecol, "row": erow, "player": FOE, "occupied_hexes": [(ecol, erow)]},
         },
     }
     if objectives is not None:
         gs["objectives"] = objectives
-    return gs, {"id": "1", "player": 0, "col": ucol, "row": urow}
+    return gs, {"id": "1", "player": ACTING, "col": ucol, "row": urow}
 
 
 def test_select_weighted_deployment_action_errors_and_antirepeat(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,10 +131,10 @@ def test_select_weighted_deployment_action_errors_and_antirepeat(monkeypatch: py
 def test_random_bot_phase_aware_selection(monkeypatch: pytest.MonkeyPatch) -> None:
     bot = RandomBot()
     monkeypatch.setattr(eb.random, "choice", lambda seq: seq[0])
-    assert bot.select_action_with_state([4, 9], {"phase": "deployment"}) == 4
-    assert bot.select_action_with_state([SHOOT, WAIT_ACTION], {"phase": "shoot"}) == SHOOT
+    assert _act(bot, [4, 9], {"phase": "deployment"}, active={"id": "1", "player": ACTING}) == 4
+    assert _act(bot, [SHOOT, WAIT_ACTION], {"phase": "shoot"}, active={"id": "1", "player": ACTING}) == SHOOT
     # No shoot slot available in shoot phase -> WAIT
-    assert bot.select_action_with_state([CELL, WAIT_ACTION], {"phase": "shoot"}) == WAIT_ACTION
+    assert _act(bot, [CELL, WAIT_ACTION], {"phase": "shoot"}, active={"id": "1", "player": ACTING}) == WAIT_ACTION
 
 
 def test_random_bot_destinations_and_targets(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -136,17 +156,17 @@ def test_greedy_bot_select_action_and_state(monkeypatch: pytest.MonkeyPatch) -> 
         "_select_weighted_deployment_action",
         lambda **kwargs: 6,
     )
-    assert bot.select_action_with_state([4, 5, 6], {"phase": "deployment", "episode_number": 1}) == 6
-    assert bot.select_action_with_state([SHOOT, WAIT_ACTION], {"phase": "shoot"}) == SHOOT
+    assert _act(bot, [4, 5, 6], {"phase": "deployment", "episode_number": 1}, active={"id": "1", "player": ACTING}) == 6
+    assert _act(bot, [SHOOT, WAIT_ACTION], {"phase": "shoot"}, active={"id": "1", "player": ACTING}) == SHOOT
 
 
 def test_greedy_bot_target_selection_uses_low_hp(monkeypatch: pytest.MonkeyPatch) -> None:
     bot = GreedyBot(randomness=0.0)
     game_state = {
         "units": [
-            {"id": "1", "player": 0},
-            {"id": "2", "player": 1},
-            {"id": "3", "player": 1},
+            {"id": "1", "player": ACTING},
+            {"id": "2", "player": FOE},
+            {"id": "3", "player": FOE},
         ]
     }
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: uid in {"2", "3"})
@@ -179,17 +199,17 @@ def test_defensive_bot_action_shoot_phase(monkeypatch: pytest.MonkeyPatch) -> No
 
     game_state = {
         "phase": "shoot",
-        "current_player": 0,
+        "current_player": ACTING,
         "units": [
-            {"id": "1", "player": 0, "col": 1, "row": 1},
-            {"id": "2", "player": 1, "col": 2, "row": 1},
+            {"id": "1", "player": ACTING, "col": 1, "row": 1},
+            {"id": "2", "player": FOE, "col": 2, "row": 1},
         ],
         "units_cache": {},
         "inches_to_subhex": 1,
     }
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: uid in {"1", "2"})
     # shoot phase -> always shoots first target slot
-    assert bot.select_action_with_state([SHOOT, SHOOT2, WAIT_ACTION], game_state) == SHOOT
+    assert _act(bot, [SHOOT, SHOOT2, WAIT_ACTION], game_state) == SHOOT
 
 
 def test_tactical_bot_phase_action_selection() -> None:
@@ -199,7 +219,7 @@ def test_tactical_bot_phase_action_selection() -> None:
     assert bot.select_action([CELL, WAIT_ACTION], phase="move") == CELL
     assert bot.select_action([SHOOT, WAIT_ACTION], phase="shoot") == SHOOT
     # No living active unit -> charge skipped -> WAIT
-    assert bot.select_action([CHARGE, WAIT_ACTION], phase="charge", game_state={"current_player": 0, "units": []}) == WAIT_ACTION
+    assert bot.select_action([CHARGE, WAIT_ACTION], phase="charge", game_state={"current_player": ACTING, "units": []}) == WAIT_ACTION
     # V11 §9 P3-1 : le bot frappe le slot ennemi ouvert le plus menacant (menace decroissante).
     assert bot.select_action([FIGHT_SLOT0, WAIT_ACTION], phase="fight") == FIGHT_SLOT0
     # Sans cible eligible, il se declare « a vide » plutot que d'attendre (12.04).
@@ -209,11 +229,11 @@ def test_tactical_bot_phase_action_selection() -> None:
 def test_tactical_bot_select_shooting_target_scoring(monkeypatch: pytest.MonkeyPatch) -> None:
     bot = TacticalBot(randomness=0.0)
     game_state = {
-        "current_player": 0,
+        "current_player": ACTING,
         "units": [
-            {"id": "u0", "player": 0, **_dmg(rng=4, cc=1)},
-            {"id": "e1", "player": 1, **_dmg(rng=2, cc=1)},
-            {"id": "e2", "player": 1, **_dmg(rng=1, cc=1)},
+            {"id": "u0", "player": ACTING, **_dmg(rng=4, cc=1)},
+            {"id": "e1", "player": FOE, **_dmg(rng=2, cc=1)},
+            {"id": "e2", "player": FOE, **_dmg(rng=1, cc=1)},
         ],
     }
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: uid in {"u0", "e1", "e2"})
@@ -225,11 +245,11 @@ def test_tactical_bot_select_shooting_target_scoring(monkeypatch: pytest.MonkeyP
 def test_tactical_bot_find_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     bot = TacticalBot(randomness=0.0)
     game_state = {
-        "current_player": 0,
+        "current_player": ACTING,
         "units": [
-            {"id": "u0", "player": 0, "col": 1, "row": 1, **_dmg(rng=2, cc=1)},
-            {"id": "e1", "player": 1, "col": 4, "row": 1, **_dmg(rng=1, cc=3)},
-            {"id": "e2", "player": 1, "col": 9, "row": 1, **_dmg(rng=3, cc=1)},
+            {"id": "u0", "player": ACTING, "col": 1, "row": 1, **_dmg(rng=2, cc=1)},
+            {"id": "e1", "player": FOE, "col": 4, "row": 1, **_dmg(rng=1, cc=3)},
+            {"id": "e2", "player": FOE, "col": 9, "row": 1, **_dmg(rng=3, cc=1)},
         ],
         "units_cache": {},
     }
@@ -245,9 +265,9 @@ def test_tactical_bot_movement_position_helpers(monkeypatch: pytest.MonkeyPatch)
     bot = TacticalBot(randomness=0.0)
     game_state = {
         "units": [
-            {"id": "u0", "player": 0},
-            {"id": "e1", "player": 1, "col": 5, "row": 5, **_dmg(rng=1, cc=3)},
-            {"id": "e2", "player": 1, "col": 10, "row": 10, **_dmg(rng=3, cc=1)},
+            {"id": "u0", "player": ACTING},
+            {"id": "e1", "player": FOE, "col": 5, "row": 5, **_dmg(rng=1, cc=3)},
+            {"id": "e2", "player": FOE, "col": 10, "row": 10, **_dmg(rng=3, cc=1)},
         ],
         "units_cache": {},
         "config": {
@@ -261,7 +281,7 @@ def test_tactical_bot_movement_position_helpers(monkeypatch: pytest.MonkeyPatch)
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },
     }
-    unit = {"id": "u0", "player": 0, "RNG_WEAPONS": [{"RNG": 6}]}
+    unit = {"id": "u0", "player": ACTING, "RNG_WEAPONS": [{"RNG": 6}]}
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: uid in {"e1", "e2"})
     monkeypatch.setattr(eb, "calculate_hex_distance", lambda c1, r1, c2, r2: abs(c1 - c2) + abs(r1 - r2))
     monkeypatch.setattr("engine.utils.weapon_helpers.get_max_ranged_range", lambda u: 6)
@@ -291,15 +311,15 @@ def test_control_bot_non_move_phases(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: True)
     game_state = {
         "phase": "shoot",
-        "current_player": 0,
-        "units": [{"id": "1", "player": 0, "col": 5, "row": 5}],
+        "current_player": ACTING,
+        "units": [{"id": "1", "player": ACTING, "col": 5, "row": 5}],
         "objectives": [{"hexes": [{"col": 5, "row": 5}]}],
     }
     # Shoot phase -> shoot first target slot
-    assert bot.select_action_with_state([SHOOT, SHOOT2, WAIT_ACTION], game_state) == SHOOT
+    assert _act(bot, [SHOOT, SHOOT2, WAIT_ACTION], game_state) == SHOOT
     # Charge phase on objective -> WAIT
     charge_gs = {**game_state, "phase": "charge"}
-    assert bot.select_action_with_state([CHARGE, WAIT_ACTION], charge_gs) == WAIT_ACTION
+    assert _act(bot, [CHARGE, WAIT_ACTION], charge_gs) == WAIT_ACTION
 
 
 def test_aggressive_smart_bot_movement_and_combat(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -309,18 +329,18 @@ def test_aggressive_smart_bot_movement_and_combat(monkeypatch: pytest.MonkeyPatc
     # Pousse vers l'ennemi
     assert bot.select_movement_destination(unit, [(2, 0), (8, 0)], gs) == (8, 0)
 
-    combat_gs = {"phase": "charge", "current_player": 0, "units": [{"id": "1", "player": 0}]}
+    combat_gs = {"phase": "charge", "current_player": ACTING, "units": [{"id": "1", "player": ACTING}]}
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, g: True)
     # Charge -> always charge
-    assert bot.select_action_with_state([CHARGE, WAIT_ACTION], combat_gs) == CHARGE
+    assert _act(bot, [CHARGE, WAIT_ACTION], combat_gs) == CHARGE
     # Shoot with no targets -> wait
     shoot_gs = {**combat_gs, "phase": "shoot"}
-    assert bot.select_action_with_state([CELL, WAIT_ACTION], shoot_gs) == WAIT_ACTION
+    assert _act(bot, [CELL, WAIT_ACTION], shoot_gs) == WAIT_ACTION
     # Shoot with targets -> focus-fire de la cible designee par le critere (ici HP egaux et
     # mapping [e0, e1] : le slot 0 l'emporte au premier arrive a score egal).
     monkeypatch.setattr(eb, "get_hp_from_cache", lambda uid, gs_: 5)
     targets_gs = _slot_gs("shoot", {"e0": _dmg(rng=1, cc=1), "e1": _dmg(rng=1, cc=1)}, ["e0", "e1"])
-    assert bot.select_action_with_state([SHOOT, SHOOT2, WAIT_ACTION], targets_gs) == SHOOT
+    assert _act(bot, [SHOOT, SHOOT2, WAIT_ACTION], targets_gs) == SHOOT
 
 
 def test_defensive_smart_bot_movement_and_no_charge(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -330,10 +350,10 @@ def test_defensive_smart_bot_movement_and_no_charge(monkeypatch: pytest.MonkeyPa
     # Garde ses distances -> s'eloigne de l'ennemi
     assert bot.select_movement_destination(unit, [(2, 0), (8, 0)], gs) == (2, 0)
 
-    combat_gs = {"phase": "charge", "current_player": 0, "units": [{"id": "1", "player": 0}]}
+    combat_gs = {"phase": "charge", "current_player": ACTING, "units": [{"id": "1", "player": ACTING}]}
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, g: True)
     # Charge -> never
-    assert bot.select_action_with_state([CHARGE, WAIT_ACTION], combat_gs) == WAIT_ACTION
+    assert _act(bot, [CHARGE, WAIT_ACTION], combat_gs) == WAIT_ACTION
 
 
 def test_adaptive_bot_movement_posture(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -361,14 +381,14 @@ def test_adaptive_bot_charge_posture(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: True)
     base_gs = {
         "phase": "charge",
-        "current_player": 0,
+        "current_player": ACTING,
         "turn": 3,
-        "units": [{"id": "1", "player": 0, "col": 1, "row": 1}],
+        "units": [{"id": "1", "player": ACTING, "col": 1, "row": 1}],
         "objectives": [{"hexes": [{"col": 5, "row": 5}]}],
-        "units_cache": {"1": {"col": 1, "row": 1, "player": 0}},
+        "units_cache": {"1": {"col": 1, "row": 1, "player": ACTING}},
     }
     # Losing charge -> charge
-    assert bot.select_action_with_state([CHARGE, WAIT_ACTION], base_gs) == CHARGE
+    assert _act(bot, [CHARGE, WAIT_ACTION], base_gs) == CHARGE
 
 
 # --- V11 §0.3 : portage CC_DMG/RNG_DMG vers le systeme multi-armes -----------------------------
@@ -396,7 +416,7 @@ def test_threat_focus_fire_without_legacy_damage_fields(monkeypatch: pytest.Monk
 
     bot = DefensiveSmartBot(randomness=0.0)
     # slot 1 = e_strong, la plus menacante (6 en melee vs 1 en tir pour e_weak).
-    assert bot.select_action_with_state([SHOOT, SHOOT2, WAIT_ACTION], gs) == SHOOT2
+    assert _act(bot, [SHOOT, SHOOT2, WAIT_ACTION], gs) == SHOOT2
 
 
 def test_tactical_bot_charges_only_when_melee_beats_shooting(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -426,27 +446,31 @@ FIGHT_SLOT1 = mi.FIGHT_SLOT_BASE + 1
 K_ENEMY_SLOTS = len(mi.SHOOT_SLOTS)
 
 
-def _slot_gs(phase: str, enemies: dict, order: list) -> dict:
+def _slot_gs(phase: str, enemies: dict, order: list, current_player=None) -> dict:
     """game_state minimal pour les selections par slot ennemi.
 
     `enemies` : {squad_id: champs d'armes} ; `order` : ids ranges PAR SLOT (mapping fige, donc
     deterministe : `get_enemy_slot_mapping` relit la cle deja presente sans reattribuer).
+    `current_player` peut DIFFERER du joueur agissant : c'est le cas en phase de combat, ou la
+    selection 12.04 alterne entre les camps (`fight_selector`).
     """
-    ours = {"id": "1", "player": 0, "col": 1, "row": 1, **_dmg(rng=2, cc=2)}
+    if current_player is None:
+        current_player = ACTING
+    ours = {"id": "1", "player": ACTING, "col": 1, "row": 1, **_dmg(rng=2, cc=2)}
     units = [ours]
     units_cache = {"1": dict(ours)}
     for i, (eid, fields) in enumerate(enemies.items()):
-        enemy = {"id": eid, "player": 1, "col": 5 + i, "row": 1, **fields}
+        enemy = {"id": eid, "player": FOE, "col": 5 + i, "row": 1, **fields}
         units.append(enemy)
         units_cache[eid] = dict(enemy)
     return {
         "phase": phase,
-        "current_player": 0,
+        "current_player": current_player,
         "turn": 1,
         "units": units,
         "units_cache": units_cache,
         "inches_to_subhex": 1,
-        "enemy_slot_mapping_p0": list(order) + [None] * (K_ENEMY_SLOTS - len(order)),
+        f"enemy_slot_mapping_p{ACTING}": list(order) + [None] * (K_ENEMY_SLOTS - len(order)),
     }
 
 
@@ -462,7 +486,7 @@ def test_defensive_bot_counter_charges_melee_threat(monkeypatch: pytest.MonkeyPa
         {"e_shooty": _dmg(rng=6, cc=1), "e_melee": _dmg(rng=1, cc=5)},
         ["e_shooty", "e_melee"],
     )
-    assert bot.select_action_with_state([CHARGE, CHARGE_SLOT1, WAIT_ACTION], gs) == CHARGE_SLOT1
+    assert _act(bot, [CHARGE, CHARGE_SLOT1, WAIT_ACTION], gs) == CHARGE_SLOT1
 
     # Deux brutes : la plus dangereuse au corps a corps l'emporte, meme sur le slot le plus haut.
     gs2 = _slot_gs(
@@ -470,11 +494,11 @@ def test_defensive_bot_counter_charges_melee_threat(monkeypatch: pytest.MonkeyPa
         {"e_small": _dmg(rng=1, cc=2), "e_big": _dmg(rng=1, cc=9)},
         ["e_small", "e_big"],
     )
-    assert bot.select_action_with_state([CHARGE, CHARGE_SLOT1, WAIT_ACTION], gs2) == CHARGE_SLOT1
+    assert _act(bot, [CHARGE, CHARGE_SLOT1, WAIT_ACTION], gs2) == CHARGE_SLOT1
 
     # Uniquement des tireurs : le defensif tient sa ligne.
     gs3 = _slot_gs("charge", {"e_shooty": _dmg(rng=6, cc=1)}, ["e_shooty"])
-    assert bot.select_action_with_state([CHARGE, WAIT_ACTION], gs3) == WAIT_ACTION
+    assert _act(bot, [CHARGE, WAIT_ACTION], gs3) == WAIT_ACTION
 
 
 def test_defensive_bot_fights_highest_threat_not_lowest_slot(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -487,10 +511,10 @@ def test_defensive_bot_fights_highest_threat_not_lowest_slot(monkeypatch: pytest
         {"e_weak": _dmg(rng=1, cc=1), "e_strong": _dmg(rng=2, cc=8)},
         ["e_weak", "e_strong"],
     )
-    assert bot.select_action_with_state([FIGHT_SLOT0, FIGHT_SLOT1], gs) == FIGHT_SLOT1
+    assert _act(bot, [FIGHT_SLOT0, FIGHT_SLOT1], gs) == FIGHT_SLOT1
 
     # Aucun slot ouvert -> combat a vide (12.04/12.06), jamais une cible arbitraire.
-    assert bot.select_action_with_state([FIGHT_EMPTY], gs) == FIGHT_EMPTY
+    assert _act(bot, [FIGHT_EMPTY], gs) == FIGHT_EMPTY
 
 
 def test_greedy_bot_fights_lowest_hp_not_lowest_slot(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -504,8 +528,35 @@ def test_greedy_bot_fights_lowest_hp_not_lowest_slot(monkeypatch: pytest.MonkeyP
         {"e_full": _dmg(rng=1, cc=1), "e_hurt": _dmg(rng=1, cc=1)},
         ["e_full", "e_hurt"],
     )
-    assert bot.select_action_with_state([FIGHT_SLOT0, FIGHT_SLOT1], gs) == FIGHT_SLOT1
-    assert bot.select_action_with_state([FIGHT_EMPTY], gs) == FIGHT_EMPTY
+    assert _act(bot, [FIGHT_SLOT0, FIGHT_SLOT1], gs) == FIGHT_SLOT1
+    assert _act(bot, [FIGHT_EMPTY], gs) == FIGHT_EMPTY
+
+
+def test_fight_target_follows_the_activated_squad_not_current_player(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SELECTEUR != JOUEUR COURANT (12.04).
+
+    Le masque derive son joueur de l'escouade activee
+    (`action_decoder` : `units_cache[eligible_units[0]["id"]]["player"]`), et la selection 12.04
+    alterne entre les camps (`fight_handlers._fight_v11_register_selection` : `3 - selector`).
+    Un bot qui deduirait le joueur de `current_player` lirait le mapping de SES PROPRES escouades.
+    """
+    monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
+    monkeypatch.setattr(eb, "get_hp_from_cache", lambda uid, gs_: 5 if uid == "e_weak" else 2)
+
+    # L'escouade activee appartient a ACTING, mais c'est FOE qui est `current_player`.
+    gs = _slot_gs(
+        "fight",
+        {"e_weak": _dmg(rng=1, cc=1), "e_strong": _dmg(rng=2, cc=8)},
+        ["e_weak", "e_strong"],
+        current_player=FOE,
+    )
+    assert gs["current_player"] != gs["units"][0]["player"]
+
+    # Defensif -> la plus menacante ; greedy -> la plus entamee. Ici c'est e_strong (slot 1).
+    assert _act(DefensiveBot(randomness=0.0), [FIGHT_SLOT0, FIGHT_SLOT1], gs) == FIGHT_SLOT1
+    assert _act(GreedyBot(randomness=0.0), [FIGHT_SLOT0, FIGHT_SLOT1], gs) == FIGHT_SLOT1
 
 
 def test_slot_mapping_divergence_is_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -513,7 +564,7 @@ def test_slot_mapping_divergence_is_explicit(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
     gs = _slot_gs("fight", {"e_weak": _dmg(rng=1, cc=1)}, ["e_weak"])
     with pytest.raises(RuntimeError, match=r"sans escouade ennemie"):
-        DefensiveBot(randomness=0.0).select_action_with_state([FIGHT_SLOT0, FIGHT_SLOT1], gs)
+        _act(DefensiveBot(randomness=0.0), [FIGHT_SLOT0, FIGHT_SLOT1], gs)
 
 
 # --- Tir des smart bots : le slot vise est celui du MAPPING, pas un index de pool de tir -------
@@ -537,7 +588,7 @@ def test_smart_bots_shoot_the_slot_designated_by_their_criterion(
     )
     gs_threat["units"][0]["valid_target_pool"] = ["e_strong", "e_weak"]
     assert (
-        DefensiveSmartBot(randomness=0.0).select_action_with_state(
+        _act(DefensiveSmartBot(randomness=0.0), 
             [SHOOT, SHOOT2, WAIT_ACTION], gs_threat
         )
         == SHOOT2
@@ -551,13 +602,13 @@ def test_smart_bots_shoot_the_slot_designated_by_their_criterion(
     )
     gs_hp["units"][0]["valid_target_pool"] = ["e_hurt", "e_full"]
     assert (
-        AggressiveSmartBot(randomness=0.0).select_action_with_state(
+        _act(AggressiveSmartBot(randomness=0.0), 
             [SHOOT, SHOOT2, WAIT_ACTION], gs_hp
         )
         == SHOOT2
     )
     assert (
-        AdaptiveBot(randomness=0.0).select_action_with_state([SHOOT, SHOOT2, WAIT_ACTION], gs_hp)
+        _act(AdaptiveBot(randomness=0.0), [SHOOT, SHOOT2, WAIT_ACTION], gs_hp)
         == SHOOT2
     )
 
@@ -569,4 +620,4 @@ def test_smart_bot_shoot_slot_mapping_divergence_is_explicit(
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
     gs = _slot_gs("shoot", {"e_weak": _dmg(rng=1, cc=1)}, ["e_weak"])
     with pytest.raises(RuntimeError, match=r"sans escouade ennemie"):
-        AggressiveSmartBot(randomness=0.0).select_action_with_state([SHOOT, SHOOT2], gs)
+        _act(AggressiveSmartBot(randomness=0.0), [SHOOT, SHOOT2], gs)

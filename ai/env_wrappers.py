@@ -974,7 +974,14 @@ class BotControlledEnv(gym.Wrapper):
             # cellule via la carte MEMOISEE par le moteur au masque (spatial_grid = source unique).
             bot_choice = self._select_bot_move_action(game_state, eligible_units[0], valid_actions)
         elif hasattr(self.bot, 'select_action_with_state'):
-            bot_choice = self.bot.select_action_with_state(valid_actions, game_state)
+            # L'escouade activee est TRANSMISE au bot : c'est elle (et non `current_player`) qui
+            # determine le joueur dont le masque est construit — cf.
+            # `get_squad_action_mask_and_eligible_units`, `our_player` lu dans
+            # `units_cache[eligible_units[0]["id"]]`. En phase de combat, la selection 12.04
+            # alterne entre les camps : le bot peut etre selecteur SANS etre joueur courant.
+            bot_choice = self.bot.select_action_with_state(
+                valid_actions, game_state, eligible_units[0]
+            )
         else:
             bot_choice = self.bot.select_action(valid_actions)
 
