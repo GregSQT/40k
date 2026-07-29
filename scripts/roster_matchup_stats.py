@@ -521,7 +521,11 @@ def _run_single_episode(
         obs, _, terminated, truncated, info = env.step(action_scalar)
         done = bool(terminated or truncated)
         step_count += 1
-    winner = info.get("winner")
+    # Pas de `info.get("winner")` : un `None` de repli n'est ni `controlled_player` ni -1,
+    # l'episode serait compte en DEFAITE alors que la donnee manque. Le moteur ecrit toujours
+    # la cle (engine/w40k_core.py:1906 partie terminee, :2050 partie en cours) : son absence
+    # est une anomalie d'environnement, pas un cas de jeu.
+    winner = require_key(info, "winner")
     # ai/bot_evaluation.py:543 : le siege controle est LU dans l'info rendue par l'env, pas
     # recalcule ici. Un identifiant recalcule localement peut diverger silencieusement du
     # siege reellement joue (BotControlledEnv gere l'alternance des sieges).

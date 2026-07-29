@@ -18,6 +18,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from shared.data_validation import ConfigurationError
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = PROJECT_ROOT / "scripts" / "roster_matchup_stats.py"
 
@@ -218,7 +220,15 @@ def test_winner_is_read_from_engine_info(script):
 def test_missing_controlled_player_is_an_explicit_error(script):
     """Pas de repli : sans la cle, l'erreur est explicite plutot qu'un comptage faux."""
     env = FakeEnv(steps_before_done=1, final_info={"winner": 1})
-    with pytest.raises(Exception):
+    with pytest.raises(ConfigurationError, match="controlled_player"):
+        _run(script, env, FakeModel())
+
+
+def test_missing_winner_is_an_explicit_error(script):
+    """`info.get("winner")` rendait None, qui n'est ni le siege controle ni -1 : l'episode
+    etait compte en DEFAITE sur une donnee manquante. La lecture doit lever."""
+    env = FakeEnv(steps_before_done=1, final_info={"controlled_player": 1})
+    with pytest.raises(ConfigurationError, match="winner"):
         _run(script, env, FakeModel())
 
 
