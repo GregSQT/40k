@@ -302,7 +302,7 @@ def test_objective_control_snapshot() -> None:
 @pytest.mark.parametrize(
     "fn_name,line,expected",
     [
-        ("parse_step_timings_from_debug", "STEP_TIMING episode=1 step_index=2 duration_s=0.123 step_calls=3", (1, 2, 0.123, 3)),
+        ("parse_step_timings_from_debug", "STEP_TIMING episode=1 step_index=2 duration_s=0.123", (1, 2, 0.123)),
         ("parse_predict_timings_from_debug", "PREDICT_TIMING episode=1 step_index=2 duration_s=0.123", (1, 2, 0.123)),
         (
             "parse_cascade_timings_from_debug",
@@ -335,6 +335,30 @@ def test_debug_timing_parsers(tmp_path: Path, fn_name: str, line: str, expected:
     assert parsed is not None
     assert parsed[0] == expected
     assert parser(str(tmp_path / "missing.log")) is None
+
+
+def test_parse_step_timings_still_reads_archived_step_calls_suffix(tmp_path: Path) -> None:
+    """Un debug.log archive porte un suffixe ` step_calls=<n>` que plus rien ne produit.
+
+    Le producteur (`StepLogger.log_action(step_calls_since_last=...)`, alimente par le bloc
+    step_logger de `_process_semantic_action`) a ete supprime le 2026-07-29 parce qu'inatteignable,
+    et le 4e champ du tuple avec lui. Retirer le groupe optionnel de la regex ne devait PAS rendre
+    les anciens runs illisibles : les 3 premiers champs doivent continuer a se parser, le suffixe
+    etant simplement ignore. Sans ce test, la promesse n'est verifiee par rien.
+    """
+    log_path = tmp_path / "debug.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "STEP_TIMING episode=1 step_index=2 duration_s=0.123 step_calls=3",
+                "STEP_TIMING episode=1 step_index=3 duration_s=0.456",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    parsed = an.parse_step_timings_from_debug(str(log_path))
+    assert parsed == [(1, 2, 0.123), (1, 3, 0.456)]
 
 
 def test_parse_step_breakdowns_new_and_old_formats(tmp_path: Path) -> None:

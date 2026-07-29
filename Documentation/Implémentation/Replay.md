@@ -158,9 +158,12 @@ cercle vert en fight.
 1. `engine/w40k_core.py` — `_pre_action_fight_state` (step(), chemin squad V11 T6) : capture
    `{ fight_subphase, fight_eligible_units }` (pré-action) au lieu des 3 pools V10 ; injecté au
    formateur via `_build_shot_details` (`details.update(fight_state)`).
-2. `engine/w40k_core.py` — 2 sites par-attaque de `_process_semantic_action` (chemin PvE/legacy, hors
+2. ~~`engine/w40k_core.py` — 2 sites par-attaque de `_process_semantic_action` (chemin PvE/legacy, hors
    training) : `attack_details["fight_eligible_units"] = list(require_key(self.game_state, …))`
-   (pool intact à ce point, avant `end_activation`).
+   (pool intact à ce point, avant `end_activation`).~~
+   **Supprimé le 2026-07-29** : ces 2 sites étaient dans le bloc `step_logger` de
+   `_process_semantic_action`, prouvé inatteignable (aucun appelant de `execute_semantic_action`
+   n'assigne de StepLogger). Seul le point 1 alimente réellement le replay.
 3. `ai/step_logger.py` (bloc combat) : émet `[FIGHT_SUBPHASE:…] [FIGHT_ELIGIBLE:…]` (contrat strict) ;
    3 tags legacy retirés.
 4. `frontend/src/utils/replayParser.ts` : parse `FIGHT_ELIGIBLE` → `action.fight_eligible_units` ;

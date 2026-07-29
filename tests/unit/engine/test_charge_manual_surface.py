@@ -492,3 +492,61 @@ class TestAutoplacePlan:
         assert {str(e[0]) for e in plan} == {"1#0", "1#1"}
         check = ch.charge_preview_move_plan(gs, "1", plan, ["2"])
         assert check["engaged_all"] is True, f"autoplace n'engage pas la cible : {check}"
+
+
+class TestAutoplaceFallbacks:
+    """Les deux replis DOCUMENTÉS de l'autoplace — aucun n'était exécuté par un test (mesuré)."""
+
+    def _gs(self, models, target, roll):
+        gs = _make_gs([_unit("1", 1, models), _unit("2", 2, [target])])
+        _activated(gs, "1", roll)
+        gs["charge_target_selections"]["1"] = ["2"]
+        return gs
+
+    def test_a_model_without_a_slot_still_advances_towards_the_target(self):
+        """Repli « traînards » : une figurine que l'ILP ne place sur aucun slot d'engagement n'est
+        pas laissée au départ — elle est rapprochée au maximum (11.04 WHILE MOVING : CHAQUE
+        figurine doit finir plus proche). La laisser sur place rendrait le plan invalide au Check
+        pour une raison que le joueur n'a pas causée.
+        """
+        starts = [(10, 10), (2, 30), (3, 31)]
+        gs = self._gs(starts, (16, 10), 6)
+        from engine.hex_utils import min_distance_between_sets
+
+        before = {f"1#{i}": min_distance_between_sets({p}, {(16, 10)}) for i, p in enumerate(starts)}
+
+        plan = ch.charge_autoplace_plan(gs, "1", mode="offensive")["plan"]
+
+        placed = {str(e[0]): (int(e[1]), int(e[2])) for e in plan}
+        assert set(placed) == {"1#0", "1#1", "1#2"}
+        stragglers = ["1#1", "1#2"]
+        for mid in stragglers:
+            assert placed[mid] != starts[int(mid[-1])], (
+                f"{mid} est restée au départ au lieu d'être rapprochée (repli traînards)"
+            )
+            after = min_distance_between_sets({placed[mid]}, {(16, 10)})
+            assert after < before[mid], (
+                f"{mid} n'a pas fini plus proche de la cible : {before[mid]} → {after}"
+            )
+
+    def test_an_impossible_coverage_still_returns_a_full_plan_and_names_the_gap(self):
+        """Repli « couverture impossible » : quand le budget ne permet à AUCUNE figurine
+        d'engager la cible, l'ILP relâche la contrainte dure au lieu d'échouer. Le plan sort
+        complet, et c'est le Check — pas l'autoplace — qui nomme la cible non engagée.
+
+        Un autoplace qui lèverait ou rendrait un plan vide priverait le joueur de l'avancée
+        partielle à laquelle 11.04 WHILE MOVING lui donne droit.
+        """
+        gs = self._gs([(10, 10), (10, 11)], (16, 10), 3)
+
+        plan = ch.charge_autoplace_plan(gs, "1", mode="offensive")["plan"]
+
+        assert {str(e[0]) for e in plan} == {"1#0", "1#1"}, "plan incomplet malgré le repli"
+        check = ch.charge_preview_move_plan(gs, "1", [tuple(e) for e in plan], ["2"])
+        assert all(check["per_model"].values()), (
+            f"le repli a produit une position illégale : {check['per_model']}"
+        )
+        assert check["engaged_all"] is False, (
+            "prémisse : avec ce budget la cible ne peut pas être engagée"
+        )
+        assert check["missing_targets"] == ["2"], "le Check ne nomme pas la cible non engagée"

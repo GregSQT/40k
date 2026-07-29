@@ -53,9 +53,16 @@ class StepLogger:
                 f.write("=" * 80 + "\n\n")
             print(f"📝 Step logging enabled: {self.output_file}")
     
-    def log_action(self, unit_id, action_type, phase, player, success, step_increment, action_details=None, step_calls_since_last=None):
+    def log_action(self, unit_id, action_type, phase, player, success, step_increment, action_details=None):
         """Log action with step increment information using clear format.
-        step_calls_since_last: LOG TEMPORAIRE -- number of step() calls since last step_increment (--debug).
+
+        Un parametre `step_calls_since_last` ajoutait un suffixe `step_calls=` a la ligne
+        STEP_TIMING de debug.log. Son unique producteur etait le compteur
+        `_step_calls_since_increment` du bloc step_logger de `W40KEngine._process_semantic_action`,
+        supprime le 2026-07-29 parce qu'inatteignable : plus aucun appelant ne pouvait renseigner
+        l'argument, donc le suffixe ne pouvait plus s'afficher. Pour retrouver ce diagnostic, le
+        point d'accroche est `step()` (ou `_episode_step_calls` compte deja les appels), pas la
+        journalisation.
         """
         # LOG TEMPORAIRE: Log when log_action is called for move actions (only if --debug)
         import time
@@ -83,8 +90,7 @@ class StepLogger:
             if self.debug_mode:
                 try:
                     with open("debug.log", "a") as f_db:
-                        suffix = f" step_calls={step_calls_since_last}" if step_calls_since_last is not None else ""
-                        f_db.write(f"STEP_TIMING episode={self.episode_number} step_index={step_index} duration_s={duration_s:.6f}{suffix}\n")
+                        f_db.write(f"STEP_TIMING episode={self.episode_number} step_index={step_index} duration_s={duration_s:.6f}\n")
                 except Exception:
                     pass
             self._last_step_wall = now

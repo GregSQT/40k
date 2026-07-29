@@ -143,8 +143,10 @@ PV (§0.6.5), qui entre dans l'observation, qui impose un ré-entraînement.
 
 1. **Id d'unité inexistant → HTTP 500** au lieu d'un refus métier. **CORRIGÉ**.
    La levée était dans le pré-traitement du step_logger (`_process_semantic_action`,
-   `w40k_core.py`), qui récupère l'unité avant l'action pour logger sa position et son
-   joueur — pas dans la logique de jeu. Le motif `unit_not_found` existait déjà dans une
+   `w40k_core.py`), qui récupérait l'unité avant l'action pour logger sa position et son
+   joueur — pas dans la logique de jeu. (Ce pré-traitement ne sert plus la journalisation :
+   le bloc step_logger de cette méthode, inatteignable, a été supprimé le 2026-07-29. La
+   récupération de l'unité et son refus `unit_not_found` restent, eux, bien vivants.) Le motif `unit_not_found` existait déjà dans une
    dizaine de handlers (`movement_handlers.py:797`, `shooting_handlers.py:5429`…) : c'était
    le dispatch central qui était incohérent avec eux.
    Correctif appliqué : id inconnu de `units` ET `units_cache` ET `squad_models` → refus

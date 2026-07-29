@@ -138,6 +138,10 @@ réels ont été trouvés et corrigés :
 La sourdine **reste, mais motivée** : elle acte le refus d'analyse, pas un faux positif.
 ➡️ **Sa disparition = dette n°1 (§3.1).**
 
+> **2026-07-29, plus tard le même jour — la sourdine est levée et la dette §3.1 est close.**
+> Voir **§3.1** pour le détail : la cause n'était pas celle diagnostiquée ici, et le bloc
+> `step_logger` de cette méthode s'est révélé **inatteignable** — il a été supprimé.
+
 ### 2.5 Le flux de replay qui effaçait un scénario versionné
 
 `ed0ef47c` — quatre attributs posés sur des objets fonction faisaient croire à un mécanisme vivant
@@ -233,20 +237,68 @@ en commentaire** (`ai/pointer_policy.py:254`) ⇒ **9 sourdines réelles**, tout
 > l'a pas été. Un point non instruit est écrit **non instruit**, jamais « sain » — c'est
 > précisément l'erreur que cette campagne a passé la journée à corriger.
 
-### 3.1 🔴 La méthode centrale du moteur reste non analysée — **décision en attente**
+### 3.1 ✅ La méthode centrale du moteur — **CLOS le 2026-07-29**
 
-- **Où** : `_process_semantic_action`, [`engine/w40k_core.py:3035`](../../engine/w40k_core.py#L3035).
-- **Ce que c'est** : **1613 lignes, 205 `if`** (mesuré après campagne ; 1582 / 205 au commit
-  `b376f2ae`). pyright refuse d'analyser le corps : *« Code is too complex to analyze »*. La
-  sourdine est **désormais motivée par écrit**, mais elle reste — donc la méthode la plus centrale
-  du moteur n'a **aucune couverture statique**.
-- **Ce qui a été instruit** : la levée temporaire a trouvé **3 défauts réels** (§2.4). Une
-  **extraction simple du bloc `step_logger` ne suffit pas** : c'est mesuré, les blocs partagent
-  **16 à 50 variables locales**, une extraction naïve rend une signature ingérable.
-- **Pourquoi ce n'est pas traité** : faire disparaître la sourdine exige de **décomposer le point
-  unique de journalisation** — un changement de structure du dispatcher, pas un refactor local.
-  **Décision d'architecture : elle appartient à l'utilisateur.**
-- **Effort** : non estimé. À estimer une fois la décomposition arbitrée.
+- **Où** : `_process_semantic_action`, `engine/w40k_core.py`.
+- **Résultat** : `pyright engine/w40k_core.py` → **0 erreur, sans aucune sourdine**. La méthode
+  passe de **1613 à ~390 lignes** et le corps est analysé en permanence.
+- **Le diagnostic ci-dessus était faux sur sa cause.** Il affirmait qu'une extraction simple ne
+  suffisait pas, « les blocs partagent 16 à 50 variables locales ». Mesure contradictoire : les
+  deux blocs qui faisaient la masse étaient de la **duplication pure**. Les lignes 3775-3969 et
+  3972-4166 donnaient un **`diff` vide** — 195 lignes identiques mot pour mot, atteintes par deux
+  branches du même `if/elif`, sans une seule assignation partagée (`action_type`, `unit_id`,
+  `updated_unit`, `result[...]` : aucune). Idem pour les deux passes de vidage de `action_logs`.
+  Le comptage de variables partagées avait mesuré l'**union** de blocs disjoints, pas leur
+  couplage réel.
+- **Défaut trouvé au passage** : 42 lignes inatteignables (`if raw_type == "reactive_move":
+  continue` suivi immédiatement de `if raw_type == "reactive_move":` + son corps) — exactement le
+  genre de mort que le verrou de types éteint laissait vivre.
+- **Puis la décomposition a rendu visible plus grave** : le bloc `step_logger` de cette méthode
+  (516 lignes) était **entièrement inatteignable**. Sa garde
+  `self.step_logger and self.step_logger.enabled` ne peut jamais être vraie sur ce chemin :
+  `_process_semantic_action` n'a qu'un appelant (`execute_semantic_action` → `api_server.py` /
+  `main.py`, le PvP humain, qui n'assigne jamais de StepLogger), et les seuls à en assigner un
+  (`ai/train.py`, `ai/replay_converter.py`, `ai/bot_evaluation.py`) passent par `step()` sans
+  jamais appeler `execute_semantic_action`. Ensembles disjoints. C'est le constat qui avait motivé
+  la rupture **V11 T6-c** ; le remplaçant avait été écrit, l'original jamais retiré.
+- **Supprimé** : le bloc gardé + les deux méthodes qui n'existaient que pour lui + le `except
+  Exception` large qui rendait toute panne du journal invisible. **Pierre tombale à l'emplacement.**
+  Inertie prouvée avant coupe (AST) : aucune variable du bloc lue en aval, tous les effets de bord
+  (`result[...]`, `game_state[...]`, `self._step_calls_since_increment`) internes à la garde.
+- **Ce qui prend le relais** : `_flush_squad_action_logs_to_step_logger`, appelé depuis `step()`.
+- **Résidus balayés après coupe** : l'attribut `self._step_calls_since_increment` n'avait plus aucun
+  lecteur (son unique rôle était d'alimenter le `step_calls_since_last` des `log_action` supprimés) —
+  retiré, trace laissée à son ancienne initialisation. Contrôle systématique par AST des symboles
+  dont **tous** les usages disparaissaient avec le bloc : rien d'autre au niveau module (les imports
+  `safe_print` étaient locaux au bloc et partent avec lui). Six imports inutilisés subsistent dans le
+  fichier (`Path`, `decode_zone_intent_action`, `is_zone_intent_action`, `squad_union_weapons`,
+  `weapon_availability_check`, `_is_adjacent_to_enemy_within_cc_range`) : **préexistants**, non liés à
+  cette coupe, non traités.
+- **Jumeau traité** : `_record_rule_choice_action_log` portait le même motif — un `except Exception`
+  large autour de la journalisation `rule_choice`, justifié par « ne pas faire tomber la partie pour
+  un défaut de journal ». Il ne tenait pas cette promesse : l'écriture disque est déjà protégée un
+  cran plus bas par le `try/except` interne de `StepLogger.log_action`, si bien que ce filet-ci
+  n'attrapait plus que les `require_key` sur `phase`/`turn`/`episode_number` — des ruptures d'état
+  qui doivent rester bruyantes. **Supprimé**, avec la démonstration en commentaire à sa place.
+- **Chaîne aval nettoyée (hors périmètre initial, arbitré par l'utilisateur)** : la suppression du
+  compteur a tué toute une chaîne, traitée bout en bout plutôt que laissée en dette.
+  1. `StepLogger.log_action` (`ai/step_logger.py`) : paramètre `step_calls_since_last` et suffixe
+     `step_calls=` de la ligne `STEP_TIMING` retirés — plus aucun appelant ne pouvait les
+     renseigner (contrôle AST sur les 6 appels réels du dépôt, tous en mots-clés).
+  2. `ai/analyzer.py` : le 4ᵉ champ du tuple de `parse_step_timings_from_debug`, le groupe regex
+     optionnel, et la statistique « Step calls between step_increment » (plus le suffixe
+     « N step() calls » de la ligne Max) — tout cela était devenu inatteignable. Le parseur
+     s'aligne du même coup sur ses cinq jumeaux, qui rendent tous `(episode, step_index,
+     duration_s)`.
+  3. **Rétro-compatibilité verrouillée** : les `debug.log` archivés portent encore le suffixe. Un
+     test dédié (`test_parse_step_timings_still_reads_archived_step_calls_suffix`) prouve qu'ils
+     restent parsables, suffixe ignoré. Vérifié par mutation (regex ancrée en fin de ligne →
+     rouge ; rétablie → vert) : sans lui, la promesse n'était vérifiée par rien.
+- **Si ce diagnostic redevient utile** : le rebrancher sur `step()`, où `_episode_step_calls` compte
+  déjà les appels — un compteur vivant, pas un parseur d'archives.
+- **Non vérifié** : aucun run PvP navigateur. La non-régression repose sur 169 tests unitaires + les
+  10 tests d'intégration PvP, dont `test_unknown_unit_id_is_a_clean_business_refusal` qui verrouille
+  le seul pré-traitement conservé (mutation → rouge, rétabli → vert).
 
 ### 3.2 🟠 540 coercitions redondantes — **arrêt décidé**
 

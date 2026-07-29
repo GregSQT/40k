@@ -6130,7 +6130,7 @@ def squad_shoot_los_overview(
         if shooter_unit is not None
         else None
     )
-    if shooting_type is None:
+    if shooter_unit is None or shooting_type is None:
         return {
             "valid_targets": [],
             "count_by_unit_id": {},

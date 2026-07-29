@@ -129,8 +129,9 @@ class TestRejectedActionsAreInert:
     def test_unknown_unit_id_is_a_clean_business_refusal(self, game):
         """t2_rejet_id_inconnu : un id d'unité inexistant est refusé, pas planté.
 
-        Le pré-traitement du step_logger (``_process_semantic_action``) récupère l'unité
-        avant l'action pour logger sa position ; il levait ``KeyError`` sur un id inconnu,
+        Le pré-traitement de ``_process_semantic_action`` récupère l'unité avant l'action
+        (il servait alors à logger sa position, avant que le bloc step_logger de cette
+        méthode — inatteignable — ne soit supprimé) ; il levait ``KeyError`` sur un id inconnu,
         donnant une HTTP 500 là où toute la logique de jeu répond ``unit_not_found`` en
         200 (movement_handlers.py:797, shooting_handlers.py:5429…). Une saisie invalide du
         client est un refus métier ordinaire, avec le même contrat que les autres.

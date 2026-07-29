@@ -1304,24 +1304,29 @@ def parse_step_log(filepath: str) -> Dict:
     return stats
 
 
-def parse_step_timings_from_debug(debug_log_path: str) -> Optional[List[Tuple[int, int, float, Optional[int]]]]:
+def parse_step_timings_from_debug(debug_log_path: str) -> Optional[List[Tuple[int, int, float]]]:
     """
     LOG TEMPORAIRE: Parse STEP_TIMING lines from debug.log (only written when --debug).
-    Returns list of (episode, step_index, duration_s, step_calls or None) or None if file missing.
-    step_calls = number of step() calls between this step_increment and the previous.
+    Returns list of (episode, step_index, duration_s) or None if file missing.
+
+    Un 4e champ `step_calls` etait lu depuis un suffixe optionnel ` step_calls=<n>` de la ligne
+    STEP_TIMING, et alimentait une statistique « Step calls between step_increment ». Le producteur
+    de ce suffixe (`StepLogger.log_action(step_calls_since_last=...)`, renseigne depuis le bloc
+    step_logger de `W40KEngine._process_semantic_action`) a ete supprime le 2026-07-29 parce
+    qu'inatteignable : plus aucun run ne peut ecrire ce suffixe, la statistique etait donc morte.
+    Les debug.log archives restent lisibles — leurs 3 premiers champs sont inchanges, seul le
+    suffixe est desormais ignore.
     """
     if not os.path.isfile(debug_log_path):
         return None
-    result: List[Tuple[int, int, float, Optional[int]]] = []
-    # With optional step_calls= (LOG TEMPORAIRE)
-    pattern = re.compile(r'STEP_TIMING episode=(\d+) step_index=(\d+) duration_s=([\d.]+)(?: step_calls=(\d+))?')
+    result: List[Tuple[int, int, float]] = []
+    pattern = re.compile(r'STEP_TIMING episode=(\d+) step_index=(\d+) duration_s=([\d.]+)')
     try:
         with open(debug_log_path, 'r', encoding='utf-8') as f:
             for line in f:
                 m = pattern.search(line)
                 if m:
-                    step_calls = int(m.group(4)) if m.group(4) else None
-                    result.append((int(m.group(1)), int(m.group(2)), float(m.group(3)), step_calls))
+                    result.append((int(m.group(1)), int(m.group(2)), float(m.group(3))))
     except (OSError, ValueError):
         return None
     return result if result else None
@@ -1568,7 +1573,7 @@ def parse_step_breakdowns_from_debug(debug_log_path: str) -> Optional[List[Tuple
     return result if result else None
 
 
-def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tuple[int, int, float, Optional[int]]]] = None, predict_timings: Optional[List[Tuple[int, int, float]]] = None, get_mask_timings: Optional[List[Tuple[int, int, float]]] = None, console_log_write_timings: Optional[List[Tuple[int, int, float, int]]] = None, cascade_timings: Optional[List[Tuple[int, int, str, str, float]]] = None, step_breakdowns: Optional[List[Tuple[int, int, float, float, float, float, float, float, float]]] = None, between_step_timings: Optional[List[Tuple[int, int, float]]] = None, reset_timings: Optional[List[Tuple[int, float]]] = None, post_step_timings: Optional[List[Tuple[int, int, float]]] = None, pre_step_timings: Optional[List[Tuple[int, int, float]]] = None, wrapper_step_timings: Optional[List[Tuple[int, int, float]]] = None, after_step_increment_timings: Optional[List[Tuple[int, int, float]]] = None, debug_section_filter: Optional[str] = None, output_lines: Optional[List[str]] = None, emit_console: bool = True):
+def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tuple[int, int, float]]] = None, predict_timings: Optional[List[Tuple[int, int, float]]] = None, get_mask_timings: Optional[List[Tuple[int, int, float]]] = None, console_log_write_timings: Optional[List[Tuple[int, int, float, int]]] = None, cascade_timings: Optional[List[Tuple[int, int, str, str, float]]] = None, step_breakdowns: Optional[List[Tuple[int, int, float, float, float, float, float, float, float]]] = None, between_step_timings: Optional[List[Tuple[int, int, float]]] = None, reset_timings: Optional[List[Tuple[int, float]]] = None, post_step_timings: Optional[List[Tuple[int, int, float]]] = None, pre_step_timings: Optional[List[Tuple[int, int, float]]] = None, wrapper_step_timings: Optional[List[Tuple[int, int, float]]] = None, after_step_increment_timings: Optional[List[Tuple[int, int, float]]] = None, debug_section_filter: Optional[str] = None, output_lines: Optional[List[str]] = None, emit_console: bool = True):
     """Print formatted statistics."""
     active_debug_section: Optional[str] = None
 
@@ -1770,31 +1775,23 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     # LOG TEMPORAIRE: Step durations (by step index, from debug.log STEP_TIMING when --debug)
     if step_timings:
         log_print("")
-        # step_timings: (episode, step_index, duration_s, step_calls or None)
+        # step_timings: (episode, step_index, duration_s)
         by_index: Dict[int, List[float]] = defaultdict(list)
-        for _ep, idx, dur, _sc in step_timings:
+        for _ep, idx, dur in step_timings:
             by_index[idx].append(dur)
-        all_durations = [d for _e, _i, d, _sc in step_timings]
+        all_durations = [d for _e, _i, d in step_timings]
         n_steps = len(all_durations)
         avg_all = sum(all_durations) / n_steps if n_steps else 0.0
         min_all = min(all_durations) if all_durations else 0.0
         max_all = max(all_durations) if all_durations else 0.0
         # Which (episode, step_index) has min/max duration (global over all steps)
-        min_ep, min_idx, min_val, _ = min(step_timings, key=lambda t: t[2])
-        max_ep, max_idx, max_val, max_sc = max(step_timings, key=lambda t: t[2])
+        min_ep, min_idx, min_val = min(step_timings, key=lambda t: t[2])
+        max_ep, max_idx, max_val = max(step_timings, key=lambda t: t[2])
         log_print(f"Step Durations (from debug.log): {avg_all:.3f}s (average), Min: {min_all:.3f}s, Max: {max_all:.3f}s (n={n_steps} steps)")
         log_print(f"  Min: {min_val:.3f}s (Episode {min_ep}, step index {min_idx})")
-        max_line = f"  Max: {max_val:.3f}s (Episode {max_ep}, step index {max_idx})"
-        if max_sc is not None:
-            max_line += f", {max_sc} step() calls"
-        log_print(max_line)
-        # LOG TEMPORAIRE: step_calls stats when present (--debug)
-        step_calls_list = [sc for _e, _i, _d, sc in step_timings if sc is not None]
-        if step_calls_list:
-            n_sc = len(step_calls_list)
-            avg_sc = sum(step_calls_list) / n_sc
-            max_step_calls = max(step_calls_list)
-            log_print(f"  Step calls between step_increment: avg={avg_sc:.1f}, max={max_step_calls} (n={n_sc} with data)")
+        log_print(f"  Max: {max_val:.3f}s (Episode {max_ep}, step index {max_idx})")
+        # (le suffixe « N step() calls » et la stat « Step calls between step_increment » vivaient
+        #  ici : leur producteur a ete supprime le 2026-07-29, voir parse_step_timings_from_debug)
         # LOG TEMPORAIRE: show STEP_BREAKDOWN for the slowest step (same episode/step_index or step_index-1 for early-return)
         if step_breakdowns:
             # step_breakdowns: (episode, step_index, get_mask_s, convert_s, process_s, replay_s, build_obs_s, reward_s, total_s)
