@@ -102,3 +102,40 @@ def test_get_weapons_raises_when_weapon_missing(tmp_path: Path) -> None:
     parser._cache["FactionX"] = {"known": {"display_name": "Known"}}
     with pytest.raises(KeyError, match=r"Weapon 'missing' not found"):
         parser.get_weapons("FactionX", ["known", "missing"])
+
+
+def test_parsed_weapon_rule_never_survives_into_weapon_dicts() -> None:
+    """Invariant de PROVENANCE : aucun `ParsedWeaponRule` ne peut exister hors du parseur.
+
+    Ce type n'est construit qu'en `engine/weapons/rules.py` (`parse_weapon_rule`). Son unique
+    chemin de production, `ArmoryParser`, jette le retour de `validate_weapon_rules_field`
+    (la validation fail-fast est l'appel, pas son resultat). Aucune instance ne survit donc
+    dans le processus, ce qui rend inatteignables les branches `isinstance(..., ParsedWeaponRule)`
+    retirees le 2026-07-29 de `_orjson_default`, `make_json_serializable` et
+    `_serialize_weapon_for_json`, ainsi que les tests de forme `hasattr(entry, "rule")` de
+    `engine/utils/weapon_helpers`.
+
+    Ce test rougit si quelqu'un remet un objet regle dans un dict d'arme : ce serait une
+    regression SILENCIEUSE (la charge API porterait un dict `{rule, parameter, definition}`
+    la ou le front attend une chaine), pas un plantage.
+
+    Note : l'inatteignabilite a aussi ete verifiee par balayage du tas (`gc.get_objects()`,
+    zero instance vivante apres parsing des 153 armes des deux factions). Ce balayage n'est PAS
+    commite : il est global, couteux, et declenche un FutureWarning de torch en parcourant le
+    tas. L'assertion utile en regression est celle sur le contenu des dicts d'armes, ci-dessous.
+    """
+    from engine.weapons import get_armory_parser
+    from engine.weapons.rules import ParsedWeaponRule
+
+    parser = get_armory_parser()
+    armory = parser.get_armory("spaceMarine")
+    assert armory, "armurerie spaceMarine vide : le test ne prouverait rien"
+
+    for code, weapon in armory.items():
+        rules = weapon["WEAPON_RULES"]
+        assert isinstance(rules, list), f"{code}: WEAPON_RULES doit etre une liste"
+        for entry in rules:
+            assert isinstance(entry, str), (
+                f"{code}: entree WEAPON_RULES de type {type(entry).__name__}, attendu str"
+            )
+        assert not any(isinstance(v, ParsedWeaponRule) for v in weapon.values())

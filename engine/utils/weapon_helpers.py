@@ -12,10 +12,16 @@ from engine.combat_utils import expected_dice_value
 def weapon_has_rule(weapon: Dict[str, Any], rule_id: str) -> bool:
     """True si l'arme declare la regle `rule_id` dans WEAPON_RULES.
 
-    Gere les trois formes d'entree rencontrees en runtime : chaine 'NAME',
-    chaine parametree 'NAME:param', ou objet ParsedWeaponRule (attribut `.rule`).
+    Gere les deux formes d'entree : chaine 'NAME' et chaine parametree 'NAME:param'.
     Comparaison insensible a la casse. Aucun repli masquant : WEAPON_RULES est
     exige (require_key) et doit etre une liste, sinon erreur explicite.
+
+    2026-07-29 — la branche `hasattr(entry, "rule")` (forme objet `ParsedWeaponRule`) a ete
+    SUPPRIMEE : ce type n'est plus constructible hors du parseur d'armurerie, qui jette son
+    resultat, et `WEAPON_RULES` ne contient que des chaines partout. Note : `hasattr` etait un
+    test de FORME, pas de type — il aurait attrape n'importe quel objet portant un attribut
+    `.rule`. Une telle entree tombe desormais dans le `raise TypeError` ci-dessous, c'est-a-dire
+    une erreur explicite plutot qu'un traitement silencieux d'une donnee inattendue.
     """
     rules = require_key(weapon, "WEAPON_RULES")
     if not isinstance(rules, list):
@@ -25,9 +31,7 @@ def weapon_has_rule(weapon: Dict[str, Any], rule_id: str) -> bool:
         )
     target = rule_id.strip().upper()
     for entry in rules:
-        if hasattr(entry, "rule"):
-            name = getattr(entry, "rule")
-        elif isinstance(entry, str):
+        if isinstance(entry, str):
             name = entry.split(":", 1)[0]
         else:
             raise TypeError(
@@ -41,11 +45,14 @@ def weapon_has_rule(weapon: Dict[str, Any], rule_id: str) -> bool:
 def weapon_rule_parameter(weapon: Dict[str, Any], rule_id: str) -> Optional[int]:
     """Valeur entiere du parametre d'une regle d'arme parametree (ex: RAPID_FIRE:X).
 
-    Gere les deux formes runtime : chaine 'NAME:param' et objet ParsedWeaponRule
-    (attributs `.rule` / `.parameter`). Comparaison du nom insensible a la casse.
+    Forme unique : chaine 'NAME:param'. Comparaison du nom insensible a la casse.
     Retourne None si l'arme ne declare PAS `rule_id`. Leve (aucun repli masquant) si la
     regle est presente mais son parametre est absent ou non entier. Miroir de l'extraction
     de `ai/analyzer_config.py` (RAPID_FIRE), mutualisee ici pour le chemin de resolution.
+
+    2026-07-29 — la branche objet `ParsedWeaponRule` a ete SUPPRIMEE, meme raison que dans
+    `weapon_has_rule` : type non constructible hors du parseur, qui jette son resultat. Toute
+    entree non-chaine leve desormais explicitement.
     """
     rules = require_key(weapon, "WEAPON_RULES")
     if not isinstance(rules, list):
@@ -61,12 +68,6 @@ def weapon_rule_parameter(weapon: Dict[str, Any], rule_id: str) -> Optional[int]
             if ":" not in entry:
                 raise ValueError(f"Weapon rule {rule_id!r} present but missing parameter: {entry!r}")
             raw: Any = entry.split(":", 1)[1]
-        elif hasattr(entry, "rule"):
-            if str(getattr(entry, "rule")).strip().upper() != target:
-                continue
-            raw = getattr(entry, "parameter", None)
-            if raw is None:
-                raise ValueError(f"Weapon rule {rule_id!r} present but missing parameter (object form)")
         else:
             raise TypeError(
                 f"Unsupported WEAPON_RULES entry type: {type(entry).__name__} ({entry!r})"
