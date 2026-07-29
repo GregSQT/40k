@@ -45,19 +45,22 @@ def test_scenario_template_declares_board_and_terrain(module):
     assert template["terrain_ref"] == "terrain-mc1.json"
 
 
-def test_cli_defaults_point_to_existing_board_and_terrain():
-    # On relit les defauts du parser sans executer main() : ils doivent designer des fichiers reels.
-    parser_defaults = {}
-    src = (PROJECT_ROOT / "scripts" / "roster_matchup_stats.py").read_text(encoding="utf-8")
-    for name in ("--board-ref", "--terrain-ref"):
-        marker = f'parser.add_argument("{name}", default="'
-        idx = src.index(marker) + len(marker)
-        parser_defaults[name] = src[idx : src.index('"', idx)]
+def test_cli_defaults_point_to_existing_board_and_terrain(module):
+    """Les defauts sont lus sur le PARSEUR construit, pas dans le texte du source."""
+    parser = module._build_arg_parser()
+    board_ref = parser.get_default("board_ref")
+    terrain_ref = parser.get_default("terrain_ref")
 
-    board_dir = PROJECT_ROOT / "config" / "board" / parser_defaults["--board-ref"]
+    board_dir = PROJECT_ROOT / "config" / "board" / board_ref
     assert board_dir.is_dir(), f"board_ref par defaut inexistant: {board_dir}"
-    terrain_path = board_dir / "terrain" / parser_defaults["--terrain-ref"]
+    terrain_path = board_dir / "terrain" / terrain_ref
     assert terrain_path.is_file(), f"terrain_ref par defaut inexistant: {terrain_path}"
+
+
+def test_cli_defaults_survive_an_actual_parse(module):
+    """Le parseur applique reellement ces defauts a des arguments parses."""
+    args = module._build_arg_parser().parse_args(["--agent", "AnyAgent"])
+    assert (PROJECT_ROOT / "config" / "board" / args.board_ref / "terrain" / args.terrain_ref).is_file()
 
 
 def test_default_terrain_supplies_objectives_and_deployment_zones():

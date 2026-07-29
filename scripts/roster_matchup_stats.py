@@ -700,7 +700,13 @@ def _build_obs_normalizer(agent_key: str, training_config_name: str, model_path:
     )
 
 
-def main() -> None:
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Construit le parseur de la ligne de commande.
+
+    Extrait de `main()` pour que les valeurs par defaut soient interrogeables sur le parseur
+    REELLEMENT construit (`parser.get_default(...)`), au lieu d'etre relues dans le texte du
+    source — une lecture qui casse a la premiere reformulation et ne prouve rien.
+    """
     parser = argparse.ArgumentParser(description="Collect roster matchup statistics")
     parser.add_argument("--agent", required=True, help="Agent key (e.g. Infantry_Troop_RangedSwarm)")
     parser.add_argument("--scale", default="100pts", help="Roster scale")
@@ -826,7 +832,11 @@ def main() -> None:
         default=None,
         help="Écrire un JSON partiel au lieu de fusionner dans la matrice complète",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> None:
+    args = _build_arg_parser().parse_args()
 
     if args.rule_checker:
         _generate_rule_checker_artifacts(
