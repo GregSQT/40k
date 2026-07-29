@@ -419,3 +419,107 @@ def test_tactical_bot_charges_only_when_melee_beats_shooting(monkeypatch: pytest
 
     assert bot.select_action([CHARGE, WAIT_ACTION], phase="charge", game_state=melee_unit) == CHARGE
     assert bot.select_action([CHARGE, WAIT_ACTION], phase="charge", game_state=shooty_unit) == WAIT_ACTION
+
+
+# --- Charge du defensif + cible frappee par CRITERE (jamais par ordre de tri) ------------------
+#
+# 1. `DefensiveBot` ne chargeait JAMAIS : sa branche terminale etait « si l'attente est
+#    disponible, attendre », or le masque de la phase de charge arme WAIT INCONDITIONNELLEMENT.
+# 2. En combat, `DefensiveBot` et `GreedyBot` tombaient sur `valid_actions[0]` — la liste triee
+#    des bits du masque — donc frappaient le slot ennemi d'indice le plus BAS, par accident.
+# Les cas ci-dessous placent volontairement la cible attendue sur un slot NON minimal : ils sont
+# rouges sur l'ancien comportement.
+
+CHARGE_SLOT1 = mi.CHARGE_SLOT_BASE + 1
+FIGHT_SLOT1 = mi.FIGHT_SLOT_BASE + 1
+K_ENEMY_SLOTS = len(mi.SHOOT_SLOTS)
+
+
+def _slot_gs(phase: str, enemies: dict, order: list) -> dict:
+    """game_state minimal pour les selections par slot ennemi.
+
+    `enemies` : {squad_id: champs d'armes} ; `order` : ids ranges PAR SLOT (mapping fige, donc
+    deterministe : `get_enemy_slot_mapping` relit la cle deja presente sans reattribuer).
+    """
+    ours = {"id": "1", "player": 0, "col": 1, "row": 1, **_dmg(rng=2, cc=2)}
+    units = [ours]
+    units_cache = {"1": dict(ours)}
+    for i, (eid, fields) in enumerate(enemies.items()):
+        enemy = {"id": eid, "player": 1, "col": 5 + i, "row": 1, **fields}
+        units.append(enemy)
+        units_cache[eid] = dict(enemy)
+    return {
+        "phase": phase,
+        "current_player": 0,
+        "turn": 1,
+        "units": units,
+        "units_cache": units_cache,
+        "inches_to_subhex": 1,
+        "enemy_slot_mapping_p0": list(order) + [None] * (K_ENEMY_SLOTS - len(order)),
+    }
+
+
+def test_defensive_bot_counter_charges_melee_threat(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Doctrine : le defensif charge l'escouade de MELEE la plus dangereuse plutot que de la
+    subir (elle deviendrait Fights First, 12.04) ; il ignore les escouades de tir."""
+    monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
+    bot = DefensiveBot(randomness=0.0)
+
+    # Slot 0 = tireur (melee <= tir, ecarte) ; slot 1 = brute de melee -> charge du slot 1.
+    gs = _slot_gs(
+        "charge",
+        {"e_shooty": _dmg(rng=6, cc=1), "e_melee": _dmg(rng=1, cc=5)},
+        ["e_shooty", "e_melee"],
+    )
+    assert bot.select_action_with_state([CHARGE, CHARGE_SLOT1, WAIT_ACTION], gs) == CHARGE_SLOT1
+
+    # Deux brutes : la plus dangereuse au corps a corps l'emporte, meme sur le slot le plus haut.
+    gs2 = _slot_gs(
+        "charge",
+        {"e_small": _dmg(rng=1, cc=2), "e_big": _dmg(rng=1, cc=9)},
+        ["e_small", "e_big"],
+    )
+    assert bot.select_action_with_state([CHARGE, CHARGE_SLOT1, WAIT_ACTION], gs2) == CHARGE_SLOT1
+
+    # Uniquement des tireurs : le defensif tient sa ligne.
+    gs3 = _slot_gs("charge", {"e_shooty": _dmg(rng=6, cc=1)}, ["e_shooty"])
+    assert bot.select_action_with_state([CHARGE, WAIT_ACTION], gs3) == WAIT_ACTION
+
+
+def test_defensive_bot_fights_highest_threat_not_lowest_slot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Combat : cible = la plus menacante, pas le slot d'indice le plus bas."""
+    monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
+    bot = DefensiveBot(randomness=0.0)
+
+    gs = _slot_gs(
+        "fight",
+        {"e_weak": _dmg(rng=1, cc=1), "e_strong": _dmg(rng=2, cc=8)},
+        ["e_weak", "e_strong"],
+    )
+    assert bot.select_action_with_state([FIGHT_SLOT0, FIGHT_SLOT1], gs) == FIGHT_SLOT1
+
+    # Aucun slot ouvert -> combat a vide (12.04/12.06), jamais une cible arbitraire.
+    assert bot.select_action_with_state([FIGHT_EMPTY], gs) == FIGHT_EMPTY
+
+
+def test_greedy_bot_fights_lowest_hp_not_lowest_slot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Combat : cible = la plus entamee (focus fire), pas le slot d'indice le plus bas."""
+    monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
+    monkeypatch.setattr(eb, "get_hp_from_cache", lambda uid, gs_: 5 if uid == "e_full" else 2)
+    bot = GreedyBot(randomness=0.0)
+
+    gs = _slot_gs(
+        "fight",
+        {"e_full": _dmg(rng=1, cc=1), "e_hurt": _dmg(rng=1, cc=1)},
+        ["e_full", "e_hurt"],
+    )
+    assert bot.select_action_with_state([FIGHT_SLOT0, FIGHT_SLOT1], gs) == FIGHT_SLOT1
+    assert bot.select_action_with_state([FIGHT_EMPTY], gs) == FIGHT_EMPTY
+
+
+def test_slot_mapping_divergence_is_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Un slot ouvert par le masque sans escouade en face est une erreur, pas un repli."""
+    monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
+    gs = _slot_gs("fight", {"e_weak": _dmg(rng=1, cc=1)}, ["e_weak"])
+    with pytest.raises(RuntimeError, match=r"sans escouade ennemie"):
+        DefensiveBot(randomness=0.0).select_action_with_state([FIGHT_SLOT0, FIGHT_SLOT1], gs)

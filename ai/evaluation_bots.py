@@ -6,8 +6,9 @@ Bot Hierarchy (easiest to hardest):
 
 Tier 1 — Simple strategy bots:
   1. RandomBot - Random actions (baseline)
-  2. GreedyBot - Shoots first, moves toward enemies (aggressive)
-  3. DefensiveBot - Retreats from threats, shoots when possible
+  2. GreedyBot - Shoots first, moves toward enemies (aggressive), acheve le blesse en melee
+  3. DefensiveBot - Retreats from threats, shoots when possible, contre-charge les unites
+     de melee qui menacent sa ligne
   4. ControlBot - Captures and holds objectives, shoots contesters
 
 Tier 2 — Smart bots (focus-fire, advance, charge):
@@ -31,7 +32,7 @@ from engine.hex_utils import min_distance_between_sets
 from engine.phase_handlers.shared_utils import (
     is_unit_alive, get_hp_from_cache,
     get_unit_position, require_unit_position,
-    compute_candidate_footprint,
+    compute_candidate_footprint, get_enemy_slot_mapping,
 )
 from engine import macro_intents as mi
 from engine.utils.weapon_helpers import get_max_ranged_damage, get_max_melee_damage
@@ -79,6 +80,102 @@ def _first_fight_action_in(valid_actions):
     fight = _first_action_in(valid_actions, mi.FIGHT_SLOTS)
     if fight is not None:
         return fight
+    if mi.ACTION_FIGHT_NO_TARGET in valid_actions:
+        return mi.ACTION_FIGHT_NO_TARGET
+    return None
+
+
+# --- Choix de cible par CRITERE EXPLICITE (jamais par ordre de tri) ----------
+# `valid_actions` est la liste TRIEE des bits a True du masque : `valid_actions[0]` designe
+# l'action d'indice le plus bas, donc une cible choisie par accident d'ordre. Les helpers
+# ci-dessous relisent le mapping slot -> escouade ennemie (`get_enemy_slot_mapping` : la MEME
+# source que le masque — cf. action_decoder.get_squad_action_mask_and_eligible_units — et que la
+# ligne du tenseur ennemi de l'observation), puis tranchent sur une PROPRIETE de la cible.
+#
+# Un slot ouvert par le masque sans escouade en face est une divergence d'invariant : erreur
+# explicite, jamais un repli silencieux sur un autre slot.
+
+def _target_slot_entries(
+    valid_actions: List[int], slots, slot_base: int, game_state: Dict[str, Any]
+) -> List[Tuple[int, str, Dict[str, Any]]]:
+    """[(action, squad_id ennemi, entree units_cache)] pour les slots ouverts par le masque."""
+    open_actions = [a for a in valid_actions if a in slots]
+    if not open_actions:
+        return []
+    mapping = get_enemy_slot_mapping(game_state, int(require_key(game_state, "current_player")))
+    units_cache = require_key(game_state, "units_cache")
+    entries: List[Tuple[int, str, Dict[str, Any]]] = []
+    for action in open_actions:
+        slot = action - slot_base
+        if slot >= len(mapping) or mapping[slot] is None:
+            raise RuntimeError(
+                f"Slot {slot} (action {action}) ouvert par le masque mais sans escouade ennemie "
+                f"dans get_enemy_slot_mapping : masque et mapping ont diverge."
+            )
+        sid = str(mapping[slot])
+        entry = units_cache.get(sid)
+        if entry is None:
+            raise RuntimeError(
+                f"Escouade ennemie {sid} du slot {slot} absente de units_cache."
+            )
+        entries.append((action, sid, entry))
+    return entries
+
+
+def _best_slot_action(
+    valid_actions: List[int], slots, slot_base: int, game_state: Dict[str, Any], score_fn
+) -> Optional[int]:
+    """Action de slot dont la cible MAXIMISE `score_fn`, ou None si aucune cible retenue.
+
+    `score_fn(squad_id, cache_entry, game_state) -> Optional[float]` ; renvoyer None ecarte la
+    cible (doctrine du bot), ce qui n'est pas la meme chose qu'un score bas.
+    """
+    best_action: Optional[int] = None
+    best_score = -float("inf")
+    for action, sid, entry in _target_slot_entries(valid_actions, slots, slot_base, game_state):
+        score = score_fn(sid, entry, game_state)
+        if score is None:
+            continue
+        if score > best_score:
+            best_score = score
+            best_action = action
+    return best_action
+
+
+def _score_threat(sid: str, entry: Dict[str, Any], game_state: Dict[str, Any]) -> Optional[float]:
+    """Menace de la cible : meilleur degat attendu, tir ou melee (meme mesure que
+    `_best_target_slot_by_threat` et que RewardMapper._get_unit_threat)."""
+    return max(get_max_ranged_damage(entry), get_max_melee_damage(entry))
+
+
+def _score_wounded(sid: str, entry: Dict[str, Any], game_state: Dict[str, Any]) -> Optional[float]:
+    """Cible la plus entamee : score = -HP (meme critere que GreedyBot.select_shooting_target)."""
+    hp = get_hp_from_cache(sid, game_state)
+    if hp is None:
+        raise RuntimeError(f"Cible {sid} ouverte par le masque mais absente du cache de HP.")
+    return -float(hp)
+
+
+def _score_melee_threat_only(
+    sid: str, entry: Dict[str, Any], game_state: Dict[str, Any]
+) -> Optional[float]:
+    """Contre-charge : ne retient que les cibles dont la MELEE prime sur le TIR ; parmi elles,
+    la plus dangereuse au corps a corps. Une unite de tir est ecartee (None)."""
+    melee = get_max_melee_damage(entry)
+    if melee <= get_max_ranged_damage(entry):
+        return None
+    return melee
+
+
+def _fight_action_by(
+    valid_actions: List[int], game_state: Dict[str, Any], score_fn
+) -> Optional[int]:
+    """Action de combat : cible tranchee par `score_fn`, sinon combat a vide (12.04/12.06)."""
+    action = _best_slot_action(
+        valid_actions, mi.FIGHT_SLOTS, mi.FIGHT_SLOT_BASE, game_state, score_fn
+    )
+    if action is not None:
+        return action
     if mi.ACTION_FIGHT_NO_TARGET in valid_actions:
         return mi.ACTION_FIGHT_NO_TARGET
     return None
@@ -301,6 +398,14 @@ class GreedyBot:
             if WAIT_ACTION in valid_actions:
                 return WAIT_ACTION
             return valid_actions[0]
+        if phase == "fight":
+            # Doctrine greedy : ACHEVER. La cible frappee est la plus entamee (focus fire), le
+            # meme critere que son tir (`select_shooting_target`) — plus l'accident d'ordre de
+            # tri de `valid_actions[0]`, qui designait le slot ennemi d'indice le plus bas.
+            fight = _fight_action_by(valid_actions, game_state, _score_wounded)
+            if fight is not None:
+                return fight
+            return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
         if WAIT_ACTION in valid_actions and len(valid_actions) > 1:
             return valid_actions[0] if valid_actions[0] != WAIT_ACTION else valid_actions[1]
         return valid_actions[0]
@@ -357,7 +462,11 @@ class GreedyBot:
 
 
 class DefensiveBot:
-    """Prioritizes survival, maintains distance"""
+    """Prioritizes survival, maintains distance, contre-charge les menaces de melee.
+
+    Charge : cf. `_charge_action` (doctrine de contre-charge).
+    Combat : frappe la cible la PLUS MENACANTE (neutraliser la source de degats).
+    """
 
     def __init__(self, randomness: float = 0.0):
         """
@@ -473,6 +582,18 @@ class DefensiveBot:
                 return WAIT_ACTION
             return valid_actions[0]
 
+        if phase == "charge":
+            return self._charge_action(valid_actions, game_state)
+
+        if phase == "fight":
+            # Doctrine defensive : NEUTRALISER LA SOURCE DE DEGATS. La cible frappee est la plus
+            # menacante (meme mesure que le focus-fire de DefensiveSmartBot), plus le slot
+            # d'indice le plus bas que renvoyait `valid_actions[0]`.
+            fight = _fight_action_by(valid_actions, game_state, _score_threat)
+            if fight is not None:
+                return fight
+            return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
+
         shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
         if nearby_threats > 0 and shoot is not None:
             return shoot
@@ -480,7 +601,33 @@ class DefensiveBot:
         if WAIT_ACTION in valid_actions:
             return WAIT_ACTION
         return valid_actions[0]
-    
+
+    def _charge_action(self, valid_actions: List[int], game_state) -> int:
+        """CONTRE-CHARGE : le defensif ne cherche pas la melee, il refuse de la subir.
+
+        Doctrine : quand une escouade ennemie de MELEE (degat de melee > degat de tir) est deja
+        declarable comme cible de charge (11.02), elle viendra au contact de toute facon au tour
+        suivant ; la laisser charger, c'est lui offrir Fights First (12.04 : « It made a charge
+        move this turn ») et encaisser ses attaques en premier. Le bot prend donc les devants sur
+        la plus dangereuse au corps a corps. Face a une escouade de TIR, charger reviendrait a
+        abandonner sa position defensive pour un gain incertain : il tient sa ligne (WAIT).
+
+        Avant cette doctrine, la branche terminale « si l'attente est disponible, attendre »
+        s'appliquait a la phase de charge, dont le masque arme WAIT INCONDITIONNELLEMENT
+        (shared_utils, phase charge) : le bot ne chargeait JAMAIS.
+        """
+        charge = _best_slot_action(
+            valid_actions,
+            mi.CHARGE_SLOTS,
+            mi.CHARGE_SLOT_BASE,
+            game_state,
+            _score_melee_threat_only,
+        )
+        if charge is not None:
+            return charge
+        return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
+
+
     def _count_nearby_threats(self, unit, game_state) -> int:
         """Count enemy units within threatening range."""
         threat_count = 0
