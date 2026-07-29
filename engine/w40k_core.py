@@ -2966,6 +2966,17 @@ class W40KEngine(gym.Env):
         }
 
 
+    # pyright abandonne l'analyse de CE corps : « Code is too complex to analyze » (1582 lignes,
+    # 205 `if`). La sourdine ne masque donc pas une erreur de type precise — elle acte que
+    # l'integralite de la methode echappe au verificateur. Ce qu'elle taisait a ete instruit en
+    # extrayant le bloc step_logger dans une methode temporaire, ce qui rend le corps analysable :
+    # pyright y trouvait alors (a) `action_details` possiblement non lie quand l'unite n'existe
+    # plus (UnboundLocalError avale par le `except Exception` du bloc), (b) `require_unit_position`
+    # appele avec `updated_unit` optionnel sur la branche advance, (c) deux `result.get(x).strip()`
+    # controles sur un autre acces que celui utilise. Ces trois defauts sont corriges ci-dessous ;
+    # apres correction, l'extraction ne laisse plus que du bruit de narrowing (`self.step_logger`
+    # narrowe chez l'appelant). Reste a traiter, hors de ce lot : decomposer ce dispatcher pour
+    # que pyright puisse verifier ce corps en permanence.
     def _process_semantic_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:  # pyright: ignore[reportGeneralTypeIssues]
         """
         Process semantic action with detailed execution debugging.
@@ -3482,32 +3493,42 @@ class W40KEngine(gym.Env):
                             raise ValueError(f"Invalid unit_id '{unit_id}' - cannot log system actions. action_type={action_type}")
 
                         # Get unit coordinates AFTER action execution using semantic action unitId
-                        updated_unit = self._get_unit_by_id(str(unit_id)) if unit_id else None
-                        
-                        if updated_unit:
-                            # Use PRE-ACTION position from captured data for movement logging
-                            # CRITICAL FIX: Also use pre_action_positions for "flee" actions
-                            if str(unit_id) in pre_action_positions and (action_type == "move" or action_type == "flee"):
-                                orig_col, orig_row = pre_action_positions[str(unit_id)]
-                                action_details = {
-                                    "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
-                                    "current_episode": pre_action_episode,  # CRITICAL: Use episode captured BEFORE action execution
-                                    "unit_display_name": updated_unit.get("DISPLAY_NAME"),
-                                    # unit_with_coords sera mis à jour plus bas avec result
-                                    "action": action,
-                                    "start_pos": (orig_col, orig_row)
-                                    # end_pos et unit_with_coords seront définis dans action_details.update() avec result
-                                }
-                            else:
-                                # Build complete action details for step logger
-                                action_details = {
-                                    "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
-                                    "current_episode": pre_action_episode,  # CRITICAL: Use episode captured BEFORE action execution
-                                    "unit_display_name": updated_unit.get("DISPLAY_NAME"),
-                                    # unit_with_coords sera mis à jour plus bas avec result
-                                    "action": action
-                                }
-                    
+                        updated_unit = self._get_unit_by_id(str(unit_id))
+                        # `action_details` etait construit sous `if updated_unit:` : quand l'unite
+                        # n'existait plus, TOUTES les branches en aval (`action_details.update(...)`,
+                        # logging generique) levaient un UnboundLocalError avale par le `except
+                        # Exception` de ce bloc — une ligne de step.log perdue sans dire pourquoi.
+                        # La branche move levait deja explicitement ; on remonte la meme exigence
+                        # pour tous les action_type, avec un message qui nomme ce qu'on a trouve.
+                        if updated_unit is None:
+                            raise ValueError(
+                                f"Cannot log action: unit no longer exists in game_state. "
+                                f"action_type={action_type} unit_id={unit_id} phase={pre_action_phase}"
+                            )
+
+                        # Use PRE-ACTION position from captured data for movement logging
+                        # CRITICAL FIX: Also use pre_action_positions for "flee" actions
+                        if str(unit_id) in pre_action_positions and (action_type == "move" or action_type == "flee"):
+                            orig_col, orig_row = pre_action_positions[str(unit_id)]
+                            action_details = {
+                                "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
+                                "current_episode": pre_action_episode,  # CRITICAL: Use episode captured BEFORE action execution
+                                "unit_display_name": updated_unit.get("DISPLAY_NAME"),
+                                # unit_with_coords sera mis à jour plus bas avec result
+                                "action": action,
+                                "start_pos": (orig_col, orig_row)
+                                # end_pos et unit_with_coords seront définis dans action_details.update() avec result
+                            }
+                        else:
+                            # Build complete action details for step logger
+                            action_details = {
+                                "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
+                                "current_episode": pre_action_episode,  # CRITICAL: Use episode captured BEFORE action execution
+                                "unit_display_name": updated_unit.get("DISPLAY_NAME"),
+                                # unit_with_coords sera mis à jour plus bas avec result
+                                "action": action
+                            }
+
                         # Add specific data for different action types
                         # NOTE: move, shoot, wait use the common logging path below
                         # charge and combat have their own specialized logging
@@ -3553,8 +3574,8 @@ class W40KEngine(gym.Env):
                                 add_debug_log(self.game_state, debug_msg)
                                 safe_print(self.game_state, debug_msg)
                             
-                            if updated_unit is None:
-                                raise ValueError(f"Move action missing updated unit in game_state: unit_id={unit_id}")
+                            # (l'existence de `updated_unit` est deja exigee plus haut, pour tous
+                            # les action_type et pas seulement pour move)
                             actual_col, actual_row = require_unit_position(updated_unit, self.game_state)
                             if (actual_col, actual_row) != (dest_col, dest_row):
                                 raise ValueError(
@@ -4330,6 +4351,11 @@ class W40KEngine(gym.Env):
 
                         # Safety net: when a post-shoot move exists in result but was not
                         # persisted via action_logs flush paths, emit it once here.
+                        # Les deux champs texte sont lus UNE fois : `isinstance(result.get(x), str)`
+                        # suivi de `result.get(x).strip()` refaisait deux acces distincts sur un
+                        # dict mutable — le controle ne portait pas sur la valeur utilisee.
+                        fallback_ability_name = result.get("ability_display_name") if isinstance(result, dict) else None
+                        fallback_source_rule_id = result.get("source_rule_id") if isinstance(result, dict) else None
                         if (
                             action_type == "shoot"
                             and not move_after_shooting_logged
@@ -4338,10 +4364,10 @@ class W40KEngine(gym.Env):
                             and result.get("fromRow") is not None
                             and result.get("toCol") is not None
                             and result.get("toRow") is not None
-                            and isinstance(result.get("ability_display_name"), str)
-                            and result.get("ability_display_name").strip()
-                            and isinstance(result.get("source_rule_id"), str)
-                            and result.get("source_rule_id").strip()
+                            and isinstance(fallback_ability_name, str)
+                            and fallback_ability_name.strip()
+                            and isinstance(fallback_source_rule_id, str)
+                            and fallback_source_rule_id.strip()
                             and result.get("move_distance") is not None
                         ):
                             fallback_move_details = {
@@ -4353,8 +4379,8 @@ class W40KEngine(gym.Env):
                                 "col": result["toCol"],
                                 "row": result["toRow"],
                                 "move_distance": result["move_distance"],
-                                "ability_display_name": result["ability_display_name"].strip(),
-                                "source_rule_id": result["source_rule_id"].strip(),
+                                "ability_display_name": fallback_ability_name.strip(),
+                                "source_rule_id": fallback_source_rule_id.strip(),
                                 "reward": 0.0,
                             }
                             self.step_logger.log_action(
