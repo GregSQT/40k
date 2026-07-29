@@ -44,7 +44,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.52` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.51` le 2026-07-29).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.53` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -77,7 +77,8 @@ donc absente de ce tableau).
 | **§0.47** | Relecture T2→T5 du 2026-07-29 — 9 écarts, dont un outil d'éval qui sert au modèle un masque de l'ANCIEN layout | 🟠 **OUVERT — É1, É2, É3, É4, É6 ✅ LIVRÉS (non mergés) ; restent É5, É7, É8, É9** (état au 2026-07-29 14 h 01) — l'audit d'origine était par LECTURE SEULE, les correctifs, eux, portent des tests ciblés | **9** | Verdicts : **T2 = ÉCARTS (6)** · **T3 = CONFORME** (une phrase de doc inexacte) · **T4 = ÉCARTS (2)** · **T5 = CONFORME** (lacune déjà déclarée, re-confirmée). Le plus lourd : `scripts/roster_matchup_stats.py:562` passe à `model.predict` un masque du layout legacy — **silencieusement faux**, les deux masques ayant la même taille (1107). L'éval **du run 4 n'était pas touchée**. 🟢 **ARBITRAGES DU 2026-07-29** : **É2+É3 = UN SEUL chantier** — supprimer `convert_gym_action` et ses ~25 tests, **et écrire à la place** le verrou d'interface `tests/unit/engine/test_agent_interface_contract.py` exigé par §8.2 (chaque entier d'action routé vers l'intention attendue dans l'espace ACTUEL, décodeur réellement appelé) ; son absence est ce qui a laissé passer É1. ✅ **É1 + É6 LIVRÉS** (`v11-0.47-eval-tooling-mask`, 10 commits, tête `cc3b5713` à 14 h 05 — le masque legacy, **plus** l'obs Dict aplatie qui empêchait l'outil de démarrer, le plafond de pas qui fabriquait des défaites, et le vainqueur recalculé au lieu d'être lu dans l'info du moteur) ; ✅ **É2 + É3 LIVRÉS** (`v11-0.47-dead-decoder-and-interface-lock`, `ac776efc` + `62a934f3`, verrou de 15 tests / 26 cas) ; ✅ **É4 LIVRÉ** (`72a34d5c` + `5f91c744` sur `v11-pre-lot-eval-baseline`), avec une **doctrine de contre-charge inventée** pour le `DefensiveBot` (11.02 + 12.04, détail en §0.47 É4) et la fin du choix de cible par accident d'ordre de tri chez `DefensiveBot` ET `GreedyBot` ⚠️ l'adversaire (0.23 du score) devient plus fort : **les win-rates d'avant et d'après ce correctif ne sont plus comparables** — la baseline d'éval change. 🔴 **É4 S'ÉLARGIT le 2026-07-29** : les bots « intelligents » (`AggressiveSmartBot` 0.15, `AdaptiveBot` 0.16, `DefensiveSmartBot`) **tirent à côté de leur propre critère** — `_best_target_slot_by_*` indexe `valid_target_pool` comme un index de slot. Le run 4 chiffre le biais : `vs_defensive` **0.89** apporte **40 % du `combined` 0.509** (§0.14). Détail → §0.47. |
 | **§0.49** | Non-conformité **21.03 « Take to the skies »** — le mot-clé FLY perdu sur 6 types d'unités, dont 5 dans les rosters d'ArmageddonAgent | ✅ **CORRIGÉ, NON MERGÉ** — branche `v11-fly-2103-conformity`, **7 commits**, tête `6191a360`, 18 tests ciblés (⏳ état constaté le 2026-07-29 à 14 h 01, la branche bougeait encore : reconfronter) | **3** (merger) | `_unit_has_keyword` ([movement_handlers.py:234-255](../../engine/phase_handlers/movement_handlers.py#L234-L255)) compare par **égalité stricte** alors que ses 5 appelants passent `"fly"` en minuscules — le reste du moteur normalise (`.strip().lower()`), c'est **l'exception**. ⚠️ Le corpus est **INCOHÉRENT**, pas uniformément en majuscules : **16** `keywordId: "fly"` (qui fonctionnent) contre **6** `keywordId: "FLY"` (qui perdent la règle) dans `frontend/src/roster/`. **5 des 6 types en majuscules sont dans les rosters d'ArmageddonAgent** (training ET holdout_regular) : **le run 4 entraînait l'agent sur un jeu où ses unités à réacteurs et son Land Speeder ne volaient pas** — c'est l'une des deux raisons de son arrêt (§0.14). Les deux défauts adjacents (traversée gratuite en gym, charge FLY inactive pour l'IA) sont **corrigés dans la même branche**. 🟢 **DÉCISION ASSUMÉE, écrite en §0.49 point 5** : une unité FLY pilotée par le modèle **déclare systématiquement**, en attendant `L6` (§0.48) — coût permanent de **2"** de mouvement pour les 5 types volants du roster, **y compris en terrain découvert** où c'est un pur désavantage. Détail → §0.49. |
 | **§0.50** | Non-conformité **01.07** — une unité **battle-shocked** contrôlait ses objectifs normalement | ✅ **CORRIGÉ, NON MERGÉE** — branche `v11-battle-shock-oc`, `4be41919` puis **5 commits, tête `b8932f52`** (⏳ constaté le 2026-07-29 à 14 h 05) ; ⚠️ **travail de suite consigné** : le `require_key(battle_shocked)` contredit **7 autres lecteurs** du même drapeau qui, eux, utilisent `get(..., False)` — à trancher (§0.50) | — | `sum_objective_control_oc_multi` ([game_state.py:2983-3060](../../engine/game_state.py#L2983-L3060)), **source unique** partagée moteur + observation, ne consultait jamais `battle_shocked` alors que 01.07 met l'OC de toutes ses figurines à `'-'`. ⚠️ **Change l'issue des parties** : tout modèle entraîné avant a appris qu'on tient un objectif gratuitement en étant choqué — dont le run 4. Détail → §0.50. |
-| **§0.51** | Branches prêtes, **non mergées** — état du dépôt | ⏳ **ENTRÉE PÉRISSABLE (état au 2026-07-29 14 h 01)** — reconfronter au réel (`git branch`, `git log main..<branche>`) AVANT usage | — | **6 branches, TOUTES porteuses de travail terminé, AUCUNE mergée** (`main` = `5d2dfd48`) : `v11-0.46-dead-code-charge-heuristic` (`306033ec`), `v11-0.47-eval-tooling-mask` (`aa04a8d9`), `v11-0.47-dead-decoder-and-interface-lock` (`62a934f3`), `v11-pre-lot-eval-baseline` (`5f91c744`), `v11-battle-shock-oc` (`4be41919`), `v11-fly-2103-conformity` (`6191a360`). ⚠️ Deux d'entre elles bougeaient **pendant** ce constat. ⚠️ **Point de composition** : la branche du décodeur mort a CONSERVÉ `get_action_mask_and_eligible_units` + `_build_mask_for_units` parce qu'un appelant subsistait — or c'est exactement celui que la branche d'outillage d'éval migre. **Une fois les deux mergées, ces deux fonctions deviennent mortes et DOIVENT être supprimées.** ⚠️ **La vérification large (suite complète, `pyright`, `biome`, `tsc`) appartient à l'utilisateur et n'a PAS été faite** : aucune de ces branches n'est validée au-delà de ses tests ciblés. Détail → §0.51. |
+| **§0.51** | Branches prêtes — état du dépôt | 🟢 **LES SIX SONT MERGÉES** ⏳ **ENTRÉE PÉRISSABLE (état au 2026-07-29 17 h)** — reconfronter au réel (`git branch --merged main`, `git log main..<branche>`) AVANT usage | — | Constaté par `git merge-base --is-ancestor <branche> main` : `v11-0.46-dead-code-charge-heuristic` (`306033ec`), `v11-0.47-eval-tooling-mask` (`ee3a55b8`), `v11-0.47-dead-decoder-and-interface-lock` (`fbd1d278`), `v11-pre-lot-eval-baseline` (`b5888bdf`), `v11-battle-shock-oc` (`ee1dccb9`), `v11-fly-2103-conformity` (`aba3cb07`) — **toutes ancêtres de `main` = `d061f21b`**. Le **point de composition est donc soldé** (les deux branches du décodeur et de l'outillage d'éval sont sur `main` ensemble). 🔴 **UNE SEULE branche reste NON MERGÉE : `fix-weapon-collection-defaults` (`5980a035`)** — « distinguer *pas d'arme* (liste vide) de *entité mal construite* (clé absente) », 8 fichiers, +310/−35. **En attente : l'utilisateur a du travail en cours sur les mêmes fichiers** (`git status` : `fight_handlers.py`, `shared_utils.py`, `shooting_handlers.py`, `w40k_core.py` modifiés). Elle n'appartient PAS à V11 → [campagne du 2026-07-29](campagne_typage_et_replis_2026-07-29.md#5-limites-de-preuve-de-cette-campagne). ⚠️ **La vérification large (suite complète, `pyright`, `biome`, `tsc`) appartient à l'utilisateur et n'a toujours PAS été faite** : le merge ne l'a pas produite. Détail → §0.51. |
+| **§0.52** | Deux effets de la campagne du 2026-07-29 sur ce que le prochain entraînement mesurera | ✅ **LIVRÉ ET MERGÉ** | **0** (à lire avant d'interpréter toute courbe) | 1️⃣ **Quatre compteurs de combat morts depuis le 2025-10-25 rebranchés** (`5f1878eb`) : `shooting_accuracy`, `damage_dealt`, `damage_received`, `damage_efficiency` étaient **ABSENTES, pas nulles** — aucune mesure d'entraînement antérieure ne les contient. 2️⃣ **Type de socle scindé** (`6f0c0c6b`) : −27 % / −28 % sur deux fonctions géométriques du chemin chaud, invariant devenu impossible à violer. Détail → §0.52. Le reste de la campagne (57 commits) est **hors V11** → [campagne_typage_et_replis_2026-07-29.md](campagne_typage_et_replis_2026-07-29.md). |
 | **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)) ; **T2→T5 relus le 2026-07-29** — les écarts trouvés vivent en **[§0.47](#s0.47)**, pas ici. Reste ouvert : les ✅ de T2→T5 ne sont revérifiés que par LECTURE (aucune exécution), et la conformité littérale de T2 est indécidable (cf. §0.47). ⚠️ Sa **section** est restée en §0hist (elle y était déjà avant l'épuration) alors qu'elle est encore ouverte — laissée en place plutôt que scindée, pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
 
 ✅ **Contrôle de conformité indépendant du 2026-07-29** (vérification par lecture, PAS une nouvelle
@@ -949,9 +950,32 @@ moteur — mais toute lecture de contrôle d'objectif faite depuis l'analyzer es
 non fiable tant qu'il n'est pas rebranché sur `sum_objective_control_oc_multi`.
 
 <a id="s0.51"></a>
-### 0.51 Branches prêtes, NON mergées — ⏳ ENTRÉE PÉRISSABLE (état au 2026-07-29 14 h 05)
+### 0.51 Branches prêtes — 🟢 LES SIX SONT MERGÉES ⏳ ENTRÉE PÉRISSABLE (état au 2026-07-29 17 h)
 
-⏳ **Reconfronter au réel (`git log main..<branche>`) AVANT de s'en servir.**
+> 🟢 **MISE À JOUR DU 2026-07-29 (soir) — le constat de 14 h 05 ci-dessous est HISTORIQUE.**
+> Les **six** branches sont désormais **ancêtres de `main` = `d061f21b`** (vérifié par
+> `git merge-base --is-ancestor <branche> main` pour chacune) ; leurs têtes ont bougé après le
+> constat de 14 h 05, les têtes réellement mergées sont : `306033ec`, `ee3a55b8`, `fbd1d278`,
+> `b5888bdf`, `ee1dccb9`, `aba3cb07`.
+>
+> ✅ **Le POINT DE COMPOSITION signalé plus bas est SOLDÉ** : `v11-0.47-dead-decoder-and-interface-lock`
+> et `v11-0.47-eval-tooling-mask` sont sur `main` **ensemble**, donc `roster_matchup_stats.py`
+> n'appelle plus une méthode supprimée. La contrainte d'ordre de merge n'a plus d'objet.
+>
+> 🔴 **UNE branche reste NON MERGÉE, et elle n'est PAS V11** : `fix-weapon-collection-defaults`
+> (`5980a035`) — « distinguer *pas d'arme* (liste vide) de *entité mal construite* (clé absente) »,
+> 8 fichiers, +310/−35 dont `tests/unit/engine/test_weapon_collections_contract.py` (213 lignes).
+> **Motif de l'attente : l'utilisateur a du travail en cours sur exactement ces fichiers**
+> (`git status` au 2026-07-29 : `engine/phase_handlers/fight_handlers.py`,
+> `engine/phase_handlers/shared_utils.py`, `engine/phase_handlers/shooting_handlers.py`,
+> `engine/w40k_core.py` modifiés). Elle appartient à la campagne « typage & replis » →
+> [`campagne_typage_et_replis_2026-07-29.md`](campagne_typage_et_replis_2026-07-29.md).
+>
+> ⚠️ **Le merge n'est PAS une validation.** La vérification large appartient toujours à
+> l'utilisateur et n'a pas été faite.
+
+⏳ **Constat historique du 2026-07-29 à 14 h 05 — conservé tel quel, NE PLUS S'EN SERVIR comme
+état courant.** Reconfronter au réel (`git log main..<branche>`) avant tout usage.
 Constaté par `git log main..<branche>` le **2026-07-29 à 14 h 05**, `main` = **`5d2dfd48`**.
 🔴 **CINQ des six branches ont bougé PENDANT le constat** (entre 13 h 56 et 14 h 05, suites de
 relecture adverse écrites par d'autres agents en parallèle) : les têtes et les comptes ci-dessous
@@ -992,6 +1016,84 @@ merger la seule branche du décodeur laisse l'outil de statistiques cassé à l'
 (suite de tests complète, `pyright`, `ai/hidden_action_finder.py`, `scripts/check_ai_rules.py`,
 `biome`, `tsc`) **appartient à l'utilisateur et n'a PAS été faite**. Ne pas lire « branche prête »
 comme « branche verte ».
+
+<a id="s0.52"></a>
+### 0.52 Ce que la campagne « typage & replis » du 2026-07-29 change pour la MESURE — ✅ LIVRÉ ET MERGÉ (2026-07-29)
+
+> **Périmètre de cette entrée : UNIQUEMENT ce qui change ce que l'utilisateur mesurera au prochain
+> entraînement.** La campagne complète (57 commits, `bb3a788f` → `d061f21b`) — contre-audit du
+> typage, replis silencieux, code mort, journal de tir, **et surtout la dette restante** — vit à UN
+> seul endroit : **[`campagne_typage_et_replis_2026-07-29.md`](campagne_typage_et_replis_2026-07-29.md)**.
+> Ne pas recopier son contenu ici.
+
+#### 1. 🔴 Quatre compteurs de combat rebranchés — les courbes antérieures sont ABSENTES, pas nulles
+
+Commit **`5f1878eb`**. `shots_fired`, `hits`, `damage_dealt` et `damage_received` étaient
+**déclarés** dans `episode_tactical_data` et **jamais incrémentés** depuis le commit **`fe1df7d8`
+« metrics OK » du 2025-10-25** (date constatée par `git log -1 --date=short fe1df7d8`) : ce commit a
+déplacé le dictionnaire du callback vers le moteur, a réimplémenté `valid_actions`,
+`invalid_actions`, `units_lost` et `units_killed`, **mais pas ces quatre-là**, tout en supprimant
+leur calcul côté callback **dans le même diff**. Migration partielle, **neuf mois de silence**.
+
+**Ce qu'il faut en retenir pour lire les courbes** — les consommateurs sont gardés par `> 0` :
+
+| Courbe | État avant le 2026-07-29 |
+|---|---|
+| `game_tactical/shooting_accuracy` | **jamais émise** |
+| `game_detailed/damage_dealt` | **jamais émise** |
+| `game_detailed/damage_received` | **jamais émise** |
+| `game_tactical/damage_efficiency` | **jamais émise** |
+
+🔴 **Une courbe absente ne se distingue pas d'un agent qui ne se bat jamais.** Toutes les mesures
+d'entraînement antérieures au 2026-07-29 — **y compris le run 4 (§0.14)** — **ne contiennent pas ces
+quatre courbes**. Elles ne sont pas à zéro : elles n'existent pas. Toute comparaison
+avant/après sur les dégâts, la précision ou l'efficacité de combat est **impossible**, pas
+seulement dégradée.
+
+**Où c'est branché** : bloc de fin d'épisode de `step()`, sur `action_logs`
+([`engine/w40k_core.py:2007`](../../engine/w40k_core.py#L2007) et suivants) — **pas** sur
+`attack_details`, qui vit sous `if (self.step_logger and self.step_logger.enabled)` et rendrait les
+métriques **dépendantes de `--step`**, donc nulles à l'entraînement normal.
+
+**Définitions verrouillées par test** (pour qu'un élargissement futur soit un choix, pas un oubli) :
+`shots_fired` / `hits` = **TIR seul** (une précision au tir ; y verser la mêlée la rendrait
+ininterprétable), donc `hits <= shots_fired` par construction ; `damage_dealt` /
+`damage_received` = **tir ET mêlée**, c'est l'attrition totale.
+
+**Preuve** : cohérence croisée sur vraie partie (14 tests, moteur réel, 3 graines) —
+`damage_dealt` == PV réellement perdus par l'adversaire et `damage_received` == PV perdus par le
+camp contrôlé, à l'unité près, **dans les deux sens et pour les deux sièges** ; rouge sous 4
+mutations restaurées.
+
+#### 2. 🟢 Type de socle scindé — la géométrie du chemin chaud accélère, l'invariant devient inviolable
+
+Commits **`44486667`** (invariant validé à la frontière, 9 `cast` supprimés) puis **`6f0c0c6b`**
+(scission du type). `Socle` était une **union étiquetée modélisée comme un enregistrement plat** :
+`shape` DÉTERMINAIT le type de `base_size` (`round`/`square` → diamètre scalaire, `oval` → paire)
+sans que rien ne le dise. `RoundSocle` / `SquareSocle` / `OvalSocle`
+([`engine/hex_utils.py:1728/1741/1754`](../../engine/hex_utils.py#L1728)) portent désormais chacun
+le type exact, et `Socle(...)` est la **fabrique** qui choisit la classe et refuse une taille qui
+contredit l'étiquette.
+
+| Mesure (timeit, n=200000, 3 passes) | avant | après | |
+|---|---|---|---|
+| `euclidean_edge_distance` | 883 ns | 645 ns | **−27 %** |
+| `footprints_overlap` | 679 ns | 490 ns | **−28 %** |
+| construction d'un socle | 243 ns | 274 ns | **+31 ns — assumé** (la fabrique valide, là où `tuple.__new__` était en C) |
+
+Net sur le couple réel « construire un socle puis tester le chevauchement » : **−17 %**.
+
+**Pourquoi ça compte au-delà de la perf** : l'invariant n'est plus vérifié à la lecture — **un socle
+incohérent ne peut plus exister**. La classe de base ne déclare pas `base_size`, donc on ne peut pas
+lire la taille d'un socle sans savoir de quelle forme il s'agit, et le vérificateur l'impose. Les
+**30 sites de construction sont inchangés** (la fabrique garde nom, signature et mots-clés du
+NamedTuple) et les **161 datasheets** du registre respectent l'invariant (156 `round` + 5 `oval`,
+0 violation).
+
+⚠️ **Aucun `obs_size` ni `TOTAL_ACTION_SIZE` n'est touché** par ces deux points : ils
+**n'appartiennent pas au lot de ré-entraînement de §0.48** et ne forcent aucun `--new`.
+
+---
 
 <a id="s0.33"></a>
 ### 0.33 Rollout buffer 46,9 Go pour 39 Go de RAM — 🟠 CONDITIONNEL : bloque les profils à 48 envs, PAS le run à lancer (2026-07-28)

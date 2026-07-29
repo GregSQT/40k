@@ -83,6 +83,7 @@ la racine de `Implémentation/`.
 | **[Implémentation/V11_refactor_plan.md](Impl%C3%A9mentation/V11_refactor_plan.md)** | Plan d'extraction de `V11_agent_rework.md` en sous-documents. | ⏸️ **plan non exécuté** ; ses numéros de ligne datent du 2026-07-21 et ne correspondent plus |
 | **[Implémentation/Replay.md](Impl%C3%A9mentation/Replay.md)** | Spec du replay. | — |
 | **[Implémentation/Implémenté/observation_deploiement.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/observation_deploiement.md)** | Observation de la phase de déploiement : les 5 défauts et leurs correctifs (clos le 2026-07-29). | — |
+| **[Implémentation/campagne_typage_et_replis_2026-07-29.md](Impl%C3%A9mentation/campagne_typage_et_replis_2026-07-29.md)** | Campagne « typage & replis silencieux » (57 commits) : **ce qui a été LIVRÉ** (replis silencieux, code mort, socle scindé, compteurs de combat, journal de tir) **et la DETTE RESTANTE** (7 points, §3) + leçons de méthode réutilisables (§4). Le typage n'y était presque jamais le défaut, seulement son symptôme. | 🟠 livré ; **7 dettes ouvertes** dont 1 en attente de décision utilisateur |
 
 ### Archives et backlog
 
