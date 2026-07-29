@@ -21,7 +21,6 @@ from typing import (
     Sequence,
     Set,
     Tuple,
-    cast,
 )
 
 import numpy as np
@@ -1521,6 +1520,53 @@ def engagement_minimum_clearance_norm(engagement_zone: int) -> float:
 _OVERLAP_TOL: float = 1e-6
 
 
+def require_scalar_base_size(base_shape: str, base_size: Any, context: str) -> int:
+    """Diamètre d'un socle `round`/`square` — la moitié « scalaire » de l'union `BASE_SIZE`.
+
+    `BASE_SHAPE` est l'étiquette qui DÉTERMINE le type de `BASE_SIZE` : `round`/`square`
+    portent un diamètre scalaire, `oval` une paire `[grand axe, petit axe]`. Le couple est
+    validé UNE fois à la frontière de chargement (`game_state._scale_socle` /
+    `GameStateManager.create_unit`) ; ces accesseurs ne font que rendre l'étiquette lisible
+    par le typage statique — là où le code écrivait un `cast` non prouvé.
+    """
+    if isinstance(base_size, bool) or not isinstance(base_size, int):
+        raise TypeError(
+            f"{context}: BASE_SHAPE {base_shape!r} exige un BASE_SIZE entier (diamètre), "
+            f"reçu {base_size!r}"
+        )
+    return base_size
+
+
+def require_oval_base_size(base_size: Any, context: str) -> List[int]:
+    """Paire `[grand axe, petit axe]` d'un socle `oval` (cf. ``require_scalar_base_size``)."""
+    if (
+        not isinstance(base_size, (list, tuple))
+        or len(base_size) != 2
+        or any(isinstance(v, bool) or not isinstance(v, int) for v in base_size)
+    ):
+        raise TypeError(
+            f"{context}: BASE_SHAPE 'oval' exige un BASE_SIZE [grand axe, petit axe] "
+            f"d'entiers, reçu {base_size!r}"
+        )
+    return [int(base_size[0]), int(base_size[1])]
+
+
+def require_base_size(base_shape: str, base_size: Any, context: str) -> "int | list[int]":
+    """Valide le couple (`BASE_SHAPE`, `BASE_SIZE`) et rend la taille dans son type d'étiquette.
+
+    C'est LA garde de l'invariant, appelée à la frontière où la donnée entre (chargement de
+    datasheet) ; `context` doit nommer l'unité pour qu'une datasheet incohérente soit
+    identifiable sans instrumenter le moteur.
+    """
+    if base_shape == "round" or base_shape == "square":
+        return require_scalar_base_size(base_shape, base_size, context)
+    if base_shape == "oval":
+        return require_oval_base_size(base_size, context)
+    raise ValueError(
+        f"{context}: BASE_SHAPE inconnue {base_shape!r} (attendu 'round', 'square' ou 'oval')"
+    )
+
+
 class Socle(NamedTuple):
     """Socle d'une figurine (ou empreinte d'une escouade) pour les tests de distance.
 
@@ -1542,6 +1588,14 @@ class Socle(NamedTuple):
     fp: Optional[Set[Tuple[int, int]]] = None
     model_centers: Optional[List[Tuple[int, int]]] = None
     orientation: int = 0
+
+    def scalar_size(self) -> int:
+        """Diamètre du socle, pour les formes qui en portent un (`round`/`square`)."""
+        return require_scalar_base_size(self.shape, self.base_size, "Socle")
+
+    def oval_size(self) -> List[int]:
+        """Paire `[grand axe, petit axe]` du socle `oval`."""
+        return require_oval_base_size(self.base_size, "Socle")
 
 
 def bounding_radius_norm(shape: str, base_size: "int | list[int]") -> float:
@@ -1570,7 +1624,7 @@ def footprints_overlap(a: Socle, b: Socle) -> bool:
     """
     if a.shape == "round" and b.shape == "round":
         gap = euclidean_edge_clearance_round_round(
-            a.col, a.row, cast(float, a.base_size), b.col, b.row, cast(float, b.base_size)
+            a.col, a.row, a.scalar_size(), b.col, b.row, b.scalar_size()
         )
         return gap < -_OVERLAP_TOL
     # Méthode empreinte (au moins une base non ronde) : broad-phase, puis intersection.
@@ -1602,7 +1656,7 @@ def _socle_edge_primitives(s: Socle) -> List[Tuple]:
     centers = s.model_centers if s.model_centers else [(s.col, s.row)]
     prims: List[Tuple] = []
     if s.shape == "round":
-        r = round_base_radius_norm(cast(float, s.base_size))
+        r = round_base_radius_norm(s.scalar_size())
         for c, rr in centers:
             cx, cy = _hex_center(int(c), int(rr))
             prims.append(("c", cx, cy, r))
@@ -1610,7 +1664,7 @@ def _socle_edge_primitives(s: Socle) -> List[Tuple]:
     ang = s.orientation * _ORIENTATION_STEP_RAD
     cos_a, sin_a = math.cos(ang), math.sin(ang)
     if s.shape == "oval":
-        size = cast(list, s.base_size)
+        size = s.oval_size()
         aa = (size[0] / 2.0) * _FOOTPRINT_SIZE_SCALE
         bb = (size[1] / 2.0) * _FOOTPRINT_SIZE_SCALE
         local = [
@@ -1619,7 +1673,7 @@ def _socle_edge_primitives(s: Socle) -> List[Tuple]:
             for k in range(_OVAL_EDGE_SAMPLES)
         ]
     elif s.shape == "square":
-        half = (cast(float, s.base_size) / 2.0) * _FOOTPRINT_SIZE_SCALE
+        half = (s.scalar_size() / 2.0) * _FOOTPRINT_SIZE_SCALE
         local = [(-half, -half), (half, -half), (half, half), (-half, half)]
     else:
         raise ValueError(f"euclidean_edge_distance: forme de socle inconnue {s.shape!r}")
@@ -1709,8 +1763,8 @@ def euclidean_edge_distance(a: Socle, b: Socle) -> float:
         # = comportement historique.
         centers_a = a.model_centers if a.model_centers else [(a.col, a.row)]
         centers_b = b.model_centers if b.model_centers else [(b.col, b.row)]
-        base_a = cast(float, a.base_size)
-        base_b = cast(float, b.base_size)
+        base_a = a.scalar_size()
+        base_b = b.scalar_size()
         best = math.inf
         for ca, ra in centers_a:
             for cb, rb in centers_b:

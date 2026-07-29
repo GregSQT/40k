@@ -48,6 +48,8 @@ from engine.hex_utils import (
     geodesic_field,
     min_distance_between_sets,
     ORIENTATION_STEP_COUNT,
+    require_base_size,
+    require_scalar_base_size,
     round_base_radius_norm,
 )
 from engine.phase_handlers.geodesic_move import _euclidean_move_field, reachable_multilevel_field
@@ -73,19 +75,6 @@ def _validate_move_orientation(raw_orientation: Any) -> int:
             f"Move orientation must be in 0..{ORIENTATION_STEP_COUNT - 1}, got {raw_orientation!r}"
         )
     return raw_orientation
-
-
-def _require_footprint_base_size(base_shape: str, base_size: Any, context: str) -> Any:
-    """Validate BASE_SIZE against BASE_SHAPE before footprint computation."""
-    if base_shape == "round" or base_shape == "square":
-        if isinstance(base_size, bool) or not isinstance(base_size, int):
-            raise ValueError(f"{context}: {base_shape} BASE_SIZE must be int, got {base_size!r}")
-        return base_size
-    if base_shape == "oval":
-        if not isinstance(base_size, (list, tuple)) or len(base_size) != 2:
-            raise ValueError(f"{context}: oval BASE_SIZE must be [major, minor], got {base_size!r}")
-        return base_size
-    raise ValueError(f"{context}: unsupported BASE_SHAPE {base_shape!r}")
 
 
 def _sync_move_preview_mask_loops(
@@ -1439,10 +1428,16 @@ def _euclidean_mover_ez_forbidden_mask(
         dy = grid_y[c0:c1, r0:r1] - ey
         dst[c0:c1, r0:r1] |= (dx * dx + dy * dy) <= (reach * reach + 1e-9)
 
-    mover_shape = unit["BASE_SHAPE"]
-    mover_bs = unit["BASE_SIZE"]
+    # Le mover passe par la MÊME garde que les ennemis dix lignes plus bas : sa taille de
+    # socle est lue selon la forme déclarée, jamais affirmée par un cast.
+    mover_shape = require_key(unit, "BASE_SHAPE")
+    mover_bs = require_base_size(
+        mover_shape, require_key(unit, "BASE_SIZE"), f"units_cache mover {unit.get('id', '?')}"
+    )
     mover_round = mover_shape == "round"
-    r_m = round_base_radius_norm(cast(float, mover_bs)) if mover_round else 0.0
+    r_m = round_base_radius_norm(
+        require_scalar_base_size(mover_shape, mover_bs, "engagement mask mover")
+    ) if mover_round else 0.0
 
     # Dispatch identique à euclidean_edge_distance : round↔round (les DEUX ronds) = clearance
     # continu exact (centre + rayons) ; toute paire impliquant un non-rond = min entre centres de
@@ -1451,7 +1446,7 @@ def _euclidean_mover_ez_forbidden_mask(
     cell_sources: List[Tuple[int, int]] = []
     for _, ce in enemy_list:
         e_shape = require_key(ce, "BASE_SHAPE")
-        e_bs = _require_footprint_base_size(
+        e_bs = require_base_size(
             e_shape, require_key(ce, "BASE_SIZE"), f"units_cache enemy {ce.get('id', '?')}"
         )
         by_model = ce.get("occupied_hexes_by_model")
@@ -1459,7 +1454,9 @@ def _euclidean_mover_ez_forbidden_mask(
             (int(require_key(ce, "col")), int(require_key(ce, "row")))
         ]
         if mover_round and e_shape == "round":
-            r_e = round_base_radius_norm(cast(float, e_bs))
+            r_e = round_base_radius_norm(
+                require_scalar_base_size(e_shape, e_bs, "engagement mask enemy")
+            )
             for ec, er in model_positions:
                 _stamp_disc(eng_bad, int(ec), int(er), ez_norm + r_m + r_e)
         else:
@@ -1602,7 +1599,7 @@ def _compute_mover_ez_forbidden_mask(
     has_hex_mixed = False
     for _, ce in enemy_list:
         e_shape = require_key(ce, "BASE_SHAPE")
-        e_bs = _require_footprint_base_size(
+        e_bs = require_base_size(
             e_shape,
             require_key(ce, "BASE_SIZE"),
             f"units_cache enemy {ce.get('id', '?')}",

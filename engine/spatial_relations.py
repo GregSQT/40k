@@ -1,6 +1,6 @@
 """Shared spatial relation helpers for footprint contact and engagement checks."""
 
-from typing import Any, Dict, List, Optional, Set, Tuple, cast
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from engine.hex_utils import (
     _hex_center,
@@ -9,6 +9,7 @@ from engine.hex_utils import (
     euclidean_edge_clearance_round_round,
     euclidean_edge_distance,
     min_distance_between_sets,
+    require_base_size,
 )
 from shared.data_validation import require_key
 
@@ -58,14 +59,6 @@ def _cache_entry_footprint(cache_entry: Dict[str, Any]) -> Set[Tuple[int, int]]:
     return {(require_key(cache_entry, "col"), require_key(cache_entry, "row"))}
 
 
-def _cache_entry_round_base_size(cache_entry: Dict[str, Any]) -> float:
-    """Return a round base size from a cache entry, raising when the stored value is invalid."""
-    base_size = require_key(cache_entry, "BASE_SIZE")
-    if not isinstance(base_size, (int, float)):
-        raise TypeError(f"round BASE_SIZE must be numeric, got {type(base_size).__name__}")
-    return base_size
-
-
 # Hex count of a single base, memoized by geometry. The COUNT is invariant under
 # translation and depends only on (shape, size, orientation, column parity) — see
 # precompute_footprint_offsets: only column parity shifts the odd-q footprint.
@@ -82,7 +75,11 @@ def _single_base_hex_count(
     if cached is None:
         # col_parity as the reference column preserves odd-q parity; row 0 is arbitrary
         # (the count is translation-invariant), matching the legacy per-call computation.
-        cached = len(compute_occupied_hexes(col_parity, 0, base_shape, cast("int | list[int]", base_size), orientation))
+        cached = len(compute_occupied_hexes(
+            col_parity, 0, base_shape,
+            require_base_size(base_shape, base_size, "_single_base_hex_count"),
+            orientation,
+        ))
         _SINGLE_BASE_HEX_COUNT_CACHE[key] = cached
     return cached
 
