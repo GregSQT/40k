@@ -8,7 +8,6 @@
       "hp_damage_weight": 0.7,
       "model_kill_bonus_factor": 0.2,
       "squad_kill_bonus_factor": 0.3,
-      "oc_weight": 0.5,
       "incoherent_weight": 0.2
     },
     "base_actions": {
@@ -42,7 +41,7 @@
       "reward_for_objective_lead": 10.0,
       "use_objective_lead": true,
       "reward_per_objective_turn5": 0.0,
-      "on_objective_bonus": 5.0
+      "on_objective_bonus": 1.0
     },
     "system_penalties": {
       "forbidden_action": -1.0,

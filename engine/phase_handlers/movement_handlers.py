@@ -536,6 +536,12 @@ def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     AI_MOVE.md: Initialize movement phase and build activation pool
     """
+    # Sous W40K_MASK_VERIFY=1 : aucun jet d'Advance ne doit avoir survecu a la phase move
+    # precedente (regle 09.06). Avant de poser la phase, sinon le controle s'auto-justifie.
+    from engine.mask_verification import verify_advance_rolls_cycle
+
+    verify_advance_rolls_cycle(game_state)
+
     # Set phase
     game_state["phase"] = "move"
 

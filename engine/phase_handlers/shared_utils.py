@@ -46,6 +46,7 @@ from engine.combat_utils import (
 # import local y coûterait un lookup `sys.modules` par appel. `spatial_relations` n'importe rien de
 # ce module au niveau global → aucun cycle.
 from engine.spatial_relations import geometry_is_hex
+from engine.mask_verification import verify_memoised_move_cell_map
 
 # end_activation / _handle_shooting_end_activation argument constants (AI_TURN.md)
 ACTION = "ACTION"
@@ -7669,6 +7670,12 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     summary["damage_total"] += dmg_dealt
     rec["damageDealt"] = dmg_dealt
     rec["targetDied"] = destroyed
+    # VALUE de la figurine VISEE par cette attaque (pas la valeur d'escouade), capturee ici
+    # parce qu'elle n'est plus lisible apres coup : `destroy_model` retire la figurine du
+    # models_cache. C'est la seule voie pour ventiler la valeur detruite par phase cote
+    # metriques — `summary["events"]` porte la meme donnee mais ne remonte jamais jusqu'a
+    # `step()` dans le pipeline squad V11.
+    rec["targetValue"] = model_value
     rec["targetUnitType"] = unit_type
     rec["targetCol"] = col
     rec["targetRow"] = row
@@ -9256,6 +9263,11 @@ def read_squad_move_cell_map(
 
     Aucun repli : reconstruire ici masquerait une rupture du contrat « masque avant decodage »
     et pourrait executer une cellule que le masque n'avait pas autorisee.
+
+    Le tampon (ancre, phase) ci-dessous est PARTIEL : il ne voit que le deplacement du mover et
+    le changement de phase. Sous ``W40K_MASK_VERIFY=1``, la carte est en plus RECALCULEE et
+    comparee (cf. `engine.mask_verification`), ce qui couvre les evolutions d'etat que ce tampon
+    laisse passer. Desarme, ce controle ne coute rien.
     """
     entry = game_state.get(MOVE_CELL_MAP_CACHE_KEY, {}).get(str(squad_id))  # get allowed
     if entry is None:
@@ -9271,6 +9283,7 @@ def read_squad_move_cell_map(
             f"phase {entry['phase']!r} depuis l'ancre {entry['anchor']}, relue en phase {phase!r} "
             f"depuis {anchor}. Executer cette carte designerait d'autres hexes que ceux masques."
         )
+    verify_memoised_move_cell_map(game_state, str(squad_id), entry["map"])
     return entry["map"]
 
 

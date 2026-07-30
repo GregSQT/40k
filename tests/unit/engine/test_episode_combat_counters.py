@@ -167,6 +167,41 @@ def _damage_of(engine: W40KEngine, log_type: str, player: int) -> int:
                if lg["type"] == log_type and int(lg["player"]) == player)
 
 
+def _model_kills_of(engine: W40KEngine, log_type: str, player: int) -> List[Dict[str, Any]]:
+    """Les attaques du camp `player` qui ont DETRUIT une figurine (une entree = une figurine)."""
+    return [shot for lg in _attack_logs(engine)
+            if lg["type"] == log_type and int(lg["player"]) == player
+            for shot in lg["shootDetails"] if shot.get("targetDied")]
+
+
+def _has_kill_after_the_first_attack(engine: W40KEngine, log_type: str, player: int) -> bool:
+    """Au moins une figurine achevee par une attaque qui n'est pas la PREMIERE de son groupe.
+
+    C'est la situation que l'ancienne formule de ``melee_kills`` (``shootDetails[0]``
+    uniquement) ne voyait pas. Sans elle, les tests de kills ne distingueraient pas le
+    compteur corrige de celui qu'il remplace.
+    """
+    return any(shot.get("targetDied") for lg in _attack_logs(engine)
+               if lg["type"] == log_type and int(lg["player"]) == player
+               for shot in lg["shootDetails"][1:])
+
+
+def _enemy_models_destroyed(engine: W40KEngine, controlled_player: int) -> int:
+    """Figurines adverses reellement retirees du plateau, lues sur l'etat, pas sur le journal.
+
+    ``destroy_model`` retire la figurine morte de ``squad_models`` ET de ``models_cache`` :
+    les morts ne sont plus enumerables, seuls les vivants le sont. On compte donc a l'envers,
+    depuis les unites du scenario. Les montages de ce fichier sont MONO-FIGURINE (aucune cle
+    ``models``) — verifie ici, sinon ce compte d'unites ne serait pas un compte de figurines.
+    """
+    gs = engine.game_state
+    alive_ids = {str(uid) for uid in gs["units_cache"]}
+    for mids in gs["squad_models"].values():
+        assert len(mids) <= 1, "helper valable seulement sur un montage mono-figurine"
+    return sum(1 for u in gs["units"]
+               if int(u["player"]) != controlled_player and str(u["id"]) not in alive_ids)
+
+
 def _melee_units(controlled_player: int) -> List[Dict[str, Any]]:
     """Les deux camps DEJA au contact : la melee n'attend ni deplacement ni charge."""
     _ = controlled_player
@@ -220,6 +255,23 @@ def _melee_episode(monkeypatch: pytest.MonkeyPatch,
         require=lambda eng, _td: (_damage_of(eng, "combat", controlled_player) > 0
                                   and _attacks_of(eng, "shoot", controlled_player) == 0),
         what="une melee pure avec des degats",
+    )
+
+
+def _melee_kill_episode(monkeypatch: pytest.MonkeyPatch,
+                        controlled_player: int = 1) -> Tuple[W40KEngine, Dict[str, Any]]:
+    """Melee pure AVEC des figurines tuees, dont au moins une hors de la premiere attaque.
+
+    La derniere condition est ce qui donne sa valeur au test : c'est exactement le kill que
+    l'ancienne formule (``shootDetails[0]``) ne comptait pas.
+    """
+    return _play_until(
+        monkeypatch, _melee_units(controlled_player), controlled_player,
+        require=lambda eng, _td: (_attacks_of(eng, "shoot", controlled_player) == 0
+                                  and bool(_model_kills_of(eng, "combat", controlled_player))
+                                  and _has_kill_after_the_first_attack(
+                                      eng, "combat", controlled_player)),
+        what="une melee pure tuant une figurine ailleurs qu'a la premiere attaque",
     )
 
 
@@ -297,6 +349,103 @@ def test_melee_feeds_damage_but_never_shots(monkeypatch: pytest.MonkeyPatch) -> 
     assert tactical["hits"] == 0
     # ... mais l'attrition, elle, compte bien la melee.
     assert tactical["damage_dealt"] == melee_damage
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Kills et VALUE detruite — par FIGURINE, dans les deux phases
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_melee_kills_count_every_model_not_just_the_first_attack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``melee_kills`` compte chaque figurine tuee, quelle que soit l'attaque qui l'acheve.
+
+    Jusqu'au 2026-07-30 le moteur ne lisait que ``shootDetails[0]["targetDied"]`` : il ne
+    mesurait que « la premiere attaque du groupe a-t-elle tue ? », soit une probabilite quasi
+    constante, independante de la competence de l'agent — d'ou une courbe l_melee_kills plate
+    et bruitee pendant que k_shoot_kills progressait. Le montage EXIGE un kill hors premiere
+    attaque : avec l'ancienne formule, ce test est rouge.
+    """
+    engine, tactical = _melee_kill_episode(monkeypatch)
+    kills = _model_kills_of(engine, "combat", player=1)
+
+    assert tactical["melee_kills"] == len(kills)
+    # Le compte de l'ancienne formule, recalcule ici : il DOIT etre plus bas, sinon le montage
+    # ne separe pas les deux implementations et le test ne verrouille rien.
+    old_formula = sum(1 for lg in _attack_logs(engine)
+                      if lg["type"] == "combat" and int(lg["player"]) == 1
+                      and lg["shootDetails"] and lg["shootDetails"][0].get("targetDied"))
+    assert old_formula < tactical["melee_kills"]
+
+
+def test_shoot_kills_count_every_model_not_just_the_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``shoot_kills`` compte des FIGURINES, pas des groupes (arme, cible).
+
+    L'entete du log porte ``target_died = kills > 0`` pour tout le groupe : un groupe qui tue
+    trois figurines n'en aurait compte qu'une. Les deux phases suivent desormais la meme
+    convention, seule facon de comparer k_ et l_ entre elles.
+    """
+    engine, tactical = _ranged_episode(monkeypatch)
+    kills = _model_kills_of(engine, "shoot", player=1)
+
+    assert tactical["shoot_kills"] == len(kills)
+    assert tactical["melee_kills"] == 0, "ce montage doit etre tir pur"
+
+
+@pytest.mark.parametrize("controlled_player", [1, 2])
+def test_melee_kills_match_the_models_actually_removed(
+    monkeypatch: pytest.MonkeyPatch, controlled_player: int
+) -> None:
+    """Coherence croisee : les kills comptes = les figurines reellement retirees du plateau.
+
+    Le montage est une melee PURE du cote controle : aucune autre source de perte adverse,
+    donc l'egalite journal/plateau doit tenir exactement, et sur les deux sieges.
+    """
+    engine, tactical = _melee_kill_episode(monkeypatch, controlled_player)
+
+    assert tactical["melee_kills"] == _enemy_models_destroyed(engine, controlled_player)
+
+
+def test_value_killed_sums_the_value_of_each_model_destroyed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``melee_value_killed`` somme la VALUE PAR FIGURINE des cibles detruites.
+
+    C'est ce qui separe 20 gretchins a 4 points d'un monstre a 120 : le compte de tetes seul
+    ne le dit pas. La VALUE lue doit etre celle de la figurine (100 ici), jamais celle de
+    l'escouade — l'erreur classique de ce depot.
+    """
+    engine, tactical = _melee_kill_episode(monkeypatch)
+    kills = _model_kills_of(engine, "combat", player=1)
+
+    assert tactical["melee_value_killed"] == pytest.approx(
+        sum(float(shot["targetValue"]) for shot in kills)
+    )
+    assert tactical["melee_value_killed"] == pytest.approx(100.0 * len(kills))
+    assert tactical["shoot_value_killed"] == 0.0
+
+
+def test_the_kill_and_value_curves_are_emitted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Les quatre courbes sortent avec les valeurs de l'episode (k_, l_, n_, o_)."""
+    from ai.metrics_tracker import W40KMetricsTracker
+
+    _engine, tactical = _melee_kill_episode(monkeypatch)
+
+    tracker = W40KMetricsTracker("ArmageddonAgent", log_dir=str(tmp_path), show_banner=False)
+    recording = _RecordingWriter()
+    tracker.writer = recording
+    tracker.episode_count = 1
+    tracker.log_tactical_metrics(tactical)
+
+    by_key = {key: value for key, value, _step in recording.scalars}
+    assert by_key["0_game/l_melee_kills"] == pytest.approx(tactical["melee_kills"])
+    assert by_key["0_game/k_shoot_kills"] == pytest.approx(tactical["shoot_kills"])
+    assert by_key["0_game/o_melee_value_killed"] == pytest.approx(tactical["melee_value_killed"])
+    assert by_key["0_game/n_shoot_value_killed"] == pytest.approx(tactical["shoot_value_killed"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────

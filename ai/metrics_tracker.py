@@ -101,8 +101,15 @@ class W40KMetricsTracker:
         _config_loader = get_config_loader()
         _rewards_cfg = _config_loader.load_agent_rewards_config(_base_key)
         _agent_rewards = require_key(_rewards_cfg, _base_key)
+        _objective_rewards = require_key(_agent_rewards, "objective_rewards")
         self.reward_per_objective: float = float(
-            require_key(require_key(_agent_rewards, "objective_rewards"), "reward_per_objective")
+            require_key(_objective_rewards, "reward_per_objective")
+        )
+        # Le terme d'AVANCE fait partie du versement (cf. _calculate_objective_reward_per_turn) :
+        # l'omettre sous-estimerait d_obj_rewards de la moitie du montant reel.
+        self.use_objective_lead: bool = bool(require_key(_objective_rewards, "use_objective_lead"))
+        self.reward_for_objective_lead: float = float(
+            require_key(_objective_rewards, "reward_for_objective_lead")
         )
         self.reward_kill_target: float = float(
             require_key(require_key(_agent_rewards, "result_bonuses"), "kill_target")
@@ -178,6 +185,8 @@ class W40KMetricsTracker:
         self.combat_history = {
             'shoot_kills': [],
             'melee_kills': [],
+            'shoot_value_killed': [],
+            'melee_value_killed': [],
             'charge_successes': [],
             'victory_points_cumulative': []
         }
@@ -230,12 +239,15 @@ class W40KMetricsTracker:
             'kill_rewards': [], 'obj_rewards': [],
         }
         
-        # NEW: Episode tactical data for invalid_action_rate tracking
-        self.episode_tactical_data = {
-            'total_actions': 0,
-            'invalid_actions': 0,
-            'valid_actions': 0
-        }
+        # `self.episode_tactical_data` (total_actions / invalid_actions / valid_actions a 0)
+        # occupait cette place. Aucun ecrivain : les compteurs d'actions vivent dans
+        # MetricsCollectionCallback, qui les passe a log_tactical_metrics par argument. Le seul
+        # lecteur etait le second ecrivain de game_critical/invalid_action_rate dans
+        # log_critical_dashboard : total_actions valant toujours 0, il ecrivait un 0.0 constant
+        # a CHAQUE episode sur le meme tag que le vrai calcul (log_tactical_metrics), soit
+        # 100 000 points pour 50 000 episodes et une courbe alternant valeur reelle / zero.
+        # Supprime avec son unique lecteur.
+
         # Seat-aware tracking (controlled player can be P1 or P2 per episode)
         self.seat_aware = {
             'episodes_agent_p1': 0,
@@ -448,6 +460,21 @@ class W40KMetricsTracker:
             kill_rewards_ep = (shoot_kills + melee_kills) * self.reward_kill_target
             self.writer.add_scalar('0_game/g_kill_rewards', self._game_smooth('kill_rewards', kill_rewards_ep), self.episode_count)
 
+            # VALUE des figurines tuees, ventilee par phase : k_/l_ comptent des tetes, n_/o_
+            # comptent ce qu'elles valaient. Les deux ensemble separent l'agent qui fauche des
+            # figurines a 4 points de celui qui abat le monstre a 120 — un seul des deux
+            # chiffres ne le dit pas.
+            shoot_value = float(require_key(tactical_data, 'shoot_value_killed'))
+            melee_value = float(require_key(tactical_data, 'melee_value_killed'))
+            self.combat_history['shoot_value_killed'].append(shoot_value)
+            if len(self.combat_history['shoot_value_killed']) > 500:
+                self.combat_history['shoot_value_killed'].pop(0)
+            self.combat_history['melee_value_killed'].append(melee_value)
+            if len(self.combat_history['melee_value_killed']) > 500:
+                self.combat_history['melee_value_killed'].pop(0)
+            self.writer.add_scalar('0_game/n_shoot_value_killed', self._calculate_smoothed_metric(self.combat_history['shoot_value_killed'], window_size=500), self.episode_count)
+            self.writer.add_scalar('0_game/o_melee_value_killed', self._calculate_smoothed_metric(self.combat_history['melee_value_killed'], window_size=500), self.episode_count)
+
         # COMBAT VALUE METRICS: Episode-level attrition in VALUE points.
         enemy_value_destroyed = float(require_key(tactical_data, 'enemy_value_destroyed'))
         ally_value_lost = float(require_key(tactical_data, 'ally_value_lost'))
@@ -497,18 +524,46 @@ class W40KMetricsTracker:
             vp_diff = float(require_key(tactical_data, 'victory_points_diff_controlled_minus_opponent'))
             self.writer.add_scalar('0_game/a_vp_diff', self._game_smooth('vp_diff', vp_diff), self.episode_count)
 
-        samples = tactical_data.get('controlled_objective_samples')
-        if isinstance(samples, list) and samples:
-            self.writer.add_scalar('0_game/e_objectives_held', self._game_smooth('objectives_held', float(np.mean(samples))), self.episode_count)
-            # d_obj_rewards: computed from reliable episode data (NOT episode_reward_components, broken with n_envs=48)
-            # sum(samples) × reward_per_objective = total objective reward for this episode
-            obj_rewards_ep = float(np.sum(samples)) * self.reward_per_objective
-            self.writer.add_scalar('0_game/d_obj_rewards', self._game_smooth('obj_rewards', obj_rewards_ep), self.episode_count)
-
-        opp_samples = tactical_data.get('opponent_objective_samples')
-        if isinstance(samples, list) and samples and isinstance(opp_samples, list) and opp_samples:
+        # Objectifs tenus : echantillonnes par tour marque cote moteur
+        # (GameStateManager._sample_objectives_held). Cles EXIGEES, jamais `.get()` : le garde
+        # `if isinstance(list) and samples` qui les protegeait a tenu ces deux courbes muettes
+        # pendant 50 000 episodes sans jamais le signaler.
+        # Une liste vide reste un cas de JEU legitime (episode termine avant le premier tour
+        # marquant, scenario sans objectif primaire) : rien a logguer, mais l'absence de cle
+        # est un etat corrompu et doit lever.
+        samples = require_key(tactical_data, 'controlled_objective_samples')
+        opp_samples = require_key(tactical_data, 'opponent_objective_samples')
+        if samples:
+            self.writer.add_scalar(
+                '0_game/e_objectives_held',
+                self._game_smooth('objectives_held', float(np.mean(samples))),
+                self.episode_count
+            )
+        if samples and opp_samples:
             diff = float(np.mean(samples)) - float(np.mean(opp_samples))
             self.writer.add_scalar('0_game/f_objectives_held_diff', self._game_smooth('objectives_held_diff', diff), self.episode_count)
+
+            # d_obj_rewards : le montant REELLEMENT verse par
+            # RewardCalculator._calculate_objective_reward_per_turn sur l'episode. La formule
+            # rejoue celle du versement (par objectif + par objectif d'avance) sur les
+            # echantillons pris au MEME instant que lui — identite verifiee au reward paye sur
+            # 8 episodes complets joues, 8/8 exacte.
+            # Ce n'est PAS une reconstitution optimiste : la courbe etait auparavant
+            # `somme(tenus) * reward_per_objective`, elle affichait un signal que l'agent ne
+            # recevait pas (versement mort) et oubliait le terme d'avance. Elle est restee
+            # supprimee tant que le versement l'etait.
+            obj_rewards_ep = float(np.sum(samples)) * self.reward_per_objective
+            if self.use_objective_lead:
+                # FORFAIT par tour ou je tiens PLUS d'objectifs que l'adversaire — la formule du
+                # versement (cf. _calculate_objective_reward_per_turn), pas la difference
+                # cumulee : celle-la surpayait les grosses avances et facturait les retards.
+                turns_ahead = sum(1 for mine, theirs in zip(samples, opp_samples) if mine > theirs)
+                obj_rewards_ep += turns_ahead * self.reward_for_objective_lead
+            self.writer.add_scalar(
+                '0_game/d_obj_rewards',
+                self._game_smooth('obj_rewards', obj_rewards_ep),
+                self.episode_count
+            )
 
         if 'victory_points_opponent_episode' in tactical_data:
             self.writer.add_scalar('0_game/c_vp_bot', self._game_smooth('vp_bot', float(tactical_data['victory_points_opponent_episode'])), self.episode_count)
@@ -649,8 +704,9 @@ class W40KMetricsTracker:
             if len(self.reward_components[key]) > 100:
                 self.reward_components[key].pop(0)
 
-        # NOTE: 0_game/d_obj_rewards is computed in log_tactical_metrics from controlled_objective_samples
-        # (reliable source, bypasses broken episode_reward_components chain with n_envs=48)
+        # NOTE : 0_game/d_obj_rewards est calcule dans log_tactical_metrics depuis les
+        # echantillons d'objectifs tenus, et non depuis episode_reward_components (cette chaine
+        # ne tient pas avec n_envs=48).
 
     def log_aiturn_compliance(self, compliance_data: Dict[str, Any]):
         """Log AI_TURN.md compliance validation metrics.
@@ -862,10 +918,13 @@ class W40KMetricsTracker:
             smoothed_value = self._calculate_smoothed_metric(self.combat_history['charge_successes'], window_size=200)
             self.writer.add_scalar('combat/c_charge_successes', smoothed_value, self.episode_count)
 
-        # d) Melee kills
-        if len(self.combat_history['melee_kills']) >= 1:
-            smoothed_value = self._calculate_smoothed_metric(self.combat_history['melee_kills'], window_size=500)
-            self.writer.add_scalar('0_game/l_melee_kills', smoothed_value, self.episode_count)
+        # d) Un SECOND add_scalar('0_game/l_melee_kills') occupait cette place, sur la meme
+        # combat_history['melee_kills'] que log_tactical_metrics — seul endroit qui l'alimente.
+        # compute_and_log_phase_metrics etant appele DEPUIS log_episode_end, donc AVANT
+        # log_tactical_metrics de l'episode courant, il ecrivait la moyenne de l'episode
+        # PRECEDENT : deux series entrelacees sur un meme tag (99 999 points pour 50 000
+        # episodes), d'ou une courbe en zigzag sans rapport avec les kills de melee. Le seul
+        # ecrivain restant est log_tactical_metrics, qui logge apres l'append.
 
         # e) Mean cumulative victory points per episode (smoothed over 500 episodes)
         if len(self.combat_history['victory_points_cumulative']) >= 1:
@@ -1102,16 +1161,10 @@ class W40KMetricsTracker:
         # NOTE: This metric is logged in log_bot_evaluations() to avoid duplicate/stale values
         # Do not log here - let log_bot_evaluations() handle it
         
-        # Invalid Action Rate - Moved to game_critical (game-specific, not training-critical)
-        if hasattr(self, 'episode_tactical_data') and self.episode_tactical_data:
-            total_actions = require_key(self.episode_tactical_data, 'total_actions')
-            invalid_actions = require_key(self.episode_tactical_data, 'invalid_actions')
-            if total_actions > 0:
-                invalid_rate = invalid_actions / total_actions
-                self.writer.add_scalar('game_critical/invalid_action_rate', invalid_rate, self.episode_count)
-            else:
-                # Log zero if no actions yet
-                self.writer.add_scalar('game_critical/invalid_action_rate', 0.0, self.episode_count)
+        # game_critical/invalid_action_rate a UN SEUL ecrivain : log_tactical_metrics, qui lit
+        # les compteurs d'actions de l'episode passes par le callback. Le doublon qui occupait
+        # cette place lisait un self.episode_tactical_data jamais alimente (voir la trace dans
+        # __init__) et ecrasait la vraie courbe avec des zeros.
 
         self._log_thresholds(self.episode_count)
 

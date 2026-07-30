@@ -2938,6 +2938,38 @@ class GameStateManager:
             raise KeyError(f"victory_points missing player {current_player_int}")
         victory_points[current_player_int] += total_points
         scored_turns.add(score_key)
+        self._sample_objectives_held(game_state, counts, current_player_int, opponent_player)
+
+    def _sample_objectives_held(
+        self,
+        game_state: Dict[str, Any],
+        counts: Dict[int, int],
+        current_player_int: int,
+        opponent_player: int,
+    ) -> None:
+        """Echantillonne, UNE fois par tour marque, les objectifs tenus de part et d'autre.
+
+        Alimente 0_game/e_objectives_held et f_objectives_held_diff. Site choisi : l'instant
+        exact ou les VP sont attribues au joueur controle. `counts` est celui qui vient de
+        decider les points (regles de controle 14.02 du primaire, tie_behavior inclus) — la
+        mesure et le score partent donc de la MEME source, sans second comptage.
+
+        L'echantillonnage vivait auparavant dans RewardCalculator._calculate_objective_reward_per_turn
+        (voir la trace laissee la-bas) : branche sur un calcul de recompense, il heritait de ses
+        gardes de sortie et n'a jamais produit un seul point en 50 000 episodes.
+
+        Un seul echantillon par tour : celui du joueur controle. La fonction est appelee pour
+        les deux joueurs a chaque tour, mais `f_objectives_held_diff` compare mon controle a
+        celui de l'adversaire AU MEME INSTANT — prendre aussi le passage adverse melangerait
+        deux instants dans une meme moyenne.
+        """
+        controlled_player = int(require_key(self.config, "controlled_player"))
+        if current_player_int != controlled_player:
+            return
+        controlled_samples = require_key(game_state, "controlled_objective_samples_scoring_turns")
+        opponent_samples = require_key(game_state, "opponent_objective_samples_scoring_turns")
+        controlled_samples.append(float(require_key(counts, current_player_int)))
+        opponent_samples.append(float(require_key(counts, opponent_player)))
 
     def check_game_over(self, game_state: Dict[str, Any]) -> bool:
         """

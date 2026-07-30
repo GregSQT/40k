@@ -101,6 +101,8 @@ def _tracker_stub() -> W40KMetricsTracker:
     t.combat_history = {
         "shoot_kills": [],
         "melee_kills": [],
+        "shoot_value_killed": [],
+        "melee_value_killed": [],
         "charge_successes": [],
         "victory_points_cumulative": [],
     }
@@ -117,7 +119,14 @@ def _tracker_stub() -> W40KMetricsTracker:
     t.bot_eval_combined = None
     t.latest_value_trade_ratio = None
     t.value_trade_ratio_history = []
-    t.episode_tactical_data = {"total_actions": 0, "invalid_actions": 0, "valid_actions": 0}
+    # t.episode_tactical_data occupait cette place : supprime du tracker avec son unique
+    # lecteur (le 2e ecrivain de invalid_action_rate). Le reposer ici ferait passer un stub
+    # pour un etat valide qui ne l'est plus.
+    # Montants lus de la config d'agent par __init__ : d_obj_rewards rejoue le versement du
+    # reward d'objectif par tour, terme d'avance inclus.
+    t.reward_per_objective = 10.0
+    t.use_objective_lead = True
+    t.reward_for_objective_lead = 10.0
     t._episodes_in_window = 0
     t._game_history = {
         'vp_diff': [], 'vp_bot': [], 'objectives_held': [],
@@ -272,10 +281,16 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
             "forced_unit_instances_controlled": 2,
             "forced_unit_counts_controlled": {"My Unit": 2},
             "victory_points_diff_controlled_minus_opponent": 1.0,
+            # Cles EXIGEES depuis que les objectifs tenus sont echantillonnes cote moteur
+            # (voir tests/unit/engine/test_objective_held_samples.py) : leur absence est un
+            # etat corrompu, plus une courbe silencieusement muette.
+            "controlled_objective_samples": [2.0, 1.0],
+            "opponent_objective_samples": [1.0, 1.0],
         }
     )
     keys = [k for k, _, _ in _dw(t).scalars]
     assert "game_tactical/shooting_accuracy" in keys
+    assert "0_game/e_objectives_held" in keys
     assert "combat/h_value_trade_ratio" in keys
     assert "forcing/episodes_with_forced_unit_ratio" in keys
 
@@ -363,6 +378,8 @@ def test_log_tactical_metrics_forcing_validation_errors() -> None:
         "invalid_actions": 0,
         "wait_actions": 0,
         "victory_points_diff_controlled_minus_opponent": 0.0,
+        "controlled_objective_samples": [1.0],
+        "opponent_objective_samples": [1.0],
     }
 
     with pytest.raises(TypeError, match=r"forced_unit_counts_controlled.*dict"):

@@ -116,10 +116,36 @@ class RewardCalculator:
             matching_indicators and not (is_action_result or has_position_data)
         ) or result.get("reason") == "pool_empty"
         
+        # RECOMPENSES DE FRONTIERE DE TOUR — calculees AVANT le tri action / reponse systeme.
+        #
+        # Elles se declenchent sur `phase_transition` + `next_phase == "move"`, c'est-a-dire sur
+        # la fin de la phase command (command_handlers.command_phase_end). Or ce payload ne porte
+        # ni `unitId` ni `action` : c'est une REPONSE SYSTEME, et le retour anticipe ci-dessous
+        # l'interceptait. Les deux calculs vivaient apres lui : ils n'ont donc jamais rien verse
+        # (mesure : 73 appels par episode, 0,00 de reward, sur 8 episodes complets), alors que
+        # reward_per_objective valait 10.0 et reward_for_objective_lead 10.0 dans la config.
+        # C'est le seul signal intermediaire entre le dense (frapper, a chaque phase) et le
+        # terminal (+-50 a la fin) : sans lui, rien n'apprend a TENIR un objectif, ce que le jeu
+        # paie 15 VP par tour.
+        #
+        # Le calcul reste ici, et non a la frontiere moteur : c'est le RewardCalculator qui doit
+        # decider d'un reward, et il n'y a pas besoin d'un report (`_pending_zone_shaping`) —
+        # le step qui porte la transition est deja un step credite a l'agent.
+        objective_turn_reward = self._calculate_objective_reward_per_turn(game_state, result)
+        if objective_turn_reward:
+            reward_breakdown['tactical_bonuses'] += objective_turn_reward
+        # Penalite coherency fin de tour (squad_shaping) : MEME garde, meme site, donc morte
+        # pour la meme raison. La reparer avec sa jumelle est deliberé — laisser une penalite
+        # inerte a cote d'un bonus repare fausserait l'arbitrage entre les deux.
+        coherency_penalty = self._calculate_coherency_penalty_per_turn(game_state, result)
+        if coherency_penalty:
+            reward_breakdown['penalties'] += coherency_penalty
+            objective_turn_reward += coherency_penalty
+
         if is_system_response:
             # Pure system response - no action attached
             system_response_reward = system_penalties['system_response']
-            reward_breakdown['total'] = system_response_reward
+            reward_breakdown['total'] = system_response_reward + objective_turn_reward
 
             # CRITICAL FIX: Check if game ended and add situational reward
             if game_state.get("game_over", False):
@@ -129,7 +155,7 @@ class RewardCalculator:
 
             game_state['last_reward_breakdown'] = reward_breakdown
             return reward_breakdown['total']
-        
+
         # CRITICAL: No fallbacks - require explicit unitId in result
         acting_unit_id = result.get("unitId")
         if acting_unit_id is None:
@@ -144,15 +170,9 @@ class RewardCalculator:
         if not acting_unit:
             raise ValueError(f"Acting unit not found: {acting_unit_id}")
 
-        objective_turn_reward = self._calculate_objective_reward_per_turn(game_state, result)
-        if objective_turn_reward:
-            reward_breakdown['tactical_bonuses'] += objective_turn_reward
-        # Penalite coherency fin de tour (squad_shaping). Fusionnee dans
-        # objective_turn_reward pour etre propagee par tous les chemins de retour.
-        coherency_penalty = self._calculate_coherency_penalty_per_turn(game_state, result)
-        if coherency_penalty:
-            reward_breakdown['penalties'] += coherency_penalty
-            objective_turn_reward += coherency_penalty
+        # objective_turn_reward et coherency_penalty sont calcules plus haut (avant le tri
+        # action / reponse systeme, voir la trace la-bas) et restent propages par tous les
+        # chemins de retour ci-dessous.
 
         # CRITICAL: Only give rewards to the controlled player.
         # The opponent's actions are part of the environment, not the learning agent.
@@ -853,6 +873,10 @@ class RewardCalculator:
         if not result.get("phase_transition") or result.get("next_phase") != "move":
             return 0.0
         controlled_player = int(require_key(self.config, "controlled_player"))
+        # MA phase command : meme raison que dans _calculate_objective_reward_per_turn (la
+        # transition command -> move existe pour les deux joueurs a chaque round).
+        if int(require_key(game_state, "current_player")) != controlled_player:
+            return 0.0
         current_turn = require_key(game_state, "turn")
         penalized = require_key(game_state, "coherency_penalized_turns")
         key = (current_turn, controlled_player)
@@ -887,6 +911,35 @@ class RewardCalculator:
         if primary_objective is None:
             return 0.0
 
+        # MA phase command, pas celle de l'adversaire.
+        #
+        # 07.02 : un battle round comprend UN tour par joueur, chacun avec sa propre phase
+        # command — la transition command -> move survient donc DEUX fois par round. Sans ce
+        # filtre, le premier des deux passages arme `objective_rewarded_turns` et l'agent est
+        # paye pour les objectifs qu'il tient au debut du tour ADVERSE.
+        #
+        # Le critere est l'alignement avec le SCORING DU MOTEUR, et rien d'autre :
+        # GameStateManager._apply_primary_objective_scoring_single attribue les VP au joueur
+        # ACTIF, une fois par tour, a partir de start_turn. Ce sont ces VP qui decident du
+        # vainqueur (determine_winner_with_method) ; payer a la frontiere adverse recompenserait
+        # un etat de controle qui ne se convertit en rien.
+        #
+        # ⚠️ Aucun PDF de Documentation/40k_rules ne fonde ce decoupage — le corpus est celui des
+        # regles de BASE, sans mission pack : les termes « victory point » et « primary » n'y
+        # apparaissent nulle part. 14.02 traite du CONTROLE (determine a la fin de chaque phase
+        # et de chaque tour, symetriquement pour les deux joueurs), pas du marquage ; 08.05 dit
+        # seulement qu'une mission PEUT se resoudre a la fin de la phase command. L'instant de
+        # marquage vient de config/primary_objective/*/Objectives_Control.json, propre au projet.
+        # Donc : si ce fichier change de timing, ce filtre doit le suivre — il n'a pas d'autre
+        # source de verite que lui.
+        # ⚠️ Limite connue : cette mission fait marquer le SECOND joueur a la fin de la phase
+        # fight au round 5 (`round5_second_player_phase`). Ce versement-la reste calcule a la
+        # frontiere command -> move, donc a un instant different de l'attribution des VP dans ce
+        # seul cas (1 marquage sur 4, et seulement quand l'agent joue en second).
+        controlled_player = int(require_key(self.config, "controlled_player"))
+        if int(require_key(game_state, "current_player")) != controlled_player:
+            return 0.0
+
         scoring_cfg = require_key(primary_objective, "scoring")
         start_turn = require_key(scoring_cfg, "start_turn")
         current_turn = require_key(game_state, "turn")
@@ -894,12 +947,8 @@ class RewardCalculator:
             return 0.0
 
         objective_rewarded_turns = require_key(game_state, "objective_rewarded_turns")
-        controlled_player = int(require_key(self.config, "controlled_player"))
         reward_key = (current_turn, controlled_player)
         if reward_key in objective_rewarded_turns:
-            return 0.0
-
-        if not self.state_manager:
             return 0.0
 
         acting_unit = self._get_controlled_player_unit(game_state)
@@ -913,22 +962,24 @@ class RewardCalculator:
         if "reward_per_objective" not in objective_rewards:
             raise KeyError("Objective rewards missing required 'reward_per_objective' value")
 
-        obj_counts = self.state_manager.count_controlled_objectives(game_state)
-        controlled_objectives = require_key(obj_counts, controlled_player)
-        controlled_objective_samples_turn2_to_5 = require_key(
-            game_state,
-            "controlled_objective_samples_turn2_to_5"
+        # LECTURE PURE de l'etat 14.02, et non `state_manager.count_controlled_objectives` :
+        # celui-la RECALCULE le controle et REECRIT `objective_controllers`. Tant que cette
+        # fonction ne versait rien, la mutation n'arrivait jamais ; la rendre effective aurait
+        # fait recalculer le controle depuis un chemin de RECOMPENSE, hors des frontieres ou la
+        # regle 14.02 l'autorise (run_objective_control_checkpoint) — donc un reward capable de
+        # deplacer les VP et l'observation.
+        # Ici on compte les controleurs deja figes, ceux-la memes que le scoring vient d'ecrire a
+        # la phase command : le reward et les VP partent du MEME comptage, par construction,
+        # sans second calcul qui pourrait diverger (methode de controle, egalites).
+        objective_controllers = require_key(game_state, "objective_controllers")
+        controlled_objectives = sum(
+            1 for controller in objective_controllers.values() if controller == controlled_player
         )
-        if not isinstance(controlled_objective_samples_turn2_to_5, list):
-            raise TypeError(
-                "game_state['controlled_objective_samples_turn2_to_5'] must be a list"
-            )
-        opponent_player = 2 if int(controlled_player) == 1 else 1
-        opponent_objectives = require_key(obj_counts, opponent_player)
-        opponent_objective_samples_turn2_to_5 = game_state.setdefault("opponent_objective_samples_turn2_to_5", [])
-        if 2 <= current_turn <= 5:
-            controlled_objective_samples_turn2_to_5.append(float(controlled_objectives))
-            opponent_objective_samples_turn2_to_5.append(float(opponent_objectives))
+        # L'echantillonnage des objectifs tenus (controlled/opponent_objective_samples_*)
+        # occupait cette place : une MESURE branchee sur ce calcul de RECOMPENSE, donc soumise a
+        # ses gardes de sortie. Il vit desormais dans
+        # GameStateManager._apply_primary_objective_scoring_single, au moment exact ou les VP
+        # sont attribues (meme instant que la lecture ci-dessus).
         reward_per_objective = objective_rewards["reward_per_objective"]
         total_reward = reward_per_objective * controlled_objectives
 
@@ -936,9 +987,17 @@ class RewardCalculator:
             if "reward_for_objective_lead" not in objective_rewards:
                 raise KeyError("Objective rewards missing required 'reward_for_objective_lead' value")
             opponent_player = 2 if int(controlled_player) == 1 else 1
-            opponent_objectives = require_key(obj_counts, opponent_player)
-            lead = controlled_objectives - opponent_objectives
-            total_reward += float(objective_rewards["reward_for_objective_lead"]) * lead
+            opponent_objectives = sum(
+                1 for controller in objective_controllers.values() if controller == opponent_player
+            )
+            # FORFAIT « j'en tiens PLUS que lui », et non `lead * (mes objectifs - les siens)`.
+            # La regle de score du primaire qui correspond (`control_more_than_opponent`) est un
+            # forfait : 5 VP, que l'avance soit de 1 ou de 4. La version proportionnelle payait
+            # +2x le montant pour une avance de 2 — donc un signal que le jeu ne rend pas — et
+            # surtout elle facturait -1x le montant en cas de retard, ajoutant une PENALITE que
+            # ni la config ni la regle ne prevoient (le retard coute deja les VP non marques).
+            if controlled_objectives > opponent_objectives:
+                total_reward += float(objective_rewards["reward_for_objective_lead"])
 
         objective_rewarded_turns.add(reward_key)
 

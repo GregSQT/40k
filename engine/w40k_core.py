@@ -455,8 +455,8 @@ class W40KEngine(gym.Env):
             "primary_objective_scored_turns": set(),
             "objective_rewarded_turns": set(),
             "coherency_penalized_turns": set(),
-            "controlled_objective_samples_turn2_to_5": [],
-            "opponent_objective_samples_turn2_to_5": [],
+            "controlled_objective_samples_scoring_turns": [],
+            "opponent_objective_samples_scoring_turns": [],
             "zone_intents": [INTENT_INVADE] * MAX_OBJECTIVES,
             "zone_intent_free_steps_remaining": 0,
             "unit_zone_assignments": {},
@@ -1158,8 +1158,8 @@ class W40KEngine(gym.Env):
             "primary_objective_scored_turns": set(),
             "objective_rewarded_turns": set(),
             "coherency_penalized_turns": set(),
-            "controlled_objective_samples_turn2_to_5": [],
-            "opponent_objective_samples_turn2_to_5": [],
+            "controlled_objective_samples_scoring_turns": [],
+            "opponent_objective_samples_scoring_turns": [],
             "zone_intents": [INTENT_INVADE] * MAX_OBJECTIVES,
             "zone_intent_free_steps_remaining": 0,
             "unit_zone_assignments": {},
@@ -1991,27 +1991,9 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['units_killed'] = total_enemy_units - surviving_enemy_units
             self.episode_tactical_data['total_enemies'] = total_enemy_units
 
-            # Count kills by phase from action_logs (reliable source: same as reward_calculator)
             action_logs = self.game_state["action_logs"]
-            shoot_kills = sum(
-                1 for log in action_logs
-                if log.get("type") == "shoot"
-                and log.get("target_died", False)
-                and int(log["player"]) == controlled_player
-            )
-            melee_kills = sum(
-                1 for log in action_logs
-                if log.get("type") == "combat"
-                and log.get("phase") == "fight"
-                and int(log["player"]) == controlled_player
-                and isinstance(log.get("shootDetails"), list)
-                and log["shootDetails"]
-                and log["shootDetails"][0].get("targetDied", False)
-            )
-            self.episode_tactical_data['shoot_kills'] = shoot_kills
-            self.episode_tactical_data['melee_kills'] = melee_kills
 
-            # Volume de combat et attrition, meme source action_logs (seat-aware).
+            # Volume de combat, kills et attrition, meme source action_logs (seat-aware).
             #
             # Ces quatre compteurs etaient DECLARES et jamais incrementes depuis le commit
             # fe1df7d8 « metrics OK » (2025-10-25), qui a deplace episode_tactical_data du
@@ -2038,10 +2020,29 @@ class W40KEngine(gym.Env):
             # (BS), que melanger avec la melee (WS) rendrait ininterpretable. Les deux viennent
             # du meme filtre, donc hits <= shots_fired par construction. damage_dealt et
             # damage_received, eux, couvrent tir ET melee : c'est l'attrition totale.
+            #
+            # KILLS — DEFINITION : une FIGURINE detruite = 1, dans les deux phases. Le compte se
+            # fait donc sur `shootDetails[i]["targetDied"]` (pose par attaque, sur celle qui
+            # acheve la figurine), et JAMAIS sur le `target_died` de l'entete, qui vaut
+            # `kills > 0` pour tout le groupe (arme, cible) : un groupe qui tue trois figurines
+            # ne compterait que pour un. Jusqu'au 2026-07-30 la melee lisait le seul
+            # `shootDetails[0]`, ce qui ne mesurait que « la premiere attaque du groupe a-t-elle
+            # tue ? » — une probabilite quasi constante (~0,15 mesure) independante de la
+            # competence de l'agent, d'ou une courbe l_melee_kills plate et bruitee pendant que
+            # k_shoot_kills, elle, progressait.
+            # `*_value_killed` somme la VALUE des figurines ainsi detruites : distinguer 20
+            # gretchins a 4 points d'un monstre a 120 est ce qui separe un agent qui grignote
+            # d'un agent qui frappe ce qui compte. Distinct de `enemy_value_destroyed`, calcule
+            # plus bas, qui est a granularite ESCOUADE (une escouade entamee y compte pour 0)
+            # et sans ventilation par phase.
             shots_fired = 0
             hits = 0
             damage_dealt = 0
             damage_received = 0
+            shoot_kills = 0
+            melee_kills = 0
+            shoot_value_killed = 0.0
+            melee_value_killed = 0.0
             for log in action_logs:
                 log_type = log.get("type")
                 if log_type not in ("shoot", "combat"):
@@ -2055,16 +2056,41 @@ class W40KEngine(gym.Env):
                     damage_dealt += log_damage
                 else:
                     damage_received += log_damage
-                if log_type != "shoot" or not by_controlled:
+                if not by_controlled:
                     continue
+                # `type == "combat"` n'a qu'un seul emetteur (FIGHT_CTX, `phase_label="fight"`) :
+                # une autre phase serait un log de melee produit par un chemin inconnu, pas une
+                # ligne a ranger au tir en silence.
+                is_melee = log_type == "combat"
+                if is_melee and log.get("phase") != "fight":
+                    raise ValueError(
+                        f"action_log de type 'combat' hors phase fight (phase="
+                        f"{log.get('phase')!r}) — emetteur inattendu, kills non ventilables"
+                    )
                 for shot in require_key(log, "shootDetails"):
-                    shots_fired += 1
-                    if require_key(shot, "hitResult") == "HIT":
-                        hits += 1
+                    if not is_melee:
+                        shots_fired += 1
+                        if require_key(shot, "hitResult") == "HIT":
+                            hits += 1
+                    # `targetDied` n'est pose que sur les attaques qui ont applique des degats
+                    # (une attaque ratee ou sauvegardee n'a pas de cible morte) : absence = False.
+                    if not shot.get("targetDied", False):  # get allowed
+                        continue
+                    model_value = float(require_key(shot, "targetValue"))
+                    if is_melee:
+                        melee_kills += 1
+                        melee_value_killed += model_value
+                    else:
+                        shoot_kills += 1
+                        shoot_value_killed += model_value
             self.episode_tactical_data['shots_fired'] = shots_fired
             self.episode_tactical_data['hits'] = hits
             self.episode_tactical_data['damage_dealt'] = damage_dealt
             self.episode_tactical_data['damage_received'] = damage_received
+            self.episode_tactical_data['shoot_kills'] = shoot_kills
+            self.episode_tactical_data['melee_kills'] = melee_kills
+            self.episode_tactical_data['shoot_value_killed'] = shoot_value_killed
+            self.episode_tactical_data['melee_value_killed'] = melee_value_killed
 
             # VALUE attrition metrics (episode-level): destroyed enemy value and lost ally value.
             units = require_key(self.game_state, "units")
@@ -2148,10 +2174,17 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['victory_points_diff_controlled_minus_opponent'] = (
                 controlled_vp - opponent_vp
             )
-            samples = self.game_state.get("controlled_objective_samples_turn2_to_5")
-            self.episode_tactical_data['controlled_objective_samples'] = list(samples) if isinstance(samples, list) else []
-            opp_samples = self.game_state.get("opponent_objective_samples_turn2_to_5")
-            self.episode_tactical_data['opponent_objective_samples'] = list(opp_samples) if isinstance(opp_samples, list) else []
+            # Cles exigees : posees a l'init du game_state et au reset. Le `.get(...) if
+            # isinstance(...) else []` qui occupait cette place transformait leur absence en
+            # liste vide, et une liste vide desarme silencieusement les courbes qui la lisent
+            # (0_game/e_objectives_held, f_objectives_held_diff) — exactement ce qui a masque
+            # pendant 50 000 episodes que personne ne remplissait ces listes.
+            self.episode_tactical_data['controlled_objective_samples'] = list(
+                require_key(self.game_state, "controlled_objective_samples_scoring_turns")
+            )
+            self.episode_tactical_data['opponent_objective_samples'] = list(
+                require_key(self.game_state, "opponent_objective_samples_scoring_turns")
+            )
 
             # Add tactical data to info
             info["tactical_data"] = self.episode_tactical_data.copy()

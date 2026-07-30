@@ -589,7 +589,7 @@
       "bot_eval_intermediate": 1,
       "bot_eval_final": 0,
       "bot_eval_worker_device": "cpu",
-      "bot_eval_task_timeout_seconds": 600,
+      "bot_eval_task_timeout_seconds": 3600,
       "save_best_robust": false,
       "save_best_robust_seed": false,
       "robust_window": 5,
@@ -658,8 +658,8 @@
     "model_params": {
       "policy": "MultiInputPolicy",
       "learning_rate": {
-        "initial": 0.0005,
-        "final": 0.0003
+        "initial": 0.002,
+        "final": 0.002
       },
       "n_steps": 8192,
       "batch_size": 1024,

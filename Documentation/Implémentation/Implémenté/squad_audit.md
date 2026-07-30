@@ -488,7 +488,7 @@ Gate : 5 escouades ennemies avec menaces variées → ordre HP*OC respecté, kil
 6. **Brancher `squad_shooting_*` / `squad_fight_*` / `execute_squad_move` / `charge_build_valid_plan`** dans le pipeline gameplay (w40k_core.step + phase handlers).
 7. **Adapter training script** (ai/train.py) pour ré-initialiser le modèle PPO avec nouvel obs_space.
 8. **Retrain from scratch obligatoire** sur scenario_pvp_squad5.json + scénarios multi-fig variés.
-9. **Calibrer reward shaping** (hp_damage_weight, model_kill_bonus_factor, squad_kill_bonus_factor, oc_weight, incoherent_weight).
+9. **Calibrer reward shaping** (hp_damage_weight, model_kill_bonus_factor, squad_kill_bonus_factor, incoherent_weight). `oc_weight` a ete abandonne, cf. squad.md §Controle d objectif.
 
 Décisions à prendre avant 4e :
 - Approche A : remplacer complètement le pipeline mono-fig (clean, mais le modèle PPO existant est perdu).
@@ -536,7 +536,7 @@ Gate : ObservationBuilder(obs_size=357).build_observation → OK (shape 357). Ob
    - `config/agents/CoreAgent/CoreAgent_training_config_BEST_X1.json` (12 occurrences)
    - `tests/unit/engine/test_observation_builder.py` (2 occurrences)
    - Décision : nouveau phase de training `squad_new` avec `obs_size: 108` vs remplacer une phase existante ?
-   - Ajouter reward shaping params (hp_damage_weight, model_kill_bonus_factor, squad_kill_bonus_factor, oc_weight, incoherent_weight).
+   - Ajouter reward shaping params (hp_damage_weight, model_kill_bonus_factor, squad_kill_bonus_factor, incoherent_weight).
 
 2. **4e-iv : Wire `build_squad_observation` dans le pipeline RL** :
    - Soit dispatch via `obs_size` config (108 → squad, 357 → legacy).
@@ -560,7 +560,7 @@ Gate : ObservationBuilder(obs_size=357).build_observation → OK (shape 357). Ob
 6. **4e-viii : Smoke training + analyzer + validation** :
    - Run training court sur scenario_pvp_squad5.json.
    - Vérifier convergence sur 50-100 épisodes.
-   - Calibrer hp_damage_weight si overkill, oc_weight si ignore objectifs, etc.
+   - Calibrer hp_damage_weight si overkill, objective_rewards.reward_per_objective si ignore objectifs, etc.
 
 **Pourquoi STOP ici :**
 - Chaque sub-tranche restante engage des heures de travail + GPU.

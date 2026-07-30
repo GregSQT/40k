@@ -459,7 +459,7 @@ These are the most important gameplay metrics to watch in the `game_critical/` a
 | **game_critical/episode_length** | Steps per episode | 50-150 steps<br>(stable) | • Agent dying too fast<br>• Increase defensive rewards<br>• Reduce aggression penalties | • Agent too passive<br>• Reduce wait penalty<br>• Increase action rewards | Increasing trend = agent stalling. Stable = good |
 | **game_critical/win_rate_100ep** | Rolling 100-episode win rate | Phase 1: 60%+<br>Phase 2: 70%+<br>Phase 3: 75%+ | • Increase training episodes<br>• Adjust reward balance<br>• Check observation quality | • Good! Advance to next phase<br>• Consider harder opponents | Primary success metric. Must be stable, not just lucky streak |
 | **game_critical/units_killed_vs_lost_ratio** | Kill/death ratio | 1.5+ (killing more than losing) | • Improve combat rewards<br>• Reduce defensive penalties<br>• Check target selection | • Excellent performance<br>• Consider phase advancement | <1.0 = losing units. >2.0 = dominating |
-| **game_critical/invalid_action_rate** | % of invalid actions | <5% (ideally <2%) | N/A - this is good! | • Action masking broken<br>• Observation quality issue<br>• Network capacity problem | >10% persistently = serious problem requiring restart |
+| **game_critical/invalid_action_rate** | % of invalid actions | <5% (ideally <2%) | N/A - this is good! | • Action masking broken<br>• Observation quality issue<br>• Network capacity problem | >10% persistently = serious problem requiring restart. ⚠️ Avant le 2026-07-30, un second écrivain écrivait un 0.0 constant sur ce tag à chaque épisode : tout historique antérieur alterne vraie valeur et zéro, et sa moyenne est divisée par deux |
 | **bot_eval/vs_random** | Reward vs RandomBot | 0.0+ (positive) | • Agent worse than random<br>• Major training problem<br>• Check overfitting | • Good! Should beat random<br>• Target: -0.3 to +0.1 range | Baseline competence. Failure here = critical issue |
 | **bot_eval/vs_greedy** | Reward vs GreedyBot | 0.05 to 0.15 | • Target selection poor<br>• Increase priority rewards<br>• Check tactical bonuses | • Agent exploiting patterns<br>• Increase bot randomness<br>• Balance rewards | Tests target prioritization. Should be moderate |
 | **bot_eval/vs_defensive** | Reward vs DefensiveBot | 0.10 to 0.20 | • Tactical positioning weak<br>• Increase positioning rewards<br>• Check movement bonuses | • Agent exploiting patterns<br>• Increase bot randomness<br>• More diverse scenarios | Tests tactical mastery. Hardest opponent |
@@ -603,42 +603,80 @@ These metrics compare agent performance against scripted opponents.
 
 ### `0_game/` Dashboard — Métriques de jeu
 
-Le namespace **`0_game/`** est le second dashboard à consulter après `0_critical/`. Il regroupe les 11 métriques décrivant le comportement tactique de l'agent dans la partie. Tous les metrics sont lissés sur **200 épisodes** (rolling window).
+Le namespace **`0_game/`** est le second dashboard à consulter après `0_critical/`. Il regroupe les 13 métriques décrivant le comportement tactique de l'agent dans la partie. Elles sont lissées sur **200 épisodes** (rolling window), sauf les quatre métriques de kills (`k_`, `l_`, `n_`, `o_`), lissées sur **500**.
 
 | Métrique | Ce qu'elle mesure | Signal attendu |
 |----------|-------------------|----------------|
 | **0_game/a_vp_diff** | VP agent − VP bot (différentiel) | Croissant → agent gagne le jeu de points |
 | **0_game/b_vp_agent** | VP cumulés de l'agent sur l'épisode | Croissant |
 | **0_game/c_vp_bot** | VP cumulés du bot sur l'épisode | Décroissant (ou agent > bot) |
-| **0_game/d_obj_rewards** | Récompense objectifs per-turn cumulée par épisode (tactical_bonuses) | Croissant — agent tient des objectifs actifs |
-| **0_game/e_objectives_held** | Moyenne d'objectifs contrôlés par l'agent (turns 2–5) | Croissant — agent se positionne stratégiquement |
-| **0_game/f_objectives_held_diff** | Objectifs agent − objectifs bot (turns 2–5) | Positif et croissant — agent domine le contrôle |
+| **0_game/e_objectives_held** | Moyenne d'objectifs contrôlés par l'agent, échantillonnée à chaque tour marquant | Croissant — agent se positionne stratégiquement |
+| **0_game/f_objectives_held_diff** | Objectifs agent − objectifs bot, au même instant | Positif et croissant — agent domine le contrôle |
 | **0_game/g_kill_rewards** | Récompense kill_target cumulée par épisode (ranged + mêlée) | Croissant — reflète l'activité de kill réelle |
 | **0_game/h_kill_efficiency** | kills / total_enemies | Croissant |
 | **0_game/i_units_killed** | Unités ennemies éliminées par épisode | Croissant |
 | **0_game/j_units_lost** | Unités alliées perdues par épisode | Décroissant ou stable |
-| **0_game/k_shoot_kills** | Kills en phase de tir | Croissant — ranged = source principale de dégâts |
-| **0_game/l_melee_kills** | Kills en phase de combat (fight) | Croissant |
+| **0_game/k_shoot_kills** | Figurines ennemies détruites en phase de tir | Croissant — ranged = source principale de dégâts |
+| **0_game/l_melee_kills** | Figurines ennemies détruites en phase de combat (fight) | Croissant |
+| **0_game/n_shoot_value_killed** | VALUE (points) des figurines détruites au tir | Croissant — et plus vite que k_ si l'agent cible ce qui coûte cher |
+| **0_game/o_melee_value_killed** | VALUE (points) des figurines détruites en mêlée | Idem, côté mêlée |
 
 #### Lecture combinée
 
 **Problème : agent focus kills mais perd les objectifs**
 - `i_units_killed` élevé, `a_vp_diff` négatif, `e_objectives_held` faible
-- → Augmenter `reward_per_objective` et `reward_for_objective_lead` dans rewards_config.json
+- → Augmenter `reward_per_objective` et `reward_for_objective_lead` dans rewards_config.json.
+  ⚠️ Ces deux montants n'étaient **pas versés** avant le 2026-07-30 (mesuré : 73 appels par
+  épisode, 0,00 de reward) : `_calculate_objective_reward_per_turn` était appelé *après* le
+  retour anticipé « réponse système » de `calculate_reward`, alors que son déclencheur — la fin
+  de la phase command — EST une réponse système. Tout run antérieur a donc appris sans aucun
+  signal intermédiaire sur les objectifs ; ses courbes ne se comparent pas aux suivantes.
 
 **Problème : agent passif**
 - `k_shoot_kills` + `l_melee_kills` faibles, `g_kill_rewards` ≈ 0
+  (⚠️ avant le 2026-07-30, `l_melee_kills` avait deux écrivains et sa courbe entrelaçait
+  l'épisode courant et le précédent ; et jusqu'au 2026-07-30 elle ne comptait que les kills
+  portés par la PREMIÈRE attaque de chaque groupe — soit une valeur quasi constante ~0,15
+  sans rapport avec la compétence de l'agent : ne pas interpréter un historique antérieur)
 - → Vérifier `ent_coef` (trop bas = politique déterministe passive)
 
 **Problème : agent tire mais ne tue pas**
 - `k_shoot_kills` ≈ 0 mais `i_units_killed` > 0 (kills en mêlée seulement)
-- Vérifier la structure `all_attack_results` — cf. `_handle_shooting_end_activation`
+- Vérifier les `action_logs` de type `shoot` — c'est leur seule source (cf. notes techniques)
+
+**Problème : agent qui grignote au lieu de frapper ce qui compte**
+- `k_`/`l_` (nombre de figurines) élevés mais `n_`/`o_` (VALUE) plats : l'agent fauche des
+  figurines bon marché et laisse vivre les cibles chères. Le rapport `n_/k_` est la VALUE
+  moyenne par figurine tuée — c'est lui qui bouge quand le ciblage s'améliore.
 
 #### Notes techniques
 
-- `e_objectives_held` / `f_objectives_held_diff` : calculés à partir des échantillons turns 2–5 uniquement (épisodes complets). Normal si absent sur épisodes courts.
-- `k_shoot_kills` / `l_melee_kills` : comptage par kill individuel (itération sur `all_attack_results`), pas par activation.
-- `g_kill_rewards` : calculé en fin d'épisode depuis `combat_effectiveness` (shoot_kills + melee_kills) × 2.0, source fiable indépendante du système reward_breakdown.
+- `e_objectives_held` / `f_objectives_held_diff` : échantillonnés par le moteur dans
+  `GameStateManager._sample_objectives_held`, à l'instant exact où les VP sont attribués au
+  joueur contrôlé (un échantillon par tour marquant, soit 4 sur une partie complète à
+  `start_turn: 2` / `max_turns: 5`). Absentes si l'épisode se termine avant le premier tour
+  marquant — c'est le seul cas légitime.
+  ⚠️ Jusqu'au 2026-07-30 l'échantillonnage vivait dans
+  `RewardCalculator._calculate_objective_reward_per_turn` : branché sur un calcul de récompense,
+  il héritait de ses gardes de sortie et n'a produit AUCUN point en 50 000 épisodes (mesuré :
+  215 appels, 0 échantillon). Une mesure ne doit pas dépendre du chemin de récompense.
+- `0_game/d_obj_rewards` : montant d'objectif réellement versé sur l'épisode, rejouant la
+  formule du versement — `reward_per_objective × tenus` **+** le forfait
+  `reward_for_objective_lead` pour chaque tour où l'agent en tient strictement plus que
+  l'adversaire (quand `use_objective_lead` est vrai). Identité avec le reward payé
+  vérifiée sur 8 épisodes complets joués : 8/8 exacte. L'ancienne version omettait le terme
+  d'avance (moitié du montant) et affichait un signal que l'agent ne recevait pas.
+- `k_shoot_kills` / `l_melee_kills` / `n_shoot_value_killed` / `o_melee_value_killed` :
+  comptés en fin d'épisode par `W40KEngine`, en une passe sur `action_logs`, **par figurine**
+  (`shootDetails[i]["targetDied"]`) — jamais sur le `target_died` d'en-tête, qui vaut
+  `kills > 0` pour tout un groupe (arme, cible) et écraserait un triple kill en un seul.
+  `all_attack_results` ne remonte jamais jusqu'à `step()` dans le pipeline squad V11 et n'est
+  donc PAS une source utilisable. La VALUE est celle de la figurine visée (`targetValue`,
+  posé à la résolution de la blessure), jamais la valeur d'escouade.
+- `combat/f_value_destroyed` ne fait pas double emploi avec `n_`/`o_` : elle est à granularité
+  ESCOUADE (une escouade entamée mais vivante y compte pour 0) et n'est pas ventilée par phase.
+- `g_kill_rewards` : `(shoot_kills + melee_kills) × reward_kill_target`, même source que ci-dessus,
+  indépendante du système reward_breakdown.
 
 ---
 

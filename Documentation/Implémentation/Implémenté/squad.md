@@ -1523,8 +1523,16 @@ reward -= points_per_hp_ally * hp_damage_weight * damage_taken
 reward -= (ally_points / ally_model_count_at_start) * model_kill_bonus_factor
 reward -= ally_points * squad_kill_bonus_factor  # si la derniere figurine alliee meurt
 
-# --- Controle d objectif ---
-reward_oc_control = +oc_weight  # par objectif controle en fin de tour (OC_allie > OC_ennemi)
+# --- Controle d objectif --- ABANDONNE, jamais implemente (2026-07-30)
+# `oc_weight` n a jamais eu un seul lecteur dans le code et a ete retire de
+# ArmageddonAgent_rewards_config.json. Le controle d objectif est paye par
+# objective_rewards.reward_per_objective + reward_for_objective_lead (forfait), verses UNE fois
+# par tour a la phase command du joueur controle — l instant exact ou la mission lui attribue
+# ses VP. Un bonus par fin de phase (ce que decrivait oc_weight) paierait des etats de controle
+# qui ne rapportent aucun VP : l agent optimiserait la mesure de substitution au lieu de la
+# victoire. Decision assumee : la conservation d un objectif d un tour sur l autre s apprend par
+# la value function (gamma=0.99, ~16 steps entre deux phases command, soit 85% de la valeur
+# conservee ; explained_variance mesure a 0.72), pas par un signal dense.
 
 # --- Coherency ---
 reward_incoherent = -incoherent_weight  # par escouade hors coherency en fin de tour
@@ -1542,15 +1550,15 @@ reward_incoherent = -incoherent_weight  # par escouade hors coherency en fin de 
   "hp_damage_weight": 0.7,
   "model_kill_bonus_factor": 0.2,
   "squad_kill_bonus_factor": 0.3,
-  "oc_weight": 0.5,
   "incoherent_weight": 0.2,
 }
 ```
+(`oc_weight` retire : voir ci-dessus.)
 
-**Timing reward OC :**
-`reward_oc_control` est calcule a la **fin de chaque tour** (apres les deux Fight phases du tour).
-Un objectif est "controle" par le joueur dont l OC_TOTAL dans la zone > OC_TOTAL ennemi dans la zone.
-La logique est appelee dans `end_of_turn_scoring()`. Pas de scoring en milieu de phase.
+**Timing reward OC :** SANS OBJET — `reward_oc_control` n existe pas (voir ci-dessus).
+Le controle d objectif lui-meme est reevalue a la fin de chaque phase et de chaque tour
+(regle 14.02, `run_objective_control_checkpoint`), mais il n est PAYE qu une fois par tour, a la
+phase command du joueur controle.
 
 **Signal de terminaison de partie :**
 La reward de fin de partie (victoire / defaite / limite de tours) doit etre explicitement
@@ -1586,7 +1594,8 @@ Controle objectif : +0.5 par objectif par tour.
 Escouade hors coherency : -0.2 par escouade par tour.
 ```
 Ces magnitudes sont coherentes : tuer vaut plus que controler, ce qui est intentionnel
-(le jeu W40K est combat-centric). Si l agent ignore les objectifs : augmenter `oc_weight`.
+(le jeu W40K est combat-centric). Si l agent ignore les objectifs : augmenter
+`objective_rewards.reward_per_objective` et `reward_for_objective_lead` (`oc_weight` n existe plus).
 Si l agent est trop agressif et negllige sa survie : reduire `hp_damage_weight` ou augmenter
 `incoherent_weight`. Calibrer sur les premiers runs de training.
 
@@ -1690,7 +1699,7 @@ penalise la situation en amont (escouade hors coherency), pas le retrait lui-mem
   toute tentative de changement d obs_size en PR4.
 - `config/agents/*_training_config.json` : verifier obs_size (fixe en PR1) +
   parametres reward shaping (hp_damage_weight, model_kill_bonus_factor,
-  squad_kill_bonus_factor, oc_weight, incoherent_weight).
+  squad_kill_bonus_factor, incoherent_weight).
 - Mesurer la frequence du cas "retrait fin de tour" sur runs de validation.
   Si > 5% des tours : implementer action interactive. Sinon : conserver mode deterministe.
 - Re-train micro puis macro.

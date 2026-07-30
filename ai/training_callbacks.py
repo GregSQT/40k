@@ -1055,19 +1055,26 @@ class MetricsCollectionCallback(BaseCallback):
                 # Force tensorboard dump to ensure gamma metrics are written
                 self.model.logger.dump(step=self.model.num_timesteps)
 
-        # CRITICAL: Use tactical_data from engine (populated during episode)
-        if 'tactical_data' in info:
-            # Engine provides complete tactical data - use it directly
-            self.episode_tactical_data.update(info['tactical_data'])
-            if 'total_actions' not in info['tactical_data']:
-                valid_actions = int(require_key(info['tactical_data'], 'valid_actions'))
-                invalid_actions = int(require_key(info['tactical_data'], 'invalid_actions'))
-                self.episode_tactical_data['total_actions'] = valid_actions + invalid_actions
+        # tactical_data du moteur — cle EXIGEE, pas testee.
+        # Le `if 'tactical_data' in info:` qui gardait ce bloc laissait passer un episode sans
+        # donnees tactiques : log_tactical_metrics etait appele juste apres DE TOUTE FACON, avec
+        # le dict de l'episode PRECEDENT, non reinitialise. Chaque courbe tactique aurait alors
+        # recompte deux fois le meme episode sans que rien ne le signale.
+        # L'exigence est structurelle : W40KEngine.step pose info["episode"] et
+        # info["tactical_data"] dans le MEME bloc `if terminated:` — on n'entre ici que sur
+        # info["episode"], donc l'un ne peut pas arriver sans l'autre. Verifie sur le run
+        # complet : 50 000 episodes joues, 50 000 points logues sur chaque courbe tactique.
+        tactical_data = require_key(info, 'tactical_data')
+        self.episode_tactical_data.update(tactical_data)
+        if 'total_actions' not in tactical_data:
+            valid_actions = int(require_key(tactical_data, 'valid_actions'))
+            invalid_actions = int(require_key(tactical_data, 'invalid_actions'))
+            self.episode_tactical_data['total_actions'] = valid_actions + invalid_actions
 
-            victory_points_cumulative_episode = float(
-                require_key(info['tactical_data'], 'victory_points_cumulative_episode')
-            )
-            self.metrics_tracker.log_victory_points_cumulative(victory_points_cumulative_episode)
+        victory_points_cumulative_episode = float(
+            require_key(tactical_data, 'victory_points_cumulative_episode')
+        )
+        self.metrics_tracker.log_victory_points_cumulative(victory_points_cumulative_episode)
 
         # Log to metrics tracker (KEEP for state tracking)
         self.metrics_tracker.log_episode_end(episode_data)
