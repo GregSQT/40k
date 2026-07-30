@@ -70,7 +70,7 @@ def _tracker_stub() -> W40KMetricsTracker:
     t.reward_components = {
         "base_actions": [],
         "result_bonuses": [],
-        "tactical_bonuses": [],
+        "objective": [],
         "situational": [],
         "penalties": [],
     }
@@ -130,10 +130,11 @@ def _tracker_stub() -> W40KMetricsTracker:
     t._episodes_in_window = 0
     t._game_history = {
         'vp_diff': [], 'vp_bot': [], 'objectives_held': [],
-        'units_killed': [], 'units_lost': [],
         'objectives_held_diff': [],
-        'kill_efficiency': [],
         'kill_rewards': [], 'obj_rewards': [],
+        'models_killed_ratio': [], 'models_lost_ratio': [],
+        'value_killed_ratio': [], 'value_lost_ratio': [],
+        'units_killed_ratio': [], 'units_lost_ratio': [],
     }
     t.seat_aware = {
         "episodes_agent_p1": 0,
@@ -204,7 +205,7 @@ def test_log_reward_decomposition_validation_and_trimming() -> None:
             {
                 "base_actions": "x",
                 "result_bonuses": 1,
-                "tactical_bonuses": 1,
+                "objective": 1,
                 "situational": 1,
                 "penalties": 1,
             }
@@ -215,7 +216,7 @@ def test_log_reward_decomposition_validation_and_trimming() -> None:
             {
                 "base_actions": 1.0,
                 "result_bonuses": 0.5,
-                "tactical_bonuses": 0.2,
+                "objective": 0.2,
                 "situational": 0.1,
                 "penalties": -0.1,
             }
@@ -272,8 +273,15 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
             "damage_dealt": 3,
             "damage_received": 1,
             "units_lost": 1,
+            "total_ally_units": 2,
             "enemy_value_destroyed": 8.0,
             "ally_value_lost": 4.0,
+            "total_ally_value": 20.0,
+            "total_enemy_value": 16.0,
+            "initial_ally_models": 4,
+            "initial_enemy_models": 4,
+            "surviving_ally_models": 3,
+            "surviving_enemy_models": 2,
             "valid_actions": 8,
             "invalid_actions": 2,
             "wait_actions": 1,
@@ -290,7 +298,7 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
     )
     keys = [k for k, _, _ in _dw(t).scalars]
     assert "game_tactical/shooting_accuracy" in keys
-    assert "0_game/e_objectives_held" in keys
+    assert "0_VP/e_objectives_held" in keys
     assert "combat/h_value_trade_ratio" in keys
     assert "forcing/episodes_with_forced_unit_ratio" in keys
 
@@ -372,8 +380,15 @@ def test_log_tactical_metrics_forcing_validation_errors() -> None:
         "damage_dealt": 1,
         "damage_received": 1,
         "units_lost": 1,
+        "total_ally_units": 1,
         "enemy_value_destroyed": 1.0,
         "ally_value_lost": 1.0,
+        "total_ally_value": 10.0,
+        "total_enemy_value": 10.0,
+        "initial_ally_models": 1,
+        "initial_enemy_models": 1,
+        "surviving_ally_models": 1,
+        "surviving_enemy_models": 1,
         "valid_actions": 1,
         "invalid_actions": 0,
         "wait_actions": 0,

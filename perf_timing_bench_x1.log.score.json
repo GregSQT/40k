@@ -26,6 +26,7 @@
   "__total_s": 4.02,
   "__total_calls": 5633,
   "__score_ms": 0.7144,
+  "__score_ms_per_episode": 236.7,
   "__n_episodes": 17,
   "__episodes": [
     2,

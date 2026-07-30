@@ -439,7 +439,7 @@ The `0_critical/` namespace contains **THE 11 ESSENTIAL METRICS** for hyperparam
 | **0_critical/h_clip_fraction** | % of clipped policy updates | 0.10–0.30 | Tune `learning_rate` — <0.05 = politique trop déterministe |
 | **0_critical/i_approx_kl** | Policy change magnitude | <0.02 (ideally 0.01–0.015) | Policy stability |
 | **0_critical/j_entropy_loss** | Exploration level | Decroissant -> -1.5 à -1.0 vers les 2/3 du training | Tune `ent_coef` |
-| **0_critical/l_value_trade_ratio** | Valeur détruite / valeur perdue (200ep) | >1.0 | Efficacité tactique — l'agent doit détruire plus qu'il ne perd |
+| **0_combat/a_value_trade_ratio** | Valeur détruite / valeur perdue (500ep) | >1.0 | Efficacité tactique — l'agent doit détruire plus qu'il ne perd |
 | **0_critical/m_value_loss_smooth** | Value function loss lissée | Décroissante puis stable | Convergence du value network |
 
 **How to use this dashboard:**
@@ -602,30 +602,58 @@ These metrics compare agent performance against scripted opponents.
 
 ---
 
-### `0_game/` Dashboard — Métriques de jeu
+### `0_VP/` et `0_combat/` Dashboards — Métriques de jeu
 
-Le namespace **`0_game/`** est le second dashboard à consulter après `0_critical/`. Il regroupe les 13 métriques décrivant le comportement tactique de l'agent dans la partie. Elles sont lissées sur **200 épisodes** (rolling window), sauf les quatre métriques de kills (`k_`, `l_`, `n_`, `o_`), lissées sur **500**.
+Le namespace **`0_game/`** a été scindé le 2026-07-30 en deux dashboards : **`0_VP/`** (le jeu de
+points) et **`0_combat/`** (l'attrition). Aucune courbe `0_game/` n'est plus émise — les anciennes
+séries ne se prolongent pas dans les nouvelles. Tout est lissé sur **500 épisodes**.
+
+Ce qui a changé, au-delà des noms : les compteurs bruts d'attrition (unités tuées/perdues) sont
+remplacés par des **ratios** rapportés à l'effectif de départ du camp concerné. Un compte brut
+n'est pas comparable d'un roster à l'autre — « 3 unités tuées » ne veut rien dire sans savoir
+combien il y en avait en face, et c'est précisément ce qui rend illisible un entraînement sur
+plusieurs rosters.
+
+#### `0_VP/` — le jeu de points
 
 | Métrique | Ce qu'elle mesure | Signal attendu |
 |----------|-------------------|----------------|
-| **0_game/a_vp_diff** | VP agent − VP bot (différentiel) | Croissant → agent gagne le jeu de points |
-| **0_game/b_vp_agent** | VP cumulés de l'agent sur l'épisode | Croissant |
-| **0_game/c_vp_bot** | VP cumulés du bot sur l'épisode | Décroissant (ou agent > bot) |
-| **0_game/e_objectives_held** | Moyenne d'objectifs contrôlés par l'agent, échantillonnée à chaque tour marquant | Croissant — agent se positionne stratégiquement |
-| **0_game/f_objectives_held_diff** | Objectifs agent − objectifs bot, au même instant | Positif et croissant — agent domine le contrôle |
-| **0_game/g_kill_rewards** | Récompense kill_target cumulée par épisode (ranged + mêlée) | Croissant — reflète l'activité de kill réelle |
-| **0_game/h_kill_efficiency** | kills / total_enemies | Croissant |
-| **0_game/i_units_killed** | Unités ennemies éliminées par épisode | Croissant |
-| **0_game/j_units_lost** | Unités alliées perdues par épisode | Décroissant ou stable |
-| **0_game/k_shoot_kills** | Figurines ennemies détruites en phase de tir | Croissant — ranged = source principale de dégâts |
-| **0_game/l_melee_kills** | Figurines ennemies détruites en phase de combat (fight) | Croissant |
-| **0_game/n_shoot_value_killed** | VALUE (points) des figurines détruites au tir | Croissant — et plus vite que k_ si l'agent cible ce qui coûte cher |
-| **0_game/o_melee_value_killed** | VALUE (points) des figurines détruites en mêlée | Idem, côté mêlée |
+| **0_VP/a_vp_diff** | VP agent − VP bot (différentiel) | Croissant → agent gagne le jeu de points |
+| **0_VP/b_vp_agent** | VP cumulés de l'agent sur l'épisode | Croissant |
+| **0_VP/c_vp_bot** | VP cumulés du bot sur l'épisode | Décroissant (ou agent > bot) |
+| **0_VP/d_objectives_held_diff** | Objectifs agent − objectifs bot, au même instant | Positif et croissant — agent domine le contrôle |
+| **0_VP/e_objectives_held** | Moyenne d'objectifs contrôlés par l'agent, échantillonnée à chaque tour marquant | Croissant — agent se positionne stratégiquement |
+| **0_VP/f_obj_rewards** | Récompense d'objectif réellement versée sur l'épisode | Croissant avec `e_` |
+
+#### `0_combat/` — l'attrition
+
+| Métrique | Ce qu'elle mesure | Signal attendu |
+|----------|-------------------|----------------|
+| **0_combat/a_value_trade_ratio** | VALUE détruite / VALUE perdue | > 1.0 — l'agent détruit plus qu'il ne perd |
+| **0_combat/b_kill_rewards** | Récompense kill_target cumulée par épisode (tir + mêlée) | Croissant — reflète l'activité de kill réelle |
+| **0_combat/c_models_killed_ratio** | Figurines ennemies retirées du plateau / effectif ennemi de départ | Croissant, borné à 1.0 |
+| **0_combat/d_models_lost_ratio** | Figurines alliées retirées du plateau / effectif allié de départ | Décroissant |
+| **0_combat/e_value_killed_ratio** | VALUE ennemie détruite / VALUE ennemie de départ | Croissant, borné à 1.0 |
+| **0_combat/f_value_lost_ratio** | VALUE alliée perdue / VALUE alliée de départ | Décroissant |
+| **0_combat/g_shoot_model_kills** | Figurines ennemies détruites en phase de tir | Croissant — ranged = source principale de dégâts |
+| **0_combat/h_melee_model_kills** | Figurines ennemies détruites en phase de combat (fight) | Croissant |
+| **0_combat/i_shoot_value_killed** | VALUE (points) des figurines détruites au tir | Croissant — et plus vite que `g_` si l'agent cible ce qui coûte cher |
+| **0_combat/j_melee_value_killed** | VALUE (points) des figurines détruites en mêlée | Idem, côté mêlée |
+| **0_combat/k_units_killed_ratio** | Unités ennemies éliminées / unités ennemies de départ | Croissant |
+| **0_combat/l_units_lost_ratio** | Unités alliées perdues / unités alliées de départ | Décroissant ou stable |
+
+Chaque ratio est émis **seulement si son dénominateur est > 0** : un dénominateur nul est un état
+de jeu possible (aucune unité en face), pas une erreur, et il ne produit donc aucun point plutôt
+qu'un zéro trompeur.
+
+Figurines et unités disent deux choses différentes : `c_`/`d_` comptent des figurines (une
+escouade de 20 entamée bouge la courbe), `k_`/`l_` comptent des escouades entièrement détruites.
+Un agent qui grignote sans achever fait monter `c_` sans bouger `k_`.
 
 #### Lecture combinée
 
 **Problème : agent focus kills mais perd les objectifs**
-- `i_units_killed` élevé, `a_vp_diff` négatif, `e_objectives_held` faible
+- `0_combat/k_units_killed_ratio` élevé, `0_VP/a_vp_diff` négatif, `0_VP/e_objectives_held` faible
 - → Augmenter `reward_per_objective` et `reward_for_objective_lead` dans rewards_config.json.
   ⚠️ Ces deux montants n'étaient **pas versés** avant le 2026-07-30 (mesuré : 73 appels par
   épisode, 0,00 de reward) : `_calculate_objective_reward_per_turn` était appelé *après* le
@@ -634,21 +662,22 @@ Le namespace **`0_game/`** est le second dashboard à consulter après `0_critic
   signal intermédiaire sur les objectifs ; ses courbes ne se comparent pas aux suivantes.
 
 **Problème : agent passif**
-- `k_shoot_kills` + `l_melee_kills` faibles, `g_kill_rewards` ≈ 0
-  (⚠️ avant le 2026-07-30, `l_melee_kills` avait deux écrivains et sa courbe entrelaçait
+- `g_shoot_model_kills` + `h_melee_model_kills` faibles, `b_kill_rewards` ≈ 0
+  (⚠️ avant le 2026-07-30, la courbe de kills en mêlée avait deux écrivains et sa courbe entrelaçait
   l'épisode courant et le précédent ; et jusqu'au 2026-07-30 elle ne comptait que les kills
   portés par la PREMIÈRE attaque de chaque groupe — soit une valeur quasi constante ~0,15
   sans rapport avec la compétence de l'agent : ne pas interpréter un historique antérieur)
 - → Vérifier `ent_coef` (trop bas = politique déterministe passive)
 
 **Problème : agent tire mais ne tue pas**
-- `k_shoot_kills` ≈ 0 mais `i_units_killed` > 0 (kills en mêlée seulement)
+- `g_shoot_model_kills` ≈ 0 mais `k_units_killed_ratio` > 0 (kills en mêlée seulement)
 - Vérifier les `action_logs` de type `shoot` — c'est leur seule source (cf. notes techniques)
 
 **Problème : agent qui grignote au lieu de frapper ce qui compte**
-- `k_`/`l_` (nombre de figurines) élevés mais `n_`/`o_` (VALUE) plats : l'agent fauche des
-  figurines bon marché et laisse vivre les cibles chères. Le rapport `n_/k_` est la VALUE
-  moyenne par figurine tuée — c'est lui qui bouge quand le ciblage s'améliore.
+- `g_`/`h_` (nombre de figurines) élevés mais `i_`/`j_` (VALUE) plats : l'agent fauche des
+  figurines bon marché et laisse vivre les cibles chères. Le rapport `i_/g_` est la VALUE
+  moyenne par figurine tuée — c'est lui qui bouge quand le ciblage s'améliore. Même lecture,
+  normalisée, entre `c_models_killed_ratio` et `e_value_killed_ratio`.
 
 #### Notes techniques
 
@@ -661,23 +690,38 @@ Le namespace **`0_game/`** est le second dashboard à consulter après `0_critic
   `RewardCalculator._calculate_objective_reward_per_turn` : branché sur un calcul de récompense,
   il héritait de ses gardes de sortie et n'a produit AUCUN point en 50 000 épisodes (mesuré :
   215 appels, 0 échantillon). Une mesure ne doit pas dépendre du chemin de récompense.
-- `0_game/d_obj_rewards` : montant d'objectif réellement versé sur l'épisode, rejouant la
+- `0_VP/f_obj_rewards` : montant d'objectif réellement versé sur l'épisode, rejouant la
   formule du versement — `reward_per_objective × tenus` **+** le forfait
   `reward_for_objective_lead` pour chaque tour où l'agent en tient strictement plus que
   l'adversaire (quand `use_objective_lead` est vrai). Identité avec le reward payé
   vérifiée sur 8 épisodes complets joués : 8/8 exacte. L'ancienne version omettait le terme
   d'avance (moitié du montant) et affichait un signal que l'agent ne recevait pas.
-- `k_shoot_kills` / `l_melee_kills` / `n_shoot_value_killed` / `o_melee_value_killed` :
+- `g_shoot_model_kills` / `h_melee_model_kills` / `i_shoot_value_killed` / `j_melee_value_killed` :
   comptés en fin d'épisode par `W40KEngine`, en une passe sur `action_logs`, **par figurine**
   (`shootDetails[i]["targetDied"]`) — jamais sur le `target_died` d'en-tête, qui vaut
   `kills > 0` pour tout un groupe (arme, cible) et écraserait un triple kill en un seul.
   `all_attack_results` ne remonte jamais jusqu'à `step()` dans le pipeline squad V11 et n'est
   donc PAS une source utilisable. La VALUE est celle de la figurine visée (`targetValue`,
   posé à la résolution de la blessure), jamais la valeur d'escouade.
-- `combat/f_value_destroyed` ne fait pas double emploi avec `n_`/`o_` : elle est à granularité
+- `combat/f_value_destroyed` ne fait pas double emploi avec `i_`/`j_` : elle est à granularité
   ESCOUADE (une escouade entamée mais vivante y compte pour 0) et n'est pas ventilée par phase.
-- `g_kill_rewards` : `(shoot_kills + melee_kills) × reward_kill_target`, même source que ci-dessus,
+- `b_kill_rewards` : `(shoot_kills + melee_kills) × reward_kill_target`, même source que ci-dessus,
   indépendante du système reward_breakdown.
+- `c_models_killed_ratio` / `d_models_lost_ratio` : les effectifs de DÉPART sont relevés par
+  `W40KEngine.reset` (`initial_ally_models` / `initial_enemy_models`) et jamais recalculés — les
+  figurines détruites disparaissent de `models_cache` *et* de `squad_models`, donc le
+  dénominateur ne serait plus dérivable en fin d'épisode. Les survivantes, elles, se comptent
+  dans `models_cache`.
+  Les deux courbes utilisent la MÊME mesure de chaque côté : figurines retirées du plateau
+  (différence des survivants), et non le compte de kills du journal. Ce dernier ignore les
+  retraits hors attaque (hazard 24.16, retrait de cohérence 03.03) que le côté allié compte
+  forcément — les deux courbes n'auraient alors pas la même base et ne se liraient pas côte à
+  côte. L'attribution des kills à l'agent reste lisible sur `g_`/`h_`, qui sont, eux, des
+  compteurs de journal.
+- `a_value_trade_ratio` a UN SEUL écrivain (`log_tactical_metrics`). Le second `add_scalar` de
+  `log_critical_dashboard`, qui réémettait la dernière valeur connue à un autre instant de
+  l'épisode, a été supprimé avec le namespace `0_game/` : il entrelaçait deux séries sur un tag
+  unique, le défaut déjà constaté sur les kills de mêlée et `invalid_action_rate`.
 
 ---
 

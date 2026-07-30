@@ -1343,6 +1343,24 @@ class W40KEngine(gym.Env):
         if self._model_count <= 0:
             raise ValueError("reset produced zero models: cannot derive runaway step limits")
         self._episode_step_limit_cache = None
+
+        # Effectif de depart PAR CAMP, en FIGURINES. Releve ici et jamais recalcule : les
+        # figurines detruites disparaissent de `models_cache`, donc le denominateur des ratios
+        # de fin d'episode (0_combat/c_models_killed_ratio, d_models_lost_ratio) n'est plus
+        # derivable ensuite. `squad_models` ne le rattraperait pas : `destroy_model` en retire
+        # aussi l'id (shared_utils.py:3387). Il n'est donc lisible que MAINTENANT, au reset,
+        # ou aucune figurine n'est encore morte.
+        _controlled_player = int(require_key(self.config, "controlled_player"))
+        _squad_models = require_key(self.game_state, "squad_models")
+        _units_cache_init = require_key(self.game_state, "units_cache")
+        self._initial_ally_models = sum(
+            len(mids) for uid, mids in _squad_models.items()
+            if int(require_key(_units_cache_init[uid], "player")) == _controlled_player
+        )
+        self._initial_enemy_models = sum(
+            len(mids) for uid, mids in _squad_models.items()
+            if int(require_key(_units_cache_init[uid], "player")) != _controlled_player
+        )
         
         # Initialize units_cache_prev for first step (Phase 2: units_cache always exists after reset)
         uc = require_key(self.game_state, "units_cache")
@@ -2038,6 +2056,31 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['units_lost'] = total_ally_units - surviving_ally_units
             self.episode_tactical_data['units_killed'] = total_enemy_units - surviving_enemy_units
             self.episode_tactical_data['total_enemies'] = total_enemy_units
+            self.episode_tactical_data['total_ally_units'] = total_ally_units
+
+            # Effectifs en FIGURINES : depart releve au reset, survivants comptes dans
+            # models_cache (les mortes en sont retirees). Denominateur + numerateur des
+            # ratios 0_combat/c_ et d_, qui rendent comparables deux rosters de tailles
+            # differentes la ou les compteurs bruts ne le sont pas.
+            #
+            # LES DEUX CAMPS SONT COMPTES DE LA MEME FACON — c'est ce qui rend les deux
+            # courbes lisibles cote a cote. Le compte de kills du journal (shoot_kills +
+            # melee_kills) ne convient PAS comme numerateur de c_ : il ignore les figurines
+            # retirees hors attaque (hazard 24.16, retrait de coherence 03.03), qui sont
+            # comptees cote allie par la difference des survivants. Les deux courbes
+            # n'auraient alors pas la meme base. L'attribution des kills a l'agent, elle,
+            # reste lisible sur g_/h_.
+            models_cache = require_key(self.game_state, "models_cache")
+            self.episode_tactical_data['initial_ally_models'] = int(self._initial_ally_models)
+            self.episode_tactical_data['initial_enemy_models'] = int(self._initial_enemy_models)
+            self.episode_tactical_data['surviving_ally_models'] = sum(
+                1 for m in models_cache.values()
+                if int(require_key(m, "player")) == controlled_player
+            )
+            self.episode_tactical_data['surviving_enemy_models'] = sum(
+                1 for m in models_cache.values()
+                if int(require_key(m, "player")) != controlled_player
+            )
 
             action_logs = self.game_state["action_logs"]
 
@@ -2076,8 +2119,8 @@ class W40KEngine(gym.Env):
             # ne compterait que pour un. Jusqu'au 2026-07-30 la melee lisait le seul
             # `shootDetails[0]`, ce qui ne mesurait que « la premiere attaque du groupe a-t-elle
             # tue ? » — une probabilite quasi constante (~0,15 mesure) independante de la
-            # competence de l'agent, d'ou une courbe l_melee_kills plate et bruitee pendant que
-            # k_shoot_kills, elle, progressait.
+            # competence de l'agent, d'ou une courbe 0_combat/h_melee_model_kills plate et bruitee pendant que
+            # g_shoot_model_kills, elle, progressait.
             # `*_value_killed` somme la VALUE des figurines ainsi detruites : distinguer 20
             # gretchins a 4 points d'un monstre a 120 est ce qui separe un agent qui grignote
             # d'un agent qui frappe ce qui compte. Distinct de `enemy_value_destroyed`, calcule
@@ -2167,6 +2210,8 @@ class W40KEngine(gym.Env):
 
             self.episode_tactical_data['ally_value_lost'] = max(0.0, total_ally_value - surviving_ally_value)
             self.episode_tactical_data['enemy_value_destroyed'] = max(0.0, total_enemy_value - surviving_enemy_value)
+            self.episode_tactical_data['total_ally_value'] = total_ally_value
+            self.episode_tactical_data['total_enemy_value'] = total_enemy_value
 
             # Store turn number for metrics filtering (e.g., objectives only on turn 5+)
             self.episode_tactical_data['final_turn'] = self.game_state["turn"]

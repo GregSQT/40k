@@ -124,7 +124,15 @@ def _calculator(controlled_player: int) -> RewardCalculator:
     `state_manager.count_controlled_objectives`, ce test leverait au lieu de passer.
     """
     return RewardCalculator(
-        {"controlled_agent": AGENT, "controlled_player": controlled_player, "quiet": True},
+        {
+            "controlled_agent": AGENT,
+            "controlled_player": controlled_player,
+            "quiet": True,
+            # `game_rules` REEL (config de jeu de production) : `_enrich_unit_for_reward_mapper`
+            # y lit `engagement_zone` pour trancher is_ranged/is_melee. Le recopier a la main
+            # figerait ici une valeur que la config peut faire evoluer.
+            "game_rules": get_config_loader().get_game_config()["game_rules"],
+        },
         _rewards_config(),
     )
 
@@ -145,7 +153,7 @@ def test_the_command_phase_transition_actually_pays_the_objective_reward() -> No
     expected = _expected_turn_reward(2, 1)
 
     assert expected > 0.0, "config d'agent sans reward d'objectif : le test ne mesure rien"
-    assert breakdown["tactical_bonuses"] == pytest.approx(expected)
+    assert breakdown["objective"] == pytest.approx(expected)
     assert total == pytest.approx(_system_response_penalty() + expected)
 
 
@@ -197,8 +205,8 @@ def test_being_behind_costs_nothing_extra() -> None:
     _total, breakdown = _pay(calc, state)
     per_objective = float(_objective_rewards()["reward_per_objective"])
 
-    assert breakdown["tactical_bonuses"] == pytest.approx(per_objective * 1)
-    assert breakdown["tactical_bonuses"] > 0.0, "tenir un objectif reste paye, meme en retard"
+    assert breakdown["objective"] == pytest.approx(per_objective * 1)
+    assert breakdown["objective"] > 0.0, "tenir un objectif reste paye, meme en retard"
 
 
 def test_paid_once_per_turn() -> None:
@@ -209,8 +217,8 @@ def test_paid_once_per_turn() -> None:
     _first, first_breakdown = _pay(calc, state)
     _second, second_breakdown = _pay(calc, state)
 
-    assert first_breakdown["tactical_bonuses"] == pytest.approx(_expected_turn_reward(2, 1))
-    assert second_breakdown["tactical_bonuses"] == pytest.approx(0.0)
+    assert first_breakdown["objective"] == pytest.approx(_expected_turn_reward(2, 1))
+    assert second_breakdown["objective"] == pytest.approx(0.0)
 
 
 @pytest.mark.parametrize("controlled_player", [1, 2])
@@ -229,11 +237,11 @@ def test_not_paid_at_the_opponent_command_phase(controlled_player: int) -> None:
 
     _total, breakdown = _pay(calc, state)
 
-    assert breakdown["tactical_bonuses"] == pytest.approx(0.0)
+    assert breakdown["objective"] == pytest.approx(0.0)
     # ... et le tour n'est pas consomme : mon propre passage doit encore payer.
     state["current_player"] = controlled_player
     _total2, breakdown2 = _pay(calc, state)
-    assert breakdown2["tactical_bonuses"] == pytest.approx(_expected_turn_reward(2, 1))
+    assert breakdown2["objective"] == pytest.approx(_expected_turn_reward(2, 1))
 
 
 def test_the_coherency_penalty_shares_the_repaired_site_and_now_applies() -> None:
@@ -261,4 +269,164 @@ def test_not_paid_before_the_scoring_start_turn() -> None:
 
     _total, breakdown = _pay(calc, state)
 
-    assert breakdown["tactical_bonuses"] == pytest.approx(0.0)
+    assert breakdown["objective"] == pytest.approx(0.0)
+
+
+# --- Ventilation : la part d'objectif doit etre LISIBLE, pas seulement versee --------------
+#
+# Le versement de fin de tour ci-dessus n'est qu'UNE des deux sources d'objectif. L'autre, le
+# bonus « se poser sur un objectif » (`_calculate_on_objective_reward`), entrait dans le total
+# sur six chemins d'action (move, flee, fight, wait, advance, squad_*) sans jamais etre
+# categorise : il etait compte dans `base_actions`, ou retranche de rien du tout. Impossible,
+# donc, de repondre a « quelle part de la recompense vient du controle d'objectif ? » — la
+# question qui decide si l'agent est paye pour gagner ou pour autre chose.
+
+
+def _move_state(controlled_player: int = 1) -> Dict[str, Any]:
+    """Etat de phase move avec UN objectif non controle, sur lequel l'unite 1 va se poser."""
+    state = _game_state(turn=2, current_player=controlled_player, controlled_player=controlled_player)
+    state["phase"] = "move"
+    state["objectives"] = [{"id": "obj_move", "hexes": [{"col": 5, "row": 5}]}]
+    # Zone non controlee : `get_objective_control` < 1.0 est la condition du bonus.
+    state["objective_controllers"] = {}
+    for unit in state["units"]:
+        unit["battle_shocked"] = False
+        # `_enrich_unit_for_reward_mapper` s'execute AVANT le dispatch par action et exige les
+        # deux contrats d'armes. Listes vides : ce test porte sur la VENTILATION du reward
+        # d'objectif, pas sur des degats — un armement invente ne rendrait pas le controle plus
+        # portant, il ajouterait seulement une fiction a maintenir.
+        unit["RNG_WEAPONS"] = []
+        unit["CC_WEAPONS"] = []
+    return state
+
+
+def _on_objective_bonus() -> float:
+    return float(_rewards_config()[AGENT]["objective_rewards"]["on_objective_bonus"])
+
+
+def test_the_on_objective_bonus_is_categorised_as_objective_not_base_action() -> None:
+    """Se poser sur un objectif doit apparaitre dans `objective`, JAMAIS dans `base_actions`.
+
+    VERROU. En remettant `reward_breakdown['objective'] += on_obj_reward` en commentaire dans
+    la branche move de `calculate_reward`, ce test passe au ROUGE sur la premiere assertion :
+    le bonus retombe dans le total sans categorie, et la part d'objectif se lit 0.
+    """
+    calc = _calculator(controlled_player=1)
+    state = _move_state()
+    bonus = _on_objective_bonus()
+
+    assert bonus > 0.0, "on_objective_bonus nul en config : le test ne mesure rien"
+
+    total = calc.calculate_reward(
+        True, {"action": "move", "unitId": "1", "toCol": 5, "toRow": 5}, state
+    )
+    breakdown = state["last_reward_breakdown"]
+
+    assert breakdown["objective"] == pytest.approx(bonus)
+    assert breakdown["base_actions"] == pytest.approx(0.0)
+    assert total == pytest.approx(bonus)
+
+
+def test_the_fight_path_does_not_count_the_on_objective_bonus_twice() -> None:
+    """Chemin fight : `base_actions` retranche le bonus, il n'est compte QUE dans `objective`.
+
+    VERROU. La branche fight construit `base_actions` par soustraction
+    (`fight_reward - objective_turn_reward - on_obj_reward`). Retirer le `- on_obj_reward`
+    fait passer ce test au ROUGE : le bonus apparait alors dans les deux categories, et la
+    somme des parts depasse le total.
+    """
+    calc = _calculator(controlled_player=1)
+    state = _move_state()
+    bonus = _on_objective_bonus()
+
+    total = calc.calculate_reward(
+        True,
+        {
+            "action": "fight",
+            "unitId": "1",
+            "targetId": "2",
+            "toCol": 5,
+            "toRow": 5,
+            "all_attack_results": [],
+        },
+        state,
+    )
+    breakdown = state["last_reward_breakdown"]
+
+    assert breakdown["objective"] == pytest.approx(bonus)
+    assert breakdown["base_actions"] + breakdown["objective"] == pytest.approx(total)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        pytest.param({"waiting_for_player": True}, id="waiting_for_target_selection"),
+        pytest.param({}, id="activation_ended_without_firing"),
+    ],
+)
+def test_a_shoot_payload_carrying_the_transition_still_pays_the_objective(
+    extra: Dict[str, Any],
+) -> None:
+    """Un tir SANS attaque qui porte la transition doit quand meme payer l'objectif.
+
+    CE QUI ETAIT MANQUE. Un tir n'arrive pas toujours ici en payload « pur » : lorsqu'il vide
+    le pool, la cascade du moteur le fait traverser les phases suivantes jusqu'a
+    `command_phase_start`, qui hors tour agent rend `command_phase_end` — la transition
+    `phase_transition` + `next_phase == "move"` qui declenche le versement. La cascade
+    REINJECTE `action`/`unitId`/`all_attack_results` dans ce resultat (w40k_core, bloc
+    `preserved_combat_data`), donc le payload atteint la branche `shoot` en portant la
+    transition, au lieu de partir par le chemin « reponse systeme » qui, lui, payait.
+    Les trois sorties anticipees de cette branche renvoyaient `0.0` sec : les points etaient
+    perdus, et `objective` les comptait quand meme.
+
+    VERROU. Remettre `return 0.0` a la place de `return objective_turn_reward` sur la sortie
+    correspondante fait passer ce test au ROUGE.
+
+    CONTROLE NON VACANT : le montant attendu est recalcule depuis la config reelle et l'etat
+    d'objectifs construit ici ; l'assertion `expected > 0` garantit qu'un zero signifierait
+    vraiment « pas verse » et non « rien a verser ».
+    """
+    calc = _calculator(controlled_player=1)
+    state = _game_state(turn=2, current_player=1, controlled_player=1, mine=2, theirs=1)
+    for unit in state["units"]:
+        unit["battle_shocked"] = False
+        unit["RNG_WEAPONS"] = []
+        unit["CC_WEAPONS"] = []
+    state["action_logs"] = []
+    state["objectives"] = []
+
+    # Le VRAI payload de transition, produit par son unique producteur, augmente des cles que
+    # la cascade reinjecte. Le recopier a la main le figerait le jour ou le producteur change.
+    payload: Dict[str, Any] = dict(command_phase_end(state))
+    payload.update({"action": "shoot", "unitId": "1", "all_attack_results": []})
+    payload.update(extra)
+
+    total = calc.calculate_reward(True, payload, state)
+    breakdown = state["last_reward_breakdown"]
+    expected = _expected_turn_reward(2, 1)
+
+    assert expected > 0.0, "config sans reward d'objectif : le test ne mesure rien"
+    assert total == pytest.approx(expected), "recompense d'objectif perdue sur la sortie anticipee"
+    assert breakdown["objective"] == pytest.approx(expected)
+    # La ventilation ne doit plus annoncer des points que le total ne verse pas.
+    assert breakdown["total"] == pytest.approx(total)
+
+
+def test_the_coherency_penalty_is_never_imputed_to_the_objective() -> None:
+    """`objective_turn_reward` TRANSPORTE la penalite de coherency : elle ne doit pas y entrer.
+
+    VERROU. Deplacer `reward_breakdown['objective'] += objective_turn_reward` APRES la ligne
+    `objective_turn_reward += coherency_penalty` fait passer ce test au ROUGE : la part
+    d'objectif devient nette de la penalite, et une escouade incoherente ferait baisser une
+    mesure qui ne parle que de controle de terrain.
+    """
+    calc = _calculator(controlled_player=1)
+    state = _game_state(turn=2, current_player=1, controlled_player=1, mine=2, theirs=1)
+    state["squad_cache"]["1"]["is_coherent"] = False
+
+    _total, breakdown = _pay(calc, state)
+    incoherent_weight = float(_rewards_config()[AGENT]["squad_shaping"]["incoherent_weight"])
+
+    assert incoherent_weight > 0.0, "poids nul : le test ne mesure rien"
+    assert breakdown["objective"] == pytest.approx(_expected_turn_reward(2, 1))
+    assert breakdown["penalties"] == pytest.approx(-incoherent_weight)

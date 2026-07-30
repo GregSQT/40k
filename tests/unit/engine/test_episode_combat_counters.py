@@ -430,7 +430,7 @@ def test_value_killed_sums_the_value_of_each_model_destroyed(
 def test_the_kill_and_value_curves_are_emitted(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    """Les quatre courbes sortent avec les valeurs de l'episode (k_, l_, n_, o_)."""
+    """Les quatre courbes sortent avec les valeurs de l'episode (0_combat/g_ h_ i_ j_)."""
     from ai.metrics_tracker import W40KMetricsTracker
 
     _engine, tactical = _melee_kill_episode(monkeypatch)
@@ -442,10 +442,10 @@ def test_the_kill_and_value_curves_are_emitted(
     tracker.log_tactical_metrics(tactical)
 
     by_key = {key: value for key, value, _step in recording.scalars}
-    assert by_key["0_game/l_melee_kills"] == pytest.approx(tactical["melee_kills"])
-    assert by_key["0_game/k_shoot_kills"] == pytest.approx(tactical["shoot_kills"])
-    assert by_key["0_game/o_melee_value_killed"] == pytest.approx(tactical["melee_value_killed"])
-    assert by_key["0_game/n_shoot_value_killed"] == pytest.approx(tactical["shoot_value_killed"])
+    assert by_key["0_combat/h_melee_model_kills"] == pytest.approx(tactical["melee_kills"])
+    assert by_key["0_combat/g_shoot_model_kills"] == pytest.approx(tactical["shoot_kills"])
+    assert by_key["0_combat/j_melee_value_killed"] == pytest.approx(tactical["melee_value_killed"])
+    assert by_key["0_combat/i_shoot_value_killed"] == pytest.approx(tactical["shoot_value_killed"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -579,3 +579,113 @@ def test_the_four_tensorboard_curves_are_emitted(
     assert by_key["game_tactical/damage_efficiency"] == pytest.approx(
         tactical["damage_dealt"] / tactical["damage_received"]
     )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Effectifs de depart et ratios 0_combat/ — denominateurs, pas compteurs bruts
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _asymmetric_units() -> List[Dict[str, Any]]:
+    """Montage ou les QUATRE effectifs sont DISTINCTS : 1 escouade alliee de 3 figurines
+    a 40 points contre 2 escouades ennemies mono-figurine a 100.
+
+    C'est la seule facon de verrouiller les ratios : sur un montage symetrique
+    mono-figurine, figurines et unites valent le meme nombre des deux cotes, et une
+    confusion allie/ennemi ou figurine/unite passerait tous les controles. Les deux camps
+    sont DEJA au contact — la melee n'attend ni deplacement ni charge.
+    """
+    ally = _unit(1, 1, 7, 6, DEVASTATING)
+    # models[0] DOIT etre a l'ancre de l'unite (invariant multi-figurine de build_units_cache).
+    ally["models"] = [
+        {"col": 7, "row": 6, "VALUE": 40}, {"col": 7, "row": 5, "VALUE": 40},
+        {"col": 7, "row": 7, "VALUE": 40},
+    ]
+    ally["VALUE"] = 120
+    return [ally, _unit(3, 2, 8, 6, DEVASTATING), _unit(4, 2, 8, 7, DEVASTATING)]
+
+
+def _asymmetric_config() -> Dict[str, Any]:
+    config = _config(_asymmetric_units(), controlled_player=1)
+    # Exigees des qu'une escouade a plusieurs figurines (coherence 03.03).
+    config["game_rules"]["unit_model_cohesion_range"] = 2
+    config["game_rules"]["unit_global_cohesion_range"] = 9
+    config["game_rules"]["squad_min_neighbors"] = 1
+    config["game_rules"]["cohesion_distance_mode"] = "euclidean"
+    return config
+
+
+def _asymmetric_episode(monkeypatch: pytest.MonkeyPatch) -> Tuple[W40KEngine, Dict[str, Any]]:
+    """Episode ou les DEUX camps perdent des figurines — sans ca, tous les ratios valent 0
+    et un mauvais denominateur passerait inapercu (0/2 = 0/3).
+
+    Meme idiome que ``_play_until`` : on essaie les politiques deterministes et on garde la
+    premiere qui produit la situation EXIGEE, au lieu de l'esperer d'une graine.
+    """
+    _pinned_die(monkeypatch)
+    for _name, policy in _POLICIES.items():
+        engine = _build(_asymmetric_config())
+        tactical = _run_to_end(engine, policy)
+        losses = tactical["initial_ally_models"] - tactical["surviving_ally_models"]
+        kills = tactical["initial_enemy_models"] - tactical["surviving_enemy_models"]
+        if losses > 0 and kills > 0:
+            return engine, tactical
+    raise AssertionError("aucune politique n'a produit de pertes des DEUX cotes")
+
+
+def test_initial_model_counts_are_per_side_and_survive_the_deaths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Les effectifs de depart en FIGURINES sont releves par camp, et par camp seulement.
+
+    Ils ne sont plus derivables en fin d'episode (``models_cache`` perd les mortes), d'ou
+    le releve au reset : c'est lui que ce controle verrouille, contre le compte d'unites.
+    """
+    engine, tactical = _asymmetric_episode(monkeypatch)
+
+    assert tactical["initial_ally_models"] == 3
+    assert tactical["initial_enemy_models"] == 2
+    assert tactical["total_ally_units"] == 1
+    assert tactical["total_enemies"] == 2
+
+    models_cache = engine.game_state["models_cache"]
+    assert tactical["surviving_ally_models"] == sum(
+        1 for m in models_cache.values() if int(m["player"]) == 1
+    )
+    assert tactical["surviving_enemy_models"] == sum(
+        1 for m in models_cache.values() if int(m["player"]) == 2
+    )
+    assert tactical["total_ally_value"] == pytest.approx(120.0)
+    assert tactical["total_enemy_value"] == pytest.approx(200.0)
+
+
+def test_the_zero_combat_ratios_use_their_own_denominators(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Chaque ratio 0_combat/ divise par SON effectif de depart, pas par celui d'a cote."""
+    from ai.metrics_tracker import W40KMetricsTracker
+
+    _engine, tactical = _asymmetric_episode(monkeypatch)
+
+    tracker = W40KMetricsTracker("ArmageddonAgent", log_dir=str(tmp_path), show_banner=False)
+    recording = _RecordingWriter()
+    tracker.writer = recording
+    tracker.episode_count = 1
+    tracker.log_tactical_metrics(tactical)
+
+    by_key = {key: value for key, value, _step in recording.scalars}
+    models_lost = tactical["initial_ally_models"] - tactical["surviving_ally_models"]
+    models_killed = tactical["initial_enemy_models"] - tactical["surviving_enemy_models"]
+    assert by_key["0_combat/c_models_killed_ratio"] == pytest.approx(models_killed / 2)
+    assert by_key["0_combat/d_models_lost_ratio"] == pytest.approx(models_lost / 3)
+    assert by_key["0_combat/e_value_killed_ratio"] == pytest.approx(
+        tactical["enemy_value_destroyed"] / 200.0
+    )
+    assert by_key["0_combat/f_value_lost_ratio"] == pytest.approx(
+        tactical["ally_value_lost"] / 120.0
+    )
+    assert by_key["0_combat/k_units_killed_ratio"] == pytest.approx(tactical["units_killed"] / 2)
+    assert by_key["0_combat/l_units_lost_ratio"] == pytest.approx(tactical["units_lost"] / 1)
+
+    # Les ratios ne sont pas tous nuls : sans ca, 0/2 et 0/3 seraient indistinguables et
+    # ce controle vaudrait pour n'importe quel denominateur.
+    assert by_key["0_combat/d_models_lost_ratio"] > 0
+    assert by_key["0_combat/c_models_killed_ratio"] > 0

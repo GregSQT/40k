@@ -955,13 +955,13 @@ class MetricsCollectionCallback(BaseCallback):
                     self.episode_reward_components = {
                         'base_actions': 0.0,
                         'result_bonuses': 0.0,
-                        'tactical_bonuses': 0.0,
+                        'objective': 0.0,
                         'situational': 0.0,
                         'penalties': 0.0
                     }
                 self.episode_reward_components['base_actions'] += require_key(reward_breakdown, 'base_actions')
                 self.episode_reward_components['result_bonuses'] += require_key(reward_breakdown, 'result_bonuses')
-                self.episode_reward_components['tactical_bonuses'] += require_key(reward_breakdown, 'tactical_bonuses')
+                self.episode_reward_components['objective'] += require_key(reward_breakdown, 'objective')
                 self.episode_reward_components['situational'] += require_key(reward_breakdown, 'situational')
                 self.episode_reward_components['penalties'] += require_key(reward_breakdown, 'penalties')
                 # `if 'position_score' in reward_breakdown: log_position_score(...)` occupait la
@@ -972,7 +972,12 @@ class MetricsCollectionCallback(BaseCallback):
                 # Le garde etait reste cote consommateur, silencieux : une courbe
                 # game_tactical/avg_position_score vide ne se distingue pas d'une courbe nulle.
                 # Le seul producteur de reward_breakdown ecrit base_actions, result_bonuses,
-                # tactical_bonuses, situational, penalties et total — rien d'autre.
+                # objective, situational, penalties et total — rien d'autre.
+                # `objective` a REMPLACE `tactical_bonuses` : cette derniere n'avait qu'un seul
+                # producteur (la recompense d'objectif de fin de tour), et son nom empechait de
+                # lire ce qui compte — la part de recompense issue du CONTROLE D'OBJECTIF, seul
+                # critere de victoire. Le bonus « sur un objectif » par action, jusque-la noyé
+                # dans base_actions sur six chemins, y est desormais agrege.
 
         # Le suivi periodique des Q-values (train/q_value_mean_smooth, toutes les 100 etapes)
         # occupait cette place. Meme raison que son jumeau d'EpisodeBasedEvalCallback (classe
@@ -1213,7 +1218,7 @@ class MetricsCollectionCallback(BaseCallback):
             self.episode_reward_components = {
                 'base_actions': 0.0,
                 'result_bonuses': 0.0,
-                'tactical_bonuses': 0.0,
+                'objective': 0.0,
                 'situational': 0.0,
                 'penalties': 0.0
             }

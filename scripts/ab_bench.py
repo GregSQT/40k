@@ -11,10 +11,12 @@ regles rendent le chiffre exploitable, et cet outil les impose :
    secondaire. Rien n'est deplace pendant la mesure, chaque version garde son propre
    `__pycache__` — le piege du bytecode perime (un mtime restaure a la seconde pres apres un
    `stash pop`) disparait par construction.
-2. ENTRELACEMENT A,B,A,B, et on ne compare QUE les deux membres d'une meme paire, executes coup
-   sur coup : la machine est alors dans le meme etat pour les deux. Un ratio intra-paire est
-   interpretable, un absolu inter-paire ne l'est pas. La premiere paire est jetee (remplissage
-   des caches disque et allocateur).
+2. ENTRELACEMENT, ORDRE ALTERNE (A,B puis B,A puis A,B...), et on ne compare QUE les deux membres
+   d'une meme paire, executes coup sur coup : la machine est alors dans le meme etat pour les
+   deux. Un ratio intra-paire est interpretable, un absolu inter-paire ne l'est pas. L'ordre
+   s'inverse d'une paire a l'autre pour qu'une derive monotone (temperature, charge de fond) ne
+   penalise pas toujours le meme cote. La premiere paire est jetee (remplissage des caches
+   disque et allocateur).
 3. TEMPS CPU (user+sys), pas wall : il ne compte pas les instants ou un autre processus occupe le
    coeur. Le wall est affiche a cote, a titre indicatif.
 
@@ -89,11 +91,21 @@ def main() -> int:
 
     ratios = []
     for index in range(1, args.paires + 1):
-        wall_a, cpu_a, masks_a = _run(args.avant, args.episodes)
-        wall_b, cpu_b, masks_b = _run(args.apres, args.episodes)
+        # Ordre alterne A,B puis B,A : lance toujours dans le meme ordre, une derive monotone de
+        # la machine (temperature, charge de fond qui s'installe) penalise systematiquement le
+        # second des deux. Le biais est alors de meme signe dans toutes les paires, et la mediane
+        # ne l'annule pas — elle le consacre.
+        b_first = index % 2 == 0
+        if b_first:
+            wall_b, cpu_b, masks_b = _run(args.apres, args.episodes)
+            wall_a, cpu_a, masks_a = _run(args.avant, args.episodes)
+        else:
+            wall_a, cpu_a, masks_a = _run(args.avant, args.episodes)
+            wall_b, cpu_b, masks_b = _run(args.apres, args.episodes)
         ratio = cpu_b / cpu_a
         print(
-            f"paire {index}{' (jetee)' if index == 1 else ''}\n"
+            f"paire {index} ({'B puis A' if b_first else 'A puis B'})"
+            f"{' — jetee' if index == 1 else ''}\n"
             f"  A(avant) cpu={cpu_a:6.2f}s  wall={wall_a:6.2f}s  masques={masks_a}\n"
             f"  B(apres) cpu={cpu_b:6.2f}s  wall={wall_b:6.2f}s  masques={masks_b}\n"
             f"  ratio CPU B/A = {ratio:.3f}",

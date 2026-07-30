@@ -309,7 +309,14 @@ Le `RewardCalculator` (`engine/reward_calculator.py`) filtre les rewards par jou
 
 1. **Actions non-contrôlées** : si `acting_unit["player"] != controlled_player` → seuls les rewards objectifs par tour et situationnels (game_over) sont retournés. Pas de reward d'action pour les coups du bot.
 
-2. **Actions contrôlées** : reward complète (base_action + result_bonuses + tactical_bonuses + situational).
+2. **Actions contrôlées** : reward complète (base_action + result_bonuses + objective + situational).
+
+   La ventilation `last_reward_breakdown` expose `base_actions`, `result_bonuses`, `objective`,
+   `situational`, `penalties` et `total`. La clé `objective` agrège les DEUX sources d'objectif —
+   le versement de fin de tour (`_calculate_objective_reward_per_turn`) et le bonus « se poser sur
+   un objectif » (`_calculate_on_objective_reward`) — et remplace l'ancienne `tactical_bonuses`,
+   dont le nom masquait le seul signal aligné sur la condition de victoire. Exposée en TensorBoard
+   sous `reward/objective_total` et `reward/objective_share`.
 
 3. **Reward situationnelle** (`_get_situational_reward`) :
    - `winner == controlled_player` → bonus win

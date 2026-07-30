@@ -7,7 +7,7 @@ CE QUI A ETE MANQUE. Deux tags avaient deux ecrivains, et personne ne l'a vu pen
     log_critical_dashboard, qui lisait un ``self.episode_tactical_data`` du tracker jamais
     alimente — ``total_actions`` valant toujours 0, il ecrivait un 0.0 constant. 100 000 points
     pour 50 000 episodes, une courbe alternant valeur reelle et zero.
-  * ``0_game/l_melee_kills`` : ecrit par log_tactical_metrics ET par
+  * ``0_combat/h_melee_model_kills`` : ecrit par log_tactical_metrics ET par
     compute_and_log_phase_metrics, appele AVANT lui (depuis log_episode_end), donc avec la
     moyenne de l'episode PRECEDENT. 99 999 points, deux series entrelacees.
 
@@ -52,10 +52,13 @@ def _tactical(**overrides: Any) -> Dict[str, Any]:
     data: Dict[str, Any] = {
         "shots_fired": 10, "hits": 6,
         "damage_dealt": 12, "damage_received": 7,
-        "units_lost": 2, "units_killed": 3, "total_enemies": 4,
+        "units_lost": 2, "units_killed": 3, "total_enemies": 4, "total_ally_units": 5,
         "shoot_kills": 2, "melee_kills": 1,
         "shoot_value_killed": 200.0, "melee_value_killed": 100.0,
         "enemy_value_destroyed": 300.0, "ally_value_lost": 200.0,
+        "total_ally_value": 1000.0, "total_enemy_value": 900.0,
+        "initial_ally_models": 12, "initial_enemy_models": 15,
+        "surviving_ally_models": 7, "surviving_enemy_models": 9,
         "valid_actions": 40, "invalid_actions": 5,
         "victory_points_diff_controlled_minus_opponent": 5.0,
         "victory_points_opponent_episode": 27.0,
@@ -110,7 +113,7 @@ def test_the_two_historical_duplicates_are_emitted_exactly_once(tmp_path: Any) -
 
     counts = Counter(key for key, _value, _step in recording.scalars)
     assert counts["game_critical/invalid_action_rate"] == 1
-    assert counts["0_game/l_melee_kills"] == 1
+    assert counts["0_combat/h_melee_model_kills"] == 1
 
 
 def test_melee_kills_carries_this_episode_value_not_the_previous_one(tmp_path: Any) -> None:
@@ -124,7 +127,7 @@ def test_melee_kills_carries_this_episode_value_not_the_previous_one(tmp_path: A
     recording.scalars.clear()
     _episode(tracker, _tactical(melee_kills=4, shoot_kills=0))
 
-    melee = [value for key, value, _step in recording.scalars if key == "0_game/l_melee_kills"]
+    melee = [value for key, value, _step in recording.scalars if key == "0_combat/h_melee_model_kills"]
     assert melee == [pytest.approx(2.0)], (
         "la courbe doit valoir la moyenne des DEUX episodes (0 puis 4), pas 0.0"
     )
@@ -154,12 +157,12 @@ def test_objective_curves_are_emitted_from_the_engine_samples(tmp_path: Any) -> 
     ))
 
     by_key = {key: value for key, value, _step in recording.scalars}
-    assert by_key["0_game/e_objectives_held"] == pytest.approx(1.5)
-    assert by_key["0_game/f_objectives_held_diff"] == pytest.approx(0.5)
+    assert by_key["0_VP/e_objectives_held"] == pytest.approx(1.5)
+    assert by_key["0_VP/d_objectives_held_diff"] == pytest.approx(0.5)
 
 
 def test_obj_rewards_equals_what_the_reward_calculator_actually_pays(tmp_path: Any) -> None:
-    """0_game/d_obj_rewards = le montant REELLEMENT verse par tour, terme d'avance inclus.
+    """0_VP/f_obj_rewards = le montant REELLEMENT verse par tour, terme d'avance inclus.
 
     La formule rejouee ici est celle de RewardCalculator._calculate_objective_reward_per_turn,
     sur les memes echantillons (pris au meme instant que le versement). Sans le terme d'avance,
@@ -189,7 +192,7 @@ def test_obj_rewards_equals_what_the_reward_calculator_actually_pays(tmp_path: A
     ))
 
     by_key = {key: value for key, value, _step in recording.scalars}
-    assert by_key["0_game/d_obj_rewards"] == pytest.approx(expected)
+    assert by_key["0_VP/f_obj_rewards"] == pytest.approx(expected)
 
 
 def test_a_missing_objective_samples_key_raises(tmp_path: Any) -> None:
@@ -215,5 +218,5 @@ def test_an_empty_sample_list_stays_silent_without_raising(tmp_path: Any) -> Non
     ))
 
     keys = {key for key, _value, _step in recording.scalars}
-    assert "0_game/e_objectives_held" not in keys
-    assert "0_game/f_objectives_held_diff" not in keys
+    assert "0_VP/e_objectives_held" not in keys
+    assert "0_VP/d_objectives_held_diff" not in keys

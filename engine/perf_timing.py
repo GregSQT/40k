@@ -146,6 +146,7 @@ _PERF_PROFILE_WRITE_ERROR_LOGGED = False
 _PERF_FILE_HANDLE: Optional[Any] = None
 _PERF_FILE_PATH: Optional[str] = None
 _PERF_WRITE_COUNT: int = 0
+_PERF_SIGTERM_INSTALLED: bool = False
 # Flush tous les N writes. Défaut 500 (perf training). Surchargeable via env pour le debug
 # interactif (ex. ``W40K_PERF_TIMING_FLUSH_EVERY=1`` → chaque ligne visible immédiatement).
 try:
@@ -168,10 +169,48 @@ def _get_perf_file_handle() -> Optional[Any]:
                 _PERF_FILE_HANDLE.close()
             except OSError:
                 pass
+            # Purge inconditionnelle : si l'`open` ci-dessous echoue, garder ici le handle FERME
+            # ferait lever `ValueError: I/O operation on closed file` au prochain flush — une
+            # exception que l'appelant ne rattrape pas (il ne filtre que `OSError`), donc un
+            # echec d'ECRITURE DE LOG se transformerait en plantage moteur.
+            _PERF_FILE_HANDLE = None
+            _PERF_FILE_PATH = None
         _PERF_FILE_HANDLE = open(path, "a", encoding="utf-8", errors="replace", buffering=8192)
         _PERF_FILE_PATH = path
         atexit.register(_flush_perf_file)
+        _install_sigterm_flush()
     return _PERF_FILE_HANDLE
+
+
+def _install_sigterm_flush() -> None:
+    """Flush du buffer perf sur SIGTERM, en plus de l'``atexit``.
+
+    Les workers ``SubprocVecEnv`` sont demoniques et ne sont jamais fermes proprement par
+    ``ai/train.py`` : a la fin du run ils recoivent un SIGTERM, qui n'execute AUCUN ``atexit``.
+    Avec un buffer de 8 Ko flushe toutes les 500 lignes, chaque worker perdait donc sa queue de
+    lignes — c'est-a-dire precisement ses derniers episodes, de facon invisible dans le rapport.
+    Le handler flushe, restaure le comportement precedent et se renvoie le signal : la
+    terminaison reste identique, seule la perte de donnees disparait.
+    """
+    global _PERF_SIGTERM_INSTALLED
+    if _PERF_SIGTERM_INSTALLED:
+        return
+    import signal
+    try:
+        previous = signal.getsignal(signal.SIGTERM)
+    except ValueError:
+        return  # pas le thread principal : la pose de handler y est interdite, atexit suffit
+
+    def _handler(signum: int, frame: Any) -> None:
+        _flush_perf_file()
+        signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    try:
+        signal.signal(signal.SIGTERM, _handler)
+    except ValueError:
+        return
+    _PERF_SIGTERM_INSTALLED = True
 
 
 def _flush_perf_file() -> None:
@@ -213,7 +252,14 @@ def perf_timing_enabled(game_state: Optional[Dict[str, Any]]) -> bool:
     else:
         return False
     min_ep_raw = os.environ.get("W40K_PERF_TIMING_MIN_EPISODE", "1").strip()
-    min_ep = int(min_ep_raw) if min_ep_raw.isdigit() else 1
+    if not min_ep_raw.isdigit():
+        # Pas de repli sur 1 : une valeur mal saisie (`-1`, `1e3`, faute de frappe) changerait
+        # silencieusement la base de mesure — on croirait comparer deux runs sur la meme fenetre
+        # d'episodes alors que l'un capture tout depuis le premier.
+        raise ValueError(
+            f"W40K_PERF_TIMING_MIN_EPISODE={min_ep_raw!r} invalide : entier positif attendu."
+        )
+    min_ep = int(min_ep_raw)
     if game_state is not None and game_state.get("episode_number", 1) < min_ep:
         return False
     return True
@@ -403,8 +449,9 @@ if __name__ == "__main__":
         print("Usage: python3 engine/perf_timing.py <log> [log_after]")
         sys.exit(1)
 
+    # `ADVANCE_TIMING` a ete retire : aucun emetteur dans le moteur (`grep -r ADVANCE_TIMING`
+    # ne rend que ce fichier), la ligne etait donc sautee en silence a chaque rapport.
     ROWS = [
-        ("ADVANCE_TIMING",          "total_s",    [("los_cache_s", "los"), ("adj_cache_s", "adj")]),
         ("MOVE_COMMIT_TIMING",      "total_s",    [("los_cache_s", "los"), ("adj_cache_s", "adj")]),
         ("SHOOT_ACTIVATION_START",  "total_s",    [("los_cache_s", "los")]),
         ("CHARGE_REVERSE_GOAL_BFS", "total_s",    [("goal_build_s", "goal"), ("reverse_bfs_s", "bfs")]),
@@ -477,6 +524,14 @@ if __name__ == "__main__":
         scores["__total_s"] = round(total_s, 2)
         scores["__total_calls"] = total_calls
         scores["__score_ms"] = round(total_s / total_calls * 1000, 4) if total_calls else 0.0
+        # Cout par EPISODE, seul chiffre a lire pour juger une optimisation sur un log unique :
+        # `__score_ms` est une moyenne ms/APPEL, donc une optimisation qui SUPPRIME des appels
+        # (le cas courant ici : deduplication de masque, cache) la fait MONTER alors que le temps
+        # reel baisse. Le rapport a deux logs a son propre score normalise ; le rapport a un log
+        # n'en avait aucun. Denominateur fiable depuis l'etiquetage par pid.
+        scores["__score_ms_per_episode"] = (
+            round(total_s / n_episodes * 1000, 1) if n_episodes else 0.0
+        )
         scores["__n_episodes"] = n_episodes
         scores["__episodes"] = eps
         scores["__n_processes"] = len(pids)
@@ -506,7 +561,11 @@ if __name__ == "__main__":
             )
             print(f"{event:<28} calls={e['calls']:<6} avg={_fmt(e['avg_s']):<10} sum={_fmt(e['sum_s']):<10}  {subs}")
         print(f"\n{'─' * 72}")
-        print(f"SCORE : {scores['__score_ms']:.4f} ms/call  (total={_fmt(scores['__total_s'])}, calls={scores['__total_calls']})")
+        print(f"COUT / EPISODE : {scores['__score_ms_per_episode']:.1f} ms/ep  "
+              f"(total={_fmt(scores['__total_s'])} sur {n_ep} épisodes)  ← à comparer entre runs")
+        print(f"SCORE          : {scores['__score_ms']:.4f} ms/call  "
+              f"(calls={scores['__total_calls']})  ← moyenne par appel : monte si des appels "
+              f"sont supprimés")
         print(f"{'=' * 72}\n")
 
     def _print_diff(before: Dict[str, Any], after: Dict[str, Any], lbl_b: str, lbl_a: str) -> None:

@@ -16,9 +16,11 @@ moyenne ms/appel sur des fonctions moteur, intrinsequement independante du nombr
 
 CE QUE CET OUTIL IMPOSE
 -----------------------
-1. ENTRELACEMENT A,B,A,B. Sur cette machine deux executions du MEME code peuvent differer d'un
-   facteur 2. Seuls les deux membres d'une meme paire, lances coup sur coup, sont comparables.
-   La premiere paire est jetee (remplissage des caches disque et allocateur).
+1. ENTRELACEMENT, ORDRE ALTERNE (A,B puis B,A puis A,B...). Sur cette machine deux executions du
+   MEME code peuvent differer d'un facteur 2. Seuls les deux membres d'une meme paire, lances
+   coup sur coup, sont comparables ; et l'ordre s'inverse d'une paire a l'autre pour qu'une
+   derive monotone (temperature, charge de fond) ne penalise pas toujours le meme cote. La
+   premiere paire est jetee (remplissage des caches disque et allocateur).
 2. WALL, pas CPU. Avec SubprocVecEnv, augmenter `n_envs` augmente le CPU total consomme meme
    quand le wall baisse : le CPU mesure le travail, pas la vitesse. Il est affiche a titre
    indicatif, jamais utilise pour le verdict.
@@ -99,12 +101,21 @@ def _run(repo: str, agent: str, scenario: str, episodes: int, n_envs: int) -> di
         raise SystemExit(f"echec (n_envs={n_envs}) :\n{proc.stdout[-3000:]}{proc.stderr[-3000:]}")
     output = proc.stdout + proc.stderr
     built = _NENVS_RE.search(output)
-    if built is None:
+    # train.py n'annonce "Creating K parallel environments" que pour n_envs > 1 ; a 1 il prend la
+    # branche mono-env, silencieuse. Le controle s'inverse donc : a 1 c'est l'ABSENCE du message
+    # qui prouve la configuration, sa presence trahirait une surcharge de config.
+    if n_envs == 1:
+        if built is not None:
+            raise SystemExit(
+                f"n_envs demande 1, mais train.py a construit {built.group(1)} environnements "
+                f"paralleles : une surcharge de configuration ecrase --param."
+            )
+    elif built is None:
         raise SystemExit(
             f"train.py n'a pas annonce d'environnements paralleles pour n_envs={n_envs} : "
             f"soit la vectorisation est desactivee (--step ? --replay ?), soit le message a change."
         )
-    if int(built.group(1)) != n_envs:
+    elif int(built.group(1)) != n_envs:
         raise SystemExit(
             f"n_envs demande {n_envs}, n_envs construit {built.group(1)} : une surcharge de "
             f"configuration ecrase --param, la mesure comparerait deux fois la meme chose."
@@ -124,8 +135,10 @@ def main() -> int:
     parser.add_argument("--scenario", default="bot")
     args = parser.parse_args()
 
-    main_repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    repo = os.path.abspath(args.repo)
+    # realpath, pas abspath : un `--repo` qui est un lien symbolique vers le depot principal
+    # passerait le controle ci-dessous et l'entrainement ecraserait le modele protege.
+    main_repo = os.path.realpath(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    repo = os.path.realpath(args.repo)
     if repo == main_repo:
         raise SystemExit(
             "refus de mesurer dans le depot principal : chaque run ecrit "
@@ -151,11 +164,21 @@ def main() -> int:
 
     ratios = []
     for index in range(1, args.paires + 1):
-        run_a = _run(repo, args.agent, args.scenario, args.episodes, args.a)
-        run_b = _run(repo, args.agent, args.scenario, args.episodes, args.b)
+        # Ordre alterne A,B puis B,A : lance toujours dans le meme ordre, une derive monotone de
+        # la machine (montee en temperature, charge de fond qui s'installe) penalise
+        # systematiquement le second des deux. Le biais est alors de meme signe dans toutes les
+        # paires et la mediane ne l'annule pas — elle le consacre.
+        b_first = index % 2 == 0
+        if b_first:
+            run_b = _run(repo, args.agent, args.scenario, args.episodes, args.b)
+            run_a = _run(repo, args.agent, args.scenario, args.episodes, args.a)
+        else:
+            run_a = _run(repo, args.agent, args.scenario, args.episodes, args.a)
+            run_b = _run(repo, args.agent, args.scenario, args.episodes, args.b)
         ratio = run_b["wall"] / run_a["wall"]
+        order = "B puis A" if b_first else "A puis B"
         print(
-            f"paire {index}{' (jetee)' if index == 1 else ''}\n"
+            f"paire {index} ({order}){' — jetee' if index == 1 else ''}\n"
             f"  A(n_envs={args.a}) wall={run_a['wall']:6.1f}s  boucle={run_a['loop']:5.0f}s  "
             f"demarrage={run_a['startup']:5.1f}s  cpu={run_a['cpu']:7.1f}s  "
             f"debit={args.episodes / run_a['wall']:.2f} ep/s\n"

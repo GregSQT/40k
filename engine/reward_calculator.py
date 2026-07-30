@@ -28,10 +28,19 @@ class RewardCalculator:
     def calculate_reward(self, success: bool, result: Dict[str, Any], game_state: Dict[str, Any]) -> float:
         """Calculate reward using actual acting unit with reward mapper integration."""
         # Initialize reward breakdown dictionary for metrics tracking
+        # `objective` REMPLACE l'ancienne cle `tactical_bonuses`, qui n'avait qu'un seul
+        # producteur (la recompense d'objectif de fin de tour) et dont le nom masquait ce
+        # qu'elle mesurait. La ventilation doit pouvoir repondre a « quelle part de la
+        # recompense vient du CONTROLE D'OBJECTIF, la seule chose qui decide la victoire
+        # (game_state.determine_winner_with_method) ? ». Elle ne le pouvait pas : la part
+        # objectif entrait dans le total sur 12 chemins mais n'etait categorisee que sur UN
+        # (la reponse systeme), noyee dans `base_actions` ou explicitement retranchee ailleurs
+        # (`fight_reward - objective_turn_reward`). Cette cle agrege desormais les DEUX sources
+        # d'objectif — le versement de fin de tour et le bonus « sur un objectif » par action.
         reward_breakdown = {
             'base_actions': 0.0,
             'result_bonuses': 0.0,
-            'tactical_bonuses': 0.0,
+            'objective': 0.0,
             'situational': 0.0,
             'penalties': 0.0,
             'total': 0.0
@@ -133,13 +142,18 @@ class RewardCalculator:
         # le step qui porte la transition est deja un step credite a l'agent.
         objective_turn_reward = self._calculate_objective_reward_per_turn(game_state, result)
         if objective_turn_reward:
-            reward_breakdown['tactical_bonuses'] += objective_turn_reward
+            reward_breakdown['objective'] += objective_turn_reward
         # Penalite coherency fin de tour (squad_shaping) : MEME garde, meme site, donc morte
         # pour la meme raison. La reparer avec sa jumelle est deliberé — laisser une penalite
         # inerte a cote d'un bonus repare fausserait l'arbitrage entre les deux.
         coherency_penalty = self._calculate_coherency_penalty_per_turn(game_state, result)
         if coherency_penalty:
             reward_breakdown['penalties'] += coherency_penalty
+            # ⚠️ A partir d'ici `objective_turn_reward` n'est PLUS de l'objectif pur : il
+            # TRANSPORTE aussi la penalite de coherency vers le total de chaque chemin. C'est
+            # pourquoi `reward_breakdown['objective']` est renseigne AVANT cette ligne, a partir
+            # de la valeur pure. Categoriser la variable apres cette absorption imputerait la
+            # penalite a l'objectif et fausserait la mesure des le premier tour.
             objective_turn_reward += coherency_penalty
 
         if is_system_response:
@@ -230,16 +244,30 @@ class RewardCalculator:
             # In these cases, no logs are added, so return 0.0 reward
             waiting_for_player = result.get("waiting_for_player", False)
             all_attack_results = result["all_attack_results"] if "all_attack_results" in result else []
+            # ⚠️ CES SORTIES RENVOYAIENT 0.0 SEC, ecrasant `objective_turn_reward`.
+            # Un tir n'est pas toujours un payload de tir « pur » : quand il vide le pool, la
+            # cascade (w40k_core, boucle `phase_complete`/`next_phase`) le fait traverser les
+            # phases suivantes jusqu'a `command_phase_start`, qui hors tour agent rend
+            # `command_phase_end` — soit `phase_transition: True` + `next_phase: "move"`, le
+            # declencheur EXACT du versement d'objectif. La cascade REINJECTE alors `action`,
+            # `unitId` et `all_attack_results` dans ce resultat, si bien que le payload arrive
+            # ici en portant la transition. `is_action_result` etant vrai, il echappe au chemin
+            # « reponse systeme » qui, lui, versait bien les points.
+            # Mesure : meme transition, memes objectifs — 30.0 verses sans les cles d'action,
+            # 0.0 avec. Les points etaient perdus, et la ventilation les comptait quand meme.
+            # `objective_turn_reward` (et non 0.0) est ce que rendent DEJA les douze autres
+            # branches d'action : c'est l'alignement, pas une exception de plus.
             if waiting_for_player and not all_attack_results:
-                # No attacks executed yet (waiting for target selection), return 0.0 reward
-                reward_breakdown['total'] = 0.0
+                # No attacks executed yet (waiting for target selection): no shooting reward,
+                # mais la recompense d'objectif reste due si le payload porte la transition.
+                reward_breakdown['total'] = objective_turn_reward
                 game_state['last_reward_breakdown'] = reward_breakdown
-                return 0.0
+                return objective_turn_reward
             if not all_attack_results:
                 # End activation without firing (e.g. no valid targets, no weapons) - no logs
-                reward_breakdown['total'] = 0.0
+                reward_breakdown['total'] = objective_turn_reward
                 game_state['last_reward_breakdown'] = reward_breakdown
-                return 0.0
+                return objective_turn_reward
             
             # Sum all shoot rewards from current activation (handles RNG_NB > 1)
             action_logs = require_key(game_state, "action_logs")
@@ -316,12 +344,13 @@ class RewardCalculator:
                 # 2. Logs not yet added (timing issue)
                 # 3. Logs added with different turn
                 # 4. Phase transition or other edge cases
-                # Return 0.0 reward instead of raising error to handle all cases gracefully
+                # Aucun log de tir exploitable : pas de reward de tir, mais la recompense
+                # d'objectif reste due (meme raison que les deux sorties ci-dessus).
                 reward_breakdown['base_actions'] = 0.0
                 reward_breakdown['result_bonuses'] = 0.0
-                reward_breakdown['total'] = 0.0
+                reward_breakdown['total'] = objective_turn_reward
                 game_state['last_reward_breakdown'] = reward_breakdown
-                return 0.0
+                return objective_turn_reward
             
             # Calculate total reward
             calculated_reward = base_action_reward + result_bonus_reward + objective_turn_reward
@@ -359,6 +388,7 @@ class RewardCalculator:
             on_obj_reward = self._calculate_on_objective_reward(game_state, result)
             movement_reward = on_obj_reward + objective_turn_reward
             reward_breakdown['base_actions'] = 0.0
+            reward_breakdown['objective'] += on_obj_reward
             reward_breakdown['total'] = movement_reward
 
             if game_state.get("game_over", False):
@@ -424,7 +454,10 @@ class RewardCalculator:
             elif pile_in_col is not None:
                 on_obj_reward = self._calculate_on_objective_reward(game_state, {"unitId": result.get("unitId"), "toCol": pile_in_col, "toRow": pile_in_row})
             fight_reward = reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets, game_state) + objective_turn_reward + on_obj_reward
-            reward_breakdown['base_actions'] = fight_reward - objective_turn_reward
+            # `- on_obj_reward` en plus de `- objective_turn_reward` : sans lui, le bonus
+            # « sur un objectif » resterait compte dans `base_actions` EN PLUS d'`objective`.
+            reward_breakdown['base_actions'] = fight_reward - objective_turn_reward - on_obj_reward
+            reward_breakdown['objective'] += on_obj_reward
             reward_breakdown['total'] = fight_reward
 
             fight_attack_results = result["all_attack_results"]
@@ -493,6 +526,7 @@ class RewardCalculator:
             if pile_in_col is not None:
                 on_obj_reward = self._calculate_on_objective_reward(game_state, {"unitId": result.get("unitId"), "toCol": pile_in_col, "toRow": pile_in_row})
             wait_reward += objective_turn_reward + on_obj_reward
+            reward_breakdown['objective'] += on_obj_reward
             reward_breakdown['total'] = wait_reward
 
             # CRITICAL FIX: Add situational reward if game ended
@@ -545,6 +579,7 @@ class RewardCalculator:
             on_obj_reward = self._calculate_on_objective_reward(game_state, result)
             advance_reward = on_obj_reward + objective_turn_reward
             reward_breakdown['base_actions'] = 0.0
+            reward_breakdown['objective'] += on_obj_reward
             reward_breakdown['total'] = advance_reward
 
             if game_state.get("game_over", False):
@@ -579,6 +614,7 @@ class RewardCalculator:
             on_obj_reward = self._calculate_on_objective_reward(game_state, result)
             movement_reward = on_obj_reward + objective_turn_reward
             reward_breakdown['base_actions'] = 0.0
+            reward_breakdown['objective'] += on_obj_reward
             reward_breakdown['total'] = movement_reward
             if game_state.get("game_over", False):
                 situational_reward = self._get_situational_reward(game_state)
@@ -592,6 +628,7 @@ class RewardCalculator:
             on_obj_reward = self._calculate_on_objective_reward(game_state, result)
             advance_reward = on_obj_reward + objective_turn_reward
             reward_breakdown['base_actions'] = 0.0
+            reward_breakdown['objective'] += on_obj_reward
             reward_breakdown['total'] = advance_reward
             if game_state.get("game_over", False):
                 situational_reward = self._get_situational_reward(game_state)
