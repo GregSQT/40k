@@ -295,7 +295,13 @@ def append_perf_timing_line(message: str) -> None:
         fh = _get_perf_file_handle()
         if fh is None:
             return
-        fh.write(message + "\n")
+        # `pid` est ajoute ici, au point de passage unique de toutes les lignes perf : en
+        # entrainement vectorise (SubprocVecEnv), N processus appendent dans le MEME fichier et
+        # `episode_number` est un compteur PAR PROCESSUS. Sans pid, l'agregation confond les
+        # episodes 5 de six processus en un seul et sous-compte l'echantillon d'un facteur N.
+        # os.getpid() est relu a chaque ligne, jamais mis en cache : un cache serait herite tel
+        # quel par un fork et etiquetterait les lignes du fils avec le pid du pere.
+        fh.write(f"{message} pid={os.getpid()}\n")
         _PERF_WRITE_COUNT += 1
         if _PERF_WRITE_COUNT % _PERF_FLUSH_INTERVAL == 0:
             fh.flush()
@@ -443,9 +449,16 @@ if __name__ == "__main__":
         scores: Dict[str, Any] = {}
         total_s = 0.0
         total_calls = 0
-        eps = sorted({int(r["episode"]) for recs in events.values() for r in recs
-                      if "episode" in r and isinstance(r.get("episode"), float)})
-        n_episodes = max(len(eps), 1)
+        # Un episode est identifie par (pid, episode_number) : en vectorise, chaque processus a
+        # son propre compteur d'episodes et tous ecrivent dans le meme fichier. Dedupliquer sur
+        # le seul numero fusionnerait les episodes homonymes de N processus.
+        keyed = [(int(r["pid"]) if isinstance(r.get("pid"), float) else None, int(r["episode"]))
+                 for recs in events.values() for r in recs
+                 if isinstance(r.get("episode"), float)]
+        untagged = sum(1 for pid, _ in keyed if pid is None)
+        eps = sorted({ep for _, ep in keyed})
+        pids = sorted({pid for pid, _ in keyed if pid is not None})
+        n_episodes = max(len({(pid, ep) for pid, ep in keyed}), 1)
         for event, total_field, sub_fields in ROWS:
             if event not in events:
                 continue
@@ -466,13 +479,21 @@ if __name__ == "__main__":
         scores["__score_ms"] = round(total_s / total_calls * 1000, 4) if total_calls else 0.0
         scores["__n_episodes"] = n_episodes
         scores["__episodes"] = eps
+        scores["__n_processes"] = len(pids)
+        scores["__untagged_records"] = untagged
         return scores
 
     def _print_scores(scores: Dict[str, Any], label: str) -> None:
         eps = scores["__episodes"]
         n_ep = scores["__n_episodes"]
+        n_proc = scores["__n_processes"]
+        untagged = scores["__untagged_records"]
         print(f"\n{'=' * 72}")
-        print(f"PERF TIMING — {label}   (épisodes: {eps if eps else '?'}, n={n_ep})")
+        print(f"PERF TIMING — {label}   (n={n_ep} épisodes sur {n_proc} processus, "
+              f"numéros vus: {eps if eps else '?'})")
+        if untagged:
+            print(f"⚠️  {untagged} enregistrements sans champ pid (log antérieur à l'étiquetage "
+                  f"par processus) : n est sous-estimé si le run était vectorisé.")
         print(f"{'=' * 72}\n")
         for event, _, sub_fields in ROWS:
             if event not in scores:

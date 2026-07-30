@@ -1597,6 +1597,29 @@ class W40KEngine(gym.Env):
     def step(
         self, action: int
     ) -> Tuple[Optional[Union[np.ndarray, Dict[str, np.ndarray]]], float, bool, bool, Dict[str, Any]]:
+        """Interface gym.Env — 5-uplet fixe. L'implementation est ``step_with_mask``.
+
+        Le 5-uplet de gym n'a pas de place pour le masque, et gym.Wrapper.step ne transmet que
+        l'action : un appelant qui a DEJA le masque de l'etat courant, ou qui voudrait celui de
+        l'etat de sortie, ne peut ni le donner ni le recevoir par ici. C'est ``step_with_mask`` qui
+        ouvre les deux sens, pour les appelants qui tiennent une reference au moteur
+        (``ai/env_wrappers``). Ici, les deux sont simplement ignores.
+        """
+        observation, reward, terminated, truncated, info, _mask = self.step_with_mask(action)
+        return observation, reward, terminated, truncated, info
+
+    def step_with_mask(
+        self,
+        action: int,
+        mask_and_eligible: Optional[Tuple[np.ndarray, List[Dict[str, Any]]]] = None,
+    ) -> Tuple[
+        Optional[Union[np.ndarray, Dict[str, np.ndarray]]],
+        float,
+        bool,
+        bool,
+        Dict[str, Any],
+        Optional[Tuple[np.ndarray, List[Dict[str, Any]]]],
+    ]:
         """
         Execute gym action with built-in step counting - gym.Env interface.
 
@@ -1604,7 +1627,28 @@ class W40KEngine(gym.Env):
         ``defer_observation`` : il s'est alors engage a construire l'observation finale lui-meme
         (cf. ``_step_observation`` et ``BotControlledEnv.step``). Le type l'expose au lieu de le
         cacher : un appelant qui ignore ce contrat doit se faire signaler ici, pas plus loin.
+
+        ``mask_and_eligible`` (ENTREE) — masque et pool deja construits par l'appelant pour l'etat
+        d'ENTREE. Mesure : le wrapper d'entrainement construisait ce masque pour savoir a qui est la
+        decision, puis cette fonction le reconstruisait a l'identique juste apres (124,2 fois par
+        episode, 100 % des reconstructions rendant un couple bit-a-bit identique). Meme regle que
+        ``_build_observation`` : l'appelant doit pouvoir PROUVER que rien n'a touche ``game_state``
+        entre sa construction et cet appel. ``W40K_MASK_VERIFY=1`` recalcule et compare, et leve si
+        l'appelant s'est trompe (cf. ``_verify_supplied_mask``).
+
+        6e ELEMENT RENDU — le couple ``(masque, pool)`` de l'etat de SORTIE, ou ``None`` quand
+        aucune construction n'a eu lieu sur le chemin emprunte. L'appelant y reprend le masque au
+        lieu de le reconstruire pour reposer la question « a qui est la decision maintenant ? »
+        (96,5 reconstructions identiques par episode). Sa validite jusqu'au ``return`` a ete
+        auditee : entre la derniere construction et la sortie ne tournent que ``calculate_reward``,
+        des compteurs et la fabrication d'``info``, et RIEN de ce que ``calculate_reward`` ecrit
+        dans ``game_state`` (``last_reward_breakdown``, ``_pile_in_toCol/Row``) n'est lu par la
+        construction du masque — verifie par grep sur ``action_decoder``, ``phase_handlers`` et
+        ``spatial_grid``. ``_pending_zone_shaping`` est poppe ici, pas par le calcul de recompense.
         """
+        # Reste None sur tout chemin qui ne construit aucune observation : l'appelant reconstruit
+        # alors le masque lui-meme. Jamais un couple perime — c'est l'inverse du defaut a eviter.
+        out_mask: Optional[Tuple[np.ndarray, List[Dict[str, Any]]]] = None
         if self.game_state.get("debug_mode", False):
             episode = self.game_state.get("episode_number", "?")
             turn = self.game_state.get("turn", "?")
@@ -1625,7 +1669,7 @@ class W40KEngine(gym.Env):
             # CRITICAL: Set turn_limit_reached flag in game_state for winner determination
             self.game_state["game_over"] = True
             self.game_state["turn_limit_reached"] = True
-            observation = self._step_observation()
+            observation, out_mask = self._step_observation()
             winner, win_method = self._determine_winner_with_method()
             
             # CRITICAL: win_method should never be None when game is terminated
@@ -1641,7 +1685,7 @@ class W40KEngine(gym.Env):
                 objective_control = self.state_manager.calculate_objective_control(self.game_state)
                 self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
             
-            return observation, 0.0, True, False, info
+            return observation, 0.0, True, False, info, out_mask
 
         # Check for game termination before action
         self.game_state["game_over"] = self._check_game_over()
@@ -1658,7 +1702,13 @@ class W40KEngine(gym.Env):
         # CRITICAL FIX: Auto-advance phase when no valid actions exist
         # This handles the case where fight phase pools are empty
         # PERF: compute mask+eligible_units once, reuse for convert_squad_action
-        action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
+        # L'appelant qui tient deja ce couple pour l'etat d'entree le transmet (cf. docstring) ;
+        # sinon on le construit. `_verify_supplied_mask` est un no-op hors `W40K_MASK_VERIFY=1`.
+        if mask_and_eligible is not None:
+            action_mask, eligible_units = mask_and_eligible
+            self._verify_supplied_mask(action_mask, eligible_units, "W40KEngine.step_with_mask")
+        else:
+            action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
         if self.game_state.get("debug_mode", False):
             from engine.game_utils import add_debug_file_log
             episode = self.game_state.get("episode_number", "?")
@@ -1682,7 +1732,7 @@ class W40KEngine(gym.Env):
                 raise RuntimeError(f"advance_phase failed: {result}")
             _step_t2_early = time.perf_counter() if _step_t0 is not None else None
             # After phase transition, get new observation
-            observation = self._step_observation()
+            observation, out_mask = self._step_observation()
             _step_t3_early = time.perf_counter() if _step_t0 is not None else None
             # Check if game ended after phase transition
             self.game_state["game_over"] = self._check_game_over()
@@ -1710,7 +1760,7 @@ class W40KEngine(gym.Env):
                     objective_control = self.state_manager.calculate_objective_control(self.game_state)
                     self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
             
-            return observation, 0.0, terminated, False, info
+            return observation, 0.0, terminated, False, info, out_mask
 
         if self._should_force_random_deployment_action(action_mask):
             valid_action_indices = [int(i) for i, value in enumerate(action_mask) if bool(value)]
@@ -1856,7 +1906,7 @@ class W40KEngine(gym.Env):
         if not eligible_units and not action_mask.any():
             if self.game_state.get("game_over", False):
                 # Adjacent au masque ci-dessus : seules des lectures separent les deux.
-                observation = self._step_observation(
+                observation, out_mask = self._step_observation(
                     mask_and_eligible=(action_mask, eligible_units)
                 )
             else:
@@ -1872,51 +1922,39 @@ class W40KEngine(gym.Env):
                         and advance_result.get("error") == "game_over"
                     ):
                         self.game_state["game_over"] = True
-                        observation = self._step_observation()
+                        observation, out_mask = self._step_observation()
                     else:
                         raise RuntimeError(f"advance_phase failed: {advance_result}")
                 else:
-                    # Mirror cascade behavior from step(): execute phase transitions before building observation
-                    if isinstance(advance_result, dict) and advance_result.get("phase_complete") and advance_result.get("next_phase"):
-                        max_cascade = 10
-                        cascade_count = 0
-                        result = advance_result
-                        while result.get("phase_complete") and result.get("next_phase") and cascade_count < max_cascade:
-                            next_phase = result["next_phase"]
-                            current_phase = self.game_state.get("phase", "unknown")
-                            cascade_count += 1
-                            
-                            if next_phase == current_phase:
-                                break
-                            
-                            if next_phase == "deployment":
-                                phase_init_result = deployment_handlers.deployment_phase_start(self.game_state)
-                            elif next_phase == "command":
-                                phase_init_result = command_handlers.command_phase_start(self.game_state)
-                            elif next_phase == "shoot":
-                                phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)
-                            elif next_phase == "charge":
-                                phase_init_result = charge_handlers.charge_phase_start(self.game_state)
-                            elif next_phase == "fight":
-                                phase_init_result = fight_handlers.fight_phase_start(self.game_state)
-                                phase_init_result = self._fight_v11_gym_after_phase_start(phase_init_result)
-                            elif next_phase == "move":
-                                phase_init_result = movement_handlers.movement_phase_start(self.game_state)
-                            else:
-                                break
-                            
-                            if phase_init_result and phase_init_result.get("phase_complete") and phase_init_result.get("next_phase"):
-                                result = phase_init_result
-                            else:
-                                break
-                    observation = self._step_observation()
+                    # `result` GARDE le resultat de l'action de l'agent. Le `advance_phase` ci-dessus
+                    # avance la phase, il ne decrit pas ce que l'agent a fait : `calculate_reward` et
+                    # `info` (construits plus bas depuis `result`) doivent voir l'action, pas la
+                    # transition qu'elle a declenchee.
+                    #
+                    # Ce qui vivait ici, et pourquoi c'est parti : une cascade de phases doublonnee
+                    # (morte — `_process_squad_action` cascade lui-meme avant de rendre la main ; 0
+                    # appel a `*_phase_start` mesure) dont l'initialiseur de boucle `result =
+                    # advance_result` etait, lui, bien vivant. Effet mesure sur 8 episodes : 25,6
+                    # substitutions par episode, soit 25 % des calculs de recompense, ou le payload
+                    # `reason: "pool_empty"` forcait `is_system_response` (reward_calculator) et
+                    # versait `system_penalties['system_response']` = 0.0 a la place de la recompense
+                    # de l'action — la DERNIERE activation de chaque phase, dernier tir et dernier
+                    # corps-a-corps compris (+68,20 de recompense d'action annulee sur 8 episodes).
+                    # `info` y perdait aussi `action` et `unitId`, invisibilisant ces steps pour toute
+                    # metrique par type d'action. Aucun consommateur ne lisait `info["next_phase"]`
+                    # ni `info["phase_complete"]`.
+                    #
+                    # Verrouille par tests/unit/engine/test_engine_step.py
+                    # (TestStepPostActionPoolEmpty) : reintroduire la substitution rend ces tests
+                    # rouges. Ce changement DEPLACE les recompenses : il exige un re-entrainement.
+                    observation, out_mask = self._step_observation()
         else:
             # Aucune transition de phase n'a eu lieu : l'etat est EXACTEMENT celui sur lequel le
             # masque ci-dessus a ete calcule, on le transmet au lieu de le refaire calculer a
             # l'identique (cf. `_build_observation`, parametre `mask_and_eligible`). Les branches
             # ci-dessus, elles, ont avance la phase : leur masque est perime, elles n'en passent
             # aucun.
-            observation = self._step_observation(mask_and_eligible=(action_mask, eligible_units))
+            observation, out_mask = self._step_observation(mask_and_eligible=(action_mask, eligible_units))
         _step_t4 = time.perf_counter() if _step_t0 is not None else None
         # Calculate reward (independent of step_logger)
         # Zone intent free step: reward is always 0.0 (agent learns via deferred rewards)
@@ -2320,7 +2358,7 @@ class W40KEngine(gym.Env):
             info["winner"] = -1  # draw so eval does not skew win rate
             info["win_method"] = "step_limit"
             
-        return observation, reward, terminated, truncated, info
+        return observation, reward, terminated, truncated, info, out_mask
     
     
     # ============================================================================
@@ -5502,6 +5540,25 @@ class W40KEngine(gym.Env):
             victory_points,
         )
 
+    def _verify_supplied_mask(
+        self,
+        action_mask: np.ndarray,
+        eligible_units: List[Dict[str, Any]],
+        source: str,
+    ) -> None:
+        """Controle du masque transmis a ``step_with_mask`` — no-op hors ``W40K_MASK_VERIFY=1``.
+
+        Le gain de la transmission repose sur une affirmation de l'appelant que rien ne verifiait
+        (cf. ``engine.mask_verification.verify_supplied_mask``). Armer ce mode sur un run de
+        validation transforme cette affirmation en fait.
+
+        ``source`` nomme la PORTE d'entree — il y en a deux (``step_with_mask`` et
+        ``_build_observation_and_mask``) et le message d'erreur doit designer la bonne.
+        """
+        from engine.mask_verification import verify_supplied_mask
+
+        verify_supplied_mask(self.game_state, action_mask, eligible_units, source)
+
     def _step_observation(
         self, mask_and_eligible: Optional[Tuple[np.ndarray, List[Dict[str, Any]]]] = None
     ):
@@ -5526,8 +5583,13 @@ class W40KEngine(gym.Env):
 
         ``mask_and_eligible`` : cf. ``_build_observation``. Seul un appelant IMMEDIATEMENT adjacent
         peut le fournir.
+
+        Rend ``(observation, masque_utilise)`` — le second element est celui de
+        ``_build_observation_and_mask`` (couple ``(masque, pool)`` sur lequel cette construction
+        s'est appuyee, ou ``None`` quand elle n'en a construit aucun). ``step_with_mask`` le propage
+        jusqu'a son appelant, qui evite ainsi de le reconstruire a l'identique sur l'etat de sortie.
         """
-        return self._build_observation(
+        return self._build_observation_and_mask(
             tensor=not self.defer_observation, mask_and_eligible=mask_and_eligible
         )
 
@@ -5669,6 +5731,14 @@ class W40KEngine(gym.Env):
 
         if mask_and_eligible is not None:
             action_mask, eligible_units = mask_and_eligible
+            # Meme controle que dans `step_with_mask`, et pour la meme raison : ce parametre est
+            # l'AUTRE porte d'entree d'un masque construit ailleurs (quatre appelants de
+            # production). Elle n'etait pas verifiee alors que la docstring ci-dessus renvoie a
+            # `W40K_MASK_VERIFY=1` — un mode arme qui ne regarde qu'une porte sur deux donne un
+            # feu vert partiel qui se lit comme un feu vert.
+            self._verify_supplied_mask(
+                action_mask, eligible_units, "W40KEngine._build_observation_and_mask"
+            )
         else:
             action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
         if not eligible_units and not action_mask.any():

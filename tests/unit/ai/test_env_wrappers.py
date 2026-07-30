@@ -54,6 +54,8 @@ class _DummyEngine(gym.Env):
         self.defer_observation = False
         self.build_observation_calls = 0
         self.last_mask_and_eligible = None
+        self.step_with_mask_calls = 0
+        self.last_step_mask_and_eligible = None
         self.game_state = {
             "phase": "move",
             "debug_mode": False,
@@ -68,14 +70,35 @@ class _DummyEngine(gym.Env):
         return np.zeros((4,), dtype=np.float32), {}
 
     def step(self, action) -> tuple:
-        _ = action
-        # Miroir de `W40KEngine.step` : l'observation retournee passe par le report.
-        return self._step_observation(), 0.0, False, False, {}
+        # Miroir de `W40KEngine.step` : adaptateur gym 5-uplet au-dessus de `step_with_mask`.
+        obs, reward, terminated, truncated, info, _mask = self.step_with_mask(action)
+        return obs, reward, terminated, truncated, info
 
-    def _step_observation(self):
+    def step_with_mask(self, action, mask_and_eligible=None) -> tuple:
+        """Miroir de `W40KEngine.step_with_mask` — masque transmis dans les deux sens.
+
+        Membre du contrat moteur (`ENGINE_CONTRACT_ATTRS`) : les wrappers l'appellent
+        DIRECTEMENT, `step` n'etant plus que l'adaptateur gym. Le double enregistre le masque
+        recu et rend celui de l'etat de sortie, comme le vrai moteur.
+        """
+        _ = action
+        self.step_with_mask_calls += 1
+        self.last_step_mask_and_eligible = mask_and_eligible
+        obs, out_mask = self._step_observation()
+        return obs, 0.0, False, False, {}, out_mask
+
+    def get_action_mask(self):
+        """Masque du moteur nu — ce que `BotControlledEnv.action_masks()` sert a defaut de depot."""
+        mask, _eligible = self.action_decoder.get_squad_action_mask_and_eligible_units(
+            self.game_state
+        )
+        return mask
+
+    def _step_observation(self, mask_and_eligible=None):
+        # Rend `(observation, masque_utilise)`, comme le vrai `_step_observation`.
         if self.defer_observation:
-            return None
-        return self._build_observation()
+            return None, mask_and_eligible
+        return self._build_observation(mask_and_eligible=mask_and_eligible), mask_and_eligible
 
     def _build_observation(self, mask_and_eligible=None):
         # `mask_and_eligible` fait partie du contrat moteur (cf. `W40KEngine._build_observation`) :
@@ -366,7 +389,12 @@ def test_get_opponent_action_uses_self_play_branch_when_enabled(monkeypatch: pyt
     wrapper = BotControlledEnv(_DummyEngine(), bot=_DummyBot(action=4))
     wrapper._episode_uses_self_play_opponent = True
     monkeypatch.setattr(wrapper, "_get_self_play_opponent_action", lambda decision=None: 9)
-    assert wrapper._get_opponent_action() == 9
+    # `_get_opponent_action` rend (action, decision encore valable). La branche self-play construit
+    # une observation, donc MUTE l'etat : elle doit rendre None — c'est cette invalidation qui
+    # empeche de transmettre au step suivant un masque devenu faux.
+    action, surviving_decision = wrapper._get_opponent_action()
+    assert action == 9
+    assert surviving_decision is None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -441,9 +469,14 @@ class _TerminatingDummyEngine(_DummyEngine):
     AVANT l'action pourrait survivre jusqu'a l'observation terminale.
     """
 
-    def step(self, action) -> tuple:
-        _ = action
-        return self._step_observation(), 0.0, True, False, {}
+    #: Masque de l'etat d'APRES l'action — distinguable de tout masque d'avant.
+    POST_ACTION_MASK = (np.zeros(1, dtype=bool), [{"id": "post", "player": 1}])
+
+    def step_with_mask(self, action, mask_and_eligible=None) -> tuple:
+        _ = (action, mask_and_eligible)
+        self.step_with_mask_calls += 1
+        obs, _out = self._step_observation()
+        return obs, 0.0, True, False, {}, self.POST_ACTION_MASK
 
 
 def test_terminal_observation_never_uses_a_pre_action_mask() -> None:
@@ -465,9 +498,19 @@ def test_terminal_observation_never_uses_a_pre_action_mask() -> None:
     _obs, _reward, terminated, _truncated, _info = wrapper.step(slot)
 
     assert terminated
-    assert engine.last_mask_and_eligible is None, (
-        "l'observation terminale a recu le masque construit AVANT l'action de la politique"
+    # Le verrou porte sur la PROVENANCE du masque, pas sur son absence : l'observation terminale
+    # decrit l'etat d'apres l'action, donc elle a le droit d'utiliser le masque que le moteur a
+    # construit sur CET etat (il remonte par le 6e element de `step_with_mask`). Ce qu'elle ne
+    # doit jamais recevoir, c'est celui d'avant — un etat qui n'existe plus, appris par PPO comme
+    # observation finale.
+    # Identite des ELEMENTS et non du couple : il transite par une `MaskDecision` puis
+    # `mask_pair_of`, qui reforme un tuple. Ce sont bien les memes objets qui arrivent.
+    received = engine.last_mask_and_eligible
+    assert received is not None, "l'observation terminale n'a recu aucun masque"
+    assert received[0] is engine.POST_ACTION_MASK[0], (
+        "l'observation terminale n'a pas recu le masque construit APRES l'action de la politique"
     )
+    assert received[1] is engine.POST_ACTION_MASK[1]
 
 
 class _StubFrozenModel:
@@ -777,13 +820,16 @@ def test_step_defers_intermediate_observations_and_builds_exactly_one() -> None:
     wrapper, engine = _deferral_wrapper()
     engine.build_observation_calls = 0
     seen_flag: List[bool] = []
-    inner_step = engine.step
+    # On sonde `step_with_mask` et non `step` : le wrapper appelle l'implementation directement
+    # pour transmettre le masque (`_engine_step`), `step` n'etant plus que l'adaptateur gym.
+    # Sonder `step` laissait ce test vert sans rien observer.
+    inner_step = engine.step_with_mask
 
-    def _spy(action):
+    def _spy(action, mask_and_eligible=None):
         seen_flag.append(engine.defer_observation)
-        return inner_step(action)
+        return inner_step(action, mask_and_eligible)
 
-    engine.step = _spy  # type: ignore[method-assign]
+    engine.step_with_mask = _spy  # type: ignore[method-assign]
     wrapper.step(mi.ACTION_WAIT)
     assert seen_flag and all(seen_flag), "defer_observation n'etait pas arme pendant les steps moteur"
     assert engine.build_observation_calls == 1
@@ -793,11 +839,11 @@ def test_step_clears_deferral_even_when_the_engine_raises() -> None:
     """Le drapeau ne doit pas survivre a une exception : sinon tout step ulterieur rendrait None."""
     wrapper, engine = _deferral_wrapper()
 
-    def _boom(action):
-        _ = action
+    def _boom(action, mask_and_eligible=None):
+        _ = (action, mask_and_eligible)
         raise RuntimeError("boom moteur")
 
-    engine.step = _boom  # type: ignore[method-assign]
+    engine.step_with_mask = _boom  # type: ignore[method-assign]
     with pytest.raises(RuntimeError, match="boom moteur"):
         wrapper.step(mi.ACTION_WAIT)
     assert engine.defer_observation is False

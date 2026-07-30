@@ -115,7 +115,15 @@ def _minimal_config() -> Dict[str, Any]:
 
 @pytest.fixture(autouse=True)
 def mock_build_obs(monkeypatch):
-    monkeypatch.setattr(W40KEngine, "_build_observation", lambda self, *_a, **_k: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET))
+    # On double `_build_observation_and_mask`, l'IMPLEMENTATION, et non la facade
+    # `_build_observation` : `_step_observation` appelle l'implementation directement, donc doubler
+    # la facade seule laissait tourner le vrai constructeur (et le vrai `advance_phase` sur pool
+    # vide) sur ces etats artificiels. La facade est doublee aussi, pour les tests qui l'appellent.
+    _stub_obs = np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET)
+    monkeypatch.setattr(
+        W40KEngine, "_build_observation_and_mask", lambda self, *_a, **_k: (_stub_obs, None)
+    )
+    monkeypatch.setattr(W40KEngine, "_build_observation", lambda self, *_a, **_k: _stub_obs)
     from engine.reward_calculator import RewardCalculator
     monkeypatch.setattr(RewardCalculator, "calculate_reward", lambda self, *a, **kw: 0.0)
 
@@ -302,6 +310,117 @@ class TestStepGameOver:
 
         # Phase advance automatique doit avoir eu lieu
         assert info.get("phase_auto_advanced") is True or engine.game_state["phase"] != "fight"
+
+
+class TestStepPostActionPoolEmpty:
+    """Pool vide APRÈS une action réussie — branche distincte du pool vide À L'ENTRÉE.
+
+    `test_step_pool_empty_triggers_phase_advance` ci-dessus couvre l'entrée de `step()`. Celle-ci
+    couvre la sortie : le `advance_phase` déclenché par le pool vide avance la phase, et le `result`
+    de l'action de l'agent doit SURVIVRE — c'est lui qui alimente `info` et `calculate_reward`.
+
+    Pourquoi ce verrou existe : `step()` substituait le résultat du `advance_phase` à celui de
+    l'agent. La ligne était l'initialiseur de boucle d'une cascade de phases doublonnée et morte
+    (0 appel à `*_phase_start` mesuré — `_process_squad_action` cascade lui-même) ; son effet réel
+    était sur la récompense. Mesure sur 8 épisodes : 25,6 substitutions par épisode, 25 % des
+    calculs de récompense, où `reason: "pool_empty"` forçait `is_system_response` et versait 0.0 au
+    lieu de la récompense de l'action (+68,20 annulés sur 8 épisodes, dernier tir et dernier
+    corps-à-corps de chaque phase compris).
+
+    Ces tests tiennent les DEUX côtés : le résultat de l'agent arrive dans `info`, et le payload du
+    `advance_phase` n'y arrive pas. Réintroduire la substitution les rend rouges.
+    """
+
+    @staticmethod
+    def _engine_with_post_action_empty_pool(monkeypatch, advance_result):
+        """Construit l'état observé : action décodée puis exécutée, PUIS pool vide.
+
+        Les deux constructions de masque de `step()` sont pilotées séparément (non vide à l'entrée
+        pour que l'action soit décodée, vide ensuite pour atteindre la branche), et
+        `_process_squad_action` est doublé pour rendre un résultat d'agent DISTINGUABLE puis le
+        résultat d'`advance_phase`. C'est le joint exact que ce test verrouille.
+        """
+        engine = _make_engine()
+        engine.reset()
+        engine.game_state["turn"] = 1
+
+        mask_size = len(engine.get_action_mask())
+        full = np.zeros(mask_size, dtype=bool)
+        full[SQUAD_ACTION_WAIT] = True
+        empty = np.zeros(mask_size, dtype=bool)
+        eligible = [dict(engine.game_state["units"][0])]
+
+        mask_calls = {"n": 0}
+
+        def fake_mask(_game_state):
+            mask_calls["n"] += 1
+            # 1er appel = entrée de step() ; suivants = après l'action.
+            return (full, eligible) if mask_calls["n"] == 1 else (empty, [])
+
+        monkeypatch.setattr(
+            engine.action_decoder, "get_squad_action_mask_and_eligible_units", fake_mask
+        )
+        monkeypatch.setattr(
+            engine.action_decoder,
+            "convert_squad_action",
+            lambda *_a, **_k: {"action": "squad_wait"},
+        )
+
+        process_calls = {"n": 0}
+
+        def fake_process(semantic):
+            process_calls["n"] += 1
+            if semantic.get("action") == "advance_phase":
+                return True, dict(advance_result)
+            return True, {"action": "squad_wait", "origine": "ACTION_AGENT"}
+
+        monkeypatch.setattr(engine, "_process_squad_action", fake_process)
+        return engine, process_calls
+
+    # Le payload d'un `advance_phase` qui cascade : c'est celui qui écrasait le résultat de l'agent.
+    _CASCADING_ADVANCE = {"phase_complete": True, "next_phase": "shoot", "reason": "pool_empty"}
+
+    def test_agent_result_survives_phase_advance_in_info(self, monkeypatch):
+        """`info` décrit l'action de l'agent, pas la transition qu'elle a déclenchée."""
+        engine, process_calls = self._engine_with_post_action_empty_pool(
+            monkeypatch, self._CASCADING_ADVANCE
+        )
+
+        _, _, _, _, info = engine.step(SQUAD_ACTION_WAIT)
+
+        # Non-vacuité : les deux appels ont bien eu lieu (action de l'agent, puis advance_phase).
+        # Sans cette assertion le test resterait vert si la branche pool-vide n'était pas atteinte.
+        assert process_calls["n"] == 2
+        assert info.get("origine") == "ACTION_AGENT"
+        # Le payload de la transition ne fuit pas dans `info`.
+        assert "next_phase" not in info
+        assert "phase_complete" not in info
+
+    def test_reward_is_computed_on_agent_result_not_on_advance(self, monkeypatch):
+        """La récompense porte sur l'action de l'agent — le verrou qui compte.
+
+        `info` n'est qu'un symptôme ; le vrai dégât était sur la récompense : le payload du
+        `advance_phase` porte `reason: "pool_empty"`, ce qui force `is_system_response` dans
+        `RewardCalculator` et verse 0.0 au lieu de la récompense de l'action.
+        """
+        engine, process_calls = self._engine_with_post_action_empty_pool(
+            monkeypatch, self._CASCADING_ADVANCE
+        )
+        seen: list = []
+
+        def spy(_self, success, result, _game_state):
+            seen.append(result)
+            return 0.0
+
+        from engine.reward_calculator import RewardCalculator
+        monkeypatch.setattr(RewardCalculator, "calculate_reward", spy)
+
+        engine.step(SQUAD_ACTION_WAIT)
+
+        assert process_calls["n"] == 2
+        assert len(seen) == 1
+        assert seen[0].get("origine") == "ACTION_AGENT"
+        assert seen[0].get("reason") != "pool_empty"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -125,6 +125,75 @@ def verify_advance_rolls_cycle(game_state: Dict[str, Any]) -> None:
         )
 
 
+def verify_supplied_mask(
+    game_state: Dict[str, Any],
+    supplied_mask: Any,
+    supplied_eligible: Any,
+    source: str,
+) -> None:
+    """Leve si un masque TRANSMIS par un appelant ne decrit plus l'etat sur lequel il est consomme.
+
+    POURQUOI ce controle n'est pas redondant avec les deux ci-dessus. Ils verifient une donnee
+    memoisee DANS ``game_state``. Celui-ci verifie une donnee qui voyage AUTREMENT : le masque passe
+    en argument (``W40KEngine.step_with_mask``, ``_build_observation``) pour eviter de le
+    reconstruire a l'identique. Sa validite repose sur une affirmation de l'appelant — « rien n'a
+    touche ``game_state`` entre ma construction et cet appel » — que rien ne verifiait.
+
+    Le mode de defaillance vise : le pool eligible ou la legalite ont bouge entre les deux (un bot
+    tiers qui muterait l'etat pendant sa selection, un chemin d'observation qui avance une phase).
+    Le moteur executerait alors une action legale au regard d'un masque PERIME. Comme partout dans
+    ce module, ca ne leve pas tout seul : c'est coherent et faux.
+
+    Recalcul sur COPIE PROFONDE, comme ``_recompute_move_cell_map`` et pour la meme raison : le
+    masque reecrit la carte de cellules memoisee et peut tirer le jet d'Advance. Recalculer sur
+    l'etat vivant ferait executer au decodage la carte du CONTROLE au lieu de celle du masque —
+    le controle changerait ce qu'il observe.
+    """
+    global _VERIFYING
+    if _VERIFYING or not mask_verification_enabled(game_state):
+        return
+
+    _VERIFYING = True
+    try:
+        from engine.action_decoder import ActionDecoder
+
+        scratch = copy.deepcopy(game_state)
+        fresh_mask, fresh_eligible = ActionDecoder(
+            scratch["config"]
+        ).get_squad_action_mask_and_eligible_units(scratch)
+    finally:
+        _VERIFYING = False
+
+    import numpy as np
+
+    supplied_bits = np.asarray(supplied_mask, dtype=bool)
+    fresh_bits = np.asarray(fresh_mask, dtype=bool)
+    if supplied_bits.shape != fresh_bits.shape or not np.array_equal(supplied_bits, fresh_bits):
+        diff = (
+            sorted(np.flatnonzero(supplied_bits != fresh_bits).tolist())[:8]
+            if supplied_bits.shape == fresh_bits.shape
+            else []
+        )
+        raise RuntimeError(
+            f"mask_verification: masque transmis perime ({source}) — tour "
+            f"{game_state.get('turn')}, phase {game_state.get('phase')}, joueur "
+            f"{game_state.get('current_player')}. Slots divergents (max 8) : {diff}"
+            f"{'' if diff else f' ; formes {supplied_bits.shape} vs {fresh_bits.shape}'}. "
+            f"L'etat a evolue entre la construction du masque et sa consommation : l'appelant ne "
+            f"peut plus affirmer que rien n'a touche game_state entre les deux."
+        )
+
+    supplied_ids = [str(u.get("id")) for u in (supplied_eligible or [])]
+    fresh_ids = [str(u.get("id")) for u in (fresh_eligible or [])]
+    if supplied_ids != fresh_ids:
+        raise RuntimeError(
+            f"mask_verification: pool eligible transmis perime ({source}) — transmis "
+            f"{supplied_ids}, recalcule {fresh_ids} (tour {game_state.get('turn')}, phase "
+            f"{game_state.get('phase')}). Le masque peut concorder alors que le pool a change : "
+            f"c'est le pool qui designe l'unite activee et l'observateur."
+        )
+
+
 def verify_memoised_move_cell_map(
     game_state: Dict[str, Any], squad_id: str, memoised: CellMap
 ) -> None:

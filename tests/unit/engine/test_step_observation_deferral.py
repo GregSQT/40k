@@ -77,6 +77,9 @@ class _EngineStub:
     _step_observation = W40KEngine._step_observation
     _build_observation = W40KEngine._build_observation
     _build_observation_and_mask = W40KEngine._build_observation_and_mask
+    # `_build_observation_and_mask` verifie desormais le masque qu'on lui transmet (no-op hors
+    # `W40K_MASK_VERIFY=1`) : le vrai moteur le fait, la doublure doit donc le porter aussi.
+    _verify_supplied_mask = W40KEngine._verify_supplied_mask
 
     def __init__(self, defer: bool) -> None:
         self.defer_observation = defer
@@ -114,8 +117,10 @@ def test_deferral_replays_the_exact_same_mutations() -> None:
     engine_full = _EngineStub(defer=False)
     engine_deferred = _EngineStub(defer=True)
 
-    obs_full = engine_full._step_observation()
-    obs_deferred = engine_deferred._step_observation()
+    # `_step_observation` rend `(observation, masque_utilise)` : le masque de l'etat de sortie
+    # remonte jusqu'a l'appelant de `step_with_mask` au lieu d'y etre reconstruit.
+    obs_full, mask_full = engine_full._step_observation()
+    obs_deferred, mask_deferred = engine_deferred._step_observation()
 
     assert _mutations(engine_full) == _mutations(engine_deferred)
     # ... et la mutation en question a bien eu lieu (sinon le test compare deux inactions).
@@ -126,6 +131,12 @@ def test_deferral_replays_the_exact_same_mutations() -> None:
     # Seul l'encodage differe.
     assert obs_full is not None and engine_full.obs_builder.squad_builds == 1
     assert obs_deferred is None and engine_deferred.obs_builder.squad_builds == 0
+    # Le masque rendu ne depend PAS du report : seul l'encodage l'est. Sans cette assertion, un
+    # report qui cesserait de rendre le masque passerait inapercu et l'appelant le reconstruirait
+    # en silence — la deduplication disparaitrait sans qu'aucun test ne bouge.
+    assert mask_full is not None and mask_deferred is not None
+    assert np.array_equal(mask_full[0], mask_deferred[0])
+    assert [u["id"] for u in mask_full[1]] == [u["id"] for u in mask_deferred[1]]
 
 
 def test_boundary_checkpoint_runs_exactly_once_per_observation() -> None:

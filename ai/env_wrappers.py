@@ -88,6 +88,8 @@ ENGINE_CONTRACT_ATTRS = (
     "action_decoder",
     "config",
     "get_turn_step_limit",
+    "step_with_mask",
+    "get_action_mask",
     "_build_observation",
     "defer_observation",
     "_check_game_over",
@@ -115,10 +117,25 @@ def unwrap_engine(env: Any, owner: str) -> "W40KEngine":
     le chemin chaud — `self.engine` est resolu a la construction, jamais par pas de simulation.
     """
     stack = []
+    overriding_step = []
     current = env
     while isinstance(current, gym.Wrapper):
         stack.append(type(current).__name__)
+        # Ces wrappers appellent `engine.step_with_mask` DIRECTEMENT (cf. `_engine_step`) : le
+        # 5-uplet de gym n'a pas de place pour le masque. Court-circuiter la pile n'est sans effet
+        # que si aucune couche traversee ne fait quoi que ce soit dans `step` — c'est le cas
+        # d'`ActionMasker`, qui n'ajoute que `action_masks`. On le VERIFIE au lieu de le supposer :
+        # une couche qui surchargerait `step` verrait son traitement saute en silence.
+        if type(current).step is not gym.Wrapper.step:
+            overriding_step.append(type(current).__name__)
         current = current.env
+    if overriding_step:
+        raise TypeError(
+            f"{owner}: la pile gym ({' -> '.join(stack)}) contient une ou des couches qui "
+            f"redefinissent `step` : {overriding_step}. Ce module appelle "
+            f"`engine.step_with_mask` directement pour transmettre le masque, ce qui SAUTERAIT "
+            f"leur traitement. Faire passer le masque par ces couches, ou les retirer de la pile."
+        )
     missing = [attr for attr in ENGINE_CONTRACT_ATTRS if not hasattr(current, attr)]
     if missing:
         traversed = " -> ".join(stack + [type(current).__name__]) if stack else type(current).__name__
@@ -303,6 +320,9 @@ class BotControlledEnv(gym.Wrapper):
         self.ai_wait_actions = 0
         # LOG TEMPORAIRE: time between step() return and next step() call (--debug)
         self._last_step_return_time = None
+        # Decision servie a MaskablePPO par `action_masks()`, et REPRISE en entree du `step`
+        # suivant — cf. la docstring d'`action_masks` pour le cycle de vie.
+        self._served_decision: Optional[MaskDecision] = None
 
     def _run_bot_until_not_bot_turn(
         self,
@@ -364,7 +384,7 @@ class BotControlledEnv(gym.Wrapper):
                     f"BotControlledEnv infinite loop: {bot_loop_count} iterations, phase={current_phase}"
                 )
             debug_bot = self.episode_length < 10
-            bot_action = self._get_opponent_action(debug=debug_bot, decision=decision)
+            bot_action, decision = self._get_opponent_action(debug=debug_bot, decision=decision)
             if debug_mode and (bot_loop_count <= 5 or bot_loop_count % 25 == 0):
                 current_phase = str(require_key(self.engine.game_state, "phase"))
                 print(
@@ -381,9 +401,13 @@ class BotControlledEnv(gym.Wrapper):
                     f"before self.env.step(bot_action={bot_action})",
                     flush=True,
                 )
-            # L'etat va changer : la decision portee cesse d'etre valide ici et nulle part ailleurs.
-            decision = None
-            obs, reward, terminated, truncated, info = self.env.step(bot_action)
+            # La decision en main (si elle a survecu au choix de l'adversaire, cf.
+            # `_get_opponent_action`) est CONSOMMEE par le step : le moteur ne reconstruit pas le
+            # masque de l'etat d'entree. Elle est remplacee par celle de l'etat de sortie — jamais
+            # conservee au-dela, donc jamais perimee.
+            obs, reward, terminated, truncated, info, decision = self._engine_step(
+                bot_action, decision
+            )
             if debug_mode and (bot_loop_count <= 5 or bot_loop_count % 25 == 0):
                 print(
                     "[TRAIN DEBUG] BotControlledEnv._run_bot_until_not_bot_turn "
@@ -406,6 +430,11 @@ class BotControlledEnv(gym.Wrapper):
                 except (OSError, IOError):
                     pass
             self.episode_length += 1
+        # Idem : sortie par terminaison -> aucune decision rendue (cf. la borne jumelle dans
+        # `_ensure_actionable_controlled_turn`). Le `break` « la decision a change de camp », lui,
+        # rend bien la decision fraiche : c'est sa raison d'etre.
+        if terminated or truncated:
+            decision = None
         if debug_mode:
             current_phase = str(require_key(self.engine.game_state, "phase"))
             current_player = int(require_key(self.engine.game_state, "current_player"))
@@ -432,6 +461,21 @@ class BotControlledEnv(gym.Wrapper):
         action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(
             self.engine.game_state
         )
+        return self._decision_from_mask(action_mask, eligible_units)
+
+    def _decision_from_mask(
+        self, action_mask: np.ndarray, eligible_units: List[Dict[str, Any]]
+    ) -> MaskDecision:
+        """Meme reponse, a partir d'un couple DEJA construit — aucune construction ici.
+
+        Scinde de `_get_decision_owner_from_mask` pour que le masque rendu par
+        `W40KEngine.step_with_mask` (etat de SORTIE) puisse repondre a « a qui est la decision
+        maintenant ? » sans reconstruire. Mesure : 96,5 reconstructions par episode rendaient un
+        couple bit-a-bit identique a celui que `step` venait de construire.
+
+        Ne lit `game_state` que pour ce que le couple ne porte pas (decision en attente, phase,
+        joueur courant) : ces lectures decrivent l'etat auquel le couple appartient.
+        """
         # Une seule construction, avant le test de decision en attente : le decodeur traite ce cas
         # LUI-MEME (il rend le masque des CHOICE et un pool vide, cf. `action_decoder`), donc les
         # deux chemins demandaient deja le meme masque.
@@ -459,6 +503,32 @@ class BotControlledEnv(gym.Wrapper):
             )
         return MaskDecision(owners.pop(), action_mask, eligible_units)
 
+    def _engine_step(
+        self, action: int, decision: Optional[MaskDecision]
+    ) -> tuple[Any, float, bool, bool, dict, Optional[MaskDecision]]:
+        """Un step moteur, masque transmis dans les DEUX sens.
+
+        Passe par `step_with_mask` et non par `self.env.step` : le 5-uplet de gym n'a de place ni
+        pour le masque d'entree ni pour celui de sortie. `unwrap_engine` prouve qu'aucun wrapper
+        traverse ne redefinit `step`, donc court-circuiter la pile est ici sans effet observable
+        (cf. sa verification `step` non surchargee).
+
+        `decision` : celle etablie pour l'etat COURANT, ou None. La regle de validite est celle de
+        `MaskDecision` — l'appelant ne la passe que s'il peut prouver que rien n'a touche
+        `game_state` depuis sa construction. `W40K_MASK_VERIFY=1` transforme cette preuve en
+        mesure (cf. `W40KEngine._verify_supplied_mask`).
+
+        Rend en dernier element la decision de l'etat de SORTIE quand le moteur a construit un
+        masque dessus, None sinon — l'appelant la reprend telle quelle ou la construit.
+        """
+        obs, reward, terminated, truncated, info, out_mask = self.engine.step_with_mask(
+            action, mask_and_eligible=mask_pair_of(decision)
+        )
+        out_decision = (
+            self._decision_from_mask(out_mask[0], out_mask[1]) if out_mask is not None else None
+        )
+        return obs, float(reward), terminated, truncated, info, out_decision
+
     def _ensure_actionable_controlled_turn(
         self,
         terminated: bool,
@@ -468,6 +538,7 @@ class BotControlledEnv(gym.Wrapper):
         debug_mode: bool,
         accumulate_reward: bool,
         cumulative_reward: float,
+        decision: Optional[MaskDecision] = None,
     ) -> tuple[Any, bool, bool, dict, float, Optional[MaskDecision]]:
         """
         Advance deterministic no-choice states so controlled player always gets a non-empty mask.
@@ -477,10 +548,9 @@ class BotControlledEnv(gym.Wrapper):
         MAX_ENSURE_ITERATIONS = 2000
         iteration_count = 0
         decision_owner = has_valid_actions = eligible_count = None
-        # Decision etablie pour l'etat COURANT, ou None s'il faut l'etablir (regle : `MaskDecision`).
-        # C'est aussi ce qu'on rend a l'appelant : seule la sortie « le joueur controle a une action
-        # jouable » la laisse non nulle.
-        decision: Optional[MaskDecision] = None
+        # `decision` (parametre) : deja etablie pour l'etat courant par l'appelant, ou None s'il
+        # faut l'etablir (regle : `MaskDecision`). C'est aussi ce qu'on rend a l'appelant : seule la
+        # sortie « le joueur controle a une action jouable » la laisse non nulle.
         while not (terminated or truncated):
             iteration_count += 1
             if iteration_count > MAX_ENSURE_ITERATIONS:
@@ -586,7 +656,14 @@ class BotControlledEnv(gym.Wrapper):
                     flush=True,
                 )
             try:
-                obs, reward, terminated, truncated, info = self.env.step(mi.ACTION_WAIT)
+                # `decision` vaut deja None ici (remise a None au-dessus, avant la premiere
+                # mutation) : on ne transmet RIEN en entree. Deliberé — `_check_game_over` a pu
+                # ecrire `game_over` juste avant, et prouver que le masque n'en depend pas
+                # couterait plus que ce que ce chemin peu frequent rapporte. Le sens SORTIE, lui,
+                # est gratuit : le masque de l'etat d'arrivee remonte.
+                obs, reward, terminated, truncated, info, decision = self._engine_step(
+                    mi.ACTION_WAIT, None
+                )
             except RuntimeError as e:
                 err = str(e)
                 if "advance_phase failed" in err and "game_over" in err:
@@ -615,6 +692,16 @@ class BotControlledEnv(gym.Wrapper):
                 except (OSError, IOError):
                     pass
             self.episode_length += 1
+
+        # Sortie par TERMINAISON (la condition du `while` tombe apres un step) : on ne rend AUCUNE
+        # decision. Les steps ci-dessus rendent desormais celle de leur etat d'arrivee, et sur un
+        # episode termine elle serait valide — mais la transmettre changerait le comportement :
+        # l'observation terminale de `step()` est construite avec ce masque, et un masque fourni
+        # rend inatteignable la branche `advance_phase` de `_build_observation`. Ce chemin doit
+        # rester exactement celui d'avant (cf. `_play_bot_until_control_returns`, qui documente que
+        # cette construction peut avancer une phase sur episode termine, sans consequence).
+        if terminated or truncated:
+            decision = None
 
         # CONTRAT DE SORTIE, verifie ICI et NULLE PART AILLEURS : soit l'episode est termine, soit
         # le joueur controle a une action jouable ET sa decision est en main. Les appelants s'y
@@ -766,13 +853,24 @@ class BotControlledEnv(gym.Wrapper):
 
     def _get_opponent_action(
         self, debug: bool = False, decision: Optional[MaskDecision] = None
-    ) -> int:
-        """Get action from selected opponent mode for current episode."""
-        if self._episode_uses_self_play_opponent:
-            return self._get_self_play_opponent_action(decision=decision)
-        return self._get_bot_action(debug=debug, decision=decision)
+    ) -> tuple[int, Optional[MaskDecision]]:
+        """Action de l'adversaire, ET la decision encore valable APRES ce choix.
 
-    def _play_bot_until_control_returns(self, debug_mode: bool):
+        Pourquoi ce second element plutot qu'une discipline au site d'appel : les deux branches ne
+        se valent pas. Le bot ne fait que LIRE l'etat, sa decision survit. L'adversaire self-play,
+        lui, construit une observation — donc MUTE l'etat (frontiere 14.02, journal VP,
+        `advance_phase` sur pool vide) : la decision ne vaut plus, et le masque qu'elle porte ne
+        peut pas etre transmis au step suivant. Rendre l'invalidation ici la met dans la SIGNATURE
+        de la fonction qui mute, au lieu de la confier a la memoire de l'appelant. Le banc
+        d'entrainement ne couvre pas la branche self-play : une discipline y aurait ete non testee.
+        """
+        if self._episode_uses_self_play_opponent:
+            return self._get_self_play_opponent_action(decision=decision), None
+        return self._get_bot_action(debug=debug, decision=decision), decision
+
+    def _play_bot_until_control_returns(
+        self, debug_mode: bool, decision: Optional[MaskDecision] = None
+    ):
         """
         Advance environment until controlled player has an actionable decision state.
 
@@ -803,6 +901,7 @@ class BotControlledEnv(gym.Wrapper):
             debug_mode=debug_mode,
             accumulate_reward=True,
             cumulative_reward=0.0,
+            decision=decision,
         )
         if obs is None and not self.engine.defer_observation:
             # Keep vectorized env stacking stable: always return a real observation.
@@ -810,9 +909,13 @@ class BotControlledEnv(gym.Wrapper):
             # POURQUOI cet appel ne peut PAS avancer la phase — la question se pose parce que le
             # `reset` passe ici (report desarme) et qu'il n'y a plus de controle apres :
             # `_build_observation` n'avance la phase que sur `not eligible_units and not mask.any()`.
-            # Or on lui transmet le masque du contrat de sortie ci-dessus, dont le pool est NON VIDE
-            # par construction (sinon la boucle aurait leve). La branche d'avancement est donc hors
-            # d'atteinte, et l'etat rendu a la politique reste celui que la boucle a etabli. Si un
+            # Or on lui transmet le masque du contrat de sortie ci-dessus, dont le MASQUE est non
+            # vide par construction (sinon la boucle aurait leve). L'avancement exigeant les DEUX
+            # conditions, il suffit que le masque soit non vide. Ne PAS invoquer ici un pool non
+            # vide : le contrat ne le garantit pas — une decision agent en attente et l'intention
+            # de zone en phase command rendent toutes deux un pool vide avec un masque arme. La
+            # branche d'avancement est donc hors d'atteinte, et l'etat rendu a la politique reste
+            # celui que la boucle a etabli. Si un
             # jour on cessait de transmettre ce masque, ce raisonnement tomberait : la construction
             # recalculerait, pourrait avancer, et il faudrait re-verifier l'etat apres cet appel.
             # Sur episode TERMINE, la decision vaut None et cette construction peut avancer une
@@ -835,6 +938,8 @@ class BotControlledEnv(gym.Wrapper):
         return obs, float(cumulative_reward), terminated, truncated, info, ready_decision
 
     def reset(self, *, seed=None, options=None):
+        # Meme cycle de vie que dans `step` : le depot meurt avant la premiere mutation.
+        self._served_decision = None
         debug_mode = require_key(self.engine.game_state, "debug_mode")
         max_reset_attempts = 64
         last_failure: Optional[str] = None
@@ -912,7 +1017,7 @@ class BotControlledEnv(gym.Wrapper):
             self.ai_wait_actions = 0
 
             # Enforce reset contract for policy learning: return only controlled actionable states.
-            bot_obs, _, terminated, truncated, bot_info, _ready = self._play_bot_until_control_returns(
+            bot_obs, _, terminated, truncated, bot_info, ready_decision = self._play_bot_until_control_returns(
                 debug_mode=debug_mode
             )
             if bot_obs is not None:
@@ -938,6 +1043,10 @@ class BotControlledEnv(gym.Wrapper):
                 "self_play" if self._episode_uses_self_play_opponent else "bot"
             )
             info["self_play_ratio_current"] = self._self_play_ratio_current
+            # PPO appelle `action_masks()` juste apres ce retour : on lui sert la decision etablie
+            # par la boucle. `_play_bot_until_control_returns` l'a remise a None s'il a construit
+            # l'observation lui-meme.
+            self._deposit_served_decision(ready_decision, terminated, truncated)
             return obs, info
 
         raise RuntimeError(
@@ -945,6 +1054,54 @@ class BotControlledEnv(gym.Wrapper):
             f"(max_reset_attempts={max_reset_attempts}). "
             f"Last failure: {last_failure}"
         )
+
+    def _deposit_served_decision(
+        self, decision: Optional[MaskDecision], terminated: bool, truncated: bool
+    ) -> None:
+        """Pose (ou non) la decision que `action_masks()` servira a PPO — precondition ICI.
+
+        La precondition est verifiee au site du DEPOT et non chez les producteurs, parce que la
+        question a laquelle `action_masks()` repond est precise : « quelles actions la POLITIQUE
+        peut-elle choisir maintenant ? ». Seule une decision appartenant au joueur controle et
+        portant au moins une action y repond. Deux cas legitimes ou ce n'est pas le cas :
+
+        - episode termine ou tronque : plus aucune politique ne choisit sur cet etat (PPO passe par
+          un reset avant de redemander un masque) ;
+        - decision produite par un chemin intermediaire, appartenant a l'autre camp ou a personne.
+
+        Ce n'est pas un repli qui masque une erreur, c'est le DOMAINE DE VALIDITE du depot : hors
+        de lui, `action_masks()` construit, ce qui est le calcul normal. Mesure a la mise en place :
+        sans ce filtre, un masque VIDE etait servi a PPO sur episode termine alors qu'un masque
+        frais etait non vide.
+        """
+        if terminated or truncated or decision is None:
+            self._served_decision = None
+            return
+        if decision.decision_owner != self.controlled_player or not decision.has_valid_actions:
+            self._served_decision = None
+            return
+        self._served_decision = decision
+
+    def action_masks(self) -> np.ndarray:
+        """Masque servi a MaskablePPO — celui que la boucle vient d'etablir, pas un recalcul.
+
+        POURQUOI CE POINT D'ENTREE. `get_action_masks` de sb3_contrib resout `action_masks` par
+        `env.get_wrapper_attr(...)`, qui interroge le wrapper le PLUS EXTERNE d'abord : defini ici,
+        il prime sur celui d'`ActionMasker` (place SOUS ce wrapper, cf. `ai/training_utils`), dont
+        la fonction reconstruisait le masque sur le moteur nu. Mesure : 75,5 reconstructions par
+        episode, dont 302 sur 302 rendaient le couple deja etabli par ce wrapper.
+
+        SEUL DEPOT DU CHANTIER, et il est inevitable : PPO appelle cette methode quand il veut,
+        depuis sa propre boucle — il n'y a aucune signature ou faire passer la valeur. Sa duree de
+        vie est donc bornee par construction plutot que par une discipline : posee a la fin de
+        `step`/`reset`, EFFACEE a leur entree, et rien d'autre ne tourne entre les deux que le
+        passe avant de la politique. Sur un etat sans decision en main (episode termine avant la
+        premiere decision controlee), on construit — c'est le calcul normal, pas un repli : il n'y
+        a rien a servir, et rien d'errone a masquer.
+        """
+        if self._served_decision is not None:
+            return self._served_decision.action_mask
+        return self.engine.get_action_mask()
 
     def step(self, action):
         """Un step gym = plusieurs steps moteur (bot, WAIT forces) dont UNE seule observation est lue.
@@ -955,10 +1112,17 @@ class BotControlledEnv(gym.Wrapper):
         Voir ``W40KEngine._step_observation`` : les effets de bord de frontiere (controle
         d'objectif 14.02, VP) restent joues a chaque step moteur.
         """
+        # Le depot decrit l'etat d'ENTREE de ce step : rien ne s'est execute depuis qu'il a ete
+        # pose (fin du step precedent) hormis le passe avant de la politique. On le REPREND donc
+        # comme decision de depart — c'est le meme couple que `_ensure_actionable_controlled_turn`
+        # reconstruisait a l'entree — et on l'efface AVANT la premiere mutation : servir a PPO le
+        # masque d'un etat revolu ferait choisir une action legale ailleurs, sans que rien ne leve.
+        entry_decision = self._served_decision
+        self._served_decision = None
         self.engine.defer_observation = True
         try:
             obs, reward, terminated, truncated, info, ready_decision = (
-                self._step_with_deferred_observation(action)
+                self._step_with_deferred_observation(action, entry_decision)
             )
         finally:
             self.engine.defer_observation = False
@@ -969,9 +1133,16 @@ class BotControlledEnv(gym.Wrapper):
             # reconstruire a l'identique. Vaut None quand l'episode s'est termine : l'observation
             # terminale se construit alors sur un masque frais.
             obs = self.engine._build_observation(mask_and_eligible=mask_pair_of(ready_decision))
+        # Le masque reste servable APRES cette construction : elle mute l'etat (frontiere 14.02,
+        # journal VP) mais ne change pas la LEGALITE des actions — c'est l'invariant que
+        # `_build_observation_and_mask` documente, etabli par recalcul-comparaison et re-verifiable
+        # par `W40K_MASK_VERIFY=1`. C'est deja celui sur lequel repose la ligne au-dessus, qui lui
+        # transmet ce meme masque. Sa branche `advance_phase` est hors d'atteinte ici : le pool du
+        # contrat de sortie est non vide.
+        self._deposit_served_decision(ready_decision, terminated, truncated)
         return obs, reward, terminated, truncated, info
 
-    def _step_with_deferred_observation(self, action):
+    def _step_with_deferred_observation(self, action, entry_decision=None):
         # LOG TEMPORAIRE: time between previous step() return and this step() call (SB3 loop = predict + overhead, --debug)
         debug_mode = require_key(self.engine.game_state, "debug_mode")
         if debug_mode and self._last_step_return_time is not None:
@@ -995,7 +1166,7 @@ class BotControlledEnv(gym.Wrapper):
         agent_intent_value = None
         agent_is_controlled_action = None
         obs, bot_reward_before, terminated, truncated, info, ready_decision = self._play_bot_until_control_returns(
-            debug_mode=debug_mode
+            debug_mode=debug_mode, decision=entry_decision
         )
         cumulative_reward += float(bot_reward_before)
         # DIAGNOSTIC: Track AI shoot phase decisions BEFORE executing action
@@ -1019,11 +1190,16 @@ class BotControlledEnv(gym.Wrapper):
             # Execute agent action
             # LOG TEMPORAIRE: time full env.step() call (--debug) to compare with STEP_TIMING
             t0_agent = time.perf_counter() if debug_mode else None
-            # L'action de la politique va muter l'etat : la decision issue du jeu du bot AVANT
-            # l'action cesse de valoir. Si l'episode se termine sur cette action, le jeu du bot
-            # APRES est saute et il ne faut surtout pas rendre celle d'avant.
-            ready_decision = None
-            obs, reward, terminated, truncated, info = self.env.step(action)
+            # La decision du contrat de sortie decrit EXACTEMENT l'etat sur lequel la politique
+            # vient de choisir : entre son etablissement et ici, seules des lectures (diagnostics
+            # de phase, compteurs de tir) se sont executees. On la CONSOMME donc en entree du step
+            # — c'etait le premier poste de reconstruction du chantier (124,2 par episode, 100 %
+            # rendant un couple identique). Elle est ensuite remplacee par celle de l'etat de
+            # sortie : si l'episode se termine sur cette action, le jeu du bot APRES est saute et
+            # c'est bien celle d'apres l'action qui doit sortir, jamais celle d'avant.
+            obs, reward, terminated, truncated, info, ready_decision = self._engine_step(
+                action, ready_decision
+            )
             agent_action_info = info.get("action")
             agent_intent_value = info.get("intent_value")
             agent_is_controlled_action = info.get("is_controlled_action")

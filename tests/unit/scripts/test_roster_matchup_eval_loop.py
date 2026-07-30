@@ -94,6 +94,18 @@ class FakeEnv:
         self.step_calls = 0
         self.reset_seeds = []
 
+    def get_wrapper_attr(self, name):
+        """La boucle passe par `get_action_masks` de sb3_contrib, qui resout `action_masks` ainsi.
+
+        C'est le chemin de PPO : l'appel direct `engine.get_action_mask()` qui vivait dans la
+        boucle pouvait faire avancer la phase de combat ENTRE deux `step()`, perimant le masque
+        que le wrapper transmet ensuite au moteur.
+        """
+        return getattr(self, name)
+
+    def action_masks(self):
+        return self.engine.get_action_mask()
+
     def reset(self, seed=None):
         self.reset_seeds.append(seed)
         self.step_calls = 0

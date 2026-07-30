@@ -115,7 +115,12 @@ def _install_work_counters() -> dict:
     count(action_decoder_module.ActionDecoder, "get_squad_action_mask_and_eligible_units", "action_mask")
     count(movement_handlers, "movement_build_valid_destinations_pool", "move_pool")
     count(charge_handlers, "charge_phase_start", "charge_phase_start")
-    count(w40k_core.W40KEngine, "step", "engine_step")
+    # `step_with_mask` et NON `step` : `step` n'est plus que l'adaptateur gym 5-uplet, et le
+    # wrapper d'entrainement appelle l'implementation directement pour transmettre le masque
+    # (cf. `ai/env_wrappers._engine_step`). Enveloppee sur `step`, la sonde comptait 0 — le garde
+    # de non-vacuite plus bas l'a signale au premier run. Compter l'implementation couvre les DEUX
+    # chemins d'appel, puisque l'adaptateur y delegue.
+    count(w40k_core.W40KEngine, "step_with_mask", "engine_step")
     return counters
 
 
@@ -155,6 +160,9 @@ def _play(env, episodes: int, seed_base: int, counters: dict) -> str:
     par episode : la trajectoire ne depend d'aucun modele entraine, donc l'empreinte reste
     comparable meme apres un reentrainement.
     """
+    # Import differe, comme les autres dependances lourdes de ce module.
+    from sb3_contrib.common.maskable.utils import get_action_masks
+
     digest = hashlib.sha256()
     for episode in range(episodes):
         # Les trois sources d'alea du moteur et des bots, fixees a l'identique a chaque episode.
@@ -166,12 +174,15 @@ def _play(env, episodes: int, seed_base: int, counters: dict) -> str:
         game_state = env.unwrapped.game_state
         done = False
         while not done:
-            # `unwrapped.get_action_mask()` EST l'appel de production : `mask_fn` recoit l'env que
-            # `ActionMasker` enveloppe, c'est-a-dire le moteur nu (cf. `ai/training_utils`). Reserve
-            # pour plus tard : si un wrapper se mettait a servir le masque lui-meme (au lieu de
-            # laisser redescendre au moteur), ce chemin-ci le contournerait et le compteur
-            # afficherait « travail identique » en regardant ailleurs.
-            mask = np.asarray(env.unwrapped.get_action_mask())
+            # `get_action_masks` de sb3_contrib, c'est-a-dire EXACTEMENT ce qu'appelle MaskablePPO :
+            # il resout `action_masks` via `get_wrapper_attr` sur le wrapper le PLUS EXTERNE.
+            # Cet appel passait auparavant par `env.unwrapped.get_action_mask()`, au motif que
+            # `mask_fn` recevait le moteur nu — la reserve inscrite ici prevoyait le cas ou un
+            # wrapper servirait le masque lui-meme, et c'est arrive (`BotControlledEnv.action_masks`).
+            # Le chemin nu contournait alors le depot et le compteur affichait « travail identique »
+            # en regardant ailleurs. Ne JAMAIS revenir a `unwrapped` ici : ce banc ne vaut que s'il
+            # emprunte le meme chemin que PPO.
+            mask = np.asarray(get_action_masks(env))
             legal = np.flatnonzero(mask)
             if legal.size == 0:
                 raise RuntimeError(

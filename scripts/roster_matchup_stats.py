@@ -557,7 +557,19 @@ def _run_single_episode(
         # `engine.get_action_mask()` fait de plus avancer la phase de combat quand le
         # masque sort vide — sans quoi la boucle d'evaluation se bloquerait sur un masque
         # tout a False.
-        action_masks = np.asarray(env.engine.get_action_mask(), dtype=bool)
+        # `get_action_masks` de sb3_contrib = le chemin de PPO : il resout `action_masks` sur
+        # le wrapper le PLUS EXTERNE, donc `BotControlledEnv.action_masks`, qui sert la decision
+        # deja etablie. L'appel direct `env.engine.get_action_mask()` qui vivait ici POIGNARDAIT
+        # ce depot : il fait avancer la phase de combat sur masque vide (cf. sa docstring), donc
+        # il pouvait deplacer l'etat ENTRE deux `step()` — le step suivant consommait alors le
+        # masque d'un etat revolu, sans que rien ne leve. Il ne gagnait rien au passage : cette
+        # boucle n'utilisait pas le depot, elle ne faisait que le perimer.
+        # L'avancement de phase reste assure : sans depot, `action_masks()` retombe sur
+        # `engine.get_action_mask()` ; avec depot, le masque est non vide par precondition, donc
+        # la boucle d'avancement n'aurait de toute facon rien fait.
+        from sb3_contrib.common.maskable.utils import get_action_masks
+
+        action_masks = np.asarray(get_action_masks(env), dtype=bool)
         if action_masks.ndim == 1:
             action_masks = action_masks.reshape(1, -1)
         action, _ = model.predict(model_input, action_masks=action_masks, deterministic=True)

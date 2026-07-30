@@ -196,6 +196,16 @@ def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pyte
             self._closed = False
             self._winners = [0, -1, 1]
 
+        def get_wrapper_attr(self, name):
+            # Chemin de PPO : `get_action_masks` resout `action_masks` par ce biais. L'appel
+            # direct a `engine.get_action_mask()` a ete retire de la boucle d'evaluation — il
+            # pouvait avancer la phase de combat entre deux `step()` et perimer le masque
+            # transmis ensuite au moteur.
+            return getattr(self, name)
+
+        def action_masks(self):
+            return [True, False]
+
         def reset(self, seed=None):
             _ = seed
             self._episode += 1
@@ -336,6 +346,16 @@ def test_eval_worker_task_attaches_step_logger(monkeypatch: pytest.MonkeyPatch) 
     class _DummyEnv:
         def __init__(self):
             self.engine = SimpleNamespace(get_action_mask=lambda: [True], step_logger=None)
+
+        def get_wrapper_attr(self, name):
+            # Chemin de PPO : `get_action_masks` resout `action_masks` par ce biais. L'appel
+            # direct a `engine.get_action_mask()` a ete retire de la boucle d'evaluation — il
+            # pouvait avancer la phase de combat entre deux `step()` et perimer le masque
+            # transmis ensuite au moteur.
+            return getattr(self, name)
+
+        def action_masks(self):
+            return [True]
 
         def reset(self, seed=None):
             _ = seed
