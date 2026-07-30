@@ -105,7 +105,12 @@ def generate_steplog_and_replay(config, args):
     
     print("🎮 W40K Replay Generator - One-Shot Workflow")
     print("=" * 50)
-    
+
+    # Ressource a rendre QUOI QU'IL ARRIVE : le `except Exception` en fin de fonction convertit
+    # toute erreur en `return False`, donc un `env.close()` place dans le chemin nominal etait
+    # saute des qu'une erreur survenait dans la boucle d'episodes.
+    env = None
+
     try:
         if not args.agent:
             raise ValueError("--agent required to read step_log_buffer_size from agent training config")
@@ -115,9 +120,7 @@ def generate_steplog_and_replay(config, args):
         # Step 1: Enable step logging temporarily
         temp_steplog = "temp_steplog_for_replay.log"
         temp_step_logger = StepLogger(temp_steplog, enabled=True, buffer_size=step_log_buffer_size)
-        original_step_logger = globals().get('step_logger')
-        globals()['step_logger'] = temp_step_logger
-        
+
         # Step 2: Load model for testing
         print("🎯 Loading model for steplog generation...")
         
@@ -169,7 +172,11 @@ def generate_steplog_and_replay(config, args):
             gym_training_mode=True
         )
 
-        # Connect step logger directly to W40KEngine
+        # Connect step logger directly to W40KEngine — SEUL branchement necessaire.
+        # Un `globals()['step_logger'] = temp_step_logger` l'accompagnait, sauvegarde puis
+        # restauree : ce global n'etait lu NULLE PART (ni ici, ni ailleurs dans le depot), et sur
+        # un process neuf la « restauration » ecrivait None dans un attribut qui n'existait pas.
+        # Ne pas le remettre : c'est cette ligne-ci qui alimente le steplog.
         env.step_logger = temp_step_logger
         model = MaskablePPO.load(model_path, env=env)
         
@@ -188,11 +195,18 @@ def generate_steplog_and_replay(config, args):
             while not done and step_count < 1000:
                 action, _ = model.predict(obs, deterministic=True)
                 obs, reward, terminated, truncated, info = env.step(int(action))
+                if obs is None:
+                    # `W40KEngine.step` ne rend `None` que si l'appelant a arme
+                    # `defer_observation` (report d'observation du wrapper d'entrainement).
+                    # Ici le moteur est pilote NU, sans BotControlledEnv : le report n'est
+                    # jamais arme et personne ne construirait l'observation a notre place.
+                    raise RuntimeError(
+                        "replay_converter: W40KEngine.step a rendu une observation None alors "
+                        "que le report n'est pas arme — contrat de _step_observation rompu."
+                    )
                 done = terminated or truncated
                 step_count += 1
-        
-        env.close()
-        
+
         # Step 4: Convert steplog to replay
         print("🔄 Converting steplog to replay format...")
         
@@ -209,21 +223,21 @@ def generate_steplog_and_replay(config, args):
         # amputait le jeu d'entrainement. Le nettoyage du contexte de template a disparu avec
         # les attributs de fonction qui le portaient : l'etat passe maintenant par parametre.
 
-        # Restore original step logger
-        globals()['step_logger'] = original_step_logger
-        
         if success:
             print("✅ One-shot replay generation complete!")
             return True
         else:
             print("❌ Replay conversion failed")
             return False
-            
+
     except Exception as e:
         print(f"❌ One-shot workflow failed: {e}")
         import traceback
         traceback.print_exc()
         return False
+    finally:
+        if env is not None:
+            env.close()
 
 def parse_steplog_file(steplog_path):
     """Parse steplog file and extract structured data."""

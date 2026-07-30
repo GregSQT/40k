@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from ai import replay_converter
@@ -197,20 +198,23 @@ def test_two_conversions_in_one_process_each_use_their_own_scenario(
     assert [u["id"] for u in replay_b["initial_state"]["units"]] == [22]
 
 
-def test_generate_steplog_and_replay_keeps_the_bot_scenario_on_disk(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Le scenario bot est un fichier versionne : le workflow ne doit jamais l'effacer.
+_OBS = {"global_cont": np.zeros(2, dtype=np.float32)}
 
-    Le bloc de nettoyage appelait `os.remove` dessus, heritage du temps ou le scenario etait
-    genere a la volee. Depuis `get_scenario_list_for_phase`, le chemin designe un vrai fichier
-    de config/agents/<agent>/scenarios/training/ : le supprimer amputait le jeu d'entrainement.
+
+def _rig_one_shot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, step_obs):
+    """Gree le workflow one-shot avec des doubles ; `step_obs` = observation rendue par `step`.
+
+    `step_obs=_OBS` reproduit le moteur reel (`W40KEngine.step` ne rend `None` que si l'appelant
+    a arme `defer_observation`, ce que ce workflow ne fait pas : moteur NU, sans wrapper
+    d'entrainement). `step_obs=None` simule la violation de ce contrat.
     """
     scenario = tmp_path / "scenario_bot.json"
     scenario.write_text(json.dumps({"units": []}), encoding="utf-8")
     model_file = tmp_path / "models" / "CoreAgent" / "model_CoreAgent.zip"
-    model_file.parent.mkdir(parents=True)
+    model_file.parent.mkdir(parents=True, exist_ok=True)
     model_file.write_text("dummy", encoding="utf-8")
+
+    closed: list = []
 
     class _Engine:
         def __init__(self, **kwargs):
@@ -218,14 +222,14 @@ def test_generate_steplog_and_replay_keeps_the_bot_scenario_on_disk(
             self.step_logger = None
 
         def reset(self):
-            return None, {}
+            return _OBS, {}
 
         def step(self, action):
             _ = action
-            return None, 0.0, True, False, {}
+            return step_obs, 0.0, True, False, {}
 
         def close(self):
-            pass
+            closed.append(True)
 
     class _Model:
         @staticmethod
@@ -267,9 +271,54 @@ def test_generate_steplog_and_replay_keeps_the_bot_scenario_on_disk(
         model=None,
         test_episodes=1,
     )
-    assert replay_converter.generate_steplog_and_replay(config=_Cfg(), args=args) is True
-    assert converted == [str(scenario)]
-    assert scenario.exists(), "le scenario bot versionne a ete efface par le nettoyage"
+    return SimpleNamespace(
+        args=args, cfg=_Cfg(), scenario=scenario, converted=converted, closed=closed
+    )
+
+
+def test_generate_steplog_and_replay_keeps_the_bot_scenario_on_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le scenario bot est un fichier versionne : le workflow ne doit jamais l'effacer.
+
+    Le bloc de nettoyage appelait `os.remove` dessus, heritage du temps ou le scenario etait
+    genere a la volee. Depuis `get_scenario_list_for_phase`, le chemin designe un vrai fichier
+    de config/agents/<agent>/scenarios/training/ : le supprimer amputait le jeu d'entrainement.
+    """
+    rig = _rig_one_shot(tmp_path, monkeypatch, step_obs=_OBS)
+    assert replay_converter.generate_steplog_and_replay(config=rig.cfg, args=rig.args) is True
+    assert rig.converted == [str(rig.scenario)]
+    assert rig.scenario.exists(), "le scenario bot versionne a ete efface par le nettoyage"
+
+
+def test_none_observation_is_refused_instead_of_producing_a_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Une observation `None` doit arreter le workflow, jamais produire un replay silencieux.
+
+    Ce chemin pilote un `W40KEngine` NU : `defer_observation` n'y est jamais arme, donc `None`
+    signale un contrat rompu. Sans le garde, `None` partait dans `model.predict` a l'iteration
+    suivante — et selon la politique, un replay tronque ou faux pouvait en sortir.
+    """
+    rig = _rig_one_shot(tmp_path, monkeypatch, step_obs=None)
+    assert replay_converter.generate_steplog_and_replay(config=rig.cfg, args=rig.args) is False
+    assert rig.converted == [], "aucun replay ne doit etre produit sur contrat rompu"
+    assert "contrat de _step_observation rompu" in capsys.readouterr().out
+
+
+def test_env_is_closed_even_when_the_workflow_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`env.close()` doit etre appele meme en cas d'echec.
+
+    Le `except Exception` final convertit toute erreur en `return False` : tant que le
+    `env.close()` vivait dans le chemin nominal, une erreur levee dans la boucle d'episodes
+    fuyait le moteur.
+    """
+    rig = _rig_one_shot(tmp_path, monkeypatch, step_obs=None)
+
+    assert replay_converter.generate_steplog_and_replay(config=rig.cfg, args=rig.args) is False
+    assert rig.closed == [True], "env.close() saute quand le workflow echoue"
 
 
 def test_resolve_agent_bot_scenario_requires_an_agent() -> None:

@@ -2,7 +2,7 @@
   "x1": {
     "type": "################################################### x1 — curriculum phase 1 (board 44x60x1, scale ×1) ###################################################",
     "seed": 12345,
-    "total_episodes": 30000,
+    "total_episodes": 50000,
     "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
     "agent_seat_mode": "random",
     "eval_episodes": 10,
