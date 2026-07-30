@@ -26,6 +26,11 @@ def _make_manager() -> GameStateManager:
     config = {
         "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+        # Siege du joueur controle : TOUS les sites de production le posent (`W40KEngine.__init__`,
+        # le manager du PvP dans `services/api_server`, les managers temporaires d'`ai/train`), et
+        # l'echantillonnage des objectifs tenus le lit en `require_key`. Une doublure qui l'omet
+        # decrit une config impossible.
+        "controlled_player": 1,
     }
     return GameStateManager(config, unit_registry=None)
 
@@ -123,6 +128,10 @@ def _make_gs(
         "board_rows": 13,
         "wall_hexes": set(),
         "turn_limit_reached": False,
+        # Accumulateurs d'episode poses par `W40KEngine.reset()` et lus en `require_key` par
+        # l'echantillonnage des objectifs tenus.
+        "controlled_objective_samples_scoring_turns": [],
+        "opponent_objective_samples_scoring_turns": [],
         "config": {
             "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},

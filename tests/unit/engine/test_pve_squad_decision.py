@@ -128,6 +128,32 @@ def test_mask_is_the_squad_action_space(engine):
     assert np.array_equal(np.asarray(model.seen_mask, dtype=bool), np.asarray(expected, dtype=bool))
 
 
+def test_decision_builds_the_mask_exactly_once(engine, monkeypatch):
+    """Une seule construction de masque par décision, et c'est celle de l'observation.
+
+    L'observation construit déjà un masque en interne (elle doit savoir quelle escouade décrire) ;
+    le code le recalculait juste après pour le servir au modèle. Deux constructions, et surtout
+    deux résultats dont l'égalité ne tenait qu'à « rien ne s'exécute entre les deux lignes » —
+    une propriété à re-démontrer à chaque modification. Le masque sort désormais de l'observation.
+    """
+    action_int = _first_allowed_move_action(engine)  # avant le compteur : cet appel est le nôtre
+    ctrl = _controller_with(_RecordingModel(action_int), engine)
+
+    original = engine.action_decoder.get_squad_action_mask_and_eligible_units
+    calls = []
+
+    def counted(game_state):
+        calls.append(1)
+        return original(game_state)
+
+    monkeypatch.setattr(
+        engine.action_decoder, "get_squad_action_mask_and_eligible_units", counted
+    )
+    ctrl.make_ai_decision(engine.game_state, engine)
+
+    assert len(calls) == 1, f"{len(calls)} constructions de masque pour une seule décision"
+
+
 def test_semantic_action_uses_the_squad_vocabulary(engine):
     """La sémantique rendue est celle de `convert_squad_action`, sans réécriture d'unitId."""
     action_int = _first_allowed_move_action(engine)

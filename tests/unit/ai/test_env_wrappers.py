@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import gymnasium as gym
 import numpy as np
@@ -15,7 +15,7 @@ from engine import macro_intents as mi
 
 
 class _DummyActionDecoder:
-    def __init__(self, mask=None, eligible=None, normalized_action=4, raise_validation=False):
+    def __init__(self, mask=None, eligible=None, normalized_action: Optional[int] = 4, raise_validation=False):
         self._mask = list(mask) if mask is not None else [False] * 12
         self._eligible = list(eligible) if eligible is not None else []
         self._normalized_action = normalized_action
@@ -53,6 +53,7 @@ class _DummyEngine(gym.Env):
         # Report d'observation (cf. W40KEngine._step_observation) : membre du contrat moteur.
         self.defer_observation = False
         self.build_observation_calls = 0
+        self.last_mask_and_eligible = None
         self.game_state = {
             "phase": "move",
             "debug_mode": False,
@@ -66,7 +67,7 @@ class _DummyEngine(gym.Env):
         _ = (seed, options)
         return np.zeros((4,), dtype=np.float32), {}
 
-    def step(self, action):
+    def step(self, action) -> tuple:
         _ = action
         # Miroir de `W40KEngine.step` : l'observation retournee passe par le report.
         return self._step_observation(), 0.0, False, False, {}
@@ -76,7 +77,10 @@ class _DummyEngine(gym.Env):
             return None
         return self._build_observation()
 
-    def _build_observation(self):
+    def _build_observation(self, mask_and_eligible=None):
+        # `mask_and_eligible` fait partie du contrat moteur (cf. `W40KEngine._build_observation`) :
+        # les wrappers le transmettent quand ils viennent de construire le masque.
+        self.last_mask_and_eligible = mask_and_eligible
         self.build_observation_calls += 1
         return np.zeros((4,), dtype=np.float32)
 
@@ -300,15 +304,11 @@ def test_self_play_wrapper_get_frozen_model_action_fallback_paths(monkeypatch: p
 
 
 def test_self_play_wrapper_get_frozen_model_action_uses_frozen_model_predict() -> None:
-    class FrozenModel:
-        def predict(self, obs, deterministic, action_masks):
-            _ = (obs, deterministic, action_masks)
-            return 6, None
-
     mask = [False] * 12
     mask[6] = True
     decoder = _DummyActionDecoder(mask=mask, eligible=[{"id": "u1", "player": 2}])
-    wrapper = SelfPlayWrapper(_DummyEngine(decoder=decoder), frozen_model=FrozenModel())
+    model = _StubFrozenModel(action=6)
+    wrapper = SelfPlayWrapper(_DummyEngine(decoder=decoder), frozen_model=cast(Any, model))
     assert wrapper._get_frozen_model_action() == 6
 
 
@@ -365,8 +365,188 @@ def test_compute_self_play_ratio_interpolates_between_start_and_end() -> None:
 def test_get_opponent_action_uses_self_play_branch_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     wrapper = BotControlledEnv(_DummyEngine(), bot=_DummyBot(action=4))
     wrapper._episode_uses_self_play_opponent = True
-    monkeypatch.setattr(wrapper, "_get_self_play_opponent_action", lambda: 9)
+    monkeypatch.setattr(wrapper, "_get_self_play_opponent_action", lambda decision=None: 9)
     assert wrapper._get_opponent_action() == 9
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Masque porté d'un appelant à l'autre (cf. `MaskDecision`) — réutilisation ET péremption
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _SequenceDecoder(_DummyActionDecoder):
+    """Rend une réponse DIFFÉRENTE à chaque construction, et les compte.
+
+    C'est le seul moyen de distinguer « le wrapper a relu le masque » de « il a rejoué le
+    précédent » : avec un décodeur qui répond toujours pareil, les deux se lisent identiquement
+    et le test afficherait vert dans les deux cas.
+    """
+
+    def __init__(self, responses) -> None:
+        super().__init__(normalized_action=None)
+        self._responses = list(responses)
+        self.calls = 0
+
+    def get_squad_action_mask_and_eligible_units(self, game_state):
+        _ = game_state
+        self.calls += 1
+        return self._responses[min(self.calls - 1, len(self._responses) - 1)]
+
+
+def _single_action_mask(slot: int) -> list:
+    """Masque n'autorisant QUE `slot` — de quoi rendre identifiable le masque qu'un test observe."""
+    mask = [False] * mi.TOTAL_ACTION_SIZE
+    mask[slot] = True
+    return mask
+
+
+def test_reset_path_observation_cannot_advance_a_phase() -> None:
+    """L'observation construite APRES l'unique contrôle ne doit pas pouvoir changer l'état.
+
+    Le `reset` construit son observation sans report, donc après le contrat de sortie de la boucle
+    et sans contrôle derrière. `_build_observation` avance la phase quand le pool est vide : la
+    seule chose qui l'en empêche ici est qu'on lui transmette le masque du contrat, dont le pool
+    est non vide. Ce test vérifie que ce masque est bien transmis — sinon la construction
+    recalculerait, et un pool devenu vide entre-temps ferait avancer une phase juste avant de
+    rendre l'état à la politique, sans que rien ne le voie.
+    """
+    slot = mi.SHOOT_SLOT_BASE
+    engine = _DummyEngine(
+        decoder=_DummyActionDecoder(
+            mask=_single_action_mask(slot), eligible=[{"id": "c1", "player": 1}]
+        )
+    )
+    engine.game_state["phase"] = "shoot"
+    wrapper = BotControlledEnv(engine, bot=_DummyBot(action=slot), agent_seat_mode="p1")
+    wrapper._apply_episode_seat()
+
+    _obs, _reward, terminated, _truncated, _info, _ready = (
+        wrapper._play_bot_until_control_returns(debug_mode=False)
+    )
+
+    assert not terminated
+    assert engine.build_observation_calls == 1
+    carried = engine.last_mask_and_eligible
+    assert carried is not None, (
+        "observation du reset construite sans masque : elle peut avancer une phase, et plus "
+        "aucun controle ne verifie l'etat rendu a la politique"
+    )
+    assert carried[1], "le pool transmis est vide : la branche d'avancement redevient atteignable"
+
+
+class _TerminatingDummyEngine(_DummyEngine):
+    """Moteur qui termine l'episode SUR l'action de la politique.
+
+    C'est le seul cas ou le jeu du bot d'apres est saute — donc le seul ou une decision etablie
+    AVANT l'action pourrait survivre jusqu'a l'observation terminale.
+    """
+
+    def step(self, action) -> tuple:
+        _ = action
+        return self._step_observation(), 0.0, True, False, {}
+
+
+def test_terminal_observation_never_uses_a_pre_action_mask() -> None:
+    """Verrou du mode grave : l'observation terminale ne doit PAS etre batie sur le masque d'avant
+    l'action. Elle n'echoue pas bruyamment si c'est le cas — elle decrit juste un etat qui n'existe
+    plus, et PPO l'apprend comme observation finale."""
+    slot = mi.SHOOT_SLOT_BASE
+    engine = _TerminatingDummyEngine(
+        decoder=_DummyActionDecoder(
+            mask=_single_action_mask(slot),
+            eligible=[{"id": "c1", "player": 1}],
+            normalized_action=slot,
+        )
+    )
+    engine.game_state["phase"] = "shoot"
+    wrapper = BotControlledEnv(engine, bot=_DummyBot(action=slot), agent_seat_mode="p1")
+    wrapper._apply_episode_seat()
+
+    _obs, _reward, terminated, _truncated, _info = wrapper.step(slot)
+
+    assert terminated
+    assert engine.last_mask_and_eligible is None, (
+        "l'observation terminale a recu le masque construit AVANT l'action de la politique"
+    )
+
+
+class _StubFrozenModel:
+    """Adversaire gele minimal : `predict(obs, deterministic, action_masks) -> (action, state)`."""
+
+    def __init__(self, action: int) -> None:
+        self._action = action
+        self.received_masks: List[Any] = []
+
+    def predict(self, obs, deterministic, action_masks):
+        _ = (obs, deterministic)
+        self.received_masks.append(action_masks)
+        return np.int64(self._action), None
+
+
+def test_self_play_opponent_hands_its_mask_to_the_observation() -> None:
+    """Le chemin self-play passe REELLEMENT par le site optimise, et lui donne son masque.
+
+    Ce test existe parce que le banc de mesure (scenario bot) ne traverse jamais ce chemin :
+    corrige mais jamais appele, il ne corrigerait rien, et aucun compteur ne le dirait.
+    """
+    slot = mi.SHOOT_SLOT_BASE
+    mask = _single_action_mask(slot)
+    eligible = [{"id": "b1", "player": 2}]
+    engine = _DummyEngine(decoder=_DummyActionDecoder(mask=mask, eligible=eligible))
+    wrapper = BotControlledEnv(engine, bot=_DummyBot(), agent_seat_mode="p1")
+    wrapper._frozen_model = cast(Any, _StubFrozenModel(action=slot))
+    wrapper._self_play_deterministic = True
+
+    assert wrapper._get_self_play_opponent_action() == slot
+    assert engine.build_observation_calls == 1
+    carried = engine.last_mask_and_eligible
+    assert carried is not None, "l'observation a reconstruit le masque au lieu de le recevoir"
+    # Le decodeur stub recopie ses arguments : on compare le contenu, pas l'identite.
+    assert list(carried[0]) == mask and carried[1] == eligible
+
+
+def test_carried_mask_is_reused_within_a_state_and_dropped_after_each_engine_step() -> None:
+    """Le masque porté sert l'action du bot, et ne survit JAMAIS à un `env.step`.
+
+    Les deux défauts que ce test verrouille, en sens inverse l'un de l'autre :
+      - retirer le passage de valeur -> 5 constructions au lieu de 3, le gain disparaît ;
+      - retirer la remise à None avant `env.step` -> le bot rejoue le masque de l'activation
+        précédente sur un état qui a bougé. C'est le mode grave : il ne lève pas, le moteur
+        exécute quelque chose de cohérent mais faux.
+    """
+    first_slot, second_slot = mi.SHOOT_SLOT_BASE, mi.SHOOT_SLOT_BASE + 1
+    bot_unit = [{"id": "b1", "player": 2}]
+    decoder = _SequenceDecoder(
+        [
+            (_single_action_mask(first_slot), bot_unit),
+            (_single_action_mask(second_slot), bot_unit),
+            (_single_action_mask(first_slot), [{"id": "c1", "player": 1}]),
+        ]
+    )
+    engine = _DummyEngine(decoder=decoder)
+    engine.game_state["phase"] = "shoot"  # hors phase move : le bot reçoit les actions du masque
+    bot = _DummyBot(action=first_slot)
+    wrapper = BotControlledEnv(engine, bot=bot, agent_seat_mode="p1")
+    wrapper._apply_episode_seat()
+
+    _obs, terminated, _truncated, _info, _reward, decision = wrapper._run_bot_until_not_bot_turn(
+        terminated=False,
+        truncated=False,
+        obs=None,
+        info={},
+        debug_mode=False,
+        accumulate_reward=False,
+        cumulative_reward=0.0,
+    )
+
+    assert not terminated
+    # Le bot a vu le masque FRAIS à chaque activation, jamais deux fois le même.
+    assert [actions for actions, _gs, _unit in bot.received] == [[first_slot], [second_slot]]
+    # Une construction par activation (réutilisée pour choisir l'action) + celle qui fait sortir.
+    assert decoder.calls == 3
+    # Cette dernière est rendue à l'appelant, qui enchaîne sans la refaire (site « boucle bot
+    # -> boucle appelante » : rien ne s'exécute entre les deux).
+    assert decision is not None and decision.decision_owner == 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -387,15 +567,6 @@ def _decision_state(player: int) -> dict:
     }
 
 
-class _PassthroughDecoder(_DummyActionDecoder):
-    """Decodeur stub qui rend l'action telle quelle : sans lui, le tirage du bot serait masque
-    par la normalisation figee du stub de base."""
-
-    def normalize_action_input(self, raw_action, phase, source, action_space_size):
-        _ = (phase, source, action_space_size)
-        return int(raw_action)
-
-
 def _decision_mask() -> list:
     mask = [False] * mi.TOTAL_ACTION_SIZE
     mask[mi.CHOICE_BASE] = True
@@ -410,10 +581,14 @@ def test_decision_owner_is_the_player_of_the_pending_decision() -> None:
     engine = _DummyEngine(decoder=decoder)
     engine.game_state["pending_agent_decision"] = _decision_state(player=2)
     wrapper = BotControlledEnv(engine, bot=_DummyBot())
-    owner, has_valid_actions, eligible_count = wrapper._get_decision_owner_from_mask()
-    assert owner == 2
-    assert has_valid_actions is True
-    assert eligible_count == 0
+    decision = wrapper._get_decision_owner_from_mask()
+    assert decision.decision_owner == 2
+    assert decision.has_valid_actions is True
+    assert decision.eligible_count == 0
+    # Le masque qui a servi a repondre est rendu avec la reponse : c'est ce qui permet a
+    # l'appelant adjacent de ne pas le reconstruire (cf. `MaskDecision`).
+    assert list(np.asarray(decision.action_mask, dtype=bool)) == _decision_mask()
+    assert decision.eligible_units == []
 
 
 def test_bot_plays_its_own_decision_instead_of_waiting() -> None:
@@ -422,7 +597,7 @@ def test_bot_plays_its_own_decision_instead_of_waiting() -> None:
     Sans ce branchement, `_get_bot_action` retomberait sur `ACTION_WAIT`, action que le masque
     d'une décision n'autorise pas.
     """
-    decoder = _PassthroughDecoder(mask=_decision_mask(), eligible=[])
+    decoder = _DummyActionDecoder(mask=_decision_mask(), eligible=[], normalized_action=None)
     engine = _DummyEngine(decoder=decoder)
     engine.game_state["pending_agent_decision"] = _decision_state(player=2)
     wrapper = BotControlledEnv(engine, bot=_DummyBot())
@@ -437,14 +612,51 @@ def test_self_play_opponent_plays_its_own_decision() -> None:
     """Symétrique du bot : sans `frozen_model`, l'adversaire self-play joue un CHOICE.
 
     `ACTION_WAIT` est hors masque quand une décision est en attente : le renvoyer lèverait à la
-    validation. Avec un `frozen_model`, la prédiction masquée choisit déjà un `CHOICE_i`.
+    validation. Le cas AVEC `frozen_model` est couvert par le test suivant — il ne l'était pas, et
+    cette docstring affirmait qu'il fonctionnait « déjà ».
     """
-    decoder = _PassthroughDecoder(mask=_decision_mask(), eligible=[])
+    decoder = _DummyActionDecoder(mask=_decision_mask(), eligible=[], normalized_action=None)
     engine = _DummyEngine(decoder=decoder)
     engine.game_state["pending_agent_decision"] = _decision_state(player=2)
     wrapper = SelfPlayWrapper(engine, allow_random_opponent=True)
     for _ in range(20):
         assert wrapper._get_frozen_model_action() in (mi.CHOICE_BASE, mi.CHOICE_BASE + 1)
+
+
+def test_frozen_model_is_asked_to_answer_a_pending_decision() -> None:
+    """L'autre moitié du cas ci-dessus : AVEC `frozen_model`, le modèle doit être interrogé.
+
+    Le pool éligible est vide par construction pendant une décision, et cette branche sortait sur
+    `ACTION_WAIT` avant même d'atteindre `predict` — action hors masque. Le moteur ne revalide pas
+    contre le masque : `convert_squad_action` lève en move/shoot/charge/fight, et rend
+    silencieusement `command_wait` en phase command, décision perdue sans trace.
+    """
+    decoder = _DummyActionDecoder(mask=_decision_mask(), eligible=[], normalized_action=None)
+    engine = _DummyEngine(decoder=decoder)
+    engine.game_state["pending_agent_decision"] = _decision_state(player=2)
+    model = _StubFrozenModel(action=mi.CHOICE_BASE)
+    wrapper = SelfPlayWrapper(engine, frozen_model=cast(Any, model))
+
+    action = wrapper._get_frozen_model_action()
+
+    assert model.received_masks, "le modèle n'a pas été interrogé : un WAIT hors masque a été rendu"
+    assert action == mi.CHOICE_BASE
+
+
+def test_bot_env_self_play_opponent_answers_a_pending_decision() -> None:
+    """Jumeau du précédent dans `BotControlledEnv` — même défaut, même correction."""
+    decoder = _DummyActionDecoder(mask=_decision_mask(), eligible=[], normalized_action=None)
+    engine = _DummyEngine(decoder=decoder)
+    engine.game_state["pending_agent_decision"] = _decision_state(player=2)
+    model = _StubFrozenModel(action=mi.CHOICE_BASE + 1)
+    wrapper = BotControlledEnv(engine, bot=_DummyBot(), agent_seat_mode="p1")
+    wrapper._frozen_model = cast(Any, model)
+    wrapper._self_play_deterministic = True
+
+    action = wrapper._get_self_play_opponent_action()
+
+    assert model.received_masks, "le modèle n'a pas été interrogé : un WAIT hors masque a été rendu"
+    assert action == mi.CHOICE_BASE + 1
 
 
 class _NotAnEngine(gym.Env):

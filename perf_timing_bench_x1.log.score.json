@@ -1,32 +1,32 @@
 {
   "CHARGE_REVERSE_GOAL_BFS": {
-    "calls": 451,
-    "avg_s": 0.002219,
-    "sum_s": 1.0,
-    "avg_goal_s": 0.002062,
-    "avg_bfs_s": 0.000152
+    "calls": 491,
+    "avg_s": 0.001673,
+    "sum_s": 0.82,
+    "avg_goal_s": 0.001545,
+    "avg_bfs_s": 0.000124
   },
   "CHARGE_DEST_BFS": {
-    "calls": 16,
+    "calls": 10,
     "avg_s": 3.3e-05,
     "sum_s": 0.0
   },
   "MOVE_POOL_BUILD": {
-    "calls": 4194,
-    "avg_s": 0.000346,
-    "sum_s": 1.45,
-    "avg_bfs_s": 0.000232
+    "calls": 4210,
+    "avg_s": 0.000267,
+    "sum_s": 1.12,
+    "avg_bfs_s": 0.00018
   },
   "CHARGE_PHASE_START": {
-    "calls": 937,
-    "avg_s": 0.002602,
-    "sum_s": 2.44,
-    "avg_pool_s": 0.002297
+    "calls": 934,
+    "avg_s": 0.002131,
+    "sum_s": 1.99,
+    "avg_pool_s": 0.001908
   },
-  "__total_s": 4.89,
-  "__total_calls": 5598,
-  "__score_ms": 0.8738,
-  "__n_episodes": 13,
+  "__total_s": 3.93,
+  "__total_calls": 5645,
+  "__score_ms": 0.697,
+  "__n_episodes": 12,
   "__episodes": [
     2,
     3,
@@ -39,7 +39,6 @@
     10,
     11,
     12,
-    13,
-    14
+    13
   ]
 }

@@ -10,7 +10,7 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 """
 
 import gymnasium as gym
-from typing import Optional, Any, TYPE_CHECKING, cast
+from typing import Dict, List, NamedTuple, Optional, Any, TYPE_CHECKING, cast
 import random
 import os
 import time
@@ -27,6 +27,57 @@ if TYPE_CHECKING:
 __all__ = ['BotControlledEnv', 'SelfPlayWrapper', 'unwrap_engine']
 PLAYER_ONE_ID = 1
 PLAYER_TWO_ID = 2
+
+
+class MaskDecision(NamedTuple):
+    """Qui decide, et le masque SUR LEQUEL cette reponse a ete etablie.
+
+    Le wrapper posait la question « a qui est la decision ? » puis, deux lignes plus loin,
+    reconstruisait le masque a l'identique pour choisir l'action — la meme construction, sur le
+    meme etat, deux fois. Rendre le masque avec la reponse supprime le second calcul.
+
+    Ce n'est PAS un cache : rien n'est conserve entre deux pas, il n'y a donc rien a perimer. Un
+    objet de ce type ne vaut que pour l'etat qui l'a produit, et sa validite se lit sur le site
+    d'appel : entre sa production et sa consommation, il ne doit RIEN se passer qui touche
+    `game_state`. LA REGLE, enoncee ici une seule fois et referencee ailleurs : tout appel a
+    `env.step` (ou a `_build_observation`, qui mute aussi) remet la valeur portee a None, et
+    l'appel suivant la recalcule.
+
+    Pourquoi pas une memoisation sur un compteur de revision d'etat : le masque n'est pas pur (il
+    tire le jet d'Advance au premier appel d'une activation et memoise la carte de cellules que le
+    decodage rejouera). Une carte rejouee sur un etat qui a bouge fait executer au moteur un
+    deplacement coherent mais FAUX, sans lever : l'agent apprendrait sur des transitions qui ne
+    sont pas celles qu'on lui a montrees. Le filet de securite est `W40K_MASK_VERIFY=1`.
+
+    Deux champs seulement, plus ce qui s'en derive : porter `has_valid_actions` et `eligible_count`
+    en dur obligeait a les tenir coherents sur chaque site de construction.
+    """
+
+    decision_owner: Optional[int]
+    action_mask: np.ndarray
+    eligible_units: List[Dict[str, Any]]
+
+    @property
+    def has_valid_actions(self) -> bool:
+        # `asarray` et pas `.any()` direct : les doublures de test rendent des listes.
+        return bool(np.any(np.asarray(self.action_mask, dtype=bool)))
+
+    @property
+    def eligible_count(self) -> int:
+        return len(self.eligible_units)
+
+
+def mask_pair_of(
+    decision: Optional[MaskDecision],
+) -> Optional[tuple[np.ndarray, List[Dict[str, Any]]]]:
+    """Le couple attendu par `W40KEngine._build_observation`, ou None si aucune decision portee.
+
+    Fonction de module et pas methode : c'est le cas `None` — « aucune decision en main » — qu'elle
+    sert, et il n'a pas de receveur.
+    """
+    if decision is None:
+        return None
+    return decision.action_mask, decision.eligible_units
 
 # Membres du moteur que CES wrappers utilisent sur `self.engine`. C'est le contrat exact
 # verifie par `unwrap_engine` : rien de plus (on n'exige pas ce qu'on n'appelle pas), rien de
@@ -262,8 +313,14 @@ class BotControlledEnv(gym.Wrapper):
         debug_mode: bool,
         accumulate_reward: bool,
         cumulative_reward: float,
-    ) -> tuple[Any, bool, bool, dict, float]:
-        """Execute consecutive bot turns until control leaves bot player or episode ends."""
+        decision: Optional[MaskDecision] = None,
+    ) -> tuple[Any, bool, bool, dict, float, Optional[MaskDecision]]:
+        """Execute consecutive bot turns until control leaves bot player or episode ends.
+
+        `decision` (cf. `MaskDecision` pour la regle) : deja etablie pour l'etat courant, elle sert
+        la premiere iteration. Rendue en dernier element quand la boucle sort parce que la decision
+        a change de camp — l'appelant la reprend telle quelle.
+        """
         bot_loop_count = 0
         # Borne des activations consecutives du bot sur un tour : meme source que le
         # moteur (derivee des figurines en jeu), sinon le bot serait coupe a tort des
@@ -275,7 +332,9 @@ class BotControlledEnv(gym.Wrapper):
                 flush=True,
             )
         while not (terminated or truncated):
-            decision_owner, has_valid_actions, _eligible_count = self._get_decision_owner_from_mask()
+            if decision is None:
+                decision = self._get_decision_owner_from_mask()
+            decision_owner, has_valid_actions = decision.decision_owner, decision.has_valid_actions
             if debug_mode and (bot_loop_count < 5 or bot_loop_count % 25 == 0):
                 current_phase = str(require_key(self.engine.game_state, "phase"))
                 current_player = int(require_key(self.engine.game_state, "current_player"))
@@ -305,7 +364,7 @@ class BotControlledEnv(gym.Wrapper):
                     f"BotControlledEnv infinite loop: {bot_loop_count} iterations, phase={current_phase}"
                 )
             debug_bot = self.episode_length < 10
-            bot_action = self._get_opponent_action(debug=debug_bot)
+            bot_action = self._get_opponent_action(debug=debug_bot, decision=decision)
             if debug_mode and (bot_loop_count <= 5 or bot_loop_count % 25 == 0):
                 current_phase = str(require_key(self.engine.game_state, "phase"))
                 print(
@@ -322,6 +381,8 @@ class BotControlledEnv(gym.Wrapper):
                     f"before self.env.step(bot_action={bot_action})",
                     flush=True,
                 )
+            # L'etat va changer : la decision portee cesse d'etre valide ici et nulle part ailleurs.
+            decision = None
             obs, reward, terminated, truncated, info = self.env.step(bot_action)
             if debug_mode and (bot_loop_count <= 5 or bot_loop_count % 25 == 0):
                 print(
@@ -355,42 +416,40 @@ class BotControlledEnv(gym.Wrapper):
                 f"phase={current_phase} current_player={current_player}",
                 flush=True,
             )
-        return obs, terminated, truncated, info, cumulative_reward
+        return obs, terminated, truncated, info, cumulative_reward, decision
 
-    def _get_decision_owner_from_mask(self) -> tuple[Optional[int], bool, int]:
+    def _get_decision_owner_from_mask(self) -> MaskDecision:
         """
         Determine which player currently owns the decision from eligible units/action mask.
 
-        Returns:
-            (decision_owner, has_valid_actions, eligible_count)
-            - decision_owner: 1|2 when eligible units exist, None when no eligible unit
+        Rend aussi le masque et le pool qui ont servi a repondre (cf. `MaskDecision`) : l'appelant
+        immediatement adjacent les consomme au lieu de les reconstruire.
         """
         # Décision agent en attente (V11 §9.3 P2) : le pool d'unités éligibles est vide par
         # construction (le moteur est arrêté sur un point de choix), mais la décision APPARTIENT à
         # un joueur — celui du prompt. Sans ce cas, le wrapper conclurait « personne ne décide »
         # et tenterait de faire avancer une phase que la décision bloque.
-        pending_decision = read_pending_agent_decision(self.engine.game_state)
-        if pending_decision is not None:
-            action_mask = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(
-                self.engine.game_state
-            )[0]
-            return (
-                int(require_key(pending_decision, "player")),
-                bool(np.any(np.asarray(action_mask, dtype=bool))),
-                0,
-            )
-
         action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(
             self.engine.game_state
         )
-        has_valid_actions = bool(np.any(np.asarray(action_mask, dtype=bool)))
+        # Une seule construction, avant le test de decision en attente : le decodeur traite ce cas
+        # LUI-MEME (il rend le masque des CHOICE et un pool vide, cf. `action_decoder`), donc les
+        # deux chemins demandaient deja le meme masque.
+        pending_decision = read_pending_agent_decision(self.engine.game_state)
+        if pending_decision is not None:
+            return MaskDecision(
+                int(require_key(pending_decision, "player")), action_mask, eligible_units
+            )
+
         if not eligible_units:
-            if has_valid_actions and self.engine.game_state.get("phase") == "command":
+            if self.engine.game_state.get("phase") == "command" and np.any(
+                np.asarray(action_mask, dtype=bool)
+            ):
                 # Command phase: no eligible units but zone intent actions are valid.
                 # Current player owns the decision.
                 current_player = int(require_key(self.engine.game_state, "current_player"))
-                return current_player, has_valid_actions, 0
-            return None, has_valid_actions, 0
+                return MaskDecision(current_player, action_mask, eligible_units)
+            return MaskDecision(None, action_mask, eligible_units)
 
         owners = {int(require_key(unit, "player")) for unit in eligible_units}
         if len(owners) != 1:
@@ -398,7 +457,7 @@ class BotControlledEnv(gym.Wrapper):
                 f"Eligible unit pool has mixed owners: {owners}. "
                 "Pool must contain units from a single acting side."
             )
-        return owners.pop(), has_valid_actions, len(eligible_units)
+        return MaskDecision(owners.pop(), action_mask, eligible_units)
 
     def _ensure_actionable_controlled_turn(
         self,
@@ -409,13 +468,19 @@ class BotControlledEnv(gym.Wrapper):
         debug_mode: bool,
         accumulate_reward: bool,
         cumulative_reward: float,
-    ) -> tuple[Any, bool, bool, dict, float]:
+    ) -> tuple[Any, bool, bool, dict, float, Optional[MaskDecision]]:
         """
         Advance deterministic no-choice states so controlled player always gets a non-empty mask.
+
+        Dernier element : cf. `_play_bot_until_control_returns`.
         """
         MAX_ENSURE_ITERATIONS = 2000
         iteration_count = 0
         decision_owner = has_valid_actions = eligible_count = None
+        # Decision etablie pour l'etat COURANT, ou None s'il faut l'etablir (regle : `MaskDecision`).
+        # C'est aussi ce qu'on rend a l'appelant : seule la sortie « le joueur controle a une action
+        # jouable » la laisse non nulle.
+        decision: Optional[MaskDecision] = None
         while not (terminated or truncated):
             iteration_count += 1
             if iteration_count > MAX_ENSURE_ITERATIONS:
@@ -429,7 +494,11 @@ class BotControlledEnv(gym.Wrapper):
                     f"has_valid_actions={has_valid_actions} eligible_count={eligible_count} "
                     f"free_steps={free}"
                 )
-            decision_owner, has_valid_actions, eligible_count = self._get_decision_owner_from_mask()
+            if decision is None:
+                decision = self._get_decision_owner_from_mask()
+            decision_owner = decision.decision_owner
+            has_valid_actions = decision.has_valid_actions
+            eligible_count = decision.eligible_count
             if debug_mode and (iteration_count <= 5 or iteration_count % 25 == 0):
                 current_phase = str(require_key(self.engine.game_state, "phase"))
                 current_player = int(require_key(self.engine.game_state, "current_player"))
@@ -444,7 +513,10 @@ class BotControlledEnv(gym.Wrapper):
                 )
 
             if decision_owner == self.bot_player:
-                obs, terminated, truncated, info, cumulative_reward = self._run_bot_until_not_bot_turn(
+                # La boucle bot repart de cette decision, et rend celle sur laquelle elle s'arrete :
+                # sa sortie « la decision a change de camp » vient d'un masque frais, et rien ne
+                # s'execute entre son `break` et l'iteration suivante ici.
+                obs, terminated, truncated, info, cumulative_reward, decision = self._run_bot_until_not_bot_turn(
                     terminated=terminated,
                     truncated=truncated,
                     obs=obs,
@@ -452,6 +524,7 @@ class BotControlledEnv(gym.Wrapper):
                     debug_mode=debug_mode,
                     accumulate_reward=accumulate_reward,
                     cumulative_reward=cumulative_reward,
+                    decision=decision,
                 )
                 if debug_mode and (iteration_count <= 5 or iteration_count % 25 == 0):
                     print(
@@ -470,6 +543,8 @@ class BotControlledEnv(gym.Wrapper):
                             f"env_rank={self._env_rank} iteration={iteration_count} branch=controlled-ready",
                             flush=True,
                         )
+                    # SEULE sortie qui laisse l'etat intact et un masque frais en main : celle-ci.
+                    # Les autres ont deja remis `decision` a None avant de muter l'etat.
                     break
                 # Controlled owner selected but no valid action: try explicit WAIT to advance.
             elif decision_owner is None:
@@ -482,6 +557,11 @@ class BotControlledEnv(gym.Wrapper):
                     f"(controlled_player={self.controlled_player}, bot_player={self.bot_player}, "
                     f"current_player={current_player})"
                 )
+
+            # A partir d'ici, tous les chemins mutent l'etat — `_check_game_over` ecrit `game_over`,
+            # puis viennent `_build_observation` ou `env.step`. La decision portee est perimee des
+            # maintenant : on la retire AVANT la premiere mutation, pas entre deux (cf. `MaskDecision`).
+            decision = None
 
             # If controlled player has no eligible units and game is over, terminate cleanly.
             if eligible_count == 0:
@@ -536,7 +616,29 @@ class BotControlledEnv(gym.Wrapper):
                     pass
             self.episode_length += 1
 
-        return obs, terminated, truncated, info, cumulative_reward
+        # CONTRAT DE SORTIE, verifie ICI et NULLE PART AILLEURS : soit l'episode est termine, soit
+        # le joueur controle a une action jouable ET sa decision est en main. Les appelants s'y
+        # fient au lieu de reconstruire le masque pour reposer la meme question. Deux raisons :
+        # un controle en aval nourri par la valeur qui l'a produit ne controle rien, et un controle
+        # en aval qui reconstruit le masque paye un pas de travail complet pour ne relire que deux
+        # champs. Ici, la verification est gratuite — la decision est deja en main.
+        if not (terminated or truncated):
+            if (
+                decision is None
+                or decision.decision_owner != self.controlled_player
+                or not decision.has_valid_actions
+            ):
+                current_player = self.engine.game_state.get("current_player")
+                raise RuntimeError(
+                    "BotControlledEnv._ensure_actionable_controlled_turn: sortie sans terminaison "
+                    "et sans etat jouable pour le joueur controle — "
+                    f"decision={None if decision is None else (decision.decision_owner, decision.has_valid_actions)}, "
+                    f"controlled_player={self.controlled_player}, current_player={current_player}, "
+                    f"iterations={iteration_count}. Une sortie de boucle a ete ajoutee sans "
+                    "etablir ce contrat : les appelants (action de la politique, observation "
+                    "reportee) le supposent tenu."
+                )
+        return obs, terminated, truncated, info, cumulative_reward, decision
 
     def _resolve_controlled_player_for_episode(self) -> int:
         """Resolve controlled player for this episode from seat mode."""
@@ -620,15 +722,30 @@ class BotControlledEnv(gym.Wrapper):
         else:
             self._bot_episodes += 1
 
-    def _get_self_play_opponent_action(self) -> int:
-        """Get action from frozen self-play opponent model."""
-        action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(
-            self.engine.game_state
-        )
-        if not eligible_units:
+    def _get_self_play_opponent_action(self, decision: Optional[MaskDecision] = None) -> int:
+        """Get action from frozen self-play opponent model.
+
+        `decision` : masque deja construit pour cet etat par l'appelant adjacent (`MaskDecision`).
+        Absente, on le construit.
+        """
+        if decision is not None:
+            action_mask, eligible_units = decision.action_mask, decision.eligible_units
+        else:
+            action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(
+                self.engine.game_state
+            )
+        # Decision agent en attente (V11 §9.3 P2) : le pool est vide PAR CONSTRUCTION — le moteur
+        # est arrete sur un point de choix, pas sur une activation. Sortir ici sur `ACTION_WAIT`
+        # rendrait une action HORS MASQUE, et le moteur ne revalide pas : `convert_squad_action`
+        # leve en move/shoot/charge/fight, et rend silencieusement `command_wait` en phase command
+        # — la decision est alors perdue sans trace. On laisse donc passer jusqu'a
+        # `predict(action_masks=...)`, ou le modele choisit un `CHOICE_i`. Jumeau de la branche
+        # de `_get_bot_action` et de celle de `SelfPlayWrapper._get_frozen_model_action`.
+        if not eligible_units and read_pending_agent_decision(self.engine.game_state) is None:
             return mi.ACTION_WAIT
-        valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
-        if not valid_actions:
+        # La liste des actions legales n'etait construite que pour tester sa vacuite : le modele
+        # recoit le masque tel quel.
+        if not np.any(np.asarray(action_mask, dtype=bool)):
             raise RuntimeError(
                 "BotControlledEnv self-play opponent encountered empty action mask. "
                 "Engine must advance phase/turn instead of exposing empty masks."
@@ -637,7 +754,9 @@ class BotControlledEnv(gym.Wrapper):
             raise RuntimeError(
                 "Self-play opponent model is not loaded while episode is in self-play mode."
             )
-        obs = self.engine._build_observation()
+        # Les lignes intermediaires ne lisent que des locales : on transmet le masque au lieu de
+        # laisser l'observation le reconstruire.
+        obs = self.engine._build_observation(mask_and_eligible=(action_mask, eligible_units))
         action, _ = self._frozen_model.predict(
             obs,
             deterministic=self._self_play_deterministic,
@@ -645,11 +764,13 @@ class BotControlledEnv(gym.Wrapper):
         )
         return int(action)
 
-    def _get_opponent_action(self, debug: bool = False) -> int:
+    def _get_opponent_action(
+        self, debug: bool = False, decision: Optional[MaskDecision] = None
+    ) -> int:
         """Get action from selected opponent mode for current episode."""
         if self._episode_uses_self_play_opponent:
-            return self._get_self_play_opponent_action()
-        return self._get_bot_action(debug=debug)
+            return self._get_self_play_opponent_action(decision=decision)
+        return self._get_bot_action(debug=debug, decision=decision)
 
     def _play_bot_until_control_returns(self, debug_mode: bool):
         """
@@ -660,7 +781,12 @@ class BotControlledEnv(gym.Wrapper):
         - executing forced controlled WAIT when controlled player has no legal action.
 
         Returns:
-            obs, cumulative_reward, terminated, truncated, info
+            obs, cumulative_reward, terminated, truncated, info, ready_decision
+
+        `ready_decision` : masque etabli sur l'etat de sortie quand le joueur controle a bien une
+        action jouable, pour que l'appelant n'ait pas a le reconstruire (cf. `MaskDecision`) ;
+        None sur toute autre sortie, et remise a None si l'observation est construite ici — un
+        `_build_observation` mute l'etat (frontiere 14.02, journal VP, advance_phase sur pool vide).
         """
         if debug_mode:
             print(
@@ -669,7 +795,7 @@ class BotControlledEnv(gym.Wrapper):
             )
         obs = None
         info = {}
-        obs, terminated, truncated, info, cumulative_reward = self._ensure_actionable_controlled_turn(
+        obs, terminated, truncated, info, cumulative_reward, ready_decision = self._ensure_actionable_controlled_turn(
             terminated=False,
             truncated=False,
             obs=obs,
@@ -680,7 +806,22 @@ class BotControlledEnv(gym.Wrapper):
         )
         if obs is None and not self.engine.defer_observation:
             # Keep vectorized env stacking stable: always return a real observation.
-            obs = self.engine._build_observation()
+            #
+            # POURQUOI cet appel ne peut PAS avancer la phase — la question se pose parce que le
+            # `reset` passe ici (report desarme) et qu'il n'y a plus de controle apres :
+            # `_build_observation` n'avance la phase que sur `not eligible_units and not mask.any()`.
+            # Or on lui transmet le masque du contrat de sortie ci-dessus, dont le pool est NON VIDE
+            # par construction (sinon la boucle aurait leve). La branche d'avancement est donc hors
+            # d'atteinte, et l'etat rendu a la politique reste celui que la boucle a etabli. Si un
+            # jour on cessait de transmettre ce masque, ce raisonnement tomberait : la construction
+            # recalculerait, pourrait avancer, et il faudrait re-verifier l'etat apres cet appel.
+            # Sur episode TERMINE, la decision vaut None et cette construction peut avancer une
+            # phase — comportement inchange, et sans consequence : `reset` reprend une tentative,
+            # `step` rend `terminated`. Aucune politique ne decide sur cet etat.
+            obs = self.engine._build_observation(mask_and_eligible=mask_pair_of(ready_decision))
+            # Les autres mutations (frontiere 14.02, journal VP) ont bien eu lieu : la decision ne
+            # vaut plus pour l'appelant, meme si le pool n'a pas bouge.
+            ready_decision = None
         if debug_mode:
             current_phase = str(require_key(self.engine.game_state, "phase"))
             current_player = int(require_key(self.engine.game_state, "current_player"))
@@ -691,7 +832,7 @@ class BotControlledEnv(gym.Wrapper):
                 f"controlled_player={self.controlled_player}",
                 flush=True,
             )
-        return obs, float(cumulative_reward), terminated, truncated, info
+        return obs, float(cumulative_reward), terminated, truncated, info, ready_decision
 
     def reset(self, *, seed=None, options=None):
         debug_mode = require_key(self.engine.game_state, "debug_mode")
@@ -771,7 +912,7 @@ class BotControlledEnv(gym.Wrapper):
             self.ai_wait_actions = 0
 
             # Enforce reset contract for policy learning: return only controlled actionable states.
-            bot_obs, _, terminated, truncated, bot_info = self._play_bot_until_control_returns(
+            bot_obs, _, terminated, truncated, bot_info, _ready = self._play_bot_until_control_returns(
                 debug_mode=debug_mode
             )
             if bot_obs is not None:
@@ -788,16 +929,6 @@ class BotControlledEnv(gym.Wrapper):
                     f"episode_number={episode_number})"
                 )
                 continue
-
-            # Defensive validation: wrapper must return on actionable controlled decision owner.
-            decision_owner, has_valid_actions, _eligible_count = self._get_decision_owner_from_mask()
-            if decision_owner != self.controlled_player or not has_valid_actions:
-                current_player = require_key(self.engine.game_state, "current_player")
-                raise RuntimeError(
-                    "BotControlledEnv reset returned non-actionable controlled state: "
-                    f"decision_owner={decision_owner}, has_valid_actions={has_valid_actions}, "
-                    f"current_player={current_player}, controlled_player={self.controlled_player}"
-                )
 
             self._last_step_return_time = None
             info["controlled_player"] = self.controlled_player
@@ -826,11 +957,18 @@ class BotControlledEnv(gym.Wrapper):
         """
         self.engine.defer_observation = True
         try:
-            obs, reward, terminated, truncated, info = self._step_with_deferred_observation(action)
+            obs, reward, terminated, truncated, info, ready_decision = (
+                self._step_with_deferred_observation(action)
+            )
         finally:
             self.engine.defer_observation = False
         if obs is None:
-            obs = self.engine._build_observation()
+            # Le masque du dernier etat a deja ete construit par la boucle qui a rendu la main
+            # (`ready_decision`), et rien n'a touche `game_state` depuis — `defer_observation` est
+            # un attribut du moteur, pas un element d'etat de jeu. On le transmet plutot que de le
+            # reconstruire a l'identique. Vaut None quand l'episode s'est termine : l'observation
+            # terminale se construit alors sur un masque frais.
+            obs = self.engine._build_observation(mask_and_eligible=mask_pair_of(ready_decision))
         return obs, reward, terminated, truncated, info
 
     def _step_with_deferred_observation(self, action):
@@ -856,19 +994,10 @@ class BotControlledEnv(gym.Wrapper):
         agent_action_info = None
         agent_intent_value = None
         agent_is_controlled_action = None
-        obs, bot_reward_before, terminated, truncated, info = self._play_bot_until_control_returns(
+        obs, bot_reward_before, terminated, truncated, info, ready_decision = self._play_bot_until_control_returns(
             debug_mode=debug_mode
         )
         cumulative_reward += float(bot_reward_before)
-        if not (terminated or truncated):
-            decision_owner, has_valid_actions, _eligible_count = self._get_decision_owner_from_mask()
-            if decision_owner != self.controlled_player or not has_valid_actions:
-                raise RuntimeError(
-                    "BotControlledEnv.step reached non-actionable controlled state before policy action: "
-                    f"decision_owner={decision_owner}, has_valid_actions={has_valid_actions}, "
-                    f"controlled_player={self.controlled_player}"
-                )
-
         # DIAGNOSTIC: Track AI shoot phase decisions BEFORE executing action
         # PERFORMANCE: Only track if diagnostics are enabled (shoot stats will be collected)
         # Skip get_action_mask() call here to avoid redundant computation - action_masks are already computed
@@ -890,6 +1019,10 @@ class BotControlledEnv(gym.Wrapper):
             # Execute agent action
             # LOG TEMPORAIRE: time full env.step() call (--debug) to compare with STEP_TIMING
             t0_agent = time.perf_counter() if debug_mode else None
+            # L'action de la politique va muter l'etat : la decision issue du jeu du bot AVANT
+            # l'action cesse de valoir. Si l'episode se termine sur cette action, le jeu du bot
+            # APRES est saute et il ne faut surtout pas rendre celle d'avant.
+            ready_decision = None
             obs, reward, terminated, truncated, info = self.env.step(action)
             agent_action_info = info.get("action")
             agent_intent_value = info.get("intent_value")
@@ -910,7 +1043,7 @@ class BotControlledEnv(gym.Wrapper):
 
         # Execute bot turns only while episode is still running.
         if not (terminated or truncated):
-            obs, bot_reward_after, terminated, truncated, info = self._play_bot_until_control_returns(
+            obs, bot_reward_after, terminated, truncated, info, ready_decision = self._play_bot_until_control_returns(
                 debug_mode=debug_mode
             )
             cumulative_reward += float(bot_reward_after)
@@ -935,7 +1068,7 @@ class BotControlledEnv(gym.Wrapper):
             "self_play" if self._episode_uses_self_play_opponent else "bot"
         )
         info["self_play_ratio_current"] = self._self_play_ratio_current
-        return obs, float(cumulative_reward), terminated, truncated, info
+        return obs, float(cumulative_reward), terminated, truncated, info, ready_decision
 
     def _select_bot_move_action(self, game_state, active_unit, valid_actions) -> int:
         """Traduit le choix de destination du bot en action-cellule legale (phase move spatiale).
@@ -998,9 +1131,19 @@ class BotControlledEnv(gym.Wrapper):
             )
         return cell
 
-    def _get_bot_action(self, debug=False) -> int:
+    def _get_bot_action(self, debug=False, decision: Optional[MaskDecision] = None) -> int:
+        """`decision` : masque deja construit pour cet etat par l'appelant adjacent (`MaskDecision`).
+        Absente, on le construit — c'est le cas des appels directs (tests).
+
+        Consequence a garder en tete : la carte cellule -> destination lue plus bas
+        (`read_squad_move_cell_map`) est celle que CETTE construction a memoisee, d'ici ou de
+        l'appelant.
+        """
         game_state = self.engine.game_state
-        action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(game_state)
+        if decision is not None:
+            action_mask, eligible_units = decision.action_mask, decision.eligible_units
+        else:
+            action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(game_state)
         # Décision agent du camp BOT (V11 §9.3 P2) : le bot la joue par son propre tirage, comme
         # tout choix qu'il ne modélise pas. C'était jusqu'ici l'action de l'AGENT qui la tranchait
         # (`raw_action_int % len(options)`) — l'agent décidait à la place de son adversaire.
@@ -1360,8 +1503,10 @@ class SelfPlayWrapper(gym.Wrapper):
             action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(self.engine.game_state)
             # Décision agent en attente (V11 §9.3 P2) : le pool est vide PAR CONSTRUCTION, mais
             # `ACTION_WAIT` est hors masque dans cet état — le renvoyer léverait. Symétrique du
-            # cas traité dans `BotControlledEnv._get_bot_action`. (La branche avec `frozen_model`
-            # passe, elle, par `predict(action_masks=…)` : elle joue naturellement un `CHOICE_i`.)
+            # cas traité dans `BotControlledEnv._get_bot_action`. La branche avec `frozen_model`
+            # laisse `predict(action_masks=…)` choisir le `CHOICE_i` : elle affirmait le faire alors
+            # qu'elle sortait sur `ACTION_WAIT` avant d'y arriver — corrigé plus bas, et verrouillé
+            # par `test_frozen_model_is_asked_to_answer_a_pending_decision`.
             if read_pending_agent_decision(self.engine.game_state) is not None:
                 choice_actions = [
                     index for index in mi.CHOICE_SLOTS if bool(action_mask[index])
@@ -1398,10 +1543,15 @@ class SelfPlayWrapper(gym.Wrapper):
         # Use frozen model to predict action WITH action masking
         # CRITICAL: MaskablePPO requires action_masks parameter for proper masked inference
         action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(self.engine.game_state)
-        if not eligible_units:
+        # Decision agent en attente : pool vide par construction, et `ACTION_WAIT` est hors masque.
+        # Cette branche sortait ici sans jamais atteindre `predict` — c'est la moitie du cas §9.3 P2
+        # que la branche sans modele traitait deja, et que son commentaire declarait a tort tenue.
+        if not eligible_units and read_pending_agent_decision(self.engine.game_state) is None:
             # Pool empty -> advance phase via WAIT/invalid action handling
             return mi.ACTION_WAIT
-        obs = self.engine._build_observation()
+        # Jumeau de `_get_self_play_opponent_action` : rien ne touche l'etat entre le masque et
+        # cette observation, on transmet au lieu de reconstruire.
+        obs = self.engine._build_observation(mask_and_eligible=(action_mask, eligible_units))
 
         # MaskablePPO.predict() expects action_masks as keyword argument
         # CRITICAL: Use deterministic=False so P1 explores like P0 (fair self-play)

@@ -1855,9 +1855,14 @@ class W40KEngine(gym.Env):
         action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
         if not eligible_units and not action_mask.any():
             if self.game_state.get("game_over", False):
-                observation = self._step_observation()
+                # Adjacent au masque ci-dessus : seules des lectures separent les deux.
+                observation = self._step_observation(
+                    mask_and_eligible=(action_mask, eligible_units)
+                )
             else:
             # Pool empty -> advance phase before building observation (no recursion)
+            # (les observations construites plus bas suivent un `_process_squad_action` : leur
+            #  masque a change, elles n'en passent aucun.)
                 current_phase = self.game_state.get("phase", "unknown")
                 advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
                 advance_success, advance_result = self._process_squad_action(advance_action)
@@ -1906,7 +1911,12 @@ class W40KEngine(gym.Env):
                                 break
                     observation = self._step_observation()
         else:
-            observation = self._step_observation()
+            # Aucune transition de phase n'a eu lieu : l'etat est EXACTEMENT celui sur lequel le
+            # masque ci-dessus a ete calcule, on le transmet au lieu de le refaire calculer a
+            # l'identique (cf. `_build_observation`, parametre `mask_and_eligible`). Les branches
+            # ci-dessus, elles, ont avance la phase : leur masque est perime, elles n'en passent
+            # aucun.
+            observation = self._step_observation(mask_and_eligible=(action_mask, eligible_units))
         _step_t4 = time.perf_counter() if _step_t0 is not None else None
         # Calculate reward (independent of step_logger)
         # Zone intent free step: reward is always 0.0 (agent learns via deferred rewards)
@@ -5492,7 +5502,9 @@ class W40KEngine(gym.Env):
             victory_points,
         )
 
-    def _step_observation(self):
+    def _step_observation(
+        self, mask_and_eligible: Optional[Tuple[np.ndarray, List[Dict[str, Any]]]] = None
+    ):
         """Observation RETOURNEE par ``step`` — ``None`` quand l'appelant a demande le report.
 
         Un step gym du wrapper d'entrainement enchaine plusieurs ``step`` moteur (tours du bot,
@@ -5511,20 +5523,64 @@ class W40KEngine(gym.Env):
         etat non avance, ``terminated`` etait calcule dessus et le wrapper compensait par un WAIT
         force — steps et journal decales. Seule la production du tenseur est reportee (parametre
         ``tensor``) ; la sequence d'effets de bord est rigoureusement la meme dans les deux modes.
+
+        ``mask_and_eligible`` : cf. ``_build_observation``. Seul un appelant IMMEDIATEMENT adjacent
+        peut le fournir.
         """
-        return self._build_observation(tensor=not self.defer_observation)
+        return self._build_observation(
+            tensor=not self.defer_observation, mask_and_eligible=mask_and_eligible
+        )
 
     @overload
-    def _build_observation(self) -> Dict[str, np.ndarray]: ...
+    def _build_observation(
+        self,
+        tensor: Literal[True] = True,
+        mask_and_eligible: Optional[Tuple[np.ndarray, List[Dict[str, Any]]]] = None,
+    ) -> Dict[str, np.ndarray]: ...
 
     @overload
-    def _build_observation(self, tensor: Literal[True]) -> Dict[str, np.ndarray]: ...
+    def _build_observation(
+        self,
+        tensor: bool,
+        mask_and_eligible: Optional[Tuple[np.ndarray, List[Dict[str, Any]]]] = None,
+    ) -> Optional[Dict[str, np.ndarray]]: ...
 
-    @overload
-    def _build_observation(self, tensor: bool) -> Optional[Dict[str, np.ndarray]]: ...
+    def _build_observation(
+        self,
+        tensor: bool = True,
+        mask_and_eligible: Optional[Tuple[np.ndarray, List[Dict[str, Any]]]] = None,
+    ) -> Optional[Dict[str, np.ndarray]]:
+        """Facade : l'observation seule. L'implementation est ``_build_observation_and_mask``.
 
-    def _build_observation(self, tensor: bool = True) -> Optional[Dict[str, np.ndarray]]:
+        Quinze appelants n'ont besoin que du tenseur ; ils gardent cette signature. Ceux qui ont
+        AUSSI besoin du masque (le PvE : observation pour le modele, masque pour le masquage des
+        actions) appellent l'implementation et obtiennent les deux du MEME passage — plus besoin
+        de recalculer un masque et d'argumenter qu'il decrit le meme etat.
+        """
+        return self._build_observation_and_mask(
+            tensor=tensor, mask_and_eligible=mask_and_eligible
+        )[0]
+
+    def _build_observation_and_mask(
+        self,
+        tensor: bool = True,
+        mask_and_eligible: Optional[Tuple[np.ndarray, List[Dict[str, Any]]]] = None,
+    ) -> Tuple[
+        Optional[Dict[str, np.ndarray]], Optional[Tuple[np.ndarray, List[Dict[str, Any]]]]
+    ]:
         """Build observation — pipeline squad, seul pipeline existant.
+
+        Rend ``(observation, masque_utilise)``. Le second element est le couple
+        ``(masque, pool eligible)`` sur lequel CETTE construction s'est appuyee, ou ``None`` quand
+        elle n'en a construit aucun (decision en attente, phase de deploiement : l'observateur y
+        est designe autrement). Un appelant qui a besoin du masque le reprend tel quel au lieu de
+        le reconstruire : ils viennent alors du meme passage, donc du meme etat, PAR CONSTRUCTION —
+        c'est un mecanisme, pas un argument d'adjacence. Sur ``None``, il le construit lui-meme.
+
+        Pourquoi cette sortie et pas l'entree ``mask_and_eligible`` : ici l'ordre est impose dans
+        l'autre sens. Cette fonction peut AVANCER LA PHASE (pool vide) ; un masque calcule avant
+        elle decrirait alors la phase precedente. Le masque doit donc sortir d'elle, jamais y entrer,
+        pour tout appelant qui ne peut pas prouver qu'aucune transition n'aura lieu.
 
         L'obs est un Dict de TENSEURS D'ENTITES (V11 §0.30 T-D — une unite, amie ou ennemie, y
         porte le meme schema de features), toujours scinde continues/discretes (V11 §9.5), plus
@@ -5537,6 +5593,25 @@ class W40KEngine(gym.Env):
         pas de simulation, seul l'encodage est facultatif. Les deux fabriques locales ci-dessous
         sont les SEULS producteurs de tenseur (tous les `return` y passent) : porter le drapeau la
         garantit qu'aucune sortie ne l'oublie.
+
+        ``mask_and_eligible`` — masque et pool DEJA calcules par l'appelant, pour ne pas les
+        recalculer ici. Ce n'est pas un cache : rien n'est conserve, donc rien a perimer. Le masque
+        n'est de toute facon pas memoisable — il tire le jet d'Advance au premier appel d'une
+        activation (cf. ``action_decoder``).
+
+        LA REGLE, et non une liste d'appelants autorises — une telle liste rouille en silence des
+        qu'un site s'ajoute (c'est arrive dans le commit meme qui l'a ecrite) : l'appelant doit
+        pouvoir PROUVER que rien n'a touche ``game_state`` entre la construction du masque et cet
+        appel. Adjacence de ligne quand la valeur ne bouge pas ; quand elle traverse des cadres de
+        pile, tout chemin mutant doit la remettre a ``None`` — discipline tenue et documentee par
+        ``ai/env_wrappers.MaskDecision``. Dans le doute : ``None``, et le masque est reconstruit ici
+        (correct dans tous les cas, seulement plus lent).
+
+        Le rafraichissement de frontiere 14.02 fait juste en dessous ne change pas la legalite des
+        actions : verifie par recalcul-comparaison a la mise en place, et re-verifiable a tout moment
+        par ``W40K_MASK_VERIFY=1``, qui recompare la carte de cellules memoisee
+        (``engine.mask_verification``, appelee depuis ``shared_utils.read_squad_move_cell_map`` et
+        ``movement_handlers``).
         """
         # Regle 14.02 : le controle d objectif est determine a la FIN de chaque phase/tour.
         # Ce point de passage est le seul commun aux 7 sites de construction d observation du
@@ -5576,7 +5651,8 @@ class W40KEngine(gym.Env):
                     f"_build_observation: unite {decision_unit_id} de la decision en attente "
                     "absente de units_cache — la decision survit a son unite."
                 )
-            return _build_for_squad(decision_unit_id)
+            # Aucun masque construit sur ce chemin : l'observateur est l'unite de la decision.
+            return _build_for_squad(decision_unit_id), None
 
         if self.game_state.get("phase") == "deployment":
             # §0.40 point 1 : l'obs decrit l'unite SUR LAQUELLE LE MASQUE AGIT, jamais une autre.
@@ -5586,24 +5662,33 @@ class W40KEngine(gym.Env):
             # doctrine que la branche `pending_agent_decision` ci-dessus : UNE source, celle du
             # masque (`get_deployment_active_unit`, qui leve si le pool est vide au lieu de rendre
             # une obs nulle qui masquerait l'incoherence).
+            # Aucun masque construit ici non plus : l'unite active vient du pool de deploiement.
             return _build_for_squad(
                 str(require_key(self.action_decoder.get_deployment_active_unit(self.game_state), "id"))
-            )
+            ), None
 
-        action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
+        if mask_and_eligible is not None:
+            action_mask, eligible_units = mask_and_eligible
+        else:
+            action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
         if not eligible_units and not action_mask.any():
             if self.game_state.get("game_over", False):
-                return _zero_obs()
+                return _zero_obs(), (action_mask, eligible_units)
             current_phase = self.game_state.get("phase", "unknown")
             advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
             advance_success, advance_result = self._process_squad_action(advance_action)
             if not advance_success:
                 if isinstance(advance_result, dict) and advance_result.get("error") == "game_over":
-                    return _zero_obs()
+                    # `_process_squad_action` a echoue APRES avoir potentiellement mute l'etat :
+                    # le masque ci-dessus ne le decrit plus, on n'en rend aucun.
+                    return _zero_obs(), None
                 raise RuntimeError(f"advance_phase failed: {advance_result}")
-            _action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
+            # La phase vient d'avancer : on garde le masque RECALCULE, pas celui d'avant. Il etait
+            # jete dans `_action_mask` — le couple rendu serait alors incoherent (masque d'avant la
+            # transition, pool d'apres), exactement le defaut que cette sortie doit empecher.
+            action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
             if not eligible_units:  # get allowed
-                return _zero_obs()
+                return _zero_obs(), (action_mask, eligible_units)
         # Active squad = 1er eligible (convention 1 unit = 1 squad).
         # Si eligible_units vide mais mask any (cas degenere),
         # prendre 1ere unite vivante du player courant.
@@ -5617,8 +5702,8 @@ class W40KEngine(gym.Env):
                 None,
             )
             if active_squad_id is None:
-                return _zero_obs()
-        return _build_for_squad(active_squad_id)
+                return _zero_obs(), (action_mask, eligible_units)
+        return _build_for_squad(active_squad_id), (action_mask, eligible_units)
 
     def _calculate_board_max_range(self, board_cols: int, board_rows: int) -> int:
         """

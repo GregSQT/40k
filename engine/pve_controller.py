@@ -143,16 +143,25 @@ class PvEController:
         autre contrat que celui sur lequel la politique a ete entrainee joue autre chose que ce
         qu'elle a appris.
 
-        L'observation est construite AVANT le masque : `_build_observation` peut avancer la phase
-        quand le pool est vide, et le masque doit decrire l'etat sur lequel le modele a decide.
+        L'observation est construite AVANT le masque : `_build_observation_and_mask` peut avancer la
+        phase quand le pool est vide, et le masque doit decrire l'etat sur lequel le modele a decide.
+        C'est pourquoi le masque SORT de la construction d'observation au lieu d'etre recalcule
+        apres elle : les deux proviennent du meme passage, donc du meme etat, par construction. Un
+        second calcul redonnait le bon resultat tant que rien ne s'executait entre les deux — une
+        propriete qui se demontre par lecture a chaque modification, au lieu d'etre garantie.
         """
         if not self.micro_models:
             raise RuntimeError("Micro models not loaded for PvE")
 
-        micro_obs = engine._build_observation()
-        action_mask, eligible_units = engine.action_decoder.get_squad_action_mask_and_eligible_units(
-            game_state
-        )
+        micro_obs, mask_used = engine._build_observation_and_mask()
+        if mask_used is not None:
+            action_mask, eligible_units = mask_used
+        else:
+            # Chemins ou l'observation ne construit aucun masque (decision en attente, phase de
+            # deploiement : l'observateur y est designe autrement). Il faut donc le construire.
+            action_mask, eligible_units = engine.action_decoder.get_squad_action_mask_and_eligible_units(
+                game_state
+            )
         if not eligible_units and not action_mask.any():
             raise RuntimeError("No eligible units and no valid action for PvE decision")
         # Squad actif = 1er eligible, EXACTEMENT la convention de `_build_observation`, du masque

@@ -84,35 +84,38 @@ def _install_work_counters() -> dict:
     seul point d'interception qui reste valide quel que soit l'appelant. Si un renommage cassait
     l'interception, le compteur resterait a zero — d'ou la garde de non-vacuite.
     """
+    import engine.action_decoder as action_decoder_module
     import engine.phase_handlers.charge_handlers as charge_handlers
     import engine.phase_handlers.movement_handlers as movement_handlers
     import engine.w40k_core as w40k_core
 
-    counters = {"move_pool": 0, "charge_phase_start": 0, "engine_step": 0, "episode_steps": 0}
+    counters = {
+        "action_mask": 0,
+        "move_pool": 0,
+        "charge_phase_start": 0,
+        "engine_step": 0,
+        "episode_steps": 0,
+    }
 
-    build_pool = movement_handlers.movement_build_valid_destinations_pool
+    def count(owner, attribute: str, key: str) -> None:
+        """Enveloppe `owner.attribute` d'un compteur. Les quatre interceptions ont la meme forme ;
+        l'ecrire une fois evite qu'une cinquieme copie diverge d'une lettre."""
+        wrapped = getattr(owner, attribute)
 
-    def counted_build_pool(*args, **kwargs):
-        counters["move_pool"] += 1
-        return build_pool(*args, **kwargs)
+        def counted(*args, **kwargs):
+            counters[key] += 1
+            return wrapped(*args, **kwargs)
 
-    movement_handlers.movement_build_valid_destinations_pool = counted_build_pool
+        setattr(owner, attribute, counted)
 
-    charge_start = charge_handlers.charge_phase_start
-
-    def counted_charge_start(*args, **kwargs):
-        counters["charge_phase_start"] += 1
-        return charge_start(*args, **kwargs)
-
-    charge_handlers.charge_phase_start = counted_charge_start
-
-    engine_step = w40k_core.W40KEngine.step
-
-    def counted_step(self, action):
-        counters["engine_step"] += 1
-        return engine_step(self, action)
-
-    w40k_core.W40KEngine.step = counted_step
+    # `action_mask` compte les CONSTRUCTIONS DE MASQUE, seul compteur sensible a la suppression
+    # d'un appel redondant. `move_pool` ne l'est pas : le pool de destinations est memoise pour la
+    # duree de l'activation, donc un second appel de masque sur le meme etat le retrouve sans le
+    # reconstruire — deux appels et un seul se lisent identiquement sur ce compteur-la.
+    count(action_decoder_module.ActionDecoder, "get_squad_action_mask_and_eligible_units", "action_mask")
+    count(movement_handlers, "movement_build_valid_destinations_pool", "move_pool")
+    count(charge_handlers, "charge_phase_start", "charge_phase_start")
+    count(w40k_core.W40KEngine, "step", "engine_step")
     return counters
 
 
@@ -163,6 +166,11 @@ def _play(env, episodes: int, seed_base: int, counters: dict) -> str:
         game_state = env.unwrapped.game_state
         done = False
         while not done:
+            # `unwrapped.get_action_mask()` EST l'appel de production : `mask_fn` recoit l'env que
+            # `ActionMasker` enveloppe, c'est-a-dire le moteur nu (cf. `ai/training_utils`). Reserve
+            # pour plus tard : si un wrapper se mettait a servir le masque lui-meme (au lieu de
+            # laisser redescendre au moteur), ce chemin-ci le contournerait et le compteur
+            # afficherait « travail identique » en regardant ailleurs.
             mask = np.asarray(env.unwrapped.get_action_mask())
             legal = np.flatnonzero(mask)
             if legal.size == 0:

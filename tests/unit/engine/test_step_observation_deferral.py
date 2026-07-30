@@ -43,9 +43,11 @@ class _PoolDecoder:
 
     def __init__(self) -> None:
         self.advanced = False
+        self.calls = 0
 
     def get_squad_action_mask_and_eligible_units(self, game_state):
         _ = game_state
+        self.calls += 1
         empty_mask = np.zeros(4, dtype=bool)
         if not self.advanced:
             return empty_mask, []
@@ -74,6 +76,7 @@ class _EngineStub:
 
     _step_observation = W40KEngine._step_observation
     _build_observation = W40KEngine._build_observation
+    _build_observation_and_mask = W40KEngine._build_observation_and_mask
 
     def __init__(self, defer: bool) -> None:
         self.defer_observation = defer
@@ -135,14 +138,36 @@ def test_boundary_checkpoint_runs_exactly_once_per_observation() -> None:
         assert engine.snapshot_logs == 3, f"defer={defer}"
 
 
+def test_precomputed_mask_is_consumed_instead_of_rebuilt() -> None:
+    """`mask_and_eligible` doit REELLEMENT eviter la construction, pas seulement etre accepte.
+
+    Un parametre ignore laisserait tout vert en supprimant zero appel : le gain annonce serait
+    nul et rien ne le dirait. Ce test compare donc les deux modes sur le meme etat.
+    """
+    engine = _EngineStub(defer=False)
+    engine.action_decoder.advanced = True  # pool non vide : on reste sur le chemin nominal
+    mask = np.zeros(4, dtype=bool)
+    mask[0] = True
+
+    engine._build_observation(mask_and_eligible=(mask, [{"id": "u1"}]))
+    assert engine.action_decoder.calls == 0, "le masque fourni n'a pas ete consomme"
+
+    engine._build_observation()
+    assert engine.action_decoder.calls == 1, "sans valeur fournie, le masque doit etre construit"
+
+
 def test_every_observation_return_path_honours_the_tensor_flag() -> None:
     """Invariant de CONCEPTION : les deux fabriques locales sont les seuls producteurs de tenseur.
 
     Le drapeau `tensor` n'est teste qu'a l'interieur de `_zero_obs` / `_build_for_squad`. Cette
     economie n'est sure que si TOUT `return` du corps passe par l'une des deux : un futur
     `return self.obs_builder...` en direct rendrait un tenseur malgre le report, sans bruit.
+
+    Le balayage porte sur `_build_observation_and_mask`, l'implementation (`_build_observation`
+    n'en est plus que la facade). Chaque `return` y rend le couple `(observation, masque)` : c'est
+    donc le PREMIER element qui doit venir d'une fabrique.
     """
-    tree = ast.parse(textwrap.dedent(inspect.getsource(W40KEngine._build_observation)))
+    tree = ast.parse(textwrap.dedent(inspect.getsource(W40KEngine._build_observation_and_mask)))
     fn = tree.body[0]
     assert isinstance(fn, ast.FunctionDef)
     factories = {"_zero_obs", "_build_for_squad"}
@@ -158,8 +183,13 @@ def test_every_observation_return_path_honours_the_tensor_flag() -> None:
     ]
     assert body_returns, "aucun return detecte : le balayage AST est casse"
     for value in body_returns:
+        assert isinstance(value, ast.Tuple) and len(value.elts) == 2, (
+            f"return qui n'est pas un couple (observation, masque) : "
+            f"{ast.dump(value) if value else 'None'}"
+        )
+        observation = value.elts[0]
         assert (
-            isinstance(value, ast.Call)
-            and isinstance(value.func, ast.Name)
-            and value.func.id in factories
-        ), f"return hors fabrique : {ast.dump(value) if value else 'None'}"
+            isinstance(observation, ast.Call)
+            and isinstance(observation.func, ast.Name)
+            and observation.func.id in factories
+        ), f"observation rendue hors fabrique : {ast.dump(observation)}"
