@@ -62,7 +62,7 @@ Le namespace **`0_critical/`** regroupe les 11 métriques essentielles pour le t
 
 **Organisation** :
 - **a–c** : Évaluation bot (combined, worst_bot, holdout_hard)
-- **d–e** : Performance training (win_rate, episode_reward)
+- **d–f** : Performance training (win_rate, episode_reward, loss_mean)
 - **g–j** : Santé PPO (explained_variance, clip_fraction, approx_kl, entropy)
 - **l–m** : Efficacité tactique (value_trade_ratio, value_loss)
 
@@ -73,6 +73,7 @@ Le namespace **`0_critical/`** regroupe les 11 métriques essentielles pour le t
 | **c_holdout_hard_mean** | >0.10 | Matchup défavorable | Score ≈0 normal (structurel, pas un bug) | — |
 | **d_win_rate_100ep** | >0.50 | Apprentissage général | Vérifier entropy (trop basse) et clip_fraction | — |
 | **e_episode_reward_smooth** | Tendance croissante | Signal de récompense | Vérifier reward config — récompenses intermédiaires trop faibles | Possible reward hacking — vérifier les récompenses exploitées |
+| **f_loss_mean** | Tendance décroissante, sans oscillations | learning_rate, n_steps, vf_coef | Basse et stable : convergence saine — rien à faire | Oscille → learning_rate ↓ (÷2), n_steps ↓ ; Stagne haute → vf_coef ↑ |
 | **g_explained_variance** | >0.30 | gamma, gae_lambda, net_arch | <0.30 : gamma ↑ (→0.98), net_arch ↑, n_steps ↑ | >0.95 : value network saturé — aucune action requise |
 | **h_clip_fraction** | 0.10–0.30 | **learning_rate**, clip_range | <0.05 : politique figée → clip_range ↑ (→0.25) ou ent_coef ↑ | >0.40 : LR trop élevé → learning_rate ↓ (÷2), clip_range ↓ (→0.15) |
 | **i_approx_kl** | 0.01–0.02 | learning_rate, target_kl | <0.005 : apprentissage trop lent → LR ↑ (×1.5) | >0.02 : mise à jour trop agressive → LR ↓ (÷2), fixer target_kl à 0.01–0.015 |
@@ -437,7 +438,7 @@ The `0_critical/` namespace contains **THE 11 ESSENTIAL METRICS** for hyperparam
 | **0_critical/g_explained_variance** | Value function quality (R²) | >0.30 | Value network capacity |
 | **0_critical/h_clip_fraction** | % of clipped policy updates | 0.10–0.30 | Tune `learning_rate` — <0.05 = politique trop déterministe |
 | **0_critical/i_approx_kl** | Policy change magnitude | <0.02 (ideally 0.01–0.015) | Policy stability |
-| **0_critical/j_entropy_loss** | Exploration level | -2.0 to -0.5 (decreasing) | Tune `ent_coef` |
+| **0_critical/j_entropy_loss** | Exploration level | Decroissant -> -1.5 à -1.0 vers les 2/3 du training | Tune `ent_coef` |
 | **0_critical/l_value_trade_ratio** | Valeur détruite / valeur perdue (200ep) | >1.0 | Efficacité tactique — l'agent doit détruire plus qu'il ne perd |
 | **0_critical/m_value_loss_smooth** | Value function loss lissée | Décroissante puis stable | Convergence du value network |
 
