@@ -1633,7 +1633,7 @@ class W40KEngine(gym.Env):
         decision, puis cette fonction le reconstruisait a l'identique juste apres (124,2 fois par
         episode, 100 % des reconstructions rendant un couple bit-a-bit identique). Meme regle que
         ``_build_observation`` : l'appelant doit pouvoir PROUVER que rien n'a touche ``game_state``
-        entre sa construction et cet appel. ``W40K_MASK_VERIFY=1`` recalcule et compare, et leve si
+        entre sa construction et cet appel. ``W40K_MASK_VERIFY=2`` recalcule et compare, et leve si
         l'appelant s'est trompe (cf. ``_verify_supplied_mask``).
 
         6e ELEMENT RENDU — le couple ``(masque, pool)`` de l'etat de SORTIE, ou ``None`` quand
@@ -1703,7 +1703,7 @@ class W40KEngine(gym.Env):
         # This handles the case where fight phase pools are empty
         # PERF: compute mask+eligible_units once, reuse for convert_squad_action
         # L'appelant qui tient deja ce couple pour l'etat d'entree le transmet (cf. docstring) ;
-        # sinon on le construit. `_verify_supplied_mask` est un no-op hors `W40K_MASK_VERIFY=1`.
+        # sinon on le construit. `_verify_supplied_mask` est un no-op hors `W40K_MASK_VERIFY=2`.
         if mask_and_eligible is not None:
             action_mask, eligible_units = mask_and_eligible
             self._verify_supplied_mask(action_mask, eligible_units, "W40KEngine.step_with_mask")
@@ -5546,7 +5546,7 @@ class W40KEngine(gym.Env):
         eligible_units: List[Dict[str, Any]],
         source: str,
     ) -> None:
-        """Controle du masque transmis a ``step_with_mask`` — no-op hors ``W40K_MASK_VERIFY=1``.
+        """Controle d'un masque transmis par un appelant — no-op hors ``W40K_MASK_VERIFY=2``.
 
         Le gain de la transmission repose sur une affirmation de l'appelant que rien ne verifiait
         (cf. ``engine.mask_verification.verify_supplied_mask``). Armer ce mode sur un run de
@@ -5734,7 +5734,7 @@ class W40KEngine(gym.Env):
             # Meme controle que dans `step_with_mask`, et pour la meme raison : ce parametre est
             # l'AUTRE porte d'entree d'un masque construit ailleurs (quatre appelants de
             # production). Elle n'etait pas verifiee alors que la docstring ci-dessus renvoie a
-            # `W40K_MASK_VERIFY=1` — un mode arme qui ne regarde qu'une porte sur deux donne un
+            # `W40K_MASK_VERIFY=2` — un mode arme qui ne regarde qu'une porte sur deux donne un
             # feu vert partiel qui se lit comme un feu vert.
             self._verify_supplied_mask(
                 action_mask, eligible_units, "W40KEngine._build_observation_and_mask"

@@ -47,7 +47,9 @@ class MaskDecision(NamedTuple):
     tire le jet d'Advance au premier appel d'une activation et memoise la carte de cellules que le
     decodage rejouera). Une carte rejouee sur un etat qui a bouge fait executer au moteur un
     deplacement coherent mais FAUX, sans lever : l'agent apprendrait sur des transitions qui ne
-    sont pas celles qu'on lui a montrees. Le filet de securite est `W40K_MASK_VERIFY=1`.
+    sont pas celles qu'on lui a montrees. Les filets de securite sont `W40K_MASK_VERIFY=1`
+    (carte memoisee) et `W40K_MASK_VERIFY=2` (masque transmis lui-meme) — deux niveaux parce que
+    le second coute une copie profonde par appel, cf. `engine.mask_verification`.
 
     Deux champs seulement, plus ce qui s'en derive : porter `has_valid_actions` et `eligible_count`
     en dur obligeait a les tenir coherents sur chaque site de construction.
@@ -515,7 +517,7 @@ class BotControlledEnv(gym.Wrapper):
 
         `decision` : celle etablie pour l'etat COURANT, ou None. La regle de validite est celle de
         `MaskDecision` — l'appelant ne la passe que s'il peut prouver que rien n'a touche
-        `game_state` depuis sa construction. `W40K_MASK_VERIFY=1` transforme cette preuve en
+        `game_state` depuis sa construction. `W40K_MASK_VERIFY=2` transforme cette preuve en
         mesure (cf. `W40KEngine._verify_supplied_mask`).
 
         Rend en dernier element la decision de l'etat de SORTIE quand le moteur a construit un
@@ -1135,10 +1137,12 @@ class BotControlledEnv(gym.Wrapper):
             obs = self.engine._build_observation(mask_and_eligible=mask_pair_of(ready_decision))
         # Le masque reste servable APRES cette construction : elle mute l'etat (frontiere 14.02,
         # journal VP) mais ne change pas la LEGALITE des actions — c'est l'invariant que
-        # `_build_observation_and_mask` documente, etabli par recalcul-comparaison et re-verifiable
-        # par `W40K_MASK_VERIFY=1`. C'est deja celui sur lequel repose la ligne au-dessus, qui lui
-        # transmet ce meme masque. Sa branche `advance_phase` est hors d'atteinte ici : le pool du
-        # contrat de sortie est non vide.
+        # `_build_observation_and_mask` documente, etabli par recalcul-comparaison. Le masque
+        # transmis a la ligne au-dessus passe par la porte de verification de niveau 2 :
+        # `W40K_MASK_VERIFY=2` (et non 1, qui ne controle que les donnees memoisees). Sa branche
+        # `advance_phase` est hors d'atteinte ici parce que le MASQUE du contrat de sortie est non
+        # vide, et que l'avancement exige les deux conditions — ne PAS invoquer un pool non vide,
+        # que le contrat ne garantit pas (decision en attente, intention de zone : pool vide).
         self._deposit_served_decision(ready_decision, terminated, truncated)
         return obs, reward, terminated, truncated, info
 

@@ -28,6 +28,12 @@ from tests._state_invariants import TURN_STATE_KEYS, turn_state_invariants
 @pytest.fixture(autouse=True)
 def mock_build_obs(monkeypatch):
     """Mocke _build_observation pour tous les tests — on ne teste pas l'obs builder ici."""
+    # `_step_observation` appelle l'IMPLEMENTATION `_build_observation_and_mask`, pas la
+    # facade : doubler la seule facade laissait tourner le vrai constructeur d'observation
+    # (et son `advance_phase` sur pool vide) sur ces etats de test.
+    monkeypatch.setattr(
+        W40KEngine, "_build_observation_and_mask", lambda self, *_a, **_k: (np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET), None)
+    )
     monkeypatch.setattr(W40KEngine, "_build_observation", lambda self, *_a, **_k: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET))
 
 

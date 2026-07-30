@@ -316,6 +316,17 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
     # game_log_history) seulement aux réponses de Load / rewind du replay.
     "log_delta",
     "wall_hexes",
+    # Geometrie STATIQUE du plateau (160 Ko apres le passage au banc 44x60x1) : renvoyee a chaque
+    # action alors que le front dessine le terrain depuis `useGameConfig` / `/api/config/board`.
+    # `grep -rn terrain_areas frontend/src` : 0 hit.
+    "terrain_areas",
+    # Index miroir de `units` construit par le moteur (`unit_by_id`, ~97 Ko) : le front lit `units`,
+    # jamais cet index. `grep -rn unit_by_id frontend/src` : 0 hit.
+    "unit_by_id",
+    # Distances de charge par ancre, dict à clés TUPLE. Le front en reçoit la forme aplatie
+    # `result.charge_dest_distances` (charge_handlers.py:4322, useEngineAPI.ts:2797), jamais ce
+    # dict : `grep -rn valid_charge_dest_distances frontend/src` → 0 hit.
+    "valid_charge_dest_distances",
     # Table statique moteur (config/weapon_damage_table.json) — le client web n’en a pas besoin ;
     # le moteur garde ``game_state["weapon_damage_table"]`` en mémoire pour les règles.
     "weapon_damage_table",
@@ -335,36 +346,48 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
     "shoot_preview_candidates",
     "engagement_zone_cache",
     "occupation_map",
-    "_cache_instance_id",
-    "_charge_dest_bfs_cache",
-    "_charge_fp_offset_pair_cache",
-    # Cache du champ géodésique de charge par-figurine (Étape 5.A), même motif que le move ci-dessous :
-    # dicts volumineux à clés tuples, jamais consommés par l'UI → exclusion obligatoire.
-    "_charge_model_field_cache",
-    # Cache du champ géodésique de move par-figurine (Étape 4.1) : dicts volumineux à clés tuples,
-    # jamais consommés par l'UI (le front reçoit ``destinations``). Exclusion obligatoire, sinon
-    # sérialisé dans chaque réponse → payload énorme + serialize lent.
-    "_move_model_field_cache",
     # Sous-ensemble dérivé des ancres pour contour UI ; le front n’utilise pas ce champ (preview = pool + footprint_zone).
     "move_preview_border",
     # Moteur / RL / debug — pas consommés par l’UI web (réduit serialize + jsonify sur chaque POST /action).
     "last_compliance_data",
     "units_cache_prev",
-    "_best_weapon_cache",
-    "_last_semantic_action",
-    "_last_action_debug",
-    "_choice_timing_fired_events",
-    "_deployment_random_mix_forced_steps",
-    "_wall_set_cache",
-    "_obscuring_area_sets_cache",
-    "_obscuring_hex_to_area_cache",
-    "_unit_los_pair_cache",
-    "_shooting_phase_initialized",
-    "_fight_consolidation_ctx",
-    "_fight_pile_in_ctx",
     "console_logs",
+    # Les caches moteur à préfixe `_` (`_move_model_field_cache`, `_charge_model_field_cache`,
+    # `_wall_set_cache`, `_unit_los_pair_cache`, `_obs_*`…) ne sont PLUS listés ici : ils sont
+    # couverts par la règle de préfixe de `_exclude_game_state_key_for_api_json`, qui les prend
+    # tous, y compris ceux qui n'existent pas encore.
 })
 
+
+def _normalise_non_str_keys(game_state: Dict[str, Any]) -> None:
+    """Convertit en ``str`` les clés des dicts de premier niveau qui n'en sont pas.
+
+    POURQUOI. JSON n'a pas de clé entière : tout encodeur les convertit, et c'est déjà ce que le
+    front reçoit — cette normalisation est iso-payload (les règles ci-dessous sont exactement celles
+    de ``make_json_serializable``). Ce qui change, c'est QUI la fait. ``orjson`` REFUSE un dict à
+    clé non-``str`` (``TypeError: Dict key must be str``) et son échec n'est pas local : il fait
+    retomber la réponse ENTIÈRE sur le pré-parcours récursif Python. Mesure du 2026-07-30 : les
+    seuls ``victory_points == {1: 0, 2: 0}`` envoyaient 61 réponses sur 61 dans ce repli, à 22-71 ms
+    l'unité contre 1,2 ms pour orjson.
+
+    POURQUOI UNE RÈGLE ET PAS UNE LISTE. La première version listait les clés connues
+    (``victory_points``, ``value_at_start``, ``deployment_type_by_player``…). Cette liste a perdu
+    la course en une revue : ``valid_move_destinations_pool_by_level`` (clés d'étage), puis
+    ``valid_charge_dest_distances`` (clés tuple) sont nées hors d'elle, chacune remettant 100 % des
+    réponses de sa phase dans le repli. Le mode de défaillance est silencieux — même JSON, 50x plus
+    lent — donc rien ne le signale. La règle prend aussi celles qui n'existent pas encore.
+
+    Coût : un ``isinstance`` par clé de premier niveau (~15 000, soit ~1 ms) contre les 22-71 ms du
+    repli qu'elle évite. Premier niveau SEULEMENT : un dict imbriqué à clés exotiques doit être
+    exclu du payload (cf. ``_GAME_STATE_EXCLUDE_KEYS``), pas aplati en silence.
+    """
+    for key, value in game_state.items():
+        if not isinstance(value, dict) or all(isinstance(k, str) for k in value):
+            continue
+        game_state[key] = {
+            (k if isinstance(k, str) else ",".join(str(x) for x in k) if isinstance(k, tuple) else str(k)): v
+            for k, v in value.items()
+        }
 
 _UNITS_CACHE_FRONTEND_KEYS = ("col", "row", "level", "HP_CUR", "player", "orientation", "occupied_hexes_by_model", "orientation_by_model", "models_meta_by_model")
 
@@ -539,6 +562,16 @@ def _exclude_game_state_key_for_api_json(key: str) -> bool:
         return True
     if key.startswith("enemy_adjacent_counts_player_"):
         return True
+    # Convention du moteur : un `_` initial marque une donnee INTERNE (cache, memo, contexte de
+    # sous-phase). Regle de PREFIXE et non liste nominative, parce que la liste perdait la course :
+    # chaque nouveau cache d'observation naissait hors d'elle et partait au navigateur en silence.
+    # Mesure au 2026-07-30, apres 60 actions d'une partie pvp_test : 555 Ko sur 1,07 Mo de reponse
+    # etaient des cles `_` (dont `_grid_static_hex_arrays` 195 Ko, `_shooter_los_models_cache`
+    # 166 Ko, `_obs_objective_hex_arrays` 118 Ko), aucune lue par le front. Deux d'entre elles
+    # portaient en plus des cles tuple/int, ce qui faisait echouer orjson sur la reponse ENTIERE.
+    # `grep -rnE "[\"'\.]_[A-Za-z_]+" frontend/src` : aucune lecture d'une cle `_` du game_state.
+    if key.startswith("_"):
+        return True
     return False
 
 
@@ -693,11 +726,17 @@ def _game_state_for_json(
     ``move_preview_footprint_zone`` du JSON (évite des milliers de couples hex).
     Si ``valid_move_destinations_pool`` est non vide, supprime ``preview_hexes`` (alias du même pool).
     Trims units_cache to (col, row, HP_CUR, player, orientation).
-    Exclut aussi caches internes, snapshots ``units_cache_prev``, ``last_compliance_data``,
-    ``console_logs``, la table statique ``weapon_damage_table`` (moteur uniquement), la config
-    complète ``config`` (déjà chargée côté client), et les caches d’adjacence par joueur
-    ``enemy_adjacent_hexes_player_*`` / ``enemy_adjacent_counts_player_*``
+    Exclut aussi snapshots ``units_cache_prev``, ``last_compliance_data``, ``console_logs``, la
+    table statique ``weapon_damage_table`` (moteur uniquement), la config complète ``config``
+    (déjà chargée côté client), la géométrie statique ``terrain_areas`` (le front la lit via
+    ``/api/config/board``), l'index miroir ``unit_by_id``, les caches d’adjacence par joueur
+    ``enemy_adjacent_hexes_player_*`` / ``enemy_adjacent_counts_player_*``, et TOUTE clé à préfixe
+    ``_`` — caches et mémos moteur, par convention jamais consommés par l'UI
     (voir ``_GAME_STATE_EXCLUDE_KEYS`` et ``_exclude_game_state_key_for_api_json``).
+
+    Normalise enfin en ``str`` les clés non-``str`` des dicts de premier niveau
+    (``_normalise_non_str_keys``) : iso-payload, mais c'est ce qui rend la réponse encodable par
+    ``orjson`` au lieu de retomber sur le pré-parcours récursif ``make_json_serializable``.
 
     Si ``for_post_action`` est True (réponses ``POST /api/game/action``, ``/api/game/ai-turn``) :
     omet ``objectives`` du JSON — le client conserve la liste issue du ``/start`` ou du premier état
@@ -723,6 +762,7 @@ def _game_state_for_json(
         k: v for k, v in engine_instance.game_state.items()
         if k not in _GAME_STATE_EXCLUDE_KEYS and not _exclude_game_state_key_for_api_json(k)
     }
+    _normalise_non_str_keys(gs)
     raw_cache = engine_instance.game_state.get("units_cache")
     if raw_cache is not None:
         models_cache = engine_instance.game_state.get("models_cache") or {}

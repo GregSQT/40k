@@ -78,7 +78,7 @@ class _EngineStub:
     _build_observation = W40KEngine._build_observation
     _build_observation_and_mask = W40KEngine._build_observation_and_mask
     # `_build_observation_and_mask` verifie desormais le masque qu'on lui transmet (no-op hors
-    # `W40K_MASK_VERIFY=1`) : le vrai moteur le fait, la doublure doit donc le porter aussi.
+    # `W40K_MASK_VERIFY=2`) : le vrai moteur le fait, la doublure doit donc le porter aussi.
     _verify_supplied_mask = W40KEngine._verify_supplied_mask
 
     def __init__(self, defer: bool) -> None:

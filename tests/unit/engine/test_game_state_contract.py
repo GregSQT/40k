@@ -102,7 +102,10 @@ def _minimal_config() -> Dict[str, Any]:
 def engine():
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}), \
-         patch.object(W40KEngine, "_build_observation", return_value=np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET)):
+         patch.object(W40KEngine, "_build_observation", return_value=np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET)), \
+         patch.object(
+             W40KEngine, "_build_observation_and_mask", return_value=(np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET), None)
+         ):
         eng = W40KEngine(config=_minimal_config())
     return eng
 
@@ -231,6 +234,9 @@ class TestGameStateComplexKeys:
     def test_units_cache_present_after_reset(self, engine, monkeypatch):
         """gs_units_cache : units_cache présent après reset()."""
         monkeypatch.setattr(engine, "_build_observation", lambda *_a, **_k: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET))
+        monkeypatch.setattr(
+            engine, "_build_observation_and_mask", lambda *_a, **_k: (np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET), None)
+        )
         from engine.reward_calculator import RewardCalculator
         monkeypatch.setattr(RewardCalculator, "calculate_reward", lambda self, *a, **kw: 0.0)
         engine.reset()

@@ -19,13 +19,29 @@ Ce module repond a la question par la MESURE plutot que par la lecture : il reca
 et la compare a la version memoisee. Toute divergence devient une erreur explicite, nommant les
 cellules en cause.
 
-ACTIVATION (jamais active en production)
-----------------------------------------
-- variable d'environnement ``W40K_MASK_VERIFY=1`` (ou ``true`` / ``yes``), ou
-- ``game_state["mask_verification"] is True``.
+ACTIVATION (jamais active en production) — DEUX NIVEAUX
+--------------------------------------------------------
+- ``W40K_MASK_VERIFY=1`` (ou ``true`` / ``yes`` / ``on`` / ``y``), ou
+  ``game_state["mask_verification"]`` a ``True``, ``1`` ou ``"1"`` :
+  controles de MEMOISATION — carte de cellules et cycle des jets d'Advance. ~113 verifications par
+  episode.
+- ``W40K_MASK_VERIFY=2`` (ou ``game_state["mask_verification"]`` a ``2`` / ``"2"``) : ajoute les
+  controles de MASQUE TRANSMIS (``verify_supplied_mask``), ~315 verifications par episode, chacune
+  avec copie profonde et recalcul complet du masque.
+
+Les DEUX sources passent par le meme parseur strict (``_parse_level``) : desarmement explicite
+(``0`` / ``false`` / ``no`` / ``off`` / ``n``), niveau, ou erreur. Aucune valeur n'est ignoree en
+silence — c'est par la que se glisse un run entierement vert sans qu'aucun controle ne tourne.
 
     W40K_MASK_VERIFY=1 python3 ai/train.py --agent ArmageddonAgent --training-config x1_debug \\
         --scenario bot --new --resolution 1
+
+POURQUOI DEUX NIVEAUX, et pas un seul. Mesure sur 2 episodes du banc d'empreinte : 3,8 s sans
+drapeau, 18,2 s au niveau 1, 60,6 s au niveau 2. Les controles de masque transmis, ajoutes apres
+coup, TRIPLAIENT le cout d'un mode deja a x4,7 — un run d'entrainement passait de 2,6 a 55 s par
+episode et devenait inutilisable, alors que le niveau 1 repond a une question differente et reste
+abordable. Fondre les deux dans un seul drapeau revenait a supprimer en pratique le seul mode de
+diagnostic utilisable sur un run un peu long.
 
 Compter ~50 ms par verification : c'est un mode de diagnostic, pas une option de run long.
 
@@ -55,11 +71,91 @@ CellMap = Dict[int, Tuple[Tuple[int, int], float]]
 _VERIFYING = False
 
 
+#: Valeurs qui DESARMENT explicitement, distinguees d'une valeur inattendue (cf. plus bas).
+#: `off` et `n` figurent ici par SYMETRIE avec `no`/`false` : sans eux, un `W40K_MASK_VERIFY=off`
+#: — intention de desarmement sans la moindre ambiguite — faisait echouer au chargement `train.py`,
+#: `api_server.py` et la collecte des tests. Lever n'y apporte aucune surete : rien n'est saute en
+#: silence, le run ne demarre simplement pas.
+_DISARMING_VALUES = {"", "0", "false", "no", "off", "n"}
+#: Valeurs qui arment le niveau 1, symetriques des precedentes.
+_LEVEL_ONE_VALUES = {"1", "true", "yes", "on", "y"}
+
+#: Niveau requis par les controles de masque TRANSMIS — les plus chers (cf. en-tete du module).
+SUPPLIED_MASK_LEVEL = 2
+
+
+def _parse_level(raw: str) -> int:
+    """Traduit la valeur brute du drapeau en niveau. Leve sur une valeur inattendue.
+
+    Lever plutot que desarmer : un `W40K_MASK_VERIFY=ues` mal tape rendrait un run entier vert
+    sans qu'aucun controle ne tourne — le faux feu vert exact que ce module existe pour empecher.
+    """
+    raw = raw.strip().lower()
+    if raw in _DISARMING_VALUES:
+        return 0
+    if raw in _LEVEL_ONE_VALUES:
+        return 1
+    if raw.isdigit():
+        return int(raw)
+    raise ValueError(
+        f"W40K_MASK_VERIFY={raw!r} n'est pas une valeur reconnue. Attendu : un entier "
+        f"(0 desarme, 1 controles de memoisation, {SUPPLIED_MASK_LEVEL} + masques transmis) "
+        f"ou l'une de {sorted(_LEVEL_ONE_VALUES | (_DISARMING_VALUES - {''}))}."
+    )
+
+
+# Validation AU CHARGEMENT du module : sans elle, la valeur n'etait lue que depuis le chemin
+# moteur par pas de simulation, donc un `W40K_MASK_VERIFY=on` faisait echouer la premiere phase
+# de mouvement d'un run (ou d'une requete API) au lieu d'echouer au lancement. Une erreur de
+# drapeau doit se voir avant que quoi que ce soit ne tourne. La valeur n'est PAS memoisee ici :
+# elle reste relue a chaque appel, sinon les tests ne pourraient plus l'armer dynamiquement.
+_parse_level(os.environ.get("W40K_MASK_VERIFY", ""))
+
+
+def mask_verification_level(game_state: Optional[Dict[str, Any]] = None) -> int:
+    """Niveau arme : 0 desarme, 1 memoisation, 2 (et au-dela) + masques transmis.
+
+    Deux sources, on garde la PLUS ELEVEE : la variable d'environnement, et
+    ``game_state["mask_verification"]`` pour les appelants qui ne peuvent pas en poser une (serveur
+    API, harnais embarque) — cf. ``_level_from_game_state`` pour ce que cette seconde voie accepte.
+    Elle plafonnait a 1, ce qui rendait le niveau 2 structurellement inaccessible : un masque
+    transmis perime y serait passe sans bruit, alors meme que l'appelant croyait avoir arme la
+    verification.
+    """
+    level = _parse_level(os.environ.get("W40K_MASK_VERIFY", ""))
+    if game_state is not None:
+        level = max(level, _level_from_game_state(game_state))
+    return level
+
+
+def _level_from_game_state(game_state: Dict[str, Any]) -> int:
+    """Niveau demande par ``game_state["mask_verification"]``, avec la MEME rigueur que le drapeau.
+
+    Cette voie sert les appelants qui ne peuvent pas poser de variable d'environnement (serveur
+    API, harnais embarque) — c'est-a-dire des valeurs qui arrivent souvent par JSON. Ignorer en
+    silence tout ce qui n'est ni ``True`` ni un entier y recreait exactement le faux feu vert que
+    ``_parse_level`` vient d'eliminer cote environnement : un ``"mask_verification": "2"`` rendait
+    un run entierement vert avec zero verification. Les deux sources partagent donc un seul
+    parseur, et une valeur inexploitable leve au lieu de desarmer.
+    """
+    value = game_state.get("mask_verification")  # get allowed : absente = desarme
+    if value is None or value is False:
+        return 0
+    if value is True:  # forme historique
+        return 1
+    if isinstance(value, int):  # les bool sont deja traites au-dessus
+        return value
+    if isinstance(value, str):
+        return _parse_level(value)
+    raise ValueError(
+        f"game_state['mask_verification'] = {value!r} ({type(value).__name__}) est inexploitable. "
+        f"Attendu : un booleen, un entier, ou une chaine acceptee par W40K_MASK_VERIFY."
+    )
+
+
 def mask_verification_enabled(game_state: Optional[Dict[str, Any]] = None) -> bool:
-    """Le mode de verification est-il arme ? Faux par defaut, y compris si la cle est absente."""
-    if game_state is not None and game_state.get("mask_verification") is True:  # get allowed
-        return True
-    return os.environ.get("W40K_MASK_VERIFY", "").strip().lower() in {"1", "true", "yes"}
+    """Le niveau 1 est-il arme ? Faux par defaut, y compris si la cle est absente."""
+    return mask_verification_level(game_state) >= 1
 
 
 def _recompute_move_cell_map(game_state: Dict[str, Any], squad_id: str) -> Optional[CellMap]:
@@ -75,6 +171,23 @@ def _recompute_move_cell_map(game_state: Dict[str, Any], squad_id: str) -> Optio
     decoder.get_squad_action_mask_and_eligible_units(scratch)
     entry = scratch.get(MOVE_CELL_MAP_CACHE_KEY, {}).get(str(squad_id))  # get allowed
     return entry["map"] if entry is not None else None
+
+
+def _recompute_supplied_mask(game_state: Dict[str, Any]) -> Tuple[Any, Any]:
+    """Recalcule ``(masque, pool)`` sur une COPIE PROFONDE de l'etat, pour comparaison.
+
+    Fonction nommee et non corps inline : c'est le SEUL joint ou une doublure peut se poser pour
+    tester la comparaison qui suit. Inline, un test ne pouvait atteindre cette comparaison qu'avec
+    un ``game_state`` complet — et le premier essai a produit un vert vacant, l'etat minimal du
+    test faisant lever le decodeur AVANT toute comparaison.
+
+    Copie profonde pour la meme raison que ``_recompute_move_cell_map`` : le recalcul reecrit la
+    carte de cellules memoisee et peut tirer le jet d'Advance. Cf. l'en-tete du module.
+    """
+    from engine.action_decoder import ActionDecoder
+
+    scratch = copy.deepcopy(game_state)
+    return ActionDecoder(scratch["config"]).get_squad_action_mask_and_eligible_units(scratch)
 
 
 def _describe_divergence(memoised: CellMap, fresh: CellMap) -> str:
@@ -150,17 +263,15 @@ def verify_supplied_mask(
     le controle changerait ce qu'il observe.
     """
     global _VERIFYING
-    if _VERIFYING or not mask_verification_enabled(game_state):
+    # Niveau 2 et non 1 : ce controle coute une copie profonde et un recalcul complet par appel,
+    # et il tourne ~315 fois par episode (contre ~113 pour ceux de niveau 1). Cf. l'en-tete du
+    # module pour les temps mesures et la raison de la separation.
+    if _VERIFYING or mask_verification_level(game_state) < SUPPLIED_MASK_LEVEL:
         return
 
     _VERIFYING = True
     try:
-        from engine.action_decoder import ActionDecoder
-
-        scratch = copy.deepcopy(game_state)
-        fresh_mask, fresh_eligible = ActionDecoder(
-            scratch["config"]
-        ).get_squad_action_mask_and_eligible_units(scratch)
+        fresh_mask, fresh_eligible = _recompute_supplied_mask(game_state)
     finally:
         _VERIFYING = False
 

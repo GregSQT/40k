@@ -157,6 +157,12 @@ def _minimal_config() -> Dict[str, Any]:
 
 @pytest.fixture(autouse=True)
 def mocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    # `_step_observation` appelle l'IMPLEMENTATION `_build_observation_and_mask`, pas la
+    # facade : doubler la seule facade laissait tourner le vrai constructeur d'observation
+    # (et son `advance_phase` sur pool vide) sur ces etats de test.
+    monkeypatch.setattr(
+        W40KEngine, "_build_observation_and_mask", lambda self, *_a, **_k: (np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET), None)
+    )
     monkeypatch.setattr(W40KEngine, "_build_observation", lambda self, *_a, **_k: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET))
     monkeypatch.setattr(RewardCalculator, "calculate_reward", lambda self, *a, **kw: 0.0)
 
