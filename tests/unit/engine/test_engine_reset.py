@@ -28,7 +28,7 @@ from tests._state_invariants import TURN_STATE_KEYS, turn_state_invariants
 @pytest.fixture(autouse=True)
 def mock_build_obs(monkeypatch):
     """Mocke _build_observation pour tous les tests — on ne teste pas l'obs builder ici."""
-    monkeypatch.setattr(W40KEngine, "_build_observation", lambda self: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET))
+    monkeypatch.setattr(W40KEngine, "_build_observation", lambda self, *_a, **_k: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

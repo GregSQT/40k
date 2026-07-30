@@ -110,6 +110,11 @@ def hex_distance(col1: int, row1: int, col2: int, row2: int) -> int:
     return max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
 
 
+# Seuil |A|x|B| sous lequel `min_distance_between_sets` balaye directement les paires au lieu
+# de calculer la borne par boite englobante puis de trier. Cf. le commentaire dans la fonction.
+_SMALL_SET_PRODUCT = 36
+
+
 def min_distance_between_sets(
     set_a: Set[Tuple[int, int]], set_b: Set[Tuple[int, int]],
     max_distance: int = 0,
@@ -137,6 +142,23 @@ def min_distance_between_sets(
         raise ValueError("Cannot compute distance between empty sets")
     if set_a & set_b:
         return 0
+
+    # Chemin rapide petits ensembles — mesure sur un episode d'entrainement x1 : 70 % des appels
+    # sont 1x1 et le produit |A|x|B| moyen vaut 8. Sous ce seuil, le balayage direct coute moins
+    # que la borne par boite englobante + le tri de `cubes_a` qui la precedent. Resultat EXACT,
+    # donc conforme au contrat `max_distance` (qui n'autorise l'approximation que par exces).
+    if len(set_a) * len(set_b) <= _SMALL_SET_PRODUCT:
+        cubes_b_small = [offset_to_cube(c, r) for c, r in set_b]
+        best_small = _UNREACHABLE
+        for c, r in set_a:
+            x1, y1, z1 = offset_to_cube(c, r)
+            for x2, y2, z2 in cubes_b_small:
+                d = max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
+                if d < best_small:
+                    if d <= 1:
+                        return d
+                    best_small = d
+        return best_small
 
     cubes_a = [offset_to_cube(c, r) for c, r in set_a]
     cubes_b = [offset_to_cube(c, r) for c, r in set_b]

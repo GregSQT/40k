@@ -50,6 +50,9 @@ class _DummyEngine(gym.Env):
         self.action_space = gym.spaces.Discrete(12)
         self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float32)
         self.action_decoder = decoder or _DummyActionDecoder()
+        # Report d'observation (cf. W40KEngine._step_observation) : membre du contrat moteur.
+        self.defer_observation = False
+        self.build_observation_calls = 0
         self.game_state = {
             "phase": "move",
             "debug_mode": False,
@@ -65,9 +68,16 @@ class _DummyEngine(gym.Env):
 
     def step(self, action):
         _ = action
-        return np.zeros((4,), dtype=np.float32), 0.0, False, False, {}
+        # Miroir de `W40KEngine.step` : l'observation retournee passe par le report.
+        return self._step_observation(), 0.0, False, False, {}
+
+    def _step_observation(self):
+        if self.defer_observation:
+            return None
+        return self._build_observation()
 
     def _build_observation(self):
+        self.build_observation_calls += 1
         return np.zeros((4,), dtype=np.float32)
 
     def _check_game_over(self):
@@ -514,3 +524,68 @@ def test_wrappers_refuse_a_core_that_is_not_an_engine() -> None:
         BotControlledEnv(_PassthroughWrapper(_NotAnEngine()), bot=_DummyBot())
     with pytest.raises(TypeError, match="n'honore pas le contrat moteur"):
         SelfPlayWrapper(_PassthroughWrapper(_NotAnEngine()), allow_random_opponent=True)
+
+
+# ─── Report d'observation (perf) — cf. W40KEngine._step_observation ──────────────────────
+
+
+def _deferral_wrapper() -> Tuple[BotControlledEnv, "_DummyEngine"]:
+    """Wrapper dont le tour appartient a l'AGENT : `step` applique l'action puis rend la main."""
+    mask = [False] * mi.TOTAL_ACTION_SIZE
+    mask[mi.ACTION_WAIT] = True
+    decoder = _DummyActionDecoder(
+        mask=mask, eligible=[{"id": "u1", "player": 1}], normalized_action=mi.ACTION_WAIT
+    )
+    engine = _DummyEngine(decoder=decoder)
+    engine.game_state["phase"] = "charge"
+    wrapper = BotControlledEnv(engine, bot=_DummyBot(), agent_seat_mode="p1")
+    wrapper.controlled_player = 1
+    wrapper.bot_player = 2
+    return wrapper, engine
+
+
+def test_step_returns_a_real_observation_despite_deferral() -> None:
+    """Le report ne doit JAMAIS laisser filtrer un `None` vers PPO.
+
+    Un step gym enchaine plusieurs steps moteur ; seule la derniere observation est lue, mais
+    elle doit etre reelle — c'est aussi le `terminal_observation` en fin d'episode.
+    """
+    wrapper, engine = _deferral_wrapper()
+    obs, _reward, _term, _trunc, _info = wrapper.step(mi.ACTION_WAIT)
+    assert obs is not None
+    assert isinstance(obs, np.ndarray) and obs.shape == (4,)
+
+
+def test_step_defers_intermediate_observations_and_builds_exactly_one() -> None:
+    """Le report est REELLEMENT arme pendant le step, et une seule observation est construite.
+
+    Sans cette assertion le report pourrait etre inactif (drapeau jamais pose) sans qu'aucun
+    test ne bronche : le comportement resterait correct et le gain nul.
+    """
+    wrapper, engine = _deferral_wrapper()
+    engine.build_observation_calls = 0
+    seen_flag: List[bool] = []
+    inner_step = engine.step
+
+    def _spy(action):
+        seen_flag.append(engine.defer_observation)
+        return inner_step(action)
+
+    engine.step = _spy  # type: ignore[method-assign]
+    wrapper.step(mi.ACTION_WAIT)
+    assert seen_flag and all(seen_flag), "defer_observation n'etait pas arme pendant les steps moteur"
+    assert engine.build_observation_calls == 1
+
+
+def test_step_clears_deferral_even_when_the_engine_raises() -> None:
+    """Le drapeau ne doit pas survivre a une exception : sinon tout step ulterieur rendrait None."""
+    wrapper, engine = _deferral_wrapper()
+
+    def _boom(action):
+        _ = action
+        raise RuntimeError("boom moteur")
+
+    engine.step = _boom  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="boom moteur"):
+        wrapper.step(mi.ACTION_WAIT)
+    assert engine.defer_observation is False

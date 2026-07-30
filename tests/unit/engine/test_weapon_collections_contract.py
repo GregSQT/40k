@@ -116,7 +116,7 @@ def _minimal_config() -> Dict[str, Any]:
 def mocks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         W40KEngine, "_build_observation",
-        lambda self: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET),
+        lambda self, *_a, **_k: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET),
     )
     monkeypatch.setattr(RewardCalculator, "calculate_reward", lambda self, *a, **kw: 0.0)
 

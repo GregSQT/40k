@@ -12,7 +12,7 @@ import json
 import random
 import gymnasium as gym
 import numpy as np
-from typing import Dict, List, Tuple, Set, Optional, Any, Union
+from typing import Dict, List, Literal, Tuple, Set, Optional, Any, Union, overload
 
 # Import shared utilities
 from shared.data_validation import require_key, require_present
@@ -115,6 +115,9 @@ class W40KEngine(gym.Env):
         self.gym_training_mode = gym_training_mode
         self.debug_mode = debug_mode
         self.current_mode_code: Optional[str] = None
+        # Report de la construction d'observation dans ``step`` (cf. ``_step_observation``).
+        # Faux par defaut : tout appelant qui ne connait pas ce contrat recoit une observation.
+        self.defer_observation: bool = False
 
         # Store scenario files list for random selection during reset
         # If scenario_files provided, use it; otherwise create single-item list from scenario_file
@@ -1591,9 +1594,16 @@ class W40KEngine(gym.Env):
             )
         return self._episode_step_limit_cache
 
-    def step(self, action: int) -> Tuple[Union[np.ndarray, Dict[str, np.ndarray]], float, bool, bool, Dict[str, Any]]:
+    def step(
+        self, action: int
+    ) -> Tuple[Optional[Union[np.ndarray, Dict[str, np.ndarray]]], float, bool, bool, Dict[str, Any]]:
         """
         Execute gym action with built-in step counting - gym.Env interface.
+
+        L'observation vaut ``None`` — et seulement dans ce cas — quand l'appelant a arme
+        ``defer_observation`` : il s'est alors engage a construire l'observation finale lui-meme
+        (cf. ``_step_observation`` et ``BotControlledEnv.step``). Le type l'expose au lieu de le
+        cacher : un appelant qui ignore ce contrat doit se faire signaler ici, pas plus loin.
         """
         if self.game_state.get("debug_mode", False):
             episode = self.game_state.get("episode_number", "?")
@@ -1615,7 +1625,7 @@ class W40KEngine(gym.Env):
             # CRITICAL: Set turn_limit_reached flag in game_state for winner determination
             self.game_state["game_over"] = True
             self.game_state["turn_limit_reached"] = True
-            observation = self._build_observation()
+            observation = self._step_observation()
             winner, win_method = self._determine_winner_with_method()
             
             # CRITICAL: win_method should never be None when game is terminated
@@ -1672,7 +1682,7 @@ class W40KEngine(gym.Env):
                 raise RuntimeError(f"advance_phase failed: {result}")
             _step_t2_early = time.perf_counter() if _step_t0 is not None else None
             # After phase transition, get new observation
-            observation = self._build_observation()
+            observation = self._step_observation()
             _step_t3_early = time.perf_counter() if _step_t0 is not None else None
             # Check if game ended after phase transition
             self.game_state["game_over"] = self._check_game_over()
@@ -1845,7 +1855,7 @@ class W40KEngine(gym.Env):
         action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
         if not eligible_units and not action_mask.any():
             if self.game_state.get("game_over", False):
-                observation = self._build_observation()
+                observation = self._step_observation()
             else:
             # Pool empty -> advance phase before building observation (no recursion)
                 current_phase = self.game_state.get("phase", "unknown")
@@ -1857,7 +1867,7 @@ class W40KEngine(gym.Env):
                         and advance_result.get("error") == "game_over"
                     ):
                         self.game_state["game_over"] = True
-                        observation = self._build_observation()
+                        observation = self._step_observation()
                     else:
                         raise RuntimeError(f"advance_phase failed: {advance_result}")
                 else:
@@ -1894,9 +1904,9 @@ class W40KEngine(gym.Env):
                                 result = phase_init_result
                             else:
                                 break
-                    observation = self._build_observation()
+                    observation = self._step_observation()
         else:
-            observation = self._build_observation()
+            observation = self._step_observation()
         _step_t4 = time.perf_counter() if _step_t0 is not None else None
         # Calculate reward (independent of step_logger)
         # Zone intent free step: reward is always 0.0 (agent learns via deferred rewards)
@@ -5449,13 +5459,51 @@ class W40KEngine(gym.Env):
             victory_points,
         )
 
-    def _build_observation(self):
+    def _step_observation(self):
+        """Observation RETOURNEE par ``step`` — ``None`` quand l'appelant a demande le report.
+
+        Un step gym du wrapper d'entrainement enchaine plusieurs ``step`` moteur (tours du bot,
+        WAIT forces, cascades de phase) mais PPO ne lit que la derniere observation : les autres
+        etaient construites puis ecrasees. Mesure sur un worker x1 : la construction d'observation
+        pese 55 % du temps CPU et ~70 % de ces constructions etaient jetees.
+
+        L'appelant qui positionne ``defer_observation`` s'engage a construire lui-meme
+        l'observation finale via ``_build_observation``. Une observation intermediaire vaut alors
+        ``None`` : toute lecture leve immediatement, jamais un tenseur silencieusement faux.
+
+        Le report traverse ``_build_observation`` au lieu de la court-circuiter, et c'est DELIBERE :
+        cette fonction n'est pas un pur constructeur de tenseur, elle MUTE l'etat (checkpoint de
+        controle d'objectif 14.02, journal VP, et surtout ``advance_phase`` quand le pool est vide).
+        Un report qui sautait l'appel supprimait ces transitions : le moteur rendait la main sur un
+        etat non avance, ``terminated`` etait calcule dessus et le wrapper compensait par un WAIT
+        force — steps et journal decales. Seule la production du tenseur est reportee (parametre
+        ``tensor``) ; la sequence d'effets de bord est rigoureusement la meme dans les deux modes.
+        """
+        return self._build_observation(tensor=not self.defer_observation)
+
+    @overload
+    def _build_observation(self) -> Dict[str, np.ndarray]: ...
+
+    @overload
+    def _build_observation(self, tensor: Literal[True]) -> Dict[str, np.ndarray]: ...
+
+    @overload
+    def _build_observation(self, tensor: bool) -> Optional[Dict[str, np.ndarray]]: ...
+
+    def _build_observation(self, tensor: bool = True) -> Optional[Dict[str, np.ndarray]]:
         """Build observation — pipeline squad, seul pipeline existant.
 
         L'obs est un Dict de TENSEURS D'ENTITES (V11 §0.30 T-D — une unite, amie ou ennemie, y
         porte le meme schema de features), toujours scinde continues/discretes (V11 §9.5), plus
         la grille egocentrique (perception du terrain, spec §4.1 / T1b). La geometrie de la
         grille est celle de `engine.spatial_grid`, partagee avec le masque (T2) et le decoder (T3).
+
+        ``tensor=False`` (report d'observation, cf. ``_step_observation``) : le corps est parcouru
+        A L'IDENTIQUE — frontiere 14.02, journal VP, ``advance_phase`` sur pool vide — mais rend
+        ``None`` au lieu d'encoder. Cette fonction n'est PAS pure : ces mutations font partie du
+        pas de simulation, seul l'encodage est facultatif. Les deux fabriques locales ci-dessous
+        sont les SEULS producteurs de tenseur (tous les `return` y passent) : porter le drapeau la
+        garantit qu'aucune sortie ne l'oublie.
         """
         # Regle 14.02 : le controle d objectif est determine a la FIN de chaque phase/tour.
         # Ce point de passage est le seul commun aux 7 sites de construction d observation du
@@ -5468,6 +5516,8 @@ class W40KEngine(gym.Env):
         self._log_objective_control_snapshot_if_changed()
 
         def _zero_obs():
+            if not tensor:
+                return None
             from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
 
             obs = self.obs_builder._empty_squad_observation()
@@ -5475,6 +5525,8 @@ class W40KEngine(gym.Env):
             return obs
 
         def _build_for_squad(squad_id: str):  # get allowed
+            if not tensor:
+                return None
             obs = self.obs_builder.build_squad_observation(self.game_state, squad_id)
             obs["grid"] = self.obs_builder.build_squad_grid(self.game_state, squad_id)
             return obs

@@ -213,6 +213,15 @@ class ConfigLoader:
         Example: W40K_BOARD_PATH=board/44x60x1 python3 ai/train.py ...
         """
         board_override = os.environ.get("W40K_BOARD_PATH", "").strip()
+        # Cache AVANT resolution du chemin : cette fonction est appelee ~40k fois par episode
+        # d'entrainement (geometry_is_hex -> engagement_distance_metric). Construire le Path puis
+        # `exists()` a chaque appel coutait un stat(2) par appel — 12 % du temps CPU d'un worker.
+        # Le contenu etait deja memorise sous cette meme cle : seule la verification d'existence
+        # etait refaite, et elle ne pouvait rien detecter de plus (le JSON n'est jamais relu).
+        cache_key = f"board_config__{board_override}"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
         if board_override:
             board_path = self.config_dir / board_override / "board_config.json"
         else:
@@ -224,9 +233,6 @@ class ConfigLoader:
                 board_path = self.config_dir / "board_config.json"
         if not board_path.exists():
             raise FileNotFoundError(f"Board config not found: {board_path}")
-        cache_key = f"board_config__{board_override}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
         try:
             with open(board_path, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)

@@ -103,7 +103,7 @@ def _stub_rewards(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(RewardCalculator, "calculate_reward", lambda self, *a, **kw: 0.0)
     monkeypatch.setattr(
         W40KEngine, "_build_observation",
-        lambda self: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET),
+        lambda self, *_a, **_k: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET),
     )
 
 

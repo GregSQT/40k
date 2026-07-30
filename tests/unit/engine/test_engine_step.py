@@ -115,7 +115,7 @@ def _minimal_config() -> Dict[str, Any]:
 
 @pytest.fixture(autouse=True)
 def mock_build_obs(monkeypatch):
-    monkeypatch.setattr(W40KEngine, "_build_observation", lambda self: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET))
+    monkeypatch.setattr(W40KEngine, "_build_observation", lambda self, *_a, **_k: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET))
     from engine.reward_calculator import RewardCalculator
     monkeypatch.setattr(RewardCalculator, "calculate_reward", lambda self, *a, **kw: 0.0)
 

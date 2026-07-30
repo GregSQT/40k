@@ -230,7 +230,7 @@ class TestGameStateComplexKeys:
 
     def test_units_cache_present_after_reset(self, engine, monkeypatch):
         """gs_units_cache : units_cache présent après reset()."""
-        monkeypatch.setattr(engine, "_build_observation", lambda: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET))
+        monkeypatch.setattr(engine, "_build_observation", lambda *_a, **_k: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET))
         from engine.reward_calculator import RewardCalculator
         monkeypatch.setattr(RewardCalculator, "calculate_reward", lambda self, *a, **kw: 0.0)
         engine.reset()

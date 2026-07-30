@@ -38,6 +38,7 @@ ENGINE_CONTRACT_ATTRS = (
     "config",
     "get_turn_step_limit",
     "_build_observation",
+    "defer_observation",
     "_check_game_over",
     "_determine_winner_with_method",
 )
@@ -677,7 +678,7 @@ class BotControlledEnv(gym.Wrapper):
             accumulate_reward=True,
             cumulative_reward=0.0,
         )
-        if obs is None:
+        if obs is None and not self.engine.defer_observation:
             # Keep vectorized env stacking stable: always return a real observation.
             obs = self.engine._build_observation()
         if debug_mode:
@@ -815,6 +816,24 @@ class BotControlledEnv(gym.Wrapper):
         )
 
     def step(self, action):
+        """Un step gym = plusieurs steps moteur (bot, WAIT forces) dont UNE seule observation est lue.
+
+        Le report (``engine.defer_observation``) fait renvoyer ``None`` aux observations
+        intermediaires ; l'observation finale — la seule que PPO consomme, y compris comme
+        ``terminal_observation`` en fin d'episode — est construite ici, une fois, sur l'etat final.
+        Voir ``W40KEngine._step_observation`` : les effets de bord de frontiere (controle
+        d'objectif 14.02, VP) restent joues a chaque step moteur.
+        """
+        self.engine.defer_observation = True
+        try:
+            obs, reward, terminated, truncated, info = self._step_with_deferred_observation(action)
+        finally:
+            self.engine.defer_observation = False
+        if obs is None:
+            obs = self.engine._build_observation()
+        return obs, reward, terminated, truncated, info
+
+    def _step_with_deferred_observation(self, action):
         # LOG TEMPORAIRE: time between previous step() return and this step() call (SB3 loop = predict + overhead, --debug)
         debug_mode = require_key(self.engine.game_state, "debug_mode")
         if debug_mode and self._last_step_return_time is not None:
