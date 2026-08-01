@@ -1,0 +1,15 @@
+{
+  "_comment": "Geometrie de deplacement des bots d'evaluation/entrainement (ai/evaluation_bots.py). Score d'une destination : w_objective * (-distance_hex_objectif) + w_enemy * (-distance_hex_ennemi) [+ w_objective * hold_bonus si la destination est dans une zone d'objectif]. w_enemy > 0 = se rapprocher, w_enemy < 0 = s'eloigner. Aucune valeur par defaut n'est appliquee : une cle absente leve.",
+  "hold_bonus": 3.0,
+  "bots": {
+    "greedy": {"w_objective": 0.3, "w_enemy": 1.0},
+    "defensive": {"w_objective": 0.7, "w_enemy": -0.5},
+    "control": {"w_objective": 1.0, "w_enemy": 0.1},
+    "tactical": {"w_objective": 0.5, "w_enemy": 0.0},
+    "adaptive": {
+      "early": {"w_objective": 1.0, "w_enemy": 0.2},
+      "winning": {"w_objective": 1.0, "w_enemy": -0.2},
+      "losing": {"w_objective": 0.5, "w_enemy": 1.0}
+    }
+  }
+}
