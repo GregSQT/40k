@@ -121,6 +121,111 @@ def assert_clean_environment() -> None:
         )
 
 
+# La barre de progression de `training_callbacks.py` porte les grandeurs que les bancs
+# d'entrainement lisent : le compteur d'episodes, le chronometre `[MM:SS<` (origine : debut de
+# `learn()`), et `moy` = secondes d'entrainement par episode produit, hors evaluation bot.
+# Le format est celui d'un affichage destine a l'oeil ; il a change deux fois entre le 2026-08-01
+# et le 2026-08-02. C'est assume : les bancs ARRETENT la campagne quand ils ne trouvent plus ces
+# motifs, au lieu de retomber sur une grandeur approchante. Une ligne de cloture machine-lisible
+# cote train.py supprimerait ce risque.
+# Les deux captures viennent du MEME rafraichissement : lire le compteur et `moy` par deux regex
+# separees les apparierait au petit bonheur.
+_PROGRESS_RE = re.compile(
+    r"(\d+)/\d+ \[[\d:]+<[\d:]+\] \[s/ep \((\d+) env\): cur [\d.]+, moy ([\d.]+)"
+)
+_LOOP_ELAPSED_RE = re.compile(r"\[(\d+):(\d\d)(?::(\d\d))?<")
+
+
+def read_steady_rate(output: str) -> tuple:
+    """Rend (secondes par episode en REGIME ETABLI, n_envs, episodes de la fenetre de mesure).
+
+    POURQUOI PAS `moy` DIRECTEMENT — c'est un rapport CUMULE, et un rapport cumule porte le stock
+    d'episodes EN VOL. A tout instant, `n_envs` episodes sont commences et non termines : leur
+    temps est deja dans le numerateur, leur compte pas encore dans le denominateur. Ce stock est
+    constant en regime, donc il gonfle `moy` d'environ `n_envs / episodes` — 33 % a n_envs=48 sur
+    144 episodes contre 4 % a n_envs=6. Sur une campagne qui CLASSE des valeurs de `n_envs`, ce
+    biais suit l'axe classe et penalise les grandes valeurs : il fabrique une pente.
+    La DIFFERENCE entre deux rafraichissements l'elimine par construction — un stock constant
+    disparait dans une soustraction. C'est la derivee qu'on veut, pas l'integrale.
+
+    Elimine aussi la phase de remplissage initiale (aucun episode termine tant que le premier
+    slot n'a pas fini) : les affichages anterieurs a `n_envs` episodes sont ecartes.
+
+    `elapsed` est reconstitue par `moy x episodes` plutot que lu dans `[MM:SS<` : `moy` a trois
+    decimales, le chronometre affiche la seconde. Sur une fenetre de 27 s, la seconde vaut 3,7 %.
+    """
+    points = [
+        (int(episodes), int(n_envs), float(rate))
+        for episodes, n_envs, rate in _PROGRESS_RE.findall(output)
+    ]
+    if len(points) < 2:
+        raise SystemExit(
+            f"{len(points)} rafraichissement(s) de barre exploitable(s) dans la sortie : il en "
+            f"faut au moins deux pour mesurer un regime etabli. Le run s'est-il arrete tot, ou le "
+            f"format de la barre a-t-il change (training_callbacks.py) ?"
+        )
+    n_envs = points[-1][1]
+    if any(point[1] != n_envs for point in points):
+        raise SystemExit(
+            f"`n_envs` change en cours de run dans la barre ({sorted({p[1] for p in points})}) : "
+            f"les rafraichissements ne decrivent pas la meme configuration."
+        )
+    # Avant que chaque slot ait termine un episode, le parallelisme n'est pas etabli : ces
+    # rafraichissements-la decrivent le remplissage, pas le regime.
+    usable = [point for point in points if point[0] >= n_envs]
+    if len(usable) < 2:
+        raise SystemExit(
+            f"aucune fenetre exploitable : la barre n'a rendu que {len(usable)} rafraichissement(s) "
+            f"au-dela de {n_envs} episodes. Le run est trop court devant `n_envs` — prendre "
+            f"--episodes >= {4 * n_envs} pour que le regime etabli existe."
+        )
+    first_episodes, _, first_rate = usable[0]
+    last_episodes, _, last_rate = usable[-1]
+    span = last_episodes - first_episodes
+    if span < n_envs:
+        raise SystemExit(
+            f"fenetre de mesure de {span} episodes pour n_envs={n_envs} : trop courte pour que "
+            f"la difference soit stable (il faut au moins une vague complete de slots). "
+            f"Augmenter --episodes."
+        )
+    rate = (last_rate * last_episodes - first_rate * first_episodes) / span
+    if rate <= 0.0:
+        raise SystemExit(
+            f"regime etabli calcule a {rate:.6f} s/ep : les deux rafraichissements retenus "
+            f"({first_episodes} et {last_episodes} episodes) sont incoherents."
+        )
+    # `moy` est arrondi a 3 decimales : l'erreur sur la difference vaut 0,0005 x (ep1 + ep2) / span.
+    quantisation = 0.0005 * (first_episodes + last_episodes) / span / rate
+    if quantisation > 0.01:
+        print(
+            f"AVERTISSEMENT : l'arrondi de `moy` represente {quantisation * 100:.1f} % du regime "
+            f"mesure (fenetre {first_episodes}->{last_episodes} episodes). Un ecart plus fin que "
+            f"cela n'est pas mesurable ; allonger --episodes.",
+            flush=True,
+        )
+    return rate, n_envs, (first_episodes, last_episodes)
+
+
+def read_loop_elapsed(output: str) -> float:
+    """Secondes ecoulees dans la boucle au dernier rafraichissement, lues dans `[MM:SS<`.
+
+    Sert a AFFICHER la part de demarrage (`wall du process - cette valeur`), jamais au verdict :
+    la resolution est la seconde. Le verdict passe par `read_steady_rate`, plus fin.
+    Sa presence prouve aussi que la boucle a tourne : sans elle, le process s'est arrete avant le
+    premier episode et son wall-clock ne mesure pas un entrainement.
+    """
+    matches = _LOOP_ELAPSED_RE.findall(output)
+    if not matches:
+        raise SystemExit(
+            "aucun compteur de progression `[MM:SS<` dans la sortie : la barre a-t-elle change "
+            "de format, ou le run s'est-il arrete avant le premier episode ?"
+        )
+    hours_or_minutes, minutes_or_seconds, seconds = matches[-1]
+    if seconds:
+        return int(hours_or_minutes) * 3600 + int(minutes_or_seconds) * 60 + int(seconds)
+    return int(hours_or_minutes) * 60 + int(minutes_or_seconds)
+
+
 def validate_paires(paires: int) -> None:
     """Impose un nombre de paires permettant d'annuler la derive (cf. `drift_cancelled`)."""
     if paires < 3 or paires % 2 == 0:

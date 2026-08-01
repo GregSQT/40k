@@ -27,20 +27,26 @@ CE QUE CE BANC IMPOSE (identique a `ab_bench_nenvs.py`, dont il generalise le pr
    peuvent differer d'un facteur 2. Seuls les deux membres d'une meme paire, lances coup sur
    coup, sont comparables ; l'ordre s'inverse d'une paire a l'autre pour qu'une derive monotone
    ne penalise pas toujours le meme cote. La premiere paire est jetee (caches disque, allocateur).
-2. WALL, et rien que le wall — mais RAPPORTE AU NOMBRE D'EPISODES REELLEMENT JOUES, lu dans la
-   cloture du run, jamais au budget demande : les deux different (les `done` d'un meme step
-   comptent ensemble) et l'ecart depend de la configuration mesuree.
-   A savoir pour lire les chiffres absolus : l'arret coupe les ~n_envs-1 episodes en cours, dont
-   le temps est compte au numerateur sans entrer au denominateur. Le debit affiche est donc
-   SOUS-ESTIME, d'autant plus que `n_envs` est grand et `--episodes` petit. Ce biais est le meme
-   des deux cotes — il s'annule dans le ratio, qui est le verdict — mais il interdit de comparer
-   un debit absolu d'ici a celui d'un entrainement reel. Pas de CPU : `getrusage(RUSAGE_CHILDREN)` ne compte pas les workers
-   `SubprocVecEnv` arretes en fin de run (mesure : 33,7 s de CPU annoncees pour 530 s de wall a
+2. LE REGIME ETABLI, ET RIEN QUE LUI. Le verdict porte sur la DIFFERENCE entre deux
+   rafraichissements de la barre, pas sur son `moy` final ni sur le wall du process.
+   - le wall ajoute le DEMARRAGE (imports torch, fork des `n_envs` workers, chargement du modele)
+     et la CLOTURE (sauvegarde du zip, arret des workers) : des couts fixes par run, sans rapport
+     avec le parametre compare, qu'un entrainement de production de 150 000 a 200 000 episodes
+     amortit jusqu'a les rendre negligeables. Les compter classerait les configurations sur une
+     charge qui n'existe pas a l'echelle ou elles serviront ;
+   - `moy` est un rapport CUMULE, donc il porte le stock d'episodes EN VOL : a tout instant,
+     `n_envs` episodes sont commences et non termines, leur temps deja au numerateur et leur
+     compte pas encore au denominateur. Ce stock gonfle `moy` d'environ `n_envs / episodes` —
+     33 % a n_envs=48 sur 144 episodes contre 4 % a n_envs=6. Une soustraction entre deux
+     rafraichissements elimine un stock constant par construction.
+   `wall` et `hors-boucle` restent AFFICHES par run : ils disent ce que coute la campagne, ils ne
+   disent rien du parametre. Pas de CPU : `getrusage(RUSAGE_CHILDREN)` ne compte pas les workers
+   `SubprocVecEnv` arretes en fin de run (mesure : 33,7 s annoncees pour 530 s de wall a
    `n_envs=48`) ; un chiffre faux est plus nuisible qu'un chiffre absent.
-3. LE DEMARRAGE EST COMPTE et cet outil n'en isole pas la part. Le compteur `[MM:SS<` de la barre
-   etait retro-date d'une somme de durees PAR SLOT ; corrige le 2026-08-01, il vaut un vrai
-   wall-clock, mais il part du debut de `learn()` — donc apres les imports et le fork des
-   workers — quand le chronometre d'ici couvre le process entier.
+3. LE VERDICT EST LU, PAS CHRONOMETRE. Cette valeur vient d'un affichage destine a l'oeil, dont
+   le format a change deux fois en deux jours. C'est assume, avec une contrepartie stricte :
+   l'absence du motif ARRETE la campagne au lieu de retomber sur une grandeur approchante. Une
+   ligne de cloture machine-lisible dans `train.py` serait plus robuste.
 4. EXECUTION DANS UN ARBRE DE TRAVAIL SECONDAIRE : un entrainement ecrit
    `ai/models/<agent>/model_<agent>.zip`, fichier protege.
 5. EVALUATION BOT DESACTIVEE sur ses deux chemins (periodique et finale). Elle lance ses propres
@@ -178,23 +184,28 @@ def main() -> int:
                 run_b = one(args.b, wanted_b)
         except RunFailed as failure:
             raise SystemExit(str(failure))
-        # Ratio de TEMPS PAR EPISODE, pas de wall brut : les `n_envs` slots ne terminent pas au
-        # meme instant, donc un run depasse legerement son budget, d'un depassement qui depend de
-        # la configuration mesuree. Comparer deux walls bruts attribuerait ce surplus de travail
-        # au parametre. Le nombre d'episodes est lu dans la cloture du run, pas suppose.
-        rate_a = run_a["wall"] / run_a["episodes_trained"]
-        rate_b = run_b["wall"] / run_b["episodes_trained"]
-        ratio = rate_b / rate_a
-        print(
+        # Le verdict porte sur le REGIME ETABLI (`loop_rate`, cf. `read_steady_rate`), jamais sur le wall du
+        # process : celui-ci ajoute le DEMARRAGE — imports torch, fork des `n_envs` workers,
+        # chargement du modele — qui ne depend pas du parametre compare et qui, sur un run court,
+        # ecrase tout le reste. `wall` et `demarrage` restent AFFICHES : ils disent ce que coute
+        # la campagne, ils ne disent rien du parametre. `hors-boucle` n'est pas que du
+        # demarrage : la sauvegarde du modele et la fermeture des workers y sont aussi.
+        ratio = run_b["loop_rate"] / run_a["loop_rate"]
+        lines = [
             f"paire {index} ({'B puis A' if b_first else 'A puis B'})"
-            f"{' — jetee' if index == 1 else ''}\n"
-            f"  A({args.param}={args.a}) wall={run_a['wall']:6.1f}s  "
-            f"episodes={run_a['episodes_trained']}  debit={1 / rate_a:.3f} ep/s\n"
-            f"  B({args.param}={args.b}) wall={run_b['wall']:6.1f}s  "
-            f"episodes={run_b['episodes_trained']}  debit={1 / rate_b:.3f} ep/s\n"
-            f"  ratio s/episode B/A = {ratio:.3f}",
-            flush=True,
-        )
+            f"{' — jetee' if index == 1 else ''}"
+        ]
+        for side, value, run in (("A", args.a, run_a), ("B", args.b, run_b)):
+            lines.append(
+                f"  {side}({args.param}={value}) wall={run['wall']:6.1f}s  "
+                f"hors-boucle={run['wall'] - run['loop_seconds']:6.1f}s  "
+                f"boucle={run['loop_seconds']:6.1f}s  "
+                f"regime={run['loop_rate']:.3f} s/ep sur {run['rate_window'][0]}->"
+                f"{run['rate_window'][1]} ep  "
+                f"episodes={run['episodes_trained']}  n_envs={run['n_envs']}"
+            )
+        lines.append(f"  ratio regime B/A = {ratio:.3f}")
+        print("\n".join(lines), flush=True)
         if index > 1:
             ratios.append(ratio)
 
@@ -204,7 +215,7 @@ def main() -> int:
         f"couples sans derive        : {[round(c, 3) for c in couples]}\n"
         f"VERDICT = {median:.3f}  ->  {args.param}={args.b} est "
         f"{'PLUS RAPIDE' if median < 1 else 'PLUS LENT'} que {args.a} de "
-        f"{abs(1 - median) * 100:.1f} % de temps par episode"
+        f"{abs(1 - median) * 100:.1f} % de temps par episode DE BOUCLE (demarrage exclu)"
     )
     print_spread(couples)
     print(

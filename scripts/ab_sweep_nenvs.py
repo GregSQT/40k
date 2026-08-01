@@ -33,19 +33,24 @@ CE QUE CET OUTIL IMPOSE
 
 CE QUI EST MESURE, ET CE QUI NE L'EST PAS
 -----------------------------------------
-Le DEBIT : episodes termines par seconde de wall-clock, DEMARRAGE DU PROCESS COMPRIS. Pas les
-`cur`/`max` de la barre de progression, qui sont des latences par slot et croissent mecaniquement
-avec `n_envs` (elles classent donc a l'envers). Le `mur` que la barre affiche depuis le
-2026-08-01 se compare bien entre valeurs de `n_envs`, mais ignore le demarrage, dont le cout
-croit justement avec `n_envs` — voir la docstring de `ab_bench_nenvs.py`.
+Le DEBIT EN REGIME ETABLI : l'inverse des secondes par episode mesurees entre deux
+rafraichissements de la barre (cf. `read_steady_rate` dans `ab_bench.py`). Trois couts en sont
+exclus, et tous trois croissent avec `n_envs` — les compter fabriquerait une pente sur l'axe
+classe : le DEMARRAGE du process, la CLOTURE (sauvegarde, arret des workers), et le STOCK
+d'episodes en vol (`n_envs` parties commencees et non terminees a tout instant, qui gonflent un
+rapport cumule de `n_envs / episodes` : 33 % a n_envs=48 sur 144 episodes contre 4 % a n_envs=6).
+LES CLASSEMENTS ANTERIEURS AU 2026-08-02 ONT ETE ETABLIS SUR LE WALL COMPLET et sont a reprendre.
+Le wall, la part hors boucle et la fenetre de mesure restent journalises par run (`wall_s`,
+`outside_loop_s`, `steady_window_ep`) : ils disent ce que coute la campagne, pas ce que vaut la
+configuration. La cle de debit a ete RENOMMEE (`throughput_ep_s` -> `steady_throughput_ep_s`) le
+2026-08-02 : le journal est ouvert en append, une meme cle pour deux grandeurs rendrait les lignes
+d'avant et d'apres indiscernables.
 
-NI le temps CPU, NI la part de "demarrage" : les deux ont ete retires de `_run` le 2026-08-01
-apres avoir ete pris en defaut par cette campagne meme (CPU sous-compte car les workers de
-SubprocVecEnv n'entrent pas dans `getrusage` ; "demarrage" negatif car la barre de progression
-etait alors retro-datee d'une somme de durees par slot — retro-datation supprimee depuis, sans
-que la colonne soit remise). Detail et chiffres dans l'en-tete de
-`ab_bench_nenvs.py`. Le journal produit AVANT cette correction contient encore ces colonnes :
-elles y sont sans valeur.
+NI le temps CPU, NI la part hors boucle AU VERDICT : le CPU sous-compte (les workers de
+SubprocVecEnv n'entrent pas dans `getrusage`), et le hors-boucle est affiche a titre
+d'information. Les durees de campagne annoncees dans le classement sont des WALL MESURES, jamais
+une extrapolation du debit de regime — c'est sur le wall que se dimensionnent `--deadline` et
+`--timeout`.
 
 L'evaluation bot est desactivee sur ses deux chemins par `_run` (periodique et finale) : elle
 lance ses propres sous-processus pendant le chronometre pour un cout etranger a `n_envs`. Le
@@ -196,6 +201,13 @@ def _summarise(rounds: list[dict], envs: list[int], episodes: int, warmup_droppe
         key=lambda item: statistics.median(item[1]),
         reverse=True,
     )
+    # Le wall MESURE, pas une extrapolation du debit de regime : celui-ci ignore le demarrage et
+    # la cloture, donc il sous-estimerait la duree d'une campagne — or c'est sur cette duree que
+    # se dimensionnent `--deadline` et `--timeout`.
+    walls: dict = {}
+    for rnd in rounds:
+        for env, detail in rnd.get("details", {}).items():
+            walls.setdefault(env, []).append(detail["wall"])
     for rank, (env, values) in enumerate(ranked, start=1):
         median = statistics.median(values)
         absolute = [
@@ -204,8 +216,9 @@ def _summarise(rounds: list[dict], envs: list[int], episodes: int, warmup_droppe
         lines.append(
             f"{rank}. n_envs={env:3d}  debit relatif median={median:5.3f}  "
             f"etendue={min(values):5.3f}-{max(values):5.3f}  "
-            f"debit absolu median={statistics.median(absolute):.4f} ep/s  "
-            f"({episodes / statistics.median(absolute) / 60:.1f} min pour {episodes} episodes)"
+            f"debit absolu median={statistics.median(absolute):.4f} ep/s de regime  "
+            f"(wall mesure median {statistics.median(walls[env]) / 60:.1f} min"
+            f" pour {episodes} episodes)"
         )
 
     # Deux configurations dont les etendues se chevauchent ne sont pas departagees par cette
@@ -358,7 +371,13 @@ def main() -> int:
                 })
                 continue
 
-            throughput = args.episodes / result["wall"]
+            # Debit en REGIME ETABLI (cf. `read_steady_rate` dans ab_bench.py) : le fork
+            # de N workers coute d'autant plus cher que N est grand, et un entrainement de
+            # production de 150k a 200k episodes l'amortit jusqu'a le rendre negligeable. Le
+            # compter penaliserait les grandes valeurs de `n_envs` sur un cout qui n'existe pas a
+            # l'echelle ou elles servent — c'est ce que faisaient les campagnes anterieures au
+            # 2026-08-02, dont les classements sont a reprendre.
+            throughput = 1.0 / result["loop_rate"]
             measured[n_envs] = throughput
             details[n_envs] = result
             durations.append(result["wall"])
@@ -368,13 +387,23 @@ def main() -> int:
                 "status": "ok",
                 "started": started_at.isoformat(timespec="seconds"),
                 "wall_s": round(result["wall"], 2),
-                "throughput_ep_s": round(throughput, 5),
+                "loop_s": round(result["loop_seconds"], 2),
+                # Pas "startup" : ce delta couvre aussi la sauvegarde du modele, la fermeture des
+                # workers et la sortie de l'interpreteur, qui suivent le dernier rafraichissement.
+                "outside_loop_s": round(result["wall"] - result["loop_seconds"], 2),
+                "steady_s_per_ep": result["loop_rate"],
+                "steady_window_ep": list(result["rate_window"]),
+                # Cle RENOMMEE le 2026-08-02 : `throughput_ep_s` designait un debit calcule sur le
+                # wall complet. Le journal etant ouvert en append, garder le nom aurait rendu les
+                # deux grandeurs indiscernables d'une campagne a l'autre.
+                "steady_throughput_ep_s": round(throughput, 5),
                 "min_available_mb": round(sampler.min_available_mb or 0.0, 1),
             }
             _append_journal(journal, record)
             print(
                 f"  tour {round_index}  n_envs={n_envs:3d}  wall={result['wall']:7.1f}s  "
-                f"debit={throughput:.4f} ep/s  "
+                f"hors-boucle={record['outside_loop_s']:6.1f}s  boucle={result['loop_seconds']:6.1f}s  "
+                f"debit regime={throughput:.4f} ep/s  "
                 f"RAM libre min={record['min_available_mb']:.0f} Mo",
                 flush=True,
             )

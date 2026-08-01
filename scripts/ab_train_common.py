@@ -77,7 +77,11 @@ import zipfile
 # l'heritage de l'environnement par `subprocess` — les concerne tous. Reexporte ici parce que
 # les deux bancs de parametres l'importent de ce socle.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ab_bench import assert_clean_environment  # noqa: E402,F401
+from ab_bench import (  # noqa: E402
+    assert_clean_environment,  # noqa: F401 — reexporte pour les deux bancs
+    read_loop_elapsed,
+    read_steady_rate,
+)
 
 # Chemins de config PILOTABLES par les bancs, et leur preuve dans le membre `data` du zip SB3.
 # La cle est le CHEMIN COMPLET dans la config, jamais un alias `--param` : dupliquer la table
@@ -295,11 +299,30 @@ def run_training(
         raise RunFailed(
             f"{overrides} : code de retour {proc.returncode}\n{stdout[-3000:]}{stderr[-3000:]}"
         )
+    effective = _read_effective(zip_path, started_stamp)
+    loop_rate, n_envs_bar, window = read_steady_rate(output)
+    # Double preuve gratuite : la barre annonce le `n_envs` de la boucle, le modele sauvegarde
+    # celui que PPO a recu. Un desaccord signifie que la grandeur lue et la configuration prouvee
+    # ne viennent pas du meme run.
+    if n_envs_bar != effective["n_envs"]:
+        raise SystemExit(
+            f"n_envs incoherent entre la barre ({n_envs_bar}) et le modele sauvegarde "
+            f"({effective['n_envs']}) : les deux sources ne decrivent pas le meme run."
+        )
     return {
         "wall": wall,
         "output": output,
-        "effective": _read_effective(zip_path, started_stamp),
+        "effective": effective,
         "episodes_trained": _episodes_trained(output, episodes),
+        # Grandeur du VERDICT : secondes par episode en regime etabli (demarrage, remplissage
+        # et stock d'episodes en vol exclus).
+        "loop_rate": loop_rate,
+        "rate_window": window,
+        # Affichage seulement (resolution : la seconde). `wall - loop_seconds` couvre TOUT ce qui
+        # n'est pas la boucle : demarrage en amont, mais aussi sauvegarde du modele, fermeture des
+        # workers et sortie de l'interpreteur en aval.
+        "loop_seconds": read_loop_elapsed(output),
+        "n_envs": n_envs_bar,
     }
 
 

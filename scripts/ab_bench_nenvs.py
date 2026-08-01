@@ -3,22 +3,23 @@
 
 POURQUOI CET OUTIL PLUTOT QUE LIRE `s/ep` DANS LA BARRE DE PROGRESSION
 ----------------------------------------------------------------------
-`cur` et `max` de la barre (ai/training_callbacks.py) sont la duree wall-clock d'UN episode SUR
-UN SLOT d'env, mesuree entre deux `done` du meme slot. Elles incluent toute l'attente de
-synchronisation des autres envs a chaque step. C'est une LATENCE, et elle croit mecaniquement
-avec `n_envs` : mesure reelle, 2,24 s/ep a n_envs=6 contre 2,61 a n_envs=8 — alors que le run a
-8 etait le plus RAPIDE des deux (37 s contre 42 s pour 100 episodes). Les comparer entre deux
-valeurs de `n_envs` conclut donc systematiquement a l'envers.
-Depuis le 2026-08-01 la barre affiche en plus `mur` = temps d'ENTRAINEMENT (evaluation bot
-retranchee) / episodes produits, qui se compare, lui, entre valeurs de `n_envs` — c'est la
-moyenne PAR SLOT qu'il a remplacee, precisement parce que cette moyenne-la avait fait conclure a
-un ralentissement lors du passage de 8 a 48 envs. Le rapport est calcule directement, et NON
-comme `moyenne par slot / n_envs` : cette
-division-la n'est exacte qu'une fois que chaque slot a fini un episode, et rend un resultat
-`n_envs/k` fois trop petit tant que seuls `k` slots sont arrives. Cet outil garde pourtant sa
-raison d'etre : `mur` ne mesure que le regime etabli de la boucle, tandis qu'un changement de
-`n_envs` deplace aussi le cout de DEMARRAGE (imports torch, fork des N workers, chargement du
-modele), que seul un chronometre sur le process entier — celui-ci — fait entrer dans le compte.
+La barre mesurait ses durees PAR SLOT d'env — l'intervalle entre deux `done` du meme slot,
+attente de synchronisation des autres envs comprise. C'est une LATENCE, et elle croit
+mecaniquement avec `n_envs` : mesure reelle, 2,24 s/ep a n_envs=6 contre 2,61 a n_envs=8 — alors
+que le run a 8 etait le plus RAPIDE des deux (37 s contre 42 s pour 100 episodes). Les comparer
+entre deux valeurs de `n_envs` concluait donc systematiquement a l'envers.
+Depuis le 2026-08-01 la barre affiche TOUTES ses durees en secondes par EPISODE PRODUIT,
+evaluation bot retranchee, diviseur annonce en tete : `moy` = temps d'entrainement / episodes
+produits, et `cur`/`min`/`max` = durees par slot ramenees a la meme echelle. Elles se comparent
+donc entre valeurs de `n_envs`. `moy` est calcule directement, et NON comme `moyenne par slot /
+n_envs` : cette division-la n'est exacte qu'une fois que chaque slot a fini un episode, et rend un
+resultat `n_envs/k` fois trop petit tant que seuls `k` slots sont arrives.
+`moy` est desormais la grandeur du VERDICT de cet outil, qui la LIT dans la sortie du run au lieu
+de chronometrer le process (cf. `read_steady_rate` dans `ab_bench.py`). Ce que l'outil apporte que
+la barre seule n'apporte pas : l'ENTRELACEMENT et l'APPARIEMENT — deux executions du meme code
+peuvent differer d'un facteur 2 sur cette machine, donc deux `moy` lus sur deux runs lances a dix
+minutes d'intervalle ne se comparent pas — l'annulation de derive par couples d'ordres opposes, et
+la preuve que le `n_envs` construit est bien celui demande.
 
 Le bloc `PERF TIMING` (engine/perf_timing.py) ne repond pas non plus a la question : c'est une
 moyenne ms/appel sur des fonctions moteur, intrinsequement independante du nombre d'envs.
@@ -30,29 +31,25 @@ CE QUE CET OUTIL IMPOSE
    coup sur coup, sont comparables ; et l'ordre s'inverse d'une paire a l'autre pour qu'une
    derive monotone (temperature, charge de fond) ne penalise pas toujours le meme cote. La
    premiere paire est jetee (remplissage des caches disque et allocateur).
-2. WALL, et RIEN QUE le wall. Le CPU etait affiche a titre indicatif ; il ne l'est plus, parce
-   qu'il ne mesurait pas ce qu'il annoncait. `getrusage(RUSAGE_CHILDREN)` ne comptabilise que les
-   descendants effectivement attendus ; les workers de SubprocVecEnv, arretes en fin de run, n'y
-   entrent pas. Mesure du 2026-08-01 : 33,7 s de CPU annoncees pour 530 s de wall a n_envs=48, ce
-   que 48 processus actifs rendent impossible. Un chiffre faux est plus nuisible qu'un chiffre
-   absent : il aurait servi a "expliquer" un resultat de wall-clock surprenant.
-3. LE DEMARRAGE EST COMPTE, et cet outil n'en isole PAS la part. Le chronometre couvre le process
-   entier : imports torch, fork des N sous-processus et chargement du modele sont dedans, et ce
-   cout croit avec `n_envs`.
-   L'outil a longtemps affiche cette part, calculee comme `wall du process - duree annoncee par la
-   barre`, et elle etait FAUSSE : le `[MM:SS<` se retro-datait de `total_episode_duration_seconds`,
-   somme des durees d'episode de CHAQUE slot, donc d'environ `n_envs` fois le temps reellement
-   ecoule. Mesure du 2026-08-01 : a n_envs=16, boucle annoncee 684 s pour un wall total de 664 s,
-   soit un "demarrage" de -19,5 s. La colonne a ete retiree le jour meme.
-   La retro-datation elle-meme a ete supprimee de `training_callbacks.py` le 2026-08-01 : le
-   chronometre part desormais du debut de `learn()`. Le `[MM:SS<` est donc un vrai wall-clock
-   POUR LE CHEMIN QUE CE BANC EMPRUNTE (`--scenario bot/self/all`, un seul appel a
-   `train_with_scenario_rotation`) — et pour lui seul : en curriculum, cette fonction est
-   rappelee par chunk et remet `global_start_time` a `time.time()`, si bien que le compteur
-   repart de 00:00 pendant que le nombre d'episodes affiche, lui, cumule.
-   La soustraction redevient donc calculable ici — mais la colonne n'a PAS ete remise, faute
-   d'une campagne qui la valide, et les journaux anterieurs a cette date la contiennent encore,
-   sans valeur.
+2. LE REGIME ETABLI, ET RIEN QUE LUI — c'est-a-dire la DIFFERENCE entre deux rafraichissements
+   de barre. Deux couts sont exclus, et tous deux croissent avec `n_envs`, donc les compter
+   fabrique une pente sur l'axe meme que cet outil classe :
+   - le DEMARRAGE (imports torch, fork des N workers, chargement du modele) et la CLOTURE
+     (sauvegarde, arret des workers). Couts fixes par run, negligeables sur les 150 000 a
+     200 000 episodes d'un entrainement reel, dominants sur un run de banc de 150 episodes ;
+   - le STOCK d'episodes EN VOL : `n_envs` episodes commences et non termines a tout instant,
+     dont le temps est deja compte et le resultat pas encore. Il gonfle le rapport cumule de
+     `n_envs / episodes` — 33 % a n_envs=48 sur 144 episodes contre 4 % a n_envs=6. La
+     soustraction l'elimine : un stock constant disparait dans une difference.
+   LES CAMPAGNES ANTERIEURES AU 2026-08-02 ONT ETE CLASSEES SUR LE WALL COMPLET : leurs verdicts
+   sont a reprendre, « n_envs=48 optimal » compris.
+   `wall`, `hors-boucle` et `boucle` restent AFFICHES par run : ils disent ce que coute la
+   campagne, pas ce que vaut la configuration.
+3. PAS DE CPU. `getrusage(RUSAGE_CHILDREN)` ne comptabilise que les descendants effectivement
+   attendus ; les workers de SubprocVecEnv, arretes en fin de run, n'y entrent pas. Mesure du
+   2026-08-01 : 33,7 s de CPU annoncees pour 530 s de wall a n_envs=48, ce que 48 processus actifs
+   rendent impossible. Un chiffre faux est plus nuisible qu'un chiffre absent : il aurait servi a
+   "expliquer" un resultat surprenant.
 4. NOMBRE D'EPISODES DIVISIBLE PAR LES DEUX `n_envs`. Sinon le run s'arrete en laissant des
    episodes a moitie joues sur certains slots, et le cote qui en laisse le plus est avantage.
 5. EXECUTION DANS UN ARBRE DE TRAVAIL SECONDAIRE, jamais dans le depot principal : un
@@ -104,29 +101,12 @@ from ab_bench import (  # noqa: E402
     assert_clean_environment,
     drift_cancelled,
     print_spread,
+    read_loop_elapsed,
+    read_steady_rate,
     validate_paires,
 )
 
-_ELAPSED_RE = re.compile(r"\[(\d+):(\d\d)(?::(\d\d))?<")
 _NENVS_RE = re.compile(r"Creating (\d+) parallel environments")
-
-
-def _assert_loop_ran(output: str) -> None:
-    """Verifie que la boucle d'entrainement a tourne (barre de progression presente).
-
-    Ne rend PAS de duree. Le compteur `[MM:SS<` l'etait a l'origine parce qu'il etait retro-date
-    d'une somme de durees par slot ; cette retro-datation a ete supprimee le 2026-08-01 et il
-    vaut desormais un vrai wall-clock sur le chemin emprunte ici (cf. point 3 de l'en-tete). Il
-    reste ignore : il part du debut de `learn()`, donc APRES les imports et le fork des workers,
-    alors que cet outil chronometre le process entier — deux origines differentes, aucune raison
-    de melanger. Seule sa PRESENCE est une information : sans elle, le process s'est arrete avant
-    le premier episode et son wall-clock ne mesure pas un entrainement.
-    """
-    if not _ELAPSED_RE.search(output):
-        raise SystemExit(
-            "aucun compteur de progression `[MM:SS<` dans la sortie : la barre a-t-elle change "
-            "de format, ou le run s'est-il arrete avant le premier episode ?"
-        )
 
 
 class RunFailed(RuntimeError):
@@ -227,8 +207,18 @@ def _run(
             f"n_envs demande {n_envs}, n_envs construit {built.group(1)} : une surcharge de "
             f"configuration ecrase --param, la mesure comparerait deux fois la meme chose."
         )
-    _assert_loop_ran(output)
-    return {"wall": wall}
+    loop_rate, n_envs_bar, window = read_steady_rate(output)
+    if n_envs_bar != n_envs:
+        raise SystemExit(
+            f"n_envs demande {n_envs}, n_envs annonce par la barre {n_envs_bar} : la grandeur "
+            f"mesuree ne vient pas de la configuration demandee."
+        )
+    return {
+        "wall": wall,
+        "loop_rate": loop_rate,
+        "rate_window": window,
+        "loop_seconds": read_loop_elapsed(output),
+    }
 
 
 def main() -> int:
@@ -294,15 +284,21 @@ def main() -> int:
                 run_b = _run(repo, args.agent, args.scenario, args.training_config, args.episodes, args.b)
         except RunFailed as failure:
             raise SystemExit(str(failure))
-        ratio = run_b["wall"] / run_a["wall"]
+        # Verdict sur le REGIME ETABLI, pas sur le wall : cf. `read_steady_rate`. Le demarrage croit
+        # avec `n_envs` (fork de N workers), mais un entrainement de production de 150k a 200k
+        # episodes l'amortit jusqu'a le rendre negligeable — le compter reviendrait a classer les
+        # valeurs de `n_envs` sur un cout qui n'existe pas a l'echelle ou elles servent.
+        ratio = run_b["loop_rate"] / run_a["loop_rate"]
         order = "B puis A" if b_first else "A puis B"
         print(
             f"paire {index} ({order}){' — jetee' if index == 1 else ''}\n"
             f"  A(n_envs={args.a}) wall={run_a['wall']:6.1f}s  "
-            f"debit={args.episodes / run_a['wall']:.2f} ep/s\n"
+            f"hors-boucle={run_a['wall'] - run_a['loop_seconds']:6.1f}s  "
+            f"boucle={run_a['loop_seconds']:6.1f}s  regime={run_a['loop_rate']:.3f} s/ep\n"
             f"  B(n_envs={args.b}) wall={run_b['wall']:6.1f}s  "
-            f"debit={args.episodes / run_b['wall']:.2f} ep/s\n"
-            f"  ratio wall B/A = {ratio:.3f}",
+            f"hors-boucle={run_b['wall'] - run_b['loop_seconds']:6.1f}s  "
+            f"boucle={run_b['loop_seconds']:6.1f}s  regime={run_b['loop_rate']:.3f} s/ep\n"
+            f"  ratio regime B/A = {ratio:.3f}",
             flush=True,
         )
         if index > 1:
@@ -314,7 +310,7 @@ def main() -> int:
         f"couples sans derive        : {[round(c, 3) for c in couples]}\n"
         f"VERDICT = {median:.3f}  ->  n_envs={args.b} est "
         f"{'PLUS RAPIDE' if median < 1 else 'PLUS LENT'} que n_envs={args.a} de "
-        f"{abs(1 - median) * 100:.1f} % de wall-clock"
+        f"{abs(1 - median) * 100:.1f} % de temps par episode DE BOUCLE (demarrage exclu)"
     )
     print_spread(couples)
     return 0
