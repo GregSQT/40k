@@ -17,14 +17,6 @@
       "charge_fail": -0.01,
       "wait": -0.1
     },
-    "shoot_priority_1": 0.0,
-    "shoot_priority_2": 0.0,
-    "shoot_priority_3": 0.0,
-    "charge_priority_1": 0.0,
-    "charge_priority_2": 0.0,
-    "charge_priority_3": 0.0,
-    "attack_priority_1": 0.0,
-    "attack_priority_2": 0.0,
     "result_bonuses": {
       "damage_target": 0.2,
       "kill_target": 2.0,
@@ -52,6 +44,14 @@
       "invade_success_bonus": 1.5,
       "invade_neutral_bonus": 0.5,
       "invade_lost_penalty": -0.5
-    }
+    },
+    "shoot_priority_1": 0.0,
+    "shoot_priority_2": 0.0,
+    "shoot_priority_3": 0.0,
+    "charge_priority_1": 0.0,
+    "charge_priority_2": 0.0,
+    "charge_priority_3": 0.0,
+    "attack_priority_1": 0.0,
+    "attack_priority_2": 0.0
   }
 }

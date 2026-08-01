@@ -3,13 +3,22 @@
 
 POURQUOI CET OUTIL PLUTOT QUE LIRE `s/ep` DANS LA BARRE DE PROGRESSION
 ----------------------------------------------------------------------
-`s/ep` (ai/training_callbacks.py) est la duree wall-clock d'UN episode SUR UN SLOT d'env,
-mesuree entre deux `done` du meme slot. Elle inclut toute l'attente de synchronisation des
-autres envs a chaque step. C'est une LATENCE, et elle croit mecaniquement avec `n_envs` :
-mesure reelle, 2,24 s/ep a n_envs=6 contre 2,61 a n_envs=8 — alors que le run a 8 etait le
-plus RAPIDE des deux (37 s contre 42 s pour 100 episodes). Comparer `s/ep` entre deux valeurs
-de `n_envs` conclut donc systematiquement a l'envers. Ce qui se compare est le DEBIT : episodes
-termines par seconde de wall-clock, ce que mesure cet outil.
+`cur` et `max` de la barre (ai/training_callbacks.py) sont la duree wall-clock d'UN episode SUR
+UN SLOT d'env, mesuree entre deux `done` du meme slot. Elles incluent toute l'attente de
+synchronisation des autres envs a chaque step. C'est une LATENCE, et elle croit mecaniquement
+avec `n_envs` : mesure reelle, 2,24 s/ep a n_envs=6 contre 2,61 a n_envs=8 — alors que le run a
+8 etait le plus RAPIDE des deux (37 s contre 42 s pour 100 episodes). Les comparer entre deux
+valeurs de `n_envs` conclut donc systematiquement a l'envers.
+Depuis le 2026-08-01 la barre affiche en plus `mur` = temps d'ENTRAINEMENT (evaluation bot
+retranchee) / episodes produits, qui se compare, lui, entre valeurs de `n_envs` — c'est la
+moyenne PAR SLOT qu'il a remplacee, precisement parce que cette moyenne-la avait fait conclure a
+un ralentissement lors du passage de 8 a 48 envs. Le rapport est calcule directement, et NON
+comme `moyenne par slot / n_envs` : cette
+division-la n'est exacte qu'une fois que chaque slot a fini un episode, et rend un resultat
+`n_envs/k` fois trop petit tant que seuls `k` slots sont arrives. Cet outil garde pourtant sa
+raison d'etre : `mur` ne mesure que le regime etabli de la boucle, tandis qu'un changement de
+`n_envs` deplace aussi le cout de DEMARRAGE (imports torch, fork des N workers, chargement du
+modele), que seul un chronometre sur le process entier — celui-ci — fait entrer dans le compte.
 
 Le bloc `PERF TIMING` (engine/perf_timing.py) ne repond pas non plus a la question : c'est une
 moyenne ms/appel sur des fonctions moteur, intrinsequement independante du nombre d'envs.
@@ -27,18 +36,23 @@ CE QUE CET OUTIL IMPOSE
    entrent pas. Mesure du 2026-08-01 : 33,7 s de CPU annoncees pour 530 s de wall a n_envs=48, ce
    que 48 processus actifs rendent impossible. Un chiffre faux est plus nuisible qu'un chiffre
    absent : il aurait servi a "expliquer" un resultat de wall-clock surprenant.
-3. LE DEMARRAGE EST COMPTE, et il n'est PAS isolable. L'outil chronometre le process entier :
-   imports torch, fork des N sous-processus et chargement du modele sont dedans, et ce cout croit
-   avec `n_envs`. En revanche il est impossible d'en afficher la part a partir de la barre de
-   progression, et cet outil a longtemps pretendu le faire.
-   POURQUOI C'EST FAUX : `total_episode_duration_seconds` additionne la duree de chaque episode
-   de CHAQUE slot (training_callbacks.py:419, dans la boucle `for env_index`), puis la barre se
-   retro-date de cette somme au premier lot d'episodes terminés (:432). La somme vaut donc environ
-   `n_envs` fois le temps reellement ecoule, et le `[MM:SS<` part d'un passe fictif d'autant plus
-   lointain que `n_envs` est grand. Mesure du 2026-08-01 : a n_envs=16, boucle annoncee 684 s pour
-   un wall total de 664 s, soit un "demarrage" de -19,5 s. Une soustraction de deux grandeurs
-   incomparables ne devient pas interpretable parce qu'elle tombe parfois positive.
-   La barre reste lue, mais UNIQUEMENT comme preuve que la boucle a bien tourne.
+3. LE DEMARRAGE EST COMPTE, et cet outil n'en isole PAS la part. Le chronometre couvre le process
+   entier : imports torch, fork des N sous-processus et chargement du modele sont dedans, et ce
+   cout croit avec `n_envs`.
+   L'outil a longtemps affiche cette part, calculee comme `wall du process - duree annoncee par la
+   barre`, et elle etait FAUSSE : le `[MM:SS<` se retro-datait de `total_episode_duration_seconds`,
+   somme des durees d'episode de CHAQUE slot, donc d'environ `n_envs` fois le temps reellement
+   ecoule. Mesure du 2026-08-01 : a n_envs=16, boucle annoncee 684 s pour un wall total de 664 s,
+   soit un "demarrage" de -19,5 s. La colonne a ete retiree le jour meme.
+   La retro-datation elle-meme a ete supprimee de `training_callbacks.py` le 2026-08-01 : le
+   chronometre part desormais du debut de `learn()`. Le `[MM:SS<` est donc un vrai wall-clock
+   POUR LE CHEMIN QUE CE BANC EMPRUNTE (`--scenario bot/self/all`, un seul appel a
+   `train_with_scenario_rotation`) — et pour lui seul : en curriculum, cette fonction est
+   rappelee par chunk et remet `global_start_time` a `time.time()`, si bien que le compteur
+   repart de 00:00 pendant que le nombre d'episodes affiche, lui, cumule.
+   La soustraction redevient donc calculable ici — mais la colonne n'a PAS ete remise, faute
+   d'une campagne qui la valide, et les journaux anterieurs a cette date la contiennent encore,
+   sans valeur.
 4. NOMBRE D'EPISODES DIVISIBLE PAR LES DEUX `n_envs`. Sinon le run s'arrete en laissant des
    episodes a moitie joues sur certains slots, et le cote qui en laisse le plus est avantage.
 5. EXECUTION DANS UN ARBRE DE TRAVAIL SECONDAIRE, jamais dans le depot principal : un
@@ -100,10 +114,13 @@ _NENVS_RE = re.compile(r"Creating (\d+) parallel environments")
 def _assert_loop_ran(output: str) -> None:
     """Verifie que la boucle d'entrainement a tourne (barre de progression presente).
 
-    Ne rend PAS de duree : le compteur `[MM:SS<` est retro-date d'une somme de durees par slot
-    (cf. point 3 de l'en-tete) et ne se compare a aucun wall-clock. Seule sa PRESENCE est une
-    information : sans elle, le process s'est arrete avant le premier episode et son wall-clock
-    ne mesure pas un entrainement.
+    Ne rend PAS de duree. Le compteur `[MM:SS<` l'etait a l'origine parce qu'il etait retro-date
+    d'une somme de durees par slot ; cette retro-datation a ete supprimee le 2026-08-01 et il
+    vaut desormais un vrai wall-clock sur le chemin emprunte ici (cf. point 3 de l'en-tete). Il
+    reste ignore : il part du debut de `learn()`, donc APRES les imports et le fork des workers,
+    alors que cet outil chronometre le process entier — deux origines differentes, aucune raison
+    de melanger. Seule sa PRESENCE est une information : sans elle, le process s'est arrete avant
+    le premier episode et son wall-clock ne mesure pas un entrainement.
     """
     if not _ELAPSED_RE.search(output):
         raise SystemExit(

@@ -33,14 +33,17 @@ CE QUE CET OUTIL IMPOSE
 
 CE QUI EST MESURE, ET CE QUI NE L'EST PAS
 -----------------------------------------
-Le DEBIT : episodes termines par seconde de wall-clock, demarrage du process compris. Pas `s/ep`
-de la barre de progression, qui est une latence par slot et croit mecaniquement avec `n_envs`
-(elle classe donc a l'envers — voir la docstring de `ab_bench_nenvs.py`).
+Le DEBIT : episodes termines par seconde de wall-clock, DEMARRAGE DU PROCESS COMPRIS. Pas les
+`cur`/`max` de la barre de progression, qui sont des latences par slot et croissent mecaniquement
+avec `n_envs` (elles classent donc a l'envers). Le `mur` que la barre affiche depuis le
+2026-08-01 se compare bien entre valeurs de `n_envs`, mais ignore le demarrage, dont le cout
+croit justement avec `n_envs` — voir la docstring de `ab_bench_nenvs.py`.
 
 NI le temps CPU, NI la part de "demarrage" : les deux ont ete retires de `_run` le 2026-08-01
 apres avoir ete pris en defaut par cette campagne meme (CPU sous-compte car les workers de
 SubprocVecEnv n'entrent pas dans `getrusage` ; "demarrage" negatif car la barre de progression
-est retro-datee d'une somme de durees par slot). Detail et chiffres dans l'en-tete de
+etait alors retro-datee d'une somme de durees par slot — retro-datation supprimee depuis, sans
+que la colonne soit remise). Detail et chiffres dans l'en-tete de
 `ab_bench_nenvs.py`. Le journal produit AVANT cette correction contient encore ces colonnes :
 elles y sont sans valeur.
 

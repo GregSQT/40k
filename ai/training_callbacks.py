@@ -252,21 +252,15 @@ class EpisodeTerminationCallback(BaseCallback):
         self.last_display_episode_count = None
         self.ema_alpha = 0.1  # Smoothing factor (higher = more weight on recent)
         self._last_progress_line_len = 0
-        self.total_episode_actions = 0
-        self.episode_stats_count = 0
         self.max_episode_duration_seconds = 0.0
+        # +inf et non 0.0 : un minimum initialise a zero resterait a zero pour toujours et
+        # afficherait un ecart min/max flatteur sans qu'aucun episode ne l'ait justifie. La
+        # valeur n'est lue que sous `if episode_ended`, donc apres au moins un `min()`.
+        self.min_episode_duration_seconds = float("inf")
         self.last_episode_duration_seconds = 0.0
-        self.total_episode_duration_seconds = 0.0
-        self.episode_duration_stats_count = 0
-        self._first_episode_done = False
-        self.episode_duration_window_size = 200
-        self.recent_episode_durations_seconds: deque[float] = deque(
-            maxlen=self.episode_duration_window_size
-        )
-        self._episode_action_counts_by_env: Optional[List[int]] = None
         self._episode_wall_time_by_env: Optional[List[float]] = None
+        self._episode_eval_time_by_env: Optional[List[float]] = None
         self._last_step_perf_time: Optional[float] = None
-        self._ema_env_actions_per_second: Optional[float] = None
         self.gate_display_state = gate_display_state
         self.total_eval_time_at_last_display = 0.0
         self.training_progress_bar_length = _require_progress_bar_width("training_width")
@@ -372,6 +366,8 @@ class EpisodeTerminationCallback(BaseCallback):
         n_envs = len(done_flags)
         if n_envs <= 0:
             raise ValueError("dones must contain at least one environment flag")
+        # L'horloge doit avancer strictement : `now_perf` sert d'origine aux durees d'episode
+        # ci-dessous, un delta nul ou negatif les rendrait insensees.
         if self._last_step_perf_time is not None:
             delta_step_seconds = now_perf - self._last_step_perf_time
             if delta_step_seconds <= 0:
@@ -379,58 +375,57 @@ class EpisodeTerminationCallback(BaseCallback):
                     f"Non-positive callback step delta: {delta_step_seconds} "
                     f"(now={now_perf}, prev={self._last_step_perf_time})"
                 )
-            env_actions_per_second = n_envs / delta_step_seconds
-            if self._ema_env_actions_per_second is None:
-                self._ema_env_actions_per_second = env_actions_per_second
-            else:
-                self._ema_env_actions_per_second = (
-                    self.ema_alpha * env_actions_per_second
-                    + (1 - self.ema_alpha) * self._ema_env_actions_per_second
-                )
         self._last_step_perf_time = now_perf
-        if self._episode_action_counts_by_env is None:
-            self._episode_action_counts_by_env = [0] * n_envs
-            self._episode_wall_time_by_env = [now_perf] * n_envs
-        elif len(self._episode_action_counts_by_env) != n_envs:
-            raise ValueError(
-                "Environment count changed during training; cannot maintain per-env episode timing/action tracking"
-            )
+        # Cumul du temps passe en evaluation bot, retranche des durees d'episode ci-dessous : une
+        # eval periodique bloque TOUS les slots, et le slot qui l'enjambe se verrait sinon
+        # imputer ses minutes d'attente. Mesure : une eval de 120 s portait `max` a 121,80 s
+        # contre 1,20 s de duree reelle, ce qui rend la colonne `min/max` aveugle a ce qu'elle
+        # sert a reperer — une dispersion d'origine MOTEUR.
+        total_eval_seconds = (
+            self.gate_display_state.get("total_eval_time", 0.0)
+            if self.gate_display_state else 0.0
+        )
         if self._episode_wall_time_by_env is None:
-            raise RuntimeError("Per-env wall time tracking not initialized")
-
-        for env_index in range(n_envs):
-            self._episode_action_counts_by_env[env_index] += 1
+            self._episode_wall_time_by_env = [now_perf] * n_envs
+            self._episode_eval_time_by_env = [total_eval_seconds] * n_envs
+        elif len(self._episode_wall_time_by_env) != n_envs:
+            raise ValueError(
+                "Environment count changed during training; cannot maintain per-env episode timing"
+            )
+        if self._episode_eval_time_by_env is None:
+            raise RuntimeError("Per-env eval time tracking not initialized")
 
         episodes_finished = 0
         for env_index, done in enumerate(done_flags):
             if not done:
                 continue
             episodes_finished += 1
-            episode_actions = int(self._episode_action_counts_by_env[env_index])
-            if episode_actions <= 0:
-                raise ValueError(
-                    f"Non-positive episode action count for env {env_index}: {episode_actions}"
-                )
-            wall_duration = now_perf - self._episode_wall_time_by_env[env_index]
+            wall_duration = (
+                (now_perf - self._episode_wall_time_by_env[env_index])
+                - (total_eval_seconds - self._episode_eval_time_by_env[env_index])
+            )
             self._episode_wall_time_by_env[env_index] = now_perf
-            self._episode_action_counts_by_env[env_index] = 0
-            self.total_episode_actions += episode_actions
-            self.episode_stats_count += 1
-            self.total_episode_duration_seconds += wall_duration
-            self.episode_duration_stats_count += 1
+            self._episode_eval_time_by_env[env_index] = total_eval_seconds
             self.max_episode_duration_seconds = max(
                 self.max_episode_duration_seconds,
                 wall_duration
             )
-            self.recent_episode_durations_seconds.append(wall_duration)
+            self.min_episode_duration_seconds = min(
+                self.min_episode_duration_seconds,
+                wall_duration
+            )
             self.last_episode_duration_seconds = wall_duration
 
         episode_ended = episodes_finished > 0
         if episode_ended:
             self.episode_count += episodes_finished
-            if not self._first_episode_done and self.total_episode_duration_seconds > 0:
-                self.start_time = time.time() - self.total_episode_duration_seconds
-                self._first_episode_done = True
+            # Le chrono N'EST PAS retro-date du premier lot d'episodes. Il l'etait, et ce recul
+            # valait `total_episode_duration_seconds`, SOMME des durees de chaque slot arrive :
+            # a n_envs=48 avec des episodes de 10 s, il reculait de 480 s au lieu de 10, puis
+            # figeait ce decalage pour tout le run (mesure du 2026-08-01 : un "demarrage" de
+            # -19,5 s a n_envs=16). Le recul est de toute facon sans objet : `start_time` est
+            # deja pose au debut de `learn()` (ou au demarrage du process en mode rotation),
+            # donc AVANT le premier episode — le retro-dater ne pouvait que compter deux fois.
 
         # Update progress display on episode end
         if episode_ended:
@@ -454,74 +449,99 @@ class EpisodeTerminationCallback(BaseCallback):
                 bar = '█' * filled + '░' * (bar_length - filled)
 
                 # Calculate time with EMA for smooth, accurate ETA estimates
-                time_info = ""
-                global_avg_time_per_episode = 0.0
-                if self.start_time is not None and display_episode_count > 0:
-                    # Total elapsed time from start
-                    elapsed = current_time - self.start_time
-                    total_eval_now = (
-                        self.gate_display_state.get("total_eval_time", 0.0)
-                        if self.gate_display_state else 0.0
+                # `start_time` est pose au plus tard par `_on_training_start` (hook SB3 appele
+                # avant tout `_on_step`) et au plus tot par le constructeur en mode rotation. Un
+                # None ici signifie que le callback tourne hors du cycle d'entrainement : une barre
+                # muette masquerait ce cas, alors que toutes les durees affichees en dependent.
+                if self.start_time is None:
+                    raise RuntimeError(
+                        "EpisodeTerminationCallback.start_time not initialized: "
+                        "_on_training_start must run before _on_step"
                     )
+                # Total elapsed time from start
+                elapsed = current_time - self.start_time
 
-                    # Update EMA from real deltas (time and episodes), no fixed-batch assumption.
-                    if (
-                        self.last_display_time is not None
-                        and self.last_display_episode_count is not None
-                    ):
-                        eval_delta = total_eval_now - self.total_eval_time_at_last_display
-                        delta_time = current_time - self.last_display_time - eval_delta
-                        self.total_eval_time_at_last_display = total_eval_now
-                        delta_episodes = display_episode_count - self.last_display_episode_count
-                        if delta_time > 0 and delta_episodes > 0:
-                            avg_time_per_episode = delta_time / delta_episodes
-                            if self.ema_episode_time is None:
-                                # Initialize EMA with first valid measurement
-                                self.ema_episode_time = avg_time_per_episode
-                            else:
-                                # new_ema = alpha * new_value + (1 - alpha) * old_ema
-                                self.ema_episode_time = (
-                                    self.ema_alpha * avg_time_per_episode
-                                    + (1 - self.ema_alpha) * self.ema_episode_time
-                                )
-                    self.last_display_time = current_time
-                    self.last_display_episode_count = display_episode_count
-
-                    # Calculate ETA using EMA; use overall average when EMA not yet available (early episodes)
-                    remaining_episodes = display_total_episodes - display_episode_count
-                    # Global average wall-clock time per episode since training start (includes eval time)
-                    global_avg_time_per_episode = (
-                        elapsed / display_episode_count if display_episode_count > 0 else 0.0
-                    )
-
-                    if self.ema_episode_time is not None:
-                        eta = self.ema_episode_time * remaining_episodes
-                    else:
-                        # Use overall average when EMA not yet available (early episodes)
-                        eta = global_avg_time_per_episode * remaining_episodes
-
-                    # Format times as HH:MM:SS or MM:SS depending on duration
-                    def format_time(seconds):
-                        hours = int(seconds // 3600)
-                        minutes = int((seconds % 3600) // 60)
-                        secs = int(seconds % 60)
-                        if hours > 0:
-                            return f"{hours}:{minutes:02d}:{secs:02d}"
+                # Update EMA from real deltas (time and episodes), no fixed-batch assumption.
+                if (
+                    self.last_display_time is not None
+                    and self.last_display_episode_count is not None
+                ):
+                    eval_delta = total_eval_seconds - self.total_eval_time_at_last_display
+                    delta_time = current_time - self.last_display_time - eval_delta
+                    self.total_eval_time_at_last_display = total_eval_seconds
+                    delta_episodes = display_episode_count - self.last_display_episode_count
+                    if delta_time > 0 and delta_episodes > 0:
+                        avg_time_per_episode = delta_time / delta_episodes
+                        if self.ema_episode_time is None:
+                            # Initialize EMA with first valid measurement
+                            self.ema_episode_time = avg_time_per_episode
                         else:
-                            return f"{minutes:02d}:{secs:02d}"
+                            # new_ema = alpha * new_value + (1 - alpha) * old_ema
+                            self.ema_episode_time = (
+                                self.ema_alpha * avg_time_per_episode
+                                + (1 - self.ema_alpha) * self.ema_episode_time
+                            )
+                self.last_display_time = current_time
+                self.last_display_episode_count = display_episode_count
 
-                    elapsed_str = format_time(elapsed)
-                    eta_str = format_time(eta)
-                    time_info = f"{elapsed_str}<{eta_str}"
+                # Calculate ETA using EMA; use overall average when EMA not yet available (early episodes)
+                remaining_episodes = display_total_episodes - display_episode_count
+                # Secondes d'ENTRAINEMENT par episode produit, hors evaluation.
+                # Numerateur : le temps d'eval bot est retranche, comme le fait deja l'EMA
+                # ci-dessus. Une eval periodique bloque la boucle plusieurs minutes (13 min
+                # mesurees contre 21 s d'entrainement sur un run de 6 episodes) : l'y laisser
+                # rendrait un chiffre plusieurs fois trop lent, et surtout incomparable entre
+                # deux runs de cadences d'eval differentes — ce que cette colonne existe
+                # justement pour permettre. `total_eval_time` est porte par `gate_display_state`,
+                # construit dans `setup_callbacks` (ai/train.py:3536) donc de meme portee que
+                # `start_time` : les deux datent du chunk courant.
+                # Denominateur : `episode_count`, le compteur LOCAL a ce callback, et surtout PAS
+                # `display_episode_count`. En rotation de scenarios un callback neuf est construit
+                # a chaque chunk avec un `global_start_time` lui aussi remis a `time.time()`
+                # (ai/train.py:3032), tandis que les offsets d'affichage CUMULENT les chunks
+                # precedents (ai/train.py:4381-4382) : diviser un temps local par un compteur
+                # cumulatif rend un taux effondre — a l'offset 992, 0.000 pour un vrai 0,031 s/ep.
+                # Non garde : on est sous `if episode_ended`, qui vient d'incrementer le compteur.
+                training_elapsed = elapsed - total_eval_seconds
+                avg_training_time_per_episode = training_elapsed / self.episode_count
 
-                moy_duration = (
-                    self.total_episode_duration_seconds / self.episode_duration_stats_count
-                    if self.episode_duration_stats_count > 0 else 0.0
-                )
+                if self.ema_episode_time is not None:
+                    eta = self.ema_episode_time * remaining_episodes
+                else:
+                    # Use overall average when EMA not yet available (early episodes)
+                    eta = avg_training_time_per_episode * remaining_episodes
+
+                # Format times as HH:MM:SS or MM:SS depending on duration
+                def format_time(seconds):
+                    hours = int(seconds // 3600)
+                    minutes = int((seconds % 3600) // 60)
+                    secs = int(seconds % 60)
+                    if hours > 0:
+                        return f"{hours}:{minutes:02d}:{secs:02d}"
+                    else:
+                        return f"{minutes:02d}:{secs:02d}"
+
+                elapsed_str = format_time(elapsed)
+                eta_str = format_time(eta)
+                time_info = f"{elapsed_str}<{eta_str}"
+
+                # `cur` et `min/max` sont des durees PAR SLOT : l'intervalle entre deux fins
+                # d'episode d'un meme environnement. Elles valent donc ~n_envs fois la seconde
+                # par episode reellement ecoulee, et ne sont PAS comparables entre deux runs de
+                # n_envs differents (8 -> 48 envs a fait passer la moyenne par slot de 3,19 a
+                # 10,70 alors que le debit avait double). Les trois excluent le temps d'eval
+                # bot (retranche a la source, cf. boucle des durees). `mur` est le temps d'entrainement
+                # divise par les episodes produits : la seule des deux grandeurs qui se compare.
+                # Il REUTILISE `avg_training_time_per_episode` plutot que de diviser la moyenne
+                # par slot par `n_envs` : cette division-la n'est exacte qu'une fois que CHAQUE
+                # slot a fini un episode (avant, la somme ne couvre que les k slots deja
+                # arrives et le resultat est n_envs/k fois trop petit — 48x sur le premier
+                # affichage), alors qu'un rapport temps/episodes est juste des le premier.
                 duration_display = (
                     f"s/ep: cur {self.last_episode_duration_seconds:.2f}, "
-                    f"moy {moy_duration:.2f}, "
-                    f"max: {self.max_episode_duration_seconds:.2f}"
+                    f"mur {avg_training_time_per_episode:.3f} ({n_envs} env), "
+                    f"min/max: {self.min_episode_duration_seconds:.2f}"
+                    f"/{self.max_episode_duration_seconds:.2f}"
                 )
                 gate_label = "Gate 🧱"
                 robust_status_text = ""
@@ -2033,7 +2053,6 @@ class BotEvaluationCallback(BaseCallback):
         # d'entrainement). Une evaluation pouvait donc peser des dizaines de minutes par marqueur
         # sans qu'aucune sortie ne le dise. Une seule ligne, emise a la CONSOMMATION du resultat
         # (thread principal), donc sans collision avec la barre.
-        #
         # Le marqueur seul identifie l'evaluation : `self.eval_count` n'ajouterait rien et
         # ferait dependre l'affichage d'un attribut que cette methode n'utilise pas autrement.
         episodes_played = int(require_key(results, "total_episodes_played"))
