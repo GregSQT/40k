@@ -2,14 +2,10 @@
   "x1": {
     "type": "################################################### x1 — curriculum phase 1 (board 44x60x1, scale ×1) ###################################################",
     "seed": 12345,
-    "total_episodes": 200000,
+    "total_episodes": 10000,
     "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
     "agent_seat_mode": "random",
     "eval_episodes": 10,
-    "bot_eval_scenario_pool": "holdout",
-    "bot_eval_show_progress": true,
-    "bot_eval_use_subprocess": true,
-    "bot_eval_n_workers": 6,
     "n_envs": 48,
     "metrics_smoothing": null,
     "model_params": {
@@ -46,6 +42,10 @@
       "verbose": 0
     },
     "callback_params": {
+      "bot_eval_scenario_pool": "holdout",
+      "bot_eval_show_progress": true,
+      "bot_eval_use_subprocess": true,
+      "bot_eval_n_workers": 4,
       "early_stopping_patience": 0,
       "save_best_min_episodes": 10000,
       "checkpoint_save_freq": 10000,
@@ -54,6 +54,7 @@
       "eval_deterministic": true,
       "eval_render": false,
       "bot_eval_freq": 2000,
+      "bot_eval_freq_normal": "---------------------------------- 2000 ",
       "bot_eval_use_episodes": true,
       "bot_eval_intermediate": 100,
       "bot_eval_final": 100,
@@ -196,10 +197,6 @@
     "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
     "agent_seat_mode": "random",
     "eval_episodes": 10,
-    "bot_eval_scenario_pool": "holdout",
-    "bot_eval_show_progress": true,
-    "bot_eval_use_subprocess": true,
-    "bot_eval_n_workers": 6,
     "n_envs": 48,
     "metrics_smoothing": null,
     "model_params": {
@@ -236,6 +233,10 @@
       "verbose": 0
     },
     "callback_params": {
+      "bot_eval_scenario_pool": "holdout",
+      "bot_eval_show_progress": true,
+      "bot_eval_use_subprocess": true,
+      "bot_eval_n_workers": 4,
       "early_stopping_patience": 0,
       "save_best_min_episodes": 10000,
       "checkpoint_save_freq": 10000,
@@ -387,10 +388,6 @@
     "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
     "agent_seat_mode": "random",
     "eval_episodes": 10,
-    "bot_eval_scenario_pool": "holdout",
-    "bot_eval_show_progress": true,
-    "bot_eval_use_subprocess": true,
-    "bot_eval_n_workers": 6,
     "n_envs": 8,
     "metrics_smoothing": null,
     "model_params": {
@@ -427,6 +424,10 @@
       "verbose": 0
     },
     "callback_params": {
+      "bot_eval_scenario_pool": "holdout",
+      "bot_eval_show_progress": true,
+      "bot_eval_use_subprocess": true,
+      "bot_eval_n_workers": 4,
       "early_stopping_patience": 0,
       "save_best_min_episodes": 10000,
       "checkpoint_save_freq": 10000,
@@ -577,10 +578,6 @@
     "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
     "agent_seat_mode": "random",
     "eval_episodes": 0,
-    "bot_eval_scenario_pool": "holdout",
-    "bot_eval_show_progress": true,
-    "bot_eval_use_subprocess": true,
-    "bot_eval_n_workers": 6,
     "n_envs": 48,
     "metrics_smoothing": null,
     "model_params": {
@@ -617,6 +614,10 @@
       "verbose": 0
     },
     "callback_params": {
+      "bot_eval_scenario_pool": "holdout",
+      "bot_eval_show_progress": true,
+      "bot_eval_use_subprocess": true,
+      "bot_eval_n_workers": 4,
       "early_stopping_patience": 0,
       "save_best_min_episodes": 10000,
       "checkpoint_save_freq": 10000,
@@ -624,7 +625,7 @@
       "checkpoint_name_prefix": "ppo_checkpoint",
       "eval_deterministic": true,
       "eval_render": false,
-      "bot_eval_freq": 0,
+      "bot_eval_freq": 1000,
       "bot_eval_use_episodes": true,
       "bot_eval_intermediate": 0,
       "bot_eval_final": 0,
@@ -768,14 +769,14 @@
     "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
     "agent_seat_mode": "random",
     "eval_episodes": 2,
-    "bot_eval_scenario_pool": "holdout",
-    "bot_eval_show_progress": true,
-    "bot_eval_use_subprocess": true,
-    "bot_eval_n_workers": 3,
     "n_envs": 8,
     "metrics_smoothing": null,
     "n_envs_normal--------------------------------": 48,
     "callback_params": {
+      "bot_eval_scenario_pool": "holdout",
+      "bot_eval_show_progress": true,
+      "bot_eval_use_subprocess": true,
+      "bot_eval_n_workers": 3,
       "early_stopping_patience": 0,
       "save_best_min_episodes": 10000,
       "checkpoint_save_freq": 10000,

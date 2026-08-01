@@ -79,6 +79,7 @@ def _results() -> Dict[str, Any]:
         "total_timeout_episodes": 0,
         "total_error_episodes": 0,
         "eval_duration_seconds": 1.0,
+        "total_episodes_played": 600,
         "combined": 0.4,
         "random": 0.5,
         "greedy": 0.4,

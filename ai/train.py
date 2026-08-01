@@ -691,6 +691,111 @@ def close_training_env(env, contexte: str, log=print, timeout_s: float = 30.0) -
             f"Les processus workers ont pu être tués par signal.")
 
 
+def apply_rollout_n_steps(model_params: Dict[str, Any], n_envs: int, observation_space,
+                          log=print) -> int:
+    """Convertit `model_params["n_steps"]` (TOTAL par update) en pas PAR ENV, et borne le buffer.
+
+    POINT DE PASSAGE UNIQUE. La division vivait dans le seul `train_with_scenario_rotation`,
+    alors que `create_model` et `create_multi_agent_model` construisent AUSSI un
+    `SubprocVecEnv` de `n_envs`. Un run mono-scenario (`--scenario X --new`) passait donc par
+    `create_model` avec `n_steps: 8192` BRUT sur 48 envs : `MaskablePPO` allouait
+    8192 x 48 = 393 216 transitions, soit 44 Go rien que pour les observations
+    (30 044 flottants par obs). MESURE sur le run fautif : VmSize 139,7 Go, RSS montant de
+    2,4 Go/min a mesure que les pages du buffer etaient touchees, mort de la VM WSL avant la
+    fin. Jumeau classique : correction appliquee a un chemin sur trois.
+
+    Le total journalise est celui REELLEMENT obtenu (`effective * n_envs`), jamais le total
+    demande : `//` tronque, donc 8192 sur 48 envs ne donne pas 8192 mais 8160. Annoncer le
+    total demande a deja fait valider a `scripts/ab_train_common.py` deux configurations que
+    le clamp rendait identiques.
+
+    Le garde-fou de taille refuse de construire un buffer plus gros que la memoire
+    disponible : sans lui, l'erreur ne se manifeste qu'apres plusieurs minutes de
+    remplissage, sous la forme d'un OOM sans rapport apparent avec `n_steps`.
+    """
+    if "n_steps" not in model_params:
+        raise KeyError("model_params.n_steps is required to size the PPO rollout buffer")
+    base_n_steps = model_params["n_steps"]
+    if not isinstance(base_n_steps, int) or isinstance(base_n_steps, bool) or base_n_steps <= 0:
+        raise ValueError(f"model_params.n_steps must be a positive integer (got {base_n_steps!r})")
+    if n_envs > 1:
+        effective_n_steps = max(1, base_n_steps // n_envs)
+        model_params["n_steps"] = effective_n_steps
+        log(
+            f"📊 n_envs={n_envs}: using n_steps={effective_n_steps} per env "
+            f"({effective_n_steps * n_envs} total per update, config asked {base_n_steps})"
+        )
+    else:
+        effective_n_steps = base_n_steps
+
+    floats_per_obs = _observation_floats(observation_space)
+    buffer_bytes = floats_per_obs * 4 * effective_n_steps * n_envs
+    available_bytes = _available_memory_bytes()
+    if available_bytes is not None and buffer_bytes > available_bytes * 0.5:
+        raise MemoryError(
+            f"PPO rollout buffer would need {buffer_bytes / 2**30:.1f} GiB of observations "
+            f"({effective_n_steps} steps x {n_envs} envs x {floats_per_obs} floats), "
+            f"for {available_bytes / 2**30:.1f} GiB available. "
+            "Reduce model_params.n_steps (it is a TOTAL, divided by n_envs) or n_envs."
+        )
+    return effective_n_steps
+
+
+def recreate_rollout_buffer(model, log=print) -> None:
+    """Reconstruit le rollout buffer apres un changement de `model.n_steps` sur un modele charge.
+
+    `MaskablePPO.load` dimensionne le buffer sur le `n_steps` du CHECKPOINT. Ecrire
+    `model.n_steps` ensuite ne le redimensionne pas : le modele collecte alors sur l'ancienne
+    taille, en contradiction silencieuse avec la config du run.
+
+    La classe depend de l'espace d'observation. `MaskableRolloutBuffer` etait code en dur ici,
+    alors que le pipeline squad expose un espace `Dict` — il lui faut `MaskableDictRolloutBuffer`.
+    """
+    import gymnasium as gym
+    from sb3_contrib.common.maskable.buffers import (
+        MaskableDictRolloutBuffer,
+        MaskableRolloutBuffer,
+    )
+
+    buffer_cls = (
+        MaskableDictRolloutBuffer
+        if isinstance(model.observation_space, gym.spaces.Dict)
+        else MaskableRolloutBuffer
+    )
+    model.rollout_buffer = buffer_cls(
+        model.n_steps,
+        model.observation_space,
+        model.action_space,
+        device=model.device,
+        gae_lambda=model.gae_lambda,
+        gamma=model.gamma,
+        n_envs=model.n_envs,
+    )
+    log(f"📊 rollout buffer rebuilt: {buffer_cls.__name__}, n_steps={model.n_steps}, "
+        f"n_envs={model.n_envs}")
+
+
+def _observation_floats(observation_space) -> int:
+    """Nombre de flottants d'UNE observation, espace Dict comme espace Box."""
+    import gymnasium as gym
+
+    if isinstance(observation_space, gym.spaces.Dict):
+        return sum(int(np.prod(sub.shape)) for sub in observation_space.spaces.values())
+    return int(np.prod(observation_space.shape))
+
+
+def _available_memory_bytes() -> Optional[int]:
+    """MemAvailable de /proc/meminfo, ou None hors Linux (le garde-fou ne mord alors pas)."""
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, IndexError, ValueError):
+        return None
+    return None
+
+
 def _resolve_n_envs_for_step_logging(n_envs: int, log=print) -> int:
     """Force un environnement unique quand la journalisation --step est active.
 
@@ -703,7 +808,14 @@ def _resolve_n_envs_for_step_logging(n_envs: int, log=print) -> int:
 
     Meme traitement que `--replay`/`--convert-steplog`, qui forcent deja un env unique :
     on force ET on le DIT (pas de no-op silencieux, pas de promesse non tenue).
+    Le controle `n_envs > 0` vit ici parce que c'est le SEUL passage obligatoire des trois
+    lectures de `training_config["n_envs"]`. Il vivait auparavant dans
+    `ai/bot_evaluation.evaluate_against_bots`, ou il n'etait atteint qu'au premier marqueur
+    d'evaluation — donc apres des minutes d'entrainement — et ou il ne servait plus qu'a
+    alimenter un repli de `bot_eval_n_workers` depuis supprime.
     """
+    if not isinstance(n_envs, int) or isinstance(n_envs, bool) or n_envs <= 0:
+        raise ValueError(f"training config n_envs must be a positive integer (got {n_envs!r})")
     if step_logger is None or not getattr(step_logger, "enabled", False):
         return n_envs
     if n_envs > 1:
@@ -1906,6 +2018,9 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
 
     model_params["device"] = device
     model_params["verbose"] = 0  # Disable verbose logging
+    # n_steps est un TOTAL par update : sans cette conversion, un run mono-scenario allouait
+    # n_steps x n_envs transitions (8192 x 48 = 44 Go d'observations).
+    apply_rollout_n_steps(model_params, n_envs, env.observation_space)
 
     if use_gpu:
         print(f"🖥️  Using GPU for PPO")
@@ -1963,6 +2078,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
                 model.gae_lambda = model_params["gae_lambda"]
             if "n_steps" in model_params:
                 model.n_steps = model_params["n_steps"]
+                recreate_rollout_buffer(model)
             if "batch_size" in model_params:
                 model.batch_size = model_params["batch_size"]
             if "n_epochs" in model_params:
@@ -2210,6 +2326,8 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     )
 
     model_params["device"] = device
+    # Jumeau de create_model : meme conversion TOTAL -> par env, meme garde-fou de taille.
+    apply_rollout_n_steps(model_params, n_envs, env.observation_space)
 
     if use_gpu:
         print(f"🖥️  Using GPU for {agent_key} PPO")
@@ -2266,6 +2384,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
                 model.gae_lambda = model_params["gae_lambda"]
             if "n_steps" in model_params:
                 model.n_steps = model_params["n_steps"]
+                recreate_rollout_buffer(model)
             if "batch_size" in model_params:
                 model.batch_size = model_params["batch_size"]
             if "n_epochs" in model_params:
@@ -2856,12 +2975,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     # Create or load model
     model_params = training_config["model_params"].copy()
 
-    # Automatic n_steps adjustment when n_envs > 1: keep total steps per update constant
-    base_n_steps = model_params.get("n_steps", 10240)
-    if n_envs > 1:
-        effective_n_steps = max(1, base_n_steps // n_envs)
-        model_params["n_steps"] = effective_n_steps
-        chunk_log(f"📊 n_envs={n_envs}: using n_steps={effective_n_steps} per env ({base_n_steps} total per update)")
+    # n_steps est un TOTAL par update : le convertir en pas PAR ENV et borner le buffer.
+    apply_rollout_n_steps(model_params, n_envs, env.observation_space, log=chunk_log)
 
     # Handle entropy coefficient scheduling if configured
     # Use START value for model creation; callback will handle the schedule
@@ -2940,18 +3055,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 model.gae_lambda = model_params["gae_lambda"]
             if "n_steps" in model_params:
                 model.n_steps = model_params["n_steps"]
-                # Rollout buffer buffer_size was set from the checkpoint's n_steps;
-                # recreate it so it matches the (possibly adjusted) n_steps.
-                from sb3_contrib.common.maskable.buffers import MaskableRolloutBuffer
-                model.rollout_buffer = MaskableRolloutBuffer(
-                    model.n_steps,
-                    model.observation_space,
-                    model.action_space,
-                    device=model.device,
-                    gae_lambda=model.gae_lambda,
-                    gamma=model.gamma,
-                    n_envs=model.n_envs,
-                )
+                recreate_rollout_buffer(model, log=chunk_log)
             if "batch_size" in model_params:
                 model.batch_size = model_params["batch_size"]
             if "n_epochs" in model_params:
@@ -3596,6 +3700,13 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             f"callback_params.bot_eval_show_progress must be boolean "
             f"(got {type(bot_eval_show_progress).__name__})"
         )
+    # Parallelisation de l'evaluation bot : validee ICI, au demarrage, avec ses soeurs — et non
+    # dans `evaluate_against_bots`, qui n'est atteinte qu'au premier marqueur d'evaluation, donc
+    # apres des minutes d'entrainement. La fabrique est partagee avec ce point d'entree, qui
+    # revalide pour son propre compte (il sert aussi a evaluer hors entrainement).
+    from ai.bot_evaluation import validate_bot_eval_worker_params
+
+    validate_bot_eval_worker_params(callback_params)
     save_best_robust = bool(_resolve_callback_value("save_best_robust"))
     model_gating_enabled = bool(_resolve_callback_value("model_gating_enabled"))
     model_gating_min_combined = None

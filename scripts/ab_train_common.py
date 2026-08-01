@@ -121,7 +121,9 @@ _SUPPORTED_SCENARIOS = ("bot", "self", "all")
 
 _CLI_EPISODES_RE = re.compile(r"Using total_episodes from CLI: (\d+)")
 _EPISODES_TRAINED_RE = re.compile(r"Total episodes trained: (\d+)")
-_N_STEPS_RE = re.compile(r"using n_steps=(\d+) per env \((\d+) total per update\)")
+_N_STEPS_RE = re.compile(
+    r"using n_steps=(\d+) per env \((\d+) total per update, config asked (\d+)\)"
+)
 
 
 class RunFailed(RuntimeError):
@@ -376,25 +378,36 @@ def parse_value(value: str):
 def _expected_n_steps(output: str, requested):
     """Valeur de `n_steps` attendue dans le zip — LUE dans la sortie, pas deduite.
 
-    `train_with_scenario_rotation` divise : PPO recoit `base // n_envs` quand `n_envs > 1`
-    (train.py:2862). Mais ce n'est PAS un invariant du depot — `create_model` et
-    `create_multi_agent_model` passent `model_params` tel quel, et les zips de
-    `ai/models/ArmageddonAgent/` portent les deux regimes a `n_envs=8` identique (`n_steps` a 1024
-    divise, a 8192 non divise). Appliquer la division systematiquement ferait donc echouer le
-    controle sur un run correct.
-    D'ou la lecture de la ligne emise par la division elle-meme : sa PRESENCE prouve le regime,
-    et le total qu'elle annonce doit valoir la valeur demandee.
+    `n_steps` est un TOTAL par update : `apply_rollout_n_steps` (train.py) donne `base // n_envs`
+    a PPO quand `n_envs > 1`. C'est desormais un invariant des TROIS chemins vectorises ; ca ne
+    l'etait pas — `create_model` et `create_multi_agent_model` passaient `model_params` tel quel,
+    d'ou les deux regimes visibles dans les zips de `ai/models/ArmageddonAgent/` a `n_envs=8`
+    identique. La lecture de la ligne reste la methode : sa PRESENCE prouve le regime applique,
+    plutot qu'une division deduite qui ferait echouer le controle sur un vieux modele.
+
+    LE TOTAL ANNONCE EST CELUI OBTENU, PAS CELUI DEMANDE. `//` tronque : a `n_envs=48`, une
+    demande de 8192 donne 170 x 48 = 8160. L'ancienne ligne rejouait la valeur DEMANDEE, ce qui
+    masquait la troncature — et le clamp `max(1, ...)` avec elle. C'est le trou signale : a
+    `n_envs=48`, comparer `n_steps` 32 et 40 validait les deux cotes alors que PPO tournait a
+    1 x 48 dans les deux cas, donc le banc comparait deux fois la meme configuration. La
+    troncature au plancher est maintenant un refus explicite.
     """
     match = _N_STEPS_RE.search(output)
     if match is None:
-        # Pas de division annoncee : soit n_envs vaut 1, soit le chemin ne divise pas. Dans les
-        # deux cas PPO recoit la valeur demandee telle quelle.
+        # Pas de division annoncee : n_envs vaut 1, PPO recoit la valeur demandee telle quelle.
         return int(requested)
-    per_env, total = int(match.group(1)), int(match.group(2))
-    if total != int(requested):
+    per_env, total, asked = (int(match.group(i)) for i in (1, 2, 3))
+    if asked != int(requested):
         raise SystemExit(
-            f"train.py annonce {total} pas au total par mise a jour, {requested} demandes : une "
+            f"train.py a recu {asked} comme n_steps total, {requested} demandes : une "
             f"surcharge de configuration ecrase --param."
+        )
+    n_envs = total // per_env
+    if per_env == 1 and asked < n_envs:
+        raise SystemExit(
+            f"n_steps={asked} avec n_envs={n_envs} : `max(1, {asked} // {n_envs})` ramene PPO a "
+            f"1 pas par env. Toute valeur inferieure a {n_envs} donne le MEME rollout, donc la "
+            f"paire comparerait deux fois la meme configuration. Demander n_steps >= {n_envs}."
         )
     return per_env
 
@@ -442,20 +455,54 @@ def assert_effective(run: dict, path: str, requested) -> None:
 def assert_worktree(repo_arg: str, agent: str) -> str:
     """Impose un arbre de travail secondaire. Rend le chemin resolu.
 
-    `realpath`, pas `abspath` : un `--repo` qui est un lien symbolique vers le depot principal
-    passerait le controle et l'entrainement ecraserait le modele protege.
+    Le controle interroge GIT sur la cible, il ne la compare pas a une reference deduite.
+    Dans un worktree lie, `--absolute-git-dir` vaut `<principal>/.git/worktrees/<nom>` tandis
+    que `--git-common-dir` vaut `<principal>/.git` : ils DIFFERENT. Dans le depot principal ils
+    sont identiques. C'est exactement la propriete voulue (« --repo est-il un worktree
+    secondaire ? »), testee directement.
+
+    L'implementation precedente definissait le depot principal comme le parent du SCRIPT
+    EXECUTE (`os.path.dirname(__file__)`). Lancer le banc depuis le worktree — le cas d'usage
+    normal, puisque c'est la que le code teste vit — faisait donc valoir `main_repo` = worktree,
+    et `--repo /home/greg/40k` passait le controle : le banc entrainait dans le depot principal
+    et ecrasait `ai/models/<agent>/model_<agent>.zip`, LE fichier que le message dit proteger.
+    Le garde-fou se retournait contre son propre objet.
+
+    Un `git` absent, une cible hors depot ou une sortie inattendue LEVENT : un controle de
+    securite qui ne peut pas conclure doit refuser, jamais laisser passer.
     """
-    main_repo = os.path.realpath(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     repo = os.path.realpath(repo_arg)
-    if repo == main_repo:
+    if not os.path.isdir(repo):
+        raise SystemExit(
+            f"arbre de travail absent : {repo_arg}\n"
+            f"    git worktree add {repo_arg} HEAD"
+        )
+    try:
+        proc = subprocess.run(
+            ["git", "-C", repo, "rev-parse", "--absolute-git-dir", "--git-common-dir"],
+            capture_output=True, text=True, check=True,
+        )
+    except FileNotFoundError:
+        raise SystemExit("git introuvable : impossible de verifier que --repo est un worktree.")
+    except subprocess.CalledProcessError as exc:
+        raise SystemExit(
+            f"--repo n'est pas un depot git : {repo}\n    {exc.stderr.strip()}"
+        )
+    parts = proc.stdout.split()
+    if len(parts) != 2:
+        raise SystemExit(
+            f"sortie git rev-parse inattendue pour {repo} : {proc.stdout!r}"
+        )
+    git_dir = os.path.realpath(parts[0])
+    # `--git-common-dir` peut etre relatif ; `-C repo` fait de `repo` le repertoire courant de git.
+    common_raw = parts[1]
+    git_common_dir = os.path.realpath(
+        common_raw if os.path.isabs(common_raw) else os.path.join(repo, common_raw)
+    )
+    if git_dir == git_common_dir:
         raise SystemExit(
             "refus de mesurer dans le depot principal : chaque run ecrit "
             f"ai/models/{agent}/model_{agent}.zip, fichier protege.\n"
-            f"    git -C {main_repo} worktree add {repo_arg} HEAD"
-        )
-    if not os.path.isdir(repo):
-        raise SystemExit(
-            f"arbre de travail absent. Le creer une fois :\n"
-            f"    git -C {main_repo} worktree add {repo_arg} HEAD"
+            f"    git -C {repo} worktree add ../bench-{agent} HEAD"
         )
     return repo

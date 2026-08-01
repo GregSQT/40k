@@ -28,12 +28,61 @@ if TYPE_CHECKING:
 
 from shared.data_validation import require_key, require_present
 
-__all__ = ['evaluate_against_bots']
+__all__ = ['evaluate_against_bots', 'validate_bot_eval_worker_params']
 
 # Worker globals (scope processus)
 _worker_model = None
 _worker_obs_normalizer = None
 _eval_ref_temp_dir: Optional[str] = None
+
+
+def validate_bot_eval_worker_params(callback_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Valide les trois parametres de parallelisation de l'evaluation bot.
+
+    FABRIQUE UNIQUE, appelee a DEUX moments qui ne sont pas redondants :
+    - `ai/train.py`, au demarrage, avec les autres `callback_params.bot_eval_*` : c'est la
+      qu'une config incomplete doit arreter le run, pas apres des minutes d'entrainement ;
+    - `evaluate_against_bots`, qui est aussi un point d'entree autonome (evaluation hors
+      entrainement) et ne peut donc pas s'en remettre au controle de train.py.
+
+    Ces trois cles etaient lues par `.get()` avec defaut silencieux, et vivaient au niveau
+    SUPERIEUR de la section de phase alors que toute la chaine les cherche dans
+    `callback_params` (cf. `_resolve_callback_value` dans `ai/train.py`). Elles etaient donc
+    invisibles : `bot_eval_n_workers` retombait sur `min(n_envs, n_scenarios * n_bots)` = 24
+    workers quelle que soit la valeur ecrite. Mesure : 24 workers = 47 Go de RSS (~1,9 Go
+    chacun) contre 9,6 Go a 4, et une evaluation 42 % PLUS LENTE (598 s contre 349 s) parce que
+    la VM swappait. Un repli qui contredit silencieusement la config est ce qu'interdit T1.
+
+    Aucune de ces trois cles n'est definie dans `config/agents/_training_common.json` : il n'y
+    a donc pas de valeur partagee a resoudre, l'absence est une erreur de config.
+    """
+    use_subprocess = require_key(callback_params, "bot_eval_use_subprocess")
+    if not isinstance(use_subprocess, bool):
+        raise TypeError(
+            "callback_params.bot_eval_use_subprocess must be boolean "
+            f"(got {type(use_subprocess).__name__})"
+        )
+    task_timeout_seconds = require_key(callback_params, "bot_eval_task_timeout_seconds")
+    if not isinstance(task_timeout_seconds, int) or isinstance(task_timeout_seconds, bool):
+        raise TypeError(
+            "callback_params.bot_eval_task_timeout_seconds must be an integer "
+            f"(got {type(task_timeout_seconds).__name__})"
+        )
+    if task_timeout_seconds <= 0:
+        raise ValueError(
+            "callback_params.bot_eval_task_timeout_seconds must be > 0 "
+            f"(got {task_timeout_seconds})"
+        )
+    n_workers = require_key(callback_params, "bot_eval_n_workers")
+    if not isinstance(n_workers, int) or isinstance(n_workers, bool) or n_workers <= 0:
+        raise ValueError(
+            f"callback_params.bot_eval_n_workers must be a positive integer (got {n_workers!r})"
+        )
+    return {
+        "use_subprocess": use_subprocess,
+        "task_timeout_seconds": task_timeout_seconds,
+        "n_workers": n_workers,
+    }
 
 
 def _cleanup_eval_ref_temp_dir() -> None:
@@ -1093,7 +1142,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     raise ValueError(f"Invalid wall ref in scenario_sampling.eval_wall_refs: {raw_ref!r}")
                 eval_wall_refs.append(raw_ref.strip())
 
-        use_subprocess = callback_params.get("bot_eval_use_subprocess", True)
+        worker_params = validate_bot_eval_worker_params(callback_params)
+        use_subprocess = worker_params["use_subprocess"]
         worker_model_device_raw = require_key(callback_params, "bot_eval_worker_device")
         worker_model_device = str(worker_model_device_raw).strip().lower()
         if worker_model_device not in {"cpu", "auto"}:
@@ -1105,10 +1155,6 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             use_subprocess = False
         if debug_mode:
             use_subprocess = False
-
-        n_envs = int(require_key(training_cfg, "n_envs"))
-        if n_envs <= 0:
-            raise ValueError(f"n_envs must be > 0 (got {n_envs})")
 
         config_params = {
             "training_config_name": training_config_name,
@@ -1124,11 +1170,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             config_params["step_logger"] = step_logger
 
         base_seed = 42
-        task_timeout_seconds = callback_params.get("bot_eval_task_timeout_seconds", 300)
-        n_workers = callback_params.get("bot_eval_n_workers")
-        if n_workers is None:
-            n_workers = min(n_envs, len(scenario_list) * len(active_bot_names))
-        n_workers = max(1, int(n_workers))
+        task_timeout_seconds = worker_params["task_timeout_seconds"]
+        n_workers = worker_params["n_workers"]
 
         from config_loader import get_max_turns
 
@@ -1299,6 +1342,13 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     results["total_error_episodes"] = total_error_episodes
     results["eval_reliable"] = total_failed_episodes == 0
     results["eval_duration_seconds"] = float(time.time() - eval_wall_start)
+    # Denominateur HONNETE de la duree : les episodes reellement joues, hors abandons. Sans lui,
+    # la seule facon de connaitre le cout d'une evaluation etait de multiplier `bot_eval_*` par
+    # le nombre de bots actifs — un calcul de tete que rien ne verifie.
+    results["total_episodes_played"] = sum(
+        int(require_key(r, "wins")) + int(require_key(r, "losses")) + int(require_key(r, "draws"))
+        for r in results_list
+    )
 
     results["combined"] = sum(
         eval_weights[bn] * results[bn] for bn in active_bot_names

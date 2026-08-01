@@ -50,6 +50,7 @@ def _results(
         "total_timeout_episodes": timeout,
         "total_error_episodes": error,
         "eval_duration_seconds": duration,
+        "total_episodes_played": 600,
         "combined": 0.42,
         "eval_reliable": failed == 0,
     }

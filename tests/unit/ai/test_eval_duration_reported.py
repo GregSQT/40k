@@ -1,0 +1,118 @@
+"""Le COUT d'une evaluation bot doit etre affiche sur le chemin NORMAL, pas seulement en echec.
+
+Bug d'origine : `evaluate_against_bots` calcule `results["eval_duration_seconds"]`
+(bot_evaluation.py), mais `_apply_eval_results` ne le lisait que pour construire ses messages
+d'echec — `RuntimeError` sur crash de worker, avertissement sur timeout. Sur un run sain la
+valeur etait calculee puis jetee.
+
+Et la barre de progression de l'evaluation ne comblait pas le trou : elle est desactivee des
+que l'eval est asynchrone (`effective_show_eval_progress = show_eval_progress and not
+async_eval_enabled`, training_callbacks.py), ce qui est le cas par DEFAUT puisque rien ne
+surcharge `async_eval_enabled=True`. Resultat : une evaluation pouvait peser des dizaines de
+minutes par marqueur sans qu'aucune sortie ne le dise, et la seule facon d'estimer son cout
+etait de multiplier `bot_eval_intermediate` par le nombre de bots actifs — un calcul de tete
+que rien ne verifiait.
+
+Famille « code teste mais jamais appele », version affichage : la mesure existait, personne ne
+la montrait.
+"""
+
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+from typing import Any, Dict, List
+
+import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _results(duration: float = 125.0, played: int = 600) -> Dict[str, Any]:
+    """Un resultat d'evaluation SAIN : ni crash, ni timeout."""
+    return {
+        "total_failed_episodes": 0,
+        "total_timeout_episodes": 0,
+        "total_error_episodes": 0,
+        "eval_duration_seconds": duration,
+        "total_episodes_played": played,
+        "combined": 0.42,
+        "faction_scores": {},
+        "scenario_scores": {},
+        "scenario_split_scores": {},
+    }
+
+
+def test_bot_evaluation_publishes_the_episode_count() -> None:
+    """`total_episodes_played` doit etre pose par evaluate_against_bots. ROUGE avant le fix.
+
+    Contrat de source : sans cette cle, `_apply_eval_results` leve sur son `require_key`.
+    """
+    source = (PROJECT_ROOT / "ai" / "bot_evaluation.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    published = {
+        node.slice.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Name) and node.value.id == "results"
+        and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str)
+    }
+    for key in ("eval_duration_seconds", "total_episodes_played"):
+        assert key in published, f"ai/bot_evaluation.py ne publie plus results[{key!r}]"
+
+
+def test_duration_is_printed_on_the_healthy_path(capsys, monkeypatch) -> None:
+    """Une eval SANS crash ni timeout imprime sa duree. ROUGE avant le fix."""
+    from ai import training_callbacks as tc
+
+    cb = object.__new__(tc.BotEvaluationCallback)
+    cb.metrics_tracker = None
+    cb.model = None
+    cb.last_eval_results = None
+    cb.last_eval_marker = None
+    # Le test porte sur l'AFFICHAGE : tout ce qui suit dans _apply_eval_results (gate, logs,
+    # checkpoints) est hors sujet et couperait sur des attributs non initialises.
+    sentinel = RuntimeError("stop-after-print")
+
+    def _stop(*_a: Any, **_k: Any) -> None:
+        raise sentinel
+
+    monkeypatch.setattr(tc.BotEvaluationCallback, "_evaluate_model_gate", _stop)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        tc.BotEvaluationCallback._apply_eval_results(cb, _results(125.0, 600), 2000)
+    assert excinfo.value is sentinel, "l'echec doit venir du sentinelle, pas d'une autre erreur"
+
+    out = capsys.readouterr().out
+    assert "600 épisodes" in out, f"le nombre d'episodes doit apparaitre : {out!r}"
+    assert "02:05" in out, f"la duree doit apparaitre en MM:SS : {out!r}"
+    assert "4.80 ep/s" in out, f"le debit doit apparaitre : {out!r}"
+    assert "marker 2000" in out
+
+
+def test_crash_still_stops_training(capsys) -> None:
+    """Contrepartie : l'ajout d'un affichage ne doit pas avaler le chemin d'echec dur."""
+    from ai import training_callbacks as tc
+
+    cb = object.__new__(tc.BotEvaluationCallback)
+    cb.last_eval_results = None
+    cb.last_eval_marker = None
+    broken = _results()
+    broken["total_failed_episodes"] = 5
+    broken["total_error_episodes"] = 5
+    with pytest.raises(RuntimeError, match="crashed episodes"):
+        tc.BotEvaluationCallback._apply_eval_results(cb, broken, 2000)
+
+
+def test_eval_progress_bar_is_off_whenever_eval_is_async() -> None:
+    """Documente POURQUOI la barre ne suffit pas : elle est desactivee en mode async.
+
+    Ce test ne demande pas de la reactiver (elle se disputerait la ligne avec la barre
+    d'entrainement) : il verrouille le fait que la ligne de duree est le SEUL canal restant,
+    donc qu'on ne peut pas la supprimer en croyant que la barre prend le relais.
+    """
+    source = (PROJECT_ROOT / "ai" / "training_callbacks.py").read_text(encoding="utf-8")
+    assert "self.show_eval_progress and not self.async_eval_enabled" in source, (
+        "si la barre d'eval redevient active en mode async, revoir la ligne de duree : "
+        "deux ecrivains sur la meme ligne de terminal."
+    )
