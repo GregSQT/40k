@@ -157,19 +157,54 @@ def _build_training_bots_from_config(training_config):
     return bots
 
 
-def _make_learning_rate_schedule(lr_config):
-    """Convert learning_rate config to callable for PPO. Supports:
-    - float: constant learning rate
-    - dict: {"initial": 0.00015, "final": 0.00005} for linear decay over training
-    SB3 uses progress_remaining: 1 at start, 0 at end."""
+def _describe_ramp(name: str, start: float, end: float, total_eps: int, decay_fraction: float) -> str:
+    """Ligne de log d'une rampe : ou elle s'acheve, et le fait qu'elle tienne son plancher."""
+    return (
+        f"✅ Added {name} schedule callback: {start} -> {end} over {int(total_eps * decay_fraction)} "
+        f"episodes (decay_fraction {decay_fraction} of {total_eps}), then held at {end}"
+    )
+
+
+def _model_params_with_ent_coef_frozen(model_params: dict, log=print) -> dict:
+    """COPIE de `model_params` ou une rampe `ent_coef` est reduite a sa valeur de depart.
+
+    PPO n'accepte qu'un scalaire ; la decroissance est ensuite pilotee par
+    `EntropyScheduleCallback`. La copie n'est pas de la prudence : les deux appelants qui
+    lisaient `training_config["model_params"]` directement ECRASAIENT la rampe dans la config
+    elle-meme, si bien que `setup_callbacks`, qui relit la MEME structure plus tard, y trouvait
+    un float, ne creait aucun callback d'entropie et figeait `ent_coef` a sa valeur de depart
+    pour tout le run -- `decay_fraction` compris, sans le moindre signal. Rendre une copie est
+    ce qui empeche la lecture d'une config de dependre de qui l'a lue avant.
+    """
+    if not isinstance(model_params.get("ent_coef"), dict):
+        return dict(model_params)
+    ent_config = model_params["ent_coef"]
+    start_val = float(ent_config["start"])
+    frozen = dict(model_params)
+    frozen["ent_coef"] = start_val
+    log(
+        f"✅ Entropy coefficient schedule: {start_val} -> {float(ent_config['end'])} "
+        f"(will be applied via callback)"
+    )
+    return frozen
+
+
+def _make_constant_lr_schedule(lr_config):
+    """Valeur INITIALE du learning rate, sous la forme de callable qu'attend SB3.
+
+    Rend une constante dans les deux cas : `float` (LR constant, aucun callback ne le pilote) et
+    `dict {"initial", "final", "decay_fraction"}` (constante a `initial`, la decroissance etant
+    pilotee par `LearningRateScheduleCallback`, PAR EPISODE).
+
+    Le nom dit « constant » parce qu'une rampe rendue ici serait inerte ET fausse : le seul usage
+    du callable est `optimizer(lr=lr_schedule(1))`, et `learn()` etant appele par chunks,
+    `progress_remaining` refait 1 -> 0 a chaque chunk. Demonstration complete dans
+    Documentation/AI_TRAINING.md, section « Rampes learning_rate / ent_coef ».
+    """
     if isinstance(lr_config, (int, float)):
         return get_schedule_fn(float(lr_config))
     if isinstance(lr_config, dict):
-        initial = float(lr_config["initial"])
-        final = float(lr_config["final"])
-        def schedule(progress_remaining):
-            return initial + (final - initial) * (1 - progress_remaining)
-        return schedule
+        return get_schedule_fn(float(lr_config["initial"]))
     raise ValueError(f"learning_rate must be float or dict with initial/final, got {type(lr_config)}")
 
 
@@ -1815,16 +1850,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     
     # Load training configuration from config files (not script parameters)
     training_config = config.load_training_config(training_config_name)
-    model_params = training_config["model_params"]
-
-    # Handle entropy coefficient scheduling if configured
-    # Use START value for model creation; callback will handle the schedule
-    if "ent_coef" in model_params and isinstance(model_params["ent_coef"], dict):
-        ent_config = model_params["ent_coef"]
-        start_val = float(ent_config["start"])
-        end_val = float(ent_config["end"])
-        model_params["ent_coef"] = start_val  # Use initial value
-        print(f"✅ Entropy coefficient schedule: {start_val} -> {end_val} (will be applied via callback)")
+    model_params = _model_params_with_ent_coef_frozen(training_config["model_params"])
 
     # Import environment
     W40KEngine, register_environment = setup_imports()
@@ -2043,7 +2069,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
         model_params_copy = model_params.copy()
         model_params_copy["tensorboard_log"] = specific_log_dir
         if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
-            model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
+            model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
 
         model = MaskablePPO(env=env, **model_params_copy)
         # Properly suppress rollout console output
@@ -2066,7 +2092,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             # This allows Phase 2 to use different learning rates, entropy, etc. than Phase 1
             # while preserving the neural network weights learned in Phase 1
             if "learning_rate" in model_params:
-                model.learning_rate = _make_learning_rate_schedule(model_params["learning_rate"])
+                model.learning_rate = _make_constant_lr_schedule(model_params["learning_rate"])
             if "ent_coef" in model_params:
                 model.ent_coef = model_params["ent_coef"]
             if "clip_range" in model_params:
@@ -2114,7 +2140,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             model_params_copy = model_params.copy()
             model_params_copy["tensorboard_log"] = specific_log_dir
             if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
-                model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
+                model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
     else:
         print(f"📁 Loading existing model: {model_path}")
@@ -2130,7 +2156,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             model_params_copy = model_params.copy()
             model_params_copy["tensorboard_log"] = specific_log_dir
             if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
-                model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
+                model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
 
     _apply_torch_compile(model)
@@ -2155,16 +2181,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         training_config = config.load_training_config(training_config_name)
         agent_specific_mode = False
 
-    model_params = training_config["model_params"]
-
-    # Handle entropy coefficient scheduling if configured
-    # Use START value for model creation; callback will handle the schedule
-    if "ent_coef" in model_params and isinstance(model_params["ent_coef"], dict):
-        ent_config = model_params["ent_coef"]
-        start_val = float(ent_config["start"])
-        end_val = float(ent_config["end"])
-        model_params["ent_coef"] = start_val  # Use initial value
-        print(f"✅ Entropy coefficient schedule: {start_val} -> {end_val} (will be applied via callback)")
+    model_params = _model_params_with_ent_coef_frozen(training_config["model_params"])
 
     # Import environment
     W40KEngine, register_environment = setup_imports()
@@ -2348,7 +2365,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         model_params_copy = model_params.copy()
         model_params_copy["tensorboard_log"] = specific_log_dir
         if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
-            model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
+            model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
 
         model = MaskablePPO(env=env, **model_params_copy)
         # Disable rollout logging for multi-agent models (suppress verbose rollout/ metrics)
@@ -2372,7 +2389,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
             # This allows Phase 2 to use different learning rates, entropy, etc. than Phase 1
             # while preserving the neural network weights learned in Phase 1
             if "learning_rate" in model_params:
-                model.learning_rate = _make_learning_rate_schedule(model_params["learning_rate"])
+                model.learning_rate = _make_constant_lr_schedule(model_params["learning_rate"])
             if "ent_coef" in model_params:
                 model.ent_coef = model_params["ent_coef"]
             if "clip_range" in model_params:
@@ -2420,7 +2437,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
             model_params_copy = model_params.copy()
             model_params_copy["tensorboard_log"] = specific_log_dir
             if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
-                model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
+                model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
     else:
         print(f"📁 Loading existing model: {model_path}")
@@ -2436,7 +2453,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
             model_params_copy = model_params.copy()
             model_params_copy["tensorboard_log"] = specific_log_dir
             if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
-                model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
+                model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
     
     _apply_torch_compile(model)
@@ -2978,14 +2995,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     # n_steps est un TOTAL par update : le convertir en pas PAR ENV et borner le buffer.
     apply_rollout_n_steps(model_params, n_envs, env.observation_space, log=chunk_log)
 
-    # Handle entropy coefficient scheduling if configured
-    # Use START value for model creation; callback will handle the schedule
-    if "ent_coef" in model_params and isinstance(model_params["ent_coef"], dict):
-        ent_config = model_params["ent_coef"]
-        start_val = float(ent_config["start"])
-        end_val = float(ent_config["end"])
-        model_params["ent_coef"] = start_val  # Use initial value
-        chunk_log(f"✅ Entropy coefficient schedule: {start_val} -> {end_val} (will be applied via callback)")
+    model_params = _model_params_with_ent_coef_frozen(model_params, log=chunk_log)
 
     tensorboard_root = require_key(model_params, "tensorboard_log")
     if not isinstance(tensorboard_root, str) or not tensorboard_root.strip():
@@ -3031,7 +3041,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         model_params_copy["tensorboard_log"] = specific_log_dir
         if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
             lr_cfg = model_params_copy["learning_rate"]
-            model_params_copy["learning_rate"] = _make_learning_rate_schedule(lr_cfg)
+            model_params_copy["learning_rate"] = _make_constant_lr_schedule(lr_cfg)
             chunk_log(f"✅ Learning rate schedule: {lr_cfg['initial']} → {lr_cfg['final']} (linear decay)")
         model = MaskablePPO(env=env, **model_params_copy)
     elif append_training:
@@ -3043,7 +3053,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             # This allows Phase 2 to use different learning rates, entropy, etc. than Phase 1
             # while preserving the neural network weights learned in Phase 1
             if "learning_rate" in model_params:
-                model.learning_rate = _make_learning_rate_schedule(model_params["learning_rate"])
+                model.learning_rate = _make_constant_lr_schedule(model_params["learning_rate"])
             if "ent_coef" in model_params:
                 model.ent_coef = model_params["ent_coef"]
             if "clip_range" in model_params:
@@ -3080,14 +3090,14 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             model_params_copy = model_params.copy()
             model_params_copy["tensorboard_log"] = specific_log_dir
             if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
-                model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
+                model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
     else:
         chunk_log(f"⚠️ Model exists but neither --new nor --append specified. Creating new model.")
         model_params_copy = model_params.copy()
         model_params_copy["tensorboard_log"] = specific_log_dir
         if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
-            model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
+            model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
         model = MaskablePPO(env=env, **model_params_copy)
     
     _apply_torch_compile(model)
@@ -3559,17 +3569,19 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                 raise KeyError("model_params.learning_rate dict must contain required keys: 'initial' and 'final'")
             start_lr = float(lr_cfg["initial"])
             end_lr = float(lr_cfg["final"])
+            decay_fraction = float(require_key(lr_cfg, "decay_fraction"))
             total_eps = total_episodes_override if total_episodes_override else training_config["total_episodes"]
             lr_callback = LearningRateScheduleCallback(
-                start_lr=start_lr,
-                end_lr=end_lr,
+                start=start_lr,
+                end=end_lr,
                 total_episodes=total_eps,
+                decay_fraction=decay_fraction,
                 initial_episode_count=phase_episode_offset,
                 verbose=1
             )
             callbacks.append(lr_callback)
             if not silent_logs:
-                print(f"✅ Added learning-rate schedule callback: {start_lr} -> {end_lr} over {total_eps} episodes")
+                print(_describe_ramp("learning-rate", start_lr, end_lr, total_eps, decay_fraction))
 
     # Add entropy coefficient schedule callback if configured
     if "model_params" in training_config and "ent_coef" in training_config["model_params"]:
@@ -3577,18 +3589,20 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         if isinstance(ent_coef, dict) and "start" in ent_coef and "end" in ent_coef:
             start_ent = float(ent_coef["start"])
             end_ent = float(ent_coef["end"])
+            ent_decay_fraction = float(require_key(ent_coef, "decay_fraction"))
             total_eps = total_episodes_override if total_episodes_override else training_config["total_episodes"]
 
             entropy_callback = EntropyScheduleCallback(
-                start_ent=start_ent,
-                end_ent=end_ent,
+                start=start_ent,
+                end=end_ent,
                 total_episodes=total_eps,
+                decay_fraction=ent_decay_fraction,
                 initial_episode_count=phase_episode_offset,
                 verbose=1
             )
             callbacks.append(entropy_callback)
             if not silent_logs:
-                print(f"✅ Added entropy schedule callback: {start_ent} -> {end_ent} over {total_eps} episodes")
+                print(_describe_ramp("entropy", start_ent, end_ent, total_eps, ent_decay_fraction))
 
     # Evaluation callback - test model periodically with logging enabled
     # Load scenario and unit registry for evaluation callback

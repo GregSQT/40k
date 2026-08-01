@@ -115,104 +115,118 @@ def _require_progress_bar_width(config_key: str) -> int:
     return width
 
 
-class LearningRateScheduleCallback(BaseCallback):
-    """Callback to linearly reduce learning rate during training (episode-based)."""
+def ramp_episode_span(total_episodes: int, decay_fraction: float) -> float:
+    """Nombre d'episodes que la rampe OCCUPE, et seul point de validation de ses bornes.
+
+    `decay_fraction` : fraction du run sur laquelle la rampe se deroule integralement, la valeur
+    restant ensuite au plancher (`end`). Il existe parce que les rampes de ce module sont
+    normalisees sur `total_episodes` : allonger un run les etire mecaniquement, alors que ce qui
+    compte pour PPO n'est pas la fraction du run ecoulee mais le NOMBRE D'UPDATES de gradient
+    passes a haut learning rate / haute entropie. La rampe 0.002 -> 0.0002 calibree pour 50k
+    episodes tient le LR au-dessus de 0.001 pendant 83k episodes sur un run de 150k, contre 28k
+    sur un run de 50k -- 3x plus d'occasions de diverger ou d'oublier. A 0.4 sur 150k, elle
+    decroit sur 60k episodes puis consolide 90k au plancher. `1.0` reproduit exactement le
+    comportement historique et reste le reglage des runs courts.
+
+    Cle OBLIGATOIRE en config, sans valeur par defaut : un profil qui l'omettrait retomberait en
+    silence sur une rampe etiree, c'est-a-dire le defaut meme qu'elle existe pour rendre visible.
+    Detail du raisonnement et tableau des profils : Documentation/AI_TRAINING.md.
+    """
+    if not 0.0 < decay_fraction <= 1.0:
+        raise ValueError(f"decay_fraction must be in ]0.0, 1.0] (got {decay_fraction})")
+    if total_episodes <= 0:
+        raise ValueError(f"total_episodes must be > 0 (got {total_episodes})")
+    return total_episodes * decay_fraction
+
+
+def schedule_progress(episode_count: int, total_episodes: int, decay_fraction: float) -> float:
+    """Progression 0.0 -> 1.0 d'une rampe qui s'ACHEVE a `decay_fraction` du run.
+
+    Forme pure, pour le calcul hors callback. Les callbacks, eux, precalculent le denominateur
+    une fois (`ramp_episode_span`) : les bornes sont invariantes sur la duree du run, les
+    revalider a chaque fin d'episode serait du travail jete des centaines de milliers de fois.
+    """
+    return min(1.0, episode_count / ramp_episode_span(total_episodes, decay_fraction))
+
+
+class _EpisodeRampCallback(BaseCallback):
+    """Rampe lineaire `start` -> `end` pilotee PAR EPISODE, achevee a `decay_fraction` du run.
+
+    Les deux rampes du depot ne different que par ce qu'elles ECRIVENT dans le modele : tout le
+    reste -- comptage des episodes via `dones`, progression, reprise a mi-run -- est identique et
+    vit ici. Les sous-classes n'implementent que `_apply`.
+
+    Le comptage passe par `dones` et non par le dict `infos` : plus fiable, et c'est la seule
+    source qui voit les fins d'episode de TOUS les environnements d'un VecEnv.
+    """
 
     def __init__(
         self,
-        start_lr: float,
-        end_lr: float,
+        start: float,
+        end: float,
         total_episodes: int,
+        decay_fraction: float,
         initial_episode_count: int = 0,
         verbose: int = 0
     ):
         super().__init__(verbose)
-        self.start_lr = start_lr
-        self.end_lr = end_lr
+        self.start = start
+        self.end = end
         self.total_episodes = total_episodes
+        self.decay_fraction = decay_fraction
         if initial_episode_count < 0:
             raise ValueError(f"initial_episode_count must be >= 0 (got {initial_episode_count})")
+        # Valide ICI, et une seule fois : une rampe invalide qui n'echouerait qu'au premier
+        # episode ferait perdre le temps de setup du run (envs, modele, VecNormalize).
+        self._ramp_episodes = ramp_episode_span(total_episodes, decay_fraction)
         self.episode_count = initial_episode_count
-        self.last_update_step = 0
 
-    @staticmethod
-    def _set_model_learning_rate(model, lr_value: float) -> None:
+    def _current_value(self) -> float:
+        progress = min(1.0, self.episode_count / self._ramp_episodes)
+        return self.start + (self.end - self.start) * progress
+
+    def _apply(self, value: float) -> None:
+        """Ecrit la valeur courante dans le modele. Seul point de variation entre les rampes."""
+        raise NotImplementedError
+
+    def _on_training_start(self) -> None:
+        self._apply(self._current_value())
+
+    def _on_step(self) -> bool:
+        if hasattr(self, 'locals') and 'dones' in self.locals:
+            dones = self.locals['dones']
+            episodes_finished = sum(dones) if hasattr(dones, '__iter__') else (1 if dones else 0)
+            if episodes_finished > 0:
+                self.episode_count += episodes_finished
+                self._apply(self._current_value())
+        return True
+
+
+class LearningRateScheduleCallback(_EpisodeRampCallback):
+    """Rampe du learning rate. C'est ELLE qui pilote le LR, pas le schedule SB3.
+
+    `_make_constant_lr_schedule` (ai/train.py) ne fournit que la valeur initiale de
+    l'optimizer : `_on_training_start` remplace `model.lr_schedule` ci-dessous, et s'execute
+    avant la premiere iteration de `learn()` donc avant tout `train()`.
+    """
+
+    def _apply(self, value: float) -> None:
         """Apply learning rate to all SB3 learning-rate access points."""
-        model.learning_rate = lr_value
+        model = self.model
+        model.learning_rate = value
         # PPO uses lr_schedule internally during train(); keep it aligned with episode-based LR.
-        model.lr_schedule = lambda _progress_remaining: lr_value
+        model.lr_schedule = lambda _progress_remaining: value
         if hasattr(model, 'policy') and hasattr(model.policy, 'optimizer'):
             for param_group in model.policy.optimizer.param_groups:
-                param_group["lr"] = lr_value
-
-    def _on_training_start(self) -> None:
-        progress = min(1.0, self.episode_count / self.total_episodes)
-        initial_lr = self.start_lr + (self.end_lr - self.start_lr) * progress
-        self._set_model_learning_rate(self.model, initial_lr)
-
-    def _on_step(self) -> bool:
-        # Detect episode end using dones array (more reliable than info dict)
-        if hasattr(self, 'locals') and 'dones' in self.locals:
-            dones = self.locals['dones']
-            episodes_finished = sum(dones) if hasattr(dones, '__iter__') else (1 if dones else 0)
-
-            if episodes_finished > 0:
-                self.episode_count += episodes_finished
-                progress = min(1.0, self.episode_count / self.total_episodes)
-                new_lr = self.start_lr + (self.end_lr - self.start_lr) * progress
-                self._set_model_learning_rate(self.model, new_lr)
-
-                if self.verbose > 0 and self.num_timesteps - self.last_update_step >= 1000:
-                    # Keep internal throttling state in sync without printing a separate line.
-                    # Progress display is handled by EpisodeTerminationCallback.
-                    self.last_update_step = self.num_timesteps
-        return True
+                param_group["lr"] = value
 
 
-class EntropyScheduleCallback(BaseCallback):
-    """Callback to linearly reduce entropy coefficient during training."""
+class EntropyScheduleCallback(_EpisodeRampCallback):
+    """Rampe du coefficient d'entropie (exploration)."""
 
-    def __init__(
-        self,
-        start_ent: float,
-        end_ent: float,
-        total_episodes: int,
-        initial_episode_count: int = 0,
-        verbose: int = 0
-    ):
-        super().__init__(verbose)
-        self.start_ent = start_ent
-        self.end_ent = end_ent
-        self.total_episodes = total_episodes
-        if initial_episode_count < 0:
-            raise ValueError(f"initial_episode_count must be >= 0 (got {initial_episode_count})")
-        self.episode_count = initial_episode_count
-        self.last_update_step = 0
+    def _apply(self, value: float) -> None:
+        cast(Any, self.model).ent_coef = value
 
-    def _on_training_start(self) -> None:
-        progress = min(1.0, self.episode_count / self.total_episodes)
-        initial_ent = self.start_ent + (self.end_ent - self.start_ent) * progress
-        cast(Any, self.model).ent_coef = initial_ent
-
-    def _on_step(self) -> bool:
-        # Detect episode end using dones array (more reliable than info dict)
-        if hasattr(self, 'locals') and 'dones' in self.locals:
-            dones = self.locals['dones']
-            # Count number of episodes that finished in this step
-            episodes_finished = sum(dones) if hasattr(dones, '__iter__') else (1 if dones else 0)
-
-            if episodes_finished > 0:
-                self.episode_count += episodes_finished
-                # Linear interpolation: ent = start + (end - start) * progress
-                progress = min(1.0, self.episode_count / self.total_episodes)
-                new_ent = self.start_ent + (self.end_ent - self.start_ent) * progress
-                cast(Any, self.model).ent_coef = new_ent
-
-                if self.verbose > 0 and self.num_timesteps - self.last_update_step >= 1000:
-                    # Keep internal throttling state in sync without printing a separate line.
-                    # Progress display is handled by EpisodeTerminationCallback.
-                    self.last_update_step = self.num_timesteps
-        return True
 
 class EpisodeTerminationCallback(BaseCallback):
     """Callback to terminate training after exact episode count."""

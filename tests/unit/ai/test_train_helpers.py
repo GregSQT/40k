@@ -60,15 +60,28 @@ def test_build_training_bots_rejects_a_budget_that_is_not_one() -> None:
         })
 
 
-def test_make_learning_rate_schedule() -> None:
-    const_fn = train._make_learning_rate_schedule(0.001)
-    assert const_fn(1.0) == pytest.approx(0.001)
+def test_make_constant_lr_schedule() -> None:
+    """Le callable rendu ici est CONSTANT, meme pour une config en rampe.
 
-    sched = train._make_learning_rate_schedule({"initial": 0.002, "final": 0.001})
+    Il n'alimente que la construction de l'optimizer (`lr=lr_schedule(1)`, policies.py:634).
+    La decroissance est pilotee par `LearningRateScheduleCallback`, PAR EPISODE, qui remplace
+    `model.lr_schedule` des `on_training_start` -- donc avant la premiere iteration de `learn()`
+    et avant tout `train()`. Ce test attendait `sched(0.0) == final` : il verrouillait une rampe
+    qui n'a jamais ete appliquee, et qui aurait ete FAUSSE si elle l'avait ete (`learn()` est
+    appele par chunks, `progress_remaining` refait 1 -> 0 a chaque chunk, d'ou une dent de scie
+    par chunk au lieu d'une decroissance sur le run). Cf. `test_schedule_decay_fraction.py`.
+    """
+    const_fn = train._make_constant_lr_schedule(0.001)
+    assert const_fn(1.0) == pytest.approx(0.001)
+    assert const_fn(0.0) == pytest.approx(0.001)
+
+    sched = train._make_constant_lr_schedule(
+        {"initial": 0.002, "final": 0.001, "decay_fraction": 0.4}
+    )
     assert sched(1.0) == pytest.approx(0.002)
-    assert sched(0.0) == pytest.approx(0.001)
+    assert sched(0.0) == pytest.approx(0.002), "l'optimizer doit partir de `initial`, pas de `final`"
     with pytest.raises(ValueError, match=r"learning_rate must be float or dict"):
-        train._make_learning_rate_schedule(["bad"])
+        train._make_constant_lr_schedule(["bad"])
 
 
 def test_load_configured_unit_rule_ids(tmp_path: Path) -> None:

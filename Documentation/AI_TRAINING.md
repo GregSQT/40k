@@ -833,6 +833,57 @@ Règles:
 
 ---
 
+### Rampes `learning_rate` / `ent_coef` — et `decay_fraction` pour les runs longs
+
+`learning_rate` et `ent_coef` acceptent un **dict** au lieu d'un scalaire. Le dict active un
+callback qui interpole la valeur **par épisode** ([training_callbacks.py](../ai/training_callbacks.py)) :
+
+```jsonc
+"learning_rate": { "initial": 0.002, "final": 0.0002, "decay_fraction": 0.4 },
+"ent_coef":      { "start": 0.1,     "end": 0.01,     "decay_fraction": 0.4 }
+```
+
+**Les trois clés sont OBLIGATOIRES** (lues par `require_key` dans `setup_callbacks`, sans valeur
+par défaut). Une valeur scalaire est un régime différent : pas de callback, valeur constante.
+
+**Pourquoi `decay_fraction`.** La rampe est normalisée sur `total_episodes` : allonger un run
+l'étire mécaniquement. Or ce qui compte pour PPO n'est pas la fraction du run écoulée mais le
+**nombre d'updates de gradient** passés à haut LR / haute entropie. La rampe 0.002 → 0.0002
+calibrée pour 50k épisodes tient le LR au-dessus de 0.001 pendant **83k** épisodes sur un run de
+150k, contre 28k sur un run de 50k — trois fois plus d'occasions de diverger ou d'oublier.
+
+`decay_fraction` découple les deux : la rampe s'achève à cette fraction du run, puis la valeur
+**reste au plancher** (`final` / `end`). À 0.4 sur 150k épisodes, la décroissance occupe les
+60k premiers — calibration comparable à un run court — puis 90k épisodes consolident à
+LR/entropie plancher. `1.0` reproduit exactement le comportement historique et reste le réglage
+des runs courts.
+
+| Profil | `total_episodes` | `decay_fraction` | Rampe achevée à |
+|--------|------------------|------------------|-----------------|
+| `x1` | 10 000 | 1.0 | fin du run |
+| `x1_long` | 150 000 | 0.4 | 60 000 épisodes |
+| autres | — | 1.0 | fin du run |
+
+**Le profil `x1_long`** est `x1` recalibré pour les runs longs, et rien d'autre : mêmes
+architecture, `n_steps`, `target_kl`, rampe de déploiement. Ne changent que ce qui dépend de la
+longueur du run — `total_episodes` (150k), les deux `decay_fraction` (0.4) et `bot_eval_freq`
+(5000 : à 2000, un run de 150k déclencherait 75 évaluations bot au lieu de 30). Verrou :
+`tests/unit/ai/test_schedule_decay_fraction.py` refuse toute autre divergence.
+
+`checkpoint_save_freq` reste **aligné sur `x1`**, délibérément : SB3 sauvegarde tous les
+`save_freq` **appels du callback** (`callbacks.py:300`), soit un par pas du VecEnv — jamais des
+épisodes. Le régler depuis une durée exprimée en épisodes n'a pas de sens ; pour couvrir plus
+d'historique sur un run long, le levier sans ambiguïté d'unité est `max_checkpoints`.
+
+**Le LR n'est PAS piloté par le schedule SB3.** `_make_learning_rate_schedule`
+([train.py](../ai/train.py)) ne sert qu'à donner sa valeur initiale à l'optimizer : dès
+`on_training_start`, le callback remplace `model.lr_schedule` par sa propre constante, avant la
+première itération de `learn()`. Une rampe sur `progress_remaining` serait d'ailleurs fausse ici —
+`learn()` est appelé **en boucle par chunks**, donc `progress_remaining` refait 1 → 0 à chaque
+chunk et produirait une dent de scie par chunk au lieu d'une décroissance sur le run.
+
+---
+
 ### Unit Rules Implementation Flags (`RULES_STATUS`)
 
 Cette feature sert a distinguer une regle **declaree** d'une regle **effectivement appliquee** dans le moteur.
