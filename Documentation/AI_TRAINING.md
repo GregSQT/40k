@@ -1887,9 +1887,54 @@ W40K_PERF_TIMING=1 W40K_PERF_TIMING_LOG=perf_timing_bench_x10.log W40K_PERF_TIMI
 - le compteur `[MM:SS<` est rétro-daté de `total_episode_duration_seconds`, qui additionne la durée de chaque épisode de **chaque slot** ([training_callbacks.py:419](../ai/training_callbacks.py#L419)) puis sert d'origine au chronomètre ([:432](../ai/training_callbacks.py#L432)). Cette somme vaut ~`n_envs` fois le temps réellement écoulé, donc la barre part d'un passé fictif. Mesuré : à `n_envs=16`, « boucle » 684 s pour un wall total de 664 s, soit un démarrage de **−19,5 s**. La part de démarrage n'est pas isolable par ce biais ;
 - `getrusage(RUSAGE_CHILDREN)` ne compte que les descendants attendus ; les workers `SubprocVecEnv`, arrêtés en fin de run, en sortent. Mesuré : 33,7 s de CPU pour 530 s de wall à `n_envs=48`, impossible avec 48 processus actifs. Le CPU reste valide dans `ab_bench.py`, dont le processus mesuré (`refactor_fingerprint.py`) est mono-processus.
 
-##### [2026-08] Classement de `n_envs` — 8 tours, 31 runs, 5,4 h ✅ Mesuré
+##### [2026-08] Comparer un hyperparamètre : quel banc, quelle grandeur
 
-Machine 8 cœurs / 40 Go, `ArmageddonAgent` phase `x1`, 144 épisodes par run, évaluation bot désactivée. Débit relatif au pivot `n_envs=6`, médiane sur 7 tours (tour de chauffe écarté) :
+Deux questions distinctes, deux outils. Les confondre, c'est répondre à côté : `batch_size` ne change presque rien au wall-clock et beaucoup à ce qui est appris ; `n_envs` c'est l'inverse.
+
+| Question | Outil | Grandeur | Protocole | Coût |
+|---|---|---|---|---|
+| « ça tourne plus vite ? » | [`scripts/ab_bench_param.py`](../scripts/ab_bench_param.py) | **secondes par épisode** | paires entrelacées A,B / B,A, 1ʳᵉ jetée, `--paires 5` minimum utile | ~2 runs × `--paires` |
+| « ça apprend mieux ? » | [`scripts/ab_bench_perf.py`](../scripts/ab_bench_perf.py) | win-rate combiné (holdout) | couples appariés par graine, ≥ 5 graines | 2 entraînements **complets** + 2 évals par graine |
+
+- **`ab_bench_nenvs.py` reste l'outil de référence pour `n_envs`** : il porte les contre-mesures écrites pour ce paramètre-là. `ab_bench_param.py` généralise son protocole aux autres.
+- **Aiguillage** : `n_envs` → débit seul. `n_steps`, `n_epochs` → débit, mais un gain peut se payer en qualité, que ce banc ne voit pas. `batch_size`, `learning_rate`, `gamma`, `gae_lambda`, `ent_coef` → qualité.
+- **Contrôle anti-confusion (le point dur)** : les deux bancs relisent la valeur **effectivement instanciée par PPO** dans le membre `data` du modèle sauvegardé, pas dans la sortie texte. La ligne `⚙️ Override: …` ([train.py:1484](../ai/train.py#L1484)) prouve seulement que l'override a atteint la config chargée — pas qu'aucune surcharge ultérieure ne l'a écrasé, c'est-à-dire exactement le scénario contre lequel le garde-fou existe. Socle commun : [`scripts/ab_train_common.py`](../scripts/ab_train_common.py).
+- **Preuve aval validée sur un run réel** (2026-08-01, `x1_debug`, 16 épisodes, `n_envs=8`, 149 s) : `--param model_params.batch_size 512 / n_steps 4096 / seed 7` → le zip porte `batch_size=512`, `n_steps=512` (= 4096 // 8, division lue dans la sortie) et `seed=7`. Verrou vérifié : les trois contrôles repassent **rouges** quand on leur soumet une valeur non appliquée.
+- **Corollaire assumé** : un paramètre dont la valeur effective n'est pas relisible est **refusé**, pas mesuré à l'aveugle — `clip_range` et `policy_kwargs`/`net_arch` (sérialisés en cloudpickle par SB3). Les chemins sont donnés en toutes lettres (`model_params.batch_size`), jamais via les alias courts de `--param`, pour ne pas dupliquer la table `_PARAM_ALIASES` ([train.py:1433](../ai/train.py#L1433)).
+- **`learning_rate` et `ent_coef` sont schedulés en `x1`** (dict `initial`/`final`, `start`/`end`) : leur donner une valeur scalaire **supprime le callback de schedule** des deux côtés. Les bancs refusent par défaut et exigent `--autoriser-suppression-schedule` — le verdict porte alors sur un régime différent de la production.
+- **`n_steps` n'est pas une égalité** : la config donne le total par mise à jour, PPO reçoit `base // n_envs` ([train.py:2862](../ai/train.py#L2862)). Le contrôle en tient compte.
+- **Pourquoi ≥ 5 graines côté qualité** : le test des signes bilatéral ne peut pas descendre sous `2 × 0,5ⁿ`, soit 0,25 à 3 graines — même une unanimité parfaite y serait ininterprétable. Le choix du test des signes plutôt qu'un Student est délibéré : à 5 points, la normalité n'est pas vérifiable et un `t` donnerait une précision décorative.
+- **Bruit d'évaluation, à ne pas confondre avec la variance d'apprentissage** : à 100 épisodes par bot, l'écart-type binomial d'un win-rate autour de 50 % est de 5 points. Un écart de 2 points ne veut rien dire ; le banc réimprime cette borne.
+- **`--scenario bot`, `self` ou `all` uniquement** : `--total-episodes` n'est lu que sur ce chemin ([train.py:5145](../ai/train.py#L5145)) et en mode rule-checker ; le mode curriculum prend `max_episodes_in_phase` ([:5091](../ai/train.py#L5091)) et `create_multi_agent_model` ignore l'option ([:5175](../ai/train.py#L5175)). Un banc lancé sur `phase1` jouerait 30000 épisodes au lieu de 96, sans aucun signal. Les bancs refusent à l'entrée, et vérifient en plus la ligne `Using total_episodes from CLI` puis lisent `Total episodes trained` — le débit est **normalisé sur les épisodes réellement joués**, jamais sur le budget demandé (les `n_envs` slots ne terminent pas ensemble, et ce dépassement dépend de la config mesurée).
+- **La division `n_steps // n_envs` n'est pas un invariant** : elle n'existe que dans `train_with_scenario_rotation` ([train.py:2862](../ai/train.py#L2862)) ; les zips de `ai/models/ArmageddonAgent/` portent les deux régimes à `n_envs=8` identique. Le contrôle **lit la ligne émise par la division** au lieu de la supposer, sinon il avortait la campagne sur un run correct.
+- **Le `combined` est reconstitué en pleine précision** depuis les compteurs `nW-nL-nD` et `bot_eval_weights`, puis vérifié contre le pourcentage affiché : le bloc final arrondit à 0,1 point, ce qui fabrique des ex æquo. Vérifié : deux runs affichés `48.0 %` / `48.0 %` sont départagés à `+0,0375` point — sans ça, l'ex æquo était exclu du test des signes et un résultat unanime à 5 graines partait à la poubelle.
+- **Non couvert par ces bancs** : `--mode CPU/GPU` et le nombre de threads torch ne passent pas par `--param` (donc pas de preuve aval) ; `net_arch` non plus.
+
+```bash
+git worktree add /tmp/40k-bench HEAD
+python3 scripts/ab_bench_param.py --param model_params.n_steps --a 8192 --b 4096 \
+    --episodes 96 --paires 5 --training-config x1
+python3 scripts/ab_bench_perf.py --param model_params.batch_size --a 1024 --b 2048 \
+    --episodes 2000 --graines 1,2,3,4,5 --eval-episodes 100 --training-config x1   # ~22 h
+git worktree remove /tmp/40k-bench
+```
+
+##### [2026-08] Classement de `n_envs` — 37 runs, 6,6 h, verdict `n_envs=48` ✅ Mesuré
+
+**Conclusion applicable : `n_envs: 48` avec `batch_size: 1020`** (justification des deux plus bas).
+
+Deux campagnes, machine 8 cœurs / 40 Go, `ArmageddonAgent` phase `x1`, évaluation bot désactivée sur ses deux chemins. Reproduction :
+
+```bash
+git worktree add /tmp/40k-bench HEAD
+python3 scripts/ab_sweep_nenvs.py --envs 6,8,16,48 --episodes 144 --deadline 08:30   # 8 tours, 31 runs
+python3 scripts/ab_sweep_nenvs.py --envs 48,64 --episodes 192 --tours 3              # 3 tours, 6 runs
+git worktree remove /tmp/40k-bench
+```
+
+Le nombre d'épisodes n'est pas libre : il doit être divisible par **toutes** les valeurs balayées (144 pour 6/8/16/48, 192 pour 48/64 dont le PPCM est 192) et contenir au moins une passe d'apprentissage (~118 épisodes à ~70 pas). Le script refuse les deux cas et indique la valeur correcte.
+
+Première campagne — débit relatif au pivot `n_envs=6`, médiane sur 7 tours (tour de chauffe écarté) :
 
 | `n_envs` | débit relatif | étendue | débit absolu | 144 épisodes |
 |---|---|---|---|---|
@@ -1898,9 +1943,12 @@ Machine 8 cœurs / 40 Go, `ArmageddonAgent` phase `x1`, 144 épisodes par run, �
 | 8 | 1,098 | 0,997–1,185 | 0,219 ep/s | 11,0 min |
 | 6 | 1,000 | — | 0,201 ep/s | 12,0 min |
 
+Campagne complémentaire `48` contre `64` (3 tours, 192 épisodes, 2026-08-01 matin) : **`64` est 4,2 % PLUS LENT que `48`** (débit relatif 0,958, étendue 0,945–0,971, disjointe de 1 → tranché). `n_envs=48` est donc l'optimum de la série, et non un point sur une pente encore montante.
+
 - **`48` est ~43 % plus rapide que `6`**, et les étendues de `48`, `16` et `8` sont disjointes : ces rangs sont tranchés. `8` contre `6` ne l'est pas (étendue 0,997–1,185, elle enjambe l'égalité), bien que 6 tours sur 7 donnent l'avantage à `8`.
-- **Plus d'environnements que de cœurs reste gagnant** : 48 processus sur 8 cœurs battent 6 processus de 43 %. Le goulot n'est donc pas le CPU de collecte. Consommation à `n_envs=48` : 16 Go libres au creux sur 40, aucune saturation.
-- **Aucun plateau atteint** : les gains successifs sont +10 % (6→8), +13 % (8→16), +16 % (16→48). L'optimum est au-delà de 48, non mesuré. Deux limites à surveiller au-delà : la mémoire, et `n_steps` par env qui vaut `8192 // n_envs` — 170 pas à 48, 85 à 96, ce qui fragmente le lot d'apprentissage.
+- **Plus d'environnements que de cœurs reste gagnant** : 48 processus sur 8 cœurs battent 6 processus de 43 %. Le goulot n'est donc pas le CPU de collecte.
+- **Le plateau est à 48** : +10 % (6→8), +13 % (8→16), +16 % (16→48), puis **−4,2 % (48→64)**. Mémoire libre au creux : 30,5 Go à `n_envs=6`, 16,3 Go à 48, 10,0 Go à 64 — soit ~6 Go par palier sur 40 Go installés. `96` passerait sous zéro et n'a pas été tenté.
+- **À `n_envs=48`, ajuster `batch_size` à 1020.** Le rollout réel vaut `(8192 // n_envs) × n_envs` = **8160** à 48, que `batch_size: 1024` ne divise pas : chaque mise à jour finit sur un mini-lot tronqué de 992 (SB3 le signale). 8160 = 8 × 1020. `batch_size` n'est PAS ajusté automatiquement, contrairement à `n_steps` ([train.py:2955](../ai/train.py#L2955) le recopie tel quel). Rien d'autre à toucher : `learning_rate` reste valide puisque le total par mise à jour est maintenu constant, et l'horizon effectif de GAE (~17 pas avec `gamma=0.99`, `gae_lambda=0.95`) reste très en dessous des 170 pas par env.
 - **Ce banc mesure le débit, pas la qualité d'apprentissage.** Le budget de collecte est fixe (8192 pas par mise à jour) : à 48 envs chacun fournit ~2 parties par mise à jour, contre ~18 à 6 envs. La composition du lot n'est pas la même, et cet effet-là n'est pas mesuré ici.
 - Écart résiduel non corrigé : `effective_n_steps = base_n_steps // n_envs` est une division entière ([train.py:2862](../ai/train.py#L2862)) alors que le message annonce `base_n_steps`. Total réel par mise à jour : 8190 à `n_envs=6`, 8192 à 8 et 16, **8160** à 48 — écart max 0,4 %, sans effet sur le classement.
 

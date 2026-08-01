@@ -5,9 +5,9 @@
     "Info": "######################### MINIMAL CONFIG - Only 5 reward signals per RL_TRAINING_ROADMAP.md ##############################",
     "squad_shaping": {
       "_comment": "PR4 squad pipeline reward shaping (squad.md §Reward function). Calibrate after first runs.",
-      "hp_damage_weight": 0.7,
-      "model_kill_bonus_factor": 0.2,
-      "squad_kill_bonus_factor": 0.3,
+      "hp_damage_weight": 0.35,
+      "model_kill_bonus_factor": 0.1,
+      "squad_kill_bonus_factor": 0.15,
       "incoherent_weight": 0.2
     },
     "base_actions": {
@@ -32,14 +32,14 @@
     },
     "target_type_bonuses": {},
     "situational_modifiers": {
-      "win": 50,
-      "lose": -50,
+      "win": 150,
+      "lose": -150,
       "draw": 0.0
     },
     "objective_rewards": {
-      "objective_reward_factor": 3.0,
+      "objective_reward_factor": 6.0,
       "reward_per_objective_turn5": 0.0,
-      "on_objective_bonus": 1.0
+      "on_objective_bonus": 5.0
     },
     "system_penalties": {
       "forbidden_action": -1.0,
@@ -48,10 +48,10 @@
       "generic_error": -0.1
     },
     "zone_intent_shaping": {
-      "defend_held_bonus": 0.2,
-      "invade_success_bonus": 0.3,
-      "invade_neutral_bonus": 0.1,
-      "invade_lost_penalty": -0.1
+      "defend_held_bonus": 1.0,
+      "invade_success_bonus": 1.5,
+      "invade_neutral_bonus": 0.5,
+      "invade_lost_penalty": -0.5
     }
   }
 }

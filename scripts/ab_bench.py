@@ -30,7 +30,7 @@ meme version et produit des ratios erratiques qu'on impute a tort a la machine â
 USAGE
 -----
     git worktree add /tmp/40k-avant HEAD      # une fois ; ou <commit> au lieu de HEAD
-    python3 scripts/ab_bench.py --episodes 24 --paires 3
+    python3 scripts/ab_bench.py --episodes 24 --paires 5
     git worktree remove /tmp/40k-avant        # a la fin
 
 Prendre au moins 24 episodes : le demarrage (imports torch, chargement des configs) coute ~3 s
@@ -83,6 +83,29 @@ def drift_cancelled(ratios: list) -> tuple[float, list]:
     return statistics.median(couples), couples
 
 
+def print_spread(couples: list) -> None:
+    """Affiche l'etendue des couples, ou dit pourquoi il n'y en a pas. Partage par les 3 bancs.
+
+    Une "etendue" calculee sur UN couple vaut exactement zero et se lit comme une mesure
+    resserree, alors qu'elle ne dit rien : c'est le meme echantillon repete deux fois par min() et
+    max(). Le garde-fou "l'etendue enjambe 1.000" n'existe donc qu'a partir de deux couples,
+    c'est-a-dire 5 paires (la premiere est jetee, et les ratios retenus vont par couples
+    d'ordres opposes).
+    """
+    if len(couples) < 2:
+        print(
+            "UN SEUL COUPLE : mesure NON REPLIQUEE, aucune etendue calculable. Ce chiffre n'est "
+            "pas verifiable â€” relancer avec --paires 5 au minimum."
+        )
+        return
+    print(f"etendue des couples {min(couples):.3f}-{max(couples):.3f}")
+    if min(couples) < 1.0 < max(couples):
+        print(
+            "L'ETENDUE ENJAMBE 1.000 : cette mesure ne tranche pas. Augmenter --episodes et "
+            "--paires avant d'en conclure quoi que ce soit, dans un sens comme dans l'autre."
+        )
+
+
 def _run(cwd: str, episodes: int) -> tuple[float, float, str]:
     """Un run complet ; rend (wall, cpu, compteur de masques)."""
     before = resource.getrusage(resource.RUSAGE_CHILDREN)
@@ -105,7 +128,10 @@ def main() -> int:
     parser.add_argument("--avant", default="/tmp/40k-avant", help="arbre de travail de reference")
     parser.add_argument("--apres", default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     parser.add_argument("--episodes", type=int, default=24)
-    parser.add_argument("--paires", type=int, default=3)
+    # 5, pas 3 : a 3 paires il ne reste que 2 ratios, donc UN couple, et l'etendue affichee est
+    # de largeur nulle (cf. `print_spread`). Le verdict median existe des 3 paires, mais rien ne
+    # permet alors de savoir s'il est stable.
+    parser.add_argument("--paires", type=int, default=5)
     args = parser.parse_args()
 
     if not os.path.isdir(args.avant):
@@ -145,14 +171,9 @@ def main() -> int:
         f"\nratios retenus (BA,AB,...) : {[round(r, 3) for r in ratios]}\n"
         f"couples sans derive        : {[round(c, 3) for c in couples]}\n"
         f"VERDICT = {median:.3f}  ->  {'gain' if median < 1 else 'PERTE'} de "
-        f"{abs(1 - median) * 100:.1f} % de temps CPU\n"
-        f"etendue des couples {min(couples):.3f}-{max(couples):.3f}"
+        f"{abs(1 - median) * 100:.1f} % de temps CPU"
     )
-    if min(couples) < 1.0 < max(couples):
-        print(
-            "L'ETENDUE ENJAMBE 1.000 : cette mesure ne tranche pas. Augmenter --episodes et "
-            "--paires avant d'en conclure quoi que ce soit, dans un sens comme dans l'autre."
-        )
+    print_spread(couples)
     return 0
 
 

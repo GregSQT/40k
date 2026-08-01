@@ -1,0 +1,6 @@
+{"round": 1, "n_envs": 64, "status": "ok", "started": "2026-08-01T08:36:20", "wall_s": 667.89, "throughput_ep_s": 0.28747, "min_available_mb": 10011.0}
+{"round": 1, "n_envs": 48, "status": "ok", "started": "2026-08-01T08:48:43", "wall_s": 636.62, "throughput_ep_s": 0.30159, "min_available_mb": 16130.3}
+{"round": 2, "n_envs": 48, "status": "ok", "started": "2026-08-01T09:00:31", "wall_s": 709.61, "throughput_ep_s": 0.27057, "min_available_mb": 15531.9}
+{"round": 2, "n_envs": 64, "status": "ok", "started": "2026-08-01T09:13:40", "wall_s": 730.61, "throughput_ep_s": 0.26279, "min_available_mb": 9609.6}
+{"round": 3, "n_envs": 64, "status": "ok", "started": "2026-08-01T09:26:32", "wall_s": 720.42, "throughput_ep_s": 0.26651, "min_available_mb": 9899.6}
+{"round": 3, "n_envs": 48, "status": "ok", "started": "2026-08-01T09:38:53", "wall_s": 680.61, "throughput_ep_s": 0.2821, "min_available_mb": 15473.3}

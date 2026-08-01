@@ -70,6 +70,18 @@ TESTS — QUI LANCE QUOI (NON NÉGOCIABLE) :
 - Outils de conformité (documentés dans Documentation/Code_Compliance/) : `scripts/check_ai_rules.py`
   et `ai/hidden_action_finder.py` font partie de la vérification de l'utilisateur, pas de la tienne.
 
+=== WORKTREES — SESSIONS PARALLÈLES ===
+
+- Avant la PREMIÈRE écriture de code d'une tâche : proposer un worktree en une ligne,
+  puis attendre. Tâche de lecture, d'analyse ou de doc seule → ne rien proposer.
+- Vérifier `git status --short` avant de proposer. Si le tree est sale, le dire : un
+  worktree part du dernier commit, les modifications en cours ne suivent pas.
+- Si oui : EnterWorktree, `name` décrivant le sujet. Si non : ne pas re-proposer.
+- Au commit : committer, ExitWorktree "keep", merger dans main, PUIS supprimer worktree
+  et branche. Jamais "remove" avant le merge.
+- `discard_changes: true` est interdit, sous tous les modes.
+- Training en cours : ne toucher aucun JSON de `config/` (relus à chaud par les évals).
+
 === WORKFLOW IA ===
 
 FICHIERS À NE JAMAIS MODIFIER AUTOMATIQUEMENT :

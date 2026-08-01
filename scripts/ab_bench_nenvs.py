@@ -55,7 +55,7 @@ surcharge de config silencieuse ferait mesurer deux fois la meme configuration.
 USAGE
 -----
     git worktree add /tmp/40k-bench HEAD        # une fois
-    python3 scripts/ab_bench_nenvs.py --a 6 --b 8 --episodes 96 --paires 3 --training-config x1
+    python3 scripts/ab_bench_nenvs.py --a 6 --b 8 --episodes 96 --paires 5 --training-config x1
     git worktree remove /tmp/40k-bench          # a la fin
 
 `--training-config` est OBLIGATOIRE cote train.py (aucun defaut silencieux) ; le banc a le sien
@@ -86,7 +86,7 @@ import time
 # d'execution et garde sur --paires. Importe plutot que recopie — c'est exactement le genre de
 # regle qu'on corrige d'un cote seulement.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ab_bench import drift_cancelled, validate_paires  # noqa: E402
+from ab_bench import drift_cancelled, print_spread, validate_paires  # noqa: E402
 
 _ELAPSED_RE = re.compile(r"\[(\d+):(\d\d)(?::(\d\d))?<")
 _NENVS_RE = re.compile(r"Creating (\d+) parallel environments")
@@ -211,7 +211,9 @@ def main() -> int:
     parser.add_argument("--a", type=int, default=6, help="n_envs du cote A")
     parser.add_argument("--b", type=int, default=8, help="n_envs du cote B")
     parser.add_argument("--episodes", type=int, default=96)
-    parser.add_argument("--paires", type=int, default=3)
+    # 5, pas 3 : a 3 paires il ne reste que 2 ratios, donc UN couple, et l'etendue affichee est
+    # de largeur nulle (cf. `print_spread` dans ab_bench.py).
+    parser.add_argument("--paires", type=int, default=5)
     parser.add_argument("--agent", default="ArmageddonAgent")
     parser.add_argument("--scenario", default="bot")
     # train.py exige une phase explicite (R1, `_require_training_config_phase`). La phase fixe
@@ -285,14 +287,9 @@ def main() -> int:
         f"couples sans derive        : {[round(c, 3) for c in couples]}\n"
         f"VERDICT = {median:.3f}  ->  n_envs={args.b} est "
         f"{'PLUS RAPIDE' if median < 1 else 'PLUS LENT'} que n_envs={args.a} de "
-        f"{abs(1 - median) * 100:.1f} % de wall-clock\n"
-        f"etendue des couples {min(couples):.3f}-{max(couples):.3f}"
+        f"{abs(1 - median) * 100:.1f} % de wall-clock"
     )
-    if min(couples) < 1.0 < max(couples):
-        print(
-            "L'ETENDUE ENJAMBE 1.000 : cette mesure ne tranche pas. Augmenter --episodes et "
-            "--paires avant d'en conclure quoi que ce soit, dans un sens comme dans l'autre."
-        )
+    print_spread(couples)
     return 0
 
 
