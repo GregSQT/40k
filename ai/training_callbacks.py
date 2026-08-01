@@ -752,6 +752,12 @@ class MetricsCollectionCallback(BaseCallback):
                 # Log to metrics_tracker for TensorBoard
                 if hasattr(self, 'metrics_tracker') and self.metrics_tracker:
                     self.metrics_tracker.log_bot_evaluations(bot_results)
+                    # Le gap par roster doit exister AU SCORE LIVRE, pas seulement sur les
+                    # evaluations intermediaires : c'est le point de mesure que l'on cite.
+                    self.metrics_tracker.log_faction_scores(
+                        require_key(bot_results, 'faction_scores'),
+                        bot_results.get('roster_gap'),
+                    )
                     # Flush to ensure metrics are written immediately
                     self.metrics_tracker.writer.flush()
                 
@@ -1412,6 +1418,7 @@ class BotEvaluationCallback(BaseCallback):
             raise ValueError(
                 f"robust_penalty_hard must be >= 0.0 (got {self.robust_penalty_hard})"
             )
+        self._validate_hard_penalty_is_measurable()
         if not isinstance(model_gating_enabled, bool):
             raise ValueError(
                 f"model_gating_enabled must be boolean (got {type(model_gating_enabled).__name__})"
@@ -1941,6 +1948,40 @@ class BotEvaluationCallback(BaseCallback):
             "worst_holdout_hard_combined": worst_holdout_hard_combined,
         }
 
+    def _validate_hard_penalty_is_measurable(self) -> None:
+        """
+        Refuse AU DEMARRAGE une penalite hard que l'evaluation ne pourra jamais mesurer.
+
+        `robust_penalty_hard` s'applique a `holdout_hard_mean`, que
+        `_compute_holdout_split_metrics` ne produit QUE si
+        `callback_params.holdout_hard_scenarios` est declare et que le pool est "holdout".
+        Le controle equivalent existe aussi au moment du calcul du score robuste, mais il
+        n'y est atteint qu'apres `robust_window` evaluations — soit 10 000 episodes avec
+        le profil x1 (bot_eval_freq=2000, robust_window=5). Une incoherence purement
+        statique doit couter une seconde, pas plusieurs heures de run.
+        """
+        if self.robust_penalty_hard <= 0.0 or not self.save_best_robust:
+            return
+        if not self.training_config_name or not self.rewards_config_name:
+            # Configs non nommees (tests, usages programmatiques) : rien a relire ici, le
+            # controle au moment du calcul reste le filet.
+            return
+        training_cfg = get_config_loader().load_agent_training_config(
+            self.rewards_config_name, self.training_config_name
+        )
+        callback_params = require_key(training_cfg, "callback_params")
+        hard_scenarios = callback_params.get("holdout_hard_scenarios")
+        if self.scenario_pool == "holdout" and hard_scenarios:
+            return
+        raise ValueError(
+            f"robust_penalty_hard={self.robust_penalty_hard} is configured but the hard "
+            f"holdout split cannot be measured: scenario_pool={self.scenario_pool!r} and "
+            f"callback_params.holdout_hard_scenarios="
+            f"{hard_scenarios!r}. The penalty would silently weigh 0 in the robust score. "
+            f"Set robust_penalty_hard to 0.0, or build the hard split with "
+            f"scripts/build_holdout_benchmark.py and declare it in holdout_hard_scenarios."
+        )
+
     def _apply_eval_results(self, results: Dict[str, Any], eval_marker: int) -> None:
         """Apply evaluation results (gating, logging, checkpoints)."""
         self.last_eval_results = results
@@ -1999,6 +2040,11 @@ class BotEvaluationCallback(BaseCallback):
             if 'holdout_hard_mean' in results:
                 bot_results['holdout_hard_mean'] = float(results['holdout_hard_mean'])
             self.metrics_tracker.log_bot_evaluations(bot_results, step=int(eval_marker))
+            self.metrics_tracker.log_faction_scores(
+                require_key(results, 'faction_scores'),
+                results.get('roster_gap'),
+                step=int(eval_marker),
+            )
 
         if hasattr(self.model, 'logger') and self.model.logger:
             self.model.logger.record('eval_bots/combined_win_rate', combined_win_rate)
@@ -2053,12 +2099,35 @@ class BotEvaluationCallback(BaseCallback):
             if "holdout_hard_mean" in results:
                 holdout_hard_mean = float(results["holdout_hard_mean"])
                 penalty_hard = self.robust_penalty_hard * max(0.0, tau_h - holdout_hard_mean) ** 2
+            elif self.robust_penalty_hard > 0.0:
+                # FILET, pas la detection principale : le cas statique (penalite configuree
+                # sans split hard declare) est refuse au demarrage par
+                # _validate_hard_penalty_is_measurable. On n'arrive ici que si le split etait
+                # DECLARE mais n'a produit aucun `holdout_hard_mean` — trop peu d'episodes pour
+                # couvrir chaque scenario hard, cas que _compute_holdout_split_metrics tolere
+                # DELIBEREMENT ("Keep evaluation running, but skip split aggregates").
+                # On ne tue donc PAS le run : on saute ce point de mesure, exactement comme le
+                # chemin timeout plus haut. Scorer quand meme reviendrait a comparer un score
+                # a deux termes avec un score a trois selon les evaluations, et a sauvegarder
+                # le best robust model sur cette incoherence.
+                print(
+                    f"\n⚠️  Score robuste ignoré au marker {eval_marker} : "
+                    f"robust_penalty_hard={self.robust_penalty_hard} est configurée mais cette "
+                    f"évaluation n'a produit aucun 'holdout_hard_mean' (couverture incomplète "
+                    f"des scénarios hard). Le training CONTINUE ; ce point n'entre ni dans la "
+                    f"courbe ni dans la sélection du best robust model. Augmenter "
+                    f"`bot_eval_intermediate` si le cas se répète."
+                )
+                return
             robust_score = robust_base - penalty_bot - penalty_hard
 
             if self.metrics_tracker is not None:
                 step = int(eval_marker)
+                # Prefixe `o_` et non `0_` : TensorBoard trie les tags alphabetiquement, ce
+                # score est un critere de DECISION (il pilote la sauvegarde du best robust
+                # model, plus bas) et non un diagnostic a lire en tete de tableau de bord.
                 self.metrics_tracker.writer.add_scalar(
-                    "00_critical/0_robust_current_score", robust_score, step,
+                    "00_critical/o_robust_current_score", robust_score, step,
                 )
 
             if gate_pass and robust_score > self.best_robust_score and eval_marker >= self.save_best_min_episodes:

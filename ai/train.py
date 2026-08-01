@@ -3332,6 +3332,12 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 }
                 final_bot_results["combined"] = float(require_key(bot_results, "combined"))
                 metrics_tracker.log_bot_evaluations(final_bot_results)
+                # Jumeau de BotEvaluationCallback._on_training_end : le gap par roster doit
+                # etre publie au score livre, pas seulement aux evaluations intermediaires.
+                metrics_tracker.log_faction_scores(
+                    require_key(bot_results, "faction_scores"),
+                    bot_results.get("roster_gap"),
+                )
                 holdout_split_metrics = {
                     key: float(require_key(bot_results, key))
                     for key in (

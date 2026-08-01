@@ -84,7 +84,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--tag-robust",
-        default="00_critical/n_robust_current_score",
+        default="00_critical/o_robust_current_score",
         help="TensorBoard tag for robust current score.",
     )
     parser.add_argument(

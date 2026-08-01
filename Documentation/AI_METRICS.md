@@ -484,6 +484,7 @@ The `00_critical/` namespace contains **THE ESSENTIAL METRICS** for hyperparamet
 
 | Metric | What It Measures | Target Value | Critical For |
 |--------|------------------|--------------|--------------|
+| **00_critical/0_gap_sm-ork** | `combined` Space Marines − `combined` Orks (même pondération que `a_bot_eval_combined`) | ≈ 0 (parité) | Spécialisation par roster — **>0 = SM dominants, <0 = Orks dominants**. Seule métrique qui distingue un agent équilibré (0.43/0.42) d'un agent spécialisé (0.70/0.15) : `a_bot_eval_combined` affiche la même valeur dans les deux cas. Absente si le pool d'éval ne couvre pas les deux factions. |
 | **00_critical/a_bot_eval_combined** | Weighted win rate vs all holdout bots | >0.49 (BEST actuel: 0.4857) | **PRIMARY GOAL** — sélection du modèle |
 | **00_critical/b_worst_bot_score** | Score vs le bot le plus difficile | >0.35 | Robustesse — pas de point faible structurel |
 | **00_critical/c_holdout_hard_mean** | Score moyen holdout hard (matchup défavorable) | >0.10 (structurellement faible) | Résilience aux matchups difficiles |
@@ -499,6 +500,7 @@ The `00_critical/` namespace contains **THE ESSENTIAL METRICS** for hyperparamet
 | **00_critical/q_obj_held_diff_deploy_{active,fixed}** | Différence d'objectifs tenus, par mode | Les DEUX croissantes | Idem sur la condition de victoire |
 | **00_critical/r_win_rate_deploy_{active,fixed}** | Win rate par mode | Les DEUX croissantes | Idem sur le verdict |
 | **00_critical/s_deploy_active_share** | Part réelle d'épisodes en déploiement actif | Suit `active_ratio` du profil | Variable explicative des trois lignes ci-dessus |
+| **00_critical/o_robust_current_score** | Moyenne mobile de `combined` − pénalités (drawdown, `worst_bot`, holdout hard) | Croissante | Critère de **décision** (sauvegarde du best robust model), pas de diagnostic : préfixe `o_` pour le trier en fin de tableau de bord. Sans unité, peut être négatif, non comparable entre runs si les coefficients de pénalité changent. |
 
 #### Ventilation par mode de déploiement (`p` à `s`)
 

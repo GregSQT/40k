@@ -191,7 +191,23 @@ def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pyte
 
     class _DummyEnv:
         def __init__(self):
-            self.engine = SimpleNamespace(get_action_mask=lambda: [True, False])
+            # Le roster de l'agent CHANGE de faction au 3e episode : le worker doit relever la
+            # faction a chaque reset, pas une fois par tache (roster tire au sort).
+            self._rosters = [
+                [{"player": 0, "unitType": "Intercessor"}, {"player": 1, "unitType": "Boyz"}],
+                [{"player": 0, "unitType": "Intercessor"}, {"player": 1, "unitType": "Boyz"}],
+                [{"player": 0, "unitType": "Boyz"}, {"player": 1, "unitType": "Intercessor"}],
+            ]
+            self.engine = SimpleNamespace(
+                get_action_mask=lambda: [True, False],
+                unit_registry=SimpleNamespace(
+                    get_unit_data=lambda unit_type: {
+                        "faction": {"Intercessor": "Spacemarine", "Boyz": "Ork"}[unit_type]
+                    }
+                ),
+                config={"controlled_player": 0},
+                game_state={"units": []},
+            )
             self._episode = -1
             self._closed = False
             self._winners = [0, -1, 1]
@@ -209,6 +225,7 @@ def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pyte
         def reset(self, seed=None):
             _ = seed
             self._episode += 1
+            self.engine.game_state["units"] = self._rosters[self._episode]
             return np.array([0.0, 1.0], dtype=np.float32), {}
 
         def step(self, action):
@@ -258,6 +275,11 @@ def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pyte
     assert result["losses"] == 1
     assert result["shoot_stats"]["acc"] == 0.5
     assert progress["n"] == 3
+    # Episodes 1 (victoire) et 2 (nul) en Space Marines, episode 3 (defaite) en Orks.
+    assert result["faction_stats"] == {
+        "Spacemarine": {"wins": 1, "total": 2},
+        "Ork": {"wins": 0, "total": 1},
+    }
 
 
 def test_eval_worker_task_requires_worker_init() -> None:
@@ -345,7 +367,15 @@ def test_eval_worker_task_attaches_step_logger(monkeypatch: pytest.MonkeyPatch) 
 
     class _DummyEnv:
         def __init__(self):
-            self.engine = SimpleNamespace(get_action_mask=lambda: [True], step_logger=None)
+            self.engine = SimpleNamespace(
+                get_action_mask=lambda: [True],
+                step_logger=None,
+                unit_registry=SimpleNamespace(
+                    get_unit_data=lambda unit_type: {"faction": "Spacemarine"}
+                ),
+                config={"controlled_player": 0},
+                game_state={"units": [{"player": 0, "unitType": "Intercessor"}]},
+            )
 
         def get_wrapper_attr(self, name):
             # Chemin de PPO : `get_action_masks` resout `action_masks` par ce biais. L'appel
@@ -466,3 +496,138 @@ def test_collect_parallel_results_with_timeouts_rejects_non_positive_timeout() -
                 future_to_task={},
                 task_timeout_seconds=0,
             )
+
+
+def _faction_result(bot_name: str, faction_stats: dict) -> dict:
+    return {"bot_name": bot_name, "faction_stats": faction_stats}
+
+
+def test_compute_faction_scores_weights_bots_like_combined() -> None:
+    """Le score par faction utilise les MEMES poids que `combined`, pas un win-rate brut."""
+    weights = {"random": 0.75, "greedy": 0.25}
+    results_list = [
+        # Space Marines : 100% vs random (poids 0.75), 0% vs greedy -> 0.75
+        _faction_result("random", {"Spacemarine": {"wins": 4, "total": 4}}),
+        _faction_result("greedy", {"Spacemarine": {"wins": 0, "total": 4}}),
+        # Orks : 50% vs random, 100% vs greedy -> 0.375 + 0.25 = 0.625
+        _faction_result("random", {"Ork": {"wins": 2, "total": 4}}),
+        _faction_result("greedy", {"Ork": {"wins": 4, "total": 4}}),
+    ]
+    scores = be._compute_faction_scores(results_list, ("random", "greedy"), weights)
+    assert scores == {"Spacemarine": 0.75, "Ork": 0.625}
+    # Un win-rate brut donnerait 0.5 pour SM et 0.75 pour Ork, soit un gap de signe OPPOSE.
+    assert scores["Spacemarine"] > scores["Ork"]
+
+
+def test_compute_faction_scores_drops_faction_missing_a_bot() -> None:
+    """Une faction sans episode contre l'un des bots n'est pas sur la meme echelle : ecartee."""
+    results_list = [
+        _faction_result("random", {"Spacemarine": {"wins": 2, "total": 4}, "Ork": {"wins": 1, "total": 2}}),
+        _faction_result("greedy", {"Spacemarine": {"wins": 1, "total": 4}}),
+    ]
+    scores = be._compute_faction_scores(results_list, ("random", "greedy"), {"random": 0.5, "greedy": 0.5})
+    assert set(scores) == {"Spacemarine"}
+
+
+def test_compute_faction_scores_ignores_failed_tasks() -> None:
+    """Une tache en timeout/erreur porte `faction_stats` vide et ne fausse aucun total."""
+    results_list = [
+        _faction_result("random", {"Spacemarine": {"wins": 3, "total": 4}}),
+        _faction_result("random", {}),
+    ]
+    scores = be._compute_faction_scores(results_list, ("random",), {"random": 1.0})
+    assert scores == {"Spacemarine": 0.75}
+
+
+def test_roster_gap_faction_order_carries_the_curve_sign() -> None:
+    """L'ordre de ROSTER_GAP_FACTIONS fixe le sens de 00_critical/0_gap_sm-ork."""
+    assert be.ROSTER_GAP_FACTIONS == ("Spacemarine", "Ork")
+
+
+def test_every_failed_task_result_carries_faction_stats() -> None:
+    """
+    Un timeout ne doit JAMAIS tuer le training (V11 §0.27) — or `_compute_faction_scores`
+    lit `faction_stats` par require_key. Les quatre sites d'echec passent par la meme
+    fabrique : ce test verrouille le contrat de cette fabrique.
+    """
+    task = {"bot_name": "random", "scenario_file": "/tmp/s1.json", "n_episodes": 3}
+    for result in (
+        be._failed_task_result(task, "training_bot-1", timeout=True),
+        be._failed_task_result(task, "training_bot-1", error="boom"),
+    ):
+        assert result["faction_stats"] == {}
+        assert result["failed_episodes"] == 3
+        assert result["wins"] == 0
+    # Et l'agregation les traverse sans lever.
+    scores = be._compute_faction_scores(
+        [be._failed_task_result(task, "training_bot-1", timeout=True)], ("random",), {"random": 1.0}
+    )
+    assert scores == {}
+
+
+def test_collected_timeout_results_are_aggregatable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Verrou du jumeau : `_collect_parallel_results_with_timeouts` construit ses PROPRES
+    dicts d'echec. Ils doivent traverser l'agregation comme ceux de _get_result_with_timeout.
+    """
+    monkeypatch.setattr(be, "_force_terminate_process_pool", lambda pool: None)
+
+    class _FutureHung:
+        pass
+
+    hung_future = _FutureHung()
+    # Meme motif que test_collect_parallel_results_with_timeouts_aborts_pool_on_hung_task :
+    # `wait` est stubbe, le pool reel n'execute rien.
+    monkeypatch.setattr(be, "wait", lambda pending, timeout=None, return_when=None: (set(), {hung_future}))
+    # Iterateur cree UNE fois : recree a chaque appel, monotonic renverrait toujours 0.0,
+    # elapsed resterait nul et la boucle ne sortirait jamais.
+    monotonic_values = chain([0.0], repeat(2.0))
+    monkeypatch.setattr(be.time, "monotonic", lambda: next(monotonic_values))
+
+    task = {
+        "bot_name": "random",
+        "scenario_file": "/tmp/s1.json",
+        "scenario_name": "training_bot-1",
+        "n_episodes": 3,
+    }
+    with ProcessPoolExecutor(max_workers=1) as pool:
+        out = be._collect_parallel_results_with_timeouts(
+            pool=pool,
+            future_to_task={hung_future: task},
+            task_timeout_seconds=1,
+        )
+    assert len(out) == 1 and out[0]["timeout"] is True
+    # Le point du bug : sans `faction_stats`, cet appel levait ConfigurationError.
+    assert be._compute_faction_scores(out, ("random",), {"random": 1.0}) == {}
+
+
+def test_mixed_faction_roster_is_bucketed_not_fatal() -> None:
+    """Un roster mixte est une donnee, pas un crash : cle composite, hors du gap."""
+    engine = SimpleNamespace(
+        unit_registry=SimpleNamespace(
+            get_unit_data=lambda unit_type: {
+                "faction": {"Intercessor": "Spacemarine", "Boyz": "Ork"}[unit_type]
+            }
+        ),
+        config={"controlled_player": 0},
+        game_state={
+            "units": [
+                {"player": 0, "unitType": "Intercessor"},
+                {"player": 0, "unitType": "Boyz"},
+            ]
+        },
+    )
+    faction = be._agent_faction_from_engine(engine)
+    assert faction == "Ork+Spacemarine"
+    assert faction not in be.ROSTER_GAP_FACTIONS
+
+
+def test_empty_controlled_roster_raises() -> None:
+    """Aucune unite pour le joueur controle : anomalie d'environnement, pas un cas de jeu."""
+    engine = SimpleNamespace(
+        unit_registry=SimpleNamespace(get_unit_data=lambda unit_type: {"faction": "Ork"}),
+        config={"controlled_player": 0},
+        game_state={"units": [{"player": 1, "unitType": "Boyz"}]},
+    )
+    with pytest.raises(ValueError, match=r"No unit belongs to the controlled player 0"):
+        be._agent_faction_from_engine(engine)

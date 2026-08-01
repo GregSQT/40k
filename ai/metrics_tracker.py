@@ -1310,6 +1310,8 @@ class W40KMetricsTracker:
         All metrics are smoothed (20-episode rolling average) for clear trends.
 
         GAME PERFORMANCE (6 metrics):
+        - 00_critical/0_gap_sm-ork           - combined(Space Marines) - combined(Orks) :
+                                               >0 SM dominants, <0 Orks dominants, ~0 parite
         - 00_critical/a_bot_eval_combined    - Primary goal [0-1] (sorts first)
 
         - 00_critical/b_worst_bot_score      - Min across all 7 bots
@@ -1674,6 +1676,35 @@ class W40KMetricsTracker:
                     float(bot_results['combined']) - baseline_combined,
                     x
                 )
+
+    def log_faction_scores(
+        self,
+        faction_scores: Dict[str, float],
+        roster_gap: Optional[float],
+        step: Optional[int] = None,
+    ) -> None:
+        """
+        Log le win-rate pondere par faction jouee par l'agent, et leur ecart.
+
+        `00_critical/0_gap_sm-ork` = combined(Space Marines) - combined(Orks) :
+          > 0 -> l'agent domine avec les Space Marines
+          < 0 -> l'agent domine avec les Orks
+          ~ 0 -> parite entre les deux rosters
+        Cet ecart est le seul indicateur qui distingue un agent equilibre d'un agent
+        specialise : `a_bot_eval_combined` moyenne les deux factions et affiche la meme
+        valeur dans les deux cas. `roster_gap` vaut None quand le pool d'evaluation ne
+        couvre pas les deux factions — aucune courbe n'est alors tracee (cf.
+        ai.bot_evaluation.ROSTER_GAP_FACTIONS, qui porte aussi le SENS de la soustraction).
+        """
+        if not isinstance(faction_scores, dict):
+            raise TypeError(
+                f"faction_scores must be dict (got {type(faction_scores).__name__})"
+            )
+        x = step if step is not None else self.episode_count
+        for faction, score in faction_scores.items():
+            self.writer.add_scalar(f'bot_eval/faction/{str(faction).lower()}', float(score), x)
+        if roster_gap is not None:
+            self.writer.add_scalar('00_critical/0_gap_sm-ork', float(roster_gap), x)
 
     def log_holdout_split_metrics(self, split_metrics: Dict[str, float]) -> None:
         """Log holdout split aggregates to TensorBoard."""

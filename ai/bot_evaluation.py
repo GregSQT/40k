@@ -139,6 +139,87 @@ def _load_bot_eval_params(config_loader, agent_key: str, training_config_name: s
     }
 
 
+#: Couple de factions dont l'ecart de win-rate est publie en 00_critical/0_gap_sm-ork.
+#: L'ORDRE porte le sens de la courbe : gap = score(ROSTER_GAP_FACTIONS[0]) - score([1]),
+#: donc positif = Space Marines dominants, negatif = Orks dominants. Changer cet ordre
+#: inverserait le sens d'une courbe deja tracee : le nom du tag doit suivre.
+ROSTER_GAP_FACTIONS: Tuple[str, str] = ("Spacemarine", "Ork")
+
+
+def _agent_faction_from_engine(engine: Any) -> str:
+    """
+    Faction reellement jouee par l'agent sur l'episode courant.
+
+    MESUREE sur les unites chargees, pas deduite du nom du fichier de scenario : le roster
+    de l'agent peut etre tire au sort (`agent_roster_ref: "*_random"`, autorise en holdout
+    comme en training par GameStateManager._resolve_roster_ref), auquel cas le scenario ne
+    dit pas quelle faction a ete jouee. A appeler APRES reset() et AVANT la fin de partie —
+    une escouade morte disparait de game_state["units"].
+
+    Un roster MIXTE rend la cle composite ("Ork+Spacemarine") au lieu de lever : cette
+    fonction sert une metrique de DIAGNOSTIC, elle ne doit pas pouvoir abattre un run de
+    36 h. La cle composite ne figure dans aucun couple de ROSTER_GAP_FACTIONS, donc elle
+    est visible dans `bot_eval/faction/*` et n'entre jamais dans le gap — ce n'est pas un
+    repli qui masque une erreur, c'est le domaine de definition de la mesure : « faction
+    jouee » n'a pas de valeur unique pour un roster mixte.
+    Un roster VIDE, lui, leve : aucune unite pour le joueur controle est une anomalie
+    d'environnement, pas un cas de jeu.
+    """
+    unit_registry = require_present(engine.unit_registry, "engine.unit_registry")
+    controlled_player = int(require_key(engine.config, "controlled_player"))
+    # `unitType` (camelCase) et non `unit_type` : c'est la clef des unites MATERIALISEES dans
+    # game_state (GameStateManager._build_enhanced_unit) ; `unit_type` n'existe que dans la
+    # declaration de scenario en amont.
+    factions = {
+        str(require_key(unit_registry.get_unit_data(require_key(unit, "unitType")), "faction"))
+        for unit in require_key(engine.game_state, "units")
+        if int(require_key(unit, "player")) == controlled_player
+    }
+    if not factions:
+        raise ValueError(
+            f"No unit belongs to the controlled player {controlled_player}: cannot attribute "
+            f"a faction to this episode"
+        )
+    return "+".join(sorted(factions))
+
+
+def _compute_faction_scores(
+    results_list: List[Dict[str, Any]],
+    active_bot_names: Tuple[str, ...],
+    eval_weights: Dict[str, float],
+) -> Dict[str, float]:
+    """
+    Win-rate pondere par bot, ventile par faction jouee par l'agent.
+
+    Meme ponderation que `results["combined"]` (bot_eval_weights) pour que les deux courbes
+    soient comparables : le gap entre factions est un ecart de combined, pas un ecart de
+    win-rate brut qui melangerait des adversaires de difficultes differentes.
+    Une faction dont un seul bot n'a produit aucun episode est ECARTEE : son score partiel
+    ne serait pas sur la meme echelle que celui des autres.
+    """
+    tally: Dict[str, Dict[str, List[int]]] = {}
+    for result in results_list:
+        bot_name = result.get("bot_name")
+        if bot_name not in active_bot_names:
+            continue
+        for faction, stats in require_key(result, "faction_stats").items():
+            per_bot = tally.setdefault(str(faction), {})
+            wins, total = per_bot.setdefault(str(bot_name), [0, 0])
+            per_bot[str(bot_name)] = [
+                wins + int(require_key(stats, "wins")),
+                total + int(require_key(stats, "total")),
+            ]
+
+    faction_scores: Dict[str, float] = {}
+    for faction, per_bot in tally.items():
+        if any(bn not in per_bot or per_bot[bn][1] == 0 for bn in active_bot_names):
+            continue
+        faction_scores[faction] = sum(
+            eval_weights[bn] * (per_bot[bn][0] / per_bot[bn][1]) for bn in active_bot_names
+        )
+    return faction_scores
+
+
 def _scenario_name_from_file(base_agent_key: str, scenario_file: str) -> str:
     """Build short scenario name used in logs/results."""
     basename = os.path.basename(scenario_file).replace(".json", "")
@@ -509,11 +590,15 @@ def _eval_worker_task(
         env.engine.step_logger = config_params["step_logger"]
 
     wins, losses, draws = 0, 0, 0
+    # Faction jouee par l'agent, relevee A CHAQUE episode : un roster tire au sort peut
+    # changer de faction d'un reset a l'autre au sein d'une meme tache.
+    faction_stats: Dict[str, Dict[str, int]] = {}
     for ep_idx in range(task["n_episodes"]):
         ep_seed = _episode_seed(task["base_seed"], task["bot_name"], task["scenario_index"], ep_idx)
         random.seed(ep_seed)
         np.random.seed(ep_seed)
         obs, info = env.reset(seed=ep_seed)
+        episode_faction = _agent_faction_from_engine(env.engine)
         done = False
         step_count = 0
         max_steps_per_episode = int(require_key(task, "max_steps_per_episode"))
@@ -556,8 +641,11 @@ def _eval_worker_task(
         # son absence est une anomalie d'environnement, pas un cas de jeu.
         winner = require_key(info, "winner")
         controlled_player = require_key(info, "controlled_player")
+        faction_bucket = faction_stats.setdefault(episode_faction, {"wins": 0, "total": 0})
+        faction_bucket["total"] += 1
         if winner == controlled_player:
             wins += 1
+            faction_bucket["wins"] += 1
         elif winner == -1:
             draws += 1
         else:
@@ -573,7 +661,48 @@ def _eval_worker_task(
         "shoot_stats": shoot_stats,
         "bot_name": task["bot_name"],
         "scenario_name": task["scenario_name"],
+        "faction_stats": faction_stats,
     }
+
+
+def _failed_task_result(
+    task: Dict[str, Any],
+    scenario_name: str,
+    **cause: Any,
+) -> Dict[str, Any]:
+    """
+    Resultat d'une tache d'evaluation qui n'a produit aucun episode exploitable.
+
+    FABRIQUE UNIQUE : ce dict etait construit a l'identique sur QUATRE sites (les deux
+    branches de _get_result_with_timeout et les deux de _collect_parallel_results_with_timeouts).
+    Chaque nouvelle cle d'agregat devait etre ajoutee aux quatre — `faction_stats` ne l'a
+    ete que sur deux, et le premier timeout venu tuait alors le run sur un `require_key`,
+    en contradiction avec la regle « un TIMEOUT n'est pas un bug, le training CONTINUE »
+    (BotEvaluationCallback._apply_eval_results). Un seul site desormais.
+
+    `cause` porte `timeout=True` ou `error=<str>` : les deux sont distingues en aval
+    (V11 §0.27, crash moteur vs lenteur mesuree).
+    """
+    return {
+        "wins": 0,
+        "losses": 0,
+        "draws": 0,
+        "failed_episodes": int(require_key(task, "n_episodes")),
+        "bot_name": require_key(task, "bot_name"),
+        "scenario_name": scenario_name,
+        # Aucun episode joue : la tache ne contribue a aucune faction. Cle PRESENTE et vide,
+        # jamais absente — _compute_faction_scores la lit par require_key.
+        "faction_stats": {},
+        **cause,
+    }
+
+
+def _scenario_name_from_task(task: Dict[str, Any]) -> str:
+    """Nom de scenario d'une tache, y compris quand elle n'a pas pu s'executer."""
+    declared = task.get("scenario_name")
+    if declared:
+        return str(declared)
+    return os.path.basename(require_key(task, "scenario_file")).replace(".json", "")
 
 
 def _get_result_with_timeout(
@@ -583,7 +712,7 @@ def _get_result_with_timeout(
 ) -> Dict[str, Any]:
     """Récupère le résultat d'une tâche avec timeout. Retourne dict avec timeout/error si échec."""
     bot_name = task["bot_name"]
-    scenario_name = task.get("scenario_name") or os.path.basename(task["scenario_file"]).replace(".json", "")
+    scenario_name = _scenario_name_from_task(task)
     try:
         return future.result(timeout=timeout_seconds)
     except TimeoutError:
@@ -591,22 +720,10 @@ def _get_result_with_timeout(
         _sys.stderr.write(f"BOT_EVAL_TIMEOUT bot={bot_name} scenario={scenario_name} n_episodes={task.get('n_episodes')} timeout={timeout_seconds}s\n")
         _sys.stderr.flush()
         logging.warning(f"Eval task timeout: bot={bot_name} scenario={scenario_name}")
-        return {
-            "wins": 0, "losses": 0, "draws": 0,
-            "failed_episodes": int(task["n_episodes"]),
-            "timeout": True,
-            "bot_name": bot_name,
-            "scenario_name": scenario_name,
-        }
+        return _failed_task_result(task, scenario_name, timeout=True)
     except Exception as e:
         logging.exception(f"Eval task failed: bot={bot_name} scenario={scenario_name} error={e}")
-        return {
-            "wins": 0, "losses": 0, "draws": 0,
-            "failed_episodes": int(task["n_episodes"]),
-            "error": str(e),
-            "bot_name": bot_name,
-            "scenario_name": scenario_name,
-        }
+        return _failed_task_result(task, scenario_name, error=str(e))
 
 
 def _force_terminate_process_pool(pool: ProcessPoolExecutor) -> None:
@@ -669,19 +786,8 @@ def _collect_parallel_results_with_timeouts(
             task = require_key(future_to_task, future)
             elapsed = now - require_key(task_start_times, future)
             if elapsed >= task_timeout_seconds:
-                scenario_name = task.get("scenario_name") or os.path.basename(
-                    require_key(task, "scenario_file")
-                ).replace(".json", "")
                 results_list.append(
-                    {
-                        "wins": 0,
-                        "losses": 0,
-                        "draws": 0,
-                        "failed_episodes": int(require_key(task, "n_episodes")),
-                        "timeout": True,
-                        "bot_name": require_key(task, "bot_name"),
-                        "scenario_name": scenario_name,
-                    }
+                    _failed_task_result(task, _scenario_name_from_task(task), timeout=True)
                 )
                 timed_out_futures.append(future)
                 must_abort_pool = True
@@ -701,19 +807,8 @@ def _collect_parallel_results_with_timeouts(
         _force_terminate_process_pool(pool)
         for future in list(pending):
             task = require_key(future_to_task, future)
-            scenario_name = task.get("scenario_name") or os.path.basename(
-                require_key(task, "scenario_file")
-            ).replace(".json", "")
             results_list.append(
-                {
-                    "wins": 0,
-                    "losses": 0,
-                    "draws": 0,
-                    "failed_episodes": int(require_key(task, "n_episodes")),
-                    "timeout": True,
-                    "bot_name": require_key(task, "bot_name"),
-                    "scenario_name": scenario_name,
-                }
+                _failed_task_result(task, _scenario_name_from_task(task), timeout=True)
             )
     return results_list
 
@@ -1209,6 +1304,18 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         eval_weights[bn] * results[bn] for bn in active_bot_names
     )
     results["scenario_bot_stats"] = scenario_bot_stats
+
+    # Ventilation par faction jouee par l'agent. `roster_gap` n'est produit QUE si les deux
+    # factions de ROSTER_GAP_FACTIONS sont toutes deux representees : un pool mono-faction,
+    # ou melangeant d'autres factions, n'a pas d'ecart a publier — la cle reste alors absente
+    # et le callback ne trace pas de courbe, plutot que d'en tracer une qui vaudrait un score
+    # absolu deguise en ecart.
+    faction_scores = _compute_faction_scores(results_list, active_bot_names, eval_weights)
+    results["faction_scores"] = faction_scores
+    if all(faction in faction_scores for faction in ROSTER_GAP_FACTIONS):
+        results["roster_gap"] = (
+            faction_scores[ROSTER_GAP_FACTIONS[0]] - faction_scores[ROSTER_GAP_FACTIONS[1]]
+        )
 
     # V11 §10.5 : le holdout (tactical) est MESURE et affiche, mais EXCLU du worst_bot_score,
     # qui alimente le gate de curriculum (_extract_worst_bot_scores_for_gate). Le poids nul ne
