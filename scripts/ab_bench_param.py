@@ -139,9 +139,9 @@ def main() -> int:
 
     if args.a == args.b:
         raise SystemExit("--a et --b identiques : rien a comparer.")
+    assert_clean_environment()
     repo = assert_worktree(args.repo, args.agent)
     assert_scenario_supported(args.scenario)
-    assert_clean_environment()
     assert_provable(args.param)
     validate_paires(args.paires)
 

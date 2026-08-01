@@ -86,7 +86,12 @@ import time
 # d'execution et garde sur --paires. Importe plutot que recopie — c'est exactement le genre de
 # regle qu'on corrige d'un cote seulement.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ab_bench import drift_cancelled, print_spread, validate_paires  # noqa: E402
+from ab_bench import (  # noqa: E402
+    assert_clean_environment,
+    drift_cancelled,
+    print_spread,
+    validate_paires,
+)
 
 _ELAPSED_RE = re.compile(r"\[(\d+):(\d\d)(?::(\d\d))?<")
 _NENVS_RE = re.compile(r"Creating (\d+) parallel environments")
@@ -132,6 +137,10 @@ def _run(
     seul fils : `train.py` fait tourner `n_envs` sous-processus qui survivraient a la mort de
     leur parent et continueraient a consommer la machine pendant toutes les mesures suivantes.
     """
+    # Ici et pas seulement dans `main` : `ab_sweep_nenvs.py` importe cette fonction et ne passe
+    # jamais par notre `main`. Un controle place uniquement la-bas laisserait le balayage — la
+    # campagne la PLUS longue des quatre bancs — tourner des heures dans un environnement arme.
+    assert_clean_environment()
     started = time.perf_counter()
     proc = subprocess.Popen(
         [
@@ -224,6 +233,7 @@ def main() -> int:
 
     # realpath, pas abspath : un `--repo` qui est un lien symbolique vers le depot principal
     # passerait le controle ci-dessous et l'entrainement ecraserait le modele protege.
+    assert_clean_environment()
     main_repo = os.path.realpath(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     repo = os.path.realpath(args.repo)
     if repo == main_repo:

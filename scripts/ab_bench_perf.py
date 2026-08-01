@@ -207,9 +207,9 @@ def main() -> int:
             f"est fixe par --graines des deux cotes."
         )
 
+    assert_clean_environment()
     repo = assert_worktree(args.repo, args.agent)
     assert_scenario_supported(args.scenario)
-    assert_clean_environment()
     assert_provable(args.param)
     phase_block = read_phase_config(repo, args.agent, args.training_config)
     for value in (args.a, args.b):

@@ -57,6 +57,63 @@ import sys
 import time
 
 
+# Variables d'environnement qui changent la VITESSE d'un run (verifications supplementaires,
+# instrumentation, traces). `subprocess` herite de l'environnement du banc : une seule d'entre
+# elles exportee dans le shell fausse silencieusement toute une campagne — `W40K_MASK_VERIFY` a
+# ete mesuree a x4,7 au niveau 1 et x17 au niveau 2 (commit 0839ea21). Le ralentissement
+# s'applique aux deux cotes, donc le RATIO survit peut-etre ; mais les durees absolues, le
+# dimensionnement de `--timeout` et toute comparaison avec une campagne precedente, non. Et rien
+# dans la sortie ne l'indiquerait.
+_SPEED_ALTERING_ENV = (
+    "W40K_MASK_VERIFY",
+    "W40K_PERF_TIMING",
+    "W40K_PERF_TIMING_LOG",
+    "W40K_PERF_TIMING_MIN_EPISODE",
+    "W40K_PERF_TIMING_FLUSH_EVERY",
+    "W40K_PERF_PROFILE",
+    "W40K_PERF_PROFILE_LOG",
+    "W40K_CHARGE_DEBUG",
+    "W40K_FIGHT_DEBUG",
+    "W40K_CASCADE_DEBUG_FILE",
+    "W40K_FOCUS_FIRE_POOL_AUDIT",
+    # Lue sur le chemin CHAUD du tir (shooting_handlers : trois sites, dont la boucle de
+    # verification de ligne de vue), avec une trace par controle. Deux autres variables du
+    # moteur ont ete ecartees de cette liste a dessein : W40K_DEBUG et
+    # W40K_PERF_PAYLOAD_BREAKDOWN ne sont lues que par services/api_server.py, donc elles ne
+    # ralentissent aucun run de banc — les refuser bloquerait une session PvP voisine sans
+    # rien proteger.
+    "W40K_LOS_DEBUG",
+)
+
+# Valeurs qui DESARMENT une de ces variables : la laisser a "0" ne ralentit rien, refuser dans ce
+# cas rendrait le banc penible sans rien proteger. Alignees sur le parseur strict de
+# W40K_MASK_VERIFY (off/n/false/0).
+_DISARMED_VALUES = {"", "0", "off", "false", "no", "n"}
+
+def assert_clean_environment() -> None:
+    """Refuse de mesurer si une variable d'environnement ralentissante est armee.
+
+    Appelee a chaque run plutot qu'une fois au demarrage : c'est le seul endroit par lequel les
+    deux bancs passent obligatoirement, donc le seul qui ne puisse pas etre oublie par un banc
+    futur. Le cout est nul.
+    """
+    armed = [
+        f"{name}={os.environ[name]!r}"
+        for name in _SPEED_ALTERING_ENV
+        if name in os.environ and os.environ[name].strip().lower() not in _DISARMED_VALUES
+    ]
+    if armed:
+        raise SystemExit(
+            "refus de mesurer : des variables d'environnement qui changent la vitesse d'un run "
+            "sont armees et seraient heritees par chaque entrainement —\n    "
+            + "\n    ".join(armed)
+            + "\nLes desarmer avant la campagne (`unset " + " ".join(a.split("=")[0] for a in armed)
+            + "`). W40K_MASK_VERIFY a ete mesuree a x4,7 (niveau 1) et x17 (niveau 2) : une "
+            "campagne lancee avec ne mesure pas ce qu'elle annonce, et rien dans la sortie ne le "
+            "signalerait."
+        )
+
+
 def validate_paires(paires: int) -> None:
     """Impose un nombre de paires permettant d'annuler la derive (cf. `drift_cancelled`)."""
     if paires < 3 or paires % 2 == 0:
@@ -133,6 +190,8 @@ def main() -> int:
     # permet alors de savoir s'il est stable.
     parser.add_argument("--paires", type=int, default=5)
     args = parser.parse_args()
+
+    assert_clean_environment()
 
     if not os.path.isdir(args.avant):
         raise SystemExit(
