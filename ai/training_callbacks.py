@@ -525,23 +525,36 @@ class EpisodeTerminationCallback(BaseCallback):
                 eta_str = format_time(eta)
                 time_info = f"{elapsed_str}<{eta_str}"
 
-                # `cur` et `min/max` sont des durees PAR SLOT : l'intervalle entre deux fins
-                # d'episode d'un meme environnement. Elles valent donc ~n_envs fois la seconde
-                # par episode reellement ecoulee, et ne sont PAS comparables entre deux runs de
-                # n_envs differents (8 -> 48 envs a fait passer la moyenne par slot de 3,19 a
-                # 10,70 alors que le debit avait double). Les trois excluent le temps d'eval
-                # bot (retranche a la source, cf. boucle des durees). `mur` est le temps d'entrainement
-                # divise par les episodes produits : la seule des deux grandeurs qui se compare.
-                # Il REUTILISE `avg_training_time_per_episode` plutot que de diviser la moyenne
-                # par slot par `n_envs` : cette division-la n'est exacte qu'une fois que CHAQUE
-                # slot a fini un episode (avant, la somme ne couvre que les k slots deja
-                # arrives et le resultat est n_envs/k fois trop petit — 48x sur le premier
-                # affichage), alors qu'un rapport temps/episodes est juste des le premier.
+                # TOUTE la ligne est en secondes de wall-clock PAR EPISODE PRODUIT, et le
+                # diviseur est annonce UNE fois en tete. Melanger deux echelles sur une meme
+                # ligne est precisement ce qui a fait conclure a un ralentissement le
+                # 2026-08-01 : `cur`, `min` et `max` sont mesures PAR SLOT (l'intervalle entre
+                # deux `done` d'un meme environnement, attente de synchronisation comprise),
+                # donc ~n_envs fois la seconde par episode reellement ecoulee — le passage de 8
+                # a 48 envs les a multipliees par 3,4 alors que le debit avait double. Les
+                # ramener ici a l'echelle de `moy` les rend comparables entre deux runs de
+                # `n_envs` differents. C'est un CHANGEMENT D'UNITE, pas une estimation : chaque
+                # valeur reste la duree d'UN episode, exprimee en secondes de wall par episode
+                # produit — « si les n_envs slots tenaient ce rythme ». Aucun biais de remplissage
+                # ici, contrairement a la moyenne par slot (cf. plus bas) : rien n'est somme sur
+                # les slots, et `n_envs` est constant sur la duree du run (garde plus haut sur
+                # `_episode_wall_time_by_env`).
+                # `:.3f` et non `:.2f` : a n_envs=48 une duree par slot de 12 s tombe a 0,250, et
+                # deux decimales ecraseraient la dispersion que `min/max` sert a montrer. Sous
+                # ~0,005 s par episode (soit une duree par slot inferieure a 0,25 s a n_envs=48,
+                # regime que ce moteur n'atteint pas), il faudrait une decimale de plus.
+                # `moy` n'est PAS divise : il vaut deja temps d'entrainement / episodes produits.
+                # Il ne se calcule surtout pas comme `moyenne par slot / n_envs`, division qui
+                # n'est exacte qu'une fois que CHAQUE slot a fini un episode et rend `n_envs/k`
+                # fois trop peu tant que seuls `k` slots sont arrives — 48x sur le premier
+                # affichage. Les quatre valeurs excluent le temps d'eval bot, retranche a la
+                # source dans la boucle des durees.
                 duration_display = (
-                    f"s/ep: cur {self.last_episode_duration_seconds:.2f}, "
-                    f"mur {avg_training_time_per_episode:.3f} ({n_envs} env), "
-                    f"min/max: {self.min_episode_duration_seconds:.2f}"
-                    f"/{self.max_episode_duration_seconds:.2f}"
+                    f"s/ep ({n_envs} env): "
+                    f"cur {self.last_episode_duration_seconds / n_envs:.3f}, "
+                    f"moy {avg_training_time_per_episode:.3f}, "
+                    f"min/max: {self.min_episode_duration_seconds / n_envs:.3f}"
+                    f"/{self.max_episode_duration_seconds / n_envs:.3f}"
                 )
                 gate_label = "Gate 🧱"
                 robust_status_text = ""
