@@ -33,7 +33,10 @@ CE QUE CE BANC IMPOSE
 5. ARBRE DE TRAVAIL SECONDAIRE : chaque run ecrit `ai/models/<agent>/model_<agent>.zip`, protege.
 6. SCENARIO `bot`, `self` ou `all` UNIQUEMENT : les autres chemins de `train.py` ignorent
    `--total-episodes` (cf. `ab_train_common`), et « a budget d'episodes egal » serait faux.
-7. COMBINED RECONSTITUE EN PLEINE PRECISION depuis les compteurs W/L/D et les poids d'evaluation,
+7. ENVIRONNEMENT PROPRE : une variable `W40K_*` armee dans le shell serait heritee par chaque
+   run ; le banc refuse de demarrer (cf. `assert_clean_environment`). Ici elle ne fausse pas le
+   win-rate, mais elle multiplie une campagne deja longue de plusieurs heures.
+8. COMBINED RECONSTITUE EN PLEINE PRECISION depuis les compteurs W/L/D et les poids d'evaluation,
    puis verifie contre le pourcentage affiche : l'arrondi a 0,1 point du bloc final fabriquerait
    des ex aequo, et un ex aequo suffit a faire jeter un resultat unanime a 5 graines.
 
@@ -77,6 +80,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ab_train_common import (  # noqa: E402
     RunFailed,
     assert_effective,
+    assert_clean_environment,
     assert_not_scheduled,
     assert_provable,
     assert_scenario_supported,
@@ -205,6 +209,7 @@ def main() -> int:
 
     repo = assert_worktree(args.repo, args.agent)
     assert_scenario_supported(args.scenario)
+    assert_clean_environment()
     assert_provable(args.param)
     phase_block = read_phase_config(repo, args.agent, args.training_config)
     for value in (args.a, args.b):

@@ -42,6 +42,9 @@ CE QUE CE BANC IMPOSE (identique a `ab_bench_nenvs.py`, dont il generalise le pr
    poids est ecrasant : 6 episodes d'entrainement = 21 s, evaluation finale > 13 min.
 6. SCENARIO `bot`, `self` ou `all` UNIQUEMENT : les autres chemins de `train.py` ignorent
    `--total-episodes` (cf. `ab_train_common`), le banc mesurerait alors le budget de la config.
+7. ENVIRONNEMENT PROPRE : `subprocess` herite du shell, et une variable `W40K_*` de verification
+   ou d'instrumentation y ralentit chaque run sans laisser de trace dans la sortie. Le banc
+   refuse de demarrer tant qu'une seule est armee (cf. `assert_clean_environment`).
 
 CONTROLE ANTI-CONFUSION
 -----------------------
@@ -79,6 +82,7 @@ from ab_bench import drift_cancelled, print_spread, validate_paires  # noqa: E40
 from ab_train_common import (  # noqa: E402
     RunFailed,
     assert_effective,
+    assert_clean_environment,
     assert_not_scheduled,
     assert_provable,
     assert_scenario_supported,
@@ -137,6 +141,7 @@ def main() -> int:
         raise SystemExit("--a et --b identiques : rien a comparer.")
     repo = assert_worktree(args.repo, args.agent)
     assert_scenario_supported(args.scenario)
+    assert_clean_environment()
     assert_provable(args.param)
     validate_paires(args.paires)
 
