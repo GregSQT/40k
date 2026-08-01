@@ -853,22 +853,32 @@ calibrée pour 50k épisodes tient le LR au-dessus de 0.001 pendant **83k** épi
 150k, contre 28k sur un run de 50k — trois fois plus d'occasions de diverger ou d'oublier.
 
 `decay_fraction` découple les deux : la rampe s'achève à cette fraction du run, puis la valeur
-**reste au plancher** (`final` / `end`). À 0.4 sur 150k épisodes, la décroissance occupe les
-60k premiers — calibration comparable à un run court — puis 90k épisodes consolident à
-LR/entropie plancher. `1.0` reproduit exactement le comportement historique et reste le réglage
-des runs courts.
+**reste au plancher** (`final` / `end`). `1.0` reproduit exactement le comportement historique et
+reste le réglage des runs courts.
 
-| Profil | `total_episodes` | `decay_fraction` | Rampe achevée à |
-|--------|------------------|------------------|-----------------|
-| `x1` | 10 000 | 1.0 | fin du run |
-| `x1_long` | 150 000 | 0.4 | 60 000 épisodes |
-| autres | — | 1.0 | fin du run |
+**La clé est propre à chaque rampe, et `x1_long` s'en sert pour leur donner des valeurs
+différentes** — elles ne pilotent pas la même chose :
+
+| Profil | `total_episodes` | `learning_rate` | `ent_coef` |
+|--------|------------------|-----------------|------------|
+| `x1` | 10 000 | 1.0 → fin du run | 1.0 → fin du run |
+| `x1_long` | 200 000 | **0.7** → 140 000 ép. | **0.4** → 80 000 ép. |
+| autres | — | 1.0 | 1.0 |
+
+L'**entropie** s'arrête tôt (80k) : passé ce point on veut que la politique cesse d'explorer et
+exploite ce qu'elle a appris, sur les 120k épisodes restants. Le **learning rate** descend plus
+longtemps (140k) : le poser au plancher (0.0002) dès 80k briderait l'apprentissage sur 60 % du
+budget du run. La rampe restant continue, ce choix ne rend pas le début plus risqué — à 80k le LR
+vaut 0.00097 au lieu de 0.0002.
 
 **Le profil `x1_long`** est `x1` recalibré pour les runs longs, et rien d'autre : mêmes
 architecture, `n_steps`, `target_kl`, rampe de déploiement. Ne changent que ce qui dépend de la
-longueur du run — `total_episodes` (150k), les deux `decay_fraction` (0.4) et `bot_eval_freq`
-(5000 : à 2000, un run de 150k déclencherait 75 évaluations bot au lieu de 30). Verrou :
-`tests/unit/ai/test_schedule_decay_fraction.py` refuse toute autre divergence.
+longueur du run — `total_episodes` (200k), les deux `decay_fraction` et `bot_eval_freq`
+(**10000**, soit 20 points de mesure : à 5000, les 40 évaluations × 100 épisodes coûteraient
+~8,5 h — 13 min l'unité, cf. commit `42326ed0` — contre ~5,5 h d'entraînement à 36k ép./h, donc
+l'évaluation doublerait la durée du run). `bot_eval_intermediate` reste à 100 : c'est cette
+mesure qui pilote `save_best_robust`, la dégrader dégraderait le choix du modèle sauvegardé.
+Verrou : `tests/unit/ai/test_schedule_decay_fraction.py` refuse toute autre divergence.
 
 `checkpoint_save_freq` reste **aligné sur `x1`**, délibérément : SB3 sauvegarde tous les
 `save_freq` **appels du callback** (`callbacks.py:300`), soit un par pas du VecEnv — jamais des

@@ -166,3 +166,41 @@ def test_apply_rollout_n_steps_requires_the_key() -> None:
 
     with pytest.raises(KeyError):
         apply_rollout_n_steps({}, 48, _space("box"))
+
+
+# --- `batch_size` doit diviser le rollout REEL, pas celui demande en config -------------------
+
+def test_every_profile_batch_size_divides_its_real_rollout() -> None:
+    """Le rollout reel est `(n_steps // n_envs) * n_envs`, PAS `n_steps`.
+
+    `apply_rollout_n_steps` ajuste `n_steps` au passage vectorise ; `batch_size` ne l'est pas et
+    reste recopie tel quel. A `n_envs=48` le rollout tombe a 8160 et `batch_size: 1024` laisse un
+    mini-lot tronque de 992 a chaque epoque — SB3 le signale, mais un avertissement au demarrage
+    d'un run de plusieurs heures ne se lit pas.
+
+    Le controle porte sur l'INVARIANT (`rollout % batch_size == 0`), jamais sur une valeur en
+    dur : 1020 ne vaut que pour `n_envs=48`, et `n_envs=8` (rollout 8192) veut 1024. Figer un
+    nombre ici creerait le defaut inverse sur la moitie des profils.
+    """
+    import json
+    import os
+
+    config_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+        "config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json",
+    )
+    with open(config_path, encoding="utf-8-sig") as f:
+        profiles = {k: v for k, v in json.load(f).items() if isinstance(v, dict)}
+
+    assert profiles, "aucun profil lu : le controle ne regarderait rien"
+    for name, profile in profiles.items():
+        n_envs = profile["n_envs"]
+        n_steps = profile["model_params"]["n_steps"]
+        batch_size = profile["model_params"]["batch_size"]
+        rollout = (n_steps // n_envs) * n_envs if n_envs > 1 else n_steps
+        assert rollout % batch_size == 0, (
+            f"profil '{name}' : n_envs={n_envs}, n_steps={n_steps} -> rollout reel {rollout}, "
+            f"que batch_size={batch_size} ne divise pas (reste {rollout % batch_size}). "
+            f"Plus grande valeur valide <= {batch_size} : "
+            f"{max(d for d in range(1, batch_size + 1) if rollout % d == 0)}."
+        )

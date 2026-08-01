@@ -280,8 +280,9 @@ défaut — `setup_callbacks` les lit par `require_key`.
 `decay_fraction` existe parce que la rampe est normalisée sur `total_episodes` : allonger un run
 l'étire mécaniquement, alors que ce qui compte pour PPO est le **nombre d'updates de gradient**
 passés à haut LR / haute entropie. `1.0` = comportement historique (rampe sur tout le run) et
-reste le réglage des runs courts ; `x1_long` (150 000 épisodes) utilise `0.4`, la rampe s'achevant
-donc à 60 000 épisodes suivis de 90 000 au plancher. Détail du raisonnement et tableau des
+reste le réglage des runs courts. La clé est **propre à chaque rampe** : `x1_long` (200 000
+épisodes) met `0.4` sur `ent_coef` (exploration terminée à 80 000, exploitation ensuite) et `0.7`
+sur `learning_rate` (rampe jusqu'à 140 000, pour ne pas brider l'apprentissage sur 60 % du run). Détail du raisonnement et tableau des
 profils : `Documentation/AI_TRAINING.md`. Verrou :
 `tests/unit/ai/test_schedule_decay_fraction.py`.
 

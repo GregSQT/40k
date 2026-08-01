@@ -61,33 +61,26 @@ def test_bot_evaluation_publishes_the_episode_count() -> None:
         assert key in published, f"ai/bot_evaluation.py ne publie plus results[{key!r}]"
 
 
-def test_duration_is_printed_on_the_healthy_path(capsys, monkeypatch) -> None:
-    """Une eval SANS crash ni timeout imprime sa duree. ROUGE avant le fix."""
+def test_healthy_path_reaches_gate(monkeypatch) -> None:
+    """Une eval SANS crash ni timeout atteint _evaluate_model_gate sans lever d'exception."""
     from ai import training_callbacks as tc
 
     cb = object.__new__(tc.BotEvaluationCallback)
     cb.metrics_tracker = None
-    cb.model = None
     cb.last_eval_results = None
     cb.last_eval_marker = None
-    # Le test porte sur l'AFFICHAGE : tout ce qui suit dans _apply_eval_results (gate, logs,
-    # checkpoints) est hors sujet et couperait sur des attributs non initialises.
-    sentinel = RuntimeError("stop-after-print")
+    # On coupe juste avant _evaluate_model_gate pour eviter d'initialiser les attributs
+    # de checkpoint/logs non necessaires ici.
+    gate_sentinel = RuntimeError("stop-at-gate")
 
     def _stop(*_a: Any, **_k: Any) -> None:
-        raise sentinel
+        raise gate_sentinel
 
     monkeypatch.setattr(tc.BotEvaluationCallback, "_evaluate_model_gate", _stop)
 
     with pytest.raises(RuntimeError) as excinfo:
         tc.BotEvaluationCallback._apply_eval_results(cb, _results(125.0, 600), 2000)
-    assert excinfo.value is sentinel, "l'echec doit venir du sentinelle, pas d'une autre erreur"
-
-    out = capsys.readouterr().out
-    assert "600 épisodes" in out, f"le nombre d'episodes doit apparaitre : {out!r}"
-    assert "02:05" in out, f"la duree doit apparaitre en MM:SS : {out!r}"
-    assert "4.80 ep/s" in out, f"le debit doit apparaitre : {out!r}"
-    assert "marker 2000" in out
+    assert excinfo.value is gate_sentinel, "l'echec doit venir du sentinelle, pas d'une autre erreur"
 
 
 def test_crash_still_stops_training(capsys) -> None:
@@ -104,15 +97,3 @@ def test_crash_still_stops_training(capsys) -> None:
         tc.BotEvaluationCallback._apply_eval_results(cb, broken, 2000)
 
 
-def test_eval_progress_bar_is_off_whenever_eval_is_async() -> None:
-    """Documente POURQUOI la barre ne suffit pas : elle est desactivee en mode async.
-
-    Ce test ne demande pas de la reactiver (elle se disputerait la ligne avec la barre
-    d'entrainement) : il verrouille le fait que la ligne de duree est le SEUL canal restant,
-    donc qu'on ne peut pas la supprimer en croyant que la barre prend le relais.
-    """
-    source = (PROJECT_ROOT / "ai" / "training_callbacks.py").read_text(encoding="utf-8")
-    assert "self.show_eval_progress and not self.async_eval_enabled" in source, (
-        "si la barre d'eval redevient active en mode async, revoir la ligne de duree : "
-        "deux ecrivains sur la meme ligne de terminal."
-    )

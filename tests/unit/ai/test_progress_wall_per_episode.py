@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import re
 import time
+from typing import Any, Dict
 
 import pytest
 
@@ -232,15 +233,17 @@ def test_moy_ignore_les_episodes_des_chunks_precedents(monkeypatch):
     """
     # 0.016 et non 0.01 : `moy` tombe alors sur 0.050, valeur exactement rendue par `:.3f`,
     # au lieu de 0.03125 arrondi a 0.031 (la moitie de la tolerance consommee par l'arrondi).
-    n_envs, steps_per_episode, step_seconds = 8, 25, 0.016
-    common = dict(n_envs=n_envs, steps_per_episode=steps_per_episode,
-                  step_seconds=step_seconds, episodes_per_slot=1)
+    n_envs, steps_per_episode, step_seconds, episodes_per_slot = 8, 25, 0.016, 1
 
-    line_offset = _drive(monkeypatch, global_episode_offset=992, **common)
-    line_fresh = _drive(monkeypatch, global_episode_offset=0, **common)
+    line_offset = _drive(monkeypatch, n_envs=n_envs, steps_per_episode=steps_per_episode,
+                         step_seconds=step_seconds, episodes_per_slot=episodes_per_slot,
+                         global_episode_offset=992)
+    line_fresh = _drive(monkeypatch, n_envs=n_envs, steps_per_episode=steps_per_episode,
+                        step_seconds=step_seconds, episodes_per_slot=episodes_per_slot,
+                        global_episode_offset=0)
 
     elapsed = steps_per_episode * step_seconds
-    expected = elapsed / (n_envs * common["episodes_per_slot"])
+    expected = elapsed / (n_envs * episodes_per_slot)
     assert _read_moy(line_offset) == pytest.approx(expected, abs=5e-4), (
         "`moy` doit compter les episodes de CE chunk, pas ceux des chunks precedents"
     )
@@ -262,7 +265,7 @@ def test_moy_retranche_le_temps_d_evaluation_bot(monkeypatch):
     """
     n_envs, steps_per_episode, step_seconds = 4, 10, 0.02
     eval_seconds = 30.0
-    gate_state = {"label": "Gate 🧱"}
+    gate_state: Dict[str, Any] = {"label": "Gate 🧱"}
     clock, callback, printed = _install(monkeypatch, n_envs, steps_per_episode,
                                         episodes_per_slot=2, gate_display_state=gate_state)
 

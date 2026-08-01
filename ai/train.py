@@ -815,7 +815,20 @@ def _observation_floats(observation_space) -> int:
     import gymnasium as gym
 
     if isinstance(observation_space, gym.spaces.Dict):
-        return sum(int(np.prod(sub.shape)) for sub in observation_space.spaces.values())
+        total = 0
+        for name, sub in observation_space.spaces.items():
+            if sub.shape is None:
+                raise ValueError(
+                    f"sous-espace d'observation '{name}' sans shape ({type(sub).__name__}) : "
+                    "impossible de dimensionner le buffer"
+                )
+            total += int(np.prod(sub.shape))
+        return total
+    if observation_space.shape is None:
+        raise ValueError(
+            f"espace d'observation sans shape ({type(observation_space).__name__}) : "
+            "impossible de dimensionner le buffer"
+        )
     return int(np.prod(observation_space.shape))
 
 
@@ -3042,7 +3055,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
             lr_cfg = model_params_copy["learning_rate"]
             model_params_copy["learning_rate"] = _make_constant_lr_schedule(lr_cfg)
-            chunk_log(f"✅ Learning rate schedule: {lr_cfg['initial']} → {lr_cfg['final']} (linear decay)")
+            chunk_log(f"✅ Learning rate: constant {lr_cfg['initial']} (decay → {lr_cfg['final']} via LearningRateScheduleCallback)")
         model = MaskablePPO(env=env, **model_params_copy)
     elif append_training:
         chunk_log(f"📁 Loading existing model for continued training: {model_path}")

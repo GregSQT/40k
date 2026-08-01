@@ -18,8 +18,11 @@ from __future__ import annotations
 
 import json
 import os
+from typing import Callable, Optional, cast
 
 import pytest
+from stable_baselines3.common.base_class import BaseAlgorithm
+from stable_baselines3.common.callbacks import BaseCallback
 
 from ai.training_callbacks import (
     EntropyScheduleCallback,
@@ -43,19 +46,30 @@ class _FakePolicy:
         self.optimizer = _FakeOptimizer()
 
 
+def _unwritten_schedule(_progress_remaining: float) -> float:
+    """`lr_schedule` avant tout passage du callback : l'appeler doit ÉCHOUER, pas rendre None."""
+    raise AssertionError("lr_schedule n'a jamais ete remplace par le callback")
+
+
 class _FakeModel:
     """Surface SB3 réellement touchée par les callbacks (cf. `LearningRateScheduleCallback._apply`)."""
 
     def __init__(self) -> None:
-        self.learning_rate = None
-        self.lr_schedule = None
-        self.ent_coef = None
+        self.learning_rate: Optional[float] = None
+        self.lr_schedule: Callable[[float], float] = _unwritten_schedule
+        self.ent_coef: Optional[float] = None
         self.policy = _FakePolicy()
 
 
-def _drive(callback, model, episodes: int, dones_per_step: int = 4) -> None:
+def _attach(callback: BaseCallback, model: _FakeModel) -> None:
+    """SB3 injecte le vrai modèle ; le double n'en implémente que la surface touchée."""
+    callback.model = cast(BaseAlgorithm, model)
+
+
+def _drive(callback: BaseCallback, model: _FakeModel, episodes: int,
+           dones_per_step: int = 4) -> None:
     """Pilote le callback comme SB3 : `_on_training_start`, puis des lots de `dones`."""
-    callback.model = model
+    _attach(callback, model)
     callback.num_timesteps = 0
     callback._on_training_start()
     delivered = 0
@@ -157,7 +171,7 @@ def test_resume_mid_run_starts_at_the_right_value() -> None:
     cb = LearningRateScheduleCallback(
         0.002, 0.0002, 150_000, decay_fraction=0.4, initial_episode_count=30_000
     )
-    cb.model = model
+    _attach(cb, model)
     cb._on_training_start()
     assert model.learning_rate == pytest.approx(0.0011)  # mi-rampe
 
@@ -249,13 +263,22 @@ def test_x1_long_is_x1_recalibrated_for_long_runs() -> None:
             continue
         assert x1[key] == x1_long[key], f"x1_long dérive de x1 sur '{key}'"
 
-    assert x1_long["total_episodes"] == 150_000
-    for ramp_key in ("learning_rate", "ent_coef"):
+    assert x1_long["total_episodes"] == 200_000
+    # Les deux rampes ont des `decay_fraction` DISTINCTES, et c'est délibéré : elles ne servent
+    # pas la même chose. L'entropie s'arrête tôt (80k) parce qu'on veut que la politique cesse
+    # d'explorer et exploite ; le learning rate descend plus longtemps (140k) parce que le mettre
+    # au plancher à 80k briderait l'apprentissage sur 60 % du budget du run.
+    expected_decay = {"learning_rate": 0.7, "ent_coef": 0.4}
+    for ramp_key, expected in expected_decay.items():
         long_ramp = dict(x1_long["model_params"][ramp_key])
         ref_ramp = dict(x1["model_params"][ramp_key])
-        assert long_ramp.pop("decay_fraction") == 0.4
+        assert long_ramp.pop("decay_fraction") == expected, ramp_key
         assert ref_ramp.pop("decay_fraction") == 1.0
         assert long_ramp == ref_ramp, f"x1_long change {ramp_key} au-delà de decay_fraction"
+    assert expected_decay["ent_coef"] < expected_decay["learning_rate"], (
+        "l'exploration doit s'arrêter AVANT que le learning rate n'atteigne son plancher, "
+        "sinon la politique se fige alors qu'elle peut encore apprendre vite"
+    )
     # Le reste de model_params (archi, n_steps, target_kl…) doit être identique : un run long
     # sert à mesurer plus longtemps, pas à changer le modèle mesuré.
     assert {k: v for k, v in x1_long["model_params"].items()
@@ -264,8 +287,10 @@ def test_x1_long_is_x1_recalibrated_for_long_runs() -> None:
             if k not in ("learning_rate", "ent_coef")}
 
     long_cb, ref_cb = x1_long["callback_params"], x1["callback_params"]
-    assert long_cb["bot_eval_freq"] == 5000, (
-        "à 2000, un run de 150k déclencherait 75 évaluations bot au lieu de 30."
+    assert long_cb["bot_eval_freq"] == 10000, (
+        "20 points de mesure sur 200k. À 5000, les 40 évaluations × 100 épisodes coûteraient "
+        "~8,5 h (13 min l'unité, commit 42326ed0) contre ~5,5 h d'entraînement : l'évaluation "
+        "doublerait la durée du run."
     )
     # `checkpoint_save_freq` reste ALIGNÉ sur x1, et ce n'est pas un oubli : SB3 sauvegarde tous
     # les `save_freq` APPELS du callback (callbacks.py:300), soit un par pas du VecEnv — jamais

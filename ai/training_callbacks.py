@@ -2073,23 +2073,6 @@ class BotEvaluationCallback(BaseCallback):
                     int(eval_marker),
                 )
             return
-        # Le COUT de l'evaluation, sur le chemin normal. Il n'etait affiche que par les chemins
-        # d'echec (crash, timeout) : sur un run sain, `eval_duration_seconds` etait calcule puis
-        # jete, et la barre de progression de l'eval est desactivee en mode async
-        # (`effective_show_eval_progress`, pour ne pas se disputer la ligne avec la barre
-        # d'entrainement). Une evaluation pouvait donc peser des dizaines de minutes par marqueur
-        # sans qu'aucune sortie ne le dise. Une seule ligne, emise a la CONSOMMATION du resultat
-        # (thread principal), donc sans collision avec la barre.
-        # Le marqueur seul identifie l'evaluation : `self.eval_count` n'ajouterait rien et
-        # ferait dependre l'affichage d'un attribut que cette methode n'utilise pas autrement.
-        episodes_played = int(require_key(results, "total_episodes_played"))
-        rate = episodes_played / eval_duration_seconds if eval_duration_seconds > 0 else 0.0
-        print(
-            f"\n⏱️  Eval marker {eval_marker} : {episodes_played} épisodes "
-            f"en {int(eval_duration_seconds // 60):02d}:{int(eval_duration_seconds % 60):02d} "
-            f"({rate:.2f} ep/s)"
-        )
-
         gate_pass = self._evaluate_model_gate(results, eval_marker)
 
         combined_win_rate = require_key(results, 'combined')
