@@ -130,7 +130,10 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["unit_zone_assignments"] = assignments
 
     if is_agent_turn:
-        # Reset zone_intent_free_steps_remaining to MAX_OBJECTIVES
+        # Reset zone_intent_free_steps_remaining to MAX_OBJECTIVES.
+        # Cette valeur PLEINE est aussi le signal qu'aucun intent n'a encore ete joue ce tour :
+        # `W40KEngine._process_command_phase` s'en sert pour solder la declaration du tour
+        # precedent exactement une fois (cf. `settle_pending_zone_intent_declaration`).
         game_state["zone_intent_free_steps_remaining"] = MAX_OBJECTIVES
 
         # Stay in command phase — agent will issue zone intent actions

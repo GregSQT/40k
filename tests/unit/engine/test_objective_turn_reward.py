@@ -1,4 +1,4 @@
-"""Tests — versement du reward d'objectif par tour (reward_per_objective + objective_lead).
+"""Tests — versement du reward d'objectif par tour (multiple exact des VP du primaire).
 
 CE QUI A ETE MANQUE. `_calculate_objective_reward_per_turn` se declenche sur la fin de la phase
 command (`phase_transition` + `next_phase == "move"`). Ce payload ne porte ni `unitId` ni
@@ -23,17 +23,18 @@ from typing import Any, Dict, List
 import pytest
 
 from config_loader import get_config_loader
+from engine.game_state import primary_objective_points
 from engine.phase_handlers.command_handlers import command_phase_end
 from engine.reward_calculator import RewardCalculator
 
 AGENT = "ArmageddonAgent"
 
-PRIMARY_OBJECTIVE: Dict[str, Any] = {
-    "id": "objectives_control",
-    "scoring": {"start_turn": 2, "max_points_per_turn": 15, "rules": []},
-    "timing": {"default_phase": "command", "round5_second_player_phase": "fight"},
-    "control": {"method": "oc_sum_greater", "control_method": "default", "tie_behavior": "no_control"},
-}
+# La mission REELLE, pas une recopie. Le versement vaut `facteur x VP marques` : un `rules: []`
+# code en dur ici — ce qu'il y avait avant, du temps ou seule la formule lineaire etait testee —
+# ferait valoir 0 a chaque versement et rendrait tout ce fichier vert sans rien mesurer.
+PRIMARY_OBJECTIVE: Dict[str, Any] = get_config_loader().load_primary_objective_config(
+    "objectives_control"
+)
 
 
 def _objective_controllers(mine: int, theirs: int, controlled_player: int) -> Dict[str, Any]:
@@ -73,16 +74,15 @@ def _system_response_penalty() -> float:
 
 
 def _expected_turn_reward(mine: int, theirs: int) -> float:
-    """Formule du versement : par objectif tenu, PLUS un FORFAIT si j'en tiens plus que lui.
+    """Le versement vaut `objective_reward_factor x VP marques ce tour`.
 
-    Forfait et non proportionnel : la regle de score correspondante du primaire
-    (`control_more_than_opponent`) accorde ses points en une fois, quelle que soit l'avance.
+    Le montant n'est PAS recalcule ici a partir des regles : il passe par la meme fonction que le
+    moteur de scoring et que le versement (`primary_objective_points`). Une seconde
+    implementation dans le test rendrait vert le jour ou les deux autres divergeraient — c'est
+    precisement le defaut qu'on vient de corriger.
     """
-    cfg = _objective_rewards()
-    total = float(cfg["reward_per_objective"]) * mine
-    if cfg["use_objective_lead"] is True and mine > theirs:
-        total += float(cfg["reward_for_objective_lead"])
-    return total
+    factor = float(_objective_rewards()["objective_reward_factor"])
+    return factor * primary_objective_points(PRIMARY_OBJECTIVE["scoring"], mine, theirs)
 
 
 def _game_state(
@@ -158,7 +158,7 @@ def test_the_command_phase_transition_actually_pays_the_objective_reward() -> No
 
 
 def test_the_lead_term_is_included() -> None:
-    """`reward_for_objective_lead` compte l'AVANCE : deux comptages differents, deux montants."""
+    """La regle `control_more_than_opponent` compte : meme nombre tenu, deux montants."""
     ahead, _ = _pay(
         _calculator(controlled_player=1),
         _game_state(turn=2, current_player=1, controlled_player=1, mine=2, theirs=0),
@@ -196,17 +196,68 @@ def test_the_lead_bonus_is_flat_not_proportional() -> None:
 def test_being_behind_costs_nothing_extra() -> None:
     """Etre en retard ne facture RIEN de plus : le retard coute deja les VP non marques.
 
-    La version proportionnelle retirait `reward_for_objective_lead` par objectif de retard —
-    une penalite que ni la config ni la regle de score ne prevoient.
+    La version proportionnelle retirait le montant d'avance par objectif de retard — une
+    penalite que ni la config ni la regle de score ne prevoient.
     """
     calc = _calculator(controlled_player=1)
     state = _game_state(turn=2, current_player=1, controlled_player=1, mine=1, theirs=3)
 
     _total, breakdown = _pay(calc, state)
-    per_objective = float(_objective_rewards()["reward_per_objective"])
 
-    assert breakdown["objective"] == pytest.approx(per_objective * 1)
+    assert breakdown["objective"] == pytest.approx(_expected_turn_reward(1, 3))
     assert breakdown["objective"] > 0.0, "tenir un objectif reste paye, meme en retard"
+
+
+def test_the_payout_is_a_staircase_capped_like_the_mission() -> None:
+    """Tenir 2, 3, 4 ou 5 objectifs avec la meme avance rapporte EXACTEMENT la meme chose.
+
+    LE DEFAUT CORRIGE. Le versement etait `reward_per_objective * mes_objectifs`, LINEAIRE et
+    sans plafond, alors que la mission est un escalier plafonne : 5 VP si >=1, 5 si >=2, 5 si
+    j'en tiens plus que lui, 15 au maximum. Au-dela de 2 objectifs le jeu ne paie plus rien et
+    la recompense continuait de monter de 10 par zone — l'agent etait paye pour s'etaler sur des
+    objectifs que la mission ne compte pas, au lieu de consolider et de priver l'adversaire.
+
+    VERROU. En remettant `total_reward = reward_per_objective * controlled_objectives` dans
+    `_calculate_objective_reward_per_turn`, ce test passe au ROUGE : les quatre montants
+    deviennent 20 / 30 / 40 / 50 au lieu d'etre egaux.
+
+    CONTROLE NON VACANT : `expected > 0` garantit qu'une egalite a zero (mission sans regle,
+    versement mort) ne passerait pas pour une egalite valide.
+    """
+    expected = _expected_turn_reward(2, 1)
+    assert expected > 0.0, "versement nul : l'egalite testee ne prouverait rien"
+
+    payouts = []
+    for mine in (2, 3, 4, 5):
+        _total, breakdown = _pay(
+            _calculator(controlled_player=1),
+            _game_state(turn=2, current_player=1, controlled_player=1, mine=mine, theirs=1),
+        )
+        payouts.append(breakdown["objective"])
+
+    for mine, paid in zip((2, 3, 4, 5), payouts):
+        assert paid == pytest.approx(expected), f"{mine} objectifs paye {paid}, attendu {expected}"
+
+
+def test_the_payout_is_exactly_the_scored_vp_times_the_factor() -> None:
+    """Le montant verse est le multiple exact des VP que le moteur attribue au meme instant.
+
+    C'est ce qui rend `01_VP/f_obj_rewards` lisible sur les VP au lieu de rejouer une formule :
+    si cette identite tombe, la courbe ment. On compare donc au scoring REEL du moteur
+    (`primary_objective_points`, la fonction qu'appelle `_apply_primary_objective_scoring_single`
+    pour ecrire les VP), pas a une formule reecrite ici.
+    """
+    factor = float(_objective_rewards()["objective_reward_factor"])
+    for mine, theirs in ((0, 2), (1, 1), (2, 1), (2, 3), (3, 0)):
+        _total, breakdown = _pay(
+            _calculator(controlled_player=1),
+            _game_state(turn=2, current_player=1, controlled_player=1, mine=mine, theirs=theirs),
+        )
+        scored_vp = primary_objective_points(PRIMARY_OBJECTIVE["scoring"], mine, theirs)
+        assert breakdown["objective"] == pytest.approx(factor * scored_vp), (
+            f"{mine} contre {theirs} : verse {breakdown['objective']}, "
+            f"VP marques {scored_vp} x {factor}"
+        )
 
 
 def test_paid_once_per_turn() -> None:
@@ -282,13 +333,34 @@ def test_not_paid_before_the_scoring_start_turn() -> None:
 # question qui decide si l'agent est paye pour gagner ou pour autre chose.
 
 
-def _move_state(controlled_player: int = 1) -> Dict[str, Any]:
-    """Etat de phase move avec UN objectif non controle, sur lequel l'unite 1 va se poser."""
+def _move_state(controlled_player: int = 1, model_col: int = 5, model_row: int = 5) -> Dict[str, Any]:
+    """Etat de phase move avec UN objectif non controle, ou l'unite 1 a une FIGURINE posee.
+
+    Le bonus « sur un objectif » se juge PAR FIGURINE (14.02, empreinte de socle) et non sur
+    l'ancre d'escouade : l'etat doit donc porter `models_cache` / `squad_models`, sinon le
+    lecteur leve. C'est `model_col`/`model_row` qui decide de la presence dans la zone — l'ancre
+    de `units_cache` reste volontairement AILLEURS (1,1), pour que ce fichier casse si quelqu'un
+    revenait a une lecture par ancre.
+    """
     state = _game_state(turn=2, current_player=controlled_player, controlled_player=controlled_player)
     state["phase"] = "move"
     state["objectives"] = [{"id": "obj_move", "hexes": [{"col": 5, "row": 5}]}]
     # Zone non controlee : `get_objective_control` < 1.0 est la condition du bonus.
     state["objective_controllers"] = {}
+    opponent = 2 if controlled_player == 1 else 1
+    state["units_cache"]["1"]["orientation"] = 0
+    state["units_cache"]["2"]["orientation"] = 0
+    state["squad_models"] = {"1": ["m1"], "2": ["m2"]}
+    state["models_cache"] = {
+        "m1": {
+            "player": controlled_player, "col": model_col, "row": model_row,
+            "HP_CUR": 6, "BASE_SHAPE": "round", "BASE_SIZE": 1,
+        },
+        "m2": {
+            "player": opponent, "col": 20, "row": 20,
+            "HP_CUR": 6, "BASE_SHAPE": "round", "BASE_SIZE": 1,
+        },
+    }
     for unit in state["units"]:
         unit["battle_shocked"] = False
         # `_enrich_unit_for_reward_mapper` s'execute AVANT le dispatch par action et exige les
@@ -325,6 +397,56 @@ def test_the_on_objective_bonus_is_categorised_as_objective_not_base_action() ->
     assert breakdown["objective"] == pytest.approx(bonus)
     assert breakdown["base_actions"] == pytest.approx(0.0)
     assert total == pytest.approx(bonus)
+
+
+def test_the_on_objective_bonus_reads_the_models_not_the_squad_anchor() -> None:
+    """Une FIGURINE dans la zone suffit, meme si l'ancre d'escouade est ailleurs (14.02).
+
+    LE DEFAUT CORRIGE. Le bonus comparait la DESTINATION d'escouade a un hexe d'objectif par
+    egalite stricte de coordonnees. Deux erreurs cumulees : l'ancre n'est pas une figurine, et
+    l'egalite de centre ignore l'empreinte de socle — alors que le decompte de controle du meme
+    moteur (`sum_objective_control_oc_multi`) compte une figurine des qu'une case de son socle
+    recouvre la zone. Une escouade etalee etait donc COMPTEE par le moteur et PAS payee par la
+    recompense, dans le meme etat de jeu.
+
+    VERROU. En remettant la comparaison `h_col == to_col and h_row == to_row` dans
+    `_calculate_on_objective_reward`, ce test passe au ROUGE : la destination (1,1) ne tombe sur
+    aucun hexe d'objectif, donc le bonus vaut 0.
+
+    Le cas MIROIR est verifie juste apres : ancre sur la zone, aucune figurine dedans -> rien.
+    """
+    calc = _calculator(controlled_player=1)
+    state = _move_state(model_col=5, model_row=5)  # figurine DANS la zone
+    bonus = _on_objective_bonus()
+
+    # Destination d'escouade HORS de la zone d'objectif : seule la figurine y est.
+    total = calc.calculate_reward(
+        True, {"action": "move", "unitId": "1", "toCol": 1, "toRow": 1}, state
+    )
+    breakdown = state["last_reward_breakdown"]
+
+    assert bonus > 0.0, "on_objective_bonus nul en config : le test ne mesure rien"
+    assert breakdown["objective"] == pytest.approx(bonus)
+    assert total == pytest.approx(bonus)
+
+
+def test_the_on_objective_bonus_is_not_paid_when_no_model_stands_in_the_zone() -> None:
+    """Miroir : destination sur l'hexe d'objectif, mais aucune figurine dedans -> rien.
+
+    C'est l'autre moitie du defaut d'ancre : l'ancienne lecture payait des que la DESTINATION
+    tombait sur la zone, y compris quand aucune figurine vivante ne s'y trouvait. Sans ce
+    controle, un lecteur qui rendrait « vrai » en permanence passerait le test precedent.
+    """
+    calc = _calculator(controlled_player=1)
+    state = _move_state(model_col=30, model_row=30)  # figurine LOIN de la zone
+
+    total = calc.calculate_reward(
+        True, {"action": "move", "unitId": "1", "toCol": 5, "toRow": 5}, state
+    )
+    breakdown = state["last_reward_breakdown"]
+
+    assert breakdown["objective"] == pytest.approx(0.0)
+    assert total == pytest.approx(0.0)
 
 
 def test_the_fight_path_does_not_count_the_on_objective_bonus_twice() -> None:
@@ -410,6 +532,60 @@ def test_a_shoot_payload_carrying_the_transition_still_pays_the_objective(
     assert breakdown["objective"] == pytest.approx(expected)
     # La ventilation ne doit plus annoncer des points que le total ne verse pas.
     assert breakdown["total"] == pytest.approx(total)
+
+
+def test_an_opponent_action_that_ends_the_game_still_pays_the_objective() -> None:
+    """Partie terminee par l'ADVERSAIRE : le versement d'objectif du tour doit etre paye.
+
+    CE QUI ETAIT MANQUE. Sur le chemin « action adverse », la sortie `game_over` renvoyait
+    `situational + defensive_penalty` — sans `objective_turn_reward`, alors que la sortie
+    jumelle deux lignes plus bas (partie non terminee) l'inclut. Les points etaient perdus POUR
+    DE BON : `objective_rewarded_turns` a deja consomme le tour, donc aucun autre chemin ne les
+    versera, et `breakdown['objective']` les a deja credites — la ventilation annoncait une part
+    que le total ne payait pas. Meme defaut que sur les trois sorties anticipees du tir.
+
+    VERROU. En retirant `+ objective_turn_reward` de cette sortie, ce test passe au ROUGE :
+    le total tombe a la seule recompense terminale.
+
+    CONTROLE NON VACANT : `expected_objective > 0` garantit qu'un total egal au terminal seul ne
+    puisse pas passer pour un versement correct, et la penalite defensive est nulle par
+    construction (aucun evenement de degats) pour isoler le terme mesure.
+    """
+    controlled = 1
+    calc = _calculator(controlled_player=controlled)
+    # Le vainqueur vient du state_manager, comme en production (`_determine_winner` lui delegue).
+    # Sans lui, la logique de repli tranche a l'ELIMINATION : il faudrait tuer toutes les unites
+    # de l'agent pour obtenir un vainqueur, or une partie sans unite controlee ne verse aucun
+    # objectif — le test ne mesurerait plus rien. Ici la partie se termine avec les deux camps
+    # vivants (fin de tour 5), le cas exact ou le versement d'objectif est en jeu.
+    class _WinnerStateManager:
+        def determine_winner_with_method(self, _game_state: Dict[str, Any]):
+            return controlled, "primary_objective"
+
+    calc.state_manager = _WinnerStateManager()
+    state = _game_state(
+        turn=2, current_player=controlled, controlled_player=controlled, mine=2, theirs=1
+    )
+    state["game_over"] = True
+
+    # Payload d'une action ADVERSE portant la transition de fin de phase command — la cascade
+    # du moteur reinjecte `action`/`unitId` dans ce resultat (cf. le test du tir ci-dessus).
+    payload: Dict[str, Any] = dict(command_phase_end(state))
+    payload.update({
+        "action": "squad_shoot",
+        "unitId": "2",  # unite de l'adversaire : c'est ce qui aiguille vers le chemin teste
+        "shoot_result": {"events": [], "squads_wiped": [], "targets_meta": {}},
+    })
+
+    total = calc.calculate_reward(True, payload, state)
+    breakdown = state["last_reward_breakdown"]
+    expected_objective = _expected_turn_reward(2, 1)
+
+    assert expected_objective > 0.0, "versement nul : le test ne mesure rien"
+    assert breakdown["penalties"] == pytest.approx(0.0), "penalite defensive non nulle : terme parasite"
+    assert breakdown["objective"] == pytest.approx(expected_objective)
+    assert total == pytest.approx(breakdown["situational"] + expected_objective)
+    assert breakdown["total"] == pytest.approx(total), "la ventilation annonce ce que le total verse"
 
 
 def test_the_coherency_penalty_is_never_imputed_to_the_objective() -> None:

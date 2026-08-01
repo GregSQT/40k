@@ -102,25 +102,39 @@ def _build_training_bots_from_config(training_config):
     Returns list of bot instances for random.choice() selection.
     """
     from ai.evaluation_bots import (
-        RandomBot, GreedyBot, DefensiveBot, ControlBot,
-        AggressiveSmartBot, DefensiveSmartBot, AdaptiveBot,
+        RandomBot, GreedyBot, DefensiveBot, ControlBot, AdaptiveBot, ValueTradeBot,
     )
-    
+
     cfg = require_key(training_config, "bot_training")
-    ratios = cfg.get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})
-    randomness_cfg = cfg["randomness"] if "randomness" in cfg else {}
+    ratios = require_key(cfg, "ratios")
+    randomness_cfg = require_key(cfg, "randomness")
 
     BOT_CLASSES = {
         "random": RandomBot,
         "greedy": GreedyBot,
         "defensive": DefensiveBot,
         "control": ControlBot,
-        "aggressive_smart": AggressiveSmartBot,
-        "defensive_smart": DefensiveSmartBot,
         "adaptive": AdaptiveBot,
+        "value_trade": ValueTradeBot,
     }
 
-    total = 10
+    # La somme des ratios EST le budget d'entrainement : elle doit valoir 1.0, comme
+    # `bot_eval_weights` cote evaluation (`bot_evaluation._load_bot_eval_params`, meme controle).
+    # Sans lui, un ratio oublie ou en double deplace silencieusement le budget d'adversaire.
+    total_ratio = sum(float(r) for r in ratios.values())
+    if abs(total_ratio - 1.0) > 1e-9:
+        detail = ", ".join(f"{k}={v}" for k, v in ratios.items())
+        raise ValueError(
+            f"bot_training.ratios must sum to 1.0 (got {detail}, total={total_ratio})"
+        )
+
+    # ⚠️ Pool de 100, pas de 10. `BotControlledEnv` tire l'adversaire de l'episode par un
+    # `random.choice` UNIFORME sur cette liste (env_wrappers, `_use_random_bots`) : la frequence
+    # reelle d'un bot vaut donc count / len(bots), et `round(ratio * 10)` la deformait. Sur le
+    # panel a six bots, 0.35/0.15/0.15/0.15/0.15/0.05 donnait 4/2/2/2/2/1 = 13 instances, soit
+    # 0.31 pour control (-11 %) et 0.077 pour random (+54 %) : le budget d'adversaire n'etait
+    # pas celui de la config. A 100, tout ratio au centieme pres tombe juste.
+    total = 100
     bots = []
     for bot_name, ratio in ratios.items():
         count = round(ratio * total)
@@ -132,7 +146,9 @@ def _build_training_bots_from_config(training_config):
             for _ in range(count):
                 bots.append(RandomBot())
         elif bot_name in BOT_CLASSES:
-            r_val = float(randomness_cfg.get(bot_name, 0.10))
+            # Pas de defaut : un bot pondere sans entree de randomness est une config
+            # incomplete, pas un bot a 10 % de bruit choisi en silence (regle T1).
+            r_val = float(require_key(randomness_cfg, bot_name))
             for _ in range(count):
                 bots.append(BOT_CLASSES[bot_name](randomness=r_val))
         else:
@@ -594,6 +610,85 @@ def _load_scenario_wall_ref(scenario_path: str) -> Optional[str]:
     if not isinstance(wall_ref_raw, str) or not wall_ref_raw.strip():
         raise ValueError(f"Scenario wall_ref must be a non-empty string: {scenario_path}")
     return wall_ref_raw.strip()
+
+
+# Environnements vectorises ouverts, dans l'ordre de creation. Un `SubprocVecEnv` possede des
+# PROCESSUS : le perdre de vue, c'est les laisser tuer par signal a la sortie. Les fermetures
+# nominales couvrent les chemins nominaux ; ce registre couvre le reste — exception levee au
+# milieu d'une phase de curriculum, branche d'echec, retour anticipe — sans exiger un `finally`
+# dans chacune des fonctions concernees.
+_OPEN_VEC_ENVS: List[Any] = []
+
+
+def register_vec_env(env):
+    """Enregistre un environnement vectorise pour le balayage final. Rend `env` inchange."""
+    _OPEN_VEC_ENVS.append(env)
+    return env
+
+
+def close_all_training_envs(log=print) -> None:
+    """Ferme ce qui reste ouvert. Idempotent : `close()` d'un VecEnv deja ferme ne fait rien."""
+    while _OPEN_VEC_ENVS:
+        close_training_env(_OPEN_VEC_ENVS.pop(), "balayage final", log)
+
+
+def close_training_env(env, contexte: str, log=print, timeout_s: float = 30.0) -> None:
+    """Arrete proprement l'environnement d'entrainement (workers compris).
+
+    POURQUOI : avec `SubprocVecEnv`, chaque env vit dans un processus fils DEMONIQUE. Sans
+    `close()`, personne ne leur demande jamais de s'arreter : a la fin du run, le gestionnaire
+    `multiprocessing` du pere les termine par signal. Un fils tue par signal n'execute AUCUN
+    code de fin — tout tampon non vide est perdu. Symptome observe : la queue de
+    `perf_timing.log` de chaque worker, donc precisement ses derniers episodes, disparaissait.
+    `close()` leur envoie l'ordre d'arret puis attend leur sortie normale.
+
+    Appelee depuis un `finally` : l'echec est IMPRIME et non leve. Lever ici remplacerait
+    l'exception d'entrainement en cours de propagation et masquerait la vraie cause — c'est le
+    seul endroit ou taire l'exception est moins grave que de la substituer.
+
+    BORNEE DANS LE TEMPS : `SubprocVecEnv.close()` fait `remote.recv()` puis `process.join()`
+    SANS timeout. Un worker bloque figerait donc la fin du run — regression par rapport a
+    l'avant, ou le processus sortait toujours (quitte a tuer ses fils). La fermeture tourne dans
+    un thread demonique : passe le delai, on renonce et on le DIT ; la sortie du processus
+    terminera les workers comme avant, avec la perte de tampon que cela implique.
+    """
+    if env is None:
+        log(f"⚠️  {contexte} : aucun environnement attaché au modèle, "
+            f"workers potentiellement laissés en vie.")
+        return
+
+    # UNE seule tentative par environnement. Sans ce retrait, une fermeture qui EXPIRE laissait
+    # l'env dans le registre : le balayage final en relancait une seconde, concurrente de la
+    # premiere restee vivante — deux threads emettant sur la meme `multiprocessing.Connection`
+    # et attendant les memes fils, pour 30 s de plus. La borne de temps annoncee ne tenait plus.
+    # Le retrait suit la chaine des wrappers : on ferme souvent un `VecNormalize`, alors que
+    # c'est le `SubprocVecEnv` qu'il enveloppe qui est enregistre.
+    enveloppes = []
+    sonde = env
+    while sonde is not None:
+        enveloppes.append(id(sonde))
+        sonde = getattr(sonde, "venv", None)
+    _OPEN_VEC_ENVS[:] = [e for e in _OPEN_VEC_ENVS if id(e) not in enveloppes]
+
+    import threading
+
+    echec: List[str] = []
+
+    def _fermer() -> None:
+        try:
+            env.close()
+        except Exception as exc:  # noqa: BLE001 — voir docstring : dans un finally, on n'ecrase pas
+            echec.append(str(exc))
+
+    fermeture = threading.Thread(target=_fermer, name="close_training_env", daemon=True)
+    fermeture.start()
+    fermeture.join(timeout_s)
+    if fermeture.is_alive():
+        log(f"⚠️  {contexte} : fermeture toujours en cours après {timeout_s:.0f}s "
+            f"(worker bloqué ?) — abandon, le processus terminera ses fils par signal.")
+    elif echec:
+        log(f"⚠️  {contexte} : fermeture de l'environnement échouée ({echec[0]}). "
+            f"Les processus workers ont pu être tués par signal.")
 
 
 def _resolve_n_envs_for_step_logging(n_envs: int, log=print) -> int:
@@ -1689,7 +1784,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
         print(f"🚀 Creating {n_envs} parallel environments for accelerated training...")
 
         # Disable step logger for vectorized training (avoid file conflicts)
-        vec_envs = SubprocVecEnv([
+        vec_envs = register_vec_env(SubprocVecEnv([
             make_training_env(
                 rank=i,
                 scenario_file=scenario_file,
@@ -1706,7 +1801,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
                 opponent_mix_config=opponents["opponent_mix_config"],
             )
             for i in range(n_envs)
-        ])
+        ]))
         
         env = vec_envs
         print(f"✅ Vectorized training environment created with {n_envs} parallel processes")
@@ -2009,7 +2104,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         # ✓ CHANGE 8: Create vectorized environments for parallel training
         print(f"🚀 Creating {n_envs} parallel environments for accelerated training...")
 
-        vec_envs = SubprocVecEnv([
+        vec_envs = register_vec_env(SubprocVecEnv([
             make_training_env(
                 rank=i,
                 scenario_file=scenario_file,
@@ -2026,7 +2121,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
                 opponent_mix_config=opponents["opponent_mix_config"],
             )
             for i in range(n_envs)
-        ])
+        ]))
         
         env = vec_envs
         print(f"✅ Vectorized training environment created with {n_envs} parallel processes")
@@ -2376,7 +2471,7 @@ def build_training_opponents(
             )
         opponents["agent_seat_seed"] = int(agent_seat_seed_raw)
 
-    ratios = require_key(training_config, "bot_training").get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})
+    ratios = require_key(require_key(training_config, "bot_training"), "ratios")
     ratio_parts = [f"{v*100:.0f}% {k.replace('_', ' ').title()}" for k, v in ratios.items() if v > 0]
     log(f"🤖 Bot training ratios: {', '.join(ratio_parts)}")
     log(f"🤖 Agent seat mode: {agent_seat_mode}")
@@ -2655,7 +2750,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     # Branch: n_envs > 1 uses SubprocVecEnv for parallel training
     if n_envs > 1:
         chunk_log(f"🚀 Creating {n_envs} parallel environments for accelerated training...")
-        vec_envs = SubprocVecEnv([
+        vec_envs = register_vec_env(SubprocVecEnv([
             make_training_env(
                 rank=i,
                 scenario_file=scenario_list[0],
@@ -2673,7 +2768,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 opponent_mix_config=opponent_mix_config,
             )
             for i in range(n_envs)
-        ])
+        ]))
         env = vec_envs
         chunk_log(f"✅ Vectorized training environment created with {n_envs} parallel processes")
     else:
@@ -2893,7 +2988,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     
     _apply_torch_compile(model)
     # Import metrics tracker
-    from ai.metrics_tracker import W40KMetricsTracker
+    from ai.metrics_tracker import W40KMetricsTracker, resolve_perf_windows
 
     # Initialize frozen model for self-play
     # The frozen model is a copy of the learning model used by Player 1
@@ -2907,12 +3002,15 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     model_tensorboard_dir = specific_log_dir
     
     # Create metrics tracker for entire rotation training
+    _perf_window, _perf_window_fast = resolve_perf_windows(training_config)
     metrics_tracker = W40KMetricsTracker(
         agent_key,
         model_tensorboard_dir,
         initial_episode_count=callback_global_episode_offset,
         initial_step_count=int(getattr(model, "num_timesteps", 0)),
-        show_banner=not silent_chunk
+        show_banner=not silent_chunk,
+        perf_window=_perf_window,
+        perf_window_fast=_perf_window_fast,
     )
     # print(f"📈 Metrics tracking enabled for agent: {agent_key}")
 
@@ -2948,7 +3046,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             gym_training_mode=True,
             debug_mode=debug_mode
         )
-        base_env._metrics_tracker = metrics_tracker
         # V11 T6 : ce bloc RECREE l'environnement (cf. commentaire ci-dessus) et remplace le
         # base_env construit plus haut — celui-la seul recevait le StepLogger (~L2377). Sans
         # cette reconnexion, `--step` journalisait "StepLogger connected" pour un env aussitot
@@ -2996,8 +3093,12 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                     for f in os.listdir(tmp_dir):
                         os.unlink(os.path.join(tmp_dir, f))
                     os.rmdir(tmp_dir)
+        # L'environnement construit plus haut dans cette fonction est REMPLACE ici. Sans
+        # fermeture, il reste ouvert jusqu'a la fin du process (fichiers, et processus fils si
+        # la branche vectorisee l'avait produit) : `set_env` ne ferme pas l'ancien.
+        close_training_env(model.get_env(), "remplacement d'environnement (rotation)", chunk_log)
         model.set_env(env)
-    
+
     def _debug_train_marker(message: str) -> None:
         if debug_mode:
             print(f"[TRAIN DEBUG] {message}", flush=True)
@@ -3215,9 +3316,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                     "greedy",
                     "defensive",
                     "control",
-                    "aggressive_smart",
-                    "defensive_smart",
                     "adaptive",
+                    "value_trade",
                     "tactical",  # V11 §10.5 : holdout d'evaluation
                 )
                 available_bot_keys = [key for key in known_bot_keys if key in bot_results]
@@ -3495,6 +3595,32 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     model_gating_min_combined = None
     model_gating_min_worst_bot = None
     model_gating_min_worst_scenario_combined = None
+    # Resolu INCONDITIONNELLEMENT : ce plancher mord meme gating desarme (cf.
+    # `BotEvaluationCallback._evaluate_model_gate`). 0.0 est le seul moyen de le neutraliser.
+    #
+    # ⚠️ Lu DIRECTEMENT dans le profil de l'agent, SANS passer par `_resolve_callback_value` :
+    # ce seuil decide si un modele est sauve ou jete, il doit etre un choix explicite du profil
+    # qu'on lance, jamais une valeur heritee d'un fichier commun a tous les agents. Son absence
+    # est une erreur, pas un defaut a 0.40. (`config/agents/_training_common.json` ne le definit
+    # donc pas — verrou : tests/unit/ai/test_model_gate_control_floor.py.)
+    if "model_gating_min_vs_control" not in callback_params:
+        raise KeyError(
+            "callback_params.model_gating_min_vs_control est OBLIGATOIRE dans le profil "
+            "d'entrainement de l'agent (aucun repli sur _training_common.json) : ce plancher "
+            "decide de la sauvegarde d'un modele. Mettre 0.0 pour le desarmer explicitement."
+        )
+    raw_min_vs_control = callback_params["model_gating_min_vs_control"]
+    if raw_min_vs_control is None:
+        raise ValueError(
+            "callback_params.model_gating_min_vs_control vaut null : renseigner un nombre "
+            "(0.0 pour desarmer le plancher)."
+        )
+    model_gating_min_vs_control = float(raw_min_vs_control)
+    if model_gating_min_vs_control < 0.0 or model_gating_min_vs_control > 1.0:
+        raise ValueError(
+            "callback_params.model_gating_min_vs_control must be between 0.0 and 1.0 "
+            f"(got {model_gating_min_vs_control})"
+        )
     if model_gating_enabled or save_best_robust:
         if model_gating_enabled:
             model_gating_min_combined = float(_resolve_callback_value("model_gating_min_combined"))
@@ -3604,6 +3730,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             model_gating_min_combined=model_gating_min_combined,
             model_gating_min_worst_bot=model_gating_min_worst_bot,
             model_gating_min_worst_scenario_combined=model_gating_min_worst_scenario_combined,
+            model_gating_min_vs_control=model_gating_min_vs_control,
             gate_display_state=training_config.get("_gate_display_state"),
             eval_deterministic=eval_deterministic,
             final_summary_target_episodes=total_eps,
@@ -3625,7 +3752,7 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
     """Execute the training process with metrics tracking."""
     
     # Import metrics tracker
-    from ai.metrics_tracker import W40KMetricsTracker
+    from ai.metrics_tracker import W40KMetricsTracker, resolve_perf_windows
     
     # Extract agent name from model path for metrics
     agent_name = "default_agent"
@@ -3644,7 +3771,13 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         print(f"⚠️  No tensorboard_log found, using default: {model_tensorboard_dir}")
    
     # Create metrics tracker using model's directory
-    metrics_tracker = W40KMetricsTracker(agent_name, model_tensorboard_dir)
+    _perf_window, _perf_window_fast = resolve_perf_windows(training_config)
+    metrics_tracker = W40KMetricsTracker(
+        agent_name,
+        model_tensorboard_dir,
+        perf_window=_perf_window,
+        perf_window_fast=_perf_window_fast,
+    )
     
     try:
         # Start training
@@ -3762,6 +3895,9 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         import traceback
         traceback.print_exc()
         return False
+
+    finally:
+        close_training_env(model.get_env(), "fin d'entraînement")
 
 def test_trained_model(model, num_episodes, training_config_name="default", agent_key=None, rewards_config_name="default", debug_mode=False):
     """Test the trained model."""
@@ -4199,6 +4335,15 @@ def train_with_curriculum(
             if not is_last_phase:
                 chunk_callback_params["save_best_robust"] = False
 
+            # Fermeture AVANT le chunk suivant, pas apres : `train_with_scenario_rotation` cree
+            # son propre environnement des son entree. Fermer au retour laissait donc 2 x n_envs
+            # processus workers vivants pendant TOUT un chunk, alors qu'une seule moitie
+            # travaille. `model` porte encore l'env du chunk precedent a ce point, et
+            # `train_with_scenario_rotation` lui en posera un neuf.
+            if final_env is not None:
+                close_training_env(final_env, "fin de phase de curriculum")
+                final_env = None
+
             success, model, env, run_info = train_with_scenario_rotation(
                 config=config,
                 agent_key=agent_key,
@@ -4220,6 +4365,13 @@ def train_with_curriculum(
                 return_run_info=True
             )
             if not success:
+                # Branche INATTEIGNABLE aujourd'hui : `train_with_scenario_rotation` ne rend que
+                # `True` (seuls returns : 3316/3317). Elle garde le contrat declare par les
+                # @overload (`Tuple[bool, ...]`). L'environnement du chunk precedent est deja
+                # ferme (juste avant l'appel) ; `env` est rendu a l'appelant, qui le ferme.
+                # Cette fonction n'a AUCUN try/except : les sorties par exception sont couvertes
+                # par le `finally: close_all_training_envs()` de `main()`, pas ici. Ne pas
+                # supprimer ce balayage en croyant qu'un except local prend le relais.
                 return False, model, env
 
             first_run = False
@@ -4886,6 +5038,7 @@ def main():
                         args.rewards_config,
                         debug_mode=args.debug
                     )
+                close_training_env(env, "fin de run")
                 return 0 if success else 1
 
             # Curriculum mode: --scenario phaseX
@@ -4928,6 +5081,7 @@ def main():
                             args.rewards_config,
                             debug_mode=args.debug
                         )
+                    close_training_env(env, "fin de run")
                     return 0 if success else 1
 
                 print(f"🎯 Single phase mode: {args.scenario}")
@@ -4959,6 +5113,7 @@ def main():
                         args.rewards_config,
                         debug_mode=args.debug
                     )
+                close_training_env(env, "fin de run")
                 return 0 if success else 1
 
             # Check if scenario rotation is requested
@@ -5013,6 +5168,7 @@ def main():
                 if success and args.test_episodes > 0:
                     test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config, debug_mode=args.debug)
 
+                close_training_env(env, "fin de run")
                 return 0 if success else 1
             
             # Standard single-scenario training (no rotation)
@@ -5081,6 +5237,14 @@ def main():
         import traceback
         traceback.print_exc()
         return 1
+
+    finally:
+        # Filet unique de TOUTES les sorties de main() — retour normal, `return 1` anticipe,
+        # exception levee au fond d'une phase de curriculum. Les fermetures nominales placees
+        # plus haut ne couvrent que les chemins nominaux ; sans ce balayage, une exception
+        # laissait les workers etre tues par signal, c'est-a-dire exactement la perte que ce
+        # chantier corrige.
+        close_all_training_envs()
 
 if __name__ == "__main__":
     exit_code = main()

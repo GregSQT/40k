@@ -82,7 +82,7 @@ Source de vérité règles : `Documentation/40k_rules/12 Fights pahse.pdf` et `1
 ### Briques existantes réutilisables
 - `fight_v11_consolidation_mode` (~L4684) → cascade 12.08 `"ongoing"|"engaging"|"objective"|None`. **Utiliser tel quel.**
 - `fight_v11_engaging_triggered_unit_ids` (~L4703) → ennemis engagés post-move non sélectionnés (New Foes).
-- `_fight_v11_objective_hex_sets` (~L4641) → `(id, set hexes)` par objectif (zone de contrôle runtime). **Source objectif pour la conso** (après Tranche 0bis qui la remplit depuis les terrains).
+- `objective_hex_zones` (engine/game_state.py, ex-`objective_hex_zones` fusionnee le 2026-08-01) → `(id, set hexes)` par objectif (zone de contrôle runtime). **Source objectif pour la conso** (après Tranche 0bis qui la remplit depuis les terrains).
 - `_fight_v11_objectives_within_range` (~L4663) → objectifs à portée (distance empreinte→zone).
 - `min_distance_between_sets` (hex_utils) → distance empreinte→zone objectif.
 - `_fight_bfs_reachable_anchors_consolidation` (~L1166) → BFS 3" par unité (agnostique).
@@ -93,7 +93,7 @@ Source de vérité règles : `Documentation/40k_rules/12 Fights pahse.pdf` et `1
 - `_fight_plan_consolidation_destinations` (~L1255) : consolidation **par-UNITÉ** (pas par-figurine). **Sa branche `objective` est NON CONFORME** : elle vise le **marqueur central** (médiode/centre) via `_fight_resolve_objective_marker_center_hex` + `on_marker`, alors que 14.02 demande d'être **dans la zone**. → À corriger/remplacer, **PAS un modèle de référence pour l'objectif**.
   - Sa branche **`enemy`** reste valable comme référence de palier ennemi.
   - **Attention appelants** : utilisée par le flux **IA/auto** (`_ai_select_consolidation_destination`, `_fight_try_begin_consolidation_after_attacks`). Sa branche `objective` est **corrigée en Tranche 6** (viser la zone, comme le PvP) — préserver le flux auto.
-- Helpers **marqueur** — **écartés pour la branche objectif** (ponctuels, non conformes 14.02) : `_fight_resolve_objective_marker_center_hex` (~L1068), `_fight_closest_objective_marker_snapshot` (~L1111), `_fight_new_fp_strictly_closer_to_objective_marker_tier` (~L1133). Pour l'objectif, utiliser **`_fight_v11_objective_hex_sets` (zone) + `min_distance_between_sets`** à la place.
+- Helpers **marqueur** — **écartés pour la branche objectif** (ponctuels, non conformes 14.02) : `_fight_resolve_objective_marker_center_hex` (~L1068), `_fight_closest_objective_marker_snapshot` (~L1111), `_fight_new_fp_strictly_closer_to_objective_marker_tier` (~L1133). Pour l'objectif, utiliser **`objective_hex_zones` (zone) + `min_distance_between_sets`** à la place.
 
 ### Points de branchement à modifier (actuellement auto-skip)
 - `_fight_v11_manual_state`, `sub == "consolidate"` (~L6055-6064) → présentation paresseuse.
@@ -114,7 +114,7 @@ Source de vérité règles : `Documentation/40k_rules/12 Fights pahse.pdf` et `1
 |---|---|
 | `_fight_pile_in_closest_tier_ids` | **Réutiliser** (palier ennemi) |
 | `_fight_apply_pile_in_move`, `_fight_synth_cache_entry_at_footprint`, `_fight_footprint_in_engagement_with_any_enemy` | **Réutiliser** |
-| `_fight_v11_objective_hex_sets`, `_fight_v11_objectives_within_range`, `min_distance_between_sets` | **Réutiliser** (branche objectif = ZONE) |
+| `objective_hex_zones`, `_fight_v11_objectives_within_range`, `min_distance_between_sets` | **Réutiliser** (branche objectif = ZONE) |
 | `polygon_to_hex_list`, `_objective_polygon_hexes` | **Réutiliser** (Tranche 0bis) |
 | `fight_v11_consolidation_mode`, `fight_v11_engaging_triggered_unit_ids`, `fight_v11_is_consolidation_eligible` | **Réutiliser** (déjà bons) |
 | `_fight_pile_in_build_model_pool` | **Référence de structure (NE PAS cloner-coller)** → réécrire en moteur générique paramétré (`lock_base_contact`, `tier_kind`, 3 sémantiques WHILE), cf. §4/Tranche 2 |
@@ -155,7 +155,7 @@ Exposer aussi : `_fight_v11_consolidation_engaging_candidates(game_state, unit)`
 - `_fight_consolidation_build_model_pool(...)` — BFS 3" par figurine, **3 sémantiques WHILE** : Ongoing (tier=enemy, engaged si possible, **`lock_base_contact=True`**) ; Engaging (tier=enemy, engaged si possible, `lock_base_contact=False`) ; Objective (tier=zone, **within range sinon plus près**, `lock_base_contact=False`).
 - `_fight_consolidation_preview_plan(...)` — **AFTER par mode** : Ongoing = engagements de départ conservés ; Engaging = engaged avec **tous** les ciblés ; Objective = **≥1 figurine dans la zone**. ⚠️ **`can_validate = false` si 0 figurine n'atteint la zone** (Objective) : le « closer if not » du WHILE ne **valide pas** un move — il ne concerne que les figurines qui n'entrent pas alors qu'**au moins une** y entre ; move optionnel → on ne bouge pas. Idem Engaging : `can_validate=false` si pas engaged avec **tous** les sélectionnés.
 - `_fight_consolidation_model_plan_state(...)` — état UI, branché sur `_fight_v11_consolidation_targets`.
-**Réutiliser (helpers bas-niveau)** : `_fight_pile_in_closest_tier_ids` (enemy) ; `_fight_v11_objective_hex_sets` + `min_distance_between_sets` (zone) ; `_fight_synth_cache_entry_at_footprint` ; clone de `commit_plan`.
+**Réutiliser (helpers bas-niveau)** : `_fight_pile_in_closest_tier_ids` (enemy) ; `objective_hex_zones` + `min_distance_between_sets` (zone) ; `_fight_synth_cache_entry_at_footprint` ; clone de `commit_plan`.
 **Critère** : `model_plan_state` cohérent ; `preview_plan.can_validate` correct dans les 3 modes, **dont `false` quand la cible (zone/ciblés) est inatteignable**.
 
 ### Tranche 3 — Présentation & dispatch (backend)
@@ -177,7 +177,7 @@ Au commit `engaging`, récupérer `fight_v11_engaging_triggered_unit_ids(U)` (en
 **Critère** : un New Foe combat immédiatement (ordre choisi par l'adversaire), la conso reprend sans sauter ni redoubler, et I1-I5 tiennent.
 
 ### Tranche 6 — Alignement IA/auto de la conso objectif (backend)
-Le chemin IA/auto (`_fight_plan_consolidation_destinations`, par-unité) joue la conso objectif vers le **marqueur central** (non conforme 14.02, et peut rater une conso légale par le bord). **Corriger sa branche `objective` pour viser la ZONE** : utiliser `_fight_v11_objective_hex_sets` + `min_distance_between_sets` (plus proche hex de la zone), comme le PvP. Écarter les helpers marqueur (`_fight_resolve_objective_marker_center_hex`, etc.).
+Le chemin IA/auto (`_fight_plan_consolidation_destinations`, par-unité) joue la conso objectif vers le **marqueur central** (non conforme 14.02, et peut rater une conso légale par le bord). **Corriger sa branche `objective` pour viser la ZONE** : utiliser `objective_hex_zones` + `min_distance_between_sets` (plus proche hex de la zone), comme le PvP. Écarter les helpers marqueur (`_fight_resolve_objective_marker_center_hex`, etc.).
 - **Attention appelants** : `_ai_select_consolidation_destination`, `_fight_try_begin_consolidation_after_attacks` — préserver le flux auto.
 **Critère** : IA et PvP appliquent la **même** règle objectif (zone) ; pas de régression du flux auto (import + `--step`).
 

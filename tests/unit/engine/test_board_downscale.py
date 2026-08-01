@@ -307,9 +307,23 @@ def test_squads_stay_coherent_on_the_real_scenario(board_x1) -> None:
         controlled_agent="ArmageddonAgent", scenario_file=str(BANK_SCEN),
         unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
     )
+    # Le RELAYOUT est ce qui est mesuré ici : il n'existe qu'en placement FIXE (positions du
+    # scénario). `deployment_mode_schedule` du profil `x1` tire fixed↔active par épisode ; dès
+    # que son `active_ratio_start` est non nul, une graine peut rendre un plateau où AUCUNE
+    # figurine n'est encore posée (toutes à (-1,-1)) et le test observe alors autre chose que ce
+    # qu'il annonce. Le mode est donc imposé, jamais espéré d'un tirage (cf.
+    # `test_roster_fixed_positions`).
+    assert engine.training_config is not None
+    engine.training_config = dict(engine.training_config)
+    engine.training_config["deployment_mode_schedule"] = {
+        "enabled": True, "training_only": False,
+        "active_ratio_start": 0.0, "active_ratio_end": 0.0,
+        "schedule": "linear", "freeze_after_progress": 1.0,
+    }
     for seed in range(4):
         engine.reset(seed=seed)
         state = engine.game_state
+        assert state["deployment_mode_schedule_mode"] == "fixed", f"seed {seed}: mode non imposé"
         cells = [(m["col"], m["row"]) for m in state["models_cache"].values()]
         assert len(cells) == len(set(cells)), f"seed {seed}: figurines superposées"
         incoherent = [

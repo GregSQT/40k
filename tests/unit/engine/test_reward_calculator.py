@@ -81,10 +81,23 @@ class TestDetermineWinner:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _objective_gs(battle_shocked: bool) -> Dict[str, Any]:
+    """Escouade de 2 figurines dont l'ANCRE est HORS de la zone et la SECONDE figurine dedans.
+
+    Ce montage est ce qui rend le test non vacant : le bonus se juge par FIGURINE (14.02, meme
+    lecteur que ``sum_objective_control_oc_multi``), et une lecture a l'ancre d'escouade —
+    l'erreur classique de ce depot — rendrait 0.0 ici alors que l'escouade est bien sur
+    l'objectif. Les trois caches sont ceux que ``iter_living_model_footprints`` exige.
+    """
     unit = {"id": "1", "player": 1, "battle_shocked": battle_shocked}
     return {
         "units": [unit],
         "unit_by_id": {"1": unit},
+        "units_cache": {"1": {"player": 1, "col": 3, "row": 3, "HP_CUR": 1, "orientation": 0}},
+        "squad_models": {"1": ["1#0", "1#1"]},
+        "models_cache": {
+            "1#0": {"col": 3, "row": 3, "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+            "1#1": {"col": 5, "row": 5, "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+        },
         "objectives": [{"id": "obj1", "hexes": [{"col": 5, "row": 5}]}],
         "objective_controllers": {"obj1": None},
         "current_player": 1,

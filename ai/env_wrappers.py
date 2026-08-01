@@ -98,6 +98,44 @@ ENGINE_CONTRACT_ATTRS = (
     "_determine_winner_with_method",
 )
 
+#: Cles de l'`info` moteur qui decrivent l'action de l'AGENT et doivent survivre au step gym.
+#:
+#: Un step gym enchaine plusieurs steps moteur : celui de l'agent, puis ceux de l'adversaire
+#: jusqu'au retour de la main. Gym n'a qu'un `info` a rendre, et c'est naturellement celui du
+#: DERNIER step — donc celui de l'adversaire. Les consommateurs (MetricsCollectionCallback)
+#: lisent pourtant ces cles-la comme decrivant l'agent, puisqu'elles cotoient
+#: `is_controlled_action`. Elles sont donc relevees sur le step de l'agent et reappliquees
+#: avant le retour.
+#:
+#: Ce qui n'est PAS ici et n'y a pas sa place : tout ce qui decrit l'ETAT DE SORTIE du step gym
+#: (`episode`, `tactical_data`, `winner`, `action_logs`) — c'est bien le dernier step moteur qui
+#: fait foi pour ceux-la.
+AGENT_STEP_INFO_KEYS = (
+    "action",
+    "intent_value",
+    "zone_control",
+    "is_controlled_action",
+    "phase",
+    "success",
+    "charge_succeeded",
+)
+
+
+def apply_agent_step_info(info: Dict[str, Any], agent_step_info: Dict[str, Any]) -> None:
+    """Remplace EN BLOC les cles de `AGENT_STEP_INFO_KEYS` par celles du step de l'agent.
+
+    Remplacer, et non `update` : une cle posee par l'adversaire mais ABSENTE du step de l'agent
+    survivrait a une simple mise a jour, sous le `is_controlled_action=True` recolle juste a
+    cote. Cas concret : l'agent tire (aucun `charge_succeeded` dans son info), l'adversaire
+    enchaine sur une charge reussie — `charge_succeeded=True` resterait, et la charge de
+    l'adversaire serait comptee comme celle de l'agent. Ces cles sont optionnelles par nature
+    (posees par le resultat du handler, donc seulement quand elles s'appliquent) : leur ABSENCE
+    porte autant d'information que leur valeur.
+    """
+    for key in AGENT_STEP_INFO_KEYS:
+        info.pop(key, None)
+    info.update(agent_step_info)
+
 
 def unwrap_engine(env: Any, owner: str) -> "W40KEngine":
     """Deballe la pile de wrappers gym jusqu'au moteur, et PROUVE ce qu'elle trouve.
@@ -1166,9 +1204,13 @@ class BotControlledEnv(gym.Wrapper):
         reward = 0.0
         cumulative_reward = 0.0
         info = {}
-        agent_action_info = None
-        agent_intent_value = None
-        agent_is_controlled_action = None
+        # Ce que l'INFO du step de l'agent doit rendre a l'appelant. Un step gym enchaine
+        # plusieurs steps moteur (l'agent, puis l'adversaire jusqu'au retour de la main) et seul
+        # le DERNIER info survit — celui de l'adversaire. Ces cles-la decrivent l'action de
+        # l'AGENT ; sans ce report, elles decrivaient celle du bot sous un drapeau
+        # `is_controlled_action` qui dit le contraire (metriques `obs/*` rangees sous la phase du
+        # bot, `combat/c_charge_successes` comptant les charges du bot).
+        agent_step_info: Dict[str, Any] = {}
         obs, bot_reward_before, terminated, truncated, info, ready_decision = self._play_bot_until_control_returns(
             debug_mode=debug_mode, decision=entry_decision
         )
@@ -1204,9 +1246,9 @@ class BotControlledEnv(gym.Wrapper):
             obs, reward, terminated, truncated, info, ready_decision = self._engine_step(
                 action, ready_decision
             )
-            agent_action_info = info.get("action")
-            agent_intent_value = info.get("intent_value")
-            agent_is_controlled_action = info.get("is_controlled_action")
+            agent_step_info = {
+                key: info[key] for key in AGENT_STEP_INFO_KEYS if key in info
+            }
             cumulative_reward += float(reward)
             self.episode_reward += float(reward)
             if debug_mode and t0_agent is not None:
@@ -1235,12 +1277,7 @@ class BotControlledEnv(gym.Wrapper):
                 self.timesteps_agent_p1 += self.episode_length
             else:
                 self.timesteps_agent_p2 += self.episode_length
-        if agent_action_info is not None:
-            info["action"] = agent_action_info
-        if agent_intent_value is not None:
-            info["intent_value"] = agent_intent_value
-        if agent_is_controlled_action is not None:
-            info["is_controlled_action"] = agent_is_controlled_action
+        apply_agent_step_info(info, agent_step_info)
         info["controlled_player"] = self.controlled_player
         info["opponent_player"] = self.bot_player
         info["agent_seat_mode"] = self.agent_seat_mode
@@ -1559,6 +1596,8 @@ class SelfPlayWrapper(gym.Wrapper):
         truncated = False
         info = {}
 
+        agent_step_info: Dict[str, Any] = {}
+
         # Track P1 actions for diagnostic
         p1_actions_before = 0
         p1_terminal_reward = 0.0  # Capture lose penalty if P1 ends game before P0 acts
@@ -1609,6 +1648,11 @@ class SelfPlayWrapper(gym.Wrapper):
                 except (OSError, IOError):
                     pass
             p0_reward = float(reward)  # CRITICAL: Save P0's reward before P1 overwrites it
+            # Meme releve que dans BotControlledEnv, et pour la meme raison : les steps de P1
+            # qui suivent vont remplacer `info`, et les cles qui decrivent l'action de P0 (la
+            # phase ou elle a ete jouee, sa reussite, une charge aboutie) se liraient alors
+            # comme celles de l'adversaire.
+            agent_step_info = {key: info[key] for key in AGENT_STEP_INFO_KEYS if key in info}
             self.episode_reward += float(reward)
             self.episode_length += 1
 
@@ -1656,6 +1700,7 @@ class SelfPlayWrapper(gym.Wrapper):
 
         # CRITICAL: Return P0's reward to SB3, not P1's!
         reward = p0_reward
+        apply_agent_step_info(info, agent_step_info)
 
         # Track episode end statistics
         if terminated or truncated:

@@ -136,9 +136,29 @@ def _active_training_configs() -> List[Path]:
     return files
 
 
+def test_no_shared_fallback_for_the_control_floor() -> None:
+    """`_training_common.json` ne doit PAS definir le plancher.
+
+    Decision : ce seuil decide si un modele est sauve ou jete, il doit etre un choix EXPLICITE
+    du profil qu'on lance — jamais une valeur heritee d'un fichier commun a tous les agents.
+    `train.py` le lit donc directement dans `callback_params`, sans passer par
+    `_resolve_callback_value`, et leve si la cle manque. Ce test verrouille la decision : le
+    jour ou quelqu'un repose la cle dans le fichier commun, elle serait silencieusement heritee
+    par tout profil qui l'oublie.
+    """
+    shared_path = CONFIG_ROOT / "_training_common.json"
+    with shared_path.open(encoding="utf-8-sig") as handle:
+        shared = json.load(handle)
+
+    assert "model_gating_min_vs_control" not in shared, (
+        "_training_common.json definit model_gating_min_vs_control : un profil qui oublie ce "
+        "plancher en heriterait en silence. Le seuil appartient au profil de l'agent."
+    )
+
+
 @pytest.mark.parametrize("config_path", _active_training_configs(), ids=lambda p: p.parent.name)
 def test_every_profile_declares_the_control_floor(config_path: Path) -> None:
-    """La cle est OBLIGATOIRE des que le gate est arme : `train.py` la lit sans defaut."""
+    """La cle est OBLIGATOIRE dans CHAQUE profil : `train.py` la lit sans aucun repli."""
     with config_path.open(encoding="utf-8-sig") as handle:
         config = json.load(handle)
 
@@ -150,8 +170,8 @@ def test_every_profile_declares_the_control_floor(config_path: Path) -> None:
     assert profiles, f"{config_path.name} : aucun profil avec callback_params"
     for name, params in profiles:
         assert "model_gating_min_vs_control" in params, (
-            f"{config_path.name}[{name}] : plancher `vs_control` absent — le gate leverait "
-            "au premier armement de model_gating_enabled."
+            f"{config_path.name}[{name}] : plancher `vs_control` absent — `setup_callbacks` "
+            "leve au lancement du run (aucun repli sur _training_common.json)."
         )
         value = float(params["model_gating_min_vs_control"])
         assert 0.0 <= value <= 1.0, f"{config_path.name}[{name}] : plancher hors [0,1] ({value})"

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Agrège les matrices holdout_hard_matchups_{greedy,defensive_smart,adaptive}.json
-et produit des classements par roster (P1 agent ou P2 opponent).
+Agrège les matrices holdout_hard_matchups_<bot>.json des bots de RANKING_BOTS
+(control, adaptive, greedy, defensive) et produit des classements par roster
+(P1 agent ou P2 opponent).
 
 Pour chaque roster :
   - roster_value : somme des VALUE (unit_sampling_matrix.unit_values) du roster courant.
-  - mean_greedy / mean_defensive_smart / mean_adaptive : moyenne marginale du win_rate
+  - mean_<bot> (un par bot de RANKING_BOTS) : moyenne marginale du win_rate
     pour ce bot seul (P1 : sur tous les P2 ; P2 : sur tous les P1).
-  - mean_agg : moyenne pondérée (0.33, 0.33, 0.34) de ces trois moyennes.
+  - mean_agg : moyenne pondérée (BOT_WEIGHTS, 0.25 chacun) de ces moyennes.
   - worst / best : min / max du win_rate sur toutes les paires × bots.
   - worst_vs_roster / best_vs_roster : id du roster adverse (P2 si ligne P1, P1 si ligne P2)
     à la cellule où ce min/max est atteint (égalités : départage lexicographique stable).
@@ -34,33 +35,28 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULT_UNITS_MATRIX = PROJECT_ROOT / "reports" / "unit_sampling_matrix.json"
 
-BOT_FILES: Tuple[str, ...] = (
-    "holdout_hard_matchups_greedy.json",
-    "holdout_hard_matchups_defensive_smart.json",
-    "holdout_hard_matchups_adaptive.json",
-)
-BOT_FILES_P1SUBSET: Tuple[str, ...] = (
-    "holdout_hard_matchups_greedy_p1subset.json",
-    "holdout_hard_matchups_defensive_smart_p1subset.json",
-    "holdout_hard_matchups_adaptive_p1subset.json",
-)
-BOT_FILES_P1EXCLUDE: Tuple[str, ...] = (
-    "holdout_hard_matchups_adaptive_p1exclude.json",
-    "holdout_hard_matchups_aggressive_smart_p1exclude.json",
-    "holdout_hard_matchups_defensive_p1exclude.json",
-)
-BOT_LABELS: Tuple[str, str, str] = (
-    "mean_greedy",
-    "mean_defensive_smart",
-    "mean_adaptive",
-)
-BOT_LABELS_P1EXCLUDE: Tuple[str, str, str] = (
-    "mean_adaptive",
-    "mean_aggressive_smart",
-    "mean_defensive",
-)
-BOT_WEIGHTS: Tuple[float, ...] = (0.33, 0.33, 0.34)
-BOT_WEIGHTS_P1EXCLUDE: Tuple[float, ...] = (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)
+# Agregat de reference : QUATRE bots a poids egaux. Il etait bati sur trois bots dont
+# `defensive_smart` (supprime, jamais joue) et `aggressive_smart` (doublon strict de `greedy`) :
+# il classait donc les rosters sur deux fois la meme doctrine offensive, sans jamais regarder
+# le jeu d'objectifs — la competence qui decide 93 % des parties. L'arite n'est plus figee a 3.
+RANKING_BOTS: Tuple[str, ...] = ("control", "adaptive", "greedy", "defensive")
+BOT_WEIGHTS: Tuple[float, ...] = (0.25, 0.25, 0.25, 0.25)
+BOT_WEIGHTS_P1EXCLUDE: Tuple[float, ...] = BOT_WEIGHTS
+
+
+def _matrix_filenames(bots: Sequence[str], suffix: str = "") -> Tuple[str, ...]:
+    return tuple(f"holdout_hard_matchups_{bot}{suffix}.json" for bot in bots)
+
+
+def _labels(bots: Sequence[str]) -> Tuple[str, ...]:
+    return tuple(f"mean_{bot}" for bot in bots)
+
+
+BOT_FILES: Tuple[str, ...] = _matrix_filenames(RANKING_BOTS)
+BOT_FILES_P1SUBSET: Tuple[str, ...] = _matrix_filenames(RANKING_BOTS, "_p1subset")
+BOT_FILES_P1EXCLUDE: Tuple[str, ...] = _matrix_filenames(RANKING_BOTS, "_p1exclude")
+BOT_LABELS: Tuple[str, ...] = _labels(RANKING_BOTS)
+BOT_LABELS_P1EXCLUDE: Tuple[str, ...] = BOT_LABELS
 
 
 def _require_weights_sum(weights: Sequence[float]) -> None:
@@ -351,18 +347,21 @@ def weighted_mean(per_bot: List[float], weights: Sequence[float]) -> float:
 def build_rows_p1(
     matrices: List[Dict[str, Dict[str, Any]]],
     weights: Sequence[float],
-    labels: Tuple[str, str, str] = BOT_LABELS,
+    labels: Sequence[str] = BOT_LABELS,
 ) -> List[Dict[str, Any]]:
     mm = marginal_means_p1(matrices)
     wmap, bmap, wcp, bcp = min_max_with_counterparty_p1(matrices)
     rows: List[Dict[str, Any]] = []
     for p1, per_bot in mm.items():
+        if len(per_bot) != len(labels):
+            raise ValueError(
+                f"{len(per_bot)} matrices chargees pour {len(labels)} libelles de bot "
+                f"({list(labels)}) : l agregat doit porter sur exactement ces bots."
+            )
         rows.append(
             {
                 "roster_id": p1,
-                labels[0]: per_bot[0],
-                labels[1]: per_bot[1],
-                labels[2]: per_bot[2],
+                **dict(zip(labels, per_bot, strict=True)),
                 "mean_agg": weighted_mean(per_bot, weights),
                 "worst": wmap[p1],
                 "worst_vs_roster": wcp[p1],
@@ -376,18 +375,21 @@ def build_rows_p1(
 def build_rows_p2(
     matrices: List[Dict[str, Dict[str, Any]]],
     weights: Sequence[float],
-    labels: Tuple[str, str, str] = BOT_LABELS,
+    labels: Sequence[str] = BOT_LABELS,
 ) -> List[Dict[str, Any]]:
     mm = marginal_means_p2(matrices)
     wmap, bmap, wcp, bcp = min_max_with_counterparty_p2(matrices)
     rows: List[Dict[str, Any]] = []
     for p2, per_bot in mm.items():
+        if len(per_bot) != len(labels):
+            raise ValueError(
+                f"{len(per_bot)} matrices chargees pour {len(labels)} libelles de bot "
+                f"({list(labels)}) : l agregat doit porter sur exactement ces bots."
+            )
         rows.append(
             {
                 "roster_id": p2,
-                labels[0]: per_bot[0],
-                labels[1]: per_bot[1],
-                labels[2]: per_bot[2],
+                **dict(zip(labels, per_bot, strict=True)),
                 "mean_agg": weighted_mean(per_bot, weights),
                 "worst": wmap[p2],
                 "worst_vs_roster": wcp[p2],
@@ -405,13 +407,11 @@ def sort_rows(
     return sorted(rows, key=lambda r: r[key], reverse=reverse)
 
 
-def csv_fieldnames(labels: Tuple[str, str, str]) -> Tuple[str, ...]:
+def csv_fieldnames(labels: Sequence[str]) -> Tuple[str, ...]:
     return (
         "roster_id",
         "roster_value",
-        labels[0],
-        labels[1],
-        labels[2],
+        *labels,
         "mean_agg",
         "worst",
         "worst_vs_roster",
@@ -435,11 +435,11 @@ def _csv_float_fr(value: float, decimals: int = 4) -> str:
 def write_csv(
     path: Path,
     rows: List[Dict[str, Any]],
-    labels: Tuple[str, str, str] = BOT_LABELS,
+    labels: Sequence[str] = BOT_LABELS,
 ) -> None:
     """Écrit un CSV délimité par ';' et nombres décimaux avec ','."""
     fieldnames = list(csv_fieldnames(labels))
-    float_keys = frozenset(("mean_agg", "worst", "best", labels[0], labels[1], labels[2]))
+    float_keys = frozenset(("mean_agg", "worst", "best", *labels))
     int_keys = frozenset(("roster_value", "worst_vs_value", "best_vs_value"))
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
@@ -494,15 +494,16 @@ def print_table(
     title: str,
     rows: List[Dict[str, Any]],
     sort_key: str,
-    labels: Tuple[str, str, str] = BOT_LABELS,
+    labels: Sequence[str] = BOT_LABELS,
 ) -> None:
     print(title)
     print(f"(tri par {sort_key})")
     wv_w = 36
     bv_w = 36
     vw = 6
+    bot_cols = " ".join(f"{label:>14}" for label in labels)
     hdr = (
-        f"{'roster_id':<42} {'VALUE':>{vw}} {labels[0]:>14} {labels[1]:>14} {labels[2]:>14} "
+        f"{'roster_id':<42} {'VALUE':>{vw}} {bot_cols} "
         f"{'mean_agg':>10} {'worst':>8} {'worst_vs':>{wv_w}} {'w_v':>{vw}} "
         f"{'best':>8} {'best_vs':>{bv_w}} {'b_v':>{vw}}"
     )
@@ -512,9 +513,10 @@ def print_table(
         bv_raw = r["best_vs_roster"]
         wv = (wv_raw[: wv_w - 2] + "..") if len(wv_raw) > wv_w else wv_raw
         bv = (bv_raw[: bv_w - 2] + "..") if len(bv_raw) > bv_w else bv_raw
+        bot_cells = " ".join(f"{r[label]:14.4f}" for label in labels)
         print(
             f"{r['roster_id']:<42} {_fmt_table_int_cell(r['roster_value'], vw)} "
-            f"{r[labels[0]]:14.4f} {r[labels[1]]:14.4f} {r[labels[2]]:14.4f} "
+            f"{bot_cells} "
             f"{r['mean_agg']:10.4f} {r['worst']:8.4f} {wv:>{wv_w}} {_fmt_table_int_cell(r['worst_vs_value'], vw)} "
             f"{r['best']:8.4f} {bv:>{bv_w}} {_fmt_table_int_cell(r['best_vs_value'], vw)}"
         )
@@ -528,7 +530,7 @@ def main() -> None:
         type=Path,
         default=PROJECT_ROOT
         / "config/agents/CoreAgent/rosters/150pts/matchups",
-        help="Répertoire contenant les 3 JSON holdout_hard_matchups_*.json",
+        help="Répertoire contenant les JSON holdout_hard_matchups_<bot>.json de RANKING_BOTS",
     )
     parser.add_argument(
         "--role",
@@ -560,8 +562,8 @@ def main() -> None:
         "--p1exclude",
         action="store_true",
         help=(
-            "Charge holdout_hard_matchups_<bot>_p1exclude.json (adaptive, aggressive_smart, "
-            "defensive — sortie de roster_matchup_stats.py --p1-exclude). Moyenne pondérée 1/3 chacun."
+            "Charge holdout_hard_matchups_<bot>_p1exclude.json pour les bots de RANKING_BOTS "
+            "(sortie de roster_matchup_stats.py --p1-exclude). Mêmes poids que l'agrégat standard."
         ),
     )
     parser.add_argument(
@@ -599,7 +601,7 @@ def main() -> None:
     if args.p1exclude:
         bot_files = BOT_FILES_P1EXCLUDE
         weights = BOT_WEIGHTS_P1EXCLUDE
-        labels: Tuple[str, str, str] = BOT_LABELS_P1EXCLUDE
+        labels: Sequence[str] = BOT_LABELS_P1EXCLUDE
     elif args.p1subset:
         bot_files = BOT_FILES_P1SUBSET
         weights = BOT_WEIGHTS
@@ -645,7 +647,7 @@ def main() -> None:
                 r["worst_vs_value"] = ""
                 r["best_vs_value"] = ""
         if args.p1exclude:
-            p1_title = "=== P1 (agent) rosters — matrices p1exclude (adaptive, aggressive_smart, defensive) ==="
+            p1_title = "=== P1 (agent) rosters — matrices p1exclude ==="
         elif args.p1subset:
             p1_title = "=== P1 (agent) rosters — matrices p1subset ==="
         else:

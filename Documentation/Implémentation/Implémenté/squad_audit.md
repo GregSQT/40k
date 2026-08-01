@@ -560,7 +560,7 @@ Gate : ObservationBuilder(obs_size=357).build_observation → OK (shape 357). Ob
 6. **4e-viii : Smoke training + analyzer + validation** :
    - Run training court sur scenario_pvp_squad5.json.
    - Vérifier convergence sur 50-100 épisodes.
-   - Calibrer hp_damage_weight si overkill, objective_rewards.reward_per_objective si ignore objectifs, etc.
+   - Calibrer hp_damage_weight si overkill, objective_rewards.objective_reward_factor si ignore objectifs, etc.
 
 **Pourquoi STOP ici :**
 - Chaque sub-tranche restante engage des heures de travail + GPU.

@@ -325,7 +325,7 @@ def _create_eval_env(
     """
     from ai.evaluation_bots import (
         RandomBot, GreedyBot, DefensiveBot, ControlBot,
-        AggressiveSmartBot, DefensiveSmartBot, AdaptiveBot, TacticalBot,
+        AdaptiveBot, ValueTradeBot, TacticalBot,
     )
     from ai.training_utils import setup_imports
     from ai.env_wrappers import BotControlledEnv
@@ -339,9 +339,8 @@ def _create_eval_env(
         "greedy": GreedyBot,
         "defensive": DefensiveBot,
         "control": ControlBot,
-        "aggressive_smart": AggressiveSmartBot,
-        "defensive_smart": DefensiveSmartBot,
         "adaptive": AdaptiveBot,
+        "value_trade": ValueTradeBot,
         # V11 §10.5 : holdout d'evaluation — JAMAIS dans bot_training.ratios.
         "tactical": TacticalBot,
     }
@@ -792,8 +791,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     # cree aucun cycle. Le drapeau valait toujours True ; le repli `return {}` aurait rendu une
     # evaluation vide au lieu de lever, ce qui est exactement ce qu'on ne veut pas ici.
     from ai.evaluation_bots import (
-        RandomBot, GreedyBot, DefensiveBot, ControlBot,
-        AggressiveSmartBot, DefensiveSmartBot, AdaptiveBot,
+        RandomBot, GreedyBot, DefensiveBot, ControlBot, AdaptiveBot,
     )
 
     # Import scenario utilities from training_utils

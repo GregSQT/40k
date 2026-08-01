@@ -79,6 +79,8 @@ donc absente de ce tableau).
 | **§0.50** | Non-conformité **01.07** — une unité **battle-shocked** contrôlait ses objectifs normalement | ✅ **CORRIGÉ, NON MERGÉE** — branche `v11-battle-shock-oc`, `4be41919` puis **5 commits, tête `b8932f52`** (⏳ constaté le 2026-07-29 à 14 h 05) ; ⚠️ **travail de suite consigné** : le `require_key(battle_shocked)` contredit **7 autres lecteurs** du même drapeau qui, eux, utilisent `get(..., False)` — à trancher (§0.50) | — | `sum_objective_control_oc_multi` ([game_state.py:2983-3060](../../engine/game_state.py#L2983-L3060)), **source unique** partagée moteur + observation, ne consultait jamais `battle_shocked` alors que 01.07 met l'OC de toutes ses figurines à `'-'`. ⚠️ **Change l'issue des parties** : tout modèle entraîné avant a appris qu'on tient un objectif gratuitement en étant choqué — dont le run 4. Détail → §0.50. |
 | **§0.51** | Branches prêtes — état du dépôt | 🟢 **LES SIX SONT MERGÉES** ⏳ **ENTRÉE PÉRISSABLE (état au 2026-07-29 17 h)** — reconfronter au réel (`git branch --merged main`, `git log main..<branche>`) AVANT usage | — | Constaté par `git merge-base --is-ancestor <branche> main` : `v11-0.46-dead-code-charge-heuristic` (`306033ec`), `v11-0.47-eval-tooling-mask` (`ee3a55b8`), `v11-0.47-dead-decoder-and-interface-lock` (`fbd1d278`), `v11-pre-lot-eval-baseline` (`b5888bdf`), `v11-battle-shock-oc` (`ee1dccb9`), `v11-fly-2103-conformity` (`aba3cb07`) — **toutes ancêtres de `main` = `d061f21b`**. Le **point de composition est donc soldé** (les deux branches du décodeur et de l'outillage d'éval sont sur `main` ensemble). 🔴 **UNE SEULE branche reste NON MERGÉE : `fix-weapon-collection-defaults` (`5980a035`)** — « distinguer *pas d'arme* (liste vide) de *entité mal construite* (clé absente) », 8 fichiers, +310/−35. **En attente : l'utilisateur a du travail en cours sur les mêmes fichiers** (`git status` : `fight_handlers.py`, `shared_utils.py`, `shooting_handlers.py`, `w40k_core.py` modifiés). Elle n'appartient PAS à V11 → [campagne du 2026-07-29](campagne_typage_et_replis_2026-07-29.md#5-limites-de-preuve-de-cette-campagne). ⚠️ **La vérification large (suite complète, `pyright`, `biome`, `tsc`) appartient à l'utilisateur et n'a toujours PAS été faite** : le merge ne l'a pas produite. Détail → §0.51. |
 | **§0.52** | Deux effets de la campagne du 2026-07-29 sur ce que le prochain entraînement mesurera | ✅ **LIVRÉ ET MERGÉ** | **0** (à lire avant d'interpréter toute courbe) | 1️⃣ **Quatre compteurs de combat morts depuis le 2025-10-25 rebranchés** (`5f1878eb`) : `shooting_accuracy`, `damage_dealt`, `damage_received`, `damage_efficiency` étaient **ABSENTES, pas nulles** — aucune mesure d'entraînement antérieure ne les contient. 2️⃣ **Type de socle scindé** (`6f0c0c6b`) : −27 % / −28 % sur deux fonctions géométriques du chemin chaud, invariant devenu impossible à violer. Détail → §0.52. Le reste de la campagne (57 commits) est **hors V11** → [campagne_typage_et_replis_2026-07-29.md](campagne_typage_et_replis_2026-07-29.md). |
+| **§0.53** | Refonte du panel de bots — les adversaires ignoraient la condition de victoire | ✅ **LIVRÉ le 2026-07-30** (non mergé) — 4 verrous prouvés rouges puis verts ; ⚠️ **la vérification large appartient à l'utilisateur** | **0** (à lire avant d'interpréter tout win-rate postérieur) | **Constat mesuré sur deux runs successifs** : le win-rate de l'agent contre chaque bot suit EXACTEMENT le rapport de ce bot aux objectifs (`control` 0.33→0.27 et `adaptive` 0.52→0.36 régressent, `greedy` 0.67→0.82, `aggressive_smart` 0.68→0.80, `tactical` 0.80→0.89, `defensive` 0.88→0.95 progressent), alors que la victoire se décide aux VP d'objectifs (`determine_winner_with_method` : les kills ne tranchent qu'à égalité). Le `combined` montait (0.62→0.65) pendant que la compétence décisive baissait. **Quatre changements** : (1) les trois géométries exclusives de déplacement (`_dest_toward_enemies` / `_dest_away_from_enemies` / `_dest_toward_objective`) sont remplacées par **un score pondéré unique** `w_objective × (−d_objectif) + w_enemy × (−d_ennemi) [+ bonus de tenue]`, réglé dans **`config/bot_movement_weights.json`** — plus aucun bot ne peut ignorer les objectifs, et « tenir l'objectif » devient une règle de score commune au lieu d'une clause propre à `ControlBot` ; (2) **deux lectures d'objectif fausses** corrigées (motif ancre-vs-par-figurine) : `_count_objectives_controlled` relit `objective_controllers` — l'état 14.02 que le moteur écrit — au lieu de recompter des ancres amies, et `_is_on_objective` teste l'**empreinte de socle par figurine** (`iter_living_model_footprints`, extrait de `sum_objective_control_oc_multi` : une seule implémentation) ; les deux vont ensemble, la posture « winning » d'`AdaptiveBot` **fuyait** les objectifs et se serait déclenchée bien plus souvent une fois le comptage juste ; (3) **`AggressiveSmartBot` et `DefensiveSmartBot` supprimés** — le premier est un doublon strict de `GreedyBot` (même géométrie, même `_score_wounded` aux trois phases ; seul écart : un poids de déploiement), le second n'était instancié nulle part ; avec eux disparaissent le regroupement « palier 2 », le scalaire `bot_eval/tier2_combined`, et l'early stopping bascule sur `bot_eval/combined` ; (4) **budget re-pondéré** dans les 5 profils : `ratios` et `bot_eval_weights` = control 0.40 / adaptive 0.20 / greedy 0.20 / defensive 0.20 (+ random 0.05 en training), et l'agrégat de classement de rosters (`roster_aggregate_rankings.py`) passe à **4 bots à 0.25**, arité généralisée. 🔴 **CONSÉQUENCES** : (a) les **matrices `{split}_matchups_{bot}.json` sur disque sont caduques** (`defensive_smart` n'existe plus, l'agrégat change de bots) — **à régénérer** ; (b) le `combined` va **BAISSER** (tous les bots deviennent compétitifs) : c'est le résultat recherché, pas une régression, mais **les seuils de gate de curriculum doivent être recalibrés** (arbitrage utilisateur) ; (c) **aucun win-rate antérieur au 2026-07-30 n'est comparable** à un win-rate postérieur. |
+| **§0.54** | Non-conformité **14.02** — « l'unité est sur un objectif » se lisait sur l'ANCRE d'escouade | ✅ **CORRIGÉ le 2026-07-30** (non mergé) — 2 verrous prouvés rouges sur la lecture par ancre, le test de discrimination restant vert | **2** (change l'issue des parties → ré-entraînement) | Jumeau trouvé en corrigeant les bots ([§0.53](#s0.53)). `is_unit_on_objective` ([shared_utils.py:1274](../../engine/phase_handlers/shared_utils.py#L1274)) comparait l'**ancre d'escouade** à un hexe d'objectif **par égalité stricte de coordonnées**, alors que **14.02** dit « *A model is within range of a terrain objective while it is within that terrain area* » — la portée se juge **PAR FIGURINE** (l'illustration du même paragraphe compte « *six of its models are within the terrain area* »), et le CONTRÔLE d'objectif du **même moteur** (`sum_objective_control_oc_multi`) comptait déjà une figurine dès qu'une case de son **socle** recouvre la zone. Deux réponses différentes à la même question dans le même état de jeu. Deux consommateurs, les deux phases d'attaque : `reroll_towound_target_on_objective` au **tir** ([shared_utils.py:7487](../../engine/phase_handlers/shared_utils.py#L7487)) et en **mêlée** ([fight_handlers.py:5240](../../engine/phase_handlers/fight_handlers.py#L5240)). Correction : implémentation **unique** `game_state.unit_is_within_objective`, sur le même générateur d'empreintes que le contrôle (`iter_living_model_footprints`) ; `is_unit_on_objective` et `_squad_on_objective` (bots) y délèguent. ⚠️ **Change l'issue des parties** : une escouade étalée, ou à socle large, déclenche désormais la relance là où elle ne la déclenchait pas (et l'inverse). Tout modèle entraîné avant a appris une géométrie fausse de cette règle. `ai/analyzer_phases/*` vérifiés : ils comptent le token du journal, sans test géométrique — pas de jumeau de plus. |
 | **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)) ; **T2→T5 relus le 2026-07-29** — les écarts trouvés vivent en **[§0.47](#s0.47)**, pas ici. Reste ouvert : les ✅ de T2→T5 ne sont revérifiés que par LECTURE (aucune exécution), et la conformité littérale de T2 est indécidable (cf. §0.47). ⚠️ Sa **section** est restée en §0hist (elle y était déjà avant l'épuration) alors qu'elle est encore ouverte — laissée en place plutôt que scindée, pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
 
 ✅ **Contrôle de conformité indépendant du 2026-07-29** (vérification par lecture, PAS une nouvelle
@@ -560,6 +562,10 @@ des ids ennemis vivants ([`shared_utils.py:9617`](../../engine/phase_handlers/sh
 [:9663](../../engine/phase_handlers/shared_utils.py#L9663),
 [:9698](../../engine/phase_handlers/shared_utils.py#L9698)) — deux espaces d'indices différents.
 Le bot vise donc **une autre unité que celle que son propre critère a élue**.
+
+> ⚠️ **Périmé depuis le 2026-07-30 (§0.53, table d'état en tête de document)** : `AggressiveSmartBot` et
+> `DefensiveSmartBot` ont été **supprimés**, et les poids ci-dessous ne sont plus ceux de la
+> config. Table conservée telle quelle — c'est un constat daté, pas un état courant.
 
 | Bot | Poids (`x1`) | Touché ? |
 |---|---|---|
@@ -2147,7 +2153,10 @@ AVANT d'y lancer un entraînement.
 > Choses **tranchées et closes** qui ne sont ni des bugs ni des dettes : des décisions de
 > périmètre que l'utilisateur assume. À ne pas rouvrir comme des réserves.
 
-- **§0.16(b) — `DefensiveSmartBot` reste hors éval (status quo, 2026-07-21).** Retiré à l'origine
+- **§0.16(b) — `DefensiveSmartBot` reste hors éval (status quo, 2026-07-21).** ⚠️ **CADUC depuis le
+  2026-07-30 (§0.53) : la classe elle-même a été SUPPRIMÉE**, ainsi que son appelant
+  `_best_target_slot_by_threat`. Le critère de menace reste vivant chez `DefensiveBot`, qui est,
+  lui, joué en éval. Entrée conservée pour mémoire. Retiré à l'origine
   parce qu'il **sous-performait**. Conséquence acceptée : son unique appelant
   `_best_target_slot_by_threat` (7ᵉ site porté) n'est validé que par un **test unitaire**, jamais
   en éval runtime. Le réintroduire pour la seule couverture fausserait la composition d'éval
@@ -3848,7 +3857,7 @@ poussait `unit["col"/"row"]` alors que `require_unit_position` lit `units_cache`
 > Conséquences par site :
 > - `training_callbacks.py::_apply_eval_results` (éval INTERMÉDIAIRE) : lève toujours sur
 >   `total_error_episodes > 0` (**un crash moteur ne s'absorbe pas**) ; sur timeout seul, imprime
->   `⚠️ Évaluation NON FIABLE`, loggue le compteur TensorBoard `0_critical/0_eval_timeout_episodes`
+>   `⚠️ Évaluation NON FIABLE`, loggue le compteur TensorBoard `00_critical/0_eval_timeout_episodes`
 >   et **sort avant** le gate, la métrique de win-rate, la sauvegarde du best model, l'early
 >   stopping et l'historique robuste. Le training continue ; **le point de mesure est ignoré, pas
 >   maquillé** — c'est le point clé : un score sur dénominateur tronqué n'alimente AUCUN signal.
@@ -4514,7 +4523,7 @@ split étaient morts en permanence.
 Poussée jusqu'au bout, cette décision rend le split de scénarios **redondant** — les rosters
 `hard` seraient des copies exactes des `regular`, donc 4 scénarios byte-identiques évalués par
 les mêmes bots, et il faudrait en plus câbler un pool de bots par split qui ferait doublon avec
-l'axe par-bot déjà en place (`bot_eval/vs_*`, `0_critical/c_holdout_tactical`). Les deux listes
+l'axe par-bot déjà en place (`bot_eval/vs_*`). Les deux listes
 ont donc été **supprimées** des 5 phases : l'absence est désormais **explicite**
 (`Worst holdout hard combined: N/A`) au lieu d'être un zéro silencieux.
 
@@ -4717,8 +4726,8 @@ Smart, 15% Adaptive` + `seat mode: random`, 8 workers, exit 0. +5 tests
 **✅ [§10.5](V11_eval_strategy.md#s10.5) FAIT (2026-07-19) — holdout d'évaluation `TacticalBot`.** Câblé dans la factory
 d'éval (`bot_evaluation.BOT_CLASSES`), dans `ALL_BOT_NAMES` (training_callbacks — sans quoi son
 score n'était ni affiché ni loggé) et dans `bot_eval_weights`/`bot_eval_randomness` des 5 phases
-des 2 agents. Deux scalaires TensorBoard : `bot_eval/vs_tactical` et
-`0_critical/c_holdout_tactical`.
+des 2 agents. Un scalaire TensorBoard : `bot_eval/vs_tactical` (son doublon
+`00_critical/c_holdout_tactical` a été supprimé le 2026-07-31 — même valeur, deux tags).
 
 ⚠️ **Un holdout doit être MESURÉ mais ne doit piloter AUCUN signal de sélection** — sinon la
 sélection de modèle optimise dessus et ce n'est plus un holdout. Deux verrous, tous deux
@@ -4730,7 +4739,7 @@ nécessaires (le premier seul ne suffit pas) :
   D'où `HOLDOUT_BOT_NAMES` / `SELECTION_BOT_NAMES = ALL_BOT_NAMES - HOLDOUT_BOT_NAMES`
   (training_callbacks), utilisé aux 3 sites de sélection ; `ALL_BOT_NAMES` reste pour
   l'affichage et le log. `ALL_BOT_KEYS` (metrics_tracker) exclut aussi le holdout, car il
-  alimente `0_critical/b_worst_bot_score`.
+  alimente `00_critical/b_worst_bot_score`.
 
 ⚠️ **Le motif d'origine de cette exclusion était FAUX — corrigé le 2026-07-19 après mesure.**
 Ce document justifiait l'exclusion par nom en écrivant que « `TacticalBot` est le bot le plus

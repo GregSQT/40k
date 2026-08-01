@@ -10,14 +10,18 @@
   "bot_eval_freq_normal": 1000,
   "bot_eval_intermediate": 300,
   "bot_eval_intermediate_normal": 100,
-  "bot_eval_final": 300 ,
+  "bot_eval_final": 300,
   "bot_eval_final_normal": 100,
   "save_best_robust": true,
   "save_best_robust_normal": true,
   "robust_window": 5,
   "robust_drawdown_penalty": 0.5,
   "model_gating_enabled": true,
-  "model_gating_min_combined": 0.60,
+  "model_gating_min_combined": 0.6,
   "model_gating_min_worst_bot": 0.45,
-  "model_gating_min_worst_scenario_combined": 0.45
+  "model_gating_min_worst_scenario_combined": 0.45,
+  "metrics_smoothing": {
+    "perf_window": 500,
+    "perf_window_fast": 500
+  }
 }

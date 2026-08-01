@@ -2,24 +2,30 @@
 """
 ai/evaluation_bots.py - Tactical bots for measuring agent performance
 
-Bot Hierarchy (easiest to hardest):
-
-Tier 1 — Simple strategy bots:
+Panel de bots (du plus simple au plus dur) :
   1. RandomBot - Random actions (baseline)
-  2. GreedyBot - Shoots first, moves toward enemies (aggressive), acheve le blesse en melee
-  3. DefensiveBot - Retreats from threats, shoots when possible, contre-charge les unites
-     de melee qui menacent sa ligne
+  2. GreedyBot - Shoots first, pousse vers l'ennemi, acheve le blesse en melee
+  3. DefensiveBot - Maintient la distance, tire, contre-charge les unites de melee qui
+     menacent sa ligne
   4. ControlBot - Captures and holds objectives, shoots contesters
-
-Tier 2 — Smart bots (focus-fire, advance, charge):
-  5. AggressiveSmartBot - Focus-fires low HP, advances, charges always
-  6. DefensiveSmartBot - Focus-fires threats, keeps distance, never charges
-  7. AdaptiveBot - Adapts posture to game state (early rush / winning hold / losing push)
-
-Legacy:
-  8. TacticalBot - Full phase awareness. V11 §10.5 : HOLDOUT d'evaluation — utilise
+  5. AdaptiveBot - Adapts posture to game state (early rush / winning hold / losing push)
+  6. ValueTradeBot - Joue le DEPARTAGE : maximise le differentiel de VALUE (cible la plus
+     rentable en points par degat, engagement selon son propre profil, retrait des pieces
+     cheres entamees)
+  7. TacticalBot - Full phase awareness. V11 §10.5 : HOLDOUT d'evaluation — utilise
      UNIQUEMENT en evaluation, jamais dans bot_training.ratios, et exclu de tout
      signal de selection de modele. Jamais valide runtime sur le pipeline squad.
+
+⚠️ `AggressiveSmartBot` et `DefensiveSmartBot` ont ete SUPPRIMES, avec le regroupement
+« palier 2 » qui les portait. Le premier etait un doublon strict de `GreedyBot` (meme geometrie
+de move, meme `_score_wounded` aux trois phases d'action ; seul ecart : un poids de
+deploiement) — il gonflait donc l'evaluation d'un adversaire deja mesure. Le second n'etait
+instancie ni a l'entrainement ni en evaluation, et etait domine par `DefensiveBot`, qui a sa
+contre-charge.
+
+Le DEPLACEMENT de tous les bots (hors RandomBot) est un score pondere unique — cf. la section
+« Geometrie de deplacement » : plus aucun bot ne peut ignorer les objectifs, qui decident la
+victoire.
 
 All bots implement all 4 phases: MOVE, SHOOT, CHARGE, FIGHT
 """
@@ -28,9 +34,10 @@ import random
 from typing import Dict, List, Tuple, Any, Optional
 from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
+from engine.game_state import objective_hex_sets, unit_is_within_objective
 from engine.hex_utils import min_distance_between_sets
 from engine.phase_handlers.shared_utils import (
-    is_unit_alive, get_hp_from_cache,
+    is_unit_alive, get_hp_from_cache, is_unit_at_half_strength,
     require_unit_position,
     compute_candidate_footprint, get_enemy_slot_mapping,
 )
@@ -199,6 +206,35 @@ def _score_objective_proximity(
     )
 
 
+def _score_value_per_damage(
+    sid: str, entry: Dict[str, Any], game_state: Dict[str, Any]
+) -> Optional[float]:
+    """Points RETIRES a l'adversaire par point de degat inflige : VALUE / PV restants.
+
+    C'est la mesure exacte du critere de DEPARTAGE : `determine_winner_with_method` compare les
+    VP d'objectifs, puis, a egalite, somme `unit["VALUE"]` sur les escouades ENCORE PRESENTES
+    dans units_cache (« value_tiebreaker »). Une escouade ne rend donc sa VALUE qu'ENTIEREMENT,
+    a sa mort — jamais au prorata des figurines tombees : le gain marginal d'un point de degat
+    vaut VALUE / PV_restants. Un monstre a 120 points sur 10 PV (12.0 par PV) passe devant
+    20 points de gretchins sur 2 PV (10.0 par PV) — l'inverse de `_score_wounded`, qui achevait
+    le moins cher parce qu'il etait le plus proche de mourir.
+
+    VALUE est lue sur la DATASHEET (`entry`, cf. `_target_slot_entries` : units_cache la porte
+    aussi, mais la datasheet est la source de verite du contrat d'unite) et les PV sur
+    units_cache, source de verite des HP_CUR.
+    """
+    hp = get_hp_from_cache(sid, game_state)
+    if hp is None:
+        raise RuntimeError(f"Cible {sid} ouverte par le masque mais absente du cache de HP.")
+    hp_left = float(hp)
+    if hp_left <= 0:
+        raise RuntimeError(
+            f"Cible {sid} presente dans units_cache avec HP_CUR={hp} : le cache ne contient que "
+            f"des escouades vivantes, l'invariant est rompu."
+        )
+    return float(require_key(entry, "VALUE")) / hp_left
+
+
 def _score_killable_then_wounded(attacker: Dict[str, Any], melee: bool):
     """Critere de TacticalBot : tuable ce tour > peu de PV > menace elevee.
 
@@ -268,17 +304,173 @@ def _charge_action_by(
     )
 
 
-# --- Heuristiques de destination (refonte spatiale du move, spec §T4) --------
+# --- Geometrie de deplacement : UNE fonction de score ponderee ---------------
 # En move spatial, le TYPE de move (normal/advance/fall_back) est INFERE du cout geodesique par
 # le moteur (shared_utils.infer_squad_move_type) : le bot ne choisit plus qu'une DESTINATION
 # parmi le pool BFS legal (les hexes reellement executables), via select_movement_destination.
 # Le wrapper d'eval traduit ensuite destination -> cellule -> action entiere. Choisir « la
 # premiere cellule legale » donnerait un coin arbitraire de la grille (root cause §3 transposee,
-# c'est explicitement rejete) : ces helpers donnent a chaque bot une vraie geometrie.
+# c'est explicitement rejete) : ce score donne a chaque bot une vraie geometrie.
+#
+# ⚠️ REFONTE — les trois heuristiques exclusives `_dest_toward_enemies` /
+# `_dest_away_from_enemies` / `_dest_toward_objective` ont ete REMPLACEES par une seule fonction
+# de score ponderee. Motif mesure : la victoire se decide aux VP d'objectifs
+# (`determine_winner_with_method` : les kills ne tranchent qu'a egalite), et le win-rate de
+# l'agent contre chaque bot suivait EXACTEMENT le rapport de ce bot aux objectifs — les bots qui
+# les ignoraient etaient les plus faciles, et progressaient d'un run a l'autre pendant que les
+# deux qui les jouaient regressaient. Une geometrie exclusive laissait un bot ignorer TOTALEMENT
+# la condition de victoire ; un score pondere ne le permet plus.
+#
+#     score(dest) = w_obj * (-d_objectif) + w_enn * (-d_ennemi) [+ w_obj * hold_bonus sur zone]
+#
+# w_enn > 0 = se rapprocher, w_enn < 0 = s'eloigner. Le STYLE d'un bot est ce couple de poids,
+# lu dans config/bot_movement_weights.json (aucun defaut : une cle absente leve).
+#
+# « Tenir l'objectif » est une REGLE DE SCORE (le bonus ci-dessus), plus une doctrine exclusive a
+# ControlBot : tout bot assez objectif-centre reste sur une zone qu'il occupe deja.
 #
 # Convention WAIT : renvoyer la position courante de l'unite (`require_unit_position`) signale
 # « je ne bouge pas » — le wrapper la traduit en WAIT. `start_pos` etant exclu du pool (§4.6),
-# l'ancre n'est jamais une destination legale : le signal est donc sans ambiguite.
+# l'ancre n'est jamais une destination legale : le signal est donc sans ambiguite. La position
+# courante est TOUJOURS candidate au score, et l'emporte a egalite (on ne bouge pas pour rien).
+
+_MOVEMENT_WEIGHTS_CONFIG = "bot_movement_weights"
+
+
+def _movement_weights_config() -> Dict[str, Any]:
+    """config/bot_movement_weights.json, memoise par le config_loader."""
+    from config_loader import get_config_loader
+
+    return get_config_loader().load_config(_MOVEMENT_WEIGHTS_CONFIG, force_reload=False)
+
+
+def load_movement_weights(bot_key: str, posture: Optional[str] = None) -> Tuple[float, float]:
+    """(w_objective, w_enemy) du bot `bot_key` — `posture` pour les bots a postures.
+
+    Aucune valeur par defaut : un bot absent du fichier, ou une cle de poids manquante, leve.
+    """
+    bots = require_key(_movement_weights_config(), "bots")
+    entry = require_key(bots, bot_key)
+    if posture is not None:
+        entry = require_key(entry, posture)
+    return float(require_key(entry, "w_objective")), float(require_key(entry, "w_enemy"))
+
+
+def load_hold_bonus() -> float:
+    """Bonus (en distance-hex) accorde a une destination situee dans une zone d'objectif."""
+    return float(require_key(_movement_weights_config(), "hold_bonus"))
+
+
+def _squad_on_objective(unit, game_state, zones=None) -> bool:
+    """L'escouade est-elle a portee d'un objectif ? 14.02, lecture PAR FIGURINE.
+
+    ⚠️ ROOT CAUSE CORRIGEE — les bots comparaient l'ANCRE d'escouade (`get_unit_coordinates`)
+    aux hexes d'objectif. Le controle reel se joue sur l'EMPREINTE DE SOCLE de chaque figurine :
+    une escouade dont une figurine couvre la zone alors que son ancre est a cote comptait pour
+    le moteur et pas pour le bot. Implementation unique, celle du moteur
+    (`game_state.unit_is_within_objective`) — les bots ne repondent pas a leur facon a une
+    question de regle.
+    """
+    return unit_is_within_objective(game_state, unit, zones)
+
+
+def _objective_context(game_state):
+    """(centres d'objectif, zones d'objectif, bonus de tenue) — lus une fois par decision."""
+    objectives = game_state.get("objectives")  # get allowed : scenario sans objectif
+    centers = [mi.get_objective_center(obj) for obj in objectives] if objectives else []
+    return centers, objective_hex_sets(game_state), load_hold_bonus()
+
+
+def _objective_term(
+    dest, centers, zones, hold_bonus: float, w_obj: float, on_objective: Optional[bool] = None
+) -> float:
+    """Part « objectif » du score d'une destination. Sans objectif sur la table : 0.0.
+
+    `on_objective` force le verdict de presence (lecture exacte par figurine pour la position
+    courante) ; None le derive de l'ancre de la destination candidate (heuristique O(1)).
+    """
+    if not centers:
+        return 0.0
+    score = -w_obj * min(
+        calculate_hex_distance(dest[0], dest[1], ocol, orow) for ocol, orow in centers
+    )
+    inside = any(dest in zone for zone in zones) if on_objective is None else on_objective
+    if inside:
+        score += w_obj * hold_bonus
+    return score
+
+
+def _select_destination(
+    valid_destinations, unit, game_state, w_obj: float, w_enn: float
+) -> Tuple[int, int]:
+    """Destination maximisant le score pondere ; la position courante est candidate (= WAIT).
+
+    Cout : O(1) par candidate (distances ancre->ancre / ancre->centre d'objectif). Le pool BFS
+    compte jusqu'a ~634 cellules sur board x5 ; recalculer une empreinte par candidate coutait
+    ~44 ms/decision de bot. Le bonus de tenue se lit donc par ANCRE sur les candidates (choix de
+    bot, heuristique assumee) et PAR FIGURINE sur la position courante (`_squad_on_objective`,
+    exact) — c'est la position courante qui porte la decision « je tiens », donc c'est elle qui
+    exige la lecture juste.
+    """
+    current = require_unit_position(unit, game_state)
+    enemy_positions = _living_enemy_positions(unit, game_state)
+    centers, zones, hold_bonus = _objective_context(game_state)
+
+    def _score(dest, on_objective: Optional[bool]) -> float:
+        score = _objective_term(dest, centers, zones, hold_bonus, w_obj, on_objective)
+        if enemy_positions:
+            score -= w_enn * _dest_nearest_enemy_hexdist(dest, enemy_positions)
+        return score
+
+    best_dest = current
+    best_score = _score(current, _squad_on_objective(unit, game_state, zones))
+    for dest in valid_destinations:
+        score = _score(dest, None)
+        if score > best_score:
+            best_score = score
+            best_dest = dest
+    return best_dest
+
+
+class _WeightedMover:
+    """Socle des bots dont le deplacement est un couple de poids (cf. `_select_destination`).
+
+    `MOVEMENT_BOT_KEY` designe l'entree du fichier de config ; `movement_weights` permet a un
+    appelant (test) de fournir explicitement les poids au lieu de les lire dans la config.
+    """
+
+    MOVEMENT_BOT_KEY: str = ""
+
+    # Pose par le __init__ de CHAQUE sous-classe (clampe dans [0,1]) : le socle le declare pour
+    # que `_weighted_destination`, qui le lit, soit verifiable — il n'y a pas de valeur ici, une
+    # sous-classe qui oublierait de l'initialiser doit lever a l'acces, pas heriter d'un 0.0.
+    randomness: float
+
+    def _weights(self, posture: Optional[str] = None) -> Tuple[float, float]:
+        override = getattr(self, "_movement_weights_override", None)
+        if override is not None:
+            entry = override if posture is None else require_key(override, posture)
+            return float(entry[0]), float(entry[1])
+        return load_movement_weights(self.MOVEMENT_BOT_KEY, posture)
+
+    def _weighted_destination(
+        self, unit, valid_destinations, game_state, posture=None
+    ) -> Tuple[int, int]:
+        """Chemin commun : tirage aleatoire eventuel, puis score pondere."""
+        if game_state is None:
+            raise ValueError(
+                f"{type(self).__name__}.select_movement_destination exige game_state : le score "
+                f"de destination lit les objectifs, les ennemis et la position courante."
+            )
+        # Le pool vide se tranche AVANT le tirage : sinon un bot sans destination legale
+        # consommerait quand meme un tirage du RNG global, decalant la sequence de tous les
+        # bots pour le reste de l'episode (ils partagent `random`).
+        if valid_destinations and self.randomness > 0 and random.random() < self.randomness:
+            chosen = random.choice(valid_destinations)
+            return (int(chosen[0]), int(chosen[1]))
+        w_obj, w_enn = self._weights(posture)
+        return _select_destination(valid_destinations, unit, game_state, w_obj, w_enn)
+
 
 def _living_enemy_positions(unit, game_state):
     """Ancres (col,row) des ennemis vivants de `unit`, depuis units_cache."""
@@ -300,50 +492,6 @@ def _living_enemy_positions(unit, game_state):
 def _dest_nearest_enemy_hexdist(dest, enemy_positions):
     """Distance-hex de la destination a l'ancre ennemie la plus proche."""
     return min(calculate_hex_distance(dest[0], dest[1], ec, er) for ec, er in enemy_positions)
-
-
-def _dest_toward_enemies(valid_destinations, unit, game_state):
-    """Destination minimisant la distance-hex a l'ennemi le plus proche (poussee offensive).
-
-    Distance ancre->ancre (O(1)/cellule) et non empreinte->empreinte : sur board x5 le pool
-    contient ~337 cellules jouables (jusqu'a 634), et recalculer une empreinte par candidate
-    coutait ~44 ms/decision de bot. Une distance hex suffit a une heuristique de bot.
-    """
-    enemy_pos = _living_enemy_positions(unit, game_state)
-    if not enemy_pos:
-        return valid_destinations[0]
-    return min(
-        valid_destinations,
-        key=lambda d: _dest_nearest_enemy_hexdist(d, enemy_pos),
-    )
-
-
-def _dest_away_from_enemies(valid_destinations, unit, game_state):
-    """Destination maximisant la distance-hex a l'ennemi le plus proche (repli)."""
-    enemy_pos = _living_enemy_positions(unit, game_state)
-    if not enemy_pos:
-        return valid_destinations[0]
-    return max(
-        valid_destinations,
-        key=lambda d: _dest_nearest_enemy_hexdist(d, enemy_pos),
-    )
-
-
-def _dest_toward_objective(valid_destinations, unit, game_state):
-    """Destination la plus proche du centre de l'objectif le plus proche de l'unite."""
-    objectives = game_state.get("objectives")
-    if not objectives:
-        return _dest_toward_enemies(valid_destinations, unit, game_state)
-    ucol, urow = get_unit_coordinates(unit)
-    nearest = min(
-        objectives,
-        key=lambda o: calculate_hex_distance(ucol, urow, *mi.get_objective_center(o)),
-    )
-    ocol, orow = mi.get_objective_center(nearest)
-    return min(
-        valid_destinations,
-        key=lambda d: calculate_hex_distance(d[0], d[1], ocol, orow),
-    )
 
 
 def _select_weighted_deployment_action(
@@ -410,23 +558,28 @@ class RandomBot:
         return get_unit_coordinates(unit)
 
 
-class GreedyBot:
+class GreedyBot(_WeightedMover):
     """Pousse vers l'ennemi le plus proche et ACHEVE les cibles entamees.
 
     Critere de cible unique aux trois phases d'action (tir, charge, melee) : l'escouade la plus
     ENTAMEE (`_score_wounded`), lue sur le mapping de slots ennemis — jamais sur l'ordre des
-    slots. Deplacement : vers l'ennemi le plus proche.
+    slots. Deplacement : poussee offensive dominante, corrigee d'un attrait d'objectif (il ne
+    traverse plus la table en ignorant une zone qui gagne la partie).
     """
 
-    def __init__(self, randomness: float = 0.0):
+    MOVEMENT_BOT_KEY = "greedy"
+
+    def __init__(self, randomness: float = 0.0, movement_weights=None):
         """
         Initialize GreedyBot with optional randomness.
 
         Args:
             randomness: Probability [0.0-1.0] of making a random move instead of greedy choice.
                        0.0 = pure greedy, 0.15 = 15% random actions (recommended for training)
+            movement_weights: (w_objective, w_enemy) explicites ; None = lus dans la config.
         """
         self.randomness = max(0.0, min(1.0, randomness))  # Clamp to [0, 1]
+        self._movement_weights_override = movement_weights
         self._deployment_last_action: Optional[int] = None
         self._deployment_repeat_count = 0
         self._deployment_episode_marker: Optional[Any] = None
@@ -486,54 +639,39 @@ class GreedyBot:
         return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
-        """Greedy : pousse vers l'ennemi le plus proche (poussee offensive)."""
-        if not valid_destinations:
-            if game_state is not None:
-                return require_unit_position(unit, game_state)
-            return get_unit_coordinates(unit)
+        """Greedy : poussee offensive ponderee d'un attrait d'objectif."""
+        return self._weighted_destination(unit, valid_destinations, game_state)
 
-        # Add randomness to movement
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_destinations)
 
-        if game_state is None:
-            return valid_destinations[0]
-        return _dest_toward_enemies(valid_destinations, unit, game_state)
-
-class DefensiveBot:
+class DefensiveBot(_WeightedMover):
     """Prioritizes survival, maintains distance, contre-charge les menaces de melee.
 
+    Deplacement : recule DEVANT l'ennemi mais VERS son objectif — le repli pur l'emmenait au
+    bord de la table, hors de la seule chose qui marque des points.
     Charge : cf. `_charge_action` (doctrine de contre-charge).
     Combat : frappe la cible la PLUS MENACANTE (neutraliser la source de degats).
     """
 
-    def __init__(self, randomness: float = 0.0):
+    MOVEMENT_BOT_KEY = "defensive"
+
+    def __init__(self, randomness: float = 0.0, movement_weights=None):
         """
         Initialize DefensiveBot with optional randomness.
 
         Args:
             randomness: Probability [0.0-1.0] of making a random move instead of defensive choice.
                        0.0 = pure defensive, 0.15 = 15% random actions (recommended for training)
+            movement_weights: (w_objective, w_enemy) explicites ; None = lus dans la config.
         """
         self.randomness = max(0.0, min(1.0, randomness))  # Clamp to [0, 1]
+        self._movement_weights_override = movement_weights
         self._deployment_last_action: Optional[int] = None
         self._deployment_repeat_count = 0
         self._deployment_episode_marker: Optional[Any] = None
 
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
-        """Defensif : s'eloigne de l'ennemi le plus proche (maintien de distance)."""
-        if not valid_destinations:
-            if game_state is not None:
-                return require_unit_position(unit, game_state)
-            return get_unit_coordinates(unit)
-
-        # Add randomness to movement
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_destinations)
-
-        if game_state is None:
-            return valid_destinations[0]
-        return _dest_away_from_enemies(valid_destinations, unit, game_state)
+        """Defensif : maintien de distance, mais l'attrait d'objectif borne le repli."""
+        return self._weighted_destination(unit, valid_destinations, game_state)
 
     def select_action_with_state(
         self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
@@ -653,27 +791,31 @@ class DefensiveBot:
         return threat_count
 
 
-class ControlBot:
+class ControlBot(_WeightedMover):
     """
     Objective-focused bot that prioritizes capturing and holding control points.
 
     Strategy:
-    - MOVE: Move toward nearest uncontrolled/enemy objective (action 0 aggressive
-      when objectives are between us and enemies, action 1 tactical otherwise).
-      Hold position (WAIT) when already on an objective.
+    - MOVE: score pondere fortement objectif (le bonus de tenue le fait rester sur une zone
+      qu'il occupe deja — c'est desormais une regle de score commune, plus une clause propre
+      a ce bot).
     - SHOOT: Prioritize enemies near objectives (contesting control).
     - CHARGE/FIGHT: Only engage to defend or contest an objective.
     - DEPLOYMENT: Weighted toward objective pressure.
     """
 
-    def __init__(self, randomness: float = 0.0):
+    MOVEMENT_BOT_KEY = "control"
+
+    def __init__(self, randomness: float = 0.0, movement_weights=None):
         """
         Initialize ControlBot with optional randomness.
 
         Args:
             randomness: Probability [0.0-1.0] of making a random action.
+            movement_weights: (w_objective, w_enemy) explicites ; None = lus dans la config.
         """
         self.randomness = max(0.0, min(1.0, randomness))
+        self._movement_weights_override = movement_weights
         self._deployment_last_action: Optional[int] = None
         self._deployment_repeat_count = 0
         self._deployment_episode_marker: Optional[Any] = None
@@ -696,15 +838,19 @@ class ControlBot:
         # Escouade activee FOURNIE par le wrapper : plus de devinette « premiere unite vivante
         # de current_player », qui pouvait designer une autre escouade et, en combat, un autre
         # joueur (la selection 12.04 alterne entre les camps).
-        on_objective = self._is_on_objective(active_unit, game_state)
-
+        #
         # Doctrine de CONTROLE : frapper qui CONTESTE, c'est-a-dire la cible la plus proche d'un
         # objectif (`_score_objective_proximity`) — tir, charge et melee alignes sur le meme
         # critere, conformement a la docstring de la classe.
         if phase == "shoot":
             return self._shoot_action(valid_actions, game_state, active_unit)
         if phase == "charge":
-            if on_objective and WAIT_ACTION in valid_actions:
+            # « Suis-je sur un objectif ? » n'est lu QUE par la charge : la question est
+            # calculee ici et pas en tete de methode. Depuis qu'elle se lit par figurine
+            # (14.02 : empreinte de socle de chaque figurine vs zones d'objectif) elle n'est
+            # plus une egalite de coordonnees, et ControlBot est le chemin le plus chaud du
+            # panel (35 % des bots d'entrainement, 0.40 du poids d'evaluation).
+            if self._is_on_objective(active_unit, game_state) and WAIT_ACTION in valid_actions:
                 return WAIT_ACTION
             charge = _charge_action_by(
                 valid_actions, game_state, active_unit, _score_objective_proximity
@@ -751,22 +897,12 @@ class ControlBot:
         return chosen
 
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
-        """Vers l'objectif le plus proche ; tient sa position s'il est deja dessus.
+        """Vers l'objectif ; le bonus de tenue le maintient sur la zone qu'il occupe deja.
 
         « Tenir » = renvoyer l'hex courant (le wrapper le traduit en WAIT), `start_pos` etant
         exclu du pool donc jamais une destination legale.
         """
-        if not valid_destinations:
-            if game_state is not None:
-                return require_unit_position(unit, game_state)
-            return get_unit_coordinates(unit)
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_destinations)
-        if game_state is None:
-            return valid_destinations[0]
-        if self._is_on_objective(unit, game_state):
-            return require_unit_position(unit, game_state)
-        return _dest_toward_objective(valid_destinations, unit, game_state)
+        return self._weighted_destination(unit, valid_destinations, game_state)
 
     def _shoot_action(
         self, valid_actions: List[int], game_state: Dict[str, Any], active_unit: Dict[str, Any]
@@ -781,24 +917,8 @@ class ControlBot:
         return valid_actions[0]
 
     def _is_on_objective(self, unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
-        """Check if unit is standing on an objective hex."""
-        objectives = game_state.get("objectives")
-        if not objectives:
-            return False
-        unit_col, unit_row = get_unit_coordinates(unit)
-        for obj in objectives:
-            if not isinstance(obj, dict):
-                continue
-            _hx = obj.get("hexes")
-            hexes = _hx if isinstance(_hx, list) else []
-            for h in hexes:
-                if isinstance(h, dict):
-                    if unit_col == int(h.get("col", -1)) and unit_row == int(h.get("row", -1)):
-                        return True
-                elif isinstance(h, (list, tuple)) and len(h) == 2:
-                    if unit_col == int(h[0]) and unit_row == int(h[1]):
-                        return True
-        return False
+        """Lecture PAR FIGURINE (14.02) — cf. `_squad_on_objective`, implementation unique."""
+        return _squad_on_objective(unit, game_state)
 
 
 # ---------------------------------------------------------------------------
@@ -836,228 +956,42 @@ def _shoot_focus_fire(
 
 
 def _count_objectives_controlled(game_state: Dict[str, Any], player: int) -> int:
-    """Count how many objectives have at least one friendly unit on them."""
-    objectives = game_state.get("objectives")
-    if not objectives:
-        return 0
-    units_cache = require_key(game_state, "units_cache")
-    friendly_positions: set = set()
-    for uid, entry in units_cache.items():
-        if int(entry.get("player", -1)) == player:
-            friendly_positions.add((int(entry["col"]), int(entry["row"])))
+    """Objectifs CONTROLES par `player`, lus dans l'etat que le moteur ecrit.
 
-    controlled = 0
-    for obj in objectives:
-        if isinstance(obj, dict):
-            _oh = obj.get("hexes")
-            hexes = _oh if isinstance(_oh, list) else []
-        else:
-            hexes = []
-        for h in hexes:
-            if isinstance(h, dict):
-                pos = (int(h["col"]), int(h["row"]))
-            elif isinstance(h, (list, tuple)) and len(h) == 2:
-                pos = (int(h[0]), int(h[1]))
-            else:
-                continue
-            if pos in friendly_positions:
-                controlled += 1
-                break
-    return controlled
-
-
-class AggressiveSmartBot:
+    ⚠️ ROOT CAUSE CORRIGEE — ce comptage recalculait un pseudo-controle « au moins une ANCRE
+    amie sur un hexe d'objectif ». Le controle reel (14.02) est la somme des OC PAR FIGURINE sur
+    l'empreinte, fige a chaque fin de phase et de tour par `calculate_objective_control`, qui
+    ecrit `objective_controllers`. Un bot ne recalcule donc rien : il relit cet etat, comme
+    l'observation de l'agent (`ObservationBuilder._squad_objective_control`) et comme le calcul
+    de recompense (`reward_calculator`). L'ancien comptage ignorait aussi l'OC adverse : une
+    zone contestee et PERDUE y comptait comme controlee.
     """
-    Palier 2 — Aggressive with intelligence.
+    controllers = require_key(game_state, "objective_controllers")
+    return sum(1 for controller in controllers.values() if controller == player)
 
-    Always pushes forward, uses advance when no targets, charges every chance,
-    and focus-fires the lowest HP enemy to maximise kills.
+
+
+class AdaptiveBot(_WeightedMover):
     """
+    Adapte sa strategie a l'etat de la partie.
 
-    def __init__(self, randomness: float = 0.0):
-        self.randomness = max(0.0, min(1.0, randomness))
-        self._deployment_last_action: Optional[int] = None
-        self._deployment_repeat_count = 0
-        self._deployment_episode_marker: Optional[Any] = None
+    - Tours 1-2 (`early`) : rush objectif, charge pour contester.
+    - `winning` : il TIENT ses objectifs (poids objectif fort + bonus de tenue), sans charger.
+    - `losing` : ultra-agressif, pousse vers l'ennemi et charge.
+    Focus-fire de la cible la plus entamee en permanence.
 
-    def select_action_with_state(
-        self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
-    ) -> int:
-        if not valid_actions:
-            return WAIT_ACTION
-        phase = require_key(game_state, "phase")
-
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_actions)
-
-        if phase == "deployment":
-            return self._deploy(valid_actions, game_state)
-
-        # La phase move est routee par le wrapper vers select_movement_destination.
-
-        if phase == "shoot":
-            if any(a in valid_actions for a in mi.SHOOT_SLOTS):
-                # Agressif : focus-fire de l'escouade la plus ENTAMEE (maximiser les kills).
-                return _shoot_focus_fire(valid_actions, game_state, active_unit, _score_wounded)
-            return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
-
-        if phase == "charge":
-            # Agressif : il charge des qu'il peut, sur l'escouade la plus ENTAMEE — meme critere
-            # que son tir et sa melee (maximiser les kills).
-            charge = _charge_action_by(valid_actions, game_state, active_unit, _score_wounded)
-            if charge is not None:
-                return charge
-            return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
-
-        if phase == "fight":
-            fight = _fight_action_by(valid_actions, game_state, active_unit, _score_wounded)
-            if fight is not None:
-                return fight
-            return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
-
-        return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
-
-    def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
-        """Agressif : pousse toujours vers l'ennemi le plus proche."""
-        if not valid_destinations:
-            if game_state is not None:
-                return require_unit_position(unit, game_state)
-            return get_unit_coordinates(unit)
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_destinations)
-        if game_state is None:
-            return valid_destinations[0]
-        return _dest_toward_enemies(valid_destinations, unit, game_state)
-
-    def _deploy(self, valid_actions: List[int], game_state) -> int:
-        episode_marker = game_state.get("episode_number")
-        if self._deployment_episode_marker != episode_marker:
-            self._deployment_episode_marker = episode_marker
-            self._deployment_last_action = None
-            self._deployment_repeat_count = 0
-        weights = {
-            DEPLOYMENT_ACTIONS[0]: 0.50,
-            DEPLOYMENT_ACTIONS[1]: 0.20,
-            DEPLOYMENT_ACTIONS[2]: 0.10,
-            DEPLOYMENT_ACTIONS[3]: 0.10,
-            DEPLOYMENT_ACTIONS[4]: 0.10,
-        }
-        chosen = _select_weighted_deployment_action(
-            valid_actions=valid_actions,
-            weights_by_action=weights,
-            last_action=self._deployment_last_action,
-            repeat_count=self._deployment_repeat_count,
-            max_repeat=2,
-        )
-        if self._deployment_last_action == chosen:
-            self._deployment_repeat_count += 1
-        else:
-            self._deployment_last_action = chosen
-            self._deployment_repeat_count = 1
-        return chosen
-
-
-class DefensiveSmartBot:
-    """
-    Palier 2 — Defensive with intelligence.
-
-    Keeps distance, never charges or advances, focus-fires the highest-threat
-    enemy to neutralise damage sources.
-    """
-
-    def __init__(self, randomness: float = 0.0):
-        self.randomness = max(0.0, min(1.0, randomness))
-        self._deployment_last_action: Optional[int] = None
-        self._deployment_repeat_count = 0
-        self._deployment_episode_marker: Optional[Any] = None
-
-    def select_action_with_state(
-        self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
-    ) -> int:
-        if not valid_actions:
-            return WAIT_ACTION
-        phase = require_key(game_state, "phase")
-
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_actions)
-
-        if phase == "deployment":
-            return self._deploy(valid_actions, game_state)
-
-        # La phase move est routee par le wrapper vers select_movement_destination (repli).
-
-        if phase == "shoot":
-            if any(a in valid_actions for a in mi.SHOOT_SLOTS):
-                # Defensif : focus-fire de l'escouade la plus MENACANTE (neutraliser les degats).
-                return _shoot_focus_fire(valid_actions, game_state, active_unit, _score_threat)
-            return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
-
-        if phase == "charge":
-            return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
-
-        if phase == "fight":
-            # Defensif : neutraliser la source de degats, meme critere que son tir.
-            fight = _fight_action_by(valid_actions, game_state, active_unit, _score_threat)
-            if fight is not None:
-                return fight
-            return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
-
-        return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
-
-    def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
-        """Defensif : garde ses distances, s'eloigne de l'ennemi le plus proche."""
-        if not valid_destinations:
-            if game_state is not None:
-                return require_unit_position(unit, game_state)
-            return get_unit_coordinates(unit)
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_destinations)
-        if game_state is None:
-            return valid_destinations[0]
-        return _dest_away_from_enemies(valid_destinations, unit, game_state)
-
-    def _deploy(self, valid_actions: List[int], game_state) -> int:
-        episode_marker = game_state.get("episode_number")
-        if self._deployment_episode_marker != episode_marker:
-            self._deployment_episode_marker = episode_marker
-            self._deployment_last_action = None
-            self._deployment_repeat_count = 0
-        weights = {
-            DEPLOYMENT_ACTIONS[0]: 0.10,
-            DEPLOYMENT_ACTIONS[1]: 0.20,
-            DEPLOYMENT_ACTIONS[2]: 0.45,
-            DEPLOYMENT_ACTIONS[3]: 0.10,
-            DEPLOYMENT_ACTIONS[4]: 0.15,
-        }
-        chosen = _select_weighted_deployment_action(
-            valid_actions=valid_actions,
-            weights_by_action=weights,
-            last_action=self._deployment_last_action,
-            repeat_count=self._deployment_repeat_count,
-            max_repeat=2,
-        )
-        if self._deployment_last_action == chosen:
-            self._deployment_repeat_count += 1
-        else:
-            self._deployment_last_action = chosen
-            self._deployment_repeat_count = 1
-        return chosen
-
-
-class AdaptiveBot:
-    """
-    Palier 2 — Adapts strategy to game state.
-
-    - Early turns (1-2): rush objectives (action 3), charge to contest.
-    - Late turns winning: defensive hold, no advance/charge.
-    - Late turns losing: ultra-aggressive, advance + charge + focus fire.
-    Focus-fires lowest HP target throughout.
+    ⚠️ « winning » signifiait S'ELOIGNER (`_dest_away_from_enemies`) : une fois le comptage
+    d'objectifs juste (`_count_objectives_controlled` relit `objective_controllers`), cette
+    posture se declenche bien plus souvent — et faisait alors FUIR les objectifs qui font
+    gagner. Les deux corrections vont ensemble.
     """
 
     EARLY_TURN_THRESHOLD = 2
+    MOVEMENT_BOT_KEY = "adaptive"
 
-    def __init__(self, randomness: float = 0.0):
+    def __init__(self, randomness: float = 0.0, movement_weights=None):
         self.randomness = max(0.0, min(1.0, randomness))
+        self._movement_weights_override = movement_weights
         self._deployment_last_action: Optional[int] = None
         self._deployment_repeat_count = 0
         self._deployment_episode_marker: Optional[Any] = None
@@ -1109,23 +1043,16 @@ class AdaptiveBot:
 
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
         """Destination selon la posture (le type de move est infere par le moteur) :
-        early -> rush objectif ; losing -> pousse vers l'ennemi ; winning -> garde ses distances.
+        early -> rush objectif ; losing -> pousse vers l'ennemi ; winning -> TIENT l'objectif.
         """
-        if not valid_destinations:
-            if game_state is not None:
-                return require_unit_position(unit, game_state)
-            return get_unit_coordinates(unit)
-        if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_destinations)
         if game_state is None:
-            return valid_destinations[0]
+            raise ValueError(
+                "AdaptiveBot.select_movement_destination exige game_state : la posture et le "
+                "score de destination le lisent."
+            )
         turn = int(game_state.get("turn", 1))
         posture = self._evaluate_posture(game_state, _acting_player(game_state, unit), turn)
-        if posture == "winning":
-            return _dest_away_from_enemies(valid_destinations, unit, game_state)
-        if posture == "early":
-            return _dest_toward_objective(valid_destinations, unit, game_state)
-        return _dest_toward_enemies(valid_destinations, unit, game_state)
+        return self._weighted_destination(unit, valid_destinations, game_state, posture=posture)
 
     def _shoot(
         self,
@@ -1183,12 +1110,190 @@ class AdaptiveBot:
         return chosen
 
 
-class TacticalBot:
+class ValueTradeBot(_WeightedMover):
+    """Maximise le DIFFERENTIEL DE VALUE — le critere qui departage a VP d'objectifs egaux.
+
+    Aucun autre bot du panel ne joue ce critere : ils visent les PV les plus bas
+    (`_score_wounded`), la menace (`_score_threat`) ou la proximite d'objectif
+    (`_score_objective_proximity`). Or `determine_winner_with_method` tranche les egalites de VP
+    sur la VALUE totale restante (« value_tiebreaker »), et l'agent n'a jamais eu d'adversaire qui
+    la defende ou l'attaque.
+
+    - CIBLE (tir, charge, melee — un seul critere aux trois phases) : `_score_value_per_damage`,
+      VALUE de la cible / PV restants. Il tue le monstre a 120 points plutot que les gretchins a
+      20, la ou `GreedyBot` fait l'inverse a degats egaux.
+    - ENGAGEMENT selon SON PROPRE profil, pas une portee fixee d'avance : melee attendue > tir
+      attendu -> il cherche le contact (posture « engage », charge ouverte) ; sinon il tient sa
+      portee (posture « standoff », pas de charge). Meme comparaison que
+      `TacticalBot._select_charge_action`, ici etendue a la geometrie de deplacement.
+    - RETRAIT : une escouade a lui, de haute VALUE et entamee, est SORTIE DU JEU (posture
+      « withdraw ») — la garder au contact, c'est offrir a l'adversaire le departage.
+
+    Les trois postures sont des couples de poids de `_select_destination` (aucune geometrie
+    dediee), lus dans config/bot_movement_weights.json comme pour les autres bots.
+    """
+
+    MOVEMENT_BOT_KEY = "value_trade"
+
+    def __init__(self, randomness: float = 0.0, movement_weights=None):
+        """
+        Args:
+            randomness: probabilite [0.0-1.0] de jouer une action au hasard.
+            movement_weights: {posture: (w_objective, w_enemy)} explicites ; None = config.
+        """
+        self.randomness = max(0.0, min(1.0, randomness))
+        self._movement_weights_override = movement_weights
+        self._deployment_last_action: Optional[int] = None
+        self._deployment_repeat_count = 0
+        self._deployment_episode_marker: Optional[Any] = None
+
+    def select_action_with_state(
+        self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
+    ) -> int:
+        """Un seul critere de cible aux trois phases d'action : la VALUE par point de degat."""
+        if not valid_actions:
+            return WAIT_ACTION
+        phase = require_key(game_state, "phase")
+
+        if self.randomness > 0 and random.random() < self.randomness:
+            return random.choice(valid_actions)
+
+        if phase == "deployment":
+            return self._deploy(valid_actions, game_state)
+        if phase == "shoot":
+            if _has_action_in(valid_actions, mi.SHOOT_SLOTS):
+                return _shoot_focus_fire(
+                    valid_actions, game_state, active_unit, _score_value_per_damage
+                )
+            return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
+        if phase == "charge":
+            return self._charge(valid_actions, game_state, active_unit)
+        if phase == "fight":
+            # Au contact, il n'y a plus de portee a tenir : on frappe, et on frappe ce qui rend
+            # le plus de points par degat (12.04/12.06 : combat a vide si aucun slot ouvert).
+            fight = _fight_action_by(
+                valid_actions, game_state, active_unit, _score_value_per_damage
+            )
+            if fight is not None:
+                return fight
+            return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
+
+        return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
+
+    def _charge(
+        self, valid_actions: List[int], game_state: Dict[str, Any], active_unit: Dict[str, Any]
+    ) -> int:
+        """Charge SI le contact est son meilleur profil de degats, sur la cible la plus rentable.
+
+        Le SI porte sur l'ATTAQUANT (melee attendue > tir attendu), le QUI sur la cible — meme
+        decoupage que `TacticalBot._select_charge_action`, avec le critere de VALUE au lieu du
+        « faire taire les canons ». Une escouade de tir qui chargerait perdrait sa portee, donc
+        les degats qui alimentent le differentiel : elle tient sa ligne.
+        """
+        if get_max_melee_damage(active_unit) > get_max_ranged_damage(active_unit):
+            charge = _charge_action_by(
+                valid_actions, game_state, active_unit, _score_value_per_damage
+            )
+            if charge is not None:
+                return charge
+        return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
+
+    def _deploy(self, valid_actions: List[int], game_state) -> int:
+        """Deploiement prudent : on ne brade pas sa VALUE au premier tour (safe/cohesion et
+        pression d'objectif dominent, l'avance agressive est marginale)."""
+        episode_marker = game_state.get("episode_number")
+        if self._deployment_episode_marker != episode_marker:
+            self._deployment_episode_marker = episode_marker
+            self._deployment_last_action = None
+            self._deployment_repeat_count = 0
+        weights = {
+            DEPLOYMENT_ACTIONS[0]: 0.10,  # aggressive front
+            DEPLOYMENT_ACTIONS[1]: 0.35,  # objective pressure
+            DEPLOYMENT_ACTIONS[2]: 0.35,  # safe/cohesion
+            DEPLOYMENT_ACTIONS[3]: 0.10,  # left flank
+            DEPLOYMENT_ACTIONS[4]: 0.10,  # right flank
+        }
+        chosen = _select_weighted_deployment_action(
+            valid_actions=valid_actions,
+            weights_by_action=weights,
+            last_action=self._deployment_last_action,
+            repeat_count=self._deployment_repeat_count,
+            max_repeat=2,
+        )
+        if self._deployment_last_action == chosen:
+            self._deployment_repeat_count += 1
+        else:
+            self._deployment_last_action = chosen
+            self._deployment_repeat_count = 1
+        return chosen
+
+    def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
+        """Destination selon la posture : withdraw (sortir la piece chere) > engage > standoff."""
+        if game_state is None:
+            raise ValueError(
+                "ValueTradeBot.select_movement_destination exige game_state : la posture, les "
+                "objectifs, les ennemis et la position courante y sont lus."
+            )
+        posture = self._posture(unit, game_state)
+        return self._weighted_destination(unit, valid_destinations, game_state, posture=posture)
+
+    def _posture(self, unit: Dict[str, Any], game_state: Dict[str, Any]) -> str:
+        """« withdraw » | « engage » | « standoff ».
+
+        Le retrait PRIME : une piece chere entamee qui reste au contact finance le departage
+        adverse, quel que soit son profil de degats.
+        """
+        if self._is_wounded_high_value(unit, game_state):
+            return "withdraw"
+        if get_max_melee_damage(unit) > get_max_ranged_damage(unit):
+            return "engage"
+        return "standoff"
+
+    def _is_wounded_high_value(self, unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
+        """Escouade a lui, ENTAMEE (08.03) ET plus chere que la moyenne de ses AUTRES escouades.
+
+        ⚠️ « Entamee » est une question de REGLE, tranchee par le moteur
+        (`is_unit_at_half_strength`, 08.03), pas par une comparaison maison — meme principe que
+        `_squad_on_objective` pour 14.02. Le seuil naif `HP_CUR < HP_MAX * 0.5` est FAUX sur
+        toute escouade multi-figurines : `units_cache["HP_CUR"]` porte la SOMME des PV des
+        figurines vivantes (`_recompute_squad_hp_total`) alors que `unit["HP_MAX"]` est le PV
+        d'UNE figurine. Dix Boyz a 1 PV donnent 10 < 0.5 : jamais vrai, meme a un survivant —
+        la posture n'aurait tout simplement jamais existe sur les rosters reels. 08.03 compte,
+        elle, les figurines vivantes (`alive <= initial / 2`) et ne retombe sur les PV que pour
+        les unites mono-figurine, ou les deux mesures coincident.
+
+        « Haute VALUE » est RELATIF a l'armee du moment : un seuil absolu en points serait faux
+        d'un roster a l'autre (et deviendrait faux a chaque rebalance), et il perdrait son sens
+        des que l'escouade chere du debut de partie est morte.
+
+        La moyenne exclut l'escouade elle-meme, sans quoi une armee reduite a une seule escouade
+        ne pourrait jamais se retirer (elle serait sa propre moyenne). Derniere escouade vivante :
+        elle porte a elle seule tout le departage, donc entamee elle se retire.
+        """
+        squad_id = str(require_key(unit, "id"))
+        if not is_unit_at_half_strength(squad_id, game_state):
+            return False
+
+        other_values = [
+            float(require_key(friend, "VALUE"))
+            for friend in require_key(game_state, "units")
+            if friend.get("player") == unit.get("player")
+            and str(friend["id"]) != squad_id
+            and is_unit_alive(str(friend["id"]), game_state)
+        ]
+        if not other_values:
+            return True
+        return float(require_key(unit, "VALUE")) > sum(other_values) / len(other_values)
+
+
+class TacticalBot(_WeightedMover):
     """
     Advanced tactical bot that properly uses all 4 game phases.
 
     This is the hardest bot to beat - it makes optimal decisions in each phase:
-    - MOVE: Advances toward enemies if out of range, retreats if wounded
+    - MOVE: Advances toward enemies if out of range, retreats if wounded — les deux corriges
+      d'un terme d'objectif (`w_objective`), pour qu'un bot du panel ne puisse pas ignorer la
+      condition de victoire ; sa geometrie ennemie propre est conservee
     - SHOOT: Always shoots if targets available, prioritizes wounded enemies
     - CHARGE: Charges if melee is advantageous (degats melee attendus > degats de tir)
     - FIGHT: Always fights when in melee, prioritizes killing wounded enemies
@@ -1196,15 +1301,22 @@ class TacticalBot:
     Use this bot to test if agents learn proper multi-phase coordination.
     """
 
-    def __init__(self, randomness: float = 0.1):
+    MOVEMENT_BOT_KEY = "tactical"
+
+    def __init__(self, randomness: float = 0.1, movement_weights=None):
         """
         Initialize TacticalBot.
 
         Args:
             randomness: Probability [0.0-1.0] of making suboptimal choice.
                        0.1 = 10% random (recommended for training diversity)
+            movement_weights: (w_objective, w_enemy) explicites ; None = lus dans la config.
+                       Seul w_objective est utilise : la geometrie ennemie de ce bot lui est
+                       propre (portee de tir / fuite des menaces de melee), le terme objectif
+                       s'y AJOUTE au lieu de la remplacer.
         """
         self.randomness = max(0.0, min(1.0, randomness))
+        self._movement_weights_override = movement_weights
 
     def select_action_with_state(
         self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
@@ -1294,29 +1406,35 @@ class TacticalBot:
         - If no enemies in range: move toward nearest enemy
         - If enemies in range: move to position with best LoS
         - If wounded: move away from melee threats
+        Les deux positions sont corrigees d'un terme d'objectif (cf. `_objective_term`).
         """
+        if game_state is None:
+            raise ValueError(
+                "TacticalBot.select_movement_destination exige game_state : la geometrie lit "
+                "les ennemis, les objectifs et la position courante."
+            )
         if not valid_destinations:
-            if game_state is not None:
-                return require_unit_position(unit, game_state)
-            return get_unit_coordinates(unit)
+            return require_unit_position(unit, game_state)
 
         if self.randomness > 0 and random.random() < self.randomness:
             return random.choice(valid_destinations)
 
-        if not game_state:
-            return valid_destinations[0]
-
-        # Find nearest enemy
+        # Plus d'ennemi vivant : plus de geometrie de menace, le terme d'objectif tranche seul.
         nearest_enemy = self._find_nearest_enemy(unit, game_state)
         if not nearest_enemy:
-            return valid_destinations[0]
+            w_obj, w_enn = self._weights()
+            return _select_destination(valid_destinations, unit, game_state, w_obj, w_enn)
 
-        # If wounded (< 50% HP), move away from melee units. Skip if unit dead (not in cache).
-        hp_cur = get_hp_from_cache(str(unit["id"]), game_state)
-        if hp_cur is None:
-            return valid_destinations[0]
-        hp_max = require_key(unit, "HP_MAX")
-        if hp_max <= 0 or hp_cur < hp_max * 0.5:
+        # Escouade ENTAMEE : elle se replie hors des menaces de melee.
+        #
+        # ⚠️ ROOT CAUSE CORRIGEE — le test etait `HP_CUR < HP_MAX * 0.5`, qui compare la SOMME
+        # des PV des figurines vivantes (`units_cache["HP_CUR"]`, cf. `_recompute_squad_hp_total`)
+        # au PV d'UNE figurine (`unit["HP_MAX"]`). Sur toute escouade multi-figurines le test est
+        # faux meme a un survivant (10 Boyz : `10 < 0.5`, puis `1 < 0.5`), donc
+        # `_find_safest_position` etait INJOIGNABLE — avec le terme d'objectif qu'on y a ajoute.
+        # 08.03 (`is_unit_at_half_strength`) est l'implementation unique de la question, et
+        # retombe sur les PV pour les mono-figurine, ou les deux mesures coincident.
+        if is_unit_at_half_strength(str(unit["id"]), game_state):
             return self._find_safest_position(unit, valid_destinations, game_state)
 
         # Otherwise, move toward optimal shooting range
@@ -1343,10 +1461,16 @@ class TacticalBot:
 
     def _find_safest_position(self, unit: Dict, destinations: List[Tuple[int, int]],
                                game_state: Dict) -> Tuple[int, int]:
-        """Find position furthest from melee threats."""
+        """Position la plus eloignee des menaces de melee, corrigee du terme d'objectif.
+
+        Sans ce terme, le repli du blesse le sortait de la table plutot que de le ramener sur
+        la zone qui marque — c'est le defaut mesure sur `DefensiveBot`, transpose ici.
+        """
         best_pos = destinations[0]
-        max_min_dist = -1
+        best_score = -float('inf')
         units_cache = game_state["units_cache"]
+        w_obj, _ = self._weights()
+        centers, zones, hold_bonus = _objective_context(game_state)
 
         for col, row in destinations:
             unit_fp = compute_candidate_footprint(col, row, unit, game_state)
@@ -1360,15 +1484,31 @@ class TacticalBot:
                         dist = min_distance_between_sets(unit_fp, enemy_fp)
                         min_enemy_dist = min(min_enemy_dist, dist)
 
-            if min_enemy_dist > max_min_dist:
-                max_min_dist = min_enemy_dist
+            # Aucune menace de melee sur la table : la distance vaut +inf pour TOUTES les
+            # candidates (le jeu d'ennemis est le meme), le terme d'objectif tranche seul.
+            safety = 0.0 if min_enemy_dist == float('inf') else float(min_enemy_dist)
+            score = safety + _objective_term((col, row), centers, zones, hold_bonus, w_obj)
+            if score > best_score:
+                best_score = score
                 best_pos = (col, row)
 
         return best_pos
 
     def _find_best_offensive_position(self, unit: Dict, destinations: List[Tuple[int, int]],
                                        target: Dict, game_state: Dict) -> Tuple[int, int]:
-        """Find position closest to target but within shooting range."""
+        """Position a portee de tir de la cible et la plus proche d'elle, terme d'objectif inclus.
+
+        Deux passes, comme avant l'ajout du terme d'objectif, et pour la meme raison de COUT :
+        la premiere garde `max_distance=rng_rng`, qui laisse `min_distance_between_sets` sortir
+        sur une borne par boite englobante des que la candidate est hors portee (le contrat
+        n'exige l'exactitude que sous le seuil, ce qui suffit au test `<=`). Fusionner les deux
+        passes obligeait a une distance EXACTE pour chaque candidate — sur un pool de ~337 a
+        634 cellules et des empreintes allant jusqu'a 1113 hexes, c'est le budget que le
+        commentaire de tete du module chiffre a ~44 ms/decision.
+
+        La seconde passe (exacte) ne sert qu'au cas ou AUCUNE position n'est a portee : on se
+        rabat alors sur la plus proche, ou le classement doit etre juste.
+        """
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
         from engine.utils.weapon_helpers import get_max_ranged_range
         rng_weapons = require_key(unit, 'RNG_WEAPONS')
@@ -1376,24 +1516,32 @@ class TacticalBot:
         units_cache = game_state["units_cache"]
         target_entry = units_cache.get(str(target.get("id", "")))
         target_fp = target_entry.get("occupied_hexes", {(target["col"], target["row"])}) if target_entry else {(target["col"], target["row"])}
+        w_obj, _ = self._weights()
+        centers, zones, hold_bonus = _objective_context(game_state)
         best_pos = destinations[0]
-        best_dist = float('inf')
+        best_score = -float('inf')
+        found_in_range = False
 
         for col, row in destinations:
             unit_fp = compute_candidate_footprint(col, row, unit, game_state)
             dist = min_distance_between_sets(unit_fp, target_fp, max_distance=rng_rng)
-            # Prefer positions within shooting range
-            if dist <= rng_rng and dist < best_dist:
-                best_dist = dist
+            if dist > rng_rng:
+                continue
+            found_in_range = True
+            score = -float(dist) + _objective_term((col, row), centers, zones, hold_bonus, w_obj)
+            if score > best_score:
+                best_score = score
                 best_pos = (col, row)
 
-        # If no position in range, get closest
-        if best_dist == float('inf'):
+        if not found_in_range:
             for col, row in destinations:
                 unit_fp = compute_candidate_footprint(col, row, unit, game_state)
                 dist = min_distance_between_sets(unit_fp, target_fp)
-                if dist < best_dist:
-                    best_dist = dist
+                score = -float(dist) + _objective_term(
+                    (col, row), centers, zones, hold_bonus, w_obj
+                )
+                if score > best_score:
+                    best_score = score
                     best_pos = (col, row)
 
         return best_pos

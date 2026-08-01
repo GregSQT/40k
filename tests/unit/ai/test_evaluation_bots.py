@@ -6,15 +6,16 @@ from engine import macro_intents as mi
 from ai.evaluation_bots import (
     DEPLOYMENT_ACTIONS,
     WAIT_ACTION,
-    AggressiveSmartBot,
     AdaptiveBot,
     ControlBot,
     DefensiveBot,
-    DefensiveSmartBot,
     GreedyBot,
     RandomBot,
     TacticalBot,
+    ValueTradeBot,
+    _count_objectives_controlled,
     _select_weighted_deployment_action,
+    _squad_on_objective,
 )
 from tests._state_invariants import turn_state_invariants
 
@@ -82,19 +83,53 @@ def _act(bot, valid_actions, gs, active=None):
     return bot.select_action_with_state(valid_actions, gs, active)
 
 
-def _move_gs(unit_hex=(0, 0), enemy_hex=(10, 0), objectives=None):
+def _objective(hexes, obj_id="o1") -> dict:
+    """Objectif au format que le MOTEUR ecrit : `hexes` = liste de [col, row].
+
+    (`StateManager._load_scenario` : `polygon_to_hex_list` sur les terrains "objective": true.)
+    Les doublures en {"col": .., "row": ..} n'existent nulle part en production.
+    """
+    return {"id": obj_id, "name": obj_id, "hexes": [[int(c), int(r)] for c, r in hexes]}
+
+
+def _move_gs(unit_hex=(0, 0), enemy_hex=(10, 0), objectives=None, models=None, controllers=None):
+    """game_state minimal pour les decisions de deplacement.
+
+    `models` : [(col, row, base_size)] des figurines de l'escouade activee — PAR FIGURINE, la
+    seule lecture juste du controle d'objectif (14.02). Defaut : une figurine sur l'ancre.
+    `controllers` : contenu de `objective_controllers`, l'etat que le moteur ecrit et que les
+    bots RELISENT (ils ne recalculent aucun controle).
+    """
     ucol, urow = unit_hex
     ecol, erow = enemy_hex
+    models = models if models is not None else [(ucol, urow, 1)]
+    models_cache = {
+        f"m{i}": {
+            "col": int(c), "row": int(r), "level": 0, "HP_CUR": 1,
+            "BASE_SHAPE": "round", "BASE_SIZE": int(b),
+        }
+        for i, (c, r, b) in enumerate(models)
+    }
+    models_cache["me"] = {
+        "col": ecol, "row": erow, "level": 0, "HP_CUR": 1,
+        "BASE_SHAPE": "round", "BASE_SIZE": 1,
+    }
     gs = {
         "current_player": ACTING,
+        "turn": 1,
         "units": [
             {"id": "1", "player": ACTING, "col": ucol, "row": urow},
             {"id": "e", "player": FOE, "col": ecol, "row": erow},
         ],
         "units_cache": {
-            "1": {"col": ucol, "row": urow, "player": ACTING, "occupied_hexes": [(ucol, urow)]},
-            "e": {"col": ecol, "row": erow, "player": FOE, "occupied_hexes": [(ecol, erow)]},
+            "1": {"col": ucol, "row": urow, "player": ACTING, "orientation": 0,
+                  "occupied_hexes": [(ucol, urow)]},
+            "e": {"col": ecol, "row": erow, "player": FOE, "orientation": 0,
+                  "occupied_hexes": [(ecol, erow)]},
         },
+        "models_cache": models_cache,
+        "squad_models": {"1": [k for k in models_cache if k != "me"], "e": ["me"]},
+        "objective_controllers": dict(controllers) if controllers else {},
     }
     if objectives is not None:
         gs["objectives"] = objectives
@@ -191,9 +226,12 @@ def test_greedy_bot_movement_pushes_toward_enemy(monkeypatch: pytest.MonkeyPatch
 def test_defensive_bot_movement_keeps_distance(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_move_geometry(monkeypatch)
     bot = DefensiveBot(randomness=0.0)
-    gs, unit = _move_gs(unit_hex=(0, 0), enemy_hex=(10, 0))
-    # (2,0) plus loin de l'ennemi que (8,0) -> repli
+    gs, unit = _move_gs(unit_hex=(5, 0), enemy_hex=(10, 0))
+    # (2,0) plus loin de l'ennemi que (8,0) ET que la position courante (5,0) -> repli.
+    # Sans objectif sur la table, seul le terme ennemi joue.
     assert bot.select_movement_destination(unit, [(2, 0), (8, 0)], gs) == (2, 0)
+    # Rester sur place est une option scoree : aucune destination meilleure -> WAIT (l'ancre).
+    assert bot.select_movement_destination(unit, [(6, 0), (8, 0)], gs) == (5, 0)
 
 
 def test_defensive_bot_action_shoot_phase(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -296,12 +334,17 @@ def test_control_bot_movement_holds_and_seeks_objective(monkeypatch: pytest.Monk
     _patch_move_geometry(monkeypatch)
     bot = ControlBot(randomness=0.0)
 
-    # Sur l'objectif -> tient sa position (renvoie l'ancre, que le wrapper traduit en WAIT)
-    gs_on, unit_on = _move_gs(unit_hex=(5, 5), enemy_hex=(20, 20), objectives=[{"hexes": [{"col": 5, "row": 5}]}])
+    # Sur l'objectif -> tient sa position (renvoie l'ancre, que le wrapper traduit en WAIT).
+    # « Tenir » est desormais une regle de SCORE (bonus de tenue), plus une clause exclusive.
+    gs_on, unit_on = _move_gs(
+        unit_hex=(5, 5), enemy_hex=(20, 20), objectives=[_objective([(5, 5)])]
+    )
     assert bot.select_movement_destination(unit_on, [(6, 6), (4, 4)], gs_on) == (5, 5)
 
     # Hors objectif -> se rapproche du centre de l'objectif (10,10)
-    gs_off, unit_off = _move_gs(unit_hex=(0, 0), enemy_hex=(20, 20), objectives=[{"hexes": [{"col": 10, "row": 10}]}])
+    gs_off, unit_off = _move_gs(
+        unit_hex=(0, 0), enemy_hex=(20, 20), objectives=[_objective([(10, 10)])]
+    )
     assert bot.select_movement_destination(unit_off, [(2, 2), (8, 8)], gs_off) == (8, 8)
 
 
@@ -313,7 +356,7 @@ def test_control_bot_non_move_phases(monkeypatch: pytest.MonkeyPatch) -> None:
         "shoot",
         {"e_far": _dmg(rng=9, cc=1), "e_on_obj": _dmg(rng=1, cc=1)},
         ["e_far", "e_on_obj"],
-        objectives=[{"hexes": [{"col": 6, "row": 1}]}],
+        objectives=[_objective([(6, 1)])],
     )
     assert _act(bot, [SHOOT, SHOOT2, WAIT_ACTION], gs) == SHOOT2
     # Charge phase, unite SUR un objectif -> elle tient sa position.
@@ -321,43 +364,9 @@ def test_control_bot_non_move_phases(monkeypatch: pytest.MonkeyPatch) -> None:
         "charge",
         {"e_far": _dmg(rng=9, cc=1)},
         ["e_far"],
-        objectives=[{"hexes": [{"col": 1, "row": 1}]}],
+        objectives=[_objective([(1, 1)])],
     )
     assert _act(bot, [CHARGE, WAIT_ACTION], charge_gs) == WAIT_ACTION
-
-
-def test_aggressive_smart_bot_movement_and_combat(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_move_geometry(monkeypatch)
-    bot = AggressiveSmartBot(randomness=0.0)
-    gs, unit = _move_gs(unit_hex=(0, 0), enemy_hex=(10, 0))
-    # Pousse vers l'ennemi
-    assert bot.select_movement_destination(unit, [(2, 0), (8, 0)], gs) == (8, 0)
-
-    monkeypatch.setattr(eb, "is_unit_alive", lambda uid, g: True)
-    monkeypatch.setattr(eb, "get_hp_from_cache", lambda uid, gs_: 5)
-    combat_gs = _slot_gs("charge", {"e0": _dmg(rng=1, cc=1)}, ["e0"])
-    # Charge -> always charge
-    assert _act(bot, [CHARGE, WAIT_ACTION], combat_gs) == CHARGE
-    # Shoot with no targets -> wait
-    shoot_gs = {**combat_gs, "phase": "shoot"}
-    assert _act(bot, [CELL, WAIT_ACTION], shoot_gs) == WAIT_ACTION
-    # Shoot with targets -> focus-fire de la cible designee par le critere (ici HP egaux et
-    # mapping [e0, e1] : le slot 0 l'emporte au premier arrive a score egal).
-    targets_gs = _slot_gs("shoot", {"e0": _dmg(rng=1, cc=1), "e1": _dmg(rng=1, cc=1)}, ["e0", "e1"])
-    assert _act(bot, [SHOOT, SHOOT2, WAIT_ACTION], targets_gs) == SHOOT
-
-
-def test_defensive_smart_bot_movement_and_no_charge(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_move_geometry(monkeypatch)
-    bot = DefensiveSmartBot(randomness=0.0)
-    gs, unit = _move_gs(unit_hex=(0, 0), enemy_hex=(10, 0))
-    # Garde ses distances -> s'eloigne de l'ennemi
-    assert bot.select_movement_destination(unit, [(2, 0), (8, 0)], gs) == (2, 0)
-
-    monkeypatch.setattr(eb, "is_unit_alive", lambda uid, g: True)
-    combat_gs = _slot_gs("charge", {"e0": _dmg(rng=1, cc=1)}, ["e0"])
-    # Charge -> never
-    assert _act(bot, [CHARGE, WAIT_ACTION], combat_gs) == WAIT_ACTION
 
 
 def test_adaptive_bot_movement_posture(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -365,19 +374,18 @@ def test_adaptive_bot_movement_posture(monkeypatch: pytest.MonkeyPatch) -> None:
     bot = AdaptiveBot(randomness=0.0)
 
     # Turn 1 (early) -> rush objectif : se rapproche du centre (10,10)
-    gs_early, unit_early = _move_gs(unit_hex=(0, 0), enemy_hex=(20, 0), objectives=[{"hexes": [{"col": 10, "row": 10}]}])
+    gs_early, unit_early = _move_gs(
+        unit_hex=(0, 0), enemy_hex=(20, 0), objectives=[_objective([(10, 10)])]
+    )
     gs_early["turn"] = 1
     assert bot.select_movement_destination(unit_early, [(2, 2), (8, 8)], gs_early) == (8, 8)
 
     # Turn 3 losing (aucun objectif controle) -> agressif : pousse vers l'ennemi (10,0)
-    gs_losing, unit_losing = _move_gs(unit_hex=(0, 0), enemy_hex=(10, 0), objectives=[{"hexes": [{"col": 99, "row": 99}]}])
+    gs_losing, unit_losing = _move_gs(
+        unit_hex=(0, 0), enemy_hex=(10, 0), objectives=[_objective([(99, 99)])]
+    )
     gs_losing["turn"] = 3
     assert bot.select_movement_destination(unit_losing, [(2, 0), (8, 0)], gs_losing) == (8, 0)
-
-    # Turn 3 winning (controle l'objectif sous ses pieds) -> defensif : s'eloigne de l'ennemi
-    gs_win, unit_win = _move_gs(unit_hex=(5, 5), enemy_hex=(10, 5), objectives=[{"hexes": [{"col": 5, "row": 5}]}])
-    gs_win["turn"] = 3
-    assert bot.select_movement_destination(unit_win, [(2, 5), (8, 5)], gs_win) == (2, 5)
 
 
 def test_adaptive_bot_charge_posture(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -388,11 +396,101 @@ def test_adaptive_bot_charge_posture(monkeypatch: pytest.MonkeyPatch) -> None:
         "charge",
         {"e0": _dmg(rng=1, cc=1)},
         ["e0"],
-        objectives=[{"hexes": [{"col": 50, "row": 50}]}],
+        objectives=[_objective([(50, 50)])],
     )
     base_gs["turn"] = 3
     # Aucun objectif tenu de part et d'autre -> posture « losing » -> charge
     assert _act(bot, [CHARGE, WAIT_ACTION], base_gs) == CHARGE
+
+
+# --- VERROUS de la refonte du panel : objectifs, tenue, lecture par-figurine -------------------
+#
+# Contexte mesure : la victoire se decide aux VP d'objectifs, et le win-rate de l'agent contre
+# chaque bot suivait exactement le rapport de ce bot aux objectifs. Chaque test ci-dessous
+# CONSTRUIT la situation qu'il observe et est ROUGE sur le comportement d'avant la refonte.
+
+
+def test_squad_on_objective_counts_a_model_whose_footprint_covers_the_zone() -> None:
+    """L'ANCRE d'escouade est ailleurs, une FIGURINE couvre la zone : l'escouade y est.
+
+    C'est le defaut exact verrouille : l'ancien `_is_on_objective` comparait
+    `get_unit_coordinates(unit)` (l'ancre, ici (0,0)) aux hexes d'objectif et rendait False.
+    La figurine est en (14,10) avec un socle rond de 3 : son empreinte contient (15,10).
+    """
+    gs, unit = _move_gs(
+        unit_hex=(0, 0),
+        enemy_hex=(40, 40),
+        objectives=[_objective([(15, 10)])],
+        models=[(14, 10, 3)],
+    )
+    # La zone ne contient NI l'ancre, NI le centre de la figurine : seule l'empreinte la touche.
+    assert (0, 0) != (15, 10) and (14, 10) != (15, 10)
+    assert _squad_on_objective(unit, gs) is True
+
+    # Meme figurine, socle de 1 : plus d'empreinte etendue -> plus de presence.
+    gs_small, unit_small = _move_gs(
+        unit_hex=(0, 0),
+        enemy_hex=(40, 40),
+        objectives=[_objective([(15, 10)])],
+        models=[(14, 10, 1)],
+    )
+    assert _squad_on_objective(unit_small, gs_small) is False
+
+
+def test_objectives_controlled_reads_engine_state_not_a_bot_recount() -> None:
+    """Le comptage relit `objective_controllers` (14.02), il ne recompte pas des ancres amies.
+
+    Rouge sur l'ancien code : une escouade amie POSEE sur la zone mais qui n'en a PAS le
+    controle (OC adverse superieur) y comptait comme un objectif tenu.
+    """
+    gs, _unit = _move_gs(
+        unit_hex=(5, 5),
+        enemy_hex=(5, 6),
+        objectives=[_objective([(5, 5)]), _objective([(9, 9)], obj_id="o2")],
+        controllers={"o1": FOE, "o2": ACTING},
+    )
+    assert _count_objectives_controlled(gs, ACTING) == 1
+    assert _count_objectives_controlled(gs, FOE) == 1
+
+
+def test_defensive_bot_retreats_toward_its_objective_not_off_the_table(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sous pression, le defensif recule VERS son objectif, pas hors de la table.
+
+    Ennemi en (10,0), objectif en (0,0), l'escouade en (5,0). Le repli pur
+    (`_dest_away_from_enemies`, ancienne geometrie) choisissait (20,0) — l'hex le plus eloigne
+    de l'ennemi, a l'oppose de la zone. Le score pondere (w_obj 0.7 / w_enn -0.5) prend (1,0).
+    """
+    _patch_move_geometry(monkeypatch)
+    bot = DefensiveBot(randomness=0.0)
+    gs, unit = _move_gs(unit_hex=(5, 0), enemy_hex=(10, 0), objectives=[_objective([(0, 0)])])
+
+    # (20,0) est bien la destination du repli pur : c'est la plus eloignee de l'ennemi.
+    assert max([(1, 0), (20, 0)], key=lambda d: abs(d[0] - 10)) == (20, 0)
+    assert bot.select_movement_destination(unit, [(1, 0), (20, 0)], gs) == (1, 0)
+
+
+def test_adaptive_bot_winning_holds_the_objective_instead_of_fleeing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Posture « winning » = TENIR. Elle declenchait `_dest_away_from_enemies` : le bot fuyait
+    l'objectif qui le faisait gagner — d'autant plus souvent que le comptage devenait juste.
+
+    L'escouade tient o1 (controle par ACTING dans l'etat moteur), l'ennemi est adjacent.
+    """
+    _patch_move_geometry(monkeypatch)
+    bot = AdaptiveBot(randomness=0.0)
+    gs, unit = _move_gs(
+        unit_hex=(5, 5),
+        enemy_hex=(7, 5),
+        objectives=[_objective([(5, 5)])],
+        controllers={"o1": ACTING},
+    )
+    gs["turn"] = 3
+    assert bot._evaluate_posture(gs, ACTING, 3) == "winning"
+    # (1,5) est la fuite (le plus loin de l'ennemi) ; (5,5) est la position tenue.
+    assert bot.select_movement_destination(unit, [(1, 5), (6, 5)], gs) == (5, 5)
 
 
 # --- V11 §0.3 : portage CC_DMG/RNG_DMG vers le systeme multi-armes -----------------------------
@@ -401,12 +499,9 @@ def test_adaptive_bot_charge_posture(monkeypatch: pytest.MonkeyPatch) -> None:
 # « Replaces old RNG_DMG/CC_DMG fields »). Aucun fichier d'unite ne les definit plus, mais 2 bots
 # les lisaient encore via require_key -> ConfigurationError.
 #
-# ⚠️ Correction de l'attribution portee en §0.3 du doc V11 : le site « ControlBot ligne 674 » est
-# en fait dans le helper module `_best_target_slot_by_threat`, dont l'UNIQUE appelant est
-# `DefensiveSmartBot` (verifie par grep). `DefensiveSmartBot` n'est PAS dans `bot_training.ratios`
-# (random/greedy/defensive/control/aggressive_smart/adaptive) : l'exposition est l'EVALUATION,
-# pas le training. Ces tests exercent les deux bots concernes sur des unites au contrat ACTUEL
-# (sans les champs supprimes) : ils sont rouges sur le code d'avant le portage.
+# Le critere de menace etait porte par le helper `_best_target_slot_by_threat`, dont l'unique
+# appelant etait `DefensiveSmartBot` — bot depuis SUPPRIME. Le critere, lui, reste vivant chez
+# `DefensiveBot`, qui l'exerce ici sur des unites au contrat ACTUEL (sans les champs supprimes).
 
 def test_threat_focus_fire_without_legacy_damage_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     """Menace lue sur RNG_WEAPONS/CC_WEAPONS (les champs RNG_DMG/CC_DMG ont ete supprimes)."""
@@ -418,7 +513,7 @@ def test_threat_focus_fire_without_legacy_damage_fields(monkeypatch: pytest.Monk
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
     monkeypatch.setattr(eb, "get_hp_from_cache", lambda uid, gs_: 5)
 
-    bot = DefensiveSmartBot(randomness=0.0)
+    bot = DefensiveBot(randomness=0.0)
     # slot 1 = e_strong, la plus menacante (6 en melee vs 1 en tir pour e_weak).
     assert _act(bot, [SHOOT, SHOOT2, WAIT_ACTION], gs) == SHOOT2
 
@@ -467,7 +562,16 @@ def _cache_entry(unit: dict) -> dict:
         "col": unit["col"],
         "row": unit["row"],
         "player": unit["player"],
+        "orientation": 0,
         "occupied_hexes": {(unit["col"], unit["row"])},
+    }
+
+
+def _model_entry(unit: dict) -> dict:
+    """Figurine de `models_cache` : position PAR FIGURINE + socle, la source du controle (14.02)."""
+    return {
+        "col": unit["col"], "row": unit["row"], "level": 0, "HP_CUR": 1,
+        "BASE_SHAPE": "round", "BASE_SIZE": 1,
     }
 
 
@@ -484,16 +588,24 @@ def _slot_gs(phase: str, enemies: dict, order: list, current_player=None, object
     ours = {"id": "1", "player": ACTING, "col": 1, "row": 1, **_dmg(rng=2, cc=2)}
     units = [ours]
     units_cache = {"1": _cache_entry(ours)}
+    models_cache = {"m_1": _model_entry(ours)}
+    squad_models = {"1": ["m_1"]}
     for i, (eid, fields) in enumerate(enemies.items()):
         enemy = {"id": eid, "player": FOE, "col": 5 + i, "row": 1, **fields}
         units.append(enemy)
         units_cache[eid] = _cache_entry(enemy)
+        models_cache[f"m_{eid}"] = _model_entry(enemy)
+        squad_models[eid] = [f"m_{eid}"]
     gs = {**turn_state_invariants(),
         "phase": phase,
+        # Etat que le moteur ecrit a chaque frontiere de phase (14.02) et que les bots RELISENT.
+        "objective_controllers": {},
         "current_player": current_player,
         "turn": 1,
         "units": units,
         "units_cache": units_cache,
+        "models_cache": models_cache,
+        "squad_models": squad_models,
         "inches_to_subhex": 1,
         f"enemy_slot_mapping_p{ACTING}": list(order) + [None] * (K_ENEMY_SLOTS - len(order)),
     }
@@ -608,7 +720,7 @@ def test_smart_bots_shoot_the_slot_designated_by_their_criterion(
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
     monkeypatch.setattr(eb, "get_hp_from_cache", lambda uid, gs_: 5 if uid == "e_full" else 2)
 
-    # Menace (DefensiveSmartBot) : mapping [faible, forte] -> slot 1 ; pool inverse [forte, faible].
+    # Menace (DefensiveBot) : mapping [faible, forte] -> slot 1 ; pool inverse [forte, faible].
     gs_threat = _slot_gs(
         "shoot",
         {"e_weak": _dmg(rng=1, cc=1), "e_strong": _dmg(rng=2, cc=8)},
@@ -616,13 +728,11 @@ def test_smart_bots_shoot_the_slot_designated_by_their_criterion(
     )
     gs_threat["units"][0]["valid_target_pool"] = ["e_strong", "e_weak"]
     assert (
-        _act(DefensiveSmartBot(randomness=0.0), 
-            [SHOOT, SHOOT2, WAIT_ACTION], gs_threat
-        )
+        _act(DefensiveBot(randomness=0.0), [SHOOT, SHOOT2, WAIT_ACTION], gs_threat)
         == SHOOT2
     )
 
-    # HP (AggressiveSmartBot, AdaptiveBot) : mapping [pleine, entamee] -> slot 1 ; pool inverse.
+    # HP (GreedyBot, AdaptiveBot) : mapping [pleine, entamee] -> slot 1 ; pool inverse.
     gs_hp = _slot_gs(
         "shoot",
         {"e_full": _dmg(rng=1, cc=1), "e_hurt": _dmg(rng=1, cc=1)},
@@ -630,15 +740,264 @@ def test_smart_bots_shoot_the_slot_designated_by_their_criterion(
     )
     gs_hp["units"][0]["valid_target_pool"] = ["e_hurt", "e_full"]
     assert (
-        _act(AggressiveSmartBot(randomness=0.0), 
-            [SHOOT, SHOOT2, WAIT_ACTION], gs_hp
-        )
+        _act(GreedyBot(randomness=0.0), [SHOOT, SHOOT2, WAIT_ACTION], gs_hp)
         == SHOOT2
     )
     assert (
         _act(AdaptiveBot(randomness=0.0), [SHOOT, SHOOT2, WAIT_ACTION], gs_hp)
         == SHOOT2
     )
+
+
+# --- ValueTradeBot : le DEPARTAGE (VALUE restante) joue enfin dans le panel -------------------
+#
+# `determine_winner_with_method` tranche les egalites de VP sur la VALUE totale restante
+# ("value_tiebreaker"). Aucun bot ne jouait ce critere. Les cas ci-dessous CONSTRUISENT la
+# situation qu'ils observent et placent la cible attendue sur un slot NON minimal.
+
+
+def _value_enemy(value: int, rng: float = 1.0, cc: float = 1.0) -> dict:
+    """Champs de datasheet d'une escouade ennemie : armes + VALUE (points d'escouade)."""
+    return {**_dmg(rng=rng, cc=cc), "VALUE": value}
+
+
+def _value_move_gs(
+    *,
+    unit_hex,
+    enemy_hex,
+    value,
+    ally_value,
+    rng,
+    cc,
+    models_start=1,
+    models_alive=1,
+    hp_cur=None,
+    hp_max=1,
+    objectives=None,
+):
+    """Etat de deplacement pour ValueTradeBot : VALUE/armes de l'escouade activee + UNE escouade
+    amie (« haute VALUE » se mesure a la moyenne des AUTRES escouades vivantes).
+
+    `squad_cache` est FOURNI parce que « entamee » se lit par la regle 08.03
+    (`is_unit_at_half_strength`) : sur une escouade MULTI-FIGURINES elle compte les figurines
+    vivantes (`models_start`/`models_alive`) et ne regarde pas les PV ; sur une escouade
+    mono-figurine elle compare `units_cache["HP_CUR"]` (`hp_cur`) a `unit["HP_MAX"]` (`hp_max`).
+    Les deux voies sont donc parametrables, et c'est le MOTEUR qui tranche dans les deux cas.
+    """
+    gs, unit = _move_gs(unit_hex=unit_hex, enemy_hex=enemy_hex, objectives=objectives)
+    stats = {"HP_MAX": hp_max, "VALUE": value, **_dmg(rng=rng, cc=cc)}
+    unit.update(stats)
+    gs["units"][0].update(stats)
+    gs["units_cache"]["1"]["HP_CUR"] = hp_max if hp_cur is None else hp_cur
+    acol, arow = unit_hex
+    gs["units"].append({
+        "id": "a", "player": ACTING, "col": acol, "row": arow,
+        "HP_MAX": hp_max, "VALUE": ally_value, **_dmg(rng=1, cc=1),
+    })
+    gs["units_cache"]["a"] = {
+        "col": acol, "row": arow, "player": ACTING, "orientation": 0,
+        "occupied_hexes": [(acol, arow)], "HP_CUR": hp_max,
+    }
+    gs["squad_cache"] = {
+        "1": {"model_count_at_start": models_start, "model_count": models_alive},
+        "a": {"model_count_at_start": models_start, "model_count": models_start},
+    }
+    return gs, unit
+
+
+def test_value_trade_and_greedy_diverge_on_expensive_versus_wounded_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CAS DISCRIMINANT : cible chere et couteuse a tuer VS cible entamee et bon marche.
+
+    e_cheap : 20 points sur 2 PV restants -> 10.0 points par degat.
+    e_valuable : 120 points sur 10 PV restants -> 12.0 points par degat.
+    GreedyBot acheve la plus entamee (slot 0) ; ValueTradeBot prend la plus rentable au
+    departage (slot 1). Les deux bots doivent DIVERGER, et aucun des deux ne peut tomber juste
+    par l'ordre des slots (ils choisissent des slots opposes).
+    """
+    monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
+    monkeypatch.setattr(eb, "get_hp_from_cache", lambda uid, gs_: 2 if uid == "e_cheap" else 10)
+
+    gs = _slot_gs(
+        "shoot",
+        {"e_cheap": _value_enemy(20), "e_valuable": _value_enemy(120)},
+        ["e_cheap", "e_valuable"],
+    )
+    assert _act(GreedyBot(randomness=0.0), [SHOOT, SHOOT2, WAIT_ACTION], gs) == SHOOT
+    assert _act(ValueTradeBot(randomness=0.0), [SHOOT, SHOOT2, WAIT_ACTION], gs) == SHOOT2
+
+    # Meme critere en melee : le monstre (slot 1) plutot que les gretchins acheves (slot 0).
+    gs_fight = _slot_gs(
+        "fight",
+        {"e_cheap": _value_enemy(20), "e_valuable": _value_enemy(120)},
+        ["e_cheap", "e_valuable"],
+    )
+    assert _act(ValueTradeBot(randomness=0.0), [FIGHT_SLOT0, FIGHT_SLOT1], gs_fight) == FIGHT_SLOT1
+    # Aucun slot ouvert -> combat a vide (12.04/12.06), jamais une cible arbitraire.
+    assert _act(ValueTradeBot(randomness=0.0), [FIGHT_EMPTY], gs_fight) == FIGHT_EMPTY
+
+
+def test_value_trade_bot_charges_only_when_melee_is_its_own_best_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """L'engagement suit SON PROPRE profil, pas une portee fixee : melee > tir -> contact.
+
+    Le QUI reste le critere de VALUE par degat : e_valuable (120 pts / 10 PV = 12.0) devant
+    e_cheap (20 pts / 2 PV = 10.0), donc le slot 1.
+    """
+    monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
+    monkeypatch.setattr(eb, "get_hp_from_cache", lambda uid, gs_: 2 if uid == "e_cheap" else 10)
+    bot = ValueTradeBot(randomness=0.0)
+
+    gs = _slot_gs(
+        "charge",
+        {"e_cheap": _value_enemy(20), "e_valuable": _value_enemy(120)},
+        ["e_cheap", "e_valuable"],
+    )
+    melee_attacker = {**gs["units"][0], **_dmg(rng=1, cc=4)}
+    shooty_attacker = {**gs["units"][0], **_dmg(rng=6, cc=1)}
+
+    assert _act(bot, [CHARGE, CHARGE_SLOT1, WAIT_ACTION], gs, active=melee_attacker) == CHARGE_SLOT1
+    # Unite de tir : elle tient sa portee au lieu d'aller brader ses degats au contact.
+    assert _act(bot, [CHARGE, CHARGE_SLOT1, WAIT_ACTION], gs, active=shooty_attacker) == WAIT_ACTION
+
+
+def test_value_trade_bot_postures_follow_profile_and_wounded_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Postures : withdraw (piece chere entamee) PRIME sur engage (profil melee) et standoff."""
+    _patch_move_geometry(monkeypatch)
+    bot = ValueTradeBot(randomness=0.0)
+
+    # Brute de melee saine (mono-figurine, PV pleins) -> contact.
+    gs_engage, unit_engage = _value_move_gs(
+        unit_hex=(5, 0), enemy_hex=(10, 0), hp_cur=10, hp_max=10,
+        value=120, ally_value=20, rng=1, cc=5,
+    )
+    assert bot._posture(unit_engage, gs_engage) == "engage"
+
+    # Meme unite de melee, meme VALUE, mais entamee (2/10 PV) et plus chere que son armee.
+    gs_wd, unit_wd = _value_move_gs(
+        unit_hex=(5, 0), enemy_hex=(10, 0), hp_cur=2, hp_max=10,
+        value=120, ally_value=20, rng=1, cc=5,
+    )
+    assert bot._posture(unit_wd, gs_wd) == "withdraw"
+
+    # Entamee mais BON MARCHE (l'alliee vaut plus) : rien a preserver, le profil reprend la main.
+    gs_cheap, unit_cheap = _value_move_gs(
+        unit_hex=(5, 0), enemy_hex=(10, 0), hp_cur=2, hp_max=10,
+        value=20, ally_value=120, rng=1, cc=5,
+    )
+    assert bot._posture(unit_cheap, gs_cheap) == "engage"
+
+    # Unite de tir saine -> elle tient sa portee.
+    gs_standoff, unit_standoff = _value_move_gs(
+        unit_hex=(5, 0), enemy_hex=(10, 0), hp_cur=10, hp_max=10,
+        value=120, ally_value=20, rng=5, cc=1,
+    )
+    assert bot._posture(unit_standoff, gs_standoff) == "standoff"
+
+
+def test_value_trade_bot_withdraw_triggers_on_a_multi_model_squad(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """08.03 sur une ESCOUADE, le cas reel : « entamee » se compte en FIGURINES, pas en PV.
+
+    ROUGE sur le seuil naif `units_cache["HP_CUR"] < unit["HP_MAX"] * 0.5` : le HP_CUR d'escouade
+    est la SOMME des PV des figurines vivantes et HP_MAX le PV d'UNE figurine. Dix Boyz a 1 PV
+    reduits a 3 survivants donnent `3 < 0.5` -> faux, comme `10 < 0.5` a pleine escouade : la
+    posture n'existait sur AUCUN roster multi-figurines, c'est-a-dire sur aucun roster reel.
+    """
+    _patch_move_geometry(monkeypatch)
+    bot = ValueTradeBot(randomness=0.0)
+
+    # 10 figurines a 1 PV, 3 vivantes : 3 <= 10/2 -> entamee (08.03). HP_CUR = 3, HP_MAX = 1.
+    gs_wd, unit_wd = _value_move_gs(
+        unit_hex=(5, 0), enemy_hex=(10, 0), models_start=10, models_alive=3,
+        hp_cur=3, hp_max=1, value=120, ally_value=20, rng=1, cc=5,
+    )
+    assert gs_wd["units_cache"]["1"]["HP_CUR"] > gs_wd["units"][0]["HP_MAX"] * 0.5
+    assert bot._posture(unit_wd, gs_wd) == "withdraw"
+    assert bot.select_movement_destination(unit_wd, [(2, 0), (8, 0)], gs_wd) == (2, 0)
+
+    # 6 survivantes sur 10 : au-dessus de la moitie -> pas entamee, le profil de melee prime.
+    gs_ok, unit_ok = _value_move_gs(
+        unit_hex=(5, 0), enemy_hex=(10, 0), models_start=10, models_alive=6,
+        hp_cur=6, hp_max=1, value=120, ally_value=20, rng=1, cc=5,
+    )
+    assert bot._posture(unit_ok, gs_ok) == "engage"
+    assert bot.select_movement_destination(unit_ok, [(2, 0), (8, 0)], gs_ok) == (8, 0)
+
+
+def test_value_trade_bot_withdraws_the_wounded_expensive_squad(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """La posture est BRANCHEE sur les poids : la brute de melee entamee et chere RECULE.
+
+    Meme unite, meme profil de melee, meme ennemi en (10,0) : saine elle prend (8,0) (contact),
+    entamee elle prend (2,0). Sans la posture « withdraw », les deux cas rendraient (8,0).
+    """
+    _patch_move_geometry(monkeypatch)
+    bot = ValueTradeBot(randomness=0.0)
+
+    gs_healthy, unit_healthy = _value_move_gs(
+        unit_hex=(5, 0), enemy_hex=(10, 0), hp_cur=10, hp_max=10,
+        value=120, ally_value=20, rng=1, cc=5,
+    )
+    assert bot.select_movement_destination(unit_healthy, [(2, 0), (8, 0)], gs_healthy) == (8, 0)
+
+    gs_wounded, unit_wounded = _value_move_gs(
+        unit_hex=(5, 0), enemy_hex=(10, 0), hp_cur=2, hp_max=10,
+        value=120, ally_value=20, rng=1, cc=5,
+    )
+    assert bot.select_movement_destination(unit_wounded, [(2, 0), (8, 0)], gs_wounded) == (2, 0)
+
+
+def test_tactical_bot_retreat_triggers_on_a_multi_model_squad(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """JUMEAU du defaut precedent : le repli du blesse de TacticalBot etait INJOIGNABLE.
+
+    `select_movement_destination` testait `HP_CUR < HP_MAX * 0.5`, somme des PV de l'escouade
+    contre PV d'UNE figurine : `_find_safest_position` — et le terme d'objectif qu'on y a
+    ajoute — etait du code mort sur tout roster multi-figurines. Ce test verrouille le passage
+    a 08.03 ; il n'y en avait AUCUN sur cette methode (le seuil naif y restait vert).
+    """
+    _patch_move_geometry(monkeypatch)
+    bot = TacticalBot(randomness=0.0)
+
+    def _gs(models_alive: int):
+        gs, unit = _value_move_gs(
+            unit_hex=(5, 0), enemy_hex=(10, 0), models_start=10, models_alive=models_alive,
+            hp_cur=models_alive, hp_max=1, value=120, ally_value=20, rng=0, cc=5,
+        )
+        # L'ennemi doit etre une MENACE DE MELEE : c'est la seule que `_find_safest_position` fuit.
+        gs["units"][1].update(_dmg(rng=1, cc=5))
+        return gs, unit
+
+    # 3 survivantes sur 10 -> entamee (08.03) -> repli : la destination la plus loin de la menace.
+    gs_hurt, unit_hurt = _gs(3)
+    assert gs_hurt["units_cache"]["1"]["HP_CUR"] > gs_hurt["units"][0]["HP_MAX"] * 0.5
+    assert bot.select_movement_destination(unit_hurt, [(2, 0), (8, 0)], gs_hurt) == (2, 0)
+
+    # 6 survivantes sur 10 -> pas entamee -> position offensive : il se rapproche de la cible.
+    gs_ok, unit_ok = _gs(6)
+    assert bot.select_movement_destination(unit_ok, [(2, 0), (8, 0)], gs_ok) == (8, 0)
+
+
+def test_value_trade_score_refuses_a_target_without_hp(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PV nuls dans units_cache = invariant rompu -> erreur explicite, jamais une division ni un
+    score par defaut."""
+    monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
+    monkeypatch.setattr(eb, "get_hp_from_cache", lambda uid, gs_: 0)
+    gs = _slot_gs("shoot", {"e0": _value_enemy(120)}, ["e0"])
+    with pytest.raises(RuntimeError, match=r"invariant est rompu"):
+        _act(ValueTradeBot(randomness=0.0), [SHOOT, WAIT_ACTION], gs)
+
+    monkeypatch.setattr(eb, "get_hp_from_cache", lambda uid, gs_: None)
+    with pytest.raises(RuntimeError, match=r"absente du cache de HP"):
+        _act(ValueTradeBot(randomness=0.0), [SHOOT, WAIT_ACTION], gs)
 
 
 def test_smart_bot_shoot_slot_mapping_divergence_is_explicit(
@@ -648,4 +1007,4 @@ def test_smart_bot_shoot_slot_mapping_divergence_is_explicit(
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
     gs = _slot_gs("shoot", {"e_weak": _dmg(rng=1, cc=1)}, ["e_weak"])
     with pytest.raises(RuntimeError, match=r"sans escouade ennemie"):
-        _act(AggressiveSmartBot(randomness=0.0), [SHOOT, SHOOT2], gs)
+        _act(GreedyBot(randomness=0.0), [SHOOT, SHOOT2], gs)

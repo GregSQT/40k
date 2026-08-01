@@ -2,6 +2,7 @@
 """engine/macro_intents.py - Zone intent system Phase 2."""
 
 from engine.observation_entities import MAX_DECISION_OPTIONS
+from shared.data_validation import require_key
 
 INTENT_INVADE = 0
 INTENT_DEFEND = 1
@@ -144,8 +145,18 @@ def get_nearest_objective_zone(active_unit: dict, game_state: dict) -> int:
 # scoree par la tete pointeur. Aucune heuristique de repli ne doit revenir ici.
 
 
-def get_objective_control(zone_idx: int, game_state: dict) -> float:
-    """Return 1.0 if objective controlled by current_player, -1.0 if by opponent, 0.0 if neutral/contested."""
+def get_objective_control_for_player(zone_idx: int, game_state: dict, player: int) -> float:
+    """Controle de l'objectif `zone_idx` DU POINT DE VUE de `player`.
+
+    1.0 s'il le controle, -1.0 si l'adversaire le controle, 0.0 si neutre/conteste.
+
+    Version explicite, a utiliser des que le point de vue n'est PAS celui du joueur dont c'est
+    le tour. Cas vecu : le solde terminal des zone-intents porte sur le joueur controle, alors
+    que la partie se termine pendant le tour du bot — mesure sur le harnais moteur : 6
+    terminaisons sur 6 avec `current_player=2` pour `controlled_player=1`. Passer par la version
+    relative y inversait le signe de TOUS les objectifs, donc payait le bonus DEFEND quand
+    l'agent avait PERDU la zone.
+    """
     objectives = game_state["objectives"]
     if zone_idx >= len(objectives):
         return 0.0
@@ -153,9 +164,18 @@ def get_objective_control(zone_idx: int, game_state: dict) -> float:
     obj_id = str(obj["id"])
     controllers = game_state["objective_controllers"]
     controller = controllers.get(obj_id)
-    current_player = game_state.get("current_player")
     if controller is None:
         return 0.0
-    if controller == current_player:
+    if controller == player:
         return 1.0
     return -1.0
+
+
+def get_objective_control(zone_idx: int, game_state: dict) -> float:
+    """Return 1.0 if objective controlled by current_player, -1.0 if by opponent, 0.0 if neutral/contested."""
+    # `current_player` est pose a la construction du game_state ET a chaque reset : sa lecture
+    # est stricte. Le `.get()` tolerant d'avant rendait -1.0 quand la cle manquait, c'est-a-dire
+    # "objectif adverse" pour un etat incomplet — un silence qui se lisait comme une donnee.
+    return get_objective_control_for_player(
+        zone_idx, game_state, int(require_key(game_state, "current_player"))
+    )

@@ -1,33 +1,57 @@
 {
+  "MOVE_POOL_BUILD": {
+    "calls": 4152,
+    "avg_s": 0.000283,
+    "sum_s": 1.174687,
+    "ms_per_episode": 73.417938,
+    "avg_bfs_s": 0.00019
+  },
+  "WEAPON_AVAILABILITY_CHECK": {
+    "calls": 2293,
+    "avg_s": 6.3e-05,
+    "sum_s": 0.145525,
+    "ms_per_episode": 9.095312,
+    "avg_scan_s": 2.5e-05
+  },
+  "CHARGE_PHASE_START": {
+    "calls": 950,
+    "avg_s": 0.002129,
+    "sum_s": 2.022932,
+    "ms_per_episode": 126.43325,
+    "avg_pool_s": 0.001877
+  },
+  "CHARGE_BUILD_POOL": {
+    "calls": 950,
+    "avg_s": 0.001857,
+    "sum_s": 1.764432,
+    "ms_per_episode": 110.277,
+    "avg_bfs_s": 0.001286,
+    "avg_filtre_s": 0.000566
+  },
+  "CHARGE_HAS_VALID_TARGET": {
+    "calls": 621,
+    "avg_s": 0.001862,
+    "sum_s": 1.156206,
+    "ms_per_episode": 72.262875
+  },
   "CHARGE_REVERSE_GOAL_BFS": {
-    "calls": 451,
-    "avg_s": 0.00174,
-    "sum_s": 0.78,
+    "calls": 439,
+    "avg_s": 0.001739,
+    "sum_s": 0.763525,
+    "ms_per_episode": 47.720312,
     "avg_goal_s": 0.001617,
-    "avg_bfs_s": 0.000119
+    "avg_bfs_s": 0.000118
   },
   "CHARGE_DEST_BFS": {
     "calls": 12,
     "avg_s": 3.2e-05,
-    "sum_s": 0.0
+    "sum_s": 0.000383,
+    "ms_per_episode": 0.023938
   },
-  "MOVE_POOL_BUILD": {
-    "calls": 4211,
-    "avg_s": 0.000283,
-    "sum_s": 1.19,
-    "avg_bfs_s": 0.000191
-  },
-  "CHARGE_PHASE_START": {
-    "calls": 959,
-    "avg_s": 0.002135,
-    "sum_s": 2.05,
-    "avg_pool_s": 0.001882
-  },
-  "__total_s": 4.02,
-  "__total_calls": 5633,
-  "__score_ms": 0.7144,
-  "__score_ms_per_episode": 236.7,
-  "__n_episodes": 17,
+  "__total_s": 7.02769,
+  "__total_calls": 9417,
+  "__score_ms": 0.7463,
+  "__n_episodes": 16,
   "__episodes": [
     2,
     3,
@@ -44,9 +68,11 @@
     14,
     15,
     16,
-    17,
-    18
+    17
   ],
   "__n_processes": 0,
-  "__untagged_records": 10521
+  "__untagged_records": 10521,
+  "__undated_records": 0,
+  "__truncated_episodes": 1,
+  "__all_episodes_truncated": false
 }

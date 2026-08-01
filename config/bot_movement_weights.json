@@ -6,6 +6,11 @@
     "defensive": {"w_objective": 0.7, "w_enemy": -0.5},
     "control": {"w_objective": 1.0, "w_enemy": 0.1},
     "tactical": {"w_objective": 0.5, "w_enemy": 0.0},
+    "value_trade": {
+      "engage": {"w_objective": 0.5, "w_enemy": 1.0},
+      "standoff": {"w_objective": 0.9, "w_enemy": -0.2},
+      "withdraw": {"w_objective": 0.3, "w_enemy": -1.0}
+    },
     "adaptive": {
       "early": {"w_objective": 1.0, "w_enemy": 0.2},
       "winning": {"w_objective": 1.0, "w_enemy": -0.2},

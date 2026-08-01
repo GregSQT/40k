@@ -29,7 +29,7 @@ from engine.combat_utils import (
     resolve_dice_value,
     set_unit_coordinates,
 )
-from engine.game_state import GameStateManager
+from engine.game_state import GameStateManager, objective_hex_zones
 from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH
 from .shared_utils import (
     end_of_turn_regain_coherency_all_squads,
@@ -1265,7 +1265,7 @@ def _fight_plan_consolidation_destinations(
     # zone (14.01). « within range si possible, sinon plus proche » → on minimise la distance
     # empreinte→zone ; un anchor dont l'empreinte recouvre la zone a une distance 0 (within range)
     # et sort donc naturellement comme meilleur. IA et PvP appliquent ainsi la même règle.
-    zone_sets = _fight_v11_objective_hex_sets(game_state)
+    zone_sets = objective_hex_zones(game_state)
     if not zone_sets:
         return None
 
@@ -2536,28 +2536,6 @@ def _fight_v11_enemies_within_range(
     return out
 
 
-def _fight_v11_objective_hex_sets(game_state: Dict[str, Any]) -> List[Tuple[Any, Set[Tuple[int, int]]]]:
-    """(id, set des hexes) par objectif. Utilise ``hexes`` (zone de contrôle runtime)."""
-    objectives = game_state.get("objectives")
-    if not isinstance(objectives, (list, tuple)):
-        return []
-    out: List[Tuple[Any, Set[Tuple[int, int]]]] = []
-    for obj in objectives:
-        if not isinstance(obj, dict):
-            continue
-        hexes = obj.get("hexes")
-        s: Set[Tuple[int, int]] = set()
-        if isinstance(hexes, (list, tuple)):
-            for h in hexes:
-                if isinstance(h, dict):
-                    s.add((int(require_key(h, "col")), int(require_key(h, "row"))))
-                elif isinstance(h, (list, tuple)) and len(h) >= 2:
-                    s.add((int(h[0]), int(h[1])))
-        if s:
-            out.append((obj.get("id"), s))
-    return out
-
-
 def _fight_v11_objectives_within_range(
     game_state: Dict[str, Any], unit: Dict[str, Any], range_inches: int
 ) -> List[Any]:
@@ -2573,7 +2551,7 @@ def _fight_v11_objectives_within_range(
         raise ValueError(f"Unit {uid} not in units_cache; cannot compute objective range")
     ufp = entry.get("occupied_hexes", {(entry["col"], entry["row"])})
     out: List[Any] = []
-    for oid, hexes in _fight_v11_objective_hex_sets(game_state):
+    for oid, hexes in objective_hex_zones(game_state):
         if min_distance_between_sets(ufp, hexes, max_distance=rng) <= rng:
             out.append(oid)
     return out
@@ -4182,7 +4160,7 @@ def _fight_v11_consolidation_objective_zone(
     game_state: Dict[str, Any], objective_id: Any
 ) -> Set[Tuple[int, int]]:
     """Set d'hexes de la zone de contrôle d'un objectif (par id). ``raise`` si introuvable."""
-    for oid, hexes in _fight_v11_objective_hex_sets(game_state):
+    for oid, hexes in objective_hex_zones(game_state):
         if oid == objective_id:
             return hexes
     raise ValueError(f"_fight_v11_consolidation_objective_zone: objectif {objective_id!r} sans hexes")

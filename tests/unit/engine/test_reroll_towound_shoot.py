@@ -38,24 +38,38 @@ def _seq_randint(monkeypatch, rolls):
     return seq
 
 
-def _game_state(unit_rules, target_col=9, target_row=9):
+def _game_state(unit_rules, target_col=9, target_row=9, model_col=None, model_row=None,
+                base_size=1):
     """1 tireur (arme sans regle speciale) + 1 cible ; objectif en (5,5).
-    target_col/row = (5,5) -> cible sur objectif, sinon hors objectif."""
+
+    Regle 14.02 : « a model is within range of a terrain objective while it is within that
+    terrain area » — la presence sur l objectif se juge PAR FIGURINE, sur l empreinte de socle.
+    D ou deux jeux de coordonnees distincts dans cette doublure :
+      - `target_col/row` : l ANCRE d escouade (units_cache), qui ne decide PLUS de rien ;
+      - `model_col/row` + `base_size` : la FIGURINE (models_cache), qui decide.
+    Par defaut la figurine est posee sur l ancre (cas courant, escouade a une figurine).
+    """
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "WEAPON_RULES": [], "display_name": "Gun"}
     attacker = {"id": "A1", "squad_id": "1", "T": 4, "RNG_WEAPONS": [weapon]}
     attacker_unit = {"id": "1", "UNIT_RULES": unit_rules}
     target_model = {
         "id": "T1", "T": 4, "HP_CUR": 2, "HP_MAX": 2,
         "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
+        "col": target_col if model_col is None else model_col,
+        "row": target_row if model_row is None else model_row,
+        "level": 0, "BASE_SHAPE": "round", "BASE_SIZE": base_size,
     }
     target_unit = {"id": "2", "UNIT_RULES": []}
     game_state = {
         "models_cache": {"A1": attacker, "T1": target_model},
         "squad_models": {"2": ["T1"]},
         "squad_cache": {"2": {"model_count_at_start": 1}},
-        "units_cache": {"2": {"col": target_col, "row": target_row, "VALUE": 10.0, "player": 1}},
+        "units_cache": {
+            "2": {"col": target_col, "row": target_row, "VALUE": 10.0, "player": 1,
+                  "orientation": 0},
+        },
         "unit_by_id": {"1": attacker_unit, "2": target_unit},
-        "objectives": [{"hexes": [{"col": 5, "row": 5}]}],
+        "objectives": [{"id": "o1", "hexes": [[5, 5]]}],
     }
     intent = {"model_id": "A1", "target_unit_id": "2", "weapon_index": 0, "n_attacks_resolved": 1}
     return game_state, intent
@@ -119,3 +133,206 @@ def test_reroll_towound_on_objective_inactive_off_objective(monkeypatch):
 
     assert result["counts"]["wounds"] == 0
     assert seq == []
+
+
+# --- 14.02 : la presence sur l objectif se lit PAR FIGURINE, pas sur l ancre d escouade -------
+#
+# `is_unit_on_objective` comparait l ANCRE d escouade a un hexe d objectif, par egalite stricte.
+# Deux erreurs cumulees, et le meme moteur repondait deja autrement a la meme question pour le
+# CONTROLE d objectif (`sum_objective_control_oc_multi` : empreinte de socle, par figurine) :
+#   1. l ancre n est pas une figurine — une escouade etalee a des figurines dans la zone sans
+#      que son ancre y soit (et l inverse) ;
+#   2. l egalite de centre ignore l empreinte du socle — un socle large recouvre la zone sans
+#      que son centre y soit.
+# Les deux cas ci-dessous construisent exactement ces situations. Ils sont ROUGES sur l ancienne
+# lecture par ancre : le reroll ne se declenchait pas, le 3 restait un echec.
+
+def test_reroll_on_objective_follows_the_model_not_the_squad_anchor(monkeypatch):
+    """ANCRE hors zone, FIGURINE dans la zone -> l unite est sur l objectif (14.02)."""
+    seq = _seq_randint(monkeypatch, [4, 3, 5, 2])  # hit, wound=3 (echec), reroll=5 (succes), save
+    gs, intent = _game_state(
+        [dict(_TARGETED_INTERCESSION, ruleId="reroll_towound_target_on_objective")],
+        target_col=9, target_row=9,   # ancre d escouade LOIN de l objectif (5,5)
+        model_col=5, model_row=5,     # la figurine, elle, est dessus
+    )
+
+    result = roll_shoot_intent(gs, intent)
+
+    assert result["counts"]["wounds"] == 1
+    assert result["shot_records"][0]["strengthRoll"] == 5
+    assert seq == []
+
+
+def test_reroll_on_objective_follows_the_base_footprint(monkeypatch):
+    """CENTRE de figurine hors zone, EMPREINTE de socle dessus -> l unite est sur l objectif.
+
+    Socle rond de 3 centre en (4,5) : son empreinte contient (5,5), l hexe de l objectif.
+    """
+    from engine.hex_utils import compute_occupied_hexes
+    assert (5, 5) in compute_occupied_hexes(4, 5, "round", 3)
+    assert (4, 5) != (5, 5)
+
+    seq = _seq_randint(monkeypatch, [4, 3, 5, 2])
+    gs, intent = _game_state(
+        [dict(_TARGETED_INTERCESSION, ruleId="reroll_towound_target_on_objective")],
+        target_col=9, target_row=9,
+        model_col=4, model_row=5, base_size=3,
+    )
+
+    result = roll_shoot_intent(gs, intent)
+
+    assert result["counts"]["wounds"] == 1
+    assert result["shot_records"][0]["strengthRoll"] == 5
+    assert seq == []
+
+
+def test_reroll_on_objective_inactive_when_no_model_reaches_the_zone(monkeypatch):
+    """Ancre ET figurine hors zone, socle de 1 -> pas de reroll (le controle reste discriminant)."""
+    seq = _seq_randint(monkeypatch, [4, 3])  # hit, wound=3 -> FAILED, pas de reroll
+    gs, intent = _game_state(
+        [{"ruleId": "reroll_towound_target_on_objective"}],
+        target_col=9, target_row=9, model_col=7, model_row=7,
+    )
+
+    result = roll_shoot_intent(gs, intent)
+
+    assert result["counts"]["wounds"] == 0
+    assert seq == []
+
+
+# --- La cle `objectives` absente est un ETAT CORROMPU, jamais « pas d objectif » -------------
+#
+# `is_unit_on_objective` EXIGEAIT `game_state["objectives"]` avant l unification 14.02 ; celle-ci
+# l avait relachee en `.get(...)` renvoyant `[]`. Consequence : un game_state ampute aurait rendu
+# « pas sur l objectif » pour TOUTE unite, desarmant cette regle de relance sans un mot. Un
+# scenario reellement sans objectif est une LISTE VIDE — que le moteur pose inconditionnellement
+# (w40k_core : `"objectives": self._scenario_objectives`), et qui reste acceptee ci-dessous.
+
+
+def test_a_missing_objectives_key_raises_instead_of_silently_disabling_the_rule():
+    """VERROU : en remettant `.get("objectives")` dans `unit_is_within_objective`, ce test
+    devient ROUGE — l appel rend `False` au lieu de lever, et la regle s eteint en silence."""
+    import pytest
+
+    from engine.game_state import unit_is_within_objective
+
+    gs, _intent = _game_state(
+        [{"ruleId": "reroll_towound_target_on_objective"}], model_col=5, model_row=5
+    )
+    assert unit_is_within_objective(gs, "2") is True, "montage inerte : l unite doit etre dessus"
+
+    del gs["objectives"]
+    with pytest.raises(Exception):
+        unit_is_within_objective(gs, "2")
+
+
+def test_a_table_without_objectives_is_an_empty_list_and_stays_legal():
+    """Liste vide = configuration legitime : la reponse est False, sans erreur."""
+    from engine.game_state import unit_is_within_objective
+
+    gs, _intent = _game_state(
+        [{"ruleId": "reroll_towound_target_on_objective"}], model_col=5, model_row=5
+    )
+    gs["objectives"] = []
+
+    assert unit_is_within_objective(gs, "2") is False
+
+
+# --- Parseur UNIQUE des zones d objectif ------------------------------------------------------
+#
+# `fight_handlers._fight_v11_objective_hex_sets` etait une SECONDE implementation de la meme
+# question (« quels hexes forment la zone de chaque objectif ? »), tolerante la ou celle du
+# moteur est stricte. Sur des donnees propres les deux coincidaient — mesure sur le scenario
+# d entrainement : 5 zones, tailles identiques. Sur une entree abimee elles rendaient des listes
+# de LONGUEURS DIFFERENTES dans le meme etat de jeu : l observation et la recompense voyaient N
+# objectifs pendant que la consolidation 12.08 en voyait N-1, sans erreur ni log.
+
+
+def test_a_malformed_objective_raises_instead_of_disappearing_from_the_fight_phase():
+    """VERROU : la version fight `continue`-ait sur un objectif non-dict et ecartait un `hexes`
+    absent. Les deux cas doivent lever, pour les DEUX appelants — c est le meme parseur."""
+    import pytest
+
+    from engine.game_state import objective_hex_sets, objective_hex_zones
+
+    gs, _intent = _game_state([{"ruleId": "reroll_towound_target_on_objective"}])
+    assert len(objective_hex_zones(gs)) == 1, "montage inerte : il faut un objectif valide"
+
+    gs["objectives"] = [{"id": "o1"}]  # `hexes` absent
+    for reader in (objective_hex_zones, objective_hex_sets):
+        with pytest.raises(Exception):
+            reader(gs)
+
+    gs["objectives"] = [{"id": "o1", "hexes": [[5]]}]  # entree de longueur 1
+    for reader in (objective_hex_zones, objective_hex_sets):
+        with pytest.raises(Exception):
+            reader(gs)
+
+
+def test_an_empty_objective_zone_raises_where_it_names_the_objective():
+    """Zone vide : erreur ICI, et pas `min_distance_between_sets` vingt appels plus loin.
+
+    La version fight ECARTAIT l objectif (`if s:`), donc la consolidation 12.08 l ignorait en
+    silence pendant que l observation et la recompense continuaient de le compter.
+    """
+    import pytest
+
+    from engine.game_state import objective_hex_zones
+
+    gs, _intent = _game_state([{"ruleId": "reroll_towound_target_on_objective"}])
+    gs["objectives"] = [{"id": "o_vide", "hexes": []}]
+
+    with pytest.raises(ValueError, match="o_vide"):
+        objective_hex_zones(gs)
+
+
+def test_the_zone_order_matches_game_state_objectives():
+    """L ordre EST un contrat : `get_objective_control(zone_idx)` indexe la meme liste."""
+    from engine.game_state import objective_hex_sets, objective_hex_zones
+
+    gs, _intent = _game_state([{"ruleId": "reroll_towound_target_on_objective"}])
+    gs["objectives"] = [
+        {"id": "a", "hexes": [[1, 1]]},
+        {"id": "b", "hexes": [[2, 2], [3, 3]]},
+        {"id": "c", "hexes": [[4, 4]]},
+    ]
+
+    assert [oid for oid, _z in objective_hex_zones(gs)] == ["a", "b", "c"]
+    assert [len(z) for z in objective_hex_sets(gs)] == [1, 2, 1]
+
+
+def test_the_footprint_follows_the_per_model_orientation_not_the_squad_one():
+    """Une figurine PIVOTEE seule garde son orientation propre (socle non rond).
+
+    LE DEFAUT. `iter_living_model_footprints` ne lisait QUE l orientation d ESCOUADE
+    (`units_cache[uid]["orientation"]`), alors que `update_model_position` pose une orientation
+    PAR FIGURINE lors d un pivot a la molette sans jamais synchroniser l entree d escouade — et
+    que `shared_utils._recompute_squad_occupied_hexes`, qui ecrit les empreintes de reference,
+    lit bien la valeur par figurine. Deux empreintes differentes pour la meme figurine dans le
+    meme etat : le controle d objectif 14.02, la regle de relance et la recompense d objectif
+    lisaient la mauvaise.
+
+    VERROU. En remettant `orientation = squad_orientation`, ce test passe au ROUGE : l empreinte
+    calculee est celle de l orientation d escouade, donc differente de la reference.
+
+    Socle OVALE : sur un socle rond l orientation n a aucun effet, le controle serait vacant.
+    """
+    from engine.game_state import iter_living_model_footprints
+    from engine.hex_utils import compute_occupied_hexes
+
+    gs, _intent = _game_state([{"ruleId": "reroll_towound_target_on_objective"}])
+    model = gs["models_cache"]["T1"]
+    model["BASE_SHAPE"] = "oval"
+    model["BASE_SIZE"] = [3, 1]
+    gs["units_cache"]["2"]["orientation"] = 0
+    model["orientation"] = 1  # la figurine a pivote, l escouade non
+
+    attendu = compute_occupied_hexes(
+        int(model["col"]), int(model["row"]), "oval", [3, 1], 1
+    )
+    par_escouade = compute_occupied_hexes(
+        int(model["col"]), int(model["row"]), "oval", [3, 1], 0
+    )
+    assert attendu != par_escouade, "orientation sans effet sur ce socle : le controle serait vacant"
+
+    assert list(iter_living_model_footprints(gs, "2")) == [attendu]

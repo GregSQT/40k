@@ -2,7 +2,7 @@
   "x1": {
     "type": "################################################### x1 — curriculum phase 1 (board 44x60x1, scale ×1) ###################################################",
     "seed": 12345,
-    "total_episodes": 30000,
+    "total_episodes": 200000,
     "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
     "agent_seat_mode": "random",
     "eval_episodes": 10,
@@ -10,12 +10,13 @@
     "bot_eval_show_progress": true,
     "bot_eval_use_subprocess": true,
     "bot_eval_n_workers": 6,
-    "n_envs": 8,
+    "n_envs": 48,
+    "metrics_smoothing": null,
     "model_params": {
       "policy": "MultiInputPolicy",
       "learning_rate": {
         "initial": 0.002,
-        "final": 0.0015
+        "final": 0.0002
       },
       "n_steps": 8192,
       "batch_size": 1024,
@@ -27,7 +28,7 @@
       "normalize_advantage": true,
       "ent_coef": {
         "start": 0.1,
-        "end": 0.02
+        "end": 0.01
       },
       "vf_coef": 1.0,
       "max_grad_norm": 0.5,
@@ -35,8 +36,8 @@
       "tensorboard_log": "./tensorboard/",
       "policy_kwargs": {
         "net_arch": [
-          320,
-          320
+          512,
+          512
         ],
         "features_extractor_kwargs": {
           "cnn_features": 256
@@ -66,22 +67,23 @@
       "robust_penalty_hard": 0.2,
       "model_gating_enabled": false,
       "model_gating_min_worst_bot": 0.25,
-      "model_gating_min_worst_scenario_combined": 0.35,
+      "model_gating_min_worst_scenario_combined": 0.3,
+      "model_gating_min_vs_control": 0.3,
       "holdout_hard_opponent_budget_modifier": 1.1,
       "bot_eval_weights": {
-        "greedy": 0.23,
-        "defensive": 0.23,
-        "control": 0.23,
-        "aggressive_smart": 0.15,
-        "adaptive": 0.16,
+        "control": 0.4,
+        "value_trade": 0.15,
+        "adaptive": 0.15,
+        "greedy": 0.15,
+        "defensive": 0.15,
         "tactical": 0.0
       },
       "bot_eval_randomness": {
+        "control": 0.05,
+        "value_trade": 0.05,
+        "adaptive": 0.05,
         "greedy": 0.05,
         "defensive": 0.05,
-        "control": 0.05,
-        "aggressive_smart": 0.05,
-        "adaptive": 0.05,
         "tactical": 0.05
       }
     },
@@ -106,17 +108,17 @@
       "force_random_ratio_start": 0.1,
       "force_random_ratio_end": 0.2,
       "schedule": "linear",
-      "freeze_after_progress": 0.8,
+      "freeze_after_progress": 0.7,
       "apply_to": "agent_only"
     },
     "deployment_mode_schedule": {
       "enabled": true,
       "training_only": true,
-      "active_ratio_start": 0.0,
+      "active_ratio_start": 0.3,
       "active_ratio_end": 0.8,
       "schedule": "linear",
-      "freeze_after_progress": 1.0,
-      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les cinq profils portent le meme reglage 0.0 -> 0.8 depuis le 2026-07-29 (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0). 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les cinq profils."
+      "freeze_after_progress": 0.5,
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les cinq profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des quatre autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-01 : 0.3 -> 0.8 gele a mi-run (freeze_after_progress 0.5), soit un PLAFOND EFFECTIF de 0.55 -- la rampe s'arrete a mi-parcours, donc active_ratio_end n'est jamais atteint et c'est ce plafond, et non active_ratio_end, qui dit quelle part des episodes finit en deploiement actif. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les cinq profils."
     },
     "observation_params": {
       "obs_size": 20828,
@@ -138,19 +140,19 @@
     },
     "bot_training": {
       "ratios": {
-        "random": 0.1,
-        "greedy": 0.2,
-        "defensive": 0.2,
-        "control": 0.2,
-        "aggressive_smart": 0.15,
-        "adaptive": 0.15
+        "control": 0.35,
+        "value_trade": 0.15,
+        "adaptive": 0.15,
+        "greedy": 0.15,
+        "defensive": 0.15,
+        "random": 0.05
       },
       "randomness": {
-        "greedy": 0.05,
-        "defensive": 0.05,
         "control": 0.05,
-        "aggressive_smart": 0.05,
-        "adaptive": 0.05
+        "value_trade": 0.05,
+        "adaptive": 0.05,
+        "greedy": 0.05,
+        "defensive": 0.05
       }
     },
     "scenario_sampling": {
@@ -199,6 +201,7 @@
     "bot_eval_use_subprocess": true,
     "bot_eval_n_workers": 6,
     "n_envs": 48,
+    "metrics_smoothing": null,
     "model_params": {
       "policy": "MultiInputPolicy",
       "learning_rate": {
@@ -255,21 +258,22 @@
       "model_gating_enabled": false,
       "model_gating_min_worst_bot": 0.25,
       "model_gating_min_worst_scenario_combined": 0.35,
+      "model_gating_min_vs_control": 0.5,
       "holdout_hard_opponent_budget_modifier": 1.1,
       "bot_eval_weights": {
-        "greedy": 0.23,
-        "defensive": 0.23,
-        "control": 0.23,
-        "aggressive_smart": 0.15,
-        "adaptive": 0.16,
+        "control": 0.4,
+        "value_trade": 0.15,
+        "adaptive": 0.15,
+        "greedy": 0.15,
+        "defensive": 0.15,
         "tactical": 0.0
       },
       "bot_eval_randomness": {
+        "control": 0.05,
+        "value_trade": 0.05,
+        "adaptive": 0.05,
         "greedy": 0.05,
         "defensive": 0.05,
-        "control": 0.05,
-        "aggressive_smart": 0.05,
-        "adaptive": 0.05,
         "tactical": 0.05
       }
     },
@@ -300,11 +304,11 @@
     "deployment_mode_schedule": {
       "enabled": true,
       "training_only": true,
-      "active_ratio_start": 0.0,
+      "active_ratio_start": 0.3,
       "active_ratio_end": 0.8,
       "schedule": "linear",
-      "freeze_after_progress": 1.0,
-      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les cinq profils portent le meme reglage 0.0 -> 0.8 depuis le 2026-07-29 (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0). 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les cinq profils."
+      "freeze_after_progress": 0.5,
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les cinq profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des quatre autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-01 : 0.3 -> 0.8 gele a mi-run (freeze_after_progress 0.5), soit un PLAFOND EFFECTIF de 0.55 -- la rampe s'arrete a mi-parcours, donc active_ratio_end n'est jamais atteint et c'est ce plafond, et non active_ratio_end, qui dit quelle part des episodes finit en deploiement actif. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les cinq profils."
     },
     "observation_params": {
       "obs_size": 20828,
@@ -327,19 +331,19 @@
     },
     "bot_training": {
       "ratios": {
-        "random": 0.1,
-        "greedy": 0.2,
-        "defensive": 0.2,
-        "control": 0.2,
-        "aggressive_smart": 0.15,
-        "adaptive": 0.15
+        "control": 0.35,
+        "value_trade": 0.15,
+        "adaptive": 0.15,
+        "greedy": 0.15,
+        "defensive": 0.15,
+        "random": 0.05
       },
       "randomness": {
-        "greedy": 0.05,
-        "defensive": 0.05,
         "control": 0.05,
-        "aggressive_smart": 0.05,
-        "adaptive": 0.05
+        "value_trade": 0.05,
+        "adaptive": 0.05,
+        "greedy": 0.05,
+        "defensive": 0.05
       }
     },
     "scenario_sampling": {
@@ -388,6 +392,7 @@
     "bot_eval_use_subprocess": true,
     "bot_eval_n_workers": 6,
     "n_envs": 8,
+    "metrics_smoothing": null,
     "model_params": {
       "policy": "MultiInputPolicy",
       "learning_rate": {
@@ -444,21 +449,22 @@
       "model_gating_enabled": false,
       "model_gating_min_worst_bot": 0.25,
       "model_gating_min_worst_scenario_combined": 0.35,
+      "model_gating_min_vs_control": 0.5,
       "holdout_hard_opponent_budget_modifier": 1.1,
       "bot_eval_weights": {
-        "greedy": 0.23,
-        "defensive": 0.23,
-        "control": 0.23,
-        "aggressive_smart": 0.15,
-        "adaptive": 0.16,
+        "control": 0.4,
+        "value_trade": 0.15,
+        "adaptive": 0.15,
+        "greedy": 0.15,
+        "defensive": 0.15,
         "tactical": 0.0
       },
       "bot_eval_randomness": {
+        "control": 0.05,
+        "value_trade": 0.05,
+        "adaptive": 0.05,
         "greedy": 0.05,
         "defensive": 0.05,
-        "control": 0.05,
-        "aggressive_smart": 0.05,
-        "adaptive": 0.05,
         "tactical": 0.05
       }
     },
@@ -489,11 +495,11 @@
     "deployment_mode_schedule": {
       "enabled": true,
       "training_only": true,
-      "active_ratio_start": 0.0,
+      "active_ratio_start": 0.3,
       "active_ratio_end": 0.8,
       "schedule": "linear",
-      "freeze_after_progress": 1.0,
-      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les cinq profils portent le meme reglage 0.0 -> 0.8 depuis le 2026-07-29 (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0). 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les cinq profils."
+      "freeze_after_progress": 0.5,
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les cinq profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des quatre autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-01 : 0.3 -> 0.8 gele a mi-run (freeze_after_progress 0.5), soit un PLAFOND EFFECTIF de 0.55 -- la rampe s'arrete a mi-parcours, donc active_ratio_end n'est jamais atteint et c'est ce plafond, et non active_ratio_end, qui dit quelle part des episodes finit en deploiement actif. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les cinq profils."
     },
     "observation_params": {
       "obs_size": 20828,
@@ -515,19 +521,19 @@
     },
     "bot_training": {
       "ratios": {
-        "random": 0.1,
-        "greedy": 0.2,
-        "defensive": 0.2,
-        "control": 0.2,
-        "aggressive_smart": 0.15,
-        "adaptive": 0.15
+        "control": 0.35,
+        "value_trade": 0.15,
+        "adaptive": 0.15,
+        "greedy": 0.15,
+        "defensive": 0.15,
+        "random": 0.05
       },
       "randomness": {
-        "greedy": 0.05,
-        "defensive": 0.05,
         "control": 0.05,
-        "aggressive_smart": 0.05,
-        "adaptive": 0.05
+        "value_trade": 0.05,
+        "adaptive": 0.05,
+        "greedy": 0.05,
+        "defensive": 0.05
       }
     },
     "scenario_sampling": {
@@ -576,6 +582,7 @@
     "bot_eval_use_subprocess": true,
     "bot_eval_n_workers": 6,
     "n_envs": 8,
+    "metrics_smoothing": null,
     "callback_params": {
       "early_stopping_patience": 0,
       "save_best_min_episodes": 10000,
@@ -599,21 +606,22 @@
       "model_gating_enabled": false,
       "model_gating_min_worst_bot": 0.25,
       "model_gating_min_worst_scenario_combined": 0.35,
+      "model_gating_min_vs_control": 0.5,
       "holdout_hard_opponent_budget_modifier": 1.1,
       "bot_eval_weights": {
-        "greedy": 0.23,
-        "defensive": 0.23,
-        "control": 0.23,
-        "aggressive_smart": 0.15,
-        "adaptive": 0.16,
+        "control": 0.4,
+        "value_trade": 0.15,
+        "adaptive": 0.15,
+        "greedy": 0.15,
+        "defensive": 0.15,
         "tactical": 0.0
       },
       "bot_eval_randomness": {
+        "control": 0.05,
+        "value_trade": 0.05,
+        "adaptive": 0.05,
         "greedy": 0.05,
         "defensive": 0.05,
-        "control": 0.05,
-        "aggressive_smart": 0.05,
-        "adaptive": 0.05,
         "tactical": 0.05
       }
     },
@@ -644,11 +652,11 @@
     "deployment_mode_schedule": {
       "enabled": true,
       "training_only": true,
-      "active_ratio_start": 0.0,
+      "active_ratio_start": 0.3,
       "active_ratio_end": 0.8,
       "schedule": "linear",
-      "freeze_after_progress": 1.0,
-      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les cinq profils portent le meme reglage 0.0 -> 0.8 depuis le 2026-07-29 (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0). 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les cinq profils."
+      "freeze_after_progress": 0.5,
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les cinq profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des quatre autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-01 : 0.3 -> 0.8 gele a mi-run (freeze_after_progress 0.5), soit un PLAFOND EFFECTIF de 0.55 -- la rampe s'arrete a mi-parcours, donc active_ratio_end n'est jamais atteint et c'est ce plafond, et non active_ratio_end, qui dit quelle part des episodes finit en deploiement actif. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les cinq profils."
     },
     "observation_params": {
       "obs_size": 20828,
@@ -703,19 +711,19 @@
     },
     "bot_training": {
       "ratios": {
-        "random": 0.1,
-        "greedy": 0.2,
-        "defensive": 0.2,
-        "control": 0.2,
-        "aggressive_smart": 0.15,
-        "adaptive": 0.15
+        "control": 0.35,
+        "value_trade": 0.15,
+        "adaptive": 0.15,
+        "greedy": 0.15,
+        "defensive": 0.15,
+        "random": 0.05
       },
       "randomness": {
-        "greedy": 0.05,
-        "defensive": 0.05,
         "control": 0.05,
-        "aggressive_smart": 0.05,
-        "adaptive": 0.05
+        "value_trade": 0.05,
+        "adaptive": 0.05,
+        "greedy": 0.05,
+        "defensive": 0.05
       }
     },
     "scenario_sampling": {
@@ -765,6 +773,7 @@
     "bot_eval_use_subprocess": true,
     "bot_eval_n_workers": 3,
     "n_envs": 8,
+    "metrics_smoothing": null,
     "n_envs_normal--------------------------------": 48,
     "callback_params": {
       "early_stopping_patience": 0,
@@ -791,21 +800,22 @@
       "model_gating_enabled": false,
       "model_gating_min_worst_bot": 0.25,
       "model_gating_min_worst_scenario_combined": 0.35,
+      "model_gating_min_vs_control": 0.5,
       "holdout_hard_opponent_budget_modifier": 1.1,
       "bot_eval_weights": {
-        "greedy": 0.23,
-        "defensive": 0.23,
-        "control": 0.23,
-        "aggressive_smart": 0.15,
-        "adaptive": 0.16,
+        "control": 0.4,
+        "value_trade": 0.15,
+        "adaptive": 0.15,
+        "greedy": 0.15,
+        "defensive": 0.15,
         "tactical": 0.0
       },
       "bot_eval_randomness": {
+        "control": 0.05,
+        "value_trade": 0.05,
+        "adaptive": 0.05,
         "greedy": 0.05,
         "defensive": 0.05,
-        "control": 0.05,
-        "aggressive_smart": 0.05,
-        "adaptive": 0.05,
         "tactical": 0.05
       }
     },
@@ -836,11 +846,11 @@
     "deployment_mode_schedule": {
       "enabled": true,
       "training_only": true,
-      "active_ratio_start": 0.0,
+      "active_ratio_start": 0.3,
       "active_ratio_end": 0.8,
       "schedule": "linear",
-      "freeze_after_progress": 1.0,
-      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les cinq profils portent le meme reglage 0.0 -> 0.8 depuis le 2026-07-29 (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0). 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les cinq profils."
+      "freeze_after_progress": 0.5,
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les cinq profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des quatre autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-01 : 0.3 -> 0.8 gele a mi-run (freeze_after_progress 0.5), soit un PLAFOND EFFECTIF de 0.55 -- la rampe s'arrete a mi-parcours, donc active_ratio_end n'est jamais atteint et c'est ce plafond, et non active_ratio_end, qui dit quelle part des episodes finit en deploiement actif. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les cinq profils."
     },
     "observation_params": {
       "obs_size": 20828,
@@ -895,19 +905,19 @@
     },
     "bot_training": {
       "ratios": {
-        "random": 0.1,
-        "greedy": 0.2,
-        "defensive": 0.2,
-        "control": 0.2,
-        "aggressive_smart": 0.15,
-        "adaptive": 0.15
+        "control": 0.35,
+        "value_trade": 0.15,
+        "adaptive": 0.15,
+        "greedy": 0.15,
+        "defensive": 0.15,
+        "random": 0.05
       },
       "randomness": {
-        "greedy": 0.05,
-        "defensive": 0.05,
         "control": 0.05,
-        "aggressive_smart": 0.05,
-        "adaptive": 0.05
+        "value_trade": 0.05,
+        "adaptive": 0.05,
+        "greedy": 0.05,
+        "defensive": 0.05
       }
     },
     "scenario_sampling": {

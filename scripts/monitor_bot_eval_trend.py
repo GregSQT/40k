@@ -24,7 +24,7 @@ import numpy as np
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
 
-DEFAULT_TAG = "0_critical/a_bot_eval_combined"
+DEFAULT_TAG = "00_critical/a_bot_eval_combined"
 
 
 @dataclass

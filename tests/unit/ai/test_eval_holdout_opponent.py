@@ -125,7 +125,7 @@ def test_holdout_bots_excluded_from_every_selection_signal() -> None:
     for bot_name in HOLDOUT_BOTS:
         assert f"'{bot_name}'" not in all_bot_keys_line, (
             f"'{bot_name}' present dans ALL_BOT_KEYS : il entrerait dans worst_bot_score "
-            "et donc dans 0_critical/b_worst_bot_score (V11 §10.5)."
+            "et donc dans 00_critical/b_worst_bot_score (V11 §10.5)."
         )
 
 

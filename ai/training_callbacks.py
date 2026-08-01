@@ -46,9 +46,24 @@ from config_loader import get_config_loader
 # optimise n'est plus un holdout.
 HOLDOUT_BOT_NAMES = frozenset(["tactical"])
 
+# Nom de classe reel de chaque adversaire d'evaluation, pour les tags TensorBoard : une courbe
+# `03_eval/<scenario>/defensive` n'identifie pas l'adversaire pour qui lit le dashboard, alors
+# que le code n'echange que ces cles courtes. Table EXPLICITE et non derivee de la cle (un
+# `''.join(part.capitalize()) + 'Bot'` rendrait le bon nom aujourd'hui et divergerait en silence
+# a la premiere classe qui ne suit pas la convention) ; verrouillee contre les classes reelles
+# de ai/evaluation_bots par tests/unit/ai/test_eval_bot_display_names.py.
+BOT_DISPLAY_NAMES = {
+    "random": "RandomBot",
+    "greedy": "GreedyBot",
+    "defensive": "DefensiveBot",
+    "control": "ControlBot",
+    "adaptive": "AdaptiveBot",
+    "value_trade": "ValueTradeBot",
+    "tactical": "TacticalBot",
+}
+
 ALL_BOT_NAMES = frozenset([
-    "random", "greedy", "defensive", "control",
-    "aggressive_smart", "defensive_smart", "adaptive",
+    "random", "greedy", "defensive", "control", "adaptive", "value_trade",
 ]) | HOLDOUT_BOT_NAMES
 
 # Bots qui pilotent la selection (gating, worst_bot, score robuste). Le holdout en est exclu.
@@ -583,15 +598,13 @@ class MetricsCollectionCallback(BaseCallback):
         self.model = model
         self.controlled_agent = controlled_agent  # CRITICAL FIX: Store controlled_agent for bot evaluation
         self.episode_count = 0
-        self.episode_reward = 0
-        self.episode_length = 0
         
         # Initialize episode tracking with ALL metrics
         self.episode_tactical_data = {
             # Combat metrics
             'shots_fired': 0,
             'hits': 0,
-            'total_enemies': 0,
+            'total_enemy_units': 0,
             'killed_enemies': 0,
             
             # NEW: Damage tracking
@@ -623,23 +636,10 @@ class MetricsCollectionCallback(BaseCallback):
         self.immediate_reward_ratio_history = []
         self.max_reward_ratio_history = 50  # Keep last 50 episodes
         
-        self.episode_observation_phase_data = {
-            'shoot': {
-                'best_kill_probability': [],
-                'danger_to_me': [],
-                'valid_target_count': []
-            },
-            'fight': {
-                'best_kill_probability': [],
-                'danger_to_me': [],
-                'valid_target_count': []
-            },
-            'charge': {
-                'best_kill_probability': [],
-                'danger_to_me': [],
-                'valid_target_count': []
-            },
-        }
+        # Metriques d'observation par phase, UN accumulateur PAR ENVIRONNEMENT — meme raison
+        # que la ventilation de recompense : un dictionnaire unique melangeait les 48 parties
+        # et etait vide par celle qui finissait la premiere.
+        self.episode_observation_phase_data_by_env: Dict[int, Dict[str, Dict[str, List[float]]]] = {}
 
     def _get_observation_batch_from_locals(self):
         """Get current observation batch from callback locals."""
@@ -815,7 +815,7 @@ class MetricsCollectionCallback(BaseCallback):
                 print(f"      -> Reduce max_grad_norm or learning_rate")
         
         print(f"\n💡 TensorBoard: {self.metrics_tracker.log_dir}")
-        print(f"   -> Focus on 0_critical/ namespace for hyperparameter tuning")
+        print(f"   -> Focus on 00_critical/ namespace for hyperparameter tuning")
         print("="*80 + "\n")
     
     def _run_final_bot_eval(self, model, training_config, training_config_name, rewards_config_name):
@@ -860,14 +860,13 @@ class MetricsCollectionCallback(BaseCallback):
     def _on_step(self) -> bool:
         """Collect step-level data including actions, damage, and unit changes"""
         obs_batch = self._get_observation_batch_from_locals()
-        # Track step-level reward and length
+        # `self.episode_reward += rewards[0]` et `self.episode_length += 1` occupaient cette
+        # place. Aucun lecteur : la recompense et la longueur d'episode logguees viennent de
+        # `info["episode"]` ("r" et "l", poses par le Monitor de CHAQUE env), pas d'eux. Ils
+        # etaient de surcroit faux par construction avec n_envs=48 — somme des recompenses du
+        # seul env 0, incrementee une fois par pas de VecEnv (donc 48 pas de jeu), et remise a
+        # zero par la fin d'episode de n'importe lequel des environnements.
         if hasattr(self, 'locals'):
-            if 'rewards' in self.locals:
-                reward = self.locals['rewards'][0] if isinstance(self.locals['rewards'], (list, np.ndarray)) else self.locals['rewards']
-                self.episode_reward += reward
-
-            self.episode_length += 1
-
             # Process info dict for action tracking
             if 'infos' in self.locals:
                 for idx, info in enumerate(self.locals['infos']):
@@ -876,7 +875,7 @@ class MetricsCollectionCallback(BaseCallback):
                     if (
                         is_controlled_action
                         and isinstance(phase_name, str)
-                        and phase_name in self.episode_observation_phase_data
+                        and phase_name in self.OBSERVATION_PHASES
                         and obs_batch is not None
                     ):
                         if isinstance(obs_batch, np.ndarray) and obs_batch.ndim == 2:
@@ -899,34 +898,31 @@ class MetricsCollectionCallback(BaseCallback):
                             )
 
                         extracted = self._extract_valid_target_metrics_from_obs(np.asarray(obs_vector))
-                        self.episode_observation_phase_data[phase_name]['best_kill_probability'].extend(
-                            extracted['best_kill_probability']
-                        )
-                        self.episode_observation_phase_data[phase_name]['danger_to_me'].extend(
-                            extracted['danger_to_me']
-                        )
-                        self.episode_observation_phase_data[phase_name]['valid_target_count'].extend(
-                            extracted['valid_target_count']
-                        )
+                        phase_data = self.episode_observation_phase_data_by_env.setdefault(
+                            idx, self._empty_observation_phase_data()
+                        )[phase_name]
+                        phase_data['best_kill_probability'].extend(extracted['best_kill_probability'])
+                        phase_data['danger_to_me'].extend(extracted['danger_to_me'])
+                        phase_data['valid_target_count'].extend(extracted['valid_target_count'])
 
-                    # Track action validity
-                    if 'success' in info and is_controlled_action:
-                        if info['success']:
-                            self.episode_tactical_data['valid_actions'] += 1
-                        else:
-                            self.episode_tactical_data['invalid_actions'] += 1
+                    # Le comptage de `valid_actions` / `invalid_actions` / `total_actions` /
+                    # `wait_actions` occupait cette place, depuis `info['success']` et
+                    # `info['action']`. Il ne servait a rien : le MOTEUR compte les memes
+                    # quantites dans `episode_tactical_data` (seat-aware, sur le vrai step de
+                    # l'agent), et le `.update(info['tactical_data'])` de fin d'episode ecrasait
+                    # les compteurs du callback avant toute lecture. Un compteur unique nourri
+                    # par 48 environnements n'aurait de toute facon rien mesure.
 
-                        self.episode_tactical_data['total_actions'] += 1
-
-                    # Track wait actions (action type in info; optional per step)
-                    if is_controlled_action and (info.get('action') == 'wait' or info.get('action') == 'skip'):  # get allowed
-                        self.episode_tactical_data['wait_actions'] += 1
-
-                    # Track zone intent steps (SubprocVecEnv-safe: read from info dict)
+                    # Track zone intent steps (SubprocVecEnv-safe: read from info dict).
+                    # ECRIVAIN UNIQUE de ces compteurs : le moteur ne compte plus lui-meme (son
+                    # `_metrics_tracker` n'etait arme qu'a n_envs==1, donc `--step` comptait
+                    # double). Les deux cles sont posees ensemble par la branche zone_intent de
+                    # w40k_core : leur absence est un defaut de cablage, pas un cas nominal.
                     if is_controlled_action and info.get('action') == 'zone_intent' and self.metrics_tracker is not None:
-                        intent_value = info.get('intent_value')
-                        if intent_value is not None:
-                            self.metrics_tracker.log_zone_intent_step(int(intent_value))
+                        self.metrics_tracker.log_zone_intent_step(
+                            int(require_key(info, 'intent_value')),
+                            float(require_key(info, 'zone_control')),
+                        )
 
                     # `if 'totalDamage' in info: episode_tactical_data['damage_dealt'] += ...`
                     # occupait cette place. Aucun producteur : `totalDamage` n'est ecrit nulle
@@ -943,41 +939,7 @@ class MetricsCollectionCallback(BaseCallback):
 
                     # Handle episode end - check for 'episode' key (Monitor wrapper adds this)
                     if 'episode' in info:
-                        self._handle_episode_end(info)
-        
-        # Collect reward breakdown from info (avoids game_state access which triggers
-        # IPC with SubprocVecEnv and degrades training perf). Use first env only (original behavior).
-        if hasattr(self, 'locals') and 'infos' in self.locals and len(self.locals['infos']) > 0:
-            info0 = self.locals['infos'][0]
-            if 'reward_breakdown' in info0:
-                reward_breakdown = info0['reward_breakdown']
-                if not hasattr(self, 'episode_reward_components'):
-                    self.episode_reward_components = {
-                        'base_actions': 0.0,
-                        'result_bonuses': 0.0,
-                        'objective': 0.0,
-                        'situational': 0.0,
-                        'penalties': 0.0
-                    }
-                self.episode_reward_components['base_actions'] += require_key(reward_breakdown, 'base_actions')
-                self.episode_reward_components['result_bonuses'] += require_key(reward_breakdown, 'result_bonuses')
-                self.episode_reward_components['objective'] += require_key(reward_breakdown, 'objective')
-                self.episode_reward_components['situational'] += require_key(reward_breakdown, 'situational')
-                self.episode_reward_components['penalties'] += require_key(reward_breakdown, 'penalties')
-                # `if 'position_score' in reward_breakdown: log_position_score(...)` occupait la
-                # ligne suivante. La cle n'existe plus : elle etait ecrite par la recompense de
-                # mouvement basee sur calculate_position_score (offensive_value moins menace
-                # defensive ponderee), supprimee de engine/reward_calculator.py par le commit
-                # 329d140e "move reward deleted" (2026-02-01) avec la metrique correspondante.
-                # Le garde etait reste cote consommateur, silencieux : une courbe
-                # game_tactical/avg_position_score vide ne se distingue pas d'une courbe nulle.
-                # Le seul producteur de reward_breakdown ecrit base_actions, result_bonuses,
-                # objective, situational, penalties et total — rien d'autre.
-                # `objective` a REMPLACE `tactical_bonuses` : cette derniere n'avait qu'un seul
-                # producteur (la recompense d'objectif de fin de tour), et son nom empechait de
-                # lire ce qui compte — la part de recompense issue du CONTROLE D'OBJECTIF, seul
-                # critere de victoire. Le bonus « sur un objectif » par action, jusque-la noyé
-                # dans base_actions sur six chemins, y est desormais agrege.
+                        self._handle_episode_end(info, idx)
 
         # Le suivi periodique des Q-values (train/q_value_mean_smooth, toutes les 100 etapes)
         # occupait cette place. Meme raison que son jumeau d'EpisodeBasedEvalCallback (classe
@@ -1013,12 +975,38 @@ class MetricsCollectionCallback(BaseCallback):
         
         return True
     
-    def _handle_episode_end(self, info):
+    #: Phases dont l'observation est instrumentee (cf. log_observation_phase_metrics).
+    OBSERVATION_PHASES = ('shoot', 'fight', 'charge')
+
+    @classmethod
+    def _empty_observation_phase_data(cls) -> Dict[str, Dict[str, List[float]]]:
+        """Accumulateur d'observation vide, une entree par phase instrumentee."""
+        return {
+            phase: {'best_kill_probability': [], 'danger_to_me': [], 'valid_target_count': []}
+            for phase in cls.OBSERVATION_PHASES
+        }
+
+    def _flush_observation_phase_data(self, env_index: int) -> None:
+        """Publie les metriques d'observation de l'episode qui finit, et de LUI SEUL.
+
+        Les 47 autres environnements sont au milieu de leur propre episode : ni leur contenu
+        ni leur remise a zero ne les concerne.
+        """
+        phase_data = self.episode_observation_phase_data_by_env.get(int(env_index))  # get allowed
+        if phase_data is None:
+            # Cet environnement n'a encore produit aucune observation instrumentee : il n'y a
+            # pas d'accumulateur. Un episode instrumente mais sans cible valide publie bien ses
+            # listes vides, que le tracker sait ne pas transformer en courbe.
+            return
+        self.metrics_tracker.log_observation_phase_metrics(phase_data)
+        self.episode_observation_phase_data_by_env[int(env_index)] = self._empty_observation_phase_data()
+
+    def _handle_episode_end(self, info, env_index: int):
         """Handle episode completion and log metrics."""
         self.episode_count += 1
 
         # CRITICAL: Update step_count BEFORE logging episode metrics
-        # This ensures 0_critical/ metrics use timesteps (not episodes) as x-axis
+        # This ensures 00_critical/ metrics use timesteps (not episodes) as x-axis
         self.metrics_tracker.step_count = self.model.num_timesteps
 
         # Extract episode data (we are only called when 'episode' in info; engine sets info["episode"] = {"r","l","t"})
@@ -1033,6 +1021,10 @@ class MetricsCollectionCallback(BaseCallback):
                 if ('winner' in info and info['winner'] is not None)
                 else None
             ),
+            # "active" | "fixed" | None (scheduler inactif). Cle EXIGEE : le moteur la pose a
+            # chaque episode termine (w40k_core, bloc `if terminated`), donc son absence est un
+            # defaut de cablage, pas un episode sans mode.
+            'deployment_mode': require_key(info, 'deployment_mode'),
         }
 
         # GAMMA MONITORING: Track discount factor effects
@@ -1084,7 +1076,7 @@ class MetricsCollectionCallback(BaseCallback):
         # Log to metrics tracker (KEEP for state tracking)
         self.metrics_tracker.log_episode_end(episode_data)
         self.metrics_tracker.log_tactical_metrics(self.episode_tactical_data)
-        self.metrics_tracker.log_observation_phase_metrics(self.episode_observation_phase_data)
+        self._flush_observation_phase_data(env_index)
         
         # CRITICAL FIX: Write game_critical metrics directly to model.logger
         # This ensures metrics appear in same TensorBoard directory as train/ metrics
@@ -1191,7 +1183,11 @@ class MetricsCollectionCallback(BaseCallback):
                     float(self.win_method_counts['step_limit']) / win_method_total
                 )
 
-                if len(self.win_rate_window) >= 10:
+                # Fenetre PLEINE exigee, pas 10 episodes : sous la fenetre, la moyenne porte
+                # sur tout l'historique et converge en descendant depuis un echantillon de
+                # depart bruite. Cette descente n'est pas une degradation de l'agent, mais
+                # elle en a l'allure exacte (cf. PERF_WINDOW dans ai/metrics_tracker.py).
+                if len(self.win_rate_window) == self.win_rate_window.maxlen:
                     rolling_win_rate = np.mean(self.win_rate_window)
                     self.model.logger.record('game_critical/win_rate_100ep', rolling_win_rate)
             
@@ -1211,26 +1207,20 @@ class MetricsCollectionCallback(BaseCallback):
             # Dump metrics to TensorBoard
             self.model.logger.dump(step=self.model.num_timesteps)
         
-        # NEW: Log reward decomposition
-        if hasattr(self, 'episode_reward_components'):
-            self.metrics_tracker.log_reward_decomposition(self.episode_reward_components)
-            # Reset for next episode
-            self.episode_reward_components = {
-                'base_actions': 0.0,
-                'result_bonuses': 0.0,
-                'objective': 0.0,
-                'situational': 0.0,
-                'penalties': 0.0
-            }
-       
+        # Ventilation de la recompense : cumulee par le MOTEUR sur tout l'episode (chaque step
+        # moteur y ajoute sa part) et transmise dans `tactical_data`. Le callback ne peut pas
+        # l'accumuler lui-meme : il ne voit qu'un info par step gym, celui du dernier step
+        # moteur, donc celui du bot des que le wrapper d'adversaire rejoue apres l'agent.
+        self.metrics_tracker.log_reward_decomposition(
+            require_key(self.episode_tactical_data, 'reward_breakdown')
+        )
+
         # Reset episode tracking with ALL fields
-        self.episode_reward = 0
-        self.episode_length = 0
         self.episode_tactical_data = {
             # Combat metrics
             'shots_fired': 0,
             'hits': 0,
-            'total_enemies': 0,
+            'total_enemy_units': 0,
             'killed_enemies': 0,
             
             # Damage tracking
@@ -1253,24 +1243,10 @@ class MetricsCollectionCallback(BaseCallback):
             'phases_completed': 0,
             'total_phases': 6
         }
-        self.episode_observation_phase_data = {
-            'shoot': {
-                'best_kill_probability': [],
-                'danger_to_me': [],
-                'valid_target_count': []
-            },
-            'fight': {
-                'best_kill_probability': [],
-                'danger_to_me': [],
-                'valid_target_count': []
-            },
-            'charge': {
-                'best_kill_probability': [],
-                'danger_to_me': [],
-                'valid_target_count': []
-            },
-        }
-    
+        # Les observations sont remises a zero PAR ENVIRONNEMENT au moment de leur publication
+        # (voir plus haut) : les reinitialiser ici viderait aussi les 47 autres, en plein
+        # milieu de leur episode.
+
     def _calculate_immediate_vs_future_ratio(self, info):
         """Calculate ratio of immediate vs future-oriented actions"""
         # Analyze action patterns to detect myopic vs strategic behavior
@@ -1319,6 +1295,7 @@ class BotEvaluationCallback(BaseCallback):
                  model_gating_min_combined: Optional[float] = None,
                  model_gating_min_worst_bot: Optional[float] = None,
                  model_gating_min_worst_scenario_combined: Optional[float] = None,
+                 model_gating_min_vs_control: Optional[float] = None,
                  gate_display_state: Optional[Dict[str, Any]] = None,
                  eval_deterministic: bool = True,
                  final_summary_target_episodes: Optional[int] = None,
@@ -1397,8 +1374,10 @@ class BotEvaluationCallback(BaseCallback):
         self.scenario_pool = scenario_pool
         self.early_stopping_patience = int(early_stopping_patience)
         self.save_best_min_episodes = int(save_best_min_episodes)
-        self.best_tier2_combined = -float('inf')
-        self.evals_without_tier2_improvement = 0
+        # Signal d'early stopping : le `combined` de SELECTION (holdout exclu). Il remplace
+        # l'ancienne moyenne « palier 2 », dont deux des trois bots ont ete supprimes.
+        self.best_early_stop_score = -float('inf')
+        self.evals_without_improvement = 0
         self.should_stop_early = False
         self.eval_count = int(initial_episode_marker // eval_freq) if use_episode_freq and eval_freq > 0 else 0
         self.best_combined_win_rate = 0.0
@@ -1441,6 +1420,24 @@ class BotEvaluationCallback(BaseCallback):
         self.model_gating_min_combined = model_gating_min_combined
         self.model_gating_min_worst_bot = model_gating_min_worst_bot
         self.model_gating_min_worst_scenario_combined = model_gating_min_worst_scenario_combined
+        # Plancher sur le SEUL adversaire qui joue la condition de victoire (les VP d'objectifs
+        # decident la partie ; les kills ne tranchent qu'a egalite). Il s'AJOUTE a `combined` et
+        # `worst_bot` : « control decide » ne doit pas vouloir dire « on ne regarde plus que
+        # control », un modele effondre contre les trois autres resterait alors selectionnable.
+        self.model_gating_min_vs_control = model_gating_min_vs_control
+        # Valide TOUJOURS, pas seulement gating arme : ce plancher s'applique aussi quand le
+        # gating complet est desarme (cf. `_evaluate_model_gate`). `train.py` le resout donc
+        # inconditionnellement, et le lit DIRECTEMENT dans le profil de l'agent : il n'y a
+        # justement PAS de repli sur `_training_common.json` (train.py, resolution de
+        # `model_gating_min_vs_control`), un seuil qui decide si un modele est sauve ou jete
+        # devant etre un choix explicite du profil.
+        if self.model_gating_min_vs_control is None:
+            raise ValueError("model_gating_min_vs_control is required (0.0 pour le desarmer)")
+        if not 0.0 <= float(self.model_gating_min_vs_control) <= 1.0:
+            raise ValueError(
+                f"model_gating_min_vs_control must be between 0.0 and 1.0 "
+                f"(got {self.model_gating_min_vs_control})"
+            )
         if self.model_gating_enabled:
             for metric_name, metric_value in (
                 ("model_gating_min_combined", self.model_gating_min_combined),
@@ -1543,11 +1540,37 @@ class BotEvaluationCallback(BaseCallback):
             return "↘"
         return "→"
 
+    def _control_floor_pass(self, results: Dict[str, Any]) -> bool:
+        """Le score contre `ControlBot` atteint-il le plancher ? (0.0 = plancher desarme)
+
+        `ControlBot` est le seul adversaire du panel dont la doctrine est de prendre et tenir
+        les objectifs, or ce sont eux qui decident la partie (`determine_winner_with_method` :
+        les kills ne tranchent qu'a egalite). Mesure fondatrice : sur deux runs successifs le
+        `combined` a MONTE (0.62 -> 0.65) pendant que `vs_control` BAISSAIT (0.33 -> 0.27) —
+        une moyenne ponderee peut donc progresser en perdant la competence decisive.
+
+        C'est un bot PONDERE, jamais le holdout : si un plancher est arme, l'absence de son
+        score est une config d'evaluation incoherente, pas un cas a contourner par un defaut.
+        """
+        floor = float(
+            require_present(self.model_gating_min_vs_control, "model_gating_min_vs_control")
+        )
+        if floor <= 0.0:
+            return True
+        return float(require_key(results, "control")) >= floor
+
     def _evaluate_model_gate(self, results: Dict[str, Any], eval_marker: int) -> bool:
         """Evaluate model gating thresholds and store explicit PASS/FAIL history."""
+        control_floor_pass = self._control_floor_pass(results)
         if not self.model_gating_enabled:
-            self.last_gate_pass = True
-            return True
+            # ⚠️ Le plancher `vs_control` s'applique MEME gating desarme. Le conditionner a
+            # `model_gating_enabled` l'aurait rendu inerte : les profils portent `false`, donc
+            # cette methode rendait True sans rien regarder et les DEUX chemins de sauvegarde
+            # (best_combined et best_robust, tous deux gardes par `gate_pass`) auraient accepte
+            # un modele a 0 % contre ControlBot — exactement ce que ce plancher existe pour
+            # empecher. Un seuil a 0.0 le neutralise explicitement, c'est le seul desarmement.
+            self.last_gate_pass = control_floor_pass
+            return control_floor_pass
 
         combined_score = float(require_key(results, "combined"))
         # V11 §10.5 : le holdout ne pilote pas le gating.
@@ -1579,6 +1602,14 @@ class BotEvaluationCallback(BaseCallback):
                 "worst_scenario_combined",
                 worst_scenario_combined,
                 float(require_present(self.model_gating_min_worst_scenario_combined, "model_gating_min_worst_scenario_combined")),
+            ),
+            (
+                "vs_control",
+                # ControlBot est un adversaire PONDERE, jamais le holdout : son score est
+                # toujours present quand le gate tourne. Son absence est une config d'eval
+                # incoherente avec le gate, pas un cas a contourner par un defaut.
+                float(require_key(results, "control")),
+                float(require_present(self.model_gating_min_vs_control, "model_gating_min_vs_control")),
             ),
         ]
         gate_pass = all(actual >= threshold for _, actual, threshold in checks)
@@ -1794,7 +1825,13 @@ class BotEvaluationCallback(BaseCallback):
         Metrics namespace:
           bot_eval/scenario/<slug>/combined
           bot_eval/scenario/<slug>/worst_bot_score
-          1_evals/<holdout_regular_scenario_name> (worst_bot_score)
+          03_eval/<holdout_scenario_slug>/<BotName> (win-rate de CE bot sur CE scenario)
+
+        Le namespace 03_eval/ portait jusqu'ici un scalaire par scenario holdout, valant son
+        `worst_bot_score` : le nom du tag designait le scenario (`bot-01` = un fichier de
+        matchup de rosters, pas un adversaire) et la valeur venait d'un bot different d'une
+        evaluation a l'autre — impossible de savoir de qui parlait la courbe. Il porte
+        desormais un win-rate par (scenario, bot), tag stable et adversaire nomme.
         """
         scenario_scores = results.get("scenario_scores")
         if scenario_scores is None:
@@ -1824,10 +1861,15 @@ class BotEvaluationCallback(BaseCallback):
                     scenario_name_str.startswith("holdout_regular_")
                     or scenario_name_str.startswith("holdout_hard_")
                 ):
-                    self.model.logger.record(
-                        f"1_evals/{scenario_name_str}",
-                        float(require_key(values, "worst_bot_score"))
+                    per_bot = require_key(
+                        require_key(results, "scenario_bot_stats"), scenario_name_str
                     )
+                    for bot_key, stats in per_bot.items():
+                        display_name = require_key(BOT_DISPLAY_NAMES, str(bot_key))
+                        self.model.logger.record(
+                            f"03_eval/{slug}/{display_name}",
+                            float(require_key(stats, "win_rate"))
+                        )
             scenario_split_scores = results.get("scenario_split_scores")
             if scenario_split_scores is not None:
                 if not isinstance(scenario_split_scores, dict):
@@ -1938,7 +1980,7 @@ class BotEvaluationCallback(BaseCallback):
             )
             if self.metrics_tracker is not None:
                 self.metrics_tracker.writer.add_scalar(
-                    "0_critical/0_eval_timeout_episodes",
+                    "00_critical/0_eval_timeout_episodes",
                     float(total_timeout_episodes),
                     int(eval_marker),
                 )
@@ -1969,22 +2011,18 @@ class BotEvaluationCallback(BaseCallback):
                 self._save_model_with_vecnormalize(save_path)
 
         if self.early_stopping_patience > 0:
-            _TIER2_KEYS = ('aggressive_smart', 'defensive_smart', 'adaptive')
-            tier2_scores = [float(results[k]) for k in _TIER2_KEYS if k in results]
-            if tier2_scores:
-                tier2_now = sum(tier2_scores) / len(tier2_scores)
-                if tier2_now > self.best_tier2_combined:
-                    self.best_tier2_combined = tier2_now
-                    self.evals_without_tier2_improvement = 0
-                else:
-                    self.evals_without_tier2_improvement += 1
-                    if self.evals_without_tier2_improvement >= self.early_stopping_patience:
-                        print(
-                            f"\n🛑 Early stopping: a2_tier2_combined n'a pas progressé depuis "
-                            f"{self.evals_without_tier2_improvement} évaluations "
-                            f"(best={self.best_tier2_combined:.4f}, current={tier2_now:.4f})"
-                        )
-                        self.should_stop_early = True
+            if combined_win_rate > self.best_early_stop_score:
+                self.best_early_stop_score = combined_win_rate
+                self.evals_without_improvement = 0
+            else:
+                self.evals_without_improvement += 1
+                if self.evals_without_improvement >= self.early_stopping_patience:
+                    print(
+                        f"\n🛑 Early stopping: bot_eval/combined n'a pas progressé depuis "
+                        f"{self.evals_without_improvement} évaluations "
+                        f"(best={self.best_early_stop_score:.4f}, current={combined_win_rate:.4f})"
+                    )
+                    self.should_stop_early = True
 
         self.combined_history.append(combined_win_rate)
         if self.save_best_robust and len(self.combined_history) >= self.robust_window:
@@ -2020,7 +2058,7 @@ class BotEvaluationCallback(BaseCallback):
             if self.metrics_tracker is not None:
                 step = int(eval_marker)
                 self.metrics_tracker.writer.add_scalar(
-                    "0_critical/0_robust_current_score", robust_score, step,
+                    "00_critical/0_robust_current_score", robust_score, step,
                 )
 
             if gate_pass and robust_score > self.best_robust_score and eval_marker >= self.save_best_min_episodes:

@@ -362,15 +362,16 @@ def main() -> None:
     parser.add_argument(
         "--bot-matchups-files",
         default=(
+            "holdout_hard_matchups_control.json,"
+            "holdout_hard_matchups_adaptive.json,"
             "holdout_hard_matchups_greedy.json,"
-            "holdout_hard_matchups_defensive_smart.json,"
-            "holdout_hard_matchups_adaptive.json"
+            "holdout_hard_matchups_defensive.json"
         ),
         help="Comma-separated matchup files used when --eval-mode bot",
     )
     parser.add_argument(
         "--bot-matchups-weights",
-        default="0.3333,0.3333,0.3334",
+        default="0.25,0.25,0.25,0.25",
         help="Comma-separated weights aligned with --bot-matchups-files when --eval-mode bot",
     )
     parser.add_argument("--target-win-rate", type=float, default=0.60)

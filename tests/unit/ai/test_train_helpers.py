@@ -11,12 +11,53 @@ def test_build_training_bots_from_config() -> None:
     cfg = {
         "bot_training": {
             "ratios": {"random": 0.2, "greedy": 0.4, "defensive": 0.4},
-            "greedy_randomness": 0.11,
-            "defensive_randomness": 0.22,
+            # `randomness` est EXIGE pour chaque bot pondere (plus de defaut a 0.10 en silence).
+            "randomness": {"greedy": 0.11, "defensive": 0.22},
         }
     }
     bots = train._build_training_bots_from_config(cfg)
     assert len(bots) >= 3
+
+
+def test_build_training_bots_respects_the_configured_budget() -> None:
+    """La FREQUENCE d'un bot doit etre son ratio : `BotControlledEnv` tire l'adversaire par un
+    `random.choice` UNIFORME sur cette liste, donc frequence = count / len(bots).
+
+    ROUGE sur le pool de 10 : `round(ratio * 10)` rendait 4/2/2/2/2/1 = 13 instances pour le
+    panel a six bots, soit 0.31 pour control (au lieu de 0.35) et 0.077 pour random (au lieu
+    de 0.05, +54 %). `len(bots) >= 3` ne regardait rien de tout cela.
+    """
+    from collections import Counter
+
+    ratios = {
+        "control": 0.35, "value_trade": 0.15, "adaptive": 0.15,
+        "greedy": 0.15, "defensive": 0.15, "random": 0.05,
+    }
+    bots = train._build_training_bots_from_config({
+        "bot_training": {
+            "ratios": ratios,
+            "randomness": {k: 0.05 for k in ratios if k != "random"},
+        }
+    })
+    counts = Counter(type(b).__name__ for b in bots)
+    by_name = {
+        "control": "ControlBot", "value_trade": "ValueTradeBot", "adaptive": "AdaptiveBot",
+        "greedy": "GreedyBot", "defensive": "DefensiveBot", "random": "RandomBot",
+    }
+    for name, ratio in ratios.items():
+        assert counts[by_name[name]] / len(bots) == pytest.approx(ratio), name
+
+
+def test_build_training_bots_rejects_a_budget_that_is_not_one() -> None:
+    """Des ratios qui ne somment pas a 1.0 deplacent le budget en silence : erreur explicite,
+    comme `bot_eval_weights` cote evaluation."""
+    with pytest.raises(ValueError, match=r"must sum to 1\.0"):
+        train._build_training_bots_from_config({
+            "bot_training": {
+                "ratios": {"random": 0.2, "greedy": 0.4},
+                "randomness": {"greedy": 0.11},
+            }
+        })
 
 
 def test_make_learning_rate_schedule() -> None:

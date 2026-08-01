@@ -22,7 +22,7 @@ Les plans d'implémentation sont classés dans `Implémentation/Implémenté/` (
 | Document | Rôle |
 |----------|------|
 | **[AI_TRAINING.md](AI_TRAINING.md)** | Référence unique training/tuning : pipeline (train.py, env, wrappers), configs, monitoring, bots, anti-overfitting. |
-| **[AI_METRICS.md](AI_METRICS.md)** | Métriques et tuning : guide rapide (0_critical, matrice → paramètres) + analyse experte. |
+| **[AI_METRICS.md](AI_METRICS.md)** | Métriques et tuning : guide rapide (00_critical, matrice → paramètres) + analyse experte. |
 | **[AI_OBSERVATION.md](AI_OBSERVATION.md)** | Ce que l’agent observe : tenseurs d’entités (clés, formes, normalisation, caches) + grille égocentrique. |
 | **[AI_OBSERVATION_Legacy.md](AI_OBSERVATION_Legacy.md)** | Archive : pipeline mono-figurine (vecteur plat d’offsets fixes). Ne décrit PAS le code actuel. |
 | **[self-play_organization32.md](self-play_organization32.md)** | Organisation self-play (ratio progressif, snapshots). |

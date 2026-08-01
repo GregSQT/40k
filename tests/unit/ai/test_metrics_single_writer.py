@@ -7,7 +7,7 @@ CE QUI A ETE MANQUE. Deux tags avaient deux ecrivains, et personne ne l'a vu pen
     log_critical_dashboard, qui lisait un ``self.episode_tactical_data`` du tracker jamais
     alimente — ``total_actions`` valant toujours 0, il ecrivait un 0.0 constant. 100 000 points
     pour 50 000 episodes, une courbe alternant valeur reelle et zero.
-  * ``0_combat/h_melee_model_kills`` : ecrit par log_tactical_metrics ET par
+  * ``02_combat/h_melee_model_kills`` : ecrit par log_tactical_metrics ET par
     compute_and_log_phase_metrics, appele AVANT lui (depuis log_episode_end), donc avec la
     moyenne de l'episode PRECEDENT. 99 999 points, deux series entrelacees.
 
@@ -52,16 +52,17 @@ def _tactical(**overrides: Any) -> Dict[str, Any]:
     data: Dict[str, Any] = {
         "shots_fired": 10, "hits": 6,
         "damage_dealt": 12, "damage_received": 7,
-        "units_lost": 2, "units_killed": 3, "total_enemies": 4, "total_ally_units": 5,
+        "units_lost": 2, "units_killed": 3, "total_enemy_units": 4, "total_ally_units": 5,
         "shoot_kills": 2, "melee_kills": 1,
         "shoot_value_killed": 200.0, "melee_value_killed": 100.0,
         "enemy_value_destroyed": 300.0, "ally_value_lost": 200.0,
         "total_ally_value": 1000.0, "total_enemy_value": 900.0,
         "initial_ally_models": 12, "initial_enemy_models": 15,
-        "surviving_ally_models": 7, "surviving_enemy_models": 9,
+        "models_lost": 5, "models_killed": 6,
         "valid_actions": 40, "invalid_actions": 5,
         "victory_points_diff_controlled_minus_opponent": 5.0,
         "victory_points_opponent_episode": 27.0,
+        "victory_points_controlled_episode": 32.0,
         "controlled_objective_samples": [2.0, 1.0, 2.0, 2.0],
         "opponent_objective_samples": [1.0, 2.0, 1.0, 1.0],
         "forced_unit_episode_has_controlled": 0,
@@ -72,9 +73,19 @@ def _tactical(**overrides: Any) -> Dict[str, Any]:
     return data
 
 
-def _tracker(tmp_path: Any) -> Tuple[W40KMetricsTracker, _RecordingWriter]:
-    """Vrai constructeur (pas ``__new__``) : un attribut retire du __init__ doit se voir ici."""
-    tracker = W40KMetricsTracker("ArmageddonAgent", log_dir=str(tmp_path), show_banner=False)
+def _tracker(tmp_path: Any, window: int = 1) -> Tuple[W40KMetricsTracker, _RecordingWriter]:
+    """Vrai constructeur (pas ``__new__``) : un attribut retire du __init__ doit se voir ici.
+
+    Les deux fenetres de lissage sont ramenees a ``window`` : ces tests portent sur
+    l'appariement tag <-> valeur, pas sur la taille des fenetres de production (500/100), qui
+    obligerait chaque cas a rejouer des centaines d'episodes. Les fenetres egales suppriment
+    le doublon ``_100ep``, donc les comptages d'occurrences restent lisibles. Le comportement
+    des fenetres, lui, a ses propres tests (``test_no_point_is_emitted_before...``).
+    """
+    tracker = W40KMetricsTracker(
+        "ArmageddonAgent", log_dir=str(tmp_path), show_banner=False,
+        perf_window=window, perf_window_fast=window,
+    )
     recording = _RecordingWriter()
     tracker.writer = recording
     tracker.episode_count = 1
@@ -89,8 +100,67 @@ def _episode(tracker: W40KMetricsTracker, tactical: Dict[str, Any]) -> None:
     """
     tracker.log_episode_end({
         "total_reward": 42.0, "episode_length": 100, "winner": 1, "controlled_player": 1,
+        "deployment_mode": None,
     })
     tracker.log_tactical_metrics(tactical)
+
+
+def test_no_point_is_emitted_before_the_window_is_full(tmp_path: Any) -> None:
+    """Une courbe de performance se tait tant que sa fenetre n'est pas pleine.
+
+    CE QUI A ETE MANQUE. Sous la fenetre, le lissage retournait la moyenne de TOUT
+    l'historique. Les 500 premiers points de chaque courbe etaient donc une moyenne
+    cumulative, qui converge en DESCENDANT depuis son echantillon de depart bruite : sur un
+    run de 1000 episodes, la moitie de la courbe etait une decroissance mecanique, lue comme
+    une degradation de l'agent. Aucune donnee ne la contredisait, puisque toutes les courbes
+    du dashboard portaient le meme artefact.
+
+    Le montage discrimine les deux formules : rewards 0, 0, 0, 30, 30 avec une fenetre de 3.
+      - moyenne de la fenetre (attendu)  : 10.0 puis 20.0 — et RIEN sur les deux premiers
+      - moyenne cumulative (le defaut)   : 0.0, 0.0, 0.0, 7.5, 12.0 — cinq points, tous faux
+    """
+    tracker, recording = _tracker(tmp_path, window=3)
+    for reward in (0.0, 0.0, 0.0, 30.0, 30.0):
+        tracker.log_episode_end({
+            "total_reward": reward, "episode_length": 100, "winner": 1, "controlled_player": 1,
+            "deployment_mode": None,
+        })
+
+    emitted = [
+        (value, step) for key, value, step in recording.scalars
+        if key == "00_critical/e_episode_reward_smooth"
+    ]
+    # `_tracker` demarre a episode_count=1 et log_episode_end incremente AVANT d'ecrire :
+    # les cinq episodes portent les steps 2 a 6, dont seuls les trois derniers sont emis.
+    assert [step for _value, step in emitted] == [4, 5, 6], (
+        "un point par episode a partir du troisieme, aucun avant"
+    )
+    assert [value for value, _step in emitted] == [
+        pytest.approx(0.0), pytest.approx(10.0), pytest.approx(20.0)
+    ]
+
+
+def test_each_perf_curve_is_doubled_by_a_reactive_window(tmp_path: Any) -> None:
+    """Chaque courbe de performance sort en DEUX exemplaires : fenetre de fond et `_Nep`.
+
+    Sans ce test, ramener les deux fenetres a la meme valeur — ce que font les autres cas de
+    ce fichier — supprimerait le doublon partout sans qu'une seule assertion ne bouge.
+    """
+    tracker, recording = _tracker(tmp_path, window=4)
+    tracker.PERF_WINDOW_FAST = 2
+    for _ in range(4):
+        _episode(tracker, _tactical())
+
+    keys = {key for key, _value, _step in recording.scalars}
+    for tag in (
+        "00_critical/e_episode_reward_smooth",   # historique complet
+        "00_critical/d_win_rate",                # historique complet
+        "01_VP/c_vp_bot",                        # _emit_game
+        "02_combat/e_value_killed_ratio",        # _emit_ratio
+        "02_combat/a_value_trade_ratio",         # rapport de deux moyennes
+    ):
+        assert tag in keys, f"{tag} manquant (fenetre de fond)"
+        assert f"{tag}_2ep" in keys, f"{tag}_2ep manquant (fenetre reactive)"
 
 
 def test_no_tag_is_written_twice_in_one_episode(tmp_path: Any) -> None:
@@ -113,7 +183,7 @@ def test_the_two_historical_duplicates_are_emitted_exactly_once(tmp_path: Any) -
 
     counts = Counter(key for key, _value, _step in recording.scalars)
     assert counts["game_critical/invalid_action_rate"] == 1
-    assert counts["0_combat/h_melee_model_kills"] == 1
+    assert counts["02_combat/h_melee_model_kills"] == 1
 
 
 def test_melee_kills_carries_this_episode_value_not_the_previous_one(tmp_path: Any) -> None:
@@ -122,12 +192,12 @@ def test_melee_kills_carries_this_episode_value_not_the_previous_one(tmp_path: A
     C'etait le second symptome du doublon : l'ecrivain supprime logguait avant l'append.
     Deux episodes de suite, avec des kills differents, pour que le decalage soit visible.
     """
-    tracker, recording = _tracker(tmp_path)
+    tracker, recording = _tracker(tmp_path, window=2)
     _episode(tracker, _tactical(melee_kills=0, shoot_kills=0))
     recording.scalars.clear()
     _episode(tracker, _tactical(melee_kills=4, shoot_kills=0))
 
-    melee = [value for key, value, _step in recording.scalars if key == "0_combat/h_melee_model_kills"]
+    melee = [value for key, value, _step in recording.scalars if key == "02_combat/h_melee_model_kills"]
     assert melee == [pytest.approx(2.0)], (
         "la courbe doit valoir la moyenne des DEUX episodes (0 puis 4), pas 0.0"
     )
@@ -157,42 +227,38 @@ def test_objective_curves_are_emitted_from_the_engine_samples(tmp_path: Any) -> 
     ))
 
     by_key = {key: value for key, value, _step in recording.scalars}
-    assert by_key["0_VP/e_objectives_held"] == pytest.approx(1.5)
-    assert by_key["0_VP/d_objectives_held_diff"] == pytest.approx(0.5)
+    assert by_key["01_VP/e_objectives_held"] == pytest.approx(1.5)
+    assert by_key["01_VP/d_objectives_held_diff"] == pytest.approx(0.5)
 
 
 def test_obj_rewards_equals_what_the_reward_calculator_actually_pays(tmp_path: Any) -> None:
-    """0_VP/f_obj_rewards = le montant REELLEMENT verse par tour, terme d'avance inclus.
+    """01_VP/f_obj_rewards = le montant REELLEMENT verse par tour.
 
-    La formule rejouee ici est celle de RewardCalculator._calculate_objective_reward_per_turn,
-    sur les memes echantillons (pris au meme instant que le versement). Sans le terme d'avance,
-    la courbe sous-estimerait le versement de moitie — c'est ce qu'elle faisait avant.
+    Le versement vaut `objective_reward_factor x VP marques` par construction
+    (RewardCalculator._calculate_objective_reward_per_turn) : la courbe se LIT donc sur les VP
+    de l'episode. Elle rejouait auparavant la formule du versement sur les echantillons — un
+    miroir de la formule du moteur, qui est devenu faux des que celle-ci est passee du lineaire
+    a l'escalier plafonne de la mission.
+
+    CONTROLE DISCRIMINANT : les echantillons d'objectifs sont volontairement INCOHERENTS avec
+    les VP fournis (4 tours a 1-3 objectifs ne peuvent pas produire 32 VP). Toute formule qui
+    les relirait donnerait autre chose que 96 — seule la lecture des VP passe.
     """
     from config_loader import get_config_loader
 
     cfg = get_config_loader().load_agent_rewards_config("ArmageddonAgent")["ArmageddonAgent"]
-    per_objective = float(cfg["objective_rewards"]["reward_per_objective"])
-    lead_reward = float(cfg["objective_rewards"]["reward_for_objective_lead"])
-    use_lead = bool(cfg["objective_rewards"]["use_objective_lead"])
-
-    # Donnees CHOISIES pour discriminer forfait et proportionnel : 1 seul tour d'avance mais
-    # +2 d'ecart cumule. Avec [2,3,1,2]/[2,1,2,1] les deux formules donnaient 20 par
-    # coincidence, et le controle passait dans les deux cas.
-    mine = [3.0, 1.0, 1.0, 1.0]
-    theirs = [1.0, 1.0, 1.0, 1.0]
-    expected = sum(per_objective * m for m in mine)
-    if use_lead:
-        turns_ahead = sum(1 for m, t in zip(mine, theirs) if m > t)
-        assert turns_ahead == 1 and (sum(mine) - sum(theirs)) == 2.0
-        expected += lead_reward * turns_ahead
+    factor = float(cfg["objective_rewards"]["objective_reward_factor"])
+    assert factor > 0.0, "facteur nul : le controle ne mesurerait rien"
 
     tracker, recording = _tracker(tmp_path)
     _episode(tracker, _tactical(
-        controlled_objective_samples=mine, opponent_objective_samples=theirs,
+        victory_points_controlled_episode=32.0,
+        controlled_objective_samples=[3.0, 1.0, 1.0, 1.0],
+        opponent_objective_samples=[1.0, 1.0, 1.0, 1.0],
     ))
 
     by_key = {key: value for key, value, _step in recording.scalars}
-    assert by_key["0_VP/f_obj_rewards"] == pytest.approx(expected)
+    assert by_key["01_VP/f_obj_rewards"] == pytest.approx(factor * 32.0)
 
 
 def test_a_missing_objective_samples_key_raises(tmp_path: Any) -> None:
@@ -218,5 +284,36 @@ def test_an_empty_sample_list_stays_silent_without_raising(tmp_path: Any) -> Non
     ))
 
     keys = {key for key, _value, _step in recording.scalars}
-    assert "0_VP/e_objectives_held" not in keys
-    assert "0_VP/d_objectives_held_diff" not in keys
+    assert "01_VP/e_objectives_held" not in keys
+    assert "01_VP/d_objectives_held_diff" not in keys
+
+
+def test_value_trade_ratio_is_the_ratio_of_the_two_smoothed_totals(tmp_path: Any) -> None:
+    """02_combat/a_value_trade_ratio = VALUE detruite cumulee / VALUE perdue cumulee.
+
+    Le denominateur de cette courbe est un RESULTAT d'episode, pas une constante de scenario :
+    lisser le rapport par episode obligerait a ecarter une population entiere — les episodes
+    sans perte (les MEILLEURS) si on garde le rapport, les episodes sans destruction (les
+    PIRES) si on y verse un 0.0. Les deux biaisent, en sens contraire.
+
+    Le montage discrimine les trois formules : detruit 300/perdu 200 puis detruit 0/perdu 100.
+      - rapport des sommes (attendu)     : 300 / 300 = 1.0
+      - moyenne des rapports par episode : (1.5 + 0.0) / 2 = 0.75
+      - ancienne garde (les deux > 0)    : 1.5 (le second episode n'existe pas)
+    """
+    tracker, recording = _tracker(tmp_path, window=2)
+    _episode(tracker, _tactical(enemy_value_destroyed=300.0, ally_value_lost=200.0))
+    recording.scalars.clear()
+    _episode(tracker, _tactical(enemy_value_destroyed=0.0, ally_value_lost=100.0))
+
+    ratios = [v for key, v, _step in recording.scalars if key == "02_combat/a_value_trade_ratio"]
+    assert ratios == [pytest.approx(1.0)]
+
+
+def test_value_trade_ratio_stays_silent_while_nothing_has_been_lost(tmp_path: Any) -> None:
+    """Aucune perte sur toute la fenetre : il n'y a pas de rapport a afficher — surtout pas 0."""
+    tracker, recording = _tracker(tmp_path)
+    _episode(tracker, _tactical(enemy_value_destroyed=120.0, ally_value_lost=0.0))
+
+    keys = {key for key, _value, _step in recording.scalars}
+    assert "02_combat/a_value_trade_ratio" not in keys

@@ -255,10 +255,14 @@ l'évaluation, elle, impose toujours une phase de déploiement. Sur les chemins 
 fournissent qu'un fragment de config (`observation_params`) et n'ont pas d'épisodes à ramper,
 l'absence reste légitime et ne lève pas.
 
-Réglage de référence des cinq profils `ArmageddonAgent` : `0.0 → 0.8`, `linear`,
-`freeze_after_progress: 1.0`. Chaque bloc porte un champ `justification` (même convention que
-`observation_params.justification`). Verrou : `tests/unit/engine/test_deployment_mode_schedule.py`
-lit le vrai fichier et vérifie les cinq profils.
+Réglage de référence des cinq profils `ArmageddonAgent` (2026-08-01) : `0.3 → 0.8`, `linear`,
+`freeze_after_progress: 0.5`. **Le gel arrive avant la fin de la rampe**, donc `active_ratio_end`
+n'est jamais atteint : la part réellement plafond est `start + (end − start) × freeze` = **0.55**.
+C'est ce plafond effectif, et non `active_ratio_end`, qui dit quelle proportion des épisodes de
+fin de run se joue en déploiement actif. Chaque bloc porte un champ `justification` (même
+convention que `observation_params.justification`). Verrou :
+`tests/unit/engine/test_deployment_mode_schedule.py` dérive la référence du profil `x1`, exige que
+les quatre autres l'égalent, et vérifie que le plafond effectif reste ≥ 0.5.
 
 ---
 

@@ -116,7 +116,7 @@ def test_timeout_logs_a_counter_and_no_win_rate_metric(monkeypatch: pytest.Monke
 
     callback._apply_eval_results(_results(failed=500, timeout=500, error=0), eval_marker=2000)
 
-    assert scalars == [("0_critical/0_eval_timeout_episodes", 500.0, 2000)]
+    assert scalars == [("00_critical/0_eval_timeout_episodes", 500.0, 2000)]
 
 
 def test_clean_eval_still_reaches_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:

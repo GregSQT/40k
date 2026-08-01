@@ -4,7 +4,56 @@ from typing import Any, Dict, List, Tuple
 import pytest
 
 import ai.metrics_tracker as mt
-from ai.metrics_tracker import TrainingMonitor, W40KMetricsTracker, create_metrics_tracker
+from ai.metrics_tracker import (
+    TrainingMonitor,
+    W40KMetricsTracker,
+    create_metrics_tracker,
+    resolve_perf_windows,
+    validate_perf_windows,
+)
+from config_loader import get_config_loader
+
+ARMAGEDDON_PROFILES = ("x1", "x5_append", "x5_new", "x1_debug", "x5_debug")
+
+
+def test_every_training_profile_carries_its_smoothing_windows() -> None:
+    """Les CINQ profils resolvent leurs fenetres de lissage, via _training_common.json.
+
+    Le test lit le VRAI fichier de config, pas une doublure : une section oubliee dans un
+    profil ne se verrait qu'au lancement du run concerne, c'est-a-dire apres coup. Meme
+    forme de verrou que tests/unit/engine/test_deployment_mode_schedule.py, et pour la meme
+    raison — c'est deja par ce trou que deux profils avaient diverge en silence.
+
+    Le doublon reactif est DESACTIVE depuis 2026-07-31 (`perf_window_fast == perf_window`) :
+    les 21 courbes `_250ep` doublaient les dashboards 00_critical/01_VP/02_combat sans etre
+    lues. Le test verifie donc la coherence des deux fenetres, plus leur ecart.
+    """
+    loader = get_config_loader()
+    for profile in ARMAGEDDON_PROFILES:
+        training_config = loader.load_agent_training_config("ArmageddonAgent", profile)
+        window, fast = resolve_perf_windows(training_config)
+        assert fast <= window, f"{profile}: la fenetre reactive ne peut pas depasser le fond"
+        assert window >= 100, f"{profile}: fenetre de fond trop courte pour trancher une tendance"
+
+
+def test_smoothing_windows_are_required_not_defaulted() -> None:
+    """Une section absente ou incomplete LEVE — jamais de repli silencieux sur 500/250.
+
+    Un defaut muet ici rendrait le reglage inoperant sans le dire : le run afficherait des
+    courbes lissees autrement que ce que le config demande, et rien ne le signalerait.
+    """
+    with pytest.raises(Exception):
+        resolve_perf_windows({})
+    with pytest.raises(Exception):
+        resolve_perf_windows({"metrics_smoothing": {"perf_window": 500}})
+    with pytest.raises(TypeError):
+        resolve_perf_windows({"metrics_smoothing": 500})
+    with pytest.raises(ValueError):
+        validate_perf_windows(100, 250)  # reactive plus lisse que le fond
+    with pytest.raises(ValueError):
+        validate_perf_windows(0, 0)
+    # Egales : reglage legitime, le doublon reactif est simplement desactive.
+    assert validate_perf_windows(500, 500) == (500, 500)
 
 
 class _DummyWriter:
@@ -51,6 +100,11 @@ def _dw(t: W40KMetricsTracker) -> _DummyWriter:
 def _tracker_stub() -> W40KMetricsTracker:
     t = W40KMetricsTracker.__new__(W40KMetricsTracker)
     t.writer = _DummyWriter()
+    # Fenetres de lissage ramenees a 1 : ces tests verifient qu'un chemin d'execution emet la
+    # bonne courbe, pas la taille des fenetres de production (500/100), qui les obligerait a
+    # rejouer des centaines d'episodes. Egales, elles suppriment aussi le doublon `_100ep`.
+    t.PERF_WINDOW = 1
+    t.PERF_WINDOW_FAST = 1
     t.episode_count = 12
     t.step_count = 0
     t.win_rate_window = deque([1.0] * 12, maxlen=100)
@@ -66,13 +120,6 @@ def _tracker_stub() -> W40KMetricsTracker:
         "clip_fractions": [0.2] * 12,
         "approx_kls": [0.01] * 12,
         "explained_variances": [],
-    }
-    t.reward_components = {
-        "base_actions": [],
-        "result_bonuses": [],
-        "objective": [],
-        "situational": [],
-        "penalties": [],
     }
     t.compliance_data = {
         "units_per_step": [],
@@ -117,25 +164,21 @@ def _tracker_stub() -> W40KMetricsTracker:
     }
     t.latest_gradient_norm = None
     t.bot_eval_combined = None
-    t.latest_value_trade_ratio = None
-    t.value_trade_ratio_history = []
     # t.episode_tactical_data occupait cette place : supprime du tracker avec son unique
     # lecteur (le 2e ecrivain de invalid_action_rate). Le reposer ici ferait passer un stub
     # pour un etat valide qui ne l'est plus.
-    # Montants lus de la config d'agent par __init__ : d_obj_rewards rejoue le versement du
-    # reward d'objectif par tour, terme d'avance inclus.
-    t.reward_per_objective = 10.0
-    t.use_objective_lead = True
-    t.reward_for_objective_lead = 10.0
-    t._episodes_in_window = 0
-    t._game_history = {
-        'vp_diff': [], 'vp_bot': [], 'objectives_held': [],
-        'objectives_held_diff': [],
-        'kill_rewards': [], 'obj_rewards': [],
-        'models_killed_ratio': [], 'models_lost_ratio': [],
-        'value_killed_ratio': [], 'value_lost_ratio': [],
-        'units_killed_ratio': [], 'units_lost_ratio': [],
+    # Lu de la config d'agent par __init__ : f_obj_rewards vaut ce facteur fois les VP marques.
+    t.objective_reward_factor = 3.0
+    t._game_history = {k: [] for k in W40KMetricsTracker.GAME_HISTORY_KEYS}
+    # Ventilation par mode de deploiement : etat construit depuis les constantes de CLASSE, pas
+    # recopie, pour que l'ajout d'une serie ne fasse pas tomber ces tests sur un detail sans
+    # rapport avec ce qu'ils verifient (meme raison que GAME_HISTORY_KEYS ci-dessus).
+    t._deploy_history = {
+        series: {mode: [] for mode in W40KMetricsTracker.DEPLOY_MODES}
+        for series in W40KMetricsTracker.DEPLOY_SPLIT_SERIES
     }
+    t._deploy_active_flags = []
+    t._episode_deploy_mode = None
     t.seat_aware = {
         "episodes_agent_p1": 0,
         "episodes_agent_p2": 0,
@@ -195,33 +238,67 @@ def test_log_holdout_and_scenario_split_scores() -> None:
     assert "bot_split/hard_bot_1" in keys2
 
 
-def test_log_reward_decomposition_validation_and_trimming() -> None:
+def _reward_data(**overrides: Any) -> Dict[str, Any]:
+    """Ventilation complete d'un episode, telle que le callback l'emet."""
+    data: Dict[str, Any] = {
+        "base_actions": 1.0, "result_bonuses": 0.5, "objective": 0.2,
+        "situational": 0.1, "penalties": -0.1,
+        "base_actions_positive": 1.0, "result_bonuses_positive": 0.5,
+        "objective_positive": 0.2,
+    }
+    data.update(overrides)
+    return data
+
+
+def test_log_reward_decomposition_validation() -> None:
     t = _tracker_stub()
     with pytest.raises(KeyError, match=r"Missing required field"):
         t.log_reward_decomposition({"base_actions": 1})
 
-    with pytest.raises(TypeError, match=r"must be numeric"):
+    # Les flux positifs sont EXIGES au meme titre que les totaux : sans eux la part
+    # d'objectif ne serait calculable que sur des totaux nettes, ce qui la fausse.
+    with pytest.raises(KeyError, match=r"base_actions_positive"):
         t.log_reward_decomposition(
             {
-                "base_actions": "x",
-                "result_bonuses": 1,
-                "objective": 1,
-                "situational": 1,
-                "penalties": 1,
+                "base_actions": 1, "result_bonuses": 1, "objective": 1,
+                "situational": 1, "penalties": 1,
             }
         )
 
-    for _ in range(105):
-        t.log_reward_decomposition(
-            {
-                "base_actions": 1.0,
-                "result_bonuses": 0.5,
-                "objective": 0.2,
-                "situational": 0.1,
-                "penalties": -0.1,
-            }
-        )
-    assert len(t.reward_components["base_actions"]) == 100
+    with pytest.raises(TypeError, match=r"must be numeric"):
+        t.log_reward_decomposition(_reward_data(base_actions="x"))
+
+
+def test_objective_share_uses_positive_flows_not_netted_totals() -> None:
+    """La part d'objectif se calcule sur les flux POSITIFS, jamais sur les totaux nettes.
+
+    Montage : un agent qui tire beaucoup ET attend beaucoup. `base_actions` vaut +18 de
+    combat et -20 d'attente, soit un net de -2. Filtrer les totaux sur leur signe — ce que
+    faisait la version precedente — jetait les 18 points entiers du denominateur et donnait
+    10/(10+4) = 0,71 au lieu de 10/(10+18+4) = 0,3125.
+    """
+    t = _tracker_stub()
+    t.log_reward_decomposition(_reward_data(
+        base_actions=-2.0, base_actions_positive=18.0,
+        result_bonuses=4.0, result_bonuses_positive=4.0,
+        objective=10.0, objective_positive=10.0,
+    ))
+
+    shares = [v for key, v, _ in _dw(t).scalars if key == "reward/objective_share"]
+    assert shares == [pytest.approx(10.0 / 32.0)]
+
+
+def test_objective_share_stays_silent_without_any_positive_reward() -> None:
+    """Aucune recompense positive : il n'y a pas de part a mesurer, surtout pas un 0.0."""
+    t = _tracker_stub()
+    t.log_reward_decomposition(_reward_data(
+        base_actions=-3.0, base_actions_positive=0.0,
+        result_bonuses=0.0, result_bonuses_positive=0.0,
+        objective=0.0, objective_positive=0.0,
+    ))
+
+    keys = [key for key, _v, _ in _dw(t).scalars]
+    assert "reward/objective_share" not in keys
 
 
 # test_log_position_score_and_close occupait cette place. Il verrouillait log_position_score et
@@ -237,14 +314,19 @@ def test_create_metrics_tracker_factory(monkeypatch: pytest.MonkeyPatch) -> None
     created = {}
 
     class DummyTracker:
-        def __init__(self, agent_key, log_dir):
+        def __init__(self, agent_key, log_dir, *, perf_window, perf_window_fast):
             created["agent_key"] = agent_key
             created["log_dir"] = log_dir
+            created["windows"] = (perf_window, perf_window_fast)
 
     monkeypatch.setattr(mt, "W40KMetricsTracker", DummyTracker)
-    tracker = create_metrics_tracker("CoreAgent", {"tensorboard_log": "/tmp/tb"})
+    tracker = create_metrics_tracker("CoreAgent", {
+        "tensorboard_log": "/tmp/tb",
+        "metrics_smoothing": {"perf_window": 400, "perf_window_fast": 200},
+    })
     assert created["agent_key"] == "CoreAgent"
     assert created["log_dir"] == "/tmp/tb"
+    assert created["windows"] == (400, 200), "les fenetres du config doivent etre transmises"
     assert isinstance(tracker, DummyTracker)
 
 
@@ -258,6 +340,7 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
             "winner": 1,
             "episode_length": 20,
             "controlled_player": 1,
+            "deployment_mode": None,
         }
     )
     assert t.episode_count == 13
@@ -268,7 +351,7 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
         {
             "shots_fired": 4,
             "hits": 2,
-            "total_enemies": 2,
+            "total_enemy_units": 2,
             "units_killed": 1,
             "damage_dealt": 3,
             "damage_received": 1,
@@ -280,8 +363,8 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
             "total_enemy_value": 16.0,
             "initial_ally_models": 4,
             "initial_enemy_models": 4,
-            "surviving_ally_models": 3,
-            "surviving_enemy_models": 2,
+            "models_lost": 1,
+            "models_killed": 2,
             "valid_actions": 8,
             "invalid_actions": 2,
             "wait_actions": 1,
@@ -294,12 +377,15 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
             # etat corrompu, plus une courbe silencieusement muette.
             "controlled_objective_samples": [2.0, 1.0],
             "opponent_objective_samples": [1.0, 1.0],
+            # f_obj_rewards vaut `objective_reward_factor x VP marques` : la courbe se lit sur
+            # les VP de l'episode au lieu de rejouer la formule du versement.
+            "victory_points_controlled_episode": 20.0,
         }
     )
     keys = [k for k, _, _ in _dw(t).scalars]
     assert "game_tactical/shooting_accuracy" in keys
-    assert "0_VP/e_objectives_held" in keys
-    assert "combat/h_value_trade_ratio" in keys
+    assert "01_VP/e_objectives_held" in keys
+    assert "02_combat/a_value_trade_ratio" in keys
     assert "forcing/episodes_with_forced_unit_ratio" in keys
 
 
@@ -353,8 +439,8 @@ def test_compliance_mapper_phase_and_training_metrics_paths() -> None:
         step=99,
     )
     keys = [k for k, _, _ in _dw(t).scalars]
-    assert "0_critical/b_worst_bot_score" in keys
-    assert "0_critical/a_bot_eval_combined" in keys
+    assert "00_critical/b_worst_bot_score" in keys
+    assert "00_critical/a_bot_eval_combined" in keys
 
 
 def test_log_episode_end_rejects_invalid_controlled_player() -> None:
@@ -366,6 +452,7 @@ def test_log_episode_end_rejects_invalid_controlled_player() -> None:
                 "winner": 1,
                 "episode_length": 10,
                 "controlled_player": 3,
+                "deployment_mode": None,
             }
         )
 
@@ -375,7 +462,7 @@ def test_log_tactical_metrics_forcing_validation_errors() -> None:
     base = {
         "shots_fired": 1,
         "hits": 1,
-        "total_enemies": 1,
+        "total_enemy_units": 1,
         "units_killed": 1,
         "damage_dealt": 1,
         "damage_received": 1,
@@ -387,14 +474,15 @@ def test_log_tactical_metrics_forcing_validation_errors() -> None:
         "total_enemy_value": 10.0,
         "initial_ally_models": 1,
         "initial_enemy_models": 1,
-        "surviving_ally_models": 1,
-        "surviving_enemy_models": 1,
+        "models_lost": 0,
+        "models_killed": 0,
         "valid_actions": 1,
         "invalid_actions": 0,
         "wait_actions": 0,
         "victory_points_diff_controlled_minus_opponent": 0.0,
         "controlled_objective_samples": [1.0],
         "opponent_objective_samples": [1.0],
+        "victory_points_controlled_episode": 5.0,
     }
 
     with pytest.raises(TypeError, match=r"forced_unit_counts_controlled.*dict"):

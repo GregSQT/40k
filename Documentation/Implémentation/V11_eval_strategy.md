@@ -106,8 +106,9 @@ point de vue de l'apprentissage.
 **Déjà implémenté, à paramétrer et non à développer — mais UNIQUEMENT sur le chemin rotation**
 (`--scenario bot`, cf. §10.4) :
 - `training_config.bot_training.ratios` — mélange pondéré de bots
-  (`_build_training_bots_from_config`, train.py ~L91 ; 7 classes supportées, 6 pondérées dans
-  la config actuelle — `defensive_smart` n'y est pas). Configuré dans les 5 phases.
+  (`_build_training_bots_from_config`, train.py ~L91 ; 5 classes supportées, toutes pondérées
+  dans la config actuelle depuis la refonte du panel du 2026-07-30 — `aggressive_smart` et
+  `defensive_smart` ont été supprimés). Configuré dans les 5 phases.
 - `training_config.opponent_mix` — self-play progressif : `self_play_ratio_start` →
   `self_play_ratio_end`, `warmup_episodes`, snapshot publié par
   `_publish_self_play_snapshot` (train.py ~L2854) et rechargé par mtime dans
@@ -173,9 +174,9 @@ dans `make_training_env`, qui accepte DÉJÀ ces paramètres : seul l'appel de
 
 **Constat (historique)** : les bots d'évaluation viennent de `callback_params.bot_eval_weights`
 (`_load_bot_eval_params`, bot_evaluation.py ~L168 ; itération sur `eval_weights.keys()` ~L886).
-Config actuelle, identique dans les 5 phases : `{greedy, defensive, control, aggressive_smart,
-adaptive}` — un **sous-ensemble strict des bots d'entraînement** (`bot_training.ratios` = les
-mêmes 5 + `random`). L'agent n'est donc évalué QUE contre des adversaires rencontrés à
+Config actuelle, identique dans les 5 phases : `{control, adaptive, greedy, defensive}` (+
+`tactical` à poids nul, le holdout) — un **sous-ensemble strict des bots d'entraînement**
+(`bot_training.ratios` = les mêmes 4 + `random`). L'agent n'est donc évalué QUE contre des adversaires rencontrés à
 l'entraînement : ce win-rate mesure **l'exploitation apprise, pas la compétence**, et sera
 systématiquement optimiste par rapport au comportement face à un humain.
 

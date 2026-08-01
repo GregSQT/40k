@@ -37,9 +37,7 @@
       "draw": 0.0
     },
     "objective_rewards": {
-      "reward_per_objective": 10.0,
-      "reward_for_objective_lead": 10.0,
-      "use_objective_lead": true,
+      "objective_reward_factor": 3.0,
       "reward_per_objective_turn5": 0.0,
       "on_objective_bonus": 1.0
     },

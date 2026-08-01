@@ -1,4 +1,4 @@
-"""Tests — echantillonnage des objectifs tenus (0_game/e_objectives_held, f_objectives_held_diff).
+"""Tests — echantillonnage des objectifs tenus (01_VP/e_objectives_held, d_objectives_held_diff).
 
 CE QUI A ETE MANQUE, ET POURQUOI AUCUN TEST NE L'A VU.
 
@@ -130,9 +130,9 @@ def _stub_rewards(monkeypatch: pytest.MonkeyPatch) -> None:
     l'ancienne implementation ne pouvait pas faire.
     """
     monkeypatch.setattr(RewardCalculator, "calculate_reward", lambda self, *a, **kw: 0.0)
-    # compute_zone_intent_shaping est appele DIRECTEMENT par la phase command (hors
+    # settle_zone_intent_declaration est appele DIRECTEMENT par la phase command (hors
     # calculate_reward) et exige une config d'agent complete : encore de la recompense.
-    monkeypatch.setattr(RewardCalculator, "compute_zone_intent_shaping", lambda self, *a, **kw: 0.0)
+    monkeypatch.setattr(RewardCalculator, "settle_zone_intent_declaration", lambda self, *a, **kw: 0.0)
     monkeypatch.setattr(
         W40KEngine, "_build_observation",
         lambda self, *_a, **_k: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET),

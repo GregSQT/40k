@@ -4,10 +4,20 @@ reward_calculator.py - Reward calculation system
 """
 
 from typing import Dict, List, Any, Optional
-from engine.macro_intents import INTENT_DEFEND, INTENT_INVADE, get_objective_control
+from engine.macro_intents import (
+    INTENT_DEFEND,
+    INTENT_INVADE,
+    get_objective_control,
+    get_objective_control_for_player,
+)
 from engine.combat_utils import expected_dice_value
 from engine.phase_handlers.shared_utils import is_unit_alive
 from engine.game_utils import get_unit_by_id
+from engine.game_state import (
+    iter_living_model_footprints,
+    objective_hex_sets,
+    primary_objective_points,
+)
 from shared.data_validation import require_key
 
 class RewardCalculator:
@@ -212,7 +222,14 @@ class RewardCalculator:
             if game_state.get("game_over", False):
                 situational_reward = self._get_situational_reward(game_state)
                 reward_breakdown['situational'] = situational_reward
-                reward_breakdown['total'] = situational_reward + defensive_penalty
+                # `objective_turn_reward` COMPRIS, comme sur la sortie jumelle deux lignes plus
+                # bas. L'omettre perdait les points pour de bon : le tour a deja ete consomme
+                # (`objective_rewarded_turns`) et `breakdown['objective']` deja credite — la
+                # ventilation annoncait donc une part que le total ne versait pas. Meme defaut
+                # que sur les trois sorties anticipees du tir, corrigees en 9b7d0aa0.
+                reward_breakdown['total'] = (
+                    situational_reward + defensive_penalty + objective_turn_reward
+                )
                 game_state['last_reward_breakdown'] = reward_breakdown
                 return reward_breakdown['total']
 
@@ -656,30 +673,6 @@ class RewardCalculator:
             game_state['last_reward_breakdown'] = reward_breakdown
             return wait_reward
 
-        elif action_type == "squad_shoot":
-            shoot_result = result.get("shoot_result", {})  # get allowed
-            attacks_made = shoot_result.get("attacks_made", 0)  # get allowed
-            if attacks_made == 0:
-                reward_breakdown['total'] = objective_turn_reward
-                game_state['last_reward_breakdown'] = reward_breakdown
-                return objective_turn_reward
-            unit_rewards = self._get_unit_reward_config(acting_unit)
-            base_actions = require_key(unit_rewards, "base_actions")
-            result_bonuses = unit_rewards.get("result_bonuses", {})  # get allowed
-            base = float(base_actions.get("ranged_attack", 0.0))
-            kill_bonus = float(result_bonuses.get("kill_target", 0.0)) * shoot_result.get("models_killed", 0)  # get allowed
-            calculated = base + kill_bonus + objective_turn_reward
-            reward_breakdown['base_actions'] = base
-            reward_breakdown['result_bonuses'] = kill_bonus
-            reward_breakdown['total'] = calculated
-            if game_state.get("game_over", False):
-                situational_reward = self._get_situational_reward(game_state)
-                reward_breakdown['situational'] = situational_reward
-                calculated += situational_reward
-                reward_breakdown['total'] = calculated
-            game_state['last_reward_breakdown'] = reward_breakdown
-            return calculated
-
         elif action_type == "squad_charge":
             charge_succeeded = result.get("charge_succeeded", False)
             if not charge_succeeded:
@@ -714,35 +707,6 @@ class RewardCalculator:
                 reward_breakdown['total'] = charge_reward
             game_state['last_reward_breakdown'] = reward_breakdown
             return charge_reward
-
-        elif action_type == "squad_fight":
-            target_squad_id = result.get("target_squad_id")
-            if target_squad_id is None:
-                raise ValueError(f"squad_fight missing target_squad_id: {result}")
-            target = get_unit_by_id(str(target_squad_id), game_state)
-            if not target:
-                raise ValueError(f"Fight target not found: {target_squad_id}")
-            enriched_target = self._enrich_unit_for_reward_mapper(target) if is_unit_alive(str(target["id"]), game_state) else target
-            all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit, game_state)]
-            fight_result = result.get("fight_result", {})  # get allowed
-            fight_reward = reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets, game_state) + objective_turn_reward
-            reward_breakdown['base_actions'] = fight_reward - objective_turn_reward
-            reward_breakdown['total'] = fight_reward
-            models_killed = fight_result.get("models_killed", 0)  # get allowed
-            if models_killed > 0:
-                unit_rewards = self._get_unit_reward_config(acting_unit)
-                result_bonuses_cfg = require_key(unit_rewards, "result_bonuses")
-                kill_bonus = float(result_bonuses_cfg.get("kill_target", 0.0))
-                fight_reward += kill_bonus
-                reward_breakdown['result_bonuses'] = kill_bonus
-                reward_breakdown['total'] = fight_reward
-            if game_state.get("game_over", False):
-                situational_reward = self._get_situational_reward(game_state)
-                reward_breakdown['situational'] = situational_reward
-                fight_reward += situational_reward
-                reward_breakdown['total'] = fight_reward
-            game_state['last_reward_breakdown'] = reward_breakdown
-            return fight_reward
 
         # NO FALLBACK - Raise error to identify missing action types
         raise ValueError(f"Unhandled action type '{action_type}' in _calculate_reward. Result: {result}")
@@ -993,11 +957,8 @@ class RewardCalculator:
             return 0.0
 
         unit_rewards = self._get_unit_reward_config(acting_unit)
-        if "objective_rewards" not in unit_rewards:
-            raise KeyError("Unit rewards missing required 'objective_rewards' section")
-        objective_rewards = unit_rewards["objective_rewards"]
-        if "reward_per_objective" not in objective_rewards:
-            raise KeyError("Objective rewards missing required 'reward_per_objective' value")
+        objective_rewards = require_key(unit_rewards, "objective_rewards")
+        objective_reward_factor = float(require_key(objective_rewards, "objective_reward_factor"))
 
         # LECTURE PURE de l'etat 14.02, et non `state_manager.count_controlled_objectives` :
         # celui-la RECALCULE le controle et REECRIT `objective_controllers`. Tant que cette
@@ -1009,32 +970,29 @@ class RewardCalculator:
         # la phase command : le reward et les VP partent du MEME comptage, par construction,
         # sans second calcul qui pourrait diverger (methode de controle, egalites).
         objective_controllers = require_key(game_state, "objective_controllers")
+        opponent_player = 2 if controlled_player == 1 else 1
         controlled_objectives = sum(
             1 for controller in objective_controllers.values() if controller == controlled_player
+        )
+        opponent_objectives = sum(
+            1 for controller in objective_controllers.values() if controller == opponent_player
         )
         # L'echantillonnage des objectifs tenus (controlled/opponent_objective_samples_*)
         # occupait cette place : une MESURE branchee sur ce calcul de RECOMPENSE, donc soumise a
         # ses gardes de sortie. Il vit desormais dans
         # GameStateManager._apply_primary_objective_scoring_single, au moment exact ou les VP
         # sont attribues (meme instant que la lecture ci-dessus).
-        reward_per_objective = objective_rewards["reward_per_objective"]
-        total_reward = reward_per_objective * controlled_objectives
 
-        if "use_objective_lead" in objective_rewards and objective_rewards["use_objective_lead"] is True:
-            if "reward_for_objective_lead" not in objective_rewards:
-                raise KeyError("Objective rewards missing required 'reward_for_objective_lead' value")
-            opponent_player = 2 if int(controlled_player) == 1 else 1
-            opponent_objectives = sum(
-                1 for controller in objective_controllers.values() if controller == opponent_player
-            )
-            # FORFAIT « j'en tiens PLUS que lui », et non `lead * (mes objectifs - les siens)`.
-            # La regle de score du primaire qui correspond (`control_more_than_opponent`) est un
-            # forfait : 5 VP, que l'avance soit de 1 ou de 4. La version proportionnelle payait
-            # +2x le montant pour une avance de 2 — donc un signal que le jeu ne rend pas — et
-            # surtout elle facturait -1x le montant en cas de retard, ajoutant une PENALITE que
-            # ni la config ni la regle ne prevoient (le retard coute deja les VP non marques).
-            if controlled_objectives > opponent_objectives:
-                total_reward += float(objective_rewards["reward_for_objective_lead"])
+        # MULTIPLE EXACT DES VP DU TOUR, et non une formule propre a la recompense.
+        # `reward_per_objective * mes_objectifs` (+ un forfait d'avance) etait LINEAIRE alors que
+        # la mission est un ESCALIER plafonne : tenir 3, 4 ou 5 objectifs rapporte exactement
+        # autant que 2 (5 VP si >=1, 5 si >=2, 5 si j'en tiens plus, plafond 15). Le reward
+        # payait 10 de plus par zone supplementaire — un signal que le jeu ne rend jamais, qui
+        # pousse a s'etaler au lieu de consolider et de PRIVER l'adversaire. Un seul facteur
+        # d'echelle demeure : la forme appartient a la mission.
+        total_reward = objective_reward_factor * primary_objective_points(
+            scoring_cfg, controlled_objectives, opponent_objectives
+        )
 
         objective_rewarded_turns.add(reward_key)
 
@@ -1289,34 +1247,63 @@ class RewardCalculator:
         # choc rapporte, alors que le decompte moteur l ignore entierement.
         if bool(require_key(unit, "battle_shocked")):
             return 0.0
-        to_col = result.get("toCol")
-        to_row = result.get("toRow")
-        if to_col is None or to_row is None:
+        # `toCol`/`toRow` ne servent plus a LOCALISER l'unite, seulement a savoir qu'une
+        # destination a ete jouee : les chemins qui n'en portent pas (activation sans
+        # deplacement) ne doivent rien payer. Les appelants pile-in les fournissent
+        # explicitement pour cette raison.
+        if result.get("toCol") is None or result.get("toRow") is None:
             return 0.0
         unit_rewards = self._get_unit_reward_config(unit)
-        if "objective_rewards" not in unit_rewards or "on_objective_bonus" not in unit_rewards["objective_rewards"]:
-            raise KeyError("Unit rewards missing required 'on_objective_bonus' in 'objective_rewards'")
-        on_objective_bonus = float(unit_rewards["objective_rewards"]["on_objective_bonus"])
-        objectives = require_key(game_state, "objectives")
-        for zone_idx, obj in enumerate(objectives):
-            for h in obj["hexes"]:
-                h_col = int(h["col"]) if isinstance(h, dict) else int(h[0])
-                h_row = int(h["row"]) if isinstance(h, dict) else int(h[1])
-                if h_col == int(to_col) and h_row == int(to_row):
-                    if get_objective_control(zone_idx, game_state) < 1.0:
-                        return on_objective_bonus
+        objective_rewards = require_key(unit_rewards, "objective_rewards")
+        on_objective_bonus = float(require_key(objective_rewards, "on_objective_bonus"))
+
+        # LECTURE PAR FIGURINE (14.02), et non « l'ancre d'escouade est EGALE a un hexe
+        # d'objectif ». Deux erreurs cumulees dans la version precedente : l'ancre n'est pas une
+        # figurine (une escouade etalee couvre la zone sans que son ancre y soit, et l'inverse),
+        # et l'egalite de centre ignore l'EMPREINTE DE SOCLE, alors que le decompte de controle
+        # du meme moteur (`sum_objective_control_oc_multi`) compte une figurine des qu'une case
+        # de son socle recouvre la zone. Ce bonus paie la progression vers un controle : il doit
+        # se juger comme le controle lui-meme, par le meme lecteur
+        # (`iter_living_model_footprints` / `objective_hex_sets`) que `unit_is_within_objective`.
+        # L'ordre des zones est celui de `game_state["objectives"]`, donc `zone_idx` designe le
+        # meme objectif ici et dans `get_objective_control`.
+        unit_id = str(require_key(unit, "id"))
+        for zone_idx, zone in enumerate(objective_hex_sets(game_state)):
+            in_zone = any(
+                not footprint.isdisjoint(zone)
+                for footprint in iter_living_model_footprints(game_state, unit_id)
+            )
+            if in_zone and get_objective_control(zone_idx, game_state) < 1.0:
+                return on_objective_bonus
         return 0.0
 
-    def compute_zone_intent_shaping(self, game_state: Dict[str, Any]) -> float:
+    def settle_zone_intent_declaration(
+        self, game_state: Dict[str, Any], declaration: Dict[str, Any], player: int
+    ) -> float:
         """
-        Compute zone intent shaping reward based on current zone intents and objective control.
+        Solde une declaration d'intents contre le controle d'objectif OBTENU.
 
-        Called once per command phase, stored in _pending_zone_shaping, added to the first
-        non-zone-intent action reward of the turn.
+        POURQUOI CE N'EST PLUS EVALUE A LA DECLARATION. La version precedente
+        (``compute_zone_intent_shaping``) lisait ``get_objective_control`` en COMMAND PHASE,
+        c'est-a-dire au moment meme ou l'agent declarait ses intents — donc avant qu'il ait joue
+        son tour, et sur un controle fige a la fin du tour PRECEDENT (regle 14.02 : le controle
+        n'est reevalue qu'aux frontieres de phase/tour). Le versement etait entierement
+        determine par l'etat herite : declarer DEFEND sur une zone deja tenue rapportait le
+        bonus que l'agent la defende ou l'abandonne ensuite.
 
-        Returns:
-          +0.05 per DEFEND zone where the objective is currently held (controlled by current_player)
-          -0.05 per INVADE zone where the objective is lost (controlled by opponent)
+        Ce terme recompensait donc la DESCRIPTION de l'etat, pas sa TRANSFORMATION : la
+        politique qui le maximise recopie ``objective_controllers`` en intents sans changer une
+        seule action tactique. Pire, cette politique creuse produit exactement la signature
+        qu'une bonne politique produirait sur ``00_critical/o_intent_control_dependency`` — un
+        conditionnement parfait entre intent et controle, pour un comportement vide.
+
+        L'intent est donc paye sur son RESULTAT : la zone a-t-elle fini le tour dans l'etat que
+        l'intent visait ? Les quatre montants de config gardent leurs valeurs, seule leur
+        condition de declenchement change.
+
+        Args:
+            declaration: intents declares et controle AU MOMENT de la declaration, tel que pose
+                par ``W40KEngine`` a la cloture des free steps.
         """
         agent_key = require_key(self.config, "controlled_agent")
         zone_intent_cfg = self.rewards_config[agent_key]["zone_intent_shaping"]
@@ -1325,17 +1312,47 @@ class RewardCalculator:
         invade_neutral_bonus = zone_intent_cfg["invade_neutral_bonus"]
         invade_own_penalty = zone_intent_cfg["invade_lost_penalty"]
 
-        zone_intents = game_state["zone_intents"]
+        intents = require_key(declaration, "intents")
+        control_at_declaration = require_key(declaration, "control")
+
+        # BORNE SUR LES OBJECTIFS REELS. `zone_intents` compte MAX_OBJECTIVES entrees quel que
+        # soit le scenario, et `get_objective_control` rend 0.0 pour un zone_idx hors liste. La
+        # version precedente parcourait donc les zones INEXISTANTES, qui tombaient dans sa
+        # branche "INVADE sur neutre" et versaient `invade_neutral_bonus` a chaque tour,
+        # gratuitement et sans action possible de l'agent (+0.2/tour sur un scenario a 3
+        # objectifs pour MAX_OBJECTIVES=5, l'intent par defaut etant INVADE).
+        #
+        # Ce revenu passif a disparu avec l'evaluation sur resultat — une zone inexistante n'est
+        # jamais "prise", donc plus rien ne se declenche pour elle. La borne ci-dessous ne
+        # corrige donc aucun symptome subsistant : elle empeche d'en recreer un si une regle
+        # future se declenchait sans exiger `obtained == 1.0` (c'est deja le cas de la penalite
+        # d'incoherence). Aucun test ne peut la rendre rouge seule, et c'est normal.
+        num_zones = len(require_key(game_state, "objectives"))
+
         shaping = 0.0
-        for zone_idx, intent in enumerate(zone_intents):
-            control = get_objective_control(zone_idx, game_state)
-            if intent == INTENT_DEFEND and control == 1.0:
-                shaping += defend_bonus
-            elif intent == INTENT_INVADE and control == -1.0:
-                shaping += invade_success_bonus   # cible une zone ennemie : correct
-            elif intent == INTENT_INVADE and control == 0.0:
-                shaping += invade_neutral_bonus   # cible une zone neutre : acceptable
-            elif intent == INTENT_INVADE and control == 1.0:
-                shaping += invade_own_penalty     # déclare invasion sur sa propre zone : incorrect
+        for zone_idx in range(num_zones):
+            intent = intents[zone_idx]
+            declared = control_at_declaration[zone_idx]
+            # POINT DE VUE EXPLICITE, jamais `get_objective_control` : ce helper est relatif a
+            # `current_player`, or le solde terminal porte sur le joueur controle alors que la
+            # partie se termine pendant le tour de l'adversaire (mesure : 6 terminaisons sur 6).
+            # Le signe de TOUS les objectifs s'en trouvait inverse, et le bonus DEFEND paye
+            # exactement quand la zone avait ete perdue.
+            obtained = get_objective_control_for_player(zone_idx, game_state, player)
+
+            if intent == INTENT_DEFEND:
+                # Tenue au moment de la declaration ET conservee : l'intention est realisee.
+                if declared == 1.0 and obtained == 1.0:
+                    shaping += defend_bonus
+            elif intent == INTENT_INVADE:
+                if declared == 1.0:
+                    # Declarer une invasion sur sa PROPRE zone reste une incoherence de
+                    # declaration : elle se juge sans attendre le resultat.
+                    shaping += invade_own_penalty
+                elif obtained == 1.0:
+                    # Zone prise : bonus selon la difficulte de ce qui a ete pris.
+                    shaping += (
+                        invade_success_bonus if declared == -1.0 else invade_neutral_bonus
+                    )
         return shaping
 

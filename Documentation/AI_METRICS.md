@@ -4,14 +4,14 @@
 > **📍 Purpose**: Deep dive into metrics-driven training optimization for W40K tactical AI
 >
 > **Status**: January 2025 - Expert optimization guide (Updated: Corrected metric namespaces to match actual code)
-> **⚠️ MàJ 2026-07** : namespaces (`bot_eval/`, `0_critical/`, `vs_random/greedy/defensive/combined`) confirmés dans `ai/metrics_tracker.py`. Le code évalue désormais **7 bots** (`metrics_tracker.py`) alors que ce doc n'en décrit que 3 — le reste du contenu reste exact.
+> **⚠️ MàJ 2026-07** : namespaces (`bot_eval/`, `00_critical/`, `vs_random/greedy/defensive/combined`) confirmés dans `ai/metrics_tracker.py`. Le code évalue désormais **7 bots** (`metrics_tracker.py`) alors que ce doc n'en décrit que 3 — le reste du contenu reste exact.
 >
 > **Companion Document**: [AI_TRAINING.md](AI_TRAINING.md) - Configuration and setup
 >
 > **⚠️ IMPORTANT CORRECTION**: This document has been updated to use correct metric namespaces:
 > - Bot evaluation metrics use `bot_eval/` namespace (not `eval_bots/`)
 > - Bot metric names: `vs_random`, `vs_greedy`, `vs_defensive`, `combined` (not `vs_random_bot`, etc.)
-> - Added documentation for the `0_critical/` dashboard - **START HERE** for training monitoring
+> - Added documentation for the `00_critical/` dashboard - **START HERE** for training monitoring
 
 ---
 
@@ -22,7 +22,7 @@
   - [Unit-Rule Forcing Metrics](#unit-rule-forcing-metrics)
   - [Training Metrics (PPO Internals)](#training-metrics-ppo-internals)
   - [Critical Metrics Quick Reference](#-critical-metrics-quick-reference) ⭐ **START HERE**
-    - [0_critical/ Dashboard](#-start-here-0_critical-dashboard) ⭐⭐ **PRIMARY DASHBOARD**
+    - [00_critical/ Dashboard](#-start-here-00_critical-dashboard) ⭐⭐ **PRIMARY DASHBOARD**
     - [Game Critical Metrics](#game-critical-metrics)
   - [Game Metrics (Performance Indicators)](#game-metrics-performance-indicators)
   - [Evaluation Metrics (Bot Comparisons)](#evaluation-metrics-bot-comparisons)
@@ -56,29 +56,83 @@
 
 > Ce bloc reprend l’ancien **PPO_METRICS_TUNING_GUIDE.md** fusionné ici. Il donne les tableaux et actions correctives ; les sections suivantes de ce document détaillent chaque métrique et les cas d’usage.
 
-### 1. Métriques 0_critical (TensorBoard)
+### 1. Métriques 00_critical (TensorBoard)
 
-Le namespace **`0_critical/`** regroupe les 11 métriques essentielles pour le tuning PPO. Le préfixe `0_` les fait apparaître en premier dans TensorBoard.
+Le namespace **`00_critical/`** regroupe les métriques essentielles pour le tuning PPO (11 métriques de base + 7 courbes de ventilation par mode de déploiement, cf. plus bas).
+
+**Ordre et dépliage des dashboards** — TensorBoard trie les groupes de tags par tri naturel *sensible à la casse* (chiffres et `/` d'abord, puis comparaison brute des caractères) : les préfixes numériques `00_` / `01_` / `02_` / `03_` imposent donc l'ordre `00_critical` → `01_VP` → `02_combat` → `03_eval`. Par ailleurs TensorBoard ne déplie au chargement que les **2 premiers groupes** (constante codée en dur dans `webfiles.zip` → `index.js`) ; `scripts/patch_tensorboard_expand.py` porte cette constante à 3 et recalcule le `_file_hash` d'`index.html` (le bundle est servi avec un cache navigateur d'un an sous une URL figée — sans ce recalcul le navigateur resservirait l'ancien JS). **Redémarrer TensorBoard après le patch** : `core_plugin.py` lit `webfiles.zip` une seule fois au démarrage et sert son contenu depuis la mémoire. À relancer après chaque `pip install` (la réinstallation restaure le bundle d'origine) :
+
+```bash
+python3 scripts/patch_tensorboard_expand.py          # applique (idempotent)
+python3 scripts/patch_tensorboard_expand.py --check  # vérifie l'état
+```
 
 **Organisation** :
 - **a–c** : Évaluation bot (combined, worst_bot, holdout_hard)
 - **d–f** : Performance training (win_rate, episode_reward, loss_mean)
 - **g–j** : Santé PPO (explained_variance, clip_fraction, approx_kl, entropy)
-- **l–m** : Efficacité tactique (value_trade_ratio, value_loss)
+- **l–m** : Efficacité tactique (`02_combat/a_value_trade_ratio`, value_loss)
+
+### Namespace `03_eval/` — holdout, un tag par (scénario, adversaire)
+
+`03_eval/<scénario_holdout>/<NomDeClasseDuBot>` porte le **win-rate de ce bot sur ce scénario**,
+écrit par `BotEvaluationCallback._log_scenario_scores`. Un tag par couple, donc 7 courbes par
+scénario holdout (`holdout_regular_bot_01` … `holdout_hard_bot_0n`), l'adversaire désigné par son
+nom de classe réel (`DefensiveBot`, `TacticalBot`, …) et non par sa clé interne (`defensive`).
+
+Ce namespace s'appelait `1_evals/` et portait **un seul** scalaire par scénario, valant son
+`worst_bot_score` : le nom du tag désignait le scénario — `bot-01` est un fichier de matchup de
+rosters, pas un adversaire — et la valeur venait d'un bot différent d'une évaluation à l'autre.
+Impossible de savoir de qui parlait la courbe. Les agrégats restent disponibles ailleurs :
+`bot_eval/scenario/<slug>/combined` et `/worst_bot_score`.
+
+**Fenêtres de lissage des courbes de performance**, réglées dans le training config de l'agent :
+
+```json
+"metrics_smoothing": { "perf_window": 500, "perf_window_fast": 500 }
+```
+
+La section vit dans `config/agents/_training_common.json` et chaque profil la reprend par
+`"metrics_smoothing": null` (idiome d'héritage du dépôt). Les deux clés sont **obligatoires** :
+une section absente ou incomplète lève au démarrage du run, jamais de repli silencieux.
+
+Chaque mesure des dashboards `00_critical/`, `01_VP/` et `02_combat/` peut sortir en **deux**
+exemplaires — le tag nu lissé sur `perf_window` (tendance de fond) et le même tag suffixé
+**`_<perf_window_fast>ep`** (évolution récente). Le suffixe désigne toujours la fenêtre réelle.
+Une fenêtre réactive plus longue que la fenêtre de fond lève.
+
+**Le doublon réactif est désactivé** (`perf_window_fast == perf_window`, 2026-07-31) : les 21
+courbes `_250ep` doublaient les trois dashboards sans être lues, et noyaient les tags nus dans
+la liste. Le mécanisme reste disponible — descendre `perf_window_fast` sous `perf_window` le
+réactive, sans toucher au code.
+
+**Si tu le réactives** : le repère est le nombre d'épisodes par update PPO (`n_steps` ÷ durée
+moyenne d'un épisode en timesteps ≈ 8192 ÷ 134 ≈ 61 sur le profil x1). En dessous de ~4 updates,
+la courbe bouge parce que l'échantillon change, pas la politique. 250 couvre ~4 updates ; 100
+n'en couvrait que 1,6 et était dominé par le bruit d'échantillonnage (±11,8 de reward à 1σ contre
+±7,5 à 250, pour un signal utile d'environ 40).
+
+**Aucun point n'est écrit tant que la fenêtre n'est pas pleine.** Une courbe de fond démarre
+donc à l'épisode 500. C'est voulu : sous la fenêtre, le
+lissage renvoyait la moyenne de tout l'historique, une moyenne cumulative qui converge **en
+descendant** depuis son échantillon de départ bruité. Sur un run de 1000 épisodes, la moitié de
+chaque courbe était cette décroissance mécanique — indiscernable à l'œil d'un agent qui se
+dégrade, et lue comme telle. Une courbe qui démarre tard ne ment pas ; un point qui n'a pas le
+même sens que son voisin, si.
 
 | Métrique | Cible | Contrôle principal | Si trop bas | Si trop haut |
 |----------|--------|---------------------|-------------|--------------|
 | **a_bot_eval_combined** | >0.49 (BEST actuel) | Récompenses + PPO | Ajuster les autres métriques d’abord | — |
 | **b_worst_bot_score** | >0.35 | Diversité d’entraînement | Augmenter diversité des bots dans bot_training.ratios | — |
 | **c_holdout_hard_mean** | >0.10 | Matchup défavorable | Score ≈0 normal (structurel, pas un bug) | — |
-| **d_win_rate_100ep** | >0.50 | Apprentissage général | Vérifier entropy (trop basse) et clip_fraction | — |
+| **d_win_rate** | >0.50 | Apprentissage général | Vérifier entropy (trop basse) et clip_fraction | — |
 | **e_episode_reward_smooth** | Tendance croissante | Signal de récompense | Vérifier reward config — récompenses intermédiaires trop faibles | Possible reward hacking — vérifier les récompenses exploitées |
 | **f_loss_mean** | Tendance décroissante, sans oscillations | learning_rate, n_steps, vf_coef | Basse et stable : convergence saine — rien à faire | Oscille → learning_rate ↓ (÷2), n_steps ↓ ; Stagne haute → vf_coef ↑ |
 | **g_explained_variance** | >0.30 | gamma, gae_lambda, net_arch | <0.30 : gamma ↑ (→0.98), net_arch ↑, n_steps ↑ | >0.95 : value network saturé — aucune action requise |
 | **h_clip_fraction** | 0.10–0.30 | **learning_rate**, clip_range | <0.05 : politique figée → clip_range ↑ (→0.25) ou ent_coef ↑ | >0.40 : LR trop élevé → learning_rate ↓ (÷2), clip_range ↓ (→0.15) |
 | **i_approx_kl** | 0.01–0.02 | learning_rate, target_kl | <0.005 : apprentissage trop lent → LR ↑ (×1.5) | >0.02 : mise à jour trop agressive → LR ↓ (÷2), fixer target_kl à 0.01–0.015 |
 | **j_entropy_loss** | -2.0 à -0.5 | **ent_coef** | >-0.5 (proche de 0) : politique déterministe → ent_coef ↑ ; si <20ep : restart obligatoire | <-2.0 après 200ep : trop d’exploration → ent_coef ↓ (÷2) |
-| **l_value_trade_ratio** | >1.0 | Récompenses combat | <1.0 : agent perd plus qu’il ne détruit → revoir récompenses kill/combat | — |
+| **02_combat/a_value_trade_ratio** | >1.0 | Récompenses combat | <1.0 : agent perd plus qu’il ne détruit → revoir récompenses kill/combat | — |
 | **m_value_loss_smooth** | Tendance décroissante | learning_rate, vf_coef | Basse et stable : convergence saine — rien à faire | Croissante : LR ↓ (÷2) ; Stagne haute : vf_coef ↑ ou net_arch ↑ |
 
 **Notes** :
@@ -99,7 +153,7 @@ Le namespace **`0_critical/`** regroupe les 11 métriques essentielles pour le t
 | Métrique | Ce que cela mesure | Cible | Paramètres à modifier |
 |----------|---------------------|-------|------------------------|
 | **episode_reward_smooth** | Récompense moyenne par épisode (lissée) | Augmentation progressive | Si stagne → ent_coef ↑, récompenses intermédiaires ↑ ; si chute → learning_rate ↓ |
-| **win_rate_100ep** | Taux de victoire sur 100 épisodes | Augmentation progressive | Si stagne → ent_coef ↑, récompenses win/lose ↑ ; si chute → learning_rate ↓ |
+| **d_win_rate** | Taux de victoire lissé (fenêtre `perf_window`) | Augmentation progressive | Si stagne → ent_coef ↑, récompenses win/lose ↑ ; si chute → learning_rate ↓ |
 | **bot_eval_combined** | Win rate pondéré vs Random + Greedy + Defensive | >0.55 (Phase 2), >0.70 (Phase 3) | Si sous la cible → ent_coef ↑, target_kl ↓ ; si chute → learning_rate ↓, net_arch ↑ |
 | **loss_mean** | Erreur moyenne (policy + value) | Diminution progressive, sans oscillations | Si oscille → learning_rate ↓, n_steps ↓ ; si stagne → vf_coef ↓ |
 | **explained_variance** | Variance des returns expliquée par le value model | 0.3 < idéal < 0.7 | Si <0.3 → net_arch ↑, n_steps ↑ ; si stagne sous 0.5 → learning_rate ↓ |
@@ -229,7 +283,7 @@ Quand `n_envs > 1`, le système ajuste automatiquement `n_steps` par env pour ga
 1. **Démarrage** : Surveiller explained_variance, gradient_norm. Si explained_variance < 0.3 → augmenter gamma. Si gradient_norm > 10 → réduire learning_rate.
 2. **Premiers 100 ep** : Ajuster learning_rate pour clip_fraction 0.1–0.3 ; garder entropy_loss dans 0.5–2.0.
 3. **Première bot eval (~500 ep)** : Si bot_eval < 0.4 et immediate_ratio > 0.9 → problème de récompenses. Si bot_eval < 0.4 et entropy bas → exploration.
-4. **Milieu (1000+ ep)** : win_rate_100ep et episode_reward doivent monter. Si plateau → ent_coef ou curriculum.
+4. **Milieu (1000+ ep)** : d_win_rate et episode_reward doivent monter. Si plateau → ent_coef ou curriculum.
 5. **Évaluation finale** : Cible bot_eval_combined > 0.70.
 
 ### 9. Config et références (tuning)
@@ -422,30 +476,58 @@ These metrics reveal the health of the PPO learning algorithm itself.
 
 These are the most important metrics to watch in TensorBoard.
 
-### **⭐ START HERE: `0_critical/` Dashboard**
+### **⭐ START HERE: `00_critical/` Dashboard**
 
-The `0_critical/` namespace contains **THE 11 ESSENTIAL METRICS** for hyperparameter tuning. All metrics are smoothed for clear trends.
+The `00_critical/` namespace contains **THE ESSENTIAL METRICS** for hyperparameter tuning. All metrics are smoothed for clear trends.
 
-**TIP:** Open TensorBoard and navigate to the `0_critical/` namespace first - it contains everything you need for tuning.
+**TIP:** Open TensorBoard and navigate to the `00_critical/` namespace first - it contains everything you need for tuning.
 
 | Metric | What It Measures | Target Value | Critical For |
 |--------|------------------|--------------|--------------|
-| **0_critical/a_bot_eval_combined** | Weighted win rate vs all holdout bots | >0.49 (BEST actuel: 0.4857) | **PRIMARY GOAL** — sélection du modèle |
-| **0_critical/b_worst_bot_score** | Score vs le bot le plus difficile | >0.35 | Robustesse — pas de point faible structurel |
-| **0_critical/c_holdout_hard_mean** | Score moyen holdout hard (matchup défavorable) | >0.10 (structurellement faible) | Résilience aux matchups difficiles |
-| **0_critical/d_win_rate_100ep** | Rolling 100-episode win rate | >0.50 | Self-play performance |
-| **0_critical/e_episode_reward_smooth** | Smoothed episode reward | Increasing trend | Learning progress signal |
-| **0_critical/g_explained_variance** | Value function quality (R²) | >0.30 | Value network capacity |
-| **0_critical/h_clip_fraction** | % of clipped policy updates | 0.10–0.30 | Tune `learning_rate` — <0.05 = politique trop déterministe |
-| **0_critical/i_approx_kl** | Policy change magnitude | <0.02 (ideally 0.01–0.015) | Policy stability |
-| **0_critical/j_entropy_loss** | Exploration level | Decroissant -> -1.5 à -1.0 vers les 2/3 du training | Tune `ent_coef` |
-| **0_combat/a_value_trade_ratio** | Valeur détruite / valeur perdue (500ep) | >1.0 | Efficacité tactique — l'agent doit détruire plus qu'il ne perd |
-| **0_critical/m_value_loss_smooth** | Value function loss lissée | Décroissante puis stable | Convergence du value network |
+| **00_critical/a_bot_eval_combined** | Weighted win rate vs all holdout bots | >0.49 (BEST actuel: 0.4857) | **PRIMARY GOAL** — sélection du modèle |
+| **00_critical/b_worst_bot_score** | Score vs le bot le plus difficile | >0.35 | Robustesse — pas de point faible structurel |
+| **00_critical/c_holdout_hard_mean** | Score moyen holdout hard (matchup défavorable) | >0.10 (structurellement faible) | Résilience aux matchups difficiles |
+| **00_critical/d_win_rate** (+ doublon réactif) | Win rate lissé sur 500 ép. (doublon : 250 ép.) | >0.50 | Self-play performance |
+| **00_critical/e_episode_reward_smooth** | Smoothed episode reward | Increasing trend | Learning progress signal |
+| **00_critical/g_explained_variance** | Value function quality (R²) | >0.30 | Value network capacity |
+| **00_critical/h_clip_fraction** | % of clipped policy updates | 0.10–0.30 | Tune `learning_rate` — <0.05 = politique trop déterministe |
+| **00_critical/i_approx_kl** | Policy change magnitude | <0.02 (ideally 0.01–0.015) | Policy stability |
+| **00_critical/j_entropy_loss** | Exploration level | Decroissant -> -1.5 à -1.0 vers les 2/3 du training | Tune `ent_coef` |
+| **02_combat/a_value_trade_ratio** | Valeur détruite / valeur perdue (500ep) | >1.0 | Efficacité tactique — l'agent doit détruire plus qu'il ne perd |
+| **00_critical/m_value_loss_smooth** | Value function loss lissée | Décroissante puis stable | Convergence du value network |
+| **00_critical/p_reward_deploy_{active,fixed}** | Reward ventilée par mode de déploiement | Les DEUX croissantes | Sépare « l'agent stagne » de « la tâche durcit » |
+| **00_critical/q_obj_held_diff_deploy_{active,fixed}** | Différence d'objectifs tenus, par mode | Les DEUX croissantes | Idem sur la condition de victoire |
+| **00_critical/r_win_rate_deploy_{active,fixed}** | Win rate par mode | Les DEUX croissantes | Idem sur le verdict |
+| **00_critical/s_deploy_active_share** | Part réelle d'épisodes en déploiement actif | Suit `active_ratio` du profil | Variable explicative des trois lignes ci-dessus |
+
+#### Ventilation par mode de déploiement (`p` à `s`)
+
+`deployment_mode_schedule` fait monter la part d'épisodes joués en déploiement **actif** de 0 % à
+80 % sur la durée du run, alors que l'**évaluation impose toujours** un déploiement. La population
+mesurée par les métriques d'épisode change donc en continu pendant tout l'entraînement : une
+courbe agrégée mélange deux tâches de difficulté différente dans des proportions mouvantes.
+Elle s'aplatit et se disperse quand l'agent progresse mais que la tâche durcit à la même vitesse
+— indiscernable d'un agent qui plafonne. Constaté sur un run de 50 000 épisodes où les métriques
+d'épisode stagnaient pendant que `a_bot_eval_combined` et `b_worst_bot_score` accéléraient.
+
+**Lecture.** Comparer chaque paire `_active` / `_fixed` *entre elles*, jamais à l'agrégat. Deux
+séries croissantes sous un agrégat plat = la rampe, pas un plafond. Une seule série qui stagne =
+un vrai déficit, sur ce mode-là.
+
+**Piège d'axe.** La fenêtre de lissage (`perf_window`, 500) compte 500 épisodes **de chaque
+mode**. Les deux courbes n'ont donc pas le même axe temporel, et `_active` démarre d'autant plus
+tard que `active_ratio_start` est bas (à 0.3, réglage courant, il faut ~1 700 épisodes avant que
+500 d'entre eux soient actifs ; à 0.0 il faut attendre que la rampe en produise 500). Une fenêtre raccourcie pour le mode rare rendrait les deux séries non
+comparables — c'est le décalage qui est retenu, pas l'artefact.
+
+**Rien n'est émis quand le scheduler est inactif** (profil sans rampe, ou scénario hors split
+training) : ces épisodes n'appartiennent à aucune des deux populations, et les imputer d'office
+à `fixed` viderait l'écart de son sens.
 
 **How to use this dashboard:**
 1. Open TensorBoard: `tensorboard --logdir=./tensorboard/`
-2. Navigate to Scalars → `0_critical/`
-3. Check all 11 metrics are trending correctly
+2. Navigate to Scalars → `00_critical/`
+3. Check all metrics are trending correctly
 4. Use table above to diagnose issues
 
 ---
@@ -458,7 +540,7 @@ These are the most important gameplay metrics to watch in the `game_critical/` a
 |--------|------------------|--------------|----------------|-----------------|-------|
 | **game_critical/episode_reward** | Total reward per episode | Phase 1: 0+<br>Phase 2: +10 to +25<br>Phase 3: +25 to +50+ | • Check reward config balance<br>• Increase key action rewards<br>• Reduce penalties | • Possible reward hacking<br>• Review exploited rewards<br>• Add balancing penalties | Should increase steadily. Sudden drops = policy collapse |
 | **game_critical/episode_length** | Steps per episode | 50-150 steps<br>(stable) | • Agent dying too fast<br>• Increase defensive rewards<br>• Reduce aggression penalties | • Agent too passive<br>• Reduce wait penalty<br>• Increase action rewards | Increasing trend = agent stalling. Stable = good |
-| **game_critical/win_rate_100ep** | Rolling 100-episode win rate | Phase 1: 60%+<br>Phase 2: 70%+<br>Phase 3: 75%+ | • Increase training episodes<br>• Adjust reward balance<br>• Check observation quality | • Good! Advance to next phase<br>• Consider harder opponents | Primary success metric. Must be stable, not just lucky streak |
+| **game_critical/win_rate** (+ doublon réactif) | Win rate lissé sur 500 ép. (doublon : 250 ép.) | Phase 1: 60%+<br>Phase 2: 70%+<br>Phase 3: 75%+ | • Increase training episodes<br>• Adjust reward balance<br>• Check observation quality | • Good! Advance to next phase<br>• Consider harder opponents | Primary success metric. Must be stable, not just lucky streak |
 | **game_critical/units_killed_vs_lost_ratio** | Kill/death ratio | 1.5+ (killing more than losing) | • Improve combat rewards<br>• Reduce defensive penalties<br>• Check target selection | • Excellent performance<br>• Consider phase advancement | <1.0 = losing units. >2.0 = dominating |
 | **game_critical/invalid_action_rate** | % of invalid actions | <5% (ideally <2%) | N/A - this is good! | • Action masking broken<br>• Observation quality issue<br>• Network capacity problem | >10% persistently = serious problem requiring restart. ⚠️ Avant le 2026-07-30, un second écrivain écrivait un 0.0 constant sur ce tag à chaque épisode : tout historique antérieur alterne vraie valeur et zéro, et sa moyenne est divisée par deux |
 | **bot_eval/vs_random** | Reward vs RandomBot | 0.0+ (positive) | • Agent worse than random<br>• Major training problem<br>• Check overfitting | • Good! Should beat random<br>• Target: -0.3 to +0.1 range | Baseline competence. Failure here = critical issue |
@@ -476,13 +558,13 @@ These are the most important gameplay metrics to watch in the `game_critical/` a
 ### Priority Order
 
 **For daily monitoring:**
-1. **0_critical/** dashboard - Check all 10 metrics first
-2. **bot_eval/combined** (in 0_critical/) - Primary goal metric
+1. **00_critical/** dashboard - Check all 10 metrics first
+2. **bot_eval/combined** (in 00_critical/) - Primary goal metric
 3. **invalid_action_rate** - Fix immediately if >10%
 4. **episode_reward** - Must be increasing (even slowly)
-5. **win_rate_100ep** - Primary success indicator
+5. **d_win_rate** - Primary success indicator
 
-**TIP:** If all `0_critical/` metrics are healthy, your training is on track. Dive into detailed namespaces only when debugging specific issues.
+**TIP:** If all `00_critical/` metrics are healthy, your training is on track. Dive into detailed namespaces only when debugging specific issues.
 
 ---
 
@@ -602,10 +684,10 @@ These metrics compare agent performance against scripted opponents.
 
 ---
 
-### `0_VP/` et `0_combat/` Dashboards — Métriques de jeu
+### `01_VP/` et `02_combat/` Dashboards — Métriques de jeu
 
-Le namespace **`0_game/`** a été scindé le 2026-07-30 en deux dashboards : **`0_VP/`** (le jeu de
-points) et **`0_combat/`** (l'attrition). Aucune courbe `0_game/` n'est plus émise — les anciennes
+Le namespace **`0_game/`** a été scindé le 2026-07-30 en deux dashboards : **`01_VP/`** (le jeu de
+points) et **`02_combat/`** (l'attrition). Aucune courbe `0_game/` n'est plus émise — les anciennes
 séries ne se prolongent pas dans les nouvelles. Tout est lissé sur **500 épisodes**.
 
 Ce qui a changé, au-delà des noms : les compteurs bruts d'attrition (unités tuées/perdues) sont
@@ -614,33 +696,33 @@ n'est pas comparable d'un roster à l'autre — « 3 unités tuées » ne veut r
 combien il y en avait en face, et c'est précisément ce qui rend illisible un entraînement sur
 plusieurs rosters.
 
-#### `0_VP/` — le jeu de points
+#### `01_VP/` — le jeu de points
 
 | Métrique | Ce qu'elle mesure | Signal attendu |
 |----------|-------------------|----------------|
-| **0_VP/a_vp_diff** | VP agent − VP bot (différentiel) | Croissant → agent gagne le jeu de points |
-| **0_VP/b_vp_agent** | VP cumulés de l'agent sur l'épisode | Croissant |
-| **0_VP/c_vp_bot** | VP cumulés du bot sur l'épisode | Décroissant (ou agent > bot) |
-| **0_VP/d_objectives_held_diff** | Objectifs agent − objectifs bot, au même instant | Positif et croissant — agent domine le contrôle |
-| **0_VP/e_objectives_held** | Moyenne d'objectifs contrôlés par l'agent, échantillonnée à chaque tour marquant | Croissant — agent se positionne stratégiquement |
-| **0_VP/f_obj_rewards** | Récompense d'objectif réellement versée sur l'épisode | Croissant avec `e_` |
+| **01_VP/a_vp_diff** | VP agent − VP bot (différentiel) | Croissant → agent gagne le jeu de points |
+| **01_VP/b_vp_agent** | VP cumulés de l'agent sur l'épisode | Croissant |
+| **01_VP/c_vp_bot** | VP cumulés du bot sur l'épisode | Décroissant (ou agent > bot) |
+| **01_VP/d_objectives_held_diff** | Objectifs agent − objectifs bot, au même instant | Positif et croissant — agent domine le contrôle |
+| **01_VP/e_objectives_held** | Moyenne d'objectifs contrôlés par l'agent, échantillonnée à chaque tour marquant | Croissant — agent se positionne stratégiquement |
+| **01_VP/f_obj_rewards** | Récompense d'objectif réellement versée sur l'épisode | Croissant avec `e_` |
 
-#### `0_combat/` — l'attrition
+#### `02_combat/` — l'attrition
 
 | Métrique | Ce qu'elle mesure | Signal attendu |
 |----------|-------------------|----------------|
-| **0_combat/a_value_trade_ratio** | VALUE détruite / VALUE perdue | > 1.0 — l'agent détruit plus qu'il ne perd |
-| **0_combat/b_kill_rewards** | Récompense kill_target cumulée par épisode (tir + mêlée) | Croissant — reflète l'activité de kill réelle |
-| **0_combat/c_models_killed_ratio** | Figurines ennemies retirées du plateau / effectif ennemi de départ | Croissant, borné à 1.0 |
-| **0_combat/d_models_lost_ratio** | Figurines alliées retirées du plateau / effectif allié de départ | Décroissant |
-| **0_combat/e_value_killed_ratio** | VALUE ennemie détruite / VALUE ennemie de départ | Croissant, borné à 1.0 |
-| **0_combat/f_value_lost_ratio** | VALUE alliée perdue / VALUE alliée de départ | Décroissant |
-| **0_combat/g_shoot_model_kills** | Figurines ennemies détruites en phase de tir | Croissant — ranged = source principale de dégâts |
-| **0_combat/h_melee_model_kills** | Figurines ennemies détruites en phase de combat (fight) | Croissant |
-| **0_combat/i_shoot_value_killed** | VALUE (points) des figurines détruites au tir | Croissant — et plus vite que `g_` si l'agent cible ce qui coûte cher |
-| **0_combat/j_melee_value_killed** | VALUE (points) des figurines détruites en mêlée | Idem, côté mêlée |
-| **0_combat/k_units_killed_ratio** | Unités ennemies éliminées / unités ennemies de départ | Croissant |
-| **0_combat/l_units_lost_ratio** | Unités alliées perdues / unités alliées de départ | Décroissant ou stable |
+| **02_combat/a_value_trade_ratio** | VALUE détruite ÷ VALUE perdue, cumulées sur la fenêtre | > 1.0 — l'agent détruit plus qu'il ne perd |
+| **02_combat/b_kill_rewards** | Récompense kill_target cumulée par épisode (tir + mêlée) | Croissant — reflète l'activité de kill réelle |
+| **02_combat/c_models_killed_ratio** | Figurines ennemies retirées du plateau / effectif ennemi de départ | Croissant, borné à 1.0 |
+| **02_combat/d_models_lost_ratio** | Figurines alliées retirées du plateau / effectif allié de départ | Décroissant |
+| **02_combat/e_value_killed_ratio** | VALUE ennemie détruite / VALUE ennemie de départ (par figurine) | Croissant, borné à 1.0 |
+| **02_combat/f_value_lost_ratio** | VALUE alliée perdue / VALUE alliée de départ (par figurine) | Décroissant |
+| **02_combat/g_shoot_model_kills** | Figurines ennemies détruites en phase de tir | Croissant — ranged = source principale de dégâts |
+| **02_combat/h_melee_model_kills** | Figurines ennemies détruites en phase de combat (fight) | Croissant |
+| **02_combat/i_shoot_value_killed** | VALUE (points) des figurines détruites au tir | Croissant — et plus vite que `g_` si l'agent cible ce qui coûte cher |
+| **02_combat/j_melee_value_killed** | VALUE (points) des figurines détruites en mêlée | Idem, côté mêlée |
+| **02_combat/k_units_killed_ratio** | Unités ennemies éliminées / unités ennemies de départ | Croissant |
+| **02_combat/l_units_lost_ratio** | Unités alliées perdues / unités alliées de départ | Décroissant ou stable |
 
 Chaque ratio est émis **seulement si son dénominateur est > 0** : un dénominateur nul est un état
 de jeu possible (aucune unité en face), pas une erreur, et il ne produit donc aucun point plutôt
@@ -653,8 +735,8 @@ Un agent qui grignote sans achever fait monter `c_` sans bouger `k_`.
 #### Lecture combinée
 
 **Problème : agent focus kills mais perd les objectifs**
-- `0_combat/k_units_killed_ratio` élevé, `0_VP/a_vp_diff` négatif, `0_VP/e_objectives_held` faible
-- → Augmenter `reward_per_objective` et `reward_for_objective_lead` dans rewards_config.json.
+- `02_combat/k_units_killed_ratio` élevé, `01_VP/a_vp_diff` négatif, `01_VP/e_objectives_held` faible
+- → Augmenter `objective_reward_factor` dans rewards_config.json.
   ⚠️ Ces deux montants n'étaient **pas versés** avant le 2026-07-30 (mesuré : 73 appels par
   épisode, 0,00 de reward) : `_calculate_objective_reward_per_turn` était appelé *après* le
   retour anticipé « réponse système » de `calculate_reward`, alors que son déclencheur — la fin
@@ -690,12 +772,13 @@ Un agent qui grignote sans achever fait monter `c_` sans bouger `k_`.
   `RewardCalculator._calculate_objective_reward_per_turn` : branché sur un calcul de récompense,
   il héritait de ses gardes de sortie et n'a produit AUCUN point en 50 000 épisodes (mesuré :
   215 appels, 0 échantillon). Une mesure ne doit pas dépendre du chemin de récompense.
-- `0_VP/f_obj_rewards` : montant d'objectif réellement versé sur l'épisode, rejouant la
-  formule du versement — `reward_per_objective × tenus` **+** le forfait
-  `reward_for_objective_lead` pour chaque tour où l'agent en tient strictement plus que
-  l'adversaire (quand `use_objective_lead` est vrai). Identité avec le reward payé
-  vérifiée sur 8 épisodes complets joués : 8/8 exacte. L'ancienne version omettait le terme
-  d'avance (moitié du montant) et affichait un signal que l'agent ne recevait pas.
+- `01_VP/f_obj_rewards` : montant d'objectif réellement versé sur l'épisode. Le versement vaut
+  `objective_reward_factor × VP marqués` **par construction**, donc la courbe se **lit** sur
+  `victory_points_controlled_episode` au lieu de rejouer une formule. Elle rejouait celle du
+  versement jusqu'au 2026-08-01 : un miroir, redevenu faux dès que le versement est passé du
+  linéaire à l'escalier de la mission. Limite connue, celle du versement lui-même : au round 5
+  le second joueur marque à la fin de la phase fight alors que le reward se calcule à la
+  frontière command → move — les deux comptages peuvent différer sur ce seul marquage.
 - `g_shoot_model_kills` / `h_melee_model_kills` / `i_shoot_value_killed` / `j_melee_value_killed` :
   comptés en fin d'épisode par `W40KEngine`, en une passe sur `action_logs`, **par figurine**
   (`shootDetails[i]["targetDied"]`) — jamais sur le `target_died` d'en-tête, qui vaut
@@ -703,25 +786,42 @@ Un agent qui grignote sans achever fait monter `c_` sans bouger `k_`.
   `all_attack_results` ne remonte jamais jusqu'à `step()` dans le pipeline squad V11 et n'est
   donc PAS une source utilisable. La VALUE est celle de la figurine visée (`targetValue`,
   posé à la résolution de la blessure), jamais la valeur d'escouade.
-- `combat/f_value_destroyed` ne fait pas double emploi avec `i_`/`j_` : elle est à granularité
-  ESCOUADE (une escouade entamée mais vivante y compte pour 0) et n'est pas ventilée par phase.
+- `enemy_value_destroyed` / `ally_value_lost` (donc `combat/f_`, `combat/g_`, `a_value_trade_ratio`,
+  `e_`, `f_`) se comptent PAR FIGURINE depuis le 2026-07-30 : valeur de départ lue dans
+  `value_at_start` (relevée au reset), survivantes sommées sur `models_cache`, où chaque
+  figurine porte sa propre VALUE. Auparavant la valeur survivante était le `VALUE` d'escouade
+  entier tant qu'une seule figurine tenait : une escouade de 10 réduite à 1 pesait **0** de
+  perte, et ces courbes affichaient 0.0 là où `c_`/`d_` montraient 0.9. Aucun historique
+  antérieur n'est comparable.
+- `combat/f_value_destroyed` ne fait pas double emploi avec `i_`/`j_` : les deux comptent par
+  figurine, mais elle somme la VALUE perdue toutes causes confondues et sans ventilation par
+  phase, là où `i_`/`j_` n'attribuent que ce que l'agent a tué au tir ou en mêlée.
 - `b_kill_rewards` : `(shoot_kills + melee_kills) × reward_kill_target`, même source que ci-dessus,
   indépendante du système reward_breakdown.
-- `c_models_killed_ratio` / `d_models_lost_ratio` : les effectifs de DÉPART sont relevés par
-  `W40KEngine.reset` (`initial_ally_models` / `initial_enemy_models`) et jamais recalculés — les
-  figurines détruites disparaissent de `models_cache` *et* de `squad_models`, donc le
-  dénominateur ne serait plus dérivable en fin d'épisode. Les survivantes, elles, se comptent
-  dans `models_cache`.
+- `c_models_killed_ratio` / `d_models_lost_ratio` : les effectifs de DÉPART sont posés par
+  `build_units_cache` au reset (`game_state["model_count_at_start_by_player"]`, dans la même
+  boucle que `value_at_start` pour que les deux références soient prises au même instant) et
+  jamais recalculés — les figurines détruites disparaissent de `models_cache` *et* de
+  `squad_models`, donc le dénominateur ne serait plus dérivable en fin d'épisode. Les
+  survivantes, elles, se comptent dans `models_cache`.
   Les deux courbes utilisent la MÊME mesure de chaque côté : figurines retirées du plateau
   (différence des survivants), et non le compte de kills du journal. Ce dernier ignore les
   retraits hors attaque (hazard 24.16, retrait de cohérence 03.03) que le côté allié compte
   forcément — les deux courbes n'auraient alors pas la même base et ne se liraient pas côte à
   côte. L'attribution des kills à l'agent reste lisible sur `g_`/`h_`, qui sont, eux, des
   compteurs de journal.
-- `a_value_trade_ratio` a UN SEUL écrivain (`log_tactical_metrics`). Le second `add_scalar` de
-  `log_critical_dashboard`, qui réémettait la dernière valeur connue à un autre instant de
-  l'épisode, a été supprimé avec le namespace `0_game/` : il entrelaçait deux séries sur un tag
-  unique, le défaut déjà constaté sur les kills de mêlée et `invalid_action_rate`.
+- `a_value_trade_ratio` est le SEUL tag de cette mesure. Elle en portait trois :
+  `combat/h_value_trade_ratio` (historique) et `0_game/h_value_trade_ratio` — ce dernier
+  réémis par `log_critical_dashboard` à un autre instant de l'épisode, donc deux séries
+  entrelacées sur un tag unique, le défaut déjà constaté sur les kills de mêlée et
+  `invalid_action_rate`. Les deux ont été supprimés avec le namespace `0_game/`.
+  Elle se calcule désormais comme le **rapport des deux totaux lissés** (VALUE détruite cumulée
+  sur 500 épisodes ÷ VALUE perdue cumulée), et non comme la moyenne des rapports par épisode :
+  son dénominateur est un résultat d'épisode, pas une constante de scénario, donc toute garde
+  sur un rapport par épisode écarte une population entière — les épisodes sans perte (les
+  meilleurs) ou ceux sans destruction (les pires), et biaise dans un sens ou dans l'autre.
+  Aucun épisode n'est exclu ; la courbe se tait seulement tant que la fenêtre ne contient
+  aucune perte. Un historique antérieur n'est pas comparable.
 
 ---
 
@@ -1400,7 +1500,7 @@ START: Problem detected in daily monitoring
 
 #### 1. ✅ Win Rate Target Achieved
 **Condition:**
-- `game_critical/win_rate_100ep` > 80% for 100 consecutive episodes
+- `game_critical/win_rate` > 80% for 100 consecutive episodes
 - Indicates strong general performance across diverse scenarios
 
 **Verification:**

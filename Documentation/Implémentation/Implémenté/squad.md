@@ -1526,7 +1526,7 @@ reward -= ally_points * squad_kill_bonus_factor  # si la derniere figurine allie
 # --- Controle d objectif --- ABANDONNE, jamais implemente (2026-07-30)
 # `oc_weight` n a jamais eu un seul lecteur dans le code et a ete retire de
 # ArmageddonAgent_rewards_config.json. Le controle d objectif est paye par
-# objective_rewards.reward_per_objective + reward_for_objective_lead (forfait), verses UNE fois
+# objective_rewards.objective_reward_factor x les VP que la mission attribue, verses UNE fois
 # par tour a la phase command du joueur controle — l instant exact ou la mission lui attribue
 # ses VP. Un bonus par fin de phase (ce que decrivait oc_weight) paierait des etats de controle
 # qui ne rapportent aucun VP : l agent optimiserait la mesure de substitution au lieu de la
@@ -1595,7 +1595,7 @@ Escouade hors coherency : -0.2 par escouade par tour.
 ```
 Ces magnitudes sont coherentes : tuer vaut plus que controler, ce qui est intentionnel
 (le jeu W40K est combat-centric). Si l agent ignore les objectifs : augmenter
-`objective_rewards.reward_per_objective` et `reward_for_objective_lead` (`oc_weight` n existe plus).
+`objective_rewards.objective_reward_factor` (`oc_weight` n existe plus).
 Si l agent est trop agressif et negllige sa survie : reduire `hp_damage_weight` ou augmenter
 `incoherent_weight`. Calibrer sur les premiers runs de training.
 

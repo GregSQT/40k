@@ -115,7 +115,13 @@ SCHEDULE_KEYS = {
 
 @pytest.mark.parametrize("profile_name", sorted(PROFILES))
 def test_every_profile_carries_the_deployment_ramp(profile_name: str) -> None:
-    """Chaque profil porte le bloc, au réglage de référence (celui de `x1`)."""
+    """Chaque profil porte le bloc, et ce bloc a du SENS.
+
+    Les valeurs de la rampe sont un réglage d'entraînement : les figer ici en dur ferait de ce
+    test un miroir du fichier, rouge à chaque ajustement légitime sans rien prouver. Ce qui est
+    verrouillé, c'est ce qui rend la rampe utilisable — et le fait qu'aucun profil ne dérive des
+    autres (`test_all_profiles_share_the_same_ramp`, référence = `x1`).
+    """
     profile = PROFILES[profile_name]
     assert "deployment_mode_schedule" in profile, (
         f"profil '{profile_name}' sans deployment_mode_schedule : la rampe serait désactivée "
@@ -128,22 +134,44 @@ def test_every_profile_carries_the_deployment_ramp(profile_name: str) -> None:
     assert "EVALUATION IMPOSE TOUJOURS" in cfg["justification"]
     assert cfg["enabled"] is True
     assert cfg["training_only"] is True
-    assert cfg["active_ratio_start"] == 0.0
-    assert cfg["active_ratio_end"] == 0.8, (
-        f"profil '{profile_name}' : une rampe qui finit à {cfg['active_ratio_end']} n'apprend "
-        f"pas le déploiement."
-    )
     assert cfg["schedule"] == "linear"
-    assert cfg["freeze_after_progress"] == 1.0
+    start, end = cfg["active_ratio_start"], cfg["active_ratio_end"]
+    freeze = cfg["freeze_after_progress"]
+    for key, val in (("active_ratio_start", start), ("active_ratio_end", end),
+                     ("freeze_after_progress", freeze)):
+        assert isinstance(val, (int, float)) and not isinstance(val, bool), key
+        assert 0.0 <= float(val) <= 1.0, f"profil '{profile_name}' : {key}={val} hors [0,1]"
+    assert start <= end, (
+        f"profil '{profile_name}' : rampe DÉCROISSANTE ({start} → {end}) — la part d'épisodes en "
+        f"déploiement actif baisserait au fil du run."
+    )
+    # PLAFOND EFFECTIF, et non `active_ratio_end` : `freeze_after_progress` gèle la progression,
+    # donc la rampe s'arrête à `start + (end - start) * freeze`. Avec un gel à mi-run,
+    # `active_ratio_end` n'est JAMAIS atteint et le lire seul surestime ce que l'agent voit.
+    # C'est ce plafond qui doit rester majoritaire : sous 0.5, l'agent finit son entraînement en
+    # jouant surtout des parties déjà déployées, alors que l'évaluation le déploie TOUJOURS.
+    reached = start + (end - start) * freeze
+    assert reached >= 0.5, (
+        f"profil '{profile_name}' : plafond effectif {reached:.2f} (start={start}, end={end}, "
+        f"freeze={freeze}) — la majorité des épisodes de fin de run reste en placement fixe."
+    )
     # `total_episodes` est le dénominateur de la rampe : le scheduler lève sans lui.
     assert isinstance(profile["total_episodes"], int) and profile["total_episodes"] > 0
 
 
 def test_all_profiles_share_the_same_ramp() -> None:
-    """Les cinq profils portent EXACTEMENT le même bloc : aucune dérive possible entre eux."""
-    blocks = {name: p.get("deployment_mode_schedule") for name, p in PROFILES.items()}
+    """Les cinq profils portent EXACTEMENT le bloc de `x1` : aucune dérive possible entre eux.
+
+    `x1` est la référence (profil de production) : c'est lui qu'on ajuste, les autres suivent.
+    """
     assert len(PROFILES) == 5, f"profils attendus : 5, trouvés {sorted(PROFILES)}"
-    assert len({json.dumps(b, sort_keys=True) for b in blocks.values()}) == 1, blocks
+    reference = json.dumps(PROFILES["x1"]["deployment_mode_schedule"], sort_keys=True)
+    diverged = {
+        name: p.get("deployment_mode_schedule")
+        for name, p in PROFILES.items()
+        if json.dumps(p.get("deployment_mode_schedule"), sort_keys=True) != reference
+    }
+    assert not diverged, f"profils divergents de la référence x1 : {sorted(diverged)}"
 
 
 def test_missing_block_in_an_agent_profile_is_an_explicit_error() -> None:

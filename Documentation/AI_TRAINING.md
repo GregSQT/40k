@@ -192,7 +192,7 @@ Cette section décrit comment le training est structuré (qui appelle quoi). Pou
   - `--agent <agent_key>` : agent à entraîner (obligatoire pour training ciblé). Détermine le dossier de config et le chemin du modèle.
   - `--training-config <name>` : clé du bloc dans `*_training_config.json` (ex. `default`, `debug`).
   - `--rewards-config <name>` : en pratique le même que `--agent` ou un alias ; utilisé comme `rewards_config_name` et pour charger `*_rewards_config.json`.
-  - `--scenario <name>` : scénario ou mode (`bot`, `default`, `phase1`, etc.). Avec `bot`, l’adversaire est un mix configurable de 7 bots (Tier 1 : Random, Greedy, Defensive, Control ; Tier 2 : AggressiveSmart, DefensiveSmart, Adaptive).
+  - `--scenario <name>` : scénario ou mode (`bot`, `default`, `phase1`, etc.). Avec `bot`, l’adversaire est un mix configurable de 5 bots (Random, Greedy, Defensive, Control, Adaptive).
 - **Options utiles** : `--step` (écrit `step.log`), `--test-only` (pas d’apprentissage, évaluation uniquement), `--eval` (alias de `--test-only`), `--test-episodes N`, `--append` (reprendre un modèle existant), `--resume-from <checkpoint.zip>`
 (reprendre depuis un checkpoint périodique), `--new-model` (partir de zéro).
 
@@ -239,7 +239,7 @@ Cette section décrit comment le training est structuré (qui appelle quoi). Pou
 2. **Step logger** (si `--step`) : `StepLogger("step.log", ...)` attaché à `base_env.step_logger` ; désactivé pour les envs vectorisés (SubprocVecEnv).
 3. **ActionMasker** : wrapper SB3 `ActionMasker(base_env, mask_fn)` avec `mask_fn(env) = env.get_action_mask()` pour MaskablePPO.
 4. **Adversaire** :
-   - **Scénario bot** : `BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry, agent_seat_mode=..., global_seed=..., env_rank=...)`. Les bots sont instanciés dynamiquement à partir de `training_config` (`bot_training.ratios` + `bot_training.randomness`) — 7 bots disponibles : Tier 1 (Random, Greedy, Defensive, Control) et Tier 2 (AggressiveSmart, DefensiveSmart, Adaptive). Le `agent_seat_mode` détermine quel joueur l'agent contrôle (voir [Seat-Aware Training](#-seat-aware-training-p1--p2--random)).
+   - **Scénario bot** : `BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry, agent_seat_mode=..., global_seed=..., env_rank=...)`. Les bots sont instanciés dynamiquement à partir de `training_config` (`bot_training.ratios` + `bot_training.randomness`) — 5 bots disponibles : Random, Greedy, Defensive, Control, Adaptive. Le `agent_seat_mode` détermine quel joueur l'agent contrôle (voir [Seat-Aware Training](#-seat-aware-training-p1--p2--random)).
    - **Self-play** : `SelfPlayWrapper(masked_env, ...)` (autre joueur = copie du modèle, mise à jour périodique).
 5. **Monitor** : `Monitor(wrapped_env)` pour les stats d’épisode (reward, length) utilisées par TensorBoard et les callbacks.
 
@@ -318,16 +318,54 @@ Le `RewardCalculator` (`engine/reward_calculator.py`) filtre les rewards par jou
    dont le nom masquait le seul signal aligné sur la condition de victoire. Exposée en TensorBoard
    sous `reward/objective_total` et `reward/objective_share`.
 
+   **Ce que `reward/objective_share` mesure** : la part de l'objectif dans ce que l'épisode a
+   *rapporté* — `objective⁺ / (base_actions⁺ + result_bonuses⁺ + objective⁺)`, où `x⁺` est le
+   flux **positif** accumulé pas à pas. `situational` (le ±50 terminal) en est exclu : il paie le
+   résultat, pas le comportement qui y mène, et sa masse écraserait la comparaison. `penalties`
+   aussi : il est négatif, et il n'est **pas disjoint** de `base_actions` — `wait` et
+   `charge_fail` sont écrits dans les deux par `reward_calculator`, les additionner compterait
+   chaque attente deux fois.
+   Le flux positif se mesure **au pas**, jamais sur le total d'épisode : `base_actions` mélange
+   les +0,3 de chaque tir et les −0,1 de chaque attente, un agent passif peut cumuler +18 de
+   combat pour un net de −2, et filtrer ce net sur son signe jetterait les 18 points entiers du
+   dénominateur.
+
+   **Où l'accumulation se fait, et pourquoi là** : dans le MOTEUR
+   (`episode_tactical_data['reward_breakdown']`, alimenté à chaque step moteur), pas dans le
+   callback d'entraînement. Le callback ne voit qu'un `info` par step **gym**, et c'est celui du
+   dernier step **moteur** : les wrappers d'adversaire (`BotControlledEnv`, `SelfPlayWrapper`)
+   rejouent l'adversaire après l'action de l'agent et remplacent `info` par le sien, de sorte que
+   la ventilation de l'action de l'agent était jetée — et que rien du tout n'était accumulé quand
+   l'adversaire ne jouait pas. Cumulée côté moteur, elle voyage dans `info["tactical_data"]` du
+   step terminal, la voie dont les wrappers tirent déjà `episode` et `winner`.
+   Corrigé le 2026-07-31 ; les courbes antérieures ne sont pas comparables.
+
+   **Contrat d'`info` des wrappers** (`AGENT_STEP_INFO_KEYS`, `ai/env_wrappers.py`) : pour les
+   clés qui décrivent l'action de l'agent et ne peuvent PAS être cumulées côté moteur — `phase`,
+   `success`, `charge_succeeded`, `action`, `intent_value`, `is_controlled_action` — c'est le
+   wrapper qui choisit quel step moteur il expose. Il relève ces clés sur le step de l'agent et
+   les **remplace en bloc** avant de rendre la main (`apply_agent_step_info`), dans
+   `BotControlledEnv` **et** dans `SelfPlayWrapper`. Remplacer, et non mettre à jour : ces clés
+   sont optionnelles — le moteur ne les pose que quand elles s'appliquent — donc une clé posée
+   par l'adversaire mais absente du step de l'agent survivrait à un simple `update`, sous le
+   `is_controlled_action=True` recollé juste à côté (l'agent tire, l'adversaire charge, et la
+   charge est comptée pour l'agent). Tout ce qui décrit l'état de SORTIE du step gym (`episode`,
+   `tactical_data`, `winner`, `action_logs`) reste au contraire celui du dernier step moteur.
+   Sans ce report, `obs/*` rangeait ses échantillons sous la phase de l'adversaire et
+   `combat/c_charge_successes` comptait les charges de l'adversaire sous le drapeau de l'agent.
+
 3. **Reward situationnelle** (`_get_situational_reward`) :
    - `winner == controlled_player` → bonus win
    - `winner == opponent_player` → pénalité lose
    - `winner == -1` → reward draw
    - Si toutes les unités contrôlées sont éliminées (`_get_controlled_player_unit() is None`) : le penalty lose/draw est quand même appliqué via la config rewards.
 
-4. **Reward objectifs par tour** (`_calculate_objective_reward_per_turn`) : `reward_per_objective` × objectifs contrôlés, plus le **forfait** `reward_for_objective_lead` si l'agent en contrôle strictement plus que l'adversaire (forfait et non proportionnel : la règle de score correspondante du primaire, `control_more_than_opponent`, accorde ses points en une fois quelle que soit l'avance ; et un retard ne facture rien — il coûte déjà les VP non marqués). Appliqué une fois par tour, à la transition vers la phase move **du joueur contrôlé** (elle existe pour les deux joueurs : payer à celle de l'adversaire créditerait un instant que l'agent ne contrôle pas, et qui n'est pas celui où le jeu lui attribue ses VP). Le comptage est une **lecture pure** de `objective_controllers`, l'état 14.02 que le scoring vient de figer — jamais `count_controlled_objectives`, qui recalculerait et réécrirait ce contrôle depuis un chemin de récompense.
+4. **Reward objectifs par tour** (`_calculate_objective_reward_per_turn`) : `objective_reward_factor` × **les VP que la mission attribue ce tour-là**, calculés par `game_state.primary_objective_points` — la même fonction qu'appelle le moteur de scoring pour écrire les VP. La forme appartient donc à la mission (`config/primary_objective/*/Objectives_Control.json` : 5 VP si ≥1 objectif, 5 si ≥2, 5 si l'agent en tient strictement plus que l'adversaire, plafond 15/tour), et la config d'agent ne règle plus qu'une **échelle**. ⚠️ Jusqu'au 2026-08-01 le versement était `reward_per_objective × objectifs contrôlés` + un forfait d'avance : **linéaire et sans plafond** face à un escalier plafonné. Tenir 3, 4 ou 5 objectifs rapportait 10 de plus par zone alors que le jeu ne paie plus rien au-delà de 2 — l'agent était payé pour s'étaler sur des objectifs que la mission ne compte pas, au lieu de consolider et de priver l'adversaire. Appliqué une fois par tour, à la transition vers la phase move **du joueur contrôlé** (elle existe pour les deux joueurs : payer à celle de l'adversaire créditerait un instant que l'agent ne contrôle pas, et qui n'est pas celui où le jeu lui attribue ses VP). Le comptage est une **lecture pure** de `objective_controllers`, l'état 14.02 que le scoring vient de figer — jamais `count_controlled_objectives`, qui recalculerait et réécrirait ce contrôle depuis un chemin de récompense.
    ⚠️ Ce versement était **inerte avant le 2026-07-30** : le calcul était placé après le retour anticipé « réponse système » de `calculate_reward`, alors que son déclencheur (`command_phase_end`) est précisément une réponse système. Mesuré : 73 appels par épisode, 0,00 versé. La pénalité de cohérence (`_calculate_coherency_penalty_per_turn`) partageait ce site et était inerte pour la même raison ; elle est réparée avec lui.
 
-5. **Victory Points** : scorés par joueur absolu (P1 et P2 scorent indépendamment). Le winner est déterminé par comparaison VP à la fin du turn 5.
+5. **Bonus « sur un objectif »** (`_calculate_on_objective_reward`, `objective_rewards.on_objective_bonus`) : versé quand une action qui porte une destination laisse l'unité **dans** une zone d'objectif que l'agent ne contrôle pas encore (il paie la *progression* vers un contrôle, pas le maintien). La présence se juge **par figurine, sur l'empreinte de socle** (14.02), par les mêmes lecteurs que le contrôle du moteur — `objective_hex_sets` + `iter_living_model_footprints`. ⚠️ Jusqu'au 2026-08-01 il comparait la **destination d'escouade** à un hexe d'objectif par égalité stricte : une escouade étalée était comptée par `sum_objective_control_oc_multi` et **pas** payée par la récompense, dans le même état de jeu — et l'inverse. Une unité **battle-shocked** ne touche rien (01.07 : OC modifié à `-`, elle ne peut pas prendre l'objectif).
+
+6. **Victory Points** : scorés par joueur absolu (P1 et P2 scorent indépendamment). Le winner est déterminé par comparaison VP à la fin du turn 5.
 
 ### Configuration (seat)
 
@@ -635,7 +673,7 @@ Ce mode vise un **seul agent PPO** entraîné sur une distribution de situations
 - `distribution_drift_blend/mobility/weapon_profile`
 - `matchup_value_gap_mean`, `matchup_value_gap_p95`
 - `%matchups_in_strict/medium/wide_bucket`
-- métriques RL standard (`0_critical/*`, `bot_eval/*`)
+- métriques RL standard (`00_critical/*`, `bot_eval/*`)
 
 **Commande type (agent unique)**
 ```bash
@@ -896,20 +934,20 @@ Start TensorBoard:
 tensorboard --logdir=./tensorboard/
 ```
 
-#### 🎯 **Quick Start: The `0_critical/` Dashboard**
+#### 🎯 **Quick Start: The `00_critical/` Dashboard**
 
 **For immediate training monitoring, start here:**
 
-Navigate to the `0_critical/` namespace in TensorBoard - it contains **10 essential metrics** optimized for hyperparameter tuning:
+Navigate to the `00_critical/` namespace in TensorBoard - it contains **10 essential metrics** optimized for hyperparameter tuning:
 
 **Primary Metrics to Check Daily:**
-- `0_critical/a_bot_eval_combined` - **Your primary goal** (overall competence vs all bots)
-- `0_critical/b_win_rate_100ep` - Recent 100-episode performance trend
-- `0_critical/g_approx_kl` - Policy stability (<0.02 = healthy)
-- `0_critical/h_entropy_loss` - Exploration level (should decrease gradually)
-- `0_critical/e_explained_variance` - Value function quality (target: >0.70 early, >0.85 late training)
+- `00_critical/a_bot_eval_combined` - **Your primary goal** (overall competence vs all bots)
+- `00_critical/b_win_rate_100ep` - Recent 100-episode performance trend
+- `00_critical/g_approx_kl` - Policy stability (<0.02 = healthy)
+- `00_critical/h_entropy_loss` - Exploration level (should decrease gradually)
+- `00_critical/e_explained_variance` - Value function quality (target: >0.70 early, >0.85 late training)
 
-**✅ Healthy Training:** All `0_critical/` metrics trending toward targets
+**✅ Healthy Training:** All `00_critical/` metrics trending toward targets
 **⚠️ Red Flag:** Any metric outside range for 200+ episodes needs intervention
 
 **Pour le détail des métriques et le tuning**, voir [AI_METRICS.md](AI_METRICS.md).
@@ -931,8 +969,6 @@ Navigate to the `0_critical/` namespace in TensorBoard - it contains **10 essent
 | `bot_eval/` | `vs_greedy` | Performance vs GreedyBot | Improving |
 | `bot_eval/` | `vs_defensive` | Performance vs DefensiveBot | Improving |
 | `bot_eval/` | `vs_control` | Performance vs ControlBot | Improving |
-| `bot_eval/` | `vs_aggressive_smart` | Performance vs AggressiveSmartBot | Improving |
-| `bot_eval/` | `vs_defensive_smart` | Performance vs DefensiveSmartBot | Improving |
 | `bot_eval/` | `vs_adaptive` | Performance vs AdaptiveBot | Improving |
 | `bot_eval/` | `combined` | Weighted average across all 7 bots | Increasing to 0.70+ |
 
@@ -974,7 +1010,7 @@ Navigate to the `0_critical/` namespace in TensorBoard - it contains **10 essent
 
 ## 📊 MÉTRIQUES AVANCÉES ET TUNING
 
-Ce document couvre le **monitoring de base** (TensorBoard, 0_critical/, indicateurs de succès, red flags). Pour aller plus loin :
+Ce document couvre le **monitoring de base** (TensorBoard, 00_critical/, indicateurs de succès, red flags). Pour aller plus loin :
 
 - **[AI_METRICS.md](AI_METRICS.md)** — Métriques et tuning : guide de tuning rapide (tableau, problèmes courants, matrice métrique → paramètres, actions correctives, n_envs, workflow) + analyse experte (explication détaillée de chaque métrique, patterns, arbres de décision, études de cas). **À utiliser pour « quoi changer quand ça va mal » et pour le diagnostic avancé.**
 
@@ -999,6 +1035,18 @@ Ce document couvre le **monitoring de base** (TensorBoard, 0_critical/, indicate
 >    phase ni état, si bien qu'aucune de ses heuristiques de phase n'était atteinte — le bot le
 >    plus difficile du panel jouait « premier slot ouvert ».
 >
+> ⚠️ **Refonte du panel (2026-07-30) — les win-rates d'avant ne sont PAS comparables.** Trois
+> changements : (a) `AggressiveSmartBot` (doublon strict de `GreedyBot`) et `DefensiveSmartBot`
+> (jamais instancié) sont **supprimés**, avec le regroupement « palier 2 » et le scalaire
+> `bot_eval/tier2_combined` ; (b) le **déplacement** de tous les bots devient un score pondéré
+> unique `w_objective × (-d_objectif) + w_enemy × (-d_ennemi) [+ bonus de tenue]`, réglé dans
+> `config/bot_movement_weights.json` — aucun bot ne peut plus ignorer les objectifs, qui
+> décident la victoire ; (c) deux **lectures d'objectif fausses** sont corrigées : le comptage
+> relit `objective_controllers` (l'état 14.02 que le moteur écrit) au lieu de recompter des
+> ancres amies, et « suis-je sur un objectif » se lit **par figurine** sur l'empreinte de socle
+> au lieu de l'ancre d'escouade. Conséquence attendue et RECHERCHÉE : `combined` en baisse
+> (tous les bots deviennent compétitifs) — les seuils de gate doivent être recalibrés.
+>
 > **Critère de cible = définition de l'adversaire.** Chaque bot choisit désormais sa cible (tir,
 > charge, mêlée) par un critère explicite appliqué au mapping slot → escouade ennemie
 > (`get_enemy_slot_mapping`, la même source que le masque), et jamais par l'ordre des slots :
@@ -1010,15 +1058,32 @@ Ce document couvre le **monitoring de base** (TensorBoard, 0_critical/, indicate
 | GreedyBot | la plus **entamée** (achever) — identique aux trois phases |
 | DefensiveBot | la plus **menaçante** au tir et en mêlée ; charge : voir contre-charge ci-dessous |
 | ControlBot | celle qui **conteste** — la plus proche d'un objectif — aux trois phases |
-| AggressiveSmartBot | la plus **entamée** |
-| DefensiveSmartBot | la plus **menaçante** (ne charge jamais) |
 | AdaptiveBot | la plus **entamée** |
 | TacticalBot | **tuable ce tour > peu de PV > menace élevée** ; charge : l'escouade de **tir** la plus dangereuse |
 
 « Menaçante » = meilleur dégât attendu (tir ou mêlée, `NB × DMG`), même mesure que
 `RewardMapper._get_unit_threat`. « Entamée » = PV courants les plus bas.
 
-#### Tier 1 — Bots simples (comportement fixe)
+#### Géométrie de déplacement (commune, `config/bot_movement_weights.json`)
+
+`score(dest) = w_objective × (−distance_objectif) + w_enemy × (−distance_ennemi)`, plus
+`w_objective × hold_bonus` si la destination est dans une zone d'objectif. `w_enemy > 0` =
+se rapprocher, `< 0` = s'éloigner. La position courante est toujours candidate (elle l'emporte
+à égalité → WAIT), et « tenir l'objectif » est cette règle de score, plus une doctrine propre à
+`ControlBot`. `TacticalBot` garde sa géométrie ennemie propre (portée de tir / fuite si < 50 %
+PV) et n'utilise du fichier que `w_objective`, ajouté à son score.
+
+| Bot | `w_objective` | `w_enemy` |
+|---|---|---|
+| Greedy | 0.3 | +1.0 |
+| Defensive | 0.7 | −0.5 |
+| Control | 1.0 | +0.1 |
+| Adaptive (early / winning / losing) | 1.0 / 1.0 / 0.5 | +0.2 / −0.2 / +1.0 |
+| Tactical | 0.5 | — (géométrie propre) |
+
+`hold_bonus` = 3.0 (en distance-hex). `RandomBot` n'a pas de géométrie (baseline).
+
+#### Bots simples (comportement fixe)
 
 **RandomBot (Easiest)**
 - Selects random valid actions
@@ -1026,14 +1091,15 @@ Ce document couvre le **monitoring de base** (TensorBoard, 0_critical/, indicate
 - Baseline: Any competent agent should win 90%+
 
 **GreedyBot (Medium)**
-- Pousse vers l'ennemi le plus proche ; tire dès qu'il peut
+- Poussée offensive dominante, corrigée d'un attrait d'objectif ; tire dès qu'il peut
 - **Doctrine de combat : ACHEVER** — tir, charge et mêlée visent l'escouade la plus entamée
 - Charge désormais explicitement (sa charge résultait avant de la branche terminale)
 - Basic threat: Tests if agent learned shooting
 - **Supports randomness parameter** (0.0-0.3)
 
 **DefensiveBot (Medium-Hard)**
-- Se replie (s'éloigne de l'ennemi le plus proche) et tire sur la cible la plus **menaçante**
+- Se replie **vers son objectif** (le repli pur l'emmenait hors de la table) et tire sur la
+  cible la plus **menaçante**
 - **CONTRE-CHARGE (nouveau)** : il ne cherche pas la mêlée, il refuse de la subir. Quand une
   escouade ennemie de mêlée (dégât de mêlée > dégât de tir) est déjà déclarable comme cible de
   charge (11.02), elle viendra au contact de toute façon ; la laisser charger lui offrirait
@@ -1044,32 +1110,18 @@ Ce document couvre le **monitoring de base** (TensorBoard, 0_critical/, indicate
 - **Supports randomness parameter** (0.0-0.3)
 
 **ControlBot (Medium)**
-- Moves toward objectives (action 3) when off-objective, holds position once on
+- Va vers l'objectif et le tient (poids objectif fort + bonus de tenue)
 - **Cible celle qui conteste** : la plus proche d'un objectif, au tir comme en charge et en mêlée
 - Ne charge pas s'il tient déjà un objectif (il le garde)
 - Objective-focused: Tests if agent can contest/control objectives
 - **Supports randomness parameter** (0.0-0.3)
 
-#### Tier 2 — Bots intelligents (comportement contextuel)
+#### Bots contextuels
 
-**AggressiveSmartBot (Hard)**
-- Aggressive movement (action 0), always charges (action 9), advances (action 12) if no targets
-- Focus fire: lowest-HP enemy (achever les cibles faibles) — **effectif depuis le 2026-07-29
-  seulement** (cf. encadré : le critère existait mais visait un autre slot)
-- Charge et mêlée alignées sur le même critère (la plus entamée)
-- Forces l'agent à apprendre advance et charge par exposition
-
-**DefensiveSmartBot (Hard)**
-- Defensive movement (action 2) if threatened, tactical (action 1) otherwise
-- Never charges or advances — purely positional
-- Focus fire: highest-threat enemy (neutraliser les menaces) — **effectif depuis le 2026-07-29
-  seulement** (cf. encadré)
-- Mêlée : même critère que son tir (la plus menaçante)
-- Tests if agent can beat a cautious, threat-aware opponent
-
-**AdaptiveBot (Hardest des Tier 2)**
+**AdaptiveBot (le plus dur du panel d'entraînement)**
 - Adapts strategy based on game state (early/winning/losing postures)
-- Early: objective movement (action 3); Winning: defensive; Losing: aggressive + charge
+- Early : rush objectif ; **Winning : il TIENT ses objectifs** (il s'en éloignait, et d'autant
+  plus souvent une fois le comptage juste) ; Losing : agressif + charge
 - Focus fire: lowest-HP enemy — **effectif depuis le 2026-07-29 seulement** (cf. encadré)
 - Charge et mêlée alignées sur le même critère ; la posture « winning » interdit la charge
 - ⚠️ Sa posture comparait ses objectifs à ceux du joueur `1 - player`, qui n'existe pas (le
@@ -1180,7 +1232,7 @@ et verrouillée par `tests/unit/scripts/test_roster_matchup_eval_loop.py`.
 
 ### Win Rate Benchmarks
 
-| Training Stage | vs Random | vs Greedy | vs Defensive | vs Control | vs Tier 2 (avg) |
+| Training Stage | vs Random | vs Greedy | vs Defensive | vs Control | vs Adaptive |
 |----------------|-----------|-----------|--------------|------------|-----------------|
 | Start          | 30-40%    | 10-20%   | 5-15%        | 10-20%     | 0-10%           |
 | 1000 episodes  | 60-70%    | 40-50%   | 30-40%       | 35-45%     | 15-25%          |
@@ -1193,7 +1245,7 @@ et verrouillée par `tests/unit/scripts/test_roster_matchup_eval_loop.py`.
 
 ### The Problem: Pattern Exploitation vs. Robust Tactics
 
-**Symptom**: Agent performs well against simple bots (Greedy, Defensive) but fails against RandomBot or Tier 2 bots
+**Symptom**: Agent performs well against simple bots (Greedy, Defensive) but fails against RandomBot or ControlBot/AdaptiveBot
 
 **Root Cause**: The agent learned to **exploit predictable patterns** instead of developing robust tactical strategies.
 
@@ -1261,28 +1313,45 @@ DefensiveBot(randomness=0.15) # 15% chance of random action
 
 **Location**: `config/agents/<agent>/<agent>_training_config.json` → `callback_params.bot_eval_weights`
 
-**Configuration actuelle** (7 bots) :
+**Configuration actuelle** (2026-07-30, identique dans les 5 profils) :
 ```json
 "bot_eval_weights": {
-  "random": 0.10,
-  "greedy": 0.15,
-  "defensive": 0.15,
-  "control": 0.15,
-  "aggressive_smart": 0.15,
-  "defensive_smart": 0.15,
-  "adaptive": 0.15
+  "control": 0.40,
+  "adaptive": 0.20,
+  "greedy": 0.20,
+  "defensive": 0.20,
+  "tactical": 0.0
 }
 ```
+`tactical` est le holdout (V11 §10.5) : il est JOUÉ et mesuré, mais son poids nul l'exclut du
+`combined`. `random` n'est pas évalué (il l'est en entraînement seulement).
 
 **Why this helps**:
-- Evaluation couvre 7 profils tactiques distincts (Tier 1 + Tier 2)
-- Poids équilibrés entre bots — aucun bot ne domine le score
-- RandomBot conserve un poids (10%) pour détecter les régressions de base
-- Les bots Tier 2 (advance, charge, focus fire) forcent l'agent à développer des tactiques avancées
+- Evaluation couvre 5 profils tactiques distincts (4 pondérés + le holdout)
+- `ControlBot` (0.40) et `AdaptiveBot` (0.20) portent 60 % du score : ce sont les deux bots qui
+  jouent les objectifs, donc la condition de victoire
 
-**Randomness par bot** (dans `callback_params.bot_eval_randomness`) :
-- Tier 1 : `0.05` (Greedy, Defensive, Control) — peu de bruit, benchmark stable
-- Tier 2 : `0.1` (AggressiveSmart, DefensiveSmart, Adaptive) — léger bruit pour variabilité
+**Plancher `vs_control` (gate de sélection, 2026-07-30)** — `callback_params.model_gating_min_vs_control`.
+Un modèle ne peut être sauvé s'il n'atteint pas ce score contre `ControlBot`, **en plus** de
+`combined`, `worst_bot` et `worst_scenario_combined`. Raison : sur deux runs successifs le
+`combined` a MONTÉ (0.62 → 0.65) pendant que `vs_control` BAISSAIT (0.33 → 0.27) — une moyenne
+pondérée peut progresser en perdant la compétence qui décide la partie. Le plancher ne remplace
+pas les autres critères : un modèle excellent contre `control` et effondré ailleurs reste refusé.
+⚠️ **Aucun repli** : la clé doit être présente dans le profil d'entraînement de l'agent
+(`<profil>.callback_params`). Elle n'est **pas** définie dans `_training_common.json` et n'y est
+pas cherchée — un profil qui l'oublie fait lever `setup_callbacks` au lancement du run. Ce seuil
+décide si un modèle est sauvé ou jeté : c'est un choix explicite du profil qu'on lance, pas une
+valeur héritée. Mettre `0.0` pour le désarmer explicitement.
+
+⚠️ Ce plancher s'applique **même quand `model_gating_enabled` est `false`** — l'état des 5
+profils. Le conditionner au gating complet l'aurait rendu décoratif : `_evaluate_model_gate`
+rendait alors `True` sans rien regarder, et les **deux** chemins de sauvegarde (`best_combined`
+et `best_robust`) sont gardés par ce `gate_pass`. Le seul moyen de le désarmer est de le mettre
+à `0.0`. Les trois autres seuils, eux, restent conditionnés à `model_gating_enabled`.
+
+**Randomness par bot** (dans `callback_params.bot_eval_randomness`) : `0.05` pour CHAQUE bot
+pondéré, `tactical` compris malgré son poids nul — il est évalué, et l'absence d'une entrée lève
+un `KeyError` explicite (`bot_evaluation.py`, contrôle `missing_randomness`).
 
 ---
 
@@ -1299,27 +1368,27 @@ DefensiveBot(randomness=0.15) # 15% chance of random action
 ```json
 "bot_training": {
   "ratios": {
-    "random": 0.10,
-    "greedy": 0.15,
-    "defensive": 0.15,
-    "control": 0.15,
-    "aggressive_smart": 0.15,
-    "defensive_smart": 0.15,
-    "adaptive": 0.15
+    "control": 0.40,
+    "adaptive": 0.20,
+    "greedy": 0.20,
+    "defensive": 0.20,
+    "random": 0.05
   },
   "randomness": {
-    "greedy": 0.05,
-    "defensive": 0.05,
     "control": 0.05,
-    "aggressive_smart": 0.1,
-    "defensive_smart": 0.1,
-    "adaptive": 0.1
+    "adaptive": 0.05,
+    "greedy": 0.05,
+    "defensive": 0.05
   }
 }
 ```
 
-- **ratios**: Must sum to 1.0. Distribution identique entre eval et training pour cohérence.
-- **randomness**: Format unifié (dict imbriqué). Tier 1 = `0.05`, Tier 2 = `0.1`.
+- **ratios**: distribution alignée sur `bot_eval_weights` (mêmes bots, mêmes poids) plus `random`.
+  Les ratios ne sont pas normalisés par le code : ils sont convertis en effectifs
+  (`round(ratio × 10)`, `random` au minimum à 1), d'où un pool de 11 bots — control ×4,
+  adaptive/greedy/defensive ×2, random ×1.
+- **randomness**: Format unifié (dict imbriqué), `0.05` pour chaque bot pondéré. Aucun défaut :
+  un bot présent dans `ratios` sans entrée `randomness` lève.
 
 **Defaults** when `bot_training` is omitted: 20% Random, 40% Greedy, 40% Defensive (legacy).
 
@@ -1362,8 +1431,8 @@ Watch these metrics in TensorBoard:
 bot_eval/vs_random      - Should improve from -0.5 to 0.0+
 bot_eval/vs_greedy      - Should stay around 0.05-0.1
 bot_eval/vs_defensive   - Should stay around 0.1-0.15
-0_critical/a_bot_eval_combined  - Overall score (primary goal)
-0_critical/b_win_rate_100ep     - Training win rate
+00_critical/a_bot_eval_combined  - Overall score (primary goal)
+00_critical/b_win_rate_100ep     - Training win rate
 ```
 
 **✅ Healthy performance**: All three bots within 0.2 reward range of each other; `bot_eval_combined` and `win_rate_100ep` trend together
@@ -1398,7 +1467,7 @@ every N episodes:
         - 40% current agent
         - 10% RandomBot
         - 15% GreedyBot + 15% DefensiveBot + 15% ControlBot
-        - 15% AggressiveSmartBot + 15% DefensiveSmartBot + 15% AdaptiveBot
+        - 20% AdaptiveBot
 ```
 
 This forces continuous adaptation and prevents exploitation strategies.
@@ -1410,9 +1479,9 @@ This forces continuous adaptation and prevents exploitation strategies.
 | Setting | Value | Location | Impact |
 |--------|-------|----------|--------|
 | Tier 1 bots (eval) | randomness=0.05 | `training_config.json` → `bot_eval_randomness` | Benchmark stable |
-| Tier 2 bots (eval) | randomness=0.10 | `training_config.json` → `bot_eval_randomness` | Variabilité contrôlée |
+| Bots pondérés (eval) | randomness=0.05 | `training_config.json` → `bot_eval_randomness` | Variabilité contrôlée |
 | Tier 1 bots (training) | randomness=0.05 | `training_config.json` → `bot_training.randomness` | Adversaires forts |
-| Tier 2 bots (training) | randomness=0.10 | `training_config.json` → `bot_training.randomness` | Adversaires variés |
+| Bots pondérés (training) | randomness=0.05 | `training_config.json` → `bot_training.randomness` | Adversaires variés |
 | Training/eval bot ratios | 7 bots, ~15% each (random 10%) | `training_config.json` | Distribution équilibrée |
 | Eval weights | 7 bots, ~15% each (random 10%) | `training_config.json` → `bot_eval_weights` | Score combiné multi-profil |
 
@@ -1765,9 +1834,44 @@ La matérialisation du disque entier (~43K hexes) n'était jamais nécessaire : 
 
 #### [2026-05] Méthode d'évaluation des optimisations perf — Référence
 
-**Métrique de référence** : `SCORE = total_s / total_calls` (ms/call), calculé automatiquement par `python3 engine/perf_timing.py <log>` et sauvegardé dans `<log>.score.json`.
+**Métrique de référence** : la colonne **`ms/ep`** (coût de l'événement par épisode), affichée ligne par ligne par `python3 engine/perf_timing.py <log>` et sauvegardée sous `ms_per_episode` dans `<log>.score.json`. On compare une ligne à elle-même entre deux runs, jamais un total. **Elle exige un échantillon** : 192 épisodes minimum, et un delta inférieur à ~15 % ne conclut rien (voir « Stabilité » plus bas). Pour un gain plus fin, l'A/B entrelacé est le seul outil valable.
 
-**Stabilité mesurée** : 3 runs consécutifs identiques donnent 13.1587 / 13.2009 / 13.1808 ms/call → variance ±0.16%. Un delta > 1% est significatif.
+**Pourquoi pas le `SCORE` ms/call** — il reste affiché mais n'est qu'indicatif, pour deux raisons :
+- c'est une moyenne **par appel** : une optimisation qui *supprime* des appels (déduplication de masque, cache — le cas courant ici) la fait **monter** alors que le temps réel baisse ;
+- son numérateur additionne des timers **imbriqués** (`CHARGE_PHASE_START` ⊃ pool de charge ⊃ `CHARGE_REVERSE_GOAL_BFS`), donc ~20 % du total est compté deux fois sur un log x1 typique, et un gain sur le BFS interne s'y affiche au double de sa valeur.
+
+**Dénominateur** : un épisode est identifié par `(pid, episode_number)`. En vectorisé, chaque worker `SubprocVecEnv` a son propre compteur et tous appendent dans le même fichier ; sans le `pid` (ajouté à chaque ligne), l'agrégation fusionnait les épisodes homonymes de N processus et sous-comptait l'échantillon d'un facteur N.
+
+**Épisodes tronqués** : le dernier épisode de chaque processus est coupé net par l'arrêt du run — fraction de temps au numérateur, épisode entier au dénominateur. L'agrégateur l'écarte des deux côtés du ratio et l'annonce (`ℹ️ n épisode(s) écarté(s)`). Sans ça, `ms/ep` était biaisé à la baisse de ~3 % sur un échantillon de 17 épisodes.
+
+**Stabilité — mesurée, par métrique** :
+- `ms/call` : 3 runs consécutifs identiques → 13.1587 / 13.2009 / 13.1808, variance ±0.16 %, delta > 1 % significatif. Ce seuil vaut **pour cette métrique-là uniquement**, et elle reste aveugle à la suppression d'appels.
+- `ms/ep` : mesurée le 2026-07-31, 3 runs identiques par taille d'échantillon (commande ci-dessous). Le bruit vient du **contenu** des parties — scénario tiré, rosters, déroulé — que `ms/call` absorbait en normalisant par le volume d'appels. Il faut donc un échantillon d'épisodes, pas seulement un run :
+
+| Ligne | 48 épisodes (étendue) | 192 épisodes (étendue) |
+|---|---|---|
+| `MOVE_POOL_BUILD` | 12,2 % | **5,7 %** |
+| `CHARGE_PHASE_START` | 26,7 % | **4,5 %** |
+| `CHARGE_BUILD_POOL` | 31,7 % | **5,7 %** |
+| `WEAPON_AVAILABILITY_CHECK` | 28,2 % | **9,6 %** |
+| `CHARGE_HAS_VALID_TARGET` | 47,4 % | **9,8 %** |
+| `CHARGE_REVERSE_GOAL_BFS` | 61,0 % | **12,8 %** |
+| `CHARGE_DEST_BFS` | 107 % | 64 % — ininterprétable, ~40 appels |
+
+**Seuils à retenir** :
+- **48 épisodes : inutilisable.** Une ligne peut bouger de 60 % sans qu'il se soit rien passé.
+- **192 épisodes : un delta doit dépasser ~15 %** pour être concluant sur un simple avant/après (~7 % pour `MOVE_POOL_BUILD` et `CHARGE_PHASE_START`). En dessous, ne rien conclure.
+- **Ignorer toute ligne sous ~0,1 ms/ep** : à quelques dizaines d'appels, le bruit dépasse le signal quelle que soit la durée du run.
+- Pour un gain attendu plus fin que ces seuils, ne pas chercher à allonger le run : passer à l'**A/B entrelacé** (`scripts/ab_bench.py`), qui compare le même travail dans deux versions du code au lieu de deux échantillons de parties différentes.
+
+**Commande de la mesure de stabilité** (3 fois de suite, dans un worktree pour ne pas écraser `ai/models/`) :
+```bash
+W40K_PERF_TIMING=1 W40K_PERF_TIMING_MIN_EPISODE=2 W40K_PERF_TIMING_LOG=stab_N.log \
+  python3 ai/train.py --agent ArmageddonAgent --training-config x1_debug --scenario bot \
+  --new --total-episodes 192 --param n_envs 4 --resolution 1
+python3 engine/perf_timing.py stab_N.log     # -> stab_N.log.score.json, clé ms_per_episode
+```
+Coût : 2 min 11 s par run (mesuré), soit ~7 min pour les trois.
 
 **Commande benchmark** :
 ```bash
@@ -1777,7 +1881,28 @@ W40K_PERF_TIMING=1 W40K_PERF_TIMING_LOG=perf_timing_bench_x10.log W40K_PERF_TIMI
   --new --resolution 10 && python3 engine/perf_timing.py perf_timing_bench_x10.log
 ```
 
-**Pourquoi pas `s/ep`** : CV=36% sur x10_debug → il faut ≥50 épisodes pour ±10% IC95%. Le SCORE ms/call est stable sur 192 épisodes car il normalise par le volume total de calls — indépendant du nombre d'épisodes terminés et de la composition des rosters.
+**Pourquoi pas le `s/ep` de la barre de progression** : c'est la durée wall-clock d'un épisode **sur un slot d'env**, attente de synchronisation des autres envs comprise ([training_callbacks.py:399](../ai/training_callbacks.py#L399)). C'est une *latence*, pas un débit, et elle croît mécaniquement avec `n_envs` : mesuré 2,24 s/ep à `n_envs=6` contre 2,61 à `n_envs=8`, alors que le run à 8 était le plus rapide (37 s contre 42 s pour 100 épisodes). Elle a en outre un CV=36 % sur x10_debug → ≥50 épisodes pour ±10 % IC95 %. Pour comparer deux valeurs de `n_envs`, utiliser `scripts/ab_bench_nenvs.py` (débit wall, entrelacé) ; pour en classer plusieurs, `scripts/ab_sweep_nenvs.py` (tours à ordre inversé, échéance horaire).
+
+**Ni le `[MM:SS<` de la barre, ni le CPU** — les deux ont été retirés des bancs le 2026-08-01 après avoir été pris en défaut :
+- le compteur `[MM:SS<` est rétro-daté de `total_episode_duration_seconds`, qui additionne la durée de chaque épisode de **chaque slot** ([training_callbacks.py:419](../ai/training_callbacks.py#L419)) puis sert d'origine au chronomètre ([:432](../ai/training_callbacks.py#L432)). Cette somme vaut ~`n_envs` fois le temps réellement écoulé, donc la barre part d'un passé fictif. Mesuré : à `n_envs=16`, « boucle » 684 s pour un wall total de 664 s, soit un démarrage de **−19,5 s**. La part de démarrage n'est pas isolable par ce biais ;
+- `getrusage(RUSAGE_CHILDREN)` ne compte que les descendants attendus ; les workers `SubprocVecEnv`, arrêtés en fin de run, en sortent. Mesuré : 33,7 s de CPU pour 530 s de wall à `n_envs=48`, impossible avec 48 processus actifs. Le CPU reste valide dans `ab_bench.py`, dont le processus mesuré (`refactor_fingerprint.py`) est mono-processus.
+
+##### [2026-08] Classement de `n_envs` — 8 tours, 31 runs, 5,4 h ✅ Mesuré
+
+Machine 8 cœurs / 40 Go, `ArmageddonAgent` phase `x1`, 144 épisodes par run, évaluation bot désactivée. Débit relatif au pivot `n_envs=6`, médiane sur 7 tours (tour de chauffe écarté) :
+
+| `n_envs` | débit relatif | étendue | débit absolu | 144 épisodes |
+|---|---|---|---|---|
+| **48** | **1,435** | 1,366–1,626 | 0,285 ep/s | 8,4 min |
+| 16 | 1,238 | 1,214–1,345 | 0,251 ep/s | 9,6 min |
+| 8 | 1,098 | 0,997–1,185 | 0,219 ep/s | 11,0 min |
+| 6 | 1,000 | — | 0,201 ep/s | 12,0 min |
+
+- **`48` est ~43 % plus rapide que `6`**, et les étendues de `48`, `16` et `8` sont disjointes : ces rangs sont tranchés. `8` contre `6` ne l'est pas (étendue 0,997–1,185, elle enjambe l'égalité), bien que 6 tours sur 7 donnent l'avantage à `8`.
+- **Plus d'environnements que de cœurs reste gagnant** : 48 processus sur 8 cœurs battent 6 processus de 43 %. Le goulot n'est donc pas le CPU de collecte. Consommation à `n_envs=48` : 16 Go libres au creux sur 40, aucune saturation.
+- **Aucun plateau atteint** : les gains successifs sont +10 % (6→8), +13 % (8→16), +16 % (16→48). L'optimum est au-delà de 48, non mesuré. Deux limites à surveiller au-delà : la mémoire, et `n_steps` par env qui vaut `8192 // n_envs` — 170 pas à 48, 85 à 96, ce qui fragmente le lot d'apprentissage.
+- **Ce banc mesure le débit, pas la qualité d'apprentissage.** Le budget de collecte est fixe (8192 pas par mise à jour) : à 48 envs chacun fournit ~2 parties par mise à jour, contre ~18 à 6 envs. La composition du lot n'est pas la même, et cet effet-là n'est pas mesuré ici.
+- Écart résiduel non corrigé : `effective_n_steps = base_n_steps // n_envs` est une division entière ([train.py:2862](../ai/train.py#L2862)) alors que le message annonce `base_n_steps`. Total réel par mise à jour : 8190 à `n_envs=6`, 8192 à 8 et 16, **8160** à 48 — écart max 0,4 %, sans effet sur le classement.
 
 ---
 
@@ -2179,9 +2304,9 @@ Recommandation:
 - Suivre:
   - `bot_eval/combined`,
   - `bot_eval/worst_bot_score`,
-  - `0_critical/b_win_rate_100ep`,
-  - `0_critical/g_approx_kl`,
-  - `0_critical/f_clip_fraction`.
+  - `00_critical/b_win_rate_100ep`,
+  - `00_critical/g_approx_kl`,
+  - `00_critical/f_clip_fraction`.
 
 ---
 
@@ -2255,10 +2380,11 @@ Notes:
 But: obtenir une première estimation rapide de difficulté.
 
 1. Nettoyer sorties matchup précédentes (`scenarios/.../matchups/*.json`, `rosters/.../matchups/*.json`).
-2. Lancer 3 jobs en parallèle (un par bot):
+2. Lancer un job par bot de `RANKING_BOTS` (scripts/roster_aggregate_rankings.py), en parallèle :
+   - `control`,
+   - `adaptive`,
    - `greedy`,
-   - `defensive_smart`,
-   - `adaptive`.
+   - `defensive`.
 3. Utiliser `--episodes 12` (ou 10/12) pour réduire le temps.
 
 Important:

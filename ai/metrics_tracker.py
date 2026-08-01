@@ -35,9 +35,72 @@ import numpy as np
 from collections import deque
 from torch.utils.tensorboard.writer import SummaryWriter
 import os
-from typing import Dict, Any, List, Optional, Protocol
+from typing import Any, Deque, Dict, List, Optional, Protocol, Sequence, Tuple, Tuple
 from shared.data_validation import require_key
 from config_loader import get_config_loader
+
+
+#: Largeur de la fenetre glissante des metriques zone-intent, en EPISODES.
+#:
+#: Le nombre de free steps par episode a un ecart-type de ~18,5 sur un run de reference, ce qui
+#: rend la valeur brute illisible. Moyenner sur 100 episodes ramene l'ecart-type des moyennes a
+#: ~0,94 ; 200 episodes ne descendent qu'a ~0,87 et 830 (un rollout) qu'a ~0,78 : le gain est
+#: epuise bien avant. Constante FIXE et non derivee de n_steps/n_envs, pour que la courbe reste
+#: comparable entre configurations d'entrainement.
+#:
+#: La largeur porte aussi I(intent ; controle) : ~2000 free steps pour 9 cellules, soit un biais
+#: positif de la mesure empirique de ~0,001 bit. Reduire cette constante degraderait ce biais.
+ZONE_INTENT_WINDOW_EPISODES = 100
+
+#: Etats de controle d'un objectif renvoyes par `engine.macro_intents.get_objective_control`
+#: (-1.0 adversaire, 0.0 neutre/conteste, 1.0 joueur courant), remappes en index 0..2.
+ZONE_CONTROL_CARDINALITY = 3
+
+#: INTENT_INVADE / INTENT_DEFEND / INTENT_ATTACK.
+INTENT_CARDINALITY = 3
+
+
+def validate_perf_windows(perf_window: int, perf_window_fast: int) -> tuple[int, int]:
+    """Controle le couple de fenetres de lissage et le retourne en entiers.
+
+    Egales, les deux fenetres DESACTIVENT le doublon reactif : `_emit_windowed` ne l'emet
+    qu'a fenetre strictement plus courte, sans quoi le dashboard afficherait deux courbes
+    superposees qui se liraient comme une confirmation mutuelle alors qu'elles n'en sont
+    qu'une. C'est un reglage legitime, pas une tolerance : c'est ainsi qu'on revient a une
+    seule courbe par mesure. Une fenetre reactive PLUS LONGUE que la fenetre de fond n'a en
+    revanche aucun sens et leve.
+    """
+    window = int(perf_window)
+    fast = int(perf_window_fast)
+    if window < 1 or fast < 1:
+        raise ValueError(
+            f"metrics_smoothing windows must be >= 1 (got perf_window={window}, "
+            f"perf_window_fast={fast})"
+        )
+    if fast > window:
+        raise ValueError(
+            f"metrics_smoothing.perf_window_fast ({fast}) cannot exceed perf_window "
+            f"({window}) — the reactive curve must not be smoother than the baseline."
+        )
+    return window, fast
+
+
+def resolve_perf_windows(training_config: Dict[str, Any]) -> tuple[int, int]:
+    """Fenetres de lissage lues dans le training config de l'agent. Cles EXIGEES.
+
+    La section `metrics_smoothing` se met a `null` dans un profil pour hériter de
+    config/agents/_training_common.json, comme les autres reglages partages.
+    """
+    smoothing = require_key(training_config, "metrics_smoothing")
+    if not isinstance(smoothing, dict):
+        raise TypeError(
+            f"training_config.metrics_smoothing must be a mapping "
+            f"(got {type(smoothing).__name__})"
+        )
+    return validate_perf_windows(
+        require_key(smoothing, "perf_window"),
+        require_key(smoothing, "perf_window_fast"),
+    )
 
 
 class MetricsWriter(Protocol):
@@ -77,15 +140,84 @@ class W40KMetricsTracker:
     Tracks essential training metrics for W40K agents with tensorboard integration.
     Streamlined to 20 critical metrics, removing redundant calculations.
     """
-    
+
+    #: Fenetres de lissage des courbes de PERFORMANCE. Deux fenetres par mesure, jamais une :
+    #:   - PERF_WINDOW      : la fenetre de fond, celle qui tranche une tendance ;
+    #:   - PERF_WINDOW_FAST : le doublon reactif, tag suffixe `_100ep`, qui montre l'evolution
+    #:                        recente et repond des le centieme episode.
+    #: AUCUN point n'est emis tant que la fenetre n'est pas PLEINE. La version precedente
+    #: retournait la moyenne de TOUT l'historique sous la fenetre : les 500 premiers points de
+    #: chaque courbe etaient une moyenne cumulative, qui converge en DESCENDANT depuis son
+    #: echantillon de depart bruite. Cette descente ne mesure que le remplissage de la fenetre,
+    #: mais elle a l'allure exacte d'un agent qui se degrade — et elle a ete lue comme telle.
+    #: Un point absent ne ment pas ; un point qui n'a pas le meme sens que son voisin, si.
+    #: Les deux valeurs viennent du training config de l'agent (`metrics_smoothing`, cf.
+    #: `resolve_perf_windows`) : elles se regient par run, sans toucher au code. Elles sont
+    #: posees sur l'INSTANCE par __init__ — la classe n'en porte aucune, pour qu'un appelant
+    #: qui oublierait de les fournir tombe tout de suite au lieu d'hériter d'un 500 muet.
+
+    #: Series accumulees par `_game_push` et emises sur deux fenetres par `_emit_game`
+    #: (dashboards 01_VP/ et 02_combat/).
+    #: Constante de classe et non litteral dans __init__ : les doublures de test qui
+    #: reconstruisent l'objet a la main recopiaient la liste, et toute courbe ajoutee ici
+    #: les faisait tomber en KeyError sur un detail sans rapport avec ce qu'elles testent.
+    GAME_HISTORY_KEYS = (
+        'vp_diff', 'vp_bot', 'objectives_held', 'objectives_held_diff',
+        'kill_rewards', 'obj_rewards',
+        'models_killed_ratio', 'models_lost_ratio',
+        'value_killed_ratio', 'value_lost_ratio',
+        'units_killed_ratio', 'units_lost_ratio',
+        'value_destroyed', 'value_lost',
+        'shoot_kills', 'melee_kills', 'shoot_value_killed', 'melee_value_killed',
+    )
+
+    #: Modes de deploiement ventiles (cf. `deployment_mode_schedule`, w40k_core).
+    DEPLOY_MODES = ('active', 'fixed')
+
+    #: Series ventilees par mode de deploiement -> prefixe de tag 00_critical.
+    #: Le mode est SUFFIXE au tag (`..._active` / `..._fixed`) et non porte par une lettre
+    #: distincte : les deux courbes d'une meme mesure se trient alors cote a cote et se
+    #: superposent d'un clic, ce qui est la seule lecture qui reponde a la question posee.
+    #:
+    #: POURQUOI CETTE VENTILATION. `deployment_mode_schedule` fait monter la part d'episodes en
+    #: deploiement ACTIF de 0% a 80% sur la duree du run. La tache mesuree change donc en
+    #: continu, alors que l'EVALUATION, elle, impose toujours un deploiement. Une courbe agregee
+    #: melange les deux populations dans des proportions mouvantes : elle s'aplatit et se
+    #: disperse quand l'agent progresse mais que la tache durcit a la meme vitesse, ce qui est
+    #: indiscernable d'un agent qui plafonne. Ventilee, chaque population redevient lisible.
+    #:
+    #: Trois series et non huit : 00_critical en compte deja une douzaine, et doubler la
+    #: categorie la rend illisible. `vp_diff` et `value_trade_ratio` sont ecartees comme
+    #: largement redondantes avec la difference d'objectifs et la recompense.
+    DEPLOY_SPLIT_SERIES = {
+        'reward': '00_critical/p_reward_deploy',
+        'obj_held_diff': '00_critical/q_obj_held_diff_deploy',
+        'win': '00_critical/r_win_rate_deploy',
+    }
+
+    #: Cle d'historique `_game_history` -> serie ventilee. Le branchement se fait dans
+    #: `_emit_game`, point de passage UNIQUE des courbes 01_VP/ et 02_combat/ : ventiler sur les
+    #: huit sites d'appel aurait laisse diverger l'appariement tag <-> historique, qui est
+    #: precisement ce que `_emit_ratio` documente comme se cassant en silence.
+    DEPLOY_SPLIT_GAME_KEYS = {
+        'objectives_held_diff': 'obj_held_diff',
+    }
+
+
     def __init__(
         self,
         agent_key: str,
         log_dir: str = "./tensorboard/",
         initial_episode_count: int = 0,
         initial_step_count: int = 0,
-        show_banner: bool = True
+        show_banner: bool = True,
+        *,
+        perf_window: int,
+        perf_window_fast: int,
     ):
+        self.PERF_WINDOW, self.PERF_WINDOW_FAST = validate_perf_windows(
+            perf_window, perf_window_fast
+        )
         self.agent_key = agent_key
         self.log_dir = os.path.join(log_dir, agent_key)
         self.writer: MetricsWriter = SummaryWriter(self.log_dir)
@@ -102,14 +234,13 @@ class W40KMetricsTracker:
         _rewards_cfg = _config_loader.load_agent_rewards_config(_base_key)
         _agent_rewards = require_key(_rewards_cfg, _base_key)
         _objective_rewards = require_key(_agent_rewards, "objective_rewards")
-        self.reward_per_objective: float = float(
-            require_key(_objective_rewards, "reward_per_objective")
-        )
-        # Le terme d'AVANCE fait partie du versement (cf. _calculate_objective_reward_per_turn) :
-        # l'omettre sous-estimerait d_obj_rewards de la moitie du montant reel.
-        self.use_objective_lead: bool = bool(require_key(_objective_rewards, "use_objective_lead"))
-        self.reward_for_objective_lead: float = float(
-            require_key(_objective_rewards, "reward_for_objective_lead")
+        # Facteur d'echelle du versement d'objectif : le reward vaut EXACTEMENT ce facteur fois
+        # les VP marques (cf. _calculate_objective_reward_per_turn). Les trois reglages qui
+        # occupaient cette place (reward_per_objective / use_objective_lead /
+        # reward_for_objective_lead) decrivaient une formule LINEAIRE que ce fichier rejouait sur
+        # les echantillons — un miroir de la formule du moteur, donc une divergence en attente.
+        self.objective_reward_factor: float = float(
+            require_key(_objective_rewards, "objective_reward_factor")
         )
         self.reward_kill_target: float = float(
             require_key(require_key(_agent_rewards, "result_bonuses"), "kill_target")
@@ -131,14 +262,6 @@ class W40KMetricsTracker:
         self.episode_count = initial_episode_count
         self.step_count = initial_step_count
         
-        # NEW: Reward decomposition tracking
-        self.reward_components = {
-            'base_actions': [],
-            'result_bonuses': [],
-            'objective': [],
-            'situational': [],
-            'penalties': []
-        }
 
         # L'accumulateur self.position_scores occupait cette place, avec log_position_score et
         # les deux courbes qu'il alimentait (game_tactical/avg_position_score,
@@ -181,12 +304,12 @@ class W40KMetricsTracker:
             'victory_points_cumulative': 0.0  # Cumulative victory points at episode end
         }
 
-        # Rolling history for smoothed combat metrics
+        # Rolling history for smoothed combat metrics. Ne restent ici que les series a fenetre
+        # NON standard : les kills et VALUE par phase, tous lisses sur 500 comme le reste du
+        # dashboard, sont passes a `_game_history` / `_emit_game`, qui fait exactement le
+        # meme append + fenetre + moyenne — deux mecaniques de lissage identiques cote a cote
+        # obligeaient chaque nouvelle courbe a choisir entre elles sans raison.
         self.combat_history = {
-            'shoot_kills': [],
-            'melee_kills': [],
-            'shoot_value_killed': [],
-            'melee_value_killed': [],
             'charge_successes': [],
             'victory_points_cumulative': []
         }
@@ -202,18 +325,25 @@ class W40KMetricsTracker:
             'explained_variances': []  # For tuning dashboard
         }
         
-        # NEW: Gradient norm tracking for 0_critical/ dashboard
+        # NEW: Gradient norm tracking for 00_critical/ dashboard
         self.latest_gradient_norm = None
         
-        # NEW: Bot evaluation combined score for 0_critical/ dashboard
+        # NEW: Bot evaluation combined score for 00_critical/ dashboard
         self.bot_eval_combined = None
 
-        # Phase 2: Zone intent metrics (sliding window, reset after each log interval)
-        self._intent_invade_count = 0
-        self._intent_defend_count = 0
-        self._intent_attack_count = 0
-        self._intent_zone_steps_total = 0
-        self._episodes_in_window = 0
+        # Phase 2 : metriques zone-intent, fenetre GLISSANTE de ZONE_INTENT_WINDOW_EPISODES
+        # episodes, loggee a CHAQUE fin d'episode comme toutes les autres courbes 00_critical.
+        #
+        # `_zone_steps_since_episode_end` accumule les free steps ecoulés entre deux fins
+        # d'episode, toutes instances d'environnement confondues. C'est volontaire : le tracker
+        # est unique et recoit n_envs episodes entrelaces, donc AUCUN free step n'est
+        # attribuable a un episode precis. Seul le ratio steps/episodes sur une fenetre a un
+        # sens ; une lecture point-par-point de cette courbe n'en a jamais eu.
+        #
+        # La table de contingence controle x intent suit la meme fenetre, une entree par episode
+        # ecoule. Elle sert a I(intent ; controle) : 0 bit = le choix d'intent est independant de
+        # l'etat du plateau, donc la tete zone-intent n'a rien appris.
+        self._reset_zone_intent_state()
 
         # Unit-rule forcing instrumentation (episode exposure + bot-eval impact)
         self.forcing_tracking = {
@@ -226,19 +356,26 @@ class W40KMetricsTracker:
             'baseline_worst_bot': None,      # first worst_bot_score after forcing exposure starts
         }
         
-        # NEW: Latest VALUE trade ratio for 0_critical/ dashboard
-        self.latest_value_trade_ratio = None
-        self.value_trade_ratio_history: List[float] = []
 
-        # Rolling histories for 0_VP/ + 0_combat/ smoothing (window=500)
-        self._game_history: Dict[str, List[float]] = {
-            'vp_diff': [], 'vp_bot': [], 'objectives_held': [],
-            'objectives_held_diff': [],
-            'kill_rewards': [], 'obj_rewards': [],
-            'models_killed_ratio': [], 'models_lost_ratio': [],
-            'value_killed_ratio': [], 'value_lost_ratio': [],
-            'units_killed_ratio': [], 'units_lost_ratio': [],
+        # Rolling histories for 01_VP/ + 02_combat/ smoothing (window=500)
+        self._game_history: Dict[str, List[float]] = {k: [] for k in self.GAME_HISTORY_KEYS}
+
+        # Ventilation par mode de deploiement (cf. DEPLOY_SPLIT_SERIES). Un historique PAR mode :
+        # la fenetre de lissage compte donc PERF_WINDOW episodes DE CE MODE, et les deux courbes
+        # n'ont pas le meme axe temporel. C'est voulu — une fenetre raccourcie pour le mode rare
+        # rendrait les deux series non comparables entre elles, ce qui est pire que le decalage.
+        self._deploy_history: Dict[str, Dict[str, List[float]]] = {
+            series: {mode: [] for mode in self.DEPLOY_MODES}
+            for series in self.DEPLOY_SPLIT_SERIES
         }
+        #: 1.0 par episode en deploiement actif, 0.0 en fixe. Moyenne glissante = part reelle
+        #: d'episodes actifs, seule lecture qui permette d'interpreter l'ecart entre les deux
+        #: courbes de chaque serie.
+        self._deploy_active_flags: List[float] = []
+        #: Mode de l'episode en cours de log, pose en tete de `log_episode_end` AVANT toute
+        #: emission. None = scheduler inactif -> aucune courbe ventilee n'est ecrite (pas de
+        #: bucket par defaut qui melangerait des episodes hors perimetre).
+        self._episode_deploy_mode: Optional[str] = None
         
         # `self.episode_tactical_data` (total_actions / invalid_actions / valid_actions a 0)
         # occupait cette place. Aucun ecrivain : les compteurs d'actions vivent dans
@@ -260,32 +397,32 @@ class W40KMetricsTracker:
         if show_banner:
             print(f"✅ Metrics tracker initialized for {agent_key} -> {self.log_dir}")
             print(f"📊 Metric System:")
-            print(f"   🎯 0_critical/ (13) - Essential hyperparameter tuning metrics")
+            print(f"   🎯 00_critical/ (20) - Essential hyperparameter tuning metrics")
             print(f"   🎮 game_critical/ (5) - Core gameplay indicators")
             print(f"   ⚙️  training_critical/ (6) - PPO algorithm health")
-            print(f"   💡 TIP: Start with 0_critical/ - everything you need for tuning")
+            print(f"   💡 TIP: Start with 00_critical/ - everything you need for tuning")
     
     def _setup_custom_scalars_layout(self) -> None:
         """Register Custom Scalars dashboard layout in TensorBoard (called once at init)."""
         layout = {
-            "0_critical + Seuils": {
+            "00_critical + Seuils": {
                 "g_explained_variance": ["Multiline", [
-                    "0_critical/g_explained_variance",
+                    "00_critical/g_explained_variance",
                     "thresholds/explained_variance_min",
                 ]],
                 "h_clip_fraction": ["Multiline", [
-                    "0_critical/h_clip_fraction",
+                    "00_critical/h_clip_fraction",
                     "thresholds/clip_fraction_min",
                     "thresholds/clip_fraction_max",
                     "thresholds/clip_fraction_warn",
                 ]],
                 "i_approx_kl": ["Multiline", [
-                    "0_critical/i_approx_kl",
+                    "00_critical/i_approx_kl",
                     "thresholds/kl_min",
                     "thresholds/kl_max",
                 ]],
                 "j_entropy_loss": ["Multiline", [
-                    "0_critical/j_entropy_loss",
+                    "00_critical/j_entropy_loss",
                     "thresholds/entropy_target_min",
                     "thresholds/entropy_target_max",
                 ]],
@@ -294,7 +431,7 @@ class W40KMetricsTracker:
         self.writer.add_custom_scalars(layout)
 
     def _log_thresholds(self, step: int) -> None:
-        """Log constant threshold reference lines for 0_critical metrics."""
+        """Log constant threshold reference lines for 00_critical metrics."""
         self.writer.add_scalar("thresholds/explained_variance_min", 0.30, step)
         self.writer.add_scalar("thresholds/clip_fraction_min", 0.10, step)
         self.writer.add_scalar("thresholds/clip_fraction_max", 0.30, step)
@@ -307,23 +444,41 @@ class W40KMetricsTracker:
     def log_episode_end(self, episode_data: Dict[str, Any]):
         """Log core episode metrics - reward, win rate, and episode length"""
         self.episode_count += 1
-        self._episodes_in_window += 1
 
         # Extract data
         total_reward = require_key(episode_data, 'total_reward')
         winner = require_key(episode_data, 'winner')
         episode_length = require_key(episode_data, 'episode_length')
         controlled_player = int(require_key(episode_data, 'controlled_player'))
-        
+
+        # Mode de deploiement de l'episode, pose AVANT toute emission : `_emit_game` le lit
+        # pendant `log_tactical_metrics`, appele juste apres cette methode par le callback.
+        deployment_mode = require_key(episode_data, 'deployment_mode')
+        if deployment_mode is not None and deployment_mode not in self.DEPLOY_MODES:
+            raise ValueError(
+                f"episode_data['deployment_mode'] must be one of {self.DEPLOY_MODES} or None "
+                f"(got {deployment_mode!r})"
+            )
+        self._episode_deploy_mode = deployment_mode
+        if deployment_mode is not None:
+            self._deploy_active_flags.append(1.0 if deployment_mode == 'active' else 0.0)
+            if len(self._deploy_active_flags) > self.PERF_WINDOW:
+                self._deploy_active_flags.pop(0)
+            self._emit_windowed(
+                '00_critical/s_deploy_active_share', self._deploy_active_flags
+            )
+
         # GAME CRITICAL: Episode reward - Individual episode rewards
         self.writer.add_scalar('game_critical/episode_reward', total_reward, self.episode_count)
         self.all_episode_rewards.append(total_reward)
-        
+        self._emit_deploy_split('reward', total_reward)
+
         # GAME CRITICAL: Win rate - Cumulative win rate (FULL DURATION)
         if winner is not None:
             agent_won = 1.0 if winner == controlled_player else 0.0
             self.all_episode_wins.append(agent_won)
             self.win_rate_window.append(agent_won)
+            self._emit_deploy_split('win', agent_won)
             if winner == -1:
                 outcome_flag = -1
             elif winner == controlled_player:
@@ -336,10 +491,8 @@ class W40KMetricsTracker:
             cumulative_win_rate = float(np.mean(self.all_episode_wins))
             self.writer.add_scalar('game_critical/win_rate_overall', cumulative_win_rate, self.episode_count)
             
-            # GAME CRITICAL: Rolling win rate (recent 100 episodes) - PRIMARY METRIC
-            if len(self.win_rate_window) >= 10:
-                rolling_win_rate = float(np.mean(self.win_rate_window))
-                self.writer.add_scalar('game_critical/win_rate_100ep', rolling_win_rate, self.episode_count)
+            # GAME CRITICAL: Rolling win rate - PRIMARY METRIC
+            self._emit_windowed('game_critical/win_rate', self.all_episode_wins)
 
             # SEAT-AWARE: cumulative win rates by controlled seat + global
             if controlled_player == 1:
@@ -398,13 +551,92 @@ class W40KMetricsTracker:
         # Flush metrics to disk
         self.writer.flush()
     
-    def _game_smooth(self, key: str, value: float, window: int = 500) -> float:
-        """Append value to rolling history and return smoothed mean."""
+    def _game_push(self, key: str, value: float) -> List[float]:
+        """Ajoute une valeur a l'historique de `key` et retourne l'historique tronque."""
         h = self._game_history[key]
         h.append(value)
-        if len(h) > window:
+        if len(h) > self.PERF_WINDOW:
             h.pop(0)
-        return float(np.mean(h))
+        return h
+
+    @staticmethod
+    def _window_mean(values: Sequence[float], window: int) -> Optional[float]:
+        """Moyenne des `window` dernieres valeurs, ou None tant que la fenetre n'est pas pleine.
+
+        Le None n'est pas une valeur manquante a remplacer : c'est le refus d'emettre un point
+        qui n'aurait pas le meme sens que les suivants (cf. PERF_WINDOW).
+        """
+        if len(values) < window:
+            return None
+        return float(np.mean(values[-window:]))
+
+    def _emit_windowed(self, tag: str, values: Sequence[float]) -> None:
+        """Emet la mesure sur ses DEUX fenetres : `tag` (fond) et `tag_<N>ep` (reactif).
+
+        Toutes les courbes de performance partagent le MEME couple de fenetres. Un litteral
+        de 200 vivait ici pour `c_charge_successes` : des que la fenetre reactive du config
+        l'a depasse, cette courbe a perdu son doublon sans que rien ne le signale — une
+        fenetre en dur dans un reglage devenu configurable ne peut que diverger de lui.
+        """
+        window = self.PERF_WINDOW
+        slow = self._window_mean(values, window)
+        if slow is not None:
+            self.writer.add_scalar(tag, slow, self.episode_count)
+        fast_window = min(self.PERF_WINDOW_FAST, window)
+        if fast_window < window:
+            fast = self._window_mean(values, fast_window)
+            if fast is not None:
+                self.writer.add_scalar(f"{tag}_{fast_window}ep", fast, self.episode_count)
+
+    def _emit_deploy_split(self, series: str, value: float) -> None:
+        """Accumule `value` dans l'historique du mode courant et emet la courbe ventilee.
+
+        Ne fait RIEN quand le mode est None : le scheduler est inactif (profil sans rampe, ou
+        scenario hors split training), donc l'episode n'appartient a aucune des deux populations
+        comparees. L'imputer d'office a `fixed` — le mode que le JSON applique alors — melerait
+        des episodes qu'aucun tirage n'a places la, et l'ecart mesure ne voudrait plus rien dire.
+        """
+        mode = self._episode_deploy_mode
+        if mode is None:
+            return
+        if mode not in self._deploy_history[series]:
+            raise ValueError(
+                f"deployment_mode must be one of {self.DEPLOY_MODES} or None (got {mode!r})"
+            )
+        history = self._deploy_history[series][mode]
+        history.append(float(value))
+        if len(history) > self.PERF_WINDOW:
+            history.pop(0)
+        self._emit_windowed(f"{self.DEPLOY_SPLIT_SERIES[series]}_{mode}", history)
+
+    def _emit_game(self, tag: str, key: str, value: float) -> None:
+        """Accumule `value` dans l'historique de `key` puis emet les deux courbes de `tag`."""
+        self._emit_windowed(tag, self._game_push(key, value))
+        # Point de branchement UNIQUE de la ventilation par mode de deploiement : toute courbe
+        # de DEPLOY_SPLIT_GAME_KEYS est ventilee ici, au moment ou sa valeur est calculee.
+        # L'emettre depuis `log_critical_dashboard` la decalerait d'un episode — ce dashboard est
+        # appele DEPUIS `log_episode_end`, donc AVANT `log_tactical_metrics` qui produit ces
+        # valeurs (cf. l'ordre des deux appels dans MetricsCollectionCallback).
+        if key in self.DEPLOY_SPLIT_GAME_KEYS:
+            self._emit_deploy_split(self.DEPLOY_SPLIT_GAME_KEYS[key], value)
+
+    def _emit_ratio(self, tag: str, key: str, numerator: float, denominator: float) -> None:
+        """Emet un ratio lisse, et RIEN si son denominateur est nul.
+
+        RESERVE aux ratios dont le denominateur est une constante de l'episode (effectif ou
+        VALUE de depart) : lisser le rapport par episode n'y perd rien, le denominateur ne
+        depend pas de ce qu'a fait l'agent. Un denominateur nul y est un etat de JEU possible
+        (aucune unite dans ce camp), pas une erreur : il n'y a rien a mesurer, et un 0.0 emis
+        a sa place se lirait comme « l'agent n'a rien detruit ».
+        Un ratio dont le denominateur est un RESULTAT d'episode ne passe pas par ici — toute
+        garde y ecarte une population entiere et biaise la courbe (cf. a_value_trade_ratio).
+
+        La forme est factorisee parce que l'appariement tag <-> cle d'historique est ce qui se
+        casse en silence quand on recopie le bloc : deux courbes se retrouvent alors melangees
+        dans la meme fenetre glissante.
+        """
+        if denominator > 0:
+            self._emit_game(tag, key, numerator / denominator)
 
     def log_tactical_metrics(self, tactical_data: Dict[str, Any]):
         """Log tactical performance metrics - combat effectiveness and decision quality"""
@@ -433,81 +665,42 @@ class W40KMetricsTracker:
         units_lost = require_key(tactical_data, 'units_lost')
         units_killed = require_key(tactical_data, 'units_killed')
 
-        # 0_COMBAT — ratios d'attrition. Les compteurs bruts (unites/figurines/VALUE) ne sont
-        # pas comparables d'un roster a l'autre : « 6 figurines tuees » ne dit rien sans
-        # l'effectif en face. Chaque ratio n'est emis que si son denominateur est > 0 ; un
-        # denominateur nul est un etat de JEU possible (aucune unite ennemie), pas une erreur.
-        total_enemy_units = require_key(tactical_data, 'total_enemies')
-        if total_enemy_units > 0:
-            self.writer.add_scalar(
-                '0_combat/k_units_killed_ratio',
-                self._game_smooth('units_killed_ratio', units_killed / total_enemy_units),
-                self.episode_count
-            )
-        total_ally_units = require_key(tactical_data, 'total_ally_units')
-        if total_ally_units > 0:
-            self.writer.add_scalar(
-                '0_combat/l_units_lost_ratio',
-                self._game_smooth('units_lost_ratio', units_lost / total_ally_units),
-                self.episode_count
-            )
-
-        # c_ et d_ sont deux fois la MEME mesure, une par camp : figurines retirees du plateau
-        # sur effectif de depart. Le compte de kills du journal ne peut pas servir de numerateur
-        # a c_ — il ignore les retraits hors attaque (hazard, coherence) que d_ compte cote
-        # allie, et les deux courbes n'auraient plus la meme base.
-        initial_ally_models = int(require_key(tactical_data, 'initial_ally_models'))
-        if initial_ally_models > 0:
-            models_lost = initial_ally_models - int(require_key(tactical_data, 'surviving_ally_models'))
-            self.writer.add_scalar(
-                '0_combat/d_models_lost_ratio',
-                self._game_smooth('models_lost_ratio', models_lost / initial_ally_models),
-                self.episode_count
-            )
-        initial_enemy_models = int(require_key(tactical_data, 'initial_enemy_models'))
-        if initial_enemy_models > 0:
-            models_killed = initial_enemy_models - int(require_key(tactical_data, 'surviving_enemy_models'))
-            self.writer.add_scalar(
-                '0_combat/c_models_killed_ratio',
-                self._game_smooth('models_killed_ratio', models_killed / initial_enemy_models),
-                self.episode_count
-            )
-
-        total_enemy_value = float(require_key(tactical_data, 'total_enemy_value'))
-        if total_enemy_value > 0:
-            self.writer.add_scalar(
-                '0_combat/e_value_killed_ratio',
-                self._game_smooth(
-                    'value_killed_ratio',
-                    float(require_key(tactical_data, 'enemy_value_destroyed')) / total_enemy_value
-                ),
-                self.episode_count
-            )
-        total_ally_value = float(require_key(tactical_data, 'total_ally_value'))
-        if total_ally_value > 0:
-            self.writer.add_scalar(
-                '0_combat/f_value_lost_ratio',
-                self._game_smooth(
-                    'value_lost_ratio',
-                    float(require_key(tactical_data, 'ally_value_lost')) / total_ally_value
-                ),
-                self.episode_count
-            )
+        # 0_COMBAT — ratios d'attrition, la MEME mesure a trois granularites (unites,
+        # figurines, VALUE) et pour les DEUX camps. Les compteurs bruts ne sont pas
+        # comparables d'un roster a l'autre : « 6 figurines tuees » ne dit rien sans
+        # l'effectif en face. Le moteur exporte partout le meme couple (perdu, effectif de
+        # depart) ; ici on ne fait que diviser.
+        # Le compte de kills du journal ne pourrait pas servir de numerateur a c_ : il ignore
+        # les retraits hors attaque (hazard, coherence) que d_ compte forcement cote allie, et
+        # les deux courbes n'auraient plus la meme base. L'attribution des kills reste sur g_/h_.
+        for tag, hist_key, numerator, denominator in (
+            ('02_combat/c_models_killed_ratio', 'models_killed_ratio',
+             float(require_key(tactical_data, 'models_killed')),
+             float(require_key(tactical_data, 'initial_enemy_models'))),
+            ('02_combat/d_models_lost_ratio', 'models_lost_ratio',
+             float(require_key(tactical_data, 'models_lost')),
+             float(require_key(tactical_data, 'initial_ally_models'))),
+            ('02_combat/e_value_killed_ratio', 'value_killed_ratio',
+             float(require_key(tactical_data, 'enemy_value_destroyed')),
+             float(require_key(tactical_data, 'total_enemy_value'))),
+            ('02_combat/f_value_lost_ratio', 'value_lost_ratio',
+             float(require_key(tactical_data, 'ally_value_lost')),
+             float(require_key(tactical_data, 'total_ally_value'))),
+            ('02_combat/k_units_killed_ratio', 'units_killed_ratio',
+             float(units_killed), float(require_key(tactical_data, 'total_enemy_units'))),
+            ('02_combat/l_units_lost_ratio', 'units_lost_ratio',
+             float(units_lost), float(require_key(tactical_data, 'total_ally_units'))),
+        ):
+            self._emit_ratio(tag, hist_key, numerator, denominator)
 
         # Kill breakdown by phase (from engine action_logs via tactical_data — reliable, per-episode per-env)
         if 'shoot_kills' in tactical_data and 'melee_kills' in tactical_data:
             shoot_kills = int(tactical_data['shoot_kills'])
             melee_kills = int(tactical_data['melee_kills'])
-            self.combat_history['shoot_kills'].append(shoot_kills)
-            if len(self.combat_history['shoot_kills']) > 500:
-                self.combat_history['shoot_kills'].pop(0)
-            self.combat_history['melee_kills'].append(melee_kills)
-            if len(self.combat_history['melee_kills']) > 500:
-                self.combat_history['melee_kills'].pop(0)
-            self.writer.add_scalar('0_combat/g_shoot_model_kills', self._calculate_smoothed_metric(self.combat_history['shoot_kills'], window_size=500), self.episode_count)
-            self.writer.add_scalar('0_combat/h_melee_model_kills', self._calculate_smoothed_metric(self.combat_history['melee_kills'], window_size=500), self.episode_count)
+            self._emit_game('02_combat/g_shoot_model_kills', 'shoot_kills', shoot_kills)
+            self._emit_game('02_combat/h_melee_model_kills', 'melee_kills', melee_kills)
             kill_rewards_ep = (shoot_kills + melee_kills) * self.reward_kill_target
-            self.writer.add_scalar('0_combat/b_kill_rewards', self._game_smooth('kill_rewards', kill_rewards_ep), self.episode_count)
+            self._emit_game('02_combat/b_kill_rewards', 'kill_rewards', kill_rewards_ep)
 
             # VALUE des figurines tuees, ventilee par phase : g_/h_ comptent des tetes, i_/j_
             # comptent ce qu'elles valaient. Les deux ensemble separent l'agent qui fauche des
@@ -515,43 +708,44 @@ class W40KMetricsTracker:
             # chiffres ne le dit pas.
             shoot_value = float(require_key(tactical_data, 'shoot_value_killed'))
             melee_value = float(require_key(tactical_data, 'melee_value_killed'))
-            self.combat_history['shoot_value_killed'].append(shoot_value)
-            if len(self.combat_history['shoot_value_killed']) > 500:
-                self.combat_history['shoot_value_killed'].pop(0)
-            self.combat_history['melee_value_killed'].append(melee_value)
-            if len(self.combat_history['melee_value_killed']) > 500:
-                self.combat_history['melee_value_killed'].pop(0)
-            self.writer.add_scalar('0_combat/i_shoot_value_killed', self._calculate_smoothed_metric(self.combat_history['shoot_value_killed'], window_size=500), self.episode_count)
-            self.writer.add_scalar('0_combat/j_melee_value_killed', self._calculate_smoothed_metric(self.combat_history['melee_value_killed'], window_size=500), self.episode_count)
+            self._emit_game('02_combat/i_shoot_value_killed', 'shoot_value_killed', shoot_value)
+            self._emit_game('02_combat/j_melee_value_killed', 'melee_value_killed', melee_value)
 
         # COMBAT VALUE METRICS: Episode-level attrition in VALUE points.
         enemy_value_destroyed = float(require_key(tactical_data, 'enemy_value_destroyed'))
         ally_value_lost = float(require_key(tactical_data, 'ally_value_lost'))
         self.writer.add_scalar('combat/f_value_destroyed', enemy_value_destroyed, self.episode_count)
         self.writer.add_scalar('combat/g_value_lost', ally_value_lost, self.episode_count)
-        if ally_value_lost > 0 and enemy_value_destroyed > 0:
-            value_trade_ratio = enemy_value_destroyed / ally_value_lost
-            self.value_trade_ratio_history.append(value_trade_ratio)
-            if len(self.value_trade_ratio_history) > 500:
-                self.value_trade_ratio_history.pop(0)
-            value_trade_ratio_mean = self._calculate_smoothed_metric(
-                self.value_trade_ratio_history,
-                window_size=500
-            )
-            self.latest_value_trade_ratio = value_trade_ratio_mean
+        # Un SEUL tag pour cette mesure. Elle en a porte trois : `combat/h_value_trade_ratio`
+        # (historique) et `0_game/h_value_trade_ratio` (reecrit a un autre instant par
+        # log_critical_dashboard, donc deux series entrelacees) ont ete supprimes avec le
+        # namespace 0_game/, comme tous les autres tags de la refonte : deplaces, pas dupliques.
+        #
+        # RAPPORT DES MOYENNES, et non moyenne des rapports comme les cinq autres ratios : ici
+        # le denominateur est un RESULTAT d'episode (ce que j'ai perdu), pas une constante de
+        # scenario. Tout choix de garde sur un rapport par episode biaise la courbe, et dans les
+        # deux sens : ecarter les episodes sans perte retire les MEILLEURS (l'ancienne garde,
+        # qui tirait vers le haut en excluant aussi les pires), y verser un 0.0 pour les
+        # episodes sans destruction retire les meilleurs et garde les pires (biais inverse).
+        # Sommer les deux cotes sur la fenetre n'exclut RIEN : chaque episode pese ce qu'il
+        # vaut en points, et le rapport reste defini tant que la fenetre contient une perte.
+        # Une fenetre entiere sans une seule perte n'a pas de rapport a afficher, pas un 0.
+        # Le rapport se calcule fenetre par fenetre : prendre le rapport de la fenetre longue
+        # pour la courte melangerait deux populations d'episodes.
+        destroyed_hist = self._game_push('value_destroyed', enemy_value_destroyed)
+        lost_hist = self._game_push('value_lost', ally_value_lost)
+        windows = [(self.PERF_WINDOW, '')]
+        if self.PERF_WINDOW_FAST < self.PERF_WINDOW:
+            windows.append((self.PERF_WINDOW_FAST, f'_{self.PERF_WINDOW_FAST}ep'))
+        for window, suffix in windows:
+            destroyed_mean = self._window_mean(destroyed_hist, window)
+            lost_mean = self._window_mean(lost_hist, window)
+            if destroyed_mean is None or lost_mean is None or lost_mean <= 0:
+                continue
             self.writer.add_scalar(
-                'combat/h_value_trade_ratio',
-                value_trade_ratio_mean,
-                self.episode_count
-            )
-            # Meme valeur, remontee en tete de dashboard. Ecrivain UNIQUE : le second
-            # add_scalar de log_critical_dashboard (ex-0_game/h_value_trade_ratio) est
-            # supprime — appele a un autre instant, il entrelacait deux series sur un meme
-            # tag, le defaut deja constate sur l_melee_kills et invalid_action_rate.
-            self.writer.add_scalar(
-                '0_combat/a_value_trade_ratio',
-                value_trade_ratio_mean,
-                self.episode_count
+                f'02_combat/a_value_trade_ratio{suffix}',
+                destroyed_mean / lost_mean,
+                self.episode_count,
             )
         
         # GAME CRITICAL: Unit trade ratio (killed/lost) - Core success metric
@@ -580,7 +774,7 @@ class W40KMetricsTracker:
         # 0_GAME: VP differential and objective samples
         if 'victory_points_diff_controlled_minus_opponent' in tactical_data:
             vp_diff = float(require_key(tactical_data, 'victory_points_diff_controlled_minus_opponent'))
-            self.writer.add_scalar('0_VP/a_vp_diff', self._game_smooth('vp_diff', vp_diff), self.episode_count)
+            self._emit_game('01_VP/a_vp_diff', 'vp_diff', vp_diff)
 
         # Objectifs tenus : echantillonnes par tour marque cote moteur
         # (GameStateManager._sample_objectives_held). Cles EXIGEES, jamais `.get()` : le garde
@@ -592,39 +786,31 @@ class W40KMetricsTracker:
         samples = require_key(tactical_data, 'controlled_objective_samples')
         opp_samples = require_key(tactical_data, 'opponent_objective_samples')
         if samples:
-            self.writer.add_scalar(
-                '0_VP/e_objectives_held',
-                self._game_smooth('objectives_held', float(np.mean(samples))),
-                self.episode_count
-            )
+            self._emit_game('01_VP/e_objectives_held', 'objectives_held', float(np.mean(samples)))
         if samples and opp_samples:
             diff = float(np.mean(samples)) - float(np.mean(opp_samples))
-            self.writer.add_scalar('0_VP/d_objectives_held_diff', self._game_smooth('objectives_held_diff', diff), self.episode_count)
+            self._emit_game('01_VP/d_objectives_held_diff', 'objectives_held_diff', diff)
 
-            # d_obj_rewards : le montant REELLEMENT verse par
-            # RewardCalculator._calculate_objective_reward_per_turn sur l'episode. La formule
-            # rejoue celle du versement (par objectif + par objectif d'avance) sur les
-            # echantillons pris au MEME instant que lui — identite verifiee au reward paye sur
-            # 8 episodes complets joues, 8/8 exacte.
-            # Ce n'est PAS une reconstitution optimiste : la courbe etait auparavant
-            # `somme(tenus) * reward_per_objective`, elle affichait un signal que l'agent ne
-            # recevait pas (versement mort) et oubliait le terme d'avance. Elle est restee
-            # supprimee tant que le versement l'etait.
-            obj_rewards_ep = float(np.sum(samples)) * self.reward_per_objective
-            if self.use_objective_lead:
-                # FORFAIT par tour ou je tiens PLUS d'objectifs que l'adversaire — la formule du
-                # versement (cf. _calculate_objective_reward_per_turn), pas la difference
-                # cumulee : celle-la surpayait les grosses avances et facturait les retards.
-                turns_ahead = sum(1 for mine, theirs in zip(samples, opp_samples) if mine > theirs)
-                obj_rewards_ep += turns_ahead * self.reward_for_objective_lead
-            self.writer.add_scalar(
-                '0_VP/f_obj_rewards',
-                self._game_smooth('obj_rewards', obj_rewards_ep),
-                self.episode_count
+            # f_obj_rewards : le montant verse par
+            # RewardCalculator._calculate_objective_reward_per_turn sur l'episode. Il vaut
+            # `facteur x VP marques` PAR CONSTRUCTION, donc il se LIT sur les VP au lieu de se
+            # rejouer : cette ligne rejouait la formule du versement sur les echantillons, un
+            # miroir qui redevenait faux a chaque changement de forme du reward (c'est
+            # exactement ce qui vient d'arriver au passage lineaire -> escalier).
+            # Limite connue, celle du versement lui-meme : au round 5, le SECOND joueur marque a
+            # la fin de la phase fight alors que le reward est calcule a la frontiere
+            # command -> move — les deux comptages peuvent differer sur ce seul marquage.
+            obj_rewards_ep = self.objective_reward_factor * float(
+                require_key(tactical_data, 'victory_points_controlled_episode')
             )
+            self._emit_game('01_VP/f_obj_rewards', 'obj_rewards', obj_rewards_ep)
 
         if 'victory_points_opponent_episode' in tactical_data:
-            self.writer.add_scalar('0_VP/c_vp_bot', self._game_smooth('vp_bot', float(tactical_data['victory_points_opponent_episode'])), self.episode_count)
+            self._emit_game(
+                '01_VP/c_vp_bot',
+                'vp_bot',
+                float(tactical_data['victory_points_opponent_episode']),
+            )
 
         # FORCING METRICS: Exposure of units with configured UNIT_RULES.
         has_forcing_fields = 'forced_unit_episode_has_controlled' in tactical_data
@@ -716,13 +902,7 @@ class W40KMetricsTracker:
         - reward/objective_total
         - reward/situational_total
         - reward/penalties_total
-        - reward/objective_share  (part de l'objectif dans la recompense POSITIVE)
-
-        ⚠️ Ces scalaires n'etaient PAS ecrits : la docstring en annoncait cinq, la methode
-        se contentait d'empiler `self.reward_components` — une liste bornee a 100 episodes,
-        relue par personne (grep : aucun lecteur hors de cette methode). Toute la chaine
-        producteur -> callback -> tracker tournait donc a vide, et une decomposition absente
-        ne se distingue pas d'une decomposition nulle.
+        - reward/objective_share  (part de l'objectif dans ce que l'episode a RAPPORTE)
 
         `objective_share` est la mesure qui motive tout le reste : la victoire se decide aux
         VP d'objectifs (game_state.determine_winner_with_method), donc une part d'objectif
@@ -731,8 +911,13 @@ class W40KMetricsTracker:
         if not reward_data:
             return
 
-        # Validate required fields - raise errors for missing data, NO DEFAULTS
-        required_fields = ['base_actions', 'result_bonuses', 'objective', 'situational', 'penalties']
+        # Validate required fields - raise errors for missing data, NO DEFAULTS.
+        # `*_positive` accompagne chaque composante DENSE : c'est le flux positif cumule pas a
+        # pas par le callback, la seule forme utilisable pour une part (cf. plus bas).
+        required_fields = [
+            'base_actions', 'result_bonuses', 'objective', 'situational', 'penalties',
+            'base_actions_positive', 'result_bonuses_positive', 'objective_positive',
+        ]
         for field in required_fields:
             if field not in reward_data:
                 raise KeyError(
@@ -740,39 +925,21 @@ class W40KMetricsTracker:
                     f"Got keys: {list(reward_data.keys())}. "
                     f"All reward calculations must provide complete breakdown."
                 )
-        
-        # Extract components - all fields validated above
+            if not isinstance(reward_data[field], (int, float)):
+                raise TypeError(
+                    f"Reward field '{field}' must be numeric, "
+                    f"got {type(reward_data[field])}: {reward_data[field]}"
+                )
+
         base_actions = reward_data['base_actions']
         result_bonuses = reward_data['result_bonuses']
         objective = reward_data['objective']
         situational = reward_data['situational']
         penalties = reward_data['penalties']
-
-        # Validate types - must be numeric
-        for field_name, field_value in [
-            ('base_actions', base_actions),
-            ('result_bonuses', result_bonuses),
-            ('objective', objective),
-            ('situational', situational),
-            ('penalties', penalties)
-        ]:
-            if not isinstance(field_value, (int, float)):
-                raise TypeError(
-                    f"Reward field '{field_name}' must be numeric, got {type(field_value)}: {field_value}"
-                )
         
-        # Track in history
-        self.reward_components['base_actions'].append(base_actions)
-        self.reward_components['result_bonuses'].append(result_bonuses)
-        self.reward_components['objective'].append(objective)
-        self.reward_components['situational'].append(situational)
-        self.reward_components['penalties'].append(penalties)
-
-        # Keep last 100 episodes
-        for key in self.reward_components:
-            if len(self.reward_components[key]) > 100:
-                self.reward_components[key].pop(0)
-
+        # `self.reward_components` (historique de 100 episodes par composante) etait alimente
+        # ici et relu par PERSONNE : les cinq courbes ci-dessous sont per-episode, elles ne
+        # lissent rien. Supprime avec son accumulateur.
         x = self.episode_count
         self.writer.add_scalar('reward/base_actions_total', float(base_actions), x)
         self.writer.add_scalar('reward/result_bonuses_total', float(result_bonuses), x)
@@ -783,21 +950,30 @@ class W40KMetricsTracker:
         # Part de l'objectif dans ce qui RAPPORTE sur l'episode. `situational` (le terminal
         # +-50) est exclu : il recompense le RESULTAT, pas le comportement qui y mene, et sa
         # masse ecraserait la comparaison entre les deux signaux denses qu'on veut arbitrer.
-        # `penalties` est exclu pour la meme raison de signe.
+        # `penalties` est exclu pour deux raisons : il est negatif, et il n'est pas disjoint de
+        # `base_actions` (wait / charge_fail sont ecrits dans les DEUX par reward_calculator).
         #
-        # ⚠️ Le denominateur ne somme QUE les composantes positives. `base_actions` cumule des
-        # montants negatifs sur tout l'episode (wait, charge_fail) : une somme algebrique
-        # pouvait devenir minuscule ou negative et faire afficher des parts aberrantes —
-        # mesure sur des valeurs realistes (base=-12, result=4, objective=10) : 500 %.
-        components = (float(base_actions), float(result_bonuses), float(objective))
-        positive_total = sum(c for c in components if c > 0.0)
+        # Le denominateur somme les FLUX POSITIFS accumules pas a pas, jamais les totaux nets :
+        # `base_actions` melange sur un episode les +0,3 de chaque tir et les -0,1 de chaque
+        # attente, et un agent passif peut cumuler +18 de combat pour un net de -2. Filtrer les
+        # totaux nets sur leur signe — ce que faisait la version precedente — jetait alors les
+        # 18 points entiers du denominateur et gonflait la part de l'objectif exactement quand
+        # les recompenses d'action sont les plus denses.
+        # Numerateur = le flux positif de l'objectif lui aussi : la part reste dans [0,1] sans
+        # rien supposer du signe des composantes.
+        objective_positive = float(reward_data['objective_positive'])
+        positive_total = (
+            float(reward_data['base_actions_positive'])
+            + float(reward_data['result_bonuses_positive'])
+            + objective_positive
+        )
         if positive_total > 0.0:
-            self.writer.add_scalar('reward/objective_share', float(objective) / positive_total, x)
+            self.writer.add_scalar('reward/objective_share', objective_positive / positive_total, x)
         # Denominateur nul = aucune recompense positive sur l'episode : il n'y a pas de part a
         # mesurer. On n'ecrit RIEN plutot qu'un 0.0, qui se lirait « part d'objectif nulle » et
         # serait indiscernable du cas ou l'agent n'a rien gagne du tout.
 
-        # NOTE : 0_VP/f_obj_rewards est calcule dans log_tactical_metrics depuis les
+        # NOTE : 01_VP/f_obj_rewards est calcule dans log_tactical_metrics depuis les
         # echantillons d'objectifs tenus, et non depuis episode_reward_components (cette chaine
         # ne tient pas avec n_envs=48).
 
@@ -985,16 +1161,16 @@ class W40KMetricsTracker:
         # Store current episode values in history for smoothing
         # victory_points_cumulative is logged for every episode.
         # Note: shoot_kills/melee_kills are now tracked via action_logs in log_tactical_metrics (reliable, per-episode per-env)
-        for key in ['charge_successes']:
+        # Troncature a PERF_WINDOW, la fenetre que `_emit_windowed` exige PLEINE, et non a un
+        # 500 en dur : les deux etaient egaux par coincidence de config. Un `perf_window` regle
+        # au-dela de 500 aurait tronque ces historiques SOUS la longueur requise, et
+        # `combat/c_charge_successes` comme `01_VP/b_vp_agent` n'auraient plus jamais emis un
+        # seul point — sans erreur, sans courbe. `_game_push` tronque deja a PERF_WINDOW : ces
+        # deux-la etaient le jumeau reste en arriere.
+        for key in ['charge_successes', 'victory_points_cumulative']:
             self.combat_history[key].append(self.combat_effectiveness[key])
-            if len(self.combat_history[key]) > 500:
+            if len(self.combat_history[key]) > self.PERF_WINDOW:
                 self.combat_history[key].pop(0)
-
-        self.combat_history['victory_points_cumulative'].append(
-            self.combat_effectiveness['victory_points_cumulative']
-        )
-        if len(self.combat_history['victory_points_cumulative']) > 500:
-            self.combat_history['victory_points_cumulative'].pop(0)
 
         # Log smoothed combat metrics (20-episode rolling average)
         # Prefixes control TensorBoard sort order:
@@ -1004,15 +1180,14 @@ class W40KMetricsTracker:
         # renumerotage b..e n'a pas ete fait pour ne pas casser la continuite des courbes
         # existantes dans TensorBoard.
 
-        # b) Shoot kills + g_kill_rewards + l_melee_kills are now logged in log_tactical_metrics (reliable source)
+        # b) Kills tir/melee et recompense de kill : logges dans log_tactical_metrics (source fiable)
 
         # c) Charge successes
-        if len(self.combat_history['charge_successes']) >= 1:
-            smoothed_value = self._calculate_smoothed_metric(self.combat_history['charge_successes'], window_size=200)
-            self.writer.add_scalar('combat/c_charge_successes', smoothed_value, self.episode_count)
+        self._emit_windowed('combat/c_charge_successes', self.combat_history['charge_successes'])
 
-        # d) Un SECOND add_scalar('0_game/l_melee_kills') occupait cette place, sur la meme
-        # combat_history['melee_kills'] que log_tactical_metrics — seul endroit qui l'alimente.
+        # d) Un SECOND add_scalar sur la courbe de kills de melee (ex-`0_game/l_melee_kills`,
+        # aujourd'hui `02_combat/h_melee_model_kills`) occupait cette place, sur la meme serie
+        # que log_tactical_metrics — seul endroit qui l'alimente.
         # compute_and_log_phase_metrics etant appele DEPUIS log_episode_end, donc AVANT
         # log_tactical_metrics de l'episode courant, il ecrivait la moyenne de l'episode
         # PRECEDENT : deux series entrelacees sur un meme tag (99 999 points pour 50 000
@@ -1020,12 +1195,7 @@ class W40KMetricsTracker:
         # ecrivain restant est log_tactical_metrics, qui logge apres l'append.
 
         # e) Mean cumulative victory points per episode (smoothed over 500 episodes)
-        if len(self.combat_history['victory_points_cumulative']) >= 1:
-            smoothed_value = self._calculate_smoothed_metric(
-                self.combat_history['victory_points_cumulative'],
-                window_size=500
-            )
-            self.writer.add_scalar('0_VP/b_vp_agent', smoothed_value, self.episode_count)
+        self._emit_windowed('01_VP/b_vp_agent', self.combat_history['victory_points_cumulative'])
 
         # Reset combat effectiveness and flags for next episode
         self.combat_effectiveness = {
@@ -1114,7 +1284,7 @@ class W40KMetricsTracker:
         # TRAINING DIAGNOSTIC: Gradient norm (gradient explosion/vanishing check)
         if 'train/gradient_norm' in model_stats:
             grad_norm = model_stats['train/gradient_norm']
-            self.latest_gradient_norm = grad_norm  # Store for 0_critical/ dashboard
+            self.latest_gradient_norm = grad_norm  # Store for 00_critical/ dashboard
             self.writer.add_scalar('training_diagnostic/gradient_norm', grad_norm, self.step_count)
         
         # TRAINING CRITICAL: Frames per second (training efficiency)
@@ -1140,23 +1310,34 @@ class W40KMetricsTracker:
         All metrics are smoothed (20-episode rolling average) for clear trends.
 
         GAME PERFORMANCE (6 metrics):
-        - 0_critical/a_bot_eval_combined    - Primary goal [0-1] (sorts first)
+        - 00_critical/a_bot_eval_combined    - Primary goal [0-1] (sorts first)
 
-        - 0_critical/b_worst_bot_score      - Min across all 7 bots
-        - 0_critical/c_holdout_hard_mean    - Hard holdout aggregate robustness
-        - 0_critical/d_win_rate_100ep       - Training opponent performance
-        - 0_critical/e_episode_reward_smooth  - Learning progress
+        - 00_critical/b_worst_bot_score      - Min across all 7 bots
+        - 00_critical/c_holdout_hard_mean    - Hard holdout aggregate robustness
+        - 00_critical/d_win_rate             - Training opponent performance
+        - 00_critical/e_episode_reward_smooth  - Learning progress
+        (le doublon a fenetre courte `_<perf_window_fast>ep` n'existe que si les deux
+         fenetres du training config different ; elles sont egales par defaut)
 
         PPO HEALTH (5 metrics):
-        - 0_critical/f_loss_mean           - Overall learning health
-        - 0_critical/g_explained_variance  - >0.3 -> Value function working
-        - 0_critical/h_clip_fraction       - [0.1-0.3] -> Tune learning_rate
-        - 0_critical/i_approx_kl           - <0.02 -> Policy stability
-        - 0_critical/j_entropy_loss        - [0.5-2.0] -> Tune ent_coef
+        - 00_critical/f_loss_mean           - Overall learning health
+        - 00_critical/g_explained_variance  - >0.3 -> Value function working
+        - 00_critical/h_clip_fraction       - [0.1-0.3] -> Tune learning_rate
+        - 00_critical/i_approx_kl           - <0.02 -> Policy stability
+        - 00_critical/j_entropy_loss        - [0.5-2.0] -> Tune ent_coef
 
         TECHNICAL HEALTH (3 metrics):
-        - 0_critical/k_gradient_norm       - <10 -> No gradient explosion
-        - 0_critical/m_value_loss_smooth   - Smoothed critic loss
+        - 00_critical/k_gradient_norm       - <10 -> No gradient explosion
+        - 00_critical/m_value_loss_smooth   - Smoothed critic loss
+
+        VENTILATION PAR MODE DE DEPLOIEMENT (7 courbes) -- ecrites AILLEURS que dans cette
+        methode, volontairement : `_emit_deploy_split`, appele au moment ou chaque valeur est
+        calculee. Les emettre ici les decalerait d'un episode (ce dashboard tourne AVANT
+        log_tactical_metrics). Cf. DEPLOY_SPLIT_SERIES pour le pourquoi de la ventilation.
+        - 00_critical/p_reward_deploy_{active,fixed}
+        - 00_critical/q_obj_held_diff_deploy_{active,fixed}
+        - 00_critical/r_win_rate_deploy_{active,fixed}
+        - 00_critical/s_deploy_active_share  - part reelle d'episodes en deploiement actif
 
         NOTE: position_score a ete supprime (voir la trace dans __init__), pas deplace.
         """
@@ -1170,15 +1351,13 @@ class W40KMetricsTracker:
         # GAME PERFORMANCE (2 metrics)
         # ==========================================
         
-        # 1. Win Rate (100-episode rolling window) - SORTS FIRST alphabetically
-        if len(self.win_rate_window) >= 1:
-            win_rate = float(np.mean(self.win_rate_window))
-            self.writer.add_scalar('0_critical/d_win_rate_100ep', win_rate, self.episode_count)
+        # 1. Win Rate - SORTS FIRST alphabetically
+        # Le tag suffixe `_100ep` portait jusqu'ici une fenetre de 500 : son nom mentait. Il
+        # designe desormais la fenetre qu'il annonce, et la fenetre de fond prend le nom nu.
+        self._emit_windowed('00_critical/d_win_rate', self.all_episode_wins)
 
         # 2. Episode Reward (smoothed) - Training signal strength
-        if len(self.all_episode_rewards) >= 1:
-            reward_smooth = self._calculate_smoothed_metric(self.all_episode_rewards, window_size=500)
-            self.writer.add_scalar('0_critical/e_episode_reward_smooth', reward_smooth, self.episode_count)
+        self._emit_windowed('00_critical/e_episode_reward_smooth', self.all_episode_rewards)
 
         # ==========================================
         # PPO HEALTH (5 metrics)
@@ -1189,28 +1368,28 @@ class W40KMetricsTracker:
             clip_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['clip_fractions'], window_size=20
             )
-            self.writer.add_scalar('0_critical/h_clip_fraction', clip_smooth, self.episode_count)
+            self.writer.add_scalar('00_critical/h_clip_fraction', clip_smooth, self.episode_count)
 
         # 4. Approx KL - Policy change magnitude
         if len(self.hyperparameter_tracking['approx_kls']) >= 1:
             kl_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['approx_kls'], window_size=20
             )
-            self.writer.add_scalar('0_critical/i_approx_kl', kl_smooth, self.episode_count)
+            self.writer.add_scalar('00_critical/i_approx_kl', kl_smooth, self.episode_count)
 
         # 5. Explained Variance - Value function quality
         if len(require_key(self.hyperparameter_tracking, 'explained_variances')) >= 1:
             ev_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['explained_variances'], window_size=20
             )
-            self.writer.add_scalar('0_critical/g_explained_variance', ev_smooth, self.episode_count)
+            self.writer.add_scalar('00_critical/g_explained_variance', ev_smooth, self.episode_count)
 
         # 6. Entropy Loss - Exploration health
         if len(self.hyperparameter_tracking['entropy_losses']) >= 1:
             entropy_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['entropy_losses'], window_size=20
             )
-            self.writer.add_scalar('0_critical/j_entropy_loss', entropy_smooth, self.episode_count)
+            self.writer.add_scalar('00_critical/j_entropy_loss', entropy_smooth, self.episode_count)
 
         # 7. Loss Mean (combined policy + value loss) - Training stability
         if (len(self.hyperparameter_tracking['policy_losses']) >= 1 and
@@ -1221,15 +1400,15 @@ class W40KMetricsTracker:
             combined_losses = [abs(p) + abs(v) for p, v in zip(recent_policy, recent_value)]
             loss_mean = float(np.mean(combined_losses))
             value_loss_smooth = float(np.mean(recent_value))
-            self.writer.add_scalar('0_critical/f_loss_mean', loss_mean, self.episode_count)
-            self.writer.add_scalar('0_critical/m_value_loss_smooth', value_loss_smooth, self.episode_count)
+            self.writer.add_scalar('00_critical/f_loss_mean', loss_mean, self.episode_count)
+            self.writer.add_scalar('00_critical/m_value_loss_smooth', value_loss_smooth, self.episode_count)
         
         # ==========================================
         # TECHNICAL HEALTH (3 metrics)
         # ==========================================
         
         # 8. Gradient Norm (direct value from latest training step) - Technical health
-        pass  # gradient_norm removed from 0_critical (redundant with clip_fraction + approx_kl)
+        pass  # gradient_norm removed from 00_critical (redundant with clip_fraction + approx_kl)
         
         # 10. Reward-Victory Gap (reward alignment: mean reward when won vs lost)
         # Gap > 20-30 = good alignment; Gap < 10 = reward may not correlate with victory
@@ -1245,10 +1424,6 @@ class W40KMetricsTracker:
                 self.writer.add_scalar('game_critical/reward_when_lost', mean_lost, self.episode_count)
                 self.writer.add_scalar('game_detailed/reward_victory_gap', gap, self.episode_count)
 
-        # 11. VALUE trade ratio (destroyed/lost) : ecrit par log_tactical_metrics seul
-        # (0_combat/a_value_trade_ratio). Le re-emettre ici, a un autre instant de l'episode
-        # et meme quand rien n'a ete recalcule, entrelacait deux series sur un tag unique.
-
         # 12. Bot Evaluation Combined Score (logged immediately in log_bot_evaluations())
         # NOTE: This metric is logged in log_bot_evaluations() to avoid duplicate/stale values
         # Do not log here - let log_bot_evaluations() handle it
@@ -1263,58 +1438,177 @@ class W40KMetricsTracker:
         # Phase 2: zone intent metrics (sliding window)
         self._log_zone_intent_metrics(self.episode_count)
 
-    def log_zone_intent_step(self, intent_value: int) -> None:
+    def _reset_zone_intent_state(self) -> None:
+        """Initialise l'etat zone-intent (fenetre glissante + accumulateurs de l'episode courant)."""
+        self._zone_steps_since_episode_end: int = 0
+        self._zone_steps_window: Deque[int] = deque(maxlen=ZONE_INTENT_WINDOW_EPISODES)
+        self._intent_contingency_window: Deque[List[int]] = deque(maxlen=ZONE_INTENT_WINDOW_EPISODES)
+        self._intent_contingency_since_episode_end: List[int] = [0] * (
+            ZONE_CONTROL_CARDINALITY * INTENT_CARDINALITY
+        )
+
+    def log_zone_intent_step(self, intent_value: int, zone_control: float) -> None:
         """
-        Log a single zone intent free step. Called from w40k_core.step() when is_zone_intent_action(action).
+        Compte un free step zone-intent. ECRIVAIN UNIQUE : le callback d'entrainement, qui lit
+        `info['intent_value']` et `info['zone_control']` (voir training_callbacks). Le moteur a
+        longtemps compte EN PLUS via un `_metrics_tracker` pose sur l'env ; ce chemin n'etait
+        arme qu'a n_envs==1, donc `--step` comptait double et l'entrainement multi-env non.
 
         Args:
             intent_value: 0=INVADE, 1=DEFEND, 2=ATTACK
+            zone_control: -1.0 objectif adverse, 0.0 neutre/conteste, 1.0 controle par l'agent
         """
-        self._intent_zone_steps_total += 1
-        if intent_value == 0:
-            self._intent_invade_count += 1
-        elif intent_value == 1:
-            self._intent_defend_count += 1
-        elif intent_value == 2:
-            self._intent_attack_count += 1
-        else:
+        if intent_value not in (0, 1, 2):
             raise ValueError(f"Invalid intent_value for zone intent step: {intent_value}")
+        if zone_control not in (-1.0, 0.0, 1.0):
+            raise ValueError(f"Invalid zone_control for zone intent step: {zone_control}")
+
+        self._zone_steps_since_episode_end += 1
+        control_idx = int(zone_control) + 1  # -1/0/1 -> 0/1/2
+        self._intent_contingency_since_episode_end[control_idx * INTENT_CARDINALITY + intent_value] += 1
 
     def _log_zone_intent_metrics(self, step: int) -> None:
         """
-        Log zone intent metrics to 0_critical/ namespace and reset window counters.
-        Called from log_critical_dashboard() at each log interval.
+        Emet les metriques zone-intent sur la fenetre glissante et fait avancer celle-ci d'un
+        episode. Appelee a chaque `log_episode_end` via `log_critical_dashboard`.
         """
-        episodes = max(1, self._episodes_in_window)
-        n_steps_per_ep = self._intent_zone_steps_total / episodes
-        self.writer.add_scalar("0_critical/n_intent_zone_steps", n_steps_per_ep, step)
+        self._zone_steps_window.append(self._zone_steps_since_episode_end)
+        self._zone_steps_since_episode_end = 0
+        self._intent_contingency_window.append(self._intent_contingency_since_episode_end)
+        self._intent_contingency_since_episode_end = [0] * (ZONE_CONTROL_CARDINALITY * INTENT_CARDINALITY)
 
-        total_intents = self._intent_invade_count + self._intent_defend_count + self._intent_attack_count
-        if total_intents > 0:
-            self.writer.add_scalar(
-                "combat/intent_invade_ratio", self._intent_invade_count / total_intents, step
-            )
-            self.writer.add_scalar(
-                "combat/intent_defend_ratio", self._intent_defend_count / total_intents, step
-            )
-            self.writer.add_scalar(
-                "combat/intent_attack_ratio", self._intent_attack_count / total_intents, step
-            )
-        else:
-            self.writer.add_scalar("combat/intent_invade_ratio", 0.0, step)
-            self.writer.add_scalar("combat/intent_defend_ratio", 0.0, step)
-            self.writer.add_scalar("combat/intent_attack_ratio", 0.0, step)
+        n_steps_per_ep = sum(self._zone_steps_window) / len(self._zone_steps_window)
+        self.writer.add_scalar("00_critical/n_intent_zone_steps", n_steps_per_ep, step)
 
-        # Reset sliding window counters
-        self._intent_invade_count = 0
-        self._intent_defend_count = 0
-        self._intent_attack_count = 0
-        self._intent_zone_steps_total = 0
-        self._episodes_in_window = 0
+        table = [0] * (ZONE_CONTROL_CARDINALITY * INTENT_CARDINALITY)
+        for episode_table in self._intent_contingency_window:
+            for cell, count in enumerate(episode_table):
+                table[cell] += count
+        total_intents = sum(table)
+
+        if total_intents == 0:
+            # Aucun free step sur la fenetre : les ratios et l'information mutuelle n'ont pas
+            # d'echantillon. Ne rien emettre plutot que des zeros, qui se liraient comme
+            # "distribution uniforme, MI nulle" — soit exactement le diagnostic recherche.
+            return
+
+        _control_marginal, intent_marginal = self._marginals(table)
+        self.writer.add_scalar("combat/intent_invade_ratio", intent_marginal[0], step)
+        self.writer.add_scalar("combat/intent_defend_ratio", intent_marginal[1], step)
+        self.writer.add_scalar("combat/intent_attack_ratio", intent_marginal[2], step)
+
+        # Ingredients de la mesure, emis pour eux-memes : l'entropie du CONTROLE dit si le
+        # plateau offrait seulement de quoi conditionner un choix.
+        mutual_info = self._intent_control_mutual_info(table)
+        control_entropy = self._control_entropy(table)
+        self.writer.add_scalar("combat/intent_mutual_info_bits", mutual_info, step)
+        self.writer.add_scalar("combat/intent_control_entropy_bits", control_entropy, step)
+
+        if control_entropy > 0.0:
+            # I est bornee par H(controle), PAS par log2(3) : sur un plateau ou tous les
+            # objectifs sont neutres au moment des free steps, H = 0 et I = 0 quelle que soit la
+            # politique. Emettre I seule ferait lire "la tete n'a rien appris" la ou il n'y avait
+            # rien a apprendre. On normalise donc : U = I / H(controle) est la FRACTION de
+            # l'incertitude d'intent expliquee par l'etat, 1.0 = intent entierement determine.
+            self.writer.add_scalar(
+                "00_critical/o_intent_control_dependency", mutual_info / control_entropy, step
+            )
+        # H(controle) == 0 : aucun contraste d'etat sur la fenetre, la question n'a pas de sens.
+        # Emettre 0.0 la designerait a tort la politique.
+
+        aligned, aligned_baseline = self._intent_shaping_alignment(table)
+        self.writer.add_scalar("combat/intent_shaping_aligned_ratio", aligned, step)
+        self.writer.add_scalar("combat/intent_shaping_aligned_baseline", aligned_baseline, step)
+
+    @staticmethod
+    def _marginals(table: Sequence[int]) -> Tuple[List[float], List[float]]:
+        """Distributions marginales (controle, intent) de la table de contingence 3x3."""
+        total = sum(table)
+        if total == 0:
+            raise ValueError("Zone intent marginals require a non-empty contingency table")
+        control = [
+            sum(table[c * INTENT_CARDINALITY + i] for i in range(INTENT_CARDINALITY)) / total
+            for c in range(ZONE_CONTROL_CARDINALITY)
+        ]
+        intent = [
+            sum(table[c * INTENT_CARDINALITY + i] for c in range(ZONE_CONTROL_CARDINALITY)) / total
+            for i in range(INTENT_CARDINALITY)
+        ]
+        return control, intent
+
+    @classmethod
+    def _control_entropy(cls, table: Sequence[int]) -> float:
+        """
+        H(controle) en BITS : le contraste d'etat que le plateau a REELLEMENT offert aux free
+        steps de la fenetre.
+
+        C'est le plafond de I(intent ; controle). Mesure faite sur le vrai moteur : en jeu
+        aleatoire les figurines quittent les objectifs et les free steps, joues en command phase
+        avant tout mouvement du tour, ne voient plus que du neutre — H tombe a 0 et aucune
+        politique, si bonne soit-elle, ne peut produire une I non nulle. D'ou la publication de
+        H a cote du diagnostic : sans elle, "rien appris" et "rien a apprendre" se confondent.
+        """
+        control, _intent = cls._marginals(table)
+        return float(-sum(p * np.log2(p) for p in control if p > 0.0))
+
+    @classmethod
+    def _intent_control_mutual_info(cls, table: Sequence[int]) -> float:
+        """
+        I(intent ; controle) en BITS a partir de la table de contingence 3x3.
+
+        0 bit = le choix d'intent est statistiquement independant de l'etat de l'objectif : la
+        tete zone-intent joue la meme distribution quel que soit le plateau, donc elle n'a rien
+        appris. Une valeur > 0 prouve le conditionnement mais PAS son sens — un agent qui ferait
+        systematiquement l'inverse du shaping obtiendrait une MI elevee. C'est
+        `_intent_shaping_alignment` qui donne le sens.
+
+        A NE PAS LIRE SEULE : bornee par H(controle) (cf. `_control_entropy`), pas par log2(3).
+        Le diagnostic publie en 00_critical est le rapport I / H(controle).
+        """
+        total = sum(table)
+        control, intent = cls._marginals(table)
+
+        mutual_info = 0.0
+        for c in range(ZONE_CONTROL_CARDINALITY):
+            for i in range(INTENT_CARDINALITY):
+                joint = table[c * INTENT_CARDINALITY + i]
+                if joint == 0:
+                    continue  # 0 * log(0) = 0, terme nul et non defini
+                p_joint = joint / total
+                mutual_info += p_joint * np.log2(p_joint / (control[c] * intent[i]))
+        return float(mutual_info)
+
+    @classmethod
+    def _intent_shaping_alignment(cls, table: Sequence[int]) -> Tuple[float, float]:
+        """
+        Part des free steps dont le couple (controle, intent) est paye par
+        `RewardCalculator.settle_zone_intent_declaration` — DEFEND sur objectif tenu, INVADE sur
+        objectif adverse, INVADE sur objectif neutre — ET la valeur de reference a laquelle la
+        comparer.
+
+        La reference est ce que la MEME politique obtiendrait si elle choisissait son intent
+        sans regarder le plateau (produit des marginales observees). Elle n'est pas constante :
+        elle depend de la frequence des trois etats de controle, qui varie d'une fenetre a
+        l'autre. Publier le ratio seul le rendrait illisible — "0.42, c'est bien ou pas ?" n'a
+        de reponse qu'en regard de cette ligne.
+        """
+        control, intent = cls._marginals(table)
+        total = sum(table)
+
+        control_owned, control_neutral, control_enemy = 2, 1, 0  # controle 1.0 / 0.0 / -1.0
+        intent_invade, intent_defend = 0, 1
+        paid = (
+            (control_owned, intent_defend),
+            (control_enemy, intent_invade),
+            (control_neutral, intent_invade),
+        )
+        aligned = sum(table[c * INTENT_CARDINALITY + i] for c, i in paid) / total
+        baseline = sum(control[c] * intent[i] for c, i in paid)
+        return aligned, baseline
 
     def log_bot_evaluations(self, bot_results: Dict[str, float], step: Optional[int] = None):
         """
-        Log bot evaluation results to both 0_critical/ and bot_eval/ namespaces.
+        Log bot evaluation results to both 00_critical/ and bot_eval/ namespaces.
 
         Args:
             bot_results: Dict with keys 'random', 'greedy', 'defensive', 'combined'
@@ -1330,31 +1624,26 @@ class W40KMetricsTracker:
             self.writer.add_scalar('bot_eval/vs_defensive', bot_results['defensive'], x)
         if 'control' in bot_results:
             self.writer.add_scalar('bot_eval/vs_control', bot_results['control'], x)
-        if 'aggressive_smart' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_aggressive_smart', bot_results['aggressive_smart'], x)
-        if 'defensive_smart' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_defensive_smart', bot_results['defensive_smart'], x)
         if 'adaptive' in bot_results:
             self.writer.add_scalar('bot_eval/vs_adaptive', bot_results['adaptive'], x)
+        if 'value_trade' in bot_results:
+            self.writer.add_scalar('bot_eval/vs_value_trade', bot_results['value_trade'], x)
         # V11 §10.5 : holdout d'evaluation, jamais rencontre a l'entrainement — c'est
         # LE win-rate qui mesure la competence et non l'exploitation apprise (§10.6).
         if 'tactical' in bot_results:
             self.writer.add_scalar('bot_eval/vs_tactical', bot_results['tactical'], x)
-            self.writer.add_scalar('0_critical/c_holdout_tactical', bot_results['tactical'], x)
         # V11 §10.5 : 'tactical' est le holdout — mesure et logge ci-dessus, mais EXCLU de
-        # worst_bot_score, qui alimente 0_critical/b_worst_bot_score et suit la selection.
-        ALL_BOT_KEYS = ('random', 'greedy', 'defensive', 'control', 'aggressive_smart', 'defensive_smart', 'adaptive')
-        TIER2_BOT_KEYS = ('aggressive_smart', 'defensive_smart', 'adaptive')
-        tier2_scores = [bot_results[k] for k in TIER2_BOT_KEYS if k in bot_results]
-        if tier2_scores:
-            tier2_combined = sum(tier2_scores) / len(tier2_scores)
-            self.writer.add_scalar('bot_eval/tier2_combined', tier2_combined, x)
+        # worst_bot_score, qui alimente 00_critical/b_worst_bot_score et suit la selection.
+        # Le regroupement « palier 2 » (aggressive_smart + defensive_smart + adaptive) et son
+        # scalaire bot_eval/tier2_combined ont ete SUPPRIMES avec deux de leurs trois bots :
+        # une moyenne sur un seul adversaire n'est plus un palier, c'est `vs_adaptive`.
+        ALL_BOT_KEYS = ('random', 'greedy', 'defensive', 'control', 'adaptive', 'value_trade')
 
         bot_score_keys = [k for k in ALL_BOT_KEYS if k in bot_results]
         if len(bot_score_keys) >= 3:
             worst_bot_score = min(bot_results[k] for k in bot_score_keys)
             self.writer.add_scalar('bot_eval/worst_bot_score', worst_bot_score, x)
-            self.writer.add_scalar('0_critical/b_worst_bot_score', worst_bot_score, x)
+            self.writer.add_scalar('00_critical/b_worst_bot_score', worst_bot_score, x)
             if self.forcing_tracking['episodes_total'] > 0:
                 if self.forcing_tracking['baseline_worst_bot'] is None:
                     self.forcing_tracking['baseline_worst_bot'] = float(worst_bot_score)
@@ -1367,15 +1656,15 @@ class W40KMetricsTracker:
         if 'holdout_hard_mean' in bot_results:
             holdout_hard_mean = float(bot_results['holdout_hard_mean'])
             self.writer.add_scalar('bot_eval/holdout_hard_mean', holdout_hard_mean, x)
-            self.writer.add_scalar('0_critical/c_holdout_hard_mean', holdout_hard_mean, x)
+            self.writer.add_scalar('00_critical/c_holdout_hard_mean', holdout_hard_mean, x)
 
         # Store combined score and log immediately to both namespaces
         if 'combined' in bot_results:
             self.bot_eval_combined = bot_results['combined']
             # Log to bot_eval/ namespace
             self.writer.add_scalar('bot_eval/combined', bot_results['combined'], x)
-            # Log IMMEDIATELY to 0_critical/ namespace (don't wait for next episode)
-            self.writer.add_scalar('0_critical/a_bot_eval_combined', bot_results['combined'], x)
+            # Log IMMEDIATELY to 00_critical/ namespace (don't wait for next episode)
+            self.writer.add_scalar('00_critical/a_bot_eval_combined', bot_results['combined'], x)
             if self.forcing_tracking['episodes_total'] > 0:
                 if self.forcing_tracking['baseline_combined'] is None:
                     self.forcing_tracking['baseline_combined'] = float(bot_results['combined'])
@@ -1599,4 +1888,7 @@ class TrainingMonitor:
 def create_metrics_tracker(agent_key: str, config: Dict[str, Any]) -> W40KMetricsTracker:
     """Factory function to create metrics tracker with config"""
     log_dir = require_key(config, 'tensorboard_log')
-    return W40KMetricsTracker(agent_key, log_dir)
+    perf_window, perf_window_fast = resolve_perf_windows(config)
+    return W40KMetricsTracker(
+        agent_key, log_dir, perf_window=perf_window, perf_window_fast=perf_window_fast
+    )

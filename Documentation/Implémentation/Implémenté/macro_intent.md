@@ -159,8 +159,8 @@ def _encode_macro_intent_context(game_state, active_unit):
 | 4 | `engine/action_decoder.py` | **Code net-new dans `__init__`** : `ActionDecoder.__init__` ne lit actuellement aucun `action_space_size` — il stocke seulement `self.config`. Ajouter la lecture : `self.total_action_size = config["observation_params"]["action_space_size"]` (raise `KeyError` si absent — pas de default). Deux magic numbers à remplacer par `self.total_action_size` : ligne 133 (`np.zeros(16, dtype=bool)`) et ligne 497 (`action_space_size=16`). `_build_mask_for_units` : mask `np.zeros(self.total_action_size)` ; lit `game_state["zone_intent_free_steps_remaining"]` pour masquer les zone intent actions quand = 0 ; masking command phase only ; masking zones > num_zones. `convert_gym_action` : décodage des actions zone intent. |
 | 5 | `engine/w40k_core.py` | Init `game_state["zone_intents"]`, `zone_intent_free_steps_remaining`, `unit_zone_assignments` — **deux locations** : lignes 472–474 (reset épisode) et 931–933 (init partie). Supprimer les imports `INTENT_TAKE_OBJECTIVE`, `DETAIL_OBJECTIVE` ligne 42. Handler free step dans `step()`. |
 | 6 | `engine/observation_builder.py` | Supprimer les deux branches legacy (`obs_size=323` et `obs_size=355`). Remplacer les constantes `LEGACY_OBS_SIZE = 323` et `RULE_AWARE_OBS_SIZE = 355` par `PHASE2_OBS_SIZE = 357` — source unique de vérité. Réécrire `_encode_macro_intent_context` : 2 candidats + intent one-hot 3D, obs_size → 357. Supprimer les imports `INTENT_DETAIL_TYPE`, `DETAIL_OBJECTIVE`, `DETAIL_ENEMY`, `DETAIL_ALLY`, `DETAIL_NONE`, `INTENT_COUNT`. Lire `zone_idx` depuis `game_state["unit_zone_assignments"]`, pas depuis `get_nearest_objective_zone`. |
-| 7 | `engine/reward_calculator.py` | Ajouter `compute_zone_intent_shaping(game_state) -> float` : +0.05 par zone DEFEND si objectif tenu, -0.05 si objectif perdu en zone INVADE. **Appelée depuis `w40k_core.step()`** (voir §Design free steps), jamais en interne dans `reward_calculator`. Évalue l'état hérité du tour précédent au moment où les intents sont actifs. Pour les actions zone intent elles-mêmes, le reward 0.0 est retourné directement dans `step()` sans passer par le calculateur. **Import requis** : `from engine.macro_intents import INTENT_DEFEND, INTENT_INVADE, get_objective_control` — ajouter à la liste des imports de `reward_calculator.py`. |
-| 8 | `ai/metrics_tracker.py` | Metrics `0_critical/n_intent_zone_steps` (nombre moyen de free steps par tour), `0_critical/intent_invade_ratio`, `0_critical/intent_defend_ratio`, `0_critical/intent_attack_ratio` (distribution des intents sur les free steps uniquement, somme = 1.0) |
+| 7 | `engine/reward_calculator.py` | `settle_zone_intent_declaration(game_state, declaration) -> float` : solde une déclaration contre le contrôle **obtenu**. ⚠️ La prescription d'origine — `compute_zone_intent_shaping`, évaluée « au moment où les intents sont actifs », donc sur l'état hérité — était un défaut, voir §Shaping ci-dessous. **Appelée depuis `w40k_core`** (voir §Design free steps), jamais en interne dans `reward_calculator`. Pour les actions zone intent elles-mêmes, le reward 0.0 est retourné directement dans `step()` sans passer par le calculateur. **Import requis** : `from engine.macro_intents import INTENT_DEFEND, INTENT_INVADE, get_objective_control` — ajouter à la liste des imports de `reward_calculator.py`. |
+| 8 | `ai/metrics_tracker.py` | Metrics `00_critical/n_intent_zone_steps` (nombre moyen de free steps par épisode), `00_critical/o_intent_control_dependency`, `combat/intent_invade_ratio`, `combat/intent_defend_ratio`, `combat/intent_attack_ratio` (distribution des intents sur les free steps uniquement, somme = 1.0), `combat/intent_shaping_aligned_ratio` |
 | 9 | `Documentation/AI_OBSERVATION.md` | Documenter les nouvelles actions + obs[346:357] |
 | 10 | `engine/pve_controller.py` | Supprimer les writes `game_state["macro_intent_id"]`, `["macro_detail_type"]`, `["macro_detail_id"]`. Supprimer les imports des constantes Phase 1 (`INTENT_TAKE_OBJECTIVE`, `DETAIL_OBJECTIVE` etc.). **Supprimer également** les blocs masking et décodage d'actions macro Phase 1 (lignes ~563–813) — ils deviennent unreachable et importent des constantes supprimées de `macro_intents.py` (import error au démarrage si non nettoyés). Le bot continue à jouer normalement — ses handlers mouvement/tir ne lisent pas ces clés. **Le bot n'émettra jamais d'actions 16–30** : `pve_controller.py` génère des actions hardcodées dans l'espace 0–15 uniquement (ses handlers sont des appels directs, pas des samples de l'action space). Si par bug `convert_gym_action` reçoit une valeur 16–30 via le bot, c'est un invariant cassé — ajouter une guard explicite dans `convert_gym_action` : `if action_int >= BASE_ZONE_INTENT and source == "pve": raise ValueError(...)`. |
 | 11 | `ai/train.py` | Supprimer l'import `MacroTrainingWrapper, MacroVsBotWrapper` (ligne 1013) et l'import `make_macro_training_env` (ligne 1038). Supprimer l'appel `make_macro_training_env(...)` (ligne 2009). Import error garanti au démarrage si ces références survivent à la suppression de `macro_training_env.py`. |
@@ -200,17 +200,17 @@ Vérifier qu'aucun autre fichier n'importe ces constantes avant suppression (`gr
 ### Credit assignment dilué
 Les actions zone intent ont reward=0.0. L'agent apprend leur utilité via des rewards différés. Avec GAE (λ=0.95) et des épisodes de 30-50 steps, le signal se propage jusqu'aux free steps du début de tour avec une décroissance ~0.95^30 ≈ 0.21.
 
-**Mitigation** : shaping reward +0.05 par zone DEFEND si objectif tenu en fin de free steps, -0.05 si objectif perdu en zone INVADE. Activer dès le début — ne pas attendre l'effondrement de l'entropie. (±0.01 est noyé dans le bruit avec GAE sur 30-50 steps ; ±0.05 ≈ 2.5% d'un kill, propagé à ~0.008 aux free steps du début de tour via (γλ)^30 = (0.99 × 0.95)^30 ≈ 0.16.)
+**Mitigation** : shaping reward sur le RÉSULTAT de l'intent, soldé au tour suivant (§Shaping). Activer dès le début — ne pas attendre l'effondrement de l'entropie. (±0.01 est noyé dans le bruit avec GAE sur 30-50 steps ; ±0.05 ≈ 2.5% d'un kill, propagé à ~0.008 aux free steps du début de tour via (γλ)^30 = (0.99 × 0.95)^30 ≈ 0.16.)
 
 ### Spam de free steps
 L'agent peut looper sur les zone intents pour éviter les décisions tactiques.
 
-**Mitigation** : cap à `MAX_OBJECTIVES` free steps max par command phase. Surveiller via `0_critical/n_intent_zone_steps` — si la valeur converge vers 0, l'agent ignore les intents ; si elle est proche de MAX_OBJECTIVES à chaque tour, il spamme.
+**Mitigation** : cap à `MAX_OBJECTIVES` free steps max par command phase. Surveiller via `00_critical/n_intent_zone_steps` — si la valeur converge vers 0, l'agent ignore les intents ; si elle vaut `MAX_OBJECTIVES × nombre de tours`, il spamme. Attention à l'échelle : la courbe est un nombre de free steps **par épisode**, donc par tour il faut la diviser par la longueur d'épisode en tours.
 
 ### Régression Policy existante
 Ajouter `MAX_OBJECTIVES × 3` actions dilue la distribution de politique. Les couches de sortie pour les nouvelles actions sont initialisées à zéro → déséquilibre des gradients au début.
 
-**Mitigation** : training from scratch obligatoire (`--new`) — obs_size 355→357 rend tout checkpoint Phase 1 incompatible. Surveiller `0_critical/j_entropy_loss` sur les 100k premiers steps — une chute brutale indique que les nouvelles têtes de sortie absorbent les gradients.
+**Mitigation** : training from scratch obligatoire (`--new`) — obs_size 355→357 rend tout checkpoint Phase 1 incompatible. Surveiller `00_critical/j_entropy_loss` sur les 100k premiers steps — une chute brutale indique que les nouvelles têtes de sortie absorbent les gradients.
 
 ### obs_size change (355 → 357)
 Un checkpoint entraîné avec obs_size=355 est **incompatible** avec obs_size=357.
@@ -252,24 +252,24 @@ if is_zone_intent_action(action):
     game_state["zone_intents"][zone_idx] = intent_value
     game_state["zone_intent_free_steps_remaining"] -= 1
     if game_state["zone_intent_free_steps_remaining"] == 0:
-        # Cap épuisé : déclencher le shaping maintenant, avant de retourner.
-        # La prochaine action sera non-zone-intent (zone intents masqués) mais remaining=0
-        # → le hook de la branche non-zone-intent ne firrait PAS sans cette ligne.
-        game_state["_pending_zone_shaping"] = reward_calculator.compute_zone_intent_shaping(game_state)
+        # Cap épuisé : la déclaration est close, on l'ENREGISTRE (intents + contrôle au moment
+        # du choix). Elle sera soldée au tour suivant du même joueur — voir §Shaping.
+        engine._record_zone_intent_declaration()
     # NE PAS avancer la phase — retourner (True, result) sans phase_complete=True
     # Le wrapper Gym rappelle ObservationBuilder normalement : aucune interface spéciale.
-    return True, {"action": "zone_intent", "zone_idx": zone_idx, "intent": intent_value}
+    return True, {"action": "zone_intent", "zone_idx": zone_idx, "intent": intent_value,
+                  "zone_control": zone_control}   # zone_control : axe des métriques, cf. §Metric
 
 # Action non-zone-intent → sortir des free steps
 if game_state["zone_intent_free_steps_remaining"] > 0:
-    # Sortie volontaire : l'agent a choisi une action tactique avant d'épuiser le cap.
-    game_state["_pending_zone_shaping"] = reward_calculator.compute_zone_intent_shaping(game_state)
+    # Sortie volontaire : n'enregistrer que si au moins un intent a été joué.
+    engine._record_zone_intent_declaration()
 game_state["zone_intent_free_steps_remaining"] = 0
 
-# Ajouter le shaping accumulé (cap épuisé ou sortie volontaire) au reward de cette action.
-# _pending_zone_shaping est absent si aucun free step n'a eu lieu ce tour.
+# Le SOLDE, lui, a lieu en tête de la command phase (marqueur : remaining == MAX_OBJECTIVES),
+# et à la terminaison pour la déclaration du dernier tour. Il alimente _pending_zone_shaping,
+# que step() ajoute au reward de la première action non-zone-intent.
 shaping = game_state.pop("_pending_zone_shaping", 0.0)
-# ... traitement normal de la command phase (shaping additionné au reward final)
 ```
 
 **Note architecture** : `w40k_core.step()` retourne `(success, result_dict)` — c'est le wrapper Gym (SB3 `VecEnv`) qui appelle `ObservationBuilder` ensuite. Le free step ne nécessite aucune interface supplémentaire : retourner sans `phase_complete: True` suffit pour que le wrapper reboucle normalement sur la même phase.
@@ -279,8 +279,43 @@ shaping = game_state.pop("_pending_zone_shaping", 0.0)
 - **Invariant** : `zone_intent_free_steps_remaining` est remis à `MAX_OBJECTIVES` au début de chaque command phase, pas au début du tour. Si la command phase est skippée, il reste à 0 et aucun free step n'est disponible.
 - **Masking cohérent** : quand `free_steps_remaining = 0`, les actions zone intent doivent être masquées même si on est en command phase.
 - **Reset épisode** : dans `reset()`, initialiser `game_state["zone_intents"] = [INVADE] * MAX_OBJECTIVES`, `game_state["zone_intent_free_steps_remaining"] = 0` et `game_state["unit_zone_assignments"] = {}`. Sans ce dernier reset, un `KeyError` est garanti au premier obs build si la command phase n'est pas atteinte avant l'appel à `_encode_macro_intent_context`.
-- **Logging** : incrémenter le compteur `n_intent_zone_steps` dans le step callback uniquement quand `is_zone_intent_action(action)` est True.
-- **Interaction avec le reward shaping** : le shaping zone (+0.05 DEFEND / -0.05 INVADE) est déclenché exactement une fois par command phase, stocké dans `game_state["_pending_zone_shaping"]`, puis ajouté au reward de la première action tactique réelle. Deux chemins de déclenchement : (1) sortie volontaire — l'agent choisit une action non-zone-intent alors que `remaining > 0` ; (2) cap épuisé — le compteur passe à 0 après le dernier zone intent valide (déclenché dans la branche zone-intent elle-même, car à ce moment `remaining` vient d'atteindre 0 et la prochaine action aura `remaining=0` → la branche non-zone-intent ne firerait pas). `_pending_zone_shaping` est absent (ou 0.0) si l'agent n'a utilisé aucun free step ce tour.
+- **Logging** : le step callback (`ai/training_callbacks.py`) est l'**écrivain unique** de ces compteurs — il appelle `log_zone_intent_step(intent_value, zone_control)` en lisant `info['intent_value']` et `info['zone_control']`, tous deux posés par la branche zone-intent de `w40k_core`. Le moteur a longtemps compté **en plus**, via un `_metrics_tracker` posé sur l'env par `train.py` ; ce chemin n'étant armé qu'à `n_envs == 1`, `--step` comptait double et l'entraînement multi-env non. L'attribut a été supprimé : ne pas le réintroduire.
+- **Interaction avec le reward shaping** : voir §Shaping ci-dessous. La déclaration est *enregistrée* à la clôture des free steps (deux chemins : sortie volontaire, ou cap épuisé), et *soldée* au tour suivant du même joueur.
+
+---
+
+## Shaping : l'intent est payé sur son RÉSULTAT
+
+**Le défaut corrigé.** La première implémentation (`compute_zone_intent_shaping`) lisait `get_objective_control` en command phase, au moment même où l'agent déclarait ses intents — donc avant qu'il ait joué son tour, et sur un contrôle figé à la fin du tour précédent (14.02 : le contrôle n'est réévalué qu'aux frontières de phase/tour). Le versement était **entièrement déterminé par l'état hérité** : déclarer DEFEND sur une zone déjà tenue rapportait le bonus que l'agent la défende ou l'abandonne ensuite.
+
+Ce terme récompensait donc la *description* de l'état, pas sa *transformation*. Sa politique optimale consiste à recopier `objective_controllers` en intents sans changer une seule action tactique. Pire, cette politique creuse produit exactement la signature qu'une bonne politique produirait sur `00_critical/o_intent_control_dependency` — un conditionnement parfait entre intent et contrôle, pour un comportement vide. **C'est le reward qui rendait la métrique inexploitable, pas l'inverse.**
+
+Effet de bord du même code : la boucle parcourait les `MAX_OBJECTIVES` entrées de `zone_intents` alors que `get_objective_control` rend `0.0` hors liste, si bien que les zones **inexistantes** tombaient dans « INVADE sur neutre » et versaient `invade_neutral_bonus` chaque tour — +0.2/tour gratuits sur un scénario à 3 objectifs (l'intent par défaut étant INVADE). Ce revenu passif disparaît avec l'évaluation sur résultat : une zone inexistante n'est jamais prise.
+
+**Le cycle.** À la clôture des free steps, `W40KEngine._record_zone_intent_declaration` fige les intents déclarés **et** le contrôle au moment du choix (l'état visé n'existe plus une fois le tour joué), dans `game_state["_zone_intent_declarations"]`, une entrée par joueur. Le solde a lieu à l'ouverture de la command phase suivante *du même joueur* — `zone_intent_free_steps_remaining` plein sert de marqueur « aucun intent joué ce tour », ce qui garantit un solde et un seul, même si le joueur ne déclare rien. À cet instant le contrôle a été rafraîchi par la frontière de tour, et l'action en cours est celle du déclarant, donc `_pending_zone_shaping` part bien dans **sa** récompense (solder à la frontière elle-même tomberait sur le step de l'adversaire).
+
+**Solde terminal** : la déclaration du dernier tour n'atteint jamais la command phase suivante. Sans rattrapage à la terminaison, le dernier tour de *chaque* épisode serait muet — et c'est celui qui décide la partie. Le solde terminal porte sur le joueur **contrôlé** et non sur l'auteur du dernier step : la partie se termine le plus souvent pendant le tour de l'adversaire, et les wrappers cumulent de toute façon les récompenses des steps du bot dans celle rendue à l'agent.
+
+**Point de vue explicite, jamais `get_objective_control`.** Ce helper est relatif à `game_state["current_player"]`. Or le solde terminal porte sur le joueur contrôlé alors que la partie se termine pendant le tour de l'adversaire — mesuré sur le harnais moteur : **6 terminaisons sur 6** avec `current_player=2` pour `controlled_player=1`. Passer par la version relative y inversait le signe de *tous* les objectifs : le bonus DEFEND était payé exactement quand la zone avait été **perdue**. Le solde utilise donc `get_objective_control_for_player(zone_idx, game_state, player)`, et `get_objective_control` n'en est plus qu'un cas particulier.
+
+**Ventilation** : le shaping n'est pas produit par `calculate_reward`, donc il n'apparaît pas dans `last_reward_breakdown`. Il est rattaché explicitement à la catégorie `objective` (il paie la prise et la conservation d'objectifs), sans quoi il gonflait le retour de l'épisode sans entrer dans aucune catégorie — les cinq `reward/*_total` ne sommaient plus le retour, et `reward/objective_share`, la métrique que ce shaping doit éclairer, ignorait un flux d'objectif réellement perçu.
+
+**Fuite du solde calculé** : `_pending_zone_shaping` n'est poppé que par une action non-zone-intent, et plusieurs chemins n'y arrivent jamais (fin de partie pendant les free steps, sortie anticipée turn-limit, auto-advance). Il est donc remis à `0.0` à l'init et au reset, comme `_zone_intent_declarations`.
+
+**Fuite inter-épisodes** : `reset()` fait un `update()` de `game_state`, pas une recréation. `_zone_intent_declarations` est donc remis à `{}` explicitement à l'init **et** au reset, sans quoi une déclaration non soldée serait payée au tour 1 de l'épisode suivant contre un plateau sans rapport.
+
+**Barème** — les quatre montants de config gardent leurs valeurs, seule leur condition de déclenchement change :
+
+| clé | condition |
+|---|---|
+| `defend_held_bonus` | DEFEND sur zone tenue à la déclaration **et conservée** |
+| `invade_success_bonus` | INVADE sur zone adverse **devenue tenue** |
+| `invade_neutral_bonus` | INVADE sur zone neutre **devenue tenue** |
+| `invade_lost_penalty` | INVADE sur sa propre zone — incohérence de déclaration, jugée sans attendre le résultat |
+
+ATTACK ne porte aucun terme de shaping.
+
+⚠️ **Ce changement modifie la fonction de récompense : ré-entraînement obligatoire, les runs antérieurs ne sont pas comparables.**
 
 ---
 
@@ -288,15 +323,35 @@ shaping = game_state.pop("_pending_zone_shaping", 0.0)
 
 | Metric | Namespace | Valeur attendue | Signal |
 |--------|-----------|-----------------|--------|
-| `0_critical/n_intent_zone_steps` | 0_critical | 1–MAX_OBJECTIVES | =0 → agent ignore les intents ; =MAX_OBJECTIVES systématique → spam |
-| `0_critical/intent_invade_ratio` | 0_critical | 0.2–0.6 | ~1.0 → agent utilise seulement INVADE, n'a pas appris DEFEND/ATTACK |
-| `0_critical/intent_defend_ratio` | 0_critical | 0.1–0.4 | ~0.0 → agent ne défend jamais (objectifs non tenus) |
-| `0_critical/intent_attack_ratio` | 0_critical | 0.1–0.4 | ~0.0 → ATTACK jamais utilisé (signal de dommage pas exploité) |
+| `00_critical/n_intent_zone_steps` | 00_critical | free steps **par épisode** | =0 → agent ignore les intents ; =`MAX_OBJECTIVES × tours` → spam |
+| `00_critical/o_intent_control_dependency` | 00_critical | 0–1 | **~0 → le choix d'intent est indépendant de l'état du plateau : la tête zone-intent n'a rien appris.** Non émise si `intent_control_entropy_bits` = 0. Voir ci-dessous |
+| `combat/intent_mutual_info_bits` | combat | 0–H(contrôle) | numérateur de la précédente, à ne pas lire seul |
+| `combat/intent_control_entropy_bits` | combat | 0–log2(3) ≈ 1.585 bit | contraste d'état offert par le plateau. **=0 → il n'y avait rien à conditionner**, la question ne se pose pas |
+| `combat/intent_shaping_aligned_ratio` | combat | > sa ligne de référence | part des free steps que `settle_zone_intent_declaration` récompense — donne le SENS que la dépendance ignore |
+| `combat/intent_shaping_aligned_baseline` | combat | — | ce que la même politique marquerait **sans regarder le plateau**. Seul l'écart entre les deux courbes a un sens |
+| `combat/intent_invade_ratio` | combat | 0.2–0.6 | ~1.0 → agent utilise seulement INVADE, n'a pas appris DEFEND/ATTACK |
+| `combat/intent_defend_ratio` | combat | 0.1–0.4 | ~0.0 → agent ne défend jamais (objectifs non tenus) |
+| `combat/intent_attack_ratio` | combat | 0.1–0.4 | ~0.0 → ATTACK jamais utilisé (signal de dommage pas exploité) |
 | `train/value_loss` | train (SB3) | décroissant puis stable | hausse transitoire les 100k premiers steps = normale (états command phase à reward 0.0 élargissent la target distribution) ; hausse persistante après 200k steps = signal de value divergence |
 
 Ces trois ratios sont calculés sur les free steps de la command phase uniquement. Leur somme = 1.0. Si après 500k steps la distribution reste ~(1.0, 0.0, 0.0), les nouvelles têtes de sortie ne convergent pas.
 
-**Implémentation dans `metrics_tracker.py`** : maintenir trois compteurs cumulatifs (`_intent_invade_count`, `_intent_defend_count`, `_intent_attack_count`) incrémentés à chaque free step. Les ratios sont calculés et loggés à chaque intervalle de log (`n_steps` rollout) en divisant par le total des free steps sur la fenêtre. Réinitialiser les compteurs après chaque log (fenêtre glissante, pas cumulatif depuis le début du training) pour que les ratios reflètent l'évolution récente de la politique. `n_intent_zone_steps` : moyenne sur les épisodes complétés dans la fenêtre courante.
+**Pourquoi les ratios marginaux ne suffisent pas.** Une distribution plate à (1/3, 1/3, 1/3) est ambiguë : elle décrit aussi bien une tête qui tire au hasard qu'une tête qui a parfaitement appris à conditionner son intent sur l'état de l'objectif (INVADE sur zone ennemie, DEFEND sur zone tenue…) — dans les deux cas la moyenne vaut 1/3. C'est exactement ce qui a été observé sur un run de 50 000 épisodes, sans possibilité de trancher. D'où la mesure de I(intent ; contrôle de l'objectif) sur la table de contingence 3×3 (contrôle ∈ {adverse, neutre, tenu} × intent).
+
+**Pourquoi l'information mutuelle brute ne suffit pas non plus.** I est bornée par H(contrôle), pas par log2(3). Or le contrôle est très peu contrasté au moment des free steps : ils sont joués en command phase, avant tout mouvement du tour. Mesure sur le vrai moteur — jeu aléatoire : `{neutre: 24}`, soit **H = 0 et donc I = 0 quelle que soit la politique** ; figurines immobiles : `{neutre: 5, tenu: 20}`, H = 0,72 bit seulement. Publier I seule en `00_critical` ferait lire « la tête n'a rien appris » là où il n'y avait rien à apprendre — le vert vacant déplacé d'un cran.
+
+Le diagnostic publié est donc le **coefficient d'incertitude** `00_critical/o_intent_control_dependency` = I / H(contrôle) ∈ [0, 1] : la fraction de l'incertitude d'intent expliquée par l'état, 1.0 = intent entièrement déterminé, indépendamment du contraste du plateau. Il n'est **pas émis** quand H(contrôle) = 0 : la question n'a alors pas de sens, et un 0.0 imputerait à tort la politique. `combat/intent_control_entropy_bits` publie H pour que les deux cas restent distinguables.
+
+Cette dépendance ne dit pas le *sens* — une politique systématiquement inverse du shaping la sature aussi (test dédié). Le sens vient de `combat/intent_shaping_aligned_ratio`, part des free steps sur un couple que `settle_zone_intent_declaration` paie réellement. **À lire uniquement contre `combat/intent_shaping_aligned_baseline`**, ce que la même politique marquerait sans regarder le plateau : cette référence n'est pas une constante et elle est haute (5/9 sur un plateau équilibré, INVADE étant payé sur deux états de contrôle sur trois). Un seuil absolu du type « > 0.5 = bon » serait trompeur ; seul l'écart entre les deux courbes porte le signal.
+
+**Implémentation dans `metrics_tracker.py`** : fenêtre **glissante** de `ZONE_INTENT_WINDOW_EPISODES = 100` épisodes (`deque(maxlen=…)`), émise à **chaque** fin d'épisode — donc à la même cadence que toutes les autres courbes `00_critical`, ce qui les rend corrélables visuellement. Deux fenêtres parallèles : le nombre de free steps écoulés entre deux fins d'épisode, et la table de contingence 3×3.
+
+Deux pièges dont dépend la validité de la mesure :
+
+- **La grandeur est un ratio, jamais une valeur par épisode.** Le tracker est unique et reçoit `n_envs` épisodes entrelacés : aucun free step n'est attribuable à un épisode précis, un épisode qui se termine ramasse ce que les autres environnements ont accumulé entre-temps. Seul `total steps / total épisodes` sur la fenêtre a un sens — c'est pourquoi une lecture point-par-point de cette courbe (des pics à 144 pour une moyenne de 20) n'a jamais rien voulu dire.
+- **La largeur de 100 n'est pas cosmétique.** L'écart-type par épisode est de ~18,5 sur un run de référence ; 100 épisodes le ramènent à ~0,94, contre ~0,87 à 200 et ~0,78 à 830 (un rollout) : le gain est épuisé bien avant. La constante est fixe et non dérivée de `n_steps`/`n_envs`, pour que la courbe reste comparable entre configurations. Elle porte aussi le biais de la MI empirique, positif sur échantillon fini : ~2000 free steps pour 9 cellules donnent ~0,001 bit, négligeable — réduire la fenêtre le dégraderait.
+
+Fenêtre sans aucun free step : ni MI ni ratios ne sont émis. Écrire 0.0 se lirait comme « distribution uniforme, MI nulle », soit précisément le diagnostic recherché — un vert vacant.
 
 ---
 
@@ -307,7 +362,8 @@ Ces trois ratios sont calculés sur les free steps de la command phase uniquemen
 3. Les zones au-delà de `len(objectives)` sont masquées même en command phase
 4. `game_state["zone_intents"]` se met à jour après une action zone intent
 5. Pour intent ATTACK : obs[346:350] = position ennemi scoré, obs[350:354] = position objectif (valeurs distinctes) — vérifier obs[346:357]
-6. `0_critical/n_intent_zone_steps` est loggé et borné
+6. `00_critical/n_intent_zone_steps` est loggé et borné
+7. `00_critical/o_intent_control_dependency` est significativement > 0, avec `combat/intent_control_entropy_bits` non nulle : sans cela, soit la tête zone-intent tire indépendamment de l'état du plateau, soit le plateau n'offrait aucun contraste — les points 1–6 ne prouvent que le câblage
 
 Gate de performance : winrate > 60% stable sur 3 scénarios bot distincts après 2M steps.
 

@@ -3,7 +3,7 @@
 game_state.py - Game state initialization and management
 """
 
-from typing import Dict, List, Any, Optional, Tuple, Set
+from typing import Dict, Iterator, List, Any, Optional, Tuple, Set
 import copy
 import json
 import math
@@ -2639,10 +2639,10 @@ class GameStateManager:
 
         # UNE passe d'empreintes pour TOUS les objectifs (au lieu d'une par objectif) : le scan
         # de socle est le poste dominant de ce calcul, et il est identique d'une zone à l'autre.
-        hex_sets = [
-            {normalize_coordinates(h[0], h[1]) for h in require_key(objective, "hexes")}
-            for objective in objectives
-        ]
+        # Parseur commun : ce site indexait `h[0]/h[1]` en dur, donc il REJETAIT la forme
+        # {"col","row"} que le reste du moteur accepte — une meme donnee etait lisible par la
+        # regle 14.02 et par les bots, et levait ici, dans le scoring des VP.
+        hex_sets = objective_hex_sets(game_state)
         oc_sums = sum_objective_control_oc_multi(game_state, hex_sets)
 
         for obj_index, objective in enumerate(objectives):
@@ -2816,11 +2816,11 @@ class GameStateManager:
 
         counts = {1: 0, 2: 0}
 
-        for objective in objectives:
-            obj_id = require_key(objective, "id")
+        # Parseur commun : ce site indexait `h[0]/h[1]` en dur, comme `_calculate_objective_control`
+        # — la forme {"col","row"}, acceptee partout ailleurs, levait donc dans le comptage qui
+        # decide des VP.
+        for obj_id, hex_set in objective_hex_zones(game_state):
             obj_id_key = str(obj_id)
-            obj_hexes = require_key(objective, "hexes")
-            hex_set = {normalize_coordinates(h[0], h[1]) for h in obj_hexes}
             # Rule 14.02 : somme des OC des figurines dont l'empreinte de socle RECOUVRE la
             # zone (un hexe commun suffit — ce n'est PAS un test sur le centre du socle),
             # figurines mortes exclues. Les unites battle-shocked n'y contribuent rien :
@@ -2885,8 +2885,12 @@ class GameStateManager:
         scoring_cfg = require_key(primary_objective, "scoring")
         timing_cfg = require_key(primary_objective, "timing")
         start_turn = require_key(scoring_cfg, "start_turn")
-        max_points_per_turn = require_key(scoring_cfg, "max_points_per_turn")
-        rules = require_key(scoring_cfg, "rules")
+        # `rules` / `max_points_per_turn` sont exiges ICI, avant les quatre sorties anticipees,
+        # bien que `primary_objective_points` les relise : une mission malformee doit echouer au
+        # PREMIER appel, pas au premier tour marquant — soit plusieurs minutes de run plus tard,
+        # sur un chemin qu'un scenario court peut ne jamais atteindre.
+        require_key(scoring_cfg, "rules")
+        require_key(scoring_cfg, "max_points_per_turn")
         default_phase = require_key(timing_cfg, "default_phase")
         round5_second_player_phase = require_key(timing_cfg, "round5_second_player_phase")
 
@@ -2914,24 +2918,9 @@ class GameStateManager:
         counts = self._calculate_primary_objective_control_counts(game_state, primary_objective)
         opponent_player = 1 if current_player_int == 2 else 2
 
-        total_points = 0
-        for rule in rules:
-            condition = require_key(rule, "condition")
-            points = require_key(rule, "points")
-            if condition == "control_at_least_one":
-                if counts[current_player_int] >= 1:
-                    total_points += points
-            elif condition == "control_at_least_two":
-                if counts[current_player_int] >= 2:
-                    total_points += points
-            elif condition == "control_more_than_opponent":
-                if counts[current_player_int] > counts[opponent_player]:
-                    total_points += points
-            else:
-                raise ValueError(f"Unsupported primary objective condition: {condition}")
-
-        if total_points > max_points_per_turn:
-            total_points = max_points_per_turn
+        total_points = primary_objective_points(
+            scoring_cfg, counts[current_player_int], counts[opponent_player]
+        )
 
         victory_points = require_key(game_state, "victory_points")
         if current_player_int not in victory_points:
@@ -2949,7 +2938,7 @@ class GameStateManager:
     ) -> None:
         """Echantillonne, UNE fois par tour marque, les objectifs tenus de part et d'autre.
 
-        Alimente 0_game/e_objectives_held et f_objectives_held_diff. Site choisi : l'instant
+        Alimente 01_VP/e_objectives_held et 01_VP/d_objectives_held_diff. Site choisi : l'instant
         exact ou les VP sont attribues au joueur controle. `counts` est celui qui vient de
         decider les points (regles de controle 14.02 du primaire, tie_behavior inclus) — la
         mesure et le score partent donc de la MEME source, sans second comptage.
@@ -3082,6 +3071,41 @@ class GameStateManager:
 
 
 
+def primary_objective_points(
+    scoring_cfg: Dict[str, Any], own_objectives: int, opponent_objectives: int
+) -> int:
+    """VP marques par UN joueur sur UN tour de scoring du primaire, plafond compris.
+
+    SOURCE UNIQUE de la forme du primaire : `_apply_primary_objective_scoring_single` (qui
+    attribue les VP) et `RewardCalculator._calculate_objective_reward_per_turn` (qui paie
+    l'agent pour la meme chose) l'appellent tous les deux. Les deux repondaient auparavant a
+    leur facon : le moteur en ESCALIER (5 si >=1, 5 si >=2, 5 si j'en tiens plus, plafond 15),
+    la recompense en LINEAIRE (`reward_per_objective * mes_objectifs`, sans plafond). Au-dela
+    de 2 objectifs le jeu ne payait plus rien et la recompense continuait de monter : l'agent
+    etait paye pour s'etaler sur des zones que la mission ne compte pas.
+
+    Les montants et les conditions viennent de `scoring.rules` du primaire — le seul endroit ou
+    la mission est definie. Une condition inconnue leve : un scoring silencieusement ignore
+    ferait diverger les VP et la recompense sans que rien ne le signale.
+    """
+    total_points = 0
+    for rule in require_key(scoring_cfg, "rules"):
+        condition = require_key(rule, "condition")
+        points = require_key(rule, "points")
+        if condition == "control_at_least_one":
+            if own_objectives >= 1:
+                total_points += points
+        elif condition == "control_at_least_two":
+            if own_objectives >= 2:
+                total_points += points
+        elif condition == "control_more_than_opponent":
+            if own_objectives > opponent_objectives:
+                total_points += points
+        else:
+            raise ValueError(f"Unsupported primary objective condition: {condition}")
+    return min(total_points, require_key(scoring_cfg, "max_points_per_turn"))
+
+
 def sum_objective_control_oc(
     game_state: Dict[str, Any], hex_set: Set[Tuple[int, int]]
 ) -> Tuple[int, int]:
@@ -3105,6 +3129,181 @@ def sum_objective_control_oc(
     return sum_objective_control_oc_multi(game_state, [hex_set])[0]
 
 
+def iter_living_model_footprints(
+    game_state: Dict[str, Any], unit_id: Any
+) -> Iterator[Set[Tuple[int, int]]]:
+    """Empreintes de socle des figurines VIVANTES de ``unit_id`` (lecture PAR FIGURINE, 14.02).
+
+    Source unique de la question « ou est reellement posee cette escouade » : ``models_cache``
+    (position par figurine) + ``compute_occupied_hexes`` (empreinte du socle), et NON l ancre
+    d escouade de ``units_cache``. Une figurine dont le socle recouvre une zone y est presente
+    meme si l ancre de son escouade est ailleurs — c est exactement ce que teste
+    ``sum_objective_control_oc_multi``, qui consomme ce generateur.
+
+    Les figurines mortes (absentes de ``models_cache`` ou HP_CUR <= 0) sont ignorees.
+    """
+    from engine.hex_utils import compute_occupied_hexes
+
+    units_cache = require_key(game_state, "units_cache")
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    entry = require_key(units_cache, str(unit_id))
+    squad_orientation = int(require_key(entry, "orientation"))
+    for mid in require_key(squad_models, str(unit_id)):
+        model = models_cache.get(mid)
+        if model is None:
+            continue
+        if int(model.get("HP_CUR", 1)) <= 0:
+            continue
+        # ORIENTATION PAR FIGURINE, defaut = celle de l escouade. Meme lecture que
+        # `shared_utils._recompute_squad_occupied_hexes`, qui ecrit les empreintes de reference
+        # (`occupied_hexes_by_model`). Cette fonction ne lisait QUE l orientation d escouade :
+        # `update_model_position` pose une orientation propre a la figurine lors d un pivot a la
+        # molette et ne synchronise PAS l entree d escouade — un socle ovale ou carre pivote
+        # rendait donc une empreinte differente selon le lecteur, dans le meme etat de jeu. Sans
+        # effet sur un socle rond (l orientation n y change rien), d ou l absence de symptome
+        # jusqu ici. `get` et non `require_key` : les etats anterieurs au pivot par figurine
+        # n ont pas la cle, et l orientation d escouade EST leur valeur.
+        orientation = int(model.get("orientation", squad_orientation))
+        yield compute_occupied_hexes(
+            int(model["col"]),
+            int(model["row"]),
+            model["BASE_SHAPE"],
+            model["BASE_SIZE"],
+            orientation,
+        )
+
+
+def objective_hex_zones(game_state: Dict[str, Any]) -> List[Tuple[Any, Set[Tuple[int, int]]]]:
+    """`(id, zone)` par objectif, DANS L ORDRE de ``game_state["objectives"]`` (14.01).
+
+    PARSEUR DES ZONES pour tout ce qui juge une PRESENCE ou un CONTROLE : controle d objectif
+    (`_calculate_objective_control`, `_calculate_primary_objective_control_counts`), regle 14.02
+    (`unit_is_within_objective`), consolidation 12.08 (`fight_handlers`), recompense d objectif,
+    bots d evaluation.
+
+    `fight_handlers._fight_v11_objective_hex_sets` en etait une SECONDE implementation, tolerante
+    la ou celle-ci est stricte : objectif non-dict ignore, `hexes` absent ou mal type reduit a un
+    ensemble vide puis ECARTE de la liste, entree `[col]` acceptee par un `len >= 2`. Sur des
+    donnees propres les deux coincidaient (mesure sur le scenario d entrainement : 5 zones, memes
+    tailles) ; sur une entree abimee elles rendaient des listes de LONGUEURS DIFFERENTES dans le
+    meme etat de jeu — l observation et la recompense voyant N objectifs pendant que la
+    consolidation 12.08 en voyait N-1, sans un mot. Les deux sites de scoring des VP indexaient
+    `h[0]/h[1]` en dur : ils REJETAIENT la forme {"col","row"} que cette fonction accepte, donc
+    une meme donnee etait lisible par la regle et levait dans le calcul des VP.
+
+    ⚠️ DEUX lectures subsistent, volontairement : `observation_builder` (~581) et `action_decoder`
+    (~1005) parsent `hexes` pour en tirer des DISTANCES, pas des zones — ils ont besoin des hexes
+    un par un, pas d un ensemble, et acceptent deja les deux formes. Ils ne divergent donc pas de
+    celle-ci sur ce qu ils acceptent ; les mutualiser est une simplification, pas une correction.
+
+    Le loader de scenario ecrit `hexes` en paires [col, row] (`polygon_to_hex_list` sur les
+    terrains "objective": true). La forme {"col","row"} est acceptee parce que la lecture
+    historique du moteur l acceptait ; toute autre forme est une erreur explicite.
+
+    Une zone VIDE leve, et l erreur nomme l objectif fautif. Un objectif sans hexe n est
+    controlable par personne : il fausse `control_at_least_one` / `control_at_least_two` et le
+    depart « j en tiens plus que lui », donc les VP. Le moteur le traite DEJA comme une erreur
+    ailleurs — `macro_intents.get_objective_center` leve « has no center and no hexes » sur la
+    meme donnee, et les bots d evaluation passent par la a chaque decision. Lever ici ne cree
+    donc pas un mode d echec, il l avance a un endroit qui dit lequel des objectifs est en cause.
+    Les deux lectures precedentes en donnaient DEUX interpretations muettes : ensemble vide
+    conserve cote moteur, objectif ecarte cote combat. Aucune occurrence en production (zones de
+    1730 a 3000 hexes sur le scenario d entrainement), c est un garde-fou de scenario abime —
+    typiquement une forme rasterisee entierement hors plateau.
+
+    `.get` sur `objectives` est ASSUME : cette fonction est de la GEOMETRIE, partagee avec les
+    bots d evaluation, qui tournent sur des etats ou l absence d objectif est legitime. La
+    severite de la REGLE 14.02 est portee par `unit_is_within_objective`, pas ici.
+    """
+    objectives = game_state.get("objectives")  # get allowed : scenario sans objectif
+    if not objectives:
+        return []
+    if not isinstance(objectives, list):
+        raise TypeError(
+            f"game_state['objectives'] must be a list, got {type(objectives).__name__}"
+        )
+    zones: List[Tuple[Any, Set[Tuple[int, int]]]] = []
+    for objective in objectives:
+        hexes = require_key(objective, "hexes")
+        if not isinstance(hexes, list):
+            raise TypeError(f"objective['hexes'] must be a list, got {type(hexes).__name__}")
+        zone: Set[Tuple[int, int]] = set()
+        for objective_hex in hexes:
+            if isinstance(objective_hex, dict):
+                zone.add(normalize_coordinates(
+                    require_key(objective_hex, "col"), require_key(objective_hex, "row")
+                ))
+            elif isinstance(objective_hex, (list, tuple)) and len(objective_hex) == 2:
+                zone.add(normalize_coordinates(objective_hex[0], objective_hex[1]))
+            else:
+                raise TypeError(
+                    "objective hex entry must be {'col','row'} or [col,row]/(col,row), "
+                    f"got {objective_hex!r}"
+                )
+        if not zone:
+            raise ValueError(
+                f"Objective {require_key(objective, 'id')!r} has an empty control zone: "
+                f"an objective with no hex cannot be controlled by anyone."
+            )
+        zones.append((require_key(objective, "id"), zone))
+    return zones
+
+
+def objective_hex_sets(game_state: Dict[str, Any]) -> List[Set[Tuple[int, int]]]:
+    """Zones des objectifs, SANS leur id, dans l ordre de ``game_state["objectives"]``.
+
+    L ordre est un contrat : `get_objective_control(zone_idx, ...)` indexe la meme liste, donc
+    aucune entree ne peut etre omise — c est pourquoi une zone vide leve dans le parseur au lieu
+    d etre ecartee.
+    """
+    return [zone for _objective_id, zone in objective_hex_zones(game_state)]
+
+
+def unit_is_within_objective(
+    game_state: Dict[str, Any],
+    unit_or_id: Any,
+    zones: Optional[List[Set[Tuple[int, int]]]] = None,
+) -> bool:
+    """Regle 14.02 : l unite est-elle A PORTEE d un objectif ? Lecture PAR FIGURINE.
+
+    « A model is within range of a terrain objective while it is within that terrain area »
+    (14.02, PDF 14 Objectives) — la portee se juge donc FIGURINE par FIGURINE, sur l aire de
+    terrain, et l unite y est des qu UNE de ses figurines vivantes y est (l illustration du
+    meme paragraphe compte « six of its models are within the terrain area »).
+
+    ⚠️ ROOT CAUSE CORRIGEE — la lecture historique comparait l ANCRE D ESCOUADE a un hexe
+    d objectif, par egalite stricte de coordonnees. Deux erreurs cumulees : l ancre n est pas
+    une figurine (une escouade etalee a des figurines dans la zone sans que son ancre y soit,
+    et l inverse), et l egalite de centre ignore l EMPREINTE DE SOCLE, alors que le controle
+    d objectif du meme moteur (`sum_objective_control_oc_multi`) compte une figurine des qu une
+    case de son socle recouvre la zone. Les deux questions n avaient donc pas la meme reponse
+    dans le meme etat de jeu. Meme generateur d empreintes ici : une seule implementation.
+
+    `zones` : zones deja calculees par l appelant (evite de reconstruire les ensembles a
+    chaque candidate d une boucle de decision) ; None = les lire ici.
+
+    ⚠️ Quand cette fonction construit elle-meme les zones, elle EXIGE la cle `objectives` : elle
+    repond alors a une question de REGLE pour le moteur (relance de blessure sur objectif, bonus
+    « sur un objectif »), et la cle est posee inconditionnellement a la construction du
+    game_state — son absence est un etat corrompu, jamais « pas d objectif sur la table », qui
+    est une LISTE VIDE. La lecture historique (`is_unit_on_objective`) exigeait cette cle ;
+    l unification l avait relachee en `.get`, ce qui aurait desarme la regle EN SILENCE. Un
+    appelant qui FOURNIT `zones` (les bots d evaluation, sur des etats ou l absence d objectif
+    est legitime) ne subit pas cette exigence : il a deja repondu a la question pour lui-meme.
+    """
+    if zones is None:
+        require_key(game_state, "objectives")
+    zones = objective_hex_sets(game_state) if zones is None else zones
+    if not zones:
+        return False
+    unit_id = str(unit_or_id["id"]) if isinstance(unit_or_id, dict) else str(unit_or_id)
+    for footprint in iter_living_model_footprints(game_state, unit_id):
+        if any(not footprint.isdisjoint(zone) for zone in zones):
+            return True
+    return False
+
+
 def sum_objective_control_oc_multi(
     game_state: Dict[str, Any], hex_sets: List[Set[Tuple[int, int]]]
 ) -> List[Tuple[int, int]]:
@@ -3120,11 +3319,7 @@ def sum_objective_control_oc_multi(
     l empreinte complete — l union n y est donc pas un sur-ensemble et le filtre perdrait du
     controle en silence. Seule la mutualisation des empreintes (exacte) est conservee.
     """
-    from engine.hex_utils import compute_occupied_hexes
-
     units_cache = require_key(game_state, "units_cache")
-    models_cache = require_key(game_state, "models_cache")
-    squad_models = require_key(game_state, "squad_models")
     unit_by_id = {str(u["id"]): u for u in game_state["units"]}
 
     sums: List[List[int]] = [[0, 0] for _ in hex_sets]
@@ -3145,24 +3340,9 @@ def sum_objective_control_oc_multi(
         unit_player = int(require_key(unit, "player"))
         if unit_player not in (1, 2):
             raise ValueError(f"Unexpected unit player id: {unit_player}")
-        entry = units_cache[unit_id]
         candidate_zones = range(len(hex_sets))
-        orientation = int(require_key(entry, "orientation"))
-        model_ids = require_key(squad_models, unit_id)
         models_in_area = [0] * len(hex_sets)
-        for mid in model_ids:
-            model = models_cache.get(mid)
-            if model is None:
-                continue
-            if int(model.get("HP_CUR", 1)) <= 0:
-                continue
-            footprint = compute_occupied_hexes(
-                int(model["col"]),
-                int(model["row"]),
-                model["BASE_SHAPE"],
-                model["BASE_SIZE"],
-                orientation,
-            )
+        for footprint in iter_living_model_footprints(game_state, unit_id):
             for i in candidate_zones:
                 if not footprint.isdisjoint(hex_sets[i]):
                     models_in_area[i] += 1

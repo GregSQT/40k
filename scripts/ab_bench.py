@@ -47,6 +47,7 @@ que ce chiffre ignore (mesure : -11 % ici contre -5 % de s/ep sur un vrai run de
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import re
 import resource
@@ -54,6 +55,32 @@ import statistics
 import subprocess
 import sys
 import time
+
+
+def validate_paires(paires: int) -> None:
+    """Impose un nombre de paires permettant d'annuler la derive (cf. `drift_cancelled`)."""
+    if paires < 3 or paires % 2 == 0:
+        raise SystemExit(
+            "--paires doit etre impair et >= 3 : la premiere paire est jetee (remplissage des "
+            "caches), et les ratios retenus doivent etre en nombre PAIR pour former des couples "
+            "d'ordres opposes (BA,AB) — c'est le couple, pas la mediane, qui annule la derive."
+        )
+
+
+def drift_cancelled(ratios: list) -> tuple[float, list]:
+    """Rend (estimation finale, estimations par couple) a partir des ratios retenus.
+
+    Les ratios retenus alternent d'ordre d'execution : BA, AB, BA, AB... Une derive monotone de
+    la machine multiplie le second run de chaque paire par un facteur k ; elle biaise donc le
+    ratio B/A de k dans un sens quand B passe en second, et de 1/k dans l'autre. La MOYENNE
+    GEOMETRIQUE d'un couple (BA, AB) annule ce facteur — c'est la seule operation qui le fait.
+
+    Une mediane sur l'ensemble des ratios ne l'annule PAS : elle trie par valeur, pas par ordre
+    d'execution, et peut donc selectionner deux mesures du meme ordre. D'ou le decoupage en
+    couples d'abord, mediane des couples ensuite (robustesse a une paire aberrante).
+    """
+    couples = [math.sqrt(ratios[i] * ratios[i + 1]) for i in range(0, len(ratios), 2)]
+    return statistics.median(couples), couples
 
 
 def _run(cwd: str, episodes: int) -> tuple[float, float, str]:
@@ -86,15 +113,14 @@ def main() -> int:
             f"arbre de reference absent. Le creer une fois :\n"
             f"    git -C {args.apres} worktree add {args.avant} HEAD"
         )
-    if args.paires < 2:
-        raise SystemExit("au moins 2 paires : la premiere est jetee (remplissage des caches).")
+    validate_paires(args.paires)
 
     ratios = []
     for index in range(1, args.paires + 1):
         # Ordre alterne A,B puis B,A : lance toujours dans le meme ordre, une derive monotone de
         # la machine (temperature, charge de fond qui s'installe) penalise systematiquement le
-        # second des deux. Le biais est alors de meme signe dans toutes les paires, et la mediane
-        # ne l'annule pas — elle le consacre.
+        # second des deux, et le biais est alors de meme signe dans toutes les paires. Les deux
+        # ordres sont ensuite apparies par `drift_cancelled` : c'est la que le biais s'annule.
         b_first = index % 2 == 0
         if b_first:
             wall_b, cpu_b, masks_b = _run(args.apres, args.episodes)
@@ -114,14 +140,15 @@ def main() -> int:
         if index > 1:
             ratios.append(ratio)
 
-    median = statistics.median(ratios)
+    median, couples = drift_cancelled(ratios)
     print(
-        f"\nratios retenus : {[round(r, 3) for r in ratios]}\n"
-        f"MEDIANE = {median:.3f}  ->  {'gain' if median < 1 else 'PERTE'} de "
+        f"\nratios retenus (BA,AB,...) : {[round(r, 3) for r in ratios]}\n"
+        f"couples sans derive        : {[round(c, 3) for c in couples]}\n"
+        f"VERDICT = {median:.3f}  ->  {'gain' if median < 1 else 'PERTE'} de "
         f"{abs(1 - median) * 100:.1f} % de temps CPU\n"
-        f"etendue {min(ratios):.3f}-{max(ratios):.3f}"
+        f"etendue des couples {min(couples):.3f}-{max(couples):.3f}"
     )
-    if min(ratios) < 1.0 < max(ratios):
+    if min(couples) < 1.0 < max(couples):
         print(
             "L'ETENDUE ENJAMBE 1.000 : cette mesure ne tranche pas. Augmenter --episodes et "
             "--paires avant d'en conclure quoi que ce soit, dans un sens comme dans l'autre."

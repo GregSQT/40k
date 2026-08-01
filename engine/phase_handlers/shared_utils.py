@@ -1075,11 +1075,20 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
     # detruites disparaissent de models_cache, donc la valeur initiale n est plus derivable
     # ensuite. Sert la feature « VALUE cumulee / valeur de depart » de l observation (force
     # d usure, V11 §9.8) — meme motif que model_count_at_start ci-dessus.
+    # EFFECTIF de depart par joueur, meme photo, meme boucle : les figurines detruites
+    # disparaissent de models_cache ET de squad_models (destroy_model), et squad_cache perd
+    # les escouades aneanties — le compte de depart n'est donc derivable NULLE PART ensuite.
+    # Il sert de denominateur aux ratios d'attrition (02_combat/c_ et d_). Pose ici, a cote de
+    # value_at_start, pour que les deux references de depart soient prises au meme instant :
+    # capturees a deux endroits, une reconstruction de cache pourrait n'en bouger qu'une.
     value_at_start: Dict[int, int] = {}
+    model_count_at_start_by_player: Dict[int, int] = {}
     for model in models_cache.values():
         p = int(require_key(model, "player"))
         value_at_start[p] = value_at_start.get(p, 0) + int(require_key(model, "VALUE"))
+        model_count_at_start_by_player[p] = model_count_at_start_by_player.get(p, 0) + 1  # get allowed : accumulateur, 0 = 1re figurine du joueur
     game_state["value_at_start"] = value_at_start
+    game_state["model_count_at_start_by_player"] = model_count_at_start_by_player
 
     from engine.game_utils import add_debug_file_log
     episode = game_state.get("episode_number", "?")
@@ -1272,35 +1281,21 @@ def require_unit_position(
 
 
 def is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
-    """True si les coordonnees de l unite sont dans un hex d objectif.
+    """Regle 14.02 : l unite est-elle a portee d un objectif ? Lecture PAR FIGURINE.
 
     Helper generique de position (tir ET fight) : le reroll_towound_target_on_objective
-    s applique aux deux phases. Aucun repli : objectives/hexes malformes -> erreur explicite.
+    s applique aux deux phases.
+
+    ⚠️ Cette fonction comparait l ANCRE d escouade a un hexe d objectif par egalite stricte —
+    ni la bonne granularite (14.02 juge FIGURINE par figurine), ni la bonne geometrie (le
+    controle d objectif du meme moteur compte l EMPREINTE DE SOCLE). Implementation unique
+    desormais : `game_state.unit_is_within_objective`. Import local : `engine.game_state`
+    importe ce module, l import de tete creerait un cycle (meme motif que
+    `unit_can_occupy_upper_floor`, importe localement par 4 handlers).
     """
-    unit_col, unit_row = require_unit_position(unit, game_state)
-    objectives = require_key(game_state, "objectives")
-    if not isinstance(objectives, list):
-        raise TypeError(f"game_state['objectives'] must be a list, got {type(objectives).__name__}")
-    for objective in objectives:
-        objective_hexes = require_key(objective, "hexes")
-        if not isinstance(objective_hexes, list):
-            raise TypeError(f"objective['hexes'] must be a list, got {type(objective_hexes).__name__}")
-        for objective_hex in objective_hexes:
-            if isinstance(objective_hex, dict):
-                obj_col, obj_row = normalize_coordinates(
-                    require_key(objective_hex, "col"),
-                    require_key(objective_hex, "row"),
-                )
-            elif isinstance(objective_hex, (list, tuple)) and len(objective_hex) == 2:
-                obj_col, obj_row = normalize_coordinates(objective_hex[0], objective_hex[1])
-            else:
-                raise TypeError(
-                    "objective hex entry must be {'col','row'} or [col,row]/(col,row), "
-                    f"got {objective_hex!r}"
-                )
-            if unit_col == obj_col and unit_row == obj_row:
-                return True
-    return False
+    from engine.game_state import unit_is_within_objective
+
+    return unit_is_within_objective(game_state, unit)
 
 
 # ============================================================================

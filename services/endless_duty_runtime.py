@@ -685,11 +685,16 @@ def _replace_units_for_player(gs: Dict[str, Any], player: int, replacement_units
     # build_units_cache pour LES DEUX joueurs. Ici seul `player` est remplace : la reference
     # de l adversaire doit rester celle de son propre debut, sinon ses pertes deja subies
     # disparaissent de l observation (son ratio remonterait a 1.0 sans avoir rien regagne).
+    # `model_count_at_start_by_player` est la meme photo, en figurines : elle se preserve
+    # exactement de la meme facon, sinon les deux references de depart divergeraient.
     previous_value_at_start = dict(gs.get("value_at_start") or {})  # get allowed (1er appel)
+    previous_models_at_start = dict(gs.get("model_count_at_start_by_player") or {})  # get allowed (1er appel)
     build_units_cache(gs)
     opponent = 1 if int(player) == 2 else 2
     if opponent in previous_value_at_start:
         require_key(gs, "value_at_start")[opponent] = previous_value_at_start[opponent]
+    if opponent in previous_models_at_start:
+        require_key(gs, "model_count_at_start_by_player")[opponent] = previous_models_at_start[opponent]
     rebuild_choice_timing_index(gs)
     units_cache = require_key(gs, "units_cache")
     gs["units_cache_prev"] = {

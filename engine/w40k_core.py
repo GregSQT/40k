@@ -47,7 +47,13 @@ from engine.observation_builder import ObservationBuilder
 from engine.action_decoder import DEPLOY_SLOT_CANDIDATES_CACHE_KEY, ActionDecoder
 from engine.reward_calculator import RewardCalculator
 from engine.game_state import GameStateManager
-from engine.macro_intents import INTENT_INVADE, MAX_OBJECTIVES, get_nearest_objective_zone
+from engine.macro_intents import (
+    INTENT_INVADE,
+    MAX_OBJECTIVES,
+    get_nearest_objective_zone,
+    get_objective_control,
+    get_objective_control_for_player,
+)
 from engine.agent_decision import (
     clear_pending_agent_decision,
     initialize_agent_decision_state,
@@ -59,13 +65,30 @@ from engine.pve_controller import PvEController
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ai.step_logger import StepLogger
-    from ai.metrics_tracker import W40KMetricsTracker
 
 # Global flag to ensure debug.log is cleared only once per training session
 _debug_log_cleared = False
 
 _engine_id_counter = 0
 _engine_id_lock = threading.Lock()
+
+#: Les cinq categories de `reward_breakdown` posees par RewardCalculator (`total` est leur
+#: resultat, pas une categorie).
+REWARD_BREAKDOWN_COMPONENTS = ('base_actions', 'result_bonuses', 'objective', 'situational', 'penalties')
+
+#: Categories DENSES : celles qui paient un COMPORTEMENT. `situational` (le +-50 terminal) paie
+#: le RESULTAT et sa masse ecraserait toute comparaison ; `penalties` est negatif et n'est PAS
+#: disjoint de `base_actions` (`wait` et `charge_fail` sont ecrits dans les deux), l'additionner
+#: compterait chaque attente deux fois. Seules ces trois-la portent un flux positif cumule.
+DENSE_REWARD_BREAKDOWN_COMPONENTS = ('base_actions', 'result_bonuses', 'objective')
+
+
+def empty_reward_breakdown_totals() -> Dict[str, float]:
+    """Accumulateur de ventilation vide : totaux nets + flux positif des composantes denses."""
+    totals: Dict[str, float] = {key: 0.0 for key in REWARD_BREAKDOWN_COMPONENTS}
+    for key in DENSE_REWARD_BREAKDOWN_COMPONENTS:
+        totals[f'{key}_positive'] = 0.0
+    return totals
 
 
 def _next_engine_id() -> int:
@@ -387,7 +410,6 @@ class W40KEngine(gym.Env):
         self.step_logger: Optional["StepLogger"] = None  # Will be set by training system if enabled
         self.is_evaluation_mode: bool = False  # Set by training system during evaluation
         self._force_evaluation_mode: bool = False  # Set by training system during evaluation
-        self._metrics_tracker: Optional["W40KMetricsTracker"] = None  # Set by training system
         
         # Detect training context to suppress debug logs
         self.is_training = training_config_name in ["debug", "default", "conservative", "aggressive"]
@@ -457,9 +479,26 @@ class W40KEngine(gym.Env):
             "coherency_penalized_turns": set(),
             "controlled_objective_samples_scoring_turns": [],
             "opponent_objective_samples_scoring_turns": [],
+            # Mode tire par `deployment_mode_schedule` pour l'episode ("active"|"fixed"), None
+            # hors entrainement. Pose A L'INIT et pas au seul reset : les chemins API/PvP
+            # construisent le moteur puis jouent sans passer par `reset()`, et le bloc terminal
+            # de `step` lit cette cle pour la publier dans `info`. Le `.update()` du reset ne la
+            # reecrit pas — c'est la neutralisation explicite en tete de reset qui s'en charge,
+            # avant le tirage.
+            "deployment_mode_schedule_mode": None,
             "zone_intents": [INTENT_INVADE] * MAX_OBJECTIVES,
             "zone_intent_free_steps_remaining": 0,
             "unit_zone_assignments": {},
+            # Declarations d'intents en attente de solde, par joueur. REMISE A ZERO ICI parce
+            # que `reset` fait un `update()` de game_state, pas une recreation : une declaration
+            # non soldee (l'adversaire, ou l'agent sur un episode tronque) serait sinon soldee au
+            # tour 1 de l'episode SUIVANT, contre un plateau sans aucun rapport.
+            "_zone_intent_declarations": {},
+            # Meme raison pour le solde DEJA CALCULE mais pas encore verse : il n'est poppe que
+            # par une action non-zone-intent, et plusieurs chemins n'y arrivent jamais (fin de
+            # partie pendant les free steps, sortie anticipee turn-limit, auto-advance). Il
+            # atterrirait alors sur la premiere action de l'episode suivant.
+            "_pending_zone_shaping": 0.0,
 
             # AI_TURN.md required tracking sets
             "units_moved": set(),
@@ -692,7 +731,8 @@ class W40KEngine(gym.Env):
             'invalid_actions': 0,
             'wait_actions': 0,
             'total_actions': 0,
-            'total_enemies': 0
+            'total_enemy_units': 0,
+            'reward_breakdown': empty_reward_breakdown_totals(),
         }
         
         # ==================================================
@@ -1050,6 +1090,12 @@ class W40KEngine(gym.Env):
 
         # Scheduler par-épisode fixed↔active : impose un rechargement avec le mode tiré (rampé sur
         # la progression du training). None = scheduler inactif → mode laissé au JSON du scénario.
+        #
+        # La clé est posée à None AVANT l'appel pour qu'elle existe à CHAQUE épisode : le
+        # scheduler ne l'écrit que sur son chemin actif (5 `return None` en amont), et une clé
+        # tantôt présente tantôt absente forcerait ses lecteurs à un `.get` — donc à confondre
+        # « scheduler inactif » avec « épisode où personne n'a rien écrit ».
+        self.game_state["deployment_mode_schedule_mode"] = None
         episode_deployment_mode = self._configure_deployment_mode_for_episode()
         if episode_deployment_mode is not None:
             should_reload_scenario = True
@@ -1163,6 +1209,16 @@ class W40KEngine(gym.Env):
             "zone_intents": [INTENT_INVADE] * MAX_OBJECTIVES,
             "zone_intent_free_steps_remaining": 0,
             "unit_zone_assignments": {},
+            # Declarations d'intents en attente de solde, par joueur. REMISE A ZERO ICI parce
+            # que `reset` fait un `update()` de game_state, pas une recreation : une declaration
+            # non soldee (l'adversaire, ou l'agent sur un episode tronque) serait sinon soldee au
+            # tour 1 de l'episode SUIVANT, contre un plateau sans aucun rapport.
+            "_zone_intent_declarations": {},
+            # Meme raison pour le solde DEJA CALCULE mais pas encore verse : il n'est poppe que
+            # par une action non-zone-intent, et plusieurs chemins n'y arrivent jamais (fin de
+            # partie pendant les free steps, sortie anticipee turn-limit, auto-advance). Il
+            # atterrirait alors sur la premiere action de l'episode suivant.
+            "_pending_zone_shaping": 0.0,
             "units_moved": set(),
             "moved_distance_by_model": {},
             "units_fled": set(),
@@ -1343,25 +1399,6 @@ class W40KEngine(gym.Env):
         if self._model_count <= 0:
             raise ValueError("reset produced zero models: cannot derive runaway step limits")
         self._episode_step_limit_cache = None
-
-        # Effectif de depart PAR CAMP, en FIGURINES. Releve ici et jamais recalcule : les
-        # figurines detruites disparaissent de `models_cache`, donc le denominateur des ratios
-        # de fin d'episode (0_combat/c_models_killed_ratio, d_models_lost_ratio) n'est plus
-        # derivable ensuite. `squad_models` ne le rattraperait pas : `destroy_model` en retire
-        # aussi l'id (shared_utils.py:3387). Il n'est donc lisible que MAINTENANT, au reset,
-        # ou aucune figurine n'est encore morte.
-        _controlled_player = int(require_key(self.config, "controlled_player"))
-        _squad_models = require_key(self.game_state, "squad_models")
-        _units_cache_init = require_key(self.game_state, "units_cache")
-        self._initial_ally_models = sum(
-            len(mids) for uid, mids in _squad_models.items()
-            if int(require_key(_units_cache_init[uid], "player")) == _controlled_player
-        )
-        self._initial_enemy_models = sum(
-            len(mids) for uid, mids in _squad_models.items()
-            if int(require_key(_units_cache_init[uid], "player")) != _controlled_player
-        )
-        
         # Initialize units_cache_prev for first step (Phase 2: units_cache always exists after reset)
         uc = require_key(self.game_state, "units_cache")
         self.game_state["units_cache_prev"] = {
@@ -1462,7 +1499,8 @@ class W40KEngine(gym.Env):
             'invalid_actions': 0,
             'wait_actions': 0,
             'total_actions': 0,
-            'total_enemies': 0
+            'total_enemy_units': 0,
+            'reward_breakdown': empty_reward_breakdown_totals(),
         }
         
         # Log episode start with all unit positions, walls, and objectives
@@ -1975,17 +2013,46 @@ class W40KEngine(gym.Env):
             observation, out_mask = self._step_observation(mask_and_eligible=(action_mask, eligible_units))
         _step_t4 = time.perf_counter() if _step_t0 is not None else None
         # Calculate reward (independent of step_logger)
+        # Shaping zone-intent verse a ce step, cumule pour la VENTILATION : il n'est pas produit
+        # par `calculate_reward`, donc il n'apparait pas dans `last_reward_breakdown`. Sans le
+        # rattacher, il gonflait le retour de l'episode sans entrer dans aucune categorie — les
+        # cinq `reward/*_total` ne sommaient plus le retour, et `reward/objective_share`, la
+        # metrique meme que ce shaping doit eclairer, ignorait un flux d'objectif reellement percu.
+        zone_shaping_paid = 0.0
         # Zone intent free step: reward is always 0.0 (agent learns via deferred rewards)
         if isinstance(result, dict) and result.get("action") == "zone_intent":
             reward = 0.0
         else:
             reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
-            # Add zone intent shaping accumulated from this turn's free steps
-            # Two paths: cap épuisé (stored during zone_intent action) or sortie volontaire (stored at first non-zone-intent)
-            shaping = self.game_state.pop("_pending_zone_shaping", 0.0)
+            # Shaping zone-intent : solde d'une declaration d'un tour PRECEDENT, pose a
+            # l'ouverture de la command phase du declarant (cf. _process_command_phase).
+            # La cle est posee a l'init ET au reset : sa lecture est stricte, et le versement
+            # la remet a 0.0 au lieu de la supprimer — un `pop` avec defaut masquerait une
+            # desynchronisation du cycle declaration/solde.
+            shaping = require_key(self.game_state, "_pending_zone_shaping")
+            self.game_state["_pending_zone_shaping"] = 0.0
             reward += shaping
+            zone_shaping_paid += shaping
         _step_t5 = time.perf_counter() if _step_t0 is not None else None
         terminated = self.game_state["game_over"]
+        if terminated:
+            # SOLDE TERMINAL. La declaration du dernier tour n'atteindra jamais la command phase
+            # suivante : sans ce rattrapage, le dernier tour de CHAQUE episode ne serait jamais
+            # paye — un tour sur N systematiquement muet, et justement celui qui decide la
+            # partie.
+            #
+            # On solde celle du JOUEUR CONTROLE, pas celle de l'auteur du dernier step : la
+            # partie se termine le plus souvent pendant le tour de l'adversaire, et l'agent n'a
+            # alors plus aucun step pour porter son solde. Verser ici reste correct — les
+            # wrappers d'adversaire cumulent les recompenses des steps du bot dans celle rendue
+            # a l'agent (`cumulative_reward`, ai/env_wrappers.py). La declaration eventuelle de
+            # l'adversaire n'est jamais soldee : sa recompense n'entraine rien, et `reset` la
+            # jette avec le reste de `game_state`.
+            terminal_shaping = self.settle_pending_zone_intent_declaration(
+                int(require_key(self.config, "controlled_player"))
+            )
+            reward += terminal_shaping
+            zone_shaping_paid += terminal_shaping
         truncated = False
         info = result.copy() if isinstance(result, dict) else {}
         info["success"] = success
@@ -2017,7 +2084,40 @@ class W40KEngine(gym.Env):
                 action_name = result.get("action")
                 if action_name in {"wait", "skip"}:
                     self.episode_tactical_data['wait_actions'] += 1
-        
+
+        # VENTILATION DE LA RECOMPENSE — cumulee ICI, pas cote callback.
+        #
+        # Chaque step moteur pose sa ventilation dans `last_reward_breakdown` et l'ecrase au
+        # suivant. Le callback d'entrainement ne voit, lui, qu'UN info par step GYM, et cet info
+        # est celui du DERNIER step moteur : les wrappers d'adversaire (BotControlledEnv,
+        # SelfPlayWrapper) rejouent le bot apres l'action de l'agent et remplacent l'info par
+        # celle du bot — la ventilation de l'action de l'agent etait donc jetee, et rien du tout
+        # n'etait accumule quand le bot ne jouait pas. Cumulee ici, elle traverse : elle voyage
+        # dans `episode_tactical_data`, que le bloc de terminaison ci-dessous copie dans info.
+        #
+        # `*_positive` : le flux POSITIF des composantes denses. Le signe ne se lit qu'AU PAS
+        # (une action, un signe) — une fois l'episode somme, les +0,3 de chaque tir et les -0,1
+        # de chaque attente ne sont plus separables, et c'est ce flux-la que la part d'objectif
+        # (reward/objective_share) doit prendre au denominateur.
+        if "last_reward_breakdown" in self.game_state:
+            step_breakdown = self.game_state["last_reward_breakdown"]
+            del self.game_state["last_reward_breakdown"]
+            totals = self.episode_tactical_data['reward_breakdown']
+            for key in REWARD_BREAKDOWN_COMPONENTS:
+                value = float(require_key(step_breakdown, key))
+                totals[key] += value
+                if key in DENSE_REWARD_BREAKDOWN_COMPONENTS:
+                    totals[f'{key}_positive'] += max(0.0, value)
+
+        if zone_shaping_paid != 0.0:
+            # Categorie `objective` : le shaping paie la prise et la conservation d'objectifs.
+            # Accumule ici et non dans `last_reward_breakdown` — celui-ci n'existe pas sur tous
+            # les chemins qui versent (un solde terminal peut tomber sur un step zone-intent,
+            # ou `calculate_reward` n'est pas appele).
+            totals = self.episode_tactical_data['reward_breakdown']
+            totals['objective'] += zone_shaping_paid
+            totals['objective_positive'] += max(0.0, zone_shaping_paid)
+
         # Add winner info when game ends
         if terminated:
             winner, win_method = self._determine_winner_with_method()
@@ -2055,32 +2155,49 @@ class W40KEngine(gym.Env):
             
             self.episode_tactical_data['units_lost'] = total_ally_units - surviving_ally_units
             self.episode_tactical_data['units_killed'] = total_enemy_units - surviving_enemy_units
-            self.episode_tactical_data['total_enemies'] = total_enemy_units
+            self.episode_tactical_data['total_enemy_units'] = total_enemy_units
             self.episode_tactical_data['total_ally_units'] = total_ally_units
 
-            # Effectifs en FIGURINES : depart releve au reset, survivants comptes dans
-            # models_cache (les mortes en sont retirees). Denominateur + numerateur des
-            # ratios 0_combat/c_ et d_, qui rendent comparables deux rosters de tailles
-            # differentes la ou les compteurs bruts ne le sont pas.
+            # Attrition en FIGURINES et en VALUE : une seule passe sur models_cache, dont les
+            # mortes sont retirees. Les references de depart (effectif, VALUE) sont les photos
+            # posees par build_units_cache au reset — rien ne les redonne ensuite.
             #
-            # LES DEUX CAMPS SONT COMPTES DE LA MEME FACON — c'est ce qui rend les deux
-            # courbes lisibles cote a cote. Le compte de kills du journal (shoot_kills +
-            # melee_kills) ne convient PAS comme numerateur de c_ : il ignore les figurines
-            # retirees hors attaque (hazard 24.16, retrait de coherence 03.03), qui sont
-            # comptees cote allie par la difference des survivants. Les deux courbes
-            # n'auraient alors pas la meme base. L'attribution des kills a l'agent, elle,
-            # reste lisible sur g_/h_.
+            # LES DEUX CAMPS SONT COMPTES DE LA MEME FACON, et le camp perdant comme le camp
+            # gagnant : c'est ce qui rend les courbes lisibles cote a cote. Le compte de kills
+            # du journal (shoot_kills + melee_kills) ne conviendrait PAS comme numerateur cote
+            # ennemi — il ignore les figurines retirees hors attaque (hazard 24.16, retrait de
+            # coherence 03.03) que la difference des survivants compte forcement cote allie.
+            # L'attribution des kills a l'agent, elle, reste lisible sur g_/h_.
             models_cache = require_key(self.game_state, "models_cache")
-            self.episode_tactical_data['initial_ally_models'] = int(self._initial_ally_models)
-            self.episode_tactical_data['initial_enemy_models'] = int(self._initial_enemy_models)
-            self.episode_tactical_data['surviving_ally_models'] = sum(
-                1 for m in models_cache.values()
-                if int(require_key(m, "player")) == controlled_player
-            )
-            self.episode_tactical_data['surviving_enemy_models'] = sum(
-                1 for m in models_cache.values()
-                if int(require_key(m, "player")) != controlled_player
-            )
+            models_at_start = require_key(self.game_state, "model_count_at_start_by_player")
+            value_at_start = require_key(self.game_state, "value_at_start")
+            opponent_player = 2 if controlled_player == 1 else 1
+
+            surviving_ally_models = 0
+            surviving_enemy_models = 0
+            surviving_ally_value = 0.0
+            surviving_enemy_value = 0.0
+            for model in models_cache.values():
+                model_value = float(require_key(model, "VALUE"))
+                if int(require_key(model, "player")) == controlled_player:
+                    surviving_ally_models += 1
+                    surviving_ally_value += model_value
+                else:
+                    surviving_enemy_models += 1
+                    surviving_enemy_value += model_value
+
+            initial_ally_models = int(require_key(models_at_start, controlled_player))
+            initial_enemy_models = int(require_key(models_at_start, opponent_player))
+            if surviving_ally_models > initial_ally_models or surviving_enemy_models > initial_enemy_models:
+                raise ValueError(
+                    f"more surviving models than at start (ally {surviving_ally_models}/"
+                    f"{initial_ally_models}, enemy {surviving_enemy_models}/{initial_enemy_models}): "
+                    "model_count_at_start_by_player is not the reset snapshot"
+                )
+            self.episode_tactical_data['initial_ally_models'] = initial_ally_models
+            self.episode_tactical_data['initial_enemy_models'] = initial_enemy_models
+            self.episode_tactical_data['models_lost'] = initial_ally_models - surviving_ally_models
+            self.episode_tactical_data['models_killed'] = initial_enemy_models - surviving_enemy_models
 
             action_logs = self.game_state["action_logs"]
 
@@ -2119,13 +2236,14 @@ class W40KEngine(gym.Env):
             # ne compterait que pour un. Jusqu'au 2026-07-30 la melee lisait le seul
             # `shootDetails[0]`, ce qui ne mesurait que « la premiere attaque du groupe a-t-elle
             # tue ? » — une probabilite quasi constante (~0,15 mesure) independante de la
-            # competence de l'agent, d'ou une courbe 0_combat/h_melee_model_kills plate et bruitee pendant que
+            # competence de l'agent, d'ou une courbe 02_combat/h_melee_model_kills plate et bruitee pendant que
             # g_shoot_model_kills, elle, progressait.
             # `*_value_killed` somme la VALUE des figurines ainsi detruites : distinguer 20
             # gretchins a 4 points d'un monstre a 120 est ce qui separe un agent qui grignote
-            # d'un agent qui frappe ce qui compte. Distinct de `enemy_value_destroyed`, calcule
-            # plus bas, qui est a granularite ESCOUADE (une escouade entamee y compte pour 0)
-            # et sans ventilation par phase.
+            # d'un agent qui frappe ce qui compte. Distinct de `enemy_value_destroyed`,
+            # calcule plus bas : les deux comptent par figurine, mais celui-la somme la VALUE
+            # perdue TOUTES CAUSES confondues et sans ventilation par phase, la ou ceux-ci
+            # n'attribuent que ce que l'agent a detruit au tir ou en melee.
             shots_fired = 0
             hits = 0
             damage_dealt = 0
@@ -2184,32 +2302,26 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['melee_value_killed'] = melee_value_killed
 
             # VALUE attrition metrics (episode-level): destroyed enemy value and lost ally value.
-            units = require_key(self.game_state, "units")
-            total_ally_value = 0.0
-            total_enemy_value = 0.0
-            for unit in units:
-                unit_player = require_key(unit, "player")
-                unit_value = float(require_key(unit, "VALUE"))
-                if unit_player == controlled_player:
-                    total_ally_value += unit_value
-                else:
-                    total_enemy_value += unit_value
-
-            units_by_id = {str(require_key(unit, "id")): unit for unit in units}
-            surviving_ally_value = 0.0
-            surviving_enemy_value = 0.0
-            for unit_id, cache_entry in units_cache.items():
-                unit_ref = units_by_id.get(str(unit_id))
-                if unit_ref is None:
-                    raise KeyError(f"units_cache contains unknown unit id '{unit_id}' for value metrics")
-                alive_value = float(require_key(unit_ref, "VALUE"))
-                if cache_entry["player"] == controlled_player:
-                    surviving_ally_value += alive_value
-                else:
-                    surviving_enemy_value += alive_value
-
-            self.episode_tactical_data['ally_value_lost'] = max(0.0, total_ally_value - surviving_ally_value)
-            self.episode_tactical_data['enemy_value_destroyed'] = max(0.0, total_enemy_value - surviving_enemy_value)
+            #
+            # PAR FIGURINE, des deux cotes (survivants accumules avec les effectifs plus haut).
+            # Ces deux quantites se comptaient a l'ESCOUADE : la valeur survivante etait
+            # `unit["VALUE"]` entiere tant qu'une seule figurine tenait, donc une escouade de
+            # 10 reduite a 1 pesait 0 de perte. Les courbes d'attrition en VALUE (combat/f_,
+            # combat/g_, 02_combat/a_, e_, f_) affichaient alors 0.0 la ou le compte de
+            # figurines montrait 0.9 — la mesure ne pouvait pas etre lue a cote de c_/d_.
+            total_ally_value = float(require_key(value_at_start, controlled_player))
+            total_enemy_value = float(require_key(value_at_start, opponent_player))
+            # Pas de `max(0.0, ...)` ici : depart et survivants sortent des memes figurines,
+            # rien n'ajoute de figurine en cours de partie. Un ecart negatif signifierait que
+            # la photo de depart n'en est pas une — a signaler, pas a ramener a zero.
+            if surviving_ally_value > total_ally_value or surviving_enemy_value > total_enemy_value:
+                raise ValueError(
+                    f"surviving VALUE exceeds start VALUE (ally {surviving_ally_value}/"
+                    f"{total_ally_value}, enemy {surviving_enemy_value}/{total_enemy_value}): "
+                    "value_at_start is not the reset snapshot"
+                )
+            self.episode_tactical_data['ally_value_lost'] = total_ally_value - surviving_ally_value
+            self.episode_tactical_data['enemy_value_destroyed'] = total_enemy_value - surviving_enemy_value
             self.episode_tactical_data['total_ally_value'] = total_ally_value
             self.episode_tactical_data['total_enemy_value'] = total_enemy_value
 
@@ -2218,6 +2330,7 @@ class W40KEngine(gym.Env):
 
             # Unit-rule forcing exposure metrics:
             # Count units that have at least one configured UNIT_RULES entry.
+            units = require_key(self.game_state, "units")
             forced_unit_counts_controlled: Dict[str, int] = {}
             forced_unit_counts_all: Dict[str, int] = {}
             for unit in units:
@@ -2270,7 +2383,7 @@ class W40KEngine(gym.Env):
             # Cles exigees : posees a l'init du game_state et au reset. Le `.get(...) if
             # isinstance(...) else []` qui occupait cette place transformait leur absence en
             # liste vide, et une liste vide desarme silencieusement les courbes qui la lisent
-            # (0_game/e_objectives_held, f_objectives_held_diff) — exactement ce qui a masque
+            # (01_VP/e_objectives_held, d_objectives_held_diff) — exactement ce qui a masque
             # pendant 50 000 episodes que personne ne remplissait ces listes.
             self.episode_tactical_data['controlled_objective_samples'] = list(
                 require_key(self.game_state, "controlled_objective_samples_scoring_turns")
@@ -2281,6 +2394,14 @@ class W40KEngine(gym.Env):
 
             # Add tactical data to info
             info["tactical_data"] = self.episode_tactical_data.copy()
+
+            # Mode de déploiement de CET épisode ("active" | "fixed" | None), pour que les
+            # courbes puissent être ventilées par mode. Sans cette ventilation, la rampe
+            # `deployment_mode_schedule` fait varier la population mesurée pendant tout le run :
+            # une métrique agrégée mélange alors deux tâches de difficulté différente dans des
+            # proportions qui changent à chaque épisode, et son plateau ne distingue plus un
+            # agent qui stagne d'un agent qui progresse sur une tâche qui durcit.
+            info["deployment_mode"] = self.game_state["deployment_mode_schedule_mode"]
             
             # Log episode end with final stats and win method
             if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
@@ -2293,11 +2414,12 @@ class W40KEngine(gym.Env):
         # This must happen BEFORE reset clears action_logs. action_logs is always present (init + reset).
         info["action_logs"] = self.game_state["action_logs"].copy()
 
-        # Add reward_breakdown to info so MetricsCollectionCallback can read it without accessing
-        # game_state (which triggers IPC with SubprocVecEnv and degrades training perf).
-        if "last_reward_breakdown" in self.game_state:
-            info["reward_breakdown"] = self.game_state["last_reward_breakdown"]
-            del self.game_state["last_reward_breakdown"]
+        # `info["reward_breakdown"] = last_reward_breakdown` occupait cette place, un step
+        # moteur a la fois. Son unique lecteur (MetricsCollectionCallback) ne voit qu'un info
+        # par step GYM — celui du dernier step moteur, c'est-a-dire celui du BOT des que le
+        # wrapper d'adversaire rejoue apres l'agent : la ventilation de l'action de l'agent
+        # etait jetee. Elle est desormais cumulee dans `episode_tactical_data['reward_breakdown']`
+        # (voir plus haut), qui voyage dans `info["tactical_data"]` a la terminaison.
 
         # NOTE: last_unit_positions loop removed - now using units_cache_prev snapshot at step() start
         
@@ -5347,8 +5469,69 @@ class W40KEngine(gym.Env):
         else:
             return True, handler_response
 
+    def _record_zone_intent_declaration(self) -> None:
+        """Fige les intents declares CE tour et le controle d'objectif au moment du choix.
+
+        Le controle est memorise ici et non relu au solde : le shaping compare l'etat VISE a
+        l'etat OBTENU, et l'etat vise n'existe plus une fois le tour joue. Une declaration par
+        joueur — les deux camps traversent ce code en self-play, et solder celle du mauvais
+        joueur verserait le shaping de l'adversaire dans la recompense de l'agent.
+        """
+        current_player = int(require_key(self.game_state, "current_player"))
+        zone_intents = require_key(self.game_state, "zone_intents")
+        declarations = require_key(self.game_state, "_zone_intent_declarations")
+        declarations[current_player] = {
+            "turn": self.game_state["turn"],
+            "intents": list(zone_intents),
+            "control": [
+                get_objective_control_for_player(zone_idx, self.game_state, current_player)
+                for zone_idx in range(len(zone_intents))
+            ],
+        }
+
+    def settle_pending_zone_intent_declaration(self, player: int) -> float:
+        """Solde la declaration de `player` et rend le shaping du, 0.0 s'il n'y en a pas.
+
+        Appelee a l'OUVERTURE de la command phase du joueur (command_handlers), donc apres que
+        la frontiere de tour a rafraichi ``objective_controllers`` (14.02) : le controle lu est
+        bien celui OBTENU pendant le tour ecoule. C'est aussi le seul instant ou l'on est sur
+        que la prochaine action jouee sera celle du declarant, donc que le shaping ira dans SA
+        recompense — un solde a la frontiere de tour elle-meme tomberait sur le step de
+        l'adversaire.
+
+        Point de solde independant de la declaration : un joueur qui ne joue aucun free step un
+        tour laisse quand meme sa declaration precedente se solder ici.
+        """
+        declarations = require_key(self.game_state, "_zone_intent_declarations")
+        declaration = declarations.pop(int(player), None)
+        if declaration is None:
+            return 0.0
+        return self.reward_calculator.settle_zone_intent_declaration(
+            self.game_state, declaration, int(player)
+        )
+
     def _process_command_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """Process command phase actions."""
+        # SOLDE de la declaration du tour precedent, avant tout traitement d'action.
+        #
+        # Ici et pas a la frontiere de tour : a cet instant le controle d'objectif a deja ete
+        # rafraichi par la frontiere (14.02), et l'action en cours est celle du declarant — donc
+        # `_pending_zone_shaping` ira dans SA recompense. Solder a la frontiere elle-meme le
+        # ferait tomber sur le step de l'adversaire.
+        #
+        # `zone_intent_free_steps_remaining` PLEIN est le marqueur d'un tour dont aucun intent
+        # n'a encore ete joue (command_phase_start vient de le remettre a MAX_OBJECTIVES) : le
+        # solde a donc lieu exactement une fois par command phase, que l'agent enchaine des free
+        # steps ou sorte immediatement, et meme s'il n'en joue aucun.
+        if self.game_state["zone_intent_free_steps_remaining"] == MAX_OBJECTIVES:
+            pending = self.settle_pending_zone_intent_declaration(
+                int(require_key(self.game_state, "current_player"))
+            )
+            if pending != 0.0:
+                self.game_state["_pending_zone_shaping"] = (
+                    require_key(self.game_state, "_pending_zone_shaping") + pending
+                )
+
         # Phase 2: handle zone intent free step actions
         if action.get("action") == "zone_intent":
             zone_idx = action["zone_idx"]
@@ -5371,39 +5554,36 @@ class W40KEngine(gym.Env):
                     "error": f"zone_idx {zone_idx} out of range (len={len(zone_intents)})",
                 }
 
+            # Etat de controle de l'objectif AU MOMENT du choix : c'est l'axe que
+            # `settle_zone_intent_declaration` recompense, donc le seul axe sur lequel mesurer si la
+            # tete zone-intent conditionne sa decision. Publie dans l'info, jamais compte ici :
+            # les metriques ont un ecrivain unique, le callback d'entrainement.
+            zone_control = get_objective_control(zone_idx, self.game_state)
+
             zone_intents[zone_idx] = intent_value
             self.game_state["zone_intent_free_steps_remaining"] = free_steps - 1
 
-            # Log zone intent step for metrics
-            metrics_tracker = getattr(self, "_metrics_tracker", None)
-            if metrics_tracker is not None and hasattr(metrics_tracker, "log_zone_intent_step"):
-                metrics_tracker.log_zone_intent_step(intent_value)
-
             if self.game_state["zone_intent_free_steps_remaining"] == 0:
-                # Cap épuisé: déclencher le shaping maintenant.
-                # La prochaine action sera non-zone-intent (zone intents masqués).
-                # _pending_zone_shaping sera ajouté au reward de la première action tactique.
-                self.game_state["_pending_zone_shaping"] = self.reward_calculator.compute_zone_intent_shaping(
-                    self.game_state
-                )
+                # Cap epuise : la declaration est close, on l'enregistre. Elle sera SOLDEE au
+                # tour suivant du meme joueur, contre le controle obtenu entre-temps.
+                self._record_zone_intent_declaration()
 
             # Return without phase_complete — env re-demande une action (free step)
             return True, {
                 "action": "zone_intent",
                 "zone_idx": zone_idx,
                 "intent_value": intent_value,
+                "zone_control": zone_control,
                 "zone_intent_free_steps_remaining": self.game_state["zone_intent_free_steps_remaining"],
             }
 
         # Non-zone-intent action in command phase: exit free steps
         free_steps = self.game_state["zone_intent_free_steps_remaining"]
         if free_steps > 0:
-            # Sortie volontaire: shaper uniquement si au moins un intent a été joué
+            # Sortie volontaire : n'enregistrer une declaration que si un intent a ete joue.
             intents_played = MAX_OBJECTIVES - free_steps
             if intents_played > 0:
-                self.game_state["_pending_zone_shaping"] = self.reward_calculator.compute_zone_intent_shaping(
-                    self.game_state
-                )
+                self._record_zone_intent_declaration()
             self.game_state["zone_intent_free_steps_remaining"] = 0
 
         unit_id = action.get("unitId")

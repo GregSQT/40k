@@ -47,16 +47,22 @@ def _game_state(unit_rules, weapon_rules=(), *, target_col=9, target_row=9, armo
     weapon = {"ATK": 4, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
               "WEAPON_RULES": list(weapon_rules), "display_name": "Gun"}
     attacker = {"id": "A1", "squad_id": "1", "T": 4, "RNG_WEAPONS": [weapon]}
+    # 14.02 : la presence sur objectif se juge PAR FIGURINE (models_cache + empreinte de socle),
+    # pas sur l ancre d escouade. La figurine est posee sur l ancre : un seul jeu de coordonnees
+    # ici, ce test ne discrimine pas les deux (cf. test_reroll_towound_shoot.py, qui le fait).
     target_model = {"id": "T1", "T": 4, "HP_CUR": 2, "HP_MAX": 2,
-                    "ARMOR_SAVE": armor_save, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt"}
+                    "ARMOR_SAVE": armor_save, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
+                    "col": target_col, "row": target_row, "level": 0,
+                    "BASE_SHAPE": "round", "BASE_SIZE": 1}
     game_state = {
         "models_cache": {"A1": attacker, "T1": target_model},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "squad_cache": {"2": {"model_count_at_start": 1}},
-        "units_cache": {"2": {"col": target_col, "row": target_row, "VALUE": 10.0, "player": 1}},
+        "units_cache": {"2": {"col": target_col, "row": target_row, "VALUE": 10.0, "player": 1,
+                              "orientation": 0}},
         "unit_by_id": {"1": {"id": "1", "UNIT_RULES": list(unit_rules)},
                        "2": {"id": "2", "UNIT_RULES": []}},
-        "objectives": [{"hexes": [{"col": 5, "row": 5}]}],
+        "objectives": [{"id": "o1", "hexes": [[5, 5]]}],
     }
     intent = {"model_id": "A1", "target_unit_id": "2", "weapon_index": 0, "n_attacks_resolved": 1}
     return game_state, intent

@@ -46,7 +46,7 @@ def test_build_training_opponents_without_bots_is_inert() -> None:
 
 def test_build_training_opponents_rejects_seat_mode_random_without_seed() -> None:
     config = {
-        "bot_training": {"ratios": {"greedy": 1.0}},
+        "bot_training": {"ratios": {"greedy": 1.0}, "randomness": {"greedy": 0.05}},
         "agent_seat_mode": "random",
     }
     with pytest.raises(KeyError, match="agent_seat_seed"):

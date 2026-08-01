@@ -1139,11 +1139,11 @@ de T4/de code latent) :
   les deux bugs sont indépendants et cumulatifs.
 
 **T6.2 — métriques TensorBoard : RÉSOLU, la mémoire projet était périmée.** Inspection directe
-des `events.out.tfevents.*` (EventAccumulator) sur training neuf : `0_critical/` porte bien les
+des `events.out.tfevents.*` (EventAccumulator) sur training neuf : `00_critical/` porte bien les
 métriques PPO — `f_loss_mean`, `g_explained_variance`, `h_clip_fraction`, `i_approx_kl`,
 `j_entropy_loss`, `m_value_loss_smooth`, **56 points chacune** ; `training_critical/` expose ses
 6 tags. Le fix `_dump_with_capture` du 2026-05-22 tient. Nuance non diagnostiquée (sans impact) :
-`train/*` et `training_critical/*` n'ont qu'1 point là où `0_critical/*` en a 56 — répartition
+`train/*` et `training_critical/*` n'ont qu'1 point là où `00_critical/*` en a 56 — répartition
 entre les deux fichiers d'events (`CoreAgent/` et `x1_debug_CoreAgent_1/`).
 
 **Run T6.1 — « run court complet sans erreur » : DÉMONTRÉ sur les deux chemins.**
@@ -1393,7 +1393,7 @@ Plan d'origine :
 1. `python3 ai/train.py --agent CoreAgent --scenario bot --new --training-config x1_debug --step`
    → run court complet sans erreur ; puis `ai/analyzer.py` sur les résultats + replay.
 2. Vérifier les métriques TensorBoard (cf. mémoire projet : métriques PPO manquantes dans
-   0_critical — diagnostiquer si toujours le cas).
+   00_critical — diagnostiquer si toujours le cas).
 3. Baseline bots : l'agent frais doit apprendre à battre RandomBot/GreedyBot sur quelques
    scénarios avant tout tuning (critère de succès : stabilité multi-scénarios, pas un pic).
 4. Hygiène (ne bloque pas) : corriger la `justification` (31→41) de la config ; mettre à jour

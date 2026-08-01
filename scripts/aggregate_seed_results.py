@@ -84,22 +84,22 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--tag-robust",
-        default="0_critical/n_robust_current_score",
+        default="00_critical/n_robust_current_score",
         help="TensorBoard tag for robust current score.",
     )
     parser.add_argument(
         "--tag-combined",
-        default="0_critical/a_bot_eval_combined",
+        default="00_critical/a_bot_eval_combined",
         help="TensorBoard tag for combined score.",
     )
     parser.add_argument(
         "--tag-worst-bot",
-        default="0_critical/b_worst_bot_score",
+        default="00_critical/b_worst_bot_score",
         help="TensorBoard tag for worst bot score.",
     )
     parser.add_argument(
         "--tag-holdout-hard",
-        default="0_critical/c_holdout_hard_mean",
+        default="00_critical/c_holdout_hard_mean",
         help="TensorBoard tag for holdout hard mean.",
     )
     parser.add_argument(

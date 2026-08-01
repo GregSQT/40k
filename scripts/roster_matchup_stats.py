@@ -17,7 +17,7 @@ Modes:
   - P1 subset: --p1-rosters id1,id2  → only these P1 vs all P2 (same episodes each matchup)
   - P1 exclude: --p1-exclude id1,id2  → all P1 in split except these; output: <split>_matchups_<bot>_p1exclude.json
   - Quantile: --quantile best25|worst25 avec --owner agent et/ou --owner opponent → sous-ensembles selon mean_agg
-    (greedy + defensive_smart + adaptive). --merge-full-matrices (défaut si quantile) fusionne dans
+    (RANKING_BOTS : control + adaptive + greedy + defensive). --merge-full-matrices (défaut si quantile) fusionne dans
     <split>_matchups_<eval_bot>.json.
   - P2 benchmark: --p2-benchmark p2_training_roster-01   → one P2, evaluate all P1 rosters
   - All splits: --all-splits  → run training, holdout_regular, holdout_hard
@@ -94,13 +94,14 @@ def _import_roster_aggregate() -> Any:
     return mod
 
 
-def _ranking_matrix_filenames(split: str) -> Tuple[str, str, str]:
-    """Même trio que roster_aggregate_rankings (mean_agg de référence)."""
-    return (
-        f"{split}_matchups_greedy.json",
-        f"{split}_matchups_defensive_smart.json",
-        f"{split}_matchups_adaptive.json",
-    )
+def _ranking_matrix_filenames(split: str) -> Tuple[str, ...]:
+    """Mêmes bots que roster_aggregate_rankings (mean_agg de référence), même ordre.
+
+    Dérivé de `RANKING_BOTS` : l'arité n'est plus figée à 3, et les deux scripts ne peuvent
+    plus diverger sur la liste des bots agrégés.
+    """
+    agg = _import_roster_aggregate()
+    return tuple(f"{split}_matchups_{bot}.json" for bot in agg.RANKING_BOTS)
 
 
 def _quantile_ids_from_rows(
@@ -134,7 +135,7 @@ def _resolve_p1_quantile_ids(
         if not p.is_file():
             raise FileNotFoundError(
                 f"Classement quantile: fichier manquant {p} "
-                f"(nécessite les 3 matrices {names} pour calculer mean_agg)."
+                f"(nécessite les {len(names)} matrices {names} pour calculer mean_agg)."
             )
         matrices.append(agg.load_matchup_matrix(p))
     rows = agg.build_rows_p1(matrices, agg.BOT_WEIGHTS)
@@ -155,7 +156,7 @@ def _resolve_p2_quantile_ids(
         if not p.is_file():
             raise FileNotFoundError(
                 f"Classement quantile P2: fichier manquant {p} "
-                f"(nécessite les 3 matrices {names})."
+                f"(nécessite les {len(names)} matrices {names})."
             )
         matrices.append(agg.load_matchup_matrix(p))
     rows = agg.build_rows_p2(matrices, agg.BOT_WEIGHTS)
@@ -631,7 +632,7 @@ def _build_eval_env(
     from ai.env_wrappers import BotControlledEnv
     from ai.evaluation_bots import (
         RandomBot, GreedyBot, DefensiveBot, ControlBot,
-        AggressiveSmartBot, DefensiveSmartBot, AdaptiveBot,
+        AdaptiveBot, ValueTradeBot,
     )
     from sb3_contrib.common.wrappers import ActionMasker
     from ai.unit_registry import UnitRegistry
@@ -648,9 +649,8 @@ def _build_eval_env(
         "greedy": GreedyBot,
         "defensive": DefensiveBot,
         "control": ControlBot,
-        "aggressive_smart": AggressiveSmartBot,
-        "defensive_smart": DefensiveSmartBot,
         "adaptive": AdaptiveBot,
+        "value_trade": ValueTradeBot,
     }
     if opponent_mode == "bot" and eval_bot_name not in BOT_CLASSES:
         raise ValueError(f"Unknown eval bot: {eval_bot_name!r}")
@@ -853,7 +853,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--eval-bot",
         default="greedy",
-        choices=["random", "greedy", "defensive", "control", "aggressive_smart", "defensive_smart", "adaptive"],
+        choices=["random", "greedy", "defensive", "control", "adaptive", "value_trade"],
         help="Single evaluation bot used for matchup generation",
     )
     parser.add_argument(
@@ -861,7 +861,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Optional comma-separated list of eval bots to generate multiple matchup matrices in one run, "
-            "e.g. greedy,defensive_smart,adaptive"
+            "e.g. control,adaptive,greedy,defensive"
         ),
     )
     parser.add_argument(
@@ -891,7 +891,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         choices=["best25", "worst25"],
         default=None,
         help=(
-            "Quartile par mean_agg agrégé (greedy + defensive_smart + adaptive). "
+            "Quartile par mean_agg agrégé (RANKING_BOTS : control + adaptive + greedy + defensive). "
             "À combiner avec --owner agent et/ou --owner opponent."
         ),
     )
@@ -1011,7 +1011,7 @@ def main() -> None:
         if not eval_bot_names:
             print("❌ --eval-bots provided but empty after parsing")
             sys.exit(1)
-        valid_bots = {"random", "greedy", "defensive", "control", "aggressive_smart", "defensive_smart", "adaptive"}
+        valid_bots = {"random", "greedy", "defensive", "control", "adaptive", "value_trade"}
         invalid = [name for name in eval_bot_names if name not in valid_bots]
         if invalid:
             print(f"❌ Invalid bot(s) in --eval-bots: {invalid}. Valid: {sorted(valid_bots)}")
