@@ -1,3 +1,5 @@
+import json
+import os
 from collections import deque
 from typing import Any, Dict, List, Tuple
 
@@ -13,11 +15,20 @@ from ai.metrics_tracker import (
 )
 from config_loader import get_config_loader
 
-ARMAGEDDON_PROFILES = ("x1", "x5_append", "x5_new", "x1_debug", "x5_debug")
+_AGENT_CONFIG = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+    "config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json",
+)
+
+# ENUMERE depuis le fichier, jamais fige en dur : un tuple ecrit a la main laisse silencieusement
+# passer tout profil ajoute ensuite -- c'est exactement ce qui est arrive a `x1_long`
+# (2026-08-02), qui a echappe a ce verrou alors qu'il etait la raison meme de son existence.
+with open(_AGENT_CONFIG, encoding="utf-8-sig") as _f:
+    ARMAGEDDON_PROFILES = tuple(k for k, v in json.load(_f).items() if isinstance(v, dict))
 
 
 def test_every_training_profile_carries_its_smoothing_windows() -> None:
-    """Les CINQ profils resolvent leurs fenetres de lissage, via _training_common.json.
+    """TOUS les profils resolvent leurs fenetres de lissage, via _training_common.json.
 
     Le test lit le VRAI fichier de config, pas une doublure : une section oubliee dans un
     profil ne se verrait qu'au lancement du run concerne, c'est-a-dire apres coup. Meme
@@ -28,6 +39,15 @@ def test_every_training_profile_carries_its_smoothing_windows() -> None:
     les 21 courbes `_250ep` doublaient les dashboards 00_critical/01_VP/02_combat sans etre
     lues. Le test verifie donc la coherence des deux fenetres, plus leur ecart.
     """
+    # L'énumération doit couvrir le fichier, sinon ce test affiche « tout va bien » sur un
+    # sous-ensemble : une liste vide, ou refigée en dur, passerait sans rien regarder.
+    with open(_AGENT_CONFIG, encoding="utf-8-sig") as f:
+        in_file = {k for k, v in json.load(f).items() if isinstance(v, dict)}
+    assert in_file, "aucun profil lu dans le fichier de config"
+    assert set(ARMAGEDDON_PROFILES) == in_file, (
+        f"profils non couverts : {sorted(in_file - set(ARMAGEDDON_PROFILES))} — l'énumération "
+        f"doit être DÉRIVÉE du fichier, jamais écrite à la main."
+    )
     loader = get_config_loader()
     for profile in ARMAGEDDON_PROFILES:
         training_config = loader.load_agent_training_config("ArmageddonAgent", profile)

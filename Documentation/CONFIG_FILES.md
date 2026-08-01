@@ -219,7 +219,8 @@ elle est désormais pilotée par `defaults.agent_key`.
 | Field | Type | Description |
 |-------|------|-------------|
 | `total_episodes` | integer | Number of episodes to train |
-| `learning_rate` | float | PPO learning rate |
+| `learning_rate` | float **ou** objet | PPO learning rate. Objet `{initial, final, decay_fraction}` = rampe par épisode (voir ci-dessous) |
+| `ent_coef` | float **ou** objet | Coefficient d'entropie. Objet `{start, end, decay_fraction}` = rampe par épisode |
 | `gamma` | float | Discount factor for rewards |
 | `batch_size` | integer | Training batch size |
 | `max_turns_per_episode` | integer | Maximum turns before episode truncation |
@@ -255,14 +256,39 @@ l'évaluation, elle, impose toujours une phase de déploiement. Sur les chemins 
 fournissent qu'un fragment de config (`observation_params`) et n'ont pas d'épisodes à ramper,
 l'absence reste légitime et ne lève pas.
 
-Réglage de référence des cinq profils `ArmageddonAgent` (2026-08-01) : `0.3 → 0.8`, `linear`,
+Réglage de référence des six profils `ArmageddonAgent` (2026-08-01) : `0.3 → 0.8`, `linear`,
 `freeze_after_progress: 0.5`. **Le gel arrive avant la fin de la rampe**, donc `active_ratio_end`
 n'est jamais atteint : la part réellement plafond est `start + (end − start) × freeze` = **0.55**.
 C'est ce plafond effectif, et non `active_ratio_end`, qui dit quelle proportion des épisodes de
 fin de run se joue en déploiement actif. Chaque bloc porte un champ `justification` (même
 convention que `observation_params.justification`). Verrou :
 `tests/unit/engine/test_deployment_mode_schedule.py` dérive la référence du profil `x1`, exige que
-les quatre autres l'égalent, et vérifie que le plafond effectif reste ≥ 0.5.
+les cinq autres l'égalent, et vérifie que le plafond effectif reste ≥ 0.5.
+
+### Rampes `learning_rate` / `ent_coef` — `decay_fraction` (clé OBLIGATOIRE)
+
+Quand `learning_rate` ou `ent_coef` est un **objet** plutôt qu'un scalaire, un callback interpole
+la valeur **par épisode** pendant le run. Les trois clés sont obligatoires, sans valeur par
+défaut — `setup_callbacks` les lit par `require_key`.
+
+| Clé | Type | Contrainte |
+|---|---|---|
+| `initial` / `start` | number | valeur au **début** du run (`initial` pour `learning_rate`, `start` pour `ent_coef`) |
+| `final` / `end` | number | valeur **plancher**, tenue une fois la rampe achevée |
+| `decay_fraction` | number | ∈ ]0,1] — fraction du run sur laquelle la rampe se déroule **intégralement** |
+
+`decay_fraction` existe parce que la rampe est normalisée sur `total_episodes` : allonger un run
+l'étire mécaniquement, alors que ce qui compte pour PPO est le **nombre d'updates de gradient**
+passés à haut LR / haute entropie. `1.0` = comportement historique (rampe sur tout le run) et
+reste le réglage des runs courts ; `x1_long` (150 000 épisodes) utilise `0.4`, la rampe s'achevant
+donc à 60 000 épisodes suivis de 90 000 au plancher. Détail du raisonnement et tableau des
+profils : `Documentation/AI_TRAINING.md`. Verrou :
+`tests/unit/ai/test_schedule_decay_fraction.py`.
+
+> ⚠️ `checkpoint_save_freq` ne se compte **pas** en épisodes : SB3 sauvegarde tous les
+> `save_freq` **appels du callback**, soit un par pas du VecEnv (≈ `n_envs` timesteps). Le régler
+> depuis une durée exprimée en épisodes n'a donc pas de sens ; pour couvrir davantage
+> d'historique sur un run long, le levier sans ambiguïté est `max_checkpoints`.
 
 ---
 
