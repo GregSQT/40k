@@ -58,13 +58,13 @@ import time
 
 
 # Variables d'environnement qui changent la VITESSE d'un run (verifications supplementaires,
-# instrumentation, traces). `subprocess` herite de l'environnement du banc : une seule d'entre
-# elles exportee dans le shell fausse silencieusement toute une campagne — `W40K_MASK_VERIFY` a
-# ete mesuree a x4,7 au niveau 1 et x17 au niveau 2 (commit 0839ea21). Le ralentissement
-# s'applique aux deux cotes, donc le RATIO survit peut-etre ; mais les durees absolues, le
-# dimensionnement de `--timeout` et toute comparaison avec une campagne precedente, non. Et rien
-# dans la sortie ne l'indiquerait.
-_SPEED_ALTERING_ENV = (
+# instrumentation, traces) ou son OBJET (le plateau mesure). `subprocess` herite de
+# l'environnement du banc : une seule d'entre elles exportee dans le shell fausse silencieusement
+# toute une campagne — `W40K_MASK_VERIFY` a ete mesuree a x4,7 au niveau 1 et x17 au niveau 2
+# (commit 0839ea21). Le ralentissement s'applique aux deux cotes, donc le RATIO survit peut-etre ;
+# mais les durees absolues, le dimensionnement de `--timeout` et toute comparaison avec une
+# campagne precedente, non. Et rien dans la sortie ne l'indiquerait.
+_MEASUREMENT_ALTERING_ENV = (
     "W40K_MASK_VERIFY",
     "W40K_PERF_TIMING",
     "W40K_PERF_TIMING_LOG",
@@ -83,6 +83,12 @@ _SPEED_ALTERING_ENV = (
     # ralentissent aucun run de banc — les refuser bloquerait une session PvP voisine sans
     # rien proteger.
     "W40K_LOS_DEBUG",
+    # Pas un ralentisseur : un CHANGEMENT DE CE QUI EST MESURE. `config_loader.py:86` la fait
+    # primer sur `paths.board` de config.json, aucun banc ne passe `--resolution` (defaut None,
+    # train.py:4725) et `refactor_fingerprint.py:74` la pose en `setdefault`, donc la valeur du
+    # shell gagne partout. Un `board/44x60x5` exporte et oublie ferait mesurer un plateau 25 fois
+    # plus grand — un resultat parfaitement coherent, mais qui ne repond pas a la question posee.
+    "W40K_BOARD_PATH",
 )
 
 # Valeurs qui DESARMENT une de ces variables : la laisser a "0" ne ralentit rien, refuser dans ce
@@ -99,13 +105,14 @@ def assert_clean_environment() -> None:
     """
     armed = [
         f"{name}={os.environ[name]!r}"
-        for name in _SPEED_ALTERING_ENV
+        for name in _MEASUREMENT_ALTERING_ENV
         if name in os.environ and os.environ[name].strip().lower() not in _DISARMED_VALUES
     ]
     if armed:
         raise SystemExit(
-            "refus de mesurer : des variables d'environnement qui changent la vitesse d'un run "
-            "sont armees et seraient heritees par chaque entrainement —\n    "
+            "refus de mesurer : des variables d'environnement qui changent la vitesse d'un run, "
+            "ou le plateau sur lequel il tourne, sont armees et seraient heritees par chaque "
+            "run —\n    "
             + "\n    ".join(armed)
             + "\nLes desarmer avant la campagne (`unset " + " ".join(a.split("=")[0] for a in armed)
             + "`). W40K_MASK_VERIFY a ete mesuree a x4,7 (niveau 1) et x17 (niveau 2) : une "

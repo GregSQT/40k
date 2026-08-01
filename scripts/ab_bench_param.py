@@ -28,13 +28,19 @@ CE QUE CE BANC IMPOSE (identique a `ab_bench_nenvs.py`, dont il generalise le pr
    coup, sont comparables ; l'ordre s'inverse d'une paire a l'autre pour qu'une derive monotone
    ne penalise pas toujours le meme cote. La premiere paire est jetee (caches disque, allocateur).
 2. WALL, et rien que le wall — mais RAPPORTE AU NOMBRE D'EPISODES REELLEMENT JOUES, lu dans la
-   cloture du run. Les `n_envs` slots ne terminent pas ensemble : un run depasse son budget d'un
-   surplus qui depend de la configuration, et comparer deux walls bruts attribuerait ce surplus
-   au parametre mesure. Pas de CPU : `getrusage(RUSAGE_CHILDREN)` ne compte pas les workers
+   cloture du run, jamais au budget demande : les deux different (les `done` d'un meme step
+   comptent ensemble) et l'ecart depend de la configuration mesuree.
+   A savoir pour lire les chiffres absolus : l'arret coupe les ~n_envs-1 episodes en cours, dont
+   le temps est compte au numerateur sans entrer au denominateur. Le debit affiche est donc
+   SOUS-ESTIME, d'autant plus que `n_envs` est grand et `--episodes` petit. Ce biais est le meme
+   des deux cotes — il s'annule dans le ratio, qui est le verdict — mais il interdit de comparer
+   un debit absolu d'ici a celui d'un entrainement reel. Pas de CPU : `getrusage(RUSAGE_CHILDREN)` ne compte pas les workers
    `SubprocVecEnv` arretes en fin de run (mesure : 33,7 s de CPU annoncees pour 530 s de wall a
    `n_envs=48`) ; un chiffre faux est plus nuisible qu'un chiffre absent.
-3. LE DEMARRAGE EST COMPTE et n'est pas isolable — le compteur `[MM:SS<` de la barre est
-   retro-date d'une somme de durees PAR SLOT et ne se compare a aucun wall-clock.
+3. LE DEMARRAGE EST COMPTE et cet outil n'en isole pas la part. Le compteur `[MM:SS<` de la barre
+   etait retro-date d'une somme de durees PAR SLOT ; corrige le 2026-08-01, il vaut un vrai
+   wall-clock, mais il part du debut de `learn()` — donc apres les imports et le fork des
+   workers — quand le chronometre d'ici couvre le process entier.
 4. EXECUTION DANS UN ARBRE DE TRAVAIL SECONDAIRE : un entrainement ecrit
    `ai/models/<agent>/model_<agent>.zip`, fichier protege.
 5. EVALUATION BOT DESACTIVEE sur ses deux chemins (periodique et finale). Elle lance ses propres
@@ -73,7 +79,6 @@ de `train.py --param`. `--training-config` doit etre la phase du run a optimiser
 from __future__ import annotations
 
 import argparse
-import math
 import os
 import sys
 
@@ -87,32 +92,10 @@ from ab_train_common import (  # noqa: E402
     assert_provable,
     assert_scenario_supported,
     assert_worktree,
-    config_lookup,
     parse_value,
     read_phase_config,
     run_training,
 )
-
-
-def _planned_n_envs(phase_block: dict, param: str, value: str) -> int:
-    """n_envs que ce cote va utiliser : la valeur comparee si c'est elle, sinon celle de la phase.
-
-    Sert au controle de divisibilite des episodes. Une cle absente leve : deviner un n_envs
-    reviendrait a valider un `--episodes` qui laisse des episodes a moitie joues.
-    """
-    if param == "n_envs":
-        return int(value)
-    try:
-        n_envs = config_lookup(phase_block, "n_envs")
-    except KeyError:
-        raise SystemExit(
-            "la config de phase ne declare pas n_envs : impossible de verifier que --episodes "
-            "est divisible par le nombre d'environnements, donc impossible de garantir que les "
-            "deux cotes terminent le meme nombre d'episodes."
-        )
-    if not isinstance(n_envs, int) or isinstance(n_envs, bool):
-        raise SystemExit(f"n_envs de la config de phase n'est pas un entier : {n_envs!r}")
-    return n_envs
 
 
 def main() -> int:
@@ -151,18 +134,23 @@ def main() -> int:
             phase_block, args.param, value, args.autoriser_suppression_schedule
         )
 
-    envs_a = _planned_n_envs(phase_block, args.param, args.a)
-    envs_b = _planned_n_envs(phase_block, args.param, args.b)
-    # Un run s'arrete au budget d'episodes ; si celui-ci n'est pas divisible par le nombre d'envs,
-    # certains slots laissent un episode a moitie joue et le cote qui en laisse le plus est
-    # avantage. Le controle vaut aussi quand n_envs n'est PAS le parametre compare : il vient
-    # alors de la config, et rien ne garantit qu'il divise --episodes.
-    if args.episodes % envs_a or args.episodes % envs_b:
-        lcm = envs_a * envs_b // math.gcd(envs_a, envs_b)
-        raise SystemExit(
-            f"--episodes {args.episodes} n'est pas divisible par n_envs des deux cotes "
-            f"({envs_a} et {envs_b}) : le run laisserait des episodes a moitie joues, "
-            f"inegalement des deux cotes. Prendre un multiple de {lcm}."
+    # Aucun controle de divisibilite de --episodes par n_envs : il a existe ici, sa justification
+    # etait fausse. Un run s'arrete des que le compteur GLOBAL atteint le budget
+    # (training_callbacks.py:598, `return False`), a un instant quelconque du step courant : les
+    # ~n_envs-1 autres slots sont alors au milieu d'un episode, quel que soit le reste de la
+    # division. Ce travail-la est effectue mais jamais compte, donc le debit affiche est
+    # SOUS-ESTIME d'autant plus que `n_envs` est grand et `--episodes` petit — a 48 envs pour 96
+    # episodes, pres de la moitie des episodes en cours partent a la poubelle. Le biais est
+    # identique des deux cotes tant que `n_envs` ne fait pas partie de la comparaison, donc il
+    # s'annule dans le ratio ; ce qui protege reellement, c'est la normalisation sur les episodes
+    # REELLEMENT joues (cf. la boucle plus bas), pas une contrainte sur le budget demande.
+    if args.param == "n_envs":
+        print(
+            f"AVERTISSEMENT : `n_envs` est l'axe compare, et le travail en vol non compte a "
+            f"l'arret croit avec lui (~n_envs-1 episodes interrompus). Le cote a plus fort "
+            f"n_envs est donc penalise par le protocole lui-meme. Monter --episodes reduit ce "
+            f"biais ; `ab_bench_nenvs.py` reste l'outil de reference pour ce parametre.\n",
+            flush=True,
         )
 
     wanted_a = parse_value(args.a)
