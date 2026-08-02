@@ -11,8 +11,10 @@ annonce une fois en tete : `moy` = temps d'entrainement / episodes produits, `cu
 durees par slot ramenees a cette meme echelle. Une seule unite par ligne — c'est le melange des
 deux qui avait induit en erreur.
 
-Le temps d'evaluation bot est retranche des quatre, sinon le slot qui enjambe une eval de 120 s
-la porte dans sa propre duree (`max` mesure a 121,80 s contre 1,20 s de duree moteur).
+Le temps d'evaluation bot BLOQUANTE est retranche des quatre, sinon le slot qui enjambe une eval
+de 120 s la porte dans sa propre duree (`max` mesure a 121,80 s contre 1,20 s de duree moteur).
+Une eval async ne bloque rien et n'est pas retranchee : la soustraire rendait des durees
+negatives (`min` a -4,791 s/ep, 2026-08-02).
 
 `moy` est calcule DIRECTEMENT, pas comme `moyenne par slot / n_envs` : cette division n'est exacte
 qu'une fois que chaque slot a termine un episode, et rend `n_envs/k` fois trop peu tant que seuls
@@ -260,8 +262,10 @@ def test_moy_retranche_le_temps_d_evaluation_bot(monkeypatch):
     incomparable entre deux runs de cadences d'eval differentes — or c'est exactement ce que la
     colonne existe pour permettre. L'EMA retranchait deja ce temps ; `moy` doit faire pareil.
 
-    Le test arme `gate_display_state` (le canal reel : `_run_bot_eval` y cumule `total_eval_time`)
-    et fait avancer l'horloge d'une pause d'eval au milieu du run.
+    Le test arme `gate_display_state` (le canal reel : `_add_blocking_eval_seconds` y cumule
+    `blocking_eval_seconds`) et fait avancer l'horloge d'une pause d'eval au milieu du run — donc une
+    eval BLOQUANTE, la seule qui alimente ce compteur. Une eval async, qui laisse la boucle
+    tourner, n'y entre pas : cf. tests/unit/ai/test_eval_time_blocking_only.py.
     """
     n_envs, steps_per_episode, step_seconds = 4, 10, 0.02
     eval_seconds = 30.0
@@ -281,7 +285,7 @@ def test_moy_retranche_le_temps_d_evaluation_bot(monkeypatch):
         if round_index == 0:
             # Une eval bot s'intercale : l'horloge avance, aucun episode d'entrainement produit.
             clock.advance(eval_seconds)
-            gate_state["total_eval_time"] = eval_seconds
+            gate_state["blocking_eval_seconds"] = eval_seconds
 
     training_elapsed = 2 * steps_per_episode * step_seconds
     produced = 2 * n_envs

@@ -12,6 +12,7 @@ Contains:
 Extracted from ai/train.py during refactoring (2025-01-21)
 """
 
+import contextlib
 import json
 import os
 import time
@@ -276,7 +277,7 @@ class EpisodeTerminationCallback(BaseCallback):
         self._episode_eval_time_by_env: Optional[List[float]] = None
         self._last_step_perf_time: Optional[float] = None
         self.gate_display_state = gate_display_state
-        self.total_eval_time_at_last_display = 0.0
+        self.blocking_eval_seconds_at_last_display = 0.0
         self.training_progress_bar_length = _require_progress_bar_width("training_width")
         self.training_config = training_config
 
@@ -390,18 +391,21 @@ class EpisodeTerminationCallback(BaseCallback):
                     f"(now={now_perf}, prev={self._last_step_perf_time})"
                 )
         self._last_step_perf_time = now_perf
-        # Cumul du temps passe en evaluation bot, retranche des durees d'episode ci-dessous : une
-        # eval periodique bloque TOUS les slots, et le slot qui l'enjambe se verrait sinon
-        # imputer ses minutes d'attente. Mesure : une eval de 120 s portait `max` a 121,80 s
-        # contre 1,20 s de duree reelle, ce qui rend la colonne `min/max` aveugle a ce qu'elle
-        # sert a reperer — une dispersion d'origine MOTEUR.
-        total_eval_seconds = (
-            self.gate_display_state.get("total_eval_time", 0.0)
+        # Cumul du temps ou la boucle est ARRETEE par une evaluation bot, retranche des durees
+        # d'episode ci-dessous : une eval bloquante fige TOUS les slots, et le slot qui l'enjambe
+        # se verrait sinon imputer ses minutes d'attente. Mesure : une eval de 120 s portait `max`
+        # a 121,80 s contre 1,20 s de duree reelle, ce qui rend la colonne `min/max` aveugle a ce
+        # qu'elle sert a reperer — une dispersion d'origine MOTEUR.
+        # Ce compteur ne contient PAS la duree des evals async (le mode par defaut), qui ne
+        # bloquent rien : cf. BotEvaluationCallback._add_blocking_eval_seconds, seul point
+        # d'alimentation, pour le detail et la mesure.
+        blocking_eval_seconds = (
+            self.gate_display_state.get("blocking_eval_seconds", 0.0)
             if self.gate_display_state else 0.0
         )
         if self._episode_wall_time_by_env is None:
             self._episode_wall_time_by_env = [now_perf] * n_envs
-            self._episode_eval_time_by_env = [total_eval_seconds] * n_envs
+            self._episode_eval_time_by_env = [blocking_eval_seconds] * n_envs
         elif len(self._episode_wall_time_by_env) != n_envs:
             raise ValueError(
                 "Environment count changed during training; cannot maintain per-env episode timing"
@@ -416,10 +420,10 @@ class EpisodeTerminationCallback(BaseCallback):
             episodes_finished += 1
             wall_duration = (
                 (now_perf - self._episode_wall_time_by_env[env_index])
-                - (total_eval_seconds - self._episode_eval_time_by_env[env_index])
+                - (blocking_eval_seconds - self._episode_eval_time_by_env[env_index])
             )
             self._episode_wall_time_by_env[env_index] = now_perf
-            self._episode_eval_time_by_env[env_index] = total_eval_seconds
+            self._episode_eval_time_by_env[env_index] = blocking_eval_seconds
             self.max_episode_duration_seconds = max(
                 self.max_episode_duration_seconds,
                 wall_duration
@@ -480,9 +484,9 @@ class EpisodeTerminationCallback(BaseCallback):
                     self.last_display_time is not None
                     and self.last_display_episode_count is not None
                 ):
-                    eval_delta = total_eval_seconds - self.total_eval_time_at_last_display
+                    eval_delta = blocking_eval_seconds - self.blocking_eval_seconds_at_last_display
                     delta_time = current_time - self.last_display_time - eval_delta
-                    self.total_eval_time_at_last_display = total_eval_seconds
+                    self.blocking_eval_seconds_at_last_display = blocking_eval_seconds
                     delta_episodes = display_episode_count - self.last_display_episode_count
                     if delta_time > 0 and delta_episodes > 0:
                         avg_time_per_episode = delta_time / delta_episodes
@@ -502,11 +506,11 @@ class EpisodeTerminationCallback(BaseCallback):
                 remaining_episodes = display_total_episodes - display_episode_count
                 # Secondes d'ENTRAINEMENT par episode produit, hors evaluation.
                 # Numerateur : le temps d'eval bot est retranche, comme le fait deja l'EMA
-                # ci-dessus. Une eval periodique bloque la boucle plusieurs minutes (13 min
+                # ci-dessus. Une eval SYNCHRONE bloque la boucle plusieurs minutes (13 min
                 # mesurees contre 21 s d'entrainement sur un run de 6 episodes) : l'y laisser
                 # rendrait un chiffre plusieurs fois trop lent, et surtout incomparable entre
                 # deux runs de cadences d'eval differentes — ce que cette colonne existe
-                # justement pour permettre. `total_eval_time` est porte par `gate_display_state`,
+                # justement pour permettre. `blocking_eval_seconds` est porte par `gate_display_state`,
                 # construit dans `setup_callbacks` (ai/train.py:3536) donc de meme portee que
                 # `start_time` : les deux datent du chunk courant.
                 # Denominateur : `episode_count`, le compteur LOCAL a ce callback, et surtout PAS
@@ -516,7 +520,7 @@ class EpisodeTerminationCallback(BaseCallback):
                 # precedents (ai/train.py:4381-4382) : diviser un temps local par un compteur
                 # cumulatif rend un taux effondre — a l'offset 992, 0.000 pour un vrai 0,031 s/ep.
                 # Non garde : on est sous `if episode_ended`, qui vient d'incrementer le compteur.
-                training_elapsed = elapsed - total_eval_seconds
+                training_elapsed = elapsed - blocking_eval_seconds
                 avg_training_time_per_episode = training_elapsed / self.episode_count
 
                 if self.ema_episode_time is not None:
@@ -1757,30 +1761,36 @@ class BotEvaluationCallback(BaseCallback):
     def _save_model_with_vecnormalize(self, save_path: str) -> str:
         """Save model (.zip) and associated VecNormalize statistics.
 
+        Chronometre ici et non aux call-sites : les TROIS sauvegardes (snapshot d'eval,
+        best_model, best_robust) s'executent sur le thread d'entrainement et figent la boucle
+        le temps de zipper le modele. N'en instrumenter qu'une laissait les deux autres
+        gonfler silencieusement les durees d'episode affichees.
+
         Returns:
             Absolute/relative path to the saved model zip.
         """
-        model_zip_path = self._ensure_zip_path(save_path)
-        policy = self.model.policy
-        patched_forward = vars(policy).pop("forward", None)
-        patched_train = vars(self.model).pop("train", None)
-        try:
-            self.model.save(model_zip_path)
-        finally:
-            if patched_forward is not None:
-                policy.forward = patched_forward
-            if patched_train is not None:
-                setattr(self.model, "train", patched_train)
-        if not os.path.exists(model_zip_path):
-            raise FileNotFoundError(
-                f"Model save did not produce expected .zip artifact: {model_zip_path}"
-            )
-        # Pas de try/except avaleur : ce snapshot alimente l'evaluation ASYNCHRONE — un echec
-        # d'ecriture des stats avale ici ressortait comme 600/600 episodes en erreur 5 h 30
-        # plus tard (V11 §0.35). Le retour False (env non enveloppe) = VecNormalize desactive.
-        from ai.vec_normalize_utils import save_vec_normalize
-        save_vec_normalize(self.model.get_env(), model_zip_path)
-        return model_zip_path
+        with self._blocking_eval_timer():
+            model_zip_path = self._ensure_zip_path(save_path)
+            policy = self.model.policy
+            patched_forward = vars(policy).pop("forward", None)
+            patched_train = vars(self.model).pop("train", None)
+            try:
+                self.model.save(model_zip_path)
+            finally:
+                if patched_forward is not None:
+                    policy.forward = patched_forward
+                if patched_train is not None:
+                    setattr(self.model, "train", patched_train)
+            if not os.path.exists(model_zip_path):
+                raise FileNotFoundError(
+                    f"Model save did not produce expected .zip artifact: {model_zip_path}"
+                )
+            # Pas de try/except avaleur : ce snapshot alimente l'evaluation ASYNCHRONE — un echec
+            # d'ecriture des stats avale ici ressortait comme 600/600 episodes en erreur 5 h 30
+            # plus tard (V11 §0.35). Le retour False (env non enveloppe) = VecNormalize desactive.
+            from ai.vec_normalize_utils import save_vec_normalize
+            save_vec_normalize(self.model.get_env(), model_zip_path)
+            return model_zip_path
 
     def _infer_agent_key(self) -> str:
         """Infer agent key from best-model save directory."""
@@ -2219,6 +2229,40 @@ class BotEvaluationCallback(BaseCallback):
             self._remove_model_artifacts(self._pending_eval_snapshot_path)
             self._pending_eval_snapshot_path = None
 
+    def _add_blocking_eval_seconds(self, seconds: float) -> None:
+        """Cumule le temps ou la boucle d'entrainement est REELLEMENT arretee par une eval.
+
+        Ce compteur (`gate_display_state["blocking_eval_seconds"]`) est retranche des durees
+        d'episode et des quatre chiffres `s/ep` de la barre (EpisodeTerminationCallback._on_step,
+        ~ligne 417 et ~ligne 523). Il ne doit donc contenir QUE du wall-clock pendant lequel
+        aucun episode n'a pu progresser. La duree d'une eval async ne convient pas : elle
+        s'ecoule sur un thread worker (`_async_eval_executor`) PENDANT que la boucle continue
+        de produire des episodes. La retrancher rendait des durees d'episode negatives —
+        mesure du 2026-08-02, run x1_long a n_envs=48 : `min` affiche a -4,791 s/ep, soit
+        -230 s bruts, une eval concurrente entiere soustraite d'un episode de ~10 s.
+        Les seuls temps reellement bloquants sont donc cumules ici : l'eval synchrone,
+        l'attente explicite du future (`force_wait`), et toute sauvegarde de modele
+        (`_save_model_with_vecnormalize` : snapshot d'eval, best_model, best_robust). Tous ces
+        appels ont lieu sur le thread d'entrainement, ce qui fait aussi de ce dict une donnee
+        mono-ecrivain.
+        """
+        if self.gate_display_state is None:
+            return
+        if seconds < 0:
+            raise ValueError(f"Blocking eval duration must be >= 0 (got {seconds})")
+        self.gate_display_state["blocking_eval_seconds"] = (
+            self.gate_display_state.get("blocking_eval_seconds", 0.0) + seconds
+        )
+
+    @contextlib.contextmanager
+    def _blocking_eval_timer(self):
+        """Impute au temps bloque le wall-clock passe dans le bloc encadre."""
+        start = time.perf_counter()
+        try:
+            yield
+        finally:
+            self._add_blocking_eval_seconds(time.perf_counter() - start)
+
     def _consume_async_eval_if_ready(self, force_wait: bool = False) -> None:
         """Consume completed async evaluation result and apply it."""
         if self._pending_eval_future is None:
@@ -2228,8 +2272,13 @@ class BotEvaluationCallback(BaseCallback):
         if self._pending_eval_marker is None:
             raise RuntimeError("Pending async eval marker is missing")
         eval_marker = self._pending_eval_marker
+        # Seul `force_wait` peut reellement attendre : sans lui la garde ci-dessus garantit un
+        # future deja `done()`, donc un `result()` immediat et rien a imputer. Chronometrer ce
+        # cas-la cumulerait du bruit flottant a chaque recolte, c'est-a-dire a chaque `_on_step`.
+        wait_timer = self._blocking_eval_timer() if force_wait else contextlib.nullcontext()
         try:
-            results = self._pending_eval_future.result()
+            with wait_timer:
+                results = self._pending_eval_future.result()
         finally:
             self._pending_eval_future = None
             self._pending_eval_marker = None
@@ -2291,7 +2340,10 @@ class BotEvaluationCallback(BaseCallback):
                 if self.early_stopping_patience > 0:
                     self._consume_async_eval_if_ready(force_wait=True)
             else:
-                results = self._evaluate_against_bots(eval_marker)
+                # Chemin synchrone : l'eval s'execute sur le thread d'entrainement, sa duree
+                # entiere est du temps bloque.
+                with self._blocking_eval_timer():
+                    results = self._evaluate_against_bots(eval_marker)
                 self._apply_eval_results(results, eval_marker)
 
         if self.should_stop_early:
@@ -2427,10 +2479,12 @@ class BotEvaluationCallback(BaseCallback):
         eval_marker: int,
         model_path: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Evaluate agent against bots using standalone function"""
-        import os
-        import time
-        eval_start = time.time()
+        """Evaluate agent against bots using standalone function.
+
+        NE cumule PAS sa propre duree dans `blocking_eval_seconds` : en mode async cette methode
+        tourne sur un thread worker, sa duree n'arrete pas la boucle d'entrainement. Le
+        cumul appartient aux appelants, cote thread d'entrainement (`_add_blocking_eval_seconds`).
+        """
         if os.environ.get("LOS_ENV_TRACE") == "1":
             import sys
             train_env = self.model.get_env() if hasattr(self.model, "get_env") else None
@@ -2461,9 +2515,4 @@ class BotEvaluationCallback(BaseCallback):
             scenario_pool=self.scenario_pool,
             model_path=model_path,
         )
-        if self.gate_display_state is not None:
-            self.gate_display_state["total_eval_time"] = (
-                self.gate_display_state.get("total_eval_time", 0.0)
-                + (time.time() - eval_start)
-            )
         return results
