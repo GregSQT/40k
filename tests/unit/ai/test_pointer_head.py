@@ -669,3 +669,100 @@ def test_pointer_requires_the_entity_extractor():
             PointerMaskablePolicy, _ToyEnv(), device="cpu", verbose=0,
             policy_kwargs={"net_arch": [8], "features_extractor_class": CombinedExtractor},
         )
+
+
+def _logits_rejected_by_two_step_masking():
+    """Cherche des logits que le masquage EN DEUX TEMPS de sb3 rejette. `None` s'il n'y en a plus.
+
+    Le cas est SÉLECTIONNÉ EN INTERROGEANT l'objet réel, jamais en rejouant sa formule de
+    masquage : c'est donc exactement ce qui casserait le chemin de production, même si sb3
+    changeait sa constante `HUGE_NEG`. Seul l'offset varie — il ne change rien au softmax
+    mathématique, il ne fait bouger que l'arrondi float32 sur 1107 catégories, qui est le
+    phénomène observé. Aucune graine aléatoire.
+
+    Rendre `None` plutôt qu'échouer ici laisse UN SEUL test porter ce signal, celui qui est
+    nommé pour lui : `test_sb3_two_step_masking_still_rejects_valid_logits`.
+    """
+    masks = np.zeros((1, TOTAL_ACTION_SIZE), dtype=bool)
+    masks[0, :5] = True
+    for step in range(1, 300):
+        logits = torch.full((1, TOTAL_ACTION_SIZE), -(8.0 + step * 0.01), dtype=torch.float32)
+        logits[0] += (torch.arange(TOTAL_ACTION_SIZE, dtype=torch.float32) % 7) * 0.01
+        logits[0, 0] = 0.0
+        try:
+            MaskableCategorical(logits=logits).apply_masking(masks)
+        except ValueError:
+            return logits, masks
+    return None
+
+
+def test_sb3_two_step_masking_still_rejects_valid_logits():
+    """DÉTECTEUR D'AMONT — il ne verrouille pas notre code, il surveille sb3_contrib.
+
+    Tout `_distribution_from` repose sur ce fait : masquer en DEUX temps
+    (`proba_distribution` puis `apply_masking`) fait rejeter par `Simplex()` des logits dont la
+    distribution masquée est pourtant saine. Si ce test tombe, l'amont a corrigé sa double
+    initialisation (ou l'arrondi float32 a changé) : le masquage à la construction n'est alors
+    plus nécessaire, et le test du correctif ci-dessous ne peut plus rien observer.
+
+    C'est le SEUL test qui doit rougir dans ce cas — d'où le `skip` explicite de l'autre.
+    """
+    case = _logits_rejected_by_two_step_masking()
+    assert case is not None, (
+        "le masquage en deux temps de sb3 n'echoue plus sur aucun offset : reevaluer si le "
+        "masquage a la construction de _distribution_from reste necessaire"
+    )
+    logits, masks = case
+    with pytest.raises(ValueError, match="Simplex"):
+        MaskableCategorical(logits=logits).apply_masking(masks)
+
+
+def test_masking_at_construction_accepts_logits_the_two_step_form_rejects(model, monkeypatch):
+    """Le masquage ne doit PAS lever sur des logits sains — bug vécu, run arrêté à 50 000 épisodes.
+
+    Le mécanisme complet est documenté dans `PointerMaskablePolicy._distribution_from` : en deux
+    temps, torch valide un `probs` PÉRIMÉ calculé sur les logits bruts. Ici on prouve le VERT sur
+    le chemin réel de la policy, où `forward`, `get_distribution` et `evaluate_actions`
+    convergent tous.
+
+    Ce verrou ne PEUT pas être exprimé sans le bug amont : sur des logits ordinaires, les deux
+    formes produisent des `logits`/`probs`/`entropy`/`log_prob` identiques BIT À BIT (mesuré sur
+    2000 cas), donc un test sans cas pathologique resterait vert avec le défaut réintroduit.
+    """
+    case = _logits_rejected_by_two_step_masking()
+    if case is None:
+        pytest.skip("amont corrige : voir test_sb3_two_step_masking_still_rejects_valid_logits")
+    logits, masks = case
+
+    policy = model.policy
+    monkeypatch.setattr(policy, "_action_logits", lambda *_args, **_kwargs: logits)
+    inner = policy._distribution_from(None, None, None, None, masks).distribution
+
+    reference = MaskableCategorical(logits=logits, masks=masks)
+    reference_logits: torch.Tensor = torch.as_tensor(reference.logits)
+    assert inner.masks is not None, "le masque doit survivre : entropy() et log_prob() en dépendent"
+    # `probs` n'est pas comparé : il dérive déterministiquement de `logits` par softmax, et
+    # `test_masking_removes_a_shoot_slot_from_the_distribution` couvre déjà sa forme masquée.
+    assert torch.equal(inner.logits, reference_logits)
+    assert torch.equal(inner.entropy(), reference.entropy())
+
+
+def test_non_finite_logits_raise_instead_of_poisoning_ppo(model, monkeypatch):
+    """Un `-inf` doit LEVER : torch l'accepte, et il rend l'entropie NaN.
+
+    C'est le cas que les contraintes de torch ne couvrent PAS : `-inf` est un logit licite
+    (probabilité 0), mais `MaskableCategorical.entropy` calcule `logits * probs`, donc
+    `-inf * 0.0 = nan` sur un slot non masqué — le terme d'entropie de PPO devient NaN et
+    empoisonne les poids en silence. (`+inf` et `NaN`, eux, sont déjà rejetés par torch, mais
+    sa validation entière disparaît sous `python -O` : le contrôle ne s'y délègue pas.)
+    """
+    logits = torch.zeros((1, TOTAL_ACTION_SIZE), dtype=torch.float32)
+    logits[0, 3] = float("-inf")
+    unmasked = np.ones((1, TOTAL_ACTION_SIZE), dtype=bool)
+    assert torch.isnan(MaskableCategorical(logits=logits, masks=unmasked).entropy()).all(), (
+        "sans le controle, ce -inf passe et rend l'entropie NaN"
+    )
+
+    monkeypatch.setattr(model.policy, "_action_logits", lambda *_args, **_kwargs: logits)
+    with pytest.raises(RuntimeError, match="Non-finite action logits"):
+        model.policy._distribution_from(None, None, None, None, unmasked)

@@ -45,7 +45,11 @@ from typing import Any, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
-from sb3_contrib.common.maskable.distributions import MaskableDistribution
+from sb3_contrib.common.maskable.distributions import (
+    MaskableCategorical,
+    MaskableCategoricalDistribution,
+    MaskableDistribution,
+)
 from sb3_contrib.common.maskable.policies import MaskableMultiInputActorCriticPolicy
 from stable_baselines3.common.torch_layers import MlpExtractor
 from stable_baselines3.common.type_aliases import PyTorchObs
@@ -350,12 +354,46 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         decision_emb: torch.Tensor,
         action_masks: Optional[np.ndarray],
     ) -> MaskableDistribution:
-        distribution = self.action_dist.proba_distribution(
-            action_logits=self._action_logits(latent_pi, embeddings, move_map, decision_emb)
+        logits = self._action_logits(latent_pi, embeddings, move_map, decision_emb)
+        # Garde-fou de divergence. Ne PAS s'en remettre aux contraintes de `torch.distributions` :
+        # `Distribution._validate_args` vaut `__debug__`, donc toute cette validation disparaît
+        # sous `python -O` (et sb3 peut l'éteindre globalement). Elle ne couvre de toute façon pas
+        # le cas dangereux ici : un `-inf` est un logit LICITE pour torch (probabilité 0), mais
+        # `MaskableCategorical.entropy` calcule `logits * probs`, donc `-inf * 0.0 = nan` sur un
+        # slot non masqué — le terme d'entropie de PPO devient NaN et empoisonne les poids sans
+        # que rien ne lève. Coût mesuré sous 2 % du forward (et ~170 appels par rollout, pas un
+        # par pas d'env : le forward est batché sur les n_envs) — le prix d'un échec bruyant.
+        if not torch.isfinite(logits).all():
+            raise RuntimeError(
+                "Non-finite action logits (NaN or +/-inf) produced by the pointer heads: "
+                "the policy has diverged, refusing to build a distribution from them."
+            )
+        # ⚠️ Masquage À LA CONSTRUCTION, en UNE passe — ne pas revenir à
+        # `proba_distribution(logits)` puis `apply_masking(masks)`, qui fait TOMBER le run.
+        #
+        # `MaskableCategorical.apply_masking` se termine par `self.probs = logits_to_probs(...)` :
+        # `probs` cesse d'être une lazy_property et devient une valeur matérialisée dans
+        # `__dict__`, calculée sur les logits BRUTS. Au masquage SUIVANT, `Distribution.__init__`
+        # ne saute plus ce paramètre (il ne saute que les lazy NON matérialisés) et le valide
+        # contre `Simplex()`, dont la tolérance est ABSOLUE (`|sum - 1| < 1e-6`) quel que soit le
+        # nombre de catégories. Torch juge alors un vecteur PÉRIMÉ, qui ne décrit même pas la
+        # distribution construite : sur nos 1107 actions en float32, la somme des probas BRUTES
+        # dérive au-delà de 1e-6 là où la distribution MASQUÉE, elle, somme à 1e-8 près. Vécu en
+        # éval CPU : 25 épisodes perdus sur une passe, run arrêté à 50 000 épisodes.
+        #
+        # En une passe, `probs` n'existe pas encore quand torch valide : rien de périmé n'est
+        # jugé, et `masks` est posé par le constructeur (donc `entropy()`/`log_prob()`, qui s'en
+        # servent, sont inchangés — vérifié bit à bit contre la forme en deux temps).
+        action_dist = self.action_dist
+        if not isinstance(action_dist, MaskableCategoricalDistribution):
+            raise TypeError(
+                "PointerMaskablePolicy assemble UN logit par action et exige donc un espace "
+                f"d'action Discrete (distribution recue : {type(action_dist).__name__})."
+            )
+        action_dist.distribution = MaskableCategorical(
+            logits=logits.view(-1, action_dist.action_dim), masks=action_masks
         )
-        if action_masks is not None:
-            distribution.apply_masking(action_masks)
-        return distribution
+        return action_dist
 
     # -- API policy --------------------------------------------------------
     def forward(
