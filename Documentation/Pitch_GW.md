@@ -72,7 +72,7 @@ Ce n'est pas un concept ni une étude de faisabilité. C'est un système qui fon
 
 - Un **moteur de jeu complet** : mouvement, tir, charge, corps-à-corps, terrain, objectifs, ligne
   de vue en trois dimensions, règles d'armes spéciales, phases et tour de bataille.
-- Une **interface jouable** par des humains, avec rejeu et analyse des parties.
+- **Deux modes jouables** : entre joueurs, ou contre l'IA — avec rejeu et analyse des parties.
 - Une **intelligence artificielle par apprentissage par renforcement** qui joue le jeu — elle
   déploie, manœuvre, tire, charge, combat et dispute les objectifs.
 
@@ -176,8 +176,26 @@ catalogue complet, ni des mois d'entraînement supplémentaire — elle repose e
 existe déjà, ces deux armées et cette IA. L'équilibrage est un chantier ; l'onboarding est
 disponible.
 
-Un même moteur qui sert à la fois à équilibrer le jeu et à y faire entrer des joueurs n'est pas un
-outil : c'est une infrastructure.
+**Et ce produit a déjà un canal chez vous.**
+
+Vous avez un service par abonnement, une base de clients qui paie déjà, une distribution en place.
+Il propose aujourd'hui du contenu qui se **consomme** : on le regarde, puis on attend la suite. Un
+jeu, lui, se **pratique** — chaque semaine, indéfiniment.
+
+C'est la distinction qui décide de la vie d'un abonnement. Un service ne se juge pas sur ce qui
+fait souscrire, mais sur ce qui empêche de résilier. Un catalogue qu'on a fini de regarder ne
+retient personne ; une partie en cours ramène le joueur. Vous n'auriez pas un contenu de plus à
+proposer : vous auriez une raison de rester.
+
+Ce que j'ai observé chez les joueurs à qui je l'ai montré : ils n'ont pas demandé si le jeu
+sortirait un jour. Ils ont demandé comment y accéder, et combien ça coûterait. Ce n'est pas une
+étude de marché — c'est ce que j'ai constaté, spontanément, à chaque fois.
+
+Et il n'y a rien à construire autour : ni canal de distribution, ni facturation, ni acquisition de
+clients. Tout existe déjà chez vous.
+
+Un même moteur qui équilibre le jeu, y fait entrer les nouveaux joueurs et donne à votre
+abonnement une raison d'être reconduit n'est pas un outil : c'est une infrastructure.
 
 ## 8. Ce que la simulation retire du travail — et ce qu'elle vous laisse
 
@@ -308,7 +326,8 @@ This is not a concept or a feasibility study. It is a working system today:
 
 - A **complete game engine**: movement, shooting, charging, close combat, terrain, objectives,
   three-dimensional line of sight, special weapon rules, phases and battle round.
-- A **playable interface** for human players, with replay and game analysis.
+- **Two playable modes**: against another player, or against the AI — with replay and game
+  analysis.
 - A **reinforcement-learning artificial intelligence** that plays the game — it deploys,
   manoeuvres, shoots, charges, fights and contests objectives.
 
@@ -408,8 +427,26 @@ The decisive point is this: **this application waits for nothing.** It requires 
 complete catalogue nor months of additional training — it rests on exactly what already exists,
 those two armies and this AI. Balancing is a programme of work; onboarding is available now.
 
-A single engine that both balances the game and brings players into it is not a tool: it is
-infrastructure.
+**And this product already has a channel at your end.**
+
+You have a subscription service, a customer base that already pays, distribution in place. Today
+it offers content that is **consumed**: you watch it, then wait for the next thing. A game is
+**practised** — every week, indefinitely.
+
+That distinction decides whether a subscription lives or dies. A service is not judged on what
+makes people sign up, but on what stops them cancelling. A catalogue you have finished watching
+retains nobody; a game in progress brings the player back. You would not be adding one more piece
+of content: you would be adding a reason to stay.
+
+What I observed with the players I showed it to: they did not ask whether the game would come out
+one day. They asked how to get access, and what it would cost. That is not market research — it is
+what I saw, unprompted, every time.
+
+And there is nothing to build around it: no distribution channel, no billing, no customer
+acquisition. It all already exists at your end.
+
+A single engine that balances the game, brings new players into it, and gives your subscription a
+reason to be renewed is not a tool: it is infrastructure.
 
 ## 8. What the simulation takes off your hands — and what it leaves you
 

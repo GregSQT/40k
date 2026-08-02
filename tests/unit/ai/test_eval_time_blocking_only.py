@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import Future
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 import pytest
 
@@ -55,8 +55,8 @@ def _bare_callback(gate_state: Optional[Dict[str, Any]]) -> BotEvaluationCallbac
     callback.n_eval_episodes = 2
     callback.training_config_name = "x1"
     callback.rewards_config_name = "CoreAgent"
-    callback.scenario_pool = None
-    callback.model = object()
+    callback.scenario_pool = "training"
+    callback.model = cast(Any, object())
     callback._pending_eval_future = None
     callback._pending_eval_marker = None
     callback._pending_eval_snapshot_path = None
@@ -138,7 +138,7 @@ def test_l_attente_explicite_du_future_est_comptee(monkeypatch):
             clock.advance(12.0)
             return {"win_rate": 0.5}
 
-    callback._pending_eval_future = _BlockingFuture()
+    callback._pending_eval_future = cast(Any, _BlockingFuture())
     callback._pending_eval_marker = 42
     monkeypatch.setattr(callback, "_apply_eval_results", lambda r, m: None)
     monkeypatch.setattr(callback, "_cleanup_pending_snapshot", lambda: None)
@@ -204,7 +204,7 @@ def test_la_sauvegarde_de_modele_est_comptee(monkeypatch):
         def get_env(self):
             return None
 
-    callback.model = _SlowModel()
+    callback.model = cast(Any, _SlowModel())
     monkeypatch.setattr("os.path.exists", lambda p: True)
     monkeypatch.setattr("ai.vec_normalize_utils.save_vec_normalize", lambda env, path: False)
 
