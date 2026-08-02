@@ -7,6 +7,25 @@
 
 # 🇫🇷 VERSION FRANÇAISE
 
+## ⚡ Pourquoi maintenant
+
+Jusqu'à récemment, les joueurs qui voulaient jouer à Warhammer 40,000 à distance passaient par une
+plateforme de simulation physique généraliste : des figurines modélisées, des décors, un mètre, des
+dés. Et rien d'autre. Aucune règle n'y est connue du logiciel. Le joueur mesure lui-même, se
+souvient lui-même, arbitre lui-même les désaccords, et fait confiance à l'autre.
+
+Cette solution n'est plus disponible. Le besoin, lui, demeure — et il est aujourd'hui sans réponse.
+
+Ce document ne propose pas de la remplacer. Il propose autre chose : **un moteur qui connaît les
+règles, les applique, et rend les erreurs impossibles au lieu de les laisser s'arbitrer entre
+joueurs.** L'écart entre les deux est celui qui sépare un parking d'un circuit.
+
+Et c'est une offre que vous contrôlez : elle joue vos règles, dans votre univers, avec vos
+validations — au lieu d'un bricolage sur lequel vous n'avez aucune prise.
+
+Ce qui suit décrit ce même système et l'usage qu'il permet en interne : mesurer l'équilibrage du
+jeu.
+
 ## 1. Un problème qui n'a jamais été résolu — parce qu'il est insoluble à la main
 
 Depuis quarante ans, la critique la plus constante adressée à Warhammer 40,000 n'est ni son
@@ -129,30 +148,73 @@ cette distinction est exactement celle qu'un designer a besoin de faire.
 - **Transposable à vos autres systèmes** — Age of Sigmar, Kill Team, Necromunda. Le moteur change ;
   la méthode, non.
 
-## 7. L'argument que je considère comme décisif
+## 7. Le même moteur répond à un second problème : faire entrer les nouveaux joueurs
 
-Aujourd'hui, chaque décision d'équilibrage est contestée. C'est inévitable : elle repose sur un
-jugement, et un jugement se discute. Le joueur qui perd attribue sa défaite aux règles ; celui qui
-gagne attribue sa victoire à son talent. Personne ne peut trancher, donc la controverse est
-permanente — et c'est elle, autant que le déséquilibre lui-même, qui use la réputation du jeu.
+Les deux armées sur lesquelles mon IA s'entraîne ne sont pas choisies au hasard : **ce sont celles
+de la boîte de base de la V11.**
 
-**Comment un joueur pourra-t-il encore affirmer que l'équilibrage est mauvais, quand
-l'intelligence qui l'a établi joue mieux que lui ?**
+Considérez la situation d'un nouveau joueur. Il est intéressé, il est seul, personne autour de lui
+ne connaît le jeu, et il a 200 € devant lui. Sa barrière n'est pas le prix : c'est d'apprendre
+seul un jeu de cette complexité, sans partenaire et sans personne pour corriger ses erreurs.
+Beaucoup renoncent exactement là — non par manque d'envie, mais par manque d'un adversaire.
 
-C'est un renversement complet du terrain du débat. L'équilibrage cesse d'être une opinion
-d'éditeur opposée à une opinion de joueur. Il devient une mesure, produite par une partie
-qui n'a aucun intérêt dans le résultat, sur un volume de parties qu'aucune communauté ne pourra
-jamais égaler.
+Ce que l'IA met dans la bouche d'un vendeur :
 
-Et cet argument porte bien plus loin qu'un communiqué. **La même IA peut être rendue aux
-joueurs** — comme partenaire d'entraînement, adversaire de préparation aux tournois, ou outil
-d'analyse de liste. Ce qui transforme la démonstration en expérience vécue : le joueur ne lit pas
-que l'IA joue mieux que lui, il le constate lui-même. À ce moment-là, l'autorité de l'outil n'a
-plus besoin d'être défendue.
+> *« Tenez, voilà une adresse. C'est gratuit. Vous jouez avec les figurines de la boîte, et vous
+> apprenez les règles en jouant. »*
 
-C'est aussi, accessoirement, un produit.
+- Un adversaire **disponible immédiatement**, sans avoir à trouver quelqu'un.
+- Les règles apprises **en jouant**, pas en lisant — la seule méthode qui fonctionne réellement.
+- Il joue **exactement les unités qu'il s'apprête à acheter**, pas une démonstration abstraite.
+- Et une IA encore imparfaite est un adversaire **idéal** pour un débutant : ici, ce n'est pas une
+  limite, c'est la bonne difficulté.
 
-## 8. Où en est le projet, sans enjoliver
+C'est mesurable, et rapidement : taux de conversion sur la boîte de base, avec et sans l'outil.
+
+Le point décisif est celui-ci : **cette application n'attend rien.** Elle ne demande ni le
+catalogue complet, ni des mois d'entraînement supplémentaire — elle repose exactement sur ce qui
+existe déjà, ces deux armées et cette IA. L'équilibrage est un chantier ; l'onboarding est
+disponible.
+
+Un même moteur qui sert à la fois à équilibrer le jeu et à y faire entrer des joueurs n'est pas un
+outil : c'est une infrastructure.
+
+## 8. Ce que la simulation retire du travail — et ce qu'elle vous laisse
+
+Aujourd'hui, éprouver un changement d'équilibrage suppose de jouer des parties. Et jouer une
+partie introduit deux problèmes que personne ne sait éliminer :
+
+- **Le niveau des joueurs.** Un résultat dépend d'eux autant que des règles. Deux testeurs
+  inégaux, et l'unité testée paraît forte ou faible sans qu'on puisse démêler la cause.
+- **L'angle mort.** Une interaction qu'on n'a pas pensé à essayer reste invisible — jusqu'à ce
+  que dix mille joueurs la trouvent après publication.
+
+**En simulation, l'IA joue au même niveau des deux côtés de la table. Le niveau du joueur cesse
+d'être une variable.** Ce qui subsiste dans l'écart de résultats, ce sont les règles et les
+points : exactement ce que vous cherchez à mesurer, et rien d'autre. Ce n'est pas un argument
+d'autorité, c'est un contrôle expérimental.
+
+Et une partie prend une seconde. Ce changement d'échelle change la nature du travail : au lieu de
+vérifier quelques hypothèses choisies à l'avance, on balaie l'espace — y compris les
+combinaisons auxquelles personne n'aurait pensé, qui sont précisément celles qui font mal.
+
+**Ce qui ne change pas : vous gardez la main.** Vos designers définissent les listes de référence,
+choisissent les affrontements à explorer, arbitrent les ajustements. L'outil ne décide rien et ne
+remplace aucun jugement — il n'a pas d'intention, pas de vision du jeu, pas de goût. Ce qu'il vous
+retire est le travail que personne ne veut faire : jouer des centaines de parties pour éprouver
+une intuition, et la crainte permanente d'être passé à côté d'une combinaison que la communauté
+trouvera à votre place.
+
+Et il en découle quelque chose qui pèse au-delà du studio : une décision d'équilibrage cesse
+d'être une opinion d'éditeur opposée à l'opinion d'un joueur. Elle s'appuie sur une mesure, faite
+à niveau de jeu égal, sur un volume de parties qu'aucune communauté ne pourra jamais atteindre.
+La controverse permanente sur l'équilibrage use la réputation du jeu autant que le déséquilibre
+lui-même ; c'est le premier levier qui l'attaque à la racine.
+
+Enfin, **la même IA peut être rendue aux joueurs** — partenaire d'entraînement, adversaire de
+préparation aux tournois, outil d'analyse de liste. C'est aussi, accessoirement, un produit.
+
+## 9. Où en est le projet, sans enjoliver
 
 **Fait :** le moteur de jeu, l'interface jouable, la chaîne de rejeu et d'analyse automatisée, et
 l'architecture d'IA qui lit les caractéristiques des unités — la fondation dont dépend tout ce
@@ -168,9 +230,9 @@ découverte. Il faut du contenu à saisir, et du temps de calcul pour l'entraîn
 ressources, pas des inconnues. C'est précisément là que je viens vous chercher : j'ai construit
 seul la partie qu'on ne peut pas acheter, et il me manque celle qu'on peut.
 
-## 9. Ce que je propose
+## 10. Ce que je propose
 
-Je ne viens revendiquer aucun droit sur votre univers. Il est le vôtre, et le prototype ne
+Je ne viens pas négocier de droits aujourd'hui. Votre univers est le vôtre, et le prototype ne
 prendrait son sens qu'entre vos mains.
 
 Ce que j'apporte est **l'instrument** : un moteur de simulation et une IA capables de mesurer ce
@@ -183,6 +245,25 @@ Je suis disponible pour une démonstration en direct : l'IA joue, vous regardez.
 ---
 
 # 🇬🇧 ENGLISH VERSION
+
+## ⚡ Why now
+
+Until recently, players who wanted to play Warhammer 40,000 remotely went through a general-purpose
+physics sandbox: modelled miniatures, terrain, a tape measure, dice. And nothing else. The software
+knows no rules. Players measure themselves, remember themselves, settle their own disagreements,
+and trust each other.
+
+That solution is no longer available. The need remains — and today it has no answer.
+
+This document does not propose to replace it. It proposes something else: **an engine that knows
+the rules, applies them, and makes mistakes impossible rather than leaving them to be argued out
+between players.** The gap between the two is the gap between a car park and a racing circuit.
+
+And it is an offering you control: it plays your rules, in your setting, with your approvals —
+instead of a workaround you have no hold over.
+
+What follows describes that same system and the internal use it makes possible: measuring the
+game's balance.
 
 ## 1. A problem that was never solved — because it cannot be solved by hand
 
@@ -300,29 +381,71 @@ designer needs to make.
 - **Transferable to your other systems** — Age of Sigmar, Kill Team, Necromunda. The engine
   changes; the method does not.
 
-## 7. The argument I consider decisive
+## 7. The same engine answers a second problem: bringing new players in
 
-Today, every balance decision is contested. That is unavoidable: it rests on judgement, and
-judgement can be argued with. The losing player blames the rules; the winning player credits
-their own skill. Nobody can settle it, so the controversy is permanent — and it is that
-controversy, as much as the imbalance itself, that wears down the game's reputation.
+The two armies my AI trains on are not chosen at random: **they are the ones from the 11th edition
+starter set.**
 
-**How can a player still claim the balance is wrong, when the intelligence that set it plays
-better than they do?**
+Consider a new player. They are interested, they are on their own, nobody around them knows the
+game, and there is £200 in front of them. Their barrier is not the price: it is learning a game of
+this complexity alone, with no partner and nobody to correct their mistakes. Many give up at
+exactly that point — not for lack of desire, but for lack of an opponent.
 
-That is a complete reversal of the ground the debate is fought on. Balance stops being a
-publisher's opinion set against a player's opinion. It becomes a measurement, produced by a party
-with no stake in the outcome, over a volume of games no community could ever match.
+What the AI puts in a shop assistant's mouth:
 
-And the argument reaches far beyond a press release. **The same AI can be given back to the
-players** — as a training partner, a tournament-preparation opponent, or a list-analysis tool.
-That turns the claim into lived experience: the player does not merely read that the AI plays
-better than them, they find it out first-hand. At that point, the tool's authority no longer needs
-defending.
+> *"Here, take this address. It's free. You play with the miniatures from the box, and you learn
+> the rules as you play."*
 
-It is also, incidentally, a product.
+- An opponent **available immediately**, with no need to find one.
+- Rules learned **by playing**, not by reading — the only method that actually works.
+- They play **exactly the units they are about to buy**, not an abstract demo.
+- And an AI that is still imperfect is an **ideal** opponent for a beginner: here it is not a
+  limitation, it is the right difficulty.
 
-## 8. Where the project stands, without embellishment
+It is measurable, and quickly: conversion rate on the starter set, with and without the tool.
+
+The decisive point is this: **this application waits for nothing.** It requires neither the
+complete catalogue nor months of additional training — it rests on exactly what already exists,
+those two armies and this AI. Balancing is a programme of work; onboarding is available now.
+
+A single engine that both balances the game and brings players into it is not a tool: it is
+infrastructure.
+
+## 8. What the simulation takes off your hands — and what it leaves you
+
+Today, testing a balance change means playing games. And playing a game introduces two problems
+nobody knows how to eliminate:
+
+- **The players' skill.** A result depends on them as much as on the rules. Two unevenly matched
+  testers, and the unit under test looks strong or weak with no way to tell which caused what.
+- **The blind spot.** An interaction nobody thought to try stays invisible — until ten thousand
+  players find it after publication.
+
+**In simulation, the AI plays at the same level on both sides of the table. Player skill stops
+being a variable.** What remains in the difference between results is the rules and the points:
+exactly what you are trying to measure, and nothing else. This is not an argument from authority,
+it is experimental control.
+
+And a game takes one second. That change of scale changes the nature of the work: instead of
+checking a handful of hypotheses picked in advance, you sweep the space — including the
+combinations nobody would have thought of, which are precisely the ones that hurt.
+
+**What does not change: you keep control.** Your designers define the reference lists, choose
+which matchups to explore, and decide on the adjustments. The tool decides nothing and replaces no
+judgement — it has no intent, no vision of the game, no taste. What it takes off your hands is the
+work nobody wants: playing hundreds of games to test a hunch, and the standing fear of having
+missed a combination the community will find on your behalf.
+
+And something follows from that which matters beyond the studio: a balance decision stops being a
+publisher's opinion set against a player's opinion. It rests on a measurement, made at equal skill
+on both sides, across a volume of games no community could ever reach. The permanent controversy
+over balance wears down the game's reputation as much as the imbalance itself; this is the first
+lever that addresses it at the root.
+
+Finally, **the same AI can be given back to the players** — as a training partner, a
+tournament-preparation opponent, or a list-analysis tool. It is also, incidentally, a product.
+
+## 9. Where the project stands, without embellishment
 
 **Done:** the game engine, the playable interface, the automated replay and analysis pipeline, and
 the AI architecture that reads unit characteristics — the foundation everything in this document
@@ -338,10 +461,10 @@ content to be entered, and compute time for training. Those are resources, not u
 exactly why I am coming to you: I have built alone the part that cannot be bought, and I lack the
 part that can.
 
-## 9. What I am proposing
+## 10. What I am proposing
 
-I claim no rights over your setting. It is yours, and the prototype would only make sense in your
-hands.
+I am not here to negotiate rights today. The setting is yours, and the prototype would only make
+sense in your hands.
 
 What I bring is the **instrument**: a simulation engine and an AI able to measure what forty years
 of playtesting could not reach — and the potential to turn your oldest criticism into a selling
