@@ -390,11 +390,15 @@ class EpisodeTerminationCallback(BaseCallback):
                     f"(now={now_perf}, prev={self._last_step_perf_time})"
                 )
         self._last_step_perf_time = now_perf
-        # Cumul du temps passe en evaluation bot, retranche des durees d'episode ci-dessous : une
-        # eval periodique bloque TOUS les slots, et le slot qui l'enjambe se verrait sinon
-        # imputer ses minutes d'attente. Mesure : une eval de 120 s portait `max` a 121,80 s
-        # contre 1,20 s de duree reelle, ce qui rend la colonne `min/max` aveugle a ce qu'elle
-        # sert a reperer — une dispersion d'origine MOTEUR.
+        # Cumul du temps ou la boucle est ARRETEE par une evaluation bot, retranche des durees
+        # d'episode ci-dessous : une eval bloquante fige TOUS les slots, et le slot qui l'enjambe
+        # se verrait sinon imputer ses minutes d'attente. Mesure : une eval de 120 s portait `max`
+        # a 121,80 s contre 1,20 s de duree reelle, ce qui rend la colonne `min/max` aveugle a ce
+        # qu'elle sert a reperer — une dispersion d'origine MOTEUR.
+        # Ce compteur ne contient PAS la duree des evals async (le mode par defaut) : elles
+        # tournent sur un thread worker sans arreter la boucle, et les retrancher rendait des
+        # durees NEGATIVES (`min` a -4,791 s/ep le 2026-08-02, n_envs=48). Cf.
+        # BotEvaluationCallback._add_blocking_eval_seconds, seul point d'alimentation.
         total_eval_seconds = (
             self.gate_display_state.get("total_eval_time", 0.0)
             if self.gate_display_state else 0.0
@@ -502,7 +506,7 @@ class EpisodeTerminationCallback(BaseCallback):
                 remaining_episodes = display_total_episodes - display_episode_count
                 # Secondes d'ENTRAINEMENT par episode produit, hors evaluation.
                 # Numerateur : le temps d'eval bot est retranche, comme le fait deja l'EMA
-                # ci-dessus. Une eval periodique bloque la boucle plusieurs minutes (13 min
+                # ci-dessus. Une eval SYNCHRONE bloque la boucle plusieurs minutes (13 min
                 # mesurees contre 21 s d'entrainement sur un run de 6 episodes) : l'y laisser
                 # rendrait un chiffre plusieurs fois trop lent, et surtout incomparable entre
                 # deux runs de cadences d'eval differentes — ce que cette colonne existe
@@ -986,9 +990,16 @@ class MetricsCollectionCallback(BaseCallback):
                     # est initialise a 0 et jamais incremente non plus : la courbe
                     # game_detailed/damage_dealt, gardee par `> 0`, n'a jamais ete emise.
 
-                    # CHARGE SUCCESS TRACKING: Log successful charges (optional per step)
-                    if is_controlled_action and info.get('charge_succeeded', False):  # get allowed
-                        cast(Any, self.metrics_tracker).log_combat_kill('charge')
+                    # Le suivi des charges reussies occupait cette place, lu sur
+                    # `info['charge_succeeded']` du step gym et verse a `log_combat_kill('charge')`
+                    # (courbe `combat/c_charge_successes`). Il ne comptait que les REUSSITES de
+                    # l'agent : ni les tentatives, ni le camp d'en face, donc il ne pouvait pas
+                    # dire si une melee absente vient d'un agent qui ne charge pas ou d'un agent
+                    # qui rate ses charges. Le moteur compte desormais les quatre quantites sur
+                    # `action_logs` (types `charge` / `charge_fail`, tous deux porteurs de
+                    # `player`), comme shoot_kills/melee_kills — meme source, seat-aware par
+                    # construction, et hors d'atteinte du defaut « info du bot sous le drapeau de
+                    # l'agent » que ce chemin a deja produit.
 
                     # Handle episode end - check for 'episode' key (Monitor wrapper adds this)
                     if 'episode' in info:
@@ -2219,6 +2230,29 @@ class BotEvaluationCallback(BaseCallback):
             self._remove_model_artifacts(self._pending_eval_snapshot_path)
             self._pending_eval_snapshot_path = None
 
+    def _add_blocking_eval_seconds(self, seconds: float) -> None:
+        """Cumule le temps ou la boucle d'entrainement est REELLEMENT arretee par une eval.
+
+        Ce compteur (`gate_display_state["total_eval_time"]`) est retranche des durees
+        d'episode et des quatre chiffres `s/ep` de la barre (EpisodeTerminationCallback._on_step,
+        ~ligne 417 et ~ligne 519). Il ne doit donc contenir QUE du wall-clock pendant lequel
+        aucun episode n'a pu progresser. La duree d'une eval async ne convient pas : elle
+        s'ecoule sur un thread worker (`_async_eval_executor`) PENDANT que la boucle continue
+        de produire des episodes. La retrancher rendait des durees d'episode negatives —
+        mesure du 2026-08-02, run x1_long a n_envs=48 : `min` affiche a -4,791 s/ep, soit
+        -230 s bruts, une eval concurrente entiere soustraite d'un episode de ~10 s.
+        Les seuls temps reellement bloquants sont donc cumules ici : l'eval synchrone,
+        l'attente explicite du future (`force_wait`), et la sauvegarde du snapshot de modele
+        qui precede la soumission async.
+        """
+        if seconds < 0:
+            raise ValueError(f"Blocking eval duration must be >= 0 (got {seconds})")
+        if self.gate_display_state is None:
+            return
+        self.gate_display_state["total_eval_time"] = (
+            self.gate_display_state.get("total_eval_time", 0.0) + seconds
+        )
+
     def _consume_async_eval_if_ready(self, force_wait: bool = False) -> None:
         """Consume completed async evaluation result and apply it."""
         if self._pending_eval_future is None:
@@ -2228,9 +2262,12 @@ class BotEvaluationCallback(BaseCallback):
         if self._pending_eval_marker is None:
             raise RuntimeError("Pending async eval marker is missing")
         eval_marker = self._pending_eval_marker
+        # Sur le chemin non bloquant, le future est deja `done()` : cette mesure vaut ~0.
+        wait_start = time.perf_counter()
         try:
             results = self._pending_eval_future.result()
         finally:
+            self._add_blocking_eval_seconds(time.perf_counter() - wait_start)
             self._pending_eval_future = None
             self._pending_eval_marker = None
             self._cleanup_pending_snapshot()
@@ -2249,7 +2286,11 @@ class BotEvaluationCallback(BaseCallback):
 
         fd, snapshot_path = tempfile.mkstemp(suffix=".zip")
         os.close(fd)
+        # La sauvegarde du snapshot, elle, s'execute sur le thread d'entrainement : c'est du
+        # temps ou aucun episode ne progresse, et il est imputable a l'eval.
+        snapshot_start = time.perf_counter()
         snapshot_zip_path = self._save_model_with_vecnormalize(snapshot_path)
+        self._add_blocking_eval_seconds(time.perf_counter() - snapshot_start)
         self._pending_eval_snapshot_path = snapshot_zip_path
         self._pending_eval_marker = int(eval_marker)
         self._pending_eval_future = self._async_eval_executor.submit(
@@ -2291,7 +2332,11 @@ class BotEvaluationCallback(BaseCallback):
                 if self.early_stopping_patience > 0:
                     self._consume_async_eval_if_ready(force_wait=True)
             else:
+                # Chemin synchrone : l'eval s'execute sur le thread d'entrainement, sa duree
+                # entiere est du temps bloque.
+                sync_eval_start = time.perf_counter()
                 results = self._evaluate_against_bots(eval_marker)
+                self._add_blocking_eval_seconds(time.perf_counter() - sync_eval_start)
                 self._apply_eval_results(results, eval_marker)
 
         if self.should_stop_early:
@@ -2427,10 +2472,13 @@ class BotEvaluationCallback(BaseCallback):
         eval_marker: int,
         model_path: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Evaluate agent against bots using standalone function"""
+        """Evaluate agent against bots using standalone function.
+
+        NE cumule PAS sa propre duree dans `total_eval_time` : en mode async cette methode
+        tourne sur un thread worker, sa duree n'arrete pas la boucle d'entrainement. Le
+        cumul appartient aux appelants, cote thread d'entrainement (`_add_blocking_eval_seconds`).
+        """
         import os
-        import time
-        eval_start = time.time()
         if os.environ.get("LOS_ENV_TRACE") == "1":
             import sys
             train_env = self.model.get_env() if hasattr(self.model, "get_env") else None
@@ -2461,9 +2509,4 @@ class BotEvaluationCallback(BaseCallback):
             scenario_pool=self.scenario_pool,
             model_path=model_path,
         )
-        if self.gate_display_state is not None:
-            self.gate_display_state["total_eval_time"] = (
-                self.gate_display_state.get("total_eval_time", 0.0)
-                + (time.time() - eval_start)
-            )
         return results

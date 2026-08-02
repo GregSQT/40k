@@ -351,8 +351,10 @@ Le `RewardCalculator` (`engine/reward_calculator.py`) filtre les rewards par jou
    `is_controlled_action=True` recollé juste à côté (l'agent tire, l'adversaire charge, et la
    charge est comptée pour l'agent). Tout ce qui décrit l'état de SORTIE du step gym (`episode`,
    `tactical_data`, `winner`, `action_logs`) reste au contraire celui du dernier step moteur.
-   Sans ce report, `obs/*` rangeait ses échantillons sous la phase de l'adversaire et
-   `combat/c_charge_successes` comptait les charges de l'adversaire sous le drapeau de l'agent.
+   Sans ce report, `obs/*` rangeait ses échantillons sous la phase de l'adversaire et la courbe
+   de charges réussies d'alors comptait celles de l'adversaire sous le drapeau de l'agent —
+   défaut qui a motivé son remplacement par `02_combat/m_charge_attempts` /
+   `n_charge_success_rate` (et leurs jumeaux `_bot`), comptés côté moteur sur `action_logs`.
 
 3. **Reward situationnelle** (`_get_situational_reward`) :
    - `winner == controlled_player` → bonus win

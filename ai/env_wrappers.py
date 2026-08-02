@@ -1209,7 +1209,9 @@ class BotControlledEnv(gym.Wrapper):
         # le DERNIER info survit — celui de l'adversaire. Ces cles-la decrivent l'action de
         # l'AGENT ; sans ce report, elles decrivaient celle du bot sous un drapeau
         # `is_controlled_action` qui dit le contraire (metriques `obs/*` rangees sous la phase du
-        # bot, `combat/c_charge_successes` comptant les charges du bot).
+        # bot, et la courbe de charges reussies d'alors comptant celles du bot — cette
+        # derniere est depuis comptee cote moteur sur `action_logs`, ou le camp de chaque ligne
+        # est une donnee et non une deduction sur l'ordre des steps).
         agent_step_info: Dict[str, Any] = {}
         obs, bot_reward_before, terminated, truncated, info, ready_decision = self._play_bot_until_control_returns(
             debug_mode=debug_mode, decision=entry_decision
