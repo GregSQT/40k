@@ -12,7 +12,7 @@ DUAL TIER SYSTEM (41 Total Metrics):
   
   🎯 game_tactical/ (8) - Tactical decision quality
      - shooting_accuracy, damage_efficiency, unit_trade_ratio,
-       movement_efficiency, shooting_participation, charge_rate,
+       movement_efficiency, shooting_participation,
        action_efficiency, wait_frequency
   
   🔬 game_detailed/ (12+) - Deep tactical analysis
@@ -172,7 +172,7 @@ class W40KMetricsTracker:
         'charge_attempts', 'charge_successes',
         'charge_attempts_bot', 'charge_successes_bot',
         'move_actions', 'move_flees', 'move_opportunities',
-        'shoot_activations', 'shoot_opportunities', 'charge_opportunities',
+        'shoot_activations', 'shoot_opportunities',
     )
 
     #: Modes de deploiement ventiles (cf. `deployment_mode_schedule`, w40k_core).
@@ -778,7 +778,7 @@ class W40KMetricsTracker:
 
         # PARTICIPATION PAR PHASE — la part des occasions saisies, phase par phase.
         #
-        # Ces quatre courbes ont ete emises par `log_phase_performance`, methode restee sans
+        # Ces trois courbes ont ete emises par `log_phase_performance`, methode restee sans
         # aucun appelant de production : elles n'existaient dans aucun run (verifie sur les
         # 124 tags d'un run de 50 000 episodes). Elles sont recomptees cote MOTEUR sur
         # `action_logs`, comme tout le reste de ce dashboard — le callback deduisait la phase
@@ -788,9 +788,9 @@ class W40KMetricsTracker:
         # (les occasions d'agir) est un RESULTAT d'episode. Un episode sans une seule
         # activation de tir n'a pas de taux de participation — ni a ecarter, ni a compter 0.
         #
-        # `m_charge_attempts` compte un VOLUME, `charge_rate` une PART : un agent peut declarer
-        # moins de charges parce qu'il a moins d'unites vivantes, sans rien changer a sa
-        # propension a charger. Les deux ensemble le disent, aucune des deux seule.
+        # La CHARGE n'a volontairement pas son taux de participation : cf. w40k_core, son
+        # denominateur compterait les fois ou le moteur a expose la phase, pas les occasions de
+        # charger. `m_charge_attempts` et sa colonne adverse repondent sans cette ambiguite.
         move_actions = float(require_key(tactical_data, 'move_actions'))
         move_waits = float(require_key(tactical_data, 'move_waits'))
         shoot_activations = float(require_key(tactical_data, 'shoot_activations'))
@@ -802,21 +802,12 @@ class W40KMetricsTracker:
             'shoot_opportunities',
             shoot_activations + float(require_key(tactical_data, 'shoot_waits')),
         )
-        charge_opportunities = self._game_push(
-            'charge_opportunities',
-            charge_attempts + float(require_key(tactical_data, 'charge_waits')),
-        )
         self._emit_ratio_of_means(
             'game_tactical/movement_efficiency', move_hist, move_opportunities
         )
         self._emit_ratio_of_means('game_detailed/flee_rate', flee_hist, move_opportunities)
         self._emit_ratio_of_means(
             'game_tactical/shooting_participation', shoot_hist, shoot_opportunities
-        )
-        self._emit_ratio_of_means(
-            'game_tactical/charge_rate',
-            self._game_history['charge_attempts'],
-            charge_opportunities,
         )
 
         # COMBAT VALUE METRICS: Episode-level attrition in VALUE points.
@@ -1148,8 +1139,8 @@ class W40KMetricsTracker:
 
     # `log_phase_performance` occupait cette place : elle accumulait, phase par phase, les
     # couples (agi, attendu) que `compute_and_log_phase_metrics` transformait en
-    # `game_tactical/movement_efficiency`, `shooting_participation`, `charge_rate` et
-    # `game_detailed/flee_rate`. Elle n'avait plus AUCUN appelant de production — les quatre
+    # `game_tactical/movement_efficiency`, `shooting_participation` et
+    # `game_detailed/flee_rate`. Elle n'avait plus AUCUN appelant de production — les trois
     # courbes n'existaient dans aucun run. Les memes taux sont desormais calcules dans
     # `log_tactical_metrics`, depuis les compteurs que le moteur tire d'`action_logs` : la
     # phase et le camp y sont des donnees de chaque ligne, la ou cette methode les recevait
@@ -1158,11 +1149,14 @@ class W40KMetricsTracker:
     def compute_and_log_phase_metrics(self):
         """Emet les VP cumules de l'episode, lisses sur la fenetre de performance.
 
-        Les quatre taux de participation par phase (`game_tactical/movement_efficiency`,
-        `shooting_participation`, `charge_rate`, `game_detailed/flee_rate`) etaient calcules
-        ici depuis `self.phase_stats`, accumule par `log_phase_performance` — methode sans
-        appelant de production, donc quatre courbes qui n'existaient dans aucun run. Ils sont
-        desormais calcules dans `log_tactical_metrics`, sur les compteurs du moteur.
+        Les taux de participation par phase (`game_tactical/movement_efficiency`,
+        `shooting_participation`, `game_detailed/flee_rate`) etaient calcules ici depuis
+        `self.phase_stats`, accumule par `log_phase_performance` — methode sans appelant de
+        production, donc des courbes qui n'existaient dans aucun run. Ils sont desormais
+        calcules dans `log_tactical_metrics`, sur les compteurs du moteur. Le quatrieme,
+        `game_tactical/charge_rate`, n'a pas ete repris : son denominateur ne mesurait pas ce
+        qu'il pretendait (cf. w40k_core), et le volume `02_combat/m_charge_attempts` avec sa
+        colonne adverse le remplace.
 
         Le nom de cette methode ne decrit plus que ce qu'elle fait ; elle garde sa place dans
         la sequence de fin d'episode (appelee DEPUIS `log_episode_end`, donc AVANT

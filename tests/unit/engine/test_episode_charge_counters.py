@@ -300,7 +300,6 @@ def test_the_phase_participation_counters_match_the_journal(melee_scenario_file)
     assert tactical["move_actions"] == _logs(engine, controlled, "move")
     assert tactical["move_waits"] == _logs(engine, controlled, "wait", "move")
     assert tactical["shoot_waits"] == _logs(engine, controlled, "wait", "shoot")
-    assert tactical["charge_waits"] == _logs(engine, controlled, "wait", "charge")
     assert tactical["move_flees"] == sum(
         1 for lg in engine.game_state["action_logs"]
         if lg.get("type") == "move" and int(lg["player"]) == controlled and lg["was_flee"]
@@ -348,15 +347,18 @@ def test_shoot_activations_count_squads_not_journal_lines(melee_scenario_file) -
     assert _logs(engine, controlled, "shoot") - tactical["shoot_activations"] >= 2
 
 
-def test_the_four_phase_participation_curves_are_emitted(
+def test_the_phase_participation_curves_are_emitted(
     melee_scenario_file, tmp_path
 ) -> None:
-    """Les quatre courbes mortes sortent de nouveau, avec les valeurs de l'episode."""
+    """Les trois courbes mortes sortent de nouveau, avec les valeurs de l'episode.
+
+    La charge n'en a PAS : son taux de participation compterait les fois ou le moteur a expose
+    la phase, pas les occasions de charger. Le controle qu'elle ne sort pas est plus bas.
+    """
     _engine, tactical = _episode_with(
         melee_scenario_file,
-        lambda _eng, td: td["move_actions"] > 0 and td["shoot_activations"] > 0
-        and td["charge_attempts"] > 0,
-        "un episode ou l'agent bouge, tire et charge",
+        lambda _eng, td: td["move_actions"] > 0 and td["shoot_activations"] > 0,
+        "un episode ou l'agent bouge et tire",
     )
 
     tracker, recording = _recording_tracker(tmp_path)
@@ -373,9 +375,6 @@ def test_the_four_phase_participation_curves_are_emitted(
     assert by_key["game_tactical/shooting_participation"] == pytest.approx(
         tactical["shoot_activations"]
         / (tactical["shoot_activations"] + tactical["shoot_waits"])
-    )
-    assert by_key["game_tactical/charge_rate"] == pytest.approx(
-        tactical["charge_attempts"] / (tactical["charge_attempts"] + tactical["charge_waits"])
     )
 
 
@@ -404,3 +403,28 @@ def test_a_phase_never_reached_emits_no_participation_rate(
     # Les autres phases, elles, ont bien eu lieu : leurs taux sortent. Sans ca, l'absence
     # ci-dessus serait celle d'un tag jamais ecrit.
     assert "game_tactical/shooting_participation" in emitted
+
+
+def test_the_charge_has_no_participation_rate(melee_scenario_file, tmp_path) -> None:
+    """`game_tactical/charge_rate` n'est PAS emis, meme sur un episode plein de charges.
+
+    Le taux existait dans la premiere version de ces metriques. Son denominateur comptait les
+    fois ou le moteur a EXPOSE la phase de charge, pas les occasions de charger : quand le pool
+    est vide, aucun step n'est joue, donc aucun `wait` n'est journalise et le tour n'entre nulle
+    part. Le volume `m_charge_attempts` et sa colonne adverse repondent sans cette ambiguite.
+    Ce test empeche le taux de revenir par inadvertance.
+    """
+    _engine, tactical = _episode_with(
+        melee_scenario_file,
+        lambda _eng, td: td["charge_attempts"] > 0,
+        "un episode ou l'agent declare au moins une charge",
+    )
+
+    tracker, recording = _recording_tracker(tmp_path)
+    tracker.log_tactical_metrics(tactical)
+
+    emitted = {key for key, _value, _step in recording.scalars}
+    assert "game_tactical/charge_rate" not in emitted
+    # Le volume, lui, sort bien : l'absence ci-dessus n'est pas celle de toute mesure de charge.
+    assert "02_combat/m_charge_attempts" in emitted
+    assert "02_combat/o_charge_attempts_bot" in emitted

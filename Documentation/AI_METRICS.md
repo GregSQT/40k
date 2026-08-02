@@ -754,22 +754,24 @@ scénario. Un épisode sans aucune charge déclarée n'a donc pas de taux — il
 | **game_tactical/movement_efficiency** | Activations de déplacement ÷ occasions (déplacements + attentes en phase move) | Proche de 1.0 — attendre en move est rarement optimal |
 | **game_detailed/flee_rate** | Replis (`fall_back`) ÷ occasions de déplacement | Faible ; une hausse signale un agent qui décroche du combat |
 | **game_tactical/shooting_participation** | Activations de tir ÷ occasions (tirs + attentes en phase shoot) | Croissant vers 1.0 |
-| **game_tactical/charge_rate** | Charges déclarées ÷ occasions (charges + attentes en phase charge) | À lire avec `m_charge_attempts` |
 
 **Activations, pas lignes de journal.** Le tir émet une ligne par groupe (arme, cible) : une
 escouade tirant trois armes compterait pour trois participations, et le taux dépasserait 1.
 Le numérateur déduplique donc sur `(tour, escouade)`. Le déplacement et la charge émettent une
 ligne par activation — rien à dédupliquer.
 
-`charge_rate` et `m_charge_attempts` ne disent pas la même chose : un agent peut déclarer moins
-de charges parce qu'il lui reste moins d'unités vivantes, sans rien changer à sa propension à
-charger. Le volume et la part se lisent ensemble.
+**La charge n'a volontairement pas de taux de participation.** Son dénominateur ne compterait
+pas les occasions de charger mais les fois où le moteur a **exposé** la phase : quand le pool
+de charge est vide, aucun step n'est joué, donc aucun `wait` n'est journalisé et le tour
+n'entre nulle part. Le volume `02_combat/m_charge_attempts`, lu contre la colonne adverse
+`o_charge_attempts_bot`, répond à la question sans cette ambiguïté.
 
-> Ces quatre courbes ont été émises par `log_phase_performance` jusqu'à ce que son dernier
-> appelant disparaisse — elles n'existaient dans **aucun** run (vérifié sur les 124 tags d'un
-> run de 50 000 épisodes). Recomptées côté moteur sur `action_logs` le 2026-08-02, avec la
-> méthode et `phase_stats` supprimés : le callback déduisait la phase et le camp d'une `info`
-> de step gym qui enchaîne plusieurs steps moteur.
+> Ces courbes ont été émises par `log_phase_performance` jusqu'à ce que son dernier appelant
+> disparaisse — elles n'existaient dans **aucun** run (vérifié sur les 124 tags d'un run de
+> 50 000 épisodes). Recomptées côté moteur sur `action_logs` le 2026-08-02, avec la méthode et
+> `phase_stats` supprimés : le callback déduisait la phase et le camp d'une `info` de step gym
+> qui enchaîne plusieurs steps moteur. La quatrième, `game_tactical/charge_rate`, n'a pas été
+> reprise — voir ci-dessus.
 
 Chaque ratio est émis **seulement si son dénominateur est > 0** : un dénominateur nul est un état
 de jeu possible (aucune unité en face), pas une erreur, et il ne produit donc aucun point plutôt

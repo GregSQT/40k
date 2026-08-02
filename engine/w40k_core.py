@@ -2270,10 +2270,10 @@ class W40KEngine(gym.Env):
             charge_successes_opponent = 0
             # PARTICIPATION PAR PHASE — « quelle part des occasions l'agent a-t-il saisies ».
             #
-            # Ces quatre taux (deplacement, tir, fuite, charge) ont ete emis par le callback
-            # jusqu'a ce que son unique appelant disparaisse : `log_phase_performance` n'avait
-            # plus AUCUN appel de production, donc `game_tactical/movement_efficiency`,
-            # `shooting_participation`, `charge_rate` et `game_detailed/flee_rate` n'existaient
+            # Ces trois taux (deplacement, tir, fuite) ont ete emis par le callback jusqu'a ce
+            # que son unique appelant disparaisse : `log_phase_performance` n'avait plus AUCUN
+            # appel de production, donc `game_tactical/movement_efficiency`,
+            # `shooting_participation` et `game_detailed/flee_rate` n'existaient
             # dans aucun run — verifie sur les 124 tags d'un run de 50 000 episodes. Meme
             # defaut silencieux que les quatre compteurs plus haut : une courbe absente ne se
             # distingue pas d'un agent qui n'agit jamais.
@@ -2282,6 +2282,14 @@ class W40KEngine(gym.Env):
             # de l'`info` d'un step gym, ou un step enchaine plusieurs steps moteur — c'est ce
             # qui lui faisait ranger les actions du BOT sous le drapeau de l'agent. Dans
             # `action_logs`, phase et camp sont des DONNEES de chaque ligne.
+            #
+            # PAS de taux de participation pour la CHARGE : son denominateur ne serait pas
+            # « les occasions de charger » mais « les fois ou le moteur a expose la phase »
+            # — quand le pool de charge est vide, aucun step n'est joue, donc aucun `wait` n'est
+            # journalise et le tour n'entre nulle part (mesure : sur un montage ou les deux camps
+            # arrivent au contact en se deplacant, la phase charge n'est jamais exposee). Le
+            # VOLUME de charges declarees (`charge_attempts`) repond a la question sans cette
+            # ambiguite, et la comparaison avec l'adversaire lui sert d'echelle.
             #
             # ACTIVATIONS, pas lignes de journal : le tir emet un log par groupe (arme, cible),
             # donc une escouade qui tire trois armes produirait trois « participations ». Le
@@ -2293,7 +2301,6 @@ class W40KEngine(gym.Env):
             move_waits = 0
             shoot_activations: Set[Tuple[int, str]] = set()
             shoot_waits = 0
-            charge_waits = 0
             for log in action_logs:
                 log_type = log.get("type")
                 if log_type == "move":
@@ -2309,8 +2316,6 @@ class W40KEngine(gym.Env):
                             move_waits += 1
                         elif log_phase == "shoot":
                             shoot_waits += 1
-                        elif log_phase == "charge":
-                            charge_waits += 1
                     continue
                 if log_type in ("charge", "charge_fail"):
                     if int(require_key(log, "player")) == controlled_player:
@@ -2383,7 +2388,6 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['move_waits'] = move_waits
             self.episode_tactical_data['shoot_activations'] = len(shoot_activations)
             self.episode_tactical_data['shoot_waits'] = shoot_waits
-            self.episode_tactical_data['charge_waits'] = charge_waits
 
             # VALUE attrition metrics (episode-level): destroyed enemy value and lost ally value.
             #
