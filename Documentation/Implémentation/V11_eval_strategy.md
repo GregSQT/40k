@@ -206,6 +206,15 @@ training qui les référencent.
 <a id="s10.6"></a>
 ### 10.6 Critère de succès (remplace le critère T6 « win-rate vs RandomBot »)
 
+> ⚠️ **EN DÉCALAGE AVEC LA PRATIQUE — constaté le 2026-08-02, cf.
+> [§0.55](V11_agent_rework.md#s0.55).** Le volet 1 ci-dessous désigne `TacticalBot` comme
+> adversaire du critère quantitatif. Or (a) le critère réellement suivi est
+> `00_critical/a_bot_eval_combined` + `00_critical/b_worst_bot_score`, qui **excluent** le
+> holdout ; (b) `TacticalBot` est **saturé** (`vs_tactical` 0.95 au run 4) parce que ses poids le
+> placent à l'intérieur de l'enveloppe d'entraînement. **Ne pas s'appuyer sur le volet 1 tel
+> qu'écrit** tant que §0.55 n'est pas livrée. Le volet 2 (qualitatif), lui, reste entièrement
+> valide.
+
 Le critère historique référençait une capacité qui n'existe plus (holdout de rosters). Nouveau
 critère, en deux volets — **les deux sont requis** :
 

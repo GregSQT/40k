@@ -274,6 +274,7 @@ def _make_env(args: argparse.Namespace, W40KEngine: Any) -> Any:
         unit_registry=UnitRegistry(),
         quiet=True,
         gym_training_mode=True,
+        training_n_envs=1,  # UN environnement, joue en serie (engine/episode_schedule.py)
     )
 
 

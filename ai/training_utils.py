@@ -142,10 +142,47 @@ def setup_imports():
     except ImportError as e:
         raise ImportError(f"w40k_engine import failed: {e}")
 
+# Argument `self_play_*` de `BotControlledEnv` -> (cle lue dans `opponent_mix`, conversion).
+# Table UNIQUE : les deux etats (actif / inactif) en derivent, donc une cle ajoutee ici ne peut
+# pas etre oubliee d'un cote.
+_SELF_PLAY_ARGS = (
+    ("self_play_ratio_start", "self_play_ratio_start", float),
+    ("self_play_ratio_end", "self_play_ratio_end", float),
+    ("self_play_total_episodes", "total_episodes", int),
+    ("self_play_warmup_episodes", "warmup_episodes", int),
+    ("self_play_n_envs", "n_envs", int),
+    ("self_play_snapshot_path", "snapshot_model_path", str),
+    ("self_play_snapshot_refresh_episodes", "snapshot_refresh_episodes", int),
+    ("self_play_snapshot_device", "snapshot_device", str),
+    ("self_play_deterministic", "deterministic", bool),
+)
+
+
+def self_play_is_enabled(opponent_mix_config) -> bool:
+    """`opponent_mix` demande-t-il un adversaire de self-play ? Absent = non, sans erreur."""
+    return opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
+
+
+def build_self_play_kwargs(opponent_mix_config) -> dict:
+    """Arguments `self_play_*` de `BotControlledEnv`, derives d'`opponent_mix`. SOURCE UNIQUE.
+
+    Ce cablage etait recopie a la main sur chaque site de construction : les branches mono-env
+    l'OMETTAIENT purement et simplement, donc un `opponent_mix.enabled: true` y etait ignore EN
+    SILENCE (aucun self-play, aucun message), et la branche qui le portait a rate l'ajout de
+    `self_play_n_envs` (V11 §0.57). Un seul point de verite supprime les deux defauts.
+    """
+    enabled = self_play_is_enabled(opponent_mix_config)
+    kwargs: dict = {"self_play_opponent_enabled": enabled}
+    for arg, key, cast in _SELF_PLAY_ARGS:
+        kwargs[arg] = cast(opponent_mix_config[key]) if enabled else (False if cast is bool else None)
+    return kwargs
+
+
 def make_training_env(rank, scenario_file, rewards_config_name, training_config_name,
                      controlled_agent_key, unit_registry, step_logger_enabled=False,
                      scenario_files=None, debug_mode=False, use_bots=False, training_bots=None,
-                     agent_seat_mode=None, global_seed=None, opponent_mix_config=None):
+                     agent_seat_mode=None, global_seed=None, opponent_mix_config=None,
+                     n_envs=None):
     """
     Factory function to create a single W40KEngine instance for vectorization.
 
@@ -161,10 +198,18 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
         debug_mode: Enable debug mode
         use_bots: If True, wrap with BotControlledEnv instead of SelfPlayWrapper
         training_bots: List of bot instances for BotControlledEnv (required if use_bots=True)
+        n_envs: Nombre d'environnements REELLEMENT ouverts (deja resolu par
+            `_resolve_n_envs_for_step_logging`). Obligatoire : c'est le denominateur des rampes
+            par-episode, moteur ET self-play (V11 §0.57).
 
     Returns:
         Callable that creates and returns a wrapped environment instance
     """
+    if not isinstance(n_envs, int) or isinstance(n_envs, bool) or n_envs <= 0:
+        raise ValueError(
+            f"make_training_env requiert n_envs (nombre d'environnements REELLEMENT ouverts), "
+            f"entier > 0 : c'est le denominateur des rampes par-episode (got {n_envs!r})"
+        )
     # V11 §10.4 : un worker vectorise ne peut PAS recevoir de frozen_model (pas de
     # partage inter-processus) ; `SelfPlayWrapper(frozen_model=None)` y jouait donc des
     # actions aleatoires en permanence, silencieusement. Le self-play vectorise passe par
@@ -199,7 +244,11 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
             unit_registry=unit_registry,
             quiet=True,
             gym_training_mode=True,
-            debug_mode=debug_mode
+            debug_mode=debug_mode,
+            # n_envs REELLEMENT ouverts : il prime sur la valeur declaree du profil, seule facon
+            # que les rampes par-episode du moteur et celle du self-play partagent le meme
+            # denominateur (V11 §0.57).
+            training_n_envs=n_envs,
         )
         
         # ✓ CHANGE 9: Removed seed() call - W40KEngine uses reset(seed=...) instead
@@ -218,7 +267,6 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
         # Bot training (le self-play vectorise passe par opponent_mix, cf. garde ci-dessus)
         if agent_seat_mode is None:
             raise KeyError("agent_seat_mode is required when use_bots=True")
-        mix_enabled = bool(opponent_mix_config is not None and opponent_mix_config.get("enabled") is True)
         wrapped_env = BotControlledEnv(
             masked_env,
             bots=training_bots,
@@ -226,31 +274,7 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
             agent_seat_mode=agent_seat_mode,
             global_seed=global_seed,
             env_rank=rank,
-            self_play_opponent_enabled=mix_enabled,
-            self_play_ratio_start=(
-                float(opponent_mix_config["self_play_ratio_start"]) if mix_enabled and opponent_mix_config is not None else None
-            ),
-            self_play_ratio_end=(
-                float(opponent_mix_config["self_play_ratio_end"]) if mix_enabled and opponent_mix_config is not None else None
-            ),
-            self_play_total_episodes=(
-                int(opponent_mix_config["total_episodes"]) if mix_enabled and opponent_mix_config is not None else None
-            ),
-            self_play_warmup_episodes=(
-                int(opponent_mix_config["warmup_episodes"]) if mix_enabled and opponent_mix_config is not None else None
-            ),
-            self_play_snapshot_path=(
-                str(opponent_mix_config["snapshot_model_path"]) if mix_enabled and opponent_mix_config is not None else None
-            ),
-            self_play_snapshot_refresh_episodes=(
-                int(opponent_mix_config["snapshot_refresh_episodes"]) if mix_enabled and opponent_mix_config is not None else None
-            ),
-            self_play_snapshot_device=(
-                str(opponent_mix_config["snapshot_device"]) if mix_enabled and opponent_mix_config is not None else None
-            ),
-            self_play_deterministic=(
-                bool(opponent_mix_config["deterministic"]) if mix_enabled and opponent_mix_config is not None else False
-            ),
+            **build_self_play_kwargs(opponent_mix_config),
         )
 
         # Wrap with Monitor for episode statistics

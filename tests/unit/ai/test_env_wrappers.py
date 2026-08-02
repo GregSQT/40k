@@ -180,6 +180,7 @@ def test_compute_self_play_ratio_for_episode_progression() -> None:
         self_play_ratio_end=0.5,
         self_play_total_episodes=10,
         self_play_warmup_episodes=2,
+        self_play_n_envs=1,  # budgets deja exprimes par environnement dans ce test
         self_play_snapshot_path="snapshot.zip",
         self_play_snapshot_refresh_episodes=1,
         self_play_snapshot_device="cpu",
@@ -188,6 +189,50 @@ def test_compute_self_play_ratio_for_episode_progression() -> None:
     assert wrapper._compute_self_play_ratio_for_episode() == pytest.approx(0.1)
     wrapper._episode_index = 10
     assert wrapper._compute_self_play_ratio_for_episode() == pytest.approx(0.5)
+
+
+def test_self_play_ramp_is_expressed_per_environment() -> None:
+    """Budgets GLOBAUX en entrée, rampe parcourue par CHAQUE worker (V11 §0.57).
+
+    `_episode_index` ne compte que les épisodes de ce wrapper. Sans conversion, un run à 4 envs
+    voyait chaque worker s'arrêter au quart de la rampe — figée près de `ratio_start`.
+    """
+    wrapper = BotControlledEnv(
+        _DummyEngine(),
+        bot=_DummyBot(),
+        self_play_opponent_enabled=True,
+        self_play_ratio_start=0.0,
+        self_play_ratio_end=1.0,
+        self_play_total_episodes=40,  # GLOBAL
+        self_play_warmup_episodes=0,
+        self_play_n_envs=4,           # → 10 épisodes par env
+        self_play_snapshot_path="snapshot.zip",
+        self_play_snapshot_refresh_episodes=1,
+        self_play_snapshot_device="cpu",
+    )
+    wrapper._episode_index = 0
+    assert wrapper._compute_self_play_ratio_for_episode() == pytest.approx(0.0)
+    wrapper._episode_index = 10  # dernier épisode de CE worker
+    assert wrapper._compute_self_play_ratio_for_episode() == pytest.approx(1.0), (
+        "la rampe self-play doit être parcourue en entier par chaque environnement"
+    )
+
+
+def test_self_play_requires_n_envs() -> None:
+    """Sans `n_envs`, la rampe n'a pas de dénominateur : erreur explicite, aucun défaut silencieux."""
+    with pytest.raises(KeyError, match="self_play_n_envs is required"):
+        BotControlledEnv(
+            _DummyEngine(),
+            bot=_DummyBot(),
+            self_play_opponent_enabled=True,
+            self_play_ratio_start=0.0,
+            self_play_ratio_end=1.0,
+            self_play_total_episodes=40,
+            self_play_warmup_episodes=0,
+            self_play_snapshot_path="snapshot.zip",
+            self_play_snapshot_refresh_episodes=1,
+            self_play_snapshot_device="cpu",
+        )
 
 
 def test_get_bot_action_returns_wait_when_no_eligible_units() -> None:
@@ -376,6 +421,7 @@ def test_compute_self_play_ratio_interpolates_between_start_and_end() -> None:
         self_play_ratio_end=0.6,
         self_play_total_episodes=10,
         self_play_warmup_episodes=2,
+        self_play_n_envs=1,  # budgets deja exprimes par environnement dans ce test
         self_play_snapshot_path="snapshot.zip",
         self_play_snapshot_refresh_episodes=1,
         self_play_snapshot_device="cpu",

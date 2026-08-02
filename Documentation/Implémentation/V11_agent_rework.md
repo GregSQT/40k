@@ -46,7 +46,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.55` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.58` (`0.57` le 2026-08-02, `0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30, `0.55`–`0.56` le 2026-08-02).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -77,15 +77,18 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
+| **§0.57** | Les rampes par-épisode du moteur avançaient **`n_envs` fois trop lentement** | ✅ **CORRIGÉ le 2026-08-02** — reste une conséquence à assumer | **1** | Le compteur d'épisodes du moteur est LOCAL à un worker ; il était divisé par le total GLOBAL. À `n_envs=48`, la rampe de déploiement est restée collée à `active_ratio_start` sur TOUS les runs vectorisés (mesuré : `s_deploy_active_share` 0.3040 pour 0.496 attendus). Même défaut sur `deployment_random_mix`. **Conséquence : aucune mesure passée n'a été produite avec la rampe annoncée** — §0.29 et §0.46 pt 2 sont amendés. Détail → §0.57. |
+| **§0.56** | Instrumentation : usage par **famille d'action**, et **classement bot-contre-bot** | ✅ **LIVRÉ le 2026-08-02** — reste à s'en servir | **2** | Deux angles morts fermés, aucun ne coûte de ré-entraînement. (1) `actions/share_<famille>` publie la part de chaque DÉCISION dans ce que l'agent joue : une dimension jamais choisie ou toujours choisie est cassée quel que soit le win-rate — c'est ce qui rend un lot de tranches P3 diagnosticable **en un seul run**. (2) `scripts/bot_ranking.py` fait s'affronter les bots **sans agent** : sans lui, juger un bot exigeait un modèle entraîné, donc une mesure circulaire — et §0.55 était irréalisable. Détail → §0.56. |
+| **§0.55** | Le **holdout d'évaluation** `TacticalBot` est DANS l'enveloppe d'entraînement — effet plafond | 🟠 **OUVERT** — re-profilage validé le 2026-08-02 (arbitrage utilisateur), à écrire | **1** (avant toute mesure de référence) | `tactical` porte `w_objective 0.5 / w_enemy 0.0` : un `ControlBot` dilué, interpolé entre `control` (1.0/0.1) et `defensive` (0.7/−0.5). Un holdout intérieur à l'enveloppe mesure l'**interpolation**, pas la généralisation — d'où `vs_tactical` **0.95** au run 4. Re-profiler **hors enveloppe** (piste : `w_objective 0.8 / w_enemy 0.6`) et ajouter le scalaire `vs_tactical` **par roster**. ⚠️ **À faire AVANT de geler la baseline d'évaluation** : après, plus aucune mesure n'est comparable (leçon §0.47 É4). Détail → §0.55. |
 | **§0.14** | Re-mesure du run — win-rate par matchup | ⏳ **PÉRIMÉE — état au 2026-08-02** : des runs **postérieurs au run 4** ont tourné (modèles `robust_*` du 2026-07-30 et du 2026-08-01 dans `ai/models/ArmageddonAgent/`) et **un `train.py` tournait** au moment de la relecture. Le répertoire `tensorboard/x1_ArmageddonAgent/` n'existe plus. | **1** | Reconfronter au réel (`ps -eo lstart,cmd \| grep train.py`, `ls -l ai/models/ArmageddonAgent/`) puis **réécrire l'entrée sur le run courant**. Les chiffres du run 4 (`combined` **0.509**, `worst_bot_score` **0.04**, `vs_control` **0.04**) ne valent plus que comme historique, et sur une pondération de bots qui n'existe plus (§0.53). Détail → §0.14. |
 | **[§9](V11_phaseA.md#s9)** | Phase A' — P2 + P3-0/1/2 | 🟢 **LIVRÉS ET MERGÉS sur `main`** — restent **P3-3→8**, **P4**, **P5** | **2** | ⚠️ Aucune des quatre livraisons n'est **MESURÉE**. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). Détail → §0.42 et §0.43 (en §0hist), et [§9](V11_phaseA.md#s9). |
 | **§0.44** | Tête pointeur de **déploiement** — les slots 4-8 n'ont pas de tête dédiée | 🟠 **OUVERT** — reporté après la mesure de référence (arbitrage utilisateur du 2026-07-29) | **3** | Les ids 4-8 tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`) : leurs logits sortent de la **conv 1×1** (`_move_logits`), pas d'une tête dédiée ; `deploy_emb` n'atteint le calcul que par le **conditionnement du tronc**. Ajouter un `deploy_query_net`, jumeau de `choice_query_net` — ce qui oblige à lire la phase dans la policy. Élément `L1` du lot §0.48 ; `L11` (`N_DEPLOY_SLOTS`) à trancher **avant**. Détail → §0.44. |
 | **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — inventaire rendu, périmètre arbitré : le lot = **`L1` + `L2` + `L6`**, et eux seuls | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. Reste l'arbitrage 2 (réserver la place des règles pas encore implémentées, toute règle rendue vivante changeant `obs_size`). Détail → §0.48. |
 | **§0.46** | Résidus du 2026-07-29 | 🟠 **OUVERT — point 3 SEUL** (points 1 et 2 ✅ livrés **et mergés**) | **5** | Statuer sur les **37** occurrences `[TRAIN DEBUG]` (`ai/env_wrappers.py` 14, `engine/action_decoder.py` 15, `engine/w40k_core.py` 7, `ai/train.py` 1) : instrument permanent assumé, ou temporaire à retirer. Détail → §0.46. |
-| **§0.47** | Relecture T2→T5 du 2026-07-29 — 9 écarts | 🟠 **OUVERT — restent É5, É7, É9** (É1, É2, É3, É4, É6 ✅ livrés **et mergés** ; **É8 est tombé**) | **6** | **É8 n'a plus d'objet** : `ai/analyzer.py` ne construit plus aucun chemin de board à la main (il lit `get_board_config()` / `get_board_size()`). **É9 était mal énoncé** : les **3 graines SONT couvertes** (`test_t5_bare_loop.py`, `for seed in (1, 2, 3)`) ; ce qui manque est le **second scénario** et les **2 sièges**. Détail → §0.47. |
-| **§0.50** | Non-conformité **01.07** — travail de suite | 🟠 **OUVERT** (la correction moteur, elle, est mergée) | **7** | Deux résidus. (1) `require_key(unit, "battle_shocked")` dans `sum_objective_control_oc_multi` contredit **6** lecteurs du même drapeau qui utilisent `get(..., False)` — à trancher. (2) 🔴 **Une TROISIÈME lecture d'OC subsiste dans le frontend** : le constructeur du journal d'événements de `BoardReplay.tsx` recompte le contrôle **à l'ancre et sans battle-shock**, et son commentaire renvoie à `computeControlCounts`, **fonction supprimée**. Détail → §0.50. |
-| **§0.53** | Refonte du panel de bots — les adversaires ignoraient la condition de victoire | 🟢 **LIVRÉ ET MERGÉ** — ses **conséquences** restent ouvertes | **8** (à lire avant d'interpréter tout win-rate) | (a) les matrices `{split}_matchups_{bot}.json` ne sont **plus sur disque** : il n'y a rien à régénérer, **tout est à produire** ; (b) les **seuils de gate de curriculum doivent être recalibrés** (arbitrage utilisateur) ; (c) **aucun win-rate antérieur au 2026-07-30 n'est comparable** à un win-rate postérieur. ⏳ Le panel a **encore évolué depuis** : un **cinquième bot `ValueTradeBot`** a été ajouté, `bot_eval_weights` = `control` 0.40 / `value_trade`, `adaptive`, `greedy`, `defensive` 0.15 / `tactical` 0. Détail → §0.53 (en §0hist). |
-| **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)) ; **T2→T5 relus le 2026-07-29** — les écarts vivent en **[§0.47](#s0.47)**, pas ici. Reste ouvert : les ✅ de T2→T5 ne sont revérifiés que **par LECTURE** (aucune exécution), et la conformité littérale de T2 est indécidable. ⚠️ Sa **section** est restée en §0hist pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`.
+| **§0.47** | Relecture T2→T5 du 2026-07-29 — 9 écarts | 🟠 **OUVERT — reste É9 (second siège + second scénario)** ; É5 et É7 ✅ corrigés le 2026-08-02 (É1, É2, É3, É4, É6 ✅ livrés **et mergés** ; **É8 est tombé**) | **6** | **É8 n'a plus d'objet** : `ai/analyzer.py` ne construit plus aucun chemin de board à la main (il lit `get_board_config()` / `get_board_size()`). **É9 était mal énoncé** : les **3 graines SONT couvertes** (`test_t5_bare_loop.py`, `for seed in (1, 2, 3)`) ; ce qui manque est le **second scénario** et les **2 sièges**. Détail → §0.47. |
+| **§0.50** | Non-conformité **01.07** — travail de suite | 🟠 **OUVERT** (la correction moteur, elle, est mergée) | **7** | ✅ **SOLDÉE le 2026-08-02** — les deux résidus sont traités : (1) le contrat de `battle_shocked` est **tranché en lecture STRICTE**, les 7 `get(..., False)` migrés en `require_key` ; (2) la 3ᵉ lecture d'OC du frontend (journal d'événements de `BoardReplay.tsx`) diffère l'instantané moteur au lieu de recompter. Détail → §0.50. |
+| **§0.53** | Refonte du panel de bots — les adversaires ignoraient la condition de victoire | 🟢 **LIVRÉ ET MERGÉ** — plus aucun chantier ouvert (arbitrage du 2026-08-02) | — (à lire avant d'interpréter tout win-rate) | 🟢 **ARBITRAGE UTILISATEUR DU 2026-08-02 — (a) et (b) SONT SANS OBJET JUSQU'À LA DÉMO MÉTIER** : le travail porte sur **2 rosters seulement**, donc ni les matrices de matchups par roster ni le recalibrage des seuils de gate ne sont d'actualité. **Ne pas les re-signaler comme des chantiers ouverts.** Reste vrai et à retenir : (c) **aucun win-rate antérieur au 2026-07-30 n'est comparable** à un win-rate postérieur. ⏳ Le panel a **encore évolué depuis** : un **cinquième bot `ValueTradeBot`** a été ajouté, `bot_eval_weights` = `control` 0.40 / `value_trade`, `adaptive`, `greedy`, `defensive` 0.15 / `tactical` 0. Détail → §0.53 (en §0hist). |
+| **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)) ; **T2→T5 relus le 2026-07-29** — les écarts vivent en **[§0.47](#s0.47)**, pas ici. Reste ouvert : les ✅ de T2→T5 ne sont revérifiés que **par LECTURE** (aucune exécution), et la conformité littérale de T2 est indécidable. ⚠️ Sa **section** est restée en §0hist pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
 
 ✅ **Contrôle de conformité du 2026-08-02** (vérification par lecture, PAS une livraison —
 aucune ligne de code touchée) :
@@ -130,6 +133,289 @@ jour 2026-07-29** : la section 9 a été auditée le 2026-07-24 ([§9.0](V11_pha
 **T2→T5 ont été relus le 2026-07-29 — 9 écarts, verdicts et réserves en [§0.47](#s0.47)** ; cette
 relecture s'est faite **par lecture seule, sans aucune exécution**, elle ne vaut donc pas
 mutation-test.
+
+<a id="s0.57"></a>
+### 0.57 Les rampes par-épisode du MOTEUR divisaient un compteur LOCAL par le total GLOBAL — la rampe de déploiement est restée figée sur tous les runs vectorisés — ✅ CORRIGÉ (2026-08-02)
+
+**Mesure, pas déduction.** Run `x1_long` en cours (`n_envs` **48**, `total_episodes` **200 000**),
+relevé dans les événements TensorBoard au step **78 477** : `00_critical/s_deploy_active_share` =
+**0.3040**, soit exactement `active_ratio_start` (**0.3**). La rampe 0.3 → 0.8 attendait **0.496**.
+
+**Cause.** `W40KEngine.episode_number` — et `game_state["episode_number"]` qui en dérive — est un
+compteur **par environnement** : un worker `SubprocVecEnv` vit dans son propre processus et ne voit
+aucun compteur global (`engine/w40k_core.py:705` init, `:1185` incrément dans `reset`). Les deux
+rampes par-épisode du moteur divisaient pourtant ce compteur local par `total_episodes`, qui est
+**global** :
+- `_configure_deployment_mode_for_episode` (mode `fixed` ↔ `active`) ;
+- `_configure_deployment_random_mix_for_episode` (randomisation des ACTIONS de déploiement) — **même
+  défaut, jumeau confirmé**.
+
+**Troisième site, trouvé au grep et corrigé lui aussi** :
+`BotControlledEnv._compute_self_play_ratio_for_episode` ([`ai/env_wrappers.py`](../../ai/env_wrappers.py))
+rapportait `self._episode_index` — compteur du wrapper, donc **par worker** — aux budgets GLOBAUX
+`opponent_mix.total_episodes` / `warmup_episodes`. **Inerte aujourd'hui** (aucun des six profils ne
+porte `opponent_mix`), mais le jour où le self-play est rallumé la rampe serait restée collée à
+`self_play_ratio_start`. Correctif : `build_training_opponents` reçoit le `n_envs` **runtime** (celui
+déjà résolu par `_resolve_n_envs_for_step_logging`, donc juste même sous `--step`) et le transmet ;
+le wrapper convertit les deux bornes en budget par environnement. `n_envs` manquant → `KeyError`.
+Au passage, tout le câblage `self_play_*` passe par une **source unique**
+(`training_utils.build_self_play_kwargs`, piloté par table) : il était recopié à la main sur 5 sites
+de construction, et **3 branches mono-env l'omettaient entièrement** — un `opponent_mix.enabled:
+true` y était ignoré EN SILENCE, sans self-play ni message. C'est cette duplication qui avait fait
+rater l'ajout de `self_play_n_envs` sur deux sites (relecture adverse du 2026-08-02). Corollaire
+découvert en le branchant : `create_model` et `create_multi_agent_model` ne republient JAMAIS de
+snapshot de self-play (seul `train_with_scenario_rotation` le fait), donc `opponent_mix` y lève
+maintenant une erreur explicite au lieu de lire un fichier absent — ou un snapshot figé d'un run
+précédent, adversaire immobile pour tout l'entraînement.
+
+**Résultat complet du grep** (tout site divisant un compteur d'épisodes par un total) : 6 sites, 3
+étaient faux (les 3 ci-dessus, corrigés), 3 étaient déjà justes —
+`engine/game_state.py:1683`, `ai/training_callbacks.py:352`, et les rampes `learning_rate` /
+`ent_coef` (`_EpisodeRampCallback`, `ai/training_callbacks.py:186`). Ces dernières sont saines pour
+une raison à noter : elles sont pilotées **par épisode** (et non par timestep), mais leur compteur
+vient de la somme des `dones` du VecEnv — il est donc **global**, comme leur dénominateur.
+
+Conséquence : la progression avançait **`n_envs` fois trop lentement**. À 48 envs et 200 000
+épisodes, chaque worker n'en joue que ~4 167 ; la rampe aurait eu besoin de **4,8 millions**
+d'épisodes globaux pour atteindre son gel. Vérification arithmétique du symptôme : 78 477 / 48 =
+1 635 épisodes par env, `p = 0.3 + 0.5 × 1635/199 999` = **0.3041** — la valeur relevée, à 10⁻⁴.
+
+**Ce que le dépôt faisait déjà juste.** Les deux AUTRES rampes par-épisode divisaient, elles, par
+`episodes_per_env = ceil(total_episodes / n_envs)` : `engine/game_state.py`
+(`roster_pool_schedule`) et `ai/training_callbacks.py`.
+
+**La formule ne vit plus qu'à UN endroit** : [`engine/episode_schedule.py`](../../engine/episode_schedule.py)
+(`episodes_per_env`, `ramp_progress`), appelé par les **quatre** consommateurs (les deux rampes du
+moteur, la rampe self-play du wrapper, la rampe de rosters du callback). Elle était manuscrite en
+quatre exemplaires — deux justes, deux faux : recopier une formule, c'est précisément ce qui a
+produit ce défaut. Le POURQUOI (compteur local vs budget global) est écrit là, une fois ; les
+consommateurs y renvoient au lieu de le reparaphraser. Les budgets absents ou absurdes lèvent
+(`require_positive_int`, ajouté à `shared/data_validation.py` — la garde « entier > 0, `bool` exclu »
+était elle aussi recopiée trois fois).
+
+**Choix de conception.** Le moteur ne reçoit pas une progression calculée par l'entraînement (un
+worker vectorisé ne peut pas observer le compteur global sans IPC par épisode) : il calcule la
+sienne. Mais **les deux termes de la fraction viennent du RUN, pas du profil**, et sont résolus au
+même endroit — `ai/train.py::resolve_run_budget` :
+
+| Terme | Intention du JSON | Réalité du run |
+|---|---|---|
+| `n_envs` | 48 | 1 sous `--step` / `--replay` (`_resolve_n_envs_for_step_logging`) |
+| `total_episodes` | 200 000 | `--total-episodes`, ou la longueur de la PHASE en curriculum |
+
+Tout ce qui vit dans le processus (callbacks, budgets d'`opponent_mix`) lit le dict résolu ; les
+workers, qui relisent le JSON, reçoivent les valeurs par `make_training_env(n_envs=…)` →
+`W40KEngine(training_n_envs=…)`.
+
+**Anti-récidive.** Une fois dans `training_config`, un `n_envs` déclaré et un `n_envs` résolu sont
+indiscernables — un site qui oublie de résoudre repartirait en silence sur 48 environnements
+imaginaires. Le moteur **refuse donc de ramper** tant que `training_n_envs` ne lui a pas été passé
+(`KeyError` explicite). Les 11 constructions de moteur du dépôt sur profil d'entraînement déclarent
+désormais leur nombre d'environnements (1 pour tous les chemins sériels : évaluation, replay,
+`roster_matchup_stats`, `refactor_fingerprint`, smoke, profilage, tests). `training_n_envs` est en
+revanche refusé hors chemin d'entraînement (l'accepter en silence le rendrait inerte).
+
+**Verrou.** `tests/unit/engine/test_deployment_mode_schedule.py` : les 3 tests historiques
+n'exerçaient qu'UN environnement avec `total_episodes` = nombre d'épisodes rejoués — le compteur
+local ÉTAIT le compteur global, donc ils restaient verts sur le code défectueux. Ajoutés : 4 envs se
+partageant 40 épisodes (chacun doit parcourir la rampe entière, contrôle déterministe sur
+`p_active`), la reproduction du point de mesure du run (n_envs 48 / 200 000 → 0.496), et l'erreur
+explicite sans `n_envs`. **Contre-épreuve faite** : défaut remis → les deux premiers passent ROUGE ;
+rétabli → verts. Idem côté self-play : `tests/unit/ai/test_env_wrappers.py`
+(`test_self_play_ramp_is_expressed_per_environment` + exigence de `n_envs`), conversion retirée →
+ROUGE, rétablie → vert.
+
+**Réglage arbitré dans la foulée (2026-08-02).** Les **six** profils passent à
+`freeze_after_progress` **1.0** — le gel à mi-run (plafond effectif 0,55) n'avait de sens que si la
+rampe avançait, ce qu'elle ne faisait pas. La rampe atteint donc `active_ratio_end` **0.8** en fin
+de run. Les `justification` du JSON, qui décrivaient encore le gel, sont réécrites.
+
+**Ce que ce défaut invalide.** Voir §0.29 (formule) et §0.46 point 2 : la rampe y est présentée
+comme alignant entraînement et évaluation. Elle n'a **jamais** rampé sur un run vectorisé — tous les
+runs `n_envs=48` ont entraîné à `active_ratio_start` constant (0.0 avant le 2026-08-01, 0.3 depuis).
+Les agents antérieurs ont donc vu **beaucoup moins de déploiement actif** qu'annoncé, alors que
+l'évaluation en impose TOUJOURS : l'asymétrie que §0.29 prétend corriger était **toujours là**. Le
+même raisonnement vaut pour `deployment_random_mix` (ratio figé à `force_random_ratio_start`).
+
+<a id="s0.56"></a>
+### 0.56 Instrumentation — usage par famille d'action + classement bot-contre-bot — ✅ LIVRÉ (2026-08-02)
+
+**Origine.** Deux questions auxquelles le dépôt ne savait pas répondre, découvertes en cherchant
+comment livrer le lot `L1 + L2 + L6` ([§0.48](#s0.48)) sans payer un ré-entraînement par tranche.
+
+#### 1. Usage par famille d'action
+
+**Le manque.** `ai/metrics_tracker.py` publiait `valid_actions` / `invalid_actions` **agrégés** :
+de quoi savoir si l'agent joue des coups légaux, jamais de quoi savoir **quelle décision il
+exerce**. Une dimension d'action jamais choisie (mal masquée, mal observée, jamais préférée) ou
+toujours choisie (dégénérée) est un défaut que le win-rate **ne distingue pas** d'un agent
+simplement faible.
+
+**Ce que ça change pour le lot.** L'attribution d'une régression ne demande pas des runs séparés,
+elle demande des **observables séparés**. Chaque décision ajoutée par une tranche P3 a désormais
+sa courbe, donc sa signature de panne : `L1 + L2 + L6` reste livrable **en un seul run** sans
+perdre le diagnostic. C'est ce qui rend inutile le « une tranche = un run » que P5 prescrit par
+défaut.
+
+**Livré :**
+- `engine/macro_intents.action_family(action_int, phase)` + `ACTION_FAMILIES` — le classifieur vit
+  dans la **source unique du layout** : le recopier ailleurs le désynchroniserait au premier slot
+  ajouté.
+- ⚠️ **La phase est un paramètre OBLIGATOIRE, pas un confort** : `DEPLOY_SLOT_BASE = 4` et
+  `MOVE_CELL_BASE = 0` se recouvrent, les ids **4-8** sont à la fois les cinq stratégies de
+  déploiement et des cellules de move. Sans la phase, **tout déploiement serait compté comme un
+  déplacement**. C'est le même recouvrement que [§0.44](#s0.44) doit lever côté policy.
+- `engine/w40k_core` capture `pre_action_phase` **avant** exécution (l'action peut faire avancer
+  la phase) et ventile dans `episode_tactical_data['action_family_counts']`, à côté des compteurs
+  existants, pour le seul camp contrôlé.
+- `ai/metrics_tracker` émet `actions/share_<famille>` par épisode.
+
+**Verrous** : `tests/unit/engine/test_action_family_usage.py`, **13 tests** — chaque famille
+atteinte, bornes de chaque plage, ids hors espace qui lèvent, action non-déploiement en phase
+deployment qui lève, et sur le **chemin de production** : la ventilation couvre exactement
+`total_actions` (non nulle), et aucune action n'est classée `deploy_slot` dans un épisode sans
+phase de déploiement.
+Mutation vérifiée ROUGE : retirer la dépendance à la phase (4-8 toujours `deploy_slot`) ⇒ 5 tests
+rouges.
+⚠️ **Limite de verrou, assumée et à ne pas oublier** : muter `pre_action_phase` en phase
+**post-action** laisse la suite VERTE. Le harnais de test construit le moteur depuis une config
+en mémoire, qui démarre toujours en placement **fixe** (`deployment_type` ne vient que d'un
+fichier de scénario) : aucune phase de déploiement n'y est jouée, donc pré et post donnent la même
+réponse. **Le choix de la phase pré-action n'est donc PAS verrouillé** — il faudrait un test sur
+un scénario `deployment_type: active`.
+
+#### 2. Classement bot-contre-bot — `scripts/bot_ranking.py`
+
+**Le manque.** `evaluate_against_bots` exige un **modèle entraîné** comme joueur 1 : la seule
+façon de juger un bot était de le faire affronter l'agent. Un bot faible contre un agent fort
+donne le même chiffre qu'un bot fort contre un agent faible — **la mesure est circulaire**.
+Conséquence directe : [§0.55](#s0.55) était irréalisable. Re-profiler `tactical` sans pouvoir
+mesurer sa force revenait à remplacer un holdout trop faible par un holdout de force **inconnue**.
+
+**Livré :**
+- `ai/env_wrappers.BotControlledEnv.scripted_action_for_agent_side(bot)` — fait jouer un bot **à
+  la place de l'agent**. `_get_bot_action` et `_select_bot_move_action` prennent un acteur
+  optionnel : il n'existe toujours qu'**UN SEUL** chemin de décision pour les bots, celui de la
+  production. Une seconde implémentation divergerait, et le bot mesuré ne serait plus celui joué
+  en évaluation.
+- `scripts/bot_ranking.py` — round-robin de chaque bot contre chaque autre sur les scénarios du
+  pool, matrice des win-rates, classement, export CSV. Aucun repli : `winner` et
+  `controlled_player` en `require_key`, un épisode non terminé **lève** au lieu d'être compté en
+  défaite, la randomness vient de `bot_eval_randomness`.
+
+**Vérifié par exécution** (`--bots control,tactical --episodes 1`, pool holdout) : 8 épisodes
+joués, matrice et classement produits.
+
+📌 **Piège à ne pas re-diagnostiquer** : la graine d'épisode intègre le nom des **DEUX** bots.
+Sans cela, deux appariements différents rejouent la même séquence de tirages et leurs win-rates
+se comparent sur des parties corrélées.
+
+⏳ **Signal à confirmer, PAS une conclusion** : sur les 8 épisodes du smoke, le siège « agent » a
+perdu **6 fois sur 8**, dans les deux sens d'appariement. À n=8 c'est parfaitement compatible avec
+du hasard, mais si l'asymétrie se confirme sur un échantillon sérieux, elle biaiserait **toute**
+mesure — l'agent joue toujours ce siège. À vérifier avec `--episodes 20` ou plus.
+
+<a id="s0.55"></a>
+### 0.55 Le holdout d'évaluation est DANS l'enveloppe d'entraînement — effet plafond sur le seul adversaire jamais vu — 🟠 OUVERT (2026-08-02)
+
+**Origine.** Relevé en répondant à la question « TacticalBot a-t-il été supprimé ? ». Il ne l'a
+pas été (ce sont `AggressiveSmartBot` et `DefensiveSmartBot` qui l'ont été, [§0.53](#s0.53)), et
+son câblage de holdout est correct : présent dans le registre, **poids 0.0** dans
+`bot_eval_weights`, **absent de `bot_training.ratios`**, et **explicitement exclu** du
+`worst_bot_score` qui alimente le gate ([§10.5](V11_eval_strategy.md#s10.5)). Le mécanisme n'est
+pas en cause — **le contenu du bot l'est.**
+
+**Le constat.** Les bots vivent dans un plan à deux paramètres depuis [§0.53](#s0.53)
+(`config/bot_movement_weights.json`) :
+
+| Bot | `w_objective` | `w_enemy` | Rôle |
+|---|---|---|---|
+| `control` | 1.0 | 0.1 | entraînement (poids 0.40) |
+| `defensive` | 0.7 | −0.5 | entraînement |
+| `greedy` | 0.3 | 1.0 | entraînement |
+| `value_trade` / `adaptive` | 3 modes chacun | | entraînement |
+| **`tactical`** | **0.5** | **0.0** | **HOLDOUT** |
+
+`tactical` tombe **à l'intérieur de l'enveloppe convexe** de ce que l'agent affronte — quelque
+part entre `control` et `defensive`, et c'est le seul bot totalement indifférent à l'ennemi. C'est
+un `ControlBot` dilué : il ne fait rien qu'un bot d'entraînement ne fasse **mieux**.
+
+**Conséquence mesurée** : `vs_tactical` = **0.95** au run 4, quand `vs_control` valait 0.04. Un
+holdout battu 19 fois sur 20 est saturé : il ne discrimine plus rien. **Un holdout intérieur à
+l'enveloppe teste l'INTERPOLATION, pas la GÉNÉRALISATION** — c'est la leçon à retenir de cette
+entrée, indépendamment du bot concerné.
+
+🟢 **ARBITRAGE UTILISATEUR DU 2026-08-02 — re-profilage validé, à écrire.**
+1. **Sortir `tactical` de l'enveloppe.** Piste proposée : `w_objective 0.8 / w_enemy 0.6` — un bot
+   qui dispute les objectifs **et** se bat pour eux. Aucun bot d'entraînement n'occupe ce coin
+   (`control` est passif au contact, `greedy` ignore les objectifs). Un holdout doit différer
+   **en nature**, pas être plus faible en degré. La valeur exacte reste à régler par mesure.
+2. **Ajouter le scalaire `vs_tactical` PAR ROSTER.** Aujourd'hui `ai/metrics_tracker.py` émet
+   `bot_eval/vs_tactical` (tous rosters confondus) et `bot_eval/faction/<faction>` (le `combined`
+   par faction), mais **pas le croisement** — or c'est exactement ce que
+   [§10.6](V11_eval_strategy.md#s10.6) demande.
+
+⚠️ **ORDRE — non négociable** : ce chantier se livre **AVANT** de geler la baseline d'évaluation
+et de lancer la mesure de référence. Changer un adversaire d'éval après coup rend toute
+comparaison invalide — c'est exactement ce qui a tué la comparabilité du run 4
+([§0.47](#s0.47) É4). Il ne casse **aucun** des trois contrats (archi / obs / action) : il ne
+coûte donc **aucun** ré-entraînement, il change seulement la règle du mètre.
+
+🟢 **POURQUOI `control` PÈSE 0.40 — raison écrite le 2026-08-02, à ne pas « rééquilibrer ».**
+Décision utilisateur, assumée : `ControlBot` est **le bot qui joue le mieux à 40k**, parce qu'il
+joue pour **gagner** et non pour détruire — et c'est ce que dit la règle : la victoire se décide
+aux VP d'objectifs, les kills ne tranchent qu'à égalité (`determine_winner_with_method`). D'où
+`control` 0.40 contre 0.15 aux quatre autres, et 0.0 au holdout. Ce n'est pas un déséquilibre à
+corriger, c'est la **pondération de la compétence décisive**.
+⚠️ Contrepartie à connaître : 40 % du `combined` dépend d'UN adversaire, donc une stratégie qui
+exploiterait une idiosyncrasie de `control` déplacerait 40 % du score. `b_worst_bot_score` est le
+garde-fou exact de ce risque — c'est la raison pour laquelle les deux métriques vont **ensemble**
+et qu'aucune ne se lit seule.
+
+📌 **DEUX LIMITES DE LECTURE DU COUPLE `combined` / `worst_bot_score`** (constatées le 2026-08-02,
+aucune ne le disqualifie) :
+1. **`worst_bot_score` peut être une seconde mesure de PERFORMANCE, pas de consistance.** Si le
+   minimum tombe toujours sur le même adversaire (au run 4 : `vs_control` à 0.04), les deux
+   métriques pointent au même endroit au lieu de se compléter. Le fait se lit directement — les
+   scalaires `bot_eval/vs_*` sont tous publiés, et le rapport d'éval de fin de training les
+   classe — il suffit d'y regarder avant de conclure qu'un creux du `min` est un défaut de
+   consistance.
+2. **Un `min` est la statistique la plus bruitée du lot.** Sur ~100 épisodes par bot, le minimum
+   de six estimateurs bruités est biaisé vers le bas et varie plus que la moyenne. Un creux isolé
+   de `worst_bot_score` est plus probablement du bruit qu'une régression — contrairement à un
+   creux de `combined`.
+
+🟢 **SUITE ENVISAGÉE (2026-08-02, non engagée)** : si le `tactical` re-profilé s'avère plus fort
+que les bots d'entraînement, il devient le **critère de généralisation** — « battre un adversaire
+jamais rencontré ». C'est l'argument le plus fort possible devant un financeur. Condition : il doit
+rester **hors de `bot_training.ratios`** et **hors du gate**, sans quoi il cesse d'être un holdout.
+
+📌 **PÉRIMÈTRE DE MESURE — ASSUMÉ, NE PAS LE RE-SIGNALER COMME UN DÉFAUT** (utilisateur,
+2026-08-02). Vérifié fichier par fichier : les rosters `holdout_regular` sont **identiques unité
+pour unité** aux rosters `training` (SM comme Orks), sur le **même plateau** `44x60x5` et le **même
+terrain** `terrain-mc1.json`. Le « holdout de scénarios » n'en est donc pas un — et **c'est
+voulu** :
+- **rosters fixes** — on joue le contenu de la boîte de base, pas d'autre armée (cf. [§0.15](#s0.15),
+  identité déjà tranchée le 2026-07-21) ;
+- **diversité d'ADVERSAIRE reportée** — self-play et MCTS viendront **quand l'observation sera
+  complète**, pas avant.
+
+⚠️ **Conséquence à garder en tête pour lire les courbes** : `combined` et `worst_bot_score`
+mesurent la performance **dans la distribution d'entraînement**, entièrement — mêmes armées, même
+terrain, mêmes adversaires. C'est adapté au besoin courant (valider les paramètres), mais **le
+`tactical` re-profilé est le SEUL signal hors distribution du dispositif** tant que le self-play
+n'est pas là. C'est ce qui fait la valeur du point 1 ci-dessus.
+
+📌 **DIVERGENCE DOC / PRATIQUE, à trancher.** [§10.6](V11_eval_strategy.md#s10.6) écrit que le
+critère de succès quantitatif est le **win-rate PAR ROSTER contre `TacticalBot`**. Ce n'est **pas**
+le critère réellement utilisé : l'utilisateur suit `00_critical/a_bot_eval_combined` et
+`00_critical/b_worst_bot_score` (2026-08-02), qui portent tous deux sur les bots
+**d'entraînement** — `tactical` en est exclu par construction. Ces deux métriques ne sont **pas**
+saturées (`worst_bot_score` ≈ 0.35 pour un gate à 0.50), donc le critère opérationnel est sain ;
+c'est le critère **écrit** qui est en décalage. À réconcilier : soit §10.6 adopte
+`combined` + `worst_bot_score` + `0_gap_sm-ork` comme critère quantitatif et rétrograde le holdout
+au rang d'indicateur de généralisation, soit le holdout redevient le critère — mais alors il faut
+d'abord le désaturer (point 1 ci-dessus). **Les deux voies exigent le re-profilage.**
 
 <a id="s0.44"></a>
 ### 0.44 Tête pointeur de déploiement — les slots 4-8 n'ont pas de tête dédiée — 🟠 OUVERT, REPORTÉ APRÈS LE RUN 4 (2026-07-29)
@@ -207,7 +493,7 @@ et, dans le fichier lui-même, des **appels mutuels internes** (`get_best_enemy_
 plus que par lui-même. C'est le **résidu de l'heuristique de charge par `damage_ratio`**, remplacée
 par la cible de charge en dimension d'action (§0.43, P3-2). **Même motif que §0.38 et §0.39**
 (correctif ou heuristique juste, plus aucun appelant, code conservé par inertie).
-✅ **LIVRÉ, NON MERGÉ** — constaté le 2026-07-29 à 13 h 56 (`git log main..v11-0.46-dead-code-charge-heuristic`) :
+✅ **LIVRÉ ET MERGÉ** — constaté le 2026-07-29 à 13 h 56 (`git log main..v11-0.46-dead-code-charge-heuristic`) : ⏳ **MERGÉ depuis — vérifié le 2026-08-02 ; la branche citée est supprimée.**
 branche `v11-0.46-dead-code-charge-heuristic`, **2 commits**, tête **`306033ec`** (13 h 55) —
 `2d6bd2a8` (12 h 11) supprime le code, `306033ec` (13 h 55, suite de relecture adverse) répare les
 documents que la suppression rendait faux (`V11_phaseA.md` ~L806 et ~L959 affirmaient
@@ -247,7 +533,7 @@ d'asymétrie de §0.29 ne dépend pas du profil — la rampe est `training_only`
 **TOUJOURS** une phase de déploiement ; un profil resté à `0.0` entraîne un agent qui ne se déploie
 jamais, puis le note sur des parties à déployer.
 
-✅ **LIVRÉ, NON MERGÉ** — constaté le 2026-07-29 à 13 h 56 : commit **`4c0ed7a4`**
+✅ **LIVRÉ ET MERGÉ** — constaté le 2026-07-29 à 13 h 56 : commit **`4c0ed7a4`** ⏳ **MERGÉ depuis — vérifié le 2026-08-02 ; la branche citée est supprimée.**
 (« config(armageddon): aligner les 5 profils sur la rampe de deploiement de x1 (0.0 -> 0.8) »), sur
 la branche **`v11-pre-lot-eval-baseline`** (et NON sur une branche `§0.46`, cf. §0.51). Les **cinq** profils d'alors
 portent le réglage de `x1` **clé pour clé** ; les clés du contrat lu par
@@ -256,9 +542,16 @@ portent le réglage de `x1` **clé pour clé** ; les clés du contrat lu par
 valeur par défaut) sont présentes, JSON revalidé. Ce chantier fait partie des quatre à livrer
 **AVANT la mesure de référence** (§0.48, ordre) ; ✅ **mergé** (vérifié le 2026-08-02).
 ⏳ **Réglage changé depuis** : les **six** profils (`x1_long` ajouté) portent aujourd'hui
-`active_ratio_start` **0.3** → `active_ratio_end` **0.8** avec `freeze_after_progress` **0.5**,
-soit un plafond effectif de **0,55** — et non la rampe `0.0 → 0.8` décrite ici. Le bloc est
+`active_ratio_start` **0.3** → `active_ratio_end` **0.8** avec `freeze_after_progress` **1.0**
+(arbitrage utilisateur du 2026-08-02, en même temps que §0.57 : le gel à mi-run — plafond effectif
+0,55 — est **abandonné**, la rampe atteint donc bien 0.8 en fin de run) — et non la rampe
+`0.0 → 0.8` décrite ici. Le bloc est
 **obligatoire** : son absence lève un `KeyError` (`_configure_deployment_mode_for_episode`).
+🔴 **Ce point est LIVRÉ mais son EFFET était nul jusqu'au 2026-08-02 ([§0.57](#s0.57))** : aligner les
+profils sur la rampe de `x1` ne servait à rien tant que le moteur divisait un compteur d'épisodes
+LOCAL à un worker par le total GLOBAL. Sur un run `n_envs=48`, la part d'épisodes en déploiement
+actif est restée à `active_ratio_start` du premier au dernier épisode. **Aucune mesure antérieure au
+2026-08-02 n'a été produite avec la rampe décrite ici.**
 
 **3. Instrumentation `[TRAIN DEBUG]` — non documentée jusqu'ici.** **41 occurrences** au 2026-07-29, **37** au 2026-08-02 (`ai/env_wrappers.py` 14, `engine/action_decoder.py` 15, `engine/w40k_core.py` 7, `ai/train.py` 1), réparties
 sur [`ai/train.py`](../../ai/train.py), [`ai/env_wrappers.py`](../../ai/env_wrappers.py),
@@ -329,7 +622,7 @@ Deux faits contre-vérifiés, à ne pas perdre :
 [:509](../../scripts/roster_matchup_stats.py#L509) (`return env.get_action_mask()`). Un seul des
 deux chemins a été migré.
 
-✅ **CORRIGÉ, NON MERGÉ** — branche `v11-0.47-eval-tooling-mask`, commit **`9eab91a1`** : le masque
+✅ **CORRIGÉ ET MERGÉ** — branche `v11-0.47-eval-tooling-mask`, commit **`9eab91a1`** : le masque ⏳ **MERGÉ depuis — vérifié le 2026-08-02 ; la branche citée est supprimée.**
 vient désormais de `env.engine.get_action_mask()`, **le même appel que la boucle de référence**
 ([`ai/bot_evaluation.py:523`](../../ai/bot_evaluation.py#L523)).
 
@@ -402,7 +695,7 @@ d'action ACTUEL**, en **appelant réellement le décodeur** (pas en comparant de
 elles, cf. É3). Coût accepté : ce chantier est **plus long qu'une simple suppression** — il faut
 écrire le verrou avant de pouvoir retirer les anciens tests.
 
-✅ **FAIT, NON MERGÉ** — branche `v11-0.47-dead-decoder-and-interface-lock`, **4 commits**, tête
+✅ **FAIT ET MERGÉ** — branche `v11-0.47-dead-decoder-and-interface-lock`, **4 commits**, tête ⏳ **MERGÉ depuis — vérifié le 2026-08-02 ; la branche citée est supprimée.**
 **`f0ed563a`** (14 h 02), ⏳ constaté le 2026-07-29 à 14 h 05 (la branche bougeait encore).
 `ac776efc` supprime `convert_gym_action`
 (~247 lignes) **et**, dans le même mouvement, ses satellites devenus injoignables :
@@ -442,7 +735,7 @@ aurait exécuté « masque → `predict` → décodeur » aurait échoué sur `r
 suppression de É2** — écrire `test_agent_interface_contract.py` est la contrepartie non négociable
 du retrait de `convert_gym_action` et de ses ~25 tests. Contenu et justification : voir É2.
 
-✅ **ÉCRIT, NON MERGÉ** — commit **`62a934f3`** (même branche que É2) :
+✅ **ÉCRIT ET MERGÉ** — commit **`62a934f3`** (même branche que É2) : ⏳ **MERGÉ depuis — vérifié le 2026-08-02 ; la branche citée est supprimée.**
 `tests/unit/engine/test_agent_interface_contract.py`, **15 fonctions de test / 26 cas**, tous adossés
 à un `game_state` de **moteur réel** et passant par `convert_squad_action` — cellules de move, `WAIT`
 hors et en command, `SHOOT`/`CHARGE`/`FIGHT_SLOT_BASE + k`, `ACTION_FIGHT_NO_TARGET`, zone intents,
@@ -485,7 +778,7 @@ eux.** La **baseline d'évaluation change** — ce bot pèse **0.23** du score d
 du profil `x1`). Toute comparaison de win-rate franchissant ce correctif est invalide ; il faudra
 re-mesurer la référence sur la nouvelle baseline, et non l'extrapoler.
 
-✅ **CORRIGÉ, NON MERGÉ** — commit **`72a34d5c`** (12 h 59) sur la branche `v11-pre-lot-eval-baseline`,
+✅ **CORRIGÉ ET MERGÉ** — commit **`72a34d5c`** (12 h 59) sur la branche `v11-pre-lot-eval-baseline`, ⏳ **MERGÉ depuis — vérifié le 2026-08-02 ; la branche citée est supprimée.**
 constaté le 2026-07-29 à 13 h 56.
 
 🟢 **DÉCISION ASSUMÉE — DOCTRINE DE CONTRE-CHARGE DU `DefensiveBot`** (écrite ici parce qu'elle
@@ -555,7 +848,7 @@ T6-i « code testé mais jamais appelé »).
 📏 **Chiffrage par le run 4** ([§0.14](#s0.14)) : `vs_defensive` **0.89** pèse **0.205 des 0.509** du
 `combined`, soit **40 % du score**. Le biais de É4 n'est plus une réserve qualitative, il est mesuré.
 
-✅ **CORRIGÉ, NON MERGÉ** — commit **`5f91c744`** (13 h 07), même branche. `_shoot_focus_fire` prend
+✅ **CORRIGÉ ET MERGÉ** — commit **`5f91c744`** (13 h 07), même branche. `_shoot_focus_fire` prend ⏳ **MERGÉ depuis — vérifié le 2026-08-02 ; la branche citée est supprimée.**
 désormais un `score_fn` (`_score_wounded` / `_score_threat`) et **ne prend plus d'unité active** :
 le mapping est **par JOUEUR**, issu de `get_enemy_slot_mapping` (la même source que le masque). Les
 deux helpers indexés sur le pool sont supprimés — **et avec eux `_find_active_unit_for_bot`**, leur
@@ -567,13 +860,16 @@ l'indexation par le pool → 3 tests rouges) puis rétablies ; le commit rapport
 ⏳ **À 14 h 05 la branche porte un 4ᵉ commit**, `d0183afe` (« deriver le joueur de l'escouade ACTIVEE,
 jamais de `current_player` »), et `test_evaluation_bots.py` compte **27 tests**.
 
-#### É5 — [T4] `scripts/sweep_scenario_bank_v11.py` documenté comme livré, ABSENT — ✅ CONTRE-VÉRIFIÉ
+#### É5 — [T4] `scripts/sweep_scenario_bank_v11.py` documenté comme livré, ABSENT — ✅ CORRIGÉ (2026-08-02)
 
 Le fichier est **absent du disque** (contre-vérifié). Il a été supprimé au commit **`924c2b41`**,
 **sans aucune mention dans la tranche T4**, qui continue de le présenter comme un livrable.
 **Atténuation** : la fonction de balayage elle-même survit, exercée par
 [`tests/unit/ai/test_scenario_bank_migration_v11.py:118-157`](../../tests/unit/ai/test_scenario_bank_migration_v11.py#L118-L157).
 L'écart est donc documentaire (un inventaire faux), pas une perte de capacité.
+✅ **CORRIGÉ le 2026-08-02** : les deux mentions de `V11_tranches.md` (le livrable T4 et la
+« réserve T4 close ») portent désormais l'avertissement que le script a été supprimé et que le
+balayage vit dans le test.
 
 #### É6 — [T4] `roster_matchup_stats.py` ÉCRIT des scénarios au contrat legacy — ✅ CONFIRMÉ ET CORRIGÉ (non mergé)
 
@@ -603,11 +899,13 @@ Les **trois autres outils** de l'inventaire T4 sont propres — p. ex.
 [`scripts/build_holdout_benchmark.py:124-125`](../../scripts/build_holdout_benchmark.py#L124-L125)
 émet bien `board_ref`/`terrain_ref`.
 
-#### É7 — [T2, mineur] `SelfPlayWrapper` n'a pas les trackers diagnostiques annoncés — ⚠️ NON CONTRE-VÉRIFIÉ
+#### É7 — [T2, mineur] `SelfPlayWrapper` n'a pas les trackers diagnostiques annoncés — ✅ CONTRE-VÉRIFIÉ ET CORRIGÉ (2026-08-02)
 
-Les trackers que T2 attribue à `SelfPlayWrapper` sont **tous portés par `BotControlledEnv`**
-([`ai/env_wrappers.py:191-199`](../../ai/env_wrappers.py#L191-L199)). Écart d'attribution dans la
-doc de tranche.
+Les trackers que T2 attribue à `SelfPlayWrapper` sont **tous portés par `BotControlledEnv`** :
+le suivi shoot/wait et `get_shoot_stats` y vivent entièrement, `SelfPlayWrapper` n'en porte
+**aucun** (re-vérifié le 2026-08-02 par lecture des deux classes). Écart d'attribution dans la doc
+de tranche. ✅ **CORRIGÉ** : la phrase de T2 ne crédite plus que `BotControlledEnv`, avec la note
+de correction.
 
 #### É8 — [T3, mineur] ✅ TOMBÉ — l'écart n'existe pas dans le code (vérifié le 2026-08-02)
 
@@ -627,6 +925,13 @@ c'est cette phrase-là qui est à reprendre, dans la doc de tranche.
 reste réellement non couvert du critère §8.3, c'est le **second scénario** et le **second siège**.
 Cette lacune était **déjà déclarée par la doc** ; la relecture la **re-confirme** sans rien
 découvrir de neuf — T5 reste CONFORME à ce qu'elle annonce d'elle-même.
+
+🟢 **ARBITRAGE UTILISATEUR DU 2026-08-02 — les deux manques sont PLANIFIÉS, pas abandonnés :**
+- **second siège** (l'agent en joueur 2) : **après** un entraînement bot satisfaisant — le tester
+  avant n'apprendrait rien d'utile ;
+- **second scénario** : **écrit par l'utilisateur**.
+
+Ne pas re-signaler É9 comme un trou de couverture avant ces deux jalons.
 
 <a id="s0.48"></a>
 ### 0.48 Inventaire des chantiers qui cassent un contrat + PÉRIMÈTRE du lot de ré-entraînement — 🟠 OUVERT (2026-07-29)
@@ -694,7 +999,7 @@ ré-entraînement — c'est le critère de tri, pas l'importance du chantier.
   référence du lot** : la rampe de déploiement ([§0.46](#s0.46) point 2) et la conformité FLY 21.03
   ([§0.49](#s0.49)) changent **ce qui est appris** ; le correctif des bots d'éval
   ([§0.47](#s0.47) É4) change la **baseline d'évaluation** ; la conformité 01.07
-  ([§0.50](#s0.50), déjà corrigée mais **non mergée**) change **l'issue des parties**. Arrivés
+  ([§0.50](#s0.50)) change **l'issue des parties**. Arrivés
   après, ils rendent toute comparaison à une mesure antérieure **INVALIDE** — c'est exactement
   pourquoi le run 4 a été arrêté ([§0.14](#s0.14)) plutôt que mené à terme.
   ✅ **État au 2026-08-02 : les QUATRE sont MERGÉS sur `main`** — rampe `4c0ed7a4`,
@@ -738,7 +1043,7 @@ n'est **pas préjugé** ici, aucun chiffre n'en est supposé tant qu'il n'est pa
 ### 0.50 Non-conformité 01.07 — le contrôle d'objectif sous battle-shock — ✅ CORRIGÉ ET MERGÉ (2026-07-29) ; 🟠 TRAVAIL DE SUITE OUVERT (2026-08-02)
 
 **État.** ✅ Corrigé sur la branche **`v11-battle-shock-oc`**, commit **`4be41919`**
-(« fix(01.07): une unite battle-shocked n'apporte plus aucun controle d'objectif »), **NON MERGÉE**
+(« fix(01.07): une unite battle-shocked n'apporte plus aucun controle d'objectif »), **MERGÉE depuis (vérifié le 2026-08-02)**
 sur `main`. ⏳ **État constaté le 2026-07-29 à 14 h 05** (la branche a bougé pendant le constat) :
 **5 commits**, tête **`b8932f52`** — s'ajoutent `906fffc8` (docstring qui prétendait à tort que
 l'observation partage `sum_objective_control_oc`), **`d0bbdcc4`** (le **reward** `on_objective_bonus`
@@ -749,13 +1054,22 @@ non corrigeable ici** : `BoardReplay.computeControlCounts` recalcule le contrôl
 l'ancre **et** sans battle-shock).
 
 ✅ **Les DEUX `useMemo` du front (points de victoire, coloration) sont SUPPRIMÉS (2026-07-29)** et
-lisent l'instantané moteur. 🔴 **MAIS UN TROISIÈME RECALCUL SUBSISTE (constaté le 2026-08-02)** :
-le **constructeur du journal d'événements** de `BoardReplay.tsx` — celui qui produit les entrées
-`action_name: "objective_control"` — recompte encore l'OC lui-même, **à l'ancre de l'unité** et
-**sans battle-shock**, donc avec exactement les deux divergences que cette entrée dit avoir closes.
-Son commentaire renvoie à `computeControlCounts` « ci-dessus », **fonction supprimée** : le
-commentaire est mort en plus d'être exact. **À traiter** : le journal doit lire l'instantané
-journalisé par le moteur, comme les deux autres consommateurs.
+lisent l'instantané moteur. ⚠️ Un **troisième recalcul** avait survécu — le **constructeur du journal d'événements** de
+`BoardReplay.tsx`, celui qui produit les entrées `action_name: "objective_control"` : il recomptait
+l'OC **à l'ancre de l'unité** et **sans battle-shock**, et ré-implémentait une troisième fois la
+fenêtre de score et le départage. ✅ **CORRIGÉ le 2026-08-02** : il **diffère deux instantanés
+moteur successifs** (`state.objective_control.controllers`, attaché par `replayParser.ts`) et
+journalise le changement — plus aucun barème, aucune géométrie, aucune règle rejoués côté
+navigateur. Sont morts avec lui `isObjectiveScoringWindow`, la relecture de
+`rules.primary_objective`, l'enrichissement d'unités et le calcul de phase qui ne servaient qu'à ce
+comptage. Les sommes d'OC ont disparu du message : le moteur ne les publie pas, et les afficher
+reviendrait à réintroduire le calcul local.
+**Verrou** : la différence d'instantanés est extraite en fonction pure
+(`frontend/src/utils/objectiveControlJournal.ts`, appelée par le composant — pas de copie inline)
+et couverte par `objectiveControlJournal.test.ts`, **8 tests**. Mutation-testée : retirer le
+`?? null` sur la zone jamais vue ⇒ **3 rouges** ; retirer la comparaison au contrôleur précédent
+⇒ **4 rouges**. `BoardPvp.tsx` a été vérifié au passage : il lit déjà `objective_controllers` du
+moteur — pas de jumeau.
 Le constat « impossible en l'état, le
 `step.log` ne porte aucune information de battle-shock » posait le problème à l'envers : il n'a
 jamais fallu **reconstituer** le battle-shock côté navigateur, il fallait cesser d'y recalculer quoi
@@ -820,13 +1134,30 @@ choqué ». Recomptés sur `main` le **2026-08-02**, toujours **sept**, ancrés 
 | `build_squad_move_cell_map` | `shared_utils.py` | `bool(_unit_obj_fp.get("battle_shocked", False))` — porte même le commentaire `# get allowed` |
 | `_handle_hazard_confirm` | `w40k_core.py` | `not bool(unit.get("battle_shocked", False))` |
 
-**Les deux positions ne peuvent pas être vraies en même temps** : si le champ est un invariant de
-construction, ces sept `get(..., False)` sont des valeurs par défaut anti-erreur interdites ; s'il
-est optionnel, le `require_key` est un fail-fast qui lèvera là où le reste du moteur continue.
-**À trancher, pas à laisser coexister** — soit la migration se termine (les sept sites passent en
-lecture stricte), soit le `require_key` devient une **exception justifiée par écrit** ici. ⚠️ Ce
-n'est **pas** une dette « documentée donc traitée » : tant qu'elle tient, un même état d'unité
-produit deux réponses selon le lecteur.
+✅ **TRANCHÉ ET MIGRÉ le 2026-08-02 (arbitrage utilisateur) : la lecture STRICTE gagne.** Le champ
+**est** un invariant de construction — il est posé par les quatre constructeurs de production
+(`game_state.py` ×2, `services/api_server.py`, `services/endless_duty_runtime.py`). Les sept
+`get(..., False)` étaient donc des valeurs par défaut anti-erreur (T1) : ils sont passés en
+`require_key(unit, "battle_shocked")`. `grep 'get("battle_shocked"' engine/ ai/ services/` → **0
+hit** hors tests.
+
+**Ce que la migration a révélé, et qui est le vrai bénéfice** : six fichiers de test construisaient
+des unités **sans ce champ** — des doublures qui ne représentaient donc pas une unité que la
+production sait produire (motif §0bis « un test qui contourne le vrai constructeur »). Ils sont
+corrigés, avec le commentaire qui dit pourquoi le champ est obligatoire :
+`test_command_phase.py`, `test_activation_e2e.py`, `test_squad_move_descent_frontier.py`,
+`test_execute_semantic_action.py`, `test_cascade_fight_subphases.py`, `test_move_budget_geodesic.py`.
+
+**Trois replis voisins durcis dans la foulée** (relevés par relecture, même intention) :
+`desperate_escape_post_move` lève désormais si l'unité est introuvable — son jumeau
+`desperate_escape_pre_move` levait déjà, l'asymétrie ne se justifiait pas ; l'empreinte de cache de
+`build_squad_move_cell_map` lève au lieu de retomber sur « non choqué », un `squad_id` introuvable
+ne pouvant pas produire une clé de cache valide (deux états de jeu différents auraient partagé la
+même) ; et `command_phase_start` lit `player` et `LD` en strict, eux aussi posés par les quatre
+constructeurs.
+
+✅ **Vérification** : ~60 fichiers de test ciblés verts côté agent, **suite complète lancée par
+l'utilisateur le 2026-08-02 — RAS**.
 
 ✅ **ÉCART `ai/analyzer.py` — TRAITÉ** (vérifié le 2026-08-02). `_calculate_objective_control_snapshot`
 n'existe plus : les fonctions de recalcul de contrôle d'objectif de l'analyzer ont été supprimées
@@ -962,7 +1293,7 @@ l'**adversaire**, jamais au roster.
 
 **🟠 MAJ 2026-07-22 — le run réel a ENFIN été lancé, et il a franchi la non-régression mais s'est
 arrêté à l'éval.** Commande exacte : `python3 ai/train.py --agent ArmageddonAgent --scenario bot
---new --training-config x5_new` (10k ép., 48 envs, `bot_eval_final=100`), lancée après le
+--new --training-config x5_new` (10k ép. **à l'époque** — `x5_new` porte 5 000 épisodes depuis, relevé le 2026-08-02 ; 48 envs, `bot_eval_final=100`), lancée après le
 réalignement complet de l'instrument (§0.23 logger per-figurine, §0.24 analyzer per-figurine) et la
 correction d'un **vrai bug moteur de move** découvert par l'analyzer fiabilisé (§0.25 budget
 ligne-droite → géodésique ; §0.26 régression cache). **Le training a atteint l'épisode 2000 (20 %)
@@ -1760,13 +2091,15 @@ régressent, `greedy` 0.67→0.82, `aggressive_smart` 0.68→0.80, `tactical` 0.
 4. **Budget re-pondéré** dans les profils, et l'agrégat de classement de rosters
    (`roster_aggregate_rankings.py`) passe à **4 bots à 0.25**, arité généralisée.
 
-🔴 **CONSÉQUENCES — toujours ouvertes, cf. tableau d'état :**
-- (a) les matrices `{split}_matchups_{bot}.json` **ne sont plus sur disque** (vérifié le
-  2026-08-02) : il n'y a rien à régénérer, **tout est à produire** ;
-- (b) le `combined` va **BAISSER** (tous les bots deviennent compétitifs) : c'est le résultat
-  recherché, pas une régression, mais **les seuils de gate de curriculum doivent être recalibrés**
-  (arbitrage utilisateur) ;
-- (c) **aucun win-rate antérieur au 2026-07-30 n'est comparable** à un win-rate postérieur.
+**CONSÉQUENCES :**
+- (a) 🟢 **SANS OBJET jusqu'à la démo métier** (arbitrage utilisateur du 2026-08-02) : les matrices
+  `{split}_matchups_{bot}.json` ne sont plus sur disque, mais le travail porte sur **2 rosters
+  seulement** — il n'y a pas de classement par roster à produire. **Ne pas re-signaler.**
+- (b) 🟢 **SANS OBJET, même raison** : le `combined` va **BAISSER** (tous les bots deviennent
+  compétitifs) — c'est le résultat recherché, pas une régression — mais le recalibrage des seuils
+  de gate de curriculum attend la sortie du périmètre 2 rosters.
+- (c) ⚠️ **TOUJOURS VRAI** : **aucun win-rate antérieur au 2026-07-30 n'est comparable** à un
+  win-rate postérieur.
 
 ⏳ **Le panel a évolué depuis cette entrée** (constaté le 2026-08-02) : un **cinquième bot
 `ValueTradeBot`** a été ajouté. La pondération courante est `bot_eval_weights` = `control` 0.40 /
@@ -1928,7 +2261,7 @@ comme « branche verte ».
 **Cadre.** Découvert le 2026-07-29, pendant le run 4 — c'est **l'une des deux raisons de son arrêt**
 ([§0.14](#s0.14)).
 
-✅ **CORRIGÉ sur la branche `v11-fly-2103-conformity`, NON MERGÉE.** ⏳ **État constaté le 2026-07-29
+✅ **CORRIGÉ ET MERGÉ sur `main`** (branche `v11-fly-2103-conformity` supprimée depuis ; vérifié le 2026-08-02). ⏳ **État constaté le 2026-07-29
 à 14 h 05** (`git log main..v11-fly-2103-conformity`) — **la branche bougeait encore pendant ce
 constat** (elle est passée de 5 à 8 commits entre 13 h 56 et 14 h 02), **reconfronter au réel avant
 usage** : **8 commits**, tête **`4c88ec60`** (14 h 02) — `d1099b26` (casse du mot-clé), `18096753`
@@ -2187,7 +2520,10 @@ croissante, sur un SEUL fichier rechargé dans le mode tiré (réutilise les 2 c
 2. `w40k_core.py::_configure_deployment_mode_for_episode()` — **miroir de `deployment_random_mix`**
    (orthogonal : celui-ci choisit fixed/active, l'autre randomise les ACTIONS d'un déploiement déjà
    actif). p(t) = `active_ratio_start + (end−start)·min(progress, freeze)`, progress =
-   `episode_number/(total_episodes−1)`, Bernoulli(p) → `active`/`fixed`. Dans `reset()`, impose un
+   `episode_number/(total_episodes−1)`, Bernoulli(p) → `active`/`fixed`. ⏳ **FORMULE FAUSSE, corrigée
+   le 2026-08-02 ([§0.57](#s0.57))** : `episode_number` compte les épisodes d'UN environnement, donc le
+   dénominateur est `ceil(total_episodes/n_envs) − 1`. Telle qu'écrite ici, la rampe avançait `n_envs`
+   fois trop lentement et **n'a jamais rampé sur un run vectorisé**. Dans `reset()`, impose un
    rechargement avec l'override (reward_configs reconstruits via le chemin `_reload_scenario` existant).
 3. Config `x5_new.deployment_mode_schedule` (opt-in, `enabled:false` par défaut) :
    `active_ratio_start/active_ratio_end/schedule:"linear"/freeze_after_progress`, `training_only`.
@@ -5642,6 +5978,7 @@ complet et la source unique partagée avec la consolidation.
 couplage : **2 sur 2**. Le test verrouille donc l'optimalité, pas seulement l'absence de
 collision.
 
+<a id="s0.15"></a>
 ### 0.15 Rosters `training` ≡ `holdout_regular` — ✅ TRANCHÉ (2026-07-21 : identité ASSUMÉE)
 
 > Part **ouverte** de §0.6. La suppression des listes holdout mortes, elle, est résolue — voir
@@ -6096,7 +6433,7 @@ tableau de §0bis) :
 
 | # | Où | Affirmation | Pourquoi elle est périmée |
 |---|---|---|---|
-| 11 | [§6](V11_tranches.md#s6), critère **T2**, et [§8.2](V11_tranches.md#s8.2) | « `action_space.n == 41` », « `ACTION_WAIT` (18) », « `6+6+6+1+5+1+1+15 == 41` », « 19→shoot slot 0, 24→charge » | Le layout réel est **1047** actions : `ACTION_WAIT = 1024`, `SHOOT_SLOT_BASE = 1025`, `ACTION_CHARGE = 1030`, `ACTION_FIGHT = 1031` ([macro_intents.py:20-38](../../engine/macro_intents.py#L20-L38)). Changé par la refonte spatiale du move. **MAJ 2026-07-26 (§0.30 T-E)** : le layout est désormais **1062** — `SHOOT_SLOT_BASE = 1025` sur **20** slots, `ACTION_CHARGE = 1045`, `ACTION_FIGHT = 1046`. Le critère T2 **réel** (zéro littéral d'action dans `ai/`) reste, lui, satisfait. |
+| 11 | [§6](V11_tranches.md#s6), critère **T2**, et [§8.2](V11_tranches.md#s8.2) | « `action_space.n == 41` », « `ACTION_WAIT` (18) », « `6+6+6+1+5+1+1+15 == 41` », « 19→shoot slot 0, 24→charge » | Le layout réel est **1047** actions : `ACTION_WAIT = 1024`, `SHOOT_SLOT_BASE = 1025`, `ACTION_CHARGE = 1030`, `ACTION_FIGHT = 1031` ([macro_intents.py:20-38](../../engine/macro_intents.py#L20-L38)). Changé par la refonte spatiale du move. **MAJ 2026-07-26 (§0.30 T-E)** : le layout passe à **1062**. ⏳ **MAJ 2026-08-02 : ce chiffre est à son tour périmé** — le layout a continué d'évoluer (P3-1/P3-2 : la mêlée et la charge ont désormais des **plages de slots**, il n'y a plus d'`ACTION_CHARGE` ni d'`ACTION_FIGHT` isolés). **Ne plus citer de chiffre ici** : lire `engine/macro_intents.py`. Le critère T2 **réel** (zéro littéral d'action dans `ai/`) reste, lui, satisfait — c'est la seule chose que cette ligne devait établir. |
 | 12 | [§6](V11_tranches.md#s6), critère **T4** | « Les **61 scénarios** se chargent (script de balayage) » | La banque `ArmageddonAgent` compte **5** scénarios et `test_bank_has_expected_count` l'assert explicitement ; la banque `CoreAgent` en compte **4**. De plus `scripts/sweep_scenario_bank_v11.py:24` pointe encore `config/agents/CoreAgent/scenarios` : **le balayage du critère n'est plus exécutable tel quel**. La migration T4 a bien eu lieu ; c'est le critère qui n'a pas suivi. |
 | 13 | [§8.2](V11_tranches.md#s8.2) | « Fichier proposé : `tests/unit/engine/test_agent_interface_contract.py` … C'est LE verrou anti-récidive de R5 » | Ce fichier **n'existe pas**. Le verrou existe sous un autre nom et une autre forme — `test_action_space_mirror.py` — et il est **meilleur** : il vérifie `macro_intents` ≡ `shared_utils` constante par constante, et le décodeur **importe** ces mêmes constantes ([action_decoder.py:25-32](../../engine/action_decoder.py#L25-L32)), donc la désynchronisation visée par [§8.2](V11_tranches.md#s8.2) est structurellement impossible. |
 

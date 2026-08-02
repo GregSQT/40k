@@ -10,6 +10,7 @@ import {
 } from "../constants/gameConfig";
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useSingleDoubleClick } from "../hooks/useSingleDoubleClick";
+import { API_BASE, apiFetch } from "../services/apiFetch";
 import type {
   FightSubPhase,
   GameState,
@@ -2930,7 +2931,7 @@ export default function Board({
     (async () => {
       try {
         const [wRes, mRes] = await Promise.all([
-          fetch(`/api/game/action`, {
+          apiFetch(`/api/game/action`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -2938,7 +2939,7 @@ export default function Board({
               unitId: String(unitId),
             }),
           }),
-          fetch(`/api/game/action`, {
+          apiFetch(`/api/game/action`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -3333,7 +3334,7 @@ export default function Board({
     let cancelled = false;
     const timer = setTimeout(() => {
       void (async () => {
-        const response = await fetch("/api/game/action", {
+        const response = await apiFetch("/api/game/action", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -4078,7 +4079,7 @@ export default function Board({
 
         let losPreview = movePreviewBackendLosCacheRef.current.get(cacheKey);
         if (!losPreview) {
-          const response = await fetch("/api/game/action", {
+          const response = await apiFetch("/api/game/action", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -6337,7 +6338,7 @@ export default function Board({
         ].join("|");
         let losPreview = movePreviewBackendLosCacheRef.current.get(cacheKey);
         if (!losPreview) {
-          const response = await fetch("/api/game/action", {
+          const response = await apiFetch("/api/game/action", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -6445,7 +6446,7 @@ export default function Board({
         while (coverStatusPendingRef.current) {
           const pending = coverStatusPendingRef.current;
           coverStatusPendingRef.current = null;
-          const response = await fetch("/api/game/action", {
+          const response = await apiFetch("/api/game/action", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -6598,7 +6599,7 @@ export default function Board({
           ].join("|");
           let losPreview = movePreviewBackendLosCacheRef.current.get(cacheKey);
           if (!losPreview) {
-            const response = await fetch("/api/game/action", {
+            const response = await apiFetch("/api/game/action", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -6693,7 +6694,7 @@ export default function Board({
     }
     void (async () => {
       try {
-        const response = await fetch("/api/game/action", {
+        const response = await apiFetch("/api/game/action", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -7208,7 +7209,7 @@ export default function Board({
         ].join("|");
         let losPreview = movePreviewBackendLosCacheRef.current.get(cacheKey);
         if (!losPreview) {
-          const response = await fetch("/api/game/action", {
+          const response = await apiFetch("/api/game/action", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -7376,7 +7377,7 @@ export default function Board({
         if (cached) {
           hiddenModels = cached;
         } else {
-          const response = await fetch("/api/game/action", {
+          const response = await apiFetch("/api/game/action", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -11204,7 +11205,7 @@ export default function Board({
     targetId: string,
     modelId?: string
   ): Promise<Array<{ code: string; weapon: Weapon; m: number; x: number }>> => {
-    const res = await fetch(`/api/game/action`, {
+    const res = await apiFetch(`/api/game/action`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -11268,7 +11269,7 @@ export default function Board({
   ): Promise<
     Array<{ model_id: string; can_shoot: boolean; exhausted: boolean; weapon_codes: string[] }>
   > => {
-    const res = await fetch(`/api/game/action`, {
+    const res = await apiFetch(`/api/game/action`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -11311,7 +11312,7 @@ export default function Board({
       if (menu.activeTargetId)
         modelsStatus = await fetchModelsStatus(plan.unitId, menu.activeTargetId);
       // Recharge les profils du menu (can_use) → exclusion Pistol/non-Pistol en temps réel.
-      const menuRes = await fetch(`/api/game/action`, {
+      const menuRes = await apiFetch(`/api/game/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -11374,7 +11375,7 @@ export default function Board({
     };
     if (count > 0) body.count = count;
     try {
-      const res = await fetch(`/api/game/action`, {
+      const res = await apiFetch(`/api/game/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -11419,8 +11420,7 @@ export default function Board({
     // (déclaration quantifiée par groupe) — plus de désassignation de profil frère ici.
 
     try {
-      const API_BASE = "/api";
-      const response = await fetch(`${API_BASE}/game/action`, {
+      const response = await apiFetch(`${API_BASE}/game/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

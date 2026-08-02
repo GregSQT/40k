@@ -179,3 +179,53 @@ def get_objective_control(zone_idx: int, game_state: dict) -> float:
     return get_objective_control_for_player(
         zone_idx, game_state, int(require_key(game_state, "current_player"))
     )
+
+#: Familles d'actions, pour l'instrumentation d'USAGE (quelle DECISION l'agent exerce).
+#: Vit ici parce que la decoupe DERIVE du layout : la recopier ailleurs la desynchroniserait
+#: au premier slot ajoute.
+ACTION_FAMILIES = (
+    "deploy_slot", "move_cell", "wait", "shoot_slot", "charge_slot",
+    "fight_slot", "fight_no_target", "zone_intent", "choice",
+)
+
+
+def action_family(action_int: int, phase: str) -> str:
+    """Famille de `action_int`, sachant la PHASE ou il a ete joue.
+
+    La phase est indispensable, elle n'est pas un confort : les ids 4-8 sont a la fois les
+    5 strategies de deploiement (`DEPLOY_SLOTS`) et des cellules de move (`MOVE_CELL_BASE = 0`).
+    Sans elle, tout deploiement serait compte comme un deplacement — et c'est precisement le
+    recouvrement que V11 §0.44 doit lever cote policy.
+    """
+    a = int(action_int)
+    if a < 0 or a >= TOTAL_ACTION_SIZE:
+        raise ValueError(f"action_int hors espace d'action : {a} (taille {TOTAL_ACTION_SIZE})")
+    # Les CHOICE_k PREEMPTENT la phase : quand une decision d'agent est en attente, le masque
+    # n'expose qu'elles, y compris pendant le deploiement (`trigger="on_deploy"`). Les tester
+    # AVANT la branche deployment, sinon une regle de datasheet declenchee au deploiement ferait
+    # lever cette fonction — donc planter le step, pour une simple statistique.
+    if a in CHOICE_SLOTS:
+        return "choice"
+    if phase == "deployment":
+        if a in DEPLOY_SLOTS:
+            return "deploy_slot"
+        raise ValueError(
+            f"action {a} jouee en phase deployment hors des slots {DEPLOY_SLOTS} et hors "
+            f"CHOICE_SLOTS — le masque de deploiement n'ouvre que ces ids."
+        )
+    if a == ACTION_WAIT:
+        return "wait"
+    if a in MOVE_CELLS:
+        return "move_cell"
+    if a in SHOOT_SLOTS:
+        return "shoot_slot"
+    if a in CHARGE_SLOTS:
+        return "charge_slot"
+    if a in FIGHT_SLOTS:
+        return "fight_slot"
+    if a == ACTION_FIGHT_NO_TARGET:
+        return "fight_no_target"
+    if a in CHOICE_SLOTS:
+        return "choice"
+    return "zone_intent"
+

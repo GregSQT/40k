@@ -52,6 +52,9 @@ def _unit(uid: str, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
         "HP_MAX": hp,
         "VALUE": 100,
         "OC": 1,
+        # Invariant de construction : posé par tous les constructeurs de production, lu en
+        # strict par le moteur depuis 2026-08-02.
+        "battle_shocked": False,
         "BASE_SIZE": 1,
         "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",

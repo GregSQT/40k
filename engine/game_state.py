@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 from shared.data_validation import ConfigurationError, require_key
+from engine.episode_schedule import ramp_progress
 from engine.combat_utils import normalize_coordinates, get_unit_coordinates, resolve_dice_value
 from engine.phase_handlers.shared_utils import (
     is_unit_alive, _derive_model_role, compute_unit_rules_in_effect, strip_role_rules,
@@ -1662,27 +1663,12 @@ class GameStateManager:
 
         total_episodes = training_cfg_raw.get("total_episodes")
         n_envs = training_cfg_raw.get("n_envs")
-        if not isinstance(total_episodes, int) or isinstance(total_episodes, bool):
-            raise TypeError(
-                "training_config.total_episodes must be integer when roster_pool_schedule is enabled"
-            )
-        if not isinstance(n_envs, int) or isinstance(n_envs, bool):
-            raise TypeError(
-                "training_config.n_envs must be integer when roster_pool_schedule is enabled"
-            )
-        if total_episodes <= 0 or n_envs <= 0:
-            raise ValueError(
-                "training_config.total_episodes and n_envs must be > 0 when roster_pool_schedule is enabled"
-            )
 
         episode_number = require_key(self.config, "_training_episode_index")
         if not isinstance(episode_number, int) or isinstance(episode_number, bool):
             raise TypeError("config._training_episode_index must be integer when roster_pool_schedule is enabled")
-        episode_number = max(0, int(episode_number))
 
-        episodes_per_env = int(math.ceil(float(total_episodes) / float(n_envs)))
-        denominator = max(1, episodes_per_env - 1)
-        progress = min(1.0, max(0.0, float(episode_number) / float(denominator)))
+        progress = ramp_progress(max(0, int(episode_number)), total_episodes, n_envs)
 
         active_limits: Dict[str, int] = {}
         for cls in classes:

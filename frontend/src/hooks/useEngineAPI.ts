@@ -1,9 +1,9 @@
 // frontend/src/hooks/useEngineAPI.ts
 import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getAuthSession } from "../auth/authStorage";
 import type { SaveMeta } from "../components/SnapshotRewind";
 import { ORIENTATION_STEP_COUNT, wrapOrientationStep } from "../constants/gameConfig";
+import { API_BASE, apiFetch } from "../services/apiFetch";
 import type { GameMode, PlayerId, Unit } from "../types";
 import type { DiceValue, HiddenDetectionInfo, UnitModel, Weapon } from "../types/game";
 import {
@@ -32,6 +32,7 @@ import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalcul
 // Get max_turns from config instead of hardcoded fallback
 const getMaxTurnsFromConfig = async (): Promise<number> => {
   try {
+    // biome-ignore lint/style/noRestrictedGlobals: asset statique servi par Vite, pas une route API
     const response = await fetch("/config/game_config.json");
     if (!response.ok) {
       throw new Error(`Config fetch failed: ${response.status}`);
@@ -45,8 +46,6 @@ const getMaxTurnsFromConfig = async (): Promise<number> => {
     throw new Error(`CRITICAL CONFIG ERROR: Failed to load max_turns from config: ${error}`);
   }
 };
-
-const API_BASE = "/api";
 
 /** Replay : notifie useGameLog de réhydrater le Game Log avec l'historique complet renvoyé par une
  *  réponse de Load / rewind / retour live (champ ``game_log_history``). Même canal window que le flux
@@ -1105,16 +1104,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           requestPayload.board_path = boardParam;
         }
 
-        const authSession = getAuthSession();
-        if (!authSession?.token) {
-          throw new Error("Session utilisateur manquante. Merci de vous reconnecter.");
-        }
-
-        const response = await fetch(`${API_BASE}/game/start`, {
+        const response = await apiFetch(`${API_BASE}/game/start`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${authSession.token}`,
           },
           body: JSON.stringify(requestPayload),
         });
@@ -1163,11 +1156,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       scenarioFile: string,
       options?: { preserveP1PositionsFrom?: APIGameState | null; skipLoading?: boolean }
     ) => {
-      const authSession = getAuthSession();
-      if (!authSession?.token) {
-        setError("Session utilisateur manquante. Merci de vous reconnecter.");
-        return;
-      }
       const skipLoading = options?.skipLoading ?? options?.preserveP1PositionsFrom != null;
       if (!skipLoading) {
         setLoading(true);
@@ -1181,11 +1169,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         if (options?.preserveP1PositionsFrom != null) {
           body.preserve_p1_positions_from = options.preserveP1PositionsFrom;
         }
-        const response = await fetch(`${API_BASE}/game/start`, {
+        const response = await apiFetch(`${API_BASE}/game/start`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${authSession.token}`,
           },
           body: JSON.stringify(body),
         });
@@ -1212,11 +1199,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   /** POST /api/game/start pour le scénario PvE standard (fin tutoriel → mode PvE). */
   const startPveGame = useCallback(async () => {
-    const authSession = getAuthSession();
-    if (!authSession?.token) {
-      setError("Session utilisateur manquante. Merci de vous reconnecter.");
-      return;
-    }
     setLoading(true);
     try {
       const requestPayload = {
@@ -1224,11 +1206,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         mode_code: "pve",
         scenario_file: "config/scenario_pve.json",
       };
-      const response = await fetch(`${API_BASE}/game/start`, {
+      const response = await apiFetch(`${API_BASE}/game/start`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${authSession.token}`,
         },
         body: JSON.stringify(requestPayload),
       });
@@ -1258,11 +1239,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   /** POST /api/game/start pour une partie PvP locale (Continuer sans PvE). */
   const startPvpGame = useCallback(async () => {
-    const authSession = getAuthSession();
-    if (!authSession?.token) {
-      setError("Session utilisateur manquante. Merci de vous reconnecter.");
-      return;
-    }
     setLoading(true);
     try {
       const requestPayload = {
@@ -1270,11 +1246,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         mode_code: "pvp",
         scenario_file: "config/scenario_pvp.json",
       };
-      const response = await fetch(`${API_BASE}/game/start`, {
+      const response = await apiFetch(`${API_BASE}/game/start`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${authSession.token}`,
         },
         body: JSON.stringify(requestPayload),
       });
@@ -1759,7 +1734,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         body.charge_roll_override =
           Number.isFinite(_chargeOverrideNum) && _chargeOverrideNum > 0 ? _chargeOverrideNum : null;
         const requestBody = JSON.stringify(body);
-        const response = await fetch(`${API_BASE}/game/action`, {
+        const response = await apiFetch(`${API_BASE}/game/action`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: requestBody,
@@ -3583,7 +3558,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   }, []);
 
   const fetchEndlessDutyStatus = useCallback(async (): Promise<EndlessDutyState | null> => {
-    const response = await fetch(`${API_BASE}/game/action`, {
+    const response = await apiFetch(`${API_BASE}/game/action`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "endless_duty_status" }),
@@ -3614,7 +3589,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         range: Record<string, string | null> | null;
       }
     ) => {
-      const response = await fetch(`${API_BASE}/game/action`, {
+      const response = await apiFetch(`${API_BASE}/game/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -4276,7 +4251,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
    */
   const postEngineQuery = useCallback(
     async (action: Record<string, unknown>): Promise<Record<string, unknown> | null> => {
-      const response = await fetch(`${API_BASE}/game/action`, {
+      const response = await apiFetch(`${API_BASE}/game/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(action),
@@ -5842,7 +5817,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   }, []);
 
   const listArmies = useCallback(async (): Promise<ArmyListItem[]> => {
-    const response = await fetch(`${API_BASE}/armies`);
+    const response = await apiFetch(`${API_BASE}/armies`);
     if (!response.ok) {
       throw new Error(`Failed to load armies: HTTP ${response.status}`);
     }
@@ -7989,7 +7964,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     }>;
     persist_enabled: boolean;
   }> => {
-    const response = await fetch(`${API_BASE}/game/snapshots`);
+    const response = await apiFetch(`${API_BASE}/game/snapshots`);
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "snapshots fetch failed");
     return { snapshots: data.snapshots, persist_enabled: data.persist_enabled };
@@ -8011,7 +7986,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     }>;
     recording_enabled: boolean;
   }> => {
-    const response = await fetch(`${API_BASE}/game/timeline`);
+    const response = await apiFetch(`${API_BASE}/game/timeline`);
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "timeline fetch failed");
     return { rows: data.rows, recording_enabled: data.recording_enabled };
@@ -8024,7 +7999,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     restoreMode: "resume" | "view",
     divergence?: { fork: "fork" | "overwrite"; backup_name?: string }
   ) => {
-    const response = await fetch(`${API_BASE}/game/snapshot/restore`, {
+    const response = await apiFetch(`${API_BASE}/game/snapshot/restore`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ turn, player, phase, mode: restoreMode, ...(divergence ?? {}) }),
@@ -8042,7 +8017,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   // Recharge l'état vivant réel du moteur (sortie du mode visionnage : le moteur n'a pas été muté).
   const snapshotReloadLive = async () => {
-    const response = await fetch(`${API_BASE}/game/state`);
+    const response = await apiFetch(`${API_BASE}/game/state`);
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "game state reload failed");
     setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
@@ -8051,7 +8026,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   };
 
   const snapshotSetPersist = async (enabled: boolean, directory?: string) => {
-    const response = await fetch(`${API_BASE}/game/snapshot/persist`, {
+    const response = await apiFetch(`${API_BASE}/game/snapshot/persist`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(directory ? { enabled, directory } : { enabled }),
@@ -8063,7 +8038,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   // --- Saves manuelles (fichier plat par save) ---
   const saveGameNow = async (note = ""): Promise<SaveMeta> => {
-    const response = await fetch(`${API_BASE}/game/save`, {
+    const response = await apiFetch(`${API_BASE}/game/save`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ note }),
@@ -8074,7 +8049,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   };
 
   const saveList = async (): Promise<SaveMeta[]> => {
-    const response = await fetch(`${API_BASE}/game/saves`);
+    const response = await apiFetch(`${API_BASE}/game/saves`);
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "saves list failed");
     return data.saves as SaveMeta[];
@@ -8085,7 +8060,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     mode: "view" | "resume" = "resume",
     divergence?: { fork: "fork" | "overwrite"; backup_name?: string }
   ) => {
-    const response = await fetch(`${API_BASE}/game/save/load`, {
+    const response = await apiFetch(`${API_BASE}/game/save/load`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, mode, ...(divergence ?? {}) }),
@@ -8100,7 +8075,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   };
 
   const fetchPartyList = async (): Promise<Array<{ name: string }>> => {
-    const response = await fetch(`${API_BASE}/game/parties`);
+    const response = await apiFetch(`${API_BASE}/game/parties`);
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "parties list failed");
     return data.parties as Array<{ name: string }>;
@@ -8111,7 +8086,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     mode: "view" | "resume" = "resume",
     divergence?: { fork: "fork" | "overwrite"; backup_name?: string }
   ) => {
-    const response = await fetch(`${API_BASE}/game/party/load`, {
+    const response = await apiFetch(`${API_BASE}/game/party/load`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, mode, ...(divergence ?? {}) }),
@@ -8126,7 +8101,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   };
 
   const setAutosaveConfig = async (enabled: boolean, granularity: "phase" | "turn") => {
-    const response = await fetch(`${API_BASE}/game/autosave`, {
+    const response = await apiFetch(`${API_BASE}/game/autosave`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled, granularity }),
@@ -8143,21 +8118,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     autosave_enabled: boolean;
     granularity: "phase" | "turn";
   }> => {
-    const response = await fetch(`${API_BASE}/game/save-config`);
+    const response = await apiFetch(`${API_BASE}/game/save-config`);
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "save config fetch failed");
     return data;
   };
 
   const pickDirectory = async (): Promise<string | null> => {
-    const response = await fetch(`${API_BASE}/game/pick-directory`, { method: "POST" });
+    const response = await apiFetch(`${API_BASE}/game/pick-directory`, { method: "POST" });
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "directory picker failed");
     return (data.path as string | null) ?? null;
   };
 
   const deleteSaves = async (): Promise<number> => {
-    const response = await fetch(`${API_BASE}/game/saves/delete`, { method: "POST" });
+    const response = await apiFetch(`${API_BASE}/game/saves/delete`, { method: "POST" });
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "delete saves failed");
     return data.deleted as number;
@@ -8732,7 +8707,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           }
 
           // Step 1: Call backend to activate next AI unit
-          const aiResponse = await fetch(`${API_BASE}/game/ai-turn`, {
+          const aiResponse = await apiFetch(`${API_BASE}/game/ai-turn`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({}),
@@ -8746,7 +8721,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             if (errorInfo.error === "not_ai_player_turn") {
               // No more eligible AI units - fetch current game state and exit gracefully
               try {
-                const stateResponse = await fetch(`${API_BASE}/game/state`);
+                const stateResponse = await apiFetch(`${API_BASE}/game/state`);
                 if (stateResponse.ok) {
                   const stateData = await stateResponse.json();
                   if (stateData.game_state) {
@@ -9121,7 +9096,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
 
             // Step 4: Send AI decision immediately
-            const decisionResponse = await fetch(`${API_BASE}/game/action`, {
+            const decisionResponse = await apiFetch(`${API_BASE}/game/action`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(aiDecision),
@@ -9293,7 +9268,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             if (unitId) {
               // Send skip action to backend
               try {
-                const skipResponse = await fetch(`${API_BASE}/game/action`, {
+                const skipResponse = await apiFetch(`${API_BASE}/game/action`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ action: "skip", unitId: String(unitId) }),

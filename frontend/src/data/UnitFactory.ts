@@ -35,6 +35,7 @@ async function initializeUnitRegistry(): Promise<void> {
     rangedRangeByDisplayName = null;
 
     // Load unit registry from config file
+    // biome-ignore lint/style/noRestrictedGlobals: asset statique servi par Vite, pas une route API
     const registryResponse = await fetch("/config/unit_registry.json");
 
     if (!registryResponse.ok) {

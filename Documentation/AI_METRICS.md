@@ -58,7 +58,7 @@
 
 ### 1. Métriques 00_critical (TensorBoard)
 
-Le namespace **`00_critical/`** regroupe les métriques essentielles pour le tuning PPO (11 métriques de base + 7 courbes de ventilation par mode de déploiement, cf. plus bas).
+Le namespace **`00_critical/`** regroupe les métriques essentielles pour le tuning PPO (15 métriques de base + 7 courbes de ventilation par mode de déploiement, cf. plus bas — plus `0_eval_timeout_episodes`, qui n'apparaît que lorsqu'une évaluation a été tronquée).
 
 **Ordre et dépliage des dashboards** — TensorBoard trie les groupes de tags par tri naturel *sensible à la casse* (chiffres et `/` d'abord, puis comparaison brute des caractères) : les préfixes numériques `00_` / `01_` / `02_` / `03_` imposent donc l'ordre `00_critical` → `01_VP` → `02_combat` → `03_eval`. Par ailleurs TensorBoard ne déplie au chargement que les **2 premiers groupes** (constante codée en dur dans `webfiles.zip` → `index.js`) ; `scripts/patch_tensorboard_expand.py` porte cette constante à 3 et recalcule le `_file_hash` d'`index.html` (le bundle est servi avec un cache navigateur d'un an sous une URL figée — sans ce recalcul le navigateur resservirait l'ancien JS). **Redémarrer TensorBoard après le patch** : `core_plugin.py` lit `webfiles.zip` une seule fois au démarrage et sert son contenu depuis la mémoire. À relancer après chaque `pip install` (la réinstallation restaure le bundle d'origine) :
 
@@ -71,7 +71,10 @@ python3 scripts/patch_tensorboard_expand.py --check  # vérifie l'état
 - **a–c** : Évaluation bot (combined, worst_bot, holdout_hard)
 - **d–f** : Performance training (win_rate, episode_reward, loss_mean)
 - **g–j** : Santé PPO (explained_variance, clip_fraction, approx_kl, entropy)
-- **l–m** : Efficacité tactique (`02_combat/a_value_trade_ratio`, value_loss)
+- **m** : Convergence du critic (value_loss)
+- **n–o** : Tête d'intent (nb de free steps, dépendance intent↔contrôle)
+- **o_robust** : critère de sélection du best robust model
+- **p–s** : Ventilation par mode de déploiement
 
 ### Namespace `03_eval/` — holdout, un tag par (scénario, adversaire)
 
@@ -120,24 +123,17 @@ chaque courbe était cette décroissance mécanique — indiscernable à l'œil 
 dégrade, et lue comme telle. Une courbe qui démarre tard ne ment pas ; un point qui n'a pas le
 même sens que son voisin, si.
 
+**Cibles et remèdes : une seule table**, [⭐ START HERE: `00_critical/` Dashboard](#-start-here-00_critical-dashboard),
+colonnes *Too low* / *Too high*. Elle couvre les **20 tags** du namespace ; la table qui vivait ici
+n'en couvrait que 11 et a divergé du code (ni `n_`, ni `o_`, ni la ventilation `p`–`s`).
+
+Un seul remède n'appartenait pas au namespace et n'avait pas d'autre point de chute :
+
 | Métrique | Cible | Contrôle principal | Si trop bas | Si trop haut |
 |----------|--------|---------------------|-------------|--------------|
-| **a_bot_eval_combined** | >0.49 (BEST actuel) | Récompenses + PPO | Ajuster les autres métriques d’abord | — |
-| **b_worst_bot_score** | >0.35 | Diversité d’entraînement | Augmenter diversité des bots dans bot_training.ratios | — |
-| **c_holdout_hard_mean** | >0.10 | Matchup défavorable | Score ≈0 normal (structurel, pas un bug) | — |
-| **d_win_rate** | >0.50 | Apprentissage général | Vérifier entropy (trop basse) et clip_fraction | — |
-| **e_episode_reward_smooth** | Tendance croissante | Signal de récompense | Vérifier reward config — récompenses intermédiaires trop faibles | Possible reward hacking — vérifier les récompenses exploitées |
-| **f_loss_mean** | Tendance décroissante, sans oscillations | learning_rate, n_steps, vf_coef | Basse et stable : convergence saine — rien à faire | Oscille → learning_rate ↓ (÷2), n_steps ↓ ; Stagne haute → vf_coef ↑ |
-| **g_explained_variance** | >0.30 | gamma, gae_lambda, net_arch | <0.30 : gamma ↑ (→0.98), net_arch ↑, n_steps ↑ | >0.95 : value network saturé — aucune action requise |
-| **h_clip_fraction** | 0.10–0.30 | **learning_rate**, clip_range | <0.05 : politique figée → clip_range ↑ (→0.25) ou ent_coef ↑ | >0.40 : LR trop élevé → learning_rate ↓ (÷2), clip_range ↓ (→0.15) |
-| **i_approx_kl** | 0.01–0.02 | learning_rate, target_kl | <0.005 : apprentissage trop lent → LR ↑ (×1.5) | >0.02 : mise à jour trop agressive → LR ↓ (÷2), fixer target_kl à 0.01–0.015 |
-| **j_entropy_loss** | -2.0 à -0.5 | **ent_coef** | >-0.5 (proche de 0) : politique déterministe → ent_coef ↑ ; si <20ep : restart obligatoire | <-2.0 après 200ep : trop d’exploration → ent_coef ↓ (÷2) |
 | **02_combat/a_value_trade_ratio** | >1.0 | Récompenses combat | <1.0 : agent perd plus qu’il ne détruit → revoir récompenses kill/combat | — |
-| **m_value_loss_smooth** | Tendance décroissante | learning_rate, vf_coef | Basse et stable : convergence saine — rien à faire | Croissante : LR ↓ (÷2) ; Stagne haute : vf_coef ↑ ou net_arch ↑ |
 
-**Notes** :
-- **c_holdout_hard_mean ≈ 0** : structurel, pas un bug — holdout hard teste des matchups défavorables par construction.
-- **j_entropy_loss** : valeur TensorBoard toujours négative (`entropy_loss = -entropy`). "Trop haut" = proche de 0 = politique déterministe. "Trop bas" = très négatif (ex. -2.5) = trop d'exploration.
+**Note** — **j_entropy_loss** : valeur TensorBoard toujours négative (`entropy_loss = -entropy`). "Trop haut" = proche de 0 = politique déterministe. "Trop bas" = très négatif (ex. -2.5) = trop d'exploration.
 
 ### 2. Patterns de diagnostic (symptômes → cause)
 
@@ -482,25 +478,39 @@ The `00_critical/` namespace contains **THE ESSENTIAL METRICS** for hyperparamet
 
 **TIP:** Open TensorBoard and navigate to the `00_critical/` namespace first - it contains everything you need for tuning.
 
-| Metric | What It Measures | Target Value | Critical For |
-|--------|------------------|--------------|--------------|
-| **00_critical/0_gap_sm-ork** | `combined` Space Marines − `combined` Orks (même pondération que `a_bot_eval_combined`) | ≈ 0 (parité) | Spécialisation par roster — **>0 = SM dominants, <0 = Orks dominants**. Seule métrique qui distingue un agent équilibré (0.43/0.42) d'un agent spécialisé (0.70/0.15) : `a_bot_eval_combined` affiche la même valeur dans les deux cas. Absente si le pool d'éval ne couvre pas les deux factions. |
-| **00_critical/a_bot_eval_combined** | Weighted win rate vs all holdout bots | >0.49 (BEST actuel: 0.4857) | **PRIMARY GOAL** — sélection du modèle |
-| **00_critical/b_worst_bot_score** | Score vs le bot le plus difficile | >0.35 | Robustesse — pas de point faible structurel |
-| **00_critical/c_holdout_hard_mean** | Score moyen holdout hard (matchup défavorable) | >0.10 (structurellement faible) | Résilience aux matchups difficiles |
-| **00_critical/d_win_rate** (+ doublon réactif) | Win rate lissé sur 500 ép. (doublon : 250 ép.) | >0.50 | Self-play performance |
-| **00_critical/e_episode_reward_smooth** | Smoothed episode reward | Increasing trend | Learning progress signal |
-| **00_critical/g_explained_variance** | Value function quality (R²) | >0.30 | Value network capacity |
-| **00_critical/h_clip_fraction** | % of clipped policy updates | 0.10–0.30 | Tune `learning_rate` — <0.05 = politique trop déterministe |
-| **00_critical/i_approx_kl** | Policy change magnitude | <0.02 (ideally 0.01–0.015) | Policy stability |
-| **00_critical/j_entropy_loss** | Exploration level | Decroissant -> -1.5 à -1.0 vers les 2/3 du training | Tune `ent_coef` |
-| **02_combat/a_value_trade_ratio** | Valeur détruite / valeur perdue (500ep) | >1.0 | Efficacité tactique — l'agent doit détruire plus qu'il ne perd |
-| **00_critical/m_value_loss_smooth** | Value function loss lissée | Décroissante puis stable | Convergence du value network |
-| **00_critical/p_reward_deploy_{active,fixed}** | Reward ventilée par mode de déploiement | Les DEUX croissantes | Sépare « l'agent stagne » de « la tâche durcit » |
-| **00_critical/q_obj_held_diff_deploy_{active,fixed}** | Différence d'objectifs tenus, par mode | Les DEUX croissantes | Idem sur la condition de victoire |
-| **00_critical/r_win_rate_deploy_{active,fixed}** | Win rate par mode | Les DEUX croissantes | Idem sur le verdict |
-| **00_critical/s_deploy_active_share** | Part réelle d'épisodes en déploiement actif | Suit `active_ratio` du profil | Variable explicative des trois lignes ci-dessus |
-| **00_critical/o_robust_current_score** | Moyenne mobile de `combined` − pénalités (drawdown, `worst_bot`, holdout hard) | Croissante | Critère de **décision** (sauvegarde du best robust model), pas de diagnostic : préfixe `o_` pour le trier en fin de tableau de bord. Sans unité, peut être négatif, non comparable entre runs si les coefficients de pénalité changent. |
+Les deux dernières colonnes donnent le **seuil de déclenchement** puis le **paramètre à changer et
+dans quel sens**. Les paramètres vivent dans `config/agents/<Agent>/<Agent>_training_config.json`,
+sous `model_params` (PPO) ou `callback_params` (évaluation) ; `bot_training.ratios`,
+`deployment_mode_schedule` et `scenario_sampling` sont au niveau du profil.
+
+| Metric | Target Value | ⬇️ Too low → corriger | ⬆️ Too high → corriger | What It Measures | Critical For |
+|--------|--------------|----------------------|------------------------|------------------|--------------|
+| **00_critical/0_eval_timeout_episodes** | 0 — **la courbe ne devrait jamais exister** | Impossible : 0 est le plancher et l'état nominal | **≥ 1** : `bot_eval_intermediate` ↓ (300 → 100, moins d'épisodes par éval) **ou** `bot_eval_task_timeout_seconds` ↑ (3600). Si récurrent malgré ça, la cause est la durée des parties (parties dégénérées × coût géodésique), pas l'éval | Nb d'épisodes d'évaluation abandonnés sur timeout de task | Fiabilité de la mesure : émis uniquement quand >0, et ce point d'éval est alors intégralement ignoré (pas de gate, pas de best model, aucune autre métrique écrite) |
+| **00_critical/0_gap_sm-ork** | ≈ 0 (parité) | **< −0.15** (Orks dominants) : rééquilibrer le **training**, pas l'éval — augmenter le poids des scénarios à roster SM dans `scenario_sampling` du split training | **> +0.15** (SM dominants) : symétrique, augmenter le poids des scénarios à roster Ork. Ne jamais corriger en retirant une faction du pool d'éval : c'est la mesure qu'on éteint, pas l'écart | `combined` Space Marines − `combined` Orks (même pondération que `a_bot_eval_combined`) | Spécialisation par roster. Seule métrique qui distingue un agent équilibré (0.43/0.42) d'un agent spécialisé (0.70/0.15) : `a_bot_eval_combined` affiche la même valeur dans les deux cas. Absente si le pool d'éval ne couvre pas les deux factions |
+| **00_critical/a_bot_eval_combined** | >0.49 (BEST actuel: 0.4857) | **< 0.49** : sortie, pas entrée — ne pas la tuner directement. Redresser d'abord `j_entropy_loss`, `h_clip_fraction`, `g_explained_variance`, puis diversifier `bot_training.ratios` | **Saut brutal** : suspecter un pool d'éval affaibli — vérifier `bot_eval_scenario_pool` (`holdout`) et croiser avec `b_worst_bot_score` et `0_gap_sm-ork`, qu'une moyenne flatteuse masque | Weighted win rate vs all holdout bots | **PRIMARY GOAL** — sélection du modèle |
+| **00_critical/b_worst_bot_score** | >0.35 | **< 0.35** : augmenter la part du bot en échec dans `bot_training.ratios` (ex. `control` 0.35 → 0.45) et sa `randomness` ↓ pour un adversaire plus régulier | **≈ `a_bot_eval_combined`** : pas un succès — le pool d'adversaires est trop homogène, redistribuer `bot_training.ratios` vers les archétypes absents | Score vs le bot le plus difficile | Robustesse — pas de point faible structurel |
+| **00_critical/c_holdout_hard_mean** | >0.10 (structurellement faible) | **≈ 0** : normal et structurel (matchups défavorables par construction) — aucune action. N'agir que si la courbe **recule** alors que `a_bot_eval_combined` monte : sur-spécialisation sur le pool régulier | **> `a_bot_eval_combined`** : le split holdout hard n'est plus dur — revoir la composition des scénarios `holdout_hard_*` | Score moyen holdout hard (matchup défavorable) | Résilience aux matchups difficiles |
+| **00_critical/d_win_rate** (+ doublon réactif) | >0.50 | **< 0.50** : d'abord lire `j_entropy_loss` (proche de 0 = politique figée → `ent_coef` ↑) et `h_clip_fraction` ; ensuite seulement les récompenses | **> 0.85** : l'adversaire d'entraînement est trop faible, l'écart avec `a_bot_eval_combined` va se creuser — `bot_training.ratios` vers `control` / `adaptive`, `random` ↓ | Win rate lissé sur `perf_window` (500 ép.) | Performance contre l'adversaire d'entraînement |
+| **00_critical/e_episode_reward_smooth** | Tendance croissante | **Plate ou décroissante** : récompenses intermédiaires trop faibles — revoir la config de reward. Vérifier d'abord `p_reward_deploy_{active,fixed}` : un agrégat plat sous deux séries croissantes, c'est la rampe de déploiement, pas un plafond | **Monte alors que `d_win_rate` stagne** : reward hacking — identifier la composante exploitée dans `01_VP/` et `02_combat/` avant de toucher aux coefficients | Reward d'épisode lissée sur `perf_window` | Signal d'apprentissage |
+| **00_critical/f_loss_mean** | Décroissante puis stable, sans oscillations | **Basse et stable** : convergence saine, aucune action | **Oscille** : `learning_rate` ÷2, `n_steps` ↓ ; **stagne haute** : `vf_coef` ↑ (1.0 → 1.5) | `\|policy_loss\| + \|value_loss\|`, moyenné sur les 20 derniers updates | Santé globale de l'apprentissage |
+| **00_critical/g_explained_variance** | >0.30 | **< 0.30** : `gamma` ↑ (0.99 → 0.98 si horizon trop long), `policy_kwargs.net_arch` ↑ (512×512 → 1024×512), `n_steps` ↑ | **> 0.95** : critic saturé — aucune action requise, ce n'est pas un défaut | Qualité du critic (R²) | Capacité du value network |
+| **00_critical/h_clip_fraction** | 0.10–0.30 | **< 0.05** : politique figée → `clip_range` ↑ (0.2 → 0.25) ou `ent_coef.start` ↑ | **> 0.40** : LR trop élevé → `learning_rate.initial` ÷2, `clip_range` ↓ (0.2 → 0.15) | Part des updates de politique écrêtées | Réglage de `learning_rate` |
+| **00_critical/i_approx_kl** | 0.01–0.015 (< 0.02) | **< 0.005** : apprentissage trop lent → `learning_rate.initial` ×1.5 | **> 0.02** : mise à jour trop agressive → `learning_rate.initial` ÷2 et `target_kl` fixé à 0.01–0.015 (early-stop des epochs) | Amplitude du changement de politique | Stabilité de la politique |
+| **00_critical/j_entropy_loss** | Décroissant → −1.5 à −1.0 vers les 2/3 du run | **< −2.0 après 200 ép.** (très négatif) : trop d'exploration → `ent_coef.start` ÷2 | **> −0.5** (proche de 0) : politique déterministe → `ent_coef.start` / `.end` ↑, `decay_fraction` ↑ ; **si atteint avant 20 ép., restart obligatoire** — le run est perdu | Niveau d'exploration — **toujours négatif** (`entropy_loss = −entropy`) | Réglage de `ent_coef` |
+| **00_critical/m_value_loss_smooth** | Décroissante puis stable | **Basse et stable** : convergence saine, aucune action | **Croissante** : `learning_rate.initial` ÷2 ; **stagne haute** : `vf_coef` ↑ ou `policy_kwargs.net_arch` ↑ | Value function loss, moyennée sur les 20 derniers updates | Convergence du value network |
+| **00_critical/n_intent_zone_steps** | Proche de 5 × nb de tours agent (5 = `MAX_OBJECTIVES`) | **≈ 0 alors que le run tourne** : ce n'est pas un réglage — l'agent solde ses intents dès le premier free step, ou le callback ne transmet plus `intent_value`/`zone_control`. Vérifier l'écrivain avant de conclure quoi que ce soit sur les deux courbes qui en dépendent | **Aucun plafond à corriger** : borné par `MAX_OBJECTIVES` × tours. Une hausse = parties qui s'allongent — la lire sur la durée d'épisode, pas sur la politique | Nb moyen de free steps zone-intent par épisode (fenêtre glissante 100 ép.) | Taille de l'échantillon qui alimente `o_intent_control_dependency` et les `combat/intent_*` — à 0, ces courbes ne sont **pas émises** (et non « nulles ») |
+| **00_critical/o_intent_control_dependency** | Croissante ; 1.0 = intent entièrement déterminé par l'état | **≈ 0 avec la courbe émise** (donc `H(contrôle) > 0`) : l'intent est indépendant de l'état → `ent_coef` ↑ pour rouvrir l'exploration, et vérifier le shaping via `combat/intent_shaping_aligned_ratio` vs `..._baseline` (aligné ≈ baseline = le shaping ne paie rien) | **≈ 1.0** : intent entièrement déterminé — la tête a dégénéré en règle fixe. Croiser avec `combat/intent_{invade,defend,attack}_ratio` : une marginale à ~1.0 confirme le collapse → `ent_coef` ↑ | `I(intent ; contrôle de zone) / H(contrôle)` sur la fenêtre 100 ép. — fraction de l'incertitude d'intent expliquée par l'état | La tête d'intent conditionne-t-elle sa sortie sur le plateau, ou tire-t-elle à vide. **Non émise si `H(contrôle) = 0`** (aucun contraste d'état sur la fenêtre : la question n'a pas de sens, un 0 désignerait à tort la politique) |
+| **00_critical/o_robust_current_score** | Croissante | **Décroissant** : score dérivé — ne jamais le tuner. Remonter à sa cause : `a_bot_eval_combined` qui recule (drawdown), `b_worst_bot_score` ou `c_holdout_hard_mean` qui s'effondre. Les coefficients (`robust_drawdown_penalty` 0.5, `robust_penalty_bot`, `robust_penalty_hard`, `robust_window` 5) se règlent une fois pour toutes, pas en cours de run | **Monte alors que `combined` stagne** : les pénalités ne mordent plus — `robust_penalty_bot` / `robust_penalty_hard` ↑. Toute modification de ces coefficients rend la courbe incomparable aux runs précédents | Moyenne mobile de `combined` − pénalités (drawdown, `worst_bot`, holdout hard) | Critère de **décision** (sauvegarde du best robust model), pas de diagnostic : préfixe `o_` pour le trier en fin de tableau de bord. Sans unité, peut être négatif, non comparable entre runs si les coefficients changent |
+| **00_critical/p_reward_deploy_{active,fixed}** | Les DEUX croissantes | **Une seule série stagne** : déficit réel sur CE mode. `_active` bas → l'agent place mal ses figurines ; `_fixed` bas → problème de jeu, pas de déploiement | **Les deux montent sous un agrégat plat** : rien à corriger — c'est la rampe `deployment_mode_schedule` qui déplace la population mesurée | Reward ventilée par mode de déploiement | Sépare « l'agent stagne » de « la tâche durcit » |
+| **00_critical/q_obj_held_diff_deploy_{active,fixed}** | Les DEUX croissantes | Idem `p_` | Idem `p_` | Différence d'objectifs tenus, par mode | Idem sur la condition de victoire |
+| **00_critical/r_win_rate_deploy_{active,fixed}** | Les DEUX croissantes | Idem `p_` | Idem `p_` | Win rate par mode | Idem sur le verdict |
+| **00_critical/s_deploy_active_share** | Suit la rampe du profil (0.3 → plafond effectif 0.55) | **Reste à `active_ratio_start`** : la rampe ne progresse pas — `freeze_after_progress` atteint trop tôt, ou scénario hors split training (le scheduler n'émet alors rien du tout) | **Proche de 1.0** : plus aucun épisode en placement fixe — `active_ratio_end` ↓ (le placement fixe conserve les positions du scénario comme source de variété) | Part réelle d'épisodes en déploiement actif | Variable explicative des trois lignes ci-dessus |
+
+> **Deux tags en `o_`** — `o_intent_control_dependency` (diagnostic, écrit par `metrics_tracker`) et
+> `o_robust_current_score` (décision, écrit par `training_callbacks`) partagent la lettre sans
+> partager de sujet. Les lettres `k` et `l` sont libres : `k_gradient_norm` a été **retiré** du
+> dashboard (redondant avec `h_clip_fraction` + `i_approx_kl`, cf. `log_critical_dashboard`), et
+> `l` n'a jamais été attribué dans ce namespace.
 
 #### Ventilation par mode de déploiement (`p` à `s`)
 
@@ -560,7 +570,7 @@ These are the most important gameplay metrics to watch in the `game_critical/` a
 ### Priority Order
 
 **For daily monitoring:**
-1. **00_critical/** dashboard - Check all 10 metrics first
+1. **00_critical/** dashboard - Check all metrics first
 2. **bot_eval/combined** (in 00_critical/) - Primary goal metric
 3. **invalid_action_rate** - Fix immediately if >10%
 4. **episode_reward** - Must be increasing (even slowly)

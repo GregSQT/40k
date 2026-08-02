@@ -14,6 +14,7 @@ from ai.metrics_tracker import (
     validate_perf_windows,
 )
 from config_loader import get_config_loader
+from engine.macro_intents import ACTION_FAMILIES
 
 _AGENT_CONFIG = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
@@ -383,6 +384,9 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
             "valid_actions": 8,
             "invalid_actions": 2,
             "wait_actions": 1,
+            # Invariant : le moteur initialise TOUJOURS cette ventilation dans
+            # `episode_tactical_data` (V11 §0.56), et `log_tactical_metrics` la lit en strict.
+            "action_family_counts": {name: 0 for name in ACTION_FAMILIES},
             "forced_unit_episode_has_controlled": 1,
             "forced_unit_instances_controlled": 2,
             "forced_unit_counts_controlled": {"My Unit": 2},
@@ -496,6 +500,9 @@ def test_log_tactical_metrics_forcing_validation_errors() -> None:
         "valid_actions": 1,
         "invalid_actions": 0,
         "wait_actions": 0,
+        # Invariant : le moteur initialise TOUJOURS cette ventilation dans
+        # `episode_tactical_data` (V11 §0.56), et `log_tactical_metrics` la lit en strict.
+        "action_family_counts": {name: 0 for name in ACTION_FAMILIES},
         "victory_points_diff_controlled_minus_opponent": 0.0,
         "controlled_objective_samples": [1.0],
         "opponent_objective_samples": [1.0],

@@ -401,7 +401,7 @@ class W40KMetricsTracker:
         if show_banner:
             print(f"✅ Metrics tracker initialized for {agent_key} -> {self.log_dir}")
             print(f"📊 Metric System:")
-            print(f"   🎯 00_critical/ (20) - Essential hyperparameter tuning metrics")
+            print(f"   🎯 00_critical/ - Essential hyperparameter tuning metrics")
             print(f"   🎮 game_critical/ (5) - Core gameplay indicators")
             print(f"   ⚙️  training_critical/ (6) - PPO algorithm health")
             print(f"   💡 TIP: Start with 00_critical/ - everything you need for tuning")
@@ -848,6 +848,24 @@ class W40KMetricsTracker:
             # GAME TACTICAL: Action efficiency - Valid action rate
             action_efficiency = valid_actions / total_actions
             self.writer.add_scalar('game_tactical/action_efficiency', action_efficiency, self.episode_count)
+
+        # USAGE PAR FAMILLE D'ACTION — la part de chaque DECISION dans ce que l'agent joue.
+        #
+        # Ce que ces courbes repondent, et qu'aucune autre ne repondait : « l'agent utilise-t-il
+        # cette dimension d'action ? ». Une famille a 0 en permanence est une decision MORTE
+        # (mal masquee, mal observee, ou jamais preferee) ; une famille a 1 est une decision
+        # degeneree. Les deux sont des defauts que le win-rate ne distingue pas d'un agent
+        # simplement faible — et qui, sans ces courbes, ne se voient qu'en fin de run.
+        #
+        # C'est aussi ce qui rend un lot de tranches P3 diagnosticable en UN SEUL run : chaque
+        # decision ajoutee a sa propre courbe, donc sa propre signature de panne.
+        family_counts = require_key(tactical_data, 'action_family_counts')
+        family_total = sum(family_counts.values())
+        if family_total > 0:
+            for family, count in family_counts.items():
+                self.writer.add_scalar(
+                    f'actions/share_{family}', count / family_total, self.episode_count
+                )
         
         # 0_GAME: VP differential and objective samples
         if 'victory_points_diff_controlled_minus_opponent' in tactical_data:
@@ -1295,44 +1313,45 @@ class W40KMetricsTracker:
     
     def log_critical_dashboard(self):
         """
-        🎯 CRITICAL DASHBOARD - 13 Essential Hyperparameter Tuning Metrics
+        🎯 CRITICAL DASHBOARD - metriques essentielles au tuning des hyperparametres PPO.
 
-        This dashboard contains ONLY the metrics you need to tune PPO hyperparameters.
-        All metrics are smoothed (20-episode rolling average) for clear trends.
+        ECRIT ICI (8 tags) :
 
-        GAME PERFORMANCE (6 metrics):
-        - 00_critical/0_gap_sm-ork           - combined(Space Marines) - combined(Orks) :
-                                               >0 SM dominants, <0 Orks dominants, ~0 parite
-        - 00_critical/a_bot_eval_combined    - Primary goal [0-1] (sorts first)
-
-        - 00_critical/b_worst_bot_score      - Min across all 7 bots
-        - 00_critical/c_holdout_hard_mean    - Hard holdout aggregate robustness
+        PERFORMANCE D'EPISODE -- lissees sur `perf_window` :
         - 00_critical/d_win_rate             - Training opponent performance
         - 00_critical/e_episode_reward_smooth  - Learning progress
         (le doublon a fenetre courte `_<perf_window_fast>ep` n'existe que si les deux
          fenetres du training config different ; elles sont egales par defaut)
 
-        PPO HEALTH (5 metrics):
-        - 00_critical/f_loss_mean           - Overall learning health
+        SANTE PPO -- moyennes sur les 20 derniers updates :
+        - 00_critical/f_loss_mean           - |policy_loss| + |value_loss|, sante globale
         - 00_critical/g_explained_variance  - >0.3 -> Value function working
         - 00_critical/h_clip_fraction       - [0.1-0.3] -> Tune learning_rate
         - 00_critical/i_approx_kl           - <0.02 -> Policy stability
-        - 00_critical/j_entropy_loss        - [0.5-2.0] -> Tune ent_coef
-
-        TECHNICAL HEALTH (3 metrics):
-        - 00_critical/k_gradient_norm       - <10 -> No gradient explosion
+        - 00_critical/j_entropy_loss        - Decroissant -> Tune ent_coef
         - 00_critical/m_value_loss_smooth   - Smoothed critic loss
 
-        VENTILATION PAR MODE DE DEPLOIEMENT (7 courbes) -- ecrites AILLEURS que dans cette
-        methode, volontairement : `_emit_deploy_split`, appele au moment ou chaque valeur est
-        calculee. Les emettre ici les decalerait d'un episode (ce dashboard tourne AVANT
-        log_tactical_metrics). Cf. DEPLOY_SPLIT_SERIES pour le pourquoi de la ventilation.
-        - 00_critical/p_reward_deploy_{active,fixed}
-        - 00_critical/q_obj_held_diff_deploy_{active,fixed}
-        - 00_critical/r_win_rate_deploy_{active,fixed}
-        - 00_critical/s_deploy_active_share  - part reelle d'episodes en deploiement actif
+        ECRIT PAR `_log_zone_intent_metrics`, appele en fin de cette methode (2 tags) :
+        - 00_critical/n_intent_zone_steps          - free steps zone-intent par episode
+        - 00_critical/o_intent_control_dependency  - I(intent;controle)/H(controle), non emis
+                                                     quand H(controle) == 0
+
+        ECRIT AILLEURS, volontairement -- inventaire complet du namespace :
+        - `log_bot_evaluations`, au moment de l'evaluation (attendre l'episode suivant
+          publierait une valeur perimee) : 0_gap_sm-ork, a_bot_eval_combined,
+          b_worst_bot_score, c_holdout_hard_mean.
+        - `training_callbacks` (BotEvaluationCallback), qui seul connait ces deux etats :
+          0_eval_timeout_episodes (emis UNIQUEMENT si une eval a ete tronquee ; ce point
+          d'eval n'alimente alors aucun autre signal) et o_robust_current_score.
+        - `_emit_deploy_split`, appele au moment ou chaque valeur est calculee : les emettre
+          ici les decalerait d'un episode (ce dashboard tourne AVANT log_tactical_metrics).
+          Cf. DEPLOY_SPLIT_SERIES pour le pourquoi de la ventilation.
+          p_reward_deploy_{active,fixed}, q_obj_held_diff_deploy_{active,fixed},
+          r_win_rate_deploy_{active,fixed}, s_deploy_active_share.
 
         NOTE: position_score a ete supprime (voir la trace dans __init__), pas deplace.
+        `k_gradient_norm` a ete retire du dashboard (redondant avec h + i, cf. plus bas) ;
+        la lettre `l` n'a jamais ete attribuee dans ce namespace.
         """
         
         # Minimum data requirement (lowered to 1 for immediate feedback)
@@ -1353,7 +1372,7 @@ class W40KMetricsTracker:
         self._emit_windowed('00_critical/e_episode_reward_smooth', self.all_episode_rewards)
 
         # ==========================================
-        # PPO HEALTH (5 metrics)
+        # PPO HEALTH (6 metrics)
         # ==========================================
 
         # 3. Clip Fraction - Policy update scale
@@ -1397,13 +1416,12 @@ class W40KMetricsTracker:
             self.writer.add_scalar('00_critical/m_value_loss_smooth', value_loss_smooth, self.episode_count)
         
         # ==========================================
-        # TECHNICAL HEALTH (3 metrics)
+        # HORS 00_critical : ecrit dans game_critical/ et game_detailed/
         # ==========================================
-        
-        # 8. Gradient Norm (direct value from latest training step) - Technical health
-        pass  # gradient_norm removed from 00_critical (redundant with clip_fraction + approx_kl)
-        
-        # 10. Reward-Victory Gap (reward alignment: mean reward when won vs lost)
+        # `k_gradient_norm` occupait cette place : retire du dashboard, redondant avec
+        # h_clip_fraction + i_approx_kl.
+
+        # Reward-Victory Gap (reward alignment: mean reward when won vs lost)
         # Gap > 20-30 = good alignment; Gap < 10 = reward may not correlate with victory
         if len(self.episode_reward_winner_pairs) >= 20:
             recent = list(self.episode_reward_winner_pairs)[-100:]

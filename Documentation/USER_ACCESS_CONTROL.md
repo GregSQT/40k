@@ -48,9 +48,8 @@ Un utilisateur `admin` peut acceder a:
 
 ### Frontend (React)
 
-- ecran `Auth` avec deux actions:
-  - connexion
-  - creation de compte
+- ecran `Auth` avec une seule action: connexion
+  (l'onglet "creer un compte" a ete retire — plus de route serveur, cf. F12)
 - store global d'authentification:
   - user courant
   - profil
@@ -61,9 +60,9 @@ Un utilisateur `admin` peut acceder a:
 ### Backend (Flask)
 
 - endpoints d'authentification:
-  - `POST /api/auth/register`
   - `POST /api/auth/login`
   - `GET /api/auth/me`
+  - pas de route de creation de compte (cf. section dediee plus bas)
 - middleware de verification des permissions
 - protection serveur obligatoire:
   - toute action non autorisee doit renvoyer `403`
@@ -127,32 +126,23 @@ Un utilisateur `admin` peut acceder a:
 
 ## Contrat API
 
-## `POST /api/auth/register`
+## Creation de compte — pas de route API
 
-### Input
+`POST /api/auth/register` **n'existe plus** (faille F12, cf.
+`Documentation/Implementation/A_faire/Security.md`). L'inscription libre etait ouverte a
+Internet, et la simple mise derriere authentification ne suffisait pas : n'importe quel
+testeur au profil `base` aurait pu creer des comptes en masse.
 
-```json
-{
-  "login": "greg",
-  "password": "motDePasseFort"
-}
+Les comptes sont crees **en SQL** dans `config/users.db` :
+
+```sql
+-- Le hash doit etre au format PBKDF2 produit par _hash_password() (services/api_server.py).
+INSERT INTO users (login, password_hash, profile_id)
+VALUES ('nouveau_testeur', '<hash>', (SELECT id FROM profiles WHERE code = 'base'));
 ```
 
-### Comportement
-
-- cree un user
-- affecte le profil par defaut `base`
-- hash le mot de passe (argon2 ou bcrypt)
-
-### Output (exemple)
-
-```json
-{
-  "user_id": 12,
-  "login": "greg",
-  "profile": "base"
-}
-```
+Evolution prevue si le nombre de testeurs grandit : jeton d'invitation a usage unique. La
+route reapparaitra alors avec sa validation propre.
 
 ## `POST /api/auth/login`
 
@@ -195,9 +185,7 @@ Retourne l'utilisateur connecte et ses droits resolus depuis la base.
 ## Flux utilisateur
 
 1. L'utilisateur arrive sur la page `/auth`.
-2. Il choisit:
-   - connexion
-   - creation de compte
+2. Il se connecte (son compte a ete cree en SQL au prealable).
 3. En cas de succes, le front recupere `permissions`.
 4. Le front redirige automatiquement vers `pve`.
 5. Les menus, boutons et toggles affichent uniquement les elements autorises.
@@ -309,7 +297,7 @@ COMMIT;
 
 ## Integration frontend (resume pratique)
 
-- Au login/register:
+- Au login:
   - stocker token/session
   - charger `permissions`
 - Dans l'ecran principal:
@@ -326,7 +314,7 @@ COMMIT;
 
 - hash mot de passe via Argon2 (prioritaire) ou bcrypt
 - validation serveur stricte des inputs
-- rate limit sur login/register
+- rate limit sur login (F8, non implemente a ce jour)
 - message d'erreur neutre en auth (`identifiants invalides`)
 - expiration token/session + mecanisme de refresh
 
@@ -359,9 +347,7 @@ Cette section decrit ce qui a ete effectivement ajoute dans le code.
 
 ### Endpoints auth implementes
 
-- `POST /api/auth/register`
-  - cree un utilisateur `login/password`
-  - assigne automatiquement le profil `base`
+- (aucune route de creation de compte : supprimee, F12 — creation en SQL)
 - `POST /api/auth/login`
   - verifie le mot de passe hash (PBKDF2-SHA256)
   - cree une session (`access_token`) en DB
@@ -386,7 +372,7 @@ Cette section decrit ce qui a ete effectivement ajoute dans le code.
 
 ### Utilisation
 
-1. Creer d'abord un user via `/auth` (ou via endpoint `POST /api/auth/register`)
+1. Creer d'abord un user en SQL dans `config/users.db` (cf. section "Creation de compte")
 2. Editer le script et remplacer `__ADMIN_LOGIN__` par le login cible
 3. Executer:
 

@@ -236,7 +236,7 @@ else:
         "frontend/src/roster/tyranid/units/Genestealer.ts",
                 
         # frontend/src/services
-        "frontend/src/services/aiService.ts",
+        "frontend/src/services/apiFetch.ts",
 
         # frontend/src/types
         "frontend/src/types/api.ts",

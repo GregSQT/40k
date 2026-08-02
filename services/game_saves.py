@@ -71,7 +71,8 @@ def _phase_rank(phase: str) -> int:
     return _PHASE_RANK[phase]
 
 
-def _progress_key_from_meta(meta: Dict[str, Any]) -> tuple:
+def progress_key_from_meta(meta: Dict[str, Any]) -> tuple:
+    """Cle de progression d une row deja lue (evite de rescanner le fichier de partie)."""
     return (int(meta["turn"]), _phase_rank(str(meta["phase"])), int(meta["episode_steps"]))
 
 
@@ -457,7 +458,7 @@ class SaveStore:
             return []
         out: List[Dict[str, Any]] = []
         for meta in self._scan(target, False):
-            if up_to_key is not None and _progress_key_from_meta(meta) > up_to_key:
+            if up_to_key is not None and progress_key_from_meta(meta) > up_to_key:
                 continue
             delta = meta.get("log_delta")
             if isinstance(delta, list):
@@ -483,12 +484,26 @@ class SaveStore:
             raise ValueError("aucune partie courante")
         return self._find(self._current, lambda m: m["id"] == point_id)
 
-    def restore_point(self, engine: Any, point_id: str) -> Dict[str, Any]:
-        """Restaure une row (par id) de la partie courante (commit destructif)."""
+    def restore_point(
+        self, engine: Any, point_id: str, row: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Restaure une row (par id) de la partie courante (commit destructif).
+
+        ``row`` : row déjà lue par l'appelant (contrôle d'accès en amont), pour éviter un
+        second scan du fichier et une seconde désérialisation du game_state. Son identité
+        est VÉRIFIÉE contre ``point_id`` : une row dépareillée écraserait la partie avec un
+        état étranger, silencieusement, et rendrait ``point_id`` décoratif.
+        """
+        # Validation d'entrée AVANT toute I/O : une row dépareillée est une erreur de
+        # l'appelant, elle ne doit pas dépendre de l'état du disque pour être détectée.
+        if row is not None and row["meta"]["id"] != point_id:
+            raise ValueError(
+                f"row fournie incohérente: meta.id={row['meta']['id']!r} != point_id={point_id!r}"
+            )
         if self._current is None:
             raise ValueError("aucune partie courante")
         self._assert_scenario_match(engine, self._current)
-        r = self.point(point_id)
+        r = self.point(point_id) if row is None else row
         apply_live_state(engine, r["state"])
         return r["meta"]
 
@@ -504,7 +519,13 @@ class SaveStore:
         return self._find(name, lambda m: m["id"] == start_id)
 
     def load_party_start(self, engine: Any, name: str) -> Dict[str, Any]:
-        """Charge une partie à son game_start (commit destructif) et la rend courante."""
+        """Charge une partie à son game_start (commit destructif) et la rend courante.
+
+        Pas de paramètre « row déjà lue » ici, contrairement à `restore_point` : vérifier
+        qu'une row fournie est bien LE game_start de ``name`` exige de relire le fichier,
+        soit exactement le scan que le paramètre prétendrait économiser. Une relecture sur
+        un clic « charger une partie » coûte moins qu'un raccourci invérifiable.
+        """
         self._assert_scenario_match(engine, name)
         start = self.party_start_point(name)
         apply_live_state(engine, start["state"])
@@ -520,26 +541,26 @@ class SaveStore:
             raise ValueError("aucune partie courante")
         for m in self._scan(self._current, False):
             if m["id"] == point_id:
-                return _progress_key_from_meta(m)
+                return progress_key_from_meta(m)
         raise KeyError(f"row introuvable: {point_id}")
 
     def party_start_progress_key(self, name: str) -> tuple:
         """Clé de progression du game_start d'une partie (point de reprise Load→Resume)."""
-        return _progress_key_from_meta(self.party_start_point(name)["meta"])
+        return progress_key_from_meta(self.party_start_point(name)["meta"])
 
     def has_posterior_points(self, name: str, resume_key: tuple) -> bool:
         """True s'il existe des rows STRICTEMENT postérieures à ``resume_key`` (metas seuls)."""
         _assert_safe_party_name(name)
         if not os.path.exists(self._path(name)):
             return False
-        return any(_progress_key_from_meta(m) > resume_key for m in self._scan(name, False))
+        return any(progress_key_from_meta(m) > resume_key for m in self._scan(name, False))
 
     def truncate_after(self, name: str, resume_key: tuple) -> int:
         """Retire les rows strictement postérieures à ``resume_key``. Retourne le nb retiré."""
         _assert_safe_party_name(name)
         with self._lock:
             rows = self._scan(name, True)
-            kept = [r for r in rows if _progress_key_from_meta(r["meta"]) <= resume_key]
+            kept = [r for r in rows if progress_key_from_meta(r["meta"]) <= resume_key]
             removed = len(rows) - len(kept)
             self._write_all(name, kept)
             return removed

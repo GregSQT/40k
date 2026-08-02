@@ -68,6 +68,33 @@
     {
       "includes": ["**/roster/**/armory.ts"],
       "formatter": { "lineWidth": 320, "expand": "never" }
+    },
+    {
+      "includes": ["frontend/src/**/*.ts", "frontend/src/**/*.tsx"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "fetch": "Le backend ferme toute l'API par defaut (before_request) : passe par apiFetch() de src/services/apiFetch.ts, qui attache le token Bearer et traite le 401. Un fetch() brut sur /api/* renverra 401. Pour un asset statique (/config/*.json) ou un service tiers, desactive la regle sur la ligne avec un commentaire justifiant pourquoi."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["frontend/src/services/apiFetch.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": "off"
+          }
+        }
+      }
     }
   ]
 }

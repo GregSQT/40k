@@ -28,7 +28,8 @@ import gymnasium as gym
 from typing import Dict, Optional, Any, List, cast
 from stable_baselines3.common.callbacks import BaseCallback
 
-from shared.data_validation import require_key, require_present
+from engine.episode_schedule import ramp_progress
+from shared.data_validation import require_key, require_positive_int, require_present
 from ai.vec_normalize_utils import get_vec_normalize_path
 from config_loader import get_config_loader
 
@@ -339,19 +340,12 @@ class EpisodeTerminationCallback(BaseCallback):
             end_counts[cls] = int(end_value)
 
         total_episodes = self.training_config.get("total_episodes")
-        n_envs = self.training_config.get("n_envs")
-        if not isinstance(total_episodes, int) or isinstance(total_episodes, bool):
-            raise TypeError("training_config.total_episodes must be integer when roster schedule is enabled")
-        if not isinstance(n_envs, int) or isinstance(n_envs, bool):
-            raise TypeError("training_config.n_envs must be integer when roster schedule is enabled")
-        if total_episodes <= 0 or n_envs <= 0:
-            raise ValueError("training_config.total_episodes and n_envs must be > 0 when roster schedule is enabled")
+        n_envs = require_positive_int(self.training_config.get("n_envs"), "training_config.n_envs")
 
-        # Schedule runs per environment episode index, aligned with engine/game_state.py.
+        # `display_episode_count` est un compte GLOBAL (somme des `dones` du VecEnv) ; la rampe,
+        # elle, vit dans l'echelle d'UN environnement — comme cote moteur.
         per_env_episode_index = max(0, int(math.ceil(float(display_episode_count) / float(n_envs))) - 1)
-        episodes_per_env = int(math.ceil(float(total_episodes) / float(n_envs)))
-        denominator = max(1, episodes_per_env - 1)
-        progress = min(1.0, max(0.0, float(per_env_episode_index) / float(denominator)))
+        progress = ramp_progress(per_env_episode_index, total_episodes, n_envs)
 
         total_active = 0
         for cls in classes:

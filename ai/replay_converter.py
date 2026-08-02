@@ -169,7 +169,8 @@ def generate_steplog_and_replay(config, args):
             scenario_file=bot_scenario_file,
             unit_registry=unit_registry,
             quiet=True,
-            gym_training_mode=True
+            gym_training_mode=True,
+            training_n_envs=1,  # UN environnement, joue en serie
         )
 
         # Connect step logger directly to W40KEngine — SEUL branchement necessaire.

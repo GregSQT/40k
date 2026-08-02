@@ -16,8 +16,9 @@ import os
 import time
 import hashlib
 import numpy as np
-from shared.data_validation import require_key, require_present
+from shared.data_validation import require_key, require_positive_int, require_present
 from engine.action_decoder import ActionValidationError
+from engine.episode_schedule import episodes_per_env
 from engine.agent_decision import read_pending_agent_decision
 from engine import macro_intents as mi
 
@@ -213,6 +214,7 @@ class BotControlledEnv(gym.Wrapper):
         self_play_ratio_end: Optional[float] = None,
         self_play_total_episodes: Optional[int] = None,
         self_play_warmup_episodes: Optional[int] = None,
+        self_play_n_envs: Optional[int] = None,
         self_play_snapshot_path: Optional[str] = None,
         self_play_snapshot_refresh_episodes: Optional[int] = None,
         self_play_snapshot_device: Optional[str] = None,
@@ -281,6 +283,13 @@ class BotControlledEnv(gym.Wrapper):
                 raise KeyError(
                     "self_play_warmup_episodes is required when self_play_opponent_enabled=true"
                 )
+            if self_play_n_envs is None:
+                raise KeyError(
+                    "self_play_n_envs is required when self_play_opponent_enabled=true : "
+                    "`self_play_total_episodes` est un budget GLOBAL alors que la rampe est "
+                    "pilotee par le compteur LOCAL a cet environnement "
+                    "(cf. engine/episode_schedule.py)."
+                )
             if self_play_snapshot_path is None or not str(self_play_snapshot_path).strip():
                 raise KeyError(
                     "self_play_snapshot_path is required when self_play_opponent_enabled=true"
@@ -336,6 +345,15 @@ class BotControlledEnv(gym.Wrapper):
                     "self_play_snapshot_device must be either 'cpu' or 'auto' "
                     f"(got {self._self_play_snapshot_device!r})"
                 )
+            # PASSAGE EN BUDGET PAR ENVIRONNEMENT (pourquoi : engine/episode_schedule.py).
+            # `_episode_index` ne compte que les episodes de CE wrapper. Les deux bornes se
+            # convertissent ENSEMBLE, sinon le warmup mangerait toute la rampe.
+            n_envs = require_positive_int(self_play_n_envs, "self_play_n_envs")
+            self._self_play_total_episodes = episodes_per_env(self._self_play_total_episodes, n_envs)
+            self._self_play_warmup_episodes = (
+                episodes_per_env(self._self_play_warmup_episodes, n_envs)
+                if self._self_play_warmup_episodes > 0 else 0
+            )
         else:
             self._self_play_ratio_start = 0.0
             self._self_play_ratio_end = 0.0
@@ -1289,7 +1307,7 @@ class BotControlledEnv(gym.Wrapper):
         info["self_play_ratio_current"] = self._self_play_ratio_current
         return obs, float(cumulative_reward), terminated, truncated, info, ready_decision
 
-    def _select_bot_move_action(self, game_state, active_unit, valid_actions) -> int:
+    def _select_bot_move_action(self, game_state, active_unit, valid_actions, bot=None) -> int:
         """Traduit le choix de destination du bot en action-cellule legale (phase move spatiale).
 
         Contrat strict (cf. audit spec §7bis, le repli silencieux a ete eradique) :
@@ -1329,12 +1347,13 @@ class BotControlledEnv(gym.Wrapper):
                 dest_to_cell[dest] = cell_idx
                 valid_destinations.append(dest)
 
-        if not hasattr(self.bot, "select_movement_destination"):
+        actor = self.bot if bot is None else bot
+        if not hasattr(actor, "select_movement_destination"):
             raise RuntimeError(
-                f"Bot {type(self.bot).__name__} n'implemente pas select_movement_destination, "
+                f"Bot {type(actor).__name__} n'implemente pas select_movement_destination, "
                 f"requis par l'action space spatial de la phase move."
             )
-        chosen = self.bot.select_movement_destination(active_unit, valid_destinations, game_state)
+        chosen = actor.select_movement_destination(active_unit, valid_destinations, game_state)
         chosen = (int(chosen[0]), int(chosen[1]))
 
         if chosen == tuple(require_unit_position(squad_id, game_state)):
@@ -1344,20 +1363,39 @@ class BotControlledEnv(gym.Wrapper):
         cell = dest_to_cell.get(chosen)
         if cell is None:
             raise RuntimeError(
-                f"Bot {type(self.bot).__name__}.select_movement_destination a renvoye {chosen}, "
+                f"Bot {type(actor).__name__}.select_movement_destination a renvoye {chosen}, "
                 f"hors des {len(valid_destinations)} destinations legales du pool. Un bot ne peut "
                 f"choisir que parmi les destinations masquees (aucun move maison, aucun repli WAIT)."
             )
         return cell
 
-    def _get_bot_action(self, debug=False, decision: Optional[MaskDecision] = None) -> int:
+    def scripted_action_for_agent_side(self, bot) -> int:
+        """Action que `bot` jouerait A LA PLACE DE L'AGENT sur l'etat courant.
+
+        Sert au classement bot-contre-bot (`scripts/bot_ranking.py`) : sans elle, mesurer la force
+        d'un bot exigeait un modele entraine comme joueur 1, donc un classement circulaire.
+        Un SEUL chemin de decision existe pour les bots — celui de `_get_bot_action` — et c'est
+        volontaire : deux implementations divergeraient, et le bot mesure ne serait plus celui
+        joue en evaluation.
+
+        ⚠️ Effet de bord assume : les compteurs de diagnostic tir/wait de ce wrapper sont ecrits
+        par `_get_bot_action`, donc un appel ici les melange avec ceux du bot de P2.
+        `get_shoot_stats()` n'a pas de sens sur un env pilote des deux cotes.
+        """
+        return self._get_bot_action(bot=bot)
+
+    def _get_bot_action(self, debug=False, decision: Optional[MaskDecision] = None, bot=None) -> int:
         """`decision` : masque deja construit pour cet etat par l'appelant adjacent (`MaskDecision`).
         Absente, on le construit — c'est le cas des appels directs (tests).
+
+        `bot` : acteur a interroger. Par defaut `self.bot` (le bot de P2). Le parametrer permet de
+        faire jouer un AUTRE bot a la place de l'agent, cf. `scripted_action_for_agent_side`.
 
         Consequence a garder en tete : la carte cellule -> destination lue plus bas
         (`read_squad_move_cell_map`) est celle que CETTE construction a memoisee, d'ici ou de
         l'appelant.
         """
+        actor = self.bot if bot is None else bot
         game_state = self.engine.game_state
         if decision is not None:
             action_mask, eligible_units = decision.action_mask, decision.eligible_units
@@ -1405,14 +1443,16 @@ class BotControlledEnv(gym.Wrapper):
             # cellule legale » = coin arbitraire de la grille, root cause §3). Il choisit une
             # DESTINATION via son heuristique (select_movement_destination), et on la traduit en
             # cellule via la carte MEMOISEE par le moteur au masque (spatial_grid = source unique).
-            bot_choice = self._select_bot_move_action(game_state, eligible_units[0], valid_actions)
+            bot_choice = self._select_bot_move_action(
+                game_state, eligible_units[0], valid_actions, bot=actor
+            )
         else:
-            if not hasattr(self.bot, "select_action_with_state"):
+            if not hasattr(actor, "select_action_with_state"):
                 # Meme contrat que `select_movement_destination` ci-dessus : un bot qui ne voit
                 # ni l'etat ni l'escouade activee ne peut choisir qu'au hasard ou par ordre de
                 # slot. Erreur explicite plutot qu'un repli silencieux sur une politique aveugle.
                 raise RuntimeError(
-                    f"Bot {type(self.bot).__name__} n'implemente pas select_action_with_state, "
+                    f"Bot {type(actor).__name__} n'implemente pas select_action_with_state, "
                     f"requis pour toute decision hors deplacement."
                 )
             # L'escouade activee est TRANSMISE au bot : c'est elle (et non `current_player`) qui
@@ -1420,7 +1460,7 @@ class BotControlledEnv(gym.Wrapper):
             # `get_squad_action_mask_and_eligible_units`, `our_player` lu dans
             # `units_cache[eligible_units[0]["id"]]`. En phase de combat, la selection 12.04
             # alterne entre les camps : le bot peut etre selecteur SANS etre joueur courant.
-            bot_choice = self.bot.select_action_with_state(
+            bot_choice = actor.select_action_with_state(
                 valid_actions, game_state, eligible_units[0]
             )
 

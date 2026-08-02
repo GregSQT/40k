@@ -38,6 +38,7 @@ def _make_env(active_ratio: float):
         unit_registry=UnitRegistry(),
         quiet=True,
         gym_training_mode=True,
+        training_n_envs=1,  # UN environnement joue en serie (engine/episode_schedule.py)
     )
     # Chemin training : la config de phase est chargée à l'init (le moteur lève sinon).
     assert env.training_config is not None

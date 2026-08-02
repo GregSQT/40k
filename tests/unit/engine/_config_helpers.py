@@ -104,6 +104,11 @@ def pin_active_deployment(engine: Any) -> Any:
     # cache de configuration. Le muter en place contaminerait les autres tests du process.
     engine.training_config = dict(engine.training_config)
     engine.training_config.update(_ACTIVE_DEPLOYMENT_PINS)
+    # Un test joue UN environnement, en serie. Le moteur REFUSE de ramper sur un `n_envs` non
+    # resolu (le profil en declare 48, cf. engine/episode_schedule.py) : on declare le nombre
+    # reel, comme le fait `ai/train.py` pour ses branches mono-env.
+    engine.training_config["n_envs"] = 1
+    engine._episode_ramp_n_envs_is_runtime = True
     return engine
 
 

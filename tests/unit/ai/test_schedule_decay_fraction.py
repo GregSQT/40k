@@ -297,6 +297,23 @@ def test_x1_long_is_x1_recalibrated_for_long_runs() -> None:
     # des épisodes. Le régler depuis la durée en épisodes d'un run n'a pas de sens ; le levier
     # pour couvrir plus d'historique est `max_checkpoints`, qui est un compte, sans ambiguïté.
     assert long_cb["checkpoint_save_freq"] == ref_cb["checkpoint_save_freq"]
-    ignored = {"bot_eval_freq", "bot_eval_freq_normal"}
+    # `bot_eval_final` est un nombre d'épisodes PAR BOT, et x1_long est le run de MESURE : son
+    # win-rate final est le chiffre publié, donc sa précision fait partie du livrable. À 100
+    # épisodes, l'erreur-type d'un win-rate autour de 0,5 vaut 5,0 points (IC95 ≈ ±9,8) — deux
+    # runs séparés de 10 points ne sont pas départageables. À 600 elle tombe à 2,0 points
+    # (IC95 ≈ ±4,0), σ étant divisé par √6. Le coût est borné et payé UNE fois, en fin de run :
+    # ~1 h 20 (13 min les 100 ép./bot, commit 42326ed0) contre ~5 h 30 d'entraînement sur 200k —
+    # une proportion qui n'a de sens que sur un run long, d'où x1 laissé à 100.
+    assert long_cb["bot_eval_final"] == 600
+    assert ref_cb["bot_eval_final"] == 100
+    # `bot_eval_intermediate` reste ALIGNÉ sur x1 : les évals intermédiaires sont du monitoring
+    # répété 20 fois, pas la mesure ; les gonfler paierait 20 fois une précision inutile.
+    assert long_cb["bot_eval_intermediate"] == ref_cb["bot_eval_intermediate"]
+    ignored = {
+        "bot_eval_freq",
+        "bot_eval_freq_normal",
+        "bot_eval_final",
+        "bot_eval_final_normal",  # commentaire libre, présent sur x1_long seul
+    }
     assert {k: v for k, v in long_cb.items() if k not in ignored} == \
            {k: v for k, v in ref_cb.items() if k not in ignored}

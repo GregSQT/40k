@@ -1331,6 +1331,8 @@ from ai.training_callbacks import (
 
 # Training utilities (extracted to ai/training_utils.py)
 from ai.training_utils import (
+    build_self_play_kwargs,
+    self_play_is_enabled,
     check_gpu_availability,
     benchmark_device_speed,
     setup_imports,
@@ -1348,7 +1350,7 @@ from ai.vec_normalize_utils import (
     VEC_NORMALIZE_SUFFIX,
 )
 
-from shared.data_validation import require_key, require_present
+from shared.data_validation import require_key, require_positive_int, require_present
 
 _progress_bar_width_cache: Optional[Dict[str, int]] = None
 _wall_override_temp_dir: Optional[str] = None
@@ -1920,7 +1922,9 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
         print("ℹ️  Replay mode: Using single environment (vectorization disabled)")
     else:
         n_envs = _resolve_n_envs_for_step_logging(n_envs)
-    
+
+    training_config = resolve_run_budget(training_config, n_envs)
+
     # V11 §10.4 : meme construction d'adversaires que les chemins rotation et agent.
     opponents = build_training_opponents(
         training_config,
@@ -1928,6 +1932,17 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
         training_config["total_episodes"] if "total_episodes" in training_config else None,
         print,
     )
+
+    # `opponent_mix` exige qu'un snapshot du modele soit REPUBLIE pendant le run : seul
+    # `train_with_scenario_rotation` le fait (`_publish_self_play_snapshot`). Ici, le premier
+    # tirage de self-play lirait un fichier absent — ou pire, un snapshot fige d'un run precedent,
+    # adversaire immobile pour tout l'entrainement. Erreur explicite plutot que les deux.
+    if self_play_is_enabled(opponents["opponent_mix_config"]):
+        raise ValueError(
+            "opponent_mix.enabled=True n'est supporte que par le chemin de rotation de scenarios "
+            "(seul `train_with_scenario_rotation` republie le snapshot de self-play). Lancer "
+            "l'entrainement par ce chemin, ou desactiver opponent_mix."
+        )
 
     base_env = None
     if n_envs > 1:
@@ -1950,6 +1965,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
                 agent_seat_mode=opponents["agent_seat_mode"],
                 global_seed=opponents["agent_seat_seed"],
                 opponent_mix_config=opponents["opponent_mix_config"],
+                n_envs=n_envs,
             )
             for i in range(n_envs)
         ]))
@@ -1968,7 +1984,8 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             unit_registry=unit_registry,
             quiet=True,
             gym_training_mode=True,
-            debug_mode=args.debug
+            debug_mode=args.debug,
+            training_n_envs=n_envs,
         )
         
         # Connect step logger after environment creation - compliant engine compatibility
@@ -1991,6 +2008,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
                 unit_registry=unit_registry,
                 agent_seat_mode=require_present(opponents["agent_seat_mode"], "agent_seat_mode"),
                 global_seed=opponents["agent_seat_seed"],
+                **build_self_play_kwargs(opponents["opponent_mix_config"]),
             )
             env = Monitor(bot_env)
         else:
@@ -2238,6 +2256,8 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
 
     n_envs = _resolve_n_envs_for_step_logging(n_envs)
 
+    training_config = resolve_run_budget(training_config, n_envs)
+
     # V11 §10.4 : meme construction d'adversaires que le chemin rotation.
     opponents = build_training_opponents(
         training_config,
@@ -2245,6 +2265,17 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         training_config["total_episodes"] if "total_episodes" in training_config else None,
         print,
     )
+
+    # `opponent_mix` exige qu'un snapshot du modele soit REPUBLIE pendant le run : seul
+    # `train_with_scenario_rotation` le fait (`_publish_self_play_snapshot`). Ici, le premier
+    # tirage de self-play lirait un fichier absent — ou pire, un snapshot fige d'un run precedent,
+    # adversaire immobile pour tout l'entrainement. Erreur explicite plutot que les deux.
+    if self_play_is_enabled(opponents["opponent_mix_config"]):
+        raise ValueError(
+            "opponent_mix.enabled=True n'est supporte que par le chemin de rotation de scenarios "
+            "(seul `train_with_scenario_rotation` republie le snapshot de self-play). Lancer "
+            "l'entrainement par ce chemin, ou desactiver opponent_mix."
+        )
 
     if n_envs > 1:
         # ✓ CHANGE 8: Create vectorized environments for parallel training
@@ -2265,6 +2296,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
                 agent_seat_mode=opponents["agent_seat_mode"],
                 global_seed=opponents["agent_seat_seed"],
                 opponent_mix_config=opponents["opponent_mix_config"],
+                n_envs=n_envs,
             )
             for i in range(n_envs)
         ]))
@@ -2283,7 +2315,8 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
             unit_registry=unit_registry,
             quiet=True,
             gym_training_mode=True,
-            debug_mode=debug_mode
+            debug_mode=debug_mode,
+            training_n_envs=n_envs,
         )
         
         # Connect step logger after environment creation - compliant engine compatibility
@@ -2307,6 +2340,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
                 unit_registry=unit_registry,
                 agent_seat_mode=require_present(opponents["agent_seat_mode"], "agent_seat_mode"),
                 global_seed=opponents["agent_seat_seed"],
+                **build_self_play_kwargs(opponents["opponent_mix_config"]),
             )
             env = Monitor(bot_env)
         else:
@@ -2566,6 +2600,28 @@ def resolve_turn_step_limit(
     return max_steps
 
 
+def resolve_run_budget(training_config: Dict[str, Any], n_envs: int,
+                       total_episodes: Any = None,
+                       total_episodes_override: Optional[int] = None) -> Dict[str, Any]:
+    """Config du RUN : les deux termes du denominateur des rampes par-episode, resolus.
+
+    Le JSON ne porte que des INTENTIONS. `--step`/`--replay` n'ouvrent qu'un environnement la ou
+    le profil en declare 48 ; `--total-episodes` remplace la longueur du run ; une phase de
+    curriculum decoupe le run en chunks dont `total_episodes_override` porte la vraie longueur.
+    Tout ce qui vit dans ce processus (callbacks, budgets d'`opponent_mix`) lit le dict rendu ici ;
+    les workers, eux, relisent le fichier et recoivent les valeurs par `make_training_env`.
+    Cf. engine/episode_schedule.py.
+
+    `total_episodes=None` laisse la valeur du profil : les chemins qui n'ont pas de longueur de run
+    propre (`create_model`) n'en ont pas d'autre.
+    """
+    resolved = {**training_config, "n_envs": require_positive_int(n_envs, "n_envs")}
+    budget = total_episodes_override if total_episodes_override is not None else total_episodes
+    if budget is not None:
+        resolved["total_episodes"] = require_positive_int(budget, "total_episodes")
+    return resolved
+
+
 def build_training_opponents(
     training_config: Dict[str, Any],
     use_bots: bool,
@@ -2573,6 +2629,10 @@ def build_training_opponents(
     log: Callable[[str], None],
 ) -> Dict[str, Any]:
     """Construction de l'adversaire d'entrainement — CHEMIN UNIQUE (V11 §10.4).
+
+    `training_config["n_envs"]` doit porter le nombre d'environnements REELLEMENT ouverts (le
+    chemin d'entrainement l'y reecrit apres `_resolve_n_envs_for_step_logging`) : la rampe de
+    self-play d'`opponent_mix` en depend. Cf. engine/episode_schedule.py.
 
     Historiquement seul `train_with_scenario_rotation` construisait les bots ponderes
     et `opponent_mix` ; le chemin single-scenario tombait sur
@@ -2686,6 +2746,8 @@ def build_training_opponents(
         "self_play_ratio_end": self_play_ratio_end,
         "warmup_episodes": warmup_episodes,
         "total_episodes": int(total_episodes),
+        # Budgets GLOBAUX ci-dessus ; le wrapper les ramene au budget d'UN environnement.
+        "n_envs": require_positive_int(training_config.get("n_envs"), "training_config.n_envs"),
         "snapshot_model_path": snapshot_path,
         "snapshot_refresh_episodes": snapshot_refresh_episodes,
         "snapshot_device": snapshot_device,
@@ -2859,6 +2921,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     n_envs = require_key(training_config, "n_envs")
     n_envs = _resolve_n_envs_for_step_logging(n_envs, log=chunk_log)
 
+    training_config = resolve_run_budget(
+        training_config, n_envs, total_episodes, callback_total_episodes_override
+    )
+
     max_steps = resolve_turn_step_limit(scenario_list, training_config, use_bots, chunk_log)
 
     # Calculate average steps per episode for timestep conversion
@@ -2915,6 +2981,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 agent_seat_mode=require_present(agent_seat_mode, "agent_seat_mode"),
                 global_seed=agent_seat_seed,
                 opponent_mix_config=opponent_mix_config,
+                n_envs=n_envs,
             )
             for i in range(n_envs)
         ]))
@@ -2933,7 +3000,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             unit_registry=unit_registry,
             quiet=True,
             gym_training_mode=True,
-            debug_mode=debug_mode
+            debug_mode=debug_mode,
+            training_n_envs=n_envs,
         )
         if step_logger:
             base_env.step_logger = step_logger
@@ -2948,49 +3016,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 unit_registry=unit_registry,
                 agent_seat_mode=require_present(agent_seat_mode, "agent_seat_mode"),
                 global_seed=agent_seat_seed,
-                self_play_opponent_enabled=(
-                    bool(opponent_mix_config is not None and opponent_mix_config.get("enabled") is True)
-                ),
-                self_play_ratio_start=(
-                    float(opponent_mix_config["self_play_ratio_start"])
-                    if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
-                    else None
-                ),
-                self_play_ratio_end=(
-                    float(opponent_mix_config["self_play_ratio_end"])
-                    if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
-                    else None
-                ),
-                self_play_total_episodes=(
-                    int(opponent_mix_config["total_episodes"])
-                    if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
-                    else None
-                ),
-                self_play_warmup_episodes=(
-                    int(opponent_mix_config["warmup_episodes"])
-                    if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
-                    else None
-                ),
-                self_play_snapshot_path=(
-                    str(opponent_mix_config["snapshot_model_path"])
-                    if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
-                    else None
-                ),
-                self_play_snapshot_refresh_episodes=(
-                    int(opponent_mix_config["snapshot_refresh_episodes"])
-                    if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
-                    else None
-                ),
-                self_play_snapshot_device=(
-                    str(opponent_mix_config["snapshot_device"])
-                    if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
-                    else None
-                ),
-                self_play_deterministic=(
-                    bool(opponent_mix_config["deterministic"])
-                    if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
-                    else False
-                ),
+                **build_self_play_kwargs(opponent_mix_config),
             )
             env = Monitor(bot_env)
         else:
@@ -3171,7 +3197,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             unit_registry=unit_registry,
             quiet=True,
             gym_training_mode=True,
-            debug_mode=debug_mode
+            debug_mode=debug_mode,
+            training_n_envs=n_envs,
         )
         # V11 T6 : ce bloc RECREE l'environnement (cf. commentaire ci-dessus) et remplace le
         # base_env construit plus haut — celui-la seul recevait le StepLogger (~L2377). Sans
@@ -3191,6 +3218,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 unit_registry=unit_registry,
                 agent_seat_mode=require_present(agent_seat_mode, "agent_seat_mode"),
                 global_seed=agent_seat_seed,
+                **build_self_play_kwargs(opponent_mix_config),
             )
             env = Monitor(bot_env)
         else:
@@ -4061,6 +4089,7 @@ def test_trained_model(model, num_episodes, training_config_name="default", agen
         scenario_file=scenario_file,
         unit_registry=unit_registry,
         quiet=True,
+        training_n_envs=1,  # test_trained_model : UN environnement, joue en serie
         debug_mode=debug_mode
     )
     wins = 0
@@ -4972,6 +5001,7 @@ def main():
                 unit_registry=unit_registry,
                 quiet=True,
                 gym_training_mode=True,
+                training_n_envs=1,  # test holdout : UN environnement, joue en serie
                 debug_mode=args.debug
             )
             

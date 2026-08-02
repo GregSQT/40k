@@ -668,6 +668,8 @@ def _build_eval_env(
         quiet=True,
         gym_training_mode=True,
         debug_mode=False,
+        # UN environnement joue en serie : denominateur des rampes par-episode.
+        training_n_envs=1,
     )
     masked_env = ActionMasker(base_env, mask_fn)
     if opponent_mode == "bot":
@@ -696,6 +698,9 @@ def _build_eval_env(
             self_play_ratio_end=1.0,
             self_play_total_episodes=max(1, int(n_episodes)),
             self_play_warmup_episodes=0,
+            # Ce script joue ses episodes dans UN seul environnement, en serie : le budget
+            # ci-dessus est deja per-env (cf. V11 §0.57).
+            self_play_n_envs=1,
             self_play_snapshot_path=model_path,
             self_play_snapshot_refresh_episodes=1,
             self_play_snapshot_device="cpu",

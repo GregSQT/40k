@@ -173,7 +173,7 @@ def main():
     tpl = os.path.join(ROOT, "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json")
     env = W40KEngine(rewards_config="ArmageddonAgent", training_config_name="x5_new",
                      controlled_agent="ArmageddonAgent", scenario_file=tpl, unit_registry=ur,
-                     quiet=True, gym_training_mode=True)
+                     quiet=True, gym_training_mode=True, training_n_envs=1)
     env.reset(seed=1)
     walls = set((int(c), int(r)) for c, r in (env.game_state.get("wall_hexes") or set()))
 

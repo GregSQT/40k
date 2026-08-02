@@ -38,6 +38,7 @@ class TestGetGameState:
     def test_engine_initialized_returns_200(self, monkeypatch):
         """state_ok : engine initialisé → 200 + success=True + game_state présent."""
         mock_engine = MagicMock()
+        mock_engine.current_mode_code = "pve"  # sinon la porte RBAC refuse (moteur sans mode)
         mock_engine.game_state = {**turn_state_invariants(),
             "phase": "move",
             "current_player": 1,
@@ -83,6 +84,7 @@ class TestExecuteAction:
     def test_no_json_body_returns_400(self, monkeypatch):
         """action_no_json : corps JSON null → 400 avec message d'erreur."""
         mock_engine = MagicMock()
+        mock_engine.current_mode_code = "pve"  # sinon la porte RBAC refuse (moteur sans mode)
         mock_engine.game_state = {"units_cache": {}}
         monkeypatch.setattr(api_server, "engine", mock_engine)
         with app.test_client() as client:
@@ -100,6 +102,7 @@ class TestExecuteAction:
     def test_no_units_cache_returns_400(self, monkeypatch):
         """action_no_cache : engine présent mais units_cache manquant → 400 avec error_code."""
         mock_engine = MagicMock()
+        mock_engine.current_mode_code = "pve"  # sinon la porte RBAC refuse (moteur sans mode)
         mock_engine.game_state = {}  # pas de units_cache
         monkeypatch.setattr(api_server, "engine", mock_engine)
         with app.test_client() as client:
@@ -111,6 +114,7 @@ class TestExecuteAction:
     def test_valid_action_returns_200(self, monkeypatch):
         """action_valid : engine + units_cache + action valide → 200 + success=True."""
         mock_engine = MagicMock()
+        mock_engine.current_mode_code = "pve"  # sinon la porte RBAC refuse (moteur sans mode)
         mock_engine.game_state = {"units_cache": {}, "phase": "move"}
         mock_engine.execute_semantic_action.return_value = (True, {"action": "skip"})
         monkeypatch.setattr(api_server, "engine", mock_engine)
@@ -155,7 +159,9 @@ class TestHealthEndpoint:
 
     def test_health_engine_initialized_true_when_engine(self, monkeypatch):
         """health_engine_true : engine présent → engine_initialized=True."""
-        monkeypatch.setattr(api_server, "engine", MagicMock())
+        _engine = MagicMock()
+        _engine.current_mode_code = "pve"  # sinon la porte RBAC refuse (moteur sans mode)
+        monkeypatch.setattr(api_server, "engine", _engine)
         with app.test_client() as client:
             resp = client.get("/api/health")
         data = resp.get_json()
@@ -179,6 +185,7 @@ class TestResetGame:
     def test_valid_reset_returns_200(self, monkeypatch):
         """reset_ok : engine présent, reset() réussit → 200 + success=True."""
         mock_engine = MagicMock()
+        mock_engine.current_mode_code = "pve"  # sinon la porte RBAC refuse (moteur sans mode)
         mock_engine.game_state = {"units_cache": {}, "phase": "move"}
         mock_engine.reset.return_value = (None, {})
         monkeypatch.setattr(api_server, "engine", mock_engine)
@@ -196,6 +203,7 @@ class TestResetGame:
     def test_reset_failure_returns_500(self, monkeypatch):
         """reset_fail : reset() lève exception → 500."""
         mock_engine = MagicMock()
+        mock_engine.current_mode_code = "pve"  # sinon la porte RBAC refuse (moteur sans mode)
         mock_engine.game_state = {"units_cache": {}}
         mock_engine.reset.side_effect = RuntimeError("Reset broke")
         monkeypatch.setattr(api_server, "engine", mock_engine)

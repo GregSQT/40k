@@ -15,11 +15,12 @@ import hashlib
 import secrets
 import copy
 from functools import wraps
+from contextlib import contextmanager
 from threading import RLock
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 from uuid import UUID
-from flask import Flask, request, jsonify, send_file, Response
+from flask import Flask, request, jsonify, send_file, Response, g
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
 
@@ -48,7 +49,14 @@ from services.endless_duty_runtime import (
     is_endless_duty_mode,
 )
 
-AUTH_DB_PATH = os.path.join(abs_parent, "config", "users.db")
+# `initialize_auth_db()` s'exécute à l'import (bas de ce fichier) et ÉCRIT dans cette base.
+# Importer le module suffit donc à la modifier — d'où la surcharge par variable
+# d'environnement : elle permet aux tests de viser une base jetable, `config/users.db`
+# étant un fichier protégé (cf. CLAUDE.md). Aucune valeur par défaut de repli en prod :
+# sans la variable, c'est bien la base réelle qui est utilisée.
+AUTH_DB_PATH = os.environ.get(
+    "W40K_AUTH_DB_PATH", os.path.join(abs_parent, "config", "users.db")
+)
 PBKDF2_ITERATIONS = 200000
 
 # Plateau JOUÉ pour chaque option de l'écran de test. `x1` et `x5_44x60` sont le MÊME plateau
@@ -929,13 +937,57 @@ def _attach_player_types(serializable_state: Dict[str, Any], engine_instance: _P
 
 
 def _get_auth_db_connection() -> sqlite3.Connection:
+    """Connexion neuve, à fermer par l'appelant. Réservée aux ÉCRITURES.
+
+    Le répertoire est créé par `initialize_auth_db()` au démarrage, pas ici : depuis la
+    fermeture globale de l'API, l'accès à cette base a lieu à CHAQUE requête, où le
+    `makedirs` ne pouvait plus rien faire.
+
+    Les écritures gardent une connexion propre : partagée, un échec en cours d'écriture
+    laisserait une transaction pendante sur la connexion des autres requêtes.
     """
-    Return a sqlite connection configured for named column access.
-    """
-    os.makedirs(os.path.dirname(AUTH_DB_PATH), exist_ok=True)
     connection = sqlite3.connect(AUTH_DB_PATH)
     connection.row_factory = sqlite3.Row
     return connection
+
+
+_auth_read_connection: Optional[sqlite3.Connection] = None
+_auth_read_connection_path: Optional[str] = None
+_AUTH_READ_LOCK = RLock()
+
+
+@contextmanager
+def auth_db_read_cursor():
+    """Connexion de LECTURE partagée par TOUT le process, sérialisée par un verrou.
+
+    La porte interroge cette base à chaque requête (session, puis permissions quand une
+    partie tourne). Mesuré : ~189 µs par requête pour connexion + résolution des
+    permissions, contre ~19 µs sur une connexion déjà ouverte — l'essentiel du coût est
+    l'ouverture et l'analyse du schéma à froid, payées jusqu'à 40 fois par seconde sur les
+    prévisualisations au survol.
+
+    Partagée par PROCESS et non par thread : le serveur de dev Werkzeug est en HTTP/1.0
+    sans keep-alive, donc `ThreadingMixIn` crée un thread PAR REQUÊTE. Un `threading.local`
+    y serait vide à chaque fois et n'économiserait rien — l'optimisation n'existerait que
+    dans les tests, qui tournent dans un seul thread.
+
+    `check_same_thread=False` est donc obligatoire, et le verrou est ce qui rend l'usage
+    concurrent sûr : toute lecture se fait à l'intérieur du `with`. Réservée aux lectures —
+    les écritures gardent une connexion propre (cf. `_get_auth_db_connection`), pour qu'un
+    échec ne laisse pas de transaction pendante sur la connexion commune.
+
+    Rouverte si `AUTH_DB_PATH` change : les tests le réaffectent, une connexion mémorisée
+    pointerait sinon sur la base précédente.
+    """
+    global _auth_read_connection, _auth_read_connection_path
+    with _AUTH_READ_LOCK:
+        if _auth_read_connection is None or _auth_read_connection_path != AUTH_DB_PATH:
+            if _auth_read_connection is not None:
+                _auth_read_connection.close()
+            _auth_read_connection = sqlite3.connect(AUTH_DB_PATH, check_same_thread=False)
+            _auth_read_connection.row_factory = sqlite3.Row
+            _auth_read_connection_path = AUTH_DB_PATH
+        yield _auth_read_connection
 
 
 def _hash_password(password: str) -> str:
@@ -1034,8 +1086,7 @@ def _get_authenticated_user_or_response():
     except ValueError as auth_error:
         return None, (jsonify({"success": False, "error": str(auth_error)}), 401)
 
-    connection = _get_auth_db_connection()
-    try:
+    with auth_db_read_cursor() as connection:
         row = connection.execute(
             """
             SELECT u.id AS user_id, u.login AS login, p.id AS profile_id, p.code AS profile_code
@@ -1046,8 +1097,6 @@ def _get_authenticated_user_or_response():
             """,
             (token,),
         ).fetchone()
-    finally:
-        connection.close()
 
     if row is None:
         return None, (jsonify({"success": False, "error": "Invalid or expired session"}), 401)
@@ -1079,6 +1128,11 @@ def initialize_auth_db() -> None:
     """
     Create auth tables and seed default profile permissions.
     """
+    # `dirname` est vide si AUTH_DB_PATH est un simple nom de fichier (surcharge par
+    # variable d'environnement) : `makedirs("")` lèverait FileNotFoundError à l'import.
+    auth_db_dir = os.path.dirname(AUTH_DB_PATH)
+    if auth_db_dir:
+        os.makedirs(auth_db_dir, exist_ok=True)
     connection = _get_auth_db_connection()
     try:
         cursor = connection.cursor()
@@ -1340,7 +1394,7 @@ _SNAPSHOT_STORE = GameSnapshotStore()
 _SNAPSHOT_PERSIST_ENABLED = False
 
 # Saves manuelles (un fichier plat par save) sous logs/pvp_saves/.
-from services.game_saves import SaveStore, progress_key_from_gs
+from services.game_saves import SaveStore, progress_key_from_gs, progress_key_from_meta
 # Répertoire de persistance (snapshots + saves), configurable via le menu. Défaut : logs/.
 _PERSIST_DIR = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), "logs")
 _SAVE_STORE = SaveStore(os.path.join(_PERSIST_DIR, "pvp_saves"))
@@ -1949,7 +2003,156 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
             os.chdir(original_cwd)
         raise
 
+# Routes accessibles SANS session valide. Tout le reste est fermé par le `before_request`
+# ci-dessous : une route nouvelle ou oubliée est donc fermée par défaut, jamais ouverte.
+# Il n'existe aucune route de création de compte (F12) : les comptes sont créés en SQL.
+_PUBLIC_ENDPOINTS: set[str] = set()
+
+
+def public_endpoint(view_func):
+    """Marque une vue comme accessible sans session.
+
+    L'exemption est déclarée SUR la route elle-même, pas dans une liste distante : une
+    route renommée emporte son exemption avec elle. Une liste de chemins en dur se
+    périmerait en silence, et pour `/api/auth/login` la panne serait un verrouillage
+    total (plus personne ne peut se connecter), pas une simple fuite.
+    """
+    _PUBLIC_ENDPOINTS.add(view_func.__name__)
+    return view_func
+
+
+# Vues qui CHANGENT le mode de la partie en cours : le contrôle RBAC de la porte porte sur
+# le mode courant, il bloquerait donc à tort une bascule légitime vers un mode autorisé.
+# Elles valident elles-mêmes le mode DEMANDÉ (cf. `_is_mode_allowed` dans `start_game`).
+_MODE_CHANGING_ENDPOINTS: set[str] = set()
+
+
+def changes_game_mode(view_func):
+    """Exempte une vue du contrôle RBAC sur le mode courant — elle doit valider le sien."""
+    _MODE_CHANGING_ENDPOINTS.add(view_func.__name__)
+    return view_func
+
+
+# Vues qui n'agissent pas sur la partie en cours (catalogues, config, replays, identité) :
+# leur appliquer le RBAC de mode renverrait 403 à un testeur `pve` pendant toute la séquence
+# de démarrage du front dès qu'une partie `pvp` traîne dans le process. Le mode reste
+# contrôlé PAR DÉFAUT : une route non listée ici l'est, y compris une route nouvelle.
+_MODE_AGNOSTIC_ENDPOINTS: set[str] = set()
+
+
+def mode_agnostic(view_func):
+    """Marque une vue comme n'agissant pas sur la partie en cours (pas de RBAC de mode)."""
+    _MODE_AGNOSTIC_ENDPOINTS.add(view_func.__name__)
+    return view_func
+
+
+def _current_game_mode() -> Optional[str]:
+    """Mode de la partie en cours, `None` si aucune partie n'est démarrée."""
+    if engine is None:
+        return None
+    mode_code = getattr(engine, "current_mode_code", None)
+    return mode_code if isinstance(mode_code, str) and mode_code else None
+
+
+def _captured_mode(captured_state: Dict[str, Any]) -> Optional[str]:
+    """Mode de jeu d'un état CAPTURÉ (`capture_live_state`), pour les routes de chargement.
+
+    Un état capturé est une enveloppe `{"game_state": ..., "engine_attrs": ...}` : lire
+    `current_mode_code` à sa racine rend toujours `None`, donc un refus systématique.
+    `restore_snapshot` n'a pas ce besoin — `build_game_state()` lui rend un game_state plat.
+    """
+    game_state = captured_state.get("game_state")
+    if not isinstance(game_state, dict):
+        return None
+    mode = game_state.get("current_mode_code")
+    return mode if isinstance(mode, str) and mode else None
+
+
+def _forbidden_mode_response(mode: Optional[str]):
+    """403 si le profil de l'utilisateur courant n'a pas droit à `mode`, sinon `None`.
+
+    À appeler par toute vue qui REMPLACE le mode de la partie (chargement d'une sauvegarde,
+    restauration d'un snapshot) : la porte juge le mode COURANT, elle ne peut rien dire du
+    mode qu'on s'apprête à charger. Sans ce contrôle, un profil `pve` en partie `pve`
+    charge une partie `pvp` sans que personne ne valide le mode cible.
+
+    Doit être appelée AVANT la mutation de l'engine — refuser après coup laisserait l'état
+    interdit en place.
+
+    Un mode absent ou vide est REFUSÉ, jamais laissé passer : un état sans mode ne peut pas
+    être autorisé par défaut, ce serait exactement le contournement que ce contrôle vise.
+    """
+    if not isinstance(mode, str) or not mode:
+        return jsonify({
+            "success": False,
+            "error": "Game state has no 'current_mode_code': cannot authorize access",
+        }), 403
+    with auth_db_read_cursor() as connection:
+        permissions = _resolve_permissions_for_profile(connection, g.auth_user["profile_id"])
+    if _is_mode_allowed(mode, permissions):
+        return None
+    return jsonify({
+        "success": False,
+        "error": f"Profile is not allowed to play mode '{mode}'",
+    }), 403
+
+
+@app.before_request
+def require_authenticated_session():
+    """Ferme toute l'API par défaut : seules les vues `@public_endpoint` sont ouvertes.
+
+    Le filtrage porte sur `request.endpoint` (nom de la vue résolue par le routeur) et non
+    sur `request.path` : l'exemption suit ainsi la vue, et changer l'URL d'une route ne
+    peut pas laisser derrière elle une entrée de liste blanche périmée — silencieuse dans
+    le cas d'une route protégée, mais synonyme de verrouillage total pour `login`.
+
+    Une URL qui ne correspond à aucune route a `endpoint` à `None` : elle reçoit donc 401
+    plutôt que 404, ce qui évite au passage de révéler quelles routes existent.
+
+    Les préflights CORS (`OPTIONS`) sont laissés passer : le navigateur les émet sans
+    header `Authorization`, les bloquer casserait tout appel cross-origin côté front.
+
+    Le RBAC (modes de jeu autorisés par profil) est appliqué ICI et non sur chaque route
+    de jeu : le vérifier au seul démarrage de partie laissait un utilisateur agir sur une
+    partie déjà lancée dont son profil interdit le mode.
+    """
+    if request.method == "OPTIONS":
+        return None
+    if request.endpoint in _PUBLIC_ENDPOINTS:
+        return None
+
+    user_row, error_response = _get_authenticated_user_or_response()
+    if error_response is not None:
+        return error_response
+    if user_row is None:
+        # Contrat du helper : jamais (None, None). Une violation doit être bruyante — la
+        # laisser passer authentifierait une requête sans utilisateur.
+        raise RuntimeError("_get_authenticated_user_or_response returned no user and no error")
+    # Évite aux vues un second aller-retour SQLite pour le même token (cf. `g.auth_user`).
+    g.auth_user = user_row
+
+    if request.endpoint in _MODE_CHANGING_ENDPOINTS or request.endpoint in _MODE_AGNOSTIC_ENDPOINTS:
+        return None
+
+    # Lecture sous le verrou moteur : `start_game` remplace `engine` puis pose son
+    # `current_mode_code` en deux temps. Lire hors verrou peut tomber dans cette fenêtre,
+    # y voir un mode absent, et donc ouvrir la porte à une requête d'un profil non autorisé
+    # sur la partie en train de démarrer. Le verrou est réentrant : la vue le reprendra.
+    with _ENGINE_STATE_LOCK:
+        if engine is None:
+            # AUCUN moteur : il n'y a rien sur quoi agir, donc aucun mode à contrôler.
+            # C'est le seul cas où l'absence de mode est légitime.
+            return None
+        current_mode = _current_game_mode()
+    # Un moteur EXISTE mais sans mode : c'est l'état produit par `initialize_engine()` au
+    # démarrage (moteur PvP complet, `current_mode_code` posé seulement par `start_game`),
+    # et la fenêtre de ré-initialisation. Confondre ce cas avec « pas de partie » ouvrait la
+    # porte à tout profil sur ce moteur. `_forbidden_mode_response` refuse un mode absent.
+    return _forbidden_mode_response(current_mode)
+
+
 @app.route('/api/health', methods=['GET'])
+@public_endpoint
 def health_check():
     """Health check endpoint."""
     return jsonify({
@@ -1957,56 +2160,15 @@ def health_check():
         "engine_initialized": engine is not None
     })
 
-@app.route('/api/auth/register', methods=['POST'])
-def register_user():
-    """Create a user account with base profile."""
-    data = request.get_json()
-    if not isinstance(data, dict):
-        return jsonify({"success": False, "error": "JSON body is required"}), 400
-
-    login = data.get("login")
-    password = data.get("password")
-    if not isinstance(login, str) or not login.strip():
-        return jsonify({"success": False, "error": "login is required and must be a non-empty string"}), 400
-    if not isinstance(password, str) or not password:
-        return jsonify({"success": False, "error": "password is required and must be a non-empty string"}), 400
-
-    normalized_login = login.strip()
-    connection = _get_auth_db_connection()
-    try:
-        existing_user = connection.execute(
-            "SELECT id FROM users WHERE login = ?",
-            (normalized_login,),
-        ).fetchone()
-        if existing_user is not None:
-            return jsonify({"success": False, "error": "login already exists"}), 409
-
-        base_profile = connection.execute(
-            "SELECT id, code FROM profiles WHERE code = ?",
-            ("base",),
-        ).fetchone()
-        if base_profile is None:
-            raise RuntimeError("Profile 'base' is missing from auth database")
-
-        password_hash = _hash_password(password)
-        cursor = connection.execute(
-            "INSERT INTO users (login, password_hash, profile_id) VALUES (?, ?, ?)",
-            (normalized_login, password_hash, base_profile["id"]),
-        )
-        connection.commit()
-        return jsonify(
-            {
-                "success": True,
-                "user_id": cursor.lastrowid,
-                "login": normalized_login,
-                "profile": base_profile["code"],
-            }
-        ), 201
-    finally:
-        connection.close()
+# Pas de route de création de compte (F12, décision « fermeture pure ») : les comptes sont
+# créés en SQL dans `config/users.db`. La laisser derrière l'authentification ne suffirait
+# pas — n'importe quel testeur au profil `base` pourrait alors créer des comptes en masse.
+# Un jeton d'invitation à usage unique reste l'évolution prévue si le nombre de testeurs
+# grandit ; c'est à ce moment-là que la route réapparaîtra, avec sa validation propre.
 
 
 @app.route('/api/auth/login', methods=['POST'])
+@public_endpoint
 def login_user():
     """Authenticate user and return access token with permissions."""
     data = request.get_json()
@@ -2064,19 +2226,15 @@ def login_user():
 
 
 @app.route('/api/auth/me', methods=['GET'])
+@mode_agnostic
 def current_user():
     """Return current user session and permissions."""
-    user_row, error_response = _get_authenticated_user_or_response()
-    if error_response is not None:
-        return error_response
-    if user_row is None:
-        return jsonify({"success": False, "error": "authentication failed"}), 401
+    # Session déjà validée par `require_authenticated_session` : la revalider ouvrirait une
+    # seconde connexion SQLite et rejouerait la même jointure pour le même token.
+    user_row = g.auth_user
 
-    connection = _get_auth_db_connection()
-    try:
+    with auth_db_read_cursor() as connection:
         permissions = _resolve_permissions_for_profile(connection, user_row["profile_id"])
-    finally:
-        connection.close()
 
     return jsonify(
         {
@@ -2113,16 +2271,14 @@ def test_engine():
     })
 
 @app.route('/api/game/start', methods=['POST'])
+@changes_game_mode
 @with_engine_state_lock
 def start_game():
     """Start a new game session with optional PvE mode."""
     global engine
     
-    auth_user, auth_error = _get_authenticated_user_or_response()
-    if auth_error is not None:
-        return auth_error
-    if auth_user is None:
-        return jsonify({"success": False, "error": "authentication failed"}), 401
+    # Session déjà validée par `require_authenticated_session` (cf. /api/auth/me).
+    auth_user = g.auth_user
 
     # Check for PvE mode in request
     data = request.get_json() or {}
@@ -2148,11 +2304,8 @@ def start_game():
     elif pve_mode:
         requested_mode = "pve"
 
-    connection = _get_auth_db_connection()
-    try:
+    with auth_db_read_cursor() as connection:
         permissions = _resolve_permissions_for_profile(connection, auth_user["profile_id"])
-    finally:
-        connection.close()
 
     if not _is_mode_allowed(requested_mode, permissions):
         return jsonify(
@@ -3383,6 +3536,7 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
 
 
 @app.route('/api/armies', methods=['GET'])
+@mode_agnostic
 def list_armies():
     """List selectable armies from config/armies."""
     return jsonify({"success": True, "armies": _list_armies()})
@@ -3470,6 +3624,7 @@ def list_snapshots():
 
 
 @app.route('/api/game/snapshot/restore', methods=['POST'])
+@changes_game_mode
 @with_engine_state_lock
 def restore_snapshot():
     """Restaure un snapshot. mode='resume' remplace l'état vivant et purge l'historique postérieur ;
@@ -3489,9 +3644,17 @@ def restore_snapshot():
     if not _SNAPSHOT_STORE.has(turn, player, phase):
         return jsonify({"success": False, "error": f"snapshot introuvable: turn={turn} player={player} phase={phase}"}), 404
 
+    # État reconstruit UNE fois, avant la bifurcation view/resume : `view` renvoie l'état
+    # complet du snapshot, il doit passer le même contrôle de mode que `resume`. Avec la
+    # persistance disque, les snapshots peuvent provenir d'une autre partie, donc d'un
+    # autre mode que celui en cours.
+    rebuilt = _SNAPSHOT_STORE.build_game_state(engine, turn, player, phase)
+    forbidden = _forbidden_mode_response(rebuilt.get("current_mode_code"))
+    if forbidden is not None:
+        return forbidden
+
     if mode == "view":
         # Sérialise le snapshot sans muter la partie vivante : swap temporaire de game_state.
-        rebuilt = _SNAPSHOT_STORE.build_game_state(engine, turn, player, phase)
         live_gs = engine.game_state
         try:
             engine.game_state = rebuilt
@@ -3509,10 +3672,9 @@ def restore_snapshot():
         })
 
     # Divergence : save-points du fichier courant postérieurs au point rembobiné → fork/écrasement.
-    # Clé de progression calculée sur l'état reconstruit du snapshot, sans commit.
-    rewound_gs = _SNAPSHOT_STORE.build_game_state(engine, turn, player, phase)
+    # Clé de progression calculée sur l'état déjà reconstruit plus haut, sans commit.
     gate = _resume_divergence_gate(
-        _SAVE_STORE.current_party(), progress_key_from_gs(rewound_gs), data
+        _SAVE_STORE.current_party(), progress_key_from_gs(rebuilt), data
     )
     if gate is not None:
         return gate
@@ -3659,6 +3821,7 @@ def _resume_divergence_gate(party_name, resume_key, data):
 
 
 @app.route('/api/game/save/load', methods=['POST'])
+@changes_game_mode
 @with_engine_state_lock
 def load_save():
     """Restaure un save-point de la partie courante (Select) : remplace l'état vivant, repart de ce point."""
@@ -3670,23 +3833,28 @@ def load_save():
         return jsonify({"success": False, "error": "No JSON data provided"}), 400
     point_id = str(require_key(data, "id"))
     mode = str(data.get("mode", "resume"))
+    # Row lue UNE fois, avant la bifurcation view/resume : `view` renvoie l'état complet du
+    # save-point, il doit donc passer le même contrôle de mode que `resume`.
+    save_row = _SAVE_STORE.point(point_id)
+    forbidden = _forbidden_mode_response(_captured_mode(save_row["state"]))
+    if forbidden is not None:
+        return forbidden
+    resume_key = progress_key_from_meta(save_row["meta"])
     if mode == "view":
-        p = _SAVE_STORE.point(point_id)
-        serializable_state = _serialize_captured_view(engine, p["state"])
+        serializable_state = _serialize_captured_view(engine, save_row["state"])
         return api_json_response({
-            "success": True, "game_state": serializable_state, "save": p["meta"], "mode": "view",
+            "success": True, "game_state": serializable_state, "save": save_row["meta"],
+            "mode": "view",
             # Log jusqu'à ce save-point (Select) : deltas de la timeline courante jusqu'à ce point.
             "game_log_history": _reconstruct_game_log(
-                _SAVE_STORE.current_party(), _SAVE_STORE.point_progress_key(point_id)
+                _SAVE_STORE.current_party(), resume_key
             ),
         })
     # Divergence : save-points postérieurs à ce point dans la partie courante → fork/écrasement.
-    gate = _resume_divergence_gate(
-        _SAVE_STORE.current_party(), _SAVE_STORE.point_progress_key(point_id), data
-    )
+    gate = _resume_divergence_gate(_SAVE_STORE.current_party(), resume_key, data)
     if gate is not None:
         return gate
-    meta = _SAVE_STORE.restore_point(engine, point_id)
+    meta = _SAVE_STORE.restore_point(engine, point_id, row=save_row)
     _reset_timeline_last(engine)
     # Commit : nouvelle timeline de rewind à partir du point chargé (capture la phase courante).
     _SNAPSHOT_STORE.reset()
@@ -3699,9 +3867,7 @@ def load_save():
     return api_json_response({
         "success": True, "game_state": serializable_state, "save": meta, "mode": "resume",
         # Log jusqu'au point chargé (commit) : deltas de la timeline courante jusqu'à ce point.
-        "game_log_history": _reconstruct_game_log(
-            _SAVE_STORE.current_party(), _SAVE_STORE.point_progress_key(point_id)
-        ),
+        "game_log_history": _reconstruct_game_log(_SAVE_STORE.current_party(), resume_key),
     })
 
 
@@ -3713,6 +3879,7 @@ def list_parties():
 
 
 @app.route('/api/game/party/load', methods=['POST'])
+@changes_game_mode
 @with_engine_state_lock
 def load_party():
     """Charge une partie sauvegardée à son game start ; elle devient la partie courante."""
@@ -3724,20 +3891,29 @@ def load_party():
         return jsonify({"success": False, "error": "No JSON data provided"}), 400
     name = str(require_key(data, "name"))
     mode = str(data.get("mode", "resume"))
+    # Ligne lue UNE fois, avant la bifurcation view/resume : `view` renvoie l'état complet
+    # et fixe la partie courante, il doit donc être soumis au même contrôle de mode que
+    # `resume` — et cette lecture sert ensuite les deux branches.
+    start_point = _SAVE_STORE.party_start_point(name)
+    forbidden = _forbidden_mode_response(_captured_mode(start_point["state"]))
+    if forbidden is not None:
+        return forbidden
     if mode == "view":
-        p = _SAVE_STORE.party_start_point(name)
         # Aperçu : la partie devient le contexte de navigation (Select liste SES points), sans commit.
         _SAVE_STORE.set_current(name)
-        serializable_state = _serialize_captured_view(engine, p["state"])
+        serializable_state = _serialize_captured_view(engine, start_point["state"])
         return api_json_response({
-            "success": True, "game_state": serializable_state, "save": p["meta"], "mode": "view",
+            "success": True, "game_state": serializable_state, "save": start_point["meta"],
+            "mode": "view",
             # Log au game_start de la partie chargée (delta de la row game_start, souvent vide).
             "game_log_history": _reconstruct_game_log(
-                name, _SAVE_STORE.party_start_progress_key(name)
+                name, progress_key_from_meta(start_point["meta"])
             ),
         })
     # Divergence : save-points postérieurs au game_start dans cette partie → fork/écrasement.
-    gate = _resume_divergence_gate(name, _SAVE_STORE.party_start_progress_key(name), data)
+    gate = _resume_divergence_gate(
+        name, progress_key_from_meta(start_point["meta"]), data
+    )
     if gate is not None:
         return gate
     meta = _SAVE_STORE.load_party_start(engine, name)
@@ -3824,6 +4000,7 @@ def delete_saves():
 
 
 @app.route('/api/config/defaults', methods=['GET'])
+@mode_agnostic
 def get_config_defaults():
     """Expose config.json defaults section to the frontend."""
     from config_loader import get_config_loader
@@ -3833,6 +4010,7 @@ def get_config_defaults():
 
 
 @app.route('/api/config/board', methods=['GET'])
+@mode_agnostic
 def get_board_config():
     """Get board configuration for frontend.
     Loads board_config.json from config/board/{paths.board}/, then walls and objectives
@@ -4262,6 +4440,7 @@ def execute_ai_turn():
     })
 
 @app.route('/api/replay/parse', methods=['POST'])
+@mode_agnostic
 def parse_replay_log():
     """
     Parse train_step.log into replay format.
@@ -4282,18 +4461,31 @@ def parse_replay_log():
     data = request.get_json() or {}
     log_path = data.get('log_path', 'train_step.log')
 
-    # Security: Only allow logs in current directory or subdirectories
-    if '..' in log_path or log_path.startswith('/'):
+    # Type vérifié avant tout usage : `{"log_path": null}` produirait sinon une
+    # AttributeError, donc un 500 avec traceback là où le reste du filtre renvoie 400.
+    if not isinstance(log_path, str) or not log_path:
+        return jsonify({"error": "log_path must be a non-empty string"}), 400
+
+    # Sécurité : filtre aligné sur /api/replay/file/<filename> — un simple nom de fichier
+    # `.log` à la racine du projet, aucun séparateur ni `..` toléré (F14).
+    if not log_path.endswith('.log'):
+        return jsonify({"error": "Only .log files are allowed"}), 400
+
+    if '..' in log_path or '/' in log_path or '\\' in log_path:
         return jsonify({"error": "Invalid log path"}), 400
 
-    if not os.path.exists(log_path):
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    resolved_log_path = os.path.join(project_root, log_path)
+
+    if not os.path.exists(resolved_log_path):
         return jsonify({"error": f"Log file not found: {log_path}"}), 404
 
-    replay_data = parse_log_file(log_path)
+    replay_data = parse_log_file(resolved_log_path)
     return jsonify(replay_data)
 
 
 @app.route('/api/replay/default', methods=['GET'])
+@mode_agnostic
 def get_default_replay_log():
     """
     Get the default step.log file content for auto-loading in replay mode.
@@ -4316,6 +4508,7 @@ def get_default_replay_log():
     return Response(content, mimetype='text/plain')
 
 @app.route('/api/replay/file/<filename>', methods=['GET'])
+@mode_agnostic
 def get_replay_log_file(filename):
     """
     Get a specific replay log file content by filename.
@@ -4349,6 +4542,7 @@ def get_replay_log_file(filename):
 
 
 @app.route('/api/replay/list', methods=['GET'])
+@mode_agnostic
 def list_replay_logs():
     """
     List available replay log files.
@@ -4392,36 +4586,16 @@ def list_replay_logs():
 
 
 @app.route('/', methods=['GET'])
+@public_endpoint
 def serve_frontend():
-    """Serve frontend instructions."""
-    return jsonify({
-        "message": "W40K Engine API Server",
-        "frontend_url": "http://localhost:5175",
-        "api_endpoints": {
-            "health": "/api/health",
-            "auth_register": "/api/auth/register",
-            "auth_login": "/api/auth/login",
-            "auth_me": "/api/auth/me",
-            "start_game": "/api/game/start",
-            "execute_action": "/api/game/action",
-            "ai_turn": "/api/game/ai-turn",
-            "get_state": "/api/game/state",
-            "reset_game": "/api/game/reset",
-            "board_config": "/api/config/board",
-            "debug_actions": "/api/debug/actions",
-            "replay_parse": "/api/replay/parse",
-            "replay_default": "/api/replay/default",
-            "replay_list": "/api/replay/list"
-        },
-        "instructions": [
-            "1. Start frontend: cd frontend && npm run dev",
-            "2. API server runs on http://localhost:5001",
-            "3. Frontend runs on http://localhost:5175",
-            "4. POST /api/game/start with pve_mode:true for AI",
-            "5. POST /api/game/action with semantic actions",
-            "6. POST /api/game/ai-turn to execute AI Player 2 turn"
-        ]
-    })
+    """Racine publique — volontairement muette.
+
+    Elle publiait le catalogue des routes et la topologie de déploiement, ce qui annulait
+    l'intérêt de renvoyer 401 plutôt que 404 sur les URL inconnues : la liste était offerte
+    à tout visiteur non authentifié. Le catalogue vit dans le README, pas sur un port
+    exposé.
+    """
+    return jsonify({"message": "W40K Engine API Server"})
 
 if __name__ == '__main__':
     print("🚀 Starting W40K Engine API Server...")

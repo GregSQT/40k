@@ -77,6 +77,9 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
         "row": row,
         "HP_CUR": hp,
         "HP_MAX": hp,
+        # Invariant de construction : les constructeurs de production posent toujours ce
+        # champ ; les lecteurs du moteur le lisent en strict depuis 2026-08-02.
+        "battle_shocked": False,
         "VALUE": 100,
         "OC": 1,
         "BASE_SIZE": 1,

@@ -37,6 +37,9 @@ def _gs(wall: Iterable[Tuple[int, int]], *, fly: bool = False) -> Dict[str, Any]
     unit = {
         "id": 1, "player": 1, "col": 5, "row": 10, "MOVE": BUDGET,
         "HP_CUR": 1, "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": keywords,
+        # Invariant de construction : posé par tous les constructeurs de production, lu en
+        # strict par le moteur depuis 2026-08-02.
+        "battle_shocked": False,
     }
     models_cache = {
         "1#0": {"col": 5, "row": 10, "level": 0, "player": 1, "squad_id": "1", "HP_CUR": 1,
@@ -199,6 +202,9 @@ def _gym_state_for_cellmap() -> Dict[str, Any]:
     unit = {
         "id": 1, "player": 1, "col": 10, "row": 10, "MOVE": 3, "HP_CUR": 1,
         "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": [],
+        # Invariant de construction : posé par tous les constructeurs de production, lu en
+        # strict par le moteur depuis 2026-08-02.
+        "battle_shocked": False,
     }
     return {**turn_state_invariants(),
         "models_cache": {

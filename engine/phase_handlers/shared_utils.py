@@ -4468,7 +4468,7 @@ def desperate_escape_pre_move(
     unit = get_unit_by_id(game_state, str(squad_id))
     if unit is None:
         raise KeyError(f"desperate_escape_pre_move: unit {squad_id} not found")
-    is_desperate = bool(was_engaged) and bool(unit.get("battle_shocked", False))
+    is_desperate = bool(was_engaged) and bool(require_key(unit, "battle_shocked"))
     if not is_desperate:
         return False, True, 0
     hazard_wounds = roll_hazard_for_unit(str(squad_id), game_state, auto_resolve)
@@ -4482,7 +4482,9 @@ def desperate_escape_post_move(squad_id: str, game_state: Dict[str, Any]) -> Non
     que le Desperate Escape n'est déclenché que pour des unités déjà battle-shocked (cf. 09.07 :
     Ordered Retreat pour non-shocked, Desperate Escape sinon)."""
     unit = get_unit_by_id(game_state, str(squad_id))
-    if unit is not None and not unit.get("battle_shocked", False):
+    if unit is None:
+        raise KeyError(f"desperate_escape_post_move: unit {squad_id} not found")
+    if not require_key(unit, "battle_shocked"):
         roll_battle_shock(str(squad_id), game_state)
 
 
@@ -9611,7 +9613,11 @@ def build_squad_move_cell_map(
         if (_m := _mc_fp.get(str(_mid))) is not None
     ))
     _unit_obj_fp = get_unit_by_id(game_state, squad_id)
-    _bshock = bool(_unit_obj_fp.get("battle_shocked", False)) if _unit_obj_fp else False  # get allowed
+    if _unit_obj_fp is None:
+        # Un squad_id introuvable ne peut pas rendre une empreinte de cache VALIDE : retomber sur
+        # « non choque » fabriquerait une cle partagee par deux etats de jeu differents.
+        raise KeyError(f"build_squad_move_cell_map: unit {squad_id} not found")
+    _bshock = bool(require_key(_unit_obj_fp, "battle_shocked"))
     from engine.phase_handlers.movement_handlers import (
         take_to_the_skies_applies_to_phase as _tts_phase_fp,
         took_to_the_skies as _tts_fp,
@@ -9623,8 +9629,7 @@ def build_squad_move_cell_map(
         # la déclaration DÉRIVÉE des unités pilotées par le modèle, et omettre la garde ferait
         # varier la clé là où le budget, lui, ne varie pas.
         bool(
-            _unit_obj_fp is not None
-            and _tts_phase_fp(game_state, charge=False)
+            _tts_phase_fp(game_state, charge=False)
             and _tts_fp(game_state, _unit_obj_fp, str(squad_id), charge=False)
         ),
         str(game_state.get("phase", "")),  # get allowed

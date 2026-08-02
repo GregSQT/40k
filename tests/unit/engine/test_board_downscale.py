@@ -306,6 +306,7 @@ def test_squads_stay_coherent_on_the_real_scenario(board_x1) -> None:
         rewards_config="ArmageddonAgent", training_config_name="x1",
         controlled_agent="ArmageddonAgent", scenario_file=str(BANK_SCEN),
         unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
+        training_n_envs=1,  # UN environnement joue en serie (engine/episode_schedule.py)
     )
     # Le RELAYOUT est ce qui est mesuré ici : il n'existe qu'en placement FIXE (positions du
     # scénario). `deployment_mode_schedule` du profil `x1` tire fixed↔active par épisode ; dès

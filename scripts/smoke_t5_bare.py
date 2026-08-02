@@ -58,6 +58,7 @@ def _make_engine(scenario_path: str, seed: int):
     eng = W40KEngine(
         rewards_config="CoreAgent", training_config_name="x1_debug", controlled_agent="CoreAgent",
         scenario_file=scenario_path, unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
+        training_n_envs=1,  # UN environnement, joue en serie (engine/episode_schedule.py)
     )
     eng.reset(seed=seed)
     return eng

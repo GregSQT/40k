@@ -76,17 +76,18 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     from engine.phase_handlers.shared_utils import is_unit_at_half_strength, roll_battle_shock, is_unit_alive
     current_player = require_key(game_state, "current_player")
     for unit in require_key(game_state, "units"):
-        if unit.get("player") != current_player:
+        if require_key(unit, "player") != current_player:
             continue
         unit_id = str(unit["id"])
         if not is_unit_alive(unit_id, game_state):
             continue
-        needs_roll = unit.get("battle_shocked", False) or is_unit_at_half_strength(unit_id, game_state)
+        needs_roll = require_key(unit, "battle_shocked") or is_unit_at_half_strength(unit_id, game_state)
         if needs_roll:
             shocked = roll_battle_shock(unit_id, game_state)
             add_debug_file_log(
                 game_state,
-                f"[BATTLE-SHOCK] E{episode} T{turn} unit={unit_id} shocked={shocked} ld={unit.get('LD')}"
+                f"[BATTLE-SHOCK] E{episode} T{turn} unit={unit_id} shocked={shocked} "
+                f"ld={require_key(unit, 'LD')}"
             )
 
     # Build activation pool (empty for now, structure ready for future)

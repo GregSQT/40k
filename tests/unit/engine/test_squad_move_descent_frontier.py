@@ -56,6 +56,9 @@ def _gs(*, level: int, fly: bool = False, move: int = MOVE) -> Dict[str, Any]:
         "id": 1, "player": 1, "col": START[0], "row": START[1], "MOVE": move,
         "HP_CUR": 1, "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": keywords,
         "level": level,
+        # Invariant de construction : posé par tous les constructeurs de production, lu en
+        # strict par le moteur depuis 2026-08-02.
+        "battle_shocked": False,
     }
     models_cache = {
         "1#0": {

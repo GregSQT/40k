@@ -1,10 +1,23 @@
 // frontend/src/Routes.tsx
 
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { useEffect } from "react";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { getAuthSession } from "./auth/authStorage";
 import { BoardReplay } from "./components/BoardReplay";
 import { BoardWithAPI } from "./components/BoardWithAPI";
 import AuthPage from "./pages/AuthPage";
+import { onSessionExpired } from "./services/apiFetch";
+
+/**
+ * Renvoie sur l'écran de login dès que le backend rejette la session (401).
+ * Les routes protégées ne lisent la session qu'au rendu : sans ce watcher, une session
+ * invalidée côté serveur laisserait l'utilisateur sur un écran de jeu inerte.
+ */
+const SessionExpiryWatcher = () => {
+  const navigate = useNavigate();
+  useEffect(() => onSessionExpired(() => navigate("/auth", { replace: true })), [navigate]);
+  return null;
+};
 
 const RootRedirect = () => {
   const authSession = getAuthSession();
@@ -62,6 +75,7 @@ const ProtectedReplayRoute = () => {
 export default function App() {
   return (
     <BrowserRouter>
+      <SessionExpiryWatcher />
       <Routes>
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/game" element={<ProtectedGameRoute />} />

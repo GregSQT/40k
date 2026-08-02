@@ -9,7 +9,7 @@ mutualisee des adversaires, et le refus explicite du repli aleatoire.
 
 import pytest
 
-from ai.train import build_training_opponents
+from ai.train import build_training_opponents, resolve_run_budget
 from ai.training_utils import make_training_env
 
 
@@ -83,4 +83,56 @@ def test_make_training_env_refuses_missing_opponents() -> None:
             unit_registry=None,
             use_bots=False,
             training_bots=None,
+            n_envs=4,
         )
+
+
+def test_make_training_env_requires_n_envs() -> None:
+    # `n_envs` est le denominateur des rampes par-episode (V11 §0.57) : l'omettre laisserait le
+    # moteur retomber sur la valeur DECLAREE du profil, qui peut ne pas etre celle du run.
+    with pytest.raises(ValueError, match="n_envs"):
+        make_training_env(
+            rank=0,
+            scenario_file="unused.json",
+            rewards_config_name="default",
+            training_config_name="default",
+            controlled_agent_key="agent",
+            unit_registry=None,
+            use_bots=True,
+            training_bots=["bot"],
+        )
+
+
+# --- Budget du RUN : les deux termes du denominateur des rampes par-episode (V11 §0.57) --------
+
+
+def test_resolve_run_budget_takes_the_runtime_n_envs() -> None:
+    """Le profil declare une INTENTION (48) ; `--step` n'ouvre qu'un environnement."""
+    resolved = resolve_run_budget({"n_envs": 48, "total_episodes": 200000}, 1)
+    assert resolved["n_envs"] == 1
+    assert resolved["total_episodes"] == 200000, "sans longueur de run propre, le profil fait foi"
+
+
+def test_resolve_run_budget_takes_the_cli_total_episodes() -> None:
+    """`--total-episodes 5000` : sans cette reecriture, la rampe se terminerait a 2,5 %."""
+    resolved = resolve_run_budget({"n_envs": 48, "total_episodes": 200000}, 48, 5000)
+    assert resolved["total_episodes"] == 5000
+
+
+def test_resolve_run_budget_prefers_the_phase_length_over_the_chunk() -> None:
+    """Curriculum : le run est decoupe en chunks, la rampe se rapporte a la PHASE entiere."""
+    resolved = resolve_run_budget({"n_envs": 48, "total_episodes": 200000}, 48, 500, 40000)
+    assert resolved["total_episodes"] == 40000
+
+
+def test_resolve_run_budget_does_not_mutate_the_profile() -> None:
+    """Le dict du profil est relu ailleurs : la resolution en rend une COPIE."""
+    profile = {"n_envs": 48, "total_episodes": 200000}
+    resolve_run_budget(profile, 1, 5000)
+    assert profile == {"n_envs": 48, "total_episodes": 200000}
+
+
+@pytest.mark.parametrize("n_envs,total", [(0, 100), (-1, 100), (True, 100), (4, 0), (4, -5)])
+def test_resolve_run_budget_refuses_absurd_budgets(n_envs, total) -> None:
+    with pytest.raises(Exception):
+        resolve_run_budget({"n_envs": 48, "total_episodes": 200000}, n_envs, total)

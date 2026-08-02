@@ -11,11 +11,16 @@ import {
 } from "../data/UnitFactory";
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
+import { apiFetch } from "../services/apiFetch";
 import type { GameState, Unit, Weapon } from "../types/game";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
-import { computeHexReachable } from "../utils/replayHexReachable";
 // Source unique du type d'action de replay : celui que produit le parseur (pas de copie locale
 // qui dérive silencieusement quand le parseur gagne un champ).
+import {
+  diffObjectiveControllers,
+  objectiveControlMessage,
+} from "../utils/objectiveControlJournal";
+import { computeHexReachable } from "../utils/replayHexReachable";
 import type { ReplayAction, ReplayObjectiveControl } from "../utils/replayParser";
 import {
   getDiceAverage,
@@ -204,7 +209,7 @@ export const BoardReplay: React.FC = () => {
   useEffect(() => {
     const loadAvailableFiles = async () => {
       try {
-        const response = await fetch("/api/replay/list");
+        const response = await apiFetch("/api/replay/list");
         if (response.ok) {
           const data = await response.json();
           setAvailableLogFiles(data.logs || []);
@@ -221,7 +226,7 @@ export const BoardReplay: React.FC = () => {
   useEffect(() => {
     const loadDefaultLog = async () => {
       try {
-        const response = await fetch("/api/replay/default");
+        const response = await apiFetch("/api/replay/default");
         if (!response.ok) {
           // Silent fail - file might not exist, user can still browse manually
           console.log("No default step.log found, user can browse manually");
@@ -354,7 +359,7 @@ export const BoardReplay: React.FC = () => {
 
     try {
       // Load file content from server
-      const response = await fetch(`/api/replay/file/${encodeURIComponent(filename)}`);
+      const response = await apiFetch(`/api/replay/file/${encodeURIComponent(filename)}`);
       if (!response.ok) {
         throw new Error(`Failed to load file: ${response.statusText}`);
       }
@@ -747,246 +752,27 @@ export const BoardReplay: React.FC = () => {
     // Clear and rebuild log up to current action
     gameLog.clearLog();
 
-    // Track persistent objective control and log changes (replay mode)
+    // Contrôle d'objectif : ce bloc le RECOMPTAIT ; il DIFFÈRE désormais deux instantanés
+    // moteur successifs. La règle et ses raisons vivent dans `utils/objectiveControlJournal.ts` —
+    // ne rien recalculer ici.
     const objectiveControllers: Record<string, number | null> = {};
-    const rules = currentEpisode.initial_state.rules;
-    const parseTurnValue = (turnValue: string): number => {
-      const parsed = parseInt(turnValue.replace("T", ""), 10);
-      if (Number.isNaN(parsed)) {
-        throw new Error(`Invalid turn value in replay action: ${turnValue}`);
-      }
-      return parsed;
-    };
-    const isObjectiveScoringWindow = (
-      action: ReplayAction,
-      actionIndex: number,
-      turnNumber: number
-    ): boolean => {
-      if (!rules) {
-        throw new Error("Replay rules missing: cannot determine objective scoring window");
-      }
-      const primaryObjective = rules.primary_objective;
-      const primaryObjectiveConfig = Array.isArray(primaryObjective)
-        ? (() => {
-            if (primaryObjective.length !== 1) {
-              throw new Error("Replay rules primary_objective must contain exactly one config");
-            }
-            return primaryObjective[0];
-          })()
-        : primaryObjective;
-      if (!primaryObjectiveConfig) {
-        throw new Error("Replay rules primary_objective is null");
-      }
-      if (turnNumber < primaryObjectiveConfig.scoring.start_turn) {
-        return false;
-      }
-
-      const player = action.player;
-      if (
-        player === 2 &&
-        turnNumber === 5 &&
-        primaryObjectiveConfig.timing.round5_second_player_phase === "fight"
-      ) {
-        if (action.type !== "fight") {
-          return false;
-        }
-        for (let i = 0; i < actionIndex; i++) {
-          const previousAction = currentEpisode.actions[i];
-          const previousTurn = parseTurnValue(previousAction.turn);
-          if (
-            previousTurn === turnNumber &&
-            previousAction.player === player &&
-            previousAction.type === "fight"
-          ) {
-            return false;
-          }
-        }
-        return true;
-      }
-
-      if (actionIndex === 0) {
-        return true;
-      }
-      const previousAction = currentEpisode.actions[actionIndex - 1];
-      const previousTurn = parseTurnValue(previousAction.turn);
-      return previousTurn !== turnNumber || previousAction.player !== player;
-    };
-    const logObjectiveControlChanges = (
-      units: Unit[],
-      objectives: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>,
-      turnNumber: number,
-      actionPhase: string,
-      actionPlayer: number
-    ) => {
-      if (!rules) {
-        throw new Error("Replay rules missing: cannot apply primary objective logic");
-      }
-      const primaryObjective = rules.primary_objective;
-      const primaryObjectiveConfig = Array.isArray(primaryObjective)
-        ? (() => {
-            if (primaryObjective.length !== 1) {
-              throw new Error("Replay rules primary_objective must contain exactly one config");
-            }
-            return primaryObjective[0];
-          })()
-        : primaryObjective;
-      if (!primaryObjectiveConfig) {
-        throw new Error("Replay rules primary_objective is null");
-      }
-      if (
-        !primaryObjectiveConfig.scoring ||
-        primaryObjectiveConfig.scoring.start_turn === undefined ||
-        primaryObjectiveConfig.scoring.start_turn === null
-      ) {
-        throw new Error("Replay rules primary_objective.scoring.start_turn is missing");
-      }
-      if (!primaryObjectiveConfig.control?.method || !primaryObjectiveConfig.control.tie_behavior) {
-        throw new Error("Replay rules primary_objective.control is missing required fields");
-      }
-      if (!primaryObjectiveConfig.control.control_method) {
-        throw new Error("Replay rules primary_objective.control.control_method is missing");
-      }
-      if (
-        !primaryObjectiveConfig.timing?.default_phase ||
-        !primaryObjectiveConfig.timing.round5_second_player_phase
-      ) {
-        throw new Error("Replay rules primary_objective.timing is missing required fields");
-      }
-      if (primaryObjectiveConfig.control.method !== "oc_sum_greater") {
-        throw new Error(
-          `Unsupported objective control method: ${primaryObjectiveConfig.control.method}`
-        );
-      }
-      if (!["secured", "default"].includes(primaryObjectiveConfig.control.control_method)) {
-        throw new Error(
-          `Unsupported control_method: ${primaryObjectiveConfig.control.control_method}`
-        );
-      }
-      if (turnNumber < primaryObjectiveConfig.scoring.start_turn) {
-        return;
-      }
-      if (
-        turnNumber === 5 &&
-        actionPlayer === 2 &&
-        primaryObjectiveConfig.timing.round5_second_player_phase === "fight" &&
-        actionPhase !== "fight"
-      ) {
-        return;
-      }
-      // ⚠️ Même divergence que `computeControlCounts` ci-dessus (ancre vs empreinte, et
-      // battle-shock 01.07 absent du step.log) : ce décompte n'est PAS celui du moteur.
-      for (const obj of objectives) {
-        const hexSet = new Set(obj.hexes.map((h) => `${h.col},${h.row}`));
-        let p1_oc = 0;
-        let p2_oc = 0;
-
-        for (const unit of units) {
-          if (unit.id < 0) {
-            continue;
-          }
-          if (unit.HP_CUR <= 0) {
-            continue;
-          }
-          const unitHex = `${unit.col},${unit.row}`;
-          if (hexSet.has(unitHex)) {
-            if (unit.OC === undefined || unit.OC === null) {
-              throw new Error(`Unit ${unit.id} missing required OC for objective control`);
-            }
-            if (unit.player === 1) {
-              p1_oc += unit.OC;
-            } else {
-              p2_oc += unit.OC;
-            }
-          }
-        }
-
-        if (!obj.name) {
-          throw new Error("Objective name is required for control tracking");
-        }
-        const prevController = objectiveControllers[obj.name] ?? null;
-        let newController =
-          primaryObjectiveConfig.control.control_method === "secured" ? prevController : null;
-        if (p1_oc > p2_oc) {
-          newController = 1;
-        } else if (p2_oc > p1_oc) {
-          newController = 2;
-        } else if (
-          primaryObjectiveConfig.control.control_method === "secured" &&
-          prevController === null
-        ) {
-          if (primaryObjectiveConfig.control.tie_behavior === "no_control") {
-            newController = null;
-          } else {
-            throw new Error(
-              `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
-            );
-          }
-        } else if (primaryObjectiveConfig.control.control_method === "default") {
-          if (primaryObjectiveConfig.control.tie_behavior !== "no_control") {
-            throw new Error(
-              `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
-            );
-          }
-        }
-
-        if (newController !== prevController) {
-          if (newController === 1) {
-            gameLog.addEvent({
-              type: "phase_change",
-              message: `P1 controls objective ${obj.name} (OC ${p1_oc} vs ${p2_oc})`,
-              turnNumber: turnNumber,
-              phase: "command",
-              player: 1,
-              action_name: "objective_control",
-            });
-          } else if (newController === 2) {
-            gameLog.addEvent({
-              type: "phase_change",
-              message: `P2 controls objective ${obj.name} (OC ${p1_oc} vs ${p2_oc})`,
-              turnNumber: turnNumber,
-              phase: "command",
-              player: 2,
-              action_name: "objective_control",
-            });
-          } else {
-            gameLog.addEvent({
-              type: "phase_change",
-              message: `Objective ${obj.name} contested (OC ${p1_oc} vs ${p2_oc})`,
-              turnNumber: turnNumber,
-              phase: "command",
-              action_name: "objective_control",
-            });
-          }
-        }
-
-        objectiveControllers[obj.name] = newController;
+    const logObjectiveControlChanges = (control: ReplayObjectiveControl, turnNumber: number) => {
+      for (const change of diffObjectiveControllers(objectiveControllers, control.controllers)) {
+        gameLog.addEvent({
+          type: "phase_change",
+          message: objectiveControlMessage(change),
+          turnNumber: turnNumber,
+          phase: "command",
+          player: change.controller ?? undefined,
+          action_name: "objective_control",
+        });
+        objectiveControllers[change.zoneName] = change.controller;
       }
     };
 
     for (let i = 0; i < currentActionIndex; i++) {
       const action = currentEpisode.actions[i];
       const turnNumber = parseInt(action.turn.replace("T", ""), 10);
-      const rollInfoMessage = action.log_message || "";
-      const rollInfoPhase =
-        action.type === "roll_info"
-          ? rollInfoMessage.includes(" FIGHTS with ")
-            ? "fight"
-            : "shoot"
-          : null;
-      const actionPhase =
-        action.type.includes("fight") ||
-        action.type === "pile_in" ||
-        action.type === "consolidation"
-          ? "fight"
-          : action.type.includes("charge")
-            ? "charge"
-            : rollInfoPhase ||
-                action.type.includes("shoot") ||
-                action.type === "advance" ||
-                action.type === "hazardous"
-              ? "shoot"
-              : "move";
-
       if (action.type === "move" && action.from && action.to) {
         const moveMessage = requireReplayLogMessage(action, "move");
         gameLog.addEvent({
@@ -1308,25 +1094,12 @@ export const BoardReplay: React.FC = () => {
         }
       }
 
-      const stateAfterAction = currentEpisode.states[i];
-      const objectives =
-        stateAfterAction?.objectives || currentEpisode.initial_state.objectives || [];
-      if (
-        objectives.length > 0 &&
-        stateAfterAction?.units &&
-        isObjectiveScoringWindow(action, i, turnNumber)
-      ) {
-        const enrichedObjectiveUnits = enrichUnitsWithStats(
-          stateAfterAction.units as Unit[],
-          currentEpisode.board.inches_to_subhex
-        );
-        logObjectiveControlChanges(
-          enrichedObjectiveUnits,
-          objectives,
-          turnNumber,
-          actionPhase,
-          action.player
-        );
+      // L'instantané peut manquer sur les états ANTÉRIEURS à la première ligne
+      // `OBJECTIVE CONTROL` du step.log : il n'y a alors rien à journaliser. `replayParser.ts`
+      // refuse déjà un épisode qui n'en porte aucune.
+      const objectiveControl = currentEpisode.states[i]?.objective_control;
+      if (objectiveControl) {
+        logObjectiveControlChanges(objectiveControl, turnNumber);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1334,7 +1107,6 @@ export const BoardReplay: React.FC = () => {
     currentActionIndex,
     currentEpisode,
     unitRegistryReady,
-    enrichUnitsWithStats,
     gameLog.addEvent, // Clear and rebuild log up to current action
     gameLog.clearLog,
   ]);

@@ -2,6 +2,7 @@
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { apiFetch } from "../services/apiFetch";
 import { ErrorBoundary } from "./ErrorBoundary";
 import TooltipWrapper from "./TooltipWrapper";
 
@@ -204,7 +205,7 @@ function BoardResolutionPicker() {
   const current = (params.get("board") as BoardKey | null) ?? defaultBoard;
 
   useEffect(() => {
-    fetch("/api/config/defaults")
+    apiFetch("/api/config/defaults")
       .then((r) => r.json())
       .then((data: { success?: boolean; defaults?: { test_board?: string } }) => {
         if (data.success && data.defaults?.test_board) {

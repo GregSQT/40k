@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Tuple
 import pytest
 
 from ai.metrics_tracker import W40KMetricsTracker
+from engine.macro_intents import ACTION_FAMILIES
 
 
 class _RecordingWriter:
@@ -64,6 +65,9 @@ def _tactical(**overrides: Any) -> Dict[str, Any]:
         "initial_ally_models": 12, "initial_enemy_models": 15,
         "models_lost": 5, "models_killed": 6,
         "valid_actions": 40, "invalid_actions": 5,
+        # Invariant : le moteur initialise TOUJOURS cette ventilation dans
+        # `episode_tactical_data` (V11 §0.56), et `log_tactical_metrics` la lit en strict.
+        "action_family_counts": {name: 0 for name in ACTION_FAMILIES},
         "victory_points_diff_controlled_minus_opponent": 5.0,
         "victory_points_opponent_episode": 27.0,
         "victory_points_controlled_episode": 32.0,

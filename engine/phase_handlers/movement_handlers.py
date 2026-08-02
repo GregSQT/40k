@@ -1082,7 +1082,7 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
         # l'action hazard_confirm (hazard 06.03 + attribution 06.02 AVANT de bouger). Une escouade
         # engagée mais saine = Ordered Retreat (aucun hazard) → flux normal ci-dessous.
         engaged_de = _squad_is_in_enemy_er(game_state, str(unit_id))
-        shocked_de = bool(unit.get("battle_shocked", False))
+        shocked_de = bool(require_key(unit, "battle_shocked"))
         if engaged_de and shocked_de:
             # Desperate Escape : résolution SÉQUENTIELLE. Tant que le hazard n'est pas roulé/
             # attribué, l'unité ne doit PAS être en cours de déplacement côté front : aucun pool
@@ -3411,7 +3411,7 @@ def movement_build_model_destinations_pool(
     # Desperate Escape : unité battle-shocked tentant un fall-back depuis l'ER ennemie.
     # Les figurines peuvent traverser les positions ennemies (règle 09.07).
     desperate_escape = (
-        unit.get("battle_shocked", False)
+        require_key(unit, "battle_shocked")
         and _squad_is_in_enemy_er(game_state, squad_id)
     )
 

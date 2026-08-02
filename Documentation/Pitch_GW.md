@@ -88,6 +88,20 @@ Ce qui reste devant est du travail volumineux mais connu : compléter le catalog
 des unités, et fournir du temps d'entraînement. Pas de verrou de recherche. Du temps et des
 moyens.
 
+**Et la fiabilité du moteur n'est pas un détail technique.** Une mesure d'équilibrage ne vaut que
+ce que vaut le moteur qui la produit : si les règles sont mal appliquées, tout ce qui suit dans ce
+document ne vaut rien. C'est pourquoi la vérification est traitée ici comme dans un système où une
+erreur coûte cher :
+
+- **2 300 tests automatisés, nommés d'après les règles officielles qu'ils vérifient.** Choisissez
+  une règle, je vous montre le test qui la verrouille — c'est lisible sans savoir coder.
+- **Chaque test est validé en réintroduisant volontairement le défaut** qu'il doit attraper. Un
+  test qui passe du premier coup ne prouve rien ; on vérifie qu'il échoue quand il doit échouer.
+- **Des parties entières jouées au hasard, en continu**, pour débusquer les incohérences que
+  personne n'a pensé à tester — y compris des enchaînements d'actions qu'aucun joueur ne tenterait.
+  Ces tests ne cherchent pas un résultat, ils cherchent une contradiction.
+- **Aucun test désactivé.** Rien n'est mis de côté en attendant d'avoir le temps.
+
 ## 4. De « elle joue » à « elle équilibre » — quatre étapes
 
 **Étape 1 — La machine compose des armées.**
@@ -176,28 +190,32 @@ catalogue complet, ni des mois d'entraînement supplémentaire — elle repose e
 existe déjà, ces deux armées et cette IA. L'équilibrage est un chantier ; l'onboarding est
 disponible.
 
-**Et ce produit a déjà un canal chez vous.**
+## 8. Un abonnement qu'on ne résilie pas
 
-Vous avez un service par abonnement, une base de clients qui paie déjà, une distribution en place.
-Il propose aujourd'hui du contenu qui se **consomme** : on le regarde, puis on attend la suite. Un
-jeu, lui, se **pratique** — chaque semaine, indéfiniment.
+Ce même produit a déjà un canal chez vous : un service par abonnement, une base de clients qui
+paie, une distribution en place. Il n'y a rien à construire autour — ni canal, ni facturation, ni
+acquisition de clients.
 
-C'est la distinction qui décide de la vie d'un abonnement. Un service ne se juge pas sur ce qui
-fait souscrire, mais sur ce qui empêche de résilier. Un catalogue qu'on a fini de regarder ne
-retient personne ; une partie en cours ramène le joueur. Vous n'auriez pas un contenu de plus à
-proposer : vous auriez une raison de rester.
+Ce qu'il propose aujourd'hui est du contenu qui se **consomme** : on le regarde, puis on attend la
+suite. Un jeu, lui, se **pratique** — chaque semaine, indéfiniment.
+
+Cette distinction décide de la vie d'un abonnement. **Un service ne se juge pas sur ce qui fait
+souscrire, mais sur ce qui empêche de résilier.** Un catalogue qu'on a fini de regarder ne retient
+personne ; une partie en cours ramène le joueur. Vous n'auriez pas un contenu de plus à proposer :
+vous auriez une raison de rester.
 
 Ce que j'ai observé chez les joueurs à qui je l'ai montré : ils n'ont pas demandé si le jeu
 sortirait un jour. Ils ont demandé comment y accéder, et combien ça coûterait. Ce n'est pas une
 étude de marché — c'est ce que j'ai constaté, spontanément, à chaque fois.
 
-Et il n'y a rien à construire autour : ni canal de distribution, ni facturation, ni acquisition de
-clients. Tout existe déjà chez vous.
+Et c'est la seule des trois applications dont le revenu se calcule directement. L'équilibrage
+produit une économie diffuse, l'onboarding une conversion difficile à isoler ; un abonnement est un
+revenu récurrent, attribuable, projetable.
 
-Un même moteur qui équilibre le jeu, y fait entrer les nouveaux joueurs et donne à votre
-abonnement une raison d'être reconduit n'est pas un outil : c'est une infrastructure.
+Un même moteur qui équilibre le jeu, y fait entrer les nouveaux joueurs et donne à votre offre en
+ligne une raison d'être reconduite n'est pas un outil : c'est une infrastructure.
 
-## 8. Ce que la simulation retire du travail — et ce qu'elle vous laisse
+## 9. Ce que la simulation retire du travail — et ce qu'elle vous laisse
 
 Aujourd'hui, éprouver un changement d'équilibrage suppose de jouer des parties. Et jouer une
 partie introduit deux problèmes que personne ne sait éliminer :
@@ -232,7 +250,7 @@ lui-même ; c'est le premier levier qui l'attaque à la racine.
 Enfin, **la même IA peut être rendue aux joueurs** — partenaire d'entraînement, adversaire de
 préparation aux tournois, outil d'analyse de liste. C'est aussi, accessoirement, un produit.
 
-## 9. Où en est le projet, sans enjoliver
+## 10. Où en est le projet, sans enjoliver
 
 **Fait :** le moteur de jeu, l'interface jouable, la chaîne de rejeu et d'analyse automatisée, et
 l'architecture d'IA qui lit les caractéristiques des unités — la fondation dont dépend tout ce
@@ -248,7 +266,7 @@ découverte. Il faut du contenu à saisir, et du temps de calcul pour l'entraîn
 ressources, pas des inconnues. C'est précisément là que je viens vous chercher : j'ai construit
 seul la partie qu'on ne peut pas acheter, et il me manque celle qu'on peut.
 
-## 10. Ce que je propose
+## 11. Ce que je propose
 
 Je ne viens pas négocier de droits aujourd'hui. Votre univers est le vôtre, et le prototype ne
 prendrait son sens qu'entre vos mains.
@@ -342,6 +360,20 @@ does not require rebuilding the AI.** The system absorbs new content.
 What remains ahead is substantial but understood work: completing the catalogue of rules and
 units, and providing training time. No research blocker. Time and resources.
 
+**And the engine's reliability is not a technical detail.** A balance measurement is only worth as
+much as the engine that produces it: if the rules are misapplied, everything else in this document
+is worthless. That is why verification here is handled as it would be in a system where a mistake
+is expensive:
+
+- **2,300 automated tests, named after the official rules they check.** Pick a rule and I will show
+  you the test that locks it down — it is readable without knowing how to code.
+- **Every test is validated by deliberately reintroducing the defect** it is meant to catch. A test
+  that passes first time proves nothing; you verify that it fails when it ought to.
+- **Entire games played at random, continuously**, to flush out inconsistencies nobody thought to
+  test — including sequences of actions no player would ever attempt. These tests do not look for a
+  result, they look for a contradiction.
+- **No disabled tests.** Nothing is set aside until there is time for it.
+
 ## 4. From "it plays" to "it balances" — four steps
 
 **Step 1 — The machine composes armies.**
@@ -427,14 +459,17 @@ The decisive point is this: **this application waits for nothing.** It requires 
 complete catalogue nor months of additional training — it rests on exactly what already exists,
 those two armies and this AI. Balancing is a programme of work; onboarding is available now.
 
-**And this product already has a channel at your end.**
+## 8. A subscription people don't cancel
 
-You have a subscription service, a customer base that already pays, distribution in place. Today
-it offers content that is **consumed**: you watch it, then wait for the next thing. A game is
-**practised** — every week, indefinitely.
+This same product already has a channel at your end: a subscription service, a customer base that
+already pays, distribution in place. There is nothing to build around it — no channel, no billing,
+no customer acquisition.
 
-That distinction decides whether a subscription lives or dies. A service is not judged on what
-makes people sign up, but on what stops them cancelling. A catalogue you have finished watching
+What it offers today is content that is **consumed**: you watch it, then wait for the next thing. A
+game is **practised** — every week, indefinitely.
+
+That distinction decides whether a subscription lives or dies. **A service is not judged on what
+makes people sign up, but on what stops them cancelling.** A catalogue you have finished watching
 retains nobody; a game in progress brings the player back. You would not be adding one more piece
 of content: you would be adding a reason to stay.
 
@@ -442,13 +477,14 @@ What I observed with the players I showed it to: they did not ask whether the ga
 one day. They asked how to get access, and what it would cost. That is not market research — it is
 what I saw, unprompted, every time.
 
-And there is nothing to build around it: no distribution channel, no billing, no customer
-acquisition. It all already exists at your end.
+And it is the only one of the three applications whose revenue can be calculated directly.
+Balancing produces a diffuse saving, onboarding a conversion that is hard to isolate; a
+subscription is recurring revenue — attributable and projectable.
 
-A single engine that balances the game, brings new players into it, and gives your subscription a
-reason to be renewed is not a tool: it is infrastructure.
+A single engine that balances the game, brings new players into it, and gives your online offering
+a reason to be renewed is not a tool: it is infrastructure.
 
-## 8. What the simulation takes off your hands — and what it leaves you
+## 9. What the simulation takes off your hands — and what it leaves you
 
 Today, testing a balance change means playing games. And playing a game introduces two problems
 nobody knows how to eliminate:
@@ -482,7 +518,7 @@ lever that addresses it at the root.
 Finally, **the same AI can be given back to the players** — as a training partner, a
 tournament-preparation opponent, or a list-analysis tool. It is also, incidentally, a product.
 
-## 9. Where the project stands, without embellishment
+## 10. Where the project stands, without embellishment
 
 **Done:** the game engine, the playable interface, the automated replay and analysis pipeline, and
 the AI architecture that reads unit characteristics — the foundation everything in this document
@@ -498,7 +534,7 @@ content to be entered, and compute time for training. Those are resources, not u
 exactly why I am coming to you: I have built alone the part that cannot be bought, and I lack the
 part that can.
 
-## 10. What I am proposing
+## 11. What I am proposing
 
 I am not here to negotiate rights today. The setting is yours, and the prototype would only make
 sense in your hands.

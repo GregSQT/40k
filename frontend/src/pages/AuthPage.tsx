@@ -1,10 +1,11 @@
 import { type FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { saveAuthSession } from "../auth/authStorage";
+import { API_BASE } from "../services/apiFetch";
 
-const API_BASE = "/api";
-
-type AuthMode = "login" | "register";
+// Pas de création de compte depuis l'interface : la route `/api/auth/register` n'existe
+// plus côté serveur (F12 de Documentation/Implémentation/A_faire/Security.md), les comptes
+// sont créés en SQL. Exposer un formulaire qui ne peut que échouer serait un leurre.
 
 interface LoginResponse {
   access_token: string;
@@ -25,13 +26,13 @@ interface LoginResponse {
 
 export default function AuthPage() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<AuthMode>("login");
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const executeLogin = async (userLogin: string, userPassword: string): Promise<LoginResponse> => {
+    // biome-ignore lint/style/noRestrictedGlobals: /api/auth/login est @public_endpoint — c'est l'appel qui OBTIENT le token
     const loginResponse = await fetch(`${API_BASE}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -75,28 +76,6 @@ export default function AuthPage() {
     setError(null);
 
     try {
-      if (mode === "register") {
-        const registerResponse = await fetch(`${API_BASE}/auth/register`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ login: trimmedLogin, password }),
-        });
-        const text = await registerResponse.text();
-        let registerPayload: { error?: string };
-        try {
-          registerPayload = text ? (JSON.parse(text) as { error?: string }) : {};
-        } catch {
-          console.error("Register response (non-JSON):", text.slice(0, 200));
-          throw new Error(
-            "Le serveur a retourné une réponse invalide. Vérifiez que le backend est démarré et accessible."
-          );
-        }
-        if (!registerResponse.ok) {
-          const errorMessage = registerPayload?.error ?? "Echec de creation du compte";
-          throw new Error(errorMessage);
-        }
-      }
-
       const loginPayload = await executeLogin(trimmedLogin, password);
       saveAuthSession({
         token: loginPayload.access_token,
@@ -139,39 +118,6 @@ export default function AuthPage() {
           Connexion utilisateur
         </h1>
 
-        <div style={{ display: "flex", gap: "10px", marginBottom: "16px" }}>
-          <button
-            type="button"
-            onClick={() => setMode("login")}
-            style={{
-              flex: 1,
-              padding: "10px",
-              borderRadius: "6px",
-              border: "1px solid #4b5563",
-              background: mode === "login" ? "#2563eb" : "#111827",
-              color: "white",
-              cursor: "pointer",
-            }}
-          >
-            Se connecter
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("register")}
-            style={{
-              flex: 1,
-              padding: "10px",
-              borderRadius: "6px",
-              border: "1px solid #4b5563",
-              background: mode === "register" ? "#2563eb" : "#111827",
-              color: "white",
-              cursor: "pointer",
-            }}
-          >
-            Creer un compte
-          </button>
-        </div>
-
         <label
           htmlFor="auth-login"
           style={{ display: "block", marginBottom: "8px", color: "#d1d5db" }}
@@ -206,7 +152,7 @@ export default function AuthPage() {
           type="password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
-          autoComplete={mode === "login" ? "current-password" : "new-password"}
+          autoComplete="current-password"
           style={{
             width: "100%",
             marginBottom: "14px",
@@ -247,11 +193,7 @@ export default function AuthPage() {
             fontWeight: 600,
           }}
         >
-          {loading
-            ? "Traitement..."
-            : mode === "login"
-              ? "Se connecter"
-              : "Creer le compte et se connecter"}
+          {loading ? "Traitement..." : "Se connecter"}
         </button>
       </form>
     </div>

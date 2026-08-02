@@ -549,8 +549,10 @@ SHOOT_SLOTS=19-23, ACTION_CHARGE=24, ACTION_FIGHT=25, DEPLOY_SLOTS=4-8 — miroi
 `SQUAD_ACTION_*` de shared_utils). `evaluation_bots.py` : 8 bots migrés (helper `_first_action_in`,
 `_shoot_focus_fire` sur SHOOT_SLOTS, dicts de poids déploiement via DEPLOYMENT_ACTIONS, TacticalBot
 inclus) — zéro littéral d'action résiduel. `env_wrappers.py` : bug phare R5 corrigé (`step(11)` →
-`ACTION_WAIT`), `return 18` et trackers diagnostiques shoot/wait migrés (BotControlledEnv +
-SelfPlayWrapper). `game_replay_logger.log_action` (layout `% 8` mort + lit `self.env.controller`
+`ACTION_WAIT`), `return 18` et trackers diagnostiques shoot/wait migrés (BotControlledEnv).
+⚠️ **Attribution corrigée le 2026-08-02 (§0.47 É7)** : cette ligne créditait aussi
+`SelfPlayWrapper`. C'est faux — les trackers shoot/wait et `get_shoot_stats` vivent
+**entièrement dans `BotControlledEnv`** ; `SelfPlayWrapper` n'en porte aucun. `game_replay_logger.log_action` (layout `% 8` mort + lit `self.env.controller`
 absent du moteur squad, aucun appelant vif) CONDAMNÉ (NotImplementedError explicite). Tests migrés
 (`test_evaluation_bots.py`, `test_env_wrappers.py`, `test_game_replay_logger.py`). Audit train.py /
 multi_agent_trainer / bot_evaluation : aucun littéral d'action (les `objectives_ref` restent T3/T4).
@@ -678,6 +680,11 @@ alignement 0/1 vs 1/2 traverse multi_agent_trainer = chantier séparé à valide
 > `ai/scenario_manager.py` a été **supprimé** — l'alignement 0/1 vs 1/2 n'a plus d'objet.
 > Cf. [§0.45](V11_agent_rework.md#s0.45).
 **Balayage** : `scripts/sweep_scenario_bank_v11.py` — 61/61 chargés + reset. Tests +83.
+> ⚠️ **Le script n'existe plus** (supprimé au commit `924c2b41`, constaté le 2026-08-02) : cette
+> ligne décrit ce qui a été fait à l'époque, pas un livrable disponible. **La capacité de
+> balayage, elle, survit** — elle est exercée par
+> [`tests/unit/ai/test_scenario_bank_migration_v11.py`](../../tests/unit/ai/test_scenario_bank_migration_v11.py).
+> (Écart §0.47 É5.)
 Validé : 1245 passed / 2 skipped ; Carnifex en charge 3 seeds sans TypeError (R6).
 ⚠️ Pertes de mêlée toujours non démontrables end-to-end (deadlock R7/T5 fight/pile_in tour 1,
 confirmé 3 voies) — inchangé depuis T2/T3, aucun code fight/charge touché par T4.
@@ -1425,6 +1432,8 @@ Plan d'origine :
   le test `test_materialize_scenario_with_refs_wall_override_emits_no_legacy_key`, corrigé.
 - ✅ **Réserve T4 close** : `sweep_scenario_bank_v11.py` a désormais son bootstrap `sys.path`
   (L19) ; `migrate_scenario_bank_v11.py` n'a **aucun import projet** → n'en a pas besoin.
+  ⚠️ **2026-08-02 : `sweep_scenario_bank_v11.py` a depuis été SUPPRIMÉ du dépôt** (`924c2b41`) ;
+  cette réserve n'a plus d'objet, le balayage vit dans `test_scenario_bank_migration_v11.py`.
 - ✅ **`ai/target_selector.py` SUPPRIMÉ** (validation utilisateur obtenue le 2026-07-16), avec son
   test `tests/unit/ai/test_target_selector.py`. Mort confirmé par grep exhaustif avant suppression :
   aucun importeur hors le module lui-même et son propre test (-9 tests collectés).

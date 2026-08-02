@@ -499,6 +499,8 @@ def _create_eval_env(
         quiet=True,
         gym_training_mode=True,
         debug_mode=debug_mode,
+        # Evaluation : UN environnement, joue en serie (denominateur des rampes par-episode).
+        training_n_envs=1,
     )
     masked_env = ActionMasker(base_env, mask_fn)
     return BotControlledEnv(

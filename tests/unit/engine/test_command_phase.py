@@ -28,6 +28,10 @@ def _cmd_unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
             "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
             "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
             "RNG_WEAPONS": [], "CC_WEAPONS": [], "UNIT_RULES": [],
+            # Invariant de construction : les 4 constructeurs de production posent ce champ
+            # (game_state, api_server, endless_duty_runtime). Les lecteurs le lisent en strict
+            # depuis 2026-08-02, une doublure qui l'omet ne represente donc plus une unite.
+            "battle_shocked": False,
             "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5}
 
 

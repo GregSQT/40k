@@ -303,6 +303,7 @@ def main() -> None:
         quiet=True,
         gym_training_mode=True,
         debug_mode=False,
+        training_n_envs=1,  # UN environnement, joue en serie (engine/episode_schedule.py)
     )
 
     total_steps = 0

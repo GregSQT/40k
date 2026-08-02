@@ -134,6 +134,10 @@ def _build_env(agent: str, training_config: str):
     config = get_config_loader()
     cfg = config.load_agent_training_config(agent, training_config)
     scenarios = train.get_scenario_list_for_phase(config, agent, training_config, scenario_type="bot")
+    # UN environnement, joue en serie : le profil en declare 48, mais c'est le nombre REEL qui
+    # sert de denominateur aux rampes par-episode (cf. engine/episode_schedule.py). Meme
+    # reecriture que le chemin d'entrainement apres `_resolve_n_envs_for_step_logging`.
+    cfg = {**cfg, "n_envs": 1}
     opponents = train.build_training_opponents(cfg, True, 100, lambda _message: None)
     return make_training_env(
         rank=0,
@@ -150,6 +154,7 @@ def _build_env(agent: str, training_config: str):
         agent_seat_mode=opponents["agent_seat_mode"],
         global_seed=opponents["agent_seat_seed"],
         opponent_mix_config=opponents["opponent_mix_config"],
+        n_envs=1,
     )()
 
 

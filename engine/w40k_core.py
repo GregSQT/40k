@@ -15,7 +15,7 @@ import numpy as np
 from typing import Dict, List, Literal, Tuple, Set, Optional, Any, Union, overload
 
 # Import shared utilities
-from shared.data_validation import require_key, require_present
+from shared.data_validation import require_key, require_positive_int, require_present
 from engine.combat_utils import calculate_hex_distance, normalize_coordinates, resolve_dice_value, set_unit_coordinates
 from engine.weapon_damage_cache import load_weapon_damage_table, stamp_weapon_keys, build_best_weapon_cache
 from engine.utils.weapon_helpers import melee_weapons, ranged_weapons
@@ -40,6 +40,7 @@ from engine.phase_handlers.shared_utils import (
 )
 
 # Import shared utilities FIRST (no circular dependencies)
+from engine.episode_schedule import episodes_per_env
 from engine.game_utils import get_unit_by_id, turn_limit_reached, get_effective_turn_limit
 
 # Import NEW extracted modules
@@ -48,8 +49,10 @@ from engine.action_decoder import DEPLOY_SLOT_CANDIDATES_CACHE_KEY, ActionDecode
 from engine.reward_calculator import RewardCalculator
 from engine.game_state import GameStateManager
 from engine.macro_intents import (
+    ACTION_FAMILIES,
     INTENT_INVADE,
     MAX_OBJECTIVES,
+    action_family,
     get_nearest_objective_zone,
     get_objective_control,
     get_objective_control_for_player,
@@ -126,7 +129,8 @@ class W40KEngine(gym.Env):
     def __init__(self, config=None, rewards_config=None, training_config_name=None,
                 controlled_agent=None, active_agents=None, scenario_file=None,
                 scenario_files=None,  # NEW: List of scenarios for random selection per episode
-                unit_registry=None, quiet=True, gym_training_mode=False, debug_mode=False, **kwargs):
+                unit_registry=None, quiet=True, gym_training_mode=False, debug_mode=False,
+                training_n_envs: Optional[int] = None, **kwargs):
         """Initialize W40K engine with AI_TURN.md compliance - training system compatible.
 
         Args:
@@ -156,6 +160,22 @@ class W40KEngine(gym.Env):
         # Store current scenario file path for reference
         self._current_scenario_file = scenario_file
         
+        # Dénominateur des rampes par-épisode, mémoïsé sur (total_episodes, n_envs).
+        self._episode_ramp_budget: Optional[Tuple[int, Any]] = None
+        self._episode_ramp_denominator: int = 1
+        # Le `n_envs` de `training_config` a-t-il été RÉSOLU par l'appelant, ou n'est-ce que la
+        # valeur déclarée du profil ? Les deux sont indiscernables une fois dans le dict, et un
+        # site qui oublie de résoudre repart en silence sur 48 envs imaginaires — c'est le défaut
+        # §0.57 qui se reforme. Une rampe refuse donc de tourner sur une valeur non résolue.
+        self._episode_ramp_n_envs_is_runtime = False
+
+        if config is not None and training_n_envs is not None:
+            raise ValueError(
+                "W40KEngine(training_n_envs=...) n'est accepté que sur le chemin d'entraînement "
+                "(config=None + training_config_name) : le chemin API/PvP ne joue pas d'épisodes "
+                "rampés."
+            )
+
         # Handle both new engine format (single config) and old training system format
         if config is None:
             # Build config from training system parameters
@@ -198,6 +218,14 @@ class W40KEngine(gym.Env):
             # Le nom de phase n'était posé que sur le chemin API : sans lui, tout message d'erreur
             # portant sur le profil chargé ne peut pas dire DE QUEL profil il parle.
             self.training_config_name = training_config_name
+            # n_envs RÉELLEMENT ouverts par le run. Le profil, lui, ne déclare qu'une intention :
+            # un worker relit le JSON (48) même quand `--step` n'a ouvert qu'un environnement.
+            # Écrit sur une COPIE — rien ne garantit que ce dict ne soit pas partagé ailleurs.
+            # Pourquoi ce nombre décide de tout : engine/episode_schedule.py.
+            if training_n_envs is not None:
+                self.training_config = dict(self.training_config)
+                self.training_config["n_envs"] = require_positive_int(training_n_envs, "training_n_envs")
+                self._episode_ramp_n_envs_is_runtime = True
             
             # Load base configuration
             board_config = config_loader.get_board_config()
@@ -732,6 +760,10 @@ class W40KEngine(gym.Env):
             'wait_actions': 0,
             'total_actions': 0,
             'total_enemy_units': 0,
+            # Usage par FAMILLE d'action : quelle decision l'agent exerce reellement. Une
+            # dimension jamais choisie, ou toujours choisie, est cassee quel que soit le
+            # win-rate — et cela se voit en quelques milliers de pas, pas en fin de run.
+            'action_family_counts': {name: 0 for name in ACTION_FAMILIES},
             'reward_breakdown': empty_reward_breakdown_totals(),
         }
         
@@ -754,6 +786,36 @@ class W40KEngine(gym.Env):
             return False
         normalized = current_path.replace("\\", "/")
         return "/scenarios/training/" in normalized
+
+    def _episode_schedule_progress(self, episode_index: int, total_episodes: int) -> float:
+        """Progression d'une rampe par-épisode. Le POURQUOI vit dans `engine/episode_schedule.py`.
+
+        `n_envs` est lu dans `training_config`, où le chemin d'entraînement a écrit le nombre
+        d'environnements RÉELLEMENT ouverts (cf. `training_n_envs` dans `__init__`).
+
+        Le couple (total, n_envs) est invariant sur la vie d'un worker, mais les tests le
+        remplacent après construction : on mémoïse sur sa valeur plutôt qu'à l'init, ce qui évite
+        de revalider deux fois par épisode (une fois par rampe) pendant tout le run.
+        """
+        if not isinstance(self.training_config, dict):
+            raise TypeError(
+                "_episode_schedule_progress requires a training_config dict "
+                f"(got {type(self.training_config).__name__})"
+            )
+        if not self._episode_ramp_n_envs_is_runtime:
+            raise KeyError(
+                "W40KEngine(training_n_envs=...) est OBLIGATOIRE pour jouer une rampe par-épisode "
+                f"(profil '{self.training_config_name}') : le compteur d'épisodes du moteur est "
+                "LOCAL à un environnement, donc la rampe se rapporte au nombre d'environnements "
+                "RÉELLEMENT ouverts — que le profil ne connaît pas (il en déclare 48 même sous "
+                "`--step`, qui n'en ouvre qu'un). Un site sériel passe 1. "
+                "Cf. engine/episode_schedule.py."
+            )
+        budget = (int(total_episodes), self.training_config["n_envs"])
+        if budget != self._episode_ramp_budget:
+            self._episode_ramp_denominator = max(1, episodes_per_env(*budget) - 1)
+            self._episode_ramp_budget = budget
+        return min(1.0, max(0.0, float(max(0, episode_index)) / float(self._episode_ramp_denominator)))
 
     def _configure_deployment_random_mix_for_episode(self) -> None:
         """
@@ -879,8 +941,7 @@ class W40KEngine(gym.Env):
                 f"(got {type(episode_number).__name__})"
             )
         episode_index = max(0, int(episode_number) - 1)
-        denominator = max(1, total_episodes - 1)
-        progress = min(1.0, max(0.0, float(episode_index) / float(denominator)))
+        progress = self._episode_schedule_progress(episode_index, total_episodes)
         capped_progress = min(progress, freeze_after_progress)
         mix_ratio = ratio_start + ((ratio_end - ratio_start) * capped_progress)
         mix_ratio = min(1.0, max(0.0, mix_ratio))
@@ -999,8 +1060,7 @@ class W40KEngine(gym.Env):
         # lieu plus bas). Premier épisode → 0 → proba = active_ratio_start. Base cohérente avec
         # l'index utilisé par le loader (`_training_episode_index`).
         episode_index = max(0, int(self.episode_number))
-        denominator = max(1, total_episodes - 1)
-        progress = min(1.0, max(0.0, float(episode_index) / float(denominator)))
+        progress = self._episode_schedule_progress(episode_index, total_episodes)
         capped_progress = min(progress, freeze_after_progress)
         p_active = ratio_start + ((ratio_end - ratio_start) * capped_progress)
         p_active = min(1.0, max(0.0, p_active))
@@ -1500,6 +1560,10 @@ class W40KEngine(gym.Env):
             'wait_actions': 0,
             'total_actions': 0,
             'total_enemy_units': 0,
+            # Usage par FAMILLE d'action : quelle decision l'agent exerce reellement. Une
+            # dimension jamais choisie, ou toujours choisie, est cassee quel que soit le
+            # win-rate — et cela se voit en quelques milliers de pas, pas en fin de run.
+            'action_family_counts': {name: 0 for name in ACTION_FAMILIES},
             'reward_breakdown': empty_reward_breakdown_totals(),
         }
         
@@ -1884,6 +1948,10 @@ class W40KEngine(gym.Env):
 
         # Joueur pre-action : requis par info["acting_player"] apres execution.
         pre_action_player = int(require_key(self.game_state, "current_player"))
+        # Phase pre-action : l'execution peut la faire avancer, et la famille d'une action en
+        # DEPEND (les ids 4-8 sont des slots de deploiement en phase deployment, des cellules
+        # de move ailleurs). La lire apres coup classerait l'action dans la phase suivante.
+        pre_action_phase = require_key(self.game_state, "phase")
 
         # V11 T6 : curseur des action_logs AVANT l'action, pour ne transferer au StepLogger que
         # les entrees produites par CETTE action (cf. _flush_squad_action_logs_to_step_logger).
@@ -2084,6 +2152,11 @@ class W40KEngine(gym.Env):
                 action_name = result.get("action")
                 if action_name in {"wait", "skip"}:
                     self.episode_tactical_data['wait_actions'] += 1
+            # `action_int`, pas `action` : `normalize_action_input` accepte un ndarray de
+            # taille 1, forme sur laquelle `int()` leve depuis NumPy 2. Compter la valeur
+            # brute ferait planter le step pour une statistique.
+            family = action_family(action_int, pre_action_phase)
+            self.episode_tactical_data['action_family_counts'][family] += 1
 
         # VENTILATION DE LA RECOMPENSE — cumulee ICI, pas cote callback.
         #
@@ -2207,7 +2280,7 @@ class W40KEngine(gym.Env):
             # fe1df7d8 « metrics OK » (2025-10-25), qui a deplace episode_tactical_data du
             # callback vers le moteur : le deplacement a reimplemente valid_actions /
             # invalid_actions / units_lost / units_killed, mais pas ceux-ci, tout en supprimant
-            # leur calcul cote callback dans le meme diff. Cinq courbes muettes pendant neuf
+            # leur calcul cote callback dans le meme diff. Quatre courbes muettes pendant neuf
             # mois (damage_dealt, damage_received, accuracy, damage_efficiency), sans erreur
             # pour le signaler : leurs consommateurs sont gardes par `> 0`, donc une courbe
             # absente ne se distingue pas d'un agent qui ne se bat jamais.
@@ -3279,7 +3352,7 @@ class W40KEngine(gym.Env):
             return False, {"error": f"hazard_confirm: unit {uid} not found"}
 
         was_engaged = _squad_is_in_enemy_er(self.game_state, str(uid))
-        if not was_engaged or not bool(unit.get("battle_shocked", False)):
+        if not was_engaged or not bool(require_key(unit, "battle_shocked")):
             return False, {
                 "error": f"hazard_confirm: unit {uid} not in Desperate Escape "
                           "(engaged + battle_shocked required)"

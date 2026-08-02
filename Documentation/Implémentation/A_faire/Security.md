@@ -82,13 +82,32 @@ Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute 
 > F1 (debugger Werkzeug exposé) est **résolu** (`api_server.py:4440` : `debug=False`, `host='127.0.0.1'`). L'étape 1 initiale (F1+F7+F11) est donc scindée : l'auth globale (F6, ex-étape 2) passe en premier — elle neutralise d'un coup l'exposition réseau de F7/F11, qui redeviennent alors un nettoyage plutôt qu'une urgence.
 
 ### Étape 1 — Authentification sur toutes les routes (F6, F12, F14) 🔴 bloquant
-**Fichier :** `services/api_server.py`
-- `@app.before_request` global : toute route exige un token de session valide, **sauf** liste blanche explicite (`/api/auth/login`, health check). Pas de logique inversée (pas de "protéger certaines routes") : tout est fermé par défaut.
-- `/api/auth/register` (F12) : **ne pas** mettre en liste blanche. Créer les comptes testeurs manuellement en SQL, ou protéger register par un jeton d'invitation à usage unique. Inscription libre = interdite tant que le MFA est reporté.
-- `/api/replay/parse` (F14) : harmoniser le filtre avec `/api/replay/file/<filename>` (extension `.log` imposée, rejet strict de tout séparateur/`..`).
-- Vérifier que le RBAC (modes de jeu) est appliqué sur les routes de jeu, pas seulement au démarrage de partie.
 
-**Validation :** toute route hors liste blanche sans token → 401 ; `register` sans invitation → refusé ; le jeu fonctionne normalement une fois loggé.
+> ⚠️ **Chantier backend ET frontend.** Constaté à l'implémentation : sur ~46 appels API du frontend,
+> **4 seulement** envoient le token (tous sur `/game/start`). Fermer l'API côté serveur sans toucher au
+> front casse l'intégralité du jeu. Il n'existe aucun client API centralisé — chaque site d'appel fait
+> son `fetch` à la main.
+
+**Backend — `services/api_server.py`**
+- `@app.before_request` global : toute route exige un token de session valide, **sauf** liste blanche explicite. Pas de logique inversée (pas de "protéger certaines routes") : tout est fermé par défaut, une route oubliée est donc fermée et non ouverte.
+- Liste blanche portée par un décorateur `@public_endpoint` posé **sur la vue**, et filtrage sur `request.endpoint` et non sur `request.path` : changer l'URL d'une route emporte son exemption avec elle. Une liste de chemins en dur se périmerait en silence — et pour `login` la panne serait un verrouillage total, pas une fuite. Trois vues exemptées : `login_user`, `health_check`, `serve_frontend`, plus les préflights `OPTIONS` (envoyés par le navigateur sans header d'auth — les bloquer casse le CORS).
+- Une URL ne correspondant à aucune route a `endpoint = None` → 401 plutôt que 404, ce qui évite de révéler quelles routes existent.
+- `g.auth_user` porte l'utilisateur validé par la porte ; `/api/auth/me` et `/api/game/start` le lisent au lieu de rejouer la jointure (2 connexions SQLite par requête au lieu de 3). `os.makedirs` sorti de `_get_auth_db_connection` vers `initialize_auth_db` : la porte s'exécute à chaque requête, y compris les prévisualisations au survol (~40/s).
+- `/api/auth/register` (F12) : **route supprimée**, pas seulement retirée de la liste blanche — décision actée = *fermeture pure*, comptes testeurs créés manuellement en SQL. La garder derrière l'authentification ne suffirait pas : n'importe quel testeur au profil `base` pourrait créer des comptes en masse. Le jeton d'invitation à usage unique reste l'évolution prévue si le nombre de testeurs grandit ; la route réapparaîtra alors avec sa validation propre. Inscription libre = interdite tant que le MFA est reporté.
+- `/api/replay/parse` (F14) : harmoniser le filtre avec `/api/replay/file/<filename>` (extension `.log` imposée, rejet strict de tout séparateur/`..`).
+- RBAC (modes de jeu) appliqué **dans la porte**, à chaque requête : contrôlé au seul démarrage de partie, un utilisateur pouvait agir sur une partie déjà lancée dont son profil interdit le mode. Trois catégories, toutes portées par un décorateur sur la vue, le contrôle étant le défaut :
+  - `@changes_game_mode` (`start_game`, `load_party`, `load_save`, `restore_snapshot`) — ces vues REMPLACENT le mode, les juger sur le mode courant bloquerait une bascule légitime. Elles valident le mode **cible** via `_forbidden_mode_response`, **avant** de muter l'engine. Charger une sauvegarde réécrit `current_mode_code` (`_sync_derived_engine_attrs`) : sans ce contrôle, un profil `pve` chargeait une partie `pvp` sans validation.
+  - `@mode_agnostic` (catalogues, config, replays, `/api/auth/me`) — n'agissent pas sur la partie. `engine` étant une globale de process, les soumettre au contrôle renverrait 403 à un testeur `pve` sur toute la séquence de démarrage du front dès qu'une partie `pvp` traîne — et 403 n'est pas redirigé vers le login par `apiFetch`.
+  - tout le reste : contrôle du mode courant. Une route nouvelle y tombe par défaut.
+- Racine `/` rendue muette : elle publiait le catalogue des routes à tout visiteur non authentifié, ce qui annulait le choix « 401 plutôt que 404 sur URL inconnue ».
+- Coût : une résolution de permissions par requête, **uniquement quand une partie tourne** et hors routes `@mode_agnostic`.
+
+**Frontend — client API centralisé**
+- Introduire un `apiFetch()` unique qui attache `Authorization: Bearer <token>` à tout appel `/api/*`, et migrer les sites d'appel dessus. Ajouter le header à la main sur chaque `fetch` est rejeté : la faille se rouvrirait au prochain `fetch` ajouté.
+- Fichiers concernés : `hooks/useEngineAPI.ts` (27 appels), `components/BoardPvp.tsx` (15), `components/BoardReplay.tsx` (3), `components/SharedLayout.tsx` (1). `pages/AuthPage.tsx` (login/register) reste hors `apiFetch` — pas de token à ce stade.
+- Traitement du 401 centralisé dans `apiFetch` (session expirée → retour à l'écran de login), plutôt que dupliqué sur chaque appelant.
+
+**Validation :** toute route hors liste blanche sans token → 401 ; `register` sans token → refusé ; le jeu fonctionne normalement une fois loggé (validation runtime PvP obligatoire, le `tsc` ne prouve rien ici).
 
 ### Étape 2 — Fermer les vecteurs d'écriture/désérialisation arbitraires (F7, F11) 🔴 bloquant
 **Fichier :** `services/api_server.py`
@@ -161,7 +180,7 @@ Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute 
 | Étape | Failles | Statut | Date |
 |---|---|---|---|
 | — | F1 (debugger Werkzeug) | ✅ Résolu | ≤2026-08-02 |
-| 1. Auth sur toutes les routes | F6, F12, F14 | ⬜ À faire | — |
+| 1. Auth sur toutes les routes | F6, F12, F14 | ✅ Fait (runtime PvP à valider) | 2026-08-02 |
 | 2. Fermer vecteurs écriture/désérialisation | F7, F11 | ⬜ À faire | — |
 | 3. Durcissement sessions + rate limiting | F2, F8 | ⬜ À faire | — |
 | 4. Réduction surface d'information | F3, F10, F13 | ⬜ À faire | — |

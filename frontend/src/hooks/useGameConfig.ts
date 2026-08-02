@@ -1,5 +1,6 @@
 // frontend/src/hooks/useGameConfig.ts
 import { useEffect, useState } from "react";
+import { apiFetch } from "../services/apiFetch";
 
 interface DisplayConfig {
   resolution?: "auto" | number;
@@ -250,7 +251,8 @@ export const useGameConfig = (_boardConfigName: string = "default"): ExtendedGam
           boardUrl += `&board_path=${encodeURIComponent(boardParam)}`;
         }
         const [boardResponse, gameResponse] = await Promise.all([
-          fetch(boardUrl),
+          apiFetch(boardUrl),
+          // biome-ignore lint/style/noRestrictedGlobals: asset statique servi par Vite, pas une route API
           fetch("/config/game_config.json"),
         ]);
 
