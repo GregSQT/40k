@@ -1,6 +1,8 @@
 # V11 — Rétablissement de l'entraînement de l'agent (agent rework)
 
-Date d'audit : 2026-07-14. Tous les faits ci-dessous ont été vérifiés dans le code actuel
+Date d'audit : 2026-07-14. **Relecture intégrale du document contre le code le 2026-08-02**
+(8 lots de vérification en lecture seule ; corrections reportées dans les entrées concernées).
+Tous les faits ci-dessous ont été vérifiés dans le code actuel
 (lecture + exécution de smoke tests), puis contre-vérifiés par une review indépendante
 (2026-07-14 soir). Chaque rupture est accompagnée de sa reproduction exacte.
 
@@ -34,7 +36,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 ---
 
 <a id="s0"></a>
-## 0. ÉTAT AU 2026-07-28 — À LIRE EN PREMIER
+## 0. ÉTAT AU 2026-08-02 — À LIRE EN PREMIER
 
 > **Cette section ne contient QUE ce qui est ouvert et actionnable.**
 > - Ce qui est résolu est en **§0hist — Historique résolu**, **en fin de document, après les [Pointeurs](#pointeurs)** :
@@ -44,7 +46,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.53` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.55` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -54,62 +56,63 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 
 ### Tableau d'état — ce qui est ouvert
 
-**Épuration du 2026-07-28** : les entrées **§0.22, §0.27, §0.28, §0.31, §0.32, §0.34, §0.35, §0.36,
-§0.37** ont été descendues en **§0hist** (intégrales, ancres inchangées) — elles étaient closes mais
-occupaient encore la section « ouvert ». Ne restaient **alors** ici que les **cinq** chantiers
-réellement actionnables ; les entrées **§0.44 → §0.51** ont été ouvertes depuis, le 2026-07-29
-(§0.39, ouverte puis close le même jour, est descendue en §0hist avec les autres ;
-§0.40 ajoutée le 2026-07-28, contenu externalisé dès l'ouverture, **close et descendue en §0hist le 2026-07-29** ;
-**§0.45** ouverte et close le 2026-07-29 — suppression de `ai/scenario_manager.py`, écrite directement en §0hist,
-donc absente de ce tableau).
+**Épuration du 2026-08-02** : les entrées **§0.29, §0.33, §0.42, §0.43, §0.49, §0.51, §0.52,
+§0.54** sont descendues en **§0hist** — elles sont closes. Épurations précédentes : **§0.22, §0.27,
+§0.28, §0.31, §0.32, §0.34, §0.35, §0.36, §0.37** le 2026-07-28 ; **§0.39, §0.40, §0.45** le
+2026-07-29.
+
+> **Ce tableau ne porte que les GRANDES LIGNES.** Le détail d'une entrée vit dans sa section ;
+> l'historique intégral est en fin de document. Une cellule qui grossit au point de raconter un
+> run ou une chronologie est à redescendre.
+
+⏳ **Relecture intégrale du document contre le code, le 2026-08-02.** Le fond technique du
+document a été confirmé ; c'est son ÉTAT qui avait dérivé. Motif dominant corrigé ici : **toutes
+les branches déclarées « NON MERGÉ » étaient en réalité mergées sur `main`** (§0.43, §0.46, §0.47,
+§0.49, §0.50, §0.51, §0.53, §0.54 — vérifié par `git merge-base --is-ancestor`), et les branches
+correspondantes sont supprimées. Les conséquences par entrée sont reportées ci-dessous.
+
+📌 **Périmètre de profils** : seuls les profils **`x1*`** sont utilisés aujourd'hui (décision
+utilisateur du 2026-08-02). Les valeurs citées pour `x5_new` / `x5_append` / `x5_debug` ne sont pas
+tenues à jour et **ne doivent pas servir de référence** — les relire dans le JSON avant usage.
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
-| **§0.14** | Re-mesure du run — win-rate par matchup | 🔴 **RUN 4 ARRÊTÉ le 2026-07-29 à 13 h 08** (SIGINT, décision utilisateur) — ⏳ **ENTRÉE PÉRISSABLE (état au 2026-07-29 13 h 30) : reconfronter au réel (`ps -eo lstart,cmd \| grep train.py`, `ls -l ai/models/ArmageddonAgent/`, `tensorboard/x1_ArmageddonAgent/`) AVANT de s'en servir.** Historique : 🔴 RUN 3 ARRÊTÉ par l'utilisateur (2026-07-28, fin de nuit) pour livrer §0.40 (points 1, 2, 4 puis 5) — il avait été lancé ~23 h 20 depuis `main` (P3-2 inclus : `obs_size` **20768**, action space **1107**, rampe de déploiement **0.0 → 0.8**) | **1** | **RUN 4 LANCÉ le 2026-07-29 à 12 h 03 min 50 s**, `python3 ai/train.py --agent ArmageddonAgent --training-config x1 --scenario config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json --new --resolution 1`, TensorBoard sous `tensorboard/x1_ArmageddonAgent/`. **🔴 ARRÊTÉ PROPREMENT PAR SIGINT le 2026-07-29 à 13 h 08**, sur décision de l'utilisateur, après ~3 400 épisodes : `model_ArmageddonAgent_interrupted.zip` + son `.pkl` VecNormalize (13 h 08), dernier checkpoint `ppo_checkpoint_240000_steps.zip` (12 h 56) ; **plus aucun processus `train.py`** (`ps -eo lstart,cmd \| grep train.py` : 0 ligne). **MOTIF DE L'ARRÊT** : ce run ne pouvait plus être la mesure de référence, pour **deux raisons cumulées** — (1) ses **adversaires d'éval sont faussés** ([§0.47](#s0.47) É4, élargi le même jour : les bots « intelligents » ciblent à côté de leur propre critère) ; (2) son **propre roster jouait un jeu non conforme aux règles** ([§0.49](#s0.49) : FLY 21.03 perdu sur 5 de ses types d'unités). 📏 **Ce qu'il a produit, seul chiffre de la journée, à conserver** : la **PREMIÈRE ÉVALUATION COMPLÈTE** au marqueur **2 000 épisodes** a été **franchie** — exactement là où le run 2 était mort. `bot_eval/combined` **0.509**, `worst_bot_score` **0.04**. Par adversaire (poids `bot_eval_weights` du profil `x1` entre parenthèses) : `vs_tactical` 0.95 (0) · `vs_defensive` **0.89** (0.23) · `vs_aggressive_smart` 0.76 (0.15) · `vs_greedy` 0.65 (0.23) · `vs_adaptive` 0.20 (0.16) · `vs_control` **0.04** (0.23). **Deux lectures** : (a) le bot **défensif apporte à lui seul 0.205 des 0.509, soit 40 % du score** — c'est le chiffrage du biais de §0.47 É4 (ce bot ne charge jamais) ; (b) la **faiblesse réelle est `vs_control` à 0.04**, sur le jeu d'objectifs qui **décide 93 % des parties**. **Chronologie du 2026-07-29** : run de nuit (checkpoints `ppo_checkpoint_560000_steps.zip` 05 h 18, `ppo_checkpoint_640000_steps.zip` 05 h 32) → relance du matin (`ppo_checkpoint_80000_steps.zip` 11 h 22) **interrompue à 11 h 38** → commit `5d2dfd48` « correction de la reprise depuis checkpoint et debug » à 11 h 57 → relance 12 h 03 → **arrêt 13 h 08**. Les checkpoints 80 k et 640 k portent bien `deploy_cand_encoder` (donc `obs_size` **20828**, contrat courant) et un `action_net` de forme **[17, 320] SANS `deploy_query_net`** — cohérent avec **§0.44 encore ouverte**. 🔴 **`obs_size` = 20828** (20768 + le bloc « candidats de déploiement », §0.40 point 3, 2026-07-29) : **`--new` OBLIGATOIRE**, tout modèle antérieur est incompatible par construction. `TOTAL_ACTION_SIZE` **inchangé** (1107). Le run 3 avait de toute façon entraîné le déploiement sur une observation fausse, ses mesures de déploiement ne valent rien. ✅ **LE WORKING TREE N'EST PLUS GELÉ** depuis 13 h 08 : la règle « dès qu'un run tourne, aucun commit de code/config, aucun checkout, aucune édition » (§0bis) **redevient applicable au prochain lancement**, elle ne contraint plus le travail en cours. Historique : 🔴 **RUN 1 mort à 20 h 20** (§0.41+§0.42 mergés pendant lui, `obs_size` changé). 🔴 **RUN 2 mort à ~21 h 45** à la 1ʳᵉ éval (600 épisodes `error` en 7,1 s) : le `git checkout` de 21 h 39 a réécrit le code sur le disque, les workers d'éval `spawn` ont reconstruit l'architecture P3-2 (`action_net [17,320]` + `charge_query_net`) pour charger un snapshot P2 (`[18,320]`, sans) → `load_state_dict` lève → `BrokenProcessPool`. Diagnostic reproduit, leçon durcie en §0bis. Points d'observation : la 1ʳᵉ éval (marqueur 2000) doit **se terminer** (§0.27) ; aucun modèle ne peut être sauvé avant 10 000 (`save_best_min_episodes`) ; le livrable est le win-rate par matchup de l'éval finale. Checkpoints 720 k et 80 k : contrats périmés, inutilisables. |
-| **[§9](V11_phaseA.md#s9)** | Phase A' — **P2 + P3 points 0/1/2 livrés**, **P3 tranches 3→8** (décisions restantes) | 🟢 **P2 + P3-0 + P3-1 + P3-2 TOUS MERGÉS sur `main`** (fast-forward du 2026-07-28 23 h ; `main` était alors `acd63b66`. ⏳ **PÉRISSABLE — état au 2026-07-29 12 h 30** : `main` = **`5d2dfd48`** « correction de la reprise depuis checkpoint et debug » (2026-07-29 11 h 57 ; touche `ai/train.py`, `Documentation/AI_TRAINING.md`, ajoute `tests/unit/ai/test_resume_from_checkpoint.py`), working tree propre ; `acd63b66` et `b371a45e` sont des ancêtres de HEAD. Vérifier par `git log --oneline -1` plutôt que de se fier à ce hash) | **2** | **P3-1 (cible de mêlée)** → §0.41 : une décision dont les candidats sont des ENTITÉS déjà observées se paramètre en **dimension d'action + tête pointeur**, pas en `CHOICE_k`. **P2 (mécanisme générique) + P3-0 (rule-choice)** → §0.42 : `CHOICE_0..5` pour les candidats qui ne sont **pas** des entités observées ; `raw_action_int % len(options)` n'existe plus. **P3-2 (cible de charge)** → §0.43 : patron P3-1, `TOTAL_ACTION_SIZE` **1107**, `obs_size` **20768**. Reste **P3-3→8** (unité à activer, allocation des pertes, pile-in/conso, move-after-shooting, FLY, optionnels), **P4**, **P5**. ⚠️ Aucune de ces 4 livraisons n'est MESURÉE : le run 4 en donne une **mesure partielle** (1ʳᵉ éval au marqueur 2 000, `combined` 0.509, §0.14), sur des adversaires faussés (§0.47 É4) et un roster non conforme (§0.49). ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). ⛔ La règle « toute tranche suivante se livre dans un **`git worktree` séparé** » ne vaut que **tant qu'un run tourne** : le run 4 est arrêté depuis le 2026-07-29 13 h 08, elle ne contraint plus le travail en cours. |
-| **§0.33** | Rollout buffer 46,9 Go pour 39 Go de RAM | 🟠 **CONDITIONNEL** — ne bloque que les profils à 48 envs | **4** (avant tout run 48 envs) | Vérifié 2026-07-28 dans la config : `x1`/`x5_new`/`x5_debug` = **8 envs** (passent) ; `x5_append`/`x1_debug` = **48 envs** (échouent à l'allocation). Ne pas lancer ces deux-là sans rouvrir l'entrée. |
-| **§0.29** | Scénario SM vs Orks fixed/active + scheduler | 🟢 **USAGE CONFIGURÉ** le 2026-07-28 (`active_ratio_end` 0.0 → **0.8**, commit `acd63b66`) — et c'est le réglage CORRECT, cf. l'asymétrie ci-dessous | 5 | Le run 3 joue une part croissante d'épisodes en `active` (0 % au début → 80 % à la fin, `p_active = start + (end−start)·progress`, [w40k_core.py:934](../../engine/w40k_core.py#L934)). 🔴 **ASYMÉTRIE VÉRIFIÉE le 2026-07-28 23 h 30 — la rampe ne s'applique QU'À L'ENTRAÎNEMENT, jamais à l'éval.** `deployment_mode_schedule.training_only: true` + `_is_training_scenario_context()` qui exige `/scenarios/training/` dans le chemin ([w40k_core.py:693](../../engine/w40k_core.py#L693)) ⇒ les scénarios d'éval (`/scenarios/holdout_regular/`, tous en `deployment_type: "active"`) **jouent TOUJOURS une phase de déploiement**, quelle que soit la rampe. **Donc `active_ratio_end: 0.0` créait un décalage entraînement/éval** : agent entraîné 100 % en placement figé, puis noté sur des parties à déployer. La rampe à 0.8 **aligne** les deux — la remettre à 0 dégraderait la mesure. ✅ **Réserve INTÉGRALEMENT levée le 2026-07-29** : les CINQ défauts de l'observation du déploiement sont corrigés (§0.40 clos ; le point 3, les hexes candidats, porte `obs_size` à 20828). Plus aucun plafond résiduel de ce côté. ⚠️ Le run 3 lancé le 2026-07-28 à 23 h 20 est ANTÉRIEUR à ces correctifs : il a entraîné le déploiement sur une observation fausse. |
-| **§0.42** | P2 « décision agent » | ✅ **MERGÉ** sur `main` — reste la MESURE (mesure partielle par le run 4, arrêté le 2026-07-29, §0.14) | — | Détail → §0.42. |
-| **§0.43** | P3-2 « cible de charge » | ✅ **MERGÉ** sur `main` le 2026-07-28 23 h (fast-forward, 8 commits, 0 conflit) — reste la MESURE (mesure partielle par le run 4, arrêté le 2026-07-29, §0.14) | — | La branche `v11-p3-2-charge-target` est devenue identique à `main` (supprimable). Détail → §0.43. |
-| **§0.44** | Tête pointeur de **déploiement** — les slots 4-8 n'ont pas de tête dédiée | 🟠 **OUVERT** — arbitré le 2026-07-29 : **REPORTÉ APRÈS LE RUN 4**, décision utilisateur | **7** (après le run 4) | §0.40 a donné à l'agent la description des 5 candidats de déploiement, mais **pas de quoi les comparer proprement** : les ids 4-8 tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`), donc leurs logits sortent de la **conv 1×1 de la carte**, aux cellules `(0, 4..8)` de la fenêtre égocentrique — pas d'une tête dédiée. Le bloc `deploy_cand_*` n'atteint cette tête que par le **conditionnement du tronc** (`move_ctx_net`), donc indirectement. Prochaine action : ajouter un `deploy_query_net`, jumeau de `choice_query_net`, qui score les 5 embeddings de candidats — ce qui oblige à distinguer « cellule de move » et « slot de déploiement » sur les mêmes ids, donc à lire la phase dans la policy. ⚠️ Touche l'architecture de la policy : **incompatible avec un run en cours** (workers d'éval en `spawn`, cf. §0bis). N'invalide PAS `obs_size`. 🟢 **DÉCISION 2026-07-29 — UN SEUL RETRAIN POUR TOUT LE LOT** : tout changement d'architecture de policy ou de contrat d'observation rend le modèle inchargeable et force un `--new` ; ils sont donc **groupés en un seul lot payant UN SEUL ré-entraînement complet**. Donc (a) le **run 4 est une mesure de référence, pas le modèle final** ; (b) §0.44 n'est plus un chantier isolé mais **un élément du lot** ; (c) l'**inventaire exhaustif** exigé avant de lancer le lot est **RENDU → [§0.48](#s0.48)**, qui **FIXE aussi le périmètre du lot** : §0.44 y est `L1`, avec `L2` et `L6`, et eux seuls ; (d) `L11` (`N_DEPLOY_SLOTS`) doit être **tranché avant** d'écrire cette tête. Détail → §0.44 ; §0.40 en §0hist. |
-| **§0.48** | Inventaire des chantiers qui cassent un contrat (archi / obs / action) + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — inventaire rendu le 2026-07-29 (il clôt l'exigence (c) de §0.44), périmètre **arbitré** le même jour | **6** (prépare le lot, à livrer après le run 4) | **13 chantiers cassent un contrat** (`L1`→`L13`, tableau avec preuve et ampleur) ; tout le reste (§0.46 1/2/3, §0.47 É1→É9, §0.33, §0.19, 19.04, bug pile-in BFS, overrun 12.06, MCTS, outillage `A_faire/`) **n'en casse aucun** et se livre à tout moment sans coûter de retrain. 🟢 **ARBITRAGE 1 — le lot = `L1` (tête pointeur de déploiement, §0.44) + `L2` (choix de l'unité à activer, P3-3) + `L6` (FLY, P3-7), et eux seuls** : « grouper » ne veut pas dire « tout faire », le lot est un périmètre choisi. `L3`, `L4`, `L5`, `L7`→`L13` sont HORS lot, à replanifier après sa mesure. 🟢 **ARBITRAGE 2 — réserver dès le lot la place des règles pas encore implémentées** (inactives) : `PROFILE_BIN_SIZE` et les drapeaux `rule_*` dérivent de listes de règles, donc **toute règle rendue vivante change `obs_size`** et impose un retrain — tension directe entre « 100 % conforme aux règles » et « un seul ré-entraînement ». ⏳ Inventaire des règles manquantes **en cours en parallèle**, contenu non préjugé. ⚠️ **Ordre** : **quatre** chantiers ne cassent aucun contrat **mais doivent être livrés AVANT la mesure de référence** — rampe de déploiement (§0.46 pt 2), conformité FLY 21.03 (§0.49), correctif des bots d'éval (§0.47 É4), conformité 01.07 (§0.50) ; sinon la comparaison est invalide. ⏳ **État au 2026-07-29 14 h 01 : les quatre sont ÉCRITS, aucun n'est MERGÉ** (§0.51) — le prérequis n'est levé qu'au merge. C'est précisément pourquoi le **run 4 a été arrêté** plutôt que mené à terme (§0.14). Détail → §0.48. |
-| **§0.46** | Résidus du 2026-07-29 — code mort `get_best_enemy_*`, rampe de déploiement sur le seul profil `x1`, instrumentation `[TRAIN DEBUG]` | 🟠 **OUVERT — points 1 et 2 ✅ LIVRÉS (non mergés), point 3 SEUL encore ouvert** (état au 2026-07-29 14 h 01) | **8** | 1️⃣ ✅ **LIVRÉ** — code mort supprimé, branche `v11-0.46-dead-code-charge-heuristic`, tête `306033ec` (2 commits) ; **reste à merger**. 2️⃣ ✅ **LIVRÉ** — les 5 profils alignés sur `x1` (`active_ratio_start` 0.0 → `active_ratio_end` 0.8), commit **`4c0ed7a4`** sur `v11-pre-lot-eval-baseline` (et non sur une branche §0.46) ; **reste à merger**. 3️⃣ 🟠 **SEUL POINT OUVERT** : statuer sur les 41 occurrences `[TRAIN DEBUG]` (instrument permanent assumé, ou temporaire à retirer). Détail → §0.46. |
-| **§0.47** | Relecture T2→T5 du 2026-07-29 — 9 écarts, dont un outil d'éval qui sert au modèle un masque de l'ANCIEN layout | 🟠 **OUVERT — É1, É2, É3, É4, É6 ✅ LIVRÉS (non mergés) ; restent É5, É7, É8, É9** (état au 2026-07-29 14 h 01) — l'audit d'origine était par LECTURE SEULE, les correctifs, eux, portent des tests ciblés | **9** | Verdicts : **T2 = ÉCARTS (6)** · **T3 = CONFORME** (une phrase de doc inexacte) · **T4 = ÉCARTS (2)** · **T5 = CONFORME** (lacune déjà déclarée, re-confirmée). Le plus lourd : `scripts/roster_matchup_stats.py:562` passe à `model.predict` un masque du layout legacy — **silencieusement faux**, les deux masques ayant la même taille (1107). L'éval **du run 4 n'était pas touchée**. 🟢 **ARBITRAGES DU 2026-07-29** : **É2+É3 = UN SEUL chantier** — supprimer `convert_gym_action` et ses ~25 tests, **et écrire à la place** le verrou d'interface `tests/unit/engine/test_agent_interface_contract.py` exigé par §8.2 (chaque entier d'action routé vers l'intention attendue dans l'espace ACTUEL, décodeur réellement appelé) ; son absence est ce qui a laissé passer É1. ✅ **É1 + É6 LIVRÉS** (`v11-0.47-eval-tooling-mask`, 10 commits, tête `cc3b5713` à 14 h 05 — le masque legacy, **plus** l'obs Dict aplatie qui empêchait l'outil de démarrer, le plafond de pas qui fabriquait des défaites, et le vainqueur recalculé au lieu d'être lu dans l'info du moteur) ; ✅ **É2 + É3 LIVRÉS** (`v11-0.47-dead-decoder-and-interface-lock`, `ac776efc` + `62a934f3`, verrou de 15 tests / 26 cas) ; ✅ **É4 LIVRÉ** (`72a34d5c` + `5f91c744` sur `v11-pre-lot-eval-baseline`), avec une **doctrine de contre-charge inventée** pour le `DefensiveBot` (11.02 + 12.04, détail en §0.47 É4) et la fin du choix de cible par accident d'ordre de tri chez `DefensiveBot` ET `GreedyBot` ⚠️ l'adversaire (0.23 du score) devient plus fort : **les win-rates d'avant et d'après ce correctif ne sont plus comparables** — la baseline d'éval change. 🔴 **É4 S'ÉLARGIT le 2026-07-29** : les bots « intelligents » (`AggressiveSmartBot` 0.15, `AdaptiveBot` 0.16, `DefensiveSmartBot`) **tirent à côté de leur propre critère** — `_best_target_slot_by_*` indexe `valid_target_pool` comme un index de slot. Le run 4 chiffre le biais : `vs_defensive` **0.89** apporte **40 % du `combined` 0.509** (§0.14). Détail → §0.47. |
-| **§0.49** | Non-conformité **21.03 « Take to the skies »** — le mot-clé FLY perdu sur 6 types d'unités, dont 5 dans les rosters d'ArmageddonAgent | ✅ **CORRIGÉ, NON MERGÉ** — branche `v11-fly-2103-conformity`, **7 commits**, tête `6191a360`, 18 tests ciblés (⏳ état constaté le 2026-07-29 à 14 h 01, la branche bougeait encore : reconfronter) | **3** (merger) | `_unit_has_keyword` ([movement_handlers.py:234-255](../../engine/phase_handlers/movement_handlers.py#L234-L255)) compare par **égalité stricte** alors que ses 5 appelants passent `"fly"` en minuscules — le reste du moteur normalise (`.strip().lower()`), c'est **l'exception**. ⚠️ Le corpus est **INCOHÉRENT**, pas uniformément en majuscules : **16** `keywordId: "fly"` (qui fonctionnent) contre **6** `keywordId: "FLY"` (qui perdent la règle) dans `frontend/src/roster/`. **5 des 6 types en majuscules sont dans les rosters d'ArmageddonAgent** (training ET holdout_regular) : **le run 4 entraînait l'agent sur un jeu où ses unités à réacteurs et son Land Speeder ne volaient pas** — c'est l'une des deux raisons de son arrêt (§0.14). Les deux défauts adjacents (traversée gratuite en gym, charge FLY inactive pour l'IA) sont **corrigés dans la même branche**. 🟢 **DÉCISION ASSUMÉE, écrite en §0.49 point 5** : une unité FLY pilotée par le modèle **déclare systématiquement**, en attendant `L6` (§0.48) — coût permanent de **2"** de mouvement pour les 5 types volants du roster, **y compris en terrain découvert** où c'est un pur désavantage. Détail → §0.49. |
-| **§0.50** | Non-conformité **01.07** — une unité **battle-shocked** contrôlait ses objectifs normalement | ✅ **CORRIGÉ, NON MERGÉE** — branche `v11-battle-shock-oc`, `4be41919` puis **5 commits, tête `b8932f52`** (⏳ constaté le 2026-07-29 à 14 h 05) ; ⚠️ **travail de suite consigné** : le `require_key(battle_shocked)` contredit **7 autres lecteurs** du même drapeau qui, eux, utilisent `get(..., False)` — à trancher (§0.50) | — | `sum_objective_control_oc_multi` ([game_state.py:2983-3060](../../engine/game_state.py#L2983-L3060)), **source unique** partagée moteur + observation, ne consultait jamais `battle_shocked` alors que 01.07 met l'OC de toutes ses figurines à `'-'`. ⚠️ **Change l'issue des parties** : tout modèle entraîné avant a appris qu'on tient un objectif gratuitement en étant choqué — dont le run 4. Détail → §0.50. |
-| **§0.51** | Branches prêtes — état du dépôt | 🟢 **LES SIX SONT MERGÉES** ⏳ **ENTRÉE PÉRISSABLE (état au 2026-07-29 17 h)** — reconfronter au réel (`git branch --merged main`, `git log main..<branche>`) AVANT usage | — | Constaté par `git merge-base --is-ancestor <branche> main` : `v11-0.46-dead-code-charge-heuristic` (`306033ec`), `v11-0.47-eval-tooling-mask` (`ee3a55b8`), `v11-0.47-dead-decoder-and-interface-lock` (`fbd1d278`), `v11-pre-lot-eval-baseline` (`b5888bdf`), `v11-battle-shock-oc` (`ee1dccb9`), `v11-fly-2103-conformity` (`aba3cb07`) — **toutes ancêtres de `main` = `d061f21b`**. Le **point de composition est donc soldé** (les deux branches du décodeur et de l'outillage d'éval sont sur `main` ensemble). 🔴 **UNE SEULE branche reste NON MERGÉE : `fix-weapon-collection-defaults` (`5980a035`)** — « distinguer *pas d'arme* (liste vide) de *entité mal construite* (clé absente) », 8 fichiers, +310/−35. **En attente : l'utilisateur a du travail en cours sur les mêmes fichiers** (`git status` : `fight_handlers.py`, `shared_utils.py`, `shooting_handlers.py`, `w40k_core.py` modifiés). Elle n'appartient PAS à V11 → [campagne du 2026-07-29](campagne_typage_et_replis_2026-07-29.md#5-limites-de-preuve-de-cette-campagne). ⚠️ **La vérification large (suite complète, `pyright`, `biome`, `tsc`) appartient à l'utilisateur et n'a toujours PAS été faite** : le merge ne l'a pas produite. Détail → §0.51. |
-| **§0.52** | Deux effets de la campagne du 2026-07-29 sur ce que le prochain entraînement mesurera | ✅ **LIVRÉ ET MERGÉ** | **0** (à lire avant d'interpréter toute courbe) | 1️⃣ **Quatre compteurs de combat morts depuis le 2025-10-25 rebranchés** (`5f1878eb`) : `shooting_accuracy`, `damage_dealt`, `damage_received`, `damage_efficiency` étaient **ABSENTES, pas nulles** — aucune mesure d'entraînement antérieure ne les contient. 2️⃣ **Type de socle scindé** (`6f0c0c6b`) : −27 % / −28 % sur deux fonctions géométriques du chemin chaud, invariant devenu impossible à violer. Détail → §0.52. Le reste de la campagne (57 commits) est **hors V11** → [campagne_typage_et_replis_2026-07-29.md](campagne_typage_et_replis_2026-07-29.md). |
-| **§0.53** | Refonte du panel de bots — les adversaires ignoraient la condition de victoire | ✅ **LIVRÉ le 2026-07-30** (non mergé) — 4 verrous prouvés rouges puis verts ; ⚠️ **la vérification large appartient à l'utilisateur** | **0** (à lire avant d'interpréter tout win-rate postérieur) | **Constat mesuré sur deux runs successifs** : le win-rate de l'agent contre chaque bot suit EXACTEMENT le rapport de ce bot aux objectifs (`control` 0.33→0.27 et `adaptive` 0.52→0.36 régressent, `greedy` 0.67→0.82, `aggressive_smart` 0.68→0.80, `tactical` 0.80→0.89, `defensive` 0.88→0.95 progressent), alors que la victoire se décide aux VP d'objectifs (`determine_winner_with_method` : les kills ne tranchent qu'à égalité). Le `combined` montait (0.62→0.65) pendant que la compétence décisive baissait. **Quatre changements** : (1) les trois géométries exclusives de déplacement (`_dest_toward_enemies` / `_dest_away_from_enemies` / `_dest_toward_objective`) sont remplacées par **un score pondéré unique** `w_objective × (−d_objectif) + w_enemy × (−d_ennemi) [+ bonus de tenue]`, réglé dans **`config/bot_movement_weights.json`** — plus aucun bot ne peut ignorer les objectifs, et « tenir l'objectif » devient une règle de score commune au lieu d'une clause propre à `ControlBot` ; (2) **deux lectures d'objectif fausses** corrigées (motif ancre-vs-par-figurine) : `_count_objectives_controlled` relit `objective_controllers` — l'état 14.02 que le moteur écrit — au lieu de recompter des ancres amies, et `_is_on_objective` teste l'**empreinte de socle par figurine** (`iter_living_model_footprints`, extrait de `sum_objective_control_oc_multi` : une seule implémentation) ; les deux vont ensemble, la posture « winning » d'`AdaptiveBot` **fuyait** les objectifs et se serait déclenchée bien plus souvent une fois le comptage juste ; (3) **`AggressiveSmartBot` et `DefensiveSmartBot` supprimés** — le premier est un doublon strict de `GreedyBot` (même géométrie, même `_score_wounded` aux trois phases ; seul écart : un poids de déploiement), le second n'était instancié nulle part ; avec eux disparaissent le regroupement « palier 2 », le scalaire `bot_eval/tier2_combined`, et l'early stopping bascule sur `bot_eval/combined` ; (4) **budget re-pondéré** dans les 5 profils : `ratios` et `bot_eval_weights` = control 0.40 / adaptive 0.20 / greedy 0.20 / defensive 0.20 (+ random 0.05 en training), et l'agrégat de classement de rosters (`roster_aggregate_rankings.py`) passe à **4 bots à 0.25**, arité généralisée. 🔴 **CONSÉQUENCES** : (a) les **matrices `{split}_matchups_{bot}.json` sur disque sont caduques** (`defensive_smart` n'existe plus, l'agrégat change de bots) — **à régénérer** ; (b) le `combined` va **BAISSER** (tous les bots deviennent compétitifs) : c'est le résultat recherché, pas une régression, mais **les seuils de gate de curriculum doivent être recalibrés** (arbitrage utilisateur) ; (c) **aucun win-rate antérieur au 2026-07-30 n'est comparable** à un win-rate postérieur. |
-| **§0.54** | Non-conformité **14.02** — « l'unité est sur un objectif » se lisait sur l'ANCRE d'escouade | ✅ **CORRIGÉ le 2026-07-30** (non mergé) — 2 verrous prouvés rouges sur la lecture par ancre, le test de discrimination restant vert | **2** (change l'issue des parties → ré-entraînement) | Jumeau trouvé en corrigeant les bots ([§0.53](#s0.53)). `is_unit_on_objective` ([shared_utils.py:1274](../../engine/phase_handlers/shared_utils.py#L1274)) comparait l'**ancre d'escouade** à un hexe d'objectif **par égalité stricte de coordonnées**, alors que **14.02** dit « *A model is within range of a terrain objective while it is within that terrain area* » — la portée se juge **PAR FIGURINE** (l'illustration du même paragraphe compte « *six of its models are within the terrain area* »), et le CONTRÔLE d'objectif du **même moteur** (`sum_objective_control_oc_multi`) comptait déjà une figurine dès qu'une case de son **socle** recouvre la zone. Deux réponses différentes à la même question dans le même état de jeu. Deux consommateurs, les deux phases d'attaque : `reroll_towound_target_on_objective` au **tir** ([shared_utils.py:7487](../../engine/phase_handlers/shared_utils.py#L7487)) et en **mêlée** ([fight_handlers.py:5240](../../engine/phase_handlers/fight_handlers.py#L5240)). Correction : implémentation **unique** `game_state.unit_is_within_objective`, sur le même générateur d'empreintes que le contrôle (`iter_living_model_footprints`) ; `is_unit_on_objective` et `_squad_on_objective` (bots) y délèguent. ⚠️ **Change l'issue des parties** : une escouade étalée, ou à socle large, déclenche désormais la relance là où elle ne la déclenchait pas (et l'inverse). Tout modèle entraîné avant a appris une géométrie fausse de cette règle. `ai/analyzer_phases/*` vérifiés : ils comptent le token du journal, sans test géométrique — pas de jumeau de plus. |
-| **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)) ; **T2→T5 relus le 2026-07-29** — les écarts trouvés vivent en **[§0.47](#s0.47)**, pas ici. Reste ouvert : les ✅ de T2→T5 ne sont revérifiés que par LECTURE (aucune exécution), et la conformité littérale de T2 est indécidable (cf. §0.47). ⚠️ Sa **section** est restée en §0hist (elle y était déjà avant l'épuration) alors qu'elle est encore ouverte — laissée en place plutôt que scindée, pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
+| **§0.14** | Re-mesure du run — win-rate par matchup | ⏳ **PÉRIMÉE — état au 2026-08-02** : des runs **postérieurs au run 4** ont tourné (modèles `robust_*` du 2026-07-30 et du 2026-08-01 dans `ai/models/ArmageddonAgent/`) et **un `train.py` tournait** au moment de la relecture. Le répertoire `tensorboard/x1_ArmageddonAgent/` n'existe plus. | **1** | Reconfronter au réel (`ps -eo lstart,cmd \| grep train.py`, `ls -l ai/models/ArmageddonAgent/`) puis **réécrire l'entrée sur le run courant**. Les chiffres du run 4 (`combined` **0.509**, `worst_bot_score` **0.04**, `vs_control` **0.04**) ne valent plus que comme historique, et sur une pondération de bots qui n'existe plus (§0.53). Détail → §0.14. |
+| **[§9](V11_phaseA.md#s9)** | Phase A' — P2 + P3-0/1/2 | 🟢 **LIVRÉS ET MERGÉS sur `main`** — restent **P3-3→8**, **P4**, **P5** | **2** | ⚠️ Aucune des quatre livraisons n'est **MESURÉE**. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). Détail → §0.42 et §0.43 (en §0hist), et [§9](V11_phaseA.md#s9). |
+| **§0.44** | Tête pointeur de **déploiement** — les slots 4-8 n'ont pas de tête dédiée | 🟠 **OUVERT** — reporté après la mesure de référence (arbitrage utilisateur du 2026-07-29) | **3** | Les ids 4-8 tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`) : leurs logits sortent de la **conv 1×1** (`_move_logits`), pas d'une tête dédiée ; `deploy_emb` n'atteint le calcul que par le **conditionnement du tronc**. Ajouter un `deploy_query_net`, jumeau de `choice_query_net` — ce qui oblige à lire la phase dans la policy. Élément `L1` du lot §0.48 ; `L11` (`N_DEPLOY_SLOTS`) à trancher **avant**. Détail → §0.44. |
+| **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — inventaire rendu, périmètre arbitré : le lot = **`L1` + `L2` + `L6`**, et eux seuls | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. Reste l'arbitrage 2 (réserver la place des règles pas encore implémentées, toute règle rendue vivante changeant `obs_size`). Détail → §0.48. |
+| **§0.46** | Résidus du 2026-07-29 | 🟠 **OUVERT — point 3 SEUL** (points 1 et 2 ✅ livrés **et mergés**) | **5** | Statuer sur les **37** occurrences `[TRAIN DEBUG]` (`ai/env_wrappers.py` 14, `engine/action_decoder.py` 15, `engine/w40k_core.py` 7, `ai/train.py` 1) : instrument permanent assumé, ou temporaire à retirer. Détail → §0.46. |
+| **§0.47** | Relecture T2→T5 du 2026-07-29 — 9 écarts | 🟠 **OUVERT — restent É5, É7, É9** (É1, É2, É3, É4, É6 ✅ livrés **et mergés** ; **É8 est tombé**) | **6** | **É8 n'a plus d'objet** : `ai/analyzer.py` ne construit plus aucun chemin de board à la main (il lit `get_board_config()` / `get_board_size()`). **É9 était mal énoncé** : les **3 graines SONT couvertes** (`test_t5_bare_loop.py`, `for seed in (1, 2, 3)`) ; ce qui manque est le **second scénario** et les **2 sièges**. Détail → §0.47. |
+| **§0.50** | Non-conformité **01.07** — travail de suite | 🟠 **OUVERT** (la correction moteur, elle, est mergée) | **7** | Deux résidus. (1) `require_key(unit, "battle_shocked")` dans `sum_objective_control_oc_multi` contredit **6** lecteurs du même drapeau qui utilisent `get(..., False)` — à trancher. (2) 🔴 **Une TROISIÈME lecture d'OC subsiste dans le frontend** : le constructeur du journal d'événements de `BoardReplay.tsx` recompte le contrôle **à l'ancre et sans battle-shock**, et son commentaire renvoie à `computeControlCounts`, **fonction supprimée**. Détail → §0.50. |
+| **§0.53** | Refonte du panel de bots — les adversaires ignoraient la condition de victoire | 🟢 **LIVRÉ ET MERGÉ** — ses **conséquences** restent ouvertes | **8** (à lire avant d'interpréter tout win-rate) | (a) les matrices `{split}_matchups_{bot}.json` ne sont **plus sur disque** : il n'y a rien à régénérer, **tout est à produire** ; (b) les **seuils de gate de curriculum doivent être recalibrés** (arbitrage utilisateur) ; (c) **aucun win-rate antérieur au 2026-07-30 n'est comparable** à un win-rate postérieur. ⏳ Le panel a **encore évolué depuis** : un **cinquième bot `ValueTradeBot`** a été ajouté, `bot_eval_weights` = `control` 0.40 / `value_trade`, `adaptive`, `greedy`, `defensive` 0.15 / `tactical` 0. Détail → §0.53 (en §0hist). |
+| **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)) ; **T2→T5 relus le 2026-07-29** — les écarts vivent en **[§0.47](#s0.47)**, pas ici. Reste ouvert : les ✅ de T2→T5 ne sont revérifiés que **par LECTURE** (aucune exécution), et la conformité littérale de T2 est indécidable. ⚠️ Sa **section** est restée en §0hist pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`.
 
-✅ **Contrôle de conformité indépendant du 2026-07-29** (vérification par lecture, PAS une nouvelle
-livraison — aucune ligne de code touchée) : **tout est conforme à ce que ce document affirme.**
-- `obs_size` : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` = **20828**, somme des formes de
-  `squad_obs_shapes()` = **20828**, et les **5** profils de
-  `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` portent **20828**.
+✅ **Contrôle de conformité du 2026-08-02** (vérification par lecture, PAS une livraison —
+aucune ligne de code touchée) :
+- `obs_size` : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` = **20828**, et les **6** profils de
+  `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` portent **20828**
+  (`x1_long` ajouté depuis la relecture du 2026-07-29).
 - `macro_intents.TOTAL_ACTION_SIZE` = **1107** ; `DEPLOY_SLOTS` = ids **4..8** ;
-  `spatial_grid.GRID_CHANNELS` = **9**.
+  `spatial_grid.GRID_CHANNELS` = **9** ; `MOVE_CELL_BASE` = 0 / `MOVE_CELL_COUNT` = 1024.
 - `raw_action_int % len(options)` : **absent du code vif** (ne subsiste que dans des commentaires
   historiques) — conforme à §0.42.
 - `pointer_policy` : `query_net`, `charge_query_net`, `fight_query_net`, `choice_query_net`
   présents ; `action_decoder` décode bien `target_slot` pour la charge et la mêlée (§0.41, §0.43).
-- **§0.44 CONFIRMÉE dans le code** : `deploy_emb` sort de `deploy_cand_encoder` et n'entre QUE dans
-  le tronc (concat) — aucune tête ne le lit ; les logits des ids **4-8** viennent bien de
-  `_move_logits` (conv 1×1).
+- **§0.44 TOUJOURS CONFIRMÉE dans le code** : `deploy_emb` sort de `deploy_cand_encoder` et n'entre
+  QUE dans le tronc (concat) — aucune tête ne le lit ; les logits des ids **4-8** viennent bien de
+  `_move_logits` (conv 1×1). Aucun `deploy_query_net`.
 - **§0.40** : les 5 points sont dans le code vif (`get_deployment_active_unit` qui lève,
   `squad_grid_anchor`, filtre `on_battlefield`, `open_deploy_slot_count` partagé,
   `deployment_slot_candidates`, purge du cache).
-- `ai/scenario_manager.py` **absent** (§0.45) ; `_attack_sequence_rng` : **zéro occurrence** (§0.38).
-- **54 tests de contrat ciblés lancés et VERTS** : `tests/unit/engine/test_action_space_mirror.py`,
-  `tests/unit/engine/test_deployment_candidate_observation.py`,
-  `tests/unit/engine/test_squad_obs_structure_doc.py`,
-  `tests/unit/ai/test_entity_encoder_extractor.py`, `tests/unit/ai/test_resume_from_checkpoint.py`.
+- `ai/scenario_manager.py` **absent** (§0.45) ; `_attack_sequence_rng` : **zéro occurrence**
+  (§0.38) ; `get_best_enemy_*` : plus aucune définition (§0.46 pt 1).
+- ⚠️ **Non revérifié le 2026-08-02** : la somme des formes de `squad_obs_shapes()` (exige une
+  exécution) et les suites de tests (la vérification large appartient à l'utilisateur).
 
 🟢 **TRANCHÉ le 2026-07-28 soir (arbitrage utilisateur) : `bot_eval_freq = 2000` ASSUMÉ**, pour
 la **granularité des courbes de métriques**. La décision « 4000 » de §0.14 est **annulée** ;
-HEAD (`x1: 2000`, commité `ea18e9ae`) et décision sont alignés — plus rien à committer.
-Conséquence acceptée en connaissance de cause : sur 30 000 épisodes, les 4 évals des marqueurs
+HEAD (`x1: 2000`) et décision sont alignés — **revérifié le 2026-08-02**, toujours à 2000.
+Conséquence acceptée en connaissance de cause : les évals des marqueurs
 < `save_best_min_episodes` (10 000) ne peuvent sauvegarder aucun modèle — coût = du temps d'éval
 « pour les courbes », aucune perte de modèle.
 
@@ -117,13 +120,9 @@ Conséquence acceptée en connaissance de cause : sur 30 000 épisodes, les 4 é
 |---|---|---|
 | `bot_eval_freq` | ~~4000~~ | **2000** |
 
-**C'était le SEUL écart qui contredisait une décision.** Les autres changements du même commit
-vont dans le bon sens : les `justification` d'`obs_size` sont mises à jour de « grille 32x32x7 » vers
-« 32x32x9 » (**corrige** un texte périmé par §0.32 T-K/T-L), et les clés `perception_radius` /
-`max_nearby_units` / `max_valid_targets` ont été **retirées des 5 profils** le 2026-07-28 — elles
-n'alimentaient que le pipeline mono-figurine supprimé le même jour, plus aucun code ne les lit
-(vérifié par grep sur `engine/`, `services/`, `ai/`, `config_loader.py`). Aucun impact sur le run.
-Le run §0.14 peut donc être lancé tel quel, sans retouche de config.
+Les clés `perception_radius` / `max_nearby_units` / `max_valid_targets` ont été **retirées de tous
+les profils** le 2026-07-28 — elles n'alimentaient que le pipeline mono-figurine supprimé le même
+jour, plus aucun code ne les lit.
 
 ⚠️ **Avant de vous appuyer sur une affirmation de ce document, lire §0bis** — en particulier la
 réserve de méthode sur le document lui-même et la règle de périmètre `ArmageddonAgent`. **Mise à
@@ -131,46 +130,6 @@ jour 2026-07-29** : la section 9 a été auditée le 2026-07-24 ([§9.0](V11_pha
 **T2→T5 ont été relus le 2026-07-29 — 9 écarts, verdicts et réserves en [§0.47](#s0.47)** ; cette
 relecture s'est faite **par lecture seule, sans aucune exécution**, elle ne vaut donc pas
 mutation-test.
-
-<a id="s0.42"></a>
-### 0.42 P2 « décision agent » — ✅ MERGÉ SUR `main` le 2026-07-28 (avec P3-1), NON MESURÉ
-
-**Ce qui est livré.** Le mécanisme générique « décision agent » ([§9.3](V11_phaseA.md#s9.3) P2) et son pilote
-([§9.4](V11_phaseA.md#s9.4) point 0) — détail complet et preuves en [§9.3bis](V11_phaseA.md#s9.3bis).
-
-**État du merge (2026-07-28 soir).** `v11-p2-agent-decision` était **rebasée** sur
-`v11-p3-1-fight-target` (dont les changements d'action space entraient en conflit avec les siens,
-tous résolus dans la branche). Le merge de la branche rebasée a donc porté **les deux chantiers à
-la fois** sur `main` : `obs_size` **20740**, `TOTAL_ACTION_SIZE` **1088**, code et 5 profils de
-config vérifiés cohérents après merge.
-
-⚠️ **Décision utilisateur ASSUMÉE : merge pendant le run `--new` de §0.14** (démarré le 2026-07-28
-à 17 h 25). Le risque était connu et accepté : un sous-processus d'évaluation qui relit la config
-d'agent depuis le disque charge un contrat d'observation **incompatible** avec le modèle en cours
-d'entraînement.
-
-**CONSTATÉ le 2026-07-28 à 20 h 21** : le run **s'est arrêté**, dernière écriture TensorBoard à
-**20 h 20 min 27 s**, quelques minutes après le merge (20 h ~15). Dernier checkpoint sauvegardé :
-`ppo_checkpoint_720000_steps.zip` (**720 000 pas**, 20 h 08). C'est la conséquence ATTENDUE du
-changement d'`obs_size`, pas un bug de P2 ni de P3-1 — ne pas le re-diagnostiquer comme tel. La
-sortie d'erreur est restée dans le terminal du run (non redirigée vers un fichier).
-
-**Ce checkpoint n'est PAS réutilisable** : il porte l'ancien contrat (`obs_size` 20626, action
-space 1062), que plus aucun code ne sait construire. Reprendre le run est impossible ; le prochain
-doit être `--new`. La mesure de win-rate de §0.14 sur l'ancien contrat n'existera donc jamais —
-c'est le coût, accepté, de ce merge.
-
-**Conséquence, non négociable.** Le prochain run **DOIT** être `--new`. Ce n'est pas un choix :
-le fail-fast d'`obs_size` à l'init du moteur le rendra explicite au démarrage.
-
-⚠️ **Ne pas comparer les win-rates d'avant et d'après comme s'ils mesuraient P2.** Ils mesureraient
-deux contrats d'observation différents, sur un mécanisme qui ne se déclenche sur AUCUN roster
-d'entraînement (aucun SM ni Ork ne porte de rule choice — le seul du jeu est le Tyranid Warrior
-mêlée). Cf. la réserve de mesure en [§9.3bis](V11_phaseA.md#s9.3bis).
-
-**Effet de bord corrigé au passage** (trouvé par mesure, pas par lecture) : `rule_choice` était
-journalisé DEUX fois dans step.log — une écriture directe correcte, plus une tentative de flush qui
-échouait en silence sur une clé mal orthographiée. Détail en [§9.3bis](V11_phaseA.md#s9.3bis).
 
 <a id="s0.44"></a>
 ### 0.44 Tête pointeur de déploiement — les slots 4-8 n'ont pas de tête dédiée — 🟠 OUVERT, REPORTÉ APRÈS LE RUN 4 (2026-07-29)
@@ -229,7 +188,7 @@ Coût accepté : le lot est plus long à préparer qu'une livraison isolée, et 
 déploiement reste non mesurée jusque-là.
 
 <a id="s0.46"></a>
-### 0.46 Résidus du 2026-07-29 — code mort `get_best_enemy_*`, rampe de déploiement sur le seul profil `x1`, instrumentation `[TRAIN DEBUG]` — 🟠 OUVERT : points 1 et 2 ✅ LIVRÉS (non mergés), point 3 SEUL encore ouvert (2026-07-29)
+### 0.46 Résidus du 2026-07-29 — code mort `get_best_enemy_*`, rampe de déploiement sur le seul profil `x1`, instrumentation `[TRAIN DEBUG]` — 🟠 OUVERT : points 1 et 2 ✅ LIVRÉS ET MERGÉS, point 3 SEUL encore ouvert (mergés le 2026-07-29, vérifié le 2026-08-02)
 
 **Cadre.** Trois constats indépendants relevés le 2026-07-29 pendant le contrôle de conformité
 (§0, bloc « Contrôle de conformité indépendant »). Ils ont été relevés pendant le run 4, alors que
@@ -239,11 +198,10 @@ est levé : les trois sont désormais traitables.**
 **1. Code mort dans [`engine/macro_intents.py`](../../engine/macro_intents.py).**
 `get_best_enemy_global`, `get_best_enemy_score` et `get_best_enemy_score_for_unit` n'ont **plus
 aucun appelant en production**. Vérifié par grep sur tout le dépôt : les seules occurrences hors du
-fichier sont des **mentions dans des commentaires/docstrings** —
-[`ai/evaluation_bots.py:59`](../../ai/evaluation_bots.py#L59),
-[`engine/w40k_core.py:5751`](../../engine/w40k_core.py#L5751),
-[`engine/phase_handlers/shared_utils.py:8981`](../../engine/phase_handlers/shared_utils.py#L8981),
-[`tests/unit/engine/test_squad_charge_target_parity.py:5`](../../tests/unit/engine/test_squad_charge_target_parity.py#L5) —
+fichier sont des **mentions dans des commentaires/docstrings** — ⏳ **re-grepées le 2026-08-02, il
+n'en reste que trois** : la pierre tombale de `engine/macro_intents.py`, un commentaire de
+`engine/w40k_core.py` et l'en-tête de `tests/unit/engine/test_squad_charge_target_parity.py`
+(celles d'`evaluation_bots.py` et de `shared_utils.py` ont disparu depuis) —
 et, dans le fichier lui-même, des **appels mutuels internes** (`get_best_enemy_global` et
 `get_best_enemy_score` appellent tous deux `get_best_enemy_score_for_unit`) : le groupe ne se tient
 plus que par lui-même. C'est le **résidu de l'heuristique de charge par `damage_ratio`**, remplacée
@@ -291,14 +249,18 @@ jamais, puis le note sur des parties à déployer.
 
 ✅ **LIVRÉ, NON MERGÉ** — constaté le 2026-07-29 à 13 h 56 : commit **`4c0ed7a4`**
 (« config(armageddon): aligner les 5 profils sur la rampe de deploiement de x1 (0.0 -> 0.8) »), sur
-la branche **`v11-pre-lot-eval-baseline`** (et NON sur une branche `§0.46`, cf. §0.51). Les **cinq**
-profils portent désormais le réglage de `x1` **clé pour clé** ; les clés du contrat lu par
+la branche **`v11-pre-lot-eval-baseline`** (et NON sur une branche `§0.46`, cf. §0.51). Les **cinq** profils d'alors
+portent le réglage de `x1` **clé pour clé** ; les clés du contrat lu par
 `_configure_deployment_mode_for_episode` (`enabled`, `training_only`, `active_ratio_start`,
 `active_ratio_end`, `schedule == "linear"`, `freeze_after_progress`, toutes via `require_key`, sans
 valeur par défaut) sont présentes, JSON revalidé. Ce chantier fait partie des quatre à livrer
-**AVANT la mesure de référence** (§0.48, ordre) ; il reste à **merger**.
+**AVANT la mesure de référence** (§0.48, ordre) ; ✅ **mergé** (vérifié le 2026-08-02).
+⏳ **Réglage changé depuis** : les **six** profils (`x1_long` ajouté) portent aujourd'hui
+`active_ratio_start` **0.3** → `active_ratio_end` **0.8** avec `freeze_after_progress` **0.5**,
+soit un plafond effectif de **0,55** — et non la rampe `0.0 → 0.8` décrite ici. Le bloc est
+**obligatoire** : son absence lève un `KeyError` (`_configure_deployment_mode_for_episode`).
 
-**3. Instrumentation `[TRAIN DEBUG]` — non documentée jusqu'ici.** **41 occurrences**, réparties
+**3. Instrumentation `[TRAIN DEBUG]` — non documentée jusqu'ici.** **41 occurrences** au 2026-07-29, **37** au 2026-08-02 (`ai/env_wrappers.py` 14, `engine/action_decoder.py` 15, `engine/w40k_core.py` 7, `ai/train.py` 1), réparties
 sur [`ai/train.py`](../../ai/train.py), [`ai/env_wrappers.py`](../../ai/env_wrappers.py),
 [`engine/action_decoder.py`](../../engine/action_decoder.py) et
 [`engine/w40k_core.py`](../../engine/w40k_core.py), toutes **conditionnées** à
@@ -310,7 +272,7 @@ mode debug), mais **absentes de toute entrée de ce document** : elles sont arri
 instrument **temporaire** (alors il se retire). Tant que ce n'est pas tranché, ne pas l'étendre.
 
 <a id="s0.47"></a>
-### 0.47 Relecture T2→T5 (dette §0.19) — 9 écarts, dont un outil d'éval au masque périmé — 🟠 OUVERT : É1, É2, É3, É4, É6 ✅ LIVRÉS (non mergés) ; restent É5, É7, É8, É9 (2026-07-29)
+### 0.47 Relecture T2→T5 (dette §0.19) — 9 écarts, dont un outil d'éval au masque périmé — 🟠 OUVERT : É1, É2, É3, É4, É6 ✅ LIVRÉS ET MERGÉS ; **É8 EST TOMBÉ** ; restent É5, É7, É9 (mergés le 2026-07-29, vérifié le 2026-08-02)
 
 **Cadre.** La part « T2→T5 jamais revérifiés » de [§0.19](#s0.19) a été traitée le **2026-07-29** :
 relecture spec par spec de [`V11_tranches.md` §5](V11_tranches.md#s5) — T2 (L524-578), T3 (L579-638),
@@ -647,19 +609,24 @@ Les trackers que T2 attribue à `SelfPlayWrapper` sont **tous portés par `BotCo
 ([`ai/env_wrappers.py:191-199`](../../ai/env_wrappers.py#L191-L199)). Écart d'attribution dans la
 doc de tranche.
 
-#### É8 — [T3, mineur] la doc affirme un passage par `get_board_dir()` que le code ne fait pas — ⚠️ NON CONTRE-VÉRIFIÉ
+#### É8 — [T3, mineur] ✅ TOMBÉ — l'écart n'existe pas dans le code (vérifié le 2026-08-02)
 
-[`ai/analyzer.py:242`](../../ai/analyzer.py#L242) construit le chemin de board **à la main**, au
-lieu de passer par `config_loader.get_board_dir()`, contrairement à ce qu'affirme T3. **Mais
-l'objectif de R2 est atteint** : aucune reconstruction `{cols}x{rows}` résiduelle. C'est donc la
-**PHRASE de la doc** qui est fausse, **pas une rupture ouverte** — d'où le verdict CONFORME de T3.
+L'écart tel qu'énoncé le 2026-07-29 (« `ai/analyzer.py` construit le chemin de board **à la
+main**, au lieu de passer par `config_loader.get_board_dir()` ») **n'est pas vérifiable dans le
+code** : `ai/analyzer.py` ne contient **aucune** occurrence de `get_board_dir`, ni aucune
+construction manuelle de chemin de board — il lit `get_config_loader().get_board_config()` et
+`.get_board_size()`. Le seul appelant de `get_board_dir()` du dépôt est `ai/train.py`.
+**Rien à corriger côté code.** Si la phrase de T3 affirme encore un passage par `get_board_dir()`,
+c'est cette phrase-là qui est à reprendre, dans la doc de tranche.
 
 #### É9 — [T5] le critère « 3 seeds × 2 sièges » de §8.3 reste non couvert — re-confirmé
 
-[`tests/unit/engine/test_t5_bare_loop.py:66-70`](../../tests/unit/engine/test_t5_bare_loop.py#L66-L70)
-n'exerce **qu'un seul scénario** et **aucun test de siège**. Cette lacune était **déjà déclarée par
-la doc** ; la relecture la **re-confirme** sans rien découvrir de neuf — T5 reste CONFORME à ce
-qu'elle annonce d'elle-même.
+⚠️ **Énoncé corrigé le 2026-08-02.** Les **3 graines SONT couvertes** :
+`tests/unit/engine/test_t5_bare_loop.py` boucle sur `for seed in (1, 2, 3)` dans ses trois tests
+(les lignes 66-70 citées à l'origine sont la *fixture* de scénario, pas un corps de test). Ce qui
+reste réellement non couvert du critère §8.3, c'est le **second scénario** et le **second siège**.
+Cette lacune était **déjà déclarée par la doc** ; la relecture la **re-confirme** sans rien
+découvrir de neuf — T5 reste CONFORME à ce qu'elle annonce d'elle-même.
 
 <a id="s0.48"></a>
 ### 0.48 Inventaire des chantiers qui cassent un contrat + PÉRIMÈTRE du lot de ré-entraînement — 🟠 OUVERT (2026-07-29)
@@ -704,7 +671,7 @@ ré-entraînement — c'est le critère de tri, pas l'importance du chantier.
 - [§0.47](#s0.47) **É1 à É9** (relecture T2→T5).
 - [§0.49](#s0.49) conformité **FLY 21.03** — non-conformité de moteur, à ne pas confondre avec `L6`
   (FLY comme décision d'agent), qui, lui, est dans le lot.
-- [§0.50](#s0.50) conformité **01.07** battle-shock / contrôle d'objectif (déjà corrigée, non mergée).
+- [§0.50](#s0.50) conformité **01.07** battle-shock / contrôle d'objectif (corrigée et mergée).
 - [§0.33](#s0.33) rollout buffer / nombre d'envs.
 - [§0.19](#s0.19) revérification T1→T5.
 - **Règle 19.04 leader ↔ bodyguard** : change la **VALEUR** de bits existants, pas leur **nombre**.
@@ -730,9 +697,9 @@ ré-entraînement — c'est le critère de tri, pas l'importance du chantier.
   ([§0.50](#s0.50), déjà corrigée mais **non mergée**) change **l'issue des parties**. Arrivés
   après, ils rendent toute comparaison à une mesure antérieure **INVALIDE** — c'est exactement
   pourquoi le run 4 a été arrêté ([§0.14](#s0.14)) plutôt que mené à terme.
-  ⏳ **État au 2026-07-29 14 h 01 : les QUATRE sont ÉCRITS, aucun n'est MERGÉ** — rampe `4c0ed7a4`,
-  FLY `v11-fly-2103-conformity` (tête `6191a360`), bots `72a34d5c` + `5f91c744`, 01.07 `4be41919`.
-  Le prérequis d'ordre n'est donc levé qu'**au merge**, pas à l'écriture (inventaire → [§0.51](#s0.51)).
+  ✅ **État au 2026-08-02 : les QUATRE sont MERGÉS sur `main`** — rampe `4c0ed7a4`,
+  FLY `6191a360`, bots `72a34d5c` + `5f91c744`, 01.07 `4be41919` ; vérifié par
+  `git merge-base --is-ancestor`. **Le prérequis d'ordre est LEVÉ.**
 - ⚠️ **Le verrou d'interface de [§0.47](#s0.47) É3 fige l'espace d'action COURANT (1107)** : écrit
   avant L2 / L8 / L9, il **devra être mis à jour avec le lot**. Ce n'est pas une raison de ne pas
   l'écrire, c'est une **conséquence à assumer**.
@@ -767,120 +734,8 @@ confrontés au vocabulaire observé) est **en cours de constitution en parallèl
 n'est **pas préjugé** ici, aucun chiffre n'en est supposé tant qu'il n'est pas rendu.
 **Coût accepté** : quelques bits inutilisés dans l'observation.
 
-<a id="s0.49"></a>
-### 0.49 Non-conformité 21.03 « Take to the skies » — le mot-clé FLY perdu par comparaison sensible à la casse — ✅ CORRIGÉ, NON MERGÉ (2026-07-29)
-
-**Cadre.** Découvert le 2026-07-29, pendant le run 4 — c'est **l'une des deux raisons de son arrêt**
-([§0.14](#s0.14)).
-
-✅ **CORRIGÉ sur la branche `v11-fly-2103-conformity`, NON MERGÉE.** ⏳ **État constaté le 2026-07-29
-à 14 h 05** (`git log main..v11-fly-2103-conformity`) — **la branche bougeait encore pendant ce
-constat** (elle est passée de 5 à 8 commits entre 13 h 56 et 14 h 02), **reconfronter au réel avant
-usage** : **8 commits**, tête **`4c88ec60`** (14 h 02) — `d1099b26` (casse du mot-clé), `18096753`
-(traversée payante), `350da3cf` (vol de charge pour l'IA), `6b714180` (commentaire qui disait
-l'inverse du code), `3b234200` (éligibilité bornée sur le budget réel), `c57f4fb6` (table de phases
-née morte + garde de phase symétrique sur `get_squad_move_budget` : le budget d'une unité volante
-était amputé de 2" **en tir, en charge et en combat** via `grid_half_extent_subhex`), `6191a360`
-(un `keywordId` absent ou nul était sauté en silence — désormais `ValueError`, plus de valeur par
-défaut masquant une donnée corrompue), `4c88ec60` (justification écrite de la politique moteur du
-point 5 ci-dessous).
-Verrou : `tests/unit/engine/test_fly_2103_conformity.py`, **18 tests** (compté par
-`git show <branche>:<fichier>`), dont une **sonde in-engine** sur un vrai `W40KEngine` chargé de
-`scenario_training_armageddon.json`, qui **échoue si elle ne rencontre aucune unité volante**
-(« SONDE MUETTE »). ⚠️ **Non validée au-delà de ces tests ciblés** : la vérification large appartient
-à l'utilisateur et n'a pas été faite (§0.51).
-
-**1. La rupture.** `_unit_has_keyword`
-([`engine/phase_handlers/movement_handlers.py:234-255`](../../engine/phase_handlers/movement_handlers.py#L234-L255))
-compare le mot-clé par **ÉGALITÉ STRICTE** (`keyword_value == keyword_id`), et ses **5 appelants**
-passent `"fly"` en minuscules :
-[movement_handlers.py:265](../../engine/phase_handlers/movement_handlers.py#L265),
-[:522](../../engine/phase_handlers/movement_handlers.py#L522),
-[:834](../../engine/phase_handlers/movement_handlers.py#L834),
-[charge_handlers.py:83](../../engine/phase_handlers/charge_handlers.py#L83),
-[:5466](../../engine/phase_handlers/charge_handlers.py#L5466).
-
-**C'est l'EXCEPTION, pas la norme du moteur** : partout ailleurs les mots-clés sont **normalisés**
-avant comparaison — [`engine/game_state.py:80`](../../engine/game_state.py#L80),
-[:102](../../engine/game_state.py#L102), [:1162](../../engine/game_state.py#L1162),
-[`shared_utils.py:4265`](../../engine/phase_handlers/shared_utils.py#L4265) (`.strip().lower()`).
-
-**2. ⚠️ Le corpus est INCOHÉRENT, pas uniformément en majuscules.** Dans `frontend/src/roster/` :
-**16** occurrences `keywordId: "fly"` et **6** `keywordId: "FLY"`. **Les 16 fonctionnent, les 6
-perdent la règle.**
-
-> ⚠️ **Correction d'une analyse fausse** : une première lecture concluait « tout le chemin FLY est
-> mort ». **C'est FAUX** — les deux tiers du corpus passent. La rupture est **partielle et
-> silencieuse**, ce qui est pire à diagnostiquer qu'un chemin uniformément mort.
-
-**3. Gravité — elle touchait précisément le roster entraîné.** **Cinq des six** types en majuscules
-sont dans les rosters d'ArmageddonAgent, présents à la fois dans
-`config/agents/ArmageddonAgent/rosters/500pts/training/` **ET** `.../holdout_regular/` :
-`VanguardVeteranSquadJumpPack`, `VanguardVeteranSquadJumpPackPlasma`,
-`VanguardVeteranSquadJumpPackSergeant`, `ChaplainJumpPack`,
-`LandSpeederOnslaughtGatlingCannon`. (Le sixième, `LandSpeederHeavyFlamer`, n'est dans aucun
-roster de l'agent.) **Le run 4 entraînait donc l'agent sur un jeu où ses unités à réacteurs et son
-Land Speeder ne volaient pas** — ni traversée, ni charge FLY.
-
-**4. Deux défauts adjacents, révélés DÈS la casse corrigée — ✅ CORRIGÉS dans la même branche.** Ils
-étaient masqués par la rupture : la corriger sans eux aurait transformé un bug en un autre.
-
-- **(a) Traversée FLY gratuite en gym, EN FAVEUR DE L'AGENT.** `_fly_traversal_active`
-  ([movement_handlers.py:258-273](../../engine/phase_handlers/movement_handlers.py#L258-L273)) rend
-  `True` **inconditionnellement** pour une unité IA, alors que le **malus de 2"** de 21.03 n'est
-  retranché du budget que pour les unités de `units_took_to_skies`
-  ([shared_utils.py:4541-4546](../../engine/phase_handlers/shared_utils.py#L4541-L4546)) — ensemble
-  **jamais rempli en gym**. L'agent volerait donc **sans en payer le coût**.
-  → ✅ **`18096753`** : `took_to_the_skies(gs, unit, id, charge=)` devient la **SOURCE UNIQUE** de la
-  déclaration, dont dérivent **et** la traversée (`_fly_traversal_active`, coût de descente) **et**
-  le `-2"` (`get_squad_move_budget`) — la dissociation n'est plus représentable. C'est une **fonction
-  PURE de l'état**, donc vue à l'identique par le masque (`build_squad_move_cell_map`), l'observation
-  et l'exécution : une déclaration posée APRÈS la construction du pool aurait offert des destinations
-  que le budget réel ne permet plus. Le fingerprint du cache de pool lit le même prédicat. 21.03
-  n'énumère que « *normal, advance, fall-back or charge move* » : hors de ces mouvements (pile-in,
-  consolidation) il n'y a plus de traversée — c'était le cas `phase != "move"` qui rendait `True`.
-  Deux tests **existants** devenus rouges parce que l'unité paie enfin : leur `MOVE` est relevé de 2"
-  pour retrouver le **budget effectif** d'origine — **aucune assertion assouplie**.
-- **(b) Charge FLY inactive pour toute unité IA.** `_charge_fly_active`
-  ([charge_handlers.py:83-88](../../engine/phase_handlers/charge_handlers.py#L83-L88)) rend `False`
-  dès `_charge_is_ai_unit`, alors que **21.03 nomme explicitement le mouvement de charge**.
-  → ✅ **`350da3cf`** : le court-circuit est supprimé, la déclaration déléguée à la même source unique
-  `took_to_the_skies` ; `_charge_is_ai_unit`, sans appelant restant, est supprimé. **Corollaire
-  indispensable** : `charge_build_valid_plan` — le chemin qu'exécute `w40k_core.squad_charge`, donc
-  l'agent, et l'oracle d'observation — recalculait son budget en ligne et n'appliquait donc **jamais**
-  les 2", alors qu'il déduisait déjà `squad_descent_penalty_subhex` (ignore du vertical dès que le vol
-  est actif) : l'unité volante aurait ignoré le vertical **gratuitement**. Le budget passe par
-  `_charge_budget_subhex`, source unique, où traversée et coût sortent de la **même** déclaration.
-
-**5. 🟢 DÉCISION ASSUMÉE — POLITIQUE MOTEUR DE LA DÉCLARATION : une unité FLY pilotée par le modèle
-DÉCLARE SYSTÉMATIQUEMENT.** (Écrite ici parce qu'elle ne figurait **nulle part** dans ce journal,
-alors qu'elle change ce que l'agent apprend.) 21.03 fait de « prendre les airs » une **décision du
-joueur actif** ; l'agent ne peut pas encore décider — c'est le chantier **`L6`** du lot
-([§0.48](#s0.48), P3-7), qui casse le contrat d'observation et sort donc du périmètre de ce
-correctif. Il fallait néanmoins **une constante**, et les deux seules possibles ne sont pas
-équivalentes : « ne jamais déclarer » rendrait le mot-clé FLY **inerte** pour l'agent — pas plus
-conforme, seulement muet ; « toujours déclarer » **conserve la capacité que la règle donne et la
-facture au prix légal**, dans un état de jeu toujours valide. C'est la seconde qui est retenue, en
-mouvement **comme** en charge.
-
-⚠️ **COÛT ASSUMÉ, permanent et parfois pur** : **2 pouces de mouvement en moins à chaque move**
-(normal / advance / fall-back / charge) pour les **cinq types volants du roster d'entraînement**
-d'ArmageddonAgent (`VanguardVeteranSquadJumpPack`, `...Plasma`, `...Sergeant`, `ChaplainJumpPack`,
-`LandSpeederOnslaughtGatlingCannon`) — **y compris en terrain découvert**, où la traversée
-n'apporte rien et où le malus est donc un **pur désavantage** que l'agent ne peut pas refuser.
-Ordre de grandeur constaté par la sonde in-engine du commit `350da3cf` : `LandSpeeder…` **70 → 60**
-subhex, `VanguardVeteranSquadJumpPack` **60 → 50** (`ish = 5`). ⚠️ Cette constante devra **disparaître
-avec `L6`** : tant qu'elle tient, une part de la performance mesurée de l'agent est imputable à un
-choix qu'il n'a pas fait.
-
-**Rapport au lot de ré-entraînement ([§0.48](#s0.48))** : ceci est une **non-conformité de moteur**,
-pas un changement de contrat — à ne pas confondre avec `L6` (FLY comme **décision d'agent**, P3-7),
-qui est dans le lot. Ce correctif-ci ne casse ni `obs_size` ni l'espace d'action, mais il **change
-ce qui est appris** : il doit donc être livré **AVANT** la mesure de référence, au même titre que la
-rampe de déploiement (§0.46 pt 2) et le correctif des bots (§0.47 É4).
-
 <a id="s0.50"></a>
-### 0.50 Non-conformité 01.07 — le contrôle d'objectif sous battle-shock — ✅ CORRIGÉ, NON MERGÉ (2026-07-29)
+### 0.50 Non-conformité 01.07 — le contrôle d'objectif sous battle-shock — ✅ CORRIGÉ ET MERGÉ (2026-07-29) ; 🟠 TRAVAIL DE SUITE OUVERT (2026-08-02)
 
 **État.** ✅ Corrigé sur la branche **`v11-battle-shock-oc`**, commit **`4be41919`**
 (« fix(01.07): une unite battle-shocked n'apporte plus aucun controle d'objectif »), **NON MERGÉE**
@@ -893,7 +748,15 @@ producteurs du drapeau et sur le chemin vif du choc), `b8932f52` (**3ᵉ vérit�
 non corrigeable ici** : `BoardReplay.computeControlCounts` recalcule le contrôle dans le front, à
 l'ancre **et** sans battle-shock).
 
-✅ **Cette 3ᵉ vérité parallèle est SUPPRIMÉE (2026-07-29).** Le constat « impossible en l'état, le
+✅ **Les DEUX `useMemo` du front (points de victoire, coloration) sont SUPPRIMÉS (2026-07-29)** et
+lisent l'instantané moteur. 🔴 **MAIS UN TROISIÈME RECALCUL SUBSISTE (constaté le 2026-08-02)** :
+le **constructeur du journal d'événements** de `BoardReplay.tsx` — celui qui produit les entrées
+`action_name: "objective_control"` — recompte encore l'OC lui-même, **à l'ancre de l'unité** et
+**sans battle-shock**, donc avec exactement les deux divergences que cette entrée dit avoir closes.
+Son commentaire renvoie à `computeControlCounts` « ci-dessus », **fonction supprimée** : le
+commentaire est mort en plus d'être exact. **À traiter** : le journal doit lire l'instantané
+journalisé par le moteur, comme les deux autres consommateurs.
+Le constat « impossible en l'état, le
 `step.log` ne porte aucune information de battle-shock » posait le problème à l'envers : il n'a
 jamais fallu **reconstituer** le battle-shock côté navigateur, il fallait cesser d'y recalculer quoi
 que ce soit. Le moteur journalise désormais **son** état 14.02 —
@@ -942,20 +805,20 @@ antérieures sur le jeu d'objectifs (au premier chef `vs_control`, §0.14) sont 
 réserve.
 
 ⚠️ **TRAVAIL DE SUITE EXPLICITE — LE CONTRAT DE `battle_shocked` EST CONTRADICTOIRE DANS LE MOTEUR.**
-Ce correctif pose, par `require_key(unit, "battle_shocked")`
-([`game_state.py:3016`](../../engine/game_state.py#L3016) sur la branche), que **l'absence du champ
-est un état corrompu**. Or **sept autres lecteurs du même drapeau** posent l'inverse — l'absence y
-vaut « pas choqué » — vérifiés un par un sur `main` le 2026-07-29 :
+Ce correctif pose, par `require_key(unit, "battle_shocked")` dans
+`sum_objective_control_oc_multi` (`engine/game_state.py`), que **l'absence du champ est un état
+corrompu**. Or **sept autres lecteurs du même drapeau** posent l'inverse — l'absence y vaut « pas
+choqué ». Recomptés sur `main` le **2026-08-02**, toujours **sept**, ancrés par nom de fonction :
 
-| Site | Lecture |
-|---|---|
-| [`command_handlers.py:84`](../../engine/phase_handlers/command_handlers.py#L84) | `unit.get("battle_shocked", False)` |
-| [`movement_handlers.py:965`](../../engine/phase_handlers/movement_handlers.py#L965) | `bool(unit.get("battle_shocked", False))` |
-| [`movement_handlers.py:3284`](../../engine/phase_handlers/movement_handlers.py#L3284) | `unit.get("battle_shocked", False)` |
-| [`shared_utils.py:4482`](../../engine/phase_handlers/shared_utils.py#L4482) | `bool(unit.get("battle_shocked", False))` |
-| [`shared_utils.py:4496`](../../engine/phase_handlers/shared_utils.py#L4496) | `not unit.get("battle_shocked", False)` |
-| [`shared_utils.py:9486`](../../engine/phase_handlers/shared_utils.py#L9486) | `bool(_unit_obj_fp.get("battle_shocked", False))` — porte même le commentaire `# get allowed` |
-| [`w40k_core.py:2833`](../../engine/w40k_core.py#L2833) | `not bool(unit.get("battle_shocked", False))` |
+| Fonction | Fichier | Lecture |
+|---|---|---|
+| `command_phase_start` | `command_handlers.py` | `unit.get("battle_shocked", False)` |
+| `movement_unit_execution_loop` | `movement_handlers.py` | `bool(unit.get("battle_shocked", False))` |
+| `movement_build_model_destinations_pool` | `movement_handlers.py` | `unit.get("battle_shocked", False)` |
+| `desperate_escape_pre_move` | `shared_utils.py` | `bool(unit.get("battle_shocked", False))` |
+| `desperate_escape_post_move` | `shared_utils.py` | `not unit.get("battle_shocked", False)` |
+| `build_squad_move_cell_map` | `shared_utils.py` | `bool(_unit_obj_fp.get("battle_shocked", False))` — porte même le commentaire `# get allowed` |
+| `_handle_hazard_confirm` | `w40k_core.py` | `not bool(unit.get("battle_shocked", False))` |
 
 **Les deux positions ne peuvent pas être vraies en même temps** : si le champ est un invariant de
 construction, ces sept `get(..., False)` sont des valeurs par défaut anti-erreur interdites ; s'il
@@ -965,377 +828,14 @@ lecture stricte), soit le `require_key` devient une **exception justifiée par �
 n'est **pas** une dette « documentée donc traitée » : tant qu'elle tient, un même état d'unité
 produit deux réponses selon le lecteur.
 
-⚠️ **ÉCART SIGNALÉ, NON TRAITÉ — `ai/analyzer.py`.**
-`_calculate_objective_control_snapshot` ([`ai/analyzer.py:973`](../../ai/analyzer.py#L973))
-**recalcule le contrôle hors moteur**. Il **divergeait déjà** (ancre d'escouade au lieu de
-l'empreinte par figurine) et **n'a pas accès à l'état de choc** : ses snapshots de contrôle
-d'objectif ne sont pas alignés sur la source unique. C'est un défaut d'**instrument**, pas de
-moteur — mais toute lecture de contrôle d'objectif faite depuis l'analyzer est à traiter comme
-non fiable tant qu'il n'est pas rebranché sur `sum_objective_control_oc_multi`.
-
-<a id="s0.51"></a>
-### 0.51 Branches prêtes — 🟢 LES SIX SONT MERGÉES ⏳ ENTRÉE PÉRISSABLE (état au 2026-07-29 17 h)
-
-> 🟢 **MISE À JOUR DU 2026-07-29 (soir) — le constat de 14 h 05 ci-dessous est HISTORIQUE.**
-> Les **six** branches sont désormais **ancêtres de `main` = `d061f21b`** (vérifié par
-> `git merge-base --is-ancestor <branche> main` pour chacune) ; leurs têtes ont bougé après le
-> constat de 14 h 05, les têtes réellement mergées sont : `306033ec`, `ee3a55b8`, `fbd1d278`,
-> `b5888bdf`, `ee1dccb9`, `aba3cb07`.
->
-> ✅ **Le POINT DE COMPOSITION signalé plus bas est SOLDÉ** : `v11-0.47-dead-decoder-and-interface-lock`
-> et `v11-0.47-eval-tooling-mask` sont sur `main` **ensemble**, donc `roster_matchup_stats.py`
-> n'appelle plus une méthode supprimée. La contrainte d'ordre de merge n'a plus d'objet.
->
-> 🔴 **UNE branche reste NON MERGÉE, et elle n'est PAS V11** : `fix-weapon-collection-defaults`
-> (`5980a035`) — « distinguer *pas d'arme* (liste vide) de *entité mal construite* (clé absente) »,
-> 8 fichiers, +310/−35 dont `tests/unit/engine/test_weapon_collections_contract.py` (213 lignes).
-> **Motif de l'attente : l'utilisateur a du travail en cours sur exactement ces fichiers**
-> (`git status` au 2026-07-29 : `engine/phase_handlers/fight_handlers.py`,
-> `engine/phase_handlers/shared_utils.py`, `engine/phase_handlers/shooting_handlers.py`,
-> `engine/w40k_core.py` modifiés). Elle appartient à la campagne « typage & replis » →
-> [`campagne_typage_et_replis_2026-07-29.md`](campagne_typage_et_replis_2026-07-29.md).
->
-> ⚠️ **Le merge n'est PAS une validation.** La vérification large appartient toujours à
-> l'utilisateur et n'a pas été faite.
-
-⏳ **Constat historique du 2026-07-29 à 14 h 05 — conservé tel quel, NE PLUS S'EN SERVIR comme
-état courant.** Reconfronter au réel (`git log main..<branche>`) avant tout usage.
-Constaté par `git log main..<branche>` le **2026-07-29 à 14 h 05**, `main` = **`5d2dfd48`**.
-🔴 **CINQ des six branches ont bougé PENDANT le constat** (entre 13 h 56 et 14 h 05, suites de
-relecture adverse écrites par d'autres agents en parallèle) : les têtes et les comptes ci-dessous
-sont **datés à la minute, et déjà probablement dépassés**. Ne jamais les citer sans les revérifier.
-**Aucune de ces branches n'est un chantier en cours sans livrable : les six portent du travail
-terminé, avec ses tests ciblés.**
-
-| Branche | Objet | Commits | Tête (14 h 05) | Détail |
-|---|---|---|---|---|
-| `v11-0.46-dead-code-charge-heuristic` | code mort `get_best_enemy_*` **+** documents rendus faux par la suppression | 2 | `306033ec` | [§0.46](#s0.46) pt 1 |
-| `v11-0.47-eval-tooling-mask` | outil de stats par matchup : masque legacy, **obs Dict aplatie (l'outil ne démarrait pas)**, plafond de pas, vainqueur recalculé, scénarios au contrat legacy, `--agent-seat-mode` sans effet | 10 | `cc3b5713` | [§0.47](#s0.47) É1 **et** É6 |
-| `v11-0.47-dead-decoder-and-interface-lock` | suppression de `convert_gym_action` **+ du masque de l'ancien espace** + 3 symboles morts préexistants, **+** verrou d'interface `test_agent_interface_contract.py` | 4 | `f0ed563a` | [§0.47](#s0.47) É2+É3 |
-| `v11-pre-lot-eval-baseline` | bots d'éval (contre-charge du défensif, cibles hors ordre de tri, focus-fire rebranché, joueur dérivé de l'escouade activée) **+** rampe de déploiement sur les 5 profils | 4 | `d0183afe` | [§0.47](#s0.47) **É4** + [§0.46](#s0.46) **pt 2** |
-| `v11-battle-shock-oc` | conformité 01.07 : contrôle d'objectif, **+ bonus de reward « sur objectif »**, docstring, verrous des producteurs du drapeau, 3ᵉ vérité parallèle du replay signalée **puis supprimée** (contrôle/VP journalisés par le moteur, 2026-07-29) | 5 | `b8932f52` | [§0.50](#s0.50) |
-| `v11-fly-2103-conformity` | conformité 21.03 (casse du mot-clé, traversée payante, vol de charge, garde de phase, donnée corrompue, justification de la politique moteur) | 8 | `4c88ec60` | [§0.49](#s0.49) |
-
-⚠️ **Le renvoi de `v11-pre-lot-eval-baseline` vers §0.48 était FAUX** (corrigé le 2026-07-29) : §0.48
-est l'inventaire du **lot de ré-entraînement** et ne décrit **rien** de ce travail. Cette branche
-livre **§0.47 É4** (bots d'évaluation) et **§0.46 point 2** (rampe de déploiement) — deux des quatre
-chantiers que §0.48 exige **avant** la mesure de référence, ce qui n'en fait pas des éléments du lot.
-
-⚠️ **POINT DE COMPOSITION — il ne s'agit PLUS d'un travail de suite, mais d'une CONTRAINTE D'ORDRE
-DE MERGE** (mis à jour le 2026-07-29 à 14 h 05). Historique : la branche du décodeur mort avait
-d'abord **CONSERVÉ** `get_action_mask_and_eligible_units` et `_build_mask_for_units` parce qu'un
-appelant subsistait — [`scripts/roster_matchup_stats.py:562`](../../scripts/roster_matchup_stats.py#L562),
-précisément celui que `v11-0.47-eval-tooling-mask` migre (§0.47 É1). Le commit **`a210008c`** les a
-**supprimées** depuis, sur le constat que leur décodeur était parti au commit précédent et que ce
-masque ne décrivait donc plus aucun espace décodable (pierre tombale posée dans `action_decoder.py`,
-7 cas de test retirés).
-
-🔴 **CONSÉQUENCE : `v11-0.47-dead-decoder-and-interface-lock` est INCOMPLÈTE SEULE.** Sur cette
-branche prise isolément, `roster_matchup_stats.py:562` appelle une méthode qui n'existe plus —
-c'est l'**état post-merge** qui fait foi, et la correction de ce site vit sur l'autre branche. Les
-**deux branches doivent donc être mergées ENSEMBLE** (ou celle de l'outillage d'éval en premier) ;
-merger la seule branche du décodeur laisse l'outil de statistiques cassé à l'exécution.
-
-⚠️ **AUCUNE de ces branches n'est validée au-delà de ses tests ciblés.** La **vérification large**
-(suite de tests complète, `pyright`, `ai/hidden_action_finder.py`, `scripts/check_ai_rules.py`,
-`biome`, `tsc`) **appartient à l'utilisateur et n'a PAS été faite**. Ne pas lire « branche prête »
-comme « branche verte ».
-
-<a id="s0.52"></a>
-### 0.52 Ce que la campagne « typage & replis » du 2026-07-29 change pour la MESURE — ✅ LIVRÉ ET MERGÉ (2026-07-29)
-
-> **Périmètre de cette entrée : UNIQUEMENT ce qui change ce que l'utilisateur mesurera au prochain
-> entraînement.** La campagne complète (57 commits, `bb3a788f` → `d061f21b`) — contre-audit du
-> typage, replis silencieux, code mort, journal de tir, **et surtout la dette restante** — vit à UN
-> seul endroit : **[`campagne_typage_et_replis_2026-07-29.md`](campagne_typage_et_replis_2026-07-29.md)**.
-> Ne pas recopier son contenu ici.
-
-#### 1. 🔴 Quatre compteurs de combat rebranchés — les courbes antérieures sont ABSENTES, pas nulles
-
-Commit **`5f1878eb`**. `shots_fired`, `hits`, `damage_dealt` et `damage_received` étaient
-**déclarés** dans `episode_tactical_data` et **jamais incrémentés** depuis le commit **`fe1df7d8`
-« metrics OK » du 2025-10-25** (date constatée par `git log -1 --date=short fe1df7d8`) : ce commit a
-déplacé le dictionnaire du callback vers le moteur, a réimplémenté `valid_actions`,
-`invalid_actions`, `units_lost` et `units_killed`, **mais pas ces quatre-là**, tout en supprimant
-leur calcul côté callback **dans le même diff**. Migration partielle, **neuf mois de silence**.
-
-**Ce qu'il faut en retenir pour lire les courbes** — les consommateurs sont gardés par `> 0` :
-
-| Courbe | État avant le 2026-07-29 |
-|---|---|
-| `game_tactical/shooting_accuracy` | **jamais émise** |
-| `game_detailed/damage_dealt` | **jamais émise** |
-| `game_detailed/damage_received` | **jamais émise** |
-| `game_tactical/damage_efficiency` | **jamais émise** |
-
-🔴 **Une courbe absente ne se distingue pas d'un agent qui ne se bat jamais.** Toutes les mesures
-d'entraînement antérieures au 2026-07-29 — **y compris le run 4 (§0.14)** — **ne contiennent pas ces
-quatre courbes**. Elles ne sont pas à zéro : elles n'existent pas. Toute comparaison
-avant/après sur les dégâts, la précision ou l'efficacité de combat est **impossible**, pas
-seulement dégradée.
-
-**Où c'est branché** : bloc de fin d'épisode de `step()`, sur `action_logs`
-([`engine/w40k_core.py:2007`](../../engine/w40k_core.py#L2007) et suivants) — **pas** sur
-`attack_details`, qui vit sous `if (self.step_logger and self.step_logger.enabled)` et rendrait les
-métriques **dépendantes de `--step`**, donc nulles à l'entraînement normal.
-
-**Définitions verrouillées par test** (pour qu'un élargissement futur soit un choix, pas un oubli) :
-`shots_fired` / `hits` = **TIR seul** (une précision au tir ; y verser la mêlée la rendrait
-ininterprétable), donc `hits <= shots_fired` par construction ; `damage_dealt` /
-`damage_received` = **tir ET mêlée**, c'est l'attrition totale.
-
-**Preuve** : cohérence croisée sur vraie partie (14 tests, moteur réel, 3 graines) —
-`damage_dealt` == PV réellement perdus par l'adversaire et `damage_received` == PV perdus par le
-camp contrôlé, à l'unité près, **dans les deux sens et pour les deux sièges** ; rouge sous 4
-mutations restaurées.
-
-#### 2. 🟢 Type de socle scindé — la géométrie du chemin chaud accélère, l'invariant devient inviolable
-
-Commits **`44486667`** (invariant validé à la frontière, 9 `cast` supprimés) puis **`6f0c0c6b`**
-(scission du type). `Socle` était une **union étiquetée modélisée comme un enregistrement plat** :
-`shape` DÉTERMINAIT le type de `base_size` (`round`/`square` → diamètre scalaire, `oval` → paire)
-sans que rien ne le dise. `RoundSocle` / `SquareSocle` / `OvalSocle`
-([`engine/hex_utils.py:1728/1741/1754`](../../engine/hex_utils.py#L1728)) portent désormais chacun
-le type exact, et `Socle(...)` est la **fabrique** qui choisit la classe et refuse une taille qui
-contredit l'étiquette.
-
-| Mesure (timeit, n=200000, 3 passes) | avant | après | |
-|---|---|---|---|
-| `euclidean_edge_distance` | 883 ns | 645 ns | **−27 %** |
-| `footprints_overlap` | 679 ns | 490 ns | **−28 %** |
-| construction d'un socle | 243 ns | 274 ns | **+31 ns — assumé** (la fabrique valide, là où `tuple.__new__` était en C) |
-
-Net sur le couple réel « construire un socle puis tester le chevauchement » : **−17 %**.
-
-**Pourquoi ça compte au-delà de la perf** : l'invariant n'est plus vérifié à la lecture — **un socle
-incohérent ne peut plus exister**. La classe de base ne déclare pas `base_size`, donc on ne peut pas
-lire la taille d'un socle sans savoir de quelle forme il s'agit, et le vérificateur l'impose. Les
-**30 sites de construction sont inchangés** (la fabrique garde nom, signature et mots-clés du
-NamedTuple) et les **161 datasheets** du registre respectent l'invariant (156 `round` + 5 `oval`,
-0 violation).
-
-⚠️ **Aucun `obs_size` ni `TOTAL_ACTION_SIZE` n'est touché** par ces deux points : ils
-**n'appartiennent pas au lot de ré-entraînement de §0.48** et ne forcent aucun `--new`.
-
----
-
-<a id="s0.33"></a>
-### 0.33 Rollout buffer 46,9 Go pour 39 Go de RAM — 🟠 CONDITIONNEL : bloque les profils à 48 envs, PAS le run à lancer (2026-07-28)
-
-> ⚠️ **Titre corrigé le 2026-07-28** : « BLOQUANT le run » contredisait le corps de l'entrée, qui
-> établit que `x1`, `x5_new` et `x5_debug` (8 envs, 7,8 Go) passent. Vérifié dans la config le
-> 2026-07-28 : seuls `x5_append` et `x1_debug` portent `n_envs: 48`.
-
-**Origine.** Point soulevé — sans être chiffré — par l'agent de la tranche T-K/T-L : « la spec
-§8.3 de `move_action_space_spatial_rework.md` dimensionne le rollout buffer sur la grille, mais `obs_size` y pèse bien plus lourd depuis
-§0.30/§0.31 ». Chiffré ici, sur la config réelle.
-
-**Mesure (2026-07-28).** `DictRolloutBuffer` stocke **toutes** les clés d'observation, vecteur
-compris, et il est alloué **d'un bloc au premier `learn()`** — pas progressivement.
-
-| | floats / transition | |
-|---|---|---|
-| vecteur (`obs_size`) | 20 626 | **le poste dominant depuis §0.30/§0.31** |
-| grille (9 × 32 × 32) | 9 216 | 7 168 avant §0.32 |
-| **total** | **29 842** | soit **116,6 Ko** par transition en float32 |
-
-| Profil | `n_envs × n_steps` | Transitions | Buffer |
-|---|---|---|---|
-| `x1`, `x5_new`, `x5_debug` | 8 × 8 192 | 65 536 | **7,8 Go** — passe |
-| `x5_append`, `x1_debug` | 48 × 8 192 | 393 216 | **46,9 Go** — ne passe pas |
-
-Machine : **39 Go physiques, 29 Go disponibles**. Les profils à 48 envs échouent à l'allocation,
-avant le premier pas — ce n'est pas une lenteur, c'est un `MemoryError` immédiat.
-
-⚠️ **Deux pièges de lecture à ne pas répéter.**
-1. Le « 14,49 Go, sous la limite de 19,33 Go » de
-   [`move_action_space_spatial_rework.md`](A_faire/move_action_space_spatial_rework.md) §8.3 ne
-   compte **que la grille**. Il était juste quand l'obs vectorielle faisait 108 floats ; il est
-   périmé depuis §0.30, pour une raison qui n'est pas celle de §0.32.
-2. La ligne §0.14 annonce « run `x5_new`, 48 envs » alors que le profil `x5_new` porte
-   `n_envs=8`. **Vérifier le profil ET les overrides CLI réellement lancés** avant de conclure
-   quoi que ce soit d'un OOM ou de son absence.
-
-**ARBITRAGE DU 2026-07-28 : aucun changement.** La commande réellement lancée porte
-`--training-config x1` ⇒ **8 envs, 7,8 Go**, dans les 29 Go disponibles. §0.33 ne bloque **pas**
-ce run. Il ne se déclenche que sur `x5_append` et `x1_debug`.
-**MAJ 2026-07-28 soir (utilisateur)** : re-test effectué, **8 envs mesuré MEILLEUR** que 48 sur
-cette machine — le régime 8 envs n'est pas un pis-aller, c'est le choix retenu. Un run 48 envs
-reste conditionné au re-tuning décrit ci-dessous.
-
-⚠️ **Une recommandation « `n_steps` 8192 → 1024 » a été formulée puis RETIRÉE le même jour. La
-retenir aurait dégradé le run.** Ses deux erreurs, à ne pas refaire :
-
-1. **Argument faux.** Elle promettait « 8× plus de mises à jour, donc plus d'apprentissage ». Le
-   nombre de PAS DE GRADIENT d'un run ne dépend pas de `n_steps` : il vaut
-   `transitions_totales × n_epochs / batch_size`. `n_steps` n'arbitre que **fraîcheur contre
-   variance** — des avantages estimés sur moins de données, et donc plus bruités.
-2. **Preuve contraire déjà au dossier, non consultée** :
-   [`config/agents/CoreAgent/Training_logs.md`](../../config/agents/CoreAgent/Training_logs.md)
-   — ablations à 30k épisodes, `n_envs=48`, un seul hyperparamètre changé par run :
-
-   | Changement | Robust score | Verdict noté à l'époque |
-   |---|---|---|
-   | baseline `n_steps=16384` | **0,4857** | BEST |
-   | `n_steps` → 8 192 | 0,3808 | « rollout **trop petit** → instabilité » |
-   | `n_steps` → 32 768 | 0,4345 | mieux que 8192, sous la baseline |
-   | `batch_size` → 2048 | 0,3281 | « catastrophique, trop peu de pas de gradient par rollout » |
-
-   Sur ce projet, la direction mesurée est donc l'INVERSE : **plus gros, mieux**, avec un optimum
-   à 16 384. C'est sur CoreAgent — autre pipeline, autre observation — donc ce n'est pas une
-   preuve transférable ; c'est la **seule** preuve disponible, et elle contredit la proposition.
-
-**Le vrai enseignement de §0.33.** Le régime validé de CoreAgent — `48 × 16 384` = 786 432
-transitions — demanderait **93,9 Go** avec l'observation actuelle. **Il est devenu structurellement
-inatteignable.** Sous 29 Go, le plafond à 48 envs est `n_steps ≈ 2048` (11,7 Go) à 3072 (17,6 Go),
-soit **5 à 8× sous l'optimum mesuré**. Autrement dit : tout run à 48 envs sortira du régime validé,
-et son hyperparamétrage devra être **re-tuné**, pas hérité. Ce n'est pas un réglage à trancher au
-jugé — c'est un screening à refaire, du type de celui de
-[`TUNING_NUIT.md`](../../config/agents/CoreAgent/TUNING_NUIT.md), quand le pipeline sera stable.
-
-**Leviers, si un run à 48 envs devient nécessaire** (aucun n'est gratuit — tous déplacent la
-baseline) : baisser `n_envs` · baisser `n_steps` en sachant qu'on quitte l'optimum mesuré ·
-stocker la grille en `uint8` — qui ne suffit pas seul : elle ne pèse que 31 % de la transition,
-donc 46,9 → **36,1 Go**, encore au-dessus des 29 Go disponibles.
-
-### 0.29 Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum — ✅ LIVRÉ + VALIDÉ IN-ENGINE (2026-07-22)
-
-**But (recadré par l'utilisateur).** Pouvoir **placer les unités manuellement** ET **choisir**, sur un
-même fichier, entre placement figé (manuel) et phase de déploiement — le tout sur le terrain réel du
-training, sans nouveau terrain. Reliquat demandé : faire évoluer la **proportion figé↔déploiement au
-fil du training** (curriculum). Matchup **Space Marines vs Orks**.
-
-**Fichiers livrés.**
-- `config/board/44x60x5/scenario/scenario_fixed_brawl_sm_orks.json` — 4 escouades / **36 figurines**,
-  format `units[]` avec clé `models` (compositions RÉELLES des rosters training) :
-  P1 SM = Intercessor (Bolt Rifle) + VanguardVeteranSquadJumpPack (jump pack) ;
-  P2 Orks = 2× Boyz. Chaque figurine a `col/row/unit_type` propre (sergents, plasma, personnages
-  fidèles au roster). `terrain_ref` = **`terrain-mc1.json`** (terrain réel du training).
-- `tests/unit/engine/test_fixed_brawl_deploy_modes.py` — **verrou** (bascule fixed↔active).
-- *(Aucun terrain créé — un premier jet en avait introduit un, retiré à la demande de l'utilisateur.)*
-
-**Le seul levier = `deployment_type`** (tracé, pas supposé). `game_state.py::load_units_from_scenario` :
-- `"fixed"` (ou champ absent, défaut ~L274) → chaque unité EXIGE `col/row` top-niveau = ancre =
-  `models[0]` (~L589-594), figurines posées telles quelles ; la clé `models[]` est normalisée par
-  figurine (~L874-985, override `unit_type`/stats par modèle). Au `reset`, phase `command` directe
-  (aucun `deployment`).
-- `"active"` → au `reset`, `deployment_type=="active"` déclenche la phase `deployment`
-  (`w40k_core.py:1364`), figurines mises à la sentinelle (-1,-1) et placées en jeu (IA/manuel). Les
-  `col/row` du fichier sont alors ignorés. `terrain-mc1.json` fournit les `deployment_zones` requises.
-
-**Positions par défaut** (éditables). Board 220×300 subhex. Placées dans les **bandes dégagées de
-mc1** (P1 SM rows 92/100, P2 Orks rows 198/206 ; cols 66-154), à l'écart des murs de la ruine
-centrale (rows ~120-185) — vérifié : le mode `fixed` chargeait en erreur « footprint on wall hex »
-tant que les unités tombaient sur la ruine. Portées lues (datasheets) pour référence : Bolt Rifle
-24″=120 subhex, shoota Boyz 18″=90 ; charge 11.02 (≤12″, non-engagé), zone d'engagement 03.04
-(2″=10 subhex hz).
-
-**Preuve in-engine (verrou, chemin gym réel).** `python3 -m pytest tests/unit/engine/test_fixed_brawl_deploy_modes.py` :
-```
-✅ fixed  : phase initiale='command', 4 unités / 36 figurines placées (aucun déploiement)
-✅ active : phase initiale='deployment', 4 unités en attente de déploiement
-✅ VERROU OK : même fichier, bascule fixed↔active par `deployment_type` (36 figurines).
-```
-⚠️ Piège rencontré (dans le verrou) : le loader **mémoïse le JSON par chemin absolu** (~L240) — tester
-deux modes en réécrivant un seul fichier temporaire relit le cache du 1er mode ; le verrou utilise
-donc **deux chemins distincts**.
-
-**Proportionnalité figé↔déploiement au fil du training — ✅ LIVRÉ (scheduler continu).** Approche
-retenue (arbitrage utilisateur) : **montée lisse par épisode**, mode `active` tiré à proba p(t)
-croissante, sur un SEUL fichier rechargé dans le mode tiré (réutilise les 2 chemins de chargement
-éprouvés plutôt qu'un chemin « hybride » risqué côté fuite d'état — cf. §0.25/§0.26). Implémentation
-(3 fichiers) :
-1. `game_state.py::load_units_from_scenario(..., deployment_type_override=None)` — force le mode du
-   chargement en remplaçant le `deployment_type` du JSON (et neutralise les surcharges P1/P2).
-2. `w40k_core.py::_configure_deployment_mode_for_episode()` — **miroir de `deployment_random_mix`**
-   (orthogonal : celui-ci choisit fixed/active, l'autre randomise les ACTIONS d'un déploiement déjà
-   actif). p(t) = `active_ratio_start + (end−start)·min(progress, freeze)`, progress =
-   `episode_number/(total_episodes−1)`, Bernoulli(p) → `active`/`fixed`. Dans `reset()`, impose un
-   rechargement avec l'override (reward_configs reconstruits via le chemin `_reload_scenario` existant).
-3. Config `x5_new.deployment_mode_schedule` (opt-in, `enabled:false` par défaut) :
-   `active_ratio_start/active_ratio_end/schedule:"linear"/freeze_after_progress`, `training_only`.
-**Preuve in-engine** — `python3 -m pytest tests/unit/engine/test_deployment_mode_schedule.py` : ratio 0.0→ 20/20 `fixed` ;
-ratio 1.0→ 20/20 `active` ; rampe 0→1 (60 ép.)→ part `active` croissante (1re moitié 8, 2e moitié 24),
-avec cohérence stricte mode↔phase (`fixed`→`command`, `active`→`deployment`). Le scheduler est
-**orthogonal** à `deployment_random_mix` (les deux peuvent coexister). ⚠️ `training_only:true` exige
-le scénario sous `.../scenarios/training/` (`_is_training_scenario_context`) — le déposer là pour
-l'activer en training réel ; mettre `enabled:true` dans `x5_new`.
-
-**Emplacements DANS les rosters (mode strict sur le chemin roster réel) — ✅ LIVRÉ.** Le training
-réel ne joue pas un `units[]` figé : il passe par le **template roster** (`scenario_training_armageddon.json`,
-`agent_roster_ref=training_random`, `opponent_roster_ref=[SM,Orks]`, **siège aléatoire**). Or un
-roster compact ne portait aucune coordonnée → `fixed` était interdit (`_expand_compact_roster_to_basic_units`
-levait). Solution retenue par l'utilisateur (pas de miroir) : **chaque roster déclare `top` ET `bottom`
-par figurine**, le loader choisit le côté selon le joueur assigné (**convention P1=top, P2=bottom**) —
-comme le siège est aléatoire, les deux côtés sont portés. Implémentation :
-- `game_state.py::_expand_compact_roster_to_basic_units` — `models[i]` accepte la forme objet
-  `{unit_type, top:{col,row[,level]}, bottom:{...}}` ; unité **mono** (véhicule/perso) : positions au
-  **niveau de l'entrée** (`top`/`bottom`) pour NE PAS la transformer en escouade (comportement `active`
-  préservé). En `fixed` : positions obligatoires (sinon erreur explicite), `count==1` requis, côté
-  sélectionné par joueur. En `active` : positions ignorées (roster à double usage). Helper
-  `_parse_roster_model_side` (validation stricte col/row/level).
-- Les **4 rosters** training (agent SM/Orks, opponent SM/Orks) portent désormais `top`/`bottom`,
-  produits par le **générateur committé `scripts/gen_roster_positions.py`** (reproductible) :
-  placement en **réseau hexagonal** (pas 9 subhex) par footprint réel (tailles de socle variables
-  persos/véhicules), wall-aware (terrain-mc1), sans chevauchement (le mode `fixed` valide les
-  footprints), dans les bandes haute (~rows 40-104) et basse (~196-260). **Cohérence d'escouade
-  GARANTIE** : le générateur n'accepte un centre d'escouade que si la formation est cohérente. La
-  règle moteur (03.03) exige **la CONNEXITÉ** (une seule chaîne — précision d'arbitre/FAQ) plus
-  « à 9" de CHAQUE autre figurine », mesurée en hex centre-à-centre à x1 et bord d'empreinte à x5+
-  (bascule de résolution `spatial_relations.geometry_is_hex`, 2026-07-29) ; `squad_min_neighbors`=1
-  reste un degré minimal, et `cohesion_distance_mode`="euclidean" ne vaut plus que pour x5 et
-  au-delà. Le générateur vise ≥2 centre-à-centre = borne conservatrice. **L'oracle est la fonction moteur `validate_squad_coherency`** — c'est ELLE
-  que le verrou asserte à la charge (pas une réimplémentation).
-**Preuve in-engine** — `python3 -m pytest tests/unit/engine/test_roster_fixed_positions.py` : 8 épisodes `fixed` (rosters
-+ siège tirés au hasard) → **aucun déploiement, toutes figurines placées, P1 en bande haute / P2 en
-bande basse, escouades cohérentes** ; 3 épisodes `active` → phase `deployment`, sentinelles.
-Cohérence re-vérifiée hors test : 0 figurine sous-cohérente sur 12 chargements (2 sièges × 6 rosters
-aléatoires). Régression : template `active` + rosters positionnés, scheduler off → step normal
-(deployment→move→shoot), aucun crash. Le scheduler `deployment_mode_schedule` rampe donc **strict
-(positions rosters) → déploiement appris** directement sur le vrai flux (rotation SM/Orks + siège
-aléatoires conservés). ⚠️ Si une composition de roster change, relancer `gen_roster_positions.py`.
-
-**Suite (mécanique LIVRÉE ; reste l'USAGE + la mesure — arbitrage utilisateur / dépendances).** Un
-agent frais qui reprend :
-1. **Activer le curriculum** : `x5_new.deployment_mode_schedule.enabled = true` puis régler la rampe
-   (`active_ratio_start`/`active_ratio_end`/`freeze_after_progress`, p.ex. 0.0→1.0 sur 0.8 de la
-   progression). Aucun autre câblage : le template roster réel (`scenario_training_armageddon.json`)
-   marche tel quel, rosters déjà positionnés.
-   > 🔴 **RELEVÉ le 2026-07-28 soir — `enabled: true` NE SUFFIT PAS, et c'est le piège exact du
-   > profil `x1` aujourd'hui.** Les 3 profils qui la portent (`x1`, `x5_new`, `x5_debug` — vérifié
-   > le 2026-07-28 ; `x5_append` et `x1_debug` n'ont pas la clé) déclarent `enabled: true` avec
-   > `active_ratio_start = active_ratio_end = 0.0` : le scheduler s'exécute, calcule `p_active = 0`
-   > et renvoie `fixed` à **tous** les épisodes. Un `enabled: true` sans rampe non nulle est
-   > indistinguable d'un scheduler éteint dans les logs. **C'est la RAMPE qui active le
-   > curriculum, pas le drapeau.**
-2. **Vérifier en épisode réel** avant un long run : `python3 ai/train.py --agent ArmageddonAgent
-   --training-config x5_new --step` + `ai/analyzer.py` + replay → confirmer que des épisodes `fixed`
-   (placement rosters, aucun déploiement) ET `active` (déploiement) surviennent, dans la bonne
-   proportion selon l'avancement.
-3. **Mesurer l'objectif curriculum** : win-rate en régime `fixed` (strict) vs `active` au fil de la
-   rampe — c'est la métrique qui valide « scénarios fixes → apprendre à se déployer ». **Rejoint
-   §0.14 (win-rate)**, ✅ **débloqué le 2026-07-26** (§0.27 corrigé, [§9.2.5](V11_phaseA.md#s9.2.5) livré).
-Décisions ouvertes (utilisateur) : forme exacte de la rampe ; coexistence éventuelle avec
-`deployment_random_mix` ; siège (`agent_seat_mode`) gardé aléatoire ou figé en phase strict.
-
-**Outillage : jouer/visualiser UN scénario explicite en éval (2026-07-22).** Pour observer un
-scénario précis (ex. `scenario_fixed_brawl_sm_orks.json`, placement fixed) avec le modèle courant
-SANS l'entraîner ni écraser le `.zip`, `--test-only` accepte désormais un chemin de scénario
-explicite :
-`python3 ai/train.py --agent ArmageddonAgent --training-config x5_debug --test-only --eval --step
---scenario config/board/44x60x5/scenario/scenario_fixed_brawl_sm_orks.json`.
-Il est joué **tel quel** (`train.py`, branche test-only) : ni repli holdout, ni matérialisation
-`wall_ref` (celle-ci exige un scénario sous `agents/.../scenarios/<split>/` et réécrit le terrain —
-elle casserait un scénario autonome sous `config/board/`). Mécanisme : `evaluate_against_bots(...,
-materialize_eval_refs=False, scenario_list_override=[chemin])`. Le mode holdout par défaut
-(`materialize_eval_refs=True`) est **inchangé**. Verrou : `tests/unit/ai/test_eval_explicit_scenario.py`
-(ROUGE : la matérialisation lève hors `agents/` ; VERT : le scénario explicite est joué, 0 planté).
-⚠️ Un scénario `fixed` joué en test-only n'a **aucune** phase de déploiement (step.log : 0
-`DEPLOYMENT`, figurines aux positions du fichier dès T1).
-
+✅ **ÉCART `ai/analyzer.py` — TRAITÉ** (vérifié le 2026-08-02). `_calculate_objective_control_snapshot`
+n'existe plus : les fonctions de recalcul de contrôle d'objectif de l'analyzer ont été supprimées
+le 2026-07-29 (un commentaire-tombeau en tête de fichier le consigne), et l'analyzer lit désormais
+l'instantané journalisé par le moteur (`T{tour} OBJECTIVE CONTROL:`). Il ne reste donc qu'**une**
+lecture parallèle, celle du frontend signalée plus haut.
 
 <a id="s0.14"></a>
-### 0.14 Re-mesure du run — 🟠 OUVERT : run 4 `--new` lancé le 2026-07-29 à 12 h 03, **ARRÊTÉ à 13 h 08** (état et chronologie dans le tableau du §0, entrée périssable — ne pas les dupliquer ici)
+### 0.14 Re-mesure du run — 🟠 OUVERT ; ⏳ ENTRÉE PÉRIMÉE au 2026-08-02 (des runs POSTÉRIEURS ont tourné, cf. tableau du §0) — historique : run 4 `--new` lancé le 2026-07-29 à 12 h 03, **ARRÊTÉ à 13 h 08** (état et chronologie dans le tableau du §0, entrée périssable — ne pas les dupliquer ici)
 
 > 🔴 **ARRÊT DU RUN 4 — 2026-07-29, 13 h 08, SIGINT, décision de l'utilisateur.** Le run **n'a pas
 > échoué** : il a été arrêté parce qu'il **ne pouvait plus servir de mesure de référence**, pour
@@ -1490,8 +990,9 @@ le run multi-env, pas le smoke, qui a validé.
 
 Écrit en corrigeant 01.07 (une unité **battle-shocked** contrôlait ses objectifs normalement).
 [`V11_tranches.md:157-159`](V11_tranches.md#L157) affirmait :
-*« ✅ **Le vrai Objective Control est SAIN** : il compte bien OC × figurines dans la zone (14.02).
-Ce sont les règles satellites qui n'ont pas suivi. »* L'audit qui a produit cette phrase cherchait
+*« ✅ **Le vrai Objective Control est SAIN** : `_sum_objective_control_oc` compte bien
+OC × figurines dans la zone (14.02). Ce sont les règles satellites qui n'ont pas suivi. »*
+(la phrase est **barrée à la source** depuis le 2026-07-29, avec la mention « AFFIRMATION FAUSSE ») L'audit qui a produit cette phrase cherchait
 **un** défaut précis — le calcul à l'ancre d'escouade au lieu du par-figurine — et l'a correctement
 écarté. Mais la phrase écrite dit bien plus que ce qui a été vérifié, et c'est **elle** qui a rendu
 le défaut invisible pendant des mois : quiconque relisait le contrôle d'objectif lisait d'abord
@@ -2009,25 +1510,27 @@ python3 ai/train.py --agent ArmageddonAgent --training-config x5_debug \
   --scenario config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json \
   --new --resolution 5
 ```
-⚠️ `x5_debug` = **1000 épisodes** (~2h50 à 8 envs), pas un run de quelques minutes malgré son nom.
+⚠️ `x5_debug` n'est **pas** un run de quelques minutes malgré son nom : **10 000 épisodes à 48
+envs** au 2026-08-02. ⏳ **Seuls les profils `x1*` sont tenus à jour** (décision utilisateur du
+2026-08-02) — relire le JSON avant de citer un chiffre d'un profil `x5*`.
 
-⚠️ **Ce que `x5_debug` ne produit PAS**, à cause de ses `callback_params` :
-`save_best_min_episodes = 10000` et `checkpoint_save_freq = 10000` sont **supérieurs** à ses
-1000 épisodes → **ni « best model » ni checkpoint** ne sont jamais écrits. `model_gating_enabled`
-est `False` (le `Gate 🧱` de la barre de progression est purement décoratif) et `bot_eval_final`
-vaut **1** épisode par bot — contre 60 pour le run de §0.7. C'est un run de **validation de
-pipeline**, pas de mesure : il ne peut pas servir le critère [§10.6](V11_eval_strategy.md#s10.6).
+⚠️ **La leçon durable** : un profil de debug peut, par ses seuls `callback_params`, ne rien
+produire du tout — `save_best_min_episodes` et `checkpoint_save_freq` supérieurs (ou égaux) au
+nombre d'épisodes du profil ⇒ **ni « best model » ni checkpoint**, sans le moindre message.
+`model_gating_enabled: False` rend en outre le `Gate 🧱` de la barre de progression purement
+décoratif. **Toujours confronter ces trois clés au `total_episodes` du profil avant de lancer**,
+et ne pas prendre un run de validation de pipeline pour une mesure : il ne peut pas servir le
+critère [§10.6](V11_eval_strategy.md#s10.6). (Valeurs constatées le 2026-08-02 sur `x5_debug` :
+`total_episodes` 10 000, `save_best_min_episodes` 10 000, `checkpoint_save_freq` 10 000,
+`bot_eval_final` 100.)
 
 **Tout run `x5_debug` ÉCRASE le modèle canonique (§0.0)**
 
 - ⚠️ **Le modèle en place a été ÉCRASÉ par ce run** (`model_ArmageddonAgent.zip`, 2026-07-20
   02:14 — autorisation utilisateur explicite). C'est donc un modèle **de debug, 100 épisodes
-  `--new`**, sans valeur de jeu : `save_best_robust: false` fait que
-  [train.py:3548](../../ai/train.py#L3548) écrit le modèle final **inconditionnellement** en fin
-  de run. Le modèle précédent (19/07 04:25, entraîné AVANT les `VALUE` Munitorum, avec la
-  `WarTrakk` à 175) reste disponible dans
-  `ai/models/_backup_pre_munitorum_20260719_232816/` — **vérifié intact après le run**.
-  ⚠️ Tout run `x5_debug` ultérieur écrasera à nouveau le modèle canonique : sauvegarder avant
+  `--new`**, sans valeur de jeu : `save_best_robust: false` fait que `train.py` écrit le modèle
+  final en fin de run, aux deux sites gardés par `if not save_best_robust`.
+  ⚠️ Tout run de debug ultérieur écrasera à nouveau le modèle canonique : **sauvegarder avant**
   si le modèle en place compte.
 
 **`config/users.db` réapparaît modifié après chaque run (§0.0, dette 5)**
@@ -2037,24 +1540,26 @@ pipeline**, pas de mesure : il ne peut pas servir le critère [§10.6](V11_eval_
 
 **`bot_eval_scenario_pool` placé au mauvais niveau est silencieusement ignoré (§0.13)**
 
-⚠️ **Piège latent voisin, découvert au passage.** Dans
-`ArmageddonAgent_training_config.json`, `bot_eval_scenario_pool` est placé à la **racine** de
-`x5_debug`, alors que `_resolve_callback_value` ([train.py:3273](../../ai/train.py#L3273)) le
-cherche dans **`callback_params`** puis retombe sur `config/agents/_training_common.json`.
-La clé racine est donc **ignorée**. Sans effet aujourd'hui (les deux valent `holdout`), mais
-toute surcharge par agent placée à la racine serait **silencieusement sans effet**.
+⚠️ **Piège latent, RÉSORBÉ — la leçon reste.** `bot_eval_scenario_pool` avait été placé à la
+**racine** de `x5_debug`, alors que `_resolve_callback_value` (`ai/train.py`) le cherche dans
+**`callback_params`** puis retombe sur `config/agents/_training_common.json` : la clé racine était
+donc **ignorée**. Vérifié le 2026-08-02 : elle vit aujourd'hui dans `callback_params`. Mais toute
+surcharge par agent placée à la racine reste **silencieusement sans effet** — c'est vrai de toutes
+les clés lues par `_resolve_callback_value`, pas seulement de celle-ci.
 
 **`agent_roster_seed` neutralise le tirage de roster sans le moindre message (§0.10)**
 
 ⚠️ **Piège latent voisin — `agent_roster_seed`.** Cette clé de scénario est passée en
-`random_seed` au tirage du roster AGENT ([game_state.py:1056](../../engine/game_state.py#L1056)),
-et le RNG est reconstruit à chaque appel (`random.Random(seed)`,
-[:1142](../../engine/game_state.py#L1142)). Si elle est renseignée, **le roster agent devient
-identique à tous les épisodes** — le tirage est neutralisé sans le moindre message. Voulu pour les
-scénarios holdout `bot-01..04` (qui la portent, pour la reproductibilité), mais ce serait un piège
-silencieux dans un scénario d'entraînement. `scenario_training_armageddon.json` ne la porte pas
-(`None`) : vérifié. **À contrôler avant de conclure quoi que ce soit sur une distribution de
-matchups.**
+`random_seed` au tirage du roster AGENT (`game_state.py`, lecture puis validation de
+`agent_roster_seed`), et le RNG est reconstruit à chaque appel (`random.Random(random_seed)`). Si
+elle est **renseignée**, le roster agent devient **identique à tous les épisodes** — le tirage est
+neutralisé sans le moindre message.
+🔴 **Correction du 2026-08-02** : ce document affirmait que les scénarios holdout `bot-01..04`
+« la portent, pour la reproductibilité ». **C'est faux** : les quatre portent la clé **à `null`**,
+donc le tirage y est **ACTIF**. Le seul scénario du dépôt qui la renseigne réellement est
+`scenario_training_benchmark.json` (CoreAgent, `12345`). `scenario_training_armageddon.json` ne la
+porte pas. **À contrôler avant de conclure quoi que ce soit sur une distribution de matchups** —
+et à ne pas déduire de la seule PRÉSENCE de la clé.
 
 **Une suite de tests est une mesure GLOBALE, donc un verrou GLOBAL (§0.19.1, 2026-07-20)**
 
@@ -2087,8 +1592,9 @@ modifications. Pour un mutation-test sur ces fichiers, sauvegarder par `cp` et r
 
 🔒 **RÈGLE MÉTIER (utilisateur, 2026-07-20) — NON NÉGOCIABLE.** `VALUE` **suit les documents
 officiels**. Ce n'est pas une variable de tuning. `VALUE` est pourtant consommé **par figurine**
-(pondération de menace [reward_calculator.py:1442](../../engine/reward_calculator.py#L1442),
-différentiel d'armée [observation_builder.py:367](../../engine/observation_builder.py#L367)) : cet
+(bonus de kill pondéré par `model_value` dans `_squad_combat_shaping`,
+`engine/reward_calculator.py` ; différentiel d'armée `value_alive`,
+`engine/observation_builder.py`) : cet
 effet sur l'apprentissage est une **conséquence à assumer**, jamais un motif pour s'écarter du
 Munitorum. **Ne pas « rééquilibrer » ces valeurs pour améliorer un résultat d'entraînement.**
 
@@ -2117,7 +1623,8 @@ prouvé que les deux figurines de l'escouade 3 étaient à des étages différen
 
 **Limite connue, HORS PÉRIMÈTRE (décision utilisateur, 2026-07-20) : le cas x10.** Le contrôle
 compare les **sous-hex d'ancre**. Sur Board ×10 les figurines ont une **empreinte multi-hex**
-(`compute_candidate_footprint` — « Multi-hex footprints are only computed on Board ×10 ») : deux
+(`compute_candidate_footprint` — « *For multi-hex units on x10 boards, computes the full
+round/oval/square footprint* ») : deux
 socles peuvent donc s'y chevaucher **sans partager leur ancre**, et la même classe d'incohérence
 masque/exécution reste ouverte à cette résolution. Sur x5 (résolution du training) l'empreinte
 vaut le sous-hex, le contrôle est **exact**. Limite préexistante, non introduite par le correctif.
@@ -2143,7 +1650,7 @@ AVANT d'y lancer un entraînement.
 | 7 | [§2](V11_tranches.md#s2) « État des lieux vérifié » | « Tous les imports du pipeline passent (`ai.train`, `ai.env_wrappers`, **`ai.multi_agent_trainer`**, **`ai.scenario_manager`**, …) » | `ai/multi_agent_trainer.py` **n'existe plus** (supprimé en §0.8, vérifié absent du disque le 2026-07-20) ; `ai/scenario_manager.py` non plus (supprimé le 2026-07-29, §0.45). Deux des modules cités comme preuve de santé du pipeline étaient du code mort. |
 | 8 | §0.17 (par construction) | l'état de commit | Périmé dès le prochain `git commit` — l'entrée porte elle-même l'ordre de la reconfronter à `git status`. |
 | 10 | §0.18, note annexe | « après ce crash le process … s'est terminé avec un **code de sortie 0** » | ❌ **FAUSSE, tranchée le 2026-07-20 — voir §0.20.** Le handler `return 1`, `sys.exit` propage, et l'exécution confirme `EXIT=1`. Cause probable : un pipe (`| tee`) côté shell lors de la mesure. Enseignement : une note **« hors périmètre »** échappe à la relecture *parce qu'*elle est marquée annexe. |
-| 11-13 | [§6](V11_tranches.md#s6) (T2, T4), [§8.2](V11_tranches.md#s8.2) | layout d'actions « 41 », « 61 scénarios », `test_agent_interface_contract.py` | ➜ **détaillées en §0.19.1** (audit du 2026-07-20). Signalées, NON corrigées. |
+| 11-13 | [§6](V11_tranches.md#s6) (T2, T4), [§8.2](V11_tranches.md#s8.2) | layout d'actions « 41 », « 61 scénarios », `test_agent_interface_contract.py` | ➜ **détaillées en §0.19.1** (audit du 2026-07-20). Signalées, NON corrigées. ⚠️ **2026-08-02** : la n°11 a été « corrigée » une fois avec des chiffres qui sont à leur tour périmés — **ne plus citer de chiffre de layout d'action ici**, seul l'invariant « zéro littéral d'action dans `ai/` » compte, et il tient. La n°12 est aggravée : `scripts/sweep_scenario_bank_v11.py` **n'existe plus dans le dépôt** (il n'est donc plus seulement non exécutable). |
 | 9 | §0.14 (rédigée puis **corrigée le même jour**) | « Non-régression §0.11 ✅ **VALIDÉE EN BOUT-EN-BOUT** » | ❌ **FAUSSE, retirée le 2026-07-20** — cf. §0.18 : le run suivant a crashé sur ce même message. Cas d'école : l'affirmation a été produite **par l'auteur du run lui-même**, le jour même, à partir d'un unique run vert. Le motif n°1 de ce document ne vient pas que du passé. |
 
 ---
@@ -2157,10 +1664,11 @@ AVANT d'y lancer un entraînement.
   2026-07-30 (§0.53) : la classe elle-même a été SUPPRIMÉE**, ainsi que son appelant
   `_best_target_slot_by_threat`. Le critère de menace reste vivant chez `DefensiveBot`, qui est,
   lui, joué en éval. Entrée conservée pour mémoire. Retiré à l'origine
-  parce qu'il **sous-performait**. Conséquence acceptée : son unique appelant
-  `_best_target_slot_by_threat` (7ᵉ site porté) n'est validé que par un **test unitaire**, jamais
-  en éval runtime. Le réintroduire pour la seule couverture fausserait la composition d'éval
-  (`combined`, poids) sans bénéfice. **Ne pas re-signaler comme un trou de couverture.**
+  parce qu'il **sous-performait**. ⚠️ **Mise à jour 2026-08-02** : `_best_target_slot_by_threat`
+  a été supprimé avec la classe — il n'en reste qu'un commentaire d'archive dans
+  `tests/unit/ai/test_evaluation_bots.py`. Le « trou de couverture » décrit ici **n'a plus
+  d'objet** ; l'entrée ne vaut plus que comme décision de périmètre (ne pas réintroduire le bot
+  pour la seule couverture, cela fausserait la composition d'éval). **Ne pas re-signaler.**
 - **§0.16(c) — clé `holdout_hard_opponent_budget_modifier` + `build_holdout_benchmark.py` gardés
   (2026-07-21).** Non consommés par le training actuel (2 rosters fixes, [§10.2](V11_eval_strategy.md#s10.2)), mais **conservés
   volontairement** : un holdout à armées **générées** est prévu **après la démo**. La clé est en
@@ -2189,8 +1697,581 @@ AVANT d'y lancer un entraînement.
 
 ## 0hist. Historique résolu
 
+<a id="s0.54"></a>
+### 0.54 Non-conformité 14.02 — « l'unité est sur un objectif » se lisait sur l'ANCRE d'escouade — ✅ CORRIGÉ ET MERGÉ (2026-07-30)
+
+> ⏳ **Reconfrontée le 2026-08-02** : mergée sur `main` (le « non mergé » d'origine est faux
+> depuis). ⚠️ **Change l'issue des parties → tout modèle antérieur a appris une géométrie fausse
+> de cette règle.**
+
+Jumeau trouvé en corrigeant les bots ([§0.53](#s0.53)). `is_unit_on_objective` comparait l'**ancre
+d'escouade** à un hexe d'objectif **par égalité stricte de coordonnées**, alors que **14.02** dit
+« *A model is within range of a terrain objective while it is within that terrain area* » — la
+portée se juge **PAR FIGURINE** (l'illustration du même paragraphe compte « *six of its models are
+within the terrain area* »), et le CONTRÔLE d'objectif du **même moteur**
+(`sum_objective_control_oc_multi`) comptait déjà une figurine dès qu'une case de son **socle**
+recouvre la zone. Deux réponses différentes à la même question dans le même état de jeu.
+
+Deux consommateurs, les deux phases d'attaque : `reroll_towound_target_on_objective` au **tir**
+(`shared_utils.py`) et en **mêlée** (`fight_handlers.py`).
+
+**Correction** : implémentation **unique** `game_state.unit_is_within_objective`, sur le même
+générateur d'empreintes que le contrôle (`iter_living_model_footprints`) ; `is_unit_on_objective`
+et `_squad_on_objective` (bots) y délèguent. Verrous : 2 tests prouvés rouges sur la lecture par
+ancre, le test de discrimination restant vert.
+
+⚠️ Une escouade étalée, ou à socle large, déclenche désormais la relance là où elle ne la
+déclenchait pas — et l'inverse. `ai/analyzer_phases/*` vérifiés : ils comptent le token du
+journal, sans test géométrique — pas de jumeau de plus.
+
+<a id="s0.53"></a>
+### 0.53 Refonte du panel de bots — les adversaires ignoraient la condition de victoire — ✅ LIVRÉ ET MERGÉ (2026-07-30)
+
+> ⏳ **Entrée périssable, reconfrontée le 2026-08-02** : le code est **mergé sur `main`** (le
+> « non mergé » d'origine est faux depuis). Le panel a **encore évolué** : voir la note de fin
+> d'entrée.
+
+**Constat mesuré sur deux runs successifs** : le win-rate de l'agent contre chaque bot suit
+EXACTEMENT le rapport de ce bot aux objectifs (`control` 0.33→0.27 et `adaptive` 0.52→0.36
+régressent, `greedy` 0.67→0.82, `aggressive_smart` 0.68→0.80, `tactical` 0.80→0.89,
+`defensive` 0.88→0.95 progressent), alors que la victoire se décide aux VP d'objectifs
+(`determine_winner_with_method` : les kills ne tranchent qu'à égalité). Le `combined` montait
+(0.62→0.65) pendant que la compétence décisive baissait.
+
+**Quatre changements :**
+
+1. Les trois géométries exclusives de déplacement (`_dest_toward_enemies` / `_dest_away_from_enemies`
+   / `_dest_toward_objective`) sont remplacées par **un score pondéré unique**
+   `w_objective × (−d_objectif) + w_enemy × (−d_ennemi) [+ bonus de tenue]`, réglé dans
+   **`config/bot_movement_weights.json`** — plus aucun bot ne peut ignorer les objectifs, et
+   « tenir l'objectif » devient une règle de score commune au lieu d'une clause propre à
+   `ControlBot`.
+2. **Deux lectures d'objectif fausses** corrigées (motif ancre-vs-par-figurine) :
+   `_count_objectives_controlled` relit `objective_controllers` — l'état 14.02 que le moteur écrit —
+   au lieu de recompter des ancres amies, et `_is_on_objective` teste l'**empreinte de socle par
+   figurine** (`iter_living_model_footprints`, extrait de `sum_objective_control_oc_multi` : une
+   seule implémentation). Les deux vont ensemble : la posture « winning » d'`AdaptiveBot` **fuyait**
+   les objectifs et se serait déclenchée bien plus souvent une fois le comptage juste.
+3. **`AggressiveSmartBot` et `DefensiveSmartBot` supprimés** — le premier est un doublon strict de
+   `GreedyBot` (même géométrie, même `_score_wounded` aux trois phases ; seul écart : un poids de
+   déploiement), le second n'était instancié nulle part. Avec eux disparaissent le regroupement
+   « palier 2 » et le scalaire `bot_eval/tier2_combined` ; l'early stopping bascule sur
+   `bot_eval/combined`.
+4. **Budget re-pondéré** dans les profils, et l'agrégat de classement de rosters
+   (`roster_aggregate_rankings.py`) passe à **4 bots à 0.25**, arité généralisée.
+
+🔴 **CONSÉQUENCES — toujours ouvertes, cf. tableau d'état :**
+- (a) les matrices `{split}_matchups_{bot}.json` **ne sont plus sur disque** (vérifié le
+  2026-08-02) : il n'y a rien à régénérer, **tout est à produire** ;
+- (b) le `combined` va **BAISSER** (tous les bots deviennent compétitifs) : c'est le résultat
+  recherché, pas une régression, mais **les seuils de gate de curriculum doivent être recalibrés**
+  (arbitrage utilisateur) ;
+- (c) **aucun win-rate antérieur au 2026-07-30 n'est comparable** à un win-rate postérieur.
+
+⏳ **Le panel a évolué depuis cette entrée** (constaté le 2026-08-02) : un **cinquième bot
+`ValueTradeBot`** a été ajouté. La pondération courante est `bot_eval_weights` = `control` 0.40 /
+`value_trade` 0.15 / `adaptive` 0.15 / `greedy` 0.15 / `defensive` 0.15 / `tactical` 0, et
+`ratios` = `control` 0.35 / `value_trade`, `adaptive`, `greedy`, `defensive` 0.15 / `random` 0.05 —
+et non la répartition « control 0.40 / adaptive 0.20 / greedy 0.20 / defensive 0.20 » écrite à la
+livraison. Relire le JSON avant de citer un poids.
+
+<a id="s0.52"></a>
+### 0.52 Ce que la campagne « typage & replis » du 2026-07-29 change pour la MESURE — ✅ LIVRÉ ET MERGÉ (2026-07-29)
+
+> **Périmètre de cette entrée : UNIQUEMENT ce qui change ce que l'utilisateur mesurera au prochain
+> entraînement.** La campagne complète (57 commits, `bb3a788f` → `d061f21b`) — contre-audit du
+> typage, replis silencieux, code mort, journal de tir, **et surtout la dette restante** — vit à UN
+> seul endroit : **[`campagne_typage_et_replis_2026-07-29.md`](campagne_typage_et_replis_2026-07-29.md)**.
+> Ne pas recopier son contenu ici.
+
+#### 1. 🔴 Quatre compteurs de combat rebranchés — les courbes antérieures sont ABSENTES, pas nulles
+
+Commit **`5f1878eb`**. `shots_fired`, `hits`, `damage_dealt` et `damage_received` étaient
+**déclarés** dans `episode_tactical_data` et **jamais incrémentés** depuis le commit **`fe1df7d8`
+« metrics OK » du 2025-10-25** (date constatée par `git log -1 --date=short fe1df7d8`) : ce commit a
+déplacé le dictionnaire du callback vers le moteur, a réimplémenté `valid_actions`,
+`invalid_actions`, `units_lost` et `units_killed`, **mais pas ces quatre-là**, tout en supprimant
+leur calcul côté callback **dans le même diff**. Migration partielle, **neuf mois de silence**.
+
+**Ce qu'il faut en retenir pour lire les courbes** — les consommateurs sont gardés par `> 0` :
+
+| Courbe | État avant le 2026-07-29 |
+|---|---|
+| `game_tactical/shooting_accuracy` | **jamais émise** |
+| `game_detailed/damage_dealt` | **jamais émise** |
+| `game_detailed/damage_received` | **jamais émise** |
+| `game_tactical/damage_efficiency` | **jamais émise** |
+
+🔴 **Une courbe absente ne se distingue pas d'un agent qui ne se bat jamais.** Toutes les mesures
+d'entraînement antérieures au 2026-07-29 — **y compris le run 4 (§0.14)** — **ne contiennent pas ces
+quatre courbes**. Elles ne sont pas à zéro : elles n'existent pas. Toute comparaison
+avant/après sur les dégâts, la précision ou l'efficacité de combat est **impossible**, pas
+seulement dégradée.
+
+**Où c'est branché** : bloc de fin d'épisode de `step()`, sur `action_logs`
+([`engine/w40k_core.py:2007`](../../engine/w40k_core.py#L2007) et suivants) — **pas** sur
+`attack_details`, qui vit sous `if (self.step_logger and self.step_logger.enabled)` et rendrait les
+métriques **dépendantes de `--step`**, donc nulles à l'entraînement normal.
+
+**Définitions verrouillées par test** (pour qu'un élargissement futur soit un choix, pas un oubli) :
+`shots_fired` / `hits` = **TIR seul** (une précision au tir ; y verser la mêlée la rendrait
+ininterprétable), donc `hits <= shots_fired` par construction ; `damage_dealt` /
+`damage_received` = **tir ET mêlée**, c'est l'attrition totale.
+
+**Preuve** : cohérence croisée sur vraie partie (14 tests, moteur réel, 3 graines) —
+`damage_dealt` == PV réellement perdus par l'adversaire et `damage_received` == PV perdus par le
+camp contrôlé, à l'unité près, **dans les deux sens et pour les deux sièges** ; rouge sous 4
+mutations restaurées.
+
+#### 2. 🟢 Type de socle scindé — la géométrie du chemin chaud accélère, l'invariant devient inviolable
+
+Commits **`44486667`** (invariant validé à la frontière, 9 `cast` supprimés) puis **`6f0c0c6b`**
+(scission du type). `Socle` était une **union étiquetée modélisée comme un enregistrement plat** :
+`shape` DÉTERMINAIT le type de `base_size` (`round`/`square` → diamètre scalaire, `oval` → paire)
+sans que rien ne le dise. `RoundSocle` / `SquareSocle` / `OvalSocle`
+([`engine/hex_utils.py:1728/1741/1754`](../../engine/hex_utils.py#L1728)) portent désormais chacun
+le type exact, et `Socle(...)` est la **fabrique** qui choisit la classe et refuse une taille qui
+contredit l'étiquette.
+
+| Mesure (timeit, n=200000, 3 passes) | avant | après | |
+|---|---|---|---|
+| `euclidean_edge_distance` | 883 ns | 645 ns | **−27 %** |
+| `footprints_overlap` | 679 ns | 490 ns | **−28 %** |
+| construction d'un socle | 243 ns | 274 ns | **+31 ns — assumé** (la fabrique valide, là où `tuple.__new__` était en C) |
+
+Net sur le couple réel « construire un socle puis tester le chevauchement » : **−17 %**.
+
+**Pourquoi ça compte au-delà de la perf** : l'invariant n'est plus vérifié à la lecture — **un socle
+incohérent ne peut plus exister**. La classe de base ne déclare pas `base_size`, donc on ne peut pas
+lire la taille d'un socle sans savoir de quelle forme il s'agit, et le vérificateur l'impose. Les
+**28 sites de construction hors tests sont inchangés** (la fabrique garde nom, signature et mots-clés du
+NamedTuple) et les **179 datasheets** du registre qui portent `BASE_SHAPE` respectent l'invariant (174 `round` + 5 `oval`,
+0 violation).
+
+⚠️ **Aucun `obs_size` ni `TOTAL_ACTION_SIZE` n'est touché** par ces deux points : ils
+**n'appartiennent pas au lot de ré-entraînement de §0.48** et ne forcent aucun `--new`.
+
+---
+
+<a id="s0.51"></a>
+### 0.51 Branches prêtes — 🟢 LES SIX SONT MERGÉES ⏳ ENTRÉE PÉRISSABLE (état au 2026-07-29 17 h)
+
+> 🟢 **MISE À JOUR DU 2026-07-29 (soir) — le constat de 14 h 05 ci-dessous est HISTORIQUE.**
+> Les **six** branches sont désormais **ancêtres de `main` = `d061f21b`** (vérifié par
+> `git merge-base --is-ancestor <branche> main` pour chacune) ; leurs têtes ont bougé après le
+> constat de 14 h 05, les têtes réellement mergées sont : `306033ec`, `ee3a55b8`, `fbd1d278`,
+> `b5888bdf`, `ee1dccb9`, `aba3cb07`.
+>
+> ✅ **Le POINT DE COMPOSITION signalé plus bas est SOLDÉ** : `v11-0.47-dead-decoder-and-interface-lock`
+> et `v11-0.47-eval-tooling-mask` sont sur `main` **ensemble**, donc `roster_matchup_stats.py`
+> n'appelle plus une méthode supprimée. La contrainte d'ordre de merge n'a plus d'objet.
+>
+> 🟢 **MERGÉE DEPUIS — vérifié le 2026-08-02** (le motif d'attente ci-dessous est historique) :
+> `fix-weapon-collection-defaults`
+> (`5980a035`) — « distinguer *pas d'arme* (liste vide) de *entité mal construite* (clé absente) »,
+> 8 fichiers, +310/−35 dont `tests/unit/engine/test_weapon_collections_contract.py` (213 lignes).
+> **Motif de l'attente : l'utilisateur a du travail en cours sur exactement ces fichiers**
+> (`git status` au 2026-07-29 : `engine/phase_handlers/fight_handlers.py`,
+> `engine/phase_handlers/shared_utils.py`, `engine/phase_handlers/shooting_handlers.py`,
+> `engine/w40k_core.py` modifiés). Elle appartient à la campagne « typage & replis » →
+> [`campagne_typage_et_replis_2026-07-29.md`](campagne_typage_et_replis_2026-07-29.md).
+>
+> ⚠️ **Le merge n'est PAS une validation.** La vérification large appartient toujours à
+> l'utilisateur et n'a pas été faite.
+
+⏳ **Constat historique du 2026-07-29 à 14 h 05 — conservé tel quel, NE PLUS S'EN SERVIR comme
+état courant.** Reconfronter au réel (`git log main..<branche>`) avant tout usage.
+Constaté par `git log main..<branche>` le **2026-07-29 à 14 h 05**, `main` = **`5d2dfd48`**.
+🔴 **CINQ des six branches ont bougé PENDANT le constat** (entre 13 h 56 et 14 h 05, suites de
+relecture adverse écrites par d'autres agents en parallèle) : les têtes et les comptes ci-dessous
+sont **datés à la minute, et déjà probablement dépassés**. Ne jamais les citer sans les revérifier.
+**Aucune de ces branches n'est un chantier en cours sans livrable : les six portent du travail
+terminé, avec ses tests ciblés.**
+
+| Branche | Objet | Commits | Tête (14 h 05) | Détail |
+|---|---|---|---|---|
+| `v11-0.46-dead-code-charge-heuristic` | code mort `get_best_enemy_*` **+** documents rendus faux par la suppression | 2 | `306033ec` | [§0.46](#s0.46) pt 1 |
+| `v11-0.47-eval-tooling-mask` | outil de stats par matchup : masque legacy, **obs Dict aplatie (l'outil ne démarrait pas)**, plafond de pas, vainqueur recalculé, scénarios au contrat legacy, `--agent-seat-mode` sans effet | 10 | `cc3b5713` | [§0.47](#s0.47) É1 **et** É6 |
+| `v11-0.47-dead-decoder-and-interface-lock` | suppression de `convert_gym_action` **+ du masque de l'ancien espace** + 3 symboles morts préexistants, **+** verrou d'interface `test_agent_interface_contract.py` | 4 | `f0ed563a` | [§0.47](#s0.47) É2+É3 |
+| `v11-pre-lot-eval-baseline` | bots d'éval (contre-charge du défensif, cibles hors ordre de tri, focus-fire rebranché, joueur dérivé de l'escouade activée) **+** rampe de déploiement sur les 5 profils | 4 | `d0183afe` | [§0.47](#s0.47) **É4** + [§0.46](#s0.46) **pt 2** |
+| `v11-battle-shock-oc` | conformité 01.07 : contrôle d'objectif, **+ bonus de reward « sur objectif »**, docstring, verrous des producteurs du drapeau, 3ᵉ vérité parallèle du replay signalée **puis supprimée** (contrôle/VP journalisés par le moteur, 2026-07-29) | 5 | `b8932f52` | [§0.50](#s0.50) |
+| `v11-fly-2103-conformity` | conformité 21.03 (casse du mot-clé, traversée payante, vol de charge, garde de phase, donnée corrompue, justification de la politique moteur) | 8 | `4c88ec60` | [§0.49](#s0.49) |
+
+⚠️ **Le renvoi de `v11-pre-lot-eval-baseline` vers §0.48 était FAUX** (corrigé le 2026-07-29) : §0.48
+est l'inventaire du **lot de ré-entraînement** et ne décrit **rien** de ce travail. Cette branche
+livre **§0.47 É4** (bots d'évaluation) et **§0.46 point 2** (rampe de déploiement) — deux des quatre
+chantiers que §0.48 exige **avant** la mesure de référence, ce qui n'en fait pas des éléments du lot.
+
+⚠️ **POINT DE COMPOSITION — il ne s'agit PLUS d'un travail de suite, mais d'une CONTRAINTE D'ORDRE
+DE MERGE** (mis à jour le 2026-07-29 à 14 h 05). Historique : la branche du décodeur mort avait
+d'abord **CONSERVÉ** `get_action_mask_and_eligible_units` et `_build_mask_for_units` parce qu'un
+appelant subsistait — [`scripts/roster_matchup_stats.py:562`](../../scripts/roster_matchup_stats.py#L562),
+précisément celui que `v11-0.47-eval-tooling-mask` migre (§0.47 É1). Le commit **`a210008c`** les a
+**supprimées** depuis, sur le constat que leur décodeur était parti au commit précédent et que ce
+masque ne décrivait donc plus aucun espace décodable (pierre tombale posée dans `action_decoder.py`,
+7 cas de test retirés).
+
+🔴 **CONSÉQUENCE : `v11-0.47-dead-decoder-and-interface-lock` est INCOMPLÈTE SEULE.** Sur cette
+branche prise isolément, `roster_matchup_stats.py:562` appelle une méthode qui n'existe plus —
+c'est l'**état post-merge** qui fait foi, et la correction de ce site vit sur l'autre branche. Les
+**deux branches doivent donc être mergées ENSEMBLE** (ou celle de l'outillage d'éval en premier) ;
+merger la seule branche du décodeur laisse l'outil de statistiques cassé à l'exécution.
+
+⚠️ **AUCUNE de ces branches n'est validée au-delà de ses tests ciblés.** La **vérification large**
+(suite de tests complète, `pyright`, `ai/hidden_action_finder.py`, `scripts/check_ai_rules.py`,
+`biome`, `tsc`) **appartient à l'utilisateur et n'a PAS été faite**. Ne pas lire « branche prête »
+comme « branche verte ».
+
+<a id="s0.49"></a>
+### 0.49 Non-conformité 21.03 « Take to the skies » — le mot-clé FLY perdu par comparaison sensible à la casse — ✅ CORRIGÉ ET MERGÉ (2026-07-29 ; branche supprimée, vérifié le 2026-08-02)
+
+**Cadre.** Découvert le 2026-07-29, pendant le run 4 — c'est **l'une des deux raisons de son arrêt**
+([§0.14](#s0.14)).
+
+✅ **CORRIGÉ sur la branche `v11-fly-2103-conformity`, NON MERGÉE.** ⏳ **État constaté le 2026-07-29
+à 14 h 05** (`git log main..v11-fly-2103-conformity`) — **la branche bougeait encore pendant ce
+constat** (elle est passée de 5 à 8 commits entre 13 h 56 et 14 h 02), **reconfronter au réel avant
+usage** : **8 commits**, tête **`4c88ec60`** (14 h 02) — `d1099b26` (casse du mot-clé), `18096753`
+(traversée payante), `350da3cf` (vol de charge pour l'IA), `6b714180` (commentaire qui disait
+l'inverse du code), `3b234200` (éligibilité bornée sur le budget réel), `c57f4fb6` (table de phases
+née morte + garde de phase symétrique sur `get_squad_move_budget` : le budget d'une unité volante
+était amputé de 2" **en tir, en charge et en combat** via `grid_half_extent_subhex`), `6191a360`
+(un `keywordId` absent ou nul était sauté en silence — désormais `ValueError`, plus de valeur par
+défaut masquant une donnée corrompue), `4c88ec60` (justification écrite de la politique moteur du
+point 5 ci-dessous).
+Verrou : `tests/unit/engine/test_fly_2103_conformity.py`, **18 tests** (compté par
+`git show <branche>:<fichier>`), dont une **sonde in-engine** sur un vrai `W40KEngine` chargé de
+`scenario_training_armageddon.json`, qui **échoue si elle ne rencontre aucune unité volante**
+(« SONDE MUETTE »). ⚠️ **Non validée au-delà de ces tests ciblés** : la vérification large appartient
+à l'utilisateur et n'a pas été faite (§0.51).
+
+**1. La rupture (état AVANT correctif).** `_unit_has_keyword`
+(`engine/phase_handlers/movement_handlers.py`) comparait le mot-clé par **ÉGALITÉ STRICTE**
+(`keyword_value == keyword_id`), alors que ses appelants passent `"fly"` en minuscules.
+✅ **Depuis le correctif (vérifié le 2026-08-02), elle normalise** (`str(v).strip().lower()`) et
+**lève** si `keywordId` est absent ou nul. Les appelants qui passent `"fly"` sont **quatre**, dans
+`movement_handlers.py` (trois) et `charge_handlers.py` (un).
+
+**C'est l'EXCEPTION, pas la norme du moteur** : partout ailleurs les mots-clés sont **normalisés**
+avant comparaison — [`engine/game_state.py:80`](../../engine/game_state.py#L80),
+[:102](../../engine/game_state.py#L102), [:1162](../../engine/game_state.py#L1162),
+[`shared_utils.py:4265`](../../engine/phase_handlers/shared_utils.py#L4265) (`.strip().lower()`).
+
+**2. ⚠️ Le corpus est INCOHÉRENT, pas uniformément en majuscules.** Dans `frontend/src/roster/` :
+**16** occurrences `keywordId: "fly"` et **6** `keywordId: "FLY"`. **Les 16 fonctionnent, les 6
+perdent la règle.**
+
+> ⚠️ **Correction d'une analyse fausse** : une première lecture concluait « tout le chemin FLY est
+> mort ». **C'est FAUX** — les deux tiers du corpus passent. La rupture est **partielle et
+> silencieuse**, ce qui est pire à diagnostiquer qu'un chemin uniformément mort.
+
+**3. Gravité — elle touchait précisément le roster entraîné.** **Cinq des six** types en majuscules
+sont dans les rosters d'ArmageddonAgent, présents à la fois dans
+`config/agents/ArmageddonAgent/rosters/500pts/training/` **ET** `.../holdout_regular/` :
+`VanguardVeteranSquadJumpPack`, `VanguardVeteranSquadJumpPackPlasma`,
+`VanguardVeteranSquadJumpPackSergeant`, `ChaplainJumpPack`,
+`LandSpeederOnslaughtGatlingCannon`. (Le sixième, `LandSpeederHeavyFlamer`, n'est dans aucun
+roster de l'agent.) **Le run 4 entraînait donc l'agent sur un jeu où ses unités à réacteurs et son
+Land Speeder ne volaient pas** — ni traversée, ni charge FLY.
+
+**4. Deux défauts adjacents, révélés DÈS la casse corrigée — ✅ CORRIGÉS dans la même branche.** Ils
+étaient masqués par la rupture : la corriger sans eux aurait transformé un bug en un autre.
+
+- **(a) Traversée FLY gratuite en gym, EN FAVEUR DE L'AGENT.** `_fly_traversal_active`
+  ([movement_handlers.py:258-273](../../engine/phase_handlers/movement_handlers.py#L258-L273)) rend
+  `True` **inconditionnellement** pour une unité IA, alors que le **malus de 2"** de 21.03 n'est
+  retranché du budget que pour les unités de `units_took_to_skies`
+  ([shared_utils.py:4541-4546](../../engine/phase_handlers/shared_utils.py#L4541-L4546)) — ensemble
+  **jamais rempli en gym**. L'agent volerait donc **sans en payer le coût**.
+  → ✅ **`18096753`** : `took_to_the_skies(gs, unit, id, charge=)` devient la **SOURCE UNIQUE** de la
+  déclaration, dont dérivent **et** la traversée (`_fly_traversal_active`, coût de descente) **et**
+  le `-2"` (`get_squad_move_budget`) — la dissociation n'est plus représentable. C'est une **fonction
+  PURE de l'état**, donc vue à l'identique par le masque (`build_squad_move_cell_map`), l'observation
+  et l'exécution : une déclaration posée APRÈS la construction du pool aurait offert des destinations
+  que le budget réel ne permet plus. Le fingerprint du cache de pool lit le même prédicat. 21.03
+  n'énumère que « *normal, advance, fall-back or charge move* » : hors de ces mouvements (pile-in,
+  consolidation) il n'y a plus de traversée — c'était le cas `phase != "move"` qui rendait `True`.
+  Deux tests **existants** devenus rouges parce que l'unité paie enfin : leur `MOVE` est relevé de 2"
+  pour retrouver le **budget effectif** d'origine — **aucune assertion assouplie**.
+- **(b) Charge FLY inactive pour toute unité IA.** `_charge_fly_active`
+  ([charge_handlers.py:83-88](../../engine/phase_handlers/charge_handlers.py#L83-L88)) rend `False`
+  dès `_charge_is_ai_unit`, alors que **21.03 nomme explicitement le mouvement de charge**.
+  → ✅ **`350da3cf`** : le court-circuit est supprimé, la déclaration déléguée à la même source unique
+  `took_to_the_skies` ; `_charge_is_ai_unit`, sans appelant restant, est supprimé. **Corollaire
+  indispensable** : `charge_build_valid_plan` — le chemin qu'exécute `w40k_core.squad_charge`, donc
+  l'agent, et l'oracle d'observation — recalculait son budget en ligne et n'appliquait donc **jamais**
+  les 2", alors qu'il déduisait déjà `squad_descent_penalty_subhex` (ignore du vertical dès que le vol
+  est actif) : l'unité volante aurait ignoré le vertical **gratuitement**. Le budget passe par
+  `_charge_budget_subhex`, source unique, où traversée et coût sortent de la **même** déclaration.
+
+**5. 🟢 DÉCISION ASSUMÉE — POLITIQUE MOTEUR DE LA DÉCLARATION : une unité FLY pilotée par le modèle
+DÉCLARE SYSTÉMATIQUEMENT.** (Écrite ici parce qu'elle ne figurait **nulle part** dans ce journal,
+alors qu'elle change ce que l'agent apprend.) 21.03 fait de « prendre les airs » une **décision du
+joueur actif** ; l'agent ne peut pas encore décider — c'est le chantier **`L6`** du lot
+([§0.48](#s0.48), P3-7), qui casse le contrat d'observation et sort donc du périmètre de ce
+correctif. Il fallait néanmoins **une constante**, et les deux seules possibles ne sont pas
+équivalentes : « ne jamais déclarer » rendrait le mot-clé FLY **inerte** pour l'agent — pas plus
+conforme, seulement muet ; « toujours déclarer » **conserve la capacité que la règle donne et la
+facture au prix légal**, dans un état de jeu toujours valide. C'est la seconde qui est retenue, en
+mouvement **comme** en charge.
+
+⚠️ **COÛT ASSUMÉ, permanent et parfois pur** : **2 pouces de mouvement en moins à chaque move**
+(normal / advance / fall-back / charge) pour les **cinq types volants du roster d'entraînement**
+d'ArmageddonAgent (`VanguardVeteranSquadJumpPack`, `...Plasma`, `...Sergeant`, `ChaplainJumpPack`,
+`LandSpeederOnslaughtGatlingCannon`) — **y compris en terrain découvert**, où la traversée
+n'apporte rien et où le malus est donc un **pur désavantage** que l'agent ne peut pas refuser.
+Ordre de grandeur constaté par la sonde in-engine du commit `350da3cf` : `LandSpeeder…` **70 → 60**
+subhex, `VanguardVeteranSquadJumpPack` **60 → 50** (`ish = 5`). ⚠️ Cette constante devra **disparaître
+avec `L6`** : tant qu'elle tient, une part de la performance mesurée de l'agent est imputable à un
+choix qu'il n'a pas fait.
+
+**Rapport au lot de ré-entraînement ([§0.48](#s0.48))** : ceci est une **non-conformité de moteur**,
+pas un changement de contrat — à ne pas confondre avec `L6` (FLY comme **décision d'agent**, P3-7),
+qui est dans le lot. Ce correctif-ci ne casse ni `obs_size` ni l'espace d'action, mais il **change
+ce qui est appris** : il doit donc être livré **AVANT** la mesure de référence, au même titre que la
+rampe de déploiement (§0.46 pt 2) et le correctif des bots (§0.47 É4).
+
+<a id="s0.42"></a>
+### 0.42 P2 « décision agent » — ✅ MERGÉ SUR `main` le 2026-07-28 (avec P3-1), NON MESURÉ
+
+**Ce qui est livré.** Le mécanisme générique « décision agent » ([§9.3](V11_phaseA.md#s9.3) P2) et son pilote
+([§9.4](V11_phaseA.md#s9.4) point 0) — détail complet et preuves en [§9.3bis](V11_phaseA.md#s9.3bis).
+
+**État du merge (2026-07-28 soir).** `v11-p2-agent-decision` était **rebasée** sur
+`v11-p3-1-fight-target` (dont les changements d'action space entraient en conflit avec les siens,
+tous résolus dans la branche). Le merge de la branche rebasée a donc porté **les deux chantiers à
+la fois** sur `main` : `obs_size` **20740**, `TOTAL_ACTION_SIZE` **1088**, code et 5 profils de
+config vérifiés cohérents après merge.
+
+⚠️ **Décision utilisateur ASSUMÉE : merge pendant le run `--new` de §0.14** (démarré le 2026-07-28
+à 17 h 25). Le risque était connu et accepté : un sous-processus d'évaluation qui relit la config
+d'agent depuis le disque charge un contrat d'observation **incompatible** avec le modèle en cours
+d'entraînement.
+
+**CONSTATÉ le 2026-07-28 à 20 h 21** : le run **s'est arrêté**, dernière écriture TensorBoard à
+**20 h 20 min 27 s**, quelques minutes après le merge (20 h ~15). Dernier checkpoint sauvegardé :
+`ppo_checkpoint_720000_steps.zip` (**720 000 pas**, 20 h 08). C'est la conséquence ATTENDUE du
+changement d'`obs_size`, pas un bug de P2 ni de P3-1 — ne pas le re-diagnostiquer comme tel. La
+sortie d'erreur est restée dans le terminal du run (non redirigée vers un fichier).
+
+**Ce checkpoint n'est PAS réutilisable** : il porte l'ancien contrat (`obs_size` 20626, action
+space 1062), que plus aucun code ne sait construire. Reprendre le run est impossible ; le prochain
+doit être `--new`. La mesure de win-rate de §0.14 sur l'ancien contrat n'existera donc jamais —
+c'est le coût, accepté, de ce merge.
+
+**Conséquence, non négociable.** Le prochain run **DOIT** être `--new`. Ce n'est pas un choix :
+le fail-fast d'`obs_size` à l'init du moteur le rendra explicite au démarrage.
+
+⚠️ **Ne pas comparer les win-rates d'avant et d'après comme s'ils mesuraient P2.** Ils mesureraient
+deux contrats d'observation différents, sur un mécanisme qui ne se déclenche sur AUCUN roster
+d'entraînement (aucun SM ni Ork ne porte de rule choice — le seul du jeu est le Tyranid Warrior
+mêlée). Cf. la réserve de mesure en [§9.3bis](V11_phaseA.md#s9.3bis).
+
+**Effet de bord corrigé au passage** (trouvé par mesure, pas par lecture) : `rule_choice` était
+journalisé DEUX fois dans step.log — une écriture directe correcte, plus une tentative de flush qui
+échouait en silence sur une clé mal orthographiée. Détail en [§9.3bis](V11_phaseA.md#s9.3bis).
+
+<a id="s0.33"></a>
+### 0.33 Rollout buffer surdimensionné — la cause était `n_steps` NON divisé par `n_envs` sur 2 chemins de création sur 3 — ✅ RÉSOLU (2026-08-01)
+
+> ⚠️ **Requalifiée le 2026-08-02.** L'entrée titrait « 46,9 Go pour 39 Go de RAM — 🟠 CONDITIONNEL,
+> bloque les profils à 48 envs ». Ce n'était **pas** une fatalité de dimensionnement mais **un
+> bug** : `model_params.n_steps` est un **TOTAL par update**, et sa division par `n_envs` ne vivait
+> que dans `train_with_scenario_rotation`, alors que `create_model` et `create_multi_agent_model`
+> construisent AUSSI un `SubprocVecEnv` de `n_envs`. Un run mono-scénario (`--scenario X --new`)
+> allouait donc `8192 × 48` = 393 216 transitions. **Jumeau classique : correction appliquée à un
+> chemin sur trois.**
+
+**Correctif — `apply_rollout_n_steps` (`ai/train.py`), point de passage UNIQUE** appelé par les
+trois constructeurs :
+- `n_steps` est divisé par `n_envs`. La troncature compte : `8192 // 48` donne **170** pas par env,
+  soit **8 160** transitions et non 8 192. Le total journalisé est celui **réellement obtenu**,
+  jamais celui demandé — annoncer le total demandé avait déjà fait valider deux configurations que
+  la troncature rendait identiques.
+- Un **garde-fou** lève un `MemoryError` explicite si le buffer dépasserait **0,5 × la mémoire
+  disponible**, au lieu d'un OOM sans rapport apparent quelques minutes plus tard.
+
+| | floats / transition |
+|---|---|
+| vecteur (`obs_size`) | 20 828 |
+| grille (9 × 32 × 32) | 9 216 |
+| **total** | **30 044**, soit **117,4 Kio** par transition en float32 |
+
+**Dimensionnement réel au 2026-08-02** — les **six** profils portent `n_envs: 48` et
+`n_steps: 8192` : **8 160 transitions**, **≈ 0,98 Go** de buffer. Le régime validé de CoreAgent
+(`n_steps = 16 384`) reste finançable (**≈ 1,97 Go**) : il n'y a **pas** de plafond à 2048, et la
+mémoire ne contraint plus le re-tuning.
+
+⏳ **Arbitrage du 2026-07-28 « 8 envs mesuré MEILLEUR que 48 » : PÉRIMÉ.** Un banc de balayage
+dédié (`scripts/ab_sweep_nenvs.py`, 37 runs appariés) a depuis retenu **48** : +43 % de débit face
+à 6, −4,2 % face à 64. Les six profils sont à 48 envs, avec le `batch_size: 1020` qu'impose un
+rollout réel de 8 160.
+
+⚠️ **Piège de lecture conservé** : le « 14,49 Go, sous la limite de 19,33 Go » de
+[`move_action_space_spatial_rework.md`](A_faire/move_action_space_spatial_rework.md) §8.3 ne compte
+**que la grille**. Il était juste quand l'obs vectorielle faisait 108 floats ; il est périmé depuis
+§0.30, pour une raison qui n'est pas celle de §0.32.
+
+⚠️ **Une recommandation « `n_steps` 8192 → 1024 » a été formulée puis RETIRÉE le même jour. La
+retenir aurait dégradé le run.** Ses deux erreurs, à ne pas refaire :
+
+1. **Argument faux.** Elle promettait « 8× plus de mises à jour, donc plus d'apprentissage ». Le
+   nombre de PAS DE GRADIENT d'un run ne dépend pas de `n_steps` : il vaut
+   `transitions_totales × n_epochs / batch_size`. `n_steps` n'arbitre que **fraîcheur contre
+   variance** — des avantages estimés sur moins de données, et donc plus bruités.
+2. **Preuve contraire déjà au dossier, non consultée** :
+   [`config/agents/CoreAgent/Training_logs.md`](../../config/agents/CoreAgent/Training_logs.md)
+   — ablations à 30k épisodes, `n_envs=48`, un seul hyperparamètre changé par run :
+
+   | Changement | Robust score | Verdict noté à l'époque |
+   |---|---|---|
+   | baseline `n_steps=16384` | **0,4857** | BEST |
+   | `n_steps` → 8 192 | 0,3808 | « rollout **trop petit** → instabilité » |
+   | `n_steps` → 32 768 | 0,4345 | mieux que 8192, sous la baseline |
+   | `batch_size` → 2048 | 0,3281 | « catastrophique, trop peu de pas de gradient par rollout » |
+
+   Sur ce projet, la direction mesurée est donc l'INVERSE : **plus gros, mieux**, avec un optimum
+   à 16 384. C'est sur CoreAgent — autre pipeline, autre observation — donc ce n'est pas une
+   preuve transférable ; c'est la **seule** preuve disponible, et elle contredit la proposition.
+
+<a id="s0.29"></a>
+### 0.29 Scénario SM vs Orks à placement manuel + bascule fixed/active + scheduler curriculum — ✅ LIVRÉ + VALIDÉ IN-ENGINE (2026-07-22)
+
+**But (recadré par l'utilisateur).** Pouvoir **placer les unités manuellement** ET **choisir**, sur un
+même fichier, entre placement figé (manuel) et phase de déploiement — le tout sur le terrain réel du
+training, sans nouveau terrain. Reliquat demandé : faire évoluer la **proportion figé↔déploiement au
+fil du training** (curriculum). Matchup **Space Marines vs Orks**.
+
+**Fichiers livrés.**
+- `config/board/44x60x5/scenario/scenario_fixed_brawl_sm_orks.json` — 4 escouades / **36 figurines**,
+  format `units[]` avec clé `models` (compositions RÉELLES des rosters training) :
+  P1 SM = Intercessor (Bolt Rifle) + VanguardVeteranSquadJumpPack (jump pack) ;
+  P2 Orks = 2× Boyz. Chaque figurine a `col/row/unit_type` propre (sergents, plasma, personnages
+  fidèles au roster). `terrain_ref` = **`terrain-mc1.json`** (terrain réel du training).
+- `tests/unit/engine/test_fixed_brawl_deploy_modes.py` — **verrou** (bascule fixed↔active).
+- *(Aucun terrain créé — un premier jet en avait introduit un, retiré à la demande de l'utilisateur.)*
+
+**Le seul levier = `deployment_type`** (tracé, pas supposé). `game_state.py::load_units_from_scenario` :
+- `"fixed"` (ou champ absent, défaut ~L274) → chaque unité EXIGE `col/row` top-niveau = ancre =
+  `models[0]` (~L589-594), figurines posées telles quelles ; la clé `models[]` est normalisée par
+  figurine (~L874-985, override `unit_type`/stats par modèle). Au `reset`, phase `command` directe
+  (aucun `deployment`).
+- `"active"` → au `reset`, `deployment_type=="active"` déclenche la phase `deployment`
+  (`w40k_core.py:1364`), figurines mises à la sentinelle (-1,-1) et placées en jeu (IA/manuel). Les
+  `col/row` du fichier sont alors ignorés. `terrain-mc1.json` fournit les `deployment_zones` requises.
+
+**Positions par défaut** (éditables). Board 220×300 subhex. Placées dans les **bandes dégagées de
+mc1** (P1 SM rows 92/100, P2 Orks rows 198/206 ; cols 66-154), à l'écart des murs de la ruine
+centrale (rows ~120-185) — vérifié : le mode `fixed` chargeait en erreur « footprint on wall hex »
+tant que les unités tombaient sur la ruine. Portées lues (datasheets) pour référence : Bolt Rifle
+24″=120 subhex, shoota Boyz 18″=90 ; charge 11.02 (≤12″, non-engagé), zone d'engagement 03.04
+(2″=10 subhex hz).
+
+**Preuve in-engine (verrou, chemin gym réel).** `python3 -m pytest tests/unit/engine/test_fixed_brawl_deploy_modes.py` :
+```
+✅ fixed  : phase initiale='command', 4 unités / 36 figurines placées (aucun déploiement)
+✅ active : phase initiale='deployment', 4 unités en attente de déploiement
+✅ VERROU OK : même fichier, bascule fixed↔active par `deployment_type` (36 figurines).
+```
+⚠️ Piège rencontré (dans le verrou) : le loader **mémoïse le JSON par chemin absolu** (~L240) — tester
+deux modes en réécrivant un seul fichier temporaire relit le cache du 1er mode ; le verrou utilise
+donc **deux chemins distincts**.
+
+**Proportionnalité figé↔déploiement au fil du training — ✅ LIVRÉ (scheduler continu).** Approche
+retenue (arbitrage utilisateur) : **montée lisse par épisode**, mode `active` tiré à proba p(t)
+croissante, sur un SEUL fichier rechargé dans le mode tiré (réutilise les 2 chemins de chargement
+éprouvés plutôt qu'un chemin « hybride » risqué côté fuite d'état — cf. §0.25/§0.26). Implémentation
+(3 fichiers) :
+1. `game_state.py::load_units_from_scenario(..., deployment_type_override=None)` — force le mode du
+   chargement en remplaçant le `deployment_type` du JSON (et neutralise les surcharges P1/P2).
+2. `w40k_core.py::_configure_deployment_mode_for_episode()` — **miroir de `deployment_random_mix`**
+   (orthogonal : celui-ci choisit fixed/active, l'autre randomise les ACTIONS d'un déploiement déjà
+   actif). p(t) = `active_ratio_start + (end−start)·min(progress, freeze)`, progress =
+   `episode_number/(total_episodes−1)`, Bernoulli(p) → `active`/`fixed`. Dans `reset()`, impose un
+   rechargement avec l'override (reward_configs reconstruits via le chemin `_reload_scenario` existant).
+3. Config `x5_new.deployment_mode_schedule` (opt-in, `enabled:false` par défaut) :
+   `active_ratio_start/active_ratio_end/schedule:"linear"/freeze_after_progress`, `training_only`.
+**Preuve in-engine** — `python3 -m pytest tests/unit/engine/test_deployment_mode_schedule.py` : ratio 0.0→ 20/20 `fixed` ;
+ratio 1.0→ 20/20 `active` ; rampe 0→1 (60 ép.)→ part `active` croissante (1re moitié 8, 2e moitié 24),
+avec cohérence stricte mode↔phase (`fixed`→`command`, `active`→`deployment`). Le scheduler est
+**orthogonal** à `deployment_random_mix` (les deux peuvent coexister). ⚠️ `training_only:true` exige
+le scénario sous `.../scenarios/training/` (`_is_training_scenario_context`) — le déposer là pour
+l'activer en training réel ; mettre `enabled:true` dans `x5_new`.
+
+**Emplacements DANS les rosters (mode strict sur le chemin roster réel) — ✅ LIVRÉ.** Le training
+réel ne joue pas un `units[]` figé : il passe par le **template roster** (`scenario_training_armageddon.json`,
+`agent_roster_ref=training_random`, `opponent_roster_ref=[SM,Orks]`, **siège aléatoire**). Or un
+roster compact ne portait aucune coordonnée → `fixed` était interdit (`_expand_compact_roster_to_basic_units`
+levait). Solution retenue par l'utilisateur (pas de miroir) : **chaque roster déclare `top` ET `bottom`
+par figurine**, le loader choisit le côté selon le joueur assigné (**convention P1=top, P2=bottom**) —
+comme le siège est aléatoire, les deux côtés sont portés. Implémentation :
+- `game_state.py::_expand_compact_roster_to_basic_units` — `models[i]` accepte la forme objet
+  `{unit_type, top:{col,row[,level]}, bottom:{...}}` ; unité **mono** (véhicule/perso) : positions au
+  **niveau de l'entrée** (`top`/`bottom`) pour NE PAS la transformer en escouade (comportement `active`
+  préservé). En `fixed` : positions obligatoires (sinon erreur explicite), `count==1` requis, côté
+  sélectionné par joueur. En `active` : positions ignorées (roster à double usage). Helper
+  `_parse_roster_model_side` (validation stricte col/row/level).
+- Les **4 rosters** training (agent SM/Orks, opponent SM/Orks) portent désormais `top`/`bottom`,
+  produits par le **générateur committé `scripts/gen_roster_positions.py`** (reproductible) :
+  placement en **réseau hexagonal** (pas 9 subhex) par footprint réel (tailles de socle variables
+  persos/véhicules), wall-aware (terrain-mc1), sans chevauchement (le mode `fixed` valide les
+  footprints), dans les bandes haute (~rows 40-104) et basse (~196-260). **Cohérence d'escouade
+  GARANTIE** : le générateur n'accepte un centre d'escouade que si la formation est cohérente. La
+  règle moteur (03.03) exige **la CONNEXITÉ** (une seule chaîne — précision d'arbitre/FAQ) plus
+  « à 9" de CHAQUE autre figurine », mesurée en hex centre-à-centre à x1 et bord d'empreinte à x5+
+  (bascule de résolution `spatial_relations.geometry_is_hex`, 2026-07-29) ; `squad_min_neighbors`=1
+  reste un degré minimal, et `cohesion_distance_mode`="euclidean" ne vaut plus que pour x5 et
+  au-delà. Le générateur vise ≥2 centre-à-centre = borne conservatrice. **L'oracle est la fonction moteur `validate_squad_coherency`** — c'est ELLE
+  que le verrou asserte à la charge (pas une réimplémentation).
+**Preuve in-engine** — `python3 -m pytest tests/unit/engine/test_roster_fixed_positions.py` : 8 épisodes `fixed` (rosters
++ siège tirés au hasard) → **aucun déploiement, toutes figurines placées, P1 en bande haute / P2 en
+bande basse, escouades cohérentes** ; 3 épisodes `active` → phase `deployment`, sentinelles.
+Cohérence re-vérifiée hors test : 0 figurine sous-cohérente sur 12 chargements (2 sièges × 6 rosters
+aléatoires). Régression : template `active` + rosters positionnés, scheduler off → step normal
+(deployment→move→shoot), aucun crash. Le scheduler `deployment_mode_schedule` rampe donc **strict
+(positions rosters) → déploiement appris** directement sur le vrai flux (rotation SM/Orks + siège
+aléatoires conservés). ⚠️ Si une composition de roster change, relancer `gen_roster_positions.py`.
+
+**Suite (mécanique LIVRÉE ; reste l'USAGE + la mesure — arbitrage utilisateur / dépendances).** Un
+agent frais qui reprend :
+1. **Activer le curriculum** : `x5_new.deployment_mode_schedule.enabled = true` puis régler la rampe
+   (`active_ratio_start`/`active_ratio_end`/`freeze_after_progress`, p.ex. 0.0→1.0 sur 0.8 de la
+   progression). Aucun autre câblage : le template roster réel (`scenario_training_armageddon.json`)
+   marche tel quel, rosters déjà positionnés.
+   > 🔴 **RELEVÉ le 2026-07-28 soir — `enabled: true` NE SUFFIT PAS, et c'est le piège exact du
+   > profil `x1` aujourd'hui.** Les 3 profils qui la portent (`x1`, `x5_new`, `x5_debug` — vérifié
+   > le 2026-07-28 ; `x5_append` et `x1_debug` n'ont pas la clé) déclarent `enabled: true` avec
+   > `active_ratio_start = active_ratio_end = 0.0` : le scheduler s'exécute, calcule `p_active = 0`
+   > et renvoie `fixed` à **tous** les épisodes. Un `enabled: true` sans rampe non nulle est
+   > indistinguable d'un scheduler éteint dans les logs. **C'est la RAMPE qui active le
+   > curriculum, pas le drapeau.**
+2. **Vérifier en épisode réel** avant un long run : `python3 ai/train.py --agent ArmageddonAgent
+   --training-config x5_new --step` + `ai/analyzer.py` + replay → confirmer que des épisodes `fixed`
+   (placement rosters, aucun déploiement) ET `active` (déploiement) surviennent, dans la bonne
+   proportion selon l'avancement.
+3. **Mesurer l'objectif curriculum** : win-rate en régime `fixed` (strict) vs `active` au fil de la
+   rampe — c'est la métrique qui valide « scénarios fixes → apprendre à se déployer ». **Rejoint
+   §0.14 (win-rate)**, ✅ **débloqué le 2026-07-26** (§0.27 corrigé, [§9.2.5](V11_phaseA.md#s9.2.5) livré).
+Décisions ouvertes (utilisateur) : forme exacte de la rampe ; coexistence éventuelle avec
+`deployment_random_mix` ; siège (`agent_seat_mode`) gardé aléatoire ou figé en phase strict.
+
+**Outillage : jouer/visualiser UN scénario explicite en éval (2026-07-22).** Pour observer un
+scénario précis (ex. `scenario_fixed_brawl_sm_orks.json`, placement fixed) avec le modèle courant
+SANS l'entraîner ni écraser le `.zip`, `--test-only` accepte désormais un chemin de scénario
+explicite :
+`python3 ai/train.py --agent ArmageddonAgent --training-config x5_debug --test-only --eval --step
+--scenario config/board/44x60x5/scenario/scenario_fixed_brawl_sm_orks.json`.
+Il est joué **tel quel** (`train.py`, branche test-only) : ni repli holdout, ni matérialisation
+`wall_ref` (celle-ci exige un scénario sous `agents/.../scenarios/<split>/` et réécrit le terrain —
+elle casserait un scénario autonome sous `config/board/`). Mécanisme : `evaluate_against_bots(...,
+materialize_eval_refs=False, scenario_list_override=[chemin])`. Le mode holdout par défaut
+(`materialize_eval_refs=True`) est **inchangé**. Verrou : `tests/unit/ai/test_eval_explicit_scenario.py`
+(ROUGE : la matérialisation lève hors `agents/` ; VERT : le scénario explicite est joué, 0 planté).
+⚠️ Un scénario `fixed` joué en test-only n'a **aucune** phase de déploiement (step.log : 0
+`DEPLOYMENT`, figurines aux positions du fichier dès T1).
+
 <a id="s0.43"></a>
-### 0.43 [§9](V11_phaseA.md#s9) P3-2 — la cible de charge devient une dimension d'action (slots ennemis + pointeur) — ✅ LIVRÉ, NON MERGÉ, NON MESURÉ (2026-07-28)
+### 0.43 [§9](V11_phaseA.md#s9) P3-2 — la cible de charge devient une dimension d'action (slots ennemis + pointeur) — ✅ LIVRÉ ET MERGÉ sur `main`, NON MESURÉ (2026-07-28 ; merge vérifié le 2026-08-02)
 
 **Contenu d'état complet en [§9.4bis](V11_phaseA.md#s9.4bis)** (ce que le code fait, preuves,
 mesures) — conformément à la règle « un contenu d'état vit à UN seul endroit ». Cette entrée porte
@@ -3216,6 +3297,13 @@ et la mauvaise cause.
 <a id="s0.32"></a>
 ### 0.32 Optimalité de l'observation ET de la tête d'action — audit du 2026-07-28 — ✅ LIVRÉ (T-G/T-H/T-I/T-J/T-K/T-L ; résidus fermés par §0.37)
 
+> ⏳ **Chiffres dépassés depuis — relevé du 2026-08-02.** Cette entrée décrit un état
+> **intermédiaire** du 2026-07-28 ; du travail a été livré par-dessus (§0.40 pour l'observation,
+> P2/P3-2 pour l'espace d'action). Valeurs courantes : `obs_size` **20828** (et non 20601/20626),
+> `TOTAL_ACTION_SIZE` **1107** (et non 1062), `UNIT_CONT_SIZE` **20**, `UNIT_BIN_SIZE` **33**.
+> `PROFILE_CONT_SIZE` 13 / `PROFILE_BIN_SIZE` 18 et `GRID_CHANNELS` **9** restent exacts.
+> **Ne pas citer un chiffre de cette entrée comme état courant.**
+
 **Origine.** Question de l'utilisateur : « mon obs est-elle optimale ? », posée pendant le test
 x1 qui précède le run x5. Audit fait **par lecture du code**, pas de la doc — puis recoupement
 des deux documents d'observation avec le code.
@@ -3876,7 +3964,7 @@ poussait `unit["col"/"row"]` alors que `require_unit_position` lit `units_cache`
 >
 > ⚠️ **CORRECTION 2026-07-28 — le « 20 » n'est PAS ce que porte la config.** Valeurs relevées
 > dans `ArmageddonAgent_training_config.json` à HEAD : `x5_new` = **50** (pas 20), `x1` = **100**,
-> `x5_append` = 100, `x5_debug` = 100, `x1_debug` = 5. Et §0.14 a **explicitement retiré** la
+> `x5_append` = 100, `x5_debug` = 100, `x1_debug` = 5 (⏳ **relevé à 1 au 2026-08-02** — profil `x5*`/debug non tenu à jour, relire le JSON). Et §0.14 a **explicitement retiré** la
 > proposition de descendre à 20 (20 ép./bot ⇒ ±11 points d'erreur-type sur le win-rate, injectés
 > dans `save_best_robust`). Cette ligne est donc conservée comme **trace de l'intention du
 > 2026-07-26**, pas comme description de l'état : le paramètre qui a réellement bougé pour le run
@@ -4273,12 +4361,9 @@ Les tâches 1-3 sont commitées (`6a7a9de1`).
 > ➜ **Déplacé en §0.14 (ouvert).** Rien n'a été supprimé : le contenu est intégral là-bas.
 - ⚠️ **Le modèle en place a été ÉCRASÉ par ce run** (`model_ArmageddonAgent.zip`, 2026-07-20
   02:14 — autorisation utilisateur explicite). C'est donc un modèle **de debug, 100 épisodes
-  `--new`**, sans valeur de jeu : `save_best_robust: false` fait que
-  [train.py:3548](../../ai/train.py#L3548) écrit le modèle final **inconditionnellement** en fin
-  de run. Le modèle précédent (19/07 04:25, entraîné AVANT les `VALUE` Munitorum, avec la
-  `WarTrakk` à 175) reste disponible dans
-  `ai/models/_backup_pre_munitorum_20260719_232816/` — **vérifié intact après le run**.
-  ⚠️ Tout run `x5_debug` ultérieur écrasera à nouveau le modèle canonique : sauvegarder avant
+  `--new`**, sans valeur de jeu : `save_best_robust: false` fait que `train.py` écrit le modèle
+  final en fin de run, aux deux sites gardés par `if not save_best_robust`.
+  ⚠️ Tout run de debug ultérieur écrasera à nouveau le modèle canonique : sauvegarder avant
   si le modèle en place compte.
 > ➜ **Déplacé en §0.16 (ouvert).** Rien n'a été supprimé : le contenu est intégral là-bas.
 - ~~Dette `ai/game_replay_logger.py` (~8 sites `RNG_DMG`/`CC_DMG`) + `config/unit_definitions.json`.~~
@@ -5283,7 +5368,7 @@ notée (12 épisodes d'éval).
 `bot_eval_final: 2`), lancé après les fixes §0.10 et §0.11 :
 **100/100 épisodes, exit 0, aucune exception**, ~114 s/ép. à 8 envs (28 min). Éval finale
 exécutée, modèle écrasé (autorisation utilisateur explicite) — `model_ArmageddonAgent.zip`
-au 2026-07-20 02:14 ; la sauvegarde `_backup_pre_munitorum_20260719_232816/` est intacte.
+au 2026-07-20 02:14.
 
 > ➜ **Déplacé en §0.14 (ouvert).** Rien n'a été supprimé : le contenu est intégral là-bas.
 
@@ -6054,3 +6139,4 @@ tombe.
 **Ce qui EST mesuré de façon fiable**, parce que cela ne dépend que de fichiers qu'aucun autre
 agent ne touche : les mutation-tests par tranche du tableau ci-dessus, et la contre-épreuve de
 §0.19.2 sur `fight_handlers.py`. Le test de pile-in passe **3 fois sur 3** en isolé.
+

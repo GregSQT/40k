@@ -1,6 +1,6 @@
 # Sécurité — Analyse et plan d'implémentation
 
-> Date : 2026-07-15 (mis à jour : exposition Internet prévue pour les tests)
+> Date : 2026-07-15 — audit de conformité 2026-08-02 (ancres de ligne rafraîchies, F1 reclassé résolu, comptage F6 corrigé)
 > Périmètre : backend Flask (`services/api_server.py`), frontend React/Vite, base auth `config/users.db`.
 > Contexte : jeu hobby, aujourd'hui local (WSL2), **bientôt exposé sur Internet pour des tests publics**.
 
@@ -17,7 +17,7 @@ Menaces retenues :
 ### Sur le vol de code spécifiquement
 
 - **Frontend** : le code JS/WASM est **par nature envoyé à chaque visiteur** — c'est impossible à empêcher. Le build Vite est minifié et ne contient pas de source maps (vérifié : aucun `.map` dans `frontend/dist/`). L'obfuscation supplémentaire est inutile (contournable en heures). La vraie protection du frontend est **juridique** (licence, pas de repo public), pas technique.
-- **Backend + modèles IA** : c'est là qu'est la valeur (moteur de règles, agents entraînés). Ce code ne quitte jamais le serveur **sauf si** un attaquant obtient une exécution de code ou une lecture de fichiers arbitraire. Toute la stratégie consiste donc à fermer ces vecteurs — ils existent aujourd'hui (F1, F6, F7 ci-dessous).
+- **Backend + modèles IA** : c'est là qu'est la valeur (moteur de règles, agents entraînés). Ce code ne quitte jamais le serveur **sauf si** un attaquant obtient une exécution de code ou une lecture de fichiers arbitraire. Toute la stratégie consiste donc à fermer ces vecteurs — F1 est résolu, F6 et F7 existent encore aujourd'hui (voir ci-dessous).
 
 ---
 
@@ -27,29 +27,29 @@ Menaces retenues :
 
 | Domaine | Implémentation | Référence |
 |---|---|---|
-| Hachage des mots de passe | PBKDF2-HMAC-SHA256 avec sel aléatoire 16 octets (`secrets.token_bytes`) | `api_server.py:810` |
-| Authentification (mécanisme) | Bearer token de session, stocké dans `sessions` (SQLite) | `api_server.py:848`, `api_server.py:897` |
-| Autorisation (RBAC) | Tables `profiles`, `profile_game_modes`, `profile_options` ; résolution des permissions par profil | `api_server.py:861`, `api_server.py:957` |
+| Hachage des mots de passe | PBKDF2-HMAC-SHA256 avec sel aléatoire 16 octets (`secrets.token_bytes`) | `api_server.py:941` |
+| Authentification (mécanisme) | Bearer token de session, stocké dans `sessions` (SQLite) | `api_server.py:979`, `api_server.py:1028` |
+| Autorisation (RBAC) | Tables `profiles`, `profile_game_modes`, `profile_options` ; résolution des permissions par profil | `api_server.py:992`, `api_server.py:1057` |
 | Gestion mémoire | Python + TypeScript (mémoire managée) ; module WASM LoS en **Rust** (`frontend/wasm-los/`), memory-safe. Aucun code C/C++. | — |
-| Endpoint replay | `/api/replay/file/<filename>` filtre correctement le path traversal (`..`, `/`, `\` rejetés, extension `.log` imposée) | `api_server.py:4165` |
+| Endpoint replay | `/api/replay/file/<filename>` filtre correctement le path traversal (`..`, `/`, `\` rejetés, extension `.log` imposée) | `api_server.py:4319` |
 | Frontend build | Pas de source maps dans `dist/` | vérifié |
+| **F1 (ex-critique) — RCE via debugger Werkzeug** | **Résolu.** `app.run(host='127.0.0.1', port=5001, debug=False)` — plus de `debug=True`/`0.0.0.0`. | `api_server.py:4440` |
 
 ### Failles identifiées
 
 | # | Sévérité | Faille | Détail | Référence |
 |---|---|---|---|---|
-| F1 | **Critique** | Debugger Werkzeug exposé au réseau | `app.run(host='0.0.0.0', port=5001, debug=True)` : le debugger interactif Werkzeug donne une **exécution de code arbitraire** (donc vol de tout le code) à quiconque provoque une exception. Le flag `W40K_DEBUG` (ligne 4010) n'est pas utilisé ici. | `api_server.py:4285` |
-| F6 | **Critique** | API quasi entièrement non authentifiée | **30 des 34 routes** n'appellent pas `_get_authenticated_user_or_response()` et il n'y a aucun `before_request` global. Toutes les actions de jeu, la lecture des logs/replays et la configuration de persistance sont ouvertes à n'importe qui. | vérifié par comptage |
-| F7 | **Critique** | Répertoire de persistance contrôlé par le client + `pickle.load` | `/api/game/snapshot/persist` accepte un `directory` arbitraire (créé via `os.makedirs`, aucune restriction) → **écriture disque n'importe où** avec les droits du process. Les snapshots sont ensuite relus via `pickle.load` → la désérialisation pickle d'un fichier influençable par un client est un **vecteur RCE classique**. | `api_server.py:3415`, `api_server.py:3328` |
-| F11 | **Critique** | Endpoint `pick-directory` exécute `subprocess`/`powershell.exe` | `/api/game/pick-directory` (non authentifié) lance `powershell.exe` via `subprocess` pour ouvrir un dialogue Windows. Aucun sens fonctionnel sur un serveur exposé, et surface `subprocess` ouverte sur le réseau. **À supprimer purement** en prod (pas seulement authentifier). | `api_server.py:3447` |
-| F12 | **Haute** | Inscription (`/api/auth/register`) totalement ouverte | Aucune auth, aucun rate limit → création de comptes en masse depuis Internet. Rend caduque la logique « testeurs invités » qui justifie de reporter le MFA. Fermer (création manuelle en SQL) ou protéger par jeton d'invitation. | `api_server.py:1845` |
-| F13 | Moyenne | Token de session en `localStorage` | Le token est stocké dans `localStorage` → volable par tout XSS (token = accès complet). Cible : cookie `HttpOnly`+`Secure`+`SameSite`. À défaut, risque à acter explicitement. | `frontend/src/auth/authStorage.ts:44` |
-| F14 | Moyenne | Filtre path-traversal faible sur `replay/parse` | `/api/replay/parse` rejette `..` et `/` en tête mais ouvre tout `log_path` relatif directement — moins strict que `/api/replay/file/<filename>` (extension `.log` imposée, ligne 4177). À harmoniser (couvert incidemment par l'auth globale F6). | `api_server.py:4133` |
-| F2 | **Haute** | Sessions sans expiration | Table `sessions` : `created_at` seulement ; validation `WHERE token = ?` sans condition temporelle. Token volé = valide à vie. Le message "Invalid or expired session" est trompeur. | `api_server.py:915`, `api_server.py:995` |
+| F6 | **Critique** | API quasi entièrement non authentifiée | **30 des 32 routes** n'appellent pas `_get_authenticated_user_or_response()` et il n'y a aucun `before_request` global. Toutes les actions de jeu, la lecture des logs/replays et la configuration de persistance sont ouvertes à n'importe qui. | vérifié par comptage (`grep -c "^@app.route"` = 32 ; 2 seuls appels à `_get_authenticated_user_or_response()`) |
+| F7 | **Critique** | Répertoire de persistance contrôlé par le client + `pickle.load` | `/api/game/snapshot/persist` accepte un `directory` arbitraire (créé via `os.makedirs`, aucune restriction) → **écriture disque n'importe où** avec les droits du process. Les snapshots sont ensuite relus via `pickle.load` → la désérialisation pickle d'un fichier influençable par un client est un **vecteur RCE classique**. | `api_server.py:3537` (directory), `api_server.py:3454` (pickle.load) |
+| F11 | **Critique** | Endpoint `pick-directory` exécute `subprocess`/`powershell.exe` | `/api/game/pick-directory` (non authentifié) lance `powershell.exe` via `subprocess` pour ouvrir un dialogue Windows. Aucun sens fonctionnel sur un serveur exposé, et surface `subprocess` ouverte sur le réseau. **À supprimer purement** en prod (pas seulement authentifier). | `api_server.py:3567` |
+| F12 | **Haute** | Inscription (`/api/auth/register`) totalement ouverte | Aucune auth, aucun rate limit → création de comptes en masse depuis Internet. Rend caduque la logique « testeurs invités » qui justifie de reporter le MFA. Fermer (création manuelle en SQL) ou protéger par jeton d'invitation. | `api_server.py:1961` |
+| F13 | Moyenne | Token de session en `localStorage` | Le token est stocké dans `localStorage` → volable par tout XSS (token = accès complet). Cible : cookie `HttpOnly`+`Secure`+`SameSite`. À défaut, risque à acter explicitement. | `frontend/src/auth/authStorage.ts:23,40,44` |
+| F14 | Moyenne | Filtre path-traversal faible sur `replay/parse` | `/api/replay/parse` rejette `..` et `/` en tête mais ouvre tout `log_path` relatif directement — moins strict que `/api/replay/file/<filename>` (extension `.log` imposée, ligne 4326). À harmoniser (couvert incidemment par l'auth globale F6). | `api_server.py:4265` |
+| F2 | **Haute** | Sessions sans expiration | Table `sessions` : `created_at` seulement ; validation `WHERE token = ?` sans condition temporelle. Token volé = valide à vie. Le message "Invalid or expired session" est trompeur. | `api_server.py:1125-1129` (table), `api_server.py:1045` (validation) |
 | F8 | **Haute** | Pas de rate limiting sur le login | Brute-force des mots de passe possible à pleine vitesse depuis Internet. | — |
-| F9 | **Haute** | Flask dev server + pas de TLS | Le serveur de dev Werkzeug n'est pas fait pour Internet (perf, robustesse). Sans HTTPS, tokens et mots de passe passent en clair. | `api_server.py:4285` |
-| F3 | Moyenne | CORS ouvert à toutes les origines | `CORS(app, ...)` sans `origins` = `*`. | `api_server.py:1194` |
-| F10 | Moyenne | Traceback complet renvoyé au client | Le handler global d'exceptions renvoie type + message + traceback dans la réponse JSON → révèle chemins, structure du code, versions. Utile en dev, à désactiver en prod (log serveur uniquement). | `api_server.py:1201` |
+| F9 | **Haute** | Flask dev server + pas de TLS | Le serveur de dev Werkzeug n'est pas fait pour Internet (perf, robustesse). Sans HTTPS, tokens et mots de passe passent en clair. Indépendant de F1 (déjà résolu) : même avec `debug=False`, Werkzeug reste un serveur de dev. | `api_server.py:4440` |
+| F3 | Moyenne | CORS ouvert à toutes les origines | `CORS(app, ...)` sans `origins` = `*`. | `api_server.py:1302` |
+| F10 | Moyenne | Traceback complet renvoyé au client | Le handler global d'exceptions renvoie type + message + traceback dans la réponse JSON → révèle chemins, structure du code, versions. Utile en dev, à désactiver en prod (log serveur uniquement). | `api_server.py:1309` |
 | F4 | Faible→Moyenne | Pas de journal d'audit | Aucune trace des logins réussis/échoués, IP, créations d'utilisateurs. Indispensable pour détecter une attaque en cours une fois exposé. | — |
 | F5 | Faible | Pas d'analyse automatisée | Aucun outil statique (bandit, pip-audit, npm audit) dans le workflow. | — |
 
@@ -61,7 +61,7 @@ Menaces retenues :
 **Reporté, plus écarté.** Pour des tests publics avec quelques testeurs invités, des mots de passe forts + rate limiting + sessions expirantes suffisent. À implémenter (TOTP via `pyotp`) si le jeu passe en accès ouvert avec inscription libre. Réévaluation prévue à la fin du plan.
 
 ### Autorisation / RBAC
-**Le mécanisme existe, mais il ne protège presque rien** (F6) : il n'est appliqué que sur 4 routes. Le chantier n'est pas de créer un RBAC, c'est de **l'appliquer partout** (étape 2).
+**Le mécanisme existe, mais il ne protège presque rien** (F6) : `_resolve_permissions_for_profile` n'est appelé que sur 3 routes (`/api/auth/login`, `/api/auth/me`, `/api/game/start`). Le chantier n'est pas de créer un RBAC, c'est de **l'appliquer partout** (étape 1).
 
 ### Audit
 **Recommandé, sévérité remontée.** Exposé sur Internet, le journal d'audit (avec IP) est ton seul moyen de savoir si quelqu'un brute-force le login ou abuse de l'API.
@@ -79,16 +79,9 @@ Menaces retenues :
 
 Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute exposition Internet.**
 
-### Étape 1 — Fermer les vecteurs RCE (F1, F7, F11) 🔴 bloquant
-**Fichier :** `services/api_server.py`
-- `app.run` : `debug` conditionné au flag `W40K_DEBUG` existant (défaut `False`) ; `host` = `127.0.0.1` par défaut, surchargeable par `W40K_HOST`. Erreur explicite au démarrage si debug + host non-local sont combinés.
-- `/api/game/snapshot/persist` : supprimer la possibilité pour le client de choisir `directory`. Le répertoire de persistance devient une config **serveur** (variable d'environnement ou fichier de config), jamais une donnée de requête.
-- Remplacer `pickle` par un format non exécutable pour les snapshots (JSON si la structure le permet, sinon garder pickle mais uniquement sur un chemin fixe non influençable par le client — à trancher au moment de l'implémentation selon le contenu de `GameSnapshotStore`).
-- `/api/game/pick-directory` (F11) : supprimer l'endpoint en prod (via flag `W40K_DEBUG` ou retrait pur). Aucun `subprocess`/`powershell.exe` exposé sur le réseau. Le front doit basculer sur une config serveur du répertoire de persistance (voir point précédent).
+> F1 (debugger Werkzeug exposé) est **résolu** (`api_server.py:4440` : `debug=False`, `host='127.0.0.1'`). L'étape 1 initiale (F1+F7+F11) est donc scindée : l'auth globale (F6, ex-étape 2) passe en premier — elle neutralise d'un coup l'exposition réseau de F7/F11, qui redeviennent alors un nettoyage plutôt qu'une urgence.
 
-**Validation :** API démarre sur 127.0.0.1 sans debugger ; requête POST avec `directory` → erreur explicite ; `pick-directory` absent/404 en prod ; snapshots toujours fonctionnels.
-
-### Étape 2 — Authentification sur toutes les routes (F6, F12, F14) 🔴 bloquant
+### Étape 1 — Authentification sur toutes les routes (F6, F12, F14) 🔴 bloquant
 **Fichier :** `services/api_server.py`
 - `@app.before_request` global : toute route exige un token de session valide, **sauf** liste blanche explicite (`/api/auth/login`, health check). Pas de logique inversée (pas de "protéger certaines routes") : tout est fermé par défaut.
 - `/api/auth/register` (F12) : **ne pas** mettre en liste blanche. Créer les comptes testeurs manuellement en SQL, ou protéger register par un jeton d'invitation à usage unique. Inscription libre = interdite tant que le MFA est reporté.
@@ -97,9 +90,17 @@ Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute 
 
 **Validation :** toute route hors liste blanche sans token → 401 ; `register` sans invitation → refusé ; le jeu fonctionne normalement une fois loggé.
 
+### Étape 2 — Fermer les vecteurs d'écriture/désérialisation arbitraires (F7, F11) 🔴 bloquant
+**Fichier :** `services/api_server.py`
+- `/api/game/snapshot/persist` : supprimer la possibilité pour le client de choisir `directory`. Le répertoire de persistance devient une config **serveur** (variable d'environnement ou fichier de config), jamais une donnée de requête.
+- Remplacer `pickle` par un format non exécutable pour les snapshots (JSON si la structure le permet, sinon garder pickle mais uniquement sur un chemin fixe non influençable par le client — à trancher au moment de l'implémentation selon le contenu de `GameSnapshotStore`).
+- `/api/game/pick-directory` (F11) : supprimer l'endpoint en prod (via flag `W40K_DEBUG` ou retrait pur). Aucun `subprocess`/`powershell.exe` exposé sur le réseau. Le front doit basculer sur une config serveur du répertoire de persistance (voir point précédent).
+
+**Validation :** requête POST avec `directory` → erreur explicite ; `pick-directory` absent/404 en prod ; snapshots toujours fonctionnels.
+
 ### Étape 3 — Durcissement des sessions (F2, F8)
 **Fichier :** `services/api_server.py`
-- Colonne `expires_at` sur `sessions` (migration `ALTER TABLE`, pattern existant ligne 1003) ; durée 7 jours glissants, renouvelée à chaque requête ; purge au login ; `AND expires_at > ?` dans la validation. Session expirée = 401 explicite, pas de fallback.
+- Colonne `expires_at` sur `sessions` (migration `ALTER TABLE` — aucun pattern existant dans `initialize_auth_db()`, à introduire) ; durée 7 jours glissants, renouvelée à chaque requête ; purge au login ; `AND expires_at > ?` dans la validation. Session expirée = 401 explicite, pas de fallback.
 - Rate limiting sur `/api/auth/login` : `flask-limiter` (ex. 5 tentatives/minute/IP). Échec → 429 explicite.
 
 **Validation :** token expiré forcé en SQL → 401 ; 6 logins ratés en rafale → 429.
@@ -159,8 +160,9 @@ Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute 
 
 | Étape | Failles | Statut | Date |
 |---|---|---|---|
-| 1. Fermer les vecteurs RCE | F1, F7, F11 | ⬜ À faire | — |
-| 2. Auth sur toutes les routes | F6, F12, F14 | ⬜ À faire | — |
+| — | F1 (debugger Werkzeug) | ✅ Résolu | ≤2026-08-02 |
+| 1. Auth sur toutes les routes | F6, F12, F14 | ⬜ À faire | — |
+| 2. Fermer vecteurs écriture/désérialisation | F7, F11 | ⬜ À faire | — |
 | 3. Durcissement sessions + rate limiting | F2, F8 | ⬜ À faire | — |
 | 4. Réduction surface d'information | F3, F10, F13 | ⬜ À faire | — |
 | 5. Infra d'exposition (WSGI + proxy + TLS) | F9 | ⬜ À faire | — |
