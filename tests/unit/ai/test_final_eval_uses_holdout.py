@@ -105,3 +105,20 @@ def test_evaluate_against_bots_default_pool_is_not_silently_trusted() -> None:
         "Sites appelant evaluate_against_bots SANS scenario_pool (ils mesureront le scenario "
         f"d'entrainement en silence) : {missing}"
     )
+
+
+def test_bot_eval_callback_has_no_default_scenario_pool() -> None:
+    """`BotEvaluationCallback` ne peut PAS choisir le split a la place de l'appelant.
+
+    Meme famille que le test precedent, traitee un cran plus haut : plutot que de verifier que
+    personne n'omet l'argument, la signature rend l'omission impossible. Le defaut valait
+    `"training"` — il n'a jamais servi (les six profils passent `holdout` depuis la config),
+    et c'est exactement pour ca qu'il pouvait rester la indefiniment : un defaut jamais atteint
+    ne produit aucun symptome jusqu'au jour ou il l'est.
+    """
+    from ai.training_callbacks import BotEvaluationCallback
+
+    param = inspect.signature(BotEvaluationCallback.__init__).parameters["scenario_pool"]
+    assert param.default is inspect.Parameter.empty, (
+        "Un defaut a ete rendu a `scenario_pool` : le split de mesure redeviendrait implicite."
+    )

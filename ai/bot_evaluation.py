@@ -20,6 +20,7 @@ import shutil
 import atexit
 import numpy as np
 import re
+from collections import deque
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from typing import Callable, Optional, Dict, List, Any, Tuple, TYPE_CHECKING
 
@@ -800,27 +801,52 @@ def _force_terminate_process_pool(pool: ProcessPoolExecutor) -> None:
 
 def _collect_parallel_results_with_timeouts(
     pool: ProcessPoolExecutor,
-    future_to_task: Dict[Any, Dict[str, Any]],
+    tasks: List[Dict[str, Any]],
     task_timeout_seconds: int,
+    max_in_flight: int,
 ) -> List[Dict[str, Any]]:
     """
     Collect parallel eval results with per-task deadline enforcement.
 
     Unlike as_completed(), this loop never blocks indefinitely on a hung worker.
     If any running task exceeds timeout, the pool is force-terminated and all
-    remaining pending tasks are marked as failed timeouts.
+    remaining tasks are marked as failed timeouts.
+
+    Les tasks sont soumises AU FIL DE L'EAU, au plus `max_in_flight` (= `bot_eval_n_workers`)
+    a la fois : il n'existe donc jamais de task en attente dans le pool, et l'instant de
+    soumission EST l'instant de depart. C'est ce qui rend `task_start_times` exact, et donc
+    `bot_eval_task_timeout_seconds` fidele a son nom. Tout soumettre d'un coup en faisait une
+    deadline GLOBALE sur l'evaluation entiere : a 24 tasks sur 4 workers, celles de la 6e vague
+    avaient consomme 5 durees de task avant de commencer, et UNE seule qui deborde
+    force-termine le pool, donc annule la mesure. Se rabattre sur `future.running()` ne suffit
+    pas : CPython arme RUNNING quand le future part dans la `call_queue` du pool, pas quand un
+    worker le prend (mesure : 4 futures RUNNING pour 2 workers).
     """
     if task_timeout_seconds <= 0:
         raise ValueError(
             f"task_timeout_seconds must be > 0 for parallel collection (got {task_timeout_seconds})"
         )
+    if max_in_flight <= 0:
+        raise ValueError(
+            f"max_in_flight must be > 0 for parallel collection (got {max_in_flight})"
+        )
 
-    pending = set(future_to_task.keys())
-    task_start_times: Dict[Any, float] = {future: time.monotonic() for future in pending}
+    queued = deque(tasks)
+    future_to_task: Dict[Any, Dict[str, Any]] = {}
+    task_start_times: Dict[Any, float] = {}
+    pending: set = set()
     results_list: List[Dict[str, Any]] = []
     must_abort_pool = False
 
-    while pending:
+    while queued or pending:
+        # Un worker libre <=> une soumission : le task part maintenant, il demarre maintenant.
+        while queued and len(pending) < max_in_flight:
+            task = queued.popleft()
+            future = pool.submit(_eval_worker_task, task)
+            future_to_task[future] = task
+            task_start_times[future] = time.monotonic()
+            pending.add(future)
+
         done, not_done = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
         now = time.monotonic()
 
@@ -834,9 +860,8 @@ def _collect_parallel_results_with_timeouts(
         # Enforce per-task timeout on still-running tasks.
         timed_out_futures: List[Any] = []
         for future in not_done:
-            task = require_key(future_to_task, future)
-            elapsed = now - require_key(task_start_times, future)
-            if elapsed >= task_timeout_seconds:
+            if now - require_key(task_start_times, future) >= task_timeout_seconds:
+                task = require_key(future_to_task, future)
                 results_list.append(
                     _failed_task_result(task, _scenario_name_from_task(task), timeout=True)
                 )
@@ -856,8 +881,11 @@ def _collect_parallel_results_with_timeouts(
 
     if must_abort_pool:
         _force_terminate_process_pool(pool)
-        for future in list(pending):
-            task = require_key(future_to_task, future)
+        # Les tasks encore en vol ET celles jamais soumises : l'evaluation est invalidee en
+        # bloc, l'appelant compte des episodes manquants et leve. Les taire donnerait un score
+        # calcule sur un denominateur tronque.
+        abandoned = [require_key(future_to_task, f) for f in pending] + list(queued)
+        for task in abandoned:
             results_list.append(
                 _failed_task_result(task, _scenario_name_from_task(task), timeout=True)
             )
@@ -1258,11 +1286,11 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 initializer=_eval_worker_init,
                 initargs=initargs,
             ) as pool:
-                future_to_task = {pool.submit(_eval_worker_task, t): t for t in tasks}
                 results_list = _collect_parallel_results_with_timeouts(
                     pool=pool,
-                    future_to_task=future_to_task,
+                    tasks=tasks,
                     task_timeout_seconds=int(task_timeout_seconds),
+                    max_in_flight=n_workers,
                 )
                 completed_episodes = 0
                 for result in results_list:
@@ -1342,7 +1370,6 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     results["total_failed_episodes"] = total_failed_episodes
     results["total_timeout_episodes"] = total_timeout_episodes
     results["total_error_episodes"] = total_error_episodes
-    results["eval_reliable"] = total_failed_episodes == 0
     results["eval_duration_seconds"] = float(time.time() - eval_wall_start)
     # Denominateur HONNETE de la duree : les episodes reellement joues, hors abandons. Sans lui,
     # la seule facon de connaitre le cout d'une evaluation etait de multiplier `bot_eval_*` par

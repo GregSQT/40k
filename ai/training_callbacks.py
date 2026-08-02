@@ -18,19 +18,18 @@ import os
 import time
 import re
 import math
-import shutil
 import tempfile
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 import numpy as np
 import torch
 import gymnasium as gym
-from typing import Dict, Optional, Any, List, cast
+from typing import Dict, Optional, Any, List, Tuple, cast
 from stable_baselines3.common.callbacks import BaseCallback
 
 from engine.episode_schedule import ramp_progress
 from shared.data_validation import require_key, require_positive_int, require_present
-from ai.vec_normalize_utils import get_vec_normalize_path
+from ai.model_artifacts import copy_model_with_companions, remove_model_with_companions
 from config_loader import get_config_loader
 
 # Les sept classes de bots d'evaluation etaient importees ici sous try/except ImportError, avec
@@ -236,8 +235,6 @@ class EpisodeTerminationCallback(BaseCallback):
     def __init__(self, max_episodes: int, expected_timesteps: int, verbose: int = 0,
                  total_episodes: Optional[int] = None, scenario_info: Optional[str] = None,
                  disable_early_stopping: bool = False, global_start_time: Optional[float] = None,
-                 phase_label: Optional[str] = None,
-                 phase_episode_offset: int = 0,
                  gate_display_state: Optional[Dict[str, Any]] = None,
                  training_config: Optional[Dict[str, Any]] = None):
         super().__init__(verbose)
@@ -254,12 +251,6 @@ class EpisodeTerminationCallback(BaseCallback):
         self.total_episodes = total_episodes if total_episodes else max_episodes
         self.scenario_info = scenario_info  # e.g., "Cycle 8 | Scenario: phase2-1"
         self.global_episode_offset = 0  # Set by rotation code to track overall progress
-        self.phase_label = phase_label
-        if phase_episode_offset < 0:
-            raise ValueError(
-                f"phase_episode_offset must be >= 0 (got {phase_episode_offset})"
-            )
-        self.phase_episode_offset = int(phase_episode_offset)
         # ROTATION FIX: Disable early stopping to let model.learn() consume all timesteps
         self.disable_early_stopping = disable_early_stopping
         # EMA for smooth ETA estimation (weights recent episodes more heavily)
@@ -288,6 +279,18 @@ class EpisodeTerminationCallback(BaseCallback):
         # Only set start_time if not already set (preserves global start time in rotation mode)
         if self.start_time is None:
             self.start_time = time.time()
+
+    def display_progress(self) -> Tuple[int, int]:
+        """(episodes affiches, total affiche). Les deux dans le MEME referentiel.
+
+        `global_episode_offset` porte les episodes d'un run PRECEDENT (reprise, cf.
+        ai/run_state.py) : le total doit donc les inclure aussi, sinon la barre affiche 1000 %
+        et le reste-a-faire devient negatif, donc l'ETA absurde.
+        """
+        return (
+            self.global_episode_offset + self.episode_count,
+            self.global_episode_offset + self.total_episodes,
+        )
 
     def _compute_training_roster_count(self, display_episode_count: int) -> Optional[int]:
         """Compute active training roster count (per side) for progress display."""
@@ -442,14 +445,7 @@ class EpisodeTerminationCallback(BaseCallback):
         # Update progress display on episode end
         if episode_ended:
             current_time = time.time()
-            # In curriculum mode (phase_label set), progress must be phase-local.
-            # Outside curriculum, keep global progress across rotations.
-            if self.phase_label:
-                display_episode_count = self.phase_episode_offset + self.episode_count
-                display_total_episodes = self.total_episodes
-            else:
-                display_episode_count = self.global_episode_offset + self.episode_count
-                display_total_episodes = self.total_episodes
+            display_episode_count, display_total_episodes = self.display_progress()
 
             # Update progress every 10 episodes, or on final episode of this callback.
             if display_episode_count % 10 == 0 or display_episode_count == 1 or self.episode_count >= self.max_episodes:
@@ -584,7 +580,6 @@ class EpisodeTerminationCallback(BaseCallback):
                         robust_status_text += f" {robust_trend.strip()}"
 
                 # Use \r for overwriting progress, but add spaces to clear previous longer lines
-                phase_display = f" | {self.phase_label}" if self.phase_label else ""
                 roster_display = ""
                 roster_count = self._compute_training_roster_count(display_episode_count)
                 if roster_count is not None:
@@ -592,7 +587,7 @@ class EpisodeTerminationCallback(BaseCallback):
                 progress_line = (
                     f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}"
                     f" [{time_info}] [{duration_display}] {gate_label}"
-                    f"{robust_status_text}{roster_display}{phase_display}"
+                    f"{robust_status_text}{roster_display}"
                 )
                 # CRITICAL: Read prev_len BEFORE overwriting — eval may have set a longer line
                 prev_len = self._last_progress_line_len
@@ -1337,9 +1332,17 @@ class MetricsCollectionCallback(BaseCallback):
 
 
 class BotEvaluationCallback(BaseCallback):
-    """Callback to test agent against evaluation bots with best model saving"""
+    """Callback to test agent against evaluation bots with best model saving.
 
-    def __init__(self, eval_freq: int = 5000, n_eval_episodes: int = 20,
+    `scenario_pool` est en tete et SANS defaut : il dit sur quel split l'agent est note, donc
+    aucune valeur ne peut etre choisie a sa place. Il valait `"training"` par defaut, ce qui
+    aurait note l'agent sur les scenarios qu'il apprend — et en silence, puisqu'un defaut ne
+    signale rien. Les six profils passent `holdout`, ce chemin n'a donc jamais servi ; c'est
+    justement pourquoi un tel defaut peut survivre indefiniment sans que rien ne le revele.
+    """
+
+    def __init__(self, scenario_pool: str,
+                 eval_freq: int = 5000, n_eval_episodes: int = 20,
                  best_model_save_path: Optional[str] = None, metrics_tracker: Any = None,
                  use_episode_freq: bool = False, verbose: int = 1,
                  training_config_name: Optional[str] = None, rewards_config_name: Optional[str] = None,
@@ -1359,9 +1362,6 @@ class BotEvaluationCallback(BaseCallback):
                  final_summary_target_episodes: Optional[int] = None,
                  initial_episode_marker: int = 0,
                  show_eval_progress: bool = False,
-                 phase_progress_total_episodes: Optional[int] = None,
-                 phase_progress_episode_offset: int = 0,
-                 scenario_pool: str = "training",
                  async_eval_enabled: bool = True,
                  early_stopping_patience: int = 0,
                  save_best_min_episodes: int = 0):
@@ -1411,14 +1411,6 @@ class BotEvaluationCallback(BaseCallback):
             raise ValueError(
                 f"show_eval_progress must be boolean (got {type(show_eval_progress).__name__})"
             )
-        if phase_progress_total_episodes is not None and phase_progress_total_episodes <= 0:
-            raise ValueError(
-                f"phase_progress_total_episodes must be > 0 (got {phase_progress_total_episodes})"
-            )
-        if phase_progress_episode_offset < 0:
-            raise ValueError(
-                f"phase_progress_episode_offset must be >= 0 (got {phase_progress_episode_offset})"
-            )
         self.last_eval_episode = int(initial_episode_marker)
         self.last_eval_marker: Optional[int] = None
         if not isinstance(async_eval_enabled, bool):
@@ -1427,8 +1419,6 @@ class BotEvaluationCallback(BaseCallback):
             )
         self.async_eval_enabled = async_eval_enabled
         self.show_eval_progress = show_eval_progress
-        self.phase_progress_total_episodes = phase_progress_total_episodes
-        self.phase_progress_episode_offset = int(phase_progress_episode_offset)
         self.scenario_pool = scenario_pool
         self.early_stopping_patience = int(early_stopping_patience)
         self.save_best_min_episodes = int(save_best_min_episodes)
@@ -1549,9 +1539,6 @@ class BotEvaluationCallback(BaseCallback):
         self._pending_eval_marker: Optional[int] = None
         self._pending_eval_snapshot_path: Optional[str] = None
         self.async_eval_skipped_count = 0
-        self.curriculum_phase_progress_bar_length = _require_progress_bar_width(
-            "curriculum_phase_width"
-        )
 
         # Un dictionnaire self.bots (random / greedy / defensive, instancies avec 15% d'actions
         # aleatoires) etait construit ici. Personne ne le relisait : l'evaluation instancie ses
@@ -1728,8 +1715,8 @@ class BotEvaluationCallback(BaseCallback):
 
         return gate_pass
 
-    def _mark_unreliable_eval_skip(self, eval_marker: int, failed_episodes: int) -> None:
-        """Record a skipped gate decision when eval results are marked unreliable."""
+    def _mark_unreliable_eval_skip(self, eval_marker: int, timeout_episodes: int) -> None:
+        """Record a skipped gate decision when eval results are truncated by task timeouts."""
         self.last_gate_pass = False
         self.gating_skipped_unreliable_count += 1
 
@@ -1742,7 +1729,7 @@ class BotEvaluationCallback(BaseCallback):
                 "criteria_mean": None,
                 "has_improved_mean": False,
                 "thresholds_ever_passed": self.thresholds_ever_passed,
-                "reason": f"total_failed_episodes={failed_episodes}",
+                "reason": f"total_timeout_episodes={timeout_episodes}",
                 "checks": [],
             }
         )
@@ -1849,31 +1836,27 @@ class BotEvaluationCallback(BaseCallback):
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump({"robust_score": robust_score}, f, indent=0)
 
-    def _remove_model_artifacts(self, model_zip_path: str) -> None:
-        """Remove model zip and associated VecNormalize stats if they exist."""
-        if os.path.exists(model_zip_path):
-            os.remove(model_zip_path)
-        vec_path = get_vec_normalize_path(model_zip_path)
-        if os.path.exists(vec_path):
-            os.remove(vec_path)
-
     def _copy_model_artifacts(self, src_model_zip: str, dst_model_zip: str) -> None:
-        """Copy model zip and VecNormalize stats from src to dst."""
-        if not os.path.exists(src_model_zip):
-            raise FileNotFoundError(f"Source model zip not found: {src_model_zip}")
-        shutil.copy2(src_model_zip, dst_model_zip)
+        """Copie le modele ET ses compagnons vers la sortie CANONIQUE (ai/model_artifacts.py).
 
-        src_vec_path = get_vec_normalize_path(src_model_zip)
-        if os.path.exists(src_vec_path):
-            dst_vec_path = get_vec_normalize_path(dst_model_zip)
-            shutil.copy2(src_vec_path, dst_vec_path)
+        L'etat de run de la destination porte le compte d'episodes du moment : c'est ce modele
+        qu'une reprise chargera, et sans lui elle leve.
+        """
+        if self.metrics_tracker is None:
+            raise RuntimeError(
+                "BotEvaluationCallback.metrics_tracker absent : impossible d'ecrire l'etat de run "
+                "du modele canonique, donc de le reprendre plus tard (cf. ai/run_state.py)."
+            )
+        copy_model_with_companions(
+            src_model_zip, dst_model_zip, int(self.metrics_tracker.episode_count)
+        )
 
     def _cleanup_legacy_best_robust_artifacts(self) -> None:
         """Remove legacy best_robust_model artifacts from previous naming scheme."""
         if not self.best_model_save_path:
             raise ValueError("best_model_save_path is required for legacy cleanup")
         legacy_zip_path = os.path.join(self.best_model_save_path, "best_robust_model.zip")
-        self._remove_model_artifacts(legacy_zip_path)
+        remove_model_with_companions(legacy_zip_path)
 
     @staticmethod
     def _scenario_metric_slug(scenario_name: str) -> str:
@@ -2065,9 +2048,9 @@ class BotEvaluationCallback(BaseCallback):
         # geodesique du move par-figurine). Tuer un run de 36 h pour ca est disproportionne. Mais
         # le score est calcule sur un denominateur tronque : il ne doit alimenter AUCUN signal.
         # On sort donc AVANT le gate, le log de metrique, la sauvegarde du best model,
-        # l'early stopping et l'historique robuste. Le marker reste synchronise pour que le gate
-        # de curriculum (train.py) ne se declare pas desynchronise ; c'est LUI qui refuse de
-        # valider une phase sur `eval_reliable=False`.
+        # l'early stopping et l'historique robuste. Le marker, lui, reste synchronise, et
+        # l'eval ignoree est TRACEE (`SKIP_UNRELIABLE`) : sans cette trace les resumes de
+        # gating affichaient `skip_unreliable=0` sur un run qui avait perdu des evals.
         if total_timeout_episodes > 0:
             print(
                 f"\n⚠️  Évaluation NON FIABLE au marker {eval_marker} : "
@@ -2083,6 +2066,7 @@ class BotEvaluationCallback(BaseCallback):
                     float(total_timeout_episodes),
                     int(eval_marker),
                 )
+            self._mark_unreliable_eval_skip(eval_marker, total_timeout_episodes)
             return
         gate_pass = self._evaluate_model_gate(results, eval_marker)
 
@@ -2212,7 +2196,7 @@ class BotEvaluationCallback(BaseCallback):
                         previous_robust_model_path is not None
                         and previous_robust_model_path != self.best_robust_model_path
                     ):
-                        self._remove_model_artifacts(previous_robust_model_path)
+                        remove_model_with_companions(previous_robust_model_path)
 
                     canonical_model_path = self._build_canonical_model_path()
                     current_canonical_score = self._read_canonical_robust_score()
@@ -2227,7 +2211,7 @@ class BotEvaluationCallback(BaseCallback):
     def _cleanup_pending_snapshot(self) -> None:
         """Delete pending async snapshot artifacts if they exist."""
         if self._pending_eval_snapshot_path:
-            self._remove_model_artifacts(self._pending_eval_snapshot_path)
+            remove_model_with_companions(self._pending_eval_snapshot_path)
             self._pending_eval_snapshot_path = None
 
     def _add_blocking_eval_seconds(self, seconds: float) -> None:
@@ -2461,19 +2445,6 @@ class BotEvaluationCallback(BaseCallback):
                 f"pass={self.gating_pass_count}, fail={self.gating_fail_count}, "
                 f"skip_unreliable={self.gating_skipped_unreliable_count}"
             )
-
-    def _build_eval_progress_prefix(self, eval_marker: int) -> Optional[str]:
-        """Build phase progress prefix for inline evaluation display."""
-        if self.phase_progress_total_episodes is None:
-            return None
-        phase_episode_count = max(0, eval_marker - self.phase_progress_episode_offset)
-        bounded_episodes = min(phase_episode_count, self.phase_progress_total_episodes)
-        progress_ratio = bounded_episodes / self.phase_progress_total_episodes
-        progress_pct = progress_ratio * 100.0
-        bar_length = self.curriculum_phase_progress_bar_length
-        filled = int(bar_length * progress_ratio)
-        bar = '█' * filled + '░' * (bar_length - filled)
-        return f"{progress_pct:3.0f}% {bar} {bounded_episodes}/{self.phase_progress_total_episodes}"
 
     def _evaluate_against_bots(
         self,

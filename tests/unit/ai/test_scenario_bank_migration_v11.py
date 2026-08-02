@@ -146,6 +146,7 @@ def test_sample_scenario_loads_and_resets(rel):
         unit_registry=UnitRegistry(),
         quiet=True,
         gym_training_mode=True,
+        training_n_envs=1,  # UN environnement joue en serie (engine/episode_schedule.py)
     )
     eng.reset(seed=0)
     objectives = eng.game_state.get("objectives") or []

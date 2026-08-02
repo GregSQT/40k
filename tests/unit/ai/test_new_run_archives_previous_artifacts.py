@@ -39,6 +39,9 @@ def test_canonical_artifacts_are_the_fixed_name_ones(tmp_path) -> None:
     assert names == {
         "model_TestAgent.zip",
         "model_TestAgent_vec_normalize.pkl",
+        # Le compte d'episodes deja joues suit le modele : laisse en place, il ferait reprendre
+        # les rampes du run NEUF au compteur du run precedent (V11 §0.58).
+        "model_TestAgent_run_state.json",
         "model_TestAgent_robust_meta.json",
         "best_model.zip",
     }

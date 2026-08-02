@@ -46,7 +46,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.58` (`0.57` le 2026-08-02, `0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30, `0.55`–`0.56` le 2026-08-02).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.59` (`0.57`–`0.58` le 2026-08-02, `0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30, `0.55`–`0.56` le 2026-08-02).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -77,6 +77,7 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
+| **§0.58** | Les rampes par-épisode **redémarraient à chaque reprise** (`--append`, `--resume-from`, chunks de curriculum) | ✅ **CORRIGÉ le 2026-08-02** | **1** | Rien ne persistait le nombre d'épisodes joués : un modèle convergé repartait à son **learning rate et son entropie INITIAUX** (catastrophic forgetting), et la rampe de déploiement n'atteignait jamais `active_ratio_end`. `ai/run_state.py` persiste le compte (compté, jamais dérivé de `num_timesteps`) ; reprendre un modèle sans lui **lève** (arbitrage : pas de compatibilité ascendante). Détail → §0.58. |
 | **§0.57** | Les rampes par-épisode du moteur avançaient **`n_envs` fois trop lentement** | ✅ **CORRIGÉ le 2026-08-02** — reste une conséquence à assumer | **1** | Le compteur d'épisodes du moteur est LOCAL à un worker ; il était divisé par le total GLOBAL. À `n_envs=48`, la rampe de déploiement est restée collée à `active_ratio_start` sur TOUS les runs vectorisés (mesuré : `s_deploy_active_share` 0.3040 pour 0.496 attendus). Même défaut sur `deployment_random_mix`. **Conséquence : aucune mesure passée n'a été produite avec la rampe annoncée** — §0.29 et §0.46 pt 2 sont amendés. Détail → §0.57. |
 | **§0.56** | Instrumentation : usage par **famille d'action**, et **classement bot-contre-bot** | ✅ **LIVRÉ le 2026-08-02** — reste à s'en servir | **2** | Deux angles morts fermés, aucun ne coûte de ré-entraînement. (1) `actions/share_<famille>` publie la part de chaque DÉCISION dans ce que l'agent joue : une dimension jamais choisie ou toujours choisie est cassée quel que soit le win-rate — c'est ce qui rend un lot de tranches P3 diagnosticable **en un seul run**. (2) `scripts/bot_ranking.py` fait s'affronter les bots **sans agent** : sans lui, juger un bot exigeait un modèle entraîné, donc une mesure circulaire — et §0.55 était irréalisable. Détail → §0.56. |
 | **§0.55** | Le **holdout d'évaluation** `TacticalBot` est DANS l'enveloppe d'entraînement — effet plafond | 🟠 **OUVERT** — re-profilage validé le 2026-08-02 (arbitrage utilisateur), à écrire | **1** (avant toute mesure de référence) | `tactical` porte `w_objective 0.5 / w_enemy 0.0` : un `ControlBot` dilué, interpolé entre `control` (1.0/0.1) et `defensive` (0.7/−0.5). Un holdout intérieur à l'enveloppe mesure l'**interpolation**, pas la généralisation — d'où `vs_tactical` **0.95** au run 4. Re-profiler **hors enveloppe** (piste : `w_objective 0.8 / w_enemy 0.6`) et ajouter le scalaire `vs_tactical` **par roster**. ⚠️ **À faire AVANT de geler la baseline d'évaluation** : après, plus aucune mesure n'est comparable (leçon §0.47 É4). Détail → §0.55. |
@@ -133,6 +134,96 @@ jour 2026-07-29** : la section 9 a été auditée le 2026-07-24 ([§9.0](V11_pha
 **T2→T5 ont été relus le 2026-07-29 — 9 écarts, verdicts et réserves en [§0.47](#s0.47)** ; cette
 relecture s'est faite **par lecture seule, sans aucune exécution**, elle ne vaut donc pas
 mutation-test.
+
+<a id="s0.58"></a>
+### 0.58 Les rampes par-épisode REDÉMARRAIENT à chaque reprise — un modèle convergé revenait à son learning rate initial — ✅ CORRIGÉ (2026-08-02)
+
+**Suite directe de [§0.57](#s0.57)** : une fois la rampe réparée, elle est repartie de sa valeur de
+DÉPART à chaque fois que les environnements étaient reconstruits — `--append`, `--resume-from`, et
+chaque chunk de curriculum. Cause : `W40KEngine.episode_number` naît à 0 et **rien ne survivait au
+processus**. Le `.zip` ne persiste que `num_timesteps`.
+
+**Trois rampes concernées**, pas une : `learning_rate`, `ent_coef` et le mode de déploiement du
+moteur. La plus dangereuse n'est pas celle du déploiement — c'est le **learning rate** : reprendre
+un modèle déjà convergé à son LR et à son entropie initiaux est la recette exacte du catastrophic
+forgetting que ce projet surveille (`CLAUDE.md`, « pièges connus »). Côté déploiement, l'effet est
+de même nature que §0.57 : un run repris **ne finit jamais** à `active_ratio_end`, donc l'agent est
+noté sur des parties à déployer après un entraînement qui n'a jamais atteint le régime prévu.
+Le défaut est **antérieur** à §0.57 — mais tant que la rampe n'avançait pas, il était invisible.
+
+**Le compteur est COMPTÉ, pas déduit.** [`ai/run_state.py`](../../ai/run_state.py) persiste le
+nombre d'épisodes joués dans un fichier compagnon du `.zip` (`<stem>_run_state.json`, même patron
+que les stats VecNormalize : un nom par modèle, écriture atomique). Il vient de la somme des `dones`
+du VecEnv, via le tracker de métriques. **Ne pas le dériver de `num_timesteps`** : la longueur d'un
+épisode varie du simple au triple selon le scénario et l'issue, la conversion produirait un chiffre
+inventé qui a l'air juste.
+
+**Écrit partout où un modèle reprenable est sauvé** : sauvegarde finale, checkpoints périodiques,
+sauvegarde d'interruption (Ctrl-C), et promotion du meilleur modèle robuste en sortie canonique.
+Il **suit** le modèle quand on le déplace et **part avec lui** quand on le supprime — un
+`_run_state.json` orphelin serait relu par un futur modèle de même nom.
+
+**Un modèle est désormais un JEU de fichiers, pas un fichier** :
+[`ai/model_artifacts.py`](../../ai/model_artifacts.py) énumère, copie et supprime le `.zip` avec
+ses deux compagnons (`_vec_normalize.pkl`, `_run_state.json`). Cette liste était recopiée à la main
+sur cinq sites — énumération canonique, rotation des checkpoints, promotion `--resume-from`, copie
+du meilleur robuste, suppression d'un modèle périmé — chacun avec sa propre politique sur les
+fichiers absents ; ajouter le troisième fichier a demandé de retrouver les cinq. La dérivation du
+chemin d'un compagnon, elle, vit dans [`ai/companion_paths.py`](../../ai/companion_paths.py) : elle
+existait en trois exemplaires.
+
+**ARBITRAGE UTILISATEUR DU 2026-08-02 — pas de compatibilité pour les anciens modèles.** Reprendre
+un `.zip` dépourvu de son état de run **lève**, avec le message qui dit de repartir en `--new`.
+Aucun avertissement suivi d'un compteur remis à 0 en douce : c'est exactement le silence que §0.57
+et cette entrée existent pour fermer. Justification utilisateur : le parc de modèles est de toute
+façon obsolète (changement d'observation en cours).
+
+**Ce qu'un compteur qui reprend oblige à corriger ailleurs** (relecture adverse du 2026-08-02) :
+le **curriculum** doit partir du compte déjà joué (sinon sa garde d'évaluation se désynchronise au
+premier chunk, puis le suivant rembobine le compteur persisté) ; la **barre de progression** doit
+ajouter l'offset des DEUX côtés (sinon 1000 % affichés et un reste-à-faire négatif, donc une ETA
+absurde) ; et `--append` **sans modèle existant** n'est pas une reprise — les trois chemins créent
+alors un modèle neuf, exiger un état de run y ferait échouer le premier entraînement d'un agent.
+
+**Les deux boucles d'entraînement le supportent.** `train_with_scenario_rotation` **et**
+`create_model`/`create_multi_agent_model` + `train_model` : la seconde écrivait l'état de run sans
+jamais le relire, donc son `--append` restait muet — et son compteur, non initialisé, ÉCRASAIT le
+cumul du modèle par le compte du seul run courant (un `--append` de 10 000 épisodes sur un modèle
+de 200 000 réécrivait 10 000). Relevé en relecture adverse le 2026-08-02.
+
+**DEUX NATURES DE RAMPE, DEUX ORIGINES** (arbitrage utilisateur du 2026-08-02). Toutes ne doivent
+pas reprendre :
+
+| Rampe | Compte depuis | Pourquoi |
+|---|---|---|
+| `learning_rate`, `ent_coef` | **ce run** | c'est le RÉGIME d'entraînement, déclaré par le profil qu'on lance |
+| `opponent_mix` (self-play) | **ce run** | une introduction progressive n'a de sens que dans la phase qui l'introduit |
+| déploiement, `deployment_random_mix` | **la vie du modèle** | c'est une COMPÉTENCE acquise : la phase suivante démarre au niveau atteint |
+| compteur d'épisodes | **la vie du modèle** | axe TensorBoard, ETA, et il alimente la ligne du dessus |
+
+Concrètement : `training_episode_start_index` (converti en index PAR ENVIRONNEMENT via
+`episodes_per_env`) ne va **qu'au moteur** ; le wrapper de self-play part de zéro, et les callbacks
+de LR/entropie aussi. Sans cette distinction, une phase 2 lancée en `--append` verrait son
+`learning_rate.initial` **jamais appliqué** (progression déjà saturée → collée à `final`) et son
+warmup de self-play **sauté** (ratio final dès le premier épisode).
+
+**Ce que ça remplace : le driver de curriculum, supprimé** (~630 lignes). L'enchaînement
+automatique des phases n'est pas voulu (arbitrage utilisateur du 2026-08-02) : une phase 2 est un
+**profil indépendant** lancé en `--append` sur le même agent, avec son propre régime — le chemin du
+modèle dépend de l'agent, pas du profil. Le mécanisme existait déjà côté normalisation
+(`vec_normalize.reset_on_curriculum`, porté par `x5`). Sont partis avec le driver : la branche CLI
+`--scenario phaseX`, la porte de phase, le découpage en chunks, les offsets de phase des callbacks
+et l'affichage de progression par phase. Aucun profil ne portait de bloc `curriculum` : le chemin
+était **inatteignable**.
+
+**Verrous** : [`tests/unit/ai/test_run_state.py`](../../tests/unit/ai/test_run_state.py) (8 tests,
+dont la rampe moteur de bout en bout : index 0 → 0.0, index 50 → 0.5, index 100 → 1.0) et
+`test_resume_from_checkpoint.py` étendu (l'état suit le checkpoint promu, le modèle écarté garde le
+sien, un checkpoint sans état est refusé **avant toute modification du disque**, les trois artefacts
+partent ensemble à la rotation). Le refus tardif était un défaut réel : placé après la mise à
+l'écart, il laissait l'agent sans `model_<agent>.zip`.
+**Contre-épreuve faite** : index de départ ignoré + état manquant traité comme 0 → 2 tests ROUGES ;
+rétablis → verts.
 
 <a id="s0.57"></a>
 ### 0.57 Les rampes par-épisode du MOTEUR divisaient un compteur LOCAL par le total GLOBAL — la rampe de déploiement est restée figée sur tous les runs vectorisés — ✅ CORRIGÉ (2026-08-02)
@@ -3458,7 +3549,7 @@ n'est pas le moteur : les évaluations des marqueurs 4000 → 20 000 avaient ré
 1. `_launch_async_eval` sauve un snapshot **et ses stats** — donc écrit `<dir>/vec_normalize.pkl` ;
 2. les workers chargent ce pkl **PARESSEUSEMENT**, au premier pas de leur premier épisode ;
 3. pendant ce temps, la consommation du résultat de l'évaluation **PRÉCÉDENTE** appelle
-   `_remove_model_artifacts` (rotation du meilleur modèle robuste, nettoyage legacy, nettoyage du
+   `remove_model_with_companions` (rotation du meilleur modèle robuste, nettoyage legacy, nettoyage du
    snapshot) — qui supprime `<dir>/vec_normalize.pkl`, **le fichier des autres**.
 
 Tant qu'aucune rotation ne tombait entre l'écriture et la lecture, ça passait. Au marqueur 24 000,
@@ -4285,10 +4376,16 @@ poussait `unit["col"/"row"]` alors que `require_unit_position` lit `units_cache`
 >   et **sort avant** le gate, la métrique de win-rate, la sauvegarde du best model, l'early
 >   stopping et l'historique robuste. Le training continue ; **le point de mesure est ignoré, pas
 >   maquillé** — c'est le point clé : un score sur dénominateur tronqué n'alimente AUCUN signal.
-> - `train.py` (gate de CURRICULUM) : `gate_now` exige maintenant `eval_reliable`. Une éval
->   abandonnée ne peut plus valider une transition de phase, et remet `consecutive_ok` à 0 —
->   sans tuer le run. Le `marker` reste synchronisé, donc la garde d'anti-désynchronisation
->   (`last_bot_eval_marker != total_global_episodes`) ne se déclenche pas.
+> - ⚠️ **PÉRIMÉ au 2026-08-02** : cette puce décrivait le gate de CURRICULUM de `train.py`
+>   (`gate_now` exigeant `eval_reliable`). Le curriculum automatique **n'existe plus** — les
+>   phases se lancent manuellement, il n'y a plus de transition à garder. Le drapeau
+>   `eval_reliable`, dont ce gate était l'unique lecteur, a été **supprimé** (il doublait
+>   `total_failed_episodes == 0`). L'éval ignorée est désormais tracée côté callback :
+>   `_apply_eval_results` appelle `_mark_unreliable_eval_skip` avant son `return`, ce qui
+>   incrémente `gating_skipped_unreliable_count` et pousse une entrée `SKIP_UNRELIABLE` dans
+>   `gating_history`. Sans cet appel — jamais câblé jusque-là — les résumés de gating
+>   affichaient `skip_unreliable=0` sur un run ayant perdu des évals. Le `marker` reste
+>   synchronisé, la garde d'anti-désynchronisation ne se déclenche pas.
 > - `train.py` (éval FINALE / eval-only) : **reste strict dans les deux cas** — c'est le score
 >   livré, un échantillon tronqué ne se publie pas. Seul le message change : il nomme la cause
 >   (crash / timeout / les deux), pour que le diagnostic soit immédiat au lieu d'exiger une
@@ -4308,12 +4405,14 @@ poussait `unit["col"/"row"]` alors que `require_unit_position` lit `units_cache`
 > modification non commitée du répertoire de travail (cf. l'alerte en §0).
 > **MAJ 2026-07-28 soir : tranché dans l'autre sens — 2000 assumé et commité** (encadré 🟢 en §0).
 >
-> **Verrou** : `tests/unit/ai/test_eval_timeout_resilience.py` (**7** tests) — crash lève /
-> crash+timeout lève (le crash prime) / timeout ne lève pas et n'atteint pas le gate / timeout
-> loggue le compteur mais **jamais** un win-rate / éval propre atteint le gate (non-régression) /
-> contrat des 3 compteurs / verrou **AST** sur `gate_now` exigeant `eval_reliable`.
+> **Verrou** : `tests/unit/ai/test_eval_timeout_resilience.py` (**8** tests au 2026-08-02) —
+> crash lève / crash+timeout lève (le crash prime) / timeout ne lève pas et n'atteint pas le
+> gate / timeout loggue le compteur mais **jamais** un win-rate / éval propre atteint le gate
+> (non-régression) / contrat des 3 compteurs / timeout **tracé** en `SKIP_UNRELIABLE` /
+> éval propre ne fabrique **aucune** trace de skip.
 > **Contre-épreuve mutation** : garde-fou remis sur `total_failed_episodes` + early-return
-> neutralisé + `eval_reliable` retiré du gate → **3 rouges** ; restauré → 7 verts.
+> neutralisé → rouges ; appel `_mark_unreliable_eval_skip` retiré → `test_timeout_is_traced_as_a_skipped_gate`
+> rouge ; restauré → 8 verts.
 >
 > ⚠️ **Ce que ce fix NE prouve PAS** : que l'éval s'accélère quand le modèle s'améliore
 > (hypothèse de l'option 1, toujours non mesurée). Il garantit seulement que le run **survit**
@@ -4340,6 +4439,18 @@ strict de §0.7 : « aucune mesure [§10.6](V11_eval_strategy.md#s10.6) tant qu'
   (`bot_eval_task_timeout_seconds=3600` pour la phase `x5_new`) ; si UN task le dépasse, **tout le pool
   est force-terminé et tous les épisodes pending sont marqués `failed`** (`:716`, `:719-736`). D'où
   `failed_episodes=500` (l'éval a à peine démarré) et `duration≈3600`.
+- **Correctif du 2026-08-02 — le chrono partait de la SOUMISSION.** Les tasks étaient TOUTES
+  soumises d'un coup et `task_start_times` était rempli pour tous les futures à l'ouverture de la
+  collecte, alors que le pool n'en exécute que `bot_eval_n_workers` à la fois :
+  `bot_eval_task_timeout_seconds` était donc une deadline **globale** sur toute l'évaluation, pas
+  un timeout par task. Signature exacte de l'incident ci-dessus (`failed_episodes=500` avec
+  `duration≈3600` : « l'éval a à peine démarré » = les tasks des dernières vagues tuées avant
+  d'avoir tourné). La collecte soumet désormais **au fil de l'eau**, au plus `bot_eval_n_workers`
+  tasks en vol : il n'existe plus de task en attente dans le pool, donc l'instant de soumission
+  EST l'instant de départ. (`future.running()` ne suffisait pas : CPython arme RUNNING quand le
+  future part dans la `call_queue`, pas quand un worker le prend — mesuré : 4 futures RUNNING
+  pour 2 workers.) Verrous : `tests/unit/ai/test_bot_evaluation_utils.py::test_collect_parallel_results_arms_each_deadline_at_its_own_submission`
+  et `::test_collect_parallel_results_reports_tasks_never_submitted_on_abort`.
 - **Ce n'est PAS un hang infini** : chaque épisode d'éval est borné par
   `max_steps_per_episode = get_max_turns()×400 = 5×400 = 2000` pas (`bot_evaluation.py:1072`, boucle
   `while not done and step_count < max_steps_per_episode` `:555`). Un épisode s'arrête au cap.

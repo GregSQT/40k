@@ -21,6 +21,7 @@ from concurrent.futures import Future
 from typing import Any, Dict, Optional, cast
 
 import pytest
+from types import SimpleNamespace
 
 import ai.bot_evaluation
 from ai.training_callbacks import BotEvaluationCallback

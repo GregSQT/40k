@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Callable, Optional, cast
+from typing import Callable, Container, Optional, cast
 
 import pytest
 from stable_baselines3.common.base_class import BaseAlgorithm
@@ -226,6 +226,25 @@ with open(AGENT_CONFIG, encoding="utf-8-sig") as _f:
     PROFILES = {k: v for k, v in json.load(_f).items() if isinstance(v, dict)}
 
 
+def _comparable(block: dict, ignored: Container[str] = ()) -> dict:
+    """Le bloc privé de `ignored` et de ses clés-commentaires.
+
+    Une clé-commentaire de ce fichier, c'est un suffixe `_normal` ET une valeur TEXTE : de la
+    prose documentant le réglage voisin. Les écarter par cette règle, plutôt qu'en les
+    énumérant, évite qu'ajouter un commentaire au JSON fasse rougir une comparaison qui n'a
+    rien à voir.
+
+    Le suffixe seul ne suffit PAS : dans `config/agents/_training_common.json` il porte des
+    valeurs réelles (`bot_eval_freq_normal: 1000`, `save_best_robust_normal: true`), et un jour
+    où une telle clé apparaîtrait ici, l'écarter au nom de la convention laisserait passer en
+    silence exactement la dérive x1/x1_long que ce test verrouille.
+    """
+    return {
+        k: v for k, v in block.items()
+        if k not in ignored and not (k.endswith("_normal") and isinstance(v, str))
+    }
+
+
 @pytest.mark.parametrize("profile_name", sorted(PROFILES))
 @pytest.mark.parametrize("ramp_key", ["learning_rate", "ent_coef"])
 def test_every_profile_declares_decay_fraction(profile_name: str, ramp_key: str) -> None:
@@ -254,14 +273,10 @@ def test_x1_long_is_x1_recalibrated_for_long_runs() -> None:
     length_dependent = {
         "type",
         "total_episodes",
-        "total_episodes_normal",  # commentaire libre, décrit le budget du profil
-        "model_params",           # seul decay_fraction y change, vérifié juste après
-        "callback_params",        # seul bot_eval_freq, idem
+        "model_params",   # seuls les decay_fraction y changent, vérifiés juste après
+        "callback_params",  # seuls bot_eval_freq et bot_eval_final, idem
     }
-    for key in set(x1) | set(x1_long):
-        if key in length_dependent:
-            continue
-        assert x1[key] == x1_long[key], f"x1_long dérive de x1 sur '{key}'"
+    assert _comparable(x1_long, length_dependent) == _comparable(x1, length_dependent)
 
     assert x1_long["total_episodes"] == 200_000
     # Les deux rampes ont des `decay_fraction` DISTINCTES, et c'est délibéré : elles ne servent
@@ -270,21 +285,20 @@ def test_x1_long_is_x1_recalibrated_for_long_runs() -> None:
     # au plancher à 80k briderait l'apprentissage sur 60 % du budget du run.
     expected_decay = {"learning_rate": 0.7, "ent_coef": 0.4}
     for ramp_key, expected in expected_decay.items():
-        long_ramp = dict(x1_long["model_params"][ramp_key])
-        ref_ramp = dict(x1["model_params"][ramp_key])
-        assert long_ramp.pop("decay_fraction") == expected, ramp_key
-        assert ref_ramp.pop("decay_fraction") == 1.0
-        assert long_ramp == ref_ramp, f"x1_long change {ramp_key} au-delà de decay_fraction"
+        long_ramp = x1_long["model_params"][ramp_key]
+        ref_ramp = x1["model_params"][ramp_key]
+        assert long_ramp["decay_fraction"] == expected, ramp_key
+        assert ref_ramp["decay_fraction"] == 1.0
+        assert _comparable(long_ramp, {"decay_fraction"}) == _comparable(ref_ramp, {"decay_fraction"}), \
+            f"x1_long change {ramp_key} au-delà de decay_fraction"
     assert expected_decay["ent_coef"] < expected_decay["learning_rate"], (
         "l'exploration doit s'arrêter AVANT que le learning rate n'atteigne son plancher, "
         "sinon la politique se fige alors qu'elle peut encore apprendre vite"
     )
     # Le reste de model_params (archi, n_steps, target_kl…) doit être identique : un run long
     # sert à mesurer plus longtemps, pas à changer le modèle mesuré.
-    assert {k: v for k, v in x1_long["model_params"].items()
-            if k not in ("learning_rate", "ent_coef")} == \
-           {k: v for k, v in x1["model_params"].items()
-            if k not in ("learning_rate", "ent_coef")}
+    ramps = {"learning_rate", "ent_coef"}
+    assert _comparable(x1_long["model_params"], ramps) == _comparable(x1["model_params"], ramps)
 
     long_cb, ref_cb = x1_long["callback_params"], x1["callback_params"]
     assert long_cb["bot_eval_freq"] == 10000, (
@@ -292,28 +306,26 @@ def test_x1_long_is_x1_recalibrated_for_long_runs() -> None:
         "~8,5 h (13 min l'unité, commit 42326ed0) contre ~5,5 h d'entraînement : l'évaluation "
         "doublerait la durée du run."
     )
-    # `checkpoint_save_freq` reste ALIGNÉ sur x1, et ce n'est pas un oubli : SB3 sauvegarde tous
-    # les `save_freq` APPELS du callback (callbacks.py:300), soit un par pas du VecEnv — jamais
-    # des épisodes. Le régler depuis la durée en épisodes d'un run n'a pas de sens ; le levier
-    # pour couvrir plus d'historique est `max_checkpoints`, qui est un compte, sans ambiguïté.
-    assert long_cb["checkpoint_save_freq"] == ref_cb["checkpoint_save_freq"]
     # `bot_eval_final` est un nombre d'épisodes PAR BOT, et x1_long est le run de MESURE : son
-    # win-rate final est le chiffre publié, donc sa précision fait partie du livrable. À 100
-    # épisodes, l'erreur-type d'un win-rate autour de 0,5 vaut 5,0 points (IC95 ≈ ±9,8) — deux
-    # runs séparés de 10 points ne sont pas départageables. À 600 elle tombe à 2,0 points
-    # (IC95 ≈ ±4,0), σ étant divisé par √6. Le coût est borné et payé UNE fois, en fin de run :
-    # ~1 h 20 (13 min les 100 ép./bot, commit 42326ed0) contre ~5 h 30 d'entraînement sur 200k —
-    # une proportion qui n'a de sens que sur un run long, d'où x1 laissé à 100.
+    # win-rate final est le chiffre publié, donc sa précision fait partie du livrable. 600 divise
+    # l'erreur-type par √6 (5,0 → 2,0 points autour de 0,5) pour un coût payé UNE fois en fin de
+    # run ; le détail du calcul et du coût est dans `bot_eval_final_normal` du JSON, seule source.
     assert long_cb["bot_eval_final"] == 600
     assert ref_cb["bot_eval_final"] == 100
-    # `bot_eval_intermediate` reste ALIGNÉ sur x1 : les évals intermédiaires sont du monitoring
-    # répété 20 fois, pas la mesure ; les gonfler paierait 20 fois une précision inutile.
-    assert long_cb["bot_eval_intermediate"] == ref_cb["bot_eval_intermediate"]
-    ignored = {
-        "bot_eval_freq",
-        "bot_eval_freq_normal",
-        "bot_eval_final",
-        "bot_eval_final_normal",  # commentaire libre, présent sur x1_long seul
-    }
-    assert {k: v for k, v in long_cb.items() if k not in ignored} == \
-           {k: v for k, v in ref_cb.items() if k not in ignored}
+    # Corollaire OBLIGATOIRE de la ligne précédente : le timeout porte sur un TASK, et un task
+    # joue `bot_eval_final / nb_scenarios` épisodes en séquence. ×6 sur `bot_eval_final` = ×6 sur
+    # la durée d'un task (150 épisodes au lieu de 25 sur les 4 scénarios du holdout). Laisser
+    # 3600 s ne laisserait que 24 s/épisode contre les 17 s/ép. mesurées sur parties dégénérées
+    # (V11 §0.14) — et un seul task qui déborde force-termine tout le pool, donc perd la mesure
+    # publiée après ~5 h 30 de run. Le détail est dans `bot_eval_task_timeout_seconds_normal`.
+    assert long_cb["bot_eval_task_timeout_seconds"] == 7200
+    assert ref_cb["bot_eval_task_timeout_seconds"] == 3600
+    # Tout le reste est comparé en bloc, `checkpoint_save_freq` et `bot_eval_intermediate`
+    # compris — ce n'est pas un oubli qu'ils n'aient pas leur assert dédié :
+    # — `checkpoint_save_freq` : SB3 sauvegarde tous les `save_freq` APPELS du callback
+    #   (callbacks.py:300), un par pas du VecEnv, jamais des épisodes ; le régler depuis la durée
+    #   en épisodes d'un run n'a pas de sens, le levier est `max_checkpoints`, un compte ;
+    # — `bot_eval_intermediate` : les évals intermédiaires sont du monitoring répété 20 fois, pas
+    #   la mesure ; les gonfler paierait 20 fois une précision inutile.
+    overridden = {"bot_eval_freq", "bot_eval_final", "bot_eval_task_timeout_seconds"}
+    assert _comparable(long_cb, overridden) == _comparable(ref_cb, overridden)

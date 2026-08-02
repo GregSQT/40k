@@ -494,6 +494,7 @@ def test_in_engine_armageddon_flying_units_fly_and_pay_for_it():
         unit_registry=UnitRegistry(),
         quiet=True,
         gym_training_mode=True,
+        training_n_envs=1,  # UN environnement joue en serie (engine/episode_schedule.py)
     )
 
     inspected = 0

@@ -42,6 +42,17 @@ def require_key(mapping: Mapping[_KT, Any], key: _KT) -> Any:
     return mapping[key]
 
 
+def require_non_negative_int(value: Any, name: str) -> int:
+    """Ensure that a value is an integer >= 0 (booleans excluded)."""
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ConfigurationError(
+            f"'{name}' must be an integer (got {type(value).__name__}: {value!r})"
+        )
+    if value < 0:
+        raise ConfigurationError(f"'{name}' must be >= 0 (got {value})")
+    return value
+
+
 def require_positive_int(value: Any, name: str) -> int:
     """
     Ensure that a value is a strictly positive integer (booleans excluded).

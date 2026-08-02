@@ -1289,7 +1289,9 @@ et verrouillée par `tests/unit/scripts/test_roster_matchup_eval_loop.py`.
 
 **Sorties runtime d'évaluation** (`evaluate_against_bots`) :
 - `total_failed_episodes`: nombre total d’épisodes échoués (timeouts/erreurs agrégés)
-- `eval_reliable`: `true` si `total_failed_episodes == 0`, sinon `false`
+- `total_timeout_episodes` / `total_error_episodes`: les deux causes séparées — un **crash**
+  arrête le training, un **timeout** fait ignorer le point de mesure (tracé `SKIP_UNRELIABLE`
+  dans l’historique de gating) sans tuer le run
 - `eval_duration_seconds`: durée murale de l’évaluation
 - `scenario_bot_stats` / `scenario_scores`: agrégats par scénario (utilisés par les gates robustesse)
 

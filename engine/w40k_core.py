@@ -15,7 +15,12 @@ import numpy as np
 from typing import Dict, List, Literal, Tuple, Set, Optional, Any, Union, overload
 
 # Import shared utilities
-from shared.data_validation import require_key, require_positive_int, require_present
+from shared.data_validation import (
+    require_key,
+    require_non_negative_int,
+    require_positive_int,
+    require_present,
+)
 from engine.combat_utils import calculate_hex_distance, normalize_coordinates, resolve_dice_value, set_unit_coordinates
 from engine.weapon_damage_cache import load_weapon_damage_table, stamp_weapon_keys, build_best_weapon_cache
 from engine.utils.weapon_helpers import melee_weapons, ranged_weapons
@@ -130,7 +135,8 @@ class W40KEngine(gym.Env):
                 controlled_agent=None, active_agents=None, scenario_file=None,
                 scenario_files=None,  # NEW: List of scenarios for random selection per episode
                 unit_registry=None, quiet=True, gym_training_mode=False, debug_mode=False,
-                training_n_envs: Optional[int] = None, **kwargs):
+                training_n_envs: Optional[int] = None,
+                training_episode_start_index: int = 0, **kwargs):
         """Initialize W40K engine with AI_TURN.md compliance - training system compatible.
 
         Args:
@@ -168,6 +174,10 @@ class W40KEngine(gym.Env):
         # site qui oublie de résoudre repart en silence sur 48 envs imaginaires — c'est le défaut
         # §0.57 qui se reforme. Une rampe refuse donc de tourner sur une valeur non résolue.
         self._episode_ramp_n_envs_is_runtime = False
+
+        # Episodes deja joues par CET environnement lors d'un run precedent (reprise, chunk de
+        # curriculum) : la rampe repart de la, au lieu de `active_ratio_start`. Cf. ai/run_state.py.
+        require_non_negative_int(training_episode_start_index, "training_episode_start_index")
 
         if config is not None and training_n_envs is not None:
             raise ValueError(
@@ -728,7 +738,7 @@ class W40KEngine(gym.Env):
         # Episode-level metrics accumulation for MetricsCollectionCallback
         self.episode_reward_accumulator = 0.0
         self.episode_length_accumulator = 0
-        self.episode_number = 0  # Track episode number for debug logging
+        self.episode_number = int(training_episode_start_index)  # compteur d'episodes de CET env (offset de reprise inclus)
         self._deployment_random_mix_episode_enabled = False
         self._deployment_random_mix_ratio = 0.0
         self._deployment_random_mix_apply_to = "agent_only"

@@ -136,3 +136,40 @@ def test_resolve_run_budget_does_not_mutate_the_profile() -> None:
 def test_resolve_run_budget_refuses_absurd_budgets(n_envs, total) -> None:
     with pytest.raises(Exception):
         resolve_run_budget({"n_envs": 48, "total_episodes": 200000}, n_envs, total)
+
+
+def test_x1_selfplay_profile_is_consumable_end_to_end() -> None:
+    """Le profil de PHASE 2 du fichier réel passe tout le contrat `opponent_mix`.
+
+    Ces clés sont lues par `require_key`, sans valeur par défaut : une faute de frappe dans le
+    JSON ne se verrait qu'au lancement d'un run de plusieurs heures. Le test lit le VRAI fichier.
+    """
+    import json
+    import os
+
+    from ai.training_utils import build_self_play_kwargs
+
+    project_root = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
+    path = os.path.join(
+        project_root, "config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json"
+    )
+    with open(path, encoding="utf-8-sig") as handle:
+        profile = json.load(handle)["x1_selfplay"]
+
+    opponents = build_training_opponents(profile, True, profile["total_episodes"], _silent)
+    mix = opponents["opponent_mix_config"]
+    assert mix is not None and mix["enabled"] is True
+    assert opponents["self_play_snapshot_enabled"] is True
+
+    kwargs = build_self_play_kwargs(mix)
+    assert kwargs["self_play_opponent_enabled"] is True
+    # Budgets GLOBAUX dans la config ; c'est le wrapper qui les ramène au budget d'un env.
+    assert kwargs["self_play_total_episodes"] == profile["total_episodes"]
+    assert kwargs["self_play_n_envs"] == profile["n_envs"]
+
+    # La rampe MONTE et ne sature pas : un agent qui ne joue plus que contre lui-même dérive
+    # vers un équilibre local qu'aucun bot ne récompense, et l'évaluation note vs bots.
+    assert 0.0 <= mix["self_play_ratio_start"] < mix["self_play_ratio_end"] <= 0.8
+    assert 0 < mix["warmup_episodes"] < profile["total_episodes"]

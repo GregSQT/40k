@@ -255,7 +255,8 @@
       "bot_eval_final": 600,
       "bot_eval_final_normal": "---------------------------------- 600 (et non 100 comme les autres profils) : x1_long est le run de MESURE, son win-rate final est le chiffre publie, donc sa PRECISION est le livrable. bot_eval_final est un nombre d'episodes PAR BOT ; a 100, l'erreur-type d'un win-rate autour de 0,5 vaut 5,0 points (IC95 ~ +/-9,8), ce qui ne permet meme pas de departager deux runs de 10 points d'ecart. A 600 elle tombe a 2,0 points (IC95 ~ +/-4,0), l'ecart-type etant divise par racine(6). Le cout est BORNE et paye une seule fois, en fin de run : ~1 h 20 (13 min les 100 ep./bot, commit 42326ed0) contre ~5 h 30 d'entrainement pour 200 000 episodes -- proportion acceptable sur un run long, inacceptable sur x1 (10 000 episodes), qui reste donc a 100. bot_eval_intermediate reste a 100 : les evaluations intermediaires sont du MONITORING repete 20 fois, pas la mesure. Verrou : tests/unit/ai/test_schedule_decay_fraction.py::test_x1_long_is_x1_recalibrated_for_long_runs.",
       "bot_eval_worker_device": "cpu",
-      "bot_eval_task_timeout_seconds": 3600,
+      "bot_eval_task_timeout_seconds": 7200,
+      "bot_eval_task_timeout_seconds_normal": "---------------------------------- 7200 (et non 3600 comme les autres profils) : le timeout porte sur un TASK, et un task = 1 bot x 1 scenario x (bot_eval_final / nb_scenarios) episodes joues SEQUENTIELLEMENT dans un seul sous-process (bot_evaluation.py, episodes_per_scenario) ; depuis le fix du 2026-08-02 les tasks sont soumises AU FIL DE L'EAU, au plus bot_eval_n_workers a la fois, donc l'instant de soumission est bien l'instant de depart (_collect_parallel_results_with_timeouts). Avant ce fix tout partait d'un coup et le chrono courait des la soumission : c'etait une deadline GLOBALE sur toute l'eval, qui tuait les tasks des dernieres vagues avant qu'elles ne commencent. Passer bot_eval_final de 100 a 600 multiplie donc par 6 la duree d'un task de l'eval FINALE : 150 episodes par task au lieu de 25, sur les 4 scenarios du holdout. A 3600 s le budget tomberait a 24 s/episode, alors que V11 §0.14 a MESURE 17 s/episode sur des parties degenerees (cap 2000 pas x cout geodesique §0.25) : il ne resterait qu'un facteur 1,4. L'asymetrie tranche le reglage — un seul task qui deborde force-termine TOUT le pool (_collect_parallel_results_with_timeouts) et fait lever l'eval finale, soit la mesure publiee PERDUE apres ~5 h 30 d'entrainement, contre 2 h gachees une seule fois si le timeout est trop large. 7200 tolere 48 s/episode, ~2,8x le pire regime mesure, et reste un vrai garde-fou anti-worker-bloque (un episode est deja borne a max_steps_per_episode = 2000 pas, ce n'est donc jamais un hang infini). Les autres profils restent a 3600 : ils evaluent 100 episodes par bot, soit 25 par task. Verrou : tests/unit/ai/test_schedule_decay_fraction.py::test_x1_long_is_x1_recalibrated_for_long_runs.",
       "save_best_robust": true,
       "save_best_robust_seed": true,
       "robust_window": 5,
@@ -334,6 +335,214 @@
       "enabled": true,
       "training": false,
       "norm_reward": false
+    },
+    "bot_training": {
+      "ratios": {
+        "control": 0.35,
+        "value_trade": 0.15,
+        "adaptive": 0.15,
+        "greedy": 0.15,
+        "defensive": 0.15,
+        "random": 0.05
+      },
+      "randomness": {
+        "control": 0.05,
+        "value_trade": 0.05,
+        "adaptive": 0.05,
+        "greedy": 0.05,
+        "defensive": 0.05
+      }
+    },
+    "scenario_sampling": {
+      "eval_ref_strict": true,
+      "train_objective_count_weights": {
+        "1": 0.025,
+        "2": 0.025,
+        "3": 0.025,
+        "4": 0.025,
+        "5": 0.9
+      },
+      "eval_objective_count_weights": {
+        "5": 1.0
+      },
+      "train_wall_ref_weights": {
+        "default": 1.0
+      },
+      "eval_wall_refs": [
+        "walls-33.json",
+        "walls-mc1.json"
+      ],
+      "train_selection_mode": "uniform_within_count",
+      "eval_selection_mode": "uniform_within_count"
+    },
+    "training_hard": {
+      "enabled": false,
+      "target_episode_ratio": 0.3,
+      "max_scenario_weight": 4,
+      "scenario_names": []
+    },
+    "unit_rule_forcing": {
+      "enabled": false,
+      "target_controlled_episode_ratio": 0.2,
+      "max_scenario_weight": 6
+    }
+  },
+  "x1_selfplay": {
+    "type": "################################################### x1_selfplay — PHASE 2 : self-play introduit sur un agent deja entraine vs bots (board 44x60x1, scale x1) ###################################################",
+    "seed": 12345,
+    "total_episodes": 100000,
+    "total_episodes_normal": "100000 : PHASE 2, lancee en --append sur le modele de phase 1. Toutes les rampes de REGIME (learning_rate, ent_coef, opponent_mix) comptent depuis CE run et non depuis la vie du modele (V11 §0.58) : les valeurs ci-dessous s'appliquent donc telles quelles. Le compteur d'episodes et la rampe de deploiement, eux, CONTINUENT (competence acquise, etat persiste par ai/run_state.py). Rampe entropie achevee a 40000 (decay_fraction 0.4), rampe learning_rate a 70000 (0.7).",
+    "agent_seat_mode": "random",
+    "eval_episodes": 10,
+    "n_envs": 48,
+    "metrics_smoothing": null,
+    "model_params": {
+      "policy": "MultiInputPolicy",
+      "learning_rate": {
+        "initial": 0.0005,
+        "final": 0.0001,
+        "decay_fraction": 0.7,
+        "justification": "4x plus bas que la phase 1 (0.002). Le modele arrive DEJA CONVERGE : le remettre a son LR initial est la definition du catastrophic forgetting. Assez haut malgre tout pour s'adapter a un adversaire qui n'est plus un bot scripte. Plancher 0.0001, moitie de celui de la phase 1 : on affine, on ne reapprend pas."
+      },
+      "n_steps": 8192,
+      "batch_size": 1020,
+      "n_epochs": 3,
+      "gamma": 0.99,
+      "gae_lambda": 0.95,
+      "clip_range": 0.2,
+      "clip_range_vf": null,
+      "normalize_advantage": true,
+      "ent_coef": {
+        "start": 0.03,
+        "end": 0.005,
+        "decay_fraction": 0.4,
+        "justification": "0.03 et non 0.1 : la politique est FORMEE, une entropie de decouverte la disperserait. Non nulle quand meme, parce que l'adversaire change de nature — le self-play ouvre des situations que le panel de bots ne produit jamais. Plancher 0.005 : moitie de la phase 1, l'exploitation prime en fin de phase 2."
+      },
+      "vf_coef": 1.0,
+      "max_grad_norm": 0.5,
+      "target_kl": 0.02,
+      "tensorboard_log": "./tensorboard/",
+      "policy_kwargs": {
+        "net_arch": [
+          512,
+          512
+        ],
+        "features_extractor_kwargs": {
+          "cnn_features": 256
+        }
+      },
+      "verbose": 0
+    },
+    "callback_params": {
+      "bot_eval_scenario_pool": "holdout",
+      "bot_eval_show_progress": true,
+      "bot_eval_use_subprocess": true,
+      "bot_eval_n_workers": 4,
+      "early_stopping_patience": 0,
+      "save_best_min_episodes": 10000,
+      "checkpoint_save_freq": 10000,
+      "max_checkpoints": 3,
+      "checkpoint_name_prefix": "ppo_checkpoint",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "bot_eval_freq": 10000,
+      "bot_eval_freq_normal": "---------------------------------- 10000 (20 evals sur 200k ; a 5000, les 40 evals x 100 episodes couteraient ~8,5 h contre ~5,5 h d'entrainement)",
+      "bot_eval_use_episodes": true,
+      "bot_eval_intermediate": 100,
+      "bot_eval_final": 600,
+      "bot_eval_final_normal": "---------------------------------- 600 (et non 100 comme les autres profils) : x1_long est le run de MESURE, son win-rate final est le chiffre publie, donc sa PRECISION est le livrable. bot_eval_final est un nombre d'episodes PAR BOT ; a 100, l'erreur-type d'un win-rate autour de 0,5 vaut 5,0 points (IC95 ~ +/-9,8), ce qui ne permet meme pas de departager deux runs de 10 points d'ecart. A 600 elle tombe a 2,0 points (IC95 ~ +/-4,0), l'ecart-type etant divise par racine(6). Le cout est BORNE et paye une seule fois, en fin de run : ~1 h 20 (13 min les 100 ep./bot, commit 42326ed0) contre ~5 h 30 d'entrainement pour 200 000 episodes -- proportion acceptable sur un run long, inacceptable sur x1 (10 000 episodes), qui reste donc a 100. bot_eval_intermediate reste a 100 : les evaluations intermediaires sont du MONITORING repete 20 fois, pas la mesure. Verrou : tests/unit/ai/test_schedule_decay_fraction.py::test_x1_long_is_x1_recalibrated_for_long_runs.",
+      "bot_eval_worker_device": "cpu",
+      "bot_eval_task_timeout_seconds": 7200,
+      "bot_eval_task_timeout_seconds_normal": "---------------------------------- 7200 (et non 3600 comme les autres profils) : le timeout porte sur un TASK, et un task = 1 bot x 1 scenario x (bot_eval_final / nb_scenarios) episodes joues SEQUENTIELLEMENT dans un seul sous-process (bot_evaluation.py, episodes_per_scenario) ; depuis le fix du 2026-08-02 les tasks sont soumises AU FIL DE L'EAU, au plus bot_eval_n_workers a la fois, donc l'instant de soumission est bien l'instant de depart (_collect_parallel_results_with_timeouts). Avant ce fix tout partait d'un coup et le chrono courait des la soumission : c'etait une deadline GLOBALE sur toute l'eval, qui tuait les tasks des dernieres vagues avant qu'elles ne commencent. Passer bot_eval_final de 100 a 600 multiplie donc par 6 la duree d'un task de l'eval FINALE : 150 episodes par task au lieu de 25, sur les 4 scenarios du holdout. A 3600 s le budget tomberait a 24 s/episode, alors que V11 §0.14 a MESURE 17 s/episode sur des parties degenerees (cap 2000 pas x cout geodesique §0.25) : il ne resterait qu'un facteur 1,4. L'asymetrie tranche le reglage — un seul task qui deborde force-termine TOUT le pool (_collect_parallel_results_with_timeouts) et fait lever l'eval finale, soit la mesure publiee PERDUE apres ~5 h 30 d'entrainement, contre 2 h gachees une seule fois si le timeout est trop large. 7200 tolere 48 s/episode, ~2,8x le pire regime mesure, et reste un vrai garde-fou anti-worker-bloque (un episode est deja borne a max_steps_per_episode = 2000 pas, ce n'est donc jamais un hang infini). Les autres profils restent a 3600 : ils evaluent 100 episodes par bot, soit 25 par task. Verrou : tests/unit/ai/test_schedule_decay_fraction.py::test_x1_long_is_x1_recalibrated_for_long_runs.",
+      "save_best_robust": true,
+      "save_best_robust_seed": true,
+      "robust_window": 5,
+      "robust_drawdown_penalty": 0.5,
+      "robust_penalty_bot": 0.12,
+      "robust_penalty_hard": 0.0,
+      "model_gating_enabled": false,
+      "model_gating_min_worst_bot": 0.25,
+      "model_gating_min_worst_scenario_combined": 0.3,
+      "model_gating_min_vs_control": 0.3,
+      "holdout_hard_opponent_budget_modifier": 1.1,
+      "bot_eval_weights": {
+        "control": 0.4,
+        "value_trade": 0.15,
+        "adaptive": 0.15,
+        "greedy": 0.15,
+        "defensive": 0.15,
+        "tactical": 0.0
+      },
+      "bot_eval_randomness": {
+        "control": 0.05,
+        "value_trade": 0.05,
+        "adaptive": 0.05,
+        "greedy": 0.05,
+        "defensive": 0.05,
+        "tactical": 0.05
+      }
+    },
+    "roster_pool_schedule": {
+      "enabled": false,
+      "training": {
+        "start_counts": {
+          "swarm": 16,
+          "troop": 10,
+          "elite": 6
+        },
+        "end_counts": {
+          "swarm": 16,
+          "troop": 10,
+          "elite": 6
+        }
+      }
+    },
+    "deployment_random_mix": {
+      "enabled": false,
+      "training_only": true,
+      "force_random_ratio_start": 0.1,
+      "force_random_ratio_end": 0.2,
+      "schedule": "linear",
+      "freeze_after_progress": 0.7,
+      "apply_to": "agent_only"
+    },
+    "deployment_mode_schedule": {
+      "enabled": true,
+      "training_only": true,
+      "active_ratio_start": 0.3,
+      "active_ratio_end": 0.8,
+      "schedule": "linear",
+      "freeze_after_progress": 1.0,
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les six profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les six profils (x1_long ajoute le 2026-08-02 pour les runs longs, cf. model_params.*.decay_fraction)."
+    },
+    "observation_params": {
+      "obs_size": 20828,
+      "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x9 (GRID_CHANNELS, engine/spatial_grid.py) restant fournie a part. Depuis V11 §9 P3-1 s'y ajoute le support de la cible de melee, depuis V11 §9 P3-2 celui de la cible de charge (charge_reachable_max_roll), et depuis V11 §9.3 (P2) le bloc CONTEXTE DE DECISION (decision_ctx_bin, decision_options_bin) : quand le moteur s'arrete sur un point de choix joueur, il decrit le type de decision et CHAQUE candidat, que les actions CHOICE_0..5 designent. Depuis V11 §0.40 point 3 s'y ajoute le bloc CANDIDATS DE DEPLOIEMENT (deploy_cand_cont, deploy_cand_bin, 5 slots x 12 scalaires) : pendant la phase de deploiement, chaque slot 4-8 est decrit par l'EFFET de l'hexe que sa strategie poserait (position relative a l'ancre de zone, distances objectif/ennemi/allie, exposition LoS reelle et potentielle, etalement, objectif, couvert) et par son bit present, lu sur la MEME source que le masque (ActionDecoder.deployment_slot_candidates) ; hors deploiement le bloc est nul. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE). perception_radius / max_nearby_units / max_valid_targets NE SONT PLUS configures non plus : ils n'alimentaient que le pipeline mono-figurine, supprime le 2026-07-28. Ce que l'agent percoit du terrain est la grille egocentrique (engine/spatial_grid.py), dont la geometrie est partagee avec le masque et le decodeur."
+    },
+    "step_log_buffer_size": 200,
+    "vec_normalize": {
+      "enabled": true,
+      "norm_obs": true,
+      "norm_reward": true,
+      "clip_obs": 10.0,
+      "clip_reward": 10.0,
+      "gamma": 0.99
+    },
+    "vec_normalize_eval": {
+      "enabled": true,
+      "training": false,
+      "norm_reward": false
+    },
+    "opponent_mix": {
+      "enabled": true,
+      "self_play_ratio_start": 0.0,
+      "self_play_ratio_end": 0.5,
+      "warmup_episodes": 5000,
+      "snapshot_model_path": "ai/models/ArmageddonAgent/selfplay_snapshot.zip",
+      "snapshot_update_freq_episodes": 5000,
+      "self_play_snapshot_device": "cpu",
+      "self_play_deterministic": false,
+      "justification": "RAISON D'ETRE DE LA PHASE 2. Un adversaire FIGE, tire du modele lui-meme, remplace le bot une fraction des episodes. RAMPE 0.0 -> 0.5 : on demarre a 100 % bots (l'agent ne sait pas encore ce qu'est un adversaire non scripte) et on finit moitie-moitie. PAS 1.0 : l'evaluation note vs BOTS, et un agent qui ne joue plus que contre lui-meme derive vers un equilibre local qu'aucun bot ne recompense — la moitie restante ancre la mesure. WARMUP 5000 episodes GLOBAUX : le temps que le run se stabilise apres le changement de regime, aucun self-play. Ces budgets sont GLOBAUX et ramenes au budget d'UN environnement par le wrapper (V11 §0.57). SNAPSHOT tous les 5000 episodes : trop rapide, l'agent poursuit son ombre et les deux derivent ensemble ; trop lent, il bat un fantoche perime et le signal s'appauvrit. 5000 = un dixieme du run, soit ~20 adversaires successifs sur la phase. deterministic false : un adversaire deterministe s'exploite par memorisation. Device cpu : le snapshot tourne dans les workers, le GPU reste au modele qui apprend."
     },
     "bot_training": {
       "ratios": {

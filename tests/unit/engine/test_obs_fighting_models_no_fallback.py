@@ -49,6 +49,7 @@ def _load(seed: int = 0):
         rewards_config="ArmageddonAgent", training_config_name="x1_debug",
         controlled_agent="ArmageddonAgent", scenario_file=str(SCENARIO),
         unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
+        training_n_envs=1,  # UN environnement joue en serie (engine/episode_schedule.py)
     )
     eng.reset(seed=seed)
     return eng

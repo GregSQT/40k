@@ -1,7 +1,8 @@
+from collections import deque
 from concurrent.futures import ProcessPoolExecutor
 from itertools import chain, repeat
 from types import SimpleNamespace
-from typing import List
+from typing import Any, List, Optional, cast
 
 import numpy as np
 import pytest
@@ -430,72 +431,167 @@ def test_eval_worker_task_attaches_step_logger(monkeypatch: pytest.MonkeyPatch) 
     assert result["wins"] == 1
 
 
+class _FakeFuture:
+    """Doublure de future. `wait` etant stubbe, la collecte n'appelle que `result()`."""
+
+    def __init__(self, payload: Optional[dict] = None) -> None:
+        self._payload = payload
+
+    def result(self, timeout=None):
+        _ = timeout
+        if self._payload is None:
+            raise AssertionError("un future jamais rendu 'done' ne doit pas etre lu")
+        return self._payload
+
+
+class _FakePool:
+    """Pool qui rend les futures preparees, dans l'ordre de soumission.
+
+    Un vrai `ProcessPoolExecutor` lancerait de vrais workers : ici la collecte SOUMET
+    elle-meme, donc le pool doit etre une doublure pour que `submitted` soit observable —
+    c'est lui qui prouve l'etranglement a `max_in_flight`.
+    """
+
+    def __init__(self, futures) -> None:
+        self._futures = deque(futures)
+        self.submitted: List[dict] = []
+
+    def submit(self, fn, task):
+        _ = fn
+        self.submitted.append(task)
+        return self._futures.popleft()
+
+
+def _stub_collect(monkeypatch: pytest.MonkeyPatch, waits, clock) -> List[Any]:
+    """Stubbe `wait` (une paire `(done, not_done)` par tour) et l'horloge de la collecte.
+
+    `clock` est consommee dans l'ordre par TOUS les appels a `time.monotonic` : une valeur par
+    soumission, puis une par tour de boucle ; la derniere se repete. L'iterateur est cree UNE
+    fois — le recreer a chaque appel renverrait toujours la meme valeur, `elapsed` resterait nul
+    et la boucle ne sortirait jamais.
+
+    Retourne la liste, remplie au fil de l'eau, des pools force-termines.
+    """
+    turns = iter(waits)
+    monkeypatch.setattr(be, "wait", lambda pending, timeout=None, return_when=None: next(turns))
+    values = chain(clock[:-1], repeat(clock[-1]))
+    monkeypatch.setattr(be.time, "monotonic", lambda: next(values))
+    terminated: List[Any] = []
+    monkeypatch.setattr(be, "_force_terminate_process_pool", terminated.append)
+    return terminated
+
+
+def _eval_task(bot_name: str, n_episodes: int) -> dict:
+    return {
+        "bot_name": bot_name,
+        "scenario_name": "training_bot-1",
+        "scenario_file": f"/tmp/{bot_name}.json",
+        "n_episodes": n_episodes,
+    }
+
+
 def test_collect_parallel_results_with_timeouts_aborts_pool_on_hung_task(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class _FutureDone:
-        def result(self, timeout=None):
-            _ = timeout
-            return {
-                "wins": 1,
-                "losses": 0,
-                "draws": 0,
-                "failed_episodes": 0,
-                "bot_name": "random",
-                "scenario_name": "training_bot-1",
-            }
-
-    class _FutureHung:
-        pass
-
-    done_future = _FutureDone()
-    hung_future = _FutureHung()
-
-    wait_calls = {"n": 0}
-
-    def _fake_wait(pending, timeout=None, return_when=None):
-        _ = timeout, return_when
-        wait_calls["n"] += 1
-        if wait_calls["n"] == 1:
-            return {done_future}, {hung_future}
-        return set(), {hung_future}
-
-    monotonic_values = chain([0.0, 0.0, 2.0], repeat(2.0))  # 2 starts at 0.0 (order-independent), then now=2.0
-    monkeypatch.setattr(be, "wait", _fake_wait)
-    monkeypatch.setattr(be.time, "monotonic", lambda: next(monotonic_values))
-
-    terminated: List[ProcessPoolExecutor] = []
-    monkeypatch.setattr(be, "_force_terminate_process_pool", terminated.append)
-
-    task_map = {
-        done_future: {"bot_name": "random", "scenario_name": "training_bot-1", "scenario_file": "/tmp/a.json", "n_episodes": 1},
-        hung_future: {"bot_name": "greedy", "scenario_file": "/tmp/hung.json", "n_episodes": 3},
+    done_payload = {
+        "wins": 1, "losses": 0, "draws": 0, "failed_episodes": 0,
+        "bot_name": "random", "scenario_name": "training_bot-1",
     }
+    done_future, hung_future = _FakeFuture(done_payload), _FakeFuture()
+    pool = _FakePool([done_future, hung_future])
+    tasks = [_eval_task("random", 1), _eval_task("greedy", 3)]
 
-    # Vrai ProcessPoolExecutor (aucun worker n'est lance tant qu'on ne submit rien) :
-    # `pool` n'est pas un parametre mort, il est reforwarde a _force_terminate_process_pool.
-    with ProcessPoolExecutor(max_workers=1) as pool:
-        out = be._collect_parallel_results_with_timeouts(
-            pool=pool,
-            future_to_task=task_map,
-            task_timeout_seconds=1,
-        )
-        assert terminated == [pool]
+    # 2 soumissions a t=0, tour 1 a t=0 (rien n'a expire), tour 2 a t=2 > timeout=1.
+    terminated = _stub_collect(
+        monkeypatch,
+        waits=[({done_future}, {hung_future}), (set(), {hung_future})],
+        clock=[0.0, 0.0, 0.0, 2.0],
+    )
+    out = be._collect_parallel_results_with_timeouts(
+        pool=cast(ProcessPoolExecutor, pool), tasks=tasks, task_timeout_seconds=1, max_in_flight=2,
+    )
 
+    assert terminated == [pool]
     assert any(r.get("bot_name") == "random" and r.get("wins") == 1 for r in out)
     timed_out = [r for r in out if r.get("bot_name") == "greedy" and r.get("timeout") is True]
     assert len(timed_out) == 1
     assert timed_out[0]["failed_episodes"] == 3
 
 
-def test_collect_parallel_results_with_timeouts_rejects_non_positive_timeout() -> None:
-    with ProcessPoolExecutor(max_workers=1) as pool:
-        with pytest.raises(ValueError, match=r"must be > 0"):
-            be._collect_parallel_results_with_timeouts(
-                pool=pool,
-                future_to_task={},
-                task_timeout_seconds=0,
-            )
+def test_collect_parallel_results_arms_each_deadline_at_its_own_submission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Au plus `max_in_flight` tasks en vol, et le chrono de chacune part de SA soumission.
+
+    Tout soumettre d'un coup faisait de `bot_eval_task_timeout_seconds` une deadline GLOBALE :
+    a 24 tasks sur 4 workers, celles de la 6e vague avaient consomme 5 durees de task avant de
+    commencer et se faisaient tuer sans avoir tourne — or UN seul timeout force-termine le pool,
+    donc annule la mesure finale apres des heures d'entrainement. Ici la 2e task demarre a
+    t=100 s avec un timeout de 1 s : elle n'expire que si son chrono est celui du pool.
+    """
+    payloads = [
+        {"wins": 2, "losses": 0, "draws": 0, "failed_episodes": 0,
+         "bot_name": bot, "scenario_name": "training_bot-1"}
+        for bot in ("random", "greedy")
+    ]
+    first, second = _FakeFuture(payloads[0]), _FakeFuture(payloads[1])
+    pool = _FakePool([first, second])
+    tasks = [_eval_task("random", 2), _eval_task("greedy", 2)]
+
+    terminated = _stub_collect(
+        monkeypatch,
+        # Le tour 2 observe la 2e task ENCORE EN COURS : c'est le seul moment ou sa deadline
+        # est evaluee, donc le seul ou ce test peut echouer. Sans lui, il ne verrouillerait
+        # que l'ordre de soumission.
+        waits=[({first}, set()), (set(), {second}), ({second}, set())],
+        # soumission 1 a t=0, tour 1 a t=0.5, soumission 2 a t=100 (le pool tourne depuis
+        # longtemps), tour 2 a t=100.2 : 0,2 s pour la 2e task, bien sous le timeout de 1 s.
+        clock=[0.0, 0.5, 100.0, 100.2, 100.3],
+    )
+    out = be._collect_parallel_results_with_timeouts(
+        pool=cast(ProcessPoolExecutor, pool), tasks=tasks, task_timeout_seconds=1, max_in_flight=1,
+    )
+
+    assert pool.submitted == tasks, "les tasks partent une par une, pas toutes d'un coup"
+    assert terminated == [], "aucune task n'a depasse SON propre budget"
+    assert out == payloads
+
+
+def test_collect_parallel_results_reports_tasks_never_submitted_on_abort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """L'abandon du pool doit rendre compte AUSSI des tasks jamais soumises.
+
+    Les taire donnerait un resultat calcule sur un denominateur tronque, donc un score publie
+    plus flatteur que la realite, alors que l'appelant doit lever sur evaluation incomplete.
+    """
+    hung_future = _FakeFuture()
+    pool = _FakePool([hung_future])
+    tasks = [_eval_task("random", 3), _eval_task("greedy", 5)]
+
+    terminated = _stub_collect(
+        monkeypatch, waits=[(set(), {hung_future})], clock=[0.0, 2.0],
+    )
+    out = be._collect_parallel_results_with_timeouts(
+        pool=cast(ProcessPoolExecutor, pool), tasks=tasks, task_timeout_seconds=1, max_in_flight=1,
+    )
+
+    assert terminated == [pool]
+    assert pool.submitted == [tasks[0]], "la 2e task n'a jamais ete soumise"
+    assert all(r["timeout"] is True for r in out)
+    assert sum(r["failed_episodes"] for r in out) == 8, "les 3 + 5 episodes sont comptes perdus"
+
+
+def test_collect_parallel_results_with_timeouts_rejects_invalid_bounds() -> None:
+    pool = cast(ProcessPoolExecutor, _FakePool([]))
+    with pytest.raises(ValueError, match=r"task_timeout_seconds must be > 0"):
+        be._collect_parallel_results_with_timeouts(
+            pool=pool, tasks=[], task_timeout_seconds=0, max_in_flight=1,
+        )
+    with pytest.raises(ValueError, match=r"max_in_flight must be > 0"):
+        be._collect_parallel_results_with_timeouts(
+            pool=pool, tasks=[], task_timeout_seconds=1, max_in_flight=0,
+        )
 
 
 def _faction_result(bot_name: str, faction_stats: dict) -> dict:
@@ -570,32 +666,16 @@ def test_collected_timeout_results_are_aggregatable(monkeypatch: pytest.MonkeyPa
     Verrou du jumeau : `_collect_parallel_results_with_timeouts` construit ses PROPRES
     dicts d'echec. Ils doivent traverser l'agregation comme ceux de _get_result_with_timeout.
     """
-    monkeypatch.setattr(be, "_force_terminate_process_pool", lambda pool: None)
+    hung_future = _FakeFuture()
+    pool = _FakePool([hung_future])
+    _stub_collect(monkeypatch, waits=[(set(), {hung_future})], clock=[0.0, 2.0])
 
-    class _FutureHung:
-        pass
-
-    hung_future = _FutureHung()
-    # Meme motif que test_collect_parallel_results_with_timeouts_aborts_pool_on_hung_task :
-    # `wait` est stubbe, le pool reel n'execute rien.
-    monkeypatch.setattr(be, "wait", lambda pending, timeout=None, return_when=None: (set(), {hung_future}))
-    # Iterateur cree UNE fois : recree a chaque appel, monotonic renverrait toujours 0.0,
-    # elapsed resterait nul et la boucle ne sortirait jamais.
-    monotonic_values = chain([0.0], repeat(2.0))
-    monkeypatch.setattr(be.time, "monotonic", lambda: next(monotonic_values))
-
-    task = {
-        "bot_name": "random",
-        "scenario_file": "/tmp/s1.json",
-        "scenario_name": "training_bot-1",
-        "n_episodes": 3,
-    }
-    with ProcessPoolExecutor(max_workers=1) as pool:
-        out = be._collect_parallel_results_with_timeouts(
-            pool=pool,
-            future_to_task={hung_future: task},
-            task_timeout_seconds=1,
-        )
+    out = be._collect_parallel_results_with_timeouts(
+        pool=cast(ProcessPoolExecutor, pool),
+        tasks=[_eval_task("random", 3)],
+        task_timeout_seconds=1,
+        max_in_flight=1,
+    )
     assert len(out) == 1 and out[0]["timeout"] is True
     # Le point du bug : sans `faction_stats`, cet appel levait ConfigurationError.
     assert be._compute_faction_scores(out, ("random",), {"random": 1.0}) == {}

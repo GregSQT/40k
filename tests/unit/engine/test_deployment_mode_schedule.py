@@ -303,14 +303,19 @@ def test_every_profile_carries_the_deployment_ramp(profile_name: str) -> None:
 
 
 def test_all_profiles_share_the_same_ramp() -> None:
-    """Les six profils portent EXACTEMENT le bloc de `x1` : aucune dérive possible entre eux.
+    """Tous les profils portent EXACTEMENT le bloc de `x1` : aucune dérive possible entre eux.
 
     `x1` est la référence (profil de production) : c'est lui qu'on ajuste, les autres suivent.
     Le compte est figé exprès : un profil ajouté sans son bloc de déploiement est le défaut que
     ce fichier existe pour attraper, et un `len` non contraint le laisserait passer. Passé de 5
-    à 6 le 2026-08-02 avec `x1_long` (runs longs, cf. `model_params.*.decay_fraction`).
+    à 6 le 2026-08-02 avec `x1_long` (runs longs), puis à 7 le même jour avec `x1_selfplay`
+    (phase 2 — self-play sur un agent déjà entraîné vs bots).
+
+    ⚠️ `x1_selfplay` porte le MÊME bloc que les autres, et ce n'est pas un oubli : la rampe de
+    déploiement est une COMPÉTENCE ACQUISE, elle reprend là où la phase 1 l'a laissée (V11 §0.58).
+    Le bloc y décrit donc le plafond atteint, pas une rampe rejouée.
     """
-    assert len(PROFILES) == 6, f"profils attendus : 6, trouvés {sorted(PROFILES)}"
+    assert len(PROFILES) == 7, f"profils attendus : 7, trouvés {sorted(PROFILES)}"
     reference = json.dumps(PROFILES["x1"]["deployment_mode_schedule"], sort_keys=True)
     diverged = {
         name: p.get("deployment_mode_schedule")

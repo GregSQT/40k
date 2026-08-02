@@ -528,7 +528,7 @@ def _run_single_episode(
     le moteur n'a donc pas de vainqueur a designer (`info["winner"]` vaut None hors
     terminaison, `W40KEngine.step`). Le classer gagne/perdu/nul fabriquerait une statistique.
     La reference tient le meme compte separe sous le nom `failed_episodes`
-    (`_eval_worker_task`, agrege par `evaluate_against_bots` qui en tire `eval_reliable`).
+    (`_eval_worker_task`, agrege par `evaluate_against_bots` en `total_failed_episodes`).
     """
     import numpy as np
     from shared.data_validation import require_key
@@ -727,7 +727,7 @@ def _run_matchup_episodes(
 
     `failed_episodes` compte les episodes TRONQUES par le plafond de pas, jamais melanges aux
     resultats de parties : meme separation que `failed_episodes` dans la reference
-    (`ai/bot_evaluation._eval_worker_task`), qui s'en sert pour decider `eval_reliable`.
+    (`ai/bot_evaluation._eval_worker_task`), qui les agrege en `total_failed_episodes`.
     """
     from sb3_contrib import MaskablePPO
     from config_loader import get_max_turns

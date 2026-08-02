@@ -182,7 +182,7 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
                      controlled_agent_key, unit_registry, step_logger_enabled=False,
                      scenario_files=None, debug_mode=False, use_bots=False, training_bots=None,
                      agent_seat_mode=None, global_seed=None, opponent_mix_config=None,
-                     n_envs=None):
+                     n_envs=None, episode_start_index=0):
     """
     Factory function to create a single W40KEngine instance for vectorization.
 
@@ -201,6 +201,11 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
         n_envs: Nombre d'environnements REELLEMENT ouverts (deja resolu par
             `_resolve_n_envs_for_step_logging`). Obligatoire : c'est le denominateur des rampes
             par-episode, moteur ET self-play (V11 §0.57).
+        episode_start_index: Episodes deja joues PAR CET environnement lors d'un run precedent
+            (reprise). Il n'est passe QU'AU MOTEUR : la rampe de deploiement est une COMPETENCE
+            ACQUISE, elle reprend ou elle en etait. Le wrapper, lui, part de zero — la rampe de
+            self-play appartient au REGIME du run qu'on lance, et son introduction progressive
+            n'a de sens que depuis le debut de ce run. Cf. ai/run_state.py.
 
     Returns:
         Callable that creates and returns a wrapped environment instance
@@ -249,6 +254,7 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
             # que les rampes par-episode du moteur et celle du self-play partagent le meme
             # denominateur (V11 §0.57).
             training_n_envs=n_envs,
+            training_episode_start_index=episode_start_index,
         )
         
         # ✓ CHANGE 9: Removed seed() call - W40KEngine uses reset(seed=...) instead

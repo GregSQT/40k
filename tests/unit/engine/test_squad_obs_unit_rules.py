@@ -68,6 +68,7 @@ def _load(units: List[Dict[str, Any]]) -> W40KEngine:
             rewards_config="ArmageddonAgent", training_config_name="x1_debug",
             controlled_agent="ArmageddonAgent", scenario_file=str(path),
             unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
+            training_n_envs=1,  # UN environnement joue en serie (engine/episode_schedule.py)
         )
         eng.reset(seed=0)
         return eng
@@ -182,6 +183,7 @@ def test_real_training_roster_lights_the_expected_bit():
         rewards_config="ArmageddonAgent", training_config_name="x5_new",
         controlled_agent="ArmageddonAgent", scenario_file=TEMPLATE,
         unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
+        training_n_envs=1,  # UN environnement joue en serie (engine/episode_schedule.py)
     )
     lit = 0
     for _ in range(4):

@@ -177,7 +177,6 @@ def test_build_agent_model_path_and_progress_width(monkeypatch: pytest.MonkeyPat
                 "progress_bar": {
                     "training_width": 10,
                     "bot_eval_width": 11,
-                    "curriculum_phase_width": 12,
                 }
             },
         ),

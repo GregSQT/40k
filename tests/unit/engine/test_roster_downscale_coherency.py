@@ -50,6 +50,7 @@ def _engine(seed: int):
         unit_registry=UnitRegistry(),
         quiet=True,
         gym_training_mode=True,
+        training_n_envs=1,  # UN environnement joue en serie (engine/episode_schedule.py)
     )
     eng.reset(seed=seed)
     return eng

@@ -256,11 +256,15 @@ l'évaluation, elle, impose toujours une phase de déploiement. Sur les chemins 
 fournissent qu'un fragment de config (`observation_params`) et n'ont pas d'épisodes à ramper,
 l'absence reste légitime et ne lève pas.
 
-Réglage de référence des six profils `ArmageddonAgent` (2026-08-01) : `0.3 → 0.8`, `linear`,
-`freeze_after_progress: 0.5`. **Le gel arrive avant la fin de la rampe**, donc `active_ratio_end`
-n'est jamais atteint : la part réellement plafond est `start + (end − start) × freeze` = **0.55**.
-C'est ce plafond effectif, et non `active_ratio_end`, qui dit quelle proportion des épisodes de
-fin de run se joue en déploiement actif. Chaque bloc porte un champ `justification` (même
+Réglage de référence des six profils `ArmageddonAgent` (2026-08-02) : `0.3 → 0.8`, `linear`,
+`freeze_after_progress: 1.0`. **Aucun gel** : la rampe se déroule sur tout le run et
+`active_ratio_end` est atteint en fin de parcours, donc c'est lui — et non un plafond effectif —
+qui dit quelle proportion des épisodes de fin de run se joue en déploiement actif. Le gel à
+mi-run (`0.5`, plafond effectif `start + (end − start) × freeze` = 0.55, réglage du 2026-08-01)
+est **abandonné le 2026-08-02**, en même temps que la correction du dénominateur de la rampe
+(V11 §0.57) : le compteur d'épisodes du moteur est LOCAL à un environnement et il était divisé
+par le total GLOBAL, donc à `n_envs=48` la rampe n'avançait pas et le gel n'avait aucun objet.
+Chaque bloc porte un champ `justification` (même
 convention que `observation_params.justification`). Verrou :
 `tests/unit/engine/test_deployment_mode_schedule.py` dérive la référence du profil `x1`, exige que
 les cinq autres l'égalent, et vérifie que le plafond effectif reste ≥ 0.5.

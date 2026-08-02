@@ -45,8 +45,8 @@ CE QUE CE BANC NE FAIT PAS
 - Il ne rend PAS le resultat reproductible. `model_params.seed` fixe l'initialisation et les
   tirages, mais un run a `n_envs` sous-processus asynchrones n'est pas deterministe bit-a-bit. La
   graine sert a ECHANTILLONNER la variance de facon appariee, pas a l'annuler.
-- Il ne verifie pas la fiabilite interne de l'evaluation (`eval_reliable`,
-  `total_failed_episodes`) : `train.py` calcule ces cles mais ne les imprime pas dans le bloc
+- Il ne verifie pas la fiabilite interne de l'evaluation (`total_failed_episodes`,
+  `total_timeout_episodes`) : `train.py` calcule ces cles mais ne les imprime pas dans le bloc
   final, et ce banc ne lit que ce qui est imprime.
 - Il ne dit rien du temps. Une valeur peut gagner 3 points de win-rate en doublant la duree du
   run : c'est `ab_bench_param.py` qui le mesure.
