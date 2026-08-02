@@ -153,24 +153,10 @@ def _tracker_stub() -> W40KMetricsTracker:
         "movement_actions": 0,
         "mapper_failures": 0,
     }
-    t.phase_stats = {
-        "movement": {"moved": 0, "waited": 0, "fled": 0},
-        "shooting": {"shot": 0, "skipped": 0},
-        "charge": {"charged": 0, "skipped": 0},
-        "fight": {"fought": 0, "skipped": 0},
-    }
     t.combat_effectiveness = {
-        "shoot_kills": 0,
-        "melee_kills": 0,
-        "charge_successes": 0,
         "victory_points_cumulative": 0.0,
     }
     t.combat_history = {
-        "shoot_kills": [],
-        "melee_kills": [],
-        "shoot_value_killed": [],
-        "melee_value_killed": [],
-        "charge_successes": [],
         "victory_points_cumulative": [],
     }
     t.forcing_tracking = {
@@ -385,6 +371,15 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
             "initial_enemy_models": 4,
             "models_lost": 1,
             "models_killed": 2,
+            "charge_attempts": 2,
+            "charge_successes": 1,
+            "charge_attempts_opponent": 1,
+            "charge_successes_opponent": 1,
+            "move_actions": 4,
+            "move_flees": 1,
+            "move_waits": 1,
+            "shoot_activations": 2,
+            "shoot_waits": 1,
             "valid_actions": 8,
             "invalid_actions": 2,
             "wait_actions": 1,
@@ -426,13 +421,6 @@ def test_compliance_mapper_phase_and_training_metrics_paths() -> None:
             "mapper_failed": False,
         }
     )
-    t.log_phase_performance({"phase": "move", "action": "move", "was_flee": True})
-    t.log_phase_performance({"phase": "shoot", "action": "shoot"})
-    t.log_phase_performance({"phase": "charge", "action": "charge"})
-    t.log_phase_performance({"phase": "fight", "action": "combat"})
-    t.log_combat_kill("shoot")
-    t.log_combat_kill("melee")
-    t.log_combat_kill("charge")
     t.log_victory_points_cumulative(12.0)
     t.compute_and_log_phase_metrics()
 
@@ -496,6 +484,15 @@ def test_log_tactical_metrics_forcing_validation_errors() -> None:
         "initial_enemy_models": 1,
         "models_lost": 0,
         "models_killed": 0,
+        "charge_attempts": 1,
+        "charge_successes": 0,
+        "charge_attempts_opponent": 0,
+        "charge_successes_opponent": 0,
+        "move_actions": 1,
+        "move_flees": 0,
+        "move_waits": 0,
+        "shoot_activations": 1,
+        "shoot_waits": 0,
         "valid_actions": 1,
         "invalid_actions": 0,
         "wait_actions": 0,

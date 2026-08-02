@@ -725,6 +725,53 @@ plusieurs rosters.
 | **02_combat/j_melee_value_killed** | VALUE (points) des figurines détruites en mêlée | Idem, côté mêlée |
 | **02_combat/k_units_killed_ratio** | Unités ennemies éliminées / unités ennemies de départ | Croissant |
 | **02_combat/l_units_lost_ratio** | Unités alliées perdues / unités alliées de départ | Décroissant ou stable |
+| **02_combat/m_charge_attempts** | Charges DÉCLARÉES par l'agent (réussies + ratées) par épisode | Croissant si l'agent cherche le corps à corps |
+| **02_combat/n_charge_success_rate** | Charges réussies ÷ charges déclarées, cumulées sur la fenêtre | Croissant — l'agent apprend à déclarer de plus près |
+| **02_combat/o_charge_attempts_bot** | Idem `m_`, pour l'adversaire | Référence : un taux ne se lit pas sans elle |
+| **02_combat/p_charge_success_rate_bot** | Idem `n_`, pour l'adversaire | Référence : le même 40 % est bon ou mauvais selon ce que le scénario permet |
+
+**Lire `m_` et `n_` ENSEMBLE, jamais séparément.** C'est tout l'intérêt du couple : une mêlée
+absente (`h_`/`j_` bas) a deux causes opposées que le seul compte de charges réussies ne
+distinguait pas — un agent qui ne DÉCLARE pas de charge (`m_` bas) ou un agent qui les déclare
+de trop loin (`m_` haut, `n_` bas). La première se corrige côté récompense (`charge_success`
+vaut-il l'investissement de 1–2 tours de déplacement ?), la seconde côté politique.
+
+`n_` et `p_` sont un **rapport de moyennes** calculé fenêtre par fenêtre, comme
+`a_value_trade_ratio` : leur dénominateur est un résultat d'épisode, pas une constante de
+scénario. Un épisode sans aucune charge déclarée n'a donc pas de taux — il n'est ni écarté
+(cela retirerait une population entière) ni compté 0 (cela se lirait « toutes ses charges ont
+échoué »). Une fenêtre entière sans une seule tentative n'émet aucun point, pas un zéro.
+
+> `combat/c_charge_successes` portait cette mesure jusqu'au 2026-08-02 : un compte de réussites
+> de l'agent seul, reconstruit depuis les `info` du step gym côté callback. Supprimé, pas
+> déplacé — la continuité de la courbe est rompue parce que la source a changé (le moteur, sur
+> `action_logs`, où le camp de chaque ligne est une donnée du journal).
+
+#### Participation par phase — la part des occasions saisies
+
+| Tag | Ce qu'il mesure | Attendu |
+|---|---|---|
+| **game_tactical/movement_efficiency** | Activations de déplacement ÷ occasions (déplacements + attentes en phase move) | Proche de 1.0 — attendre en move est rarement optimal |
+| **game_detailed/flee_rate** | Replis (`fall_back`) ÷ occasions de déplacement | Faible ; une hausse signale un agent qui décroche du combat |
+| **game_tactical/shooting_participation** | Activations de tir ÷ occasions (tirs + attentes en phase shoot) | Croissant vers 1.0 |
+
+**Activations, pas lignes de journal.** Le tir émet une ligne par groupe (arme, cible) : une
+escouade tirant trois armes compterait pour trois participations, et le taux dépasserait 1.
+Le numérateur déduplique donc sur `(tour, escouade)`. Le déplacement et la charge émettent une
+ligne par activation — rien à dédupliquer.
+
+**La charge n'a volontairement pas de taux de participation.** Son dénominateur ne compterait
+pas les occasions de charger mais les fois où le moteur a **exposé** la phase : quand le pool
+de charge est vide, aucun step n'est joué, donc aucun `wait` n'est journalisé et le tour
+n'entre nulle part. Le volume `02_combat/m_charge_attempts`, lu contre la colonne adverse
+`o_charge_attempts_bot`, répond à la question sans cette ambiguïté.
+
+> Ces courbes ont été émises par `log_phase_performance` jusqu'à ce que son dernier appelant
+> disparaisse — elles n'existaient dans **aucun** run (vérifié sur les 124 tags d'un run de
+> 50 000 épisodes). Recomptées côté moteur sur `action_logs` le 2026-08-02, avec la méthode et
+> `phase_stats` supprimés : le callback déduisait la phase et le camp d'une `info` de step gym
+> qui enchaîne plusieurs steps moteur. La quatrième, `game_tactical/charge_rate`, n'a pas été
+> reprise — voir ci-dessus.
 
 Chaque ratio est émis **seulement si son dénominateur est > 0** : un dénominateur nul est un état
 de jeu possible (aucune unité en face), pas une erreur, et il ne produit donc aucun point plutôt

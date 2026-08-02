@@ -5736,7 +5736,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         "toRow": dest_row,
         "charge_roll": charge_roll,
         "ability_display_name": charge_ability_display_name,
-        "charge_succeeded": True,  # For metrics tracking - successful charge
+        "charge_succeeded": True,  # Lu par reward_calculator (penalite charge_fail)
         "activation_complete": True
     })
 

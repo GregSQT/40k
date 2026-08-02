@@ -445,6 +445,71 @@ def test_the_kill_and_value_curves_are_emitted(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Charges — VENTILATION PAR SIEGE
+#
+# Les compteurs de charge sont verifies bout en bout dans test_episode_charge_counters, sur le
+# seul scenario du depot ou une charge est reellement declarable. Ce qu'IL ne peut pas couvrir,
+# c'est le siege 2 : son moteur se construit depuis un `scenario_file`, et cette branche fixe
+# `controlled_player` a 1 en dur (w40k_core ~L297). Ce harnais-ci, lui, le prend en parametre.
+# Les tentatives sont donc INJECTEES dans le journal : ce qu'on verifie ici n'est pas que le
+# moteur produise des charges, mais que chaque ligne parte du bon cote — le defaut exact que le
+# chemin callback avait deja produit (charges du BOT sous le drapeau de l'agent).
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: Tentatives injectees : trois du joueur 1 (deux abouties), une du joueur 2 (ratee). Le
+#: desequilibre est voulu — des chiffres identiques des deux cotes rendraient une inversion
+#: des camps invisible.
+_INJECTED_CHARGES = (("charge", 1), ("charge", 1), ("charge_fail", 1), ("charge_fail", 2))
+
+
+def _inject_charges(engine: W40KEngine) -> None:
+    """Ajoute ``_INJECTED_CHARGES`` au journal de l'episode en cours.
+
+    Injecte juste apres le reset : ``action_logs`` n'est remis a zero QUE par ``reset()`` et
+    n'est jamais purge en cours d'episode, donc ces lignes seront encore la a la terminaison,
+    au moment ou le moteur fait sa passe de comptage.
+    """
+    for log_type, player in _INJECTED_CHARGES:
+        engine.game_state["action_logs"].append({
+            "type": log_type, "phase": "charge", "player": player,
+            "turn": 1, "unitId": "1", "targetId": "3", "charge_roll": 7,
+            "message": "injected", "timestamp": "server_time", "reward": 0.0,
+        })
+
+
+@pytest.mark.parametrize("controlled_player", [1, 2])
+def test_charge_counters_ventilate_by_seat(
+    monkeypatch: pytest.MonkeyPatch, controlled_player: int,
+) -> None:
+    """Chaque tentative est comptee du cote de SON joueur, sur les deux sieges.
+
+    Les memes lignes injectees doivent basculer d'un jeu de compteurs a l'autre quand le siege
+    change : c'est ce qui distingue une ventilation reelle d'un compteur qui verserait tout du
+    meme cote et passerait quand meme au siege 1.
+    """
+    _pinned_die(monkeypatch)
+    opponent = 2 if controlled_player == 1 else 1
+    engine = _build(_config(_melee_units(controlled_player), controlled_player))
+    _inject_charges(engine)
+    tactical = _run_to_end(engine, _POLICIES["first"])
+
+    def _count(player: int, types: Tuple[str, ...]) -> int:
+        return sum(1 for lg in engine.game_state["action_logs"]
+                   if lg.get("type") in types and int(lg["player"]) == player)
+
+    assert tactical["charge_attempts"] == _count(controlled_player, ("charge", "charge_fail"))
+    assert tactical["charge_successes"] == _count(controlled_player, ("charge",))
+    assert tactical["charge_attempts_opponent"] == _count(opponent, ("charge", "charge_fail"))
+    assert tactical["charge_successes_opponent"] == _count(opponent, ("charge",))
+    # Les deux cotes portent des tentatives : sans ca les egalites tiendraient a zero.
+    assert tactical["charge_attempts"] > 0
+    assert tactical["charge_attempts_opponent"] > 0
+    # Et les totaux injectes se retrouvent bien, repartis selon le siege.
+    assert (tactical["charge_successes"] + tactical["charge_successes_opponent"]) == 2
+    assert (tactical["charge_attempts"] + tactical["charge_attempts_opponent"]) == 4
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Coherence croisee — vrais episodes joues, EGALITES seulement (vraies meme a zero)
 # ─────────────────────────────────────────────────────────────────────────────
 

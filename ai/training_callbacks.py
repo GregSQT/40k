@@ -990,9 +990,16 @@ class MetricsCollectionCallback(BaseCallback):
                     # est initialise a 0 et jamais incremente non plus : la courbe
                     # game_detailed/damage_dealt, gardee par `> 0`, n'a jamais ete emise.
 
-                    # CHARGE SUCCESS TRACKING: Log successful charges (optional per step)
-                    if is_controlled_action and info.get('charge_succeeded', False):  # get allowed
-                        cast(Any, self.metrics_tracker).log_combat_kill('charge')
+                    # Le suivi des charges reussies occupait cette place, lu sur
+                    # `info['charge_succeeded']` du step gym et verse a `log_combat_kill('charge')`
+                    # (courbe `combat/c_charge_successes`). Il ne comptait que les REUSSITES de
+                    # l'agent : ni les tentatives, ni le camp d'en face, donc il ne pouvait pas
+                    # dire si une melee absente vient d'un agent qui ne charge pas ou d'un agent
+                    # qui rate ses charges. Le moteur compte desormais les quatre quantites sur
+                    # `action_logs` (types `charge` / `charge_fail`, tous deux porteurs de
+                    # `player`), comme shoot_kills/melee_kills — meme source, seat-aware par
+                    # construction, et hors d'atteinte du defaut « info du bot sous le drapeau de
+                    # l'agent » que ce chemin a deja produit.
 
                     # Handle episode end - check for 'episode' key (Monitor wrapper adds this)
                     if 'episode' in info:

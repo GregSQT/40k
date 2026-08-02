@@ -12,7 +12,7 @@ DUAL TIER SYSTEM (41 Total Metrics):
   
   🎯 game_tactical/ (8) - Tactical decision quality
      - shooting_accuracy, damage_efficiency, unit_trade_ratio,
-       movement_efficiency, shooting_participation, charge_rate,
+       movement_efficiency, shooting_participation,
        action_efficiency, wait_frequency
   
   🔬 game_detailed/ (12+) - Deep tactical analysis
@@ -169,6 +169,10 @@ class W40KMetricsTracker:
         'units_killed_ratio', 'units_lost_ratio',
         'value_destroyed', 'value_lost',
         'shoot_kills', 'melee_kills', 'shoot_value_killed', 'melee_value_killed',
+        'charge_attempts', 'charge_successes',
+        'charge_attempts_bot', 'charge_successes_bot',
+        'move_actions', 'move_flees', 'move_opportunities',
+        'shoot_activations', 'shoot_opportunities',
     )
 
     #: Modes de deploiement ventiles (cf. `deployment_mode_schedule`, w40k_core).
@@ -287,20 +291,21 @@ class W40KMetricsTracker:
             'mapper_failures': 0
         }
         
-        # NEW: Phase performance
-        self.phase_stats = {
-            'movement': {'moved': 0, 'waited': 0, 'fled': 0},
-            'shooting': {'shot': 0, 'skipped': 0},
-            'charge': {'charged': 0, 'skipped': 0},
-            'fight': {'fought': 0, 'skipped': 0}
-        }
+        # `self.phase_stats` occupait cette place, accumule par `log_phase_performance` (partie
+        # avec elle). Les taux de participation par phase se calculent desormais sur les
+        # compteurs que le moteur tire d'`action_logs`, dans `log_tactical_metrics`.
 
         # NEW: Combat effectiveness metrics (per RL_TRAINING_ROADMAP.md)
-        # These metrics tell you if the agent learns combat properly
+        # These metrics tell you if the agent learns combat properly.
+        # `shoot_kills` / `melee_kills` / `charge_successes` ont vecu ici, incrementes par
+        # `log_combat_kill` depuis le callback. Les deux premiers n'avaient plus aucun appelant
+        # (les kills viennent d'`action_logs` via log_tactical_metrics) ; le troisieme nourrissait
+        # `combat/c_charge_successes`, remplace par le couple 02_combat/m_+n_ compte cote MOTEUR
+        # sur la meme source que tous les autres compteurs de combat. Le chemin callback est
+        # celui qui avait deja produit le defaut « charges du BOT comptees sous le drapeau de
+        # l'agent » (cf. tests/unit/ai/test_wrapper_agent_step_info.py) : une mesure de jeu
+        # reconstruite depuis les `info` d'un step gym ne peut pas savoir de qui elle parle.
         self.combat_effectiveness = {
-            'shoot_kills': 0,      # Kills from ranged attacks
-            'melee_kills': 0,      # Kills from melee attacks
-            'charge_successes': 0, # Successful charges (reached target)
             'victory_points_cumulative': 0.0  # Cumulative victory points at episode end
         }
 
@@ -310,7 +315,6 @@ class W40KMetricsTracker:
         # meme append + fenetre + moyenne — deux mecaniques de lissage identiques cote a cote
         # obligeaient chaque nouvelle courbe a choisir entre elles sans raison.
         self.combat_history = {
-            'charge_successes': [],
             'victory_points_cumulative': []
         }
         
@@ -573,10 +577,10 @@ class W40KMetricsTracker:
     def _emit_windowed(self, tag: str, values: Sequence[float]) -> None:
         """Emet la mesure sur ses DEUX fenetres : `tag` (fond) et `tag_<N>ep` (reactif).
 
-        Toutes les courbes de performance partagent le MEME couple de fenetres. Un litteral
-        de 200 vivait ici pour `c_charge_successes` : des que la fenetre reactive du config
-        l'a depasse, cette courbe a perdu son doublon sans que rien ne le signale — une
-        fenetre en dur dans un reglage devenu configurable ne peut que diverger de lui.
+        Toutes les courbes de performance partagent le MEME couple de fenetres. Une seule y a
+        eu sa fenetre en dur (un litteral de 200) : des que la fenetre reactive du config l'a
+        depasse, elle a perdu son doublon sans que rien ne le signale — une fenetre en dur
+        dans un reglage devenu configurable ne peut que diverger de lui.
         """
         window = self.PERF_WINDOW
         slow = self._window_mean(values, window)
@@ -637,6 +641,34 @@ class W40KMetricsTracker:
         """
         if denominator > 0:
             self._emit_game(tag, key, numerator / denominator)
+
+    def _emit_ratio_of_means(
+        self, tag: str, numerator_hist: Sequence[float], denominator_hist: Sequence[float]
+    ) -> None:
+        """Emet, fenetre par fenetre, le rapport des MOYENNES de deux series deja accumulees.
+
+        RESERVE aux ratios dont le denominateur est un RESULTAT d'episode (pertes subies,
+        charges tentees) et non une constante de scenario. Le rapport par episode n'y est pas
+        moyennable : il n'existe pas pour les episodes ou le denominateur est nul, et TOUTE
+        facon de traiter ces episodes biaise la courbe — les ecarter retire une population
+        entiere, y verser un 0.0 compte comme un echec un episode ou rien n'a ete tente.
+        Sommer les deux cotes sur la fenetre n'exclut RIEN : chaque episode y pese ce qu'il
+        vaut, et le rapport reste defini des que la fenetre contient un seul denominateur non
+        nul. Une fenetre entiere a denominateur nul n'a pas de rapport a afficher, pas un 0.
+        Le rapport se calcule fenetre par fenetre : prendre celui de la fenetre longue pour la
+        courte melangerait deux populations d'episodes.
+        """
+        windows = [(self.PERF_WINDOW, '')]
+        if self.PERF_WINDOW_FAST < self.PERF_WINDOW:
+            windows.append((self.PERF_WINDOW_FAST, f'_{self.PERF_WINDOW_FAST}ep'))
+        for window, suffix in windows:
+            numerator_mean = self._window_mean(numerator_hist, window)
+            denominator_mean = self._window_mean(denominator_hist, window)
+            if numerator_mean is None or denominator_mean is None or denominator_mean <= 0:
+                continue
+            self.writer.add_scalar(
+                f'{tag}{suffix}', numerator_mean / denominator_mean, self.episode_count
+            )
 
     def log_tactical_metrics(self, tactical_data: Dict[str, Any]):
         """Log tactical performance metrics - combat effectiveness and decision quality"""
@@ -711,6 +743,73 @@ class W40KMetricsTracker:
             self._emit_game('02_combat/i_shoot_value_killed', 'shoot_value_killed', shoot_value)
             self._emit_game('02_combat/j_melee_value_killed', 'melee_value_killed', melee_value)
 
+        # CHARGES — le volume tente et le taux de reussite, POUR LES DEUX CAMPS.
+        #
+        # Ce que ce couple separe, et qu'aucune autre courbe ne separait : un agent qui ne va
+        # jamais au contact parce qu'il ne DECLARE pas de charge, d'un agent qui en declare
+        # autant que l'adversaire mais les RATE (2D6 insuffisant, donc charges lancees de trop
+        # loin). Les kills de melee, seuls, confondent les deux — ils sont bas dans les deux cas.
+        # La colonne adverse est la reference sans laquelle un taux brut ne se lit pas : le
+        # meme 40% est bon ou mauvais selon ce que le scenario permet.
+        #
+        # Le TAUX passe par `_emit_ratio_of_means` et non `_emit_ratio` : son denominateur est
+        # le nombre de tentatives de l'episode, un resultat, pas une constante de scenario
+        # (un episode sans aucune charge tentee n'a pas de taux — ni a exclure, ni a compter 0).
+        charge_attempts = float(require_key(tactical_data, 'charge_attempts'))
+        charge_attempts_bot = float(require_key(tactical_data, 'charge_attempts_opponent'))
+        self._emit_game('02_combat/m_charge_attempts', 'charge_attempts', charge_attempts)
+        self._emit_game('02_combat/o_charge_attempts_bot', 'charge_attempts_bot', charge_attempts_bot)
+        successes_hist = self._game_push(
+            'charge_successes', float(require_key(tactical_data, 'charge_successes'))
+        )
+        successes_bot_hist = self._game_push(
+            'charge_successes_bot', float(require_key(tactical_data, 'charge_successes_opponent'))
+        )
+        self._emit_ratio_of_means(
+            '02_combat/n_charge_success_rate',
+            successes_hist,
+            self._game_history['charge_attempts'],
+        )
+        self._emit_ratio_of_means(
+            '02_combat/p_charge_success_rate_bot',
+            successes_bot_hist,
+            self._game_history['charge_attempts_bot'],
+        )
+
+        # PARTICIPATION PAR PHASE — la part des occasions saisies, phase par phase.
+        #
+        # Ces trois courbes ont ete emises par `log_phase_performance`, methode restee sans
+        # aucun appelant de production : elles n'existaient dans aucun run (verifie sur les
+        # 124 tags d'un run de 50 000 episodes). Elles sont recomptees cote MOTEUR sur
+        # `action_logs`, comme tout le reste de ce dashboard — le callback deduisait la phase
+        # et le camp de l'`info` d'un step gym, qui en enchaine plusieurs.
+        #
+        # Meme traitement de ratio que les charges, et pour la meme raison : le denominateur
+        # (les occasions d'agir) est un RESULTAT d'episode. Un episode sans une seule
+        # activation de tir n'a pas de taux de participation — ni a ecarter, ni a compter 0.
+        #
+        # La CHARGE n'a volontairement pas son taux de participation : cf. w40k_core, son
+        # denominateur compterait les fois ou le moteur a expose la phase, pas les occasions de
+        # charger. `m_charge_attempts` et sa colonne adverse repondent sans cette ambiguite.
+        move_actions = float(require_key(tactical_data, 'move_actions'))
+        move_waits = float(require_key(tactical_data, 'move_waits'))
+        shoot_activations = float(require_key(tactical_data, 'shoot_activations'))
+        move_hist = self._game_push('move_actions', move_actions)
+        flee_hist = self._game_push('move_flees', float(require_key(tactical_data, 'move_flees')))
+        move_opportunities = self._game_push('move_opportunities', move_actions + move_waits)
+        shoot_hist = self._game_push('shoot_activations', shoot_activations)
+        shoot_opportunities = self._game_push(
+            'shoot_opportunities',
+            shoot_activations + float(require_key(tactical_data, 'shoot_waits')),
+        )
+        self._emit_ratio_of_means(
+            'game_tactical/movement_efficiency', move_hist, move_opportunities
+        )
+        self._emit_ratio_of_means('game_detailed/flee_rate', flee_hist, move_opportunities)
+        self._emit_ratio_of_means(
+            'game_tactical/shooting_participation', shoot_hist, shoot_opportunities
+        )
+
         # COMBAT VALUE METRICS: Episode-level attrition in VALUE points.
         enemy_value_destroyed = float(require_key(tactical_data, 'enemy_value_destroyed'))
         ally_value_lost = float(require_key(tactical_data, 'ally_value_lost'))
@@ -720,33 +819,12 @@ class W40KMetricsTracker:
         # (historique) et `0_game/h_value_trade_ratio` (reecrit a un autre instant par
         # log_critical_dashboard, donc deux series entrelacees) ont ete supprimes avec le
         # namespace 0_game/, comme tous les autres tags de la refonte : deplaces, pas dupliques.
-        #
-        # RAPPORT DES MOYENNES, et non moyenne des rapports comme les cinq autres ratios : ici
-        # le denominateur est un RESULTAT d'episode (ce que j'ai perdu), pas une constante de
-        # scenario. Tout choix de garde sur un rapport par episode biaise la courbe, et dans les
-        # deux sens : ecarter les episodes sans perte retire les MEILLEURS (l'ancienne garde,
-        # qui tirait vers le haut en excluant aussi les pires), y verser un 0.0 pour les
-        # episodes sans destruction retire les meilleurs et garde les pires (biais inverse).
-        # Sommer les deux cotes sur la fenetre n'exclut RIEN : chaque episode pese ce qu'il
-        # vaut en points, et le rapport reste defini tant que la fenetre contient une perte.
-        # Une fenetre entiere sans une seule perte n'a pas de rapport a afficher, pas un 0.
-        # Le rapport se calcule fenetre par fenetre : prendre le rapport de la fenetre longue
-        # pour la courte melangerait deux populations d'episodes.
-        destroyed_hist = self._game_push('value_destroyed', enemy_value_destroyed)
-        lost_hist = self._game_push('value_lost', ally_value_lost)
-        windows = [(self.PERF_WINDOW, '')]
-        if self.PERF_WINDOW_FAST < self.PERF_WINDOW:
-            windows.append((self.PERF_WINDOW_FAST, f'_{self.PERF_WINDOW_FAST}ep'))
-        for window, suffix in windows:
-            destroyed_mean = self._window_mean(destroyed_hist, window)
-            lost_mean = self._window_mean(lost_hist, window)
-            if destroyed_mean is None or lost_mean is None or lost_mean <= 0:
-                continue
-            self.writer.add_scalar(
-                f'02_combat/a_value_trade_ratio{suffix}',
-                destroyed_mean / lost_mean,
-                self.episode_count,
-            )
+        # Rapport des MOYENNES et non moyenne des rapports : cf. `_emit_ratio_of_means`.
+        self._emit_ratio_of_means(
+            '02_combat/a_value_trade_ratio',
+            self._game_push('value_destroyed', enemy_value_destroyed),
+            self._game_push('value_lost', ally_value_lost),
+        )
         
         # GAME CRITICAL: Unit trade ratio (killed/lost) - Core success metric
         if units_lost > 0 and units_killed > 0:
@@ -1051,22 +1129,6 @@ class W40KMetricsTracker:
         
         self.writer.add_scalar('game_detailed/reward_mapper_calculation_failures', self.reward_mapper_stats['mapper_failures'], self.episode_count)
     
-    def log_combat_kill(self, kill_type: str):
-        """Log a combat kill for tracking combat effectiveness.
-
-        Args:
-            kill_type: One of 'shoot', 'melee', or 'charge'
-                      - 'shoot': Enemy killed by ranged attack
-                      - 'melee': Enemy killed by melee attack in fight phase
-                      - 'charge': Successful charge that reached target
-        """
-        if kill_type == 'shoot':
-            self.combat_effectiveness['shoot_kills'] += 1
-        elif kill_type == 'melee':
-            self.combat_effectiveness['melee_kills'] += 1
-        elif kill_type == 'charge':
-            self.combat_effectiveness['charge_successes'] += 1
-
     def log_victory_points_cumulative(self, points: float):
         """Log cumulative victory points for the controlled player at episode end.
 
@@ -1075,133 +1137,62 @@ class W40KMetricsTracker:
         """
         self.combat_effectiveness['victory_points_cumulative'] = float(points)
 
-    def log_phase_performance(self, phase_data: Dict[str, Any]):
-        """Accumulate phase-specific performance metrics during episode.
-        
-        This method only ACCUMULATES stats. Call compute_and_log_phase_metrics() 
-        at episode end to calculate and log the actual metrics.
-        
-        ACCUMULATED METRICS:
-        - movement: moved, waited, fled counts
-        - shooting: shot, skipped counts
-        - charge: charged, skipped counts
-        - fight: fought, skipped counts
-        """
-        phase = require_key(phase_data, 'phase')
-        action = require_key(phase_data, 'action')
-        
-        # Track phase-specific actions (accumulate only)
-        if phase == 'move':
-            if action == 'move':
-                self.phase_stats['movement']['moved'] += 1
-            elif action == 'wait' or action == 'skip':
-                self.phase_stats['movement']['waited'] += 1
-            if 'was_flee' in phase_data and phase_data['was_flee']:
-                self.phase_stats['movement']['fled'] += 1
-        
-        elif phase == 'shoot':
-            if action == 'shoot':
-                self.phase_stats['shooting']['shot'] += 1
-            elif action == 'wait' or action == 'skip':
-                self.phase_stats['shooting']['skipped'] += 1
-        
-        elif phase == 'charge':
-            if action == 'charge':
-                self.phase_stats['charge']['charged'] += 1
-            elif action == 'wait' or action == 'skip':
-                self.phase_stats['charge']['skipped'] += 1
-        
-        elif phase == 'fight':
-            if action == 'combat' or action == 'fight':
-                self.phase_stats['fight']['fought'] += 1
-            elif action == 'wait' or action == 'skip':
-                self.phase_stats['fight']['skipped'] += 1
-    
-    def compute_and_log_phase_metrics(self):
-        """Compute and log phase performance metrics at episode end.
-        
-        GAME TACTICAL METRICS (4):
-        - game_tactical/movement_efficiency
-        - game_tactical/shooting_participation
-        - game_detailed/flee_rate
-        - game_tactical/charge_rate
-        
-        Called once per episode after all actions are accumulated.
-        """
-        # GAME TACTICAL: Movement efficiency
-        move_total = self.phase_stats['movement']['moved'] + self.phase_stats['movement']['waited']
-        if move_total > 0:
-            movement_efficiency = self.phase_stats['movement']['moved'] / move_total
-            self.writer.add_scalar('game_tactical/movement_efficiency', movement_efficiency, self.episode_count)
-            
-            flee_rate = self.phase_stats['movement']['fled'] / move_total
-            self.writer.add_scalar('game_detailed/flee_rate', flee_rate, self.episode_count)
-        
-        # GAME TACTICAL: Shooting participation
-        shoot_total = self.phase_stats['shooting']['shot'] + self.phase_stats['shooting']['skipped']
-        if shoot_total > 0:
-            shooting_participation = self.phase_stats['shooting']['shot'] / shoot_total
-            self.writer.add_scalar('game_tactical/shooting_participation', shooting_participation, self.episode_count)
-        
-        # GAME TACTICAL: Charge rate
-        charge_total = self.phase_stats['charge']['charged'] + self.phase_stats['charge']['skipped']
-        if charge_total > 0:
-            charge_rate = self.phase_stats['charge']['charged'] / charge_total
-            self.writer.add_scalar('game_tactical/charge_rate', charge_rate, self.episode_count)
-        
-        # Reset phase stats for next episode
-        self.phase_stats = {
-            'movement': {'moved': 0, 'waited': 0, 'fled': 0},
-            'shooting': {'shot': 0, 'skipped': 0},
-            'charge': {'charged': 0, 'skipped': 0},
-            'fight': {'fought': 0, 'skipped': 0}
-        }
+    # `log_phase_performance` occupait cette place : elle accumulait, phase par phase, les
+    # couples (agi, attendu) que `compute_and_log_phase_metrics` transformait en
+    # `game_tactical/movement_efficiency`, `shooting_participation` et
+    # `game_detailed/flee_rate`. Elle n'avait plus AUCUN appelant de production — les trois
+    # courbes n'existaient dans aucun run. Les memes taux sont desormais calcules dans
+    # `log_tactical_metrics`, depuis les compteurs que le moteur tire d'`action_logs` : la
+    # phase et le camp y sont des donnees de chaque ligne, la ou cette methode les recevait
+    # d'un `info` de step gym qui enchaine plusieurs steps moteur.
 
-        # Log combat effectiveness metrics (per RL_TRAINING_ROADMAP.md)
-        # Store current episode values in history for smoothing
-        # victory_points_cumulative is logged for every episode.
-        # Note: shoot_kills/melee_kills are now tracked via action_logs in log_tactical_metrics (reliable, per-episode per-env)
+    def compute_and_log_phase_metrics(self):
+        """Emet les VP cumules de l'episode, lisses sur la fenetre de performance.
+
+        Les taux de participation par phase (`game_tactical/movement_efficiency`,
+        `shooting_participation`, `game_detailed/flee_rate`) etaient calcules ici depuis
+        `self.phase_stats`, accumule par `log_phase_performance` — methode sans appelant de
+        production, donc des courbes qui n'existaient dans aucun run. Ils sont desormais
+        calcules dans `log_tactical_metrics`, sur les compteurs du moteur. Le quatrieme,
+        `game_tactical/charge_rate`, n'a pas ete repris : son denominateur ne mesurait pas ce
+        qu'il pretendait (cf. w40k_core), et le volume `02_combat/m_charge_attempts` avec sa
+        colonne adverse le remplace.
+
+        Le nom de cette methode ne decrit plus que ce qu'elle fait ; elle garde sa place dans
+        la sequence de fin d'episode (appelee DEPUIS `log_episode_end`, donc AVANT
+        `log_tactical_metrics` — cet ordre est ce qui a deja fait ecrire ici la moyenne de
+        l'episode PRECEDENT sur un tag de kills).
+        """
+        # VP cumules de l'episode. Seule serie qui reste ici : les kills tir/melee et leur
+        # VALUE sont comptes cote moteur et emis par log_tactical_metrics (source fiable,
+        # par episode et par env), et `combat/c_charge_successes` a suivi le meme chemin —
+        # remplace par `02_combat/m_charge_attempts` + `n_charge_success_rate` et leurs jumeaux
+        # `_bot`, comptes eux aussi sur `action_logs`. Un compte de reussites SANS le compte de
+        # tentatives ne distinguait pas l'agent qui ne charge pas de celui qui rate ses
+        # charges — exactement la question qu'on posait a cette courbe. Rupture de continuite
+        # assumee : la mesure a change de source.
+        #
         # Troncature a PERF_WINDOW, la fenetre que `_emit_windowed` exige PLEINE, et non a un
         # 500 en dur : les deux etaient egaux par coincidence de config. Un `perf_window` regle
-        # au-dela de 500 aurait tronque ces historiques SOUS la longueur requise, et
-        # `combat/c_charge_successes` comme `01_VP/b_vp_agent` n'auraient plus jamais emis un
-        # seul point — sans erreur, sans courbe. `_game_push` tronque deja a PERF_WINDOW : ces
-        # deux-la etaient le jumeau reste en arriere.
-        for key in ['charge_successes', 'victory_points_cumulative']:
-            self.combat_history[key].append(self.combat_effectiveness[key])
-            if len(self.combat_history[key]) > self.PERF_WINDOW:
-                self.combat_history[key].pop(0)
-
-        # Log smoothed combat metrics (20-episode rolling average)
-        # Prefixes control TensorBoard sort order:
-        # b_shoot_kills, c_charge_successes, d_melee_kills, e_victory_points_cumulative_mean
-        # Le prefixe a_ est libre : combat/a_position_score occupait cette place et a ete
-        # supprime avec l'accumulateur position_scores (voir la trace dans __init__). Le
-        # renumerotage b..e n'a pas ete fait pour ne pas casser la continuite des courbes
-        # existantes dans TensorBoard.
-
-        # b) Kills tir/melee et recompense de kill : logges dans log_tactical_metrics (source fiable)
-
-        # c) Charge successes
-        self._emit_windowed('combat/c_charge_successes', self.combat_history['charge_successes'])
-
-        # d) Un SECOND add_scalar sur la courbe de kills de melee (ex-`0_game/l_melee_kills`,
-        # aujourd'hui `02_combat/h_melee_model_kills`) occupait cette place, sur la meme serie
-        # que log_tactical_metrics — seul endroit qui l'alimente.
-        # compute_and_log_phase_metrics etant appele DEPUIS log_episode_end, donc AVANT
-        # log_tactical_metrics de l'episode courant, il ecrivait la moyenne de l'episode
-        # PRECEDENT : deux series entrelacees sur un meme tag (99 999 points pour 50 000
-        # episodes), d'ou une courbe en zigzag sans rapport avec les kills de melee. Le seul
-        # ecrivain restant est log_tactical_metrics, qui logge apres l'append.
-
-        # e) Mean cumulative victory points per episode (smoothed over 500 episodes)
-        self._emit_windowed('01_VP/b_vp_agent', self.combat_history['victory_points_cumulative'])
+        # au-dela de 500 aurait tronque cet historique SOUS la longueur requise, et
+        # `01_VP/b_vp_agent` n'aurait plus jamais emis un seul point — sans erreur, sans courbe.
+        # `_game_push` tronque deja a PERF_WINDOW : celui-ci etait le jumeau reste en arriere.
+        #
+        # Un SECOND add_scalar sur la courbe de kills de melee (ex-`0_game/l_melee_kills`,
+        # aujourd'hui `02_combat/h_melee_model_kills`) a vecu ici, sur la meme serie que
+        # log_tactical_metrics. compute_and_log_phase_metrics etant appele DEPUIS
+        # log_episode_end, donc AVANT log_tactical_metrics de l'episode courant, il ecrivait la
+        # moyenne de l'episode PRECEDENT : deux series entrelacees sur un meme tag (99 999
+        # points pour 50 000 episodes), d'ou une courbe en zigzag sans rapport avec les kills
+        # de melee. Le seul ecrivain restant est log_tactical_metrics, qui logge apres l'append.
+        vp_history = self.combat_history['victory_points_cumulative']
+        vp_history.append(self.combat_effectiveness['victory_points_cumulative'])
+        if len(vp_history) > self.PERF_WINDOW:
+            vp_history.pop(0)
+        self._emit_windowed('01_VP/b_vp_agent', vp_history)
 
         # Reset combat effectiveness and flags for next episode
         self.combat_effectiveness = {
-            'shoot_kills': 0,
-            'melee_kills': 0,
-            'charge_successes': 0,
             'victory_points_cumulative': 0.0
         }
     

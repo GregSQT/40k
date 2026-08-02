@@ -2252,8 +2252,81 @@ class W40KEngine(gym.Env):
             melee_kills = 0
             shoot_value_killed = 0.0
             melee_value_killed = 0.0
+            # CHARGES — comptees POUR LES DEUX CAMPS, seul bloc de cette passe a le faire.
+            # Le taux de reussite d'une charge (2D6 contre la distance a laquelle elle est
+            # declaree) ne se lit que rapporte a une reference : un agent qui reussit 40% de
+            # ses charges joue bien ou mal selon que l'adversaire en reussit 30% ou 70%. Sans
+            # la colonne d'en face, la courbe ne distingue pas la competence de la difficulte
+            # du scenario. Les compteurs `*_opponent` sont donc la mesure, pas un supplement.
+            #
+            # `charge` et `charge_fail` sont les deux SEULS types emis pour une tentative, et
+            # ils le sont par les DEUX chemins — pipeline squad V11 (ce fichier) et handlers
+            # legacy/PvP (charge_handlers ~L2914/4233/5409/5531/5689) — donc le comptage tient
+            # quel que soit le chemin qui a joue. `charge_impact` est exclu : c'est la
+            # consequence d'une charge deja reussie, pas une tentative.
+            charge_attempts = 0
+            charge_successes = 0
+            charge_attempts_opponent = 0
+            charge_successes_opponent = 0
+            # PARTICIPATION PAR PHASE — « quelle part des occasions l'agent a-t-il saisies ».
+            #
+            # Ces trois taux (deplacement, tir, fuite) ont ete emis par le callback jusqu'a ce
+            # que son unique appelant disparaisse : `log_phase_performance` n'avait plus AUCUN
+            # appel de production, donc `game_tactical/movement_efficiency`,
+            # `shooting_participation` et `game_detailed/flee_rate` n'existaient
+            # dans aucun run — verifie sur les 124 tags d'un run de 50 000 episodes. Meme
+            # defaut silencieux que les quatre compteurs plus haut : une courbe absente ne se
+            # distingue pas d'un agent qui n'agit jamais.
+            #
+            # Recomptes ICI et pas rebranches la-bas : le callback deduisait la phase et le camp
+            # de l'`info` d'un step gym, ou un step enchaine plusieurs steps moteur — c'est ce
+            # qui lui faisait ranger les actions du BOT sous le drapeau de l'agent. Dans
+            # `action_logs`, phase et camp sont des DONNEES de chaque ligne.
+            #
+            # PAS de taux de participation pour la CHARGE : son denominateur ne serait pas
+            # « les occasions de charger » mais « les fois ou le moteur a expose la phase »
+            # — quand le pool de charge est vide, aucun step n'est joue, donc aucun `wait` n'est
+            # journalise et le tour n'entre nulle part (mesure : sur un montage ou les deux camps
+            # arrivent au contact en se deplacant, la phase charge n'est jamais exposee). Le
+            # VOLUME de charges declarees (`charge_attempts`) repond a la question sans cette
+            # ambiguite, et la comparaison avec l'adversaire lui sert d'echelle.
+            #
+            # ACTIVATIONS, pas lignes de journal : le tir emet un log par groupe (arme, cible),
+            # donc une escouade qui tire trois armes produirait trois « participations ». Le
+            # couple (turn, shooterId) ramene le compte a ce qu'il pretend mesurer — combien de
+            # fois une escouade a choisi de tirer plutot que d'attendre. Le deplacement et la
+            # charge, eux, emettent une ligne par activation : rien a dedupliquer.
+            move_actions = 0
+            move_flees = 0
+            move_waits = 0
+            shoot_activations: Set[Tuple[int, str]] = set()
+            shoot_waits = 0
             for log in action_logs:
                 log_type = log.get("type")
+                if log_type == "move":
+                    if int(require_key(log, "player")) == controlled_player:
+                        move_actions += 1
+                        if require_key(log, "was_flee"):
+                            move_flees += 1
+                    continue
+                if log_type == "wait":
+                    if int(require_key(log, "player")) == controlled_player:
+                        log_phase = require_key(log, "phase")
+                        if log_phase == "move":
+                            move_waits += 1
+                        elif log_phase == "shoot":
+                            shoot_waits += 1
+                    continue
+                if log_type in ("charge", "charge_fail"):
+                    if int(require_key(log, "player")) == controlled_player:
+                        charge_attempts += 1
+                        if log_type == "charge":
+                            charge_successes += 1
+                    else:
+                        charge_attempts_opponent += 1
+                        if log_type == "charge":
+                            charge_successes_opponent += 1
+                    continue
                 if log_type not in ("shoot", "combat"):
                     continue
                 by_controlled = int(require_key(log, "player")) == controlled_player
@@ -2271,6 +2344,12 @@ class W40KEngine(gym.Env):
                 # une autre phase serait un log de melee produit par un chemin inconnu, pas une
                 # ligne a ranger au tir en silence.
                 is_melee = log_type == "combat"
+                if not is_melee:
+                    # Une ACTIVATION de tir = une escouade, un tour. Cf. le commentaire des
+                    # compteurs de participation : le journal en emet une ligne par arme.
+                    shoot_activations.add(
+                        (int(require_key(log, "turn")), str(require_key(log, "shooterId")))
+                    )
                 if is_melee and log.get("phase") != "fight":
                     raise ValueError(
                         f"action_log de type 'combat' hors phase fight (phase="
@@ -2300,6 +2379,15 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['melee_kills'] = melee_kills
             self.episode_tactical_data['shoot_value_killed'] = shoot_value_killed
             self.episode_tactical_data['melee_value_killed'] = melee_value_killed
+            self.episode_tactical_data['charge_attempts'] = charge_attempts
+            self.episode_tactical_data['charge_successes'] = charge_successes
+            self.episode_tactical_data['charge_attempts_opponent'] = charge_attempts_opponent
+            self.episode_tactical_data['charge_successes_opponent'] = charge_successes_opponent
+            self.episode_tactical_data['move_actions'] = move_actions
+            self.episode_tactical_data['move_flees'] = move_flees
+            self.episode_tactical_data['move_waits'] = move_waits
+            self.episode_tactical_data['shoot_activations'] = len(shoot_activations)
+            self.episode_tactical_data['shoot_waits'] = shoot_waits
 
             # VALUE attrition metrics (episode-level): destroyed enemy value and lost ally value.
             #
