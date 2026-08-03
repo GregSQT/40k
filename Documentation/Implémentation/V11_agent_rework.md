@@ -80,18 +80,18 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 | **§0.62** | L'**analyzer** mesurait à une autre échelle et avec d'autres règles que le run — et trois déplacements n'étaient pas contrôlés | ✅ **CORRIGÉ le 2026-08-03** — une conséquence à assumer | **1** | 206 erreurs → **0** sur un log de référence de 6 épisodes. L'échelle venait du `board_config` COURANT, pas de l'entête du log : un run x1 relu avec un `config.json` en x5 mesurait tout ×5 — il **fabriquait** des erreurs (132 faux « shoot at engaged enemy ») **et en masquait** (portées, budgets jamais dépassés). Même défaut, silencieux celui-là, sur `engagement_zone`, `distance_metric` et les toggles `move` : désormais journalisés en entête `Run rules:`. Charge, pile-in/consolidation et move réactif n'avaient **aucun** contrôle conforme (jet non converti, mesure d'ancre, pas de pathfinding). **Conséquence : aucun verdict d'analyzer antérieur ne vaut**, et deux correctifs MOTEUR changent le jeu (move réactif). Détail → §0.62. |
 | **§0.61** | Le garde **anti-runaway** était MUET, et son compteur d'épisodes divergeait | ✅ **CORRIGÉ le 2026-08-03** | **1** | Une troncature signale une BOUCLE dans le moteur, pas une fin de partie — or son diagnostic n'existait que dans le `print` d'un worker (noyé à `n_envs=48`) et le compteur persisté ne la comptait pas, alors que le run s'arrête dessus. Nouveau scalaire `00_critical/t_truncated_episodes`, diagnostic complet en `truncations.jsonl`, bilan imprimé en fin de run. Détail → §0.61. |
 | **§0.65** | Le prix de la conformité de §0.64, **rendu** : la LoS de déploiement vectorisée | ✅ **LIVRÉ le 2026-08-03** — **aucun** changement de valeur | — | La règle est inchangée, son EXÉCUTION est vectorisée : jumeau de `hex_line_iter` une source → N cibles (`batch_hex_line_steps`) + la règle de blocage (murs, obscuring 13.10) appliquée à la grille (`batch_ground_hex_can_see`). **Phase de déploiement 3,58 → 1,33 s** (−63 %), part LoS **1,58 → 0,09 s** (−94 %), **146 781 → 0** paire tracée en Python. **ISO-VALEUR prouvé** : égalité hexe par hexe sur la totalité du pool et 2 terrains (+ 2 contre-épreuves ROUGES), et 90 empreintes de l'observation §0.40 identiques à `main`. Donc **rien à ajouter au lot de ré-entraînement**. `/code-review` a en outre trouvé et fait corriger un défaut **structurel** de §0.64 : la clé du cache des expositions potentielles ignorait les areas **obscurantes** (aucun terrain actuel ne déclenche le cas). Détail → §0.65. |
-| **§0.64** | Le scoring de déploiement calculait la **LoS avec une autre implémentation** que le moteur | ✅ **ALIGNÉ SUR LA RÈGLE le 2026-08-03** — ⚠️ **ré-entraînement requis** | — (entre dans le lot §0.48) | `batch_has_los_from_source` (grille de murs **2D**) contre `compute_unit_los` (la règle : obscuring 13.10, plancher-occulteur 3D) : **607 désaccords sur 16 104 hexes** pour une seule source, tous dans le même sens. L'observation de déploiement (§0.40) et le score des 5 stratégies reposent donc sur une LoS **approximative**, alors que le docstring de `_has_line_of_sight` affirme le contraire pour le déploiement. 🟢 **Arbitrage : aligner** — l'observation annonçait « l'exposition réelle » alors qu'elle surestimait le danger sur ~4 % des hexes, faisant fuir à l'agent des positions sûres. Les DEUX canaux (réel et potentiel) passent par `deployment_los` → `compute_unit_los` ; cache disque invalidé par `DEPLOYMENT_LOS_MODEL_VERSION`. Coût : phase de déploiement **1,46 → 2,85 s** (+42 % sur `main`, le gain de §0.63 en absorbant une part) — ⚠️ **chiffre périmé le jour même par [§0.65](#s0.65)**, qui rend ce surcoût et davantage, à la valeur près. `obs_size` inchangé, **valeurs changées → `--new`**. Détail → §0.64. |
+| **§0.64** | Le scoring de déploiement calculait la **LoS avec une autre implémentation** que le moteur | ✅ **ALIGNÉ SUR LA RÈGLE le 2026-08-03** — ⚠️ ré-entraînement **RÉTROGRADÉ** (mesuré : le modèle d'avant joue à 0.82 sur `main` d'après) | — (entre dans le lot §0.48) | `batch_has_los_from_source` (grille de murs **2D**) contre `compute_unit_los` (la règle : obscuring 13.10, plancher-occulteur 3D) : **607 désaccords sur 16 104 hexes** pour une seule source, tous dans le même sens. L'observation de déploiement (§0.40) et le score des 5 stratégies reposent donc sur une LoS **approximative**, alors que le docstring de `_has_line_of_sight` affirme le contraire pour le déploiement. 🟢 **Arbitrage : aligner** — l'observation annonçait « l'exposition réelle » alors qu'elle surestimait le danger sur ~4 % des hexes, faisant fuir à l'agent des positions sûres. Les DEUX canaux (réel et potentiel) passent par `deployment_los` → `compute_unit_los` ; cache disque invalidé par `DEPLOYMENT_LOS_MODEL_VERSION`. Coût : phase de déploiement **1,46 → 2,85 s** (+42 % sur `main`, le gain de §0.63 en absorbant une part) — ⚠️ **chiffre périmé le jour même par [§0.65](#s0.65)**, qui rend ce surcoût et davantage, à la valeur près. `obs_size` ET espace d'action inchangés : le modèle d'avant se charge et joue à **combined 0.82** (éval du 2026-08-03, §0.14) — **aucun run dédié n'est dû**. Reste dans le lot §0.48 parce que `L1`/`L2`/`L6` imposeront un `--new`, mais ce sont eux qui l'imposent. Détail → §0.64. |
 | **§0.63** | Le cache de scoring du déploiement **ne servait jamais** (100 % de reconstruction) | ✅ **CORRIGÉ le 2026-08-03** | — | Deux causes, la seconde invisible sans la première : cache indexé sur les hexes de l'unité (condition jamais satisfaite), et déploiement **en alternance** avec un delta incrémental limité à une pose. Correctif : sur-ensemble stable (pool moins murs), **un cache par joueur**, delta généralisé à N poses. **Neutre pour l'observation, mesuré** (0 écart) → aucun ré-entraînement. Gain **2,01 s → 1,46 s** (−27 %) sur la phase de déploiement, reconstruction **100 % → 20 %**. Détail → §0.63. |
 | **§0.60** | Instrumentation du **coût** de l'entraînement — workers d'éval, temps bloquant, courbes de charge et de participation | ✅ **LIVRÉ le 2026-08-02** | **2** | Trois angles morts de COÛT, distincts des angles morts de COMPORTEMENT du §0.56. (1) Quatre clés `bot_eval_*` vivaient **hors de `callback_params`** : personne ne les lisait, `bot_eval_n_workers` retombait sur `min(n_envs, n_scenarios × n_bots)` = **24 workers**, soit **47 Go et 598 s** contre **9,6 Go et 349 s** à 4 workers — moins de workers est aussi **42 % plus rapide**, la VM passant son temps à swapper. `validate_bot_eval_worker_params` valide désormais au DÉMARRAGE. (2) `blocking_eval_seconds` ne compte plus que le temps où la boucle est RÉELLEMENT figée. (3) Six courbes moteur : charges tentées/réussies (agent et bot) et participation par phase. Détail → §0.60. |
 | **§0.59** | Régime d'entraînement en **deux phases** — `x1_selfplay` (self-play) et `decay_fraction` | 🟠 **OUVERT — livré, JAMAIS EXÉCUTÉ** | **2** | Deux changements de régime non mesurés. (1) `decay_fraction` achève les rampes lr/entropie **avant** la fin d'un run long (sans lui, un run de 200 000 épisodes garde une entropie élevée jusqu'au dernier épisode). (2) Le profil `x1_selfplay` ajoute une **phase 2** en `--append` : un snapshot figé de l'agent remplace le bot sur une part rampée **0.0 → 0.5** des épisodes. ⚠️ Aucun run de phase 2 n'a jamais tourné ; `opponent_mix.enabled` **lève** hors du chemin de rotation de scénarios. Détail → §0.59. |
 | **§0.58** | Les rampes par-épisode **redémarraient à chaque reprise** (`--append`, `--resume-from`) | ✅ **CORRIGÉ le 2026-08-02** | **1** | Rien ne persistait le nombre d'épisodes joués : la rampe de déploiement n'atteignait jamais `active_ratio_end` et le compte cumulé du modèle était écrasé par celui du seul run courant. `ai/run_state.py` persiste le compte (compté, jamais dérivé de `num_timesteps`) ; reprendre un modèle sans lui **lève** (arbitrage : pas de compatibilité ascendante). `learning_rate`, `ent_coef` et le self-play sont des rampes de **RÉGIME** : elles repartent de zéro à chaque run, et c'est l'arbitrage. Détail → §0.58. |
 | **§0.57** | Les rampes par-épisode du moteur avançaient **`n_envs` fois trop lentement** | ✅ **CORRIGÉ le 2026-08-02** — reste une conséquence à assumer | **1** | Le compteur d'épisodes du moteur est LOCAL à un worker ; il était divisé par le total GLOBAL. À `n_envs=48`, la rampe de déploiement est restée collée à `active_ratio_start` sur TOUS les runs vectorisés (mesuré : `s_deploy_active_share` 0.3040 pour 0.496 attendus). Même défaut sur `deployment_random_mix`. **Conséquence : aucune mesure passée n'a été produite avec la rampe annoncée** — §0.29 et §0.46 pt 2 sont amendés. Détail → §0.57. |
 | **§0.56** | Instrumentation : usage par **famille d'action**, et **classement bot-contre-bot** | ✅ **LIVRÉ le 2026-08-02** — reste à s'en servir | **2** | Deux angles morts fermés, aucun ne coûte de ré-entraînement. (1) `actions/share_<famille>` publie la part de chaque DÉCISION dans ce que l'agent joue : une dimension jamais choisie ou toujours choisie est cassée quel que soit le win-rate — c'est ce qui rend un lot de tranches P3 diagnosticable **en un seul run**. (2) `scripts/bot_ranking.py` fait s'affronter les bots **sans agent** : sans lui, juger un bot exigeait un modèle entraîné, donc une mesure circulaire — et §0.55 était irréalisable. Détail → §0.56. |
-| **§0.55** | Le **holdout d'évaluation** `TacticalBot` est DANS l'enveloppe d'entraînement — effet plafond | 🟠 **OUVERT** — re-profilage validé le 2026-08-02 (arbitrage utilisateur), à écrire | **1** (avant toute mesure de référence) | `tactical` porte `w_objective 0.5 / w_enemy 0.0` : un `ControlBot` dilué, interpolé entre `control` (1.0/0.1) et `defensive` (0.7/−0.5). Un holdout intérieur à l'enveloppe mesure l'**interpolation**, pas la généralisation — d'où `vs_tactical` **0.95** au run 4. Re-profiler **hors enveloppe** (`w_objective 0.8 / w_enemy 0.6`) et ajouter le scalaire `vs_tactical` **par roster**. 🛠️ **Spec d'application ÉCRITE le 2026-08-02** (3 étapes, 2 fichiers, mesure `bot_ranking` avant/après) — **rien n'est appliqué** : `config/` est relu à chaud par les évals du run en cours. ⚠️ **À faire AVANT de geler la baseline d'évaluation** : après, plus aucune mesure n'est comparable (leçon §0.47 É4). Détail → §0.55. |
-| **§0.14** | Re-mesure du run — win-rate par matchup | ⏳ **PÉRIMÉE — état au 2026-08-02** : des runs **postérieurs au run 4** ont tourné (modèles `robust_*` du 2026-07-30 et du 2026-08-01 dans `ai/models/ArmageddonAgent/`) et **un `train.py` tournait** au moment de la relecture. Le répertoire `tensorboard/x1_ArmageddonAgent/` n'existe plus. | **1** | Reconfronter au réel (`ps -eo lstart,cmd \| grep train.py`, `ls -l ai/models/ArmageddonAgent/`) puis **réécrire l'entrée sur le run courant**. Les chiffres du run 4 (`combined` **0.509**, `worst_bot_score` **0.04**, `vs_control` **0.04**) ne valent plus que comme historique, et sur une pondération de bots qui n'existe plus (§0.53). Détail → §0.14. |
+| **§0.55** | Le **holdout d'évaluation** `TacticalBot` est DANS l'enveloppe d'entraînement — effet plafond | 🟠 **OUVERT** — re-profilage validé le 2026-08-02 (arbitrage utilisateur), à écrire ; ⚠️ **RE-MESURÉ le 2026-08-03 : le diagnostic tient** — `tactical` est l'adversaire le PLUS FACILE des six (0.89) quand `value_trade`, un bot d'entraînement, est le plus dur (0.74) | **1** (avant toute mesure de référence) | `tactical` porte `w_objective 0.5 / w_enemy 0.0` : un `ControlBot` dilué, interpolé entre `control` (1.0/0.1) et `defensive` (0.7/−0.5). Un holdout intérieur à l'enveloppe mesure l'**interpolation**, pas la généralisation — d'où `vs_tactical` **0.95** au run 4. Re-profiler **hors enveloppe** (`w_objective 0.8 / w_enemy 0.6`) et ajouter le scalaire `vs_tactical` **par roster**. 🛠️ **Spec d'application ÉCRITE le 2026-08-02** (3 étapes, 2 fichiers, mesure `bot_ranking` avant/après) — **rien n'est appliqué** : `config/` est relu à chaud par les évals du run en cours. ⚠️ **À faire AVANT de geler la baseline d'évaluation** : après, plus aucune mesure n'est comparable (leçon §0.47 É4). Détail → §0.55. |
+| **§0.14** | Re-mesure du run — win-rate par matchup | ✅ **MESURE OBTENUE le 2026-08-03** | — | Run de **200 000 épisodes** (2026-08-02 12 h 26 → 2026-08-03 02 h 05, 19 points d'éval, 820 k → 12,1 M steps). `eval_bots/combined_win_rate` **0,283 → max 0,837 → 0,743**. Éval rejouée le 2026-08-03 sur le snapshot ROBUSTE (`robust_0.8049`), APRÈS §0.64/§0.65 : **combined 0.8200**, `tactical` 0.89, `defensive` 0.87, `greedy` 0.84, `adaptive` 0.83, **`control` 0.82**, **`value_trade` 0.74** (le pire), **0 troncature**. Le seuil de gating `vs_control ≥ 0.50` est **franchi** — le **0.04 du run 4 est périmé**. ⚠️ 0,743 → 0,820 est un écart best-contre-final, PAS l'effet de §0.64. Détail → §0.14. |
 | **[§9](V11_phaseA.md#s9)** | Phase A' — P2 + P3-0/1/2 | 🟢 **LIVRÉS ET MERGÉS sur `main`** — restent **P3-3→8**, **P4**, **P5** | **2** | ⚠️ Aucune des quatre livraisons n'est **MESURÉE**. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). Détail → §0.42 et §0.43 (en §0hist), et [§9](V11_phaseA.md#s9). |
 | **§0.44** | Tête pointeur de **déploiement** — les slots 4-8 n'ont pas de tête dédiée | 🟠 **OUVERT** — reporté après la mesure de référence (arbitrage utilisateur du 2026-07-29) | **3** | Les ids 4-8 tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`) : leurs logits sortent de la **conv 1×1** (`_move_logits`), pas d'une tête dédiée ; `deploy_emb` n'atteint le calcul que par le **conditionnement du tronc**. Ajouter un `deploy_query_net`, jumeau de `choice_query_net` — ce qui oblige à lire la phase dans la policy. Élément `L1` du lot §0.48 ; `L11` (`N_DEPLOY_SLOTS`) à trancher **avant**. Détail → §0.44. |
-| **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — le lot = **`L1` + `L2` + `L6`** + **[§0.64](#s0.64)** (LoS de déploiement alignée le 2026-08-03 : `obs_size` inchangé, **valeurs changées**) | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. Reste l'arbitrage 2 (réserver la place des règles pas encore implémentées, toute règle rendue vivante changeant `obs_size`). Détail → §0.48. |
+| **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — le lot = **`L1` + `L2` + `L6`** + **[§0.64](#s0.64)** (LoS de déploiement alignée le 2026-08-03 ; ⚠️ **n'impose PLUS de run à elle seule** — mesuré le 2026-08-03 : le modèle d'avant joue à 0.82 sur `main` d'après, cf. §0.14 — elle **voyage** avec `L1`/`L2`/`L6`) | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. Reste l'arbitrage 2 (réserver la place des règles pas encore implémentées, toute règle rendue vivante changeant `obs_size`). Détail → §0.48. |
 | **§0.46** | Résidus du 2026-07-29 | ✅ **CLOSE le 2026-08-03** — les trois points sont livrés | — | ✅ **SOLDÉ le 2026-08-03** (arbitrage : GARDER, sous forme optimisée). Les 4 issues du cache de déploiement deviennent des **compteurs publiés en permanence** (`perf/*`) au lieu de traces invisibles hors `--debug` ; les 37 sites passent par `engine/debug_trace.py` (canaux `W40K_TRACE`, formatage différé) ; garde verrouillée par **21 tests**, dont une **analyse AST** (fichiers découverts par leur import) qui interdit f-string, formatage anticipé et mot-clé. La passe `/simplify` du même jour y a trouvé **un bug** (`flush=True` résiduel → `TypeError` dès que le canal s'allume) et **un verrou qui mentait** (canal `train` hors garde). ⏳ Première mesure : **100 % de reconstruction** du cache de déploiement — signalé, non ouvert. Détail → §0.46. |
 | **§0.47** | Relecture T2→T5 du 2026-07-29 — 9 écarts | 🟠 **OUVERT — reste É9 (second siège + second scénario)** ; É5 et É7 ✅ corrigés le 2026-08-02 (É1, É2, É3, É4, É6 ✅ livrés **et mergés** ; **É8 est tombé**) | **6** | **É8 n'a plus d'objet** : `ai/analyzer.py` ne construit plus aucun chemin de board à la main (il lit `get_board_config()` / `get_board_size()`). **É9 était mal énoncé** : les **3 graines SONT couvertes** (`test_t5_bare_loop.py`, `for seed in (1, 2, 3)`) ; ce qui manque est le **second scénario** et les **2 sièges**. Détail → §0.47. |
 | **§0.50** | Non-conformité **01.07** — travail de suite | 🟠 **OUVERT** (la correction moteur, elle, est mergée) | **7** | ✅ **SOLDÉE le 2026-08-02** — les deux résidus sont traités : (1) le contrat de `battle_shocked` est **tranché en lecture STRICTE**, les 7 `get(..., False)` migrés en `require_key` ; (2) la 3ᵉ lecture d'OC du frontend (journal d'événements de `BoardReplay.tsx`) diffère l'instantané moteur au lieu de recompter. Détail → §0.50. |
@@ -536,10 +536,16 @@ conformité. 🟢 Arbitrage utilisateur : « aligner d'abord, optimiser ensuite 
 ✅ **Le « ensuite » est fait le jour même, et le prix de la conformité est plus que rendu** :
 cf. [§0.65](#s0.65) — la règle est inchangée, son EXÉCUTION est vectorisée.
 
-⚠️ **RÉ-ENTRAÎNEMENT REQUIS** : `obs_size` est **inchangé** (aucun champ ajouté), mais les
-**valeurs** du bloc candidats de déploiement changent sur ~4 % des hexes. Un modèle entraîné
-avant cette date a appris sur l'ancienne exposition. Cette entrée appartient donc au lot
-[§0.48](#s0.48), avec `L1`/`L2`/`L6`.
+⚠️ **RÉ-ENTRAÎNEMENT — RÉTROGRADÉ LE JOUR MÊME, PAR LA MESURE.** `obs_size` est **inchangé**
+(aucun champ ajouté) et l'espace d'action aussi ; seules les **valeurs** du bloc candidats de
+déploiement changent, sur ~4 % des hexes. Le modèle entraîné AVANT cette date se charge donc tel
+quel sur `main` d'après — et **y joue à `combined` 0.82** (éval du 2026-08-03, cf.
+[§0.14](#s0.14)). ✅ **Aucun run dédié n'est dû pour §0.64.** L'entrée reste dans le lot
+[§0.48](#s0.48) parce que `L1` (architecture), `L2` (espace d'action) et `L6` (`obs_size`)
+imposeront un `--new` de toute façon — mais ce sont EUX qui l'imposent, pas §0.64.
+📌 Non mesuré, et à ne pas confondre : le COÛT propre de §0.64 (même modèle, même éval, sur le
+moteur d'avant — parent de `d9d18622`). L'éval ci-dessus prouve que le modèle n'est pas cassé,
+pas que les 4 % d'hexes ne changent rien.
 
 **Code mort supprimé dans la foulée** : `_has_line_of_sight_cached`, `_count_los_exposure` et
 `_count_potential_los_from_reference_hexes` (~80 lignes) n'avaient plus aucun appelant, et
@@ -1105,6 +1111,22 @@ holdout battu 19 fois sur 20 est saturé : il ne discrimine plus rien. **Un hold
 l'enveloppe teste l'INTERPOLATION, pas la GÉNÉRALISATION** — c'est la leçon à retenir de cette
 entrée, indépendamment du bot concerné.
 
+✅ **RE-MESURÉ SUR LE RUN 200k (2026-08-03), ET LE DIAGNOSTIC TIENT — autrement.** Le panel n'est
+plus écrasé comme au run 4, mais `tactical` reste **l'adversaire le plus FACILE des six**
+(cf. [§0.14](#s0.14)) :
+
+| | run 4 | run 200k (fin) | robuste, éval du 2026-08-03 |
+|---|---|---|---|
+| `vs_tactical` (holdout) | 0.95 | 0.83 | **0.89** — le plus haut |
+| `vs_control` | 0.04 | 0.71 | 0.82 |
+| `vs_value_trade` (le plus dur) | — | 0.65 | **0.74** — le `worst_bot_score` |
+
+L'écart entre le plus facile et le plus dur n'est plus que de **0,15**, et le holdout est du
+mauvais côté : l'agent bat 9 fois sur 10 le bot censé mesurer sa généralisation, pendant que
+`value_trade` — un bot d'ENTRAÎNEMENT — le bat encore 1 fois sur 4. ⚠️ Corollaire pour l'étape 3
+ci-dessous : la cible « `tactical` ne doit pas se classer dernier » est déjà violée dans l'autre
+sens — il est **premier**, c'est-à-dire le plus faible.
+
 🟢 **ARBITRAGE UTILISATEUR DU 2026-08-02 — re-profilage validé, à écrire.**
 1. **Sortir `tactical` de l'enveloppe.** Piste proposée : `w_objective 0.8 / w_enemy 0.6` — un bot
    qui dispute les objectifs **et** se bat pour eux. Aucun bot d'entraînement n'occupe ce coin
@@ -1177,7 +1199,9 @@ et qu'aucune ne se lit seule.
 aucune ne le disqualifie) :
 1. **`worst_bot_score` peut être une seconde mesure de PERFORMANCE, pas de consistance.** Si le
    minimum tombe toujours sur le même adversaire (au run 4 : `vs_control` à 0.04), les deux
-   métriques pointent au même endroit au lieu de se compléter. Le fait se lit directement — les
+   métriques pointent au même endroit au lieu de se compléter. ✅ **Ce n'est plus le cas au 2026-08-03** :
+   le minimum a MIGRÉ vers `value_trade` (0.74) pendant que `vs_control` montait à 0.82, donc les deux
+   métriques se complètent de nouveau. Le fait se lit directement — les
    scalaires `bot_eval/vs_*` sont tous publiés, et le rapport d'éval de fin de training les
    classe — il suffit d'y regarder avant de conclure qu'un creux du `min` est un défaut de
    consistance.
@@ -2100,7 +2124,60 @@ l'instantané journalisé par le moteur (`T{tour} OBJECTIVE CONTROL:`). Il ne re
 lecture parallèle, celle du frontend signalée plus haut.
 
 <a id="s0.14"></a>
-### 0.14 Re-mesure du run — 🟠 OUVERT ; ⏳ ENTRÉE PÉRIMÉE au 2026-08-02 (des runs POSTÉRIEURS ont tourné, cf. tableau du §0) — historique : run 4 `--new` lancé le 2026-07-29 à 12 h 03, **ARRÊTÉ à 13 h 08** (état et chronologie dans le tableau du §0, entrée périssable — ne pas les dupliquer ici)
+### 0.14 Re-mesure du run — ✅ MESURE OBTENUE le 2026-08-03 (run 200k) ; le RESTE de l'entrée est l'historique périmé du run 4
+
+> 🟢 **RUN DE 200 000 ÉPISODES — la première mesure exploitable du projet (2026-08-02 → 03).**
+> Démarré le **2026-08-02 à 12 h 26**, dernier événement le **2026-08-03 à 02 h 05** (~13 h 30),
+> 19 points d'évaluation de 820 k à 12,1 M steps. Modèle retenu :
+> `ArmageddonAgent_12345_robust_0.8049.zip` (le snapshot ROBUSTE, md5-identique à
+> `model_ArmageddonAgent.zip`).
+>
+> **Courbes du run** (`tensorboard/200k/x1_long_ArmageddonAgent_2`) :
+>
+> | scalaire | premier | max | dernier |
+> |---|---|---|---|
+> | `eval_bots/combined_win_rate` | 0,283 | **0,837** (pt 18/19) | 0,743 |
+> | `bot_01` combined / worst | 0,290 / 0,120 | 0,826 / 0,760 | 0,790 / 0,640 |
+> | `bot_02` combined / worst | 0,298 / 0,160 | 0,966 / 0,920 | 0,804 / 0,600 |
+> | `bot_03` combined / worst | 0,290 / 0,160 | 0,808 / 0,640 | 0,808 / 0,600 |
+> | `bot_04` combined / worst | 0,256 / 0,200 | 0,822 / 0,760 | 0,570 / 0,480 |
+>
+> **Ventilation par adversaire du run** (sortie d'évaluation, 100 parties par bot) : `tactical`
+> 0.83, `greedy` 0.77, `defensive` 0.76, `adaptive` 0.75, **`control` 0.71**, `value_trade` 0.65.
+>
+> ⚠️ **La ventilation par adversaire n'est PAS dans les scalaires TensorBoard** — seuls
+> `bot_eval/scenario/<scén>/combined`, `/worst_bot_score` et `eval_bots/combined_win_rate` y sont.
+> Elle n'existe que dans la sortie d'évaluation, donc elle n'est ni tracée dans le temps, ni
+> croisée par roster. C'est exactement ce que [§0.55](#s0.55) étape 2b demande de publier.
+>
+> ✅ **ÉVAL REJOUÉE LE 2026-08-03, APRÈS §0.64/§0.65** (LoS de déploiement alignée puis
+> vectorisée), sur le **modèle robuste** :
+>
+> | | | | |
+> |---|---|---|---|
+> | `tactical` **0.89** | `defensive` 0.87 | `greedy` 0.84 | `adaptive` 0.83 |
+> | `control` **0.82** | `value_trade` **0.74** | **combined 0.8200** | **0 troncature** |
+>
+> Scénarios : `bot-02` 0.966 / worst 0.920 · `bot-01` 0.808 / 0.720 · `bot-04` 0.756 / 0.720 ·
+> `bot-03` **0.750 / 0.520**.
+>
+> 🔴 **DEUX LECTURES À NE PAS CONFONDRE, et c'est le piège de cette entrée.**
+> 1. **0,743 → 0,820 n'est PAS l'effet de §0.64.** Le premier est le DERNIER point d'éval du run,
+>    le second est le snapshot ROBUSTE (score propre 0.8049). L'écart mesure best-contre-final.
+>    Isoler §0.64 demanderait la même éval, même modèle, sur le moteur d'avant (parent de
+>    `d9d18622`) — non fait.
+> 2. **Ce que l'éval établit, elle, est solide** : le modèle entraîné AVANT §0.64 se charge et
+>    joue à 0.82 sur `main` d'après §0.64/§0.65. La LoS alignée ne casse pas le modèle existant.
+>
+> 📌 **Conséquences.** (a) Le seuil `model_gating_min_vs_control: 0.50` est **franchi** —
+> `vs_control` 0.71 en fin de run, 0.82 sur le robuste ; le **0.04 du run 4 ci-dessous est
+> périmé**. (b) `tactical`, le HOLDOUT, est l'adversaire **le plus facile** des six (0.89) et
+> `value_trade` le plus dur (0.74) : [§0.55](#s0.55) n'est pas de la cosmétique, c'est ce qui
+> décide si le prochain chiffre veut dire quelque chose. (c) L'écart entre scénarios est large
+> (0.750 à 0.966) : la moyenne cache un facteur roster, à ventiler ([§0.55](#s0.55) étape 2b).
+
+<a id="s0.14hist"></a>
+### 0.14hist Historique — run 4, ⏳ PÉRIMÉ au 2026-08-02 (des runs POSTÉRIEURS ont tourné, cf. tableau du §0) — historique : run 4 `--new` lancé le 2026-07-29 à 12 h 03, **ARRÊTÉ à 13 h 08** (état et chronologie dans le tableau du §0, entrée périssable — ne pas les dupliquer ici)
 
 > 🔴 **ARRÊT DU RUN 4 — 2026-07-29, 13 h 08, SIGINT, décision de l'utilisateur.** Le run **n'a pas
 > échoué** : il a été arrêté parce qu'il **ne pouvait plus servir de mesure de référence**, pour
