@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from ai.env_wrappers import BotControlledEnv
 
 from shared.data_validation import require_key, require_present
+from ai.scenario_scratch import make_scenario_scratch_dir
 
 __all__ = ['evaluate_against_bots', 'validate_bot_eval_worker_params']
 
@@ -95,10 +96,13 @@ def _cleanup_eval_ref_temp_dir() -> None:
 
 
 def _get_eval_ref_temp_dir() -> str:
-    """Create (once) and return temp dir for eval scenario ref overrides."""
+    """Create (once) and return temp dir for eval scenario ref overrides.
+
+    Sous la racine du dépôt (cf. `ai.scenario_scratch`) : le scénario matérialisé est celui que
+    l'épisode joue réellement, et son chemin doit rester journalisable pour le replay."""
     global _eval_ref_temp_dir
     if _eval_ref_temp_dir is None:
-        _eval_ref_temp_dir = tempfile.mkdtemp(prefix="w40k_eval_refmix_")
+        _eval_ref_temp_dir = make_scenario_scratch_dir("w40k_eval_refmix_")
         atexit.register(_cleanup_eval_ref_temp_dir)
     return _eval_ref_temp_dir
 

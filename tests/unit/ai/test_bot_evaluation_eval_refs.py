@@ -48,3 +48,44 @@ def test_materialize_eval_scenario_refs_bad_wall_ref_raises(tmp_path):
             scenario_path=str(scenario_path),
             wall_ref="   ",
         )
+
+
+def test_le_scenario_materialise_reste_sous_la_racine_du_depot(tmp_path):
+    """`W40KEngine.reset` journalise le chemin du scénario RELATIF à la racine du dépôt : c'est
+    ce que le replay repasse à `/api/config/board` pour dessiner le décor de l'épisode. Un
+    scénario matérialisé dans `/tmp` n'a pas de chemin relatif exprimable — le moteur refusait
+    l'épisode et `--eval --step` sur le pool holdout mourait au premier reset.
+
+    Le contrôle est fait ICI, à la source du chemin, plutôt que sur le message d'erreur du
+    moteur : c'est l'emplacement du fichier qui est l'invariant, pas la formulation du refus.
+    """
+    import os
+
+    scenario_path = _make_scenario(tmp_path)
+    out_path = bot_evaluation._materialize_eval_scenario_refs(
+        scenario_path=str(scenario_path),
+        wall_ref="walls-33.json",
+    )
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(bot_evaluation.__file__)))
+    relative = os.path.relpath(os.path.abspath(out_path), repo_root)
+
+    assert not relative.startswith(".."), (
+        f"scénario matérialisé hors du dépôt : {out_path} (racine {repo_root})"
+    )
+
+
+def test_le_repertoire_de_travail_d_entrainement_reste_aussi_sous_la_racine():
+    """JUMEAU : `ai/train.py` matérialise les mêmes scénarios (override `wall_ref`) pour
+    l'entraînement, par un second répertoire. Il tombait dans `/tmp` pour la même raison, donc
+    sous le même refus du moteur dès que le step logging est actif."""
+    import os
+
+    import ai.train as train
+
+    path = train._get_wall_override_temp_dir()
+    try:
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(train.__file__)))
+        assert not os.path.relpath(path, repo_root).startswith(".."), path
+    finally:
+        train._cleanup_wall_override_temp_dir()

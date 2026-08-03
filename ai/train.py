@@ -1407,10 +1407,15 @@ def _cleanup_wall_override_temp_dir() -> None:
 
 
 def _get_wall_override_temp_dir() -> str:
-    """Create (once) and return temporary directory for wall-ref scenario overrides."""
+    """Create (once) and return temporary directory for wall-ref scenario overrides.
+
+    JUMEAU du répertoire d'éval : sous la racine du dépôt (cf. `ai.scenario_scratch`), pour la
+    même raison — un scénario matérialisé dans `/tmp` fait refuser l'épisode par le moteur dès
+    que le step logging est actif, son chemin n'étant pas journalisable pour le replay."""
     global _wall_override_temp_dir
     if _wall_override_temp_dir is None:
-        _wall_override_temp_dir = tempfile.mkdtemp(prefix="w40k_wallmix_")
+        from ai.scenario_scratch import make_scenario_scratch_dir
+        _wall_override_temp_dir = make_scenario_scratch_dir("w40k_wallmix_")
         atexit.register(_cleanup_wall_override_temp_dir)
     return _wall_override_temp_dir
 
