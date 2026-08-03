@@ -6,7 +6,6 @@ import re
 from typing import TYPE_CHECKING
 
 from shared.data_validation import require_key
-from engine.combat_utils import calculate_hex_distance
 
 if TYPE_CHECKING:
     from ai.analyzer_state import AnalyzerState

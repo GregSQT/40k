@@ -1029,21 +1029,25 @@ def handle_advance(
         # (movement_handlers.movement_set_advance_mode_handler). L'ancien budget = jet×scale
         # seul produisait de faux « distance>roll »/« path blocked » (chaque figurine dépasse
         # mécaniquement un budget amputé de M).
-        advance_budget = (
-            require_key(state.unit_move, advance_unit_id)
-            + advance_roll * _get_inches_to_subhex_for_analyzer()
-        )
-        occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
-            state.positions_by_model, state.unit_positions, state.unit_base,
-            state.unit_player, state.unit_hp, advance_unit_id,
-        )
-        advance_unit_type = require_key(state.unit_types, advance_unit_id)
         # 21.03 — jumeau du move : la traversée suit la DÉCLARATION loguée, pas le keyword du
         # registre. Le keyword exemptait toute unité volante même quand elle n'avait pas déclaré
         # (donc n'avait pas payé les -2" et ne traversait rien).
         advance_is_fly = re.search(
             r'ADVANCED\s+\[FLY\]\s+from', action_desc, re.IGNORECASE
         ) is not None
+        # 21.03 : le vol DÉCLARÉ retranche aussi 2" au budget (`get_squad_move_budget`), comme
+        # pour le move et la charge. Sans ce retrait, aucun advance volant hors budget n'était
+        # remonté — les contrôles « mutualisés » ne mesuraient pas la même chose.
+        advance_budget = max(0, (
+            require_key(state.unit_move, advance_unit_id)
+            + advance_roll * _get_inches_to_subhex_for_analyzer()
+            - (2 * _get_inches_to_subhex_for_analyzer() if advance_is_fly else 0)
+        ))
+        occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
+            state.positions_by_model, state.unit_positions, state.unit_base,
+            state.unit_player, state.unit_hp, advance_unit_id,
+        )
+        advance_unit_type = require_key(state.unit_types, advance_unit_id)
         # CONTRÔLE PER-SOCLE (09 Movement / Advance) : identique au move, budget = D6×scale.
         # Chaque figurine avance de son origine (positions_by_model, ligne N-1) vers sa
         # destination ([MODELS:] de cette ligne). L'ancre d'escouade peut dépasser le budget

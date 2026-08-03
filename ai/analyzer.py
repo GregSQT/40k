@@ -742,6 +742,12 @@ def _bfs_shortest_path_length(
                 continue
             if neighbor in occupied_positions:
                 continue
+            # Bande d'engagement ennemie : l'appelant la fournit VIDE quand la config autorise
+            # à la traverser (`can_move_through_enemy_engagement_zone`, lu par
+            # `_build_move_bfs_blockers`). Le paramètre était accepté et transmis par les cinq
+            # sites, mais la boucle ne le lisait pas : basculer ce toggle n'aurait rien changé.
+            if neighbor in enemy_adjacent_hexes:
+                continue
             next_dist = current_dist + 1
             if neighbor == dest_pos:
                 return next_dist
@@ -2529,6 +2535,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if agent_fight_alt > 0 and stats['first_error_lines']['fight_alternation_violations'][1]:
         first_err = stats['first_error_lines']['fight_alternation_violations'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_fight_alt > 0 and stats['first_error_lines']['fight_alternation_violations'][2]:
+        first_err = stats['first_error_lines']['fight_alternation_violations'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     _fm = require_key(stats, 'fight_move_invalid')
     for _kind, _label in (('pile_in', 'Pile-in au-dela de 3"'), ('consolidation', 'Conso au-dela de 3"')):
         _table_row(f"{_label}:", _fmt_count(_fm[_kind][1]), _fmt_count(_fm[_kind][2]))
@@ -2536,9 +2545,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             if _fm[_kind][_pl] > 0 and stats['first_error_lines']['fight_move_invalid'][_kind][_pl]:
                 _fe = stats['first_error_lines']['fight_move_invalid'][_kind][_pl]
                 log_print(f"  First P{_pl} occurrence (Episode {_fe['episode']}): {_fe['line']}")
-    if bot_fight_alt > 0 and stats['first_error_lines']['fight_alternation_violations'][2]:
-        first_err = stats['first_error_lines']['fight_alternation_violations'][2]
-        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
 
     
     # ACTION PHASE ACCURACY

@@ -245,3 +245,25 @@ def test_le_marqueur_fly_de_charge_atteint_bien_step_log():
 
     assert "CHARGED [FLY]" in _line(True), _line(True)
     assert "[FLY]" not in _line(False), _line(False)
+
+
+def test_le_vol_declare_retranche_deux_pouces_au_budget_de_move(tmp_path):
+    """21.03 : le vol DÉCLARÉ retranche 2" à la distance max — `get_squad_move_budget` côté
+    moteur. Le contrôle de la charge retranchait déjà ces 2" ; move et advance ne le faisaient
+    pas, donc les trois contrôles « mutualisés » ne mesuraient pas la même chose et aucun vol
+    hors budget n'était remonté.
+    """
+    body = (
+        "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [SUCCESS]\n"
+        "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(90,50) DEPLOYED from (-1,-1) to (90,50) [R:+0.0] [SUCCESS]\n"
+        "[10:00:02] E1 T1 P1 MOVE : Unit 1(50,50) MOVED from (50,50) to (50,50)"
+        "[R:+0.0] [MODELS: 1#0@(50,50)] [SUCCESS]\n"
+        # Intercessor : MOVE 6. Vol déclaré → budget 4. Un déplacement de 5 cases dépasse.
+        "[10:00:03] E1 T1 P1 MOVE : Unit 1(55,50) MOVED [FLY] from (50,50) to (55,50)"
+        "[R:+0.0] [MODELS: 1#0@(55,50)] [SUCCESS]\n"
+    )
+    log = tmp_path / "move_fly_budget.log"
+    log.write_text(_log(body, scale=1))
+    stats = an.parse_step_log(str(log))
+
+    assert stats["move_distance_over_limit"]["move"][1] == 1, "les 2\" de 21.03 non retranchés"

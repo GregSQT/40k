@@ -6,7 +6,6 @@ import re
 from typing import TYPE_CHECKING
 
 from shared.data_validation import require_key
-from engine.combat_utils import calculate_hex_distance
 
 if TYPE_CHECKING:
     from ai.analyzer_state import AnalyzerState
@@ -195,6 +194,7 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
                  get_adjacent_enemies, is_within_engine_engagement_zone,
                  _get_engagement_zone_for_analyzer, _debug_log):
     from ai.analyzer_perfig import surviving_start_models
+    from ai.analyzer import _get_inches_to_subhex_for_analyzer
 
     stats = state.stats
     move_unit_id = move_match.group(1)
@@ -386,6 +386,14 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         else:
             move_range_raw = require_key(state.unit_move, move_unit_id)
             move_range = int(move_range_raw)
+            if move_is_fly:
+                # 21.03 : le vol DÉCLARÉ retranche 2" à la distance max — même prédicat que la
+                # traversée côté moteur (`get_squad_move_budget` / `took_to_the_skies`), donc
+                # le marqueur `[FLY]` du journal atteste les deux. Le contrôle de la charge
+                # retranchait déjà ces 2" ; move et advance ne le faisaient pas, si bien que les
+                # trois contrôles « mutualisés » ne mesuraient pas la même chose : à x5, 30
+                # subhex autorisés pour 20 légaux, et aucun vol hors budget n'était remonté.
+                move_range = max(0, move_range - 2 * _get_inches_to_subhex_for_analyzer())
         occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
             state.positions_by_model, positions_at_movement, state.unit_base,
             state.unit_player, unit_hp_at_movement, move_unit_id,
