@@ -1741,7 +1741,9 @@ def _charge_model_multilevel_reachable_cells(
     hors FLY, pour une unité capable de finir en hauteur (garanti par l'appelant).
 
     Retour : ``{level: {(col, row): distance_subhex}}`` (distance = coût géodésique vertical inclus)."""
-    from engine.terrain_utils import floor_hexes_at_level, floor_polys_at_level, footprint_within_floor
+    from engine.terrain_utils import (
+        floor_hexes_at_level, floor_levels_present, floor_polys_at_level, footprint_within_floor,
+    )
     from engine.hex_utils import (
         get_neighbors, precompute_footprint_offsets, ENGAGEMENT_NORM_HEX_WIDTH,
     )
@@ -1756,7 +1758,7 @@ def _charge_model_multilevel_reachable_cells(
     walls = set(game_state.get("wall_hexes", set()))  # get allowed
     inches_to_subhex = int(require_key(game_state, "inches_to_subhex"))
 
-    present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})  # get allowed
+    present = floor_levels_present(terrain_areas)
     floor_hexes_by_level = {lv: floor_hexes_at_level(terrain_areas, lv) for lv in present}
     height_by_level: Dict[int, float] = {0: 0.0}
     for a in terrain_areas:
@@ -4525,21 +4527,34 @@ def _charge_model_pos_is_closer(
     start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
     dest = (int(dest_c), int(dest_r))
 
-    if int(dest_level) >= 1:
-        # 3b : destination À L'ÉTAGE → reachability par le champ climb (coût de montée §13.06 imputé au
-        # jet 2D6), pas le BFS 2D qui ignorerait le vertical. La fig doit apparaître dans les cases
-        # d'étage atteignables. Obstacles sol = murs + ennemis + clairance (amies traversables).
-        from engine.terrain_utils import low_clearance_ground_hexes
-        _terrain_areas = game_state.get("terrain_areas", [])  # get allowed
+    # Niveau EFFECTIF de DÉPART (§13.06) — dérivé du niveau committé, comme le pool de l'UI
+    # (``_compute_plan_context``). Sans lui, le champ repartait du sol : une figurine déjà en hauteur
+    # se voyait facturer une montée qu'elle avait déjà payée, et sa descente vers le sol ne coûtait
+    # rien. Le pool proposait alors des cases que ce contrôle refusait, et l'inverse.
+    # Même garde que le pool : le champ multi-niveaux n'est défini qu'en euclidien, hors vol.
+    from engine.terrain_utils import low_clearance_ground_hexes, resolve_model_floor_level
+    _terrain_areas = game_state.get("terrain_areas", [])  # get allowed
+    start_eff = (
+        resolve_model_floor_level(
+            start_col, start_row, model["BASE_SHAPE"], model["BASE_SIZE"],
+            int(model.get("orientation", 0)), int(model.get("level", 0)), _terrain_areas,  # get allowed
+        )
+        if (_charge_distance_metric(game_state) == "euclidean" and not fly_active) else 0
+    )
+    # Une arrivée d'étage, ou un départ d'étage : dans les deux cas le trajet a une composante
+    # verticale, facturée sur le jet (§13.06) par le champ multi-niveaux — le BFS plat l'ignorerait.
+    # Les obstacles de sol ne sont construits que là : ce contrôle est appelé une fois par figurine à
+    # chaque rafraîchissement de plan, et une charge de plain-pied n'en a aucun usage.
+    if int(dest_level) >= 1 or (start_eff >= 1 and dest != (start_col, start_row)):
         _ground_obs = (
-            set(wall_hexes) | ground_enemy_blocked
+            path_blocked
             | low_clearance_ground_hexes(_terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
         )
-        _fcells = _charge_model_climb_reachable_floor_cells(
+        _cells = _charge_model_multilevel_reachable_cells(
             game_state, unit, squad_id, model, (start_col, start_row), int(budget),
-            int(dest_level), _ground_obs, _terrain_areas,
-        )
-        if dest not in _fcells:
+            {int(dest_level)}, _ground_obs, _terrain_areas, start_level=start_eff,
+        ).get(int(dest_level), {})  # get allowed (niveau inatteignable = aucune case)
+        if dest not in _cells:
             return False
     elif dest != (start_col, start_row):
         # Reachability BFS 2D (centre-à-centre, traverse les amies, pas mur/ennemi sauf vol actif), early-exit dest.
@@ -4724,7 +4739,19 @@ def charge_autoplace_plan(
       - REPLI : figs non posées par l'ILP → rapprochées au max (strictement plus proche, sans overlap,
         sans engager de non-cible), sinon laissées au départ (per_model les marquera invalides → Check).
 
-    Retour : {"plan": [[model_id, col, row], ...]} couvrant toutes les figs vivantes.
+    ÉTAGES (§13.06) — l'espace de recherche couvre le SOL **et** chaque étage atteignable : une charge
+    est un mouvement, elle peut monter comme descendre, et le contrôle de légalité par-figurine sait
+    déjà juger un niveau de destination quelconque (``_charge_model_pos_is_closer(dest_level=…)``).
+    Contraindre chaque figurine à son plancher de départ, comme le fait le pile-in, priverait la charge
+    de son cas le plus courant : descendre pour aller au contact. Conséquences :
+      - un slot est un triplet (col, row, niveau) ; deux slots d'étages différents ne se disputent
+        jamais une case (superposition inter-étage légale) ;
+      - l'atteignabilité vient du champ multi-niveaux, qui facture montée et descente sur le jet, et
+        rend toutes les couches en une passe ;
+      - l'engagement est mesuré au niveau réel du slot (engagement 3D §03.04).
+    FLY et métrique hex gardent le BFS plat au sol : le champ multi-niveaux n'y est pas défini.
+
+    Retour : {"plan": [[model_id, col, row, level], ...]} couvrant toutes les figs vivantes.
     """
     from collections import deque
     import math
@@ -4806,9 +4833,48 @@ def charge_autoplace_plan(
     if allow_nontarget_engagement:
         nontarget_entries = []
 
-    obstacle_socles = _charge_obstacle_socles(game_state, squad_id, level=0)
     fly_active = False if disable_fly else _charge_fly_active(game_state, unit, squad_id)
     traverse_blocked = set() if fly_active else (walls | ground_enemy_blocked)
+
+    # --- Étages (§13.06) : niveaux candidats et niveau effectif de départ par figurine. ---
+    from engine.terrain_utils import (
+        floor_levels_present,
+        low_clearance_ground_hexes,
+        resolve_model_floor_level,
+    )
+    from engine.game_state import unit_can_occupy_upper_floor
+
+    terrain_areas = game_state.get("terrain_areas", [])  # get allowed (board sans terrain)
+    # Le champ multi-niveaux n'est défini qu'en euclidien et hors vol (cf. sa docstring) : partout
+    # ailleurs, la recherche reste au sol comme avant — pas de niveau inventé sur une géométrie qui
+    # ne sait pas le facturer.
+    multilevel_ok = (
+        _charge_distance_metric(game_state) == "euclidean"
+        and not fly_active
+        and unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS"))
+    )
+    start_eff: Dict[str, int] = {}
+    for mid in alive:
+        m = models_cache[mid]
+        start_eff[mid] = (
+            resolve_model_floor_level(
+                int(m["col"]), int(m["row"]), m["BASE_SHAPE"], m["BASE_SIZE"],
+                int(m.get("orientation", 0)), int(m.get("level", 0)), terrain_areas,  # get allowed
+            )
+            if multilevel_ok else 0
+        )
+    upper_levels = (
+        floor_levels_present(terrain_areas) if multilevel_ok else []
+    )
+    candidate_levels = [0] + [lv for lv in upper_levels if lv >= 1]
+    ground_obstacles_for_climb = (
+        walls | ground_enemy_blocked
+        | low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
+    )
+    # Obstacles de PLACEMENT par niveau : une figurine d'un autre étage ne bloque pas (§13.06).
+    obstacle_socles_by_level = {
+        lv: _charge_obstacle_socles(game_state, squad_id, level=lv) for lv in candidate_levels
+    }
 
     def _socle(mid: str, c: int, r: int) -> Any:
         return _charge_model_socle(game_state, models_cache[mid], int(c), int(r))
@@ -4819,8 +4885,10 @@ def charge_autoplace_plan(
     def _fp_min_to_targets(fp: Set[Tuple[int, int]]) -> int:
         return min(min_distance_between_sets(fp, tfp) for tfp in all_target_fps)
 
-    def _engages_nontarget(mid: str, c: int, r: int) -> bool:
-        synth = _synth_model_entry(game_state, squad_id, models_cache[mid], int(c), int(r), level=0)  # 3a sol
+    def _engages_nontarget(mid: str, c: int, r: int, level: int) -> bool:
+        # Synth au niveau RÉEL de la destination : l'engagement est 3D (§03.04), un ennemi non déclaré
+        # deux étages plus bas n'est pas engagé par une figurine posée en hauteur.
+        synth = _synth_model_entry(game_state, squad_id, models_cache[mid], int(c), int(r), level=int(level))
         return any(
             unit_entries_within_engagement_zone(synth, ne, ez, vertical_zone_inches=_charge_vertical_zone(game_state))
             for ne in nontarget_entries
@@ -4866,15 +4934,17 @@ def charge_autoplace_plan(
                     _zone.add((nc, nr))
                     _nx.append((nc, nr))
         _zf = _nx
-    obstacle_socles = [o for o in obstacle_socles if o.fp & _zone]
+    obstacle_socles_by_level = {
+        lv: [o for o in socles if o.fp & _zone] for lv, socles in obstacle_socles_by_level.items()
+    }
     nontarget_entries = [
         ne for ne in nontarget_entries
         if set(ne.get("occupied_hexes") or {(int(ne["col"]), int(ne["row"]))}) & _zone
     ]
 
-    # all_slots[i] = (col, row, socle, slot_min_to_targets, engaged_target_ids)
-    all_slots: List[Tuple[int, int, Any, int, frozenset]] = []
-    slots_by_base: Dict[Tuple[Any, Any], List[int]] = {}
+    # all_slots[i] = (col, row, socle, slot_min_to_targets, engaged_target_ids, level)
+    all_slots: List[Tuple[int, int, Any, int, frozenset, int]] = []
+    slots_by_base: Dict[Tuple[Any, Any, int], List[int]] = {}
 
     # Champ de distance géométrique (hex, sans obstacle) multi-source depuis les cellules cibles, calculé
     # UNE fois. Rayon = plus grande marge candidate + plus grand rayon d'empreinte (pour couvrir les
@@ -4933,6 +5003,83 @@ def charge_autoplace_plan(
         # Branche euclidienne (métrique gameplay) → primitive 3D. synth porte level=0 (3a, candidat au sol).
         return unit_entries_within_engagement_zone(synth, struct[1], ez, vertical_zone_inches=_vz_auto)
 
+    # --- Atteignabilité par fig (BFS centre-à-centre ≤ budget, amies traversables). ---
+    starts = {mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"])) for mid in alive}
+    start_min = {mid: _fp_min_to_targets(_model_fp(mid, *starts[mid])) for mid in alive}
+
+    _reach_cache: Dict[str, Dict[int, Dict[Tuple[int, int], int]]] = {}
+
+    def _reachable(mid: str) -> Dict[int, Dict[Tuple[int, int], int]]:
+        """Cases atteignables PAR NIVEAU, avec leur coût (sous-hexes).
+
+        Multi-niveaux : une seule passe du champ géodésique rend toutes les couches, coût vertical
+        facturé sur le jet en montée comme en descente (§13.06), depuis le niveau effectif de départ.
+        Sinon (FLY, métrique hex, unité qui ne peut pas finir en hauteur) : BFS plat au sol, à
+        l'identique du comportement historique."""
+        cached = _reach_cache.get(mid)
+        if cached is not None:
+            return cached
+        sc, sr = starts[mid]
+
+        def _flat_bfs() -> Dict[Tuple[int, int], int]:
+            dist: Dict[Tuple[int, int], int] = {(sc, sr): 0}
+            queue: deque = deque([(sc, sr, 0)])
+            while queue:
+                c, r, d = queue.popleft()
+                if d >= budget:
+                    continue
+                for nc, nr in get_hex_neighbors(c, r):
+                    if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                        continue
+                    cell = (nc, nr)
+                    if cell in dist or cell in traverse_blocked:
+                        continue
+                    dist[cell] = d + 1
+                    queue.append((nc, nr, d + 1))
+            return dist
+
+        out: Dict[int, Dict[Tuple[int, int], int]] = {}
+        if multilevel_ok:
+            # Découpage CALQUÉ sur le contrôle de légalité (``_charge_model_pos_is_closer``), qui seul
+            # décide si un placement passe : champ multi-niveaux pour toute arrivée d'étage et pour la
+            # descente d'une figurine déjà en hauteur ; BFS plat pour un trajet sol → sol. Faire
+            # autrement produirait des placements atteignables ici et refusés là-bas — par exemple une
+            # case de sol accessible seulement en passant par un étage.
+            wanted = {lv for lv in candidate_levels if lv >= 1}
+            if start_eff[mid] >= 1:
+                wanted.add(0)
+            if wanted:
+                out = _charge_model_multilevel_reachable_cells(
+                    game_state, unit, squad_id, models_cache[mid], (sc, sr), int(budget),
+                    wanted, ground_obstacles_for_climb, terrain_areas,
+                    start_level=start_eff[mid],
+                )
+            if start_eff[mid] == 0:
+                out[0] = _flat_bfs()
+            # La case de DÉPART est exclue du champ : une figurine qui ne bouge pas reste légale à son
+            # propre niveau, et l'ILP doit pouvoir la « poser » là où elle est déjà.
+            out.setdefault(start_eff[mid], {})[(sc, sr)] = 0
+        else:
+            out = {0: _flat_bfs()}
+        _reach_cache[mid] = out
+        return out
+
+    # Cases réellement atteignables par étage, toutes figurines confondues. Sert à ne construire des
+    # slots d'étage QUE là où une figurine peut aller : le champ a déjà tranché l'appartenance au
+    # plancher, ce qui évite de retester le confinement du socle sur toute la bande d'engagement —
+    # de loin le test le plus cher de cette boucle, et faux 95 % du temps.
+    reach_union: Dict[int, Set[Tuple[int, int]]] = {}
+    if multilevel_ok:
+        for _mid in alive:
+            if start_min[_mid] <= 0:
+                continue  # déjà au contact : ne produira aucune arête, son champ ne sert à rien
+            for _lv, _cells in _reachable(_mid).items():
+                if _lv >= 1:
+                    reach_union.setdefault(_lv, set()).update(_cells)
+
+    # Un jeu de slots par (base, NIVEAU) : à géométrie identique, un même hex peut être un placement
+    # légal à l'étage et illégal au sol (obstacle, empreinte hors plancher), et l'engagement 3D d'une
+    # cible dépend de la hauteur d'arrivée.
     for bkey, mids in by_base.items():
         rep = models_cache[mids[0]]
         charger_shape = rep["BASE_SHAPE"]
@@ -4945,30 +5092,43 @@ def charge_autoplace_plan(
         )
         margin = ez + fp_radius_by_base[bkey] + 2
         near_cells = sorted(cell for cell, d in dist_to_t.items() if d <= margin)
-        idxs: List[int] = []
+        idxs_by_level: Dict[int, List[int]] = {lv: [] for lv in candidate_levels}
+        # Cellules à l'extérieur, niveaux à l'intérieur : empreinte, bornes de plateau, socle et
+        # distance au palier ne dépendent pas de l'étage — les recalculer par niveau était du travail
+        # jeté. Seuls les obstacles et la mesure d'engagement (3D) en dépendent.
         for (c, r) in near_cells:
             fp = _charge_model_footprint(game_state, rep, c, r)
             if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in fp):
                 continue
             fps = set(fp)
-            synth = (
-                _synth_model_entry(game_state, squad_id, rep, c, r, level=0)  # 3a : candidat au sol
-                if need_synth else None
-            )
-            eng = frozenset(
-                t for t in present_target_ids if _fp_engages(fps, target_eng[t], synth)
-            )
-            if not eng:
-                continue  # n'engage aucune cible déclarée → inutile comme slot
             socle = _charge_model_socle(game_state, rep, c, r)
-            if _charge_model_placement_overlaps(socle, obstacle_socles, [], walls):
-                continue
-            if any(_fp_engages(fps, s, synth) for s in nontarget_eng):
-                continue  # engagerait un ennemi non déclaré → interdit (11.04 AFTER)
             slot_min = min((dist_to_t[cell] for cell in fps if cell in dist_to_t), default=_field_radius + 1)
-            idxs.append(len(all_slots))
-            all_slots.append((c, r, socle, slot_min, eng))
-        slots_by_base[bkey] = idxs
+            for slot_level in candidate_levels:
+                if slot_level >= 1 and (c, r) not in reach_union.get(slot_level, ()):  # get allowed
+                    continue  # aucune figurine ne peut finir là-haut : slot mort-né
+                # Murs appliqués à TOUS les niveaux : c'est ce que fait le contrôle de légalité de la
+                # charge (``_charge_model_pos_is_closer``, qui passe ``wall_hexes`` quel que soit
+                # ``dest_level``). Le pile-in, lui, en dispense l'étage — l'écart entre les deux phases
+                # est réel, mais le trancher ici produirait des placements que le commit refuse.
+                if _charge_model_placement_overlaps(
+                    socle, obstacle_socles_by_level[slot_level], [], walls
+                ):
+                    continue
+                synth = (
+                    _synth_model_entry(game_state, squad_id, rep, c, r, level=slot_level)
+                    if need_synth else None
+                )
+                eng = frozenset(
+                    t for t in present_target_ids if _fp_engages(fps, target_eng[t], synth)
+                )
+                if not eng:
+                    continue  # n'engage aucune cible déclarée → inutile comme slot
+                if any(_fp_engages(fps, s, synth) for s in nontarget_eng):
+                    continue  # engagerait un ennemi non déclaré → interdit (11.04 AFTER)
+                idxs_by_level[slot_level].append(len(all_slots))
+                all_slots.append((c, r, socle, slot_min, eng, slot_level))
+        for slot_level, idxs in idxs_by_level.items():
+            slots_by_base[(bkey[0], bkey[1], slot_level)] = idxs
 
     # --- Plafond : par (base, cible), bucketing angulaire → garder le slot le plus PROCHE (contact,
     #     mode offensif) et le plus LOIN (externe ≈ EZ, mode défensif) de chaque secteur. Borne n_slot à
@@ -4982,7 +5142,9 @@ def charge_autoplace_plan(
             sum(c for c, _ in cells) / len(cells),
             sum(r for _, r in cells) / len(cells),
         )
-    by_base_target: Dict[Tuple[Tuple[Any, Any], str], List[int]] = {}
+    # Le niveau entre dans la clé du bucketing : sans lui, un secteur ne garderait qu'un seul étage et
+    # la couverture d'une cible pourrait n'exister qu'à une hauteur inatteignable.
+    by_base_target: Dict[Tuple[Tuple[Any, Any, int], str], List[int]] = {}
     for bkey, idxs in slots_by_base.items():
         for si in idxs:
             for t in all_slots[si][4]:
@@ -4993,7 +5155,7 @@ def charge_autoplace_plan(
         near_sec: Dict[int, int] = {}
         far_sec: Dict[int, int] = {}
         for si in sis:
-            sc, sr, _soc, smin, _eng = all_slots[si]
+            sc, sr, _soc, smin, _eng, _slv = all_slots[si]
             ang = math.atan2(sr - cy, sc - cx)
             sec = int((ang + math.pi) / (2.0 * math.pi + 1e-9) * N_SECTORS)
             if sec not in near_sec or smin < all_slots[near_sec[sec]][3]:
@@ -5010,28 +5172,6 @@ def charge_autoplace_plan(
         for bkey, idxs in slots_by_base.items()
     }
 
-    # --- Atteignabilité par fig (BFS centre-à-centre ≤ budget, amies traversables). ---
-    starts = {mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"])) for mid in alive}
-    start_min = {mid: _fp_min_to_targets(_model_fp(mid, *starts[mid])) for mid in alive}
-
-    def _reachable(mid: str) -> Dict[Tuple[int, int], int]:
-        sc, sr = starts[mid]
-        dist: Dict[Tuple[int, int], int] = {(sc, sr): 0}
-        queue: deque = deque([(sc, sr, 0)])
-        while queue:
-            c, r, d = queue.popleft()
-            if d >= budget:
-                continue
-            for nc, nr in get_hex_neighbors(c, r):
-                if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
-                    continue
-                cell = (nc, nr)
-                if cell in dist or cell in traverse_blocked:
-                    continue
-                dist[cell] = d + 1
-                queue.append((nc, nr, d + 1))
-        return dist
-
     # --- Arêtes ILP (fig, slot) légales : strictement plus proche + atteignable. ---
     edges: List[Tuple[str, int, int]] = []  # (mid, slot_index, pathdist)
     for mid in alive:
@@ -5039,16 +5179,21 @@ def charge_autoplace_plan(
         if sm <= 0:
             continue  # déjà au contact d'une cible : aucun slot strictement plus proche
         reach = _reachable(mid)
-        for si in slots_by_base[_base_key(models_cache[mid])]:
-            sc, sr, _soc, slot_min, _eng = all_slots[si]
-            if slot_min >= sm:
-                continue  # WHILE : strictement plus proche d'une cible
-            pd = reach.get((sc, sr))
-            if pd is None:
-                continue  # hors budget (atteignabilité réelle)
-            edges.append((mid, si, pd))
+        bkey = _base_key(models_cache[mid])
+        for slot_level in candidate_levels:
+            level_reach = reach.get(slot_level)
+            if not level_reach:
+                continue
+            for si in slots_by_base[(bkey[0], bkey[1], slot_level)]:
+                sc, sr, _soc, slot_min, _eng, _slv = all_slots[si]
+                if slot_min >= sm:
+                    continue  # WHILE : strictement plus proche d'une cible
+                pd = level_reach.get((sc, sr))
+                if pd is None:
+                    continue  # hors budget (atteignabilité réelle)
+                edges.append((mid, si, pd))
 
-    def _solve(cover: bool) -> Optional[Dict[str, Tuple[int, int]]]:
+    def _solve(cover: bool) -> Optional[Dict[str, Tuple[int, int, int]]]:
         """Résout l'ILP d'affectation ; ``cover`` ajoute la contrainte dure « chaque cible engagée ».
         Renvoie {mid: (c, r)} ou None si infaisable."""
         if not edges:
@@ -5065,11 +5210,16 @@ def charge_autoplace_plan(
         for e_i, (mid, si, _pd) in enumerate(edges):
             rows.append(mids_idx[mid]); cols.append(e_i)               # (1) 1 fig ≤ 1 slot
             rows.append(n_model + slot_row[si]); cols.append(e_i)      # (2) 1 slot ≤ 1 fig
-        # (3) paires de slots utilisés qui se chevauchent (euclidien) → exclusion mutuelle.
+        # (3) paires de slots utilisés qui se chevauchent (euclidien) → exclusion mutuelle. Deux slots
+        # d'ÉTAGES différents ne se chevauchent jamais : la superposition inter-étage est légale
+        # (§13.06), les exclure mutuellement interdirait le dessous d'une figurine en hauteur.
         conflict_pairs: List[Tuple[int, int]] = []
         for a in range(n_slot):
             sa = all_slots[used_slots[a]][2]
+            la = all_slots[used_slots[a]][5]
             for b in range(a + 1, n_slot):
+                if all_slots[used_slots[b]][5] != la:
+                    continue
                 if footprints_overlap(sa, all_slots[used_slots[b]][2]):
                     conflict_pairs.append((used_slots[a], used_slots[b]))
         edges_by_slot: Dict[int, List[int]] = {}
@@ -5117,117 +5267,167 @@ def charge_autoplace_plan(
                    bounds=Bounds(0, 1), options={"time_limit": 2.0})
         if res.x is None:
             return None
-        out: Dict[str, Tuple[int, int]] = {}
+        out: Dict[str, Tuple[int, int, int]] = {}
         for e_i, x in enumerate(res.x):
             if x > 0.5:
                 mid, si, _pd = edges[e_i]
-                out[mid] = (all_slots[si][0], all_slots[si][1])
+                out[mid] = (all_slots[si][0], all_slots[si][1], all_slots[si][5])
         return out
 
     assign = _solve(cover=True)
     if assign is None:
         assign = _solve(cover=False)  # couverture impossible → au moins le focus ; Check liste le reste
 
-    provisional: Dict[str, Tuple[int, int]] = {}
+    # Position provisoire = (col, row, NIVEAU) : le niveau n'est pas décoratif, il conditionne quelles
+    # figurines se gênent réellement.
+    provisional: Dict[str, Tuple[int, int, int]] = {}
     # Socles occupants : une entrée par fig vivante (départ, puis MAJ à la pose) — bloque une fig encore
     # à son départ comme une fig posée (calque du provisional du preview).
-    occ_by_mid: Dict[str, Any] = {mid: _socle(mid, *starts[mid]) for mid in alive}
+    occ_by_mid: Dict[str, Tuple[int, Any]] = {
+        mid: (start_eff[mid], _socle(mid, *starts[mid])) for mid in alive
+    }
     if assign:
         for mid, pos in assign.items():
             provisional[mid] = pos
-            occ_by_mid[mid] = _socle(mid, pos[0], pos[1])
+            occ_by_mid[mid] = (pos[2], _socle(mid, pos[0], pos[1]))
 
-    def _overlaps_world(soc: Any, self_mid: str) -> bool:
+    def _overlaps_world(soc: Any, self_mid: str, level: int) -> bool:
+        # Murs à tous les niveaux, comme la génération des slots et le contrôle de légalité.
         if walls and (soc.fp & walls):
             return True
-        if any(footprints_overlap(soc, o) for o in obstacle_socles):
+        if any(footprints_overlap(soc, o) for o in obstacle_socles_by_level.get(level, [])):  # get allowed
             return True
-        return any(footprints_overlap(soc, s) for m, s in occ_by_mid.items() if m != self_mid)
+        return any(
+            footprints_overlap(soc, s)
+            for m, (lv, s) in occ_by_mid.items()
+            if m != self_mid and lv == level
+        )
 
     # --- Repli : figs non posées par l'ILP → rapprochées par DESCENTE DE GRADIENT vers les cibles
     #     (O(budget) par fig, vs O(reach) avant — décisif avec le budget de charge >> 3" du pile-in).
     #     Champ de distance multi-source BFS depuis les empreintes cibles (traverse amies, pas
     #     murs/ennemis), calculé UNE fois, partagé par toutes les bases. Validation closer/overlap/
     #     non-cible seulement sur les ≤ budget positions du chemin (pas chaque case atteignable). ---
+    #     Le champ n'est construit que pour la branche qui s'en sert (repli à plat) : en multi-niveaux
+    #     le repli lit le champ atteignable de la figurine, déjà calculé, et ce parcours de plateau
+    #     serait intégralement jeté.
     straggler_df: Dict[Tuple[int, int], int] = {}
-    _q: deque = deque()
-    for tfp in all_target_fps:
-        for cell in tfp:
-            if cell not in straggler_df:
-                straggler_df[cell] = 0
-                _q.append(cell)
-    while _q:
-        cur = _q.popleft()
-        d = straggler_df[cur]
-        for nb in get_hex_neighbors(cur[0], cur[1]):
-            nc, nr = nb
-            if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
-                continue
-            if nb in straggler_df or nb in traverse_blocked:
-                continue
-            straggler_df[nb] = d + 1
-            _q.append(nb)
+    if not multilevel_ok:
+        _q: deque = deque()
+        for tfp in all_target_fps:
+            for cell in tfp:
+                if cell not in straggler_df:
+                    straggler_df[cell] = 0
+                    _q.append(cell)
+        while _q:
+            cur = _q.popleft()
+            d = straggler_df[cur]
+            for nb in get_hex_neighbors(cur[0], cur[1]):
+                nc, nr = nb
+                if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                    continue
+                if nb in straggler_df or nb in traverse_blocked:
+                    continue
+                straggler_df[nb] = d + 1
+                _q.append(nb)
 
     for mid in alive:
         if mid in provisional:
             continue
         sm = start_min[mid]
         if sm <= 0:
-            provisional[mid] = starts[mid]  # déjà au contact : ne peut finir plus proche
+            provisional[mid] = (*starts[mid], start_eff[mid])  # déjà au contact : ne peut finir plus proche
             continue
         start = starts[mid]
-        # Chemin de descente (≤ budget pas) du départ vers la cible la plus proche.
-        path: List[Tuple[int, int]] = []
-        cur = start
-        if start in straggler_df:
-            steps = 0
-            while steps < budget:
-                nxt = None
-                for nb in get_hex_neighbors(cur[0], cur[1]):
-                    if straggler_df.get(nb, 1 << 30) == straggler_df[cur] - 1:
-                        nxt = nb
+        # Candidats ordonnés (col, row, niveau). Multi-niveaux : le champ atteignable de la figurine
+        # est déjà calculé pour toutes les couches, on le parcourt directement — le raccourci par
+        # descente de gradient ne connaît que le sol et raterait un repli d'étage.
+        candidates: List[Tuple[int, int, int]] = []
+        if multilevel_ok:
+            reach = _reachable(mid)
+            # Filtrage AVANT le tri : seule une case strictement plus proche des cibles que le départ
+            # peut passer le test WHILE plus bas (``dist_to_t`` minore la distance d'empreinte). Sur un
+            # budget de charge, le champ atteignable compte des milliers de cases par étage — les
+            # trier toutes pour n'en consommer que les premières est le coût que la descente de
+            # gradient avait justement supprimé.
+            scored: List[Tuple[int, int, int, int]] = []
+            for lv, cells in reach.items():
+                for (cc, rr), pd in cells.items():
+                    if (cc, rr) == start and lv == start_eff[mid]:
+                        continue
+                    d_t = dist_to_t.get((cc, rr))
+                    if d_t is None or d_t >= sm:
+                        continue
+                    # Offensif → au plus près de la cible ; défensif → déplacement minimal. La
+                    # proximité se lit dans ``dist_to_t``, valable à toute hauteur — ``straggler_df``
+                    # est un parcours de SOL et reléguerait toute position d'étage en fin de liste.
+                    scored.append((d_t if mode == "offensive" else pd, cc, rr, lv))
+            scored.sort(key=lambda p: p[0])
+            candidates = [(cc, rr, lv) for _k, cc, rr, lv in scored]
+        else:
+            # Chemin de descente (≤ budget pas) du départ vers la cible la plus proche.
+            path: List[Tuple[int, int]] = []
+            cur = start
+            if start in straggler_df:
+                steps = 0
+                while steps < budget:
+                    nxt = None
+                    for nb in get_hex_neighbors(cur[0], cur[1]):
+                        if straggler_df.get(nb, 1 << 30) == straggler_df[cur] - 1:
+                            nxt = nb
+                            break
+                    if nxt is None:
                         break
-                if nxt is None:
-                    break
-                cur = nxt
-                path.append(cur)
-                steps += 1
-        # Offensif → position la plus proche de la cible (fin du chemin) ; défensif → déplacement
-        # minimal (début du chemin). On garde la 1re du parcours qui est closer + valide.
-        order = list(reversed(path)) if mode == "offensive" else path
-        chosen: Optional[Tuple[int, int]] = None
-        for pos in order:
-            soc = _socle(mid, pos[0], pos[1])
+                    cur = nxt
+                    path.append(cur)
+                    steps += 1
+            # Offensif → position la plus proche de la cible (fin du chemin) ; défensif → déplacement
+            # minimal (début du chemin). On garde la 1re du parcours qui est closer + valide.
+            order = list(reversed(path)) if mode == "offensive" else path
+            candidates = [(pos[0], pos[1], 0) for pos in order]
+        chosen: Optional[Tuple[int, int, int]] = None
+        for (pc, pr, plv) in candidates:
+            soc = _socle(mid, pc, pr)
             if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in soc.fp):
                 continue
-            if _overlaps_world(soc, mid):
+            if _overlaps_world(soc, mid, plv):
                 continue
             if _fp_min_to_targets(set(soc.fp)) >= sm:
                 continue  # WHILE : strictement plus proche
-            if _engages_nontarget(mid, pos[0], pos[1]):
+            if _engages_nontarget(mid, pc, pr, plv):
                 continue  # n'engage aucun ennemi non déclaré
-            chosen = pos
+            chosen = (pc, pr, plv)
             break
         if chosen is not None:
             provisional[mid] = chosen
-            occ_by_mid[mid] = _socle(mid, *chosen)
+            occ_by_mid[mid] = (chosen[2], _socle(mid, chosen[0], chosen[1]))
         else:
-            provisional[mid] = starts[mid]  # ne peut se rapprocher : reste au départ (Check → per_model)
+            # Ne peut se rapprocher : reste au départ, à son propre étage (Check → per_model).
+            provisional[mid] = (*starts[mid], start_eff[mid])
 
     # Garde-fou : aucun chevauchement de socle dans le plan produit. Erreur explicite plutôt qu'un
     # plan illégal silencieux (le contact tangent gap≈0 reste autorisé, footprints_overlap ne le compte pas).
     placed = [
-        (mid, _socle(mid, provisional[mid][0], provisional[mid][1])) for mid in alive
+        (mid, _socle(mid, provisional[mid][0], provisional[mid][1]), provisional[mid][2])
+        for mid in alive
     ]
     for i in range(len(placed)):
         for j in range(i + 1, len(placed)):
+            if placed[i][2] != placed[j][2]:
+                continue  # étages différents : superposition légale (§13.06)
             if footprints_overlap(placed[i][1], placed[j][1]):
                 raise ValueError(
                     f"charge_autoplace_plan: chevauchement de socles entre {placed[i][0]} "
                     f"({provisional[placed[i][0]]}) et {placed[j][0]} ({provisional[placed[j][0]]})"
                 )
 
-    plan = [[mid, int(provisional[mid][0]), int(provisional[mid][1])] for mid in alive]
+    # Niveau EXPLICITE par figurine : le consommateur ne peut pas le déduire, et ses défauts sont faux
+    # dans les deux sens — le commit de charge complète à 0 (une arrivée d'étage retomberait au sol),
+    # celui de la consolidation complète au niveau de VUE (un placement au sol monterait d'un cran).
+    plan = [
+        [mid, int(provisional[mid][0]), int(provisional[mid][1]), int(provisional[mid][2])]
+        for mid in alive
+    ]
     return {"plan": plan}
 
 

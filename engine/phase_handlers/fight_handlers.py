@@ -869,8 +869,20 @@ def _fight_synth_cache_entry_at_footprint(
     anchor_col: int,
     anchor_row: int,
     candidate_fp: Set[Tuple[int, int]],
+    model_centers: Optional[List[Tuple[int, int]]] = None,
 ) -> Dict[str, Any]:
-    """Construit une entrée ``units_cache``-compatible pour un test d'engagement à l'ancre donnée."""
+    """Construit une entrée ``units_cache``-compatible pour un test d'engagement à l'ancre donnée.
+
+    ``model_centers`` : centres par-figurine de la position CANDIDATE. Il n'est pas optionnel par
+    confort — la métrique d'engagement du jeu est euclidienne, et ``socle_from_cache_entry`` mesure
+    alors depuis ``occupied_hexes_by_model`` quand cette clé est présente. Copiée telle quelle depuis
+    l'entrée source, elle décrit les positions D'ORIGINE : le contrôle AFTER 12.03/12.08 « l'unité
+    doit finir engagée » répondait donc sur l'état d'AVANT le mouvement, et acceptait n'importe quelle
+    destination — y compris à l'autre bout du plateau. Sans centres candidats, la clé est retirée et
+    la mesure retombe sur l'empreinte candidate (exact pour un déplacement rigide, qui translate son
+    empreinte entière). Les cartes par-figurine dépendantes (niveau, hauteur de plancher) suivent le
+    même sort : périmées de la même façon, elles n'ont pas de version candidate à proposer.
+    """
     uid = str(require_key(unit, "id"))
     units_cache = require_key(game_state, "units_cache")
     src = units_cache.get(uid)
@@ -880,6 +892,14 @@ def _fight_synth_cache_entry_at_footprint(
     out["col"] = int(anchor_col)
     out["row"] = int(anchor_row)
     out["occupied_hexes"] = set(candidate_fp)
+    if model_centers is None:
+        out.pop("occupied_hexes_by_model", None)
+    else:
+        out["occupied_hexes_by_model"] = {
+            f"#{i}": (int(c), int(r)) for i, (c, r) in enumerate(model_centers)
+        }
+    out.pop("level_by_model", None)
+    out.pop("floor_height_by_model", None)
     return out
 
 
@@ -3084,7 +3104,7 @@ def _fight_pile_in_build_model_pool(
     closest = {str(t) for t in closest_tier_ids}
     target_entries: List[Dict[str, Any]] = []
     target_fps: List[Set[Tuple[int, int]]] = []
-    from engine.terrain_utils import low_clearance_ground_hexes
+    from engine.terrain_utils import floor_levels_present, low_clearance_ground_hexes
     from .shared_utils import build_enemy_occupied_positions_set
     # Obstacles au SOL filtrés par NIVEAU (miroir move) : seuls les ennemis au niveau 0 bloquent le
     # sol — un ennemi en hauteur ne gêne pas (superposition inter-étage §13.06). ``_low_clear`` =
@@ -3161,7 +3181,7 @@ def _fight_pile_in_build_model_pool(
     # cases du plancher atteignables avec le coût vertical, seedées au niveau effectif du mover
     # (source unique move : reachable_multilevel_field). Niveau EFFECTIF de destination = view_level.
     if _view_level >= 1:
-        present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})  # get allowed (champ optionnel : area sans étage)
+        present = floor_levels_present(terrain_areas)
         if _view_level not in present:
             return empty
         from engine.game_state import unit_can_occupy_upper_floor
@@ -3377,7 +3397,12 @@ def _fight_pile_in_preview_plan(
     for f in fps:
         union_fp |= f
     anchor_c, anchor_r = norm[0][1], norm[0][2]
-    synth_unit = _fight_synth_cache_entry_at_footprint(unit, game_state, anchor_c, anchor_r, union_fp)
+    # Centres par-figurine du PLAN : la mesure d'engagement euclidienne part de là (cf.
+    # _fight_synth_cache_entry_at_footprint), pas de l'empreinte agrégée.
+    synth_unit = _fight_synth_cache_entry_at_footprint(
+        unit, game_state, anchor_c, anchor_r, union_fp,
+        model_centers=[(c, r) for _mid, c, r, _lv in norm],
+    )
     ez = int(get_engagement_zone(game_state))
     units_cache = require_key(game_state, "units_cache")
     player = int(require_key(unit, "player"))
@@ -3605,24 +3630,34 @@ def pile_in_autoplace_plan(
       - objectif : maximiser Σ x (toutes les arêtes engagent le focus), départage = distance minimale.
 
     Contraintes de règle (12.03), par arête, conformes au pool/commit pile-in existant :
-      - budget 3" (× inches_to_subhex), atteignabilité BFS centre-à-centre (mur/ennemi bloquent, amies
+      - budget 3" (× inches_to_subhex), atteignabilité centre-à-centre (mur/ennemi bloquent, amies
         traversables — 03.01) ;
       - figs en base-contact FIGÉES (ne bougent pas) ;
       - WHILE : empreinte au slot strictement plus proche du palier le plus proche que le départ de la fig ;
       - AFTER : chaque engagement de départ de la fig est conservé au slot.
 
-    Les slots sont générés UNE fois par taille de socle sur la BANDE d'engagement du focus (pas tout le
-    rayon). Les figs non affectées par l'ILP sont rapprochées au max le long de leur zone atteignable
-    (strictement plus proche, sans chevaucher). Garde-fou final : aucun chevauchement de cellules.
+    ÉTAGES (§13.06) — chaque figurine reste sur SON plancher : son niveau EFFECTIF de départ est aussi
+    son niveau de destination, et tout ce qui dépend de la géométrie est calculé à ce niveau (obstacles
+    de traversée, collisions de socles, atteignabilité). L'optimisation se décompose donc exactement par
+    étage : deux figurines de niveaux différents ne peuvent pas se disputer une case (la superposition
+    inter-étage est légale), donc leurs contraintes de non-chevauchement ne se croisent jamais.
+    Le plan porte le niveau de chaque figurine — sans lui, le commit retombe sur le niveau de VUE
+    (``_prov_from_action``) et fait descendre d'un étage, sans coût ni contrôle, toute figurine posée
+    en hauteur.
 
-    Retour : {"plan": [[model_id, col, row], ...]} couvrant toutes les figs vivantes.
+    Les slots sont générés UNE fois par (taille de socle, niveau) sur la BANDE d'engagement du focus (pas
+    tout le rayon). Les figs non affectées par l'ILP sont rapprochées au max le long de leur zone
+    atteignable (strictement plus proche, sans chevaucher). Garde-fou final : aucun chevauchement.
+
+    Retour : {"plan": [[model_id, col, row, level], ...]} couvrant toutes les figs vivantes.
     """
     import numpy as np
     from scipy.optimize import milp, LinearConstraint, Bounds
     from scipy.sparse import coo_matrix
     from engine.hex_utils import min_distance_between_sets, footprints_overlap, Socle
     from engine.spatial_relations import unit_entries_within_engagement_zone
-    from .shared_utils import get_engagement_zone
+    from engine.terrain_utils import low_clearance_ground_hexes, resolve_model_floor_level
+    from .shared_utils import build_enemy_occupied_positions_set, get_engagement_zone
     from .charge_handlers import (
         _charge_model_footprint,
         _charge_model_socle,
@@ -3664,6 +3699,32 @@ def pile_in_autoplace_plan(
     focus_occ = focus_entry.get("occupied_hexes")
     focus_fp = set(focus_occ) if focus_occ else {(int(focus_entry["col"]), int(focus_entry["row"]))}
 
+    # --- Étages §13.06 : niveau EFFECTIF (plancher réellement occupé) de chaque figurine. C'est à la
+    # fois son niveau de départ et son niveau de destination — le pile-in replace une figurine sur son
+    # propre plancher. Même source que le pool de validation (``_fight_pile_in_build_model_pool``), qui
+    # seede son champ au niveau effectif du mover : toute autre lecture du niveau produirait des slots
+    # que le validateur refuserait.
+    terrain_areas = game_state.get("terrain_areas", [])  # get allowed (champ optionnel : board sans terrain)
+    _orient = int(unit.get("orientation", 0))  # get allowed (champ optionnel : orientation absente = 0)
+    eff_level: Dict[str, int] = {}
+    for mid in alive:
+        m = models_cache[mid]
+        eff_level[mid] = resolve_model_floor_level(
+            int(m["col"]), int(m["row"]), m["BASE_SHAPE"], m["BASE_SIZE"], _orient,
+            int(m.get("level", 0)), terrain_areas,  # get allowed (champ optionnel : level absent = sol)
+        )
+    if any(lv >= 1 for lv in eff_level.values()):
+        # Garde du pool de validation, reproduite à l'identique : une unité qui ne peut pas finir en
+        # hauteur n'a aucune destination légale là-haut, l'autoplace proposerait des slots
+        # systématiquement rejetés. (Le niveau lui-même n'a pas à être vérifié : le niveau EFFECTIF
+        # n'est rendu que pour un plancher qui existe et qui porte l'empreinte entière.)
+        from engine.game_state import unit_can_occupy_upper_floor
+        if not unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS")):
+            raise ValueError(
+                f"pile_in_autoplace_plan: {squad_id} a des figurines en hauteur alors que ses mots-clés "
+                f"lui interdisent d'y finir (§13.06)"
+            )
+
     # Palier WHILE : empreintes des cibles les plus proches de l'unité.
     tier_fps: List[Set[Tuple[int, int]]] = []
     for tid in closest_tier:
@@ -3679,17 +3740,27 @@ def pile_in_autoplace_plan(
     def _socle(mid: str, c: int, r: int) -> Any:
         return _charge_model_socle(game_state, models_cache[mid], c, r)
 
-    def _overlaps(s: Any, others: List[Any]) -> bool:
-        if walls and (s.fp & walls):
+    def _overlaps(s: Any, others: List[Any], level: int) -> bool:
+        # Les murs ne barrent que le SOL : aux étages, l'appartenance au plancher (et donc l'absence
+        # de mur) est déjà tranchée par le champ multi-niveaux qui produit l'atteignabilité — c'est
+        # la même dispense que ``skip_wall_blocker`` dans le pool de validation.
+        if level == 0 and walls and (s.fp & walls):
             return True
         return any(footprints_overlap(s, o) for o in others)
+
+    def _at_level(socles: List[Tuple[int, Any]], level: int) -> List[Any]:
+        """Socles du seul étage ``level`` : deux figurines d'étages différents ne se gênent pas
+        (superposition inter-étage, §13.06 — même filtrage que le pool de validation)."""
+        return [s for lv, s in socles if lv == level]
 
     # Socles bloquants PAR FIGURINE : ennemis + autres unités amies (rond↔rond exact par modèle).
     # Empreinte COMPLÈTE par figurine via _charge_model_socle (miroir EXACT du pool de validation,
     # cf. _fight_pile_in_build_model_pool ~L3626) : avec fp={(mc,mr)} (une seule case) un blocker à
     # base NON-RONDE n'occupait que son hex central → l'autoplace posait des figs en superposition
     # partielle que le validateur rejetait ensuite (CHEVAUCHE UN BLOQUEUR → plan invalide).
-    blocker_socles: List[Any] = []
+    # Chaque socle est étiqueté de son niveau EFFECTIF (idem pool) : sans cette étiquette, une
+    # figurine d'un autre étage interdisait une case parfaitement libre au niveau visé.
+    blocker_socles: List[Tuple[int, Any]] = []
     for eid, entry in units_cache.items():
         if str(eid) == str(squad_id):
             continue
@@ -3699,36 +3770,43 @@ def pile_in_autoplace_plan(
                 _bm_entry = models_cache.get(str(_bmid))
                 if _bm_entry is None:
                     continue
-                blocker_socles.append(
-                    _charge_model_socle(game_state, _bm_entry, int(mc), int(mr))
-                )
+                blocker_socles.append((
+                    _fight_fig_effective_level(entry, str(_bmid)),
+                    _charge_model_socle(game_state, _bm_entry, int(mc), int(mr)),
+                ))
         else:
             occ = entry.get("occupied_hexes")
-            blocker_socles.append(
+            blocker_socles.append((
+                int(entry.get("level", 0)),  # get allowed (champ optionnel : level absent = sol)
                 Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
                       col=int(entry["col"]), row=int(entry["row"]),
-                      fp=set(occ) if occ else {(int(entry["col"]), int(entry["row"]))})
-            )
+                      fp=set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}),
+            ))
 
-    # Ennemis (cellules occupées) : bloquent la TRAVERSÉE du BFS (les amies sont traversables, 03.01).
-    enemy_occupied: Set[Tuple[int, int]] = set()
-    for entry in units_cache.values():
-        if int(entry["player"]) != player:
-            occ = entry.get("occupied_hexes")
-            enemy_occupied |= set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
+    # Traversée au SOL : ennemis du niveau 0 seulement (les amies sont traversables, 03.01) et
+    # clairance verticale §13.06/§2.11 (une figurine trop haute ne passe pas sous un plancher bas).
+    # Aux étages, la traversée est portée par le champ multi-niveaux, qui construit ses propres
+    # obstacles par plancher — reproduire ici un blocage de sol l'y ferait compter deux fois.
+    ground_enemy = build_enemy_occupied_positions_set(game_state, current_player=player, level=0)
+    low_clear = low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
 
-    # Figs figées (base-contact) : ne bougent pas ; leurs socles bloquent les placements.
-    frozen_socles: List[Any] = []
+    # Figs figées (base-contact) : ne bougent pas ; leurs socles bloquent les placements de leur étage.
+    frozen_socles: List[Tuple[int, Any]] = []
     movable: List[str] = []
     for mid in alive:
         m = models_cache[mid]
         if _fight_model_in_base_contact(game_state, m):
-            frozen_socles.append(_socle(mid, int(m["col"]), int(m["row"])))
+            frozen_socles.append((eff_level[mid], _socle(mid, int(m["col"]), int(m["row"]))))
         else:
             movable.append(mid)
 
-    path_blocked = walls | enemy_occupied
-    static_blockers = blocker_socles + frozen_socles
+    path_blocked = walls | ground_enemy | low_clear
+    # Obstacles de sol du champ multi-niveaux : invariants par figurine (ils excluent l'escouade
+    # entière), donc calculés une fois — seule la case de départ, retirée à l'usage, varie.
+    ground_obstacles_climb = path_blocked | build_occupied_positions_set(
+        game_state, exclude_unit_id=str(squad_id), level=0
+    )
+    static_blockers: List[Tuple[int, Any]] = blocker_socles + frozen_socles
 
     def _model_fp(mid: str, c: int, r: int) -> Set[Tuple[int, int]]:
         return _charge_model_footprint(game_state, models_cache[mid], c, r)
@@ -3748,16 +3826,22 @@ def pile_in_autoplace_plan(
     for mid in movable:
         m = models_cache[mid]
         if _fp_min_to_tier(_model_fp(mid, int(m["col"]), int(m["row"]))) <= 0:
-            static_blockers.append(_socle(mid, int(m["col"]), int(m["row"])))
+            static_blockers.append((eff_level[mid], _socle(mid, int(m["col"]), int(m["row"]))))
 
-    # --- Slots : bande d'engagement du focus, par taille de socle distincte (coût). ---
+    # --- Slots : bande d'engagement du focus, par (taille de socle, étage) distincts (coût). ---
+    # L'étage entre dans la clé parce que les bloqueurs à éviter en dépendent : une même case peut
+    # être libre au niveau 1 et occupée au sol.
     def _base_key(m: Dict[str, Any]) -> Tuple[Any, Any]:
         bs = m["BASE_SIZE"]
         return (m["BASE_SHAPE"], tuple(bs) if isinstance(bs, (list, tuple)) else bs)
 
-    by_base: Dict[Tuple[Any, Any], List[str]] = {}
+    def _slot_key(mid: str) -> Tuple[Any, Any, int]:
+        bk = _base_key(models_cache[mid])
+        return (bk[0], bk[1], eff_level[mid])
+
+    by_base: Dict[Tuple[Any, Any, int], List[str]] = {}
     for mid in movable:
-        by_base.setdefault(_base_key(models_cache[mid]), []).append(mid)
+        by_base.setdefault(_slot_key(mid), []).append(mid)
 
     # Rayon d'empreinte EN CASES par base (marge de balayage correcte ; cf. charge_autoplace_plan :
     # BASE_SIZE en mm dilatait ~13× trop loin). Les deux parités de colonne sont couvertes.
@@ -3802,30 +3886,32 @@ def pile_in_autoplace_plan(
     # aucun slot (dont l'empreinte est dans cette zone) → on filtre UNE fois pour le balayage des slots.
     # Le repli garde static_blockers complet (positions de repli potentiellement hors zone).
     _zone = set(dist_to_focus)
-    near_blockers = [s for s in static_blockers if s.fp & _zone]
+    near_blockers = [(lv, s) for lv, s in static_blockers if s.fp & _zone]
 
-    # Liste GLOBALE des slots (toutes bases) : (col, row, Socle, slot_min_to_tier, dist_to_focus).
-    all_slots: List[Tuple[int, int, Any, int, int]] = []
-    # slots_by_base[bkey] = [index dans all_slots, ...]
-    slots_by_base: Dict[Tuple[Any, Any], List[int]] = {}
+    # Liste GLOBALE des slots : (col, row, Socle, slot_min_to_tier, dist_to_focus, level).
+    all_slots: List[Tuple[int, int, Any, int, int, int]] = []
+    # slots_by_base[(shape, base, level)] = [index dans all_slots, ...]
+    slots_by_base: Dict[Tuple[Any, Any, int], List[int]] = {}
     for bkey, mids in by_base.items():
         rep_id = mids[0]
+        slot_level = bkey[2]
         margin = ez + fp_radius_by_base[bkey] + 2
         near_cells = sorted(cell for cell, d in dist_to_focus.items() if d <= margin)
+        level_blockers = _at_level(near_blockers, slot_level)
         idxs: List[int] = []
         for (c, r) in near_cells:
             soc = _socle(rep_id, c, r)
             fps = set(soc.fp)
             if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in fps):
                 continue
-            if _overlaps(soc, near_blockers):
+            if _overlaps(soc, level_blockers, slot_level):
                 continue
             if not _engages_focus(c, r, fps):
                 continue
             slot_min = min((dist_to_tier[cell] for cell in fps if cell in dist_to_tier), default=1 << 30)
             df_slot = min((dist_to_focus[cell] for cell in fps if cell in dist_to_focus), default=1 << 30)
             idxs.append(len(all_slots))
-            all_slots.append((c, r, soc, slot_min, df_slot))
+            all_slots.append((c, r, soc, slot_min, df_slot, slot_level))
         slots_by_base[bkey] = idxs
 
     # --- Atteignabilité par fig (BFS centre-à-centre ≤ budget, amies traversables). ---
@@ -3836,24 +3922,41 @@ def pile_in_autoplace_plan(
     _reach_cache: Dict[str, Dict[Tuple[int, int], int]] = {}
 
     def _reachable(mid: str) -> Dict[Tuple[int, int], int]:
+        """Cases atteignables par la figurine SUR SON PLANCHER, avec leur coût (sous-hexes).
+
+        Sol : BFS centre-à-centre du budget (03.01, amies traversables). Étage : champ multi-niveaux
+        du move (source unique du coût vertical, §13.06), seedé au niveau effectif de la figurine —
+        exactement ce que calcule le pool de validation pour ce même niveau de vue."""
         cached = _reach_cache.get(mid)
         if cached is not None:
-            return cached  # même fig réutilisée au repli → pas de 2e BFS
+            return cached  # même fig réutilisée au repli → pas de 2e parcours
+        level = eff_level[mid]
         sc, sr = starts[mid]
-        dist: Dict[Tuple[int, int], int] = {(sc, sr): 0}
-        queue: deque = deque([(sc, sr, 0)])
-        while queue:
-            c, r, d = queue.popleft()
-            if d >= budget:
-                continue
-            for nc, nr in get_hex_neighbors(c, r):
-                if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+        if level >= 1:
+            from engine.phase_handlers.movement_handlers import _model_multilevel_reachable_field
+
+            ground_obs = ground_obstacles_climb
+            if (sc, sr) in ground_obs:
+                ground_obs = ground_obs - {(sc, sr)}
+            dist = _model_multilevel_reachable_field(
+                game_state, unit, str(squad_id), models_cache[mid], (sc, sr), budget, {level},
+                ground_obs, terrain_areas, start_level=level,
+            ).get(level, {})  # get allowed (niveau inatteignable = aucune case)
+        else:
+            dist = {(sc, sr): 0}
+            queue: deque = deque([(sc, sr, 0)])
+            while queue:
+                c, r, d = queue.popleft()
+                if d >= budget:
                     continue
-                cell = (nc, nr)
-                if cell in dist or cell in path_blocked:
-                    continue
-                dist[cell] = d + 1
-                queue.append((nc, nr, d + 1))
+                for nc, nr in get_hex_neighbors(c, r):
+                    if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                        continue
+                    cell = (nc, nr)
+                    if cell in dist or cell in path_blocked:
+                        continue
+                    dist[cell] = d + 1
+                    queue.append((nc, nr, d + 1))
         _reach_cache[mid] = dist
         return dist
 
@@ -3876,8 +3979,8 @@ def pile_in_autoplace_plan(
             continue  # déjà au contact du palier : aucun slot strictement plus proche
         reach = _reachable(mid)
         start_eng = _start_engagements(mid)
-        for si in slots_by_base[_base_key(models_cache[mid])]:
-            sc, sr, soc, slot_min, _df = all_slots[si]
+        for si in slots_by_base[_slot_key(mid)]:
+            sc, sr, soc, slot_min, _df, _slv = all_slots[si]
             if slot_min >= sm:
                 continue  # WHILE : strictement plus proche du palier
             pd = reach.get((sc, sr))
@@ -3890,7 +3993,7 @@ def pile_in_autoplace_plan(
             edges.append((mid, si, pd))
 
     provisional: Dict[str, Tuple[int, int]] = {}
-    placed_socles: List[Any] = list(static_blockers)
+    placed_socles: List[Tuple[int, Any]] = list(static_blockers)
 
     if edges:
         n = len(edges)
@@ -3906,11 +4009,16 @@ def pile_in_autoplace_plan(
         for e_i, (mid, si, _pd) in enumerate(edges):
             rows.append(mids_idx[mid]); cols.append(e_i)              # (1)
             rows.append(n_model + slot_row[si]); cols.append(e_i)     # (2)
-        # (3) paires de slots utilisés qui se chevauchent → 1 ligne par paire.
+        # (3) paires de slots utilisés qui se chevauchent → 1 ligne par paire. Deux slots d'ÉTAGES
+        # différents ne sont jamais en conflit : la superposition inter-étage est légale (§13.06),
+        # les y contraindre interdirait à une figurine du sol la case située sous une figurine d'étage.
         conflict_pairs: List[Tuple[int, int]] = []
         for a in range(n_slot):
             sa = all_slots[used_slots[a]][2]
+            la = all_slots[used_slots[a]][5]
             for b in range(a + 1, n_slot):
+                if all_slots[used_slots[b]][5] != la:
+                    continue
                 if footprints_overlap(sa, all_slots[used_slots[b]][2]):
                     conflict_pairs.append((used_slots[a], used_slots[b]))
         edges_by_slot: Dict[int, List[int]] = {}
@@ -3945,9 +4053,9 @@ def pile_in_autoplace_plan(
             for e_i, x in enumerate(res.x):
                 if x > 0.5:
                     mid, si, _pd = edges[e_i]
-                    sc, sr, soc, _sm, _df = all_slots[si]
+                    sc, sr, soc, _sm, _df, slv = all_slots[si]
                     provisional[mid] = (sc, sr)
-                    placed_socles.append(soc)
+                    placed_socles.append((slv, soc))
 
     # Figs mobiles non posées par l'ILP : rapprochement au max (strictement plus proche, sans chevaucher).
     placed = set(provisional)
@@ -3955,15 +4063,19 @@ def pile_in_autoplace_plan(
     # susceptible de RESTER sur place) occupe son départ → une autre fig ne doit pas s'y poser.
     # Une fig est retirée de la réservation dès qu'elle bouge effectivement (elle libère sa case).
     # Corrige le crash « chevauchement de socles » : une fig restée au départ n'était pas un bloqueur.
-    reserved_start_socles: Dict[str, Any] = {
-        mid: _socle(mid, *starts[mid]) for mid in movable if mid not in placed
+    reserved_start_socles: Dict[str, Tuple[int, Any]] = {
+        mid: (eff_level[mid], _socle(mid, *starts[mid])) for mid in movable if mid not in placed
     }
     for mid in movable:
         if mid in placed:
             continue
+        level = eff_level[mid]
         sm = start_min[mid]
         best: Optional[Tuple[int, int]] = None
-        others_reserved = [s for om, s in reserved_start_socles.items() if om != mid]
+        others_reserved = [
+            s for om, (lv, s) in reserved_start_socles.items() if om != mid and lv == level
+        ]
+        level_placed = _at_level(placed_socles, level)
         if sm > 0:
             best_score = None
             for (cc, rr), _pd in _reachable(mid).items():
@@ -3972,7 +4084,7 @@ def pile_in_autoplace_plan(
                 soc = _socle(mid, cc, rr)
                 if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in soc.fp):
                     continue
-                if _overlaps(soc, placed_socles) or _overlaps(soc, others_reserved):
+                if _overlaps(soc, level_placed, level) or _overlaps(soc, others_reserved, level):
                     continue
                 d_tier = _fp_min_to_tier(set(soc.fp))
                 if d_tier >= sm:
@@ -3983,7 +4095,7 @@ def pile_in_autoplace_plan(
                     best = (cc, rr)
             if best is not None:
                 provisional[mid] = best
-                placed_socles.append(_socle(mid, *best))
+                placed_socles.append((level, _socle(mid, *best)))
                 reserved_start_socles.pop(mid, None)  # a bougé → libère sa case de départ
         if mid not in provisional:
             provisional[mid] = starts[mid]  # reste à sa position (départ, déjà réservée)
@@ -4007,6 +4119,8 @@ def pile_in_autoplace_plan(
         conflict: Optional[Tuple[str, str]] = None
         for i in range(len(ids)):
             for j in range(i + 1, len(ids)):
+                if eff_level[ids[i]] != eff_level[ids[j]]:
+                    continue  # étages différents : superposition légale (§13.06)
                 if footprints_overlap(socs[ids[i]], socs[ids[j]]):
                     conflict = (ids[i], ids[j])
                     break
@@ -4030,7 +4144,13 @@ def pile_in_autoplace_plan(
     else:
         raise ValueError("pile_in_autoplace_plan: résolution des chevauchements non convergente")
 
-    plan = [[mid, int(provisional[mid][0]), int(provisional[mid][1])] for mid in alive]
+    # Le NIVEAU est porté par chaque entrée : le consommateur (UI puis ``commit_pile_in_plan``) ne
+    # peut pas le déduire, et son défaut — le niveau de VUE — ferait descendre d'un étage toute
+    # figurine placée en hauteur.
+    plan = [
+        [mid, int(provisional[mid][0]), int(provisional[mid][1]), int(eff_level[mid])]
+        for mid in alive
+    ]
     return {"plan": plan}
 
 
@@ -4286,7 +4406,7 @@ def _fight_consolidation_build_model_pool(
     zone_set: Set[Tuple[int, int]] = set(tier) if tier_kind == "zone" else set()
     target_entries: List[Dict[str, Any]] = []
     target_fps: List[Set[Tuple[int, int]]] = []
-    from engine.terrain_utils import low_clearance_ground_hexes
+    from engine.terrain_utils import floor_levels_present, low_clearance_ground_hexes
     from .shared_utils import build_enemy_occupied_positions_set
     # Obstacles au SOL filtrés par NIVEAU (miroir move) : seuls les ennemis au niveau 0 bloquent le
     # sol — un ennemi en hauteur ne gêne pas (superposition inter-étage §13.06). ``_low_clear`` =
@@ -4361,7 +4481,7 @@ def _fight_consolidation_build_model_pool(
 
     # --- Candidats (col,row) selon le niveau de VUE (§13.06), miroir pile-in ---------------------
     if _view_level >= 1:
-        present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})  # get allowed (champ optionnel : area sans étage)
+        present = floor_levels_present(terrain_areas)
         if _view_level not in present:
             return empty
         from engine.game_state import unit_can_occupy_upper_floor
@@ -4561,7 +4681,12 @@ def _fight_consolidation_preview_plan(
     for f in fps:
         union_fp |= f
     anchor_c, anchor_r = norm[0][1], norm[0][2]
-    synth_unit = _fight_synth_cache_entry_at_footprint(unit, game_state, anchor_c, anchor_r, union_fp)
+    # Centres par-figurine du PLAN : la mesure d'engagement euclidienne part de là (cf.
+    # _fight_synth_cache_entry_at_footprint), pas de l'empreinte agrégée.
+    synth_unit = _fight_synth_cache_entry_at_footprint(
+        unit, game_state, anchor_c, anchor_r, union_fp,
+        model_centers=[(c, r) for _mid, c, r, _lv in norm],
+    )
     ez = int(get_engagement_zone(game_state))
     units_cache = require_key(game_state, "units_cache")
     player = int(require_key(unit, "player"))
