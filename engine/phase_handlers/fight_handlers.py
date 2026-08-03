@@ -5226,7 +5226,7 @@ def _manual_roll_fight_intent(
     from engine.phase_handlers.attack_sequence import (
         RerollProfile, build_weapon_attack_profile, roll_attack_pool,
     )
-    from engine.utils.weapon_helpers import weapon_has_rule
+    from engine.utils.weapon_helpers import weapon_has_rule, weapon_rule_signature
     rolled = roll_attack_pool(
         n_attacks=int(n_attacks),
         hit_target=ws,
@@ -5250,6 +5250,10 @@ def _manual_roll_fight_intent(
         # (06.01 : aucun terrain ne s interpose a distance d engagement).
         "precision": weapon_has_rule(weapon, "PRECISION"),
         "precision_range": None,
+        # 04.03 IDENTICAL ATTACKS : jumeau exact du roller de tir — la seconde moitie de la
+        # definition (« affected by the same applicable abilities and rules ») entre dans la
+        # cle de groupe, en melee comme au tir.
+        "weapon_rules": weapon_rule_signature(weapon),
         "display_wth": display_wth, "display_save_th": display_save_th,
         "shot_records": rolled["shot_records"], "pending_wounds": rolled["pending_wounds"],
         "counts": rolled["counts"],

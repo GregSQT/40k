@@ -4,7 +4,7 @@ Weapon Helper Functions
 MULTIPLE_WEAPONS_IMPLEMENTATION.md: Helper functions for accessing weapon data
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, FrozenSet, List, Optional
 from shared.data_validation import require_key
 from engine.combat_utils import expected_dice_value
 
@@ -85,6 +85,40 @@ def weapon_has_rule(weapon: Dict[str, Any], rule_id: str) -> bool:
         if str(name).strip().upper() == target:
             return True
     return False
+
+
+def weapon_rule_signature(weapon: Dict[str, Any]) -> FrozenSet[str]:
+    """Ensemble NORMALISE des regles declarees par l'arme, parametre compris.
+
+    Sert la clause « **and which are affected by the same applicable abilities and rules** » de
+    l'encadre IDENTICAL ATTACKS de 04.03 : deux armes ne font des attaques identiques que si
+    elles partagent BS/WS, S, AP, D **et** leurs regles. Sans cette moitie-la, le lot
+    d'allocation fusionnait des armes aux regles differentes (Shoota RAPID_FIRE:1, Kombi Shoota
+    aucune, Kustom Shoota RAPID_FIRE:2) : le log ne pouvait plus porter qu'une seule valeur de
+    `[RAPID FIRE:X]` pour trois armes, d'ou 898 faux « marker value mismatch » cote analyzer.
+
+    Le PARAMETRE fait partie de la signature : RAPID_FIRE:1 et RAPID_FIRE:2 ne sont pas la meme
+    regle appliquee. RNG et NB (A), eux, n'y sont PAS — 04.03 ne les liste pas parmi les
+    caracteristiques d'identite, et les y mettre separerait des lots que la regle fusionne.
+
+    Normalisation identique a `weapon_has_rule` / `weapon_rule_parameter` : casse et espaces
+    ignores, meme rejet explicite de toute entree non-chaine.
+    """
+    rules = require_key(weapon, "WEAPON_RULES")
+    if not isinstance(rules, list):
+        raise TypeError(
+            f"WEAPON_RULES must be a list, got {type(rules).__name__} "
+            f"for weapon {weapon.get('display_name', weapon.get('NAME'))}"
+        )
+    out = set()
+    for entry in rules:
+        if not isinstance(entry, str):
+            raise TypeError(
+                f"Unsupported WEAPON_RULES entry type: {type(entry).__name__} ({entry!r})"
+            )
+        name, _, param = entry.partition(":")
+        out.add(f"{name.strip().upper()}:{param.strip()}" if param else name.strip().upper())
+    return frozenset(out)
 
 
 def weapon_rule_parameter(weapon: Dict[str, Any], rule_id: str) -> Optional[int]:

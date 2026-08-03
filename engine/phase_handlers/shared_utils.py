@@ -13,7 +13,12 @@ if TYPE_CHECKING:
     from engine.hex_utils import Socle
 
 from shared.data_validation import require_key
-from engine.utils.weapon_helpers import melee_weapons, ranged_weapons, weapon_has_rule
+from engine.utils.weapon_helpers import (
+    melee_weapons,
+    ranged_weapons,
+    weapon_has_rule,
+    weapon_rule_signature,
+)
 
 # --- Type de plan de mouvement (source unique) ---------------------------------
 # Une entrée positionne UNE figurine : (model_id, col, row), (model_id, col, row, level) OU
@@ -7607,6 +7612,9 @@ def _manual_roll_intent(
         # porte la regle (seul cas ou la valeur est lue).
         "heavy_applied": _heavy_applied,
         "rapid_fire_applied": _rapid_fire_applied,
+        # 04.03 IDENTICAL ATTACKS, seconde moitie de la definition : « affected by the same
+        # applicable abilities and rules ». Entre dans la cle de groupe.
+        "weapon_rules": weapon_rule_signature(weapon),
         "precision": _weapon_precision,
         "precision_range": int(require_key(weapon, "RNG")) if _weapon_precision else None,
         "display_wth": display_wth, "display_save_th": display_save_th,
@@ -8084,8 +8092,28 @@ def _build_manual_allocation(
         # le nom) ; les noms distincts sont accumules pour l affichage (fenetre + log).
         # [MELTA] 24.25 : le bonus de D fait partie du PROFIL (une meme arme a demi-portee et
         # hors demi-portee ne se resout pas dans le meme lot) -> il entre dans la cle de groupe.
+        # 04.03 IDENTICAL ATTACKS, encadre : « Identical attacks are those that have the same
+        # BS/WS, S, AP and D characteristics, AND WHICH ARE AFFECTED BY THE SAME APPLICABLE
+        # ABILITIES AND RULES. » La cle ne portait que la premiere moitie (S est represente par
+        # `display_wth`, seuil de blessure contre CETTE cible). Trois armes de meme profil brut
+        # mais de regles differentes — Shoota RAPID_FIRE:1, Kombi Shoota aucune, Kustom Shoota
+        # RAPID_FIRE:2 — tombaient donc dans un lot unique, qui ne peut porter qu'UNE valeur de
+        # `[RAPID FIRE:X]` dans le log : 898 faux « marker value mismatch » cote analyzer, et un
+        # nom d'arme composite « A / B / C » qui melangeait des attaques non identiques.
+        # RNG et NB n'entrent PAS dans la cle : 04.03 ne les compte pas parmi les
+        # caracteristiques d'identite.
+        #
+        # `rapid_fire_applied` y entre EN PLUS de la signature declaree, parce que 04.03 dit
+        # « APPLICABLE abilities and rules » : deux figurines de la meme escouade portant la
+        # MEME arme [RAPID FIRE] n'y sont pas soumises pareil si l'une est a demi-portee et
+        # l'autre non (24.30). La signature declaree ne les separe pas ; la valeur appliquee si.
+        # C'est aussi ce qui rend `rapid_fire_applied` reellement constant sur le groupe — donc
+        # le token `[RAPID FIRE:X]` du log non ambigu. Les autres regles conditionnelles sont
+        # deja representees : [HEAVY] et [COVER] par `bs`, [MELTA] par `dmg_bonus`.
         gkey = (r["bs"], r["ap"], r["dmg_raw"], require_key(r, "dmg_bonus"),
-                r["display_wth"], r["display_save_th"], target_sid)
+                r["display_wth"], r["display_save_th"], require_key(r, "weapon_rules"),
+                int(r["rapid_fire_applied"]) if "rapid_fire_applied" in r else 0,
+                target_sid)
         if gkey not in group_index_by_key:
             group_index_by_key[gkey] = len(weapon_groups)
             # Position de l'ancre cible CAPTURÉE ICI (cible vivante : aucune figurine n'est
@@ -8116,8 +8144,11 @@ def _build_manual_allocation(
                 # (constante sur toute l activation), donc jamais ambigue au sein d un groupe ;
                 # `bs` est de toute facon deja dans la cle de groupe.
                 "heavy_applied": bool(r["heavy_applied"]) if "heavy_applied" in r else False,
-                # [RAPID FIRE] 24.30 : propriete du couple (arme, cible) — donc constante sur
-                # le groupe, qui est justement cle par (arme, cible). Absente en melee.
+                # [RAPID FIRE] 24.30 : la valeur APPLIQUEE fait partie de la cle de groupe
+                # (cf. `gkey`), elle est donc constante sur le groupe par construction. Ce
+                # n'etait PAS le cas avant : la cle ignorait les regles d'arme, trois armes de
+                # regles differentes y tombaient ensemble et le groupe ne retenait que la valeur
+                # de la PREMIERE. Absente en melee.
                 "rapid_fire_applied": int(r["rapid_fire_applied"]) if "rapid_fire_applied" in r else 0,
                 "precision": require_key(r, "precision"),
                 "precision_range": require_key(r, "precision_range"),
