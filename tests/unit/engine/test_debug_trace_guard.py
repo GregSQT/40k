@@ -29,14 +29,28 @@ from engine.debug_trace import (
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
-#: Les fichiers qui portent des traces. Si un cinquième s'y met, il DOIT être ajouté ici —
-#: sinon l'analyse statique ci-dessous ne le couvre pas et le verrou devient décoratif.
-_TRACED_FILES = (
-    "engine/w40k_core.py",
-    "engine/action_decoder.py",
-    "ai/env_wrappers.py",
-    "ai/train.py",
-)
+#: Fonctions dont le 3ᵉ argument est un format relayé tel quel à `trace`. Sans elles, le garde
+#: ne verrait que les appels directs : `_debug_train_marker` a justement vécu un temps avec une
+#: signature `(message)` que ses 12 appelants nourrissaient de f-strings — le canal `train`
+#: était intégralement hors garde pendant que ce fichier déclarait le contraire.
+_TRACE_RELAYS = ("trace", "_debug_train_marker")
+
+
+def _traced_files() -> "list[str]":
+    """Fichiers qui importent `engine.debug_trace`, DÉCOUVERTS et non listés à la main.
+
+    Une liste-miroir tenue à la main rétrécit en silence : le jour où un cinquième fichier se
+    met à tracer, il échappe au garde sans que rien ne rougisse. C'est le mode d'échec n°1 de
+    ce dépôt (JUMEAU) appliqué à son propre verrou.
+    """
+    found = []
+    for package in ("engine", "ai", "services", "scripts"):
+        for path in sorted((_REPO_ROOT / package).rglob("*.py")):
+            if path.name == "debug_trace.py":
+                continue
+            if "engine.debug_trace" in path.read_text(encoding="utf-8"):
+                found.append(str(path.relative_to(_REPO_ROOT)))
+    return found
 
 
 def test_trace_writes_nothing_when_debug_is_off():
@@ -57,25 +71,13 @@ def test_trace_writes_when_debug_is_on():
     assert "[TRAIN DEBUG]" in out and "valeur=42" in out
 
 
-def test_engine_step_writes_nothing_on_the_production_path():
+def test_engine_step_writes_nothing_on_the_production_path(make_active_deployment_engine):
     """Le vrai chemin : un `step` complet en `debug_mode=False` n'écrit pas un octet.
 
     C'est le test que réclamait §0.46 — il porte sur `W40KEngine.step`, pas sur le helper,
     donc il couvre aussi une trace qui contournerait `debug_trace`.
     """
-    from ai.unit_registry import UnitRegistry
-    from engine.w40k_core import W40KEngine
-
-    eng = W40KEngine(
-        rewards_config="ArmageddonAgent",
-        training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent",
-        scenario_file="config/agents/ArmageddonAgent/scenarios/holdout_regular/scenario_bot-01.json",
-        unit_registry=UnitRegistry(),
-        quiet=True,
-        gym_training_mode=True,
-    )
-    eng.reset(seed=1)
+    eng = make_active_deployment_engine(seed=1)
     assert eng.debug_mode is False, "ce test n'a de sens qu'avec le mode debug ETEINT"
 
     buffer = io.StringIO()
@@ -93,7 +95,14 @@ def test_engine_step_writes_nothing_on_the_production_path():
     )
 
 
-@pytest.mark.parametrize("relative_path", _TRACED_FILES)
+def test_the_traced_file_discovery_finds_the_known_sites():
+    """CONTRE LE VERT VACANT : une découverte qui ne trouve rien rendrait le garde muet."""
+    discovered = _traced_files()
+    for expected in ("engine/w40k_core.py", "engine/action_decoder.py", "ai/env_wrappers.py", "ai/train.py"):
+        assert expected in discovered, f"{expected} n'est plus vu comme fichier trace"
+
+
+@pytest.mark.parametrize("relative_path", _traced_files())
 def test_no_trace_site_formats_its_message_before_the_call(relative_path: str):
     """Analyse statique : aucun appel à `trace(...)` ne passe une f-string ni une concaténation.
 
@@ -111,16 +120,26 @@ def test_no_trace_site_formats_its_message_before_the_call(relative_path: str):
             continue
         func = node.func
         name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
-        if name != "trace" or not node.args:
+        if name not in _TRACE_RELAYS or not node.args:
             continue
-        # trace(channel, debug_mode, fmt, *args) -> le format est le 3e argument
-        if len(node.args) < 3:
+        # trace(channel, debug_mode, fmt, *args) -> format en 3e position ;
+        # _debug_train_marker(fmt, *args) -> format en 1re. On prend le premier argument
+        # litteral-ou-format, c'est-a-dire le dernier avant les valeurs interpolees.
+        fmt_index = 2 if name == "trace" else 0
+        if len(node.args) <= fmt_index:
             continue
-        fmt = node.args[2]
+        fmt = node.args[fmt_index]
         if isinstance(fmt, ast.JoinedStr):
             offenders.append((node.lineno, "f-string"))
         elif isinstance(fmt, ast.BinOp) and isinstance(fmt.op, (ast.Mod, ast.Add)):
             offenders.append((node.lineno, "formatage applique avant l'appel"))
+        # `trace` n'accepte AUCUN mot-cle : sa signature est (channel, debug_mode, fmt, *args).
+        # Un `flush=True` oublie en migrant un `print` leve un TypeError — mais seulement quand
+        # la trace s'allume, donc jamais en run normal, jamais dans un test qui n'active pas ce
+        # canal. C'est exactement ce qui est passe entre les mailles ici : le site fautif etait
+        # dans `BotControlledEnv`, qu'aucun smoke sur moteur nu n'atteint.
+        for keyword in node.keywords:
+            offenders.append((node.lineno, f"mot-cle interdit : {keyword.arg}"))
 
     assert not offenders, (
         f"{relative_path} : le format est construit AVANT la garde, "
@@ -128,63 +147,44 @@ def test_no_trace_site_formats_its_message_before_the_call(relative_path: str):
     )
 
 
-def _reload_debug_trace(monkeypatch, env_value):
-    """Recharge le module avec `W40K_TRACE` positionnée : la sélection est résolue AU CHARGEMENT.
-
-    Elle l'est volontairement (relire `os.environ` à chaque trace mettrait un accès
-    d'environnement sur le chemin de `step`), donc un test qui se contenterait de poser la
-    variable ne changerait rien — il testerait le module déjà chargé et passerait au vert
-    sans rien vérifier.
-    """
-    import importlib
-
-    import engine.debug_trace as module
-
-    if env_value is None:
-        monkeypatch.delenv("W40K_TRACE", raising=False)
-    else:
-        monkeypatch.setenv("W40K_TRACE", env_value)
-    return importlib.reload(module)
-
-
 def test_channel_selection_restricts_output_to_the_named_channels(monkeypatch):
-    """`W40K_TRACE=bot_loop` éteint les autres canaux — la raison d'être de l'axe C."""
-    module = _reload_debug_trace(monkeypatch, "bot_loop")
-    try:
-        buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
-            module.trace(module.CH_BOT_LOOP, True, "retenu")
-            module.trace(module.CH_STEP, True, "ecarte")
-            module.trace(module.CH_DEPLOY_CACHE, True, "ecarte")
-        out = buffer.getvalue()
-        assert "retenu" in out
-        assert "ecarte" not in out
-    finally:
-        _reload_debug_trace(monkeypatch, None)
+    """`W40K_TRACE=bot_loop` éteint les autres canaux — la raison d'être de l'axe C.
+
+    Un simple `monkeypatch.setenv` suffit : la sélection est RELUE à chaque appel, jamais
+    mémoïsée. C'est le patron de `engine/mask_verification.py` (« la valeur n'est PAS
+    memoisee ici : elle reste relue a chaque appel, sinon les tests ne pourraient plus
+    l'armer dynamiquement »), et il évite à ces tests la cérémonie d'un `importlib.reload`.
+    """
+    monkeypatch.setenv("W40K_TRACE", "bot_loop")
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        trace(CH_BOT_LOOP, True, "retenu")
+        trace(CH_STEP, True, "ecarte")
+        trace(CH_DEPLOY_CACHE, True, "ecarte")
+    out = buffer.getvalue()
+    assert "retenu" in out
+    assert "ecarte" not in out
 
 
 def test_absent_variable_keeps_every_channel_on(monkeypatch):
     """Sans `W40K_TRACE`, `--debug` allume tout : le comportement historique est préservé."""
-    module = _reload_debug_trace(monkeypatch, None)
+    monkeypatch.delenv("W40K_TRACE", raising=False)
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
-        for channel in module.TRACE_CHANNELS:
-            module.trace(channel, True, "canal_%s", channel)
-    for channel in module.TRACE_CHANNELS:
+        for channel in TRACE_CHANNELS:
+            trace(channel, True, "canal_%s", channel)
+    for channel in TRACE_CHANNELS:
         assert f"canal_{channel}" in buffer.getvalue()
 
 
 def test_none_switches_every_channel_off_even_under_debug(monkeypatch):
     """`W40K_TRACE=none` : le mode debug reste actif pour le reste, les traces se taisent."""
-    module = _reload_debug_trace(monkeypatch, "none")
-    try:
-        buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
-            for channel in module.TRACE_CHANNELS:
-                module.trace(channel, True, "rien")
-        assert buffer.getvalue() == ""
-    finally:
-        _reload_debug_trace(monkeypatch, None)
+    monkeypatch.setenv("W40K_TRACE", "none")
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        for channel in TRACE_CHANNELS:
+            trace(channel, True, "rien")
+    assert buffer.getvalue() == ""
 
 
 def test_an_empty_variable_raises_instead_of_silently_muting_everything(monkeypatch):
@@ -194,20 +194,36 @@ def test_an_empty_variable_raises_instead_of_silently_muting_everything(monkeypa
     donc un `export W40K_TRACE=` — ou une substitution de shell qui ne rend rien — éteignait
     TOUTES les traces sans le dire. C'est le défaut que ce module existe pour empêcher.
     """
+    monkeypatch.setenv("W40K_TRACE", "")
     with pytest.raises(ValueError):
-        _reload_debug_trace(monkeypatch, "")
-    _reload_debug_trace(monkeypatch, None)
+        channel_enabled(CH_STEP, True)
 
 
-def test_a_typo_in_the_variable_raises_at_load_instead_of_going_quiet(monkeypatch):
-    """Un canal mal orthographié dans `W40K_TRACE` lève au chargement.
+def test_a_typo_in_the_variable_raises_instead_of_going_quiet(monkeypatch):
+    """Un canal mal orthographié dans `W40K_TRACE` lève.
 
     Sans cela, `W40K_TRACE=botloop` produirait un run parfaitement silencieux : on
     conclurait que le chemin n'est pas emprunté alors qu'il l'est.
     """
+    monkeypatch.setenv("W40K_TRACE", "botloop")
     with pytest.raises(ValueError):
-        _reload_debug_trace(monkeypatch, "botloop")
-    _reload_debug_trace(monkeypatch, None)
+        channel_enabled(CH_STEP, True)
+
+
+def test_the_variable_is_validated_at_import_too(monkeypatch):
+    """La faute de frappe lève AUSSI au chargement du module, pas seulement au 1er appel.
+
+    Les deux temps comptent : à l'import pour échouer avant que le run ne démarre, à l'appel
+    pour rester armable dynamiquement. Vérifier l'un sans l'autre laisserait retirer celui
+    qu'on ne teste pas.
+    """
+    import importlib
+
+    monkeypatch.setenv("W40K_TRACE", "botloop")
+    with pytest.raises(ValueError):
+        importlib.reload(__import__("engine.debug_trace", fromlist=["_selected_channels"]))
+    monkeypatch.delenv("W40K_TRACE", raising=False)
+    importlib.reload(__import__("engine.debug_trace", fromlist=["_selected_channels"]))
 
 
 def test_unknown_channel_raises_rather_than_staying_silent():
@@ -221,7 +237,7 @@ def test_every_declared_channel_is_actually_used():
     """Un canal déclaré et jamais posé sur un site est un canal mort : il ferait croire à une
     couverture qui n'existe pas quand on écrit `W40K_TRACE=<ce canal>`."""
     used = set()
-    for relative_path in _TRACED_FILES:
+    for relative_path in _traced_files():
         source = (_REPO_ROOT / relative_path).read_text(encoding="utf-8")
         for channel_const in ("CH_STEP", "CH_BOT_LOOP", "CH_DEPLOY_CACHE", "CH_TRAIN"):
             if channel_const in source:

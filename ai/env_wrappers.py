@@ -19,6 +19,15 @@ import numpy as np
 from shared.data_validation import require_key, require_positive_int, require_present
 from engine.action_decoder import ActionValidationError
 from engine.debug_trace import CH_BOT_LOOP, channel_enabled, trace
+
+
+def _trace_sampled(count: int) -> bool:
+    """Cadence d'echantillonnage des traces de boucle : les 5 premieres, puis une sur 25.
+
+    Ecrite sept fois a la main, elle avait DEJA diverge (`< 5` sur un site, `<= 5` sur les six
+    autres) : une boucle tracait quatre iterations, les autres cinq. Un seul point de verite.
+    """
+    return count <= 5 or count % 25 == 0
 from engine.episode_schedule import episodes_per_env
 from engine.agent_decision import read_pending_agent_decision
 from engine import macro_intents as mi
@@ -411,7 +420,7 @@ class BotControlledEnv(gym.Wrapper):
             if decision is None:
                 decision = self._get_decision_owner_from_mask()
             decision_owner, has_valid_actions = decision.decision_owner, decision.has_valid_actions
-            if channel_enabled(CH_BOT_LOOP, debug_mode) and (bot_loop_count < 5 or bot_loop_count % 25 == 0):
+            if debug_mode and _trace_sampled(bot_loop_count) and channel_enabled(CH_BOT_LOOP, debug_mode):
                 trace(
                     CH_BOT_LOOP, debug_mode,
                     "BotControlledEnv._run_bot_until_not_bot_turn env_rank=%s loop=%s "
@@ -441,20 +450,15 @@ class BotControlledEnv(gym.Wrapper):
                 )
             debug_bot = self.episode_length < 10
             bot_action, decision = self._get_opponent_action(debug=debug_bot, decision=decision)
-            if channel_enabled(CH_BOT_LOOP, debug_mode) and (bot_loop_count <= 5 or bot_loop_count % 25 == 0):
+            if debug_mode and _trace_sampled(bot_loop_count) and channel_enabled(CH_BOT_LOOP, debug_mode):
                 trace(
                     CH_BOT_LOOP, debug_mode,
-                    "BotControlledEnv._run_bot_until_not_bot_turn env_rank=%s loop=%s bot_action=%s phase=%s",
+                    "BotControlledEnv._run_bot_until_not_bot_turn env_rank=%s loop=%s "
+                    "bot_action=%s phase=%s before self.env.step",
                     self._env_rank, bot_loop_count, bot_action,
                     str(require_key(self.engine.game_state, "phase")),
                 )
             t0_bot = time.perf_counter() if debug_mode else None
-            if channel_enabled(CH_BOT_LOOP, debug_mode) and (bot_loop_count <= 5 or bot_loop_count % 25 == 0):
-                trace(
-                    CH_BOT_LOOP, debug_mode,
-                    "BotControlledEnv._run_bot_until_not_bot_turn env_rank=%s loop=%s before self.env.step(bot_action=%s)",
-                    self._env_rank, bot_loop_count, bot_action,
-                )
             # La decision en main (si elle a survecu au choix de l'adversaire, cf.
             # `_get_opponent_action`) est CONSOMMEE par le step : le moteur ne reconstruit pas le
             # masque de l'etat d'entree. Elle est remplacee par celle de l'etat de sortie — jamais
@@ -462,7 +466,7 @@ class BotControlledEnv(gym.Wrapper):
             obs, reward, terminated, truncated, info, decision = self._engine_step(
                 bot_action, decision
             )
-            if channel_enabled(CH_BOT_LOOP, debug_mode) and (bot_loop_count <= 5 or bot_loop_count % 25 == 0):
+            if debug_mode and _trace_sampled(bot_loop_count):
                 trace(
                     CH_BOT_LOOP, debug_mode,
                     "BotControlledEnv._run_bot_until_not_bot_turn env_rank=%s loop=%s "
@@ -488,7 +492,7 @@ class BotControlledEnv(gym.Wrapper):
         # rend bien la decision fraiche : c'est sa raison d'etre.
         if terminated or truncated:
             decision = None
-        if channel_enabled(CH_BOT_LOOP, debug_mode):
+        if debug_mode and channel_enabled(CH_BOT_LOOP, debug_mode):
             trace(
                 CH_BOT_LOOP, debug_mode,
                 "BotControlledEnv._run_bot_until_not_bot_turn exit env_rank=%s loops=%s "
@@ -621,7 +625,7 @@ class BotControlledEnv(gym.Wrapper):
             decision_owner = decision.decision_owner
             has_valid_actions = decision.has_valid_actions
             eligible_count = decision.eligible_count
-            if channel_enabled(CH_BOT_LOOP, debug_mode) and (iteration_count <= 5 or iteration_count % 25 == 0):
+            if debug_mode and _trace_sampled(iteration_count) and channel_enabled(CH_BOT_LOOP, debug_mode):
                 trace(
                     CH_BOT_LOOP, debug_mode,
                     "BotControlledEnv._ensure_actionable_controlled_turn env_rank=%s iteration=%s "
@@ -631,7 +635,6 @@ class BotControlledEnv(gym.Wrapper):
                     str(require_key(self.engine.game_state, "phase")),
                     int(require_key(self.engine.game_state, "current_player")),
                     self.controlled_player, self.bot_player,
-                    flush=True,
                 )
 
             if decision_owner == self.bot_player:
@@ -648,7 +651,7 @@ class BotControlledEnv(gym.Wrapper):
                     cumulative_reward=cumulative_reward,
                     decision=decision,
                 )
-                if channel_enabled(CH_BOT_LOOP, debug_mode) and (iteration_count <= 5 or iteration_count % 25 == 0):
+                if debug_mode and _trace_sampled(iteration_count):
                     trace(
                         CH_BOT_LOOP, debug_mode,
                         "BotControlledEnv._ensure_actionable_controlled_turn env_rank=%s iteration=%s "
@@ -700,7 +703,7 @@ class BotControlledEnv(gym.Wrapper):
 
             # No actionable decision for controlled player: force WAIT to advance phase/turn.
             t0_wait = time.perf_counter() if debug_mode else None
-            if channel_enabled(CH_BOT_LOOP, debug_mode) and (iteration_count <= 5 or iteration_count % 25 == 0):
+            if debug_mode and _trace_sampled(iteration_count):
                 trace(
                     CH_BOT_LOOP, debug_mode,
                     "BotControlledEnv._ensure_actionable_controlled_turn env_rank=%s iteration=%s branch=forced-wait",

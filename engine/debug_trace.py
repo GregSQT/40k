@@ -14,14 +14,14 @@ noyait le signal sous le flux de `W40KEngine.step`, le chemin le plus chaud du m
 canaux permettent de n'allumer que le sous-système observé.
 
 ⚠️ RÈGLE D'USAGE — JAMAIS DE f-STRING EN ARGUMENT.
-    OUI : trace(CH_STEP, "step enter episode=%s phase=%s", episode, phase)
-    NON : trace(CH_STEP, f"step enter episode={episode} phase={phase}")
+    OUI : trace(CH_STEP, debug_mode, "step enter episode=%s phase=%s", episode, phase)
+    NON : trace(CH_STEP, debug_mode, f"step enter episode={episode} phase={phase}")
 La f-string est évaluée AVANT l'appel, donc hors de toute garde : elle déplace le coût du
 formatage sur le chemin de production, où il est censé être nul. C'est exactement la
 régression que la forme précédente évitait par accident, et que ce module doit continuer
 d'éviter par construction. `tests/unit/engine/test_debug_trace_guard.py` la verrouille.
 
-SÉLECTION DES CANAUX — variable d'environnement `W40K_TRACE`, lue UNE FOIS au chargement :
+SÉLECTION DES CANAUX — variable d'environnement `W40K_TRACE` :
     W40K_TRACE non définie  -> tous les canaux (comportement historique de `--debug`)
     W40K_TRACE=bot_loop     -> ce canal seul
     W40K_TRACE=step,deploy_cache
@@ -33,7 +33,6 @@ Le `debug_mode` du moteur reste le commutateur maître : sans lui, aucun canal n
 """
 
 import os
-import sys
 from typing import Any
 
 #: Canaux déclarés. Un canal = un sous-système qu'on veut pouvoir observer SEUL.
@@ -76,31 +75,38 @@ def _selected_channels() -> frozenset:
     return frozenset(names)
 
 
-#: Résolu au chargement : la sélection ne change pas en cours de run, et la relire à chaque
-#: trace mettrait un accès `os.environ` sur le chemin de `step`.
-_SELECTED = _selected_channels()
+# Validation AU CHARGEMENT : une faute de frappe dans `W40K_TRACE` doit se voir avant que quoi
+# que ce soit ne tourne, pas au premier site atteint. La valeur n'est PAS mémoïsée — elle reste
+# relue à chaque appel, sinon les tests ne pourraient plus l'armer dynamiquement. C'est le patron
+# déjà retenu par `engine/mask_verification.py` pour `W40K_MASK_VERIFY`, à l'identique.
+_selected_channels()
 
 
 def channel_enabled(channel: str, debug_mode: bool) -> bool:
-    """Ce canal émet-il ? À utiliser dans le `if` quand préparer les arguments COÛTE.
+    """Ce canal émet-il ? À utiliser dans le `if` UNIQUEMENT quand préparer les arguments COÛTE.
 
-    Sur les sites où les arguments sont des variables déjà calculées, `trace` suffit : sa
-    propre garde est le premier test qu'il fait.
+    Sur les sites où les arguments sont des variables déjà calculées, appeler `trace`
+    directement suffit : sa première instruction est cette même garde.
     """
     if not debug_mode:
         return False
     if channel not in TRACE_CHANNELS:
         raise ValueError(f"canal de trace inconnu : {channel!r} (declares : {list(TRACE_CHANNELS)})")
-    return channel in _SELECTED
+    return channel in _selected_channels()
 
 
 def trace(channel: str, debug_mode: bool, fmt: str, *args: Any) -> None:
     """Émet une trace si `debug_mode` et si le canal est sélectionné.
 
+    `debug_mode` est testé ICI, avant tout appel imbriqué : sur le chemin éteint — celui de la
+    production — le coût est un test booléen et rien d'autre.
+
     `fmt % args` est appliqué APRÈS la garde : les arguments non formatés ne coûtent rien
-    quand la trace est éteinte.
+    quand la trace est éteinte. D'où l'interdit sur les f-strings, cf. l'en-tête du module.
     """
+    if not debug_mode:
+        return
     if not channel_enabled(channel, debug_mode):
         return
     message = fmt % args if args else fmt
-    print(f"{TRACE_PREFIX} {message}", flush=True, file=sys.stdout)
+    print(f"{TRACE_PREFIX} {message}", flush=True)

@@ -3324,11 +3324,17 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         close_training_env(model.get_env(), "remplacement d'environnement (rotation)", chunk_log)
         model.set_env(env)
 
-    def _debug_train_marker(message: str) -> None:
-        """Jalons de construction du run. Le préfixe et le `flush` vivent dans `debug_trace`."""
+    def _debug_train_marker(fmt: str, *args: Any) -> None:
+        """Jalons de construction du run — RELAIS vers `debug_trace.trace`, canal `train`.
+
+        Prend un format et ses arguments, jamais un message déjà construit : sinon les
+        appelants formateraient AVANT la garde, et le canal `train` serait le seul du dépôt
+        à payer son formatage en permanence. C'est la règle de l'en-tête de `debug_trace`,
+        et le garde AST des tests vérifie ce relais comme il vérifie `trace` lui-même.
+        """
         from engine.debug_trace import CH_TRAIN, trace
 
-        trace(CH_TRAIN, debug_mode, "%s", message)
+        trace(CH_TRAIN, debug_mode, fmt, *args)
 
     # Create callbacks for training
     scenario_display = f"Random from {len(scenario_list)} scenarios"
@@ -3349,7 +3355,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     )
     callback_names = [callback.__class__.__name__ for callback in training_callbacks]
     _debug_train_marker(
-        f"after setup_callbacks(): count={len(training_callbacks)} callbacks={callback_names}"
+        "after setup_callbacks(): count=%s callbacks=%s", len(training_callbacks), callback_names
     )
     
     # Link metrics_tracker to bot evaluation callback
@@ -3374,8 +3380,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     ordered_training_callbacks = non_terminal_callbacks + terminal_callbacks
     enhanced_callbacks = CallbackList(cast(List[BaseCallback], [metrics_callback] + ordered_training_callbacks))
     _debug_train_marker(
-        "after CallbackList assembly: "
-        f"ordered_callbacks={[callback.__class__.__name__ for callback in ordered_training_callbacks]}"
+        "after CallbackList assembly: ordered_callbacks=%s",
+        [callback.__class__.__name__ for callback in ordered_training_callbacks],
     )
     
     # Train directly to total_episodes using an EPISODE-BUDGETED wrapper around SB3.learn().
@@ -3419,11 +3425,9 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         _publish_self_play_snapshot()
         _debug_train_marker("after initial self-play snapshot publish")
     _debug_train_marker(
-        "before learn loop: "
-        f"episode_count={metrics_tracker.episode_count} "
-        f"target_episode_count={target_episode_count} "
-        f"chunk_timesteps={chunk_timesteps} "
-        f"model_num_timesteps={model.num_timesteps}"
+        "before learn loop: episode_count=%s target_episode_count=%s "
+        "chunk_timesteps=%s model_num_timesteps=%s",
+        metrics_tracker.episode_count, target_episode_count, chunk_timesteps, model.num_timesteps
     )
     # `finally` : une interruption (Ctrl-C) ou un echec est justement le moment ou l'on veut
     # savoir si le moteur bouclait. Jumeau du `finally` de `train_model`.
@@ -3432,11 +3436,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             # As a safety guard, we still use the same chunk_timesteps. 
             # EpisodeTerminationCallback is responsible for stopping promptly when the episode budget is reached.
             _debug_train_marker(
-                "before model.learn(): "
-                f"episode_count={metrics_tracker.episode_count} "
-                f"target_episode_count={target_episode_count} "
-                f"chunk_timesteps={chunk_timesteps} "
-                f"model_num_timesteps={model.num_timesteps}"
+                "before model.learn(): episode_count=%s target_episode_count=%s "
+                "chunk_timesteps=%s model_num_timesteps=%s",
+                metrics_tracker.episode_count, target_episode_count, chunk_timesteps,
+                model.num_timesteps,
             )
             model.learn(
                 total_timesteps=chunk_timesteps,
@@ -3447,11 +3450,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 progress_bar=False  # Disabled - using episode-based progress
             )
             _debug_train_marker(
-                "after model.learn(): "
-                f"episode_count={metrics_tracker.episode_count} "
-                f"target_episode_count={target_episode_count} "
-                f"chunk_timesteps={chunk_timesteps} "
-                f"model_num_timesteps={model.num_timesteps}"
+                "after model.learn(): episode_count=%s target_episode_count=%s "
+                "chunk_timesteps=%s model_num_timesteps=%s",
+                metrics_tracker.episode_count, target_episode_count, chunk_timesteps,
+                model.num_timesteps,
             )
             if self_play_snapshot_enabled:
                 if self_play_snapshot_update_freq is None:

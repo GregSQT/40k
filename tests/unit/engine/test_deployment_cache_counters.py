@@ -11,32 +11,13 @@ import pytest
 
 from engine.action_decoder import ActionDecoder
 
-_ACTIVE_SCENARIO = "config/agents/ArmageddonAgent/scenarios/holdout_regular/scenario_bot-01.json"
-
-
-def _make_engine(seed: int):
-    from ai.unit_registry import UnitRegistry
-    from engine.w40k_core import W40KEngine
-
-    eng = W40KEngine(
-        rewards_config="ArmageddonAgent",
-        training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent",
-        scenario_file=_ACTIVE_SCENARIO,
-        unit_registry=UnitRegistry(),
-        quiet=True,
-        gym_training_mode=True,
-    )
-    eng.reset(seed=seed)
-    return eng
-
 
 def _counts(eng):
-    return eng.game_state[ActionDecoder.DEPLOYMENT_CACHE_COUNTS_KEY]
+    return eng.action_decoder.deployment_cache_counts()
 
 
-def test_reset_creates_the_counters_and_leaves_exactly_the_initial_observation_build():
-    """`reset` est le SEUL créateur de la clé, et il déclare les quatre issues.
+def test_reset_creates_the_counters_and_leaves_exactly_the_initial_observation_build(make_active_deployment_engine):
+    """`reset_episode_caches` remet les quatre issues déclarées à zéro.
 
     Le compteur n'est PAS à zéro en sortie de `reset` : l'observation initiale, construite
     dans `reset`, consulte déjà le cache pour décrire les candidats de déploiement (§0.40).
@@ -44,7 +25,7 @@ def test_reset_creates_the_counters_and_leaves_exactly_the_initial_observation_b
     `full_build_cold`. C'est cette signature qui est verrouillée ici — si un jour l'obs
     consultait le cache deux fois, ou par un autre chemin, ce test le dirait.
     """
-    eng = _make_engine(seed=1)
+    eng = make_active_deployment_engine(seed=1)
     counts = _counts(eng)
     assert set(counts) == set(ActionDecoder.DEPLOYMENT_CACHE_OUTCOMES)
     assert counts == {
@@ -55,7 +36,7 @@ def test_reset_creates_the_counters_and_leaves_exactly_the_initial_observation_b
     }
 
 
-def test_deployment_phase_actually_exercises_the_cache():
+def test_deployment_phase_actually_exercises_the_cache(make_active_deployment_engine):
     """CONTRE LE VERT VACANT : sans consultation réelle, tous les tests suivants sont creux.
 
     On joue la phase de déploiement en posant les unités une à une, et on exige que le
@@ -63,7 +44,7 @@ def test_deployment_phase_actually_exercises_the_cache():
     le compteur qui est cassé — c'est que le scénario ne déploie plus, et les autres tests
     de ce fichier ne prouvent alors plus rien.
     """
-    eng = _make_engine(seed=1)
+    eng = make_active_deployment_engine(seed=1)
     assert eng.game_state["phase"] == "deployment", (
         "le scenario doit demarrer en phase de deploiement, sinon ce fichier ne teste rien"
     )
@@ -81,13 +62,13 @@ def test_deployment_phase_actually_exercises_the_cache():
     assert total > 0, "le cache de scoring n'a ete consulte AUCUNE fois : test creux"
 
 
-def test_counters_do_not_leak_across_episodes():
+def test_counters_do_not_leak_across_episodes(make_active_deployment_engine):
     """L'état qui fuit ENTRE épisodes (§0.42) : un `reset` remet les compteurs à zéro.
 
     Un compteur qui survit au reset gonflerait d'épisode en épisode et rendrait le taux de
     rebuild ininterprétable — sans jamais lever.
     """
-    eng = _make_engine(seed=1)
+    eng = make_active_deployment_engine(seed=1)
     after_fresh_reset = dict(_counts(eng))
 
     for _ in range(50):
@@ -122,24 +103,25 @@ def test_counters_do_not_leak_across_episodes():
     )
 
 
-def test_unknown_outcome_raises_instead_of_creating_a_silent_key():
+def test_unknown_outcome_raises_instead_of_creating_a_silent_key(make_active_deployment_engine):
     """Une issue non déclarée lève — elle ne crée pas un compteur fantôme.
 
-    C'est la contrepartie de `require_key` : un nom d'issue mal orthographié dans un futur
-    chemin doit échouer bruyamment, pas produire une cinquième clé que personne ne publie.
+    Un nom d'issue mal orthographié dans un futur chemin doit échouer bruyamment, pas
+    produire une cinquième clé que personne ne publie.
     """
-    eng = _make_engine(seed=1)
+    eng = make_active_deployment_engine(seed=1)
     with pytest.raises(KeyError):
-        ActionDecoder._record_deployment_cache_outcome(eng.game_state, "chemin_inexistant")
+        eng.action_decoder._record_deployment_cache_outcome("chemin_inexistant")
 
 
-def test_recording_without_reset_raises():
-    """Un `game_state` qui n'a pas traversé `reset` doit lever, pas compter dans le vide.
+def test_the_two_outcome_families_partition_the_declared_outcomes():
+    """`INCREMENTAL` et `FULL_BUILD` recouvrent exactement les issues, sans recouvrement.
 
-    `ConfigurationError` et non `KeyError` : c'est ce que lève `require_key`, le contrôle
-    strict du dépôt.
+    `metrics_tracker` somme la seconde famille pour publier le taux de reconstruction : une
+    issue ajoutee a `DEPLOYMENT_CACHE_OUTCOMES` sans etre rangee dans une famille sortirait
+    silencieusement de la courbe.
     """
-    from shared.data_validation import ConfigurationError
-
-    with pytest.raises(ConfigurationError):
-        ActionDecoder._record_deployment_cache_outcome({}, "incremental")
+    incremental = set(ActionDecoder.INCREMENTAL_CACHE_OUTCOMES)
+    full_build = set(ActionDecoder.FULL_BUILD_CACHE_OUTCOMES)
+    assert incremental.isdisjoint(full_build)
+    assert incremental | full_build == set(ActionDecoder.DEPLOYMENT_CACHE_OUTCOMES)

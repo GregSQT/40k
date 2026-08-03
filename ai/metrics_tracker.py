@@ -38,6 +38,7 @@ import os
 from typing import Any, Deque, Dict, List, Optional, Protocol, Sequence, Tuple, Tuple
 from shared.data_validation import require_key
 from ai.truncation_log import TruncationLog, agent_log_dir
+from engine.action_decoder import ActionDecoder
 from config_loader import get_config_loader
 
 
@@ -948,7 +949,13 @@ class W40KMetricsTracker:
         # `_emit_ratio_of_means`, une fenetre sans aucune consultation n'a pas de taux, pas un 0.
         cache_counts = require_key(tactical_data, 'deployment_cache_counts')
         cache_lookups = float(sum(cache_counts.values()))
-        cache_full_builds = cache_lookups - float(require_key(cache_counts, 'incremental'))
+        # Somme des issues DECLAREES comme reconstructions, jamais `total - incremental` : une
+        # cinquieme issue qui ne serait pas un rebuild (« cache servi tel quel ») serait comptee
+        # comme tel par la soustraction, sur une courbe publiee que personne ne re-derive.
+        cache_full_builds = float(sum(
+            require_key(cache_counts, outcome)
+            for outcome in ActionDecoder.FULL_BUILD_CACHE_OUTCOMES
+        ))
         lookups_hist = self._game_push('deploy_cache_lookups', cache_lookups)
         full_builds_hist = self._game_push('deploy_cache_full_builds', cache_full_builds)
         failed_hist = self._game_push(
@@ -960,8 +967,10 @@ class W40KMetricsTracker:
         # reconstruction qui soit du travail purement perdu. Rapporte aux consultations, pas aux
         # rebuilds — c'est sa part du cout total qui compte, pas sa part des echecs.
         self._emit_ratio_of_means('perf/b_deploy_cache_wasted_rate', failed_hist, lookups_hist)
-        if cache_lookups > 0:
-            self._emit_windowed('perf/c_deploy_cache_lookups', lookups_hist)
+        # Sans garde sur l'episode courant : `_emit_windowed` publie la moyenne de la FENETRE, qui
+        # contient de toute facon les episodes en placement fixe (0 consultation). Conditionner
+        # trouait la courbe un episode sur deux et faisait croire a une mesure absente.
+        self._emit_windowed('perf/c_deploy_cache_lookups', lookups_hist)
 
         # 0_GAME: VP differential and objective samples
         if 'victory_points_diff_controlled_minus_opponent' in tactical_data:
