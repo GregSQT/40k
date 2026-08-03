@@ -1,0 +1,696 @@
+{
+  "terrain_id": "terrain-train-03",
+  "terrain": [
+    {
+      "id": "rect_b_nw_OK",
+      "name": "rect b NW",
+      "obscuring": true,
+      "shape": "polygon",
+      "vertices": [
+        [
+          25,
+          30
+        ],
+        [
+          60,
+          30
+        ],
+        [
+          60,
+          88
+        ],
+        [
+          25,
+          88
+        ]
+      ],
+      "objective": true
+    },
+    {
+      "id": "rect_b_ne_OK",
+      "name": "rect b NE",
+      "obscuring": true,
+      "shape": "polygon",
+      "vertices": [
+        [
+          151,
+          63
+        ],
+        [
+          200,
+          30
+        ],
+        [
+          220,
+          52
+        ],
+        [
+          171,
+          85
+        ]
+      ],
+      "objective": true
+    },
+    {
+      "id": "ruin_center_OK",
+      "name": " tri_2 Centre",
+      "obscuring": true,
+      "shape": "polygon",
+      "vertices": [
+        [
+          85,
+          120
+        ],
+        [
+          135,
+          120
+        ],
+        [
+          135,
+          180
+        ],
+        [
+          85,
+          180
+        ]
+      ],
+      "objective": true
+    },
+    {
+      "id": "rect_b_sw_OK",
+      "name": "rect b SW",
+      "obscuring": true,
+      "shape": "polygon",
+      "vertices": [
+        [
+          69,
+          237
+        ],
+        [
+          20,
+          270
+        ],
+        [
+          0,
+          248
+        ],
+        [
+          49,
+          215
+        ]
+      ],
+      "objective": true
+    },
+    {
+      "id": "rect_b_se_OK",
+      "name": "rect b SE",
+      "obscuring": true,
+      "shape": "polygon",
+      "vertices": [
+        [
+          195,
+          270
+        ],
+        [
+          160,
+          270
+        ],
+        [
+          160,
+          212
+        ],
+        [
+          195,
+          212
+        ]
+      ],
+      "objective": true
+    },
+    {
+      "id": "rect_s_w_OK",
+      "name": "rect s W",
+      "obscuring": true,
+      "shape": "polygon",
+      "vertices": [
+        [
+          30,
+          180
+        ],
+        [
+          55,
+          162
+        ],
+        [
+          68,
+          176
+        ],
+        [
+          43,
+          193
+        ]
+      ],
+      "objective": false
+    },
+    {
+      "id": "line_s_w_OK",
+      "name": "line s NW",
+      "obscuring": true,
+      "shape": "polygon",
+      "vertices": [
+        [
+          0,
+          150
+        ],
+        [
+          25,
+          132
+        ],
+        [
+          32,
+          140
+        ],
+        [
+          6,
+          158
+        ]
+      ],
+      "objective": false
+    },
+    {
+      "id": "rect_s_s_OK",
+      "name": "rect s S",
+      "obscuring": true,
+      "shape": "polygon",
+      "vertices": [
+        [
+          110,
+          225
+        ],
+        [
+          85,
+          242
+        ],
+        [
+          72,
+          229
+        ],
+        [
+          97,
+          211
+        ]
+      ],
+      "objective": false
+    },
+    {
+      "id": "line_s_e_OK",
+      "name": "line s SE",
+      "obscuring": true,
+      "shape": "polygon",
+      "vertices": [
+        [
+          220,
+          150
+        ],
+        [
+          195,
+          167
+        ],
+        [
+          188,
+          160
+        ],
+        [
+          213,
+          142
+        ]
+      ],
+      "objective": false
+    },
+    {
+      "id": "line_s_s_OK",
+      "name": "line s S",
+      "obscuring": true,
+      "shape": "polygon",
+      "vertices": [
+        [
+          110,
+          225
+        ],
+        [
+          129,
+          245
+        ],
+        [
+          137,
+          239
+        ],
+        [
+          118,
+          219
+        ]
+      ],
+      "objective": false
+    }
+  ],
+  "walls": [
+    {
+      "name": "rect_b_nw_d",
+      "type": "dense",
+      "segments": [
+        [
+          [
+            57,
+            85
+          ],
+          [
+            57,
+            50
+          ]
+        ],
+        [
+          [
+            57,
+            85
+          ],
+          [
+            47,
+            85
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "rect_s_n",
+      "type": "light",
+      "segments": [
+        [
+          [
+            115,
+            75
+          ],
+          [
+            122,
+            83
+          ]
+        ],
+        [
+          [
+            115,
+            75
+          ],
+          [
+            120,
+            72
+          ]
+        ],
+        [
+          [
+            143,
+            70
+          ],
+          [
+            136,
+            63
+          ]
+        ],
+        [
+          [
+            143,
+            70
+          ],
+          [
+            138,
+            74
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "line_l_n",
+      "type": "dense",
+      "segments": [
+        [
+          [
+            105,
+            80
+          ],
+          [
+            79,
+            54
+          ]
+        ],
+        [
+          [
+            108,
+            78
+          ],
+          [
+            84,
+            54
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "line_l_w_l",
+      "type": "light",
+      "segments": [
+        [
+          [
+            30,
+            136
+          ],
+          [
+            45,
+            125
+          ]
+        ],
+        [
+          [
+            56,
+            118
+          ],
+          [
+            71,
+            107
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "ruin_center_d",
+      "type": "dense",
+      "segments": [
+        [
+          [
+            88,
+            123
+          ],
+          [
+            108,
+            123
+          ]
+        ],
+        [
+          [
+            88,
+            123
+          ],
+          [
+            88,
+            141
+          ]
+        ],
+        [
+          [
+            132,
+            177
+          ],
+          [
+            109,
+            177
+          ]
+        ],
+        [
+          [
+            132,
+            177
+          ],
+          [
+            132,
+            159
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "rect_b_sw_d",
+      "type": "dense",
+      "segments": [
+        [
+          [
+            49,
+            219
+          ],
+          [
+            65,
+            237
+          ]
+        ],
+        [
+          [
+            49,
+            219
+          ],
+          [
+            39,
+            226
+          ]
+        ],
+        [
+          [
+            21,
+            265
+          ],
+          [
+            10,
+            254
+          ]
+        ],
+        [
+          [
+            21,
+            265
+          ],
+          [
+            50,
+            246
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "rect_b_se_l",
+      "type": "light",
+      "segments": [
+        [
+          [
+            192,
+            267
+          ],
+          [
+            176,
+            267
+          ]
+        ],
+        [
+          [
+            192,
+            267
+          ],
+          [
+            192,
+            257
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "rect_s_e",
+      "type": "dense",
+      "segments": [
+        [
+          [
+            179,
+            122
+          ],
+          [
+            170,
+            118
+          ]
+        ],
+        [
+          [
+            170,
+            118
+          ],
+          [
+            160,
+            125
+          ]
+        ],
+        [
+          [
+            160,
+            125
+          ],
+          [
+            163,
+            133
+          ]
+        ],
+        [
+          [
+            163,
+            133
+          ],
+          [
+            179,
+            122
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "line_l_e_l",
+      "type": "light",
+      "segments": [
+        [
+          [
+            190,
+            164
+          ],
+          [
+            177,
+            173
+          ]
+        ],
+        [
+          [
+            164,
+            182
+          ],
+          [
+            149,
+            192
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "line_s_s",
+      "type": "dense",
+      "segments": [
+        [
+          [
+            114,
+            219
+          ],
+          [
+            139,
+            245
+          ]
+        ],
+        [
+          [
+            112,
+            222
+          ],
+          [
+            134,
+            245
+          ]
+        ]
+      ]
+    }
+  ],
+  "icons": [
+    {
+      "id": 1,
+      "name": "HomeRed",
+      "path": "frontend/public/icons/Terrain/HomeRed.png",
+      "center": [
+        40,
+        60
+      ],
+      "size": 80,
+      "alpha": 0.7
+    },
+    {
+      "id": 2,
+      "name": "HomeBlue",
+      "path": "frontend/public/icons/Terrain/HomeBlue.png",
+      "center": [
+        180,
+        240
+      ],
+      "size": 80,
+      "alpha": 0.7
+    },
+    {
+      "id": 3,
+      "name": "SkullRound",
+      "path": "frontend/public/icons/Terrain/SkullRound.png",
+      "center": [
+        110,
+        150
+      ],
+      "size": 80,
+      "alpha": 0.7
+    },
+    {
+      "id": 4,
+      "name": "SkullSquare1",
+      "path": "frontend/public/icons/Terrain/SkullSquare.png",
+      "center": [
+        191,
+        56
+      ],
+      "size": 80,
+      "alpha": 0.7
+    },
+    {
+      "id": 5,
+      "name": "SkullSquare2",
+      "path": "frontend/public/icons/Terrain/SkullSquare.png",
+      "center": [
+        32,
+        242
+      ],
+      "size": 80,
+      "alpha": 0.7
+    }
+  ],
+  "deployment_zones": [
+    {
+      "id": "1",
+      "name": "Deployment zone defender",
+      "shape": "polygon",
+      "vertices": [
+        [
+          0,
+          300
+        ],
+        [
+          220,
+          150
+        ],
+        [
+          220,
+          300
+        ]
+      ],
+      "objective": false
+    },
+    {
+      "id": "2",
+      "name": "Deployment zone attacker",
+      "shape": "polygon",
+      "vertices": [
+        [
+          0,
+          150
+        ],
+        [
+          220,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "objective": false
+    }
+  ]
+}
