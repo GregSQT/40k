@@ -6636,10 +6636,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         targetId: String(tid),
       });
       if (!result) throw new Error("charge_autoplace: réponse vide");
-      const planArr = (result.plan ?? []) as Array<[string, number, number]>;
-      const models: Record<string, { col: number; row: number }> = {};
-      for (const [mid, c, r] of planArr) {
-        models[String(mid)] = { col: Number(c), row: Number(r) };
+      // 3b : le niveau de pose par figurine fait partie du plan (l'auto-placement peut faire monter
+      // ou descendre). Le propager est obligatoire — le commit de charge complète à 0, donc une
+      // arrivée d'étage non transmise serait recalculée au sol et refusée.
+      const planArr = (result.plan ?? []) as Array<[string, number, number, number?]>;
+      const models: Record<string, { col: number; row: number; level?: number }> = {};
+      for (const [mid, c, r, l] of planArr) {
+        models[String(mid)] = { col: Number(c), row: Number(r), level: l != null ? Number(l) : 0 };
       }
       chargeModelPoolRef.current = new Set();
       chargeModelMaskLoopsRef.current = null;
@@ -6664,10 +6667,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         mode,
       });
       if (!result) throw new Error("charge_autoplace: réponse vide");
-      const planArr = (result.plan ?? []) as Array<[string, number, number]>;
-      const models: Record<string, { col: number; row: number }> = {};
-      for (const [mid, c, r] of planArr) {
-        models[String(mid)] = { col: Number(c), row: Number(r) };
+      // 3b : le niveau de pose par figurine fait partie du plan (l'auto-placement peut faire monter
+      // ou descendre). Le propager est obligatoire — le commit de charge complète à 0, donc une
+      // arrivée d'étage non transmise serait recalculée au sol et refusée.
+      const planArr = (result.plan ?? []) as Array<[string, number, number, number?]>;
+      const models: Record<string, { col: number; row: number; level?: number }> = {};
+      for (const [mid, c, r, l] of planArr) {
+        models[String(mid)] = { col: Number(c), row: Number(r), level: l != null ? Number(l) : 0 };
       }
       chargeModelPoolRef.current = new Set();
       chargeModelMaskLoopsRef.current = null;

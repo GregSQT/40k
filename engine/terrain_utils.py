@@ -73,6 +73,18 @@ def hexes_in_obscuring_terrain(
     return False
 
 
+def floor_levels_present(terrain_areas: List[Dict[str, Any]]) -> List[int]:
+    """Niveaux d'étage (>= 1) réellement décrits par le terrain, triés croissant.
+
+    Le sol (0) n'y figure pas : il n'a pas d'entrée ``floors``, il existe partout. Sert à borner les
+    parcours multi-niveaux et à écarter d'emblée un niveau qu'aucune ruine ne porte."""
+    return sorted({
+        int(require_key(floor, "level"))
+        for area in terrain_areas
+        for floor in area.get("floors", [])  # get allowed (aire sans étage = sol seul)
+    })
+
+
 def floor_hexes_at_level(terrain_areas: List[Dict[str, Any]], level: int) -> Set[Tuple[int, int]]:
     """Union des hexes de tous les étages (``floors``) au niveau donné (format B, >= 1).
 

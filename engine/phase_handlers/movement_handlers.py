@@ -2309,11 +2309,13 @@ def _multilevel_floor_destinations(
     sol (mirror move phase) ; le gate vertical 5" (03.04) reste un manque transverse sol+étages, non
     modélisé ici (chantier engagement 3D dédié).
     """
-    from engine.terrain_utils import floor_hexes_at_level, floor_polys_at_level, footprint_within_floor
+    from engine.terrain_utils import (
+        floor_hexes_at_level, floor_levels_present, floor_polys_at_level, footprint_within_floor,
+    )
     from engine.game_state import unit_can_occupy_upper_floor
 
     terrain_areas = game_state.get("terrain_areas", [])  # get allowed (peut être vide)
-    present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})  # get allowed (aire sans étage)
+    present = floor_levels_present(terrain_areas)
     if not present:
         return {}  # aucun étage → no-op (non-régression du mouvement 2D)
     if not unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS")):
@@ -3171,25 +3173,55 @@ def _model_multilevel_reachable_cells(
     start_level: int = 0,
 ) -> Dict[int, List[Tuple[int, int]]]:
     """Cases réellement atteignables par la figurine avec le coût de montée/descente §13.06, pour
-    CHAQUE niveau de ``target_levels`` (0 = sol/descente inclus). Le champ géodésique multi-niveaux
+    CHAQUE niveau de ``target_levels`` (0 = sol/descente inclus). Vue « cellules » de
+    ``_model_multilevel_reachable_field`` (source unique), qui porte aussi le COÛT de chaque case.
+    Retour : ``{level: [(col, row), ...]}`` (couche vide si aucune case atteignable)."""
+    return {
+        lv: list(cells)
+        for lv, cells in _model_multilevel_reachable_field(
+            game_state, unit, squad_id, model, start_pos, budget, target_levels,
+            ground_obstacles, terrain_areas, start_level=start_level,
+        ).items()
+    }
+
+
+def _model_multilevel_reachable_field(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    squad_id: str,
+    model: Dict[str, Any],
+    start_pos: Tuple[int, int],
+    budget: int,
+    target_levels: Set[int],
+    ground_obstacles: Set[Tuple[int, int]],
+    terrain_areas: List[Dict[str, Any]],
+    start_level: int = 0,
+) -> Dict[int, Dict[Tuple[int, int], int]]:
+    """Cases atteignables AVEC LEUR COÛT, avec le coût de montée/descente §13.06, pour CHAQUE niveau
+    de ``target_levels`` (0 = sol/descente inclus). Le champ géodésique multi-niveaux
     (``reachable_multilevel_field``) est construit **une seule fois** depuis ``(start_pos, start_level)``
     puis toutes les couches demandées en sont extraites → source unique, coût vertical facturé
-    identiquement en montée ET en descente. Retour : ``{level: [(col, row), ...]}`` (couche vide si
-    aucune case atteignable). Empreinte entière sur le plancher (niveau >= 1), hors mur et hors
-    figurine de ce niveau.
+    identiquement en montée ET en descente. Empreinte entière sur le plancher (niveau >= 1), hors mur
+    et hors figurine de ce niveau.
+
+    Le coût est rendu en SOUS-HEXES (le champ le calcule en unités-norme), pour être directement
+    comparable au nombre de pas d'un BFS de sol — les deux servent le même départage « déplacement
+    minimal » côté auto-placement, qui serait faussé par deux échelles différentes.
 
     ``start_level`` : niveau EFFECTIF de départ du mover (0 = sol). Une fig déjà en hauteur qui finit
     au sol paie la descente ; qui reste sur son étage ne repaie pas de montée (§13.06).
     À n'appeler que pour une unité capable de finir en hauteur, métrique euclidienne, hors FLY.
     """
-    from engine.terrain_utils import floor_hexes_at_level, validate_floor_placement
+    from engine.terrain_utils import (
+        floor_hexes_at_level, floor_levels_present, validate_floor_placement,
+    )
     from engine.hex_utils import get_neighbors, precompute_footprint_offsets
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     walls = set(game_state.get("wall_hexes", set()))  # get allowed
     inches_to_subhex = int(require_key(game_state, "inches_to_subhex"))
 
-    present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})  # get allowed
+    present = floor_levels_present(terrain_areas)
     floor_hexes_by_level = {lv: floor_hexes_at_level(terrain_areas, lv) for lv in present}
     height_by_level: Dict[int, float] = {0: 0.0}
     for a in terrain_areas:
@@ -3233,7 +3265,7 @@ def _model_multilevel_reachable_cells(
         "BASE_SIZE": base,
         "orientation": orientation,
     }
-    out: Dict[int, List[Tuple[int, int]]] = {lv: [] for lv in target_levels}
+    out: Dict[int, Dict[Tuple[int, int], int]] = {lv: {} for lv in target_levels}
     for (c, r, lv), _d in field.items():
         if lv not in out or (c, r) == start_pos:
             continue
@@ -3241,7 +3273,7 @@ def _model_multilevel_reachable_cells(
             continue
         ok, _ = validate_floor_placement(stub, c, r, lv, terrain_areas)
         if ok:
-            out[lv].append((c, r))
+            out[lv][(c, r)] = int(round(_d / ENGAGEMENT_NORM_HEX_WIDTH))
     return out
 
 

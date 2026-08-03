@@ -1834,7 +1834,9 @@ class ObservationBuilder:
         # Vaut 0 partout tant qu'aucun etage n'est declare : le sol EST le niveau 0, ce n'est
         # pas une absence de donnee (les etages sont un chantier en cours, spec §6.1).
         terrain_areas = game_state.get("terrain_areas", [])  # get allowed (scenario sans terrain)
-        levels = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})  # get allowed
+        from engine.terrain_utils import floor_levels_present
+
+        levels = floor_levels_present(terrain_areas)
         if levels:
             from engine.terrain_utils import floor_hexes_at_level
 
