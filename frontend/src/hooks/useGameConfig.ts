@@ -342,6 +342,23 @@ export const useGameConfig = (options?: {
         if (!isBoardConfig(configData)) {
           throw new Error("Invalid board config: missing required properties");
         }
+        // La résolution SERVIE doit être celle DEMANDÉE. C'est ici, et nulle part ailleurs, que la
+        // requête et sa réponse coexistent : le consommateur, lui, ne verrait qu'une config sans
+        // savoir pour quelle demande elle a été produite. Sans ce contrôle, un `inches_to_subhex`
+        // qui n'atteint pas l'API fait servir le plateau par DÉFAUT, et le replay fusionne un décor
+        // x5 avec la grille x1 du journal : décor cinq fois trop grand, murs et unités justes,
+        // aucune erreur. C'est le mode de panne décrit en Documentation/Implémentation/Replay.md
+        // §2.4 — il ne se voyait qu'à l'œil, sur un plateau déjà dessiné.
+        if (
+          inchesToSubhexOverride !== undefined &&
+          configData.inches_to_subhex !== inchesToSubhexOverride
+        ) {
+          throw new Error(
+            `Board served at inches_to_subhex=${configData.inches_to_subhex} ` +
+              `(${configData.cols}x${configData.rows}) but ${inchesToSubhexOverride} was requested ` +
+              `for ${scenarioFile}`
+          );
+        }
 
         if (cancelled) return;
         setBoardError(null);
