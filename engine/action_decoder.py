@@ -10,6 +10,7 @@ import pickle
 import time
 from typing import Dict, List, Any, Optional, Tuple
 from shared.data_validation import require_key
+from engine.debug_trace import CH_DEPLOY_CACHE, channel_enabled, trace
 from engine.game_utils import get_unit_by_id
 from engine.combat_utils import calculate_hex_distance, get_unit_coordinates, has_line_of_sight
 from engine.phase_handlers.shared_utils import (
@@ -113,6 +114,51 @@ class ActionDecoder:
     #: l'instance, donc `reset_episode_caches` ne l'atteint pas : sa purge est dans le bloc de
     #: purges d'épisode de `w40k_core`, avec les caches d'observation qui en DÉPENDENT.
     DEPLOYMENT_SCORING_CACHE_KEY = "_deployment_scoring_cache"
+
+    #: Issues possibles d'une consultation du cache de scoring, comptées par épisode.
+    #:
+    #: POURQUOI UN COMPTEUR ET PAS UNE TRACE (V11 §0.46 point 3, axe A). Ces quatre issues
+    #: n'étaient visibles que sous `debug_mode`, donc JAMAIS sur un run réel — alors qu'elles
+    #: mesurent un COÛT : un `full_build` reconstruit toutes les expositions LoS de la zone,
+    #: un `incremental` ne touche que le delta d'une pose. Le rapport des deux est exactement
+    #: la famille de défauts §0.22 (`MOVE_POOL_BUILD` = 95,6 % du training), qui ne lève rien
+    #: et ne fait échouer aucun test : elle consomme. Compté toujours, publié toujours.
+    #:
+    #: `incremental_failed` est le signal à surveiller : l'incrémental a été TENTÉ et a rendu
+    #: la main, donc le coût du delta a été payé EN PLUS de la reconstruction complète.
+    DEPLOYMENT_CACHE_OUTCOMES = (
+        "incremental",
+        "full_build_cold",
+        "full_build_hex_mismatch",
+        "full_build_incremental_failed",
+    )
+
+    #: Clé des compteurs ci-dessus dans le `game_state`. Remise à zéro PAR ÉPISODE au même
+    #: endroit que la purge du cache lui-même (`w40k_core`) : un compteur qui survit à un
+    #: `reset` cumulerait entre épisodes, le défaut exact de §0.42.
+    DEPLOYMENT_CACHE_COUNTS_KEY = "_deployment_scoring_cache_counts"
+
+    @classmethod
+    def empty_deployment_cache_counts(cls) -> Dict[str, int]:
+        """Compteurs d'issues du cache de scoring, remis à zéro. SOURCE UNIQUE de leur forme."""
+        return {outcome: 0 for outcome in cls.DEPLOYMENT_CACHE_OUTCOMES}
+
+    @classmethod
+    def _record_deployment_cache_outcome(cls, game_state: Dict[str, Any], outcome: str) -> None:
+        """Compte une consultation du cache de scoring. Lève si l'issue n'est pas déclarée.
+
+        `require_key` sur le dict de compteurs, jamais `setdefault` : un `game_state` qui n'a
+        pas traversé le `reset` du moteur est un chemin qu'on veut voir échouer, pas un
+        compteur à créer en silence — c'est ce silence qui a laissé les 4 clés `bot_eval_*`
+        vivre au mauvais niveau pendant des semaines (§0.60).
+        """
+        counts = require_key(game_state, cls.DEPLOYMENT_CACHE_COUNTS_KEY)
+        if outcome not in counts:
+            raise KeyError(
+                f"issue de cache de deploiement inconnue : {outcome!r} "
+                f"(declarees : {cls.DEPLOYMENT_CACHE_OUTCOMES})"
+            )
+        counts[outcome] += 1
 
     def reset_episode_caches(self) -> None:
         """Invalidate per-episode caches. Call on every env.reset()."""
@@ -1207,14 +1253,13 @@ class ActionDecoder:
         valid_hexes: List[tuple[int, int]],
     ) -> Dict[str, Any]:
         """Build full deployment scoring cache for current state."""
-        _debug_mode = bool(game_state.get("debug_mode", False))
+        _debug_mode = channel_enabled(CH_DEPLOY_CACHE, bool(game_state.get("debug_mode", False)))
         _t_cache0 = time.perf_counter() if _debug_mode else None
-        if _debug_mode:
-            print(
-                "[TRAIN DEBUG] ActionDecoder._build_deployment_scoring_cache enter "
-                f"current_deployer={current_deployer} valid_hexes_n={len(valid_hexes)}",
-                flush=True,
-            )
+        trace(
+            CH_DEPLOY_CACHE, _debug_mode,
+            "ActionDecoder._build_deployment_scoring_cache enter current_deployer=%s valid_hexes_n=%s",
+            current_deployer, len(valid_hexes),
+        )
         deployed_snapshot = self._build_deployed_snapshot(game_state)
         snapshot_version = self._build_deployed_snapshot_version(deployed_snapshot)
         enemy_player = 2 if int(current_deployer) == 1 else 1
@@ -1231,23 +1276,21 @@ class ActionDecoder:
                     ally_col_counts[col] = 1
             elif player == enemy_player:
                 enemy_deployed_units.append({"col": col, "row": row})
-        if _debug_mode:
-            print(
-                "[TRAIN DEBUG] ActionDecoder._build_deployment_scoring_cache after deployed snapshot split "
-                f"ally_deployed_hexes_n={len(ally_deployed_hexes)} "
-                f"enemy_deployed_units_n={len(enemy_deployed_units)}",
-                flush=True,
-            )
+        trace(
+            CH_DEPLOY_CACHE, _debug_mode,
+            "ActionDecoder._build_deployment_scoring_cache after deployed snapshot split "
+            "ally_deployed_hexes_n=%s enemy_deployed_units_n=%s",
+            len(ally_deployed_hexes), len(enemy_deployed_units),
+        )
 
         enemy_pool_hexes = self._get_enemy_deployment_pool_hexes(game_state, current_deployer)
         enemy_los_reference_hexes = self._build_enemy_los_reference_hexes(enemy_pool_hexes)
-        if _debug_mode:
-            print(
-                "[TRAIN DEBUG] ActionDecoder._build_deployment_scoring_cache after enemy refs "
-                f"enemy_pool_hexes_n={len(enemy_pool_hexes)} "
-                f"enemy_los_reference_hexes_n={len(enemy_los_reference_hexes)}",
-                flush=True,
-            )
+        trace(
+            CH_DEPLOY_CACHE, _debug_mode,
+            "ActionDecoder._build_deployment_scoring_cache after enemy refs "
+            "enemy_pool_hexes_n=%s enemy_los_reference_hexes_n=%s",
+            len(enemy_pool_hexes), len(enemy_los_reference_hexes),
+        )
         raw_wall_hexes = require_key(game_state, "wall_hexes")
         wall_signature: List[tuple[int, int]] = []
         for raw_hex in raw_wall_hexes:
@@ -1271,12 +1314,11 @@ class ActionDecoder:
         )
         if topology_key not in self._deployment_potential_los_cache:
             if os.path.exists(potential_los_cache_file_path):
-                if _debug_mode:
-                    print(
-                        "[TRAIN DEBUG] ActionDecoder._build_deployment_scoring_cache "
-                        f"loading shared potential_los cache path={potential_los_cache_file_path}",
-                        flush=True,
-                    )
+                trace(
+                    CH_DEPLOY_CACHE, _debug_mode,
+                    "ActionDecoder._build_deployment_scoring_cache loading shared potential_los cache path=%s",
+                    potential_los_cache_file_path,
+                )
                 self._deployment_potential_los_cache[topology_key] = (
                     self._load_deployment_potential_los_disk_cache(potential_los_cache_file_path)
                 )
@@ -1343,28 +1385,25 @@ class ActionDecoder:
             # Idem : le chrono lui-meme est la preuve que le mode debug etait actif.
             if _t_potential0 is not None:
                 potential_los_total_s = time.perf_counter() - _t_potential0
-        if _debug_mode and _t_cache0 is not None:
-            print(
-                "[TRAIN DEBUG] ActionDecoder._build_deployment_scoring_cache after los maps "
-                f"los_exposure_by_hex_n={len(los_exposure_by_hex)} "
-                f"potential_los_exposure_by_hex_n={len(potential_los_exposure_by_hex)} "
-                f"los_pair_cache_n={len(los_pair_cache)} "
-                f"los_exposure_total_s={los_exposure_total_s:.6f} "
-                f"potential_los_total_s={potential_los_total_s:.6f} "
-                f"duration_s={time.perf_counter() - _t_cache0:.6f}",
-                flush=True,
+        if _t_cache0 is not None:
+            trace(
+                CH_DEPLOY_CACHE, _debug_mode,
+                "ActionDecoder._build_deployment_scoring_cache after los maps "
+                "los_exposure_by_hex_n=%s potential_los_exposure_by_hex_n=%s los_pair_cache_n=%s "
+                "los_exposure_total_s=%.6f potential_los_total_s=%.6f duration_s=%.6f",
+                len(los_exposure_by_hex), len(potential_los_exposure_by_hex), len(los_pair_cache),
+                los_exposure_total_s, potential_los_total_s, time.perf_counter() - _t_cache0,
             )
         if not os.path.exists(potential_los_cache_file_path):
             self._save_deployment_potential_los_disk_cache(
                 potential_los_cache_file_path,
                 potential_los_cache_for_topology,
             )
-            if _debug_mode:
-                print(
-                    "[TRAIN DEBUG] ActionDecoder._build_deployment_scoring_cache "
-                    f"saved shared potential_los cache path={potential_los_cache_file_path}",
-                    flush=True,
-                )
+            trace(
+                CH_DEPLOY_CACHE, _debug_mode,
+                "ActionDecoder._build_deployment_scoring_cache saved shared potential_los cache path=%s",
+                potential_los_cache_file_path,
+            )
 
         return {
             "current_deployer": int(current_deployer),
@@ -1470,29 +1509,28 @@ class ActionDecoder:
 
         Full rebuild is used only when state drift is not a single deployment delta.
         """
-        _debug_mode = bool(game_state.get("debug_mode", False))
+        _debug_mode = channel_enabled(CH_DEPLOY_CACHE, bool(game_state.get("debug_mode", False)))
         _t_cache0 = time.perf_counter() if _debug_mode else None
-        if _debug_mode:
-            print(
-                "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache enter "
-                f"current_deployer={current_deployer} valid_hexes_n={len(valid_hexes)}",
-                flush=True,
-            )
+        trace(
+            CH_DEPLOY_CACHE, _debug_mode,
+            "ActionDecoder._get_or_build_deployment_scoring_cache enter current_deployer=%s valid_hexes_n=%s",
+            current_deployer, len(valid_hexes),
+        )
         current_snapshot = self._build_deployed_snapshot(game_state)
         cache_key = self.DEPLOYMENT_SCORING_CACHE_KEY
         if cache_key not in game_state:
-            if _debug_mode:
-                print(
-                    "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache cache_miss_full_build",
-                    flush=True,
-                )
+            trace(
+                CH_DEPLOY_CACHE, _debug_mode,
+                "ActionDecoder._get_or_build_deployment_scoring_cache cache_miss_full_build",
+            )
+            self._record_deployment_cache_outcome(game_state, "full_build_cold")
             new_cache = self._build_deployment_scoring_cache(game_state, current_deployer, valid_hexes)
             game_state[cache_key] = new_cache
-            if _debug_mode and _t_cache0 is not None:
-                print(
-                    "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache exit "
-                    f"path=cache_miss_full_build duration_s={time.perf_counter() - _t_cache0:.6f}",
-                    flush=True,
+            if _t_cache0 is not None:
+                trace(
+                    CH_DEPLOY_CACHE, _debug_mode,
+                    "ActionDecoder._get_or_build_deployment_scoring_cache exit path=cache_miss_full_build duration_s=%.6f",
+                    time.perf_counter() - _t_cache0,
                 )
             return new_cache
 
@@ -1500,26 +1538,24 @@ class ActionDecoder:
         current_valid_hex_set = set(valid_hexes)
         cached_valid_hex_set = require_key(cache, "valid_hex_set")
         if cached_valid_hex_set != current_valid_hex_set:
-            if _debug_mode:
-                print(
-                    "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache "
-                    "valid_hex_set_mismatch_full_build",
-                    flush=True,
-                )
+            trace(
+                CH_DEPLOY_CACHE, _debug_mode,
+                "ActionDecoder._get_or_build_deployment_scoring_cache valid_hex_set_mismatch_full_build",
+            )
+            self._record_deployment_cache_outcome(game_state, "full_build_hex_mismatch")
             new_cache = self._build_deployment_scoring_cache(game_state, current_deployer, valid_hexes)
             game_state[cache_key] = new_cache
-            if _debug_mode and _t_cache0 is not None:
-                print(
-                    "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache exit "
-                    f"path=valid_hex_set_mismatch_full_build duration_s={time.perf_counter() - _t_cache0:.6f}",
-                    flush=True,
+            if _t_cache0 is not None:
+                trace(
+                    CH_DEPLOY_CACHE, _debug_mode,
+                    "ActionDecoder._get_or_build_deployment_scoring_cache exit path=valid_hex_set_mismatch_full_build duration_s=%.6f",
+                    time.perf_counter() - _t_cache0,
                 )
             return new_cache
-        if _debug_mode:
-            print(
-                "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache before incremental_update",
-                flush=True,
-            )
+        trace(
+            CH_DEPLOY_CACHE, _debug_mode,
+            "ActionDecoder._get_or_build_deployment_scoring_cache before incremental_update",
+        )
         updated = self._update_deployment_scoring_cache_incremental(
             cache=cache,
             game_state=game_state,
@@ -1527,26 +1563,28 @@ class ActionDecoder:
             current_snapshot=current_snapshot,
         )
         if updated:
-            if _debug_mode and _t_cache0 is not None:
-                print(
-                    "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache exit "
-                    f"path=incremental_update duration_s={time.perf_counter() - _t_cache0:.6f}",
-                    flush=True,
+            self._record_deployment_cache_outcome(game_state, "incremental")
+            if _t_cache0 is not None:
+                trace(
+                    CH_DEPLOY_CACHE, _debug_mode,
+                    "ActionDecoder._get_or_build_deployment_scoring_cache exit path=incremental_update duration_s=%.6f",
+                    time.perf_counter() - _t_cache0,
                 )
             return cache
 
-        if _debug_mode:
-            print(
-                "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache incremental_failed_full_build",
-                flush=True,
-            )
+        trace(
+            CH_DEPLOY_CACHE, _debug_mode,
+            "ActionDecoder._get_or_build_deployment_scoring_cache incremental_failed_full_build",
+        )
+        self._record_deployment_cache_outcome(game_state, "full_build_incremental_failed")
         new_cache = self._build_deployment_scoring_cache(game_state, current_deployer, valid_hexes)
         game_state[cache_key] = new_cache
-        if _debug_mode and _t_cache0 is not None:
-            print(
-                "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache exit "
-                f"path=incremental_failed_full_build duration_s={time.perf_counter() - _t_cache0:.6f}",
-                flush=True,
+        if _t_cache0 is not None:
+            trace(
+                CH_DEPLOY_CACHE, _debug_mode,
+                "ActionDecoder._get_or_build_deployment_scoring_cache exit "
+                "path=incremental_failed_full_build duration_s=%.6f",
+                time.perf_counter() - _t_cache0,
             )
         return new_cache
 

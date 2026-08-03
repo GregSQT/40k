@@ -51,6 +51,7 @@ from engine.game_utils import get_unit_by_id, turn_limit_reached, get_effective_
 # Import NEW extracted modules
 from engine.observation_builder import ObservationBuilder
 from engine.action_decoder import DEPLOY_SLOT_CANDIDATES_CACHE_KEY, ActionDecoder
+from engine.debug_trace import CH_STEP, channel_enabled, trace
 from engine.reward_calculator import RewardCalculator
 from engine.game_state import GameStateManager
 from engine.macro_intents import (
@@ -97,6 +98,38 @@ def empty_reward_breakdown_totals() -> Dict[str, float]:
     for key in DENSE_REWARD_BREAKDOWN_COMPONENTS:
         totals[f'{key}_positive'] = 0.0
     return totals
+
+
+def _empty_episode_tactical_data() -> Dict[str, Any]:
+    """Accumulateur tactique d'épisode, remis à zéro. SOURCE UNIQUE de sa forme.
+
+    Ce dict était écrit DEUX FOIS mot pour mot (`__init__` et `reset`) : toute clé ajoutée à
+    un site et pas à l'autre donne un `require_key` qui lève au premier épisode joué par le
+    chemin oublié — motif JUMEAU du dépôt, et raison d'être de cette fabrique.
+    """
+    return {
+        'shots_fired': 0,
+        'hits': 0,
+        'damage_dealt': 0,
+        'damage_received': 0,
+        'units_killed': 0,
+        'units_lost': 0,
+        'enemy_value_destroyed': 0.0,
+        'ally_value_lost': 0.0,
+        'valid_actions': 0,
+        'invalid_actions': 0,
+        'wait_actions': 0,
+        'total_actions': 0,
+        'total_enemy_units': 0,
+        # Usage par FAMILLE d'action : quelle decision l'agent exerce reellement. Une
+        # dimension jamais choisie, ou toujours choisie, est cassee quel que soit le
+        # win-rate — et cela se voit en quelques milliers de pas, pas en fin de run.
+        'action_family_counts': {name: 0 for name in ACTION_FAMILIES},
+        # Issues du cache de scoring du deploiement (V11 §0.46 axe A) : recopiees ICI depuis
+        # le `game_state` a la terminaison, comme `shots_fired` l'est depuis `action_logs`.
+        'deployment_cache_counts': ActionDecoder.empty_deployment_cache_counts(),
+        'reward_breakdown': empty_reward_breakdown_totals(),
+    }
 
 
 def _next_engine_id() -> int:
@@ -756,26 +789,7 @@ class W40KEngine(gym.Env):
                 _debug_log_cleared = True
             except Exception as e:
                 print(f"⚠️ Failed to clear debug.log: {e}")
-        self.episode_tactical_data = {
-            'shots_fired': 0,
-            'hits': 0,
-            'damage_dealt': 0,
-            'damage_received': 0,
-            'units_killed': 0,
-            'units_lost': 0,
-            'enemy_value_destroyed': 0.0,
-            'ally_value_lost': 0.0,
-            'valid_actions': 0,
-            'invalid_actions': 0,
-            'wait_actions': 0,
-            'total_actions': 0,
-            'total_enemy_units': 0,
-            # Usage par FAMILLE d'action : quelle decision l'agent exerce reellement. Une
-            # dimension jamais choisie, ou toujours choisie, est cassee quel que soit le
-            # win-rate — et cela se voit en quelques milliers de pas, pas en fin de run.
-            'action_family_counts': {name: 0 for name in ACTION_FAMILIES},
-            'reward_breakdown': empty_reward_breakdown_totals(),
-        }
+        self.episode_tactical_data = _empty_episode_tactical_data()
         
         # ==================================================
 
@@ -1211,6 +1225,15 @@ class W40KEngine(gym.Env):
         # PRECEDENT. Trouve le 2026-07-29 en verifiant §0.40 point 3, qui LIT ce cache pour
         # decrire les candidats a l'agent : la corruption y serait devenue une observation.
         self.game_state.pop(ActionDecoder.DEPLOYMENT_SCORING_CACHE_KEY, None)
+        # Compteurs d'issues de CE cache : remis a zero AU MEME ENDROIT que sa purge. Les
+        # separer laisserait un compteur cumuler d'un episode a l'autre — l'etat qui fuit
+        # ENTRE episodes que §0.42 a deja paye une fois, et qu'un smoke a un episode ne voit
+        # pas. `reset` est le SEUL createur de cette cle : `_record_deployment_cache_outcome`
+        # la lit en `require_key`, donc un chemin qui contourne `reset` leve au lieu de
+        # compter dans le vide.
+        self.game_state[ActionDecoder.DEPLOYMENT_CACHE_COUNTS_KEY] = (
+            ActionDecoder.empty_deployment_cache_counts()
+        )
         # Zones de terrain contenant un mur DENSE (Solid 13.11), memoisees par
         # `_squad_terrain_flags` pour le drapeau « gone to ground pret » (13.5). Elles derivent
         # de `terrain_areas` ET de `dense_wall_hexes`, que `_reload_scenario` remplace : sans
@@ -1556,26 +1579,7 @@ class W40KEngine(gym.Env):
             cmd_result = command_handlers.command_phase_start(self.game_state)
             if not (cmd_result and cmd_result.get("phase_complete") is False):
                 movement_handlers.movement_phase_start(self.game_state)
-        self.episode_tactical_data = {
-            'shots_fired': 0,
-            'hits': 0,
-            'damage_dealt': 0,
-            'damage_received': 0,
-            'units_killed': 0,
-            'units_lost': 0,
-            'enemy_value_destroyed': 0.0,
-            'ally_value_lost': 0.0,
-            'valid_actions': 0,
-            'invalid_actions': 0,
-            'wait_actions': 0,
-            'total_actions': 0,
-            'total_enemy_units': 0,
-            # Usage par FAMILLE d'action : quelle decision l'agent exerce reellement. Une
-            # dimension jamais choisie, ou toujours choisie, est cassee quel que soit le
-            # win-rate — et cela se voit en quelques milliers de pas, pas en fin de run.
-            'action_family_counts': {name: 0 for name in ACTION_FAMILIES},
-            'reward_breakdown': empty_reward_breakdown_totals(),
-        }
+        self.episode_tactical_data = _empty_episode_tactical_data()
         
         # Log episode start with all unit positions, walls, and objectives
         if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
@@ -1779,16 +1783,18 @@ class W40KEngine(gym.Env):
         # Reste None sur tout chemin qui ne construit aucune observation : l'appelant reconstruit
         # alors le masque lui-meme. Jamais un couple perime — c'est l'inverse du defaut a eviter.
         out_mask: Optional[Tuple[np.ndarray, List[Dict[str, Any]]]] = None
-        if self.game_state.get("debug_mode", False):
-            episode = self.game_state.get("episode_number", "?")
-            turn = self.game_state.get("turn", "?")
-            phase = self.game_state.get("phase", "?")
-            current_player = self.game_state.get("current_player", "?")
-            print(
-                "[TRAIN DEBUG] W40KEngine.step enter "
-                f"episode={episode} turn={turn} phase={phase} "
-                f"current_player={current_player} action={action}",
-                flush=True,
+        # `self.debug_mode` et non `game_state.get("debug_mode")` (§0.46 axe D) : le drapeau est
+        # un attribut d'instance, le relire par hachage de chaine dans le dict d'etat coutait un
+        # acces de plus a chaque appel de `step`, le chemin le plus chaud du moteur.
+        if channel_enabled(CH_STEP, self.debug_mode):
+            trace(
+                CH_STEP, self.debug_mode,
+                "W40KEngine.step enter episode=%s turn=%s phase=%s current_player=%s action=%s",
+                self.game_state.get("episode_number", "?"),
+                self.game_state.get("turn", "?"),
+                self.game_state.get("phase", "?"),
+                self.game_state.get("current_player", "?"),
+                action,
             )
         # Safety: count step() calls per episode to truncate runaways (e.g. stuck in eval)
         self._episode_step_calls = getattr(self, '_episode_step_calls', 0) + 1
@@ -1839,7 +1845,7 @@ class W40KEngine(gym.Env):
             self._verify_supplied_mask(action_mask, eligible_units, "W40KEngine.step_with_mask")
         else:
             action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
-        if self.game_state.get("debug_mode", False):
+        if self.debug_mode:
             from engine.game_utils import add_debug_file_log
             episode = self.game_state.get("episode_number", "?")
             turn = self.game_state.get("turn", "?")
@@ -1908,43 +1914,39 @@ class W40KEngine(gym.Env):
             self.game_state["_deployment_random_mix_forced_steps"] = forced_steps + 1
         
         # Normalize raw action once.
-        if self.game_state.get("debug_mode", False):
-            print(
-                "[TRAIN DEBUG] W40KEngine.step before normalize_action_input "
-                f"phase={self.game_state.get('phase', '?')} action={action}",
-                flush=True,
-            )
+        trace(
+            CH_STEP, self.debug_mode,
+            "W40KEngine.step before normalize_action_input phase=%s action=%s",
+            self.game_state.get("phase", "?"), action,
+        )
         action_int = self.action_decoder.normalize_action_input(
             raw_action=action,
             phase=require_key(self.game_state, "phase"),
             source="w40k_core.step",
             action_space_size=len(action_mask),
         )
-        if self.game_state.get("debug_mode", False):
-            print(
-                "[TRAIN DEBUG] W40KEngine.step after normalize_action_input "
-                f"phase={self.game_state.get('phase', '?')} action_int={action_int}",
-                flush=True,
-            )
+        trace(
+            CH_STEP, self.debug_mode,
+            "W40KEngine.step after normalize_action_input phase=%s action_int=%s",
+            self.game_state.get("phase", "?"), action_int,
+        )
 
         # Convert gym integer action to semantic action (reuse precomputed mask+eligible_units)
-        if self.game_state.get("debug_mode", False):
-            print(
-                "[TRAIN DEBUG] W40KEngine.step before convert_squad_action "
-                f"phase={self.game_state.get('phase', '?')} action_int={action_int}",
-                flush=True,
-            )
+        trace(
+            CH_STEP, self.debug_mode,
+            "W40KEngine.step before convert_squad_action phase=%s action_int=%s",
+            self.game_state.get("phase", "?"), action_int,
+        )
         semantic_action = self.action_decoder.convert_squad_action(
             action_int, self.game_state, eligible_units=eligible_units
         )
-        if self.game_state.get("debug_mode", False):
-            print(
-                "[TRAIN DEBUG] W40KEngine.step after convert_squad_action "
-                f"phase={self.game_state.get('phase', '?')} semantic_action={semantic_action}",
-                flush=True,
-            )
+        trace(
+            CH_STEP, self.debug_mode,
+            "W40KEngine.step after convert_squad_action phase=%s semantic_action=%s",
+            self.game_state.get("phase", "?"), semantic_action,
+        )
         self.game_state["_last_semantic_action"] = copy.deepcopy(semantic_action)
-        if self.game_state.get("debug_mode", False):
+        if self.debug_mode:
             from engine.game_utils import add_debug_file_log
             episode = self.game_state.get("episode_number", "?")
             turn = self.game_state.get("turn", "?")
@@ -1976,19 +1978,17 @@ class W40KEngine(gym.Env):
         }
 
         # Process semantic action with AI_TURN.md compliance
-        if self.game_state.get("debug_mode", False):
-            print(
-                "[TRAIN DEBUG] W40KEngine.step before _process_semantic_action "
-                f"phase={self.game_state.get('phase', '?')} semantic_action={semantic_action}",
-                flush=True,
-            )
+        trace(
+            CH_STEP, self.debug_mode,
+            "W40KEngine.step before _process_semantic_action phase=%s semantic_action=%s",
+            self.game_state.get("phase", "?"), semantic_action,
+        )
         action_result = self._process_squad_action(semantic_action)
-        if self.game_state.get("debug_mode", False):
-            print(
-                "[TRAIN DEBUG] W40KEngine.step after _process_semantic_action "
-                f"phase={self.game_state.get('phase', '?')} action_result={action_result}",
-                flush=True,
-            )
+        trace(
+            CH_STEP, self.debug_mode,
+            "W40KEngine.step after _process_semantic_action phase=%s action_result=%s",
+            self.game_state.get("phase", "?"), action_result,
+        )
         _step_t3 = time.perf_counter() if _step_t0 is not None else None
         if isinstance(action_result, tuple) and len(action_result) == 2:
             success, result = action_result
@@ -2471,6 +2471,13 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['move_waits'] = move_waits
             self.episode_tactical_data['shoot_activations'] = len(shoot_activations)
             self.episode_tactical_data['shoot_waits'] = shoot_waits
+
+            # Issues du cache de scoring du deploiement : recopiees depuis le `game_state`, ou
+            # le decodeur les a comptees. COPIE et non reference — le dict du `game_state` est
+            # remis a zero au prochain `reset`, et l'appelant lit `episode_tactical_data` APRES.
+            self.episode_tactical_data['deployment_cache_counts'] = dict(
+                require_key(self.game_state, ActionDecoder.DEPLOYMENT_CACHE_COUNTS_KEY)
+            )
 
             # VALUE attrition metrics (episode-level): destroyed enemy value and lost ally value.
             #
@@ -6239,7 +6246,7 @@ class W40KEngine(gym.Env):
         for u in units:
             uid = str(u["id"])
             if uid in seen_ids:
-                if self.game_state.get("debug_mode", False):
+                if self.debug_mode:
                     from engine.game_utils import add_debug_file_log
                     add_debug_file_log(
                         self.game_state,

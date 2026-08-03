@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Tuple
 import pytest
 
 from ai.metrics_tracker import W40KMetricsTracker
+from engine.action_decoder import ActionDecoder
 from engine.macro_intents import ACTION_FAMILIES
 
 
@@ -68,6 +69,9 @@ def _tactical(**overrides: Any) -> Dict[str, Any]:
         # Invariant : le moteur initialise TOUJOURS cette ventilation dans
         # `episode_tactical_data` (V11 §0.56), et `log_tactical_metrics` la lit en strict.
         "action_family_counts": {name: 0 for name in ACTION_FAMILIES},
+        # Meme invariant pour les issues du cache de scoring du deploiement (V11 §0.46 axe A) :
+        # le moteur les recopie TOUJOURS a la terminaison, la lecture est stricte.
+        "deployment_cache_counts": ActionDecoder.empty_deployment_cache_counts(),
         "victory_points_diff_controlled_minus_opponent": 5.0,
         "victory_points_opponent_episode": 27.0,
         "victory_points_controlled_episode": 32.0,

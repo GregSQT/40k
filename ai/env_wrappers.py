@@ -18,6 +18,7 @@ import hashlib
 import numpy as np
 from shared.data_validation import require_key, require_positive_int, require_present
 from engine.action_decoder import ActionValidationError
+from engine.debug_trace import CH_BOT_LOOP, channel_enabled, trace
 from engine.episode_schedule import episodes_per_env
 from engine.agent_decision import read_pending_agent_decision
 from engine import macro_intents as mi
@@ -404,24 +405,21 @@ class BotControlledEnv(gym.Wrapper):
         # moteur (derivee des figurines en jeu), sinon le bot serait coupe a tort des
         # qu'une escouade nombreuse a besoin de plus d'actions que l'ancienne constante.
         max_bot_iterations = self.engine.get_turn_step_limit()
-        if debug_mode:
-            print(
-                f"[TRAIN DEBUG] BotControlledEnv._run_bot_until_not_bot_turn enter env_rank={self._env_rank}",
-                flush=True,
-            )
+        trace(CH_BOT_LOOP, debug_mode,
+              "BotControlledEnv._run_bot_until_not_bot_turn enter env_rank=%s", self._env_rank)
         while not (terminated or truncated):
             if decision is None:
                 decision = self._get_decision_owner_from_mask()
             decision_owner, has_valid_actions = decision.decision_owner, decision.has_valid_actions
-            if debug_mode and (bot_loop_count < 5 or bot_loop_count % 25 == 0):
-                current_phase = str(require_key(self.engine.game_state, "phase"))
-                current_player = int(require_key(self.engine.game_state, "current_player"))
-                print(
-                    "[TRAIN DEBUG] BotControlledEnv._run_bot_until_not_bot_turn "
-                    f"env_rank={self._env_rank} loop={bot_loop_count} "
-                    f"decision_owner={decision_owner} has_valid_actions={has_valid_actions} "
-                    f"phase={current_phase} current_player={current_player} bot_player={self.bot_player}",
-                    flush=True,
+            if channel_enabled(CH_BOT_LOOP, debug_mode) and (bot_loop_count < 5 or bot_loop_count % 25 == 0):
+                trace(
+                    CH_BOT_LOOP, debug_mode,
+                    "BotControlledEnv._run_bot_until_not_bot_turn env_rank=%s loop=%s "
+                    "decision_owner=%s has_valid_actions=%s phase=%s current_player=%s bot_player=%s",
+                    self._env_rank, bot_loop_count, decision_owner, has_valid_actions,
+                    str(require_key(self.engine.game_state, "phase")),
+                    int(require_key(self.engine.game_state, "current_player")),
+                    self.bot_player,
                 )
             if decision_owner != self.bot_player:
                 break
@@ -443,21 +441,19 @@ class BotControlledEnv(gym.Wrapper):
                 )
             debug_bot = self.episode_length < 10
             bot_action, decision = self._get_opponent_action(debug=debug_bot, decision=decision)
-            if debug_mode and (bot_loop_count <= 5 or bot_loop_count % 25 == 0):
-                current_phase = str(require_key(self.engine.game_state, "phase"))
-                print(
-                    "[TRAIN DEBUG] BotControlledEnv._run_bot_until_not_bot_turn "
-                    f"env_rank={self._env_rank} loop={bot_loop_count} "
-                    f"bot_action={bot_action} phase={current_phase}",
-                    flush=True,
+            if channel_enabled(CH_BOT_LOOP, debug_mode) and (bot_loop_count <= 5 or bot_loop_count % 25 == 0):
+                trace(
+                    CH_BOT_LOOP, debug_mode,
+                    "BotControlledEnv._run_bot_until_not_bot_turn env_rank=%s loop=%s bot_action=%s phase=%s",
+                    self._env_rank, bot_loop_count, bot_action,
+                    str(require_key(self.engine.game_state, "phase")),
                 )
             t0_bot = time.perf_counter() if debug_mode else None
-            if debug_mode and (bot_loop_count <= 5 or bot_loop_count % 25 == 0):
-                print(
-                    "[TRAIN DEBUG] BotControlledEnv._run_bot_until_not_bot_turn "
-                    f"env_rank={self._env_rank} loop={bot_loop_count} "
-                    f"before self.env.step(bot_action={bot_action})",
-                    flush=True,
+            if channel_enabled(CH_BOT_LOOP, debug_mode) and (bot_loop_count <= 5 or bot_loop_count % 25 == 0):
+                trace(
+                    CH_BOT_LOOP, debug_mode,
+                    "BotControlledEnv._run_bot_until_not_bot_turn env_rank=%s loop=%s before self.env.step(bot_action=%s)",
+                    self._env_rank, bot_loop_count, bot_action,
                 )
             # La decision en main (si elle a survecu au choix de l'adversaire, cf.
             # `_get_opponent_action`) est CONSOMMEE par le step : le moteur ne reconstruit pas le
@@ -466,13 +462,12 @@ class BotControlledEnv(gym.Wrapper):
             obs, reward, terminated, truncated, info, decision = self._engine_step(
                 bot_action, decision
             )
-            if debug_mode and (bot_loop_count <= 5 or bot_loop_count % 25 == 0):
-                print(
-                    "[TRAIN DEBUG] BotControlledEnv._run_bot_until_not_bot_turn "
-                    f"env_rank={self._env_rank} loop={bot_loop_count} "
-                    f"after self.env.step(bot_action={bot_action}) "
-                    f"terminated={terminated} truncated={truncated}",
-                    flush=True,
+            if channel_enabled(CH_BOT_LOOP, debug_mode) and (bot_loop_count <= 5 or bot_loop_count % 25 == 0):
+                trace(
+                    CH_BOT_LOOP, debug_mode,
+                    "BotControlledEnv._run_bot_until_not_bot_turn env_rank=%s loop=%s "
+                    "after self.env.step(bot_action=%s) terminated=%s truncated=%s",
+                    self._env_rank, bot_loop_count, bot_action, terminated, truncated,
                 )
             if accumulate_reward:
                 cumulative_reward += float(reward)
@@ -493,15 +488,14 @@ class BotControlledEnv(gym.Wrapper):
         # rend bien la decision fraiche : c'est sa raison d'etre.
         if terminated or truncated:
             decision = None
-        if debug_mode:
-            current_phase = str(require_key(self.engine.game_state, "phase"))
-            current_player = int(require_key(self.engine.game_state, "current_player"))
-            print(
-                "[TRAIN DEBUG] BotControlledEnv._run_bot_until_not_bot_turn exit "
-                f"env_rank={self._env_rank} loops={bot_loop_count} "
-                f"terminated={terminated} truncated={truncated} "
-                f"phase={current_phase} current_player={current_player}",
-                flush=True,
+        if channel_enabled(CH_BOT_LOOP, debug_mode):
+            trace(
+                CH_BOT_LOOP, debug_mode,
+                "BotControlledEnv._run_bot_until_not_bot_turn exit env_rank=%s loops=%s "
+                "terminated=%s truncated=%s phase=%s current_player=%s",
+                self._env_rank, bot_loop_count, terminated, truncated,
+                str(require_key(self.engine.game_state, "phase")),
+                int(require_key(self.engine.game_state, "current_player")),
             )
         return obs, terminated, truncated, info, cumulative_reward, decision
 
@@ -627,16 +621,16 @@ class BotControlledEnv(gym.Wrapper):
             decision_owner = decision.decision_owner
             has_valid_actions = decision.has_valid_actions
             eligible_count = decision.eligible_count
-            if debug_mode and (iteration_count <= 5 or iteration_count % 25 == 0):
-                current_phase = str(require_key(self.engine.game_state, "phase"))
-                current_player = int(require_key(self.engine.game_state, "current_player"))
-                print(
-                    "[TRAIN DEBUG] BotControlledEnv._ensure_actionable_controlled_turn "
-                    f"env_rank={self._env_rank} iteration={iteration_count} "
-                    f"decision_owner={decision_owner} has_valid_actions={has_valid_actions} "
-                    f"eligible_count={eligible_count} phase={current_phase} "
-                    f"current_player={current_player} controlled_player={self.controlled_player} "
-                    f"bot_player={self.bot_player}",
+            if channel_enabled(CH_BOT_LOOP, debug_mode) and (iteration_count <= 5 or iteration_count % 25 == 0):
+                trace(
+                    CH_BOT_LOOP, debug_mode,
+                    "BotControlledEnv._ensure_actionable_controlled_turn env_rank=%s iteration=%s "
+                    "decision_owner=%s has_valid_actions=%s eligible_count=%s phase=%s "
+                    "current_player=%s controlled_player=%s bot_player=%s",
+                    self._env_rank, iteration_count, decision_owner, has_valid_actions, eligible_count,
+                    str(require_key(self.engine.game_state, "phase")),
+                    int(require_key(self.engine.game_state, "current_player")),
+                    self.controlled_player, self.bot_player,
                     flush=True,
                 )
 
@@ -654,23 +648,22 @@ class BotControlledEnv(gym.Wrapper):
                     cumulative_reward=cumulative_reward,
                     decision=decision,
                 )
-                if debug_mode and (iteration_count <= 5 or iteration_count % 25 == 0):
-                    print(
-                        "[TRAIN DEBUG] BotControlledEnv._ensure_actionable_controlled_turn "
-                        f"env_rank={self._env_rank} iteration={iteration_count} branch=bot-run "
-                        f"terminated={terminated} truncated={truncated}",
-                        flush=True,
+                if channel_enabled(CH_BOT_LOOP, debug_mode) and (iteration_count <= 5 or iteration_count % 25 == 0):
+                    trace(
+                        CH_BOT_LOOP, debug_mode,
+                        "BotControlledEnv._ensure_actionable_controlled_turn env_rank=%s iteration=%s "
+                        "branch=bot-run terminated=%s truncated=%s",
+                        self._env_rank, iteration_count, terminated, truncated,
                     )
                 continue
 
             if decision_owner == self.controlled_player:
                 if has_valid_actions:
-                    if debug_mode:
-                        print(
-                            "[TRAIN DEBUG] BotControlledEnv._ensure_actionable_controlled_turn "
-                            f"env_rank={self._env_rank} iteration={iteration_count} branch=controlled-ready",
-                            flush=True,
-                        )
+                    trace(
+                        CH_BOT_LOOP, debug_mode,
+                        "BotControlledEnv._ensure_actionable_controlled_turn env_rank=%s iteration=%s branch=controlled-ready",
+                        self._env_rank, iteration_count,
+                    )
                     # SEULE sortie qui laisse l'etat intact et un masque frais en main : celle-ci.
                     # Les autres ont deja remis `decision` a None avant de muter l'etat.
                     break
@@ -707,11 +700,11 @@ class BotControlledEnv(gym.Wrapper):
 
             # No actionable decision for controlled player: force WAIT to advance phase/turn.
             t0_wait = time.perf_counter() if debug_mode else None
-            if debug_mode and (iteration_count <= 5 or iteration_count % 25 == 0):
-                print(
-                    "[TRAIN DEBUG] BotControlledEnv._ensure_actionable_controlled_turn "
-                    f"env_rank={self._env_rank} iteration={iteration_count} branch=forced-wait",
-                    flush=True,
+            if channel_enabled(CH_BOT_LOOP, debug_mode) and (iteration_count <= 5 or iteration_count % 25 == 0):
+                trace(
+                    CH_BOT_LOOP, debug_mode,
+                    "BotControlledEnv._ensure_actionable_controlled_turn env_rank=%s iteration=%s branch=forced-wait",
+                    self._env_rank, iteration_count,
                 )
             try:
                 # `decision` vaut deja None ici (remise a None au-dessus, avant la premiere
@@ -944,11 +937,8 @@ class BotControlledEnv(gym.Wrapper):
         None sur toute autre sortie, et remise a None si l'observation est construite ici — un
         `_build_observation` mute l'etat (frontiere 14.02, journal VP, advance_phase sur pool vide).
         """
-        if debug_mode:
-            print(
-                f"[TRAIN DEBUG] BotControlledEnv._play_bot_until_control_returns enter env_rank={self._env_rank}",
-                flush=True,
-            )
+        trace(CH_BOT_LOOP, debug_mode,
+              "BotControlledEnv._play_bot_until_control_returns enter env_rank=%s", self._env_rank)
         obs = None
         info = {}
         obs, terminated, truncated, info, cumulative_reward, ready_decision = self._ensure_actionable_controlled_turn(
@@ -984,14 +974,14 @@ class BotControlledEnv(gym.Wrapper):
             # vaut plus pour l'appelant, meme si le pool n'a pas bouge.
             ready_decision = None
         if debug_mode:
-            current_phase = str(require_key(self.engine.game_state, "phase"))
-            current_player = int(require_key(self.engine.game_state, "current_player"))
-            print(
-                "[TRAIN DEBUG] BotControlledEnv._play_bot_until_control_returns exit "
-                f"env_rank={self._env_rank} terminated={terminated} truncated={truncated} "
-                f"phase={current_phase} current_player={current_player} "
-                f"controlled_player={self.controlled_player}",
-                flush=True,
+            trace(
+                CH_BOT_LOOP, debug_mode,
+                "BotControlledEnv._play_bot_until_control_returns exit env_rank=%s terminated=%s "
+                "truncated=%s phase=%s current_player=%s controlled_player=%s",
+                self._env_rank, terminated, truncated,
+                str(require_key(self.engine.game_state, "phase")),
+                int(require_key(self.engine.game_state, "current_player")),
+                self.controlled_player,
             )
         return obs, float(cumulative_reward), terminated, truncated, info, ready_decision
 
@@ -1014,10 +1004,10 @@ class BotControlledEnv(gym.Wrapper):
                             f"episode_index={self._episode_index} seed={seed if attempt_idx == 0 else None!r} "
                             f"options_present={options is not None}\n"
                         )
-                    print(
-                        f"[TRAIN DEBUG] BotControlledEnv.reset start "
-                        f"env_rank={self._env_rank} attempt={attempt_idx}",
-                        flush=True,
+                    trace(
+                        CH_BOT_LOOP, debug_mode,
+                        "BotControlledEnv.reset start env_rank=%s attempt=%s",
+                        self._env_rank, attempt_idx,
                     )
                 except (OSError, IOError):
                     pass
@@ -1047,10 +1037,10 @@ class BotControlledEnv(gym.Wrapper):
                             f"episode={ep} duration_s={reset_s:.6f}\n"
                         )
                         f.write(f"RESET_TIMING episode={ep} duration_s={reset_s:.6f}\n")
-                    print(
-                        f"[TRAIN DEBUG] BotControlledEnv.reset end "
-                        f"env_rank={self._env_rank} attempt={attempt_idx} duration_s={reset_s:.6f}",
-                        flush=True,
+                    trace(
+                        CH_BOT_LOOP, debug_mode,
+                        "BotControlledEnv.reset end env_rank=%s attempt=%s duration_s=%.6f",
+                        self._env_rank, attempt_idx, reset_s,
                     )
                 except (OSError, IOError):
                     pass

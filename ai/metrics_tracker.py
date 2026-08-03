@@ -174,6 +174,8 @@ class W40KMetricsTracker:
         'charge_attempts_bot', 'charge_successes_bot',
         'move_actions', 'move_flees', 'move_opportunities',
         'shoot_activations', 'shoot_opportunities',
+        # Cout du cache de scoring du deploiement (V11 §0.46 axe A).
+        'deploy_cache_lookups', 'deploy_cache_full_builds', 'deploy_cache_incremental_failed',
     )
 
     #: Modes de deploiement ventiles (cf. `deployment_mode_schedule`, w40k_core).
@@ -932,7 +934,35 @@ class W40KMetricsTracker:
                 self.writer.add_scalar(
                     f'actions/share_{family}', count / family_total, self.episode_count
                 )
-        
+
+        # COUT DU CACHE DE SCORING DU DEPLOIEMENT (V11 §0.46 axe A).
+        #
+        # Ces quatre issues n'etaient tracees que sous `debug_mode`, donc jamais mesurees sur un
+        # run reel. Elles portent un COUT : un `full_build` reconstruit toutes les expositions
+        # LoS de la zone de deploiement, un `incremental` ne touche que le delta d'une pose.
+        #
+        # `full_build_rate` est la courbe a surveiller — si elle monte vers 1.0, le cache ne
+        # sert plus a rien et le deploiement repaie son scoring complet a chaque consultation.
+        # Le denominateur est un RESULTAT d'episode (un episode en placement fixe ne consulte
+        # jamais ce cache), d'ou le rapport des moyennes et non la moyenne des rapports : cf.
+        # `_emit_ratio_of_means`, une fenetre sans aucune consultation n'a pas de taux, pas un 0.
+        cache_counts = require_key(tactical_data, 'deployment_cache_counts')
+        cache_lookups = float(sum(cache_counts.values()))
+        cache_full_builds = cache_lookups - float(require_key(cache_counts, 'incremental'))
+        lookups_hist = self._game_push('deploy_cache_lookups', cache_lookups)
+        full_builds_hist = self._game_push('deploy_cache_full_builds', cache_full_builds)
+        failed_hist = self._game_push(
+            'deploy_cache_incremental_failed',
+            float(require_key(cache_counts, 'full_build_incremental_failed')),
+        )
+        self._emit_ratio_of_means('perf/a_deploy_cache_full_build_rate', full_builds_hist, lookups_hist)
+        # Le rebuild qui a PAYE l'incremental avant de le jeter : le seul des trois chemins de
+        # reconstruction qui soit du travail purement perdu. Rapporte aux consultations, pas aux
+        # rebuilds — c'est sa part du cout total qui compte, pas sa part des echecs.
+        self._emit_ratio_of_means('perf/b_deploy_cache_wasted_rate', failed_hist, lookups_hist)
+        if cache_lookups > 0:
+            self._emit_windowed('perf/c_deploy_cache_lookups', lookups_hist)
+
         # 0_GAME: VP differential and objective samples
         if 'victory_points_diff_controlled_minus_opponent' in tactical_data:
             vp_diff = float(require_key(tactical_data, 'victory_points_diff_controlled_minus_opponent'))

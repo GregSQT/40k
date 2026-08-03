@@ -3325,8 +3325,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         model.set_env(env)
 
     def _debug_train_marker(message: str) -> None:
-        if debug_mode:
-            print(f"[TRAIN DEBUG] {message}", flush=True)
+        """Jalons de construction du run. Le préfixe et le `flush` vivent dans `debug_trace`."""
+        from engine.debug_trace import CH_TRAIN, trace
+
+        trace(CH_TRAIN, debug_mode, "%s", message)
 
     # Create callbacks for training
     scenario_display = f"Random from {len(scenario_list)} scenarios"

@@ -70,6 +70,9 @@ def _build_gs(units: List[Dict[str, Any]], phase: str, current_player: int = 1) 
         "zone_intent_free_steps_remaining": 0,
         "objectives": [],
         "inches_to_subhex": 1,
+        # Le moteur pose TOUJOURS ces compteurs au `reset` (V11 §0.46 axe A) et le decodeur
+        # les lit en strict : une doublure qui les omet ne simule pas l'etat du moteur.
+        ActionDecoder.DEPLOYMENT_CACHE_COUNTS_KEY: ActionDecoder.empty_deployment_cache_counts(),
     }
     build_units_cache(gs)
     return gs
