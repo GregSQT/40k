@@ -89,6 +89,22 @@ def offset_to_cube(col: int, row: int) -> Tuple[int, int, int]:
     return x, y, z
 
 
+def offset_to_cube_vec(
+    cols: np.ndarray, rows: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Jumeau VECTORISÉ de :func:`offset_to_cube` — mêmes opérations, sur des tableaux.
+
+    `& 1` et `>> 1` se comportent identiquement sur un `int` Python et un `int64` numpy, y
+    compris en négatif : les deux fonctions rendent donc les mêmes entiers, et une seule
+    convention odd-q existe. La version vectorisée VIT ICI, avec la géométrie, parce qu'elle
+    en était à sa troisième copie (le tracé de LoS batch, `ActionDecoder._offset_to_cube_vec`)
+    dont une seule était sous test d'équivalence.
+    """
+    x = cols
+    z = rows - ((cols - (cols & 1)) >> 1)
+    return x, -x - z, z
+
+
 def cube_to_offset(x: int, y: int, z: int) -> Tuple[int, int]:
     """Convert cube (x, y, z) to offset odd-q (col, row)."""
     col = x
@@ -481,13 +497,10 @@ def batch_hex_line_steps(
     to_cols = to_arr[:, 0].astype(np.int64)
     to_rows = to_arr[:, 1].astype(np.int64)
 
-    # offset_to_cube, source puis cibles (vectorisé)
-    x1 = np.int64(from_col)
-    z1 = np.int64(from_row) - np.int64((from_col - (from_col & 1)) >> 1)
-    y1 = -x1 - z1
-    x2 = to_cols
-    z2 = to_rows - ((to_cols - (to_cols & 1)) >> 1)
-    y2 = -x2 - z2
+    # offset_to_cube, source puis cibles — la MÊME conversion des deux côtés, scalaire ici,
+    # vectorisée là, prises toutes deux à leur source unique.
+    x1, y1, z1 = offset_to_cube(from_col, from_row)
+    x2, y2, z2 = offset_to_cube_vec(to_cols, to_rows)
 
     n_arr = np.maximum(np.maximum(np.abs(x2 - x1), np.abs(y2 - y1)), np.abs(z2 - z1))
     max_n = int(n_arr.max())
@@ -520,13 +533,14 @@ def batch_hex_line_steps(
         dy = np.abs(ry.astype(np.float64) - fy)
         dz = np.abs(rz.astype(np.float64) - fz)
 
-        # Départage : on recalcule la coordonnée dont l'arrondi a le plus dérivé. Les trois
-        # masques sont exclusifs, donc chaque formule lit les rx/ry/rz d'ORIGINE.
+        # Départage : on recalcule la coordonnée dont l'arrondi a le plus dérivé. Le scalaire
+        # teste `dx > dy and dx > dz`, sinon `dy > dz`, sinon la branche z ; ici les deux
+        # masques utiles sont exclusifs, donc chaque formule lit les rx/ry/rz d'ORIGINE.
+        # La branche `y` n'a pas de masque : `ry_f` ne sert à personne (`cube_to_offset` ne lit
+        # que x et z, et cette branche laisse justement x et z intacts), donc `mask_z` s'écrit
+        # directement — `(~mask_x) & ~(dy > dz)` est `(~mask_x) & (dy <= dz)`.
         mask_x = (dx > dy) & (dx > dz)
-        mask_y = (~mask_x) & (dy > dz)
-        mask_z = (~mask_x) & (~mask_y)
-        # `ry_f` du chemin scalaire n'est pas calculé : `cube_to_offset` ne lit que x et z, et
-        # la branche `mask_y` laisse justement x et z intacts.
+        mask_z = (~mask_x) & (dy <= dz)
         rx_f = np.where(mask_x, -ry - rz, rx)
         rz_f = np.where(mask_z, -rx - ry, rz)
 

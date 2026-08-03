@@ -27,6 +27,7 @@ from engine.phase_handlers.shooting_handlers import (
     _get_obscuring_area_sets,
     _get_wall_set,
     compute_unit_los,
+    ground_los_blocking_signature,
 )
 
 #: Second TERRAIN (pas seulement un second roster) : le tracé ne dépend que des murs et des areas
@@ -237,11 +238,9 @@ def test_deux_terrains_aux_memes_murs_ne_partagent_pas_le_cache_potentiel(
     )
 
     def _cle_et_chemin():
-        signature = decoder.deployment_los_terrain_signature(game_state)
+        signature = ground_los_blocking_signature(game_state)
         chemin = decoder._get_deployment_potential_los_cache_file_path(
-            current_deployer=deployer,
-            enemy_los_reference_hexes=refs,
-            terrain_signature=signature,
+            (deployer, tuple(refs), signature)
         )
         return signature, chemin
 

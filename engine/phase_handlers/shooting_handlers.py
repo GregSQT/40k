@@ -5,6 +5,7 @@ Only pool building functionality - foundation for complete handler autonomy
 """
 
 import copy
+import hashlib
 import math
 import os
 import time
@@ -3892,7 +3893,7 @@ def _get_los_blocking_grids(game_state: Dict[str, Any]) -> Tuple[np.ndarray, np.
     obscuring_areas = _get_obscuring_area_sets(game_state)
     cols = int(require_key(game_state, "board_cols"))
     rows = int(require_key(game_state, "board_rows"))
-    for source, hexes in (("wall_hexes", wall_set), *((a, h) for a, h in obscuring_areas)):
+    for source, hexes in (("wall_hexes", wall_set), *obscuring_areas):
         for c, r in hexes:
             if c < 0 or r < 0:
                 raise ValueError(
@@ -3913,6 +3914,37 @@ def _get_los_blocking_grids(game_state: Dict[str, Any]) -> Tuple[np.ndarray, np.
     grids = (wall_grid, area_grid)
     game_state["_los_blocking_grids_cache"] = grids
     return grids
+
+
+def ground_los_blocking_signature(game_state: Dict[str, Any]) -> Tuple[Any, ...]:
+    """Signature de TOUT ce qui bloque :func:`batch_ground_hex_can_see`, pour une clé de cache.
+
+    DÉRIVÉE DES GRILLES ELLES-MÊMES, et c'est le point : `batch_ground_hex_can_see` ne lit rien
+    d'autre que `wall_grid`, `area_grid` et leur forme (une cellule hors grille est libre). Deux
+    terrains de même signature produisent donc, par construction, les mêmes expositions — et un
+    3ᵉ bloqueur ajouté un jour aux grilles entre dans la clé SANS que personne ait à y penser.
+
+    POURQUOI PAS UNE ÉNUMÉRATION À PART (V11 §0.65, 2ᵉ passe de revue). La version précédente
+    vivait dans `ActionDecoder` et relistait les bloqueurs de son côté : murs relus du JSON brut
+    avec un parseur maison, areas lues via `_get_obscuring_area_sets`. Deux énumérations de « ce
+    qui bloque », à deux altitudes, dont une seule savait ce que la règle applique vraiment —
+    exactement la forme de défaut que §0.64 a payée. Ici il n'y a plus rien à synchroniser.
+
+    Le digest porte sur les octets des grilles : déterministe d'un processus à l'autre (mêmes
+    murs et mêmes areas → mêmes octets), donc utilisable pour un nom de fichier partagé. La
+    FORME est incluse explicitement — `tobytes()` ne la porte pas, et elle décide de ce qui est
+    « hors grille », donc libre.
+
+    Coût mesuré : 2,9 ms par appel, 2 appels par épisode (une reconstruction par joueur), soit
+    0,45 % de la phase de déploiement — pas de mémoïsation, elle coûterait une 3ᵉ clé de cache
+    et deux sites de purge de plus pour ça.
+    """
+    wall_grid, area_grid = _get_los_blocking_grids(game_state)
+    return (
+        wall_grid.shape,
+        hashlib.sha256(wall_grid.tobytes()).hexdigest(),
+        hashlib.sha256(area_grid.tobytes()).hexdigest(),
+    )
 
 
 def batch_ground_hex_can_see(
@@ -3973,20 +4005,24 @@ def batch_ground_hex_can_see(
     target_area[in_grid] = area_grid[to_cols[in_grid], to_rows[in_grid]]
 
     for idx, c_off, r_off in batch_hex_line_steps(from_col, from_row, to_arr, result):
+        # Le test de bornes reste indispensable — une cellule hors grille est LIBRE, comme
+        # `prev in wall_set` est faux hors plateau — mais il est presque toujours vrai partout
+        # (mesuré : 0 cellule hors grille sur les deux terrains), d'où le chemin direct.
         inside = (c_off >= 0) & (c_off < grid_cols) & (r_off >= 0) & (r_off < grid_rows)
-        if not inside.any():
-            continue
-        c_in = c_off[inside]
-        r_in = r_off[inside]
+        if inside.all():
+            sel, c_in, r_in = idx, c_off, r_off
+        else:
+            sel = idx[inside]
+            if sel.size == 0:
+                continue
+            c_in, r_in = c_off[inside], r_off[inside]
         cell_area = area_grid[c_in, r_in]
-        blocked_inside = wall_grid[c_in, r_in] | (
+        blocked = wall_grid[c_in, r_in] | (
             (cell_area >= 0)
             & (cell_area != source_area)
-            & (cell_area != target_area[idx][inside])
+            & (cell_area != target_area[sel])
         )
-        blocked = np.zeros(len(idx), dtype=bool)
-        blocked[inside] = blocked_inside
-        result[idx[blocked]] = False
+        result[sel[blocked]] = False
 
     return result
 

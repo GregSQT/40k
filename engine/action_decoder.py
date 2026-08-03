@@ -13,7 +13,10 @@ from shared.data_validation import require_key
 from engine.debug_trace import CH_DEPLOY_CACHE, channel_enabled, trace
 from engine.game_utils import get_unit_by_id
 from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
-from engine.phase_handlers.shooting_handlers import batch_ground_hex_can_see
+from engine.phase_handlers.shooting_handlers import (
+    batch_ground_hex_can_see,
+    ground_los_blocking_signature,
+)
 from engine.phase_handlers.shared_utils import (
     is_unit_alive,
     compute_candidate_footprint,
@@ -102,9 +105,10 @@ class ActionDecoder:
         # (`env_wrappers`, `pve_controller`, `w40k_core`) : ce site etait le dernier a la lire
         # depuis la config.
         self.total_action_size = TOTAL_ACTION_SIZE
-        # Clé : (déployeur, hexes de référence, signature de terrain). La signature de terrain
-        # porte les murs ET les areas obscurantes (`deployment_los_terrain_signature`) — sans
-        # elles, deux terrains aux mêmes murs partageaient ce cache et le fichier disque.
+        # Clé : (déployeur, hexes de référence, signature des grilles de blocage). La signature
+        # (`shooting_handlers.ground_los_blocking_signature`) porte les murs ET les areas
+        # obscurantes — sans elles, deux terrains aux mêmes murs partageaient ce cache et le
+        # fichier disque.
         self._deployment_potential_los_cache: Dict[
             tuple[int, tuple[tuple[int, int], ...], tuple],
             Dict[tuple[int, int], int],
@@ -210,62 +214,15 @@ class ActionDecoder:
         """
         return batch_ground_hex_can_see(game_state, from_hex, to_hexes)
 
-    @staticmethod
-    def deployment_los_terrain_signature(
-        game_state: Dict[str, Any]
-    ) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[str, tuple[tuple[int, int], ...]], ...]]:
-        """Ce dont la LoS de déploiement DÉPEND dans le terrain : les murs ET les areas obscurantes.
+    def _get_deployment_potential_los_cache_file_path(self, topology_key: tuple) -> str:
+        """Chemin de cache disque des expositions potentielles, pour une topologie donnée.
 
-        SOURCE UNIQUE de la clé de cache des expositions potentielles (mémoire et disque). Elle
-        était réduite aux MURS, ce qui était vrai du tracé 2D d'avant V11 §0.64 et faux depuis :
-        `deployment_los` applique aussi 13.10. Deux terrains aux mêmes murs et aux areas
-        obscurantes différentes partageaient donc le même fichier `.cache/` — et le second
-        relisait en silence, pour toujours, les valeurs du premier.
-        Aucune version de modèle ne peut rattraper ça : le modèle n'a pas changé, c'est la clé
-        qui ne décrivait pas ce que le modèle lit.
-
-        📌 **Aucun terrain du dépôt ne déclenche ce cas aujourd'hui** — vérifié : les seuls
-        fichiers aux murs identiques, `terrain-mc1.json` et `terrain-train-01.json`, ont AUSSI
-        les mêmes areas obscurantes (15 areas, 15 288 hexes) et ne diffèrent que par `floors`,
-        que le tracé au sol ne lit pas. Ils partagent donc toujours ce cache, et c'est correct.
-        Ne PAS ajouter `floors` à la signature pour « les séparer » : ce serait invalider tous
-        les fichiers en cache pour une donnée dont la valeur cachée ne dépend pas.
-
-        Les areas viennent de `_get_obscuring_area_sets`, ce que la LoS lit RÉELLEMENT — pas du
-        JSON brut, qui porte aussi des champs (`floors`) dont le tracé au sol ne dépend pas.
+        Prend la clé MÉMOIRE telle quelle et n'y ajoute que la version du modèle. Les deux clés
+        décrivaient les mêmes éléments en deux listes de paramètres à garder synchronisées — et
+        `terrain_signature` est précisément le champ que la 1ʳᵉ rédaction avait oublié d'un côté.
+        Il n'y a plus qu'un objet à faire entrer dans une clé pour qu'il entre dans les deux.
         """
-        from engine.phase_handlers.shooting_handlers import _get_obscuring_area_sets
-
-        walls: List[tuple[int, int]] = []
-        for raw_hex in require_key(game_state, "wall_hexes"):
-            if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
-                walls.append((int(raw_hex[0]), int(raw_hex[1])))
-            elif isinstance(raw_hex, dict):
-                walls.append((int(require_key(raw_hex, "col")), int(require_key(raw_hex, "row"))))
-            else:
-                raise TypeError(f"Invalid wall hex format: {raw_hex}")
-        wall_signature = tuple(sorted(walls))
-        obscuring_signature = tuple(
-            (str(area_id), tuple(sorted((int(c), int(r)) for c, r in hex_set)))
-            for area_id, hex_set in sorted(
-                _get_obscuring_area_sets(game_state), key=lambda item: str(item[0])
-            )
-        )
-        return wall_signature, obscuring_signature
-
-    def _get_deployment_potential_los_cache_file_path(
-        self,
-        current_deployer: int,
-        enemy_los_reference_hexes: List[tuple[int, int]],
-        terrain_signature: tuple,
-    ) -> str:
-        """Return deterministic shared cache file path for deployment potential LoS."""
-        cache_payload = (
-            self.DEPLOYMENT_LOS_MODEL_VERSION,
-            int(current_deployer),
-            tuple(enemy_los_reference_hexes),
-            terrain_signature,
-        )
+        cache_payload = (self.DEPLOYMENT_LOS_MODEL_VERSION, *topology_key)
         cache_digest = hashlib.sha256(repr(cache_payload).encode("utf-8")).hexdigest()
         project_root = os.path.dirname(os.path.dirname(__file__))
         cache_dir = os.path.join(project_root, ".cache", "deployment_potential_los")
@@ -1318,19 +1275,17 @@ class ActionDecoder:
             "enemy_pool_hexes_n=%s enemy_los_reference_hexes_n=%s",
             len(enemy_pool_hexes), len(enemy_los_reference_hexes),
         )
-        # Murs ET areas obscurantes : les DEUX bloqueurs que `deployment_los` applique depuis
-        # §0.64. La même signature sert la clé mémoire et la clé disque — les séparer, c'est
-        # rouvrir la possibilité qu'une seule des deux soit corrigée.
-        terrain_signature = self.deployment_los_terrain_signature(game_state)
+        # La signature de terrain vient des GRILLES de blocage elles-mêmes (murs + areas
+        # obscurantes) : ce que `deployment_los` lit, ni plus ni moins. Une seule clé sert la
+        # mémoire et le disque — les séparer, c'est rouvrir la possibilité qu'une seule des deux
+        # soit corrigée (V11 §0.65).
         topology_key = (
             int(current_deployer),
             tuple(enemy_los_reference_hexes),
-            terrain_signature,
+            ground_los_blocking_signature(game_state),
         )
         potential_los_cache_file_path = self._get_deployment_potential_los_cache_file_path(
-            current_deployer=current_deployer,
-            enemy_los_reference_hexes=enemy_los_reference_hexes,
-            terrain_signature=terrain_signature,
+            topology_key
         )
         if topology_key not in self._deployment_potential_los_cache:
             if os.path.exists(potential_los_cache_file_path):
@@ -1351,22 +1306,26 @@ class ActionDecoder:
         los_exposure_total_s = 0.0
         potential_los_total_s = 0.0
 
-        for h in valid_hexes:
-            los_exposure_by_hex[h] = 0
-
         if valid_hexes:
             valid_arr = np.array(valid_hexes, dtype=np.int64)
 
             # --- Batch LoS from each deployed enemy to all valid hexes ---
+            # L'exposition s'accumule DANS UN TABLEAU, le dictionnaire n'est construit qu'une
+            # fois à la fin : `counts += seen` coûte 0,004 ms là où la boucle Python sur les
+            # ~9 600 hexes vus par ennemi en coûtait 0,60 (mesuré). Le dict produit est le
+            # même, dans le même ordre — `valid_hexes` est sans doublon (c'est le pool moins
+            # les murs), donc un `+= 1` par hexe vu vaut exactement une somme de booléens.
             _t_los0 = time.perf_counter() if _debug_mode else None
+            counts = np.zeros(len(valid_hexes), dtype=np.int64)
             for enemy in enemy_deployed_units:
                 enemy_col = int(require_key(enemy, "col"))
                 enemy_row = int(require_key(enemy, "row"))
                 if enemy_col < 0 or enemy_row < 0:
                     continue
-                seen = self.deployment_los(game_state, (enemy_col, enemy_row), valid_arr)
-                for i in np.flatnonzero(seen):
-                    los_exposure_by_hex[valid_hexes[i]] += 1
+                counts += self.deployment_los(game_state, (enemy_col, enemy_row), valid_arr)
+            los_exposure_by_hex = {
+                h: int(c) for h, c in zip(valid_hexes, counts.tolist())
+            }
             # On teste le CHRONO, pas le drapeau : c'est la meme condition (`_t_los0` n'est pose
             # que si `_debug_mode`), mais celle-ci se prouve — l'ignore precedent ne faisait que
             # taire la soustraction sur un Optional.
@@ -1483,6 +1442,11 @@ class ActionDecoder:
         # sur-ensemble ne bouge pas d'un ajout à l'autre), et seulement s'il y a un ennemi à
         # traiter — un tour où le delta est purement allié ne le paie pas.
         scoring_arr: Optional[np.ndarray] = None
+        # Deltas d'exposition accumulés sur TOUS les ennemis ajoutés, appliqués au dictionnaire
+        # en une seule passe : le `+= 1` par hexe vu coûtait 0,60 ms par ennemi (mesuré), la
+        # somme de booléens 0,004 ms. La garde `require_key` reste, au même endroit : un hexe
+        # absent du cache est un cache corrompu, pas une valeur à créer.
+        deltas: Optional[np.ndarray] = None
         for added_id in added_ids:
             player, col, row = current_snapshot[added_id]
             if int(player) == int(current_deployer):
@@ -1501,9 +1465,12 @@ class ActionDecoder:
             if scoring_arr is None:
                 scoring_arr = np.array(scoring_hexes, dtype=np.int64)
             seen = self.deployment_los(game_state, (int(col), int(row)), scoring_arr)
-            for i in np.flatnonzero(seen):
+            deltas = seen.astype(np.int64) if deltas is None else deltas + seen
+
+        if deltas is not None:
+            for i in np.flatnonzero(deltas):
                 key = scoring_hexes[i]
-                los_exposure_by_hex[key] = require_key(los_exposure_by_hex, key) + 1
+                los_exposure_by_hex[key] = require_key(los_exposure_by_hex, key) + int(deltas[i])
 
         cache["deployed_snapshot"] = current_snapshot
         cache["deployed_snapshot_version"] = current_snapshot_version
@@ -1604,13 +1571,14 @@ class ActionDecoder:
     ) -> tuple["np.ndarray", "np.ndarray", "np.ndarray"]:
         """Jumeau VECTORISÉ de la conversion offset -> cube de `calculate_hex_distance`.
 
-        Recopié terme à terme depuis `engine.combat_utils.calculate_hex_distance` (même décalage
-        `row - ((col - (col & 1)) >> 1)`), et l'identité des deux est verrouillée par test : la
-        distance de déploiement doit rester CELLE du moteur, pas une approximation vectorielle.
+        Délègue à `hex_utils.offset_to_cube_vec`, où vit la géométrie : la conversion odd-q en
+        était à trois exemplaires, dont un seul (celui-ci) sous test d'équivalence. Le test
+        reste attaché à ce symbole — il vérifie que la distance de déploiement est CELLE du
+        moteur, pas une approximation vectorielle, et cela ne dépend pas d'où vit le calcul.
         """
-        x = cols
-        z = rows - ((cols - (cols & 1)) >> 1)
-        return x, -x - z, z
+        from engine.hex_utils import offset_to_cube_vec
+
+        return offset_to_cube_vec(cols, rows)
 
     @classmethod
     def _nearest_hex_distance_vec(
