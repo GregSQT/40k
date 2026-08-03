@@ -314,6 +314,72 @@ def test_log_holdout_and_scenario_split_scores() -> None:
     assert "bot_split/hard_bot_1" in keys2
 
 
+def test_log_faction_bot_win_rates_publishes_the_bot_x_faction_cross() -> None:
+    """V11 §0.55 / §10.6 : le croisement `bot_eval/faction/<faction>/vs_<bot>` est publie.
+
+    Ni `bot_eval/vs_<bot>` (rosters melanges) ni `bot_eval/faction/<faction>` (adversaires
+    melanges) ne disent si une faiblesse contre un bot tient a UN roster. Le holdout
+    `tactical`, de poids nul, est absent de l'agregat par faction : c'est precisement lui
+    que ce croisement doit rendre lisible par roster.
+
+    Les deux familles sont emises par DEUX methodes, appelees ici comme les 3 sites de
+    production le font : c'est cet enchainement que le test verrouille, pas une signature.
+    """
+    t = _tracker_stub()
+    t.log_faction_scores({"Spacemarine": 0.6, "Ork": 0.4}, 0.2, step=7)
+    t.log_faction_bot_win_rates(
+        {
+            "Spacemarine": {"control": 0.25, "tactical": 0.75},
+            "Ork": {"control": 0.5, "tactical": 1.0},
+        },
+        step=7,
+    )
+    emitted = {k: (v, s) for k, v, s in _dw(t).scalars}
+    assert emitted["bot_eval/faction/spacemarine"] == (0.6, 7)
+    assert emitted["bot_eval/faction/spacemarine/vs_control"] == (0.25, 7)
+    assert emitted["bot_eval/faction/spacemarine/vs_tactical"] == (0.75, 7)
+    assert emitted["bot_eval/faction/ork/vs_control"] == (0.5, 7)
+    assert emitted["bot_eval/faction/ork/vs_tactical"] == (1.0, 7)
+    assert emitted["00_critical/0_gap_sm-ork"] == (0.2, 7)
+    # Le croisement porte une information que l'agregat efface : ici l'agent domine avec les
+    # Space Marines (gap > 0) tout en etant PLUS faible contre `control` avec eux qu'avec les
+    # Orks. Une lecture par faction seule concluerait l'inverse.
+    assert (
+        emitted["bot_eval/faction/spacemarine/vs_control"][0]
+        < emitted["bot_eval/faction/ork/vs_control"][0]
+    )
+
+
+def test_faction_tag_segment_is_shared_by_both_curve_families() -> None:
+    """UNE regle faction -> segment de tag, pour l'agregat comme pour le croisement.
+
+    Recopier `.lower()` dans chaque famille est le motif jumeau du depot : la faction
+    COMPOSITE est le cas qui le revele, parce que c'est le seul ou `.lower()` et
+    `_metric_slug` divergent (`ork+spacemarine` contre `ork_spacemarine`). Le segment est
+    volontairement `.lower()` : passer au slug renommerait une courbe deja tracee.
+    """
+    t = _tracker_stub()
+    t.log_faction_scores({"Ork+Spacemarine": 0.5}, None, step=3)
+    t.log_faction_bot_win_rates({"Ork+Spacemarine": {"control": 0.5}}, step=3)
+    keys = [k for k, _, _ in _dw(t).scalars]
+    assert "bot_eval/faction/ork+spacemarine" in keys
+    assert "bot_eval/faction/ork+spacemarine/vs_control" in keys
+    # Le croisement est bien un SOUS-arbre du meme segment : un prefixe divergent rendrait
+    # les deux familles illisibles ensemble dans TensorBoard.
+    assert keys[1].startswith(keys[0] + "/")
+
+
+def test_log_faction_bot_win_rates_refuses_what_it_cannot_publish() -> None:
+    """Une ventilation qui n'est pas un dict leve, au lieu d'etre ignoree en silence.
+
+    Une courbe absente se lit « pas encore mesure », jamais « appelant casse » : c'est cette
+    confusion que le garde interdit.
+    """
+    t = _tracker_stub()
+    with pytest.raises(TypeError, match="faction_bot_win_rates must be dict"):
+        t.log_faction_bot_win_rates([("Ork", "control", 0.5)])  # type: ignore[arg-type]
+
+
 def _reward_data(**overrides: Any) -> Dict[str, Any]:
     """Ventilation complete d'un episode, telle que le callback l'emet."""
     data: Dict[str, Any] = {

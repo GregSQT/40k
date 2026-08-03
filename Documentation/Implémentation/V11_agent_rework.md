@@ -88,7 +88,7 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 | **§0.58** | Les rampes par-épisode **redémarraient à chaque reprise** (`--append`, `--resume-from`) | ✅ **CORRIGÉ le 2026-08-02** | **1** | Rien ne persistait le nombre d'épisodes joués : la rampe de déploiement n'atteignait jamais `active_ratio_end` et le compte cumulé du modèle était écrasé par celui du seul run courant. `ai/run_state.py` persiste le compte (compté, jamais dérivé de `num_timesteps`) ; reprendre un modèle sans lui **lève** (arbitrage : pas de compatibilité ascendante). `learning_rate`, `ent_coef` et le self-play sont des rampes de **RÉGIME** : elles repartent de zéro à chaque run, et c'est l'arbitrage. Détail → §0.58. |
 | **§0.57** | Les rampes par-épisode du moteur avançaient **`n_envs` fois trop lentement** | ✅ **CORRIGÉ le 2026-08-02** — reste une conséquence à assumer | **1** | Le compteur d'épisodes du moteur est LOCAL à un worker ; il était divisé par le total GLOBAL. À `n_envs=48`, la rampe de déploiement est restée collée à `active_ratio_start` sur TOUS les runs vectorisés (mesuré : `s_deploy_active_share` 0.3040 pour 0.496 attendus). Même défaut sur `deployment_random_mix`. **Conséquence : aucune mesure passée n'a été produite avec la rampe annoncée** — §0.29 et §0.46 pt 2 sont amendés. Détail → §0.57. |
 | **§0.56** | Instrumentation : usage par **famille d'action**, et **classement bot-contre-bot** | ✅ **LIVRÉ le 2026-08-02** — reste à s'en servir | **2** | Deux angles morts fermés, aucun ne coûte de ré-entraînement. (1) `actions/share_<famille>` publie la part de chaque DÉCISION dans ce que l'agent joue : une dimension jamais choisie ou toujours choisie est cassée quel que soit le win-rate — c'est ce qui rend un lot de tranches P3 diagnosticable **en un seul run**. (2) `scripts/bot_ranking.py` fait s'affronter les bots **sans agent** : sans lui, juger un bot exigeait un modèle entraîné, donc une mesure circulaire — et §0.55 était irréalisable. Détail → §0.56. |
-| **§0.55** | Le **holdout d'évaluation** `TacticalBot` est DANS l'enveloppe d'entraînement — effet plafond | 🟠 **OUVERT** — re-profilage validé le 2026-08-02 (arbitrage utilisateur), à écrire ; ⚠️ **RE-MESURÉ le 2026-08-03 : le diagnostic tient** — `tactical` est l'adversaire le PLUS FACILE des six (0.89) quand `value_trade`, un bot d'entraînement, est le plus dur (0.74) | **1** (avant toute mesure de référence) | `tactical` porte `w_objective 0.5 / w_enemy 0.0` : un `ControlBot` dilué, interpolé entre `control` (1.0/0.1) et `defensive` (0.7/−0.5). Un holdout intérieur à l'enveloppe mesure l'**interpolation**, pas la généralisation — d'où `vs_tactical` **0.95** au run 4. Re-profiler **hors enveloppe** (`w_objective 0.8 / w_enemy 0.6`) et ajouter le scalaire `vs_tactical` **par roster**. 🛠️ **Spec d'application ÉCRITE le 2026-08-02** (3 étapes, 2 fichiers, mesure `bot_ranking` avant/après) — **rien n'est appliqué** : `config/` est relu à chaud par les évals du run en cours. ⚠️ **À faire AVANT de geler la baseline d'évaluation** : après, plus aucune mesure n'est comparable (leçon §0.47 É4). Détail → §0.55. |
+| **§0.55** | Le **holdout d'évaluation** `TacticalBot` est DANS l'enveloppe d'entraînement — effet plafond | ✅ **LIVRÉ le 2026-08-04 — le mètre est GELÉ** | **1** (avant toute mesure de référence) | `tactical` gelé à **`w_objective 2.0`** (mesuré sur **x1**) : l'agent passe de **0.89 à 0.72** contre lui, et le bot de **dernier (0.357) à premier (0.636)** sur 6. `combined` inchangé à 0.8200 — le holdout pèse 0.0, c'est le contrôle que son statut est intact. ✅ Croisement `bot_eval/faction/<faction>/vs_<bot>` publié (méthode dédiée, dérivé du tally unique). 🔴 **Deux des trois leviers de la spec n'avaient aucune prise** : `w_enemy` est INERTE pour ce bot (mesuré + verrou), et le pas `0.5 → 0.8` tombait dans la partie morte d'une réponse en MARCHE. 🔴 **Piège à retenir : `--training-config` ne choisit PAS le plateau** (`config.json` → x5 ; les évals de référence passent `--resolution 1`) — une campagne entière a été jetée pour ça, et en x5 le diagnostic s'inversait. Détail → §0.55. |
 | **§0.14** | Re-mesure du run — win-rate par matchup | ✅ **MESURE OBTENUE le 2026-08-03** | — | Run de **200 000 épisodes** (2026-08-02 12 h 26 → 2026-08-03 02 h 05, 19 points d'éval, 820 k → 12,1 M steps). `eval_bots/combined_win_rate` **0,283 → max 0,837 → 0,743**. Éval rejouée le 2026-08-03 sur le snapshot ROBUSTE (`robust_0.8049`), APRÈS §0.64/§0.65 : **combined 0.8200**, `tactical` 0.89, `defensive` 0.87, `greedy` 0.84, `adaptive` 0.83, **`control` 0.82**, **`value_trade` 0.74** (le pire), **0 troncature**. Le seuil de gating `vs_control ≥ 0.50` est **franchi** — le **0.04 du run 4 est périmé**. ⚠️ 0,743 → 0,820 est un écart best-contre-final, PAS l'effet de §0.64. Détail → §0.14. |
 | **[§9](V11_phaseA.md#s9)** | Phase A' — P2 + P3-0/1/2 | 🟢 **LIVRÉS ET MERGÉS sur `main`** — restent **P3-3→8**, **P4**, **P5** | **2** | ⚠️ Aucune des quatre livraisons n'est **MESURÉE**. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). Détail → §0.42 et §0.43 (en §0hist), et [§9](V11_phaseA.md#s9). |
 | **§0.44** | Tête pointeur de **déploiement** — les slots 4-8 n'ont pas de tête dédiée | 🟠 **OUVERT** — reporté après la mesure de référence (arbitrage utilisateur du 2026-07-29) | **3** | Les ids 4-8 tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`) : leurs logits sortent de la **conv 1×1** (`_move_logits`), pas d'une tête dédiée ; `deploy_emb` n'atteint le calcul que par le **conditionnement du tronc**. Ajouter un `deploy_query_net`, jumeau de `choice_query_net` — ce qui oblige à lire la phase dans la policy. Élément `L1` du lot §0.48 ; `L11` (`N_DEPLOY_SLOTS`) à trancher **avant**. Détail → §0.44. |
@@ -1230,7 +1230,7 @@ du hasard, mais si l'asymétrie se confirme sur un échantillon sérieux, elle b
 mesure — l'agent joue toujours ce siège. À vérifier avec `--episodes 20` ou plus.
 
 <a id="s0.55"></a>
-### 0.55 Le holdout d'évaluation est DANS l'enveloppe d'entraînement — effet plafond sur le seul adversaire jamais vu — 🟠 OUVERT (2026-08-02)
+### 0.55 Le holdout d'évaluation est DANS l'enveloppe d'entraînement — effet plafond sur le seul adversaire jamais vu — ✅ LIVRÉ le 2026-08-04 (le mètre est gelé)
 
 **Origine.** Relevé en répondant à la question « TacticalBot a-t-il été supprimé ? ». Il ne l'a
 pas été (ce sont `AggressiveSmartBot` et `DefensiveSmartBot` qui l'ont été, [§0.53](#s0.53)), et
@@ -1275,7 +1275,168 @@ mauvais côté : l'agent bat 9 fois sur 10 le bot censé mesurer sa généralisa
 ci-dessous : la cible « `tactical` ne doit pas se classer dernier » est déjà violée dans l'autre
 sens — il est **premier**, c'est-à-dire le plus faible.
 
-🟢 **ARBITRAGE UTILISATEUR DU 2026-08-02 — re-profilage validé, à écrire.**
+---
+
+#### ✅ LIVRÉ LE 2026-08-04 — le mètre est gelé, et ce que la spec avait faux
+
+⚠️ **Tout ce qui suit ce bloc (arbitrage du 2026-08-02, préparatifs, étapes 1-3) est conservé
+comme HISTORIQUE de la décision.** Deux de ses trois leviers se sont révélés sans prise à la
+mesure ; ne pas s'y référer comme à une consigne.
+
+#### 🔴 LE PIÈGE QUI A COÛTÉ UNE JOURNÉE — le plateau n'est pas dans le profil
+
+`--training-config x1` **ne choisit pas le plateau**. Sans `--resolution` ni `W40K_BOARD_PATH`,
+le plateau vient de `config/config.json` → `paths.board` = **`board/44x60x5`**, quel que soit le
+nom du profil. Les évals de référence, elles, passent `--resolution 1` → `board/44x60x1`.
+`scripts/bot_ranking.py` n'a **aucun** drapeau de résolution : il prend donc x5 par défaut.
+
+Une première campagne de réglage (4 évals de 600 parties + 3 classements de 2 400 épisodes) a
+tourné sur **x5** et a été **JETÉE** : `w_objective` multiplie des distances alors que
+`hold_bonus` est une constante, donc leur équilibre — et le réglage qui en découle — n'est pas le
+même d'une résolution à l'autre.
+
+📌 **Symptôme à reconnaître** : les **six** bots décalés ensemble par rapport à une mesure de
+référence. Un changement de plateau déplace tout le panel ; un changement de poids d'UN bot ne
+déplace que sa colonne. C'est exactement ce qu'a montré le contrôle de reproduction, et c'est ce
+qui a permis de refuser la conclusion au lieu de la publier.
+
+**Règle** : fixer la résolution AVANT toute mesure, et l'écrire à côté du chiffre obtenu.
+
+#### Ce qui est gelé
+
+`config/bot_movement_weights.json` → `tactical` : **`w_objective 2.0`, `w_enemy 0.0`**, mesuré sur
+**x1** (`board/44x60x1`), avec la justification écrite DANS le fichier (statut de holdout, les
+trois pièges de lecture, et la mention que la valeur est gelée).
+Statut inchangé et vérifié : poids **0.0** dans `bot_eval_weights`, **absent** de
+`bot_training.ratios`, **exclu** du `worst_bot_score` — le re-profilage change la FORCE du
+holdout, jamais son STATUT.
+
+| sur x1, modèle robuste 0.8049 | avant (`0.5`) | après (**`2.0`**) |
+|---|---|---|
+| agent → `vs_tactical` | 0.89 (le plus FACILE des six) | **0.72** |
+| `tactical` bot-contre-bot | 0.357 — **dernier sur 6** | **0.636 — premier** |
+| `00_critical/a_bot_eval_combined` | 0.8200 | 0.8200 — **inchangé** |
+
+📌 Le `combined` ne bouge pas, et c'est le contrôle qui prouve que le statut est intact :
+`tactical` pèse 0.0, donc durcir le holdout ne peut ni gonfler ni dégrader le score suivi. Un
+`combined` qui aurait bougé aurait signalé une fuite du holdout dans le critère.
+
+**Pourquoi 2.0** : côté agent la réponse est une **marche** puis un **plateau** — 1.0, 2.0 et 8.0
+donnent tous 0.72-0.73, donc la valeur exacte n'y change rien. Le départage vient du
+bot-contre-bot, plat lui aussi entre 1.0 et 3.0 (0.62-0.64) puis déclinant (5.0 → 0.571,
+8.0 → 0.541). `2.0` est au **milieu** de ce plateau : c'est le point le moins sensible à une
+erreur de mesure. Ce n'est pas un optimum, et il ne faut pas le lire comme tel.
+
+#### Le croisement bot × faction est publié (étape 2b)
+
+`bot_eval/faction/<faction>/vs_<bot>` est émis depuis le **comptage existant**. Le tally a été
+extrait en `_faction_bot_tally`, construit **une seule fois** dans `evaluate_against_bots` puis
+dérivé deux fois : `_compute_faction_scores` (agrégat pondéré) et `_compute_faction_bot_win_rates`
+(ventilation brute). Même geste que `scenario_bot_stats`, construit puis dérivé — un second
+parcours de `results_list` laisserait les deux ventilations diverger sur un filtre.
+`tactical` porte un poids nul, donc il est **absent de l'agrégat** et **présent dans le
+croisement** : c'est précisément le `vs_tactical` par roster que l'entrée demandait.
+
+⚠️ **Le croisement n'est PAS la décomposition de `bot_eval/faction/<faction>`**, malgré le préfixe
+commun : l'agrégat est pondéré et exclut le holdout, les cellules sont des win-rates bruts et
+l'incluent. Leur moyenne ne redonne pas l'agrégat, et c'est voulu — le docstring de
+`log_faction_bot_win_rates` le dit, parce que la première personne qui vérifiera l'identité
+conclura sinon à un bug.
+
+Publication par **méthode dédiée** `log_faction_bot_win_rates`, comme `log_holdout_split_metrics`
+et `log_scenario_split_scores` : une ventilation = un point d'entrée. La greffer sur
+`log_faction_scores` aurait obligé chaque ventilation suivante à rallonger sa signature.
+Verrous : `tests/unit/ai/test_metrics_tracker_utils.py` (3), `tests/unit/ai/test_bot_evaluation_utils.py`
+(2). Mutations vérifiées ROUGE : retirer la boucle d'émission ⇒ 2 rouges ; passer le segment de
+tag de faction à `_metric_slug` ⇒ 1 rouge ; recopier dans le croisement le filtre « faction
+incomplète » de l'agrégat ⇒ 2 rouges.
+
+#### 🔴 CE QUE LA SPEC AVAIT FAUX — deux leviers sur trois n'ont aucune prise
+
+**1. `w_enemy` est INERTE pour `TacticalBot`.** Ce bot ne score pas ses destinations dans le plan
+(w_objective, w_enemy) des cinq autres : sa géométrie ennemie lui est propre (portée de tir /
+fuite des menaces de mêlée), et `_select_destination` — **seul** consommateur de `w_enemy` — n'est
+atteint que dans la branche « plus aucun ennemi vivant », où le terme ennemi est vide par
+construction (`if enemy_positions:`). Les deux branches réellement jouées font `w_obj, _ =
+self._weights()`.
+**Mesuré, pas déduit** : même appariement `control`↔`tactical`, mêmes graines, joué avec
+`w_enemy` 0.0 puis 5.0 → **résultats identiques sur les 8 matchs**. Verrou :
+`test_tactical_bot_movement_ignores_w_enemy_on_both_live_branches` (mutation vérifiée ROUGE en
+câblant `w_enemy` dans les deux branches vives ; le test porte aussi un contre-contrôle
+`w_objective`, sans quoi son vert serait vacant).
+⇒ **Le re-profilage `w_enemy 0.0 → 0.6` de l'étape 2a n'aurait rien changé du tout.**
+
+**2. `w_objective` n'est pas à la même ÉCHELLE que pour les autres bots.** Chez eux il pondère
+**tout** le score de destination ; ici il ne pondère qu'un **terme correctif ajouté** à une
+géométrie exprimée en hexes bruts. Tant qu'il vaut ~1, la correction d'objectif est négligeable
+devant des distances de plusieurs dizaines d'hexes. D'où un effet **à seuil et NON MONOTONE** :
+
+**Balayage complet sur x1** (chaque colonne : 600 parties pour la ligne agent, 2 400 épisodes pour
+la ligne bot-contre-bot) :
+
+| `w_objective` | 0.5 | 1.0 | **2.0** | 3.0 | 5.0 | 8.0 |
+|---|---|---|---|---|---|---|
+| agent → `vs_tactical` | 0.89 | 0.72 | **0.72** | — | — | 0.73 |
+| `tactical` bot-contre-bot | 0.357 (6ᵉ) | 0.623 (1ᵉʳ) | **0.636 (1ᵉʳ)** | 0.616 | 0.571 | 0.541 |
+
+⇒ **`0.8` était bien le mauvais coin du plan.** La réponse est une **MARCHE** : rien ne se passe
+sous ~1.0, tout se joue entre 0.5 et 1.0, puis c'est plat. Le pas proposé par la spec (0.5 → 0.8)
+tombait entièrement dans la partie morte.
+⚠️ **Ne jamais interpoler entre deux points mesurés**, et ne jamais reprendre un chiffre sans sa
+résolution : la même courbe mesurée en x5 est NON MONOTONE et classait `tactical` 2ᵉ dès 0.5.
+
+⏳ **Campagne x5 JETÉE** (4 évals de 600 parties, 3 classements de 2 400 épisodes). Elle a servi à
+une chose : établir le piège du plateau, et le fait que `w_enemy` est inerte — deux conclusions
+qui, elles, ne dépendent pas de la résolution.
+
+#### Classement bot-contre-bot — AVANT et APRÈS (étapes 1 et 3)
+
+`scripts/bot_ranking.py`, 6 bots, pool holdout, `--episodes 20`, **2 400 épisodes par colonne**.
+📌 **MÉTHODE réutilisable** : le run monolithique demande ~5 h ; il se découpe **par paire**
+(15 processus, ~1/5ᵉ du temps de mur) sans rien changer aux résultats — la graine ne dépend que de
+(seed, p1, p2, index de scénario, index d'épisode) et chaque appariement crée son propre env.
+Corollaire : seules les 10 cellules impliquant `tactical` sont à rejouer après un changement de
+ses poids, les autres étant bit-à-bit indépendantes.
+⚠️ **`bot_ranking.py` n'a pas de drapeau de résolution** : exporter `W40K_BOARD_PATH` avant.
+
+| rang | AVANT (`w_objective 0.5`) | APRÈS (**`w_objective 2.0`**) |
+|---|---|---|
+| 1 | `value_trade` 0.574 | **`tactical` 0.636** |
+| 2 | `control` 0.529 | `value_trade` 0.526 |
+| 3 | `adaptive` 0.522 | `control` 0.468 |
+| 4 | `greedy` 0.494 | `adaptive` 0.460 |
+| 5 | `defensive` 0.440 | `greedy` 0.451 |
+| 6 | **`tactical` 0.357** | `defensive` 0.372 |
+
+✅ **La cible de l'étape 3 est atteinte** : `tactical` passe de **dernier** à **premier**. Le
+diagnostic d'origine de cette entrée — « le holdout est le bot le plus faible » — était donc
+**exact**, et il se lit dans les deux mesures : dernier entre bots, et le plus facile pour l'agent
+(0.89). ⚠️ Ce n'est vrai que sur x1 : en x5 le même bot sortait 2ᵉ, ce qui avait fait conclure à
+tort que la prémisse était fausse.
+
+✅ **BIAIS DE SIÈGE DU §0.56 — ÉCARTÉ, sur les deux plateaux.** Le siège « agent » gagne **0.480**
+sur x1 (2 400 épisodes) et 0.476 sur x5 : un désavantage réel de ~2 points, sans commune mesure
+avec le 6/8 (0.25) du smoke à n=8, qui était du bruit d'échantillon. Il s'annule de toute façon
+dans le classement, qui joue les deux sièges de chaque paire.
+
+#### ✅ RÉSOLU — pourquoi §0.14 ne se reproduisait pas : le plateau
+
+Une éval de contrôle rendait `combined 0.6755` / `tactical 0.63` là où [§0.14](#s0.14) inscrit
+`0.8200` / `0.89`. Modèle (md5 identique au snapshot robuste, stats VecNormalize idem), profil et
+code de jeu ont été écartés un à un ; **la différence était `--resolution 1`** (cf. le bloc en
+tête). Les chiffres de §0.14 sont donc **bons**, ce sont les mesures de contrôle qui portaient sur
+`board/44x60x5`.
+
+📌 **Ce que le contrôle de reproduction a permis, et qui vaut d'être gardé comme méthode** : les
+cinq bots dont les poids n'ont pas bougé servent de témoins. Ils sont rendus **bit-à-bit
+identiques** d'un run à l'autre (l'éval est déterministe), donc tout écart sur `vs_tactical` est
+imputable au seul paramètre modifié — et un décalage des SIX témoins signale que c'est
+l'environnement qui a changé, pas le bot. Sans ce contrôle, la campagne x5 aurait été publiée.
+
+---
+
+🟢 **ARBITRAGE UTILISATEUR DU 2026-08-02 — re-profilage validé, à écrire.** ⏳ *Historique — voir
+le bloc LIVRÉ ci-dessus : le point 1 s'est révélé sans prise à la mesure.*
 1. **Sortir `tactical` de l'enveloppe.** Piste proposée : `w_objective 0.8 / w_enemy 0.6` — un bot
    qui dispute les objectifs **et** se bat pour eux. Aucun bot d'entraînement n'occupe ce coin
    (`control` est passif au contact, `greedy` ignore les objectifs). Un holdout doit différer
@@ -1285,11 +1446,12 @@ sens — il est **premier**, c'est-à-dire le plus faible.
    par faction), mais **pas le croisement** — or c'est exactement ce que
    [§10.6](V11_eval_strategy.md#s10.6) demande.
 
-🛠️ **PRÉPARATIFS DU 2026-08-02 — spec prête à appliquer, RIEN N'EST APPLIQUÉ.**
-⏳ **Fenêtre d'application** : `config/` est **relu à chaud par les évaluations** du run en cours
-(`x1_long`, démarré le 2026-08-02 à 12 h 25). Éditer `bot_movement_weights.json` maintenant
-changerait l'adversaire **au milieu** du run et rendrait ses évals intermédiaires incomparables
-entre elles. **Tout ce qui suit s'applique entre deux runs, pas pendant.**
+🛠️ **PRÉPARATIFS DU 2026-08-02 — spec appliquée le 2026-08-04**, avec les deux corrections de fond
+consignées dans le bloc LIVRÉ ci-dessus.
+✅ **Fenêtre d'application** : elle était ouverte le 2026-08-04 (aucun `train.py` en cours,
+re-vérifié avant chaque écriture dans `config/`). La contrainte reste vraie pour la prochaine
+fois : `config/` est **relu à chaud par les évaluations**, donc ce chantier s'applique **entre
+deux runs, jamais pendant**.
 
 **Étape 1 — mesurer AVANT de changer (le point de comparaison n'existe pas encore).**
 `scripts/bot_ranking.py --bots control,defensive,greedy,value_trade,adaptive,tactical
@@ -1389,6 +1551,10 @@ c'est le critère **écrit** qui est en décalage. À réconcilier : soit §10.6
 `combined` + `worst_bot_score` + `0_gap_sm-ork` comme critère quantitatif et rétrograde le holdout
 au rang d'indicateur de généralisation, soit le holdout redevient le critère — mais alors il faut
 d'abord le désaturer (point 1 ci-dessus). **Les deux voies exigent le re-profilage.**
+✅ **Le re-profilage est fait (2026-08-04)**, donc le préalable commun aux deux voies est levé et
+§10.6 le consigne. 🟠 **Le CHOIX entre les deux voies, lui, reste ouvert et appartient à
+l'utilisateur** : le holdout est de nouveau mesurable comme critère, il n'est pas pour autant
+adopté comme tel.
 
 <a id="s0.44"></a>
 ### 0.44 Tête pointeur de déploiement — les slots 4-8 n'ont pas de tête dédiée — 🟠 OUVERT, REPORTÉ APRÈS LE RUN 4 (2026-07-29)
@@ -2280,6 +2446,15 @@ lecture parallèle, celle du frontend signalée plus haut.
 > gelé**, donc [§0.55](#s0.55) livrée (holdout hors enveloppe, ventilation par roster). Tant que
 > `tactical` est l'adversaire le plus facile, ces chiffres mesurent l'agent, pas sa généralisation.
 >
+> ✅ **LE MÈTRE EST GELÉ DEPUIS LE 2026-08-04** ([§0.55](#s0.55)) : `tactical` porte
+> `w_objective 2.0` et l'agent tombe à **0.72** contre lui, au lieu de 0.89. Les chiffres de cette
+> entrée restent donc une mesure OBTENUE ; **la première mesure de RÉFÉRENCE sera celle du
+> prochain run**, seule comparable aux suivantes.
+> 📌 **Ces chiffres valent pour `--resolution 1`, et cette précision n'est pas décorative** :
+> `--training-config` ne choisit pas le plateau, et une éval lancée sans le drapeau tourne sur
+> `board/44x60x5` et rend `combined 0.6755` / `tactical 0.63`. **Toujours citer la résolution avec
+> le chiffre** — c'est ce qui a coûté une journée de mesures à §0.55.
+>
 > 🟢 **RUN DE 200 000 ÉPISODES — la première mesure exploitable du projet (2026-08-02 → 03).**
 > Démarré le **2026-08-02 à 12 h 26**, dernier événement le **2026-08-03 à 02 h 05** (~13 h 30),
 > 19 points d'évaluation de 820 k à 12,1 M steps. Modèle retenu :
@@ -2303,6 +2478,8 @@ lecture parallèle, celle du frontend signalée plus haut.
 > `bot_eval/scenario/<scén>/combined`, `/worst_bot_score` et `eval_bots/combined_win_rate` y sont.
 > Elle n'existe que dans la sortie d'évaluation, donc elle n'est ni tracée dans le temps, ni
 > croisée par roster. C'est exactement ce que [§0.55](#s0.55) étape 2b demande de publier.
+> ✅ **Le croisement l'est depuis le 2026-08-04** : `bot_eval/faction/<faction>/vs_<bot>`
+> ([§0.55](#s0.55)). La ventilation par adversaire seule, elle, reste hors TensorBoard.
 >
 > ✅ **ÉVAL REJOUÉE LE 2026-08-03, APRÈS §0.64/§0.65** (LoS de déploiement alignée puis
 > vectorisée), sur le **modèle robuste** :
@@ -2322,12 +2499,16 @@ lecture parallèle, celle du frontend signalée plus haut.
 >    `d9d18622`) — non fait.
 > 2. **Ce que l'éval établit, elle, est solide** : le modèle entraîné AVANT §0.64 se charge et
 >    joue à 0.82 sur `main` d'après §0.64/§0.65. La LoS alignée ne casse pas le modèle existant.
+>    ⚠️ **Le NIVEAU 0.82 n'est pas reproductible** (cf. la réserve en tête d'entrée) ; ce qui reste
+>    établi est le fait qualitatif — le modèle se charge et joue sans régression fonctionnelle.
 >
 > 📌 **Conséquences.** (a) Le seuil `model_gating_min_vs_control: 0.50` est **franchi** —
 > `vs_control` 0.71 en fin de run, 0.82 sur le robuste ; le **0.04 du run 4 ci-dessous est
-> périmé**. (b) `tactical`, le HOLDOUT, est l'adversaire **le plus facile** des six (0.89) et
+> périmé**. (b) `tactical`, le HOLDOUT, était l'adversaire **le plus facile** des six (0.89) et
 > `value_trade` le plus dur (0.74) : [§0.55](#s0.55) n'est pas de la cosmétique, c'est ce qui
-> décide si le prochain chiffre veut dire quelque chose. (c) L'écart entre scénarios est large
+> décide si le prochain chiffre veut dire quelque chose. ✅ **Traité le 2026-08-04** : le holdout
+> re-profilé n'est plus le plus facile — `vs_tactical` passe de 0.89 à **0.72**, cf.
+> [§0.55](#s0.55). (c) L'écart entre scénarios est large
 > (0.750 à 0.966) : la moyenne cache un facteur roster, à ventiler ([§0.55](#s0.55) étape 2b).
 
 <a id="s0.14hist"></a>

@@ -603,6 +603,20 @@ def _faction_result(bot_name: str, faction_stats: dict) -> dict:
     return {"bot_name": bot_name, "faction_stats": faction_stats}
 
 
+def _faction_scores(results_list: list, active: tuple, weights: dict) -> dict:
+    """Chaine REELLE de `evaluate_against_bots` : un tally construit, puis pondere.
+
+    Les tests passent par cet enchainement et non par le tally a la main, sinon ils
+    verrouilleraient une composition qui n'est pas celle de la production.
+    """
+    return be._compute_faction_scores(be._faction_bot_tally(results_list, active), active, weights)
+
+
+def _faction_cross(results_list: list, active: tuple) -> dict:
+    """Jumeau de `_faction_scores` pour la ventilation brute : MEME tally en entree."""
+    return be._compute_faction_bot_win_rates(be._faction_bot_tally(results_list, active))
+
+
 def test_compute_faction_scores_weights_bots_like_combined() -> None:
     """Le score par faction utilise les MEMES poids que `combined`, pas un win-rate brut."""
     weights = {"random": 0.75, "greedy": 0.25}
@@ -614,7 +628,7 @@ def test_compute_faction_scores_weights_bots_like_combined() -> None:
         _faction_result("random", {"Ork": {"wins": 2, "total": 4}}),
         _faction_result("greedy", {"Ork": {"wins": 4, "total": 4}}),
     ]
-    scores = be._compute_faction_scores(results_list, ("random", "greedy"), weights)
+    scores = _faction_scores(results_list, ("random", "greedy"), weights)
     assert scores == {"Spacemarine": 0.75, "Ork": 0.625}
     # Un win-rate brut donnerait 0.5 pour SM et 0.75 pour Ork, soit un gap de signe OPPOSE.
     assert scores["Spacemarine"] > scores["Ork"]
@@ -626,7 +640,7 @@ def test_compute_faction_scores_drops_faction_missing_a_bot() -> None:
         _faction_result("random", {"Spacemarine": {"wins": 2, "total": 4}, "Ork": {"wins": 1, "total": 2}}),
         _faction_result("greedy", {"Spacemarine": {"wins": 1, "total": 4}}),
     ]
-    scores = be._compute_faction_scores(results_list, ("random", "greedy"), {"random": 0.5, "greedy": 0.5})
+    scores = _faction_scores(results_list, ("random", "greedy"), {"random": 0.5, "greedy": 0.5})
     assert set(scores) == {"Spacemarine"}
 
 
@@ -636,8 +650,43 @@ def test_compute_faction_scores_ignores_failed_tasks() -> None:
         _faction_result("random", {"Spacemarine": {"wins": 3, "total": 4}}),
         _faction_result("random", {}),
     ]
-    scores = be._compute_faction_scores(results_list, ("random",), {"random": 1.0})
+    scores = _faction_scores(results_list, ("random",), {"random": 1.0})
     assert scores == {"Spacemarine": 0.75}
+
+
+def test_faction_bot_win_rates_come_from_the_same_tally_as_the_aggregate() -> None:
+    """V11 §0.55 : le croisement derive du MEME comptage que `faction_scores`.
+
+    Un second parcours de `results_list` divergerait au premier changement de filtre. Le
+    controle porte sur ce qui les SEPARE : le poids nul du holdout l'efface de l'agregat
+    pondere sans l'effacer du croisement, et une faction a couverture partielle — ecartee de
+    l'agregat parce que son score n'y serait pas a la meme echelle — reste lisible cellule
+    par cellule.
+    """
+    weights = {"control": 1.0, "tactical": 0.0}
+    results_list = [
+        _faction_result("control", {"Spacemarine": {"wins": 1, "total": 4},
+                                    "Ork": {"wins": 2, "total": 4}}),
+        _faction_result("tactical", {"Spacemarine": {"wins": 3, "total": 4}}),
+    ]
+    active = ("control", "tactical")
+    scores = _faction_scores(results_list, active, weights)
+    cross = _faction_cross(results_list, active)
+
+    # Ork n'a aucun episode contre `tactical` : ecarte de l'agregat...
+    assert set(scores) == {"Spacemarine"}
+    # ...mais sa cellule vs_control existe et vaut son win-rate brut.
+    assert cross["Ork"] == {"control": 0.5}
+    # Le holdout pese 0.0 : invisible dans l'agregat (0.25 = celui de `control` seul),
+    # visible dans le croisement.
+    assert scores["Spacemarine"] == 0.25
+    assert cross["Spacemarine"] == {"control": 0.25, "tactical": 0.75}
+
+
+def test_faction_bot_win_rates_skip_cells_without_episodes() -> None:
+    """Un couple (faction, bot) sans episode n'est pas publie : un 0.0 y serait invente."""
+    results_list = [_faction_result("control", {"Ork": {"wins": 0, "total": 0}})]
+    assert _faction_cross(results_list, ("control",)) == {"Ork": {}}
 
 
 def test_roster_gap_faction_order_carries_the_curve_sign() -> None:
@@ -660,7 +709,7 @@ def test_every_failed_task_result_carries_faction_stats() -> None:
         assert result["failed_episodes"] == 3
         assert result["wins"] == 0
     # Et l'agregation les traverse sans lever.
-    scores = be._compute_faction_scores(
+    scores = _faction_scores(
         [be._failed_task_result(task, "training_bot-1", timeout=True)], ("random",), {"random": 1.0}
     )
     assert scores == {}
@@ -683,7 +732,7 @@ def test_collected_timeout_results_are_aggregatable(monkeypatch: pytest.MonkeyPa
     )
     assert len(out) == 1 and out[0]["timeout"] is True
     # Le point du bug : sans `faction_stats`, cet appel levait ConfigurationError.
-    assert be._compute_faction_scores(out, ("random",), {"random": 1.0}) == {}
+    assert _faction_scores(out, ("random",), {"random": 1.0}) == {}
 
 
 def test_mixed_faction_roster_is_bucketed_not_fatal() -> None:

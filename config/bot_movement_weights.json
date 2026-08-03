@@ -2,19 +2,50 @@
   "_comment": "Geometrie de deplacement des bots d'evaluation/entrainement (ai/evaluation_bots.py). Score d'une destination : w_objective * (-distance_hex_objectif) + w_enemy * (-distance_hex_ennemi) [+ w_objective * hold_bonus si la destination est dans une zone d'objectif]. w_enemy > 0 = se rapprocher, w_enemy < 0 = s'eloigner. Aucune valeur par defaut n'est appliquee : une cle absente leve.",
   "hold_bonus": 3.0,
   "bots": {
-    "greedy": {"w_objective": 0.3, "w_enemy": 1.0},
-    "defensive": {"w_objective": 0.7, "w_enemy": -0.5},
-    "control": {"w_objective": 1.0, "w_enemy": 0.1},
-    "tactical": {"w_objective": 0.5, "w_enemy": 0.0},
+    "greedy": {
+      "w_objective": 0.3,
+      "w_enemy": 1.0
+    },
+    "defensive": {
+      "w_objective": 0.7,
+      "w_enemy": -0.5
+    },
+    "control": {
+      "w_objective": 1.0,
+      "w_enemy": 0.1
+    },
+    "tactical": {
+      "_justification": "HOLDOUT d'evaluation (poids 0.0 dans bot_eval_weights, absent de bot_training.ratios, exclu du worst_bot_score). Sa force est VOLONTAIREMENT hors du panel d'entrainement : c'est sa raison d'etre, PAS un desequilibre a rééquilibrer. Ne pas le ramener vers les autres. VALEUR GELEE le 2026-08-04 (V11 §0.55) : elle definit le metre, la changer rend incomparables toutes les mesures anterieures. Mesure sur le plateau x1 (board/44x60x1), modele robuste 0.8049 : w_objective 0.5 -> l'agent gagnait 0.89 contre lui et il sortait DERNIER des six bots (0.357) ; a 2.0 l'agent tombe a 0.72 et il sort PREMIER (0.636 contre 0.526 au deuxieme). 2.0 est choisi au MILIEU du plateau 1.0-3.0, ou les deux mesures sont plates : c'est le point le moins sensible a une erreur de mesure, pas un optimum. TROIS PIEGES DE LECTURE. (1) w_enemy est INERTE pour ce bot : sa geometrie ennemie lui est propre (portee de tir / fuite des menaces de melee) et _select_destination, seul consommateur de w_enemy, n'est atteint que dans la branche « plus aucun ennemi vivant », ou le terme ennemi est vide par construction. Mesure : meme appariement, memes graines, w_enemy 0.0 puis 5.0 -> resultats identiques sur 8 matchs. Verrou : tests/unit/ai/test_evaluation_bots.py::test_tactical_bot_movement_ignores_w_enemy_on_both_live_branches. (2) TOUTE MESURE DE CE FICHIER DEPEND DU PLATEAU. Sans --resolution ni W40K_BOARD_PATH, config/config.json impose board/44x60x5, alors que les evals de reference passent `--resolution 1`. w_objective multiplie des distances tandis que hold_bonus est une constante : leur equilibre change avec la resolution, et le reglage aussi (en x5 ce meme bot sortait DEUXIEME a w_objective 0.5, au lieu de dernier). Une campagne entiere a ete jetee pour cette raison. Fixer la resolution AVANT de mesurer et l'ecrire a cote du chiffre. (3) w_objective n'est pas a la meme ECHELLE que pour les autres bots : chez eux il pondere tout le score de destination, ici il ne pondere qu'un terme correctif AJOUTE a une geometrie exprimee en hexes bruts. La reponse est une MARCHE (rien entre 0.5 et 0.8, tout entre 0.5 et 1.0) puis un plateau. Ne jamais interpoler entre deux points mesures.",
+      "w_objective": 2.0,
+      "w_enemy": 0.0
+    },
     "value_trade": {
-      "engage": {"w_objective": 0.5, "w_enemy": 1.0},
-      "standoff": {"w_objective": 0.9, "w_enemy": -0.2},
-      "withdraw": {"w_objective": 0.3, "w_enemy": -1.0}
+      "engage": {
+        "w_objective": 0.5,
+        "w_enemy": 1.0
+      },
+      "standoff": {
+        "w_objective": 0.9,
+        "w_enemy": -0.2
+      },
+      "withdraw": {
+        "w_objective": 0.3,
+        "w_enemy": -1.0
+      }
     },
     "adaptive": {
-      "early": {"w_objective": 1.0, "w_enemy": 0.2},
-      "winning": {"w_objective": 1.0, "w_enemy": -0.2},
-      "losing": {"w_objective": 0.5, "w_enemy": 1.0}
+      "early": {
+        "w_objective": 1.0,
+        "w_enemy": 0.2
+      },
+      "winning": {
+        "w_objective": 1.0,
+        "w_enemy": -0.2
+      },
+      "losing": {
+        "w_objective": 0.5,
+        "w_enemy": 1.0
+      }
     }
   }
 }
