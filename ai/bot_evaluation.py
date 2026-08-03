@@ -240,19 +240,16 @@ def _agent_faction_from_engine(engine: Any) -> str:
     return "+".join(sorted(factions))
 
 
-def _compute_faction_scores(
+def _faction_bot_tally(
     results_list: List[Dict[str, Any]],
     active_bot_names: Tuple[str, ...],
-    eval_weights: Dict[str, float],
-) -> Dict[str, float]:
-    """
-    Win-rate pondere par bot, ventile par faction jouee par l'agent.
+) -> Dict[str, Dict[str, List[int]]]:
+    """`tally[faction][bot] = [wins, total]` — le SEUL comptage croise faction x bot.
 
-    Meme ponderation que `results["combined"]` (bot_eval_weights) pour que les deux courbes
-    soient comparables : le gap entre factions est un ecart de combined, pas un ecart de
-    win-rate brut qui melangerait des adversaires de difficultes differentes.
-    Une faction dont un seul bot n'a produit aucun episode est ECARTEE : son score partiel
-    ne serait pas sur la meme echelle que celui des autres.
+    Extrait de `_compute_faction_scores` pour que la ventilation publiee
+    (`_compute_faction_bot_win_rates`) et l'agregat par faction derivent du meme comptage :
+    deux parcours independants de `results_list` divergeraient au premier changement de
+    ponderation ou de filtre.
     """
     tally: Dict[str, Dict[str, List[int]]] = {}
     for result in results_list:
@@ -266,7 +263,51 @@ def _compute_faction_scores(
                 wins + int(require_key(stats, "wins")),
                 total + int(require_key(stats, "total")),
             ]
+    return tally
 
+
+def _compute_faction_bot_win_rates(
+    tally: Dict[str, Dict[str, List[int]]],
+) -> Dict[str, Dict[str, float]]:
+    """
+    Win-rate BRUT de chaque bot, ventile par faction jouee par l'agent (V11 §10.6).
+
+    Croisement que ni `bot_eval/vs_<bot>` (tous rosters confondus) ni
+    `bot_eval/faction/<faction>` (agregat pondere) ne donnent : c'est lui qui dit si une
+    faiblesse contre un adversaire tient a UN roster ou aux deux.
+
+    Contrairement a l'agregat, aucune faction n'est ecartee : chaque cellule est un win-rate
+    autonome, sur sa propre echelle, donc une couverture partielle reste lisible. Un couple
+    (faction, bot) sans episode joue n'est pas publie — un 0.0 y serait un score invente.
+    """
+    return {
+        faction: {
+            bot_name: wins / total
+            for bot_name, (wins, total) in per_bot.items()
+            if total > 0
+        }
+        for faction, per_bot in tally.items()
+    }
+
+
+def _compute_faction_scores(
+    tally: Dict[str, Dict[str, List[int]]],
+    active_bot_names: Tuple[str, ...],
+    eval_weights: Dict[str, float],
+) -> Dict[str, float]:
+    """
+    Win-rate pondere par bot, ventile par faction jouee par l'agent.
+
+    Meme ponderation que `results["combined"]` (bot_eval_weights) pour que les deux courbes
+    soient comparables : le gap entre factions est un ecart de combined, pas un ecart de
+    win-rate brut qui melangerait des adversaires de difficultes differentes.
+    Une faction dont un seul bot n'a produit aucun episode est ECARTEE : son score partiel
+    ne serait pas sur la meme echelle que celui des autres.
+
+    Prend le `tally` CONSTRUIT, pas `results_list` : c'est le meme objet que consomme
+    `_compute_faction_bot_win_rates`, donc les deux ventilations ne peuvent pas diverger sur
+    un comptage. Meme geste que `scenario_bot_stats`, construit une fois puis derive.
+    """
     faction_scores: Dict[str, float] = {}
     for faction, per_bot in tally.items():
         if any(bn not in per_bot or per_bot[bn][1] == 0 for bn in active_bot_names):
@@ -1459,8 +1500,14 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     # ou melangeant d'autres factions, n'a pas d'ecart a publier — la cle reste alors absente
     # et le callback ne trace pas de courbe, plutot que d'en tracer une qui vaudrait un score
     # absolu deguise en ecart.
-    faction_scores = _compute_faction_scores(results_list, active_bot_names, eval_weights)
+    # UN seul comptage croise faction x bot, deux derivations : l'agregat pondere ci-dessous et
+    # le croisement brut (V11 §0.55 / §10.6). Le croisement porte `tactical`, dont le poids nul
+    # l'efface de `faction_scores` sans l'effacer d'ici — c'est justement le holdout qu'on veut
+    # lire par roster.
+    faction_tally = _faction_bot_tally(results_list, active_bot_names)
+    faction_scores = _compute_faction_scores(faction_tally, active_bot_names, eval_weights)
     results["faction_scores"] = faction_scores
+    results["faction_bot_win_rates"] = _compute_faction_bot_win_rates(faction_tally)
     if all(faction in faction_scores for faction in ROSTER_GAP_FACTIONS):
         results["roster_gap"] = (
             faction_scores[ROSTER_GAP_FACTIONS[0]] - faction_scores[ROSTER_GAP_FACTIONS[1]]

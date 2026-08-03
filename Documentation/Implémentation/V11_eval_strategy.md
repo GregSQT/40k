@@ -206,13 +206,32 @@ training qui les référencent.
 <a id="s10.6"></a>
 ### 10.6 Critère de succès (remplace le critère T6 « win-rate vs RandomBot »)
 
-> ⚠️ **EN DÉCALAGE AVEC LA PRATIQUE — constaté le 2026-08-02, cf.
-> [§0.55](V11_agent_rework.md#s0.55).** Le volet 1 ci-dessous désigne `TacticalBot` comme
-> adversaire du critère quantitatif. Or (a) le critère réellement suivi est
-> `00_critical/a_bot_eval_combined` + `00_critical/b_worst_bot_score`, qui **excluent** le
-> holdout ; (b) `TacticalBot` est **saturé** (`vs_tactical` 0.95 au run 4) parce que ses poids le
-> placent à l'intérieur de l'enveloppe d'entraînement. **Ne pas s'appuyer sur le volet 1 tel
-> qu'écrit** tant que §0.55 n'est pas livrée. Le volet 2 (qualitatif), lui, reste entièrement
+> 🟢 **ARBITRAGE UTILISATEUR DU 2026-08-04 — le holdout est un INDICATEUR, pas le critère.**
+> Le volet 1 ci-dessous désignait `TacticalBot` comme adversaire du critère quantitatif. Il ne
+> l'est pas et ne le sera pas :
+>
+> **Le critère quantitatif est `00_critical/a_bot_eval_combined` + `00_critical/b_worst_bot_score`**
+> (les deux se lisent ensemble, cf. [§10.5](#s10.5)), plus `00_critical/0_gap_sm-ork` pour
+> l'équilibre entre rosters. `vs_tactical` est l'**indicateur de généralisation** : on le cite, il
+> ne décide pas.
+>
+> **Pourquoi** — la raison décisive est la troisième :
+> 1. un seul adversaire sur ~100 parties porte ~±5 points d'erreur-type ; `combined` en agrège cinq ;
+> 2. `worst_bot_score` alimente déjà le gate de curriculum — deux critères de décision finiraient
+>    par se contredire sans règle d'arbitrage ;
+> 3. **un holdout qui décide cesse d'être un holdout.** Dès qu'un chiffre valide un run, on
+>    optimise dessus — et on perd le seul adversaire dont on puisse dire « jamais rencontré,
+>    jamais visé ». C'est exactement ce qui fait sa valeur, y compris devant un financeur.
+>
+> ✅ **Le win-rate PAR ROSTER, lui, est publié depuis le 2026-08-04** :
+> `bot_eval/faction/<faction>/vs_<bot>` (`W40KMetricsTracker.log_faction_bot_win_rates`), dérivé du
+> même `_faction_bot_tally` que l'agrégat par faction. ⚠️ Ce sont des win-rates **bruts** incluant
+> le holdout ; leur moyenne ne redonne pas `bot_eval/faction/<faction>`, qui est pondéré et
+> l'exclut.
+>
+> ✅ **Le holdout est désaturé et GELÉ depuis le 2026-08-04** ([§0.55](V11_agent_rework.md#s0.55)) :
+> `w_objective 2.0`, `vs_tactical` passe de 0.89 à **0.72** et le bot passe de dernier à premier du
+> panel. L'indicateur mesure donc enfin quelque chose. Le volet 2 (qualitatif) reste entièrement
 > valide.
 
 Le critère historique référençait une capacité qui n'existe plus (holdout de rosters). Nouveau

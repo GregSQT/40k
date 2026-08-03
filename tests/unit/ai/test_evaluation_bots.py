@@ -986,6 +986,59 @@ def test_tactical_bot_retreat_triggers_on_a_multi_model_squad(
     assert bot.select_movement_destination(unit_ok, [(2, 0), (8, 0)], gs_ok) == (8, 0)
 
 
+def test_tactical_bot_movement_ignores_w_enemy_on_both_live_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """VERROU du `w_enemy` INERTE de `tactical` (V11 §0.55).
+
+    Ce bot ne score pas ses destinations dans le plan (w_objective, w_enemy) des autres : sa
+    geometrie ennemie lui est propre (portee de tir / fuite des menaces de melee) et
+    `_select_destination`, seul consommateur de `w_enemy`, n'est atteint que dans la branche
+    « plus aucun ennemi vivant » — ou le terme ennemi est vide par construction.
+
+    Sans ce verrou, la valeur de `w_enemy` inscrite dans `config/bot_movement_weights.json`
+    se lit comme un reglage : c'est ce qui a fait proposer un re-profilage `w_enemy 0.0 ->
+    0.6` sans effet. Le fichier porte desormais cette raison ; ce test la rend fausse-able.
+    """
+    _patch_move_geometry(monkeypatch)
+
+    def _gs(models_alive: int):
+        gs, unit = _value_move_gs(
+            unit_hex=(5, 0), enemy_hex=(10, 0), models_start=10, models_alive=models_alive,
+            hp_cur=models_alive, hp_max=1, value=120, ally_value=20, rng=0, cc=5,
+        )
+        gs["units"][1].update(_dmg(rng=1, cc=5))
+        return gs, unit
+
+    destinations = [(2, 0), (8, 0)]
+    for models_alive, expected in ((3, (2, 0)), (6, (8, 0))):
+        chosen = set()
+        for w_enemy in (-5.0, 0.0, 5.0):
+            gs, unit = _gs(models_alive)
+            bot = TacticalBot(randomness=0.0, movement_weights=(0.5, w_enemy))
+            chosen.add(bot.select_movement_destination(unit, destinations, gs))
+        # Une seule destination pour trois poids ennemis opposes : le parametre n'a aucune prise.
+        assert chosen == {expected}, (
+            f"w_enemy a change la destination de TacticalBot ({models_alive} figurines "
+            f"vivantes) : {chosen}"
+        )
+
+    # Contre-controle — le vert ci-dessus ne doit PAS venir d'un pool de destinations que rien
+    # ne peut departager : `w_objective`, lui, a bien prise sur ces memes candidates.
+    gs_obj, unit_obj = _value_move_gs(
+        unit_hex=(5, 0), enemy_hex=(10, 0), models_start=10, models_alive=3,
+        hp_cur=3, hp_max=1, value=120, ally_value=20, rng=0, cc=5,
+        objectives=[_objective([(8, 0)])],
+    )
+    gs_obj["units"][1].update(_dmg(rng=1, cc=5))
+    assert TacticalBot(randomness=0.0, movement_weights=(0.0, 0.0)).select_movement_destination(
+        unit_obj, destinations, gs_obj
+    ) == (2, 0)
+    assert TacticalBot(randomness=0.0, movement_weights=(50.0, 0.0)).select_movement_destination(
+        unit_obj, destinations, gs_obj
+    ) == (8, 0)
+
+
 def test_value_trade_score_refuses_a_target_without_hp(monkeypatch: pytest.MonkeyPatch) -> None:
     """PV nuls dans units_cache = invariant rompu -> erreur explicite, jamais une division ni un
     score par defaut."""

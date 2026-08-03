@@ -1821,9 +1821,58 @@ class W40KMetricsTracker:
             )
         x = step if step is not None else self.episode_count
         for faction, score in faction_scores.items():
-            self.writer.add_scalar(f'bot_eval/faction/{str(faction).lower()}', float(score), x)
+            self.writer.add_scalar(
+                f'bot_eval/faction/{self._faction_tag_segment(faction)}', float(score), x
+            )
         if roster_gap is not None:
             self.writer.add_scalar('00_critical/0_gap_sm-ork', float(roster_gap), x)
+
+    @staticmethod
+    def _faction_tag_segment(faction: str) -> str:
+        """Segment de tag TensorBoard d'une faction — UNE regle pour les deux familles.
+
+        `.lower()` et non `_metric_slug` : une faction COMPOSITE (« Ork+Spacemarine », cf.
+        ai.bot_evaluation._agent_faction_from_engine) est deja publiee sous
+        `bot_eval/faction/ork+spacemarine`. Passer au slug la renommerait `ork_spacemarine`,
+        c'est-a-dire changer le nom d'une courbe deja tracee. La regle est donc figee ici, a
+        un seul endroit, plutot que recopiee par chaque famille de tags.
+        """
+        return str(faction).lower()
+
+    def log_faction_bot_win_rates(
+        self,
+        faction_bot_win_rates: Dict[str, Dict[str, float]],
+        step: Optional[int] = None,
+    ) -> None:
+        """
+        Log le CROISEMENT `bot_eval/faction/<faction>/vs_<bot>` (V11 §0.55, [§10.6]).
+
+        Sans lui, `bot_eval/vs_<bot>` melange les rosters et `bot_eval/faction/<faction>`
+        melange les adversaires : aucune des deux courbes ne dit si une faiblesse contre un
+        bot tient a UN roster ou aux deux.
+
+        ⚠️ Ce croisement n'est PAS la decomposition de `bot_eval/faction/<faction>`, malgre le
+        prefixe commun : l'agregat est PONDERE par `bot_eval_weights` et exclut donc le
+        holdout (poids 0.0), tandis que ces cellules sont des win-rates BRUTS et incluent le
+        holdout. Leur moyenne ne redonne pas l'agregat, et c'est voulu.
+
+        Methode dediee, comme `log_holdout_split_metrics` / `log_scenario_split_scores` : une
+        ventilation par point d'entree. La greffer sur `log_faction_scores` obligerait chaque
+        nouvelle ventilation a rallonger sa signature.
+        """
+        if not isinstance(faction_bot_win_rates, dict):
+            raise TypeError(
+                f"faction_bot_win_rates must be dict "
+                f"(got {type(faction_bot_win_rates).__name__})"
+            )
+        x = step if step is not None else self.episode_count
+        for faction, per_bot in faction_bot_win_rates.items():
+            for bot_name, win_rate in per_bot.items():
+                self.writer.add_scalar(
+                    f'bot_eval/faction/{self._faction_tag_segment(faction)}/vs_{bot_name}',
+                    float(win_rate),
+                    x,
+                )
 
     def log_holdout_split_metrics(self, split_metrics: Dict[str, float]) -> None:
         """Log holdout split aggregates to TensorBoard."""

@@ -6,13 +6,29 @@ POURQUOI CET OUTIL EXISTE
     de juger un bot etait de le faire affronter l'agent. Un bot faible et un agent fort donnent
     le meme chiffre qu'un bot fort et un agent faible — la mesure est circulaire.
 
-    Consequence concrete (V11 §0.55) : le holdout d'evaluation `tactical` s'est revele etre un
-    `ControlBot` dilue (`w_objective 0.5 / w_enemy 0.0`, interpole entre `control` et
-    `defensive`), avec un `vs_tactical` a 0.95 — sature, donc aveugle. Le re-profiler sans
-    pouvoir mesurer sa force reviendrait a remplacer un holdout trop faible par un holdout de
-    force INCONNUE.
+    Consequence concrete (V11 §0.55) : le holdout d'evaluation `tactical` etait sature
+    (`vs_tactical` 0.95 au run 4, 0.89 au run 200k — l'adversaire le plus FACILE des six).
+    Le re-profiler sans pouvoir mesurer sa force reviendrait a remplacer un holdout trop
+    faible par un holdout de force INCONNUE.
 
     Cet outil donne l'echelle manquante : chaque bot joue contre chaque autre, sans agent.
+
+⚠️ FIXER LA RESOLUTION AVANT DE MESURER — ce script n'a PAS de drapeau pour ca
+    Sans `W40K_BOARD_PATH`, le plateau vient de `config/config.json` -> `board/44x60x5`, alors
+    que les evaluations de reference passent `--resolution 1` a `ai/train.py`. Les deux ne sont
+    PAS comparables : sur x5, `tactical` sortait DEUXIEME des six a `w_objective 0.5`, contre
+    DERNIER sur x1. Une campagne de reglage entiere a ete jetee pour cette raison (V11 §0.55).
+        W40K_BOARD_PATH=board/44x60x1 python scripts/bot_ranking.py --bots ... --episodes 20
+    Et toujours ecrire la resolution a cote du chiffre obtenu.
+
+CE QU'IL A SERVI A ETABLIR (2026-08-04, §0.55) — a lire avant de rejouer un classement
+    Sur x1, 2 400 episodes : `tactical` sortait DERNIER des six (0.357) a `w_objective 0.5`.
+    Le holdout est desormais gele a `w_objective 2.0` et sort PREMIER (0.636, contre 0.526 au
+    deuxieme) ; l'agent y tombe de 0.89 a 0.72.
+    Ce classement a servi a DEPARTAGER, pas a decider : cote agent, toutes les valeurs au-dessus
+    de 1.0 rendent le meme 0.72 (reponse en marche puis plateau), donc c'est le bot-contre-bot
+    qui a designe le milieu du plateau. Justification complete et pieges de lecture :
+    `config/bot_movement_weights.json`, entree `tactical`.
 
 CE QU'IL NE FAIT PAS
     Aucun repli sur une donnee absente. `winner` et `controlled_player` sont lus par

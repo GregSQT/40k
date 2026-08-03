@@ -3577,6 +3577,9 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                         require_key(bot_results, "faction_scores"),
                         bot_results.get("roster_gap"),
                     )
+                    metrics_tracker.log_faction_bot_win_rates(
+                        require_key(bot_results, "faction_bot_win_rates")
+                    )
                     holdout_split_metrics = {
                         key: float(require_key(bot_results, key))
                         for key in (

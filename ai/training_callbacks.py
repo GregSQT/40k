@@ -798,6 +798,9 @@ class MetricsCollectionCallback(BaseCallback):
                         require_key(bot_results, 'faction_scores'),
                         bot_results.get('roster_gap'),
                     )
+                    self.metrics_tracker.log_faction_bot_win_rates(
+                        require_key(bot_results, 'faction_bot_win_rates')
+                    )
                     # Flush to ensure metrics are written immediately
                     self.metrics_tracker.writer.flush()
                 
@@ -2134,6 +2137,10 @@ class BotEvaluationCallback(BaseCallback):
             self.metrics_tracker.log_faction_scores(
                 require_key(results, 'faction_scores'),
                 results.get('roster_gap'),
+                step=int(eval_marker),
+            )
+            self.metrics_tracker.log_faction_bot_win_rates(
+                require_key(results, 'faction_bot_win_rates'),
                 step=int(eval_marker),
             )
 
