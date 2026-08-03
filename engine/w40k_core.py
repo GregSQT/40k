@@ -4395,7 +4395,14 @@ class W40KEngine(gym.Env):
     # (ai/step_logger.py::_format_replay_style_message). Les noms coincident deja presque tous ;
     # seuls "hazard"->"hazardous" et le move (dont la nuance vit dans move_type) different.
     # Un type ABSENT de cette table est ignore volontairement : il n'a pas de formateur
-    # (pile_in, consolidation, death, battle_shock, roll_info, reactive_move_declined).
+    # (death, battle_shock, roll_info, reactive_move_declined).
+    # Journalise mais NE CONSOMME PAS de step gym : le move reactif est DECLENCHE par le
+    # deplacement adverse, pas choisi par l'agent — l'entete de step.log liste les actions qui
+    # incrementent (move, shoot, charge, combat, wait). L'y compter decalerait `total_actions`
+    # et le compte de steps de tous les episodes, sans qu'aucune decision supplementaire n'ait
+    # ete prise.
+    _STEP_LOG_NON_INCREMENTING_TYPES: frozenset = frozenset({"reactive_move"})
+
     _STEP_LOG_TYPE_MAP: Dict[str, str] = {
         "shoot": "shoot",
         "combat": "combat",
@@ -4406,6 +4413,12 @@ class W40KEngine(gym.Env):
         "pile_in": "pile_in",
         "consolidation": "consolidation",
         "wait": "wait",
+        # Le move REACTIF (24.xx, capacite `reactive_move`) est un vrai deplacement, soumis aux
+        # memes contraintes que les autres (murs, figurines, budget) — il doit donc etre
+        # journalise pour etre verifiable. Son formateur existait deja dans `step_logger` ; seul
+        # ce mapping manquait, si bien que la ligne n'atteignait jamais step.log et que TOUS les
+        # controles reactifs de l'analyzer etaient du code mort.
+        "reactive_move": "reactive_move",
         # ⚠️ `rule_choice` N'EST PAS ici : `_record_rule_choice_action_log` écrit DÉJÀ sa ligne
         # directement dans step.log, au moment où le choix est appliqué. Le laisser dans ce
         # mapping le journalisait une SECONDE fois — et cette seconde tentative échouait toujours,
@@ -4673,7 +4686,7 @@ class W40KEngine(gym.Env):
                 phase=phase,
                 player=player,
                 success=True,
-                step_increment=True,
+                step_increment=action_type not in self._STEP_LOG_NON_INCREMENTING_TYPES,
                 action_details=self._build_step_log_details(raw_log, pre_action_turn),
             )
 
@@ -4714,6 +4727,20 @@ class W40KEngine(gym.Env):
         # mapping, `step_logger` n'écrit jamais `MOVED [FLY]` et l'analyzer pathfinde une
         # escouade volante comme de l'infanterie.
         details["is_fly_move"] = bool(raw_log.get("is_fly_move", False))  # get allowed
+        # Champs propres au move REACTIF, exiges par son formateur (`require_key`) : sans eux
+        # `log_action` avale l'exception et la ligne disparait en silence.
+        for _src, _dst in (
+            ("triggered_by_unit_id", "triggered_by_unit_id"),
+            ("range_roll", "range_roll"),
+            ("ability_display_name", "ability_display_name"),
+        ):
+            _val = raw_log.get(_src)  # get allowed
+            if _val is not None:
+                details[_dst] = _val
+        _ev_to_col = raw_log.get("event_toCol")  # get allowed
+        _ev_to_row = raw_log.get("event_toRow")  # get allowed
+        if _ev_to_col is not None and _ev_to_row is not None:
+            details["trigger_to_pos"] = (_ev_to_col, _ev_to_row)
         for src, dst in (
             ("targetId", "target_id"),
             ("weaponName", "weapon_name"),

@@ -738,7 +738,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         reactive_abnormal = True
                     if roll_value is not None:
                         reactive_dist = calculate_hex_distance(from_col, from_row, to_col, to_row)
-                        if reactive_dist > roll_value:
+                        if reactive_dist > roll_value * _get_inches_to_subhex_for_analyzer():
                             reactive_abnormal = True
 
                     if reactive_abnormal:
@@ -772,6 +772,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         positions_at_reactive = dict(state.unit_positions)
                         if (from_col, from_row) != (to_col, to_row):
                             if roll_value is not None:
+                                # Le D6 loggué est en POUCES : le moteur le convertit
+                                # (`_build_reactive_move_destinations_pool`), l'analyzer doit
+                                # suivre. Comparer un jet en pouces à un nombre de cases
+                                # plafonnait le contrôle à 6 cases quelle que soit la résolution.
+                                _reactive_budget = int(roll_value) * _get_inches_to_subhex_for_analyzer()
                                 occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
                                     state.positions_by_model, positions_at_reactive,
                                     state.unit_base, state.unit_player, unit_hp_at_reactive,
@@ -782,7 +787,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     from_row,
                                     to_col,
                                     to_row,
-                                    int(roll_value),
+                                    _reactive_budget,
                                     state.wall_hexes,
                                     occupied_positions,
                                     enemy_adjacent_hexes
@@ -794,7 +799,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                             'episode': state.current_episode_num,
                                             'line': line.strip()
                                         }
-                                elif shortest_steps > int(roll_value):
+                                elif shortest_steps > _reactive_budget:
                                     reactive_checks['distance_over_roll'][reactive_player] += 1
                                     if first_errors['reactive_move_distance_over_roll'][reactive_player] is None:
                                         first_errors['reactive_move_distance_over_roll'][reactive_player] = {

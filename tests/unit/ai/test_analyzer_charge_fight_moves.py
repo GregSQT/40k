@@ -151,3 +151,50 @@ def test_un_pile_in_dans_les_trois_pouces_ne_remonte_rien(verbe, tmp_path):
 
     assert stats["fight_move_invalid"]["over_budget"][1] == 0
     assert stats["fight_move_invalid"]["path_blocked"][1] == 0
+
+
+def test_le_move_reactif_est_journalise_sans_consommer_de_step():
+    """Le move réactif est un vrai déplacement, soumis aux mêmes contraintes que les autres —
+    il doit donc être journalisé pour être vérifiable. Son formateur existait, seul le mapping
+    de `_STEP_LOG_TYPE_MAP` manquait : la ligne n'atteignait jamais step.log et TOUS les
+    contrôles réactifs de l'analyzer étaient du code mort.
+
+    Mais il est DÉCLENCHÉ par le déplacement adverse, pas choisi : le compter comme un step
+    décalerait `total_actions` et le compte de steps de tous les épisodes.
+    """
+    import os
+    import tempfile
+
+    from engine.w40k_core import W40KEngine
+    from ai.step_logger import StepLogger
+
+    assert W40KEngine._STEP_LOG_TYPE_MAP.get("reactive_move") == "reactive_move"
+    assert "reactive_move" in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES
+
+    class _Bridge:
+        def _models_segment_for_unit(self, unit_id):
+            return ""
+
+    details = W40KEngine._build_step_log_details.__get__(_Bridge())(
+        {
+            "unitId": "1", "fromCol": 5, "fromRow": 5, "toCol": 7, "toRow": 5, "turn": 1,
+            "triggered_by_unit_id": "101", "range_roll": 3,
+            "ability_display_name": "Reactive Move", "event_toCol": 9, "event_toRow": 9,
+        },
+        1,
+    )
+    out = os.path.join(tempfile.mkdtemp(), "step.log")
+    logger = StepLogger(output_file=out, enabled=True, buffer_size=1)
+    logger.episode_number = 1
+    logger.log_action(
+        unit_id="1", action_type="reactive_move", phase="MOVE", player=1, success=True,
+        step_increment=False, action_details=details,
+    )
+    logger._flush_buffer()
+
+    lines = [l for l in open(out, encoding="utf-8").read().splitlines() if "REACTIVE MOVED" in l]
+    assert len(lines) == 1, lines
+    # Les champs exigés par le formateur (`require_key`) sont bien câblés : sans eux
+    # `log_action` avale l'exception et la ligne disparaît en silence.
+    assert "[Roll: 3]" in lines[0] and "trigger: Unit 101->(9,9)" in lines[0], lines[0]
+    assert logger.step_count == 0, "un move réactif ne consomme pas de step gym"

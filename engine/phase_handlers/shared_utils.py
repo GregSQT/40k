@@ -2199,14 +2199,21 @@ def get_source_unit_rule_display_name_for_effect(
 def _build_reactive_move_destinations_pool(
     game_state: Dict[str, Any],
     reactive_unit: Dict[str, Any],
-    move_range: int,
+    move_range_inches: int,
     enemy_adjacent_hexes_override: Optional[Set[Tuple[int, int]]] = None,
 ) -> List[Tuple[int, int]]:
     """
     Build legal reactive move destinations using BFS with movement restrictions.
+
+    ``move_range_inches`` est le D6 de la capacité, EN POUCES : le BFS ci-dessous compte des pas
+    de GRILLE, donc le budget doit être converti (× ``inches_to_subhex``) comme partout ailleurs
+    — budget de move, jet d'advance, jet de charge (`_charge_budget_subhex`). Sans conversion un
+    « D6 pouces » plafonnait à 6 CASES : 1,2" à x5, 0,6" à x10, autrement dit une capacité quasi
+    inopérante dès qu'on quitte le board x1.
     """
-    if move_range <= 0:
-        raise ValueError(f"reactive_move move_range must be > 0, got {move_range}")
+    if move_range_inches <= 0:
+        raise ValueError(f"reactive_move move_range must be > 0, got {move_range_inches}")
+    move_range = int(move_range_inches) * int(require_key(game_state, "inches_to_subhex"))
     start_col, start_row = require_unit_position(reactive_unit, game_state)
     start_pos = (start_col, start_row)
 

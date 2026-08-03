@@ -335,3 +335,34 @@ class TestSelectReactiveUnitOrder:
 
         with pytest.raises(ValueError, match="Unsupported reactive_mode"):
             _select_reactive_unit_order(gs, eligible)
+
+
+class TestReactiveBudgetScale:
+    """Le D6 de la capacité est en POUCES ; le BFS du pool compte des pas de GRILLE.
+
+    Sans conversion, un « D6 pouces » plafonnait à 6 CASES — 1,2" à x5, 0,6" à x10 — alors que
+    le budget de move, le jet d'advance et le jet de charge (`_charge_budget_subhex`) sont tous
+    convertis. La capacité devenait quasi inopérante hors du board x1.
+    """
+
+    def _pool_radius(self, scale: int) -> int:
+        from engine.phase_handlers.shared_utils import _build_reactive_move_destinations_pool
+        from engine.hex_utils import hex_distance
+
+        gs = _make_game_state([_unit_with_reactive(1, 1, 12, 10)])
+        gs["inches_to_subhex"] = scale
+        unit = gs["units"][0]
+        col, row = unit["col"], unit["row"]
+        dests = _build_reactive_move_destinations_pool(
+            gs, unit, 2, enemy_adjacent_hexes_override=set()
+        )
+        assert dests, "pool vide : le test ne regarderait rien"
+        return max(hex_distance(col, row, c, r) for (c, r) in dests)
+
+    def test_le_budget_suit_la_resolution_du_board(self):
+        r1 = self._pool_radius(1)
+        r5 = self._pool_radius(5)
+
+        assert r1 == 2, r1
+        # 2" à x5 = 10 cases. Sans conversion, r5 vaudrait 2 comme à x1.
+        assert r5 == 10, r5
