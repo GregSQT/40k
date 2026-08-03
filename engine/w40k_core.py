@@ -4970,6 +4970,9 @@ class W40KEngine(gym.Env):
             get_enemy_slot_mapping,
         )
         from engine.game_utils import add_console_log
+        # 21.03 « take to the skies » — consomme par le move squad ET par la charge squad :
+        # les deux emettent un action_log qui doit porter `is_fly_move`.
+        from engine.phase_handlers.movement_handlers import _fly_traversal_active as _fta
 
         if self.game_state.get("game_over", False):
             return False, {"error": "game_over", "winner": self.game_state.get("winner")}
@@ -5126,7 +5129,6 @@ class W40KEngine(gym.Env):
             # pas transmis, aucun `[FLY]` n'atteignait step.log, et l'analyzer pathfindait au SOL
             # des escouades volantes — 1014 faux « au-delà du budget » mesurés sur un run de 600
             # épisodes. Les deux émetteurs PvP de `movement_handlers` le portaient déjà.
-            from engine.phase_handlers.movement_handlers import _fly_traversal_active as _fta
             _move_unit_pre = get_unit_by_id(squad_id, self.game_state)
             if _move_unit_pre is None:
                 raise KeyError(f"Squad {squad_id} introuvable avant déplacement")
@@ -5325,6 +5327,12 @@ class W40KEngine(gym.Env):
             _tgt_uc = self.game_state.get("units_cache", {}).get(str(target_squad_id), {})  # get allowed
             _charge_from = (int(_sq_uc["col"]), int(_sq_uc["row"])) if "col" in _sq_uc else None
             _charge_target = (int(_tgt_uc["col"]), int(_tgt_uc["row"])) if "col" in _tgt_uc else None
+            # 21.03 — JUMEAU du drapeau pose sur le move squad, capture AVANT le commit pour la
+            # meme raison. Le moteur retranche deja 2" au jet (`_charge_budget_subhex`) et
+            # autorise la traversee ; sans ce drapeau, la ligne `CHARGED` de step.log ne porte
+            # pas `[FLY]` et l'analyzer juge la charge avec un budget 2" trop large ET des murs
+            # qui ne s'appliquent pas. Le formateur du StepLogger le lit deja.
+            _charge_is_fly = _fta(self.game_state, unit, str(squad_id))
             if plan is None:
                 # Arg3 = PASS, pas CHARGE : une charge RATÉE n'est pas un charge move. 11.04 place
                 # le grant de Fights First sous « AFTER MOVING » du charge move, et 12.03/12.04
@@ -5394,6 +5402,7 @@ class W40KEngine(gym.Env):
                         "toRow": int(_dest_uc["row"]) if "row" in _dest_uc else None,
                         "targetCol": _charge_target[0] if _charge_target else None,
                         "targetRow": _charge_target[1] if _charge_target else None,
+                        "is_fly_move": _charge_is_fly,
                         "timestamp": "server_time",
                         "reward": 0.0,
                     },

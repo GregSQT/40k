@@ -1,4 +1,4 @@
-"""21.03 — le pipeline squad (chemin gym) doit poser `is_fly_move` sur l'action_log de move.
+"""21.03 — les action_logs du gym doivent porter `is_fly_move` (move ET charge).
 
 Ce que les tests existants verrouillaient DEJA : le formateur (`step_logger`) et le mapping
 (`_build_step_log_details`) — cf. tests/unit/ai/test_analyzer_scale_vehicle_fly.py. Ce qu'ils ne
@@ -120,3 +120,40 @@ def test_gym_move_log_reaches_the_step_log_formatter_with_the_marker() -> None:
     formatter.debug_mode = False  # seul attribut lu par la branche « move » du formateur
     message = formatter._format_replay_style_message(entry["unitId"], "move", details)
     assert "MOVED [FLY] from" in message, message
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JUMEAU : la CHARGE. 21.03 couvre « a normal, advance, fall-back or CHARGE move ».
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _charge_engine(keywords: List[Dict[str, str]]) -> W40KEngine:
+    eng = _engine(keywords)
+    # Cible a 6 cases : declarable (< 12") et atteignable avec un jet de 12, meme ampute des 2"
+    # que 21.03 fait payer au vol.
+    eng.game_state["unit_by_id"]["2"]["col"] = 26
+    eng.game_state["unit_by_id"]["2"]["row"] = 20
+    for m in eng.game_state["models_cache"].values():
+        if str(m["squad_id"]) == "2":
+            m["col"], m["row"] = 26, 20
+    from engine.phase_handlers.shared_utils import build_units_cache
+    build_units_cache(eng.game_state)
+    eng.game_state["phase"] = "charge"
+    return eng
+
+
+@pytest.mark.parametrize("keywords, expected", [([{"keywordId": "FLY"}], True), ([], False)])
+def test_gym_charge_carries_the_fly_flag(keywords: List[Dict[str, str]], expected: bool) -> None:
+    """Sans ce drapeau, la ligne `CHARGED` de step.log ne porte pas `[FLY]` : l'analyzer juge la
+    charge avec un budget 2" trop large ET des murs qui ne s'appliquent pas — exactement la
+    classe de faux positifs que le correctif du move supprime, laissee ouverte sur son jumeau.
+    """
+    eng = _charge_engine(keywords)
+    before = len(eng.game_state.get("action_logs", []))
+    with patch("engine.phase_handlers.shared_utils.roll_charge_distance", return_value=12):
+        ok, result = eng._process_squad_action(
+            {"action": "squad_charge", "squad_id": "1", "target_slot": 0}
+        )
+    assert ok and result["charge_succeeded"] is True, result
+    charges = [e for e in eng.game_state["action_logs"][before:] if e.get("type") == "charge"]
+    assert len(charges) == 1, charges
+    assert charges[0]["is_fly_move"] is expected, charges[0]

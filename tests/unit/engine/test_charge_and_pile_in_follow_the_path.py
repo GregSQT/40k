@@ -19,6 +19,7 @@ verrou.
 from __future__ import annotations
 
 from typing import Any, Dict, List, Sequence, Tuple
+from unittest.mock import patch
 
 import pytest
 
@@ -163,3 +164,40 @@ def test_consolidation_still_works_without_the_wall() -> None:
     plan = squad_consolidate_plan(gs, "1")
     assert plan is not None
     assert plan[0][1:] == (22, 20), plan
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# METRIQUE EUCLIDIENNE (PvP / bot PvE) — l'autre moitie du contrat
+# ─────────────────────────────────────────────────────────────────────────────
+
+# `distance_metric.move` vaut `euclidean` dans la config reelle : c'est le mode de TOUT le PvP et
+# du bot PvE. Les tests ci-dessus tournent en `hex` (donc `geodesic`) ; sans ce bloc, la moitie
+# euclidienne du predicat reste non couverte — et elle a d'abord ete livree INERTE, retombant sur
+# la ligne droite. La justification empruntee au move (« deja borne par le pool par-figurine ») ne
+# vaut que pour le move : la charge et le pile-in n'ont aucun pool, c'est leur raison d'etre ici.
+
+def _euclidean() -> Any:
+    return patch(
+        "engine.phase_handlers.movement_handlers._move_distance_metric", return_value="euclidean"
+    )
+
+
+def test_euclidean_charge_does_not_cross_the_wall_either() -> None:
+    with _euclidean():
+        gs = _gs([_unit("1", 1, [ATTACKER]), _unit("101", 2, [TARGET])], WALL, "charge")
+        assert charge_build_valid_plan(gs, "1", ["101"], 8) is None
+
+
+def test_euclidean_charge_still_succeeds_without_the_wall() -> None:
+    """Contre-epreuve : le refus ci-dessus vient bien du mur, pas de la metrique."""
+    with _euclidean():
+        gs = _gs([_unit("1", 1, [ATTACKER]), _unit("101", 2, [TARGET])], [], "charge")
+        assert charge_build_valid_plan(gs, "1", ["101"], 8) is not None
+
+
+def test_euclidean_consolidation_does_not_cross_the_wall_either() -> None:
+    with _euclidean():
+        gs = _gs(
+            [_unit("1", 1, [CONSO_ATTACKER]), _unit("101", 2, [CONSO_ENEMY])], CONSO_WALL, "fight"
+        )
+        assert squad_consolidate_plan(gs, "1") is None

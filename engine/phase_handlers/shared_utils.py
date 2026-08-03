@@ -3891,6 +3891,48 @@ def _move_distance_field_bound(
     return base
 
 
+def _euclidean_move_field_for_model(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    player: int,
+    model: Dict[str, Any],
+    level: int,
+    bound: int,
+) -> Dict[Tuple[int, int], float]:
+    """Champ ANY-ANGLE (metrique euclidienne) atteignable par une figurine dans `bound`.
+
+    SOURCE UNIQUE du champ euclidien par-figurine, partagee par la MESURE de la distance
+    parcourue (`_euclidean_path_distance`) et par la BORNE de la charge / du pile-in
+    (`model_reach_predicate`). Les deux doivent voir exactement le meme atteignable : une
+    destination bornee par un champ et mesuree par un autre rouvrirait l'ecart validation/mesure.
+
+    Socle rond -> clairance continue ; socle non-rond -> obstacles dilates par l'empreinte
+    ORIENTEE. Obstacles = definition partagee du trajet legal (`build_move_transit_blocked`).
+    FLY declare (21.03) traverse murs et figurines : le champ n'a alors aucun obstacle, ce qui
+    redonne exactement la ligne droite — pas besoin d'un cas particulier.
+    """
+    from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH, precompute_footprint_offsets
+    from engine.phase_handlers.geodesic_move import _euclidean_move_field
+    from engine.phase_handlers.movement_handlers import _fly_traversal_active
+
+    start = (int(model["col"]), int(model["row"]))
+    unit = get_unit_by_id(game_state, str(squad_id))
+    obstacles: Set[Tuple[int, int]] = set()
+    if not (unit is not None and _fly_traversal_active(game_state, unit, str(squad_id))):
+        obstacles = set(build_move_transit_blocked(game_state, str(squad_id), int(player), int(level)))
+    obstacles.discard(start)
+    base_shape = str(require_key(model, "BASE_SHAPE"))
+    base_size = require_key(model, "BASE_SIZE")
+    orientation = int(model.get("orientation", 0))  # get allowed (defaut face nord, cf. pool)
+    off_even, off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
+    return _euclidean_move_field(
+        start, base_shape, base_size, off_even, off_odd, obstacles,
+        int(require_key(game_state, "board_cols")),
+        int(require_key(game_state, "board_rows")),
+        float(bound) * ENGAGEMENT_NORM_HEX_WIDTH,
+    )
+
+
 def model_reach_predicate(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -3919,16 +3961,34 @@ def model_reach_predicate(
     transit (`build_move_transit_blocked`), meme champ geodesique memoise dans l'etat
     (`_move_spatial_cache`), meme exclusion. Dupliquer la regle ici la ferait diverger.
 
-    L'exclusion est la traversee FLY declaree (21.03) et la metrique euclidienne du PvP :
-    `move_uses_geodesic_distance` rend alors False et le trajet legal EST la ligne droite —
-    la distance a vol d'oiseau est donc exacte, pas un repli.
+    LES TROIS GEOMETRIES sont traitees, via la source unique `move_plan_distance_mode` — comme
+    la validation du move. UNE SEULE rend la ligne droite exacte : `cube`, c'est-a-dire la
+    traversee FLY declaree (21.03), ou le trajet legal EST la ligne d'hexes. Ce n'est donc pas
+    un repli, c'est la geometrie de la regle.
+
+    `euclidean` (metrique PvP / PvE) doit passer par le champ ANY-ANGLE et non par la ligne
+    droite : la justification que le move s'accorde — « deja borne par le pool par-figurine » —
+    ne vaut QUE pour le move, qui a un pool. La charge et le pile-in n'en ont aucun, c'est la
+    raison d'etre de ce predicat. S'en tenir a la ligne droite y laissait les murs traversables
+    dans tout le PvE, c'est-a-dire exactement le defaut corrige, rejoue sur l'autre metrique.
     """
     o_col, o_row = int(model["col"]), int(model["row"])
     budget = int(budget)
-    if not move_uses_geodesic_distance(game_state, str(squad_id)):
+    mode = move_plan_distance_mode(game_state, str(squad_id))
+
+    if mode == "cube":
         def _straight(nc: int, nr: int) -> bool:
             return calculate_hex_distance(o_col, o_row, nc, nr) <= budget
         return _straight
+
+    if mode == "euclidean":
+        eucl = _euclidean_move_field_for_model(
+            game_state, str(squad_id), int(player), model, int(level), budget
+        )
+
+        def _by_any_angle(nc: int, nr: int) -> bool:
+            return (nc, nr) in eucl
+        return _by_any_angle
 
     fields = _move_spatial_cache(game_state)["geo"]
     fkey = (str(squad_id), int(player), o_col, o_row, int(level), budget)
@@ -3968,27 +4028,13 @@ def _euclidean_path_distance(
     FLY (21.03) traverse murs et figurines : le champ n'a alors aucun obstacle, ce qui redonne
     exactement la ligne droite — pas besoin d'un cas particulier.
     """
-    from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH, precompute_footprint_offsets
-    from engine.phase_handlers.geodesic_move import _euclidean_move_field
-    from engine.phase_handlers.movement_handlers import _fly_traversal_active
+    from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH
 
     start = (int(model["col"]), int(model["row"]))
     if start == (int(dest[0]), int(dest[1])):
         return 0.0
-    unit = get_unit_by_id(game_state, str(squad_id))
-    obstacles: Set[Tuple[int, int]] = set()
-    if not (unit is not None and _fly_traversal_active(game_state, unit, str(squad_id))):
-        obstacles = set(build_move_transit_blocked(game_state, squad_id, player, level))
-    obstacles.discard(start)
-    base_shape = str(require_key(model, "BASE_SHAPE"))
-    base_size = require_key(model, "BASE_SIZE")
-    orientation = int(model.get("orientation", 0))  # get allowed (defaut face nord, cf. pool)
-    off_even, off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
-    field = _euclidean_move_field(
-        start, base_shape, base_size, off_even, off_odd, obstacles,
-        int(require_key(game_state, "board_cols")),
-        int(require_key(game_state, "board_rows")),
-        float(bound) * ENGAGEMENT_NORM_HEX_WIDTH,
+    field = _euclidean_move_field_for_model(
+        game_state, str(squad_id), int(player), model, int(level), int(bound)
     )
     reached = field.get((int(dest[0]), int(dest[1])))
     if reached is None:

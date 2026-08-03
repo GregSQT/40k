@@ -402,6 +402,10 @@ def _charge_gs(*, fly: bool, level: int = 0, gym: bool = True) -> Dict[str, Any]
             "game_rules": {"engagement_zone": 1, "unit_model_cohesion_range": 2,
                            "unit_global_cohesion_range": 9,
                            "cohesion_distance_mode": "euclidean", "squad_min_neighbors": 1},
+            # 11.04 EFFECT : le charge move borne chaque figurine par son TRAJET, comme le move —
+            # les toggles de traversée réels lui sont donc exigés (même helper que la fixture
+            # de move ci-dessus, jamais des constantes recopiées).
+            "move": build_move_rules(),
         },
         "phase": "charge",
         "gym_training_mode": gym,

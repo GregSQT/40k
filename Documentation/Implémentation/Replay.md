@@ -90,7 +90,7 @@ est centralisée dans `ai/analyzer_core.move_line_re` : un nouveau tag n'a qu'un
 
 | Tag | Lignes concernées | Règle | Producteur |
 |---|---|---|---|
-| `[FLY]` | `MOVED` / `FLED` / `ADVANCED` / `CHARGED` | 21.03 — vol **déclaré** (« take to the skies »), pas le keyword | **`w40k_core` branche `squad_*_move`** (seul producteur du gym), `movement_handlers` (2 sites PvP), `charge_handlers` (2 sites) |
+| `[FLY]` | `MOVED` / `FLED` / `ADVANCED` / `CHARGED` | 21.03 — vol **déclaré** (« take to the skies »), pas le keyword | **`w40k_core`, branches `squad_*_move` ET `squad_charge`** (les deux seuls producteurs du gym), `movement_handlers` (2 sites PvP), `charge_handlers` (2 sites PvP) |
 | `[SUSTAINED HITS]` | `SHOOT` et `FIGHT`, sur la ligne `Hit None(…)` | 24.36 — touche **additionnelle**, pas une attaque | `attack_sequence` (`sustainedHit`) → `_SHOT_RECORD_FIELD_MAP` |
 | `[RAPID FIRE:X]`, `[HEAVY]`, `[COVER]`, `Save [DEVASTATING WOUNDS]` | `SHOOT` | 24.30 / 24.16 / 13.08 / 24.10 | idem |
 
