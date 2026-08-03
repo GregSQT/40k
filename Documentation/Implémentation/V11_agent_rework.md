@@ -2126,6 +2126,12 @@ lecture parallèle, celle du frontend signalée plus haut.
 <a id="s0.14"></a>
 ### 0.14 Re-mesure du run — ✅ MESURE OBTENUE le 2026-08-03 (run 200k) ; le RESTE de l'entrée est l'historique périmé du run 4
 
+> ⚠️ **« MESURE OBTENUE » N'EST PAS « MESURE DE RÉFÉRENCE ».** Les deux mots coexistent dans ce
+> document et ne désignent pas la même chose : ce run donne des chiffres **exploitables**, mais la
+> mesure de RÉFÉRENCE — celle à laquelle les runs suivants se compareront — suppose un **mètre
+> gelé**, donc [§0.55](#s0.55) livrée (holdout hors enveloppe, ventilation par roster). Tant que
+> `tactical` est l'adversaire le plus facile, ces chiffres mesurent l'agent, pas sa généralisation.
+>
 > 🟢 **RUN DE 200 000 ÉPISODES — la première mesure exploitable du projet (2026-08-02 → 03).**
 > Démarré le **2026-08-02 à 12 h 26**, dernier événement le **2026-08-03 à 02 h 05** (~13 h 30),
 > 19 points d'évaluation de 820 k à 12,1 M steps. Modèle retenu :
