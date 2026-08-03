@@ -925,11 +925,12 @@ def handle_advance(
         _get_inches_to_subhex_for_analyzer,
         _build_move_bfs_blockers,
         _build_enemy_adjacent_hexes,
-        _bfs_shortest_path_length,
+        _per_model_move_violation,
         get_adjacent_enemies,
         _debug_log,
         _get_unit_hp_value,
     )
+    from ai.analyzer_perfig import surviving_start_models
 
     stats = state.stats
     if phase == 'SHOOT':
@@ -1048,47 +1049,17 @@ def handle_advance(
         # destination ([MODELS:] de cette ligne). L'ancre d'escouade peut dépasser le budget
         # (reformation) tout en gardant chaque socle ≤ budget → l'ancre-à-ancre produisait de
         # faux « distance>roll » / « path blocked ».
-        prev_models = state.positions_by_model.get(advance_unit_id)
-        new_models = state.current_line_models.get(advance_unit_id)
-        adv_blocked = False
-        adv_over = False
-        if prev_models and new_models:
-            for mid in [m for m in new_models if m in prev_models]:
-                o_col, o_row = prev_models[mid]
-                d_col, d_row = new_models[mid]
-                if (o_col, o_row) == (d_col, d_row):
-                    continue
-                if advance_is_fly:
-                    if calculate_hex_distance(o_col, o_row, d_col, d_row) > advance_budget:
-                        adv_over = True
-                else:
-                    steps = _bfs_shortest_path_length(
-                        o_col, o_row, d_col, d_row,
-                        advance_budget, state.wall_hexes, occupied_positions, enemy_adjacent_hexes
-                    )
-                    if steps is None:
-                        adv_blocked = True
-                    elif steps > advance_budget:
-                        adv_over = True
-        else:
-            if advance_is_fly:
-                if calculate_hex_distance(start_col, start_row, dest_col, dest_row) > advance_budget:
-                    adv_over = True
-            else:
-                shortest_steps = _bfs_shortest_path_length(
-                    start_col, start_row, dest_col, dest_row,
-                    advance_budget, state.wall_hexes, occupied_positions, enemy_adjacent_hexes
-                )
-                if shortest_steps is None:
-                    adv_blocked = True
-                elif shortest_steps > advance_budget:
-                    adv_over = True
-        if adv_blocked:
-            stats['move_path_blocked']['advance'][player] += 1
-            if stats['first_error_lines']['move_path_blocked']['advance'][player] is None:
-                stats['first_error_lines']['move_path_blocked']['advance'][player] = {
-                    'episode': state.current_episode_num, 'line': line.strip()
-                }
+        # Contrôle per-socle mutualisé (`_per_model_move_violation`), socles morts exclus.
+        adv_over = _per_model_move_violation(
+            surviving_start_models(
+                state.positions_by_model.get(advance_unit_id),  # get allowed
+                state.current_line_models.get(advance_unit_id),  # get allowed
+            ),
+            state.current_line_models.get(advance_unit_id),  # get allowed
+            (start_col, start_row), (dest_col, dest_row),
+            advance_budget, advance_is_fly,
+            state.wall_hexes, occupied_positions, enemy_adjacent_hexes,
+        )
         if adv_over:
             stats['move_distance_over_limit']['advance'][player] += 1
             if stats['first_error_lines']['move_distance_over_limit']['advance'][player] is None:

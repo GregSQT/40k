@@ -36,7 +36,7 @@ def handle_move_or_fled(
         _get_unit_hp_value,
         _build_move_bfs_blockers,
         _build_enemy_adjacent_hexes,
-        _bfs_shortest_path_length,
+        _per_model_move_violation,
         get_adjacent_enemies,
     )
     # Import local : `analyzer_core` importe ce module au chargement (cycle sinon), comme les
@@ -63,7 +63,7 @@ def handle_move_or_fled(
         skip = _handle_move(state, config, line, action_desc, player, turn, phase, move_match,
                             _track_action_phase_accuracy, _position_cache_set,
                             _get_unit_hp_value, _build_move_bfs_blockers,
-                            _build_enemy_adjacent_hexes, _bfs_shortest_path_length,
+                            _build_enemy_adjacent_hexes, _per_model_move_violation,
                             get_adjacent_enemies, is_within_engine_engagement_zone,
                             _get_engagement_zone_for_analyzer, _debug_log)
         return skip
@@ -191,7 +191,7 @@ def _handle_fled(state, config, line, action_desc, player, turn, phase, fled_mat
 def _handle_move(state, config, line, action_desc, player, turn, phase, move_match,
                  _track_action_phase_accuracy, _position_cache_set,
                  _get_unit_hp_value, _build_move_bfs_blockers,
-                 _build_enemy_adjacent_hexes, _bfs_shortest_path_length,
+                 _build_enemy_adjacent_hexes, _per_model_move_violation,
                  get_adjacent_enemies, is_within_engine_engagement_zone,
                  _get_engagement_zone_for_analyzer, _debug_log):
     from ai.analyzer_perfig import surviving_start_models
@@ -396,56 +396,20 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         # [MODELS:] de cette ligne). En V11 l'ANCRE d'escouade peut faire un bond >
         # budget (reformation), alors que chaque socle reste ≤ budget → le contrôle
         # ancre-à-ancre produisait des faux « distance>budget » / « path blocked ».
-        prev_models = state.positions_by_model.get(move_unit_id)
-        new_models = state.current_line_models.get(move_unit_id)
-        move_blocked = False
-        move_over = False
-        if prev_models and new_models:
-            common_mids = [m for m in new_models if m in prev_models]
-            checked_any = False
-            for mid in common_mids:
-                o_col, o_row = prev_models[mid]
-                d_col, d_row = new_models[mid]
-                if (o_col, o_row) == (d_col, d_row):
-                    continue
-                checked_any = True
-                if move_is_fly:
-                    if calculate_hex_distance(o_col, o_row, d_col, d_row) > move_range:
-                        move_over = True
-                else:
-                    steps = _bfs_shortest_path_length(
-                        o_col, o_row, d_col, d_row,
-                        move_range, state.wall_hexes, occupied_positions, enemy_adjacent_hexes
-                    )
-                    if steps is None:
-                        move_blocked = True
-                    elif steps > move_range:
-                        move_over = True
-            if not checked_any:
-                # Aucun socle commun n'a bougé (reformation pure autour de socles fixes) :
-                # rien à valider côté distance.
-                pass
-        else:
-            # Pas de données per-socle (log ancien/synthétique) → repli ancre legacy.
-            if move_is_fly:
-                if calculate_hex_distance(start_col, start_row, dest_col, dest_row) > move_range:
-                    move_over = True
-            else:
-                shortest_steps = _bfs_shortest_path_length(
-                    start_col, start_row, dest_col, dest_row,
-                    move_range, state.wall_hexes, occupied_positions, enemy_adjacent_hexes
-                )
-                if shortest_steps is None:
-                    move_blocked = True
-                elif shortest_steps > move_range:
-                    move_over = True
-
-        if move_blocked:
-            stats['move_path_blocked']['move'][player] += 1
-            if stats['first_error_lines']['move_path_blocked']['move'][player] is None:
-                stats['first_error_lines']['move_path_blocked']['move'][player] = {
-                    'episode': state.current_episode_num, 'line': line.strip()
-                }
+        # Contrôle per-socle mutualisé avec advance, charge et pile-in/consolidation
+        # (`_per_model_move_violation`). Les socles de DÉPART excluent les figurines mortes
+        # entre-temps : le log ne dit pas laquelle est tombée, les garder mesurerait contre des
+        # figurines retirées du plateau.
+        move_over = _per_model_move_violation(
+            surviving_start_models(
+                state.positions_by_model.get(move_unit_id),  # get allowed
+                state.current_line_models.get(move_unit_id),  # get allowed
+            ),
+            state.current_line_models.get(move_unit_id),  # get allowed
+            (start_col, start_row), (dest_col, dest_row),
+            move_range, move_is_fly,
+            state.wall_hexes, occupied_positions, enemy_adjacent_hexes,
+        )
         if move_over:
             if is_move_after_shooting:
                 stats['move_after_shooting_distance_over_limit'][player] += 1

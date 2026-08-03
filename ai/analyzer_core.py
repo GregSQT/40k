@@ -15,7 +15,7 @@ from ai.analyzer_phases.episode_handler import handle_episode_start
 from ai.analyzer_phases.shoot_handler import handle_shoot, handle_wait, handle_skip, handle_advance
 from ai.analyzer_phases.charge_handler import handle_charge
 from ai.analyzer_phases.move_handler import handle_move_or_fled
-from ai.analyzer_phases.fight_handler import handle_fight
+from ai.analyzer_phases.fight_handler import handle_fight, handle_fight_move
 
 
 PLAYER_ONE_ID = 1
@@ -57,7 +57,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
         is_adjacent,
         _build_move_bfs_blockers,
         _build_enemy_adjacent_hexes,
-        _bfs_shortest_path_length,
+        _per_model_move_violation,
         _get_inches_to_subhex_for_analyzer,
         has_line_of_sight,
         parse_timestamp_to_seconds,
@@ -782,24 +782,19 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     state.unit_base, state.unit_player, unit_hp_at_reactive,
                                     reactive_unit_id
                                 )
-                                shortest_steps = _bfs_shortest_path_length(
-                                    from_col,
-                                    from_row,
-                                    to_col,
-                                    to_row,
-                                    _reactive_budget,
-                                    state.wall_hexes,
-                                    occupied_positions,
-                                    enemy_adjacent_hexes
-                                )
-                                if shortest_steps is None:
-                                    reactive_checks['path_blocked'][reactive_player] += 1
-                                    if first_errors['reactive_move_path_blocked'][reactive_player] is None:
-                                        first_errors['reactive_move_path_blocked'][reactive_player] = {
-                                            'episode': state.current_episode_num,
-                                            'line': line.strip()
-                                        }
-                                elif shortest_steps > _reactive_budget:
+                                # 5e site du controle per-socle : meme helper que move,
+                                # advance, charge et pile-in. La ligne reactive porte un
+                                # segment `[MODELS:]` depuis qu'elle est journalisee.
+                                if _per_model_move_violation(
+                                    surviving_start_models(
+                                        state.positions_by_model.get(reactive_unit_id),  # get allowed
+                                        state.current_line_models.get(reactive_unit_id),  # get allowed
+                                    ),
+                                    state.current_line_models.get(reactive_unit_id),  # get allowed
+                                    (from_col, from_row), (to_col, to_row),
+                                    _reactive_budget, False,
+                                    state.wall_hexes, occupied_positions, enemy_adjacent_hexes,
+                                ):
                                     reactive_checks['distance_over_roll'][reactive_player] += 1
                                     if first_errors['reactive_move_distance_over_roll'][reactive_player] is None:
                                         first_errors['reactive_move_distance_over_roll'][reactive_player] = {
@@ -907,73 +902,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         if handle_move_or_fled(state, config, line, action_desc, action_unit_id, player, turn, phase):
                             continue
                 elif "CONSOLIDATED from" in action_desc or "PILED IN from" in action_desc:
-                        # Mouvements de fin de combat (12.02 pile-in / 12.07 consolidation) :
-                        # recalent l'ancre d'escouade (positions_by_model est déjà mis à jour via
-                        # le segment [MODELS:]). Sans ça l'ancre reste figée sur la position de
-                        # combat → faux mismatch position/log au move/advance suivant (2.2).
+                        # 12.03 pile-in / 12.08 consolidation : déplacements de la phase de
+                        # combat, contrôlés comme les autres (budget 3", per-socle, chemin).
                         action_type = 'move'
-                        _consol_match = re.search(
-                            r'Unit (\d+)\(\d+,\s*\d+\) (?:CONSOLIDATED|PILED IN) from '
-                            r'\((\d+),\s*(\d+)\) to \((\d+),\s*(\d+)\)',
-                            action_desc,
-                        )
-                        if _consol_match:
-                            _consol_uid = _consol_match.group(1)
-                            _consol_from = (int(_consol_match.group(2)), int(_consol_match.group(3)))
-                            _consol_to = (int(_consol_match.group(4)), int(_consol_match.group(5)))
-                            # 12.03 pile-in / 12.08 consolidation : MAXIMUM DISTANCE 3", et
-                            # « moves as described in Moving (03) » — donc mêmes obstacles que
-                            # le move. Ces deux déplacements n'étaient contrôlés par RIEN :
-                            # la branche se contentait de recaler l'ancre. Budget pris à la
-                            # même source que le moteur (3 × inches_to_subhex).
-                            if _consol_uid in state.unit_hp and require_key(state.unit_hp, _consol_uid) > 0:
-                                _fight_budget = 3 * _get_inches_to_subhex_for_analyzer()
-                                _occ, _ez = _build_move_bfs_blockers(
-                                    state.positions_by_model, state.unit_positions, state.unit_base,
-                                    state.unit_player, state.unit_hp, _consol_uid,
-                                )
-                                _prev = surviving_start_models(
-                                    state.positions_by_model.get(_consol_uid),  # get allowed
-                                    state.current_line_models.get(_consol_uid),  # get allowed
-                                )
-                                _new = state.current_line_models.get(_consol_uid)  # get allowed
-                                _over = False
-                                _blocked = False
-                                if _prev and _new:
-                                    for _mid, (_oc, _orow) in _prev.items():
-                                        if _mid not in _new:
-                                            continue
-                                        _dc, _dr = _new[_mid]
-                                        if (_oc, _orow) == (_dc, _dr):
-                                            continue
-                                        # Marge de recherche (cf. charge) : distingue « aucun
-                                        # chemin » de « chemin plus long que 3" ».
-                                        _steps = _bfs_shortest_path_length(
-                                            _oc, _orow, _dc, _dr, _fight_budget,
-                                            state.wall_hexes, _occ, _ez,
-                                            search_margin=calculate_hex_distance(_oc, _orow, _dc, _dr),
-                                        )
-                                        if _steps is None:
-                                            _blocked = True
-                                        elif _steps > _fight_budget:
-                                            _over = True
-                                else:
-                                    if calculate_hex_distance(*_consol_from, *_consol_to) > _fight_budget:
-                                        _over = True
-                                _fm = require_key(stats, 'fight_move_invalid')
-                                if _over:
-                                    _fm['over_budget'][player] += 1
-                                    if stats['first_error_lines']['fight_move_invalid'][player] is None:
-                                        stats['first_error_lines']['fight_move_invalid'][player] = {
-                                            'episode': state.current_episode_num, 'line': line.strip()}
-                                if _blocked:
-                                    _fm['path_blocked'][player] += 1
-                                    if stats['first_error_lines']['fight_move_invalid'][player] is None:
-                                        stats['first_error_lines']['fight_move_invalid'][player] = {
-                                            'episode': state.current_episode_num, 'line': line.strip()}
-                                _position_cache_set(
-                                    state.unit_positions, _consol_uid, _consol_to[0], _consol_to[1],
-                                )
+                        handle_fight_move(state, config, line, action_desc, player, turn, phase)
                 elif "FOUGHT Unit" in action_desc:
                         action_type = 'fight'
                         handle_fight(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)

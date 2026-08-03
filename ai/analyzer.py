@@ -712,16 +712,17 @@ def _bfs_shortest_path_length(
     wall_hexes: Set[Tuple[int, int]],
     occupied_positions: Set[Tuple[int, int]],
     enemy_adjacent_hexes: Set[Tuple[int, int]],
-    search_margin: int = 0,
 ) -> Optional[int]:
-    """Longueur du plus court chemin de mouvement, ou None si aucun n'existe dans la fenêtre.
+    """Longueur du plus court chemin de mouvement, ou None s'il n'en existe aucun dans le budget.
 
-    ``search_margin`` élargit la RECHERCHE sans élargir le budget : le BFS explore jusqu'à
-    ``max_steps + search_margin``, ce qui permet à l'appelant de distinguer « aucun chemin »
-    (obstacle) de « chemin trop long » (dépassement de budget). Sans marge, tout dépassement
-    revient en None et le compteur « distance > budget » de l'appelant est INATTEIGNABLE : un
-    déplacement hors budget se comptait comme un chemin bloqué, ce qui affiche 0 en face du
-    contrôle qu'on croit lire.
+    UN SEUL verdict, et c'est délibéré : « trop long » et « bloqué » ne sont pas distinguables
+    à un coût raisonnable. Les distinguer demandait d'explorer AU-DELÀ du budget, ce qui
+    quadruplait le flood sur les chemins en échec (mesuré : 1,6 → 6,3 ms par socle pour une
+    charge à x5) sans même offrir de garantie — un détour peut dépasser n'importe quelle marge
+    fixée d'avance. Les compteurs séparés qui vivaient chez les appelants entretenaient donc une
+    fiction : celui qui affichait « distance > budget » restait à 0 en permanence, tout partant
+    dans « chemin bloqué ». Ce que le contrôle établit vraiment, et tout ce qu'il établit :
+    **la figurine n'a pas pu atteindre sa destination dans son budget**.
     """
     start_pos = (start_col, start_row)
     dest_pos = (dest_col, dest_row)
@@ -732,7 +733,7 @@ def _bfs_shortest_path_length(
     while queue:
         current_pos = queue.pop(0)
         current_dist = visited[current_pos]
-        if current_dist >= max_steps + search_margin:
+        if current_dist >= max_steps:
             continue
         for neighbor in get_hex_neighbors(current_pos[0], current_pos[1]):
             if neighbor in visited:
@@ -747,6 +748,60 @@ def _bfs_shortest_path_length(
             visited[neighbor] = next_dist
             queue.append(neighbor)
     return None
+
+
+def _per_model_move_violation(
+    prev_models: Optional[Dict[str, Tuple[int, int]]],
+    new_models: Optional[Dict[str, Tuple[int, int]]],
+    anchor_from: Tuple[int, int],
+    anchor_to: Tuple[int, int],
+    budget: int,
+    is_fly: bool,
+    wall_hexes: Set[Tuple[int, int]],
+    occupied_positions: Set[Tuple[int, int]],
+    enemy_adjacent_hexes: Set[Tuple[int, int]],
+) -> bool:
+    """Une figurine a-t-elle été déplacée AU-DELÀ de ce que son budget permettait ?
+
+    Contrôle commun aux QUATRE déplacements contrôlés — move, advance, charge, pile-in /
+    consolidation. Il était écrit quatre fois, et les quatre copies avaient déjà divergé : le
+    filtre des socles morts n'existait que dans deux d'entre elles, la distinction
+    bloqué/hors-budget dans deux autres. Une règle de déplacement corrigée devait atterrir en
+    quatre endroits ; elle n'y atterrissait jamais complètement.
+
+    Ce que l'appelant fournit : les socles d'AVANT (déjà réduits aux survivants), ceux de la
+    ligne, le budget DÉJÀ converti en cases, et le drapeau de vol déclaré. Ce que ce helper ne
+    fait pas : écrire dans `stats` — les quatre appelants ont des compteurs de formes
+    différentes, et c'est leur seule divergence légitime.
+
+    - Chaque socle commun qui a bougé est mesuré de SA position de départ à SA destination :
+      l'ancre d'escouade peut bondir plus loin qu'aucune figurine (reformation) ou moins loin
+      que l'une d'elles.
+    - Vol déclaré (21.03) : distance à vol d'oiseau, la traversée étant la contrepartie des 2"
+      retranchés au budget. Sinon : chemin réel, murs et figurines ennemies compris (03.01).
+    - Sans donnée per-figurine des deux côtés : repli sur l'ancre, seule donnée disponible —
+      et par le MÊME chemin, pour ne pas rendre le verdict dépendant de la présence du segment.
+    """
+    if prev_models and new_models:
+        moved = [
+            (mid, pos) for mid, pos in prev_models.items()
+            if mid in new_models and new_models[mid] != pos
+        ]
+    else:
+        moved = [("<ancre>", anchor_from)] if anchor_from != anchor_to else []
+        new_models = {"<ancre>": anchor_to}
+
+    for mid, (o_col, o_row) in moved:
+        d_col, d_row = new_models[mid]
+        if is_fly:
+            if calculate_hex_distance(o_col, o_row, d_col, d_row) > budget:
+                return True
+        elif _bfs_shortest_path_length(
+            o_col, o_row, d_col, d_row, budget,
+            wall_hexes, occupied_positions, enemy_adjacent_hexes,
+        ) is None:
+            return True
+    return False
 
 
 def _track_action_phase_accuracy(
@@ -985,12 +1040,11 @@ def parse_step_log(filepath: str) -> Dict:
             1: {'total': 0, 'distance_over_roll': 0, 'advanced': 0, 'fled': 0},
             2: {'total': 0, 'distance_over_roll': 0, 'advanced': 0, 'fled': 0}
         },
-        # Chemin de charge introuvable dans le budget (murs/figurines) — jumeau de
-        # `move_path_blocked`. Absent tant que la charge se mesurait à vol d'oiseau.
-        'charge_path_blocked': {1: 0, 2: 0},
         # Pile-in (12.03) et consolidation (12.08) : MAXIMUM DISTANCE 3", mêmes obstacles que
         # le move (03). Ces deux déplacements n'étaient contrôlés par rien.
-        'fight_move_invalid': {'over_budget': {1: 0, 2: 0}, 'path_blocked': {1: 0, 2: 0}},
+        # Un slot par RÈGLE (12.03 / 12.08) : elles partagent le budget et les obstacles, pas
+        # le reste. Un compteur commun rendait la ligne d'exemple ambiguë.
+        'fight_move_invalid': {'pile_in': {1: 0, 2: 0}, 'consolidation': {1: 0, 2: 0}},
         'special_rule_usage': defaultdict(lambda: {1: 0, 2: 0}),  # (rule_id, unit_type) -> {1: count, 2: count}
         'rule_choice_usage': defaultdict(
             lambda: {
@@ -1008,15 +1062,10 @@ def parse_step_log(filepath: str) -> Dict:
         'reactive_move_checks': {
             'to_adjacent_enemy': {1: 0, 2: 0},
             'into_wall': {1: 0, 2: 0},
-            'path_blocked': {1: 0, 2: 0},
             'distance_over_roll': {1: 0, 2: 0},
         },
         'move_adjacent_before_non_flee': {1: 0, 2: 0},
         'move_distance_over_limit': {
-            'move': {1: 0, 2: 0},
-            'advance': {1: 0, 2: 0}
-        },
-        'move_path_blocked': {
             'move': {1: 0, 2: 0},
             'advance': {1: 0, 2: 0}
         },
@@ -1074,22 +1123,16 @@ def parse_step_log(filepath: str) -> Dict:
                 2: None
             },
             'charge_invalid': {1: None, 2: None},
-            'charge_path_blocked': {1: None, 2: None},
-            'fight_move_invalid': {1: None, 2: None},
+            'fight_move_invalid': {'pile_in': {1: None, 2: None}, 'consolidation': {1: None, 2: None}},
             'reactive_move_abnormal': {1: None, 2: None},
             'reactive_move_to_adjacent_enemy': {1: None, 2: None},
             'reactive_move_into_wall': {1: None, 2: None},
-            'reactive_move_path_blocked': {1: None, 2: None},
             'reactive_move_distance_over_roll': {1: None, 2: None},
             'rule_choice_selection_invalid': {1: None, 2: None},
             'rule_choice_usage_missing': {1: None, 2: None},
             'rule_choice_usage_mismatch': {1: None, 2: None},
             'move_adjacent_before_non_flee': {1: None, 2: None},
             'move_distance_over_limit': {
-                'move': {1: None, 2: None},
-                'advance': {1: None, 2: None}
-            },
-            'move_path_blocked': {
                 'move': {1: None, 2: None},
                 'advance': {1: None, 2: None}
             },
@@ -2207,7 +2250,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
         agent_move_over = stats['move_distance_over_limit']['move'][1]
         bot_move_over = stats['move_distance_over_limit']['move'][2]
-        _table_row("Move distance > MOVE:", _fmt_count(agent_move_over), _fmt_count(bot_move_over))
+        _table_row("Move au-dela du budget:", _fmt_count(agent_move_over), _fmt_count(bot_move_over))
         if agent_move_over > 0 and stats['first_error_lines']['move_distance_over_limit']['move'][1]:
             first_err = stats['first_error_lines']['move_distance_over_limit']['move'][1]
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -2222,15 +2265,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
         if bot_mas_over > 0 and stats['first_error_lines']['move_after_shooting_distance_over_limit'][2]:
             first_err = stats['first_error_lines']['move_after_shooting_distance_over_limit'][2]
-            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        agent_move_blocked = stats['move_path_blocked']['move'][1]
-        bot_move_blocked = stats['move_path_blocked']['move'][2]
-        _table_row("Move path blocked (BFS):", _fmt_count(agent_move_blocked), _fmt_count(bot_move_blocked))
-        if agent_move_blocked > 0 and stats['first_error_lines']['move_path_blocked']['move'][1]:
-            first_err = stats['first_error_lines']['move_path_blocked']['move'][1]
-            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        if bot_move_blocked > 0 and stats['first_error_lines']['move_path_blocked']['move'][2]:
-            first_err = stats['first_error_lines']['move_path_blocked']['move'][2]
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
         reactive_stats = require_key(stats, 'reactive_move_stats')
         agent_reactive_applied = reactive_stats[1]['applied']
@@ -2267,18 +2301,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         if bot_reactive_wall > 0 and stats['first_error_lines']['reactive_move_into_wall'][2]:
             first_err = stats['first_error_lines']['reactive_move_into_wall'][2]
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        agent_reactive_blocked = reactive_checks['path_blocked'][1]
-        bot_reactive_blocked = reactive_checks['path_blocked'][2]
-        _table_row("Reactive path blocked (BFS):", _fmt_count(agent_reactive_blocked), _fmt_count(bot_reactive_blocked))
-        if agent_reactive_blocked > 0 and stats['first_error_lines']['reactive_move_path_blocked'][1]:
-            first_err = stats['first_error_lines']['reactive_move_path_blocked'][1]
-            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        if bot_reactive_blocked > 0 and stats['first_error_lines']['reactive_move_path_blocked'][2]:
-            first_err = stats['first_error_lines']['reactive_move_path_blocked'][2]
-            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
         agent_reactive_over_roll = reactive_checks['distance_over_roll'][1]
         bot_reactive_over_roll = reactive_checks['distance_over_roll'][2]
-        _table_row("Reactive distance > roll:", _fmt_count(agent_reactive_over_roll), _fmt_count(bot_reactive_over_roll))
+        _table_row("Reactive au-dela du budget:", _fmt_count(agent_reactive_over_roll), _fmt_count(bot_reactive_over_roll))
         if agent_reactive_over_roll > 0 and stats['first_error_lines']['reactive_move_distance_over_roll'][1]:
             first_err = stats['first_error_lines']['reactive_move_distance_over_roll'][1]
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -2409,7 +2434,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_adv_over = stats['move_distance_over_limit']['advance'][1]
     bot_adv_over = stats['move_distance_over_limit']['advance'][2]
-    _table_row("Advance distance > roll:", _fmt_count(agent_adv_over), _fmt_count(bot_adv_over))
+    _table_row("Advance au-dela du budget:", _fmt_count(agent_adv_over), _fmt_count(bot_adv_over))
     if agent_adv_over > 0 and stats['first_error_lines']['move_distance_over_limit']['advance'][1]:
         first_err = stats['first_error_lines']['move_distance_over_limit']['advance'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -2424,15 +2449,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     if bot_advance_adj > 0 and stats['first_error_lines']['advance_from_adjacent'][2]:
         first_err = stats['first_error_lines']['advance_from_adjacent'][2]
-        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    agent_adv_blocked = stats['move_path_blocked']['advance'][1]
-    bot_adv_blocked = stats['move_path_blocked']['advance'][2]
-    _table_row("Advance path blocked (BFS):", _fmt_count(agent_adv_blocked), _fmt_count(bot_adv_blocked))
-    if agent_adv_blocked > 0 and stats['first_error_lines']['move_path_blocked']['advance'][1]:
-        first_err = stats['first_error_lines']['move_path_blocked']['advance'][1]
-        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_adv_blocked > 0 and stats['first_error_lines']['move_path_blocked']['advance'][2]:
-        first_err = stats['first_error_lines']['move_path_blocked']['advance'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     
     # CHARGE ERRORS
@@ -2474,14 +2490,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     _table_row("Charges after advance:", _fmt_count(agent_charge_adv), _fmt_count(bot_charge_adv))
     agent_charge_over = stats['charge_invalid'][1]['distance_over_roll']
     bot_charge_over = stats['charge_invalid'][2]['distance_over_roll']
-    _table_row("Distance > roll:", _fmt_count(agent_charge_over), _fmt_count(bot_charge_over))
-    agent_charge_blocked = stats['charge_path_blocked'][1]
-    bot_charge_blocked = stats['charge_path_blocked'][2]
-    _table_row("Charge path blocked (BFS):", _fmt_count(agent_charge_blocked), _fmt_count(bot_charge_blocked))
-    for _pl in (1, 2):
-        if stats['charge_path_blocked'][_pl] > 0 and stats['first_error_lines']['charge_path_blocked'][_pl]:
-            _fe = stats['first_error_lines']['charge_path_blocked'][_pl]
-            log_print(f"  First P{_pl} occurrence (Episode {_fe['episode']}): {_fe['line']}")
+    _table_row("Charge au-dela du budget:", _fmt_count(agent_charge_over), _fmt_count(bot_charge_over))
     if stats['first_error_lines']['charge_invalid'][1]:
         first_err = stats['first_error_lines']['charge_invalid'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -2521,12 +2530,12 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         first_err = stats['first_error_lines']['fight_alternation_violations'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     _fm = require_key(stats, 'fight_move_invalid')
-    _table_row("Pile-in/conso over 3\":", _fmt_count(_fm['over_budget'][1]), _fmt_count(_fm['over_budget'][2]))
-    _table_row("Pile-in/conso path blocked:", _fmt_count(_fm['path_blocked'][1]), _fmt_count(_fm['path_blocked'][2]))
-    for _pl in (1, 2):
-        if (_fm['over_budget'][_pl] or _fm['path_blocked'][_pl]) and stats['first_error_lines']['fight_move_invalid'][_pl]:
-            _fe = stats['first_error_lines']['fight_move_invalid'][_pl]
-            log_print(f"  First P{_pl} occurrence (Episode {_fe['episode']}): {_fe['line']}")
+    for _kind, _label in (('pile_in', 'Pile-in au-dela de 3"'), ('consolidation', 'Conso au-dela de 3"')):
+        _table_row(f"{_label}:", _fmt_count(_fm[_kind][1]), _fmt_count(_fm[_kind][2]))
+        for _pl in (1, 2):
+            if _fm[_kind][_pl] > 0 and stats['first_error_lines']['fight_move_invalid'][_kind][_pl]:
+                _fe = stats['first_error_lines']['fight_move_invalid'][_kind][_pl]
+                log_print(f"  First P{_pl} occurrence (Episode {_fe['episode']}): {_fe['line']}")
     if bot_fight_alt > 0 and stats['first_error_lines']['fight_alternation_violations'][2]:
         first_err = stats['first_error_lines']['fight_alternation_violations'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -2905,11 +2914,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         stats['move_adjacent_before_non_flee'][1] + stats['move_adjacent_before_non_flee'][2] +
         stats['move_distance_over_limit']['move'][1] + stats['move_distance_over_limit']['move'][2] +
         stats['move_after_shooting_distance_over_limit'][1] + stats['move_after_shooting_distance_over_limit'][2] +
-        stats['move_path_blocked']['move'][1] + stats['move_path_blocked']['move'][2] +
         stats['reactive_move_stats'][1]['abnormal'] + stats['reactive_move_stats'][2]['abnormal'] +
         stats['reactive_move_checks']['to_adjacent_enemy'][1] + stats['reactive_move_checks']['to_adjacent_enemy'][2] +
         stats['reactive_move_checks']['into_wall'][1] + stats['reactive_move_checks']['into_wall'][2] +
-        stats['reactive_move_checks']['path_blocked'][1] + stats['reactive_move_checks']['path_blocked'][2] +
         stats['reactive_move_checks']['distance_over_roll'][1] + stats['reactive_move_checks']['distance_over_roll'][2]
     )
     shoot_invalid_total = (
@@ -2927,23 +2934,21 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         stats['advance_twice_in_shoot_phase'][1] + stats['advance_twice_in_shoot_phase'][2] +
         stats['move_distance_over_limit']['advance'][1] + stats['move_distance_over_limit']['advance'][2] +
         stats['advance_from_adjacent'][1] + stats['advance_from_adjacent'][2] +
-        stats['move_path_blocked']['advance'][1] + stats['move_path_blocked']['advance'][2] +
         shoot_invalid_total
     )
     charge_errors = (
         stats['charge_from_adjacent'][1] + stats['charge_from_adjacent'][2] +
         stats['charge_invalid'][1]['distance_over_roll'] + stats['charge_invalid'][2]['distance_over_roll'] +
         stats['charge_invalid'][1]['advanced'] + stats['charge_invalid'][2]['advanced'] +
-        stats['charge_invalid'][1]['fled'] + stats['charge_invalid'][2]['fled'] +
-        stats['charge_path_blocked'][1] + stats['charge_path_blocked'][2]
+        stats['charge_invalid'][1]['fled'] + stats['charge_invalid'][2]['fled']
     )
     fight_alternation_total = stats['fight_alternation_violations'][1] + stats['fight_alternation_violations'][2]
     fight_errors = (
         stats['fight_from_non_adjacent'][1] + stats['fight_from_non_adjacent'][2] +
         stats['fight_friendly'][1] + stats['fight_friendly'][2] +
         stats['fight_over_cc_nb'][1] + stats['fight_over_cc_nb'][2] +
-        stats['fight_move_invalid']['over_budget'][1] + stats['fight_move_invalid']['over_budget'][2] +
-        stats['fight_move_invalid']['path_blocked'][1] + stats['fight_move_invalid']['path_blocked'][2] +
+        stats['fight_move_invalid']['pile_in'][1] + stats['fight_move_invalid']['pile_in'][2] +
+        stats['fight_move_invalid']['consolidation'][1] + stats['fight_move_invalid']['consolidation'][2] +
         fight_alternation_total
     )
     dead_unit_actions = stats.setdefault('dead_unit_actions', [])
@@ -3167,12 +3172,10 @@ if __name__ == "__main__":
             stats['move_to_adjacent_enemy'][1] + stats['move_to_adjacent_enemy'][2] +
             stats['move_adjacent_before_non_flee'][1] + stats['move_adjacent_before_non_flee'][2] +
             stats['move_distance_over_limit']['move'][1] + stats['move_distance_over_limit']['move'][2] +
-            stats['move_path_blocked']['move'][1] + stats['move_path_blocked']['move'][2] +
-            stats['reactive_move_stats'][1]['abnormal'] + stats['reactive_move_stats'][2]['abnormal'] +
+                stats['reactive_move_stats'][1]['abnormal'] + stats['reactive_move_stats'][2]['abnormal'] +
             stats['reactive_move_checks']['to_adjacent_enemy'][1] + stats['reactive_move_checks']['to_adjacent_enemy'][2] +
             stats['reactive_move_checks']['into_wall'][1] + stats['reactive_move_checks']['into_wall'][2] +
-            stats['reactive_move_checks']['path_blocked'][1] + stats['reactive_move_checks']['path_blocked'][2] +
-            stats['reactive_move_checks']['distance_over_roll'][1] + stats['reactive_move_checks']['distance_over_roll'][2]
+                stats['reactive_move_checks']['distance_over_roll'][1] + stats['reactive_move_checks']['distance_over_roll'][2]
         )
         shooting_errors = (
             stats['shoot_over_rng_nb'][1] + stats['shoot_over_rng_nb'][2] +
@@ -3184,22 +3187,20 @@ if __name__ == "__main__":
             stats['advance_twice_in_shoot_phase'][1] + stats['advance_twice_in_shoot_phase'][2] +
             stats['move_distance_over_limit']['advance'][1] + stats['move_distance_over_limit']['advance'][2] +
             stats['advance_from_adjacent'][1] + stats['advance_from_adjacent'][2] +
-            stats['move_path_blocked']['advance'][1] + stats['move_path_blocked']['advance'][2] +
-            shoot_invalid_total
+                shoot_invalid_total
         )
         charge_errors = (
             stats['charge_from_adjacent'][1] + stats['charge_from_adjacent'][2] +
             stats['charge_invalid'][1]['distance_over_roll'] + stats['charge_invalid'][2]['distance_over_roll'] +
             stats['charge_invalid'][1]['advanced'] + stats['charge_invalid'][2]['advanced'] +
-            stats['charge_invalid'][1]['fled'] + stats['charge_invalid'][2]['fled'] +
-            stats['charge_path_blocked'][1] + stats['charge_path_blocked'][2]
+            stats['charge_invalid'][1]['fled'] + stats['charge_invalid'][2]['fled']
         )
         fight_errors = (
             stats['fight_from_non_adjacent'][1] + stats['fight_from_non_adjacent'][2] +
             stats['fight_friendly'][1] + stats['fight_friendly'][2] +
             stats['fight_over_cc_nb'][1] + stats['fight_over_cc_nb'][2] +
-            stats['fight_move_invalid']['over_budget'][1] + stats['fight_move_invalid']['over_budget'][2] +
-            stats['fight_move_invalid']['path_blocked'][1] + stats['fight_move_invalid']['path_blocked'][2] +
+            stats['fight_move_invalid']['pile_in'][1] + stats['fight_move_invalid']['pile_in'][2] +
+            stats['fight_move_invalid']['consolidation'][1] + stats['fight_move_invalid']['consolidation'][2] +
             stats['fight_alternation_violations'][1] + stats['fight_alternation_violations'][2]
         )
         action_phase_accuracy = require_key(stats, "action_phase_accuracy")

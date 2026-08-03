@@ -154,7 +154,7 @@ def test_un_vol_par_dessus_un_mur_n_est_pas_un_chemin_bloque(tmp_path):
     pathfinder. C'est ce marqueur que le pipeline squad n'émettait pas."""
     stats = _fly_move_stats(tmp_path, " [FLY]", "fly.log")
 
-    assert stats["move_path_blocked"]["move"][1] == 0
+    assert stats["move_distance_over_limit"]["move"][1] == 0
 
 
 def test_sans_marqueur_le_meme_deplacement_est_bien_signale(tmp_path):
@@ -163,7 +163,7 @@ def test_sans_marqueur_le_meme_deplacement_est_bien_signale(tmp_path):
     traverse quand même."""
     stats = _fly_move_stats(tmp_path, "", "walk.log")
 
-    assert stats["move_path_blocked"]["move"][1] == 1
+    assert stats["move_distance_over_limit"]["move"][1] == 1
 
 
 @pytest.mark.parametrize("verbe,action_key,ligne", [

@@ -34,7 +34,7 @@ def handle_charge(
         _get_unit_hp_value,
         _get_inches_to_subhex_for_analyzer,
         _build_move_bfs_blockers,
-        _bfs_shortest_path_length,
+        _per_model_move_violation,
     )
     from ai.analyzer_perfig import surviving_start_models
 
@@ -93,57 +93,30 @@ def handle_charge(
             if charge_is_fly:
                 charge_budget = max(0, charge_budget - 2 * _scale)
 
-            occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
-                state.positions_by_model, state.unit_positions, state.unit_base,
-                state.unit_player, state.unit_hp, charge_unit_id,
-            )
-            prev_models = surviving_start_models(
-                state.positions_by_model.get(charge_unit_id),  # get allowed
-                state.current_line_models.get(charge_unit_id),  # get allowed
-            )
-            new_models = state.current_line_models.get(charge_unit_id)  # get allowed
-            charge_over = False
-            charge_blocked = False
-            if prev_models and new_models:
-                for mid, (o_col, o_row) in prev_models.items():
-                    if mid not in new_models:
-                        continue
-                    d_col, d_row = new_models[mid]
-                    if (o_col, o_row) == (d_col, d_row):
-                        continue
-                    if charge_is_fly:
-                        # 21.03 : la traversée est la contrepartie des 2" retranchés — pas de
-                        # pathfinding, seule la distance à vol d'oiseau borne le mouvement.
-                        if calculate_hex_distance(o_col, o_row, d_col, d_row) > charge_budget:
-                            charge_over = True
-                    else:
-                        # Marge de recherche : sans elle le BFS élague AU budget, tout
-                        # dépassement revient None, et « Distance > roll » est inatteignable —
-                        # une charge trop longue se comptait en « chemin bloqué ». La marge
-                        # élargit la RECHERCHE, jamais le budget.
-                        steps = _bfs_shortest_path_length(
-                            o_col, o_row, d_col, d_row,
-                            charge_budget, state.wall_hexes, occupied_positions,
-                            enemy_adjacent_hexes,
-                            search_margin=calculate_hex_distance(o_col, o_row, d_col, d_row),
-                        )
-                        if steps is None:
-                            charge_blocked = True
-                        elif steps > charge_budget:
-                            charge_over = True
+            # Blockers construits SEULEMENT si le chemin sera réellement parcouru : une
+            # charge volante (21.03) mesure à vol d'oiseau et les jetterait intégralement.
+            if charge_is_fly:
+                occupied_positions, enemy_adjacent_hexes = set(), set()
             else:
-                # Sans socles des deux côtés : repli ancre, seule donnée disponible.
-                if calculate_hex_distance(start_col, start_row, dest_col, dest_row) > charge_budget:
-                    charge_over = True
+                occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
+                    state.positions_by_model, state.unit_positions, state.unit_base,
+                    state.unit_player, state.unit_hp, charge_unit_id,
+                )
+            charge_over = _per_model_move_violation(
+                surviving_start_models(
+                    state.positions_by_model.get(charge_unit_id),  # get allowed
+                    state.current_line_models.get(charge_unit_id),  # get allowed
+                ),
+                state.current_line_models.get(charge_unit_id),  # get allowed
+                (start_col, start_row), (dest_col, dest_row),
+                charge_budget, charge_is_fly,
+                state.wall_hexes, occupied_positions, enemy_adjacent_hexes,
+            )
 
             if charge_over:
                 stats['charge_invalid'][player]['distance_over_roll'] += 1
                 if stats['first_error_lines']['charge_invalid'][player] is None:
                     stats['first_error_lines']['charge_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
-            if charge_blocked:
-                stats['charge_path_blocked'][player] += 1
-                if stats['first_error_lines']['charge_path_blocked'][player] is None:
-                    stats['first_error_lines']['charge_path_blocked'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
 
         stats['position_log_mismatch']['charge']['total'] += 1
         if charge_unit_id not in state.unit_positions:

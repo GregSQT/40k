@@ -84,7 +84,6 @@ def test_la_charge_mesure_chaque_figurine_et_non_l_ancre(tmp_path):
     # chemin bloqué. Sans marge de recherche le BFS élaguait au budget et les deux causes
     # étaient confondues — « Distance > roll » affichait 0 en permanence.
     assert stats["charge_invalid"][1]["distance_over_roll"] == 1, "socle avancé non mesuré"
-    assert stats["charge_path_blocked"][1] == 0, "chemin libre : ce n'est pas un blocage"
 
 
 def test_une_charge_a_travers_un_mur_est_signalee(tmp_path):
@@ -100,7 +99,7 @@ def test_une_charge_a_travers_un_mur_est_signalee(tmp_path):
     log.write_text(_log(body, scale=1, walls=walls))
     stats = an.parse_step_log(str(log))
 
-    assert stats["charge_path_blocked"][1] == 1
+    assert stats["charge_invalid"][1]["distance_over_roll"] == 1
 
 
 def test_le_vol_declare_retranche_deux_pouces_au_budget(tmp_path):
@@ -131,9 +130,11 @@ def test_pile_in_et_consolidation_sont_bornes_a_trois_pouces(verbe, tmp_path):
     log.write_text(_log(body, scale=1))
     stats = an.parse_step_log(str(log))
 
-    _fm = stats["fight_move_invalid"]
-    assert _fm["over_budget"][1] == 1, "dépassement des 3\" non distingué d'un blocage"
-    assert _fm["path_blocked"][1] == 0
+    _kind = "pile_in" if verbe == "PILED IN" else "consolidation"
+    assert stats["fight_move_invalid"][_kind][1] == 1
+    # Un slot par RÈGLE : l'autre ne doit pas bouger.
+    _autre = "consolidation" if _kind == "pile_in" else "pile_in"
+    assert stats["fight_move_invalid"][_autre][1] == 0
 
 
 @pytest.mark.parametrize("verbe", ["PILED IN", "CONSOLIDATED"])
@@ -149,8 +150,8 @@ def test_un_pile_in_dans_les_trois_pouces_ne_remonte_rien(verbe, tmp_path):
     log.write_text(_log(body, scale=1))
     stats = an.parse_step_log(str(log))
 
-    assert stats["fight_move_invalid"]["over_budget"][1] == 0
-    assert stats["fight_move_invalid"]["path_blocked"][1] == 0
+    _fm = stats["fight_move_invalid"]
+    assert _fm["pile_in"][1] == 0 and _fm["consolidation"][1] == 0
 
 
 def test_le_move_reactif_est_journalise_sans_consommer_de_step():

@@ -102,9 +102,18 @@ Deux exemptions, portées par des **tags du journal** et non par le registre d'u
 `[FLY]` (21.03 — vol déclaré : traversée libre, et 2" retranchés au budget de charge) et le
 keyword `MONSTER/VEHICLE` pour le tir au contact (10.06 / 17.03).
 
-⚠️ `_bfs_shortest_path_length` élague à `max_steps` : un trajet hors budget revient « sans chemin »
-plutôt que « trop long ». Les compteurs `*_path_blocked` et `*_over_roll` se lisent donc ensemble,
-et c'est leur somme que le récapitulatif additionne.
+Les cinq sites — move, advance, charge, pile-in/consolidation, move réactif — passent par le MÊME
+helper, `ai/analyzer._per_model_move_violation`. Il *mesure* et rend un booléen ; chaque appelant
+garde son propre compteur, seule divergence légitime entre eux. Ils ont vécu en cinq copies, et
+elles avaient dérivé : le filtre des socles morts n'existait que dans deux d'entre elles.
+
+⚠️ **Un seul verdict, délibérément.** « Trop long » et « chemin bloqué » ne sont pas distinguables
+à un coût raisonnable : il faudrait explorer au-delà du budget, ce qui quadruple le flood du BFS
+sur les chemins en échec (mesuré : 1,6 → 6,3 ms par socle pour une charge à x5) sans même offrir
+de garantie — un détour peut dépasser n'importe quelle marge fixée d'avance. Les compteurs
+séparés d'autrefois entretenaient une fiction : celui qui affichait « distance > budget » restait
+à 0 en permanence, tout partant dans « chemin bloqué ». Ce que le contrôle établit, et tout ce
+qu'il établit : **la figurine n'a pas pu atteindre sa destination dans son budget**.
 
 ---
 

@@ -262,3 +262,76 @@ def handle_fight(
             'line': line.strip(),
             'error': f"Fight action missing expected format: {action_desc[:100]}"
         })
+
+
+def handle_fight_move(
+    state: "AnalyzerState",
+    config: "AnalyzerConfig",
+    line: str,
+    action_desc: str,
+    player: int,
+    turn: int,
+    phase: str,
+) -> None:
+    """Pile-in (12.03) et consolidation (12.08) — les deux déplacements de la phase de combat.
+
+    MAXIMUM DISTANCE 3" pour l'un comme pour l'autre, et « moves as described in Moving (03) » :
+    budget et obstacles sont donc communs, et c'est le seul contrôle mutualisé ici. Le RESTE de
+    ces deux règles diffère (conditions d'éligibilité, figurines au contact qui ne bougent pas,
+    post-conditions) : elles gardent donc des compteurs SÉPARÉS, faute de quoi une ligne
+    d'exemple ne dit plus de laquelle elle vient.
+
+    Ce contrôle vivait inline dans la boucle d'aiguillage de `analyzer_core`, au 8e niveau
+    d'indentation, alors que toutes ses branches sœurs délèguent à un handler : il n'était
+    atteignable en test qu'en faisant passer un fichier de log complet.
+    """
+    from ai.analyzer import (
+        _build_move_bfs_blockers,
+        _per_model_move_violation,
+        _get_inches_to_subhex_for_analyzer,
+        _position_cache_set,
+    )
+    from ai.analyzer_perfig import surviving_start_models
+
+    stats = state.stats
+    match = re.search(
+        r'Unit (\d+)\(\d+,\s*\d+\) (CONSOLIDATED|PILED IN) from '
+        r'\((\d+),\s*(\d+)\) to \((\d+),\s*(\d+)\)',
+        action_desc,
+    )
+    if not match:
+        return
+    unit_id = match.group(1)
+    kind = 'consolidation' if match.group(2) == 'CONSOLIDATED' else 'pile_in'
+    anchor_from = (int(match.group(3)), int(match.group(4)))
+    anchor_to = (int(match.group(5)), int(match.group(6)))
+
+    if unit_id not in state.unit_hp or require_key(state.unit_hp, unit_id) <= 0:
+        return
+
+    prev_models = surviving_start_models(
+        state.positions_by_model.get(unit_id),  # get allowed
+        state.current_line_models.get(unit_id),  # get allowed
+    )
+    new_models = state.current_line_models.get(unit_id)  # get allowed
+    moved = bool(prev_models and new_models) or anchor_from != anchor_to
+    if moved:
+        occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
+            state.positions_by_model, state.unit_positions, state.unit_base,
+            state.unit_player, state.unit_hp, unit_id,
+        )
+        # Budget pris à la MÊME source que le moteur : 3" × résolution du run.
+        if _per_model_move_violation(
+            prev_models, new_models, anchor_from, anchor_to,
+            3 * _get_inches_to_subhex_for_analyzer(), False,
+            state.wall_hexes, occupied_positions, enemy_adjacent_hexes,
+        ):
+            stats['fight_move_invalid'][kind][player] += 1
+            if stats['first_error_lines']['fight_move_invalid'][kind][player] is None:
+                stats['first_error_lines']['fight_move_invalid'][kind][player] = {
+                    'episode': state.current_episode_num, 'line': line.strip()
+                }
+
+    # Recale l'ancre : sans ça elle reste figée sur la position de combat et le move suivant
+    # remonte un faux mismatch position/log (2.2).
+    _position_cache_set(state.unit_positions, unit_id, anchor_to[0], anchor_to[1])
