@@ -9,6 +9,8 @@ import math
 import os
 import time
 from typing import Dict, List, Tuple, Set, Optional, Any
+
+import numpy as np
 from engine.combat_utils import (
     normalize_coordinates,
     get_unit_by_id,
@@ -3867,6 +3869,126 @@ def _get_obscuring_hex_to_area(game_state: Dict[str, Any]) -> Dict[Tuple[int, in
             out[h] = area_id
     game_state["_obscuring_hex_to_area_cache"] = out
     return out
+
+
+def _get_los_blocking_grids(game_state: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray]:
+    """``(wall_grid, area_grid)`` — les DEUX bloqueurs 2D sous forme de grilles, caché par état.
+
+    ``wall_grid`` (bool) et ``area_grid`` (int32, ``-1`` = pas d'obscuring, sinon l'INDEX de
+    l'area dans ``_get_obscuring_area_sets``) portent exactement ce que le chemin scalaire lit
+    dans ``wall_set`` et ``obscuring_by_hex``. Terrain statique → même durée de vie que
+    ``_wall_set_cache`` et ``_obscuring_hex_to_area_cache``, dont elles sont dérivées.
+
+    La grille couvre le plateau ET tout mur/obscuring qui déborderait de ses bornes ; une
+    cellule hors grille est libre, ce qui est le comportement scalaire (``prev in wall_set``
+    est faux pour une cellule sans mur, y compris hors plateau). Une coordonnée négative de
+    terrain LÈVE : elle serait indexée par la fin de la grille, donc lue comme un mur ailleurs.
+    """
+    cached = game_state.get("_los_blocking_grids_cache")
+    if cached is not None:
+        return cached
+
+    wall_set = _get_wall_set(game_state)
+    obscuring_areas = _get_obscuring_area_sets(game_state)
+    cols = int(require_key(game_state, "board_cols"))
+    rows = int(require_key(game_state, "board_rows"))
+    for source, hexes in (("wall_hexes", wall_set), *((a, h) for a, h in obscuring_areas)):
+        for c, r in hexes:
+            if c < 0 or r < 0:
+                raise ValueError(
+                    f"Coordonnee de terrain negative dans {source}: ({c},{r}) — la LoS "
+                    f"vectorisee ne peut pas l'indexer"
+                )
+            cols = max(cols, int(c) + 1)
+            rows = max(rows, int(r) + 1)
+
+    wall_grid = np.zeros((cols, rows), dtype=bool)
+    for c, r in wall_set:
+        wall_grid[int(c), int(r)] = True
+    area_grid = np.full((cols, rows), -1, dtype=np.int32)
+    for area_index, (_area_id, hex_set) in enumerate(obscuring_areas):
+        for c, r in hex_set:
+            area_grid[int(c), int(r)] = area_index
+
+    grids = (wall_grid, area_grid)
+    game_state["_los_blocking_grids_cache"] = grids
+    return grids
+
+
+def batch_ground_hex_can_see(
+    game_state: Dict[str, Any],
+    from_hex: Tuple[int, int],
+    to_arr: np.ndarray,
+) -> np.ndarray:
+    """JUMEAU VECTORISÉ de :func:`compute_unit_los` pour des paires HEXE→HEXE au sol.
+
+    Rend un tableau bool de longueur ``len(to_arr)`` : ``can_see`` de l'hexe source vers chaque
+    hexe cible, pour les paires SANS unité — celles que l'exposition de déploiement construit
+    (``{"col": .., "row": ..}``, cf. `ActionDecoder.deployment_los`).
+
+    POURQUOI CE JUMEAU PEUT EXISTER SANS ROUVRIR V11 §0.64. Sur ces paires-là, et sur elles
+    seules, `compute_unit_los` se REDUIT à un unique tracé 2D, et c'est démontrable terme à
+    terme sur son propre code :
+    - dict coordonnées-seules → ``_resolve_unit_anchor_and_footprint`` rend une empreinte
+      réduite à l'ancre, donc UNE figurine tireuse et UNE cellule cible ;
+    - empreinte d'une seule cellule → ``_shooter_lateral_vantage_hexes`` rend une liste vide :
+      pas de vantage latéral, un seul segment à tracer ;
+    - pas de clé ``MODEL_HEIGHT`` → ``z_s``/``z_t`` valent None → aucune dalle plancher-occulteur,
+      donc le chemin 3D de ``_los_line_segment_clear`` n'est pas pris ;
+    - pas de clé ``level`` → niveau 0 → ``_walls_around_occupied_floor`` rend l'ensemble vide,
+      donc le wall_set effectif est le wall_set complet ;
+    - exclusion obscuring (13.10) = area de la cellule SOURCE (``excluded_base``) ∪ area de la
+      cellule CIBLE, les seules empreintes en jeu.
+    Reste donc : « un mur, ou une case obscuring dont l'area n'est ni celle de la source ni
+    celle de la cible, sur les cellules intermédiaires ». C'est ce qui est écrit ci-dessous.
+
+    ⚠️ Ce qui rend le jumeau SÛR n'est pas ce raisonnement, c'est le test qui le vérifie :
+    ``tests/unit/engine/test_deployment_los_vectorized_equivalence.py`` compare les deux
+    chemins hexe par hexe sur la TOTALITÉ du pool, sur deux terrains. Toute évolution du modèle
+    de LoS doit passer ici aussi — le test devient rouge sinon, c'est sa raison d'être.
+    """
+    from engine.hex_utils import batch_hex_line_steps
+
+    n_targets = len(to_arr)
+    result = np.ones(n_targets, dtype=bool)
+    if n_targets == 0:
+        return result
+
+    wall_grid, area_grid = _get_los_blocking_grids(game_state)
+    grid_cols, grid_rows = wall_grid.shape
+    from_col, from_row = int(from_hex[0]), int(from_hex[1])
+
+    # Area obscuring de la SOURCE : exclue de tous les tracés (13.10).
+    source_area = -1
+    if 0 <= from_col < grid_cols and 0 <= from_row < grid_rows:
+        source_area = int(area_grid[from_col, from_row])
+
+    # Area obscuring de CHAQUE cible : exclue de SON tracé, et d'aucun autre.
+    to_cols = to_arr[:, 0].astype(np.int64)
+    to_rows = to_arr[:, 1].astype(np.int64)
+    target_area = np.full(n_targets, -1, dtype=np.int32)
+    in_grid = (
+        (to_cols >= 0) & (to_cols < grid_cols) & (to_rows >= 0) & (to_rows < grid_rows)
+    )
+    target_area[in_grid] = area_grid[to_cols[in_grid], to_rows[in_grid]]
+
+    for idx, c_off, r_off in batch_hex_line_steps(from_col, from_row, to_arr, result):
+        inside = (c_off >= 0) & (c_off < grid_cols) & (r_off >= 0) & (r_off < grid_rows)
+        if not inside.any():
+            continue
+        c_in = c_off[inside]
+        r_in = r_off[inside]
+        cell_area = area_grid[c_in, r_in]
+        blocked_inside = wall_grid[c_in, r_in] | (
+            (cell_area >= 0)
+            & (cell_area != source_area)
+            & (cell_area != target_area[idx][inside])
+        )
+        blocked = np.zeros(len(idx), dtype=bool)
+        blocked[inside] = blocked_inside
+        result[idx[blocked]] = False
+
+    return result
 
 
 def _shooter_lateral_vantage_hexes(

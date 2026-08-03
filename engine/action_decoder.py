@@ -12,7 +12,8 @@ from typing import Dict, List, Any, Optional, Tuple
 from shared.data_validation import require_key
 from engine.debug_trace import CH_DEPLOY_CACHE, channel_enabled, trace
 from engine.game_utils import get_unit_by_id
-from engine.combat_utils import calculate_hex_distance, get_unit_coordinates, has_line_of_sight
+from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
+from engine.phase_handlers.shooting_handlers import batch_ground_hex_can_see
 from engine.phase_handlers.shared_utils import (
     is_unit_alive,
     compute_candidate_footprint,
@@ -107,7 +108,6 @@ class ActionDecoder:
         ] = {}
         self._wall_hexes_cache: tuple[frozenset, int] | None = None
         self._deployment_pool_cache: Dict[int, Tuple[set, List[Tuple[int, int]], np.ndarray, np.ndarray, np.ndarray]] = {}
-        self._wall_grid_cache: Optional[np.ndarray] = None
         self._deployment_cache_counts: Dict[str, int] = self.empty_deployment_cache_counts()
         self._deployment_scoring_hexes_cache: Dict[int, List[tuple[int, int]]] = {}
 
@@ -164,7 +164,6 @@ class ActionDecoder:
         """Invalidate per-episode caches. Call on every env.reset()."""
         self._deployment_pool_cache = {}
         self._wall_hexes_cache = None
-        self._wall_grid_cache = None
         # Le sur-ensemble de scoring dérive du pool ET des murs, tous deux invalidés ici : il
         # doit l'être AVEC eux, sinon il survivrait à un changement de terrain.
         self._deployment_scoring_hexes_cache = {}
@@ -184,24 +183,29 @@ class ActionDecoder:
     DEPLOYMENT_LOS_MODEL_VERSION = 2
 
     def deployment_los(
-        self, game_state: Dict[str, Any], from_hex: tuple[int, int], to_hex: tuple[int, int]
-    ) -> bool:
-        """Ligne de vue entre deux HEXES pour le scoring de déploiement — LA RÈGLE DU MOTEUR.
+        self, game_state: Dict[str, Any], from_hex: tuple[int, int], to_hexes: np.ndarray
+    ) -> np.ndarray:
+        """Ligne de vue d'un HEXE vers N HEXES pour le scoring de déploiement — LA RÈGLE DU MOTEUR.
 
-        Passe par `has_line_of_sight`, donc par `compute_unit_los` : la même visibilité que
-        l'éligibilité de tir, la validation de cible et la récompense. C'est ce que le docstring
-        de `shooting_handlers._has_line_of_sight` a toujours affirmé du déploiement — sans que
-        ce soit vrai, jusqu'à V11 §0.64.
+        Passe par `shooting_handlers.batch_ground_hex_can_see`, jumeau VECTORISÉ de
+        `compute_unit_los` sur les paires hexe→hexe au sol : même visibilité que l'éligibilité de
+        tir, la validation de cible et la récompense (obscuring 13.10 compris). L'égalité des
+        deux chemins est verrouillée hexe par hexe par
+        `tests/unit/engine/test_deployment_los_vectorized_equivalence.py`.
 
-        Le point d'entrée est unique et public pour que les deux canaux d'exposition (réelle et
+        Le point d'entrée reste unique et public pour que les deux canaux d'exposition (réelle et
         potentielle) ne puissent plus diverger : c'est leur divergence, invisible tant que le
-        chemin incrémental ne tournait pas, qui a coûté 607 valeurs fausses.
+        chemin incrémental ne tournait pas, qui a coûté 607 valeurs fausses (V11 §0.64).
+
+        BATCH ET NON PAR PAIRE, et ce n'est pas qu'une question de vitesse (V11 §0.64 suite) :
+        par paire, la règle du moteur coûtait 10 µs × 146 781 paires = la MOITIÉ de la phase de
+        déploiement. Les 16 104 lignes d'une même source se tracent d'un coup (×18 à ×70 mesuré).
+        L'ancien chemin passait de plus par `combat_utils.has_line_of_sight`, dont le
+        `hex_los_cache` ne servait RIEN ici — mesuré 146 776 consultations pour 146 781 calculs,
+        soit zéro réutilisation, chaque paire n'étant posée qu'une fois — mais que chaque
+        déplacement d'unité devait ensuite reparcourir pour l'invalider.
         """
-        return has_line_of_sight(
-            {"col": int(from_hex[0]), "row": int(from_hex[1])},
-            {"col": int(to_hex[0]), "row": int(to_hex[1])},
-            game_state,
-        )
+        return batch_ground_hex_can_see(game_state, from_hex, to_hexes)
 
     def _get_deployment_potential_los_cache_file_path(
         self,
@@ -1172,31 +1176,6 @@ class ActionDecoder:
         version_items.sort(key=lambda item: item[0])
         return tuple(version_items)
 
-    def _build_wall_grid(self, game_state: Dict[str, Any]) -> np.ndarray:
-        """Build a (board_cols × board_rows) bool grid from game_state wall_hexes.
-
-        wall_grid[col, row] is True when that hex is a wall.
-        Result is cached in self._wall_grid_cache (reset each episode).
-        """
-        if self._wall_grid_cache is not None:
-            return self._wall_grid_cache
-        board_cols = int(require_key(game_state, "board_cols"))
-        board_rows = int(require_key(game_state, "board_rows"))
-        wall_grid = np.zeros((board_cols, board_rows), dtype=bool)
-        raw_wall_hexes = require_key(game_state, "wall_hexes")
-        for raw_hex in raw_wall_hexes:
-            if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
-                c, r = int(raw_hex[0]), int(raw_hex[1])
-            elif isinstance(raw_hex, dict):
-                c = int(require_key(raw_hex, "col"))
-                r = int(require_key(raw_hex, "row"))
-            else:
-                raise TypeError(f"Invalid wall hex format: {raw_hex!r}")
-            if 0 <= c < board_cols and 0 <= r < board_rows:
-                wall_grid[c, r] = True
-        self._wall_grid_cache = wall_grid
-        return wall_grid
-
     def _build_enemy_los_reference_hexes(
         self, enemy_reference_hexes: List[tuple[int, int]]
     ) -> List[tuple[int, int]]:
@@ -1337,11 +1316,7 @@ class ActionDecoder:
             los_exposure_by_hex[h] = 0
 
         if valid_hexes:
-            wall_grid = self._build_wall_grid(game_state)
-            valid_arr = np.array(valid_hexes, dtype=np.int32)
-            hex_los_cache: Dict[tuple[tuple[int, int], tuple[int, int]], bool] = (
-                game_state.setdefault("hex_los_cache", {})
-            )
+            valid_arr = np.array(valid_hexes, dtype=np.int64)
 
             # --- Batch LoS from each deployed enemy to all valid hexes ---
             _t_los0 = time.perf_counter() if _debug_mode else None
@@ -1350,9 +1325,9 @@ class ActionDecoder:
                 enemy_row = int(require_key(enemy, "row"))
                 if enemy_col < 0 or enemy_row < 0:
                     continue
-                for vc, vr in valid_hexes:
-                    if self.deployment_los(game_state, (enemy_col, enemy_row), (vc, vr)):
-                        los_exposure_by_hex[(vc, vr)] += 1
+                seen = self.deployment_los(game_state, (enemy_col, enemy_row), valid_arr)
+                for i in np.flatnonzero(seen):
+                    los_exposure_by_hex[valid_hexes[i]] += 1
             # On teste le CHRONO, pas le drapeau : c'est la meme condition (`_t_los0` n'est pose
             # que si `_debug_mode`), mais celle-ci se prouve — l'ignore precedent ne faisait que
             # taire la soustraction sur un Optional.
@@ -1366,11 +1341,12 @@ class ActionDecoder:
                 if (int(c), int(r)) not in potential_los_cache_for_topology
             ]
             if uncached_valid:
+                uncached_arr = np.array(uncached_valid, dtype=np.int64)
                 potential_counts = np.zeros(len(uncached_valid), dtype=np.int32)
                 for ref_col, ref_row in enemy_los_reference_hexes:
-                    for i, (vc, vr) in enumerate(uncached_valid):
-                        if self.deployment_los(game_state, (int(ref_col), int(ref_row)), (vc, vr)):
-                            potential_counts[i] += 1
+                    potential_counts += self.deployment_los(
+                        game_state, (int(ref_col), int(ref_row)), uncached_arr
+                    )
                 for i, (vc, vr) in enumerate(uncached_valid):
                     potential_los_cache_for_topology[(vc, vr)] = int(potential_counts[i])
             for col, row in valid_hexes:
@@ -1464,6 +1440,10 @@ class ActionDecoder:
         # l'autre. Écarter un hexe occupé est le travail du filtre `valid_hexes`, appliqué à la
         # LECTURE — le faire ici aussi ferait diverger le cache incrémental de la
         # reconstruction (constaté : le test d'équivalence l'a signalé sur cet exact point).
+        # Tableau des hexes de scoring construit UNE fois pour tous les ennemis ajoutés (le
+        # sur-ensemble ne bouge pas d'un ajout à l'autre), et seulement s'il y a un ennemi à
+        # traiter — un tour où le delta est purement allié ne le paie pas.
+        scoring_arr: Optional[np.ndarray] = None
         for added_id in added_ids:
             player, col, row = current_snapshot[added_id]
             if int(player) == int(current_deployer):
@@ -1479,9 +1459,12 @@ class ActionDecoder:
             # déjà les unités non posées (`if col < 0 or row < 0: continue`), donc `added_ids`
             # n'en contient jamais. Une garde ici serait du code inatteignable — la mutation
             # qui la retire laisse le test d'équivalence VERT, ce qui le prouve.
-            for key in scoring_hexes:
-                if self.deployment_los(game_state, (int(col), int(row)), key):
-                    los_exposure_by_hex[key] = require_key(los_exposure_by_hex, key) + 1
+            if scoring_arr is None:
+                scoring_arr = np.array(scoring_hexes, dtype=np.int64)
+            seen = self.deployment_los(game_state, (int(col), int(row)), scoring_arr)
+            for i in np.flatnonzero(seen):
+                key = scoring_hexes[i]
+                los_exposure_by_hex[key] = require_key(los_exposure_by_hex, key) + 1
 
         cache["deployed_snapshot"] = current_snapshot
         cache["deployed_snapshot_version"] = current_snapshot_version
