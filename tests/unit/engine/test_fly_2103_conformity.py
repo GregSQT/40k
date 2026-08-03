@@ -439,22 +439,23 @@ def test_ai_charge_flight_pays_the_two_inches_on_the_execution_path():
     """Sur `charge_build_valid_plan` — la fonction qu'exécute `squad_charge`, donc l'agent — le
     vol de charge coûte 2" comme n'importe quelle prise d'altitude. Un jet qui suffit au sol ne
     suffit plus en vol ; il faut 2" de plus."""
-    # Trajet requis jusqu'au B2B : 3 subhex.
-    assert charge_build_valid_plan(_charge_gs(fly=False), "1", ["2"], 3) is not None
-    assert charge_build_valid_plan(_charge_gs(fly=True), "1", ["2"], 3) is None
-    assert charge_build_valid_plan(_charge_gs(fly=True), "1", ["2"], 5) is not None
+    # Trajet requis jusqu'à l'ENGAGEMENT : 2 subhex (03.04 — l'ER est une zone de 2", pas la
+    # cellule voisine du centre ennemi ; à `inches_to_subhex = 1` elle porte donc à 2 subhex).
+    assert charge_build_valid_plan(_charge_gs(fly=False), "1", ["2"], 2) is not None
+    assert charge_build_valid_plan(_charge_gs(fly=True), "1", ["2"], 2) is None
+    assert charge_build_valid_plan(_charge_gs(fly=True), "1", ["2"], 4) is not None
 
 
 def test_ai_charge_flight_ignores_vertical_distance_but_still_pays():
     """Depuis un étage : le vol supprime le coût de descente (« Ignore all vertical distance »)
     et facture 2". Les deux effets sortent de la MÊME déclaration."""
-    # Descente = 3 subhex (plancher de niveau 1 haut de 3"), trajet = 3 subhex.
-    # Au sol : jet 5 → budget 5 - 3 = 2 < 3 → impossible.
-    assert charge_build_valid_plan(_charge_gs(fly=False, level=1), "1", ["2"], 5) is None
-    # En vol : jet 5 → budget 5 - 2 (skies) - 0 (vertical ignoré) = 3 → possible.
-    assert charge_build_valid_plan(_charge_gs(fly=True, level=1), "1", ["2"], 5) is not None
-    # Mais le vol ne rend pas la charge gratuite : jet 4 → budget 2 < 3.
-    assert charge_build_valid_plan(_charge_gs(fly=True, level=1), "1", ["2"], 4) is None
+    # Descente = 3 subhex (plancher de niveau 1 haut de 3"), trajet jusqu'à l'engagement = 2.
+    # Au sol : jet 4 → budget 4 - 3 = 1 < 2 → impossible.
+    assert charge_build_valid_plan(_charge_gs(fly=False, level=1), "1", ["2"], 4) is None
+    # En vol : jet 4 → budget 4 - 2 (skies) - 0 (vertical ignoré) = 2 → possible.
+    assert charge_build_valid_plan(_charge_gs(fly=True, level=1), "1", ["2"], 4) is not None
+    # Mais le vol ne rend pas la charge gratuite : jet 3 → budget 1 < 2.
+    assert charge_build_valid_plan(_charge_gs(fly=True, level=1), "1", ["2"], 3) is None
 
 
 def test_human_charge_flight_still_requires_an_explicit_declaration():

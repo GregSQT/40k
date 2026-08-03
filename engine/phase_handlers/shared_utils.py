@@ -4,7 +4,7 @@ engine/phase_handlers/shared_utils.py - Shared utility functions for phase handl
 Functions used across multiple phase handlers to avoid duplication.
 """
 
-from typing import Dict, List, Tuple, Set, Optional, Any, Union, Callable, Sequence, Mapping, cast, TYPE_CHECKING
+from typing import Dict, Iterator, List, Tuple, Set, Optional, Any, Union, Callable, Sequence, Mapping, cast, TYPE_CHECKING
 from dataclasses import dataclass
 import copy
 import inspect
@@ -5044,6 +5044,36 @@ def _hex_legal_for_charge(
     return True
 
 
+def _hex_cells_within_radius(col: int, row: int, radius: int) -> Iterator[Tuple[int, int]]:
+    """Cellules a distance hexagonale <= ``radius`` de (col,row).
+
+    Le carre ``|d_col| <= radius`` et ``|d_row| <= radius`` contient le disque en entier,
+    parite de colonne comprise : la conversion offset -> cube decale bien la ligne d'environ
+    ``d_col / 2``, mais la troisieme coordonnee cube (``|dx + dz| <= radius``) reprend
+    exactement ce que ce decalage semblait ajouter. Verifie par force brute sur les deux
+    parites dans `test_charge_plan_engagement_range.py` — une borne trop etroite amputerait
+    le disque et refuserait des charges en silence.
+    """
+    if radius < 0:
+        return
+    for d_col in range(-radius, radius + 1):
+        for d_row in range(-radius, radius + 1):
+            nc, nr = col + d_col, row + d_row
+            if calculate_hex_distance(col, row, nc, nr) <= radius:
+                yield (nc, nr)
+
+
+def _model_footprint_radius(
+    game_state: Dict[str, Any], squad_id: str, model_entry: Dict[str, Any], col: int, row: int
+) -> int:
+    """Rayon hexagonal de l'empreinte d'une figurine posee en (col,row) (centre -> bord)."""
+    synth = _synth_model_entry(game_state, squad_id, model_entry, col, row)
+    fp = synth["occupied_hexes"]
+    if not fp:
+        return 0
+    return max(calculate_hex_distance(col, row, fc, fr) for fc, fr in fp)
+
+
 def charge_build_valid_plan(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -5054,11 +5084,24 @@ def charge_build_valid_plan(
 
     Ordre de traitement : par index de figurine croissant.
     Pour chaque fig :
-      (a) priorite : B2B avec un modele ennemi cible (hex hexagonalement adjacent)
-      (b) sinon : se rapproche du cible le plus proche, hors ER des non-cibles
-    Validation finale : TOUTES les figs finissent dans l ER d au moins un modele cible
-    (regle officielle : charge legale exige ER apres deplacement). Coherency verifiee
-    sur le plan final.
+      (a) priorite : finir ENGAGEE avec une cible (11.04 WHILE MOVING « each model that can
+          end its move engaged with one or more charge targets must do so »)
+      (b) sinon : se rapprocher de la cible la plus proche, hors ER des non-cibles
+    Validation finale : l'UNITE est engagee avec CHACUNE des cibles declarees (11.04 AFTER
+    MOVING « your unit must be engaged with all of the charge targets » ; 03.04 : une unite
+    est engagee des qu'UNE de ses figurines est dans l'ER d'une figurine ennemie). Coherency
+    verifiee sur le plan final (03.01 ENDING A MOVE).
+
+    ZONE D'ENGAGEMENT, PAS ADJACENCE (2026-08-01) : les destinations « au contact » etaient
+    cherchees parmi les VOISINS HEXAGONAUX du centre d'une figurine cible. A l'echelle x1 ou
+    un hex valait un socle, cela coincidait avec l'ER ; a l'echelle x5 un voisin est a 0,2"
+    quand l'ER en vaut 2 (03.04) — le plan exigeait donc ~1,8" de mouvement de plus que la
+    regle, socles compris, et AUCUNE charge n'aboutissait (mesure sur le modele du 2026-08-01 :
+    0 reussite sur 23 declarations ; 11 des 12 charges d'escouades mono-figurine avaient
+    pourtant une destination legale dans le budget). Les candidats sont desormais filtres par
+    `unit_entries_within_engagement_zone`, la primitive que la validation finale utilise deja.
+    Le surensemble enumere est borne par l'inegalite triangulaire hexagonale
+    (`ez + rayon socle chargeant + rayon socle cible`), jamais par une reimplementation de l'ER.
 
     NIVEAU ET DESCENTE (§0.34, facettes reproduites sur la charge) : une charge est un move
     (11.04 EFFECT « moves as described in Moving (03) ») — la distance verticale descendue
@@ -5102,6 +5145,59 @@ def charge_build_valid_plan(
     if not target_positions:
         return None
 
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    ez = get_engagement_zone(game_state)
+    target_entries_by_id: List[Tuple[str, Dict[str, Any]]] = [
+        (str(t), te) for t, te in ((t, units_cache.get(str(t))) for t in target_squad_ids)
+        if te is not None
+    ]
+    if len(target_entries_by_id) != len(target_squad_ids):
+        return None  # une cible declaree n'est plus dans le cache (detruite) : plan invalide
+    target_entries = [te for _tid, te in target_entries_by_id]
+
+    # Portee d'engagement en distance CENTRE-A-CENTRE : borne superieure par inegalite
+    # triangulaire hexagonale (ez borde-a-bord + les deux demi-socles). Surensemble : chaque
+    # cellule retenue est ensuite validee par `unit_entries_within_engagement_zone`.
+    self_radius = max(
+        _model_footprint_radius(
+            game_state, str(squad_id), models_cache[mid],
+            int(models_cache[mid]["col"]), int(models_cache[mid]["row"]),
+        )
+        for mid in mids
+    )
+    target_radius = 0
+    for _tid, te in target_entries_by_id:
+        # `require_key` et non un defaut vide : une entree-cache sans empreinte donnerait un
+        # rayon nul, donc un surensemble de cellules trop etroit, donc des charges refusees
+        # sans que rien ne le signale — exactement le mode de panne qu'on vient de fermer.
+        for fc, fr in require_key(te, "occupied_hexes"):
+            d_to_model = min(
+                calculate_hex_distance(fc, fr, tc, tr) for tc, tr in target_positions
+            )
+            if d_to_model > target_radius:
+                target_radius = d_to_model
+    # +1 : la forme d'une empreinte depend de la parite de sa colonne, le rayon mesure a la
+    # position d'origine peut valoir un subhex de moins a la destination.
+    engage_reach = ez + self_radius + target_radius + 1
+
+    # Sortie O(1) : si meme la figurine la plus proche ne peut pas approcher a portee
+    # d'engagement avec tout son budget, aucune fig n'engagera et la validation finale
+    # echouerait. Evite d'enumerer le disque d'engagement pour une cible hors d'atteinte
+    # (chemin chaud : l'observation interroge cette fonction pour chaque cible candidate).
+    closest_gap = min(
+        calculate_hex_distance(int(models_cache[mid]["col"]), int(models_cache[mid]["row"]), tc, tr)
+        for mid in mids
+        for tc, tr in target_positions
+    )
+    if closest_gap - engage_reach > budget:
+        return None
+
+    # Cellules d'ou l'engagement est GEOMETRIQUEMENT possible (surensemble, cf. ci-dessus).
+    # Construit une fois pour l'escouade : il ne depend pas de la figurine traitee.
+    engage_zone_cells: Set[Tuple[int, int]] = set()
+    for tc, tr in target_positions:
+        engage_zone_cells.update(_hex_cells_within_radius(tc, tr, engage_reach))
+
     plan: List[Tuple[str, int, int, int]] = []
     occupied_after: Set[Tuple[int, int]] = set()  # cellules deja reservees par ce plan
 
@@ -5109,52 +5205,91 @@ def charge_build_valid_plan(
     # Sélecteur de métrique de la CHARGE, pas celui du move : cf. `move_plan_distance_mode`.
     from engine.phase_handlers.charge_handlers import _charge_distance_metric
     _charge_metric = _charge_distance_metric(game_state)
+
+    def _formation_gap(col: int, row: int) -> int:
+        """Ecart a la derniere figurine deja placee — departage les candidats a egalite.
+
+        Sans ce critere, deux destinations aussi bonnes (meme distance a la cible, meme trajet)
+        sont departagees par l'ordre de balayage, qui privilegie un coin de l'anneau : les
+        figurines partent en eventail et la coherency (03.03) rejette le plan complet.
+        """
+        if not plan:
+            return 0
+        _prev_mid, prev_col, prev_row, _prev_lvl = plan[-1]
+        return calculate_hex_distance(prev_col, prev_row, col, row)
+
     for mid in mids:
         m = models_cache[mid]
         orig_col, orig_row = int(m["col"]), int(m["row"])
+        orig_dist_to_tgt = min(
+            calculate_hex_distance(orig_col, orig_row, tc, tr) for tc, tr in target_positions
+        )
         # 11.04 EFFECT « Your unit moves as described in Moving (03) » : la borne du charge move
         # est un TRAJET legal, pas une distance a vol d'oiseau. Le niveau du trajet est celui
-        # d'arrivee du plan (SOL), miroir exact du squad move rigide.
+        # d'arrivee du plan (SOL), miroir exact du squad move rigide. Ce predicat BORNE DEJA par
+        # le budget dans ses trois geometries — il remplace donc, et ne double pas, le
+        # `calculate_hex_distance(origine, cellule) <= budget` qui filtrait les candidats.
         _reachable = model_reach_predicate(
             game_state, str(squad_id), _charge_player, m, budget,
             SQUAD_RIGID_MOVE_DESTINATION_LEVEL, metric=_charge_metric,
         )
 
-        # (a) Tentative B2B : voisins immediats de chaque modele cible
-        b2b_candidates: List[Tuple[int, int, int]] = []  # (dist_from_orig, col, row)
-        for tc, tr in target_positions:
-            for nc, nr in get_hex_neighbors(tc, tr):
-                if (nc, nr) in occupied_after:
-                    continue
-                if not _reachable(nc, nr):
-                    continue
-                d_orig = calculate_hex_distance(orig_col, orig_row, nc, nr)
-                if not _hex_legal_for_charge(nc, nr, game_state, squad_id, m, target_squad_ids):
-                    continue
-                b2b_candidates.append((d_orig, nc, nr))
+        # (a) Tentative d'ENGAGEMENT (03.04 : ER = 2", bord-a-bord — pas la cellule voisine
+        #     du centre ennemi). 11.04 impose de finir plus pres d'une cible, donc une
+        #     destination engageante mais qui eloigne n'est pas retenue.
+        # (dist_from_orig, ecart a la fig precedente, col, row)
+        engaged_candidates: List[Tuple[int, int, int, int]] = []
+        for nc, nr in engage_zone_cells:
+            if (nc, nr) in occupied_after:
+                continue
+            if not _reachable(nc, nr):
+                continue
+            d_orig = calculate_hex_distance(orig_col, orig_row, nc, nr)
+            if min(calculate_hex_distance(nc, nr, tc, tr) for tc, tr in target_positions) >= orig_dist_to_tgt:
+                continue
+            if not _hex_legal_for_charge(nc, nr, game_state, squad_id, m, target_squad_ids):
+                continue
+            synth = _synth_model_entry(game_state, str(squad_id), m, nc, nr)
+            if not any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
+                continue
+            engaged_candidates.append((d_orig, _formation_gap(nc, nr), nc, nr))
         picked: Optional[Tuple[int, int]] = None
-        if b2b_candidates:
-            b2b_candidates.sort()  # plus proche d origine d abord
-            _, pc, pr = b2b_candidates[0]
+        if engaged_candidates:
+            engaged_candidates.sort()  # plus proche d origine d abord, puis formation serree
+            _, _gap, pc, pr = engaged_candidates[0]
             picked = (pc, pr)
         else:
-            # (b) Pas de B2B atteignable : avancer vers la cible la plus proche
+            # (b) Engagement hors d'atteinte : avancer vers la cible la plus proche
             nearest_target = min(
                 target_positions,
                 key=lambda tp: calculate_hex_distance(orig_col, orig_row, tp[0], tp[1]),
             )
             tc, tr = nearest_target
-            orig_dist_to_tgt = calculate_hex_distance(orig_col, orig_row, tc, tr)
-            best_cand: Optional[Tuple[int, int, int]] = None  # (dist_to_target, col, row)
-            for d in range(1, budget + 1):
+            # (dist_to_target, ecart a la fig precedente, col, row)
+            best_cand: Optional[Tuple[int, int, int, int]] = None
+            # Anneaux DECROISSANTS depuis le budget : la figurine qui ne peut pas engager doit
+            # suivre le reste de l'escouade, pas avancer d'un seul subhex. Avec l'ordre croissant
+            # (etat anterieur au 2026-08-01), elle s'arretait au premier anneau utile pendant que
+            # ses camarades bondissaient au contact — la coherency finale (03.03) rejetait alors
+            # le plan, et AUCUNE escouade de plus d'une figurine ne pouvait charger.
+            for d in range(budget, 0, -1):
+                # PERIMETRE du carre, pas son interieur : les colonnes de bord balayent toutes
+                # les lignes, les autres seulement les deux extremes. Balayer le carre plein et
+                # jeter l'interieur (`max(abs(...)) != d`) coute (2d+1)^2 iterations pour 8d
+                # cellules utiles — invisible tant qu'on partait de d=1 et qu'on sortait au
+                # premier anneau, ruineux depuis qu'on part du budget (a x5, un jet de 12 fait
+                # d=60, soit 14 641 iterations par anneau au lieu de 480).
                 for d_col in range(-d, d + 1):
-                    for d_row in range(-d, d + 1):
-                        if max(abs(d_col), abs(d_row)) != d:
-                            continue
+                    row_values = range(-d, d + 1) if abs(d_col) == d else (-d, d)
+                    for d_row in row_values:
                         nc = orig_col + d_col
                         nr = orig_row + d_row
                         if (nc, nr) in occupied_after:
                             continue
+                        # L'anneau parcouru est CARRE en coordonnees offset ; la borne de charge,
+                        # elle, est un TRAJET legal (11.04 MAXIMUM DISTANCE = le jet). Sans ce
+                        # controle, un pas diagonal sortait du budget — et une charge traversait
+                        # un mur.
                         if not _reachable(nc, nr):
                             continue
                         if not _hex_legal_for_charge(nc, nr, game_state, squad_id, m, target_squad_ids):
@@ -5162,12 +5297,13 @@ def charge_build_valid_plan(
                         cand_d = calculate_hex_distance(nc, nr, tc, tr)
                         if cand_d >= orig_dist_to_tgt:
                             continue  # doit etre strictement plus proche
-                        if best_cand is None or cand_d < best_cand[0]:
-                            best_cand = (cand_d, nc, nr)
+                        cand = (cand_d, _formation_gap(nc, nr), nc, nr)
+                        if best_cand is None or cand < best_cand:
+                            best_cand = cand
                 if best_cand is not None:
                     break  # premier anneau utile retenu
             if best_cand is not None:
-                _, pc, pr = best_cand
+                _cd, _gap, pc, pr = best_cand
                 picked = (pc, pr)
         if picked is None:
             return None  # cette fig ne peut bouger legalement → charge echouee
@@ -5176,17 +5312,21 @@ def charge_build_valid_plan(
         plan.append((mid, picked[0], picked[1], SQUAD_RIGID_MOVE_DESTINATION_LEVEL))
         occupied_after.add(picked)
 
-    # Validation finale : chaque fig finit dans l ER (bord-a-bord) d au moins un
-    # modele cible (regle officielle : charge legale exige ER apres deplacement).
-    from engine.spatial_relations import unit_entries_within_engagement_zone
-    ez = get_engagement_zone(game_state)
-    target_entries = [
-        te for te in (units_cache.get(str(t)) for t in target_squad_ids) if te is not None
-    ]
+    # Validation finale (11.04 AFTER MOVING) : l'UNITE doit etre engagee avec CHACUNE des
+    # cibles declarees. 03.04 : l'unite est engagee des qu'UNE de ses figurines est dans l'ER
+    # d'une figurine ennemie — exiger que TOUTES le soient (etat anterieur au 2026-08-01)
+    # interdisait toute charge d'escouade nombreuse, aucune formation ne mettant douze socles
+    # au contact du meme ennemi.
+    engaged_targets: Set[str] = set()
     for mid, nc, nr, _lvl in plan:
         synth = _synth_model_entry(game_state, str(squad_id), models_cache[mid], nc, nr)
-        if not any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
-            return None
+        for tid, te in target_entries_by_id:
+            if tid in engaged_targets:
+                continue
+            if unit_entries_within_engagement_zone(synth, te, ez):
+                engaged_targets.add(tid)
+    if len(engaged_targets) != len(target_entries_by_id):
+        return None
 
     # Coherency finale
     plan_positions = {mid: (nc, nr) for mid, nc, nr, _lvl in plan}

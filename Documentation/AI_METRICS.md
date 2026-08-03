@@ -748,6 +748,15 @@ distinguait pas — un agent qui ne DÉCLARE pas de charge (`m_` bas) ou un agen
 de trop loin (`m_` haut, `n_` bas). La première se corrige côté récompense (`charge_success`
 vaut-il l'investissement de 1–2 tours de déplacement ?), la seconde côté politique.
 
+**Ce que le couple a effectivement révélé.** Jusqu'au 2026-08-01, `charge_build_valid_plan`
+cherchait ses destinations **au contact du centre ennemi** (0,2" à l'échelle ×5) au lieu de
+l'engagement range (2", règle 03.04). Mesuré sur le modèle de RUN_2 : **0 charge réussie sur 23
+déclarées**, alors que l'agent choisissait la charge 70 % des fois où le masque la proposait —
+c'est-à-dire un `n_` à zéro avec un `m_` élevé, la signature que seul le couple rend lisible. La
+seule courbe des réussites, elle, était plate et se confondait avec « l'agent ne charge pas ».
+Après correction et **sans ré-entraînement**, le même modèle passe à 10/15 (66,7 %) et double
+ses kills en mêlée.
+
 `n_` et `p_` sont un **rapport de moyennes** calculé fenêtre par fenêtre, comme
 `a_value_trade_ratio` : leur dénominateur est un résultat d'épisode, pas une constante de
 scénario. Un épisode sans aucune charge déclarée n'a donc pas de taux — il n'est ni écarté
