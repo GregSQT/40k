@@ -649,14 +649,34 @@ la clé doit décrire ce que le modèle LIT, sinon le premier terrain qui bouger
 obscurante sans toucher un mur sera faux sans bruit — et de nouveaux terrains arrivent.
 ⚠️ **Aucun `DEPLOYMENT_LOS_MODEL_VERSION` ne pouvait rattraper ça** : le modèle n'avait pas
 changé, c'est la CLÉ qui ne décrivait pas ce que le modèle lit. Correctif :
-`ActionDecoder.deployment_los_terrain_signature` — source unique, murs **+** areas obscurantes
-(lues via `_get_obscuring_area_sets`, ce que la LoS lit vraiment, et non le JSON brut dont les
-`floors` ne concernent pas le tracé au sol) — alimente les deux clés. Coût mesuré : **8 ms par
-épisode** (2 appels), donc pas de mémoïsation. Verrouillé par
+`shooting_handlers.ground_los_blocking_signature` — **dérivée des grilles de blocage
+elles-mêmes** (digest de leurs octets + leur forme), et posée à côté d'elles. C'est ce qui rend
+la clé complète PAR CONSTRUCTION : `batch_ground_hex_can_see` ne lit rien d'autre que ces deux
+grilles, donc un 3ᵉ bloqueur qui y entrerait un jour entre dans la clé sans que personne ait à y
+penser. 📌 La 1ʳᵉ version, elle, vivait dans `ActionDecoder` et **relistait** les bloqueurs de
+son côté (murs relus du JSON brut avec un parseur maison, areas via `_get_obscuring_area_sets`) :
+deux énumérations de « ce qui bloque » à deux altitudes, dont une seule savait ce que la règle
+applique — la forme de défaut même que §0.64 a payée. Corrigé par `/simplify` (agents altitude
+et réutilisation, convergents). Coût mesuré : **5,8 ms par épisode** (2 appels), donc pas de
+mémoïsation — elle coûterait une 3ᵉ clé de cache et deux sites de purge pour 0,45 % de la phase.
+Verrouillé par
 `test_deux_terrains_aux_memes_murs_ne_partagent_pas_le_cache_potentiel`, qui CONSTRUIT le cas
 (mêmes murs, une area obscurante déplacée) ; **contre-épreuve** : obscuring retiré de la
 signature → **ROUGE**. Les fichiers `.cache/` produits avant ce correctif sont orphelins (leur
 digest change) ; les régénérer coûte ~0,11 s.
+
+**Passe `/simplify` (4 agents), au-delà du point ci-dessus.** Retenu : `offset_to_cube_vec`
+existait en **3 exemplaires** dont un seul sous test — il vit désormais dans `hex_utils`, avec la
+géométrie, et `ActionDecoder._offset_to_cube_vec` délègue ; la clé disque prend la clé mémoire
+telle quelle (deux listes de paramètres à synchroniser, et `terrain_signature` est justement ce
+qu'une rédaction avait oublié d'un côté) ; `mask_y` était un intermédiaire mort ; la double
+indexation de la boucle de blocage devient un seul `sel` ; les expositions s'accumulent dans un
+tableau numpy au lieu d'une boucle Python sur ~9 600 hexes par ennemi (0,60 → 0,004 ms), dans les
+DEUX chemins du cache. **Écartés, mesure à l'appui** : fusionner les deux grilles (−6 % du tracé,
+mais 953 des 1 098 murs sont DANS une area obscurante et l'exclusion 13.10 s'en trouverait
+faussée) ; rétrécir `idx` rang par rang (−3 % de 0,09 s) ; vectoriser plus bas, dans
+`_los_line_segment_clear` (réécriture du chemin chaud du tir ET du miroir WASM, sur le code que
+§0.64 vient de désigner comme la référence unique).
 
 📌 **Ce qui coûte maintenant, et qui n'est PAS le sujet de cette entrée** : `_get_valid_deployment_hexes`
 devient le premier poste de la phase (0,60 s, dont 0,39 s de filtre de clairance par socle). Ce
