@@ -181,6 +181,49 @@ en bout :
 
 ---
 
+## 3bis. Colonne droite : gabarit partagé PvP / PvP test / replay
+
+`SharedLayout` rend la colonne droite en **deux emplacements**, et c'est ce découpage — non une
+convention de rédaction du JSX — qui garantit la barre de défilement du Game Log :
+
+| Emplacement | Contenu | Comportement |
+|---|---|---|
+| `rightColumnContent` | tracker, contrôles, barres d'action, **bloc illustration + Game Log** | hauteur fixe, jamais comprimé (`.game-log-with-illustration { flex-shrink: 0 }`) |
+| `rightColumnScrollableContent` | les deux `UnitStatusTable` | SEULE zone qui absorbe le manque de place — `SharedLayout` l'enveloppe lui-même dans `.unit-status-tables__scroll` |
+
+**Pourquoi.** C'est l'illustration (hauteur fixe, 280 px) qui donne sa hauteur au Game Log. Sans
+elle, le log grandissait avec son contenu et débordait de `.unit-status-tables` : les lignes
+anciennes sortaient de la fenêtre **sans aucune barre pour y revenir**. Le replay n'avait ni le
+panneau d'illustration, ni la zone défilante — d'où le défaut, absent du PvP. Sur fenêtre très
+courte, `.unit-status-tables` défile elle-même (`overflow-y: auto`, `overflow-x: hidden`) plutôt
+que de rogner son bas en silence.
+
+**Unité illustrée.** En replay, c'est **l'unité active de l'étape courante**, dérivée du même
+`replayActiveUnitId` que le cercle vert (§3) : les deux ne peuvent pas désigner des unités
+différentes. En PvP, elle suit le survol / l'épinglage / la figurine inspectée. Le composant
+partagé `GameLogWithIllustration` ne décide de rien : il reçoit l'unité et ne gère que la
+présentation (préchargement, fondu enchaîné, replis).
+
+**Replis du visuel**, dans l'ordre : `/icons/<type>.png` → champ `ICON` de la datasheet (26 unités
+n'ont leur visuel que sous cette extension) → **initiale du `type` sur fond blanc**, avec un
+`console.error` nommant l'unité et les chemins tentés. Sur les 161 classes de roster : 57 ont leur
+`.png`, 26 sont récupérées par `ICON`, 78 n'ont aucun visuel et affichent l'initiale. L'image
+générique *Endless duty* ne sert plus qu'au cas « aucune unité sélectionnée ».
+
+**Échelle de l'illustration** = `ILLUSTRATION_RATIO` de la datasheet, et rien d'autre. `BASE_SIZE`
+n'y entre PAS : c'est l'empreinte de la figurine sur le plateau, déjà convertie en cellules
+(`_scale_socle` moteur, `scaleBaseSize` replay), donc dépendante de la résolution — la même unité
+n'aurait pas la même illustration selon le plateau chargé.
+
+**Confinement.** Le panneau est un composant enfant d'une `ErrorBoundary` **clée sur l'unité** : le
+JSX en ligne aurait été évalué dans le rendu du parent, donc hors de portée du boundary. Une unité
+dont le registre ne donne pas l'`ILLUSTRATION_RATIO` dégrade le seul panneau, jamais le Game Log,
+et l'échec ne survit pas au changement d'unité.
+
+**Reste :** confirmation visuelle browser (fondu, replis, défilement sur fenêtre courte).
+
+---
+
 ## 4. Registre d'état des chantiers replay
 
 | # | Chantier | État | Prochaine action |
@@ -374,4 +417,5 @@ Validé : pytest squad_step_logging vert, vitest 5/5, tsc propre. Pas de régén
 | Pool fight V11 | `engine/phase_handlers/fight_handlers.py` (`fight_v11_current_pool`) |
 | Parseur | `frontend/src/utils/replayParser.ts` (+ `.test.ts`) |
 | Vue replay | `frontend/src/components/BoardReplay.tsx` |
+| Gabarit colonne droite (partagé PvP/replay) | `frontend/src/components/SharedLayout.tsx`, `GameLogWithIllustration.tsx` (§3bis) |
 | Rendu partagé | `frontend/src/components/BoardPvp.tsx`, `UnitRenderer.tsx` |

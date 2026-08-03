@@ -30,6 +30,7 @@ import {
 import BoardPvp, { type MeasureModeState } from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
+import { GameLogWithIllustration, useUnitIllustrationPreload } from "./GameLogWithIllustration";
 import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
 import TooltipWrapper from "./TooltipWrapper";
@@ -511,6 +512,8 @@ export const BoardReplay: React.FC = () => {
   };
 
   const currentState = getCurrentGameState();
+  // Préchargement des illustrations : monté au niveau du board (cf. useUnitIllustrationPreload).
+  useUnitIllustrationPreload(currentState?.units ?? []);
   const currentEpisode =
     selectedEpisode !== null && replayData ? replayData.episodes[selectedEpisode - 1] : null;
 
@@ -1236,6 +1239,42 @@ export const BoardReplay: React.FC = () => {
     );
   };
 
+  // Cercle vert = UNIQUEMENT l'unité qui joue l'action courante (l'unité active), dans TOUTES les
+  // phases. On restreint donc l'éligibilité à cette seule unité (id selon le type d'action) au lieu
+  // de marquer toutes les unités activables. Aucune action courante → aucune unité éligible.
+  const replayActiveUnitId: number | null = (() => {
+    if (!currentAction) return null;
+    switch (currentAction.type) {
+      case "shoot":
+        return currentAction.shooter_id ?? null;
+      case "fight":
+        return currentAction.attacker_id ?? null;
+      default:
+        // move, reactive_move, move_wait, advance, charge(_wait/_fail), deploy, pile_in,
+        // consolidation, rule_choice… : l'unité active est portée par unit_id.
+        return currentAction.unit_id ?? null;
+    }
+  })();
+
+  // Unité illustrée en replay : l'unité ACTIVE de l'étape courante — la même que celle du cercle
+  // vert du plateau (`replayActiveUnitId`), jamais le fantôme dont l'id négatif n'existe pas dans
+  // l'état. Miroir du choix PvP, qui suit le survol/l'épinglage.
+  // Contrairement au PvP, les unités viennent d'un JOURNAL : elles ne portent de quoi dimensionner
+  // l'illustration qu'une fois enrichies par le registre. Deux cas d'échec, tous deux déjà signalés
+  // à leur source — registre pas encore chargé (`unitRegistryReady`), ou type absent du registre
+  // (`console.error` du catch d'`enrichUnitsWithStats`). Une unité non enrichie n'est donc pas
+  // illustrable : on ne la passe pas plutôt que de laisser lever au rendu.
+  const replayIllustrationUnit: Unit | null =
+    unitRegistryReady && replayActiveUnitId !== null
+      ? (currentState?.units?.find(
+          (unit) =>
+            unit.id === replayActiveUnitId &&
+            unit.HP_CUR > 0 &&
+            Number.isFinite(unit.ILLUSTRATION_RATIO) &&
+            (unit.ILLUSTRATION_RATIO ?? -1) >= 0
+        ) ?? null)
+      : null;
+
   // Right column content (like BoardWithAPI but with replay controls)
   const rightColumnContent = (
     <>
@@ -1437,44 +1476,51 @@ export const BoardReplay: React.FC = () => {
       {/* PLAYBACK CONTROLS - inserted here between TurnPhaseTracker and UnitStatusTable */}
       <PlaybackControls />
 
-      {/* Unit Status Tables */}
-      {currentState && (
-        <>
-          <ErrorBoundary fallback={<div>Failed to load player 0 status</div>}>
-            <UnitStatusTable
-              units={currentState.units || []}
-              player={1}
-              playerTypes={currentState.player_types}
-              selectedUnitId={null}
-              clickedUnitId={null}
-              onSelectUnit={() => {}}
-              gameMode="training"
-              isReplay={true}
-              victoryPoints={replayVictoryPoints ? replayVictoryPoints[1] : undefined}
-              onCollapseChange={() => {}}
-            />
-          </ErrorBoundary>
-
-          <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
-            <UnitStatusTable
-              units={currentState.units || []}
-              player={2}
-              playerTypes={currentState.player_types}
-              selectedUnitId={null}
-              clickedUnitId={null}
-              onSelectUnit={() => {}}
-              gameMode="training"
-              isReplay={true}
-              victoryPoints={replayVictoryPoints ? replayVictoryPoints[2] : undefined}
-              onCollapseChange={() => {}}
-            />
-          </ErrorBoundary>
-        </>
-      )}
-
-      {/* Game Log */}
+      {/* Game Log — même gabarit qu'en PvP : l'illustration donne sa hauteur au log, qui devient
+          défilable au lieu de déborder de la colonne. */}
       <ErrorBoundary fallback={<div>Failed to load game log</div>}>
-        <GameLog {...gameLog} availableHeight={200} debugMode={showHexCoordinates} />
+        <GameLogWithIllustration unit={replayIllustrationUnit} badgesFor={null}>
+          <GameLog {...gameLog} debugMode={showHexCoordinates} />
+        </GameLogWithIllustration>
+      </ErrorBoundary>
+    </>
+  );
+
+  // Zone défilante de la colonne droite : SEUL bloc qui absorbe le manque de place (SharedLayout
+  // l'enveloppe dans `.unit-status-tables__scroll`).
+  // `undefined` tant qu'aucun épisode n'est chargé : SharedLayout n'émet alors pas la zone
+  // défilante, qui laisserait un vide de sa hauteur minimale sous le Game Log.
+  const rightColumnScrollableContent = !currentState ? undefined : (
+    <>
+      {/* Unit Status Tables */}
+      <ErrorBoundary fallback={<div>Failed to load player 0 status</div>}>
+        <UnitStatusTable
+          units={currentState.units || []}
+          player={1}
+          playerTypes={currentState.player_types}
+          selectedUnitId={null}
+          clickedUnitId={null}
+          onSelectUnit={() => {}}
+          gameMode="training"
+          isReplay={true}
+          victoryPoints={replayVictoryPoints ? replayVictoryPoints[1] : undefined}
+          onCollapseChange={() => {}}
+        />
+      </ErrorBoundary>
+
+      <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
+        <UnitStatusTable
+          units={currentState.units || []}
+          player={2}
+          playerTypes={currentState.player_types}
+          selectedUnitId={null}
+          clickedUnitId={null}
+          onSelectUnit={() => {}}
+          gameMode="training"
+          isReplay={true}
+          victoryPoints={replayVictoryPoints ? replayVictoryPoints[2] : undefined}
+          onCollapseChange={() => {}}
+        />
       </ErrorBoundary>
     </>
   );
@@ -1589,23 +1635,6 @@ export const BoardReplay: React.FC = () => {
       throw new Error(`Invalid replay current_player value: ${String(candidate)}`);
     }
     return candidate;
-  })();
-
-  // Cercle vert = UNIQUEMENT l'unité qui joue l'action courante (l'unité active), dans TOUTES les
-  // phases. On restreint donc l'éligibilité à cette seule unité (id selon le type d'action) au lieu
-  // de marquer toutes les unités activables. Aucune action courante → aucune unité éligible.
-  const replayActiveUnitId: number | null = (() => {
-    if (!currentAction) return null;
-    switch (currentAction.type) {
-      case "shoot":
-        return currentAction.shooter_id ?? null;
-      case "fight":
-        return currentAction.attacker_id ?? null;
-      default:
-        // move, reactive_move, move_wait, advance, charge(_wait/_fail), deploy, pile_in,
-        // consolidation, rule_choice… : l'unité active est portée par unit_id.
-        return currentAction.unit_id ?? null;
-    }
   })();
 
   // Figs ayant EFFECTIVEMENT tiré/frappé (segment [SHOOTER_MODELS:]). Restreint le cercle vert (et,
@@ -2081,6 +2110,7 @@ export const BoardReplay: React.FC = () => {
     <>
       <SharedLayout
         rightColumnContent={rightColumnContent}
+        rightColumnScrollableContent={rightColumnScrollableContent}
         onOpenSettings={handleOpenSettings}
         onToggleMeasureMode={handleToggleMeasureMode}
         measureModeActive={measureModeActive}
