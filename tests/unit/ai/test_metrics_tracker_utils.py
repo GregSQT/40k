@@ -16,6 +16,7 @@ from ai.metrics_tracker import (
 )
 from ai.truncation_log import TruncationLog
 from config_loader import get_config_loader
+from engine.action_decoder import ActionDecoder
 from engine.macro_intents import ACTION_FAMILIES
 
 # Agent de reference de ces tests : il porte le training config lu ci-dessous ET la config de
@@ -455,6 +456,8 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
             # Invariant : le moteur initialise TOUJOURS cette ventilation dans
             # `episode_tactical_data` (V11 §0.56), et `log_tactical_metrics` la lit en strict.
             "action_family_counts": {name: 0 for name in ACTION_FAMILIES},
+            # Meme invariant pour les issues du cache de scoring du deploiement (§0.46 axe A).
+            "deployment_cache_counts": ActionDecoder.empty_deployment_cache_counts(),
             "forced_unit_episode_has_controlled": 1,
             "forced_unit_instances_controlled": 2,
             "forced_unit_counts_controlled": {"My Unit": 2},
@@ -571,6 +574,8 @@ def test_log_tactical_metrics_forcing_validation_errors() -> None:
         # Invariant : le moteur initialise TOUJOURS cette ventilation dans
         # `episode_tactical_data` (V11 §0.56), et `log_tactical_metrics` la lit en strict.
         "action_family_counts": {name: 0 for name in ACTION_FAMILIES},
+        # Meme invariant pour les issues du cache de scoring du deploiement (§0.46 axe A).
+        "deployment_cache_counts": ActionDecoder.empty_deployment_cache_counts(),
         "victory_points_diff_controlled_minus_opponent": 0.0,
         "controlled_objective_samples": [1.0],
         "opponent_objective_samples": [1.0],
