@@ -976,6 +976,12 @@ def parse_step_log(filepath: str) -> Dict:
             1: {'total': 0, 'distance_over_roll': 0, 'advanced': 0, 'fled': 0},
             2: {'total': 0, 'distance_over_roll': 0, 'advanced': 0, 'fled': 0}
         },
+        # Chemin de charge introuvable dans le budget (murs/figurines) — jumeau de
+        # `move_path_blocked`. Absent tant que la charge se mesurait à vol d'oiseau.
+        'charge_path_blocked': {1: 0, 2: 0},
+        # Pile-in (12.03) et consolidation (12.08) : MAXIMUM DISTANCE 3", mêmes obstacles que
+        # le move (03). Ces deux déplacements n'étaient contrôlés par rien.
+        'fight_move_invalid': {'over_budget': {1: 0, 2: 0}, 'path_blocked': {1: 0, 2: 0}},
         'special_rule_usage': defaultdict(lambda: {1: 0, 2: 0}),  # (rule_id, unit_type) -> {1: count, 2: count}
         'rule_choice_usage': defaultdict(
             lambda: {
@@ -1059,6 +1065,8 @@ def parse_step_log(filepath: str) -> Dict:
                 2: None
             },
             'charge_invalid': {1: None, 2: None},
+            'charge_path_blocked': {1: None, 2: None},
+            'fight_move_invalid': {1: None, 2: None},
             'reactive_move_abnormal': {1: None, 2: None},
             'reactive_move_to_adjacent_enemy': {1: None, 2: None},
             'reactive_move_into_wall': {1: None, 2: None},
@@ -2458,6 +2466,13 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     agent_charge_over = stats['charge_invalid'][1]['distance_over_roll']
     bot_charge_over = stats['charge_invalid'][2]['distance_over_roll']
     _table_row("Distance > roll:", _fmt_count(agent_charge_over), _fmt_count(bot_charge_over))
+    agent_charge_blocked = stats['charge_path_blocked'][1]
+    bot_charge_blocked = stats['charge_path_blocked'][2]
+    _table_row("Charge path blocked (BFS):", _fmt_count(agent_charge_blocked), _fmt_count(bot_charge_blocked))
+    for _pl in (1, 2):
+        if stats['charge_path_blocked'][_pl] > 0 and stats['first_error_lines']['charge_path_blocked'][_pl]:
+            _fe = stats['first_error_lines']['charge_path_blocked'][_pl]
+            log_print(f"  First P{_pl} occurrence (Episode {_fe['episode']}): {_fe['line']}")
     if stats['first_error_lines']['charge_invalid'][1]:
         first_err = stats['first_error_lines']['charge_invalid'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -2903,13 +2918,16 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         stats['charge_from_adjacent'][1] + stats['charge_from_adjacent'][2] +
         stats['charge_invalid'][1]['distance_over_roll'] + stats['charge_invalid'][2]['distance_over_roll'] +
         stats['charge_invalid'][1]['advanced'] + stats['charge_invalid'][2]['advanced'] +
-        stats['charge_invalid'][1]['fled'] + stats['charge_invalid'][2]['fled']
+        stats['charge_invalid'][1]['fled'] + stats['charge_invalid'][2]['fled'] +
+        stats['charge_path_blocked'][1] + stats['charge_path_blocked'][2]
     )
     fight_alternation_total = stats['fight_alternation_violations'][1] + stats['fight_alternation_violations'][2]
     fight_errors = (
         stats['fight_from_non_adjacent'][1] + stats['fight_from_non_adjacent'][2] +
         stats['fight_friendly'][1] + stats['fight_friendly'][2] +
         stats['fight_over_cc_nb'][1] + stats['fight_over_cc_nb'][2] +
+        stats['fight_move_invalid']['over_budget'][1] + stats['fight_move_invalid']['over_budget'][2] +
+        stats['fight_move_invalid']['path_blocked'][1] + stats['fight_move_invalid']['path_blocked'][2] +
         fight_alternation_total
     )
     dead_unit_actions = stats.setdefault('dead_unit_actions', [])
@@ -3157,12 +3175,15 @@ if __name__ == "__main__":
             stats['charge_from_adjacent'][1] + stats['charge_from_adjacent'][2] +
             stats['charge_invalid'][1]['distance_over_roll'] + stats['charge_invalid'][2]['distance_over_roll'] +
             stats['charge_invalid'][1]['advanced'] + stats['charge_invalid'][2]['advanced'] +
-            stats['charge_invalid'][1]['fled'] + stats['charge_invalid'][2]['fled']
+            stats['charge_invalid'][1]['fled'] + stats['charge_invalid'][2]['fled'] +
+            stats['charge_path_blocked'][1] + stats['charge_path_blocked'][2]
         )
         fight_errors = (
             stats['fight_from_non_adjacent'][1] + stats['fight_from_non_adjacent'][2] +
             stats['fight_friendly'][1] + stats['fight_friendly'][2] +
             stats['fight_over_cc_nb'][1] + stats['fight_over_cc_nb'][2] +
+            stats['fight_move_invalid']['over_budget'][1] + stats['fight_move_invalid']['over_budget'][2] +
+            stats['fight_move_invalid']['path_blocked'][1] + stats['fight_move_invalid']['path_blocked'][2] +
             stats['fight_alternation_violations'][1] + stats['fight_alternation_violations'][2]
         )
         action_phase_accuracy = require_key(stats, "action_phase_accuracy")

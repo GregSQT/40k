@@ -58,6 +58,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
         _build_move_bfs_blockers,
         _build_enemy_adjacent_hexes,
         _bfs_shortest_path_length,
+        _get_inches_to_subhex_for_analyzer,
         has_line_of_sight,
         parse_timestamp_to_seconds,
     )
@@ -65,7 +66,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
     stats = state.stats
     unit_id: Optional[str] = None  # may be set from unit_start or deploy lines
 
-    from ai.analyzer_perfig import parse_models_segment
+    from ai.analyzer_perfig import parse_models_segment, surviving_start_models
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
@@ -885,7 +886,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         action_type = 'advance'
                         if handle_advance(state, config, line, action_desc, action_unit_id, player, turn, phase):
                             continue
-                elif re.search(r"CHARGED(?:\s+(?:\([A-Za-z0-9_ ]+\)|\[[A-Za-z0-9_ ]+\]))?\s+Unit", action_desc) or "FAILED CHARGE" in action_desc:
+                elif re.search(r"CHARGED(?:\s+(?:\([A-Za-z0-9_ ]+\)|\[[A-Za-z0-9_ ]+\]))*\s+Unit", action_desc) or "FAILED CHARGE" in action_desc:
                         action_type = 'charge'
                         handle_charge(state, config, line, action_desc, action_unit_id, player, turn, phase)
                 elif (
@@ -908,15 +909,62 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         action_type = 'move'
                         _consol_match = re.search(
                             r'Unit (\d+)\(\d+,\s*\d+\) (?:CONSOLIDATED|PILED IN) from '
-                            r'\(\d+,\s*\d+\) to \((\d+),\s*(\d+)\)',
+                            r'\((\d+),\s*(\d+)\) to \((\d+),\s*(\d+)\)',
                             action_desc,
                         )
                         if _consol_match:
                             _consol_uid = _consol_match.group(1)
+                            _consol_from = (int(_consol_match.group(2)), int(_consol_match.group(3)))
+                            _consol_to = (int(_consol_match.group(4)), int(_consol_match.group(5)))
+                            # 12.03 pile-in / 12.08 consolidation : MAXIMUM DISTANCE 3", et
+                            # « moves as described in Moving (03) » — donc mêmes obstacles que
+                            # le move. Ces deux déplacements n'étaient contrôlés par RIEN :
+                            # la branche se contentait de recaler l'ancre. Budget pris à la
+                            # même source que le moteur (3 × inches_to_subhex).
                             if _consol_uid in state.unit_hp and require_key(state.unit_hp, _consol_uid) > 0:
+                                _fight_budget = 3 * _get_inches_to_subhex_for_analyzer()
+                                _occ, _ez = _build_move_bfs_blockers(
+                                    state.positions_by_model, state.unit_positions, state.unit_base,
+                                    state.unit_player, state.unit_hp, _consol_uid,
+                                )
+                                _prev = surviving_start_models(
+                                    state.positions_by_model.get(_consol_uid),  # get allowed
+                                    state.current_line_models.get(_consol_uid),  # get allowed
+                                )
+                                _new = state.current_line_models.get(_consol_uid)  # get allowed
+                                _over = False
+                                _blocked = False
+                                if _prev and _new:
+                                    for _mid, (_oc, _orow) in _prev.items():
+                                        if _mid not in _new:
+                                            continue
+                                        _dc, _dr = _new[_mid]
+                                        if (_oc, _orow) == (_dc, _dr):
+                                            continue
+                                        _steps = _bfs_shortest_path_length(
+                                            _oc, _orow, _dc, _dr, _fight_budget,
+                                            state.wall_hexes, _occ, _ez,
+                                        )
+                                        if _steps is None:
+                                            _blocked = True
+                                        elif _steps > _fight_budget:
+                                            _over = True
+                                else:
+                                    if calculate_hex_distance(*_consol_from, *_consol_to) > _fight_budget:
+                                        _over = True
+                                _fm = require_key(stats, 'fight_move_invalid')
+                                if _over:
+                                    _fm['over_budget'][player] += 1
+                                    if stats['first_error_lines']['fight_move_invalid'][player] is None:
+                                        stats['first_error_lines']['fight_move_invalid'][player] = {
+                                            'episode': state.current_episode_num, 'line': line.strip()}
+                                if _blocked:
+                                    _fm['path_blocked'][player] += 1
+                                    if stats['first_error_lines']['fight_move_invalid'][player] is None:
+                                        stats['first_error_lines']['fight_move_invalid'][player] = {
+                                            'episode': state.current_episode_num, 'line': line.strip()}
                                 _position_cache_set(
-                                    state.unit_positions, _consol_uid,
-                                    int(_consol_match.group(2)), int(_consol_match.group(3)),
+                                    state.unit_positions, _consol_uid, _consol_to[0], _consol_to[1],
                                 )
                 elif "FOUGHT Unit" in action_desc:
                         action_type = 'fight'

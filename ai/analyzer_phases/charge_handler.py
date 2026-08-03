@@ -32,12 +32,19 @@ def handle_charge(
         get_adjacent_enemies,
         _debug_log,
         _get_unit_hp_value,
+        _get_inches_to_subhex_for_analyzer,
+        _build_move_bfs_blockers,
+        _bfs_shortest_path_length,
     )
+    from ai.analyzer_perfig import surviving_start_models
 
     stats = state.stats
 
+    # `*` et non `?` : la ligne peut porter DEUX marqueurs — le nom de la règle qui a permis la
+    # charge, ET `[FLY]` (21.03). Avec `?`, la charge d'une unité volante bénéficiant d'une
+    # relance n'était plus reconnue du tout, donc plus contrôlée. Même piège que sur le move.
     charge_match = re.search(
-        r'Unit (\d+)\s*\((\d+),\s*(\d+)\)\s+CHARGED(?:\s+(?:\([A-Za-z0-9_ ]+\)|\[[A-Za-z0-9_ ]+\]))?\s+Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?\s+from \((\d+),\s*(\d+)\)\s+to \((\d+),\s*(\d+)\)',
+        r'Unit (\d+)\s*\((\d+),\s*(\d+)\)\s+CHARGED(?:\s+(?:\([A-Za-z0-9_ ]+\)|\[[A-Za-z0-9_ ]+\]))*\s+Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?\s+from \((\d+),\s*(\d+)\)\s+to \((\d+),\s*(\d+)\)',
         action_desc
     )
     if charge_match:
@@ -69,14 +76,68 @@ def handle_charge(
                 stats['charge_invalid'][player]['fled'] += 1
                 if stats['first_error_lines']['charge_invalid'][player] is None:
                     stats['first_error_lines']['charge_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
-        charge_roll_match = re.search(r'\[Roll:(\d+)\]', action_desc)
+        charge_roll_match = re.search(r'\[Roll:\s*(\d+)\]', action_desc)
         if charge_roll_match:
-            charge_roll = int(charge_roll_match.group(1))
-            charge_distance = calculate_hex_distance(start_col, start_row, dest_col, dest_row)
-            if charge_distance > charge_roll:
+            # BUDGET (11.04 / 21.03) — MIROIR de l'advance, qui faisait déjà les trois choses
+            # que ce contrôle ne faisait pas :
+            #  - le jet loggué est en POUCES, la distance en subhex : sans conversion, à x5 un
+            #    jet de 7 devenait un plafond de 7 subhex au lieu de 35, et TOUTE charge
+            #    réussie remontait en faute ;
+            #  - le vol déclaré retranche 2" (`_charge_budget_subhex` côté moteur) ;
+            #  - la distance se mesure PAR FIGURINE, pas d'ancre à ancre : en V11 l'ancre
+            #    d'escouade peut bondir plus loin qu'aucun socle (reformation) — faux positif —
+            #    et un socle peut aller plus loin que l'ancre — vraie violation manquée.
+            _scale = _get_inches_to_subhex_for_analyzer()
+            charge_is_fly = re.search(r'\[FLY\]', action_desc, re.IGNORECASE) is not None
+            charge_budget = int(charge_roll_match.group(1)) * _scale
+            if charge_is_fly:
+                charge_budget = max(0, charge_budget - 2 * _scale)
+
+            occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
+                state.positions_by_model, state.unit_positions, state.unit_base,
+                state.unit_player, state.unit_hp, charge_unit_id,
+            )
+            prev_models = surviving_start_models(
+                state.positions_by_model.get(charge_unit_id),  # get allowed
+                state.current_line_models.get(charge_unit_id),  # get allowed
+            )
+            new_models = state.current_line_models.get(charge_unit_id)  # get allowed
+            charge_over = False
+            charge_blocked = False
+            if prev_models and new_models:
+                for mid, (o_col, o_row) in prev_models.items():
+                    if mid not in new_models:
+                        continue
+                    d_col, d_row = new_models[mid]
+                    if (o_col, o_row) == (d_col, d_row):
+                        continue
+                    if charge_is_fly:
+                        # 21.03 : la traversée est la contrepartie des 2" retranchés — pas de
+                        # pathfinding, seule la distance à vol d'oiseau borne le mouvement.
+                        if calculate_hex_distance(o_col, o_row, d_col, d_row) > charge_budget:
+                            charge_over = True
+                    else:
+                        steps = _bfs_shortest_path_length(
+                            o_col, o_row, d_col, d_row,
+                            charge_budget, state.wall_hexes, occupied_positions, enemy_adjacent_hexes
+                        )
+                        if steps is None:
+                            charge_blocked = True
+                        elif steps > charge_budget:
+                            charge_over = True
+            else:
+                # Sans socles des deux côtés : repli ancre, seule donnée disponible.
+                if calculate_hex_distance(start_col, start_row, dest_col, dest_row) > charge_budget:
+                    charge_over = True
+
+            if charge_over:
                 stats['charge_invalid'][player]['distance_over_roll'] += 1
                 if stats['first_error_lines']['charge_invalid'][player] is None:
                     stats['first_error_lines']['charge_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
+            if charge_blocked:
+                stats['charge_path_blocked'][player] += 1
+                if stats['first_error_lines']['charge_path_blocked'][player] is None:
+                    stats['first_error_lines']['charge_path_blocked'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
 
         stats['position_log_mismatch']['charge']['total'] += 1
         if charge_unit_id not in state.unit_positions:

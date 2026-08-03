@@ -5387,8 +5387,13 @@ def charge_commit_move_plan_handler(
     current_turn = game_state["current_turn"] if "current_turn" in game_state else 1
     target_col, target_row = require_unit_position(target_id, game_state)
     _ut_seg = f" {unit['unitType']}" if unit.get("unitType") else ""
+    # 21.03 : le vol DÉCLARÉ pour cette charge retranche 2" au budget (`_charge_budget_subhex`)
+    # et autorise la traversée. Sans le marqueur, l'analyzer ne peut ni retrancher ni exempter
+    # du pathfinding : il jugeait la charge avec un budget faux et des murs qui ne s'appliquent
+    # pas. Miroir exact de `MOVED [FLY]` / `ADVANCED [FLY]`.
+    _fly_seg = " [FLY]" if _charge_fly_declared(game_state, unit, str(unit["id"])) else ""
     charge_message = (
-        f"Unit {unit['id']}{_ut_seg} ({orig_col}, {orig_row}) CHARGED Units {target_ids} "
+        f"Unit {unit['id']}{_ut_seg} ({orig_col}, {orig_row}) CHARGED{_fly_seg} Units {target_ids} "
         f"from ({orig_col}, {orig_row}) to ({dest_col}, {dest_row}) [Roll:{charge_roll}]"
     )
     move_details = []
@@ -5677,8 +5682,10 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     _ut_seg = f" {unit['unitType']}" if unit.get("unitType") else ""
     _tt_unit = next((u for u in game_state["units"] if str(u["id"]) == str(target_id)), None)
     _tt_seg = f" {_tt_unit['unitType']}" if _tt_unit and _tt_unit.get("unitType") else ""
+    # 21.03, cf. l'autre site de log de charge : marqueur de vol DÉCLARÉ.
+    _fly_seg = " [FLY]" if _charge_fly_declared(game_state, unit, str(unit["id"])) else ""
     charge_message = (
-        f"Unit {unit['id']}{_ut_seg} ({orig_col}, {orig_row}) CHARGED{charge_rule_marker} "
+        f"Unit {unit['id']}{_ut_seg} ({orig_col}, {orig_row}) CHARGED{charge_rule_marker}{_fly_seg} "
         f"Unit {target_id}{_tt_seg} ({target_col}, {target_row}) from ({orig_col}, {orig_row}) "
         f"to ({dest_col}, {dest_row}) [Roll:{charge_roll}]"
     )
