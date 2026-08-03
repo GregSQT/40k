@@ -4705,16 +4705,20 @@ class W40KEngine(gym.Env):
         `engagement_zone` est pris dans le `game_state`, ou il est DEJA en subhexes (converti au
         chargement) : le consommateur n'a plus aucune conversion a refaire, donc aucune occasion
         de diverger.
+
+        Les metriques passent par les SELECTEURS de phase, jamais par la cle de config brute :
+        eux seuls appliquent la resolution (cf. `geometry_is_hex`), donc eux seuls rendent la
+        valeur reellement mesuree.
         """
         from engine.spatial_relations import engagement_distance_metric
-        from engine.combat_utils import get_distance_metric
+        from engine.phase_handlers.shooting_handlers import _ranged_distance_metric
 
         game_rules = require_key(require_key(self.game_state, "config"), "game_rules")
         move_rules = require_key(require_key(self.game_state, "config"), "move")
         return {
             "engagement_zone_subhex": int(require_key(game_rules, "engagement_zone")),
             "metric.engagement": engagement_distance_metric(self.game_state),
-            "metric.ranged": get_distance_metric("ranged", self.game_state["config"]),
+            "metric.ranged": _ranged_distance_metric(self.game_state),
             "move.thru_ez": bool(require_key(move_rules, "can_move_through_enemy_engagement_zone")),
             "move.thru_enemy": bool(require_key(move_rules, "can_move_through_enemy_model")),
             "move.thru_friendly": bool(require_key(move_rules, "can_move_through_friendly_model")),

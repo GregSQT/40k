@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,7 @@ X1_WALL_REF = "tutorial_walls-01.json"
 
 
 @pytest.fixture
-def scenario_in_x1_board() -> Path:
+def scenario_in_x1_board() -> Iterator[Path]:
     """Scénario déclarant `board_ref: 44x60x1`, posé le temps du test."""
     scenario_dir = PROJECT_ROOT / "config" / "board" / "44x60x1" / "scenario"
     created_dir = not scenario_dir.exists()

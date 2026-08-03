@@ -986,7 +986,7 @@
     "total_episodes": 960,
     "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
     "agent_seat_mode": "random",
-    "eval_episodes": 1,
+    "eval_episodes": 100,
     "n_envs": 48,
     "metrics_smoothing": null,
     "model_params": {
