@@ -504,7 +504,11 @@ dans le même sens (le batch voit, la règle ne voit pas), donc l'agent **surest
 sur ~4 % des hexes et fuyait des positions sûres. « Non optimal » ET « trompeur ».
 
 **Livré.** Point d'entrée unique et public `ActionDecoder.deployment_los(game_state, from, to)`
-→ `has_line_of_sight` → `compute_unit_los`. **Les DEUX canaux** y passent : exposition réelle
+→ `has_line_of_sight` → `compute_unit_los`. ⚠️ **Signature périmée le jour même par
+[§0.65](#s0.65)** : le point d'entrée est resté unique mais est devenu BATCH
+(`deployment_los(game_state, from_hex, to_hexes)` → `batch_ground_hex_can_see`), et il ne passe
+plus par `has_line_of_sight` — donc plus par le `hex_los_cache`, qui ne servait à rien ici.
+**Les DEUX canaux** y passent : exposition réelle
 (ennemis posés) et exposition **potentielle** (hexes de référence du pool adverse), dans la
 reconstruction comme dans la mise à jour incrémentale. Un point d'entrée unique parce que c'est
 la divergence entre deux chemins — invisible tant que l'incrémental ne tournait pas — qui a
@@ -558,11 +562,11 @@ avec celui du tableau de §0.64 — les deux colonnes ci-dessous sont mesurées 
 
 | poste, 1 graine | avant | après |
 |---|---|---|
-| **phase de déploiement** | **3,58 s** | **1,33 s** (−63 %) |
+| **phase de déploiement** | **3,58 s** | **1,31–1,37 s** (−63 %) |
 | cache de scoring (= la LoS) | 1,58 s | **0,09 s** (−94 %) |
 | dont paires LoS calculées | 146 781 | **0** |
 | `_get_valid_deployment_hexes` | 0,64 s | 0,60 s |
-| 3 graines, total | 10,75 s | **4,00 s** |
+| 3 graines, total | 10,75 s | **3,9–4,1 s** |
 
 **Trois pistes de l'énoncé sont mortes, mesurées** — elles valaient d'être instruites, pas d'être
 suivies :
@@ -599,7 +603,7 @@ démontre terme à terme sur son propre code (dict coordonnées-seules → empre
 de vantage latéral ; pas de `MODEL_HEIGHT` → pas de plancher-occulteur ; pas de `level` → wall_set
 complet). Le raisonnement ne suffirait pas : c'est le VERROU qui rend la chose sûre.
 
-**Preuve — `tests/unit/engine/test_deployment_los_vectorized_equivalence.py` (4)** :
+**Preuve — `tests/unit/engine/test_deployment_los_vectorized_equivalence.py` (5)** :
 - **égalité hexe par hexe** entre le tracé scalaire (`compute_unit_los`) et le vectorisé, sur la
   **TOTALITÉ du pool** (16 104 hexes) et sur **deux terrains** (`terrain-mc1` de production et
   `terrain-train-02`, 545 murs contre 1 098, 10 areas obscurantes contre 15), depuis des sources
