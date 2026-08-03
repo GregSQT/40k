@@ -79,6 +79,46 @@ Ligne dédiée, écrite **hors action** (elle n'appartient à aucune ligne de je
   que `FIGHT_ELIGIBLE`, §4.A). Un scénario **sans objectif** n'écrit aucun instantané et reste
   rejouable.
 
+### 2.3bis Tags de règle sur les lignes d'action
+
+Ces tags s'insèrent **entre le verbe et `from`** (mouvements) ou dans la partie dés (tir/combat).
+Tout lecteur de `step.log` doit donc accepter un token optionnel à cet endroit — c'est la source
+d'un défaut déjà payé trois fois : un aiguillage écrit sur la chaîne littérale `"<VERBE> from"`
+laisse la ligne **sans branche**, l'action n'est pas traitée, la position de l'unité reste figée,
+et toutes les adjacences calculées ensuite le sont contre un fantôme. Côté analyzer la grammaire
+est centralisée dans `ai/analyzer_core.move_line_re` : un nouveau tag n'a qu'un endroit à toucher.
+
+| Tag | Lignes concernées | Règle | Producteur |
+|---|---|---|---|
+| `[FLY]` | `MOVED` / `FLED` / `ADVANCED` / `CHARGED` | 21.03 — vol **déclaré** (« take to the skies »), pas le keyword | `movement_handlers` (pipeline squad + mono), `charge_handlers` (2 sites) |
+| `[SUSTAINED HITS]` | `SHOOT` et `FIGHT`, sur la ligne `Hit None(…)` | 24.36 — touche **additionnelle**, pas une attaque | `attack_sequence` (`sustainedHit`) → `_SHOT_RECORD_FIELD_MAP` |
+| `[RAPID FIRE:X]`, `[HEAVY]`, `[COVER]`, `Save [DEVASTATING WOUNDS]` | `SHOOT` | 24.30 / 24.16 / 13.08 / 24.10 | idem |
+
+Le `[FLY]` porte une **déclaration**, jamais une capacité : une unité volante qui n'a pas déclaré
+marche, paie les murs et doit être contrôlée comme de l'infanterie. Exempter sur le keyword du
+registre désarmerait le contrôle. La charge peut porter **deux** tags (nom de la règle de relance
++ `[FLY]`) : les regex utilisent `*`, pas `?`.
+
+`[SUSTAINED HITS]` est la **seule** trace exploitable d'une touche additionnelle : elle n'a pas de
+jet (`Hit None`), donc rien ne la distingue autrement d'une ligne malformée. Sans elle, l'analyzer
+la comptait dans le plafond de tirs (`shoot_over_rng_nb` / `fight_over_cc_nb`) et affichait
+simultanément la règle « NOT USED ».
+
+### 2.3ter Move réactif
+
+```
+[hh:mm:ss] E{ep} T{tour} P{j} MOVE : Unit X(c,r) REACTIVE MOVED [<ABILITÉ>] from (c,r) to (c,r) [Roll: N] - trigger: Unit Y->(c,r)
+```
+
+**Journalisée sans consommer de step gym.** Le move réactif est *déclenché* par le déplacement
+adverse, pas choisi par l'agent : l'entête du journal liste les actions qui incrémentent (move,
+shoot, charge, combat, wait). Il est donc émis avec `step_increment=False`
+(`W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES`) — le compter décalerait `total_actions` et le
+compte de steps de tous les épisodes sans qu'aucune décision supplémentaire n'ait été prise.
+
+`[Roll: N]` est en **pouces**, comme le jet d'advance et le jet de charge : tout consommateur doit
+le convertir (× `inches_to_subhex`) avant de le comparer à une distance de grille.
+
 ### 2.4 Décor : ce que le journal ne porte PAS, et comment le replay le retrouve
 
 `Walls:` (hexes) et `Objectives:` sont journalisés. **Terrain, icônes, zones de déploiement et

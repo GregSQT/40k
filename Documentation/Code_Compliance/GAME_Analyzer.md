@@ -11,6 +11,7 @@
 - [Vue d'ensemble](#vue-densemble)
 - [Utilisation](#utilisation)
 - [Structure du rapport](#structure-du-rapport)
+- [Comment un contrôle de déplacement est écrit](#comment-un-contrôle-de-déplacement-est-écrit)
 - [Métriques détaillées](#métriques-détaillées)
   - [1.6 SPECIAL RULES USAGE](#16-special-rules-usage)
   - [1.7 WEAPONS RULES USAGE](#17-weapons-rules-usage)
@@ -68,6 +69,42 @@ Sections disponibles : `1.1`, `1.2`, `1.3`, `1.4`, `1.5`, `1.6`, `1.7`, `2.1`, `
 | **2.5** | EPISODES ENDING |
 | **2.6** | SAMPLE MISSING |
 | **2.7** | CORE ISSUES |
+
+---
+
+## Comment un contrôle de déplacement est écrit
+
+Les quatre déplacements contrôlés — **move**, **advance**, **charge**, **pile-in/consolidation** —
+suivent la MÊME forme. C'est délibéré : ce dépôt est structuré en miroirs, et son motif d'échec
+n°1 est une correction faite d'un côté et pas de l'autre. La charge et les mouvements de fin de
+combat ont vécu longtemps sans les trois éléments ci-dessous, et personne ne le voyait parce que
+le board x1 neutralise le premier.
+
+1. **Budget converti.** Les jets (advance, charge, réactif) et les seuils de règle (3" pour
+   pile-in 12.03 et consolidation 12.08) sont exprimés en **pouces** ; les distances du journal
+   sont en **cases**. Tout budget se multiplie donc par `inches_to_subhex`, lu dans l'entête
+   `Board:` du log analysé — jamais dans le config courant, qui décrit le prochain run.
+   *Sans conversion, à x5 un jet de charge de 7 devient un plafond de 7 cases au lieu de 35 :
+   toute charge réussie remonte en faute. Inerte à x1.*
+
+2. **Mesure par figurine.** La distance se mesure sur chaque socle commun entre l'état d'avant et
+   le segment `[MODELS:]` de la ligne, jamais d'ancre d'escouade à ancre d'escouade.
+   *L'ancre peut bondir plus loin qu'aucun socle (reformation) — faux positif — ou moins loin que
+   l'un d'eux — vraie violation manquée.*
+
+3. **Chemin vérifié.** Toutes les règles de mouvement renvoient à Moving (03) : le trajet passe
+   par `_bfs_shortest_path_length` avec les obstacles de `_build_move_bfs_blockers`, qui lit les
+   trois toggles de `game_config['move']` au même endroit que le moteur — on traverse ses
+   **alliés** (03.01) et la bande d'engagement ennemie, jamais une figurine ennemie ni un mur.
+   *Sans BFS, un déplacement par-dessus un mur n'est jamais signalé.*
+
+Deux exemptions, portées par des **tags du journal** et non par le registre d'unités :
+`[FLY]` (21.03 — vol déclaré : traversée libre, et 2" retranchés au budget de charge) et le
+keyword `MONSTER/VEHICLE` pour le tir au contact (10.06 / 17.03).
+
+⚠️ `_bfs_shortest_path_length` élague à `max_steps` : un trajet hors budget revient « sans chemin »
+plutôt que « trop long ». Les compteurs `*_path_blocked` et `*_over_roll` se lisent donc ensemble,
+et c'est leur somme que le récapitulatif additionne.
 
 ---
 
