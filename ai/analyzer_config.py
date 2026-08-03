@@ -25,6 +25,36 @@ from engine.utils.weapon_helpers import weapon_rule_parameter
 # module, lui, n'est importé que par son chemin de paquet — il n'existe donc qu'en un exemplaire.
 _run_inches_to_subhex: Optional[int] = None
 
+# Valeurs de règle du run ANALYSÉ, lues dans l'entête `Run rules:` du step.log. Même raison que
+# l'échelle : `config/game_config.json` s'édite entre deux runs, et le relire au moment de
+# l'analyse rend des verdicts faux en silence. Même emplacement, pour la même raison (module
+# chargé en un seul exemplaire).
+_run_rules: Optional[Dict[str, str]] = None
+
+
+def set_run_rules(rules: Dict[str, str]) -> None:
+    """Fixe les règles du run pour toute la passe d'analyse."""
+    global _run_rules
+    if not isinstance(rules, dict) or not rules:
+        raise ValueError(f"run_rules invalide: {rules!r}")
+    _run_rules = dict(rules)
+
+
+def get_run_rule(key: str) -> str:
+    """Valeur d'une règle du run. Lève si l'entête n'a pas été lue ou ne porte pas la clé :
+    prendre celle du config courant produirait un verdict faux sans le dire."""
+    if _run_rules is None:
+        raise RuntimeError(
+            "Règles du run non fixées : set_run_rules() doit être appelé depuis l'entête "
+            "`Run rules:` du step.log avant tout contrôle de règle."
+        )
+    if key not in _run_rules:
+        raise KeyError(
+            f"Règle {key!r} absente de l'entête `Run rules:` du step.log "
+            f"(présentes : {sorted(_run_rules)})"
+        )
+    return _run_rules[key]
+
 
 def set_run_inches_to_subhex(inches_to_subhex: int) -> None:
     """Fixe l'échelle du run pour toute la passe d'analyse."""

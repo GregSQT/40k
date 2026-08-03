@@ -221,13 +221,19 @@ class StepLogger:
         except Exception as e:
             print(f"⚠️ Step logging flush error: {e}")
     
-    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None, roster_info=None, board_config=None, scenario_path=None):
+    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None, roster_info=None, board_config=None, scenario_path=None, run_rules=None):
         """Log episode start with all unit starting positions, walls, and objectives
 
         ``scenario_path`` : chemin du scénario RÉELLEMENT tiré pour cet épisode, relatif à la
         racine du dépôt. C'est par lui que le replay retrouve le décor joué — ``scenario_info``
         vaut « Random from N scenarios » en entraînement et ne désigne aucun fichier
         (cf. Documentation/Implémentation/Replay.md §2.4).
+
+        ``run_rules`` : les valeurs de règle que le moteur a RÉELLEMENT appliquées. Elles vivent
+        dans `config/game_config.json`, que l'on édite entre deux runs : sans elles, l'analyzer
+        relit un vieux journal avec les valeurs du jour et rend des verdicts faux EN SILENCE —
+        basculer `distance_metric.engagement` de `hex` à `euclidean` change tous les verdicts
+        d'engagement d'hier. Même raison que la ligne `Board:`, même remède.
         """
         if not self.enabled:
             return
@@ -322,6 +328,9 @@ class StepLogger:
                 hex_radius = require_key(board_config, "hex_radius")
                 margin = require_key(board_config, "margin")
                 f.write(f"[{timestamp}] Board: cols={cols} rows={rows} inches_to_subhex={inches_to_subhex} hex_radius={hex_radius} margin={margin}\n")
+                if run_rules is not None:
+                    _rules_txt = " ".join(f"{k}={v}" for k, v in sorted(run_rules.items()))
+                    f.write(f"[{timestamp}] Run rules: {_rules_txt}\n")
 
                 # Log all unit starting positions (already validated above)
                 for unit in units_list:

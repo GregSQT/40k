@@ -318,6 +318,8 @@ _LOG_HEAD = [
     # L'échelle du run vient de CETTE ligne, jamais du config courant : sans elle
     # `parse_step_log` refuse d'analyser (cf. parse_board_scale_from_log).
     "[12:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1",
+    "[12:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True",
+    "[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True",
 ]
 _LOG_END = (
     "[12:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, "

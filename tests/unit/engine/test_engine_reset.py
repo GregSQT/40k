@@ -92,6 +92,15 @@ def _minimal_config_with_units() -> Dict[str, Any]:
                 "inches_to_subhex": 1,
             }
         },
+        "distance_metric": {"engagement": "hex", "ranged": "euclidean", "move": "hex",
+                            "move_gym": "hex", "charge": "euclidean", "fight": "euclidean"},
+        # `Run rules:` journalise les toggles de traversee que le run applique : l'analyzer
+        # les lit de la, plus du config courant.
+        "move": {
+            "can_move_through_enemy_engagement_zone": True,
+            "can_move_through_enemy_model": False,
+            "can_move_through_friendly_model": True,
+        },
         "game_rules": {
             "engagement_zone": 1,
             "engagement_zone_vertical": 5,

@@ -68,6 +68,38 @@ def parse_board_scale_from_log(filepath: str) -> int:
     )
 
 
+_RUN_RULES_RE = re.compile(r'^\[[^\]]*\]\s*Run rules:\s*(.+)$')
+
+
+def parse_run_rules_from_log(filepath: str) -> Dict[str, str]:
+    """Règles appliquées par le run analysé, lues dans l'entête `Run rules:` du step.log.
+
+    MÊME contrat que `parse_board_scale_from_log`, et pour la même raison :
+    `config/game_config.json` s'édite entre deux runs. Relire `engagement_zone`, les métriques
+    de distance ou les toggles de traversée au moment de l'ANALYSE, c'est juger un vieux journal
+    avec les règles du jour — basculer `distance_metric.engagement` de `hex` à `euclidean`
+    changerait tous les verdicts d'engagement d'hier, sans le moindre signe.
+    """
+    with open(filepath, 'r', encoding='utf-8') as f:
+        for line in f:
+            m = _RUN_RULES_RE.match(line)
+            if m:
+                rules: Dict[str, str] = {}
+                for token in m.group(1).split():
+                    if "=" not in token:
+                        raise ValueError(f"{filepath}: token `Run rules:` illisible: {token!r}")
+                    key, _, value = token.partition("=")
+                    rules[key] = value
+                if not rules:
+                    raise ValueError(f"{filepath}: entête `Run rules:` vide")
+                return rules
+    raise ValueError(
+        f"{filepath}: aucune ligne d'entête 'Run rules: ...'. Les règles du run sont "
+        "indéterminables — analyser avec celles du config courant rendrait des verdicts faux "
+        "en silence (zone d'engagement, métrique de distance, traversée)."
+    )
+
+
 def set_analyzer_board_scale(inches_to_subhex: int) -> None:
     """Fixe l'échelle du run pour toute la passe (appelé par parse_step_log après lecture de
     l'entête). L'état vit dans `ai.analyzer_config` — seul module chargé en un exemplaire quand
@@ -93,9 +125,10 @@ def _get_engagement_zone_for_analyzer() -> int:
     empreintes (subhex) à un seuil en pouces (2 au lieu de 10) → toute la mêlée/engagement
     remontait faussement « non-adjacent ». Root cause des « Fight from non-adjacent ».
     """
-    from config_loader import get_config_loader
-    game_rules = require_key(get_config_loader().get_game_config(), "game_rules")
-    return int(require_key(game_rules, "engagement_zone")) * _get_inches_to_subhex_for_analyzer()
+    # Déjà en SUBHEXES dans l'entête : le moteur convertit au chargement et journalise la
+    # valeur qu'il applique. Aucune conversion ici, donc aucune occasion de diverger.
+    from ai.analyzer_config import get_run_rule
+    return int(get_run_rule("engagement_zone_subhex"))
 
 MAX_D3 = 3
 MAX_D6 = 6
@@ -531,11 +564,8 @@ def _analyzer_engagement_metric() -> str:
     « hex ssi inches_to_subhex <= 1 » — en la branchant sur l'échelle lue dans l'entête du log,
     et on délègue la clé de config elle-même, qui n'est pas propre au run.
     """
-    from config_loader import get_config_loader
-    from engine.combat_utils import get_distance_metric
-
-    metric = get_distance_metric("engagement", get_config_loader().get_game_config())
-    return "hex" if _get_inches_to_subhex_for_analyzer() <= 1 else metric
+    from ai.analyzer_config import get_run_rule
+    return get_run_rule("metric.engagement")
 
 
 def is_within_engine_engagement_zone(
@@ -643,9 +673,12 @@ def _move_rules_for_analyzer() -> Tuple[bool, bool, bool]:
     """Toggles de traversée `(EZ, ennemi, ami)` — lecteur MOTEUR (`_get_move_traversal_rules`),
     pas une relecture parallèle des trois clés. Un 4e toggle ou un renommage n'atteindrait
     qu'un côté sinon."""
-    from config_loader import get_config_loader
-    from engine.phase_handlers.movement_handlers import _get_move_traversal_rules
-    return _get_move_traversal_rules({"config": get_config_loader().get_game_config()})
+    from ai.analyzer_config import get_run_rule
+    return (
+        get_run_rule("move.thru_ez") == "True",
+        get_run_rule("move.thru_enemy") == "True",
+        get_run_rule("move.thru_friendly") == "True",
+    )
 
 
 def _build_move_bfs_blockers(
@@ -917,6 +950,8 @@ def parse_step_log(filepath: str) -> Dict:
     # Échelle du run AVANT toute construction de config : portées d'armes, budgets de move et
     # seuil d'engagement en dérivent tous (cf. parse_board_scale_from_log).
     set_analyzer_board_scale(parse_board_scale_from_log(filepath))
+    from ai.analyzer_config import set_run_rules
+    set_run_rules(parse_run_rules_from_log(filepath))
 
     # Load unit weapons and rule caches
     from ai.analyzer_config import load_analyzer_config

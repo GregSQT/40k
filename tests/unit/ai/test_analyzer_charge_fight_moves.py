@@ -32,6 +32,8 @@ def _log(body: str, *, scale: int, walls: str = "") -> str:
         f"[10:00:00] Walls: {walls}\n"
         f"[10:00:00] Objectives: rect b NW:{OBJECTIVES}\n"
         f"[10:00:00] Board: cols=220 rows=300 inches_to_subhex={scale} hex_radius=2.78 margin=1\n"
+        f"[10:00:00] Run rules: engagement_zone_subhex={2 * scale} metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True\n"
+        "[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True\n"
         f"{_UNITS}"
         "[10:00:00] === ACTIONS START ===\n"
         "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [SUCCESS]\n"
@@ -267,3 +269,49 @@ def test_le_vol_declare_retranche_deux_pouces_au_budget_de_move(tmp_path):
     stats = an.parse_step_log(str(log))
 
     assert stats["move_distance_over_limit"]["move"][1] == 1, "les 2\" de 21.03 non retranchés"
+
+
+def test_les_regles_du_run_viennent_du_log_pas_du_config_courant(tmp_path):
+    """`config/game_config.json` s'édite entre deux runs. Relire `engagement_zone`, les métriques
+    de distance ou les toggles de traversée au moment de l'ANALYSE, c'est juger un vieux journal
+    avec les règles du jour — et contrairement à l'échelle, rien ne le signalait.
+    """
+    import ai.analyzer_config as ac
+
+    body = (
+        "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [SUCCESS]\n"
+        "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(90,50) DEPLOYED from (-1,-1) to (90,50) [R:+0.0] [SUCCESS]\n"
+    )
+    # Valeurs VOLONTAIREMENT différentes de celles de `config/game_config.json` : si l'analyzer
+    # relisait le config, aucune de ces trois assertions ne passerait.
+    entete = (
+        "[10:00:00] Run rules: engagement_zone_subhex=7 metric.engagement=euclidean "
+        "metric.ranged=hex move.thru_ez=False move.thru_enemy=True move.thru_friendly=False"
+    )
+    brut = _log(body, scale=1).split("\n")
+    log_txt = "\n".join([l for l in brut if "Run rules:" not in l])
+    log_txt = log_txt.replace("[10:00:00] === ACTIONS START ===", entete + "\n[10:00:00] === ACTIONS START ===")
+    log = tmp_path / "regles.log"
+    log.write_text(log_txt)
+    an.parse_step_log(str(log))
+
+    assert an._get_engagement_zone_for_analyzer() == 7
+    assert ac.get_run_rule("metric.engagement") == "euclidean"
+    assert ac.get_run_rule("metric.ranged") == "hex"
+    assert an._move_rules_for_analyzer() == (False, True, False)
+
+
+def test_un_log_sans_entete_de_regles_est_refuse(tmp_path):
+    """Même refus explicite que pour l'échelle : sans les règles, le verdict serait faux en
+    silence. Un journal produit avant cette ligne n'est plus analysable — c'est voulu."""
+    import pytest as _pytest
+
+    body = "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [SUCCESS]\n"
+    sans_regles = "\n".join(
+        l for l in _log(body, scale=1).split("\n") if "Run rules:" not in l
+    )
+    log = tmp_path / "sans_regles.log"
+    log.write_text(sans_regles)
+
+    with _pytest.raises(ValueError, match=r"Run rules"):
+        an.parse_step_log(str(log))

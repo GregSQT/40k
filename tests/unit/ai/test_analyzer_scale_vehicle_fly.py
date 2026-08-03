@@ -26,6 +26,24 @@ import ai.analyzer as an
 OBJECTIVES = ";".join(f"(150,{r})" for r in range(150, 156))
 
 
+def _pose_regles_du_run(scale: int, *, ez_inches: int = 2, metric: str = "hex") -> int:
+    """Hors `parse_step_log`, l'échelle ET les règles du run se posent à la main : les getters
+    lèvent plutôt que de retomber sur le config courant. Rend la zone d'engagement en subhex."""
+    from ai.analyzer_config import set_run_rules
+
+    an.set_analyzer_board_scale(scale)
+    ez = ez_inches * scale
+    set_run_rules({
+        "engagement_zone_subhex": str(ez),
+        "metric.engagement": metric,
+        "metric.ranged": "euclidean",
+        "move.thru_ez": "True",
+        "move.thru_enemy": "False",
+        "move.thru_friendly": "True",
+    })
+    return ez
+
+
 def _log(body: str, *, inches_to_subhex: int = 5, walls: str = "", board: str = "cols=220 rows=300",
          units: str = "") -> str:
     return (
@@ -37,6 +55,7 @@ def _log(body: str, *, inches_to_subhex: int = 5, walls: str = "", board: str = 
         f"[10:00:00] Walls: {walls}\n"
         f"[10:00:00] Objectives: rect b NW:{OBJECTIVES}\n"
         f"[10:00:00] Board: {board} inches_to_subhex={inches_to_subhex} hex_radius=2.78 margin=1\n"
+        f"[10:00:00] Run rules: engagement_zone_subhex={2 * inches_to_subhex} metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True\n"
         f"{units}"
         "[10:00:00] === ACTIONS START ===\n"
         f"{body}"
@@ -71,10 +90,8 @@ def test_l_echelle_lue_est_celle_du_log_pas_celle_du_config(tmp_path):
 def test_la_zone_d_engagement_suit_l_echelle_du_run():
     """`engagement_zone` est stocké EN POUCES et converti ×inches_to_subhex, exactement comme
     le moteur le fait au chargement. C'est ce facteur qui valait 5 fois trop."""
-    an.set_analyzer_board_scale(1)
-    ez_x1 = an._get_engagement_zone_for_analyzer()
-    an.set_analyzer_board_scale(5)
-    ez_x5 = an._get_engagement_zone_for_analyzer()
+    ez_x1 = _pose_regles_du_run(1)
+    ez_x5 = _pose_regles_du_run(5)
 
     assert ez_x5 == 5 * ez_x1, (ez_x1, ez_x5)
 
@@ -239,8 +256,7 @@ def test_le_moteur_transmet_le_drapeau_de_vol_au_formateur():
 def test_l_engagement_voit_tous_les_socles_pas_seulement_l_ancre():
     """Ancre du sujet LOIN de l'ennemi, un de ses socles au contact. Réduire l'escouade à son
     ancre — ce que faisait ce contrôle — déclarait l'unité libre de tout engagement."""
-    an.set_analyzer_board_scale(1)
-    ez = an._get_engagement_zone_for_analyzer()
+    ez = _pose_regles_du_run(1)
     unit_player = {"a1": 1, "e1": 2}
     unit_hp = {"a1": 1, "e1": 1}
     unit_positions = {"a1": (10, 10), "e1": (30, 10)}
@@ -259,8 +275,7 @@ def test_l_engagement_voit_tous_les_socles_pas_seulement_l_ancre():
 
 def test_l_engagement_voit_tous_les_socles_de_l_ENNEMI_aussi():
     """Symétrique : c'est un socle ENNEMI avancé qui engage, pas son ancre."""
-    an.set_analyzer_board_scale(1)
-    ez = an._get_engagement_zone_for_analyzer()
+    ez = _pose_regles_du_run(1)
     unit_player = {"a1": 1, "e1": 2}
     unit_hp = {"a1": 1, "e1": 1}
     unit_positions = {"a1": (10, 10), "e1": (30, 10)}
@@ -276,8 +291,7 @@ def test_la_taille_de_socle_declaree_dans_le_log_est_respectee():
     """À x5/x10 le socle occupe plusieurs cases : deux escouades hors de portée d'ancre à
     ancre peuvent être bord à bord. Le socle vient de l'entête du log (`base=`), donc déjà à
     l'échelle du board — jamais reconstruit ici."""
-    an.set_analyzer_board_scale(5)
-    ez = an._get_engagement_zone_for_analyzer()
+    ez = _pose_regles_du_run(5, metric="euclidean")
     unit_player = {"a1": 1, "e1": 2}
     unit_hp = {"a1": 1, "e1": 1}
     gap = ez + 6  # ancres hors zone d'engagement pour des socles ponctuels
@@ -298,8 +312,7 @@ def test_la_taille_de_socle_declaree_dans_le_log_est_respectee():
 def test_un_allie_n_engage_jamais():
     """Contre-épreuve : sans le filtre de camp, la mesure d'empreintes rendrait tout le monde
     engagé en permanence (les socles alliés sont les plus proches voisins)."""
-    an.set_analyzer_board_scale(1)
-    ez = an._get_engagement_zone_for_analyzer()
+    ez = _pose_regles_du_run(1)
     unit_player = {"a1": 1, "a2": 1}
     unit_hp = {"a1": 1, "a2": 1}
     unit_positions = {"a1": (10, 10), "a2": (11, 10)}

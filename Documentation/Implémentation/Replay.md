@@ -119,6 +119,25 @@ compte de steps de tous les épisodes sans qu'aucune décision supplémentaire n
 `[Roll: N]` est en **pouces**, comme le jet d'advance et le jet de charge : tout consommateur doit
 le convertir (× `inches_to_subhex`) avant de le comparer à une distance de grille.
 
+### 2.3quater Règles du run
+
+```
+[hh:mm:ss] Run rules: engagement_zone_subhex=… metric.engagement=… metric.ranged=… move.thru_ez=… move.thru_enemy=… move.thru_friendly=…
+```
+
+Les valeurs de règle que le moteur a **réellement appliquées**. Elles vivent dans
+`config/game_config.json`, qu'on édite entre deux runs : les relire au moment de l'analyse, c'est
+juger un vieux journal avec les règles du jour. Basculer `distance_metric.engagement` de `hex` à
+`euclidean` changerait tous les verdicts d'engagement d'hier — sans le moindre signe, là où
+l'échelle est protégée par un refus explicite depuis §2.4.
+
+`engagement_zone_subhex` est **déjà en subhexes** : le moteur convertit au chargement et
+journalise ce qu'il applique, donc le consommateur n'a aucune conversion à refaire — et aucune
+occasion de diverger.
+
+Contrat identique à celui de `Board:` : ligne absente → l'analyzer refuse d'analyser. Les
+journaux produits avant cette ligne ne sont plus analysables, et c'est voulu.
+
 ### 2.4 Décor : ce que le journal ne porte PAS, et comment le replay le retrouve
 
 `Walls:` (hexes) et `Objectives:` sont journalisés. **Terrain, icônes, zones de déploiement et

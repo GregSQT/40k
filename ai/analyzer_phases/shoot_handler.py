@@ -14,8 +14,12 @@ if TYPE_CHECKING:
 
 
 def _analyzer_ranged_metric(config: "AnalyzerConfig") -> str:
-    """Métrique de portée tir (hex|euclidean) — même sélecteur unique que le moteur."""
-    return get_distance_metric("ranged", config.config_loader.get_game_config())
+    """Métrique de portée tir (hex|euclidean) — celle du RUN, lue dans l'entête `Run rules:`.
+
+    La relire dans le config courant, c'est juger un vieux journal avec la métrique du jour :
+    une bascule hex↔euclidean change silencieusement tous les verdicts de portée."""
+    from ai.analyzer_config import get_run_rule
+    return get_run_rule("metric.ranged")
 
 
 def _analyzer_socle(config: "AnalyzerConfig", unit_type: str, col: int, row: int) -> Any:

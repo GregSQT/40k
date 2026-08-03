@@ -1680,6 +1680,7 @@ class W40KEngine(gym.Env):
                     "margin": margin,
                 },
                 scenario_path=scenario_path_logged,
+                run_rules=self._run_rules_for_step_log(),
             )
             
             # CRITICAL: Synchronize game_state["episode_number"] with step_logger.episode_number
@@ -4689,6 +4690,32 @@ class W40KEngine(gym.Env):
                 step_increment=action_type not in self._STEP_LOG_NON_INCREMENTING_TYPES,
                 action_details=self._build_step_log_details(raw_log, pre_action_turn),
             )
+
+    def _run_rules_for_step_log(self) -> Dict[str, Any]:
+        """Valeurs de regle REELLEMENT appliquees par ce run, pour l'entete de step.log.
+
+        Elles vivent dans `config/game_config.json`, qu'on edite entre deux runs. L'analyzer les
+        relisait dans le fichier COURANT : basculer `distance_metric.engagement` de `hex` a
+        `euclidean` changeait tous les verdicts d'engagement d'un vieux journal, en silence et
+        sans le garde-fou qui protege deja l'echelle. On les journalise donc a la source.
+
+        `engagement_zone` est pris dans le `game_state`, ou il est DEJA en subhexes (converti au
+        chargement) : le consommateur n'a plus aucune conversion a refaire, donc aucune occasion
+        de diverger.
+        """
+        from engine.spatial_relations import engagement_distance_metric
+        from engine.combat_utils import get_distance_metric
+
+        game_rules = require_key(require_key(self.game_state, "config"), "game_rules")
+        move_rules = require_key(require_key(self.game_state, "config"), "move")
+        return {
+            "engagement_zone_subhex": int(require_key(game_rules, "engagement_zone")),
+            "metric.engagement": engagement_distance_metric(self.game_state),
+            "metric.ranged": get_distance_metric("ranged", self.game_state["config"]),
+            "move.thru_ez": bool(require_key(move_rules, "can_move_through_enemy_engagement_zone")),
+            "move.thru_enemy": bool(require_key(move_rules, "can_move_through_enemy_model")),
+            "move.thru_friendly": bool(require_key(move_rules, "can_move_through_friendly_model")),
+        }
 
     def _build_step_log_details(self, raw_log: Dict[str, Any], pre_action_turn: Any) -> Dict[str, Any]:
         """Mappe un payload d'action_log moteur vers les action_details du formateur StepLogger.
