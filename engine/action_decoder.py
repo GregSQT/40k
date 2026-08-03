@@ -220,10 +220,16 @@ class ActionDecoder:
         était réduite aux MURS, ce qui était vrai du tracé 2D d'avant V11 §0.64 et faux depuis :
         `deployment_los` applique aussi 13.10. Deux terrains aux mêmes murs et aux areas
         obscurantes différentes partageaient donc le même fichier `.cache/` — et le second
-        relisait en silence, pour toujours, les valeurs du premier. Cas réel du dépôt :
-        `terrain-mc1.json` et `terrain-train-01.json` ont des `walls` au digest IDENTIQUE.
+        relisait en silence, pour toujours, les valeurs du premier.
         Aucune version de modèle ne peut rattraper ça : le modèle n'a pas changé, c'est la clé
         qui ne décrivait pas ce que le modèle lit.
+
+        📌 **Aucun terrain du dépôt ne déclenche ce cas aujourd'hui** — vérifié : les seuls
+        fichiers aux murs identiques, `terrain-mc1.json` et `terrain-train-01.json`, ont AUSSI
+        les mêmes areas obscurantes (15 areas, 15 288 hexes) et ne diffèrent que par `floors`,
+        que le tracé au sol ne lit pas. Ils partagent donc toujours ce cache, et c'est correct.
+        Ne PAS ajouter `floors` à la signature pour « les séparer » : ce serait invalider tous
+        les fichiers en cache pour une donnée dont la valeur cachée ne dépend pas.
 
         Les areas viennent de `_get_obscuring_area_sets`, ce que la LoS lit RÉELLEMENT — pas du
         JSON brut, qui porte aussi des champs (`floors`) dont le tracé au sol ne dépend pas.

@@ -215,12 +215,16 @@ def test_deux_terrains_aux_memes_murs_ne_partagent_pas_le_cache_potentiel(
     retenait que les MURS — vrai du tracé 2D d'avant §0.64, faux depuis que `deployment_los`
     applique 13.10. Deux terrains aux mêmes murs et aux areas obscurantes différentes se
     partageaient donc le fichier : le second relisait, en silence et pour toujours, les
-    expositions du premier. Ce n'est pas théorique — `terrain-mc1.json` et
-    `terrain-train-01.json` ont des `walls` au digest IDENTIQUE (ils ne diffèrent que par
-    `floors`), et l'énoncé du chantier annonce l'arrivée de nouveaux terrains.
+    expositions du premier.
 
     Aucune version de modèle ne peut rattraper ce défaut : le modèle n'a pas changé, c'est la
     clé qui ne décrivait pas ce que le modèle lit.
+
+    📌 Aucun terrain du dépôt ne déclenche le cas aujourd'hui : les seuls fichiers aux murs
+    identiques (`terrain-mc1.json` et `terrain-train-01.json`) ont aussi les mêmes areas
+    obscurantes et ne diffèrent que par `floors`, que le tracé au sol ne lit pas — ils
+    partagent donc ce cache, correctement. C'est bien pour ça que le test CONSTRUIT son cas au
+    lieu de l'espérer d'un fichier de configuration.
 
     Le test CONSTRUIT la situation : mêmes murs, une area obscurante déplacée.
     """
