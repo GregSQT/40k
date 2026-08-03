@@ -35,9 +35,18 @@ Le parseur est **strict** : un segment/tag attendu mais absent lève une erreur 
 C'est voulu — une donnée manquante doit crier, pas être masquée.
 
 ### 2.1 Positions par figurine (per-figurine)
-- `[MODELS: uid#idx@(col,row) …]` — positions par socle de l'unité **qui agit** (et du déploiement,
-  ligne `Starting position`).
-- `[TARGET_MODELS: uid#idx@(col,row) …]` — survivants de la **cible** après pertes (tir/combat).
+- `[MODELS: uid#idx@(col,row,z<hauteur>) …]` — positions par socle de l'unité **qui agit** (et du
+  déploiement, ligne `Starting position`).
+- `[TARGET_MODELS: uid#idx@(col,row,z<hauteur>) …]` — survivants de la **cible** après pertes.
+- `z<hauteur>` = hauteur du plancher sous le socle, en POUCES. Consommée par l'**analyzer** (gate
+  vertical de l'engagement, §03.04 : 2" horizontal ET 5" vertical), pas par le replay, dont le
+  rendu reste plan : `extractModelsSegment` la matche et l'ignore. C'est la hauteur qui est
+  journalisée et pas le `level`, parce que la hauteur d'un niveau donné dépend de la POSITION
+  (deux ruines peuvent avoir un étage 1 à des hauteurs différentes) et que le step.log ne porte
+  aucun terrain : elle ne serait pas re-dérivable.
+- Le champ est **obligatoire côté analyzer** (un journal d'archive lève plutôt que d'être lu
+  comme un plateau entièrement au sol) et **optionnel côté replay** (un replay d'archive
+  s'affiche encore).
 
 Parsés par `extractModelsSegment` → posés sur l'unité via `occupied_hexes_by_model`
 (`replayParser.ts` `applyModels` + `initial_models`). Présent → `BoardPvp`/`UnitRenderer` dessinent

@@ -14,9 +14,13 @@ import os
 import sys
 import time
 from collections import deque
-from typing import Dict, List, Tuple, Set, Optional, Any
+from typing import Dict, List, Tuple, Set, Optional, Any, Mapping
 from .generic_handlers import end_activation
 from shared.data_validation import require_key
+# Seuil vertical d'engagement (§03.04 : 2" horizontal ET 5" vertical) — primitive publique,
+# lue directement comme son jumeau horizontal `get_engagement_zone`. Un wrapper privé par phase
+# n'ajoutait rien et forçait `shared_utils`/`observation_builder` à importer un privé de phase.
+from engine.spatial_relations import get_engagement_zone_vertical
 from engine.utils.weapon_helpers import melee_weapons
 from engine.action_log_utils import append_action_log
 from engine.game_utils import add_console_log, safe_print
@@ -75,7 +79,7 @@ from .shared_utils import (
     _enemy_squad_ids,
     _synth_model_entry,
     MovePlan,
-    MovePlanEntry,
+    parse_model_plan_as_map,
 )
 
 _ADJACENT_EDGE_GAP_TOLERANCE_NORM = ENGAGEMENT_NORM_HEX_WIDTH
@@ -234,7 +238,8 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
         game_state["console_logs"] = []
 
     if unit_within_engagement_zone_footprints(
-        game_state, unit, engagement_zone=cc_range, max_distance=cc_range
+        game_state, unit, engagement_zone=cc_range, max_distance=cc_range,
+        vertical_zone_inches=get_engagement_zone_vertical(game_state),
     ):
         add_console_log(game_state, f"FIGHT ELIGIBLE: Unit {unit['id']} within engagement_zone {cc_range}")
         return True
@@ -863,14 +868,95 @@ def _fight_clear_consolidation_state(game_state: Dict[str, Any]) -> None:
     game_state.pop("_fight_consolidation_ctx", None)
 
 
+def _fight_effective_level_at(
+    game_state: Dict[str, Any],
+    model_entry: Dict[str, Any],
+    col: int,
+    row: int,
+    requested_level: int,
+) -> int:
+    """Niveau EFFECTIF (§13.06) d'une figurine posée en ``(col, row)`` avec ce niveau DEMANDÉ.
+
+    SOURCE UNIQUE, partagée par tout ce que le fight construit à une position CANDIDATE :
+    translation rigide d'un pool d'ancres, slot d'ILP, plan d'auto-placement. Un niveau ne se
+    transporte pas d'une position à l'autre — une figurine translatée hors de l'empreinte de son
+    plancher est AU SOL (règle 13.06, la même que le move et le déploiement appliquent via
+    ``resolve_model_floor_level``). Coller le niveau d'origine à une case sans plancher faisait
+    lever ``floor_height_at`` (« figurine marquée à l'étage mais hors empreinte de plancher »),
+    c'est-à-dire un crash du pool là où la règle demande simplement de la poser au sol.
+    """
+    from engine.terrain_utils import resolve_model_floor_level
+
+    return resolve_model_floor_level(
+        int(col), int(row),
+        require_key(model_entry, "BASE_SHAPE"), require_key(model_entry, "BASE_SIZE"),
+        int(model_entry.get("orientation", 0)),  # get allowed (défaut 0 = face nord)
+        int(requested_level),
+        game_state.get("terrain_areas", []),  # get allowed (plateau sans terrain)
+    )
+
+
+def _fight_rigid_model_placements(
+    game_state: Dict[str, Any], squad_id: str, anchor_col: int, anchor_row: int
+) -> Dict[str, Tuple[int, int, int]]:
+    """Positions par-figurine après TRANSLATION RIGIDE de l'escouade vers ``(anchor_col, anchor_row)``.
+
+    Les pools d'ancres du fight (pile-in / consolidation) déplacent le bloc rigidement : l'empreinte
+    candidate est celle du bloc translaté. Les centres par-figurine se translatent donc du MÊME
+    vecteur, calculé en coordonnées CUBE — en offset odd-q un dx impair change la parité de colonne
+    et déformerait le bloc (miroir de ``build_rigid_plan``). Ces pools sont HORIZONTAUX — ils ne
+    font ni monter ni descendre — mais le niveau n'est pas pour autant reconduit tel quel : il est
+    RÉSOLU à la position d'arrivée (``_fight_effective_level_at``), car une figurine translatée
+    hors de l'empreinte de son plancher se retrouve au sol (§13.06).
+    """
+    from engine.hex_utils import offset_to_cube, cube_to_offset
+
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    units_cache = require_key(game_state, "units_cache")
+    src = require_key(units_cache, str(squad_id))
+    ax, ay, az = offset_to_cube(int(require_key(src, "col")), int(require_key(src, "row")))
+    bx, by, bz = offset_to_cube(int(anchor_col), int(anchor_row))
+    dcx, dcy, dcz = bx - ax, by - ay, bz - az
+    out: Dict[str, Tuple[int, int, int]] = {}
+    for mid in squad_models.get(str(squad_id), []):  # get allowed
+        m = models_cache.get(mid)
+        if m is None:
+            continue
+        mx, my, mz = offset_to_cube(int(m["col"]), int(m["row"]))
+        new_col, new_row = cube_to_offset(mx + dcx, my + dcy, mz + dcz)
+        out[str(mid)] = (
+            int(new_col),
+            int(new_row),
+            _fight_effective_level_at(game_state, m, new_col, new_row, int(require_key(m, "level"))),
+        )
+    return out
+
+
 def _fight_synth_cache_entry_at_footprint(
     unit: Dict[str, Any],
     game_state: Dict[str, Any],
     anchor_col: int,
     anchor_row: int,
     candidate_fp: Set[Tuple[int, int]],
+    model_placements: Optional[Mapping[str, Tuple[int, int, int]]] = None,
 ) -> Dict[str, Any]:
-    """Construit une entrée ``units_cache``-compatible pour un test d'engagement à l'ancre donnée."""
+    """Construit une entrée ``units_cache``-compatible pour un test d'engagement à l'ancre donnée.
+
+    ``model_placements`` (``{model_id: (col, row, level)}``) décrit la position par-figurine dans
+    la configuration CANDIDATE. Absent → translation rigide du bloc depuis sa position courante
+    (``_fight_rigid_model_placements``), ce que font les pools d'ancres ; fourni → configuration
+    par-figurine d'un plan (chaque figurine à SON étage, escouade à cheval sur deux niveaux).
+
+    Les cartes par-figurine ne sont PAS optionnelles : elles sont lues sur le vrai chemin de jeu.
+    - métrique euclidienne : ``socle_from_cache_entry`` mesure depuis ``occupied_hexes_by_model``
+      (``model_centers``) et IGNORE ``occupied_hexes``. Hériter la carte de l'entrée source faisait
+      répondre tout contrôle « après mouvement » sur l'état d'AVANT.
+    - engagement 3D : ``_vertical_classes`` exige ``occupied_hexes_by_model`` +
+      ``floor_height_by_model`` + ``MODEL_HEIGHT`` (ce dernier hérité de l'entrée réelle).
+    """
+    from engine.terrain_utils import resolved_floor_height_at
+
     uid = str(require_key(unit, "id"))
     units_cache = require_key(game_state, "units_cache")
     src = units_cache.get(uid)
@@ -880,6 +966,35 @@ def _fight_synth_cache_entry_at_footprint(
     out["col"] = int(anchor_col)
     out["row"] = int(anchor_row)
     out["occupied_hexes"] = set(candidate_fp)
+    placements = (
+        dict(model_placements)
+        if model_placements is not None
+        else _fight_rigid_model_placements(game_state, uid, int(anchor_col), int(anchor_row))
+    )
+    terrain_areas = game_state.get("terrain_areas", [])  # get allowed (plateau sans terrain)
+    out["occupied_hexes_by_model"] = {
+        str(mid): (int(c), int(r)) for mid, (c, r, _lv) in placements.items()
+    }
+    # Le niveau d'un placement est une DEMANDE (plan du joueur, slot d'ILP, translation d'ancre) :
+    # c'est le plancher qui tranche. Sans cette résolution, un aperçu en LECTURE SEULE d'un plan
+    # posant une figurine hors plancher levait au lieu de rendre `can_validate: False` — une 500
+    # côté PvP là où l'UX attend un voile rouge.
+    #
+    # Socle et facing pris sur la FIGURINE, pas sur l'escouade : la résolution dépend de
+    # l'empreinte, et une escouade à bases mixtes (personnage attaché) ou à pivot par-figurine
+    # donnerait deux verdicts différents selon le socle utilisé — l'un ici, l'autre chez
+    # l'appelant qui a choisi le niveau. Repli sur l'entrée d'escouade pour les figurines
+    # synthétiques, qui n'ont pas d'entrée dans `models_cache`.
+    models_cache = game_state.get("models_cache", {})  # get allowed (états de test sans par-fig)
+    out["floor_height_by_model"] = {}
+    for mid, (c, r, lv) in placements.items():
+        _m = models_cache.get(str(mid)) or out
+        out["floor_height_by_model"][str(mid)] = resolved_floor_height_at(
+            terrain_areas, int(c), int(r),
+            require_key(_m, "BASE_SHAPE"), require_key(_m, "BASE_SIZE"),
+            int(_m.get("orientation", 0)),  # get allowed (synthétiques sans facing)
+            int(lv),
+        )
     return out
 
 
@@ -891,10 +1006,28 @@ def _fight_footprint_in_engagement_with_any_enemy(
     candidate_fp: Set[Tuple[int, int]],
 ) -> bool:
     """True si l'empreinte candidate est en zone d'engagement (contrat ``spatial_relations``) avec ≥1 ennemi."""
+    return _fight_entry_in_engagement_with_any_enemy(
+        game_state,
+        unit,
+        _fight_synth_cache_entry_at_footprint(unit, game_state, anchor_col, anchor_row, candidate_fp),
+    )
+
+
+def _fight_entry_in_engagement_with_any_enemy(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    synth: Dict[str, Any],
+) -> bool:
+    """Idem, sur une entrée synthétique DÉJÀ construite.
+
+    L'entrée porte les cartes par-figurine à la position candidate : la bâtir coûte une
+    translation rigide et une résolution de plancher par socle. Les appelants qui la
+    réutilisent ensuite (pools d'ancres) passent par ici pour ne la payer qu'une fois.
+    """
     from engine.spatial_relations import unit_entries_within_engagement_zone, get_engagement_zone
 
     ez = get_engagement_zone(game_state)
-    synth = _fight_synth_cache_entry_at_footprint(unit, game_state, anchor_col, anchor_row, candidate_fp)
+    vz = get_engagement_zone_vertical(game_state)
     mover_id = str(require_key(unit, "id"))
     mover_player = int(require_key(unit, "player"))
     units_cache = require_key(game_state, "units_cache")
@@ -903,7 +1036,7 @@ def _fight_footprint_in_engagement_with_any_enemy(
             continue
         if int(require_key(ce, "player")) == mover_player:
             continue
-        if unit_entries_within_engagement_zone(synth, ce, ez):
+        if unit_entries_within_engagement_zone(synth, ce, ez, vertical_zone_inches=vz):
             return True
     return False
 
@@ -914,7 +1047,8 @@ def _fight_consolidation_unit_engaged_with_any_enemy(game_state: Dict[str, Any],
 
     cc_range = get_engagement_zone(game_state)
     return unit_within_engagement_zone_footprints(
-        game_state, unit, engagement_zone=cc_range, max_distance=cc_range
+        game_state, unit, engagement_zone=cc_range, max_distance=cc_range,
+        vertical_zone_inches=get_engagement_zone_vertical(game_state),
     )
 
 
@@ -1632,6 +1766,7 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
     if unit_entry is None:
         raise ValueError(f"Unit {unit_id_str} not in units_cache (dead or absent); cannot build fight target pool")
     unit_player = int(require_key(unit_entry, "player"))
+    vz = get_engagement_zone_vertical(game_state)
 
     valid_targets = []
 
@@ -1642,7 +1777,9 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
         target_player = int(require_key(target_entry, "player"))
         if target_player == unit_player:
             continue
-        if not unit_entries_within_engagement_zone(unit_entry, target_entry, cc_range):
+        if not unit_entries_within_engagement_zone(
+            unit_entry, target_entry, cc_range, vertical_zone_inches=vz
+        ):
             continue
         valid_targets.append(target_id)
 
@@ -1674,9 +1811,13 @@ def _model_can_fight_target(
     ez = get_engagement_zone(game_state)
     synth = _synth_model_entry(
         game_state, str(attacker_squad_id), attacker_model,
-        int(attacker_model["col"]), int(attacker_model["row"])
+        int(attacker_model["col"]), int(attacker_model["row"]),
+        level=int(require_key(attacker_model, "level")),
     )
-    return model_entry_can_fight_target(game_state, synth, target_entry, ez)
+    return model_entry_can_fight_target(
+        game_state, synth, target_entry, ez,
+        vertical_zone_inches=get_engagement_zone_vertical(game_state),
+    )
 
 
 def model_entry_can_fight_target(
@@ -1684,6 +1825,7 @@ def model_entry_can_fight_target(
     attacker_model_entry: Dict[str, Any],
     target_entry: Dict[str, Any],
     engagement_zone: int,
+    vertical_zone_inches: Optional[float] = None,
 ) -> bool:
     """Coeur de 04.02, sur une empreinte de figurine DEJA construite.
 
@@ -1696,11 +1838,16 @@ def model_entry_can_fight_target(
     ⚠️ C'est le MEME predicat, pas une copie : les deux fonctions partagent ce corps. Le
     dupliquer cote observation l'aurait laisse diverger de la resolution (une metrique differente
     et l'obs annoncerait un volume d'attaques que le combat ne produit pas).
+
+    ``vertical_zone_inches`` : seuil vertical §03.04. Il est passé par les DEUX appelants
+    (moteur et observation) — sans lui, l'obs annoncerait engagées des figurines que la
+    résolution refuse, exactement la divergence que ce prédicat partagé existe pour empêcher.
     """
     from engine.spatial_relations import unit_entries_within_engagement_zone
 
     return unit_entries_within_engagement_zone(
-        attacker_model_entry, target_entry, engagement_zone
+        attacker_model_entry, target_entry, engagement_zone,
+        vertical_zone_inches=vertical_zone_inches,
     )
 
 
@@ -2110,13 +2257,14 @@ def fight_compute_engaged_snapshot(game_state: Dict[str, Any]) -> Dict[str, bool
     )
 
     ez = get_engagement_zone(game_state)
+    vz = get_engagement_zone_vertical(game_state)
     snapshot: Dict[str, bool] = {}
     for u in require_key(game_state, "units"):
         uid = str(require_key(u, "id"))
         if not is_unit_alive(uid, game_state):
             continue
         snapshot[uid] = unit_within_engagement_zone_footprints(
-            game_state, u, engagement_zone=ez, max_distance=ez
+            game_state, u, engagement_zone=ez, max_distance=ez, vertical_zone_inches=vz,
         )
     return snapshot
 
@@ -2129,6 +2277,7 @@ def _fight_units_engaged_with(game_state: Dict[str, Any], unit: Dict[str, Any]) 
     )
 
     ez = get_engagement_zone(game_state)
+    vz = get_engagement_zone_vertical(game_state)
     units_cache = require_key(game_state, "units_cache")
     unit_id_str = str(require_key(unit, "id"))
     entry = units_cache.get(unit_id_str)
@@ -2141,7 +2290,7 @@ def _fight_units_engaged_with(game_state: Dict[str, Any], unit: Dict[str, Any]) 
             continue
         if int(require_key(ce, "player")) == unit_player:
             continue
-        if unit_entries_within_engagement_zone(entry, ce, ez):
+        if unit_entries_within_engagement_zone(entry, ce, ez, vertical_zone_inches=vz):
             engaged.append(str(eid))
     return engaged
 
@@ -2237,6 +2386,7 @@ def pile_in_move_destinations_12_03(
         return []
 
     ez = get_engagement_zone(game_state)
+    vz = get_engagement_zone_vertical(game_state)
     units_cache = require_key(game_state, "units_cache")
     unit_id_str = str(require_key(unit, "id"))
     entry = units_cache.get(unit_id_str)
@@ -2288,20 +2438,21 @@ def pile_in_move_destinations_12_03(
             game_state, fp, d_min_sel, closest_tier
         ):
             continue
-        # AFTER : l'unité doit finir engagée (avec au moins un ennemi).
-        if not _fight_footprint_in_engagement_with_any_enemy(game_state, unit, int(ac), int(ar), fp):
+        # AFTER : l'unité doit finir engagée (avec au moins un ennemi). L'entrée synthétique de
+        # cette ancre sert AUSSI aux deux contrôles suivants — la construire une seule fois.
+        synth = _fight_synth_cache_entry_at_footprint(unit, game_state, int(ac), int(ar), fp)
+        if not _fight_entry_in_engagement_with_any_enemy(game_state, unit, synth):
             continue
         # AFTER : conserver chaque engagement de départ.
-        synth = _fight_synth_cache_entry_at_footprint(unit, game_state, int(ac), int(ar), fp)
         if not all(
-            unit_entries_within_engagement_zone(synth, ce, ez)
+            unit_entries_within_engagement_zone(synth, ce, ez, vertical_zone_inches=vz)
             for _eid, ce in engaged_before_entries
         ):
             continue
         destinations.append(anchor)
         # WHILE « engaged with it if possible » : ancre engageant la cible la plus proche.
         if any(
-            unit_entries_within_engagement_zone(synth, ce, ez)
+            unit_entries_within_engagement_zone(synth, ce, ez, vertical_zone_inches=vz)
             for ce in closest_tier_entries
         ):
             engaging_closest.append(anchor)
@@ -2331,7 +2482,8 @@ def _fight_v11_engaged_now(game_state: Dict[str, Any], unit: Dict[str, Any]) -> 
 
     ez = get_engagement_zone(game_state)
     return unit_within_engagement_zone_footprints(
-        game_state, unit, engagement_zone=ez, max_distance=ez
+        game_state, unit, engagement_zone=ez, max_distance=ez,
+        vertical_zone_inches=get_engagement_zone_vertical(game_state),
     )
 
 
@@ -3071,6 +3223,7 @@ def _fight_pile_in_build_model_pool(
         return empty
 
     ez = int(get_engagement_zone(game_state))
+    vz = get_engagement_zone_vertical(game_state)
     budget = 3 * int(require_key(game_state, "inches_to_subhex"))
     board_cols = int(require_key(game_state, "board_cols"))
     board_rows = int(require_key(game_state, "board_rows"))
@@ -3248,8 +3401,13 @@ def _fight_pile_in_build_model_pool(
         if d_min >= start_min:
             continue  # WHILE MOVING : strictement plus proche du palier le plus proche
         closer.append([cc, rr])
-        synth = _charge_synthetic_charger_cache_entry(game_state, unit, cc, rr, cand_fp)
-        if any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
+        synth = _charge_synthetic_charger_cache_entry(
+            game_state, unit, cc, rr, cand_fp, level=dest_eff
+        )
+        if any(
+            unit_entries_within_engagement_zone(synth, te, ez, vertical_zone_inches=vz)
+            for te in target_entries
+        ):
             engaged.append([cc, rr])
 
     return {"closer": closer, "engaged": engaged}
@@ -3325,13 +3483,9 @@ def _fight_pile_in_preview_plan(
         return empty
     models_cache = require_key(game_state, "models_cache")
 
-    def _plan_level(entry: MovePlanEntry) -> int:
-        if len(entry) >= 4 and entry[3] is not None:
-            return int(entry[3])
-        m = models_cache.get(str(entry[0]))
-        return int(m.get("level", 0)) if m else 0  # get allowed (champ optionnel : level absent = sol)
-
-    norm = [(str(e[0]), int(e[1]), int(e[2]), _plan_level(e)) for e in plan]
+    # Niveau porté par le plan (frontière de décodage), jamais déduit du models_cache : une fig
+    # montée à l'étage doit être validée contre l'occupation de SON étage.
+    norm = [(str(e[0]), int(e[1]), int(e[2]), int(e[3])) for e in plan]
     n = len(norm)
     if n == 0:
         return empty
@@ -3377,12 +3531,19 @@ def _fight_pile_in_preview_plan(
     for f in fps:
         union_fp |= f
     anchor_c, anchor_r = norm[0][1], norm[0][2]
-    synth_unit = _fight_synth_cache_entry_at_footprint(unit, game_state, anchor_c, anchor_r, union_fp)
+    # Configuration par-figurine RÉELLE du plan (chaque fig à SON étage) : sans elle, l'entrée
+    # héritait la carte par-figurine d'AVANT le move (euclidien) et écrasait les étages (3D).
+    synth_unit = _fight_synth_cache_entry_at_footprint(
+        unit, game_state, anchor_c, anchor_r, union_fp,
+        model_placements={mid: (c, r, lv) for mid, c, r, lv in norm},
+    )
     ez = int(get_engagement_zone(game_state))
+    vz = get_engagement_zone_vertical(game_state)
     units_cache = require_key(game_state, "units_cache")
     player = int(require_key(unit, "player"))
     unit_engaged = any(
-        int(ce["player"]) != player and unit_entries_within_engagement_zone(synth_unit, ce, ez)
+        int(ce["player"]) != player
+        and unit_entries_within_engagement_zone(synth_unit, ce, ez, vertical_zone_inches=vz)
         for eid, ce in units_cache.items()
         if str(eid) != str(squad_id)
     )
@@ -3399,14 +3560,21 @@ def _fight_pile_in_preview_plan(
         start_fp_i = _candidate_footprint_charge(
             int(m["col"]), int(m["row"]), unit, game_state, fp_pair
         )
+        # Départ = étage COURANT de la figurine, arrivée = étage PLANIFIÉ : comparer les deux
+        # engagements au même niveau ferait perdre/gagner un engagement par pur effet vertical.
         synth_start = _charge_synthetic_charger_cache_entry(
-            game_state, unit, int(m["col"]), int(m["row"]), start_fp_i
+            game_state, unit, int(m["col"]), int(m["row"]), start_fp_i,
+            level=int(require_key(m, "level")),
         )
-        synth_end = _charge_synthetic_charger_cache_entry(game_state, unit, c, r, fps[i])
+        synth_end = _charge_synthetic_charger_cache_entry(
+            game_state, unit, c, r, fps[i], level=int(_lv)
+        )
         for _eid, ce in enemy_entries:
             if unit_entries_within_engagement_zone(
-                synth_start, ce, ez
-            ) and not unit_entries_within_engagement_zone(synth_end, ce, ez):
+                synth_start, ce, ez, vertical_zone_inches=vz
+            ) and not unit_entries_within_engagement_zone(
+                synth_end, ce, ez, vertical_zone_inches=vz
+            ):
                 kept_engagements = False
                 break
         if not kept_engagements:
@@ -3500,13 +3668,19 @@ def _fight_pile_in_model_plan_state(
     # Figs (posées ou à l'origine) dont l'empreinte finit à ≤ EZ d'une cible pile-in → voile vert UI
     # (en mesure de frapper). Cibles exposées au front pour le cercle violet + hit-test du Focus.
     ez = int(get_engagement_zone(game_state))
+    vz = get_engagement_zone_vertical(game_state)
     fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
     target_entries = [units_cache[t] for t in targets if t in units_cache]
     engaged_models: List[str] = []
     for m, c, r, _lv in full_plan:
         fp = _candidate_footprint_charge(int(c), int(r), unit, game_state, fp_pair)
-        synth = _charge_synthetic_charger_cache_entry(game_state, unit, int(c), int(r), fp)
-        if any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
+        synth = _charge_synthetic_charger_cache_entry(
+            game_state, unit, int(c), int(r), fp, level=int(_lv)
+        )
+        if any(
+            unit_entries_within_engagement_zone(synth, te, ez, vertical_zone_inches=vz)
+            for te in target_entries
+        ):
             engaged_models.append(m)
 
     return {
@@ -3557,6 +3731,11 @@ def _fight_model_in_base_contact(
     Règle 12.03 WHILE : « Models in base-contact with one or more enemy models cannot be moved. »
     Socles ronds (Board ×10) → écart euclidien bord-à-bord ; sinon métrique empreinte (contact ⟺
     distance 0). Lecture pure, réutilise les primitives moteur (aucune géométrie réimplémentée).
+
+    Le contact est gaté VERTICALEMENT comme l'engagement (§03.04) : deux socles superposés à des
+    étages différents ne se touchent pas. Sans ce gate, une figurine sous un ennemi posé à
+    l'étage était FIGÉE pour le pile-in et la consolidation alors que le moteur déclare la paire
+    non engagée — un contrôle 2D qui immobilise une unité que la règle 3D a libérée.
     """
     from engine.hex_utils import euclidean_edge_clearance_round_round, min_distance_between_sets
     from .charge_handlers import _charge_model_footprint
@@ -3567,6 +3746,25 @@ def _fight_model_in_base_contact(
     player = int(model_entry["player"])
     fp = _charge_model_footprint(game_state, model_entry, mc, mr)
     units_cache = require_key(game_state, "units_cache")
+    vz = get_engagement_zone_vertical(game_state)
+    m_floor = float(model_entry.get("floor_height", 0.0))  # get allowed (rempli ci-dessous)
+    squad_id = str(model_entry.get("squad_id", ""))  # get allowed (entrées de test sans squad)
+    own_entry = units_cache.get(squad_id)  # get allowed
+    if own_entry is not None:
+        _own_floors = own_entry.get("floor_height_by_model")  # get allowed (entrées de test 2D)
+        if isinstance(_own_floors, dict):
+            m_floor = float(_own_floors.get(str(model_entry.get("id", "")), m_floor))  # get allowed
+    m_height = float(own_entry.get("MODEL_HEIGHT", 0.0)) if own_entry is not None else 0.0  # get allowed
+
+    def _vertically_touching(enemy_entry: Dict[str, Any], emid: Any) -> bool:
+        """Intervalles verticaux séparés de ≤ ``vz`` (même formule que l'engagement 3D)."""
+        floors = enemy_entry.get("floor_height_by_model")  # get allowed (entrées de test 2D)
+        if not isinstance(floors, dict):
+            return True  # pas de donnée verticale → contrôle horizontal seul (plateau plat)
+        ef = float(floors.get(str(emid), 0.0))  # get allowed
+        eh = float(enemy_entry.get("MODEL_HEIGHT", 0.0))  # get allowed
+        return max(0.0, max(m_floor, ef) - min(m_floor + m_height, ef + eh)) <= vz
+
     for ce in units_cache.values():
         if int(ce["player"]) == player:
             continue
@@ -3574,13 +3772,19 @@ def _fight_model_in_base_contact(
         ebs = ce["BASE_SIZE"]
         if mshape == "round" and eshape == "round" and isinstance(mbs, int) and isinstance(ebs, int):
             by_model = ce.get("occupied_hexes_by_model")
-            positions = by_model.values() if by_model else [(int(ce["col"]), int(ce["row"]))]
-            for ec, er in positions:
-                if euclidean_edge_clearance_round_round(mc, mr, mbs, int(ec), int(er), ebs) <= 1e-6:
+            items = by_model.items() if by_model else [(None, (int(ce["col"]), int(ce["row"])))]
+            for emid, (ec, er) in items:
+                if (
+                    euclidean_edge_clearance_round_round(mc, mr, mbs, int(ec), int(er), ebs) <= 1e-6
+                    and _vertically_touching(ce, emid)
+                ):
                     return True
         else:
             efp = ce.get("occupied_hexes") or {(int(ce["col"]), int(ce["row"]))}
-            if min_distance_between_sets(fp, efp, max_distance=0) <= 0:
+            if min_distance_between_sets(fp, efp, max_distance=0) <= 0 and any(
+                _vertically_touching(ce, _em)
+                for _em in (ce.get("occupied_hexes_by_model") or {None})  # get allowed
+            ):
                 return True
     return False
 
@@ -3650,6 +3854,7 @@ def pile_in_autoplace_plan(
         raise ValueError(f"pile_in_autoplace_plan: palier le plus proche introuvable pour {squad_id}")
 
     ez = int(get_engagement_zone(game_state))
+    vz = get_engagement_zone_vertical(game_state)
     budget = 3 * int(require_key(game_state, "inches_to_subhex"))
     board_cols = int(require_key(game_state, "board_cols"))
     board_rows = int(require_key(game_state, "board_rows"))
@@ -3733,9 +3938,20 @@ def pile_in_autoplace_plan(
     def _model_fp(mid: str, c: int, r: int) -> Set[Tuple[int, int]]:
         return _charge_model_footprint(game_state, models_cache[mid], c, r)
 
-    def _engages_focus(c: int, r: int, fp: Set[Tuple[int, int]]) -> bool:
-        synth = _charge_synthetic_charger_cache_entry(game_state, unit, c, r, fp)
-        return unit_entries_within_engagement_zone(synth, focus_entry, ez)
+    def _engages_focus(mid: str, c: int, r: int, fp: Set[Tuple[int, int]]) -> bool:
+        # ILP horizontal : la figurine garde son étage QUAND le slot en porte un (§13.06) — sinon
+        # elle y est au sol. L'engagement se mesure au niveau EFFECTIF du slot, jamais à celui du
+        # départ : une fig à l'étage n'engage pas un ennemi trois étages plus bas, et un slot hors
+        # plancher n'est pas « à l'étage ».
+        synth = _charge_synthetic_charger_cache_entry(
+            game_state, unit, c, r, fp,
+            level=_fight_effective_level_at(
+                game_state, models_cache[mid], c, r, int(require_key(models_cache[mid], "level"))
+            ),
+        )
+        return unit_entries_within_engagement_zone(
+            synth, focus_entry, ez, vertical_zone_inches=vz
+        )
 
     def _fp_min_to_tier(fp: Set[Tuple[int, int]]) -> int:
         return min(min_distance_between_sets(fp, t) for t in tier_fps) if tier_fps else 1 << 30
@@ -3750,12 +3966,21 @@ def pile_in_autoplace_plan(
         if _fp_min_to_tier(_model_fp(mid, int(m["col"]), int(m["row"]))) <= 0:
             static_blockers.append(_socle(mid, int(m["col"]), int(m["row"])))
 
-    # --- Slots : bande d'engagement du focus, par taille de socle distincte (coût). ---
-    def _base_key(m: Dict[str, Any]) -> Tuple[Any, Any]:
+    # --- Slots : bande d'engagement du focus, par (socle, ÉTAGE) distinct (coût). ---
+    # L'étage fait partie de la clé, pas seulement le socle : les slots d'un groupe sont validés
+    # UNE fois via la figurine représentative (`_engages_focus`), or l'engagement dépend de la
+    # hauteur (§03.04). Grouper une escouade à cheval sur deux niveaux par le seul socle faisait
+    # valider tous ses slots à l'altitude du représentant — donc au mauvais étage pour la moitié
+    # de l'escouade.
+    def _base_key(m: Dict[str, Any]) -> Tuple[Any, Any, int]:
         bs = m["BASE_SIZE"]
-        return (m["BASE_SHAPE"], tuple(bs) if isinstance(bs, (list, tuple)) else bs)
+        return (
+            m["BASE_SHAPE"],
+            tuple(bs) if isinstance(bs, (list, tuple)) else bs,
+            int(m.get("level", 0)),  # get allowed (champ optionnel : level absent = sol)
+        )
 
-    by_base: Dict[Tuple[Any, Any], List[str]] = {}
+    by_base: Dict[Tuple[Any, Any, int], List[str]] = {}
     for mid in movable:
         by_base.setdefault(_base_key(models_cache[mid]), []).append(mid)
 
@@ -3807,7 +4032,7 @@ def pile_in_autoplace_plan(
     # Liste GLOBALE des slots (toutes bases) : (col, row, Socle, slot_min_to_tier, dist_to_focus).
     all_slots: List[Tuple[int, int, Any, int, int]] = []
     # slots_by_base[bkey] = [index dans all_slots, ...]
-    slots_by_base: Dict[Tuple[Any, Any], List[int]] = {}
+    slots_by_base: Dict[Tuple[Any, Any, int], List[int]] = {}
     for bkey, mids in by_base.items():
         rep_id = mids[0]
         margin = ez + fp_radius_by_base[bkey] + 2
@@ -3820,7 +4045,7 @@ def pile_in_autoplace_plan(
                 continue
             if _overlaps(soc, near_blockers):
                 continue
-            if not _engages_focus(c, r, fps):
+            if not _engages_focus(rep_id, c, r, fps):
                 continue
             slot_min = min((dist_to_tier[cell] for cell in fps if cell in dist_to_tier), default=1 << 30)
             df_slot = min((dist_to_focus[cell] for cell in fps if cell in dist_to_focus), default=1 << 30)
@@ -3859,12 +4084,15 @@ def pile_in_autoplace_plan(
 
     # Engagements de départ par fig (AFTER : à conserver au slot).
     def _start_engagements(mid: str) -> List[Dict[str, Any]]:
-        synth = _charge_synthetic_charger_cache_entry(game_state, unit, *starts[mid], start_fp[mid])
+        synth = _charge_synthetic_charger_cache_entry(
+            game_state, unit, *starts[mid], start_fp[mid],
+            level=int(require_key(models_cache[mid], "level")),
+        )
         out: List[Dict[str, Any]] = []
         for eid, ce in units_cache.items():
             if int(ce["player"]) == player or str(eid) == str(squad_id):
                 continue
-            if unit_entries_within_engagement_zone(synth, ce, ez):
+            if unit_entries_within_engagement_zone(synth, ce, ez, vertical_zone_inches=vz):
                 out.append(ce)
         return out
 
@@ -3884,8 +4112,19 @@ def pile_in_autoplace_plan(
             if pd is None:
                 continue  # slot hors budget (atteignabilité réelle)
             if start_eng:
-                synth_slot = _charge_synthetic_charger_cache_entry(game_state, unit, sc, sr, set(soc.fp))
-                if not all(unit_entries_within_engagement_zone(synth_slot, ce, ez) for ce in start_eng):
+                synth_slot = _charge_synthetic_charger_cache_entry(
+                    game_state, unit, sc, sr, set(soc.fp),
+                    level=_fight_effective_level_at(
+                        game_state, models_cache[mid], sc, sr,
+                        int(require_key(models_cache[mid], "level")),
+                    ),
+                )
+                if not all(
+                    unit_entries_within_engagement_zone(
+                        synth_slot, ce, ez, vertical_zone_inches=vz
+                    )
+                    for ce in start_eng
+                ):
                     continue  # AFTER : un engagement de départ serait perdu
             edges.append((mid, si, pd))
 
@@ -4030,7 +4269,20 @@ def pile_in_autoplace_plan(
     else:
         raise ValueError("pile_in_autoplace_plan: résolution des chevauchements non convergente")
 
-    plan = [[mid, int(provisional[mid][0]), int(provisional[mid][1])] for mid in alive]
+    # L'ILP est HORIZONTAL, mais le niveau ANNONCÉ est celui où la figurine atterrit réellement
+    # (§13.06) : le même résolveur que les slots ci-dessus, donc le validateur accepte exactement
+    # ce que l'auto-placement propose. L'étage n'est jamais omis — un plan muet est refusé à la
+    # frontière, et le front n'a plus à le deviner.
+    plan = [
+        [
+            mid, int(provisional[mid][0]), int(provisional[mid][1]),
+            _fight_effective_level_at(
+                game_state, models_cache[mid], provisional[mid][0], provisional[mid][1],
+                int(require_key(models_cache[mid], "level")),
+            ),
+        ]
+        for mid in alive
+    ]
     return {"plan": plan}
 
 
@@ -4073,13 +4325,30 @@ def consolidate_autoplace_plan(
             )
         from .charge_handlers import charge_autoplace_plan
         budget = 3 * int(require_key(game_state, "inches_to_subhex"))
-        return charge_autoplace_plan(
+        out = charge_autoplace_plan(
             game_state, str(squad_id), mode,
             target_ids_override=[str(t) for t in tier],
             budget_override=budget,
             allow_nontarget_engagement=True,
             disable_fly=True,
         )
+        # `charge_autoplace_plan` annonce le SOL : sa géométrie est celle d'une charge « 3a »,
+        # qui atterrit au niveau 0. Une consolidation, elle, ne fait pas descendre l'escouade —
+        # le niveau est donc re-stampé à celui où chaque figurine atterrit RÉELLEMENT (son étage
+        # courant, résolu à la position choisie). Sans ce re-stamp, un Focus de consolidation
+        # depuis un étage committait toute l'escouade au sol.
+        models_cache = require_key(game_state, "models_cache")
+        out["plan"] = [
+            [
+                mid, int(c), int(r),
+                _fight_effective_level_at(
+                    game_state, models_cache[str(mid)], int(c), int(r),
+                    int(require_key(models_cache[str(mid)], "level")),
+                ),
+            ]
+            for mid, c, r, _lv in out["plan"]
+        ]
+        return out
     if cons_mode == "objective":
         raise ValueError(
             f"consolidate_autoplace_plan: mode objective non supporté par le Focus "
@@ -4272,6 +4541,7 @@ def _fight_consolidation_build_model_pool(
         return empty
 
     ez = int(get_engagement_zone(game_state))
+    vz = get_engagement_zone_vertical(game_state)
     budget = 3 * int(require_key(game_state, "inches_to_subhex"))
     board_cols = int(require_key(game_state, "board_cols"))
     board_rows = int(require_key(game_state, "board_rows"))
@@ -4447,8 +4717,13 @@ def _fight_consolidation_build_model_pool(
             if d_min >= start_min:
                 continue  # WHILE : strictement plus proche du palier le plus proche
             closer.append([cc, rr])
-            synth = _charge_synthetic_charger_cache_entry(game_state, unit, cc, rr, cand_fp)
-            if any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
+            synth = _charge_synthetic_charger_cache_entry(
+                game_state, unit, cc, rr, cand_fp, level=dest_eff
+            )
+            if any(
+                unit_entries_within_engagement_zone(synth, te, ez, vertical_zone_inches=vz)
+                for te in target_entries
+            ):
                 engaged.append([cc, rr])
         else:  # zone (Objective)
             if cand_fp & zone_set:
@@ -4510,13 +4785,9 @@ def _fight_consolidation_preview_plan(
         return empty
     models_cache = require_key(game_state, "models_cache")
 
-    def _plan_level(entry: MovePlanEntry) -> int:
-        if len(entry) >= 4 and entry[3] is not None:
-            return int(entry[3])
-        m = models_cache.get(str(entry[0]))
-        return int(m.get("level", 0)) if m else 0  # get allowed (champ optionnel : level absent = sol)
-
-    norm = [(str(e[0]), int(e[1]), int(e[2]), _plan_level(e)) for e in plan]
+    # Niveau porté par le plan (frontière de décodage), jamais déduit du models_cache : une fig
+    # montée à l'étage doit être validée contre l'occupation de SON étage.
+    norm = [(str(e[0]), int(e[1]), int(e[2]), int(e[3])) for e in plan]
     n = len(norm)
     if n == 0:
         return empty
@@ -4561,13 +4832,20 @@ def _fight_consolidation_preview_plan(
     for f in fps:
         union_fp |= f
     anchor_c, anchor_r = norm[0][1], norm[0][2]
-    synth_unit = _fight_synth_cache_entry_at_footprint(unit, game_state, anchor_c, anchor_r, union_fp)
+    # Configuration par-figurine RÉELLE du plan (chaque fig à SON étage) : sans elle, l'entrée
+    # héritait la carte par-figurine d'AVANT le move (euclidien) et écrasait les étages (3D).
+    synth_unit = _fight_synth_cache_entry_at_footprint(
+        unit, game_state, anchor_c, anchor_r, union_fp,
+        model_placements={mid: (c, r, lv) for mid, c, r, lv in norm},
+    )
     ez = int(get_engagement_zone(game_state))
+    vz = get_engagement_zone_vertical(game_state)
     units_cache = require_key(game_state, "units_cache")
     player = int(require_key(unit, "player"))
 
     unit_engaged = any(
-        int(ce["player"]) != player and unit_entries_within_engagement_zone(synth_unit, ce, ez)
+        int(ce["player"]) != player
+        and unit_entries_within_engagement_zone(synth_unit, ce, ez, vertical_zone_inches=vz)
         for eid, ce in units_cache.items()
         if str(eid) != str(squad_id)
     )
@@ -4591,16 +4869,21 @@ def _fight_consolidation_preview_plan(
             start_fp_i = _candidate_footprint_charge(
                 int(m["col"]), int(m["row"]), unit, game_state, fp_pair
             )
+            # Départ = étage COURANT de la figurine (miroir strict du pile-in) : le comparer
+            # au sol ferait perdre/gagner un engagement par pur effet vertical.
             synth_start = _charge_synthetic_charger_cache_entry(
-                game_state, unit, int(m["col"]), int(m["row"]), start_fp_i
+                game_state, unit, int(m["col"]), int(m["row"]), start_fp_i,
+                level=int(require_key(m, "level")),
             )
             synth_end = _charge_synthetic_charger_cache_entry(
-                game_state, unit, c, r, fps[i]
+                game_state, unit, c, r, fps[i], level=int(_lv)
             )
             for _eid, ce in enemy_entries:
                 if unit_entries_within_engagement_zone(
-                    synth_start, ce, ez
-                ) and not unit_entries_within_engagement_zone(synth_end, ce, ez):
+                    synth_start, ce, ez, vertical_zone_inches=vz
+                ) and not unit_entries_within_engagement_zone(
+                    synth_end, ce, ez, vertical_zone_inches=vz
+                ):
                     kept_engagements = False
                     break
             if not kept_engagements:
@@ -4611,7 +4894,9 @@ def _fight_consolidation_preview_plan(
         engaged_with_all_selected = bool(selected)
         for eid in selected:
             ce = units_cache.get(eid)
-            if ce is None or not unit_entries_within_engagement_zone(synth_unit, ce, ez):
+            if ce is None or not unit_entries_within_engagement_zone(
+                synth_unit, ce, ez, vertical_zone_inches=vz
+            ):
                 engaged_with_all_selected = False
                 break
         after_ok = engaged_with_all_selected
@@ -4752,14 +5037,20 @@ def _fight_consolidation_model_plan_state(
 
     # Voile vert UI : figs « en position » (≤ EZ d'un ennemi du palier, ou dans la zone objectif).
     ez = int(get_engagement_zone(game_state))
+    vz = get_engagement_zone_vertical(game_state)
     fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
     engaged_models: List[str] = []
     if tier_kind == "enemy":
         target_entries = [units_cache[t] for t in closest_tier if t in units_cache]
         for m, c, r, _lv in full_plan:
             fp = _candidate_footprint_charge(int(c), int(r), unit, game_state, fp_pair)
-            synth = _charge_synthetic_charger_cache_entry(game_state, unit, int(c), int(r), fp)
-            if any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
+            synth = _charge_synthetic_charger_cache_entry(
+                game_state, unit, int(c), int(r), fp, level=int(_lv)
+            )
+            if any(
+                unit_entries_within_engagement_zone(synth, te, ez, vertical_zone_inches=vz)
+                for te in target_entries
+            ):
                 engaged_models.append(m)
     else:
         zone_set: Set[Tuple[int, int]] = set(tier)
@@ -5490,13 +5781,11 @@ def _fight_v11_manual_step(
         _view_level = int(action.get("level") or 0)
 
         def _prov_from_action() -> Dict[str, Tuple[int, int, int]]:
-            # (col,row) ou (col,row,level) : le niveau d'étage capturé au drop de chaque fig (frontend)
-            # est conservé → une fig posée sur un étage y reste (§13.06, miroir move par-figurine).
-            prov: Dict[str, Tuple[int, int, int]] = {}
-            for e in (action.get("plan") or []):
-                lvl = int(e[3]) if len(e) >= 4 and e[3] is not None else _view_level
-                prov[str(e[0])] = (int(e[1]), int(e[2]), lvl)
-            return prov
+            # Le niveau d'étage capturé au drop de chaque fig est OBLIGATOIRE : une fig posée sur
+            # un étage y reste (§13.06, miroir move par-figurine).
+            return parse_model_plan_as_map(
+                action.get("plan") or [], action_name="pile_in plan"
+            )
 
         if skip:
             # Le joueur renonce à piler l'unité active → marquée traitée sans déplacement.
@@ -5796,13 +6085,9 @@ def _fight_v11_manual_step(
         _view_level = int(action.get("level") or 0)
 
         def _prov_from_action() -> Dict[str, Tuple[int, int, int]]:
-            # (col,row) ou (col,row,level) : niveau d'étage capturé au drop de chaque fig (frontend)
-            # conservé → une fig posée sur un étage y reste (§13.06, miroir move par-figurine).
-            prov: Dict[str, Tuple[int, int, int]] = {}
-            for e in (action.get("plan") or []):
-                lvl = int(e[3]) if len(e) >= 4 and e[3] is not None else _view_level
-                prov[str(e[0])] = (int(e[1]), int(e[2]), lvl)
-            return prov
+            return parse_model_plan_as_map(
+                action.get("plan") or [], action_name="consolidation plan"
+            )
 
         if skip:
             # Le joueur renonce à consolider l'unité active → traitée sans déplacement.

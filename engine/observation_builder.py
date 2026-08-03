@@ -1209,7 +1209,8 @@ class ObservationBuilder:
                         1
                         for synth in ctx["synth_by_mid"].values()
                         if model_entry_can_fight_target(
-                            game_state, synth, target_entry, ctx["engagement_zone"]
+                            game_state, synth, target_entry, ctx["engagement_zone"],
+                            vertical_zone_inches=ctx["engagement_zone_vertical"],
                         )
                     ),
                 )
@@ -1294,6 +1295,11 @@ class ObservationBuilder:
         from engine.combat_utils import socle_from_cache_entry
 
         ez_zone = get_engagement_zone(game_state)
+        # Engagement 3D (§03.04) : l'observation mesure EXACTEMENT ce que le moteur résout.
+        # Laisser l'obs en 2D pendant que le fight passe en 3D annoncerait à l'agent des
+        # engagements que la résolution refuse (divergence masque/exécution).
+        from engine.spatial_relations import get_engagement_zone_vertical
+        ez_vert = get_engagement_zone_vertical(game_state)
         current_turn = int(game_state.get("turn", 0))  # get allowed (etat non initialise = tour 0)
         enemy_player = 2 if active_player == 1 else 1
         # Centroïde : REQUIS. `_compute_squad_cache_entry` le pose toujours (même escouade morte) ;
@@ -1432,7 +1438,9 @@ class ObservationBuilder:
             if fsid == active_squad_id:
                 active_relevant_enemies = relevant
             for e_entry in relevant:
-                if unit_entries_within_engagement_zone(f_entry, e_entry, ez_zone, metric="hex"):
+                if unit_entries_within_engagement_zone(
+                    f_entry, e_entry, ez_zone, metric="hex", vertical_zone_inches=ez_vert
+                ):
                     engaged_squads.add(fsid)
                     esid_of_entry = sid_by_entry_id.get(id(e_entry))
                     if esid_of_entry is None:
@@ -1475,10 +1483,15 @@ class ObservationBuilder:
         in_enemy_ez: Dict[str, bool] = {}
         for mid in alive_mids:
             m = models_cache[mid]
-            synth = _synth_model_entry(game_state, active_squad_id, m, int(m["col"]), int(m["row"]))
+            synth = _synth_model_entry(
+                game_state, active_squad_id, m, int(m["col"]), int(m["row"]),
+                level=int(require_key(m, "level")),
+            )
             synth_by_mid[mid] = synth
             in_enemy_ez[mid] = any(
-                unit_entries_within_engagement_zone(synth, ee, ez_zone, metric="hex")
+                unit_entries_within_engagement_zone(
+                    synth, ee, ez_zone, metric="hex", vertical_zone_inches=ez_vert
+                )
                 for ee in active_relevant_enemies
             )
         relayed_by_mid: Dict[str, bool] = {}
@@ -1489,7 +1502,8 @@ class ObservationBuilder:
                     if other_mid == mid or not in_enemy_ez[other_mid]:
                         continue
                     if unit_entries_within_engagement_zone(
-                        synth_by_mid[mid], synth_by_mid[other_mid], ez_zone, metric="hex"
+                        synth_by_mid[mid], synth_by_mid[other_mid], ez_zone, metric="hex",
+                        vertical_zone_inches=ez_vert,
                     ):
                         relayed = True
                         break
@@ -1577,6 +1591,7 @@ class ObservationBuilder:
             # Empreintes par figurine, réutilisées telles quelles pour le comptage 04.02.
             "synth_by_mid": synth_by_mid,
             "engagement_zone": ez_zone,
+            "engagement_zone_vertical": ez_vert,
         }
 
         def _write_entity(prefix: str, row: int, sid: str, *, is_ally: bool, is_active: bool) -> None:

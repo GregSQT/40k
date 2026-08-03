@@ -126,7 +126,10 @@ def test_pair_cache_consistent_across_chokepoint_operations():
         if len(mids) < 2:
             continue
         # Plan par-figurine : décale chaque fig de (+1,+1) — footprint change, ancre incluse.
-        plan = [(m, int(mc[m]["col"]) + 1, int(mc[m]["row"]) + 1) for m in mids]
+        plan = [
+            (m, int(mc[m]["col"]) + 1, int(mc[m]["row"]) + 1, int(mc[m]["level"]))
+            for m in mids
+        ]
         touch_all_pairs()
         commit_move(plan, gs, "pile_in")
         ops += 1

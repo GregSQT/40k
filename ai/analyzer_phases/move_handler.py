@@ -317,10 +317,12 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         was_adjacent_in_snapshot = is_within_engine_engagement_zone(
             move_unit_id, state.unit_player, enemy_positions_in_snapshot, state.unit_hp,
             engagement_zone=_get_engagement_zone_for_analyzer(), position_override=start_pos,
+            **state.engagement_3d_kwargs_at_start(),  # ancre de DÉPART → altitudes d'avant la ligne
         )
         was_adjacent_in_current = is_within_engine_engagement_zone(
             move_unit_id, state.unit_player, enemy_positions_current, state.unit_hp,
             engagement_zone=_get_engagement_zone_for_analyzer(), position_override=start_pos,
+            **state.engagement_3d_kwargs_at_start(),  # ancre de DÉPART → altitudes d'avant la ligne
         )
         if (was_adjacent_in_snapshot and was_adjacent_in_current and
                 len(state.positions_at_move_phase_start) >= 2 and
@@ -543,6 +545,7 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         dest_adjacent = is_within_engine_engagement_zone(
             move_unit_id, state.unit_player, positions_for_adjacency_check_filtered, unit_hp_at_movement,
             engagement_zone=_get_engagement_zone_for_analyzer(), position_override=(dest_col, dest_row),
+            **state.engagement_3d_kwargs(),
         )
         if dest_adjacent:
             if not adjacent_before:

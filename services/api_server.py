@@ -2788,13 +2788,16 @@ def execute_action():
                 "error": "deploy_squad_destinations requires plan",
             }), 400
         from engine.phase_handlers import deployment_handlers as _dh_squad
-        # Pool de suivi squad = translation rigide HORIZONTALE : on ne garde que (mid, col, row).
-        # Tolère les entrées 3 (sol) ou 4 (avec niveau) — le niveau n'intervient pas ici, mais on
-        # ne DROPPE pas silencieusement une entrée à 4 éléments (sinon empreinte combinée tronquée).
+        from engine.phase_handlers.shared_utils import parse_model_plan
+        # Pool de suivi squad = translation rigide HORIZONTALE : le niveau n'entre pas dans le
+        # calcul (la zone de déploiement est 2D), mais il est EXIGÉ comme partout ailleurs — un
+        # plan muet est refusé à la frontière, jamais silencieusement filtré (le filtre `len(e) in
+        # (3, 4)` faisait disparaître une entrée malformée au lieu de la signaler).
         _squad_plan = [
-            (str(e[0]), int(e[1]), int(e[2]))
-            for e in _raw_squad_plan
-            if isinstance(e, (list, tuple)) and len(e) in (3, 4)
+            (mid, col, row)
+            for mid, col, row, _lv in parse_model_plan(
+                _raw_squad_plan, action_name="deploy_squad_destinations"
+            )
         ]
         _squad_pool = _dh_squad.deployment_build_squad_destinations_pool(
             engine.game_state, _squad_plan
@@ -2816,12 +2819,11 @@ def execute_action():
                 "success": False,
                 "error": "preview_move_plan requires unitId and plan (list of [model_id, col, row])",
             }), 400
-        # Préserver le niveau (étages) : entrée 3 (sol/niveau courant) ou 4 (avec niveau) — ne PAS
-        # tronquer à 3, sinon le preview d'un move à l'étage perdrait le niveau ciblé.
-        parsed_plan = [
-            (str(e[0]), int(e[1]), int(e[2])) + ((int(e[3]),) if len(e) >= 4 else ())
-            for e in plan
-        ]
+        # Le niveau (étages) est OBLIGATOIRE : sans lui le preview d'un move à l'étage mesurerait
+        # un autre niveau que le commit. L'orientation reste en 5e position, `None` si non fournie
+        # — c'est exactement ce que `movement_preview_move_plan` attend.
+        from engine.phase_handlers.shared_utils import parse_model_plan_with_orientation
+        parsed_plan = parse_model_plan_with_orientation(plan, action_name="preview_move_plan")
         from engine.phase_handlers import movement_handlers as _mh_plan
         preview = _mh_plan.movement_preview_move_plan(
             engine.game_state, str(squad_id), parsed_plan

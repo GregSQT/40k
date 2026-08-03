@@ -236,7 +236,7 @@ class TestChargeMove:
         assert state["unsatisfied_targets"] == [target]
 
         origin = game.unit(unit_id)
-        illegal = [[model_id, 0, 0] for model_id in game.models_of(unit_id)]
+        illegal = [[model_id, 0, 0, 0] for model_id in game.models_of(unit_id)]
         accepted, body = game.try_act("commit_charge_plan", unitId=unit_id, plan=illegal)
 
         assert not accepted, "un plan hors pool a été accepté"

@@ -41,6 +41,7 @@ def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: A
 
 _inches_to_subhex_analyzer_cache: Optional[int] = None
 _engagement_zone_analyzer_cache: Optional[int] = None
+_engagement_zone_vertical_analyzer_cache: Optional[float] = None
 
 
 def _get_inches_to_subhex_for_analyzer() -> int:
@@ -77,6 +78,26 @@ def _get_engagement_zone_for_analyzer() -> int:
         int(require_key(game_rules, "engagement_zone")) * _get_inches_to_subhex_for_analyzer()
     )
     return _engagement_zone_analyzer_cache
+
+
+def _get_engagement_zone_vertical_for_analyzer() -> float:
+    """Seuil VERTICAL d'engagement en POUCES (§03.04 : 2" horizontal ET 5" vertical).
+
+    Contrairement à ``engagement_zone``, ce seuil n'est PAS scalé : il se compare à des hauteurs
+    de plancher, déjà en pouces (même contrat que ``spatial_relations.get_engagement_zone_vertical``).
+    Le multiplier par ``inches_to_subhex`` rendrait le gate inopérant (5 → 50").
+    """
+    global _engagement_zone_vertical_analyzer_cache
+    if _engagement_zone_vertical_analyzer_cache is not None:
+        return _engagement_zone_vertical_analyzer_cache
+    from config_loader import get_config_loader
+    game_config = get_config_loader().get_game_config()
+    game_rules = require_key(game_config, "game_rules")
+    _engagement_zone_vertical_analyzer_cache = float(
+        require_key(game_rules, "engagement_zone_vertical")
+    )
+    return _engagement_zone_vertical_analyzer_cache
+
 
 MAX_D3 = 3
 MAX_D6 = 6
@@ -489,6 +510,32 @@ def is_adjacent_to_enemy(col: int, row: int, unit_player: Dict[str, int], unit_p
     return is_hex_anchor_adjacent_to_enemy(col, row, unit_player, unit_positions, unit_hp, player)
 
 
+def _analyzer_vertical_classes(
+    uid: str,
+    pos: Tuple[int, int],
+    heights_by_model: Optional[Dict[str, Dict[str, float]]],
+) -> Optional[Tuple[Dict[str, Tuple[int, int]], Dict[str, float]]]:
+    """Cartes verticales d'une entrée-cache d'analyzer : une CLASSE PAR HAUTEUR distincte.
+
+    L'entrée d'analyzer réduit l'unité à son ancre (``occupied_hexes = {pos}``, socle rond 1).
+    Pour ajouter le gate vertical §03.04 SANS toucher à cette géométrie horizontale, TOUS les
+    socles sont placés à l'ancre, chacun gardant SA hauteur : le test horizontal reste mot pour
+    mot celui d'avant (même empreinte), et le regroupement par hauteur est fait en aval par
+    ``_vertical_classes``. Une unité à cheval sur deux niveaux est donc engagée si l'un de ses
+    niveaux l'est — approximation conservatrice, identique dans son esprit à celle déjà assumée
+    par ``entry_vertically_reachable`` (union horizontale + gate vertical).
+
+    Retourne ``None`` quand l'unité n'a aucune altitude connue : l'appelant reste alors en 2D
+    plutôt que de supposer « au sol », ce qui inventerait une donnée.
+    """
+    if not heights_by_model:
+        return None
+    per_model = heights_by_model.get(uid)  # get allowed (unité jamais vue avec un segment)
+    if not per_model:
+        return None
+    return {mid: pos for mid in per_model}, {mid: float(h) for mid, h in per_model.items()}
+
+
 def is_within_engine_engagement_zone(
     unit_id: str,
     unit_player: Dict[str, int],
@@ -496,44 +543,70 @@ def is_within_engine_engagement_zone(
     unit_hp: Dict[str, int],
     engagement_zone: int,
     position_override: Optional[Tuple[int, int]] = None,
+    heights_by_model: Optional[Dict[str, Dict[str, float]]] = None,
+    unit_model_height: Optional[Dict[str, float]] = None,
+    vertical_zone_inches: Optional[float] = None,
 ) -> bool:
-    """Check B/engine engagement using the shared footprint engagement primitive."""
+    """Check B/engine engagement using the shared footprint engagement primitive.
+
+    Engagement 3D (§03.04 : 2" horizontal ET 5" vertical) : ``heights_by_model`` (hauteurs de
+    plancher par socle, lues dans le segment ``[MODELS:]`` du step.log), ``unit_model_height``
+    (MODEL_HEIGHT par unité, registry) et ``vertical_zone_inches`` sont fournis ENSEMBLE ou pas
+    du tout. Fournis, le contrôle mesure la même grandeur que le moteur ; absents, il reste 2D.
+
+    Le gate n'est appliqué que si TOUTES les unités du cache ont une altitude connue : la
+    primitive lève sur une entrée sans données verticales, et une unité laissée au sol par
+    défaut ferait un verdict faux plutôt qu'un verdict absent.
+    """
     from engine.spatial_relations import unit_within_engagement_zone_footprints
 
     if unit_id not in unit_positions and position_override is None:
         return False
     player = require_key(unit_player, unit_id)
+    want_3d = (
+        heights_by_model is not None
+        and unit_model_height is not None
+        and vertical_zone_inches is not None
+    )
     units_cache: Dict[str, Dict[str, Any]] = {}
+
+    def _entry(uid: str, pos: Tuple[int, int], uid_player: int) -> Dict[str, Any]:
+        entry: Dict[str, Any] = {
+            "col": pos[0],
+            "row": pos[1],
+            "player": uid_player,
+            "occupied_hexes": {pos},
+            "BASE_SHAPE": "round",
+            "BASE_SIZE": 1,
+            "orientation": 0,
+        }
+        if want_3d:
+            assert heights_by_model is not None and unit_model_height is not None
+            classes = _analyzer_vertical_classes(uid, pos, heights_by_model)
+            mh = unit_model_height.get(uid)  # get allowed (unité hors registry lu)
+            if classes is not None and mh is not None:
+                entry["occupied_hexes_by_model"], entry["floor_height_by_model"] = classes
+                entry["MODEL_HEIGHT"] = float(mh)
+        return entry
+
     for uid, pos in unit_positions.items():
         if uid not in unit_player:
             continue
         hp_value = _get_unit_hp_value(unit_hp, uid)
         if hp_value is None or hp_value <= 0:
             continue
-        units_cache[uid] = {
-            "col": pos[0],
-            "row": pos[1],
-            "player": require_key(unit_player, uid),
-            "occupied_hexes": {pos},
-            "BASE_SHAPE": "round",
-            "BASE_SIZE": 1,
-            "orientation": 0,
-        }
+        units_cache[uid] = _entry(uid, pos, require_key(unit_player, uid))
     if position_override is not None:
         hp_value = _get_unit_hp_value(unit_hp, unit_id)
         if hp_value is None or hp_value <= 0:
             return False
-        units_cache[unit_id] = {
-            "col": position_override[0],
-            "row": position_override[1],
-            "player": player,
-            "occupied_hexes": {position_override},
-            "BASE_SHAPE": "round",
-            "BASE_SIZE": 1,
-            "orientation": 0,
-        }
+        units_cache[unit_id] = _entry(unit_id, position_override, player)
     if unit_id not in units_cache:
         return False
+    # Tout ou rien : une seule entrée sans données verticales et la primitive lève. On retombe
+    # alors en 2D — un verdict horizontal reste juste sur un plateau plat, alors qu'un gate
+    # vertical partiel comparerait une unité réelle à une altitude supposée.
+    apply_3d = want_3d and all("MODEL_HEIGHT" in e for e in units_cache.values())
     game_state = {
         "config": {"game_rules": {"engagement_zone": engagement_zone}},
         "units_cache": units_cache,
@@ -543,6 +616,7 @@ def is_within_engine_engagement_zone(
         {"id": unit_id, "player": player},
         engagement_zone=engagement_zone,
         max_distance=engagement_zone,
+        vertical_zone_inches=vertical_zone_inches if apply_3d else None,
     )
 
 

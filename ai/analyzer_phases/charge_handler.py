@@ -142,6 +142,7 @@ def handle_charge(
                 state.unit_positions,
                 state.unit_hp,
                 engagement_zone=_get_engagement_zone_for_analyzer(),
+                **state.engagement_3d_kwargs_at_start(),  # ancre de DÉPART → altitudes d'avant la ligne
                 position_override=(start_col, start_row),
             ):
                 adjacent_enemies = get_adjacent_enemies(start_col, start_row, state.unit_player, state.unit_positions, state.unit_hp, state.unit_types, player)

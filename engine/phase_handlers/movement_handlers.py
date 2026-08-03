@@ -37,7 +37,7 @@ from .shared_utils import (
     coherency_violation_flags,
     _compute_unit_occupied_hexes, _squad_is_in_enemy_er,
     roll_advance_for_squad,
-    MovePlan,
+    MovePlan, parse_model_plan_with_orientation,
 )
 from engine.hex_utils import (
     _hex_center,
@@ -3791,7 +3791,7 @@ def movement_preview_move_plan(
         _mid = str(e[0])
         _m_norm = _mc_norm[_mid]
         _ori = int(e[4]) if len(e) >= 5 and e[4] is not None else int(_m_norm.get("orientation", 0))  # get allowed (défaut = orient courante fig)
-        _lvl_req = int(e[3]) if len(e) >= 4 and e[3] is not None else int(require_key(_m_norm, "level"))
+        _lvl_req = int(e[3])
         _lvl_eff = resolve_model_floor_level(
             int(e[1]), int(e[2]),
             require_key(_m_norm, "BASE_SHAPE"), require_key(_m_norm, "BASE_SIZE"),
@@ -3915,8 +3915,8 @@ def movement_commit_move_plan_handler(
 ) -> Tuple[bool, Dict[str, Any]]:
     """Valide (= bouton Validate) puis commit un plan provisoire par-figurine.
 
-    ``action["plan"]`` : liste de ``[model_id, col, row]``, DOIT couvrir toutes
-    les figurines vivantes de l'escouade (sinon la cohesion est fausse). Move
+    ``action["plan"]`` : liste de ``[model_id, col, row, level(, orientation)]``, DOIT couvrir
+    toutes les figurines vivantes de l'escouade (sinon la cohesion est fausse). Move
     normal ou fall_back selon engagement de l'escouade au moment du commit.
 
     Note brique 1 : aucun reactive move n'est declenche ici (move par-figurine) —
@@ -3927,25 +3927,9 @@ def movement_commit_move_plan_handler(
     raw_plan = action["plan"]
     if not isinstance(raw_plan, list) or not raw_plan:
         return False, {"error": "empty_move_plan", "unitId": squad_id}
-    # Entrées 3 (sol / niveau courant), 4 (avec niveau de destination, étages) ou 5 (avec
-    # orientation socle par-fig). Le niveau None = « garder le niveau courant » (move horizontal
-    # d'une fig déjà à l'étage) ; l'orientation None = orientation inchangée.
-    plan: List[Tuple[str, int, int, Optional[int], Optional[int]]] = []
-    for entry in raw_plan:
-        if not (isinstance(entry, (list, tuple)) and len(entry) in (3, 4, 5)):
-            raise ValueError(
-                f"commit_move_plan: plan entry must be [model_id, col, row(, level(, orientation))], got {entry!r}"
-            )
-        entry = cast("Sequence[Any]", entry)
-        lvl = int(entry[3]) if len(entry) >= 4 and entry[3] is not None else None
-        if lvl is not None and lvl < 0:
-            raise ValueError(f"commit_move_plan: level must be >= 0, got {entry!r}")
-        ori = int(entry[4]) if len(entry) >= 5 and entry[4] is not None else None
-        if ori is not None and not (0 <= ori < ORIENTATION_STEP_COUNT):
-            raise ValueError(
-                f"commit_move_plan: orientation must be in 0..{ORIENTATION_STEP_COUNT - 1}, got {entry!r}"
-            )
-        plan.append((str(entry[0]), int(entry[1]), int(entry[2]), lvl, ori))
+    # Entrées 4 (niveau de destination OBLIGATOIRE) ou 5 (avec orientation socle par-fig).
+    # L'orientation None = orientation inchangée ; le niveau, lui, n'est JAMAIS inventé (frontière).
+    plan = parse_model_plan_with_orientation(raw_plan, action_name="commit_move_plan")
 
     squad_models = require_key(game_state, "squad_models")
     models_cache = require_key(game_state, "models_cache")
@@ -3994,14 +3978,11 @@ def movement_commit_move_plan_handler(
 
     # Persiste le niveau EFFECTIF (13.06) : le niveau demandé (vue) n'est retenu que si l'empreinte
     # tient ENTIÈREMENT sur le plancher ; sinon la fig est committée au SOL (0). Miroir du preview et
-    # du déploiement — jamais un étage « à moitié » persisté. None (move horizontal) → niveau inchangé.
+    # du déploiement — jamais un étage « à moitié » persisté.
     from engine.terrain_utils import resolve_model_floor_level as _rmfl_commit
     _ta_commit = require_key(game_state, "terrain_areas")
-    _resolved_plan: List[Tuple[str, int, int, Optional[int], Optional[int]]] = []
+    _resolved_plan: List[Tuple[str, int, int, int, Optional[int]]] = []
     for _mid_c, _nc_c, _nr_c, _lv_c, _ori_c in plan:
-        if _lv_c is None:
-            _resolved_plan.append((_mid_c, _nc_c, _nr_c, None, _ori_c))
-            continue
         _m_c = models_cache[_mid_c]
         _eff_c = _rmfl_commit(
             _nc_c, _nr_c, require_key(_m_c, "BASE_SHAPE"), require_key(_m_c, "BASE_SIZE"),

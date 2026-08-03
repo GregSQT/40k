@@ -49,6 +49,7 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.unit_positions = {}
     state.unit_types = {}
     state.unit_move = {}
+    state.unit_model_height = {}
     state.wall_hexes = set()
     state.positions_at_turn_start = {}
     state.positions_at_move_phase_start = {}
@@ -79,4 +80,8 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.selected_choice_by_unit_source = {}
     state.positions_by_model = {}
     state.current_line_models = {}
+    # Altitudes : même remise à zéro que les positions — un épisode ne doit rien hériter du
+    # précédent (le terrain peut changer de scénario en scénario).
+    state.heights_by_model = {}
+    state.current_line_heights = {}
     state.unit_base = {}

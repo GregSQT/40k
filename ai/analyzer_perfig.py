@@ -1,11 +1,13 @@
 """analyzer_perfig.py — couche per-figurine de l'analyzer (V11).
 
 Le step logger émet, en fin de chaque ligne d'action et avant [SUCCESS]/[FAILED],
-un segment `[MODELS: <mid>@(<col>,<row>) ...]` listant les socles VIVANTS de
-l'unité qui agit (les socles morts disparaissent). `<mid>` = `<unit_id>#<index>`.
+un segment `[MODELS: <mid>@(<col>,<row>,z<hauteur>) ...]` listant les socles VIVANTS de
+l'unité qui agit (les socles morts disparaissent). `<mid>` = `<unit_id>#<index>` ;
+`z<hauteur>` = hauteur du plancher sous le socle, en POUCES (engagement 3D §03.04).
 
 Ce module :
-  - parse ce segment (parse_models_segment) ;
+  - parse ce segment (parse_models_segment pour les positions, parse_models_heights
+    pour les altitudes) ;
   - reconstruit des empreintes de socle (footprints) via les helpers moteur
     (engine.hex_utils.compute_occupied_hexes / min_distance_between_sets), garantissant
     la parité géométrique avec le jeu ;
@@ -20,9 +22,14 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 
 from engine.hex_utils import compute_occupied_hexes, min_distance_between_sets
 
-# `<mid>@(<col>,<row>)` — mid = token sans espace contenant '#'
+# `<mid>@(<col>,<row>,z<hauteur>)` — mid = token sans espace contenant '#',
+# `z<hauteur>` = hauteur du plancher sous la figurine en POUCES (engagement 3D §03.04).
+# La hauteur est OBLIGATOIRE : un step.log antérieur à son introduction fait lever
+# `parse_models_segment` (« segment présent mais illisible ») plutôt que de se faire lire
+# comme un plateau intégralement au sol — un verdict d'engagement silencieusement 2D sur un
+# plateau à étages est exactement ce que cette colonne existe pour empêcher.
 _MODELS_RE = re.compile(r'\[MODELS:\s*([^\]]+)\]')
-_TOKEN_RE = re.compile(r'(\S+?#\S*?)@\((-?\d+),\s*(-?\d+)\)')
+_TOKEN_RE = re.compile(r'(\S+?#\S*?)@\((-?\d+),\s*(-?\d+),\s*z(-?[\d.]+)\)')
 
 # Taille de socle telle que l'attend le moteur (`compute_occupied_hexes`) : diamètre entier pour
 # un socle rond, [major, minor] pour un ovale.
@@ -58,6 +65,10 @@ def parse_models_segment(text: str) -> Optional[Dict[str, Dict[str, Tuple[int, i
 
     unit_id = préfixe de mid avant '#'. Retourne None si aucun segment (ligne
     sans suffixe per-figurine, p.ex. logs anciens/synthétiques).
+
+    Les positions restent PLANES ici : toute la couche per-figurine de l'analyzer (empreintes,
+    portées, adjacence) est horizontale. L'altitude est lue séparément par
+    ``parse_models_heights`` et ne sert qu'au gate vertical de l'engagement.
     """
     m = _MODELS_RE.search(text)
     if not m:
@@ -69,6 +80,26 @@ def parse_models_segment(text: str) -> Optional[Dict[str, Dict[str, Tuple[int, i
         row = int(tok.group(3))
         unit_id = mid.split('#', 1)[0]
         result.setdefault(unit_id, {})[mid] = (col, row)
+    if not result:
+        raise ValueError(f"Segment [MODELS:] présent mais vide/illisible: {m.group(1)[:120]}")
+    return result
+
+
+def parse_models_heights(text: str) -> Optional[Dict[str, Dict[str, float]]]:
+    """Extrait les hauteurs de plancher du segment [MODELS:] → {unit_id: {mid: hauteur_pouces}}.
+
+    Même token que ``parse_models_segment`` (un seul format, un seul regex) : ces deux lectures
+    ne peuvent pas diverger. Hauteur en POUCES, comparable directement au seuil vertical
+    ``engagement_zone_vertical`` (5", §03.04). None si aucun segment sur la ligne.
+    """
+    m = _MODELS_RE.search(text)
+    if not m:
+        return None
+    result: Dict[str, Dict[str, float]] = {}
+    for tok in _TOKEN_RE.finditer(m.group(1)):
+        mid = tok.group(1)
+        unit_id = mid.split('#', 1)[0]
+        result.setdefault(unit_id, {})[mid] = float(tok.group(4))
     if not result:
         raise ValueError(f"Segment [MODELS:] présent mais vide/illisible: {m.group(1)[:120]}")
     return result

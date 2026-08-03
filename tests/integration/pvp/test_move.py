@@ -30,6 +30,13 @@ def _model_position(game, model_id: str) -> Tuple[int, int]:
     return int(model["col"]), int(model["row"])
 
 
+def _model_placement(game, model_id: str) -> Tuple[int, int, int]:
+    """Position COMPLÈTE (col, row, level) : un plan par-figurine porte toujours son étage,
+    le backend refuse une entrée muette."""
+    model = game.state["models_cache"][model_id]
+    return int(model["col"]), int(model["row"]), int(model["level"])
+
+
 def _model_destinations(game, model_id: str, provisional_plan: Dict[str, Tuple[int, int, int]]):
     """Pool BFS d'UNE figurine, les sœurs déjà posées bloquant le passage."""
     body = game.act(
@@ -69,7 +76,7 @@ def _multi_model_unit(game) -> str:
 
 def _would_flee(game, unit_id: str) -> bool:
     """Une unité engagée : son move serait un fall-back (09.07)."""
-    plan = [[m, *_model_position(game, m)] for m in game.models_of(unit_id)]
+    plan = [[m, *_model_placement(game, m)] for m in game.models_of(unit_id)]
     body = game.act("preview_move_plan", unitId=unit_id, plan=plan)
     return bool(body["result"]["would_flee"])
 
@@ -154,9 +161,9 @@ class TestCommitMovePlan:
         game.act("activate_unit", unitId=unit_id)
         plan = _plan_one_step(game, unit_id)
 
-        preview = game.act(
-            "preview_move_plan", unitId=unit_id, plan=[[m, c, r] for m, c, r, _ in plan]
-        )["result"]
+        # Le preview reçoit le plan COMPLET (étage inclus) : le tronquer mesurerait un autre
+        # niveau que le commit — et la frontière de décodage refuse désormais une entrée muette.
+        preview = game.act("preview_move_plan", unitId=unit_id, plan=plan)["result"]
         assert preview["coherency_ok"] is True, "cohésion d'escouade (06.02) refusée sur un plan d'un pas"
         assert preview["can_validate"] is True
         assert all(preview["per_model"].values()), f"placements invalides : {preview['per_model']}"

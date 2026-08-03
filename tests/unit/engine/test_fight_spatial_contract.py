@@ -48,10 +48,10 @@ def test_fight_b_engagement_pool_uses_full_footprint_distance() -> None:
     game_state = {
         "config": {"game_rules": {"engagement_zone": 2, "engagement_zone_vertical": 5}},
         "units_cache": {
-            "u1": {"col": 0, "row": 0, "player": 1, "occupied_hexes": {(0, 0)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0},
-            "enemy_in_engagement": {"col": 0, "row": 2, "player": 2, "occupied_hexes": {(0, 2)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0},
-            "enemy_out_of_engagement": {"col": 0, "row": 3, "player": 2, "occupied_hexes": {(0, 3)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0},
-            "ally": {"col": 0, "row": 1, "player": 1, "occupied_hexes": {(0, 1)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0},
+            "u1": {"col": 0, "row": 0, "player": 1, "occupied_hexes": {(0, 0)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0, "occupied_hexes_by_model": {"u1#0": (0, 0)}, "floor_height_by_model": {"u1#0": 0.0}},
+            "enemy_in_engagement": {"col": 0, "row": 2, "player": 2, "occupied_hexes": {(0, 2)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0, "occupied_hexes_by_model": {"enemy_in_engagement#0": (0, 2)}, "floor_height_by_model": {"enemy_in_engagement#0": 0.0}},
+            "enemy_out_of_engagement": {"col": 0, "row": 3, "player": 2, "occupied_hexes": {(0, 3)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0, "occupied_hexes_by_model": {"enemy_out_of_engagement#0": (0, 3)}, "floor_height_by_model": {"enemy_out_of_engagement#0": 0.0}},
+            "ally": {"col": 0, "row": 1, "player": 1, "occupied_hexes": {(0, 1)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0, "occupied_hexes_by_model": {"ally#0": (0, 1)}, "floor_height_by_model": {"ally#0": 0.0}},
         },
     }
 
@@ -79,6 +79,9 @@ def test_fight_b_engagement_pool_large_base_euclidean_not_hex() -> None:
         return {
             "col": col, "row": row, "player": player, "occupied_hexes": occ,
             "occupied_hexes_by_model": {f"m{col}_{row}": (col, row)},
+            # Plancher par figurine : requis par l'engagement 3D (03.04). Tout au sol ici —
+            # ce test isole la métrique HORIZONTALE, le gate vertical doit être neutre.
+            "floor_height_by_model": {f"m{col}_{row}": 0.0},
             "BASE_SHAPE": "round", "BASE_SIZE": size, "MODEL_HEIGHT": 2.5, "orientation": 0,
         }
 
@@ -105,9 +108,9 @@ def test_shared_b_engagement_helper_supports_full_and_bounded_distance() -> None
     game_state = {
         "config": {"game_rules": {"engagement_zone": 2, "engagement_zone_vertical": 5}},
         "units_cache": {
-            "u1": {"col": 0, "row": 0, "player": 1, "occupied_hexes": {(0, 0)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0},
-            "enemy_in_engagement": {"col": 0, "row": 2, "player": 2, "occupied_hexes": {(0, 2)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0},
-            "enemy_out_of_engagement": {"col": 0, "row": 3, "player": 2, "occupied_hexes": {(0, 3)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0},
+            "u1": {"col": 0, "row": 0, "player": 1, "occupied_hexes": {(0, 0)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0, "occupied_hexes_by_model": {"u1#0": (0, 0)}, "floor_height_by_model": {"u1#0": 0.0}},
+            "enemy_in_engagement": {"col": 0, "row": 2, "player": 2, "occupied_hexes": {(0, 2)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0, "occupied_hexes_by_model": {"enemy_in_engagement#0": (0, 2)}, "floor_height_by_model": {"enemy_in_engagement#0": 0.0}},
+            "enemy_out_of_engagement": {"col": 0, "row": 3, "player": 2, "occupied_hexes": {(0, 3)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0, "occupied_hexes_by_model": {"enemy_out_of_engagement#0": (0, 3)}, "floor_height_by_model": {"enemy_out_of_engagement#0": 0.0}},
         },
     }
 

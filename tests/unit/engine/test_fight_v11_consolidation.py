@@ -32,6 +32,11 @@ def _make_gs(
         units_cache[uid] = {
             "col": u["col"], "row": u["row"], "player": u["player"],
             "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round", "orientation": 0, "HP_CUR": 1,
+            # Données verticales (03.04) : une entrée-cache réelle les porte TOUJOURS
+            # (build_units_cache). Sans elles l'engagement 3D lève « câblage incomplet » —
+            # c'est un défaut de fixture, pas une tolérance à ajouter au moteur.
+            "occupied_hexes_by_model": {f"{uid}#0": (u["col"], u["row"])},
+            "floor_height_by_model": {f"{uid}#0": 0.0},
         }
     return {**turn_state_invariants(),
         "inches_to_subhex": 1, "board_cols": 40, "board_rows": 40,

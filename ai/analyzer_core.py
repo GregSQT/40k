@@ -45,7 +45,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
     stats = state.stats
     unit_id: Optional[str] = None  # may be set from unit_start or deploy lines
 
-    from ai.analyzer_perfig import parse_models_segment
+    from ai.analyzer_perfig import parse_models_segment, parse_models_heights
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
@@ -61,7 +61,13 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             # current_line_models portera les positions de DESTINATION de la ligne N.
             for _muid, _mmodels in state.current_line_models.items():
                 state.positions_by_model[_muid] = _mmodels
+            # Altitudes : MÊME décalage d'une ligne que les positions. `heights_by_model` porte
+            # l'état d'ORIGINE (jusqu'à la ligne N-1), qu'exigent les contrôles à
+            # `position_override=start_pos` ; `current_line_heights` porte l'arrivée de la ligne N.
+            for _muid, _mheights in state.current_line_heights.items():
+                state.heights_by_model[_muid] = _mheights
             state.current_line_models = parse_models_segment(line) or {}
+            state.current_line_heights = parse_models_heights(line) or {}
             if state.current_line_models:
                 for _uid, _models in state.current_line_models.items():
                     if not _models:
@@ -178,6 +184,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 stats['unit_types'][unit_id] = unit_type
                 require_key(stats, 'unit_types_seen').add(unit_type)
                 state.unit_move[unit_id] = unit_move_value * config.inches_to_subhex
+                # MODEL_HEIGHT : borne haute de l'intervalle vertical (§03.04). Lue au MÊME
+                # endroit que HP_MAX/MOVE — le registry, pas le log : c'est une stat d'unité
+                # constante, la journaliser par action la dupliquerait sans rien apporter.
+                state.unit_model_height[unit_id] = float(require_key(unit_data, "MODEL_HEIGHT"))
                 state.positions_at_turn_start[unit_id] = (col, row)
                 state.unit_movement_history[unit_id] = [{"position": (col, row)}]
                 base_token_match = re.search(r'base=\w+/(?:\d+|\[[^\]]*\])', line)
@@ -799,6 +809,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 positions_for_adjacency_check_filtered,
                                 unit_hp_at_reactive,
                                 engagement_zone=_get_engagement_zone_for_analyzer(),
+                                **state.engagement_3d_kwargs(),
                                 position_override=(to_col, to_row),
                             )
                             if reactive_dest_adjacent:

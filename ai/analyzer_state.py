@@ -3,7 +3,7 @@ AnalyzerState — état partagé entre les handlers de parse_step_log.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ai.analyzer_perfig import Base
 
@@ -34,10 +34,24 @@ class AnalyzerState:
     unit_positions: Dict[str, Tuple[int, int]] = field(default_factory=dict)
     unit_types: Dict[str, str] = field(default_factory=dict)
     unit_move: Dict[str, int] = field(default_factory=dict)
+    # MODEL_HEIGHT (POUCES) par unité, lu dans le registry — borne haute de l'intervalle
+    # vertical d'une figurine, exigée par le gate d'engagement 3D du moteur.
+    unit_model_height: Dict[str, float] = field(default_factory=dict)
 
     # Couche per-figurine (V11) : socles vivants par unité, maintenu frame-à-frame
     # depuis le segment [MODELS:] de chaque ligne. unit_id = préfixe de mid avant '#'.
     positions_by_model: Dict[str, Dict[str, Tuple[int, int]]] = field(default_factory=dict)
+    # Hauteur du plancher (POUCES) sous chaque socle, lue sur le même segment [MODELS:].
+    # Séparée des positions parce que toute la couche per-figurine est HORIZONTALE : l'altitude
+    # ne sert qu'au gate vertical de l'engagement (§03.04, 2" horiz ET 5" vert).
+    #
+    # MÊME cycle de vie en deux fronts que `positions_by_model` / `current_line_models`, et pour
+    # la même raison : plusieurs contrôles mesurent l'engagement à l'ancre d'AVANT le mouvement
+    # (`position_override=start_pos`). Fusionner les deux fronts leur donnerait l'altitude
+    # d'APRÈS à une position d'AVANT — une unité qui descend d'une ruine serait évaluée à son
+    # ancre de ruine avec sa hauteur de sol, ce qui INVERSE le gate vertical.
+    heights_by_model: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    current_line_heights: Dict[str, Dict[str, float]] = field(default_factory=dict)
     # Socles listés SUR LA LIGNE COURANTE (nouvelles positions de l'unité qui agit) ;
     # positions_by_model garde encore l'état PRÉCÉDENT tant que la ligne n'est pas finie.
     current_line_models: Dict[str, Dict[str, Tuple[int, int]]] = field(default_factory=dict)
@@ -98,6 +112,36 @@ class AnalyzerState:
     objective_control_seen: bool = False
     objectives_declared: bool = False
     selected_choice_by_unit_source: Dict[str, Dict[str, str]] = field(default_factory=dict)
+
+    def _engagement_3d_kwargs(self, heights: Dict[str, Dict[str, float]]) -> Dict[str, Any]:
+        from ai.analyzer import _get_engagement_zone_vertical_for_analyzer
+
+        return {
+            "heights_by_model": heights,
+            "unit_model_height": self.unit_model_height,
+            "vertical_zone_inches": _get_engagement_zone_vertical_for_analyzer(),
+        }
+
+    def engagement_3d_kwargs(self) -> Dict[str, Any]:
+        """Trio d'arguments verticaux de ``is_within_engine_engagement_zone`` (§03.04), aux
+        positions COURANTES (celles de la ligne en cours de traitement).
+
+        Un seul point d'assemblage : ces trois valeurs vont toujours ensemble, et les recopier
+        site par site rendait un oubli silencieux — un contrôle resté 2D ne lève pas, il rend
+        juste un verdict faux sur un plateau à étages.
+        """
+        merged = dict(self.heights_by_model)
+        merged.update(self.current_line_heights)
+        return self._engagement_3d_kwargs(merged)
+
+    def engagement_3d_kwargs_at_start(self) -> Dict[str, Any]:
+        """Idem, mais aux altitudes d'AVANT la ligne courante.
+
+        À utiliser avec ``position_override`` = ancre de DÉPART : mesurer une position d'avant le
+        mouvement avec l'altitude d'après inverse le gate vertical (unité qui descend d'une ruine
+        évaluée à son ancre de ruine, mais à hauteur de sol).
+        """
+        return self._engagement_3d_kwargs(self.heights_by_model)
 
 
 def make_initial_state(stats: Dict) -> "AnalyzerState":

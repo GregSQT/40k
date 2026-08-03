@@ -75,6 +75,7 @@ def handle_fight(
                     state.unit_positions,
                     state.unit_hp,
                     engagement_zone=_get_engagement_zone_for_analyzer(),
+                    **state.engagement_3d_kwargs(),
                 ):
                     eligible_charged_units.append(charged_id)
             if eligible_charged_units:

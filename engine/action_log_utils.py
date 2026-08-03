@@ -9,20 +9,31 @@ It resets with a new episode (``w40k_core`` reset).
 from typing import Any, Dict, Iterable, MutableMapping, Tuple
 
 
-def format_models_segment(items: Iterable[Tuple[Any, int, int]], label: str = "MODELS") -> str:
+def format_models_segment(
+    items: Iterable[Tuple[Any, int, int, float]], label: str = "MODELS"
+) -> str:
     """
-    Build the per-figurine log segment ``[MODELS: <mid>@(<col>,<row>) ...]``.
+    Build the per-figurine log segment ``[MODELS: <mid>@(<col>,<row>,z<hauteur>) ...]``.
 
-    ``items`` yields ``(model_id, col, row)`` triples. The segment is appended
+    ``items`` yields ``(model_id, col, row, floor_height_inches)``. The segment is appended
     to action messages so the analyzer can reconstruct per-figurine positions
     instead of reasoning on the squad anchor alone. Returns ``""`` when empty
     (nothing to append rather than an empty, misleading segment).
+
+    ``z<hauteur>`` = hauteur du PLANCHER sous la figurine, en POUCES — la grandeur que compare
+    le gate vertical de l'engagement 3D (§03.04 : 2" horizontal ET 5" vertical). C'est la
+    HAUTEUR qui est journalisée, pas le niveau : la hauteur d'un ``level`` donné dépend de la
+    POSITION (deux ruines peuvent avoir un étage 1 à des hauteurs différentes, cf.
+    ``floor_height_at``) et le step.log ne porte aucun terrain — un consommateur ne pourrait
+    donc pas la re-dériver depuis le seul niveau.
 
     ``label`` selects the wrapper : ``"MODELS"`` (défaut, unité qui agit, lu par
     l'analyzer) ou ``"TARGET_MODELS"`` (survivants de la cible post-pertes, consommé
     uniquement par le replay — le regex analyzer ``\\[MODELS:`` ne matche pas ``[TARGET_MODELS:``).
     """
-    parts = [f"{mid}@({int(col)},{int(row)})" for mid, col, row in items]
+    parts = [
+        f"{mid}@({int(col)},{int(row)},z{float(height):g})" for mid, col, row, height in items
+    ]
     if not parts:
         return ""
     return f"[{label}: " + " ".join(parts) + "]"
@@ -38,30 +49,6 @@ def format_shooter_models_segment(model_ids: Iterable[Any]) -> str:
     if not parts:
         return ""
     return "[SHOOTER_MODELS: " + " ".join(parts) + "]"
-
-
-def models_segment_from_move_details(move_details: Iterable[Dict[str, Any]]) -> str:
-    """Per-figurine segment from a move's ``moveDetails`` (destination positions)."""
-    return format_models_segment(
-        (d["modelId"], d["toCol"], d["toRow"]) for d in move_details
-    )
-
-
-def models_segment_from_cache(game_state: MutableMapping[str, Any], unit_id: Any) -> str:
-    """
-    Per-figurine segment from the authoritative current positions
-    (``units_cache[unit_id]['occupied_hexes_by_model']``). Used by non-move
-    actions (shoot/fight) where figurines keep their current positions.
-
-    Raises:
-        KeyError: if ``units_cache`` / the unit / ``occupied_hexes_by_model`` is
-        missing — no silent fallback, the caller must have a valid cache.
-    """
-    units_cache = game_state["units_cache"]
-    by_model = units_cache[unit_id]["occupied_hexes_by_model"]
-    return format_models_segment(
-        (mid, pos[0], pos[1]) for mid, pos in by_model.items()
-    )
 
 
 def append_action_log(
