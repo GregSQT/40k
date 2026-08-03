@@ -5423,6 +5423,10 @@ def charge_commit_move_plan_handler(
             "toRow": dest_row,
             "targetId": target_id,
             "charge_roll": charge_roll,
+            # Consomme par `_build_step_log_details` -> `step_logger` : c'est CE champ, pas le
+            # texte du `message`, qui fait apparaitre `[FLY]` dans step.log (le formateur
+            # reecrit integralement la ligne de charge).
+            "is_fly_move": _fly_seg == " [FLY]",
             "timestamp": "server_time",
             "is_ai_action": unit["player"] == 1,
             "moveDetails": move_details,
@@ -5705,6 +5709,10 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             "toRow": dest_row,
             "targetId": target_id,
             "charge_roll": charge_roll,
+            # Consomme par `_build_step_log_details` -> `step_logger` : c'est CE champ, pas le
+            # texte du `message`, qui fait apparaitre `[FLY]` dans step.log (le formateur
+            # reecrit integralement la ligne de charge).
+            "is_fly_move": _fly_seg == " [FLY]",
             "ability_display_name": charge_ability_display_name,
             "timestamp": "server_time",
             "action_name": action_name,

@@ -946,9 +946,12 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                         _dc, _dr = _new[_mid]
                                         if (_oc, _orow) == (_dc, _dr):
                                             continue
+                                        # Marge de recherche (cf. charge) : distingue « aucun
+                                        # chemin » de « chemin plus long que 3" ».
                                         _steps = _bfs_shortest_path_length(
                                             _oc, _orow, _dc, _dr, _fight_budget,
                                             state.wall_hexes, _occ, _ez,
+                                            search_margin=calculate_hex_distance(_oc, _orow, _dc, _dr),
                                         )
                                         if _steps is None:
                                             _blocked = True

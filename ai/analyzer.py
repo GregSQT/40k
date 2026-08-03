@@ -711,9 +711,18 @@ def _bfs_shortest_path_length(
     max_steps: int,
     wall_hexes: Set[Tuple[int, int]],
     occupied_positions: Set[Tuple[int, int]],
-    enemy_adjacent_hexes: Set[Tuple[int, int]]
+    enemy_adjacent_hexes: Set[Tuple[int, int]],
+    search_margin: int = 0,
 ) -> Optional[int]:
-    """Compute shortest path length using movement BFS rules."""
+    """Longueur du plus court chemin de mouvement, ou None si aucun n'existe dans la fenêtre.
+
+    ``search_margin`` élargit la RECHERCHE sans élargir le budget : le BFS explore jusqu'à
+    ``max_steps + search_margin``, ce qui permet à l'appelant de distinguer « aucun chemin »
+    (obstacle) de « chemin trop long » (dépassement de budget). Sans marge, tout dépassement
+    revient en None et le compteur « distance > budget » de l'appelant est INATTEIGNABLE : un
+    déplacement hors budget se comptait comme un chemin bloqué, ce qui affiche 0 en face du
+    contrôle qu'on croit lire.
+    """
     start_pos = (start_col, start_row)
     dest_pos = (dest_col, dest_row)
     if start_pos == dest_pos:
@@ -723,7 +732,7 @@ def _bfs_shortest_path_length(
     while queue:
         current_pos = queue.pop(0)
         current_dist = visited[current_pos]
-        if current_dist >= max_steps:
+        if current_dist >= max_steps + search_margin:
             continue
         for neighbor in get_hex_neighbors(current_pos[0], current_pos[1]):
             if neighbor in visited:
@@ -2511,6 +2520,13 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if agent_fight_alt > 0 and stats['first_error_lines']['fight_alternation_violations'][1]:
         first_err = stats['first_error_lines']['fight_alternation_violations'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    _fm = require_key(stats, 'fight_move_invalid')
+    _table_row("Pile-in/conso over 3\":", _fmt_count(_fm['over_budget'][1]), _fmt_count(_fm['over_budget'][2]))
+    _table_row("Pile-in/conso path blocked:", _fmt_count(_fm['path_blocked'][1]), _fmt_count(_fm['path_blocked'][2]))
+    for _pl in (1, 2):
+        if (_fm['over_budget'][_pl] or _fm['path_blocked'][_pl]) and stats['first_error_lines']['fight_move_invalid'][_pl]:
+            _fe = stats['first_error_lines']['fight_move_invalid'][_pl]
+            log_print(f"  First P{_pl} occurrence (Episode {_fe['episode']}): {_fe['line']}")
     if bot_fight_alt > 0 and stats['first_error_lines']['fight_alternation_violations'][2]:
         first_err = stats['first_error_lines']['fight_alternation_violations'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")

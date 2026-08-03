@@ -117,9 +117,15 @@ def handle_charge(
                         if calculate_hex_distance(o_col, o_row, d_col, d_row) > charge_budget:
                             charge_over = True
                     else:
+                        # Marge de recherche : sans elle le BFS élague AU budget, tout
+                        # dépassement revient None, et « Distance > roll » est inatteignable —
+                        # une charge trop longue se comptait en « chemin bloqué ». La marge
+                        # élargit la RECHERCHE, jamais le budget.
                         steps = _bfs_shortest_path_length(
                             o_col, o_row, d_col, d_row,
-                            charge_budget, state.wall_hexes, occupied_positions, enemy_adjacent_hexes
+                            charge_budget, state.wall_hexes, occupied_positions,
+                            enemy_adjacent_hexes,
+                            search_margin=calculate_hex_distance(o_col, o_row, d_col, d_row),
                         )
                         if steps is None:
                             charge_blocked = True

@@ -705,14 +705,21 @@ class StepLogger:
                         if isinstance(ability_display_name, str) and ability_display_name.strip()
                         else ""
                     )
+                    # 21.03 : vol DÉCLARÉ pour cette charge. Le moteur en retranche 2" au budget
+                    # (`_charge_budget_subhex`) et autorise la traversée — sans le marqueur ici,
+                    # l'analyzer juge la charge avec un budget faux et des murs qui ne
+                    # s'appliquent pas. Ce formateur réécrit intégralement la ligne : le marqueur
+                    # posé sur le `message` de l'action_log moteur ne sert QUE au replay/PvP et
+                    # n'atteint jamais step.log.
+                    _fly_seg = " [FLY]" if details.get("is_fly_move") is True else ""
                     if charge_roll is not None:
                         base_msg = (
-                            f"{unit_label} CHARGED{ability_suffix} {target_label} "
+                            f"{unit_label} CHARGED{ability_suffix}{_fly_seg} {target_label} "
                             f"from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {charge_roll}]"
                         )
                     else:
                         base_msg = (
-                            f"{unit_label} CHARGED{ability_suffix} {target_label} "
+                            f"{unit_label} CHARGED{ability_suffix}{_fly_seg} {target_label} "
                             f"from ({start_col},{start_row}) to ({end_col},{end_row})"
                         )
                 else:

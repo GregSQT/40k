@@ -359,6 +359,26 @@ class TestReactiveBudgetScale:
         assert dests, "pool vide : le test ne regarderait rien"
         return max(hex_distance(col, row, c, r) for (c, r) in dests)
 
+    def test_le_rayon_de_declenchement_suit_aussi_la_resolution(self):
+        """JUMEAU du budget : les 9" de `reactive_move` (config/unit_rules.json) etaient
+        compares a une distance de GRILLE. A x5 cela valait 1,8" — moins que la zone
+        d'engagement : la capacite ne se declenchait quasiment plus hors du board x1."""
+        from engine.phase_handlers.shared_utils import maybe_resolve_reactive_move
+
+        def _triggers(scale: int, enemy_col: int) -> bool:
+            gs = _make_game_state(
+                [_unit_with_reactive(1, 1, 12, 10), _unit(2, 2, enemy_col, 10)]
+            )
+            gs["inches_to_subhex"] = scale
+            res = maybe_resolve_reactive_move(
+                gs, "2", enemy_col, 10, enemy_col, 10, "move", "normal"
+            )
+            return bool(res["triggered"])
+
+        # Ennemi a 20 cases : hors des 9 CASES, mais dans les 9 POUCES des que x5 (45 cases).
+        assert _triggers(1, 32) is False
+        assert _triggers(5, 32) is True
+
     def test_le_budget_suit_la_resolution_du_board(self):
         r1 = self._pool_radius(1)
         r5 = self._pool_radius(5)
@@ -366,3 +386,32 @@ class TestReactiveBudgetScale:
         assert r1 == 2, r1
         # 2" à x5 = 10 cases. Sans conversion, r5 vaudrait 2 comme à x1.
         assert r5 == 10, r5
+
+
+class TestReactiveMoveDeplaceLesFigurines:
+    """Un move réactif est un MOUVEMENT d'unité (03.01) : toutes les figurines suivent.
+
+    `update_units_cache_position` seul ne resynchronise que les escouades MONO-figurine ; pour
+    les autres il ne bouge que l'ancre. Or les unités qui portent cette capacité (FenrisianWolf,
+    Termagant) sont multi-figurines : leurs socles ne se déplaçaient pas du tout.
+    """
+
+    def test_les_socles_suivent_l_ancre(self):
+        from engine.phase_handlers.shared_utils import translate_squad_to_destination
+
+        gs = _make_game_state([_unit_with_reactive(1, 1, 12, 10)])
+        gs["squad_models"]["1"] = ["1#0", "1#1"]
+        gs["units_cache"]["1"]["occupied_hexes_by_model"] = {"1#0": (12, 10), "1#1": (14, 10)}
+        gs["models_cache"] = {
+            # `HP_CUR` obligatoire : la translation saute les figurines mortes.
+            "1#0": {"id": "1#0", "col": 12, "row": 10, "level": 0, "HP_CUR": 1},
+            "1#1": {"id": "1#1", "col": 14, "row": 10, "level": 0, "HP_CUR": 1},
+        }
+
+        translate_squad_to_destination(gs, "1", 16, 10)
+
+        models = gs["units_cache"]["1"]["occupied_hexes_by_model"]
+        # Translation RIGIDE : le delta d'ancre (+4) s'applique aux deux socles, la formation
+        # relative est préservée.
+        assert models["1#0"] == (16, 10), models
+        assert models["1#1"] == (18, 10), models

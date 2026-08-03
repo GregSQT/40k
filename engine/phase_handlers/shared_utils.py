@@ -2196,6 +2196,10 @@ def get_source_unit_rule_display_name_for_effect(
     return _get_source_unit_rule_display_name_for_effect(unit, effect_rule_id)
 
 
+#: Rayon de declenchement de `reactive_move`, EN POUCES (cf. config/unit_rules.json).
+_REACTIVE_TRIGGER_RANGE_INCHES = 9
+
+
 def _build_reactive_move_destinations_pool(
     game_state: Dict[str, Any],
     reactive_unit: Dict[str, Any],
@@ -2631,7 +2635,13 @@ def maybe_resolve_reactive_move(
             continue
 
         unit_col, unit_row = require_unit_position(unit, game_state)
-        if calculate_hex_distance(unit_col, unit_row, to_col_int, to_row_int) > 9:
+        # Rayon de DECLENCHEMENT de la capacite : 9 POUCES (config/unit_rules.json,
+        # `reactive_move` : « after an enemy unit ends a move ... within 9" of this unit »).
+        # JUMEAU du budget converti plus bas : compare a une distance de GRILLE, il valait
+        # 9 cases — 1,8" a x5, 0,9" a x10, soit moins que la zone d'engagement : la capacite ne
+        # se declenchait quasiment plus des qu'on quittait le board x1.
+        _trigger_radius = _REACTIVE_TRIGGER_RANGE_INCHES * int(require_key(game_state, "inches_to_subhex"))
+        if calculate_hex_distance(unit_col, unit_row, to_col_int, to_row_int) > _trigger_radius:
             continue
 
         eligible_units.append(unit)
@@ -2716,8 +2726,16 @@ def maybe_resolve_reactive_move(
             dest_col, dest_row = selected_dest
 
             orig_col, orig_row = require_unit_position(reactive_unit, game_state)
+            # Le move reactif est un MOUVEMENT d'unite (03.01) : toutes les figurines suivent.
+            # `update_units_cache_position` seul ne resync que les escouades MONO-figurine — pour
+            # les autres il ne bouge que l'ancre, laissant les socles sur place. Les unites qui
+            # portent cette capacite (FenrisianWolf, Termagant) sont justement multi-figurines :
+            # leurs figurines ne se deplacaient donc pas du tout, et la ligne de journal — qui
+            # emet desormais un segment `[MODELS:]` — l'affichait noir sur blanc (ancre a
+            # l'arrivee, socles a l'ancienne place). Meme helper que move, charge, advance et
+            # pile-in.
             set_unit_coordinates(reactive_unit, dest_col, dest_row)
-            update_units_cache_position(game_state, reactive_unit_id, dest_col, dest_row)
+            translate_squad_to_destination(game_state, reactive_unit_id, dest_col, dest_row)
             reacted_set.add(reactive_unit_id)
             game_state["last_move_cause"] = "reactive_move"
             ability_display_name = _get_source_unit_rule_display_name_for_effect(

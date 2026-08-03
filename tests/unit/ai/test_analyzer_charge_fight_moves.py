@@ -80,12 +80,11 @@ def test_la_charge_mesure_chaque_figurine_et_non_l_ancre(tmp_path):
     log.write_text(_log(body, scale=1))
     stats = an.parse_step_log(str(log))
 
-    # `_bfs_shortest_path_length` élague à `max_steps` : un trajet hors budget revient « sans
-    # chemin » plutôt que « trop long ». Les deux comptent comme une charge invalide, et c'est
-    # leur somme que le récapitulatif additionne.
-    assert (
-        stats["charge_invalid"][1]["distance_over_roll"] + stats["charge_path_blocked"][1]
-    ) == 1, "socle avancé non mesuré"
+    # Le socle a un chemin libre, simplement trop long : c'est « distance > roll », PAS un
+    # chemin bloqué. Sans marge de recherche le BFS élaguait au budget et les deux causes
+    # étaient confondues — « Distance > roll » affichait 0 en permanence.
+    assert stats["charge_invalid"][1]["distance_over_roll"] == 1, "socle avancé non mesuré"
+    assert stats["charge_path_blocked"][1] == 0, "chemin libre : ce n'est pas un blocage"
 
 
 def test_une_charge_a_travers_un_mur_est_signalee(tmp_path):
@@ -133,7 +132,8 @@ def test_pile_in_et_consolidation_sont_bornes_a_trois_pouces(verbe, tmp_path):
     stats = an.parse_step_log(str(log))
 
     _fm = stats["fight_move_invalid"]
-    assert (_fm["over_budget"][1] + _fm["path_blocked"][1]) == 1
+    assert _fm["over_budget"][1] == 1, "dépassement des 3\" non distingué d'un blocage"
+    assert _fm["path_blocked"][1] == 0
 
 
 @pytest.mark.parametrize("verbe", ["PILED IN", "CONSOLIDATED"])
@@ -198,3 +198,49 @@ def test_le_move_reactif_est_journalise_sans_consommer_de_step():
     # `log_action` avale l'exception et la ligne disparaît en silence.
     assert "[Roll: 3]" in lines[0] and "trigger: Unit 101->(9,9)" in lines[0], lines[0]
     assert logger.step_count == 0, "un move réactif ne consomme pas de step gym"
+
+
+def test_le_marqueur_fly_de_charge_atteint_bien_step_log():
+    """Le formateur du StepLogger RÉÉCRIT intégralement la ligne de charge : le marqueur posé
+    sur le `message` de l'action_log moteur ne sert qu'au replay/PvP et n'atteint jamais
+    step.log. C'est le champ `is_fly_move` qui doit traverser la chaîne — sans lui, l'analyzer
+    jugeait toute charge volante avec un budget faux (2" de 21.03 non retranchés) et un
+    pathfinding au sol.
+
+    Verrou de CHAÎNE, pas de site : c'est de ne pas l'avoir posé qu'est venu le défaut.
+    """
+    import os
+    import tempfile
+
+    from engine.w40k_core import W40KEngine
+    from ai.step_logger import StepLogger
+
+    class _Bridge:
+        def _models_segment_for_unit(self, unit_id):
+            return ""
+
+    build = W40KEngine._build_step_log_details.__get__(_Bridge())
+
+    def _line(is_fly: bool) -> str:
+        details = build(
+            {
+                "unitId": "3", "targetId": "101", "fromCol": 5, "fromRow": 5,
+                "toCol": 7, "toRow": 5, "targetCol": 7, "targetRow": 6,
+                "turn": 1, "charge_roll": 8, "is_fly_move": is_fly,
+            },
+            1,
+        )
+        out = os.path.join(tempfile.mkdtemp(), "step.log")
+        logger = StepLogger(output_file=out, enabled=True, buffer_size=1)
+        logger.episode_number = 1
+        logger.log_action(
+            unit_id="3", action_type="charge", phase="CHARGE", player=1, success=True,
+            step_increment=True, action_details=details,
+        )
+        logger._flush_buffer()
+        lines = [l for l in open(out, encoding="utf-8").read().splitlines() if "CHARGED" in l]
+        assert len(lines) == 1, lines
+        return lines[0]
+
+    assert "CHARGED [FLY]" in _line(True), _line(True)
+    assert "[FLY]" not in _line(False), _line(False)
