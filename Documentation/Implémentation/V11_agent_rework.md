@@ -78,7 +78,7 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
 | **§0.61** | Le garde **anti-runaway** était MUET, et son compteur d'épisodes divergeait | ✅ **CORRIGÉ le 2026-08-03** | **1** | Une troncature signale une BOUCLE dans le moteur, pas une fin de partie — or son diagnostic n'existait que dans le `print` d'un worker (noyé à `n_envs=48`) et le compteur persisté ne la comptait pas, alors que le run s'arrête dessus. Nouveau scalaire `00_critical/t_truncated_episodes`, diagnostic complet en `truncations.jsonl`, bilan imprimé en fin de run. Détail → §0.61. |
-| **§0.64** | Le scoring de déploiement calcule la **LoS avec une autre implémentation** que le moteur | 🟠 **OUVERT — arbitrage requis** (2026-08-03) | **1** (avant le lot §0.48) | `batch_has_los_from_source` (grille de murs **2D**) contre `compute_unit_los` (la règle : obscuring 13.10, plancher-occulteur 3D) : **607 désaccords sur 16 104 hexes** pour une seule source, tous dans le même sens. L'observation de déploiement (§0.40) et le score des 5 stratégies reposent donc sur une LoS **approximative**, alors que le docstring de `_has_line_of_sight` affirme le contraire pour le déploiement. Trancher : entériner l'approximation (et corriger le docstring), ou aligner sur la règle — ce second cas **change l'observation**, donc appartient au lot §0.48. Détail → §0.64. |
+| **§0.64** | Le scoring de déploiement calculait la **LoS avec une autre implémentation** que le moteur | ✅ **ALIGNÉ SUR LA RÈGLE le 2026-08-03** — ⚠️ **ré-entraînement requis** | — (entre dans le lot §0.48) | `batch_has_los_from_source` (grille de murs **2D**) contre `compute_unit_los` (la règle : obscuring 13.10, plancher-occulteur 3D) : **607 désaccords sur 16 104 hexes** pour une seule source, tous dans le même sens. L'observation de déploiement (§0.40) et le score des 5 stratégies reposent donc sur une LoS **approximative**, alors que le docstring de `_has_line_of_sight` affirme le contraire pour le déploiement. 🟢 **Arbitrage : aligner** — l'observation annonçait « l'exposition réelle » alors qu'elle surestimait le danger sur ~4 % des hexes, faisant fuir à l'agent des positions sûres. Les DEUX canaux (réel et potentiel) passent par `deployment_los` → `compute_unit_los` ; cache disque invalidé par `DEPLOYMENT_LOS_MODEL_VERSION`. Coût : phase de déploiement **1,46 → 2,85 s** (+42 % sur `main`, le gain de §0.63 en absorbant une part). `obs_size` inchangé, **valeurs changées → `--new`**. Détail → §0.64. |
 | **§0.63** | Le cache de scoring du déploiement **ne servait jamais** (100 % de reconstruction) | ✅ **CORRIGÉ le 2026-08-03** | — | Deux causes, la seconde invisible sans la première : cache indexé sur les hexes de l'unité (condition jamais satisfaite), et déploiement **en alternance** avec un delta incrémental limité à une pose. Correctif : sur-ensemble stable (pool moins murs), **un cache par joueur**, delta généralisé à N poses. **Neutre pour l'observation, mesuré** (0 écart) → aucun ré-entraînement. Gain **2,01 s → 1,46 s** (−27 %) sur la phase de déploiement, reconstruction **100 % → 20 %**. Détail → §0.63. |
 | **§0.60** | Instrumentation du **coût** de l'entraînement — workers d'éval, temps bloquant, courbes de charge et de participation | ✅ **LIVRÉ le 2026-08-02** | **2** | Trois angles morts de COÛT, distincts des angles morts de COMPORTEMENT du §0.56. (1) Quatre clés `bot_eval_*` vivaient **hors de `callback_params`** : personne ne les lisait, `bot_eval_n_workers` retombait sur `min(n_envs, n_scenarios × n_bots)` = **24 workers**, soit **47 Go et 598 s** contre **9,6 Go et 349 s** à 4 workers — moins de workers est aussi **42 % plus rapide**, la VM passant son temps à swapper. `validate_bot_eval_worker_params` valide désormais au DÉMARRAGE. (2) `blocking_eval_seconds` ne compte plus que le temps où la boucle est RÉELLEMENT figée. (3) Six courbes moteur : charges tentées/réussies (agent et bot) et participation par phase. Détail → §0.60. |
 | **§0.59** | Régime d'entraînement en **deux phases** — `x1_selfplay` (self-play) et `decay_fraction` | 🟠 **OUVERT — livré, JAMAIS EXÉCUTÉ** | **2** | Deux changements de régime non mesurés. (1) `decay_fraction` achève les rampes lr/entropie **avant** la fin d'un run long (sans lui, un run de 200 000 épisodes garde une entropie élevée jusqu'au dernier épisode). (2) Le profil `x1_selfplay` ajoute une **phase 2** en `--append` : un snapshot figé de l'agent remplace le bot sur une part rampée **0.0 → 0.5** des épisodes. ⚠️ Aucun run de phase 2 n'a jamais tourné ; `opponent_mix.enabled` **lève** hors du chemin de rotation de scénarios. Détail → §0.59. |
@@ -400,7 +400,7 @@ vert, ce qui le prouve. ⚠️ La garde équivalente de la reconstruction est **
 raison** ; elle est signalée, non touchée (hors périmètre).
 
 <a id="s0.64"></a>
-### 0.64 Le scoring de déploiement calcule la LoS avec une AUTRE implémentation que le moteur — 607 désaccords sur 16 104 hexes — 🟠 OUVERT (2026-08-03)
+### 0.64 Le scoring de déploiement calculait la LoS avec une AUTRE implémentation que le moteur — 607 désaccords sur 16 104 hexes — ✅ ALIGNÉ SUR LA RÈGLE (2026-08-03) ; ⚠️ RÉ-ENTRAÎNEMENT REQUIS
 
 **Trouvé par accident**, en écrivant le test d'équivalence de [§0.61](#s0.61) : il a signalé
 607 valeurs d'exposition divergentes, et la cause n'était pas le cache.
@@ -428,18 +428,50 @@ batch, de façon cohérente. Le défaut n'est pas une incohérence en production
 **l'observation de déploiement et le score des 5 stratégies reposent sur une LoS approximative**,
 différente de la règle appliquée partout ailleurs.
 
-🟠 **ARBITRAGE REQUIS — non tranché, et volontairement non tranché par l'agent** :
-1. **Entériner l'approximation 2D** pour le déploiement (elle est ~100× moins chère et
-   vectorisée) — mais alors corriger le docstring de `_has_line_of_sight`, qui promet le
-   contraire, et documenter que l'exposition de déploiement n'est pas la LoS du jeu.
-2. **Aligner sur `compute_unit_los`** — conforme, mais le coût est à mesurer : c'est
-   16 104 hexes × N ennemis par reconstruction, et c'est exactement le calcul que §0.63 vient de
-   rendre rare.
-⚠️ Toute correction dans le sens (2) **change ce que l'agent observe** (§0.40) et coûte donc un
-ré-entraînement : elle appartient au lot §0.48, pas à un correctif isolé.
+🟢 **ARBITRAGE UTILISATEUR DU 2026-08-03 : ALIGNER SUR LA RÈGLE, sans hésitation.** Le
+raisonnement, et il est juste : ça ne viole aucune règle 40K — le scoring de déploiement est une
+heuristique de placement — mais l'observation §0.40 **annonce à l'agent l'exposition réelle** d'un
+hexe. Calculée autrement que la LoS du tir, elle lui donne un modèle du monde qui n'est pas le
+monde : il croit une position exposée que le moteur ne verra pas. Les 607 désaccords vont tous
+dans le même sens (le batch voit, la règle ne voit pas), donc l'agent **surestimait** le danger
+sur ~4 % des hexes et fuyait des positions sûres. « Non optimal » ET « trompeur ».
 
-📌 **En attendant, les deux chemins du cache utilisent le MÊME batch** (§0.63) : l'observation ne
-dépend pas de l'ordre des poses. C'est le minimum exigible, pas une résolution.
+**Livré.** Point d'entrée unique et public `ActionDecoder.deployment_los(game_state, from, to)`
+→ `has_line_of_sight` → `compute_unit_los`. **Les DEUX canaux** y passent : exposition réelle
+(ennemis posés) et exposition **potentielle** (hexes de référence du pool adverse), dans la
+reconstruction comme dans la mise à jour incrémentale. Un point d'entrée unique parce que c'est
+la divergence entre deux chemins — invisible tant que l'incrémental ne tournait pas — qui a
+produit ces 607 valeurs fausses.
+
+⚠️ **Cache DISQUE invalidé par version de modèle.** `DEPLOYMENT_LOS_MODEL_VERSION = 2` entre dans
+la clé de hachage des fichiers `.cache/deployment_potential_los/`. Sans ça, un run aurait relu les
+fichiers produits par le modèle 2D et **le changement aurait été sans effet, en silence** — le
+pire résultat possible. À incrémenter à chaque évolution du modèle de LoS.
+
+📌 **Le coût de régénération était le seul risque, il est levé** : contrairement à ce que
+l'agent avait annoncé, le canal potentiel n'itère pas sur les 16 472 hexes du pool adverse mais
+sur un **échantillon de 4 hexes de référence** — 64 416 paires, ~0,8 s par topologie, payées une
+fois puis mises en cache disque. C'est le canal RÉEL (N ennemis × 16 104 hexes, à chaque pose)
+qui porte le coût.
+
+**Coût mesuré** (phase de déploiement complète, 3 graines, cache disque chaud) :
+| | phase de déploiement |
+|---|---|
+| `main` avant tout | 2,00 s |
+| après §0.63 (cache réparé) | **1,46 s** |
+| après §0.64 (LoS alignée) | **2,85 s** |
+Soit **+42 %** sur l'état d'origine, le gain de §0.63 absorbant une partie du prix de la
+conformité. 🟢 Arbitrage utilisateur : « aligner d'abord, optimiser ensuite ».
+
+⚠️ **RÉ-ENTRAÎNEMENT REQUIS** : `obs_size` est **inchangé** (aucun champ ajouté), mais les
+**valeurs** du bloc candidats de déploiement changent sur ~4 % des hexes. Un modèle entraîné
+avant cette date a appris sur l'ancienne exposition. Cette entrée appartient donc au lot
+[§0.48](#s0.48), avec `L1`/`L2`/`L6`.
+
+**Code mort supprimé dans la foulée** : `_has_line_of_sight_cached`, `_count_los_exposure` et
+`_count_potential_los_from_reference_hexes` (~80 lignes) n'avaient plus aucun appelant, et
+`los_pair_cache` n'était plus lu. C'était le SECOND modèle de LoS du fichier — celui-là même qui
+divergeait ; le garder, c'était offrir à quelqu'un de le rebrancher.
 
 <a id="s0.60"></a>
 ### 0.60 Instrumentation du COÛT — 4 clés d'éval jamais lues (47 Go de workers), temps bloquant, courbes de charge et de participation — ✅ LIVRÉ (2026-08-02)
