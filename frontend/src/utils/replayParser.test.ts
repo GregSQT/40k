@@ -26,6 +26,43 @@ describe("replayParser", () => {
     expect(parsed.episodes[0].states.length).toBeGreaterThan(0);
   });
 
+  // Le journal ne porte ni terrain, ni icones, ni zones de deploiement : le replay les relit dans
+  // la config du scenario JOUE, qu'il ne connait que par cette ligne. Sans elle il affiche le
+  // terrain du scenario par defaut, alors qu'un entrainement en tire un different par episode.
+  it("extrait le chemin du scenario joue, sans le confondre avec le nom de scenario", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "[12:00:00] Scenario: Random from 3 scenarios",
+      "[12:00:00] Scenario file: config/agents/ArmageddonAgent/scenarios/training/scenario_bot-02.json",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "[12:00:01] T1 P1 MOVE : Unit 1(1,0) MOVED from (0,0) to (1,0)",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const parsed = parse_log_file_from_text(text);
+    expect(parsed.episodes[0].scenario_file).toBe(
+      "config/agents/ArmageddonAgent/scenarios/training/scenario_bot-02.json"
+    );
+    expect(parsed.episodes[0].scenario).toBe("Random from 3 scenarios");
+  });
+
+  it("laisse scenario_file absent sur un journal ecrit avant cette ligne", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "[12:00:00] Scenario: demo",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "[12:00:01] T1 P1 MOVE : Unit 1(1,0) MOVED from (0,0) to (1,0)",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    expect(parse_log_file_from_text(text).episodes[0].scenario_file).toBeUndefined();
+  });
+
   it("classe pile_in/consolidation en phase fight avec l'unite qui bouge comme active", () => {
     const text = [
       "=== EPISODE 1 START ===",

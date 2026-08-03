@@ -883,6 +883,15 @@ type BoardProps = {
     margin: number;
     inches_to_subhex: number;
   };
+  // Replay : résolution du plateau JOUÉ (`x1` | `x5_44x60`), lue dans le journal. Sans elle, la
+  // config plateau serait chargée à la résolution par défaut et le terrain, les icônes, les zones
+  // de déploiement et les segments de murs — canaux absents du journal, donc non surchargés —
+  // seraient dessinés en coordonnées x5 sur la grille de l'épisode.
+  boardPathOverride?: string;
+  // Replay : scénario RÉELLEMENT tiré pour l'épisode (ligne « Scenario file: » du journal). Un
+  // entraînement tire un scénario différent par épisode ; sans ça le terrain affiché est celui du
+  // scénario par défaut. Absent des journaux antérieurs à cette ligne → scénario par défaut.
+  scenarioFileOverride?: string;
   wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log
   availableCellsOverride?: Array<{ col: number; row: number }>; // Replay / pile in : surbrillance des hexes disponibles
   deploymentState?: GameState["deployment_state"];
@@ -1327,6 +1336,8 @@ export default function Board({
   onSkipAdvanceWarning: _onSkipAdvanceWarning,
   showAdvanceWarningPopup: _showAdvanceWarningPopup = false,
   boardConfigOverride,
+  boardPathOverride,
+  scenarioFileOverride,
   wallHexesOverride,
   availableCellsOverride,
   deploymentState,
@@ -1469,7 +1480,12 @@ export default function Board({
   const coverStatusDestKeyRef = useRef<string | null>(null);
 
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
-  const { boardConfig: _boardConfigFromHook, gameConfig, loading, error } = useGameConfig();
+  const {
+    boardConfig: _boardConfigFromHook,
+    gameConfig,
+    loading,
+    error,
+  } = useGameConfig("default", boardPathOverride, scenarioFileOverride);
   const _rawBoardConfig =
     boardConfigOverride && _boardConfigFromHook
       ? { ..._boardConfigFromHook, ...boardConfigOverride }

@@ -36,6 +36,13 @@ import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import { UnitStatusTable } from "./UnitStatusTable";
 
+// Pas d'un pouce en sous-hex -> entrée de `BOARD_PATH_MAP` (services/api_server.py). Le journal de
+// replay donne la résolution jouée mais pas le dossier de plateau ; cette table fait le lien.
+const BOARD_PATH_BY_INCHES_TO_SUBHEX: Record<number, string> = {
+  1: "x1",
+  5: "x5_44x60",
+};
+
 // Extended Unit type for replay mode (with ghost units)
 interface UnitWithGhost extends Unit {
   isGhost?: boolean;
@@ -80,6 +87,9 @@ interface ReplayGameState extends Omit<GameState, "episode_steps"> {
 interface ReplayEpisode {
   episode_num: number;
   scenario: string;
+  // Chemin du scénario tiré pour cet épisode (ligne « Scenario file: » du journal). Absent des
+  // journaux antérieurs à cette ligne.
+  scenario_file?: string;
   bot_name: string;
   win_method?: string | null;
   board: {
@@ -510,6 +520,23 @@ export const BoardReplay: React.FC = () => {
   const currentState = getCurrentGameState();
   const currentEpisode =
     selectedEpisode !== null && replayData ? replayData.episodes[selectedEpisode - 1] : null;
+
+  // Résolution du plateau JOUÉ, à demander à l'API pour tout ce que le journal ne porte PAS
+  // (terrain, icônes, zones de déploiement, segments de murs) : ces canaux sont relus dans la
+  // config plateau et seraient servis en coordonnées x5 — donc dessinés cinq fois trop loin sur la
+  // grille x1 de l'épisode — si on laissait le hook charger le plateau par défaut.
+  const boardPathOverride = useMemo((): string | undefined => {
+    if (!currentEpisode) return undefined;
+    const ish = currentEpisode.board.inches_to_subhex;
+    const boardPath = BOARD_PATH_BY_INCHES_TO_SUBHEX[ish];
+    if (!boardPath) {
+      throw new Error(
+        `Replay: aucun plateau connu pour inches_to_subhex=${ish} ` +
+          `(attendu ${Object.keys(BOARD_PATH_BY_INCHES_TO_SUBHEX).join(" ou ")})`
+      );
+    }
+    return boardPath;
+  }, [currentEpisode]);
 
   // ── CONTRÔLE D'OBJECTIF ET POINTS DE VICTOIRE : LUS DU MOTEUR, JAMAIS RECALCULÉS ──
   // Les deux `useMemo` qui vivaient ici resommaient l'OC dans le navigateur. Ils divergeaient du
@@ -1914,6 +1941,8 @@ export const BoardReplay: React.FC = () => {
         chargeRoll={chargeRoll}
         chargeSuccess={chargeSuccess}
         boardConfigOverride={currentEpisode!.board}
+        boardPathOverride={boardPathOverride}
+        scenarioFileOverride={currentEpisode!.scenario_file}
         wallHexesOverride={currentState.walls}
         objectivesOverride={currentState.objectives}
         availableCellsOverride={(() => {
