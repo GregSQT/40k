@@ -65,6 +65,14 @@ def _gs(*, level: int) -> Dict[str, Any]:
             "game_rules": {"engagement_zone": 1, "unit_model_cohesion_range": 2,
                            "unit_global_cohesion_range": 9,
                            "cohesion_distance_mode": "euclidean", "squad_min_neighbors": 1},
+            # 11.04 EFFECT : le charge move borne desormais chaque figurine par son TRAJET, comme
+            # le move normal — les toggles de traversee lui sont donc exiges (valeurs reelles de
+            # config/game_config.json).
+            "move": {
+                "can_move_through_enemy_engagement_zone": True,
+                "can_move_through_enemy_model": False,
+                "can_move_through_friendly_model": True,
+            },
         },
         "phase": "charge",
         "gym_training_mode": True,

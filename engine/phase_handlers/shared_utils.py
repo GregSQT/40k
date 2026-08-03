@@ -3891,6 +3891,64 @@ def _move_distance_field_bound(
     return base
 
 
+def model_reach_predicate(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    player: int,
+    model: Dict[str, Any],
+    budget: int,
+    level: int,
+) -> Callable[[int, int], bool]:
+    """« Cette figurine peut-elle ATTEINDRE cette cellule dans son budget ? » — par le CHEMIN.
+
+    SOURCE UNIQUE de la portee par-figurine pour les mouvements qui n'ont pas de pool BFS :
+    la charge (11.04) et le pile-in / la consolidation (12.03 / 12.08). Les trois disent
+    « **Your unit moves as described in Moving (03)** » : la borne est donc la meme que celle du
+    move normal — un trajet legal qui contourne murs et figurines — et non une distance a vol
+    d'oiseau.
+
+    C'ETAIT LE DEFAUT. `charge_build_valid_plan` et `_assign_cells_toward_enemies` retenaient
+    une cellule sur `calculate_hex_distance(origine, cellule) <= budget` et ne validaient que la
+    case d'ARRIVEE (plateau, murs, autres escouades). Le trajet n'etait jamais regarde : une
+    escouade traversait une ligne de murs pendant sa charge, ou une consolidation passait au
+    travers d'une figurine ennemie. Mesure sur un run de 600 episodes : 43 charges et 28
+    consolidations au-dela du budget reel, dont E301 ou six socles franchissent la muraille de
+    la colonne 33 avec un jet de 8 pour des trajets legaux de 8 a 13.
+
+    Meme machinerie que `explain_move_plan_rejection`, volontairement : memes obstacles de
+    transit (`build_move_transit_blocked`), meme champ geodesique memoise dans l'etat
+    (`_move_spatial_cache`), meme exclusion. Dupliquer la regle ici la ferait diverger.
+
+    L'exclusion est la traversee FLY declaree (21.03) et la metrique euclidienne du PvP :
+    `move_uses_geodesic_distance` rend alors False et le trajet legal EST la ligne droite —
+    la distance a vol d'oiseau est donc exacte, pas un repli.
+    """
+    o_col, o_row = int(model["col"]), int(model["row"])
+    budget = int(budget)
+    if not move_uses_geodesic_distance(game_state, str(squad_id)):
+        def _straight(nc: int, nr: int) -> bool:
+            return calculate_hex_distance(o_col, o_row, nc, nr) <= budget
+        return _straight
+
+    fields = _move_spatial_cache(game_state)["geo"]
+    fkey = (str(squad_id), int(player), o_col, o_row, int(level), budget)
+    field = fields.get(fkey)
+    if field is None:
+        field = geodesic_move_reach(
+            o_col, o_row, budget,
+            build_move_transit_blocked(game_state, str(squad_id), int(player), int(level)),
+            int(require_key(game_state, "board_cols")),
+            int(require_key(game_state, "board_rows")),
+        )
+        fields[fkey] = field
+    reachable = field
+
+    def _by_path(nc: int, nr: int) -> bool:
+        return (nc, nr) in reachable
+
+    return _by_path
+
+
 def _euclidean_path_distance(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -4953,9 +5011,17 @@ def charge_build_valid_plan(
     plan: List[Tuple[str, int, int, int]] = []
     occupied_after: Set[Tuple[int, int]] = set()  # cellules deja reservees par ce plan
 
+    _charge_player = int(require_key(units_cache[str(squad_id)], "player"))
     for mid in mids:
         m = models_cache[mid]
         orig_col, orig_row = int(m["col"]), int(m["row"])
+        # 11.04 EFFECT « Your unit moves as described in Moving (03) » : la borne du charge move
+        # est un TRAJET legal, pas une distance a vol d'oiseau. Le niveau du trajet est celui
+        # d'arrivee du plan (SOL), miroir exact du squad move rigide.
+        _reachable = model_reach_predicate(
+            game_state, str(squad_id), _charge_player, m, budget,
+            SQUAD_RIGID_MOVE_DESTINATION_LEVEL,
+        )
 
         # (a) Tentative B2B : voisins immediats de chaque modele cible
         b2b_candidates: List[Tuple[int, int, int]] = []  # (dist_from_orig, col, row)
@@ -4963,9 +5029,9 @@ def charge_build_valid_plan(
             for nc, nr in get_hex_neighbors(tc, tr):
                 if (nc, nr) in occupied_after:
                     continue
-                d_orig = calculate_hex_distance(orig_col, orig_row, nc, nr)
-                if d_orig > budget:
+                if not _reachable(nc, nr):
                     continue
+                d_orig = calculate_hex_distance(orig_col, orig_row, nc, nr)
                 if not _hex_legal_for_charge(nc, nr, game_state, squad_id, m, target_squad_ids):
                     continue
                 b2b_candidates.append((d_orig, nc, nr))
@@ -4991,6 +5057,8 @@ def charge_build_valid_plan(
                         nc = orig_col + d_col
                         nr = orig_row + d_row
                         if (nc, nr) in occupied_after:
+                            continue
+                        if not _reachable(nc, nr):
                             continue
                         if not _hex_legal_for_charge(nc, nr, game_state, squad_id, m, target_squad_ids):
                             continue
@@ -8623,6 +8691,17 @@ def _assign_cells_toward_enemies(
     origins: Dict[str, Tuple[int, int]] = {
         mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"])) for mid in mids
     }
+    # 12.03 / 12.08 EFFECT « Your unit moves as described in Moving (03) » : meme borne de
+    # TRAJET que le move et la charge. Sans elle, une consolidation « de 3 pouces » traversait
+    # une figurine ennemie ou un mur — 28 occurrences mesurees sur un run de 600 episodes.
+    _pile_player = int(require_key(units_cache[str(squad_id)], "player"))
+    _reach_by_mid: Dict[str, Callable[[int, int], bool]] = {
+        mid: model_reach_predicate(
+            game_state, str(squad_id), _pile_player, models_cache[mid], pile_in_budget,
+            int(require_key(models_cache[mid], "level")),
+        )
+        for mid in mids
+    }
 
     def _is_b2b_with_enemy(col: int, row: int) -> bool:
         for ec, er in enemy_positions:
@@ -8670,10 +8749,7 @@ def _assign_cells_toward_enemies(
         candidates = {
             mid: sorted(
                 cell for cell in b2b_cells
-                if cell not in blocked
-                and calculate_hex_distance(
-                    origins[mid][0], origins[mid][1], cell[0], cell[1]
-                ) <= pile_in_budget
+                if cell not in blocked and _reach_by_mid[mid](cell[0], cell[1])
             )
             for mid in movers
         }
@@ -8708,6 +8784,8 @@ def _assign_cells_toward_enemies(
                         continue
                     nc, nr = oc + d_col, orow + d_row
                     if not _cell_base_legal(nc, nr) or (nc, nr) in taken:
+                        continue
+                    if not _reach_by_mid[mid](nc, nr):
                         continue
                     cand_d = calculate_hex_distance(nc, nr, tc, tr)
                     if cand_d >= orig_dist:

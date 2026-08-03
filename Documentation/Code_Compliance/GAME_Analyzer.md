@@ -100,6 +100,14 @@ le board x1 neutralise le premier.
    **alliés** (03.01) et la bande d'engagement ennemie, jamais une figurine ennemie ni un mur.
    *Sans BFS, un déplacement par-dessus un mur n'est jamais signalé.*
 
+   **Le moteur applique la même règle depuis 2026-08-03.** Le contrôle de l'analyzer a longtemps
+   été le seul à vérifier le trajet : `charge_build_valid_plan` (11.04) et
+   `_assign_cells_toward_enemies` (12.03 / 12.08) retenaient une cellule sur sa distance à vol
+   d'oiseau et ne validaient que la case d'arrivée. Les 43 charges et 28 consolidations « au-delà
+   du budget » d'un run de 600 épisodes étaient donc de VRAIES violations, pas des faux positifs.
+   Les deux planificateurs passent désormais par `shared_utils.model_reach_predicate`, qui
+   réutilise le champ géodésique du move (`explain_move_plan_rejection`).
+
 Deux exemptions, portées par des **tags du journal** et non par le registre d'unités :
 `[FLY]` (21.03 — vol déclaré : traversée libre, **et 2" retranchés au budget** ; les deux sont
 indissociables, la traversée est la contrepartie des 2" payés, sur le move, l'advance ET la
