@@ -5250,6 +5250,10 @@ def _manual_roll_fight_intent(
         # (06.01 : aucun terrain ne s interpose a distance d engagement).
         "precision": weapon_has_rule(weapon, "PRECISION"),
         "precision_range": None,
+        # [RAPID FIRE] 24.30 n'existe qu'au TIR : la melee emet 0, elle ne l'omet pas. La cle de
+        # groupe partagee peut ainsi l'exiger (`require_key`) au lieu de retomber sur un defaut
+        # silencieux — un producteur qui oublierait le champ leverait, comme l'exige T1.
+        "rapid_fire_applied": 0,
         # 04.03 IDENTICAL ATTACKS : jumeau exact du roller de tir — la seconde moitie de la
         # definition (« affected by the same applicable abilities and rules ») entre dans la
         # cle de groupe, en melee comme au tir.

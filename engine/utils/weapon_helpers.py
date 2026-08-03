@@ -4,7 +4,7 @@ Weapon Helper Functions
 MULTIPLE_WEAPONS_IMPLEMENTATION.md: Helper functions for accessing weapon data
 """
 
-from typing import Any, Dict, FrozenSet, List, Optional
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 from shared.data_validation import require_key
 from engine.combat_utils import expected_dice_value
 
@@ -54,19 +54,23 @@ def melee_weapons(entity: Dict[str, Any]) -> List[Dict[str, Any]]:
     return weapons
 
 
-def weapon_has_rule(weapon: Dict[str, Any], rule_id: str) -> bool:
-    """True si l'arme declare la regle `rule_id` dans WEAPON_RULES.
+def _iter_weapon_rules(weapon: Dict[str, Any]) -> List[Tuple[str, str]]:
+    """Regles declarees par l'arme, NORMALISEES : `[(NOM_MAJUSCULE, parametre_brut), ...]`.
 
-    Gere les deux formes d'entree : chaine 'NAME' et chaine parametree 'NAME:param'.
-    Comparaison insensible a la casse. Aucun repli masquant : WEAPON_RULES est
-    exige (require_key) et doit etre une liste, sinon erreur explicite.
+    PRIMITIVE UNIQUE de lecture de `WEAPON_RULES`, consommee par les trois accesseurs publics
+    ci-dessous. Elle a d'abord existe en trois copies (une par accesseur), et la derive avait
+    commence : deux faisaient `split(":", 1)`, la troisieme `partition(":")`. Elles coincidaient,
+    rien ne le garantissait. Or `weapon_has_rule` et `weapon_rule_signature` DOIVENT repondre sur
+    la meme normalisation : le premier ouvre l'application d'une regle, la seconde decide si deux
+    armes font des attaques identiques (04.03). Une divergence entre les deux, c'est le defaut de
+    lot d'allocation que ce module vient de corriger, rejoue a l'envers.
 
-    2026-07-29 — la branche `hasattr(entry, "rule")` (forme objet `ParsedWeaponRule`) a ete
-    SUPPRIMEE : ce type n'est plus constructible hors du parseur d'armurerie, qui jette son
-    resultat, et `WEAPON_RULES` ne contient que des chaines partout. Note : `hasattr` etait un
-    test de FORME, pas de type — il aurait attrape n'importe quel objet portant un attribut
-    `.rule`. Une telle entree tombe desormais dans le `raise TypeError` ci-dessous, c'est-a-dire
-    une erreur explicite plutot qu'un traitement silencieux d'une donnee inattendue.
+    Parametre rendu BRUT (non converti) : seul `weapon_rule_parameter` sait qu'il attend un entier
+    et sait quoi lever si ce n'en est pas un. Chaine vide = regle sans parametre.
+
+    Aucun repli masquant : `WEAPON_RULES` est exige (require_key), doit etre une liste, et toute
+    entree non-chaine leve. La forme objet `ParsedWeaponRule` a ete supprimee le 2026-07-29 (type
+    non constructible hors du parseur d'armurerie, qui jette son resultat).
     """
     rules = require_key(weapon, "WEAPON_RULES")
     if not isinstance(rules, list):
@@ -74,17 +78,25 @@ def weapon_has_rule(weapon: Dict[str, Any], rule_id: str) -> bool:
             f"WEAPON_RULES must be a list, got {type(rules).__name__} "
             f"for weapon {weapon.get('display_name', weapon.get('NAME'))}"
         )
-    target = rule_id.strip().upper()
+    out: List[Tuple[str, str]] = []
     for entry in rules:
-        if isinstance(entry, str):
-            name = entry.split(":", 1)[0]
-        else:
+        if not isinstance(entry, str):
             raise TypeError(
                 f"Unsupported WEAPON_RULES entry type: {type(entry).__name__} ({entry!r})"
             )
-        if str(name).strip().upper() == target:
-            return True
-    return False
+        name, _, param = entry.partition(":")
+        out.append((name.strip().upper(), param.strip()))
+    return out
+
+
+def weapon_has_rule(weapon: Dict[str, Any], rule_id: str) -> bool:
+    """True si l'arme declare la regle `rule_id` dans WEAPON_RULES.
+
+    Gere les deux formes d'entree : chaine 'NAME' et chaine parametree 'NAME:param'.
+    Comparaison insensible a la casse. Normalisation deleguee a `_iter_weapon_rules`.
+    """
+    target = rule_id.strip().upper()
+    return any(name == target for name, _ in _iter_weapon_rules(weapon))
 
 
 def weapon_rule_signature(weapon: Dict[str, Any]) -> FrozenSet[str]:
@@ -100,61 +112,29 @@ def weapon_rule_signature(weapon: Dict[str, Any]) -> FrozenSet[str]:
     Le PARAMETRE fait partie de la signature : RAPID_FIRE:1 et RAPID_FIRE:2 ne sont pas la meme
     regle appliquee. RNG et NB (A), eux, n'y sont PAS — 04.03 ne les liste pas parmi les
     caracteristiques d'identite, et les y mettre separerait des lots que la regle fusionne.
-
-    Normalisation identique a `weapon_has_rule` / `weapon_rule_parameter` : casse et espaces
-    ignores, meme rejet explicite de toute entree non-chaine.
     """
-    rules = require_key(weapon, "WEAPON_RULES")
-    if not isinstance(rules, list):
-        raise TypeError(
-            f"WEAPON_RULES must be a list, got {type(rules).__name__} "
-            f"for weapon {weapon.get('display_name', weapon.get('NAME'))}"
-        )
-    out = set()
-    for entry in rules:
-        if not isinstance(entry, str):
-            raise TypeError(
-                f"Unsupported WEAPON_RULES entry type: {type(entry).__name__} ({entry!r})"
-            )
-        name, _, param = entry.partition(":")
-        out.add(f"{name.strip().upper()}:{param.strip()}" if param else name.strip().upper())
-    return frozenset(out)
+    return frozenset(
+        f"{name}:{param}" if param else name for name, param in _iter_weapon_rules(weapon)
+    )
 
 
 def weapon_rule_parameter(weapon: Dict[str, Any], rule_id: str) -> Optional[int]:
     """Valeur entiere du parametre d'une regle d'arme parametree (ex: RAPID_FIRE:X).
 
-    Forme unique : chaine 'NAME:param'. Comparaison du nom insensible a la casse.
-    Retourne None si l'arme ne declare PAS `rule_id`. Leve (aucun repli masquant) si la
-    regle est presente mais son parametre est absent ou non entier. Miroir de l'extraction
-    de `ai/analyzer_config.py` (RAPID_FIRE), mutualisee ici pour le chemin de resolution.
-
-    2026-07-29 — la branche objet `ParsedWeaponRule` a ete SUPPRIMEE, meme raison que dans
-    `weapon_has_rule` : type non constructible hors du parseur, qui jette son resultat. Toute
-    entree non-chaine leve desormais explicitement.
+    Retourne None si l'arme ne declare PAS `rule_id`. Leve (aucun repli masquant) si la regle est
+    presente mais son parametre est absent ou non entier. Miroir de l'extraction de
+    `ai/analyzer_config.py` (RAPID_FIRE), mutualisee ici pour le chemin de resolution.
     """
-    rules = require_key(weapon, "WEAPON_RULES")
-    if not isinstance(rules, list):
-        raise TypeError(
-            f"WEAPON_RULES must be a list, got {type(rules).__name__} "
-            f"for weapon {weapon.get('display_name', weapon.get('NAME'))}"
-        )
     target = rule_id.strip().upper()
-    for entry in rules:
-        if isinstance(entry, str):
-            if entry.split(":", 1)[0].strip().upper() != target:
-                continue
-            if ":" not in entry:
-                raise ValueError(f"Weapon rule {rule_id!r} present but missing parameter: {entry!r}")
-            raw: Any = entry.split(":", 1)[1]
-        else:
-            raise TypeError(
-                f"Unsupported WEAPON_RULES entry type: {type(entry).__name__} ({entry!r})"
-            )
+    for name, param in _iter_weapon_rules(weapon):
+        if name != target:
+            continue
+        if not param:
+            raise ValueError(f"Weapon rule {rule_id!r} present but missing parameter")
         try:
-            return int(raw)
+            return int(param)
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"Invalid parameter for weapon rule {rule_id!r}: {raw!r}") from exc
+            raise ValueError(f"Invalid parameter for weapon rule {rule_id!r}: {param!r}") from exc
     return None
 
 

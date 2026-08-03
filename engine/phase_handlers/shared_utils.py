@@ -3579,7 +3579,7 @@ def _move_spatial_cache(game_state: Dict[str, Any]) -> Dict[str, Any]:
     )
     holder = game_state.get("_move_spatial_cache")  # get allowed (absent au 1er appel)
     if holder is None or holder["fp"] != fp:
-        holder = {"fp": fp, "blocked": {}, "transit": {}, "geo": {}}
+        holder = {"fp": fp, "blocked": {}, "transit": {}, "geo": {}, "eucl": {}}
         game_state["_move_spatial_cache"] = holder
     return holder
 
@@ -3820,7 +3820,9 @@ def _validate_plan_coherency(
     return _positions_in_coherency(models, game_state)
 
 
-def move_plan_distance_mode(game_state: Dict[str, Any], squad_id: str) -> str:
+def move_plan_distance_mode(
+    game_state: Dict[str, Any], squad_id: str, metric: Optional[str] = None
+) -> str:
     """GÉOMÉTRIE de la distance de move d'une escouade — `geodesic` | `cube` | `euclidean`.
 
     Source UNIQUE, partagée par la validation d'un plan (`explain_move_plan_rejection`) et par la
@@ -3844,8 +3846,15 @@ def move_plan_distance_mode(game_state: Dict[str, Any], squad_id: str) -> str:
         _move_distance_metric,
     )
 
+    # `metric` explicite = le sélecteur de la phase qui pose la question. La CHARGE a le sien
+    # (`_charge_distance_metric`, clés `distance_metric["charge"|"charge_gym"]`) et il est
+    # INDÉPENDANT de celui du move dans `game_config.json` : quatre clés, quatre valeurs
+    # possibles. Les lui imposer ici bornerait le plan de charge avec une géométrie pendant que
+    # son pool et sa preview en utilisent une autre — exactement la rupture « masque ⊆
+    # exécutable » que ce fichier passe son temps à empêcher. Défaut = métrique du move.
+    _metric = _move_distance_metric(game_state) if metric is None else metric
     # Métrique AVANT l'unité (cf. érosion) : euclidien / non-hex → pas de lecture d'unité.
-    if _move_distance_metric(game_state) != "hex":
+    if _metric != "hex":
         return "euclidean"
     _unit_obj = get_unit_by_id(game_state, str(squad_id))
     if _unit_obj is not None and _fly_traversal_active(game_state, _unit_obj, str(squad_id)):
@@ -3891,6 +3900,56 @@ def _move_distance_field_bound(
     return base
 
 
+def geodesic_field_for_origin(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    player: int,
+    origin: Tuple[int, int],
+    level: int,
+    budget: int,
+) -> Dict[Tuple[int, int], int]:
+    """Champ geodesique (cases -> cout en pas) atteignable depuis UNE origine, memoise dans l'etat.
+
+    SOURCE UNIQUE des trois consommateurs du champ de trajet : la VALIDATION d'un plan
+    (`explain_move_plan_rejection`), la MESURE de la distance parcourue (`move_plan_path_distances`)
+    et la BORNE de la charge / du pile-in (`model_reach_predicate`). Les trois doivent voir
+    exactement le meme atteignable — c'est l'invariant qui interdit qu'un plan valide ressorte
+    « injoignable » de sa propre mesure (§0.34).
+
+    Cet invariant tient a la FORME DE LA CLE de memoisation, qui a longtemps ete recopiee a la main
+    aux trois endroits. Y ajouter une composante (les toggles de traversee, la semantique de niveau)
+    a un seul site servait silencieusement aux deux autres un champ calcule pour un autre contexte.
+    La cle vit donc ici, une fois.
+
+    ``level`` est le niveau du TRAJET (niveau CIBLE du plan, pas celui d'origine) : une figurine qui
+    descend chemine parmi les obstacles du sol.
+
+    LE BUDGET N'EST PAS DANS LA CLE, et c'est deliberé : le champ rend `{cellule: cout en pas}`,
+    donc un champ calcule pour 12 repond exactement pour tout budget <= 12 — il suffit de comparer
+    le cout. Avec le budget dans la cle, l'observation (qui interroge toujours `CHARGE_MAX_ROLL`)
+    et le commit (qui interroge le jet reel) calculaient DEUX BFS par figurine au lieu d'un.
+    Mesure : 373 -> 261 us par figurine.
+
+    CONTRAT DE L'APPELANT : le champ peut porter des cellules AU-DELA de son budget. Comparer
+    `field.get(cell) <= budget`, jamais tester la seule appartenance.
+    """
+    o_col, o_row = int(origin[0]), int(origin[1])
+    budget = int(budget)
+    fields = _move_spatial_cache(game_state)["geo"]
+    fkey = (str(squad_id), int(player), o_col, o_row, int(level))
+    cached = fields.get(fkey)
+    if cached is not None and cached[0] >= budget:
+        return cached[1]
+    field = geodesic_move_reach(
+        o_col, o_row, budget,
+        build_move_transit_blocked(game_state, str(squad_id), int(player), int(level)),
+        int(require_key(game_state, "board_cols")),
+        int(require_key(game_state, "board_rows")),
+    )
+    fields[fkey] = (budget, field)
+    return field
+
+
 def _euclidean_move_field_for_model(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -3916,6 +3975,19 @@ def _euclidean_move_field_for_model(
     from engine.phase_handlers.movement_handlers import _fly_traversal_active
 
     start = (int(model["col"]), int(model["row"]))
+    # Memoise dans l'etat, comme son jumeau geodesique (`geodesic_field_for_origin`) : sans cela
+    # `charge_build_valid_plan` — appele par `observation_builder` une fois par escouade ennemie a
+    # chaque construction d'observation en phase de charge — reconstruisait un Dijkstra any-angle
+    # par figurine et par appel. Meme fingerprint d'etat, donc meme fraicheur.
+    _cache = _move_spatial_cache(game_state)["eucl"]
+    _ckey = (
+        str(squad_id), int(player), start, int(level), int(bound),
+        str(require_key(model, "BASE_SHAPE")), require_key(model, "BASE_SIZE"),
+        int(model.get("orientation", 0)),  # get allowed (defaut face nord, cf. pool)
+    )
+    _hit = _cache.get(_ckey)
+    if _hit is not None:
+        return _hit
     unit = get_unit_by_id(game_state, str(squad_id))
     obstacles: Set[Tuple[int, int]] = set()
     if not (unit is not None and _fly_traversal_active(game_state, unit, str(squad_id))):
@@ -3925,12 +3997,14 @@ def _euclidean_move_field_for_model(
     base_size = require_key(model, "BASE_SIZE")
     orientation = int(model.get("orientation", 0))  # get allowed (defaut face nord, cf. pool)
     off_even, off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
-    return _euclidean_move_field(
+    field = _euclidean_move_field(
         start, base_shape, base_size, off_even, off_odd, obstacles,
         int(require_key(game_state, "board_cols")),
         int(require_key(game_state, "board_rows")),
         float(bound) * ENGAGEMENT_NORM_HEX_WIDTH,
     )
+    _cache[_ckey] = field
+    return field
 
 
 def model_reach_predicate(
@@ -3940,6 +4014,7 @@ def model_reach_predicate(
     model: Dict[str, Any],
     budget: int,
     level: int,
+    metric: Optional[str] = None,
 ) -> Callable[[int, int], bool]:
     """« Cette figurine peut-elle ATTEINDRE cette cellule dans son budget ? » — par le CHEMIN.
 
@@ -3974,7 +4049,7 @@ def model_reach_predicate(
     """
     o_col, o_row = int(model["col"]), int(model["row"])
     budget = int(budget)
-    mode = move_plan_distance_mode(game_state, str(squad_id))
+    mode = move_plan_distance_mode(game_state, str(squad_id), metric)
 
     if mode == "cube":
         def _straight(nc: int, nr: int) -> bool:
@@ -3990,21 +4065,15 @@ def model_reach_predicate(
             return (nc, nr) in eucl
         return _by_any_angle
 
-    fields = _move_spatial_cache(game_state)["geo"]
-    fkey = (str(squad_id), int(player), o_col, o_row, int(level), budget)
-    field = fields.get(fkey)
-    if field is None:
-        field = geodesic_move_reach(
-            o_col, o_row, budget,
-            build_move_transit_blocked(game_state, str(squad_id), int(player), int(level)),
-            int(require_key(game_state, "board_cols")),
-            int(require_key(game_state, "board_rows")),
-        )
-        fields[fkey] = field
-    reachable = field
+    reachable = geodesic_field_for_origin(
+        game_state, str(squad_id), int(player), (o_col, o_row), int(level), budget
+    )
 
     def _by_path(nc: int, nr: int) -> bool:
-        return (nc, nr) in reachable
+        # `<= budget`, pas une appartenance : le champ memoise peut avoir ete calcule pour un
+        # budget PLUS LARGE (cf. `geodesic_field_for_origin`).
+        _d = reachable.get((nc, nr))
+        return _d is not None and _d <= budget
 
     return _by_path
 
@@ -4073,8 +4142,6 @@ def move_plan_path_distances(
     bound = _move_distance_field_bound(game_state, squad_id, move_type)
 
     distances: Dict[str, float] = {}
-    fields = _move_spatial_cache(game_state)["geo"]
-    transit_by_level: Dict[int, Set[Tuple[int, int]]] = {}
     for entry in plan:
         mid = str(entry[0])
         model = models_cache.get(mid)
@@ -4105,19 +4172,11 @@ def move_plan_path_distances(
                 game_state, squad_id, player, model, (n_col, n_row), o_level, bound
             )
             continue
-        if _path_level not in transit_by_level:
-            transit_by_level[_path_level] = build_move_transit_blocked(
-                game_state, squad_id, player, _path_level
-            )
-        fkey = (squad_id, player, o_col, o_row, _path_level, bound)
-        field = fields.get(fkey)
-        if field is None:
-            field = geodesic_move_reach(
-                o_col, o_row, bound, transit_by_level[_path_level], board_cols, board_rows
-            )
-            fields[fkey] = field
+        field = geodesic_field_for_origin(
+            game_state, squad_id, player, (o_col, o_row), _path_level, bound
+        )
         path = field.get((n_col, n_row))
-        if path is None:
+        if path is None or path > bound:
             raise RuntimeError(
                 f"move_plan_path_distances: figurine {mid} — destination ({n_col},{n_row}) "
                 f"injoignable en chemin <= {bound} depuis ({o_col},{o_row}) alors que le plan "
@@ -4218,8 +4277,6 @@ def explain_move_plan_rejection(
     # l'ÉTAT (`_move_spatial_cache`), pas de l'appel : le champ ne dépend pas de la destination
     # testée, alors que ce prédicat est appelé une fois par cellule candidate. Mesure sur
     # `test_move_mask_is_executable` : 20 947 BFS pour quelques dizaines de champs distincts.
-    _geo_fields: Dict[Any, Dict[Tuple[int, int], int]] = _move_spatial_cache(game_state)["geo"]
-    _transit_by_level: Dict[int, Set[Tuple[int, int]]] = {}
 
     # Clé (niveau, col, row) : le NIVEAU fait partie de l'identité d'une position — meme
     # regle que le contrôle de cellule interdite juste en dessous, qui est deja per-niveau.
@@ -4263,20 +4320,11 @@ def explain_move_plan_rejection(
                 # c'est ce meme niveau que le pool d'ancre du masque a utilise. Origine == cible
                 # dans tous les autres cas, donc aucun changement ailleurs (§0.34).
                 _path_level = level
-                if _path_level not in _transit_by_level:
-                    _transit_by_level[_path_level] = build_move_transit_blocked(
-                        game_state, squad_id, player, _path_level
-                    )
-                _fkey = (str(squad_id), int(player), o_col, o_row, _path_level, budget)
-                _field = _geo_fields.get(_fkey)
-                if _field is None:
-                    _field = geodesic_move_reach(
-                        o_col, o_row, budget,
-                        _transit_by_level[_path_level], board_cols, board_rows,
-                    )
-                    _geo_fields[_fkey] = _field
+                _field = geodesic_field_for_origin(
+                    game_state, squad_id, player, (o_col, o_row), _path_level, budget
+                )
                 _pdist = _field.get(cell)
-                if _pdist is None:
+                if _pdist is None or _pdist > budget:
                     _sl = calculate_hex_distance(o_col, o_row, nc, nr)
                     return (
                         f"figurine {mid} hors budget : ({nc},{nr}) injoignable en chemin "
@@ -5058,6 +5106,9 @@ def charge_build_valid_plan(
     occupied_after: Set[Tuple[int, int]] = set()  # cellules deja reservees par ce plan
 
     _charge_player = int(require_key(units_cache[str(squad_id)], "player"))
+    # Sélecteur de métrique de la CHARGE, pas celui du move : cf. `move_plan_distance_mode`.
+    from engine.phase_handlers.charge_handlers import _charge_distance_metric
+    _charge_metric = _charge_distance_metric(game_state)
     for mid in mids:
         m = models_cache[mid]
         orig_col, orig_row = int(m["col"]), int(m["row"])
@@ -5066,7 +5117,7 @@ def charge_build_valid_plan(
         # d'arrivee du plan (SOL), miroir exact du squad move rigide.
         _reachable = model_reach_predicate(
             game_state, str(squad_id), _charge_player, m, budget,
-            SQUAD_RIGID_MOVE_DESTINATION_LEVEL,
+            SQUAD_RIGID_MOVE_DESTINATION_LEVEL, metric=_charge_metric,
         )
 
         # (a) Tentative B2B : voisins immediats de chaque modele cible
@@ -8226,7 +8277,7 @@ def _build_manual_allocation(
         # deja representees : [HEAVY] et [COVER] par `bs`, [MELTA] par `dmg_bonus`.
         gkey = (r["bs"], r["ap"], r["dmg_raw"], require_key(r, "dmg_bonus"),
                 r["display_wth"], r["display_save_th"], require_key(r, "weapon_rules"),
-                int(r["rapid_fire_applied"]) if "rapid_fire_applied" in r else 0,
+                int(require_key(r, "rapid_fire_applied")),
                 target_sid)
         if gkey not in group_index_by_key:
             group_index_by_key[gkey] = len(weapon_groups)
@@ -8263,7 +8314,7 @@ def _build_manual_allocation(
                 # n'etait PAS le cas avant : la cle ignorait les regles d'arme, trois armes de
                 # regles differentes y tombaient ensemble et le groupe ne retenait que la valeur
                 # de la PREMIERE. Absente en melee.
-                "rapid_fire_applied": int(r["rapid_fire_applied"]) if "rapid_fire_applied" in r else 0,
+                "rapid_fire_applied": int(require_key(r, "rapid_fire_applied")),
                 "precision": require_key(r, "precision"),
                 "precision_range": require_key(r, "precision_range"),
                 "display_wth": r["display_wth"], "display_save_th": r["display_save_th"],
@@ -8737,17 +8788,6 @@ def _assign_cells_toward_enemies(
     origins: Dict[str, Tuple[int, int]] = {
         mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"])) for mid in mids
     }
-    # 12.03 / 12.08 EFFECT « Your unit moves as described in Moving (03) » : meme borne de
-    # TRAJET que le move et la charge. Sans elle, une consolidation « de 3 pouces » traversait
-    # une figurine ennemie ou un mur — 28 occurrences mesurees sur un run de 600 episodes.
-    _pile_player = int(require_key(units_cache[str(squad_id)], "player"))
-    _reach_by_mid: Dict[str, Callable[[int, int], bool]] = {
-        mid: model_reach_predicate(
-            game_state, str(squad_id), _pile_player, models_cache[mid], pile_in_budget,
-            int(require_key(models_cache[mid], "level")),
-        )
-        for mid in mids
-    }
 
     def _is_b2b_with_enemy(col: int, row: int) -> bool:
         for ec, er in enemy_positions:
@@ -8775,6 +8815,21 @@ def _assign_cells_toward_enemies(
     immobile = [mid for mid in mids if _is_b2b_with_enemy(*origins[mid])]
     movers = [mid for mid in mids if mid not in set(immobile)]
     static_cells = {origins[mid] for mid in immobile}
+
+    # 12.03 / 12.08 EFFECT « Your unit moves as described in Moving (03) » : meme borne de TRAJET
+    # que le move et la charge. Sans elle, une consolidation « de 3 pouces » traversait une
+    # figurine ennemie ou un mur — 28 occurrences mesurees sur un run de 600 episodes.
+    # Construit pour les SEULES figurines qui l'interrogent : 12.03 WHILE MOVING immobilise celles
+    # deja au contact, et c'est le cas NORMAL d'un pile-in. En metrique euclidienne chaque predicat
+    # coute un champ any-angle.
+    _pile_player = int(require_key(units_cache[str(squad_id)], "player"))
+    _reach_by_mid: Dict[str, Callable[[int, int], bool]] = {
+        mid: model_reach_predicate(
+            game_state, str(squad_id), _pile_player, models_cache[mid], pile_in_budget,
+            int(require_key(models_cache[mid], "level")),
+        )
+        for mid in movers
+    }
 
     # 2. Cellules bord-a-bord atteignables (legalite hors-plan uniquement).
     b2b_cells: Set[Tuple[int, int]] = set()

@@ -5327,12 +5327,6 @@ class W40KEngine(gym.Env):
             _tgt_uc = self.game_state.get("units_cache", {}).get(str(target_squad_id), {})  # get allowed
             _charge_from = (int(_sq_uc["col"]), int(_sq_uc["row"])) if "col" in _sq_uc else None
             _charge_target = (int(_tgt_uc["col"]), int(_tgt_uc["row"])) if "col" in _tgt_uc else None
-            # 21.03 — JUMEAU du drapeau pose sur le move squad, capture AVANT le commit pour la
-            # meme raison. Le moteur retranche deja 2" au jet (`_charge_budget_subhex`) et
-            # autorise la traversee ; sans ce drapeau, la ligne `CHARGED` de step.log ne porte
-            # pas `[FLY]` et l'analyzer juge la charge avec un budget 2" trop large ET des murs
-            # qui ne s'appliquent pas. Le formateur du StepLogger le lit deja.
-            _charge_is_fly = _fta(self.game_state, unit, str(squad_id))
             if plan is None:
                 # Arg3 = PASS, pas CHARGE : une charge RATÉE n'est pas un charge move. 11.04 place
                 # le grant de Fights First sous « AFTER MOVING » du charge move, et 12.03/12.04
@@ -5380,6 +5374,12 @@ class W40KEngine(gym.Env):
                     "charge_succeeded": False,
                 }
             else:
+                # 21.03 — JUMEAU du drapeau pose sur le move squad, capture AVANT le commit pour
+                # la meme raison. Le moteur retranche deja 2" au jet (`_charge_budget_subhex`) et
+                # autorise la traversee ; sans ce drapeau, la ligne `CHARGED` de step.log ne porte
+                # pas `[FLY]` et l'analyzer juge la charge avec un budget 2" trop large ET des
+                # murs qui ne s'appliquent pas. Le formateur du StepLogger le lit deja.
+                _charge_is_fly = _fta(self.game_state, unit, str(squad_id))
                 commit_move(plan, self.game_state, "charge")
                 end_result = end_activation(self.game_state, unit, ACTION, 1, CHARGE, CHARGE, 0)
                 _dest_uc = self.game_state.get("units_cache", {}).get(str(squad_id), {})  # get allowed
