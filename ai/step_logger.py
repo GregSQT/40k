@@ -224,11 +224,10 @@ class StepLogger:
     def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None, roster_info=None, board_config=None, scenario_path=None):
         """Log episode start with all unit starting positions, walls, and objectives
 
-        ``scenario_path`` : chemin du fichier de scénario RÉELLEMENT tiré pour cet épisode,
-        relatif à la racine du dépôt. Le journal ne porte ni terrain, ni icônes, ni zones de
-        déploiement — le replay les relit dans la config, et sans ce chemin il les relit pour le
-        scénario par DÉFAUT, alors qu'un entraînement tire un scénario différent à chaque épisode
-        (`scenario_info` vaut alors « Random from N scenarios », qui ne désigne rien).
+        ``scenario_path`` : chemin du scénario RÉELLEMENT tiré pour cet épisode, relatif à la
+        racine du dépôt. C'est par lui que le replay retrouve le décor joué — ``scenario_info``
+        vaut « Random from N scenarios » en entraînement et ne désigne aucun fichier
+        (cf. Documentation/Implémentation/Replay.md §2.4).
         """
         if not self.enabled:
             return

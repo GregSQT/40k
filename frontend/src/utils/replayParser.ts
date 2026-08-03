@@ -356,8 +356,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       continue;
     }
 
-    // Chemin du scénario tiré pour cet épisode (ai/step_logger.py::log_episode_start). Testé AVANT
-    // `Scenario:` : deux motifs voisins sur des lignes voisines, l'ordre lève l'ambiguïté.
+    // Chemin du scénario tiré pour cet épisode (ai/step_logger.py::log_episode_start).
     const scenarioFileMatch = trimmed.match(/Scenario file: (.+)$/);
     if (scenarioFileMatch) {
       currentEpisode.scenario_file = scenarioFileMatch[1].trim();

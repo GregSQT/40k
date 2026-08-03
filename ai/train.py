@@ -4282,9 +4282,9 @@ def main():
 
     args = parser.parse_args()
 
-    _RESOLUTION_TO_BOARD = {1: "board/44x60x1", 5: "board/44x60x5", 10: "board/44x60x10"}
+    from config_loader import BOARD_DIR_BY_INCHES_TO_SUBHEX
     if args.resolution is not None:
-        os.environ["W40K_BOARD_PATH"] = _RESOLUTION_TO_BOARD[args.resolution]
+        os.environ["W40K_BOARD_PATH"] = BOARD_DIR_BY_INCHES_TO_SUBHEX[args.resolution]
     args.test_only = args.test_only or args.eval
 
     # `--new` cree un modele neuf, `--append` continue l'existant : c'est l'un OU l'autre. Rien
@@ -4334,7 +4334,7 @@ def main():
     print(f"Rule-checker mode: {args.rule_checker}")
     print(f"Debug mode: {args.debug}")
     if args.resolution is not None:
-        print(f"Resolution: x{args.resolution} ({_RESOLUTION_TO_BOARD[args.resolution]})")
+        print(f"Resolution: x{args.resolution} ({BOARD_DIR_BY_INCHES_TO_SUBHEX[args.resolution]})")
     if args.mode:
         print(f"Device mode: {args.mode}")
     if getattr(args, "param", None):

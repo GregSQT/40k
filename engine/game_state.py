@@ -1989,8 +1989,14 @@ class GameStateManager:
 
         Champs convertis, et EUX SEULS : `terrain[].vertices`, `terrain[].floors[].vertices`,
         `walls[].segments`, `walls[].hexes`, `deployment_zones[].vertices`, `icons[].center`.
-        `height_inches` reste en pouces (jamais en subhex) ; `icons[].size` est une taille en
-        PIXELS, mise à l'échelle du rayon d'hex, donc multipliée par le rapport.
+        `height_inches` reste en pouces (jamais en subhex). `icons[].size` NON PLUS : c'est une
+        taille écran en PIXELS, et un plateau occupe la même surface écran à toutes ses
+        résolutions — `hex_radius` et `margin` sont multipliés par le rapport exactement là où
+        `cols`/`rows` sont divisés (x5 : 220 cases à 2.78 px ; x1 : 44 à 13.9 px, ~917 px dans les
+        deux cas). Le rayon d'hex COMPENSE déjà le changement de résolution, il ne s'y ajoute pas :
+        multiplier `size` rendait les icônes du plateau x1 cinq fois trop grandes. C'est la même
+        invariance qui rend l'habillage des murs correct sans conversion — il se dimensionne sur
+        `HEX_HEIGHT` (`BoardDisplay.tsx`, `halfW`), pas sur une valeur du fichier terrain.
 
         Un segment dont les deux extrémités se rejoignent après conversion reste un segment :
         `hex_line` le rend en une case, donc le mur devient un hex au lieu de disparaître.
@@ -2038,8 +2044,6 @@ class GameStateManager:
                 continue
             if isinstance(icon.get("center"), list):
                 icon["center"] = _pt(icon["center"])
-            if isinstance(icon.get("size"), (int, float)) and not isinstance(icon.get("size"), bool):
-                icon["size"] = icon["size"] * ratio
         return scaled
 
     def _read_terrain_file(

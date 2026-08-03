@@ -113,6 +113,29 @@ def reset_debug_log_flag():
     _debug_log_cleared = False
 
 
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def repo_relative_scenario_path(scenario_file: Optional[str]) -> Optional[str]:
+    """Chemin du scénario relatif à la racine du dépôt, en séparateurs POSIX. None si aucun.
+
+    Journalisé par `log_episode_start` : le replay le repasse à `/api/config/board` pour retrouver
+    le décor de CE scénario (cf. Documentation/Implémentation/Replay.md §2.4). Un chemin hors du
+    dépôt lève — l'API refuserait de le résoudre, et le journaliser produirait un replay qui
+    échoue silencieusement au chargement du décor.
+    """
+    if not scenario_file:
+        return None
+    scenario_abs = os.path.abspath(scenario_file)
+    relative = os.path.relpath(scenario_abs, _REPO_ROOT)
+    if relative.startswith(".."):
+        raise ValueError(
+            f"Scenario file hors du dépôt, non journalisable pour le replay : "
+            f"{scenario_abs} (racine {_REPO_ROOT})"
+        )
+    return relative.replace(os.sep, "/")
+
+
 class W40KEngine(gym.Env):
     """
     Slim W40K game engine - delegates to specialized modules.
@@ -1641,21 +1664,7 @@ class W40KEngine(gym.Env):
             _board_default = _board_default.get("default", _board_default)
             hex_radius = require_key(_board_default, "hex_radius")
             margin = require_key(_board_default, "margin")
-            # Chemin du scénario TIRÉ pour cet épisode, journalisé relatif à la racine du dépôt :
-            # le replay le repasse à /api/config/board pour afficher le terrain, les icônes, les
-            # zones de déploiement et les segments de murs de CE scénario, qu'aucune autre ligne
-            # du journal ne porte.
-            scenario_path_logged = None
-            if self._current_scenario_file:
-                _repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                _scenario_abs = os.path.abspath(self._current_scenario_file)
-                _rel = os.path.relpath(_scenario_abs, _repo_root)
-                if _rel.startswith(".."):
-                    raise ValueError(
-                        f"Scenario file hors du dépôt, non journalisable pour le replay : "
-                        f"{_scenario_abs} (racine {_repo_root})"
-                    )
-                scenario_path_logged = _rel.replace(os.sep, "/")
+            scenario_path_logged = repo_relative_scenario_path(self._current_scenario_file)
             self.step_logger.log_episode_start(
                 episode_units,
                 scenario_name,

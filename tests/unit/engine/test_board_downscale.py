@@ -138,9 +138,13 @@ def test_downscale_converts_only_coordinate_fields() -> None:
     assert len(area["floors"][0]["vertices"]) == 3
     assert out["walls"][0]["type"] == "dense" and out["walls"][0]["name"] == "w"
     assert len(out["deployment_zones"][0]["vertices"]) == 3
-    # Icône : centre en cases (converti), taille en PIXELS suivant le rayon d'hex (× ratio).
+    # Icône : le centre est en CASES (converti), la taille est en PIXELS D'ÉCRAN (invariante).
+    # Un plateau occupe la même surface écran à toutes ses résolutions — `hex_radius` et `margin`
+    # sont multipliés là où `cols`/`rows` sont divisés — donc une icône de 80 px reste 80 px.
+    # Ce test exigeait 400 : il verrouillait le défaut qui affichait les icônes du plateau x1
+    # cinq fois trop grandes.
     assert out["icons"][0]["center"] == _nearest_coarse_cell(40, 60, 5, 44, 60)
-    assert out["icons"][0]["size"] == 400
+    assert out["icons"][0]["size"] == 80
     assert out["icons"][0]["alpha"] == 0.7
     assert out["icons"][0]["path"] == "x.png"
 

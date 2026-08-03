@@ -91,11 +91,15 @@ journal :
 [hh:mm:ss] Scenario file: config/agents/<Agent>/scenarios/training/scenario_bot-02.json
 ```
 
-- **Résolution** (`inches_to_subhex`) → `board_path` (`BOARD_PATH_BY_INCHES_TO_SUBHEX` dans
-  `BoardReplay.tsx` : 1 → `x1`, 5 → `x5_44x60`), passé à `useGameConfig`. Sans lui, l'API sert le
-  plateau par **défaut** : sur un replay x1 le décor arrivait en coordonnées x5 (sommets jusqu'à
-  `(220, 270)` sur une grille 44×60) et se dessinait cinq fois trop loin. Une résolution hors table
-  lève — pas de repli sur le plateau par défaut.
+- **Résolution** (`inches_to_subhex`) → paramètre `inches_to_subhex` de la requête, transmis **tel
+  quel**. Le navigateur ne traduit rien : les dossiers de plateau ne sont connus que de
+  `BOARD_DIR_BY_INCHES_TO_SUBHEX` (`config_loader.py`), source unique partagée avec
+  `ai/train.py --resolution`. Sans ce paramètre, l'API sert le plateau par **défaut** : sur un
+  replay x1 le décor arrivait en coordonnées x5 (sommets jusqu'à `(220, 270)` sur une grille
+  44×60) et se dessinait cinq fois trop loin. Résolution inconnue → erreur de l'API, affichée
+  comme n'importe quel échec de configuration ; jamais de repli sur le plateau par défaut, qui
+  ramènerait le mauvais décor en silence. `board_path` (surnom d'écran des modes de test) reste
+  accepté, mais les deux paramètres sont exclusifs.
 - **Scénario tiré** (`Scenario file:`, chemin relatif à la racine du dépôt) → `scenario_file` de la
   même requête. Indispensable parce qu'un entraînement tire un scénario **par épisode** : la ligne
   `Scenario:` vaut alors « Random from N scenarios », qui ne désigne aucun fichier. Produit par
@@ -108,6 +112,15 @@ journal :
   `terrain-*.json` change le décor des replays passés. L'alternative (dumper le terrain rasterisé
   dans le journal) coûte 175 Ko par épisode en x5 — mesuré sur `terrain-mc1.json`, 15 288 hexes —
   et a été écartée pour ça.
+- **Échelle du décor.** Deux familles, deux règles. Ce qui a une taille de TABLE (icônes de
+  terrain, épaisseur des murs) se dessine en **pouces** et garde la même taille à l'écran quelle
+  que soit la résolution : `hex_radius × inches_to_subhex` = pixels par pouce, constant (13,90 sur
+  les plateaux 44×60). Ce qui a une taille de CASE suit la case. L'erreur corrigée était de traiter
+  les premières comme les secondes : `icons[].size` était multiplié par le rapport dans
+  `_downscale_terrain_data`, et les murs se dessinaient sur `HEX_RADIUS` / `HEX_HEIGHT` — un mur
+  x1 faisait 27,8 px d'épaisseur contre 5,6 px en x5, pour le même mur. Constantes de rendu :
+  `WALL_DOT_RADIUS_INCHES` et `WALL_SEGMENT_HALF_WIDTH_INCHES` (`BoardDisplay.tsx`), calées sur
+  les valeurs que le rendu x5 produisait — celui-ci est inchangé au pixel près.
 - **Verrous** : `tests/unit/engine/test_engine_reset.py::TestResetLogsScenarioPath` (relatif,
   refus hors dépôt, absence de ligne sans scénario), `test_step_logger.py`
   (`…writes_scenario_path`), `replayParser.test.ts` (extraction, non-confusion avec `Scenario:`,
