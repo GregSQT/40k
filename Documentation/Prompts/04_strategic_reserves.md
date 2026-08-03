@@ -61,7 +61,10 @@ Unités retirées de la table pendant la bataille et replacées en réserves (c'
   retrait est toujours battle-shocked à son retour le même tour ; une aura, en revanche,
   cesse si elle n'est plus à portée en revenant.
 
-Cette dernière clause interagit avec le battle-shock (chantier 02) et le Waaagh! (chantier 03).
+Cette dernière clause interagit avec le battle-shock et le Waaagh!. Les deux existent au
+moment où ce chantier s'exécute — battle-shock livré par le **chantier 02** (décision prise,
+il y est inclus), Waaagh! par le **chantier 03**. La clause est donc testable pour de vrai,
+sur l'exemple littéral du PDF ci-dessus, et non en théorie.
 
 ### 20.03 — Arrivée
 

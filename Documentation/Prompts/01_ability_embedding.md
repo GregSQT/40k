@@ -30,7 +30,7 @@ Chaque unité porte deux **ensembles d'identifiants entiers**, pas des bitmaps :
 | Champ | Contenu | Cardinal |
 |---|---|---|
 | `ability_ids` | capacités **en vigueur** (règle 19.04 : union des sources vivantes) | 8 |
-| `status_ids`  | statuts **en vigueur** (désignation, suppression, …)               | 4 |
+| `status_ids`  | statuts **en vigueur** (`battle_shock`, `oath_target`, `suppressed`) | 4 |
 
 Ces entiers alimentent deux `EmbeddingBag` **distinctes**, chacune pré-dimensionnée à
 **128 lignes × 16 dimensions**, avec `padding_idx = 0`, pooling **somme**. Les deux sorties
@@ -181,7 +181,10 @@ exactement le même jeu.
 1. **Registres.** Ajouter `obs_id` aux 13 règles de `config/unit_rules.json`
    (marqueurs de rôle `leader`/`support`/`sergeant`/`special_weapon` **exclus** : ils ne sont
    pas dans `UNIT_RULE_EFFECT_IDS` et ne sont pas observés). Créer
-   `config/unit_statuses.json`, vide de statut mais avec sa structure.
+   `config/unit_statuses.json` avec les trois statuts déjà identifiés par les chantiers
+   suivants — `battle_shock` (02), `oath_target` (03), `suppressed` (06) — déclarés ici et
+   **non renseignés** : ce sont leurs chantiers qui les posent. Les déclarer maintenant est ce
+   qui garantit que ces chantiers ne toucheront pas `obs_size`.
    Chargeur : `obs_id` absent, dupliqué ou hors `[1,127]` → **erreur explicite**.
 
 2. **Schéma d'entités.** Retirer les 13 bits `rule_<id>` de `UNIT_BIN_FIELDS`. Ajouter
