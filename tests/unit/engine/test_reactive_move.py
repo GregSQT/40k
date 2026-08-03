@@ -494,3 +494,35 @@ class TestReactiveMoveDeplaceLesFigurines:
         assert cible not in avec_mur, (
             "destination retenue alors que le second socle atterrit dans un mur"
         )
+
+
+class TestReactivePoolCoherency:
+    def test_une_escouade_hors_coherency_garde_ses_destinations(self):
+        """Exiger la coherency dans le pool éteint la capacité en silence.
+
+        La translation est RIGIDE : la formation, donc la coherency, est identique avant et
+        après. La re-juger revient à exiger de la capacité qu'elle RÉPARE un état antérieur —
+        une escouade sortie de coherency par une perte (résorbée seulement en fin de tour)
+        verrait toutes ses destinations rejetées, pool vide, sans un log ni un `declined`.
+        """
+        from engine.phase_handlers.shared_utils import _build_reactive_move_destinations_pool
+
+        gs = _make_game_state([_unit_with_reactive(1, 1, 12, 10)])
+        gs["squad_models"]["1"] = ["1#0", "1#1"]
+        # Deux socles très éloignés : hors coherency (`unit_model_cohesion_range` = 2).
+        gs["models_cache"] = {
+            "1#0": {"id": "1#0", "squad_id": "1", "player": 1, "col": 12, "row": 10,
+                    "level": 0, "HP_CUR": 1},
+            "1#1": {"id": "1#1", "squad_id": "1", "player": 1, "col": 20, "row": 10,
+                    "level": 0, "HP_CUR": 1},
+        }
+        gs["units_cache"]["1"]["occupied_hexes_by_model"] = {"1#0": (12, 10), "1#1": (20, 10)}
+        for _p in (1, 2):
+            gs[f"enemy_adjacent_hexes_player_{_p}"] = set()
+            gs[f"enemy_adjacent_counts_player_{_p}"] = {}
+
+        dests = _build_reactive_move_destinations_pool(
+            gs, gs["units"][0], 2, enemy_adjacent_hexes_override=set()
+        )
+
+        assert dests, "pool vide : la capacité est éteinte par un état antérieur au mouvement"

@@ -328,9 +328,17 @@ class StepLogger:
                 hex_radius = require_key(board_config, "hex_radius")
                 margin = require_key(board_config, "margin")
                 f.write(f"[{timestamp}] Board: cols={cols} rows={rows} inches_to_subhex={inches_to_subhex} hex_radius={hex_radius} margin={margin}\n")
-                if run_rules is not None:
-                    _rules_txt = " ".join(f"{k}={v}" for k, v in sorted(run_rules.items()))
-                    f.write(f"[{timestamp}] Run rules: {_rules_txt}\n")
+                # Pas de `if ... is not None` : l'analyzer REFUSE tout journal sans cette ligne.
+                # La sauter en silence ferait tomber l'erreur des heures plus tard, chez le
+                # consommateur, au lieu d'ici où le producteur est identifiable. Même exigence
+                # que `board_config` juste au-dessus.
+                if not isinstance(run_rules, dict) or not run_rules:
+                    raise ValueError(
+                        "log_episode_start: `run_rules` requis et non vide — l'analyzer refuse "
+                        f"un journal sans entête `Run rules:` (reçu {run_rules!r})"
+                    )
+                _rules_txt = " ".join(f"{k}={v}" for k, v in sorted(run_rules.items()))
+                f.write(f"[{timestamp}] Run rules: {_rules_txt}\n")
 
                 # Log all unit starting positions (already validated above)
                 for unit in units_list:

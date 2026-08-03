@@ -76,6 +76,9 @@ def test_log_episode_start_writes_units_and_metadata(tmp_path: Path) -> None:
         }
     ]
     logger.log_episode_start(
+        run_rules={"engagement_zone_subhex": 10, "metric.engagement": "hex",
+                   "metric.ranged": "euclidean", "move.thru_ez": True,
+                   "move.thru_enemy": False, "move.thru_friendly": True},
         units_data=units,
         scenario_info="demo-scenario",
         bot_name="random",
@@ -116,6 +119,9 @@ def test_log_episode_start_writes_scenario_path(tmp_path: Path) -> None:
     output_file = tmp_path / "step.log"
     logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=10)
     logger.log_episode_start(
+        run_rules={"engagement_zone_subhex": 10, "metric.engagement": "hex",
+                   "metric.ranged": "euclidean", "move.thru_ez": True,
+                   "move.thru_enemy": False, "move.thru_friendly": True},
         units_data=[],
         scenario_info="Random from 3 scenarios",
         board_config={
@@ -136,6 +142,9 @@ def test_log_action_increments_counters_and_flushes_on_threshold(tmp_path: Path)
     output_file = tmp_path / "step.log"
     logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=1)
     logger.log_episode_start(
+        run_rules={"engagement_zone_subhex": 10, "metric.engagement": "hex",
+                   "metric.ranged": "euclidean", "move.thru_ez": True,
+                   "move.thru_enemy": False, "move.thru_friendly": True},
         units_data=[{"id": 1, "col": 1, "row": 1, "player": 1, "HP_MAX": 1, "unitType": "Intercessor"}]
     )
     logger.log_action(
@@ -159,6 +168,9 @@ def test_log_episode_end_flushes_buffer_and_logs_objective_control(tmp_path: Pat
     output_file = tmp_path / "step.log"
     logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=50)
     logger.log_episode_start(
+        run_rules={"engagement_zone_subhex": 10, "metric.engagement": "hex",
+                   "metric.ranged": "euclidean", "move.thru_ez": True,
+                   "move.thru_enemy": False, "move.thru_friendly": True},
         units_data=[{"id": 1, "col": 1, "row": 1, "player": 1, "HP_MAX": 1, "unitType": "Intercessor"}]
     )
     logger.log_action(

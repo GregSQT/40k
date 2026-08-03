@@ -33,7 +33,6 @@ def _log(body: str, *, scale: int, walls: str = "") -> str:
         f"[10:00:00] Objectives: rect b NW:{OBJECTIVES}\n"
         f"[10:00:00] Board: cols=220 rows=300 inches_to_subhex={scale} hex_radius=2.78 margin=1\n"
         f"[10:00:00] Run rules: engagement_zone_subhex={2 * scale} metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True\n"
-        "[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True\n"
         f"{_UNITS}"
         "[10:00:00] === ACTIONS START ===\n"
         "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [SUCCESS]\n"

@@ -674,11 +674,16 @@ def _move_rules_for_analyzer() -> Tuple[bool, bool, bool]:
     pas une relecture parallèle des trois clés. Un 4e toggle ou un renommage n'atteindrait
     qu'un côté sinon."""
     from ai.analyzer_config import get_run_rule
-    return (
-        get_run_rule("move.thru_ez") == "True",
-        get_run_rule("move.thru_enemy") == "True",
-        get_run_rule("move.thru_friendly") == "True",
-    )
+
+    def _flag(key: str) -> bool:
+        # Lève plutôt que de deviner : `true`, `1` ou une faute de frappe deviendraient False
+        # en silence, et un toggle de traversée lu à l'envers change tous les verdicts de chemin.
+        raw = get_run_rule(key)
+        if raw not in ("True", "False"):
+            raise ValueError(f"Règle {key!r} de l'entête `Run rules:` illisible: {raw!r}")
+        return raw == "True"
+
+    return (_flag("move.thru_ez"), _flag("move.thru_enemy"), _flag("move.thru_friendly"))
 
 
 def _build_move_bfs_blockers(

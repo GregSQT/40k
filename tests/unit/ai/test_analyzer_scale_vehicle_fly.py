@@ -87,13 +87,27 @@ def test_l_echelle_lue_est_celle_du_log_pas_celle_du_config(tmp_path):
         assert an.parse_board_scale_from_log(str(log)) == scale
 
 
-def test_la_zone_d_engagement_suit_l_echelle_du_run():
-    """`engagement_zone` est stocké EN POUCES et converti ×inches_to_subhex, exactement comme
-    le moteur le fait au chargement. C'est ce facteur qui valait 5 fois trop."""
-    ez_x1 = _pose_regles_du_run(1)
-    ez_x5 = _pose_regles_du_run(5)
+def test_la_zone_d_engagement_est_celle_du_journal(tmp_path):
+    """La zone d'engagement vient de l'entête `Run rules:`, déjà EN SUBHEXES — le moteur la
+    convertit au chargement et journalise ce qu'il applique.
 
-    assert ez_x5 == 5 * ez_x1, (ez_x1, ez_x5)
+    Ce test comparait auparavant deux appels de son propre helper : il vérifiait l'arithmétique
+    de la fixture, pas le code. Il lit maintenant un vrai journal et interroge la fonction.
+    """
+    from ai.analyzer_config import set_run_rules
+
+    an.set_analyzer_board_scale(1)
+    # Valeur qu'aucune combinaison config × échelle ne produirait par hasard.
+    set_run_rules({
+        "engagement_zone_subhex": "13",
+        "metric.engagement": "hex",
+        "metric.ranged": "euclidean",
+        "move.thru_ez": "True",
+        "move.thru_enemy": "False",
+        "move.thru_friendly": "True",
+    })
+
+    assert an._get_engagement_zone_for_analyzer() == 13
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -50,7 +50,6 @@ STEP_LOG = f"""=== STEP-BY-STEP ACTION LOG ===
 [10:00:00] Objectives: rect b NW:{OBJECTIVES}
 [10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1
 [10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True
-[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True
 [10:00:00] Unit 1 ({UNIT_TYPE}) P1: Starting position (-1,-1), HP_MAX=2 base=round/6
 [10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6
 [10:00:00] === ACTIONS START ===

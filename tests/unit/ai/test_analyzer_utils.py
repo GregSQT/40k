@@ -139,8 +139,20 @@ def test_geometry_and_los_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_adjacency_and_position_cache_helpers() -> None:
-    # Les primitives géométriques exigent l'échelle du run ; hors parse_step_log, on la pose.
+    # Les primitives géométriques exigent l'échelle ET les règles du run ; hors parse_step_log
+    # on les pose. Explicitement : cet état est porté par le module, donc un test qui l'a fixé
+    # avant celui-ci le lui laisserait (`parse_step_log` le repose à chaque passe en production).
+    from ai.analyzer_config import set_run_rules
+
     an.set_analyzer_board_scale(1)
+    set_run_rules({
+        "engagement_zone_subhex": "2",
+        "metric.engagement": "hex",
+        "metric.ranged": "euclidean",
+        "move.thru_ez": "True",
+        "move.thru_enemy": "False",
+        "move.thru_friendly": "True",
+    })
     assert an.is_adjacent(1, 1, 2, 1) is True
     assert an.parse_timestamp_to_seconds("[01:02:03] line") == 3723
     assert an.parse_timestamp_to_seconds("line") is None
@@ -318,7 +330,6 @@ _LOG_HEAD = [
     # L'échelle du run vient de CETTE ligne, jamais du config courant : sans elle
     # `parse_step_log` refuse d'analyser (cf. parse_board_scale_from_log).
     "[12:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1",
-    "[12:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True",
     "[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True",
 ]
 _LOG_END = (

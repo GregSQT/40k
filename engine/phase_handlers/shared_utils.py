@@ -2303,7 +2303,16 @@ def _build_reactive_move_destinations_pool(
     # par la primitive commune à tous les mouvements d'escouade. C'est ce filtre qui autorise
     # l'appelant à translater le bloc au lieu de ne bouger que l'ancre.
     squad_id = str(require_key(reactive_unit, "id"))
-    constraints = {**DEFAULT_MOVE_CONSTRAINTS, "budget_per_model": move_range}
+    # `require_coherency` DESACTIVE : la translation est rigide, donc la formation — et donc la
+    # coherency — est identique avant et apres. La re-juger reviendrait a exiger de la capacite
+    # qu'elle REPARE un etat anterieur : une escouade sortie de coherency par une perte (resorbee
+    # seulement en fin de tour) verrait TOUTES ses destinations rejetees, pool vide, capacite
+    # eteinte sans un log ni un `declined`.
+    constraints = {
+        **DEFAULT_MOVE_CONSTRAINTS,
+        "budget_per_model": move_range,
+        "require_coherency": False,
+    }
     validated: List[Tuple[int, int]] = []
     for dest in valid_destinations:
         plan = build_rigid_plan(int(dest[0]), int(dest[1]), squad_id, game_state)
@@ -2755,8 +2764,16 @@ def maybe_resolve_reactive_move(
             # retenue par le pool PARCE QUE son plan rigide est valide pour chaque figurine —
             # `update_units_cache_position` seul ne resynchronise que les escouades
             # mono-figurine et laissait les socles des autres sur place.
+            # Empreinte AVANT la translation : le delta d'adjacence ci-dessous doit porter sur
+            # les cases reellement liberees et occupees par le BLOC, pas sur la seule ancre.
+            _old_occupied = set(
+                require_key(game_state["units_cache"][reactive_unit_id], "occupied_hexes")
+            )
             set_unit_coordinates(reactive_unit, dest_col, dest_row)
             translate_squad_to_destination(game_state, reactive_unit_id, dest_col, dest_row)
+            _new_occupied = set(
+                require_key(game_state["units_cache"][reactive_unit_id], "occupied_hexes")
+            )
             reacted_set.add(reactive_unit_id)
             game_state["last_move_cause"] = "reactive_move"
             ability_display_name = _get_source_unit_rule_display_name_for_effect(
@@ -2772,10 +2789,16 @@ def maybe_resolve_reactive_move(
                 sets_by_player=reactive_adjacent_sets_by_player,
                 players_present=players_present,
                 moved_unit_player=reactive_player_int,
-                old_occupied={(orig_col, orig_row)},
-                new_occupied={(dest_col, dest_row)},
+                # Empreintes du BLOC, et zone d'engagement REELLE : passer l'ancre seule et
+                # laisser `engagement_zone` a son defaut de 1 ecrivait un cache faux des que
+                # l'escouade avait plusieurs figurines ou que la resolution depassait x1 — cache
+                # ensuite consomme par le pool reactif suivant, le masque de move et
+                # l'eligibilite au tir.
+                old_occupied=_old_occupied,
+                new_occupied=_new_occupied,
                 board_cols=board_cols,
                 board_rows=board_rows,
+                engagement_zone=get_engagement_zone(game_state),
                 game_state=game_state,
             )
 
