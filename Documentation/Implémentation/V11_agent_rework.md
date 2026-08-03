@@ -46,7 +46,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.61` (`0.57`–`0.60` le 2026-08-02, `0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30, `0.55`–`0.56` le 2026-08-02).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.65` (`0.63`–`0.64` le 2026-08-03, `0.57`–`0.60` le 2026-08-02, `0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30, `0.55`–`0.56` le 2026-08-02).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -79,6 +79,8 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 |---|---|---|---|---|
 | **§0.62** | L'**analyzer** mesurait à une autre échelle et avec d'autres règles que le run — et trois déplacements n'étaient pas contrôlés | ✅ **CORRIGÉ le 2026-08-03** — une conséquence à assumer | **1** | 206 erreurs → **0** sur un log de référence de 6 épisodes. L'échelle venait du `board_config` COURANT, pas de l'entête du log : un run x1 relu avec un `config.json` en x5 mesurait tout ×5 — il **fabriquait** des erreurs (132 faux « shoot at engaged enemy ») **et en masquait** (portées, budgets jamais dépassés). Même défaut, silencieux celui-là, sur `engagement_zone`, `distance_metric` et les toggles `move` : désormais journalisés en entête `Run rules:`. Charge, pile-in/consolidation et move réactif n'avaient **aucun** contrôle conforme (jet non converti, mesure d'ancre, pas de pathfinding). **Conséquence : aucun verdict d'analyzer antérieur ne vaut**, et deux correctifs MOTEUR changent le jeu (move réactif). Détail → §0.62. |
 | **§0.61** | Le garde **anti-runaway** était MUET, et son compteur d'épisodes divergeait | ✅ **CORRIGÉ le 2026-08-03** | **1** | Une troncature signale une BOUCLE dans le moteur, pas une fin de partie — or son diagnostic n'existait que dans le `print` d'un worker (noyé à `n_envs=48`) et le compteur persisté ne la comptait pas, alors que le run s'arrête dessus. Nouveau scalaire `00_critical/t_truncated_episodes`, diagnostic complet en `truncations.jsonl`, bilan imprimé en fin de run. Détail → §0.61. |
+| **§0.64** | Le scoring de déploiement calculait la **LoS avec une autre implémentation** que le moteur | ✅ **ALIGNÉ SUR LA RÈGLE le 2026-08-03** — ⚠️ **ré-entraînement requis** | — (entre dans le lot §0.48) | `batch_has_los_from_source` (grille de murs **2D**) contre `compute_unit_los` (la règle : obscuring 13.10, plancher-occulteur 3D) : **607 désaccords sur 16 104 hexes** pour une seule source, tous dans le même sens. L'observation de déploiement (§0.40) et le score des 5 stratégies reposent donc sur une LoS **approximative**, alors que le docstring de `_has_line_of_sight` affirme le contraire pour le déploiement. 🟢 **Arbitrage : aligner** — l'observation annonçait « l'exposition réelle » alors qu'elle surestimait le danger sur ~4 % des hexes, faisant fuir à l'agent des positions sûres. Les DEUX canaux (réel et potentiel) passent par `deployment_los` → `compute_unit_los` ; cache disque invalidé par `DEPLOYMENT_LOS_MODEL_VERSION`. Coût : phase de déploiement **1,46 → 2,85 s** (+42 % sur `main`, le gain de §0.63 en absorbant une part). `obs_size` inchangé, **valeurs changées → `--new`**. Détail → §0.64. |
+| **§0.63** | Le cache de scoring du déploiement **ne servait jamais** (100 % de reconstruction) | ✅ **CORRIGÉ le 2026-08-03** | — | Deux causes, la seconde invisible sans la première : cache indexé sur les hexes de l'unité (condition jamais satisfaite), et déploiement **en alternance** avec un delta incrémental limité à une pose. Correctif : sur-ensemble stable (pool moins murs), **un cache par joueur**, delta généralisé à N poses. **Neutre pour l'observation, mesuré** (0 écart) → aucun ré-entraînement. Gain **2,01 s → 1,46 s** (−27 %) sur la phase de déploiement, reconstruction **100 % → 20 %**. Détail → §0.63. |
 | **§0.60** | Instrumentation du **coût** de l'entraînement — workers d'éval, temps bloquant, courbes de charge et de participation | ✅ **LIVRÉ le 2026-08-02** | **2** | Trois angles morts de COÛT, distincts des angles morts de COMPORTEMENT du §0.56. (1) Quatre clés `bot_eval_*` vivaient **hors de `callback_params`** : personne ne les lisait, `bot_eval_n_workers` retombait sur `min(n_envs, n_scenarios × n_bots)` = **24 workers**, soit **47 Go et 598 s** contre **9,6 Go et 349 s** à 4 workers — moins de workers est aussi **42 % plus rapide**, la VM passant son temps à swapper. `validate_bot_eval_worker_params` valide désormais au DÉMARRAGE. (2) `blocking_eval_seconds` ne compte plus que le temps où la boucle est RÉELLEMENT figée. (3) Six courbes moteur : charges tentées/réussies (agent et bot) et participation par phase. Détail → §0.60. |
 | **§0.59** | Régime d'entraînement en **deux phases** — `x1_selfplay` (self-play) et `decay_fraction` | 🟠 **OUVERT — livré, JAMAIS EXÉCUTÉ** | **2** | Deux changements de régime non mesurés. (1) `decay_fraction` achève les rampes lr/entropie **avant** la fin d'un run long (sans lui, un run de 200 000 épisodes garde une entropie élevée jusqu'au dernier épisode). (2) Le profil `x1_selfplay` ajoute une **phase 2** en `--append` : un snapshot figé de l'agent remplace le bot sur une part rampée **0.0 → 0.5** des épisodes. ⚠️ Aucun run de phase 2 n'a jamais tourné ; `opponent_mix.enabled` **lève** hors du chemin de rotation de scénarios. Détail → §0.59. |
 | **§0.58** | Les rampes par-épisode **redémarraient à chaque reprise** (`--append`, `--resume-from`) | ✅ **CORRIGÉ le 2026-08-02** | **1** | Rien ne persistait le nombre d'épisodes joués : la rampe de déploiement n'atteignait jamais `active_ratio_end` et le compte cumulé du modèle était écrasé par celui du seul run courant. `ai/run_state.py` persiste le compte (compté, jamais dérivé de `num_timesteps`) ; reprendre un modèle sans lui **lève** (arbitrage : pas de compatibilité ascendante). `learning_rate`, `ent_coef` et le self-play sont des rampes de **RÉGIME** : elles repartent de zéro à chaque run, et c'est l'arbitrage. Détail → §0.58. |
@@ -88,8 +90,8 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 | **§0.14** | Re-mesure du run — win-rate par matchup | ⏳ **PÉRIMÉE — état au 2026-08-02** : des runs **postérieurs au run 4** ont tourné (modèles `robust_*` du 2026-07-30 et du 2026-08-01 dans `ai/models/ArmageddonAgent/`) et **un `train.py` tournait** au moment de la relecture. Le répertoire `tensorboard/x1_ArmageddonAgent/` n'existe plus. | **1** | Reconfronter au réel (`ps -eo lstart,cmd \| grep train.py`, `ls -l ai/models/ArmageddonAgent/`) puis **réécrire l'entrée sur le run courant**. Les chiffres du run 4 (`combined` **0.509**, `worst_bot_score` **0.04**, `vs_control` **0.04**) ne valent plus que comme historique, et sur une pondération de bots qui n'existe plus (§0.53). Détail → §0.14. |
 | **[§9](V11_phaseA.md#s9)** | Phase A' — P2 + P3-0/1/2 | 🟢 **LIVRÉS ET MERGÉS sur `main`** — restent **P3-3→8**, **P4**, **P5** | **2** | ⚠️ Aucune des quatre livraisons n'est **MESURÉE**. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). Détail → §0.42 et §0.43 (en §0hist), et [§9](V11_phaseA.md#s9). |
 | **§0.44** | Tête pointeur de **déploiement** — les slots 4-8 n'ont pas de tête dédiée | 🟠 **OUVERT** — reporté après la mesure de référence (arbitrage utilisateur du 2026-07-29) | **3** | Les ids 4-8 tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`) : leurs logits sortent de la **conv 1×1** (`_move_logits`), pas d'une tête dédiée ; `deploy_emb` n'atteint le calcul que par le **conditionnement du tronc**. Ajouter un `deploy_query_net`, jumeau de `choice_query_net` — ce qui oblige à lire la phase dans la policy. Élément `L1` du lot §0.48 ; `L11` (`N_DEPLOY_SLOTS`) à trancher **avant**. Détail → §0.44. |
-| **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — inventaire rendu, périmètre arbitré : le lot = **`L1` + `L2` + `L6`**, et eux seuls | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. Reste l'arbitrage 2 (réserver la place des règles pas encore implémentées, toute règle rendue vivante changeant `obs_size`). Détail → §0.48. |
-| **§0.46** | Résidus du 2026-07-29 | ✅ **CLOSE le 2026-08-03** — les trois points sont livrés | — | ✅ **SOLDÉ le 2026-08-03** (arbitrage : GARDER, sous forme optimisée). Les 4 issues du cache de déploiement deviennent des **compteurs publiés en permanence** (`perf/*`) au lieu de traces invisibles hors `--debug` ; les 37 sites passent par `engine/debug_trace.py` (canaux `W40K_TRACE`, formatage différé) ; garde verrouillée par 19 tests, dont une **analyse AST** qui interdit la f-string en argument. Détail → §0.46. |
+| **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — le lot = **`L1` + `L2` + `L6`** + **[§0.64](#s0.64)** (LoS de déploiement alignée le 2026-08-03 : `obs_size` inchangé, **valeurs changées**) | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. Reste l'arbitrage 2 (réserver la place des règles pas encore implémentées, toute règle rendue vivante changeant `obs_size`). Détail → §0.48. |
+| **§0.46** | Résidus du 2026-07-29 | ✅ **CLOSE le 2026-08-03** — les trois points sont livrés | — | ✅ **SOLDÉ le 2026-08-03** (arbitrage : GARDER, sous forme optimisée). Les 4 issues du cache de déploiement deviennent des **compteurs publiés en permanence** (`perf/*`) au lieu de traces invisibles hors `--debug` ; les 37 sites passent par `engine/debug_trace.py` (canaux `W40K_TRACE`, formatage différé) ; garde verrouillée par **21 tests**, dont une **analyse AST** (fichiers découverts par leur import) qui interdit f-string, formatage anticipé et mot-clé. La passe `/simplify` du même jour y a trouvé **un bug** (`flush=True` résiduel → `TypeError` dès que le canal s'allume) et **un verrou qui mentait** (canal `train` hors garde). ⏳ Première mesure : **100 % de reconstruction** du cache de déploiement — signalé, non ouvert. Détail → §0.46. |
 | **§0.47** | Relecture T2→T5 du 2026-07-29 — 9 écarts | 🟠 **OUVERT — reste É9 (second siège + second scénario)** ; É5 et É7 ✅ corrigés le 2026-08-02 (É1, É2, É3, É4, É6 ✅ livrés **et mergés** ; **É8 est tombé**) | **6** | **É8 n'a plus d'objet** : `ai/analyzer.py` ne construit plus aucun chemin de board à la main (il lit `get_board_config()` / `get_board_size()`). **É9 était mal énoncé** : les **3 graines SONT couvertes** (`test_t5_bare_loop.py`, `for seed in (1, 2, 3)`) ; ce qui manque est le **second scénario** et les **2 sièges**. Détail → §0.47. |
 | **§0.50** | Non-conformité **01.07** — travail de suite | 🟠 **OUVERT** (la correction moteur, elle, est mergée) | **7** | ✅ **SOLDÉE le 2026-08-02** — les deux résidus sont traités : (1) le contrat de `battle_shocked` est **tranché en lecture STRICTE**, les 7 `get(..., False)` migrés en `require_key` ; (2) la 3ᵉ lecture d'OC du frontend (journal d'événements de `BoardReplay.tsx`) diffère l'instantané moteur au lieu de recompter. Détail → §0.50. |
 | **§0.53** | Refonte du panel de bots — les adversaires ignoraient la condition de victoire | 🟢 **LIVRÉ ET MERGÉ** — plus aucun chantier ouvert (arbitrage du 2026-08-02) | — (à lire avant d'interpréter tout win-rate) | 🟢 **ARBITRAGE UTILISATEUR DU 2026-08-02 — (a) et (b) SONT SANS OBJET JUSQU'À LA DÉMO MÉTIER** : le travail porte sur **2 rosters seulement**, donc ni les matrices de matchups par roster ni le recalibrage des seuils de gate ne sont d'actualité. **Ne pas les re-signaler comme des chantiers ouverts.** Reste vrai et à retenir : (c) **aucun win-rate antérieur au 2026-07-30 n'est comparable** à un win-rate postérieur. ⏳ Le panel a **encore évolué depuis** : un **cinquième bot `ValueTradeBot`** a été ajouté, `bot_eval_weights` = `control` 0.40 / `value_trade`, `adaptive`, `greedy`, `defensive` 0.15 / `tactical` 0. Détail → §0.53 (en §0hist). |
@@ -364,6 +366,176 @@ laissait vert. L'état réellement partagé est le **journal** — `written`, `d
 `if written >= max_lines` puis `written += 1` est un lire-modifier-écrire, et deux threads
 franchissent le garde ensemble. Le test observe donc la BORNE, avec la fenêtre construite (une
 ligne dont la sérialisation cède la main), et devient rouge sans le verrou.
+
+<a id="s0.63"></a>
+### 0.63 Le cache de scoring du déploiement ne servait JAMAIS — 100 % de reconstruction — ✅ CORRIGÉ (2026-08-03)
+
+**Origine** : la toute première mesure produite par l'instrumentation de [§0.46](#s0.46) —
+`incremental: 0`, `full_build: 10` sur `bot-01`, à **23-48 ms** la reconstruction. Le mécanisme
+de mise à jour incrémentale existait, était maintenu, et **n'avait jamais tourné**.
+
+**DEUX causes, la seconde invisible tant que la première n'est pas levée.**
+
+1. **Le cache était calculé sur les hexes valides de l'UNITÉ courante.** Sa condition de
+   validité — « même jeu d'hexes valides ? » — ne pouvait donc jamais passer : le jeu change à
+   chaque unité (le socle change la clairance) ET à chaque pose (l'hexe occupé sort du jeu).
+   Le chemin incrémental, situé APRÈS ce test, était inatteignable.
+2. **Les joueurs déploient en ALTERNANCE** (mesuré : `1,2,1,2,…`). Un cache unique se fait donc
+   invalider à chaque pose par le changement de déployeur, et la mise à jour incrémentale
+   exigeait un delta d'**exactement une** pose — or au retour d'un joueur il y en a **deux**
+   (la sienne et celle de l'adversaire). ⚠️ Corriger (1) seul ne gagne **rien** : mesuré, 9
+   reconstructions sur 10, soit exactement l'état d'avant.
+
+**Correctif.**
+- `deployment_scoring_hexes(game_state, deployer)` — **sur-ensemble stable** : le pool du joueur
+  moins les murs. Ne dépend ni du socle ni des poses. Le consommateur filtrait **déjà** à la
+  lecture (`for h in valid_hexes: los[i] = los_exposure_by_hex[key]`), il n'a pas bougé.
+- **Un cache par joueur** (`{deployer: cache}`) : les pools diffèrent, l'alternance n'invalide
+  plus rien.
+- **Mise à jour incrémentale généralisée à N poses** de delta.
+- Les hexes occupés ne sont **pas** retirés du sur-ensemble : les écarter est le travail du
+  filtre de lecture. Les retirer ici faisait diverger l'incrémental de la reconstruction — le
+  test d'équivalence l'a signalé sur cet exact point.
+- Issue de compteur `full_build_hex_mismatch` → **`full_build_cold`** seul subsiste comme cause
+  normale (une fois par joueur et par épisode).
+
+**Neutralité pour l'observation — MESURÉE avant d'écrire une ligne de correctif.** Les grandeurs
+mises en cache sont des propriétés de l'HEXE, pas de l'unité : sur les cinq unités d'un roster,
+tous les ensembles sont **inclus** dans le plus grand et l'on relève **0 écart** sur les
+intersections (`los_exposure_by_hex`, `potential_los_exposure_by_hex`, `ally_col_counts`).
+Donc **aucun ré-entraînement** : l'agent voit exactement les mêmes valeurs.
+
+**Verrou — `tests/unit/engine/test_deployment_cache_equivalence.py` (4)**, dont l'essentiel :
+à CHAQUE pose et pour CHAQUE joueur, le cache vivant doit être égal, champ par champ, à une
+reconstruction complète du même état. C'est ce test qui remplace un raisonnement cas par cas sur
+les mises à jour — et il a effectivement attrapé **trois** défauts pendant l'écriture : le
+retrait des hexes occupés, le delta limité à une pose, et le désaccord de LoS de [§0.64](#s0.64).
+S'y ajoutent : le chemin incrémental est réellement pris (contre le VERT VACANT), un cache par
+joueur, et l'invariant `valid_hexes ⊆ deployment_scoring_hexes` vérifié pour toutes les unités à
+chaque étape.
+**Contre-épreuves faites** : delta ramené à une seule pose → ROUGE ; rétabli → vert.
+
+🔴 **UNE RÉGRESSION INTRODUITE PAR CE CORRECTIF, trouvée par `/code-review` et corrigée.**
+Généraliser le delta à N poses a rouvert un trou que l'ancienne garde (`len(added_ids) != 1`)
+fermait **par accident** : un **REPOSITIONNEMENT** d'unité déjà posée
+(`deployment_recommit_plan`, atteignable par l'API) ne change pas l'ensemble des ids, donc le
+cache se déclarait à jour et servait des expositions calculées depuis l'**ancienne** position —
+scénario exécuté par la revue : **966 hexes faux**, comptés `incremental`. Corrigé par une
+comparaison explicite des positions des ids communs, et **verrouillé** par
+`test_repositioning_an_already_deployed_unit_forces_a_rebuild` (contre-épreuve : garde retirée
+→ ROUGE sur 40 expositions).
+⚠️ **La leçon** : une garde qui protège d'un cas *sans le nommer* ne survit pas à la
+généralisation de ce qu'elle gardait. L'ancien code ne parlait que du nombre d'ajouts ; le
+repositionnement n'était couvert par personne, et rien ne le disait.
+
+📌 **Trou du verrou lui-même, corrigé** : la liste des champs comparés omettait
+`ally_deployed_hexes` — construit par `append` dans le chemin incrémental et lu par
+`nearest_ally`, donc **dans l'observation**. Choisir soi-même les champs à comparer reproduit
+son propre angle mort ; les deux champs manquants ont été ajoutés.
+
+**Affinages mesurés (`/simplify`)** : sur-ensemble mémoïsé avec les autres caches d'épisode (il
+était recalculé à chaque consultation, y compris sur le chemin incrémental où il est jeté) ;
+tableau numpy et import hissés hors de la boucle par ennemi (1,31 ms/ennemi) ; accumulation par
+`np.flatnonzero` au lieu d'une boucle sur 16 000 hexes dont 0,1 % sont vrais (1,05 → 0,01 ms) ;
+branche `current_deployer` devenue inatteignable supprimée (le cache est indexé par joueur) ;
+la branche mono-hex de `_get_valid_deployment_hexes` appelle `deployment_scoring_hexes` au lieu
+d'en recopier l'expression, ce qui rend l'invariant vrai **par construction** sur ce chemin ;
+clés du cache renommées `valid_hexes`/`valid_hex_set` → **`scoring_hexes`** — l'ancien nom
+désignait la fausse dépendance qui a coûté 100 % de reconstruction.
+
+✅ **Suspension levée le jour même** : `_has_line_of_sight_cached`, `_count_los_exposure` et
+`_count_potential_los_from_reference_hexes` (~80 lignes sans appelant) et `los_pair_cache` sont
+**supprimés** par [§0.64](#s0.64) — l'alignement passe par `deployment_los`, pas par ces
+méthodes. C'était le SECOND modèle de LoS du fichier, celui qui divergeait.
+📌 **Manque à gagner signalé, non traité** : le cache DISQUE des expositions potentielles n'est
+réécrit que s'il n'existe pas (`if not os.path.exists`). Les fichiers déjà produits sur les
+hexes d'UNE unité restent valides (la clé de topologie ne dépend pas des hexes évalués) mais
+**partiels** — 93 863 octets sur `main` contre 131 842 écrits ici pour la même topologie — et ne
+sont jamais complétés : chaque processus repaie les ~30 % manquants.
+
+**Gain mesuré** (3 graines, phase de déploiement complète) : **2,01 s → 1,46 s**, soit **−27 %**.
+Taux de reconstruction **100 % → 20 %** (2 reconstructions à froid, une par joueur, puis 8 mises
+à jour). ⏳ La part sur un run entier reste à confirmer par `perf/a_deploy_cache_full_build_rate`.
+
+📌 **Une garde retirée, et pourquoi** : la mise à jour incrémentale n'écarte PAS les coordonnées
+sentinelles, contrairement à la reconstruction. `_build_deployed_snapshot` les filtre déjà, donc
+une garde ici serait inatteignable — la mutation qui la supprime laisse le test d'équivalence
+vert, ce qui le prouve. ⚠️ La garde équivalente de la reconstruction est **morte pour la même
+raison** ; elle est signalée, non touchée (hors périmètre).
+
+<a id="s0.64"></a>
+### 0.64 Le scoring de déploiement calculait la LoS avec une AUTRE implémentation que le moteur — 607 désaccords sur 16 104 hexes — ✅ ALIGNÉ SUR LA RÈGLE (2026-08-03) ; ⚠️ RÉ-ENTRAÎNEMENT REQUIS
+
+**Trouvé par accident**, en écrivant le test d'équivalence de [§0.61](#s0.61) : il a signalé
+607 valeurs d'exposition divergentes, et la cause n'était pas le cache.
+
+**Le constat, mesuré.** Deux implémentations de ligne de vue coexistent sur le chemin du
+déploiement :
+- la **reconstruction** du cache utilise `engine.hex_utils.batch_has_los_from_source` —
+  vectorisée, qui trace la ligne d'hexes et teste une **grille de murs 2D** ;
+- la **mise à jour incrémentale** utilisait `has_line_of_sight` → `shooting_handlers._has_line_of_sight`
+  → **`compute_unit_los`**, la règle du moteur.
+
+Sur UNE seule source ennemie vers les 16 104 hexes du pool : **607 désaccords** (3,8 %), tous
+dans le même sens — le batch voit, la règle moteur ne voit pas.
+
+⚠️ **Ce que dit le code lui-même.** Le docstring de `_has_line_of_sight` affirme :
+« *Thin wrapper over compute_unit_los() — the single source of truth — so eligibility, target
+validation, reward and **deployment exposure** all enforce the same visibility as the shooting
+pool.* » **C'est faux pour le déploiement** : son exposition passe par le batch 2D, qui ignore
+ce que `compute_unit_los` applique (obscuring 13.10, plancher-occulteur 3D — cf. la tranche LoS
+3D du tir).
+
+**Portée — à ne pas surestimer.** Jusqu'ici la mise à jour incrémentale **n'a jamais tourné**
+(§0.63), donc la production n'a jamais mélangé les deux : tout ce que l'agent a observé vient du
+batch, de façon cohérente. Le défaut n'est pas une incohérence en production, c'est que
+**l'observation de déploiement et le score des 5 stratégies reposent sur une LoS approximative**,
+différente de la règle appliquée partout ailleurs.
+
+🟢 **ARBITRAGE UTILISATEUR DU 2026-08-03 : ALIGNER SUR LA RÈGLE, sans hésitation.** Le
+raisonnement, et il est juste : ça ne viole aucune règle 40K — le scoring de déploiement est une
+heuristique de placement — mais l'observation §0.40 **annonce à l'agent l'exposition réelle** d'un
+hexe. Calculée autrement que la LoS du tir, elle lui donne un modèle du monde qui n'est pas le
+monde : il croit une position exposée que le moteur ne verra pas. Les 607 désaccords vont tous
+dans le même sens (le batch voit, la règle ne voit pas), donc l'agent **surestimait** le danger
+sur ~4 % des hexes et fuyait des positions sûres. « Non optimal » ET « trompeur ».
+
+**Livré.** Point d'entrée unique et public `ActionDecoder.deployment_los(game_state, from, to)`
+→ `has_line_of_sight` → `compute_unit_los`. **Les DEUX canaux** y passent : exposition réelle
+(ennemis posés) et exposition **potentielle** (hexes de référence du pool adverse), dans la
+reconstruction comme dans la mise à jour incrémentale. Un point d'entrée unique parce que c'est
+la divergence entre deux chemins — invisible tant que l'incrémental ne tournait pas — qui a
+produit ces 607 valeurs fausses.
+
+⚠️ **Cache DISQUE invalidé par version de modèle.** `DEPLOYMENT_LOS_MODEL_VERSION = 2` entre dans
+la clé de hachage des fichiers `.cache/deployment_potential_los/`. Sans ça, un run aurait relu les
+fichiers produits par le modèle 2D et **le changement aurait été sans effet, en silence** — le
+pire résultat possible. À incrémenter à chaque évolution du modèle de LoS.
+
+📌 **Le coût de régénération était le seul risque, il est levé** : contrairement à ce que
+l'agent avait annoncé, le canal potentiel n'itère pas sur les 16 472 hexes du pool adverse mais
+sur un **échantillon de 4 hexes de référence** — 64 416 paires, ~0,8 s par topologie, payées une
+fois puis mises en cache disque. C'est le canal RÉEL (N ennemis × 16 104 hexes, à chaque pose)
+qui porte le coût.
+
+**Coût mesuré** (phase de déploiement complète, 3 graines, cache disque chaud) :
+| | phase de déploiement |
+|---|---|
+| `main` avant tout | 2,00 s |
+| après §0.63 (cache réparé) | **1,46 s** |
+| après §0.64 (LoS alignée) | **2,85 s** |
+Soit **+42 %** sur l'état d'origine, le gain de §0.63 absorbant une partie du prix de la
+conformité. 🟢 Arbitrage utilisateur : « aligner d'abord, optimiser ensuite ».
+
+⚠️ **RÉ-ENTRAÎNEMENT REQUIS** : `obs_size` est **inchangé** (aucun champ ajouté), mais les
+**valeurs** du bloc candidats de déploiement changent sur ~4 % des hexes. Un modèle entraîné
+avant cette date a appris sur l'ancienne exposition. Cette entrée appartient donc au lot
+[§0.48](#s0.48), avec `L1`/`L2`/`L6`.
+
+**Code mort supprimé dans la foulée** : `_has_line_of_sight_cached`, `_count_los_exposure` et
+`_count_potential_los_from_reference_hexes` (~80 lignes) n'avaient plus aucun appelant, et
+`los_pair_cache` n'était plus lu. C'était le SECOND modèle de LoS du fichier — celui-là même qui
+divergeait ; le garder, c'était offrir à quelqu'un de le rebrancher.
 
 <a id="s0.60"></a>
 ### 0.60 Instrumentation du COÛT — 4 clés d'éval jamais lues (47 Go de workers), temps bloquant, courbes de charge et de participation — ✅ LIVRÉ (2026-08-02)
@@ -1070,53 +1242,107 @@ un flux mais **comptaient** : `cache_miss_full_build`, `valid_hex_set_mismatch`,
 `incremental_update`, `incremental_failed`. Ces quatre issues mesurent un **coût** (un `full_build`
 reconstruit toutes les expositions LoS de la zone ; un incrémental ne touche que le delta d'une
 pose) et n'étaient visibles **que sous `--debug`, donc jamais sur un run réel** — la famille §0.22.
-- `ActionDecoder.DEPLOYMENT_CACHE_OUTCOMES` + `empty_deployment_cache_counts()` (source unique de
-  la forme) ; `_record_deployment_cache_outcome` lit le dict en `require_key` : un `game_state`
-  qui n'a pas traversé `reset` **lève** au lieu de compter dans le vide.
-- Remise à zéro **au même endroit que la purge du cache** (`w40k_core.reset`) — les séparer
-  laisserait un compteur cumuler entre épisodes (§0.42).
+- `ActionDecoder.DEPLOYMENT_CACHE_OUTCOMES`, scindée en **deux sous-familles DÉCLARÉES**
+  (`INCREMENTAL_CACHE_OUTCOMES` / `FULL_BUILD_CACHE_OUTCOMES`) : le consommateur sommait au
+  départ les reconstructions par soustraction (`total − incremental`), ce qui aurait classé en
+  rebuild toute 5ᵉ issue qui n'en serait pas une — sur une courbe publiée que personne ne
+  re-dérive. Un test vérifie que les deux familles **partitionnent** l'énumération.
+- **Attribut d'INSTANCE du décodeur** (`self._deployment_cache_counts`), remis à zéro dans
+  `reset_episode_caches` avec les autres caches d'épisode. Le seul appelant du cache est interne
+  au décodeur, qui a déjà son hook d'épisode : faire transiter un compteur par le `game_state`
+  contaminait son CONTRAT avec une préoccupation d'instrumentation — au point qu'une doublure de
+  `test_action_decoder` avait dû porter la clé pour un chemin sans rapport avec le déploiement.
 - Recopie dans `episode_tactical_data` à la terminaison, comme `shots_fired` depuis `action_logs`.
 - Trois courbes : `perf/a_deploy_cache_full_build_rate` (la courbe à surveiller — vers 1.0, le
   cache ne sert plus à rien), `perf/b_deploy_cache_wasted_rate` (l'incrémental payé **puis jeté**,
   le seul travail purement perdu), `perf/c_deploy_cache_lookups`.
+- Les **trois branches de reconstruction** (même bloc de 7 lignes recopié 3×) sont un
+  `_full_rebuild(cause)` local : sans lui, toute évolution demandait trois éditions dont une
+  pouvait s'oublier en silence — l'argument « axe B » appliqué au code qu'il instrumente.
 - Au passage : `episode_tactical_data` était écrit **deux fois mot pour mot** (`__init__` et
   `reset`) — remplacé par `_empty_episode_tactical_data()`, sans quoi la clé ajoutée à un site et
   pas à l'autre aurait levé au premier épisode du chemin oublié.
 
 **B+C — `engine/debug_trace.py`, point d'émission unique à canaux.** Les 37 sites sont migrés
 (`W40KEngine.step` → `CH_STEP`, boucles bot → `CH_BOT_LOOP`, cache → `CH_DEPLOY_CACHE`,
-construction du run → `CH_TRAIN`) ; `train._debug_train_marker` n'est plus qu'un appel à `trace`.
-Sélection par `W40K_TRACE=step,deploy_cache` ; variable absente = tout (comportement historique de
-`--debug`), `none` = rien, **nom inconnu = lève au chargement**.
+construction du run → `CH_TRAIN`). Sélection par `W40K_TRACE=step,deploy_cache` ; variable absente
+= tout (comportement historique de `--debug`), `none` = rien, **nom inconnu = lève**.
+La valeur est validée **au chargement** (une faute de frappe échoue avant que le run ne démarre)
+mais **PAS mémoïsée** — elle reste relue à chaque appel. C'est le patron déjà retenu par
+[`engine/mask_verification.py`](../../engine/mask_verification.py) pour `W40K_MASK_VERIFY`, avec
+sa raison écrite : « sinon les tests ne pourraient plus l'armer dynamiquement ».
 ⚠️ **La règle qui fait tenir l'ensemble : jamais de f-string en argument de `trace`** — elle serait
 évaluée avant l'appel, donc hors garde, et déplacerait le coût sur le chemin de production. C'est
 la seule façon dont cette livraison peut se dégrader, et elle est verrouillée par analyse AST.
+`train._debug_train_marker` est un **RELAIS** `(fmt, *args)`, pas un helper qui reçoit un message
+déjà construit — cf. le trou décrit plus bas.
 
 **D** — `self.debug_mode` remplace `game_state.get("debug_mode")` sur le chemin de `step` (le dict
 n'est alimenté que depuis l'attribut : vérifié, aucun écrivain externe, aucune divergence possible).
+Les six sites de `step` sont **gardés** : leurs arguments sont des `dict.get`, donc évalués même
+debug éteint (+0,31 µs/step mesuré, ~0,03 % d'un step — corrigé par propreté, pas par performance).
+La garde de canal ne subsiste que là où elle évite un `require_key` ; ailleurs `trace` suffit, sa
+première instruction étant cette même garde.
 
-**Verrous** — `tests/unit/engine/test_debug_trace_guard.py` (14) et
-`test_deployment_cache_counters.py` (5) :
+**Verrous** — `tests/unit/engine/test_debug_trace_guard.py` (**16**) et
+`test_deployment_cache_counters.py` (**5**) :
 - `step` complet en `debug_mode=False` → **zéro octet sur `stdout`** (le test réclamé ci-dessus) ;
-- **analyse AST des 4 fichiers tracés** : aucun appel `trace(...)` ne passe une f-string, un `%`
-  ou un `+` comme format. **Contre-épreuve faite** : f-string réintroduite sur un site → ROUGE en
-  nommant la ligne ; rétablie → vert.
-- compteurs : **contre-épreuve faite** — l'init de `reset` remise en `setdefault` → ROUGE
+- **analyse AST** : aucun appel à `trace` — ni à ses **relais déclarés** — ne passe une f-string,
+  un `%`, un `+` **ni le moindre mot-clé** comme format. Les fichiers analysés sont **DÉCOUVERTS**
+  par leur import de `engine.debug_trace`, pas listés à la main : une liste-miroir rétrécit en
+  silence dès qu'un cinquième fichier se met à tracer. **Contre-épreuves faites** : f-string
+  réintroduite → ROUGE en nommant la ligne ; `flush=True` réintroduit → ROUGE ; retirés → vert.
+- compteurs : **contre-épreuve faite** — la remise à zéro changée en `setdefault` → ROUGE
   (« 10 après reset contre 10 accumulés ») ; rétablie → vert.
 - contre le VERT VACANT : le fichier de compteurs tourne sur un scénario `deployment_type: active`
   réel et **exige que le compteur bouge** — le harnais habituel démarre en placement fixe et ne
-  consulte jamais ce cache (limite déjà constatée en §0.56).
+  consulte jamais ce cache (limite déjà constatée en §0.56). La fixture partagée est
+  `make_active_deployment_engine` (`tests/unit/engine/conftest.py`).
 
-📌 **Deux faits que seule l'EXÉCUTION a donnés** (aucun n'était visible en lecture) :
+📌 **Trois faits que seule l'EXÉCUTION a donnés** (aucun n'était visible en lecture) :
 1. `reset` ne laisse pas les compteurs à zéro : **l'observation initiale consulte déjà le cache**
    (§0.40), exactement une fois, par un `full_build_cold`. C'est cette signature qui est
    verrouillée — pas un « == 0 » qui aurait été faux.
 2. `W40K_TRACE=` (définie mais **vide**) éteignait TOUTES les traces en silence — le défaut même
    que ce module existe pour rendre impossible. Elle lève désormais, en nommant la sortie voulue.
+3. 🔴 **Le taux de reconstruction du cache était de 100 %** (`bot-01` : `full_build` 10,
+   `incremental` **0**), à 23-48 ms la reconstruction. ⏳ D'abord classé « signalé, non ouvert » —
+   la part sur un run entier étant inconnue — puis **ouvert le jour même sur arbitrage
+   utilisateur** et corrigé : cf. **[§0.63](#s0.63)** (deux causes, dont l'alternance des
+   déployeurs) et, en cascade, **[§0.64](#s0.64)** (le test d'équivalence écrit pour le verrouiller
+   a révélé que le scoring n'utilisait pas la LoS du moteur).
+   📌 **C'est le meilleur argument rétrospectif pour l'axe A** : le défaut était là depuis
+   l'origine, il ne levait rien, ne faisait échouer aucun test, et n'est devenu visible qu'au
+   moment où un compteur l'a rendu observable.
 
-⚠️ **Reste vrai après cette livraison** : le test AST ne couvre que les **4 fichiers listés** dans
-`_TRACED_FILES`. Un cinquième fichier qui se mettrait à tracer doit y être ajouté, sinon le verrou
-devient décoratif pour lui. Un test vérifie en contrepartie qu'aucun canal déclaré n'est mort.
+🔍 **CE QUE LA PASSE `/simplify` DU 2026-08-03 A TROUVÉ** (4 revues parallèles : reuse,
+simplification, efficacité, altitude) — à lire, les deux premiers points sont des leçons :
+1. 🔴 **UN BUG, vu par 3 revues sur 4** : un `flush=True` était resté dans un appel `trace(...)`
+   migré depuis un `print`. `trace` n'accepte aucun mot-clé → **`TypeError` dès que le canal
+   `bot_loop` s'allume**, c'est-à-dire précisément quand on en a besoin. Ni le smoke ni les
+   tests ne l'atteignaient : le site est dans `BotControlledEnv`, **qu'un moteur nu ne traverse
+   jamais** — le motif « testé mais jamais appelé par le vrai chemin », ici retourné contre
+   l'outil de diagnostic lui-même. Le verrou AST ne regardait que le format ; il refuse
+   désormais tout mot-clé.
+2. 🔴 **UN VERROU QUI MENTAIT** : le canal `train` était **intégralement hors garde**.
+   `_debug_train_marker(message)` recevait des f-strings déjà construites par ses 12 appelants,
+   pendant que le test AST déclarait couvrir `ai/train.py`. Un garde qui n'inspecte que les
+   appels DIRECTS ne prouve rien sur les relais. Signature passée à `(fmt, *args)`, appelants
+   convertis, relais déclarés au garde.
+3. La cadence d'échantillonnage des boucles bot, écrite 7 fois à la main, avait **déjà divergé**
+   (`< 5` sur un site, `<= 5` sur les six autres) : une boucle traçait 4 itérations, les autres 5.
+   Devenue `_trace_sampled`.
+4. Divers : garde `if cache_lookups > 0` qui trouait la courbe un épisode sur deux
+   (`_emit_windowed` publie une moyenne de FENÊTRE), `file=sys.stdout` (le défaut) et son import,
+   deux traces consécutives redondantes fusionnées.
+
+⚠️ **Limites qui subsistent, à connaître avant de faire confiance au verrou** :
+- le garde AST ne reconnaît que les **relais déclarés** (`trace`, `_debug_train_marker`). Un
+  nouveau wrapper autour de `trace` qui ne serait pas ajouté à cette liste rouvrirait exactement
+  le trou du point 2 ci-dessus. La découverte des FICHIERS, elle, est automatique.
+- il vérifie la **forme des appels**, pas qu'ils soient appelables : c'est un test d'exécution du
+  canal concerné qui aurait attrapé le `flush=True`, et il n'y en a pas pour `bot_loop` (le site
+  vit dans `BotControlledEnv`, hors de portée d'un moteur nu).
 
 <a id="s0.47"></a>
 ### 0.47 Relecture T2→T5 (dette §0.19) — 9 écarts, dont un outil d'éval au masque périmé — 🟠 OUVERT : É1, É2, É3, É4, É6 ✅ LIVRÉS ET MERGÉS ; **É8 EST TOMBÉ** ; restent É5, É7, É9 (mergés le 2026-07-29, vérifié le 2026-08-02)

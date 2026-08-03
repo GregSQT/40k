@@ -159,6 +159,12 @@ journal :
   comme n'importe quel échec de configuration ; jamais de repli sur le plateau par défaut, qui
   ramènerait le mauvais décor en silence. `board_path` (surnom d'écran des modes de test) reste
   accepté, mais les deux paramètres sont exclusifs.
+  **Le retour est confronté à la demande** (`useGameConfig.ts`) : une config servie dans une autre
+  résolution que celle demandée devient une erreur de configuration, jamais un plateau dessiné. Ce
+  contrôle vit dans le hook parce que c'est le seul endroit où la requête et sa réponse coexistent —
+  le consommateur, qui fusionne le décor servi avec la grille du journal, ne verrait qu'une config
+  sans savoir pour quelle demande elle a été produite, et dessinerait l'hybride sans rien signaler
+  (décor cinq fois trop grand, murs et unités justes). Verrou : `useGameConfig.test.ts`.
 - **Scénario tiré** (`Scenario file:`, chemin relatif à la racine du dépôt) → `scenario_file` de la
   même requête. Indispensable parce qu'un entraînement tire un scénario **par épisode** : la ligne
   `Scenario:` vaut alors « Random from N scenarios », qui ne désigne aucun fichier. Produit par
