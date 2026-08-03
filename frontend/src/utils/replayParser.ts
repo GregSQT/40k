@@ -145,6 +145,10 @@ interface ReplayGameState {
 interface ReplayEpisodeDuringParsing {
   episode_num: number;
   scenario: string;
+  // Chemin, relatif à la racine du dépôt, du scénario tiré pour cet épisode. Absent des journaux
+  // écrits avant l'ajout de la ligne « Scenario file: » — le replay retombe alors sur le scénario
+  // par défaut, comme il le faisait pour tous.
+  scenario_file?: string;
   bot_name: string;
   win_method?: string | null;
   actions: ReplayAction[];
@@ -187,6 +191,7 @@ interface ReplayEpisodeDuringParsing {
 interface ReplayEpisode {
   episode_num: number;
   scenario: string;
+  scenario_file?: string;
   bot_name: string;
   win_method?: string | null;
   board: {
@@ -348,6 +353,14 @@ export function parse_log_file_from_text(text: string): ReplayData {
           },
         },
       });
+      continue;
+    }
+
+    // Chemin du scénario tiré pour cet épisode (ai/step_logger.py::log_episode_start). Testé AVANT
+    // `Scenario:` : deux motifs voisins sur des lignes voisines, l'ordre lève l'ambiguïté.
+    const scenarioFileMatch = trimmed.match(/Scenario file: (.+)$/);
+    if (scenarioFileMatch) {
+      currentEpisode.scenario_file = scenarioFileMatch[1].trim();
       continue;
     }
 
@@ -1508,6 +1521,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
     return {
       episode_num: episode.episode_num,
       scenario: episode.scenario,
+      scenario_file: episode.scenario_file,
       bot_name: episode.bot_name || "Unknown",
       win_method: episode.win_method,
       board: episode.board,

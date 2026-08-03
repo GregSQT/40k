@@ -206,7 +206,20 @@ const isGameConfig = (value: unknown): value is GameConfig => {
   return true;
 };
 
-export const useGameConfig = (_boardConfigName: string = "default"): ExtendedGameConfig => {
+/**
+ * @param boardPathOverride Résolution de plateau à charger, indépendamment de l'URL (`x1` |
+ *   `x5_44x60`). Le replay en a besoin : sa résolution vient du journal de partie, pas des query
+ *   params, et sans ça terrain / icônes / zones de déploiement / segments de murs seraient servis
+ *   dans les coordonnées du plateau par défaut (x5) puis dessinés sur la grille x1 de l'épisode.
+ * @param scenarioFileOverride Scénario dont il faut lire murs et terrain, chemin relatif à la
+ *   racine du dépôt. Le replay le tient de la ligne « Scenario file: » du journal : un
+ *   entraînement tire un scénario par épisode, et le scénario par défaut n'est pas celui joué.
+ */
+export const useGameConfig = (
+  _boardConfigName: string = "default",
+  boardPathOverride?: string,
+  scenarioFileOverride?: string
+): ExtendedGameConfig => {
   const [boardConfig, setBoardConfig] = useState<BoardConfig | null>(null);
   const [gameConfig, setGameConfig] = useState<GameConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -222,7 +235,12 @@ export const useGameConfig = (_boardConfigName: string = "default"): ExtendedGam
         const mode = urlParams.get("mode");
         const isTestMode = mode === "pvp_test" || mode === "pve_test";
         const DEFAULT_TEST_BOARD = "x5_44x60";
-        const boardParam = isTestMode ? (urlParams.get("board") ?? DEFAULT_TEST_BOARD) : null;
+        const boardParam =
+          boardPathOverride !== undefined
+            ? boardPathOverride
+            : isTestMode
+              ? (urlParams.get("board") ?? DEFAULT_TEST_BOARD)
+              : null;
         const scenarioName =
           mode === "pve_test" ? "scenario_pve_test.json" : "scenario_pvp_test.json";
         // Dossier qui PORTE les scénarios de test : il ne suit pas la résolution jouée. `x1` et
@@ -242,12 +260,15 @@ export const useGameConfig = (_boardConfigName: string = "default"): ExtendedGam
         if (isTestMode && boardParam && boardDirMap[boardParam]) {
           scenarioFile = `config/${boardDirMap[boardParam]}/scenario/${scenarioName}`;
         }
+        if (scenarioFileOverride) {
+          scenarioFile = scenarioFileOverride;
+        }
         let boardUrl =
           "/api/config/board?scenario_file=" +
           encodeURIComponent(scenarioFile) +
           "&_t=" +
           Date.now();
-        if (isTestMode && boardParam) {
+        if (boardParam) {
           boardUrl += `&board_path=${encodeURIComponent(boardParam)}`;
         }
         const [boardResponse, gameResponse] = await Promise.all([
@@ -306,7 +327,7 @@ export const useGameConfig = (_boardConfigName: string = "default"): ExtendedGam
     };
 
     loadConfigs();
-  }, []);
+  }, [boardPathOverride, scenarioFileOverride]);
 
   const maxTurns = gameConfig?.game_rules.max_turns ?? 100;
   const boardSize: [number, number] = gameConfig?.game_rules.board_size ?? [24, 18];

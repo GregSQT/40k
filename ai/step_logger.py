@@ -221,8 +221,15 @@ class StepLogger:
         except Exception as e:
             print(f"⚠️ Step logging flush error: {e}")
     
-    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None, roster_info=None, board_config=None):
-        """Log episode start with all unit starting positions, walls, and objectives"""
+    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None, roster_info=None, board_config=None, scenario_path=None):
+        """Log episode start with all unit starting positions, walls, and objectives
+
+        ``scenario_path`` : chemin du fichier de scénario RÉELLEMENT tiré pour cet épisode,
+        relatif à la racine du dépôt. Le journal ne porte ni terrain, ni icônes, ni zones de
+        déploiement — le replay les relit dans la config, et sans ce chemin il les relit pour le
+        scénario par DÉFAUT, alors qu'un entraînement tire un scénario différent à chaque épisode
+        (`scenario_info` vaut alors « Random from N scenarios », qui ne désigne rien).
+        """
         if not self.enabled:
             return
 
@@ -265,6 +272,8 @@ class StepLogger:
 
                 if scenario_info:
                     f.write(f"[{timestamp}] Scenario: {scenario_info}\n")
+                if scenario_path:
+                    f.write(f"[{timestamp}] Scenario file: {scenario_path}\n")
                 if roster_info:
                     if not isinstance(roster_info, dict):
                         raise ValueError(f"roster_info must be dict when provided, got {type(roster_info).__name__}")

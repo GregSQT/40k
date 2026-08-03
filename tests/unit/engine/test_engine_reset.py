@@ -14,6 +14,7 @@ simuler un état mi-partie, puis appeler reset() et vérifier l'état.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import patch
 
@@ -373,3 +374,54 @@ class TestTurnStateInvariantsConformity:
         assert hors_socle == [], (
             f"reset() pose des invariants d'état de tour absents du socle : {hors_socle}"
         )
+
+
+class TestResetLogsScenarioPath:
+    """reset() journalise le CHEMIN du scénario tiré pour l'épisode.
+
+    Le step.log ne porte ni terrain, ni icônes, ni zones de déploiement : le replay les relit
+    dans la config. Sans ce chemin il les relit pour le scénario par DÉFAUT, alors qu'un
+    entraînement tire un scénario différent par épisode (``Scenario:`` vaut alors
+    « Random from N scenarios », qui ne désigne aucun fichier).
+    """
+
+    @staticmethod
+    def _engine_with_logger(tmp_path, scenario_file):
+        from ai.step_logger import StepLogger
+
+        with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
+             patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
+            engine = W40KEngine(
+                config=_minimal_config_with_units(), scenario_file=scenario_file
+            )
+        log_path = tmp_path / "step.log"
+        engine.step_logger = StepLogger(
+            output_file=str(log_path), enabled=True, buffer_size=10
+        )
+        return engine, log_path
+
+    def test_reset_logs_scenario_path_relative_to_repo(self, tmp_path):
+        """Chemin ABSOLU en entrée → ligne journalisée relative à la racine du dépôt."""
+        repo_root = Path(__file__).resolve().parents[3]
+        relative = "config/board/44x60x5/scenario/scenario_pvp.json"
+        engine, log_path = self._engine_with_logger(tmp_path, str(repo_root / relative))
+
+        engine.reset()
+
+        assert f"Scenario file: {relative}\n" in log_path.read_text(encoding="utf-8")
+
+    def test_reset_rejects_scenario_outside_repo(self, tmp_path):
+        """Hors dépôt → erreur explicite, jamais un chemin que le replay ne saura pas résoudre."""
+        outside = tmp_path / "ailleurs" / "scenario_x.json"
+        engine, _ = self._engine_with_logger(tmp_path, str(outside))
+
+        with pytest.raises(ValueError, match=r"hors du dépôt"):
+            engine.reset()
+
+    def test_reset_omits_line_without_scenario_file(self, tmp_path):
+        """Moteur nu (aucun scénario) → pas de ligne, pas de chemin inventé."""
+        engine, log_path = self._engine_with_logger(tmp_path, None)
+
+        engine.reset()
+
+        assert "Scenario file:" not in log_path.read_text(encoding="utf-8")

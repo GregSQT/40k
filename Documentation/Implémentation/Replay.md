@@ -79,6 +79,40 @@ Ligne dédiée, écrite **hors action** (elle n'appartient à aucune ligne de je
   que `FIGHT_ELIGIBLE`, §4.A). Un scénario **sans objectif** n'écrit aucun instantané et reste
   rejouable.
 
+### 2.4 Décor : ce que le journal ne porte PAS, et comment le replay le retrouve
+
+`Walls:` (hexes) et `Objectives:` sont journalisés. **Terrain, icônes, zones de déploiement et
+segments de murs ne le sont pas** : le replay les relit dans la config via
+`GET /api/config/board`. Deux paramètres décident de ce qu'il obtient, et tous deux viennent du
+journal :
+
+```
+[hh:mm:ss] Board: cols=… rows=… inches_to_subhex=… hex_radius=… margin=…
+[hh:mm:ss] Scenario file: config/agents/<Agent>/scenarios/training/scenario_bot-02.json
+```
+
+- **Résolution** (`inches_to_subhex`) → `board_path` (`BOARD_PATH_BY_INCHES_TO_SUBHEX` dans
+  `BoardReplay.tsx` : 1 → `x1`, 5 → `x5_44x60`), passé à `useGameConfig`. Sans lui, l'API sert le
+  plateau par **défaut** : sur un replay x1 le décor arrivait en coordonnées x5 (sommets jusqu'à
+  `(220, 270)` sur une grille 44×60) et se dessinait cinq fois trop loin. Une résolution hors table
+  lève — pas de repli sur le plateau par défaut.
+- **Scénario tiré** (`Scenario file:`, chemin relatif à la racine du dépôt) → `scenario_file` de la
+  même requête. Indispensable parce qu'un entraînement tire un scénario **par épisode** : la ligne
+  `Scenario:` vaut alors « Random from N scenarios », qui ne désigne aucun fichier. Produit par
+  `W40KEngine.reset` (conversion en relatif ; hors dépôt → erreur) et
+  `StepLogger.log_episode_start(scenario_path=…)`.
+- **Contrat, à la différence de `FIGHT_ELIGIBLE` / `OBJECTIVE CONTROL`** : `Scenario file:` absent
+  ne rend pas le journal irrejouable — le replay retombe sur le scénario par défaut, exactement ce
+  qu'il faisait pour tous avant cette ligne. Le décor peut alors être celui d'un autre scénario.
+- **Limite assumée** : le décor reste lu dans les fichiers de config **actuels**. Réécrire un
+  `terrain-*.json` change le décor des replays passés. L'alternative (dumper le terrain rasterisé
+  dans le journal) coûte 175 Ko par épisode en x5 — mesuré sur `terrain-mc1.json`, 15 288 hexes —
+  et a été écartée pour ça.
+- **Verrous** : `tests/unit/engine/test_engine_reset.py::TestResetLogsScenarioPath` (relatif,
+  refus hors dépôt, absence de ligne sans scénario), `test_step_logger.py`
+  (`…writes_scenario_path`), `replayParser.test.ts` (extraction, non-confusion avec `Scenario:`,
+  journal ancien).
+
 > **Historique.** Avant : `[CHARGING_POOL] [ACTIVE_ALT_POOL] [NON_ACTIVE_ALT_POOL]` (pools V10, vides)
 > → pool vide en replay → pas de cercle vert. Un jet intermédiaire a loggué le pool V11 complet
 > (`[FIGHT_ELIGIBLE:…]`), mais il éclairait **toutes** les unités activables. Choix produit retenu :

@@ -1641,6 +1641,21 @@ class W40KEngine(gym.Env):
             _board_default = _board_default.get("default", _board_default)
             hex_radius = require_key(_board_default, "hex_radius")
             margin = require_key(_board_default, "margin")
+            # Chemin du scénario TIRÉ pour cet épisode, journalisé relatif à la racine du dépôt :
+            # le replay le repasse à /api/config/board pour afficher le terrain, les icônes, les
+            # zones de déploiement et les segments de murs de CE scénario, qu'aucune autre ligne
+            # du journal ne porte.
+            scenario_path_logged = None
+            if self._current_scenario_file:
+                _repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                _scenario_abs = os.path.abspath(self._current_scenario_file)
+                _rel = os.path.relpath(_scenario_abs, _repo_root)
+                if _rel.startswith(".."):
+                    raise ValueError(
+                        f"Scenario file hors du dépôt, non journalisable pour le replay : "
+                        f"{_scenario_abs} (racine {_repo_root})"
+                    )
+                scenario_path_logged = _rel.replace(os.sep, "/")
             self.step_logger.log_episode_start(
                 episode_units,
                 scenario_name,
@@ -1656,6 +1671,7 @@ class W40KEngine(gym.Env):
                     "hex_radius": hex_radius,
                     "margin": margin,
                 },
+                scenario_path=scenario_path_logged,
             )
             
             # CRITICAL: Synchronize game_state["episode_number"] with step_logger.episode_number

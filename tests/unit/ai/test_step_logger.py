@@ -105,6 +105,31 @@ def test_log_episode_start_writes_units_and_metadata(tmp_path: Path) -> None:
     assert logger.episode_number == 1
     assert logger.episode_step_count == 0
     assert logger.episode_action_count == 0
+    # Aucun scenario_path fourni : pas de ligne, plutôt qu'un chemin vide que le replay
+    # repasserait tel quel à l'API.
+    assert "Scenario file:" not in content
+
+
+def test_log_episode_start_writes_scenario_path(tmp_path: Path) -> None:
+    """Le chemin du scénario tiré est journalisé : c'est la seule trace, dans tout le step.log,
+    de la config d'où le replay doit relire terrain, icônes et zones de déploiement."""
+    output_file = tmp_path / "step.log"
+    logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=10)
+    logger.log_episode_start(
+        units_data=[],
+        scenario_info="Random from 3 scenarios",
+        board_config={
+            "cols": 15, "rows": 13, "hex_radius": 1.0,
+            "margin": 0.0, "inches_to_subhex": 2.0,
+        },
+        scenario_path="config/agents/ArmageddonAgent/scenarios/training/scenario_bot-02.json",
+    )
+    content = _read_text(output_file)
+    assert (
+        "Scenario file: config/agents/ArmageddonAgent/scenarios/training/scenario_bot-02.json"
+        in content
+    )
+    assert "Scenario: Random from 3 scenarios" in content
 
 
 def test_log_action_increments_counters_and_flushes_on_threshold(tmp_path: Path) -> None:

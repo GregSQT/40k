@@ -1,6 +1,7 @@
 import json
 import os
 from collections import deque
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import pytest
@@ -17,9 +18,12 @@ from ai.truncation_log import TruncationLog
 from config_loader import get_config_loader
 from engine.macro_intents import ACTION_FAMILIES
 
+# Agent de reference de ces tests : il porte le training config lu ci-dessous ET la config de
+# rewards que `__init__` charge dans le verrou `test_stub_matches_the_attributes_of_a_real_tracker`.
+_AGENT_KEY = "ArmageddonAgent"
 _AGENT_CONFIG = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
-    "config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json",
+    f"config/agents/{_AGENT_KEY}/{_AGENT_KEY}_training_config.json",
 )
 
 # ENUMERE depuis le fichier, jamais fige en dur : un tuple ecrit a la main laisse silencieusement
@@ -122,6 +126,11 @@ def _dw(t: W40KMetricsTracker) -> _DummyWriter:
 def _tracker_stub() -> W40KMetricsTracker:
     t = W40KMetricsTracker.__new__(W40KMetricsTracker)
     t.writer = _DummyWriter()
+    # Identite du run. Aucun ecrivain ne s'en sert ici — le writer est une doublure et le
+    # journal de troncatures est sans dossier (voir plus bas) — mais l'attribut EXISTE sur un
+    # vrai tracker, et `test_stub_matches_the_attributes_of_a_real_tracker` l'exige a ce titre.
+    t.agent_key = "StubAgent"
+    t.log_dir = "<stub: aucun dossier de run>"
     # Fenetres de lissage ramenees a 1 : ces tests verifient qu'un chemin d'execution emet la
     # bonne courbe, pas la taille des fenetres de production (500/100), qui les obligerait a
     # rejouer des centaines d'episodes. Egales, elles suppriment aussi le doublon `_100ep`.
@@ -129,8 +138,9 @@ def _tracker_stub() -> W40KMetricsTracker:
     t.PERF_WINDOW_FAST = 1
     t.episode_count = 12
     t.step_count = 0
-    # `log_dir=None` : comptage sans journal. Ces tests verifient les courbes emises, pas la
-    # trace disque ; un vrai dossier ferait ecrire `truncations.jsonl` hors du tmp_path.
+    # `log_dir=None` : comptage sans journal, le mode prevu pour qui n'a pas de dossier de run
+    # (cf. ai/truncation_log.py). Ces tests verifient les courbes emises, pas la trace disque —
+    # un vrai `log_dir` ferait ecrire un `truncations.jsonl` dans l'arborescence du depot.
     t.truncation_log = TruncationLog(None)
     t.win_rate_window = deque([1.0] * 12, maxlen=100)
     t.episode_reward_winner_pairs = deque(maxlen=200)
@@ -180,6 +190,10 @@ def _tracker_stub() -> W40KMetricsTracker:
     # pour un etat valide qui ne l'est plus.
     # Lu de la config d'agent par __init__ : f_obj_rewards vaut ce facteur fois les VP marques.
     t.objective_reward_factor = 3.0
+    # Idem, pour 02_combat/b_kill_rewards. Valeur de la config ArmageddonAgent au moment ou ce
+    # stub la reprend (result_bonuses.kill_target) : aucun test ne l'observe aujourd'hui, mais
+    # celui qui l'observera un jour doit lire un facteur plausible, pas un nombre invente.
+    t.reward_kill_target = 2.0
     t._game_history = {k: [] for k in W40KMetricsTracker.GAME_HISTORY_KEYS}
     # Ventilation par mode de deploiement : etat construit depuis les constantes de CLASSE, pas
     # recopie, pour que l'ajout d'une serie ne fasse pas tomber ces tests sur un detail sans
@@ -196,7 +210,57 @@ def _tracker_stub() -> W40KMetricsTracker:
         "wins_agent_p1": 0.0,
         "wins_agent_p2": 0.0,
     }
+    # Etat zone-intent pose par sa PROPRE methode, comme __init__ le fait : c'est la seule
+    # forme qui reste juste quand une fenetre y est ajoutee. Meme geste que le stub de
+    # tests/unit/ai/test_zone_intent_metrics.py.
+    W40KMetricsTracker._reset_zone_intent_state(t)
     return t
+
+
+def test_stub_matches_the_attributes_of_a_real_tracker(tmp_path: Path) -> None:
+    """VERROU : `_tracker_stub` porte EXACTEMENT l'etat qu'un vrai tracker construit.
+
+    Le stub court-circuite `__init__` (via `__new__`) et recopie l'etat a la main : il est
+    rapide et decouple de la config disque, mais il DERIVE en silence. Les deux sens ont
+    deja mordu ce fichier, et aucun des deux ne se signale tout seul :
+      - attribut AJOUTE a `__init__` et absent du stub : le seul signal est un
+        `AttributeError` le jour ou un chemin teste le lit (arrive sur `truncation_log` ;
+        trois autres avaient derive de la meme facon sans que rien ne le dise) ;
+      - attribut RETIRE du tracker et laisse dans le stub : aucun signal du tout, la
+        doublure decrit un objet qui n'existe plus et les tests restent verts sur un etat
+        mort (arrive sur `episode_tactical_data`, cf. le commentaire dans `_tracker_stub`).
+
+    Le verrou compare les NOMS, pas les valeurs : les valeurs du stub sont une fixture
+    deliberement differente de la production (fenetres a 1, 12 episodes d'historique). Un
+    attribut ajoute a `__init__` et inutile a ces tests fera donc rouge ici — c'est voulu, il
+    devient une ligne a poser sciemment plutot qu'une panne differee.
+
+    Le vrai tracker est construit UNE fois, ici seulement : c'est ce qui permet aux 16 autres
+    tests de garder un stub sans I/O ni lecture de la config d'agent.
+    """
+    real = W40KMetricsTracker(
+        _AGENT_KEY,
+        log_dir=str(tmp_path),
+        show_banner=False,
+        perf_window=1,
+        perf_window_fast=1,
+    )
+    expected = set(vars(real))
+    # Le SummaryWriter tient un fichier d'evenements ouvert dans tmp_path.
+    real.writer.close()
+
+    assert expected, "un vrai tracker sans attribut : le verrou ne regarderait rien"
+    posed = set(vars(_tracker_stub()))
+    missing = sorted(expected - posed)
+    obsolete = sorted(posed - expected)
+    assert not missing, (
+        "_tracker_stub ne pose pas " + ", ".join(missing) + " : ces attributs existent sur un "
+        "vrai tracker. Les ajouter au stub (ou retirer leur usage du tracker)."
+    )
+    assert not obsolete, (
+        "_tracker_stub pose " + ", ".join(obsolete) + " : ces attributs n'existent plus sur un "
+        "vrai tracker. Les retirer du stub, qui ferait sinon passer un etat mort pour valide."
+    )
 
 
 def test_metric_slug_and_smoothed_metric() -> None:
