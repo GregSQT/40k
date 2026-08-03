@@ -349,6 +349,46 @@ joueur, et l'invariant `valid_hexes ⊆ deployment_scoring_hexes` vérifié pour
 chaque étape.
 **Contre-épreuves faites** : delta ramené à une seule pose → ROUGE ; rétabli → vert.
 
+🔴 **UNE RÉGRESSION INTRODUITE PAR CE CORRECTIF, trouvée par `/code-review` et corrigée.**
+Généraliser le delta à N poses a rouvert un trou que l'ancienne garde (`len(added_ids) != 1`)
+fermait **par accident** : un **REPOSITIONNEMENT** d'unité déjà posée
+(`deployment_recommit_plan`, atteignable par l'API) ne change pas l'ensemble des ids, donc le
+cache se déclarait à jour et servait des expositions calculées depuis l'**ancienne** position —
+scénario exécuté par la revue : **966 hexes faux**, comptés `incremental`. Corrigé par une
+comparaison explicite des positions des ids communs, et **verrouillé** par
+`test_repositioning_an_already_deployed_unit_forces_a_rebuild` (contre-épreuve : garde retirée
+→ ROUGE sur 40 expositions).
+⚠️ **La leçon** : une garde qui protège d'un cas *sans le nommer* ne survit pas à la
+généralisation de ce qu'elle gardait. L'ancien code ne parlait que du nombre d'ajouts ; le
+repositionnement n'était couvert par personne, et rien ne le disait.
+
+📌 **Trou du verrou lui-même, corrigé** : la liste des champs comparés omettait
+`ally_deployed_hexes` — construit par `append` dans le chemin incrémental et lu par
+`nearest_ally`, donc **dans l'observation**. Choisir soi-même les champs à comparer reproduit
+son propre angle mort ; les deux champs manquants ont été ajoutés.
+
+**Affinages mesurés (`/simplify`)** : sur-ensemble mémoïsé avec les autres caches d'épisode (il
+était recalculé à chaque consultation, y compris sur le chemin incrémental où il est jeté) ;
+tableau numpy et import hissés hors de la boucle par ennemi (1,31 ms/ennemi) ; accumulation par
+`np.flatnonzero` au lieu d'une boucle sur 16 000 hexes dont 0,1 % sont vrais (1,05 → 0,01 ms) ;
+branche `current_deployer` devenue inatteignable supprimée (le cache est indexé par joueur) ;
+la branche mono-hex de `_get_valid_deployment_hexes` appelle `deployment_scoring_hexes` au lieu
+d'en recopier l'expression, ce qui rend l'invariant vrai **par construction** sur ce chemin ;
+clés du cache renommées `valid_hexes`/`valid_hex_set` → **`scoring_hexes`** — l'ancien nom
+désignait la fausse dépendance qui a coûté 100 % de reconstruction.
+
+⏳ **NON FAIT, et pourquoi** : `_has_line_of_sight_cached`, `_count_los_exposure` et
+`_count_potential_los_from_reference_hexes` sont désormais **sans appelant** (~80 lignes), et
+`los_pair_cache` n'est plus lu. Leur suppression est **suspendue à [§0.64](#s0.64)** : si
+l'alignement sur la règle du moteur est retenu, c'est précisément un chemin scalaire mémoïsé
+qu'il faudra rebrancher. Supprimer maintenant pour réécrire ensuite n'aurait pas de sens — mais
+ce code ne doit pas survivre à l'arbitrage §0.64, quel qu'il soit.
+📌 **Manque à gagner signalé, non traité** : le cache DISQUE des expositions potentielles n'est
+réécrit que s'il n'existe pas (`if not os.path.exists`). Les fichiers déjà produits sur les
+hexes d'UNE unité restent valides (la clé de topologie ne dépend pas des hexes évalués) mais
+**partiels** — 93 863 octets sur `main` contre 131 842 écrits ici pour la même topologie — et ne
+sont jamais complétés : chaque processus repaie les ~30 % manquants.
+
 **Gain mesuré** (3 graines, phase de déploiement complète) : **2,01 s → 1,46 s**, soit **−27 %**.
 Taux de reconstruction **100 % → 20 %** (2 reconstructions à froid, une par joueur, puis 8 mises
 à jour). ⏳ La part sur un run entier reste à confirmer par `perf/a_deploy_cache_full_build_rate`.

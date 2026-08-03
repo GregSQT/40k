@@ -15,11 +15,16 @@ serait une observation faussée pour l'agent (§0.40).
 
 import pytest
 
+#: `ally_deployed_hexes` et `enemy_deployed_units` sont construits par APPEND dans la mise à
+#: jour incrémentale, et le premier alimente `nearest_ally` dans `_deployment_score_columns`,
+#: donc directement l'observation. Les omettre laissait hors du verrou un ingrédient de score
+#: que ce chemin fabrique lui-même.
 _CHAMPS_COMPARES = (
     "los_exposure_by_hex",
     "potential_los_exposure_by_hex",
     "ally_col_counts",
-    "valid_hex_set",
+    "ally_deployed_hexes",
+    "enemy_deployed_units",
 )
 
 
@@ -35,7 +40,9 @@ def _compare(vivant, reference, contexte):
     for champ in _CHAMPS_COMPARES:
         a, b = vivant[champ], reference[champ]
         if a != b:
-            if isinstance(a, dict) and isinstance(b, dict):
+            if isinstance(a, list) and isinstance(b, list):
+                detail = f"{champ}: {len(a)} elements vivant contre {len(b)} reconstruits"
+            elif isinstance(a, dict) and isinstance(b, dict):
                 differents = [k for k in set(a) & set(b) if a[k] != b[k]]
                 detail = (
                     f"{champ}: {len(set(a) ^ set(b))} cles divergentes, "
@@ -111,9 +118,51 @@ def test_each_player_keeps_its_own_cache(make_active_deployment_engine):
 
     caches = eng.game_state[ActionDecoder.DEPLOYMENT_SCORING_CACHE_KEY]
     assert set(caches) == {1, 2}, f"un cache par joueur attendu, obtenu : {sorted(caches)}"
-    assert caches[1]["valid_hex_set"] != caches[2]["valid_hex_set"], (
+    assert set(caches[1]["scoring_hexes"]) != set(caches[2]["scoring_hexes"]), (
         "les deux joueurs auraient le meme ensemble d'hexes : le pool n'est pas propre au joueur"
     )
+
+
+def test_repositioning_an_already_deployed_unit_forces_a_rebuild(make_active_deployment_engine):
+    """Un REPOSITIONNEMENT doit reconstruire, jamais être servi comme « cache à jour ».
+
+    `deployment_recommit_plan` déplace une unité déjà posée : l'ensemble des ids ne change
+    pas, seules les positions bougent. Un cache qui se déclare à jour sur ce seul critère sert
+    des expositions calculées depuis l'ANCIENNE position — soit une observation fausse pour
+    l'agent (§0.40), sur un handler atteignable par l'API.
+
+    Ce cas était couvert par accident tant que l'incrémental exigeait exactement une pose ;
+    généraliser à N ajouts a rouvert le trou, et ce test est ce qui le referme.
+    """
+    eng = make_active_deployment_engine(seed=1)
+    dec = eng.action_decoder
+    gs = eng.game_state
+
+    for _ in range(3):
+        if gs["phase"] != "deployment":
+            break
+        mask = eng.get_action_mask()
+        legal = [i for i, ok in enumerate(mask) if ok]
+        if not legal:
+            break
+        eng.step(legal[0])
+
+    deployer = int(gs["deployment_state"]["current_deployer"])
+    dec._get_or_build_deployment_scoring_cache(gs, deployer)
+
+    posees = [u for u in gs["units"] if int(u["col"]) >= 0 and int(u["row"]) >= 0]
+    assert posees, "aucune unite posee : le test ne construit pas la situation qu'il observe"
+    cible = posees[0]
+    ancienne = (int(cible["col"]), int(cible["row"]))
+    libres = [
+        h for h in dec.deployment_scoring_hexes(gs, int(cible["player"]))
+        if h != ancienne
+    ]
+    cible["col"], cible["row"] = libres[len(libres) // 2]
+
+    cache = dec._get_or_build_deployment_scoring_cache(gs, deployer)
+    reference = _rebuild_reference(dec, gs, deployer)
+    _compare(cache, reference, "apres repositionnement d'une unite deja posee")
 
 
 def test_valid_hexes_are_always_inside_the_scoring_superset(make_active_deployment_engine):

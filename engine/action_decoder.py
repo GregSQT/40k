@@ -109,6 +109,7 @@ class ActionDecoder:
         self._deployment_pool_cache: Dict[int, Tuple[set, List[Tuple[int, int]], np.ndarray, np.ndarray, np.ndarray]] = {}
         self._wall_grid_cache: Optional[np.ndarray] = None
         self._deployment_cache_counts: Dict[str, int] = self.empty_deployment_cache_counts()
+        self._deployment_scoring_hexes_cache: Dict[int, List[tuple[int, int]]] = {}
 
     #: Clé du cache de SCORING du déploiement, dans le `game_state` (expositions LoS par hexe,
     #: alliés par colonne, snapshot des unités posées). Il vit dans l'état de partie et non sur
@@ -164,6 +165,9 @@ class ActionDecoder:
         self._deployment_pool_cache = {}
         self._wall_hexes_cache = None
         self._wall_grid_cache = None
+        # Le sur-ensemble de scoring dérive du pool ET des murs, tous deux invalidés ici : il
+        # doit l'être AVEC eux, sinon il survivrait à un changement de terrain.
+        self._deployment_scoring_hexes_cache = {}
         # Remis à zéro AVEC les autres caches d'épisode : un compteur qui survit à un `reset`
         # cumulerait d'un épisode à l'autre et rendrait le taux de rebuild ininterprétable —
         # sans jamais lever (§0.42).
@@ -847,11 +851,16 @@ class ActionDecoder:
         L'inclusion `valid_hexes ⊆ deployment_scoring_hexes` est l'invariant qui rend ce
         filtrage sûr ; elle est verrouillée par test.
         """
+        cached = self._deployment_scoring_hexes_cache.get(int(current_deployer))
+        if cached is not None:
+            return cached
         _pool_set, normalized_pool, _pool_np, _pool_grid, _even = self._deployment_pool_entry(
             game_state, current_deployer
         )
         wall_hexes = self._wall_hex_set(game_state)
-        return [hex_pos for hex_pos in normalized_pool if hex_pos not in wall_hexes]
+        scoring = [hex_pos for hex_pos in normalized_pool if hex_pos not in wall_hexes]
+        self._deployment_scoring_hexes_cache[int(current_deployer)] = scoring
+        return scoring
 
     def _get_valid_deployment_hexes(
         self,
@@ -887,10 +896,9 @@ class ActionDecoder:
         from engine.spatial_relations import geometry_is_hex
         if geometry_is_hex(game_state) or base_size == 1:
             # Single-hex footprint: pool + murs (le chevauchement passe par le clearance)
-            cell_valid = [
-                (col, row) for col, row in normalized_pool
-                if (col, row) not in wall_hexes
-            ]
+            # Exactement le sur-ensemble de scoring (pool moins murs) : le recopier ici en
+            # ferait diverger la définition du contrat `valid_hexes ⊆ scoring_hexes`.
+            cell_valid = self.deployment_scoring_hexes(game_state, current_deployer)
             return self._deployment_clearance_filter(game_state, str(unit_id), unit, cell_valid)
 
         # Multi-hex units: vectorized numpy footprint check (bornes + murs + pool)
@@ -1452,8 +1460,7 @@ class ActionDecoder:
             "current_deployer": int(current_deployer),
             "deployed_snapshot": deployed_snapshot,
             "deployed_snapshot_version": snapshot_version,
-            "valid_hexes": list(valid_hexes),
-            "valid_hex_set": set(valid_hexes),
+            "scoring_hexes": list(valid_hexes),
             "ally_col_counts": ally_col_counts,
             "ally_deployed_hexes": ally_deployed_hexes,
             "enemy_deployed_units": enemy_deployed_units,
@@ -1474,9 +1481,6 @@ class ActionDecoder:
 
         Returns True when incremental update succeeded, False when full rebuild is required.
         """
-        if int(current_deployer) != int(require_key(cache, "current_deployer")):
-            return False
-
         previous_snapshot = require_key(cache, "deployed_snapshot")
         previous_ids = set(previous_snapshot.keys())
         current_ids = set(current_snapshot.keys())
@@ -1486,8 +1490,16 @@ class ActionDecoder:
         # un état qu'on ne sait pas rattraper, donc reconstruction.
         if removed_ids:
             return False
+        # Un REPOSITIONNEMENT non plus. `deployment_recommit_plan` (deployment_handlers) déplace
+        # une unité DÉJÀ posée : l'ensemble des ids ne bouge pas, mais les expositions calculées
+        # depuis son ancienne position sont fausses et rien ici ne sait les défaire. L'ancien
+        # code s'en protégeait par accident (`len(added_ids) != 1` couvrait le cas) ; le rendre
+        # explicite est ce qui permet d'accepter N ajouts sans rouvrir le trou.
+        for unit_id in previous_ids & current_ids:
+            if previous_snapshot[unit_id] != current_snapshot[unit_id]:
+                return False
         if not added_ids:
-            # Aucun changement : le cache est déjà à jour. Ce n'est pas un échec.
+            # Ni ajout, ni retrait, ni déplacement : le cache est à jour. Ce n'est pas un échec.
             return True
 
         # PLUSIEURS ajouts sont la NORME, pas l'exception : les joueurs déploient en ALTERNANCE
@@ -1496,8 +1508,7 @@ class ActionDecoder:
         # donc la main dans tous les cas réels — le chemin incrémental n'était jamais pris.
         current_snapshot_version = self._build_deployed_snapshot_version(current_snapshot)
 
-        valid_hex_set = require_key(cache, "valid_hex_set")
-        valid_hexes = require_key(cache, "valid_hexes")
+        scoring_hexes = require_key(cache, "scoring_hexes")
         los_exposure_by_hex = require_key(cache, "los_exposure_by_hex")
         potential_los_exposure_by_hex = require_key(cache, "potential_los_exposure_by_hex")
         ally_col_counts = require_key(cache, "ally_col_counts")
@@ -1508,6 +1519,18 @@ class ActionDecoder:
         if cached_snapshot_version != current_snapshot_version:
             los_pair_cache.clear()
             cache["deployed_snapshot_version"] = current_snapshot_version
+
+        # MÊME implémentation de LoS que la reconstruction (`batch_has_los_from_source`), et non
+        # `_has_line_of_sight_cached` : les deux ne donnent PAS le même résultat (mesuré 607
+        # désaccords sur 16 104 hexes pour une seule source, cf. V11 §0.64). Tant que ce
+        # désaccord n'est pas tranché, les deux chemins du cache doivent au moins être cohérents
+        # ENTRE EUX, sans quoi l'observation dépendrait de l'ordre des poses.
+        # Grille et tableau d'hexes construits UNE fois : ils ne dépendent pas de l'ennemi
+        # traité (1,31 ms par ennemi économisés sur ~33 ms).
+        from engine.hex_utils import batch_has_los_from_source as _batch_los
+
+        wall_grid = self._build_wall_grid(game_state)
+        hexes_arr = np.array(scoring_hexes, dtype=np.int32)
 
         # Les hexes occupés ne sont PAS retirés du sur-ensemble. Il couvre le pool moins les
         # murs, une constante de l'épisode : c'est ce qui le rend réutilisable d'une unité à
@@ -1529,19 +1552,13 @@ class ActionDecoder:
             # déjà les unités non posées (`if col < 0 or row < 0: continue`), donc `added_ids`
             # n'en contient jamais. Une garde ici serait du code inatteignable — la mutation
             # qui la retire laisse le test d'équivalence VERT, ce qui le prouve.
-            # MÊME implémentation de LoS que la reconstruction (`batch_has_los_from_source`), et
-            # non `_has_line_of_sight_cached`. Les deux ne donnent PAS le même résultat : mesuré
-            # 607 désaccords sur 16 104 hexes pour une seule source. Tant que ce désaccord n'est
-            # pas tranché (cf. V11 §0.62), les deux chemins du cache doivent au moins être
-            # cohérents ENTRE EUX, sans quoi l'observation dépendrait de l'ordre des poses.
-            from engine.hex_utils import batch_has_los_from_source as _batch_los
-
-            wall_grid = self._build_wall_grid(game_state)
-            hexes_arr = np.array(valid_hexes, dtype=np.int32)
             los_results = _batch_los(int(col), int(row), hexes_arr, wall_grid)
-            for i, key in enumerate(valid_hexes):
-                if bool(los_results[i]):
-                    los_exposure_by_hex[key] = require_key(los_exposure_by_hex, key) + 1
+            # `flatnonzero` plutôt qu'une boucle sur les 16 000 hexes : la ligne de vue est vraie
+            # pour ~0,1 % d'entre eux, donc 99,9 % des itérations ne faisaient que tester un
+            # booléen faux (mesuré 1,05 ms -> 0,01 ms par ennemi).
+            for i in np.flatnonzero(los_results):
+                key = scoring_hexes[int(i)]
+                los_exposure_by_hex[key] = require_key(los_exposure_by_hex, key) + 1
 
         cache["deployed_snapshot"] = current_snapshot
         cache["deployed_snapshot_version"] = current_snapshot_version
