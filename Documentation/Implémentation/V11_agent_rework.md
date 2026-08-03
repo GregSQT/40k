@@ -77,6 +77,7 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
+| **§0.62** | L'**analyzer** mesurait à une autre échelle et avec d'autres règles que le run — et trois déplacements n'étaient pas contrôlés | ✅ **CORRIGÉ le 2026-08-03** — une conséquence à assumer | **1** | 206 erreurs → **0** sur un log de référence de 6 épisodes. L'échelle venait du `board_config` COURANT, pas de l'entête du log : un run x1 relu avec un `config.json` en x5 mesurait tout ×5 — il **fabriquait** des erreurs (132 faux « shoot at engaged enemy ») **et en masquait** (portées, budgets jamais dépassés). Même défaut, silencieux celui-là, sur `engagement_zone`, `distance_metric` et les toggles `move` : désormais journalisés en entête `Run rules:`. Charge, pile-in/consolidation et move réactif n'avaient **aucun** contrôle conforme (jet non converti, mesure d'ancre, pas de pathfinding). **Conséquence : aucun verdict d'analyzer antérieur ne vaut**, et deux correctifs MOTEUR changent le jeu (move réactif). Détail → §0.62. |
 | **§0.61** | Le garde **anti-runaway** était MUET, et son compteur d'épisodes divergeait | ✅ **CORRIGÉ le 2026-08-03** | **1** | Une troncature signale une BOUCLE dans le moteur, pas une fin de partie — or son diagnostic n'existait que dans le `print` d'un worker (noyé à `n_envs=48`) et le compteur persisté ne la comptait pas, alors que le run s'arrête dessus. Nouveau scalaire `00_critical/t_truncated_episodes`, diagnostic complet en `truncations.jsonl`, bilan imprimé en fin de run. Détail → §0.61. |
 | **§0.60** | Instrumentation du **coût** de l'entraînement — workers d'éval, temps bloquant, courbes de charge et de participation | ✅ **LIVRÉ le 2026-08-02** | **2** | Trois angles morts de COÛT, distincts des angles morts de COMPORTEMENT du §0.56. (1) Quatre clés `bot_eval_*` vivaient **hors de `callback_params`** : personne ne les lisait, `bot_eval_n_workers` retombait sur `min(n_envs, n_scenarios × n_bots)` = **24 workers**, soit **47 Go et 598 s** contre **9,6 Go et 349 s** à 4 workers — moins de workers est aussi **42 % plus rapide**, la VM passant son temps à swapper. `validate_bot_eval_worker_params` valide désormais au DÉMARRAGE. (2) `blocking_eval_seconds` ne compte plus que le temps où la boucle est RÉELLEMENT figée. (3) Six courbes moteur : charges tentées/réussies (agent et bot) et participation par phase. Détail → §0.60. |
 | **§0.59** | Régime d'entraînement en **deux phases** — `x1_selfplay` (self-play) et `decay_fraction` | 🟠 **OUVERT — livré, JAMAIS EXÉCUTÉ** | **2** | Deux changements de régime non mesurés. (1) `decay_fraction` achève les rampes lr/entropie **avant** la fin d'un run long (sans lui, un run de 200 000 épisodes garde une entropie élevée jusqu'au dernier épisode). (2) Le profil `x1_selfplay` ajoute une **phase 2** en `--append` : un snapshot figé de l'agent remplace le bot sur une part rampée **0.0 → 0.5** des épisodes. ⚠️ Aucun run de phase 2 n'a jamais tourné ; `opponent_mix.enabled` **lève** hors du chemin de rotation de scénarios. Détail → §0.59. |
@@ -149,6 +150,71 @@ jour 2026-07-29** : la section 9 a été auditée le 2026-07-24 ([§9.0](V11_pha
 **T2→T5 ont été relus le 2026-07-29 — 9 écarts, verdicts et réserves en [§0.47](#s0.47)** ; cette
 relecture s'est faite **par lecture seule, sans aucune exécution**, elle ne vaut donc pas
 mutation-test.
+
+<a id="s0.62"></a>
+### 0.62 L'ANALYZER mesurait à une autre échelle et avec d'autres règles que le run — ✅ CORRIGÉ (2026-08-03)
+
+CLAUDE.md désigne `ai/analyzer.py` comme la stratégie de validation du training. Il rendait des
+verdicts faux. Relevé en lisant `analyzer.log`, tranché et livré le 2026-08-03 ; trois passes de
+`/code-review` et une de `/simplify` ont suivi, chacune trouvant des défauts nés du lot précédent.
+
+**La cause première : l'analyzer se relisait lui-même au lieu de relire le run.**
+L'échelle subhex venait de `board_config` — le fichier tel qu'il est **au moment de l'analyse**,
+pas tel qu'il était pendant le run. Un run joué sur `board/44x60x1` relu avec un `config.json`
+pointant `board/44x60x5` mesurait toutes ses distances ×5. L'effet va dans les deux sens et c'est
+ce qui le rend coûteux : la zone d'engagement à 10 subhex au lieu de 2 **fabriquait** 132 faux
+« shoot at engaged enemy », pendant que les portées et les budgets de move ×5 **masquaient** les
+vraies violations — « out of range » et « distance > budget » restaient à 0 par construction.
+Mesure : `206 erreurs → 50` en corrigeant la seule échelle, puis `→ 0`.
+
+Le même raisonnement s'applique mot pour mot à `engagement_zone`, `distance_metric` et aux
+toggles `game_config['move']`, qui venaient eux aussi du fichier courant — **sans** le garde-fou
+qui protège l'échelle. Basculer `distance_metric.engagement` de `hex` à `euclidean` changeait
+tous les verdicts d'engagement d'un vieux journal, en silence. Le moteur journalise désormais ce
+qu'il **applique** (entête `Run rules:`), l'analyzer lit de là, et l'absence de la ligne est un
+refus explicite — comme pour `Board:`.
+
+**Trois déplacements sur cinq n'étaient pas contrôlés.** Move et advance l'étaient ; charge,
+pile-in/consolidation et move réactif ne l'étaient pas, ou pas conformément :
+- le jet 2D6 de charge, **en pouces**, était comparé à une distance en cases — à x5, un jet de 7
+  devenait un plafond de 7 subhex au lieu de 35, et **toute** charge réussie remontait en faute.
+  Inerte à x1, d'où l'absence totale de signal ;
+- la mesure se faisait d'**ancre à ancre** : en V11 l'ancre d'escouade peut bondir plus loin
+  qu'aucune figurine (reformation) ou moins loin que l'une d'elles ;
+- aucun **pathfinding** : une charge par-dessus un mur n'était jamais signalée, alors que 11.04
+  renvoie à Moving (03) ;
+- pile-in (12.03) et consolidation (12.08) — MAXIMUM DISTANCE 3" — n'étaient contrôlés par RIEN.
+
+Le contrôle est aujourd'hui **unique** (`_per_model_move_violation`) et partagé par les cinq
+sites. Il l'a fallu : les cinq copies avaient déjà dérivé, et le filtre des socles morts n'existait
+que dans deux d'entre elles. Un seul verdict est exposé — « la figurine n'a pas pu atteindre sa
+destination dans son budget » — parce que distinguer « trop long » de « bloqué » exige d'explorer
+au-delà du budget (flood ×4, 1,6 → 6,3 ms par socle à x5) sans rien garantir ; les deux compteurs
+séparés d'autrefois entretenaient une fiction, celui qui affichait « distance > budget » restant
+à 0 en permanence.
+
+**⚠️ CONSÉQUENCES À ASSUMER**
+
+1. **Aucun verdict d'analyzer antérieur au 2026-08-03 ne vaut.** Ni les « 0 erreur » (les contrôles
+   ne regardaient pas), ni les erreurs remontées (elles étaient majoritairement fausses).
+2. **Les journaux antérieurs ne sont plus analysables** : les entêtes `Board:` et `Run rules:` sont
+   exigées, et leur absence lève. C'est le contraire d'une régression — c'est le repli silencieux
+   qu'on supprime.
+3. **Deux correctifs MOTEUR changent le jeu**, tous deux sur `reactive_move` : son rayon de
+   déclenchement (9") et son budget (D6") étaient consommés comme des nombres de CASES, donc
+   1,8" et 1,2" à x5 — capacité quasi éteinte hors x1 ; et le move ne déplaçait que l'ANCRE, les
+   figurines des escouades multi-socles ne bougeant pas du tout. **Les modèles entraînés avant ont
+   appris contre l'ancien comportement.**
+4. Deux marqueurs **entrent dans `step.log`** : `[FLY]` (21.03, vol déclaré) sur les quatre verbes
+   de mouvement, et `[SUSTAINED HITS]` (24.36) au tir comme en mêlée. Le contrat est écrit dans
+   [Replay.md §2.3bis](Replay.md) ; tout lecteur de journal doit accepter un token optionnel entre
+   le verbe et `from` — c'est la dérive de cette grammaire, écrite en cinq exemplaires, qui a
+   produit le défaut le plus coûteux du lot.
+
+**Ce qui reste ouvert :** `build_rigid_plan` force le niveau 0 alors que
+`translate_squad_to_destination` n'écrit que col/row — une unité à l'étage est validée contre le
+sol. Défaut **préexistant et documenté** (`SQUAD_RIGID_MOVE_DESTINATION_LEVEL`, §0.34), partagé
+par move, charge, advance et pile-in : le move réactif y est désormais conforme, pas plus faux.
 
 <a id="s0.61"></a>
 ### 0.61 Le garde ANTI-RUNAWAY était muet, et son compteur d'épisodes divergeait — ✅ CORRIGÉ (2026-08-03)
