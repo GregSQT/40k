@@ -88,7 +88,7 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 | **[§9](V11_phaseA.md#s9)** | Phase A' — P2 + P3-0/1/2 | 🟢 **LIVRÉS ET MERGÉS sur `main`** — restent **P3-3→8**, **P4**, **P5** | **2** | ⚠️ Aucune des quatre livraisons n'est **MESURÉE**. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). Détail → §0.42 et §0.43 (en §0hist), et [§9](V11_phaseA.md#s9). |
 | **§0.44** | Tête pointeur de **déploiement** — les slots 4-8 n'ont pas de tête dédiée | 🟠 **OUVERT** — reporté après la mesure de référence (arbitrage utilisateur du 2026-07-29) | **3** | Les ids 4-8 tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`) : leurs logits sortent de la **conv 1×1** (`_move_logits`), pas d'une tête dédiée ; `deploy_emb` n'atteint le calcul que par le **conditionnement du tronc**. Ajouter un `deploy_query_net`, jumeau de `choice_query_net` — ce qui oblige à lire la phase dans la policy. Élément `L1` du lot §0.48 ; `L11` (`N_DEPLOY_SLOTS`) à trancher **avant**. Détail → §0.44. |
 | **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — inventaire rendu, périmètre arbitré : le lot = **`L1` + `L2` + `L6`**, et eux seuls | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. Reste l'arbitrage 2 (réserver la place des règles pas encore implémentées, toute règle rendue vivante changeant `obs_size`). Détail → §0.48. |
-| **§0.46** | Résidus du 2026-07-29 | ✅ **CLOSE le 2026-08-03** — les trois points sont livrés | — | ✅ **SOLDÉ le 2026-08-03** (arbitrage : GARDER, sous forme optimisée). Les 4 issues du cache de déploiement deviennent des **compteurs publiés en permanence** (`perf/*`) au lieu de traces invisibles hors `--debug` ; les 37 sites passent par `engine/debug_trace.py` (canaux `W40K_TRACE`, formatage différé) ; garde verrouillée par 19 tests, dont une **analyse AST** qui interdit la f-string en argument. Détail → §0.46. |
+| **§0.46** | Résidus du 2026-07-29 | ✅ **CLOSE le 2026-08-03** — les trois points sont livrés | — | ✅ **SOLDÉ le 2026-08-03** (arbitrage : GARDER, sous forme optimisée). Les 4 issues du cache de déploiement deviennent des **compteurs publiés en permanence** (`perf/*`) au lieu de traces invisibles hors `--debug` ; les 37 sites passent par `engine/debug_trace.py` (canaux `W40K_TRACE`, formatage différé) ; garde verrouillée par **21 tests**, dont une **analyse AST** (fichiers découverts par leur import) qui interdit f-string, formatage anticipé et mot-clé. La passe `/simplify` du même jour y a trouvé **un bug** (`flush=True` résiduel → `TypeError` dès que le canal s'allume) et **un verrou qui mentait** (canal `train` hors garde). ⏳ Première mesure : **100 % de reconstruction** du cache de déploiement — signalé, non ouvert. Détail → §0.46. |
 | **§0.47** | Relecture T2→T5 du 2026-07-29 — 9 écarts | 🟠 **OUVERT — reste É9 (second siège + second scénario)** ; É5 et É7 ✅ corrigés le 2026-08-02 (É1, É2, É3, É4, É6 ✅ livrés **et mergés** ; **É8 est tombé**) | **6** | **É8 n'a plus d'objet** : `ai/analyzer.py` ne construit plus aucun chemin de board à la main (il lit `get_board_config()` / `get_board_size()`). **É9 était mal énoncé** : les **3 graines SONT couvertes** (`test_t5_bare_loop.py`, `for seed in (1, 2, 3)`) ; ce qui manque est le **second scénario** et les **2 sièges**. Détail → §0.47. |
 | **§0.50** | Non-conformité **01.07** — travail de suite | 🟠 **OUVERT** (la correction moteur, elle, est mergée) | **7** | ✅ **SOLDÉE le 2026-08-02** — les deux résidus sont traités : (1) le contrat de `battle_shocked` est **tranché en lecture STRICTE**, les 7 `get(..., False)` migrés en `require_key` ; (2) la 3ᵉ lecture d'OC du frontend (journal d'événements de `BoardReplay.tsx`) diffère l'instantané moteur au lieu de recompter. Détail → §0.50. |
 | **§0.53** | Refonte du panel de bots — les adversaires ignoraient la condition de victoire | 🟢 **LIVRÉ ET MERGÉ** — plus aucun chantier ouvert (arbitrage du 2026-08-02) | — (à lire avant d'interpréter tout win-rate) | 🟢 **ARBITRAGE UTILISATEUR DU 2026-08-02 — (a) et (b) SONT SANS OBJET JUSQU'À LA DÉMO MÉTIER** : le travail porte sur **2 rosters seulement**, donc ni les matrices de matchups par roster ni le recalibrage des seuils de gate ne sont d'actualité. **Ne pas les re-signaler comme des chantiers ouverts.** Reste vrai et à retenir : (c) **aucun win-rate antérieur au 2026-07-30 n'est comparable** à un win-rate postérieur. ⏳ Le panel a **encore évolué depuis** : un **cinquième bot `ValueTradeBot`** a été ajouté, `bot_eval_weights` = `control` 0.40 / `value_trade`, `adaptive`, `greedy`, `defensive` 0.15 / `tactical` 0. Détail → §0.53 (en §0hist). |
@@ -1004,53 +1004,109 @@ un flux mais **comptaient** : `cache_miss_full_build`, `valid_hex_set_mismatch`,
 `incremental_update`, `incremental_failed`. Ces quatre issues mesurent un **coût** (un `full_build`
 reconstruit toutes les expositions LoS de la zone ; un incrémental ne touche que le delta d'une
 pose) et n'étaient visibles **que sous `--debug`, donc jamais sur un run réel** — la famille §0.22.
-- `ActionDecoder.DEPLOYMENT_CACHE_OUTCOMES` + `empty_deployment_cache_counts()` (source unique de
-  la forme) ; `_record_deployment_cache_outcome` lit le dict en `require_key` : un `game_state`
-  qui n'a pas traversé `reset` **lève** au lieu de compter dans le vide.
-- Remise à zéro **au même endroit que la purge du cache** (`w40k_core.reset`) — les séparer
-  laisserait un compteur cumuler entre épisodes (§0.42).
+- `ActionDecoder.DEPLOYMENT_CACHE_OUTCOMES`, scindée en **deux sous-familles DÉCLARÉES**
+  (`INCREMENTAL_CACHE_OUTCOMES` / `FULL_BUILD_CACHE_OUTCOMES`) : le consommateur sommait au
+  départ les reconstructions par soustraction (`total − incremental`), ce qui aurait classé en
+  rebuild toute 5ᵉ issue qui n'en serait pas une — sur une courbe publiée que personne ne
+  re-dérive. Un test vérifie que les deux familles **partitionnent** l'énumération.
+- **Attribut d'INSTANCE du décodeur** (`self._deployment_cache_counts`), remis à zéro dans
+  `reset_episode_caches` avec les autres caches d'épisode. Le seul appelant du cache est interne
+  au décodeur, qui a déjà son hook d'épisode : faire transiter un compteur par le `game_state`
+  contaminait son CONTRAT avec une préoccupation d'instrumentation — au point qu'une doublure de
+  `test_action_decoder` avait dû porter la clé pour un chemin sans rapport avec le déploiement.
 - Recopie dans `episode_tactical_data` à la terminaison, comme `shots_fired` depuis `action_logs`.
 - Trois courbes : `perf/a_deploy_cache_full_build_rate` (la courbe à surveiller — vers 1.0, le
   cache ne sert plus à rien), `perf/b_deploy_cache_wasted_rate` (l'incrémental payé **puis jeté**,
   le seul travail purement perdu), `perf/c_deploy_cache_lookups`.
+- Les **trois branches de reconstruction** (même bloc de 7 lignes recopié 3×) sont un
+  `_full_rebuild(cause)` local : sans lui, toute évolution demandait trois éditions dont une
+  pouvait s'oublier en silence — l'argument « axe B » appliqué au code qu'il instrumente.
 - Au passage : `episode_tactical_data` était écrit **deux fois mot pour mot** (`__init__` et
   `reset`) — remplacé par `_empty_episode_tactical_data()`, sans quoi la clé ajoutée à un site et
   pas à l'autre aurait levé au premier épisode du chemin oublié.
 
 **B+C — `engine/debug_trace.py`, point d'émission unique à canaux.** Les 37 sites sont migrés
 (`W40KEngine.step` → `CH_STEP`, boucles bot → `CH_BOT_LOOP`, cache → `CH_DEPLOY_CACHE`,
-construction du run → `CH_TRAIN`) ; `train._debug_train_marker` n'est plus qu'un appel à `trace`.
-Sélection par `W40K_TRACE=step,deploy_cache` ; variable absente = tout (comportement historique de
-`--debug`), `none` = rien, **nom inconnu = lève au chargement**.
+construction du run → `CH_TRAIN`). Sélection par `W40K_TRACE=step,deploy_cache` ; variable absente
+= tout (comportement historique de `--debug`), `none` = rien, **nom inconnu = lève**.
+La valeur est validée **au chargement** (une faute de frappe échoue avant que le run ne démarre)
+mais **PAS mémoïsée** — elle reste relue à chaque appel. C'est le patron déjà retenu par
+[`engine/mask_verification.py`](../../engine/mask_verification.py) pour `W40K_MASK_VERIFY`, avec
+sa raison écrite : « sinon les tests ne pourraient plus l'armer dynamiquement ».
 ⚠️ **La règle qui fait tenir l'ensemble : jamais de f-string en argument de `trace`** — elle serait
 évaluée avant l'appel, donc hors garde, et déplacerait le coût sur le chemin de production. C'est
 la seule façon dont cette livraison peut se dégrader, et elle est verrouillée par analyse AST.
+`train._debug_train_marker` est un **RELAIS** `(fmt, *args)`, pas un helper qui reçoit un message
+déjà construit — cf. le trou décrit plus bas.
 
 **D** — `self.debug_mode` remplace `game_state.get("debug_mode")` sur le chemin de `step` (le dict
 n'est alimenté que depuis l'attribut : vérifié, aucun écrivain externe, aucune divergence possible).
+Les six sites de `step` sont **gardés** : leurs arguments sont des `dict.get`, donc évalués même
+debug éteint (+0,31 µs/step mesuré, ~0,03 % d'un step — corrigé par propreté, pas par performance).
+La garde de canal ne subsiste que là où elle évite un `require_key` ; ailleurs `trace` suffit, sa
+première instruction étant cette même garde.
 
-**Verrous** — `tests/unit/engine/test_debug_trace_guard.py` (14) et
-`test_deployment_cache_counters.py` (5) :
+**Verrous** — `tests/unit/engine/test_debug_trace_guard.py` (**16**) et
+`test_deployment_cache_counters.py` (**5**) :
 - `step` complet en `debug_mode=False` → **zéro octet sur `stdout`** (le test réclamé ci-dessus) ;
-- **analyse AST des 4 fichiers tracés** : aucun appel `trace(...)` ne passe une f-string, un `%`
-  ou un `+` comme format. **Contre-épreuve faite** : f-string réintroduite sur un site → ROUGE en
-  nommant la ligne ; rétablie → vert.
-- compteurs : **contre-épreuve faite** — l'init de `reset` remise en `setdefault` → ROUGE
+- **analyse AST** : aucun appel à `trace` — ni à ses **relais déclarés** — ne passe une f-string,
+  un `%`, un `+` **ni le moindre mot-clé** comme format. Les fichiers analysés sont **DÉCOUVERTS**
+  par leur import de `engine.debug_trace`, pas listés à la main : une liste-miroir rétrécit en
+  silence dès qu'un cinquième fichier se met à tracer. **Contre-épreuves faites** : f-string
+  réintroduite → ROUGE en nommant la ligne ; `flush=True` réintroduit → ROUGE ; retirés → vert.
+- compteurs : **contre-épreuve faite** — la remise à zéro changée en `setdefault` → ROUGE
   (« 10 après reset contre 10 accumulés ») ; rétablie → vert.
 - contre le VERT VACANT : le fichier de compteurs tourne sur un scénario `deployment_type: active`
   réel et **exige que le compteur bouge** — le harnais habituel démarre en placement fixe et ne
-  consulte jamais ce cache (limite déjà constatée en §0.56).
+  consulte jamais ce cache (limite déjà constatée en §0.56). La fixture partagée est
+  `make_active_deployment_engine` (`tests/unit/engine/conftest.py`).
 
-📌 **Deux faits que seule l'EXÉCUTION a donnés** (aucun n'était visible en lecture) :
+📌 **Trois faits que seule l'EXÉCUTION a donnés** (aucun n'était visible en lecture) :
 1. `reset` ne laisse pas les compteurs à zéro : **l'observation initiale consulte déjà le cache**
    (§0.40), exactement une fois, par un `full_build_cold`. C'est cette signature qui est
    verrouillée — pas un « == 0 » qui aurait été faux.
 2. `W40K_TRACE=` (définie mais **vide**) éteignait TOUTES les traces en silence — le défaut même
    que ce module existe pour rendre impossible. Elle lève désormais, en nommant la sortie voulue.
+3. 🔴 **Le taux de reconstruction du cache est de 100 % sur le scénario mesuré**
+   (`bot-01` : `full_build_cold` 1, `full_build_hex_mismatch` 9, `incremental` **0**), à
+   **23-48 ms** la reconstruction. Cause lue dans le code : la validité du cache tient à
+   « le jeu d'hexes valides est-il identique ? », or `_get_valid_deployment_hexes` le calcule
+   **par unité à poser** (socle, formation) — deux unités ne donnent jamais le même jeu, le test
+   échoue à tous les coups, et `_update_deployment_scoring_cache_incremental`, situé APRÈS, n'est
+   jamais atteint. ⏳ **Non ouvert comme chantier** (arbitrage du 2026-08-03) : mesuré sur UN
+   scénario et un début d'épisode, la part réelle sur un run entier est inconnue — la phase de
+   déploiement ne dure que quelques dizaines de pas. `perf/a_deploy_cache_full_build_rate`
+   répondra seule au prochain run ; c'est très exactement ce que l'axe A existait pour rendre
+   visible.
 
-⚠️ **Reste vrai après cette livraison** : le test AST ne couvre que les **4 fichiers listés** dans
-`_TRACED_FILES`. Un cinquième fichier qui se mettrait à tracer doit y être ajouté, sinon le verrou
-devient décoratif pour lui. Un test vérifie en contrepartie qu'aucun canal déclaré n'est mort.
+🔍 **CE QUE LA PASSE `/simplify` DU 2026-08-03 A TROUVÉ** (4 revues parallèles : reuse,
+simplification, efficacité, altitude) — à lire, les deux premiers points sont des leçons :
+1. 🔴 **UN BUG, vu par 3 revues sur 4** : un `flush=True` était resté dans un appel `trace(...)`
+   migré depuis un `print`. `trace` n'accepte aucun mot-clé → **`TypeError` dès que le canal
+   `bot_loop` s'allume**, c'est-à-dire précisément quand on en a besoin. Ni le smoke ni les
+   tests ne l'atteignaient : le site est dans `BotControlledEnv`, **qu'un moteur nu ne traverse
+   jamais** — le motif « testé mais jamais appelé par le vrai chemin », ici retourné contre
+   l'outil de diagnostic lui-même. Le verrou AST ne regardait que le format ; il refuse
+   désormais tout mot-clé.
+2. 🔴 **UN VERROU QUI MENTAIT** : le canal `train` était **intégralement hors garde**.
+   `_debug_train_marker(message)` recevait des f-strings déjà construites par ses 12 appelants,
+   pendant que le test AST déclarait couvrir `ai/train.py`. Un garde qui n'inspecte que les
+   appels DIRECTS ne prouve rien sur les relais. Signature passée à `(fmt, *args)`, appelants
+   convertis, relais déclarés au garde.
+3. La cadence d'échantillonnage des boucles bot, écrite 7 fois à la main, avait **déjà divergé**
+   (`< 5` sur un site, `<= 5` sur les six autres) : une boucle traçait 4 itérations, les autres 5.
+   Devenue `_trace_sampled`.
+4. Divers : garde `if cache_lookups > 0` qui trouait la courbe un épisode sur deux
+   (`_emit_windowed` publie une moyenne de FENÊTRE), `file=sys.stdout` (le défaut) et son import,
+   deux traces consécutives redondantes fusionnées.
+
+⚠️ **Limites qui subsistent, à connaître avant de faire confiance au verrou** :
+- le garde AST ne reconnaît que les **relais déclarés** (`trace`, `_debug_train_marker`). Un
+  nouveau wrapper autour de `trace` qui ne serait pas ajouté à cette liste rouvrirait exactement
+  le trou du point 2 ci-dessus. La découverte des FICHIERS, elle, est automatique.
+- il vérifie la **forme des appels**, pas qu'ils soient appelables : c'est un test d'exécution du
+  canal concerné qui aurait attrapé le `flush=True`, et il n'y en a pas pour `bot_loop` (le site
+  vit dans `BotControlledEnv`, hors de portée d'un moteur nu).
 
 <a id="s0.47"></a>
 ### 0.47 Relecture T2→T5 (dette §0.19) — 9 écarts, dont un outil d'éval au masque périmé — 🟠 OUVERT : É1, É2, É3, É4, É6 ✅ LIVRÉS ET MERGÉS ; **É8 EST TOMBÉ** ; restent É5, É7, É9 (mergés le 2026-07-29, vérifié le 2026-08-02)
