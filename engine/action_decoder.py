@@ -102,8 +102,11 @@ class ActionDecoder:
         # (`env_wrappers`, `pve_controller`, `w40k_core`) : ce site etait le dernier a la lire
         # depuis la config.
         self.total_action_size = TOTAL_ACTION_SIZE
+        # Clé : (déployeur, hexes de référence, signature de terrain). La signature de terrain
+        # porte les murs ET les areas obscurantes (`deployment_los_terrain_signature`) — sans
+        # elles, deux terrains aux mêmes murs partageaient ce cache et le fichier disque.
         self._deployment_potential_los_cache: Dict[
-            tuple[int, tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]],
+            tuple[int, tuple[tuple[int, int], ...], tuple],
             Dict[tuple[int, int], int],
         ] = {}
         self._wall_hexes_cache: tuple[frozenset, int] | None = None
@@ -207,18 +210,55 @@ class ActionDecoder:
         """
         return batch_ground_hex_can_see(game_state, from_hex, to_hexes)
 
+    @staticmethod
+    def deployment_los_terrain_signature(
+        game_state: Dict[str, Any]
+    ) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[str, tuple[tuple[int, int], ...]], ...]]:
+        """Ce dont la LoS de déploiement DÉPEND dans le terrain : les murs ET les areas obscurantes.
+
+        SOURCE UNIQUE de la clé de cache des expositions potentielles (mémoire et disque). Elle
+        était réduite aux MURS, ce qui était vrai du tracé 2D d'avant V11 §0.64 et faux depuis :
+        `deployment_los` applique aussi 13.10. Deux terrains aux mêmes murs et aux areas
+        obscurantes différentes partageaient donc le même fichier `.cache/` — et le second
+        relisait en silence, pour toujours, les valeurs du premier. Cas réel du dépôt :
+        `terrain-mc1.json` et `terrain-train-01.json` ont des `walls` au digest IDENTIQUE.
+        Aucune version de modèle ne peut rattraper ça : le modèle n'a pas changé, c'est la clé
+        qui ne décrivait pas ce que le modèle lit.
+
+        Les areas viennent de `_get_obscuring_area_sets`, ce que la LoS lit RÉELLEMENT — pas du
+        JSON brut, qui porte aussi des champs (`floors`) dont le tracé au sol ne dépend pas.
+        """
+        from engine.phase_handlers.shooting_handlers import _get_obscuring_area_sets
+
+        walls: List[tuple[int, int]] = []
+        for raw_hex in require_key(game_state, "wall_hexes"):
+            if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
+                walls.append((int(raw_hex[0]), int(raw_hex[1])))
+            elif isinstance(raw_hex, dict):
+                walls.append((int(require_key(raw_hex, "col")), int(require_key(raw_hex, "row"))))
+            else:
+                raise TypeError(f"Invalid wall hex format: {raw_hex}")
+        wall_signature = tuple(sorted(walls))
+        obscuring_signature = tuple(
+            (str(area_id), tuple(sorted((int(c), int(r)) for c, r in hex_set)))
+            for area_id, hex_set in sorted(
+                _get_obscuring_area_sets(game_state), key=lambda item: str(item[0])
+            )
+        )
+        return wall_signature, obscuring_signature
+
     def _get_deployment_potential_los_cache_file_path(
         self,
         current_deployer: int,
         enemy_los_reference_hexes: List[tuple[int, int]],
-        wall_signature: List[tuple[int, int]],
+        terrain_signature: tuple,
     ) -> str:
         """Return deterministic shared cache file path for deployment potential LoS."""
         cache_payload = (
             self.DEPLOYMENT_LOS_MODEL_VERSION,
             int(current_deployer),
             tuple(enemy_los_reference_hexes),
-            tuple(sorted(wall_signature)),
+            terrain_signature,
         )
         cache_digest = hashlib.sha256(repr(cache_payload).encode("utf-8")).hexdigest()
         project_root = os.path.dirname(os.path.dirname(__file__))
@@ -1272,26 +1312,19 @@ class ActionDecoder:
             "enemy_pool_hexes_n=%s enemy_los_reference_hexes_n=%s",
             len(enemy_pool_hexes), len(enemy_los_reference_hexes),
         )
-        raw_wall_hexes = require_key(game_state, "wall_hexes")
-        wall_signature: List[tuple[int, int]] = []
-        for raw_hex in raw_wall_hexes:
-            if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
-                wall_signature.append((int(raw_hex[0]), int(raw_hex[1])))
-            elif isinstance(raw_hex, dict):
-                wall_signature.append(
-                    (int(require_key(raw_hex, "col")), int(require_key(raw_hex, "row")))
-                )
-            else:
-                raise TypeError(f"Invalid wall hex format: {raw_hex}")
+        # Murs ET areas obscurantes : les DEUX bloqueurs que `deployment_los` applique depuis
+        # §0.64. La même signature sert la clé mémoire et la clé disque — les séparer, c'est
+        # rouvrir la possibilité qu'une seule des deux soit corrigée.
+        terrain_signature = self.deployment_los_terrain_signature(game_state)
         topology_key = (
             int(current_deployer),
             tuple(enemy_los_reference_hexes),
-            tuple(sorted(wall_signature)),
+            terrain_signature,
         )
         potential_los_cache_file_path = self._get_deployment_potential_los_cache_file_path(
             current_deployer=current_deployer,
             enemy_los_reference_hexes=enemy_los_reference_hexes,
-            wall_signature=wall_signature,
+            terrain_signature=terrain_signature,
         )
         if topology_key not in self._deployment_potential_los_cache:
             if os.path.exists(potential_los_cache_file_path):

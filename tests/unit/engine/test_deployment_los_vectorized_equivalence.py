@@ -206,6 +206,68 @@ def test_le_trace_hex_ne_produit_jamais_de_cellule_en_double(make_active_deploym
     assert verifiees > 300, f"{verifiees} paires verifiees : test creux"
 
 
+def test_deux_terrains_aux_memes_murs_ne_partagent_pas_le_cache_potentiel(
+    make_active_deployment_engine,
+):
+    """La clé du cache des expositions POTENTIELLES doit porter l'obscuring, pas que les murs.
+
+    Trouvé par `/code-review` sur la livraison §0.65. La clé (mémoire ET fichier `.cache/`) ne
+    retenait que les MURS — vrai du tracé 2D d'avant §0.64, faux depuis que `deployment_los`
+    applique 13.10. Deux terrains aux mêmes murs et aux areas obscurantes différentes se
+    partageaient donc le fichier : le second relisait, en silence et pour toujours, les
+    expositions du premier. Ce n'est pas théorique — `terrain-mc1.json` et
+    `terrain-train-01.json` ont des `walls` au digest IDENTIQUE (ils ne diffèrent que par
+    `floors`), et l'énoncé du chantier annonce l'arrivée de nouveaux terrains.
+
+    Aucune version de modèle ne peut rattraper ce défaut : le modèle n'a pas changé, c'est la
+    clé qui ne décrivait pas ce que le modèle lit.
+
+    Le test CONSTRUIT la situation : mêmes murs, une area obscurante déplacée.
+    """
+    engine = make_active_deployment_engine(seed=1)
+    game_state = engine.game_state
+    decoder = engine.action_decoder
+    deployer = int(game_state["deployment_state"]["current_deployer"])
+    refs = decoder._build_enemy_los_reference_hexes(
+        decoder._get_enemy_deployment_pool_hexes(game_state, deployer)
+    )
+
+    def _cle_et_chemin():
+        signature = decoder.deployment_los_terrain_signature(game_state)
+        chemin = decoder._get_deployment_potential_los_cache_file_path(
+            current_deployer=deployer,
+            enemy_los_reference_hexes=refs,
+            terrain_signature=signature,
+        )
+        return signature, chemin
+
+    murs_avant = {tuple(map(int, h)) for h in game_state["wall_hexes"]}
+    signature_avant, chemin_avant = _cle_et_chemin()
+
+    obscurantes = [a for a in game_state["terrain_areas"] if a.get("obscuring")]
+    assert obscurantes, "terrain sans area obscurante : le test ne construit pas sa situation"
+    cible = obscurantes[0]
+    cible["hexes"] = [[int(c) + 3, int(r) + 3] for c, r in cible["hexes"]]
+    # Caches DÉRIVÉS du terrain : sans cette purge, le déplacement ne serait pas vu — et le
+    # test observerait sa propre inertie au lieu de la clé.
+    for cle in ("_obscuring_area_sets_cache", "_obscuring_hex_to_area_cache",
+                "_los_blocking_grids_cache"):
+        game_state.pop(cle, None)
+
+    murs_apres = {tuple(map(int, h)) for h in game_state["wall_hexes"]}
+    assert murs_apres == murs_avant, (
+        "le test a bouge les murs : il ne prouverait plus que c'est l'OBSCURING qui discrimine"
+    )
+    signature_apres, chemin_apres = _cle_et_chemin()
+    assert signature_apres != signature_avant, (
+        "signature de terrain identique apres deplacement d'une area obscurante : deux "
+        "terrains aux memes murs se partageraient le cache"
+    )
+    assert chemin_apres != chemin_avant, (
+        f"meme fichier de cache disque pour deux obscurings differents : {chemin_avant}"
+    )
+
+
 def test_le_deploiement_n_alimente_plus_le_cache_de_paires(make_active_deployment_engine):
     """`hex_los_cache` ne doit plus être rempli par le déploiement (V11 §0.64, suite).
 
