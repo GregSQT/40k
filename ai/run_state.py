@@ -1,15 +1,20 @@
 """Etat de run d'un modele — combien d'episodes il a DEJA joues.
 
 POURQUOI (V11 §0.58).
-Trois rampes sont pilotees par un compteur d'episodes : `learning_rate`, `ent_coef`, et le mode de
-deploiement du moteur (plus `deployment_random_mix`). Toutes repartaient de zero a chaque reprise
-(`--append`, `--resume-from`) et a chaque chunk de curriculum, parce que rien ne survivait au
-processus : le `.zip` ne persiste que `num_timesteps`.
+Le mode de deploiement du moteur (plus `deployment_random_mix`) est une rampe pilotee par un
+compteur d'episodes, et elle repartait de zero a chaque reprise (`--append`, `--resume-from`)
+parce que rien ne survivait au processus : le `.zip` ne persiste que `num_timesteps`. Consequence
+mesurable : la part d'episodes joues en deploiement actif n'atteignait jamais `active_ratio_end`,
+donc l'agent etait note sur des parties a deployer apres un entrainement qui n'avait jamais
+atteint le regime prevu.
 
-Consequences mesurables : un modele deja converge repartait a son learning rate et a son entropie
-INITIAUX — la recette exacte du catastrophic forgetting que ce projet surveille — et la part
-d'episodes joues en deploiement actif n'atteignait jamais `active_ratio_end`, donc l'agent etait
-note sur des parties a deployer apres un entrainement qui n'avait jamais atteint le regime prevu.
+CE COMPTEUR NE PILOTE PAS `learning_rate`, `ent_coef` NI LA RAMPE DE SELF-PLAY (decision
+utilisateur du 2026-08-02, verrouillee par
+`test_regime_ramps_start_from_this_run_not_from_the_model_lifetime`). Ce sont des rampes de
+REGIME : une phase 2 est un profil INDEPENDANT lance en `--append`, son `learning_rate.initial`
+et son warmup de self-play doivent s'appliquer. Comptees depuis la vie du modele, elles seraient
+saturees des le premier episode. Le compteur sert donc a la rampe de deploiement et au compte
+d'episodes persiste (axe TensorBoard, barre de progression, cible du resume final).
 
 CE COMPTEUR N'EST PAS DERIVE DE `num_timesteps`. La longueur d'un episode varie du simple au
 triple selon le scenario et l'issue : une conversion pas -> episodes produirait un chiffre invente
@@ -65,8 +70,8 @@ def load_run_state(model_path: str) -> int:
             f"Etat de run introuvable : {path}\n"
             f"Le modele '{os.path.basename(model_path)}' a ete entraine avant que le nombre "
             "d'episodes ne soit persiste, ou son fichier compagnon a ete perdu. Reprendre sans "
-            "lui remettrait learning_rate, ent_coef et la rampe de deploiement a leur valeur de "
-            "DEPART sur un modele deja converge (catastrophic forgetting). Repartir avec `--new`."
+            "lui remettrait la rampe de deploiement a `active_ratio_start` et repartirait d'un "
+            "compte d'episodes nul sur un modele deja entraine. Repartir avec `--new`."
         )
     with open(path, "r", encoding="utf-8") as handle:
         payload = json.load(handle)

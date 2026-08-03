@@ -7,7 +7,8 @@ Un modele entraine n'est pas un fichier, c'en est TROIS :
     model_<agent>_run_state.json      les episodes deja joues     (V11 §0.58)
 
 Les deux compagnons sont indispensables pour REPRENDRE : sans le pkl la reprise leve, sans
-l'etat de run elle relancerait toutes les rampes par-episode depuis leur valeur de depart.
+l'etat de run elle relancerait la rampe de deploiement depuis `active_ratio_start` et repartirait
+d'un compte d'episodes nul (cf. ai/run_state.py pour ce que ce compteur ne pilote PAS).
 
 Ce module existe parce que la liste etait recopiee a la main sur chaque site qui manipule un
 modele — enumeration canonique, rotation des checkpoints, promotion `--resume-from`, copie du

@@ -208,6 +208,9 @@ def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pyte
                 ),
                 config={"controlled_player": 0},
                 game_state={"units": []},
+                # Le worker aligne son backstop sur le plafond du MOTEUR (V11 §0.61) : la
+                # doublure porte ce contrat au lieu de le contourner.
+                _get_episode_step_limit=lambda: 500,
             )
             self._episode = -1
             self._closed = False
@@ -376,6 +379,8 @@ def test_eval_worker_task_attaches_step_logger(monkeypatch: pytest.MonkeyPatch) 
                 ),
                 config={"controlled_player": 0},
                 game_state={"units": [{"player": 0, "unitType": "Intercessor"}]},
+                # Le worker aligne son backstop sur le plafond du MOTEUR (V11 §0.61).
+                _get_episode_step_limit=lambda: 500,
             )
 
         def get_wrapper_attr(self, name):

@@ -642,6 +642,12 @@ def _eval_worker_task(
         env.engine.step_logger = config_params["step_logger"]
 
     wins, losses, draws = 0, 0, 0
+    # Troncatures rencontrees PENDANT L'EVAL. Sans elles, une boucle du moteur qui ne se
+    # reproduit qu'ici (`deterministic=True`, rosters du holdout) etait invisible : le moteur
+    # pose `winner = -1`, donc elle se comptait en NUL et le bilan de fin de run affichait
+    # « 0 troncature » — un feu vert faux, la classe de defaut que V11 §0.61 existe pour fermer.
+    # Ces episodes ne sont PAS des episodes d'entrainement : ils ne touchent pas `episode_count`.
+    truncations: List[Dict[str, Any]] = []
     # Faction jouee par l'agent, relevee A CHAQUE episode : un roster tire au sort peut
     # changer de faction d'un reset a l'autre au sein d'une meme tache.
     faction_stats: Dict[str, Dict[str, int]] = {}
@@ -653,7 +659,17 @@ def _eval_worker_task(
         episode_faction = _agent_faction_from_engine(env.engine)
         done = False
         step_count = 0
+        # BACKSTOP, et il ne peut PAS preempter le garde moteur : les deux compteurs n'ont pas
+        # la meme unite. Un step gym vaut PLUSIEURS steps moteur (tour du bot, WAIT forces —
+        # cf. `BotControlledEnv.step`), mesure a 1,3-1,4 sur ce depot, donc le compteur du
+        # moteur atteint SON plafond avant que celui-ci n'atteigne le sien. Aucun ajustement
+        # n'est donc necessaire, et en poser un serait du code pour un scenario qui n'existe pas.
+        #
+        # Ce backstop sert le cas ou le moteur n'a AUCUN plafond d'episode : duree illimitee
+        # (Endless Duty), ou `_get_episode_step_limit` rend None. Le releve est garde pour le
+        # diagnostic — savoir lequel des deux gardes etait arme change ce qu'on va chercher.
         max_steps_per_episode = int(require_key(task, "max_steps_per_episode"))
+        engine_episode_limit = env.engine._get_episode_step_limit()
         while not done and step_count < max_steps_per_episode:
             model_obs = _worker_obs_normalizer(obs) if _worker_obs_normalizer else obs
             # `get_action_masks` de sb3_contrib = le chemin de PPO : il resout `action_masks` sur
@@ -685,8 +701,45 @@ def _eval_worker_task(
             )
             action_scalar = int(np.asarray(action).flat[0])
             obs, reward, terminated, truncated, info = env.step(action_scalar)
+            if truncated:
+                # Le payload traverse la frontiere de process avec le resultat de la tache.
+                truncations.append({
+                    "reason": require_key(info, "truncation_reason"),
+                    "bot_name": task["bot_name"],
+                    "scenario_name": _scenario_name_from_task(task),
+                    "episode_index": ep_idx,
+                    "episode_seed": ep_seed,
+                    "deterministic": bool(task.get("deterministic", True)),
+                    **require_key(info, "truncation_debug"),
+                })
             done = bool(terminated or truncated)
             step_count += 1
+        if not done:
+            # Le backstop a tire : le garde moteur ne pouvait pas (duree illimitee — il rend
+            # None) ou n'a pas suffi. La partie n'a PAS fini : la compter en defaite (ce que
+            # faisait `winner is None` en tombant dans le `else` plus bas) attribue au modele un
+            # resultat qu'il n'a pas produit et efface l'incident. Nul + trace, comme le moteur.
+            truncations.append({
+                "reason": "eval_loop_cap",
+                "bot_name": task["bot_name"],
+                "scenario_name": _scenario_name_from_task(task),
+                "episode_index": ep_idx,
+                "episode_seed": ep_seed,
+                "deterministic": bool(task.get("deterministic", True)),
+                # `gym_*` et non `steps`/`step_limit` : ces deux cles-la portent des STEPS
+                # MOTEUR dans les lignes `episode_steps_limit` du meme journal. Un step gym en
+                # vaut plusieurs — les melanger sous un nom commun rend les lignes
+                # incomparables, et c'est un journal fait pour etre relu.
+                "gym_steps": step_count,
+                "gym_step_limit": max_steps_per_episode,
+                "engine_step_limit": engine_episode_limit,
+            })
+            draws += 1
+            faction_bucket = faction_stats.setdefault(episode_faction, {"wins": 0, "total": 0})
+            faction_bucket["total"] += 1
+            if progress_callback is not None:
+                progress_callback()
+            continue
         # Pas de `info.get("winner")` : un `None` de repli n'est ni `controlled_player` ni -1,
         # l'episode serait compte en DEFAITE alors que la donnee manque. Le moteur ecrit
         # toujours la cle dans `W40KEngine.step`, partie terminee comme partie en cours :
@@ -709,6 +762,7 @@ def _eval_worker_task(
     env.close()
     return {
         "wins": wins, "losses": losses, "draws": draws,
+        "truncations": truncations,
         "failed_episodes": 0,
         "shoot_stats": shoot_stats,
         "bot_name": task["bot_name"],
@@ -739,6 +793,8 @@ def _failed_task_result(
         "wins": 0,
         "losses": 0,
         "draws": 0,
+        # Cle PRESENTE et vide, jamais absente : meme regle que `faction_stats` ci-dessous.
+        "truncations": [],
         "failed_episodes": int(require_key(task, "n_episodes")),
         "bot_name": require_key(task, "bot_name"),
         "scenario_name": scenario_name,
@@ -1341,6 +1397,13 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             r.get("shoot_stats") for r in bot_results
             if r.get("shoot_stats")
         ]
+
+    # Troncatures rencontrees pendant CETTE evaluation, toutes taches confondues. Le moteur pose
+    # `winner = -1` sur une troncature, donc sans cette remontee elle se comptait en NUL et
+    # n'existait nulle part ailleurs (V11 §0.61).
+    results["truncations"] = [
+        entry for r in results_list for entry in require_key(r, "truncations")
+    ]
 
     scenario_bot_stats: Dict[str, Dict[str, Dict[str, float]]] = {}
     for r in results_list:

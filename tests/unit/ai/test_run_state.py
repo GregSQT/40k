@@ -1,9 +1,9 @@
 """Verrou de l'état de run (`ai/run_state.py`) — les rampes reprennent, elles ne redémarrent pas.
 
-Trois rampes se rapportent à un compteur d'épisodes : `learning_rate`, `ent_coef`, et le mode de
-déploiement du moteur. Toutes repartaient de leur valeur de DÉPART à chaque `--append` : un modèle
-déjà convergé revenait à son learning rate initial (catastrophic forgetting), et la part
-d'épisodes joués en déploiement actif n'atteignait jamais `active_ratio_end` (V11 §0.58).
+Le mode de déploiement du moteur repartait de `active_ratio_start` à chaque `--append` : la part
+d'épisodes joués en déploiement actif n'atteignait jamais `active_ratio_end` (V11 §0.58). Le
+compteur ne pilote PAS `learning_rate`, `ent_coef` ni le self-play — rampes de RÉGIME, propres à
+chaque run (`test_regime_ramps_start_from_this_run_not_from_the_model_lifetime`).
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def test_save_then_load_roundtrip(tmp_path) -> None:
 
 
 def test_missing_state_raises_instead_of_assuming_zero(tmp_path) -> None:
-    """LE point du mécanisme : supposer 0 relancerait les trois rampes sans rien signaler."""
+    """LE point du mécanisme : supposer 0 relancerait la rampe de déploiement sans rien signaler."""
     model = str(tmp_path / "model_agent.zip")
     with pytest.raises(FileNotFoundError, match="--new"):
         load_run_state(model)
@@ -263,4 +263,158 @@ def test_the_start_index_reaches_the_engine_and_not_the_self_play_wrapper() -> N
     assert "episode_start_index" not in wrapper_call, (
         "la rampe de self-play appartient au régime de CE run : son warmup ne doit pas être "
         "déjà consommé par un run précédent"
+    )
+
+
+def test_a_new_run_never_inherits_the_previous_offset(tmp_path) -> None:
+    """`--new` GAGNE sur `--append` : un modèle NEUF ne reprend jamais le compte de l'ancien.
+
+    Les deux drapeaux sont des `store_true` INDÉPENDANTS et rien ne les rend exclusifs. Sans cette
+    règle, `--new --append` démarrait un modèle neuf avec la rampe de déploiement déjà à
+    `active_ratio_end`, pour des poids initialisés au hasard.
+
+    Le prologue est joué directement : c'est lui qui porte la règle, pas l'ordre de deux appels
+    dans les trois chemins d'entraînement (un ordre ne se vérifie pas, il se re-casse au refactor
+    suivant). L'archivage du run précédent est vérifié dans la foulée — même appel, même contrat.
+    """
+    from ai.train import prepare_run_artifacts
+
+    models_root = str(tmp_path / "models")
+    model_path, offset, start_index = prepare_run_artifacts(
+        models_root, "ArmageddonAgent", new_model=False, append_training=False, n_envs=4,
+        log_fn=lambda _m: None,
+    )
+    open(model_path, "wb").close()
+    save_run_state(model_path, 200_000)
+
+    # Reprise nominale : l'offset remonte, converti en index PAR ENVIRONNEMENT.
+    _, offset, start_index = prepare_run_artifacts(
+        models_root, "ArmageddonAgent", new_model=False, append_training=True, n_envs=4,
+        log_fn=lambda _m: None,
+    )
+    assert (offset, start_index) == (200_000, 50_000)
+
+    # `--new --append` : le compte de l'ancien ne doit PAS suivre, et l'ancien doit être archivé.
+    _, offset, start_index = prepare_run_artifacts(
+        models_root, "ArmageddonAgent", new_model=True, append_training=True, n_envs=4,
+        log_fn=lambda _m: None,
+    )
+    assert (offset, start_index) == (0, 0), (
+        "un modèle NEUF a hérité du compte d'épisodes de l'ancien"
+    )
+    assert not os.path.exists(get_run_state_path(model_path)), (
+        "`--new` doit écarter les artefacts du run précédent"
+    )
+
+
+def test_a_new_run_ignores_the_offset_even_without_archiving(tmp_path, monkeypatch) -> None:
+    """La règle « `--new` gagne » ne DÉPEND PAS de l'archivage — c'est tout son intérêt.
+
+    L'archivage emporte `_run_state.json`, donc il suffirait à ramener l'offset à 0 : un test qui
+    joue les deux ensemble reste vert même si la règle disparaît. On neutralise donc l'archivage
+    pour observer la règle SEULE. Sans elle, l'exactitude du résultat tiendrait à l'ordre de deux
+    appels dans trois fonctions — un ordre ne se vérifie pas, il se re-casse au refactor suivant.
+    """
+    import ai.train as train
+
+    models_root = str(tmp_path / "models")
+    model_path, _, _ = train.prepare_run_artifacts(
+        models_root, "ArmageddonAgent", new_model=False, append_training=False, n_envs=1,
+        log_fn=lambda _m: None,
+    )
+    open(model_path, "wb").close()
+    save_run_state(model_path, 200_000)
+
+    monkeypatch.setattr(train, "archive_canonical_artifacts_for_new_run", lambda *_a, **_k: [])
+    _, offset, start_index = train.prepare_run_artifacts(
+        models_root, "ArmageddonAgent", new_model=True, append_training=True, n_envs=4,
+        log_fn=lambda _m: None,
+    )
+
+    assert os.path.exists(get_run_state_path(model_path)), "l'archivage est bien neutralisé ici"
+    assert (offset, start_index) == (0, 0), (
+        "`--new` doit ignorer l'état de run par lui-même, pas parce que l'archivage l'a effacé"
+    )
+
+
+def test_the_prologue_creates_the_model_directory_on_every_path(tmp_path) -> None:
+    """Le `os.makedirs` était placé DANS le `if new_model` du chemin rotation : jamais joué en
+    `--append`, donc la première sauvegarde d'un run repris écrivait dans un dossier absent."""
+    from ai.train import prepare_run_artifacts
+
+    models_root = str(tmp_path / "models")
+    model_path, _, _ = prepare_run_artifacts(
+        models_root, "ArmageddonAgent", new_model=False, append_training=False, n_envs=1,
+        log_fn=lambda _m: None,
+    )
+    assert os.path.isdir(os.path.dirname(model_path))
+
+
+@pytest.mark.parametrize(
+    "func_name", ["create_model", "create_multi_agent_model", "train_with_scenario_rotation"]
+)
+def test_the_three_training_paths_share_the_prologue(func_name: str) -> None:
+    """Aucun des trois chemins ne rejoue le prologue à la main.
+
+    Vérifié sur la source, comme `test_the_start_index_reaches_the_engine_and_not_the_self_play_wrapper` :
+    les jouer demanderait un `config/scenario.json` généré et la construction réelle du modèle.
+    Ce prologue avait déjà divergé trois fois (un `makedirs` jamais joué en `--append`, un
+    `makedirs` en triple exemplaire, une annonce de reprise conditionnée différemment).
+    """
+    import inspect
+
+    import ai.train as train
+
+    source = inspect.getsource(getattr(train, func_name))
+    assert "prepare_run_artifacts(" in source
+    for open_coded in ("resume_episode_offset(", "archive_canonical_artifacts_for_new_run("):
+        assert open_coded not in source, (
+            f"{func_name} rejoue le prologue à la main ({open_coded}) au lieu d'appeler "
+            f"prepare_run_artifacts"
+        )
+
+
+def test_the_final_summary_target_is_cumulative_like_the_counter(monkeypatch) -> None:
+    """La cible du résumé final suit le compteur : CUMULATIVE, offset de reprise inclus.
+
+    `metrics_tracker.episode_count` est amorcé à l'offset (`initial_episode_count`). Comparée au
+    seul budget du run, la cible était franchie dès le 1er épisode d'un `--append` : le résumé
+    « final » de gating s'imprimait sur un run interrompu, indiscernable d'un run terminé.
+
+    Les deux rampes de RÉGIME sont vérifiées ici aussi, mais dans l'autre sens : elles NE
+    reçoivent PAS l'offset (cf. `test_regime_ramps_start_from_this_run_not_from_the_model_lifetime`).
+    """
+    import ai.train as train
+    from config_loader import get_config_loader
+
+    offset, total = 200000, 5000
+    captured: dict = {}
+
+    for name in ("LearningRateScheduleCallback", "EntropyScheduleCallback", "BotEvaluationCallback"):
+        def _spy(*_a, _name=name, **kwargs):
+            captured[_name] = kwargs
+            return object()
+        monkeypatch.setattr(train, name, _spy)
+
+    cfg = get_config_loader()
+    training_config = dict(cfg.load_agent_training_config("ArmageddonAgent", "x1_debug"))
+    training_config["total_episodes"] = total
+    training_config["_turn_step_limit"] = 100
+    training_config["model_params"] = {
+        "learning_rate": {"initial": 0.002, "final": 0.0002, "decay_fraction": 0.4},
+        "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.4},
+    }
+
+    train.setup_callbacks(
+        cfg, "/tmp/model_ArmageddonAgent.zip", training_config,
+        training_config_name="x1_debug", global_episode_offset=offset,
+        agent="ArmageddonAgent", rewards_config_name="ArmageddonAgent", silent_logs=True,
+    )
+
+    assert captured["BotEvaluationCallback"]["final_summary_target_episodes"] == offset + total
+    assert "initial_episode_count" not in captured["LearningRateScheduleCallback"], (
+        "le learning rate est une rampe de RÉGIME : elle repart à SON initial à chaque run"
+    )
+    assert "initial_episode_count" not in captured["EntropyScheduleCallback"], (
+        "l'entropie est une rampe de RÉGIME : elle repart à SON initial à chaque run"
     )

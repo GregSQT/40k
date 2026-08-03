@@ -2626,7 +2626,7 @@ class W40KEngine(gym.Env):
             else:
                 active_unit_id = None
             active_unit_name = None
-            shoot_diag = ""
+            shoot_debug: Optional[Dict[str, Any]] = None
             if active_unit_id is not None:
                 active_unit_id_str = str(active_unit_id)
                 active_unit = next((u for u in units if str(require_key(u, "id")) == active_unit_id_str), None)
@@ -2662,21 +2662,22 @@ class W40KEngine(gym.Env):
                         units_shot = require_key(self.game_state, "units_shot")
                         active_unit_in_units_shot = active_unit_id_str in [str(uid) for uid in units_shot]
 
-                        shoot_diag = (
-                            ", shoot_debug={"
-                            f"'active_in_pool': {active_unit_id_str in shoot_pool_ids}, "
-                            f"'active_in_units_shot': {active_unit_in_units_shot}, "
-                            f"'shoot_left': {active_unit.get('SHOOT_LEFT')}, "
-                            f"'current_shoot_nb': {active_unit.get('_current_shoot_nb')}, "
-                            f"'selected_weapon_index': {selected_weapon_index_raw}, "
-                            f"'selected_weapon_name': {selected_weapon_name}, "
-                            f"'valid_target_pool_count': {valid_target_pool_count}, "
-                            f"'valid_target_pool_sample': {valid_target_pool_sample}, "
-                            f"'shoot_activation_started': {active_unit.get('_shoot_activation_started')}, "
-                            f"'manual_weapon_selected': {active_unit.get('_manual_weapon_selected')}, "
-                            f"'shooting_with_close_quarters': {active_unit.get('_shooting_with_close_quarters')}"
-                            "}"
-                        )
+                        # Le DICT est la source ; le message console n'en est qu'un rendu.
+                        # L'inverse (formater une chaine puis la coller dans le payload JSON)
+                        # rendait illisible a la machine la seule cle qui compte en phase shoot.
+                        shoot_debug = {
+                            'active_in_pool': active_unit_id_str in shoot_pool_ids,
+                            'active_in_units_shot': active_unit_in_units_shot,
+                            'shoot_left': active_unit.get('SHOOT_LEFT'),
+                            'current_shoot_nb': active_unit.get('_current_shoot_nb'),
+                            'selected_weapon_index': selected_weapon_index_raw,
+                            'selected_weapon_name': selected_weapon_name,
+                            'valid_target_pool_count': valid_target_pool_count,
+                            'valid_target_pool_sample': valid_target_pool_sample,
+                            'shoot_activation_started': active_unit.get('_shoot_activation_started'),
+                            'manual_weapon_selected': active_unit.get('_manual_weapon_selected'),
+                            'shooting_with_close_quarters': active_unit.get('_shooting_with_close_quarters'),
+                        }
             move_pool = len(require_key(self.game_state, "move_activation_pool"))
             shoot_pool = len(require_key(self.game_state, "shoot_activation_pool"))
             charge_pool = len(require_key(self.game_state, "charge_activation_pool"))
@@ -2685,7 +2686,8 @@ class W40KEngine(gym.Env):
                 f"phase={phase}, scenario={scenario_name}, scenario_path={current_scenario}, "
                 f"player={current_player}, fight_subphase={fight_subphase}, "
                 f"active_unit_id={active_unit_id}, active_unit_name={active_unit_name}, "
-                f"move_pool={move_pool}, shoot_pool={shoot_pool}, charge_pool={charge_pool}{shoot_diag}, "
+                f"move_pool={move_pool}, shoot_pool={shoot_pool}, charge_pool={charge_pool}"
+                f"{', shoot_debug=' + repr(shoot_debug) if shoot_debug else ''}, "
                 f"last_action_debug={self.game_state.get('_last_action_debug')}). Forcing termination."
             )
             print(error_msg, flush=True)
@@ -2693,6 +2695,29 @@ class W40KEngine(gym.Env):
             add_debug_log(self.game_state, f"[MAX_STEPS LIMIT REACHED] {error_msg}")
             truncated = True
             info["truncation_reason"] = "episode_steps_limit"
+            # Le diagnostic TRAVERSE le VecEnv. Sans ca il n'existait que dans le `print` du
+            # worker — noye dans la console a n_envs=48, perdu au scroll — et dans
+            # `add_debug_log`, muet hors `debug_mode` et de toute facon local a ce process.
+            # Une troncature signale une BOUCLE dans le moteur : ce qu'il faut, c'est de quoi
+            # la reproduire. Cf. le lecteur dans ai/training_callbacks.py.
+            info["truncation_debug"] = {
+                "episode": episode,
+                "turn": turn,
+                "phase": phase,
+                "scenario": scenario_name,
+                "scenario_path": current_scenario,
+                "player": current_player,
+                "fight_subphase": fight_subphase,
+                "active_unit_id": active_unit_id,
+                "active_unit_name": active_unit_name,
+                "steps": _calls,
+                "step_limit": _episode_limit,
+                "move_pool": move_pool,
+                "shoot_pool": shoot_pool,
+                "charge_pool": charge_pool,
+                "shoot_debug": shoot_debug,
+                "last_action_debug": self.game_state.get("_last_action_debug"),
+            }
             info["winner"] = -1  # draw so eval does not skew win rate
             info["win_method"] = "step_limit"
             

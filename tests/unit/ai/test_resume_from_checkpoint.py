@@ -54,7 +54,7 @@ def _write_checkpoint(models_root, steps: int, with_stats: bool = True, with_run
         (models_root / "TestAgent" / f"ppo_checkpoint_{steps}_steps_vec_normalize.pkl").write_bytes(b"STATS")
     if with_run_state:
         # Second jumeau (V11 §0.58) : le compte d'episodes deja joues, sans lequel la reprise
-        # relancerait learning_rate, ent_coef et la rampe de deploiement depuis leur depart.
+        # relancerait la rampe de deploiement depuis `active_ratio_start`.
         (models_root / "TestAgent" / f"ppo_checkpoint_{steps}_steps_run_state.json").write_text(
             json.dumps({"episodes_trained": 12345}), encoding="utf-8"
         )

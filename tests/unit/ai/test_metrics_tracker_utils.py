@@ -13,6 +13,7 @@ from ai.metrics_tracker import (
     resolve_perf_windows,
     validate_perf_windows,
 )
+from ai.truncation_log import TruncationLog
 from config_loader import get_config_loader
 from engine.macro_intents import ACTION_FAMILIES
 
@@ -128,6 +129,9 @@ def _tracker_stub() -> W40KMetricsTracker:
     t.PERF_WINDOW_FAST = 1
     t.episode_count = 12
     t.step_count = 0
+    # `log_dir=None` : comptage sans journal. Ces tests verifient les courbes emises, pas la
+    # trace disque ; un vrai dossier ferait ecrire `truncations.jsonl` hors du tmp_path.
+    t.truncation_log = TruncationLog(None)
     t.win_rate_window = deque([1.0] * 12, maxlen=100)
     t.episode_reward_winner_pairs = deque(maxlen=200)
     t.all_episode_rewards = [1.0] * 12

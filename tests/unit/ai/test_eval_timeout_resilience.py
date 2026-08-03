@@ -57,6 +57,7 @@ def _results(
         "total_failed_episodes": failed,
         "total_timeout_episodes": timeout,
         "total_error_episodes": error,
+        "truncations": [],
         "eval_duration_seconds": duration,
         "total_episodes_played": 600,
         "combined": 0.42,
@@ -119,6 +120,7 @@ def test_timeout_logs_a_counter_and_no_win_rate_metric() -> None:
 
         def log_bot_evaluations(self, *_a: Any, **_k: Any) -> None:
             raise AssertionError("aucun win-rate tronque ne doit etre publie en metrique")
+
 
     callback.metrics_tracker = _Tracker()
 

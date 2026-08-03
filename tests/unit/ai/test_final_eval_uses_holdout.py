@@ -34,7 +34,8 @@ def test_final_bot_eval_passes_holdout_pool(monkeypatch: pytest.MonkeyPatch) -> 
 
     def _fake_evaluate_against_bots(**kwargs: Any) -> Dict[str, Any]:
         captured.update(kwargs)
-        return {"combined": 0.0}
+        # `truncations` est pose par evaluate_against_bots a chaque eval (V11 §0.61).
+        return {"combined": 0.0, "truncations": []}
 
     # `_run_final_bot_eval` importe la fonction en LAZY depuis `ai.bot_evaluation` :
     # c'est donc ce module-la qu'il faut patcher, pas l'espace de noms du callback.
@@ -46,6 +47,9 @@ def test_final_bot_eval_passes_holdout_pool(monkeypatch: pytest.MonkeyPatch) -> 
         training_callbacks.MetricsCollectionCallback
     )
     callback.controlled_agent = "ArmageddonAgent"
+    # `_run_final_bot_eval` route ses troncatures vers le tracker (V11 §0.61) ; ce test-ci n'en
+    # a pas, et un `None` explicite vaut mieux qu'un AttributeError sur une doublure muette.
+    callback.metrics_tracker = None
 
     training_config = {
         "callback_params": {"bot_eval_final": 2, "eval_deterministic": True}

@@ -251,6 +251,14 @@ CAUSE — établir avant de toucher
   → En MODE ASK, demander l'autorisation d'exécuter ; ne pas déduire pour éviter de demander.
 - Si mon énoncé du symptôme est FAUX ou incomplet, le dire et me contredire avec la preuve.
   Ne pas chercher uniquement là où je pointe. Une liste de soupçons n'est pas un verdict.
+- COROLLAIRE REVIEW (/code-review, /simplify, audit) : un finding est une hypothèse tant qu'il
+  n'a pas de SCÉNARIO D'ÉCHEC concret — entrées/état précis → sortie fausse, crash ou invariant
+  violé, sur un chemin réellement atteint en production. Sans ce scénario, le finding est ÉCARTÉ,
+  pas rétrogradé en « mineur ». Hors périmètre sauf demande explicite : nommage, découpage, style,
+  « on pourrait extraire », préférence d'architecture sur du code correct.
+- CRITÈRE D'ARRÊT : une review est finie quand il ne reste plus de finding AVEC scénario, pas
+  quand il ne reste plus de finding. Ne jamais relancer une review pour faire taire du goût — le
+  signaler si je demande une relance dont la passe précédente n'a rendu que du cosmétique.
 
 JUMEAU — le motif d'échec n°1 de ce dépôt
 - Ce dépôt est structuré en MIROIRS : tir/mêlée, move/charge/fight, IA/PvP, moteur/replay/analyzer,

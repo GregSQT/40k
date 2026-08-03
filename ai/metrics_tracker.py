@@ -32,11 +32,12 @@ DUAL TIER SYSTEM (41 Total Metrics):
 """
 
 import numpy as np
-from collections import deque
+from collections import Counter, deque
 from torch.utils.tensorboard.writer import SummaryWriter
 import os
 from typing import Any, Deque, Dict, List, Optional, Protocol, Sequence, Tuple, Tuple
 from shared.data_validation import require_key
+from ai.truncation_log import TruncationLog, agent_log_dir
 from config_loader import get_config_loader
 
 
@@ -223,7 +224,7 @@ class W40KMetricsTracker:
             perf_window, perf_window_fast
         )
         self.agent_key = agent_key
-        self.log_dir = os.path.join(log_dir, agent_key)
+        self.log_dir = agent_log_dir(log_dir, agent_key)
         self.writer: MetricsWriter = SummaryWriter(self.log_dir)
         self._setup_custom_scalars_layout()
 
@@ -265,6 +266,12 @@ class W40KMetricsTracker:
         # Episode tracking
         self.episode_count = initial_episode_count
         self.step_count = initial_step_count
+
+        # Troncatures : episodes coupes par le garde anti-runaway du moteur (V11 §0.61).
+        # Le COMPTE comme la TRACE appartiennent a ai/truncation_log.py, parce que le mode
+        # « eval seule » doit compter sans construire de tracker. Ce qui reste ici, c'est la
+        # COURBE — la seule part qui soit une metrique TensorBoard.
+        self.truncation_log = TruncationLog(self.log_dir)
         
 
         # L'accumulateur self.position_scores occupait cette place, avec log_position_score et
@@ -445,9 +452,68 @@ class W40KMetricsTracker:
         self.writer.add_scalar("thresholds/entropy_target_min", -2.0, step)
         self.writer.add_scalar("thresholds/entropy_target_max", -0.5, step)
 
+    @property
+    def truncation_counts(self) -> Dict[str, "Counter[str]"]:
+        """Compte des troncatures, ventile par portee puis par raison (cf. TruncationLog)."""
+        return self.truncation_log.counts
+
+    def _emit_truncation_curve(self) -> None:
+        """Courbe `00_critical/t_truncated_episodes` — emise a CHAQUE fin d'episode.
+
+        Ce qu'un tableau de bord doit dire ici, c'est « ce nombre doit valoir 0 ». Emise
+        seulement quand une troncature arrive, la courbe etait absente du cas nominal, donc
+        indiscernable d'une metrique jamais branchee. Comme toutes les autres courbes
+        `00_critical/`, elle porte un point par episode.
+
+        Portee ENTRAINEMENT seule : l'abscisse est `episode_count`, qui ne compte que ces
+        episodes-la. Le compte d'eval vit dans le bilan de fin de run, pas sur cet axe.
+
+        Le cumul est celui de CE run, pas du dossier : la remise a zero d'un `--append` se lit
+        comme ce qu'elle est, un nouveau run. L'historique inter-runs, lui, est dans
+        `truncations.jsonl`, dont chaque ligne porte son `run`.
+        """
+        self.writer.add_scalar(
+            '00_critical/t_truncated_episodes',
+            sum(self.truncation_counts["training"].values()),
+            self.episode_count,
+        )
+
+    def log_truncated_episode(self, reason: str, payload: Dict[str, Any]) -> None:
+        """Episode d'ENTRAINEMENT coupe par le garde anti-runaway (cf. ai/truncation_log.py).
+
+        `episode_count` avance : c'est ce compteur qui part dans `_run_state.json`, et le run,
+        lui, s'arrete sur la somme des `dones` — troncatures comprises. Ne pas l'incrementer
+        faisait reprendre la rampe de deploiement plus bas qu'elle n'etait arrivee.
+        Les courbes de reward et de longueur, elles, ne recoivent rien : l'episode n'a pas fini.
+
+        La courbe `00_critical/` reste unique, toutes raisons confondues.
+        """
+        self.episode_count += 1
+        self.truncation_log.record("training", reason, payload)
+        self._emit_truncation_curve()
+
+    def log_eval_truncations(self, entries: Sequence[Dict[str, Any]]) -> None:
+        """Troncatures relevees pendant une EVALUATION (gating ou holdout final).
+
+        Elles arrivent en LOT : l'eval tourne dans des process workers et ne remonte qu'a la fin
+        de la campagne. Sans cette route, une boucle qui ne se reproduit qu'en eval
+        (`deterministic=True`, rosters du holdout) etait invisible — le moteur pose `winner = -1`
+        sur une troncature, donc elle se comptait en NUL et le bilan affichait « 0 troncature ».
+        Un feu vert faux est pire que pas de bilan.
+
+        `episode_count` n'avance PAS : un episode d'eval n'est pas un episode joue par le modele
+        en apprentissage, et ce compteur est celui qui est persiste dans `_run_state.json`.
+        """
+        self.truncation_log.record_eval_batch(entries)
+
+    def truncation_summary_lines(self) -> List[str]:
+        """Bilan de fin de run. Seule facade : le compte et le journal restent internes."""
+        return self.truncation_log.summary_lines()
+
     def log_episode_end(self, episode_data: Dict[str, Any]):
         """Log core episode metrics - reward, win rate, and episode length"""
         self.episode_count += 1
+        self._emit_truncation_curve()
 
         # Extract data
         total_reward = require_key(episode_data, 'total_reward')
@@ -1348,6 +1414,11 @@ class W40KMetricsTracker:
           Cf. DEPLOY_SPLIT_SERIES pour le pourquoi de la ventilation.
           p_reward_deploy_{active,fixed}, q_obj_held_diff_deploy_{active,fixed},
           r_win_rate_deploy_{active,fixed}, s_deploy_active_share.
+        - `_emit_truncation_curve` : t_truncated_episodes, cumul des episodes coupes par le
+          garde anti-runaway du moteur. Emis a part, sur les DEUX fins d'episode : un episode
+          tronque ne passe pas par ce dashboard (il n'alimente aucune courbe de jeu), et un
+          episode normal doit quand meme poser son point, sans quoi la courbe n'existe pas
+          dans le cas nominal. Doit valoir 0 (V11 §0.61).
 
         NOTE: position_score a ete supprime (voir la trace dans __init__), pas deplace.
         `k_gradient_norm` a ete retire du dashboard (redondant avec h + i, cf. plus bas) ;

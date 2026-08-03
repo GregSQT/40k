@@ -1305,6 +1305,41 @@ def archive_canonical_artifacts_for_new_run(model_path: str, log_fn=print) -> li
             log_fn(f"   {os.path.basename(path)}")
     return moved
 
+
+def prepare_run_artifacts(
+    models_root: str,
+    agent_key: Any,
+    new_model: bool,
+    append_training: bool,
+    n_envs: int,
+    log_fn=print,
+) -> Tuple[str, int, int]:
+    """Prologue commun des TROIS chemins d'entrainement : ou ecrit ce run, et d'ou il repart.
+
+    Rend `(model_path, episode_offset, episode_start_index)`. Ce prologue etait recopie sur les
+    trois chemins, avec des divergences deja constatees : un `os.makedirs` place dans le `if
+    new_model` (donc jamais execute sur un `--append`), un `os.makedirs` en triple exemplaire,
+    et l'annonce de reprise conditionnee tantot par `append_training`, tantot par l'offset.
+
+    `--new` GAGNE SUR `--append`. Les deux drapeaux sont des `store_true` independants et rien
+    ne les rend exclusifs : sans cette regle, `--new --append` faisait demarrer un modele NEUF
+    sur le compte d'episodes de l'ancien — rampe de deploiement a `active_ratio_end` pour des
+    poids initialises au hasard. Elle est appliquee ICI, sur l'argument passe a
+    `resume_episode_offset`, et non par l'ordre des deux appels : un ordre ne se verifie pas,
+    il se re-casse au refactor suivant.
+    """
+    model_path = build_agent_model_path(models_root, require_present(agent_key, "agent_key"))
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    if new_model:
+        archive_canonical_artifacts_for_new_run(model_path, log_fn)
+
+    episode_offset = resume_episode_offset(model_path, append_training and not new_model)
+    if episode_offset > 0:
+        log_fn(f"⏱️  Reprise : {episode_offset} episodes deja joues (rampes reprises a ce point)")
+    # Index de depart PAR ENVIRONNEMENT : le compteur d'un worker est local (episode_schedule.py).
+    episode_start_index = episodes_per_env(episode_offset, n_envs) if episode_offset > 0 else 0
+    return model_path, episode_offset, episode_start_index
+
 from tqdm import tqdm  # For episode progress bar
 import gymnasium as gym  # For SelfPlayWrapper to inherit from gym.Wrapper
 
@@ -1351,7 +1386,13 @@ from ai.vec_normalize_utils import (
 from engine.episode_schedule import episodes_per_env
 from ai.model_artifacts import model_companion_paths, remove_model_with_companions
 from ai.run_state import get_run_state_path, load_run_state, save_run_state
-from shared.data_validation import require_key, require_positive_int, require_present
+from ai.truncation_log import TruncationLog, agent_log_dir
+from shared.data_validation import (
+    require_key,
+    require_non_negative_int,
+    require_positive_int,
+    require_present,
+)
 
 _progress_bar_width_cache: Optional[Dict[str, int]] = None
 _wall_override_temp_dir: Optional[str] = None
@@ -1521,8 +1562,8 @@ def _promote_checkpoint_for_resume(
         raise FileNotFoundError(
             f"--resume-from : etat de run absent pour ce checkpoint : {checkpoint_run_state}. "
             f"Les checkpoints ecrits avant ce mecanisme n'ont pas leur compte d'episodes : "
-            f"les reprendre relancerait learning_rate, ent_coef et la rampe de deploiement "
-            f"depuis leur valeur de depart (cf. ai/run_state.py). Repartir avec --new."
+            f"les reprendre relancerait la rampe de deploiement depuis `active_ratio_start` et "
+            f"repartirait le compte d'episodes de zero (cf. ai/run_state.py). Repartir avec --new."
         )
 
     model_path = build_agent_model_path(config_loader.get_models_root(), agent_key)
@@ -1945,16 +1986,6 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
 
     training_config = resolve_run_budget(training_config, n_envs)
 
-    # Reprise : cf. ai/run_state.py. Le chemin canonique se derive de l'agent, il ne depend pas
-    # du modele construit plus bas.
-    _episode_offset = resume_episode_offset(
-        build_agent_model_path(config.get_models_root(), require_present(controlled_agent_key, "controlled_agent_key")),
-        append_training,
-    )
-    episode_start_index = episodes_per_env(_episode_offset, n_envs) if _episode_offset > 0 else 0
-    if _episode_offset > 0:
-        print(f"⏱️  Reprise : {_episode_offset} episodes deja joues (rampes reprises a ce point)")
-
     # V11 §10.4 : meme construction d'adversaires que les chemins rotation et agent.
     opponents = build_training_opponents(
         training_config,
@@ -1967,12 +1998,18 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     # `train_with_scenario_rotation` le fait (`_publish_self_play_snapshot`). Ici, le premier
     # tirage de self-play lirait un fichier absent — ou pire, un snapshot fige d'un run precedent,
     # adversaire immobile pour tout l'entrainement. Erreur explicite plutot que les deux.
+    # Valide AVANT `prepare_run_artifacts` : ce refus est une erreur de configuration, il ne doit
+    # pas laisser derriere lui un `--new` qui a deja mis le modele precedent de cote.
     if self_play_is_enabled(opponents["opponent_mix_config"]):
         raise ValueError(
             "opponent_mix.enabled=True n'est supporte que par le chemin de rotation de scenarios "
             "(seul `train_with_scenario_rotation` republie le snapshot de self-play). Lancer "
             "l'entrainement par ce chemin, ou desactiver opponent_mix."
         )
+
+    model_path, _episode_offset, episode_start_index = prepare_run_artifacts(
+        config.get_models_root(), controlled_agent_key, new_model, append_training, n_envs
+    )
 
     base_env = None
     if n_envs > 1:
@@ -2053,10 +2090,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     vec_norm_cfg = training_config.get("vec_normalize", {})  # get allowed: optional config
     vec_normalize_enabled = vec_norm_cfg.get("enabled", False)
     if vec_normalize_enabled:
-        model_path_for_vn = build_agent_model_path(
-            config.get_models_root(), require_present(controlled_agent_key, "controlled_agent_key")
-        )
-        env = _apply_vec_normalize(env, model_path_for_vn, vec_norm_cfg, new_model, n_envs, print)
+        env = _apply_vec_normalize(env, model_path, vec_norm_cfg, new_model, n_envs, print)
 
     # Check if action masking is available (works for both vectorized and single env)
     if n_envs == 1:
@@ -2071,17 +2105,8 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     else:
         print("⚠️ Action masking not available")
     
-    # Use auto-detected agent key for model path
-    models_root = config.get_models_root()
-    if controlled_agent_key:
-        model_path = build_agent_model_path(models_root, controlled_agent_key)
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        if new_model:
-            archive_canonical_artifacts_for_new_run(model_path)
-        print(f"📝 Using agent-specific model path: {model_path}")
-    else:
-        raise ValueError("controlled_agent_key is required to build model path")
-    
+    print(f"📝 Using agent-specific model path: {model_path}")
+
     # Set device for model creation
     # PPO optimization: MlpPolicy performs BETTER on CPU (proven by benchmarks)
     # GPU only beneficial for CNN policies or networks with >2000 hidden units
@@ -2223,7 +2248,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             model = MaskablePPO(env=env, **model_params_copy)
 
     _apply_torch_compile(model)
-    return model, env, training_config, model_path
+    return model, env, training_config, model_path, _episode_offset
 
 def create_multi_agent_model(config, training_config_name="default", rewards_config_name="default",
                             agent_key=None, new_model=False, append_training=False, scenario_override=None,
@@ -2290,15 +2315,6 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
 
     training_config = resolve_run_budget(training_config, n_envs)
 
-    # Reprise : cf. ai/run_state.py.
-    _episode_offset = resume_episode_offset(
-        build_agent_model_path(config.get_models_root(), require_present(agent_key, "agent_key")),
-        append_training,
-    )
-    episode_start_index = episodes_per_env(_episode_offset, n_envs) if _episode_offset > 0 else 0
-    if _episode_offset > 0:
-        print(f"⏱️  Reprise : {_episode_offset} episodes deja joues (rampes reprises a ce point)")
-
     # V11 §10.4 : meme construction d'adversaires que le chemin rotation.
     opponents = build_training_opponents(
         training_config,
@@ -2311,12 +2327,17 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     # `train_with_scenario_rotation` le fait (`_publish_self_play_snapshot`). Ici, le premier
     # tirage de self-play lirait un fichier absent — ou pire, un snapshot fige d'un run precedent,
     # adversaire immobile pour tout l'entrainement. Erreur explicite plutot que les deux.
+    # Valide AVANT `prepare_run_artifacts` : cf. le jumeau dans `create_model`.
     if self_play_is_enabled(opponents["opponent_mix_config"]):
         raise ValueError(
             "opponent_mix.enabled=True n'est supporte que par le chemin de rotation de scenarios "
             "(seul `train_with_scenario_rotation` republie le snapshot de self-play). Lancer "
             "l'entrainement par ce chemin, ou desactiver opponent_mix."
         )
+
+    model_path, _episode_offset, episode_start_index = prepare_run_artifacts(
+        config.get_models_root(), agent_key, new_model, append_training, n_envs
+    )
 
     if n_envs > 1:
         # ✓ CHANGE 8: Create vectorized environments for parallel training
@@ -2397,20 +2418,8 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     vec_norm_cfg = training_config.get("vec_normalize", {})  # get allowed: optional config
     vec_normalize_enabled = vec_norm_cfg.get("enabled", False)
     if vec_normalize_enabled:
-        model_path_for_vn = build_agent_model_path(
-            config.get_models_root(), require_present(agent_key, "agent_key")
-        )
-        env = _apply_vec_normalize(env, model_path_for_vn, vec_norm_cfg, new_model, n_envs, print)
+        env = _apply_vec_normalize(env, model_path, vec_norm_cfg, new_model, n_envs, print)
 
-    # Agent-specific model path
-    models_root = config.get_models_root()
-    model_path = build_agent_model_path(models_root, require_present(agent_key, "agent_key"))
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
-    if new_model:
-        archive_canonical_artifacts_for_new_run(model_path)
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
-    
     # Set device for model creation
     # PPO optimization: MlpPolicy performs BETTER on CPU (proven by benchmarks)
     # GPU only beneficial for CNN policies or networks with >2000 hidden units
@@ -2547,7 +2556,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
             model = MaskablePPO(env=env, **model_params_copy)
     
     _apply_torch_compile(model)
-    return model, env, training_config, model_path
+    return model, env, training_config, model_path, _episode_offset
 
 
 # MacroController (agent "macro" de Phase 1) a ete retire ici. Occupaient cette place :
@@ -2643,11 +2652,26 @@ def resolve_turn_step_limit(
     return max_steps
 
 
+def print_truncation_summary(metrics_tracker: Any, log_fn=print) -> None:
+    """Bilan des troncatures en fin de run. Un ZERO est une information, il s'affiche aussi.
+
+    Une troncature signale une BOUCLE dans le moteur (garde `_episode_step_limit` de
+    `w40k_core.step_with_mask`), pas une fin de partie. Sans ce bilan, elle n'existait que dans
+    le `print` d'un worker, noye dans la console a `n_envs=48` et perdu au scroll — un run de
+    47 h pouvait en produire des centaines sans que personne le sache.
+    """
+    if metrics_tracker is None:
+        return
+    for line in metrics_tracker.truncation_summary_lines():
+        log_fn(line)
+
+
 def resume_episode_offset(model_path: str, append_training: bool) -> int:
     """Episodes deja joues par le modele qu'on reprend ; 0 pour un run neuf.
 
     Un seul point de lecture pour les trois chemins d'entrainement : sans lui, un `--append`
-    relance learning_rate, ent_coef et la rampe de deploiement depuis leur valeur de depart
+    relance la rampe de deploiement depuis `active_ratio_start` et repart d'un compte d'episodes
+    nul. Il ne pilote PAS learning_rate ni ent_coef, rampes de REGIME propres a chaque run
     (cf. ai/run_state.py).
 
     `--append` SANS modele existant n'est pas une reprise : les trois chemins creent alors un
@@ -2976,19 +3000,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     max_turns = get_max_turns()
     avg_steps_per_episode = max_turns * max_steps * 0.6  # Estimate: 60% of max
     
-    # Get model path
-    models_root = config.get_models_root()
-    model_path = build_agent_model_path(models_root, agent_key)
-    if new_model:
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        archive_canonical_artifacts_for_new_run(model_path, chunk_log)
-
     # Base de TOUTES les rampes par-episode : cf. ai/run_state.py.
-    episode_offset = resume_episode_offset(model_path, append_training)
-    if append_training:
-        chunk_log(f"⏱️  Reprise : {episode_offset} episodes deja joues (rampes reprises a ce point)")
-    # Index de depart PAR ENVIRONNEMENT : le compteur d'un worker est local (episode_schedule.py).
-    episode_start_index = episodes_per_env(episode_offset, n_envs) if episode_offset > 0 else 0
+    model_path, episode_offset, episode_start_index = prepare_run_artifacts(
+        config.get_models_root(), agent_key, new_model, append_training, n_envs, chunk_log
+    )
 
     # Create initial model with first scenario (or load if append_training)
     chunk_log(f"📦 {'Loading existing model' if append_training else 'Creating initial model'} with first scenario...")
@@ -3408,200 +3423,210 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         f"chunk_timesteps={chunk_timesteps} "
         f"model_num_timesteps={model.num_timesteps}"
     )
-    while metrics_tracker.episode_count < target_episode_count:
-        # As a safety guard, we still use the same chunk_timesteps. 
-        # EpisodeTerminationCallback is responsible for stopping promptly when the episode budget is reached.
-        _debug_train_marker(
-            "before model.learn(): "
-            f"episode_count={metrics_tracker.episode_count} "
-            f"target_episode_count={target_episode_count} "
-            f"chunk_timesteps={chunk_timesteps} "
-            f"model_num_timesteps={model.num_timesteps}"
-        )
-        model.learn(
-            total_timesteps=chunk_timesteps,
-            reset_num_timesteps=(not append_training and model.num_timesteps == 0),
-            tb_log_name=tb_log_name,  # Same name = continuous graph
-            callback=enhanced_callbacks,
-            log_interval=1,  # Every iteration so MetricsCollectionCallback captures PPO metrics
-            progress_bar=False  # Disabled - using episode-based progress
-        )
-        _debug_train_marker(
-            "after model.learn(): "
-            f"episode_count={metrics_tracker.episode_count} "
-            f"target_episode_count={target_episode_count} "
-            f"chunk_timesteps={chunk_timesteps} "
-            f"model_num_timesteps={model.num_timesteps}"
-        )
-        if self_play_snapshot_enabled:
-            if self_play_snapshot_update_freq is None:
-                raise RuntimeError(
-                    "self_play_snapshot_enabled=True but snapshot update frequency is missing."
+    # `finally` : une interruption (Ctrl-C) ou un echec est justement le moment ou l'on veut
+    # savoir si le moteur bouclait. Jumeau du `finally` de `train_model`.
+    try:
+        while metrics_tracker.episode_count < target_episode_count:
+            # As a safety guard, we still use the same chunk_timesteps. 
+            # EpisodeTerminationCallback is responsible for stopping promptly when the episode budget is reached.
+            _debug_train_marker(
+                "before model.learn(): "
+                f"episode_count={metrics_tracker.episode_count} "
+                f"target_episode_count={target_episode_count} "
+                f"chunk_timesteps={chunk_timesteps} "
+                f"model_num_timesteps={model.num_timesteps}"
+            )
+            model.learn(
+                total_timesteps=chunk_timesteps,
+                reset_num_timesteps=(not append_training and model.num_timesteps == 0),
+                tb_log_name=tb_log_name,  # Same name = continuous graph
+                callback=enhanced_callbacks,
+                log_interval=1,  # Every iteration so MetricsCollectionCallback captures PPO metrics
+                progress_bar=False  # Disabled - using episode-based progress
+            )
+            _debug_train_marker(
+                "after model.learn(): "
+                f"episode_count={metrics_tracker.episode_count} "
+                f"target_episode_count={target_episode_count} "
+                f"chunk_timesteps={chunk_timesteps} "
+                f"model_num_timesteps={model.num_timesteps}"
+            )
+            if self_play_snapshot_enabled:
+                if self_play_snapshot_update_freq is None:
+                    raise RuntimeError(
+                        "self_play_snapshot_enabled=True but snapshot update frequency is missing."
+                    )
+                episodes_since_snapshot = metrics_tracker.episode_count - last_snapshot_episode_count
+                if episodes_since_snapshot >= self_play_snapshot_update_freq:
+                    _publish_self_play_snapshot()
+                    last_snapshot_episode_count = metrics_tracker.episode_count
+
+        # Final episode count
+        episodes_trained = metrics_tracker.episode_count - episode_offset
+
+        callback_params = require_key(training_config, "callback_params")
+        save_best_robust = bool(require_key(callback_params, "save_best_robust"))
+
+        # Final save unless robust mode owns canonical output.
+        if not save_best_robust:
+            _debug_train_marker("before final model.save()")
+            model.save(model_path)
+            # Jumeau des stats VecNormalize : sans ce compteur, la prochaine reprise leve (et sans la
+            # levee, elle relancerait toutes les rampes depuis leur valeur de depart).
+            save_run_state(model_path, int(metrics_tracker.episode_count))
+            if save_vec_normalize(model.get_env(), model_path):
+                if not silent_chunk:
+                    print(f"   VecNormalize stats saved")
+        elif not os.path.exists(model_path):
+            bot_eval_callback = next(
+                (cb for cb in training_callbacks if cb.__class__.__name__ == "BotEvaluationCallback"),
+                None
+            )
+            extra_detail = ""
+            if bot_eval_callback is not None:
+                extra_detail = (
+                    f" (eval_count={int(getattr(bot_eval_callback, 'eval_count', 0))}, "
+                    f"eval_freq={getattr(bot_eval_callback, 'eval_freq', 'n/a')}, "
+                    f"use_episode_freq={getattr(bot_eval_callback, 'use_episode_freq', 'n/a')}, "
+                    f"robust_window={getattr(bot_eval_callback, 'robust_window', 'n/a')}, "
+                    f"gating_enabled={getattr(bot_eval_callback, 'model_gating_enabled', 'n/a')}, "
+                    f"gating_pass={getattr(bot_eval_callback, 'gating_pass_count', 'n/a')}, "
+                    f"gating_fail={getattr(bot_eval_callback, 'gating_fail_count', 'n/a')})"
                 )
-            episodes_since_snapshot = metrics_tracker.episode_count - last_snapshot_episode_count
-            if episodes_since_snapshot >= self_play_snapshot_update_freq:
-                _publish_self_play_snapshot()
-                last_snapshot_episode_count = metrics_tracker.episode_count
+            raise RuntimeError(
+                f"Robust save mode is enabled but canonical model was not produced: {model_path}{extra_detail}"
+            )
+        if not silent_chunk:
+            print(f"\n{'='*80}")
+            print(f"✅ TRAINING COMPLETE")
+            print(f"   Total episodes trained: {episodes_trained}")
+            print(f"   Final model: {model_path}")
+            print(f"{'='*80}\n")
 
-    # Final episode count
-    episodes_trained = metrics_tracker.episode_count - episode_offset
-
-    callback_params = require_key(training_config, "callback_params")
-    save_best_robust = bool(require_key(callback_params, "save_best_robust"))
-
-    # Final save unless robust mode owns canonical output.
-    if not save_best_robust:
-        _debug_train_marker("before final model.save()")
-        model.save(model_path)
-        # Jumeau des stats VecNormalize : sans ce compteur, la prochaine reprise leve (et sans la
-        # levee, elle relancerait toutes les rampes depuis leur valeur de depart).
-        save_run_state(model_path, int(metrics_tracker.episode_count))
-        if save_vec_normalize(model.get_env(), model_path):
+        # Run final comprehensive bot evaluation
+        # Le garde `if EVALUATION_BOTS_AVAILABLE:` qui enveloppait ce bloc a ete retire : le
+        # drapeau valait toujours True (voir la trace en tete de fichier). Il n'a jamais empeche
+        # cette evaluation finale de tourner ; il la rendait seulement silencieusement optionnelle
+        # au typage.
+        _debug_train_marker("before final comprehensive bot evaluation")
+        n_final = require_key(training_config, "_bot_eval_final")
+        if not isinstance(n_final, int) or isinstance(n_final, bool) or n_final < 0:
+            raise ValueError(
+                f"Resolved bot_eval_final must be an integer >= 0 (got {n_final!r})"
+            )
+        if n_final <= 0:
             if not silent_chunk:
-                print(f"   VecNormalize stats saved")
-    elif not os.path.exists(model_path):
+                print("ℹ️  Final bot evaluation skipped (bot_eval_final=0)")
+        else:
+                print(f"\n{'='*80}")
+                print(f"🤖 FINAL BOT EVALUATION ({n_final} episodes per bot across all scenarios)")
+                print(f"{'='*80}\n")
+
+                bot_results = evaluate_against_bots(
+                    model=model,
+                    training_config_name=training_config_name,
+                    rewards_config_name=rewards_config_name,
+                    n_episodes=n_final,
+                    controlled_agent=effective_agent_key,
+                    show_progress=True,
+                    deterministic=True,
+                    step_logger=step_logger,
+                    scenario_pool="holdout",
+                )
+
+                # Log final results to metrics tracker
+                if metrics_tracker and bot_results:
+                    # Cette eval-la ne passe pas par `BotEvaluationCallback._apply_eval_results` :
+                    # son jumeau du routage des troncatures vit donc ici (V11 §0.61).
+                    metrics_tracker.log_eval_truncations(
+                        require_key(bot_results, "truncations")
+                    )
+                    known_bot_keys = (
+                        "random",
+                        "greedy",
+                        "defensive",
+                        "control",
+                        "adaptive",
+                        "value_trade",
+                        "tactical",  # V11 §10.5 : holdout d'evaluation
+                    )
+                    available_bot_keys = [key for key in known_bot_keys if key in bot_results]
+                    if len(available_bot_keys) == 0:
+                        raise ValueError(
+                            "Final bot evaluation did not return any known bot score keys. "
+                            f"Expected at least one of: {known_bot_keys}"
+                        )
+                    final_bot_results = {
+                        key: float(require_key(bot_results, key))
+                        for key in available_bot_keys
+                    }
+                    final_bot_results["combined"] = float(require_key(bot_results, "combined"))
+                    metrics_tracker.log_bot_evaluations(final_bot_results)
+                    # Jumeau de BotEvaluationCallback._on_training_end : le gap par roster doit
+                    # etre publie au score livre, pas seulement aux evaluations intermediaires.
+                    metrics_tracker.log_faction_scores(
+                        require_key(bot_results, "faction_scores"),
+                        bot_results.get("roster_gap"),
+                    )
+                    holdout_split_metrics = {
+                        key: float(require_key(bot_results, key))
+                        for key in (
+                            'holdout_regular_mean',
+                            'holdout_hard_mean',
+                            'holdout_overall_mean',
+                        )
+                        if key in bot_results
+                    }
+                    if holdout_split_metrics:
+                        metrics_tracker.log_holdout_split_metrics(holdout_split_metrics)
+                    scenario_split_scores = bot_results.get("scenario_split_scores")
+                    if scenario_split_scores is not None:
+                        if not isinstance(scenario_split_scores, dict):
+                            raise TypeError(
+                                f"bot_results.scenario_split_scores must be dict "
+                                f"(got {type(scenario_split_scores).__name__})"
+                            )
+                        metrics_tracker.log_scenario_split_scores(scenario_split_scores)
+
+                # Print summary
+                print(f"\n{'='*80}")
+                print(f"📊 FINAL BOT EVALUATION RESULTS")
+                print(f"{'='*80}")
+                if bot_results:
+                    for bot_name in sorted(bot_results.keys()):
+                        if bot_name.endswith(('_wins', '_losses', '_draws', '_episodes')) or bot_name in ('combined', 'worst_bot_score', 'worst_bot_name', 'eval_duration_seconds', 'total_failed_episodes'):
+                            continue
+                        if isinstance(bot_results[bot_name], (int, float)):
+                            win_rate = bot_results[bot_name] * 100
+                            wins = bot_results.get(f'{bot_name}_wins', '?')
+                            losses = bot_results.get(f'{bot_name}_losses', '?')
+                            draws = bot_results.get(f'{bot_name}_draws', '?')
+                            print(f"  vs {bot_name:20s}: {win_rate:5.1f}% ({wins}W-{losses}L-{draws}D)")
+
+                    combined = require_key(bot_results, 'combined') * 100
+                    print(f"  Combined Score: {combined:5.1f}%")
+                print(f"{'='*80}\n")
+
+        run_info: Dict[str, Any] = {}
         bot_eval_callback = next(
-            (cb for cb in training_callbacks if cb.__class__.__name__ == "BotEvaluationCallback"),
+            (cb for cb in training_callbacks if isinstance(cb, BotEvaluationCallback)),
             None
         )
-        extra_detail = ""
         if bot_eval_callback is not None:
-            extra_detail = (
-                f" (eval_count={int(getattr(bot_eval_callback, 'eval_count', 0))}, "
-                f"eval_freq={getattr(bot_eval_callback, 'eval_freq', 'n/a')}, "
-                f"use_episode_freq={getattr(bot_eval_callback, 'use_episode_freq', 'n/a')}, "
-                f"robust_window={getattr(bot_eval_callback, 'robust_window', 'n/a')}, "
-                f"gating_enabled={getattr(bot_eval_callback, 'model_gating_enabled', 'n/a')}, "
-                f"gating_pass={getattr(bot_eval_callback, 'gating_pass_count', 'n/a')}, "
-                f"gating_fail={getattr(bot_eval_callback, 'gating_fail_count', 'n/a')})"
-            )
-        raise RuntimeError(
-            f"Robust save mode is enabled but canonical model was not produced: {model_path}{extra_detail}"
-        )
-    if not silent_chunk:
-        print(f"\n{'='*80}")
-        print(f"✅ TRAINING COMPLETE")
-        print(f"   Total episodes trained: {episodes_trained}")
-        print(f"   Final model: {model_path}")
-        print(f"{'='*80}\n")
+            run_info = {
+                "episodes_trained": int(episodes_trained),
+                "last_bot_eval": bot_eval_callback.last_eval_results,
+                "last_bot_eval_marker": bot_eval_callback.last_eval_marker,
+                "best_robust_score": bot_eval_callback.best_robust_score,
+                "best_robust_combined": bot_eval_callback.best_robust_combined,
+                "best_robust_eval_marker": bot_eval_callback.best_robust_eval_marker
+            }
 
-    # Run final comprehensive bot evaluation
-    # Le garde `if EVALUATION_BOTS_AVAILABLE:` qui enveloppait ce bloc a ete retire : le
-    # drapeau valait toujours True (voir la trace en tete de fichier). Il n'a jamais empeche
-    # cette evaluation finale de tourner ; il la rendait seulement silencieusement optionnelle
-    # au typage.
-    _debug_train_marker("before final comprehensive bot evaluation")
-    n_final = require_key(training_config, "_bot_eval_final")
-    if not isinstance(n_final, int) or isinstance(n_final, bool) or n_final < 0:
-        raise ValueError(
-            f"Resolved bot_eval_final must be an integer >= 0 (got {n_final!r})"
-        )
-    if n_final <= 0:
-        if not silent_chunk:
-            print("ℹ️  Final bot evaluation skipped (bot_eval_final=0)")
-    else:
-            print(f"\n{'='*80}")
-            print(f"🤖 FINAL BOT EVALUATION ({n_final} episodes per bot across all scenarios)")
-            print(f"{'='*80}\n")
-
-            bot_results = evaluate_against_bots(
-                model=model,
-                training_config_name=training_config_name,
-                rewards_config_name=rewards_config_name,
-                n_episodes=n_final,
-                controlled_agent=effective_agent_key,
-                show_progress=True,
-                deterministic=True,
-                step_logger=step_logger,
-                scenario_pool="holdout",
-            )
-
-            # Log final results to metrics tracker
-            if metrics_tracker and bot_results:
-                known_bot_keys = (
-                    "random",
-                    "greedy",
-                    "defensive",
-                    "control",
-                    "adaptive",
-                    "value_trade",
-                    "tactical",  # V11 §10.5 : holdout d'evaluation
-                )
-                available_bot_keys = [key for key in known_bot_keys if key in bot_results]
-                if len(available_bot_keys) == 0:
-                    raise ValueError(
-                        "Final bot evaluation did not return any known bot score keys. "
-                        f"Expected at least one of: {known_bot_keys}"
-                    )
-                final_bot_results = {
-                    key: float(require_key(bot_results, key))
-                    for key in available_bot_keys
-                }
-                final_bot_results["combined"] = float(require_key(bot_results, "combined"))
-                metrics_tracker.log_bot_evaluations(final_bot_results)
-                # Jumeau de BotEvaluationCallback._on_training_end : le gap par roster doit
-                # etre publie au score livre, pas seulement aux evaluations intermediaires.
-                metrics_tracker.log_faction_scores(
-                    require_key(bot_results, "faction_scores"),
-                    bot_results.get("roster_gap"),
-                )
-                holdout_split_metrics = {
-                    key: float(require_key(bot_results, key))
-                    for key in (
-                        'holdout_regular_mean',
-                        'holdout_hard_mean',
-                        'holdout_overall_mean',
-                    )
-                    if key in bot_results
-                }
-                if holdout_split_metrics:
-                    metrics_tracker.log_holdout_split_metrics(holdout_split_metrics)
-                scenario_split_scores = bot_results.get("scenario_split_scores")
-                if scenario_split_scores is not None:
-                    if not isinstance(scenario_split_scores, dict):
-                        raise TypeError(
-                            f"bot_results.scenario_split_scores must be dict "
-                            f"(got {type(scenario_split_scores).__name__})"
-                        )
-                    metrics_tracker.log_scenario_split_scores(scenario_split_scores)
-
-            # Print summary
-            print(f"\n{'='*80}")
-            print(f"📊 FINAL BOT EVALUATION RESULTS")
-            print(f"{'='*80}")
-            if bot_results:
-                for bot_name in sorted(bot_results.keys()):
-                    if bot_name.endswith(('_wins', '_losses', '_draws', '_episodes')) or bot_name in ('combined', 'worst_bot_score', 'worst_bot_name', 'eval_duration_seconds', 'total_failed_episodes'):
-                        continue
-                    if isinstance(bot_results[bot_name], (int, float)):
-                        win_rate = bot_results[bot_name] * 100
-                        wins = bot_results.get(f'{bot_name}_wins', '?')
-                        losses = bot_results.get(f'{bot_name}_losses', '?')
-                        draws = bot_results.get(f'{bot_name}_draws', '?')
-                        print(f"  vs {bot_name:20s}: {win_rate:5.1f}% ({wins}W-{losses}L-{draws}D)")
-
-                combined = require_key(bot_results, 'combined') * 100
-                print(f"  Combined Score: {combined:5.1f}%")
-            print(f"{'='*80}\n")
-
-    run_info: Dict[str, Any] = {}
-    bot_eval_callback = next(
-        (cb for cb in training_callbacks if isinstance(cb, BotEvaluationCallback)),
-        None
-    )
-    if bot_eval_callback is not None:
-        run_info = {
-            "episodes_trained": int(episodes_trained),
-            "last_bot_eval": bot_eval_callback.last_eval_results,
-            "last_bot_eval_marker": bot_eval_callback.last_eval_marker,
-            "best_robust_score": bot_eval_callback.best_robust_score,
-            "best_robust_combined": bot_eval_callback.best_robust_combined,
-            "best_robust_eval_marker": bot_eval_callback.best_robust_eval_marker
-        }
-
-    if return_run_info:
-        return True, model, env, run_info
-    return True, model, env
+        if return_run_info:
+            return True, model, env, run_info
+        return True, model, env
+    finally:
+        print_truncation_summary(metrics_tracker)
 
 def setup_callbacks(config, model_path, training_config, training_config_name="default", metrics_tracker=None,
                    total_episodes_override=None, max_episodes_override=None, scenario_info=None, global_episode_offset=0,
@@ -3610,6 +3635,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     W40KEngine, _ = setup_imports()
     callbacks = []
     total_eps = 0
+    resume_offset = require_non_negative_int(global_episode_offset, "global_episode_offset")
 
     # Add episode termination callback for debug AND step configs - NO FALLBACKS
     if "total_episodes" in training_config:
@@ -3955,8 +3981,10 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             model_gating_min_vs_control=model_gating_min_vs_control,
             gate_display_state=training_config.get("_gate_display_state"),
             eval_deterministic=eval_deterministic,
-            final_summary_target_episodes=total_eps,
-            initial_episode_marker=max(0, int(global_episode_offset)),
+            # Cible CUMULATIVE, comme `target_episode_count` dans train_model : le compteur du
+            # tracker est amorce a l'offset de reprise (`initial_episode_count`).
+            final_summary_target_episodes=resume_offset + total_eps,
+            initial_episode_marker=resume_offset,
             show_eval_progress=bot_eval_show_progress,
             early_stopping_patience=int(callback_params["early_stopping_patience"]),
             save_best_min_episodes=int(callback_params["save_best_min_episodes"]),
@@ -4133,6 +4161,9 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         return False
 
     finally:
+        # Dans le `finally` : une interruption ou un echec est justement le moment ou l'on veut
+        # savoir si le moteur bouclait.
+        print_truncation_summary(metrics_tracker)
         close_training_env(model.get_env(), "fin d'entraînement")
 
 def test_trained_model(model, num_episodes, training_config_name="default", agent_key=None, rewards_config_name="default", debug_mode=False):
@@ -4231,7 +4262,7 @@ def main():
     parser.add_argument("--scenario-template", type=str, default=None,
                        help="Scenario template name from scenario_templates.json for replay generation")
     parser.add_argument("--scenario", type=str, default="default",
-                       help="Scenario (default: default; use 'bot' for bot training, 'phase1' for curriculum, etc.)")
+                       help="Scenario (default: default; use 'bot' for bot training)")
     # --macro-eval-mode retire : il ne pilotait que les branches --agent MacroController,
     # elles-memes supprimees (voir la trace au-dessus de resolve_turn_step_limit).
     parser.add_argument("--mode", type=str, default=None,
@@ -4255,6 +4286,15 @@ def main():
     if args.resolution is not None:
         os.environ["W40K_BOARD_PATH"] = _RESOLUTION_TO_BOARD[args.resolution]
     args.test_only = args.test_only or args.eval
+
+    # `--new` cree un modele neuf, `--append` continue l'existant : c'est l'un OU l'autre. Rien
+    # dans argparse ne les rend exclusifs, et le code choisissait `--new` en silence — une
+    # commande dont un drapeau ne sert a rien est une faute de frappe, pas une intention.
+    if args.new and args.append:
+        raise ValueError(
+            "--new et --append sont exclusifs : --new cree un modele neuf (et ecarte le "
+            "precedent), --append continue le modele existant."
+        )
 
     if args.resume_from:
         if args.new:
@@ -4499,7 +4539,23 @@ def main():
                 scenario_list_override=eval_scenario_list_override,
                 materialize_eval_refs=not explicit_scenario_raw,
             )
-            
+
+            # Dernier producteur d'eval de la famille, et le seul SANS tracker : il n'écrit
+            # aucune courbe, donc rien ici ne comptait ses troncatures. Le moteur posant
+            # `winner = -1` dessus, elles entraient en NUL dans le score publié — le pire des
+            # trois silences, puisque c'est ce score-là qui est cité (V11 §0.61). Le bilan sort
+            # AVANT le contrôle de fiabilité : une troncature est justement ce qu'on veut lire
+            # quand la mesure échoue.
+            # `tensorboard_log` peut être None (modèle entraîné sans TensorBoard) : le compte
+            # tient quand même, et le bilan annonce l'absence de journal.
+            eval_truncations = TruncationLog(
+                agent_log_dir(model.tensorboard_log, effective_agent_key)
+                if model.tensorboard_log else None
+            )
+            eval_truncations.record_eval_batch(require_key(results, "truncations"))
+            for line in eval_truncations.summary_lines():
+                print(line)
+
             # Fiabilité stricte, miroir de `_apply_eval_results` (training_callbacks) : un épisode
             # planté est retiré du dénominateur par `_get_result_with_timeout`, donc publier un
             # score ici reviendrait à mesurer sur un échantillon tronqué SANS le signaler. Un crash
@@ -4715,7 +4771,7 @@ def main():
                 return 0 if success else 1
             
             # Standard single-scenario training (no rotation)
-            model, env, training_config, model_path = create_multi_agent_model(
+            model, env, training_config, model_path, _resume_offset = create_multi_agent_model(
                 config,
                 args.training_config,
                 args.rewards_config,
@@ -4728,10 +4784,9 @@ def main():
             )
             
             # Setup callbacks with agent-specific model path
-            # Reprise : meme offset que celui pose dans les envs par `create_multi_agent_model`,
-            # relu a la meme source (ai/run_state.py). Il pilote le COMPTEUR (axe TensorBoard,
-            # barre de progression), pas les rampes de regime — celles-la comptent depuis ce run.
-            _resume_offset = resume_episode_offset(model_path, args.append)
+            # `_resume_offset` vient de `create_multi_agent_model` : une SEULE lecture de
+            # l'etat de run par run. Il pilote le COMPTEUR (axe TensorBoard, barre de
+            # progression), pas les rampes de regime — celles-la comptent depuis ce run.
             callbacks = setup_callbacks(config, model_path, training_config, args.training_config,
                                       agent=args.agent, rewards_config_name=args.rewards_config,
                                       global_episode_offset=_resume_offset)
@@ -4753,7 +4808,7 @@ def main():
         else:
             # Generic training mode
             # Create/load model
-            model, env, training_config, model_path = create_model(
+            model, env, training_config, model_path, _resume_offset = create_model(
             config, 
             args.training_config,
             args.rewards_config, 
@@ -4762,8 +4817,7 @@ def main():
             args
         )
         
-        # Setup callbacks
-        _resume_offset = resume_episode_offset(model_path, args.append)
+        # Setup callbacks (`_resume_offset` vient de `create_model`, cf. ci-dessus)
         callbacks = setup_callbacks(config, model_path, training_config, args.training_config,
                                     rewards_config_name=args.rewards_config,
                                     global_episode_offset=_resume_offset)

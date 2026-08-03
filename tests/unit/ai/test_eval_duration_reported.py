@@ -34,6 +34,8 @@ def _results(duration: float = 125.0, played: int = 600) -> Dict[str, Any]:
         "total_failed_episodes": 0,
         "total_timeout_episodes": 0,
         "total_error_episodes": 0,
+        # Pose par evaluate_against_bots a chaque eval (V11 §0.61).
+        "truncations": [],
         "eval_duration_seconds": duration,
         "total_episodes_played": played,
         "combined": 0.42,

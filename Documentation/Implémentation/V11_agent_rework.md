@@ -46,7 +46,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.59` (`0.57`–`0.58` le 2026-08-02, `0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30, `0.55`–`0.56` le 2026-08-02).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.61` (`0.57`–`0.60` le 2026-08-02, `0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30, `0.55`–`0.56` le 2026-08-02).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -77,15 +77,18 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
-| **§0.58** | Les rampes par-épisode **redémarraient à chaque reprise** (`--append`, `--resume-from`, chunks de curriculum) | ✅ **CORRIGÉ le 2026-08-02** | **1** | Rien ne persistait le nombre d'épisodes joués : un modèle convergé repartait à son **learning rate et son entropie INITIAUX** (catastrophic forgetting), et la rampe de déploiement n'atteignait jamais `active_ratio_end`. `ai/run_state.py` persiste le compte (compté, jamais dérivé de `num_timesteps`) ; reprendre un modèle sans lui **lève** (arbitrage : pas de compatibilité ascendante). Détail → §0.58. |
+| **§0.61** | Le garde **anti-runaway** était MUET, et son compteur d'épisodes divergeait | ✅ **CORRIGÉ le 2026-08-03** | **1** | Une troncature signale une BOUCLE dans le moteur, pas une fin de partie — or son diagnostic n'existait que dans le `print` d'un worker (noyé à `n_envs=48`) et le compteur persisté ne la comptait pas, alors que le run s'arrête dessus. Nouveau scalaire `00_critical/t_truncated_episodes`, diagnostic complet en `truncations.jsonl`, bilan imprimé en fin de run. Détail → §0.61. |
+| **§0.60** | Instrumentation du **coût** de l'entraînement — workers d'éval, temps bloquant, courbes de charge et de participation | ✅ **LIVRÉ le 2026-08-02** | **2** | Trois angles morts de COÛT, distincts des angles morts de COMPORTEMENT du §0.56. (1) Quatre clés `bot_eval_*` vivaient **hors de `callback_params`** : personne ne les lisait, `bot_eval_n_workers` retombait sur `min(n_envs, n_scenarios × n_bots)` = **24 workers**, soit **47 Go et 598 s** contre **9,6 Go et 349 s** à 4 workers — moins de workers est aussi **42 % plus rapide**, la VM passant son temps à swapper. `validate_bot_eval_worker_params` valide désormais au DÉMARRAGE. (2) `blocking_eval_seconds` ne compte plus que le temps où la boucle est RÉELLEMENT figée. (3) Six courbes moteur : charges tentées/réussies (agent et bot) et participation par phase. Détail → §0.60. |
+| **§0.59** | Régime d'entraînement en **deux phases** — `x1_selfplay` (self-play) et `decay_fraction` | 🟠 **OUVERT — livré, JAMAIS EXÉCUTÉ** | **2** | Deux changements de régime non mesurés. (1) `decay_fraction` achève les rampes lr/entropie **avant** la fin d'un run long (sans lui, un run de 200 000 épisodes garde une entropie élevée jusqu'au dernier épisode). (2) Le profil `x1_selfplay` ajoute une **phase 2** en `--append` : un snapshot figé de l'agent remplace le bot sur une part rampée **0.0 → 0.5** des épisodes. ⚠️ Aucun run de phase 2 n'a jamais tourné ; `opponent_mix.enabled` **lève** hors du chemin de rotation de scénarios. Détail → §0.59. |
+| **§0.58** | Les rampes par-épisode **redémarraient à chaque reprise** (`--append`, `--resume-from`) | ✅ **CORRIGÉ le 2026-08-02** | **1** | Rien ne persistait le nombre d'épisodes joués : la rampe de déploiement n'atteignait jamais `active_ratio_end` et le compte cumulé du modèle était écrasé par celui du seul run courant. `ai/run_state.py` persiste le compte (compté, jamais dérivé de `num_timesteps`) ; reprendre un modèle sans lui **lève** (arbitrage : pas de compatibilité ascendante). `learning_rate`, `ent_coef` et le self-play sont des rampes de **RÉGIME** : elles repartent de zéro à chaque run, et c'est l'arbitrage. Détail → §0.58. |
 | **§0.57** | Les rampes par-épisode du moteur avançaient **`n_envs` fois trop lentement** | ✅ **CORRIGÉ le 2026-08-02** — reste une conséquence à assumer | **1** | Le compteur d'épisodes du moteur est LOCAL à un worker ; il était divisé par le total GLOBAL. À `n_envs=48`, la rampe de déploiement est restée collée à `active_ratio_start` sur TOUS les runs vectorisés (mesuré : `s_deploy_active_share` 0.3040 pour 0.496 attendus). Même défaut sur `deployment_random_mix`. **Conséquence : aucune mesure passée n'a été produite avec la rampe annoncée** — §0.29 et §0.46 pt 2 sont amendés. Détail → §0.57. |
 | **§0.56** | Instrumentation : usage par **famille d'action**, et **classement bot-contre-bot** | ✅ **LIVRÉ le 2026-08-02** — reste à s'en servir | **2** | Deux angles morts fermés, aucun ne coûte de ré-entraînement. (1) `actions/share_<famille>` publie la part de chaque DÉCISION dans ce que l'agent joue : une dimension jamais choisie ou toujours choisie est cassée quel que soit le win-rate — c'est ce qui rend un lot de tranches P3 diagnosticable **en un seul run**. (2) `scripts/bot_ranking.py` fait s'affronter les bots **sans agent** : sans lui, juger un bot exigeait un modèle entraîné, donc une mesure circulaire — et §0.55 était irréalisable. Détail → §0.56. |
-| **§0.55** | Le **holdout d'évaluation** `TacticalBot` est DANS l'enveloppe d'entraînement — effet plafond | 🟠 **OUVERT** — re-profilage validé le 2026-08-02 (arbitrage utilisateur), à écrire | **1** (avant toute mesure de référence) | `tactical` porte `w_objective 0.5 / w_enemy 0.0` : un `ControlBot` dilué, interpolé entre `control` (1.0/0.1) et `defensive` (0.7/−0.5). Un holdout intérieur à l'enveloppe mesure l'**interpolation**, pas la généralisation — d'où `vs_tactical` **0.95** au run 4. Re-profiler **hors enveloppe** (piste : `w_objective 0.8 / w_enemy 0.6`) et ajouter le scalaire `vs_tactical` **par roster**. ⚠️ **À faire AVANT de geler la baseline d'évaluation** : après, plus aucune mesure n'est comparable (leçon §0.47 É4). Détail → §0.55. |
+| **§0.55** | Le **holdout d'évaluation** `TacticalBot` est DANS l'enveloppe d'entraînement — effet plafond | 🟠 **OUVERT** — re-profilage validé le 2026-08-02 (arbitrage utilisateur), à écrire | **1** (avant toute mesure de référence) | `tactical` porte `w_objective 0.5 / w_enemy 0.0` : un `ControlBot` dilué, interpolé entre `control` (1.0/0.1) et `defensive` (0.7/−0.5). Un holdout intérieur à l'enveloppe mesure l'**interpolation**, pas la généralisation — d'où `vs_tactical` **0.95** au run 4. Re-profiler **hors enveloppe** (`w_objective 0.8 / w_enemy 0.6`) et ajouter le scalaire `vs_tactical` **par roster**. 🛠️ **Spec d'application ÉCRITE le 2026-08-02** (3 étapes, 2 fichiers, mesure `bot_ranking` avant/après) — **rien n'est appliqué** : `config/` est relu à chaud par les évals du run en cours. ⚠️ **À faire AVANT de geler la baseline d'évaluation** : après, plus aucune mesure n'est comparable (leçon §0.47 É4). Détail → §0.55. |
 | **§0.14** | Re-mesure du run — win-rate par matchup | ⏳ **PÉRIMÉE — état au 2026-08-02** : des runs **postérieurs au run 4** ont tourné (modèles `robust_*` du 2026-07-30 et du 2026-08-01 dans `ai/models/ArmageddonAgent/`) et **un `train.py` tournait** au moment de la relecture. Le répertoire `tensorboard/x1_ArmageddonAgent/` n'existe plus. | **1** | Reconfronter au réel (`ps -eo lstart,cmd \| grep train.py`, `ls -l ai/models/ArmageddonAgent/`) puis **réécrire l'entrée sur le run courant**. Les chiffres du run 4 (`combined` **0.509**, `worst_bot_score` **0.04**, `vs_control` **0.04**) ne valent plus que comme historique, et sur une pondération de bots qui n'existe plus (§0.53). Détail → §0.14. |
 | **[§9](V11_phaseA.md#s9)** | Phase A' — P2 + P3-0/1/2 | 🟢 **LIVRÉS ET MERGÉS sur `main`** — restent **P3-3→8**, **P4**, **P5** | **2** | ⚠️ Aucune des quatre livraisons n'est **MESURÉE**. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). Détail → §0.42 et §0.43 (en §0hist), et [§9](V11_phaseA.md#s9). |
 | **§0.44** | Tête pointeur de **déploiement** — les slots 4-8 n'ont pas de tête dédiée | 🟠 **OUVERT** — reporté après la mesure de référence (arbitrage utilisateur du 2026-07-29) | **3** | Les ids 4-8 tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`) : leurs logits sortent de la **conv 1×1** (`_move_logits`), pas d'une tête dédiée ; `deploy_emb` n'atteint le calcul que par le **conditionnement du tronc**. Ajouter un `deploy_query_net`, jumeau de `choice_query_net` — ce qui oblige à lire la phase dans la policy. Élément `L1` du lot §0.48 ; `L11` (`N_DEPLOY_SLOTS`) à trancher **avant**. Détail → §0.44. |
 | **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — inventaire rendu, périmètre arbitré : le lot = **`L1` + `L2` + `L6`**, et eux seuls | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. Reste l'arbitrage 2 (réserver la place des règles pas encore implémentées, toute règle rendue vivante changeant `obs_size`). Détail → §0.48. |
-| **§0.46** | Résidus du 2026-07-29 | 🟠 **OUVERT — point 3 SEUL** (points 1 et 2 ✅ livrés **et mergés**) | **5** | Statuer sur les **37** occurrences `[TRAIN DEBUG]` (`ai/env_wrappers.py` 14, `engine/action_decoder.py` 15, `engine/w40k_core.py` 7, `ai/train.py` 1) : instrument permanent assumé, ou temporaire à retirer. Détail → §0.46. |
+| **§0.46** | Résidus du 2026-07-29 | 🟠 **OUVERT — point 3 SEUL** (points 1 et 2 ✅ livrés **et mergés**) | **5** | Statuer sur les **37** occurrences `[TRAIN DEBUG]` (`ai/env_wrappers.py` 14, `engine/action_decoder.py` 15, `engine/w40k_core.py` 7, `ai/train.py` 1). 🛠️ **Relevé site par site + recommandation écrits le 2026-08-02 : les GARDER** (ils couvrent les trois chemins qui se figent sans planter — la famille §0.33/§0.57/§0.60 ; coût hors debug = un test booléen, vérifié). **Arbitrage utilisateur attendu** ; si « garder », reste à verrouiller la garde par un test. Détail → §0.46. |
 | **§0.47** | Relecture T2→T5 du 2026-07-29 — 9 écarts | 🟠 **OUVERT — reste É9 (second siège + second scénario)** ; É5 et É7 ✅ corrigés le 2026-08-02 (É1, É2, É3, É4, É6 ✅ livrés **et mergés** ; **É8 est tombé**) | **6** | **É8 n'a plus d'objet** : `ai/analyzer.py` ne construit plus aucun chemin de board à la main (il lit `get_board_config()` / `get_board_size()`). **É9 était mal énoncé** : les **3 graines SONT couvertes** (`test_t5_bare_loop.py`, `for seed in (1, 2, 3)`) ; ce qui manque est le **second scénario** et les **2 sièges**. Détail → §0.47. |
 | **§0.50** | Non-conformité **01.07** — travail de suite | 🟠 **OUVERT** (la correction moteur, elle, est mergée) | **7** | ✅ **SOLDÉE le 2026-08-02** — les deux résidus sont traités : (1) le contrat de `battle_shocked` est **tranché en lecture STRICTE**, les 7 `get(..., False)` migrés en `require_key` ; (2) la 3ᵉ lecture d'OC du frontend (journal d'événements de `BoardReplay.tsx`) diffère l'instantané moteur au lieu de recompter. Détail → §0.50. |
 | **§0.53** | Refonte du panel de bots — les adversaires ignoraient la condition de victoire | 🟢 **LIVRÉ ET MERGÉ** — plus aucun chantier ouvert (arbitrage du 2026-08-02) | — (à lire avant d'interpréter tout win-rate) | 🟢 **ARBITRAGE UTILISATEUR DU 2026-08-02 — (a) et (b) SONT SANS OBJET JUSQU'À LA DÉMO MÉTIER** : le travail porte sur **2 rosters seulement**, donc ni les matrices de matchups par roster ni le recalibrage des seuils de gate ne sont d'actualité. **Ne pas les re-signaler comme des chantiers ouverts.** Reste vrai et à retenir : (c) **aucun win-rate antérieur au 2026-07-30 n'est comparable** à un win-rate postérieur. ⏳ Le panel a **encore évolué depuis** : un **cinquième bot `ValueTradeBot`** a été ajouté, `bot_eval_weights` = `control` 0.40 / `value_trade`, `adaptive`, `greedy`, `defensive` 0.15 / `tactical` 0. Détail → §0.53 (en §0hist). |
@@ -93,9 +96,9 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 
 ✅ **Contrôle de conformité du 2026-08-02** (vérification par lecture, PAS une livraison —
 aucune ligne de code touchée) :
-- `obs_size` : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` = **20828**, et les **6** profils de
+- `obs_size` : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` = **20828**, et les **7** profils de
   `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` portent **20828**
-  (`x1_long` ajouté depuis la relecture du 2026-07-29).
+  (`x1_long` **et `x1_selfplay`** ajoutés depuis la relecture du 2026-07-29 ; cf. §0.59).
 - `macro_intents.TOTAL_ACTION_SIZE` = **1107** ; `DEPLOY_SLOTS` = ids **4..8** ;
   `spatial_grid.GRID_CHANNELS` = **9** ; `MOVE_CELL_BASE` = 0 / `MOVE_CELL_COUNT` = 1024.
 - `raw_action_int % len(options)` : **absent du code vif** (ne subsiste que dans des commentaires
@@ -110,8 +113,11 @@ aucune ligne de code touchée) :
   `deployment_slot_candidates`, purge du cache).
 - `ai/scenario_manager.py` **absent** (§0.45) ; `_attack_sequence_rng` : **zéro occurrence**
   (§0.38) ; `get_best_enemy_*` : plus aucune définition (§0.46 pt 1).
-- ⚠️ **Non revérifié le 2026-08-02** : la somme des formes de `squad_obs_shapes()` (exige une
-  exécution) et les suites de tests (la vérification large appartient à l'utilisateur).
+- ✅ **Somme des formes VÉRIFIÉE PAR EXÉCUTION le 2026-08-02** (elle était jusque-là la seule
+  ligne déduite par lecture) : `sum(prod(shape))` sur les **20** clés de `squad_obs_shapes()`,
+  grille exclue, = **20828** — égale à `SQUAD_OBS_SIZE_TARGET`.
+- ⚠️ **Non revérifié le 2026-08-02** : les suites de tests (la vérification large appartient à
+  l'utilisateur).
 
 🟢 **TRANCHÉ le 2026-07-28 soir (arbitrage utilisateur) : `bot_eval_freq = 2000` ASSUMÉ**, pour
 la **granularité des courbes de métriques**. La décision « 4000 » de §0.14 est **annulée** ;
@@ -120,9 +126,18 @@ Conséquence acceptée en connaissance de cause : les évals des marqueurs
 < `save_best_min_episodes` (10 000) ne peuvent sauvegarder aucun modèle — coût = du temps d'éval
 « pour les courbes », aucune perte de modèle.
 
-| Clé (profil `x1`) | Ancienne décision §0.14 (annulée) | HEAD = décision actuelle |
-|---|---|---|
-| `bot_eval_freq` | ~~4000~~ | **2000** |
+⚠️ **Cette décision vaut pour `x1` SEUL — ne pas la lire comme un réglage global** (relevé le
+2026-08-02). Les profils longs sont calibrés à part : évaluer tous les 2 000 épisodes sur un run de
+200 000 coûterait plus cher que l'entraînement lui-même, et c'est leur mesure FINALE qui est le
+livrable, donc sa précision. Le verrou est
+`tests/unit/ai/test_schedule_decay_fraction.py::test_x1_long_is_x1_recalibrated_for_long_runs`.
+
+| Clé | `x1` (décision ci-dessus) | `x1_long` / `x1_selfplay` (HEAD) | Pourquoi l'écart |
+|---|---|---|---|
+| `bot_eval_freq` | **2000** (ancienne décision §0.14 : ~~4000~~) | **10000** | 20 évals sur 200 000 ép. ; à 5 000, les 40 évals coûteraient ~8 h 30 contre ~5 h 30 d'entraînement. |
+| `bot_eval_final` | 100 | **600** | Erreur-type d'un win-rate ~0,5 : **5,0 points** à 100 ép./bot (IC95 ±9,8), **2,0** à 600 (IC95 ±4,0). Coût borné, payé une fois (~1 h 20). |
+| `bot_eval_task_timeout_seconds` | 3600 | **7200** | Le timeout porte sur UN task ; à 600 ép./bot un task joue 150 épisodes au lieu de 25. 3600 s ne laisserait que 24 s/épisode contre 17 s **mesurées** sur parties dégénérées (§0.14). |
+| `bot_eval_intermediate` | 100 | 100 | Les évals intermédiaires sont du **monitoring** répété 20 fois, pas la mesure. |
 
 Les clés `perception_radius` / `max_nearby_units` / `max_valid_targets` ont été **retirées de tous
 les profils** le 2026-07-28 — elles n'alimentaient que le pipeline mono-figurine supprimé le même
@@ -135,21 +150,254 @@ jour 2026-07-29** : la section 9 a été auditée le 2026-07-24 ([§9.0](V11_pha
 relecture s'est faite **par lecture seule, sans aucune exécution**, elle ne vaut donc pas
 mutation-test.
 
+<a id="s0.61"></a>
+### 0.61 Le garde ANTI-RUNAWAY était muet, et son compteur d'épisodes divergeait — ✅ CORRIGÉ (2026-08-03)
+
+**Suite de [§0.58](#s0.58)**, relevée en revue de code puis tranchée avec l'utilisateur le
+2026-08-03. Le moteur coupe un épisode qui dépasse `max_steps_per_turn × marge × max_turns`
+(`w40k_core._get_episode_step_limit`). Ce n'est **pas** une fin de partie : une partie normale se
+termine sur la limite de tours (`terminated`). Une troncature est le symptôme d'une **boucle**.
+
+**Deux défauts, une seule cause — `truncated` n'est pas `terminated`.**
+
+1. **Le diagnostic était jeté.** Le moteur assemblait déjà tout ce qu'il faut pour reproduire
+   (tour, phase, scénario, joueur, sous-phase de mêlée, unité active, tailles des trois pools,
+   `shoot_debug`, dernière action) — puis l'envoyait dans un `print` du **worker**, noyé dans la
+   console à `n_envs=48` et perdu au scroll, et dans `add_debug_log`, **no-op** hors `debug_mode`
+   et de toute façon local au process. Un run de 47 h pouvait en produire des centaines sans que
+   personne le sache : `grep truncation_reason ai/` ne rendait **aucun lecteur**.
+2. **Le compteur d'épisodes divergeait.** `info["episode"]` n'est posé que sous `terminated`, donc
+   `metrics_tracker.episode_count` — celui qui part dans `_run_state.json` — ne comptait pas les
+   troncatures, alors que `EpisodeTerminationCallback` arrête le run sur la somme des `dones`,
+   troncatures **comprises**. Une reprise repartait donc plus bas qu'elle n'était arrivée : le
+   défaut §0.58 qui se reforme par une autre porte.
+
+**ARBITRAGE UTILISATEUR DU 2026-08-03 — pas de `raise`.** Le repli reste (un run de 47 h ne doit
+pas mourir sur un épisode), mais il devient **bruyant** : c'est la condition qui le rend légitime.
+`info["truncation_debug"]` traverse le VecEnv (un **dict**, dont le message console n'est plus que
+le rendu — l'inverse collait une f-string pré-formatée dans un payload censé être machine),
+`MetricsCollectionCallback._handle_truncated_episode` le route, `metrics_tracker` publie
+`00_critical/t_truncated_episodes` et compte **par raison** (un total agrégé cesserait de répondre
+à la question le jour où un second garde apparaît), et
+[`ai/truncation_log.py`](../../ai/truncation_log.py) possède le fichier — même découpage que
+`run_state.py` pour `_run_state.json` : le tracker garde la métrique, pas le cycle de vie du
+fichier. `print_truncation_summary` donne le compte, la ventilation et le chemin **en fin de
+run**, dans le `finally` des **deux** chemins d'entraînement, donc aussi sur interruption et sur
+échec — les moments où l'on veut justement savoir si le moteur bouclait. **Un zéro s'affiche
+aussi** : « aucune troncature » est un résultat, pas une absence de message.
+
+Le journal vit dans `log_dir`, qui porte l'agent et le profil mais **pas** le run (« continuous
+TensorBoard graphs across runs ») : il TRAVERSE les runs, donc chaque ligne porte `run`, sans quoi
+deux entraînements successifs seraient indiscernables (`num_timesteps` repart de zéro à chaque
+`--new`). Il est **borné à 500 lignes** — et la borne le dit dans le bilan plutôt que de tronquer
+en douce le journal des troncatures.
+
+**L'ÉVALUATION comptait aussi, et personne ne la regardait** (troisième et quatrième tours de
+revue, 2026-08-03).
+Les évals de gating et le holdout final tournent dans des **process workers**
+(`ai/bot_evaluation.py`) qui ne passent pas par `MetricsCollectionCallback`. Le moteur pose
+`winner = -1` sur une troncature : elle s'y comptait donc en **NUL** et n'existait nulle part
+ailleurs. Une boucle ne se reproduisant qu'en éval (`deterministic=True`, rosters du holdout)
+faisait ainsi terminer le run sur « ✅ Troncatures : 0 » — **un feu vert faux, exactement ce que
+cette entrée existe pour fermer**. Le worker relève désormais ses troncatures et les remonte avec
+son résultat de tâche (seul canal qui traverse la frontière de process) ;
+`BotEvaluationCallback._evaluate_against_bots` les route, là où les résultats sont **produits** —
+et non dans `_apply_eval_results`, appelé directement par les tests de gating, dont les doublures
+n'ont aucune raison de porter une route de journalisation. Les comptes sont **ventilés par portée**
+(`entraînement` / `éval`) : les deux boucles ne se cherchent pas au même endroit, un total unique
+le cacherait. Il y a **quatre** producteurs de résultats d'éval et le même oubli s'est produit
+trois fois : `test_every_eval_producer_routes_its_truncations` parcourt l'AST de `ai/train.py` et
+`ai/training_callbacks.py` et exige que toute fonction appelant `evaluate_against_bots` route ses
+troncatures — la seule exception, `main` sous `--test-only`, est déclarée avec sa raison. Le
+comptage et l'écriture se font **sous verrou** : l'éval de gating tourne sur le thread `bot-eval`,
+l'entraînement sur le thread principal, et la borne du journal est un lire-modifier-écrire. Une troncature d'éval n'avance **pas** `episode_count` — ce n'est pas un épisode joué
+par le modèle en apprentissage, et ce compteur-là est celui qui part dans `_run_state.json`.
+
+**Le discriminant est le signal GYM, pas une clé du moteur** (deux tours de revue de code le
+2026-08-03, la première version était fausse et la deuxième fragile). Le `Monitor` de SB3 pose
+`info["episode"]` sur `terminated` **OU** `truncated` — vérifié en **exécutant** `Monitor`, pas
+déduit de sa doc — et tout le chemin d'entraînement est Monitor-wrappé. Discriminer sur
+`'episode' in info` rendait donc la branche des troncatures **inatteignable** (`truncations.jsonl`
+jamais écrit, bilan toujours à zéro) **et** envoyait l'épisode tronqué dans `_handle_episode_end`,
+qui exige `deployment_mode` et `tactical_data` — deux clés que le moteur ne pose que sous
+`terminated`. Une troncature **tuait le run** sur une `ConfigurationError`.
+Discriminer sur `truncation_reason` corrigeait le symptôme mais laissait le trou ouvert pour une
+troncature venue d'ailleurs que du moteur (un wrapper `TimeLimit` ajouté un jour), qui n'aurait
+pas cette clé. Le discriminant est donc `info["TimeLimit.truncated"]`, que les **deux** VecEnv de
+SB3 posent (`truncated and not terminated`, vérifié dans leur source) : les deux branches
+s'excluent par construction, et une troncature sans payload moteur **lève** au lieu d'être
+silencieusement re-routée.
+
+**Le plafond de boucle du worker d'éval — une FAUSSE alerte, corrigée** (quatrième puis cinquième
+tour de revue, 2026-08-03). Un tour de revue a signalé que la boucle du worker s'arrête à une
+constante du profil (`max_turns * 400` = 2000) alors que le garde moteur dérive du roster (2268
+pour les 54 figurines de référence), donc qu'elle sortirait avant lui dès 48 figurines : aucun
+diagnostic, `winner` à `None`, épisode porté en défaite. **Le raisonnement était inversé sur les
+unités**, et le tour suivant l'a relevé. Un step gym vaut PLUSIEURS steps moteur (tour du bot,
+WAIT forcés — cf. `BotControlledEnv.step`) : **mesuré à 1,3–1,4 sur ce dépôt**, donc le compteur du
+moteur atteint son plafond en premier quelle que soit la taille du roster. L'ajustement introduit
+au tour précédent a été **retiré** : c'était du code pour un scénario qui n'existe pas. La relation
+qui le garantit est désormais mesurée par `test_one_gym_step_is_at_least_one_engine_step`, sur le
+VRAI wrapper — la première version verrouillait la prémisse inverse et passait uniquement parce que
+sa doublure avançait 1:1.
+
+Ce qui RESTE de ce tour, et qui tient : quand le backstop tire pour de bon — durée illimitée, où
+`_get_episode_step_limit` ne rend aucun plafond — il **trace** (`reason: eval_loop_cap`) et compte
+un NUL. Auparavant, `winner is None` tombait dans le `else` du comptage : une partie qui n'a pas
+fini était portée au débit du modèle et l'incident n'existait nulle part. Ses clés de pas sont
+`gym_steps`/`gym_step_limit` et non `steps`/`step_limit` : ces deux-là portent des steps MOTEUR
+dans les lignes `episode_steps_limit` du même journal, et un journal fait pour être relu ne peut
+pas nommer pareil deux unités différentes.
+
+**Le journal crée son dossier.** S'en remettre au `SummaryWriter` ne tenait pas : le mode « éval
+seule » construit un `TruncationLog` **sans writer**, depuis le `tensorboard_log` du modèle —
+dossier purgé, ou jamais créé pour un modèle copié d'ailleurs. La première troncature levait
+`FileNotFoundError` au milieu de `record_eval_batch` et faisait échouer l'évaluation **avant**
+l'impression du score : perdre la mesure à cause de sa trace. Même raisonnement pour toute
+`OSError` d'écriture (disque plein, droits, montage disparu) : la LIGNE est perdue, pas
+l'évaluation. Ce n'est pas un repli silencieux — le compte reste juste (il est pris avant
+l'écriture) et le bilan **annonce** les lignes perdues avec leur cause.
+
+**Ce qui n'entre PAS dans les courbes.** Un épisode tronqué n'a ni reward ni longueur exploitables :
+ni `game_critical/episode_reward`, ni `episode_length`, ni win rate, et son accumulateur
+d'observations est remis à zéro **sans être publié**. Il compte dans `episode_count`, et là
+seulement — parce que c'est ce compteur qui est persisté et que le run s'arrête dessus.
+
+**Verrous** : [`tests/unit/ai/test_truncated_episodes.py`](../../tests/unit/ai/test_truncated_episodes.py)
+(10 tests : le moteur publie les 16 clés du diagnostic sur une troncature **construite** — plafond
+abaissé, pas une graine espérée ; le vrai `Monitor` de SB3 est **exécuté** pour établir qu'il
+estampille `episode` sur une troncature, fait dont dépend l'ordre des branches ; `_on_step` route
+une troncature avec un `info` de la forme que la production produit — les DEUX clés ; le compteur
+avance et les courbes de jeu ne reçoivent rien ; le bilan donne compte et chemin, zéro compris ;
+`--new --append` refusé en **sous-process** sur le vrai point d'entrée ; la portée ÉVAL : le
+worker relève la troncature qu'il rencontre, les quatre producteurs la routent, `episode_count`
+ne bouge pas, et le bilan sépare les deux portées).
+**Contre-épreuve faite** : diagnostic retiré du moteur → ROUGE ; `episode_count` non incrémenté →
+2 ROUGES ; branche de `_on_step` supprimée → ROUGE ; **discriminant remis sur `episode`** → ROUGE ;
+marqueur `run` retiré → ROUGE ; `shoot_debug` retiré du moteur → ROUGE ; routage d'éval supprimé →
+ROUGE ; routage du holdout FINAL supprimé → ROUGE ; collecte du worker d'éval supprimée → ROUGE ;
+`episode_count` avancé aussi par l'éval → ROUGE ; verrou de concurrence retiré → ROUGE ;
+backstop ne traçant plus → ROUGE ; `makedirs` du journal retiré → ROUGE ; `OSError`
+d'écriture laissée remonter → ROUGE ; clés `gym_*` renommées en `steps`/`step_limit` → ROUGE ;
+refus CLI
+supprimé → ROUGE. Tous rétablis → verts.
+
+⚠️ **Trois verrous VERTS À TORT** dans cette entrée. Deux du motif « code testé mais jamais
+appelé » — le défaut récurrent de ce dépôt, reformé deux fois dans un seul lot — et un du motif
+jumeau « contrôle qui regarde la MAUVAISE chose ».
+(1) La première version du verrou de routage fabriquait un `info` **sans** la clé `episode` du
+Monitor : elle ne pouvait pas voir l'occultation, c'est-à-dire le défaut même qu'elle devait
+attraper.
+(2) Le premier verrou de la portée éval ne testait que le **routage** : supprimer la collecte dans
+le worker le laissait vert. Un test de collecte a été ajouté sur `_eval_worker_task`, avec une
+doublure d'env qui porte `get_wrapper_attr` — le contrat gymnasium réellement emprunté par
+`sb3_contrib.get_action_masks` — au lieu de le contourner.
+(3) Le premier verrou de concurrence observait les **compteurs** : or les deux portées ont des
+clés disjointes (`training` / `eval`), elles ne se marchent jamais dessus. Retirer le verrou le
+laissait vert. L'état réellement partagé est le **journal** — `written`, `dropped`, le fichier :
+`if written >= max_lines` puis `written += 1` est un lire-modifier-écrire, et deux threads
+franchissent le garde ensemble. Le test observe donc la BORNE, avec la fenêtre construite (une
+ligne dont la sérialisation cède la main), et devient rouge sans le verrou.
+
+<a id="s0.60"></a>
+### 0.60 Instrumentation du COÛT — 4 clés d'éval jamais lues (47 Go de workers), temps bloquant, courbes de charge et de participation — ✅ LIVRÉ (2026-08-02)
+
+Là où [§0.56](#s0.56) ferme des angles morts de **comportement**, ces trois-ci portent sur le
+**coût** — la famille de défauts qui ne fait échouer aucun test parce qu'elle ne produit pas
+d'erreur : **elle consomme**.
+
+**1. Quatre clés `bot_eval_*` vivaient au niveau SUPÉRIEUR de la section de phase**, alors que
+toute la chaîne les lit dans `callback_params` (`_resolve_callback_value` côté `train.py`,
+`require_key(callback_params, ...)` côté `bot_evaluation.py`). Elles n'étaient donc lues par
+personne, en silence : `bot_eval_n_workers` retombait sur le repli
+`min(n_envs, n_scenarios × n_bots)` = **24 workers**, quelle que soit la valeur écrite — la passer
+de 6 à 2 puis à 1 n'a jamais rien changé.
+
+| Éval isolée, 48 épisodes, sonde RSS | RSS | Durée |
+|---|---|---|
+| 24 workers (le repli, subi) | **47 Go** | 598 s |
+| 4 workers (la valeur écrite, enfin lue) | **9,6 Go** | 349 s |
+
+Moins de workers est donc aussi **42 % plus rapide** : la VM passait son temps à swapper. Les trois
+lectures par `.get()` à défaut silencieux sont remplacées par une fabrique unique,
+`validate_bot_eval_worker_params`, appelée par `setup_callbacks` **au démarrage** et non plus au
+premier marqueur d'évaluation — un réglage faux échoue maintenant à la seconde 0, pas après des
+heures.
+
+> ⚠️ **Ce défaut est le jumeau exact de [§0.33](#s0.33)** (l'autre moitié du même correctif) : une
+> clé de configuration **écrite mais jamais lue** ne se voit dans AUCUNE sortie. La leçon vaut au-delà
+> de l'éval : toute clé dont la position dans le JSON n'est pas verrouillée par une lecture stricte
+> est un réglage décoratif en puissance.
+
+**2. `blocking_eval_seconds`** ne cumule plus que le temps où la boucle d'entraînement est
+**réellement figée**. Il incluait auparavant du temps recouvert par l'entraînement, ce qui faisait
+afficher à la barre de progression des durées d'épisode **négatives**.
+
+**3. Six courbes comptées CÔTÉ MOTEUR** (elles n'existaient dans aucune sortie) : charges
+**tentées** et **réussies**, pour l'agent ET pour le bot (`02_combat/m_charge_attempts`,
+`o_charge_attempts_bot`, …), plus la **participation par phase**. `game_tactical/charge_rate` a été
+**retiré** dans la même foulée : son dénominateur ne mesurait pas les occasions de charger. La
+charge n'a délibérément **pas** de taux de participation — « avoir eu l'occasion de charger » n'est
+pas décidable sans rejouer le tour ; `m_charge_attempts` et sa colonne adverse répondent sans cette
+ambiguïté.
+
+<a id="s0.59"></a>
+### 0.59 Régime d'entraînement en DEUX PHASES — `decay_fraction` et le profil `x1_selfplay` — 🟠 OUVERT (livré, JAMAIS EXÉCUTÉ) (2026-08-02)
+
+Deux changements de **régime** livrés le 2026-08-02, tous deux **non mesurés**. Ils ne cassent aucun
+contrat d'observation (`obs_size` inchangé à 20828) : ce sont des réglages de run, pas des
+changements d'architecture.
+
+**1. `decay_fraction` — les rampes s'achèvent AVANT la fin du run.** `ramp_episode_span` /
+`schedule_progress` (`ai/training_callbacks.py`) font qu'une rampe se déroule intégralement sur
+`total_episodes × decay_fraction`, puis tient sa valeur d'arrivée. Sans lui, un run de 200 000
+épisodes garde une entropie d'exploration élevée jusqu'au **dernier** épisode et ne consolide
+jamais. Valeurs à HEAD : `x1` = **1.0** (comportement d'avant, inchangé) ; `x1_long` et
+`x1_selfplay` = **0.4** pour `ent_coef` (rampe achevée à 80 000 sur 200 000) et **0.7** pour
+`learning_rate` (achevée à 140 000). La borne est stricte : `decay_fraction ∉ ]0.0, 1.0]` **lève**.
+
+**2. Le profil `x1_selfplay` — une PHASE 2, lancée en `--append` sur le modèle de phase 1.** Un
+snapshot **figé** du modèle lui-même remplace le bot sur une fraction des épisodes :
+
+| Clé `opponent_mix` | Valeur | Raison d'être |
+|---|---|---|
+| `self_play_ratio_start` → `_end` | **0.0 → 0.5** | Démarrage à 100 % bots (l'agent ne sait pas encore ce qu'est un adversaire non scripté), arrivée à moitié-moitié. **Pas 1.0** : l'évaluation note *vs bots*, et un agent qui ne joue plus que contre lui-même dérive vers un équilibre local qu'aucun bot ne récompense — la moitié restante **ancre la mesure**. |
+| `warmup_episodes` | 5 000 (globaux) | Le temps que le run se stabilise après le changement de régime. |
+| `snapshot_update_freq_episodes` | 5 000 | Trop rapide, l'agent poursuit son ombre et les deux dérivent ensemble ; trop lent, il bat un fantoche périmé. Soit ~20 adversaires successifs sur la phase. |
+| `self_play_deterministic` | `false` | Un adversaire déterministe s'exploite par mémorisation. |
+
+Les budgets sont **globaux** et ramenés au budget d'UN environnement par le wrapper — c'est
+exactement le piège de [§0.57](#s0.57), et la raison pour laquelle ce profil n'aurait pas pu
+fonctionner avant lui. Le câblage `self_play_*` de `BotControlledEnv` passe par une source unique,
+`build_self_play_kwargs` : il était auparavant recopié à la main sur chaque site de construction et
+les branches mono-env l'**omettaient**, donc un `opponent_mix.enabled: true` y était ignoré **en
+silence**.
+
+**Ce qui reste ouvert** :
+- ⚠️ **Aucun run de phase 2 n'a jamais tourné.** Le `snapshot_model_path`
+  (`ai/models/ArmageddonAgent/selfplay_snapshot.zip`) n'existe pas encore.
+- `opponent_mix.enabled: true` **lève** hors du chemin de rotation de scénarios (`train.py`, ~l.1970)
+  — seul ce chemin republie un snapshot pendant le run. Une phase 2 doit donc être lancée avec une
+  rotation de scénarios, jamais en mono-scénario.
+- L'interaction avec [§0.58](#s0.58) est **explicitement tranchée dans la config** et mérite d'être
+  relue avant tout lancement : les rampes de **régime** (`learning_rate`, `ent_coef`,
+  `opponent_mix`) comptent depuis CE run, tandis que le **compteur d'épisodes** et la **rampe de
+  déploiement** CONTINUENT (compétence acquise, état persisté par `ai/run_state.py`).
+
 <a id="s0.58"></a>
-### 0.58 Les rampes par-épisode REDÉMARRAIENT à chaque reprise — un modèle convergé revenait à son learning rate initial — ✅ CORRIGÉ (2026-08-02)
+### 0.58 Les rampes par-épisode REDÉMARRAIENT à chaque reprise — la rampe de déploiement n'atteignait jamais son régime — ✅ CORRIGÉ (2026-08-02)
 
 **Suite directe de [§0.57](#s0.57)** : une fois la rampe réparée, elle est repartie de sa valeur de
 DÉPART à chaque fois que les environnements étaient reconstruits — `--append`, `--resume-from`, et
 chaque chunk de curriculum. Cause : `W40KEngine.episode_number` naît à 0 et **rien ne survivait au
 processus**. Le `.zip` ne persiste que `num_timesteps`.
 
-**Trois rampes concernées**, pas une : `learning_rate`, `ent_coef` et le mode de déploiement du
-moteur. La plus dangereuse n'est pas celle du déploiement — c'est le **learning rate** : reprendre
-un modèle déjà convergé à son LR et à son entropie initiaux est la recette exacte du catastrophic
-forgetting que ce projet surveille (`CLAUDE.md`, « pièges connus »). Côté déploiement, l'effet est
-de même nature que §0.57 : un run repris **ne finit jamais** à `active_ratio_end`, donc l'agent est
-noté sur des parties à déployer après un entraînement qui n'a jamais atteint le régime prévu.
-Le défaut est **antérieur** à §0.57 — mais tant que la rampe n'avançait pas, il était invisible.
+**Une seule rampe doit reprendre** — celle du déploiement (voir l'arbitrage « DEUX NATURES DE
+RAMPE » plus bas : `learning_rate`, `ent_coef` et le self-play comptent depuis CE run, et c'est
+voulu). L'effet est de même nature que §0.57 : un run repris **ne finit jamais** à
+`active_ratio_end`, donc l'agent est noté sur des parties à déployer après un entraînement qui n'a
+jamais atteint le régime prévu. Le défaut est **antérieur** à §0.57 — mais tant que la rampe
+n'avançait pas, il était invisible.
 
 **Le compteur est COMPTÉ, pas déduit.** [`ai/run_state.py`](../../ai/run_state.py) persiste le
 nombre d'épisodes joués dans un fichier compagnon du `.zip` (`<stem>_run_state.json`, même patron
@@ -216,14 +464,43 @@ modèle dépend de l'agent, pas du profil. Le mécanisme existait déjà côté 
 et l'affichage de progression par phase. Aucun profil ne portait de bloc `curriculum` : le chemin
 était **inatteignable**.
 
-**Verrous** : [`tests/unit/ai/test_run_state.py`](../../tests/unit/ai/test_run_state.py) (8 tests,
-dont la rampe moteur de bout en bout : index 0 → 0.0, index 50 → 0.5, index 100 → 1.0) et
+**Deux suites de ce compteur, relevées en revue de code le 2026-08-02 et corrigées.**
+(1) `--new` ne gagnait pas sur `--append`. Ce sont deux `store_true` **indépendants** et rien ne
+les rend exclusifs : `--new --append` faisait démarrer un modèle NEUF sur le compte d'épisodes de
+l'ancien — rampe de déploiement à `active_ratio_end` pour des poids initialisés au hasard. La règle
+vit maintenant dans **`prepare_run_artifacts`**, le prologue commun aux **trois** chemins
+d'entraînement (`build_agent_model_path` → `makedirs` → archivage `--new` → offset → index
+par-environnement), qui passe `append_training and not new_model` à `resume_episode_offset`.
+Volontairement **pas** un ordre d'appels : un ordre ne se vérifie pas, il se re-casse au refactor
+suivant — et ce prologue, recopié à la main sur trois sites, avait **déjà divergé trois fois** (un
+`makedirs` enfermé dans le `if new_model` donc jamais joué en `--append`, un `makedirs` en triple
+exemplaire, une annonce de reprise conditionnée tantôt par `append_training` tantôt par l'offset).
+Les deux constructeurs **retournent** désormais l'offset : `main()` le relisait sur disque une
+seconde fois, soit deux lectures par run devant rester d'accord.
+(1 bis) **Les deux drapeaux sont désormais refusés ensemble** au lancement (arbitrage utilisateur
+du 2026-08-03) : une commande dont un drapeau ne sert à rien est une faute de frappe, pas une
+intention. Le helper garde la règle pour les appels programmatiques, que le CLI n'atteint pas.
+(2) `final_summary_target_episodes` recevait le seul budget du run alors que
+`metrics_tracker.episode_count` est désormais **cumulatif** : sur un `--append`, la garde de
+`_on_training_end` était franchie dès le 1er épisode et le résumé « final » de gating s'imprimait
+sur un run interrompu, indiscernable d'un run terminé. La cible est maintenant
+`global_episode_offset + total_eps`, même forme que `target_episode_count`.
+
+**Verrous** : [`tests/unit/ai/test_run_state.py`](../../tests/unit/ai/test_run_state.py) (dont la
+rampe moteur de bout en bout : index 0 → 0.0, index 50 → 0.5, index 100 → 1.0 ; `--new` gagne sur
+`--append` **archivage neutralisé**, sans quoi le test resterait vert en observant l'effet de bord
+de l'archivage ; les trois chemins appellent bien le prologue ; la cible cumulative du résumé final
+ET l'absence d'offset sur les deux rampes de régime) et
 `test_resume_from_checkpoint.py` étendu (l'état suit le checkpoint promu, le modèle écarté garde le
 sien, un checkpoint sans état est refusé **avant toute modification du disque**, les trois artefacts
 partent ensemble à la rotation). Le refus tardif était un défaut réel : placé après la mise à
 l'écart, il laissait l'agent sans `model_<agent>.zip`.
 **Contre-épreuve faite** : index de départ ignoré + état manquant traité comme 0 → 2 tests ROUGES ;
-rétablis → verts.
+`and not new_model` retiré → ROUGE ; `makedirs` renfermé dans le `if new_model` → 2 ROUGES ; un
+chemin qui rejoue le prologue à la main → ROUGE ; cible du résumé final ramenée au seul budget du
+run → ROUGE ; `initial_episode_count` remis sur la rampe LR → ROUGE. Tous rétablis → verts.
+⚠️ Première version du verrou `--new --append` **VERTE À TORT** : elle jouait l'archivage en même
+temps que la règle, donc l'effet de bord de l'archivage la satisfaisait à lui seul.
 
 <a id="s0.57"></a>
 ### 0.57 Les rampes par-épisode du MOTEUR divisaient un compteur LOCAL par le total GLOBAL — la rampe de déploiement est restée figée sur tous les runs vectorisés — ✅ CORRIGÉ (2026-08-02)
@@ -446,6 +723,47 @@ entrée, indépendamment du bot concerné.
    par faction), mais **pas le croisement** — or c'est exactement ce que
    [§10.6](V11_eval_strategy.md#s10.6) demande.
 
+🛠️ **PRÉPARATIFS DU 2026-08-02 — spec prête à appliquer, RIEN N'EST APPLIQUÉ.**
+⏳ **Fenêtre d'application** : `config/` est **relu à chaud par les évaluations** du run en cours
+(`x1_long`, démarré le 2026-08-02 à 12 h 25). Éditer `bot_movement_weights.json` maintenant
+changerait l'adversaire **au milieu** du run et rendrait ses évals intermédiaires incomparables
+entre elles. **Tout ce qui suit s'applique entre deux runs, pas pendant.**
+
+**Étape 1 — mesurer AVANT de changer (le point de comparaison n'existe pas encore).**
+`scripts/bot_ranking.py --bots control,defensive,greedy,value_trade,adaptive,tactical
+--episodes 20` (pool holdout). Sans ce classement de départ, « le nouveau `tactical` est plus
+fort » n'est pas une mesure, c'est une intention. Le script ne demande **aucun modèle** (§0.56) :
+il tourne donc sans attendre la fin du run — mais il **prend du CPU**, à lancer une fois la machine
+libre.
+⚠️ Passer `--episodes 20` **et non 1** : le smoke de §0.56 signale un possible biais de siège
+(6 défaites sur 8 pour le siège « agent »), qui doit être écarté ou confirmé sur cet échantillon
+**avant** de servir de référence.
+
+**Étape 2 — le changement, deux fichiers, aucun autre.**
+1. `config/bot_movement_weights.json` : `tactical` passe de `{w_objective 0.5, w_enemy 0.0}` à
+   **`{w_objective 0.8, w_enemy 0.6}`** (valeur de départ, à régler par l'étape 3). Sa
+   `justification` doit dire ce qui suit, sinon le prochain lecteur la « rééquilibrera » : ce bot
+   est **volontairement hors du plan des bots d'entraînement** ; c'est sa raison d'être, pas un
+   déséquilibre.
+2. `ai/metrics_tracker.py` : ajouter le croisement **bot × faction**, aujourd'hui manquant.
+   ⚠️ **La donnée existe déjà, ne pas la recalculer** : `ai/bot_evaluation._compute_faction_scores`
+   construit `tally[faction][bot_name] = [wins, total]` à partir de `faction_stats`, puis n'en
+   publie que l'agrégat par faction (`log_faction_scores` → `bot_eval/faction/<faction>`). Émettre
+   `bot_eval/faction/<faction>/vs_<bot>` depuis **ce même tally** — un second comptage
+   divergerait au premier changement de pondération. Un roster = une faction ici (SM, Orks), donc
+   « par roster » et « par faction » désignent la même ventilation.
+
+**Étape 3 — régler, puis geler.** Rejouer l'étape 1 avec le `tactical` re-profilé. Cible : un
+`tactical` qui **ne se classe pas dernier** face aux bots d'entraînement — un holdout doit être
+difficile, pas seulement différent. S'il sort trop fort ou trop faible, régler `w_enemy` (c'est le
+paramètre qui le sort de l'enveloppe ; `w_objective` ne fait que le rapprocher de `control`). **Une
+fois le chiffre retenu, il est gelé** : c'est la définition du mètre.
+
+**Ce qui N'EST PAS à toucher, vérifié le 2026-08-02** : `tactical` reste à **poids 0.0** dans
+`bot_eval_weights`, **absent de `bot_training.ratios`**, **exclu du `worst_bot_score`**. Le
+re-profilage change la **force** du holdout, jamais son **statut** — l'y réintroduire d'un cran le
+détruirait en tant que holdout.
+
 ⚠️ **ORDRE — non négociable** : ce chantier se livre **AVANT** de geler la baseline d'évaluation
 et de lancer la mesure de référence. Changer un adversaire d'éval après coup rend toute
 comparaison invalide — c'est exactement ce qui a tué la comparabilité du run 4
@@ -651,9 +969,38 @@ sur [`ai/train.py`](../../ai/train.py), [`ai/env_wrappers.py`](../../ai/env_wrap
 `game_state["debug_mode"]` / `debug_mode`. Inoffensives en production (elles ne s'exécutent pas hors
 mode debug), mais **absentes de toute entrée de ce document** : elles sont arrivées avec le commit
 `5d2dfd48` et ses prédécesseurs, sans trace écrite.
-→ 🟠 **SEUL POINT ENCORE OUVERT de §0.46, et rien ne le bloque** (le run 4 est arrêté depuis
-13 h 08, aucune branche du 2026-07-29 n'y touche) : **à statuer** — instrument **permanent assumé** (alors il se documente ici), ou
-instrument **temporaire** (alors il se retire). Tant que ce n'est pas tranché, ne pas l'étendre.
+→ 🟠 **SEUL POINT ENCORE OUVERT de §0.46** : **à statuer** — instrument **permanent assumé** (alors
+il se documente ici), ou instrument **temporaire** (alors il se retire). Tant que ce n'est pas
+tranché, ne pas l'étendre.
+
+**Relevé complet du 2026-08-02, pour permettre l'arbitrage** (les 37 sites lus un par un) :
+
+| Fichier | n | Ce qui est tracé | Garde |
+|---|---|---|---|
+| `engine/action_decoder.py` | 15 | `_build_deployment_scoring_cache` (entrée, split du snapshot déployé, refs ennemies, cartes de LoS) et `_get_or_build_deployment_scoring_cache` (**hit / miss / update incrémental / échec de l'incrémental → rebuild complet**) | `game_state.get("debug_mode")`, avec `time.perf_counter()` lui-même conditionné |
+| `ai/env_wrappers.py` | 14 | Les **trois boucles bot** (`_run_bot_until_not_bot_turn`, `_ensure_actionable_controlled_turn`, `_play_bot_until_control_returns`) en entrée/sortie, + `reset`, toutes estampillées `env_rank` | `debug_mode` |
+| `engine/w40k_core.py` | 7 | `W40KEngine.step` : entrée, puis **avant/après** chacune des trois étapes (`normalize_action_input`, `convert_squad_action`, `_process_semantic_action`) | `self.game_state.get("debug_mode", False)` |
+| `ai/train.py` | 1 | `_debug_train_marker`, jalons de la phase de construction | `debug_mode` |
+
+🟢 **RECOMMANDATION (2026-08-02) : les GARDER, comme instrument permanent, et les documenter ici.**
+Trois raisons, dans l'ordre de force :
+1. **Ce sont exactement les trois endroits où ce dépôt s'est fait piéger.** Les boucles bot
+   (`env_wrappers`) et le cache de déploiement (`action_decoder`) sont des chemins qui **ne
+   plantent pas — ils consomment ou ils se figent** : c'est la famille de défauts de §0.33, §0.57 et
+   §0.60, la seule que ni un test ni le win-rate ne détecte. Un `env_rank` sur chaque trace est ce
+   qui rend un worker bloqué identifiable parmi 48.
+2. **Le coût hors debug est un test booléen** — un `dict.get` sur le chemin de `step`. La
+   construction des f-strings, le `perf_counter` et le formatage sont **tous à l'intérieur** de la
+   garde : vérifié site par site, aucun n'échappe.
+3. **Le retrait est irréversible en pratique** : ces traces sont chères à réécrire (elles encodent
+   la connaissance de *quoi* regarder), et le prochain blocage de rollout les redemandera.
+
+⚠️ **Si l'arbitrage est « garder », ce point n'est pas clos pour autant** — il reste à
+**verrouiller la garde** : aucun test n'interdit aujourd'hui qu'une trace future construise son
+message **avant** le `if`. Un test qui appelle `step` avec `debug_mode=False` et compte les
+écritures sur `stdout` (attendu : zéro) le tiendrait.
+⏳ **Fenêtre** : ces quatre fichiers sont sur le chemin du run en cours (les sous-processus d'éval
+les **réimportent** à chaque marqueur) — ne rien y toucher tant qu'il tourne.
 
 <a id="s0.47"></a>
 ### 0.47 Relecture T2→T5 (dette §0.19) — 9 écarts, dont un outil d'éval au masque périmé — 🟠 OUVERT : É1, É2, É3, É4, É6 ✅ LIVRÉS ET MERGÉS ; **É8 EST TOMBÉ** ; restent É5, É7, É9 (mergés le 2026-07-29, vérifié le 2026-08-02)

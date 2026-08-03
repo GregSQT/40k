@@ -58,6 +58,9 @@ def _bare_callback(gate_state: Optional[Dict[str, Any]]) -> BotEvaluationCallbac
     callback.rewards_config_name = "CoreAgent"
     callback.scenario_pool = "training"
     callback.model = cast(Any, object())
+    # `_evaluate_against_bots` route les troncatures d'eval vers le tracker (V11 §0.61) ;
+    # ce test-ci n'en a pas, et un `None` explicite vaut mieux qu'un AttributeError.
+    callback.metrics_tracker = None
     callback._pending_eval_future = None
     callback._pending_eval_marker = None
     callback._pending_eval_snapshot_path = None

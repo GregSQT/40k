@@ -892,7 +892,7 @@ class MetricsCollectionCallback(BaseCallback):
         # Ne PAS retirer cet argument : la signature de `evaluate_against_bots` a pour défaut
         # `"training"`, donc l'omettre fait silencieusement mesurer le scénario D'ENTRAÎNEMENT.
         # C'était le bug V11 §0.12 (mesuré : `Scenario ranking: training_armageddon`).
-        return evaluate_against_bots(
+        results = evaluate_against_bots(
             model=model,
             training_config_name=training_config_name,
             rewards_config_name=rewards_config_name,
@@ -902,6 +902,14 @@ class MetricsCollectionCallback(BaseCallback):
             deterministic=eval_deterministic,
             scenario_pool="holdout",
         )
+        # QUATRIEME producteur de resultats d'eval, et le troisieme oubli du meme jumeau : sans
+        # cette ligne, une boucle rencontree pendant le holdout FINAL sortait comptee en NUL
+        # (`winner = -1`) et le run se terminait sur « ✅ Troncatures : 0 ». Le verrou de miroir
+        # est `test_every_eval_producer_routes_its_truncations` (V11 §0.61).
+        if self.metrics_tracker is not None:
+            self.metrics_tracker.log_eval_truncations(require_key(results, "truncations"))
+        return results
+
     
     def _on_step(self) -> bool:
         """Collect step-level data including actions, damage, and unit changes"""
@@ -990,8 +998,21 @@ class MetricsCollectionCallback(BaseCallback):
                     # construction, et hors d'atteinte du defaut « info du bot sous le drapeau de
                     # l'agent » que ce chemin a deja produit.
 
-                    # Handle episode end - check for 'episode' key (Monitor wrapper adds this)
-                    if 'episode' in info:
+                    # Fin d'episode. Le discriminant est le signal GYM, pas une cle du moteur :
+                    # les deux VecEnv de SB3 posent `TimeLimit.truncated = truncated and not
+                    # terminated` (verifie dans leur source), donc les deux branches s'excluent
+                    # par construction et non par l'ordre ou elles sont ecrites.
+                    #
+                    # Ce que ca evite : le `Monitor` pose `info["episode"]` sur `terminated OR
+                    # truncated` (cf. `Monitor.step`), donc discriminer sur `episode` envoyait
+                    # tout episode tronque dans `_handle_episode_end`, qui exige `deployment_mode`
+                    # et `tactical_data` — deux cles que le moteur ne pose que sous `terminated`.
+                    # Le run mourait dessus. Discriminer sur `truncation_reason` corrigeait le
+                    # symptome, mais une troncature venant d'ailleurs que du moteur (un wrapper
+                    # `TimeLimit`) n'aurait pas cette cle et serait retombee dans le meme trou.
+                    if info.get("TimeLimit.truncated"):
+                        self._handle_truncated_episode(info, idx)
+                    elif 'episode' in info:
                         self._handle_episode_end(info, idx)
 
         # Le suivi periodique des Q-values (train/q_value_mean_smooth, toutes les 100 etapes)
@@ -1052,7 +1073,30 @@ class MetricsCollectionCallback(BaseCallback):
             # listes vides, que le tracker sait ne pas transformer en courbe.
             return
         self.metrics_tracker.log_observation_phase_metrics(phase_data)
-        self.episode_observation_phase_data_by_env[int(env_index)] = self._empty_observation_phase_data()
+        self._reset_observation_phase_data(env_index)
+
+    def _reset_observation_phase_data(self, env_index: int) -> None:
+        """Repart d'un accumulateur vide pour CET environnement. Seul proprietaire du geste."""
+        self.episode_observation_phase_data_by_env[int(env_index)] = (
+            self._empty_observation_phase_data()
+        )
+
+    def _handle_truncated_episode(self, info, env_index: int) -> None:
+        """Episode coupe : compte, trace, et repart proprement.
+
+        `truncation_reason` et `truncation_debug` sont EXIGES. On n'arrive ici que sur le signal
+        gym `TimeLimit.truncated` : une troncature venue d'ailleurs que du moteur (un wrapper
+        `TimeLimit` ajoute un jour) leve ici, bruyamment, au lieu d'ecrire une trace qui ne dirait
+        que « ca s'est produit » — exactement l'etat qu'on quitte.
+        """
+        self.episode_count += 1
+        payload = dict(require_key(info, 'truncation_debug'))
+        payload["env_index"] = env_index
+        payload["num_timesteps"] = self.model.num_timesteps
+        self.metrics_tracker.log_truncated_episode(require_key(info, 'truncation_reason'), payload)
+        # L'accumulateur porte les donnees d'un episode qui n'aboutira pas : jete, pas publie.
+        # Le publier ferait entrer dans les courbes un episode que le moteur declare boucle.
+        self._reset_observation_phase_data(env_index)
 
     def _handle_episode_end(self, info, env_index: int):
         """Handle episode completion and log metrics."""
@@ -1111,9 +1155,14 @@ class MetricsCollectionCallback(BaseCallback):
         # le dict de l'episode PRECEDENT, non reinitialise. Chaque courbe tactique aurait alors
         # recompte deux fois le meme episode sans que rien ne le signale.
         # L'exigence est structurelle : W40KEngine.step pose info["episode"] et
-        # info["tactical_data"] dans le MEME bloc `if terminated:` — on n'entre ici que sur
-        # info["episode"], donc l'un ne peut pas arriver sans l'autre. Verifie sur le run
-        # complet : 50 000 episodes joues, 50 000 points logues sur chaque courbe tactique.
+        # info["tactical_data"] dans le MEME bloc `if terminated:`, donc l'un ne peut pas
+        # arriver sans l'autre. Verifie sur le run complet : 50 000 episodes joues, 50 000
+        # points logues sur chaque courbe tactique.
+        # ⚠️ Ce raisonnement tenait a un fil : le `Monitor` de SB3 REECRIT info["episode"] sur
+        # `terminated OR truncated`, donc une troncature entrait ici et levait sur
+        # `tactical_data`. Ce qui protege desormais, c'est le discriminant de `_on_step` —
+        # `info["TimeLimit.truncated"]`, pose par les VecEnv a `truncated and not terminated` —
+        # et non la presence de la cle `episode`.
         tactical_data = require_key(info, 'tactical_data')
         self.episode_tactical_data.update(tactical_data)
         if 'total_actions' not in tactical_data:
@@ -2487,4 +2536,12 @@ class BotEvaluationCallback(BaseCallback):
             scenario_pool=self.scenario_pool,
             model_path=model_path,
         )
+        # Les troncatures relevees dans les process workers rejoignent le journal ICI, ou les
+        # resultats sont PRODUITS — et non dans `_apply_eval_results`, qui decide du gating :
+        # ce dernier est appele directement par les tests de gating, dont les doublures
+        # n'auraient aucune raison de porter une route de journalisation. Sans cette remontee,
+        # le moteur posant `winner = -1`, une troncature d'eval sortait comptee en NUL et le
+        # bilan de fin de run affichait « 0 troncature » (V11 §0.61).
+        if self.metrics_tracker is not None:
+            self.metrics_tracker.log_eval_truncations(require_key(results, "truncations"))
         return results
