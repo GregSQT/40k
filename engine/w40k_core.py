@@ -1645,17 +1645,16 @@ class W40KEngine(gym.Env):
             # le replay le repasse à /api/config/board pour afficher le terrain, les icônes, les
             # zones de déploiement et les segments de murs de CE scénario, qu'aucune autre ligne
             # du journal ne porte.
+            # Contrainte partagée avec les DEUX producteurs de scénarios matérialisés
+            # (`ai.scenario_scratch`, override de wall_ref à l'éval et à l'entraînement) : eux
+            # la respectent en écrivant sous la racine, ce contrôle la constate. Deux
+            # formulations du même invariant avaient de quoi diverger — ici on lit la seule.
             scenario_path_logged = None
             if self._current_scenario_file:
-                _repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                _scenario_abs = os.path.abspath(self._current_scenario_file)
-                _rel = os.path.relpath(_scenario_abs, _repo_root)
-                if _rel.startswith(".."):
-                    raise ValueError(
-                        f"Scenario file hors du dépôt, non journalisable pour le replay : "
-                        f"{_scenario_abs} (racine {_repo_root})"
-                    )
-                scenario_path_logged = _rel.replace(os.sep, "/")
+                from ai.scenario_scratch import assert_under_repo_root
+                scenario_path_logged = assert_under_repo_root(
+                    self._current_scenario_file, "Scenario file"
+                )
             self.step_logger.log_episode_start(
                 episode_units,
                 scenario_name,
