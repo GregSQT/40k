@@ -15,6 +15,34 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from shared.data_validation import require_key
+from engine.utils.weapon_helpers import weapon_rule_parameter
+
+# Échelle subhex/pouce du run en cours d'analyse, lue dans l'entête `Board:` du step.log.
+#
+# Elle vit ICI, et pas dans `ai/analyzer.py`, parce que ce dernier est exécuté comme `__main__`
+# par la CLI : les handlers qui font `from ai.analyzer import ...` en chargent alors une SECONDE
+# copie, avec ses propres globales. Une valeur posée par la CLI n'y serait jamais visible. Ce
+# module, lui, n'est importé que par son chemin de paquet — il n'existe donc qu'en un exemplaire.
+_run_inches_to_subhex: Optional[int] = None
+
+
+def set_run_inches_to_subhex(inches_to_subhex: int) -> None:
+    """Fixe l'échelle du run pour toute la passe d'analyse."""
+    global _run_inches_to_subhex
+    if not isinstance(inches_to_subhex, int) or isinstance(inches_to_subhex, bool) or inches_to_subhex <= 0:
+        raise ValueError(f"inches_to_subhex invalide: {inches_to_subhex!r}")
+    _run_inches_to_subhex = inches_to_subhex
+
+
+def get_run_inches_to_subhex() -> int:
+    """Échelle du run. Lève si elle n'a pas été posée : analyser à l'échelle du config courant
+    produirait des distances fausses (faux positifs d'engagement, contrôles de portée neutralisés)."""
+    if _run_inches_to_subhex is None:
+        raise RuntimeError(
+            "Échelle du run non fixée : set_run_inches_to_subhex() doit être appelé depuis "
+            "l'entête `Board:` du step.log avant tout contrôle géométrique."
+        )
+    return _run_inches_to_subhex
 
 
 @dataclass
@@ -27,6 +55,14 @@ class AnalyzerConfig:
     unit_rules_by_type: Dict[str, Set[str]]
     unit_move_after_shooting_distance_by_type: Dict[str, int]
     unit_is_fly_by_type: Dict[str, bool]
+    unit_is_monster_or_vehicle_by_type: Dict[str, bool]
+    # Socles du registre CONVERTIS à la résolution du run (`_scale_socle`), MÉMOÏSÉS à la
+    # demande : c'est une fonction pure de (unit_type, échelle), résolue une fois au lieu de
+    # deux fois par ligne de tir et une fois par ennemi vivant sur chaque WAIT. Rempli
+    # paresseusement — certaines entrées du registre portent un BASE_SIZE symbolique qui ne se
+    # résout que pour les unités réellement jouées ; le pré-calculer pour tout le registre
+    # ferait lever au chargement sur des unités absentes du log.
+    unit_socle_by_type: Dict[str, Any]
     unit_choice_effect_to_source_rules: Dict[str, Dict[str, Set[str]]]
     display_rule_name_to_ids: Dict[str, Set[str]]
     rule_to_units: Dict[str, Set[str]]
@@ -41,20 +77,28 @@ class AnalyzerConfig:
     rng_nb_by_weapon_global: Dict[str, int]
     cc_nb_by_weapon_global: Dict[str, int]
     rapid_fire_by_weapon_global: Dict[str, int]
+    sustained_hits_by_weapon_global: Dict[str, int]
     weapon_range_global: Dict[str, int]
     weapon_is_close_quarters_global: Dict[str, bool]
 
 
 def load_analyzer_config() -> AnalyzerConfig:
-    """Load all static unit/weapon/rule config from disk. Called once per parse run."""
+    """Load all static unit/weapon/rule config from disk. Called once per parse run.
+
+    L'échelle vient de `get_run_inches_to_subhex()`, donc de l'entête `Board:` du step.log
+    analysé — JAMAIS de `board_config`, qui décrit le prochain run et pas celui qu'on relit.
+    Elle met à l'échelle les portées d'armes et la distance de move-after-shooting ci-dessous.
+    La prendre en paramètre ouvrait un second canal : un appelant pouvait poser une échelle et
+    en passer une autre, sans que rien ne le détecte.
+    """
     from ai.unit_registry import UnitRegistry
     from config_loader import get_config_loader
     from ai.analyzer import max_dice_value
 
+    inches_to_subhex = get_run_inches_to_subhex()
     unit_registry = UnitRegistry()
     config_loader = get_config_loader()
     all_unit_rules_config = config_loader.load_unit_rules_config()
-    inches_to_subhex: int = int(config_loader.get_board_config()["default"]["inches_to_subhex"])
 
     def resolve_effect_rule_id_to_technical(
         rule_id: str, visited: Optional[Set[str]] = None
@@ -89,6 +133,8 @@ def load_analyzer_config() -> AnalyzerConfig:
     unit_rules_by_type: Dict[str, Set[str]] = {}
     unit_move_after_shooting_distance_by_type: Dict[str, int] = {}
     unit_is_fly_by_type: Dict[str, bool] = {}
+    unit_is_monster_or_vehicle_by_type: Dict[str, bool] = {}
+    unit_socle_by_type: Dict[str, Any] = {}
     unit_choice_effect_to_source_rules: Dict[str, Dict[str, Set[str]]] = {}
     display_rule_name_to_ids: Dict[str, Set[str]] = {}
 
@@ -105,12 +151,20 @@ def load_analyzer_config() -> AnalyzerConfig:
         rng_weapons = require_key(unit_data, "RNG_WEAPONS")
         cc_weapons = require_key(unit_data, "CC_WEAPONS")
         unit_keywords = require_key(unit_data, "UNIT_KEYWORDS")
-        unit_is_fly_by_type[unit_type] = any(
-            str(require_key(keyword_entry, "keywordId")).strip().lower() == "fly"
+        keyword_ids_lower = {
+            str(require_key(keyword_entry, "keywordId")).strip().lower()
             for keyword_entry in unit_keywords
+        }
+        unit_is_fly_by_type[unit_type] = "fly" in keyword_ids_lower
+        # 10.06 / 17.03 : les MONSTER/VEHICLE tirent engagés avec TOUTES leurs armes et peuvent
+        # être pris pour cible alors qu'ils sont engagés. Sans ce drapeau, chaque tir d'un
+        # LandSpeeder au contact remontait « tir invalide » + « cible engagée ».
+        unit_is_monster_or_vehicle_by_type[unit_type] = bool(
+            keyword_ids_lower & {"monster", "vehicle"}
         )
         rng_nb_by_weapon: Dict[str, int] = {}
         rapid_fire_by_weapon: Dict[str, int] = {}
+        sustained_hits_by_weapon: Dict[str, int] = {}
         combi_by_weapon: Dict[str, str] = {}
         for weapon in rng_weapons:
             if isinstance(weapon, dict):
@@ -119,38 +173,13 @@ def load_analyzer_config() -> AnalyzerConfig:
                     require_key(weapon, "NB"),
                     "analyzer_rng_nb",
                 )
-                weapon_rules = require_key(weapon, "WEAPON_RULES")
-                rapid_fire_value = 0
-                for rule in weapon_rules:
-                    if isinstance(rule, str) and rule.upper().startswith("RAPID_FIRE:"):
-                        _, rf_raw = rule.split(":", 1)
-                        try:
-                            rapid_fire_value = int(rf_raw)
-                        except (TypeError, ValueError) as exc:
-                            raise ValueError(
-                                f"Invalid RAPID_FIRE rule for {unit_type}/{weapon_name}: {rule}"
-                            ) from exc
-                        if rapid_fire_value <= 0:
-                            raise ValueError(
-                                f"RAPID_FIRE value must be > 0 for {unit_type}/{weapon_name}: {rapid_fire_value}"
-                            )
-                    elif hasattr(rule, "rule") and getattr(rule, "rule", None) == "RAPID_FIRE":
-                        rf_raw = getattr(rule, "parameter", None)
-                        if rf_raw is None:
-                            raise ValueError(
-                                f"RAPID_FIRE rule missing parameter for {unit_type}/{weapon_name}"
-                            )
-                        try:
-                            rapid_fire_value = int(rf_raw)
-                        except (TypeError, ValueError) as exc:
-                            raise ValueError(
-                                f"Invalid RAPID_FIRE parameter for {unit_type}/{weapon_name}: {rf_raw}"
-                            ) from exc
-                        if rapid_fire_value <= 0:
-                            raise ValueError(
-                                f"RAPID_FIRE value must be > 0 for {unit_type}/{weapon_name}: {rapid_fire_value}"
-                            )
-                rapid_fire_by_weapon[weapon_name] = rapid_fire_value
+                # Paramètre des règles d'armes paramétrées : helper MOTEUR
+                # (`weapon_rule_parameter`), qui est déjà le miroir mutualisé de l'extraction
+                # RAPID_FIRE de ce fichier. Le redoubler ici ferait diverger deux contrats —
+                # la copie locale acceptait encore la forme objet que le moteur rejette depuis
+                # le 2026-07-29. `None` = l'arme ne déclare pas la règle → 0, neutre.
+                rapid_fire_by_weapon[weapon_name] = weapon_rule_parameter(weapon, "RAPID_FIRE") or 0
+                sustained_hits_by_weapon[weapon_name] = weapon_rule_parameter(weapon, "SUSTAINED_HITS") or 0
                 combi_key = weapon.get("COMBI_WEAPON")
                 if combi_key is not None:
                     combi_by_weapon[weapon_name] = combi_key
@@ -166,6 +195,7 @@ def load_analyzer_config() -> AnalyzerConfig:
             "rng_nb_by_weapon": rng_nb_by_weapon,
             "cc_nb_by_weapon": cc_nb_by_weapon,
             "rapid_fire_by_weapon": rapid_fire_by_weapon,
+            "sustained_hits_by_weapon": sustained_hits_by_weapon,
         }
         weapons_info: List[Dict] = []
         for weapon in rng_weapons:
@@ -264,6 +294,7 @@ def load_analyzer_config() -> AnalyzerConfig:
     rng_nb_by_weapon_global: Dict[str, int] = {}
     cc_nb_by_weapon_global: Dict[str, int] = {}
     rapid_fire_by_weapon_global: Dict[str, int] = {}
+    sustained_hits_by_weapon_global: Dict[str, int] = {}
     weapon_range_global: Dict[str, int] = {}
     weapon_is_close_quarters_global: Dict[str, bool] = {}
     for _ut, _limits in unit_attack_limits.items():
@@ -271,6 +302,8 @@ def load_analyzer_config() -> AnalyzerConfig:
             rng_nb_by_weapon_global[_wname] = max(rng_nb_by_weapon_global.get(_wname, 0), _nb)  # get allowed : max cumulatif, 0 = neutre
         for _wname, _rf in _limits["rapid_fire_by_weapon"].items():
             rapid_fire_by_weapon_global[_wname] = max(rapid_fire_by_weapon_global.get(_wname, 0), _rf)  # get allowed : max cumulatif, 0 = neutre
+        for _wname, _sh in _limits["sustained_hits_by_weapon"].items():
+            sustained_hits_by_weapon_global[_wname] = max(sustained_hits_by_weapon_global.get(_wname, 0), _sh)  # get allowed : max cumulatif, 0 = neutre
         for _wname, _nb in _limits["cc_nb_by_weapon"].items():
             cc_nb_by_weapon_global[_wname] = max(cc_nb_by_weapon_global.get(_wname, 0), _nb)  # get allowed : max cumulatif, 0 = neutre
     for _ut, _winfos in unit_weapons_cache.items():
@@ -288,6 +321,8 @@ def load_analyzer_config() -> AnalyzerConfig:
         unit_rules_by_type=unit_rules_by_type,
         unit_move_after_shooting_distance_by_type=unit_move_after_shooting_distance_by_type,
         unit_is_fly_by_type=unit_is_fly_by_type,
+        unit_is_monster_or_vehicle_by_type=unit_is_monster_or_vehicle_by_type,
+        unit_socle_by_type=unit_socle_by_type,
         unit_choice_effect_to_source_rules=unit_choice_effect_to_source_rules,
         display_rule_name_to_ids=display_rule_name_to_ids,
         rule_to_units=rule_to_units,
@@ -297,6 +332,7 @@ def load_analyzer_config() -> AnalyzerConfig:
         rng_nb_by_weapon_global=rng_nb_by_weapon_global,
         cc_nb_by_weapon_global=cc_nb_by_weapon_global,
         rapid_fire_by_weapon_global=rapid_fire_by_weapon_global,
+        sustained_hits_by_weapon_global=sustained_hits_by_weapon_global,
         weapon_range_global=weapon_range_global,
         weapon_is_close_quarters_global=weapon_is_close_quarters_global,
     )

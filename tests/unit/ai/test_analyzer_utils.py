@@ -139,6 +139,8 @@ def test_geometry_and_los_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_adjacency_and_position_cache_helpers() -> None:
+    # Les primitives géométriques exigent l'échelle du run ; hors parse_step_log, on la pose.
+    an.set_analyzer_board_scale(1)
     assert an.is_adjacent(1, 1, 2, 1) is True
     assert an.parse_timestamp_to_seconds("[01:02:03] line") == 3723
     assert an.parse_timestamp_to_seconds("line") is None
@@ -154,8 +156,26 @@ def test_adjacency_and_position_cache_helpers() -> None:
     assert an.is_within_engine_engagement_zone("a1", unit_player, unit_positions, unit_hp, engagement_zone=2) is True
     unit_positions["e1"] = (2, 1)
     assert an._build_enemy_adjacent_hexes(unit_positions, unit_player, unit_hp, player=1)
-    occ = an._build_occupied_positions(unit_positions, unit_hp, exclude_unit_id="a1")
-    assert (2, 1) in occ
+    # 03.01 : une figurine traverse ses ALLIES, jamais un ennemi. Ici e1 est ennemi de a1 (P1),
+    # donc bloquant, et ses DEUX socles occupent — pas seulement son ancre.
+    occ, ez_band = an._build_move_bfs_blockers(
+        {"e1": {"e1#0": (2, 1), "e1#1": (2, 3)}}, unit_positions, {}, unit_player, unit_hp,
+        mover_unit_id="a1",
+    )
+    assert (2, 1) in occ and (2, 3) in occ
+    # La bande d'EZ ennemie se traverse (can_move_through_enemy_engagement_zone) : pas un obstacle.
+    assert ez_band == set()
+    # Unité sans donnée per-figurine : repli sur son ancre (donnée absente, pas contrôle désarmé).
+    occ_anchor, _ = an._build_move_bfs_blockers(
+        {}, unit_positions, {}, unit_player, unit_hp, mover_unit_id="a1",
+    )
+    assert occ_anchor == {(2, 1)}
+    # Le même e1 vu par un ALLIÉ ne bloque plus rien (le camp vient de `unit_player`).
+    occ_friendly, _ = an._build_move_bfs_blockers(
+        {"e1": {"e1#0": (2, 1)}}, unit_positions, {}, {"e1": 2, "a1": 2}, unit_hp,
+        mover_unit_id="a1",
+    )
+    assert occ_friendly == set()
 
     path_len = an._bfs_shortest_path_length(1, 1, 3, 1, 5, set(), set(), set())
     assert path_len is not None
@@ -166,7 +186,6 @@ def test_adjacency_and_position_cache_helpers() -> None:
 
     enemies = an.get_adjacent_enemies(1, 1, unit_player, unit_positions, unit_hp, {"e1": "x"}, player=1)
     assert "e1" in enemies
-    assert an.is_engaged("a1", unit_player, unit_positions, unit_hp) is True
 
     cache = {}
     an._position_cache_set(cache, "u1", 3, 4)
@@ -296,6 +315,9 @@ _LOG_HEAD = [
     "[12:00:00] === EPISODE 1 START ===",
     "[12:00:00] Scenario: scenario_demo",
     "[12:00:00] Walls: none",
+    # L'échelle du run vient de CETTE ligne, jamais du config courant : sans elle
+    # `parse_step_log` refuse d'analyser (cf. parse_board_scale_from_log).
+    "[12:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1",
 ]
 _LOG_END = (
     "[12:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, "

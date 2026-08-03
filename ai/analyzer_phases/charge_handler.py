@@ -135,6 +135,7 @@ def handle_charge(
             _position_cache_set(state.unit_positions, charge_unit_id, start_col, start_row)
 
         # RULE: Charge from adjacent
+        from ai.analyzer_perfig import surviving_start_models
         if charge_unit_id not in state.units_advanced:
             if is_within_engine_engagement_zone(
                 charge_unit_id,
@@ -142,6 +143,13 @@ def handle_charge(
                 state.unit_positions,
                 state.unit_hp,
                 engagement_zone=_get_engagement_zone_for_analyzer(),
+                positions_by_model=state.positions_by_model,
+                unit_base=state.unit_base,
+                # Socles AVANT la charge, morts exclus (cf. surviving_start_models).
+                subject_models=surviving_start_models(
+                    state.positions_by_model.get(charge_unit_id),  # get allowed
+                    state.current_line_models.get(charge_unit_id),  # get allowed
+                ),
                 position_override=(start_col, start_row),
             ):
                 adjacent_enemies = get_adjacent_enemies(start_col, start_row, state.unit_player, state.unit_positions, state.unit_hp, state.unit_types, player)

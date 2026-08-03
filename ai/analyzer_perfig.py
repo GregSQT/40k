@@ -185,3 +185,73 @@ def models_for_unit(
     if not m:
         return None
     return m
+
+
+def surviving_start_models(
+    prev_models: Optional[Dict[str, Tuple[int, int]]],
+    line_models: Optional[Dict[str, Tuple[int, int]]],
+) -> Optional[Dict[str, Tuple[int, int]]]:
+    """Socles d'une escouade AVANT son action, réduits à ceux qui y ont survécu.
+
+    `positions_by_model` porte le dernier `[MODELS:]` où l'unité était l'ACTRICE : une escouade
+    fauchée pendant le tir adverse y garde ses socles morts jusqu'à sa prochaine action. Mesurer
+    l'engagement de départ sur ce jeu-là, c'est le mesurer sur des figurines retirées du plateau
+    — un « advance from adjacent » a été fabriqué exactement comme ça.
+
+    Les VIVANTS sont listés par le `[MODELS:]` de la ligne en cours, leurs positions de DÉPART
+    par le jeu précédent : on croise les deux. Même convention que le contrôle de distance
+    per-socle du move (`common_mids`). Retourne None si le croisement est vide — l'appelant
+    retombe alors sur l'ancre, donnée absente plutôt que mesure fausse.
+    """
+    if not prev_models or not line_models:
+        return prev_models or None
+    survivors = {mid: pos for mid, pos in prev_models.items() if mid in line_models}
+    return survivors or None
+
+
+def footprint_or_anchor(
+    unit_id: str,
+    models: Optional[Dict[str, Tuple[int, int]]],
+    unit_base: Dict[str, Base],
+    anchor: Optional[Tuple[int, int]],
+) -> Set[Tuple[int, int]]:
+    """Empreinte d'une escouade : ses socles si on les connaît, son ancre sinon.
+
+    Repli unique de tout l'analyzer sur ce point. Il était écrit en trois exemplaires (mesure
+    d'engagement, obstacles du BFS de mouvement, engagement tireur↔cible) : le jour où le repli
+    change — lever plutôt que rendre l'ancre, par exemple — trois copies devraient suivre.
+    Empreinte VIDE (aucun socle, aucune ancre) = donnée absente, l'appelant décide.
+    """
+    if models:
+        return squad_footprint(models, _unit_base(unit_base, unit_id))
+    return {anchor} if anchor is not None else set()
+
+
+def model_cache_entries(
+    unit_id: str,
+    models: Optional[Dict[str, Tuple[int, int]]],
+    unit_base: Dict[str, Base],
+    anchor: Optional[Tuple[int, int]],
+    player: int,
+) -> List[Dict[str, object]]:
+    """Entrées `units_cache` moteur — UNE PAR FIGURINE, socle réel.
+
+    Les primitives d'engagement du moteur (`entries_in_engagement_zone`) mesurent entre DEUX
+    entrées : en métrique hex par empreintes, en métrique euclidienne par
+    `socle_from_cache_entry`, qui lit `BASE_SHAPE`/`BASE_SIZE` **et l'ancre** de l'entrée. Une
+    entrée par ESCOUADE y perdrait donc toutes les figurines sauf l'ancre dès que la métrique
+    est euclidienne — exactement le défaut qu'on corrige. Une entrée par figurine rend la mesure
+    per-socle exacte quelle que soit la métrique.
+
+    Sans donnée per-figurine : une seule entrée à l'ancre (donnée absente, pas mesure fausse).
+    """
+    shape, size = _unit_base(unit_base, unit_id)
+    positions = list(models.values()) if models else ([anchor] if anchor is not None else [])
+    return [
+        {
+            "col": col, "row": row, "player": int(player),
+            "occupied_hexes": _model_footprint(col, row, (shape, size)),
+            "BASE_SHAPE": shape, "BASE_SIZE": size, "orientation": 0,
+        }
+        for (col, row) in positions
+    ]

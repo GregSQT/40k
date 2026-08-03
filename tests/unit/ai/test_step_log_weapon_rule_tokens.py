@@ -45,6 +45,11 @@ TARGET = (80, 50)  # 30 subhex = 6" — dans la DEMI-portée (60), donc RAPID FI
 TARGET_FAR = (160, 50)  # 110 subhex = 22" — dans la portée, HORS demi-portée
 OBJECTIVES = ";".join(f"(150,{r})" for r in range(150, 156))
 
+# [SUSTAINED HITS X] : l'analyzer recoupe le marqueur avec l'ARMURERIE (marqueur sur une arme
+# qui ne déclare pas la règle = parse error). Il faut donc un profil qui la porte réellement.
+SUSTAINED_UNIT = "EradicatorHeavyBolter"
+SUSTAINED_WEAPON = "Heavy Bolter"
+
 
 def _uc(col, row, *, player, models=None):
     """Entrée units_cache. `occupied_hexes_by_model` est ce dont `_models_segment_for_unit`
@@ -58,10 +63,10 @@ def _uc(col, row, *, player, models=None):
 
 
 def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
-                unit_rules=(), cover=False):
+                unit_rules=(), cover=False, unit_type=UNIT_TYPE, weapon_name=WEAPON_NAME):
     """Tireur '1' vs cible '101', 1 attaque, en `gym_training_mode` (allocation auto)."""
     weapon = {"ATK": 3, "STR": 4, "AP": -1, "DMG": 1, "NB": 2, "RNG": WEAPON_RANGE,
-              "WEAPON_RULES": list(weapon_rules), "display_name": WEAPON_NAME}
+              "WEAPON_RULES": list(weapon_rules), "display_name": weapon_name}
     attacker = {"id": "1#0", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
                 "col": SHOOTER[0], "row": SHOOTER[1], "RNG_WEAPONS": [weapon]}
     target_model = {"id": "101#0", "squad_id": "101", "player": 1, "T": 4, "HP_CUR": 9, "HP_MAX": 9,
@@ -76,7 +81,7 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
         "squad_cache": {"1": {"model_count_at_start": 1}, "101": {"model_count_at_start": 1}},
         "units_cache": {"1": _uc(*SHOOTER, player=0, models={"1#0": SHOOTER}),
                         "101": _uc(*target, player=1, models={"101#0": target})},
-        "units": [{"id": "1", "player": 0, "unitType": UNIT_TYPE},
+        "units": [{"id": "1", "player": 0, "unitType": unit_type},
                   {"id": "101", "player": 1, "unitType": "AssaultIntercessor"}],
         # `deployed_on_turn` : clause 2 de [HEAVY] 24.16 (« not set up this turn »), lue par
         # le moteur. 0 = posée avant la bataille.
@@ -93,7 +98,8 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
 
 
 def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, target=TARGET,
-                      n_attacks=1, unit_rules=(), cover=False):
+                      n_attacks=1, unit_rules=(), cover=False, unit_type=UNIT_TYPE,
+                      weapon_name=WEAPON_NAME):
     """Fait jouer UN tir par le vrai moteur et rend (game_state, action_log de type 'shoot')."""
     seq = list(rolls)
 
@@ -109,7 +115,8 @@ def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, tar
         shooting_handlers, "_is_adjacent_to_enemy_within_cc_range", lambda gs, u: False
     )
     gs = _game_state(weapon_rules, moved_inches=moved_inches, target=target,
-                     n_attacks=n_attacks, unit_rules=unit_rules, cover=cover)
+                     n_attacks=n_attacks, unit_rules=unit_rules, cover=cover,
+                     unit_type=unit_type, weapon_name=weapon_name)
     build_manual_shoot_allocation(gs, "1")
     shoot_logs = [l for l in gs["action_logs"] if l.get("type") == "shoot"]
     assert shoot_logs, "le moteur n'a émis aucun log de tir"
@@ -166,7 +173,7 @@ def _step_log_line(tmp_path, gs, raw_log):
     return _step_log_lines(tmp_path, gs, raw_log)[0]
 
 
-def _analyzer_stats(tmp_path, engine_lines):
+def _analyzer_stats(tmp_path, engine_lines, *, unit_type=UNIT_TYPE):
     """Injecte la/les ligne(s) PRODUITE(S) PAR LE MOTEUR dans un step.log valide, et lance
     le vrai analyzer dessus."""
     import ai.analyzer as an
@@ -187,7 +194,7 @@ def _analyzer_stats(tmp_path, engine_lines):
         "[10:00:00] Walls: \n"
         f"[10:00:00] Objectives: rect b NW:{OBJECTIVES}\n"
         "[10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1\n"
-        f"[10:00:00] Unit 1 ({UNIT_TYPE}) P1: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+        f"[10:00:00] Unit 1 ({unit_type}) P1: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
         "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
         "[10:00:00] === ACTIONS START ===\n"
         f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) DEPLOYED from (-1,-1) to ({SHOOTER[0]},{SHOOTER[1]}) [R:+0.0] [SUCCESS]\n"
@@ -403,3 +410,50 @@ def test_sans_couvert_aucun_token(monkeypatch, tmp_path):
     line = _step_log_line(tmp_path, gs, raw_log)
 
     assert "COVER" not in line, line
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [SUSTAINED HITS X] 24.36 — la touche additionnelle n'est PAS une attaque
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_la_touche_additionnelle_porte_son_marqueur(monkeypatch, tmp_path):
+    """Maillon 1-3 : le moteur marque déjà le record (`sustainedHit`) ; sans le mapping ni le
+    token, la ligne est un `Hit None(3+)` que rien ne distingue d'une ligne malformée."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["SUSTAINED_HITS:1"], [6, 4, 2, 4, 2],
+                                    unit_type=SUSTAINED_UNIT, weapon_name=SUSTAINED_WEAPON)
+    lines = _step_log_lines(tmp_path, gs, raw_log)
+
+    sustained = [l for l in lines if "[SUSTAINED HITS]" in l]
+    assert len(sustained) == 1, lines
+    assert "Hit None(" in sustained[0], sustained[0]
+    # La touche NORMALE du même jet critique ne porte pas le marqueur.
+    assert sum("[SUSTAINED HITS]" in l for l in lines) < len(lines), lines
+
+
+def test_l_analyzer_ne_compte_pas_la_touche_additionnelle_dans_le_plafond(monkeypatch, tmp_path):
+    """Maillon 4, LE défaut : 2 attaques (plafond NB=2) toutes deux critiques produisent
+    4 lignes. Compter les touches additionnelles comme des tirs faisait remonter
+    `shots over RNG_NB` sur un tir parfaitement légal — signature vécue : 12 lignes de Heavy
+    Bolter pour 9 attaques, 3 erreurs."""
+    gs, raw_log = _engine_shoot_log(
+        monkeypatch, ["SUSTAINED_HITS:1"], [6, 4, 2, 4, 2, 6, 4, 2, 4, 2], n_attacks=2,
+        unit_type=SUSTAINED_UNIT, weapon_name=SUSTAINED_WEAPON,
+    )
+    lines = _step_log_lines(tmp_path, gs, raw_log)
+    assert len(lines) == 4, f"prémisse : 2 attaques + 2 touches additionnelles = 4 lignes {lines}"
+
+    stats = _analyzer_stats(tmp_path, lines, unit_type=SUSTAINED_UNIT)
+
+    assert stats["shoot_over_rng_nb"][1] == 0, stats["shoot_over_rng_nb"]
+
+
+def test_l_analyzer_atteste_l_usage_de_sustained_hits(monkeypatch, tmp_path):
+    """1.8 annonçait « NOT USED » sur une règle qui venait de servir : sans marqueur, l'usage
+    n'était attestable par rien."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["SUSTAINED_HITS:1"], [6, 4, 2, 4, 2],
+                                    unit_type=SUSTAINED_UNIT, weapon_name=SUSTAINED_WEAPON)
+    stats = _analyzer_stats(tmp_path, _step_log_lines(tmp_path, gs, raw_log),
+                            unit_type=SUSTAINED_UNIT)
+
+    usage = {k: v for k, v in stats["weapon_rule_usage"].items() if k[0] == "SUSTAINED_HITS"}
+    assert usage and any(sum(v.values()) > 0 for v in usage.values()), stats["weapon_rule_usage"]

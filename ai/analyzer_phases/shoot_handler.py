@@ -24,12 +24,28 @@ def _analyzer_socle(config: "AnalyzerConfig", unit_type: str, col: int, row: int
     Portée tir euclidienne bord-à-bord (règle 01.04) : l'analyzer mesure comme le
     moteur en rebâtissant l'empreinte à partir de BASE_SHAPE/BASE_SIZE.
     """
-    from engine.hex_utils import Socle, compute_occupied_hexes
-    data = config.unit_registry.get_unit_data(unit_type)
-    shape = require_key(data, "BASE_SHAPE")
-    size = require_key(data, "BASE_SIZE")
-    fp = compute_occupied_hexes(int(col), int(row), shape, size)
-    return Socle(shape, size, int(col), int(row), fp)
+    from engine.hex_utils import Socle
+    from ai.analyzer_perfig import _model_footprint
+    # Le registre porte le socle de la DATASHEET (unités ×10) ; le board le convertit à sa
+    # résolution — et à x1 le normalise en round/1 (une figurine = une case). Sans cette
+    # conversion l'analyzer bâtissait une empreinte de 13 cases de diamètre pour un
+    # Intercessor sur un board 44×60 : toute mesure bord-à-bord en découlait fausse.
+    # Conversion résolue UNE FOIS par unit_type au chargement, empreinte mémoïsée : ce helper
+    # est appelé deux fois par ligne de tir et une fois par ennemi vivant sur chaque WAIT.
+    socle = config.unit_socle_by_type.get(unit_type)  # get allowed : cache rempli à la demande
+    if socle is None:
+        from engine.game_state import _scale_socle
+        from ai.analyzer import _get_inches_to_subhex_for_analyzer
+        data = config.unit_registry.get_unit_data(unit_type)
+        socle = _scale_socle(
+            require_key(data, "BASE_SHAPE"),
+            require_key(data, "BASE_SIZE"),
+            _get_inches_to_subhex_for_analyzer(),
+            f"analyzer_socle/{unit_type}",
+        )
+        config.unit_socle_by_type[unit_type] = socle
+    shape, size = socle
+    return Socle(shape, size, int(col), int(row), set(_model_footprint(int(col), int(row), (shape, size))))
 
 
 def handle_shoot(
@@ -301,6 +317,41 @@ def handle_shoot(
                                 'line': line.strip()
                             }
                         state.combi_conflicts_seen.add(conflict_key)
+                # [SUSTAINED HITS X] 24.36 — une touche additionnelle n'est PAS une attaque :
+                # elle ne consomme aucun tir du pool, donc elle ne compte pas dans le plafond.
+                # Le moteur l'écrit sans jet de touche (`Hit None(...)`) et la marque
+                # explicitement ; sans exclusion, 3 figurines × A3 + 3 critiques produisaient
+                # 12 lignes pour un plafond de 9 → 3 faux « shots over RNG_NB ».
+                sustained_hits_by_weapon = require_key(limits, "sustained_hits_by_weapon")
+                sustained_hits_value = resolve_weapon_value(
+                    weapon_name_for_limits, sustained_hits_by_weapon,
+                    config.sustained_hits_by_weapon_global,
+                )
+                if sustained_hits_value is None:
+                    sustained_hits_value = 0
+                is_sustained_hit_line = re.search(
+                    r'\[SUSTAINED(?: |_)?HITS\]', action_desc, re.IGNORECASE
+                ) is not None
+                if is_sustained_hit_line:
+                    if sustained_hits_value <= 0:
+                        stats['parse_errors'].append({
+                            'episode': state.current_episode_num,
+                            'turn': turn,
+                            'phase': phase,
+                            'line': line.strip(),
+                            'error': (
+                                f"SUSTAINED HITS marker present for weapon without SUSTAINED_HITS "
+                                f"rule: {shooter_unit_type}/{weapon_name_for_limits}"
+                            )
+                        })
+                    else:
+                        _sustained_key = (
+                            "SUSTAINED_HITS",
+                            f"{weapon_display_name} ({shooter_unit_type})",
+                        )
+                        _shooter_pl = require_key(state.unit_player, shooter_id)
+                        stats['weapon_rule_usage'][_sustained_key][int(_shooter_pl)] += 1
+
                 seq_key = (state.current_episode_num, turn, shooter_id, weapon_name_for_limits)
                 if (state.last_shoot_shooter_id != shooter_id or
                         state.last_shoot_weapon != weapon_name_for_limits):
@@ -309,7 +360,8 @@ def handle_shoot(
                     state.shot_sequence_counts[seq_key] = 0
                 if seq_key not in state.shot_sequence_counts:
                     state.shot_sequence_counts[seq_key] = 0
-                state.shot_sequence_counts[seq_key] += 1
+                if not is_sustained_hit_line:
+                    state.shot_sequence_counts[seq_key] += 1
                 current_shot_index = state.shot_sequence_counts[seq_key]
                 shooter_player_for_stats = require_key(state.unit_player, shooter_id)
                 # Class B (comptage per-figurine) : le plafond de tirs d'une escouade =
@@ -399,6 +451,9 @@ def handle_shoot(
                 state.unit_hp,
                 engagement_zone=_get_engagement_zone_for_analyzer(),
                 position_override=target_pos,
+                positions_by_model=state.positions_by_model,
+                unit_base=state.unit_base,
+                subject_models=state.positions_by_model.get(target_id),  # get allowed
             )
     elif target_id in state.unit_positions:
         stats['parse_errors'].append({
@@ -440,13 +495,60 @@ def handle_shoot(
                     state.unit_hp,
                     engagement_zone=_get_engagement_zone_for_analyzer(),
                     position_override=target_pos_from_cache,
+                    positions_by_model=state.positions_by_model,
+                    unit_base=state.unit_base,
+                    subject_models=state.positions_by_model.get(target_id),  # get allowed
                 )
             else:
                 target_engaged = False
     else:
         target_engaged = False
 
-    if target_engaged and not is_close_quarters:
+    # 10.06 / 17.03 — MONSTER/VEHICLE. Deux exemptions distinctes, aucune n'est un repli :
+    #  - TIREUR M/V : engagé, il est éligible au close-quarters shooting avec TOUTES ses armes
+    #    (10.06 « Has one or more [CLOSE-QUARTERS] weapons OR is a MONSTER/VEHICLE unit »), et
+    #    peut cibler les unités avec lesquelles il est engagé, à -1 pour toucher.
+    #  - CIBLE M/V : 17.03 « enemy MONSTER/VEHICLE units that are engaged can be selected as
+    #    targets of ranged attacks ». L'interdiction de tirer sur une unité engagée ne la vise pas.
+    # Sans ces deux exemptions, chaque tir d'un LandSpeeder au contact remontait deux erreurs
+    # (« tir invalide adjacent » + « cible engagée ») alors que le moteur applique correctement
+    # le -1 (Gatling 3+ -> 4+, Multi-Melta 4+ -> 5+ dans step.log).
+    shooter_is_monster_or_vehicle = bool(require_key(
+        config.unit_is_monster_or_vehicle_by_type, require_key(state.unit_types, shooter_id)
+    ))
+    target_is_monster_or_vehicle = (
+        target_id in state.unit_types
+        and bool(require_key(
+            config.unit_is_monster_or_vehicle_by_type, require_key(state.unit_types, target_id)
+        ))
+    )
+
+    # L'exemption TIREUR ne vaut que pour la cible avec laquelle il est LUI-MÊME engagé (10.06
+    # « Models in your unit can target enemy units your unit is engaged with ») : un M/V qui
+    # tire sur une autre unité engagée avec un allié reste en faute.
+    shooter_engaged_with_target = False
+    if target_pos is not None and shooter_is_monster_or_vehicle:
+        # Même primitive que tout le reste de l'analyzer, restreinte à CETTE cible : elle porte
+        # la mesure per-figurine ET la métrique du run. Une mesure écrite à la main ici
+        # rejouerait la divergence hex↔euclidien.
+        shooter_engaged_with_target = is_within_engine_engagement_zone(
+            shooter_id,
+            state.unit_player,
+            {target_id: (target_pos[0], target_pos[1])},
+            state.unit_hp,
+            engagement_zone=_get_engagement_zone_for_analyzer(),
+            positions_by_model=state.positions_by_model,
+            unit_base=state.unit_base,
+            subject_models=state.current_line_models.get(shooter_id),  # get allowed
+            position_override=(shooter_col, shooter_row),
+        )
+
+    if (
+        target_engaged
+        and not is_close_quarters
+        and not target_is_monster_or_vehicle
+        and not shooter_engaged_with_target
+    ):
         stats['shoot_at_engaged_enemy'][player] += 1
         if stats['first_error_lines']['shoot_at_engaged_enemy'][player] is None:
             stats['first_error_lines']['shoot_at_engaged_enemy'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
@@ -461,6 +563,10 @@ def handle_shoot(
             state.unit_positions,
             state.unit_hp,
             engagement_zone=_get_engagement_zone_for_analyzer(),
+            positions_by_model=state.positions_by_model,
+            unit_base=state.unit_base,
+            # Socles du tireur SUR CETTE LIGNE : le `[MODELS:]` de l'action de tir.
+            subject_models=state.current_line_models.get(shooter_id),  # get allowed
             position_override=(shooter_col, shooter_row),
         )
         if is_close_quarters:
@@ -476,7 +582,10 @@ def handle_shoot(
                             'line': line.strip()
                         }
         else:
-            if distance == 1:
+            # 10.06 : un tireur MONSTER/VEHICLE engagé tire avec TOUTES ses armes sur l'unité
+            # avec laquelle il est engagé — l'arme non-[CLOSE_QUARTERS] au contact est légale
+            # pour lui (elle subit le -1, que le moteur applique déjà).
+            if distance == 1 and not shooter_is_monster_or_vehicle:
                 stats['non_close_quarters_adjacent_shots'][player] += 1
                 stats['shoot_invalid'][player]['adjacent_non_close_quarters'] += 1
                 if stats['first_error_lines']['shoot_invalid'][player] is None:
@@ -490,8 +599,9 @@ def handle_shoot(
             shooter_models = state.current_line_models.get(shooter_id)
             target_models = state.positions_by_model.get(target_id)
             if shooter_models and target_models:
-                shooter_base = state.unit_base.get(shooter_id, ("round", 1))
-                target_base = state.unit_base.get(target_id, ("round", 1))
+                from ai.analyzer_perfig import _DEFAULT_BASE
+                shooter_base = state.unit_base.get(shooter_id, _DEFAULT_BASE)  # get allowed
+                target_base = state.unit_base.get(target_id, _DEFAULT_BASE)  # get allowed
                 edge_dist = squads_min_edge_distance(
                     shooter_models, shooter_base, target_models, target_base,
                     max_distance=int(weapon_range),
@@ -780,7 +890,7 @@ def handle_advance(
         is_within_engine_engagement_zone,
         _get_engagement_zone_for_analyzer,
         _get_inches_to_subhex_for_analyzer,
-        _build_occupied_positions,
+        _build_move_bfs_blockers,
         _build_enemy_adjacent_hexes,
         _bfs_shortest_path_length,
         get_adjacent_enemies,
@@ -793,7 +903,10 @@ def handle_advance(
         stats['shoot_vs_wait']['advance'] += 1
         stats['shoot_vs_wait_by_player'][player]['advance'] += 1
 
-    advance_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) ADVANCED from \((\d+),\s*(\d+)\) to \((\d+),\s*(\d+)\)', action_desc)
+    # Token optionnel `[FLY]` accepté, comme dans les regex de MOVED/FLED : sans lui l'advance
+    # d'une escouade volante n'est pas parsée et sa position reste figée.
+    from ai.analyzer_core import move_line_re
+    advance_match = move_line_re("ADVANCED").search(action_desc)
     if not advance_match:
         stats['parse_errors'].append({
             'episode': state.current_episode_num,
@@ -885,10 +998,17 @@ def handle_advance(
             require_key(state.unit_move, advance_unit_id)
             + advance_roll * _get_inches_to_subhex_for_analyzer()
         )
-        occupied_positions = _build_occupied_positions(state.unit_positions, state.unit_hp, advance_unit_id)
-        enemy_adjacent_hexes = _build_enemy_adjacent_hexes(state.unit_positions, state.unit_player, state.unit_hp, player)
+        occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
+            state.positions_by_model, state.unit_positions, state.unit_base,
+            state.unit_player, state.unit_hp, advance_unit_id,
+        )
         advance_unit_type = require_key(state.unit_types, advance_unit_id)
-        advance_is_fly = require_key(config.unit_is_fly_by_type, advance_unit_type)
+        # 21.03 — jumeau du move : la traversée suit la DÉCLARATION loguée, pas le keyword du
+        # registre. Le keyword exemptait toute unité volante même quand elle n'avait pas déclaré
+        # (donc n'avait pas payé les -2" et ne traversait rien).
+        advance_is_fly = re.search(
+            r'ADVANCED\s+\[FLY\]\s+from', action_desc, re.IGNORECASE
+        ) is not None
         # CONTRÔLE PER-SOCLE (09 Movement / Advance) : identique au move, budget = D6×scale.
         # Chaque figurine avance de son origine (positions_by_model, ligne N-1) vers sa
         # destination ([MODELS:] de cette ligne). L'ancre d'escouade peut dépasser le budget
@@ -964,12 +1084,20 @@ def handle_advance(
     positions_at_advance_reconciled = dict(positions_at_advance)
 
     # RULE: Advance from adjacent
+    from ai.analyzer_perfig import surviving_start_models
     if is_within_engine_engagement_zone(
         advance_unit_id,
         state.unit_player,
         positions_at_advance_reconciled,
         unit_hp_at_advance,
         engagement_zone=_get_engagement_zone_for_analyzer(),
+        positions_by_model=state.positions_by_model,
+        unit_base=state.unit_base,
+        # Socles AVANT l'avance, morts exclus (cf. surviving_start_models).
+        subject_models=surviving_start_models(
+            state.positions_by_model.get(advance_unit_id),  # get allowed
+            state.current_line_models.get(advance_unit_id),  # get allowed
+        ),
         position_override=(start_col, start_row),
     ):
         adjacent_enemies = get_adjacent_enemies(

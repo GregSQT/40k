@@ -4420,6 +4420,13 @@ class W40KEngine(gym.Env):
         # Nom de l abilite d unite qui a ouvert la relance de blessure, quand elle a
         # EFFECTIVEMENT eu lieu (le socle trace la cause, `_manual_roll_intent` la nomme).
         "woundAbility": "wound_ability_display_name",
+        # [SUSTAINED HITS X] 24.36 : touche ADDITIONNELLE nee d une touche critique — pas une
+        # attaque, donc aucun jet de touche (`attackRoll=None`, rendu « Hit None(3+) »). Sans
+        # ce marqueur, l analyzer ne peut ni la distinguer d une ligne malformee, ni la sortir
+        # du plafond de tirs (`shoot_over_rng_nb`), ni attester l usage de la regle en 1.8 :
+        # 12 lignes pour 9 attaques remontaient « shots over RNG_NB » pendant que la meme
+        # regle etait affichee « NOT USED ». Miroir exact de [RAPID FIRE] ci-dessus.
+        "sustainedHit": "sustained_hit",
     }
 
     def _models_segment_for_unit(self, unit_id: Any, label: str = "MODELS") -> str:
@@ -4670,6 +4677,10 @@ class W40KEngine(gym.Env):
         target_row = raw_log.get("targetRow")  # get allowed
         if target_col is not None and target_row is not None:
             details["target_coords"] = (target_col, target_row)
+        # 21.03 : le drapeau de traversée FLY produit par les handlers de move. Sans ce
+        # mapping, `step_logger` n'écrit jamais `MOVED [FLY]` et l'analyzer pathfinde une
+        # escouade volante comme de l'infanterie.
+        details["is_fly_move"] = bool(raw_log.get("is_fly_move", False))  # get allowed
         for src, dst in (
             ("targetId", "target_id"),
             ("weaponName", "weapon_name"),

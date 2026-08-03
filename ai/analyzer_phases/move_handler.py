@@ -34,30 +34,35 @@ def handle_move_or_fled(
         _get_engagement_zone_for_analyzer,
         _debug_log,
         _get_unit_hp_value,
-        _build_occupied_positions,
+        _build_move_bfs_blockers,
         _build_enemy_adjacent_hexes,
         _bfs_shortest_path_length,
         get_adjacent_enemies,
     )
+    # Import local : `analyzer_core` importe ce module au chargement (cycle sinon), comme les
+    # helpers de `ai.analyzer` juste au-dessus.
+    from ai.analyzer_core import move_line_re
 
     stats = state.stats
 
-    # CRITICAL: Detect explicit FLED actions first
-    fled_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) FLED from \((\d+),\s*(\d+)\) to \((\d+),\s*(\d+)\)', action_desc)
+    # CRITICAL: Detect explicit FLED actions first.
+    # Le token optionnel (`FLED [FLY] from`) est OBLIGATOIRE dans cette regex, comme dans celle
+    # du MOVE : sans lui, une retraite volante n'est reconnue ni comme FLED ni comme MOVE, la
+    # position de l'unité reste figée à son ancienne case, et TOUTES les adjacences calculées
+    # ensuite le sont contre un fantôme (faux « move with adjacent_before » à l'autre bout du
+    # plateau). Mesuré : 3 lignes non parsées suffisaient à en fabriquer 3.
+    fled_match = move_line_re("FLED").search(action_desc)
     if fled_match:
         skip = _handle_fled(state, config, line, action_desc, player, turn, phase, fled_match,
                             _track_action_phase_accuracy, _position_cache_set, _debug_log,
                             _get_unit_hp_value)
         return skip
 
-    move_match = re.search(
-        r'Unit (\d+)\((\d+),\s*(\d+)\)\s+MOVED(?:\s+AFTER\s+SHOOTING)?(?:\s+\[[^\]]+\])?\s+from\s+\((\d+),\s*(\d+)\)\s+to\s+\((\d+),\s*(\d+)\)',
-        action_desc
-    )
+    move_match = move_line_re(r"MOVED(?:\s+AFTER\s+SHOOTING)?").search(action_desc)
     if move_match:
         skip = _handle_move(state, config, line, action_desc, player, turn, phase, move_match,
                             _track_action_phase_accuracy, _position_cache_set,
-                            _get_unit_hp_value, _build_occupied_positions,
+                            _get_unit_hp_value, _build_move_bfs_blockers,
                             _build_enemy_adjacent_hexes, _bfs_shortest_path_length,
                             get_adjacent_enemies, is_within_engine_engagement_zone,
                             _get_engagement_zone_for_analyzer, _debug_log)
@@ -185,10 +190,12 @@ def _handle_fled(state, config, line, action_desc, player, turn, phase, fled_mat
 
 def _handle_move(state, config, line, action_desc, player, turn, phase, move_match,
                  _track_action_phase_accuracy, _position_cache_set,
-                 _get_unit_hp_value, _build_occupied_positions,
+                 _get_unit_hp_value, _build_move_bfs_blockers,
                  _build_enemy_adjacent_hexes, _bfs_shortest_path_length,
                  get_adjacent_enemies, is_within_engine_engagement_zone,
                  _get_engagement_zone_for_analyzer, _debug_log):
+    from ai.analyzer_perfig import surviving_start_models
+
     stats = state.stats
     move_unit_id = move_match.group(1)
     start_col = int(move_match.group(4))
@@ -208,7 +215,10 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         ) is not None
     )
     move_unit_type = require_key(state.unit_types, move_unit_id)
-    move_is_fly = re.search(r'MOVED\s+\[FLY\]\s+from', action_desc, re.IGNORECASE) is not None
+    # 21.03 : la traversée FLY est DÉCLARÉE (« take to the skies »), pas acquise par le keyword —
+    # une unité volante qui n'a pas déclaré marche et se heurte aux murs. Le marqueur du log est
+    # donc la seule source correcte ; le keyword du registre exempterait à tort.
+    move_is_fly = re.search(r'(?:MOVED|FLED)\s+\[FLY\]\s+from', action_desc, re.IGNORECASE) is not None
     if is_move_after_shooting:
         move_is_fly = bool(require_key(config.unit_is_fly_by_type, move_unit_type))
         stats['move_after_shooting'][player] += 1
@@ -314,13 +324,22 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
                 continue
             if (int(require_key(state.unit_player, uid)) if require_key(state.unit_player, uid) is not None else None) == enemy_player_int and hp_value > 0:
                 enemy_positions_current[uid] = pos
+        # Socles de DÉPART, morts exclus (cf. surviving_start_models).
+        start_models = surviving_start_models(
+            state.positions_by_model.get(move_unit_id),  # get allowed
+            state.current_line_models.get(move_unit_id),  # get allowed
+        )
         was_adjacent_in_snapshot = is_within_engine_engagement_zone(
             move_unit_id, state.unit_player, enemy_positions_in_snapshot, state.unit_hp,
             engagement_zone=_get_engagement_zone_for_analyzer(), position_override=start_pos,
+            positions_by_model=state.positions_by_model, unit_base=state.unit_base,
+            subject_models=start_models,
         )
         was_adjacent_in_current = is_within_engine_engagement_zone(
             move_unit_id, state.unit_player, enemy_positions_current, state.unit_hp,
             engagement_zone=_get_engagement_zone_for_analyzer(), position_override=start_pos,
+            positions_by_model=state.positions_by_model, unit_base=state.unit_base,
+            subject_models=start_models,
         )
         if (was_adjacent_in_snapshot and was_adjacent_in_current and
                 len(state.positions_at_move_phase_start) >= 2 and
@@ -362,8 +381,10 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         else:
             move_range_raw = require_key(state.unit_move, move_unit_id)
             move_range = int(move_range_raw)
-        occupied_positions = _build_occupied_positions(positions_at_movement, unit_hp_at_movement, move_unit_id)
-        enemy_adjacent_hexes = _build_enemy_adjacent_hexes(positions_at_movement, state.unit_player, unit_hp_at_movement, player)
+        occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
+            state.positions_by_model, positions_at_movement, state.unit_base,
+            state.unit_player, unit_hp_at_movement, move_unit_id,
+        )
 
         # CONTRÔLE PER-SOCLE (03 Moving) : chaque figurine se déplace de SA position
         # d'origine (positions_by_model = état ligne N-1) vers SA destination (segment
@@ -524,8 +545,21 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
                 )
                 continue
             positions_at_movement_filtered[uid] = pos
-        adjacent_before = get_adjacent_enemies(
-            start_col, start_row, state.unit_player, positions_at_movement_filtered, unit_hp_at_movement, state.unit_types, player
+        # MÊME définition d'« engagé » que `dest_adjacent` ci-dessous : per-figurine, seuil
+        # `engagement_zone`, métrique du run. Ce contrôle mesurait une adjacence d'ANCRE à
+        # distance hex 1 — deux définitions dans la même fonction, et c'est la faible qui
+        # commandait la forte (elle garde `move_to_adjacent_enemy`). À x5, `ez=10` mais
+        # « distance d'ancre == 1 » n'est presque jamais vrai : la garde ne se levait plus et
+        # tout mouvement finissant engagé était compté, y compris ceux qui l'étaient déjà.
+        adjacent_before = is_within_engine_engagement_zone(
+            move_unit_id, state.unit_player, positions_at_movement_filtered, unit_hp_at_movement,
+            engagement_zone=_get_engagement_zone_for_analyzer(),
+            position_override=(start_col, start_row),
+            positions_by_model=state.positions_by_model, unit_base=state.unit_base,
+            subject_models=surviving_start_models(
+                state.positions_by_model.get(move_unit_id),  # get allowed
+                state.current_line_models.get(move_unit_id),  # get allowed
+            ),
         )
         if adjacent_before:
             stats['move_adjacent_before_non_flee'][player] += 1
@@ -533,7 +567,6 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
                 stats['first_error_lines']['move_adjacent_before_non_flee'][player] = {
                     'episode': state.current_episode_num,
                     'line': line.strip(),
-                    'adjacent_before': adjacent_before
                 }
 
         enemy_player = 3 - player
@@ -543,6 +576,9 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         dest_adjacent = is_within_engine_engagement_zone(
             move_unit_id, state.unit_player, positions_for_adjacency_check_filtered, unit_hp_at_movement,
             engagement_zone=_get_engagement_zone_for_analyzer(), position_override=(dest_col, dest_row),
+            positions_by_model=state.positions_by_model, unit_base=state.unit_base,
+            # Socles d'ARRIVÉE : le `[MODELS:]` de CETTE ligne, pas l'état d'avant.
+            subject_models=state.current_line_models.get(move_unit_id),  # get allowed
         )
         if dest_adjacent:
             if not adjacent_before:

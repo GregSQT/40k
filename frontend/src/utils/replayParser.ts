@@ -516,7 +516,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
     // Parse MOVE actions
     const moveMatch = trimmed.match(
-      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) (MOVED(?: \[[^\]]+\])?(?: \[FLY\])?|REACTIVE MOVED|WAIT|FLED)/
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) (MOVED(?: \[[^\]]+\])?(?: \[FLY\])?|REACTIVE MOVED|WAIT|FLED(?: \[FLY\])?)/
     );
     if (moveMatch) {
       const timestamp = moveMatch[1];
@@ -535,7 +535,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       if (
         actionType === "MOVED" ||
         actionType.startsWith("MOVED [") ||
-        actionType === "FLED" ||
+        actionType.startsWith("FLED") ||
         actionType === "REACTIVE MOVED"
       ) {
         const fromMatch = trimmed.match(/from \((\d+),(\d+)\)/);
@@ -559,7 +559,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
           to: { col: endCol, row: endRow },
           log_message: extractLogMessage(trimmed),
           ...(isFlyMove ? { move_mode: "fly" } : {}),
-          ...(actionType === "FLED" ? { was_flee: true } : {}),
+          ...(actionType.startsWith("FLED") ? { was_flee: true } : {}),
         });
 
         if (currentEpisode.units[unitId]) {
@@ -667,7 +667,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
     // Parse SHOOT actions
     const shootMatch = trimmed.match(
-      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) ((?:SHOT(?: \[[^\]]+\])*\s+Unit)|WAIT|ADVANCED)/
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) ((?:SHOT(?: \[[^\]]+\])*\s+Unit)|WAIT|ADVANCED(?: \[FLY\])?)/
     );
     if (shootMatch) {
       // Removed verbose logging
@@ -682,7 +682,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       syncKnownUnitPosition(currentEpisode, shooterId, shooterCol, shooterRow);
       // console.log('Action type:', actionType);
 
-      if (actionType === "ADVANCED") {
+      if (actionType.startsWith("ADVANCED")) {
         // Parse advance action: Unit X(col, row) ADVANCED from (col1, row1) to (col2, row2) (Roll: X)
         const fromMatch = trimmed.match(/from \((\d+),(\d+)\)/);
         const toMatch = trimmed.match(/to \((\d+),(\d+)\)/);
@@ -706,6 +706,9 @@ export function parse_log_file_from_text(text: string): ReplayData {
             unit_id: shooterId,
             from: { col: fromCol, row: fromRow },
             to: { col: toCol, row: toRow },
+            // 21.03 : une avance déclarée « take to the skies » traverse murs et figurines —
+            // la rejouer au sol dessinerait un trajet que la partie n'a pas joué.
+            ...(actionType.includes("[FLY]") ? { move_mode: "fly" as const } : {}),
           };
 
           if (advanceRoll !== undefined) {

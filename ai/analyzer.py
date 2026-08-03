@@ -39,23 +39,49 @@ def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: A
     return total
 
 
-_inches_to_subhex_analyzer_cache: Optional[int] = None
-_engagement_zone_analyzer_cache: Optional[int] = None
+
+
+_BOARD_HEADER_RE = re.compile(r'^\[[^\]]*\]\s*Board:\s.*\binches_to_subhex=(\d+)\b')
+
+
+def parse_board_scale_from_log(filepath: str) -> int:
+    """Échelle subhex/pouce du run analysé, lue dans l'entête `Board:` du step.log.
+
+    SOURCE UNIQUE. Elle ne peut PAS venir de `board_config` : le config courant décrit le
+    prochain run, pas celui qu'on relit. Un step.log produit sur `board/44x60x1` relu avec un
+    `config.json` pointant `board/44x60x5` donnait des distances ×5 — engagement à 10 subhex
+    au lieu de 2 (132 faux « shoot at engaged enemy »), et symétriquement des portées, budgets
+    de move et d'advance ×5 qui ne se déclenchaient jamais : l'analyzer fabriquait des erreurs
+    ET en masquait. Le step logger écrit cette ligne à chaque démarrage d'épisode
+    (`ai/step_logger.py`, « Board: cols=… inches_to_subhex=… ») : elle est toujours présente
+    sur un log réel, et son absence est une rupture de contrat, pas un cas à replier.
+    """
+    with open(filepath, 'r', encoding='utf-8') as f:
+        for line in f:
+            m = _BOARD_HEADER_RE.match(line)
+            if m:
+                return int(m.group(1))
+    raise ValueError(
+        f"{filepath}: aucune ligne d'entête 'Board: ... inches_to_subhex=N'. L'échelle du run "
+        "est indéterminable — analyser avec l'échelle du config courant produirait des "
+        "distances fausses (faux positifs d'engagement, contrôles de portée neutralisés)."
+    )
+
+
+def set_analyzer_board_scale(inches_to_subhex: int) -> None:
+    """Fixe l'échelle du run pour toute la passe (appelé par parse_step_log après lecture de
+    l'entête). L'état vit dans `ai.analyzer_config` — seul module chargé en un exemplaire quand
+    la CLI exécute `ai/analyzer.py` comme `__main__`."""
+    from ai.analyzer_config import set_run_inches_to_subhex
+    set_run_inches_to_subhex(int(inches_to_subhex))
 
 
 def _get_inches_to_subhex_for_analyzer() -> int:
-    """
-    Sub-hex scale from board_config.default (same source as engine game_state['inches_to_subhex']).
+    """Échelle subhex/pouce du run en cours d'analyse (cf. parse_board_scale_from_log).
     Boardx10-final §P3: advance budget = D6 face × this scale.
     """
-    global _inches_to_subhex_analyzer_cache
-    if _inches_to_subhex_analyzer_cache is not None:
-        return _inches_to_subhex_analyzer_cache
-    from config_loader import get_config_loader
-    board_cfg = get_config_loader().get_board_config()
-    default = require_key(board_cfg, "default")
-    _inches_to_subhex_analyzer_cache = int(require_key(default, "inches_to_subhex"))
-    return _inches_to_subhex_analyzer_cache
+    from ai.analyzer_config import get_run_inches_to_subhex
+    return get_run_inches_to_subhex()
 
 
 def _get_engagement_zone_for_analyzer() -> int:
@@ -67,16 +93,9 @@ def _get_engagement_zone_for_analyzer() -> int:
     empreintes (subhex) à un seuil en pouces (2 au lieu de 10) → toute la mêlée/engagement
     remontait faussement « non-adjacent ». Root cause des « Fight from non-adjacent ».
     """
-    global _engagement_zone_analyzer_cache
-    if _engagement_zone_analyzer_cache is not None:
-        return _engagement_zone_analyzer_cache
     from config_loader import get_config_loader
-    game_config = get_config_loader().get_game_config()
-    game_rules = require_key(game_config, "game_rules")
-    _engagement_zone_analyzer_cache = (
-        int(require_key(game_rules, "engagement_zone")) * _get_inches_to_subhex_for_analyzer()
-    )
-    return _engagement_zone_analyzer_cache
+    game_rules = require_key(get_config_loader().get_game_config(), "game_rules")
+    return int(require_key(game_rules, "engagement_zone")) * _get_inches_to_subhex_for_analyzer()
 
 MAX_D3 = 3
 MAX_D6 = 6
@@ -489,6 +508,22 @@ def is_adjacent_to_enemy(col: int, row: int, unit_player: Dict[str, int], unit_p
     return is_hex_anchor_adjacent_to_enemy(col, row, unit_player, unit_positions, unit_hp, player)
 
 
+def _analyzer_engagement_metric() -> str:
+    """Métrique de l'EZ (`hex`|`euclidean`) pour le run ANALYSÉ.
+
+    `engagement_distance_metric()` du moteur résout la même chose, mais sa bascule
+    `geometry_is_hex()` relit le board du config COURANT : appelée depuis l'analyzer, elle
+    répondrait pour le prochain run, pas pour celui qu'on relit. On reprend donc sa règle —
+    « hex ssi inches_to_subhex <= 1 » — en la branchant sur l'échelle lue dans l'entête du log,
+    et on délègue la clé de config elle-même, qui n'est pas propre au run.
+    """
+    from config_loader import get_config_loader
+    from engine.combat_utils import get_distance_metric
+
+    metric = get_distance_metric("engagement", get_config_loader().get_game_config())
+    return "hex" if _get_inches_to_subhex_for_analyzer() <= 1 else metric
+
+
 def is_within_engine_engagement_zone(
     unit_id: str,
     unit_player: Dict[str, int],
@@ -496,54 +531,74 @@ def is_within_engine_engagement_zone(
     unit_hp: Dict[str, int],
     engagement_zone: int,
     position_override: Optional[Tuple[int, int]] = None,
+    positions_by_model: Optional[Dict[str, Dict[str, Tuple[int, int]]]] = None,
+    unit_base: Optional[Dict[str, Any]] = None,
+    subject_models: Optional[Dict[str, Tuple[int, int]]] = None,
 ) -> bool:
-    """Check B/engine engagement using the shared footprint engagement primitive."""
-    from engine.spatial_relations import unit_within_engagement_zone_footprints
+    """L'unité est-elle engagée ? Mesure PER-FIGURINE, empreinte contre empreinte (03.04).
 
-    if unit_id not in unit_positions and position_override is None:
+    Une escouade n'est pas un point. Réduite à son ancre — ce que faisait ce contrôle — elle
+    perdait ses autres socles : un bloc de 6 figurines n'était engagé que si SON ANCRE l'était.
+    Faux à toute résolution, y compris x1 où l'ancre n'est qu'une figurine sur six ; à x5/x10 la
+    taille de socle s'y ajoutait (tout le monde ramené à `round/1`).
+
+    Le VERDICT reste rendu par la primitive canonique du moteur
+    (`unit_within_engagement_zone_footprints`) : elle seule résout la métrique via
+    `engagement_distance_metric()` et la bascule `geometry_is_hex`. Réécrire la boucle ici
+    figerait l'analyzer en hex pendant que le moteur suivrait sa config — la divergence
+    hex↔euclidien est précisément ce qui a fait supprimer le contrôle « Fight from non-adjacent »
+    (cf. `ai/analyzer_phases/fight_handler.py`). Ce que ce module apporte, c'est l'EMPREINTE :
+    `occupied_hexes` est peuplé depuis le log au lieu de l'ancre.
+
+    Les empreintes viennent du segment `[MODELS:]` du log et des socles déclarés dans son entête
+    (`base=`, déjà à l'échelle du board — le step logger l'omet quand il vaut 1, ce qui est
+    précisément le cas x1). La résolution du run est donc portée par le log, pas déduite ici.
+
+    - ``subject_models`` : socles du SUJET à l'instant évalué. C'est la forme exacte quand
+      l'appelant dispose d'un `[MODELS:]` correspondant (destination d'un move, départ d'une
+      charge). À privilégier sur ``position_override``.
+    - ``position_override`` : ancre hypothétique du sujet, quand aucun socle n'est connu pour
+      cet instant-là (mouvement réactif). Le sujet est alors mesuré comme un point — repli sur
+      donnée absente, jamais un contrôle désarmé.
+    - Les AUTRES unités sont toujours mesurées sur leurs socles connus, ancre sinon.
+    """
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from ai.analyzer_perfig import model_cache_entries
+
+    subject_hp = _get_unit_hp_value(unit_hp, unit_id)
+    if subject_hp is None or subject_hp <= 0 or unit_id not in unit_player:
         return False
-    player = require_key(unit_player, unit_id)
-    units_cache: Dict[str, Dict[str, Any]] = {}
-    for uid, pos in unit_positions.items():
-        if uid not in unit_player:
+    models_by_unit = positions_by_model or {}
+    bases = unit_base or {}
+    subject_player = int(require_key(unit_player, unit_id))
+    subject_anchor = position_override if position_override is not None else unit_positions.get(unit_id)  # get allowed
+    if subject_models is None and position_override is None:
+        subject_models = models_by_unit.get(unit_id)  # get allowed
+    subject_entries = model_cache_entries(
+        unit_id, subject_models, bases, subject_anchor, subject_player
+    )
+    if not subject_entries:
+        return False
+
+    metric = _analyzer_engagement_metric()
+    for uid, anchor in unit_positions.items():
+        if uid == unit_id or uid not in unit_player:
+            continue
+        enemy_player = int(require_key(unit_player, uid))
+        if enemy_player == subject_player:
             continue
         hp_value = _get_unit_hp_value(unit_hp, uid)
         if hp_value is None or hp_value <= 0:
             continue
-        units_cache[uid] = {
-            "col": pos[0],
-            "row": pos[1],
-            "player": require_key(unit_player, uid),
-            "occupied_hexes": {pos},
-            "BASE_SHAPE": "round",
-            "BASE_SIZE": 1,
-            "orientation": 0,
-        }
-    if position_override is not None:
-        hp_value = _get_unit_hp_value(unit_hp, unit_id)
-        if hp_value is None or hp_value <= 0:
-            return False
-        units_cache[unit_id] = {
-            "col": position_override[0],
-            "row": position_override[1],
-            "player": player,
-            "occupied_hexes": {position_override},
-            "BASE_SHAPE": "round",
-            "BASE_SIZE": 1,
-            "orientation": 0,
-        }
-    if unit_id not in units_cache:
-        return False
-    game_state = {
-        "config": {"game_rules": {"engagement_zone": engagement_zone}},
-        "units_cache": units_cache,
-    }
-    return unit_within_engagement_zone_footprints(
-        game_state,
-        {"id": unit_id, "player": player},
-        engagement_zone=engagement_zone,
-        max_distance=engagement_zone,
-    )
+        for enemy_entry in model_cache_entries(
+            uid, models_by_unit.get(uid), bases, anchor, enemy_player  # get allowed
+        ):
+            for subject_entry in subject_entries:
+                if unit_entries_within_engagement_zone(
+                    subject_entry, enemy_entry, engagement_zone, metric=metric
+                ):
+                    return True
+    return False
 
 
 def _build_enemy_adjacent_hexes(
@@ -570,22 +625,68 @@ def _build_enemy_adjacent_hexes(
     return adjacent_hexes
 
 
-def _build_occupied_positions(
+def _move_rules_for_analyzer() -> Tuple[bool, bool, bool]:
+    """Toggles de traversée `(EZ, ennemi, ami)` — lecteur MOTEUR (`_get_move_traversal_rules`),
+    pas une relecture parallèle des trois clés. Un 4e toggle ou un renommage n'atteindrait
+    qu'un côté sinon."""
+    from config_loader import get_config_loader
+    from engine.phase_handlers.movement_handlers import _get_move_traversal_rules
+    return _get_move_traversal_rules({"config": get_config_loader().get_game_config()})
+
+
+def _build_move_bfs_blockers(
+    positions_by_model: Dict[str, Dict[str, Tuple[int, int]]],
     unit_positions: Dict[str, Tuple[int, int]],
+    unit_base: Dict[str, Any],
+    unit_player: Dict[str, int],
     unit_hp: Dict[str, int],
-    exclude_unit_id: str
-) -> Set[Tuple[int, int]]:
-    """Build set of occupied positions (alive units only), excluding one unit."""
-    occupied = set()
-    for uid, pos in unit_positions.items():
-        if uid == exclude_unit_id:
+    mover_unit_id: str,
+) -> Tuple[Set[Tuple[int, int]], Set[Tuple[int, int]]]:
+    """Obstacles du BFS de mouvement : (cases occupées bloquantes, bande d'EZ ennemie bloquante).
+
+    DEUX corrections de fond par rapport au contrôle historique, toutes deux prouvées par la
+    règle ET par la config que le moteur consomme (`game_config['move']`) :
+
+    - 03.01 « It can be moved through friendly models. Its base cannot be moved through enemy
+      models. » — l'analyzer bloquait sur TOUTES les figurines. Sur un déploiement serré, une
+      escouade qui sort de son coin traversait forcément ses voisines : « path blocked » garanti,
+      alors que le moteur l'autorise (`can_move_through_friendly_model: true`).
+    - la bande d'engagement ennemie n'interdit que de TERMINER le mouvement, pas de la traverser
+      (`can_move_through_enemy_engagement_zone: true`). L'inclure dans les obstacles du BFS
+      revenait à interdire un pas que le moteur autorise.
+
+    Les cases sont reconstruites SOCLE PAR SOCLE : l'ancre d'escouade ne représente qu'UNE case
+    pour un bloc qui en occupe des dizaines, donc le BFS ancre-à-ancre déclarait libres les cases
+    réellement tenues et bloquées les seules ancres. Sans donnée per-figurine pour une unité (log
+    ancien / synthétique), repli sur son ancre — donnée absente, pas contrôle désarmé.
+    """
+    from ai.analyzer_perfig import _DEFAULT_BASE, squad_footprint
+    thru_ez, thru_enemy, thru_friendly = _move_rules_for_analyzer()
+    mover_player_int = int(require_key(unit_player, mover_unit_id))
+    occupied: Set[Tuple[int, int]] = set()
+    for uid, anchor in unit_positions.items():
+        if uid == mover_unit_id:
             continue
-        if uid not in unit_hp:
+        hp_value = _get_unit_hp_value(unit_hp, uid)
+        if hp_value is None or hp_value <= 0:
             continue
-        if require_key(unit_hp, uid) <= 0:
+        if uid not in unit_player:
             continue
-        occupied.add(pos)
-    return occupied
+        is_friendly = int(require_key(unit_player, uid)) == mover_player_int
+        if is_friendly and thru_friendly:
+            continue
+        if not is_friendly and thru_enemy:
+            continue
+        models = positions_by_model.get(uid)  # get allowed
+        if models:
+            occupied |= squad_footprint(models, unit_base.get(uid, _DEFAULT_BASE))  # get allowed
+        else:
+            occupied.add(anchor)
+    if thru_ez:
+        ez_band: Set[Tuple[int, int]] = set()
+    else:
+        ez_band = _build_enemy_adjacent_hexes(unit_positions, unit_player, unit_hp, mover_player_int)
+    return occupied, ez_band
 
 
 def _bfs_shortest_path_length(
@@ -698,20 +799,6 @@ def get_adjacent_enemies(col: int, row: int, unit_player: Dict[str, int], unit_p
     return adjacent_enemies
 
 
-def is_engaged(unit_id: str, unit_player: Dict[str, int], unit_positions: Dict[str, Tuple[int, int]], 
-               unit_hp: Dict[str, int]) -> bool:
-    """Check if a unit is engaged using engine B/engagement semantics."""
-    if unit_id not in unit_positions:
-        return False
-    return is_within_engine_engagement_zone(
-        unit_id,
-        unit_player,
-        unit_positions,
-        unit_hp,
-        engagement_zone=_get_engagement_zone_for_analyzer(),
-    )
-
-
 def _position_cache_set(
     cache: Dict[str, Tuple[int, int]], unit_id: str, col: int, row: int
 ) -> None:
@@ -743,6 +830,10 @@ def parse_step_log(filepath: str) -> Dict:
     _debug_log(f"Analyzing {filepath}")
     _debug_log("=" * 80)
     
+    # Échelle du run AVANT toute construction de config : portées d'armes, budgets de move et
+    # seuil d'engagement en dérivent tous (cf. parse_board_scale_from_log).
+    set_analyzer_board_scale(parse_board_scale_from_log(filepath))
+
     # Load unit weapons and rule caches
     from ai.analyzer_config import load_analyzer_config
     _cfg = load_analyzer_config()

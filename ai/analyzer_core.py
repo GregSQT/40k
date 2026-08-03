@@ -22,6 +22,26 @@ PLAYER_ONE_ID = 1
 PLAYER_TWO_ID = 2
 
 
+
+# Grammaire d'une ligne de mouvement : `Unit N(c,r) VERBE [TOKEN] from (c,r) to (c,r)`.
+# UN SEUL constructeur pour les trois verbes et les cinq sites qui la lisaient. Ces copies
+# avaient déjà divergé : deux d'entre elles ignoraient le token optionnel entre le verbe et
+# `from`, si bien qu'une ligne portant `[FLY]` n'était aiguillée vers aucun handler — position
+# figée, adjacences suivantes mesurées contre un fantôme. Le prochain token n'aura qu'un
+# endroit à toucher.
+def move_line_re(verb: str, *, with_positions: bool = True) -> "re.Pattern[str]":
+    head = r'Unit (\d+)\((\d+),\s*(\d+)\)\s+' + verb + r'(?:\s+\[[^\]]+\])?\s+from'
+    if not with_positions:
+        return re.compile(head)
+    return re.compile(head + r'\s+\((\d+),\s*(\d+)\)\s+to\s+\((\d+),\s*(\d+)\)')
+
+
+def move_verb_present(verb: str, action_desc: str) -> bool:
+    """Le verbe de mouvement `verb` introduit-il un `from` sur cette ligne ?
+    Aiguillage : même grammaire que `move_line_re`, sans les positions."""
+    return re.search(r'\b' + verb + r'(?:\s+\[[^\]]+\])?\s+from', action_desc) is not None
+
+
 def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
     """Execute the main parsing loop. Modifies state.stats in-place."""
     from ai.analyzer import (
@@ -35,7 +55,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
         is_within_engine_engagement_zone,
         _get_engagement_zone_for_analyzer,
         is_adjacent,
-        _build_occupied_positions,
+        _build_move_bfs_blockers,
         _build_enemy_adjacent_hexes,
         _bfs_shortest_path_length,
         has_line_of_sight,
@@ -744,11 +764,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         positions_at_reactive = dict(state.unit_positions)
                         if (from_col, from_row) != (to_col, to_row):
                             if roll_value is not None:
-                                occupied_positions = _build_occupied_positions(
-                                    positions_at_reactive, unit_hp_at_reactive, reactive_unit_id
-                                )
-                                enemy_adjacent_hexes = _build_enemy_adjacent_hexes(
-                                    positions_at_reactive, state.unit_player, unit_hp_at_reactive, reactive_player
+                                occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
+                                    state.positions_by_model, positions_at_reactive,
+                                    state.unit_base, state.unit_player, unit_hp_at_reactive,
+                                    reactive_unit_id
                                 )
                                 shortest_steps = _bfs_shortest_path_length(
                                     from_col,
@@ -799,7 +818,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 positions_for_adjacency_check_filtered,
                                 unit_hp_at_reactive,
                                 engagement_zone=_get_engagement_zone_for_analyzer(),
+                                # Le move réactif ne loggue pas de `[MODELS:]` d'arrivée : le
+                                # sujet reste mesuré à l'ancre, les ennemis à leurs socles.
                                 position_override=(to_col, to_row),
+                                positions_by_model=state.positions_by_model,
+                                unit_base=state.unit_base,
                             )
                             if reactive_dest_adjacent:
                                 reactive_checks['to_adjacent_enemy'][reactive_player] += 1
@@ -847,7 +870,12 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 elif " SKIP" in action_desc:
                         action_type = 'skip'
                         handle_skip(state, line, action_desc, player, turn, phase)
-                elif "ADVANCED from" in action_desc:
+                # Le token optionnel `[FLY]` (21.03) s'insère entre le verbe et `from` sur les
+                # trois types de move. Un aiguillage sur la chaîne littérale `"<VERBE> from"`
+                # laissait ces lignes SANS branche : l'action n'était pas traitée, la position
+                # de l'unité restait figée, et toutes les adjacences calculées ensuite l'étaient
+                # contre un fantôme.
+                elif move_verb_present("ADVANCED", action_desc):
                         action_type = 'advance'
                         if handle_advance(state, config, line, action_desc, action_unit_id, player, turn, phase):
                             continue
@@ -858,10 +886,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     "MOVED from" in action_desc
                     or "MOVED AFTER SHOOTING" in action_desc
                     or ("MOVED [" in action_desc and " - trigger: Unit " not in action_desc)
-                    or "FLED from" in action_desc
+                    or move_verb_present("FLED", action_desc)
                 ):
                         action_type = 'move'
-                        fled_match_check = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) FLED from', action_desc)
+                        fled_match_check = move_line_re("FLED", with_positions=False).search(action_desc)
                         if fled_match_check:
                             action_type = 'fled'
                         if handle_move_or_fled(state, config, line, action_desc, action_unit_id, player, turn, phase):

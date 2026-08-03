@@ -4039,25 +4039,32 @@ def movement_commit_move_plan_handler(
             }
         )
     _ut_seg = f" {unit['unitType']}" if unit.get("unitType") else ""
+    # 21.03 « take to the skies » : la traversée (murs, figurines, terrain) est DÉCLARÉE, pas
+    # acquise par le keyword FLY. Le pipeline squad — le chemin de production — ne transmettait
+    # pas ce drapeau, alors que le chemin mono le faisait : aucun `[FLY]` n'apparaissait dans
+    # step.log, et l'analyzer pathfindait les escouades volantes comme de l'infanterie
+    # (faux « move path blocked » sur un vol par-dessus un mur).
+    _is_fly_move = _fly_traversal_active(game_state, unit, str(unit["id"]))
+    _fly_seg = " [FLY]" if _is_fly_move else ""
     if move_type == "advance":
         action_name = "ADVANCED"
         was_flee = False
         movement_message = (
-            f"Unit {unit['id']}{_ut_seg} ADVANCED from ({orig_anchor_col},{orig_anchor_row}) "
+            f"Unit {unit['id']}{_ut_seg} ADVANCED{_fly_seg} from ({orig_anchor_col},{orig_anchor_row}) "
             f"to ({dest_anchor_col},{dest_anchor_row}) [Advance:{_adv_roll}]"
         )
     elif move_type == "fall_back":
         action_name = "FLED"
         was_flee = True
         movement_message = (
-            f"Unit {unit['id']}{_ut_seg} FLED from ({orig_anchor_col},{orig_anchor_row}) "
+            f"Unit {unit['id']}{_ut_seg} FLED{_fly_seg} from ({orig_anchor_col},{orig_anchor_row}) "
             f"to ({dest_anchor_col},{dest_anchor_row})"
         )
     else:
         action_name = "MOVE"
         was_flee = False
         movement_message = (
-            f"Unit {unit['id']}{_ut_seg} MOVED from ({orig_anchor_col},{orig_anchor_row}) "
+            f"Unit {unit['id']}{_ut_seg} MOVED{_fly_seg} from ({orig_anchor_col},{orig_anchor_row}) "
             f"to ({dest_anchor_col},{dest_anchor_row})"
         )
     append_action_log(
@@ -4078,6 +4085,7 @@ def movement_commit_move_plan_handler(
             "action_name": action_name,
             "reward": 0.0,
             "is_ai_action": unit["player"] == 2,
+            "is_fly_move": _is_fly_move,
             "moveDetails": move_details,
         },
     )

@@ -441,7 +441,8 @@ class StepLogger:
             if "start_pos" in details and details["start_pos"] is not None and "end_pos" in details and details["end_pos"] is not None:
                 start_col, start_row = details["start_pos"]
                 end_col, end_row = details["end_pos"]
-                base_msg = f"{unit_label} FLED from ({start_col},{start_row}) to ({end_col},{end_row})"
+                _fly_seg = " [FLY]" if details.get("is_fly_move") is True else ""
+                base_msg = f"{unit_label} FLED{_fly_seg} from ({start_col},{start_row}) to ({end_col},{end_row})"
             elif "col" in details and "row" in details:
                 # Use destination coordinates
                 base_msg = f"{unit_label} FLED to ({details['col']},{details['row']})"
@@ -464,10 +465,13 @@ class StepLogger:
                 _strategy_labels = {0: "aggressive", 1: "tactical", 2: "defensive", 3: "objective"}
                 _advance_strategy = details.get("advance_strategy")
                 strategy_label = _strategy_labels.get(_advance_strategy, "aggressive") if _advance_strategy is not None else "aggressive"
+                # 21.03 : meme marqueur que MOVED/FLED — l'advance d'une escouade ayant
+                # declare le vol traverse murs et figurines, l'analyzer doit le savoir.
+                _fly_seg = " [FLY]" if details.get("is_fly_move") is True else ""
                 if advance_range is not None and advance_range > 0:
-                    base_msg = f"{unit_label} ADVANCED from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {advance_range}] [Strategy: {strategy_label}]"
+                    base_msg = f"{unit_label} ADVANCED{_fly_seg} from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {advance_range}] [Strategy: {strategy_label}]"
                 else:
-                    base_msg = f"{unit_label} ADVANCED from ({start_col},{start_row}) to ({end_col},{end_row}) [Strategy: {strategy_label}]"
+                    base_msg = f"{unit_label} ADVANCED{_fly_seg} from ({start_col},{start_row}) to ({end_col},{end_row}) [Strategy: {strategy_label}]"
             else:
                 raise KeyError("Advance action missing required position data")
 
@@ -596,6 +600,11 @@ class StepLogger:
             hit_rule_suffix = (
                 f" [{hit_rule_modifier}]" if hit_rule_modifier in ("HEAVY", "COVER") else ""
             )
+            # [SUSTAINED HITS] 24.36 : touche additionnelle d une touche critique. Elle n a pas
+            # de jet (`Hit None(...)`) : le marqueur est la SEULE trace exploitable par
+            # l analyzer (plafond de tirs, usage de regle) et le replay.
+            if bool(details.get("sustained_hit", False)):
+                hit_rule_suffix += " [SUSTAINED HITS]"
             if hit_rule_modifier in ("HEAVY", "COVER") and isinstance(hit_target_base, int):
                 hit_target_display = f"{hit_target_base}+->{hit_target}+"
             else:
