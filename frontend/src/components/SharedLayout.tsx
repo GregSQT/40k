@@ -8,7 +8,13 @@ import TooltipWrapper from "./TooltipWrapper";
 
 interface SharedLayoutProps {
   children: React.ReactNode; // Left column content (GameBoard, ReplayViewer, etc.)
-  rightColumnContent: React.ReactNode; // Right column content (varies by page)
+  /** Haut de la colonne droite, À HAUTEUR FIXE : ce qui doit rester visible en permanence
+   *  (tracker, barres d'action, Game Log + illustration). Jamais comprimé. */
+  rightColumnContent: React.ReactNode;
+  /** Bas de la colonne droite, SEULE zone qui défile quand la fenêtre est trop courte (les tables
+   *  d'unités). SharedLayout l'enveloppe lui-même : c'est ce qui garantit à tous les modes que le
+   *  contenu fixe garde sa hauteur au lieu d'écraser sa propre barre de défilement. */
+  rightColumnScrollableContent?: React.ReactNode;
   className?: string;
   onOpenSettings?: () => void;
   /** Bascule le mode mesure (règle) : seule action qui le désactive quand il est actif. */
@@ -603,6 +609,7 @@ const Navigation: React.FC<NavigationProps> = ({
 export const SharedLayout: React.FC<SharedLayoutProps> = ({
   children,
   rightColumnContent,
+  rightColumnScrollableContent,
   className,
   onOpenSettings,
   onToggleMeasureMode,
@@ -647,6 +654,9 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
               replayActive={replayActive}
             />
             {rightColumnContent}
+            {rightColumnScrollableContent !== undefined && (
+              <div className="unit-status-tables__scroll">{rightColumnScrollableContent}</div>
+            )}
           </div>
         </div>
       </main>
