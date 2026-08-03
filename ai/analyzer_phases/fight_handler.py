@@ -138,7 +138,11 @@ def handle_fight(
                         state.fight_sequence_counts[seq_key] = 0
                     elif step_marker_present and step_inc:
                         state.fight_sequence_counts[seq_key] = 0
-                    state.fight_sequence_counts[seq_key] += 1
+                    # [SUSTAINED HITS X] 24.36 — JUMEAU du plafond de tir : une touche
+                    # additionnelle n'est pas une attaque et ne consomme rien du pool. Le
+                    # moteur l'écrit sans jet de touche et la marque explicitement.
+                    if re.search(r'\[SUSTAINED(?: |_)?HITS\]', action_desc, re.IGNORECASE) is None:
+                        state.fight_sequence_counts[seq_key] += 1
                     if state.fight_sequence_counts[seq_key] > cc_nb:
                         attacker_player = require_key(state.unit_player, fighter_id)
                         stats['fight_over_cc_nb'][attacker_player] += 1

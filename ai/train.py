@@ -1415,8 +1415,8 @@ def _get_wall_override_temp_dir() -> str:
     global _wall_override_temp_dir
     if _wall_override_temp_dir is None:
         from ai.scenario_scratch import make_scenario_scratch_dir
+        # Pas d'`atexit` : cf. `ai.scenario_scratch`, le replay lit ce fichier après le run.
         _wall_override_temp_dir = make_scenario_scratch_dir("w40k_wallmix_")
-        atexit.register(_cleanup_wall_override_temp_dir)
     return _wall_override_temp_dir
 
 

@@ -203,14 +203,24 @@ def _apply_damage_and_handle_death(
     unit_positions: Dict[str, Tuple[int, int]],
     unit_deaths: List[Tuple[int, str, str, int]],
     unit_kill_context: Dict[str, Tuple[str, int, str]],
-    stats: Dict[str, Any]
+    stats: Dict[str, Any],
+    positions_by_model: Optional[Dict[str, Dict[str, Tuple[int, int]]]] = None,
+    models_invalidated: Optional[Set[str]] = None,
 ) -> None:
     """Applique une blessure à la cible via l'allocation par-figurine (05 Attack sequence).
 
     Une blessure est allouée à la figurine « front » ; si ses PV tombent ≤ 0 elle est
     détruite et l'excès de dégâts est PERDU (jamais reporté sur la figurine suivante).
     L'escouade n'est retirée que lorsque sa DERNIÈRE figurine est détruite. unit_hp reste
-    l'invariant d'aliveness (présent et > 0 ⟺ escouade vivante)."""
+    l'invariant d'aliveness (présent et > 0 ⟺ escouade vivante).
+
+    `positions_by_model` — les socles connus de la cible deviennent PÉRIMÉS dès qu'elle perd une
+    figurine : le log ne dit pas LAQUELLE (l'allocation est « front », pas nominative), et le
+    segment `[MODELS:]` de la cible ne sera réécrit qu'à sa prochaine ACTION. Les garder ferait
+    mesurer l'engagement, les empreintes et les obstacles de BFS contre des figurines retirées
+    du plateau — un tir sur une escouade dont le socle avancé vient d'être tué remontait
+    « cible engagée » alors que le survivant est à l'autre bout. On efface donc l'entrée : la
+    mesure retombe sur l'ancre, fraîche à chaque ligne. Donnée absente, pas mesure fausse."""
     if damage <= 0:
         return
     if target_id not in unit_hp:
@@ -242,6 +252,10 @@ def _apply_damage_and_handle_death(
     if front_hp <= 0:
         # Figurine front détruite ; l'excès (overkill) est perdu, pas reporté (05.xx).
         unit_models_alive[target_id] -= 1
+        if positions_by_model is not None:
+            positions_by_model.pop(target_id, None)
+        if models_invalidated is not None:
+            models_invalidated.add(target_id)
         if unit_models_alive[target_id] <= 0:
             # Dernière figurine détruite → escouade retirée.
             target_type = require_key(unit_types, target_id)

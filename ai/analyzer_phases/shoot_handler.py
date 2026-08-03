@@ -221,6 +221,15 @@ def handle_shoot(
                 weapon_found = True
                 weapon_info_matched = weapon_info
                 break
+        if not weapon_found:
+            # Escouade HÉTÉROGÈNE (V11) : l'arme loguée appartient souvent à un model-type du
+            # squad et non à l'entrée `unit_type` — un Plasma Pistol de sergent dans une
+            # escouade Vanguard. Les cartes GLOBALES existent pour ce cas (cf. AnalyzerConfig)
+            # et n'étaient pas consultées ici : le pistolet ressortait non-[CLOSE_QUARTERS],
+            # donc son tir au contact était compté en faute alors que 10.06 l'autorise.
+            _cq_global = config.weapon_is_close_quarters_global.get(weapon_display_name)  # get allowed
+            if _cq_global is not None:
+                is_close_quarters = bool(_cq_global)
         if not weapon_found and shooter_unit_type:
             tyranid_weapons = ['deathspitter', 'fleshborer', 'devourer', 'scything talons', 'bonesword', 'lash whip']
             space_marine_weapons = ['bolt rifle', 'bolt pistol', 'chainsword', 'power sword', 'power fist', 'stalker bolt rifle']
@@ -526,6 +535,18 @@ def handle_shoot(
     # L'exemption TIREUR ne vaut que pour la cible avec laquelle il est LUI-MÊME engagé (10.06
     # « Models in your unit can target enemy units your unit is engaged with ») : un M/V qui
     # tire sur une autre unité engagée avec un allié reste en faute.
+    # Le tireur est-il engagé, avec QUI QUE CE SOIT ? Conditionne l'exemption 17.03 ci-dessous.
+    shooter_engaged_at_all = is_within_engine_engagement_zone(
+        shooter_id,
+        state.unit_player,
+        state.unit_positions,
+        state.unit_hp,
+        engagement_zone=_get_engagement_zone_for_analyzer(),
+        positions_by_model=state.positions_by_model,
+        unit_base=state.unit_base,
+        subject_models=state.current_line_models.get(shooter_id),  # get allowed
+        position_override=(shooter_col, shooter_row),
+    )
     shooter_engaged_with_target = False
     if target_pos is not None and shooter_is_monster_or_vehicle:
         # Même primitive que tout le reste de l'analyzer, restreinte à CETTE cible : elle porte
@@ -543,10 +564,15 @@ def handle_shoot(
             position_override=(shooter_col, shooter_row),
         )
 
+    # 17.03 n'autorise que la CIBLE : un tireur non-M/V qui est LUI-MÊME engagé reste borné au
+    # close-quarters shooting, donc aux armes [CLOSE_QUARTERS] (10.06, « Non-MONSTER/
+    # Non-VEHICLE Models », rappelé mot pour mot par l'encadré de 17.03). Exempter sur la seule
+    # nature de la cible desarmait le controle des qu'un vehicule ennemi etait au contact.
+    target_mv_exempt = target_is_monster_or_vehicle and not shooter_engaged_at_all
     if (
         target_engaged
         and not is_close_quarters
-        and not target_is_monster_or_vehicle
+        and not target_mv_exempt
         and not shooter_engaged_with_target
     ):
         stats['shoot_at_engaged_enemy'][player] += 1
@@ -595,26 +621,33 @@ def handle_shoot(
             # est à ≤ RNG (bord-à-bord) d'AU MOINS un socle cible. On mesure sur les empreintes
             # (min_distance_between_sets) — parité avec l'engagement. L'ancre-à-ancre pouvait
             # déclarer hors-portée alors qu'un socle avancé atteint la cible.
-            from ai.analyzer_perfig import squads_min_edge_distance
-            shooter_models = state.current_line_models.get(shooter_id)
-            target_models = state.positions_by_model.get(target_id)
-            if shooter_models and target_models:
-                from ai.analyzer_perfig import _DEFAULT_BASE
-                shooter_base = state.unit_base.get(shooter_id, _DEFAULT_BASE)  # get allowed
-                target_base = state.unit_base.get(target_id, _DEFAULT_BASE)  # get allowed
-                edge_dist = squads_min_edge_distance(
-                    shooter_models, shooter_base, target_models, target_base,
-                    max_distance=int(weapon_range),
-                )
-                out_of_range = edge_dist > weapon_range
-            else:
-                # Repli ancre legacy (log ancien/synthétique sans [MODELS:]).
-                _shoot_metric = _analyzer_ranged_metric(config)
-                target_unit_type = require_key(state.unit_types, target_id)
-                _shooter_socle = _analyzer_socle(config, shooter_unit_type, shooter_col, shooter_row)
-                _target_socle = _analyzer_socle(config, target_unit_type, target_pos[0], target_pos[1])
-                out_of_range = ranged_edge_distance(_shooter_socle, _target_socle, _shoot_metric) > weapon_range
-            if out_of_range:
+            # UNE seule mesure, socles connus ou non. Les deux branches d'origine ne
+            # mesuraient pas la même chose — empreintes du log en métrique hex d'un côté,
+            # socle du REGISTRE en métrique de config de l'autre — si bien que le verdict
+            # dépendait de la présence de `[MODELS:]`. La cible perd ses socles connus dès
+            # qu'elle perd une figurine (le log ne dit pas laquelle) : le repli devenait alors
+            # le cas courant, et douze tirs parfaitement à portée ressortaient « out of range ».
+            # Sans socles : une figurine à l'ancre, seule donnée fraîche disponible.
+            from ai.analyzer_perfig import _DEFAULT_BASE, squads_min_ranged_distance
+            shooter_models = state.current_line_models.get(shooter_id) or {  # get allowed
+                f"{shooter_id}#anchor": (shooter_col, shooter_row)
+            }
+            # Cible : `[TARGET_MODELS:]` de la ligne (survivants post-pertes) en priorité, sinon
+            # ses socles connus. À défaut des deux on NE REND PAS de verdict : l'ancre d'une
+            # escouade de sept figurines ne dit rien de la distance à la plus proche, et un tir
+            # légal ressortait « out of range » pour cette seule raison.
+            from ai.analyzer_perfig import parse_target_models_segment
+            target_models = (
+                parse_target_models_segment(action_desc)
+                or state.positions_by_model.get(target_id)  # get allowed
+            )
+            edge_dist = None if not target_models else squads_min_ranged_distance(
+                shooter_models, state.unit_base.get(shooter_id, _DEFAULT_BASE),  # get allowed
+                target_models, state.unit_base.get(target_id, _DEFAULT_BASE),  # get allowed
+                _analyzer_ranged_metric(config),
+                max_distance=int(weapon_range),
+            )
+            if edge_dist is not None and edge_dist > weapon_range:
                 stats['shoot_invalid'][player]['out_of_range'] += 1
                 if stats['first_error_lines']['shoot_invalid'][player] is None:
                     stats['first_error_lines']['shoot_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
@@ -944,6 +977,7 @@ def handle_advance(
             state.unit_base.get(advance_unit_id, _DEFAULT_BASE),
             state.unit_positions[advance_unit_id],
             start_col, start_row,
+            models_invalidated=advance_unit_id in state.models_invalidated,
         )
         if _pos_status == 'mismatch':
             stats['position_log_mismatch']['advance']['mismatch'] += 1

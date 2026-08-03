@@ -81,6 +81,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             # current_line_models portera les positions de DESTINATION de la ligne N.
             for _muid, _mmodels in state.current_line_models.items():
                 state.positions_by_model[_muid] = _mmodels
+                state.models_invalidated.discard(_muid)
             state.current_line_models = parse_models_segment(line) or {}
             if state.current_line_models:
                 for _uid, _models in state.current_line_models.items():
@@ -361,7 +362,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                         stats['first_error_lines']['shoot_at_dead_unit'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
                             _apply_damage_and_handle_death(
                                 target_id, _dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
-                                line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_hp_max_per_model, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats
+                                line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_hp_max_per_model, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
+                                positions_by_model=state.positions_by_model,
+                                models_invalidated=state.models_invalidated,
                             )
 
                 if 'attacked unit' in action_desc.lower() or 'fought unit' in action_desc.lower():
@@ -373,7 +376,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             damage = int(damage_match.group(1))
                             _apply_damage_and_handle_death(
                                 target_id, _dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
-                                line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_hp_max_per_model, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats
+                                line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_hp_max_per_model, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
+                                positions_by_model=state.positions_by_model,
+                                models_invalidated=state.models_invalidated,
                             )
 
                 # CHARGE IMPACT mortal wounds:
@@ -390,7 +395,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     if damage > 0:
                         _apply_damage_and_handle_death(
                             target_id, _dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
-                            line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_hp_max_per_model, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats
+                            line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_hp_max_per_model, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
+                                positions_by_model=state.positions_by_model,
+                                models_invalidated=state.models_invalidated,
                         )
 
                 # HAZARDOUS explicit self-destruction line:
@@ -821,8 +828,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 # Le move réactif ne loggue pas de `[MODELS:]` d'arrivée : le
                                 # sujet reste mesuré à l'ancre, les ennemis à leurs socles.
                                 position_override=(to_col, to_row),
-                                positions_by_model=state.positions_by_model,
-                                unit_base=state.unit_base,
+                                    unit_base=state.unit_base,
                             )
                             if reactive_dest_adjacent:
                                 reactive_checks['to_adjacent_enemy'][reactive_player] += 1

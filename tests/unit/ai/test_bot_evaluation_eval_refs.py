@@ -68,11 +68,20 @@ def test_le_scenario_materialise_reste_sous_la_racine_du_depot(tmp_path):
     )
 
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(bot_evaluation.__file__)))
-    relative = os.path.relpath(os.path.abspath(out_path), repo_root)
+    relative = os.path.relpath(os.path.abspath(out_path), repo_root).replace(os.sep, "/")
 
-    assert not relative.startswith(".."), (
-        f"scénario matérialisé hors du dépôt : {out_path} (racine {repo_root})"
-    )
+    try:
+        assert not relative.startswith(".."), (
+            f"scénario matérialisé hors du dépôt : {out_path} (racine {repo_root})"
+        )
+        # ET sous `config/` : `/api/config/board` refuse tout le reste (« scenario_file must be
+        # under config/ »). Hors dépôt le moteur refusait l'épisode ; sous le dépôt mais hors
+        # `config/`, l'épisode passait et c'est le replay qui repondait 500.
+        assert relative.startswith("config/"), relative
+        # Et le fichier survit au processus : le replay est ouvert APRES le run.
+        assert os.path.isfile(out_path), out_path
+    finally:
+        bot_evaluation._cleanup_eval_ref_temp_dir()
 
 
 def test_le_repertoire_de_travail_d_entrainement_reste_aussi_sous_la_racine():
@@ -86,6 +95,7 @@ def test_le_repertoire_de_travail_d_entrainement_reste_aussi_sous_la_racine():
     path = train._get_wall_override_temp_dir()
     try:
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(train.__file__)))
-        assert not os.path.relpath(path, repo_root).startswith(".."), path
+        relative = os.path.relpath(path, repo_root).replace(os.sep, "/")
+        assert relative.startswith("config/"), relative
     finally:
         train._cleanup_wall_override_temp_dir()

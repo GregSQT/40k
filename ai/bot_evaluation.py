@@ -88,7 +88,11 @@ def validate_bot_eval_worker_params(callback_params: Dict[str, Any]) -> Dict[str
 
 
 def _cleanup_eval_ref_temp_dir() -> None:
-    """Remove temporary scenario directory used by eval ref overrides."""
+    """Efface le répertoire de travail des scénarios d'éval.
+
+    N'est PLUS branché sur `atexit` : le replay est ouvert après le run et a besoin du scénario
+    matérialisé pour dessiner son décor (`ai.scenario_scratch`). La purge des runs révolus se
+    fait à la création du suivant. Reste appelable explicitement — les tests s'en servent."""
     global _eval_ref_temp_dir
     if _eval_ref_temp_dir and os.path.isdir(_eval_ref_temp_dir):
         shutil.rmtree(_eval_ref_temp_dir, ignore_errors=True)
@@ -103,7 +107,6 @@ def _get_eval_ref_temp_dir() -> str:
     global _eval_ref_temp_dir
     if _eval_ref_temp_dir is None:
         _eval_ref_temp_dir = make_scenario_scratch_dir("w40k_eval_refmix_")
-        atexit.register(_cleanup_eval_ref_temp_dir)
     return _eval_ref_temp_dir
 
 

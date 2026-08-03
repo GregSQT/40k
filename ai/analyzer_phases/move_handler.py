@@ -220,7 +220,11 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
     # donc la seule source correcte ; le keyword du registre exempterait à tort.
     move_is_fly = re.search(r'(?:MOVED|FLED)\s+\[FLY\]\s+from', action_desc, re.IGNORECASE) is not None
     if is_move_after_shooting:
-        move_is_fly = bool(require_key(config.unit_is_fly_by_type, move_unit_type))
+        # 21.03 : le move-after-shooting n'est PAS un mouvement volant. `_fly_traversal_active`
+        # ne rend vrai qu'en phase de move ou de charge ; celui-ci est construit en phase de
+        # tir (`movement_build_valid_destinations_pool`), donc le moteur le pathfinde AU SOL et
+        # n'écrit aucun `[FLY]`. Le keyword du registre exemptait ici toute unité volante du
+        # BFS — un Gargoyle traversant un mur n'aurait jamais été remonté.
         stats['move_after_shooting'][player] += 1
         stats['special_rule_usage'][("move_after_shooting", move_unit_type)][player] += 1
         state.units_moved_after_shooting_in_turn.add(move_unit_id)
@@ -243,6 +247,7 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
             state.unit_base.get(move_unit_id, _DEFAULT_BASE),
             state.unit_positions[move_unit_id],
             start_col, start_row,
+            models_invalidated=move_unit_id in state.models_invalidated,
         )
         if _pos_status == 'mismatch':
             stats['position_log_mismatch']['move']['mismatch'] += 1

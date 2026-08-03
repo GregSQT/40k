@@ -38,6 +38,11 @@ class AnalyzerState:
     # Couche per-figurine (V11) : socles vivants par unité, maintenu frame-à-frame
     # depuis le segment [MODELS:] de chaque ligne. unit_id = préfixe de mid avant '#'.
     positions_by_model: Dict[str, Dict[str, Tuple[int, int]]] = field(default_factory=dict)
+    # Escouades dont les socles connus ont été INVALIDÉS par une perte de figurine (le log ne
+    # dit pas laquelle est tombée). Distingue « on n'a jamais su » de « on ne sait plus » : dans
+    # le second cas l'ancre d'escouade se recalcule sans action de l'unité, et un écart avec la
+    # position de départ loguée est du bruit d'ancre, pas une incohérence.
+    models_invalidated: Set[str] = field(default_factory=set)
     # Socles listés SUR LA LIGNE COURANTE (nouvelles positions de l'unité qui agit) ;
     # positions_by_model garde encore l'état PRÉCÉDENT tant que la ligne n'est pas finie.
     current_line_models: Dict[str, Dict[str, Tuple[int, int]]] = field(default_factory=dict)

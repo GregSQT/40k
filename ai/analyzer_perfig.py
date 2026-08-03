@@ -22,6 +22,7 @@ from engine.hex_utils import compute_occupied_hexes, min_distance_between_sets
 
 # `<mid>@(<col>,<row>)` — mid = token sans espace contenant '#'
 _MODELS_RE = re.compile(r'\[MODELS:\s*([^\]]+)\]')
+_TARGET_MODELS_RE = re.compile(r'\[TARGET_MODELS:\s*([^\]]+)\]')
 _TOKEN_RE = re.compile(r'(\S+?#\S*?)@\((-?\d+),\s*(-?\d+)\)')
 
 # Taille de socle telle que l'attend le moteur (`compute_occupied_hexes`) : diamètre entier pour
@@ -106,6 +107,7 @@ def move_start_status(
     anchor_stored: Optional[Tuple[int, int]],
     start_col: int,
     start_row: int,
+    models_invalidated: bool = False,
 ) -> str:
     """Statut de cohérence de la position de départ loggée d'un déplacement (contrôle 2.2,
     version per-figurine). Retourne l'un de :
@@ -121,6 +123,12 @@ def move_start_status(
     égalité, sinon ``'mismatch'``."""
     start = (start_col, start_row)
     if not models:
+        if models_invalidated:
+            # Socles invalidés par une perte de figurine : l'ancre d'ESCOUADE se recalcule sans
+            # que l'unité ait agi, donc l'écart avec le départ logué est du bruit d'ancre. On
+            # ne sait plus, on ne conclut pas — « jamais su » et « ne sait plus » se traitent
+            # différemment, sinon toute escouade fauchée remonte une fausse téléportation.
+            return "exact" if anchor_stored == start else "absorbed"
         return "exact" if anchor_stored == start else "mismatch"
     if start not in squad_footprint(models, base):
         return "mismatch"
@@ -255,3 +263,61 @@ def model_cache_entries(
         }
         for (col, row) in positions
     ]
+
+
+def squads_min_ranged_distance(
+    models_a: Dict[str, Tuple[int, int]],
+    base_a: Base,
+    models_b: Dict[str, Tuple[int, int]],
+    base_b: Base,
+    metric: str,
+    max_distance: int = 0,
+) -> float:
+    """Distance de PORTÉE minimale entre deux escouades, socle par socle (10 Shooting / 06.01).
+
+    À portée si AU MOINS un socle tireur atteint AU MOINS un socle cible. La mesure passe par
+    `engine.combat_utils.ranged_edge_distance`, donc par la métrique que le moteur applique —
+    `min_distance_between_sets` seul fige le hex, et douze tirs légaux en euclidien
+    ressortaient « out of range » à x1 pour cette seule raison.
+    """
+    from engine.combat_utils import ranged_edge_distance
+    from engine.hex_utils import Socle
+
+    def _socles(models: Dict[str, Tuple[int, int]], base: Base) -> List:
+        shape, size = base
+        return [
+            Socle(shape, size, col, row, set(_model_footprint(col, row, base)))
+            for (col, row) in models.values()
+        ]
+
+    socles_a = _socles(models_a, base_a)
+    socles_b = _socles(models_b, base_b)
+    if not socles_a or not socles_b:
+        raise ValueError("squads_min_ranged_distance: escouade sans socle")
+    return min(
+        ranged_edge_distance(sa, sb, metric, max_distance=max_distance)
+        for sa in socles_a
+        for sb in socles_b
+    )
+
+
+def parse_target_models_segment(text: str) -> Optional[Dict[str, Tuple[int, int]]]:
+    """Socles SURVIVANTS de la cible, depuis le segment `[TARGET_MODELS:]` de la ligne.
+
+    Le step logger l'écrit sur le DERNIER jet visant cette cible, après retrait des pertes
+    (cf. `ai/step_logger.py`) : c'est la seule donnée fraîche sur une unité qui subit sans agir.
+    `positions_by_model` d'une cible, lui, date de sa dernière ACTION — et il est effacé dès
+    qu'elle perd une figurine, faute de savoir laquelle. Sans ce segment, la portée se mesurait
+    contre l'ANCRE de l'escouade, alors que le moteur mesure contre la figurine la plus proche.
+
+    Retourne None si le segment est absent (jets intermédiaires d'un même groupe).
+    """
+    m = _TARGET_MODELS_RE.search(text)
+    if not m:
+        return None
+    models: Dict[str, Tuple[int, int]] = {}
+    for tok in _TOKEN_RE.finditer(m.group(1)):
+        models[tok.group(1)] = (int(tok.group(2)), int(tok.group(3)))
+    if not models:
+        raise ValueError(f"Segment [TARGET_MODELS:] présent mais illisible: {m.group(1)[:120]}")
+    return models

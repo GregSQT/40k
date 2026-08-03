@@ -197,14 +197,20 @@ def parse_moves_from_step(step_log: str, episode_map: Dict[int, int]) -> List[Di
     Now supports both old format (without E{episode}) and new format (with E{episode})
     """
     moves = []
+    # Token OPTIONNEL entre le verbe et `from` : le moteur écrit `MOVED [FLY] from` / `FLED
+    # [FLY] from` dès qu'une escouade a déclaré « take to the skies » (21.03) — et l'IA le
+    # déclare systématiquement pour toute unité FLY. Sans l'accepter, ces déplacements ne sont
+    # pas parsés du tout, donc comptés « faits mais NON LOGUÉS » : un roster à jump packs
+    # faisait sortir ce script en erreur sur des mouvements parfaitement journalisés.
+    _TOKEN = r'(?:\s+\[[^\]]+\])?'
     # Pattern for MOVED with episode: [timestamp] E{episode} T{turn} P{player} MOVE : ...
-    moved_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) MOVED from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    moved_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) MOVED' + _TOKEN + r' from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
     # Pattern for MOVED without episode (old format): [timestamp] T{turn} P{player} MOVE : ...
-    moved_pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) MOVED from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    moved_pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) MOVED' + _TOKEN + r' from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
     # Pattern for FLED with episode
-    fled_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) FLED from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    fled_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) FLED' + _TOKEN + r' from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
     # Pattern for FLED without episode (old format)
-    fled_pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) FLED from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    fled_pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) FLED' + _TOKEN + r' from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
     
     for line_num, line in enumerate(step_log.split('\n'), 1):
         # Try MOVED with episode first (new format)

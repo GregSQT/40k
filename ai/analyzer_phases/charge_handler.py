@@ -93,6 +93,7 @@ def handle_charge(
                 state.unit_base.get(charge_unit_id, _DEFAULT_BASE),
                 state.unit_positions[charge_unit_id],
                 start_col, start_row,
+                models_invalidated=charge_unit_id in state.models_invalidated,
             )
             if _pos_status == 'mismatch':
                 stats['position_log_mismatch']['charge']['mismatch'] += 1

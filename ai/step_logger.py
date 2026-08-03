@@ -824,8 +824,13 @@ class StepLogger:
             else:
                 base_msg = f"{unit_label} FOUGHT {target_label}"
             
-            # Apply truncation logic like shooting phase - stop after first failure
-            detail_parts = [f"Hit {hit_roll}({hit_target}+)"]
+            # Apply truncation logic like shooting phase - stop after first failure.
+            # [SUSTAINED HITS] 24.36 : JUMEAU du tir. `roll_attack_pool` est partagé, donc la
+            # mêlée produit les mêmes touches additionnelles (sans jet, `Hit None`) et le même
+            # `sustainedHit` arrive ici. Sans le token, `fight_over_cc_nb` les compte comme des
+            # attaques — le faux positif exactement symétrique de celui du tir.
+            _sustained_seg = " [SUSTAINED HITS]" if details.get("sustained_hit") else ""
+            detail_parts = [f"Hit {hit_roll}({hit_target}+){_sustained_seg}"]
             
             # Only show wound if hit succeeded
             if hit_result == "HIT":

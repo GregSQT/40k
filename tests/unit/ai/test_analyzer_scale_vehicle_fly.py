@@ -325,3 +325,47 @@ def test_les_socles_de_depart_excluent_les_figurines_mortes_entre_temps():
     assert surviving_start_models(avant, None) == avant
     # Aucun survivant commun : None → l'appelant retombe sur l'ancre plutôt que sur des morts.
     assert surviving_start_models(avant, {"101#9": (1, 1)}) is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. Socles périmés : une escouade qui PERD une figurine sans agir
+# ─────────────────────────────────────────────────────────────────────────────
+
+_STALE_UNITS = (
+    "[10:00:00] Unit 1 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2\n"
+    "[10:00:00] Unit 2 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2\n"
+    "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2\n"
+)
+
+
+def test_les_socles_d_une_cible_fauchee_ne_hantent_pas_le_plateau(tmp_path):
+    """`positions_by_model` n'est réécrit que quand l'unité AGIT : une cible qui perd une
+    figurine garde ses socles morts jusqu'à sa prochaine action, et le log ne dit pas LAQUELLE
+    est tombée (allocation « front », pas nominative).
+
+    Ici le socle avancé de 101 — le seul proche de l'unité 2 — meurt au premier tir. Le second
+    tir vise un survivant à l'autre bout du plateau, donc une cible NON engagée : le compter en
+    faute, c'est mesurer contre une figurine retirée du plateau.
+    """
+    body = (
+        "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(10,10) DEPLOYED from (-1,-1) to (10,10) [R:+0.0] [SUCCESS]\n"
+        "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2(30,10) DEPLOYED from (-1,-1) to (30,10) [R:+0.0] [SUCCESS]\n"
+        "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(50,10) DEPLOYED from (-1,-1) to (50,10) [R:+0.0] [SUCCESS]\n"
+        # 101 agit : ses DEUX socles sont connus, dont 101#1 collé à l'unité 2.
+        "[10:00:02] E1 T1 P2 MOVE : Unit 101(50,10) MOVED from (50,10) to (50,10)"
+        "[R:+0.0] [MODELS: 101#0@(50,10) 101#1@(31,10)] [SUCCESS]\n"
+        # Tir 1 : une figurine de 101 tombe. Laquelle ? le log ne le dit pas.
+        "[10:00:03] E1 T1 P1 SHOOT : Unit 1(10,10) SHOT Unit 101(50,10) with [Bolt Rifle] "
+        "- Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [R:+0.0] [SUCCESS]\n"
+        # Tir 2 : l'ancre loguée est celle du survivant, à 20 cases de l'unité 2.
+        "[10:00:04] E1 T1 P1 SHOOT : Unit 1(10,10) SHOT Unit 101(50,10) with [Bolt Rifle] "
+        "- Hit 4(3+) - Wound 5(4+) - Save 2(3+) [R:+0.0] [SUCCESS]\n"
+    )
+    log = tmp_path / "stale.log"
+    log.write_text(_log(body, inches_to_subhex=1, board="cols=60 rows=60", units=_STALE_UNITS))
+    stats = an.parse_step_log(str(log))
+
+    assert stats["shoot_at_engaged_enemy"][1] == 0, (
+        "les socles morts de la cible sont encore mesurés : "
+        f"{stats['shoot_at_engaged_enemy']}"
+    )
