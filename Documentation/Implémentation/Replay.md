@@ -104,6 +104,27 @@ jet (`Hit None`), donc rien ne la distingue autrement d'une ligne malformée. Sa
 la comptait dans le plafond de tirs (`shoot_over_rng_nb` / `fight_over_cc_nb`) et affichait
 simultanément la règle « NOT USED ».
 
+
+#### Le champ `turn` des lignes de phase de combat — corrigé le 2026-08-04
+
+`_append_fight_move_log` (émetteur UNIQUE de `PILED IN` et `CONSOLIDATED`, gym **et** PvP) lisait
+`game_state["current_turn"]`, une clé qui n'existe dans **aucun** `game_state` de ce moteur — le
+compteur s'appelle `turn` — avec un repli silencieux sur `1`. Les **1521** lignes `CONSOLIDATED`
+d'un run de 600 épisodes étaient donc toutes datées `T1`, quel que soit le round.
+
+Le repli est exactement la valeur par défaut anti-erreur que CLAUDE.md T1 interdit : c'est lui qui
+a rendu le défaut invisible. Le contrat est désormais `require_key(game_state, "turn")` — absence
+= erreur explicite. Onze sites portaient le même motif (`charge_handlers`, `movement_handlers`,
+`fight_handlers`), tous corrigés.
+
+⚠️ **Observation non expliquée au 2026-08-04** : ce même run ne contient **aucune** ligne
+`PILED IN` pour 1521 `CONSOLIDATED`. La chaîne a pourtant été vérifiée par sonde — sur le vrai
+point d'entrée (`fight_phase_start` + `_fight_v11_gym_after_phase_start`), le gym émet bien deux
+action_logs `pile_in` et un `StepLogger` réel écrit `PILED IN from … to …`. Tout consommateur de
+`step.log` doit donc, aujourd'hui, considérer que **le pile-in peut être absent du journal** et ne
+pas s'en servir comme position de référence : le contrôle « pile-in au-delà de 3" » de l'analyzer
+est un VERT VACANT tant que ce point n'est pas tranché (cf. V11 §0.66).
+
 ### 2.3ter Move réactif
 
 ```
