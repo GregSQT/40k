@@ -46,7 +46,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.65` (`0.63`–`0.64` le 2026-08-03, `0.57`–`0.60` le 2026-08-02, `0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30, `0.55`–`0.56` le 2026-08-02).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.66` (`0.63`–`0.65` le 2026-08-03, `0.57`–`0.60` le 2026-08-02, `0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30, `0.55`–`0.56` le 2026-08-02).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -78,7 +78,8 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
 | **§0.61** | Le garde **anti-runaway** était MUET, et son compteur d'épisodes divergeait | ✅ **CORRIGÉ le 2026-08-03** | **1** | Une troncature signale une BOUCLE dans le moteur, pas une fin de partie — or son diagnostic n'existait que dans le `print` d'un worker (noyé à `n_envs=48`) et le compteur persisté ne la comptait pas, alors que le run s'arrête dessus. Nouveau scalaire `00_critical/t_truncated_episodes`, diagnostic complet en `truncations.jsonl`, bilan imprimé en fin de run. Détail → §0.61. |
-| **§0.64** | Le scoring de déploiement calculait la **LoS avec une autre implémentation** que le moteur | ✅ **ALIGNÉ SUR LA RÈGLE le 2026-08-03** — ⚠️ **ré-entraînement requis** | — (entre dans le lot §0.48) | `batch_has_los_from_source` (grille de murs **2D**) contre `compute_unit_los` (la règle : obscuring 13.10, plancher-occulteur 3D) : **607 désaccords sur 16 104 hexes** pour une seule source, tous dans le même sens. L'observation de déploiement (§0.40) et le score des 5 stratégies reposent donc sur une LoS **approximative**, alors que le docstring de `_has_line_of_sight` affirme le contraire pour le déploiement. 🟢 **Arbitrage : aligner** — l'observation annonçait « l'exposition réelle » alors qu'elle surestimait le danger sur ~4 % des hexes, faisant fuir à l'agent des positions sûres. Les DEUX canaux (réel et potentiel) passent par `deployment_los` → `compute_unit_los` ; cache disque invalidé par `DEPLOYMENT_LOS_MODEL_VERSION`. Coût : phase de déploiement **1,46 → 2,85 s** (+42 % sur `main`, le gain de §0.63 en absorbant une part). `obs_size` inchangé, **valeurs changées → `--new`**. Détail → §0.64. |
+| **§0.65** | Le prix de la conformité de §0.64, **rendu** : la LoS de déploiement vectorisée | ✅ **LIVRÉ le 2026-08-03** — **aucun** changement de valeur | — | La règle est inchangée, son EXÉCUTION est vectorisée : jumeau de `hex_line_iter` une source → N cibles (`batch_hex_line_steps`) + la règle de blocage (murs, obscuring 13.10) appliquée à la grille (`batch_ground_hex_can_see`). **Phase de déploiement 3,58 → 1,33 s** (−63 %), part LoS **1,58 → 0,09 s** (−94 %), **146 781 → 0** paire tracée en Python. **ISO-VALEUR prouvé** : égalité hexe par hexe sur la totalité du pool et 2 terrains (+ 2 contre-épreuves ROUGES), et 90 empreintes de l'observation §0.40 identiques à `main`. Donc **rien à ajouter au lot de ré-entraînement**. Détail → §0.65. |
+| **§0.64** | Le scoring de déploiement calculait la **LoS avec une autre implémentation** que le moteur | ✅ **ALIGNÉ SUR LA RÈGLE le 2026-08-03** — ⚠️ **ré-entraînement requis** | — (entre dans le lot §0.48) | `batch_has_los_from_source` (grille de murs **2D**) contre `compute_unit_los` (la règle : obscuring 13.10, plancher-occulteur 3D) : **607 désaccords sur 16 104 hexes** pour une seule source, tous dans le même sens. L'observation de déploiement (§0.40) et le score des 5 stratégies reposent donc sur une LoS **approximative**, alors que le docstring de `_has_line_of_sight` affirme le contraire pour le déploiement. 🟢 **Arbitrage : aligner** — l'observation annonçait « l'exposition réelle » alors qu'elle surestimait le danger sur ~4 % des hexes, faisant fuir à l'agent des positions sûres. Les DEUX canaux (réel et potentiel) passent par `deployment_los` → `compute_unit_los` ; cache disque invalidé par `DEPLOYMENT_LOS_MODEL_VERSION`. Coût : phase de déploiement **1,46 → 2,85 s** (+42 % sur `main`, le gain de §0.63 en absorbant une part) — ⚠️ **chiffre périmé le jour même par [§0.65](#s0.65)**, qui rend ce surcoût et davantage, à la valeur près. `obs_size` inchangé, **valeurs changées → `--new`**. Détail → §0.64. |
 | **§0.63** | Le cache de scoring du déploiement **ne servait jamais** (100 % de reconstruction) | ✅ **CORRIGÉ le 2026-08-03** | — | Deux causes, la seconde invisible sans la première : cache indexé sur les hexes de l'unité (condition jamais satisfaite), et déploiement **en alternance** avec un delta incrémental limité à une pose. Correctif : sur-ensemble stable (pool moins murs), **un cache par joueur**, delta généralisé à N poses. **Neutre pour l'observation, mesuré** (0 écart) → aucun ré-entraînement. Gain **2,01 s → 1,46 s** (−27 %) sur la phase de déploiement, reconstruction **100 % → 20 %**. Détail → §0.63. |
 | **§0.60** | Instrumentation du **coût** de l'entraînement — workers d'éval, temps bloquant, courbes de charge et de participation | ✅ **LIVRÉ le 2026-08-02** | **2** | Trois angles morts de COÛT, distincts des angles morts de COMPORTEMENT du §0.56. (1) Quatre clés `bot_eval_*` vivaient **hors de `callback_params`** : personne ne les lisait, `bot_eval_n_workers` retombait sur `min(n_envs, n_scenarios × n_bots)` = **24 workers**, soit **47 Go et 598 s** contre **9,6 Go et 349 s** à 4 workers — moins de workers est aussi **42 % plus rapide**, la VM passant son temps à swapper. `validate_bot_eval_worker_params` valide désormais au DÉMARRAGE. (2) `blocking_eval_seconds` ne compte plus que le temps où la boucle est RÉELLEMENT figée. (3) Six courbes moteur : charges tentées/réussies (agent et bot) et participation par phase. Détail → §0.60. |
 | **§0.59** | Régime d'entraînement en **deux phases** — `x1_selfplay` (self-play) et `decay_fraction` | 🟠 **OUVERT — livré, JAMAIS EXÉCUTÉ** | **2** | Deux changements de régime non mesurés. (1) `decay_fraction` achève les rampes lr/entropie **avant** la fin d'un run long (sans lui, un run de 200 000 épisodes garde une entropie élevée jusqu'au dernier épisode). (2) Le profil `x1_selfplay` ajoute une **phase 2** en `--append` : un snapshot figé de l'agent remplace le bot sur une part rampée **0.0 → 0.5** des épisodes. ⚠️ Aucun run de phase 2 n'a jamais tourné ; `opponent_mix.enabled` **lève** hors du chemin de rotation de scénarios. Détail → §0.59. |
@@ -385,7 +386,9 @@ méthodes. C'était le SECOND modèle de LoS du fichier, celui qui divergeait.
 réécrit que s'il n'existe pas (`if not os.path.exists`). Les fichiers déjà produits sur les
 hexes d'UNE unité restent valides (la clé de topologie ne dépend pas des hexes évalués) mais
 **partiels** — 93 863 octets sur `main` contre 131 842 écrits ici pour la même topologie — et ne
-sont jamais complétés : chaque processus repaie les ~30 % manquants.
+sont jamais complétés : chaque processus repaie les ~30 % manquants. ⚠️ **Caduc depuis**
+[§0.65](#s0.65) : ce que repaie un processus est passé de ~0,8 s à **~0,11 s** mesurées, le
+compléter ne vaut plus le code qu'il demanderait.
 
 **Gain mesuré** (3 graines, phase de déploiement complète) : **2,01 s → 1,46 s**, soit **−27 %**.
 Taux de reconstruction **100 % → 20 %** (2 reconstructions à froid, une par joueur, puis 8 mises
@@ -405,7 +408,7 @@ raison** ; elle est signalée, non touchée (hors périmètre).
 
 **Le constat, mesuré.** Deux implémentations de ligne de vue coexistent sur le chemin du
 déploiement :
-- la **reconstruction** du cache utilise `engine.hex_utils.batch_has_los_from_source` —
+- la **reconstruction** du cache utilisait `engine.hex_utils.batch_has_los_from_source` (supprimé depuis, cf. [§0.65](#s0.65)) —
   vectorisée, qui trace la ligne d'hexes et teste une **grille de murs 2D** ;
 - la **mise à jour incrémentale** utilisait `has_line_of_sight` → `shooting_handlers._has_line_of_sight`
   → **`compute_unit_los`**, la règle du moteur.
@@ -460,6 +463,8 @@ qui porte le coût.
 | après §0.64 (LoS alignée) | **2,85 s** |
 Soit **+42 %** sur l'état d'origine, le gain de §0.63 absorbant une partie du prix de la
 conformité. 🟢 Arbitrage utilisateur : « aligner d'abord, optimiser ensuite ».
+✅ **Le « ensuite » est fait le jour même, et le prix de la conformité est plus que rendu** :
+cf. [§0.65](#s0.65) — la règle est inchangée, son EXÉCUTION est vectorisée.
 
 ⚠️ **RÉ-ENTRAÎNEMENT REQUIS** : `obs_size` est **inchangé** (aucun champ ajouté), mais les
 **valeurs** du bloc candidats de déploiement changent sur ~4 % des hexes. Un modèle entraîné
@@ -470,6 +475,105 @@ avant cette date a appris sur l'ancienne exposition. Cette entrée appartient do
 `_count_potential_los_from_reference_hexes` (~80 lignes) n'avaient plus aucun appelant, et
 `los_pair_cache` n'était plus lu. C'était le SECOND modèle de LoS du fichier — celui-là même qui
 divergeait ; le garder, c'était offrir à quelqu'un de le rebrancher.
+
+<a id="s0.65"></a>
+### 0.65 Le prix de la conformité rendu — la LoS de déploiement est VECTORISÉE, à la valeur près — ✅ LIVRÉ (2026-08-03)
+
+Le « ensuite » de l'arbitrage de [§0.64](#s0.64) (« aligner d'abord, optimiser ensuite »).
+**Contrainte tenue : STRICTEMENT ISO-VALEUR.** Le bloc candidats de déploiement de l'observation
+(§0.40) vient déjà de changer, ce qui impose un `--new` ; un second changement de valeurs en
+imposerait un autre. Rien n'a bougé — prouvé, pas affirmé (voir « Preuve » plus bas).
+
+**Où partait le temps — mesuré, pas déduit** (harnais : phase de déploiement complète jouée
+action par action sur `holdout_regular/scenario_bot-01`, `x1_debug`, cache disque chaud ; ce
+harnais chronomètre AUSSI la construction du masque et l'observation, il ne coïncide donc pas
+avec celui du tableau de §0.64 — les deux colonnes ci-dessous sont mesurées avec LE MÊME, sur
+`main` et sur la branche) :
+
+| poste, 1 graine | avant | après |
+|---|---|---|
+| **phase de déploiement** | **3,58 s** | **1,33 s** (−63 %) |
+| cache de scoring (= la LoS) | 1,58 s | **0,09 s** (−94 %) |
+| dont paires LoS calculées | 146 781 | **0** |
+| `_get_valid_deployment_hexes` | 0,64 s | 0,60 s |
+| 3 graines, total | 10,75 s | **4,00 s** |
+
+**Trois pistes de l'énoncé sont mortes, mesurées** — elles valaient d'être instruites, pas d'être
+suivies :
+1. *Indexer `hex_los_cache` par signature de terrain au lieu de le vider à chaque épisode.*
+   **Sans objet** : 146 776 consultations pour 146 781 calculs, soit **zéro** réutilisation. Une
+   source ennemie qui se pose demande 16 104 paires JAMAIS posées ; le cache n'a pas été mal
+   entretenu, on ne lui repose simplement jamais la même question. (Entre ÉPISODES, la question
+   se reposerait — mais 🟢 **arbitrage utilisateur : ne pas mesurer**, de nouveaux terrains
+   arrivent et rendraient la mesure trompeuse.)
+2. *Ne pas scorer les 16 104 hexes du sur-ensemble.* Le consommateur lit `valid_hexes`, dont la
+   taille est **du même ordre** que le sur-ensemble (pool moins murs, moins clairance) : il n'y a
+   pas de gras à couper là.
+3. *Écrire un équivalent vectorisé.* C'est **celle-là** qui portait tout le gain.
+
+**Livré.**
+- `hex_utils.batch_hex_line_steps` — jumeau vectorisé de `hex_line_iter` : une source, N cibles,
+  rang par rang, avec arrêt anticipé des rayons déjà bloqués (le pendant vectoriel de l'arrêt au
+  premier bloqueur). Même nudge de départage, même `a + (b - a) * t` recalculé à chaque rang.
+- `shooting_handlers.batch_ground_hex_can_see` — la RÈGLE de blocage (mur, ou case obscurante
+  dont l'area n'est ni celle de la source ni celle de la cible, 13.10), appliquée à la grille.
+  Elle vit à côté de la règle scalaire, pas dans `hex_utils` : la géométrie d'un côté, la règle
+  de l'autre, c'est ce qui empêche un 3ᵉ modèle de naître.
+- `ActionDecoder.deployment_los` reste le point d'entrée UNIQUE de §0.64, mais devient **batch**
+  (un hexe → N hexes). Les deux canaux et les deux chemins du cache (reconstruction et
+  incrémental) y passent toujours.
+- ⚠️ `DEPLOYMENT_LOS_MODEL_VERSION` **reste à 2** : le modèle de LoS n'a pas bougé, seule son
+  exécution. Vérifié plutôt que supposé — les fichiers `.cache/deployment_potential_los/`
+  produits par la branche sont **octet pour octet identiques** à ceux de `main`.
+
+**POURQUOI CE JUMEAU NE ROUVRE PAS §0.64.** Écrire un second chemin de LoS est exactement la
+faute que §0.64 vient de réparer. Ce qui le rend acceptable ici : sur les paires du déploiement —
+et sur elles seules — `compute_unit_los` **se réduit** à un unique tracé 2D, et la réduction se
+démontre terme à terme sur son propre code (dict coordonnées-seules → empreinte = l'ancre → pas
+de vantage latéral ; pas de `MODEL_HEIGHT` → pas de plancher-occulteur ; pas de `level` → wall_set
+complet). Le raisonnement ne suffirait pas : c'est le VERROU qui rend la chose sûre.
+
+**Preuve — `tests/unit/engine/test_deployment_los_vectorized_equivalence.py` (4)** :
+- **égalité hexe par hexe** entre le tracé scalaire (`compute_unit_los`) et le vectorisé, sur la
+  **TOTALITÉ du pool** (16 104 hexes) et sur **deux terrains** (`terrain-mc1` de production et
+  `terrain-train-02`, 545 murs contre 1 098, 10 areas obscurantes contre 15), depuis des sources
+  **construites** pour couvrir ce qui fait diverger : unités posées, **dans** une area obscurante
+  (l'exclusion 13.10 côté source, justement ce que le tracé 2D condamné ignorait), collée à un
+  mur, aux deux coins du pool. Le test refuse de passer si l'échantillon de sources ne contient
+  aucune area obscurante, et si aucune source ne voit quoi que ce soit (vert vacant).
+- l'HYPOTHÈSE du jumeau — la déduplication de `hex_line_iter` ne retire jamais rien, donc les
+  deux chemins testent les mêmes cellules — est **vérifiée** (1 308 lignes : `len(ligne) == n+1`
+  et aucun doublon), au lieu d'être laissée en commentaire.
+- `hex_los_cache` doit rester **vide** après un déploiement : un retour au chemin par paire le
+  remplirait de nouveau, et c'est ce que ce test interdit.
+- **Contre-épreuves faites** (sans elles, un test vert ne prouve rien) : exclusion obscurante de
+  la source retirée → **ROUGE, 727 hexes** ; nudge de départage retiré du seul jumeau vectorisé →
+  **ROUGE, 3 hexes** (les lignes rasantes, exactement ce que le nudge départage). Rétablis, vert.
+
+**Preuve de bout en bout, en plus du verrou** : `los_exposure_by_hex`,
+`potential_los_exposure_by_hex` et `ally_col_counts` empreintés à CHAQUE pose, sur 3 graines
+(90 empreintes SHA-256) — **0 écart** entre `main` et la branche. C'est l'observation §0.40
+elle-même qui est comparée, pas seulement le prédicat de LoS.
+
+**Effet de bord, mesuré et voulu** : le déploiement remplissait `hex_los_cache` de 146 781 paires
+que **personne ne relit** en production (seul `LOS_DEBUG=1` s'en sert) et que **chaque
+déplacement d'unité** devait ensuite reparcourir pour les invalider — 0,17 s rien que pendant le
+déploiement, et le coût continuait pendant tout l'épisode. Le chemin batch ne l'alimente plus.
+
+**Code mort supprimé** : `hex_utils.batch_has_los_from_source` (le tracé vectorisé **2D**, celui
+qui divergeait de la règle sur 607 hexes) — §0.64 lui avait retiré son dernier appelant sans le
+supprimer. Garder à côté d'un tracé vectorisé conforme un tracé vectorisé faux, c'est offrir à
+quelqu'un de rebrancher le mauvais. Avec lui part `ActionDecoder._build_wall_grid`, son seul
+fournisseur de grille, et le champ `_wall_grid_cache`.
+
+📌 **Ce qui coûte maintenant, et qui n'est PAS le sujet de cette entrée** : `_get_valid_deployment_hexes`
+devient le premier poste de la phase (0,60 s, dont 0,39 s de filtre de clairance par socle). Ce
+code est antérieur, correct, et sans rapport avec la LoS — **signalé, non touché**.
+
+📌 **Une remarque de §0.63 devient caduque** : le « manque à gagner » du cache disque des
+expositions potentielles (fichiers partiels jamais complétés, chaque processus repayant les
+~30 % manquants) valait ~0,8 s ; la régénération complète coûte désormais **~0,11 s** mesurées.
+Le compléter ne vaut plus le code qu'il demanderait.
 
 <a id="s0.60"></a>
 ### 0.60 Instrumentation du COÛT — 4 clés d'éval jamais lues (47 Go de workers), temps bloquant, courbes de charge et de participation — ✅ LIVRÉ (2026-08-02)

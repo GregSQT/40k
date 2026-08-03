@@ -426,74 +426,91 @@ def hex_line(
     return list(hex_line_iter(col1, row1, col2, row2))
 
 
-def batch_has_los_from_source(
+# ── PIERRE TOMBALE — `batch_has_los_from_source` (2026-08-03) ────────────────────────────
+# Traçait les mêmes lignes que `hex_line_iter` mais ne testait QUE une grille de murs 2D : ni
+# obscuring (13.10), ni plancher-occulteur 3D. C'était le SECOND modèle de ligne de vue du
+# moteur, celui qui divergeait de `compute_unit_los` sur 607 hexes (V11 §0.64). §0.64 lui a
+# retiré son dernier appelant — le scoring de déploiement — sans le supprimer.
+# Il part ici, en même temps qu'arrive `batch_hex_line_steps` : garder à côté d'un tracé
+# vectorisé CONFORME un tracé vectorisé FAUX, c'est offrir à quelqu'un de rebrancher le mauvais.
+# La géométrie reste ici, la RÈGLE de blocage vit dans `shooting_handlers` — c'est la
+# séparation qui empêche un 3e modèle de naître.
+# ─────────────────────────────────────────────────────────────────────────────────────────
+
+
+def batch_hex_line_steps(
     from_col: int,
     from_row: int,
     to_arr: np.ndarray,
-    wall_grid: np.ndarray,
-) -> np.ndarray:
-    """Vectorized LoS from one source to N targets using the hex-line algorithm.
+    alive: np.ndarray,
+) -> "Iterator[Tuple[np.ndarray, np.ndarray, np.ndarray]]":
+    """JUMEAU VECTORISÉ de :func:`hex_line_iter` — une source, N cibles, en même temps.
 
-    Traces intermediate hexes (excluding endpoints) for each ray and checks
-    them against ``wall_grid``. Equivalent to calling :func:`hex_line` + wall
-    check on each target, but vectorized via numpy.
+    Yield, pour chaque rang ``i`` de cellule INTERMÉDIAIRE (``1 <= i < n_j``),
+    ``(idx, c_off, r_off)`` : les indices des cibles encore vivantes à ce rang et la cellule
+    que leur ligne traverse. Les extrémités ne sont jamais rendues — ni la cellule source
+    (jamais bloquante), ni la cellule cible (elle PORTE la cible) : exactement les cellules que
+    :func:`_los_line_segment_clear` examine.
 
-    Args:
-        from_col, from_row: Source hex in offset odd-q.
-        to_arr: int array shape (N, 2) — columns [col, row] of targets.
-        wall_grid: bool array shape (board_cols, board_rows), True = wall.
+    ``alive`` (bool, shape (N,)) est lu à CHAQUE rang : l'appelant y met ``False`` les cibles
+    qu'il vient de déclarer bloquées, et leurs rangs suivants ne sont plus calculés. C'est le
+    pendant vectoriel de l'arrêt au premier bloqueur du générateur scalaire (mesuré : 68 % des
+    lignes sont bloquées, la moitié des cellules ne sert à rien).
 
-    Returns:
-        bool array shape (N,) — True = has LoS, False = blocked.
+    IDENTITÉ AVEC LE CHEMIN SCALAIRE — ce qu'il faut savoir avant d'y toucher :
+    - même nudge de départage (``+1e-6``, ``-2e-6``), même expression ``a + (b - a) * t`` avec
+      ``t = i / n`` RECALCULÉ à chaque rang. Surtout pas une accumulation incrémentale : la
+      dérive flottante changerait le départage des lignes rasantes, donc le couvert (13.06).
+      numpy calcule en float64, comme Python : les deux suites sont bit-à-bit les mêmes.
+    - ``np.round`` et ``round`` arrondissent tous deux au pair le plus proche (round-half-even).
+    - la déduplication du générateur scalaire (``seen``) n'a pas d'équivalent ici, et n'en a pas
+      besoin : la i-ème cellule d'un cube-lerp est à distance cube ``i`` de la source, donc les
+      ``n+1`` cellules sont deux à deux distinctes et ``seen`` ne retire jamais rien. Cette
+      propriété n'est pas une supposition : elle est vérifiée par test sur un échantillon de
+      paires (``test_deployment_los_vectorized_equivalence``), en même temps que l'égalité
+      hexe par hexe des deux chemins.
     """
     n_targets = len(to_arr)
     if n_targets == 0:
-        return np.empty(0, dtype=bool)
+        return
+    if alive.shape != (n_targets,):
+        raise ValueError(
+            f"batch_hex_line_steps: alive de forme {alive.shape}, attendu ({n_targets},)"
+        )
 
     to_cols = to_arr[:, 0].astype(np.int64)
     to_rows = to_arr[:, 1].astype(np.int64)
 
-    # offset_to_cube for source
+    # offset_to_cube, source puis cibles (vectorisé)
     x1 = np.int64(from_col)
     z1 = np.int64(from_row) - np.int64((from_col - (from_col & 1)) >> 1)
     y1 = -x1 - z1
-
-    # offset_to_cube vectorized for all targets
     x2 = to_cols
     z2 = to_rows - ((to_cols - (to_cols & 1)) >> 1)
     y2 = -x2 - z2
 
     n_arr = np.maximum(np.maximum(np.abs(x2 - x1), np.abs(y2 - y1)), np.abs(z2 - z1))
-
-    result = np.ones(n_targets, dtype=bool)
     max_n = int(n_arr.max())
     if max_n <= 1:
-        return result  # 0 or 1 steps: no intermediate hexes possible
+        return  # 0 ou 1 pas : aucune cellule intermédiaire
 
-    # Nudged float source coords (same tiebreak nudge as hex_line)
-    fx1 = float(from_col) + 1e-6
+    fx1 = float(x1) + 1e-6
     fy1 = float(y1) + 1e-6
     fz1 = float(z1) - 2e-6
-
     fx2 = x2.astype(np.float64) + 1e-6
     fy2 = y2.astype(np.float64) + 1e-6
     fz2 = z2.astype(np.float64) - 2e-6
 
-    board_cols, board_rows = wall_grid.shape
-
     for i in range(1, max_n):
-        # Active rays: not yet blocked and step i is intermediate (i < n_j)
-        active = result & (n_arr > i)
+        active = alive & (n_arr > i)
         if not active.any():
-            break
+            return
+        idx = np.flatnonzero(active)
+        t = float(i) / n_arr[idx].astype(np.float64)
 
-        idx_active = np.where(active)[0]
-        n_active = n_arr[idx_active].astype(np.float64)
-        t = float(i) / n_active
-
-        fx = fx1 + (fx2[idx_active] - fx1) * t
-        fy = fy1 + (fy2[idx_active] - fy1) * t
-        fz = fz1 + (fz2[idx_active] - fz1) * t
+        fx = fx1 + (fx2[idx] - fx1) * t
+        fy = fy1 + (fy2[idx] - fy1) * t
+        fz = fz1 + (fz2[idx] - fz1) * t
 
         rx = np.round(fx).astype(np.int64)
         ry = np.round(fy).astype(np.int64)
@@ -503,32 +520,18 @@ def batch_has_los_from_source(
         dy = np.abs(ry.astype(np.float64) - fy)
         dz = np.abs(rz.astype(np.float64) - fz)
 
-        # Tiebreak: recompute the coordinate with the largest rounding error
+        # Départage : on recalcule la coordonnée dont l'arrondi a le plus dérivé. Les trois
+        # masques sont exclusifs, donc chaque formule lit les rx/ry/rz d'ORIGINE.
         mask_x = (dx > dy) & (dx > dz)
         mask_y = (~mask_x) & (dy > dz)
         mask_z = (~mask_x) & (~mask_y)
-
-        # Masks are mutually exclusive — use original rx/ry/rz in each formula
+        # `ry_f` du chemin scalaire n'est pas calculé : `cube_to_offset` ne lit que x et z, et
+        # la branche `mask_y` laisse justement x et z intacts.
         rx_f = np.where(mask_x, -ry - rz, rx)
-        ry_f = np.where(mask_y, -rx - rz, ry)
         rz_f = np.where(mask_z, -rx - ry, rz)
 
-        # cube_to_offset: col = x, row = z + ((x - (x & 1)) >> 1)
-        c_off = rx_f
-        r_off = rz_f + ((rx_f - (rx_f & 1)) >> 1)
-
-        in_bounds = (
-            (c_off >= 0) & (c_off < board_cols) & (r_off >= 0) & (r_off < board_rows)
-        )
-        is_wall = np.zeros(len(idx_active), dtype=bool)
-        if in_bounds.any():
-            c_v = c_off[in_bounds]
-            r_v = r_off[in_bounds]
-            is_wall[in_bounds] = wall_grid[c_v, r_v]
-
-        result[idx_active[is_wall]] = False
-
-    return result
+        # cube_to_offset : col = x, row = z + ((x - (x & 1)) >> 1)
+        yield idx, rx_f, rz_f + ((rx_f - (rx_f & 1)) >> 1)
 
 
 def expand_wall_group_to_hex_list(

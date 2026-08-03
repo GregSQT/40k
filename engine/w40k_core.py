@@ -669,6 +669,9 @@ class W40KEngine(gym.Env):
         self.game_state.pop("_dense_wall_set_cache", None)
         self.game_state.pop("_obscuring_area_sets_cache", None)
         self.game_state.pop("_obscuring_hex_to_area_cache", None)
+        # Grilles de blocage de la LoS vectorisee : DERIVEES des deux caches ci-dessus, donc
+        # purgees AVEC eux — survivantes, elles porteraient les murs du terrain precedent.
+        self.game_state.pop("_los_blocking_grids_cache", None)
         self.game_state.pop("_unit_los_pair_cache", None)
 
         self.game_state["weapon_damage_table"] = load_weapon_damage_table()
@@ -6453,6 +6456,7 @@ class W40KEngine(gym.Env):
         self.game_state["terrain_areas"] = self._scenario_terrain_areas or []
         self.game_state.pop("_obscuring_area_sets_cache", None)
         self.game_state.pop("_obscuring_hex_to_area_cache", None)
+        self.game_state.pop("_los_blocking_grids_cache", None)
         self.game_state.pop("_unit_los_pair_cache", None)
         self.game_state.pop("_wall_set_cache", None)
         self.game_state.pop("_dense_wall_set_cache", None)

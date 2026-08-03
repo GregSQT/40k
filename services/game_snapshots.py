@@ -30,6 +30,11 @@ _GS_STATIC_KEYS = frozenset({
     "board_cols", "board_rows", "inches_to_subhex", "max_range",
     "terrain_areas", "objectives", "primary_objective",
     "rewards_configs", "reward_configs", "hex_los_cache",
+    # Grilles de blocage de la LoS vectorisée (murs + areas obscurantes) : dérivées du seul
+    # terrain, donc invariantes pendant une partie et sûres à garder vivantes au restore. Non
+    # listées, elles se feraient deepcopy à CHAQUE capture — 330 Ko de décor immuable par
+    # snapshot sur un plateau x5.
+    "_los_blocking_grids_cache",
     "_cache_instance_id",
 })
 
