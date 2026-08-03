@@ -883,14 +883,11 @@ type BoardProps = {
     margin: number;
     inches_to_subhex: number;
   };
-  // Replay : résolution du plateau JOUÉ (`x1` | `x5_44x60`), lue dans le journal. Sans elle, la
-  // config plateau serait chargée à la résolution par défaut et le terrain, les icônes, les zones
-  // de déploiement et les segments de murs — canaux absents du journal, donc non surchargés —
-  // seraient dessinés en coordonnées x5 sur la grille de l'épisode.
-  boardPathOverride?: string;
-  // Replay : scénario RÉELLEMENT tiré pour l'épisode (ligne « Scenario file: » du journal). Un
-  // entraînement tire un scénario différent par épisode ; sans ça le terrain affiché est celui du
-  // scénario par défaut. Absent des journaux antérieurs à cette ligne → scénario par défaut.
+  // Replay : résolution (cases par pouce) et scénario JOUÉS, lus dans le journal, pour que la
+  // config plateau soit chargée à la bonne échelle et pour le bon scénario. Le décor (terrain,
+  // icônes, zones de déploiement, segments de murs) n'est pas journalisé et vient de là.
+  // cf. Documentation/Implémentation/Replay.md §2.4.
+  inchesToSubhexOverride?: number;
   scenarioFileOverride?: string;
   wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log
   availableCellsOverride?: Array<{ col: number; row: number }>; // Replay / pile in : surbrillance des hexes disponibles
@@ -1336,7 +1333,7 @@ export default function Board({
   onSkipAdvanceWarning: _onSkipAdvanceWarning,
   showAdvanceWarningPopup: _showAdvanceWarningPopup = false,
   boardConfigOverride,
-  boardPathOverride,
+  inchesToSubhexOverride,
   scenarioFileOverride,
   wallHexesOverride,
   availableCellsOverride,
@@ -1485,7 +1482,7 @@ export default function Board({
     gameConfig,
     loading,
     error,
-  } = useGameConfig("default", boardPathOverride, scenarioFileOverride);
+  } = useGameConfig({ inchesToSubhexOverride, scenarioFileOverride });
   const _rawBoardConfig =
     boardConfigOverride && _boardConfigFromHook
       ? { ..._boardConfigFromHook, ...boardConfigOverride }
@@ -6087,8 +6084,7 @@ export default function Board({
     const MARGIN_H = boardConfig.margin;
 
     // Cohésion d'escouade pour les halos (mêmes valeurs config que le moteur / perModelMove).
-    const inchesToSubhex =
-      (boardConfig as unknown as { inches_to_subhex?: number }).inches_to_subhex ?? 10;
+    const inchesToSubhex = boardConfig.inches_to_subhex;
     const cohesionRules = gameConfig?.game_rules as
       | { unit_model_cohesion_range?: number; unit_global_cohesion_range?: number }
       | undefined;
@@ -7022,8 +7018,7 @@ export default function Board({
     squadMoveVeilOverlayRef.current = veilOverlay;
     veilOverlay.visible = !hideIndicators;
 
-    const inchesToSubhex =
-      (boardConfig as unknown as { inches_to_subhex?: number }).inches_to_subhex ?? 10;
+    const inchesToSubhex = boardConfig.inches_to_subhex;
     const cohesionRules = gameConfig?.game_rules as
       | {
           unit_model_cohesion_range?: number;
@@ -8213,8 +8208,10 @@ export default function Board({
     canvas.style.height = `${canvasHeight}px`;
     canvas.style.border = displayConfig?.canvas_border ?? "1px solid #333";
 
-    // Clear container and append canvas - EXACT BOARDREPLAY MATCH
-    if (isNewApp) {
+    // Réattache dès que le canvas n'est PLUS dans le conteneur, pas seulement à la création de
+    // l'app : les branches `loading` / `error` plus haut écrasent `innerHTML`, ce qui détache le
+    // canvas d'une app déjà vivante et le laisse détaché à jamais (`isNewApp` est faux).
+    if (isNewApp || canvas.parentElement !== canvasContainerRef.current) {
       canvasContainerRef.current.innerHTML = "";
       canvasContainerRef.current.appendChild(canvas);
     }
@@ -8420,9 +8417,7 @@ export default function Board({
     const cfgRulesFight = gameConfig?.game_rules as { engagement_zone?: number } | undefined;
     const engagementFromRules =
       gsRulesFight?.engagement_zone ?? cfgRulesFight?.engagement_zone ?? 1;
-    const inchesToSubhexRaw = (boardConfig as unknown as { inches_to_subhex?: number })
-      .inches_to_subhex;
-    const inchesToSubhex = typeof inchesToSubhexRaw === "number" ? inchesToSubhexRaw : 10;
+    const inchesToSubhex = boardConfig.inches_to_subhex;
     // engagement_zone est en POUCES ; conversion en sous-hexes via inches_to_subhex (miroir backend
     // spatial_relations.get_engagement_zone). Ex. 2" sur board ×5 → 10 sous-hexes.
     const fightEngagementHexSteps = engagementFromRules * inchesToSubhex;
@@ -8890,6 +8885,8 @@ export default function Board({
       rows: number;
       hex_radius: number;
       margin: number;
+      /** Cases par pouce : `drawBoard` en tire les épaisseurs de mur, qui sont en pouces. */
+      inches_to_subhex: number;
       colors: {
         background: string;
         cell_even: string;

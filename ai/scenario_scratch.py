@@ -8,7 +8,8 @@ exprimable : le moteur refuse l'épisode (« Scenario file hors du dépôt, non 
 le replay ») et l'évaluation meurt au premier reset dès que le step logging est actif.
 
 Journaliser le scénario d'ORIGINE à la place serait faux : ses murs ne sont pas ceux joués, et
-c'est précisément le défaut que ce chemin de log corrige.
+c'est précisément le défaut que ce chemin de log corrige. Le contrôle miroir, côté consommateur,
+est `engine.w40k_core.repo_relative_scenario_path`.
 
 Deux appelants sans chemin d'import entre eux (`ai/bot_evaluation.py` pour l'éval,
 `ai/train.py` pour l'entraînement) matérialisaient chacun dans `/tmp` : la contrainte vit ici
@@ -21,7 +22,6 @@ import atexit
 import os
 import shutil
 import tempfile
-from typing import Optional
 
 # `tmp/` est gitignoré à la racine du dépôt (.gitignore). Nettoyé à la sortie du processus.
 _SCRATCH_DIRNAME = "tmp"
@@ -42,12 +42,3 @@ def make_scenario_scratch_dir(prefix: str) -> str:
     path = tempfile.mkdtemp(prefix=prefix, dir=scratch_root)
     atexit.register(lambda: shutil.rmtree(path, ignore_errors=True))
     return path
-
-
-def assert_under_repo_root(path: str, what: str) -> str:
-    """Chemin relatif à la racine du dépôt, ou erreur explicite. Contrôle à la SOURCE : c'est
-    l'emplacement du fichier qui est l'invariant, pas la formulation du refus du moteur."""
-    relative: Optional[str] = os.path.relpath(os.path.abspath(path), repo_root())
-    if relative is None or relative.startswith(".."):
-        raise ValueError(f"{what} hors du dépôt, non journalisable pour le replay : {path}")
-    return relative.replace(os.sep, "/")

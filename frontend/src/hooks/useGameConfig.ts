@@ -75,6 +75,8 @@ interface BoardConfig {
   rows: number;
   hex_radius: number;
   margin: number;
+  /** Cases par pouce. Requis : sert aux conversions pouces↔cases et aux épaisseurs de rendu. */
+  inches_to_subhex: number;
   wall_hexes: [number, number][];
   objective_hexes?: [number, number][];
   colors: {
@@ -173,7 +175,8 @@ const isBoardConfig = (value: unknown): value is BoardConfig => {
     typeof value.cols !== "number" ||
     typeof value.rows !== "number" ||
     typeof value.hex_radius !== "number" ||
-    typeof value.margin !== "number"
+    typeof value.margin !== "number" ||
+    typeof value.inches_to_subhex !== "number"
   ) {
     return false;
   }
@@ -207,40 +210,94 @@ const isGameConfig = (value: unknown): value is GameConfig => {
 };
 
 /**
- * @param boardPathOverride Résolution de plateau à charger, indépendamment de l'URL (`x1` |
- *   `x5_44x60`). Le replay en a besoin : sa résolution vient du journal de partie, pas des query
- *   params, et sans ça terrain / icônes / zones de déploiement / segments de murs seraient servis
- *   dans les coordonnées du plateau par défaut (x5) puis dessinés sur la grille x1 de l'épisode.
- * @param scenarioFileOverride Scénario dont il faut lire murs et terrain, chemin relatif à la
- *   racine du dépôt. Le replay le tient de la ligne « Scenario file: » du journal : un
- *   entraînement tire un scénario par épisode, et le scénario par défaut n'est pas celui joué.
+ * Règles de jeu seules (`/config/game_config.json`). Asset statique : ne dépend ni de la
+ * résolution du plateau ni du scénario, donc chargé une fois pour toutes.
+ *
+ * À préférer à `useGameConfig` quand le plateau n'est pas consommé — sinon la page paie une
+ * requête `/api/config/board` (lecture et conversion du terrain côté serveur) dont le résultat
+ * est jeté. C'est le cas de `BoardReplay`, qui n'a besoin que des règles.
  */
-export const useGameConfig = (
-  _boardConfigName: string = "default",
-  boardPathOverride?: string,
-  scenarioFileOverride?: string
-): ExtendedGameConfig => {
-  const [boardConfig, setBoardConfig] = useState<BoardConfig | null>(null);
+export const useStaticGameConfig = (): {
+  gameConfig: GameConfig | null;
+  error: string | null;
+} => {
   const [gameConfig, setGameConfig] = useState<GameConfig | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const loadConfigs = async () => {
+    let cancelled = false;
+    (async () => {
       try {
-        setLoading(true);
-        setError(null);
+        // biome-ignore lint/style/noRestrictedGlobals: asset statique servi par Vite, pas une route API
+        const gameResponse = await fetch("/config/game_config.json");
+        if (!gameResponse.ok) {
+          throw new Error(
+            `Game config missing: /config/game_config.json (HTTP ${gameResponse.status})`
+          );
+        }
+        const gameResponseText = await gameResponse.text();
+        if (!gameResponseText.trim()) {
+          throw new Error("Game config file is empty");
+        }
+        let gameDataRaw: unknown;
+        try {
+          gameDataRaw = JSON.parse(gameResponseText);
+        } catch (parseError) {
+          throw new Error(`Invalid JSON in game config: ${parseError}`);
+        }
+        if (!isGameConfig(gameDataRaw)) {
+          throw new Error("Invalid game config: missing required properties");
+        }
+        if (cancelled) return;
+        setGameConfig(gameDataRaw);
+      } catch (err) {
+        if (cancelled) return;
+        const errorMessage = err instanceof Error ? err.message : "Failed to load configuration";
+        setError(errorMessage);
+        console.error("Game config loading error:", err);
+        setGameConfig(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
+  return { gameConfig, error };
+};
+
+/**
+ * `inchesToSubhexOverride` (cases par pouce : 1, 5 ou 10) et `scenarioFileOverride` (chemin de
+ * scénario relatif à la racine du dépôt) laissent l'appelant désigner le plateau à charger quand
+ * il ne se déduit pas de l'URL. C'est le cas du replay, qui les tient de son journal :
+ * cf. Documentation/Implémentation/Replay.md §2.4. La résolution est transmise TELLE QUELLE au
+ * serveur, qui seul connaît les dossiers de plateau — le navigateur n'a aucune table à tenir.
+ */
+export const useGameConfig = (options?: {
+  inchesToSubhexOverride?: number;
+  scenarioFileOverride?: string;
+}): ExtendedGameConfig => {
+  const inchesToSubhexOverride = options?.inchesToSubhexOverride;
+  const scenarioFileOverride = options?.scenarioFileOverride;
+  const [boardConfig, setBoardConfig] = useState<BoardConfig | null>(null);
+  const [boardError, setBoardError] = useState<string | null>(null);
+  const { gameConfig, error: gameError } = useStaticGameConfig();
+
+  useEffect(() => {
+    // Cet effet re-tourne à chaque changement de résolution ou de scénario, donc deux chargements
+    // peuvent être en vol. `AbortController` coupe la requête périmée à la source — sans lui, elle
+    // irait au bout du travail serveur (lecture et downscale du terrain) pour être jetée ensuite —
+    // et `cancelled` empêche l'écriture d'état si la réponse est déjà partie. Sans ces deux gardes,
+    // c'est le chargement le plus LENT qui gagne, pas le plus récent.
+    const controller = new AbortController();
+    let cancelled = false;
+    const loadBoardConfig = async () => {
+      try {
         const urlParams = new URLSearchParams(window.location.search);
         const mode = urlParams.get("mode");
         const isTestMode = mode === "pvp_test" || mode === "pve_test";
         const DEFAULT_TEST_BOARD = "x5_44x60";
-        const boardParam =
-          boardPathOverride !== undefined
-            ? boardPathOverride
-            : isTestMode
-              ? (urlParams.get("board") ?? DEFAULT_TEST_BOARD)
-              : null;
+        const boardParam = isTestMode ? (urlParams.get("board") ?? DEFAULT_TEST_BOARD) : null;
         const scenarioName =
           mode === "pve_test" ? "scenario_pve_test.json" : "scenario_pvp_test.json";
         // Dossier qui PORTE les scénarios de test : il ne suit pas la résolution jouée. `x1` et
@@ -255,51 +312,28 @@ export const useGameConfig = (
           endless_duty: "config/scenario_endless_duty.json",
           pve: "config/scenario_pve.json",
         };
-        let scenarioFile =
-          (mode && scenarioMap[mode]) || "config/board/44x60x5/scenario/scenario_pvp.json";
-        if (isTestMode && boardParam && boardDirMap[boardParam]) {
-          scenarioFile = `config/${boardDirMap[boardParam]}/scenario/${scenarioName}`;
-        }
-        if (scenarioFileOverride) {
-          scenarioFile = scenarioFileOverride;
-        }
+        const scenarioFile =
+          scenarioFileOverride ??
+          (isTestMode && boardParam && boardDirMap[boardParam]
+            ? `config/${boardDirMap[boardParam]}/scenario/${scenarioName}`
+            : (mode && scenarioMap[mode]) || "config/board/44x60x5/scenario/scenario_pvp.json");
         let boardUrl =
           "/api/config/board?scenario_file=" +
           encodeURIComponent(scenarioFile) +
           "&_t=" +
           Date.now();
-        if (boardParam) {
+        if (inchesToSubhexOverride !== undefined) {
+          boardUrl += `&inches_to_subhex=${inchesToSubhexOverride}`;
+        } else if (boardParam) {
           boardUrl += `&board_path=${encodeURIComponent(boardParam)}`;
         }
-        const [boardResponse, gameResponse] = await Promise.all([
-          apiFetch(boardUrl),
-          // biome-ignore lint/style/noRestrictedGlobals: asset statique servi par Vite, pas une route API
-          fetch("/config/game_config.json"),
-        ]);
-
-        if (!gameResponse.ok) {
-          throw new Error(
-            `Game config missing: /config/game_config.json (HTTP ${gameResponse.status})`
-          );
-        }
+        const boardResponse = await apiFetch(boardUrl, { signal: controller.signal });
 
         if (!boardResponse.ok) {
           throw new Error(`Board config missing: /api/config/board (HTTP ${boardResponse.status})`);
         }
 
         const boardJson = await boardResponse.json();
-        const gameResponseText = await gameResponse.text();
-
-        if (!gameResponseText.trim()) {
-          throw new Error("Game config file is empty");
-        }
-
-        let gameDataRaw: unknown;
-        try {
-          gameDataRaw = JSON.parse(gameResponseText);
-        } catch (parseError) {
-          throw new Error(`Invalid JSON in game config: ${parseError}`);
-        }
 
         if (!isRecord(boardJson) || !boardJson.success || !boardJson.config) {
           throw new Error("Invalid board config response from API");
@@ -308,26 +342,33 @@ export const useGameConfig = (
         if (!isBoardConfig(configData)) {
           throw new Error("Invalid board config: missing required properties");
         }
-        if (!isGameConfig(gameDataRaw)) {
-          throw new Error("Invalid game config: missing required properties");
-        }
 
+        if (cancelled) return;
+        setBoardError(null);
         setBoardConfig(configData);
-        setGameConfig(gameDataRaw);
       } catch (err) {
+        if (cancelled || (err instanceof DOMException && err.name === "AbortError")) return;
         const errorMessage = err instanceof Error ? err.message : "Failed to load configuration";
-        setError(errorMessage);
-        console.error("Game config loading error:", err);
+        setBoardError(errorMessage);
+        console.error("Board config loading error:", err);
 
         setBoardConfig(null);
-        setGameConfig(null);
-      } finally {
-        setLoading(false);
       }
     };
 
-    loadConfigs();
-  }, [boardPathOverride, scenarioFileOverride]);
+    loadBoardConfig();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [inchesToSubhexOverride, scenarioFileOverride]);
+
+  const error = boardError ?? gameError;
+  // `loading` est DÉRIVÉ, il n'est plus un état posé au début de chaque chargement. Un
+  // rafraîchissement (changement d'épisode en replay) garde donc la config précédente affichée au
+  // lieu de repasser par un écran « Loading… » qui, chez les consommateurs PIXI, détruit et
+  // reconstruit tout le plateau alors que seul le décor a changé.
+  const loading = error === null && (boardConfig === null || gameConfig === null);
 
   const maxTurns = gameConfig?.game_rules.max_turns ?? 100;
   const boardSize: [number, number] = gameConfig?.game_rules.board_size ?? [24, 18];

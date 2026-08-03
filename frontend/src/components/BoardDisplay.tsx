@@ -720,11 +720,22 @@ function appendMovePreviewMaskTilesAndCoverageToParent(
   }
 }
 
+// Épaisseur des décors de mur, en POUCES de table. Un mur occupe UNE case, mais la case n'a pas la
+// même taille selon la résolution : 1 pouce en x1, 1/5 de pouce en x5. Dessiner sur `HEX_RADIUS`
+// rendait donc le même mur cinq fois plus épais à l'écran en x1 — ce que le plateau x1 montrait.
+// Ces deux valeurs sont celles que le rendu x5 produisait déjà (`HEX_RADIUS` et `HEX_HEIGHT` de ce
+// plateau), converties en pouces : le rendu x5 est inchangé au pixel près, le x1 s'aligne dessus.
+// Conversion : `hex_radius * inches_to_subhex` = pixels par pouce (13,90 sur les plateaux 44×60).
+const WALL_DOT_RADIUS_INCHES = 0.2;
+const WALL_SEGMENT_HALF_WIDTH_INCHES = Math.sqrt(3) / 5;
+
 interface BoardConfig {
   cols: number;
   rows: number;
   hex_radius: number;
   margin: number;
+  /** Cases par pouce. Sert à dessiner en POUCES ce qui ne doit pas grossir avec la case. */
+  inches_to_subhex: number;
   colors: {
     background: string;
     cell_even: string;
@@ -2100,7 +2111,7 @@ export const drawBoard = (
         baseHexContainer.addChild(bg);
       }
 
-      const wallDotRadius = HEX_RADIUS;
+      const wallDotRadius = HEX_RADIUS * boardConfig.inches_to_subhex * WALL_DOT_RADIUS_INCHES;
       const wallAltColor = (WALL_COLOR & 0xfefefe) + 0x101010;
       for (const [wc, wr] of boardConfig.wall_hexes || []) {
         const wx = wc * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
@@ -3069,7 +3080,7 @@ export const drawBoard = (
       const wallsContainer = new PIXI.Container();
       wallsContainer.name = "walls";
 
-      const halfW = HEX_HEIGHT * 1.0;
+      const halfW = HEX_RADIUS * boardConfig.inches_to_subhex * WALL_SEGMENT_HALF_WIDTH_INCHES;
       const wallTextureLightPath =
         boardConfig.display?.wall_texture_light?.trim() || "/textures/wall1.webp";
       const wallTextureDensePath =

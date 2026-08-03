@@ -11,6 +11,18 @@ import logging
 from typing import Dict, Any, Optional
 from pathlib import Path
 
+# Résolution (cases par pouce) -> dossier de plateau sous `config/`. SOURCE UNIQUE de ce lien.
+# `inches_to_subhex` est la valeur que porte `board_config.json`, que le moteur journalise et que
+# le replay relit : c'est la seule clé qu'un consommateur possède sans traduction préalable. Les
+# noms de dossier, eux, ne sont connus que d'ici — un appelant qui en construit un à la main
+# (table recopiée dans le navigateur, dans train.py…) diverge dès qu'un plateau est ajouté.
+BOARD_DIR_BY_INCHES_TO_SUBHEX = {
+    1: "board/44x60x1",
+    5: "board/44x60x5",
+    10: "board/44x60x10",
+}
+
+
 class ConfigLoader:
     """Centralized configuration loader."""
     

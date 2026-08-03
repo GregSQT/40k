@@ -4015,18 +4015,45 @@ def get_board_config():
     """Get board configuration for frontend.
     Loads board_config.json from config/board/{paths.board}/, then walls and objectives
     from the same directory (walls/walls-XX.json, objectives/objectives-XX.json).
-    Accepts optional query param board_path (x1|x5|x10) to override the default board.
+
+    Deux façons, exclusives, de désigner un autre plateau que celui de `paths.board` :
+      - `board_path` (`x1` | `x5_44x60`) : surnom d'écran, utilisé par les modes de test ;
+      - `inches_to_subhex` (1 | 5 | 10) : la RÉSOLUTION elle-même. C'est ce que porte le journal
+        de partie, donc ce que le replay possède sans avoir à traduire quoi que ce soit — et le
+        seul des deux qui couvre le plateau x10.
     """
     try:
-        from config_loader import get_config_loader
+        from config_loader import BOARD_DIR_BY_INCHES_TO_SUBHEX, get_config_loader
         config_loader = get_config_loader()
+        # Dossier du plateau JOUÉ quand la requête l'impose ; None = celui de `config.json`.
+        requested_board_subdir: Optional[str] = None
         board_path_param = request.args.get("board_path")
-        if board_path_param is not None and board_path_param not in BOARD_PATH_MAP:
-            raise ValueError(f"board_path must be one of {sorted(BOARD_PATH_MAP)} (got {board_path_param!r})")
         if board_path_param is not None:
+            if board_path_param not in BOARD_PATH_MAP:
+                raise ValueError(
+                    f"board_path must be one of {sorted(BOARD_PATH_MAP)} (got {board_path_param!r})"
+                )
+            requested_board_subdir = BOARD_PATH_MAP[board_path_param]
+        inches_to_subhex_param = request.args.get("inches_to_subhex")
+        if inches_to_subhex_param is not None:
+            if board_path_param is not None:
+                raise ValueError("board_path and inches_to_subhex are mutually exclusive")
+            try:
+                requested_ish = int(inches_to_subhex_param)
+            except ValueError:
+                raise ValueError(
+                    f"inches_to_subhex must be an integer (got {inches_to_subhex_param!r})"
+                )
+            if requested_ish not in BOARD_DIR_BY_INCHES_TO_SUBHEX:
+                raise ValueError(
+                    f"inches_to_subhex must be one of "
+                    f"{sorted(BOARD_DIR_BY_INCHES_TO_SUBHEX)} (got {requested_ish})"
+                )
+            requested_board_subdir = BOARD_DIR_BY_INCHES_TO_SUBHEX[requested_ish]
+        if requested_board_subdir is not None:
             with _BOARD_ENV_LOCK:
                 prev = os.environ.get("W40K_BOARD_PATH")
-                os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path_param]
+                os.environ["W40K_BOARD_PATH"] = requested_board_subdir
                 try:
                     board_data = config_loader.get_board_config()
                 finally:
@@ -4038,8 +4065,8 @@ def get_board_config():
             board_data = config_loader.get_board_config()
         board_spec = board_data["default"]
         config_json = config_loader.load_config("config", force_reload=False)
-        if board_path_param:
-            board_subdir = BOARD_PATH_MAP[board_path_param]
+        if requested_board_subdir is not None:
+            board_subdir = requested_board_subdir
         else:
             board_subdir = require_key(require_key(config_json, "paths"), "board")
         if not board_subdir:
@@ -4049,44 +4076,8 @@ def get_board_config():
         board_dir = project_root / "config" / board_subdir
         wall_ref = board_spec.get("wall_ref")
         terrain_ref = board_spec.get("terrain_ref")
-        # Le plateau JOUÉ peut être plus grossier que celui qui PORTE les murs et le terrain
-        # (option x1 = plateau 44×60 à 1 hex = 1 pouce, données écrites en x5). Les fichiers sont
-        # alors lus dans leur dossier d'origine et convertis, comme le fait le moteur — sans quoi
-        # le rendu chercherait un dossier `walls/` inexistant sous le plateau réduit.
-        board_data_dir = board_dir
-        board_data_ratio = 1
-        if board_path_param is not None:
-            data_subdir = TEST_SCENARIO_BOARD_MAP[board_path_param]
-            board_data_dir = project_root / "config" / data_subdir
-            data_board_path = board_data_dir / "board_config.json"
-            if not data_board_path.exists():
-                raise FileNotFoundError(f"Board config not found: {data_board_path}")
-            with open(data_board_path, "r", encoding="utf-8-sig") as f:
-                data_board_spec = json.load(f)["default"]
-            played_ish = int(require_key(board_spec, "inches_to_subhex"))
-            data_ish = int(require_key(data_board_spec, "inches_to_subhex"))
-            if played_ish <= 0 or data_ish % played_ish != 0:
-                raise ValueError(
-                    f"board_path '{board_path_param}': données en subhex x{data_ish}, plateau joué "
-                    f"en x{played_ish} — rapport non entier"
-                )
-            board_data_ratio = data_ish // played_ish
-            # Même contrôle que le moteur (`_board_ref_downscale_ratio`) : sans lui, une entrée de
-            # table pointant un AUTRE plateau physique déplacerait murs et terrain en silence.
-            played_dims = (
-                int(require_key(board_spec, "cols")), int(require_key(board_spec, "rows"))
-            )
-            data_dims = (
-                int(require_key(data_board_spec, "cols")) // board_data_ratio,
-                int(require_key(data_board_spec, "rows")) // board_data_ratio,
-            )
-            if data_dims != played_dims:
-                raise ValueError(
-                    f"board_path '{board_path_param}': '{data_subdir}' réduit de x{board_data_ratio} "
-                    f"donne {data_dims[0]}x{data_dims[1]}, pas {played_dims[0]}x{played_dims[1]} — "
-                    f"ce n'est pas le même plateau physique"
-                )
-
+        # NOTE: le scénario est lu AVANT la résolution du dossier de données — c'est lui qui
+        # déclare, via `board_ref`, le plateau où vivent murs et terrain (cf. bloc suivant).
         scenario_file_raw = request.args.get("scenario_file")
         scenario_data = None
         if scenario_file_raw is not None and not isinstance(scenario_file_raw, str):
@@ -4138,6 +4129,71 @@ def get_board_config():
                 if "/" in terrain_ref_candidate or "\\" in terrain_ref_candidate:
                     raise ValueError("scenario terrain_ref must be filename only")
                 terrain_ref = terrain_ref_candidate
+
+        # Le plateau JOUÉ peut être plus grossier que celui qui PORTE les murs et le terrain
+        # (option x1 = plateau 44×60 à 1 hex = 1 pouce, données écrites en x5). Les fichiers sont
+        # alors lus dans leur dossier d'origine et convertis, comme le fait le moteur — sans quoi
+        # le rendu chercherait un dossier `walls/` inexistant sous le plateau réduit.
+        #
+        # Ce dossier est DÉCLARÉ PAR LE SCÉNARIO — `board_ref`, sinon le `config/board/<plateau>/`
+        # qui le contient — - selon la règle de `GameStateManager._resolve_board_dir`. Il était
+        # déduit du seul `board_path` via une table codée en dur qui imposait `44x60x5` comme
+        # source à TOUT scénario : le premier scénario écrit en `44x60x1` aurait vu son terrain lu
+        # ailleurs, puis réduit ×5 en silence.
+        board_data_dir = board_dir
+        board_data_ratio = 1
+        if scenario_file and isinstance(scenario_data, dict) and "board_ref" in scenario_data:
+            board_ref_raw = scenario_data["board_ref"]
+            if not isinstance(board_ref_raw, str) or not board_ref_raw.strip():
+                raise ValueError(
+                    f"scenario '{scenario_file}' has invalid 'board_ref': {board_ref_raw!r}"
+                )
+            board_ref_name = board_ref_raw.strip().replace("\\", "/")
+            if board_ref_name.startswith("/") or "/" in board_ref_name or ".." in board_ref_name:
+                raise ValueError(
+                    f"scenario '{scenario_file}' has unsafe 'board_ref' (board name only): "
+                    f"{board_ref_raw!r}"
+                )
+            board_data_dir = project_root / "config" / "board" / board_ref_name
+            if not board_data_dir.is_dir():
+                raise FileNotFoundError(
+                    f"scenario '{scenario_file}' board_ref '{board_ref_name}' -> board directory "
+                    f"not found: {board_data_dir}"
+                )
+        elif scenario_file:
+            scenario_parent = (project_root / scenario_file).resolve().parent
+            if scenario_parent.name == "scenario":
+                board_data_dir = scenario_parent.parent
+
+        if board_data_dir != board_dir:
+            data_board_path = board_data_dir / "board_config.json"
+            if not data_board_path.exists():
+                raise FileNotFoundError(f"Board config not found: {data_board_path}")
+            with open(data_board_path, "r", encoding="utf-8-sig") as f:
+                data_board_spec = json.load(f)["default"]
+            played_ish = int(require_key(board_spec, "inches_to_subhex"))
+            data_ish = int(require_key(data_board_spec, "inches_to_subhex"))
+            if played_ish <= 0 or data_ish % played_ish != 0:
+                raise ValueError(
+                    f"données du plateau en subhex x{data_ish} ({board_data_dir.name}), plateau "
+                    f"joué en x{played_ish} — rapport non entier"
+                )
+            board_data_ratio = data_ish // played_ish
+            # Même contrôle que le moteur (`_board_ref_downscale_ratio`) : sans lui, un `board_ref`
+            # pointant un AUTRE plateau physique déplacerait murs et terrain en silence.
+            played_dims = (
+                int(require_key(board_spec, "cols")), int(require_key(board_spec, "rows"))
+            )
+            data_dims = (
+                int(require_key(data_board_spec, "cols")) // board_data_ratio,
+                int(require_key(data_board_spec, "rows")) // board_data_ratio,
+            )
+            if data_dims != played_dims:
+                raise ValueError(
+                    f"'{board_data_dir.name}' réduit de x{board_data_ratio} donne "
+                    f"{data_dims[0]}x{data_dims[1]}, pas {played_dims[0]}x{played_dims[1]} — "
+                    f"ce n'est pas le même plateau physique"
+                )
 
         wall_hexes: list = []
         wall_segments_raw: list[dict] = []
