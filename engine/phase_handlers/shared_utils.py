@@ -2295,9 +2295,24 @@ def _build_reactive_move_destinations_pool(
             valid_destinations.append(neighbor)
             queue.append((neighbor, cur_dist + 1))
 
+    # Le BFS ci-dessus ne valide que la case d'ANCRE. Or un mouvement d'unité déplace TOUTES
+    # ses figurines (03.01) : sans ce filtre, les figurines non-ancres atterrissent sur des
+    # coordonnées jamais vérifiées — dans un mur, dans l'empreinte d'une autre escouade, ou
+    # hors plateau — et la conversion du budget en subhex multiplie ce vecteur par 5 ou 10.
+    # On ne garde donc que les destinations dont le PLAN RIGIDE est constructible et valide,
+    # par la primitive commune à tous les mouvements d'escouade. C'est ce filtre qui autorise
+    # l'appelant à translater le bloc au lieu de ne bouger que l'ancre.
+    squad_id = str(require_key(reactive_unit, "id"))
+    constraints = {**DEFAULT_MOVE_CONSTRAINTS, "budget_per_model": move_range}
+    validated: List[Tuple[int, int]] = []
+    for dest in valid_destinations:
+        plan = build_rigid_plan(int(dest[0]), int(dest[1]), squad_id, game_state)
+        if plan is not None and validate_move_plan(plan, game_state, constraints):
+            validated.append(dest)
+
     # Deterministic destination order.
-    valid_destinations.sort(key=lambda pos: (int(pos[0]), int(pos[1])))
-    return valid_destinations
+    validated.sort(key=lambda pos: (int(pos[0]), int(pos[1])))
+    return validated
 
 
 def _select_reactive_unit_order(
@@ -2661,6 +2676,16 @@ def maybe_resolve_reactive_move(
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
 
+    # Publier l'instantané d'adjacence sous les clés que le reste du moteur lit au démarrage
+    # d'une phase : `validate_move_plan` en dépend (`enemy_adjacent_hexes_player_N`), et sans
+    # elles le pool réactif ne pouvait valider QUE la case d'ancre. C'est le même instantané que
+    # celui passé en override au pool et que `refresh_all_positional_caches_after_reactive_move`
+    # réécrit après chaque déplacement — pas une seconde vérité.
+    for _p_int, _p_set in reactive_adjacent_sets_by_player.items():
+        game_state[f"enemy_adjacent_hexes_player_{_p_int}"] = set(_p_set)
+    for _p_int, _p_counts in reactive_adjacent_counts_by_player.items():
+        game_state[f"enemy_adjacent_counts_player_{_p_int}"] = dict(_p_counts)
+
     game_state["reaction_window_active"] = True
     game_state["last_move_event_id"] = int(require_key(game_state, "last_move_event_id")) + 1
     applied_count = 0
@@ -2726,25 +2751,12 @@ def maybe_resolve_reactive_move(
             dest_col, dest_row = selected_dest
 
             orig_col, orig_row = require_unit_position(reactive_unit, game_state)
-            # ⚠️ DEFAUT CONNU, NON CORRIGE ICI — le move reactif ne deplace que l'ANCRE.
-            # `update_units_cache_position` ne resync les socles que pour les escouades
-            # MONO-figurine ; les unites qui portent cette capacite (FenrisianWolf, Termagant)
-            # sont multi-figurines, donc leurs figurines ne bougent pas. La ligne de journal,
-            # qui emet un segment `[MODELS:]`, le montre desormais noir sur blanc : ancre a
-            # l'arrivee, socles a l'ancienne place.
-            #
-            # La correction — `translate_squad_to_destination`, comme tous les autres
-            # mouvements — a ete ESSAYEE et RETIREE : le pool de destinations ci-dessus ne
-            # valide que la case d'ANCRE (murs, ancres adverses, bande d'EZ). Translater le
-            # bloc ecrit les figurines non-ancres sur des coordonnees jamais verifiees — dans un
-            # mur, dans l'empreinte d'une autre escouade, ou hors plateau — et la conversion du
-            # budget en subhex multiplie ce vecteur par 5 ou 10. La validation par empreinte
-            # (`build_rigid_plan` + `validate_move_plan`) exige les caches spatiaux
-            # `enemy_adjacent_hexes_player_N`, absents a ce stade : c'est justement pour cela
-            # que le pool recoit un `enemy_adjacent_hexes_override`. Corriger demande de
-            # construire le pool reactif par PLAN valide, pas par case d'ancre.
+            # Mouvement d'unité (03.01) : toutes les figurines suivent. La destination a été
+            # retenue par le pool PARCE QUE son plan rigide est valide pour chaque figurine —
+            # `update_units_cache_position` seul ne resynchronise que les escouades
+            # mono-figurine et laissait les socles des autres sur place.
             set_unit_coordinates(reactive_unit, dest_col, dest_row)
-            update_units_cache_position(game_state, reactive_unit_id, dest_col, dest_row)
+            translate_squad_to_destination(game_state, reactive_unit_id, dest_col, dest_row)
             reacted_set.add(reactive_unit_id)
             game_state["last_move_cause"] = "reactive_move"
             ability_display_name = _get_source_unit_rule_display_name_for_effect(

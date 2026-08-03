@@ -48,8 +48,18 @@ def _unit_with_reactive(uid: int, player: int, col: int, row: int) -> Dict[str, 
 def _make_game_state(units: List[Dict[str, Any]], current_player: int = 1) -> Dict[str, Any]:
     gs: Dict[str, Any] = {**turn_state_invariants(),
         "config": {
-            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
+            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35,
+                           "unit_model_cohesion_range": 2, "unit_global_cohesion_range": 9,
+                           "cohesion_distance_mode": "euclidean",
+                           "squad_min_neighbors": 1},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+            # Requis par `validate_move_plan` : le pool réactif valide désormais le PLAN
+            # RIGIDE de chaque destination, pas seulement la case d'ancre.
+            "move": {
+                "can_move_through_enemy_engagement_zone": True,
+                "can_move_through_enemy_model": False,
+                "can_move_through_friendly_model": True,
+            },
         },
         "board_cols": 25,
         "board_rows": 21,
@@ -353,6 +363,11 @@ class TestReactiveBudgetScale:
         gs["inches_to_subhex"] = scale
         unit = gs["units"][0]
         col, row = unit["col"], unit["row"]
+        # Le pool valide des PLANS : il lit les caches d'adjacence que la fenêtre de réaction
+        # publie en production (`maybe_resolve_reactive_move`).
+        for _p in (1, 2):
+            gs[f"enemy_adjacent_hexes_player_{_p}"] = set()
+            gs[f"enemy_adjacent_counts_player_{_p}"] = {}
         dests = _build_reactive_move_destinations_pool(
             gs, unit, 2, enemy_adjacent_hexes_override=set()
         )
@@ -386,3 +401,96 @@ class TestReactiveBudgetScale:
         assert r1 == 2, r1
         # 2" à x5 = 10 cases. Sans conversion, r5 vaudrait 2 comme à x1.
         assert r5 == 10, r5
+
+
+class TestReactiveMoveDeplaceLesFigurines:
+    """Un mouvement d'unité déplace TOUTES ses figurines (03.01).
+
+    Le pool ne validait que la case d'ANCRE : translater le bloc y aurait écrit les figurines
+    non-ancres sur des coordonnées jamais vérifiées (mur, empreinte d'une autre escouade, hors
+    plateau), défaut amplifié ×5/×10 par la conversion du budget en subhex. Le pool retient
+    désormais les seules destinations dont le PLAN RIGIDE est valide — c'est ce qui autorise la
+    translation du bloc.
+    """
+
+    def test_le_pool_ne_retient_que_des_plans_valides(self):
+        from engine.phase_handlers.shared_utils import (
+            _build_reactive_move_destinations_pool,
+            build_rigid_plan,
+            validate_move_plan,
+            DEFAULT_MOVE_CONSTRAINTS,
+        )
+
+        gs = _make_game_state([_unit_with_reactive(1, 1, 12, 10), _unit(2, 2, 20, 20)])
+        for _p in (1, 2):
+            gs[f"enemy_adjacent_hexes_player_{_p}"] = set()
+            gs[f"enemy_adjacent_counts_player_{_p}"] = {}
+        unit = gs["units"][0]
+
+        dests = _build_reactive_move_destinations_pool(
+            gs, unit, 2, enemy_adjacent_hexes_override=set()
+        )
+
+        assert dests, "pool vide : le test ne regarderait rien"
+        constraints = {**DEFAULT_MOVE_CONSTRAINTS, "budget_per_model": 2}
+        for dest in dests:
+            plan = build_rigid_plan(int(dest[0]), int(dest[1]), "1", gs)
+            assert plan is not None, dest
+            assert validate_move_plan(plan, gs, constraints), dest
+
+    def test_une_destination_dont_le_SECOND_socle_tombe_dans_un_mur_est_ecartee(self):
+        """LE cas que la validation par plan attrape et que le BFS ne voit pas : la case
+        d'ancre est libre, mais la figurine qui la suit atterrit dans un mur.
+
+        Sans ce filtre, la translation rigide écrivait ce socle dans le mur.
+        """
+        from engine.phase_handlers.shared_utils import (
+            _build_reactive_move_destinations_pool,
+            build_rigid_plan,
+        )
+
+        def _gs(walls):
+            gs = _make_game_state([_unit_with_reactive(1, 1, 12, 10)])
+            gs["squad_models"]["1"] = ["1#0", "1#1"]
+            gs["models_cache"] = {
+                "1#0": {"id": "1#0", "squad_id": "1", "player": 1, "col": 12, "row": 10,
+                        "level": 0, "HP_CUR": 1},
+                "1#1": {"id": "1#1", "squad_id": "1", "player": 1, "col": 14, "row": 10,
+                        "level": 0, "HP_CUR": 1},
+            }
+            gs["units_cache"]["1"]["occupied_hexes_by_model"] = {"1#0": (12, 10), "1#1": (14, 10)}
+            gs["wall_hexes"] = set(walls)
+            for _p in (1, 2):
+                gs[f"enemy_adjacent_hexes_player_{_p}"] = set()
+                gs[f"enemy_adjacent_counts_player_{_p}"] = {}
+            return gs
+
+        gs = _gs(set())
+        sans_mur = _build_reactive_move_destinations_pool(
+            gs, gs["units"][0], 2, enemy_adjacent_hexes_override=set()
+        )
+        assert sans_mur, "prémisse : il y avait bien des destinations"
+
+        # On ne devine PAS la géométrie : la translation rigide s'applique en coordonnées cube
+        # (un dx impair change la parité de colonne). On demande donc au moteur où atterrit le
+        # SECOND socle, et c'est là qu'on pose le mur.
+        cible = sans_mur[len(sans_mur) // 2]
+        plan = build_rigid_plan(int(cible[0]), int(cible[1]), "1", gs)
+        assert plan is not None, cible
+        second = next(p for p in plan if p[0] == "1#1")
+        case_du_second = (int(second[1]), int(second[2]))
+        assert case_du_second != cible
+
+        # État NEUF avec le mur : les ensembles spatiaux sont mémoïsés par état, muter
+        # `wall_hexes` en place ne les invaliderait pas.
+        gs_mur = _gs({case_du_second})
+        avec_mur = _build_reactive_move_destinations_pool(
+            gs_mur, gs_mur["units"][0], 2, enemy_adjacent_hexes_override=set()
+        )
+
+        # La case d'ancre reste libre : le BFS seul l'accepterait encore. Seule la validation
+        # du plan la fait tomber.
+        assert cible not in gs_mur["wall_hexes"]
+        assert cible not in avec_mur, (
+            "destination retenue alors que le second socle atterrit dans un mur"
+        )
