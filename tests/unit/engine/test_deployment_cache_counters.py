@@ -31,7 +31,6 @@ def test_reset_creates_the_counters_and_leaves_exactly_the_initial_observation_b
     assert counts == {
         "incremental": 0,
         "full_build_cold": 1,
-        "full_build_hex_mismatch": 0,
         "full_build_incremental_failed": 0,
     }
 

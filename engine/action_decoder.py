@@ -135,7 +135,6 @@ class ActionDecoder:
     INCREMENTAL_CACHE_OUTCOMES = ("incremental",)
     FULL_BUILD_CACHE_OUTCOMES = (
         "full_build_cold",
-        "full_build_hex_mismatch",
         "full_build_incremental_failed",
     )
     DEPLOYMENT_CACHE_OUTCOMES = INCREMENTAL_CACHE_OUTCOMES + FULL_BUILD_CACHE_OUTCOMES
@@ -773,6 +772,87 @@ class ActionDecoder:
         except (TypeError, ValueError) as exc:
             raise ValueError(f"Invalid deployment current_deployer: {current_deployer}") from exc
 
+    def _wall_hex_set(self, game_state: Dict[str, Any]) -> frozenset:
+        """Murs normalisés, mémoïsés sur leur NOMBRE (le terrain ne bouge pas en cours d'épisode)."""
+        raw_wall_hexes = require_key(game_state, "wall_hexes")
+        n_walls = len(raw_wall_hexes)
+        if self._wall_hexes_cache is not None and self._wall_hexes_cache[1] == n_walls:
+            return self._wall_hexes_cache[0]
+        wall_hexes_mut = set()
+        for raw_hex in raw_wall_hexes:
+            if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
+                wall_hexes_mut.add((int(raw_hex[0]), int(raw_hex[1])))
+            elif isinstance(raw_hex, dict):
+                wall_hexes_mut.add(
+                    (int(require_key(raw_hex, "col")), int(require_key(raw_hex, "row")))
+                )
+            else:
+                raise TypeError(f"Invalid wall hex format: {raw_hex}")
+        wall_hexes = frozenset(wall_hexes_mut)
+        self._wall_hexes_cache = (wall_hexes, n_walls)
+        return wall_hexes
+
+    def _deployment_pool_entry(self, game_state: Dict[str, Any], current_deployer: int):
+        """Pool du joueur, normalisé et mémoïsé : `(set, liste, np, grille, masque_pair)`."""
+        if current_deployer in self._deployment_pool_cache:
+            return self._deployment_pool_cache[current_deployer]
+
+        deployment_state = require_key(game_state, "deployment_state")
+        deployment_pools = require_key(deployment_state, "deployment_pools")
+        pool = deployment_pools.get(current_deployer, deployment_pools.get(str(current_deployer)))
+        if pool is None:
+            raise KeyError(f"deployment_pools missing player {current_deployer}")
+        board_cols = int(require_key(game_state, "board_cols"))
+        board_rows = int(require_key(game_state, "board_rows"))
+
+        pool_set = set()
+        normalized_pool_list: List[tuple[int, int]] = []
+        for raw_hex in pool:
+            if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
+                normalized = (int(raw_hex[0]), int(raw_hex[1]))
+            elif isinstance(raw_hex, dict):
+                normalized = (
+                    int(require_key(raw_hex, "col")),
+                    int(require_key(raw_hex, "row")),
+                )
+            else:
+                raise TypeError(f"Invalid deployment hex format: {raw_hex}")
+            normalized_pool_list.append(normalized)
+            pool_set.add(normalized)
+        pool_np = np.array(normalized_pool_list, dtype=np.int32)
+        pool_grid = np.zeros((board_cols + 10, board_rows + 10), dtype=bool)
+        pool_grid[pool_np[:, 0], pool_np[:, 1]] = True
+        even_mask_np = pool_np[:, 0] % 2 == 0
+        entry = (pool_set, normalized_pool_list, pool_np, pool_grid, even_mask_np)
+        self._deployment_pool_cache[current_deployer] = entry
+        return entry
+
+    def deployment_scoring_hexes(
+        self, game_state: Dict[str, Any], current_deployer: int
+    ) -> List[tuple[int, int]]:
+        """SUR-ENSEMBLE stable sur lequel le cache de scoring est calculé : pool moins murs.
+
+        POURQUOI UN SUR-ENSEMBLE (V11 §0.46, suite). Le cache était calculé sur les hexes
+        VALIDES de l'unité courante — un ensemble qui change à chaque unité (le socle change la
+        clairance) ET à chaque pose (l'hexe occupé sort du jeu). Sa condition de validité, « même
+        jeu d'hexes valides ? », ne pouvait donc jamais passer : mesuré `incremental=0` sur 10
+        consultations, soit 100 % de reconstruction, 23-48 ms pièce.
+
+        Or les grandeurs mises en cache — exposition LoS d'un hexe, alliés par colonne — sont des
+        propriétés de l'HEXE, pas de l'unité qu'on y pose : mesuré 0 écart sur les intersections
+        entre les cinq unités d'un roster. Les calculer une fois sur pool-moins-murs, qui ne
+        dépend ni du socle ni des poses, et filtrer à la LECTURE (le consommateur itère déjà sur
+        `valid_hexes`) est donc neutre pour l'observation §0.40 — donc sans ré-entraînement.
+
+        L'inclusion `valid_hexes ⊆ deployment_scoring_hexes` est l'invariant qui rend ce
+        filtrage sûr ; elle est verrouillée par test.
+        """
+        _pool_set, normalized_pool, _pool_np, _pool_grid, _even = self._deployment_pool_entry(
+            game_state, current_deployer
+        )
+        wall_hexes = self._wall_hex_set(game_state)
+        return [hex_pos for hex_pos in normalized_pool if hex_pos not in wall_hexes]
+
     def _get_valid_deployment_hexes(
         self,
         game_state: Dict[str, Any],
@@ -780,57 +860,16 @@ class ActionDecoder:
         unit_id: str,
     ) -> List[tuple]:
         """Build sorted list of currently valid deployment hexes for player."""
-        deployment_state = require_key(game_state, "deployment_state")
-        deployment_pools = require_key(deployment_state, "deployment_pools")
-        pool = deployment_pools.get(current_deployer, deployment_pools.get(str(current_deployer)))
-        if pool is None:
-            raise KeyError(f"deployment_pools missing player {current_deployer}")
         unit = get_unit_by_id(str(unit_id), game_state)
         if unit is None:
             raise KeyError(f"Unit {unit_id} missing from game_state['units']")
 
-        raw_wall_hexes = require_key(game_state, "wall_hexes")
-        n_walls = len(raw_wall_hexes)
-        if self._wall_hexes_cache is not None and self._wall_hexes_cache[1] == n_walls:
-            wall_hexes = self._wall_hexes_cache[0]
-        else:
-            wall_hexes_mut = set()
-            for raw_hex in raw_wall_hexes:
-                if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
-                    wall_hexes_mut.add((int(raw_hex[0]), int(raw_hex[1])))
-                elif isinstance(raw_hex, dict):
-                    wall_hexes_mut.add(
-                        (int(require_key(raw_hex, "col")), int(require_key(raw_hex, "row")))
-                    )
-                else:
-                    raise TypeError(f"Invalid wall hex format: {raw_hex}")
-            wall_hexes = frozenset(wall_hexes_mut)
-            self._wall_hexes_cache = (wall_hexes, n_walls)
+        wall_hexes = self._wall_hex_set(game_state)
         board_cols = int(require_key(game_state, "board_cols"))
         board_rows = int(require_key(game_state, "board_rows"))
-        if current_deployer not in self._deployment_pool_cache:
-            pool_set = set()
-            normalized_pool_list: List[tuple[int, int]] = []
-            for raw_hex in pool:
-                if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
-                    normalized = (int(raw_hex[0]), int(raw_hex[1]))
-                elif isinstance(raw_hex, dict):
-                    normalized = (
-                        int(require_key(raw_hex, "col")),
-                        int(require_key(raw_hex, "row")),
-                    )
-                else:
-                    raise TypeError(f"Invalid deployment hex format: {raw_hex}")
-                normalized_pool_list.append(normalized)
-                pool_set.add(normalized)
-            pool_np = np.array(normalized_pool_list, dtype=np.int32)
-            pool_grid = np.zeros((board_cols + 10, board_rows + 10), dtype=bool)
-            pool_grid[pool_np[:, 0], pool_np[:, 1]] = True
-            even_mask_np = pool_np[:, 0] % 2 == 0
-            self._deployment_pool_cache[current_deployer] = (
-                pool_set, normalized_pool_list, pool_np, pool_grid, even_mask_np
-            )
-        pool_set, normalized_pool, pool_np, pool_grid, even_mask_np = self._deployment_pool_cache[current_deployer]
+        pool_set, normalized_pool, pool_np, pool_grid, even_mask_np = self._deployment_pool_entry(
+            game_state, current_deployer
+        )
 
         base_size = unit["BASE_SIZE"]
         from engine.phase_handlers.shared_utils import get_engagement_zone as _get_ez
@@ -1443,28 +1482,24 @@ class ActionDecoder:
         current_ids = set(current_snapshot.keys())
         removed_ids = previous_ids - current_ids
         added_ids = current_ids - previous_ids
+        # Un RETRAIT n'est pas un delta de déploiement (une unité posée ne se dépose pas) : c'est
+        # un état qu'on ne sait pas rattraper, donc reconstruction.
         if removed_ids:
             return False
-        if len(added_ids) != 1:
-            return False
+        if not added_ids:
+            # Aucun changement : le cache est déjà à jour. Ce n'est pas un échec.
+            return True
 
-        added_id = next(iter(added_ids))
-        player, col, row = current_snapshot[added_id]
-        added_pos = (col, row)
+        # PLUSIEURS ajouts sont la NORME, pas l'exception : les joueurs déploient en ALTERNANCE
+        # (mesuré `1,2,1,2,...`), donc quand un joueur revient il a manqué sa propre pose ET
+        # celle de l'adversaire. La version précédente exigeait `len(added_ids) == 1` et rendait
+        # donc la main dans tous les cas réels — le chemin incrémental n'était jamais pris.
         current_snapshot_version = self._build_deployed_snapshot_version(current_snapshot)
 
         valid_hex_set = require_key(cache, "valid_hex_set")
         valid_hexes = require_key(cache, "valid_hexes")
-        if added_pos in valid_hex_set:
-            valid_hex_set.remove(added_pos)
-            valid_hexes.remove(added_pos)
         los_exposure_by_hex = require_key(cache, "los_exposure_by_hex")
         potential_los_exposure_by_hex = require_key(cache, "potential_los_exposure_by_hex")
-        if added_pos in los_exposure_by_hex:
-            del los_exposure_by_hex[added_pos]
-        if added_pos in potential_los_exposure_by_hex:
-            del potential_los_exposure_by_hex[added_pos]
-
         ally_col_counts = require_key(cache, "ally_col_counts")
         ally_deployed_hexes = require_key(cache, "ally_deployed_hexes")
         enemy_deployed_units = require_key(cache, "enemy_deployed_units")
@@ -1474,29 +1509,39 @@ class ActionDecoder:
             los_pair_cache.clear()
             cache["deployed_snapshot_version"] = current_snapshot_version
 
-        if int(player) == int(current_deployer):
-            ally_deployed_hexes.append((col, row))
-            if col in ally_col_counts:
-                ally_col_counts[col] = ally_col_counts[col] + 1
-            else:
-                ally_col_counts[col] = 1
-        else:
-            enemy_unit = {"col": col, "row": row}
-            enemy_deployed_units.append(enemy_unit)
-            for hex_col, hex_row in valid_hexes:
-                can_see = self._has_line_of_sight_cached(
-                    from_col=int(col),
-                    from_row=int(row),
-                    to_col=int(hex_col),
-                    to_row=int(hex_row),
-                    game_state=game_state,
-                    los_pair_cache=los_pair_cache,
-                    snapshot_version=current_snapshot_version,
-                )
-                if can_see:
-                    key = (hex_col, hex_row)
-                    previous_value = require_key(los_exposure_by_hex, key)
-                    los_exposure_by_hex[key] = previous_value + 1
+        # Les hexes occupés ne sont PAS retirés du sur-ensemble. Il couvre le pool moins les
+        # murs, une constante de l'épisode : c'est ce qui le rend réutilisable d'une unité à
+        # l'autre. Écarter un hexe occupé est le travail du filtre `valid_hexes`, appliqué à la
+        # LECTURE — le faire ici aussi ferait diverger le cache incrémental de la
+        # reconstruction (constaté : le test d'équivalence l'a signalé sur cet exact point).
+        for added_id in added_ids:
+            player, col, row = current_snapshot[added_id]
+            if int(player) == int(current_deployer):
+                ally_deployed_hexes.append((col, row))
+                if col in ally_col_counts:
+                    ally_col_counts[col] = ally_col_counts[col] + 1
+                else:
+                    ally_col_counts[col] = 1
+                continue
+
+            enemy_deployed_units.append({"col": col, "row": row})
+            # Pas de garde sur des coordonnées sentinelles : `_build_deployed_snapshot` écarte
+            # déjà les unités non posées (`if col < 0 or row < 0: continue`), donc `added_ids`
+            # n'en contient jamais. Une garde ici serait du code inatteignable — la mutation
+            # qui la retire laisse le test d'équivalence VERT, ce qui le prouve.
+            # MÊME implémentation de LoS que la reconstruction (`batch_has_los_from_source`), et
+            # non `_has_line_of_sight_cached`. Les deux ne donnent PAS le même résultat : mesuré
+            # 607 désaccords sur 16 104 hexes pour une seule source. Tant que ce désaccord n'est
+            # pas tranché (cf. V11 §0.62), les deux chemins du cache doivent au moins être
+            # cohérents ENTRE EUX, sans quoi l'observation dépendrait de l'ordre des poses.
+            from engine.hex_utils import batch_has_los_from_source as _batch_los
+
+            wall_grid = self._build_wall_grid(game_state)
+            hexes_arr = np.array(valid_hexes, dtype=np.int32)
+            los_results = _batch_los(int(col), int(row), hexes_arr, wall_grid)
+            for i, key in enumerate(valid_hexes):
+                if bool(los_results[i]):
+                    los_exposure_by_hex[key] = require_key(los_exposure_by_hex, key) + 1
 
         cache["deployed_snapshot"] = current_snapshot
         cache["deployed_snapshot_version"] = current_snapshot_version
@@ -1506,25 +1551,37 @@ class ActionDecoder:
         self,
         game_state: Dict[str, Any],
         current_deployer: int,
-        valid_hexes: List[tuple[int, int]],
     ) -> Dict[str, Any]:
-        """
-        Get deployment scoring cache with incremental updates when possible.
+        """Cache de scoring du déployeur, mis à jour incrémentalement quand c'est possible.
 
-        Full rebuild is used only when state drift is not a single deployment delta.
+        Il ne prend PLUS les hexes valides de l'unité courante : il couvre le sur-ensemble
+        stable `deployment_scoring_hexes` (pool moins murs), et c'est le consommateur qui
+        filtre à la lecture. Le passer en paramètre laissait croire que le contenu du cache
+        dépendait de l'unité — il n'en a jamais dépendu (mesuré : 0 écart sur les
+        intersections), et c'est cette fausse dépendance qui interdisait toute réutilisation.
         """
         _debug_mode = channel_enabled(CH_DEPLOY_CACHE, bool(game_state.get("debug_mode", False)))
         _t_cache0 = time.perf_counter() if _debug_mode else None
+        # SUR-ENSEMBLE stable, et non les hexes valides de l'unité courante : cf.
+        # `deployment_scoring_hexes` pour la mesure qui justifie ce choix.
+        scoring_hexes = self.deployment_scoring_hexes(game_state, current_deployer)
         trace(
             CH_DEPLOY_CACHE, _debug_mode,
-            "ActionDecoder._get_or_build_deployment_scoring_cache enter current_deployer=%s valid_hexes_n=%s",
-            current_deployer, len(valid_hexes),
+            "ActionDecoder._get_or_build_deployment_scoring_cache enter current_deployer=%s scoring_hexes_n=%s",
+            current_deployer, len(scoring_hexes),
         )
         current_snapshot = self._build_deployed_snapshot(game_state)
         cache_key = self.DEPLOYMENT_SCORING_CACHE_KEY
 
+        # UN CACHE PAR JOUEUR. Les joueurs déploient en ALTERNANCE (mesuré `1,2,1,2,...`) et
+        # chacun a son propre pool, donc son propre ensemble d'hexes : un cache unique se ferait
+        # invalider à CHAQUE pose par le changement de déployeur — c'est ce qui a été mesuré en
+        # cours de route (9 reconstructions sur 10 consultations, soit exactement l'état d'avant).
+        caches_by_deployer = game_state.setdefault(cache_key, {})
+        deployer_key = int(current_deployer)
+
         def _full_rebuild(outcome: str) -> Dict[str, Any]:
-            """Les TROIS chemins de reconstruction, qui ne diffèrent que par leur cause.
+            """Les chemins de reconstruction, qui ne diffèrent que par leur cause.
 
             Ils étaient écrits trois fois à l'identique (trace, compte, construit, stocke,
             trace la sortie chronométrée) : la moindre évolution — une issue de plus, un
@@ -1536,8 +1593,10 @@ class ActionDecoder:
                 "ActionDecoder._get_or_build_deployment_scoring_cache rebuild cause=%s", outcome,
             )
             self._record_deployment_cache_outcome(outcome)
-            rebuilt = self._build_deployment_scoring_cache(game_state, current_deployer, valid_hexes)
-            game_state[cache_key] = rebuilt
+            rebuilt = self._build_deployment_scoring_cache(
+                game_state, current_deployer, scoring_hexes
+            )
+            caches_by_deployer[deployer_key] = rebuilt
             if _t_cache0 is not None:
                 trace(
                     CH_DEPLOY_CACHE, _debug_mode,
@@ -1546,12 +1605,10 @@ class ActionDecoder:
                 )
             return rebuilt
 
-        if cache_key not in game_state:
+        if deployer_key not in caches_by_deployer:
             return _full_rebuild("full_build_cold")
 
-        cache = require_key(game_state, cache_key)
-        if require_key(cache, "valid_hex_set") != set(valid_hexes):
-            return _full_rebuild("full_build_hex_mismatch")
+        cache = caches_by_deployer[deployer_key]
 
         trace(
             CH_DEPLOY_CACHE, _debug_mode,
@@ -1634,9 +1691,7 @@ class ActionDecoder:
         c'est ce qui permet à un tri lexicographique numpy de reproduire exactement l'ancien
         `max` sur tuples.
         """
-        cache = self._get_or_build_deployment_scoring_cache(
-            game_state, current_deployer, valid_hexes
-        )
+        cache = self._get_or_build_deployment_scoring_cache(game_state, current_deployer)
         ally_col_counts = require_key(cache, "ally_col_counts")
         ally_deployed_hexes = require_key(cache, "ally_deployed_hexes")
         los_exposure_by_hex = require_key(cache, "los_exposure_by_hex")
