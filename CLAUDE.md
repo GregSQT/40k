@@ -158,8 +158,9 @@ explicitement. Elles ne concernent QUE le droit d'agir et le périmètre, jamais
 - Si l'utilisateur le demande, on peut procéder à la modification d'un fichier complet par itération
 
 4. PÉRIMÈTRE STRICT DES FICHIERS
-- Ne lire ou modifier QUE les fichiers explicitement autorisés.
-- Si un autre fichier semble nécessaire :
+- Ne lire ou modifier QUE les fichiers explicitement autorisés, PLUS le périmètre de clôture
+  défini en T2 (fichiers que la modification rend faux) : ceux-là ne demandent pas validation.
+- Si un autre fichier semble nécessaire SANS remplir le critère d'entrée T2 :
   → lister le fichier
   → expliquer pourquoi
   → attendre validation
@@ -199,6 +200,27 @@ T2. CLÔTURE COMPLÈTE DES SUJETS
   l'exécution ET suivie d'une vérification (relecture, grep, git status).
 - Une action qui rend périmé un état déjà écrit (commit, run, suppression) oblige à mettre à jour
   cet état DANS LA MÊME RÉPONSE — un document rendu faux par sa propre livraison est une régression.
+
+PÉRIMÈTRE DE CLÔTURE — autorisé SANS nouvelle validation, TOUS MODES
+- Corriger X autorise et OBLIGE à traiter dans la MÊME réponse tout ce que X rend FAUX :
+  jumeaux (miroirs tir/mêlée, move/charge/fight, IA/PvP, moteur/replay/analyzer, front/back),
+  appelants, tests, doc, configs. Ce n'est pas une extension de périmètre, c'est la correction.
+- CRITÈRE D'ENTRÉE — un seul, objectif, et il doit être NOMMÉ pour chaque fichier ajouté :
+  le fichier casse (compile/type/import), son test devient rouge, il contient le MÊME motif
+  que celui corrigé (prouvé par le grep de la ligne JUMEAU), ou il documente/configure le
+  symbole touché. Rien d'autre n'ouvre le périmètre.
+- N'ENTRE JAMAIS, même « tant qu'on y est » : renommage, découpage, style, refactor,
+  amélioration d'un code correct, défaut SANS LIEN avec X, curiosité. Ça se SIGNALE en une
+  ligne, ça ne se traite pas. ASK 3, ASK 5 et le STOP « plusieurs fichiers » gardent toute
+  leur force sur ces cas-là — c'est là qu'est le garde-fou, pas sur les dépendances.
+- Si le périmètre de clôture dépasse ~5 fichiers ou impose un changement d'architecture :
+  l'ANNONCER AVANT de commencer (cf. ligne « travail plus large que prévu »), pas après.
+- INTERDIT d'écrire « à traiter plus tard », « TODO », « dette », « hors périmètre »,
+  « laissé en l'état », « à valider par l'utilisateur » pour un fichier DU périmètre de
+  clôture. Soit c'est fait, soit l'impossibilité TECHNIQUE est nommée (cf. ci-dessus).
+- ARBITRAGE du rapport de clôture = décisions qui appartiennent à l'utilisateur (choix métier,
+  priorité, budget, donnée qu'il seul possède). JAMAIS du travail technique que l'agent savait
+  faire et n'a pas fait. Un ARBITRAGE qui décrit une tâche est une dette déguisée.
 
 RAPPORT DE CLÔTURE — OBLIGATOIRE avant d'annoncer un sujet fini
 Ne JAMAIS conclure par un verdict de qualité (« implémentation optimale », « doc à jour »,
@@ -293,6 +315,8 @@ Après chaque modification :
 2. Expliquer en une phrase ce qui a changé et pourquoi — sans montrer de code.
 
 Si plusieurs fichiers → STOP, lister, expliquer, attendre validation.
+EXCEPTION : les fichiers du périmètre de clôture (T2) se modifient sans STOP ni validation —
+ils apparaissent en RÉFS, chacun justifié par son critère d'entrée.
 
 === MODE AGENT/AUTO (ACTIVÉ PAR PROMPT EXPLICITE) ===
 
