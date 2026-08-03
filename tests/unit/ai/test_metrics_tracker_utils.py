@@ -140,17 +140,9 @@ def _tracker_stub() -> W40KMetricsTracker:
         "fight": {"fought": 0, "skipped": 0},
     }
     t.combat_effectiveness = {
-        "shoot_kills": 0,
-        "melee_kills": 0,
-        "charge_successes": 0,
         "victory_points_cumulative": 0.0,
     }
     t.combat_history = {
-        "shoot_kills": [],
-        "melee_kills": [],
-        "shoot_value_killed": [],
-        "melee_value_killed": [],
-        "charge_successes": [],
         "victory_points_cumulative": [],
     }
     t.forcing_tracking = {
@@ -372,6 +364,8 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
             "forced_unit_instances_controlled": 2,
             "forced_unit_counts_controlled": {"My Unit": 2},
             "victory_points_diff_controlled_minus_opponent": 1.0,
+            "charges_declared": 2,
+            "charges_succeeded": 1,
             # Cles EXIGEES depuis que les objectifs tenus sont echantillonnes cote moteur
             # (voir tests/unit/engine/test_objective_held_samples.py) : leur absence est un
             # etat corrompu, plus une courbe silencieusement muette.
@@ -410,9 +404,6 @@ def test_compliance_mapper_phase_and_training_metrics_paths() -> None:
     t.log_phase_performance({"phase": "shoot", "action": "shoot"})
     t.log_phase_performance({"phase": "charge", "action": "charge"})
     t.log_phase_performance({"phase": "fight", "action": "combat"})
-    t.log_combat_kill("shoot")
-    t.log_combat_kill("melee")
-    t.log_combat_kill("charge")
     t.log_victory_points_cumulative(12.0)
     t.compute_and_log_phase_metrics()
 
@@ -480,6 +471,8 @@ def test_log_tactical_metrics_forcing_validation_errors() -> None:
         "invalid_actions": 0,
         "wait_actions": 0,
         "victory_points_diff_controlled_minus_opponent": 0.0,
+        "charges_declared": 0,
+        "charges_succeeded": 0,
         "controlled_objective_samples": [1.0],
         "opponent_objective_samples": [1.0],
         "victory_points_controlled_episode": 5.0,

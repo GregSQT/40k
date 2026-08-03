@@ -105,6 +105,35 @@ def reset_debug_log_flag():
     _debug_log_cleared = False
 
 
+def count_charge_declarations(
+    action_logs: List[Dict[str, Any]], controlled_player: int
+) -> Tuple[int, int]:
+    """(charges declarees, charges reussies) du camp ``controlled_player``, lues sur le journal.
+
+    Une charge DECLAREE produit exactement un log : ``charge`` si le plan a abouti,
+    ``charge_fail`` sinon — les deux sorties de ``squad_charge`` (11.02 etape 3 : « if it is
+    possible to make a charge move [...] Otherwise, your unit does not make a charge move. In
+    either case, the charge is then resolved »).
+
+    Le couple est la seule paire qui distingue « l'agent ne monte pas au contact » de « il
+    essaie et ses charges echouent ». Un compte de reussites seul confond les deux, et c'est
+    ce qui a laisse `charge_build_valid_plan` viser le contact du CENTRE ennemi au lieu de
+    l'engagement range (03.04) sans qu'aucune courbe ne puisse le dire.
+    """
+    declared = 0
+    succeeded = 0
+    for log in action_logs:
+        log_type = log.get("type")  # get allowed
+        if log_type not in ("charge", "charge_fail"):
+            continue
+        if int(require_key(log, "player")) != controlled_player:
+            continue
+        declared += 1
+        if log_type == "charge":
+            succeeded += 1
+    return declared, succeeded
+
+
 class W40KEngine(gym.Env):
     """
     Slim W40K game engine - delegates to specialized modules.
@@ -2244,6 +2273,10 @@ class W40KEngine(gym.Env):
             # calcule plus bas : les deux comptent par figurine, mais celui-la somme la VALUE
             # perdue TOUTES CAUSES confondues et sans ventilation par phase, la ou ceux-ci
             # n'attribuent que ce que l'agent a detruit au tir ou en melee.
+            charges_declared, charges_succeeded = count_charge_declarations(
+                action_logs, controlled_player
+            )
+
             shots_fired = 0
             hits = 0
             damage_dealt = 0
@@ -2300,6 +2333,8 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['melee_kills'] = melee_kills
             self.episode_tactical_data['shoot_value_killed'] = shoot_value_killed
             self.episode_tactical_data['melee_value_killed'] = melee_value_killed
+            self.episode_tactical_data['charges_declared'] = charges_declared
+            self.episode_tactical_data['charges_succeeded'] = charges_succeeded
 
             # VALUE attrition metrics (episode-level): destroyed enemy value and lost ally value.
             #

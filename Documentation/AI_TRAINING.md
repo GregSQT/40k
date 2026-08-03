@@ -353,6 +353,10 @@ Le `RewardCalculator` (`engine/reward_calculator.py`) filtre les rewards par jou
    `tactical_data`, `winner`, `action_logs`) reste au contraire celui du dernier step moteur.
    Sans ce report, `obs/*` rangeait ses échantillons sous la phase de l'adversaire et
    `combat/c_charge_successes` comptait les charges de l'adversaire sous le drapeau de l'agent.
+   Cette courbe-là a depuis été supprimée (2026-08-01) au profit de `02_combat/m_charges_declared`
+   / `n_charge_success_rate`, comptées par le moteur sur `action_logs` —
+   la même passe que les kills, filtrée sur le siège contrôlé. Le report d'`info` reste requis
+   pour tout le reste.
 
 3. **Reward situationnelle** (`_get_situational_reward`) :
    - `winner == controlled_player` → bonus win

@@ -723,6 +723,28 @@ plusieurs rosters.
 | **02_combat/j_melee_value_killed** | VALUE (points) des figurines détruites en mêlée | Idem, côté mêlée |
 | **02_combat/k_units_killed_ratio** | Unités ennemies éliminées / unités ennemies de départ | Croissant |
 | **02_combat/l_units_lost_ratio** | Unités alliées perdues / unités alliées de départ | Décroissant ou stable |
+| **02_combat/m_charges_declared** | Charges **déclarées** par épisode (11.02, réussies ou non) | Croissant si l'agent apprend à monter au contact |
+| **02_combat/n_charge_success_rate** | Charges abouties ÷ charges déclarées, **cumulées sur la fenêtre** | ~0,5–0,7 (2D6 sur des cibles choisies proches) |
+
+Le nombre de charges réussies n'a **pas** de courbe : sa moyenne vaut exactement `m_ × n_` sur
+toute fenêtre. Deux façons de lire la même quantité finissent par diverger d'un épisode.
+
+**Pourquoi les déclarations et pas les seules réussites.** Un compte de charges réussies ne
+distingue pas « l'agent ne monte pas au contact » de « il essaie et ses charges échouent ». Les
+deux se lisent pourtant sur `h_melee_model_kills` de la même façon : une courbe plate. C'est
+exactement ce qui a masqué, jusqu'au 2026-08-01, un `charge_build_valid_plan` qui cherchait ses
+destinations **au contact du centre ennemi** (0,2" à l'échelle ×5) au lieu de l'engagement range
+(2", règle 03.04) : mesuré sur le modèle de RUN_2, **0 charge réussie sur 23 déclarées**, alors
+que l'agent choisissait la charge 70 % des fois où le masque la proposait. Après correction et
+**sans ré-entraînement**, le même modèle passe à 10/15 (66,7 %) et double ses kills en mêlée.
+`combat/c_charge_successes`, qui comptait les réussites seules depuis le callback, est supprimée :
+même mesure, deuxième source, et sans son dénominateur.
+
+`n_` est un taux **agrégé sur la fenêtre** (rapport des sommes), pas une moyenne de taux par
+épisode : le dénominateur est ici un résultat de l'épisode, et écarter les épisodes sans
+tentative réduirait la courbe à la sous-population des épisodes où l'agent a chargé. Rien n'est
+émis tant qu'aucune charge n'a été tentée dans la fenêtre — un `0.0` se lirait « toutes les
+charges échouent », qui est un tout autre diagnostic.
 
 Chaque ratio est émis **seulement si son dénominateur est > 0** : un dénominateur nul est un état
 de jeu possible (aucune unité en face), pas une erreur, et il ne produit donc aucun point plutôt

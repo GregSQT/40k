@@ -933,9 +933,14 @@ class MetricsCollectionCallback(BaseCallback):
                     # est initialise a 0 et jamais incremente non plus : la courbe
                     # game_detailed/damage_dealt, gardee par `> 0`, n'a jamais ete emise.
 
-                    # CHARGE SUCCESS TRACKING: Log successful charges (optional per step)
-                    if is_controlled_action and info.get('charge_succeeded', False):  # get allowed
-                        cast(Any, self.metrics_tracker).log_combat_kill('charge')
+                    # Le comptage des charges reussies (`log_combat_kill('charge')`, lu depuis
+                    # `info['charge_succeeded']`) occupait cette place. Il est parti avec sa
+                    # courbe `combat/c_charge_successes` : le moteur compte les charges sur
+                    # `action_logs`, DECLAREES et reussies (`02_combat/m_`, `n_`, `o_`), dans la
+                    # meme passe que les kills. Un compte de reussites sans son denominateur ne
+                    # distingue pas « l'agent ne charge pas » de « ses charges echouent » — la
+                    # confusion qui a laisse passer neuf mois de charges geometriquement
+                    # impossibles.
 
                     # Handle episode end - check for 'episode' key (Monitor wrapper adds this)
                     if 'episode' in info:

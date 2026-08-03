@@ -169,6 +169,7 @@ class W40KMetricsTracker:
         'units_killed_ratio', 'units_lost_ratio',
         'value_destroyed', 'value_lost',
         'shoot_kills', 'melee_kills', 'shoot_value_killed', 'melee_value_killed',
+        'charges_declared', 'charges_succeeded',
     )
 
     #: Modes de deploiement ventiles (cf. `deployment_mode_schedule`, w40k_core).
@@ -295,13 +296,15 @@ class W40KMetricsTracker:
             'fight': {'fought': 0, 'skipped': 0}
         }
 
-        # NEW: Combat effectiveness metrics (per RL_TRAINING_ROADMAP.md)
-        # These metrics tell you if the agent learns combat properly
+        # Points de victoire cumules de l'episode. `shoot_kills`, `melee_kills` et
+        # `charge_successes` vivaient ici, alimentes par `log_combat_kill` depuis le callback :
+        # DEUXIEME source pour des grandeurs que le moteur compte deja sur `action_logs`
+        # (02_combat/g_, h_, m_, n_), seat-aware et par episode. Les deux premieres etaient
+        # mortes (plus aucun appelant) et la troisieme doublait `m_/n_charges_*` en ne comptant
+        # que les reussites — le compte de TENTATIVES, lui, manquait, et c'est precisement ce
+        # qui a masque neuf mois de charges impossibles.
         self.combat_effectiveness = {
-            'shoot_kills': 0,      # Kills from ranged attacks
-            'melee_kills': 0,      # Kills from melee attacks
-            'charge_successes': 0, # Successful charges (reached target)
-            'victory_points_cumulative': 0.0  # Cumulative victory points at episode end
+            'victory_points_cumulative': 0.0
         }
 
         # Rolling history for smoothed combat metrics. Ne restent ici que les series a fenetre
@@ -310,7 +313,6 @@ class W40KMetricsTracker:
         # meme append + fenetre + moyenne — deux mecaniques de lissage identiques cote a cote
         # obligeaient chaque nouvelle courbe a choisir entre elles sans raison.
         self.combat_history = {
-            'charge_successes': [],
             'victory_points_cumulative': []
         }
         
@@ -620,6 +622,41 @@ class W40KMetricsTracker:
         if key in self.DEPLOY_SPLIT_GAME_KEYS:
             self._emit_deploy_split(self.DEPLOY_SPLIT_GAME_KEYS[key], value)
 
+    def _emit_pooled_ratio(self, tag: str, num_key: str, den_key: str) -> None:
+        """Emet, sur les DEUX fenetres, le rapport des SOMMES de deux historiques de `_game_push`.
+
+        Complement de `_emit_ratio` pour les taux dont le denominateur est un RESULTAT de
+        l'episode (« combien de charges l'agent a-t-il declarees ? ») et non une constante :
+        agreger les deux comptes avant de diviser garde les episodes sans tentative dans la
+        population, la ou un ratio par episode devrait les ecarter faute de denominateur.
+        Rien n'est emis tant qu'aucune tentative n'a ete observee dans la fenetre : le taux
+        n'existe alors pas, et un 0.0 se lirait « toutes les tentatives ont echoue ».
+        """
+        num_hist = self._game_history[num_key]
+        den_hist = self._game_history[den_key]
+        if len(num_hist) != len(den_hist):
+            raise ValueError(
+                f"_emit_pooled_ratio({tag}): historiques desynchronises "
+                f"({num_key}={len(num_hist)}, {den_key}={len(den_hist)}) — les deux comptes "
+                "doivent etre pousses a chaque episode, sinon le rapport apparie des episodes "
+                "differents"
+            )
+        windows = [(self.PERF_WINDOW, "")]
+        fast_window = min(self.PERF_WINDOW_FAST, self.PERF_WINDOW)
+        # `<` et non `<=` : a fenetres egales (perf_window_fast >= perf_window en config) les
+        # deux courbes seraient la MEME serie, ecrite deux fois sur le meme tag et le meme pas.
+        if fast_window < self.PERF_WINDOW:
+            windows.append((fast_window, f"_{fast_window}ep"))
+        for window, suffix in windows:
+            if len(den_hist) < window:
+                continue
+            den = sum(den_hist[-window:])
+            if den <= 0:
+                continue
+            self.writer.add_scalar(
+                f"{tag}{suffix}", sum(num_hist[-window:]) / den, self.episode_count
+            )
+
     def _emit_ratio(self, tag: str, key: str, numerator: float, denominator: float) -> None:
         """Emet un ratio lisse, et RIEN si son denominateur est nul.
 
@@ -710,6 +747,28 @@ class W40KMetricsTracker:
             melee_value = float(require_key(tactical_data, 'melee_value_killed'))
             self._emit_game('02_combat/i_shoot_value_killed', 'shoot_value_killed', shoot_value)
             self._emit_game('02_combat/j_melee_value_killed', 'melee_value_killed', melee_value)
+
+        # CHARGES — le couple (declarees, reussies), meme source `action_logs` que les kills
+        # ci-dessus. Les deux sont indispensables ENSEMBLE : `h_melee_model_kills` plate ne dit
+        # pas si l'agent renonce a la melee ou s'il tente des charges qui echouent, et c'est
+        # precisement ce qui a masque neuf mois de charges geometriquement impossibles
+        # (destination cherchee au contact du centre ennemi, pas a l'engagement range 03.04).
+        charges_declared = int(require_key(tactical_data, 'charges_declared'))
+        charges_succeeded = int(require_key(tactical_data, 'charges_succeeded'))
+        self._emit_game('02_combat/m_charges_declared', 'charges_declared', charges_declared)
+        # Les reussites alimentent l'historique mais n'ont PAS de courbe a elles : la moyenne
+        # des reussites vaut exactement `m_ x n_` sur toute fenetre, donc une troisieme courbe
+        # ne montrerait aucune information que ces deux-la ne portent pas — et deux facons de
+        # lire la meme quantite finissent toujours par diverger d'un episode.
+        self._game_push('charges_succeeded', charges_succeeded)
+        # Taux AGREGE sur la fenetre (somme des reussites / somme des declarations), pas moyenne
+        # des taux par episode : le denominateur est ici un RESULTAT de l'episode, donc
+        # `_emit_ratio` ne convient pas (sa garde `denominator > 0` ecarterait tous les episodes
+        # sans charge — soit la majorite — et la courbe ne decrirait plus que la sous-population
+        # des episodes ou l'agent a charge, cf. sa docstring).
+        self._emit_pooled_ratio(
+            '02_combat/n_charge_success_rate', 'charges_succeeded', 'charges_declared'
+        )
 
         # COMBAT VALUE METRICS: Episode-level attrition in VALUE points.
         enemy_value_destroyed = float(require_key(tactical_data, 'enemy_value_destroyed'))
@@ -1051,22 +1110,6 @@ class W40KMetricsTracker:
         
         self.writer.add_scalar('game_detailed/reward_mapper_calculation_failures', self.reward_mapper_stats['mapper_failures'], self.episode_count)
     
-    def log_combat_kill(self, kill_type: str):
-        """Log a combat kill for tracking combat effectiveness.
-
-        Args:
-            kill_type: One of 'shoot', 'melee', or 'charge'
-                      - 'shoot': Enemy killed by ranged attack
-                      - 'melee': Enemy killed by melee attack in fight phase
-                      - 'charge': Successful charge that reached target
-        """
-        if kill_type == 'shoot':
-            self.combat_effectiveness['shoot_kills'] += 1
-        elif kill_type == 'melee':
-            self.combat_effectiveness['melee_kills'] += 1
-        elif kill_type == 'charge':
-            self.combat_effectiveness['charge_successes'] += 1
-
     def log_victory_points_cumulative(self, points: float):
         """Log cumulative victory points for the controlled player at episode end.
 
@@ -1167,7 +1210,7 @@ class W40KMetricsTracker:
         # `combat/c_charge_successes` comme `01_VP/b_vp_agent` n'auraient plus jamais emis un
         # seul point — sans erreur, sans courbe. `_game_push` tronque deja a PERF_WINDOW : ces
         # deux-la etaient le jumeau reste en arriere.
-        for key in ['charge_successes', 'victory_points_cumulative']:
+        for key in ['victory_points_cumulative']:
             self.combat_history[key].append(self.combat_effectiveness[key])
             if len(self.combat_history[key]) > self.PERF_WINDOW:
                 self.combat_history[key].pop(0)
@@ -1182,8 +1225,10 @@ class W40KMetricsTracker:
 
         # b) Kills tir/melee et recompense de kill : logges dans log_tactical_metrics (source fiable)
 
-        # c) Charge successes
-        self._emit_windowed('combat/c_charge_successes', self.combat_history['charge_successes'])
+        # c) Les charges reussies (`combat/c_charge_successes`) occupaient cette place, comptees
+        # par le callback depuis `info['charge_succeeded']`. Elles sont desormais lues sur
+        # `action_logs` AVEC leur denominateur — `02_combat/m_charges_declared` et
+        # `n_charge_success_rate` — dans log_tactical_metrics.
 
         # d) Un SECOND add_scalar sur la courbe de kills de melee (ex-`0_game/l_melee_kills`,
         # aujourd'hui `02_combat/h_melee_model_kills`) occupait cette place, sur la meme serie
@@ -1199,9 +1244,6 @@ class W40KMetricsTracker:
 
         # Reset combat effectiveness and flags for next episode
         self.combat_effectiveness = {
-            'shoot_kills': 0,
-            'melee_kills': 0,
-            'charge_successes': 0,
             'victory_points_cumulative': 0.0
         }
     

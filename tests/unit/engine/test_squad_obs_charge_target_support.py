@@ -155,15 +155,22 @@ def test_zero_beyond_the_declaration_range():
 def test_zero_when_the_target_has_no_legal_landing_hex():
     """LE cas qui justifie le champ : cible PROCHE mais structurellement inatteignable.
 
-    La cible est cernée de murs : aucune case au contact n'est légale (`_hex_legal_for_charge`),
-    donc aucun plan n'existe, même au jet maximal. `edge_distance` est pourtant IDENTIQUE au cas
-    atteignable ci-dessus — c'est exactement l'ambiguïté que ce bit lève, et sans lui l'agent
-    déclarerait une charge perdue d'avance.
+    La cible est cernée de murs : aucune case d'où l'ENGAGER n'est légale
+    (`_hex_legal_for_charge`), donc aucun plan n'existe, même au jet maximal. `edge_distance` est
+    pourtant IDENTIQUE au cas atteignable ci-dessus — c'est exactement l'ambiguïté que ce bit
+    lève, et sans lui l'agent déclarerait une charge perdue d'avance.
+
+    Le mur couvre le DISQUE D'ENGAGEMENT, pas les six voisins : l'engagement est une zone de 2"
+    (03.04), pas une adjacence de cellule. N'en murer que la couronne intérieure laisserait des
+    cases légales à 2 subhex de la cible, d'où la charge aboutit — la fixture ne testerait alors
+    plus rien (cf. la correction de `charge_build_valid_plan` du 2026-08-01).
     """
-    from engine.combat_utils import get_hex_neighbors
+    from engine.phase_handlers.shared_utils import _hex_cells_within_radius
     from engine.observation_entities import unit_cont_index
 
-    walls = [[int(c), int(r)] for c, r in get_hex_neighbors(31, 20)]
+    walls = [
+        [int(c), int(r)] for c, r in _hex_cells_within_radius(31, 20, 2) if (c, r) != (31, 20)
+    ]
     units = [_unit_cfg(1, 1, [(26, 20)]), _unit_cfg(2, 2, [(31, 20)])]
     eng_blocked = _make_engine(_config(units, wall_hexes=walls))
     _charge_phase(eng_blocked)

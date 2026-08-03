@@ -37,7 +37,7 @@ from ai.metrics_tracker import W40KMetricsTracker
 from engine.observation_builder import ObservationBuilder
 from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT
 from engine.reward_calculator import RewardCalculator
-from engine.w40k_core import W40KEngine
+from engine.w40k_core import W40KEngine, count_charge_declarations
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -699,3 +699,113 @@ def test_the_zero_combat_ratios_use_their_own_denominators(
     # ce controle vaudrait pour n'importe quel denominateur.
     assert by_key["02_combat/d_models_lost_ratio"] > 0
     assert by_key["02_combat/c_models_killed_ratio"] > 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Charges — DECLAREES et reussies (02_combat/m_, n_, o_)
+#
+# Le couple est indissociable : un compte de reussites seul ne distingue pas « l'agent ne
+# monte pas au contact » de « il essaie et ses charges echouent ». C'est exactement cette
+# ambiguite qui a laisse `charge_build_valid_plan` chercher ses destinations au contact du
+# CENTRE ennemi (0,2" a l'echelle x5) au lieu de l'engagement range (2", 03.04) : 0 charge
+# reussie sur 23 declarations mesurees, sans qu'aucune courbe puisse le dire.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _charge_logs_of(engine: W40KEngine, player: int) -> List[Dict[str, Any]]:
+    """Declarations de charge du camp `player` : une entree par declaration, reussie ou non."""
+    return [lg for lg in engine.game_state["action_logs"]
+            if lg.get("type") in ("charge", "charge_fail") and int(lg["player"]) == player]
+
+
+@pytest.mark.parametrize("seed", _EPISODE_SEEDS)
+def test_charge_counters_match_the_journal(seed: int) -> None:
+    """Coherence croisee : les compteurs = les logs de charge du camp CONTROLE.
+
+    Egalites pures, vraies a zero : elles tiennent sur un episode sans la moindre charge.
+    """
+    engine, tactical = _random_episode(seed, controlled_player=1)
+    declarations = _charge_logs_of(engine, 1)
+
+    assert tactical["charges_declared"] == len(declarations)
+    assert tactical["charges_succeeded"] == sum(
+        1 for lg in declarations if lg["type"] == "charge"
+    )
+    assert tactical["charges_succeeded"] <= tactical["charges_declared"]
+
+
+@pytest.mark.parametrize("controlled_player", [1, 2])
+def test_charge_counters_follow_the_controlled_seat(controlled_player: int) -> None:
+    """Les charges de l'ADVERSAIRE ne sont pas comptees.
+
+    Journal CONSTRUIT, avec des charges des DEUX camps et un melange reussites/echecs : un
+    episode joue ne garantit pas que le bot charge, et le test passerait alors meme avec un
+    compteur aveugle au siege — le defaut exact qui a coute sa courbe a
+    `combat/c_charge_successes` (cf. tests/unit/ai/test_wrapper_agent_step_info.py).
+    """
+    opponent = 2 if controlled_player == 1 else 1
+    action_logs = [
+        {"type": "charge", "player": controlled_player},
+        {"type": "charge_fail", "player": controlled_player},
+        {"type": "charge_fail", "player": controlled_player},
+        {"type": "charge", "player": opponent},
+        {"type": "charge", "player": opponent},
+        {"type": "charge_fail", "player": opponent},
+        {"type": "shoot", "player": controlled_player},
+    ]
+
+    declared, succeeded = count_charge_declarations(action_logs, controlled_player)
+
+    assert (declared, succeeded) == (3, 1)
+
+
+def test_charge_counters_of_a_played_episode_match_its_journal() -> None:
+    """Le compteur pose dans `episode_tactical_data` est bien celui de la fonction ci-dessus,
+    sur un episode reellement joue (le cablage, pas la formule)."""
+    engine, tactical = _random_episode(seed=5, controlled_player=1)
+    declared, succeeded = count_charge_declarations(engine.game_state["action_logs"], 1)
+
+    assert tactical["charges_declared"] == declared == len(_charge_logs_of(engine, 1))
+    assert tactical["charges_succeeded"] == succeeded
+
+
+def test_the_charge_curves_are_emitted_with_the_pooled_rate(tmp_path: Any) -> None:
+    """Les deux courbes sortent, et le taux est le rapport des SOMMES sur la fenetre.
+
+    Le taux n'est PAS la moyenne des taux par episode : un episode sans tentative n'a pas de
+    taux, et l'ecarter biaiserait la courbe vers la sous-population des episodes ou l'agent
+    charge. Deux episodes, 3 declarations pour 1 reussite au total -> 1/3, et non la moyenne
+    de (1/1) et (0/2).
+    """
+    # Fenetre de 2 : c'est l'agregation SUR PLUSIEURS episodes que ce test verifie, et une
+    # fenetre de 1 ne verrait que le dernier.
+    tracker = W40KMetricsTracker(
+        "ArmageddonAgent", log_dir=str(tmp_path), show_banner=False,
+        perf_window=2, perf_window_fast=2,
+    )
+    recording = _RecordingWriter()
+    tracker.writer = recording
+    tracker.episode_count = 1
+    _engine, tactical = _random_episode(_EPISODE_SEEDS[0], controlled_player=1)
+
+    tracker.log_tactical_metrics({**tactical, "charges_declared": 1, "charges_succeeded": 1})
+    tracker.log_tactical_metrics({**tactical, "charges_declared": 2, "charges_succeeded": 0})
+
+    by_key = {key: value for key, value, _step in recording.scalars}
+    assert by_key["02_combat/m_charges_declared"] == pytest.approx(1.5)  # moyenne (1 + 2) / 2
+    assert by_key["02_combat/n_charge_success_rate"] == pytest.approx(1 / 3)
+    # Les reussites n'ont pas de courbe : leur moyenne vaut `m_ x n_`, rien de plus.
+    assert "02_combat/n_charges_succeeded" not in by_key
+
+
+def test_the_charge_rate_stays_silent_without_a_single_attempt(tmp_path: Any) -> None:
+    """Aucune tentative dans la fenetre : pas de taux. Un 0.0 se lirait « toutes les charges
+    ont echoue », qui est un tout autre diagnostic."""
+    tracker, recording = _recording_tracker(tmp_path)
+    _engine, tactical = _random_episode(_EPISODE_SEEDS[0], controlled_player=1)
+
+    tracker.log_tactical_metrics({**tactical, "charges_declared": 0, "charges_succeeded": 0})
+
+    keys = [key for key, _value, _step in recording.scalars]
+    assert "02_combat/m_charges_declared" in keys
+    assert "02_combat/n_charge_success_rate" not in keys

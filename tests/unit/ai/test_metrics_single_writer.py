@@ -55,6 +55,7 @@ def _tactical(**overrides: Any) -> Dict[str, Any]:
         "units_lost": 2, "units_killed": 3, "total_enemy_units": 4, "total_ally_units": 5,
         "shoot_kills": 2, "melee_kills": 1,
         "shoot_value_killed": 200.0, "melee_value_killed": 100.0,
+        "charges_declared": 3, "charges_succeeded": 1,
         "enemy_value_destroyed": 300.0, "ally_value_lost": 200.0,
         "total_ally_value": 1000.0, "total_enemy_value": 900.0,
         "initial_ally_models": 12, "initial_enemy_models": 15,
