@@ -839,7 +839,7 @@ def _append_fight_move_log(
                 f"Unit {unit['id']} {verb} from ({from_col},{from_row}) "
                 f"to ({to_col},{to_row})"
             ),
-            "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
+            "turn": require_key(game_state, "turn"),
             "phase": "fight",
             "unitId": unit["id"],
             "player": unit["player"],

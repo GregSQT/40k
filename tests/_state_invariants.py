@@ -62,7 +62,7 @@ TURN_STATE_KEYS: FrozenSet[str] = frozenset({
 
 
 def turn_state_invariants() -> Dict[str, Any]:
-    """Retourne les 20 invariants d'état de tour, aux valeurs exactes d'un ``game_state`` post-reset.
+    """Retourne les invariants d'état de tour, aux valeurs exactes d'un ``game_state`` post-reset.
 
     ``units_fought`` n'est pas dans le dict de ``reset()`` : c'est ``command_phase_start`` qui le
     pose, à chaque tour. Il est néanmoins présent dans tout ``game_state`` de production (la
@@ -73,6 +73,11 @@ def turn_state_invariants() -> Dict[str, Any]:
     partagées entre deux fixtures.
     """
     return {
+        # Compteur de tour : present dans TOUT game_state de production (`reset()` le pose a 1).
+        # Les emetteurs d'action_log le lisent en `require_key` depuis la suppression du repli
+        # silencieux `game_state["current_turn"] ... else 1` — une cle qui n'a jamais existe et
+        # qui datait toutes les lignes pile-in/consolidation de step.log au tour 1.
+        "turn": 1,
         "units_moved": set(),
         "units_fled": set(),
         "units_cannot_charge": set(),

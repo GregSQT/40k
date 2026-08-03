@@ -166,7 +166,12 @@ Pistol                       Bolt Pistol (Intercessor)             8         10 
 
 **Règles actuelles :**
 - **ASSAULT** : tir après advance (vérifié uniquement si l'unité a avancé avant de tirer)
-- **CLOSE_QUARTERS** : tir à distance 1 (ennemi adjacent)
+- **CLOSE_QUARTERS** : tir d'une unité ENGAGÉE (10.06), pas « tir à distance 1 ». La grandeur est
+  l'engagement — bord à bord, par figurine, zone d'engagement du run — jamais une adjacence d'hex
+  mesurée d'ancre à ancre. 10.06 borne un tireur engagé non-MONSTER/VEHICLE aux armes
+  [CLOSE-QUARTERS] **et** aux unités avec lesquelles son escouade est engagée ; les deux compteurs
+  (`close_quarters_shot_at_unengaged_target`, `engaged_shot_with_non_close_quarters_weapon`)
+  suivent exactement ces deux clauses.
 
 **Validation ASSAULT :** L'analyzer ne compte que les tirs effectués après une action ADVANCE du même tour pour la même unité.
 

@@ -4072,7 +4072,7 @@ def movement_commit_move_plan_handler(
         {
             "type": "move",
             "message": movement_message,
-            "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
+            "turn": require_key(game_state, "turn"),
             "phase": "move",
             "unitId": unit["id"],
             "player": unit["player"],
@@ -4354,7 +4354,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         {
         "type": "move",
         "message": movement_message,
-        "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
+        "turn": require_key(game_state, "turn"),
         "phase": "move",
         "unitId": unit["id"],
         "player": unit["player"],

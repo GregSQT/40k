@@ -1,0 +1,122 @@
+"""21.03 — le pipeline squad (chemin gym) doit poser `is_fly_move` sur l'action_log de move.
+
+Ce que les tests existants verrouillaient DEJA : le formateur (`step_logger`) et le mapping
+(`_build_step_log_details`) — cf. tests/unit/ai/test_analyzer_scale_vehicle_fly.py. Ce qu'ils ne
+verrouillaient PAS, et c'est precisement ce qui manquait : l'EMISSION par le moteur, sur le chemin
+que le gym execute reellement.
+
+`movement_commit_move_plan_handler` / `movement_destination_selection_handler` posaient bien le
+drapeau, mais ce sont les chemins PvP : ils n'emettent aucun `move_type`, cle exigee par
+`_drain_action_logs_to_step_log`, donc ils ne peuvent pas alimenter step.log. Le seul emetteur du
+gym est la branche `squad_normal_move / squad_advance / squad_fall_back` de `_process_squad_action`
+— elle ignorait `is_fly_move`. Mesure sur un run de 600 episodes : zero `[FLY]` dans 24 Mo de
+step.log, et 1014 fausses erreurs « au-delà du budget » chez l'analyzer, qui pathfindait les
+escouades volantes au SOL.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List
+from unittest.mock import patch
+
+import pytest
+
+from engine.observation_builder import ObservationBuilder
+from engine.w40k_core import W40KEngine
+
+
+def _weapon_cfg() -> Dict[str, Any]:
+    return {"ATK": 2, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
+            "WEAPON_RULES": [], "display_name": "Test Bolter"}
+
+
+def _unit_cfg(uid: int, player: int, col: int, row: int,
+              keywords: List[Dict[str, str]]) -> Dict[str, Any]:
+    return {
+        "id": uid, "player": player, "col": col, "row": row,
+        "unitType": "TestFlyer" if keywords else "TestUnit", "DISPLAY_NAME": f"Unit {uid}",
+        "HP_CUR": 3, "HP_MAX": 3, "MOVE": 6, "T": 4,
+        "ARMOR_SAVE": 4, "INVUL_SAVE": 0,
+        "RNG_WEAPONS": [_weapon_cfg()], "CC_WEAPONS": [],
+        "UNIT_RULES": [], "UNIT_KEYWORDS": list(keywords), "LD": 7, "OC": 1, "VALUE": 100,
+        "ICON": "test", "ICON_SCALE": 1.0, "ILLUSTRATION_RATIO": 1.0,
+        "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5,
+    }
+
+
+def _engine(keywords: List[Dict[str, str]]) -> W40KEngine:
+    obs_params = {"obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET}
+    config = {
+        "board": {"default": {"cols": 60, "rows": 60, "hex_radius": 1.0, "margin": 0.0,
+                              "wall_hexes": [], "objectives": [], "inches_to_subhex": 1}},
+        "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5,
+                       "max_base_size_hex": 35, "max_turns": 5},
+        "charge": {"charge_max_distance": 12},
+        "move": {
+            "can_move_through_enemy_engagement_zone": True,
+            "can_move_through_enemy_model": False,
+            "can_move_through_friendly_model": True,
+        },
+        "pve_mode": False,
+        "controlled_player": 1,
+        "observation_params": obs_params,
+        "training_config": {"observation_params": obs_params, "max_turns_per_episode": 3},
+        "units": [_unit_cfg(1, 1, 20, 20, keywords), _unit_cfg(2, 2, 50, 50, [])],
+    }
+    with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
+         patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
+        eng = W40KEngine(config=config, gym_training_mode=True)
+    eng.reset()
+    eng.game_state["phase"] = "move"
+    return eng
+
+
+def _move_log(eng: W40KEngine, dest_col: int, dest_row: int) -> Dict[str, Any]:
+    """Joue un move squad par le chemin de PRODUCTION et rend son action_log."""
+    before = len(eng.game_state.get("action_logs", []))
+    ok, _ = eng._process_squad_action(
+        {"action": "squad_normal_move", "squad_id": "1", "destCol": dest_col, "destRow": dest_row}
+    )
+    assert ok, "le move squad a échoué : le test n'observe rien"
+    moves = [
+        entry for entry in eng.game_state["action_logs"][before:]
+        if entry.get("type") == "move"
+    ]
+    assert len(moves) == 1, f"attendu 1 action_log de move, obtenu {len(moves)}"
+    return moves[0]
+
+
+@pytest.mark.parametrize(
+    "keywords, expected",
+    [
+        ([{"keywordId": "FLY"}], True),
+        ([], False),
+    ],
+)
+def test_gym_move_carries_the_fly_flag(keywords: List[Dict[str, str]], expected: bool) -> None:
+    """L'escouade volante pilotee par le modele declare le vol (21.03) -> le log le porte."""
+    eng = _engine(keywords)
+    entry = _move_log(eng, 24, 20)
+    assert entry["is_fly_move"] is expected, entry
+
+
+def test_gym_move_log_reaches_the_step_log_formatter_with_the_marker() -> None:
+    """Chaine complete : action_log moteur -> `_build_step_log_details` -> `[FLY]` dans la ligne.
+
+    Verrouille le maillon manquant BOUT A BOUT : sans l'emission, le mapping et le formateur
+    restent corrects mais ne voient jamais rien. `move_type` est exige par le drainage, il fait
+    donc partie du contrat teste ici.
+    """
+    from ai.step_logger import StepLogger
+
+    eng = _engine([{"keywordId": "FLY"}])
+    entry = _move_log(eng, 24, 20)
+    assert entry["move_type"] == "normal"
+
+    details = eng._build_step_log_details(entry, entry["turn"])
+    assert details["is_fly_move"] is True
+
+    formatter = StepLogger.__new__(StepLogger)
+    formatter.debug_mode = False  # seul attribut lu par la branche « move » du formateur
+    message = formatter._format_replay_style_message(entry["unitId"], "move", details)
+    assert "MOVED [FLY] from" in message, message

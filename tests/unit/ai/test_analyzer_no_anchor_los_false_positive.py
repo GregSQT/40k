@@ -69,7 +69,7 @@ def test_geometry_premise_anchor_los_is_blocked():
 
 def test_legitimate_shot_is_not_counted_as_invalid(stats):
     """Le tir est légitime (06.01, socle-à-socle) → aucune erreur de tir ne doit être comptée."""
-    assert stats["shoot_invalid"][1] == {"total": 1, "out_of_range": 0, "adjacent_non_close_quarters": 0}
+    assert stats["shoot_invalid"][1] == {"total": 1, "out_of_range": 0, "engaged_non_close_quarters": 0}
 
 
 def test_shoot_through_wall_counter_is_gone(stats):
