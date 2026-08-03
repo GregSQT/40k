@@ -83,7 +83,9 @@ le board x1 neutralise le premier.
 1. **Budget converti.** Les jets (advance, charge, réactif) et les seuils de règle (3" pour
    pile-in 12.03 et consolidation 12.08) sont exprimés en **pouces** ; les distances du journal
    sont en **cases**. Tout budget se multiplie donc par `inches_to_subhex`, lu dans l'entête
-   `Board:` du log analysé — jamais dans le config courant, qui décrit le prochain run.
+   `Board:` du log analysé — jamais dans le config courant, qui décrit le prochain run. Les
+   autres valeurs de règle (zone d'engagement, métriques, toggles de traversée) viennent de
+   l'entête `Run rules:`, pour la même raison (cf. Replay.md §2.3quater).
    *Sans conversion, à x5 un jet de charge de 7 devient un plafond de 7 cases au lieu de 35 :
    toute charge réussie remonte en faute. Inerte à x1.*
 
@@ -99,8 +101,9 @@ le board x1 neutralise le premier.
    *Sans BFS, un déplacement par-dessus un mur n'est jamais signalé.*
 
 Deux exemptions, portées par des **tags du journal** et non par le registre d'unités :
-`[FLY]` (21.03 — vol déclaré : traversée libre, et 2" retranchés au budget de charge) et le
-keyword `MONSTER/VEHICLE` pour le tir au contact (10.06 / 17.03).
+`[FLY]` (21.03 — vol déclaré : traversée libre, **et 2" retranchés au budget** ; les deux sont
+indissociables, la traversée est la contrepartie des 2" payés, sur le move, l'advance ET la
+charge) et le keyword `MONSTER/VEHICLE` pour le tir au contact (10.06 / 17.03).
 
 Les cinq sites — move, advance, charge, pile-in/consolidation, move réactif — passent par le MÊME
 helper, `ai/analyzer._per_model_move_violation`. Il *mesure* et rend un booléen ; chaque appelant
