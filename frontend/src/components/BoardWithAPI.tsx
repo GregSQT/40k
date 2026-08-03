@@ -20,18 +20,21 @@ import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
 import type { GamePhase, GameState, PlayerId, TargetPreview, Unit } from "../types";
 import type { DeploymentState } from "../types/game";
-import { resolveBaseSizeForUnitDisplay } from "../utils/hexFootprint";
 import { getIconDiameterRatio } from "../utils/unitBaseDisplay";
 import BoardPvp, { type BoardDisplayMode, type MeasureModeState } from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
+import {
+  GameLogWithIllustration,
+  type IllustrationBadges,
+  useUnitIllustrationPreload,
+} from "./GameLogWithIllustration";
 import { HelperPanel } from "./HelperPanel";
 import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
 import SnapshotRewind, { type SnapshotJump } from "./SnapshotRewind";
 import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
-import UnitStatusBadges from "./UnitStatusBadges";
 import { HALO_GLOW, UnitStatusTable } from "./UnitStatusTable";
 
 /** En-tête de colonne du roster picker (Faction / Roster / Description). */
@@ -288,48 +291,6 @@ type RuleChoicePrompt = {
     label: string;
   }>;
 };
-
-const UNIT_ILLUSTRATION_FILE_EXTENSION = "png";
-const UNIT_ILLUSTRATION_MIN_BASE_SIZE = 10;
-const UNIT_ILLUSTRATION_MAX_BASE_SIZE = 35;
-const UNIT_ILLUSTRATION_MIN_SCALE = 0.7;
-const UNIT_ILLUSTRATION_MAX_SCALE = 1;
-const UNIT_ILLUSTRATION_RATIO_PERCENT_BASE = 100;
-const DEFAULT_UNIT_ILLUSTRATION_SRC = "/icons/Endless duty.png";
-const DEFAULT_UNIT_ILLUSTRATION_DELAY_MS = 2000;
-const DEFAULT_UNIT_ILLUSTRATION_FADE_MS = 300;
-const UNIT_ILLUSTRATION_FADE_OUT_MS = 100;
-const UNIT_ILLUSTRATION_SWAP_FADE_MS = 100;
-
-function getUnitIllustrationSrc(unit: Unit): string {
-  const unitName = unit.NAME ?? unit.type;
-  if (typeof unitName !== "string" || unitName.trim() === "") {
-    throw new Error(`Unit ${unit.id} missing NAME/type for illustration path`);
-  }
-  return `/icons/${encodeURIComponent(unitName.trim())}.${UNIT_ILLUSTRATION_FILE_EXTENSION}`;
-}
-
-function getUnitIllustrationScale(unit: Unit): number {
-  const effectiveBaseSize = resolveBaseSizeForUnitDisplay(unit);
-  if (
-    typeof unit.ILLUSTRATION_RATIO !== "number" ||
-    !Number.isFinite(unit.ILLUSTRATION_RATIO) ||
-    unit.ILLUSTRATION_RATIO < 0
-  ) {
-    throw new Error(`Unit ${unit.id} missing non-negative numeric ILLUSTRATION_RATIO`);
-  }
-  const clampedBaseSize = Math.min(
-    UNIT_ILLUSTRATION_MAX_BASE_SIZE,
-    Math.max(UNIT_ILLUSTRATION_MIN_BASE_SIZE, effectiveBaseSize)
-  );
-  const normalizedBaseSize =
-    (clampedBaseSize - UNIT_ILLUSTRATION_MIN_BASE_SIZE) /
-    (UNIT_ILLUSTRATION_MAX_BASE_SIZE - UNIT_ILLUSTRATION_MIN_BASE_SIZE);
-  const baseScale =
-    UNIT_ILLUSTRATION_MIN_SCALE +
-    normalizedBaseSize * (UNIT_ILLUSTRATION_MAX_SCALE - UNIT_ILLUSTRATION_MIN_SCALE);
-  return baseScale * (unit.ILLUSTRATION_RATIO / UNIT_ILLUSTRATION_RATIO_PERCENT_BASE);
-}
 
 type EndlessDutySlotProfiles = {
   leader: string | null;
@@ -698,16 +659,6 @@ export const BoardWithAPI: React.FC = () => {
   );
   // Unité "épinglée" via clic sur une unité non-activable : affiche durablement son illustration + logos
   const [displaySelectedUnitId, setDisplaySelectedUnitId] = useState<Unit["id"] | null>(null);
-  const [showDefaultIllustration, setShowDefaultIllustration] = useState(false);
-  const [displayedIllustrationUnit, setDisplayedIllustrationUnit] = useState<Unit | null>(null);
-  const [showDisplayedIllustrationUnit, setShowDisplayedIllustrationUnit] = useState(false);
-  const [displayedIllustrationFadeMs, setDisplayedIllustrationFadeMs] = useState(
-    UNIT_ILLUSTRATION_FADE_OUT_MS
-  );
-  const displayedIllustrationUnitRef = useRef<Unit | null>(null);
-  const pendingIllustrationUnitRef = useRef<Unit | null>(null);
-  const preloadedIllustrationSrcRef = useRef<Set<string>>(new Set());
-
   // Track UnitStatusTable collapse states
   const [, setPlayer1Collapsed] = useState(false);
   const [, setPlayer2Collapsed] = useState(false);
@@ -1694,105 +1645,9 @@ export const BoardWithAPI: React.FC = () => {
     effectiveInspectModel,
   ]);
 
-  useEffect(() => {
-    if (typeof Image === "undefined") {
-      return;
-    }
-    const statusUnits = apiProps.gameState?.units ?? [];
-    const sources = new Set<string>([DEFAULT_UNIT_ILLUSTRATION_SRC]);
-    for (const unit of statusUnits) {
-      if (unit.HP_CUR > 0) {
-        sources.add(getUnitIllustrationSrc(unit));
-      }
-    }
-    for (const src of sources) {
-      if (preloadedIllustrationSrcRef.current.has(src)) {
-        continue;
-      }
-      preloadedIllustrationSrcRef.current.add(src);
-      const image = new Image();
-      image.decoding = "async";
-      image.src = src;
-      if (typeof image.decode === "function") {
-        void image.decode().catch(() => undefined);
-      }
-    }
-  }, [apiProps.gameState?.units]);
-
-  useEffect(() => {
-    const currentDisplayedUnit = displayedIllustrationUnitRef.current;
-
-    if (illustrationPreviewUnit) {
-      setShowDefaultIllustration(false);
-      const isReplacingDisplayedUnit =
-        currentDisplayedUnit !== null &&
-        (String(currentDisplayedUnit.id) !== String(illustrationPreviewUnit.id) ||
-          getUnitIllustrationSrc(currentDisplayedUnit) !==
-            getUnitIllustrationSrc(illustrationPreviewUnit));
-
-      if (isReplacingDisplayedUnit) {
-        pendingIllustrationUnitRef.current = illustrationPreviewUnit;
-        setDisplayedIllustrationFadeMs(UNIT_ILLUSTRATION_SWAP_FADE_MS);
-        setShowDisplayedIllustrationUnit(false);
-        return;
-      }
-
-      pendingIllustrationUnitRef.current = null;
-      setDisplayedIllustrationFadeMs(UNIT_ILLUSTRATION_SWAP_FADE_MS);
-      if (currentDisplayedUnit === null) {
-        setShowDisplayedIllustrationUnit(false);
-        setDisplayedIllustrationUnit(illustrationPreviewUnit);
-        displayedIllustrationUnitRef.current = illustrationPreviewUnit;
-        let secondAnimationFrameId: number | null = null;
-        const firstAnimationFrameId = window.requestAnimationFrame(() => {
-          secondAnimationFrameId = window.requestAnimationFrame(() => {
-            setShowDisplayedIllustrationUnit(true);
-          });
-        });
-        return () => {
-          window.cancelAnimationFrame(firstAnimationFrameId);
-          if (secondAnimationFrameId !== null) {
-            window.cancelAnimationFrame(secondAnimationFrameId);
-          }
-        };
-      }
-
-      setDisplayedIllustrationUnit(illustrationPreviewUnit);
-      displayedIllustrationUnitRef.current = illustrationPreviewUnit;
-      setShowDisplayedIllustrationUnit(true);
-      return;
-    }
-
-    pendingIllustrationUnitRef.current = null;
-    setDisplayedIllustrationFadeMs(UNIT_ILLUSTRATION_FADE_OUT_MS);
-    if (currentDisplayedUnit === null) {
-      return;
-    }
-    setShowDisplayedIllustrationUnit(false);
-    const timerId = window.setTimeout(() => {
-      if (displayedIllustrationUnitRef.current === currentDisplayedUnit) {
-        setDisplayedIllustrationUnit(null);
-        displayedIllustrationUnitRef.current = null;
-        setShowDisplayedIllustrationUnit(false);
-      }
-    }, UNIT_ILLUSTRATION_FADE_OUT_MS);
-    return () => {
-      window.clearTimeout(timerId);
-    };
-  }, [illustrationPreviewUnit]);
-
-  useEffect(() => {
-    if (illustrationPreviewUnit || displayedIllustrationUnit) {
-      setShowDefaultIllustration(false);
-      return;
-    }
-    const timerId = window.setTimeout(() => {
-      setShowDefaultIllustration(true);
-    }, DEFAULT_UNIT_ILLUSTRATION_DELAY_MS);
-    return () => {
-      window.clearTimeout(timerId);
-    };
-  }, [displayedIllustrationUnit, illustrationPreviewUnit]);
+  // Préchargement des illustrations : au niveau du board, donc actif AUSSI pendant le déploiement
+  // PvP, où le panneau lui-même est démonté.
+  useUnitIllustrationPreload(apiProps.gameState?.units ?? []);
 
   if (apiProps.loading) {
     return (
@@ -2223,11 +2078,9 @@ export const BoardWithAPI: React.FC = () => {
     return parsed;
   })();
 
-  const renderUnitIllustrationPreview = (
-    unit: Unit,
-    visible: boolean,
-    fadeMs: number
-  ): React.ReactElement => {
+  /** Statuts 40K de l'unité illustrée. Passé à `GameLogWithIllustration`, qui l'évalue sur
+   *  l'unité RÉELLEMENT affichée (celle du fondu en cours, pas forcément la survolée). */
+  const illustrationBadgesFor = (unit: Unit): IllustrationBadges => {
     const moved = ((apiProps.unitsMoved ?? []) as number[]).includes(unit.id);
     const advanced = (apiProps.unitsAdvanced ?? []).includes(unit.id);
     const fellBack = ((apiProps.unitsFled ?? []) as number[]).includes(unit.id);
@@ -2237,50 +2090,74 @@ export const BoardWithAPI: React.FC = () => {
       !advanced &&
       !fellBack &&
       !(apiProps.gameState?.move_activation_pool ?? []).includes(String(unit.id));
-    return (
-      <aside className="unit-illustration-preview" aria-label={`Illustration unit ${unit.id}`}>
-        <UnitStatusBadges
-          hidden={unit.hidden === true || (unit.hidden_models?.length ?? 0) > 0}
-          battleShocked={unit.battle_shocked === true}
-          advanced={advanced}
-          moved={moved}
-          charged={((apiProps.unitsCharged ?? []) as number[]).includes(unit.id)}
-          fellBack={fellBack}
-          stationary={stationary}
-        />
-        <img
-          className="unit-illustration-preview__image"
-          src={getUnitIllustrationSrc(unit)}
-          alt={`Unit ${unit.id} illustration`}
-          onTransitionEnd={(event) => {
-            if (event.propertyName !== "opacity" || showDisplayedIllustrationUnit) {
-              return;
-            }
-            const pendingUnit = pendingIllustrationUnitRef.current;
-            if (!pendingUnit) {
-              return;
-            }
-            pendingIllustrationUnitRef.current = null;
-            setDisplayedIllustrationUnit(pendingUnit);
-            displayedIllustrationUnitRef.current = pendingUnit;
-            setDisplayedIllustrationFadeMs(UNIT_ILLUSTRATION_SWAP_FADE_MS);
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                setShowDisplayedIllustrationUnit(true);
-              });
-            });
-          }}
-          style={{
-            opacity: visible ? 1 : 0,
-            transform: `scale(${getUnitIllustrationScale(unit)})`,
-            transition: `opacity ${fadeMs}ms ease`,
-            willChange: "opacity",
-            backfaceVisibility: "hidden",
-          }}
-        />
-      </aside>
-    );
+    return {
+      hidden: unit.hidden === true || (unit.hidden_models?.length ?? 0) > 0,
+      battleShocked: unit.battle_shocked === true,
+      advanced,
+      moved,
+      charged: ((apiProps.unitsCharged ?? []) as number[]).includes(unit.id),
+      fellBack,
+      stationary,
+    };
   };
+
+  // Zone défilante de la colonne droite : SEUL bloc qui absorbe le manque de place (SharedLayout
+  // l'enveloppe dans `.unit-status-tables__scroll`).
+  const rightColumnScrollableContent = (
+    <>
+      <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
+        <UnitStatusTable
+          units={apiProps.gameState?.units ?? []}
+          player={1}
+          inchesToSubhex={inchesToSubhex}
+          playerTypes={apiProps.gameState?.player_types}
+          selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
+          guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
+          clickedUnitId={clickedUnitId}
+          onSelectUnit={(unitId) => {
+            apiProps.onSelectUnit(unitId);
+            setClickedUnitId(null);
+          }}
+          gameMode={gameMode}
+          victoryPoints={getVictoryPointsForPlayer(1)}
+          onCollapseChange={setPlayer1Collapsed}
+          detailPreviewUnitId={
+            illustrationPreviewUnit?.player === 1 ? illustrationPreviewUnit.id : null
+          }
+          inspectedModel={effectiveInspectModel}
+          phase={apiProps.gameState?.phase}
+          deploymentType={apiProps.gameState?.deployment_type}
+          deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
+        />
+      </ErrorBoundary>
+
+      <ErrorBoundary fallback={<div>Failed to load player 2 status</div>}>
+        <UnitStatusTable
+          units={apiProps.gameState?.units ?? []}
+          player={2}
+          inchesToSubhex={inchesToSubhex}
+          playerTypes={apiProps.gameState?.player_types}
+          selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
+          guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
+          clickedUnitId={clickedUnitId}
+          onSelectUnit={(unitId) => {
+            apiProps.onSelectUnit(unitId);
+            setClickedUnitId(null);
+          }}
+          gameMode={gameMode}
+          victoryPoints={getVictoryPointsForPlayer(2)}
+          onCollapseChange={setPlayer2Collapsed}
+          detailPreviewUnitId={
+            illustrationPreviewUnit?.player === 2 ? illustrationPreviewUnit.id : null
+          }
+          inspectedModel={effectiveInspectModel}
+          phase={apiProps.gameState?.phase}
+          deploymentType={apiProps.gameState?.deployment_type}
+          deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
+        />
+      </ErrorBoundary>
+    </>
+  );
 
   const rightColumnContent = (
     <>
@@ -4032,92 +3909,17 @@ export const BoardWithAPI: React.FC = () => {
       {/* Game Log Component — masqué en PvP pendant la phase de déploiement */}
       {!(gameMode === "pvp" && apiProps.gameState?.phase === "deployment") && (
         <ErrorBoundary fallback={<div>Failed to load game log</div>}>
-          <div className="game-log-with-illustration">
-            {displayedIllustrationUnit ? (
-              renderUnitIllustrationPreview(
-                displayedIllustrationUnit,
-                showDisplayedIllustrationUnit,
-                displayedIllustrationFadeMs
-              )
-            ) : (
-              <aside className="unit-illustration-preview" aria-label="Endless Duty illustration">
-                <img
-                  className="unit-illustration-preview__image"
-                  src={DEFAULT_UNIT_ILLUSTRATION_SRC}
-                  alt="Endless Duty illustration"
-                  style={{
-                    opacity: showDefaultIllustration ? 1 : 0,
-                    transition: `opacity ${DEFAULT_UNIT_ILLUSTRATION_FADE_MS}ms ease`,
-                  }}
-                />
-              </aside>
-            )}
-            <div className="game-log-with-illustration__log">
-              <GameLog
-                events={gameLogEventsFiltered}
-                currentTurn={apiProps.gameState?.currentTurn ?? 1}
-                debugMode={settings.showDebug}
-                logShowCoords={settings.logShowCoords}
-                logShowType={settings.logShowType}
-              />
-            </div>
-          </div>
+          <GameLogWithIllustration unit={illustrationPreviewUnit} badgesFor={illustrationBadgesFor}>
+            <GameLog
+              events={gameLogEventsFiltered}
+              currentTurn={apiProps.gameState?.currentTurn ?? 1}
+              debugMode={settings.showDebug}
+              logShowCoords={settings.logShowCoords}
+              logShowType={settings.logShowType}
+            />
+          </GameLogWithIllustration>
         </ErrorBoundary>
       )}
-
-      <div className="unit-status-tables__scroll">
-        <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
-          <UnitStatusTable
-            units={apiProps.gameState?.units ?? []}
-            player={1}
-            inchesToSubhex={inchesToSubhex}
-            playerTypes={apiProps.gameState?.player_types}
-            selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
-            guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
-            clickedUnitId={clickedUnitId}
-            onSelectUnit={(unitId) => {
-              apiProps.onSelectUnit(unitId);
-              setClickedUnitId(null);
-            }}
-            gameMode={gameMode}
-            victoryPoints={getVictoryPointsForPlayer(1)}
-            onCollapseChange={setPlayer1Collapsed}
-            detailPreviewUnitId={
-              illustrationPreviewUnit?.player === 1 ? illustrationPreviewUnit.id : null
-            }
-            inspectedModel={effectiveInspectModel}
-            phase={apiProps.gameState?.phase}
-            deploymentType={apiProps.gameState?.deployment_type}
-            deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
-          />
-        </ErrorBoundary>
-
-        <ErrorBoundary fallback={<div>Failed to load player 2 status</div>}>
-          <UnitStatusTable
-            units={apiProps.gameState?.units ?? []}
-            player={2}
-            inchesToSubhex={inchesToSubhex}
-            playerTypes={apiProps.gameState?.player_types}
-            selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
-            guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
-            clickedUnitId={clickedUnitId}
-            onSelectUnit={(unitId) => {
-              apiProps.onSelectUnit(unitId);
-              setClickedUnitId(null);
-            }}
-            gameMode={gameMode}
-            victoryPoints={getVictoryPointsForPlayer(2)}
-            onCollapseChange={setPlayer2Collapsed}
-            detailPreviewUnitId={
-              illustrationPreviewUnit?.player === 2 ? illustrationPreviewUnit.id : null
-            }
-            inspectedModel={effectiveInspectModel}
-            phase={apiProps.gameState?.phase}
-            deploymentType={apiProps.gameState?.deployment_type}
-            deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
-          />
-        </ErrorBoundary>
-      </div>
     </>
   );
 
@@ -4229,6 +4031,7 @@ export const BoardWithAPI: React.FC = () => {
     <>
       <SharedLayout
         rightColumnContent={rightColumnContent}
+        rightColumnScrollableContent={rightColumnScrollableContent}
         onOpenSettings={handleOpenSettings}
         onToggleMeasureMode={handleToggleMeasureMode}
         measureModeActive={measureModeActive}

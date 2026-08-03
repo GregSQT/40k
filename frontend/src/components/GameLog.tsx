@@ -179,8 +179,6 @@ export interface GameLogEvent extends BaseLogEntry {
 
 interface GameLogProps {
   events: GameLogEvent[];
-  maxEvents?: number;
-  availableHeight?: number;
   useStepNumbers?: boolean;
   currentTurn?: number;
   debugMode?: boolean;
@@ -192,7 +190,6 @@ interface GameLogProps {
 
 export const GameLog: React.FC<GameLogProps> = ({
   events,
-  availableHeight: _availableHeight = 152,
   useStepNumbers = false,
   debugMode = false,
   logShowCoords = false,
