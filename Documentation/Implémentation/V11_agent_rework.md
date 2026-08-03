@@ -89,7 +89,7 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 | **§0.14** | Re-mesure du run — win-rate par matchup | ⏳ **PÉRIMÉE — état au 2026-08-02** : des runs **postérieurs au run 4** ont tourné (modèles `robust_*` du 2026-07-30 et du 2026-08-01 dans `ai/models/ArmageddonAgent/`) et **un `train.py` tournait** au moment de la relecture. Le répertoire `tensorboard/x1_ArmageddonAgent/` n'existe plus. | **1** | Reconfronter au réel (`ps -eo lstart,cmd \| grep train.py`, `ls -l ai/models/ArmageddonAgent/`) puis **réécrire l'entrée sur le run courant**. Les chiffres du run 4 (`combined` **0.509**, `worst_bot_score` **0.04**, `vs_control` **0.04**) ne valent plus que comme historique, et sur une pondération de bots qui n'existe plus (§0.53). Détail → §0.14. |
 | **[§9](V11_phaseA.md#s9)** | Phase A' — P2 + P3-0/1/2 | 🟢 **LIVRÉS ET MERGÉS sur `main`** — restent **P3-3→8**, **P4**, **P5** | **2** | ⚠️ Aucune des quatre livraisons n'est **MESURÉE**. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). Détail → §0.42 et §0.43 (en §0hist), et [§9](V11_phaseA.md#s9). |
 | **§0.44** | Tête pointeur de **déploiement** — les slots 4-8 n'ont pas de tête dédiée | 🟠 **OUVERT** — reporté après la mesure de référence (arbitrage utilisateur du 2026-07-29) | **3** | Les ids 4-8 tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`) : leurs logits sortent de la **conv 1×1** (`_move_logits`), pas d'une tête dédiée ; `deploy_emb` n'atteint le calcul que par le **conditionnement du tronc**. Ajouter un `deploy_query_net`, jumeau de `choice_query_net` — ce qui oblige à lire la phase dans la policy. Élément `L1` du lot §0.48 ; `L11` (`N_DEPLOY_SLOTS`) à trancher **avant**. Détail → §0.44. |
-| **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — inventaire rendu, périmètre arbitré : le lot = **`L1` + `L2` + `L6`**, et eux seuls | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. Reste l'arbitrage 2 (réserver la place des règles pas encore implémentées, toute règle rendue vivante changeant `obs_size`). Détail → §0.48. |
+| **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — le lot = **`L1` + `L2` + `L6`** + **[§0.64](#s0.64)** (LoS de déploiement alignée le 2026-08-03 : `obs_size` inchangé, **valeurs changées**) | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. Reste l'arbitrage 2 (réserver la place des règles pas encore implémentées, toute règle rendue vivante changeant `obs_size`). Détail → §0.48. |
 | **§0.46** | Résidus du 2026-07-29 | ✅ **CLOSE le 2026-08-03** — les trois points sont livrés | — | ✅ **SOLDÉ le 2026-08-03** (arbitrage : GARDER, sous forme optimisée). Les 4 issues du cache de déploiement deviennent des **compteurs publiés en permanence** (`perf/*`) au lieu de traces invisibles hors `--debug` ; les 37 sites passent par `engine/debug_trace.py` (canaux `W40K_TRACE`, formatage différé) ; garde verrouillée par **21 tests**, dont une **analyse AST** (fichiers découverts par leur import) qui interdit f-string, formatage anticipé et mot-clé. La passe `/simplify` du même jour y a trouvé **un bug** (`flush=True` résiduel → `TypeError` dès que le canal s'allume) et **un verrou qui mentait** (canal `train` hors garde). ⏳ Première mesure : **100 % de reconstruction** du cache de déploiement — signalé, non ouvert. Détail → §0.46. |
 | **§0.47** | Relecture T2→T5 du 2026-07-29 — 9 écarts | 🟠 **OUVERT — reste É9 (second siège + second scénario)** ; É5 et É7 ✅ corrigés le 2026-08-02 (É1, É2, É3, É4, É6 ✅ livrés **et mergés** ; **É8 est tombé**) | **6** | **É8 n'a plus d'objet** : `ai/analyzer.py` ne construit plus aucun chemin de board à la main (il lit `get_board_config()` / `get_board_size()`). **É9 était mal énoncé** : les **3 graines SONT couvertes** (`test_t5_bare_loop.py`, `for seed in (1, 2, 3)`) ; ce qui manque est le **second scénario** et les **2 sièges**. Détail → §0.47. |
 | **§0.50** | Non-conformité **01.07** — travail de suite | 🟠 **OUVERT** (la correction moteur, elle, est mergée) | **7** | ✅ **SOLDÉE le 2026-08-02** — les deux résidus sont traités : (1) le contrat de `battle_shocked` est **tranché en lecture STRICTE**, les 7 `get(..., False)` migrés en `require_key` ; (2) la 3ᵉ lecture d'OC du frontend (journal d'événements de `BoardReplay.tsx`) diffère l'instantané moteur au lieu de recompter. Détail → §0.50. |
@@ -377,12 +377,10 @@ d'en recopier l'expression, ce qui rend l'invariant vrai **par construction** su
 clés du cache renommées `valid_hexes`/`valid_hex_set` → **`scoring_hexes`** — l'ancien nom
 désignait la fausse dépendance qui a coûté 100 % de reconstruction.
 
-⏳ **NON FAIT, et pourquoi** : `_has_line_of_sight_cached`, `_count_los_exposure` et
-`_count_potential_los_from_reference_hexes` sont désormais **sans appelant** (~80 lignes), et
-`los_pair_cache` n'est plus lu. Leur suppression est **suspendue à [§0.64](#s0.64)** : si
-l'alignement sur la règle du moteur est retenu, c'est précisément un chemin scalaire mémoïsé
-qu'il faudra rebrancher. Supprimer maintenant pour réécrire ensuite n'aurait pas de sens — mais
-ce code ne doit pas survivre à l'arbitrage §0.64, quel qu'il soit.
+✅ **Suspension levée le jour même** : `_has_line_of_sight_cached`, `_count_los_exposure` et
+`_count_potential_los_from_reference_hexes` (~80 lignes sans appelant) et `los_pair_cache` sont
+**supprimés** par [§0.64](#s0.64) — l'alignement passe par `deployment_los`, pas par ces
+méthodes. C'était le SECOND modèle de LoS du fichier, celui qui divergeait.
 📌 **Manque à gagner signalé, non traité** : le cache DISQUE des expositions potentielles n'est
 réécrit que s'il n'existe pas (`if not os.path.exists`). Les fichiers déjà produits sur les
 hexes d'UNE unité restent valides (la clé de topologie ne dépend pas des hexes évalués) mais
@@ -1241,17 +1239,15 @@ première instruction étant cette même garde.
    verrouillée — pas un « == 0 » qui aurait été faux.
 2. `W40K_TRACE=` (définie mais **vide**) éteignait TOUTES les traces en silence — le défaut même
    que ce module existe pour rendre impossible. Elle lève désormais, en nommant la sortie voulue.
-3. 🔴 **Le taux de reconstruction du cache est de 100 % sur le scénario mesuré**
-   (`bot-01` : `full_build_cold` 1, `full_build_hex_mismatch` 9, `incremental` **0**), à
-   **23-48 ms** la reconstruction. Cause lue dans le code : la validité du cache tient à
-   « le jeu d'hexes valides est-il identique ? », or `_get_valid_deployment_hexes` le calcule
-   **par unité à poser** (socle, formation) — deux unités ne donnent jamais le même jeu, le test
-   échoue à tous les coups, et `_update_deployment_scoring_cache_incremental`, situé APRÈS, n'est
-   jamais atteint. ⏳ **Non ouvert comme chantier** (arbitrage du 2026-08-03) : mesuré sur UN
-   scénario et un début d'épisode, la part réelle sur un run entier est inconnue — la phase de
-   déploiement ne dure que quelques dizaines de pas. `perf/a_deploy_cache_full_build_rate`
-   répondra seule au prochain run ; c'est très exactement ce que l'axe A existait pour rendre
-   visible.
+3. 🔴 **Le taux de reconstruction du cache était de 100 %** (`bot-01` : `full_build` 10,
+   `incremental` **0**), à 23-48 ms la reconstruction. ⏳ D'abord classé « signalé, non ouvert » —
+   la part sur un run entier étant inconnue — puis **ouvert le jour même sur arbitrage
+   utilisateur** et corrigé : cf. **[§0.63](#s0.63)** (deux causes, dont l'alternance des
+   déployeurs) et, en cascade, **[§0.64](#s0.64)** (le test d'équivalence écrit pour le verrouiller
+   a révélé que le scoring n'utilisait pas la LoS du moteur).
+   📌 **C'est le meilleur argument rétrospectif pour l'axe A** : le défaut était là depuis
+   l'origine, il ne levait rien, ne faisait échouer aucun test, et n'est devenu visible qu'au
+   moment où un compteur l'a rendu observable.
 
 🔍 **CE QUE LA PASSE `/simplify` DU 2026-08-03 A TROUVÉ** (4 revues parallèles : reuse,
 simplification, efficacité, altitude) — à lire, les deux premiers points sont des leçons :
