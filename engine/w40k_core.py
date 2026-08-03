@@ -37,6 +37,7 @@ from engine.phase_handlers.shared_utils import (
     ACTION,
     WAIT,
     NO,
+    PASS,
     SHOOTING,
     MOVE,
     CHARGE,
@@ -4969,6 +4970,9 @@ class W40KEngine(gym.Env):
             get_enemy_slot_mapping,
         )
         from engine.game_utils import add_console_log
+        # 21.03 « take to the skies » — consomme par le move squad ET par la charge squad :
+        # les deux emettent un action_log qui doit porter `is_fly_move`.
+        from engine.phase_handlers.movement_handlers import _fly_traversal_active as _fta
 
         if self.game_state.get("game_over", False):
             return False, {"error": "game_over", "winner": self.game_state.get("winner")}
@@ -5071,10 +5075,15 @@ class W40KEngine(gym.Env):
         # ── squad_wait : fin d'activation sans action ─────────────────────────
         elif action_name == "squad_wait":
             squad_id = semantic["squad_id"]
+            # (tracking Arg3, pool Arg4). Arg4 retire du pool d'activation — c'est lui qui
+            # interdit la ré-activation. Arg3 marque « l'unité A FAIT l'action », ce qui est faux
+            # pour un WAIT en phase de charge : `units_charged` ne sert qu'aux règles 11.04 /
+            # 12.03 / 12.04, qui exigent toutes un charge move EFFECTUÉ. Une escouade qui renonce
+            # à charger gagnait ainsi Fights First. -> PASS en Arg3, CHARGE en Arg4.
             phase_tracking = {
                 "move": ("MOVE", "MOVE"),
                 "shoot": ("SHOOTING", "SHOOTING"),
-                "charge": ("CHARGE", "CHARGE"),  # get allowed
+                "charge": (PASS, "CHARGE"),  # get allowed
                 "fight": ("FIGHT", "FIGHT"),
             }
             tracking, pool = phase_tracking.get(current_phase, ("MOVE", "MOVE"))
@@ -5113,6 +5122,17 @@ class W40KEngine(gym.Env):
             # car execute_squad_move la mute. L'analyzer suit cette position (celle de l'en-tete
             # d'episode et de _emit_squad_shoot_log).
             _move_from_col, _move_from_row = require_unit_position(squad_id, self.game_state)
+
+            # 21.03 « take to the skies » : capture AVANT le commit, comme la position d'ancre —
+            # le drapeau qualifie le mouvement QUI EST FAIT. C'est ce chemin (pipeline squad) que
+            # le gym exécute, pas `movement_commit_move_plan_handler` (PvP) : le drapeau n'y était
+            # pas transmis, aucun `[FLY]` n'atteignait step.log, et l'analyzer pathfindait au SOL
+            # des escouades volantes — 1014 faux « au-delà du budget » mesurés sur un run de 600
+            # épisodes. Les deux émetteurs PvP de `movement_handlers` le portaient déjà.
+            _move_unit_pre = get_unit_by_id(squad_id, self.game_state)
+            if _move_unit_pre is None:
+                raise KeyError(f"Squad {squad_id} introuvable avant déplacement")
+            _move_is_fly = _fta(self.game_state, _move_unit_pre, str(squad_id))
 
             # Plus de dry-run de legalite ici, et plus de degradation silencieuse en `squad_wait` :
             # la destination VIENT du pool que le masque a lui-meme utilise (meme carte, cf.
@@ -5185,6 +5205,7 @@ class W40KEngine(gym.Env):
                     "was_flee": move_type == "fall_back",
                     "move_type": move_type,
                     "advance_roll": advance_roll,
+                    "is_fly_move": _move_is_fly,
                     "timestamp": "server_time",
                     "action_name": action_name,
                     "reward": 0.0,
@@ -5307,7 +5328,16 @@ class W40KEngine(gym.Env):
             _charge_from = (int(_sq_uc["col"]), int(_sq_uc["row"])) if "col" in _sq_uc else None
             _charge_target = (int(_tgt_uc["col"]), int(_tgt_uc["row"])) if "col" in _tgt_uc else None
             if plan is None:
-                end_result = end_activation(self.game_state, unit, NO, 1, CHARGE, CHARGE, 0)
+                # Arg3 = PASS, pas CHARGE : une charge RATÉE n'est pas un charge move. 11.04 place
+                # le grant de Fights First sous « AFTER MOVING » du charge move, et 12.03/12.04
+                # disent « made a charge move this turn » — un jet insuffisant n'en fait aucun.
+                # Avec Arg3 = CHARGE, `end_activation` ajoutait l'escouade à `units_charged`, dont
+                # les SEULS consommateurs sont ces règles-là (`is_fights_first`,
+                # `_fight_v11_charged_this_turn`) : l'escouade gagnait Fights First et passait
+                # devant les vrais chargeurs. Le jumeau PvP (`charge_handlers` ~L2929) passait déjà
+                # PASS ; c'était une divergence gym. Arg4 reste CHARGE : le retrait du
+                # `charge_activation_pool` est ce qui interdit la ré-activation, pas `units_charged`.
+                end_result = end_activation(self.game_state, unit, NO, 1, PASS, CHARGE, 0)
                 # V11 T6 — contrat de journalisation (cf. squad_move) : le chemin squad n'emettait
                 # aucun action_log de charge. Miroir du type legacy "charge_fail"
                 # (charge_handlers ~L3010/4425/5719). `charge_failed_reason` est le SEUL champ
@@ -5344,6 +5374,12 @@ class W40KEngine(gym.Env):
                     "charge_succeeded": False,
                 }
             else:
+                # 21.03 — JUMEAU du drapeau pose sur le move squad, capture AVANT le commit pour
+                # la meme raison. Le moteur retranche deja 2" au jet (`_charge_budget_subhex`) et
+                # autorise la traversee ; sans ce drapeau, la ligne `CHARGED` de step.log ne porte
+                # pas `[FLY]` et l'analyzer juge la charge avec un budget 2" trop large ET des
+                # murs qui ne s'appliquent pas. Le formateur du StepLogger le lit deja.
+                _charge_is_fly = _fta(self.game_state, unit, str(squad_id))
                 commit_move(plan, self.game_state, "charge")
                 end_result = end_activation(self.game_state, unit, ACTION, 1, CHARGE, CHARGE, 0)
                 _dest_uc = self.game_state.get("units_cache", {}).get(str(squad_id), {})  # get allowed
@@ -5366,6 +5402,7 @@ class W40KEngine(gym.Env):
                         "toRow": int(_dest_uc["row"]) if "row" in _dest_uc else None,
                         "targetCol": _charge_target[0] if _charge_target else None,
                         "targetRow": _charge_target[1] if _charge_target else None,
+                        "is_fly_move": _charge_is_fly,
                         "timestamp": "server_time",
                         "reward": 0.0,
                     },

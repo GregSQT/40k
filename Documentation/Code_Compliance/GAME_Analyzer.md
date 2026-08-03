@@ -100,6 +100,14 @@ le board x1 neutralise le premier.
    **alliés** (03.01) et la bande d'engagement ennemie, jamais une figurine ennemie ni un mur.
    *Sans BFS, un déplacement par-dessus un mur n'est jamais signalé.*
 
+   **Le moteur applique la même règle depuis 2026-08-03.** Le contrôle de l'analyzer a longtemps
+   été le seul à vérifier le trajet : `charge_build_valid_plan` (11.04) et
+   `_assign_cells_toward_enemies` (12.03 / 12.08) retenaient une cellule sur sa distance à vol
+   d'oiseau et ne validaient que la case d'arrivée. Les 43 charges et 28 consolidations « au-delà
+   du budget » d'un run de 600 épisodes étaient donc de VRAIES violations, pas des faux positifs.
+   Les deux planificateurs passent désormais par `shared_utils.model_reach_predicate`, qui
+   réutilise le champ géodésique du move (`explain_move_plan_rejection`).
+
 Deux exemptions, portées par des **tags du journal** et non par le registre d'unités :
 `[FLY]` (21.03 — vol déclaré : traversée libre, **et 2" retranchés au budget** ; les deux sont
 indissociables, la traversée est la contrepartie des 2" payés, sur le move, l'advance ET la
@@ -166,7 +174,12 @@ Pistol                       Bolt Pistol (Intercessor)             8         10 
 
 **Règles actuelles :**
 - **ASSAULT** : tir après advance (vérifié uniquement si l'unité a avancé avant de tirer)
-- **CLOSE_QUARTERS** : tir à distance 1 (ennemi adjacent)
+- **CLOSE_QUARTERS** : tir d'une unité ENGAGÉE (10.06), pas « tir à distance 1 ». La grandeur est
+  l'engagement — bord à bord, par figurine, zone d'engagement du run — jamais une adjacence d'hex
+  mesurée d'ancre à ancre. 10.06 borne un tireur engagé non-MONSTER/VEHICLE aux armes
+  [CLOSE-QUARTERS] **et** aux unités avec lesquelles son escouade est engagée ; les deux compteurs
+  (`close_quarters_shot_at_unengaged_target`, `engaged_shot_with_non_close_quarters_weapon`)
+  suivent exactement ces deux clauses.
 
 **Validation ASSAULT :** L'analyzer ne compte que les tirs effectués après une action ADVANCE du même tour pour la même unité.
 

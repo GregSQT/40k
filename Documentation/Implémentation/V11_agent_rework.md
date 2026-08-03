@@ -46,7 +46,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.66` (`0.63`–`0.65` le 2026-08-03, `0.57`–`0.60` le 2026-08-02, `0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30, `0.55`–`0.56` le 2026-08-02).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.67` (`0.66` le 2026-08-04, `0.63`–`0.65` le 2026-08-03, `0.57`–`0.60` le 2026-08-02, `0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30, `0.55`–`0.56` le 2026-08-02).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -77,6 +77,7 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
+| **§0.66** | Le **journal du gym mentait à l'analyzer**, et deux règles de mouvement n'étaient pas appliquées | ✅ **CORRIGÉ le 2026-08-04** — ⚠️ **deux correctifs CHANGENT le jeu** | **1** | Fermeture de §0.62 par le bas : sur un run de **600 épisodes**, l'analyzer rendait **2353 erreurs**. **1014** venaient d'un `[FLY]` qu'AUCUN émetteur du gym n'écrivait (l'analyzer pathfindait les escouades volantes au sol), **898** d'armes aux règles différentes fusionnées dans un même lot 04.03, **144** d'un contrôle close-quarters qui mesurait une adjacence d'ancre là où 10.06 exige l'engagement. **2353 → 1204 mesuré.** Mais **71 erreurs étaient VRAIES** : la charge (11.04) et le pile-in/consolidation (12.03/12.08) bornaient à vol d'oiseau et ne validaient que la case d'arrivée — les escouades **traversaient les murs**. Et 122 violations d'alternance venaient d'une charge **ratée** comptée comme un charge move (Fights First indu). Détail → §0.66. |
 | **§0.62** | L'**analyzer** mesurait à une autre échelle et avec d'autres règles que le run — et trois déplacements n'étaient pas contrôlés | ✅ **CORRIGÉ le 2026-08-03** — une conséquence à assumer | **1** | 206 erreurs → **0** sur un log de référence de 6 épisodes. L'échelle venait du `board_config` COURANT, pas de l'entête du log : un run x1 relu avec un `config.json` en x5 mesurait tout ×5 — il **fabriquait** des erreurs (132 faux « shoot at engaged enemy ») **et en masquait** (portées, budgets jamais dépassés). Même défaut, silencieux celui-là, sur `engagement_zone`, `distance_metric` et les toggles `move` : désormais journalisés en entête `Run rules:`. Charge, pile-in/consolidation et move réactif n'avaient **aucun** contrôle conforme (jet non converti, mesure d'ancre, pas de pathfinding). **Conséquence : aucun verdict d'analyzer antérieur ne vaut**, et deux correctifs MOTEUR changent le jeu (move réactif). Détail → §0.62. |
 | **§0.61** | Le garde **anti-runaway** était MUET, et son compteur d'épisodes divergeait | ✅ **CORRIGÉ le 2026-08-03** | **1** | Une troncature signale une BOUCLE dans le moteur, pas une fin de partie — or son diagnostic n'existait que dans le `print` d'un worker (noyé à `n_envs=48`) et le compteur persisté ne la comptait pas, alors que le run s'arrête dessus. Nouveau scalaire `00_critical/t_truncated_episodes`, diagnostic complet en `truncations.jsonl`, bilan imprimé en fin de run. Détail → §0.61. |
 | **§0.65** | Le prix de la conformité de §0.64, **rendu** : la LoS de déploiement vectorisée | ✅ **LIVRÉ le 2026-08-03** — **aucun** changement de valeur | — | La règle est inchangée, son EXÉCUTION est vectorisée : jumeau de `hex_line_iter` une source → N cibles (`batch_hex_line_steps`) + la règle de blocage (murs, obscuring 13.10) appliquée à la grille (`batch_ground_hex_can_see`). **Phase de déploiement 3,58 → 1,33 s** (−63 %), part LoS **1,58 → 0,09 s** (−94 %), **146 781 → 0** paire tracée en Python. **ISO-VALEUR prouvé** : égalité hexe par hexe sur la totalité du pool et 2 terrains (+ 2 contre-épreuves ROUGES), et 90 empreintes de l'observation §0.40 identiques à `main`. Donc **rien à ajouter au lot de ré-entraînement**. `/code-review` a en outre trouvé et fait corriger un défaut **structurel** de §0.64 : la clé du cache des expositions potentielles ignorait les areas **obscurantes** (aucun terrain actuel ne déclenche le cas). Détail → §0.65. |
@@ -153,6 +154,153 @@ jour 2026-07-29** : la section 9 a été auditée le 2026-07-24 ([§9.0](V11_pha
 **T2→T5 ont été relus le 2026-07-29 — 9 écarts, verdicts et réserves en [§0.47](#s0.47)** ; cette
 relecture s'est faite **par lecture seule, sans aucune exécution**, elle ne vaut donc pas
 mutation-test.
+
+<a id="s0.66"></a>
+### 0.66 Le JOURNAL DU GYM mentait à l'analyzer, et deux règles de mouvement n'étaient pas appliquées — ✅ CORRIGÉ (2026-08-04)
+
+Suite directe de [§0.62](#s0.62), par le bas : §0.62 a rendu l'analyzer juste, ce qui a permis de
+lui faire relire un run de **600 épisodes** (x1, board 44x60x1) au lieu des 6 épisodes de
+référence. Verdict : **2353 erreurs**. Le tri les sépare en trois familles, et la troisième est
+celle qui compte.
+
+⚠️ **Les valeurs absolues ne se comparent pas aux 206 erreurs de §0.62** : 600 épisodes contre 6,
+soit ~34 erreurs/épisode avant, ~2,3 après. Ce n'est pas une régression.
+
+#### A. Le journal du gym ne disait pas ce que le moteur faisait — 2 correctifs, ~1150 erreurs
+
+**Le `[FLY]` n'était écrit NULLE PART sur le chemin d'entraînement.** `grep -c "\[FLY\]"` sur
+24 Mo de `step.log` : **0**, alors que `SUSTAINED HITS` y apparaît 410 fois — le journal venait
+donc bien d'un moteur à jour. La plomberie existait pourtant de bout en bout : `movement_handlers`
+posait le drapeau, `_build_step_log_details` le mappait, `step_logger` l'écrivait. Elle était
+posée sur les **chemins PvP**, qui n'émettent aucun `move_type` — clé exigée par le drainage vers
+`step.log` — donc ne peuvent pas l'alimenter. Le **seul** émetteur du gym est la branche
+`squad_normal_move / squad_advance / squad_fall_back` de `_process_squad_action`, et elle ignorait
+`is_fly_move`. Conséquence : l'analyzer pathfindait au SOL des escouades qui volent, murs et
+figurines compris → **1014 faux « au-delà du budget »** (mesuré en injectant le marqueur dans une
+copie du journal : 2353 → 1339).
+
+Le jumeau `squad_charge` avait le **même** trou et n'a été vu qu'au `/code-review` : les lignes
+`CHARGED` ne portaient pas `[FLY]` non plus, alors que le formateur savait déjà le lire.
+
+**Les 1521 lignes `CONSOLIDATED` étaient toutes datées `T1`.** `_append_fight_move_log` lisait
+`game_state["current_turn"]`, une clé qui n'existe dans **aucun** `game_state` de ce moteur (le
+compteur s'appelle `turn`), avec un repli silencieux sur `1` — le défaut anti-erreur que T1
+interdit, et qui l'a rendu invisible. 11 sites portaient le même motif, tous passés en
+`require_key`. Effet de bord vertueux : `tests/_state_invariants.py` gagne `turn`, que les fixtures
+omettaient alors que la production le pose toujours.
+
+#### B. Le lot d'allocation 04.03 fusionnait des attaques NON identiques — 898 erreurs
+
+La clé de groupe ne portait que la **moitié** de l'encadré IDENTICAL ATTACKS : « same BS/WS, S, AP
+and D characteristics » — et pas « **and which are affected by the same applicable abilities and
+rules** ». Sur le roster Ork, Shoota (`RAPID_FIRE:1`), Kombi Shoota (aucune règle) et Kustom Shoota
+(`RAPID_FIRE:2`) partagent ATK/AP/DMG : elles tombaient dans un lot unique, nommé
+`Shoota / Kombi Shoota / Kustom Shoota` et ne portant qu'**une** valeur de `[RAPID FIRE:X]`, celle
+de la première arme rencontrée.
+
+**La résolution, elle, était juste** — les attaques sont comptées par intent, donc par arme. C'est
+le lot d'allocation et le log qui mélangeaient. Le commentaire de `rapid_fire_applied` affirmait
+une clé « (arme, cible) » qui n'a jamais existé : c'est ce qui a caché le défaut.
+
+La clé reçoit donc `weapon_rules` (signature normalisée, paramètre compris) **et**
+`rapid_fire_applied` — 24.30 dit « **APPLICABLE** », et deux figurines de la même escouade avec la
+même arme n'y sont pas soumises pareil selon la demi-portée. RNG et NB n'y entrent **pas** : 04.03
+ne les compte pas parmi les caractéristiques d'identité, les y mettre séparerait des lots que la
+règle fusionne (contre-épreuve verrouillée par test).
+
+#### C. ⚠️ Deux règles de mouvement n'étaient PAS appliquées — l'analyzer avait raison
+
+**C'est la partie qui change le jeu.** 11.04 EFFECT, 12.03 EFFECT et 12.08 disent mot pour mot
+« **Your unit moves as described in Moving (03)** ». Le move normal borne chaque figurine par un
+champ géodésique qui contourne murs et figurines. `charge_build_valid_plan` et
+`_assign_cells_toward_enemies`, eux, retenaient une cellule sur
+`calculate_hex_distance(origine, cellule) <= budget` et ne validaient que la case d'**arrivée** :
+le trajet n'était jamais regardé.
+
+Cas E301, vérifié socle par socle : six figurines franchissent la ligne de murs de la colonne 33
+avec un jet de 8, pour des trajets légaux de 8, 9, 11, 11, 12 et 13. **43 charges et 28
+consolidations** dans ce cas sur le run — de **vraies** violations, pas des faux positifs.
+
+`model_reach_predicate` devient la source unique de la portée par-figurine des mouvements sans
+pool BFS, et réutilise la machinerie du move (mêmes obstacles de transit, même champ mémoïsé,
+même sélecteur de géométrie). Le `/code-review` a trouvé que la version livrée était **inerte en
+métrique `euclidean`** — c'est-à-dire dans tout le PvP et le bot PvE, où `distance_metric.move`
+vaut justement `euclidean` : elle retombait sur la ligne droite. Corrigé, les trois géométries sont
+traitées ; seule `cube` (vol déclaré 21.03) rend la ligne droite exacte, et c'est la géométrie de la
+règle, pas un repli.
+
+**Une charge ratée ou un WAIT en phase de charge comptait comme un charge move.** 11.04 place le
+grant de Fights First sous « AFTER MOVING » du charge move ; 12.03/12.04 disent « made a charge
+move this turn ». `end_activation(..., Arg3=CHARGE, ...)` marquait `units_charged` dès la fin
+d'activation. Ces faux chargeurs passaient devant les vrais : **122 violations d'alternance**, dont
+**60 lignes sur 60** vérifiées appartiennent à une escouade ayant fini son activation sans charger.
+Le jumeau PvP passait déjà `PASS` — c'était une divergence gym.
+
+#### D. Un contrôle d'analyzer mesurait la mauvaise grandeur — 144 erreurs
+
+10.06 CLOSE-QUARTERS SHOOTING borne un tireur engagé non-MONSTER/VEHICLE aux armes
+[CLOSE-QUARTERS] **et** aux unités « **engaged with your unit** ». Le contrôle comptait une faute
+dès que `calculate_hex_distance(ancre_tireur, ancre_cible) != 1`. Faux deux fois : ancre au lieu du
+par-figurine, et adjacence au lieu de la zone d'engagement (10 subhex à x5). Le moteur, lui, gate
+bien sur `enemy_engaged_with_shooter`. **Troisième occurrence** de la famille « ancre vs
+par-figurine », après le contrôle LoS et le fight non-adjacent (§0bis).
+
+Le contrôle jumeau — « arme non-[CLOSE_QUARTERS] tirée en étant engagé » — exigeait lui aussi une
+adjacence d'ancre de 1, donc restait à **0 en permanence** : un VERT VACANT. Corrigé, il révèle
+**13 vraies violations** de 10.06 qui n'avaient jamais été visibles.
+
+#### Conséquences pour le ré-entraînement
+
+Les correctifs **C** (borne de trajet, `units_charged`) et **B** (lots d'allocation) **changent les
+résultats de partie**. Ils ne cassent **aucun** des trois contrats de [§0.48](#s0.48) — `obs_size`,
+espace d'action et architecture sont inchangés, le modèle se charge et joue. Ils n'entrent donc
+**pas** dans le lot `L1`/`L2`/`L6`.
+
+Mais ⚠️ **la mesure de [§0.14](#s0.14) n'est plus comparable** : `combined 0.8200` a été obtenu sur
+un moteur où les charges traversaient les murs et où des escouades gagnaient Fights First sans
+charger. Le prochain run doit repartir de ce code, et son win-rate ne se compare pas au précédent.
+
+Coût mesuré du passage « vol d'oiseau » → « trajet » : **×1,71** sur une observation de phase de
+charge (escouade de 10, 6 escouades ennemies interrogées). Une passe `/simplify` en a récupéré une
+partie sans toucher à la sémantique — budget sorti de la clé de mémoïsation (le champ rend
+`{cellule: coût}`, donc un champ calculé pour 12 répond pour tout budget ≤ 12 : **2 BFS par
+figurine → 1**), champ euclidien mémoïsé (4,47 ms/figurine recalculés à chaque appel), prédicat
+construit pour les seules figurines mobiles (12.03 immobilise celles au contact, cas normal d'un
+pile-in).
+
+#### Ce qui reste OUVERT
+
+1. **42 erreurs « unité morte »** — l'en-tête de `step.log` n'expose qu'un `HP_MAX` par escouade
+   alors qu'un personnage attaché en a un autre (preuve : un `Dmg:4HP` sur une escouade annoncée à
+   2 PV par socle, alors que le moteur plafonne le dégât aux PV restants). L'analyzer reconstruit
+   les PV avec une heuristique « figurine de front » et dérive. **Aucune des deux corrections
+   évidentes ne marche** : `[TARGET_MODELS:]` est **vide** quand l'escouade meurt, donc lire les
+   survivants ne peut pas servir d'oracle de mort ; et le journal ne dit **jamais** quelle figurine
+   a encaissé. Il faut **ajouter au contrat** `step.log` l'identité de la figurine touchée
+   (`#SquadID#ModelID`) sur les lignes de dégâts **et** une ligne de destruction d'escouade.
+   🟢 Arbitrage utilisateur du 2026-08-04 : à traiter avec le choix de la figurine tuée par
+   l'agent (`L3`), dont c'est le prérequis — pas un doublon.
+2. **Aucune ligne `PILED IN` dans 24 Mo de journal**, pour 1521 `CONSOLIDATED`. L'hypothèse
+   « l'émetteur manque » est **RÉFUTÉE par sonde** : sur le vrai point d'entrée
+   (`fight_phase_start` + `_fight_v11_gym_after_phase_start`), le gym émet bien deux action_logs
+   `pile_in` et un `StepLogger` réel écrit `PILED IN from … to …`. L'absence sur le run réel n'est
+   donc **pas expliquée**. Mesure décisive = relancer un run `--step` (impossible depuis le
+   worktree : `ai/models/` n'y est pas). Voir aussi le bug ouvert
+   `A_faire/bug_pile_in_bfs_clearance_mismatch.md`.
+
+#### Leçon de méthode — le miroir, rejoué TROIS fois dans le même lot
+
+Les trois défauts trouvés par `/code-review` ont la **même** signature : une correction posée d'un
+côté d'un miroir et pas de l'autre. `[FLY]` sur le move mais pas sur la charge ; la borne de trajet
+en `hex` mais pas en `euclidean` ; une fixture de test sur trois. C'est le motif que CLAUDE.md
+désigne comme le n°1 du dépôt, et l'avoir su n'a pas suffi à l'éviter — **le grep du jumeau doit
+être fait sur chaque correction, pas sur le lot**. Reporté en **§0bis**, qui en est la copie canonique.
+
+Le `/simplify` a montré le corollaire structurel : les payloads d'`action_log` du gym sont des
+**copies manuelles** de ceux du PvP, et c'est *pour cela* que `[FLY]` a pu manquer des deux côtés.
+`fight_handlers._append_fight_move_log` est le précédent à imiter — il manque son équivalent
+move/charge, consommé par les deux flux. **Tant qu'il n'existe pas, le prochain champ de log sera
+oublié de la même façon.**
 
 <a id="s0.62"></a>
 ### 0.62 L'ANALYZER mesurait à une autre échelle et avec d'autres règles que le run — ✅ CORRIGÉ (2026-08-03)
@@ -2333,6 +2481,39 @@ le run multi-env, pas le smoke, qui a validé.
 >
 > Ces passages existent pour **empêcher de re-diagnostiquer un faux problème**. Aucun ne doit
 > être résumé ni supprimé, même si l'entrée dont il vient est close.
+
+### Le grep du JUMEAU se fait sur chaque correction, pas sur le lot (§0.66, 2026-08-04)
+
+CLAUDE.md désigne le miroir corrigé d'un seul côté comme le motif d'échec n°1 du dépôt. §0.66 l'a
+rejoué **trois fois dans le même lot**, en le sachant, et aucune des trois n'a été vue à
+l'écriture — les trois ont été trouvées par `/code-review` :
+
+- `[FLY]` posé sur le move squad, **pas** sur `squad_charge` (même fonction, 200 lignes plus bas) ;
+- la borne de trajet écrite pour la métrique `hex`, **inerte** en `euclidean` — donc dans tout le
+  PvP et le bot PvE, où `distance_metric.move` vaut justement `euclidean` ;
+- une fixture de test mise à jour sur les **trois** que la nouvelle exigence cassait.
+
+Le point commun n'est pas l'inattention : c'est d'avoir fait le grep du jumeau **en fin de lot**,
+sur les symboles corrigés, au lieu de le faire **à chaque correction**, sur le mécanisme touché.
+Un grep de fin de lot trouve les jumeaux du *symbole* ; il ne trouve pas la branche `else` d'un
+sélecteur de métrique, ni la deuxième fixture d'un test.
+
+**Corollaire structurel**, remonté par `/simplify` : les payloads d'`action_log` du gym sont des
+**copies manuelles** de ceux du PvP. C'est *pour cela* que `[FLY]` a pu manquer des deux côtés.
+`fight_handlers._append_fight_move_log` est le précédent à imiter — il manque son équivalent
+move/charge, consommé par les deux flux. Tant qu'il n'existe pas, le prochain champ de log sera
+oublié de la même façon.
+
+### Une plomberie complète et testée peut n'être branchée sur AUCUN chemin de production (§0.66, 2026-08-04)
+
+Le drapeau `is_fly_move` traversait `movement_handlers` → `_build_step_log_details` →
+`step_logger`, chaque maillon couvert par un test vert. `grep -c "\[FLY\]" step.log` rendait
+pourtant **0** sur 24 Mo. Les tests verrouillaient le **formateur** et le **mapping** ; l'ÉMISSION,
+elle, n'était posée que sur les chemins PvP, qui n'émettent pas la clé `move_type` exigée par le
+drainage vers `step.log` — ils ne peuvent donc structurellement pas l'alimenter.
+
+Un test qui part du milieu de la chaîne ne prouve rien sur ses extrémités. Pour un contrat de
+journal, le verrou doit partir de **l'action de production** et finir sur **la ligne écrite**.
 
 ### Un « ✅ SAIN » prononcé sur UNE règle ne dit rien des règles SATELLITES qui la modifient (§0.50, 2026-07-29)
 

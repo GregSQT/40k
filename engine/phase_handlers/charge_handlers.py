@@ -1098,7 +1098,9 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     Charge Eligibility Requirements:
     - Alive (in units_cache)
     - player === current_player
-    - NOT in units_charged
+    - NOT already activated this phase (via `charge_activation_pool`, PAS via `units_charged` :
+      ce set signifie « a FAIT un charge move » — 11.04 / 12.03 / 12.04 — et le corps de cette
+      fonction ne l'a jamais lu)
     - NOT within engagement zone of any enemy (``_charge_unit_within_engagement_zone`` = contrat move)
     - NOT in units_fled
     - Has valid charge target (enemy within charge range via pathfinding)
@@ -2904,10 +2906,7 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
             # V11 RAW (roll-first) : l'unité a DÉCLARÉ une charge en s'activant et le jet
             # n'atteint aucune cible → charge ÉCHOUÉE, unité consommée (pas un simple wait
             # qui la laisserait re-jeter). Badge d'échec côté UI (chemin charge_failed).
-            if "current_turn" not in game_state:
-                current_turn = 1
-            else:
-                current_turn = game_state["current_turn"]
+            current_turn = require_key(game_state, "turn")
             append_action_log(
                 game_state,
                 {
@@ -4222,10 +4221,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         if "action_logs" not in game_state:
             game_state["action_logs"] = []
         
-        if "current_turn" not in game_state:
-            current_turn = 1
-        else:
-            current_turn = game_state["current_turn"]
+        current_turn = require_key(game_state, "turn")
         
         append_action_log(
             game_state,
@@ -5384,7 +5380,7 @@ def charge_commit_move_plan_handler(
     _invalidate_all_destination_pools_after_movement(game_state)
     # LoS bump déjà émis par commit_move (batch) — plus de double bump ici (D1).
 
-    current_turn = game_state["current_turn"] if "current_turn" in game_state else 1
+    current_turn = require_key(game_state, "turn")
     target_col, target_row = require_unit_position(target_id, game_state)
     _ut_seg = f" {unit['unitType']}" if unit.get("unitType") else ""
     # 21.03 : le vol DÉCLARÉ pour cette charge retranche 2" au budget (`_charge_budget_subhex`)
@@ -5529,10 +5525,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         if "action_logs" not in game_state:
             game_state["action_logs"] = []
         
-        if "current_turn" not in game_state:
-            current_turn = 1
-        else:
-            current_turn = game_state["current_turn"]
+        current_turn = require_key(game_state, "turn")
         
         append_action_log(
             game_state,
@@ -5658,11 +5651,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     action_reward = require_key(base_actions, "charge_success")
     _t_rew1 = time.perf_counter() if _perf else None
 
-    # AI_TURN.md COMPLIANCE: Direct field access for current_turn
-    if "current_turn" not in game_state:
-        current_turn = 1  # Explicit default for turn counter
-    else:
-        current_turn = game_state["current_turn"]
+    current_turn = require_key(game_state, "turn")
 
     target_col, target_row = require_unit_position(target_id, game_state)
     charge_rule_marker = ""

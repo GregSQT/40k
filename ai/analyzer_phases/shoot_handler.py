@@ -552,10 +552,15 @@ def handle_shoot(
         position_override=(shooter_col, shooter_row),
     )
     shooter_engaged_with_target = False
-    if target_pos is not None and shooter_is_monster_or_vehicle:
+    if target_pos is not None:
         # Même primitive que tout le reste de l'analyzer, restreinte à CETTE cible : elle porte
         # la mesure per-figurine ET la métrique du run. Une mesure écrite à la main ici
         # rejouerait la divergence hex↔euclidien.
+        #
+        # Calculé pour TOUT tireur, plus seulement les MONSTER/VEHICLE : c'est la grandeur
+        # qu'exige 10.06 (« you can only select enemy units that are ENGAGED WITH your unit as
+        # targets »), donc celle du contrôle close-quarters ci-dessous. Restreint aux M/V, il
+        # laissait ce contrôle mesurer une adjacence d'ancre — voir plus bas.
         shooter_engaged_with_target = is_within_engine_engagement_zone(
             shooter_id,
             state.unit_player,
@@ -586,28 +591,30 @@ def handle_shoot(
     # Track CLOSE_QUARTERS weapon shots
     heavy_applied_in_log = re.search(r'(?:\[\s*HEAVY\s*\]|\sHEAVY\s)', action_desc, re.IGNORECASE) is not None
     if weapon_match and target_pos and weapon_found:
-        distance = calculate_hex_distance(shooter_col, shooter_row, target_pos[0], target_pos[1])
-        shooter_engaged = is_within_engine_engagement_zone(
-            shooter_id,
-            state.unit_player,
-            state.unit_positions,
-            state.unit_hp,
-            engagement_zone=_get_engagement_zone_for_analyzer(),
-            positions_by_model=state.positions_by_model,
-            unit_base=state.unit_base,
-            # Socles du tireur SUR CETTE LIGNE : le `[MODELS:]` de l'action de tir.
-            subject_models=state.current_line_models.get(shooter_id),  # get allowed
-            position_override=(shooter_col, shooter_row),
-        )
+        # 10.06 CLOSE-QUARTERS SHOOTING, volet « Non-MONSTER/Non-VEHICLE Models » : « You can only
+        # select [CLOSE-QUARTERS] weapons to make attacks with and you can only select enemy units
+        # that are ENGAGED WITH your unit as targets. » La grandeur de la règle est donc
+        # l'ENGAGEMENT (bord-à-bord, par figurine, zone d'engagement du run — ici 2 subhex), jamais
+        # une adjacence d'hex.
+        #
+        # Ces deux contrôles mesuraient `calculate_hex_distance(ancre_tireur, ancre_cible) == 1`.
+        # Faux deux fois : ancre au lieu du par-figurine, et adjacence au lieu de la zone
+        # d'engagement. Le moteur, lui, applique bien `enemy_engaged_with_shooter`
+        # (`shooting_handlers` ~L693) — le contrôle contredisait donc le moteur ET la règle :
+        # 144 faux positifs mesurés sur un run de 600 épisodes. Troisième occurrence de la famille
+        # « ancre vs par-figurine », après le contrôle LoS et le fight non-adjacent.
         if is_close_quarters:
-            if distance == 1:
-                stats['close_quarters_shots'][player]['adjacent'] += 1
+            if shooter_engaged_with_target:
+                stats['close_quarters_shots'][player]['engaged_target'] += 1
             else:
-                stats['close_quarters_shots'][player]['not_adjacent'] += 1
-                if shooter_engaged:
-                    stats['close_quarters_engaged_shot_non_adjacent'][player] += 1
-                    if stats['first_error_lines']['close_quarters_engaged_shot_non_adjacent'][player] is None:
-                        stats['first_error_lines']['close_quarters_engaged_shot_non_adjacent'][player] = {
+                stats['close_quarters_shots'][player]['unengaged_target'] += 1
+                # Tireur non engagé : une arme [CLOSE-QUARTERS] est une arme de tir comme une
+                # autre, elle peut viser n'importe quelle cible à portée. La faute n'existe que
+                # pour un tireur ENGAGÉ, borné par 10.06 aux unités avec lesquelles il l'est.
+                if shooter_engaged_at_all and not shooter_is_monster_or_vehicle:
+                    stats['close_quarters_shot_at_unengaged_target'][player] += 1
+                    if stats['first_error_lines']['close_quarters_shot_at_unengaged_target'][player] is None:
+                        stats['first_error_lines']['close_quarters_shot_at_unengaged_target'][player] = {
                             'episode': state.current_episode_num,
                             'line': line.strip()
                         }
@@ -615,9 +622,9 @@ def handle_shoot(
             # 10.06 : un tireur MONSTER/VEHICLE engagé tire avec TOUTES ses armes sur l'unité
             # avec laquelle il est engagé — l'arme non-[CLOSE_QUARTERS] au contact est légale
             # pour lui (elle subit le -1, que le moteur applique déjà).
-            if distance == 1 and not shooter_is_monster_or_vehicle:
-                stats['non_close_quarters_adjacent_shots'][player] += 1
-                stats['shoot_invalid'][player]['adjacent_non_close_quarters'] += 1
+            if shooter_engaged_at_all and not shooter_is_monster_or_vehicle:
+                stats['engaged_shot_with_non_close_quarters_weapon'][player] += 1
+                stats['shoot_invalid'][player]['engaged_non_close_quarters'] += 1
                 if stats['first_error_lines']['shoot_invalid'][player] is None:
                     stats['first_error_lines']['shoot_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
         if weapon_range is not None:

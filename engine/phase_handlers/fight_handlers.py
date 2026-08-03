@@ -839,7 +839,7 @@ def _append_fight_move_log(
                 f"Unit {unit['id']} {verb} from ({from_col},{from_row}) "
                 f"to ({to_col},{to_row})"
             ),
-            "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
+            "turn": require_key(game_state, "turn"),
             "phase": "fight",
             "unitId": unit["id"],
             "player": unit["player"],
@@ -5226,7 +5226,7 @@ def _manual_roll_fight_intent(
     from engine.phase_handlers.attack_sequence import (
         RerollProfile, build_weapon_attack_profile, roll_attack_pool,
     )
-    from engine.utils.weapon_helpers import weapon_has_rule
+    from engine.utils.weapon_helpers import weapon_has_rule, weapon_rule_signature
     rolled = roll_attack_pool(
         n_attacks=int(n_attacks),
         hit_target=ws,
@@ -5250,6 +5250,14 @@ def _manual_roll_fight_intent(
         # (06.01 : aucun terrain ne s interpose a distance d engagement).
         "precision": weapon_has_rule(weapon, "PRECISION"),
         "precision_range": None,
+        # [RAPID FIRE] 24.30 n'existe qu'au TIR : la melee emet 0, elle ne l'omet pas. La cle de
+        # groupe partagee peut ainsi l'exiger (`require_key`) au lieu de retomber sur un defaut
+        # silencieux — un producteur qui oublierait le champ leverait, comme l'exige T1.
+        "rapid_fire_applied": 0,
+        # 04.03 IDENTICAL ATTACKS : jumeau exact du roller de tir — la seconde moitie de la
+        # definition (« affected by the same applicable abilities and rules ») entre dans la
+        # cle de groupe, en melee comme au tir.
+        "weapon_rules": weapon_rule_signature(weapon),
         "display_wth": display_wth, "display_save_th": display_save_th,
         "shot_records": rolled["shot_records"], "pending_wounds": rolled["pending_wounds"],
         "counts": rolled["counts"],

@@ -141,7 +141,7 @@ def test_un_vehicule_engage_tire_avec_une_arme_non_close_quarters(tmp_path):
     Le LandSpeeder au contact tire son Multi-Melta — légal, et le moteur applique bien le -1."""
     stats = _adjacent_shot_stats(tmp_path, "1", "Multi-Melta", "vehicle.log")
 
-    assert stats["shoot_invalid"][1]["adjacent_non_close_quarters"] == 0
+    assert stats["shoot_invalid"][1]["engaged_non_close_quarters"] == 0
     assert stats["shoot_at_engaged_enemy"][1] == 0
 
 
@@ -150,7 +150,7 @@ def test_la_meme_arme_reste_fautive_pour_de_l_infanterie(tmp_path):
     [CLOSE_QUARTERS] tirent au contact. Sans elle, l'exemption désarmerait le contrôle."""
     stats = _adjacent_shot_stats(tmp_path, "2", "Bolt Rifle", "infantry.log")
 
-    assert stats["shoot_invalid"][1]["adjacent_non_close_quarters"] == 1
+    assert stats["shoot_invalid"][1]["engaged_non_close_quarters"] == 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────

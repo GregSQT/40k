@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Tuple
 
 from engine.phase_handlers.shared_utils import fight_pile_in_plan, squad_consolidate_plan
 from tests._state_invariants import turn_state_invariants
+from tests.unit.engine._config_helpers import build_move_rules
 
 
 def _real_game_rules() -> Dict[str, Any]:
@@ -62,8 +63,13 @@ def _make_gs(
         "squad_models": squad_models, "units_cache": units_cache,
         # game_rules RÉELLES du jeu — ne pas recopier de constantes ici : un seuil de test
         # divergeant du jeu ferait passer (ou échouer) le test pour la mauvaise raison.
-        "config": {"game_rules": _real_game_rules()},
-        "units": [], "objectives": [],
+        # `move` : mêmes toggles réels. Le pile-in / la consolidation bornent désormais chaque
+        # figurine par son TRAJET (12.03 / 12.08 EFFECT « moves as described in Moving (03) »),
+        # ils lisent donc la traversée au même endroit que le move.
+        "config": {"game_rules": _real_game_rules(), "move": build_move_rules()},
+        # Index {id: unit} que le moteur construit au reset : `move_plan_distance_mode` le lit
+        # pour savoir si le vol est déclaré (21.03).
+        "units": [], "unit_by_id": {}, "objectives": [],
     }
 
 
