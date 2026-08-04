@@ -24,33 +24,18 @@ Ce fichier verrouille les deux moitiés : la config est complète, ET le checkpo
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from config_loader import GAME_CONFIG_SECTIONS_REQUIRED_BY_ENGINE
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SCENARIO = (
-    PROJECT_ROOT
-    / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
-    / "scenario_training_armageddon.json"
-)
+from tests.unit.engine._config_helpers import TRAINING_SCENARIO, build_armageddon_engine
 
 
 @pytest.fixture(scope="module")
 def gym_engine():
-    from ai.unit_registry import UnitRegistry
-    from engine.w40k_core import W40KEngine
-
-    engine = W40KEngine(
-        rewards_config="ArmageddonAgent", training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent", training_n_envs=1,
-        scenario_file=str(SCENARIO), unit_registry=UnitRegistry(),
-        quiet=True, gym_training_mode=True,
+    return build_armageddon_engine(
+        seed=0, scenario_file=TRAINING_SCENARIO, training_n_envs=1,
     )
-    engine.reset(seed=0)
-    return engine
 
 
 def test_la_config_dentrainement_porte_toutes_les_sections_du_moteur(gym_engine) -> None:

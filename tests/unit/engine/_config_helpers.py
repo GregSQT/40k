@@ -80,6 +80,49 @@ def build_move_rules(**overrides: Any) -> Dict[str, Any]:
     return rules
 
 
+#: Scénario `deployment_type: active` réel. Le harnais habituel construit le moteur depuis une
+#: config en mémoire, qui démarre TOUJOURS en placement fixe (`deployment_type` ne vient que
+#: d'un fichier de scénario) : un test qui veut voir une phase de déploiement doit passer par un
+#: fichier, sinon il observe un état qui ne se produit jamais et affiche « tout va bien » — le
+#: VERT VACANT déjà payé en V11 §0.56.
+ACTIVE_DEPLOYMENT_SCENARIO = (
+    "config/agents/ArmageddonAgent/scenarios/holdout_regular/scenario_bot-01.json"
+)
+
+
+#: Scénario d'ENTRAÎNEMENT réel, le pendant de `ACTIVE_DEPLOYMENT_SCENARIO` pour les tests qui
+#: veulent la config et l'état du chemin gym plutôt qu'une phase de déploiement active.
+TRAINING_SCENARIO = (
+    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json"
+)
+
+
+def build_armageddon_engine(seed: int, **overrides):
+    """Construit et `reset` un `W40KEngine` ArmageddonAgent / `x1_debug`.
+
+    Fonction et non fixture : une fixture de `scope="module"` ne peut pas dépendre d'une
+    fixture de portée fonction, et plusieurs fichiers amortissent volontairement la
+    construction sur tout leur module. Les deux formes partagent donc ce corps unique — un
+    argument ajouté à `W40KEngine.__init__` ne casse plus les copies une par une.
+    """
+    from ai.unit_registry import UnitRegistry
+    from engine.w40k_core import W40KEngine
+
+    kwargs = {
+        "rewards_config": "ArmageddonAgent",
+        "training_config_name": "x1_debug",
+        "controlled_agent": "ArmageddonAgent",
+        "scenario_file": ACTIVE_DEPLOYMENT_SCENARIO,
+        "unit_registry": UnitRegistry(),
+        "quiet": True,
+        "gym_training_mode": True,
+    }
+    kwargs.update(overrides)
+    engine = W40KEngine(**kwargs)
+    engine.reset(seed=seed)
+    return engine
+
+
 #: Réglages PAR ÉPISODE qu'un test observant la phase de déploiement doit ÉPINGLER au lieu de
 #: les subir. Injectés dans le ``training_config`` de l'INSTANCE — jamais dans le fichier de
 #: config, qui porte une décision utilisateur (la rampe 0.0 → 0.8 est délibérée).

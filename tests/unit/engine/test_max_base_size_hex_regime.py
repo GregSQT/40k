@@ -13,62 +13,54 @@ Le `35` littéral ne couvrait AUCUN cas métier : la clé existe dans `config/ga
 mesuré sur 791 appels d'une partie réelle (`ArmageddonAgent`, `x1_debug`, deux graines), elle a
 été lue depuis la config à chaque fois — zéro repli, valeur toujours 35. Le défaut ne pouvait
 donc que masquer un état de jeu malformé ou une clé retirée du JSON. Il était d'autant plus
-trompeur que ce seuil est un DIAMÈTRE HEX non scalé par `inches_to_subhex` (absent de la liste
-de conversion de `w40k_core`) : un littéral en dur n'a pas le même sens d'un plateau à l'autre.
+trompeur pour la raison exposée dans la docstring de `get_max_base_size_hex` (seuil non scalé
+par `inches_to_subhex`), qui reste la version canonique de cette explication.
 
 Ce fichier verrouille les deux moitiés : la config de production porte la clé, ET les deux
 appelants de production propagent l'exigence au lieu de se replier localement.
 """
 from __future__ import annotations
 
-import copy
-from pathlib import Path
-
 import pytest
 
 from shared.data_validation import ConfigurationError
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SCENARIO = (
-    PROJECT_ROOT
-    / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
-    / "scenario_training_armageddon.json"
-)
+from tests.unit.engine._config_helpers import TRAINING_SCENARIO, build_armageddon_engine
 
 
 @pytest.fixture(scope="module")
 def gym_engine():
-    from ai.unit_registry import UnitRegistry
-    from engine.w40k_core import W40KEngine
-
-    engine = W40KEngine(
-        rewards_config="ArmageddonAgent", training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent", training_n_envs=1,
-        scenario_file=str(SCENARIO), unit_registry=UnitRegistry(),
-        quiet=True, gym_training_mode=True,
+    """Portée module : les 4 tests lisent le même état sans jamais le muter (tous copient)."""
+    return build_armageddon_engine(
+        seed=0, scenario_file=TRAINING_SCENARIO, training_n_envs=1,
     )
-    engine.reset(seed=0)
-    return engine
+
+
+def _copied_layers(game_state):
+    """Copie SUPERFICIELLE des trois dicts que ce fichier réécrit : état, config, game_rules.
+
+    Superficielle et non `deepcopy` : `game_state` porte les caches du moteur (units_cache,
+    squad_models…) qu'une copie profonde dupliquerait pour rien. Rend les trois niveaux pour
+    que retirer une clé et en surcharger une passent par le MÊME chemin de copie.
+    """
+    state = dict(game_state)
+    config = state["config"] = dict(state["config"])
+    game_rules = config["game_rules"] = dict(config["game_rules"])
+    return state, config, game_rules
 
 
 def _state_without(game_state, *, drop: str):
-    """Copie de l'état où l'on retire `drop` (clé de game_rules, ou "game_rules", ou "config").
+    """État privé de `drop` : "config", "game_rules", ou une clé de `game_rules`."""
+    state, config, game_rules = _copied_layers(game_state)
+    target = {"config": state, "game_rules": config}.get(drop, game_rules)
+    del target[drop]
+    return state
 
-    Copie SUPERFICIELLE des seuls dictionnaires réécrits : `game_state` porte les caches du
-    moteur (units_cache, squad_models…) qu'un deepcopy dupliquerait pour rien.
-    """
-    state = dict(game_state)
-    if drop == "config":
-        del state["config"]
-        return state
-    config = dict(state["config"])
-    state["config"] = config
-    if drop == "game_rules":
-        del config["game_rules"]
-        return state
-    game_rules = dict(config["game_rules"])
-    del game_rules[drop]
-    config["game_rules"] = game_rules
+
+def _state_with_rules(game_state, **overrides):
+    """État dont les `game_rules` portent `overrides`."""
+    state, _config, game_rules = _copied_layers(game_state)
+    game_rules.update(overrides)
     return state
 
 
@@ -106,9 +98,7 @@ def test_la_valeur_vient_de_la_config_et_non_dune_constante(gym_engine) -> None:
     """
     from engine.phase_handlers.shared_utils import get_max_base_size_hex
 
-    state = copy.copy(gym_engine.game_state)
-    state["config"] = dict(state["config"])
-    state["config"]["game_rules"] = {**state["config"]["game_rules"], "max_base_size_hex": 7}
+    state = _state_with_rules(gym_engine.game_state, max_base_size_hex=7)
     assert get_max_base_size_hex(state) == 7
 
 
@@ -119,7 +109,6 @@ def test_les_deux_appelants_de_production_propagent_lexigence(gym_engine) -> Non
     l'état réel du moteur, privé de la seule clé `max_base_size_hex`. Chacun doit remonter
     l'erreur au lieu de se replier localement sur une borne de secours.
     """
-    from engine.observation_builder import ObservationBuilder  # noqa: F401
     from engine.phase_handlers.movement_handlers import (
         _enemy_items_within_move_engagement_horizon,
     )
