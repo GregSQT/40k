@@ -835,35 +835,27 @@ def _maybe_precompute_ingress_pools(engine_instance: Any) -> None:
     gs = engine_instance.game_state
     if gs.get("phase") != "move":  # get allowed (état non initialisé)
         return
-    current_player = gs.get("current_player")  # get allowed
-    if current_player is None:
-        return
     from engine.phase_handlers.movement_handlers import precompute_ingress_pools
 
-    precompute_ingress_pools(gs, int(current_player))
+    precompute_ingress_pools(gs)
 
 
 def _strategic_reserves_summary(game_state: Dict[str, Any]) -> Dict[str, Dict[str, int]]:
     """``{player: {used_points, cap_points}}`` — 20.01, plafond de 50 % de la taille de bataille.
 
-    ``cap_points`` à 0 quand le scénario ne déclare pas de taille de bataille (`scale` absent) :
-    le plafond est alors invérifiable, donc AUCUN dépôt n'est possible. C'est bien la règle qui
-    ferme, pas un défaut d'affichage.
+    Aucune arithmétique ici : les deux grandeurs viennent de `strategic_reserves_usage`, LE
+    calcul qui décide aussi de l'acceptation d'un dépôt. Les refaire dans la couche API ferait
+    afficher un ratio qui n'est pas celui qui refuse le dépôt — le défaut même que le passage
+    par le serveur cherche à éviter côté client.
     """
-    from engine.game_state import STRATEGIC_RESERVES_POINTS_RATIO
+    if "points_limit" not in game_state:  # état non initialisé (pas de partie en cours)
+        return {}
+    from engine.phase_handlers.deployment_handlers import strategic_reserves_usage
 
-    points_limit = game_state.get("points_limit")  # get allowed (scénario sans `scale`)
-    cap = int(int(points_limit) * STRATEGIC_RESERVES_POINTS_RATIO) if points_limit else 0
-    summary: Dict[str, Dict[str, int]] = {
-        "1": {"used_points": 0, "cap_points": cap},
-        "2": {"used_points": 0, "cap_points": cap},
-    }
-    for unit in game_state.get("units", []):  # get allowed (état non initialisé)
-        if not unit.get("in_strategic_reserves", False):  # get allowed (champ optionnel)
-            continue
-        key = str(int(require_key(unit, "player")))
-        if key in summary:
-            summary[key]["used_points"] += int(require_key(unit, "VALUE"))
+    summary: Dict[str, Dict[str, int]] = {}
+    for player in (1, 2):
+        used, cap = strategic_reserves_usage(game_state, player)
+        summary[str(player)] = {"used_points": used, "cap_points": cap}
     return summary
 
 
@@ -2908,7 +2900,7 @@ def execute_action():
         if unit_id is None:
             return jsonify({"success": False, "error": "ingress_preview requires unitId"}), 400
         from engine.phase_handlers import movement_handlers as _mh_ing
-        if not _mh_ing.squad_is_in_strategic_reserves(engine.game_state, str(unit_id)):
+        if not _mh_ing.unit_is_in_strategic_reserves(engine.game_state, str(unit_id)):
             return jsonify({
                 "success": False,
                 "error": f"unit {unit_id} is not in strategic reserves",

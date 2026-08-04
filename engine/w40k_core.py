@@ -5214,30 +5214,9 @@ class W40KEngine(gym.Env):
                     f"ingress_move refusé pour l'escouade {squad_id} alors que le masque "
                     f"l'autorisait : {result}"
                 )
-            _ing_col, _ing_row = require_unit_position(squad_id, self.game_state)
-            _ing_unit = get_unit_by_id(squad_id, self.game_state)
-            if _ing_unit is None:
-                raise KeyError(f"Unit {squad_id} introuvable après ingress_move")
-            append_action_log(
-                self.game_state,
-                {
-                    "type": "deploy_unit",
-                    "message": (
-                        f"Unit {squad_id} INGRESS from strategic reserves "
-                        f"to ({_ing_col},{_ing_row})"
-                    ),
-                    "turn": require_key(self.game_state, "turn"),
-                    "phase": "move",
-                    "unitId": squad_id,
-                    "player": require_key(_ing_unit, "player"),
-                    "fromCol": -1,
-                    "fromRow": -1,
-                    "toCol": _ing_col,
-                    "toRow": _ing_row,
-                    "timestamp": "server_time",
-                    "reward": 0.0,
-                },
-            )
+            # Journal d'action et fin d'activation : faits par `movement_handlers`, pour les
+            # DEUX sièges. Les refaire ici produirait une ligne en double et retirerait une
+            # SECONDE unité du pool.
             # Pas de `end_activation` ici : `movement_handlers` l'a déjà faite, comme pour tout
             # autre type de mouvement. La refaire retirerait une SECONDE unité du pool.
 

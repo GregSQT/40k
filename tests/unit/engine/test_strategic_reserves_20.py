@@ -760,12 +760,15 @@ def test_ingress_ends_the_activation():
     assert (int(gs["units_cache"][squad_id]["col"]), int(gs["units_cache"][squad_id]["row"])) != UNDEPLOYED
 
 
-def test_ingress_clears_the_preview_and_stale_pools():
-    """L'arrivée efface l'aperçu et périme les pools, comme tout commit de mouvement.
+def test_ingress_clears_the_preview_but_keeps_the_enemy_keyed_memo():
+    """L'arrivée efface l'APERÇU, et ne jette PAS les aires d'ingress mémoïsées.
 
-    Sans ça, la bande d'arrivée (jusqu'à 2 286 points de contour) resterait publiée dans l'état
-    et serait resérialisée dans chaque réponse suivante, et les pools de destination calculés
-    avant la pose resteraient servis alors que l'occupation du plateau a changé.
+    Deux contrats distincts, souvent confondus :
+    - l'aperçu (jusqu'à 2 286 points de contour) doit disparaître, sinon il reste publié dans
+      l'état et resérialisé dans chaque réponse suivante ;
+    - le mémo des aires d'arrivée, lui, est indexé sur les positions ENNEMIES. L'unité qui vient
+      d'être posée est AMIE : elle ne peut pas le périmer. Le vider coûtait 49 ms de recalcul
+      après chaque mouvement, mesuré, pour une entrée qui restait valable.
     """
     from engine.phase_handlers.movement_handlers import (
         INGRESS_POOL_CACHE_KEY, execute_action, movement_build_activation_pool,
@@ -796,9 +799,24 @@ def test_ingress_clears_the_preview_and_stale_pools():
     assert not gs["move_preview_footprint_mask_loops"], (
         "la bande d'arrivée doit être effacée après la pose"
     )
-    assert not gs[INGRESS_POOL_CACHE_KEY], (
-        "les aires d'ingress mémoïsées sont périmées : l'escouade posée change l'occupation"
+    assert gs[INGRESS_POOL_CACHE_KEY], (
+        "une pose AMIE ne périme aucune aire d'arrivée : la clé du mémo ne porte que les "
+        "positions ennemies. Le vider ici était du recalcul pur."
     )
+    # Et le mémo reste SERVABLE : la même unité, dans le même état, retrouve son pool sans
+    # recalcul (sinon la clé porterait quelque chose que la pose a changé).
+    from engine.phase_handlers.movement_handlers import ingress_setup_pool
+    from engine.phase_handlers.shared_utils import unit_is_in_strategic_reserves
+
+    other = next(
+        (sid for sid in gs["units_cache"] if unit_is_in_strategic_reserves(gs, sid)), None
+    )
+    if other is not None:
+        before_len = len(gs[INGRESS_POOL_CACHE_KEY])
+        ingress_setup_pool(gs, other)
+        assert len(gs[INGRESS_POOL_CACHE_KEY]) == before_len, (
+            "le pool d'une autre réserve devait être servi par le mémo, pas recalculé"
+        )
 
 
 def test_ingress_refreshes_the_enemy_adjacency_caches():

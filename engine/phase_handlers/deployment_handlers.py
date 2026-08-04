@@ -124,8 +124,8 @@ def _resolve_next_deployer_after_success(
 def _deploy_pool_set(
     game_state: Dict[str, Any],
     player: int,
-    pool_override: Optional[Set[Tuple[int, int]]] = None,
-) -> Set[Tuple[int, int]]:
+    pool_override: Optional[AbstractSet[Tuple[int, int]]] = None,
+) -> AbstractSet[Tuple[int, int]]:
     """Cellules où la mise en place (03.02) est légale pour ``player``.
 
     ``pool_override`` : aire légale IMPOSÉE par la règle qui déclenche la mise en place. La
@@ -135,6 +135,11 @@ def _deploy_pool_set(
     identique et n'est donc jamais réimplémenté : seul cet ensemble change.
     """
     if pool_override is not None:
+        # `frozenset` : passe-plat. L'aire d'ingress fait jusqu'à 57 538 cases DÉJÀ normalisées
+        # en `(int, int)` et immuables ; la recopie défensive coûtait 36,6 ms sur les 53 ms d'une
+        # action d'arrivée (3 appels), pour protéger d'une mutation qui ne peut pas arriver.
+        if isinstance(pool_override, frozenset):
+            return pool_override
         return {(int(c), int(r)) for c, r in pool_override}
     deployment_state = require_key(game_state, "deployment_state")
     deployment_pools = require_key(deployment_state, "deployment_pools")
@@ -239,7 +244,7 @@ def _alive_model_ids(game_state: Dict[str, Any], squad_id: str) -> List[str]:
 
 def generate_compact_formation(
     game_state: Dict[str, Any], squad_id: str, center_col: int, center_row: int,
-    pool_override: Optional[Set[Tuple[int, int]]] = None,
+    pool_override: Optional[AbstractSet[Tuple[int, int]]] = None,
 ) -> List[Tuple[str, int, int]]:
     """Génère une formation compacte (anneaux hex) autour de ``center`` pour toutes
     les figurines vivantes de l'escouade.
@@ -699,7 +704,7 @@ def _normalize_plan_entry(e: Tuple[Any, ...]) -> Tuple[str, int, int, int]:
 
 def deployment_preview_plan(
     game_state: Dict[str, Any], squad_id: str, plan: List[Tuple[Any, ...]],
-    pool_override: Optional[Set[Tuple[int, int]]] = None,
+    pool_override: Optional[AbstractSet[Tuple[int, int]]] = None,
 ) -> Dict[str, Any]:
     """Dry-run d'un plan de déploiement par-figurine. Aucune écriture.
 
@@ -896,7 +901,7 @@ def deployment_preview_action(
 
 def build_validated_deployment_plan(
     game_state: Dict[str, Any], squad_id: str, anchor_col: int, anchor_row: int,
-    pool_override: Optional[Set[Tuple[int, int]]] = None,
+    pool_override: Optional[AbstractSet[Tuple[int, int]]] = None,
 ) -> Optional[List[Tuple[str, int, int, int]]]:
     """Formation compacte AU SOL autour de l'ancre + validation par-figurine.
 
@@ -996,7 +1001,7 @@ def read_validated_deployment_plan(
 
 def _apply_deploy_plan(
     game_state: Dict[str, Any], action: Dict[str, Any],
-    pool_override: Optional[Set[Tuple[int, int]]] = None,
+    pool_override: Optional[AbstractSet[Tuple[int, int]]] = None,
     check_current_deployer: bool = True,
 ) -> Tuple[bool, Dict[str, Any]]:
     """Tronc commun commit/recommit : résout l'unité, valide le plan (placement +
@@ -1146,6 +1151,31 @@ def deployment_commit_plan(
     return True, result
 
 
+def strategic_reserves_usage(game_state: Dict[str, Any], player: int) -> Tuple[int, int]:
+    """``(points engagés, plafond)`` en réserves pour ``player`` — règle 20.01 (50 %).
+
+    SOURCE UNIQUE des deux grandeurs : celle qui DÉCIDE de l'acceptation d'un dépôt
+    (`unit_can_be_placed_in_strategic_reserves`, via le headroom) et celle qui est AFFICHÉE au
+    joueur (le ratio « 120/250 » du conteneur PvP) doivent être le même calcul. Les séparer
+    ferait afficher un ratio qui n'est pas celui qui refuse le dépôt — exactement le défaut que
+    l'API cherchait à éviter côté client.
+
+    Plafond nul quand la taille de bataille (`points_limit`, posée au chargement) est absente :
+    la règle est alors invérifiable, donc AUCUN dépôt n'est possible. C'est la règle qui ferme.
+    """
+    from engine.game_state import STRATEGIC_RESERVES_POINTS_RATIO
+
+    points_limit = require_key(game_state, "points_limit")
+    cap = int(int(points_limit) * STRATEGIC_RESERVES_POINTS_RATIO) if points_limit else 0
+    used = sum(
+        int(require_key(u, "VALUE"))
+        for u in require_key(game_state, "units")
+        if int(require_key(u, "player")) == int(player)
+        and u.get("in_strategic_reserves", False)  # get allowed (champ optionnel, cf. loader)
+    )
+    return (used, cap)
+
+
 def strategic_reserves_points_headroom(game_state: Dict[str, Any], player: int) -> int:
     """Points encore plaçables en réserves par ``player`` sans dépasser le plafond 20.01 (50 %).
 
@@ -1153,22 +1183,8 @@ def strategic_reserves_points_headroom(game_state: Dict[str, Any], player: int) 
     qu'au chargement (`validate_strategic_reserves_cap`), appliqué ici de façon INCRÉMENTALE :
     c'est ce qui permet au masque de fermer la mise en réserve dès qu'une unité ne tiendrait
     plus sous le plafond, au lieu de laisser l'agent produire une liste illégale.
-
-    Exige la taille de bataille (`points_limit` du game_state, posée au chargement) : sans elle,
-    le plafond est invérifiable et la mise en réserve n'est pas proposable.
     """
-    from engine.game_state import STRATEGIC_RESERVES_POINTS_RATIO
-
-    points_limit = require_key(game_state, "points_limit")
-    if points_limit is None:
-        return 0
-    cap = int(int(points_limit) * STRATEGIC_RESERVES_POINTS_RATIO)
-    used = sum(
-        int(require_key(u, "VALUE"))
-        for u in require_key(game_state, "units")
-        if int(require_key(u, "player")) == int(player)
-        and u.get("in_strategic_reserves", False)  # get allowed (champ optionnel, cf. loader)
-    )
+    used, cap = strategic_reserves_usage(game_state, player)
     return max(0, cap - used)
 
 
