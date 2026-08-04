@@ -172,8 +172,19 @@ def test_a_failed_charge_counts_as_an_attempt_and_not_as_a_success(
     controlled, _opponent = _seat(engine)
     assert controlled == 1, "la ligne injectee est posee au nom du joueur 1"
 
+    # Les REUSSITES restent celles du moteur, pas de l'injection : sans cette exigence, un
+    # `squad_charge` qui n'emettrait plus AUCUNE ligne laisserait le test vert (1 tentative
+    # injectee, 0 reussite, les trois egalites ci-dessous encore satisfaites).
+    played = [lg for lg in _charge_logs(engine, controlled, ("charge",))
+              if str(lg["unitId"]) != "injected-squad"]
+    assert played, (
+        f"la graine {_SEEDS[0]} ne produit plus de charge REUSSIE du camp controle : le test ne "
+        f"lit plus que sa propre injection — a corriger, il ne doit pas verifier le vide"
+    )
+
     failed = len(_charge_logs(engine, controlled, ("charge_fail",)))
     assert failed > 0, "montage casse : aucune charge ratee"
+    assert tactical["charge_successes"] == len(played)
     assert tactical["charge_attempts"] == tactical["charge_successes"] + failed
     # Ce que l'ancienne mesure aurait rendu ici — strictement moins que les tentatives.
     assert tactical["charge_successes"] < tactical["charge_attempts"]
