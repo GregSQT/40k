@@ -1787,7 +1787,12 @@ class SquareSocle(Socle):
         return self.base_size
 
     def bounding_radius(self) -> float:
-        return (max(1, self.base_size) / 2.0) * _FOOTPRINT_SIZE_SCALE
+        # Le point le plus éloigné du centre est un COIN, à `demi-côté × √2` — cf.
+        # `bounding_radius_norm`, dont ceci est le jumeau par classe. `footprints_overlap`
+        # s'en sert pour ÉCARTER une paire sans la tester (`d > reach` → « pas de
+        # chevauchement ») : sous-estimé, il déclarait disjoints deux carrés qui se touchent
+        # par les diagonales.
+        return (max(1, self.base_size) / 2.0) * _FOOTPRINT_SIZE_SCALE * math.sqrt(2.0)
 
 
 class OvalSocle(Socle):
@@ -1809,11 +1814,22 @@ def bounding_radius_norm(shape: str, base_size: "int | list[int]") -> float:
 
     Conservateur : pour oval/square on prend la plus grande dimension. Aligné sur
     ``_FOOTPRINT_SIZE_SCALE`` comme ``round_base_radius_norm``.
+
+    ⚠️ CARRÉ : le point le plus éloigné du centre est un COIN, à ``demi-côté × √2``, et non le
+    milieu d'un côté. `_socle_edge_primitives` construit d'ailleurs le polygone avec ses coins
+    en ``(±half, ±half)``. Rendre ``half`` pour un carré n'englobait donc pas le socle : toute
+    broad-phase qui s'en sert pour ÉCARTER des candidats sans les tester (clearance de mise en
+    place, chevauchement d'empreintes) en laissait passer près des diagonales. Latent tant
+    qu'aucune datasheet ne déclare `BASE_SHAPE: "square"` — les 161 unités du dépôt sont rondes
+    ou ovales, et l'ovale, lui, est exact (son extrême EST le demi-grand-axe).
     """
     dim = max(base_size) if isinstance(base_size, (list, tuple)) else base_size
     if dim < 1:
         dim = 1
-    return (dim / 2.0) * _FOOTPRINT_SIZE_SCALE
+    radius = (dim / 2.0) * _FOOTPRINT_SIZE_SCALE
+    if shape == "square":
+        return radius * math.sqrt(2.0)
+    return radius
 
 
 def footprints_overlap(a: Socle, b: Socle) -> bool:

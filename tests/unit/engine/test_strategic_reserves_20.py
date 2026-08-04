@@ -760,6 +760,78 @@ def test_ingress_ends_the_activation():
     assert (int(gs["units_cache"][squad_id]["col"]), int(gs["units_cache"][squad_id]["row"])) != UNDEPLOYED
 
 
+def test_ingress_clears_the_preview_and_stale_pools():
+    """L'arrivée efface l'aperçu et périme les pools, comme tout commit de mouvement.
+
+    Sans ça, la bande d'arrivée (jusqu'à 2 286 points de contour) resterait publiée dans l'état
+    et serait resérialisée dans chaque réponse suivante, et les pools de destination calculés
+    avant la pose resteraient servis alors que l'occupation du plateau a changé.
+    """
+    from engine.phase_handlers.movement_handlers import (
+        INGRESS_POOL_CACHE_KEY, execute_action, movement_build_activation_pool,
+        set_ingress_preview_loops,
+    )
+
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    gs["turn"] = 2
+    gs["current_player"] = 1
+    gs["phase"] = "move"
+    squad_id = _reserve_squad(eng, deep_strike=False)
+    movement_build_activation_pool(gs)
+
+    set_ingress_preview_loops(gs, squad_id)
+    assert gs["move_preview_footprint_mask_loops"], "aperçu non publié — test sans portée"
+    assert gs.get(INGRESS_POOL_CACHE_KEY), "mémo de pool vide — test sans portée"
+
+    candidates = eng.action_decoder.ingress_slot_candidates(gs, squad_id)
+    col, row = candidates[sorted(candidates)[0]]["hex"]
+    ok, _res = execute_action(
+        gs, _unit(gs, squad_id),
+        {"action": "ingress_move", "unitId": squad_id, "destCol": col, "destRow": row},
+        gs["config"],
+    )
+    assert ok
+    assert not gs["move_preview_footprint_mask_loops"], (
+        "la bande d'arrivée doit être effacée après la pose"
+    )
+    assert not gs[INGRESS_POOL_CACHE_KEY], (
+        "les aires d'ingress mémoïsées sont périmées : l'escouade posée change l'occupation"
+    )
+
+
+def test_bounding_radius_encloses_a_square_base():
+    """Le rayon englobant doit ENGLOBER : pour un carré, le point extrême est un COIN.
+
+    Ce rayon sert de garde de broad-phase à la clearance de mise en place (20.04) : sous-estimé,
+    il écarte sans les tester des cases pourtant à 8" ou moins d'un socle carré.
+    """
+    import math as _math
+
+    from engine.hex_utils import (
+        Socle, _hex_center, _socle_edge_primitives, bounding_radius_norm,
+    )
+
+    side = 6
+    radius = bounding_radius_norm("square", side)
+    socle = Socle(shape="square", base_size=side, col=0, row=0, fp={(0, 0)})
+    center_x, center_y = _hex_center(0, 0)
+    # Une primitive est `("p", [sommets])` pour un polygone (cf. `_socle_edge_primitives`).
+    farthest = 0.0
+    for kind, payload in _socle_edge_primitives(socle):
+        if kind != "p":
+            continue
+        for px, py in payload:
+            farthest = max(farthest, _math.hypot(px - center_x, py - center_y))
+    assert farthest > 0.0, "aucun sommet lu — test sans portée"
+    assert radius + 1e-9 >= farthest, (
+        f"rayon englobant {radius:.3f} < point le plus éloigné du socle {farthest:.3f}"
+    )
+    # Et il reste SERRÉ : un rayon délirant passerait le test ci-dessus sans rien garantir.
+    assert radius <= farthest * 1.01
+
+
 def test_roster_declared_reserve_survives_unit_construction():
     """VERROU — `create_unit` ne doit pas effacer une réserve déclarée par le roster.
 
