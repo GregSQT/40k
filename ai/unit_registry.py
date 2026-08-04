@@ -10,6 +10,7 @@ import os
 import re
 import json
 from pathlib import Path
+from shared.ts_parsing import TS_QUOTED_STRING
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import sys
 from shared.data_validation import require_key, require_present
@@ -259,13 +260,13 @@ class UnitRegistry:
                 rule_objects = []
 
             for rule_object in rule_objects:
-                rule_id_match = re.search(r'ruleId\s*:\s*["\']([^"\']+)["\']', rule_object)
-                display_name_match = re.search(r'displayName\s*:\s*["\']([^"\']+)["\']', rule_object)
+                rule_id_match = re.search(r'ruleId\s*:\s*' + TS_QUOTED_STRING, rule_object)
+                display_name_match = re.search(r'displayName\s*:\s*' + TS_QUOTED_STRING, rule_object)
                 if not rule_id_match or not display_name_match:
                     raise ValueError("UNIT_RULES must contain objects with ruleId and displayName")
 
-                rule_id = rule_id_match.group(1)
-                display_name = display_name_match.group(1)
+                rule_id = rule_id_match.group(2)
+                display_name = display_name_match.group(2)
                 if rule_id not in self._unit_rules:
                     raise KeyError(f"Unknown unit rule id '{rule_id}' (missing in config/unit_rules.json)")
                 if not display_name or not display_name.strip():
@@ -276,7 +277,7 @@ class UnitRegistry:
                 if grants_rule_ids_match:
                     grants_raw = grants_rule_ids_match.group(1).strip()
                     if grants_raw:
-                        grants_rule_ids = re.findall(r'["\']([^"\']+)["\']', grants_raw)
+                        grants_rule_ids = [m[1] for m in re.findall(TS_QUOTED_STRING, grants_raw)]
                     for granted_rule_id in grants_rule_ids:
                         if granted_rule_id not in self._unit_rules:
                             raise KeyError(
@@ -284,10 +285,10 @@ class UnitRegistry:
                                 f"(missing in config/unit_rules.json)"
                             )
 
-                usage_match = re.search(r'usage\s*:\s*["\']([^"\']+)["\']', rule_object)
+                usage_match = re.search(r'usage\s*:\s*' + TS_QUOTED_STRING, rule_object)
                 usage_value = None
                 if usage_match:
-                    usage_value = usage_match.group(1).strip().lower()
+                    usage_value = usage_match.group(2).strip().lower()
                     if usage_value not in {"and", "or", "unique", "always"}:
                         raise ValueError(
                             f"Invalid usage '{usage_value}' in UNIT_RULES for '{rule_id}'. "
@@ -298,12 +299,12 @@ class UnitRegistry:
                 choice_timing_value = None
                 if choice_timing_match:
                     choice_timing_block = choice_timing_match.group(1)
-                    trigger_match = re.search(r'trigger\s*:\s*["\']([^"\']+)["\']', choice_timing_block)
+                    trigger_match = re.search(r'trigger\s*:\s*' + TS_QUOTED_STRING, choice_timing_block)
                     if not trigger_match:
                         raise ValueError(
                             f"UNIT_RULES choice_timing for '{rule_id}' must define trigger"
                         )
-                    trigger_value = trigger_match.group(1).strip()
+                    trigger_value = trigger_match.group(2).strip()
                     allowed_triggers = {
                         "on_deploy",
                         "turn_start",
@@ -318,9 +319,9 @@ class UnitRegistry:
                         )
                     choice_timing_value = {"trigger": trigger_value}
 
-                    phase_match = re.search(r'phase\s*:\s*["\']([^"\']+)["\']', choice_timing_block)
+                    phase_match = re.search(r'phase\s*:\s*' + TS_QUOTED_STRING, choice_timing_block)
                     if phase_match:
-                        phase_value = phase_match.group(1).strip()
+                        phase_value = phase_match.group(2).strip()
                         allowed_phases = {"command", "move", "shoot", "charge", "fight"}
                         if phase_value not in allowed_phases:
                             raise ValueError(
@@ -330,10 +331,10 @@ class UnitRegistry:
                         choice_timing_value["phase"] = phase_value
 
                     active_player_scope_match = re.search(
-                        r'active_player_scope\s*:\s*["\']([^"\']+)["\']', choice_timing_block
+                        r'active_player_scope\s*:\s*' + TS_QUOTED_STRING, choice_timing_block
                     )
                     if active_player_scope_match:
-                        active_player_scope_value = active_player_scope_match.group(1).strip()
+                        active_player_scope_value = active_player_scope_match.group(2).strip()
                         allowed_active_player_scope = {"owner", "opponent", "both"}
                         if active_player_scope_value not in allowed_active_player_scope:
                             raise ValueError(
@@ -400,10 +401,10 @@ class UnitRegistry:
                 keyword_objects = []
 
             for keyword_object in keyword_objects:
-                keyword_id_match = re.search(r'keywordId\s*:\s*["\']([^"\']+)["\']', keyword_object)
+                keyword_id_match = re.search(r'keywordId\s*:\s*' + TS_QUOTED_STRING, keyword_object)
                 if not keyword_id_match:
                     raise ValueError("UNIT_KEYWORDS must contain objects with keywordId")
-                keyword_id = keyword_id_match.group(1)
+                keyword_id = keyword_id_match.group(2)
                 if not keyword_id or not keyword_id.strip():
                     raise ValueError("UNIT_KEYWORDS keywordId cannot be empty")
                 unit_keywords.append({"keywordId": keyword_id})
@@ -438,7 +439,7 @@ class UnitRegistry:
                     properties[prop_name] = json.loads(normalized)
                 except json.JSONDecodeError:
                     # Guillemets simples (TS) : extraire les tokens quotés (tableaux de strings).
-                    items = re.findall(r'["\']([^"\']*)["\']', prop_value)
+                    items = [m[1] for m in re.findall(TS_QUOTED_STRING, prop_value)]
                     if not items:
                         raise ValueError(
                             f"Static array {prop_name} unparseable in {ts_file}: {prop_value!r}"
@@ -466,7 +467,7 @@ class UnitRegistry:
         codes_str = rng_codes_match.group(1).strip()
         if codes_str:
             # Gérer guillemets simples ET doubles
-            codes = re.findall(r'["\']([^"\']+)["\']', codes_str)
+            codes = [m[1] for m in re.findall(TS_QUOTED_STRING, codes_str)]
         else:
             codes = []  # Array vide
         
@@ -493,7 +494,7 @@ class UnitRegistry:
             raise ValueError("Unit definition missing required CC_WEAPON_CODES (use [] if none)")
         codes_str = cc_codes_match.group(1).strip()
         if codes_str:
-            codes = re.findall(r'["\']([^"\']+)["\']', codes_str)
+            codes = [m[1] for m in re.findall(TS_QUOTED_STRING, codes_str)]
         else:
             codes = []
         
@@ -552,19 +553,19 @@ class UnitRegistry:
         class_name = class_match.group(1)
 
         starter_match = re.search(
-            r'static\s+STARTER_LOADOUT_ID(?:\s*:\s*[^=]+)?\s*=\s*["\']([^"\']+)["\']\s*;',
+            r'static\s+STARTER_LOADOUT_ID(?:\s*:\s*[^=]+)?\s*=\s*' + TS_QUOTED_STRING + r'\s*;',
             content,
         )
         if not starter_match:
             raise ValueError(f"ED unit class {class_name} is missing required static STARTER_LOADOUT_ID")
-        starter_loadout_id = starter_match.group(1)
+        starter_loadout_id = starter_match.group(2)
 
         def _extract_static_string(prop_name: str) -> str | None:
             match = re.search(
-                rf'static\s+{prop_name}(?:\s*:\s*[^=]+)?\s*=\s*["\']([^"\']+)["\']\s*;',
+                rf'static\s+{prop_name}(?:\s*:\s*[^=]+)?\s*=\s*' + TS_QUOTED_STRING + r'\s*;',
                 content,
             )
-            return match.group(1) if match else None
+            return match.group(2) if match else None
 
         evolution_filename = _extract_static_string("EVOLUTION_FILE")
         profile_name = _extract_static_string("PROFILE_NAME")

@@ -18,20 +18,11 @@ from typing import Dict, List, Any, Optional
 from engine.weapons.rules import get_weapon_rules_registry, validate_weapon_rules_field
 
 
-# Chaine TypeScript entre guillemets, tolerant a l'AUTRE guillemet a l'interieur.
-# group(1) = guillemet ouvrant, group(2) = contenu.
-#
-# V11 T6 — corrige un bug SILENCIEUX : l'ancien motif `["\']([^"\']+)["\']` ouvrait sur `"` ou
-# `'`, capturait tout sauf CES DEUX caracteres, puis fermait sur l'un ou l'autre. Une apostrophe
-# a l'interieur d'une chaine a guillemets doubles cassait donc la lecture. Les noms Orks en sont
-# pleins :
-#   display_name: "Dok's Tools"     -> capturait "Dok" (TRONQUE, sans erreur)
-#   display_name: "'eadbanger'"     -> aucun match -> la cle display_name n'etait JAMAIS posee,
-#   display_name: "'urty Syringe"      et l'absence explosait bien plus loin, ailleurs
-#   display_name: "'Waaagh! Staff"     (`require_key(weapon, "display_name")`, analyzer_config).
-# La backreference \1 impose de fermer sur le MEME guillemet que l'ouverture — comportement
-# strictement identique pour tout nom sans apostrophe.
-_TS_QUOTED_STRING = r'(["\'])((?:(?!\1).)*)\1'
+# Chaine TypeScript entre guillemets : motif PARTAGE avec le parseur d'unites (`ai/unit_registry`).
+# Il vivait ici seul depuis V11 T6, et le parseur d'unites a garde le motif naif jusqu'au
+# 2026-08-04 — le meme bug y a resurgi mot pour mot sur `displayName: "Thievin' Scavengers"`.
+# POURQUOI dans `shared/ts_parsing.py`.
+from shared.ts_parsing import TS_QUOTED_STRING as _TS_QUOTED_STRING
 
 
 class ArmoryParser:

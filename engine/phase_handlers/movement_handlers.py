@@ -603,7 +603,14 @@ def movement_step_cp_gain_on_objective(game_state: Dict[str, Any]) -> int:
     objectif. C'est le piège de lecture de la capacité — « if one or more of those rolls is a 4+ »
     porte sur l'ENSEMBLE des jets.
 
-    Retourne le nombre de dés lancés (0 = aucun objectif éligible), pour le log et les tests.
+    UNE SEULE FOIS par phase de mouvement, garanti par le marqueur `(tour, joueur)` —
+    `movement_phase_start` n'est PAS idempotente vis-à-vis d'une capacité qui lance des dés, et
+    `execute_action` la ré-invoque quand elle voit un pool vide. Tant que la fonction ne faisait
+    que reconstruire des caches, la relancer était sans effet ; avec un gain de CP, ce serait un
+    second jet et un CP en trop. Même motif de garde que `primary_objective_scored_turns`.
+
+    Retourne le nombre de dés lancés (0 = aucun objectif éligible ou étape déjà résolue), pour le
+    log et les tests.
     """
     import random
 
@@ -614,6 +621,7 @@ def movement_step_cp_gain_on_objective(game_state: Dict[str, Any]) -> int:
     from .shared_utils import is_unit_alive, unit_has_rule_effect
 
     current_player = int(require_key(game_state, "current_player"))
+
     units = require_key(game_state, "units")
     # Porteurs vivants, non battle-shocked, du joueur actif. Calculé UNE fois : la liste ne
     # dépend pas de l'objectif, seule l'appartenance à la zone en dépend.
@@ -631,6 +639,27 @@ def movement_step_cp_gain_on_objective(game_state: Dict[str, Any]) -> int:
     # aucune unite concernee.
     if not carriers:
         return 0
+
+    # 14.02 : « you control » se lit sur le contrôle DÉTERMINÉ à la fin de la phase précédente —
+    # ici la fin de la phase de commandement. Ce checkpoint tourne en fin de `step` moteur, donc
+    # APRÈS le début de la phase de mouvement du même step : MESURÉ, `objective_controllers`
+    # valait `{}` aux deux phases de mouvement du tour 1, et la capacité n'y jouait JAMAIS —
+    # « code testé mais jamais atteint ». On force donc la frontière à être soldée avant de lire.
+    # `refresh_objective_control_on_boundary` est idempotente (elle mémorise la dernière
+    # frontière vue) et ne fait que recalculer les contrôleurs : aucun VP n'est marqué ici.
+    from engine.game_state import GameStateManager
+
+    GameStateManager(require_key(game_state, "config")).refresh_objective_control_on_boundary(
+        game_state
+    )
+    # Etape deja resolue ce (tour, joueur) ? Verifie APRES le filtre des porteurs : sans porteur
+    # il n'y a rien a resoudre, donc rien a memoriser — et un etat de jeu sans cette capacite n'a
+    # pas a porter le marqueur.
+    resolved = require_key(game_state, "cp_gain_on_objective_resolved")
+    marker = (int(require_key(game_state, "turn")), current_player)
+    if marker in resolved:
+        return 0
+    resolved.add(marker)
 
     controllers = require_key(game_state, "objective_controllers")
     rolls: List[int] = []

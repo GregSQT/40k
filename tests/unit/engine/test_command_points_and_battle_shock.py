@@ -307,6 +307,8 @@ def _oc_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
         "primary_objective_scored_turns": set(),
         "objective_rewarded_turns": set(),
         "objective_controllers": {},
+        # Marqueur d'étape « début de phase de mouvement » déjà résolue (posé au reset moteur).
+        "cp_gain_on_objective_resolved": set(),
         "objectives": [{"id": 1, "name": "Alpha", "hexes": [[5, 5]]}],
         "board_cols": 15,
         "board_rows": 13,
@@ -498,6 +500,35 @@ def test_thievin_scavengers_donne_un_seul_cp_pour_deux_objectifs():
 
     assert rolled == 2, "un dé par objectif contrôlé et tenu, donc deux dés attendus"
     assert gs["command_points"][1] == 1, "le gain de Thievin' Scavengers est GLOBAL, pas par objectif"
+
+
+def test_thievin_scavengers_ne_rejoue_pas_dans_la_meme_phase():
+    """`movement_phase_start` est ré-invoquée par `execute_action` sur un pool vide : la capacité
+    ne doit pas relancer ses dés.
+
+    PREUVE DU ROUGE (2026-08-04) : en retirant le marqueur `(tour, joueur)`, le second appel
+    relance 2 dés et verse un second CP — `assert 1 == 1` devient `assert 2 == 1`.
+    """
+    gs = _thievin_gs()
+    original = random.randint
+    random.randint = lambda a, b: 4
+    try:
+        first = movement_handlers.movement_step_cp_gain_on_objective(gs)
+        second = movement_handlers.movement_step_cp_gain_on_objective(gs)
+    finally:
+        random.randint = original
+
+    assert (first, second) == (2, 0), "le second appel a relancé des dés"
+    assert gs["command_points"][1] == 1
+
+    # Tour suivant : l'étape se rejoue, le marqueur est bien par (tour, joueur).
+    gs["turn"] = 3
+    random.randint = lambda a, b: 4
+    try:
+        assert movement_handlers.movement_step_cp_gain_on_objective(gs) == 2
+    finally:
+        random.randint = original
+    assert gs["command_points"][1] == 2
 
 
 def test_thievin_scavengers_ne_donne_rien_sans_4_plus():

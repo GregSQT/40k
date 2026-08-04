@@ -576,6 +576,13 @@ class W40KEngine(gym.Env):
             "command_points": initial_command_points(get_config_loader().get_game_config()),
             "primary_objective": self._scenario_primary_objective,
             "primary_objective_scored_turns": set(),
+            # Etapes « debut de phase de mouvement » deja resolues, en (tour, joueur) :
+            # `movement_phase_start` est ré-invoquee par `execute_action` quand elle voit un pool
+            # vide, et une capacite qui lance des des ne doit pas rejouer (cf.
+            # `movement_step_cp_gain_on_objective`). Meme cycle de vie que les marqueurs de
+            # scoring juste au-dessus : purge a chaque episode, sinon un tour 1 passerait pour
+            # deja resolu au reset suivant.
+            "cp_gain_on_objective_resolved": set(),
             "objective_rewarded_turns": set(),
             "coherency_penalized_turns": set(),
             "controlled_objective_samples_scoring_turns": [],
@@ -1345,6 +1352,13 @@ class W40KEngine(gym.Env):
             "command_points": initial_command_points(get_config_loader().get_game_config()),
             "primary_objective": self._scenario_primary_objective,
             "primary_objective_scored_turns": set(),
+            # Etapes « debut de phase de mouvement » deja resolues, en (tour, joueur) :
+            # `movement_phase_start` est ré-invoquee par `execute_action` quand elle voit un pool
+            # vide, et une capacite qui lance des des ne doit pas rejouer (cf.
+            # `movement_step_cp_gain_on_objective`). Meme cycle de vie que les marqueurs de
+            # scoring juste au-dessus : purge a chaque episode, sinon un tour 1 passerait pour
+            # deja resolu au reset suivant.
+            "cp_gain_on_objective_resolved": set(),
             "objective_rewarded_turns": set(),
             "coherency_penalized_turns": set(),
             "controlled_objective_samples_scoring_turns": [],
