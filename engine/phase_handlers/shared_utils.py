@@ -1845,10 +1845,16 @@ def get_max_base_size_hex(game_state: Dict[str, Any]) -> int:
     Utilisé par la prune conservatrice des ennemis en déplacement (ez > 1) : au-delà de ce
     diamètre, on tronque la contribution « rayon d'empreinte » pour rester sûr sans exploser
     la fenêtre si des données unité sont aberrantes.
+
+    Aucun défaut caché, exactement comme ``get_engagement_zone`` (même section ``game_rules``,
+    même fichier) : un état sans ``config``/``game_rules``/``max_base_size_hex`` est malformé,
+    pas un cas à replier sur une constante. Ce seuil est en DIAMÈTRE HEX et n'est PAS scalé par
+    ``inches_to_subhex`` (absent de la liste de conversion de ``w40k_core``) : un littéral en
+    dur n'aurait donc même pas le même sens d'un plateau à l'autre.
     """
-    config = game_state.get("config") or {}
-    game_rules = config.get("game_rules") or {}
-    return int(game_rules.get("max_base_size_hex", 35))
+    config = require_key(game_state, "config")
+    game_rules = require_key(config, "game_rules")
+    return int(require_key(game_rules, "max_base_size_hex"))
 
 
 def build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[Tuple[int, int]]:
