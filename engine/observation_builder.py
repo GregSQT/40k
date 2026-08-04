@@ -57,15 +57,74 @@ from engine.observation_entities import (
     OBS_PHASE_IDS,
     SELF_MODEL_BIN_SIZE,
     SELF_MODEL_CONT_SIZE,
+    UNIT_ABILITY_SLOTS,
     UNIT_BIN_SIZE,
     UNIT_CONT_SIZE,
     UNIT_RULE_EFFECT_IDS,
+    UNIT_STATUS_SLOTS,
     WEAPON_PROFILE_CACHE_KEY,
     global_bin_index,
     global_cont_index,
     unit_bin_index,
     unit_cont_index,
 )
+
+
+def unit_ability_obs_ids() -> Dict[str, int]:
+    """`{effet observable -> obs_id}` pour les 13 effets de `UNIT_RULE_EFFECT_IDS`.
+
+    Le registre `config/unit_rules.json` est la SOURCE des ids ; ce module ne fait que restreindre
+    au VOCABULAIRE OBSERVÉ. Un effet observable sans `obs_id` lève : sans id, il serait écrit
+    nulle part et l'agent subirait la règle sans la percevoir — le trou que le chantier ferme.
+
+    Mémoïsé sur le loader (il cache déjà le JSON) : appelé pour chacune des 28 entités à chaque
+    step.
+    """
+    global _ABILITY_OBS_IDS
+    if _ABILITY_OBS_IDS is None:
+        from config_loader import get_config_loader
+
+        registry = get_config_loader().load_unit_rules_config()
+        mapping: Dict[str, int] = {}
+        for rule_id in UNIT_RULE_EFFECT_IDS:
+            if rule_id not in registry:
+                raise KeyError(
+                    f"Effet observable '{rule_id}' (UNIT_RULE_EFFECT_IDS) absent de "
+                    f"config/unit_rules.json."
+                )
+            entry = registry[rule_id]
+            if "obs_id" not in entry:
+                raise KeyError(
+                    f"Effet observable '{rule_id}' sans 'obs_id' dans config/unit_rules.json : "
+                    f"il ne pourrait etre ecrit dans aucun slot de capacite de l'observation."
+                )
+            mapping[rule_id] = int(entry["obs_id"])
+        _ABILITY_OBS_IDS = mapping
+    return _ABILITY_OBS_IDS
+
+
+def unit_status_obs_ids() -> Dict[str, int]:
+    """`{statut -> obs_id}` du registre `config/unit_statuses.json`.
+
+    Registre JUMEAU de `unit_ability_obs_ids` : meme convention, seconde table d'embedding. Les
+    trois statuts (`battle_shock`, `oath_target`, `suppressed`) y sont DECLARES mais pas encore
+    poses — ce sont les chantiers 02, 03 et 06 qui le feront. Les declarer des maintenant est ce
+    qui garantit qu'aucun d'eux ne retouchera `obs_size`.
+    """
+    global _STATUS_OBS_IDS
+    if _STATUS_OBS_IDS is None:
+        from config_loader import get_config_loader
+
+        _STATUS_OBS_IDS = {
+            status_id: int(entry["obs_id"])
+            for status_id, entry in get_config_loader().load_unit_statuses_config().items()
+        }
+    return _STATUS_OBS_IDS
+
+
+_ABILITY_OBS_IDS: Optional[Dict[str, int]] = None
+_STATUS_OBS_IDS: Optional[Dict[str, int]] = None
+
 
 class ObservationBuilder:
     """Builds observations for the agent."""
@@ -237,6 +296,10 @@ class ObservationBuilder:
         * (
             UNIT_CONT_SIZE
             + UNIT_BIN_SIZE
+            # Ensembles d'ids de capacités et de statuts (chantier 01) : 12 entiers par entité,
+            # là où les bits `rule_*` en coûtaient 13 ET grossissaient à chaque capacité ajoutée.
+            + UNIT_ABILITY_SLOTS
+            + UNIT_STATUS_SLOTS
             + K_WEAPONS * (PROFILE_CONT_SIZE + PROFILE_BIN_SIZE)
             + K_MODEL_TYPES * (MODEL_TYPE_CONT_SIZE + MODEL_TYPE_BIN_SIZE)
         )
@@ -262,12 +325,18 @@ class ObservationBuilder:
             "global_bin": (GLOBAL_BIN_SIZE,),
             "allies_cont": (cls.K_ALLY_SLOTS, UNIT_CONT_SIZE),
             "allies_bin": (cls.K_ALLY_SLOTS, UNIT_BIN_SIZE),
+            # Ensembles d'ids (chantier 01) — MÊME schéma des deux côtés, comme tout le reste de
+            # l'entité (§3.3) : ce sont deux tables d'embedding PARTAGÉES qui les lisent.
+            "allies_ability_ids": (cls.K_ALLY_SLOTS, UNIT_ABILITY_SLOTS),
+            "allies_status_ids": (cls.K_ALLY_SLOTS, UNIT_STATUS_SLOTS),
             "allies_wpn_cont": (cls.K_ALLY_SLOTS, cls.K_WEAPONS, PROFILE_CONT_SIZE),
             "allies_wpn_bin": (cls.K_ALLY_SLOTS, cls.K_WEAPONS, PROFILE_BIN_SIZE),
             "allies_types_cont": (cls.K_ALLY_SLOTS, cls.K_MODEL_TYPES, MODEL_TYPE_CONT_SIZE),
             "allies_types_bin": (cls.K_ALLY_SLOTS, cls.K_MODEL_TYPES, MODEL_TYPE_BIN_SIZE),
             "enemies_cont": (cls.K_ENEMY_SLOTS, UNIT_CONT_SIZE),
             "enemies_bin": (cls.K_ENEMY_SLOTS, UNIT_BIN_SIZE),
+            "enemies_ability_ids": (cls.K_ENEMY_SLOTS, UNIT_ABILITY_SLOTS),
+            "enemies_status_ids": (cls.K_ENEMY_SLOTS, UNIT_STATUS_SLOTS),
             "enemies_wpn_cont": (cls.K_ENEMY_SLOTS, cls.K_WEAPONS, PROFILE_CONT_SIZE),
             "enemies_wpn_bin": (cls.K_ENEMY_SLOTS, cls.K_WEAPONS, PROFILE_BIN_SIZE),
             "enemies_types_cont": (cls.K_ENEMY_SLOTS, cls.K_MODEL_TYPES, MODEL_TYPE_CONT_SIZE),
@@ -975,10 +1044,14 @@ class ObservationBuilder:
         *,
         is_ally: bool,
         is_active: bool,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    ) -> Tuple[
+        np.ndarray, np.ndarray, np.ndarray, np.ndarray,
+        np.ndarray, np.ndarray, np.ndarray, np.ndarray,
+    ]:
         """Encode UNE unité selon le schéma unifié (`observation_entities`).
 
-        Retourne (cont, bin, armes_cont, armes_bin, types_cont, types_bin). Les features
+        Retourne (cont, bin, ability_ids, status_ids, armes_cont, armes_bin, types_cont,
+        types_bin). Les features
         marquées « unité ACTIVE uniquement » dans le schéma restent à zéro pour les autres
         entités : leur masque est le bit `is_active` (§3.3).
         """
@@ -1137,14 +1210,52 @@ class ObservationBuilder:
             "deployed_this_turn",
             deployed_on_turn is not None and int(deployed_on_turn) == ctx["current_turn"],
         )
-        # Règles d'UNITÉ en vigueur (19.04 : union escouade + characters attachés encore vivants).
+        # Capacités EN VIGUEUR (19.04 : union escouade + characters attachés encore vivants),
+        # écrites en `obs_id` TRIÉS CROISSANT puis paddées à 0 (chantier 01).
+        #
         # Émises pour TOUTE entité, amie comme ennemie : savoir qu'une escouade adverse relance
         # ses charges ou pénètre l'armure de la cible la plus proche change l'évaluation de la
-        # menace autant que ses armes. `unit_has_rule_effect` résout les règles SOURCES vers
-        # leurs effets (une capacité nommée confère un effet technique), donc exposer les
-        # effets décrit exactement ce que le moteur applique.
-        for rule_id in UNIT_RULE_EFFECT_IDS:
-            _b(f"rule_{rule_id}", unit_has_rule_effect(unit, rule_id))
+        # menace autant que ses armes. La source est `unit_has_rule_effect`, EXACTEMENT celle des
+        # bits qu'elle remplace : elle résout les règles SOURCES vers leurs effets (une capacité
+        # nommée confère un effet technique), donc ce qui est écrit décrit ce que le moteur
+        # applique — et le jeu produit est identique à celui d'avant le chantier.
+        obs_ids = unit_ability_obs_ids()
+        ability_ids = np.zeros(UNIT_ABILITY_SLOTS, dtype=np.float32)
+        in_effect = sorted(
+            obs_ids[rule_id]
+            for rule_id in UNIT_RULE_EFFECT_IDS
+            if unit_has_rule_effect(unit, rule_id)
+        )
+        if len(in_effect) > UNIT_ABILITY_SLOTS:
+            # ERREUR, jamais troncature : tronquer ferait subir à l'agent des règles qu'il ne
+            # perçoit pas — exactement le trou que V11 §0.30 avait fermé.
+            by_obs_id = {obs_id: rule_id for rule_id, obs_id in obs_ids.items()}
+            raise ValueError(
+                f"Escouade {squad_id} : {len(in_effect)} capacites en vigueur pour "
+                f"{UNIT_ABILITY_SLOTS} slots d'observation. En exces (les moins prioritaires du "
+                f"tri croissant) : {[by_obs_id[i] for i in in_effect[UNIT_ABILITY_SLOTS:]]}. "
+                f"Augmenter UNIT_ABILITY_SLOTS (engine/observation_entities.py) — ce qui change "
+                f"obs_size et impose un retrain `--new`."
+            )
+        ability_ids[: len(in_effect)] = in_effect
+        # Statuts : les trois du registre (`battle_shock`, `oath_target`, `suppressed`) sont
+        # DÉCLARÉS mais pas encore posés — ce sont les chantiers 02, 03 et 06 qui les
+        # renseigneront. Le tenseur reste donc nul, ce qui est l'état exact du jeu aujourd'hui :
+        # aucun de ces statuts n'était observé avant ce chantier non plus.
+        #
+        # Le registre est malgré tout lu ICI, sur le chemin de PRODUCTION : un
+        # `unit_statuses.json` malformé, ou un statut déclaré de plus que de slots, doit lever
+        # maintenant et pas au chantier qui posera le statut — à ce moment-là, le défaut serait
+        # une capacité que l'agent subit sans la percevoir, faute de slot pour l'écrire.
+        declared_statuses = unit_status_obs_ids()
+        if len(declared_statuses) > UNIT_STATUS_SLOTS:
+            raise ValueError(
+                f"config/unit_statuses.json declare {len(declared_statuses)} statuts "
+                f"({sorted(declared_statuses)}) pour {UNIT_STATUS_SLOTS} slots d'observation. "
+                f"Augmenter UNIT_STATUS_SLOTS (engine/observation_entities.py) — ce qui change "
+                f"obs_size et impose un retrain `--new`."
+            )
+        status_ids = np.zeros(UNIT_STATUS_SLOTS, dtype=np.float32)
 
         if not is_ally:
             # Couvert et visibilité de cette entité ENNEMIE vus depuis l'unité observatrice.
@@ -1253,7 +1364,10 @@ class ObservationBuilder:
         types_cont, types_bin = self._encode_entity_model_types(
             game_state, squad_id, alive_mids, models_cache
         )
-        return cont, binv, wpn_cont, wpn_bin, types_cont, types_bin
+        return (
+            cont, binv, ability_ids, status_ids,
+            wpn_cont, wpn_bin, types_cont, types_bin,
+        )
 
     def build_squad_observation(
         self, game_state: Dict[str, Any], active_squad_id: str
@@ -1589,12 +1703,15 @@ class ObservationBuilder:
 
         def _write_entity(prefix: str, row: int, sid: str, *, is_ally: bool, is_active: bool) -> None:
             (
-                e_cont, e_bin, e_wpn_cont, e_wpn_bin, e_types_cont, e_types_bin,
+                e_cont, e_bin, e_ability_ids, e_status_ids,
+                e_wpn_cont, e_wpn_bin, e_types_cont, e_types_bin,
             ) = self._encode_unit_entity(
                 game_state, sid, ctx, is_ally=is_ally, is_active=is_active
             )
             obs[f"{prefix}_cont"][row] = e_cont
             obs[f"{prefix}_bin"][row] = e_bin
+            obs[f"{prefix}_ability_ids"][row] = e_ability_ids
+            obs[f"{prefix}_status_ids"][row] = e_status_ids
             obs[f"{prefix}_wpn_cont"][row] = e_wpn_cont
             obs[f"{prefix}_wpn_bin"][row] = e_wpn_bin
             obs[f"{prefix}_types_cont"][row] = e_types_cont

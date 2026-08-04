@@ -779,6 +779,16 @@ class W40KEngine(gym.Env):
                     spaces_dict[key] = gym.spaces.Box(
                         low=-1.0, high=1.0, shape=shape, dtype=np.float32
                     )
+                elif key.endswith("_ids"):
+                    # Ensembles d'ids de capacites/statuts (chantier 01) : des INDEX de ligne
+                    # d'embedding, bornes par le registre. Les laisser dans le Box non borne des
+                    # cles "_cont" aurait laisse passer un id hors table — que `EmbeddingBag`
+                    # transforme en acces memoire invalide, pas en erreur lisible.
+                    from config_loader import OBS_ID_MAX
+
+                    spaces_dict[key] = gym.spaces.Box(
+                        low=0.0, high=float(OBS_ID_MAX), shape=shape, dtype=np.float32
+                    )
                 else:
                     spaces_dict[key] = gym.spaces.Box(
                         low=-np.inf, high=np.inf, shape=shape, dtype=np.float32

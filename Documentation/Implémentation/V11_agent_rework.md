@@ -3805,9 +3805,9 @@ trois constructeurs :
 
 | | floats / transition |
 |---|---|
-| vecteur (`obs_size`) | 20 780 |
+| vecteur (`obs_size`) | 20 752 |
 | grille (9 × 32 × 32) | 9 216 |
-| **total** | **29 996**, soit **117,2 Kio** par transition en float32 |
+| **total** | **29 968**, soit **117,1 Kio** par transition en float32 |
 
 **Dimensionnement réel au 2026-08-02** — les **six** profils portent `n_envs: 48` et
 `n_steps: 8192` : **8 160 transitions**, **≈ 0,98 Go** de buffer. Le régime validé de CoreAgent
@@ -5014,8 +5014,10 @@ et la mauvaise cause.
 
 > ⏳ **Chiffres dépassés depuis — relevé du 2026-08-02.** Cette entrée décrit un état
 > **intermédiaire** du 2026-07-28 ; du travail a été livré par-dessus (§0.40 pour l'observation,
-> P2/P3-2 pour l'espace d'action). Valeurs courantes : `obs_size` **20780** (et non 20601/20626/20828),
-> `TOTAL_ACTION_SIZE` **1107** (et non 1062), `UNIT_CONT_SIZE` **20**, `UNIT_BIN_SIZE` **33**.
+> P2/P3-2 pour l'espace d'action). Valeurs courantes **au 2026-08-04, après le chantier 01** :
+> `obs_size` **20752** (et non 20601/20626/20780/20828), `TOTAL_ACTION_SIZE` **1127** (et non
+> 1062/1107), `UNIT_CONT_SIZE` **20**, `UNIT_BIN_SIZE` **20** (les 13 bits `rule_<effet>` sont
+> devenus deux ensembles d'ids, `*_ability_ids` / `*_status_ids`).
 > `PROFILE_CONT_SIZE` 13 / `PROFILE_BIN_SIZE` 18 et `GRID_CHANNELS` **9** restent exacts.
 > **Ne pas citer un chiffre de cette entrée comme état courant.**
 

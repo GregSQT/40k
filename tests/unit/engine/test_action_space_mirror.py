@@ -66,22 +66,44 @@ def test_zone_intent_starts_right_after_the_micro_actions():
     assert mi.BASE_ZONE_INTENT == su.SQUAD_ACTION_SIZE
 
 
+def test_oath_slots_mirror_the_enemy_slot_mapping():
+    """Chantier 01 : une action d'Oath = un slot ennemi, le MEME que le tir (invariant D1).
+
+    Oath of Moment designe « one unit from your opponent's army » : un candidat DEJA OBSERVE,
+    donc une dimension d'action + pointeur, jamais un `CHOICE_k`. Desolidariser les comptes
+    ferait pointer l'action d'Oath i et la ligne i du tenseur ennemi sur deux escouades
+    differentes, sans que rien ne leve.
+    """
+    assert mi.OATH_SLOT_COUNT == mi.SHOOT_SLOT_COUNT
+    assert su.SQUAD_ACTION_OATH_SLOT_COUNT == su.SQUAD_ACTION_SHOOT_SLOT_COUNT
+    assert mi.OATH_SLOT_COUNT == su.SQUAD_ACTION_OATH_SLOT_COUNT
+
+
 def test_total_action_size():
-    """L'action space se termine par les CHOICE_i du mecanisme de decision (V11 §9.3 P2)."""
+    """L'action space se termine par les slots d'Oath of Moment (chantier 01).
+
+    ⚠️ `TOTAL_ACTION_SIZE` est GELE apres le chantier 01 : les chantiers 02 a 06 n'utilisent que
+    des dimensions deja declarees ici, ce qui garantit UN SEUL retrain en fin de sequence.
+    """
     assert mi.CHOICE_BASE == su.SQUAD_ACTION_SIZE + mi.MAX_OBJECTIVES * 3
-    assert mi.TOTAL_ACTION_SIZE == mi.CHOICE_BASE + mi.CHOICE_COUNT
-    assert mi.TOTAL_ACTION_SIZE == 1107
+    assert mi.OATH_SLOT_BASE == mi.CHOICE_BASE + mi.CHOICE_COUNT
+    assert mi.TOTAL_ACTION_SIZE == mi.OATH_SLOT_BASE + mi.OATH_SLOT_COUNT
+    assert mi.TOTAL_ACTION_SIZE == 1127
 
 
-def test_choice_slots_close_the_action_space():
-    """Les CHOICE ne recouvrent aucun zone intent et ferment l'espace, sans trou."""
-    assert list(mi.CHOICE_SLOTS) == list(range(mi.CHOICE_BASE, mi.TOTAL_ACTION_SIZE))
+def test_choice_then_oath_slots_close_the_action_space():
+    """CHOICE puis Oath ferment l'espace, sans trou ni recouvrement avec les zone intents."""
+    assert list(mi.CHOICE_SLOTS) == list(range(mi.CHOICE_BASE, mi.OATH_SLOT_BASE))
+    assert list(mi.OATH_SLOTS) == list(range(mi.OATH_SLOT_BASE, mi.TOTAL_ACTION_SIZE))
     assert not mi.is_zone_intent_action(mi.CHOICE_BASE)
+    assert not mi.is_zone_intent_action(mi.OATH_SLOT_BASE)
     assert mi.is_zone_intent_action(mi.CHOICE_BASE - 1)
     for offset in range(mi.CHOICE_COUNT):
         assert mi.is_agent_decision_action(mi.CHOICE_BASE + offset)
         assert mi.decode_agent_decision_action(mi.CHOICE_BASE + offset) == offset
     assert not mi.is_agent_decision_action(mi.CHOICE_BASE - 1)
+    # Un slot d'Oath n'est PAS un candidat de decision : il ne doit pas etre decode comme tel.
+    assert not mi.is_agent_decision_action(mi.OATH_SLOT_BASE)
     assert not mi.is_agent_decision_action(mi.TOTAL_ACTION_SIZE)
 
 

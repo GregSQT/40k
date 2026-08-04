@@ -25,6 +25,7 @@ Format minimal d'une regle technique:
 {
   "reroll_1_tohit_fight": {
     "id": "reroll_1_tohit_fight",
+    "obs_id": 8,
     "description": "During the fight phase, ..."
   }
 }
@@ -51,6 +52,37 @@ Contraintes importantes:
   - doit pointer vers une regle existante,
   - ne peut pas pointer vers elle-meme.
 - `name` est requis en pratique pour toute regle utilisee comme option de choix (label UI).
+
+### `obs_id` — identifiant d'observation
+
+`obs_id` est l'entier que l'observation de l'agent ecrit dans les slots de capacite
+(`allies_ability_ids` / `enemies_ability_ids`, cf. [`AI_OBSERVATION.md`](AI_OBSERVATION.md)). Il
+remplace les 13 bits `rule_<effet>` : une capacite n'est plus une DIMENSION du vecteur mais une
+LIGNE d'une table d'embedding, ce qui rend son ajout gratuit — ni `obs_size`, ni le nombre de
+parametres du reseau ne changent, donc aucun retrain.
+
+Regles:
+
+- **Requis** pour toute regle du vocabulaire observe (`UNIT_RULE_EFFECT_IDS`,
+  `engine/observation_entities.py`) : les 13 effets techniques. Absent -> erreur explicite a la
+  premiere observation.
+- **Absent** pour tout le reste : capacites SOURCES composites (`cunning_hunters`,
+  `targeted_intercession`…), regles d'affichage a `alias`, et marqueurs de ROLE (`leader`,
+  `support`, `sergeant`, `special_weapon`) — le bloc TYPES porte deja ces derniers. Ce sont les
+  EFFETS qui sont observes, jamais les capacites nommees : `unit_has_rule_effect` resout les
+  sources vers eux.
+- Domaine `[1, 127]`. `0` est reserve au padding des slots vides.
+- **UNIQUE**, et **STABLE A VIE**. Un `obs_id` libere par la suppression d'une regle est **brule**,
+  jamais reattribue : le reattribuer ferait pointer un modele deja entraine sur une ligne
+  d'embedding qui ne veut plus dire la meme chose — corruption silencieuse, invisible en
+  entrainement comme en eval.
+
+Absent, hors domaine ou duplique -> le chargeur leve (`config_loader._validate_obs_ids`).
+
+Le registre jumeau [`config/unit_statuses.json`](../config/unit_statuses.json) suit exactement la
+meme convention pour les STATUTS (`battle_shock`, `oath_target`, `suppressed`), qui alimentent une
+seconde table d'embedding. Les deux domaines sont independants : un `obs_id` de capacite et un
+`obs_id` de statut peuvent porter la meme valeur.
 
 ## 3) Structure de `UNIT_RULES` dans une unite
 
@@ -140,6 +172,10 @@ Comportement IA:
 ## 7) Procedure "ajouter une nouvelle regle"
 
 1. Ajouter/mettre a jour la regle technique dans `config/unit_rules.json`.
+   Si l'agent doit la PERCEVOIR : l'ajouter aussi a `UNIT_RULE_EFFECT_IDS`
+   (`engine/observation_entities.py`) et lui donner un `obs_id` libre — le prochain entier
+   JAMAIS utilise, y compris par une regle supprimee depuis (cf. §2). C'est tout : `obs_size`
+   ne bouge pas, aucun retrain n'est necessaire.
 2. Si besoin de choix joueur, ajouter une (ou plusieurs) regles d'affichage avec:
    - `name`
    - `alias` vers la regle technique

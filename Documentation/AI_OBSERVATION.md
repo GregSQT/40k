@@ -26,7 +26,8 @@ lecture, jamais une copie de chiffres qui dériverait.
 | Clé | Forme | Contenu |
 |---|---|---|
 | `global_cont` / `global_bin` | (11,) / (27,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, force d'usure, **distance à chacun des 5 objectifs** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
-| `allies_cont` / `allies_bin` | (8, 19) / (8, 33) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les 32 drapeaux incluent les **13 règles d'unité en vigueur** (19.04) et, pour les ennemis seulement, `los_can_see`, `cover_vs_observer` et `charge_reachable_max_roll` |
+| `allies_cont` / `allies_bin` | (8, 19) / (8, 20) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les drapeaux incluent, pour les ennemis seulement, `los_can_see`, `cover_vs_observer` et `charge_reachable_max_roll` |
+| `allies_ability_ids` / `allies_status_ids` | (8, 8) / (8, 4) | **capacités et statuts EN VIGUEUR (19.04), en IDENTIFIANTS ENTIERS et non en bits** : `obs_id` des registres [`config/unit_rules.json`](../config/unit_rules.json) et [`config/unit_statuses.json`](../config/unit_statuses.json), **triés croissants**, paddés à `0`. Deux `nn.EmbeddingBag(128, 16, mode="sum", padding_idx=0)` en font une **lecture de ligne** : aucun one-hot n'est matérialisé, donc la longueur du vecteur est **indépendante du nombre de capacités existantes** — ajouter une capacité, un statut ou une faction entière ne change ni `obs_size`, ni le nombre de paramètres du réseau, donc n'impose **aucun retrain**. Débordement (> 8 capacités) → **erreur**, jamais troncature |
 | `allies_wpn_cont` / `_bin` | (8, 20, 13) / (8, 20, 18) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants et bits/params de règles |
 | `allies_types_cont` / `_bin` | (8, 6, 5) / (8, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
 | `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
@@ -40,7 +41,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 780 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 752 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (11,)                =      11               │
@@ -48,7 +49,9 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │                                                                        │
 │  MES ESCOUADES — ligne 0 = l'unité ACTIVE          K_ALLY_SLOTS = 8    │
 │    allies_cont            (8, 19)              =     152               │
-│    allies_bin             (8, 33)              =     264               │
+│    allies_bin             (8, 20)              =     160               │
+│    allies_ability_ids     (8, 8)               =      64               │
+│    allies_status_ids      (8, 4)               =      32               │
 │    allies_wpn_cont        (8, 20, 13)          =   2 080               │
 │    allies_wpn_bin         (8, 20, 18)          =   2 880               │
 │    allies_types_cont      (8, 6, 5)            =     240               │
@@ -56,7 +59,9 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │                                                                        │
 │  ESCOUADES ENNEMIES — ordre = slots d'action     K_ENEMY_SLOTS = 20    │
 │    enemies_cont           (20, 19)             =     380               │
-│    enemies_bin            (20, 33)             =     660               │
+│    enemies_bin            (20, 20)             =     400               │
+│    enemies_ability_ids    (20, 8)              =     160               │
+│    enemies_status_ids     (20, 4)              =      80               │
 │    enemies_wpn_cont       (20, 20, 13)         =   5 200               │
 │    enemies_wpn_bin        (20, 20, 18)         =   7 200               │
 │    enemies_types_cont     (20, 6, 5)           =     600               │
@@ -74,11 +79,12 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    deploy_cand_cont       (5, 8)               =      40               │
 │    deploy_cand_bin        (5, 4)               =      20               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      20 780              │
+│  TOTAL vectoriel (= obs_size)                      20 752              │
 │  + grid  (9, 32, 32) = 9 216, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
-Coût d'UNE entité = 19 + 33 (unité) + 20 × (13 + 18) (armes) + 6 × (5 + 5) (types) = 732
+Coût d'UNE entité = 19 + 20 (unité) + 8 + 4 (capacités/statuts) + 20 × (13 + 18) (armes)
+   + 6 × (5 + 5) (types) = 731
    → le bloc ARMES fait 86 % du vecteur. C'est le seul bloc mémoïsé.
 ```
 
@@ -181,7 +187,7 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
                                                     #   porte reellement contre elle.
 ```
 
-#### `allies_bin[s]` / `enemies_bin[s]` — une unite, 33 drapeaux  ·  jamais normalise
+#### `allies_bin[s]` / `enemies_bin[s]` — une unite, 20 drapeaux  ·  jamais normalise
 
 ```python
 [s][0]     = is_ally                                # 0.0 / 1.0
@@ -205,21 +211,38 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
 [s][18]    = charge_reachable_max_roll              # 0.0 / 1.0 — un plan de charge legal existe au jet
                                                     #   MAXIMAL (11.02, 2D6 -> 12) [ENNEMIS seuls, phase
                                                     #   CHARGE seule ; masque = phase_charge]
-[s][19]    = rule_charge_after_advance              # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][20]    = rule_charge_after_flee                 # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][21]    = rule_charge_impact                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][22]    = rule_closest_target_penetration        # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][23]    = rule_move_after_shooting               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][24]    = rule_reactive_move                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][25]    = rule_reroll_1_save_fight               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][26]    = rule_reroll_1_tohit_fight              # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][27]    = rule_reroll_1_towound                  # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][28]    = rule_reroll_charge                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][29]    = rule_reroll_towound_target_on_objective # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][30]    = rule_shoot_after_advance               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][31]    = rule_shoot_after_flee                  # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][32]    = present                                # 0.0 / 1.0 — masque d'entite (0 = slot vide ou morte), DERNIER comme dans tous les registres (§0.37)
+[s][19]    = present                                # 0.0 / 1.0 — masque d'entite (0 = slot vide ou morte), DERNIER comme dans tous les registres (§0.37)
 ```
+
+#### `*_ability_ids[s]` / `*_status_ids[s]` — ENSEMBLES D'IDENTIFIANTS  ·  jamais normalise
+
+Ce ne sont **pas** des drapeaux indexés par position : ce sont des **ensembles**. Le slot `k` n'a
+aucune sémantique propre — il porte le `k`-ième id du tri croissant, et `0` signifie « slot vide ».
+
+```python
+[s][0..7]  = ability_ids     # obs_id des capacites EN VIGUEUR (19.04), config/unit_rules.json,
+                             #   TRIES croissants puis paddes a 0. Debordement -> ERREUR.
+[s][0..3]  = status_ids      # obs_id des statuts EN VIGUEUR, config/unit_statuses.json :
+                             #   battle_shock (08.03), oath_target, suppressed. Meme convention.
+```
+
+`obs_id` **stable a vie, jamais reattribue** : un id recycle apres suppression d'une regle ferait
+pointer un modele deja entraine sur une ligne d'embedding qui ne veut plus dire la meme chose —
+corruption silencieuse. Un id retire reste **brule**. Domaine `[1, 127]`, `0` reserve au padding
+(`config_loader.OBS_ID_MIN/MAX`, valide au chargement : absent, hors domaine ou duplique -> erreur).
+
+Cote reseau (`ai/spatial_extractor.py`), **deux** `nn.EmbeddingBag(128, 16, mode="sum",
+padding_idx=0)` — deux tables et non une, parce qu'une capacite (« cette unite a Feel No Pain »)
+et un statut (« cette unite est la cible Oath adverse ») ne sont pas de meme nature : un pooling
+commun les additionnerait dans le meme espace. Le pooling **somme** est invariant par permutation
+(l'ordre des slots ne change pas le vecteur) et preserve la **multiplicite** (un ensemble de 1
+element ne se confond pas avec un de 3). Les 16 + 16 dimensions sont concatenees a la
+representation d'entite, avant l'encodeur partage.
+
+Les effets de **faction** n'entrent PAS dans ces ensembles : Waaagh! accorde quatre effets
+identiques a toutes les unites orkes ; les repeter sur 28 entites ferait deborder les slots pour
+zero information, alors que le reseau les reconstitue depuis deux informations GLOBALES
+(« unite orke » + « Waaagh! actif »). Ils vivent dans `global_bin`.
 
 #### `*_wpn_cont[s][w]` — un profil d'arme, 13 continues  ·  EntityRunningNorm
 
@@ -532,14 +555,22 @@ cible ennemie, support du choix de cible de mêlée, §9 P3-1, 2026-07-28) → 2
 « contexte de décision », §9.3 P2, 2026-07-28) → 20768 (`charge_reachable_max_roll` :
 support du choix de cible de charge, §9 P3-2, 2026-07-28) → 20828 (bloc « candidats de
 déploiement » : ce que chacune des 5 actions 4-8 poserait, §0.40 point 3, 2026-07-29)
-→ **20780** (RETRAIT de `ez_relayed_by_ally` et `n_relayed_ez` avec la clause « buddy » :
+→ 20780 (RETRAIT de `ez_relayed_by_ally` et `n_relayed_ez` avec la clause « buddy » :
 04.02 WHILE FIGHTING n'autorise à frapper qu'une figurine ENGAGÉE avec la cible, le relais par
-une alliée au contact venait d'une édition antérieure de 40K, 2026-08-04). **Toute évolution du
-schéma change cette valeur et rend les `.zip` existants incompatibles : le retrain `--new` est
-obligatoire.**
+une alliée au contact venait d'une édition antérieure de 40K, 2026-08-04)
+→ **20752** (chantier 01 : les 13 bits `rule_<effet>` remplacés par 8 slots d'ids de capacité +
+4 slots d'ids de statut, 2026-08-04). **Toute évolution du schéma change cette valeur et rend les
+`.zip` existants incompatibles : le retrain `--new` est obligatoire.**
 
-**Les règles d'unité** sont exposées depuis le 2026-07-27 : 13 bits `rule_<effet>` **par entité**
-(amie ET ennemie) dans `UNIT_BIN_FIELDS`. ⚠️ Ne pas les confondre avec les « 12 unit-rule flags »
+⚠️ **C'est la DERNIÈRE valeur de cette liste que le passage aux ids fait bouger pour une capacité.**
+Avant le chantier 01, chaque capacité ajoutée coûtait un bit par entité, donc un `obs_size`, donc un
+retrain ; les 17 capacités Armageddon auraient coûté 476 scalaires. Depuis, une capacité, un statut
+ou une faction entière n'est qu'un `obs_id` de plus dans un registre : ni `obs_size`, ni le nombre
+de paramètres du réseau, ni `TOTAL_ACTION_SIZE` ne bougent.
+
+**Les capacités d'unité** sont exposées depuis le 2026-07-27 (d'abord en 13 bits `rule_<effet>`
+dans `UNIT_BIN_FIELDS`, puis en ensembles d'identifiants depuis le chantier 01), **par entité**,
+amie ET ennemie. ⚠️ Ne pas les confondre avec les « 12 unit-rule flags »
 du layout `obs[314:346]` que décrit [`AI_OBSERVATION_Legacy.md`](AI_OBSERVATION_Legacy.md) : ceux-là
 appartiennent au pipeline mono-figurine et ont longtemps fait croire que le pipeline squad les
 portait déjà.

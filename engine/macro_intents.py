@@ -23,6 +23,7 @@ MAX_OBJECTIVES = 5
 #   1085     : fight sans cible eligible (12.04/12.06 : selectionne pour combattre, 0 attaque)
 #   1086-1100: zone intents (5 objectifs x 3 intentions)
 #   1101-1106: CHOICE_0..5 — candidats de `pending_agent_decision` (V11 §9.3 P2)
+#   1107-1126: oath slot 0-19 — cible d'Oath of Moment (chantier 01, consomme au chantier 03)
 
 # --- Named squad-action ids (single source of truth for ai/). --------------
 # Miroir EXACT de engine/phase_handlers/shared_utils.py (SQUAD_ACTION_*), qui reste la source
@@ -67,7 +68,20 @@ BASE_ZONE_INTENT = ACTION_FIGHT_NO_TARGET + 1                  # 1086
 # pointeur (§9 P3-1, les slots de combat ci-dessus), pas en CHOICE_k.
 CHOICE_BASE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3            # 1101
 CHOICE_COUNT = MAX_DECISION_OPTIONS                            # 6
-TOTAL_ACTION_SIZE = CHOICE_BASE + CHOICE_COUNT                 # 1107
+# Oath of Moment (chantier 03) : « select one unit from your opponent's army ». Les candidats
+# sont des ENTITES DEJA OBSERVEES, donc la decision se parametre en DIMENSION D'ACTION + pointeur
+# et non en `CHOICE_k` (cf. l'avertissement ci-dessus). Meme derivation que le tir, la charge et
+# la melee : `OATH_SLOT_COUNT = SHOOT_SLOT_COUNT`, parce que ces slots indexent le MEME
+# `get_enemy_slot_mapping`, donc la MEME ligne du tenseur ennemi (invariant D1). Les desolidariser
+# ferait pointer l'action et l'observation sur deux escouades differentes sans que rien ne leve.
+#
+# Declares ICI et pas au chantier 03 : `TOTAL_ACTION_SIZE` est GELE apres le chantier 01, comme
+# `obs_size`. Aucun consommateur avant le chantier 03 — le masque n'ouvre jamais ces ids, donc
+# l'agent ne peut pas les jouer (`ActionDecoder` part d'un masque tout a zero et n'ouvre que ce
+# qu'une phase autorise).
+OATH_SLOT_BASE = CHOICE_BASE + CHOICE_COUNT                    # 1107
+OATH_SLOT_COUNT = SHOOT_SLOT_COUNT                             # 20 -> 1107-1126
+TOTAL_ACTION_SIZE = OATH_SLOT_BASE + OATH_SLOT_COUNT           # 1127
 
 MOVE_CELLS = range(MOVE_CELL_BASE, MOVE_CELL_BASE + MOVE_CELL_COUNT)                # 0-1023
 SHOOT_SLOTS = range(SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT)            # 1025-1044
@@ -75,6 +89,7 @@ CHARGE_SLOTS = range(CHARGE_SLOT_BASE, CHARGE_SLOT_BASE + CHARGE_SLOT_COUNT)    
 FIGHT_SLOTS = range(FIGHT_SLOT_BASE, FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT)            # 1065-1084
 DEPLOY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT)        # 4-8
 CHOICE_SLOTS = range(CHOICE_BASE, CHOICE_BASE + CHOICE_COUNT)                       # 1101-1106
+OATH_SLOTS = range(OATH_SLOT_BASE, OATH_SLOT_BASE + OATH_SLOT_COUNT)                # 1107-1126
 
 
 def get_objective_center(obj: dict) -> tuple:
@@ -185,7 +200,7 @@ def get_objective_control(zone_idx: int, game_state: dict) -> float:
 #: au premier slot ajoute.
 ACTION_FAMILIES = (
     "deploy_slot", "move_cell", "wait", "shoot_slot", "charge_slot",
-    "fight_slot", "fight_no_target", "zone_intent", "choice",
+    "fight_slot", "fight_no_target", "zone_intent", "choice", "oath_slot",
 )
 
 
@@ -206,6 +221,12 @@ def action_family(action_int: int, phase: str) -> str:
     # lever cette fonction — donc planter le step, pour une simple statistique.
     if a in CHOICE_SLOTS:
         return "choice"
+    # Oath slots : APRES les CHOICE et AVANT la branche deployment, comme elles — Oath se declare
+    # au debut du tour de son controleur, pas dans une phase de mouvement. Sans cette branche,
+    # ces ids tomberaient dans le `return "zone_intent"` terminal, qui est un fourre-tout : ils
+    # seraient comptes comme des intentions de zone sans que rien ne leve.
+    if a in OATH_SLOTS:
+        return "oath_slot"
     if phase == "deployment":
         if a in DEPLOY_SLOTS:
             return "deploy_slot"

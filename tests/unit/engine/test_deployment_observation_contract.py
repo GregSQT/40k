@@ -641,6 +641,11 @@ def test_squad_obs_size_target_matches_the_schema():
     d'une édition antérieure) emporte les deux champs qui la décrivaient, `ez_relayed_by_ally`
     (self_models_bin) et `n_relayed_ez` (unit_cont) — d'où 20780.
 
+    Puis le chantier 01 (2026-08-04) a remplacé les 13 bits `rule_<id>` par 8 slots d'ids de
+    capacité + 4 slots d'ids de statut : 13 bits x 28 entités remplacés par 12 entiers x 28,
+    d'où 20780 -> 20752. C'est le DERNIER changement d'`obs_size` de la séquence : les chantiers
+    02 à 06 n'utilisent que des dimensions déjà déclarées, ce qui garantit un seul retrain.
+
     Ce verrou valait 20768 tant que le point 3 restait ouvert : les quatre autres points ne
     touchent QUE le contenu de l'observation de déploiement, jamais sa taille — donc aucun modèle
     n'était invalidé par eux. Le point 3 ajoute le bloc « candidats de déploiement »
@@ -651,7 +656,7 @@ def test_squad_obs_size_target_matches_the_schema():
         DEPLOY_CAND_BIN_SIZE, DEPLOY_CAND_CONT_SIZE, N_DEPLOY_SLOTS,
     )
 
-    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 20780
+    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 20752
     assert N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE) == 60, (
         "le bloc candidat de déploiement a changé de taille : mettre à jour `obs_size` dans les "
         "5 profils de la config d'agent, et l'historique d'AI_OBSERVATION.md"

@@ -753,7 +753,7 @@ W40KEngine.step(action: int)
    └─> action_decoder.convert_squad_action(action_int, game_state, eligible_units)
        │
        ├─ Map integer to semantic action (layout : engine/macro_intents.py,
-       │  TOTAL_ACTION_SIZE = 1107) :
+       │  TOTAL_ACTION_SIZE = 1127) :
        │  • 0-1023    → cellule de la grille égocentrique 32×32 (la DESTINATION
        │                est une dimension d'action ; le type normal/advance/
        │                fall_back est INFÉRÉ du coût géodésique, cf. §6.2)
@@ -764,6 +764,9 @@ W40KEngine.step(action: int)
        │  • 1085      → fight sans cible éligible (12.04/12.06, combat à vide)
        │  • 1086-1100 → zone intents (5 objectifs × 3 intentions), command only
        │  • 1101-1106 → CHOICE_0..5, candidats de `pending_agent_decision`
+       │  • 1107-1126 → oath, slot de cible 0-19  (même mapping de slots ;
+       │                déclarés au chantier 01, consommés au chantier 03 —
+       │                le masque ne les ouvre pas encore)
        │  • 4-8       → EN PHASE DEPLOYMENT uniquement : slots de déploiement.
        │                Ces ids sont AUSSI des cellules de move : c'est la phase
        │                qui désambiguïse (cf. §0.44)

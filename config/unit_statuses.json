@@ -1,0 +1,17 @@
+{
+  "battle_shock": {
+    "id": "battle_shock",
+    "obs_id": 1,
+    "description": "08.03 : l'unite a rate son test de Battle-shock au debut du tour de son controleur. Son OC vaut 0 et elle ne peut pas se voir accorder de Stratagem. POSE PAR LE CHANTIER 02 — declare ici pour figer obs_size."
+  },
+  "oath_target": {
+    "id": "oath_target",
+    "obs_id": 2,
+    "description": "Oath of Moment : cette unite ENNEMIE est la cible designee par l'adversaire ce tour. POSE PAR LE CHANTIER 03 — declare ici pour figer obs_size."
+  },
+  "suppressed": {
+    "id": "suppressed",
+    "obs_id": 3,
+    "description": "Suppression (capacites Armageddon) : l'unite subit un malus jusqu'a la fin du tour. POSE PAR LE CHANTIER 06 — declare ici pour figer obs_size."
+  }
+}

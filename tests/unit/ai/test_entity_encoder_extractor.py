@@ -153,6 +153,127 @@ def test_unit_encoder_is_a_single_module(extractor):
     assert not any("ally" in n or "enemy" in n for n in named)
 
 
+# ---------------------------------------------------------------------------
+# Chantier 01 — les deux EmbeddingBag de capacites/statuts
+# ---------------------------------------------------------------------------
+
+
+def _present_obs(extractor, batch: int = 1):
+    obs = _zero_batch(_space(), batch=batch)
+    obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0
+    obs["enemies_bin"][:, 0, _UNIT_PRESENT] = 1.0
+    return obs
+
+
+def test_ability_ids_reach_the_entity_embedding_on_both_sides(extractor):
+    """Ecrire un id de capacite DEPLACE l'embedding d'entite — des DEUX cotes.
+
+    VERT VACANT evite : sans ce test, l'`EmbeddingBag` pourrait n'etre cablee nulle part et tous
+    les autres tests resteraient verts (ils n'ecrivent que des ids nuls, donc du padding).
+    Contre-epreuve du PARTAGE : la meme capacite ecrite chez un allie et chez un ennemi produit
+    le meme embedding — une seule table, pas deux.
+    """
+    obs = _present_obs(extractor)
+    extractor.eval()
+    with torch.no_grad():
+        before_ally = extractor._encode_units(obs, "allies")[:, 0].clone()
+        before_enemy = extractor._encode_units(obs, "enemies")[:, 0].clone()
+    for family in ("allies", "enemies"):
+        obs[f"{family}_ability_ids"][:, 0, 0] = 5.0
+    with torch.no_grad():
+        after_ally = extractor._encode_units(obs, "allies")[:, 0]
+        after_enemy = extractor._encode_units(obs, "enemies")[:, 0]
+
+    assert not torch.allclose(before_ally, after_ally, atol=1e-6), (
+        "l'id de capacite n'atteint pas l'embedding d'entite (allie)"
+    )
+    assert not torch.allclose(before_enemy, after_enemy, atol=1e-6), (
+        "l'id de capacite n'atteint pas l'embedding d'entite (ennemi)"
+    )
+    assert torch.allclose(after_ally, after_enemy, atol=1e-6), (
+        "la meme capacite doit produire le meme embedding des deux cotes (table PARTAGEE)"
+    )
+
+
+def test_status_ids_use_a_SECOND_table_distinct_from_abilities(extractor):
+    """Le MEME entier lu comme capacite et comme statut ne dit PAS la meme chose.
+
+    Deux tables et non une : un pooling commun additionnerait capacites et statuts dans le meme
+    espace, et le reseau ne pourrait plus les distinguer. Contre-epreuve par PERTURBATION : on
+    modifie les poids de la table de STATUTS et on exige que seul le statut bouge.
+    """
+    extractor.eval()
+    obs_ability = _present_obs(extractor)
+    obs_ability["allies_ability_ids"][:, 0, 0] = 3.0
+    obs_status = _present_obs(extractor)
+    obs_status["allies_status_ids"][:, 0, 0] = 3.0
+    with torch.no_grad():
+        as_ability = extractor._encode_units(obs_ability, "allies")[:, 0].clone()
+        as_status = extractor._encode_units(obs_status, "allies")[:, 0].clone()
+    assert not torch.allclose(as_ability, as_status, atol=1e-6), (
+        "capacite 3 et statut 3 produisent le meme vecteur : une seule table est utilisee"
+    )
+
+    with torch.no_grad():
+        extractor.status_embedding.weight.add_(1.0)
+        as_ability_after = extractor._encode_units(obs_ability, "allies")[:, 0]
+        as_status_after = extractor._encode_units(obs_status, "allies")[:, 0]
+    assert torch.allclose(as_ability, as_ability_after, atol=1e-6), (
+        "perturber la table de STATUTS a deplace une capacite : les deux tables sont confondues"
+    )
+    assert not torch.allclose(as_status, as_status_after, atol=1e-6)
+
+
+def test_ability_pooling_is_permutation_invariant_and_padding_is_neutral(extractor):
+    """Somme + `padding_idx=0` : l'ordre des slots n'a aucun effet, un slot vide n'en a aucun.
+
+    C'est la propriete qui autorise a traiter ces slots comme un ENSEMBLE. Sans `padding_idx`,
+    « pas de capacite » deviendrait une capacite apprise, repetee a chaque slot libre.
+    """
+    extractor.eval()
+    a = _present_obs(extractor)
+    a["allies_ability_ids"][:, 0, 0] = 2.0
+    a["allies_ability_ids"][:, 0, 1] = 9.0
+    b = _present_obs(extractor)
+    b["allies_ability_ids"][:, 0, 0] = 9.0
+    b["allies_ability_ids"][:, 0, 1] = 2.0
+    # Memes ids, ecrits sur d'AUTRES slots : le padding intercale ne doit rien changer.
+    c = _present_obs(extractor)
+    c["allies_ability_ids"][:, 0, 3] = 9.0
+    c["allies_ability_ids"][:, 0, 7] = 2.0
+    with torch.no_grad():
+        ea = extractor._encode_units(a, "allies")[:, 0]
+        eb = extractor._encode_units(b, "allies")[:, 0]
+        ec = extractor._encode_units(c, "allies")[:, 0]
+    assert torch.allclose(ea, eb, atol=1e-6), "le pooling n'est pas invariant par permutation"
+    assert torch.allclose(ea, ec, atol=1e-6), "les slots vides contribuent au pooling"
+
+    # … et la MULTIPLICITE est preservee : {2} ne vaut pas {2, 9}.
+    single = _present_obs(extractor)
+    single["allies_ability_ids"][:, 0, 0] = 2.0
+    with torch.no_grad():
+        e_single = extractor._encode_units(single, "allies")[:, 0]
+    assert not torch.allclose(ea, e_single, atol=1e-6)
+
+
+def test_the_embedding_tables_are_predimensioned(extractor):
+    """Le vocabulaire est PRE-DIMENSIONNE : ajouter une capacite ne cree aucun parametre.
+
+    C'est tout l'objet du chantier. Si la table etait dimensionnee sur le nombre de capacites
+    existantes, chaque ajout changerait le `state_dict` et invaliderait les modeles entraines.
+    """
+    from config_loader import OBS_ID_VOCAB_SIZE
+
+    from ai.spatial_extractor import ABILITY_EMBED_DIM
+
+    for table in (extractor.ability_embedding, extractor.status_embedding):
+        assert table.num_embeddings == OBS_ID_VOCAB_SIZE
+        assert table.embedding_dim == ABILITY_EMBED_DIM
+        assert table.mode == "sum"
+        assert table.padding_idx == 0
+    assert extractor.ability_embedding is not extractor.status_embedding
+
+
 def test_absent_entities_do_not_leak_into_the_aggregation(extractor):
     """Un slot vide ne contribue ni à l'agrégation ni à son propre embedding.
 

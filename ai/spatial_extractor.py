@@ -58,11 +58,18 @@ import torch
 import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
+from config_loader import OBS_ID_PADDING, OBS_ID_VOCAB_SIZE
 from engine.observation_entities import self_model_bin_index, unit_bin_index
 from engine.spatial_grid import GRID_CELL_COUNT, GRID_CHANNELS, GRID_SIZE
 
 #: Familles d'unités partageant le MÊME schéma et le MÊME encodeur.
 _UNIT_FAMILIES = ("allies", "enemies")
+
+#: Largeur des embeddings de capacité et de statut (chantier 01). Deux tables de
+#: `OBS_ID_VOCAB_SIZE x ABILITY_EMBED_DIM`, PRÉ-DIMENSIONNÉES : c'est ce pré-dimensionnement qui
+#: rend l'ajout d'une capacité, d'un statut ou d'une faction entière gratuit — ni `obs_size`, ni
+#: le nombre de paramètres du réseau ne bougent, donc aucun retrain.
+ABILITY_EMBED_DIM = 16
 
 #: Canaux positionnels FIXES ajoutés à la carte de move : x, y, rayon (V11 §0.32 T-G).
 POSITIONAL_CHANNELS = 3
@@ -224,6 +231,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         for family in _UNIT_FAMILIES:
             expected_keys += [
                 f"{family}_cont", f"{family}_bin",
+                f"{family}_ability_ids", f"{family}_status_ids",
                 f"{family}_wpn_cont", f"{family}_wpn_bin",
                 f"{family}_types_cont", f"{family}_types_bin",
             ]
@@ -249,7 +257,10 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
 
         # Le schéma d'unité est UNIFIÉ : allié et ennemi partagent leurs dimensions, sans quoi
         # un encodeur commun n'aurait pas de sens (§3.3).
-        for suffix in ("cont", "bin", "wpn_cont", "wpn_bin", "types_cont", "types_bin"):
+        for suffix in (
+            "cont", "bin", "ability_ids", "status_ids",
+            "wpn_cont", "wpn_bin", "types_cont", "types_bin",
+        ):
             ally_shape = _shape(f"allies_{suffix}")[1:]
             enemy_shape = _shape(f"enemies_{suffix}")[1:]
             if ally_shape != enemy_shape:
@@ -261,6 +272,8 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
 
         self.n_ally_slots, self.unit_cont_dim = _shape("allies_cont")
         self.unit_bin_dim = _shape("allies_bin")[1]
+        self.n_ability_slots = _shape("allies_ability_ids")[1]
+        self.n_status_slots = _shape("allies_status_ids")[1]
         self.n_enemy_slots = _shape("enemies_cont")[0]
         _, self.n_weapons, self.weapon_cont_dim = _shape("allies_wpn_cont")
         self.weapon_bin_dim = _shape("allies_wpn_bin")[2]
@@ -368,9 +381,36 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         self.self_model_encoder = _mlp(
             [self.self_model_cont_dim + self.self_model_bin_dim, model_dim]
         )
+        # --- Capacités et statuts : DEUX `EmbeddingBag` distinctes (chantier 01) --------------
+        # `mode="sum"` : invariant par permutation — {A, B} écrit (slot0, slot1) ou (slot1, slot0)
+        # donne le même vecteur — et il préserve la MULTIPLICITÉ, là où la moyenne confondrait un
+        # ensemble de 1 élément et un de 3.
+        #
+        # `padding_idx=0` : la ligne 0 est nulle ET sans gradient, donc un slot vide contribue
+        # exactement zéro au pooling. Sans lui, « pas de capacité » deviendrait une capacité
+        # apprise, répétée autant de fois qu'il reste de slots libres.
+        #
+        # DEUX tables et pas une : une capacité (« cette unité a Feel No Pain ») et un statut
+        # (« cette unité est la cible Oath adverse ») ne sont pas de même nature ; un pooling
+        # commun les additionnerait dans le même espace et le réseau ne pourrait plus les
+        # distinguer.
+        #
+        # Le vocabulaire est PRÉ-DIMENSIONNÉ (`OBS_ID_VOCAB_SIZE`) et non ajusté au nombre de
+        # capacités existantes : c'est exactement ce qui rend l'ajout d'une capacité gratuit en
+        # paramètres. Les lignes inutilisées ne reçoivent aucun gradient.
+        self.ability_embedding = nn.EmbeddingBag(
+            OBS_ID_VOCAB_SIZE, ABILITY_EMBED_DIM, mode="sum", padding_idx=OBS_ID_PADDING
+        )
+        self.status_embedding = nn.EmbeddingBag(
+            OBS_ID_VOCAB_SIZE, ABILITY_EMBED_DIM, mode="sum", padding_idx=OBS_ID_PADDING
+        )
         self.unit_encoder = _mlp(
             [
-                self.unit_cont_dim + self.unit_bin_dim + weapon_agg + type_agg,
+                self.unit_cont_dim
+                + self.unit_bin_dim
+                + 2 * ABILITY_EMBED_DIM  # capacités + statuts, concaténés à l'entité
+                + weapon_agg
+                + type_agg,
                 2 * entity_dim,
                 entity_dim,
             ]
@@ -444,8 +484,27 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
             typ_mask.reshape(b * k, typ_mask.shape[2]),
         ).reshape(b, k, -1)
 
+        # Capacités et statuts : lecture de ligne, jamais de one-hot matérialisé. Les ids
+        # transitent en float32 (l'observation est homogène) et sont reconvertis en index ici —
+        # `EmbeddingBag` exige des entiers. Le `reshape` (B*K, slots) est ce qu'attend la table :
+        # un « sac » par entité.
+        ability_emb = self.ability_embedding(
+            obs[f"{family}_ability_ids"].reshape(b * k, self.n_ability_slots).long()
+        ).reshape(b, k, ABILITY_EMBED_DIM)
+        status_emb = self.status_embedding(
+            obs[f"{family}_status_ids"].reshape(b * k, self.n_status_slots).long()
+        ).reshape(b, k, ABILITY_EMBED_DIM)
+
         unit_in = torch.cat(
-            [self.unit_norm(unit_cont, present), unit_bin, wpn_agg, typ_agg], dim=-1
+            [
+                self.unit_norm(unit_cont, present),
+                unit_bin,
+                ability_emb,
+                status_emb,
+                wpn_agg,
+                typ_agg,
+            ],
+            dim=-1,
         )
         return self.unit_encoder(unit_in) * (present > 0).to(unit_in.dtype).unsqueeze(-1)
 

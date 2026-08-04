@@ -22,6 +22,55 @@ BOARD_DIR_BY_INCHES_TO_SUBHEX = {
     10: "board/44x60x10",
 }
 
+# --- Identifiants d'observation des capacites et des statuts (chantier 01) -------------------
+# Une capacite n'est plus un BIT du vecteur d'observation mais un ENTIER lu dans une table
+# d'embedding : ajouter une capacite ne change donc plus `obs_size`, et n'invalide plus les
+# modeles entraines. Ces bornes sont la SOURCE UNIQUE du domaine de ces entiers — le registre
+# les valide au chargement, le reseau dimensionne ses tables dessus (`ai/spatial_extractor.py`).
+#
+# `0` est RESERVE au padding (`padding_idx` des `EmbeddingBag`) : un slot vide doit contribuer
+# exactement zero au pooling, sinon « pas de capacite » deviendrait une capacite.
+OBS_ID_PADDING = 0
+OBS_ID_MIN = 1
+OBS_ID_MAX = 127
+#: Nombre de lignes des tables d'embedding : padding + [OBS_ID_MIN, OBS_ID_MAX].
+OBS_ID_VOCAB_SIZE = OBS_ID_MAX + 1
+
+
+def _validate_obs_ids(registry: Dict[str, Any], source: str) -> None:
+    """Valide les `obs_id` d'un registre : presents, entiers, dans le domaine, UNIQUES.
+
+    ⚠️ Un `obs_id` est STABLE A VIE et n'est JAMAIS reattribue. Reutiliser l'id d'une regle
+    supprimee ferait pointer un modele deja entraine sur une ligne d'embedding qui ne veut plus
+    dire la meme chose — corruption silencieuse, invisible en entrainement comme en eval. Un id
+    retire reste donc BRULE.
+
+    Les entrees SANS `obs_id` sont ignorees : le registre des regles contient aussi des
+    capacites SOURCES (composites, alias d'affichage) et des marqueurs de ROLE, qui ne sont pas
+    observes (cf. `UNIT_RULE_EFFECT_IDS`). C'est l'appelant qui exige la presence d'un `obs_id`
+    pour les entrees qui, elles, doivent en porter un.
+    """
+    seen: Dict[int, str] = {}
+    for entry_id, entry_data in registry.items():
+        if "obs_id" not in entry_data:
+            continue
+        obs_id = entry_data["obs_id"]
+        if not isinstance(obs_id, int) or isinstance(obs_id, bool):
+            raise ValueError(
+                f"'{entry_id}' has a non-integer obs_id in {source}: {obs_id!r}"
+            )
+        if not (OBS_ID_MIN <= obs_id <= OBS_ID_MAX):
+            raise ValueError(
+                f"'{entry_id}' has obs_id {obs_id} out of range [{OBS_ID_MIN}, {OBS_ID_MAX}] "
+                f"in {source} (0 is reserved for embedding padding)"
+            )
+        if obs_id in seen:
+            raise ValueError(
+                f"Duplicate obs_id {obs_id} in {source}: '{seen[obs_id]}' and '{entry_id}'. "
+                f"An obs_id designates ONE line of the embedding table and is never shared."
+            )
+        seen[obs_id] = entry_id
+
 
 class ConfigLoader:
     """Centralized configuration loader."""
@@ -499,9 +548,58 @@ class ConfigLoader:
                 if alias_rule_id == str(rule_id):
                     raise ValueError(f"Rule '{rule_id}' cannot alias itself")
 
+        _validate_obs_ids(unit_rules, "config/unit_rules.json")
+
         self._cache[cache_key] = unit_rules
         return unit_rules
-    
+
+    def load_unit_statuses_config(self) -> Dict[str, Any]:
+        """Registre des STATUTS observables (`config/unit_statuses.json`), valide strictement.
+
+        Jumeau de `load_unit_rules_config` : meme convention `obs_id`, meme validation. Deux
+        registres et non un seul parce que capacites et statuts alimentent deux `EmbeddingBag`
+        DISTINCTES (chantier 01) : un id de capacite et un id de statut vivent dans deux espaces
+        et peuvent donc porter la meme valeur sans ambiguite.
+        """
+        cache_key = "unit_statuses"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        path = self.config_dir / "unit_statuses.json"
+        if not path.exists():
+            raise FileNotFoundError(f"Unit statuses config not found: {path}")
+
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                statuses = json.load(f)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Invalid JSON in {path}: {e}")
+
+        if not isinstance(statuses, dict):
+            raise ValueError("unit_statuses.json must be a dict mapping status_id to config")
+
+        for status_id, status_data in statuses.items():
+            if not isinstance(status_data, dict):
+                raise ValueError(
+                    f"Status '{status_id}' must be an object, got {type(status_data).__name__}"
+                )
+            if "id" not in status_data:
+                raise KeyError(f"Status '{status_id}' missing required 'id' field")
+            if str(status_data["id"]) != str(status_id):
+                raise ValueError(
+                    f"Status id mismatch: key '{status_id}' != status.id '{status_data['id']}'"
+                )
+            if "obs_id" not in status_data:
+                raise KeyError(
+                    f"Status '{status_id}' missing required 'obs_id' in config/unit_statuses.json"
+                )
+
+        _validate_obs_ids(statuses, "config/unit_statuses.json")
+
+        self._cache[cache_key] = statuses
+        return statuses
+
+
     def load_agent_scenario(self, agent_key: str, scenario_name: str) -> Dict[str, Any]:
         """Load agent-specific scenario file.
         

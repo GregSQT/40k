@@ -303,7 +303,10 @@ def test_choice_action_beyond_the_candidate_count_raises():
 
 
 def test_choice_actions_are_inside_the_action_space():
-    assert CHOICE_BASE + CHOICE_COUNT == TOTAL_ACTION_SIZE
+    # Les CHOICE ne ferment plus l'action space depuis le chantier 01 : les 20 slots d'Oath of
+    # Moment les suivent. Ce qui compte ici reste vrai — elles sont dans l'espace, et il y en a
+    # exactement autant que de candidats observables.
+    assert CHOICE_BASE + CHOICE_COUNT <= TOTAL_ACTION_SIZE
     assert CHOICE_COUNT == MAX_DECISION_OPTIONS
 
 
