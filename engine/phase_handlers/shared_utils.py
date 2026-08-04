@@ -4729,7 +4729,16 @@ def _strength_measure(unit_id: str, game_state: Dict[str, Any]) -> Tuple[int, in
 
 
 def is_unit_below_starting_strength(unit_id: str, game_state: Dict[str, Any]) -> bool:
-    """Appendice 25 : l'unite a-t-elle perdu quoi que ce soit depuis le debut de la bataille ?"""
+    """Appendice 25 : l'unite a-t-elle perdu quoi que ce soit depuis le debut de la bataille ?
+
+    ⚠️ SANS APPELANT DANS LE MOTEUR, et c'est delibere (decision du 2026-08-04) : aucune regle
+    implementee ne dit encore « while this unit is below its starting strength » — ce sont des
+    capacites de datasheet (chantier 06) qui la consommeront. Elle est gardee parce que les TROIS
+    seuils de l'appendice 25 se lisent ensemble : en detacher un invite a le reimplementer a cote
+    plus tard, ce qui est le motif du jumeau divergent. Verifiee par un test qui construit l'etat
+    (`test_command_points_and_battle_shock.py`), pas seulement importee — mais elle n'est, pour
+    l'instant, verifiee que contre elle-meme.
+    """
     remaining, start = _strength_measure(unit_id, game_state)
     return remaining < start
 
