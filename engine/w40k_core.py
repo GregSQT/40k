@@ -470,6 +470,15 @@ class W40KEngine(gym.Env):
             # CRITICAL: Extract rewards_config from config dict for module initialization
             self.rewards_config = config["rewards_config"] if "rewards_config" in config else {}
             self._scenario_has_random_agent_roster = False
+            # Chemin API/PvP : le scénario n'arrive pas par le loader, aucun roster n'est déclaré.
+            # `None` est la valeur MÉTIER de « pas de roster » (cf. ai/bot_evaluation.py), pas un
+            # défaut anti-erreur : l'attribut existe ainsi sur les DEUX branches de construction,
+            # ce qui autorise l'accès direct partout au lieu d'un getattr par point de lecture.
+            self._scenario_roster_info = None
+            # Idem : ce chemin ne passe pas par le loader de scénario, donc aucune taille de
+            # bataille n'en vient. `None` = pas de plafond de réserves dérivable ici (20.01) —
+            # c'est déjà la valeur qu'obtenait la lecture, elle est simplement posée à sa source.
+            self._scenario_points_limit = None
             self._scenario_loaded_for_controlled_player = int(require_key(self.config, "controlled_player"))
             
             # CRITICAL: Extract training_config from config dict for observation_params access
@@ -595,7 +604,7 @@ class W40KEngine(gym.Env):
         # Set Solid/dense (rule 13.5) : uniquement les murs de terrains dense. Les murs de bord
         # de plateau ajoutés ci-dessous ne sont PAS des terrains Solid → hors de ce set.
         base_dense_wall_hexes = (
-            set(map(tuple, getattr(self, "_scenario_dense_wall_hexes", None) or []))
+            set(map(tuple, self._scenario_dense_wall_hexes or []))
         )
         bottom_row = board_rows - 1
         for col in range(board_cols):
@@ -720,7 +729,7 @@ class W40KEngine(gym.Env):
             "inches_to_subhex": require_key(_board.get("default", _board), "inches_to_subhex"),
             # Taille de bataille en points (règle 20.01 : le plafond des réserves stratégiques
             # vaut 50 % de cette limite). None quand le scénario ne déclare pas de `scale`.
-            "points_limit": getattr(self, "_scenario_points_limit", None),
+            "points_limit": self._scenario_points_limit,
             # Métrique imposée par la PHASE de training (opt-in). Posée à côté de
             # `inches_to_subhex` parce qu'elle joue le même rôle : un paramètre du monde, lu par
             # les sélecteurs de distance depuis l'état plutôt que depuis le config global.
@@ -736,7 +745,7 @@ class W40KEngine(gym.Env):
             # Murs de terrains Solid/dense (rule 13.5 Gone to Ground) — sous-ensemble de wall_hexes
             "dense_wall_hexes": base_dense_wall_hexes,
             # Polygon terrain areas (obscuring/cover, rules 13.08-13.10), rasterized to hexes
-            "terrain_areas": getattr(self, "_scenario_terrain_areas", None) or [],
+            "terrain_areas": self._scenario_terrain_areas or [],
             # Objectives: grouped structure with id, name, hexes (for objective control calculation)
             "objectives": self._scenario_objectives,
         }
@@ -1278,12 +1287,12 @@ class W40KEngine(gym.Env):
 
         should_reload_scenario = False
         current_controlled_player = int(require_key(self.config, "controlled_player"))
-        if getattr(self, "_scenario_loaded_for_controlled_player", None) != current_controlled_player:
+        if self._scenario_loaded_for_controlled_player != current_controlled_player:
             should_reload_scenario = True
         if self._random_scenario_mode and len(self._scenario_files) > 1:
             self._current_scenario_file = random.choice(self._scenario_files)
             should_reload_scenario = True
-        elif getattr(self, "_scenario_has_random_agent_roster", False):
+        elif self._scenario_has_random_agent_roster:
             should_reload_scenario = True
 
         # Scheduler par-épisode fixed↔active : impose un rechargement avec le mode tiré (rampé sur
@@ -1780,7 +1789,7 @@ class W40KEngine(gym.Env):
                 walls=walls,
                 objectives=objectives,
                 primary_objective_config=self._scenario_primary_objective,
-                roster_info=getattr(self, "_scenario_roster_info", None),
+                roster_info=self._scenario_roster_info,
                 board_config={
                     "cols": board_cols,
                     "rows": board_rows,

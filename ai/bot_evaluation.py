@@ -265,8 +265,9 @@ def _episode_roster_ids(engine: Any) -> Dict[str, str]:
 
     A appeler APRES reset().
 
-    Acces DIRECT a l'attribut, sans `getattr(..., None)` : le chargement de scenario le pose
-    toujours (`W40KEngine.__init__`, et a chaque rotation de scenario), donc un defaut ne
+    Acces DIRECT a l'attribut, sans `getattr(..., None)` : les DEUX branches de
+    `W40KEngine.__init__` le posent (chargement de scenario cote entrainement, `None` explicite
+    cote API/PvP faute de loader), ainsi que chaque rotation de scenario, donc un defaut ne
     couvrirait aucun cas reel — il ne ferait que transformer un renommage d'attribut, ou un
     moteur qui n'a jamais charge de scenario, en « 100 % des episodes sous `NO_ROSTER_REF` ».
     L'operateur lirait alors « scenario a cabler » la ou la metrique est cassee. `None` reste une
