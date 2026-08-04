@@ -107,3 +107,47 @@ def test_le_checkpoint_1402_tire_reellement_en_entrainement(gym_engine) -> None:
     assert set(game_state["objective_controllers"]) == {str(o["id"]) for o in objectives}, (
         "le checkpoint n'a pas évalué tous les objectifs du scénario"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cache des zones d'objectif
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_le_cache_de_zones_rend_les_memes_zones_et_se_perime_a_la_rotation() -> None:
+    """`objective_hex_zones` mémoïse par IDENTITÉ de la liste source (perf, 1,46 % d'un épisode).
+
+    Un cache de géométrie sur un chemin de RÈGLE (14.02) ne vaut que s'il est prouvé équivalent
+    ET incapable de rester périmé. Les deux moitiés sont ici :
+      - mêmes zones, au hexe près, avec et sans cache ;
+      - remplacer `game_state["objectives"]` (reset, rotation de roster) suffit à l'invalider,
+        parce que la clé du cache est la liste ELLE-MÊME, comparée par `is`. C'est ce qui évite
+        d'avoir un site d'invalidation à ne pas oublier — le mode de défaillance d'un cache
+        invalidé à la main.
+
+    Mesuré le 2026-08-04 : 3,9 ms par appel sans cache (10 538 hexes reparsés et normalisés),
+    0,2 µs avec, 62 appels par épisode d'entraînement.
+    """
+    from engine.game_state import objective_hex_zones
+
+    game_state = {
+        "objectives": [
+            {"id": "a", "hexes": [[1, 1], [1, 2]]},
+            {"id": "b", "hexes": [{"col": 5, "row": 5}]},
+        ]
+    }
+    cached = objective_hex_zones(game_state)
+    assert "_objective_hex_zones_cache" in game_state, "rien n'a été mémoïsé"
+
+    fresh_state = {"objectives": game_state["objectives"]}
+    fresh = objective_hex_zones(fresh_state)
+    assert [(i, sorted(z)) for i, z in cached] == [(i, sorted(z)) for i, z in fresh], (
+        "le cache ne rend pas les mêmes zones qu'un calcul neuf"
+    )
+
+    # Rotation de roster : une NOUVELLE liste est affectée -> le cache doit être ignoré.
+    game_state["objectives"] = [{"id": "c", "hexes": [[9, 9]]}]
+    after = objective_hex_zones(game_state)
+    assert [i for i, _ in after] == ["c"], (
+        "le cache a survécu au remplacement de `objectives` : il rendrait les zones de l'ancien "
+        "scénario après une rotation de roster"
+    )

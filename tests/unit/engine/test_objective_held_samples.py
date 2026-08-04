@@ -98,6 +98,22 @@ def _config(controlled_player: int) -> Dict[str, Any]:
             "can_move_through_friendly_model": True,
         },
         "charge": {"charge_max_distance": 12},
+        # Regle 14.02 — SANS elle, `run_objective_control_checkpoint` sort a sa premiere ligne
+        # (`if not check_cfg`) et le controle d'objectif n'est plus rafraichi que par effet de
+        # bord du scoring VP. Ces deux fichiers PRETENDENT mesurer l'axe de controle : ils
+        # passaient donc pour la mauvaise raison — exactement le vert vacant contre lequel la
+        # docstring de `test_zone_intent_control_axis` met en garde. Meme contenu que
+        # `config/game_config.json`, celui que les chemins de production posent.
+        "objective_control_check": {
+            "points": [
+                {"phase": "command", "moment": "end"},
+                {"phase": "move", "moment": "end"},
+                {"phase": "shoot", "moment": "end"},
+                {"phase": "charge", "moment": "end"},
+                {"phase": "fight", "moment": "end"},
+                {"phase": "turn", "moment": "end"},
+            ]
+        },
         "pve_mode": False,
         "controlled_player": controlled_player,
         # `scenario_objectives` et non la cle `objectives` du board : sur la branche
