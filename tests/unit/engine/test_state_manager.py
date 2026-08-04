@@ -70,6 +70,8 @@ def _make_gs_with_objectives(controller: int | None = None) -> Dict[str, Any]:
     gs: Dict[str, Any] = {
         "turn_limit_reached": False,
         "victory_points": {1: 0, 2: 0},
+        # 08.02 : etat de PARTIE pose au reset du moteur, comme les VP juste au-dessus.
+        "command_points": {1: 0, 2: 0},
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
         "config": {"game_rules": {

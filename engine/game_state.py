@@ -1157,6 +1157,11 @@ class GameStateManager:
                         "ARMOR_SAVE": int(require_key(m_data, "ARMOR_SAVE")),
                         "INVUL_SAVE": int(require_key(m_data, "INVUL_SAVE")),
                         "OC": int(require_key(m_data, "OC")),
+                        # Ld PROPRE de la figurine (01.06) : une unite attachee porte plusieurs
+                        # caracteristiques de Ld et le jet retient la MEILLEURE. Sans cette
+                        # recopie, un Warboss (LD 6+) replie dans des Boyz (LD 7+) laissait
+                        # l'unite tester a 7+ — la datasheet du character n'etait lue nulle part.
+                        "LD": int(require_key(m_data, "LD")),
                         "VALUE": int(require_key(m_data, "VALUE")),
                         "UNIT_RULES": copy.deepcopy(require_key(m_data, "UNIT_RULES")),
                         # Keywords PROPRES de la figurine (19.03) : l'unité porte l'UNION des
@@ -3238,6 +3243,60 @@ def objective_hex_zones(game_state: Dict[str, Any]) -> List[Tuple[Any, Set[Tuple
             )
         zones.append((require_key(objective, "id"), zone))
     return zones
+
+
+#: Gain de Core CP de l'étape 08.02, en dur : « Both players gain 1 Command Point ». Ce n'est
+#: pas un réglage — le PDF 08 ne laisse aucune latitude — d'où une constante et non une clé de
+#: config, qui laisserait croire qu'un scénario peut en changer.
+CORE_CP_GAIN_PER_COMMAND_PHASE = 1
+
+
+def initial_command_points(config: Dict[str, Any]) -> Dict[int, int]:
+    """Stock de CP des deux joueurs au début de la bataille.
+
+    Lu dans ``game_rules.starting_command_points`` — SANS valeur par défaut : la dotation de
+    départ dépend de la taille de partie (Incursion/Strike Force…), c'est donc une donnée de
+    scénario, et son absence est une config incomplète, pas un « zéro raisonnable ».
+    """
+    game_rules = require_key(config, "game_rules")
+    starting = int(require_key(game_rules, "starting_command_points"))
+    if starting < 0:
+        raise ValueError(
+            f"game_rules.starting_command_points = {starting} : un stock de CP negatif n'a "
+            f"aucun sens (aucune regle ne fait descendre un joueur sous 0)."
+        )
+    return {1: starting, 2: starting}
+
+
+def gain_command_points(
+    game_state: Dict[str, Any], player: int, amount: int, reason: str
+) -> int:
+    """Ajoute ``amount`` CP au joueur et journalise le gain. Retourne le nouveau stock.
+
+    ÉCRIVAIN UNIQUE de ``game_state["command_points"]`` : 08.02 et les capacités qui accordent
+    du CP (``cp_gain_on_objective``) passent toutes par ici, donc le log et le plafond éventuel
+    n'ont qu'une implémentation. Aucune dépense ne transite ici tant qu'aucun consommateur
+    n'existe (pas de stratagèmes) : ``amount`` est exigé strictement positif.
+    """
+    if amount <= 0:
+        raise ValueError(f"gain_command_points: amount = {amount}, attendu strictement positif")
+    player_int = int(player)
+    if player_int not in (1, 2):
+        raise ValueError(f"gain_command_points: joueur inconnu {player!r}")
+    command_points = require_key(game_state, "command_points")
+    if player_int not in command_points:
+        raise KeyError(
+            f"game_state['command_points'] n'a pas d'entree pour le joueur {player_int} : "
+            f"{command_points!r}"
+        )
+    command_points[player_int] += amount
+    from engine.game_utils import add_console_log
+
+    add_console_log(
+        game_state,
+        f"P{player_int} gains {amount}CP ({reason}) - total {command_points[player_int]}CP",
+    )
+    return command_points[player_int]
 
 
 def objective_hex_sets(game_state: Dict[str, Any]) -> List[Set[Tuple[int, int]]]:

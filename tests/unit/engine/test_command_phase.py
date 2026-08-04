@@ -25,6 +25,10 @@ from engine.reward_calculator import RewardCalculator
 def _cmd_unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
     return {"id": uid, "player": player, "col": col, "row": row,
             "HP_CUR": 3, "HP_MAX": 3, "VALUE": 100, "OC": 1,
+            # Meme exigence que `battle_shocked` ci-dessous : depuis le chantier 02 le Ld est
+            # recopie PAR FIGURINE dans models_cache (01.06, meilleur Ld d'une unite attachee),
+            # donc une doublure sans LD ne represente plus une unite.
+            "LD": 7,
             "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
             "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
             "RNG_WEAPONS": [], "CC_WEAPONS": [], "UNIT_RULES": [],
@@ -40,6 +44,9 @@ def _make_cmd_gs() -> Dict[str, Any]:
     gs: Dict[str, Any] = {
         "turn": 1,
         "current_player": 1,
+        # 08.02 : les CP sont un etat de PARTIE, pose au reset du moteur. Une doublure sans
+        # `command_points` ne peut pas jouer la phase de commandement.
+        "command_points": {1: 0, 2: 0},
         "episode_steps": 0,
         "game_over": False,
         "turn_limit_reached": False,

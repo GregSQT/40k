@@ -363,6 +363,32 @@ Stay option: 80% chance of death but maintain capabilities
 Decision factors: Unit value, importance of actions this turn, long term strategy, alternative threats
   ```
 
+## 🆕 V11 COMPLIANCE MATRIX — COMMAND PHASE
+
+> Source de vérité : `Documentation/40k_rules/08 Command phase.pdf`, `01 Core concepts.pdf`
+> (01.06/01.07), `25 Rules appendix.pdf` (effectifs). Statut établi par lecture du code
+> (`engine/phase_handlers/command_handlers.py`, `engine/game_state.py`).
+
+| Règle | Contenu | Statut moteur | Mapping / notes |
+|---|---|---|---|
+| 08.01 | Start of Command phase | ✅ (2026-08-04) | `command_step_start_of_phase` — remises à zéro « ce tour » ; point d'accrochage des capacités « at the start of your Command phase » (chantiers 03/06) |
+| 08.02 | Gain Core CP (« **both players** gain 1 CP ») | ✅ (2026-08-04) | `command_step_gain_core_cp` → `gain_command_points` (écrivain unique de `game_state["command_points"]`). Montant = constante du PDF (`CORE_CP_GAIN_PER_COMMAND_PHASE`), pas un réglage. Dotation de départ = `game_rules.starting_command_points`, **sans valeur par défaut** |
+| 08.03 | Battle-shock (joueur **actif** ; unités déjà choquées **ou** à/sous demi-effectif) | ✅ (2026-08-04) | `command_step_battle_shock` : filtre `current_player`, union `battle_shocked` ∪ `is_unit_at_or_below_half_strength`. Clause de sortie (« succeeds → no longer battle-shocked ») portée par l'écriture inconditionnelle de `roll_battle_shock` |
+| 08.04 | Command abilities | 🟡 Accroche seule | `command_step_command_abilities` — fonction nommée, appelée, sans effet : les capacités concernées (Waaagh!, Oath, Grot Orderly) appartiennent aux chantiers 03 et 06 |
+| 08.05 | End of Command phase | ✅ | `command_phase_end` — point d'accrochage des capacités « at the end of your Command phase » |
+| 01.06 | Leadership roll (**2D6** ≥ **une ou plusieurs** des caractéristiques Ld de l'unité) | ✅ (2026-08-04) | `unit_effective_leadership` = **min** des Ld des figurines VIVANTES (`models_cache["LD"]`). Warboss `LD 6+` replié dans des Boyz `LD 7+` → l'unité teste à 6+ ; le character mort, elle repasse à 7+ (extinction 19.04) |
+| 01.07 | Battle-shock roll et ses trois effets | 🟡 Partiel, par absence de déclencheur | **OC → '-'** : ✅ `sum_objective_control_oc_multi` écarte l'unité entière (14.02). **Pas ciblable par un stratagème** et **inéligible aux actions** : ⛔ **sans objet** — ni stratagèmes (15) ni système d'actions (16) n'existent dans le moteur. Les coder produirait du code jamais atteint ; à rouvrir avec le chantier stratagèmes |
+| 25 | Force de départ, sous l'effectif, à / sous le demi-effectif | ✅ (2026-08-04) | `is_unit_below_starting_strength`, `is_unit_at_half_strength`, `is_unit_below_half_strength` sur `_strength_measure` (figurines si force de départ ≥ 2, PV si = 1). **Clause de parité** : une force de départ impaire ne peut JAMAIS être *à* demi-effectif |
+| — | `cp_gain_on_objective` (Thievin' Scavengers, Gretchin) | ✅ (2026-08-04) | `movement_step_cp_gain_on_objective`, au **début de la phase de mouvement** (pas de commandement) : 1 D6 par objectif contrôlé tenu par ≥ 1 unité amie **non battle-shocked** porteuse ; ≥ 1 résultat de 4+ → **+1 CP au total** |
+| — | Dépense de CP | ⛔ Sans objet | aucun consommateur tant qu'il n'y a pas de stratagèmes ; `gain_command_points` refuse un montant ≤ 0 |
+| — | Rites of Battle (réduction de coût de stratagème) | ⛔ Non implémentable | « when a stratagem targets this unit » n'a aucun déclencheur ; hors périmètre tant que 15 n'existe pas |
+
+**Observation.** Les CP des deux joueurs sont dans `global_cont`
+(`my_command_points` / `enemy_command_points`, grandeur globale : un CP appartient au joueur, pas
+à une unité). Le battle-shock est un **statut** d'unité (`status_ids`, registre
+`config/unit_statuses.json`), écrit pour les entités alliées **comme** ennemies — l'OC à '-' est
+une information publique. Tests : `test_command_points_and_battle_shock.py`.
+
 ## 🆕 V11 COMPLIANCE MATRIX — MOVEMENT PHASE
 
 > Source de vérité : `Documentation/40k_rules`. Statut établi par lecture du code (`engine/phase_handlers/movement_handlers.py`, `config/game_config.json`). Distances exprimées en **pouces** ; conversion hex = pouces × `inches_to_subhex` (board-dépendant : 44x60x1→1, 44x60x5→5, 44x60x10→10). **Ne jamais coder une équivalence pouce↔hex en dur.**
@@ -397,7 +423,7 @@ Decision factors: Unit value, importance of actions this turn, long term strateg
 **Règle 19 — clauses connexes auditées (2026-07-26, PDF relus : 19, 24 p5-p8, 25 p1-p3, 05 p5, 08) :**
 - **24.22 LEADER / 24.34 SUPPORT** → renvoient à 19, aucun contenu propre : rien à implémenter au-delà de 19.01.
 - **24.24 LONE OPERATIVE** (« unless part of an attached unit ») → **sans objet** : aucune donnée du projet ne déclare cette capacité (grep zéro dans `config/unit_rules.json` et les rosters). À rouvrir si une datasheet la déclare.
-- **Appendix 25 — Starting strength** (« la starting strength d'une unité attachée = les figurines qu'elle contient au début ») → ✅ correct **par construction** : le character replié est une figurine du squad, donc compté dans `model_count_at_start` (squad_cache), lu par `is_unit_at_half_strength`. Le battle-shock 08.03 dit « **at, or below**, half-strength » → le `<=` du code est conforme, y compris la clause « cannot be at half-strength » des effectifs impairs.
+- **Appendix 25 — Starting strength** (« la starting strength d'une unité attachée = les figurines qu'elle contient au début ») → ✅ (2026-08-04, chantier 02) : le character replié est une figurine du squad, donc compté dans `model_count_at_start` (squad_cache, photographié APRÈS le fold 19.04). ⚠️ **La ligne précédente était FAUSSE sur un point** : elle affirmait que le `<=` du code couvrait « a unit that cannot be evenly divided in half cannot be at half-strength ». Il ne la couvrait pas — une escouade de 5 réduite à 2 était classée « à demi-effectif », état que la règle rend impossible. Les trois prédicats de l'appendice sont désormais SÉPARÉS (`is_unit_below_starting_strength`, `is_unit_at_half_strength` avec clause de parité, `is_unit_below_half_strength`), et le déclencheur de 08.03 est leur union explicite (`is_unit_at_or_below_half_strength`). Test `test_command_points_and_battle_shock.py`.
 - **Appendix 25 — Revived** (un leader revivé reste dans son unité attachée) → **sans objet**, aucune mécanique de revive.
 - **24.28 PRECISION** → implémenté et cohérent avec le fold : le character est une figurine du squad, donc un groupe d'allocation ciblable. Le critère « CHARACTER model » est aujourd'hui le **rôle** leader/support, pas le keyword `CHARACTER` — équivalent sur les données actuelles, non verrouillé par un test.
 

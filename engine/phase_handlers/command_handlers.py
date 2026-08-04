@@ -10,7 +10,9 @@ before the movement phase. In Phase 2, the agent may take zone intent free steps
 
 from typing import Dict, List, Tuple, Set, Optional, Any
 from shared.data_validation import require_key
-from engine.game_state import GameStateManager
+from engine.game_state import (
+    CORE_CP_GAIN_PER_COMMAND_PHASE, GameStateManager, gain_command_points,
+)
 
 
 def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -19,6 +21,16 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     - Stay in command if zone intent free steps are available (Phase 2), or
     - Auto-advance to move (no free steps or bot player).
 
+    LES CINQ ÉTAPES DE LA PHASE (PDF 08) — l'ordre est celui du PDF, et c'est un contrat :
+      08.01 `command_step_start_of_phase`     — début de phase (remises à zéro, caches)
+      08.02 `command_step_gain_core_cp`       — les DEUX joueurs gagnent 1 CP
+      08.03 `command_step_battle_shock`       — jets du joueur ACTIF seulement
+      08.04 `command_step_command_abilities`  — capacités « in your command phase »
+      08.05 `command_phase_end`               — fin de phase
+    Elles sont découpées en fonctions nommées parce que plusieurs capacités se déclenchent à une
+    étape PRÉCISE (Waaagh! et Oath au début, Get da Good Bitz en fin) : sans les étapes, il n'y a
+    aucun endroit où les accrocher, et elles finiraient au petit bonheur dans le corps de la phase.
+
     Phase 2 changes:
     - Initializes zone_intent_free_steps_remaining = MAX_OBJECTIVES
     - Populates unit_zone_assignments (one per alive friendly unit)
@@ -26,6 +38,78 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     from engine.macro_intents import INTENT_INVADE, MAX_OBJECTIVES, get_nearest_objective_zone
 
+    command_step_start_of_phase(game_state)   # 08.01
+    command_step_gain_core_cp(game_state)     # 08.02
+    command_step_battle_shock(game_state)     # 08.03
+
+    # Build activation pool (empty for now, structure ready for future)
+    command_build_activation_pool(game_state)
+
+    from engine.game_utils import add_debug_file_log
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    command_pool = require_key(game_state, "command_activation_pool")
+    add_debug_file_log(game_state, f"[POOL BUILD] E{episode} T{turn} command command_activation_pool={command_pool}")
+
+    # Console log
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, "COMMAND PHASE START")
+
+    command_step_command_abilities(game_state)  # 08.04
+
+    # Primary objective scoring (command phase). Règle de MISSION (14.03), pas une des cinq
+    # étapes : elle est laissée APRÈS 08.03 parce qu'elle lit l'OC, que le battle-shock vient de
+    # modifier à '-' (01.07) — l'avancer changerait les VP marqués.
+    state_manager = GameStateManager(require_key(game_state, "config"))
+    state_manager.apply_primary_objective_scoring(game_state, "command")
+
+    # Phase 2: Initialize zone intent free steps
+    # Only for the controlled agent player during gym training
+    gym_training_mode = game_state.get("gym_training_mode", False)
+    current_player = game_state.get("current_player")
+    config = game_state["config"]
+    controlled_player = config.get("controlled_player")
+
+    is_agent_turn = (
+        gym_training_mode
+        and controlled_player is not None
+        and current_player == controlled_player
+    )
+
+    # Populate unit_zone_assignments for ALL alive units (both players)
+    from engine.phase_handlers.shared_utils import is_unit_alive
+    assignments = {}
+    for unit in game_state["units"]:
+        if not is_unit_alive(str(unit["id"]), game_state):
+            continue
+        if unit.get("col", -1) >= 0 and unit.get("row", -1) >= 0:
+            zone_idx = get_nearest_objective_zone(unit, game_state)
+        else:
+            zone_idx = 0
+        assignments[str(unit["id"])] = zone_idx
+    game_state["unit_zone_assignments"] = assignments
+
+    if is_agent_turn:
+        # Reset zone_intent_free_steps_remaining to MAX_OBJECTIVES.
+        # Cette valeur PLEINE est aussi le signal qu'aucun intent n'a encore ete joue ce tour :
+        # `W40KEngine._process_command_phase` s'en sert pour solder la declaration du tour
+        # precedent exactement une fois (cf. `settle_pending_zone_intent_declaration`).
+        game_state["zone_intent_free_steps_remaining"] = MAX_OBJECTIVES
+
+        # Stay in command phase — agent will issue zone intent actions
+        return {"phase_complete": False, "phase": "command"}
+
+    # Bot player or non-training: skip free steps, auto-advance to move
+    game_state["zone_intent_free_steps_remaining"] = 0
+    return command_phase_end(game_state)
+
+
+def command_step_start_of_phase(game_state: Dict[str, Any]) -> None:
+    """08.01 START OF PHASE — pose la phase et remet à zéro l'état « ce tour ».
+
+    Point d'accrochage des capacités « at the start of your Command phase ». Rien ne s'y
+    déclenche aujourd'hui : les capacités qui le feront appartiennent aux chantiers 03 et 06.
+    """
     # Set phase
     game_state["phase"] = "command"
 
@@ -72,8 +156,37 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Used by RewardCalculator._get_enemy_reachable_positions for defensive threat calculation
     game_state["enemy_reachable_cache"] = {}
 
-    # Battle-shock step (règle 08.03) — avant l'activation pool
-    from engine.phase_handlers.shared_utils import is_unit_at_half_strength, roll_battle_shock, is_unit_alive
+
+def command_step_gain_core_cp(game_state: Dict[str, Any]) -> None:
+    """08.02 GAIN CORE CP — « Both players gain 1 Command Point (CP). »
+
+    LES DEUX joueurs, pas le seul joueur actif : c'est la différence avec 08.03 juste en dessous,
+    et l'erreur que la lecture rapide du PDF produit. Le montant est la constante du PDF, pas un
+    réglage de scénario.
+    """
+    for player in (1, 2):
+        gain_command_points(
+            game_state, player, CORE_CP_GAIN_PER_COMMAND_PHASE, "08.02 Core CP"
+        )
+
+
+def command_step_battle_shock(game_state: Dict[str, Any]) -> None:
+    """08.03 BATTLE-SHOCK — un jet par unité concernée, pour le joueur ACTIF seulement.
+
+    « The active player must now make one battle-shock roll for each unit IN THEIR ARMY that
+    fulfils one or both of the following conditions : that unit is currently battle-shocked ;
+    that unit is at, or below, half-strength. » Les deux conditions sont une UNION : une unité
+    déjà battle-shocked rejette même revenue au-dessus du demi-effectif — c'est ce jet qui lui
+    permet d'en sortir (clause de sortie appliquée par `roll_battle_shock`).
+    """
+    from engine.game_utils import add_debug_file_log
+    from engine.phase_handlers.shared_utils import (
+        is_unit_alive, is_unit_at_or_below_half_strength, roll_battle_shock,
+        unit_effective_leadership,
+    )
+
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
     current_player = require_key(game_state, "current_player")
     for unit in require_key(game_state, "units"):
         if require_key(unit, "player") != current_player:
@@ -81,68 +194,26 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
         unit_id = str(unit["id"])
         if not is_unit_alive(unit_id, game_state):
             continue
-        needs_roll = require_key(unit, "battle_shocked") or is_unit_at_half_strength(unit_id, game_state)
+        needs_roll = require_key(unit, "battle_shocked") or is_unit_at_or_below_half_strength(
+            unit_id, game_state
+        )
         if needs_roll:
+            ld = unit_effective_leadership(unit_id, game_state)
             shocked = roll_battle_shock(unit_id, game_state)
             add_debug_file_log(
                 game_state,
-                f"[BATTLE-SHOCK] E{episode} T{turn} unit={unit_id} shocked={shocked} "
-                f"ld={require_key(unit, 'LD')}"
+                f"[BATTLE-SHOCK] E{episode} T{turn} unit={unit_id} shocked={shocked} ld={ld}"
             )
 
-    # Build activation pool (empty for now, structure ready for future)
-    command_build_activation_pool(game_state)
 
-    command_pool = require_key(game_state, "command_activation_pool")
-    add_debug_file_log(game_state, f"[POOL BUILD] E{episode} T{turn} command command_activation_pool={command_pool}")
+def command_step_command_abilities(game_state: Dict[str, Any]) -> None:
+    """08.04 COMMAND ABILITIES — capacités qui se déclenchent « in your Command phase ».
 
-    # Console log
-    from engine.game_utils import add_console_log
-    add_console_log(game_state, "COMMAND PHASE START")
-
-    # Primary objective scoring (command phase)
-    state_manager = GameStateManager(require_key(game_state, "config"))
-    state_manager.apply_primary_objective_scoring(game_state, "command")
-
-    # Phase 2: Initialize zone intent free steps
-    # Only for the controlled agent player during gym training
-    gym_training_mode = game_state.get("gym_training_mode", False)
-    current_player = game_state.get("current_player")
-    config = game_state["config"]
-    controlled_player = config.get("controlled_player")
-
-    is_agent_turn = (
-        gym_training_mode
-        and controlled_player is not None
-        and current_player == controlled_player
-    )
-
-    # Populate unit_zone_assignments for ALL alive units (both players)
-    from engine.phase_handlers.shared_utils import is_unit_alive
-    assignments = {}
-    for unit in game_state["units"]:
-        if not is_unit_alive(str(unit["id"]), game_state):
-            continue
-        if unit.get("col", -1) >= 0 and unit.get("row", -1) >= 0:
-            zone_idx = get_nearest_objective_zone(unit, game_state)
-        else:
-            zone_idx = 0
-        assignments[str(unit["id"])] = zone_idx
-    game_state["unit_zone_assignments"] = assignments
-
-    if is_agent_turn:
-        # Reset zone_intent_free_steps_remaining to MAX_OBJECTIVES.
-        # Cette valeur PLEINE est aussi le signal qu'aucun intent n'a encore ete joue ce tour :
-        # `W40KEngine._process_command_phase` s'en sert pour solder la declaration du tour
-        # precedent exactement une fois (cf. `settle_pending_zone_intent_declaration`).
-        game_state["zone_intent_free_steps_remaining"] = MAX_OBJECTIVES
-
-        # Stay in command phase — agent will issue zone intent actions
-        return {"phase_complete": False, "phase": "command"}
-
-    # Bot player or non-training: skip free steps, auto-advance to move
-    game_state["zone_intent_free_steps_remaining"] = 0
-    return command_phase_end(game_state)
+    Point d'accrochage nommé, sans effet aujourd'hui : les capacités concernées (Grot Orderly,
+    Waaagh!, Oath of Moment) appartiennent aux chantiers 03 et 06. Elles se brancheront ICI,
+    entre le battle-shock et la fin de phase, comme le PDF les ordonne.
+    """
+    return None
 
 
 def command_build_activation_pool(game_state: Dict[str, Any]) -> None:
@@ -154,8 +225,11 @@ def command_build_activation_pool(game_state: Dict[str, Any]) -> None:
 
 def command_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    End command phase and transition to move phase.
-    
+    08.05 END OF PHASE — end command phase and transition to move phase.
+
+    Point d'accrochage des capacités « at the end of your Command phase » (Get da Good Bitz,
+    chantier 06).
+
     CRITICAL: Returns ONLY the dict, does NOT call movement_phase_start() directly.
     The cascade loop in w40k_core.py handles the transition automatically.
     """

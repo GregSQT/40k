@@ -826,6 +826,18 @@ def _build_models_for_unit(
             "SHOOT_LEFT": shoot_left,
             "ATTACK_LEFT": attack_left,
             "OC": int(spec.get("OC", oc)),
+            # LD PAR FIGURINE (01.06) : « one or more of the Ld characteristics IN THAT UNIT ».
+            # Une unite attachee porte plusieurs profils de Ld, la caracteristique se lit donc sur
+            # la FIGURINE — comme OC/T/ARMOR_SAVE juste au-dessus — et le seuil de l'unite s'en
+            # deduit (`unit_effective_leadership`), il ne se stocke nulle part.
+            # Propagation SANS invention, meme convention que `UNIT_KEYWORDS` plus bas : la cle
+            # n'est posee que si la donnee existe (toute unite de roster porte `LD`), et son
+            # absence LEVE chez le consommateur qui en a besoin, jamais ici.
+            **(
+                {"LD": int(spec["LD"])} if "LD" in spec
+                else {"LD": int(unit["LD"])} if "LD" in unit
+                else {}
+            ),
             "VALUE": spec_value,
             "points_per_hp": points_per_hp,
             "ARMOR_SAVE": int(spec.get("ARMOR_SAVE", armor_save)),
@@ -4676,42 +4688,127 @@ def allocate_mortal_wounds(
     return applied
 
 
-def is_unit_at_half_strength(unit_id: str, game_state: Dict[str, Any]) -> bool:
-    """Vérifie si une unité est à la half-strength (règle 08.03).
+def _strength_measure(unit_id: str, game_state: Dict[str, Any]) -> Tuple[int, int]:
+    """``(restant, depart)`` — la grandeur sur laquelle se jugent les seuils d'effectif (25).
 
-    - Multi-modèles (model_count_at_start > 1) : alive <= initial / 2
-    - Mono-modèle  (model_count_at_start == 1) : HP_CUR <= HP_MAX / 2
+    L'appendice 25 en definit DEUX, selon la force de depart, et c'est la seule difference entre
+    les trois predicats ci-dessous :
+      - force de depart >= 2 : ce sont des FIGURINES (restantes vs force de depart) ;
+      - force de depart == 1 : ce sont des POINTS DE VIE (W restants vs W du profil), parce
+        qu'une unite d'une figurine ne peut pas perdre de figurine sans etre detruite.
+
+    La force de depart est ``squad_cache[unit]["model_count_at_start"]``, photographiee par
+    ``build_units_cache`` APRES le repli 19.04 (`_fold_attached_characters`) : un Captain attache
+    a 5 Intercessors est deja une figurine de l'escouade a cet instant, donc la force de depart
+    vaut 6 — l'exemple litteral du PDF 25.
     """
     squad_cache = require_key(game_state, "squad_cache")
     entry = squad_cache.get(str(unit_id))
     if entry is None:
-        raise KeyError(f"is_unit_at_half_strength: unit {unit_id} not in squad_cache")
-    count_start = int(entry["model_count_at_start"])
-    count_now = int(entry["model_count"])
+        raise KeyError(f"_strength_measure: unit {unit_id} not in squad_cache")
+    count_start = int(require_key(entry, "model_count_at_start"))
+    if count_start <= 0:
+        raise ValueError(
+            f"_strength_measure: unit {unit_id} a une force de depart de {count_start} : "
+            f"une escouade sans figurine au debut de la bataille est un etat corrompu."
+        )
     if count_start > 1:
-        return count_now <= count_start / 2
-    # Mono-modèle : check HP. HP_CUR vient de units_cache (source de vérité vivante,
+        return int(require_key(entry, "model_count")), count_start
+    # Mono-figurine : la mesure est en PV. HP_CUR vient de units_cache (source de vérité vivante,
     # mise à jour à chaque dégât) ; HP_MAX est immuable et lu sur l'unité.
     units_cache = require_key(game_state, "units_cache")
     cache_entry = units_cache.get(str(unit_id))
     if cache_entry is None:
-        raise KeyError(f"is_unit_at_half_strength: unit {unit_id} not in units_cache")
+        raise KeyError(f"_strength_measure: unit {unit_id} not in units_cache")
     units = require_key(game_state, "units")
     try:
         unit = next(u for u in units if str(u.get("id")) == str(unit_id))
     except StopIteration:
-        raise KeyError(f"is_unit_at_half_strength: unit {unit_id} not found in game_state['units']")
-    hp_cur = int(require_key(cache_entry, "HP_CUR"))
-    hp_max = int(require_key(unit, "HP_MAX"))
-    return hp_cur <= hp_max / 2
+        raise KeyError(f"_strength_measure: unit {unit_id} not found in game_state['units']")
+    return int(require_key(cache_entry, "HP_CUR")), int(require_key(unit, "HP_MAX"))
+
+
+def is_unit_below_starting_strength(unit_id: str, game_state: Dict[str, Any]) -> bool:
+    """Appendice 25 : l'unite a-t-elle perdu quoi que ce soit depuis le debut de la bataille ?"""
+    remaining, start = _strength_measure(unit_id, game_state)
+    return remaining < start
+
+
+def is_unit_at_half_strength(unit_id: str, game_state: Dict[str, Any]) -> bool:
+    """Appendice 25 : l'unite est-elle EXACTEMENT a demi-effectif ?
+
+    ⚠️ « If a model's W characteristic or a unit's starting strength cannot be evenly divided in
+    half, that model or unit CANNOT be at half-strength (but can be below half-strength). » Une
+    force de depart IMPAIRE rend donc ce predicat definitivement faux — une escouade de 5 n'est
+    JAMAIS a demi-effectif, quel que soit son etat. C'est ce que `start % 2` verrouille, et c'est
+    exactement ce qu'une implementation en `<=` sur une division entiere raterait.
+    """
+    remaining, start = _strength_measure(unit_id, game_state)
+    if start % 2 != 0:
+        return False
+    return remaining == start // 2
+
+
+def is_unit_below_half_strength(unit_id: str, game_state: Dict[str, Any]) -> bool:
+    """Appendice 25 : l'unite est-elle SOUS le demi-effectif ?
+
+    Aucune clause de parite ici, et c'est le pendant de celle de `is_unit_at_half_strength` : une
+    escouade de 5 reduite a 2 est sous le demi-effectif (2 < 2.5) sans jamais y avoir ete.
+    """
+    remaining, start = _strength_measure(unit_id, game_state)
+    return remaining * 2 < start
+
+
+def is_unit_at_or_below_half_strength(unit_id: str, game_state: Dict[str, Any]) -> bool:
+    """Condition d'effectif de l'etape 08.03 : « at, or below, half-strength ».
+
+    Union EXPLICITE des deux predicats de l'appendice 25, et pas un `<=` maison : avec la clause
+    de parite, « a demi-effectif » et « sous le demi-effectif » ne sont pas deux moities d'un
+    meme test, et les ecrire separement est ce qui rend chacun verifiable.
+    """
+    return is_unit_at_half_strength(unit_id, game_state) or is_unit_below_half_strength(
+        unit_id, game_state
+    )
+
+
+def unit_effective_leadership(unit_id: str, game_state: Dict[str, Any]) -> int:
+    """Seuil de Ld d'une unite pour un jet de commandement (01.06). Le PLUS BAS de ses figurines.
+
+    « if the result is equal to or greater than ONE OR MORE of the Ld characteristics in that
+    unit, that roll succeeds » : reussir contre l'un des Ld suffit, donc l'unite teste contre le
+    seuil le plus facile — le Ld numeriquement le plus BAS (les datasheets ecrivent `6+`, `7+`).
+    Un Warboss (`LD 6+`) attache a des Boyz (`LD 7+`) fait tester l'unite a 6+.
+
+    Lu sur les figurines VIVANTES (`models_cache`, d'ou les morts sont retires) : quand le
+    character tombe, l'unite reperd son Ld — meme extinction par source que les regles 19.04.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    model_ids = squad_models.get(str(unit_id))
+    if model_ids is None:
+        raise KeyError(f"unit_effective_leadership: unit {unit_id} not in squad_models")
+    living = [mid for mid in model_ids if mid in models_cache]
+    if not living:
+        raise ValueError(
+            f"unit_effective_leadership: unit {unit_id} n'a plus aucune figurine vivante — "
+            f"une unite detruite ne fait aucun jet de commandement."
+        )
+    # `LD` absent = la figurine n'a pas de caracteristique de commandement, ce qui n'existe pas
+    # sur une datasheet : erreur explicite, jamais un seuil de repli qui ferait rater ou reussir
+    # le jet en silence.
+    return min(int(require_key(models_cache[mid], "LD")) for mid in living)
 
 
 def roll_battle_shock(unit_id: str, game_state: Dict[str, Any]) -> bool:
     """Battle-shock roll pour une unité (règle 01.07).
 
-    Tire 2D6 et compare au LD de l'unité.
+    Tire 2D6 et compare au MEILLEUR Ld de l'unité (01.06, `unit_effective_leadership`).
     Si résultat >= LD : succès, l'unité n'est PAS battle-shocked.
     Si résultat < LD  : échec, l'unité devient battle-shocked.
+
+    L'écriture est INCONDITIONNELLE, et c'est la clause de sortie de 08.03 : « if a unit was
+    battle-shocked at the start of this step and its battle-shock roll during this step succeeds,
+    it is no longer battle-shocked » — un succès remet donc le drapeau à False.
 
     Retourne True si l'unité est désormais battle-shocked, False sinon.
     """
@@ -4721,7 +4818,7 @@ def roll_battle_shock(unit_id: str, game_state: Dict[str, Any]) -> bool:
         unit = next(u for u in units if str(u.get("id")) == str(unit_id))
     except StopIteration:
         raise KeyError(f"roll_battle_shock: unit {unit_id} not found in game_state['units']")
-    ld = int(require_key(unit, "LD"))
+    ld = unit_effective_leadership(str(unit_id), game_state)
     roll = random.randint(1, 6) + random.randint(1, 6)
     battle_shocked = roll < ld
     unit["battle_shocked"] = battle_shocked

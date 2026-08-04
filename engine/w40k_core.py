@@ -54,7 +54,7 @@ from engine.observation_builder import ObservationBuilder
 from engine.action_decoder import DEPLOY_SLOT_CANDIDATES_CACHE_KEY, ActionDecoder
 from engine.debug_trace import CH_STEP, trace
 from engine.reward_calculator import RewardCalculator
-from engine.game_state import GameStateManager
+from engine.game_state import GameStateManager, initial_command_points
 from engine.macro_intents import (
     ACTION_FAMILIES,
     INTENT_INVADE,
@@ -550,6 +550,7 @@ class W40KEngine(gym.Env):
                 base_wall_hexes.add((col, bottom_row))
         
         from engine.combat_utils import GYM_DISTANCE_METRIC_KEY, gym_distance_metric_override
+        from config_loader import get_config_loader
 
         # CRITICAL: Initialize game_state FIRST before any other operations
         # _cache_instance_id: unique per engine instance, prevents id(game_state) reuse collision
@@ -570,6 +571,9 @@ class W40KEngine(gym.Env):
             "game_over": False,
             "winner": None,
             "victory_points": {1: 0, 2: 0},
+            # Points de commandement des deux joueurs (08.02). Meme cycle de vie que
+            # `victory_points` : pose a l'init ET remis a la dotation de depart au reset.
+            "command_points": initial_command_points(get_config_loader().get_game_config()),
             "primary_objective": self._scenario_primary_objective,
             "primary_objective_scored_turns": set(),
             "objective_rewarded_turns": set(),
@@ -1311,6 +1315,8 @@ class W40KEngine(gym.Env):
         
         # Increment episode number (original logic - works fine for everything except debug.log)
         self.episode_number += 1
+        from config_loader import get_config_loader
+
         if not isinstance(self.is_pve_mode, bool):
             raise TypeError(f"is_pve_mode must be bool, got {type(self.is_pve_mode).__name__}")
         player_types = {
@@ -1334,6 +1340,9 @@ class W40KEngine(gym.Env):
             "deployment_random_mix_episode_enabled": False,
             "_deployment_random_mix_forced_steps": 0,
             "victory_points": {1: 0, 2: 0},
+            # Remise a la dotation de depart : un episode ne peut pas heriter des CP du
+            # precedent (`reset` fait un `update()` de game_state, pas une recreation).
+            "command_points": initial_command_points(get_config_loader().get_game_config()),
             "primary_objective": self._scenario_primary_objective,
             "primary_objective_scored_turns": set(),
             "objective_rewarded_turns": set(),

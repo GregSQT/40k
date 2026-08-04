@@ -523,6 +523,12 @@ N_OBJECTIVE_SLOTS = 5
 GLOBAL_CONT_FIELDS: Tuple[str, ...] = (
     "turn", "episode_steps", "my_victory_points", "enemy_victory_points",
     "my_value_ratio", "enemy_value_ratio",
+    # Points de commandement des DEUX joueurs (08.02). Grandeur globale, pas une propriété
+    # d'entité : les CP appartiennent au joueur, jamais à une unité. Les deux sont observés —
+    # le stock adverse conditionne ce que l'adversaire pourra dépenser, exactement comme ses
+    # points de victoire. Déclarés ici et non dans un bloc d'entité pour la même raison que
+    # `my_victory_points`.
+    "my_command_points", "enemy_command_points",
     # Distance de l'escouade OBSERVATRICE à chaque objectif, en subhex bruts (hex le plus proche
     # de la zone). Sans elle, un objectif hors de la grille égocentrique — dont la demi-étendue
     # vaut le budget d'Advance, soit 12" mesuré sur le board x5 — n'existe nulle part dans

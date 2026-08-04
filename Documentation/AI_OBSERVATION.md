@@ -25,7 +25,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 
 | Clé | Forme | Contenu |
 |---|---|---|
-| `global_cont` / `global_bin` | (11,) / (27,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, force d'usure, **distance à chacun des 5 objectifs** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
+| `global_cont` / `global_bin` | (13,) / (27,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, **points de commandement des deux camps (08.02)**, force d'usure, **distance à chacun des 5 objectifs** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
 | `allies_cont` / `allies_bin` | (8, 19) / (8, 20) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les drapeaux incluent, pour les ennemis seulement, `los_can_see`, `cover_vs_observer` et `charge_reachable_max_roll` |
 | `allies_ability_ids` / `allies_status_ids` | (8, 8) / (8, 4) | **capacités et statuts EN VIGUEUR (19.04), en IDENTIFIANTS ENTIERS et non en bits** : `obs_id` des registres [`config/unit_rules.json`](../config/unit_rules.json) et [`config/unit_statuses.json`](../config/unit_statuses.json), **triés croissants**, paddés à `0`. Deux `nn.EmbeddingBag(128, 16, mode="sum", padding_idx=0)` en font une **lecture de ligne** : aucun one-hot n'est matérialisé, donc la longueur du vecteur est **indépendante du nombre de capacités existantes** — ajouter une capacité, un statut ou une faction entière ne change ni `obs_size`, ni le nombre de paramètres du réseau, donc n'impose **aucun retrain**. Débordement (> 8 capacités) → **erreur**, jamais troncature |
 | `allies_wpn_cont` / `_bin` | (8, 20, 13) / (8, 20, 18) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants et bits/params de règles |
@@ -41,10 +41,10 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 752 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 754 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
-│    global_cont            (11,)                =      11               │
+│    global_cont            (13,)                =      13               │
 │    global_bin             (27,)                =      27               │
 │                                                                        │
 │  MES ESCOUADES — ligne 0 = l'unité ACTIVE          K_ALLY_SLOTS = 8    │
@@ -79,7 +79,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    deploy_cand_cont       (5, 8)               =      40               │
 │    deploy_cand_bin        (5, 4)               =      20               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      20 752              │
+│  TOTAL vectoriel (= obs_size)                      20 754              │
 │  + grid  (9, 32, 32) = 9 216, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -113,11 +113,13 @@ global_cont[2]     = my_victory_points                      # brut (VP)
 global_cont[3]     = enemy_victory_points                   # brut (VP)
 global_cont[4]     = my_value_ratio                         # 0.0-1.0 (VALUE vivante / depart)
 global_cont[5]     = enemy_value_ratio                      # 0.0-1.0 (VALUE vivante / depart)
-global_cont[6]     = objective_distance_0                   # subhex, hex le plus proche de l'objectif 0
-global_cont[7]     = objective_distance_1                   # subhex, hex le plus proche de l'objectif 1
-global_cont[8]     = objective_distance_2                   # subhex, hex le plus proche de l'objectif 2
-global_cont[9]     = objective_distance_3                   # subhex, hex le plus proche de l'objectif 3
-global_cont[10]    = objective_distance_4                   # subhex, hex le plus proche de l'objectif 4
+global_cont[6]     = my_command_points                       # brut (CP, regle 08.02)
+global_cont[7]     = enemy_command_points                    # brut (CP, regle 08.02)
+global_cont[8]     = objective_distance_0                   # subhex, hex le plus proche de l'objectif 0
+global_cont[9]     = objective_distance_1                   # subhex, hex le plus proche de l'objectif 1
+global_cont[10]    = objective_distance_2                   # subhex, hex le plus proche de l'objectif 2
+global_cont[11]    = objective_distance_3                   # subhex, hex le plus proche de l'objectif 3
+global_cont[12]    = objective_distance_4                   # subhex, hex le plus proche de l'objectif 4
 ```
 
 #### `global_bin` — contexte discret  ·  jamais normalise
@@ -558,8 +560,13 @@ déploiement » : ce que chacune des 5 actions 4-8 poserait, §0.40 point 3, 202
 → 20780 (RETRAIT de `ez_relayed_by_ally` et `n_relayed_ez` avec la clause « buddy » :
 04.02 WHILE FIGHTING n'autorise à frapper qu'une figurine ENGAGÉE avec la cible, le relais par
 une alliée au contact venait d'une édition antérieure de 40K, 2026-08-04)
-→ **20752** (chantier 01 : les 13 bits `rule_<effet>` remplacés par 8 slots d'ids de capacité +
-4 slots d'ids de statut, 2026-08-04). **Toute évolution du schéma change cette valeur et rend les
+→ 20752 (chantier 01 : les 13 bits `rule_<effet>` remplacés par 8 slots d'ids de capacité +
+4 slots d'ids de statut, 2026-08-04)
+→ **20754** (chantier 02 : `my_command_points` / `enemy_command_points` dans `global_cont` —
+règle 08.02, les CP appartiennent au joueur, pas à une unité. Ces deux emplacements auraient dû
+être déclarés par le chantier 01, seul autorisé à bouger `obs_size` ; l'oubli est réparé ici, sans
+retrain supplémentaire puisque le chantier 01 en imposait déjà un, 2026-08-04).
+**Toute évolution du schéma change cette valeur et rend les
 `.zip` existants incompatibles : le retrain `--new` est obligatoire.**
 
 ⚠️ **C'est la DERNIÈRE valeur de cette liste que le passage aux ids fait bouger pour une capacité.**
