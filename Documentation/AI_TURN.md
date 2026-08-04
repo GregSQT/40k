@@ -383,6 +383,19 @@ Decision factors: Unit value, importance of actions this turn, long term strateg
 | — | Dépense de CP | ⛔ Sans objet | aucun consommateur tant qu'il n'y a pas de stratagèmes ; `gain_command_points` refuse un montant ≤ 0 |
 | — | Rites of Battle (réduction de coût de stratagème) | ⛔ Non implémentable | « when a stratagem targets this unit » n'a aucun déclencheur ; hors périmètre tant que 15 n'existe pas |
 
+**Règle 14.02 — le checkpoint de contrôle d'objectif était éteint en entraînement.**
+Trouvé en corrigeant `cp_gain_on_objective`, qui lit « for each objective you control » et ne
+jouait JAMAIS au tour 1 (mesuré : `objective_controllers == {}` aux deux phases de mouvement).
+Cause : `run_objective_control_checkpoint` sort sur `if not check_cfg`, et la section
+`objective_control_check` de `game_config.json` n'était posée que par les deux constructeurs de
+`services/api_server` — la branche d'entraînement de `W40KEngine.__init__` l'avait omise. Le
+contrôle n'était donc rafraîchi en gym que par effet de bord des chemins de scoring VP, à des
+moments qui ne sont pas ceux de la règle. Corrigé le 2026-08-04 ; **le contrôle est désormais
+réévalué à chaque frontière de phase**, ce qui change les VP et les récompenses d'objectif
+(mesure avant/après sur 3 graines dans le message de livraison). Verrou :
+`test_objective_control_checkpoint_1402.py`, qui contrôle la présence de la section **et** que
+le checkpoint écrit réellement.
+
 **Observation.** Les CP des deux joueurs sont dans `global_cont`
 (`my_command_points` / `enemy_command_points`, grandeur globale : un CP appartient au joueur, pas
 à une unité). Le battle-shock est un **statut** d'unité (`status_ids`, registre

@@ -375,6 +375,16 @@ class W40KEngine(gym.Env):
             self.config = {
                 "board": board_config,
                 "game_rules": require_key(game_config, "game_rules"),
+                # Regle 14.02 — points (phase, moment) ou le controle d'objectif est REEVALUE.
+                # OMIS de cette branche jusqu'au 2026-08-04, alors que les deux chemins API/PvP
+                # le posaient : `run_objective_control_checkpoint` sort sur `if not check_cfg`
+                # des que la section manque, donc le checkpoint 14.02 etait un NO-OP COMPLET en
+                # entrainement. Le controle n'y etait rafraichi que par effet de bord des chemins
+                # de scoring VP (`calculate_objective_control` appele en direct), a des moments
+                # qui ne sont pas ceux de la regle. « Code teste mais jamais appele » : le
+                # correctif de `refresh_objective_control_on_boundary` avait ete ecrit et sa
+                # docstring annonce les DEUX chemins, mais la config ne l'a jamais atteint ici.
+                "objective_control_check": require_key(game_config, "objective_control_check"),
                 "move": require_key(game_config, "move"),
                 "charge": require_key(game_config, "charge"),
                 "units": scenario_units,
