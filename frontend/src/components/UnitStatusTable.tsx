@@ -630,6 +630,9 @@ interface UnitStatusTableProps {
   /** Facteur subhex du board : MOVE/portées sont stockés ×inches_to_subhex, on les reconvertit en pouces pour l'affichage. */
   inchesToSubhex?: number;
   victoryPoints?: number;
+  /** Points de commandement du joueur (règle 08.02). Affichés dans le MÊME en-tête que les VP :
+   *  un seul endroit à l'écran pour les deux compteurs de partie. */
+  commandPoints?: number;
   onCollapseChange?: (collapsed: boolean) => void;
   /** Preview plateau : forcer cette unité et ses armes à être visibles tant que l'illustration est affichée. */
   detailPreviewUnitId?: UnitId | null;
@@ -1456,6 +1459,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     isReplay = false,
     inchesToSubhex = 1,
     victoryPoints,
+    commandPoints,
     onCollapseChange,
     detailPreviewUnitId = null,
     inspectedModel = null,
@@ -1737,6 +1741,9 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                 </button>
                 <span style={{ fontSize: "16px" }}>{getPlayerTypeLabel(player)}</span>
               </div>
+              {commandPoints !== undefined && (
+                <span style={{ fontSize: "14px" }}>{`CP : ${commandPoints}`}</span>
+              )}
               {victoryPoints !== undefined && (
                 <span style={{ fontSize: "14px" }}>{`VP : ${victoryPoints}`}</span>
               )}

@@ -12,6 +12,8 @@
   },
   "game_rules": {
     "max_turns": 5,
+    "starting_command_points": 0,
+    "starting_command_points_detail": "Stock de CP de CHAQUE joueur au debut de la bataille (regle 08.02 : le gain de 1 CP par phase de commandement s'y ajoute, pour les DEUX joueurs). 0 = dotation des parties Combat Patrol/Incursion sans Battle Tactic de depart, qui est le format des scenarios Armageddon. Aucune valeur par defaut cote code : `initial_command_points` (engine/game_state.py) leve si la cle manque, parce que la dotation depend du format de partie et ne se devine pas.",
     "max_actions_per_model_per_turn": 7,
     "max_actions_per_model_per_turn_detail": "Majorant d'actions qu'UNE figurine peut consommer en un tour (6 phases dont deployment qui ne joue qu'une fois, + marge pile-in/consolidation). Remplace l'ancien 'max_steps_per_turn' fixe a 500 : le plafond d'un tour est desormais derive du nombre de figurines REELLEMENT en jeu (releve au reset du moteur), donc il suit le roster au lieu d'etre re-regle a la main.",
     "step_limit_margin": 1.2,

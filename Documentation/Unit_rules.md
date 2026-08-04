@@ -67,12 +67,16 @@ Regles:
   `engine/observation_entities.py`) : les 13 effets techniques. Absent -> erreur explicite a la
   premiere observation.
 - **Absent** pour tout le reste : capacites SOURCES composites (`cunning_hunters`,
-  `targeted_intercession`…), regles d'affichage a `alias`, marqueurs de ROLE (`leader`,
-  `support`, `sergeant`, `special_weapon`) — le bloc TYPES porte deja ces derniers — et les
-  capacites hors vocabulaire observe, comme `cp_gain_on_objective` (Thievin' Scavengers,
-  chantier 02) : elle est vive dans le moteur (`movement_step_cp_gain_on_objective`) mais
-  n'entre pas dans `UNIT_RULE_EFFECT_IDS`, dont chaque entree coute 6 scalaires d'observation
-  (un bit par candidat de decision) — l'agent en voit deja l'EFFET, ses CP. Ce sont les
+  `targeted_intercession`…), regles d'affichage a `alias`, et marqueurs de ROLE (`leader`,
+  `support`, `sergeant`, `special_weapon`) — le bloc TYPES porte deja ces derniers.
+
+Depuis le 2026-08-04, allonger `UNIT_RULE_EFFECT_IDS` coute **exactement zero scalaire**. Ce
+n'etait pas vrai avant : le bloc `decision_options_bin` (candidats de `rule_choice`) etait bati
+sur ce meme tuple, donc chaque entree y ajoutait 6 bits positionnels — souvent morts a vie. Les
+deux registres sont separes (`DECISION_GRANTABLE_EFFECT_IDS` = les seuls effets qu'un candidat
+peut accorder), et un test de contrat recalcule le second depuis les `grantsRuleIds` des rosters.
+Consequence pratique : une capacite nouvelle entre dans le vocabulaire observe **sans arbitrage
+de cout** ; seul un effet ACCORDABLE nouveau fait bouger `obs_size`. Ce sont les
   EFFETS qui sont observes, jamais les capacites nommees : `unit_has_rule_effect` resout les
   sources vers eux.
 - Domaine `[1, 127]`. `0` est reserve au padding des slots vides.

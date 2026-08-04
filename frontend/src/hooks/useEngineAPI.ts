@@ -317,6 +317,7 @@ export interface APIGameState {
     deployment_complete: boolean;
   };
   victory_points?: Record<string, number>;
+  command_points?: Record<string, number>;
   primary_objective?: Record<string, unknown> | Array<Record<string, unknown>> | null;
   objectives?: Array<{
     name: string;
@@ -7658,6 +7659,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       active_fight_unit: gameState.active_fight_unit,
       units_cache: gameState.units_cache,
       victory_points: gameState.victory_points,
+      command_points: gameState.command_points,
       primary_objective: gameState.primary_objective,
       objectives: gameState.objectives,
       // Contrôleur d'objectif par id (Rule 14.02) — colore les terrains dans BoardDisplay.

@@ -574,6 +574,7 @@ export const BoardWithAPI: React.FC = () => {
     return Object.values(playerTypes).some((playerType) => playerType === "ai");
   })();
   const victoryPoints = apiProps.gameState?.victory_points;
+  const commandPoints = apiProps.gameState?.command_points;
   const objectivesOverride = (() => {
     const objectives = apiProps.gameState?.objectives as
       | Array<{ name: string; hexes: Array<{ col: number; row: number } | [number, number]> }>
@@ -1104,6 +1105,27 @@ export const BoardWithAPI: React.FC = () => {
     const stringValue = victoryPoints[String(player)];
     if (stringValue === undefined) {
       throw new Error(`victory_points missing for player ${player}`);
+    }
+    return stringValue;
+  };
+
+  // Jumeau EXACT de `getVictoryPointsForPlayer` : même compteur de partie, même sérialisation
+  // (JSON n'a pas de clé entière — l'API normalise, d'où la double lecture), même refus de
+  // repli sur 0. Un `?? 0` afficherait « 0 CP » pour un état incomplet, indiscernable du vrai 0.
+  const getCommandPointsForPlayer = (player: 1 | 2): number | undefined => {
+    if (!apiProps.gameState) {
+      return undefined;
+    }
+    if (!commandPoints) {
+      throw new Error("command_points missing from game_state");
+    }
+    const numericValue = commandPoints[player];
+    if (numericValue !== undefined) {
+      return numericValue;
+    }
+    const stringValue = commandPoints[String(player)];
+    if (stringValue === undefined) {
+      throw new Error(`command_points missing for player ${player}`);
     }
     return stringValue;
   };
@@ -2120,6 +2142,7 @@ export const BoardWithAPI: React.FC = () => {
           }}
           gameMode={gameMode}
           victoryPoints={getVictoryPointsForPlayer(1)}
+          commandPoints={getCommandPointsForPlayer(1)}
           onCollapseChange={setPlayer1Collapsed}
           detailPreviewUnitId={
             illustrationPreviewUnit?.player === 1 ? illustrationPreviewUnit.id : null
@@ -2146,6 +2169,7 @@ export const BoardWithAPI: React.FC = () => {
           }}
           gameMode={gameMode}
           victoryPoints={getVictoryPointsForPlayer(2)}
+          commandPoints={getCommandPointsForPlayer(2)}
           onCollapseChange={setPlayer2Collapsed}
           detailPreviewUnitId={
             illustrationPreviewUnit?.player === 2 ? illustrationPreviewUnit.id : null

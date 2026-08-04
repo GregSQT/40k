@@ -649,6 +649,13 @@ def test_squad_obs_size_target_matches_the_schema():
     chantier 02 (`global_cont`, règle 08.02) — il ne l'a pas fait. L'oubli est réparé au début du
     chantier 02 : `my_command_points` / `enemy_command_points`, d'où 20752 -> 20754. Le retrain
     `--new` reste unique (celui du chantier 01, du même jour, invalidait déjà les `.zip`).
+
+    Toujours le chantier 02 : le registre du bloc `decision_options_bin` a été DÉCOUPLÉ du
+    vocabulaire observé (`DECISION_GRANTABLE_EFFECT_IDS`). Il portait un bit `grants_*` par effet
+    OBSERVABLE, alors que 6 des 13 ne sont accordables par aucun roster — 36 scalaires qui ne
+    pouvaient jamais valoir 1, et 6 de plus à chaque capacité ajoutée à l'observation. D'où
+    20754 -> 20718, et surtout : allonger le vocabulaire observé ne bouge PLUS `obs_size`, ce
+    que le gel du chantier 01 promettait sans le tenir.
     C'est le DERNIER changement d'`obs_size` de la séquence : les chantiers 03 à 06 n'utilisent
     que des dimensions déjà déclarées.
 
@@ -662,7 +669,7 @@ def test_squad_obs_size_target_matches_the_schema():
         DEPLOY_CAND_BIN_SIZE, DEPLOY_CAND_CONT_SIZE, N_DEPLOY_SLOTS,
     )
 
-    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 20754
+    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 20718
     assert N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE) == 60, (
         "le bloc candidat de déploiement a changé de taille : mettre à jour `obs_size` dans les "
         "5 profils de la config d'agent, et l'historique d'AI_OBSERVATION.md"

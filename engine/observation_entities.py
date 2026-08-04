@@ -102,20 +102,54 @@ UNIT_CONT_FIELDS: Tuple[str, ...] = (
 #:
 #: ⚠️ Ce tuple n'ordonne PLUS rien dans l'observation (chantier 01) : les capacités y sont
 #: écrites en `obs_id` triés croissant (`UNIT_ABILITY_SLOTS` ci-dessous), pas en bits positionnels.
-#: Il reste le VOCABULAIRE — la liste de ce qui est observable — et il sert tel quel au
-#: registre de candidats de décision (`DECISION_OPTION_BIN_FIELDS`), où le nombre de types
-#: reste petit et fixe.
+#: Il reste le VOCABULAIRE — la liste de ce qui est observable — et l'allonger coûte
+#: EXACTEMENT ZÉRO scalaire. Ce n'était pas vrai avant le 2026-08-04 : le registre de candidats
+#: de décision (`DECISION_OPTION_BIN_FIELDS`) était bâti sur CE tuple, donc chaque entrée y
+#: coûtait 6 bits positionnels (un par slot de candidat) — la promesse « une capacité est
+#: gratuite » du chantier 01 était fausse d'un facteur 6. Les deux registres sont séparés depuis
+#: (cf. `DECISION_GRANTABLE_EFFECT_IDS`).
 UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (
     "charge_after_advance",
     "charge_after_flee",
     "charge_impact",
     "closest_target_penetration",
+    # Thievin' Scavengers (chantier 02) : la seule capacité du vocabulaire qui n'agit pas sur un
+    # jet mais sur les CP. Observée parce que l'agent doit pouvoir ATTRIBUER le gain à l'unité
+    # qui tient l'objectif ; ses CP seuls ne disent pas d'où ils viennent.
+    "cp_gain_on_objective",
     "move_after_shooting",
     "reactive_move",
     "reroll_1_save_fight",
     "reroll_1_tohit_fight",
     "reroll_1_towound",
     "reroll_charge",
+    "reroll_towound_target_on_objective",
+    "shoot_after_advance",
+    "shoot_after_flee",
+)
+
+#: Effets qu'un CANDIDAT DE DÉCISION peut accorder — sous-ensemble STRICT de
+#: `UNIT_RULE_EFFECT_IDS`, et registre PROPRE du bloc `decision_options_bin`.
+#:
+#: POURQUOI SÉPARÉ. Un candidat de `rule_choice` est décrit POSITIONNELLEMENT (un bit par effet
+#: accordable, × `MAX_DECISION_OPTIONS` slots). Tant que ce registre était le vocabulaire ENTIER,
+#: toute capacité ajoutée à l'observation payait 6 bits qui restaient nuls à vie — mesuré le
+#: 2026-08-04 : 6 des 13 effets n'étaient accordables par AUCUN `grantsRuleIds` de roster, soit
+#: 36 scalaires morts. Séparer rend `obs_size` insensible au vocabulaire observé, ce qui est
+#: précisément ce que le gel du chantier 01 existe pour garantir.
+#:
+#: SOURCE. Les effets TECHNIQUES atteignables depuis les `grantsRuleIds` déclarés dans les
+#: rosters (`frontend/src/roster/**`), après résolution des sources composites par
+#: `_resolve_unit_rule_entry_effect_rule_ids`. Recopié ici et non calculé, pour la MÊME raison
+#: que `OBS_PHASE_IDS` : ce module est une FEUILLE, lire le registre y créerait un cycle. La
+#: dérive est interdite par un test de contrat qui recalcule le tuple depuis les rosters —
+#: déclarer un `grantsRuleIds` vers un effet absent d'ici fait échouer ce test ET lève au
+#: moment de poser la décision (`agent_decision.normalize_decision_options`).
+DECISION_GRANTABLE_EFFECT_IDS: Tuple[str, ...] = (
+    "charge_after_flee",
+    "reroll_1_save_fight",
+    "reroll_1_tohit_fight",
+    "reroll_1_towound",
     "reroll_towound_target_on_objective",
     "shoot_after_advance",
     "shoot_after_flee",
@@ -374,23 +408,24 @@ DECISION_CTX_BIN_FIELDS: Tuple[str, ...] = ("decision_pending",) + tuple(
 #: réseau de généraliser d'un slot de candidat à l'autre.
 #:
 #: Pour `rule_choice`, un candidat EST la règle qu'il accorde : le décrire par le one-hot de son
-#: effet (le MÊME vocabulaire `UNIT_RULE_EFFECT_IDS` que les capacités d'unité, §0.31) dit à
-#: l'agent CE QU'IL GAGNE. Un index de candidat, lui, ne dit rien : l'ordre des options dépend
-#: du prompt.
+#: effet (`DECISION_GRANTABLE_EFFECT_IDS`) dit à l'agent CE QU'IL GAGNE. Un index de candidat,
+#: lui, ne dit rien : l'ordre des options dépend du prompt.
 #:
-#: ⚠️ Ce bloc reste POSITIONNEL — un bit par effet — là où les capacités d'unité sont passées aux
-#: ensembles d'`obs_id` (chantier 01). Ce n'est PAS un oubli de migration : un candidat de
-#: décision accorde UN effet, jamais un ensemble, et il n'y a que `MAX_DECISION_OPTIONS = 6`
-#: candidats — le registre coûte 14 bits UNE fois, pas 14 par entité, et il ne grossit que si un
-#: type de décision nouveau élargit le vocabulaire. Le migrer aux ids ferait bouger `obs_size`
-#: pour ~0 scalaire gagné, donc coûterait le retrain `--new` que le gel de §01 existe pour éviter.
+#: ⚠️ Ce bloc reste POSITIONNEL — un bit par effet ACCORDABLE — là où les capacités d'unité sont
+#: passées aux ensembles d'`obs_id` (chantier 01). Ce n'est PAS un oubli de migration : un
+#: candidat de décision accorde UN effet, jamais un ensemble, et il n'y a que
+#: `MAX_DECISION_OPTIONS = 6` candidats. Ce qui a changé le 2026-08-04, c'est sa SOURCE : elle
+#: était le vocabulaire observé ENTIER, si bien que le bloc grossissait à chaque capacité
+#: ajoutée à l'observation, pour des bits jamais mis à 1 (6 effets sur 13 dans ce cas, 36
+#: scalaires). Il ne grossit désormais que si une datasheet accorde un effet NOUVEAU par
+#: `grantsRuleIds` — la seule condition sous laquelle un bit de plus porte de l'information.
 #:
 #: Aucun champ CONTINU n'existe aujourd'hui : `rule_choice` n'a aucune grandeur continue à
 #: décrire, et en inventer une, remplie de zéros, serait une valeur par défaut sans signifiant.
 #: Les tranches P3 qui en auront besoin (distance d'une destination, dégâts attendus sur une
 #: cible) ouvriront un registre `DECISION_OPTION_CONT_FIELDS` à ce moment-là.
 DECISION_OPTION_BIN_FIELDS: Tuple[str, ...] = tuple(
-    f"grants_{rule_id}" for rule_id in UNIT_RULE_EFFECT_IDS
+    f"grants_{rule_id}" for rule_id in DECISION_GRANTABLE_EFFECT_IDS
 ) + (
     "present",  # masque de candidat (0 = slot vide) — DERNIER, convention uniforme §0.37
 )

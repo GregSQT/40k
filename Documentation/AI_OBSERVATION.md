@@ -41,7 +41,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 754 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 718 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (13,)                =      13               │
@@ -73,13 +73,13 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │                                                                        │
 │  DÉCISION AGENT — candidats de CHOICE_i        MAX_DECISION_OPTIONS = 6│
 │    decision_ctx_bin       (2,)                 =       2               │
-│    decision_options_bin   (6, 14)              =      84               │
+│    decision_options_bin   (6, 8)               =      48               │
 │                                                                        │
 │  DÉPLOIEMENT — candidats des actions 4-8         N_DEPLOY_SLOTS = 5    │
 │    deploy_cand_cont       (5, 8)               =      40               │
 │    deploy_cand_bin        (5, 4)               =      20               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      20 754              │
+│  TOTAL vectoriel (= obs_size)                      20 718              │
 │  + grid  (9, 32, 32) = 9 216, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -339,21 +339,25 @@ candidat** que les actions `CHOICE_0..5` (`macro_intents.CHOICE_SLOTS`) désigne
 decision_ctx_bin[0]      = decision_pending                  # 0.0 / 1.0 — masque du bloc entier
 decision_ctx_bin[1]      = decision_type_rule_choice         # 0.0 / 1.0 — one-hot du type
 
-decision_options_bin[c][ 0] = grants_charge_after_advance                  # 0.0 / 1.0
-decision_options_bin[c][ 1] = grants_charge_after_flee                     # 0.0 / 1.0
-decision_options_bin[c][ 2] = grants_charge_impact                         # 0.0 / 1.0
-decision_options_bin[c][ 3] = grants_closest_target_penetration            # 0.0 / 1.0
-decision_options_bin[c][ 4] = grants_move_after_shooting                   # 0.0 / 1.0
-decision_options_bin[c][ 5] = grants_reactive_move                         # 0.0 / 1.0
-decision_options_bin[c][ 6] = grants_reroll_1_save_fight                   # 0.0 / 1.0
-decision_options_bin[c][ 7] = grants_reroll_1_tohit_fight                  # 0.0 / 1.0
-decision_options_bin[c][ 8] = grants_reroll_1_towound                      # 0.0 / 1.0
-decision_options_bin[c][ 9] = grants_reroll_charge                         # 0.0 / 1.0
-decision_options_bin[c][10] = grants_reroll_towound_target_on_objective    # 0.0 / 1.0
-decision_options_bin[c][11] = grants_shoot_after_advance                   # 0.0 / 1.0
-decision_options_bin[c][12] = grants_shoot_after_flee                      # 0.0 / 1.0
-decision_options_bin[c][13] = present                                        # 0.0 / 1.0 — masque de candidat
+decision_options_bin[c][ 0] = grants_charge_after_flee                     # 0.0 / 1.0
+decision_options_bin[c][ 1] = grants_reroll_1_save_fight                   # 0.0 / 1.0
+decision_options_bin[c][ 2] = grants_reroll_1_tohit_fight                  # 0.0 / 1.0
+decision_options_bin[c][ 3] = grants_reroll_1_towound                      # 0.0 / 1.0
+decision_options_bin[c][ 4] = grants_reroll_towound_target_on_objective    # 0.0 / 1.0
+decision_options_bin[c][ 5] = grants_shoot_after_advance                   # 0.0 / 1.0
+decision_options_bin[c][ 6] = grants_shoot_after_flee                      # 0.0 / 1.0
+decision_options_bin[c][ 7] = present                                        # 0.0 / 1.0 — masque de candidat
 ```
+
+**Ce registre n'est PAS le vocabulaire observé** (`UNIT_RULE_EFFECT_IDS`), et c'est délibéré
+depuis le 2026-08-04. Il l'était : le bloc portait un bit `grants_*` pour **chacun** des 13
+effets observables, alors que 6 d'entre eux ne sont accordables par aucun `grantsRuleIds` de
+roster — 6 bits × 6 slots = **36 scalaires morts à vie**, et chaque capacité ajoutée à
+l'observation en payait 6 de plus, ce qui vidait de sa substance le gel du chantier 01
+(« une capacité de plus ne change pas `obs_size` »). La source est désormais
+`DECISION_GRANTABLE_EFFECT_IDS` — les 7 effets réellement accordables, recalculés depuis les
+rosters par un test de contrat (`test_agent_decision_mechanism.py`), qui échoue **dans les deux
+sens** : un accordable non déclaré, ou un déclaré que plus aucun roster n'accorde.
 
 **Pourquoi ce bloc existe.** Sans lui, `CHOICE_i` serait un choix à l'aveugle — exactement le
 défaut de la pseudo-décision `raw_action_int % len(options)` qu'il remplace (§9.4 point 0), où
@@ -562,10 +566,13 @@ déploiement » : ce que chacune des 5 actions 4-8 poserait, §0.40 point 3, 202
 une alliée au contact venait d'une édition antérieure de 40K, 2026-08-04)
 → 20752 (chantier 01 : les 13 bits `rule_<effet>` remplacés par 8 slots d'ids de capacité +
 4 slots d'ids de statut, 2026-08-04)
-→ **20754** (chantier 02 : `my_command_points` / `enemy_command_points` dans `global_cont` —
+→ 20754 (chantier 02 : `my_command_points` / `enemy_command_points` dans `global_cont` —
 règle 08.02, les CP appartiennent au joueur, pas à une unité. Ces deux emplacements auraient dû
-être déclarés par le chantier 01, seul autorisé à bouger `obs_size` ; l'oubli est réparé ici, sans
-retrain supplémentaire puisque le chantier 01 en imposait déjà un, 2026-08-04).
+être déclarés par le chantier 01, seul autorisé à bouger `obs_size` ; l'oubli est réparé là, sans
+retrain supplémentaire puisque le chantier 01 en imposait déjà un, 2026-08-04)
+→ **20718** (chantier 02 : le registre du bloc `decision_options_bin` est DÉCOUPLÉ du vocabulaire
+observé — 36 scalaires qui ne pouvaient jamais valoir 1 disparaissent, et allonger le vocabulaire
+coûte désormais 0. `cp_gain_on_objective` y entre à ce titre pour 0 scalaire, 2026-08-04).
 **Toute évolution du schéma change cette valeur et rend les
 `.zip` existants incompatibles : le retrain `--new` est obligatoire.**
 

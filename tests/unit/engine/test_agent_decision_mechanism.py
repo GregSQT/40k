@@ -49,8 +49,8 @@ from tests._state_invariants import turn_state_invariants
 
 #: Le SEUL choix de règle du jeu aujourd'hui (Tyranid Warrior mêlée) : `adrenalised_onslaught`
 #: accorde `aggression_imperative` (alias de `reroll_1_tohit_fight`) OU `preservation_imperative`
-#: (alias de `reroll_1_save_fight`). Les deux effets techniques appartiennent au vocabulaire
-#: d'observation `UNIT_RULE_EFFECT_IDS` — c'est ce qui rend les candidats descriptibles.
+#: (alias de `reroll_1_save_fight`). Les deux effets techniques appartiennent au registre des
+#: ACCORDABLES `DECISION_GRANTABLE_EFFECT_IDS` — c'est ce qui rend les candidats descriptibles.
 CHOICE_RULE = {
     "ruleId": "adrenalised_onslaught",
     "displayName": "Adrenalised Onslaught",
@@ -255,8 +255,79 @@ def test_effect_outside_the_observation_vocabulary_raises():
     gs = _game_state([_unit(1, 1, 5, 10, [])])
     options = _two_options()
     options[0]["effect_ids"] = ("some_unobserved_rule",)
-    with pytest.raises(KeyError, match="UNIT_RULE_EFFECT_IDS"):
+    with pytest.raises(KeyError, match="DECISION_GRANTABLE_EFFECT_IDS"):
         _push(gs, options=options)
+
+
+def test_effect_observable_but_not_grantable_raises():
+    """Garde RESSERRÉE (2026-08-04) : être dans le vocabulaire observé ne suffit plus.
+
+    `cp_gain_on_objective` est une capacité observée (l'agent la voit sur l'unité) mais elle
+    n'est accordable par aucun choix, donc le bloc candidat n'a PAS de bit `grants_*` pour elle :
+    un candidat qui la porterait serait décrit par un vecteur nul, indiscernable d'un autre.
+    Avant le resserrage, la garde large l'acceptait — c'est le trou que ce test ferme.
+    """
+    from engine.observation_entities import (
+        DECISION_GRANTABLE_EFFECT_IDS, UNIT_RULE_EFFECT_IDS,
+    )
+
+    assert "cp_gain_on_objective" in UNIT_RULE_EFFECT_IDS
+    assert "cp_gain_on_objective" not in DECISION_GRANTABLE_EFFECT_IDS
+
+    gs = _game_state([_unit(1, 1, 5, 10, [])])
+    options = _two_options()
+    options[0]["effect_ids"] = ("cp_gain_on_objective",)
+    with pytest.raises(KeyError, match="DECISION_GRANTABLE_EFFECT_IDS"):
+        _push(gs, options=options)
+
+
+def test_le_registre_des_accordables_ne_derive_pas_des_rosters():
+    """CONTRAT : `DECISION_GRANTABLE_EFFECT_IDS` == les effets réellement accordables par un roster.
+
+    Le tuple est RECOPIÉ dans `observation_entities` (module feuille : lire le registre de règles
+    y créerait un cycle d'import), donc rien dans le code ne l'empêche de dériver. Ce test le
+    recalcule depuis la SOURCE — les `grantsRuleIds` déclarés dans `frontend/src/roster/**`,
+    résolus vers leurs effets techniques — et échoue dans les deux sens :
+
+    - un effet accordable ABSENT du tuple → le candidat qui l'accorde n'a pas de bit `grants_*`,
+      `set_pending_agent_decision` lèverait en pleine partie ;
+    - un effet du tuple que PLUS AUCUN roster n'accorde → un bit mort par slot de candidat,
+      exactement les 36 scalaires que le découplage du 2026-08-04 a supprimés.
+
+    ⚠️ Le test échoue AUSSI si aucun `grantsRuleIds` n'est trouvé : un balayage vide rendrait
+    l'ensemble attendu vide et ferait passer n'importe quel tuple (vert vacant).
+    """
+    import re
+    from pathlib import Path
+
+    from engine.observation_entities import DECISION_GRANTABLE_EFFECT_IDS
+    from engine.phase_handlers.shared_utils import (
+        _resolve_unit_rule_entry_effect_rule_ids,
+    )
+
+    roster_dir = Path(__file__).resolve().parents[3] / "frontend" / "src" / "roster"
+    granted_source_ids: set[str] = set()
+    for path in roster_dir.rglob("*.ts"):
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"grants(?:_r|R)ule[_i]?[iI]ds\s*:\s*\[(.*?)\]", text, re.S):
+            granted_source_ids.update(re.findall(r'"([^"]+)"', match.group(1)))
+
+    assert granted_source_ids, (
+        "aucun `grantsRuleIds` trouvé dans les rosters : le balayage ne regarde rien, et "
+        "l'ensemble attendu serait vide (vert vacant)"
+    )
+
+    expected: set[str] = set()
+    for source_id in granted_source_ids:
+        expected.update(_resolve_unit_rule_entry_effect_rule_ids({"ruleId": source_id}))
+
+    assert set(DECISION_GRANTABLE_EFFECT_IDS) == expected, (
+        f"DECISION_GRANTABLE_EFFECT_IDS a dérivé des rosters.\n"
+        f"  accordables et non déclarés : {sorted(expected - set(DECISION_GRANTABLE_EFFECT_IDS))}\n"
+        f"  déclarés et plus accordables : {sorted(set(DECISION_GRANTABLE_EFFECT_IDS) - expected)}\n"
+        f"Mettre le tuple à jour fait bouger obs_size (retrain --new) : le reporter dans les "
+        f"profils de config d'agent et dans AI_OBSERVATION.md."
+    )
 
 
 def test_second_decision_never_overwrites_the_first():

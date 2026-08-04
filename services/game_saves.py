@@ -34,10 +34,15 @@ from services.game_snapshots import apply_live_state, capture_live_state, scenar
 _log = logging.getLogger(__name__)
 
 # Magic d'en-tête du format timeline. TL02 = TL01 + empreinte de scénario en meta de chaque row.
-# Les formats antérieurs (TL01, single-pickle) n'ont pas d'empreinte : leur état ne peut pas être
-# restauré sans risque de plateau incompatible → ils sont REFUSÉS explicitement (cf. _reject_legacy).
-_MAGIC = b"W40KTL02"
-_LEGACY_MAGICS = frozenset({b"W40KTL01"})
+# TL03 = TL02 + `command_points` dans l'état capturé (règle 08.02, chantier 02) : une row TL02
+# restaurée dans le moteur actuel rendrait un game_state SANS ce compteur, et la phase de
+# commandement suivante lèverait au fond du moteur — un refus explicite ici vaut mieux qu'un
+# crash obscur au premier tour, et injecter une dotation de départ inventerait des CP que la
+# partie sauvegardée n'avait pas.
+# Les formats antérieurs (TL01, single-pickle) n'ont en plus aucune empreinte : leur état ne peut
+# pas être restauré sans risque de plateau incompatible → REFUSÉS aussi (cf. _reject_legacy).
+_MAGIC = b"W40KTL03"
+_LEGACY_MAGICS = frozenset({b"W40KTL01", b"W40KTL02"})
 _LEN = struct.Struct(">Q")  # préfixe de longueur : entier 64 bits big-endian
 
 # Rows exclues du menu Select (trop nombreuses) mais présentes dans le playback ⏮⏭.
@@ -132,8 +137,9 @@ def _reject_legacy(name: str, head: bytes) -> None:
     de scénario n'est pas restaurable sûrement)."""
     if head in _LEGACY_MAGICS:
         raise ValueError(
-            f"partie {name!r} au format {head.decode()} : écrite sans empreinte de scénario, donc "
-            f"illisible depuis le passage à {_MAGIC.decode()}. Supprime-la ou rejoue la partie."
+            f"partie {name!r} au format {head.decode()} : écrite avant {_MAGIC.decode()}, donc "
+            f"illisible (TL01 : sans empreinte de scénario ; TL02 : sans les points de "
+            f"commandement de la règle 08.02). Supprime-la ou rejoue la partie."
         )
     raise ValueError(f"partie {name!r} : format de fichier inconnu (en-tête {head!r})")
 

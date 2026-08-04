@@ -33,8 +33,8 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from engine.observation_entities import (
     AGENT_DECISION_TYPE_IDS,
+    DECISION_GRANTABLE_EFFECT_IDS,
     MAX_DECISION_OPTIONS,
-    UNIT_RULE_EFFECT_IDS,
 )
 from shared.data_validation import require_key
 
@@ -78,11 +78,16 @@ def _validate_options(decision_type: str, options: Sequence[Dict[str, Any]]) -> 
                 f"pending_agent_decision: 'effect_ids' du candidat {index} doit etre une sequence"
             )
         for effect_id in effect_ids:
-            if effect_id not in UNIT_RULE_EFFECT_IDS:
+            # Garde resserree le 2026-08-04 : le registre du bloc candidat n'est plus le
+            # vocabulaire observe ENTIER mais les seuls effets ACCORDABLES. Un effet observable
+            # mais absent d'ici n'a pas de bit `grants_*` : le candidat serait decrit par un
+            # vecteur nul, donc indiscernable d'un autre. C'est exactement ce que la garde large
+            # laissait passer.
+            if effect_id not in DECISION_GRANTABLE_EFFECT_IDS:
                 raise KeyError(
-                    f"pending_agent_decision: effet '{effect_id}' du candidat {index} absent du "
-                    f"vocabulaire d'observation UNIT_RULE_EFFECT_IDS. L'agent ne pourrait pas "
-                    f"percevoir ce que ce candidat lui accorde : ajouter l'effet au schema "
+                    f"pending_agent_decision: effet '{effect_id}' du candidat {index} absent de "
+                    f"DECISION_GRANTABLE_EFFECT_IDS. L'agent ne pourrait pas percevoir ce que ce "
+                    f"candidat lui accorde : ajouter l'effet au registre des accordables "
                     f"(obs_size change -> retrain --new) plutot que de le decrire par un zero."
                 )
         normalized.append(

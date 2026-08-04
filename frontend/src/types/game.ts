@@ -386,6 +386,9 @@ export interface GameState {
   active_shooting_unit?: string; // Active unit ID in shooting phase
   active_charge_unit?: string; // Active unit ID in charge phase
   victory_points?: Record<string, number>;
+  /** Points de commandement par joueur (règle 08.02). Même forme que `victory_points` :
+   *  JSON n'a pas de clé entière, l'API sérialise donc {"1": n, "2": n}. */
+  command_points?: Record<string, number>;
   primary_objective?: PrimaryObjectiveRule | PrimaryObjectiveRule[] | null;
 }
 
