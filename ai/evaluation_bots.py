@@ -51,7 +51,7 @@ from engine.utils.weapon_helpers import get_max_ranged_damage, get_max_melee_dam
 
 # Espace d'action squad (source unique : engine/macro_intents.py). Aucun littéral nu.
 DEPLOYMENT_ACTIONS = list(mi.DEPLOY_SLOTS)   # 4-8 (slots de déploiement)
-WAIT_ACTION = mi.ACTION_WAIT                 # 18
+WAIT_ACTION = mi.ACTION_WAIT                 # 1024 (au-dessus des cellules de move 0-1023)
 
 
 def _has_action_in(valid_actions, action_ids) -> bool:
