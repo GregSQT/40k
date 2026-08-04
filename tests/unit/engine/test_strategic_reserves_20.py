@@ -801,6 +801,50 @@ def test_ingress_clears_the_preview_and_stale_pools():
     )
 
 
+def test_ingress_refreshes_the_enemy_adjacency_caches():
+    """VERROU — l'unité qui ARRIVE entre dans le cache d'adjacence de l'adversaire.
+
+    Ces caches sont bâtis une seule fois, à l'ouverture de la phase de mouvement : ils disent à
+    chaque joueur où il n'a PAS le droit de finir son déplacement. Une arrivée survenue APRÈS
+    cette construction les laissait ignorer l'unité posée, et un mouvement réactif adverse (9",
+    déclenché pendant ma propre phase) pouvait se poser dans sa zone d'engagement.
+    """
+    from engine.phase_handlers.movement_handlers import (
+        execute_action, movement_build_activation_pool,
+    )
+    from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes
+
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    gs["turn"] = 2
+    gs["current_player"] = 1
+    gs["phase"] = "move"
+    squad_id = _reserve_squad(eng, deep_strike=False)
+    movement_build_activation_pool(gs)
+    # Caches construits AVANT l'arrivée, comme le fait `movement_phase_start`.
+    build_enemy_adjacent_hexes(gs, 2)
+    before = set(gs["enemy_adjacent_hexes_player_2"])
+
+    candidates = eng.action_decoder.ingress_slot_candidates(gs, squad_id)
+    col, row = candidates[sorted(candidates)[0]]["hex"]
+    ok, _res = execute_action(
+        gs, _unit(gs, squad_id),
+        {"action": "ingress_move", "unitId": squad_id, "destCol": col, "destRow": row},
+        gs["config"],
+    )
+    assert ok
+    after = set(gs["enemy_adjacent_hexes_player_2"])
+    occupied = set(gs["units_cache"][squad_id]["occupied_hexes"])
+    assert occupied, "l'escouade posée doit occuper des cases — test sans portée"
+    assert after != before, (
+        "le cache d'adjacence de l'adversaire doit changer quand une unité arrive sur le plateau"
+    )
+    assert after & occupied or after - before, (
+        "les cases rendues adjacentes par l'arrivante doivent y figurer"
+    )
+
+
 def test_bounding_radius_encloses_a_square_base():
     """Le rayon englobant doit ENGLOBER : pour un carré, le point extrême est un COIN.
 

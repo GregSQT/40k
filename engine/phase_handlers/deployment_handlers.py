@@ -1073,6 +1073,31 @@ def _apply_deploy_plan(
     # le commit de mise en place (source unique du passage hors table -> table), et non dans le
     # handler d'ingress : les deux états ne peuvent donc pas diverger.
     unit["in_strategic_reserves"] = False
+    # Caches d'adjacence ennemie : l'unité vient d'APPARAÎTRE sur le plateau, donc les hexes
+    # qu'elle rend adjacents doivent entrer dans le cache des AUTRES joueurs — celui qu'ils
+    # consultent pour savoir où ils n'ont pas le droit d'aller. Ces caches sont construits une
+    # fois à l'ouverture de la phase de mouvement : une mise en place SURVENUE PENDANT cette
+    # phase (ingress move 20.04) les laissait ignorer l'arrivante, et un mouvement réactif
+    # adverse (9") pouvait alors se poser dans sa zone d'engagement. Jumeau de l'appel que fait
+    # `movement_commit_move_plan_handler` après un déplacement.
+    #
+    # Exclu PENDANT la phase de déploiement : `movement_phase_start` construit ces caches de
+    # zéro juste après, pour tous les joueurs. Les recalculer à chaque pose y serait du travail
+    # jeté, pas une sécurité.
+    if entry is not None and require_key(game_state, "phase") != "deployment":
+        from engine.phase_handlers.shared_utils import (
+            update_enemy_adjacent_caches_after_unit_move,
+        )
+
+        update_enemy_adjacent_caches_after_unit_move(
+            game_state,
+            moved_unit_player=int(require_key(unit, "player")),
+            # (-1,-1) = position hors table d'où l'unité arrive : aucun hexe à retirer du cache.
+            old_col=-1, old_row=-1,
+            new_col=int(entry["col"]), new_row=int(entry["row"]),
+            old_occupied=set(),
+            new_occupied=entry.get("occupied_hexes"),  # get allowed (mono-hex -> ancre seule)
+        )
     rebuild_choice_timing_index(game_state)
     return True, {}
 
