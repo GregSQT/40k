@@ -26,6 +26,7 @@ from unittest.mock import patch
 from engine.observation_builder import ObservationBuilder
 from engine.observation_entities import unit_bin_index
 from engine.w40k_core import W40KEngine
+from tests.unit.engine._config_helpers import build_engine_config
 
 BIN_PRESENT = unit_bin_index("present")
 BIN_CAN_SEE = unit_bin_index("los_can_see")
@@ -99,7 +100,7 @@ def _config(mine: List[Tuple[int, int]], enemy: List[Tuple[int, int]]) -> Dict[s
 def _make_engine(cfg: Dict[str, Any], *, area: bool, obscuring: bool = False) -> W40KEngine:
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=cfg)
+        eng = W40KEngine(config=build_engine_config(cfg))
     eng.reset()
     gs = eng.game_state
     gs["terrain_areas"] = [_terrain_area(obscuring)] if area else []
@@ -151,7 +152,7 @@ def _micro_engine(wall: List[List[int]]) -> W40KEngine:
         unit["BASE_SIZE"] = 16
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=cfg)
+        eng = W40KEngine(config=build_engine_config(cfg))
     eng.reset()
     gs = eng.game_state
     gs["terrain_areas"] = []

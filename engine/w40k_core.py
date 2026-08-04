@@ -299,9 +299,9 @@ class W40KEngine(gym.Env):
         # Handle both new engine format (single config) and old training system format
         if config is None:
             # Build config from training system parameters
-            from config_loader import get_config_loader
+            from config_loader import get_config_loader, require_engine_game_config_sections
             config_loader = get_config_loader()
-            
+
             # Load agent-specific rewards configuration
             if not controlled_agent:
                 raise ValueError("controlled_agent parameter required when config is None - cannot load agent-specific rewards")
@@ -429,14 +429,7 @@ class W40KEngine(gym.Env):
 
             self.config = {
                 "board": board_config,
-                "game_rules": require_key(game_config, "game_rules"),
-                # Regle 14.02. Omise ici jusqu'au 2026-08-04 alors que les deux constructeurs
-                # de `services/api_server` la posaient : le checkpoint etait un no-op muet en
-                # entrainement. Le recit complet est dans le test qui le verrouille,
-                # `tests/unit/engine/test_objective_control_checkpoint_1402.py`.
-                "objective_control_check": require_key(game_config, "objective_control_check"),
-                "move": require_key(game_config, "move"),
-                "charge": require_key(game_config, "charge"),
+                **require_engine_game_config_sections(game_config),
                 "units": scenario_units,
                 "name": scenario_name,  # Store scenario name for logging
                 "rewards_config_name": self.rewards_config_name,
@@ -528,26 +521,26 @@ class W40KEngine(gym.Env):
         _board_default = _board_cfg.get("default", _board_cfg)
         _scale = int(require_key(_board_default, "inches_to_subhex"))
         if _scale != 1:
-            gr = self.config.get("game_rules")
-            if gr:
-                gr = copy.deepcopy(gr)
-                self.config["game_rules"] = gr
-                for _key in (
-                    "engagement_zone",
-                    "advance_distance_range",
-                    "avg_charge_roll",
-                    "max_search_distance",
-                    "unit_model_cohesion_range",
-                    "unit_global_cohesion_range",
-                ):
-                    if _key in gr:
-                        gr[_key] = int(gr[_key]) * _scale
-            charge_cfg = self.config.get("charge")
-            if charge_cfg:
-                charge_cfg = copy.deepcopy(charge_cfg)
-                self.config["charge"] = charge_cfg
-                if "charge_max_distance" in charge_cfg:
-                    charge_cfg["charge_max_distance"] = int(charge_cfg["charge_max_distance"]) * _scale
+            # `require_key` et non `.get` : une section absente ne SAUTAIT que la mise a
+            # l'echelle, laissant `engagement_zone` / `charge_max_distance` en POUCES sur un
+            # plateau x5 ou x10 — memes sections, meme extinction silencieuse que la 14.02
+            # (cf. `config_loader.GAME_CONFIG_SECTIONS_REQUIRED_BY_ENGINE`).
+            gr = copy.deepcopy(require_key(self.config, "game_rules"))
+            self.config["game_rules"] = gr
+            for _key in (
+                "engagement_zone",
+                "advance_distance_range",
+                "avg_charge_roll",
+                "max_search_distance",
+                "unit_model_cohesion_range",
+                "unit_global_cohesion_range",
+            ):
+                if _key in gr:
+                    gr[_key] = int(gr[_key]) * _scale
+            charge_cfg = copy.deepcopy(require_key(self.config, "charge"))
+            self.config["charge"] = charge_cfg
+            if "charge_max_distance" in charge_cfg:
+                charge_cfg["charge_max_distance"] = int(charge_cfg["charge_max_distance"]) * _scale
             self.config["inches_to_subhex"] = _scale
         else:
             self.config["inches_to_subhex"] = 1

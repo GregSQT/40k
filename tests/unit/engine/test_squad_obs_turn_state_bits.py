@@ -20,6 +20,7 @@ import pytest
 from engine.observation_builder import ObservationBuilder
 from engine.observation_entities import unit_bin_index
 from engine.w40k_core import W40KEngine
+from tests.unit.engine._config_helpers import build_engine_config
 
 #: bit d'observation → clé de game_state qui doit l'allumer.
 BIT_TO_KEY = {
@@ -89,7 +90,7 @@ def _config() -> Dict[str, Any]:
 def engine() -> W40KEngine:
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=_config())
+        eng = W40KEngine(config=build_engine_config(_config()))
     eng.reset()
     return eng
 

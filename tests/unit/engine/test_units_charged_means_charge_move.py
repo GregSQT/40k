@@ -24,6 +24,7 @@ import pytest
 from engine.observation_builder import ObservationBuilder
 from engine.phase_handlers.fight_handlers import is_fights_first
 from engine.w40k_core import W40KEngine
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 def _weapon_cfg() -> Dict[str, Any]:
@@ -72,7 +73,7 @@ def engine() -> W40KEngine:
     }
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=config, gym_training_mode=True)
+        eng = W40KEngine(config=build_engine_config(config), gym_training_mode=True)
     eng.reset()
     eng.game_state["phase"] = "charge"
     return eng

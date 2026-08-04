@@ -1,17 +1,24 @@
 """Règle 14.02 — le checkpoint de contrôle d'objectif tourne AUSSI en entraînement.
 
-DÉFAUT CORRIGÉ (2026-08-04, mesuré). `run_objective_control_checkpoint` sort immédiatement sur
-``if not check_cfg`` quand la section ``objective_control_check`` manque de la config du moteur.
-Les deux constructeurs de l'API/PvP la posaient (`api_server.py:1711` et `:1881`) ; la branche
-d'ENTRAÎNEMENT de `W40KEngine.__init__` l'avait omise. Le checkpoint 14.02 était donc un
-**no-op complet en gym** : `objective_controllers` n'y était rafraîchi que par effet de bord des
-chemins de scoring VP (`calculate_objective_control` appelé en direct), à des moments qui ne sont
-pas ceux de la règle. Mesuré avant correction : le contrôle restait figé tout le tour 1, et ne
-changeait qu'aux phases de commandement.
+DÉFAUT CORRIGÉ (2026-08-04, mesuré). `run_objective_control_checkpoint` sortait immédiatement sur
+``if not check_cfg`` quand la section ``objective_control_check`` manquait de la config du moteur.
+Les deux constructeurs de l'API/PvP la posaient ; la branche d'ENTRAÎNEMENT de
+`W40KEngine.__init__` l'avait omise. Le checkpoint 14.02 était donc un **no-op complet en gym** :
+`objective_controllers` n'y était rafraîchi que par effet de bord des chemins de scoring VP
+(`calculate_objective_control` appelé en direct), à des moments qui ne sont pas ceux de la règle.
+Mesuré avant correction : le contrôle restait figé tout le tour 1, et ne changeait qu'aux phases
+de commandement.
 
 C'est le motif « code testé mais jamais appelé » : `refresh_objective_control_on_boundary` avait
 été écrite pour partager le checkpoint entre gym et PvP, sa docstring l'annonce, et la config ne
 l'a jamais atteinte du côté gym.
+
+MÉCANISME CORRIGÉ (même date). Le contrat était recopié à la main sur QUATRE sites de
+construction, dont `main.load_config` qui omettait en plus `move` et `charge`, et il était lu
+en `.get()` — donc un oubli n'échouait nulle part. Il vit désormais en UN endroit,
+`config_loader.GAME_CONFIG_SECTIONS_REQUIRED_BY_ENGINE` /
+`require_engine_game_config_sections`, avec `require_key` sur chaque section. Ce fichier LIT ce
+contrat de production : le redéclarer ici ne prouverait que sa propre copie.
 
 Ce fichier verrouille les deux moitiés : la config est complète, ET le checkpoint tire vraiment.
 """
@@ -21,23 +28,13 @@ from pathlib import Path
 
 import pytest
 
+from config_loader import GAME_CONFIG_SECTIONS_REQUIRED_BY_ENGINE
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCENARIO = (
     PROJECT_ROOT
     / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
     / "scenario_training_armageddon.json"
-)
-
-#: Sections de `config/game_config.json` que le MOTEUR lit, quel que soit le chemin de
-#: construction. C'est le contrat partagé entre la branche d'entraînement
-#: (`W40KEngine.__init__`, `config is None`) et les deux constructeurs de `services/api_server`.
-#: En omettre une ne lève nulle part : la fonctionnalité qu'elle porte s'éteint en silence — ce
-#: qui est arrivé à `objective_control_check` pendant toute la vie du chemin gym.
-GAME_CONFIG_SECTIONS_REQUIRED_BY_ENGINE = (
-    "game_rules",
-    "objective_control_check",
-    "move",
-    "charge",
 )
 
 
@@ -107,6 +104,61 @@ def test_le_checkpoint_1402_tire_reellement_en_entrainement(gym_engine) -> None:
     assert set(game_state["objective_controllers"]) == {str(o["id"]) for o in objectives}, (
         "le checkpoint n'a pas évalué tous les objectifs du scénario"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Le MÉCANISME : une section oubliée doit ÉCHOUER, pas s'éteindre
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("missing", GAME_CONFIG_SECTIONS_REQUIRED_BY_ENGINE)
+def test_lassembleur_de_config_refuse_une_section_manquante(missing: str) -> None:
+    """`require_engine_game_config_sections` lève sur CHAQUE section absente.
+
+    C'est l'unique porte d'entrée du contrat : si elle acceptait une section manquante, les
+    quatre sites de construction se remettraient à diverger sans que rien ne le dise.
+    """
+    from config_loader import get_config_loader, require_engine_game_config_sections
+    from shared.data_validation import ConfigurationError
+
+    amputee = {k: v for k, v in get_config_loader().get_game_config().items() if k != missing}
+
+    with pytest.raises(ConfigurationError, match=missing):
+        require_engine_game_config_sections(amputee)
+
+
+def test_le_checkpoint_leve_au_lieu_de_se_taire_si_la_section_manque() -> None:
+    """Régime d'erreur EXPLICITE au point de lecture, comme la section jumelle `move`.
+
+    Avant : `self.config.get("objective_control_check")` + `if not check_cfg: return` — un
+    constructeur de config qui l'oubliait éteignait la règle 14.02 en silence. Un oubli de
+    `move` plantait, lui, à la première action (`_get_move_traversal_rules`). C'est cette
+    asymétrie entre deux sections du MÊME fichier de config que ce test verrouille.
+    """
+    from engine.game_state import GameStateManager
+    from shared.data_validation import ConfigurationError
+
+    manager = GameStateManager({"units": []})
+
+    with pytest.raises(ConfigurationError, match="objective_control_check"):
+        manager.run_objective_control_checkpoint({}, "command", "move", turn_changed=False)
+
+
+def test_main_load_config_porte_toutes_les_sections_du_moteur() -> None:
+    """Le QUATRIÈME site de construction, `main.load_config`, est complet.
+
+    Il ne posait que `game_rules` : `move`, `charge` et `objective_control_check` manquaient —
+    le contrat recopié à la main sur quatre sites, avec un site oublié. Il passe désormais par
+    l'assembleur commun, donc toute section ajoutée au contrat lui arrive sans retouche.
+    """
+    import main
+
+    config = main.load_config()
+
+    for section in GAME_CONFIG_SECTIONS_REQUIRED_BY_ENGINE:
+        assert section in config, (
+            f"section '{section}' absente de `main.load_config` : ce chemin construit un moteur "
+            f"amputé de la fonctionnalité qu'elle porte"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -23,27 +23,16 @@ def load_config(scenario_path=None):
     config = {}
 
     # Load board configuration from config/board/{paths.board}/board_config.json
-    from config_loader import get_config_loader
+    from config_loader import get_config_loader, require_engine_game_config_sections
     config_loader = get_config_loader()
     board_raw = config_loader.get_board_config()
 
     # Extract default config from nested structure
     config["board"] = board_raw["default"]
 
-    # Load game rules configuration
-    game_config_path = "config/game_config.json"
-    if not os.path.exists(game_config_path):
-        raise FileNotFoundError(f"Required config file missing: {game_config_path}")
-
-    with open(game_config_path, 'r', encoding='utf-8-sig') as f:
-        game_content = f.read().strip()
-        if not game_content:
-            raise ValueError(f"Config file is empty: {game_config_path}")
-        game_raw = json.loads(game_content)
-
-    if "game_rules" not in game_raw:
-        raise KeyError("Missing 'game_rules' in game_config.json")
-    config["game_rules"] = game_raw["game_rules"]
+    # Sections de `game_config.json` exigees par le moteur. Ce chemin ne posait que
+    # `game_rules` : `move`, `charge` et `objective_control_check` manquaient.
+    config.update(require_engine_game_config_sections(config_loader.get_game_config()))
 
     # Load unit registry to get unit-to-file mappings
     unit_registry_path = "config/unit_registry.json"

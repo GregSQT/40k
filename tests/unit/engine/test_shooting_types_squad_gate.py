@@ -37,6 +37,7 @@ from engine.phase_handlers.shared_utils import (
     resolve_squad_shooting_type,
 )
 from engine.w40k_core import W40KEngine
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 def _weapon(name: str, rules: List[str], rng: int = 24, **over: Any) -> Dict[str, Any]:
@@ -95,7 +96,7 @@ def _config(units: List[Dict[str, Any]]) -> Dict[str, Any]:
 def _engine(units: List[Dict[str, Any]]) -> W40KEngine:
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=_config(units))
+        eng = W40KEngine(config=build_engine_config(_config(units)))
     eng.reset()
     eng.game_state["phase"] = "shoot"
     return eng

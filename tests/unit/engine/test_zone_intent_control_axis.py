@@ -32,6 +32,7 @@ from engine.w40k_core import W40KEngine
 # Harnais partage avec le fichier voisin (meme repertoire, donc importable) : un plateau a
 # trois objectifs avec des figurines POSEES dessus au deploiement.
 from test_objective_held_samples import _config
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 def _engine() -> W40KEngine:
@@ -40,7 +41,7 @@ def _engine() -> W40KEngine:
          patch.object(RewardCalculator, "settle_zone_intent_declaration", lambda self, *a, **kw: 0.0), \
          patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        engine = W40KEngine(config=_config(1), gym_training_mode=True, quiet=True)
+        engine = W40KEngine(config=build_engine_config(_config(1)), gym_training_mode=True, quiet=True)
         engine.reset()
         return engine
 

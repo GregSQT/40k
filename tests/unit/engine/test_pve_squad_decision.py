@@ -25,6 +25,7 @@ from engine.observation_builder import ObservationBuilder
 from engine.pve_controller import PvEController
 from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
 from engine.w40k_core import W40KEngine
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 def _weapon_cfg() -> Dict[str, Any]:
@@ -80,7 +81,7 @@ def engine():
     }
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=config)
+        eng = W40KEngine(config=build_engine_config(config))
     eng.reset()
     eng.game_state["phase"] = "move"
     return eng

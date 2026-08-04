@@ -28,6 +28,7 @@ from engine.spatial_grid import (
     hex_to_cell,
 )
 from engine.w40k_core import W40KEngine
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 def _weapon_cfg() -> Dict[str, Any]:
@@ -93,7 +94,7 @@ def engine():
     objectives = [{"id": "obj1", "name": "Alpha", "hexes": [[22, 22]]}]
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=_config(walls, objectives))
+        eng = W40KEngine(config=build_engine_config(_config(walls, objectives)))
     eng.reset()
     return eng
 
@@ -317,7 +318,7 @@ def test_cover_channel_is_dilated_by_base_radius():
             unit["BASE_SIZE"] = base_size
         with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
              patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-            eng = W40KEngine(config=cfg)
+            eng = W40KEngine(config=build_engine_config(cfg))
         eng.reset()
         gs = eng.game_state
         gs["terrain_areas"] = [{
@@ -352,7 +353,7 @@ def _engine_with_friendly_neighbour(neighbour_col: int, neighbour_row: int) -> W
     cfg["units"].append(_unit_cfg(3, 1, neighbour_col, neighbour_row))
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=cfg)
+        eng = W40KEngine(config=build_engine_config(cfg))
     eng.reset()
     return eng
 
@@ -439,7 +440,7 @@ def _engine_behind_wall() -> W40KEngine:
         unit["MOVE"] = 12
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=cfg)
+        eng = W40KEngine(config=build_engine_config(cfg))
     eng.reset()
     return eng
 

@@ -36,6 +36,7 @@ from engine.observation_entities import (
     unit_cont_index,
 )
 from engine.w40k_core import W40KEngine
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 def _weapon(**over: Any) -> Dict[str, Any]:
@@ -100,7 +101,7 @@ def _config(units: List[Dict[str, Any]]) -> Dict[str, Any]:
 def _make_engine(units: List[Dict[str, Any]]) -> W40KEngine:
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=_config(units))
+        eng = W40KEngine(config=build_engine_config(_config(units)))
     eng.reset()
     return eng
 

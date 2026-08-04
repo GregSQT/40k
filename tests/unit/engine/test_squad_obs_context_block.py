@@ -30,6 +30,7 @@ from engine.observation_builder import ObservationBuilder
 from engine.observation_entities import global_bin_index, global_cont_index
 from engine.phase_handlers.shared_utils import destroy_model, update_model_position
 from engine.w40k_core import W40KEngine
+from tests.unit.engine._config_helpers import build_engine_config
 
 # Contexte GLOBAL (tenseurs d'entites V11 §0.30 T-D) : lu par NOM de feature, jamais par un
 # index recopie — c'est ce qui permet au schema d'evoluer sans reecrire les tests.
@@ -68,18 +69,8 @@ def _unit_cfg(uid: int, player: int, models: List[Dict[str, int]], oc: int, valu
 _OBJECTIVE_HEXES = [[30, 20], [31, 20], [32, 20]]
 
 
-# Checkpoint 14.02 (valeurs de config/game_config.json) + objectif primaire minimal : sans eux
-# `run_objective_control_checkpoint` est un no-op et aucun controle n'est jamais etabli.
-_OBJECTIVE_CONTROL_CHECK = {
-    "points": [
-        {"phase": "command", "moment": "end"},
-        {"phase": "move", "moment": "end"},
-        {"phase": "shoot", "moment": "end"},
-        {"phase": "charge", "moment": "end"},
-        {"phase": "fight", "moment": "end"},
-        {"phase": "turn", "moment": "end"},
-    ]
-}
+# Checkpoint 14.02 : `objective_control_check` vient de `build_engine_config` (valeurs reelles de
+# config/game_config.json). Sans lui, aucun controle n'est jamais etabli.
 _PRIMARY_OBJECTIVE = {
     "id": "objectives_control",
     "scoring": {"start_turn": 2, "max_points_per_turn": 15, "rules": []},
@@ -127,7 +118,6 @@ def _config(objectives: Any = None) -> Dict[str, Any]:
             "can_move_through_friendly_model": True,
         },
         "pve_mode": False,
-        "objective_control_check": _OBJECTIVE_CONTROL_CHECK,
         "primary_objective": _PRIMARY_OBJECTIVE,
         # Sans scenario, les objectifs viennent de config["scenario_objectives"] (w40k_core:385).
         "scenario_objectives": objs,
@@ -144,7 +134,7 @@ def _config(objectives: Any = None) -> Dict[str, Any]:
 def _make_engine(cfg: Dict[str, Any]) -> W40KEngine:
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=cfg)
+        eng = W40KEngine(config=build_engine_config(cfg))
     eng.reset()
     return eng
 

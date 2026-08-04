@@ -32,6 +32,7 @@ from engine.observation_entities import (
     unit_cont_index,
 )
 from engine.w40k_core import W40KEngine
+from tests.unit.engine._config_helpers import build_engine_config
 
 CONT_HP_WOUNDED = unit_cont_index("wounded_hp_ratio")
 CONT_MOVE = unit_cont_index("move")
@@ -103,7 +104,7 @@ def _config() -> Dict[str, Any]:
 def engine():
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=_config())
+        eng = W40KEngine(config=build_engine_config(_config()))
     eng.reset()
     return eng
 
@@ -241,7 +242,7 @@ def test_every_model_is_counted_beyond_the_model_block_cap():
     cfg["units"][0] = _unit_cfg(1, 1, 10, 20, n_models=n_models)
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=cfg)
+        eng = W40KEngine(config=build_engine_config(cfg))
     eng.reset()
     gs = eng.game_state
     last = f"1#{n_models - 1}"          # dernière figurine créée = le perso attaché
@@ -280,7 +281,7 @@ def test_engagement_counters_cover_the_whole_squad():
     cfg["units"][1] = _unit_cfg(2, 2, 11, 20, n_models=1)  # ennemi collé à la ligne alliée
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=cfg)
+        eng = W40KEngine(config=build_engine_config(cfg))
     eng.reset()
 
     cont = eng.obs_builder.build_squad_observation(eng.game_state, "1")["allies_cont"][0]
