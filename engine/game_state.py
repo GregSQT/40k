@@ -43,6 +43,34 @@ def battle_points_limit(scale: Any, context: str) -> int:
     return limit
 
 
+def _default_reserves_parameters() -> Dict[str, Any]:
+    """Les trois paramètres de 20.03/20.04, à leur valeur GÉNÉRIQUE, posés sur chaque unité.
+
+    Les trois clauses concernées sont explicitement surchargeables par des capacités (« unless
+    otherwise stated » pour le round d'arrivée, « anywhere on the battlefield » pour la bande de
+    bord, « more than 9\" away » pour la distance aux ennemis). Les porter sur l'unité est ce qui
+    permet à une règle — y compris une règle d'une AUTRE unité, comme Logan Grimnar qui fait
+    arriver une unité au 1er round — de les modifier sans toucher au moteur.
+
+    Importés depuis `movement_handlers`, propriétaire des règles 20.03/20.04 : les défauts n'ont
+    ainsi qu'une seule définition.
+    """
+    from engine.phase_handlers.movement_handlers import (
+        INGRESS_ENEMY_CLEARANCE_INCHES,
+        INGRESS_FIRST_BATTLE_ROUND,
+        INGRESS_SETUP_DISTANCE_INCHES,
+        RESERVES_ARRIVAL_ROUND_FIELD,
+        RESERVES_EDGE_DISTANCE_FIELD,
+        RESERVES_ENEMY_CLEARANCE_FIELD,
+    )
+
+    return {
+        RESERVES_ARRIVAL_ROUND_FIELD: INGRESS_FIRST_BATTLE_ROUND,
+        RESERVES_EDGE_DISTANCE_FIELD: INGRESS_SETUP_DISTANCE_INCHES,
+        RESERVES_ENEMY_CLEARANCE_FIELD: INGRESS_ENEMY_CLEARANCE_INCHES,
+    }
+
+
 def validate_strategic_reserves_cap(
     units: List[Dict[str, Any]], points_limit: int, context: str
 ) -> None:
@@ -324,6 +352,7 @@ class GameStateManager:
             # réserves que si sa déclaration le dit.
             "in_strategic_reserves": bool(config.get("strategic_reserves", False)),  # get allowed
             "reserves_repositioned": False,
+            **_default_reserves_parameters(),
             # Attached units (rule 19.01): bodyguard unit-name keywords this leader/support may attach to.
             # Empty list for non-leader units (valid business case: the LEADER rule is absent from their config).
             "CAN_LEAD": copy.deepcopy(config["CAN_LEAD"] if "CAN_LEAD" in config else []),
@@ -1181,6 +1210,7 @@ class GameStateManager:
             # 20.02 — unité RETIRÉE du board puis replacée en réserves pendant la bataille
             # (Da Jump). Exemptée de la destruction de fin de 3e round (20.04).
             "reserves_repositioned": False,
+            **_default_reserves_parameters(),
             # Attached units (rule 19.01): empty list for non-leader units (valid business case).
             "CAN_LEAD": copy.deepcopy(full_unit_data["CAN_LEAD"] if "CAN_LEAD" in full_unit_data else []),
             "SHOOT_LEFT": shoot_left,

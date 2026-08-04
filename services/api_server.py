@@ -813,9 +813,58 @@ def _game_state_for_json(
     _pool = gs.get("valid_move_destinations_pool")
     if isinstance(_pool, list) and len(_pool) > 0:
         gs.pop("preview_hexes", None)
+    # Réserves stratégiques (20.01) : points engagés / plafond, PAR JOUEUR. Calculé par le
+    # moteur et transmis tel quel — le client ne doit pas refaire le plafond de 50 %, sous peine
+    # d'afficher un ratio qui n'est pas celui qui décide de l'acceptation d'un dépôt.
+    gs["strategic_reserves"] = _strategic_reserves_summary(engine_instance.game_state)
     if for_post_action:
         gs.pop("objectives", None)
     return gs
+
+
+def _maybe_precompute_ingress_pools(engine_instance: Any) -> None:
+    """Réchauffe l'aire d'arrivée des réserves du joueur actif, si la phase s'y prête.
+
+    Sans objet hors phase de mouvement et sans réserve éligible : `precompute_ingress_pools`
+    n'itère alors sur rien. Sur un état déjà réchauffé, tout est servi par les mémos (pool et
+    contours), donc l'appeler à chaque action ne coûte que quelques millisecondes.
+
+    Aucune exception avalée : si le réchauffage lève, c'est que l'état est incohérent et la même
+    erreur reviendrait au clic du joueur — la masquer ne ferait que la déplacer.
+    """
+    gs = engine_instance.game_state
+    if gs.get("phase") != "move":  # get allowed (état non initialisé)
+        return
+    current_player = gs.get("current_player")  # get allowed
+    if current_player is None:
+        return
+    from engine.phase_handlers.movement_handlers import precompute_ingress_pools
+
+    precompute_ingress_pools(gs, int(current_player))
+
+
+def _strategic_reserves_summary(game_state: Dict[str, Any]) -> Dict[str, Dict[str, int]]:
+    """``{player: {used_points, cap_points}}`` — 20.01, plafond de 50 % de la taille de bataille.
+
+    ``cap_points`` à 0 quand le scénario ne déclare pas de taille de bataille (`scale` absent) :
+    le plafond est alors invérifiable, donc AUCUN dépôt n'est possible. C'est bien la règle qui
+    ferme, pas un défaut d'affichage.
+    """
+    from engine.game_state import STRATEGIC_RESERVES_POINTS_RATIO
+
+    points_limit = game_state.get("points_limit")  # get allowed (scénario sans `scale`)
+    cap = int(int(points_limit) * STRATEGIC_RESERVES_POINTS_RATIO) if points_limit else 0
+    summary: Dict[str, Dict[str, int]] = {
+        "1": {"used_points": 0, "cap_points": cap},
+        "2": {"used_points": 0, "cap_points": cap},
+    }
+    for unit in game_state.get("units", []):  # get allowed (état non initialisé)
+        if not unit.get("in_strategic_reserves", False):  # get allowed (champ optionnel)
+            continue
+        key = str(int(require_key(unit, "player")))
+        if key in summary:
+            summary[key]["used_points"] += int(require_key(unit, "VALUE"))
+    return summary
 
 
 def _slim_execute_action_result_for_api(
@@ -2843,6 +2892,86 @@ def execute_action():
         ok, res = _dh_gen.deployment_generate_formation_action(engine.game_state, action)
         return api_json_response({"success": bool(ok), "result": res})
 
+    # ── RÉSERVES STRATÉGIQUES (20.01 / 20.04) ────────────────────────────────────────────────
+    # Mise en réserve AU LIEU du déploiement. L'unité sort du pool à poser et la main passe au
+    # déployeur suivant, exactement comme une pose (c'est le moteur qui le fait).
+    if action.get("action") == "deploy_strategic_reserves":
+        from engine.phase_handlers import deployment_handlers as _dh_res
+        ok, res = _dh_res.deployment_place_in_strategic_reserves(engine.game_state, action)
+        if not ok:
+            return jsonify({"success": False, "error": res}), 400
+        return api_json_response({"success": True, "result": res})
+
+    # Read-only : aire d'arrivée d'une unité en réserves, publiée dans le canal d'aperçu
+    # (`move_preview_footprint_mask_loops`) — le client la rend comme l'aperçu de mouvement, en
+    # polygone, au lieu de recevoir des dizaines de milliers de couples (col,row).
+    if action.get("action") == "ingress_preview":
+        unit_id = action.get("unitId")
+        if unit_id is None:
+            return jsonify({"success": False, "error": "ingress_preview requires unitId"}), 400
+        from engine.phase_handlers import movement_handlers as _mh_ing
+        if not _mh_ing.squad_is_in_strategic_reserves(engine.game_state, str(unit_id)):
+            return jsonify({
+                "success": False,
+                "error": f"unit {unit_id} is not in strategic reserves",
+            }), 400
+        eligible = _mh_ing.ingress_eligible_units(engine.game_state)
+        if str(unit_id) not in eligible:
+            # 20.03 : pas encore son round d'arrivée. État de jeu normal, pas une erreur serveur.
+            return api_json_response({
+                "success": True,
+                "result": {
+                    "action": "ingress_preview", "unitId": str(unit_id),
+                    "eligible": False, "cells": 0,
+                    "reason": "not_yet_arriving",
+                },
+            })
+        _mh_ing.set_ingress_preview_loops(engine.game_state, str(unit_id))
+        _pool_n = len(_mh_ing.ingress_setup_pool(engine.game_state, str(unit_id)))
+        return api_json_response({
+            "success": True,
+            "result": {
+                "action": "ingress_preview", "unitId": str(unit_id),
+                "eligible": True, "cells": _pool_n,
+                # Pool vide = aucune arrivée légale (les ennemis couvrent la bande). Le client
+                # doit le DIRE au joueur, sinon le clic suivant ne fera rien.
+                "reason": None if _pool_n else "no_legal_arrival",
+            },
+        })
+
+    # Arrivée effective (20.04). Le plan par-figurine est construit ICI, par la MÊME fonction que
+    # le décodeur gym (`build_validated_deployment_plan` contraint au pool d'ingress) : les deux
+    # sièges posent donc l'escouade exactement pareil.
+    if action.get("action") == "ingress_move":
+        unit_id = action.get("unitId")
+        dest_col = action.get("destCol")
+        dest_row = action.get("destRow")
+        if unit_id is None or dest_col is None or dest_row is None:
+            return jsonify({
+                "success": False,
+                "error": "ingress_move requires unitId, destCol, destRow",
+            }), 400
+        from engine.phase_handlers import movement_handlers as _mh_cmt
+        from engine.phase_handlers.deployment_handlers import build_validated_deployment_plan
+        if str(unit_id) not in _mh_cmt.ingress_eligible_units(engine.game_state):
+            return jsonify({
+                "success": False,
+                "error": f"unit {unit_id} cannot make an ingress move this battle round",
+            }), 400
+        _ing_pool = _mh_cmt.ingress_setup_pool(engine.game_state, str(unit_id))
+        _ing_plan = build_validated_deployment_plan(
+            engine.game_state, str(unit_id), int(dest_col), int(dest_row), _ing_pool
+        )
+        if _ing_plan is None:
+            return jsonify({
+                "success": False,
+                "error": "no legal formation at this anchor for the ingress move",
+            }), 400
+        ok, res = _mh_cmt.ingress_commit_plan(engine.game_state, str(unit_id), _ing_plan)
+        if not ok:
+            return jsonify({"success": False, "error": res}), 400
+        return api_json_response({"success": True, "result": res})
+
     # Read-only: dry-run d'un plan de déploiement par-figurine (rouge/vert + cohésion).
     if action.get("action") == "deploy_preview":
         from engine.phase_handlers import deployment_handlers as _dh_prev
@@ -2948,6 +3077,13 @@ def execute_action():
         _buffer_log_delta(engine, engine.game_state.get("action_logs", []))
         _capture_and_autosave(engine)
         _timeline_capture(engine)
+
+    # Réserves (20.04) : réchauffer l'aire d'arrivée AVANT que le joueur ne clique. Mesuré sur
+    # board x5 : 2,3 s pour les deux signatures d'un roster (pool + contours), puis 9 ms par
+    # sélection. Payer ça au clic se verrait ; le payer ici le noie dans le tour adverse.
+    # CÔTÉ API SEULEMENT : en entraînement, la plupart des phases de mouvement n'ont aucune
+    # réserve et le masque construit déjà, paresseusement, ce dont il a besoin.
+    _maybe_precompute_ingress_pools(engine)
 
     # Convert game state to JSON-serializable format
     _ser_t0 = time.perf_counter() if _api_perf else None

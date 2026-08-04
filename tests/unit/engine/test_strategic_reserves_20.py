@@ -449,6 +449,161 @@ def test_no_ingress_on_round_1():
 
 
 # ---------------------------------------------------------------------------
+# Les trois clauses de 20.03/20.04 sont des PARAMÈTRES PAR UNITÉ
+# ---------------------------------------------------------------------------
+
+
+def test_reserves_parameters_default_to_the_generic_rule():
+    from engine.phase_handlers.movement_handlers import (
+        INGRESS_ENEMY_CLEARANCE_INCHES, INGRESS_FIRST_BATTLE_ROUND,
+        INGRESS_SETUP_DISTANCE_INCHES, RESERVES_ARRIVAL_ROUND_FIELD,
+        RESERVES_EDGE_DISTANCE_FIELD, RESERVES_ENEMY_CLEARANCE_FIELD,
+    )
+
+    eng = _engine()
+    gs = eng.game_state
+    for unit in gs["units"]:
+        assert unit[RESERVES_ARRIVAL_ROUND_FIELD] == INGRESS_FIRST_BATTLE_ROUND
+        assert unit[RESERVES_EDGE_DISTANCE_FIELD] == INGRESS_SETUP_DISTANCE_INCHES
+        assert unit[RESERVES_ENEMY_CLEARANCE_FIELD] == INGRESS_ENEMY_CLEARANCE_INCHES
+
+
+def test_granted_arrival_round_opens_the_ingress_earlier():
+    """20.03 « unless otherwise stated » : une capacité fait arriver l'unité au 1er round."""
+    from engine.phase_handlers.movement_handlers import (
+        ingress_eligible_units, set_reserves_arrival_round,
+    )
+
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    squad_id = _reserve_squad(eng, deep_strike=True)
+    gs["current_player"] = 1
+    gs["turn"] = 1
+
+    assert ingress_eligible_units(gs) == [], "porte fermée au round 1 par défaut (20.03)"
+    set_reserves_arrival_round(gs, squad_id, 1)
+    assert squad_id in ingress_eligible_units(gs), (
+        "une capacité doit pouvoir ouvrir l'arrivée au 1er round, sur CETTE unité"
+    )
+    # La porte reste fermée pour les AUTRES unités en réserve : le paramètre est par unité.
+    other = _reserve_squad(eng, deep_strike=False)
+    assert other not in ingress_eligible_units(gs)
+
+
+def test_set_reserves_arrival_round_rejects_round_zero():
+    from engine.phase_handlers.movement_handlers import set_reserves_arrival_round
+
+    eng = _engine()
+    gs = eng.game_state
+    squad_id = next(iter(gs["units_cache"]))
+    with pytest.raises(ValueError):
+        set_reserves_arrival_round(gs, squad_id, 0)
+
+
+def test_granted_clearance_changes_the_pool_boundary():
+    """20.04 : la distance aux ennemis est un paramètre (Da Jump pose « more than 9\" away »)."""
+    from engine.phase_handlers.movement_handlers import (
+        ingress_setup_pool, set_reserves_setup_distances,
+    )
+
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    gs["turn"] = 2
+    squad_id = _reserve_squad(eng, deep_strike=True)
+
+    pool_8 = ingress_setup_pool(gs, squad_id)
+    assert pool_8, "pool vide — test sans portée"
+    set_reserves_setup_distances(
+        gs, squad_id, edge_distance_inches=None, enemy_clearance_inches=9,
+    )
+    pool_9 = ingress_setup_pool(gs, squad_id)
+    assert pool_9 < pool_8, (
+        "exiger plus de 9\" au lieu de plus de 8\" doit RÉTRÉCIR strictement l'aire légale"
+    )
+
+
+def test_granted_edge_distance_widens_or_lifts_the_band():
+    from engine.phase_handlers.movement_handlers import (
+        ingress_setup_pool, set_reserves_setup_distances,
+    )
+
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    gs["turn"] = 3  # zone adverse ouverte pour tous : on isole la clause de BORD
+    squad_id = _reserve_squad(eng, deep_strike=False)
+
+    pool_6 = ingress_setup_pool(gs, squad_id)
+    set_reserves_setup_distances(
+        gs, squad_id, edge_distance_inches=9, enemy_clearance_inches=8,
+    )
+    pool_9 = ingress_setup_pool(gs, squad_id)
+    assert pool_6 < pool_9, "une bande de 9\" doit contenir strictement celle de 6\""
+
+    set_reserves_setup_distances(
+        gs, squad_id, edge_distance_inches=None, enemy_clearance_inches=8,
+    )
+    pool_anywhere = ingress_setup_pool(gs, squad_id)
+    assert pool_9 < pool_anywhere, "`None` = « anywhere on the battlefield », donc tout le plateau"
+
+
+def test_pool_signature_is_shared_between_units_of_same_parameters():
+    """Deux unités de même signature ont EXACTEMENT le même pool.
+
+    C'est l'invariant sur lequel repose le partage du calcul entre toutes les réserves d'un
+    joueur : le pool ne dépend pas de l'unité au-delà de son triplet de paramètres.
+    """
+    from engine.phase_handlers.movement_handlers import (
+        ingress_pool_signature, ingress_setup_pool, set_reserves_setup_distances,
+    )
+
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    gs["turn"] = 2
+    from engine.phase_handlers.movement_handlers import unit_has_deep_strike
+
+    a = _reserve_squad(eng, deep_strike=False)
+    # La 2e escouade doit elle aussi être SANS Deep Strike : la capacité force la bande de bord
+    # à `None` et rendrait les deux signatures différentes par construction.
+    b = next(
+        sid for sid, e in gs["units_cache"].items()
+        if int(e["player"]) == 1 and sid != a and not unit_has_deep_strike(gs, sid)
+    )
+    _force_into_reserves(gs, b)
+    # État CONSTRUIT : on impose la même signature aux deux (sans Deep Strike ni l'une ni
+    # l'autre, mêmes distances). Sans ça le test dépendrait du roster tiré.
+    for sid in (a, b):
+        set_reserves_setup_distances(gs, sid, edge_distance_inches=6, enemy_clearance_inches=8)
+    assert ingress_pool_signature(gs, a) == ingress_pool_signature(gs, b), (
+        "signatures construites identiques — sinon le test ne vérifie rien"
+    )
+    assert ingress_setup_pool(gs, a) == ingress_setup_pool(gs, b), (
+        "même signature -> même pool ; sinon le partage du calcul est faux"
+    )
+
+
+def test_deep_strike_lifts_the_edge_band_in_the_signature():
+    from engine.phase_handlers.movement_handlers import ingress_pool_signature
+
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    gs["turn"] = 2
+    deep = _reserve_squad(eng, deep_strike=True)
+    plain = _reserve_squad(eng, deep_strike=False)
+
+    edge_deep, _clr_deep, zone_deep = ingress_pool_signature(gs, deep)
+    edge_plain, _clr_plain, zone_plain = ingress_pool_signature(gs, plain)
+    assert edge_deep is None, "24.09 lève la contrainte de bord"
+    assert edge_plain is not None
+    assert zone_deep is True, "24.09 ouvre aussi la zone adverse"
+    assert zone_plain is False, "fermée avant le 3e round sans Deep Strike"
+
+
+# ---------------------------------------------------------------------------
 # Hors table : ni ciblable, ni compté, ni bloquant
 # ---------------------------------------------------------------------------
 
