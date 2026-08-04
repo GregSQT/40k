@@ -31,7 +31,8 @@ _GAME_RULES = {
 def _unit(uid: int, player: int, positions: List[Tuple[int, int]], value: int) -> Dict[str, Any]:
     """⚠️ Unité FABRIQUÉE À LA MAIN — elle ne prouve rien sur le mode Endless Duty réel.
 
-    Ce dict porte `BASE_SHAPE`, `BASE_SIZE`, `orientation` et un `VALUE` non nul. En production,
+    Ce dict porte `BASE_SHAPE`, `BASE_SIZE`, `MODEL_HEIGHT`, `orientation` et un `VALUE` non nul.
+    En production,
     l'unité qui arrive dans `_replace_units_for_player` vient de `_build_unit_from_registry`, qui
     **n'émet aucun de ces champs de socle** et dont le `VALUE` vaut 0 pour le leader de départ.
     Ce helper compense donc exactement les trous qui empêchent le mode de démarrer : c'est la
@@ -50,6 +51,9 @@ def _unit(uid: int, player: int, positions: List[Tuple[int, int]], value: int) -
         "RNG_WEAPONS": [], "CC_WEAPONS": [], "UNIT_RULES": [], "UNIT_KEYWORDS": [], "LD": 7,
         "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
         "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+        # Hauteur modele (pouces) : exigee par build_units_cache (borne haute de l'intervalle
+        # vertical de l'engagement 3D, §03.04). Une unite reelle la porte toujours.
+        "MODEL_HEIGHT": 2.5,
         "models": [
             {"col": c, "row": r, "HP_CUR": 1, "HP_MAX": 1, "VALUE": value} for c, r in positions
         ],

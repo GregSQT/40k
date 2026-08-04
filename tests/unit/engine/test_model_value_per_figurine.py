@@ -47,6 +47,10 @@ def _unit(uid: int, value: int, hp_max: int, models: List[Dict[str, Any]] | None
         "ATTACK_LEFT": 1,
         "BASE_SIZE": 1,
         "BASE_SHAPE": "round",
+        # Hauteur modele (pouces) : borne haute de l'intervalle vertical de l'engagement 3D
+        # (§03.04). EXIGEE par build_units_cache depuis que toute la phase de combat passe
+        # `vertical_zone_inches` — une unite reelle la porte toujours (game_state.py).
+        "MODEL_HEIGHT": 2.5,
         "MOVE": 6,
         "UNIT_RULES": [],
         # Mise en place (24.16 clause 2 / feature d observation) : 0 = posee avant la bataille.
