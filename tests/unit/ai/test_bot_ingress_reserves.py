@@ -35,6 +35,10 @@ ALL_BOTS = [RandomBot, GreedyBot, DefensiveBot, ControlBot, AdaptiveBot, ValueTr
 #: sur la decision 20.01 de mise en reserves. Un test a `randomness=0.0` ne peut pas le voir —
 #: il ne traverse jamais cette clause. Valeur superieure aux `randomness` configures (0.15 en
 #: entrainement, 0.05 pour le holdout) pour que la fuite, si elle revenait, soit certaine.
+#:
+#: Depuis le routage de la mise en place par le wrapper, cette clause ne PEUT plus voir un masque
+#: de deploiement : c'est ce que verrouille `test_wrapper_never_offers_wait_at_deployment`, et
+#: c'est pour cela qu'il ne s'appuie plus sur une liste de bots tenue a la main.
 EXPLORATION_RANDOMNESS = 0.5
 
 
@@ -52,6 +56,13 @@ def _deployment_state() -> Dict[str, Any]:
 # --------------------------------------------------------------------------------------
 
 
+def _bare_wrapper():
+    """`BotControlledEnv` nu : la mise en place ne lit ni le moteur ni le masque memoise."""
+    from ai.env_wrappers import BotControlledEnv
+
+    return BotControlledEnv.__new__(BotControlledEnv)
+
+
 @pytest.mark.parametrize("bot_cls", ALL_BOTS, ids=lambda c: c.__name__)
 def test_no_bot_ever_puts_a_unit_in_strategic_reserves(bot_cls) -> None:
     """20.01 est une decision de LISTE, jamais une decision de bot.
@@ -60,17 +71,56 @@ def test_no_bot_ever_puts_a_unit_in_strategic_reserves(bot_cls) -> None:
     de 50 % (`ActionDecoder.get_squad_action_mask_and_eligible_units`) : jouer WAIT y MET
     L'UNITE EN RESERVES. TacticalBot, faute de branche `deployment`, tombait sur sa clause de
     repli `WAIT if WAIT in valid_actions` et reservait donc 100 % de ce qu'il pouvait.
+
+    Le test passe par le WRAPPER (`_select_bot_deploy_action`) et non plus par
+    `select_action_with_state` : c'est lui qui porte desormais l'invariant, et c'est le chemin
+    reellement joue en entrainement. Un bot n'a plus l'occasion de se tromper.
     """
     valid_actions = list(mi.DEPLOY_SLOTS) + [WAIT_ACTION]
+    wrapper = _bare_wrapper()
     bot = _bot(bot_cls)
     chosen = {
-        bot.select_action_with_state(valid_actions, _deployment_state(), {"id": "1", "player": 1})
+        wrapper._select_bot_deploy_action(_deployment_state(), valid_actions, bot=bot)
         for _ in range(2000)
     }
     assert WAIT_ACTION not in chosen, (
         f"{bot_cls.__name__} met une unite en reserves stratégiques de sa propre initiative"
     )
     assert chosen <= set(mi.DEPLOY_SLOTS)
+
+
+def test_wrapper_never_offers_wait_at_deployment() -> None:
+    """L'invariant STRUCTUREL, celui qui ne depend d'aucune liste de bots.
+
+    Le test ci-dessus enumere `ALL_BOTS` — une liste tenue a la main, donc un 8e bot oublie la
+    contournerait. Celui-ci verifie ce que le wrapper TRANSMET : quel que soit le bot, il ne voit
+    que des slots de pose. C'est ce qui rend l'oubli impossible, et non plus seulement detecte.
+    """
+    spy = _SpyBot(answer=mi.DEPLOY_SLOT_BASE + 2)
+    valid_actions = [mi.DEPLOY_SLOT_BASE, mi.DEPLOY_SLOT_BASE + 2, WAIT_ACTION]
+
+    chosen = _bare_wrapper()._select_bot_deploy_action(
+        _deployment_state(), valid_actions, bot=spy
+    )
+
+    assert chosen == mi.DEPLOY_SLOT_BASE + 2
+    assert spy.seen == [[mi.DEPLOY_SLOT_BASE, mi.DEPLOY_SLOT_BASE + 2]], (
+        "WAIT (= mise en reserves 20.01) ne doit jamais etre propose au bot"
+    )
+
+
+def test_wrapper_raises_at_deployment_without_any_open_slot() -> None:
+    """Deploiement sans slot de pose = defaut MOTEUR, jamais un repli en WAIT.
+
+    Difference assumee avec l'ingress, ou le pool vide est un etat de jeu normal (l'unite reste
+    en reserves et retentera au round suivant, cf. `test_wrapper_waits_when_no_ingress_slot_is_open`).
+    Au deploiement le decodeur leve « Deployment deadlock » avant ; se replier sur WAIT ici
+    mettrait justement l'unite en reserves — le defaut qu'on corrige.
+    """
+    spy = _SpyBot(answer=mi.DEPLOY_SLOT_BASE)
+    with pytest.raises(RuntimeError, match="deploiement"):
+        _bare_wrapper()._select_bot_deploy_action(_deployment_state(), [WAIT_ACTION], bot=spy)
+    assert spy.seen == [], "aucun slot ouvert : le bot ne doit pas etre interroge"
 
 
 @pytest.mark.parametrize("bot_cls", ALL_BOTS, ids=lambda c: c.__name__)
@@ -90,14 +140,18 @@ def test_placement_never_returns_a_closed_slot(bot_cls) -> None:
 
 
 @pytest.mark.parametrize("bot_cls", ALL_BOTS, ids=lambda c: c.__name__)
-def test_placement_refuses_a_pool_without_any_open_slot(bot_cls) -> None:
-    """Aucun slot ouvert = erreur explicite, jamais un repli silencieux.
+def test_placement_refuses_a_pool_it_has_not_been_promised(bot_cls) -> None:
+    """CONTRAT d'entree : un pool non vide de slots 4-8, et rien d'autre.
 
-    C'est a l'APPELANT de trancher avant (pool d'ingress vide -> l'unite reste en reserves,
-    etat de jeu normal). Un bot qui « choisirait quand meme » masquerait ce cas.
+    Le nettoyage se fait une seule fois chez l'appelant (`BotControlledEnv._ask_bot_placement`).
+    Les bots ne le refont pas — ils VERIFIENT. Un appelant qui transmettrait le masque brut leve
+    donc ici, au lieu de laisser un bot tirer `WAIT_ACTION` (= mise en reserves 20.01) en silence :
+    filtrer sans rien dire reproduirait le defaut du chantier 04c sous une autre forme.
     """
     with pytest.raises(ValueError):
         _bot(bot_cls).select_placement_action([WAIT_ACTION], _deployment_state())
+    with pytest.raises(ValueError):
+        _bot(bot_cls).select_placement_action([], _deployment_state())
 
 
 def test_tactical_bot_placement_is_frozen_on_the_first_open_slot() -> None:
@@ -432,6 +486,117 @@ def test_bot_ingress_end_to_end() -> None:
         assert arrived, (
             f"aucune des reserves du bot {reserve_ids} n'est arrivee sur le plateau — le bot "
             f"decline son ingress move (20.04)"
+        )
+    finally:
+        env.close()
+
+
+@pytest.mark.integration
+def test_bot_deployment_never_reserves_on_the_real_path(monkeypatch) -> None:
+    """VRAI CHEMIN du deploiement : le bot ne met JAMAIS une unite en reserves de lui-meme.
+
+    Le reste du fichier prouve que `_select_bot_deploy_action` est correct ; seul ce test prouve
+    qu'il est ATTEINT par `_get_bot_action` en phase de deploiement, et que le bot y decide
+    vraiment. Deux conditions doivent etre reunies pour que le defaut soit VISIBLE, et les deux
+    sont ASSERTEES plus bas — sans elles le test serait un vert vacant :
+      1. le deploiement doit etre ACTIF. Le scheduler par-episode (rampe fixed<->active) rend
+         « fixed » en debut de training : la phase de deploiement n'existe alors pas du tout et
+         `_get_bot_action` n'y est jamais appele. D'ou l'imposition du mode.
+      2. `WAIT_ACTION` doit etre OUVERT dans le masque de deploiement du bot. Il ne l'est que
+         sous le plafond 20.01 (50 % des points) : une liste qui declare deja ses reserves — la
+         fixture d'ingress ci-dessus, par exemple — le ferme, et le bot ne peut alors PAS se
+         tromper.
+
+    MESURE du defaut, branche `deployment` du wrapper retiree, 5 episodes de ce scenario : WAIT
+    ouvert 9 fois sur 27 deploiements du bot, et JOUE 8 fois. Branche remise : ouvert 25 fois sur
+    28, joue 0. Ce test tourne sur le meme montage.
+    """
+    import random
+
+    import numpy as np
+
+    from ai.bot_evaluation import _create_eval_env
+    from ai.env_wrappers import BotControlledEnv
+    from engine.w40k_core import W40KEngine
+
+    # (1) Deploiement ACTIF impose : sans cela il n'y a pas de phase de deploiement a observer.
+    monkeypatch.setattr(
+        W40KEngine, "_configure_deployment_mode_for_episode", lambda self: "active"
+    )
+
+    wait_was_open = 0
+    original = BotControlledEnv._get_bot_action
+
+    def spy(self, debug=False, decision=None, bot=None):
+        nonlocal wait_was_open
+        game_state = self.engine.game_state
+        if game_state["phase"] == "deployment":
+            if decision is not None:
+                mask = decision.action_mask
+            else:
+                mask, _ = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(
+                    game_state
+                )
+            if bool(np.asarray(mask, dtype=bool)[WAIT_ACTION]):
+                wait_was_open += 1
+        return original(self, debug=debug, decision=decision, bot=bot)
+
+    monkeypatch.setattr(BotControlledEnv, "_get_bot_action", spy)
+
+    scenario = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json"
+    env = _create_eval_env(
+        bot_name="tactical",
+        bot_type="tactical",
+        randomness_config={"tactical": 0.05},
+        scenario_file=scenario,
+        training_config_name="x1",
+        rewards_config_name="default",
+        controlled_agent="ArmageddonAgent",
+        base_agent_key="ArmageddonAgent",
+        debug_mode=False,
+        agent_seat_mode="p1",
+        agent_seat_seed=1234,
+    )
+    try:
+        random.seed(11)
+        np.random.seed(11)
+        env.reset()
+        assert env.engine.game_state["phase"] == "deployment", (
+            "le scenario ne demarre pas en deploiement : le test n'observerait rien"
+        )
+        bot_player = int(env.bot_player)
+        assert not [
+            u
+            for u in env.engine.game_state["units"]
+            if int(u["player"]) == bot_player and u.get("in_strategic_reserves")
+        ], "la liste du bot declare deja des reserves : impossible de distinguer sa decision"
+
+        # On ne joue QUE la phase de deploiement : le reste de la partie n'apporte rien a cet
+        # invariant, et l'agent y joue au hasard.
+        steps = 0
+        while env.engine.game_state["phase"] == "deployment" and steps < 400:
+            mask = np.asarray(env.action_masks())
+            legal = np.flatnonzero(mask).tolist()
+            assert legal, "masque vide : le moteur doit avancer la phase"
+            _, _, terminated, truncated, _ = env.step(int(random.choice(legal)))
+            steps += 1
+            if terminated or truncated:
+                break
+
+        # (2) VERT VACANT : sans WAIT ouvert au moins une fois, le bot n'a jamais eu l'occasion
+        # de se tromper et l'assertion finale ne prouverait rien.
+        assert wait_was_open > 0, (
+            "WAIT (= mise en reserves 20.01) n'a jamais ete ouvert dans un masque de "
+            "deploiement du bot : le test ne prouve rien"
+        )
+        reserved = [
+            str(u["id"])
+            for u in env.engine.game_state["units"]
+            if int(u["player"]) == bot_player and u.get("in_strategic_reserves")
+        ]
+        assert not reserved, (
+            f"le bot a mis {reserved} en reserves stratégiques de sa propre initiative : la "
+            "decision 20.01 appartient a la LISTE, jamais au bot"
         )
     finally:
         env.close()

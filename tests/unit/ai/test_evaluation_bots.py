@@ -137,7 +137,9 @@ def _move_gs(unit_hex=(0, 0), enemy_hex=(10, 0), objectives=None, models=None, c
 
 
 def test_select_weighted_deployment_action_errors_and_antirepeat(monkeypatch: pytest.MonkeyPatch) -> None:
-    with pytest.raises(ValueError, match=r"aucun slot de mise en place"):
+    # Le pool de mise en place est nettoye par l'appelant (`BotControlledEnv._ask_bot_placement`) :
+    # une action hors slots 4-8 est une violation de contrat, pas quelque chose a filtrer ici.
+    with pytest.raises(ValueError, match=r"hors slots"):
         _select_weighted_deployment_action([0, 1], {4: 1.0}, None, 0, 2)
 
     with pytest.raises(KeyError, match=r"Missing deployment weight"):
@@ -167,7 +169,8 @@ def test_select_weighted_deployment_action_errors_and_antirepeat(monkeypatch: py
 def test_random_bot_phase_aware_selection(monkeypatch: pytest.MonkeyPatch) -> None:
     bot = RandomBot()
     monkeypatch.setattr(eb.random, "choice", lambda seq: seq[0])
-    assert _act(bot, [4, 9], {"phase": "deployment"}, active={"id": "1", "player": ACTING}) == 4
+    # Mise en place : appelee en direct par le wrapper, avec un pool deja nettoye (slots 4-8).
+    assert bot.select_placement_action([4, 5], {"phase": "deployment"}) == 4
     assert _act(bot, [SHOOT, WAIT_ACTION], {"phase": "shoot"}, active={"id": "1", "player": ACTING}) == SHOOT
     # No shoot slot available in shoot phase -> WAIT
     assert _act(bot, [CELL, WAIT_ACTION], {"phase": "shoot"}, active={"id": "1", "player": ACTING}) == WAIT_ACTION
@@ -187,7 +190,9 @@ def test_greedy_bot_select_action_and_state(monkeypatch: pytest.MonkeyPatch) -> 
         "_select_weighted_deployment_action",
         lambda **kwargs: 6,
     )
-    assert _act(bot, [4, 5, 6], {"phase": "deployment", "episode_number": 1}, active={"id": "1", "player": ACTING}) == 6
+    # La mise en place ne passe plus par `select_action_with_state` : le wrapper appelle
+    # directement la politique de pose (cf. tests/unit/ai/test_bot_ingress_reserves.py).
+    assert bot.select_placement_action([4, 5, 6], {"phase": "deployment", "episode_number": 1}) == 6
 
     # Sans slot de tir ouvert -> attendre.
     monkeypatch.setattr(eb, "get_hp_from_cache", lambda uid, gs_: 5)

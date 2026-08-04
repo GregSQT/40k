@@ -54,28 +54,33 @@ def _has_action_in(valid_actions, action_ids) -> bool:
     return any(a in valid_actions for a in action_ids)
 
 
-def _open_placement_actions(valid_actions: List[int], who: str) -> List[int]:
-    """Slots de MISE EN PLACE (4-8) ouverts par le masque, dans l'ordre des strategies.
+def _require_placement_pool(valid_actions: List[int], who: str) -> List[int]:
+    """CONTRAT d'entree de `select_placement_action` : un pool non vide de slots 4-8, et rien d'autre.
 
-    SOURCE UNIQUE de la regle « seuls les slots 4-8 sont des poses ». `valid_actions` porte aussi
-    `WAIT_ACTION`, qui en phase de deploiement n'est PAS une attente : le masque l'y ouvre pour la
-    decision 20.01 « placer cette unite en RESERVES STRATEGIQUES »
+    Ce n'est plus un filtre — c'est une VERIFICATION. Le nettoyage se fait une seule fois en amont,
+    dans `BotControlledEnv._ask_bot_placement`, pour les deux sites de mise en place (deploiement
+    03.02 et ingress move 20.04). Les bots ne voient donc jamais le masque brut.
+
+    ⚠️ Ce que cette verification garde : `WAIT_ACTION` n'est PAS une attente au deploiement, le
+    masque l'y ouvre pour la decision 20.01 « placer cette unite en RESERVES STRATEGIQUES »
     (`ActionDecoder.get_squad_action_mask_and_eligible_units`). Un bot ne prend jamais cette
-    decision — c'est un choix de LISTE, pas de doctrine.
-
-    ⚠️ Ce filtre etait ecrit en quatre exemplaires. C'est son ABSENCE qui produisait le defaut du
-    chantier 04c : TacticalBot mettait en reserves 400 deploiements sur 400, et les cinq bots
-    ponderes 1 a 3 % des leurs via leur clause d'exploration. Un site oublie ne plante pas — il
-    remet le bot a decider des reserves, en silence. D'ou le point de passage unique.
+    decision — c'est un choix de LISTE, pas de doctrine. Un appelant qui transmettrait le masque
+    brut leve donc ICI au lieu de laisser un bot tirer WAIT en silence : c'est exactement le
+    defaut mesure au chantier 04c (TacticalBot 400 mises en reserves sur 400, cinq bots ponderes
+    1 a 3 % des leurs). Filtrer sans rien dire le reproduirait sous une autre forme.
     """
-    placement_actions = [a for a in DEPLOYMENT_ACTIONS if a in valid_actions]
-    if not placement_actions:
+    if not valid_actions:
         raise ValueError(
-            f"{who}: aucun slot de mise en place {DEPLOYMENT_ACTIONS} ouvert dans "
-            f"{valid_actions}. Au deploiement c'est un deadlock moteur ; a l'ingress, l'appelant "
-            "doit trancher AVANT (pool vide = l'unite reste en reserves)."
+            f"{who}: pool de mise en place vide. L'appelant doit trancher AVANT (au deploiement "
+            "c'est un deadlock moteur ; a l'ingress, pool vide = l'unite reste en reserves)."
         )
-    return placement_actions
+    intruders = [a for a in valid_actions if a not in DEPLOYMENT_ACTIONS]
+    if intruders:
+        raise ValueError(
+            f"{who}: pool de mise en place contenant des actions hors slots "
+            f"{DEPLOYMENT_ACTIONS} : {intruders}. Seul l'appelant nettoie le masque."
+        )
+    return list(valid_actions)
 
 
 # ⚠️ HISTORIQUE — « le premier slot ouvert = la cible la plus menacante » etait FAUX.
@@ -478,23 +483,23 @@ class _WeightedMover:
     _deployment_repeat_count: int
     _deployment_episode_marker: Optional[Any]
 
-    def _random_escape_action(self, valid_actions: List[int], phase: Any) -> int:
+    def _random_escape_action(self, valid_actions: List[int]) -> int:
         """Tirage d'EXPLORATION (`randomness`) — le seul site autorise a ignorer la doctrine.
 
-        En DEPLOIEMENT il est restreint aux slots de pose. `valid_actions` y porte aussi
-        `WAIT_ACTION`, qui n'y est PAS une action d'attente : le masque l'ouvre pour la decision
-        20.01 « mettre cette unite en RESERVES STRATEGIQUES ». Un bot ne prend jamais cette
-        decision-la — c'est un choix de LISTE.
+        Ne connait plus la phase, et n'a plus a la connaitre : la MISE EN PLACE ne passe plus par
+        `select_action_with_state`. Le wrapper route deploiement et ingress directement vers
+        `select_placement_action` (`BotControlledEnv._ask_bot_placement`), donc ce tirage ne peut
+        plus voir un masque de deploiement — ni, avec lui, le `WAIT_ACTION` qui y vaut mise en
+        RESERVES (20.01).
 
-        ⚠️ Le filtre est ICI, et pas dans l'ordre des clauses de chaque bot, parce que l'ordre EST
-        le defaut : 5 bots sur 7 evaluaient leur clause de hasard AVANT leur branche
-        `deployment`, donc leur tirage tombait sur WAIT. MESURE avec les `randomness` reellement
-        configures : 2,3 % (greedy), 2,5 % (control), 2,9 % (adaptive), 2,3 % (value_trade),
-        1,0 % (tactical) des deploiements partaient en reserves. Un point de passage unique rend
-        la correction independante de cet ordre, qu'un refactor pourrait reintroduire.
+        ⚠️ CONSEQUENCE ASSUMEE (arbitree le 2026-08-05) : la mise en place n'a plus de clause
+        d'exploration du tout. Elle en avait une au deploiement — un tirage UNIFORME sur les slots
+        ouverts, qui court-circuitait la table de poids du bot dans `randomness` % des cas — et
+        aucune a l'ingress, qui appelait deja `select_placement_action` en direct. Les deux sites
+        etant des jumeaux, ils jouent desormais la MEME chose : la doctrine pure. TacticalBot, le
+        holdout, devient donc strictement deterministe a la pose (premier slot ouvert) : ses
+        win-rates d'avant ce chantier ne sont plus bit-a-bit comparables.
         """
-        if phase == "deployment":
-            return int(random.choice(_open_placement_actions(valid_actions, type(self).__name__)))
         return int(random.choice(valid_actions))
 
     def select_placement_action(self, valid_actions: List[int], game_state) -> int:
@@ -585,7 +590,7 @@ def _select_weighted_deployment_action(
     max_repeat: int,
 ) -> int:
     """Select deployment intent with weighted randomness and anti-repeat guard."""
-    candidates = _open_placement_actions(valid_actions, "_select_weighted_deployment_action")
+    candidates = _require_placement_pool(valid_actions, "_select_weighted_deployment_action")
 
     if last_action in candidates and repeat_count >= max_repeat and len(candidates) > 1:
         candidates = [a for a in candidates if a != last_action]
@@ -609,22 +614,21 @@ class RandomBot:
     def select_placement_action(self, valid_actions: List[int], game_state) -> int:
         """Slot de MISE EN PLACE (03.02) : deploiement initial ET ingress move (20.04).
 
-        Uniforme sur les slots OUVERTS — c'est la doctrine de ce bot. Le tirage est restreint
-        aux slots 4-8 : `valid_actions` porte aussi `WAIT_ACTION`, qui n'est pas une strategie
+        Uniforme sur les slots OUVERTS — c'est la doctrine de ce bot. `valid_actions` ne porte
+        QUE des slots 4-8 : le wrapper a deja retire `WAIT_ACTION`, qui n'est pas une strategie
         de pose mais la decision 20.01 de mettre l'unite EN RESERVES au deploiement, et le
-        choix de reserve appartient a la LISTE, jamais au bot.
+        choix de reserve appartient a la LISTE, jamais au bot (cf. `_require_placement_pool`).
         """
-        return random.choice(_open_placement_actions(valid_actions, "RandomBot"))
+        return random.choice(_require_placement_pool(valid_actions, "RandomBot"))
 
     def select_action_with_state(
         self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
     ) -> int:
-        """Phase-aware selection to avoid deployment/shooting action index ambiguity."""
+        """Selection par phase. La MISE EN PLACE n'y figure pas : le wrapper route deploiement et
+        ingress vers `select_placement_action` (`BotControlledEnv._ask_bot_placement`)."""
         if not valid_actions:
             return WAIT_ACTION
         phase = require_key(game_state, "phase")
-        if phase == "deployment":
-            return self.select_placement_action(valid_actions, game_state)
         if phase == "shoot":
             shoot_actions = [a for a in mi.SHOOT_SLOTS if a in valid_actions]
             if shoot_actions:
@@ -689,9 +693,7 @@ class GreedyBot(_WeightedMover):
             return WAIT_ACTION
         phase = require_key(game_state, "phase")
         if self.randomness > 0 and random.random() < self.randomness:
-            return self._random_escape_action(valid_actions, phase)
-        if phase == "deployment":
-            return self.select_placement_action(valid_actions, game_state)
+            return self._random_escape_action(valid_actions)
         # Doctrine greedy : ACHEVER. Tir, charge et melee visent l'escouade la plus ENTAMEE —
         # un seul critere, le meme partout, jamais l'ordre des slots.
         if phase == "shoot":
@@ -763,15 +765,13 @@ class DefensiveBot(_WeightedMover):
         if not valid_actions:
             return WAIT_ACTION
         phase = require_key(game_state, "phase")
-        if phase == "deployment":
-            return self.select_placement_action(valid_actions, game_state)
 
         # L'escouade activee est FOURNIE par le wrapper (`eligible_units[0]`), la meme que celle
         # dont le masque est construit. La deviner (« premiere unite vivante de current_player »)
         # designait potentiellement une AUTRE escouade — et, en phase de combat, un autre joueur,
         # la selection 12.04 alternant entre les deux camps.
         if self.randomness > 0 and random.random() < self.randomness:
-            return self._random_escape_action(valid_actions, phase)
+            return self._random_escape_action(valid_actions)
 
         nearby_threats = self._count_nearby_threats(active_unit, game_state)
 
@@ -895,10 +895,7 @@ class ControlBot(_WeightedMover):
         phase = require_key(game_state, "phase")
 
         if self.randomness > 0 and random.random() < self.randomness:
-            return self._random_escape_action(valid_actions, phase)
-
-        if phase == "deployment":
-            return self.select_placement_action(valid_actions, game_state)
+            return self._random_escape_action(valid_actions)
 
         # Escouade activee FOURNIE par le wrapper : plus de devinette « premiere unite vivante
         # de current_player », qui pouvait designer une autre escouade et, en combat, un autre
@@ -1049,10 +1046,7 @@ class AdaptiveBot(_WeightedMover):
         phase = require_key(game_state, "phase")
 
         if self.randomness > 0 and random.random() < self.randomness:
-            return self._random_escape_action(valid_actions, phase)
-
-        if phase == "deployment":
-            return self.select_placement_action(valid_actions, game_state)
+            return self._random_escape_action(valid_actions)
 
         # Posture evaluee du point de vue du joueur AGISSANT (celui de l'escouade activee, la
         # source du masque), jamais de `current_player` : en combat, la selection 12.04 alterne.
@@ -1184,10 +1178,8 @@ class ValueTradeBot(_WeightedMover):
         phase = require_key(game_state, "phase")
 
         if self.randomness > 0 and random.random() < self.randomness:
-            return self._random_escape_action(valid_actions, phase)
+            return self._random_escape_action(valid_actions)
 
-        if phase == "deployment":
-            return self.select_placement_action(valid_actions, game_state)
         if phase == "shoot":
             if _has_action_in(valid_actions, mi.SHOOT_SLOTS):
                 return _shoot_focus_fire(
@@ -1331,9 +1323,14 @@ class TacticalBot(_WeightedMover):
         (`ActionDecoder.get_squad_action_mask_and_eligible_units`), ce repli tombait sur WAIT :
         le bot mettait EN RESERVES toute unite tenant sous le plafond de 50 %, a chaque
         deploiement (mesure : 400/400). Un bot ne decide jamais d'une mise en reserves — c'est
-        un choix de LISTE. D'ou le filtrage sur `DEPLOYMENT_ACTIONS`.
+        un choix de LISTE. Le retrait de `WAIT_ACTION` se fait desormais UNE fois en amont
+        (`BotControlledEnv._ask_bot_placement`) ; ici on ne fait que VERIFIER le contrat.
+
+        ⚠️ Depuis le routage de la mise en place par le wrapper (2026-08-05), cette politique
+        est le SEUL comportement de pose du holdout : sa clause d'exploration `randomness` ne
+        voit plus la phase de deploiement, ou elle tirait un slot uniforme dans 5 % des cas.
         """
-        return _open_placement_actions(valid_actions, "TacticalBot")[0]
+        return _require_placement_pool(valid_actions, "TacticalBot")[0]
 
     def select_action_with_state(
         self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
@@ -1352,11 +1349,9 @@ class TacticalBot(_WeightedMover):
         phase = require_key(game_state, "phase")
 
         if self.randomness > 0 and random.random() < self.randomness:
-            return self._random_escape_action(valid_actions, phase)
+            return self._random_escape_action(valid_actions)
 
         # La phase move est routee par le wrapper vers select_movement_destination.
-        if phase == "deployment":
-            return self.select_placement_action(valid_actions, game_state)
         if phase == "shoot":
             return self._select_shoot_action(valid_actions, game_state, active_unit)
         if phase == "charge":
