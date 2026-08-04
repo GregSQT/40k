@@ -474,6 +474,9 @@ def test_the_backstop_records_instead_of_scoring_a_silent_loss(monkeypatch) -> N
 
     class _Engine:
         game_state = {"units": []}
+        # `_eval_worker_task` ventile le win-rate par roster et lit cet attribut en acces DIRECT.
+        # `None` = scenario sans roster declare : la doublure porte le contrat, elle ne le contourne pas.
+        _scenario_roster_info = None
 
         def _get_episode_step_limit(self):
             return None  # Endless Duty : pas de plafond d'episode cote moteur
@@ -658,6 +661,8 @@ def test_the_eval_worker_records_the_truncation_it_meets(monkeypatch) -> None:
 
     class _FakeEngine:
         game_state = {"units": []}
+        # Idem `_Engine` ci-dessus : ventilation par roster, acces direct, `None` = sans roster.
+        _scenario_roster_info = None
 
         def _get_episode_step_limit(self):
             # Le worker aligne son backstop dessus : la doublure porte le contrat, elle ne

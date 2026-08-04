@@ -49,13 +49,21 @@ MIG = _load_migration_module()
 
 
 def _bank_scenarios() -> list[Path]:
-    files: list[Path] = []
-    for d in ACTIVE_DIRS:
-        for f in sorted((SCEN_ROOT / d).rglob("*.json")):
-            data = json.loads(f.read_text(encoding="utf-8-sig"))
-            if isinstance(data, dict) and "agent_roster_ref" in data and "composition" not in data:
-                files.append(f)
-    return files
+    """Les scénarios que l'ENUMERATION ramasse réellement : le motif de NOM globé par
+    `ai/training_utils.py::_gather_scenario_files_in_dir` (`scenario_*`, `*_scenario_*`).
+
+    UN seul critère d'appartenance, celui de la production. Les fixtures de test posées dans
+    `training/` sont nommées hors motif exprès (chantier 04c) — les compter ferait de ce contrôle
+    d'effectif un contrôle du contenu du dossier. La FORME des fichiers retenus (roster déclaré,
+    pas de composition) est vérifiée en invariant sur chacun, pas en filtre : un fichier au bon
+    nom mais malformé doit faire échouer la banque, pas en disparaître silencieusement.
+    """
+    return [
+        f
+        for d in ACTIVE_DIRS
+        for f in sorted((SCEN_ROOT / d).rglob("*.json"))
+        if f.name.startswith("scenario_") or "_scenario_" in f.name
+    ]
 
 
 # ── Transformation : idempotence + strip legacy ─────────────────────────────────
@@ -118,6 +126,12 @@ def test_bank_has_expected_count():
 @pytest.mark.parametrize("scen", _bank_scenarios(), ids=lambda p: str(p.relative_to(SCEN_ROOT)))
 def test_bank_scenario_has_no_legacy_and_valid_refs(scen):
     data = json.loads(scen.read_text(encoding="utf-8-sig"))
+    # Forme attendue d'un scénario de banque — vérifiée ici, jamais en filtre d'énumération
+    # (cf. `_bank_scenarios`) : un fichier au bon nom mais qui n'est pas un scénario doit
+    # faire ROUGE, pas sortir du décompte.
+    assert isinstance(data, dict), f"{scen} n'est pas un objet JSON"
+    assert "agent_roster_ref" in data, f"pas de roster déclaré dans {scen}"
+    assert "composition" not in data, f"{scen} est une liste, pas un scénario"
     assert not any(k in data for k in LEGACY_KEYS), f"clé legacy dans {scen}"
     assert data.get("board_ref") == "44x60x5"
     assert data.get("terrain_ref") in TRAIN_TERRAINS

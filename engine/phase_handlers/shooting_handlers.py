@@ -2158,8 +2158,6 @@ def _unit_has_firable_target(game_state: Dict[str, Any], unit: Dict[str, Any],
             continue
         enemy_col, enemy_row = require_unit_position(enemy, game_state)
         enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_col, enemy_row)}) if enemy_entry else {(enemy_col, enemy_row)}
-        if not enemy_fp:
-            continue  # ennemi hors-board (réserves stratégiques) — non ciblable
         distance = min_distance_between_sets(shooter_fp, enemy_fp, max_distance=max_range)
         if distance > max_range:
             continue
@@ -2321,13 +2319,13 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
 
     shooter_col, shooter_row = require_unit_position(shooter, game_state)
     target_col, target_row = require_unit_position(target, game_state)
+    if target_col < 0 or target_row < 0 or shooter_col < 0 or shooter_row < 0:
+        return False  # tireur ou cible hors-board (réserves stratégiques)
 
     shooter_entry = units_cache.get(shooter_id_str)
     target_entry = units_cache.get(target_id_str)
     shooter_fp = shooter_entry.get("occupied_hexes", {(shooter_col, shooter_row)}) if shooter_entry else {(shooter_col, shooter_row)}
     target_fp = target_entry.get("occupied_hexes", {(target_col, target_row)}) if target_entry else {(target_col, target_row)}
-    if not shooter_fp or not target_fp:
-        return False  # tireur ou cible hors-board (réserves stratégiques)
     max_range = get_max_ranged_range(shooter)
     distance = min_distance_between_sets(shooter_fp, target_fp, max_distance=max_range)
     if distance > max_range:

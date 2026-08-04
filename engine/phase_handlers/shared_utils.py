@@ -1278,6 +1278,15 @@ def entry_is_on_battlefield(entry: Dict[str, Any]) -> bool:
     return int(require_key(entry, "col")) >= 0
 
 
+def model_is_on_board(model: Dict[str, Any]) -> bool:
+    """La figurine décrite par cette entrée de ``models_cache`` est-elle sur le champ de bataille ?
+
+    Jumeau modèle de ``entry_is_on_battlefield`` (escouades). Sentinelle ``(-1,-1)`` : coordonnées
+    négatives ↔ figurine hors table (réserves stratégiques, attente de déploiement).
+    """
+    return model.get("col", -1) >= 0
+
+
 def unit_is_on_battlefield(game_state: Dict[str, Any], unit_id: str) -> bool:
     """Jumeau unité de ``entry_is_on_battlefield``, lu sur ``deployed_on_turn`` (source unique
     du « posée / pas posée », cf. `create_unit`). Une unité absente de ``units_cache`` est morte,
@@ -3275,8 +3284,8 @@ def validate_squad_coherency(game_state: Dict[str, Any], squad_id: str) -> bool:
     squad_models = require_key(game_state, "squad_models")
     model_ids = squad_models.get(squad_id, [])  # get allowed
     alive = [
-        models_cache[m] for m in model_ids
-        if m in models_cache and int(models_cache[m].get("col", -1)) >= 0 and int(models_cache[m].get("row", -1)) >= 0
+        entry for m in model_ids
+        if (entry := models_cache.get(m)) is not None and model_is_on_board(entry)
     ]
     return _positions_in_coherency(alive, game_state)
 
@@ -5864,10 +5873,10 @@ def _attacker_model_can_reach_squad(
         tm = models_cache.get(mid)
         if tm is None:
             continue
+        if not model_is_on_board(tm):
+            continue  # modèle hors-board (réserves stratégiques) — non ciblable
         tc = int(tm["col"])
         tr = int(tm["row"])
-        if tc < 0 or tr < 0:
-            continue  # modèle hors-board (réserves stratégiques) — non ciblable
         target_level = int(tm.get("level", 0))  # get allowed (champ optionnel, défaut sol)
         footprint = list(_compute_unit_occupied_hexes(tc, tr, base_unit, game_state))
         target_socle = Socle(
