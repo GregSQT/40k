@@ -294,6 +294,12 @@ convention de rédaction du JSX — qui garantit la barre de défilement du Game
 | `rightColumnContent` | tracker, contrôles, barres d'action, **bloc illustration + Game Log** | hauteur fixe, jamais comprimé (`.game-log-with-illustration { flex-shrink: 0 }`) |
 | `rightColumnScrollableContent` | les deux `UnitStatusTable` | SEULE zone qui absorbe le manque de place — `SharedLayout` l'enveloppe lui-même dans `.unit-status-tables__scroll` |
 
+**En-tête de joueur — `CP : x` et `VP : x` (2026-08-04).** Les deux compteurs de partie vivent
+dans le MÊME en-tête d'`UnitStatusTable`, donc au même endroit en PvP et en replay : le composant
+est déjà partagé, et un second conteneur qui les répéterait ferait deux affichages à maintenir de
+la même valeur. En replay les CP viennent de l'instantané `OBJECTIVE CONTROL` (§2.3) ; ils sont
+**absents** — pas à zéro — sur un journal enregistré avant que le moteur ne les écrive.
+
 **Pourquoi.** C'est l'illustration (hauteur fixe, 280 px) qui donne sa hauteur au Game Log. Sans
 elle, le log grandissait avec son contenu et débordait de `.unit-status-tables` : les lignes
 anciennes sortaient de la fenêtre **sans aucune barre pour y revenir**. Le replay n'avait ni le

@@ -182,6 +182,7 @@ elle est désormais pilotée par `defaults.agent_key`.
 | Field | Type | Description |
 |-------|------|-------------|
 | `game_rules.max_turns` | integer | Maximum number of turns per episode |
+| `game_rules.starting_command_points` | integer | Stock de CP de CHAQUE joueur au début de la bataille (règle 08.02 ; le gain de 1 CP par phase de commandement s'y ajoute, pour les deux joueurs). **Aucune valeur par défaut côté code** : `engine/game_state.initial_command_points` lève si la clé manque, la dotation dépendant du format de partie. |
 | `game_rules.turn_limit_penalty` | number | Penalty when turn limit reached |
 | `game_rules.charge_max_distance` | integer | Maximum charge distance |
 | `game_rules.advance_distance_range` | integer | Advance roll range (D6 => 6) |
