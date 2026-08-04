@@ -49,8 +49,13 @@ from engine.w40k_core import W40KEngine  # noqa: E402
 _SEEDS = (1, 2, 3, 4, 5, 6, 7, 8)
 
 
-@pytest.fixture()
+@pytest.fixture(scope="module")
 def melee_scenario_file():
+    """Scenario ecrit UNE fois pour tout le module : son contenu (`MELEE_SCENARIO`) est constant.
+
+    Portee module et pas fonction parce que `_cached_play` indexe ses episodes sur la seule
+    graine : le chemin doit designer le meme scenario d'un test a l'autre.
+    """
     with tempfile.TemporaryDirectory() as td:
         path = Path(td) / "melee.json"
         path.write_text(json.dumps(MELEE_SCENARIO))
@@ -86,6 +91,31 @@ def _play(
     return engine, info["tactical_data"]
 
 
+#: Episodes deja joues, indexes par (graine, variante). Un episode est STRICTEMENT deterministe
+#: — config figee, `reset(seed=…)`, `default_rng(seed)` — donc le rejouer redonne le meme
+#: resultat bit a bit : les six tests qui cherchent leur situation parmi les graines partagent
+#: ici le meme travail au lieu de le refaire chacun (31 episodes joues -> 10).
+#:
+#: `variante` : les episodes joues sous un patch de regles (jet de charge impose) ne sont PAS les
+#: memes que les episodes nus — ils ne doivent jamais se melanger dans ce cache. Chaque contexte
+#: qui change le comportement du moteur porte donc sa propre etiquette.
+#:
+#: Sur du PARTAGE, donc en LECTURE SEULE : aucun test ne mute le moteur ni le `tactical_data`
+#: rendus (ceux qui derivent des valeurs en font une copie, `{**tactical, …}`). Le chemin
+#: `inject`, lui, ecrit dans `action_logs` : il n'est jamais mis en cache.
+_EPISODES: Dict[Tuple[int, str], Tuple[W40KEngine, Dict[str, Any]]] = {}
+
+
+def _cached_play(
+    scenario_file: str, seed: int, variant: str = "",
+) -> Tuple[W40KEngine, Dict[str, Any]]:
+    """`_play` memoise sur (graine, variante). Voir `_EPISODES` pour le contrat de partage."""
+    key = (seed, variant)
+    if key not in _EPISODES:
+        _EPISODES[key] = _play(scenario_file, seed)
+    return _EPISODES[key]
+
+
 def _charge_logs(
     engine: W40KEngine, player: int, types: Tuple[str, ...] = ("charge", "charge_fail"),
 ) -> List[Dict[str, Any]]:
@@ -117,17 +147,19 @@ def test_the_counters_match_the_journal(melee_scenario_file, seed) -> None:
     Des EGALITES uniquement, donc vraies meme sur un episode sans la moindre charge — c'est ce
     qui permet de les faire tourner sur plusieurs graines sans parier sur leur contenu.
     """
-    engine, tactical = _play(melee_scenario_file, seed)
+    engine, tactical = _cached_play(melee_scenario_file, seed)
     _assert_counters_match_journal(engine, tactical)
     # Une reussite est une tentative, des deux cotes : le taux ne peut pas depasser 1.
     assert tactical["charge_successes"] <= tactical["charge_attempts"]
     assert tactical["charge_successes_opponent"] <= tactical["charge_attempts_opponent"]
 
 
-def _episode_with(melee_scenario_file, require, what) -> Tuple[W40KEngine, Dict[str, Any]]:
+def _episode_with(
+    melee_scenario_file, require, what, variant: str = "",
+) -> Tuple[W40KEngine, Dict[str, Any]]:
     tried: List[int] = []
     for seed in _SEEDS:
-        engine, tactical = _play(melee_scenario_file, seed)
+        engine, tactical = _cached_play(melee_scenario_file, seed, variant)
         if require(engine, tactical):
             return engine, tactical
         tried.append(seed)
@@ -164,6 +196,9 @@ def test_a_failed_charge_counts_as_an_attempt_and_not_as_a_success(
             melee_scenario_file,
             lambda _eng, td: td["charge_attempts"] > 0,
             "une charge declaree du camp controle (jet impose a 2, donc ratee)",
+            # Etiquette de cache : ces episodes sont joues sous patch, ils ne valent pas les
+            # episodes nus des autres tests et ne doivent jamais leur etre servis.
+            variant="charge_roll_forced_to_2",
         )
     controlled, _opponent = _seat(engine)
 
