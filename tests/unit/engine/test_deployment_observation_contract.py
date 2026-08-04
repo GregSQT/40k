@@ -449,7 +449,7 @@ def test_measurement_origin_is_the_centroid_once_deployed():
 GEOMETRIC_BIN_FIELDS = ("engaged", "los_can_see", "cover_vs_observer", "charge_reachable_max_roll")
 GEOMETRIC_CONT_FIELDS = (
     "col_rel", "row_rel", "edge_distance",
-    "n_fight_eligible", "n_in_enemy_ez", "n_relayed_ez", "n_models_engaging",
+    "n_fight_eligible", "n_in_enemy_ez", "n_models_engaging",
 )
 
 
@@ -619,8 +619,11 @@ def test_deployed_units_still_report_engagement_after_deployment():
     uid = next(iter(uc))
     active_player = int(uc[uid]["player"])
     obs = eng.obs_builder.build_squad_observation(gs, uid)
+    # Métrique NON épinglée, des deux côtés : c'est tout l'objet du verrou. Ce test figeait
+    # `metric="hex"` pour recopier l'épinglage de l'obs — il validait donc la divergence au lieu
+    # de la détecter (à x5 le moteur résout en euclidien). Laisser la primitive résoudre.
     expected = any(
-        unit_entries_within_engagement_zone(uc[uid], e, ez, metric="hex")
+        unit_entries_within_engagement_zone(uc[uid], e, ez)
         for sid, e in uc.items()
         if int(e["player"]) != active_player
     )
@@ -633,6 +636,11 @@ def test_deployed_units_still_report_engagement_after_deployment():
 def test_squad_obs_size_target_matches_the_schema():
     """Les points 1, 2, 4 et 5 ne changent PAS `obs_size` ; le point 3, lui, l'a changé.
 
+    Il valait 20828 jusqu'au 2026-08-04 : la suppression de la clause « buddy » (04.02 WHILE
+    FIGHTING — seule une figurine ENGAGÉE frappe ; le relais par une alliée au contact venait
+    d'une édition antérieure) emporte les deux champs qui la décrivaient, `ez_relayed_by_ally`
+    (self_models_bin) et `n_relayed_ez` (unit_cont) — d'où 20780.
+
     Ce verrou valait 20768 tant que le point 3 restait ouvert : les quatre autres points ne
     touchent QUE le contenu de l'observation de déploiement, jamais sa taille — donc aucun modèle
     n'était invalidé par eux. Le point 3 ajoute le bloc « candidats de déploiement »
@@ -643,7 +651,7 @@ def test_squad_obs_size_target_matches_the_schema():
         DEPLOY_CAND_BIN_SIZE, DEPLOY_CAND_CONT_SIZE, N_DEPLOY_SLOTS,
     )
 
-    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 20828
+    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 20780
     assert N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE) == 60, (
         "le bloc candidat de déploiement a changé de taille : mettre à jour `obs_size` dans les "
         "5 profils de la config d'agent, et l'historique d'AI_OBSERVATION.md"

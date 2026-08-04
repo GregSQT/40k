@@ -5,7 +5,7 @@ deployment_handlers.py - Deployment Phase Implementation (Test mode)
 Footprint-aware: validates entire unit footprint (multi-hex bases) during deployment.
 """
 
-from typing import Dict, Any, Tuple, List, Optional, Set
+from typing import AbstractSet, Dict, Any, Tuple, List, Optional, Set
 from shared.data_validation import require_key
 from engine.game_utils import get_unit_by_id
 from engine.combat_utils import set_unit_coordinates
@@ -436,7 +436,7 @@ def deployment_build_model_destinations_pool(
         floor_hexes_at_level, floor_polys_at_level, footprint_within_floor,
         low_clearance_ground_hexes,
     )
-    floor_hexes: Set[Tuple[int, int]] = (
+    floor_hexes: AbstractSet[Tuple[int, int]] = (
         floor_hexes_at_level(terrain_areas, level) if level >= 1 else set()
     )
     # Base + polygones du plancher pour le niveau effectif EUCLIDIEN par case (miroir move /

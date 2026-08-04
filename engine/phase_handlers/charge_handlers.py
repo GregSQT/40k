@@ -418,7 +418,6 @@ def _build_charge_anchors_in_zone(
         return []
     target_fp = set(te.get("occupied_hexes") or {(int(te["col"]), int(te["row"]))})
     engagement_zone = int(get_engagement_zone(game_state))
-    vz = get_engagement_zone_vertical(game_state)  # engagement 3D (§03.04) — cible en hauteur
 
     unit_id_str = str(unit["id"])
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
@@ -437,7 +436,7 @@ def _build_charge_anchors_in_zone(
             continue
         # 3a : ancre du chargeur au SOL (level=0) ; le gate vertical ne mord que si la cible est en hauteur.
         synth = _charge_synthetic_charger_cache_entry(game_state, unit, int(ac), int(ar), candidate_fp, level=0)
-        if not unit_entries_within_engagement_zone(synth, te, engagement_zone, vertical_zone_inches=vz):
+        if not unit_entries_within_engagement_zone(synth, te, engagement_zone):
             continue
         if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
             continue
@@ -502,8 +501,7 @@ def _charge_anchor_within_1_of_target(
         game_state, unit, int(anchor_col), int(anchor_row), candidate_fp, level=0
     )
     return unit_entries_within_engagement_zone(
-        synth, te, within_1_zone, vertical_zone_inches=get_engagement_zone_vertical(game_state)
-    )
+        synth, te, within_1_zone)
 
 
 def _charge_pool_must_socle_a_socle_if_possible(
@@ -881,7 +879,6 @@ def _charge_reverse_goal_bfs_for_eligibility(
 
         _t_engagement0 = time.perf_counter() if _perf else None
         synth = _charge_synthetic_charger_cache_entry(game_state, unit, anchor[0], anchor[1], candidate_fp, level=0)
-        _vz = get_engagement_zone_vertical(game_state)  # 3a : ancre au sol, gate vertical vs ennemi en hauteur
         hex_overlaps_enemy = False
         engages_enemy = False
         for eid, enemy_entry in indexed_enemy_engagement:
@@ -904,7 +901,7 @@ def _charge_reverse_goal_bfs_for_eligibility(
                 if not (candidate_fp & enemy_engagement_zone):
                     rejected_engagement_prefilter_n += 1
                     continue
-            if unit_entries_within_engagement_zone(synth, enemy_entry, engagement_zone, vertical_zone_inches=_vz):
+            if unit_entries_within_engagement_zone(synth, enemy_entry, engagement_zone):
                 engages_enemy = True
         if _perf and _t_engagement0 is not None:
             goal_engagement_s += time.perf_counter() - _t_engagement0
@@ -2141,7 +2138,10 @@ def _compute_plan_context(
     _tr = time.perf_counter() if _perf else None
     # Gate vertical de charge (getter pur) — hissé hors des blocs conditionnels : utilisé aussi bien
     # dans la classification (``if can_classify``) que dans la branche étages (``view_level>=1``).
-    _vz = get_engagement_zone_vertical(game_state)
+    # Sans `game_state` : MEME resolution que la primitive `entries_in_engagement_zone`, qui n'a
+    # pas d'etat sous la main. Deux chemins de lecture pour un seul seuil, c'est deux verdicts
+    # possibles sur la meme paire — le defaut deja paye sur `metric` et sur le gate vertical.
+    _vz = get_engagement_zone_vertical()
     if can_classify:
         # Obstacles (autres unités) AU SOL (level 0) pour la classification des ancres sol : une fig
         # ennemie/amie à l'étage ne bloque pas une destination de charge au sol (3b, cross-niveau).
@@ -2211,8 +2211,7 @@ def _compute_plan_context(
             # Chemin euclidien (rond simple ↔ rond simple) : on conserve la fonction partagée (précis, 3D).
             if radius > 1 and synth_shape == "round" and e_shape == "round" and not cand_is_multi and not e_multi:
                 return unit_entries_within_engagement_zone(
-                    synth_base, enemy_entry, radius, vertical_zone_inches=_vz
-                )
+                    synth_base, enemy_entry, radius)
             # Chemin empreinte : intersection horizontale (masque dilaté) ET gate vertical (par-ennemi).
             return vert_reachable and bool(cand_fp & mask)
 
@@ -2330,17 +2329,17 @@ def _compute_plan_context(
                     )
                     # AFTER MOVING : aucun engagement avec un ennemi NON déclaré (3D).
                     if any(
-                        unit_entries_within_engagement_zone(synth, ne, ez, vertical_zone_inches=_vz)
+                        unit_entries_within_engagement_zone(synth, ne, ez)
                         for ne in nontarget_entries
                     ):
                         continue
                     d_min = min((dist_tgt.get(h, INF) for h in cand_fp), default=INF)
                     engaged_f = any(
-                        unit_entries_within_engagement_zone(synth, te, ez, vertical_zone_inches=_vz)
+                        unit_entries_within_engagement_zone(synth, te, ez)
                         for te in target_entries
                     )
                     within1_f = any(
-                        unit_entries_within_engagement_zone(synth, te, within_1_zone, vertical_zone_inches=_vz)
+                        unit_entries_within_engagement_zone(synth, te, within_1_zone)
                         for te in target_entries
                     )
                     reg_f[(cc, rr)] = {"fp": cand_fp, "d_min": d_min, "within_1": within1_f, "engaged": engaged_f}
@@ -2382,7 +2381,6 @@ def _compute_plan_context(
 
     # Satisfaction par cible (voile UI) : une cible-UNITÉ est ENGAGÉE dès qu'≥1 fig POSÉE est à
     # ≤EZ d'elle (03.04, engagement au niveau unité). violet = satisfaite, rouge = pas.
-    vz = get_engagement_zone_vertical(game_state)  # engagement 3D (§03.04) — cible en hauteur
     placed_synths: List[Tuple[str, Dict[str, Any]]] = []
     for _mid, _pp in provisional_plan.items():
         _sib = models_cache.get(str(_mid))
@@ -2403,7 +2401,7 @@ def _compute_plan_context(
         if tentry is None:
             continue
         engaged_t = any(
-            unit_entries_within_engagement_zone(synth, tentry, ez, vertical_zone_inches=vz)
+            unit_entries_within_engagement_zone(synth, tentry, ez)
             for _mid, synth in placed_synths
         )
         (satisfied if engaged_t else unsatisfied).append(tid)
@@ -2411,7 +2409,7 @@ def _compute_plan_context(
     engaged_models = [
         _mid
         for _mid, synth in placed_synths
-        if any(unit_entries_within_engagement_zone(synth, te, ez, vertical_zone_inches=vz) for te in target_entries)
+        if any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries)
     ]
 
     return {
@@ -2449,7 +2447,7 @@ def _charge_pool_clip_under_floor(
     """Retire du pool de charge (sol) les ancres dont le socle de la figurine chevauche l'empreinte de
     l'étage ``view_level``. Rond : euclidien disque↔polygone sur ``floor["polygon_vertices"]`` (aligné
     rendu) ; non-rond : empreinte hex ∩ hexes de l'étage. Miroir exact du clip move (§13.06)."""
-    from engine.terrain_utils import floor_hexes_at_level
+    from engine.terrain_utils import floor_hexes_at_level, floor_polys_at_level
     from engine.hex_utils import (
         _hex_center, round_base_radius_norm, disc_overlaps_polygon, compute_occupied_hexes,
     )
@@ -2458,12 +2456,9 @@ def _charge_pool_clip_under_floor(
     if model is None:
         return pool
     terrain_areas = game_state.get("terrain_areas", [])  # get allowed (board sans terrain)
-    polys = [
-        [_hex_center(int(v[0]), int(v[1])) for v in require_key(floor, "polygon_vertices")]
-        for area in terrain_areas
-        for floor in area.get("floors", [])  # get allowed (aire sans étage)
-        if int(require_key(floor, "level")) == view_level
-    ]
+    # Accesseur mémoïsé (`_FloorIndex`) et non reconstruction locale : le seul appelant garantit
+    # ``view_level >= 1``, et les `_hex_center` des sommets sont alors calculés une fois par terrain.
+    polys = floor_polys_at_level(terrain_areas, view_level)
     if not polys:
         return pool
     shape = require_key(model, "BASE_SHAPE")
@@ -2756,7 +2751,6 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_dis
     from .shared_utils import get_engagement_zone, build_occupied_positions_set
 
     engagement_zone = int(get_engagement_zone(game_state))
-    vz = get_engagement_zone_vertical(game_state)  # engagement 3D (§03.04)
 
     fp_offset_pair = _charge_prepare_footprint_offsets(unit, game_state)
 
@@ -2770,7 +2764,7 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_dis
         if enemy_entry is None:
             raise KeyError(f"Enemy {enemy_id} not in units_cache (dead or absent)")
         # unit_entry / enemy_entry = vraies entrées (données verticales déjà présentes) → 3D direct.
-        if unit_entries_within_engagement_zone(unit_entry, enemy_entry, engagement_zone, vertical_zone_inches=vz):
+        if unit_entries_within_engagement_zone(unit_entry, enemy_entry, engagement_zone):
             continue
         ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
         enemy_fp = enemy_entry.get("occupied_hexes", {(ec, er)})
@@ -2787,7 +2781,7 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_dis
         for enemy_id, enemy_entry, enemy_fp in enemy_index:
             if candidate_fp & enemy_fp:
                 continue
-            if unit_entries_within_engagement_zone(synth, enemy_entry, engagement_zone, vertical_zone_inches=vz):
+            if unit_entries_within_engagement_zone(synth, enemy_entry, engagement_zone):
                 per_enemy_has_geom[enemy_id] = True
                 if not blocked_by_occupation:
                     per_enemy_non_occ[enemy_id] = True
@@ -3332,7 +3326,6 @@ def _charge_unit_within_engagement_zone(game_state: Dict[str, Any], unit: Dict[s
     cc_range = get_engagement_zone(game_state)
     return unit_within_engagement_zone_footprints(
         game_state, unit, engagement_zone=cc_range, max_distance=cc_range,
-        vertical_zone_inches=get_engagement_zone_vertical(game_state),
     )
 
 
@@ -3757,7 +3750,6 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             ):
                 continue
             synth = _charge_synthetic_charger_cache_entry(game_state, unit, nc, nr, candidate_fp, level=0)  # 3a sol
-            _vz = get_engagement_zone_vertical(game_state)
             is_adjacent_to_enemy = False
             hex_overlaps_enemy = False
             _cur_engaging: Optional[Set[str]] = set() if _track_engages else None
@@ -3767,7 +3759,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                 if candidate_fp & enemy_fp:
                     hex_overlaps_enemy = True
                     break
-                if unit_entries_within_engagement_zone(synth, enemy_entry, engagement_zone, vertical_zone_inches=_vz):
+                if unit_entries_within_engagement_zone(synth, enemy_entry, engagement_zone):
                     is_adjacent_to_enemy = True
                     if _cur_engaging is not None:
                         _cur_engaging.add(str(_eid))
@@ -3929,7 +3921,6 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             synth = _charge_synthetic_charger_cache_entry(
                 game_state, unit, neighbor_col_int, neighbor_row_int, candidate_fp, level=0  # 3a sol
             )
-            _vz = get_engagement_zone_vertical(game_state)
             for _eid, enemy_entry in indexed_enemy_engagement:
                 ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
                 enemy_fp = enemy_entry.get("occupied_hexes", {(ec, er)})
@@ -3946,8 +3937,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                         continue
                 bfs_engagement_checks_n += 1
                 if unit_entries_within_engagement_zone(
-                    synth, enemy_entry, engagement_zone, vertical_zone_inches=_vz
-                ):
+                    synth, enemy_entry, engagement_zone):
                     is_adjacent_to_enemy = True
                     if _cur_engaging is not None:
                         _cur_engaging.add(str(_eid))
@@ -4584,8 +4574,7 @@ def _charge_model_pos_is_closer(
         return False
     # 3b : synth au niveau RÉEL de la destination (engagement 3D en montant ; sol = level 0, comme 3a).
     synth = _charge_synthetic_charger_cache_entry(game_state, unit, dest[0], dest[1], cand_fp, level=int(dest_level))
-    _vz = get_engagement_zone_vertical(game_state)
-    if any(unit_entries_within_engagement_zone(synth, ne, ez, vertical_zone_inches=_vz) for ne in nontarget_entries):
+    if any(unit_entries_within_engagement_zone(synth, ne, ez) for ne in nontarget_entries):
         return False
     return True
 
@@ -4664,7 +4653,6 @@ def charge_preview_move_plan(
     # 3) engaged_all : chaque cible déclarée est engagée par au moins une figurine.
     ez = int(get_engagement_zone(game_state))
     units_cache = require_key(game_state, "units_cache")
-    _vz = get_engagement_zone_vertical(game_state)  # engagement 3D (§03.04) — cible en hauteur
     missing: List[str] = []
     for tid in (str(t) for t in target_ids):
         tentry = units_cache.get(tid)
@@ -4675,7 +4663,7 @@ def charge_preview_move_plan(
         for idx, (mid, c, r, lv) in enumerate(norm):
             # 3b : synth au niveau RÉEL de la fig (sol ou étage) → engagement 3D correct en montant.
             synth = _charge_synthetic_charger_cache_entry(game_state, unit, c, r, fps[idx], level=lv)
-            if unit_entries_within_engagement_zone(synth, tentry, ez, vertical_zone_inches=_vz):
+            if unit_entries_within_engagement_zone(synth, tentry, ez):
                 engaged = True
                 break
         if not engaged:
@@ -4880,7 +4868,7 @@ def charge_autoplace_plan(
         # deux étages plus bas n'est pas engagé par une figurine posée en hauteur.
         synth = _synth_model_entry(game_state, squad_id, models_cache[mid], int(c), int(r), level=int(level))
         return any(
-            unit_entries_within_engagement_zone(synth, ne, ez, vertical_zone_inches=get_engagement_zone_vertical(game_state))
+            unit_entries_within_engagement_zone(synth, ne, ez)
             for ne in nontarget_entries
         )
 
@@ -4965,7 +4953,6 @@ def charge_autoplace_plan(
     # (base modèle), source unique partagée avec le halo et la phase fight.
     from engine.spatial_relations import engagement_distance_metric
     _eng_metric = engagement_distance_metric(game_state)
-    _vz_auto = get_engagement_zone_vertical(game_state)  # engagement 3D (§03.04) — branche euclidienne (gameplay)
 
     def _entry_engage_struct(entry: Dict[str, Any], charger_shape: str) -> Tuple[str, Any]:
         # Étape 7.4 : en euclidien, router TOUTES les paires via la primitive (round-round exact +
@@ -4991,7 +4978,7 @@ def charge_autoplace_plan(
                     return True
             return False
         # Branche euclidienne (métrique gameplay) → primitive 3D. synth porte level=0 (3a, candidat au sol).
-        return unit_entries_within_engagement_zone(synth, struct[1], ez, vertical_zone_inches=_vz_auto)
+        return unit_entries_within_engagement_zone(synth, struct[1], ez)
 
     # --- Atteignabilité par fig (BFS centre-à-centre ≤ budget, amies traversables). ---
     starts = {mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"])) for mid in alive}

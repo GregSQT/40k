@@ -43,7 +43,6 @@ SM_ROW = self_model_cont_index("row_rel")
 SM_PRESENT = self_model_bin_index("present")
 SM_FIGHT = self_model_bin_index("fight_eligible")
 SM_IN_EZ = self_model_bin_index("in_enemy_ez")
-SM_RELAYED = self_model_bin_index("ez_relayed_by_ally")
 E_COL = unit_cont_index("col_rel")
 E_ROW = unit_cont_index("row_rel")
 
@@ -162,7 +161,6 @@ def test_model_on_centroid_is_present():
     assert (
         sm_bin[k][SM_FIGHT] == 0.0
         and sm_bin[k][SM_IN_EZ] == 0.0
-        and sm_bin[k][SM_RELAYED] == 0.0
     ), "fixture invalide : cette figurine doit n'avoir AUCUN drapeau (cas pathologique T-H)"
     assert float(sm_cont[k].sum()) == 0.0, "fixture invalide : ses continues doivent etre nulles"
 

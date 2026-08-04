@@ -108,7 +108,7 @@ silencieuse. Un id retiré reste **brûlé**.
 |---|---|---|---|
 | Par entité d'unité | 13 bits | 30 bits | 12 entiers |
 | × 28 entités (8 alliées + 20 ennemies) | 364 | 840 | 336 |
-| Δ `obs_size` (base 20828) | — | +476 | **−28** |
+| Δ `obs_size` (base 20780) | — | +476 | **−28** |
 | Ajouter une faction | retrain | retrain | **rien** |
 
 ## Le gel

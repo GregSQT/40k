@@ -60,7 +60,6 @@ UNIT_CONT_FIELDS: Tuple[str, ...] = (
     "moved_sum",           # … et somme
     "n_fight_eligible",    # ⚠ unité ACTIVE uniquement (masque = is_active)
     "n_in_enemy_ez",       # ⚠ unité ACTIVE uniquement
-    "n_relayed_ez",        # ⚠ unité ACTIVE uniquement
     # ⚠ Entités ENNEMIES uniquement (comme `los_can_see` / `cover_vs_observer`) : c'est une
     # grandeur de PAIRE (mon escouade → cette cible), pas une propriété de la cible.
     #
@@ -223,7 +222,7 @@ SELF_MODEL_CONT_FIELDS: Tuple[str, ...] = ("col_rel", "row_rel")
 #: erreur, dans l'agrégation comme dans le dénominateur de `EntityRunningNorm`. Il est en DERNIÈRE
 #: position, comme les masques des registres d'armes et de types (`[..., -1]`).
 SELF_MODEL_BIN_FIELDS: Tuple[str, ...] = (
-    "fight_eligible", "in_enemy_ez", "ez_relayed_by_ally", "present",
+    "fight_eligible", "in_enemy_ez", "present",
 )
 SELF_MODEL_CONT_SIZE = len(SELF_MODEL_CONT_FIELDS)
 SELF_MODEL_BIN_SIZE = len(SELF_MODEL_BIN_FIELDS)

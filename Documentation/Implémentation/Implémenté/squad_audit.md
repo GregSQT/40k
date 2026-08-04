@@ -370,7 +370,11 @@ Gate : 50 runs × 5 figs × 3 attaques Intercessor → stats W40K 10e cohérente
 
 Gate : 4 squads (2 charged, 2 in ER) → ordre attendu `[P2B-FF, P1A-FF, P2A-R, P1B-R]` avec active=1, et inversé avec active=2. Cas 3-vs-1 dans même step alterne correctement non-active 2× puis active.
 
-### Tranche 3e — ✅ DONE — Pile In + buddy rule
+### Tranche 3e — ✅ DONE — Pile In + eligibilite par figurine
+
+> ⚠️ La « buddy rule » decrite ci-dessous a ete SUPPRIMEE le 2026-08-04 : 04.02 WHILE
+> FIGHTING n'autorise a frapper qu'une figurine ENGAGEE. Cf. squad.md §« Quelles
+> figurines peuvent frapper — 04.02 ».
 - `fight_pile_in_plan(squad_id)` — budget 3" par fig, priorité B2B avec ennemi (obligatoire si possible), sinon plus proche d'un ennemi. Validation finale atomique : coherency + au moins 1 fig en ER.
 - `get_fighting_models(squad_id)` — règle buddy non-transitive : condition (1) fig en ER ennemi, OU (2) fig en B2B avec allié du même squad qui est lui-même en B2B avec ennemi. Rang-3+ exclu.
 

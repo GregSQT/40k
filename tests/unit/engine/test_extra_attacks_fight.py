@@ -65,7 +65,7 @@ def test_sans_extra_attacks_une_seule_arme():
 def test_declaration_produit_un_intent_par_arme(monkeypatch):
     """Cablage : `squad_declare_fight` emet 2 intents pour la figurine, et ATTACK_LEFT cumule
     les attaques des deux armes (sinon la 2e arme ne se resout jamais)."""
-    monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid: ["A1"])
+    monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid, tid=None: ["A1"])
     fig = _fig([_w("Choppa", [], nb=3), _w("Syringe", ["EXTRA_ATTACKS"], nb=1)])
     target = {"id": "T1", "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7}
     gs = {
@@ -89,7 +89,7 @@ def test_declaration_produit_un_intent_par_arme(monkeypatch):
 
 def test_declaration_sans_extra_reste_a_un_intent(monkeypatch):
     """Contre-epreuve du cablage : une figurine sans arme EXTRA declare une seule arme."""
-    monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid: ["A1"])
+    monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid, tid=None: ["A1"])
     fig = _fig([_w("Choppa", [], nb=3)])
     gs = {
         "models_cache": {"A1": fig, "T1": {"id": "T1", "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7}},

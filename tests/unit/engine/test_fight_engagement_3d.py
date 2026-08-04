@@ -66,6 +66,12 @@ def _make_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "squad_min_neighbors": 1,
                 "cohesion_distance_mode": "euclidean",
             },
+            # Toggles de traversée 03.01 (valeurs réelles) : le pile-in borne chaque figurine
+            # par son TRAJET (12.03 EFFECT « moves as described in Moving (03) »), il les lit
+            # donc au même endroit que le move. Requis dès qu'une figurine est MOBILE.
+            "move": {"can_move_through_enemy_engagement_zone": True,
+                     "can_move_through_enemy_model": False,
+                     "can_move_through_friendly_model": True},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },
         "board_cols": 60, "board_rows": 60,
@@ -378,11 +384,116 @@ def test_base_contact_does_not_reach_through_a_floor():
         return gs
 
     flat = _touching(attacker_level=0)
-    assert fh._fight_model_in_base_contact(flat, flat["models_cache"]["2#0"]), (
+    assert fh._fight_model_in_base_contact(flat, "2#0", flat["models_cache"]["2#0"]), (
         "prémisse : au sol des deux côtés, ces deux socles DOIVENT être au contact"
     )
 
     upstairs = _touching(attacker_level=1)
-    assert not fh._fight_model_in_base_contact(upstairs, upstairs["models_cache"]["2#0"]), (
+    assert not fh._fight_model_in_base_contact(upstairs, "2#0", upstairs["models_cache"]["2#0"]), (
         "la figurine au sol est déclarée au contact d'un ennemi situé un étage au-dessus"
+    )
+
+
+def test_base_contact_reads_the_subjects_own_floor():
+    """Le SUJET aussi a une altitude — elle était lue dans deux clés inexistantes.
+
+    Complément indispensable de `test_base_contact_does_not_reach_through_a_floor`, qui ne teste
+    que des sujets AU SOL : là, une hauteur de sujet erronée à 0,0 est juste par accident. Ici le
+    sujet est À L'ÉTAGE, au contact d'un ennemi du MÊME étage.
+
+    L'ancienne implémentation lisait `model_entry["floor_height"]` (clé qui n'existe nulle part)
+    puis `floor_height_by_model[model_entry["id"]]` (une entrée `models_cache` porte `squad_id`,
+    pas `id`) : le sujet était donc TOUJOURS mesuré à 0,0. Deux figurines côte à côte à 10" de
+    haut ressortaient séparées de 7,5" — au-delà des 5" de §03.04 — donc « pas au contact », et
+    12.03 ne les figeait plus alors qu'elles se touchent.
+    """
+    def _touching_at(level: int) -> Dict[str, Any]:
+        gs = _make_gs([
+            _unit("1", 1, [(20, 20, level)]),
+            _unit("2", 2, [(21, 20, level)]),
+        ])
+        for entry in list(gs["models_cache"].values()) + list(gs["units_cache"].values()):
+            entry["BASE_SIZE"] = 3
+        return gs
+
+    upstairs = _touching_at(level=1)
+    # Prémisse CONSTRUITE, pas espérée : les deux figurines sont réellement en hauteur.
+    floors = upstairs["units_cache"]["2"]["floor_height_by_model"]
+    assert floors["2#0"] == pytest.approx(FLOOR_HEIGHT), (
+        f"prémisse : le sujet doit être à {FLOOR_HEIGHT}\", obtenu {floors}"
+    )
+    assert upstairs["units_cache"]["1"]["floor_height_by_model"]["1#0"] == pytest.approx(
+        FLOOR_HEIGHT
+    ), "prémisse : l'ennemi doit être au MÊME étage"
+
+    assert fh._fight_model_in_base_contact(upstairs, "2#0", upstairs["models_cache"]["2#0"]), (
+        "deux figurines au contact sur le MÊME étage doivent être en base-contact — le sujet "
+        "était mesuré à 0,0 quel que soit son plancher"
+    )
+
+    # Contre-épreuve : au sol, même géométrie, même verdict. Le correctif ne rend pas tout vrai.
+    ground = _touching_at(level=0)
+    assert fh._fight_model_in_base_contact(ground, "2#0", ground["models_cache"]["2#0"])
+
+
+def test_the_gym_pile_in_uses_the_shared_base_contact_predicate():
+    """12.03 WHILE MOVING : « Models in base-contact [...] cannot be moved » — des DEUX côtés.
+
+    Le pile-in du gym (`_assign_cells_toward_enemies`, appelé par `fight_pile_in_plan` et
+    `squad_consolidate_plan`) gardait sa propre géométrie du contact : distance de CENTRE à centre
+    en cases (`== BASE_TO_BASE_SUBHEX`, 1 case) là où le PvP mesure BORD à bord. Deux socles au
+    contact ont leurs centres à 3 cases (BASE_SIZE 3) ou 6 (BASE_SIZE 6) — `== 1` était donc
+    IMPOSSIBLE dès qu'un socle dépasse une case, et la règle ne s'appliquait JAMAIS côté gym
+    pendant que le PvP figeait bien la figurine.
+
+    ⚠️ CE QUI EST VÉRIFIÉ, ET POURQUOI. La position finale ne discrimine PAS : une figurine au
+    contact n'a de toute façon aucune case « strictement plus proche » qui soit légale (elle
+    chevaucherait l'ennemi), donc elle reste sur place avec l'ancienne géométrie comme avec la
+    nouvelle — un test sur sa position serait un vert vacant. Ce qui distingue les deux versions,
+    c'est le CÂBLAGE : le plan doit suivre le prédicat partagé. On le force donc dans les deux
+    sens et on vérifie que le plan change avec lui — impossible à satisfaire pour une
+    implémentation qui garderait sa propre géométrie.
+    """
+    from unittest.mock import patch
+    from engine.phase_handlers import shared_utils as su
+
+    gs = _make_gs([_unit("1", 1, [(20, 20, 0), (14, 20, 0)]), _unit("2", 2, [(26, 20, 0)])])
+    for entry in list(gs["models_cache"].values()) + list(gs["units_cache"].values()):
+        entry["BASE_SIZE"] = 6
+    mids = [m for m in gs["squad_models"]["1"] if m in gs["models_cache"]]
+    origins = {m: (int(gs["models_cache"][m]["col"]), int(gs["models_cache"][m]["row"]))
+               for m in mids}
+    enemy_positions = []
+    for esid in su._enemy_squad_ids(gs, 1):
+        enemy_positions.extend(su._squad_model_positions(gs, esid))
+    budget = 3 * int(gs["inches_to_subhex"])
+
+    # Prémisse CONSTRUITE : les socles de 1#0 et de l'ennemi se touchent réellement, et leurs
+    # CENTRES sont hors de l'ancien test `== 1` — sans quoi les deux géométries coïncideraient.
+    from engine.hex_utils import euclidean_edge_clearance_round_round
+    from engine.combat_utils import calculate_hex_distance
+
+    assert euclidean_edge_clearance_round_round(20, 20, 6, 26, 20, 6) <= 0.0, (
+        "prémisse : les socles doivent se toucher bord à bord"
+    )
+    assert calculate_hex_distance(20, 20, 26, 20) != su.BASE_TO_BASE_SUBHEX, (
+        "prémisse : les centres doivent être hors de l'ancien test `== 1`"
+    )
+    assert su.model_in_base_contact(gs, mids[0], gs["models_cache"][mids[0]]), (
+        "prémisse : le prédicat partagé doit voir le contact"
+    )
+
+    # Contre-épreuve : sans contact déclaré, la figurine arrière BOUGE — le plan n'est pas figé
+    # par autre chose que le prédicat.
+    with patch.object(su, "model_in_base_contact", lambda _gs, _mid, _m: False):
+        libre = su._assign_cells_toward_enemies(gs, "1", mids, enemy_positions, budget)
+    assert any(libre[m] != origins[m] for m in mids), (
+        "prémisse : sans contact, au moins une figurine doit se déplacer"
+    )
+
+    # Contact déclaré pour TOUTES : le plan doit les laisser toutes sur place.
+    with patch.object(su, "model_in_base_contact", lambda _gs, _mid, _m: True):
+        figees = su._assign_cells_toward_enemies(gs, "1", mids, enemy_positions, budget)
+    assert all(figees[m] == origins[m] for m in mids), (
+        f"12.03 : le plan doit suivre le prédicat partagé, obtenu {figees} pour {origins}"
     )

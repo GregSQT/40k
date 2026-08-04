@@ -40,15 +40,92 @@ def get_engagement_zone_from_config(config: Dict[str, Any]) -> int:
     return int(require_key(game_rules, "engagement_zone"))
 
 
-def get_engagement_zone_vertical(game_state: Dict[str, Any]) -> float:
-    """Seuil vertical d'engagement 3D en POUCES (règle 03.04 = 5" vertical).
+def get_engagement_zone_vertical(game_state: Optional[Dict[str, Any]] = None) -> float:
+    """Seuil vertical d'engagement 3D en POUCES (règle 03.04 = 5" vertical) — sélecteur UNIQUE.
 
     Contrairement à ``engagement_zone`` (horizontal, scalé ×inches_to_subhex au chargement),
     ce seuil reste en pouces : il se compare aux ``height_inches`` des étages (mêmes unités),
-    donc NON scalé (absent de la liste de conversion de w40k_core). Aucun défaut caché."""
-    config = require_key(game_state, "config")
-    game_rules = require_key(config, "game_rules")
+    donc NON scalé (absent de la liste de conversion de w40k_core). Aucun défaut caché.
+
+    ``game_state`` OPTIONNEL, exactement comme ``engagement_distance_metric`` : sans état, la
+    valeur est relue du config-loader global. C'est ce qui permet à la primitive
+    ``entries_in_engagement_zone`` de résoudre elle-même le seuil au lieu de le faire plomber par
+    ses ~60 call-sites — un seul oubli y laissait un contrôle en 2D, en silence, sur un jeu qui
+    résout en 3D.
+
+    ``game_state`` FOURNI → l'état fait foi, et son ``config`` est EXIGÉ : un état sans
+    ``config`` est malformé, pas un cas à replier sur le disque. C'est la même exigence que
+    ``get_engagement_zone`` pour le volet horizontal, et elle compte doublement ici :
+    ``w40k_core._run_rules_for_step_log`` journalise la valeur de l'ÉTAT dans l'entête
+    ``Run rules:``, sur laquelle l'analyzer épingle son seuil. Laisser l'état muet retomber sur le
+    disque ferait mesurer au moteur une règle que l'audit ne verrait pas.
+    """
+    if game_state is not None:
+        game_rules = require_key(require_key(game_state, "config"), "game_rules")
+        return float(require_key(game_rules, "engagement_zone_vertical"))
+    from config_loader import get_config_loader
+
+    game_rules = require_key(get_config_loader().get_game_config(), "game_rules")
     return float(require_key(game_rules, "engagement_zone_vertical"))
+
+
+#: Clés que doit porter une entrée-cache pour être mesurable en 3D (§03.04). Propriétaire UNIQUE
+#: de cette liste : ``_vertical_classes`` la consomme, et tout consommateur qui la recopiait
+#: (l'analyzer n'en testait qu'une sur trois) restait d'accord avec elle par chance.
+_VERTICAL_ENTRY_KEYS = ("occupied_hexes_by_model", "floor_height_by_model", "MODEL_HEIGHT")
+
+
+def entry_has_vertical_data(entry: Dict[str, Any]) -> bool:
+    """L'entrée-cache porte-t-elle de quoi mesurer l'engagement VERTICAL (§03.04) ?
+
+    Les trois clés sont écrites ENSEMBLE par les deux écrivains du cache
+    (``build_units_cache``, ``_recompute_squad_occupied_hexes``) : une vraie unité les a toujours.
+    Les entrées SYNTHÉTIQUES (candidats de pool construits sans niveau) ne les ont pas — elles
+    restent alors mesurées à plat, ce qui est le verdict correct en l'absence de donnée, jamais
+    une altitude supposée.
+
+    ABSENTE vs PRÉSENTE-ET-VIDE, ce n'est pas la même chose et ça ne se traite pas pareil :
+    - clé ABSENTE → l'entrée n'a pas de couche par-figurine (cas des synthétiques construites
+      sans niveau : ``_synth_model_entry`` / ``_charge_synthetic_charger_cache_entry`` laissent
+      alors la clé de côté). Mesure à plat, verdict correct en l'absence de donnée ;
+    - carte PRÉSENTE ET VIDE → une escouade sans aucune figurine, encore dans ``units_cache``.
+      C'est une contradiction avec l'invariant du cache — « Dead = absent from cache (single
+      source of truth) », cf. ``remove_from_units_cache`` — donc un état corrompu.
+      ``_require_measurable_entry`` lève dessus : une escouade morte ne se mesure pas, ni en 3D
+      (aucune classe verticale → « non engagé » muet) ni en 2D (repli sur l'ancre → une unité
+      détruite redeviendrait engageable).
+
+    ``MODEL_HEIGHT`` est testé sur la PRÉSENCE — une hauteur de 0.0 est une valeur légitime, pas
+    une absence.
+    """
+    entry_height = entry.get("MODEL_HEIGHT")  # get allowed (le test EST l'absence)
+    return (
+        bool(entry.get("occupied_hexes_by_model"))  # get allowed (idem)
+        and bool(entry.get("floor_height_by_model"))  # get allowed (idem)
+        and entry_height is not None
+    )
+
+
+def _require_measurable_entry(entry: Dict[str, Any]) -> None:
+    """Lève si l'entrée-cache décrit une escouade SANS figurine (état corrompu).
+
+    ``units_cache`` porte un invariant : une escouade détruite en est RETIRÉE
+    (``remove_from_units_cache`` : « Dead = absent from cache »). Une entrée qui y reste avec une
+    carte par-figurine vide viole cet invariant, et il n'existe aucune mesure juste à lui
+    appliquer — la mesurer à son ancre ferait engager une unité détruite, la mesurer en 3D
+    rendrait « non engagé » sans rien regarder. Les deux sont des verdicts inventés.
+
+    La clé ABSENTE, elle, est légitime (entrée synthétique sans couche par-figurine) : seule la
+    présence d'une carte VIDE est le signal de corruption.
+    """
+    for key in ("occupied_hexes_by_model", "floor_height_by_model"):
+        value = entry.get(key)  # get allowed (l'absence est le cas LÉGITIME, cf. docstring)
+        if value is not None and not value:
+            raise ValueError(
+                f"units_cache: entrée {entry.get('id', '?')!r} avec `{key}` VIDE — escouade sans "  # get allowed
+                "figurine encore présente dans le cache. L'invariant est « détruite = absente du "
+                "cache » (remove_from_units_cache) : une escouade morte ne se mesure pas."
+            )
 
 
 def _cache_entry_footprint(cache_entry: Dict[str, Any]) -> Set[Tuple[int, int]]:
@@ -172,19 +249,41 @@ def entries_in_engagement_zone(
 
     Conversion ×1,5 confinée à ``engagement_minimum_clearance_norm``, jamais dispersée.
 
-    ``vertical_zone_inches`` (défaut ``None``) — engagement 3D (règle 03.04 = 2" horiz ET 5" vert,
-    stage.md chantier 4) :
-    - ``None`` → chemin 2D historique **inchangé** (agrégat), byte-identique. Les call-sites qui ne
-      passent rien restent 2D → zéro régression.
-    - valeur (pouces) → gate vertical **par paire de figurines** (§03.04 est par-modèle) : ∃ (fig_a,
-      fig_b) dont les intervalles verticaux ``[plancher, plancher+MODEL_HEIGHT]`` sont séparés de
-      ``≤ vertical_zone_inches`` (§01.04 « partie la plus proche », pas plancher-à-plancher) ET dont
-      la distance horizontale ≤ seuil. Métrique **euclidean uniquement** (gameplay ; ``model_centers``
-      déjà par-fig). Tout au sol des deux côtés → une seule classe verticale → résultat identique au 2D.
+    ENGAGEMENT 3D (règle 03.04 = 2" horizontal ET 5" vertical, stage.md chantier 4). Le gate
+    vertical est piloté par la DONNÉE, pas par l'opt-in de l'appelant :
+    - les deux entrées portent leurs cartes verticales (``entry_has_vertical_data``) → gate
+      appliqué, **par paire de figurines** (§03.04 est par-modèle) : ∃ (fig_a, fig_b) dont les
+      intervalles ``[plancher, plancher+MODEL_HEIGHT]`` sont séparés de ``≤ seuil`` (§01.04
+      « partie la plus proche », pas plancher-à-plancher) ET dont la distance horizontale ≤ seuil
+      horizontal ;
+    - sinon → chemin 2D (agrégat). Donnée absente = verdict horizontal, jamais une altitude
+      supposée.
+
+    POURQUOI PAR LA DONNÉE ET NON PAR L'APPELANT. Le gate a d'abord été plombé à la main sur ~49
+    call-sites via ``vertical_zone_inches=``. Il en restait **17 en 2D**, dont deux jumeaux directs
+    de sites traités (``generic_handlers._is_adjacent_to_enemy_for_fight`` vs
+    ``fight_handlers._is_adjacent_to_enemy_within_cc_range`` ; ``shared_utils.squad_is_engaged`` vs
+    ``fight_handlers._fight_v11_engaged_now``) et les sept tests d'engagement de 10.05/10.06 — une
+    escouade pouvait donc être *engagée* pour l'interdiction de tir et *non engagée* pour le
+    combat, sur la même paire. Un oubli d'opt-in ne lève pas : il rend un verdict faux. C'est
+    exactement le raisonnement déjà tenu pour ``metric`` (résolue par la primitive, cf.
+    ``engagement_distance_metric``), appliqué à l'autre moitié de la règle.
+
+    ``vertical_zone_inches`` ne survit donc que comme ÉPINGLAGE, même rôle que ``metric`` explicite :
+    ``None`` → seuil résolu par ``get_engagement_zone_vertical()`` (config-loader) ; valeur → seuil
+    imposé. L'analyzer en a besoin — il lit le sien dans l'entête ``Run rules:`` du journal analysé,
+    pas dans le config du jour.
     """
-    if vertical_zone_inches is not None:
+    _require_measurable_entry(first_entry)
+    _require_measurable_entry(second_entry)
+    if entry_has_vertical_data(first_entry) and entry_has_vertical_data(second_entry):
+        threshold = (
+            get_engagement_zone_vertical()
+            if vertical_zone_inches is None
+            else float(vertical_zone_inches)
+        )
         return _entries_in_engagement_zone_3d(
-            first_entry, second_entry, engagement_zone, float(vertical_zone_inches), metric
+            first_entry, second_entry, engagement_zone, threshold, metric
         )
     if metric == "hex":
         first_fp = _cache_entry_footprint(first_entry)
@@ -209,18 +308,38 @@ def _vertical_classes(
     (centres) + ``floor_height_by_model`` (plancher par fig, chantier 4 étape 1) + ``MODEL_HEIGHT``
     (borne haute). Aucune de ces clés absente n'est tolérée en mode 3D : erreur explicite (câblage
     incomplet), pas de repli silencieux (CLAUDE.md)."""
-    by_model = entry.get("occupied_hexes_by_model")
-    floor_h = entry.get("floor_height_by_model")
-    if not by_model or floor_h is None or "MODEL_HEIGHT" not in entry:
+    if not entry_has_vertical_data(entry):
         raise ValueError(
             "engagement 3D demandé mais entrée-cache sans données verticales "
-            "(occupied_hexes_by_model / floor_height_by_model / MODEL_HEIGHT) — câblage incomplet"
+            f"({' / '.join(_VERTICAL_ENTRY_KEYS)}) — câblage incomplet"
         )
+    by_model = entry["occupied_hexes_by_model"]
+    floor_h = entry["floor_height_by_model"]
     classes: Dict[float, List[Tuple[int, int]]] = {}
     for mid, (col, row) in by_model.items():
         h = float(require_key(floor_h, mid))
         classes.setdefault(h, []).append((int(col), int(row)))
     return classes, float(entry["MODEL_HEIGHT"])
+
+
+def vertical_intervals_within(
+    floor_a: float, height_a: float, floor_b: float, height_b: float,
+    vertical_zone_inches: float,
+) -> bool:
+    """Deux figurines sont-elles à portée VERTICALE l'une de l'autre (§03.04 : 5") ?
+
+    Chaque figurine occupe la tranche ``[plancher, plancher + MODEL_HEIGHT]`` ; on mesure la
+    séparation des deux tranches (§01.04 « partie la plus proche », pas plancher-à-plancher) et
+    on la compare au seuil. Tranches qui se recouvrent → séparation nulle → à portée.
+
+    SOURCE UNIQUE de cette formule. Elle a existé en quatre exemplaires, dont deux hors de ce
+    module : le jour où la règle verticale bouge — mesure depuis le sommet du socle, MODEL_HEIGHT
+    par figurine plutôt que par unité, tolérance — les copies restent silencieusement sur
+    l'ancienne définition. C'est le motif JUMEAU, appliqué à quatre lignes identiques.
+    """
+    return max(
+        0.0, max(floor_a, floor_b) - min(floor_a + height_a, floor_b + height_b)
+    ) <= vertical_zone_inches
 
 
 def entry_vertically_reachable(
@@ -239,10 +358,10 @@ def entry_vertically_reachable(
     couplage horizontal/vertical par-figurine n'est pas exact (union horizontale + gate vertical global),
     mais conservateur et bien plus correct que le 2D pur (rejette un ennemi hors des 5" verticaux)."""
     classes, entry_height = _vertical_classes(entry)
-    lo_c, hi_c = cand_floor_inches, cand_floor_inches + cand_model_height
     for floor_e in classes:
-        lo_e, hi_e = floor_e, floor_e + entry_height
-        if max(0.0, max(lo_c, lo_e) - min(hi_c, hi_e)) <= vertical_zone_inches:
+        if vertical_intervals_within(
+            cand_floor_inches, cand_model_height, floor_e, entry_height, vertical_zone_inches
+        ):
             return True
     return False
 
@@ -299,11 +418,10 @@ def _entries_in_engagement_zone_3d(
     )
 
     for floor_a, centers_a in a_classes.items():
-        lo_a, hi_a = floor_a, floor_a + a_height
         for floor_b, centers_b in b_classes.items():
-            lo_b, hi_b = floor_b, floor_b + b_height
-            vertical_gap = max(0.0, max(lo_a, lo_b) - min(hi_a, hi_b))
-            if vertical_gap > vertical_zone_inches:
+            if not vertical_intervals_within(
+                floor_a, a_height, floor_b, b_height, vertical_zone_inches
+            ):
                 continue
             if hex_metric:
                 if min_distance_between_sets(
@@ -330,10 +448,16 @@ def unit_entries_within_engagement_zone(
 
     Primitive canonique EZ (règle 03.04, bord-à-bord). ``metric`` :
     - ``None`` (défaut) → résolue via ``engagement_distance_metric`` (config-loader global) : tous
-      les call-sites GAMEPLAY basculent automatiquement à la config 7.6, sans changement de signature.
-    - explicite (``"hex"``) → épinglé, pour les call-sites qui doivent rester hex indépendamment de
-      la config (observations/récompenses IA, §10 — retrain hors périmètre migration).
-    Config ``engagement:"hex"`` (défaut actuel) → comportement byte-identique à l'historique.
+      les call-sites basculent automatiquement à la config, sans changement de signature.
+    - explicite → épinglage, réservé aux TESTS qui construisent une situation dans une métrique
+      donnée. Plus AUCUN call-site de production n'épingle (2026-08-04).
+
+    L'observation IA a épinglé ``"hex"`` jusqu'au 2026-08-04 (``observation_builder``, drapeaux
+    ``engaged`` et ``in_enemy_ez``). Sans effet à x1 — ``geometry_is_hex`` y impose hex de toute
+    façon — mais à x5 l'agent lisait un verdict hex pendant que la résolution du MÊME step
+    mesurait en euclidien : 61 divergences sur 2501 positions balayées autour d'une escouade
+    ennemie. Un épinglage de métrique dans une feature d'observation est la version « obs » de la
+    divergence masque/exécution ; il n'en reste aucun.
     """
     if metric is None:
         metric = engagement_distance_metric()

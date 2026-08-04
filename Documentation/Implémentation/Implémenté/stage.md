@@ -780,8 +780,29 @@ le modèle + LoS 3D est le vrai chantier.
       proche→engagé/loin→non, dégénérescence sol=2D, erreur hex+vertical ; 73 échecs de suites **pré-existants**,
       `level` manquant sur vieux stubs, hors diff). Détail conception ci-dessous.
 
-   2bis. **Détail conception — paramètre `vertical_zone_inches` (défaut `None`).**
-      `entries_in_engagement_zone(first, second, engagement_zone, metric, vertical_zone_inches=None)` :
+   2bis. **Détail conception — ⚠️ RÉVISÉ le 2026-08-04 : le gate est PILOTÉ PAR LA DONNÉE, plus par
+      l'opt-in de l'appelant.**
+
+      **Ce qui suit décrit la conception d'origine, conservée pour mémoire — elle n'est plus le
+      code.** `vertical_zone_inches` était un opt-in : `None` → 2D, valeur → 3D. Résultat mesuré :
+      sur ~49 call-sites plombés à la main, **17 étaient restés en 2D**, dont deux jumeaux directs
+      de sites traités (`generic_handlers._is_adjacent_to_enemy_for_fight` vs son homologue de
+      `fight_handlers` ; `shared_utils._squad_is_in_enemy_er` vs `_fight_v11_engaged_now`) et les
+      sept tests d'engagement de 10.05/10.06 — une escouade pouvait donc être *engagée* pour
+      l'interdiction de tir et *non engagée* pour le combat, sur la même paire au même instant. Un
+      opt-in oublié ne lève pas : il rend un verdict faux.
+
+      **Conception actuelle** : `entries_in_engagement_zone` applique le gate dès que **les deux
+      entrées portent leurs cartes verticales** (`entry_has_vertical_data` : `occupied_hexes_by_model`
+      + `floor_height_by_model` + `MODEL_HEIGHT`, les deux cartes NON VIDES). Donnée absente →
+      verdict horizontal, jamais une altitude supposée ; carte présente mais VIDE → escouade morte
+      restée dans le cache, `_require_measurable_entry` lève (l'invariant est « détruite = absente
+      du cache »). `vertical_zone_inches` ne survit que comme **épinglage**, même rôle que
+      `metric="hex"` : `None` → seuil résolu par `get_engagement_zone_vertical()`, valeur → seuil
+      imposé (l'analyzer en a besoin, il lit le sien dans l'entête `Run rules:` du journal analysé).
+      Le gate s'applique aux **deux** métriques, hex comprise.
+
+      Conception d'origine, pour mémoire :
       - `None` → **chemin actuel exact** (agrégat union / socle multi-centres), **byte-identique**. Les ~80
         call-sites qui ne passent rien restent 2D → **zéro régression**.
       - non-`None` → mode **3D par-paire de figurines** (fidèle à §03.04, qui est par-fig) :
@@ -791,13 +812,20 @@ le modèle + LoS 3D est le vrai chantier.
         les paires en amont** ; le test horizontal reste **inchangé** (réutilise `euclidean_edge_distance` sur
         les centres du `Socle`). Court-circuit : si un côté n'a pas `floor_height_by_model` ou si tout est au
         sol des deux côtés → **une seule classe** → équivalent exact au test agrégé 2D actuel.
-      - **Cible = métrique `euclidean` uniquement** (gameplay ; `model_centers` déjà par-fig). `hex` reste 2D
-        (RL/obs mono-niveau, jamais concerné) → pas de reconstruction d'empreinte hex par-fig, pas de coût RL.
+      - ~~**Cible = métrique `euclidean` uniquement**~~ **[PÉRIMÉ]** — le gate vertical est INDÉPENDANT de la
+        métrique horizontale (§03.04 : 2" horizontal ET 5" vertical). La restriction à `euclidean` était vraie
+        de l'implémentation, pas de la règle, et à x1 (géométrie hex) l'éligibilité de charge tombait dessus.
+        `_entries_in_engagement_zone_3d` traite désormais les deux métriques.
       - **Perf** : les préfiltres hex-distance existants des call-sites (ex. charge `:788`, `:3563`) sont
         conservés ; le gate vertical est un check scalaire O(1) par paire, Na×Nb petits (figs/unité).
       - Propagation additive du paramètre dans les 3 wrappers (défaut `None` partout).
 
-   3. **Migration des call-sites (incrémentale, primitive déjà centralisée).** Seuls les call-sites qui
+   3. ~~**Migration des call-sites (incrémentale).**~~ **[SANS OBJET depuis le 2026-08-04]** — il n'y a plus
+      de migration à faire : la primitive décide seule (cf. 2bis), donc aucun call-site ne peut rester 2D par
+      oubli. Le texte ci-dessous décrit la migration incrémentale telle qu'elle a été menée, et l'audit des
+      call-sites de `charge_handlers` qui l'a accompagnée — conservés pour l'historique.
+
+      Texte d'origine : seuls les call-sites qui
       doivent devenir 3D passent `vertical_zone_inches=5"` : **engagement/charge d'abord**. Les autres
       (shooting cover, coherency, fight adjacency…) restent `None` → inchangés, migrés quand une fig y sera
       réellement multi-niveaux. La source unique existe déjà : pas de re-centralisation ultérieure.
@@ -1597,7 +1625,7 @@ est le miroir strict de `_charge_vertical_zone`. Il est câblé sur **tous** les
   (mouvement horizontal → étage courant de chaque figurine).
 - **Chemin squad (gym / bots)** — `get_fighting_models`, `fight_pile_in_plan`, `squad_consolidate_plan`
   ([shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)).
-- **Observation RL** — `engaged_squads`, `in_enemy_ez` par-figurine, relais buddy, `n_models_engaging`
+- **Observation RL** — `engaged_squads`, `in_enemy_ez` par-figurine, `n_models_engaging`
   ([observation_builder.py](file:///home/greg/40k/engine/observation_builder.py)).
 
 **Décision : 3D partout, pas seulement le gameplay.** Laisser l'observation et les masques en 2D pendant

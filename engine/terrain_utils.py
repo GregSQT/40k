@@ -11,7 +11,8 @@ Membership is answered by testing hex appartenance against the precomputed
 ``hexes`` sets — same odd-q projection as objectives and the frontend renderer,
 so a unit "within a terrain area" matches exactly what the player sees on board.
 """
-from typing import Any, Dict, List, Optional, Set, Tuple
+import threading
+from typing import AbstractSet, Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from shared.data_validation import require_key
 
@@ -73,32 +74,175 @@ def hexes_in_obscuring_terrain(
     return False
 
 
-def floor_levels_present(terrain_areas: List[Dict[str, Any]]) -> List[int]:
+class _FloorIndex:
+    """Vue dérivée des étages d'un terrain — construite UNE fois, relue partout.
+
+    Les quatre accesseurs d'étage (``floor_levels_present``, ``floor_hexes_at_level``,
+    ``floor_polys_at_level``, ``floor_height_at``) reconstruisaient chacun leur réponse en
+    reparcourant TOUT ``terrain_areas`` à chaque appel : un `set` de tous les hexes de plancher,
+    une liste de polygones avec un ``_hex_center`` par sommet, un `set` de plus pour la hauteur.
+    C'est O(hexes de plancher + sommets) **par appel**.
+
+    Ça ne se voyait pas tant que ces fonctions servaient au commit d'un mouvement. Depuis que la
+    charge, le pile-in et la consolidation résolvent un niveau PAR CELLULE CANDIDATE
+    (``resolve_model_floor_level`` dans les boucles de pool), c'est 10²–10³ reconstructions du
+    même index par construction de pool, pour un terrain qui n'a pas bougé.
+    """
+
+    __slots__ = (
+        "levels", "hexes_by_level", "height_by_cell", "_low_clearance",
+        "_raw_floors_by_level", "_polys_by_level",
+    )
+
+
+    def __init__(self, terrain_areas: List[Dict[str, Any]]) -> None:
+        _hexes: Dict[int, Set[Tuple[int, int]]] = {}
+        # Polygones : construits À LA DEMANDE, jamais à l'indexation. ``polygon_vertices`` ne sert
+        # qu'au confinement euclidien des socles RONDS (13.06) ; l'exiger ici ferait échouer
+        # `floor_levels_present` / `floor_hexes_at_level` / `floor_height_at` /
+        # `low_clearance_ground_hexes` sur un terrain sans cette clé, qu'aucune d'elles ne lisait.
+        self._raw_floors_by_level: Dict[int, List[Dict[str, Any]]] = {}
+        self._polys_by_level: Dict[int, List[List[Tuple[float, float]]]] = {}
+        # (level, cell) -> height_inches. PAR POSITION et non par niveau : deux ruines peuvent
+        # porter un étage au même `level` à des `height_inches` différents (stage.md §4.1).
+        self.height_by_cell: Dict[Tuple[int, int, int], float] = {}
+        # (height_inches du plancher) -> hexes, pour `low_clearance_ground_hexes` qui compare un
+        # seuil variable (la taille du modèle) à une donnée fixe.
+        self._low_clearance: List[Tuple[float, Set[Tuple[int, int]]]] = []
+        for area in terrain_areas:
+            for floor in area.get("floors", []):  # get allowed (aire sans étage = sol seul)
+                level = int(require_key(floor, "level"))
+                cells = {(int(h[0]), int(h[1])) for h in require_key(floor, "hexes")}
+                height = float(require_key(floor, "height_inches"))
+                _hexes.setdefault(level, set()).update(cells)
+                self._raw_floors_by_level.setdefault(level, []).append(floor)
+                for cell in cells:
+                    ckey = (level, cell[0], cell[1])
+                    # Deux planchers qui se recouvrent au MÊME niveau avec des hauteurs
+                    # DIFFÉRENTES : la case n'a pas de hauteur définie. La boucle d'origine
+                    # rendait le premier trouvé, l'index le dernier écrit — deux arbitraires. Un
+                    # état incohérent se signale, il ne s'arbitre pas (CLAUDE.md, pas de masquage).
+                    previous = self.height_by_cell.get(ckey)  # get allowed (case pas encore vue)
+                    if previous is not None and previous != height:
+                        raise ValueError(
+                            f"_FloorIndex: cell ({cell[0]}, {cell[1]}) is covered twice at level "
+                            f"{level} with conflicting height_inches ({previous} vs {height})"
+                        )
+                    self.height_by_cell[ckey] = height
+                self._low_clearance.append((height, cells))
+        # FROZEN : ces sets sont partages par tous les appelants du terrain. Les figer rend
+        # impossible qu'un consommateur mute l'index sous les autres.
+        self.hexes_by_level: Dict[int, FrozenSet[Tuple[int, int]]] = {
+            lv: frozenset(cells) for lv, cells in _hexes.items()
+        }
+        # TUPLE : rendu tel quel par `floor_levels_present`, donc immuable plutôt que recopié à
+        # chaque appel pour protéger l'index.
+        self.levels: Tuple[int, ...] = tuple(sorted(self.hexes_by_level))
+
+    def polys(self, level: int) -> List[List[Tuple[float, float]]]:
+        """Polygones du niveau, calculés au PREMIER appel puis mémoïsés (cf. ``__init__``)."""
+        cached = self._polys_by_level.get(level)  # get allowed (niveau pas encore demandé)
+        if cached is None:
+            from engine.hex_utils import _hex_center
+            cached = [
+                [_hex_center(int(v[0]), int(v[1])) for v in require_key(floor, "polygon_vertices")]
+                for floor in self._raw_floors_by_level.get(level, [])  # get allowed (niveau sans plancher)
+            ]
+            self._polys_by_level[level] = cached
+        return cached
+
+    def low_clearance(self, model_height: float) -> Set[Tuple[int, int]]:
+        blocked: Set[Tuple[int, int]] = set()
+        for height, cells in self._low_clearance:
+            if height < model_height:
+                blocked |= cells
+        return blocked
+
+
+# Mémo de l'index, clé = IDENTITÉ de la liste ``terrain_areas``.
+#
+# L'entrée garde une référence FORTE à la liste : c'est ce qui rend `id()` sûr ici — tant que la
+# clé est dans le mémo, l'objet est vivant, donc son adresse ne peut pas être réattribuée à un
+# autre terrain. Le mémo est borné, en FIFO : quelques terrains coexistent au plus (board courant,
+# scénarios d'éval, fixtures de test).
+#
+# ``terrain_areas`` est normalement mis à l'échelle une fois au chargement
+# (``GameState._downscale_terrain_data``, qui travaille sur une copie profonde des données de
+# fichier) puis n'est plus muté. L'identité NE SUFFIT PAS à le garantir : une mutation en place
+# (``floors[0]["hexes"].extend(...)``, comme le fait une fixture de test) laisserait servir un
+# index périmé — des cellules légales rejetées par ``footprint_within_floor``, ou
+# ``floor_height_at`` qui lève sur une case pourtant planchéiée, sans que rien ne désigne le
+# cache. L'entrée mémoïsée porte donc une SIGNATURE de forme, relue à chaque accès et reconstruite
+# si elle a bougé.
+#
+# VERROU : l'API Flask sert en multi-THREADS (``app.run`` par défaut). Scanner puis supprimer puis
+# ajouter n'est pas atomique — deux requêtes concurrentes suffisent à ce qu'un `del` porte sur un
+# index décalé par l'autre thread, jusqu'à l'``IndexError`` si la liste a raccourci entre-temps.
+# Le mutex couvre toute l'opération ; il est non réentrant, ce qui est sûr car ni ``_FloorIndex``
+# ni ``_floor_signature`` ne rappellent ``_floor_index``.
+_FLOOR_INDEX_CACHE: "Dict[int, Tuple[List[Dict[str, Any]], Any, _FloorIndex]]" = {}
+_FLOOR_INDEX_CACHE_MAX = 8
+_FLOOR_INDEX_LOCK = threading.Lock()
+
+
+def _floor_signature(terrain_areas: List[Dict[str, Any]]) -> Any:
+    """Empreinte de FORME des étages — O(nombre de floors), pas O(nombre d'hexes).
+
+    Suffit à détecter toute mutation en place qui change la structure (floor/hex ajouté ou retiré,
+    niveau ou hauteur modifiés) : ce sont les seules mutations que le dépôt pratique. Une
+    substitution de coordonnée à taille constante ne s'y verrait pas — l'index reste donc à ne pas
+    muter en place case par case.
+
+    Cette empreinte est relue à CHAQUE accès, sur un chemin parcouru 10²–10³ fois par construction
+    de pool : elle est écrite pour être plate. Un aplatissement sur tous les étages (pas de tuple
+    par aire, pas de longueur redondante) et l'accès direct aux clés (déjà validées par
+    ``_FloorIndex`` ; leur absence lève un ``KeyError`` nommé) la ramènent de 24 µs à 6,8 µs sur un
+    terrain réel de 22 étages — mesuré, à comparer aux 933 µs du rescan qu'elle remplace."""
+    return tuple(
+        (f["level"], f["height_inches"], len(f["hexes"]))
+        for area in terrain_areas
+        for f in area.get("floors", ())  # get allowed (aire sans étage = sol seul)
+    )
+
+
+def _floor_index(terrain_areas: List[Dict[str, Any]]) -> _FloorIndex:
+    key = id(terrain_areas)
+    signature = _floor_signature(terrain_areas)
+    with _FLOOR_INDEX_LOCK:
+        cached = _FLOOR_INDEX_CACHE.get(key)  # get allowed (terrain pas encore indexé)
+        if cached is not None and cached[1] == signature:
+            return cached[2]
+        # Absent, ou terrain muté en place : l'entrée décrivait un état qui n'existe plus.
+        index = _FloorIndex(terrain_areas)
+        _FLOOR_INDEX_CACHE[key] = (terrain_areas, signature, index)
+        if len(_FLOOR_INDEX_CACHE) > _FLOOR_INDEX_CACHE_MAX:
+            # Un dict Python conserve l'ordre d'insertion : la première clé est la plus ancienne.
+            del _FLOOR_INDEX_CACHE[next(iter(_FLOOR_INDEX_CACHE))]
+        return index
+
+
+def floor_levels_present(terrain_areas: List[Dict[str, Any]]) -> Tuple[int, ...]:
     """Niveaux d'étage (>= 1) réellement décrits par le terrain, triés croissant.
 
     Le sol (0) n'y figure pas : il n'a pas d'entrée ``floors``, il existe partout. Sert à borner les
     parcours multi-niveaux et à écarter d'emblée un niveau qu'aucune ruine ne porte."""
-    return sorted({
-        int(require_key(floor, "level"))
-        for area in terrain_areas
-        for floor in area.get("floors", [])  # get allowed (aire sans étage = sol seul)
-    })
+    return _floor_index(terrain_areas).levels
 
 
-def floor_hexes_at_level(terrain_areas: List[Dict[str, Any]], level: int) -> Set[Tuple[int, int]]:
+def floor_hexes_at_level(
+    terrain_areas: List[Dict[str, Any]], level: int
+) -> FrozenSet[Tuple[int, int]]:
     """Union des hexes de tous les étages (``floors``) au niveau donné (format B, >= 1).
 
     Le niveau 0 (rez-de-chaussée) n'a pas d'entrée ``floors`` : c'est la terrain area
     elle-même / le sol. Appeler cette fonction avec level 0 est une erreur d'usage.
+
+    Le set rendu APPARTIENT à l'index mémoïsé — il est donc FROZEN, pas seulement « à ne pas
+    muter » : la mutation est impossible plutôt que déconseillée.
     """
     if level < 1:
         raise ValueError(f"floor_hexes_at_level: level must be >= 1 (0 = ground), got {level}")
-    hexes: Set[Tuple[int, int]] = set()
-    for area in terrain_areas:
-        for floor in area.get("floors", []):  # get allowed (aire sans étage = sol seul)
-            if int(require_key(floor, "level")) == level:
-                hexes.update((int(h[0]), int(h[1])) for h in require_key(floor, "hexes"))
-    return hexes
+    return _floor_index(terrain_areas).hexes_by_level.get(level, frozenset())  # get allowed (niveau sans plancher)
 
 
 def floor_polys_at_level(
@@ -112,15 +256,7 @@ def floor_polys_at_level(
     usage interdit (erreur explicite, cohérent avec ``floor_hexes_at_level``)."""
     if level < 1:
         raise ValueError(f"floor_polys_at_level: level must be >= 1 (0 = ground), got {level}")
-    from engine.hex_utils import _hex_center
-    polys: List[List[Tuple[float, float]]] = []
-    for area in terrain_areas:
-        for floor in area.get("floors", []):  # get allowed (aire sans étage = sol seul)
-            if int(require_key(floor, "level")) == level:
-                polys.append(
-                    [_hex_center(int(v[0]), int(v[1])) for v in require_key(floor, "polygon_vertices")]
-                )
-    return polys
+    return _floor_index(terrain_areas).polys(level)
 
 
 def floor_height_at(
@@ -139,13 +275,11 @@ def floor_height_at(
     ce niveau est une incoherence d'etat -> ``ValueError`` explicite (CLAUDE.md, pas de masquage)."""
     if int(level) <= 0:
         return 0.0
-    cell = (int(col), int(row))
-    for area in terrain_areas:
-        for floor in area.get("floors", []):  # get allowed (aire sans etage = sol seul)
-            if int(require_key(floor, "level")) == int(level):
-                floor_hexes = {(int(h[0]), int(h[1])) for h in require_key(floor, "hexes")}
-                if cell in floor_hexes:
-                    return float(require_key(floor, "height_inches"))
+    height = _floor_index(terrain_areas).height_by_cell.get(  # get allowed (case hors plancher)
+        (int(level), int(col), int(row))
+    )
+    if height is not None:
+        return height
     raise ValueError(
         f"floor_height_at: no floor at level {level} contains cell ({col}, {row}) "
         f"(figurine marquee a l'etage mais hors empreinte de plancher)"
@@ -163,13 +297,7 @@ def low_clearance_ground_hexes(
     étage (même unité pouce que ``height_inches``, pas de scaling). Tangence (égalité) autorisée.
     Retourne un set vide si aucun étage n'est trop bas. À unir aux murs pour le pathfinding AU SOL
     uniquement (la surface de l'étage, elle, reste praticable)."""
-    blocked: Set[Tuple[int, int]] = set()
-    mh = float(model_height)
-    for area in terrain_areas:
-        for floor in area.get("floors", []):  # get allowed (aire sans étage)
-            if float(require_key(floor, "height_inches")) < mh:
-                blocked.update((int(h[0]), int(h[1])) for h in require_key(floor, "hexes"))
-    return blocked
+    return _floor_index(terrain_areas).low_clearance(float(model_height))
 
 
 def footprint_within_floor(
@@ -178,7 +306,7 @@ def footprint_within_floor(
     base_shape: str,
     base_size: "int | list[int]",
     orientation: int,
-    floor_hexes: Set[Tuple[int, int]],
+    floor_hexes: AbstractSet[Tuple[int, int]],
     floor_polys: Optional[List[List[Tuple[float, float]]]] = None,
 ) -> bool:
     """True si le socle tient ENTIÈREMENT sur l'étage (règle 13.06 : aucun débordement du bord).
@@ -235,9 +363,12 @@ def resolve_model_floor_level(
     """
     if requested_level is None or requested_level < 1:
         return 0
-    fh = floor_hexes_at_level(terrain_areas, requested_level)
+    # UN seul passage par le mémo : cette fonction est appelée par cellule candidate (boucles de
+    # pool charge / pile-in / consolidation), et chaque passage revalide la signature du terrain.
+    index = _floor_index(terrain_areas)
+    fh = index.hexes_by_level.get(requested_level, frozenset())  # get allowed (niveau sans plancher)
     # Base ronde : confinement euclidien (aucun débordement du bord) ; oval/carré : hex.
-    fpoly = floor_polys_at_level(terrain_areas, requested_level) if base_shape == "round" else None
+    fpoly = index.polys(requested_level) if base_shape == "round" else None
     if fh and footprint_within_floor(col, row, base_shape, base_size, orientation, fh, fpoly):
         return requested_level
     return 0

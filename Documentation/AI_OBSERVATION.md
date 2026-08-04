@@ -25,7 +25,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 
 | Clé | Forme | Contenu |
 |---|---|---|
-| `global_cont` / `global_bin` | (11,) / (27,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, force d'usure, **distance à chacun des 5 objectifs** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `n_fight_eligible`, `n_in_enemy_ez`, `n_relayed_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
+| `global_cont` / `global_bin` | (11,) / (27,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, force d'usure, **distance à chacun des 5 objectifs** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
 | `allies_cont` / `allies_bin` | (8, 19) / (8, 33) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les 32 drapeaux incluent les **13 règles d'unité en vigueur** (19.04) et, pour les ennemis seulement, `los_can_see`, `cover_vs_observer` et `charge_reachable_max_roll` |
 | `allies_wpn_cont` / `_bin` | (8, 20, 13) / (8, 20, 18) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants et bits/params de règles |
 | `allies_types_cont` / `_bin` | (8, 6, 5) / (8, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
@@ -40,14 +40,14 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 828 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 780 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (11,)                =      11               │
 │    global_bin             (27,)                =      27               │
 │                                                                        │
 │  MES ESCOUADES — ligne 0 = l'unité ACTIVE          K_ALLY_SLOTS = 8    │
-│    allies_cont            (8, 20)              =     160               │
+│    allies_cont            (8, 19)              =     152               │
 │    allies_bin             (8, 33)              =     264               │
 │    allies_wpn_cont        (8, 20, 13)          =   2 080               │
 │    allies_wpn_bin         (8, 20, 18)          =   2 880               │
@@ -55,7 +55,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    allies_types_bin       (8, 6, 5)            =     240               │
 │                                                                        │
 │  ESCOUADES ENNEMIES — ordre = slots d'action     K_ENEMY_SLOTS = 20    │
-│    enemies_cont           (20, 20)             =     400               │
+│    enemies_cont           (20, 19)             =     380               │
 │    enemies_bin            (20, 33)             =     660               │
 │    enemies_wpn_cont       (20, 20, 13)         =   5 200               │
 │    enemies_wpn_bin        (20, 20, 18)         =   7 200               │
@@ -64,7 +64,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │                                                                        │
 │  MES FIGURINES (individuel)                        SQUAD_TOP_K = 20    │
 │    self_models_cont       (20, 2)              =      40               │
-│    self_models_bin        (20, 4)              =      80               │
+│    self_models_bin        (20, 3)              =      60               │
 │                                                                        │
 │  DÉCISION AGENT — candidats de CHOICE_i        MAX_DECISION_OPTIONS = 6│
 │    decision_ctx_bin       (2,)                 =       2               │
@@ -74,11 +74,11 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    deploy_cand_cont       (5, 8)               =      40               │
 │    deploy_cand_bin        (5, 4)               =      20               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      20 828              │
+│  TOTAL vectoriel (= obs_size)                      20 780              │
 │  + grid  (9, 32, 32) = 9 216, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
-Coût d'UNE entité = 20 + 33 (unité) + 20 × (13 + 18) (armes) + 6 × (5 + 5) (types) = 733
+Coût d'UNE entité = 19 + 33 (unité) + 20 × (13 + 18) (armes) + 6 × (5 + 5) (types) = 732
    → le bloc ARMES fait 86 % du vecteur. C'est le seul bloc mémoïsé.
 ```
 
@@ -152,7 +152,7 @@ deux phases où les ids d'action 4–8 signifient l'un « slot de déploiement �
 move » — le seul indice restant était indirect. Une phase hors des 6 **lève** ; il n'y a plus de
 `.get(…, 0.0)`.
 
-#### `allies_cont[s]` / `enemies_cont[s]` — une unite, 20 features  ·  EntityRunningNorm
+#### `allies_cont[s]` / `enemies_cont[s]` — une unite, 19 features  ·  EntityRunningNorm
 
 ```python
 [s][0]     = alive_models                           # brut (figurines vivantes)
@@ -173,8 +173,7 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
 [s][15]    = moved_sum                              # subhex, distance de CHEMIN (somme)
 [s][16]    = n_fight_eligible                       # brut [ACTIVE seule]
 [s][17]    = n_in_enemy_ez                          # brut [ACTIVE seule]
-[s][18]    = n_relayed_ez                           # brut [ACTIVE seule]
-[s][19]    = n_models_engaging                      # brut [ENNEMIS seuls] — mes figurines
+[s][18]    = n_models_engaging                      # brut [ENNEMIS seuls] — mes figurines
                                                     #   engagees avec CETTE cible (04.02).
                                                     #   Grandeur de PAIRE, comme los_can_see.
                                                     #   Support du choix de cible de melee
@@ -182,7 +181,7 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
                                                     #   porte reellement contre elle.
 ```
 
-#### `allies_bin[s]` / `enemies_bin[s]` — une unite, 32 drapeaux  ·  jamais normalise
+#### `allies_bin[s]` / `enemies_bin[s]` — une unite, 33 drapeaux  ·  jamais normalise
 
 ```python
 [s][0]     = is_ally                                # 0.0 / 1.0
@@ -207,19 +206,19 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
                                                     #   MAXIMAL (11.02, 2D6 -> 12) [ENNEMIS seuls, phase
                                                     #   CHARGE seule ; masque = phase_charge]
 [s][19]    = rule_charge_after_advance              # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][19]    = rule_charge_after_flee                 # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][20]    = rule_charge_impact                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][21]    = rule_closest_target_penetration        # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][22]    = rule_move_after_shooting               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][23]    = rule_reactive_move                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][24]    = rule_reroll_1_save_fight               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][25]    = rule_reroll_1_tohit_fight              # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][26]    = rule_reroll_1_towound                  # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][27]    = rule_reroll_charge                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][28]    = rule_reroll_towound_target_on_objective # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][29]    = rule_shoot_after_advance               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][30]    = rule_shoot_after_flee                  # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
-[s][31]    = present                                # 0.0 / 1.0 — masque d'entite (0 = slot vide ou morte), DERNIER comme dans tous les registres (§0.37)
+[s][20]    = rule_charge_after_flee                 # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][21]    = rule_charge_impact                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][22]    = rule_closest_target_penetration        # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][23]    = rule_move_after_shooting               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][24]    = rule_reactive_move                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][25]    = rule_reroll_1_save_fight               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][26]    = rule_reroll_1_tohit_fight              # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][27]    = rule_reroll_1_towound                  # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][28]    = rule_reroll_charge                     # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][29]    = rule_reroll_towound_target_on_objective # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][30]    = rule_shoot_after_advance               # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][31]    = rule_shoot_after_flee                  # 0.0 / 1.0 — regle d'unite EN VIGUEUR (19.04)
+[s][32]    = present                                # 0.0 / 1.0 — masque d'entite (0 = slot vide ou morte), DERNIER comme dans tous les registres (§0.37)
 ```
 
 #### `*_wpn_cont[s][w]` — un profil d'arme, 13 continues  ·  EntityRunningNorm
@@ -290,8 +289,7 @@ cont[m][0]     = col_rel                                # projection _hex_center
 cont[m][1]     = row_rel                                # projection _hex_center SIGNEE (vs centroide arrondi)
 bin[m][0]      = fight_eligible                         # 0.0 / 1.0
 bin[m][1]      = in_enemy_ez                            # 0.0 / 1.0
-bin[m][2]      = ez_relayed_by_ally                     # 0.0 / 1.0
-bin[m][3]      = present                                # 0.0 / 1.0 — masque du bloc (0 = slot vide)
+bin[m][2]      = present                                # 0.0 / 1.0 — masque du bloc (0 = slot vide)
 ```
 
 **Le masque de ce bloc est le bit `present`**, comme pour les registres d'armes et de types
@@ -532,8 +530,11 @@ slot ennemi, 2026-07-27) → 20626 (bit `present` par figurine + phase en one-ho
 §0.32 T-H/T-J, 2026-07-28) → 20654 (`n_models_engaging` : mes figurines engagées avec chaque
 cible ennemie, support du choix de cible de mêlée, §9 P3-1, 2026-07-28) → 20740 (bloc
 « contexte de décision », §9.3 P2, 2026-07-28) → 20768 (`charge_reachable_max_roll` :
-support du choix de cible de charge, §9 P3-2, 2026-07-28) → **20828** (bloc « candidats de
-déploiement » : ce que chacune des 5 actions 4-8 poserait, §0.40 point 3, 2026-07-29). **Toute évolution du
+support du choix de cible de charge, §9 P3-2, 2026-07-28) → 20828 (bloc « candidats de
+déploiement » : ce que chacune des 5 actions 4-8 poserait, §0.40 point 3, 2026-07-29)
+→ **20780** (RETRAIT de `ez_relayed_by_ally` et `n_relayed_ez` avec la clause « buddy » :
+04.02 WHILE FIGHTING n'autorise à frapper qu'une figurine ENGAGÉE avec la cible, le relais par
+une alliée au contact venait d'une édition antérieure de 40K, 2026-08-04). **Toute évolution du
 schéma change cette valeur et rend les `.zip` existants incompatibles : le retrain `--new` est
 obligatoire.**
 

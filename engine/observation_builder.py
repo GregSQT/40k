@@ -1210,7 +1210,6 @@ class ObservationBuilder:
                         for synth in ctx["synth_by_mid"].values()
                         if model_entry_can_fight_target(
                             game_state, synth, target_entry, ctx["engagement_zone"],
-                            vertical_zone_inches=ctx["engagement_zone_vertical"],
                         )
                     ),
                 )
@@ -1249,7 +1248,6 @@ class ObservationBuilder:
             binv[unit_bin_index("in_cover")] = cover_flag
             _c("n_fight_eligible", ctx["n_fight_eligible"])
             _c("n_in_enemy_ez", ctx["n_in_enemy_ez"])
-            _c("n_relayed_ez", ctx["n_relayed_ez"])
 
         wpn_cont, wpn_bin = self._encode_entity_weapons(game_state, squad_id, models, alive_mids)
         types_cont, types_bin = self._encode_entity_model_types(
@@ -1295,11 +1293,11 @@ class ObservationBuilder:
         from engine.combat_utils import socle_from_cache_entry
 
         ez_zone = get_engagement_zone(game_state)
-        # Engagement 3D (§03.04) : l'observation mesure EXACTEMENT ce que le moteur résout.
-        # Laisser l'obs en 2D pendant que le fight passe en 3D annoncerait à l'agent des
-        # engagements que la résolution refuse (divergence masque/exécution).
-        from engine.spatial_relations import get_engagement_zone_vertical
-        ez_vert = get_engagement_zone_vertical(game_state)
+        # Engagement 3D (§03.04) : l'observation mesure EXACTEMENT ce que le moteur résout —
+        # sans rien passer, parce que la primitive applique le gate dès que les deux entrées
+        # portent leurs cartes verticales (cf. `entries_in_engagement_zone`). Laisser l'obs en 2D
+        # pendant que le fight résout en 3D annoncerait à l'agent des engagements que la
+        # résolution refuse (divergence masque/exécution).
         current_turn = int(game_state.get("turn", 0))  # get allowed (etat non initialise = tour 0)
         enemy_player = 2 if active_player == 1 else 1
         # Centroïde : REQUIS. `_compute_squad_cache_entry` le pose toujours (même escouade morte) ;
@@ -1393,7 +1391,17 @@ class ObservationBuilder:
         # Le test EZ exact compare des EMPREINTES (jusqu'à ~200 cases pour une grande base) :
         # on élimine d'abord les escouades trop loin pour POUVOIR engager, avec la même borne
         # conservatrice que le pruning du move (sur-approximation stricte -> résultat
-        # identique). metric="hex" ÉPINGLÉ : feature d'observation IA (V11 §10).
+        # identique ; son `+1` couvre déjà l'arrondi hex ↔ espace continu, cf.
+        # `_enemy_items_within_move_engagement_horizon`, donc elle reste valide en euclidien).
+        #
+        # MÉTRIQUE NON ÉPINGLÉE (2026-08-04) : `metric=None` → `engagement_distance_metric()`,
+        # exactement ce que lit le moteur (`get_fighting_models`). Elle était figée à "hex", ce
+        # qui ne coûtait rien à x1 (`geometry_is_hex` y impose hex de toute façon) mais mentait à
+        # x5, où le moteur résout en euclidien : mesuré sur 2501 positions autour d'une escouade
+        # ennemie, 61 verdicts divergeaient (49 figurines que le moteur faisait combattre et que
+        # l'obs déclarait hors EZ, 12 l'inverse) — un drapeau faux dans le MÊME step que la
+        # résolution qui le contredit. L'euclidien est en prime 3× plus rapide sur ce chemin (le
+        # hex 3D recalcule les empreintes par classe verticale).
         #
         # §0.40 point 5 — RÈGLE 03.04 : « A model's engagement range is the area OF THE
         # BATTLEFIELD within 2" horizontally and 5" vertically of it » (03 Moving.pdf). Une unité
@@ -1404,8 +1412,8 @@ class ObservationBuilder:
         # `n_in_enemy_ez = 6`, `n_fight_eligible = 6` sur une escouade qui n'est pas sur la table.
         # La primitive moteur n'est pas en cause : on lui donnait des empreintes fantômes. Le
         # filtre est donc ici, à l'appelant, en UN point — l'active exclue de `friendly_sids`
-        # rend `active_relevant_enemies` vide, donc `in_enemy_ez` et `relayed_by_mid` tombent
-        # avec, sans garde supplémentaire.
+        # rend `active_relevant_enemies` vide, donc `in_enemy_ez` tombe avec, sans garde
+        # supplémentaire.
         on_battlefield: Dict[str, bool] = {}
         for sid in units_cache:
             sid_unit = get_unit_by_id(str(sid), game_state)
@@ -1438,9 +1446,7 @@ class ObservationBuilder:
             if fsid == active_squad_id:
                 active_relevant_enemies = relevant
             for e_entry in relevant:
-                if unit_entries_within_engagement_zone(
-                    f_entry, e_entry, ez_zone, metric="hex", vertical_zone_inches=ez_vert
-                ):
+                if unit_entries_within_engagement_zone(f_entry, e_entry, ez_zone):
                     engaged_squads.add(fsid)
                     esid_of_entry = sid_by_entry_id.get(id(e_entry))
                     if esid_of_entry is None:
@@ -1489,25 +1495,15 @@ class ObservationBuilder:
             )
             synth_by_mid[mid] = synth
             in_enemy_ez[mid] = any(
-                unit_entries_within_engagement_zone(
-                    synth, ee, ez_zone, metric="hex", vertical_zone_inches=ez_vert
-                )
+                unit_entries_within_engagement_zone(synth, ee, ez_zone)
                 for ee in active_relevant_enemies
             )
-        relayed_by_mid: Dict[str, bool] = {}
-        for mid in alive_mids:
-            relayed = False
-            if not in_enemy_ez[mid]:
-                for other_mid in alive_mids:
-                    if other_mid == mid or not in_enemy_ez[other_mid]:
-                        continue
-                    if unit_entries_within_engagement_zone(
-                        synth_by_mid[mid], synth_by_mid[other_mid], ez_zone, metric="hex",
-                        vertical_zone_inches=ez_vert,
-                    ):
-                        relayed = True
-                        break
-            relayed_by_mid[mid] = relayed
+        # `relayed_by_mid` (clause « buddy ») a vécu ici, jumeau du `get_fighting_models` du
+        # moteur. Les deux sont partis le 2026-08-04 : 04.02 WHILE FIGHTING n'autorise à frapper
+        # qu'une figurine ENGAGÉE avec la cible, le relais par une alliée au contact venait d'une
+        # édition antérieure de 40K. L'observation ne doit pas décrire une règle que la
+        # résolution n'applique pas — c'est la divergence masque/exécution que ce bloc existe
+        # pour éviter.
         sm_cont = obs["self_models_cont"]
         sm_bin = obs["self_models_bin"]
         if len(alive_mids) > self.SQUAD_TOP_K:
@@ -1536,7 +1532,6 @@ class ObservationBuilder:
             sm_bin[k_idx] = (
                 1.0 if mid in fighting_set else 0.0,
                 1.0 if in_enemy_ez[mid] else 0.0,
-                1.0 if relayed_by_mid[mid] else 0.0,
                 # Masque EXPLICITE (§0.32 T-H) : cette figurine peut n'avoir aucun drapeau et
                 # tomber pile sur le centroïde arrondi, donc une ligne entièrement nulle. Un
                 # masque déduit de la ligne la comptait absente, sans rien lever.
@@ -1578,7 +1573,6 @@ class ObservationBuilder:
             # bloc figurines (une escouade de 20 Boyz dont 12 sont engagées le dit).
             "n_fight_eligible": sum(1 for mid in alive_mids if mid in fighting_set),
             "n_in_enemy_ez": sum(1 for mid in alive_mids if in_enemy_ez[mid]),
-            "n_relayed_ez": sum(1 for mid in alive_mids if relayed_by_mid[mid]),
             # V11 §9 P3-1 — support du choix de cible de mêlée (`n_models_engaging`).
             # Le pool 12.05 est la MÊME source que le masque d'action : un ennemi qui n'y est
             # pas ne peut être frappé par AUCUNE de mes figurines (le pool teste l'empreinte de
@@ -1591,7 +1585,6 @@ class ObservationBuilder:
             # Empreintes par figurine, réutilisées telles quelles pour le comptage 04.02.
             "synth_by_mid": synth_by_mid,
             "engagement_zone": ez_zone,
-            "engagement_zone_vertical": ez_vert,
         }
 
         def _write_entity(prefix: str, row: int, sid: str, *, is_ally: bool, is_active: bool) -> None:

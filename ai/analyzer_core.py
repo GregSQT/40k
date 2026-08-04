@@ -66,7 +66,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
     stats = state.stats
     unit_id: Optional[str] = None  # may be set from unit_start or deploy lines
 
-    from ai.analyzer_perfig import parse_models_heights, parse_models_segment, surviving_start_models
+    from ai.analyzer_perfig import parse_models_and_heights, surviving_start_models
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
@@ -88,8 +88,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             # position de DÉPART ; `current_line_heights` porte l'arrivée de la ligne N.
             for _muid, _mheights in state.current_line_heights.items():
                 state.heights_by_model[_muid] = _mheights
-            state.current_line_models = parse_models_segment(line) or {}
-            state.current_line_heights = parse_models_heights(line) or {}
+            _line_models, _line_heights = parse_models_and_heights(line)
+            state.current_line_models = _line_models or {}
+            state.current_line_heights = _line_heights or {}
             if state.current_line_models:
                 for _uid, _models in state.current_line_models.items():
                     if not _models:

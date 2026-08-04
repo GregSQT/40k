@@ -64,50 +64,52 @@ def parse_base_token(token: str) -> Base:
     return (shape, int(size_str))
 
 
-def parse_models_segment(text: str) -> Optional[Dict[str, Dict[str, Tuple[int, int]]]]:
-    """Extrait le segment [MODELS:] → {unit_id: {mid: (col,row)}}.
+def parse_models_and_heights(
+    text: str,
+) -> Tuple[Optional[Dict[str, Dict[str, Tuple[int, int]]]], Optional[Dict[str, Dict[str, float]]]]:
+    """Extrait le segment [MODELS:] → ``(positions, hauteurs)`` en UN seul parcours.
 
-    unit_id = préfixe de mid avant '#'. Retourne None si aucun segment (ligne
-    sans suffixe per-figurine, p.ex. logs anciens/synthétiques).
+    ``positions`` = ``{unit_id: {mid: (col,row)}}``, ``hauteurs`` = ``{unit_id: {mid: pouces}}``.
+    ``unit_id`` = préfixe de mid avant '#'. Les deux valent None si la ligne ne porte pas de
+    segment (ligne sans suffixe per-figurine, p.ex. logs anciens/synthétiques).
+
+    UN parcours et non deux : les deux cartes viennent du MÊME match, et leurs consommateurs les
+    lisent ENSEMBLE (``_vertical_classes`` exige les centres ET les hauteurs). Les séparer coûtait
+    un `search` sur la ligne entière et un `finditer` complet de plus **par ligne de journal** —
+    la boucle la plus chaude de l'analyzer — et laissait la convention de token (format `z`,
+    dérivation de l'``unit_id``) s'écrire à deux endroits, donc diverger.
+
+    Les socles SANS `z` sont ABSENTS de la carte des hauteurs — pas posés à 0.0. Le consommateur
+    voit alors « pas d'altitude connue » et reste en 2D, au lieu de mesurer une figurine réelle
+    contre un sol supposé. La carte vaut None si aucun socle du segment ne porte de hauteur.
     """
     m = _MODELS_RE.search(text)
     if not m:
-        return None
-    result: Dict[str, Dict[str, Tuple[int, int]]] = {}
+        return None, None
+    positions: Dict[str, Dict[str, Tuple[int, int]]] = {}
+    heights: Dict[str, Dict[str, float]] = {}
     for tok in _TOKEN_RE.finditer(m.group(1)):
         mid = tok.group(1)
-        col = int(tok.group(2))
-        row = int(tok.group(3))
         unit_id = mid.split('#', 1)[0]
-        result.setdefault(unit_id, {})[mid] = (col, row)
-    if not result:
+        positions.setdefault(unit_id, {})[mid] = (int(tok.group(2)), int(tok.group(3)))
+        if tok.group(4) is not None:
+            heights.setdefault(unit_id, {})[mid] = float(tok.group(4))
+    if not positions:
         raise ValueError(f"Segment [MODELS:] présent mais vide/illisible: {m.group(1)[:120]}")
-    return result
+    return positions, heights or None
+
+
+def parse_models_segment(text: str) -> Optional[Dict[str, Dict[str, Tuple[int, int]]]]:
+    """Positions seules du segment [MODELS:] — enveloppe de ``parse_models_and_heights``.
+
+    Pour les appelants qui n'ont que faire de l'altitude (contrôles horizontaux, tests).
+    """
+    return parse_models_and_heights(text)[0]
 
 
 def parse_models_heights(text: str) -> Optional[Dict[str, Dict[str, float]]]:
-    """Extrait les HAUTEURS du segment [MODELS:] → {unit_id: {mid: hauteur_plancher_pouces}}.
-
-    Jumeau exact de ``parse_models_segment`` — même segment, même regex, même convention de
-    ``unit_id`` — mais rendant la 3e composante du token. Les deux cartes sont lues ENSEMBLE par
-    l'engagement 3D (``_vertical_classes`` exige les centres ET les hauteurs), et n'en produire
-    qu'une laisserait la figurine mesurée sans altitude.
-
-    Les socles SANS `z` sont simplement absents de la carte — pas posés à 0.0. Le consommateur
-    voit alors « pas d'altitude connue » et reste en 2D, au lieu de mesurer une figurine réelle
-    contre un sol supposé. ``None`` si aucun socle du segment ne porte de hauteur.
-    """
-    m = _MODELS_RE.search(text)
-    if not m:
-        return None
-    result: Dict[str, Dict[str, float]] = {}
-    for tok in _TOKEN_RE.finditer(m.group(1)):
-        if tok.group(4) is None:
-            continue
-        mid = tok.group(1)
-        unit_id = mid.split('#', 1)[0]
-        result.setdefault(unit_id, {})[mid] = float(tok.group(4))
-    return result or None
+    """Hauteurs seules du segment [MODELS:] — enveloppe de ``parse_models_and_heights``."""
+    return parse_models_and_heights(text)[1]
 
 
 def _model_footprint(col: int, row: int, base: Base) -> frozenset:

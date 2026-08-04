@@ -8,7 +8,7 @@ par ``movement_handlers`` ET ``charge_handlers`` sans duplication ni couplage in
 
 import heapq
 import math
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import AbstractSet, Any, Dict, List, Mapping, Optional, Set, Tuple
 
 from engine.hex_utils import (
     geodesic_field, geodesic_field_multi_source, get_neighbors, round_base_radius_norm, _hex_center,
@@ -99,7 +99,7 @@ def _euclidean_move_field_multi(
 
 
 def _build_level_transitions(
-    floor_hexes_by_level: Dict[int, Set[Tuple[int, int]]],
+    floor_hexes_by_level: Mapping[int, AbstractSet[Tuple[int, int]]],
     height_by_level: Dict[int, float],
     board_cols: int,
     board_rows: int,
@@ -159,7 +159,7 @@ def reachable_multilevel_field(
     board_cols: int,
     board_rows: int,
     obstacles_by_level: Dict[int, Set[Tuple[int, int]]],
-    floor_hexes_by_level: Dict[int, Set[Tuple[int, int]]],
+    floor_hexes_by_level: Mapping[int, AbstractSet[Tuple[int, int]]],
     height_by_level: Dict[int, float],
     budget_norm: float,
     allow_vertical: bool = True,

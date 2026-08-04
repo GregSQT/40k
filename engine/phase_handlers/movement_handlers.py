@@ -7,7 +7,7 @@ References: AI_TURN.md Section 🏃 MOVEMENT PHASE LOGIC
 ZERO TOLERANCE for state storage or wrapper patterns
 """
 
-from typing import Dict, List, Tuple, Set, Optional, Any, Sequence, cast
+from typing import AbstractSet, Dict, List, Tuple, Set, Optional, Any, Sequence, cast
 import math
 import numpy as np
 from collections import deque, OrderedDict
@@ -3373,7 +3373,7 @@ def movement_build_model_destinations_pool(
     from engine.terrain_utils import low_clearance_ground_hexes
     _low_clear = low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
     from engine.terrain_utils import floor_hexes_at_level, resolve_model_floor_level
-    floor_hexes_view: Set[Tuple[int, int]] = (
+    floor_hexes_view: AbstractSet[Tuple[int, int]] = (
         floor_hexes_at_level(terrain_areas, view_level) if view_level >= 1 else set()
     )
     # Niveau EFFECTIF de DÉPART du mover (§13.06) — dérivé de son niveau COMMITTÉ (models_cache),

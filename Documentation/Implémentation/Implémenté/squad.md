@@ -208,8 +208,36 @@ sont des coordonnees de subhexes. Donc :
 - ER : `calculate_hex_distance(...) <= inches_to_subhex` (1" en subhexes)
 
 Ces deux fonctions sont distinctes. Le B2B est plus strict que l ER.
-Les regles qui referencent B2B (Pile In, Consolidation, buddy rule) doivent utiliser
-`is_base_to_base`, pas `is_in_engagement_range`.
+
+> ⚠️ **RÉVISÉ le 2026-08-04 — le base-contact du PILE-IN / de la CONSOLIDATION (12.03 / 12.08
+> WHILE MOVING, « Models in base-contact [...] cannot be moved ») ne se mesure PLUS
+> centre-à-centre.**
+>
+> SOURCE UNIQUE : `shared_utils.model_in_base_contact(game_state, model_id, model_entry)`,
+> consommée par le PvP (`_fight_model_in_base_contact`) ET par le gym
+> (`_assign_cells_toward_enemies`). Le gym gardait sa propre géométrie — `== BASE_TO_BASE_SUBHEX`,
+> une distance d'ANCRE — donc deux verdicts opposés sur la même règle selon le chemin. Mesuré :
+> deux socles réellement au contact ont leurs centres à 3 cases (`BASE_SIZE 3`) ou 6
+> (`BASE_SIZE 6`), donc `== 1` répondait NON là où le contact existe, et 12.03 ne s'appliquait
+> jamais côté gym à x5.
+>
+> **Le SEUIL dépend de la métrique, et c'est la règle :**
+> - `euclidean` (x5, x10) : socles multi-cases, « bord à bord » continu → contact = écart <= 0,
+>   donc zone d'engagement **0** ;
+> - `hex` (x1, cf. `geometry_is_hex`) : `_scale_socle` normalise tout en `round`/1, une figurine
+>   tient dans UNE case → contact = cases ADJACENTES, donc zone **`BASE_TO_BASE_SUBHEX`**.
+>
+> Un seuil unique ne peut pas servir les deux : à x1 deux `round`/1 adjacents ont un écart
+> euclidien de 0,2321 et une distance d'empreinte de 1 — « zone 0 » y répondrait toujours non, et
+> 12.03 disparaîtrait du plateau d'ENTRAÎNEMENT. Verrouillé par
+> `test_engagement_3d_is_data_driven.py::test_base_contact_threshold_follows_the_metric`
+> (les deux métriques × les deux verdicts).
+>
+> Le reste passe par la primitive d'engagement : géométrie horizontale ET gate vertical §03.04,
+> sans une ligne de géométrie dans le prédicat.
+
+`is_base_to_base` reste le test générique de contact d'ancres ; il n'est plus le contrat de
+12.03 / 12.08.
 
 ---
 
@@ -1051,7 +1079,7 @@ Declenche le lock des declarations puis la resolution complete.
   eligible_targets, game_state, phase)` — fonction mutualisee tir et fight.
   Gere la declaration sequentielle par index, la mise a jour du TTK residuel entre
   chaque declaration, et le lock final. Le parametre `phase` conditionne uniquement
-  le filtre d eligibilite (LoS/portee pour "shoot", ER/buddy rule pour "fight").
+  le filtre d eligibilite (LoS/portee pour "shoot", engagement 04.02 pour "fight").
   La logique de selection value_over_ttk et de TTK residuel est identique dans les deux cas.
 
 ---
@@ -1144,25 +1172,39 @@ Conditions :
 - Note : un algorithme greedy par index peut etre sous-optimal (figurine 0 prend le
   meilleur hex, figurine 1 est bloquee). Acceptable en MVP — reproductible et deterministe.
 
-### Quelles figurines peuvent frapper — regle du buddy
+### Quelles figurines peuvent frapper — 04.02
 
-Une figurine peut faire ses attaques de melee si :
-1. Elle est dans l ER d une unite ennemie (distance subhex <= ENGAGEMENT_RANGE_SUBHEX), OU
-2. Elle est en B2B (`is_base_to_base`) avec une autre figurine de sa propre escouade
-   qui est elle-meme en B2B avec un modele ennemi.
+> ⚠️ **CORRIGE LE 2026-08-04 — la « regle du buddy » decrite ici n'existe pas.**
+>
+> 04.02 SELECT TARGETS, WHILE FIGHTING : « Each target must be **engaged with the model that has
+> that weapon**. » Et 03.04 ENGAGEMENT : engage = a <= 2" horizontalement ET <= 5" verticalement
+> d'une figurine ennemie. Il n'y a **qu'une** condition.
+>
+> Le relais par une alliee au contact venait d'une edition anterieure de 40K : `base-contact`
+> n'apparait dans les 25 PDF que dans la phase de combat, et uniquement pour dire qu'une figurine
+> au contact NE BOUGE PAS au pile-in (12.03 / 12.08 WHILE MOVING). Aucun texte n'accorde de relais
+> d'attaque.
+>
+> Il etait en prime mesure dans une autre geometrie que la condition d'engagement : distance de
+> CENTRE a centre en cases (`== BASE_TO_BASE_SUBHEX`, 1 case) la ou l'engagement se mesure BORD a
+> bord. A x5 cette case vaut 0,2" — moins qu'un socle — donc la clause ne pouvait se declencher
+> que sur des positions physiquement impossibles.
+>
+> Consequence observation : `ez_relayed_by_ally` (self_models_bin) et `n_relayed_ez` (unit_cont)
+> ont disparu, `obs_size` 20828 -> 20780, **retrain `--new` obligatoire**.
 
-La condition 2 n est pas transitive : une figurine en "rang 3" (B2B avec rang 2,
-mais rang 2 pas en B2B avec un ennemi) ne peut pas frapper.
+Une figurine peut faire ses attaques de melee si elle est ENGAGEE avec la cible (03.04). Le pool
+est rendu par `get_fighting_models(game_state, squad_id, target_squad_id)`, qui interroge la
+primitive `unit_entries_within_engagement_zone` sur une entree synthetique par figurine — meme
+mesure que la resolution, et le gate vertical §03.04 s'y applique sans etre demande.
 
-```python
-def get_fighting_models(game_state: dict, squad_id: str) -> list[str]:
-    """
-    Retourne les model_ids pouvant attaquer ce tour.
-    Condition 1 : figurine dans ER ennemi.
-    Condition 2 : figurine en B2B avec alliee elle-meme en B2B avec un ennemi.
-    Non transitif : profondeur = 1 niveau de buddy.
-    """
-```
+`target_squad_id` porte la moitie « **with the model** » de 04.02 et n'est pas optionnel a la
+declaration : sans lui (corrige le 2026-08-04) le pool valait « engagee avec n'importe quel
+ennemi », donc une escouade coincee entre A et B qui declarait B la faisait frapper par ses
+figurines qui ne touchent que A. Le jumeau PvP (`fight_handlers._model_can_fight_target`) etait,
+lui, cible-conscient depuis toujours. La forme SANS cible survit pour l'observation
+(`fight_eligible` / `n_fight_eligible` : « cette figurine est-elle au combat ? », calcule avant
+tout choix de cible) ; le compte par-cible y est un champ distinct (`n_models_engaging`).
 
 ### Declaration des attaques de melee
 
@@ -1186,7 +1228,7 @@ Comme pour le tir : selectionner toutes les cibles avant de resoudre la premiere
   le TTK residuel de la cible est mis a jour (degats attendus soustraits) — la figurine
   suivante voit un TTK residuel reduit et peut naturellement cibler ailleurs si le TTK
   est deja couvert. Toutes les declarations lockees avant la premiere resolution.
-  Filtre d eligibilite : ER ou buddy rule (au lieu de LoS/portee pour le tir).
+  Filtre d eligibilite : engagement 04.02 (au lieu de LoS/portee pour le tir).
   Pas de split explicite : le TTK residuel produit le meme effet de facon emergente.
   Si egalite de score : cible de slot le plus bas.
 - **Auto-selection de l arme** : apres selection de la cible, arme maximisant

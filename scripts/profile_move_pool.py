@@ -97,6 +97,9 @@ def _stress_units(
     # Champs de datasheet requis par build_units_cache/_build_models_for_unit depuis la
     # migration squad V11 (§0.12). Sans objet pour le BFS de move, mais require_key les exige.
     datasheet_defaults: Dict[str, Any] = {
+        # `MODEL_HEIGHT` : exigé en `require_key` par `build_units_cache` depuis l'engagement 3D
+        # (03.04 = 2" horizontal ET 5" vertical). Sans lui ce script ne démarrait plus.
+        "MODEL_HEIGHT": 2.5,
         "HP_MAX": 4,
         "OC": 1,
         "T": 4,

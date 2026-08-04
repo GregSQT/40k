@@ -8962,9 +8962,72 @@ def squad_fight_activation_order(
 
 
 # ============================================================================
-# SQUAD FIGHT — Pile In + buddy rule (squad.md PR3 3e)
+# SQUAD FIGHT — Pile In + éligibilité par figurine (04.02)
 # ============================================================================
 
+
+def model_in_base_contact(
+    game_state: Dict[str, Any], model_id: str, model_entry: Dict[str, Any]
+) -> bool:
+    """True si la figurine est en base-contact (socles collés) avec >= 1 figurine ennemie.
+
+    Règle 12.03 / 12.08 WHILE MOVING : « Models in base-contact with one or more enemy models
+    cannot be moved. » SOURCE UNIQUE du PvP et du gym : le pile-in du gym gardait sa propre
+    géométrie (centre-à-centre, `== BASE_TO_BASE_SUBHEX`), donc deux verdicts opposés sur la
+    même règle selon le chemin.
+
+    LE SEUIL DE CONTACT DÉPEND DE LA MÉTRIQUE, et c'est la règle, pas un contournement :
+    - `euclidean` (x5, x10) : les socles occupent plusieurs cases, « bord à bord » a un sens
+      continu -> contact = écart <= 0, donc zone d'engagement **0** ;
+    - `hex` (x1, cf. `geometry_is_hex`) : une figurine tient dans UNE case et `_scale_socle`
+      normalise tous les socles en `round`/1. Deux socles se touchent donc quand leurs cases sont
+      ADJACENTES -> zone d'engagement **`BASE_TO_BASE_SUBHEX`** (1).
+
+    Un seuil unique ne peut pas servir les deux. Mesuré : à x1, deux `round`/1 adjacents ont un
+    écart euclidien de 0,2321 et une distance d'empreinte de 1 — « zone 0 » y répond donc
+    TOUJOURS non, et la règle 12.03 ne s'appliquerait plus du tout sur le plateau
+    d'entraînement. Symétriquement, en euclidien la zone 1 vaut 1,5 unité, bien au-delà du
+    contact.
+
+    Le reste passe par la primitive : géométrie horizontale ET gate vertical §03.04 (appliqué dès
+    que les deux entrées portent leurs cartes verticales), sans une ligne de géométrie ici.
+    """
+    from engine.spatial_relations import (
+        engagement_distance_metric, unit_entries_within_engagement_zone,
+    )
+
+    units_cache = require_key(game_state, "units_cache")
+    squad_id = str(require_key(model_entry, "squad_id"))
+    player = int(require_key(model_entry, "player"))
+    metric = engagement_distance_metric(game_state)
+    contact_zone = BASE_TO_BASE_SUBHEX if metric == "hex" else 0
+
+    subject = _synth_model_entry(
+        game_state, squad_id, model_entry,
+        int(model_entry["col"]), int(model_entry["row"]),
+        level=int(require_key(model_entry, "level")),
+    )
+    # Hauteur COMMITTÉE, pas re-résolue. `_synth_model_entry` passe par
+    # `resolved_floor_height_at`, dont le critère (empreinte ENTIÈREMENT sur le plancher) est plus
+    # STRICT que celui de la pose — cf. `_recompute_squad_occupied_hexes`, « le niveau STOCKÉ fait
+    # foi : ce resync recopie l'état, il ne le rejuge pas ». Une figurine committée à l'étage avec
+    # un socle qui déborde serait donc mesurée au SOL et manquerait le contact d'un ennemi de son
+    # propre étage. Pour une figurine DÉJÀ POSÉE, la carte du cache est la vérité.
+    squad_entry = units_cache.get(str(squad_id))  # get allowed (escouade retirée = morte)
+    _committed = (squad_entry or {}).get("floor_height_by_model")  # get allowed (entrées 2D)
+    if _committed is not None and str(model_id) in _committed:
+        subject["floor_height_by_model"] = {
+            key: float(_committed[str(model_id)]) for key in subject["floor_height_by_model"]
+        }
+
+    for enemy_id, enemy_entry in units_cache.items():
+        if str(enemy_id) == squad_id or int(require_key(enemy_entry, "player")) == player:
+            continue
+        if unit_entries_within_engagement_zone(
+            subject, enemy_entry, contact_zone, metric=metric
+        ):
+            return True
+    return False
 
 def _assign_cells_toward_enemies(
     game_state: Dict[str, Any],
@@ -8998,12 +9061,6 @@ def _assign_cells_toward_enemies(
         mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"])) for mid in mids
     }
 
-    def _is_b2b_with_enemy(col: int, row: int) -> bool:
-        for ec, er in enemy_positions:
-            if calculate_hex_distance(col, row, ec, er) == BASE_TO_BASE_SUBHEX:
-                return True
-        return False
-
     def _cell_base_legal(col: int, row: int) -> bool:
         """Legalite INDEPENDANTE du plan : plateau, murs, autres escouades."""
         if col < 0 or row < 0 or col >= board_cols or row >= board_rows:
@@ -9021,7 +9078,13 @@ def _assign_cells_toward_enemies(
 
     # 1. 12.03 WHILE MOVING : « Models in base-contact with one or more enemy models cannot be
     #    moved ». Ces figurines restent, et leur cellule est definitivement occupee.
-    immobile = [mid for mid in mids if _is_b2b_with_enemy(*origins[mid])]
+    #    MEME predicat que le PvP (`model_in_base_contact`) : il mesurait ici centre-a-centre
+    #    (`== BASE_TO_BASE_SUBHEX`, 1 case) alors que le contact se mesure BORD a bord. Mesure :
+    #    deux socles au contact ont leurs centres a 2 subhex (BASE_SIZE 3) ou 4 (BASE_SIZE 6) —
+    #    `== 1` etait donc IMPOSSIBLE des qu'un socle depasse une case, et `immobile` restait
+    #    toujours vide sur le chemin gym. La regle ne s'y appliquait jamais, alors que le PvP
+    #    figeait bien la figurine : deux verdicts opposes sur la meme regle.
+    immobile = [mid for mid in mids if model_in_base_contact(game_state, mid, models_cache[mid])]
     movers = [mid for mid in mids if mid not in set(immobile)]
     static_cells = {origins[mid] for mid in immobile}
 
@@ -9212,8 +9275,6 @@ def fight_pile_in_plan(
     # Au moins une figurine doit finir dans l ER (bord-a-bord) d une unite ennemie.
     from engine.spatial_relations import unit_entries_within_engagement_zone
     ez = get_engagement_zone(game_state)
-    from engine.spatial_relations import get_engagement_zone_vertical
-    _vz = get_engagement_zone_vertical(game_state)  # engagement 3D (§03.04)
     enemy_entries = [
         e for e in (units_cache.get(esid) for esid in _enemy_squad_ids(game_state, our_player))
         if e is not None
@@ -9222,7 +9283,7 @@ def fight_pile_in_plan(
     for mid, c, r, _lv in plan:
         synth = _synth_model_entry(game_state, str(squad_id), models_cache[mid], c, r, level=_lv)
         if any(
-            unit_entries_within_engagement_zone(synth, ee, ez, vertical_zone_inches=_vz)
+            unit_entries_within_engagement_zone(synth, ee, ez)
             for ee in enemy_entries
         ):
             in_er = True
@@ -9232,17 +9293,42 @@ def fight_pile_in_plan(
     return plan
 
 
-def get_fighting_models(game_state: Dict[str, Any], squad_id: str) -> List[str]:
-    """Retourne les model_ids d une escouade autorises a frapper en melee.
+def get_fighting_models(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    target_squad_id: Optional[str] = None,
+) -> List[str]:
+    """Retourne les model_ids d'une escouade autorisés à frapper en mêlée.
 
-    Regle officielle (spec §"Quelles figurines peuvent frapper — buddy rule") :
-      Une fig peut attaquer si :
-        (1) elle est dans l ER d une unite ennemie, OU
-        (2) elle est en B2B avec une figurine ALLIEE de SON propre squad qui est
-            elle-meme en B2B avec un modele ennemi.
-      La condition (2) n est PAS transitive (1 niveau de buddy max).
+    Règle 04.02 SELECT TARGETS, WHILE FIGHTING : « Each target must be **engaged with the model
+    that has that weapon**. » Et 03.04 ENGAGEMENT définit « engagé » : à ≤ 2" horizontalement ET
+    ≤ 5" verticalement d'une figurine ennemie. Une figurine engagée frappe, une autre non — il n'y
+    a pas d'autre condition.
 
-    Ordre de retour : par index figurine (deterministe).
+    ``target_squad_id`` PORTE LA MOITIÉ « with the model » DE 04.02, et n'est pas un confort :
+    - **fourni** → l'engagement est testé contre CETTE escouade seule. C'est ce que la déclaration
+      de combat exige : une escouade coincée entre deux ennemis A et B qui déclare B ne doit pas
+      faire frapper B par ses figurines qui ne touchent que A. Sans ce paramètre, la liste était
+      « engagée avec n'importe qui » et le chemin gym accordait des attaques que le jumeau PvP
+      (``fight_handlers._model_can_fight_target``, cible-conscient) refuse.
+    - **None** → engagement contre n'importe quelle escouade ennemie. Sémantique DIFFÉRENTE et
+      légitime : c'est celle de l'observation (`fight_eligible` / `n_fight_eligible`, « cette
+      figurine est-elle au combat ? »), qui se calcule avant tout choix de cible. Le compte
+      par-cible y existe séparément (`n_models_engaging`, par entité ennemie).
+
+    LA CLAUSE « BUDDY » A ÉTÉ SUPPRIMÉE (2026-08-04). Elle accordait le droit de frapper à une
+    figurine NON engagée mais au contact d'une alliée de son escouade qui, elle, touchait un
+    ennemi (relais d'un cran, non transitif). Elle venait d'une édition antérieure de 40K, pas de
+    ce corpus : `base-contact` n'apparaît dans les 25 PDF que dans la phase de combat, et
+    uniquement pour dire qu'une figurine au contact NE BOUGE PAS au pile-in (12.03 / 12.08 WHILE
+    MOVING). Aucun texte n'accorde de relais d'attaque.
+
+    Elle était en prime mesurée dans une autre géométrie que la condition d'engagement : distance
+    de CENTRE à centre en cases (`== BASE_TO_BASE_SUBHEX`, soit 1 case) là où l'engagement se
+    mesure BORD à bord par la primitive. À x5 cette case vaut 0,2" — moins qu'un socle — donc la
+    clause ne pouvait se déclencher que sur des positions physiquement impossibles.
+
+    Ordre de retour : par index de figurine (déterministe).
     """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
@@ -9253,79 +9339,35 @@ def get_fighting_models(game_state: Dict[str, Any], squad_id: str) -> List[str]:
     our_player = int(units_cache.get(squad_id, {}).get("player", -1))  # get allowed
     from engine.spatial_relations import unit_entries_within_engagement_zone
     ez = get_engagement_zone(game_state)
-    from engine.spatial_relations import get_engagement_zone_vertical
-    _vz = get_engagement_zone_vertical(game_state)  # engagement 3D (§03.04)
-    # Positions ennemies AVEC leur intervalle vertical : le contact socle-à-socle est gaté par
-    # la même séparation verticale que l'engagement (§03.04). Sans ça, la clause « buddy » —
-    # qui RELAIE un engagement — réadmettait exactement les figurines que le gate vertical vient
-    # d'écarter (ennemi à l'étage juste au-dessus), c'est-à-dire un contrôle 3D contourné par un
-    # contrôle 2D dans la même fonction.
-    enemy_positions: List[Tuple[int, int]] = []
-    enemy_vertical: List[Tuple[int, int, float, float]] = []  # (col, row, plancher, MODEL_HEIGHT)
-    enemy_entries: List[Dict[str, Any]] = []
-    for esid in _enemy_squad_ids(game_state, our_player):
-        enemy_positions.extend(_squad_model_positions(game_state, esid))
-        ee = units_cache.get(esid)
-        if ee is not None:
-            enemy_entries.append(ee)
-            _e_floors = ee.get("floor_height_by_model")  # get allowed (entrées de test 2D)
-            _e_by_model = ee.get("occupied_hexes_by_model")  # get allowed
-            _e_height = float(ee.get("MODEL_HEIGHT", 0.0))  # get allowed
-            if isinstance(_e_by_model, dict) and isinstance(_e_floors, dict):
-                for _emid, (_ec, _er) in _e_by_model.items():
-                    enemy_vertical.append(
-                        (int(_ec), int(_er), float(_e_floors.get(_emid, 0.0)), _e_height)  # get allowed
-                    )
-    if not enemy_positions:
+    enemy_sids: List[str] = list(_enemy_squad_ids(game_state, our_player))
+    if target_squad_id is not None:
+        # Cible désignée : elle DOIT être ennemie. Une cible amie ou inconnue est une erreur
+        # d'appelant, pas une liste vide à interpréter comme « personne ne peut frapper ».
+        if str(target_squad_id) not in enemy_sids:
+            raise ValueError(
+                f"get_fighting_models: target_squad_id {target_squad_id!r} n'est pas une escouade "
+                f"ennemie de {squad_id!r} (joueur {our_player})"
+            )
+        enemy_sids = [str(target_squad_id)]
+    enemy_entries = [
+        e for e in (units_cache.get(esid) for esid in enemy_sids)
+        if e is not None
+    ]
+    if not enemy_entries:
         return []
 
-    # Pre-calcule : pour chaque fig, est-elle en ER (bord-a-bord) d un ennemi ? + position
-    positions: Dict[str, Tuple[int, int]] = {}
-    in_er: Dict[str, bool] = {}
-    b2b_enemy: Dict[str, bool] = {}
-    for mid in mids:
-        m = models_cache[mid]
-        pos = (int(m["col"]), int(m["row"]))
-        positions[mid] = pos
-        synth = _synth_model_entry(
-            game_state, str(squad_id), m, pos[0], pos[1], level=int(require_key(m, "level"))
-        )
-        in_er[mid] = any(
-            unit_entries_within_engagement_zone(synth, ee, ez, vertical_zone_inches=_vz)
-            for ee in enemy_entries
-        )
-        _my_floor = float(
-            (units_cache.get(squad_id, {}).get("floor_height_by_model") or {}).get(mid, 0.0)  # get allowed
-        )
-        _my_height = float(units_cache.get(squad_id, {}).get("MODEL_HEIGHT", 0.0))  # get allowed
-        b2b_enemy[mid] = any(
-            calculate_hex_distance(pos[0], pos[1], ec, er) == BASE_TO_BASE_SUBHEX
-            and max(0.0, max(_my_floor, ef) - min(_my_floor + _my_height, ef + eh)) <= _vz
-            for ec, er, ef, eh in enemy_vertical
-        )
-
-    # Condition (1) : in ER.
-    # Condition (2) : B2B avec un allie du meme squad qui est B2B avec un ennemi.
+    # Le gate vertical §03.04 n'est pas demandé : la primitive l'applique dès que les deux
+    # entrées portent leurs cartes verticales (cf. `entries_in_engagement_zone`).
     out: List[str] = []
     for mid in mids:
-        if in_er[mid]:
-            out.append(mid)
-            continue
-        my_pos = positions[mid]
-        relayed = False
-        for other_mid in mids:
-            if other_mid == mid:
-                continue
-            if not b2b_enemy.get(other_mid, False):
-                continue
-            other_pos = positions[other_mid]
-            if calculate_hex_distance(my_pos[0], my_pos[1], other_pos[0], other_pos[1]) == BASE_TO_BASE_SUBHEX:
-                relayed = True
-                break
-        if relayed:
+        m = models_cache[mid]
+        synth = _synth_model_entry(
+            game_state, str(squad_id), m, int(m["col"]), int(m["row"]),
+            level=int(require_key(m, "level")),
+        )
+        if any(unit_entries_within_engagement_zone(synth, ee, ez) for ee in enemy_entries):
             out.append(mid)
     return out
-
 
 # ============================================================================
 # SQUAD FIGHT — declaration + resolution + consolidation (squad.md PR3 3f)
@@ -9437,7 +9479,10 @@ def squad_declare_fight(
     PR3 3f MVP : auto-cible = target_squad_id passe par le caller (l agent a deja
     choisi). Auto-selection d arme CC par fig selon expected damage vs T/Sv cible.
 
-    Eligibilite per fig = `get_fighting_models` (in ER OR buddy rule).
+    Eligibilite per fig = `get_fighting_models(..., target_squad_id)` : 04.02 exige que la cible
+    soit engagee avec LA FIGURINE qui porte l arme, pas avec l escouade. Une escouade coincee
+    entre deux ennemis ne fait donc pas frapper la cible declaree par ses figurines qui ne
+    touchent que l autre.
 
     Returns la liste d intents (aussi stockee dans pending_squad_fight_intents).
     """
@@ -9463,7 +9508,7 @@ def squad_declare_fight(
     target_sv = int(require_key(t_sample, "ARMOR_SAVE"))
     target_invul = int(require_key(t_sample, "INVUL_SAVE"))
 
-    fighting = get_fighting_models(game_state, attacker_squad_id)
+    fighting = get_fighting_models(game_state, attacker_squad_id, target_squad_id)
     intents: List[Dict[str, Any]] = game_state["pending_squad_fight_intents"][attacker_squad_id]
     for mid in fighting:
         m = models_cache.get(mid)
@@ -9572,15 +9617,13 @@ def squad_consolidate_plan(
         return None
     from engine.spatial_relations import unit_entries_within_engagement_zone
     ez = get_engagement_zone(game_state)
-    from engine.spatial_relations import get_engagement_zone_vertical
-    _vz = get_engagement_zone_vertical(game_state)  # engagement 3D (§03.04)
     in_er = any(
         any(
             unit_entries_within_engagement_zone(
                 _synth_model_entry(
                     game_state, str(squad_id), models_cache[mid], c, r, level=lv
                 ),
-                ee, ez, vertical_zone_inches=_vz,
+                ee, ez,
             )
             for ee in enemy_entries
         )

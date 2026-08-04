@@ -101,8 +101,8 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 
 ✅ **Contrôle de conformité du 2026-08-02** (vérification par lecture, PAS une livraison —
 aucune ligne de code touchée) :
-- `obs_size` : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` = **20828**, et les **7** profils de
-  `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` portent **20828**
+- `obs_size` : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` = **20780**, et les **7** profils de
+  `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` portent **20780**
   (`x1_long` **et `x1_selfplay`** ajoutés depuis la relecture du 2026-07-29 ; cf. §0.59).
 - `macro_intents.TOTAL_ACTION_SIZE` = **1107** ; `DEPLOY_SLOTS` = ids **4..8** ;
   `spatial_grid.GRID_CHANNELS` = **9** ; `MOVE_CELL_BASE` = 0 / `MOVE_CELL_COUNT` = 1024.
@@ -120,7 +120,7 @@ aucune ligne de code touchée) :
   (§0.38) ; `get_best_enemy_*` : plus aucune définition (§0.46 pt 1).
 - ✅ **Somme des formes VÉRIFIÉE PAR EXÉCUTION le 2026-08-02** (elle était jusque-là la seule
   ligne déduite par lecture) : `sum(prod(shape))` sur les **20** clés de `squad_obs_shapes()`,
-  grille exclue, = **20828** — égale à `SQUAD_OBS_SIZE_TARGET`.
+  grille exclue, = **20780** — égale à `SQUAD_OBS_SIZE_TARGET`.
 - ⚠️ **Non revérifié le 2026-08-02** : les suites de tests (la vérification large appartient à
   l'utilisateur).
 
@@ -3805,9 +3805,9 @@ trois constructeurs :
 
 | | floats / transition |
 |---|---|
-| vecteur (`obs_size`) | 20 828 |
+| vecteur (`obs_size`) | 20 780 |
 | grille (9 × 32 × 32) | 9 216 |
-| **total** | **30 044**, soit **117,4 Kio** par transition en float32 |
+| **total** | **29 996**, soit **117,2 Kio** par transition en float32 |
 
 **Dimensionnement réel au 2026-08-02** — les **six** profils portent `n_envs: 48` et
 `n_steps: 8192` : **8 160 transitions**, **≈ 0,98 Go** de buffer. Le régime validé de CoreAgent
@@ -5014,7 +5014,7 @@ et la mauvaise cause.
 
 > ⏳ **Chiffres dépassés depuis — relevé du 2026-08-02.** Cette entrée décrit un état
 > **intermédiaire** du 2026-07-28 ; du travail a été livré par-dessus (§0.40 pour l'observation,
-> P2/P3-2 pour l'espace d'action). Valeurs courantes : `obs_size` **20828** (et non 20601/20626),
+> P2/P3-2 pour l'espace d'action). Valeurs courantes : `obs_size` **20780** (et non 20601/20626/20828),
 > `TOTAL_ACTION_SIZE` **1107** (et non 1062), `UNIT_CONT_SIZE` **20**, `UNIT_BIN_SIZE` **33**.
 > `PROFILE_CONT_SIZE` 13 / `PROFILE_BIN_SIZE` 18 et `GRID_CHANNELS` **9** restent exacts.
 > **Ne pas citer un chiffre de cette entrée comme état courant.**

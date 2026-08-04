@@ -286,9 +286,13 @@ def test_engagement_counters_cover_the_whole_squad():
     cont = eng.obs_builder.build_squad_observation(eng.game_state, "1")["allies_cont"][0]
     n_fight = float(cont[unit_cont_index("n_fight_eligible")])
     n_ez = float(cont[unit_cont_index("n_in_enemy_ez")])
-    n_buddy = float(cont[unit_cont_index("n_relayed_ez")])
     from engine.phase_handlers.shared_utils import get_fighting_models
 
     assert n_fight == float(len(set(get_fighting_models(eng.game_state, "1"))))
     assert n_ez >= 1.0
-    assert n_buddy >= 0.0
+    # `n_relayed_ez` a disparu avec la clause « buddy » (04.02 : seule une figurine ENGAGÉE
+    # frappe). Les deux compteurs restants décrivent donc exactement la même population, et
+    # c'est le sujet : l'observation ne doit plus annoncer d'éligible non engagé.
+    assert n_fight == n_ez, (
+        f"04.02 : éligibles ({n_fight}) et engagées ({n_ez}) sont la MÊME population"
+    )

@@ -199,7 +199,7 @@ def test_declaration_de_combat_leve_sur_nb_non_resoluble(monkeypatch):
     par l heuristique de choix d arme, donc c est bien la resolution de `squad_declare_fight`
     qui la rencontre (le tag d erreur le prouve).
     """
-    monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid: ["A1"])
+    monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid, tid=None: ["A1"])
     gs = _fight_state([_ccw("Choppa", 3, []), _ccw("Syringe", "D5", ["EXTRA_ATTACKS"])])
 
     with pytest.raises(ValueError) as exc:
@@ -211,7 +211,7 @@ def test_declaration_de_combat_leve_sur_nb_non_resoluble(monkeypatch):
 
 def test_declaration_de_combat_resout_les_nb_valides(monkeypatch):
     """Contre-epreuve : deux armes a NB valide -> attaques cumulees, aucune erreur."""
-    monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid: ["A1"])
+    monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid, tid=None: ["A1"])
     gs = _fight_state([_ccw("Choppa", 3, []), _ccw("Syringe", 1, ["EXTRA_ATTACKS"])])
 
     intents = squad_declare_fight(gs, "1", "2")
@@ -277,7 +277,7 @@ def test_invul_save_absente_leve_au_tir(monkeypatch):
 @pytest.mark.parametrize("cle", ["T", "ARMOR_SAVE", "INVUL_SAVE"])
 def test_caracteristique_defensive_absente_leve_en_melee(monkeypatch, cle):
     """`squad_declare_fight` lisait T/Sv/InSv de la cible avec 4/7/7 par defaut."""
-    monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid: ["A1"])
+    monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid, tid=None: ["A1"])
     gs = _fight_state([_ccw("Choppa", 3, [])])
     del gs["models_cache"]["T1"][cle]
 
@@ -290,7 +290,7 @@ def test_caracteristique_defensive_absente_leve_en_melee(monkeypatch, cle):
 @pytest.mark.parametrize("cle", ["ATK", "STR", "AP"])
 def test_caracteristique_d_arme_absente_leve_a_la_selection_melee(monkeypatch, cle):
     """Meme regle dans l heuristique de choix d arme CC (ex-`w.get("ATK", w.get("WS", 4))`)."""
-    monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid: ["A1"])
+    monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid, tid=None: ["A1"])
     weapon = _ccw("Choppa", 3, [])
     del weapon[cle]
     gs = _fight_state([weapon])
