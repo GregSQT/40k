@@ -27,6 +27,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -136,19 +137,6 @@ def _episode_with(melee_scenario_file, require, what) -> Tuple[W40KEngine, Dict[
     )
 
 
-def _charge_fail_line(turn: int, unit_id: str, player: int) -> Dict[str, Any]:
-    """Ligne de charge RATEE minimale : le contrat que la passe de comptage lit, et rien de plus.
-
-    Miroir des champs emis par le chemin squad (`w40k_core.squad_charge`, branche « aucun plan
-    valide pour ce jet »). Aucun autre compteur n'est touche : la passe de terminaison ne lit
-    de ces lignes que `type` et `player`.
-    """
-    return {"type": "charge_fail", "phase": "charge", "player": player, "turn": turn,
-            "unitId": unit_id, "targetId": "injected-target", "charge_roll": 3,
-            "charge_failed_reason": "no valid charge plan for roll",
-            "message": "injected", "timestamp": "server_time"}
-
-
 def test_a_failed_charge_counts_as_an_attempt_and_not_as_a_success(
     melee_scenario_file,
 ) -> None:
@@ -159,33 +147,30 @@ def test_a_failed_charge_counts_as_an_attempt_and_not_as_a_success(
     rate au moins une charge — sinon les deux compteurs seraient egaux et le test ne
     distinguerait pas les deux implementations.
 
-    La situation est CONSTRUITE, pas esperee d'une graine. Depuis 58c30dba (« la charge visait
-    le contact du CENTRE ennemi, pas l'engagement range »), plus aucune graine de `_SEEDS` ne
-    produit d'echec de jet du camp controle : la boucle `_episode_with` levait son garde-fou
-    anti-test-vacant. Une ligne `charge_fail` est donc injectee, comme dans
-    `test_shoot_activations_count_squads_not_journal_lines` — l'episode joue par-dessus fournit
-    les reussites reelles, l'injection fournit l'echec que les regles ne produisent plus ici.
-    """
-    engine, tactical = _play(
-        melee_scenario_file, _SEEDS[0], inject=[_charge_fail_line(1, "injected-squad", 1)]
-    )
-    controlled, _opponent = _seat(engine)
-    assert controlled == 1, "la ligne injectee est posee au nom du joueur 1"
+    Le JET est IMPOSE a 2, jamais espere d'une graine (meme doctrine que
+    `test_units_charged_means_charge_move`) : « a result of 2 (a double 1) is never sufficient »
+    (encart FAILED CHARGES du PDF 11), donc TOUTE charge declaree echoue sous ce patch. Depuis
+    58c30dba (« la charge visait le contact du CENTRE ennemi, pas l'engagement range »), aucune
+    graine de `_SEEDS` ne produisait plus d'echec naturel et le garde-fou anti-test-vacant de
+    `_episode_with` se levait. Ce qui reste demande a la graine — qu'une charge soit DECLAREE —
+    est justement ce que ce garde-fou exige encore.
 
-    # Les REUSSITES restent celles du moteur, pas de l'injection : sans cette exigence, un
-    # `squad_charge` qui n'emettrait plus AUCUNE ligne laisserait le test vert (1 tentative
-    # injectee, 0 reussite, les trois egalites ci-dessous encore satisfaites).
-    played = [lg for lg in _charge_logs(engine, controlled, ("charge",))
-              if str(lg["unitId"]) != "injected-squad"]
-    assert played, (
-        f"la graine {_SEEDS[0]} ne produit plus de charge REUSSIE du camp controle : le test ne "
-        f"lit plus que sa propre injection — a corriger, il ne doit pas verifier le vide"
-    )
+    L'echec traverse la vraie branche moteur (`squad_charge`, « aucun plan valide pour ce jet ») :
+    la ligne `charge_fail` que la passe de comptage lit est emise par le MOTEUR, pas fabriquee
+    par le test.
+    """
+    with patch("engine.phase_handlers.shared_utils.roll_charge_distance", return_value=2):
+        engine, tactical = _episode_with(
+            melee_scenario_file,
+            lambda _eng, td: td["charge_attempts"] > 0,
+            "une charge declaree du camp controle (jet impose a 2, donc ratee)",
+        )
+    controlled, _opponent = _seat(engine)
 
     failed = len(_charge_logs(engine, controlled, ("charge_fail",)))
     assert failed > 0, "montage casse : aucune charge ratee"
-    assert tactical["charge_successes"] == len(played)
-    assert tactical["charge_attempts"] == tactical["charge_successes"] + failed
+    # Egalites camp par camp, les quatre compteurs contre le journal du moteur.
+    _assert_counters_match_journal(engine, tactical)
     # Ce que l'ancienne mesure aurait rendu ici — strictement moins que les tentatives.
     assert tactical["charge_successes"] < tactical["charge_attempts"]
 
