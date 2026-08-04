@@ -487,3 +487,44 @@ def test_build_units_from_scenario_army_requires_unit_registry() -> None:
     engine_instance = _EngineStub({}, unit_registry=None)
     with pytest.raises(ValueError, match=r"unit_registry is required"):
         api_server._build_units_from_scenario_army(engine_instance, {"units": []}, 1, 1)
+
+
+# ---------------------------------------------------------------------------
+# Réserves stratégiques (20.01) — ce que l'UI PvP affiche et ce qu'elle refuse
+# ---------------------------------------------------------------------------
+
+
+def test_strategic_reserves_summary_reports_points_per_player() -> None:
+    """Le ratio « 120/250 » du conteneur PvP vient du MOTEUR, pas d'un calcul TypeScript."""
+    game_state = {
+        "points_limit": 500,
+        "units": [
+            {"id": "1", "player": 1, "VALUE": 120, "in_strategic_reserves": True},
+            {"id": "2", "player": 1, "VALUE": 80, "in_strategic_reserves": False},
+            {"id": "3", "player": 2, "VALUE": 60, "in_strategic_reserves": True},
+        ],
+    }
+    summary = api_server._strategic_reserves_summary(game_state)
+    assert summary["1"] == {"used_points": 120, "cap_points": 250}
+    assert summary["2"] == {"used_points": 60, "cap_points": 250}
+
+
+def test_strategic_reserves_summary_closes_the_rule_without_battle_size() -> None:
+    """Sans `scale`, le plafond de 50 % est invérifiable : plafond 0, donc aucun dépôt possible.
+
+    C'est la RÈGLE qui ferme (20.01 parle d'un pourcentage de la taille de bataille), pas un
+    défaut d'affichage rattrapé par une valeur arbitraire.
+    """
+    summary = api_server._strategic_reserves_summary({"points_limit": None, "units": []})
+    assert summary["1"]["cap_points"] == 0
+    assert summary["2"]["cap_points"] == 0
+
+
+def test_maybe_precompute_ingress_pools_is_a_noop_outside_move_phase() -> None:
+    """Le rechauffage n'a lieu qu'en phase de mouvement : ailleurs, il ne LIT meme pas l'etat."""
+    class _Boom(dict):
+        def __missing__(self, key: str) -> Any:  # pragma: no cover - garde de test
+            raise AssertionError(f"état lu hors phase move (clé {key!r})")
+
+    state = _Boom({"phase": "shoot", "current_player": 1})
+    api_server._maybe_precompute_ingress_pools(_EngineStub(state))

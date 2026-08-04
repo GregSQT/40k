@@ -121,7 +121,26 @@ def _resolve_next_deployer_after_success(
 # mouvement + zone d'engagement ennemie.
 
 
-def _deploy_pool_set(game_state: Dict[str, Any], player: int) -> Set[Tuple[int, int]]:
+def _deploy_pool_set(
+    game_state: Dict[str, Any],
+    player: int,
+    pool_override: Optional[AbstractSet[Tuple[int, int]]] = None,
+) -> AbstractSet[Tuple[int, int]]:
+    """Cellules où la mise en place (03.02) est légale pour ``player``.
+
+    ``pool_override`` : aire légale IMPOSÉE par la règle qui déclenche la mise en place. La
+    zone de déploiement n'est qu'un cas particulier — l'ingress move (20.04) pose l'unité à 6"
+    d'un bord et à plus de 8" des ennemis, le Deep Strike (24.09) n'importe où sur le plateau.
+    Le RESTE de la validité de placement (bornes, murs, empreintes, cohésion, étages) est
+    identique et n'est donc jamais réimplémenté : seul cet ensemble change.
+    """
+    if pool_override is not None:
+        # `frozenset` : passe-plat. L'aire d'ingress fait jusqu'à 57 538 cases DÉJÀ normalisées
+        # en `(int, int)` et immuables ; la recopie défensive coûtait 36,6 ms sur les 53 ms d'une
+        # action d'arrivée (3 appels), pour protéger d'une mutation qui ne peut pas arriver.
+        if isinstance(pool_override, frozenset):
+            return pool_override
+        return {(int(c), int(r)) for c, r in pool_override}
     deployment_state = require_key(game_state, "deployment_state")
     deployment_pools = require_key(deployment_state, "deployment_pools")
     pool = _get_deployment_pool(deployment_pools, int(player))
@@ -131,33 +150,35 @@ def _deploy_pool_set(game_state: Dict[str, Any], player: int) -> Set[Tuple[int, 
 def _deployed_occupied_positions(
     game_state: Dict[str, Any], exclude_squad_id: str, level: Optional[int] = None
 ) -> Set[Tuple[int, int]]:
-    """Cellules occupées par les escouades DÉJÀ déployées (hors ``exclude_squad_id``).
+    """Cellules occupées par les escouades SUR LE CHAMP DE BATAILLE (hors ``exclude_squad_id``).
 
-    On exclut les unités non déployées (ancre sentinelle ``(-1,-1)``) : leurs
-    empreintes fictives ne doivent pas bloquer une zone de déploiement réelle.
+    Le critère est la PRÉSENCE sur le plateau (``entry_is_on_battlefield``), pas l'appartenance
+    à ``deployment_state["deployed_units"]`` : ce set ne recense que les poses commises par le
+    déploiement ACTIF, donc il ignorait les unités du camp d'en face posées en mode 'fixed'
+    (elles ne bloquaient aucune case) et il ne connaît pas les unités arrivées de réserves
+    (20.04). Les unités hors table n'ont, elles, aucune empreinte (`occupied_hexes` vide).
 
     ``level`` : None = toutes figs confondues (comportement historique). Un entier
-    restreint aux figurines DÉPLOYÉES à ce niveau (deux figs à des étages différents
+    restreint aux figurines à ce niveau (deux figs à des étages différents
     ne se gênent pas — murs mis à part, cf. stage.md § murs verticaux prolongés).
     """
-    deployment_state = require_key(game_state, "deployment_state")
-    deployed_units = require_key(deployment_state, "deployed_units")
-    deployed_str = {str(u) for u in deployed_units}
+    from engine.phase_handlers.shared_utils import entry_is_on_battlefield
+
     units_cache = require_key(game_state, "units_cache")
     occupied: Set[Tuple[int, int]] = set()
     if level is None:
         for uid, entry in units_cache.items():
-            if str(uid) == str(exclude_squad_id) or str(uid) not in deployed_str:
+            if str(uid) == str(exclude_squad_id) or not entry_is_on_battlefield(entry):
                 continue
             occ = entry.get("occupied_hexes")  # get allowed
             if occ:
                 occupied.update((int(c), int(r)) for c, r in occ)
         return occupied
-    # Filtrage par niveau : empreinte par-figurine des figs déployées au niveau demandé.
+    # Filtrage par niveau : empreinte par-figurine des figs présentes au niveau demandé.
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    for uid in units_cache:
-        if str(uid) == str(exclude_squad_id) or str(uid) not in deployed_str:
+    for uid, entry in units_cache.items():
+        if str(uid) == str(exclude_squad_id) or not entry_is_on_battlefield(entry):
             continue
         for mid in squad_models.get(str(uid), []):  # get allowed
             m = models_cache.get(mid)
@@ -222,7 +243,8 @@ def _alive_model_ids(game_state: Dict[str, Any], squad_id: str) -> List[str]:
 
 
 def generate_compact_formation(
-    game_state: Dict[str, Any], squad_id: str, center_col: int, center_row: int
+    game_state: Dict[str, Any], squad_id: str, center_col: int, center_row: int,
+    pool_override: Optional[AbstractSet[Tuple[int, int]]] = None,
 ) -> List[Tuple[str, int, int]]:
     """Génère une formation compacte (anneaux hex) autour de ``center`` pour toutes
     les figurines vivantes de l'escouade.
@@ -246,7 +268,7 @@ def generate_compact_formation(
     units_cache = require_key(game_state, "units_cache")
     entry = require_key(units_cache, str(squad_id))
     player = int(require_key(entry, "player"))
-    pool_set = _deploy_pool_set(game_state, player)
+    pool_set = _deploy_pool_set(game_state, player, pool_override)
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     wall_hexes = game_state.get("wall_hexes", set())  # get allowed
@@ -681,7 +703,8 @@ def _normalize_plan_entry(e: Tuple[Any, ...]) -> Tuple[str, int, int, int]:
 
 
 def deployment_preview_plan(
-    game_state: Dict[str, Any], squad_id: str, plan: List[Tuple[Any, ...]]
+    game_state: Dict[str, Any], squad_id: str, plan: List[Tuple[Any, ...]],
+    pool_override: Optional[AbstractSet[Tuple[int, int]]] = None,
 ) -> Dict[str, Any]:
     """Dry-run d'un plan de déploiement par-figurine. Aucune écriture.
 
@@ -700,7 +723,7 @@ def deployment_preview_plan(
     units_cache = require_key(game_state, "units_cache")
     entry = require_key(units_cache, str(squad_id))
     player = int(require_key(entry, "player"))
-    pool_set = _deploy_pool_set(game_state, player)
+    pool_set = _deploy_pool_set(game_state, player, pool_override)
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     wall_hexes = game_state.get("wall_hexes", set())  # get allowed
@@ -877,7 +900,8 @@ def deployment_preview_action(
 
 
 def build_validated_deployment_plan(
-    game_state: Dict[str, Any], squad_id: str, anchor_col: int, anchor_row: int
+    game_state: Dict[str, Any], squad_id: str, anchor_col: int, anchor_row: int,
+    pool_override: Optional[AbstractSet[Tuple[int, int]]] = None,
 ) -> Optional[List[Tuple[str, int, int, int]]]:
     """Formation compacte AU SOL autour de l'ancre + validation par-figurine.
 
@@ -906,9 +930,11 @@ def build_validated_deployment_plan(
     étages restent Phase B pour le gym ; le flux PvP par escouade passe, lui, par
     ``deploy_generate_formation`` avec son niveau de vue.
     """
-    plan = generate_compact_formation(game_state, str(squad_id), int(anchor_col), int(anchor_row))
+    plan = generate_compact_formation(
+        game_state, str(squad_id), int(anchor_col), int(anchor_row), pool_override
+    )
     leveled: List[Tuple[str, int, int, int]] = [(mid, c, r, 0) for mid, c, r in plan]
-    preview = deployment_preview_plan(game_state, str(squad_id), leveled)
+    preview = deployment_preview_plan(game_state, str(squad_id), leveled, pool_override)
     if not preview["can_validate"]:
         return None
     return leveled
@@ -974,7 +1000,9 @@ def read_validated_deployment_plan(
 
 
 def _apply_deploy_plan(
-    game_state: Dict[str, Any], action: Dict[str, Any]
+    game_state: Dict[str, Any], action: Dict[str, Any],
+    pool_override: Optional[AbstractSet[Tuple[int, int]]] = None,
+    check_current_deployer: bool = True,
 ) -> Tuple[bool, Dict[str, Any]]:
     """Tronc commun commit/recommit : résout l'unité, valide le plan (placement +
     cohésion via ``deployment_preview_plan``) et écrit les positions des figurines.
@@ -985,14 +1013,18 @@ def _apply_deploy_plan(
     Retourne (True, {}) si le plan a été appliqué, sinon (False, erreur).
     """
     squad_id = str(require_key(action, "unitId"))
-    deployment_state = require_key(game_state, "deployment_state")
-    current_deployer = int(require_key(deployment_state, "current_deployer"))
 
     unit = get_unit_by_id(squad_id, game_state)
     if not unit:
         raise KeyError(f"Unit {squad_id} missing from game_state['units']")
-    if int(require_key(unit, "player")) != current_deployer:
-        return False, {"error": "unit_not_current_deployer", "unitId": squad_id}
+    # L'alternance des déployeurs n'existe QUE pendant la phase de déploiement. Une mise en
+    # place déclenchée par une règle (ingress move 20.04) survient pendant le tour de son
+    # propriétaire, sans `deployment_state["current_deployer"]` à interroger.
+    if check_current_deployer:
+        deployment_state = require_key(game_state, "deployment_state")
+        current_deployer = int(require_key(deployment_state, "current_deployer"))
+        if int(require_key(unit, "player")) != current_deployer:
+            return False, {"error": "unit_not_current_deployer", "unitId": squad_id}
 
     plan = _parse_plan(action)
     alive = set(_alive_model_ids(game_state, squad_id))
@@ -1005,7 +1037,7 @@ def _apply_deploy_plan(
             "got": sorted(plan_ids),
         }
 
-    preview = deployment_preview_plan(game_state, squad_id, plan)
+    preview = deployment_preview_plan(game_state, squad_id, plan, pool_override)
     if not preview["can_validate"]:
         return False, {
             "error": "invalid_deploy_plan",
@@ -1041,6 +1073,36 @@ def _apply_deploy_plan(
     unit["deployed_on_turn"] = (
         0 if require_key(game_state, "phase") == "deployment" else int(require_key(game_state, "turn"))
     )
+    # 20.03 — « To arrive on the battlefield, each strategic reserves unit must make an ingress
+    # move ». Une fois POSÉE, l'unité n'est plus en réserves : elle est arrivée. Écrit ici, dans
+    # le commit de mise en place (source unique du passage hors table -> table), et non dans le
+    # handler d'ingress : les deux états ne peuvent donc pas diverger.
+    unit["in_strategic_reserves"] = False
+    # Caches d'adjacence ennemie : l'unité vient d'APPARAÎTRE sur le plateau, donc les hexes
+    # qu'elle rend adjacents doivent entrer dans le cache des AUTRES joueurs — celui qu'ils
+    # consultent pour savoir où ils n'ont pas le droit d'aller. Ces caches sont construits une
+    # fois à l'ouverture de la phase de mouvement : une mise en place SURVENUE PENDANT cette
+    # phase (ingress move 20.04) les laissait ignorer l'arrivante, et un mouvement réactif
+    # adverse (9") pouvait alors se poser dans sa zone d'engagement. Jumeau de l'appel que fait
+    # `movement_commit_move_plan_handler` après un déplacement.
+    #
+    # Exclu PENDANT la phase de déploiement : `movement_phase_start` construit ces caches de
+    # zéro juste après, pour tous les joueurs. Les recalculer à chaque pose y serait du travail
+    # jeté, pas une sécurité.
+    if entry is not None and require_key(game_state, "phase") != "deployment":
+        from engine.phase_handlers.shared_utils import (
+            update_enemy_adjacent_caches_after_unit_move,
+        )
+
+        update_enemy_adjacent_caches_after_unit_move(
+            game_state,
+            moved_unit_player=int(require_key(unit, "player")),
+            # (-1,-1) = position hors table d'où l'unité arrive : aucun hexe à retirer du cache.
+            old_col=-1, old_row=-1,
+            new_col=int(entry["col"]), new_row=int(entry["row"]),
+            old_occupied=set(),
+            new_occupied=entry.get("occupied_hexes"),  # get allowed (mono-hex -> ancre seule)
+        )
     rebuild_choice_timing_index(game_state)
     return True, {}
 
@@ -1080,6 +1142,131 @@ def deployment_commit_plan(
 
     result: Dict[str, Any] = {
         "action": "deploy_commit",
+        "unitId": squad_id,
+        "deployment_complete": deployment_state.get("deployment_complete", False),  # get allowed
+    }
+    if deployment_state.get("deployment_complete", False):  # get allowed
+        game_state["current_player"] = 1
+        result.update({"phase_complete": True, "next_phase": "command"})
+    return True, result
+
+
+def strategic_reserves_usage(game_state: Dict[str, Any], player: int) -> Tuple[int, int]:
+    """``(points engagés, plafond)`` en réserves pour ``player`` — règle 20.01 (50 %).
+
+    SOURCE UNIQUE des deux grandeurs : celle qui DÉCIDE de l'acceptation d'un dépôt
+    (`unit_can_be_placed_in_strategic_reserves`, via le headroom) et celle qui est AFFICHÉE au
+    joueur (le ratio « 120/250 » du conteneur PvP) doivent être le même calcul. Les séparer
+    ferait afficher un ratio qui n'est pas celui qui refuse le dépôt — exactement le défaut que
+    l'API cherchait à éviter côté client.
+
+    Plafond nul quand la taille de bataille (`points_limit`, posée au chargement) est absente :
+    la règle est alors invérifiable, donc AUCUN dépôt n'est possible. C'est la règle qui ferme.
+    """
+    from engine.game_state import STRATEGIC_RESERVES_POINTS_RATIO
+
+    points_limit = require_key(game_state, "points_limit")
+    cap = int(int(points_limit) * STRATEGIC_RESERVES_POINTS_RATIO) if points_limit else 0
+    used = sum(
+        int(require_key(u, "VALUE"))
+        for u in require_key(game_state, "units")
+        if int(require_key(u, "player")) == int(player)
+        and u.get("in_strategic_reserves", False)  # get allowed (champ optionnel, cf. loader)
+    )
+    return (used, cap)
+
+
+def strategic_reserves_points_headroom(game_state: Dict[str, Any], player: int) -> int:
+    """Points encore plaçables en réserves par ``player`` sans dépasser le plafond 20.01 (50 %).
+
+    Le plafond porte sur la valeur TOTALE des réserves du joueur ; le contrôle est donc le même
+    qu'au chargement (`validate_strategic_reserves_cap`), appliqué ici de façon INCRÉMENTALE :
+    c'est ce qui permet au masque de fermer la mise en réserve dès qu'une unité ne tiendrait
+    plus sous le plafond, au lieu de laisser l'agent produire une liste illégale.
+    """
+    used, cap = strategic_reserves_usage(game_state, player)
+    return max(0, cap - used)
+
+
+def unit_can_be_placed_in_strategic_reserves(game_state: Dict[str, Any], unit_id: str) -> bool:
+    """20.01 — cette unité peut-elle être placée en réserves au lieu d'être déployée ?
+
+    Trois conditions, toutes du texte de la règle : elle n'est pas une FORTIFICATION, elle n'est
+    pas déjà posée, et sa valeur en points tient sous le plafond de 50 % restant.
+    """
+    unit = get_unit_by_id(str(unit_id), game_state)
+    if unit is None:
+        raise KeyError(f"unit_can_be_placed_in_strategic_reserves: unit {unit_id} introuvable")
+    if require_key(unit, "deployed_on_turn") is not None:
+        return False
+    keywords = {
+        str(require_key(kw, "keywordId")).strip().lower()
+        for kw in require_key(unit, "UNIT_KEYWORDS")
+    }
+    if "fortification" in keywords:
+        return False
+    return int(require_key(unit, "VALUE")) <= strategic_reserves_points_headroom(
+        game_state, int(require_key(unit, "player"))
+    )
+
+
+def deployment_place_in_strategic_reserves(
+    game_state: Dict[str, Any], action: Dict[str, Any]
+) -> Tuple[bool, Dict[str, Any]]:
+    """20.01 — place l'unité en réserves stratégiques AU LIEU de la déployer.
+
+    Jumeau exact de ``deployment_commit_plan`` du point de vue de la PROGRESSION du déploiement
+    (l'unité sort de ``deployable_units``, le déployeur alterne, la phase se termine quand plus
+    personne n'a d'unité à poser) ; la seule différence est qu'aucune figurine n'est posée :
+    l'unité reste hors table (`deployed_on_turn` nul) avec `in_strategic_reserves` vrai, et elle
+    arrivera par un ingress move (20.04).
+    """
+    squad_id = str(require_key(action, "unitId"))
+    deployment_state = require_key(game_state, "deployment_state")
+    current_deployer = int(require_key(deployment_state, "current_deployer"))
+
+    deployable_units = require_key(deployment_state, "deployable_units")
+    deployable_list = deployable_units.get(
+        current_deployer, deployable_units.get(str(current_deployer))
+    )
+    if deployable_list is None:
+        raise KeyError(f"deployable_units missing player {current_deployer}")
+    if squad_id not in [str(uid) for uid in deployable_list]:
+        return False, {"error": "unit_not_deployable", "unitId": squad_id}
+
+    unit = get_unit_by_id(squad_id, game_state)
+    if not unit:
+        raise KeyError(f"Unit {squad_id} missing from game_state['units']")
+    if int(require_key(unit, "player")) != current_deployer:
+        return False, {"error": "unit_not_current_deployer", "unitId": squad_id}
+    if not unit_can_be_placed_in_strategic_reserves(game_state, squad_id):
+        return False, {"error": "strategic_reserves_not_allowed", "unitId": squad_id}
+
+    unit["in_strategic_reserves"] = True
+    # L'unité sort du POOL À POSER, mais n'entre PAS dans `deployed_units` : elle n'est pas sur
+    # le champ de bataille, et `deployment_recommit_plan` (repositionnement pendant la phase de
+    # déploiement) ne doit pas pouvoir la poser après coup — elle n'arrive que par 20.04.
+    if current_deployer in deployable_units:
+        deployable_units[current_deployer] = [
+            uid for uid in deployable_units[current_deployer] if str(uid) != squad_id
+        ]
+    else:
+        deployable_units[str(current_deployer)] = [
+            uid for uid in deployable_units[str(current_deployer)] if str(uid) != squad_id
+        ]
+
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, f"STRATEGIC RESERVES (20.01): unit {squad_id} held in reserves")
+
+    next_deployer = _resolve_next_deployer_after_success(deployment_state, current_deployer)
+    if next_deployer is None:
+        deployment_state["deployment_complete"] = True
+    else:
+        deployment_state["current_deployer"] = next_deployer
+        game_state["current_player"] = next_deployer
+
+    result: Dict[str, Any] = {
+        "action": "deploy_strategic_reserves",
         "unitId": squad_id,
         "deployment_complete": deployment_state.get("deployment_complete", False),  # get allowed
     }
@@ -1134,6 +1321,12 @@ def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]
         return deployment_commit_plan(game_state, action)
     if action_type == "deploy_recommit":
         return deployment_recommit_plan(game_state, action)
+    # 20.01 — mise en réserves AU LIEU du déploiement. Routée ICI, dans le dispatcher commun aux
+    # deux sièges, et non depuis l'API : elle MUTE l'état (l'unité sort du pool à poser, la main
+    # passe au déployeur suivant), donc elle doit emprunter le chemin qui journalise l'action,
+    # capture le snapshot de rewind et resérialise l'état pour le client.
+    if action_type == "deploy_strategic_reserves":
+        return deployment_place_in_strategic_reserves(game_state, action)
     if action_type != "deploy_unit":
         return False, {"error": "invalid_deployment_action", "action": action_type}
 

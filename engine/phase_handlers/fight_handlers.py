@@ -38,6 +38,7 @@ from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH, cube_to_offset, offset_t
 # `engine.phase_handlers`.
 from engine.terrain_utils import resolve_model_floor_level, resolved_floor_height_at
 from .shared_utils import (
+    entry_is_on_battlefield,
     model_in_base_contact,
     end_of_turn_regain_coherency_all_squads,
     calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge,
@@ -1763,12 +1764,18 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
 
     valid_targets = []
 
+    from engine.phase_handlers.shared_utils import entry_is_on_battlefield
+
     for target_id, target_entry in units_cache.items():
         target_id_str = str(target_id)
         if target_id_str == unit_id_str:
             continue
         target_player = int(require_key(target_entry, "player"))
         if target_player == unit_player:
+            continue
+        # HORS TABLE (réserves 20.01) : vivante mais pas sur le champ de bataille — jamais
+        # engagée, donc jamais une cible de mêlée.
+        if not entry_is_on_battlefield(target_entry):
             continue
         if not unit_entries_within_engagement_zone(
             unit_entry, target_entry, cc_range):
@@ -2553,6 +2560,11 @@ def fight_v11_eligible_unit_ids(
         uid = str(require_key(u, "id"))
         if not is_unit_alive(uid, game_state):
             continue
+        # HORS TABLE (réserves 20.01) : une unité qui n'est pas sur le champ de bataille ne
+        # combat pas. Elle n'est de toute façon engagée avec personne (empreinte vide), mais le
+        # dire ici évite de faire reposer une règle sur un effet de bord géométrique.
+        if not entry_is_on_battlefield(require_key(game_state, "units_cache")[uid]):
+            continue
         if not fight_v11_is_eligible_to_fight(game_state, u):
             continue
         if fights_first_only and not is_fights_first(u, game_state):
@@ -2910,6 +2922,18 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     if current_player not in (1, 2):
         raise ValueError(f"Invalid current_player value: {current_player}")
     units_processed = len(game_state.get("units_selected_to_fight", set()))
+
+    # 20.04 — « At the end of the third battle round … destroyed ». Le ROUND de bataille
+    # s'achève quand le joueur 2 termine sa phase de combat (dernière phase de son tour) ;
+    # `game_state["turn"]` porte le numéro de round et n'est incrémenté qu'après. Avant le test
+    # de limite de tour ET avant le scoring : une unité détruite par cette règle ne doit pas
+    # peser dans le départage aux points de la fin de partie.
+    from engine.phase_handlers.movement_handlers import STRATEGIC_RESERVES_LAST_ROUND
+
+    if current_player == 2 and int(require_key(game_state, "turn")) == STRATEGIC_RESERVES_LAST_ROUND:
+        from engine.w40k_core import destroy_unarrived_strategic_reserves
+
+        destroy_unarrived_strategic_reserves(game_state)
 
     if current_player == 1:
         game_state["current_player"] = 2

@@ -387,7 +387,11 @@ class RewardCalculator:
             game_state['last_reward_breakdown'] = reward_breakdown
             return calculated_reward
             
-        elif action_type == "deploy_unit":
+        # Mise en réserves (20.01) et arrivée de réserves (20.04) sont deux MISES EN PLACE :
+        # elles ont exactement le même profil de récompense que le déploiement — aucune valeur
+        # propre, le gain (ou la perte) se matérialise dans les phases suivantes, et la pression
+        # de tempo de 20.04 est portée par la DESTRUCTION de fin de 3e round, pas par un bonus.
+        elif action_type in ("deploy_unit", "deploy_strategic_reserves", "ingress_move"):
             deploy_reward = 0.0 + objective_turn_reward
             reward_breakdown['base_actions'] = 0.0
             reward_breakdown['total'] = deploy_reward

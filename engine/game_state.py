@@ -20,6 +20,86 @@ from engine.hex_utils import (
     expand_wall_group_to_hex_list, polygon_to_hex_list, require_base_size,
 )
 
+# Plafond des réserves stratégiques (20.01) : « the combined points value of all of your
+# strategic reserves units cannot exceed 50% of your points limit for your battle size ».
+STRATEGIC_RESERVES_POINTS_RATIO = 0.5
+
+# `scale` du scénario = taille de bataille en points ("500pts"). C'est la SEULE source du
+# plafond 20.01 ; un format inconnu lève plutôt que de désactiver le contrôle en silence.
+_BATTLE_SIZE_RE = re.compile(r"^(\d+)pts$")
+
+
+def battle_points_limit(scale: Any, context: str) -> int:
+    """Limite de points de la bataille (20.01) lue depuis le `scale` du scénario ("500pts" → 500)."""
+    match = _BATTLE_SIZE_RE.match(str(scale).strip())
+    if match is None:
+        raise ValueError(
+            f"{context}: 'scale' {scale!r} n'exprime pas une taille de bataille en points "
+            f"(format attendu '<N>pts') — impossible de vérifier le plafond de réserves 20.01"
+        )
+    limit = int(match.group(1))
+    if limit <= 0:
+        raise ValueError(f"{context}: 'scale' {scale!r} donne une limite de points nulle ou négative")
+    return limit
+
+
+def _default_reserves_parameters() -> Dict[str, Any]:
+    """Les trois paramètres de 20.03/20.04, à leur valeur GÉNÉRIQUE, posés sur chaque unité.
+
+    Les trois clauses concernées sont explicitement surchargeables par des capacités (« unless
+    otherwise stated » pour le round d'arrivée, « anywhere on the battlefield » pour la bande de
+    bord, « more than 9\" away » pour la distance aux ennemis). Les porter sur l'unité est ce qui
+    permet à une règle — y compris une règle d'une AUTRE unité, comme Logan Grimnar qui fait
+    arriver une unité au 1er round — de les modifier sans toucher au moteur.
+
+    Importés depuis `movement_handlers`, propriétaire des règles 20.03/20.04 : les défauts n'ont
+    ainsi qu'une seule définition.
+    """
+    from engine.phase_handlers.movement_handlers import (
+        INGRESS_ENEMY_CLEARANCE_INCHES,
+        INGRESS_FIRST_BATTLE_ROUND,
+        INGRESS_SETUP_DISTANCE_INCHES,
+        RESERVES_ARRIVAL_ROUND_FIELD,
+        RESERVES_EDGE_DISTANCE_FIELD,
+        RESERVES_ENEMY_CLEARANCE_FIELD,
+    )
+
+    return {
+        RESERVES_ARRIVAL_ROUND_FIELD: INGRESS_FIRST_BATTLE_ROUND,
+        RESERVES_EDGE_DISTANCE_FIELD: INGRESS_SETUP_DISTANCE_INCHES,
+        RESERVES_ENEMY_CLEARANCE_FIELD: INGRESS_ENEMY_CLEARANCE_INCHES,
+    }
+
+
+def validate_strategic_reserves_cap(
+    units: List[Dict[str, Any]], points_limit: int, context: str
+) -> None:
+    """Plafond 20.01 : ≤ 50 % de la limite de points par joueur, en RÉSERVES.
+
+    Contrôle DUR au chargement : dépassement -> erreur nommant les unités et le total. Tronquer
+    la liste (retirer des unités des réserves jusqu'à repasser sous le plafond) déciderait à la
+    place du joueur et masquerait une liste illégale.
+    """
+    cap = int(points_limit * STRATEGIC_RESERVES_POINTS_RATIO)
+    by_player: Dict[int, List[Dict[str, Any]]] = {}
+    for unit in units:
+        if not unit.get("in_strategic_reserves"):  # get allowed (champ optionnel = pas en réserve)
+            continue
+        by_player.setdefault(int(require_key(unit, "player")), []).append(unit)
+    for player, reserve_units in sorted(by_player.items()):
+        total = sum(int(require_key(u, "VALUE")) for u in reserve_units)
+        if total > cap:
+            detail = ", ".join(
+                f"{u.get('unitType', u.get('unit_type'))}(id={u.get('id')}, {require_key(u, 'VALUE')}pts)"
+                for u in reserve_units
+            )
+            raise ValueError(
+                f"{context}: joueur {player} place {total} points en réserves stratégiques pour un "
+                f"plafond de {cap} points (50 % de {points_limit}, règle 20.01). Unités en "
+                f"réserves : {detail}"
+            )
+
+
 # PERF: In-memory caches to avoid repeated disk I/O during scenario rotation.
 _scenario_json_cache: Dict[str, Any] = {}
 _walls_json_cache: Dict[str, List[List[int]]] = {}
@@ -267,6 +347,28 @@ class GameStateManager:
             # scénario / mode fixed) ; None = pas encore sur le board (déploiement actif, la
             # valeur est écrite au commit) ; N > 0 = arrivée de réserve au tour N.
             "deployed_on_turn": None if int(config["col"]) < 0 else 0,
+            # Réserves stratégiques (20.01/20.02) — cf. `_build_enhanced_unit` pour la
+            # sémantique. DEUX sources, dans cet ordre :
+            #   - `in_strategic_reserves` : l'unité vient de `_build_enhanced_unit`, qui a déjà
+            #     résolu la déclaration de roster. C'est le cas de TOUTES les unités du moteur,
+            #     `initialize_units` reconstruisant chaque unité enrichie par ce constructeur.
+            #     L'omettre annulait purement et simplement toute réserve déclarée par un roster :
+            #     l'unité repassait à False et se retrouvait soit redéployée normalement, soit
+            #     bloquée hors table sans arrivée possible ni destruction de fin de 3e round.
+            #   - `strategic_reserves` : déclaration BRUTE (roster/scénario), pour une unité
+            #     construite sans passer par l'enrichissement (API build army, fixture).
+            "in_strategic_reserves": bool(
+                config.get(  # get allowed (2 sources, cf. ci-dessus)
+                    "in_strategic_reserves", config.get("strategic_reserves", False)
+                )
+            ),
+            "reserves_repositioned": bool(config.get("reserves_repositioned", False)),  # get allowed
+            **{
+                # Paramètres 20.03/20.04 : ceux de l'unité enrichie si elle en porte (une
+                # capacité a pu les modifier avant un rechargement), sinon la règle générique.
+                _k: config.get(_k, _v)  # get allowed (idem)
+                for _k, _v in _default_reserves_parameters().items()
+            },
             # Attached units (rule 19.01): bodyguard unit-name keywords this leader/support may attach to.
             # Empty list for non-leader units (valid business case: the LEADER rule is absent from their config).
             "CAN_LEAD": copy.deepcopy(config["CAN_LEAD"] if "CAN_LEAD" in config else []),
@@ -720,6 +822,22 @@ class GameStateManager:
                     f"datasheet {unit_type} (déploiement)",
                 )
                 player_deployment_type = deployment_type_by_player[int(unit_player)]
+                # 20.01 — « Instead of setting up these units on the battlefield during
+                # deployment, place them to one side ». Une unité en réserves n'entre dans AUCUN
+                # des trois modes de placement : ni tirage aléatoire, ni position fixe du roster,
+                # ni pool de déploiement actif. Sentinelle (-1,-1) = hors table, exactement comme
+                # une unité en attente de déploiement actif (source unique `deployed_on_turn`).
+                in_reserves = bool(unit_data.get("strategic_reserves", False))  # get allowed
+                if in_reserves:
+                    _reserve_keywords = {
+                        str(require_key(kw, "keywordId")).strip().lower()
+                        for kw in require_key(full_unit_data, "UNIT_KEYWORDS")
+                    }
+                    if "fortification" in _reserve_keywords:
+                        raise ValueError(
+                            f"Unit {unit_data.get('id')} ({unit_type}) : une FORTIFICATION ne peut "
+                            f"pas être placée en réserves stratégiques (règle 20.01)"
+                        )
                 pool_set = set()
                 # deploy_pools est peuplé soit par les deployment_zones du terrain (voie moderne,
                 # sans nom 'deployment_zone'), soit par la voie legacy config/deployment/<board>/.
@@ -727,7 +845,9 @@ class GameStateManager:
                 if int(unit_player) in deploy_pools:
                     pool_set = deploy_pools[int(unit_player)]
 
-                if player_deployment_type == "random":
+                if in_reserves:
+                    chosen_col, chosen_row = -1, -1
+                elif player_deployment_type == "random":
                     if not pool_set:
                         raise ValueError(f"No deployment pool for player {unit_player}")
                     candidates = [
@@ -792,6 +912,26 @@ class GameStateManager:
                 )
                 enhanced_units.append(enhanced_unit)
 
+            # 20.01 — plafond des réserves, vérifié AU CHARGEMENT (contrôle dur). N'a de sens
+            # qu'avec une taille de bataille déclarée (`scale`) : les scénarios PvP historiques
+            # (liste d'unités nue, sans `scale`) n'en portent pas, et aucun d'eux ne déclare de
+            # réserves — si l'un le faisait, l'absence de `scale` lèverait ici plutôt que de
+            # désactiver le plafond en silence.
+            _declared_reserves = any(u["in_strategic_reserves"] for u in enhanced_units)
+            _scale_raw = scenario_data.get("scale") if isinstance(scenario_data, dict) else None
+            if _declared_reserves:
+                if _scale_raw is None:
+                    raise ValueError(
+                        f"Scenario {scenario_file} déclare des réserves stratégiques sans 'scale' : "
+                        f"la limite de points de la bataille est inconnue, le plafond 20.01 "
+                        f"(50 %) ne peut pas être vérifié"
+                    )
+                validate_strategic_reserves_cap(
+                    enhanced_units,
+                    battle_points_limit(_scale_raw, f"Scenario {scenario_file}"),
+                    f"Scenario {scenario_file}",
+                )
+
             # Extract optional terrain data from scenario
             # If present in scenario, use it; otherwise return None for board config selection
             scenario_walls = resolved_scenario_walls
@@ -841,6 +981,14 @@ class GameStateManager:
                 "deployment_type_by_player": deployment_type_by_player,
                 "deployment_pools": deployment_pools_serializable,
                 "roster_info": scenario_roster_info,
+                # Taille de bataille en points (20.01) — None quand le scénario ne la déclare
+                # pas (`scale` absent : scénarios PvP historiques). Le plafond de réserves est
+                # alors invérifiable, donc la mise en réserve n'est pas proposée : l'absence
+                # ferme la règle, elle ne l'ouvre pas sans contrôle.
+                "points_limit": (
+                    battle_points_limit(_scale_raw, f"Scenario {scenario_file}")
+                    if _scale_raw is not None else None
+                ),
             }
 
     def _fold_attached_characters(self, basic_units: List[Dict[str, Any]], unit_registry: Any) -> List[Dict[str, Any]]:
@@ -954,6 +1102,14 @@ class GameStateManager:
             if field not in unit_data:
                 raise KeyError(f"Unit missing required field '{field}': {unit_data}")
 
+        # 20.01 — une unité en réserves est HORS TABLE au même titre qu'une unité en attente de
+        # déploiement actif : figurines à la sentinelle (-1,-1) et `deployed_on_turn` nul, quel
+        # que soit le mode de déploiement du joueur. Les positions déclarées par un roster
+        # positionné (mode 'fixed') sont donc ignorées pour elle — et surtout PAS appliquées,
+        # sinon l'ancre (-1,-1) et models[0] divergeraient (invariant `build_units_cache`).
+        in_strategic_reserves = bool(unit_data.get("strategic_reserves", False))  # get allowed
+        off_board = player_deployment_type == "active" or in_strategic_reserves
+
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract RNG_WEAPONS and CC_WEAPONS
         rng_weapons = copy.deepcopy(require_key(full_unit_data, "RNG_WEAPONS"))
         cc_weapons = copy.deepcopy(require_key(full_unit_data, "CC_WEAPONS"))
@@ -1058,8 +1214,19 @@ class GameStateManager:
             "_UNIT_RULES_OWN": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
             "_ATTACHED_RULE_GROUPS": {},
             "UNIT_KEYWORDS": copy.deepcopy(require_key(full_unit_data, "UNIT_KEYWORDS")),
-            # Cf. create_unit : 0 = posée avant la bataille, None = déploiement actif en attente.
-            "deployed_on_turn": None if player_deployment_type == "active" else 0,
+            # Cf. create_unit : 0 = posée avant la bataille, None = hors table (déploiement actif
+            # en attente, ou réserves stratégiques 20.01).
+            "deployed_on_turn": None if off_board else 0,
+            # 20.01 — statut de RÉSERVE. `deployed_on_turn` reste la source unique du « où » (hors
+            # table / posée à quel tour) ; ce drapeau porte le « pourquoi », que la position ne
+            # peut pas exprimer : une unité hors table en phase de déploiement attend d'être
+            # posée, une unité en réserves attend un ingress move (20.04). Ce n'est donc PAS un
+            # second modèle de hors-table.
+            "in_strategic_reserves": in_strategic_reserves,
+            # 20.02 — unité RETIRÉE du board puis replacée en réserves pendant la bataille
+            # (Da Jump). Exemptée de la destruction de fin de 3e round (20.04).
+            "reserves_repositioned": False,
+            **_default_reserves_parameters(),
             # Attached units (rule 19.01): empty list for non-leader units (valid business case).
             "CAN_LEAD": copy.deepcopy(full_unit_data["CAN_LEAD"] if "CAN_LEAD" in full_unit_data else []),
             "SHOOT_LEFT": shoot_left,
@@ -1092,14 +1259,15 @@ class GameStateManager:
                     raise TypeError(
                         f"Unit {unit_data.get('id')}: models[{idx}] must be dict, got {type(spec).__name__}"
                     )
-                # Mode active : l'escouade n'est pas encore déployée. On
-                # conserve la composition (nombre de figurines + unit_type
-                # par figurine) mais on ne place pas les figurines : ancre
-                # et toutes les figurines à la sentinelle (-1,-1) pour
-                # respecter l'invariant ancre==models[0] (build_units_cache).
-                # Les positions réelles sont générées au déploiement
-                # (formation compacte) puis ajustées via squad/fig move.
-                if player_deployment_type == "active":
+                # Hors table (mode active, ou réserves 20.01) : l'escouade n'est
+                # pas encore posée. On conserve la composition (nombre de
+                # figurines + unit_type par figurine) mais on ne place pas les
+                # figurines : ancre et toutes les figurines à la sentinelle
+                # (-1,-1) pour respecter l'invariant ancre==models[0]
+                # (build_units_cache). Les positions réelles sont générées à la
+                # mise en place (formation compacte) — déploiement ou ingress
+                # move (20.04) — puis ajustées via squad/fig move.
+                if off_board:
                     m_norm_col, m_norm_row = -1, -1
                 else:
                     m_col = int(require_key(spec, "col"))
@@ -1187,6 +1355,11 @@ class GameStateManager:
                     # Keywords propres = ceux de l'unit_type de l'escouade, capturés AVANT
                     # l'union 19.03 appliquée plus bas à enhanced_unit["UNIT_KEYWORDS"].
                     m_spec["UNIT_KEYWORDS"] = copy.deepcopy(require_key(full_unit_data, "UNIT_KEYWORDS"))
+                    # Règles propres — jumeau des keywords ci-dessus, capturées AVANT l'union
+                    # 19.04. Une figurine sans override est de l'unit_type de l'escouade : ses
+                    # règles sont celles de SA datasheet, pas l'union de l'escouade. C'est ce que
+                    # lisent les règles « if every model in this unit has this ability » (24.09).
+                    m_spec["UNIT_RULES"] = copy.deepcopy(require_key(full_unit_data, "UNIT_RULES"))
                     total_hp_cur += int(full_unit_data["HP_MAX"])
                     total_value += int(full_unit_data["VALUE"])
                 normalized_models.append(m_spec)
@@ -2344,6 +2517,15 @@ class GameStateManager:
                 )
             unit_type = require_key(comp_entry, "unit_type")
             count = require_key(comp_entry, "count")
+            # 20.01 — mise en réserve DÉCLARÉE par la liste. Optionnel (absent = déployée
+            # normalement) ; c'est le seul champ de roster de ce chantier. Le choix DYNAMIQUE
+            # (l'agent décide au déploiement) passe, lui, par `place_unit_in_strategic_reserves`.
+            in_reserves = comp_entry.get("strategic_reserves", False)  # get allowed (champ optionnel)
+            if not isinstance(in_reserves, bool):
+                raise ValueError(
+                    f"Roster {roster_path} composition[{idx}].strategic_reserves must be bool, "
+                    f"got {in_reserves!r}"
+                )
             if not isinstance(unit_type, str) or not unit_type.strip():
                 raise ValueError(
                     f"Roster {roster_path} composition[{idx}].unit_type must be non-empty string"
@@ -2476,6 +2658,8 @@ class GameStateManager:
                     "row": placed_models[0]["row"],
                     "models": placed_models,
                 }
+                if in_reserves:
+                    unit_entry["strategic_reserves"] = True
                 expanded_units.append(unit_entry)
                 next_id += 1
                 continue
@@ -2515,6 +2699,8 @@ class GameStateManager:
                     "player": player,
                     "unit_type": unit_type.strip(),
                 }
+                if in_reserves:
+                    unit_entry["strategic_reserves"] = True
                 if emit_models is not None:
                     unit_entry["models"] = copy.deepcopy(emit_models)
                 if mono_pos is not None:
@@ -3130,6 +3316,12 @@ def iter_living_model_footprints(
         if model is None:
             continue
         if int(model.get("HP_CUR", 1)) <= 0:
+            continue
+        # HORS TABLE (sentinelle (-1,-1)) : figurine en réserves (20.01) ou en attente de
+        # déploiement. Elle n'occupe AUCUNE case, donc ne contrôle aucun objectif (14.02) —
+        # jumeau de la garde de `_compute_unit_occupied_hexes`, ici sur le chemin par-figurine
+        # qui appelle `compute_occupied_hexes` directement.
+        if int(model["col"]) < 0 or int(model["row"]) < 0:
             continue
         # ORIENTATION PAR FIGURINE, defaut = celle de l escouade. Meme lecture que
         # `shared_utils._recompute_squad_occupied_hexes`, qui ecrit les empreintes de reference

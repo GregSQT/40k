@@ -333,6 +333,14 @@ def _compute_unit_occupied_hexes(
     plus, et seule la clause ``base_size == 1`` la remplaçait — par chance, la normalisation du
     socle la rend vraie à x1.
     """
+    # HORS TABLE (sentinelle (-1,-1)) : aucune empreinte. Une unité en attente de déploiement ou
+    # en réserves stratégiques (20.01) n'occupe aucune case — lui laisser l'empreinte fictive de
+    # la sentinelle la faisait déborder sur le coin (0,0) du plateau (socle multi-hex), donc
+    # bloquer une case réelle et polluer l'occupation, les zones d'engagement et les distances
+    # d'empreinte pendant toute la bataille. `occupied_hexes` vide est la traduction directe de
+    # « pas sur le champ de bataille » (cf. `entry_is_on_battlefield`).
+    if col < 0 or row < 0:
+        return set()
     if game_state is None:
         return {(col, row)}
     if geometry_is_hex(game_state):
@@ -857,6 +865,20 @@ def _build_models_for_unit(
                 if "UNIT_KEYWORDS" in unit
                 else {}
             ),
+            # Règles PROPRES de la figurine — jumeau exact de UNIT_KEYWORDS ci-dessus, et pour
+            # la même raison : `unit["UNIT_RULES"]` porte l'UNION en vigueur de l'escouade
+            # (19.04), alors que les règles « if EVERY model in this unit has this ability »
+            # (Deep Strike 24.09) doivent interroger CHAQUE figurine. Sans ça, une escouade
+            # menée par un character sans la capacité l'aurait héritée de l'union.
+            **(
+                {"UNIT_RULES": copy.deepcopy(spec["UNIT_RULES"])}
+                if "UNIT_RULES" in spec
+                else {"UNIT_RULES": copy.deepcopy(unit["_UNIT_RULES_OWN"])}
+                if "_UNIT_RULES_OWN" in unit
+                else {"UNIT_RULES": copy.deepcopy(unit["UNIT_RULES"])}
+                if "UNIT_RULES" in unit
+                else {}
+            ),
             # DEFAUT CONSERVE, et ce n'en est pas un : motif d'OVERRIDE par figurine. La
             # valeur de repli n'est pas une liste vide mais l'armement de L'UNITE — une
             # figurine qui ne surcharge pas ses armes herite de celles de son escouade.
@@ -1235,6 +1257,48 @@ def is_unit_alive(unit_id: str, game_state: Dict[str, Any]) -> bool:
         raise KeyError("units_cache must exist (call build_units_cache at reset)")
     
     return game_state["units_cache"].get(unit_id) is not None
+
+
+def entry_is_on_battlefield(entry: Dict[str, Any]) -> bool:
+    """L'escouade décrite par cette entrée de ``units_cache`` est-elle SUR LE CHAMP DE BATAILLE ?
+
+    Une unité VIVANTE peut être hors table : en attente de déploiement actif, ou en réserves
+    stratégiques (20.01) tant qu'elle n'a pas fait son ingress move (20.04). Elle reste dans
+    ``units_cache`` — elle compte pour la victoire aux points et elle peut encore arriver — mais
+    elle n'a ni position ni empreinte : elle ne peut être ni ciblée, ni chargée, ni engagée, et
+    elle ne contrôle aucun objectif.
+
+    Prédicat = la sentinelle de position ``(-1,-1)``, jumelle exacte de ``deployed_on_turn is
+    None`` côté unité : les deux sont écrites par le MÊME commit de mise en place
+    (``_apply_deploy_plan``) et par le MÊME chargeur. Ici on lit le cache, la source des
+    énumérations de ciblage.
+    """
+    return int(require_key(entry, "col")) >= 0
+
+
+def unit_is_on_battlefield(game_state: Dict[str, Any], unit_id: str) -> bool:
+    """Jumeau unité de ``entry_is_on_battlefield``, lu sur ``deployed_on_turn`` (source unique
+    du « posée / pas posée », cf. `create_unit`). Une unité absente de ``units_cache`` est morte,
+    donc pas sur le champ de bataille."""
+    unit = get_unit_by_id(game_state, str(unit_id))
+    if unit is None:
+        return False
+    return require_key(unit, "deployed_on_turn") is not None
+
+
+def unit_is_in_strategic_reserves(game_state: Dict[str, Any], unit_id: str) -> bool:
+    """L'unité est-elle EN RÉSERVES (20.01) ? Vraie tant qu'elle n'a pas fait d'ingress move.
+
+    `in_strategic_reserves` est remis à False par la mise en place (20.04) : le drapeau décrit
+    l'état courant, pas l'origine de l'unité.
+    """
+    unit = get_unit_by_id(game_state, str(unit_id))
+    if unit is None:
+        return False
+    # get allowed : une unité construite hors du chargeur (fixture moteur nu) ne porte pas le
+    # champ ; elle n'a par construction jamais été déclarée en réserves. Ce n'est pas un repli
+    # anti-erreur — le chargeur, lui, pose TOUJOURS le champ (`_build_enhanced_unit`).
+    return bool(unit.get("in_strategic_reserves", False))
 
 
 def _get_unit_position_from_cache(unit_id: str, game_state: Dict[str, Any]) -> Optional[Tuple[int, int]]:
@@ -2692,6 +2756,11 @@ def maybe_resolve_reactive_move(
         unit_player = require_key(unit, "player")
         if int(unit_player) == int(moved_player):
             continue
+        # HORS TABLE (réserves 20.01 / attente de déploiement) : elle ne réagit à rien. Sans
+        # cette garde, sa sentinelle (-1,-1) tombe à moins de 9" du coin du plateau et un
+        # déplacement adverse dans cette zone déclencherait un mouvement réactif depuis le néant.
+        if not entry_is_on_battlefield(units_cache[unit_id]):
+            continue
         if unit_id_str in reacted_set:
             continue
         if not _unit_has_rule_effect(unit, "reactive_move"):
@@ -3491,7 +3560,12 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
     """
     require_key(game_state, "models_cache")
     require_key(game_state, "squad_models")
-    valid_reasons = ("combat", "coherency_removal", "deployment_no_space", "hazard")
+    valid_reasons = (
+        "combat", "coherency_removal", "deployment_no_space", "hazard",
+        # 20.04 — « At the end of the third battle round … all strategic reserves units that
+        # have not made one or more ingress moves are destroyed. » Règle de jeu, pas erreur.
+        "strategic_reserves_timeout",
+    )
     if reason not in valid_reasons:
         raise ValueError(f"destroy_model: invalid reason {reason!r}, expected one of {valid_reasons}")
 

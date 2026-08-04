@@ -2078,9 +2078,16 @@ class ObservationBuilder:
         # et il n'y en a pas à construire, puisque aucune activation de move n'est en cours. Le
         # canal reste à 0, exactement comme hors phase de mouvement. En construire une ici
         # relancerait un BFS pour peindre des destinations que l'agent ne peut pas jouer.
+        # Même raisonnement pour une escouade EN RÉSERVES (20.01) : son activation de phase de
+        # mouvement est un INGRESS MOVE (20.04), une mise en place — elle n'a aucun pool de
+        # déplacement, donc aucune carte de cellules n'a été construite par le masque et il n'y
+        # en a pas à construire. Canal de coût à 0, comme hors phase de mouvement.
+        from engine.phase_handlers.shared_utils import unit_is_in_strategic_reserves
+
         if (
             str(require_key(game_state, "phase")).lower() == "move"
             and read_pending_agent_decision(game_state) is None
+            and not unit_is_in_strategic_reserves(game_state, str(active_squad_id))
         ):
             from engine.phase_handlers.shared_utils import (
                 _squad_is_in_enemy_er,
