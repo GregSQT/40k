@@ -227,10 +227,15 @@ export function parse_log_file_from_text(text: string): ReplayData {
   const episodes: ReplayEpisodeDuringParsing[] = [];
   let currentEpisode: ReplayEpisodeDuringParsing | null = null;
 
-  // Extrait un segment per-figurine "[LABEL: unit#idx@(col,row) ...]" -> { "unit#idx": [col,row] }.
-  // LABEL = "MODELS" (unite qui agit) ou "TARGET_MODELS" (survivants cible post-pertes). Retourne
-  // null si absent. Miroir du parseur moteur (ai/analyzer_perfig.parse_models_segment).
-  const modelTokenRe = /(\S+?#\S*?)@\((-?\d+),\s*(-?\d+)\)/g;
+  // Extrait un segment per-figurine "[LABEL: unit#idx@(col,row,z<hauteur>) ...]" -> { "unit#idx":
+  // [col,row] }. LABEL = "MODELS" (unite qui agit) ou "TARGET_MODELS" (survivants cible
+  // post-pertes). Retourne null si absent. Miroir du parseur moteur
+  // (ai/analyzer_perfig.parse_models_segment).
+  // `z<hauteur>` (hauteur de plancher en pouces, engagement 3D §03.04) est CONSOMME par
+  // l'analyzer, pas par le replay : le rendu reste plan, donc le champ est matche puis ignore.
+  // Il est optionnel ici — contrairement au parseur analyzer, qui l'exige : un replay d'archive
+  // s'affiche encore, alors qu'un verdict d'engagement calcule sans altitude serait faux.
+  const modelTokenRe = /(\S+?#\S*?)@\((-?\d+),\s*(-?\d+)(?:,\s*z-?[\d.]+)?\)/g;
   const extractModelsSegment = (
     text: string,
     label: string

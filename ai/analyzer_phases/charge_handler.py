@@ -185,6 +185,7 @@ def handle_charge(
                 engagement_zone=_get_engagement_zone_for_analyzer(),
                 positions_by_model=state.positions_by_model,
                 unit_base=state.unit_base,
+                **state.engagement_3d_kwargs(),  # altitudes d'AVANT la ligne (jumeau des socles de départ)
                 # Socles AVANT la charge, morts exclus (cf. surviving_start_models).
                 subject_models=surviving_start_models(
                     state.positions_by_model.get(charge_unit_id),  # get allowed

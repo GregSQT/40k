@@ -13,6 +13,10 @@ from collections import deque
 from typing import Dict, List, Tuple, Set, Optional, Any, FrozenSet, Sequence, Mapping, cast
 from .generic_handlers import end_activation
 from shared.data_validation import require_key, require_present
+# Seuil vertical d'engagement (§03.04 : 2" horizontal ET 5" vertical) — primitive publique,
+# lue directement comme son jumeau horizontal `get_engagement_zone`. Un wrapper privé par phase
+# n'ajoutait rien et forçait `shared_utils`/`observation_builder` à importer un privé de phase.
+from engine.spatial_relations import get_engagement_zone_vertical
 from engine.utils.weapon_helpers import melee_weapons, ranged_weapons
 from engine.action_log_utils import append_action_log
 from engine.hex_utils import hex_distance as _hex_distance
@@ -37,7 +41,7 @@ from .shared_utils import (
     is_placement_valid_with_clearance, candidate_overlaps_any_unit,
     _synth_model_entry,
     roll_charge_distance, unit_can_reroll_charge,
-    MovePlan,
+    MovePlan, parse_model_plan, parse_model_plan_as_map, SQUAD_RIGID_MOVE_DESTINATION_LEVEL,
 )
 
 CHARGE_IMPACT_TRIGGER_THRESHOLD = 4
@@ -240,17 +244,6 @@ def _charge_model_socle(
 _CHARGE_SYNTH_ANCHOR_MID = "__charge_anchor__"
 
 
-def _charge_vertical_zone(game_state: Dict[str, Any]) -> float:
-    """Seuil vertical d'engagement 3D (pouces) pour la charge — source unique (chantier 4).
-
-    En 3a, toutes les destinations de charge sont au sol (``synth level=0``) : le gate vertical
-    ne mord que quand la CIBLE/ennemi est en hauteur (§03.04, 5" vertical). Tout au sol → dégénérescence
-    = résultat 2D exact."""
-    from engine.spatial_relations import get_engagement_zone_vertical
-
-    return get_engagement_zone_vertical(game_state)
-
-
 def _charge_synthetic_charger_cache_entry(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -287,12 +280,18 @@ def _charge_synthetic_charger_cache_entry(
     base["occupied_hexes"] = set(candidate_fp)
     base.pop("occupied_hexes_by_model", None)
     if level is not None:
-        from engine.terrain_utils import floor_height_at
+        from engine.terrain_utils import resolved_floor_height_at
         anchor = (int(anchor_col), int(anchor_row))
         base["occupied_hexes_by_model"] = {_CHARGE_SYNTH_ANCHOR_MID: anchor}
+        # Niveau DEMANDÉ → hauteur résolue (§13.06) : une ancre candidate hors plancher est au
+        # sol, pas un état corrompu. Le chemin des pools et des aperçus ne doit pas lever.
         base["floor_height_by_model"] = {
-            _CHARGE_SYNTH_ANCHOR_MID: floor_height_at(
-                game_state.get("terrain_areas", []), int(anchor_col), int(anchor_row), int(level)  # get allowed (board sans terrain)
+            _CHARGE_SYNTH_ANCHOR_MID: resolved_floor_height_at(
+                game_state.get("terrain_areas", []),  # get allowed (board sans terrain)
+                int(anchor_col), int(anchor_row),
+                require_key(base, "BASE_SHAPE"), require_key(base, "BASE_SIZE"),
+                int(base.get("orientation", 0)),  # get allowed (synth sans facing)
+                int(level),
             )
         }
     return base
@@ -419,7 +418,7 @@ def _build_charge_anchors_in_zone(
         return []
     target_fp = set(te.get("occupied_hexes") or {(int(te["col"]), int(te["row"]))})
     engagement_zone = int(get_engagement_zone(game_state))
-    vz = _charge_vertical_zone(game_state)  # engagement 3D (§03.04) — cible en hauteur
+    vz = get_engagement_zone_vertical(game_state)  # engagement 3D (§03.04) — cible en hauteur
 
     unit_id_str = str(unit["id"])
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
@@ -503,7 +502,7 @@ def _charge_anchor_within_1_of_target(
         game_state, unit, int(anchor_col), int(anchor_row), candidate_fp, level=0
     )
     return unit_entries_within_engagement_zone(
-        synth, te, within_1_zone, vertical_zone_inches=_charge_vertical_zone(game_state)
+        synth, te, within_1_zone, vertical_zone_inches=get_engagement_zone_vertical(game_state)
     )
 
 
@@ -882,7 +881,7 @@ def _charge_reverse_goal_bfs_for_eligibility(
 
         _t_engagement0 = time.perf_counter() if _perf else None
         synth = _charge_synthetic_charger_cache_entry(game_state, unit, anchor[0], anchor[1], candidate_fp, level=0)
-        _vz = _charge_vertical_zone(game_state)  # 3a : ancre au sol, gate vertical vs ennemi en hauteur
+        _vz = get_engagement_zone_vertical(game_state)  # 3a : ancre au sol, gate vertical vs ennemi en hauteur
         hex_overlaps_enemy = False
         engages_enemy = False
         for eid, enemy_entry in indexed_enemy_engagement:
@@ -1376,11 +1375,9 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
 
     elif action_type == "charge_plan_state":
         # V11 PvP (lecture pure) : phase courante + pools éligibles par fig pour le plan provisoire.
-        prov: Dict[str, Tuple[int, ...]] = {}
-        for entry in (action.get("plan") or []):
-            # 3b : le plan porte un niveau optionnel par fig ([mid,col,row] ou [mid,col,row,level]).
-            _lv_e = int(entry[3]) if len(entry) >= 4 and entry[3] is not None else 0
-            prov[str(entry[0])] = (int(entry[1]), int(entry[2]), _lv_e)
+        prov: Dict[str, Tuple[int, ...]] = parse_model_plan_as_map(
+            action.get("plan") or [], action_name="charge_plan_state"
+        )
         sel = action.get("selected_model")
         _lvl = action.get("level")
         state = charge_model_plan_state(
@@ -2144,7 +2141,7 @@ def _compute_plan_context(
     _tr = time.perf_counter() if _perf else None
     # Gate vertical de charge (getter pur) — hissé hors des blocs conditionnels : utilisé aussi bien
     # dans la classification (``if can_classify``) que dans la branche étages (``view_level>=1``).
-    _vz = _charge_vertical_zone(game_state)
+    _vz = get_engagement_zone_vertical(game_state)
     if can_classify:
         # Obstacles (autres unités) AU SOL (level 0) pour la classification des ancres sol : une fig
         # ennemie/amie à l'étage ne bloque pas une destination de charge au sol (3b, cross-niveau).
@@ -2385,7 +2382,7 @@ def _compute_plan_context(
 
     # Satisfaction par cible (voile UI) : une cible-UNITÉ est ENGAGÉE dès qu'≥1 fig POSÉE est à
     # ≤EZ d'elle (03.04, engagement au niveau unité). violet = satisfaite, rouge = pas.
-    vz = _charge_vertical_zone(game_state)  # engagement 3D (§03.04) — cible en hauteur
+    vz = get_engagement_zone_vertical(game_state)  # engagement 3D (§03.04) — cible en hauteur
     placed_synths: List[Tuple[str, Dict[str, Any]]] = []
     for _mid, _pp in provisional_plan.items():
         _sib = models_cache.get(str(_mid))
@@ -2759,7 +2756,7 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_dis
     from .shared_utils import get_engagement_zone, build_occupied_positions_set
 
     engagement_zone = int(get_engagement_zone(game_state))
-    vz = _charge_vertical_zone(game_state)  # engagement 3D (§03.04)
+    vz = get_engagement_zone_vertical(game_state)  # engagement 3D (§03.04)
 
     fp_offset_pair = _charge_prepare_footprint_offsets(unit, game_state)
 
@@ -3335,7 +3332,7 @@ def _charge_unit_within_engagement_zone(game_state: Dict[str, Any], unit: Dict[s
     cc_range = get_engagement_zone(game_state)
     return unit_within_engagement_zone_footprints(
         game_state, unit, engagement_zone=cc_range, max_distance=cc_range,
-        vertical_zone_inches=_charge_vertical_zone(game_state),
+        vertical_zone_inches=get_engagement_zone_vertical(game_state),
     )
 
 
@@ -3760,7 +3757,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             ):
                 continue
             synth = _charge_synthetic_charger_cache_entry(game_state, unit, nc, nr, candidate_fp, level=0)  # 3a sol
-            _vz = _charge_vertical_zone(game_state)
+            _vz = get_engagement_zone_vertical(game_state)
             is_adjacent_to_enemy = False
             hex_overlaps_enemy = False
             _cur_engaging: Optional[Set[str]] = set() if _track_engages else None
@@ -3932,7 +3929,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             synth = _charge_synthetic_charger_cache_entry(
                 game_state, unit, neighbor_col_int, neighbor_row_int, candidate_fp, level=0  # 3a sol
             )
-            _vz = _charge_vertical_zone(game_state)
+            _vz = get_engagement_zone_vertical(game_state)
             for _eid, enemy_entry in indexed_enemy_engagement:
                 ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
                 enemy_fp = enemy_entry.get("occupied_hexes", {(ec, er)})
@@ -4587,7 +4584,7 @@ def _charge_model_pos_is_closer(
         return False
     # 3b : synth au niveau RÉEL de la destination (engagement 3D en montant ; sol = level 0, comme 3a).
     synth = _charge_synthetic_charger_cache_entry(game_state, unit, dest[0], dest[1], cand_fp, level=int(dest_level))
-    _vz = _charge_vertical_zone(game_state)
+    _vz = get_engagement_zone_vertical(game_state)
     if any(unit_entries_within_engagement_zone(synth, ne, ez, vertical_zone_inches=_vz) for ne in nontarget_entries):
         return False
     return True
@@ -4626,10 +4623,7 @@ def charge_preview_move_plan(
         return empty
     # 3b : entrée [mid,col,row] (sol) OU [mid,col,row,level]. Le niveau conditionne la reachability
     # (champ climb, coût de montée §13.06) et l'engagement 3D du synth au niveau réel de la destination.
-    norm = [
-        (str(e[0]), int(e[1]), int(e[2]), int(e[3]) if len(e) >= 4 and e[3] is not None else 0)
-        for e in plan
-    ]
+    norm = [(str(e[0]), int(e[1]), int(e[2]), int(e[3])) for e in plan]
     n = len(norm)
     if n == 0:
         return empty
@@ -4670,7 +4664,7 @@ def charge_preview_move_plan(
     # 3) engaged_all : chaque cible déclarée est engagée par au moins une figurine.
     ez = int(get_engagement_zone(game_state))
     units_cache = require_key(game_state, "units_cache")
-    _vz = _charge_vertical_zone(game_state)  # engagement 3D (§03.04) — cible en hauteur
+    _vz = get_engagement_zone_vertical(game_state)  # engagement 3D (§03.04) — cible en hauteur
     missing: List[str] = []
     for tid in (str(t) for t in target_ids):
         tentry = units_cache.get(tid)
@@ -4886,7 +4880,7 @@ def charge_autoplace_plan(
         # deux étages plus bas n'est pas engagé par une figurine posée en hauteur.
         synth = _synth_model_entry(game_state, squad_id, models_cache[mid], int(c), int(r), level=int(level))
         return any(
-            unit_entries_within_engagement_zone(synth, ne, ez, vertical_zone_inches=_charge_vertical_zone(game_state))
+            unit_entries_within_engagement_zone(synth, ne, ez, vertical_zone_inches=get_engagement_zone_vertical(game_state))
             for ne in nontarget_entries
         )
 
@@ -4971,7 +4965,7 @@ def charge_autoplace_plan(
     # (base modèle), source unique partagée avec le halo et la phase fight.
     from engine.spatial_relations import engagement_distance_metric
     _eng_metric = engagement_distance_metric(game_state)
-    _vz_auto = _charge_vertical_zone(game_state)  # engagement 3D (§03.04) — branche euclidienne (gameplay)
+    _vz_auto = get_engagement_zone_vertical(game_state)  # engagement 3D (§03.04) — branche euclidienne (gameplay)
 
     def _entry_engage_struct(entry: Dict[str, Any], charger_shape: str) -> Tuple[str, Any]:
         # Étape 7.4 : en euclidien, router TOUTES les paires via la primitive (round-round exact +
@@ -5417,9 +5411,10 @@ def charge_autoplace_plan(
                     f"({provisional[placed[i][0]]}) et {placed[j][0]} ({provisional[placed[j][0]]})"
                 )
 
-    # Niveau EXPLICITE par figurine : le consommateur ne peut pas le déduire, et ses défauts sont faux
-    # dans les deux sens — le commit de charge complète à 0 (une arrivée d'étage retomberait au sol),
-    # celui de la consolidation complète au niveau de VUE (un placement au sol monterait d'un cran).
+    # Niveau EXPLICITE par figurine, celui auquel l'ILP a CALCULÉ : un plan muet est refusé à la
+    # frontière de décodage, et les défauts qu'inventaient les consommateurs étaient faux dans les
+    # deux sens — le commit de charge complétait à 0 (une arrivée d'étage retombait au sol), celui
+    # de la consolidation au niveau de VUE (un placement au sol montait d'un cran).
     plan = [
         [mid, int(provisional[mid][0]), int(provisional[mid][1]), int(provisional[mid][2])]
         for mid in alive
@@ -5456,11 +5451,9 @@ def charge_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, action
 
     # Cibles déjà déclarées → le toggle recompute le plan par-figurine au nouveau budget/traversée.
     if "charge_target_selections" in game_state and uid in game_state["charge_target_selections"]:
-        prov: Dict[str, Tuple[int, ...]] = {}
-        for entry in (action.get("plan") or []):
-            # 3b : le plan porte un niveau optionnel par fig ([mid,col,row] ou [mid,col,row,level]).
-            _lv_e = int(entry[3]) if len(entry) >= 4 and entry[3] is not None else 0
-            prov[str(entry[0])] = (int(entry[1]), int(entry[2]), _lv_e)
+        prov: Dict[str, Tuple[int, ...]] = parse_model_plan_as_map(
+            action.get("plan") or [], action_name="charge_fly_mode_set"
+        )
         sel = action.get("selected_model")
         _lvl = action.get("level")
         state = charge_model_plan_state(
@@ -5509,17 +5502,8 @@ def charge_commit_move_plan_handler(
     raw_plan = action["plan"]
     if not isinstance(raw_plan, list) or not raw_plan:
         return False, {"error": "empty_charge_plan", "unitId": unit_id}
-    # 3b : entrée [mid,col,row] (sol) OU [mid,col,row,level] (chargeur qui monte). Le niveau est propagé
-    # jusqu'à ``commit_move`` (qui gère déjà le 4-uplet) et au preview de validation.
-    plan: List[Tuple[str, int, int, int]] = []
-    for entry in raw_plan:
-        if not (isinstance(entry, (list, tuple)) and len(entry) in (3, 4)):
-            raise ValueError(
-                f"commit_charge_plan: plan entry must be [model_id, col, row(, level)], got {entry!r}"
-            )
-        _e = cast("Sequence[Any]", entry)  # longueur variable (3 ou 4), lue par index
-        _lv = int(_e[3]) if len(_e) >= 4 and _e[3] is not None else 0
-        plan.append((str(_e[0]), int(_e[1]), int(_e[2]), _lv))
+    # Le niveau est OBLIGATOIRE (frontière) et propagé jusqu'à ``commit_move`` et au preview.
+    plan = parse_model_plan(raw_plan, action_name="commit_charge_plan")
 
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:

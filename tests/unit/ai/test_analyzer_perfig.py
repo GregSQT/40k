@@ -20,7 +20,7 @@ from ai.analyzer_perfig import (
 # T2 — parsing du segment [MODELS:]                                            #
 # --------------------------------------------------------------------------- #
 def test_parse_models_groups_by_unit_id_prefix():
-    seg = "Unit 1(85,164) SHOT [MODELS: 1#2@(85,164) 1#3@(91,171) 101#0@(2,146)] [SUCCESS]"
+    seg = "Unit 1(85,164) SHOT [MODELS: 1#2@(85,164,z0) 1#3@(91,171,z0) 101#0@(2,146,z0)] [SUCCESS]"
     parsed = parse_models_segment(seg)
     assert parsed == {
         "1": {"1#2": (85, 164), "1#3": (91, 171)},
@@ -34,7 +34,7 @@ def test_parse_models_absent_returns_none():
 
 def test_parse_models_dead_socles_absent_from_list():
     # 1#0 / 1#1 morts : la liste commence à 1#2 (règle « socles morts disparaissent »).
-    seg = "[MODELS: 1#2@(85,164) 1#5@(79,168)]"
+    seg = "[MODELS: 1#2@(85,164,z0) 1#5@(79,168,z0)]"
     parsed = parse_models_segment(seg)
     assert parsed is not None
     assert set(parsed["1"].keys()) == {"1#2", "1#5"}

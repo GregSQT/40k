@@ -21,15 +21,16 @@ from engine.utils.weapon_helpers import (
 )
 
 # --- Type de plan de mouvement (source unique) ---------------------------------
-# Une entrée positionne UNE figurine : (model_id, col, row), (model_id, col, row, level) OU
-# (model_id, col, row, level, orientation). Le 4e élément (niveau/étage de destination) et le 5e
-# (orientation socle 0..5) sont optionnels ; None = « garder la valeur courante ».
+# Une entrée positionne UNE figurine : (model_id, col, row, level) OU
+# (model_id, col, row, level, orientation). Le 4e élément (niveau/étage de destination) est
+# OBLIGATOIRE et non nul-able — un plan muet est refusé à la frontière de décodage
+# (``parse_model_plan``), jamais complété par un niveau inventé. Le 5e (orientation socle 0..11)
+# reste optionnel ; None = « orientation inchangée ».
 # Paramètres typés en ``Sequence`` (covariant) pour accepter indifféremment les listes de
-# 3-, 4- ou 5-uplets produites par les phases move/charge.
+# 4- ou 5-uplets produites par les phases move/charge/fight.
 MovePlanEntry = Union[
-    Tuple[str, int, int],
-    Tuple[str, int, int, Optional[int]],
-    Tuple[str, int, int, Optional[int], Optional[int]],
+    Tuple[str, int, int, int],
+    Tuple[str, int, int, int, Optional[int]],
 ]
 MovePlan = Sequence[MovePlanEntry]
 from engine.action_log_utils import append_action_log
@@ -1012,12 +1013,11 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
             if mid in models_cache
         }
         # MODEL_HEIGHT (pouces) = borne HAUTE de l'intervalle vertical [plancher, plancher+MODEL_HEIGHT]
-        # de l'engagement 3D (§01.04 « partie la plus proche »). Présent sur toute vraie unité (roster,
-        # via create_unit) ; absent des stubs de test purement 2D → la clé n'est alors pas posée et le
-        # mode 3D dégénère proprement (le gate vertical n'est activé que par un call-site passant
-        # vertical_zone_inches, sur de vraies unités).
-        if "MODEL_HEIGHT" in unit:
-            units_cache[unit_id]["MODEL_HEIGHT"] = float(unit["MODEL_HEIGHT"])
+        # de l'engagement 3D (§01.04 « partie la plus proche »). EXIGÉ, plus optionnel : depuis que
+        # toute la phase de combat passe `vertical_zone_inches`, une entrée sans cette clé ne
+        # « dégénère » plus en 2D — elle fait lever `_vertical_classes` au premier test d'engagement.
+        # L'invariant s'établit donc ici, à l'écriture unique, et pas aux dizaines de lectures.
+        units_cache[unit_id]["MODEL_HEIGHT"] = float(require_key(unit, "MODEL_HEIGHT"))
         # Per-model visual meta (icône + échelle + forme/taille de base) : exposé
         # au frontend uniquement pour les escouades hétérogènes (au moins une
         # figurine dont le profil visuel diffère de l'unité parente, ex.
@@ -1477,6 +1477,28 @@ def update_units_cache_position(game_state: Dict[str, Any], unit_id: str, col: i
             if isinstance(models_cache, dict) and mid in models_cache:
                 models_cache[mid]["col"] = col
                 models_cache[mid]["row"] = row
+                # La HAUTEUR suit la position au même titre que l'empreinte : les deux cartes
+                # par-figurine sont lues ENSEMBLE par l'engagement 3D (`_vertical_classes`), et
+                # n'en resyncer qu'une laissait la figurine mesurée à l'altitude de son ANCIENNE
+                # case. Écrites sans condition, comme `occupied_hexes_by_model` juste au-dessus :
+                # une carte présente et l'autre absente est précisément la désynchronisation que
+                # le journal per-figurine refuse désormais (cf. `_models_segment_for_unit`).
+                #
+                # Niveau STOCKÉ + `floor_height_at`, EXACTEMENT comme
+                # `_recompute_squad_occupied_hexes` : ces deux fonctions écrivent la même carte
+                # et doivent appliquer la même règle. Y résoudre le niveau par confinement
+                # d'empreinte écrasait la hauteur correcte que `_recompute` venait de poser une
+                # ligne plus haut (`update_model_position` enchaîne les deux) — une figurine
+                # explicitement committée à l'étage retombait à 0,0.
+                from engine.terrain_utils import floor_height_at
+                _lvl = int(models_cache[mid].get("level", 0))  # get allowed (champ optionnel)
+                entry["floor_height_by_model"] = {
+                    mid: floor_height_at(
+                        game_state.get("terrain_areas", []),  # get allowed (board sans terrain)
+                        col, row, _lvl,
+                    )
+                }
+                entry["level_by_model"] = {mid: _lvl}
 
     if game_state.get("debug_mode", False):
         episode = game_state.get("episode_number", "?")
@@ -3208,8 +3230,14 @@ def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -
             continue
         m_col = int(m["col"])
         m_row = int(m["row"])
-        m_level = int(require_key(m, "level"))
         m_orient = int(m.get("orientation", unit_orientation))  # get allowed (défaut = orient unité)
+        # Le niveau STOCKÉ fait foi : ce resync recopie l'état, il ne le rejuge pas. Le
+        # re-résoudre ici rétrograderait un étage explicitement committé par
+        # `update_model_position` — `resolve_model_floor_level` exige que l'EMPREINTE tienne
+        # entièrement sur le plancher, un critère plus strict que celui de la pose. C'est aux
+        # fonctions de MOUVEMENT de résoudre le niveau d'arrivée (cf. `commit_move` et
+        # `translate_squad_to_destination`), pas au resync de cache.
+        m_level = int(require_key(m, "level"))
         new_by_model[mid] = (m_col, m_row)
         new_level_by_model[mid] = m_level
         new_floor_height_by_model[mid] = floor_height_at(_terrain_areas, m_col, m_row, m_level)
@@ -3259,11 +3287,13 @@ def translate_squad_to_destination(
     celle que ``validate_move_plan`` a acceptée.
     """
     from engine.hex_utils import offset_to_cube, cube_to_offset
+    from engine.terrain_utils import resolve_model_floor_level as _rmfl_translate
 
     units_cache = game_state.get("units_cache", {})  # get allowed
     entry = units_cache.get(squad_id)
     if entry is None:
         return
+    _ta_translate = game_state.get("terrain_areas", [])  # get allowed (board sans terrain)
     norm_dest_col, norm_dest_row = normalize_coordinates(int(dest_col), int(dest_row))
     old_col = int(entry.get("col", norm_dest_col))
     old_row = int(entry.get("row", norm_dest_row))
@@ -3283,6 +3313,16 @@ def translate_squad_to_destination(
             new_col, new_row = cube_to_offset(mx + dcx, my + dcy, mz + dcz)
             m["col"] = int(new_col)
             m["row"] = int(new_row)
+            # Niveau d'ARRIVÉE résolu (§13.06), miroir du chemin par plan (`commit_move` →
+            # `resolve_model_floor_level`). Une translation rigide peut sortir une figurine de
+            # l'empreinte de son plancher : la laisser marquée à l'étage faisait ensuite lever
+            # `floor_height_at` au resync, en plein commit et sur un état déjà à moitié muté.
+            m["level"] = _rmfl_translate(
+                int(new_col), int(new_row),
+                require_key(m, "BASE_SHAPE"), require_key(m, "BASE_SIZE"),
+                int(m.get("orientation", 0)),  # get allowed (défaut 0 = face nord)
+                int(require_key(m, "level")), _ta_translate,
+            )
     # Update anchor first (sets entry.col/row, entry.occupied_hexes = anchor footprint).
     update_units_cache_position(game_state, squad_id, norm_dest_col, norm_dest_row)
     # Then override occupied_hexes (union de toutes les figs) + occupied_hexes_by_model
@@ -3614,8 +3654,7 @@ def build_move_blocked_cells_by_level(
     Retourne, par niveau, la LISTE des sets interdits — jamais leur union : une cellule est
     interdite ssi elle appartient a l'un d'eux. Ne PAS fusionner ici. L'union coute une copie
     de `wall_hexes` (~1100 cellules) a chaque appel, ce qui est du pur gaspillage pour
-    `validate_move_plan`, appele avec quelques figurines (mesure : +6% par appel, et il est
-    appele en boucle serree par `apply_snap_corrections`). Le consommateur qui balaye des
+    `validate_move_plan`, appele avec quelques figurines (mesure : +6% par appel). Le consommateur qui balaye des
     milliers de candidates (`erode_move_pool_by_squad_block`) peut, lui, materialiser l'union
     une fois s'il y trouve son compte — c'est SON arbitrage, pas celui du helper.
 
@@ -3756,6 +3795,87 @@ def geodesic_move_reach(
 # (`floor_height_at` lève « hors empreinte de plancher ») et sa destination était testée contre
 # l'occupation d'un AUTRE étage que celui où elle atterrit.
 SQUAD_RIGID_MOVE_DESTINATION_LEVEL = 0
+
+
+# --- Frontière de décodage des plans par-figurine (source unique) --------------
+# Un plan est une liste d'entrées `[model_id, col, row, level(, orientation)]`. Le niveau est
+# OBLIGATOIRE sur toute entrée PRÉSENTE : un plan muet est REFUSÉ, jamais complété. Historique :
+# chaque destinataire inventait son propre niveau par défaut (0 pour le commit de charge, le niveau
+# de VUE pour pile-in/consolidation, le niveau committé pour le move, None dans shared_utils) — une
+# escouade à cheval sur deux étages devenait invalidable et restait bloquée dans le pool de pile-in.
+# Une figurine ABSENTE du plan reste légitime (elle n'a pas bougé) : c'est le moteur qui la complète
+# avec sa position ET son étage COURANTS, en aval, pas ce décodeur.
+_PLAN_LEVEL_REQUIRED_MSG = (
+    "un plan par-figurine porte TOUJOURS son étage : entrée attendue "
+    "[model_id, col, row, level], niveau non nul-able. Aucun niveau n'est inventé (§13.06)"
+)
+
+
+def _parse_plan_entry(
+    entry: Any, action_name: str, max_len: int
+) -> Tuple[str, int, int, int, Optional[int]]:
+    """Décode UNE entrée de plan en 5-uplet interne ``(mid, col, row, level, orientation|None)``."""
+    if not isinstance(entry, (list, tuple)):
+        raise ValueError(f"{action_name}: entrée de plan invalide {entry!r} — {_PLAN_LEVEL_REQUIRED_MSG}")
+    seq = cast("Sequence[Any]", entry)
+    if not (4 <= len(seq) <= max_len):
+        raise ValueError(f"{action_name}: entrée de plan {entry!r} — {_PLAN_LEVEL_REQUIRED_MSG}")
+    if seq[3] is None:
+        raise ValueError(f"{action_name}: étage None dans {entry!r} — {_PLAN_LEVEL_REQUIRED_MSG}")
+    level = int(seq[3])
+    if level < 0:
+        raise ValueError(f"{action_name}: étage négatif dans {entry!r} (level >= 0 requis)")
+    orientation = int(seq[4]) if len(seq) >= 5 and seq[4] is not None else None
+    return (str(seq[0]), int(seq[1]), int(seq[2]), level, orientation)
+
+
+def parse_model_plan(raw_plan: Any, *, action_name: str) -> List[Tuple[str, int, int, int]]:
+    """Décode un plan par-figurine en 4-uplets stricts ``(model_id, col, row, level)``.
+
+    Frontière UNIQUE : toute action porteuse d'un plan passe par ici (ou par
+    ``parse_model_plan_with_orientation``), et les consommateurs en aval lisent ``entry[3]``
+    sans condition. Lève sur toute entrée sans étage — cf. ``_PLAN_LEVEL_REQUIRED_MSG``.
+    """
+    if not isinstance(raw_plan, list):
+        raise ValueError(f"{action_name}: plan doit être une liste, reçu {raw_plan!r}")
+    return [
+        (mid, col, row, level)
+        for mid, col, row, level, _ori in (
+            _parse_plan_entry(e, action_name, 4) for e in cast("List[Any]", raw_plan)
+        )
+    ]
+
+
+def parse_model_plan_as_map(
+    raw_plan: Any, *, action_name: str
+) -> Dict[str, Tuple[int, int, int]]:
+    """``parse_model_plan`` rendu sous forme de carte ``{model_id: (col, row, level)}``.
+
+    Forme attendue par les aperçus par-figurine (plan provisoire du front : charge, pile-in,
+    consolidation), qui indexent par figurine et non par position dans la liste.
+    """
+    return {mid: (col, row, level) for mid, col, row, level in parse_model_plan(raw_plan, action_name=action_name)}
+
+
+def parse_model_plan_with_orientation(
+    raw_plan: Any, *, action_name: str
+) -> List[Tuple[str, int, int, int, Optional[int]]]:
+    """Idem ``parse_model_plan``, avec l'orientation socle optionnelle en 5e élément.
+
+    L'orientation reste OPTIONNELLE (``None`` = orientation inchangée) : contrairement au niveau,
+    elle ne conditionne aucune éligibilité verticale — seul le move la porte (pivot molette).
+    """
+    if not isinstance(raw_plan, list):
+        raise ValueError(f"{action_name}: plan doit être une liste, reçu {raw_plan!r}")
+    from engine.hex_utils import ORIENTATION_STEP_COUNT
+
+    parsed = [_parse_plan_entry(e, action_name, 5) for e in cast("List[Any]", raw_plan)]
+    for mid, _c, _r, _lv, ori in parsed:
+        if ori is not None and not (0 <= ori < ORIENTATION_STEP_COUNT):
+            raise ValueError(
+                f"{action_name}: orientation de {mid} hors 0..{ORIENTATION_STEP_COUNT - 1} ({ori})"
+            )
+    return parsed
 
 
 def build_rigid_plan(
@@ -4153,7 +4273,7 @@ def move_plan_path_distances(
         # Niveau du TRAJET = niveau CIBLE du plan (4e élément), miroir exact de la validation
         # (`explain_move_plan_rejection`) : mesurer le chemin d'une figurine qui descend parmi les
         # obstacles de son étage de DÉPART mesurerait une autre grandeur que celle validée (§0.34).
-        _path_level = int(entry[3]) if len(entry) >= 4 and entry[3] is not None else o_level
+        _path_level = int(entry[3])
         if _mode == "cube":
             # Métrique hex + FLY (21.03) : la traversée ignore murs et figurines, donc le trajet
             # EST la ligne d'hexes et sa longueur est la distance cube — EXACTEMENT la grandeur
@@ -4235,14 +4355,10 @@ def explain_move_plan_rejection(
     player = int(first_model["player"])
 
     def _target_level(entry: Sequence[Any]) -> int:
-        """Niveau (étages) VISÉ par la fig dans ce plan : 4e élément si fourni (destination
-        verticale), sinon niveau committé (models_cache). Ne PAS déduire du models_cache quand
-        le plan spécifie un niveau cible — sinon un move vers l'étage est validé contre
-        l'occupation du sol (bug superposition inter-niveaux)."""
-        if len(entry) >= 4 and entry[3] is not None:
-            return int(entry[3])
-        m = models_cache.get(entry[0])
-        return int(require_key(m, "level")) if m is not None else 0
+        """Niveau (étages) VISÉ par la fig dans ce plan — 4e élément, TOUJOURS présent (frontière
+        de décodage). Le déduire du models_cache validait un move vers l'étage contre l'occupation
+        du sol (bug superposition inter-niveaux)."""
+        return int(entry[3])
 
     # SOURCE UNIQUE du predicat de cellule, partagee avec l'erosion du pool de move
     # (`erode_move_pool_by_squad_block`) : dupliquer ce check rouvrirait la classe de bug
@@ -4381,56 +4497,6 @@ def explain_move_plan_rejection(
             )
 
     return None
-
-
-def apply_snap_corrections(
-    plan: List[Tuple[str, int, int]],
-    game_state: Dict[str, Any],
-    radius: int = 2,
-    constraints: Optional[Dict[str, Any]] = None,
-) -> List[Tuple[str, int, int]]:
-    """Pour chaque figurine invalide individuellement, cherche un hex valide proche.
-
-    Snap par-figurine sur contraintes locales (bounds, walls, collisions, enemy_er) —
-    pas de garantie de coherency globale (responsabilite UX pour ajustement manuel).
-    Ordre : par index de figurine dans le plan (deterministe).
-
-    Recherche : anneaux concentriques de distance hex 1..radius autour de la destination
-    invalide. Premier hex valide retenu (ordre balayage col puis row).
-
-    Si aucun hex valide trouve dans le rayon, la figurine garde sa destination originale
-    (l UX affichera le voile rouge).
-    """
-    c = dict(DEFAULT_MOVE_CONSTRAINTS)
-    if constraints:
-        c.update(constraints)
-    c_individual = dict(c)
-    c_individual["require_coherency"] = False
-
-    corrected: List[Tuple[str, int, int]] = []
-    for mid, nc, nr in plan:
-        if validate_move_plan([(mid, nc, nr)], game_state, c_individual):
-            corrected.append((mid, nc, nr))
-            continue
-        found_cell: Optional[Tuple[int, int]] = None
-        for r in range(1, int(radius) + 1):
-            for d_col in range(-r, r + 1):
-                for d_row in range(-r, r + 1):
-                    if max(abs(d_col), abs(d_row)) != r:
-                        continue
-                    cand_col, cand_row = nc + d_col, nr + d_row
-                    if validate_move_plan([(mid, cand_col, cand_row)], game_state, c_individual):
-                        found_cell = (cand_col, cand_row)
-                        break
-                if found_cell is not None:
-                    break
-            if found_cell is not None:
-                break
-        if found_cell is not None:
-            corrected.append((mid, found_cell[0], found_cell[1]))
-        else:
-            corrected.append((mid, nc, nr))
-    return corrected
 
 
 def roll_hazard_for_unit(
@@ -4926,12 +4992,15 @@ def _synth_model_entry(
         "orientation": orient,
     }
     if level is not None:
-        from engine.terrain_utils import floor_height_at
+        from engine.terrain_utils import resolved_floor_height_at
         anchor = (int(col), int(row))
         synth["occupied_hexes_by_model"] = {"_synth_model": anchor}
+        # Niveau DEMANDÉ → hauteur résolue (§13.06) : une position candidate hors plancher est au
+        # sol. Cf. `resolved_floor_height_at` — les chemins de lecture seule ne doivent pas lever.
         synth["floor_height_by_model"] = {
-            "_synth_model": floor_height_at(
-                game_state.get("terrain_areas", []), int(col), int(row), int(level)  # get allowed (board sans terrain)
+            "_synth_model": resolved_floor_height_at(
+                game_state.get("terrain_areas", []),  # get allowed (board sans terrain)
+                int(col), int(row), shape, size, orient, int(level),
             )
         }
         synth["MODEL_HEIGHT"] = float(require_key(squad_entry, "MODEL_HEIGHT"))
@@ -5392,7 +5461,7 @@ def commit_move(
     try:
         for entry in plan:
             mid, nc, nr = str(entry[0]), int(entry[1]), int(entry[2])
-            lvl = int(entry[3]) if len(entry) >= 4 and entry[3] is not None else None
+            lvl = int(entry[3])
             ori = int(entry[4]) if len(entry) >= 5 and entry[4] is not None else None
             update_model_position(game_state, mid, nc, nr, level=lvl, orientation=ori)
         if move_type == "advance":
@@ -9080,7 +9149,7 @@ def _max_b2b_matching(
 
 def fight_pile_in_plan(
     game_state: Dict[str, Any], squad_id: str
-) -> Optional[List[Tuple[str, int, int]]]:
+) -> Optional[List[Tuple[str, int, int, int]]]:
     """Plan Pile In multi-figurines (transaction atomique, aucune ecriture cache).
 
     Regle officielle (spec §"Pile In") :
@@ -9129,23 +9198,33 @@ def fight_pile_in_plan(
     chosen = _assign_cells_toward_enemies(
         game_state, squad_id, mids, enemy_positions, pile_in_budget
     )
-    plan: List[Tuple[str, int, int]] = [(mid, chosen[mid][0], chosen[mid][1]) for mid in mids]
+    # `_assign_cells_toward_enemies` est HORIZONTAL : chaque fig reste à son étage, que le plan
+    # PORTE (toute entrée de plan porte le sien).
+    plan: List[Tuple[str, int, int, int]] = [
+        (mid, chosen[mid][0], chosen[mid][1], int(require_key(models_cache[mid], "level")))
+        for mid in mids
+    ]
 
     # Validation finale
-    plan_positions = {mid: (c, r) for mid, c, r in plan}
+    plan_positions = {mid: (c, r) for mid, c, r, _lv in plan}
     if not _validate_plan_coherency(plan_positions, game_state):
         return None
     # Au moins une figurine doit finir dans l ER (bord-a-bord) d une unite ennemie.
     from engine.spatial_relations import unit_entries_within_engagement_zone
     ez = get_engagement_zone(game_state)
+    from engine.spatial_relations import get_engagement_zone_vertical
+    _vz = get_engagement_zone_vertical(game_state)  # engagement 3D (§03.04)
     enemy_entries = [
         e for e in (units_cache.get(esid) for esid in _enemy_squad_ids(game_state, our_player))
         if e is not None
     ]
     in_er = False
-    for mid, c, r in plan:
-        synth = _synth_model_entry(game_state, str(squad_id), models_cache[mid], c, r)
-        if any(unit_entries_within_engagement_zone(synth, ee, ez) for ee in enemy_entries):
+    for mid, c, r, _lv in plan:
+        synth = _synth_model_entry(game_state, str(squad_id), models_cache[mid], c, r, level=_lv)
+        if any(
+            unit_entries_within_engagement_zone(synth, ee, ez, vertical_zone_inches=_vz)
+            for ee in enemy_entries
+        ):
             in_er = True
             break
     if not in_er:
@@ -9174,13 +9253,29 @@ def get_fighting_models(game_state: Dict[str, Any], squad_id: str) -> List[str]:
     our_player = int(units_cache.get(squad_id, {}).get("player", -1))  # get allowed
     from engine.spatial_relations import unit_entries_within_engagement_zone
     ez = get_engagement_zone(game_state)
+    from engine.spatial_relations import get_engagement_zone_vertical
+    _vz = get_engagement_zone_vertical(game_state)  # engagement 3D (§03.04)
+    # Positions ennemies AVEC leur intervalle vertical : le contact socle-à-socle est gaté par
+    # la même séparation verticale que l'engagement (§03.04). Sans ça, la clause « buddy » —
+    # qui RELAIE un engagement — réadmettait exactement les figurines que le gate vertical vient
+    # d'écarter (ennemi à l'étage juste au-dessus), c'est-à-dire un contrôle 3D contourné par un
+    # contrôle 2D dans la même fonction.
     enemy_positions: List[Tuple[int, int]] = []
+    enemy_vertical: List[Tuple[int, int, float, float]] = []  # (col, row, plancher, MODEL_HEIGHT)
     enemy_entries: List[Dict[str, Any]] = []
     for esid in _enemy_squad_ids(game_state, our_player):
         enemy_positions.extend(_squad_model_positions(game_state, esid))
         ee = units_cache.get(esid)
         if ee is not None:
             enemy_entries.append(ee)
+            _e_floors = ee.get("floor_height_by_model")  # get allowed (entrées de test 2D)
+            _e_by_model = ee.get("occupied_hexes_by_model")  # get allowed
+            _e_height = float(ee.get("MODEL_HEIGHT", 0.0))  # get allowed
+            if isinstance(_e_by_model, dict) and isinstance(_e_floors, dict):
+                for _emid, (_ec, _er) in _e_by_model.items():
+                    enemy_vertical.append(
+                        (int(_ec), int(_er), float(_e_floors.get(_emid, 0.0)), _e_height)  # get allowed
+                    )
     if not enemy_positions:
         return []
 
@@ -9192,13 +9287,21 @@ def get_fighting_models(game_state: Dict[str, Any], squad_id: str) -> List[str]:
         m = models_cache[mid]
         pos = (int(m["col"]), int(m["row"]))
         positions[mid] = pos
-        synth = _synth_model_entry(game_state, str(squad_id), m, pos[0], pos[1])
-        in_er[mid] = any(
-            unit_entries_within_engagement_zone(synth, ee, ez) for ee in enemy_entries
+        synth = _synth_model_entry(
+            game_state, str(squad_id), m, pos[0], pos[1], level=int(require_key(m, "level"))
         )
+        in_er[mid] = any(
+            unit_entries_within_engagement_zone(synth, ee, ez, vertical_zone_inches=_vz)
+            for ee in enemy_entries
+        )
+        _my_floor = float(
+            (units_cache.get(squad_id, {}).get("floor_height_by_model") or {}).get(mid, 0.0)  # get allowed
+        )
+        _my_height = float(units_cache.get(squad_id, {}).get("MODEL_HEIGHT", 0.0))  # get allowed
         b2b_enemy[mid] = any(
             calculate_hex_distance(pos[0], pos[1], ec, er) == BASE_TO_BASE_SUBHEX
-            for ec, er in enemy_positions
+            and max(0.0, max(_my_floor, ef) - min(_my_floor + _my_height, ef + eh)) <= _vz
+            for ec, er, ef, eh in enemy_vertical
         )
 
     # Condition (1) : in ER.
@@ -9408,7 +9511,7 @@ def squad_declare_fight(
 
 def squad_consolidate_plan(
     game_state: Dict[str, Any], squad_id: str
-) -> Optional[List[Tuple[str, int, int]]]:
+) -> Optional[List[Tuple[str, int, int, int]]]:
     """Plan Consolidation (apres melee, 3" max par fig).
 
     Regle officielle (spec §"Consolidation") — OR condition :
@@ -9456,22 +9559,32 @@ def squad_consolidate_plan(
     chosen = _assign_cells_toward_enemies(
         game_state, squad_id, mids, enemy_positions, budget
     )
-    plan: List[Tuple[str, int, int]] = [(mid, chosen[mid][0], chosen[mid][1]) for mid in mids]
+    # `_assign_cells_toward_enemies` est HORIZONTAL : chaque fig reste à son étage, que le plan
+    # PORTE (toute entrée de plan porte le sien).
+    plan: List[Tuple[str, int, int, int]] = [
+        (mid, chosen[mid][0], chosen[mid][1], int(require_key(models_cache[mid], "level")))
+        for mid in mids
+    ]
 
     # Validation finale : coherency + ER (au moins 1 fig)
-    plan_positions = {mid: (c, r) for mid, c, r in plan}
+    plan_positions = {mid: (c, r) for mid, c, r, _lv in plan}
     if not _validate_plan_coherency(plan_positions, game_state):
         return None
     from engine.spatial_relations import unit_entries_within_engagement_zone
     ez = get_engagement_zone(game_state)
+    from engine.spatial_relations import get_engagement_zone_vertical
+    _vz = get_engagement_zone_vertical(game_state)  # engagement 3D (§03.04)
     in_er = any(
         any(
             unit_entries_within_engagement_zone(
-                _synth_model_entry(game_state, str(squad_id), models_cache[mid], c, r), ee, ez
+                _synth_model_entry(
+                    game_state, str(squad_id), models_cache[mid], c, r, level=lv
+                ),
+                ee, ez, vertical_zone_inches=_vz,
             )
             for ee in enemy_entries
         )
-        for mid, c, r in plan
+        for mid, c, r, lv in plan
     )
     if not in_er:
         return None

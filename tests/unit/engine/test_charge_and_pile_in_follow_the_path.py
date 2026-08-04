@@ -163,7 +163,9 @@ def test_consolidation_still_works_without_the_wall() -> None:
     gs = _gs([_unit("1", 1, [CONSO_ATTACKER]), _unit("101", 2, [CONSO_ENEMY])], [], "fight")
     plan = squad_consolidate_plan(gs, "1")
     assert plan is not None
-    assert plan[0][1:] == (22, 20), plan
+    # Une entree de plan porte TOUJOURS son etage (frontiere `parse_model_plan`, §13.06) : la
+    # consolidation etant horizontale, c'est celui de depart — au sol ici.
+    assert plan[0][1:] == (22, 20, 0), plan
 
 
 # ─────────────────────────────────────────────────────────────────────────────

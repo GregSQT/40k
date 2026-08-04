@@ -338,12 +338,14 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
             move_unit_id, state.unit_player, enemy_positions_in_snapshot, state.unit_hp,
             engagement_zone=_get_engagement_zone_for_analyzer(), position_override=start_pos,
             positions_by_model=state.positions_by_model, unit_base=state.unit_base,
+            **state.engagement_3d_kwargs(),
             subject_models=start_models,
         )
         was_adjacent_in_current = is_within_engine_engagement_zone(
             move_unit_id, state.unit_player, enemy_positions_current, state.unit_hp,
             engagement_zone=_get_engagement_zone_for_analyzer(), position_override=start_pos,
             positions_by_model=state.positions_by_model, unit_base=state.unit_base,
+            **state.engagement_3d_kwargs(),
             subject_models=start_models,
         )
         if (was_adjacent_in_snapshot and was_adjacent_in_current and
@@ -533,6 +535,7 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
             engagement_zone=_get_engagement_zone_for_analyzer(),
             position_override=(start_col, start_row),
             positions_by_model=state.positions_by_model, unit_base=state.unit_base,
+            **state.engagement_3d_kwargs(),
             subject_models=surviving_start_models(
                 state.positions_by_model.get(move_unit_id),  # get allowed
                 state.current_line_models.get(move_unit_id),  # get allowed
@@ -554,8 +557,11 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
             move_unit_id, state.unit_player, positions_for_adjacency_check_filtered, unit_hp_at_movement,
             engagement_zone=_get_engagement_zone_for_analyzer(), position_override=(dest_col, dest_row),
             positions_by_model=state.positions_by_model, unit_base=state.unit_base,
-            # Socles d'ARRIVÉE : le `[MODELS:]` de CETTE ligne, pas l'état d'avant.
+            **state.engagement_3d_kwargs(),
+            # Socles d'ARRIVÉE : le `[MODELS:]` de CETTE ligne, pas l'état d'avant. Les hauteurs
+            # suivent la même ligne — mesurer une arrivée à l'altitude du départ inverse le gate.
             subject_models=state.current_line_models.get(move_unit_id),  # get allowed
+            subject_heights=state.current_line_heights.get(move_unit_id),  # get allowed
         )
         if dest_adjacent:
             if not adjacent_before:

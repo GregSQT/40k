@@ -53,12 +53,17 @@ SUSTAINED_WEAPON = "Heavy Bolter"
 
 def _uc(col, row, *, player, models=None):
     """Entrée units_cache. `occupied_hexes_by_model` est ce dont `_models_segment_for_unit`
-    tire le segment `[MODELS: A1@(c,r)]` — sans lui l'analyzer ne connaît pas le NOMBRE de
-    figurines de l'escouade, donc pas le plafond de tirs, donc pas la fenêtre RAPID FIRE."""
+    tire le segment `[MODELS: A1@(c,r,z0)]` — sans lui l'analyzer ne connaît pas le NOMBRE de
+    figurines de l'escouade, donc pas le plafond de tirs, donc pas la fenêtre RAPID FIRE.
+
+    `floor_height_by_model` est écrite AVEC elle, jamais seule : les deux cartes sont le contrat
+    de la couche per-figurine (position + altitude, §03.04), et le moteur exige la seconde dès
+    que la première est là. Plateau plat ici → 0.0 partout."""
     entry = {"BASE_SHAPE": "round", "BASE_SIZE": 6, "col": col, "row": row,
              "occupied_hexes": set(), "VALUE": 10.0, "player": player}
     if models:
         entry["occupied_hexes_by_model"] = dict(models)
+        entry["floor_height_by_model"] = {mid: 0.0 for mid in models}
     return entry
 
 

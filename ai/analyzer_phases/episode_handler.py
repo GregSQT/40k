@@ -79,4 +79,6 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.selected_choice_by_unit_source = {}
     state.positions_by_model = {}
     state.current_line_models = {}
+    state.heights_by_model = {}
+    state.current_line_heights = {}
     state.unit_base = {}

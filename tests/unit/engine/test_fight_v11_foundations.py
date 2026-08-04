@@ -63,6 +63,10 @@ def _make_gs(
             "BASE_SHAPE": "round",
             "orientation": 0,
             "HP_CUR": u.get("HP_CUR", 1),
+            # Données verticales (03.04) : une entrée-cache réelle les porte TOUJOURS
+            # (build_units_cache). Sans elles l'engagement 3D lève « câblage incomplet ».
+            "occupied_hexes_by_model": {f"{uid}#0": (u["col"], u["row"])},
+            "floor_height_by_model": {f"{uid}#0": 0.0},
         }
     gs: Dict[str, Any] = {**turn_state_invariants(),
         "inches_to_subhex": scale,
@@ -76,6 +80,17 @@ def _make_gs(
         }},
         "units": norm_units,
         "units_cache": units_cache,
+        # Miroir par-figurine de `units_cache` : les pools de pile-in translatent le bloc
+        # rigidement et lisent la position ET l'étage de CHAQUE figurine (03.04 / 13.06).
+        "models_cache": {
+            f"{uid}#0": {
+                "col": e["col"], "row": e["row"], "level": 0, "squad_id": uid,
+                "player": e["player"], "BASE_SIZE": 1, "BASE_SHAPE": "round", "orientation": 0,
+            }
+            for uid, e in units_cache.items()
+        },
+        "squad_models": {uid: [f"{uid}#0"] for uid in units_cache},
+        "terrain_areas": [],
         "wall_hexes": set(),
         "units_charged": set(units_charged or []),
     }

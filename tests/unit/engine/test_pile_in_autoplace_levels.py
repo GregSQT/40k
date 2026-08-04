@@ -69,18 +69,22 @@ def _gs() -> Dict[str, Any]:
                   "MODEL_HEIGHT": 2.5,
                   "occupied_hexes": {GROUND_START, UPPER_START},
                   "occupied_hexes_by_model": {"1#0": GROUND_START, "1#1": UPPER_START},
-                  "level_by_model": {"1#0": 0, "1#1": 1}},
+                  # HAUTEUR et NIVEAU vont ensemble : `1#1` est à l'étage 1, donc à
+                  # FLOOR_HEIGHT_INCHES du sol — c'est la hauteur, pas le niveau, que compare le
+                  # gate vertical de l'engagement (§03.04).
+                  "level_by_model": {"1#0": 0, "1#1": 1},
+                  "floor_height_by_model": {"1#0": 0.0, "1#1": FLOOR_HEIGHT_INCHES}},
             "2": {"col": ENEMY[0], "row": ENEMY[1], "player": 2, "level": 0,
                   "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0, "HP_CUR": 1,
                   "MODEL_HEIGHT": 2.5, "occupied_hexes": {ENEMY},
-                  "occupied_hexes_by_model": {"2#0": ENEMY}, "level_by_model": {"2#0": 0}},
+                  "occupied_hexes_by_model": {"2#0": ENEMY}, "level_by_model": {"2#0": 0}, "floor_height_by_model": {"2#0": 0.0}},
         },
         "units": [unit1, unit2],
         "unit_by_id": {"1": unit1, "2": unit2},
         "board_cols": 44, "board_rows": 60,
         "wall_hexes": set(),
         "config": {
-            "game_rules": {"engagement_zone": 1, "unit_model_cohesion_range": 2,
+            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "unit_model_cohesion_range": 2,
                            "unit_global_cohesion_range": 9,
                            "cohesion_distance_mode": "euclidean", "squad_min_neighbors": 1,
                            "pile_in_target_range": 5},

@@ -466,6 +466,7 @@ def handle_shoot(
                 position_override=target_pos,
                 positions_by_model=state.positions_by_model,
                 unit_base=state.unit_base,
+                **state.engagement_3d_kwargs(),
                 subject_models=state.positions_by_model.get(target_id),  # get allowed
             )
     elif target_id in state.unit_positions:
@@ -510,6 +511,7 @@ def handle_shoot(
                     position_override=target_pos_from_cache,
                     positions_by_model=state.positions_by_model,
                     unit_base=state.unit_base,
+                    **state.engagement_3d_kwargs(),
                     subject_models=state.positions_by_model.get(target_id),  # get allowed
                 )
             else:
@@ -548,7 +550,9 @@ def handle_shoot(
         engagement_zone=_get_engagement_zone_for_analyzer(),
         positions_by_model=state.positions_by_model,
         unit_base=state.unit_base,
+        **state.engagement_3d_kwargs(),
         subject_models=state.current_line_models.get(shooter_id),  # get allowed
+        subject_heights=state.current_line_heights.get(shooter_id),  # get allowed
         position_override=(shooter_col, shooter_row),
     )
     shooter_engaged_with_target = False
@@ -569,7 +573,9 @@ def handle_shoot(
             engagement_zone=_get_engagement_zone_for_analyzer(),
             positions_by_model=state.positions_by_model,
             unit_base=state.unit_base,
+            **state.engagement_3d_kwargs(),
             subject_models=state.current_line_models.get(shooter_id),  # get allowed
+            subject_heights=state.current_line_heights.get(shooter_id),  # get allowed
             position_override=(shooter_col, shooter_row),
         )
 
@@ -1113,6 +1119,7 @@ def handle_advance(
         engagement_zone=_get_engagement_zone_for_analyzer(),
         positions_by_model=state.positions_by_model,
         unit_base=state.unit_base,
+        **state.engagement_3d_kwargs(),
         # Socles AVANT l'avance, morts exclus (cf. surviving_start_models).
         subject_models=surviving_start_models(
             state.positions_by_model.get(advance_unit_id),  # get allowed

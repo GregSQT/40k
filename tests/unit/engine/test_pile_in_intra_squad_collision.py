@@ -56,6 +56,11 @@ def _make_gs(
             "level": 0, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
             "MODEL_HEIGHT": 2.5, "HP_CUR": 1,
             "occupied_hexes": {p for p in positions},
+            # Cartes PAR FIGURINE : l'engagement est 3D (§03.04, 2" horizontal ET 5" vertical) et
+            # la primitive EXIGE les trois (centres, hauteurs, MODEL_HEIGHT) plutôt que de
+            # supposer une altitude. Plateau plat ici → 0.0 partout, donc verdict identique au 2D.
+            "occupied_hexes_by_model": {f"{sid}#{i}": p for i, p in enumerate(positions)},
+            "floor_height_by_model": {f"{sid}#{i}": 0.0 for i, _ in enumerate(positions)},
         }
     return {**turn_state_invariants(),
         "inches_to_subhex": 1, "board_cols": 40, "board_rows": 40,
@@ -87,7 +92,7 @@ class TestPileInNeverSuperposesOwnSquad:
         })
         plan = fight_pile_in_plan(gs, "S")
         assert plan is not None, "le plan doit exister (pile-in légal ici)"
-        cells = [(c, r) for _mid, c, r in plan]
+        cells = [(c, r) for _mid, c, r, _lv in plan]  # entree de plan = (mid, col, row, ETAGE)
         assert len(set(cells)) == len(cells), (
             f"deux figurines de l'escouade sur le même hex : {plan}"
         )
@@ -149,7 +154,7 @@ class TestPileInMaximisesEngagedModels:
             BASE_TO_BASE_SUBHEX, calculate_hex_distance,
         )
         engaged = [
-            mid for mid, c, r in plan
+            mid for mid, c, r, _lv in plan
             if calculate_hex_distance(c, r, 10, 10) == BASE_TO_BASE_SUBHEX
         ]
         assert len(engaged) == 2, (
@@ -178,7 +183,7 @@ class TestConsolidationNeverSuperposesOwnSquad:
         )
         plan = squad_consolidate_plan(gs, "S")
         assert plan is not None, "le plan doit exister (consolidation légale ici)"
-        cells = [(c, r) for _mid, c, r in plan]
+        cells = [(c, r) for _mid, c, r, _lv in plan]  # entree de plan = (mid, col, row, ETAGE)
         assert len(set(cells)) == len(cells), (
             f"deux figurines de l'escouade sur le même hex : {plan}"
         )

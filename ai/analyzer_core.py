@@ -66,7 +66,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
     stats = state.stats
     unit_id: Optional[str] = None  # may be set from unit_start or deploy lines
 
-    from ai.analyzer_perfig import parse_models_segment, surviving_start_models
+    from ai.analyzer_perfig import parse_models_heights, parse_models_segment, surviving_start_models
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
@@ -83,7 +83,13 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             for _muid, _mmodels in state.current_line_models.items():
                 state.positions_by_model[_muid] = _mmodels
                 state.models_invalidated.discard(_muid)
+            # Altitudes : MÊME décalage d'une ligne que les positions. `heights_by_model` porte
+            # l'état d'ORIGINE (jusqu'à la ligne N-1), qu'exigent les contrôles mesurés à la
+            # position de DÉPART ; `current_line_heights` porte l'arrivée de la ligne N.
+            for _muid, _mheights in state.current_line_heights.items():
+                state.heights_by_model[_muid] = _mheights
             state.current_line_models = parse_models_segment(line) or {}
+            state.current_line_heights = parse_models_heights(line) or {}
             if state.current_line_models:
                 for _uid, _models in state.current_line_models.items():
                     if not _models:
@@ -184,6 +190,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 hp_max = require_key(unit_data, "HP_MAX")
                 _debug_log(f"[ANALYZER] Unit {unit_id} ({unit_type}) HP_MAX={hp_max} from registry")
                 unit_move_value = require_key(unit_data, "MOVE")
+                # MODEL_HEIGHT : borne haute de l'intervalle vertical (§03.04). Lue au MÊME
+                # endroit que HP_MAX/MOVE — le registry, pas le log : c'est une stat d'unité
+                # constante, la journaliser par action la dupliquerait sans rien apporter.
+                state.unit_model_height[unit_id] = float(require_key(unit_data, "MODEL_HEIGHT"))
                 
                 # Modèle HP par-figurine : unit_hp = PV de la figurine front (= HP_MAX à plein),
                 # nb de figurines vivantes compté sur le segment [MODELS:] de la ligne de départ
@@ -828,6 +838,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 engagement_zone=_get_engagement_zone_for_analyzer(),
                                 # Le move réactif ne loggue pas de `[MODELS:]` d'arrivée : le
                                 # sujet reste mesuré à l'ancre, les ennemis à leurs socles.
+                                # Donc pas de gate vertical non plus (§03.04) — sans socle
+                                # d'arrivée, le sujet n'a pas d'altitude, et le contrôle
+                                # « tout ou rien » de la primitive le laisse en 2D. Une altitude
+                                # supposée rendrait un verdict faux, pas un verdict absent.
                                 position_override=(to_col, to_row),
                                     unit_base=state.unit_base,
                             )

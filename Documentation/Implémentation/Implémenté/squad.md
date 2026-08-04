@@ -695,10 +695,11 @@ validate_move_plan(plan, game_state, constraints) -> bool
 #   {"budget_per_model": int, "forbid_enemy_er": bool, "require_coherency": bool, ...}
 # Commun a TOUS les types de deplacement.
 
-apply_snap_corrections(plan, game_state, radius=2) -> list[tuple[str,int,int]]
-# Pour chaque figurine invalide du plan : cherche hex valide le plus proche dans `radius`.
-# Ordre deterministe par index de figurine.
-# Commun a TOUS les types de deplacement.
+# NOTE (2026-08-03) : `apply_snap_corrections` (snap d'une figurine invalide vers un hex proche)
+# etait prevu ici mais n'a jamais ete cable — aucun appelant, ni moteur ni API. Il a ete SUPPRIME.
+# Le flux retenu est le voile rouge : une figurine mal posee reste ou elle est et s'affiche
+# invalide, l'ajustement est manuel. Reintroduire un snap automatique serait une decision de
+# design, pas une remise en service.
 
 commit_move(plan, game_state, move_type) -> None
 # Ecrit toutes les positions en une seule passe (models_cache, units_cache, squad_cache,
@@ -725,8 +726,7 @@ commit_move(plan, game_state, move_type) -> None
 ```
 squad_move_start(squad_id, move_type)  → capture positions d origine, determine budget
 on_drag_update(anchor_dest)            → build_rigid_plan dry-run, overlay hex
-on_drop()                              → validate_move_plan + apply_snap_corrections
-                                          + affichage voiles rouges
+on_drop()                              → validate_move_plan + affichage voiles rouges
 on_individual_adjust(model_id, dest)   → validate 1 figurine + LoS temps reel
 on_validate()                          → commit_move atomique
 ```

@@ -3,7 +3,7 @@ AnalyzerState — état partagé entre les handlers de parse_step_log.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ai.analyzer_perfig import Base
 
@@ -48,6 +48,16 @@ class AnalyzerState:
     current_line_models: Dict[str, Dict[str, Tuple[int, int]]] = field(default_factory=dict)
     # Base (shape, size) par unité, lue sur la ligne "Starting position ... base=".
     unit_base: Dict[str, Base] = field(default_factory=dict)
+    # Volet VERTICAL de la couche per-figurine (§03.04) : hauteur du PLANCHER sous chaque socle,
+    # en pouces, lue dans le même token `[MODELS:]` que la position (`z<hauteur>`). Jumeaux
+    # exacts de `positions_by_model` / `current_line_models`, MÊME décalage d'une ligne : les
+    # deux cartes sont lues ENSEMBLE par l'engagement 3D, et n'en décaler qu'une mesurerait une
+    # figurine à l'altitude de sa case précédente.
+    heights_by_model: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    current_line_heights: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    # MODEL_HEIGHT par unité (borne haute de l'intervalle vertical, §01.04). Lue au MÊME endroit
+    # que HP_MAX/MOVE — le registry, pas le log : c'est une stat d'unité constante.
+    unit_model_height: Dict[str, float] = field(default_factory=dict)
 
     # Board
     wall_hexes: Set[Tuple[int, int]] = field(default_factory=set)
@@ -103,6 +113,25 @@ class AnalyzerState:
     objective_control_seen: bool = False
     objectives_declared: bool = False
     selected_choice_by_unit_source: Dict[str, Dict[str, str]] = field(default_factory=dict)
+
+    def engagement_3d_kwargs(self) -> Dict[str, Any]:
+        """Paire d'arguments verticaux de ``is_within_engine_engagement_zone`` (§03.04).
+
+        Un seul point d'assemblage : ces valeurs vont TOUJOURS ensemble avec
+        ``positions_by_model``/``unit_base``, et les recopier site par site rendait un oubli
+        silencieux — un contrôle resté 2D ne lève pas, il rend juste un verdict faux sur un
+        plateau à étages.
+
+        Les hauteurs rendues sont celles d'AVANT la ligne courante, comme ``positions_by_model``
+        dont elles sont le jumeau : c'est ce que mesurent les contrôles au départ d'un mouvement.
+        Un appelant qui passe ``subject_models`` tiré de ``current_line_models`` (position
+        d'ARRIVÉE) doit passer le ``subject_heights`` correspondant, tiré de
+        ``current_line_heights`` — sinon il mesurerait une arrivée à l'altitude du départ.
+        """
+        return {
+            "heights_by_model": self.heights_by_model,
+            "unit_model_height": self.unit_model_height,
+        }
 
 
 def make_initial_state(stats: Dict) -> "AnalyzerState":

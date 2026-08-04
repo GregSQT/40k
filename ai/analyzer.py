@@ -568,6 +568,22 @@ def _analyzer_engagement_metric() -> str:
     return get_run_rule("metric.engagement")
 
 
+def _analyzer_engagement_zone_vertical() -> float:
+    """Volet VERTICAL de la zone d'engagement (§03.04 : 2" horizontal ET 5" vertical), en POUCES.
+
+    Même contrat que `_analyzer_engagement_metric` : la valeur vient de l'entête `Run rules:` du
+    log, jamais du config courant — relire un vieux journal avec le seuil du jour rendrait des
+    verdicts d'engagement faux en silence.
+
+    Contrairement à `engagement_zone`, ce seuil n'est PAS mis à l'échelle : il se compare à des
+    hauteurs de plancher, déjà en pouces (même contrat que
+    `spatial_relations.get_engagement_zone_vertical`). Le multiplier par `inches_to_subhex`
+    rendrait le gate inopérant (5 → 25" à x5).
+    """
+    from ai.analyzer_config import get_run_rule
+    return float(get_run_rule("engagement_zone_vertical_inches"))
+
+
 def is_within_engine_engagement_zone(
     unit_id: str,
     unit_player: Dict[str, int],
@@ -578,6 +594,9 @@ def is_within_engine_engagement_zone(
     positions_by_model: Optional[Dict[str, Dict[str, Tuple[int, int]]]] = None,
     unit_base: Optional[Dict[str, Any]] = None,
     subject_models: Optional[Dict[str, Tuple[int, int]]] = None,
+    heights_by_model: Optional[Dict[str, Dict[str, float]]] = None,
+    unit_model_height: Optional[Dict[str, float]] = None,
+    subject_heights: Optional[Dict[str, float]] = None,
 ) -> bool:
     """L'unité est-elle engagée ? Mesure PER-FIGURINE, empreinte contre empreinte (03.04).
 
@@ -605,6 +624,18 @@ def is_within_engine_engagement_zone(
       cet instant-là (mouvement réactif). Le sujet est alors mesuré comme un point — repli sur
       donnée absente, jamais un contrôle désarmé.
     - Les AUTRES unités sont toujours mesurées sur leurs socles connus, ancre sinon.
+
+    ENGAGEMENT 3D (§03.04 : 2" horizontal ET **5" vertical**). ``heights_by_model`` (hauteurs de
+    plancher par socle, lues dans le segment `[MODELS:]`), ``unit_model_height`` (MODEL_HEIGHT
+    par unité, registry) et ``subject_heights`` (hauteurs du sujet à l'instant évalué, jumeau
+    vertical de ``subject_models``) portent le gate. Le seuil vient de l'entête `Run rules:` du
+    log, comme la zone horizontale et pour la même raison : le config s'édite entre deux runs.
+
+    TOUT OU RIEN par paire : le gate n'est appliqué que si les DEUX entrées comparées portent
+    leurs cartes verticales. ``_vertical_classes`` lève sur une entrée sans données, et une
+    figurine laissée « au sol » par défaut rendrait un verdict FAUX là où l'absence de donnée
+    doit rendre un verdict 2D — juste sur un plateau plat, et c'est le cas de tous les journaux
+    antérieurs aux étages.
     """
     from engine.spatial_relations import unit_entries_within_engagement_zone
     from ai.analyzer_perfig import model_cache_entries
@@ -616,15 +647,29 @@ def is_within_engine_engagement_zone(
     bases = unit_base or {}
     subject_player = int(require_key(unit_player, unit_id))
     subject_anchor = position_override if position_override is not None else unit_positions.get(unit_id)  # get allowed
+    heights_by_unit = heights_by_model or {}
+    model_heights = unit_model_height or {}
     if subject_models is None and position_override is None:
         subject_models = models_by_unit.get(unit_id)  # get allowed
+    if subject_heights is None:
+        # Jumeau vertical du défaut de `subject_models` : les hauteurs d'AVANT la ligne, alignées
+        # sur `positions_by_model`. La carte étant indexée PAR SOCLE, seuls les mids réellement
+        # présents dans `subject_models` sont lus — un appelant qui mesure des socles d'ARRIVÉE
+        # (`current_line_models`) doit donc passer les hauteurs correspondantes, sinon ses socles
+        # n'ont pas d'altitude ici et il retombe en 2D plutôt que d'en inventer une.
+        subject_heights = heights_by_unit.get(unit_id)  # get allowed
     subject_entries = model_cache_entries(
-        unit_id, subject_models, bases, subject_anchor, subject_player
+        unit_id, subject_models, bases, subject_anchor, subject_player,
+        heights=subject_heights, model_height=model_heights.get(unit_id),  # get allowed
     )
     if not subject_entries:
         return False
 
     metric = _analyzer_engagement_metric()
+    # Seuil vertical lu PARESSEUSEMENT, à la première paire qui porte réellement des altitudes :
+    # un journal sans hauteurs n'a pas besoin de la règle, et l'exiger d'emblée rendrait
+    # inanalysable tout journal antérieur à cette clé d'entête sans rien mesurer de plus.
+    vertical_zone: Optional[float] = None
     for uid, anchor in unit_positions.items():
         if uid == unit_id or uid not in unit_player:
             continue
@@ -635,11 +680,20 @@ def is_within_engine_engagement_zone(
         if hp_value is None or hp_value <= 0:
             continue
         for enemy_entry in model_cache_entries(
-            uid, models_by_unit.get(uid), bases, anchor, enemy_player  # get allowed
+            uid, models_by_unit.get(uid), bases, anchor, enemy_player,  # get allowed
+            heights=heights_by_unit.get(uid),  # get allowed
+            model_height=model_heights.get(uid),  # get allowed
         ):
             for subject_entry in subject_entries:
+                # Gate vertical UNIQUEMENT si les deux entrées le portent (cf. docstring).
+                _vz: Optional[float] = None
+                if "MODEL_HEIGHT" in subject_entry and "MODEL_HEIGHT" in enemy_entry:
+                    if vertical_zone is None:
+                        vertical_zone = _analyzer_engagement_zone_vertical()
+                    _vz = vertical_zone
                 if unit_entries_within_engagement_zone(
-                    subject_entry, enemy_entry, engagement_zone, metric=metric
+                    subject_entry, enemy_entry, engagement_zone, metric=metric,
+                    vertical_zone_inches=_vz,
                 ):
                     return True
     return False

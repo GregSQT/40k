@@ -5,7 +5,7 @@ Le mode replay doit montrer **exactement** ce qui s'est passé en training/eval 
 chaque **figurine** d'une escouade individuellement, pas un seul socle par escouade.
 
 ## Constat (root cause)
-- Le moteur EST par-figurine ; `step.log` porte déjà `[MODELS: <unit>#<mid>@(col,row) ...]`
+- Le moteur EST par-figurine ; `step.log` porte déjà `[MODELS: <unit>#<mid>@(col,row,z<hauteur>) ...]`
   sur **chaque ligne d'action** = positions des figurines de l'unité qui agit.
 - Le rendu frontend multi-figurines existe déjà (BoardPvp/UnitRenderer bouclent sur
   `occupied_hexes_by_model`) — **zéro code de rendu à écrire**.

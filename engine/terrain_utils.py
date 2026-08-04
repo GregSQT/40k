@@ -243,6 +243,33 @@ def resolve_model_floor_level(
     return 0
 
 
+def resolved_floor_height_at(
+    terrain_areas: List[Dict[str, Any]],
+    col: int,
+    row: int,
+    base_shape: str,
+    base_size: "int | list[int]",
+    orientation: int,
+    requested_level: int,
+) -> float:
+    """Hauteur du plancher SOUS une figurine posée en ``(col, row)`` avec ce niveau DEMANDÉ.
+
+    Un niveau est une DEMANDE, pas un fait : c'est le plancher qui tranche (§13.06). Cette
+    fonction enchaîne donc ``resolve_model_floor_level`` puis ``floor_height_at`` — la même
+    résolution que le move et le déploiement appliquent au commit.
+
+    ``floor_height_at`` seule LÈVE sur une case sans plancher au niveau demandé. C'est le bon
+    contrat pour un état déjà résolu, mais pas pour un CANDIDAT : une position hypothétique hors
+    plancher n'est pas un état corrompu, c'est une figurine au sol. Passer par ici évite qu'un
+    pool de destinations, un aperçu en lecture seule ou une translation rigide ne plante là où la
+    règle demande simplement de poser la figurine au niveau 0.
+    """
+    level = resolve_model_floor_level(
+        col, row, base_shape, base_size, orientation, requested_level, terrain_areas
+    )
+    return floor_height_at(terrain_areas, col, row, level)
+
+
 def validate_floor_placement(
     unit: Dict[str, Any],
     col: int,

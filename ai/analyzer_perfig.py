@@ -20,10 +20,20 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 
 from engine.hex_utils import compute_occupied_hexes, min_distance_between_sets
 
-# `<mid>@(<col>,<row>)` — mid = token sans espace contenant '#'
+# `<mid>@(<col>,<row>)` ou `<mid>@(<col>,<row>,z<hauteur>)` — mid = token sans espace contenant '#'.
+#
+# `z<hauteur>` = hauteur du PLANCHER sous la figurine, en POUCES (§03.04 : le gate vertical
+# compare des hauteurs, pas des niveaux — la hauteur d'un `level` donné dépend de la POSITION, et
+# le step.log ne porte aucun terrain, donc elle ne serait pas re-dérivable).
+#
+# OPTIONNEL À LA LECTURE, et ce n'est pas un repli masquant : une hauteur absente a un
+# comportement DÉFINI et juste — le contrôle reste 2D, ce qui est exact sur un plateau plat, donc
+# sur tous les journaux antérieurs aux étages. C'est la différence avec l'entête `Run rules:`,
+# qui est EXIGÉE : pour une règle absente il n'existe aucun repli correct (prendre celle du
+# config du jour rend un verdict FAUX, pas un verdict absent). Le moteur, lui, l'écrit toujours.
 _MODELS_RE = re.compile(r'\[MODELS:\s*([^\]]+)\]')
 _TARGET_MODELS_RE = re.compile(r'\[TARGET_MODELS:\s*([^\]]+)\]')
-_TOKEN_RE = re.compile(r'(\S+?#\S*?)@\((-?\d+),\s*(-?\d+)\)')
+_TOKEN_RE = re.compile(r'(\S+?#\S*?)@\((-?\d+),\s*(-?\d+)(?:,\s*z(-?[\d.]+))?\)')
 
 # Taille de socle telle que l'attend le moteur (`compute_occupied_hexes`) : diamètre entier pour
 # un socle rond, [major, minor] pour un ovale.
@@ -73,6 +83,31 @@ def parse_models_segment(text: str) -> Optional[Dict[str, Dict[str, Tuple[int, i
     if not result:
         raise ValueError(f"Segment [MODELS:] présent mais vide/illisible: {m.group(1)[:120]}")
     return result
+
+
+def parse_models_heights(text: str) -> Optional[Dict[str, Dict[str, float]]]:
+    """Extrait les HAUTEURS du segment [MODELS:] → {unit_id: {mid: hauteur_plancher_pouces}}.
+
+    Jumeau exact de ``parse_models_segment`` — même segment, même regex, même convention de
+    ``unit_id`` — mais rendant la 3e composante du token. Les deux cartes sont lues ENSEMBLE par
+    l'engagement 3D (``_vertical_classes`` exige les centres ET les hauteurs), et n'en produire
+    qu'une laisserait la figurine mesurée sans altitude.
+
+    Les socles SANS `z` sont simplement absents de la carte — pas posés à 0.0. Le consommateur
+    voit alors « pas d'altitude connue » et reste en 2D, au lieu de mesurer une figurine réelle
+    contre un sol supposé. ``None`` si aucun socle du segment ne porte de hauteur.
+    """
+    m = _MODELS_RE.search(text)
+    if not m:
+        return None
+    result: Dict[str, Dict[str, float]] = {}
+    for tok in _TOKEN_RE.finditer(m.group(1)):
+        if tok.group(4) is None:
+            continue
+        mid = tok.group(1)
+        unit_id = mid.split('#', 1)[0]
+        result.setdefault(unit_id, {})[mid] = float(tok.group(4))
+    return result or None
 
 
 def _model_footprint(col: int, row: int, base: Base) -> frozenset:
@@ -241,6 +276,8 @@ def model_cache_entries(
     unit_base: Dict[str, Base],
     anchor: Optional[Tuple[int, int]],
     player: int,
+    heights: Optional[Dict[str, float]] = None,
+    model_height: Optional[float] = None,
 ) -> List[Dict[str, object]]:
     """Entrées `units_cache` moteur — UNE PAR FIGURINE, socle réel.
 
@@ -252,17 +289,37 @@ def model_cache_entries(
     per-socle exacte quelle que soit la métrique.
 
     Sans donnée per-figurine : une seule entrée à l'ancre (donnée absente, pas mesure fausse).
+
+    ENGAGEMENT 3D (§03.04 : 2" horizontal ET 5" vertical). ``heights`` (hauteur de plancher par
+    socle, lue dans le segment `[MODELS:]`) et ``model_height`` (MODEL_HEIGHT de l'unité,
+    registry) vont ENSEMBLE : fournis, chaque entrée porte les cartes verticales qu'exige
+    ``_vertical_classes``. Comme UNE entrée = UNE figurine, ces cartes n'ont qu'un élément et le
+    couplage horizontal/vertical y est EXACT — pas l'approximation « union horizontale + gate
+    global » que subissent les entrées d'escouade. Une figurine sans hauteur connue ne reçoit
+    aucune carte : la primitive lève alors si le gate est demandé, et l'appelant retombe en 2D
+    plutôt que de la supposer au sol.
     """
     shape, size = _unit_base(unit_base, unit_id)
-    positions = list(models.values()) if models else ([anchor] if anchor is not None else [])
-    return [
-        {
+    if models:
+        placed = list(models.items())
+    else:
+        placed = [(f"{unit_id}#anchor", anchor)] if anchor is not None else []
+    entries: List[Dict[str, object]] = []
+    for mid, pos in placed:
+        if pos is None:
+            continue
+        col, row = pos
+        entry: Dict[str, object] = {
             "col": col, "row": row, "player": int(player),
             "occupied_hexes": _model_footprint(col, row, (shape, size)),
             "BASE_SHAPE": shape, "BASE_SIZE": size, "orientation": 0,
         }
-        for (col, row) in positions
-    ]
+        if heights is not None and model_height is not None and mid in heights:
+            entry["occupied_hexes_by_model"] = {mid: (col, row)}
+            entry["floor_height_by_model"] = {mid: float(heights[mid])}
+            entry["MODEL_HEIGHT"] = float(model_height)
+        entries.append(entry)
+    return entries
 
 
 def squads_min_ranged_distance(

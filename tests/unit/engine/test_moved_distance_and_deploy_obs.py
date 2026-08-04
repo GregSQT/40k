@@ -113,7 +113,7 @@ def test_commit_move_records_straight_line_distance_without_obstacle():
     from engine.phase_handlers.shared_utils import commit_move
 
     eng = _make_engine([_unit_cfg(1, 1, [(10, 10)]), _unit_cfg(2, 2, [(50, 30)])])
-    commit_move([("1#0", 14, 10)], eng.game_state, "normal")
+    commit_move([("1#0", 14, 10, 0)], eng.game_state, "normal")
     assert eng.game_state["moved_distance_by_model"]["1#0"] == pytest.approx(
         _straight((10, 10), (14, 10)), rel=1e-4
     )
@@ -129,7 +129,7 @@ def test_commit_move_records_hex_path_distance_in_gym_metric():
 
     eng = _make_engine([_unit_cfg(1, 1, [(10, 10)]), _unit_cfg(2, 2, [(50, 30)])])
     eng.game_state["gym_training_mode"] = True
-    commit_move([("1#0", 14, 10)], eng.game_state, "normal")
+    commit_move([("1#0", 14, 10, 0)], eng.game_state, "normal")
     assert eng.game_state["moved_distance_by_model"]["1#0"] == pytest.approx(4.0)
 
 
@@ -144,7 +144,7 @@ def test_commit_move_records_the_PATH_not_the_crow_flight():
     # Mur vertical entre (10,10) et (12,10), assez long pour imposer un large detour.
     walls = [(11, r) for r in range(0, 25)]
     eng = _make_engine([_unit_cfg(1, 1, [(10, 10)], move=60), _unit_cfg(2, 2, [(50, 30)])], walls)
-    commit_move([("1#0", 12, 10)], eng.game_state, "normal")
+    commit_move([("1#0", 12, 10, 0)], eng.game_state, "normal")
 
     travelled = eng.game_state["moved_distance_by_model"]["1#0"]
     crow = _straight((10, 10), (12, 10))
@@ -159,8 +159,8 @@ def test_distances_accumulate_over_several_moves_in_a_turn():
     from engine.phase_handlers.shared_utils import commit_move
 
     eng = _make_engine([_unit_cfg(1, 1, [(10, 10)], move=30), _unit_cfg(2, 2, [(50, 30)])])
-    commit_move([("1#0", 13, 10)], eng.game_state, "normal")
-    commit_move([("1#0", 16, 10)], eng.game_state, "normal")
+    commit_move([("1#0", 13, 10, 0)], eng.game_state, "normal")
+    commit_move([("1#0", 16, 10, 0)], eng.game_state, "normal")
     expected = _straight((10, 10), (13, 10)) + _straight((13, 10), (16, 10))
     assert eng.game_state["moved_distance_by_model"]["1#0"] == pytest.approx(expected, rel=1e-4)
 
@@ -171,7 +171,7 @@ def test_distances_reset_at_the_start_of_a_player_turn():
     from engine.phase_handlers.command_handlers import command_phase_start
 
     eng = _make_engine([_unit_cfg(1, 1, [(10, 10)]), _unit_cfg(2, 2, [(50, 30)])])
-    commit_move([("1#0", 13, 10)], eng.game_state, "normal")
+    commit_move([("1#0", 13, 10, 0)], eng.game_state, "normal")
     assert eng.game_state["moved_distance_by_model"]
     command_phase_start(eng.game_state)
     assert eng.game_state["moved_distance_by_model"] == {}
@@ -188,7 +188,7 @@ def test_fight_phase_moves_are_not_counted_and_that_is_deliberate():
     from engine.phase_handlers.shared_utils import commit_move
 
     eng = _make_engine([_unit_cfg(1, 1, [(10, 10)]), _unit_cfg(2, 2, [(50, 30)])])
-    commit_move([("1#0", 12, 10)], eng.game_state, "pile_in")
+    commit_move([("1#0", 12, 10, 0)], eng.game_state, "pile_in")
     assert eng.game_state["moved_distance_by_model"] == {}
 
 
@@ -207,8 +207,8 @@ def test_observation_exposes_max_and_sum_of_travelled_distance():
         _unit_cfg(1, 1, [(10, 10), (10, 12)], move=30),
         _unit_cfg(2, 2, [(50, 30)]),
     ])
-    commit_move([("1#0", 14, 10)], eng.game_state, "normal")
-    commit_move([("1#1", 11, 12)], eng.game_state, "normal")
+    commit_move([("1#0", 14, 10, 0)], eng.game_state, "normal")
+    commit_move([("1#1", 11, 12, 0)], eng.game_state, "normal")
     d0 = _straight((10, 10), (14, 10))
     d1 = _straight((10, 12), (11, 12))
     assert d0 > d1

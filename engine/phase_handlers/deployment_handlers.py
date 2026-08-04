@@ -822,22 +822,15 @@ def deployment_preview_plan(
 def _parse_plan(action: Dict[str, Any]) -> List[Tuple[str, int, int, int]]:
     """Parse un plan de déploiement en 4-uplets ``(model_id, col, row, level)``.
 
-    Le niveau est OPTIONNEL : une entrée à 3 éléments ``[mid, col, row]`` reste valide
-    (niveau 0 = sol) — le front existant reste compatible. Une entrée à 4 éléments
-    ``[mid, col, row, level]`` cible un étage.
+    Le niveau est OBLIGATOIRE (frontière ``parse_model_plan``) : une entrée sans étage est
+    REFUSÉE, jamais complétée à 0 — cf. shared_utils, ``_PLAN_LEVEL_REQUIRED_MSG``.
     """
+    from engine.phase_handlers.shared_utils import parse_model_plan
+
     raw_plan = require_key(action, "plan")
     if not isinstance(raw_plan, list) or not raw_plan:
         raise ValueError(f"deployment plan must be a non-empty list, got {raw_plan!r}")
-    plan: List[Tuple[str, int, int, int]] = []
-    for e in raw_plan:
-        if not (isinstance(e, (list, tuple)) and len(e) in (3, 4)):
-            raise ValueError(f"deployment plan entry must be [model_id, col, row(, level)], got {e!r}")
-        level = int(e[3]) if len(e) == 4 else 0
-        if level < 0:
-            raise ValueError(f"deployment plan entry level must be >= 0, got {e!r}")
-        plan.append((str(e[0]), int(e[1]), int(e[2]), level))
-    return plan
+    return parse_model_plan(raw_plan, action_name="deployment plan")
 
 
 def deployment_generate_formation_action(
@@ -862,7 +855,9 @@ def deployment_generate_formation_action(
     return True, {
         "action": "deploy_generate_formation",
         "unitId": squad_id,
-        "plan": [[mid, c, r] for mid, c, r in plan],
+        # Le plan rendu au front porte son étage : c'est CE plan que le front renvoie au preview
+        # puis au commit, et la frontière de décodage refuse désormais toute entrée muette.
+        "plan": [[mid, c, r, lv] for mid, c, r, lv in plan_leveled],
         **preview,
     }
 

@@ -1572,3 +1572,106 @@ Le bord et la clairance d'étage sont donc gérés **uniquement en hex**, à l'i
 → **deploy et move, vue 0 et vue 1, se comportent tous comme le move niveau 0** (touche sans dépasser, aucun
 espace). La classification *sur l'étage* (§8.1, `footprint_within_floor` euclidien = empreinte entièrement
 sur le plancher) reste inchangée. Base non-ronde : hex partout. 867 tests verts.
+
+---
+
+## Chantier 4 — étape FIGHT en 3D + plans par-figurine porteurs de leur étage
+
+### A. La phase FIGHT passe en 3D (§03.04)
+
+Jusqu'ici, seule la CHARGE consommait le seuil vertical (`_charge_vertical_zone`). Le FIGHT mesurait
+l'engagement en **2D pure** partout — prédicats d'éligibilité, pools de destinations, validation des
+plans. Conséquence : une escouade posée deux étages au-dessus d'un ennemi au sol était comptée engagée
+avec lui, donc autorisée à le **piler**, le **combattre** et le **consolider**.
+
+`_fight_vertical_zone` ([fight_handlers.py](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py))
+est le miroir strict de `_charge_vertical_zone`. Il est câblé sur **tous** les chemins du fight :
+
+- **Prédicats** — `_fight_v11_engaged_now`, `fight_compute_engaged_snapshot` (12.04 / overrun 12.06),
+  `_fight_units_engaged_with`, `_fight_consolidation_unit_engaged_with_any_enemy`,
+  `_is_adjacent_to_enemy_within_cc_range`. Ils lisent les vraies entrées `units_cache`, qui portent déjà
+  les données verticales : rien à synthétiser.
+- **Cibles** — `_fight_build_valid_target_pool`, `model_entry_can_fight_target` (04.02 par-figurine).
+- **Pools / plans / autoplaces** — pile-in 12.03 et consolidation 12.08 : pools par-figurine (niveau =
+  `dest_eff`), validation de plan (départ = étage COURANT, arrivée = étage PLANIFIÉ), ILP de Focus
+  (mouvement horizontal → étage courant de chaque figurine).
+- **Chemin squad (gym / bots)** — `get_fighting_models`, `fight_pile_in_plan`, `squad_consolidate_plan`
+  ([shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)).
+- **Observation RL** — `engaged_squads`, `in_enemy_ez` par-figurine, relais buddy, `n_models_engaging`
+  ([observation_builder.py](file:///home/greg/40k/engine/observation_builder.py)).
+
+**Décision : 3D partout, pas seulement le gameplay.** Laisser l'observation et les masques en 2D pendant
+que la résolution passe en 3D aurait annoncé à l'agent des engagements que le moteur refuse — la classe
+de bug « masque/exécution » que ce dépôt paie le plus cher. Corollaire assumé : la distribution
+d'entraînement change (éligibilité 12.04, `in_enemy_ez`, `get_fighting_models`) → **les modèles
+entraînés sont périmés**, un ré-entraînement est requis.
+
+**Correction associée — `_fight_synth_cache_entry_at_footprint`.** Elle décrit une empreinte CANDIDATE
+mais héritait `occupied_hexes_by_model` de l'entrée réelle, c'est-à-dire les positions d'AVANT le
+mouvement. Or en métrique euclidienne `socle_from_cache_entry` mesure depuis cette carte et **ignore**
+`occupied_hexes` : tout contrôle « après mouvement » répondait donc sur l'état d'avant — un défaut déjà
+actif en 2D, pas seulement un obstacle à la 3D. Elle prend désormais un `model_placements`
+(`{model_id: (col, row, level)}`) ; à défaut, elle translate le bloc rigidement en coordonnées CUBE
+(`_fight_rigid_model_placements`), ce que font les pools d'ancres.
+
+### B. Un plan par-figurine porte TOUJOURS son étage
+
+**Décision : refuser un plan muet, ne jamais inventer.** Une entrée PRÉSENTE sans 4ᵉ élément (ou avec un
+étage `None`) lève. Une figurine ABSENTE du plan reste légitime : le moteur la complète avec sa position
+et son étage courants — c'est une question de couverture, pas de forme.
+
+Le refus est posé **une fois**, à la frontière de décodage : `parse_model_plan` /
+`parse_model_plan_with_orientation` ([shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)),
+appelées par les 7 points d'entrée (déploiement, `charge_plan_state`, `charge_fly_mode_set`,
+`commit_charge_plan`, `commit_move_plan`, pile-in, consolidation) plus `deploy_squad_destinations` et
+`preview_move_plan` côté API. Les 13 destinataires lisent maintenant `entry[3]` **sans condition** ;
+`MovePlanEntry` ne contient plus de 3-uplet.
+
+Historique du trou : chaque destinataire inventait son propre défaut — `0` au commit de charge, le
+**niveau de VUE** au pile-in/consolidation, le niveau committé au move, `None` dans `shared_utils`.
+Bug réel constaté : l'autoplace de pile-in n'émettait pas l'étage, le commit supposait « niveau de vue »,
+et deux figurines d'une escouade à cheval sur deux étages devenaient invalidables — l'unité restait
+bloquée dans le pool de pile-in.
+
+**Les producteurs émettaient encore des 3-uplets** (contrairement à ce qui avait été noté) : les trois
+autoplaces (`pile_in_autoplace_plan`, `charge_autoplace_plan`, `consolidate_autoplace_plan` qui délègue
+aux deux premiers), `fight_pile_in_plan`, `squad_consolidate_plan`, et le plan rendu par
+`deploy_generate_formation`. Tous portent désormais le niveau courant de chaque figurine (ces
+placements sont horizontaux). Côté front, les 5 sites émettent des 4-uplets systématiques, et les
+consommateurs d'autoplace transportent l'étage rendu par le backend au lieu de le redeviner — le
+consommateur de `charge_autoplace` le **jetait** purement et simplement (plan aplati au sol au commit).
+
+### D. L'analyzer suit — le journal transporte l'altitude
+
+`ai/analyzer.py` reconstruit son état depuis `step.log` et mesurait l'engagement en 2D : sur un
+plateau à étages il aurait signalé « combat depuis une position non adjacente » là où le moteur
+refuse simplement le combat. Un contrôle qui contredit le système qu'il contrôle produit des faux
+positifs à trier à la main — le dépôt en a déjà payé deux (LoS 06.01, « Fight from non-adjacent »).
+
+Le format du segment per-figurine passe donc de `[MODELS: <mid>@(col,row)]` à
+`[MODELS: <mid>@(col,row,z<hauteur>)]`, où `z<hauteur>` est la hauteur du plancher sous le socle,
+**en pouces**. C'est la hauteur et non le `level` qui est journalisée : la hauteur d'un niveau
+dépend de la POSITION (deux ruines peuvent avoir un étage 1 à des hauteurs différentes, cf.
+`floor_height_at`) et le step.log ne porte aucun terrain — le niveau seul ne serait pas
+re-dérivable. `MODEL_HEIGHT`, lui, ne change pas d'une action à l'autre : l'analyzer le lit dans
+le registry, au même endroit que `HP_MAX`/`MOVE`, plutôt que de le répéter à chaque ligne.
+
+`is_within_engine_engagement_zone` garde sa géométrie HORIZONTALE mot pour mot (ancre, socle rond
+1) et gagne le gate vertical : chaque hauteur distincte présente dans l'unité devient une classe
+verticale placée **à l'ancre**. Le test horizontal est donc identique à l'ancien, et le test
+vertical porte sur l'ensemble réel des étages occupés — même approximation conservatrice que
+`entry_vertically_reachable` (union horizontale + gate vertical). Règle du tout-ou-rien : si une
+seule unité du cache n'a pas d'altitude connue, le contrôle **reste 2D** au lieu de supposer
+« au sol » — un verdict horizontal reste juste sur un plateau plat, un gate vertical partiel
+comparerait une unité réelle à une altitude inventée.
+
+Compatibilité assumée : un `step.log` antérieur **lève** côté analyzer (« segment présent mais
+illisible ») plutôt que d'être lu comme un plateau intégralement au sol. Côté replay le champ
+reste optionnel — un replay d'archive s'affiche encore, son rendu est plan et n'utilise pas
+l'altitude.
+
+### E. Ce qui reste 2D, sciemment
+
+- **Tir** (`shooting_handlers`, verrou de tir de `build_squad_action_mask`), cohésion, contrôle
+  d'objectifs : hors périmètre de cette tranche, migrés quand une figurine y sera réellement
+  multi-niveaux.

@@ -4501,8 +4501,23 @@ class W40KEngine(gym.Env):
         by_model = entry.get("occupied_hexes_by_model")  # get allowed
         if not isinstance(by_model, dict) or not by_model:
             return ""
+        # Hauteur de plancher par figurine (pouces) : elle voyage AVEC la position, sinon
+        # l'analyzer ne peut pas appliquer le gate vertical §03.04 et reste 2D là où le moteur
+        # est 3D. Les deux cartes sont écrites ENSEMBLE par les deux seuls écrivains du cache
+        # (`_recompute_squad_occupied_hexes`, `update_units_cache_position`) : une figurine
+        # présente dans l'une et absente de l'autre est une corruption de cache.
+        #
+        # `require_key` plutôt qu'un `return ""` : lâcher le segment ferait disparaître la couche
+        # per-figurine ENTIÈRE (les POSITIONS, pas seulement les altitudes) — l'analyzer
+        # retomberait en silence sur l'ancre d'escouade, exactement le raisonnement par-ancre que
+        # cette couche existe pour remplacer. Un journal muet vaut moins qu'une erreur visible.
+        floors = require_key(entry, "floor_height_by_model")
         return format_models_segment(
-            ((mid, pos[0], pos[1]) for mid, pos in by_model.items()), label=label
+            (
+                (mid, pos[0], pos[1], require_key(floors, mid))
+                for mid, pos in by_model.items()
+            ),
+            label=label,
         )
 
     def _build_shot_details(
@@ -4718,6 +4733,12 @@ class W40KEngine(gym.Env):
         move_rules = require_key(require_key(self.game_state, "config"), "move")
         return {
             "engagement_zone_subhex": int(require_key(game_rules, "engagement_zone")),
+            # Volet VERTICAL de 03.04, en POUCES et non en subhexes : il se compare a des hauteurs
+            # de plancher, qui sont deja en pouces. Il est journalise pour la meme raison que son
+            # jumeau horizontal — c'est une regle du RUN, et le config s'edite entre deux runs.
+            "engagement_zone_vertical_inches": float(
+                require_key(game_rules, "engagement_zone_vertical")
+            ),
             "metric.engagement": engagement_distance_metric(self.game_state),
             "metric.ranged": _ranged_distance_metric(self.game_state),
             "move.thru_ez": bool(require_key(move_rules, "can_move_through_enemy_engagement_zone")),
@@ -4791,7 +4812,7 @@ class W40KEngine(gym.Env):
         return details
 
     def _gym_commit_fight_move(
-        self, gs: Dict[str, Any], uid: str, plan: List[Tuple[str, int, int]], kind: str
+        self, gs: Dict[str, Any], uid: str, plan: List[Tuple[str, int, int, int]], kind: str
     ) -> None:
         """Commit gym d'un move fight groupé (pile-in/consolidation) + log par-figurine.
 

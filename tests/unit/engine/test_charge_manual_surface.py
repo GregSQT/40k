@@ -258,7 +258,7 @@ class TestPreviewMovePlan:
         gs["charge_roll_values"]["1"] = 8
         # 1#1 finit à 3 hexes de 1#0 : chaque figurine s'est rapprochée de la cible (11.04),
         # mais l'écart intra-escouade dépasse les 2" de la 1re puce de 03.03.
-        plan = [("1#0", 15, 10), ("1#1", 14, 13)]
+        plan = [("1#0", 15, 10, 0), ("1#1", 14, 13, 0)]
 
         out = ch.charge_preview_move_plan(gs, "1", plan, ["2"])
 
@@ -281,7 +281,7 @@ class TestPreviewMovePlan:
             _unit("3", 2, [(16, 30)]),
         ])
         gs["charge_roll_values"]["1"] = 8
-        plan = [("1#0", 15, 10), ("1#1", 15, 11)]
+        plan = [("1#0", 15, 10, 0), ("1#1", 15, 11, 0)]
 
         out = ch.charge_preview_move_plan(gs, "1", plan, ["2", "3"])
 
@@ -298,7 +298,7 @@ class TestPreviewMovePlan:
         gs = _make_gs([_unit("1", 1, [(10, 10)]), _unit("2", 2, [(16, 10)])])
         assert "1" not in gs["charge_roll_values"], "prémisse : aucun jet enregistré"
 
-        out = ch.charge_preview_move_plan(gs, "1", [("1#0", 14, 10)], ["2"])
+        out = ch.charge_preview_move_plan(gs, "1", [("1#0", 14, 10, 0)], ["2"])
 
         assert out["can_validate"] is False
         assert out["per_model"] == {}
@@ -383,18 +383,44 @@ class TestCommitMovePlanHandler:
         assert res["error"] == "empty_charge_plan"
 
     def test_a_malformed_plan_entry_raises(self):
-        """Une entrée doit être ``[model_id, col, row(, level)]``. Une entrée tronquée est une
-        erreur de contrat du front, pas une position à deviner.
+        """Une entrée doit être ``[model_id, col, row, level]``. Une entrée tronquée — y compris
+        un 3-uplet SANS étage — est une erreur de contrat du front, pas une position à deviner.
         """
         gs = self._ready()
         with pytest.raises(ValueError):
             ch.charge_commit_move_plan_handler(gs, "1", {"plan": [["1#0", 14]]})
 
+    def test_a_plan_entry_without_level_is_refused(self):
+        """Décision : un plan MUET est refusé, jamais complété.
+
+        Le 3-uplet ``[mid, col, row]`` était accepté et l'étage inventé (0 au commit de charge,
+        niveau de VUE au pile-in/consolidation) : une escouade à cheval sur deux étages devenait
+        invalidable. Les deux formes muettes — 3-uplet et étage ``None`` — lèvent.
+        """
+        gs = self._ready()
+        with pytest.raises(ValueError, match="étage"):
+            ch.charge_commit_move_plan_handler(
+                gs, "1", {"plan": [["1#0", 15, 10], ["1#1", 15, 11]]}
+            )
+        with pytest.raises(ValueError, match="étage"):
+            ch.charge_commit_move_plan_handler(
+                gs, "1", {"plan": [["1#0", 15, 10, None], ["1#1", 15, 11, 0]]}
+            )
+
+    def test_a_model_absent_from_the_plan_stays_legitimate(self):
+        """L'autre moitié de la décision : une figurine ABSENTE du plan n'est PAS une erreur de
+        forme. Le refus porte sur l'entrée muette, pas sur la couverture — la couverture est
+        vérifiée plus loin et rend ``plan_models_mismatch``, pas une exception."""
+        gs = self._ready()
+        ok, res = ch.charge_commit_move_plan_handler(gs, "1", {"plan": [["1#0", 15, 10, 0]]})
+        assert ok is False
+        assert res["error"] == "plan_models_mismatch", res
+
     def test_a_commit_without_declared_target_is_refused(self):
         gs = self._ready()
         del gs["charge_target_selections"]["1"]
         ok, res = ch.charge_commit_move_plan_handler(
-            gs, "1", {"plan": [["1#0", 15, 10], ["1#1", 15, 11]]}
+            gs, "1", {"plan": [["1#0", 15, 10, 0], ["1#1", 15, 11, 0]]}
         )
         assert ok is False
         assert res["error"] == "target_not_selected"
@@ -403,7 +429,7 @@ class TestCommitMovePlanHandler:
         gs = self._ready()
         del gs["charge_roll_values"]["1"]
         ok, res = ch.charge_commit_move_plan_handler(
-            gs, "1", {"plan": [["1#0", 15, 10], ["1#1", 15, 11]]}
+            gs, "1", {"plan": [["1#0", 15, 10, 0], ["1#1", 15, 11, 0]]}
         )
         assert ok is False
         assert res["error"] == "charge_roll_missing"
@@ -413,7 +439,7 @@ class TestCommitMovePlanHandler:
         vivante laisserait cette figurine derrière sans que rien ne le signale.
         """
         gs = self._ready()
-        ok, res = ch.charge_commit_move_plan_handler(gs, "1", {"plan": [["1#0", 15, 10]]})
+        ok, res = ch.charge_commit_move_plan_handler(gs, "1", {"plan": [["1#0", 15, 10, 0]]})
 
         assert ok is False
         assert res["error"] == "plan_models_mismatch"
@@ -429,7 +455,7 @@ class TestCommitMovePlanHandler:
         """
         gs = self._ready()
         ok, res = ch.charge_commit_move_plan_handler(
-            gs, "1", {"plan": [["1#0", 15, 10], ["1#1", 15, 11]]}
+            gs, "1", {"plan": [["1#0", 15, 10, 0], ["1#1", 15, 11, 0]]}
         )
 
         assert ok is True, f"plan légal refusé : {res}"

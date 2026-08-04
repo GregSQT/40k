@@ -50,6 +50,50 @@ const getMaxTurnsFromConfig = async (): Promise<number> => {
 /** Replay : notifie useGameLog de réhydrater le Game Log avec l'historique complet renvoyé par une
  *  réponse de Load / rewind / retour live (champ ``game_log_history``). Même canal window que le flux
  *  live ``backendLogEvent`` → aucun threading de props entre le hook API et useGameLog. */
+/** Modèle d'un plan provisoire côté front : position + étage capturé au drop. */
+type PlanModel = { col: number; row: number; level?: number };
+
+/**
+ * Encode un plan par-figurine pour le backend : `[[model_id, col, row, level], …]`.
+ *
+ * Miroir front de `parse_model_plan` (engine/phase_handlers/shared_utils.py) : l'étage est
+ * TOUJOURS envoyé, le backend refuse une entrée muette. Un seul encodeur pour toutes les phases
+ * — la version recopiée par site avait déjà produit deux dialectes de défaut (`?? 0` contre le
+ * niveau de VUE), c'est-à-dire exactement l'étage inventé que la frontière backend élimine.
+ */
+function toPlanArray(
+  models: Record<string, PlanModel>,
+  fallbackLevel = 0
+): Array<[string, number, number, number]> {
+  return Object.entries(models).map(([mid, p]) => [mid, p.col, p.row, p.level ?? fallbackLevel]);
+}
+
+/** Variante du move : l'orientation socle par-fig voyage en 5ᵉ élément (`null` = inchangée).
+ *  Miroir de `parse_model_plan_with_orientation` côté backend. */
+function toPlanArrayWithOrientation(
+  models: Record<string, PlanModel & { orientation?: number | null }>
+): Array<[string, number, number, number, number | null]> {
+  return Object.entries(models).map(([mid, p]) => [
+    mid,
+    p.col,
+    p.row,
+    p.level ?? 0,
+    p.orientation ?? null,
+  ]);
+}
+
+/** Décode un plan rendu par le backend (autoplace) en modèles provisoires. L'étage vient du
+ *  moteur : le front le transporte, il ne le redevine pas. */
+function modelsFromPlanArray(
+  planArr: Array<[string, number, number, number]>
+): Record<string, { col: number; row: number; level: number }> {
+  const models: Record<string, { col: number; row: number; level: number }> = {};
+  for (const [mid, c, r, l] of planArr) {
+    models[String(mid)] = { col: Number(c), row: Number(r), level: Number(l) };
+  }
+  return models;
+}
+
 function dispatchGameLogHydrate(history: unknown): void {
   const entries = Array.isArray(history) ? history : [];
   window.dispatchEvent(new CustomEvent("gameLogHydrate", { detail: { entries } }));
@@ -463,7 +507,7 @@ export interface ManualOrderRequest {
 
 export interface UseEngineAPIOptions {
   /** Étage courant (multi-niveaux) : niveau de destination pour le déploiement/move à l'étage.
-   *  Ref (pas valeur) pour rester stable dans les callbacks. 0 = sol → plans 3-uplets inchangés. */
+   *  Ref (pas valeur) pour rester stable dans les callbacks. 0 = sol. */
   currentLevelRef?: MutableRefObject<number>;
 }
 
@@ -4323,13 +4367,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // (mid,col,row,level,orientation) : niveau + orientation provisoires voyagent jusqu'au preview
       // → occupation testée au bon niveau (superposition inter-étage, 13.06) ET voile rouge reflétant
       // le pivot socle par-fig (empreinte orientée). orientation null = inchangée côté moteur.
-      const plan = Object.entries(models).map(([mid, p]) => [
-        mid,
-        p.col,
-        p.row,
-        p.level ?? 0,
-        p.orientation ?? null,
-      ]);
+      const plan = toPlanArrayWithOrientation(models);
       let result: Record<string, unknown> | null = null;
       try {
         result = await postEngineQuery({
@@ -4622,13 +4660,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     // (mid,col,row,level,orientation) : niveau + orientation committés par fig, persistés par
     // commit_move_plan (update_model_position écrit model["level"]/["orientation"]) → la fig posée
     // à l'étage n'est plus au sol, et le socle pivoté conserve son orientation. null = inchangée.
-    const plan = Object.entries(squadMovePlan.models).map(([mid, p]) => [
-      mid,
-      p.col,
-      p.row,
-      p.level ?? 0,
-      p.orientation ?? null,
-    ]);
+    const plan = toPlanArrayWithOrientation(squadMovePlan.models);
     try {
       await executeAction({
         action: "commit_move_plan",
@@ -5538,10 +5570,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     ) => {
       // Étages : niveau PAR FIGURINE, capturé au drop (models[mid].level) — PAS le niveau de vue
       // au moment du refresh (sinon changer d'étage entre la pose et la validation perd le niveau).
-      // 0 = sol → 3-uplet inchangé ; >= 1 → 4-uplet [mid,col,row,level] (voile rouge 13.06).
-      const plan = Object.entries(models).map(([mid, p]) =>
-        (p.level ?? 0) >= 1 ? [mid, p.col, p.row, p.level] : [mid, p.col, p.row]
-      );
+      // Toujours un 4-uplet [mid,col,row,level] : le backend REFUSE une entrée muette (13.06).
+      const plan = toPlanArray(models);
       let result: Record<string, unknown> | null = null;
       try {
         result = await postEngineQuery({
@@ -5614,15 +5644,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         console.error(`[DEPLOY] generate_formation ERROR unit=${plan.unitId}`, err, { col, row });
         return;
       }
-      const rawPlan = result?.plan as Array<[string | number, number, number]> | undefined;
+      const rawPlan = result?.plan as Array<[string | number, number, number, number]> | undefined;
       if (!rawPlan || !Array.isArray(rawPlan)) {
         throw new Error("[DEPLOY] deploy_generate_formation: plan absent dans la réponse");
       }
-      // Étages : niveau de vue capturé AU DROP de la formation (par fig, comme le drop individuel).
-      const dropLevel = currentLevelRef?.current ?? 0;
+      // Étages : le backend rend le niveau par fig (celui de vue au drop, qu'il a lui-même résolu) —
+      // le front ne le re-devine plus, il le transporte.
       const models: Record<string, { col: number; row: number; level?: number }> = {};
-      for (const [mid, c, r] of rawPlan) {
-        models[String(mid)] = { col: c, row: r, level: dropLevel };
+      for (const [mid, c, r, l] of rawPlan) {
+        models[String(mid)] = { col: c, row: r, level: Number(l) };
       }
       const perModelValid = (result?.per_model ?? {}) as Record<string, boolean>;
       const coherencyOk = result?.coherency_ok === true;
@@ -5703,7 +5733,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     deploySelectSessionRef.current += 1;
     const plan = deployPlanRef.current;
     if (!plan?.placed) return;
-    const planArr = Object.entries(plan.models).map(([mid, p]) => [mid, p.col, p.row]);
+    const planArr = toPlanArray(plan.models);
     const result = await postEngineQuery({
       action: "deploy_squad_destinations",
       plan: planArr,
@@ -5789,9 +5819,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     }
     // Étages : niveau PAR FIGURINE capturé au drop (plan.models[mid].level) — pas la vue au
     // moment du Valider (sinon changer d'étage avant de valider committait tout au sol).
-    const planArr = Object.entries(plan.models).map(([mid, p]) =>
-      (p.level ?? 0) >= 1 ? [mid, p.col, p.row, p.level] : [mid, p.col, p.row]
-    );
+    const planArr = toPlanArray(plan.models);
     try {
       await executeAction({
         action: "deploy_commit",
@@ -6525,10 +6553,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       selectedModel: string | null = null
     ) => {
       // 3b : le niveau de pose par fig voyage jusqu'au backend (satisfaction/engagement 3D des figs
-      // posées à l'étage). Sol (level 0) → 3-uplet historique ; étage → 4-uplet.
-      const plan = Object.entries(models).map(([mid, p]) =>
-        (p.level ?? 0) >= 1 ? [mid, p.col, p.row, p.level] : [mid, p.col, p.row]
-      );
+      // posées à l'étage). Toujours un 4-uplet : le backend refuse une entrée sans étage.
+      const plan = toPlanArray(models);
       const action: Record<string, unknown> = {
         action: "charge_plan_state",
         unitId: String(unitId),
@@ -6636,14 +6662,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         targetId: String(tid),
       });
       if (!result) throw new Error("charge_autoplace: réponse vide");
-      // 3b : le niveau de pose par figurine fait partie du plan (l'auto-placement peut faire monter
-      // ou descendre). Le propager est obligatoire — le commit de charge complète à 0, donc une
-      // arrivée d'étage non transmise serait recalculée au sol et refusée.
-      const planArr = (result.plan ?? []) as Array<[string, number, number, number?]>;
-      const models: Record<string, { col: number; row: number; level?: number }> = {};
-      for (const [mid, c, r, l] of planArr) {
-        models[String(mid)] = { col: Number(c), row: Number(r), level: l != null ? Number(l) : 0 };
-      }
+      const planArr = (result.plan ?? []) as Array<[string, number, number, number]>;
+      const models = modelsFromPlanArray(planArr);
       chargeModelPoolRef.current = new Set();
       chargeModelMaskLoopsRef.current = null;
       setChargeFocusActive(false);
@@ -6667,14 +6687,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         mode,
       });
       if (!result) throw new Error("charge_autoplace: réponse vide");
-      // 3b : le niveau de pose par figurine fait partie du plan (l'auto-placement peut faire monter
-      // ou descendre). Le propager est obligatoire — le commit de charge complète à 0, donc une
-      // arrivée d'étage non transmise serait recalculée au sol et refusée.
-      const planArr = (result.plan ?? []) as Array<[string, number, number, number?]>;
-      const models: Record<string, { col: number; row: number; level?: number }> = {};
-      for (const [mid, c, r, l] of planArr) {
-        models[String(mid)] = { col: Number(c), row: Number(r), level: l != null ? Number(l) : 0 };
-      }
+      const planArr = (result.plan ?? []) as Array<[string, number, number, number]>;
+      const models = modelsFromPlanArray(planArr);
       chargeModelPoolRef.current = new Set();
       chargeModelMaskLoopsRef.current = null;
       setChargeFocusActive(false);
@@ -6742,10 +6756,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleCommitChargePlan = useCallback(async () => {
     const plan = chargeMovePlanRef.current;
     if (!plan?.canValidate) return;
-    // 3b : le niveau de pose par fig est committé (une fig peut finir à l'étage). Sol → 3-uplet.
-    const planArr = Object.entries(plan.models).map(([mid, p]) =>
-      (p.level ?? 0) >= 1 ? [mid, p.col, p.row, p.level] : [mid, p.col, p.row]
-    );
+    // 3b : le niveau de pose par fig est committé (une fig peut finir à l'étage), toujours envoyé.
+    const planArr = toPlanArray(plan.models);
     try {
       await executeAction({
         action: "commit_charge_plan",
@@ -6874,7 +6886,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // Étages (§13.06, miroir move) : niveau de VUE courant envoyé au backend + niveau par-fig
       // (niveau de pose conservé, sinon niveau de vue courant).
       const lvl = currentLevelRef?.current ?? 0;
-      const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row, p.level ?? lvl]);
+      const plan = toPlanArray(models, lvl);
       const action: Record<string, unknown> = { action: "pile_in_plan_state", plan, level: lvl };
       if (selectedModel != null) action.selected_model = selectedModel;
       const result = await postEngineQuery(action);
@@ -6890,22 +6902,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     async (targetId: string, mode: "defensive" | "offensive") => {
       const result = await postEngineQuery({ action: "pile_in_autoplace", targetId, mode });
       if (!result) throw new Error("pile_in_autoplace: réponse vide");
-      const planArr = (result.plan ?? []) as Array<[string, number, number, number?]>;
-      const lvl = currentLevelRef?.current ?? 0;
-      const models: Record<string, { col: number; row: number; level?: number }> = {};
-      for (const [mid, c, r, l] of planArr) {
-        models[String(mid)] = {
-          col: Number(c),
-          row: Number(r),
-          level: l != null ? Number(l) : lvl,
-        };
-      }
+      const planArr = (result.plan ?? []) as Array<[string, number, number, number]>;
+      const models = modelsFromPlanArray(planArr);
       pileInModelPoolRef.current = new Set();
       pileInModelMaskLoopsRef.current = null;
       setPileInMovePlan((prev) => (prev ? { ...prev, models, activeModelId: null } : prev));
       await refreshPileInPlanState(models, null);
     },
-    [postEngineQuery, refreshPileInPlanState, currentLevelRef]
+    [postEngineQuery, refreshPileInPlanState]
   );
 
   /** Boutons Focus pile-in (Défensif / Offensif) : (dé)active le mode (re-clic même mode = off).
@@ -6985,12 +6989,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const plan = pileInMovePlanRef.current;
     if (!plan?.canValidate) return;
     const lvl = currentLevelRef?.current ?? 0;
-    const planArr = Object.entries(plan.models).map(([mid, p]) => [
-      mid,
-      p.col,
-      p.row,
-      p.level ?? lvl,
-    ]);
+    const planArr = toPlanArray(plan.models, lvl);
     try {
       await executeAction({ action: "commit_pile_in_plan", plan: planArr, level: lvl });
       pileInModelPoolRef.current = new Set();
@@ -7128,7 +7127,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     ) => {
       // Étages (§13.06, miroir move) : niveau de VUE courant + niveau par-fig (pose conservée).
       const lvl = currentLevelRef?.current ?? 0;
-      const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row, p.level ?? lvl]);
+      const plan = toPlanArray(models, lvl);
       const action: Record<string, unknown> = {
         action: "consolidation_plan_state",
         plan,
@@ -7149,22 +7148,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     async (mode: "defensive" | "offensive") => {
       const result = await postEngineQuery({ action: "consolidate_autoplace", mode });
       if (!result) throw new Error("consolidate_autoplace: réponse vide");
-      const planArr = (result.plan ?? []) as Array<[string, number, number, number?]>;
-      const lvl = currentLevelRef?.current ?? 0;
-      const models: Record<string, { col: number; row: number; level?: number }> = {};
-      for (const [mid, c, r, l] of planArr) {
-        models[String(mid)] = {
-          col: Number(c),
-          row: Number(r),
-          level: l != null ? Number(l) : lvl,
-        };
-      }
+      const planArr = (result.plan ?? []) as Array<[string, number, number, number]>;
+      const models = modelsFromPlanArray(planArr);
       consolidationModelPoolRef.current = new Set();
       consolidationModelMaskLoopsRef.current = null;
       setConsolidationMovePlan((prev) => (prev ? { ...prev, models, activeModelId: null } : prev));
       await refreshConsolidationPlanState(models, null);
     },
-    [postEngineQuery, refreshConsolidationPlanState, currentLevelRef]
+    [postEngineQuery, refreshConsolidationPlanState]
   );
 
   /** Boutons Focus consolidation (Défensif / Offensif) : (dé)active le mode (re-clic même mode = off).
@@ -7186,12 +7177,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const tid = String(targetId);
       if (!plan.engagingCandidates.includes(tid)) return;
       const lvl = currentLevelRef?.current ?? 0;
-      const planArr = Object.entries(plan.models).map(([mid, p]) => [
-        mid,
-        p.col,
-        p.row,
-        p.level ?? lvl,
-      ]);
+      const planArr = toPlanArray(plan.models, lvl);
       const result = await postEngineQuery({
         action: "consolidation_select_target",
         targetId: tid,
@@ -7213,12 +7199,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const oid = String(objectiveId);
       if (!plan.objectiveCandidates.includes(oid)) return;
       const lvl = currentLevelRef?.current ?? 0;
-      const planArr = Object.entries(plan.models).map(([mid, p]) => [
-        mid,
-        p.col,
-        p.row,
-        p.level ?? lvl,
-      ]);
+      const planArr = toPlanArray(plan.models, lvl);
       const result = await postEngineQuery({
         action: "consolidation_select_objective",
         objectiveId: oid,
@@ -7281,12 +7262,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const plan = consolidationMovePlanRef.current;
     if (!plan?.canValidate) return;
     const lvl = currentLevelRef?.current ?? 0;
-    const planArr = Object.entries(plan.models).map(([mid, p]) => [
-      mid,
-      p.col,
-      p.row,
-      p.level ?? lvl,
-    ]);
+    const planArr = toPlanArray(plan.models, lvl);
     try {
       await executeAction({ action: "commit_consolidation_plan", plan: planArr, level: lvl });
       consolidationModelPoolRef.current = new Set();
