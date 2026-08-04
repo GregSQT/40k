@@ -249,13 +249,16 @@ export function computeDrawBoardPartialRedrawFingerprint(
         ? anchorsFromStatePool
         : null;
 
-  const useMoveDestPoolCircleLayer =
-    (interactionPhase === "move" ||
-      useAdvanceMovePoolLikeMove ||
-      usePostShootMovePoolLikeMove ||
-      usePileInPoolLikeMoveHoisted) &&
-    !!movePoolForDiskDraw &&
-    movePoolForDiskDraw.size > 0;
+  const useMoveDestPoolCircleLayer = shouldUseMoveDestPoolCircleLayer({
+    interactionPhase,
+    useAdvanceMovePoolLikeMove,
+    usePostShootMovePoolLikeMove,
+    usePileInPoolLikeMoveHoisted,
+    movePoolForDiskDraw,
+    movePreviewFootprintMaskLoops,
+    allowMovePoolFallbackFromGameState,
+    selectedUnitAnchor,
+  });
 
   const useChargeDestPoolDiskDraw =
     ((interactionPhase === "charge" &&
@@ -354,7 +357,7 @@ export function computeDrawBoardPartialRedrawFingerprint(
   const structuralKey = JSON.stringify(structuralPayload);
 
   let movePolygonCacheKey: string | null = null;
-  if (useMoveDestPoolCircleLayer && movePoolForDiskDraw) {
+  if (useMoveDestPoolCircleLayer) {
     if (selectedUnitAnchor == null) {
       movePolygonCacheKey = null;
     } else {
@@ -369,48 +372,43 @@ export function computeDrawBoardPartialRedrawFingerprint(
       const HIGHLIGHT_COLOR = parseColor(boardConfig.colors.highlight!);
       const advanceZoneFillColor = ADVANCE_DESTINATION_HEX_FILL;
       const poolFillColor = useAdvanceMovePoolLikeMove ? advanceZoneFillColor : HIGHLIGHT_COLOR;
-      const moveSpriteName = useAdvanceMovePoolLikeMove
-        ? "advance-dest-pool"
-        : usePileInPoolLikeMoveHoisted
-          ? "fight-pile-in-dest-pool"
-          : "move-dest-pool";
+      const moveSpriteName = resolveMovePreviewSpriteName(
+        useAdvanceMovePoolLikeMove,
+        usePileInPoolLikeMoveHoisted
+      );
       const footprintMaskHexPool =
         footprintZonePoolRef?.current && footprintZonePoolRef.current.size > 0
           ? footprintZonePoolRef.current
           : null;
-      const poolHash = hashStringSetStable(movePoolForDiskDraw);
+      const poolHash = movePoolForDiskDraw ? hashStringSetStable(movePoolForDiskDraw) : null;
       const footprintPoolHash =
         footprintMaskHexPool && footprintMaskHexPool.size > 0
           ? hashStringSetStable(footprintMaskHexPool)
           : null;
       const loopsFp = fingerprintPrecomputedMaskLoops(movePreviewFootprintMaskLoops ?? null);
-      movePolygonCacheKey = JSON.stringify({
-        v: MOVE_PREVIEW_LAYER_RENDER_CACHE_VERSION,
-        res: app.renderer.resolution,
-        ip: interactionPhase,
-        mo: mode,
-        pms: pendingMoveAfterShooting,
-        sn: moveSpriteName,
-        ph: poolHash,
-        psz: movePoolForDiskDraw.size,
-        fph: footprintPoolHash,
-        fpsz: footprintMaskHexPool?.size ?? 0,
-        lf: loopsFp,
-        ghr: HEX_RADIUS,
-        fr: footprintRadius,
-        pfc: poolFillColor,
-        ac: selectedUnitAnchor.col,
-        ar: selectedUnitAnchor.row,
-        fsp: footprintSpanForPool,
-        sp: {
+      movePolygonCacheKey = buildMovePreviewLayerCacheKey({
+        resolution: app.renderer.resolution,
+        interactionPhase,
+        mode,
+        pendingMoveAfterShooting,
+        spriteName: moveSpriteName,
+        poolHash,
+        poolSize: movePoolForDiskDraw?.size ?? 0,
+        footprintPoolHash,
+        footprintPoolSize: footprintMaskHexPool?.size ?? 0,
+        loopsFp,
+        hexRadius: HEX_RADIUS,
+        footprintRadius,
+        poolFillColor,
+        anchor: selectedUnitAnchor,
+        footprintSpan: footprintSpanForPool,
+        spacing: {
           hhs: HEX_HORIZ_SPACING,
           hw: HEX_WIDTH,
           hh: HEX_HEIGHT,
           hvs: HEX_VERT_SPACING,
           mg: MARGIN,
         },
-        mvmax: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
-        covA: MOVE_PREVIEW_COVERAGE_FILL_ALPHA,
       });
     }
   }
@@ -493,13 +491,16 @@ export function updateMovePreviewPolygonLayerInHighlightContainer(
         ? anchorsFromStatePool
         : null;
 
-  const useMoveDestPoolCircleLayer =
-    (interactionPhase === "move" ||
-      useAdvanceMovePoolLikeMove ||
-      usePostShootMovePoolLikeMove ||
-      usePileInPoolLikeMoveHoisted) &&
-    !!movePoolForDiskDraw &&
-    movePoolForDiskDraw.size > 0;
+  const useMoveDestPoolCircleLayer = shouldUseMoveDestPoolCircleLayer({
+    interactionPhase,
+    useAdvanceMovePoolLikeMove,
+    usePostShootMovePoolLikeMove,
+    usePileInPoolLikeMoveHoisted,
+    movePoolForDiskDraw,
+    movePreviewFootprintMaskLoops,
+    allowMovePoolFallbackFromGameState,
+    selectedUnitAnchor,
+  });
 
   if (!useMoveDestPoolCircleLayer) {
     disposeMovePreviewRenderCachesFull();
@@ -516,11 +517,10 @@ export function updateMovePreviewPolygonLayerInHighlightContainer(
   const HIGHLIGHT_COLOR = parseColor(boardConfig.colors.highlight!);
   const advanceZoneFillColor = ADVANCE_DESTINATION_HEX_FILL;
   const poolFillColor = useAdvanceMovePoolLikeMove ? advanceZoneFillColor : HIGHLIGHT_COLOR;
-  const moveSpriteName = useAdvanceMovePoolLikeMove
-    ? "advance-dest-pool"
-    : usePileInPoolLikeMoveHoisted
-      ? "fight-pile-in-dest-pool"
-      : "move-dest-pool";
+  const moveSpriteName = resolveMovePreviewSpriteName(
+    useAdvanceMovePoolLikeMove,
+    usePileInPoolLikeMoveHoisted
+  );
 
   if (selectedUnitAnchor == null) {
     throw new Error(
@@ -534,40 +534,36 @@ export function updateMovePreviewPolygonLayerInHighlightContainer(
     footprintZonePoolRef?.current && footprintZonePoolRef.current.size > 0
       ? footprintZonePoolRef.current
       : null;
-  const poolHash = hashStringSetStable(movePoolForDiskDraw);
+  const poolHash = movePoolForDiskDraw ? hashStringSetStable(movePoolForDiskDraw) : null;
   const footprintPoolHash =
     footprintMaskHexPool && footprintMaskHexPool.size > 0
       ? hashStringSetStable(footprintMaskHexPool)
       : null;
   const loopsFp = fingerprintPrecomputedMaskLoops(movePreviewFootprintMaskLoops ?? null);
 
-  const movePreviewCacheKey = JSON.stringify({
-    v: MOVE_PREVIEW_LAYER_RENDER_CACHE_VERSION,
-    res: app.renderer.resolution,
-    ip: interactionPhase,
-    mo: mode,
-    pms: pendingMoveAfterShooting,
-    sn: moveSpriteName,
-    ph: poolHash,
-    psz: movePoolForDiskDraw.size,
-    fph: footprintPoolHash,
-    fpsz: footprintMaskHexPool?.size ?? 0,
-    lf: loopsFp,
-    ghr: HEX_RADIUS,
-    fr: footprintRadius,
-    pfc: poolFillColor,
-    ac: selectedUnitAnchor.col,
-    ar: selectedUnitAnchor.row,
-    fsp: footprintSpanForPool,
-    sp: {
+  const movePreviewCacheKey = buildMovePreviewLayerCacheKey({
+    resolution: app.renderer.resolution,
+    interactionPhase,
+    mode,
+    pendingMoveAfterShooting,
+    spriteName: moveSpriteName,
+    poolHash,
+    poolSize: movePoolForDiskDraw?.size ?? 0,
+    footprintPoolHash,
+    footprintPoolSize: footprintMaskHexPool?.size ?? 0,
+    loopsFp,
+    hexRadius: HEX_RADIUS,
+    footprintRadius,
+    poolFillColor,
+    anchor: selectedUnitAnchor,
+    footprintSpan: footprintSpanForPool,
+    spacing: {
       hhs: HEX_HORIZ_SPACING,
       hw: HEX_WIDTH,
       hh: HEX_HEIGHT,
       hvs: HEX_VERT_SPACING,
       mg: MARGIN,
     },
-    mvmax: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
-    covA: MOVE_PREVIEW_COVERAGE_FILL_ALPHA,
   });
 
   const cachedEntry = movePreviewLayerRenderCache;
@@ -594,7 +590,7 @@ export function updateMovePreviewPolygonLayerInHighlightContainer(
     HEX_VERT_SPACING,
     MARGIN,
     moveSpriteName,
-    movePoolForDiskDraw.size
+    movePoolForDiskDraw?.size ?? 0
   );
   const cacheRoot = new PIXI.Container();
   cacheRoot.name = "move-preview-layer-cache-root";
@@ -602,7 +598,6 @@ export function updateMovePreviewPolygonLayerInHighlightContainer(
   renderMoveAdvanceDestPoolCircleLayer(
     cacheRoot,
     app,
-    movePoolForDiskDraw,
     footprintRadius,
     poolFillColor,
     moveSpriteName,
@@ -643,6 +638,106 @@ function fingerprintPrecomputedMaskLoops(loops: number[][] | null): string {
     }
   }
   return `L${loops.length}|V${totalVerts}|${h >>> 0}`;
+}
+
+/**
+ * Le calque de contour move/advance/pile-in est-il à dessiner ?
+ *
+ * UNE SEULE définition, appelée par les trois sites qui doivent s'accorder : l'empreinte de
+ * redessin partiel, la reconstruction du calque, et ``drawBoard``. Les voir diverger est le mode
+ * de panne du dépôt : l'empreinte décide si un redessin partiel suffit, donc deux sites d'accord
+ * sur trois donnent une aire peinte périmée ou un calque jamais reconstruit, sans aucune erreur.
+ *
+ * Deux sources ouvrent le calque, et la seconde est ce qui rend l'aire d'arrivée des réserves
+ * (20.04) affichable : soit un pool d'ancres non vide, soit les CONTOURS fournis par le serveur —
+ * l'aire d'ingress n'a que ceux-là, ses 57 000 cases ne descendent jamais dans le JSON.
+ *
+ * Le contour serveur est soumis aux MÊMES deux conditions que le pool d'ancres tiré de l'état :
+ * une ancre résolue, et ``allowMovePoolFallbackFromGameState``. Cette seconde condition n'est pas
+ * une précaution : l'état garde l'aperçu de l'unité précédente le temps d'un aller-retour après
+ * une désélection, et l'ancre reste résolue via ``active_movement_unit`` — sans elle, le calque
+ * repeindrait la zone de l'unité qu'on vient de désélectionner, exactement le fantôme que ce
+ * garde a été ajouté pour tuer.
+ */
+function shouldUseMoveDestPoolCircleLayer(o: {
+  interactionPhase: string;
+  useAdvanceMovePoolLikeMove: boolean;
+  usePostShootMovePoolLikeMove: boolean;
+  usePileInPoolLikeMoveHoisted: boolean;
+  movePoolForDiskDraw: Set<string> | null;
+  movePreviewFootprintMaskLoops: number[][] | null;
+  allowMovePoolFallbackFromGameState: boolean;
+  selectedUnitAnchor: { col: number; row: number } | null | undefined;
+}): boolean {
+  const phaseOpens =
+    o.interactionPhase === "move" ||
+    o.useAdvanceMovePoolLikeMove ||
+    o.usePostShootMovePoolLikeMove ||
+    o.usePileInPoolLikeMoveHoisted;
+  if (!phaseOpens) return false;
+  if (o.movePoolForDiskDraw != null && o.movePoolForDiskDraw.size > 0) return true;
+  const hasServerMaskLoops =
+    o.movePreviewFootprintMaskLoops != null && o.movePreviewFootprintMaskLoops.length > 0;
+  return hasServerMaskLoops && o.allowMovePoolFallbackFromGameState && o.selectedUnitAnchor != null;
+}
+
+/** Nom de sprite du calque — dérivé du même triplet que le prédicat ci-dessus, aux mêmes 3 sites. */
+function resolveMovePreviewSpriteName(
+  useAdvanceMovePoolLikeMove: boolean,
+  usePileInPoolLikeMoveHoisted: boolean
+): string {
+  if (useAdvanceMovePoolLikeMove) return "advance-dest-pool";
+  if (usePileInPoolLikeMoveHoisted) return "fight-pile-in-dest-pool";
+  return "move-dest-pool";
+}
+
+/**
+ * Clé de cache du calque de contour, construite UNE fois pour les trois sites.
+ *
+ * Elle était recopiée à l'identique (une vingtaine de champs) dans l'empreinte de redessin
+ * partiel et dans les deux chemins de rendu. Or c'est précisément une clé : deux copies qui
+ * divergent d'un seul champ font réutiliser un calque périmé, ou le reconstruire à chaque frame.
+ */
+function buildMovePreviewLayerCacheKey(o: {
+  resolution: number;
+  interactionPhase: string;
+  mode: string;
+  pendingMoveAfterShooting: boolean;
+  spriteName: string;
+  poolHash: number | null;
+  poolSize: number;
+  footprintPoolHash: number | null;
+  footprintPoolSize: number;
+  loopsFp: string;
+  hexRadius: number;
+  footprintRadius: number;
+  poolFillColor: number;
+  anchor: { col: number; row: number };
+  footprintSpan: number;
+  spacing: { hhs: number; hw: number; hh: number; hvs: number; mg: number };
+}): string {
+  return JSON.stringify({
+    v: MOVE_PREVIEW_LAYER_RENDER_CACHE_VERSION,
+    res: o.resolution,
+    ip: o.interactionPhase,
+    mo: o.mode,
+    pms: o.pendingMoveAfterShooting,
+    sn: o.spriteName,
+    ph: o.poolHash,
+    psz: o.poolSize,
+    fph: o.footprintPoolHash,
+    fpsz: o.footprintPoolSize,
+    lf: o.loopsFp,
+    ghr: o.hexRadius,
+    fr: o.footprintRadius,
+    pfc: o.poolFillColor,
+    ac: o.anchor.col,
+    ar: o.anchor.row,
+    fsp: o.footprintSpan,
+    sp: o.spacing,
+    mvmax: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
+    covA: MOVE_PREVIEW_COVERAGE_FILL_ALPHA,
+  });
 }
 
 function buildMovePreviewSoftMaskCacheKey(params: {
@@ -1642,17 +1737,15 @@ function resolveMovePreviewMaskLoopsBeforeSmooth(
 function renderMoveAdvanceDestPoolCircleLayer(
   parentContainer: PIXI.Container,
   app: PIXI.Application,
-  anchorPool: Set<string>,
   footprintRadius: number,
   poolFillColor: number,
   spriteName: string,
   maskGeometry: MovePreviewMaskGeometryResolved
 ): void {
-  if (anchorPool.size === 0) {
-    throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] anchorPool vide (spriteName=${spriteName})`
-    );
-  }
+  // Le pool d'ancres n'est PAS un paramètre : la silhouette rendue vient entièrement de
+  // ``maskGeometry`` (boucles serveur, ou polygone d'union construit depuis le pool d'empreinte).
+  // L'exiger fermait ce calque à l'aire d'arrivée des réserves (20.04), qui ne transporte QUE son
+  // contour — ses 57 000 cases ne descendent jamais dans le JSON.
   if (!(footprintRadius > 0) || !Number.isFinite(footprintRadius)) {
     throw new Error(
       `[renderMoveAdvanceDestPoolCircleLayer] footprintRadius invalide (${footprintRadius}, spriteName=${spriteName})`
@@ -2030,13 +2123,16 @@ export const drawBoard = (
           ? anchorsFromStatePool
           : null;
 
-    const useMoveDestPoolCircleLayer =
-      (interactionPhase === "move" ||
-        useAdvanceMovePoolLikeMove ||
-        usePostShootMovePoolLikeMove ||
-        usePileInPoolLikeMoveHoisted) &&
-      !!movePoolForDiskDraw &&
-      movePoolForDiskDraw.size > 0;
+    const useMoveDestPoolCircleLayer = shouldUseMoveDestPoolCircleLayer({
+      interactionPhase,
+      useAdvanceMovePoolLikeMove,
+      usePostShootMovePoolLikeMove,
+      usePileInPoolLikeMoveHoisted,
+      movePoolForDiskDraw,
+      movePreviewFootprintMaskLoops,
+      allowMovePoolFallbackFromGameState,
+      selectedUnitAnchor,
+    });
 
     if (!useMoveDestPoolCircleLayer) {
       disposeMovePreviewRenderCachesFull();
@@ -2531,14 +2627,13 @@ export const drawBoard = (
       highlightContainer.addChild(batch);
     };
 
-    if (useMoveDestPoolCircleLayer && movePoolForDiskDraw) {
+    if (useMoveDestPoolCircleLayer) {
       const footprintRadius = (footprintSpanForPool / 2) * HEX_HORIZ_SPACING;
       const poolFillColor = useAdvanceMovePoolLikeMove ? advanceZoneFillColor : HIGHLIGHT_COLOR;
-      const moveSpriteName = useAdvanceMovePoolLikeMove
-        ? "advance-dest-pool"
-        : usePileInPoolLikeMoveHoisted
-          ? "fight-pile-in-dest-pool"
-          : "move-dest-pool";
+      const moveSpriteName = resolveMovePreviewSpriteName(
+        useAdvanceMovePoolLikeMove,
+        usePileInPoolLikeMoveHoisted
+      );
       // Preview move/advance : masque polygone (Chaikin) + blur alpha comme avant ;
       // calque coloré = rectangle sur les bornes du masque (plus de disque).
       // Pas de fallback : si ``selectedUnitAnchor`` absent, bug côté caller (BoardPvp).
@@ -2553,40 +2648,36 @@ export const drawBoard = (
           ? footprintZonePoolRef.current
           : null;
 
-      const poolHash = hashStringSetStable(movePoolForDiskDraw);
+      const poolHash = movePoolForDiskDraw ? hashStringSetStable(movePoolForDiskDraw) : null;
       const footprintPoolHash =
         footprintMaskHexPool && footprintMaskHexPool.size > 0
           ? hashStringSetStable(footprintMaskHexPool)
           : null;
       const loopsFp = fingerprintPrecomputedMaskLoops(movePreviewFootprintMaskLoops ?? null);
 
-      const movePreviewCacheKey = JSON.stringify({
-        v: MOVE_PREVIEW_LAYER_RENDER_CACHE_VERSION,
-        res: app.renderer.resolution,
-        ip: interactionPhase,
-        mo: mode,
-        pms: pendingMoveAfterShooting,
-        sn: moveSpriteName,
-        ph: poolHash,
-        psz: movePoolForDiskDraw.size,
-        fph: footprintPoolHash,
-        fpsz: footprintMaskHexPool?.size ?? 0,
-        lf: loopsFp,
-        ghr: HEX_RADIUS,
-        fr: footprintRadius,
-        pfc: poolFillColor,
-        ac: selectedUnitAnchor.col,
-        ar: selectedUnitAnchor.row,
-        fsp: footprintSpanForPool,
-        sp: {
+      const movePreviewCacheKey = buildMovePreviewLayerCacheKey({
+        resolution: app.renderer.resolution,
+        interactionPhase,
+        mode,
+        pendingMoveAfterShooting,
+        spriteName: moveSpriteName,
+        poolHash,
+        poolSize: movePoolForDiskDraw?.size ?? 0,
+        footprintPoolHash,
+        footprintPoolSize: footprintMaskHexPool?.size ?? 0,
+        loopsFp,
+        hexRadius: HEX_RADIUS,
+        footprintRadius,
+        poolFillColor,
+        anchor: selectedUnitAnchor,
+        footprintSpan: footprintSpanForPool,
+        spacing: {
           hhs: HEX_HORIZ_SPACING,
           hw: HEX_WIDTH,
           hh: HEX_HEIGHT,
           hvs: HEX_VERT_SPACING,
           mg: MARGIN,
         },
-        mvmax: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
-        covA: MOVE_PREVIEW_COVERAGE_FILL_ALPHA,
       });
 
       const cachedEntry = movePreviewLayerRenderCache;
@@ -2613,7 +2704,7 @@ export const drawBoard = (
           HEX_VERT_SPACING,
           MARGIN,
           moveSpriteName,
-          movePoolForDiskDraw.size
+          movePoolForDiskDraw?.size ?? 0
         );
         const cacheRoot = new PIXI.Container();
         cacheRoot.name = "move-preview-layer-cache-root";
@@ -2621,7 +2712,6 @@ export const drawBoard = (
         renderMoveAdvanceDestPoolCircleLayer(
           cacheRoot,
           app,
-          movePoolForDiskDraw,
           footprintRadius,
           poolFillColor,
           moveSpriteName,
@@ -2741,7 +2831,6 @@ export const drawBoard = (
       renderMoveAdvanceDestPoolCircleLayer(
         highlightContainer,
         app,
-        chargeDestPoolRef.current,
         footprintRadius,
         CHARGE_DESTINATION_HEX_FILL,
         "charge-model-dest-pool",
@@ -2762,8 +2851,7 @@ export const drawBoard = (
         chargeFootprintZoneMaskLoops != null && chargeFootprintZoneMaskLoops.length > 0;
       if (hasChargeZoneLoops || chargeZonePool) {
         // Boucles backend (numpy) en source PRIMAIRE ; le pool d'empreintes n'est qu'un repli si
-        // le backend ne les a pas fournies (topologie non exploitable côté serveur). ``anchorPool``
-        // (bornes du calque coloré) = pool d'empreintes si dispo, sinon les ancres (jamais vide ici).
+        // le backend ne les a pas fournies (topologie non exploitable côté serveur).
         const anchorPool = chargeZonePool ?? chargeDestPoolRef.current;
         const maskGeom = resolveMovePreviewMaskLoopsBeforeSmooth(
           hasChargeZoneLoops ? chargeFootprintZoneMaskLoops : null,
@@ -2780,7 +2868,6 @@ export const drawBoard = (
         renderMoveAdvanceDestPoolCircleLayer(
           highlightContainer,
           app,
-          anchorPool,
           footprintRadius,
           CHARGE_DESTINATION_HEX_FILL,
           "charge-dest-pool",

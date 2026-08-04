@@ -214,6 +214,30 @@ export interface Unit {
   hidden?: boolean; // True only if ALL models are hidden (rule 13.09)
   hidden_models?: string[]; // model_ids whose footprint touches obscuring terrain
   battle_shocked?: boolean;
+
+  /** 20.01 — l'unité est en réserves stratégiques (hors table tant qu'elle n'a pas fait son
+   * ingress move 20.04). Écrit par le moteur ; le client ne fait que le lire. */
+  in_strategic_reserves?: boolean;
+}
+
+/** Réserves d'UN joueur — 20.01. Toutes les grandeurs viennent du moteur (`strategic_reserves`
+ * de l'API) : le client ne recalcule ni le plafond de 50 %, ni l'éligibilité d'un dépôt. */
+export interface StrategicReservesPlayerSummary {
+  /** Points DÉJÀ engagés en réserves (numérateur du ratio « 120/250 »). */
+  used_points: number;
+  /** Plafond de 50 % de la taille de bataille (dénominateur). */
+  cap_points: number;
+  /** Unités que le moteur accepterait MAINTENANT en réserves (plafond + FORTIFICATION + à poser).
+   * Le conteneur ne propose le dépôt que pour ces ids. */
+  placeable_unit_ids: string[];
+}
+
+/** ``strategic_reserves`` du game_state : un résumé par joueur + le round de destruction (20.04). */
+export interface StrategicReservesSummary {
+  "1"?: StrategicReservesPlayerSummary;
+  "2"?: StrategicReservesPlayerSummary;
+  /** Round au bout duquel les réserves non arrivées sont détruites (20.04). */
+  last_round?: number;
 }
 
 /** Detection range effective d'une unité cachée vis-à-vis du tireur actif (règle 13.09 + 13.5). */
@@ -387,6 +411,9 @@ export interface GameState {
   active_charge_unit?: string; // Active unit ID in charge phase
   victory_points?: Record<string, number>;
   primary_objective?: PrimaryObjectiveRule | PrimaryObjectiveRule[] | null;
+  /** Réserves stratégiques (20.01/20.04), par joueur — source unique du ratio affiché et des
+   * dépôts proposés. Absent tant qu'aucune partie n'est chargée. */
+  strategic_reserves?: StrategicReservesSummary;
 }
 
 export interface SemanticAction {

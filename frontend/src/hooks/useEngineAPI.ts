@@ -5,7 +5,13 @@ import type { SaveMeta } from "../components/SnapshotRewind";
 import { ORIENTATION_STEP_COUNT, wrapOrientationStep } from "../constants/gameConfig";
 import { API_BASE, apiFetch } from "../services/apiFetch";
 import type { GameMode, PlayerId, Unit } from "../types";
-import type { DiceValue, HiddenDetectionInfo, UnitModel, Weapon } from "../types/game";
+import type {
+  DiceValue,
+  HiddenDetectionInfo,
+  StrategicReservesSummary,
+  UnitModel,
+  Weapon,
+} from "../types/game";
 import {
   CROSS_ACTION_LOG_SUPPRESS_MS,
   dedupeActionLogBatch,
@@ -28,6 +34,7 @@ import { cubeDistance, cubeToOffset, offsetToCube } from "../utils/gameHelpers";
 import { addHexKeysToSet } from "../utils/movePoolRefsSync";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
 import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
+import { selectReserveUnits, shouldWarnReservesLastRound } from "../utils/strategicReservesUi";
 
 // Get max_turns from config instead of hardcoded fallback
 const getMaxTurnsFromConfig = async (): Promise<number> => {
@@ -241,6 +248,8 @@ export interface APIGameState {
     hidden?: boolean;
     hidden_models?: string[];
     battle_shocked?: boolean;
+    /** 20.01 — unité tenue en réserves stratégiques (hors table jusqu'à son ingress move). */
+    in_strategic_reserves?: boolean;
     TOTAL_ATTACK_LOG?: string;
     UNIT_RULES: Array<{
       ruleId: string;
@@ -317,6 +326,8 @@ export interface APIGameState {
     deployment_complete: boolean;
   };
   victory_points?: Record<string, number>;
+  /** Réserves stratégiques (20.01/20.04) : ratio par joueur, dépôts autorisés, round de destruction. */
+  strategic_reserves?: StrategicReservesSummary;
   primary_objective?: Record<string, unknown> | Array<Record<string, unknown>> | null;
   objectives?: Array<{
     name: string;
@@ -558,6 +569,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     | "consolidationPreview"
     | "consolidationModelMove"
     | "deploymentMove"
+    // 20.04 — arrivée de réserves : l'aire légale est affichée, le clic suivant pose l'escouade.
+    | "ingressPlacement"
   >("select");
   const [movePreview, setMovePreview] = useState<{
     unitId: number;
@@ -3594,6 +3607,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         hideable: unit.hideable,
         hidden: unit.hidden,
         hidden_models: unit.hidden_models,
+        // Réserves (20.01) : le conteneur PvP énumère les unités hors table sur CE drapeau. Sans
+        // ce report, une escouade mise en réserves resterait dans la liste normale du joueur.
+        in_strategic_reserves: unit.in_strategic_reserves,
         // Composition par-figurine (profils leader/sergent/spécial) : requis par l'inspection
         // figurine dans UnitStatusTable. Absent pour les unités mono-profil.
         models: unit.models,
@@ -3854,6 +3870,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // Allocation manuelle des pertes en cours (Desperate Escape) : aucun changement de
       // sélection/activation tant que les mortal wounds ne sont pas attribuées.
       if (manualAllocationRef.current && unitId !== null) return;
+      // Pose d'une arrivée de réserves en cours (20.04) : le clic plateau POSE l'escouade, il ne
+      // sélectionne rien. Sans cette garde, cliquer sur une unité annulerait le mode et le joueur
+      // perdrait l'aire affichée sans avoir rien fait.
+      if (mode === "ingressPlacement" && unitId !== null) return;
       const numericUnitId = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
 
       // Déploiement par escouade (PvP "active") : un clic sur une escouade déployable entre en
@@ -5844,6 +5864,153 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setSelectedUnitId(null);
   }, []);
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // Réserves stratégiques (20.01 / 20.04) — dépôt au déploiement, arrivée au mouvement.
+  // AUCUNE règle n'est rejouée ici : le plafond, l'éligibilité au dépôt, l'aire d'arrivée et la
+  // validité d'une pose viennent tous du moteur. Ce bloc ne fait qu'appeler et transporter.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /** Contours (monde) de l'aire d'arrivée de l'escouade sélectionnée — réponse d'``ingress_preview``.
+   *  Même canal que l'aperçu de move (``move_preview_footprint_mask_loops``), même rendu polygone :
+   *  l'aire vaut jusqu'à 57 000 cases, elle ne transite JAMAIS case par case. */
+  const ingressMaskLoopsRef = useRef<number[][] | null>(null);
+  /** Escouade en attente de pose (mode ``ingressPlacement``) — lue par le clic plateau. */
+  const ingressUnitIdRef = useRef<number | null>(null);
+  /** 20.04 — aucune arrivée légale (ou pas encore le round d'arrivée) : à DIRE au joueur, sinon
+   *  son clic suivant ne ferait rien. ``reason`` vient du moteur, jamais d'un diagnostic client. */
+  const [ingressBlocked, setIngressBlocked] = useState<{
+    unitId: number;
+    reason: string;
+  } | null>(null);
+  /** 20.04 — avertissement « dernier tour » : les réserves de CE joueur seront détruites à la fin
+   *  du round. Posé au début de son tour, une seule fois par (round, joueur). */
+  const [reservesLastRoundWarning, setReservesLastRoundWarning] = useState<{
+    player: number;
+    unitIds: number[];
+  } | null>(null);
+  const reservesLastRoundShownRef = useRef<string | null>(null);
+
+  /** Sort du mode d'arrivée sans rien écrire côté moteur. */
+  const handleCancelIngress = useCallback(() => {
+    ingressMaskLoopsRef.current = null;
+    ingressUnitIdRef.current = null;
+    setMode("select");
+    setSelectedUnitId(null);
+  }, []);
+
+  /** 20.01 — dépose l'unité SÉLECTIONNÉE en réserves au lieu de la déployer. Consomme le tour
+   *  d'alternance, exactement comme une pose (c'est le moteur qui fait passer la main). */
+  const handleDeployToStrategicReserves = useCallback(
+    async (unitId: number | string) => {
+      const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      const data = await executeAction({
+        action: "deploy_strategic_reserves",
+        unitId: String(uid),
+      });
+      if (data?.success === false) {
+        setError(`Strategic reserves refused: ${String(data.error ?? "unknown")}`);
+        return;
+      }
+      // Sortie de mode identique à un Annuler de déploiement : le dépôt CONSOMME le tour
+      // d'alternance comme une pose, donc il faut purger exactement les mêmes ressources.
+      handleCancelDeploy();
+    },
+    [executeAction, handleCancelDeploy]
+  );
+
+  /** 20.04 — sélection d'une escouade DANS le conteneur, en phase de mouvement : demande au moteur
+   *  son aire d'arrivée et entre en mode pose. Pool vide ou round d'arrivée pas atteint → popup. */
+  const handleSelectReserveUnitForIngress = useCallback(
+    async (unitId: number | string) => {
+      const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      let result: Record<string, unknown> | null = null;
+      try {
+        result = await postEngineQuery({ action: "ingress_preview", unitId: String(uid) });
+      } catch (err) {
+        setError(`Ingress preview failed: ${formatApiConnectionError(err)}`);
+        return;
+      }
+      if (result?.eligible !== true) {
+        setIngressBlocked({ unitId: uid, reason: String(result?.reason ?? "not_yet_arriving") });
+        return;
+      }
+      // Seul le NOMBRE DE CASES dit s'il existe une arrivée légale (20.04) — c'est le moteur qui
+      // le compte. L'absence de contour, elle, ne dit rien de la règle : la construction du
+      // polygone rend `None` sur une topologie non exploitable, et un pool bien réel s'afficherait
+      // alors comme « aucune arrivée possible », bloquant l'escouade jusqu'à sa destruction en fin
+      // de 3e round.
+      if (Number(result.cells ?? 0) <= 0) {
+        setIngressBlocked({ unitId: uid, reason: String(result.reason ?? "no_legal_arrival") });
+        return;
+      }
+      // Contour absent malgré un pool non vide : on entre quand même en pose, sans aire dessinée.
+      // Le clic n'est alors plus filtré côté client — c'est le moteur qui accepte ou refuse la
+      // destination, comme il le fait déjà pour tout ce que le contour ne dit pas (murs,
+      // figurines, cohésion). Dégradé, mais l'escouade reste jouable.
+      ingressMaskLoopsRef.current = normalizeMaskLoopsFromApi(result.footprint_mask_loops);
+      ingressUnitIdRef.current = uid;
+      setSelectedUnitId(uid);
+      setMode("ingressPlacement");
+    },
+    [postEngineQuery]
+  );
+
+  /** 20.04 — pose l'escouade à (col,row). Le moteur construit lui-même le plan par-figurine
+   *  (`build_validated_deployment_plan` contraint au pool d'ingress) et refuse ce qui ne tient
+   *  pas : le client n'anticipe aucune de ces conditions, il rapporte le refus. */
+  const handleIngressPlace = useCallback(
+    async (col: number, row: number) => {
+      const uid = ingressUnitIdRef.current;
+      if (uid === null) return;
+      const data = await executeAction({
+        action: "ingress_move",
+        unitId: String(uid),
+        destCol: col,
+        destRow: row,
+      });
+      if (data?.success === false) {
+        setError(`Ingress move refused: ${String(data.error ?? "unknown")}`);
+        return;
+      }
+      ingressMaskLoopsRef.current = null;
+      ingressUnitIdRef.current = null;
+      setMode("select");
+      setSelectedUnitId(null);
+    },
+    [executeAction]
+  );
+
+  // 20.04 — « At the end of the third battle round … destroyed ». Avertir CHAQUE joueur au début
+  // de SON tour du dernier round, et seulement s'il lui reste des réserves. Le round vient du
+  // moteur (`strategic_reserves.last_round`), jamais d'un « 3 » codé ici.
+  const reservesLastRound = gameState?.strategic_reserves?.last_round;
+  const currentPlayerForReserves = gameState?.current_player;
+  const currentTurnForReserves = gameState?.turn;
+  useEffect(() => {
+    const reserveUnits = selectReserveUnits(gameState?.units ?? []);
+    if (
+      !shouldWarnReservesLastRound({
+        turn: currentTurnForReserves,
+        lastRound: reservesLastRound,
+        currentPlayer: currentPlayerForReserves,
+        reserveUnits,
+      })
+    ) {
+      return;
+    }
+    // Une seule fois par (round, joueur) : sans ce garde, chaque réponse serveur du tour
+    // rouvrirait le popup que le joueur vient de fermer.
+    const key = `${currentTurnForReserves}:${currentPlayerForReserves}`;
+    if (reservesLastRoundShownRef.current === key) return;
+    reservesLastRoundShownRef.current = key;
+    setReservesLastRoundWarning({
+      player: currentPlayerForReserves as number,
+      unitIds: reserveUnits
+        .filter((u) => u.player === currentPlayerForReserves)
+        .map((u) => (typeof u.id === "number" ? u.id : parseInt(String(u.id), 10))),
+    });
+  }, [reservesLastRound, currentPlayerForReserves, currentTurnForReserves, gameState?.units]);
+
   const listArmies = useCallback(async (): Promise<ArmyListItem[]> => {
     const response = await apiFetch(`${API_BASE}/armies`);
     if (!response.ok) {
@@ -7629,6 +7796,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       player_types: gameState.player_types,
       deployment_type: gameState.deployment_type,
       deployment_state: memoizedDeploymentState,
+      // 20.01/20.04 : ratio, dépôts autorisés et round de destruction — tous calculés par le
+      // moteur, transportés tels quels jusqu'au conteneur de réserves.
+      strategic_reserves: gameState.strategic_reserves,
       move_activation_pool: gameState.move_activation_pool,
       shoot_activation_pool: gameState.shoot_activation_pool,
       charge_activation_pool: gameState.charge_activation_pool,
@@ -7776,6 +7946,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onFreezeSquadDeploy: () => {},
       onCommitDeploy: async () => {},
       onCancelDeploy: () => {},
+      // Réserves stratégiques (20.01 / 20.04)
+      ingressMaskLoopsRef,
+      ingressBlocked: null as null | { unitId: number; reason: string },
+      reservesLastRoundWarning: null as null | { player: number; unitIds: number[] },
+      onDismissIngressBlocked: () => {},
+      onDismissReservesLastRoundWarning: () => {},
+      onDeployToStrategicReserves: async (_unitId: number | string) => {},
+      onSelectReserveUnitForIngress: async (_unitId: number | string) => {},
+      onIngressPlace: async (_col: number, _row: number) => {},
+      onCancelIngress: () => {},
       chargeMovePlan: null,
       chargeFocusActive: false,
       chargeModelPoolRef,
@@ -8194,6 +8374,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onFreezeSquadDeploy: handleFreezeSquadDeploy,
     onCommitDeploy: handleCommitDeploy,
     onCancelDeploy: handleCancelDeploy,
+    // Réserves stratégiques (20.01 / 20.04)
+    ingressMaskLoopsRef,
+    ingressBlocked,
+    reservesLastRoundWarning,
+    onDismissIngressBlocked: () => setIngressBlocked(null),
+    onDismissReservesLastRoundWarning: () => setReservesLastRoundWarning(null),
+    onDeployToStrategicReserves: handleDeployToStrategicReserves,
+    onSelectReserveUnitForIngress: handleSelectReserveUnitForIngress,
+    onIngressPlace: handleIngressPlace,
+    onCancelIngress: handleCancelIngress,
     // Charge par-figurine (V11 11.04, Slice G)
     chargeMovePlan,
     chargeFocusActive,

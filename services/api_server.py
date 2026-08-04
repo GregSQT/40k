@@ -840,22 +840,57 @@ def _maybe_precompute_ingress_pools(engine_instance: Any) -> None:
     precompute_ingress_pools(gs)
 
 
-def _strategic_reserves_summary(game_state: Dict[str, Any]) -> Dict[str, Dict[str, int]]:
-    """``{player: {used_points, cap_points}}`` — 20.01, plafond de 50 % de la taille de bataille.
+def _strategic_reserves_summary(game_state: Dict[str, Any]) -> Dict[str, Any]:
+    """``{player: {used_points, cap_points, placeable_unit_ids}, "last_round": n}`` — 20.01/20.04.
 
-    Aucune arithmétique ici : les deux grandeurs viennent de `strategic_reserves_usage`, LE
-    calcul qui décide aussi de l'acceptation d'un dépôt. Les refaire dans la couche API ferait
-    afficher un ratio qui n'est pas celui qui refuse le dépôt — le défaut même que le passage
-    par le serveur cherche à éviter côté client.
+    Aucune arithmétique ici : les grandeurs viennent de `strategic_reserves_usage`, LE calcul qui
+    décide aussi de l'acceptation d'un dépôt. Les refaire dans la couche API ferait afficher un
+    ratio qui n'est pas celui qui refuse le dépôt — le défaut même que le passage par le serveur
+    cherche à éviter côté client.
+
+    Deux grandeurs de plus, pour la MÊME raison — l'UI PvP ne doit rejouer aucune règle en TS :
+
+      - ``placeable_unit_ids`` : les unités que `deployment_place_in_strategic_reserves` accepte
+        RÉELLEMENT en l'état, c'est-à-dire l'intersection de ses deux préconditions (être encore à
+        poser, et passer `unit_can_be_placed_in_strategic_reserves` — plafond ET FORTIFICATION).
+        Le client ne propose le dépôt que pour ces ids ; il n'a ni le plafond restant ni les
+        mots-clés à réinterpréter.
+      - ``last_round`` : le round au bout duquel les réserves non arrivées sont détruites (20.04),
+        lu sur la constante moteur. Le popup d'avertissement du client s'y accroche au lieu de
+        coder « 3 » en dur.
     """
     if "points_limit" not in game_state:  # état non initialisé (pas de partie en cours)
         return {}
-    from engine.phase_handlers.deployment_handlers import strategic_reserves_usage
+    from engine.phase_handlers.deployment_handlers import (
+        _get_deployable_remaining,
+        strategic_reserves_usage,
+        unit_can_be_placed_in_strategic_reserves,
+    )
+    from engine.phase_handlers.movement_handlers import STRATEGIC_RESERVES_LAST_ROUND
 
-    summary: Dict[str, Dict[str, int]] = {}
+    # Hors phase de déploiement il n'y a plus rien à mettre en réserves : `deployment_state` peut
+    # être absent (moteur nu, partie chargée en cours) et la liste est alors vide, ce qui est la
+    # vérité — pas un repli masquant. Quand il est là, c'est `_get_deployable_remaining` qui lit,
+    # avec sa résolution de clé int-ou-str : la convention de clés de `deployable_units` n'a pas à
+    # être réaffirmée ici (5e copie) pour diverger le jour où elle sera normalisée.
+    deployment_state = game_state.get("deployment_state")  # get allowed (phase déjà terminée)
+    summary: Dict[str, Any] = {"last_round": int(STRATEGIC_RESERVES_LAST_ROUND)}
     for player in (1, 2):
         used, cap = strategic_reserves_usage(game_state, player)
-        summary[str(player)] = {"used_points": used, "cap_points": cap}
+        pending = (
+            _get_deployable_remaining(deployment_state, player)
+            if isinstance(deployment_state, dict)
+            else []
+        )
+        summary[str(player)] = {
+            "used_points": used,
+            "cap_points": cap,
+            "placeable_unit_ids": [
+                str(uid)
+                for uid in pending
+                if unit_can_be_placed_in_strategic_reserves(game_state, str(uid))
+            ],
+        }
     return summary
 
 
@@ -2892,9 +2927,10 @@ def execute_action():
     # resérialisation de l'état — tout ce qu'un retour anticipé depuis ce point leur retirerait.
     # Seul l'APERÇU, en lecture pure, est servi ici (jumeau de `deploy_preview`).
 
-    # Read-only : aire d'arrivée d'une unité en réserves, publiée dans le canal d'aperçu
-    # (`move_preview_footprint_mask_loops`) — le client la rend comme l'aperçu de mouvement, en
-    # polygone, au lieu de recevoir des dizaines de milliers de couples (col,row).
+    # Read-only : aire d'arrivée d'une unité en réserves, rendue EN CONTOUR DANS LA RÉPONSE — le
+    # client la dessine comme l'aperçu de mouvement, en polygone, au lieu de recevoir des dizaines
+    # de milliers de couples (col,row). Elle n'est PAS publiée dans le canal d'aperçu partagé du
+    # game_state : voir le choix de `ingress_preview_loops` plus bas.
     if action.get("action") == "ingress_preview":
         unit_id = action.get("unitId")
         if unit_id is None:
@@ -2916,7 +2952,14 @@ def execute_action():
                     "reason": "not_yet_arriving",
                 },
             })
-        _mh_ing.set_ingress_preview_loops(engine.game_state, str(unit_id))
+        # `ingress_preview_loops` et NON `set_ingress_preview_loops` : le second publie la bande
+        # dans ``move_preview_footprint_mask_loops``, le canal d'aperçu du MOUVEMENT. Or cette
+        # action est en lecture pure — elle ne resérialise pas l'état, donc rien n'effacerait la
+        # bande ensuite et elle repartirait dans toutes les réponses suivantes. Le calcul, lui,
+        # est pur et mémoïsé. C'est le choix que `precompute_ingress_pools` documente déjà.
+        _ingress_loops = _compact_mask_loops_for_api_json(
+            _mh_ing.ingress_preview_loops(engine.game_state, str(unit_id))
+        )
         _pool_n = len(_mh_ing.ingress_setup_pool(engine.game_state, str(unit_id)))
         return api_json_response({
             "success": True,
@@ -2927,9 +2970,7 @@ def execute_action():
                 # rend les siens : une action en lecture pure ne resérialise pas l'état, donc
                 # les publier seulement dans le game_state obligerait le client à refaire un
                 # aller-retour pour dessiner ce qu'il vient de demander.
-                "footprint_mask_loops": _compact_mask_loops_for_api_json(
-                    engine.game_state.get("move_preview_footprint_mask_loops")  # get allowed
-                ),
+                "footprint_mask_loops": _ingress_loops,
                 # Pool vide = aucune arrivée légale (les ennemis couvrent la bande). Le client
                 # doit le DIRE au joueur, sinon le clic suivant ne fera rien.
                 "reason": None if _pool_n else "no_legal_arrival",

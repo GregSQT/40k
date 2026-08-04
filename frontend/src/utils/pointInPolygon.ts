@@ -22,3 +22,23 @@ export function pointInAnyMaskLoop(px: number, py: number, loops: number[][]): b
   }
   return false;
 }
+
+/**
+ * Point dans la surface RÉELLEMENT PEINTE par un masque à trous (règle pair-impair).
+ *
+ * Différence avec `pointInAnyMaskLoop`, qui est un OU : une boucle imbriquée dans une autre est
+ * un TROU, pas une surface. Le rendu le fait explicitement (`beginHole` sur toute boucle dont le
+ * centroïde tombe dans une boucle plus grande) ; un OU répondrait « dedans » pour un point situé
+ * dans un trou visiblement non peint — typiquement, pour l'aire d'arrivée des réserves (20.04),
+ * les bulles d'exclusion de 9" autour de chaque unité ennemie.
+ *
+ * Compter les appartenances et regarder leur parité redonne exactement la surface peinte : 1 pour
+ * l'intérieur d'un anneau, 2 (donc dehors) pour un trou, 3 pour un îlot dans ce trou.
+ */
+export function pointInMaskLoopsEvenOdd(px: number, py: number, loops: number[][]): boolean {
+  let crossings = 0;
+  for (const loop of loops) {
+    if (pointInPolygon(px, py, loop)) crossings++;
+  }
+  return crossings % 2 === 1;
+}
