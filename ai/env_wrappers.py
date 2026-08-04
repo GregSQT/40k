@@ -1300,6 +1300,60 @@ class BotControlledEnv(gym.Wrapper):
         info["self_play_ratio_current"] = self._self_play_ratio_current
         return obs, float(cumulative_reward), terminated, truncated, info, ready_decision
 
+    def _select_bot_deploy_action(self, game_state, valid_actions, bot=None) -> int:
+        """Action de PHASE DEPLOIEMENT (03.02) du bot : un slot de mise en place, jamais WAIT.
+
+        Jumeau de l'ingress move (20.04) traite dans `_select_bot_move_action` : les deux sont des
+        MISES EN PLACE, et c'est ici, au point de traduction masque -> pool jouable, que le pool se
+        nettoie. UNE fois, pour tous les bots, au lieu d'une fois par bot.
+
+        ⚠️ Le masque ouvre `ACTION_WAIT` au deploiement, et ce slot n'y est PAS une attente : le
+        jouer met l'unite en RESERVES STRATEGIQUES (20.01,
+        `ActionDecoder.get_squad_action_mask_and_eligible_units`). C'est une decision de LISTE,
+        jamais de doctrine. La surcharge d'id est volontaire (`TOTAL_ACTION_SIZE` gele depuis le
+        chantier 01), donc l'invariant ne peut pas descendre dans le decodeur : il vit ICI. MESURE
+        de ce qu'il coutait quand chaque bot le portait lui-meme (chantier 04c) : TacticalBot — le
+        HOLDOUT — mettait 400 deploiements sur 400 en reserves, et cinq bots ponderes 1 a 3 % des
+        leurs via leur clause d'exploration evaluee AVANT leur branche `deployment`. Un point de
+        passage unique rend la correction independante de l'ordre des clauses de chaque bot, et
+        d'un 8e bot qu'on ajouterait demain sans y penser.
+        """
+        placement_actions = [a for a in valid_actions if a in mi.DEPLOY_SLOTS]
+        if not placement_actions:
+            # Contrairement a l'ingress (pool vide = etat de jeu NORMAL, l'unite reste en
+            # reserves), un deploiement sans aucun slot de pose est un defaut moteur : le decodeur
+            # leve « Deployment deadlock » avant d'en arriver la. Erreur explicite, jamais un repli
+            # en WAIT — qui mettrait justement l'unite en reserves.
+            raise RuntimeError(
+                "BotControlledEnv: masque de deploiement sans aucun slot de mise en place "
+                f"{sorted(mi.DEPLOY_SLOTS)} ouvert (actions ouvertes : {valid_actions})."
+            )
+        actor = self.bot if bot is None else bot
+        return self._ask_bot_placement(actor, placement_actions, game_state)
+
+    def _ask_bot_placement(self, actor, placement_actions, game_state) -> int:
+        """Interroge la politique de MISE EN PLACE du bot sur un pool DEJA nettoye.
+
+        Point de passage unique des deux sites de mise en place — deploiement initial (03.02) et
+        ingress move (20.04) — qui sont des jumeaux exacts cote moteur
+        (`ActionDecoder.ingress_slot_candidates` : memes 5 strategies, memes slots 4-8, seule
+        l'aire legale change). Un seul contrat en resulte pour `select_placement_action` : elle
+        recoit TOUJOURS un pool non vide de slots 4-8, jamais un masque brut. C'est ce qui permet
+        aux bots de ne plus porter le filtre eux-memes.
+
+        On ne transmet QUE les slots ouverts lus dans le masque : un slot ferme ne peut donc pas
+        etre choisi, meme par un bot qui ignorerait la liste qu'on lui passe —
+        `validate_action_against_mask` le rattraperait, mais en abattant le run.
+        """
+        if not hasattr(actor, "select_placement_action"):
+            # Meme contrat que `select_movement_destination` : erreur explicite, jamais un repli
+            # silencieux qui ferait renoncer le bot a sa mise en place.
+            raise RuntimeError(
+                f"Bot {type(actor).__name__} n'implemente pas select_placement_action, "
+                f"requis par toute mise en place (deploiement 03.02, ingress move 20.04)."
+            )
+        return int(actor.select_placement_action(placement_actions, game_state))
+
     def _select_bot_move_action(self, game_state, active_unit, valid_actions, bot=None) -> int:
         """Action de PHASE MOVE du bot : ingress move si l'escouade est en reserves, sinon
         traduction de son choix de destination en action-cellule legale (phase move spatiale).
@@ -1350,17 +1404,7 @@ class BotControlledEnv(gym.Wrapper):
                 # round). Etat de jeu NORMAL — l'unite reste en reserves et retentera au round
                 # suivant — et seul WAIT est alors arme par le masque.
                 return mi.ACTION_WAIT
-            if not hasattr(actor, "select_placement_action"):
-                # Meme contrat que `select_movement_destination` plus bas : erreur explicite,
-                # jamais un repli silencieux qui ferait renoncer le bot a ses reserves.
-                raise RuntimeError(
-                    f"Bot {type(actor).__name__} n'implemente pas select_placement_action, "
-                    f"requis par l'ingress move (20.04) d'une escouade en reserves."
-                )
-            # On ne transmet QUE les slots ouverts lus dans le masque : un slot ferme ne peut
-            # donc pas etre choisi, meme par un bot qui ignorerait la liste qu'on lui passe —
-            # `validate_action_against_mask` le rattraperait, mais en abattant le run.
-            return int(actor.select_placement_action(placement_actions, game_state))
+            return self._ask_bot_placement(actor, placement_actions, game_state)
 
         move_cells = [a for a in valid_actions if a in mi.MOVE_CELLS]
         if not move_cells:
@@ -1475,7 +1519,9 @@ class BotControlledEnv(gym.Wrapper):
         if current_phase == "shoot" and any(a in valid_actions for a in mi.SHOOT_SLOTS):
             self.shoot_opportunities += 1
 
-        if current_phase == "move":
+        if current_phase == "deployment":
+            bot_choice = self._select_bot_deploy_action(game_state, valid_actions, bot=actor)
+        elif current_phase == "move":
             # Refonte spatiale : en move, les bits True du masque sont des CELLULES (0-1023), pas
             # des directions. Le bot ne peut pas choisir une cellule entiere sensement (« premiere
             # cellule legale » = coin arbitraire de la grille, root cause §3). Il choisit une
