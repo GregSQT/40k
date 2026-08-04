@@ -67,6 +67,10 @@ GAME_PHASES = ["deployment", "command", "move", "shoot", "charge", "fight"]
 #: Purgée au reset d'épisode (`w40k_core`) — son tampon est l'état de déploiement, qui
 #: recommence identique (aucune unité posée) d'un épisode à l'autre.
 DEPLOY_SLOT_CANDIDATES_CACHE_KEY = "_deployment_slot_candidates"
+#: Jumeau du précédent pour l'ingress move (20.04) — clé DISTINCTE : les deux mises en place
+#: coexistent dans un même épisode (déploiement au tour 0, ingress à partir du round 2) et
+#: décrivent des aires légales différentes.
+INGRESS_SLOT_CANDIDATES_CACHE_KEY = "_ingress_slot_candidates"
 
 
 def open_deploy_slot_count(num_valid_hexes: int) -> int:
@@ -329,6 +333,21 @@ class ActionDecoder:
                     )
                 for i in range(open_deploy_slot_count(num_hexes)):
                     mask[DEPLOY_SLOT_BASE + i] = True
+                # 20.01 — « you can select one or more friendly units to place in strategic
+                # reserves » : la mise en réserve est une DÉCISION DE JOUEUR, prise à la place
+                # du déploiement de cette unité. Elle emprunte `SQUAD_ACTION_WAIT`, id inutilisé
+                # en phase de déploiement (les slots 4-8 y portent les stratégies de pose) :
+                # aucune dimension d'action n'est ajoutée. Le slot est FERMÉ dès que l'unité ne
+                # tiendrait plus sous le plafond de 50 % — l'agent ne peut pas produire une
+                # liste illégale, exactement comme il ne peut pas poser hors zone.
+                from engine.phase_handlers.deployment_handlers import (
+                    unit_can_be_placed_in_strategic_reserves,
+                )
+
+                if unit_can_be_placed_in_strategic_reserves(
+                    game_state, str(require_key(active_unit, "id"))
+                ):
+                    mask[SQUAD_ACTION_WAIT] = True
             return mask, eligible_units
 
         if current_phase == "command":
@@ -356,6 +375,21 @@ class ActionDecoder:
             raise KeyError(f"Squad {squad_id} missing from units_cache")
         our_player = int(require_key(cache_entry, "player"))
         enemy_slot_ids = get_enemy_slot_mapping(game_state, our_player)
+
+        # INGRESS MOVE (20.04) — l'escouade active est en réserves : elle n'a aucune cellule de
+        # move (elle n'est pas sur le plateau), elle a des candidats de MISE EN PLACE. Le masque
+        # ouvre donc les mêmes slots 4-8 que le déploiement, dont c'est le jumeau, plus WAIT pour
+        # RENONCER (rester en réserves ce tour-ci est un choix légal — jusqu'à la fin du 3e
+        # round, où 20.04 la détruit). Les deux familles ne peuvent pas se confondre : une
+        # escouade en réserves n'a pas de cellule jouable, une escouade posée n'a pas de
+        # candidat d'ingress.
+        from engine.phase_handlers.shared_utils import unit_is_in_strategic_reserves
+
+        if current_phase == "move" and unit_is_in_strategic_reserves(game_state, squad_id):
+            for action_int in self.ingress_slot_candidates(game_state, squad_id):
+                mask[action_int] = True
+            mask[SQUAD_ACTION_WAIT] = True
+            return mask, eligible_units
 
         advance_roll: Optional[int] = None
         move_cell_map = None
@@ -679,6 +713,9 @@ class ActionDecoder:
                     "convert_squad_action: aucune unité eligible en phase deployment"
                 )
             selected_unit_id = eligible_units[0]["id"]
+            # 20.01 — mise en réserves au lieu du déploiement (cf. masque).
+            if action_int == SQUAD_ACTION_WAIT:
+                return {"action": "deploy_strategic_reserves", "unitId": selected_unit_id}
             if action_int not in [4, 5, 6, 7, 8]:
                 raise ValueError(
                     f"convert_squad_action: action {action_int} invalide en phase deployment"
@@ -718,6 +755,37 @@ class ActionDecoder:
                 f"pour action {action_int}"
             )
         squad_id = str(eligible_units[0]["id"])
+
+        # INGRESS MOVE (20.04) — jumeau du décodage de déploiement : le slot désigne une
+        # stratégie, `ingress_slot_candidates` en donne l'ancre ET le plan déjà validé (source
+        # UNIQUE partagée avec le masque, donc tout slot ouvert est exécutable).
+        from engine.phase_handlers.shared_utils import unit_is_in_strategic_reserves
+
+        if current_phase == "move" and unit_is_in_strategic_reserves(game_state, squad_id):
+            if action_int == SQUAD_ACTION_WAIT:
+                # RENONCER à arriver ce tour-ci : fin d'activation ordinaire (`squad_wait`),
+                # l'unité reste en réserves. Aucune sémantique propre n'est nécessaire — c'est
+                # exactement « cette escouade ne fait rien de sa phase de mouvement ».
+                return {"action": "squad_wait", "squad_id": squad_id}
+            if action_int not in list(DEPLOY_SLOTS):
+                raise ValueError(
+                    f"convert_squad_action: action {action_int} invalide pour une escouade en "
+                    f"réserves stratégiques (slots d'ingress {list(DEPLOY_SLOTS)} ou WAIT)"
+                )
+            candidates = self.ingress_slot_candidates(game_state, squad_id)
+            if action_int not in candidates:
+                raise ValueError(
+                    f"convert_squad_action: slot d'ingress {action_int} FERMÉ pour l'escouade "
+                    f"{squad_id} (ouverts : {sorted(candidates)}) — action hors masque"
+                )
+            candidate = candidates[action_int]
+            return {
+                "action": "ingress_move",
+                "unitId": squad_id,
+                "destCol": int(candidate["hex"][0]),
+                "destRow": int(candidate["hex"][1]),
+                "plan": candidate["plan"],
+            }
 
         if SQUAD_ACTION_MOVE_CELL_BASE <= action_int < (
             SQUAD_ACTION_MOVE_CELL_BASE + SQUAD_ACTION_MOVE_CELL_COUNT
@@ -1611,6 +1679,8 @@ class ActionDecoder:
         game_state: Dict[str, Any],
         current_deployer: int,
         valid_hexes: List[tuple[int, int]],
+        scoring_cache: Optional[Dict[str, Any]] = None,
+        with_los: bool = True,
     ) -> Dict[str, Any]:
         """Ingrédients de score, calculés UNE fois pour les 5 stratégies.
 
@@ -1621,7 +1691,14 @@ class ActionDecoder:
         c'est ce qui permet à un tri lexicographique numpy de reproduire exactement l'ancien
         `max` sur tuples.
         """
-        cache = self._get_or_build_deployment_scoring_cache(game_state, current_deployer)
+        # `scoring_cache` : cache CONSTRUIT PAR L'APPELANT sur d'autres hexes que la zone de
+        # déploiement (ingress move 20.04). Le cache mémoïsé, lui, est indexé sur la zone : lui
+        # demander l'exposition d'un hexe hors zone lèverait (« Missing los_exposure cache
+        # entry »). Les colonnes de score, elles, sont les mêmes — c'est tout l'intérêt.
+        cache = (
+            scoring_cache if scoring_cache is not None
+            else self._get_or_build_deployment_scoring_cache(game_state, current_deployer)
+        )
         ally_col_counts = require_key(cache, "ally_col_counts")
         ally_deployed_hexes = require_key(cache, "ally_deployed_hexes")
         los_exposure_by_hex = require_key(cache, "los_exposure_by_hex")
@@ -1641,19 +1718,23 @@ class ActionDecoder:
         center_row = (int(rows.min()) + int(rows.max())) // 2
 
         n = len(valid_hexes)
-        los = np.empty(n, dtype=np.int64)
-        potential_los = np.empty(n, dtype=np.int64)
+        # `with_los=False` (ingress 20.04) : les deux colonnes d'exposition ne sont PAS calculées
+        # et valent None — pas zéro. Un zéro serait une valeur par défaut indiscernable d'une
+        # exposition réelle nulle ; None fait lever tout lecteur qui les attendrait.
+        los = np.empty(n, dtype=np.int64) if with_los else None
+        potential_los = np.empty(n, dtype=np.int64) if with_los else None
         cluster = np.empty(n, dtype=np.int64)
         for i, h in enumerate(valid_hexes):
             key = (int(h[0]), int(h[1]))
-            if key not in los_exposure_by_hex:
-                raise KeyError(f"Missing los_exposure cache entry for hex ({key[0]},{key[1]})")
-            if key not in potential_los_exposure_by_hex:
-                raise KeyError(
-                    f"Missing potential_los_exposure cache entry for hex ({key[0]},{key[1]})"
-                )
-            los[i] = los_exposure_by_hex[key]
-            potential_los[i] = potential_los_exposure_by_hex[key]
+            if with_los:
+                if key not in los_exposure_by_hex:
+                    raise KeyError(f"Missing los_exposure cache entry for hex ({key[0]},{key[1]})")
+                if key not in potential_los_exposure_by_hex:
+                    raise KeyError(
+                        f"Missing potential_los_exposure cache entry for hex ({key[0]},{key[1]})"
+                    )
+                los[i] = los_exposure_by_hex[key]  # type: ignore[index]
+                potential_los[i] = potential_los_exposure_by_hex[key]  # type: ignore[index]
             cluster[i] = ally_col_counts[key[0]] if key[0] in ally_col_counts else 0
 
         nearest_enemy = self._nearest_hex_distance_vec(cols, rows, enemy_reference_hexes)
@@ -1829,6 +1910,163 @@ class ActionDecoder:
             }
 
         game_state[DEPLOY_SLOT_CANDIDATES_CACHE_KEY] = {
+            "key": cache_key,
+            "candidates": candidates,
+        }
+        return candidates
+
+    def _build_ingress_scoring_cache(
+        self, game_state: Dict[str, Any], player: int
+    ) -> Dict[str, Any]:
+        """Ingrédients de score d'un ingress move — SANS exposition de ligne de vue.
+
+        POURQUOI cette variante existe, et pourquoi elle n'est pas une dégradation cachée :
+        `_build_deployment_scoring_cache` calcule, pour CHAQUE case candidate, combien d'unités
+        ennemies la voient. C'est une LoS par (ennemi × case). La zone de déploiement fait
+        ~16 000 cases et n'est scorée qu'une fois par pose ; le pool d'un ingress Deep Strike
+        (24.09) fait TOUT le plateau — **57 538 cases mesurées** sur le board 44x60x5 — et doit
+        être re-scoré à chaque round (les ennemis ont bougé). Mesure : **2,98 s** pour la seule
+        exposition, contre 0,16 s pour tout le reste (colonnes + tri + validation du plan).
+        À ce prix, une escouade en réserves coûterait plus cher qu'un épisode entier.
+
+        Ce qui est perdu, exactement : les colonnes `los` / `potential_los` ne servaient QU'À
+        départager les candidats d'un slot. L'agent ne les voit pas pour un ingress —
+        `_encode_deployment_candidates` n'émet le registre de candidats qu'en PHASE DE
+        DÉPLOIEMENT — donc aucune feature d'observation ne devient fausse. L'ordre des slots
+        d'ingress est celui de `_ingress_slot_order`, qui n'en dépend pas.
+        """
+        deployed_snapshot = self._build_deployed_snapshot(game_state)
+        ally_col_counts: Dict[int, int] = {}
+        ally_deployed_hexes: List[tuple[int, int]] = []
+        for unit_player, col, row in deployed_snapshot.values():
+            if unit_player != int(player):
+                continue
+            ally_deployed_hexes.append((col, row))
+            ally_col_counts[col] = ally_col_counts.get(col, 0) + 1  # get allowed (compteur)
+        return {
+            "current_deployer": int(player),
+            "deployed_snapshot": deployed_snapshot,
+            "deployed_snapshot_version": self._build_deployed_snapshot_version(deployed_snapshot),
+            "ally_col_counts": ally_col_counts,
+            "ally_deployed_hexes": ally_deployed_hexes,
+            # Absentes VOLONTAIREMENT (cf. docstring) : tout lecteur qui les attendrait lèvera.
+            "los_exposure_by_hex": None,
+            "potential_los_exposure_by_hex": None,
+        }
+
+    @staticmethod
+    def _ingress_slot_order(columns: Dict[str, Any], action_int: int) -> "np.ndarray":
+        """Ordre de préférence de la stratégie ``action_int`` pour un INGRESS MOVE (20.04).
+
+        Jumeau de `_deployment_slot_order` — mêmes 5 intentions, même tri lexicographique, même
+        départage final par proximité au centre — PRIVÉ des deux clés d'exposition de ligne de
+        vue, que le scoring d'ingress ne calcule pas (cf. `_build_ingress_scoring_cache`).
+        Les intentions restent distinctes : 4 = front agressif, 5 = pression sur objectif,
+        6 = sûr (loin des ennemis, près des alliés), 7 = flanc gauche, 8 = flanc droit.
+        """
+        nearest_enemy = columns["nearest_enemy"]
+        nearest_objective = columns["nearest_objective"]
+        nearest_ally = columns["nearest_ally"]
+        cluster = columns["cluster"]
+        progress = columns["progress"]
+        center_distance = columns["center_distance"]
+        cols = columns["cols"]
+        rows = columns["rows"]
+
+        tail = (
+            -np.abs(cols - columns["center_col"]),
+            -np.abs(rows - columns["center_row"]),
+        )
+        if action_int == DEPLOY_SLOT_BASE + 0:
+            keys = (progress, -nearest_enemy, -nearest_objective, -cluster, -center_distance) + tail
+        elif action_int == DEPLOY_SLOT_BASE + 1:
+            keys = (-nearest_objective, progress, -nearest_enemy, -cluster, -center_distance) + tail
+        elif action_int == DEPLOY_SLOT_BASE + 2:
+            keys = (nearest_enemy, -nearest_objective, -nearest_ally, -cluster, -center_distance) + tail
+        elif action_int == DEPLOY_SLOT_BASE + 3:
+            keys = (-cols, -nearest_objective, nearest_enemy, -cluster) + tail
+        elif action_int == DEPLOY_SLOT_BASE + 4:
+            keys = (cols, -nearest_objective, nearest_enemy, -cluster) + tail
+        else:
+            raise ValueError(f"Invalid ingress action: {action_int}")
+
+        index = np.arange(len(cols), dtype=np.int64)
+        return np.lexsort((index,) + tuple(-key for key in reversed(keys)))
+
+    def ingress_slot_candidates(
+        self, game_state: Dict[str, Any], squad_id: str
+    ) -> Dict[int, Dict[str, Any]]:
+        """Ce que CHAQUE slot ouvert ferait pour un INGRESS MOVE (20.04) de cette escouade.
+
+        JUMEAU EXACT de ``deployment_slot_candidates`` — mêmes 5 stratégies, mêmes colonnes de
+        score, même contrat « un slot ouvert a un plan validé » — appliqué à une autre aire
+        légale : le pool d'ingress (`ingress_setup_pool`) au lieu de la zone de déploiement.
+        L'ingress EST une mise en place (03.02), donc rien de la chaîne de placement n'est
+        réécrit ici ; seul l'ensemble de cases change, et il change à chaque round (positions
+        ennemies, clause de zone adverse avant le 3e round).
+
+        Rend ``{}`` quand aucune destination légale n'existe : c'est un état de jeu normal
+        (l'unité reste en réserves), pas une erreur — contrairement au déploiement, où
+        l'impossibilité de poser est un deadlock.
+        """
+        from engine.phase_handlers.deployment_handlers import build_validated_deployment_plan
+        from engine.phase_handlers.movement_handlers import ingress_setup_pool
+
+        units_cache = require_key(game_state, "units_cache")
+        entry = require_key(units_cache, str(squad_id))
+        player = int(require_key(entry, "player"))
+
+        # Mémoïsation : le masque reconstruit ces candidats à CHAQUE step tant que l'escouade en
+        # réserves est active, et le calcul (exposition LoS sur toute la bande de bord) est du
+        # même ordre que celui d'un déploiement. Le tampon est l'état des unités POSÉES + le
+        # round : ce sont exactement les deux entrées dont dépend le pool d'ingress (positions
+        # ennemies pour les 8", round pour la clause de zone adverse).
+        snapshot_version = self._build_deployed_snapshot_version(
+            self._build_deployed_snapshot(game_state)
+        )
+        cache_key = (
+            str(squad_id), int(require_key(game_state, "turn")), snapshot_version,
+        )
+        store = game_state.get(INGRESS_SLOT_CANDIDATES_CACHE_KEY)  # get allowed (1er appel)
+        if store is not None and store["key"] == cache_key:
+            return store["candidates"]
+
+        pool = ingress_setup_pool(game_state, str(squad_id))
+        if not pool:
+            game_state[INGRESS_SLOT_CANDIDATES_CACHE_KEY] = {"key": cache_key, "candidates": {}}
+            return {}
+        # Ordre STABLE et déterministe : les stratégies trient ces hexes, et `np.lexsort`
+        # départage les ex æquo par l'index d'apparition (cf. `_deployment_slot_order`).
+        valid_hexes: List[tuple[int, int]] = sorted(pool)
+        scoring_cache = self._build_ingress_scoring_cache(game_state, player)
+        columns = self._deployment_score_columns(
+            game_state, player, valid_hexes, scoring_cache, with_los=False
+        )
+        cols = columns["cols"]
+        rows = columns["rows"]
+
+        candidates: Dict[int, Dict[str, Any]] = {}
+        for slot in range(open_deploy_slot_count(len(valid_hexes))):
+            action_int = DEPLOY_SLOT_BASE + slot
+            order = self._ingress_slot_order(columns, action_int)
+            for idx in order:
+                i = int(idx)
+                plan = build_validated_deployment_plan(
+                    game_state, str(squad_id), int(cols[i]), int(rows[i]), pool
+                )
+                if plan is None:
+                    continue
+                candidates[action_int] = {
+                    "hex": (int(cols[i]), int(rows[i])),
+                    "plan": plan,
+                    "nearest_enemy_distance": int(columns["nearest_enemy"][i]),
+                    "nearest_objective_distance": int(columns["nearest_objective"][i]),
+                    "nearest_ally_distance": int(columns["nearest_ally"][i]),
+                    "has_deployed_ally": columns["has_deployed_ally"],
+                    "ally_col_count": int(columns["cluster"][i]),
+                }
+                break
+        game_state[INGRESS_SLOT_CANDIDATES_CACHE_KEY] = {
             "key": cache_key,
             "candidates": candidates,
         }

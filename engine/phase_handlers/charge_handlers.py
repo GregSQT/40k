@@ -1012,6 +1012,13 @@ def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
     # Tracking sets are NOT cleared at charge phase start
     # They persist from movement phase (units_fled, units_moved, units_shot remain)
+    # EXCEPTION 20.04 : le verrou « aucun autre type de mouvement » d'une unité arrivée de
+    # réserves court « until the START of the next Charge phase » — c'est ici, et nulle part
+    # ailleurs, qu'il tombe. L'unité redevient donc chargeable, sans être redevenue déplaçable
+    # (la phase de mouvement est passée).
+    from engine.phase_handlers.movement_handlers import clear_ingress_move_lock
+
+    clear_ingress_move_lock(game_state)
 
     # Clear charge preview state
     game_state["valid_charge_destinations_pool"] = []
@@ -1129,6 +1136,12 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         # "unit.player === current_player?"
         if cache_entry["player"] != current_player:
             continue  # Wrong player
+        # HORS TABLE (réserves 20.01 / attente de déploiement) : pas de position d'où charger.
+        # Une unité arrivée de réserves ce tour-ci, elle, PEUT charger : le verrou 20.04 tombe
+        # au début de cette phase (`clear_ingress_move_lock`).
+        from engine.phase_handlers.shared_utils import entry_is_on_battlefield
+        if not entry_is_on_battlefield(cache_entry):
+            continue
         units_own_n += 1
 
         # Engagement : aligné mouvement / preview charge (pas intersection empreinte × dilatation hex seule,
@@ -2735,8 +2748,11 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_dis
     # Get all enemies - CRITICAL: is_unit_alive so dead units never enter pool
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(unit["player"]) if unit["player"] is not None else None
+    # HORS TABLE (réserves 20.01) : vivante mais absente du champ de bataille — jamais chargeable.
+    from engine.phase_handlers.shared_utils import entry_is_on_battlefield
     enemies = [enemy_id for enemy_id, cache_entry in units_cache.items()
-               if int(cache_entry["player"]) != unit_player]
+               if int(cache_entry["player"]) != unit_player
+               and entry_is_on_battlefield(cache_entry)]
 
     from engine.spatial_relations import unit_entries_within_engagement_zone
     from .shared_utils import get_engagement_zone, build_occupied_positions_set

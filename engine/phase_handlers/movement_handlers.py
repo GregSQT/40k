@@ -596,6 +596,14 @@ def movement_build_activation_pool(game_state: Dict[str, Any]) -> None:
     # Clear pool before rebuilding (defense in depth)
     game_state["move_activation_pool"] = []
     eligible_units = get_eligible_units(game_state)
+    # 20.03/20.04 — les escouades EN RÉSERVES sont activables en phase de mouvement pour y faire
+    # leur ingress move. Elles ne sont pas dans `get_eligible_units` (qui n'énumère que les
+    # unités présentes sur le plateau) : leur éligibilité a ses propres conditions (être en
+    # réserves, round >= 2). Ajoutées en FIN de pool, l'ordre des unités déjà posées est
+    # inchangé.
+    eligible_units = eligible_units + [
+        uid for uid in ingress_eligible_units(game_state) if uid not in eligible_units
+    ]
     game_state["move_activation_pool"] = eligible_units
 
     from engine.game_utils import add_debug_file_log
@@ -619,10 +627,23 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
 
     units_cache = require_key(game_state, "units_cache")
     ez_elig = get_engagement_zone(game_state)
+    from engine.phase_handlers.shared_utils import entry_is_on_battlefield
+
     for unit_id, cache_entry in units_cache.items():
         # "unit.player === current_player?"
         if cache_entry["player"] != current_player:
             continue  # Wrong player (Skip, no log)
+
+        # HORS TABLE (réserves 20.01, ou attente de déploiement) : aucun déplacement possible —
+        # l'unité n'a pas de position d'où partir. Son arrivée passe par l'ingress move (20.04),
+        # dont l'éligibilité est construite par `ingress_eligible_units`.
+        if not entry_is_on_battlefield(cache_entry):
+            continue
+
+        # 20.04 AFTER MOVING — l'escouade arrivée de réserves n'est éligible à AUCUN autre type
+        # de mouvement jusqu'au début de la phase de charge.
+        if unit_ingress_move_locked(game_state, str(unit_id)):
+            continue
 
         # Check if unit has at least one legal destination.
         # FLY units can ignore path blockers (walls/units) while moving, so eligibility
@@ -4484,6 +4505,424 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
         })
 
     return True, result
+
+
+# ============================================================================
+# RÉSERVES STRATÉGIQUES — INGRESS MOVE (20.03 / 20.04) ET DEEP STRIKE (24.09)
+# ============================================================================
+# L'ingress move est une MISE EN PLACE (« EFFECT: Your unit is set up as described in Set Up
+# (03.02) »), pas un déplacement : il n'a ni origine, ni chemin, ni budget. Il ne passe donc PAS
+# par `movement_build_valid_destinations_pool` (BFS géodésique depuis une position que l'unité
+# n'a pas) mais par la MÊME chaîne de placement que le déploiement — formation compacte, preview
+# par-figurine, commit — à laquelle on substitue l'aire légale (`pool_override`). Tout le reste
+# de la validité de placement (bornes, murs, empreintes des autres unités, cohésion 03.03,
+# étages 13.06) est donc partagé, jamais réimplémenté.
+
+#: 20.04 « SET-UP DISTANCE: 6" » — bande le long des bords de plateau.
+INGRESS_SETUP_DISTANCE_INCHES = 6
+#: 20.04 « more than 8" horizontally from all enemy units ». STRICTEMENT plus de 8" : une
+#: destination à 8" pile est REFUSÉE.
+INGRESS_ENEMY_CLEARANCE_INCHES = 8
+#: 20.03 « Unless otherwise stated, they can only do so from the second battle round onwards. »
+INGRESS_FIRST_BATTLE_ROUND = 2
+#: 20.04 « Before the Third Battle Round: no models can be set up within your opponent's
+#: deployment zone. » -> à partir du 3e round, la zone adverse est ouverte.
+INGRESS_OPPONENT_ZONE_OPEN_ROUND = 3
+#: 20.04 « At the end of the third battle round … are destroyed ».
+STRATEGIC_RESERVES_LAST_ROUND = 3
+#: Identifiant de la capacité Deep Strike (24.09) dans `config/unit_rules.json`.
+DEEP_STRIKE_RULE_ID = "deep_strike"
+
+
+def unit_has_deep_strike(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """24.09 — « if EVERY MODEL in this unit has this ability ».
+
+    Test PAR FIGURINE VIVANTE sur les règles PROPRES de chaque figurine
+    (`models_cache[mid]["UNIT_RULES"]`, jumeau du test par-figurine de 06.03 sur les keywords),
+    et surtout PAS sur `unit["UNIT_RULES"]` : celui-ci est l'UNION en vigueur (19.04), dans
+    laquelle un seul porteur suffirait à accorder la capacité à toute l'escouade. Une escouade
+    Deep Strike menée par un character qui ne l'a pas PERD donc Deep Strike, ce qui est
+    exactement ce que dit la règle.
+
+    Une escouade sans figurine vivante n'a pas la capacité (et n'a rien à poser).
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive = [models_cache[mid] for mid in squad_models.get(str(squad_id), []) if mid in models_cache]  # get allowed
+    if not alive:
+        return False
+    for model in alive:
+        rule_ids = {
+            str(require_key(rule, "ruleId")) for rule in require_key(model, "UNIT_RULES")
+        }
+        if DEEP_STRIKE_RULE_ID not in rule_ids:
+            return False
+    return True
+
+
+def _ingress_edge_band_cells(
+    board_cols: int, board_rows: int, distance_subhex: int
+) -> "np.ndarray":
+    """Masque ``(board_cols, board_rows)`` des cases à ``distance_subhex`` ou moins d'un BORD.
+
+    Les indices de colonne/ligne du plateau SONT des sous-hexes sur les deux axes (un board
+    « 44x60 » à `inches_to_subhex=5` fait 220x300 cases) : la distance à un bord se lit donc
+    directement en indices, sans conversion supplémentaire.
+    """
+    band = np.zeros((board_cols, board_rows), dtype=bool)
+    if distance_subhex < 0:
+        raise ValueError(f"_ingress_edge_band_cells: distance négative ({distance_subhex})")
+    cols = np.arange(board_cols, dtype=np.int64)[:, None]
+    rows = np.arange(board_rows, dtype=np.int64)[None, :]
+    dist_to_edge = np.minimum(
+        np.minimum(cols, board_cols - 1 - cols),
+        np.minimum(rows, board_rows - 1 - rows),
+    )
+    band |= dist_to_edge <= distance_subhex
+    return band
+
+
+def _ingress_enemy_clearance_forbidden_hex(
+    game_state: Dict[str, Any], player: int, clearance_subhex: int,
+    board_cols: int, board_rows: int,
+) -> "np.ndarray":
+    """Volet MÉTRIQUE HEX de `_ingress_enemy_clearance_forbidden` (cf. sa docstring).
+
+    ``min_distance_between_sets({case}, empreinte_ennemie) <= clearance`` pour toute case, soit
+    la dilatation hex des empreintes ennemies par le rayon de clearance. Calculée par BFS hex
+    borné (un seul parcours pour tous les ennemis), et non case par case : à x1 le plateau fait
+    quelques milliers de cases et la clearance quelques unités.
+    """
+    from engine.phase_handlers.shared_utils import entry_is_on_battlefield
+
+    forbidden = np.zeros((board_cols, board_rows), dtype=bool)
+    frontier: List[Tuple[int, int]] = []
+    units_cache = require_key(game_state, "units_cache")
+    for _uid, entry in units_cache.items():
+        if int(require_key(entry, "player")) == int(player):
+            continue
+        if not entry_is_on_battlefield(entry):
+            continue
+        for cell in require_key(entry, "occupied_hexes"):
+            c, r = int(cell[0]), int(cell[1])
+            if 0 <= c < board_cols and 0 <= r < board_rows and not forbidden[c, r]:
+                forbidden[c, r] = True
+                frontier.append((c, r))
+    for _ring in range(int(clearance_subhex)):
+        next_frontier: List[Tuple[int, int]] = []
+        for c, r in frontier:
+            for nc, nr in get_hex_neighbors(c, r):
+                if 0 <= nc < board_cols and 0 <= nr < board_rows and not forbidden[nc, nr]:
+                    forbidden[nc, nr] = True
+                    next_frontier.append((nc, nr))
+        frontier = next_frontier
+        if not frontier:
+            break
+    return forbidden
+
+
+def _ingress_enemy_clearance_forbidden(
+    game_state: Dict[str, Any], player: int, clearance_subhex: int,
+    board_cols: int, board_rows: int,
+) -> "np.ndarray":
+    """Masque des cases interdites par « more than 8" horizontally from all enemy units » (20.04).
+
+    ``forbidden[c, r]`` ⇔ une figurine posée en ``(c, r)`` serait à 8" OU MOINS, bord à bord et
+    HORIZONTALEMENT, d'au moins une unité ennemie présente sur le plateau. La règle exige
+    STRICTEMENT plus de 8" : l'égalité est donc interdite, comme pour la zone d'engagement
+    (``<= ez``) dont ceci est le jumeau à une autre distance.
+
+    MÊME MÉTRIQUE que le reste du moteur (``engagement_distance_metric``) :
+      - ``hex`` : distance d'empreinte à empreinte en cases (``min_distance_between_sets``), la
+        case candidate valant une empreinte d'une case ;
+      - ``euclidean`` : distance du CENTRE de la case au BORD du socle ennemi (rayon inclus pour
+        un socle rond, cases d'empreinte sinon).
+    C'est la sémantique de `entries_in_engagement_zone` — la primitive canonique — pour une
+    figurine réduite à sa case ; ce masque en est le miroir vectorisé, verrouillé par test
+    d'équivalence. Le verdict est HORIZONTAL par construction (aucun gate vertical), comme
+    l'exige le texte de 20.04.
+
+    L'aire interdite est appliquée CASE PAR CASE : le contrôle `empreinte ⊆ pool` de la mise en
+    place (03.02) la propage ensuite à toutes les cases de chaque figurine, donc au socle entier.
+    """
+    from engine.hex_utils import engagement_minimum_clearance_norm, round_base_radius_norm
+    from engine.phase_handlers.shared_utils import entry_is_on_battlefield
+    from engine.spatial_relations import engagement_distance_metric
+
+    forbidden = np.zeros((board_cols, board_rows), dtype=bool)
+    clearance_norm = engagement_minimum_clearance_norm(clearance_subhex)
+    if clearance_norm <= 0:
+        return forbidden
+    if engagement_distance_metric(game_state) == "hex":
+        return _ingress_enemy_clearance_forbidden_hex(
+            game_state, player, clearance_subhex, board_cols, board_rows
+        )
+
+    _hw = 1.5
+    _hh = math.sqrt(3.0)
+    _cols = np.arange(board_cols, dtype=np.float64)
+    _rows = np.arange(board_rows, dtype=np.float64)
+    grid_x = (_cols * _hw + _hw / 2.0)[:, None] + np.zeros((1, board_rows))
+    grid_y = _rows[None, :] * _hh + ((_cols[:, None].astype(np.int64) & 1) * _hh) / 2.0 + _hh / 2.0
+
+    def _stamp(sc: int, sr: int, reach: float) -> None:
+        if reach <= 0:
+            return
+        ex = sc * _hw + _hw / 2.0
+        ey = sr * _hh + ((sc & 1) * _hh) / 2.0 + _hh / 2.0
+        dcol = int(reach / _hw) + 1
+        drow = int(reach / _hh) + 1
+        c0, c1 = max(0, sc - dcol), min(board_cols, sc + dcol + 1)
+        r0, r1 = max(0, sr - drow), min(board_rows, sr + drow + 1)
+        if c0 >= c1 or r0 >= r1:
+            return
+        dx = grid_x[c0:c1, r0:r1] - ex
+        dy = grid_y[c0:c1, r0:r1] - ey
+        forbidden[c0:c1, r0:r1] |= (dx * dx + dy * dy) <= (reach * reach + 1e-9)
+
+    units_cache = require_key(game_state, "units_cache")
+    for uid, entry in units_cache.items():
+        if int(require_key(entry, "player")) == int(player):
+            continue
+        if not entry_is_on_battlefield(entry):
+            continue
+        e_shape = require_key(entry, "BASE_SHAPE")
+        e_bs = require_base_size(e_shape, require_key(entry, "BASE_SIZE"), f"units_cache enemy {uid}")
+        by_model = entry.get("occupied_hexes_by_model")  # get allowed (mono-fig -> ancre)
+        positions = list(by_model.values()) if by_model else [
+            (int(require_key(entry, "col")), int(require_key(entry, "row")))
+        ]
+        if e_shape == "round":
+            # Paire ronde↔ronde : écart bord à bord = distance des centres MOINS les deux rayons
+            # (`euclidean_edge_distance`). Le socle de la figurine candidate est celui d'UNE CASE
+            # — même convention que la géométrie du moteur à cette résolution (`_scale_socle`
+            # normalise un socle en `round`/1 quand une figurine tient dans une case). L'omettre
+            # rendrait le masque plus LAXISTE que la primitive canonique d'une demi-case.
+            reach = (
+                clearance_norm
+                + round_base_radius_norm(
+                    require_scalar_base_size(e_shape, e_bs, "ingress clearance enemy")
+                )
+                + round_base_radius_norm(1)
+            )
+            for ec, er in positions:
+                _stamp(int(ec), int(er), reach)
+        else:
+            # Socle non rond : le socle est représenté par les cases de son empreinte (même
+            # dispatch que `entries_in_engagement_zone` en métrique hex).
+            from engine.hex_utils import precompute_footprint_offsets
+            e_orient = int(require_key(entry, "orientation"))
+            off_even, off_odd = precompute_footprint_offsets(e_shape, e_bs, e_orient)
+            for ec, er in positions:
+                offs = off_even if (int(ec) & 1) == 0 else off_odd
+                for dc, dr in offs:
+                    _stamp(int(ec) + int(dc), int(er) + int(dr), clearance_norm)
+    return forbidden
+
+
+def _opponent_deployment_zone_cells(game_state: Dict[str, Any], player: int) -> Set[Tuple[int, int]]:
+    """Cases de la zone de déploiement ADVERSE (20.04, clause « before the Third Battle Round »).
+
+    Lue dans ``deployment_state["deployment_pools"]``, la MÊME collection que celle où le
+    déploiement pose les unités. Son absence est une erreur explicite : un scénario qui déclare
+    des réserves sans zones de déploiement rend la clause invérifiable, et l'ignorer
+    autoriserait un placement illégal en silence.
+    """
+    deployment_state = game_state.get("deployment_state")  # get allowed (scénario sans zones)
+    if deployment_state is None:
+        raise KeyError(
+            "ingress move (20.04) : aucune 'deployment_state' dans le game_state — la clause "
+            "« aucune figurine dans la zone de déploiement adverse avant le 3e round » ne peut "
+            "pas être vérifiée."
+        )
+    deployment_pools = require_key(deployment_state, "deployment_pools")
+    opponent = 2 if int(player) == 1 else 1
+    pool = deployment_pools.get(opponent, deployment_pools.get(str(opponent)))  # get allowed
+    if pool is None:
+        raise KeyError(
+            f"ingress move (20.04) : aucun pool de déploiement pour le joueur adverse {opponent}"
+        )
+    return {(int(c), int(r)) for c, r in pool}
+
+
+def ingress_setup_pool(game_state: Dict[str, Any], squad_id: str) -> Set[Tuple[int, int]]:
+    """Aire légale de mise en place d'un ingress move (20.04), Deep Strike compris (24.09).
+
+    Composition, dans l'ordre du texte de la règle :
+      1. « wholly within 6" of one or more battlefield edges » — bande de bord.
+         **Deep Strike (24.09) remplace cette clause** : « it can be set up ANYWHERE on the
+         battlefield », donc tout le plateau. Les 8" sont, eux, CONSERVÉS.
+      2. « more than 8" horizontally from all enemy units » — dans les deux cas.
+      3. « Before the Third Battle Round: no models can be set up within your opponent's
+         deployment zone » — **levée par Deep Strike** (« even if that is within your
+         opponent's deployment zone ») et levée pour tous à partir du 3e round.
+
+    Les murs, les autres unités et la cohésion ne sont PAS filtrés ici : ils le sont par la
+    chaîne de mise en place commune (`deployment_preview_plan`), exactement comme pour la zone
+    de déploiement. Retourne l'ensemble des cases, éventuellement vide (aucune destination
+    légale = pas d'ingress possible ce tour-ci, ce qui est un état de jeu normal).
+    """
+    units_cache = require_key(game_state, "units_cache")
+    entry = require_key(units_cache, str(squad_id))
+    player = int(require_key(entry, "player"))
+    board_cols = int(require_key(game_state, "board_cols"))
+    board_rows = int(require_key(game_state, "board_rows"))
+    inches_to_subhex = int(require_key(game_state, "inches_to_subhex"))
+    deep_strike = unit_has_deep_strike(game_state, str(squad_id))
+
+    if deep_strike:
+        allowed = np.ones((board_cols, board_rows), dtype=bool)
+    else:
+        allowed = _ingress_edge_band_cells(
+            board_cols, board_rows, INGRESS_SETUP_DISTANCE_INCHES * inches_to_subhex
+        )
+    allowed &= ~_ingress_enemy_clearance_forbidden(
+        game_state, player, INGRESS_ENEMY_CLEARANCE_INCHES * inches_to_subhex,
+        board_cols, board_rows,
+    )
+    cells = {(int(c), int(r)) for c, r in zip(*np.nonzero(allowed))}
+    turn = int(require_key(game_state, "turn"))
+    if turn < INGRESS_OPPONENT_ZONE_OPEN_ROUND and not deep_strike:
+        cells -= _opponent_deployment_zone_cells(game_state, player)
+    return cells
+
+
+def squad_is_in_strategic_reserves(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """L'escouade attend-elle encore son ingress move (20.01) ? Alias local du prédicat partagé."""
+    from engine.phase_handlers.shared_utils import unit_is_in_strategic_reserves
+
+    return unit_is_in_strategic_reserves(game_state, str(squad_id))
+
+
+def ingress_eligible_units(game_state: Dict[str, Any]) -> List[str]:
+    """Escouades du joueur actif éligibles à un ingress move CE TOUR-CI (20.03 + 20.04).
+
+    « ELIGIBLE IF: Your unit is in strategic reserves » (20.04), « they can only do so from the
+    second battle round onwards » (20.03). L'existence d'une destination légale n'est PAS
+    testée ici : c'est le masque qui la vérifie (il n'ouvre un slot que s'il a un candidat
+    validé), exactement comme pour le déploiement.
+    """
+    if int(require_key(game_state, "turn")) < INGRESS_FIRST_BATTLE_ROUND:
+        return []
+    current_player = int(require_key(game_state, "current_player"))
+    units_cache = require_key(game_state, "units_cache")
+    eligible: List[str] = []
+    for unit_id, entry in units_cache.items():
+        if int(require_key(entry, "player")) != current_player:
+            continue
+        if not squad_is_in_strategic_reserves(game_state, str(unit_id)):
+            continue
+        eligible.append(str(unit_id))
+    return eligible
+
+
+def ingress_commit_plan(
+    game_state: Dict[str, Any], squad_id: str, plan: List[Tuple[str, int, int, int]],
+) -> Tuple[bool, Dict[str, Any]]:
+    """Exécute l'ingress move : pose l'escouade selon ``plan`` (03.02) et applique l'APRÈS 20.04.
+
+    Le plan est revalidé contre l'aire légale du tour (`ingress_setup_pool`) par la chaîne de
+    mise en place commune — un plan mémoïsé au masque et devenu illégal est donc refusé, pas
+    appliqué.
+    """
+    from engine.phase_handlers.deployment_handlers import _apply_deploy_plan
+
+    pool = ingress_setup_pool(game_state, str(squad_id))
+    ok, err = _apply_deploy_plan(
+        game_state,
+        {"unitId": str(squad_id), "plan": [[mid, c, r, lv] for mid, c, r, lv in plan]},
+        pool_override=pool,
+        check_current_deployer=False,
+    )
+    if not ok:
+        return False, err
+
+    mark_unit_ingressed(game_state, str(squad_id))
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, f"INGRESS MOVE: unit {squad_id} arrives from strategic reserves")
+    return True, {
+        "action": "ingress_move",
+        "unitId": str(squad_id),
+        "col": int(plan[0][1]),
+        "row": int(plan[0][2]),
+    }
+
+
+def reposition_unit_to_strategic_reserves(game_state: Dict[str, Any], squad_id: str) -> None:
+    """20.02 — RETIRE l'unité du champ de bataille et la replace en réserves stratégiques.
+
+    Primitive des règles qui repositionnent une unité pendant la bataille (Da Jump, chantier 06).
+    Les trois clauses de 20.02 sont satisfaites ici, et deux d'entre elles le sont en NE FAISANT
+    RIEN — ce qui est précisément le piège, puisqu'un retrait « propre » aurait consisté à
+    nettoyer l'état de l'unité :
+
+      1. « If used in the Movement phase, such rules can be used on units that have already
+         moved that phase. » -> aucune garde sur ``units_moved`` : l'appelant n'a pas à
+         vérifier que l'unité n'a pas bougé.
+      2. « A repositioned unit that is set up in the same turn in which it made an advance,
+         fall-back or disembark move HAS STILL MADE that move that turn. » -> ``units_advanced``,
+         ``units_fled`` et ``units_moved`` sont laissés INTACTS. Les effacer rendrait à l'unité
+         le droit de tirer ou de charger après un Advance, en la faisant passer par les réserves.
+      3. « Any rules that are affecting such units for a specified duration or under specified
+         circumstances continue to affect them while that duration and/or those circumstances
+         apply. » -> ``battle_shocked`` (durée : jusqu'à la prochaine phase de commandement) est
+         conservé ; il tombera à son échéance normale. Les effets de CIRCONSTANCE (auras) ne
+         sont, eux, portés par aucun état persistant : ils sont réévalués par distance à chaque
+         lecture, donc ils cessent d'eux-mêmes hors table et se réappliquent à l'arrivée si
+         l'unité est de nouveau à portée — exactement l'exemple du PDF.
+
+    L'unité est EXEMPTÉE de la destruction de fin de 3e round (`reserves_repositioned`).
+    """
+    from engine.phase_handlers.shared_utils import update_model_position
+
+    unit = get_unit_by_id(game_state, str(squad_id))
+    if unit is None:
+        raise KeyError(f"reposition_unit_to_strategic_reserves: unité {squad_id} introuvable")
+    if require_key(unit, "deployed_on_turn") is None:
+        raise ValueError(
+            f"reposition_unit_to_strategic_reserves: l'unité {squad_id} n'est pas sur le champ "
+            f"de bataille — 20.02 ne s'applique qu'à une unité qu'on en RETIRE"
+        )
+    squad_models = require_key(game_state, "squad_models")
+    models_cache = require_key(game_state, "models_cache")
+    for model_id in squad_models.get(str(squad_id), []):  # get allowed
+        if model_id in models_cache:
+            update_model_position(game_state, model_id, -1, -1)
+    set_unit_coordinates(unit, -1, -1)
+    unit["deployed_on_turn"] = None
+    unit["in_strategic_reserves"] = True
+    unit["reserves_repositioned"] = True
+    from engine.game_utils import add_console_log
+    add_console_log(
+        game_state,
+        f"REPOSITIONED (20.02): unit {squad_id} removed from the battlefield into reserves",
+    )
+
+
+def mark_unit_ingressed(game_state: Dict[str, Any], squad_id: str) -> None:
+    """20.04 AFTER MOVING — « until the start of the next Charge phase, your unit is not eligible
+    to make any other type of move ».
+
+    Le marqueur vit dans ``units_ingressed_no_move`` (jumeau de ``units_moved`` / ``units_fled``)
+    et est purgé au DÉBUT de la phase de charge (`clear_ingress_move_lock`), pas à la fin de la
+    phase de mouvement : c'est la durée que dit la règle. L'escouade est en outre ajoutée à
+    ``units_moved`` — elle a été activée ce tour-ci, comme après un déplacement.
+    """
+    squad_id_str = str(squad_id)
+    game_state.setdefault("units_ingressed_no_move", set()).add(squad_id_str)
+    game_state.setdefault("units_moved", set()).add(squad_id_str)
+
+
+def unit_ingress_move_locked(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """L'escouade est-elle sous le verrou « aucun autre type de mouvement » de 20.04 ?"""
+    return str(squad_id) in game_state.get("units_ingressed_no_move", set())  # get allowed
+
+
+def clear_ingress_move_lock(game_state: Dict[str, Any]) -> None:
+    """Lève le verrou 20.04 au DÉBUT de la phase de charge (« until the start of the next Charge
+    phase »). Appelé par `charge_phase_start`, pour les DEUX camps : le verrou d'une unité posée
+    au tour du joueur A tombe à la phase de charge suivante, qui est la sienne."""
+    game_state["units_ingressed_no_move"] = set()
 
 
 def movement_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:

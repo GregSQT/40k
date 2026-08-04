@@ -51,7 +51,11 @@ from engine.game_utils import get_unit_by_id, turn_limit_reached, get_effective_
 
 # Import NEW extracted modules
 from engine.observation_builder import ObservationBuilder
-from engine.action_decoder import DEPLOY_SLOT_CANDIDATES_CACHE_KEY, ActionDecoder
+from engine.action_decoder import (
+    DEPLOY_SLOT_CANDIDATES_CACHE_KEY,
+    INGRESS_SLOT_CANDIDATES_CACHE_KEY,
+    ActionDecoder,
+)
 from engine.debug_trace import CH_STEP, trace
 from engine.reward_calculator import RewardCalculator
 from engine.game_state import GameStateManager
@@ -168,6 +172,55 @@ def repo_relative_scenario_path(scenario_file: Optional[str]) -> Optional[str]:
             f"{scenario_abs} (racine {_REPO_ROOT})"
         )
     return relative.replace(os.sep, "/")
+
+
+def destroy_unarrived_strategic_reserves(game_state: Dict[str, Any]) -> List[str]:
+    """20.04 — fin du 3e round de bataille : les réserves qui ne sont pas arrivées sont DÉTRUITES.
+
+    « At the end of the third battle round, unless otherwise stated, all strategic reserves
+    units that have not made one or more ingress moves are destroyed, with the following
+    exceptions: units embarked within TRANSPORTS that have made an ingress move during the
+    battle ; repositioned units (20.02). »
+
+    Les deux exceptions sont appliquées :
+      - **unités repositionnées** (20.02, ex. Da Jump) : drapeau `reserves_repositioned` ;
+      - **embarquées dans un transport ayant fait un ingress** : les transports (PDF 18) ne sont
+        pas modélisés — aucune unité ne peut être embarquée, donc l'exception n'a aucun sujet.
+        Elle est nommée ici pour que son absence soit une CONSTATATION et non un oubli ; elle
+        deviendra effective avec le chantier transports.
+
+    C'est une RÈGLE DE JEU : elle se journalise comme un événement normal (console log +
+    `destroy_model` avec sa raison propre), jamais comme une erreur. Retourne les ids détruits.
+
+    Appelée par le SEUL point où un round de bataille s'achève (fin de la phase de combat du
+    joueur 2, `fight_handlers._fight_v11_phase_complete`), AVANT l'incrément de tour et avant le
+    scoring de fin de partie : une unité détruite par cette règle ne doit pas compter dans le
+    départage aux points.
+    """
+    from engine.game_utils import add_console_log
+    from engine.phase_handlers.shared_utils import destroy_model
+
+    destroyed: List[str] = []
+    for unit in list(require_key(game_state, "units")):
+        unit_id = str(require_key(unit, "id"))
+        if not unit.get("in_strategic_reserves", False):  # get allowed (champ optionnel, cf. loader)
+            continue
+        if not is_unit_alive(unit_id, game_state):
+            continue
+        if bool(unit.get("reserves_repositioned", False)):  # get allowed (idem)
+            continue
+        squad_models = require_key(game_state, "squad_models")
+        models_cache = require_key(game_state, "models_cache")
+        for model_id in list(squad_models.get(str(unit_id), [])):  # get allowed
+            if model_id in models_cache:
+                destroy_model(game_state, model_id, "strategic_reserves_timeout")
+        destroyed.append(unit_id)
+        add_console_log(
+            game_state,
+            f"STRATEGIC RESERVES (20.04): unit {unit_id} never made an ingress move by the end "
+            f"of battle round {require_key(game_state, 'turn')} — destroyed",
+        )
+    return destroyed
 
 
 class W40KEngine(gym.Env):
@@ -361,6 +414,8 @@ class W40KEngine(gym.Env):
             self._scenario_terrain_areas = scenario_result.get("terrain_areas")
             self._scenario_primary_objective = primary_objective_config
             self._scenario_roster_info = scenario_roster_info
+            # Taille de bataille (points) du scénario — plafond des réserves 20.01.
+            self._scenario_points_limit = scenario_result.get("points_limit")
             self._scenario_has_random_agent_roster = bool(
                 scenario_roster_info and scenario_roster_info.get("agent_ref_randomized")
             )
@@ -657,6 +712,9 @@ class W40KEngine(gym.Env):
             "board_cols": board_cols,
             "board_rows": board_rows,
             "inches_to_subhex": require_key(_board.get("default", _board), "inches_to_subhex"),
+            # Taille de bataille en points (règle 20.01 : le plafond des réserves stratégiques
+            # vaut 50 % de cette limite). None quand le scénario ne déclare pas de `scale`.
+            "points_limit": getattr(self, "_scenario_points_limit", None),
             # Métrique imposée par la PHASE de training (opt-in). Posée à côté de
             # `inches_to_subhex` parce qu'elle joue le même rôle : un paramètre du monde, lu par
             # les sélecteurs de distance depuis l'état plutôt que depuis le config global.
@@ -1266,6 +1324,9 @@ class W40KEngine(gym.Env):
         # posees — qui recommence IDENTIQUE (aucune unite posee) a chaque episode : sans purge,
         # le 1er step du nouvel episode servirait les candidats du terrain precedent.
         self.game_state.pop(DEPLOY_SLOT_CANDIDATES_CACHE_KEY, None)
+        # Jumeau pour l'ingress move (20.04) : même raisonnement, même risque — son tampon est
+        # l'état des unités posées + le round, qui recommencent identiques à chaque épisode.
+        self.game_state.pop(INGRESS_SLOT_CANDIDATES_CACHE_KEY, None)
         # Cache de SCORING du deploiement (expositions LoS par hexe, allies par colonne). Il
         # n'etait purge NULLE PART : `reset_episode_caches` ne voit que les caches d'instance du
         # decodeur, pas ceux poses dans le game_state. Son garde-fou (« le jeu d'hexes valides
@@ -1571,6 +1632,12 @@ class W40KEngine(gym.Env):
                 player_deployment_type = effective_deployment_type_by_player.get(unit_player_int)
                 if player_deployment_type is None:
                     raise ValueError(f"Missing deployment type for player {unit_player_int}")
+                # 20.01 — une unité en réserves n'est PAS déployable : elle n'entre pas dans
+                # `deployable_units`, donc ni dans l'alternance des déployeurs ni dans le masque
+                # de déploiement. Elle arrivera par un ingress move (20.04). Sa position reste la
+                # sentinelle hors table posée par le chargeur.
+                if require_key(unit, "in_strategic_reserves"):
+                    continue
                 if player_deployment_type == "active":
                     set_unit_coordinates(unit, -1, -1)
                     if unit_player_int == 1:
@@ -5108,6 +5175,53 @@ class W40KEngine(gym.Env):
                         },
                     )
 
+        # ── 20.01 : mise en réserves au lieu du déploiement ───────────────────
+        elif action_name == "deploy_strategic_reserves":
+            success, result = deployment_handlers.deployment_place_in_strategic_reserves(
+                self.game_state, semantic
+            )
+
+        # ── 20.04 : ingress move (arrivée de réserves) ────────────────────────
+        elif action_name == "ingress_move":
+            squad_id = str(require_key(semantic, "unitId"))
+            success, result = movement_handlers.ingress_commit_plan(
+                self.game_state, squad_id, require_key(semantic, "plan")
+            )
+            if not success:
+                # Le plan vient du MÊME `ingress_slot_candidates` que le masque : un refus est
+                # une rupture d'invariant masque/exécution, pas un cas nominal.
+                raise ValueError(
+                    f"ingress_move refusé pour l'escouade {squad_id} alors que le masque "
+                    f"l'autorisait : {result}"
+                )
+            _ing_col, _ing_row = require_unit_position(squad_id, self.game_state)
+            _ing_unit = get_unit_by_id(squad_id, self.game_state)
+            if _ing_unit is None:
+                raise KeyError(f"Unit {squad_id} introuvable après ingress_move")
+            append_action_log(
+                self.game_state,
+                {
+                    "type": "deploy_unit",
+                    "message": (
+                        f"Unit {squad_id} INGRESS from strategic reserves "
+                        f"to ({_ing_col},{_ing_row})"
+                    ),
+                    "turn": require_key(self.game_state, "turn"),
+                    "phase": "move",
+                    "unitId": squad_id,
+                    "player": require_key(_ing_unit, "player"),
+                    "fromCol": -1,
+                    "fromRow": -1,
+                    "toCol": _ing_col,
+                    "toRow": _ing_row,
+                    "timestamp": "server_time",
+                    "reward": 0.0,
+                },
+            )
+            end_activation(
+                self.game_state, _ing_unit, ACTION, 1, "MOVE", "MOVE", 0,
+            )
+
         # ── zone_intent : command phase ───────────────────────────────────────
         elif action_name == "zone_intent":
             success, result = self._process_command_phase(semantic)
@@ -6556,6 +6670,10 @@ class W40KEngine(gym.Env):
         self.config["deployment_pools"] = scenario_deployment_pools
         self._scenario_primary_objective = primary_objective_config
         self._scenario_roster_info = scenario_roster_info
+        # Taille de bataille (points) du nouveau scénario — plafond des réserves 20.01. Doit
+        # suivre la rotation de scénario, sinon le plafond resterait celui du scénario précédent.
+        self._scenario_points_limit = scenario_result.get("points_limit")
+        self.game_state["points_limit"] = self._scenario_points_limit
         self._scenario_has_random_agent_roster = bool(
             scenario_roster_info and scenario_roster_info.get("agent_ref_randomized")
         )

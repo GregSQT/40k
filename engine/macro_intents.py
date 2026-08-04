@@ -230,9 +230,15 @@ def action_family(action_int: int, phase: str) -> str:
     if phase == "deployment":
         if a in DEPLOY_SLOTS:
             return "deploy_slot"
+        # 20.01 — mettre l'unite en RESERVES au lieu de la deployer. La decision emprunte
+        # `ACTION_WAIT`, id libre en phase de deploiement (cf. le masque) : c'est bien une
+        # decision de deploiement, comptee comme telle.
+        if a == ACTION_WAIT:
+            return "deploy_slot"
         raise ValueError(
-            f"action {a} jouee en phase deployment hors des slots {DEPLOY_SLOTS} et hors "
-            f"CHOICE_SLOTS — le masque de deploiement n'ouvre que ces ids."
+            f"action {a} jouee en phase deployment hors des slots {DEPLOY_SLOTS}, hors "
+            f"ACTION_WAIT (reserves 20.01) et hors CHOICE_SLOTS — le masque de deploiement "
+            f"n'ouvre que ces ids."
         )
     if a == ACTION_WAIT:
         return "wait"

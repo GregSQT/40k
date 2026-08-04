@@ -36,6 +36,7 @@ from .shared_utils import (
     build_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
     is_placement_valid_with_clearance,
     _compute_unit_occupied_hexes,
+    entry_is_on_battlefield,
 )
 
 # ============================================================================
@@ -1227,6 +1228,12 @@ def build_unit_los_cache(
         # CRITICAL: Exclude dead units so they never appear in los_cache → valid_target_pool
         if not is_unit_alive(str(target_id), game_state):
             continue
+        # HORS TABLE (réserves 20.01 / attente de déploiement) : l'unité est VIVANTE mais absente
+        # du champ de bataille — elle n'a ni position ni empreinte, donc aucune ligne de vue vers
+        # elle. Sans ce filtre, une unité en réserves (sentinelle (-1,-1)) entrerait dans le
+        # pool de cibles.
+        if not entry_is_on_battlefield(target_data):
+            continue
         # Range cull (preview) : ennemi hors portée max d'arme → jamais une cible valide.
         if _cull_ctx is not None:
             from engine.combat_utils import ranged_edge_distance
@@ -1976,7 +1983,12 @@ def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
         # CRITICAL: Only process units of current player
         if unit_player != current_player:
             continue  # Skip units of other players
-        
+
+        # HORS TABLE (réserves 20.01 / attente de déploiement) : l'unité n'est pas sur le champ
+        # de bataille, elle ne tire pas.
+        if not entry_is_on_battlefield(cache_entry):
+            continue
+
         # CRITICAL: units_cache is source of truth; missing entry means unit is dead/removed
         if hp_cur is None:
             continue
@@ -5362,12 +5374,18 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
 
     # Optional post-shoot movement rule: move_after_shooting.
     # Only relevant when a real shooting activation is ending.
+    from engine.phase_handlers.movement_handlers import unit_ingress_move_locked
+
     if (
         arg5 == 1
         and arg1 == ACTION
         and arg3 == SHOOTING
         and not unit.get("_move_after_shooting_resolved", False)
         and _unit_has_rule(unit, "move_after_shooting")
+        # 20.04 AFTER MOVING — « your unit is not eligible to make any OTHER TYPE of move »
+        # jusqu'au début de la phase de charge. Le move_after_shooting en est un : une escouade
+        # arrivée de réserves ce tour-ci ne le fait pas.
+        and not unit_ingress_move_locked(game_state, str(require_key(unit, "id")))
     ):
         move_after_shooting_distance = _get_required_rule_int_argument(
             unit, "move_after_shooting", _MOVE_AFTER_SHOOTING_DISTANCE_ARG
