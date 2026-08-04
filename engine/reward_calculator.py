@@ -830,8 +830,12 @@ class RewardCalculator:
         # Diagnostic logging (only if not quiet)
         if not self.quiet and objective_reward > 0:
             current_turn = require_key(game_state, "turn")
-            obj_counts = self.state_manager.count_controlled_objectives(game_state) if self.state_manager else {}
-            controlled_count = require_key(obj_counts, controlled_player) if obj_counts else 0
+            # Meme lecture pure que dans `_calculate_objective_reward_turn5` : un LOG de
+            # diagnostic ne doit surtout pas reecrire l'etat de controle qu'il decrit.
+            _controllers = require_key(game_state, "objective_controllers")
+            controlled_count = sum(
+                1 for controller in _controllers.values() if controller == controlled_player
+            )
             print(
                 f"🎯 OBJECTIVE REWARD: Turn={current_turn}, "
                 f"controlled_player={controlled_player}, "
@@ -1041,9 +1045,19 @@ class RewardCalculator:
         if not self.state_manager:
             return 0.0
         
-        obj_counts = self.state_manager.count_controlled_objectives(game_state)
+        # LECTURE PURE de l'etat 14.02, jumeau exact de `_compute_objective_hold_reward` (~l.963,
+        # meme raisonnement, meme piege) : `count_controlled_objectives` RECALCULE le controle et
+        # REECRIT `objective_controllers`. Ce chemin est un chemin de RECOMPENSE, appele au step
+        # TERMINAL — et `w40k_core.settle_pending_zone_intent_declaration` relit ces controleurs
+        # juste apres pour solder le shaping d'intention. Recalculer ici, hors des frontieres ou
+        # 14.02 l'autorise, faisait donc dependre le solde final d'une reecriture faite par la
+        # recompense elle-meme. Le compteur ci-dessous lit les controleurs DEJA figes, ceux du
+        # dernier checkpoint — un seul comptage, celui de la regle.
         controlled_player = int(require_key(self.config, "controlled_player"))
-        controlled_objectives = require_key(obj_counts, controlled_player)
+        objective_controllers = require_key(game_state, "objective_controllers")
+        controlled_objectives = sum(
+            1 for controller in objective_controllers.values() if controller == controlled_player
+        )
         
         # Get reward per objective from config (REQUIRED - raise error if missing)
         if "objective_rewards" not in unit_rewards:

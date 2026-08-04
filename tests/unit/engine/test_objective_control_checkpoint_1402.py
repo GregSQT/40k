@@ -59,20 +59,27 @@ def gym_engine():
 def test_la_config_dentrainement_porte_toutes_les_sections_du_moteur(gym_engine) -> None:
     """Chaque section de `game_config.json` dont le moteur dépend est PRÉSENTE.
 
-    Présence seulement pour `game_rules` / `move` / `charge` : le moteur convertit leurs
-    distances en subhex à l'init (× `inches_to_subhex`), donc une égalité au JSON serait fausse
-    par construction. `objective_control_check` ne porte aucune distance — il est comparé, lui,
-    à l'identique, puisque c'est la section dont l'omission a éteint la règle 14.02.
+    Le contenu de la section n'est PAS comparé à celui du loader : celui-ci est mémoïsé et la
+    config du moteur en stocke la RÉFÉRENCE, donc l'égalité comparerait l'objet avec lui-même
+    (`a is b` vaut True) — une assertion qui ne peut jamais échouer. On vérifie ce qui a un sens :
+    la section est présente et EXPLOITABLE, c'est-à-dire qu'elle déclare au moins un point de
+    contrôle. Une section vide rendrait `run_objective_control_checkpoint` inerte exactement
+    comme son absence (`if not points: return`), sans qu'aucune présence ne le signale.
     """
-    from config_loader import get_config_loader
-
-    game_config = get_config_loader().get_game_config()
     for section in GAME_CONFIG_SECTIONS_REQUIRED_BY_ENGINE:
         assert section in gym_engine.config, (
             f"section '{section}' absente de la config du moteur d'ENTRAÎNEMENT : la "
             f"fonctionnalité qu'elle porte s'éteint en silence (cf. en-tête du fichier)"
         )
-    assert gym_engine.config["objective_control_check"] == game_config["objective_control_check"]
+    points = gym_engine.config["objective_control_check"]["points"]
+    assert points, (
+        "`objective_control_check.points` est vide : `run_objective_control_checkpoint` sort "
+        "sur `if not points` et la règle 14.02 s'éteint, comme si la section manquait"
+    )
+    assert {"phase": "command", "moment": "end"} in points, (
+        "la fin de la phase de commandement n'est plus un point de contrôle : c'est elle qui "
+        "détermine le contrôle lu au début de la phase de mouvement (cp_gain_on_objective)"
+    )
 
 
 def test_le_checkpoint_1402_tire_reellement_en_entrainement(gym_engine) -> None:

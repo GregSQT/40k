@@ -390,11 +390,22 @@ Cause : `run_objective_control_checkpoint` sort sur `if not check_cfg`, et la se
 `objective_control_check` de `game_config.json` n'était posée que par les deux constructeurs de
 `services/api_server` — la branche d'entraînement de `W40KEngine.__init__` l'avait omise. Le
 contrôle n'était donc rafraîchi en gym que par effet de bord des chemins de scoring VP, à des
-moments qui ne sont pas ceux de la règle. Corrigé le 2026-08-04 ; **le contrôle est désormais
-réévalué à chaque frontière de phase**, ce qui change les VP et les récompenses d'objectif
-(mesure avant/après sur 3 graines dans le message de livraison). Verrou :
-`test_objective_control_checkpoint_1402.py`, qui contrôle la présence de la section **et** que
-le checkpoint écrit réellement.
+moments qui ne sont pas ceux de la règle. Corrigé le 2026-08-04 : **le contrôle est désormais
+réévalué à chaque frontière de phase**.
+
+Ce que ça change, MESURÉ (5 graines, même flux d'actions, `cp_gain_on_objective` neutralisée des
+deux côtés pour ne pas décaler le flux `random` — sans cette précaution les épisodes divergent et
+la comparaison ne mesure plus rien) :
+
+| | effet |
+|---|---|
+| **Points de victoire** | **AUCUN**, sur les 5 graines. `_calculate_primary_objective_control_counts` recalcule le contrôleur depuis les sommes d'OC et **ignore l'état persisté** en `control_method: "default"` — le seul mode livré. Le scoring ne pouvait donc pas dépendre du moment du checkpoint. |
+| **Récompenses** | −10 / −10 / −15 / −5 / −20 selon la graine. Elles, lisent `objective_controllers` en LECTURE PURE (`_compute_objective_hold_reward`, shaping d'intention de zone) : elles voyaient un contrôle périmé, crédité jusqu'au scoring suivant même une fois perdu. |
+| **Observation, `cp_gain_on_objective`, step.log** | idem : tous lisent l'état persisté. |
+
+Le sens constant du delta (l'agent perd de la récompense) mesure ce sur-crédit.
+Verrou : `test_objective_control_checkpoint_1402.py`, qui contrôle la présence de la section
+**et** que le checkpoint écrit réellement.
 
 **Observation.** Les CP des deux joueurs sont dans `global_cont`
 (`my_command_points` / `enemy_command_points`, grandeur globale : un CP appartient au joueur, pas
