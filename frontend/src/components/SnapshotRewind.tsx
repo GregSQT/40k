@@ -22,7 +22,6 @@ export interface SaveMeta {
   phase: string;
   episode_steps: number;
   ts: string;
-  label: string;
   /** Note optionnelle saisie par le joueur pour retrouver la save. */
   note?: string;
   /** Type de row : "game_start" | "turn" | "phase" | "action" | "manual". */
@@ -33,15 +32,37 @@ export interface SaveMeta {
   log_count?: number;
 }
 
-/** Nom affiché d'une save (1 ligne) : "Game start", ou tag "T{tour} P{joueur} {Phase} · #{event}",
- *  note manuelle ajoutée en fin. */
+/** Code de phase sur DEUX lettres. Une seule ne suffit pas : `command` et `charge` partagent leur
+ *  initiale, et un point de reprise ambigu se paie au moment précis où l'on cherche le bon. */
+const PHASE_TAG: Record<string, string> = {
+  deployment: "De",
+  command: "Cd",
+  move: "Mv",
+  shoot: "Sh",
+  charge: "Ch",
+  fight: "Ft",
+};
+
+function phaseTag(phase: string | undefined): string {
+  if (!phase) return "";
+  const tag = PHASE_TAG[phase.toLowerCase()];
+  if (tag) return tag;
+  // Phase hors table : on affiche la valeur brute plutôt que de masquer la save, et on le SIGNALE.
+  // Une save invisible ou étiquetée d'un code inventé serait pire qu'une étiquette inhabituelle.
+  console.error(`SnapshotRewind: phase inconnue dans une save: "${phase}" (cf. PHASE_TAG)`);
+  return phase[0].toUpperCase() + phase.slice(1);
+}
+
+/** Nom affiché d'une save (1 ligne) : "Game start", ou tag compact "T{tour}P{joueur}{Ph}",
+ *  suivi de "#{activation}" pour les saves manuelles, note ajoutée en fin.
+ *
+ *  Le "#" n'est PAS décoratif : plusieurs saves manuelles peuvent tomber dans la même phase du
+ *  même tour, et sans lui elles porteraient toutes le même nom dans la liste de reprise. */
 function saveDisplayName(s: SaveMeta): string {
   if (s.kind === "game_start") return "Game start";
-  const phase = s.phase ? s.phase[0].toUpperCase() + s.phase.slice(1) : "";
-  const base = `T${s.turn} P${s.player} ${phase}`;
-  // Le "#" (n° d'activation) n'est utile que pour distinguer plusieurs saves manuelles dans une phase.
+  const base = `T${s.turn}P${s.player}${phaseTag(s.phase)}`;
   if (s.kind === "manual") {
-    return `${base} · #${s.episode_steps}${s.note ? ` — ${s.note}` : ""}`;
+    return `${base}#${s.episode_steps}${s.note ? ` — ${s.note}` : ""}`;
   }
   return base;
 }

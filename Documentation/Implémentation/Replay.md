@@ -333,6 +333,26 @@ et l'échec ne survit pas au changement d'unité.
 
 ---
 
+## 3ter. Sauvegardes PvP : nom de fichier, libellé de point, format
+
+- **Nom de fichier d'une partie** : `aaaammjj_hh-mm` (ex. `20260712_14-30`), dérivé de
+  l'horodatage du premier point (`game_saves._party_name_from_point_ts`). ⚠️ Le séparateur est
+  un tiret et **doit le rester** : `:` est interdit dans un nom de fichier Windows, et le garde
+  du module (`_FORBIDDEN_NAME_CHARS`) le rejette avant d'écrire.
+- **Libellé d'un point de reprise** : `T{tour}P{joueur}{Ph}` (+ `#{activation}` pour les saves
+  manuelles, + la note du joueur). La phase tient sur **DEUX** lettres — `De`, `Cd`, `Mv`, `Sh`,
+  `Ch`, `Ft` — parce que `command` et `charge` partagent leur initiale : un point de reprise
+  ambigu se paie exactement au moment où l'on cherche le bon. Le `#` sépare plusieurs saves
+  manuelles tombées dans la même phase du même tour ; sans lui elles portent toutes le même nom.
+  Construit **uniquement** par `SnapshotRewind.saveDisplayName`, depuis `turn`/`player`/`phase`/
+  `episode_steps`. Le backend ne renvoie plus de champ `label` : il en existait un, transmis et
+  typé côté front, que rien n'affichait (retiré le 2026-08-04).
+- **Format de fichier** : en-tête magique `W40KTL03`. `TL01` (sans empreinte de scénario) et
+  `TL02` (sans les points de commandement de la règle 08.02) sont **refusés explicitement** au
+  chargement : leur état ne peut pas être restauré dans le moteur courant — TL02 rendrait un
+  `game_state` sans `command_points`, qui planterait à la phase de commandement suivante. Le
+  refus nomme le format et invite à rejouer la partie ; il n'y a pas de migration.
+
 ## 4. Registre d'état des chantiers replay
 
 | # | Chantier | État | Prochaine action |

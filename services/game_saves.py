@@ -116,7 +116,6 @@ def row_meta(gs: Dict[str, Any], row_ts: str, note: str, kind: str) -> Dict[str,
     player = int(gs["current_player"])
     phase = str(gs["phase"])
     steps = int(gs.get("unit_activation_count", 0))  # "#" = activations d'UNITÉ
-    label = f"T{turn} · {phase[:1].upper()}{phase[1:]} · #{steps}"
     vp = gs.get("victory_points") or {}
     return {
         "id": row_ts,
@@ -125,7 +124,10 @@ def row_meta(gs: Dict[str, Any], row_ts: str, note: str, kind: str) -> Dict[str,
         "phase": phase,
         "episode_steps": steps,
         "ts": row_ts,
-        "label": label,
+        # PAS de `label` ici : il en existait un ("T2 · Shoot · #14"), transmis et type cote
+        # front, que RIEN n'affichait — `SnapshotRewind.saveDisplayName` recompose le nom depuis
+        # `turn`/`player`/`phase`/`episode_steps`, seuls champs qui font foi. Deux libelles pour
+        # la meme row, dont un mort : retire le 2026-08-04 plutot que maintenu en double.
         "note": note,
         "kind": kind,
         "score": {str(p): int(s) for p, s in vp.items()},
