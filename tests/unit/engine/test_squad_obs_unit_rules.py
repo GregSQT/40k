@@ -324,18 +324,44 @@ def test_the_declared_observation_space_bounds_the_id_keys():
     Elles ne remplacent pas le garde ci-dessus, mais un `Box` non borne dirait a SB3 (et a qui lit
     la config) qu'un id peut valoir n'importe quoi.
     """
+    from gymnasium import spaces as gym_spaces
+
     from engine.observation_entities import OBS_ID_MAX
 
     eng = _load([_BODYGUARD, _ENEMY])
-    id_keys = [k for k in eng.observation_space.spaces if k.endswith("_ids")]
+    obs_space = eng.observation_space
+    assert isinstance(obs_space, gym_spaces.Dict), "obs Dict attendue (une Box n'a pas de cles)"
+    id_keys = [k for k in obs_space.spaces if k.endswith("_ids")]
     assert sorted(id_keys) == [
         "allies_ability_ids", "allies_status_ids",
         "enemies_ability_ids", "enemies_status_ids",
     ]
     for key in id_keys:
-        space = eng.observation_space.spaces[key]
+        space = obs_space.spaces[key]
+        assert isinstance(space, gym_spaces.Box), f"{key} : Box attendue (bornes lisibles)"
         assert float(space.low.min()) == 0.0, f"{key} : borne basse != 0 (padding)"
         assert float(space.high.max()) == float(OBS_ID_MAX), f"{key} : borne haute != OBS_ID_MAX"
+
+
+def test_the_ability_slots_are_sorted_by_the_writer():
+    """Verrou de TRI cote CAPACITES, jumeau frere du verrou statuts ci-dessous.
+
+    Le test de bout en bout ci-dessus ne l'EXERCE pas : le builder parcourt
+    `UNIT_RULE_EFFECT_IDS`, dont les `obs_id` sont deja croissants, donc l'ordre de declaration
+    est perdu avant l'ecrivain. Le tri ne se verrouille que la ou une entree DECROISSANTE peut
+    l'atteindre — l'ecrivain lui-meme.
+    """
+    from engine.observation_builder import _fill_id_slots
+
+    abilities = unit_ability_obs_ids()
+    ascending = sorted(abilities.values())[:3]
+    written = _fill_id_slots(
+        list(reversed(ascending)), UNIT_ABILITY_SLOTS, registry=abilities, kind="capacites",
+        slots_constant="UNIT_ABILITY_SLOTS", squad_id="101",
+    )
+    assert list(written) == ascending + [0.0] * (UNIT_ABILITY_SLOTS - len(ascending)), (
+        "tri croissant ou padding non appliques aux capacites"
+    )
 
 
 def test_the_status_slots_go_through_the_same_writer():
