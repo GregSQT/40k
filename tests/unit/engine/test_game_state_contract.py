@@ -19,6 +19,7 @@ import pytest
 
 from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -106,7 +107,7 @@ def engine():
          patch.object(
              W40KEngine, "_build_observation_and_mask", return_value=(np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET), None)
          ):
-        eng = W40KEngine(config=_minimal_config())
+        eng = W40KEngine(config=build_engine_config(_minimal_config()))
     return eng
 
 

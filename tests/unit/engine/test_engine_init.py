@@ -24,7 +24,7 @@ from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
 from shared.data_validation import ConfigurationError
 
-from _config_helpers import build_game_rules
+from _config_helpers import build_engine_config, build_game_rules
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -144,7 +144,7 @@ class TestEngineInitFailures:
 
         with patch("engine.w40k_core.load_weapon_damage_table", return_value={}):
             with pytest.raises(ValueError) as err:
-                W40KEngine(config=cfg)
+                W40KEngine(config=build_engine_config(cfg))
         message = str(err.value)
         assert str(stale) in message, "l'erreur doit citer la valeur fautive"
         assert str(ObservationBuilder.SQUAD_OBS_SIZE_TARGET) in message, (
@@ -158,7 +158,7 @@ class TestEngineInitFailures:
         cfg["observation_params"]["obs_size"] = size
         cfg["training_config"]["observation_params"]["obs_size"] = size
         with patch("engine.w40k_core.load_weapon_damage_table", return_value={}):
-            engine = W40KEngine(config=cfg)
+            engine = W40KEngine(config=build_engine_config(cfg))
         assert engine.obs_builder.obs_size == size
 
 
@@ -174,7 +174,7 @@ class TestEngineInitSuccess:
         # Mock weapon_damage_table (fichier lourd JSON ~ 1 Mo)
         # La logique de validation est réelle, seul le chargement fichier est mocké.
         with patch("engine.w40k_core.load_weapon_damage_table", return_value={"__mocked__": True}):
-            engine = W40KEngine(config=cfg)
+            engine = W40KEngine(config=build_engine_config(cfg))
 
         assert isinstance(engine.game_state, dict)
         assert len(engine.game_state) > 0
@@ -184,7 +184,7 @@ class TestEngineInitSuccess:
         cfg = _minimal_config()
 
         with patch("engine.w40k_core.load_weapon_damage_table", return_value={}):
-            engine = W40KEngine(config=cfg)
+            engine = W40KEngine(config=build_engine_config(cfg))
 
         gs = engine.game_state
         assert "phase" in gs
@@ -198,7 +198,7 @@ class TestEngineInitSuccess:
         cfg = _minimal_config()
 
         with patch("engine.w40k_core.load_weapon_damage_table", return_value={}):
-            engine = W40KEngine(config=cfg)
+            engine = W40KEngine(config=build_engine_config(cfg))
 
         assert engine.game_state["board_cols"] == 15
         assert engine.game_state["board_rows"] == 13
@@ -208,7 +208,7 @@ class TestEngineInitSuccess:
         cfg = _minimal_config()
 
         with patch("engine.w40k_core.load_weapon_damage_table", return_value={}):
-            engine = W40KEngine(config=cfg)
+            engine = W40KEngine(config=build_engine_config(cfg))
 
         objectives = engine.game_state.get("objectives")
         assert isinstance(objectives, list)

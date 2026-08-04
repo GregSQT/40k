@@ -17,6 +17,7 @@ from engine.phase_handlers.shared_utils import build_units_cache
 from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
 from engine.reward_calculator import RewardCalculator
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -170,7 +171,7 @@ def mocks(monkeypatch: pytest.MonkeyPatch) -> None:
 def _make_engine() -> W40KEngine:
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        return W40KEngine(config=_minimal_config())
+        return W40KEngine(config=build_engine_config(_minimal_config()))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

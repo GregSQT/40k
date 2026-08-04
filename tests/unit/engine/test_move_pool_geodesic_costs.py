@@ -20,6 +20,7 @@ from engine.combat_utils import calculate_hex_distance
 from engine.phase_handlers.movement_handlers import movement_build_valid_destinations_pool
 from engine.phase_handlers.shared_utils import get_squad_move_budget
 from engine.w40k_core import W40KEngine
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 def _weapon_cfg() -> Dict[str, Any]:
@@ -60,7 +61,7 @@ def _make_engine(base_size: int = 1, walls=None) -> W40KEngine:
     }
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=config)
+        eng = W40KEngine(config=build_engine_config(config))
     eng.reset()
     eng.game_state["phase"] = "move"
     from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes

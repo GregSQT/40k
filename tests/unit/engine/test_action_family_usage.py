@@ -31,6 +31,7 @@ from engine.observation_builder import ObservationBuilder
 from engine.reward_calculator import RewardCalculator
 from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT
 from engine.w40k_core import W40KEngine
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -142,7 +143,7 @@ def _play(pick: Callable[[Any], int]) -> Dict[str, Any]:
     units = [_unit(1, 1, 3, 6), _unit(2, 1, 4, 6), _unit(3, 2, 11, 6), _unit(4, 2, 12, 6)]
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        engine = W40KEngine(config=_config(units), gym_training_mode=True, quiet=True)
+        engine = W40KEngine(config=build_engine_config(_config(units)), gym_training_mode=True, quiet=True)
     engine.reset()
     info: Dict[str, Any] = {}
     for _ in range(4000):

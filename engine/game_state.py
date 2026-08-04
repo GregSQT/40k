@@ -2705,14 +2705,16 @@ class GameStateManager:
         call ``calculate_objective_control``, which refreshes the persistent
         ``objective_controllers`` used for both display and scoring.
 
-        No-op when the config section is absent or lists no matching point.
+        No-op when no listed point matches this boundary.
+
+        La section est OBLIGATOIRE (`require_key`, cf.
+        `config_loader.GAME_CONFIG_SECTIONS_REQUIRED_BY_ENGINE`) : elle etait auparavant lue en
+        `.get()`, si bien qu'un constructeur de config qui l'oubliait eteignait la regle 14.02
+        sans lever — ce qui est arrive au chemin d'entrainement. Meme regime d'erreur que la
+        section `move` (`movement_handlers._get_move_traversal_rules`).
         """
-        check_cfg = self.config.get("objective_control_check")
-        if not check_cfg:
-            return
-        points = check_cfg.get("points", [])  # fallback allowed — config optionnelle, absence = no-op (cf. docstring)
-        if not points:
-            return
+        check_cfg = require_key(self.config, "objective_control_check")
+        points = require_key(check_cfg, "points")
 
         def _match(phase: Optional[str], moment: str) -> bool:
             return any(p.get("phase") == phase and p.get("moment") == moment for p in points)

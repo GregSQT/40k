@@ -1670,7 +1670,7 @@ def initialize_engine(scenario_file: Optional[str] = None):
         unit_registry = UnitRegistry()
         
         # Load agent-specific configs based on scenario units
-        from config_loader import get_config_loader
+        from config_loader import get_config_loader, require_engine_game_config_sections
         config_loader = get_config_loader()
         board_config = config_loader.get_board_config()
         game_config = config_loader.get_game_config()
@@ -1707,10 +1707,7 @@ def initialize_engine(scenario_file: Optional[str] = None):
         
         config = {
             "board": board_config,
-            "game_rules": require_key(game_config, "game_rules"),
-            "objective_control_check": require_key(game_config, "objective_control_check"),
-            "move": require_key(game_config, "move"),
-            "charge": require_key(game_config, "charge"),
+            **require_engine_game_config_sections(game_config),
             "units": scenario_units,
             "primary_objective": primary_objective_config,
             "scenario_wall_hexes": scenario_wall_hexes,
@@ -1840,7 +1837,7 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
         from ai.unit_registry import UnitRegistry
         unit_registry = UnitRegistry()
         
-        from config_loader import get_config_loader
+        from config_loader import get_config_loader, require_engine_game_config_sections
         config_loader = get_config_loader()
         board_config = config_loader.get_board_config()
         game_config = config_loader.get_game_config()
@@ -1877,10 +1874,7 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
         
         config = {
             "board": board_config,
-            "game_rules": require_key(game_config, "game_rules"),
-            "objective_control_check": require_key(game_config, "objective_control_check"),
-            "move": require_key(game_config, "move"),
-            "charge": require_key(game_config, "charge"),
+            **require_engine_game_config_sections(game_config),
             "units": scenario_units,
             "primary_objective": primary_objective_config,
             "scenario_wall_hexes": scenario_wall_hexes,

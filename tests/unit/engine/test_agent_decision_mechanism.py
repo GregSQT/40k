@@ -44,7 +44,7 @@ from engine.phase_handlers.shared_utils import (
 )
 from engine.w40k_core import W40KEngine
 
-from _config_helpers import build_move_rules
+from _config_helpers import build_engine_config, build_move_rules
 from tests._state_invariants import turn_state_invariants
 
 #: Le SEUL choix de règle du jeu aujourd'hui (Tyranid Warrior mêlée) : `adrenalised_onslaught`
@@ -790,7 +790,7 @@ def test_the_choice_mechanism_survives_the_first_episode():
 
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        engine = W40KEngine(config=_full_engine_config(), gym_training_mode=True)
+        engine = W40KEngine(config=build_engine_config(_full_engine_config()), gym_training_mode=True)
 
     emitted = []
     for _episode in range(3):
