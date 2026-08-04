@@ -10,7 +10,8 @@ sans les percevoir, exactement le constat qui avait motive la tranche des regles
 
 Depuis le chantier 01, ces capacites ne sont plus des BITS `rule_<id>` mais des ENSEMBLES
 D'IDENTIFIANTS entiers (`allies_ability_ids` / `enemies_ability_ids`, 8 slots, `obs_id` du
-registre `config/unit_rules.json`) lus par une `EmbeddingBag`. Le CANAL change, le contenu non :
+registre `config/unit_rules.json`) lus par une table d'embedding. Le CANAL change, le contenu
+non :
 ces tests decrivent le meme jeu qu'avant.
 
 Ce que ces tests verrouillent :
@@ -305,7 +306,7 @@ def test_out_of_vocabulary_id_raises_at_the_write_site():
     """
     import pytest
 
-    from config_loader import OBS_ID_MAX
+    from engine.observation_entities import OBS_ID_MAX
     from engine.observation_builder import _fill_id_slots
 
     registry = {"a": 1}
@@ -323,7 +324,7 @@ def test_the_declared_observation_space_bounds_the_id_keys():
     Elles ne remplacent pas le garde ci-dessus, mais un `Box` non borne dirait a SB3 (et a qui lit
     la config) qu'un id peut valoir n'importe quoi.
     """
-    from config_loader import OBS_ID_MAX
+    from engine.observation_entities import OBS_ID_MAX
 
     eng = _load([_BODYGUARD, _ENEMY])
     id_keys = [k for k in eng.observation_space.spaces if k.endswith("_ids")]

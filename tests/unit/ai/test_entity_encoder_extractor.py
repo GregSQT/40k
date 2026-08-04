@@ -154,7 +154,7 @@ def test_unit_encoder_is_a_single_module(extractor):
 
 
 # ---------------------------------------------------------------------------
-# Chantier 01 — les deux EmbeddingBag de capacites/statuts
+# Chantier 01 — les deux tables d'embedding de capacites/statuts
 # ---------------------------------------------------------------------------
 
 
@@ -168,7 +168,7 @@ def _present_obs(extractor, batch: int = 1):
 def test_ability_ids_reach_the_entity_embedding_on_both_sides(extractor):
     """Ecrire un id de capacite DEPLACE l'embedding d'entite — des DEUX cotes.
 
-    VERT VACANT evite : sans ce test, l'`EmbeddingBag` pourrait n'etre cablee nulle part et tous
+    VERT VACANT evite : sans ce test, la table pourrait n'etre cablee nulle part et tous
     les autres tests resteraient verts (ils n'ecrivent que des ids nuls, donc du padding).
     Contre-epreuve du PARTAGE : la meme capacite ecrite chez un allie et chez un ennemi produit
     le meme embedding — une seule table, pas deux.
@@ -262,7 +262,7 @@ def test_the_embedding_tables_are_predimensioned(extractor):
     C'est tout l'objet du chantier. Si la table etait dimensionnee sur le nombre de capacites
     existantes, chaque ajout changerait le `state_dict` et invaliderait les modeles entraines.
     """
-    from config_loader import OBS_ID_VOCAB_SIZE
+    from engine.observation_entities import OBS_ID_VOCAB_SIZE
 
     from ai.spatial_extractor import ABILITY_EMBED_DIM
 

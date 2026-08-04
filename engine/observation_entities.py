@@ -243,6 +243,26 @@ UNIT_ABILITY_SLOTS = 8
 #: d'eux ne retouchera `obs_size`, donc qu'un SEUL retrain clôt la séquence.
 UNIT_STATUS_SLOTS = 4
 
+#: Domaine des identifiants écrits dans ces slots. C'est une dimension du SCHÉMA d'observation,
+#: au même titre que les deux constantes ci-dessus : le registre (`config/unit_rules.json`,
+#: `config/unit_statuses.json`) valide contre elles au chargement, l'écrivain
+#: (`observation_builder._fill_id_slots`) les fait respecter à l'écriture, l'espace d'observation
+#: (`w40k_core`) les déclare comme bornes, et le réseau (`ai/spatial_extractor`) dimensionne ses
+#: tables dessus. Elles vivent donc ICI, dans le module FEUILLE que ces quatre consommateurs
+#: importent déjà — et non dans `config_loader`, qu'`engine` et `ai` ne peuvent pas importer au
+#: niveau module sans cycle (vérifié : `import config_loader` en premier casse alors sur
+#: `pve_controller`).
+#:
+#: `0` est RÉSERVÉ au padding (`padding_idx` des tables d'embedding) : un slot vide doit
+#: contribuer exactement zéro au pooling, sinon « pas de capacité » deviendrait une capacité.
+OBS_ID_PADDING = 0
+OBS_ID_MIN = 1
+OBS_ID_MAX = 127
+#: Nombre de lignes des tables d'embedding : padding + [OBS_ID_MIN, OBS_ID_MAX]. PRÉ-DIMENSIONNÉ,
+#: jamais ajusté au nombre de capacités existantes — c'est ce qui rend l'ajout d'une capacité
+#: gratuit en paramètres, donc sans retrain.
+OBS_ID_VOCAB_SIZE = OBS_ID_MAX + 1
+
 _UNIT_CONT_INDEX: Dict[str, int] = {name: i for i, name in enumerate(UNIT_CONT_FIELDS)}
 _UNIT_BIN_INDEX: Dict[str, int] = {name: i for i, name in enumerate(UNIT_BIN_FIELDS)}
 

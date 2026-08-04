@@ -57,6 +57,8 @@ from engine.observation_entities import (
     OBS_PHASE_IDS,
     SELF_MODEL_BIN_SIZE,
     SELF_MODEL_CONT_SIZE,
+    OBS_ID_MAX,
+    OBS_ID_MIN,
     UNIT_ABILITY_SLOTS,
     UNIT_BIN_SIZE,
     UNIT_CONT_SIZE,
@@ -126,6 +128,28 @@ _ABILITY_OBS_IDS: Optional[Dict[str, int]] = None
 _STATUS_OBS_IDS: Optional[Dict[str, int]] = None
 
 
+def _unit_statuses_in_effect(
+    unit: Dict[str, Any], ctx: Dict[str, Any], *, is_ally: bool
+) -> List[int]:
+    """`obs_id` des STATUTS en vigueur sur cette unite (`config/unit_statuses.json`).
+
+    ⚠️ C'EST ICI que les chantiers suivants posent leur statut, et nulle part ailleurs :
+      - 02 : `battle_shock` — 08.03, etat d'unite (`unit["battle_shocked"]`) ;
+      - 03 : `oath_target` — l'unite ENNEMIE designee par l'Oath adverse (d'ou `is_ally`) ;
+      - 06 : `suppressed` — capacites Armageddon.
+    Le retour part ensuite dans `_fill_id_slots`, qui applique le tri, le padding et les gardes
+    de domaine et de debordement. Poser un statut AILLEURS (un bit de `UNIT_BIN_FIELDS`, une
+    ecriture directe du tenseur) ferait rater ces quatre proprietes a la fois — c'est le motif du
+    jumeau divergent que ce chantier existe pour fermer.
+
+    Vide aujourd'hui : ce n'est pas un placeholder mais l'etat EXACT du jeu — aucun de ces trois
+    statuts n'etait observe avant ce chantier non plus, et le chantier 01 ne change aucun
+    comportement. Les slots, eux, sont deja declares : c'est ce qui garantit que 02, 03 et 06 ne
+    toucheront pas `obs_size`.
+    """
+    return []
+
+
 def _fill_id_slots(
     obs_ids: List[int],
     n_slots: int,
@@ -152,20 +176,26 @@ def _fill_id_slots(
 
     GARDE DE DEBORDEMENT — ERREUR, jamais troncature : tronquer ferait subir a l'agent des regles
     qu'il ne percoit pas, exactement le trou que V11 §0.30 avait ferme.
-    """
-    from config_loader import OBS_ID_MAX, OBS_ID_MIN
 
-    by_obs_id = {obs_id: name for name, obs_id in registry.items()}
-    out_of_range = [i for i in obs_ids if not (OBS_ID_MIN <= i <= OBS_ID_MAX)]
-    if out_of_range:
+    ⚠️ CHEMIN CHAUD : appele 2 fois pour CHACUNE des 28 entites, a chaque step. Rien qui ne serve
+    qu'aux messages d'erreur ne doit etre calcule sur le chemin nominal — d'ou l'inversion
+    `obs_id -> nom` construite DANS les branches d'erreur et non avant elles (mesure : 0,8 µs par
+    appel, soit ~44 µs par step, pour une table jamais lue quand tout va bien).
+    """
+    ordered = sorted(obs_ids)
+    if ordered and not (OBS_ID_MIN <= ordered[0] and ordered[-1] <= OBS_ID_MAX):
+        # Bornes testees sur les EXTREMES de la liste triee : la verifier element par element
+        # coutait une compréhension complete a chaque entite pour le meme resultat.
+        by_obs_id = {obs_id: name for name, obs_id in registry.items()}
+        out_of_range = [i for i in ordered if not (OBS_ID_MIN <= i <= OBS_ID_MAX)]
         raise ValueError(
             f"Escouade {squad_id} : {kind} d'obs_id hors domaine "
             f"[{OBS_ID_MIN}, {OBS_ID_MAX}] : {out_of_range} "
             f"({[by_obs_id.get(i, '?') for i in out_of_range]}). Un id hors table d'embedding "
             f"n'est pas rattrapable en aval : il devient un acces memoire invalide."
         )
-    ordered = sorted(obs_ids)
     if len(ordered) > n_slots:
+        by_obs_id = {obs_id: name for name, obs_id in registry.items()}
         raise ValueError(
             f"Escouade {squad_id} : {len(ordered)} {kind} en vigueur pour {n_slots} slots "
             f"d'observation. En exces (les moins prioritaires du tri croissant) : "
@@ -1289,17 +1319,8 @@ class ObservationBuilder:
             slots_constant="UNIT_ABILITY_SLOTS",
             squad_id=squad_id,
         )
-        # Statuts : les trois du registre (`battle_shock`, `oath_target`, `suppressed`) sont
-        # DÉCLARÉS mais pas encore posés — ce sont les chantiers 02, 03 et 06 qui les
-        # renseigneront. La liste est donc vide, ce qui est l'état exact du jeu aujourd'hui :
-        # aucun de ces statuts n'était observé avant ce chantier non plus.
-        #
-        # Elle passe malgré tout par le MÊME écrivain, sur le chemin de PRODUCTION : c'est ce qui
-        # fait hériter les chantiers 02/03/06 du tri, du padding, du garde de débordement et du
-        # garde de domaine sans avoir à les réécrire — et un `unit_statuses.json` malformé lève
-        # ici plutôt qu'au chantier qui posera le statut.
         status_ids = _fill_id_slots(
-            [],
+            _unit_statuses_in_effect(unit, ctx, is_ally=is_ally),
             UNIT_STATUS_SLOTS,
             registry=unit_status_obs_ids(),
             kind="statuts",

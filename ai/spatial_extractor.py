@@ -58,8 +58,12 @@ import torch
 import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
-from config_loader import OBS_ID_PADDING, OBS_ID_VOCAB_SIZE
-from engine.observation_entities import self_model_bin_index, unit_bin_index
+from engine.observation_entities import (
+    OBS_ID_PADDING,
+    OBS_ID_VOCAB_SIZE,
+    self_model_bin_index,
+    unit_bin_index,
+)
 from engine.spatial_grid import GRID_CELL_COUNT, GRID_CHANNELS, GRID_SIZE
 
 #: Familles d'unités partageant le MÊME schéma et le MÊME encodeur.
@@ -386,9 +390,8 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         # donne le même vecteur — et il préserve la MULTIPLICITÉ, là où la moyenne confondrait un
         # ensemble de 1 élément et un de 3.
         #
-        # `padding_idx=0` : la ligne 0 est nulle ET sans gradient, donc un slot vide contribue
-        # exactement zéro au pooling. Sans lui, « pas de capacité » deviendrait une capacité
-        # apprise, répétée autant de fois qu'il reste de slots libres.
+        # `padding_idx=0` : un slot vide est IGNORÉ par le pooling. Sans lui, « pas de capacité »
+        # deviendrait une capacité apprise, répétée autant de fois qu'il reste de slots libres.
         #
         # DEUX tables et pas une : une capacité (« cette unité a Feel No Pain ») et un statut
         # (« cette unité est la cible Oath adverse ») ne sont pas de même nature ; un pooling
@@ -398,6 +401,18 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         # Le vocabulaire est PRÉ-DIMENSIONNÉ (`OBS_ID_VOCAB_SIZE`) et non ajusté au nombre de
         # capacités existantes : c'est exactement ce qui rend l'ajout d'une capacité gratuit en
         # paramètres. Les lignes inutilisées ne reçoivent aucun gradient.
+        #
+        # ⚠️ `EmbeddingBag` et NON `nn.Embedding(...).sum(dim=-2)`, alors que la seconde forme est
+        # MESURÉE 3x plus rapide sur CPU (11 200 µs contre 3 800 µs à B=1024 × 28 entités ;
+        # 193 contre 33 µs à B=1 — `padding_idx` désactive le kernel vectorisé du « sac »). Le
+        # gain a été écarté parce que les deux formes ne portent PAS le même invariant :
+        # `EmbeddingBag` IGNORE les entrées `padding_idx` au moment de la lecture, donc un slot
+        # vide contribue zéro quoi qu'il arrive à la ligne 0 ; `Embedding` + somme, lui, ne
+        # contribue zéro que TANT QUE la ligne 0 vaut zéro — `padding_idx` s'y contente de
+        # l'initialiser ainsi et de couper son gradient. Toute écriture sur cette ligne (weight
+        # decay, chargement partiel, ajustement manuel) ferait alors du padding une capacité
+        # fantôme ajoutée à chaque slot libre, silencieusement. Vérifié par test : la
+        # perturbation qui laisse `EmbeddingBag` correcte casse la variante `Embedding`.
         self.ability_embedding = nn.EmbeddingBag(
             OBS_ID_VOCAB_SIZE, ABILITY_EMBED_DIM, mode="sum", padding_idx=OBS_ID_PADDING
         )

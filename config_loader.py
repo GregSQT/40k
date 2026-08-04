@@ -22,19 +22,29 @@ BOARD_DIR_BY_INCHES_TO_SUBHEX = {
     10: "board/44x60x10",
 }
 
-# --- Identifiants d'observation des capacites et des statuts (chantier 01) -------------------
-# Une capacite n'est plus un BIT du vecteur d'observation mais un ENTIER lu dans une table
-# d'embedding : ajouter une capacite ne change donc plus `obs_size`, et n'invalide plus les
-# modeles entraines. Ces bornes sont la SOURCE UNIQUE du domaine de ces entiers — le registre
-# les valide au chargement, le reseau dimensionne ses tables dessus (`ai/spatial_extractor.py`).
-#
-# `0` est RESERVE au padding (`padding_idx` des `EmbeddingBag`) : un slot vide doit contribuer
-# exactement zero au pooling, sinon « pas de capacite » deviendrait une capacite.
-OBS_ID_PADDING = 0
-OBS_ID_MIN = 1
-OBS_ID_MAX = 127
-#: Nombre de lignes des tables d'embedding : padding + [OBS_ID_MIN, OBS_ID_MAX].
-OBS_ID_VOCAB_SIZE = OBS_ID_MAX + 1
+def _validate_registry_entries(registry: Any, source: str, label: str) -> None:
+    """Convention COMMUNE des registres indexes par id : un objet par entree, champ `id` present
+    et EGAL a la cle.
+
+    Un seul controle pour `unit_rules.json` et `unit_statuses.json` — les chantiers 02/03/06
+    ajouteront d'autres registres a la meme convention, et trois copies de la meme boucle
+    voudraient dire que le prochain durcissement (cle vide, `id` non-str, entree `null`)
+    n'atterrit que sur l'une d'elles.
+    """
+    if not isinstance(registry, dict):
+        raise ValueError(f"{source} must be a dict mapping id to {label} config")
+    for entry_id, entry_data in registry.items():
+        if not isinstance(entry_data, dict):
+            raise ValueError(
+                f"{label} '{entry_id}' must be an object, got {type(entry_data).__name__}"
+            )
+        if "id" not in entry_data:
+            raise KeyError(f"{label} '{entry_id}' missing required 'id' field")
+        if str(entry_data["id"]) != str(entry_id):
+            raise ValueError(
+                f"{label} id mismatch: key '{entry_id}' != {label.lower()}.id "
+                f"'{entry_data['id']}'"
+            )
 
 
 def _validate_obs_ids(registry: Dict[str, Any], source: str) -> None:
@@ -49,7 +59,16 @@ def _validate_obs_ids(registry: Dict[str, Any], source: str) -> None:
     capacites SOURCES (composites, alias d'affichage) et des marqueurs de ROLE, qui ne sont pas
     observes (cf. `UNIT_RULE_EFFECT_IDS`). C'est l'appelant qui exige la presence d'un `obs_id`
     pour les entrees qui, elles, doivent en porter un.
+
+    Import LOCAL du domaine : `engine.observation_entities` est une FEUILLE, mais l'importer au
+    niveau module ici cree un cycle — verifie : avec cet import en tete, `import config_loader`
+    en premier casse sur `engine/pve_controller.py` (« partially initialized module »). Ce
+    chargeur ne tourne qu'au chargement d'un registre, jamais sur un chemin chaud : le cout de
+    l'import local est nul, et les bornes restent a leur place (le SCHEMA d'observation, pas le
+    chargeur de config).
     """
+    from engine.observation_entities import OBS_ID_MAX, OBS_ID_MIN
+
     seen: Dict[int, str] = {}
     for entry_id, entry_data in registry.items():
         if "obs_id" not in entry_data:
@@ -522,16 +541,9 @@ class ConfigLoader:
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Invalid JSON in {unit_rules_path}: {e}")
 
-        if not isinstance(unit_rules, dict):
-            raise ValueError(f"unit_rules.json must be a dict mapping rule_id to rule config")
+        _validate_registry_entries(unit_rules, "unit_rules.json", "Rule")
 
         for rule_id, rule_data in unit_rules.items():
-            if not isinstance(rule_data, dict):
-                raise ValueError(f"Rule '{rule_id}' must be an object, got {type(rule_data).__name__}")
-            if "id" not in rule_data:
-                raise KeyError(f"Rule '{rule_id}' missing required 'id' field")
-            if str(rule_data["id"]) != str(rule_id):
-                raise ValueError(f"Rule id mismatch: key '{rule_id}' != rule.id '{rule_data['id']}'")
             if "name" in rule_data:
                 name_value = rule_data["name"]
                 if not isinstance(name_value, str) or not name_value.strip():
@@ -561,44 +573,21 @@ class ConfigLoader:
         DISTINCTES (chantier 01) : un id de capacite et un id de statut vivent dans deux espaces
         et peuvent donc porter la meme valeur sans ambiguite.
         """
-        cache_key = "unit_statuses"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
+        # Chargement + cache DELEGUES a `load_config` : c'etait le 3e site a recopier
+        # `exists() / open(utf-8-sig) / JSONDecodeError / self._cache[...]`, donc le 3e a devoir
+        # suivre toute evolution du chargement (encodage, message, `force_reload`).
+        statuses = self.load_config("unit_statuses", force_reload=False)
 
-        path = self.config_dir / "unit_statuses.json"
-        if not path.exists():
-            raise FileNotFoundError(f"Unit statuses config not found: {path}")
-
-        try:
-            with open(path, "r", encoding="utf-8-sig") as f:
-                statuses = json.load(f)
-        except json.JSONDecodeError as e:
-            raise RuntimeError(f"Invalid JSON in {path}: {e}")
-
-        if not isinstance(statuses, dict):
-            raise ValueError("unit_statuses.json must be a dict mapping status_id to config")
+        _validate_registry_entries(statuses, "unit_statuses.json", "Status")
 
         for status_id, status_data in statuses.items():
-            if not isinstance(status_data, dict):
-                raise ValueError(
-                    f"Status '{status_id}' must be an object, got {type(status_data).__name__}"
-                )
-            if "id" not in status_data:
-                raise KeyError(f"Status '{status_id}' missing required 'id' field")
-            if str(status_data["id"]) != str(status_id):
-                raise ValueError(
-                    f"Status id mismatch: key '{status_id}' != status.id '{status_data['id']}'"
-                )
             if "obs_id" not in status_data:
                 raise KeyError(
                     f"Status '{status_id}' missing required 'obs_id' in config/unit_statuses.json"
                 )
 
         _validate_obs_ids(statuses, "config/unit_statuses.json")
-
-        self._cache[cache_key] = statuses
         return statuses
-
 
     def load_agent_scenario(self, agent_key: str, scenario_name: str) -> Dict[str, Any]:
         """Load agent-specific scenario file.

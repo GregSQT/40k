@@ -786,7 +786,7 @@ class W40KEngine(gym.Env):
                     # — rien ne valide jamais une observation contre son espace sur le chemin
                     # d'entrainement. C'est `observation_builder._fill_id_slots` qui leve, au site
                     # d'ecriture, ou l'erreur peut encore nommer l'escouade fautive.
-                    from config_loader import OBS_ID_MAX
+                    from engine.observation_entities import OBS_ID_MAX
 
                     spaces_dict[key] = gym.spaces.Box(
                         low=0.0, high=float(OBS_ID_MAX), shape=shape, dtype=np.float32
