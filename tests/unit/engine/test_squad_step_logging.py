@@ -248,23 +248,33 @@ class _FakeSnapshotLogger:
         self.enabled = enabled
         self.snapshots: List[Dict[str, Any]] = []
 
-    def log_objective_control_snapshot(self, turn, objectives, controllers, victory_points) -> None:
+    def log_objective_control_snapshot(
+        self, turn, objectives, controllers, victory_points, command_points
+    ) -> None:
         self.snapshots.append(
             {
                 "turn": turn,
                 "objectives": objectives,
                 "controllers": dict(controllers),
                 "victory_points": dict(victory_points),
+                "command_points": dict(command_points),
             }
         )
 
 
-def _snapshot_engine(logger: Any, controllers: Dict[str, Any], vp: Dict[int, int]) -> W40KEngine:
+def _snapshot_engine(
+    logger: Any,
+    controllers: Dict[str, Any],
+    vp: Dict[int, int],
+    cp: Dict[int, int] | None = None,
+) -> W40KEngine:
     eng = object.__new__(W40KEngine)
     eng.game_state = {
         "objectives": [{"id": 1, "name": "Alpha", "hexes": [[5, 5]]}],
         "objective_controllers": controllers,
         "victory_points": vp,
+        # 08.02 : les CP entrent dans l'instantané ET dans sa clé de déduplication.
+        "command_points": dict(cp) if cp is not None else {1: 0, 2: 0},
         "turn": 2,
     }
     eng.step_logger = logger
@@ -321,3 +331,17 @@ def test_objective_snapshot_reemitted_when_victory_points_change():
     eng.game_state["victory_points"][1] = 8
     eng._log_objective_control_snapshot_if_changed()
     assert [s["victory_points"][1] for s in logger.snapshots] == [3, 8]
+
+
+def test_objective_snapshot_reemitted_when_command_points_change():
+    """08.02 : un gain de CP sans changement de contrôle ni de VP DOIT réémettre.
+
+    Les CP montent à chaque phase de commandement alors que le contrôle et les VP peuvent ne pas
+    bouger. Hors de la clé de déduplication, le replay afficherait un stock figé toute la partie.
+    """
+    logger = _FakeSnapshotLogger()
+    eng = _snapshot_engine(logger, {"1": 1}, {1: 3, 2: 0}, {1: 2, 2: 2})
+    eng._log_objective_control_snapshot_if_changed()
+    eng.game_state["command_points"][1] = 3
+    eng._log_objective_control_snapshot_if_changed()
+    assert [s["command_points"][1] for s in logger.snapshots] == [2, 3]

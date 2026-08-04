@@ -66,11 +66,13 @@ class StepLogger:
             return objective["name"]
         return f"Obj{require_key(objective, 'id')}"
 
-    def log_objective_control_snapshot(self, turn, objectives, objective_controllers, victory_points):
-        """Instantane FAISANT FOI du controle d'objectif et des points de victoire (regle 14.02).
+    def log_objective_control_snapshot(
+        self, turn, objectives, objective_controllers, victory_points, command_points
+    ):
+        """Instantane FAISANT FOI du controle d'objectif, des VP et des CP (regles 14.02, 08.02).
 
-        Ecrit l'etat que le MOTEUR a calcule (`objective_controllers` et `victory_points` du
-        game_state), jamais un recalcul. Le replay le relit tel quel au lieu de resommer les OC
+        Ecrit l'etat que le MOTEUR a calcule (`objective_controllers`, `victory_points` et
+        `command_points` du game_state), jamais un recalcul. Le replay le relit tel quel au lieu de resommer les OC
         cote navigateur : ni l'empreinte de socle par figurine (14.02) ni le drapeau
         `battle_shocked` (01.07 / 02.02, qui annule l'OC de toute l'escouade) ne sont
         reconstituables depuis le step.log, donc tout calcul cote client diverge par nature.
@@ -104,9 +106,15 @@ class StepLogger:
 
         vp1 = require_key(victory_points, 1)
         vp2 = require_key(victory_points, 2)
+        # Les CP sont ecrits APRES les VP et AVANT `ZONES=` : le parseur du replay les lit en
+        # groupe OPTIONNEL, donc un step.log enregistre avant le 2026-08-04 reste lisible et
+        # affiche simplement l'absence de CP — jamais un 0 fabrique, qui serait un mensonge sur
+        # une partie ou le stock etait autre.
+        cp1 = require_key(command_points, 1)
+        cp2 = require_key(command_points, 2)
         line = (
             f"[{timestamp}] T{turn} OBJECTIVE CONTROL: "
-            f"VP1={vp1} VP2={vp2} ZONES={'|'.join(zone_entries)}\n"
+            f"VP1={vp1} VP2={vp2} CP1={cp1} CP2={cp2} ZONES={'|'.join(zone_entries)}\n"
         )
         self.log_buffer.append(line)
         if len(self.log_buffer) >= self.buffer_size:

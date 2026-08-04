@@ -133,13 +133,21 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
 
             # Instantané 14.02 écrit par le MOTEUR (cf. Documentation/Implémentation/Replay.md
             # §2.3) : SOURCE DE VÉRITÉ des points de victoire et du contrôle d'objectif.
-            #   [hh:mm:ss] T{tour} OBJECTIVE CONTROL: VP1=… VP2=… ZONES=…
+            #   [hh:mm:ss] T{tour} OBJECTIVE CONTROL: VP1=… VP2=… CP1=… CP2=… ZONES=…
             # Ne matche PAS le récapitulatif de fin d'épisode ([ts] OBJECTIVE CONTROL:
             # Obj{id}:P1_OC=…), qui n'a ni T{tour} ni VP1= — cf. la même distinction dans
             # replayParser.ts. Les VP écrasent (et non accumulent) : le moteur journalise un
             # TOTAL courant, pas un delta.
+            # ⚠️ `CP1=/CP2=` (08.02) est un groupe OPTIONNEL, exactement comme dans
+            # `replayParser.ts` : ce champ est apparu le 2026-08-04 entre les VP et `ZONES=`.
+            # Sans l'optionalité, ce motif cesserait de matcher les journaux ANTÉRIEURS et
+            # l'analyzer les déclarerait sans instantané — et sans l'ancrage `ZONES=`, il
+            # cesserait de matcher les journaux POSTÉRIEURS. Les deux parseurs de cette ligne
+            # (celui-ci et celui du replay) doivent bouger ensemble : c'est le même format.
             objective_control_match = re.search(
-                r'\bT(\d+) OBJECTIVE CONTROL: VP1=(-?\d+) VP2=(-?\d+) ZONES=', line
+                r'\bT(\d+) OBJECTIVE CONTROL: VP1=(-?\d+) VP2=(-?\d+)'
+                r'(?: CP1=(-?\d+) CP2=(-?\d+))? ZONES=',
+                line,
             )
             if objective_control_match:
                 state.episode_victory_points[PLAYER_ONE_ID] = int(objective_control_match.group(2))

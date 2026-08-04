@@ -257,6 +257,42 @@ describe("replayParser", () => {
     });
   });
 
+  it("lit les CP quand le journal les porte", () => {
+    const text = [
+      ...CONTROL_LOG_HEAD,
+      "[12:00:00] T1 OBJECTIVE CONTROL: VP1=2 VP2=1 CP1=5 CP2=4 ZONES=West:Ctrl=1|North:Ctrl=none",
+      "[12:00:01] T1 P1 MOVE : Unit 1(1,0) MOVED from (0,0) to (1,0)",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const episode = parse_log_file_from_text(text).episodes[0];
+    expect(episode.initial_state.objective_control).toEqual({
+      controllers: { West: 1, North: null },
+      victory_points: { 1: 2, 2: 1 },
+      command_points: { 1: 5, 2: 4 },
+    });
+  });
+
+  it("reste lisible sur un journal enregistré AVANT les CP", () => {
+    // RETROCOMPATIBILITE : `CP1=/CP2=` est apparu le 2026-08-04 entre les VP et `ZONES=`. Un
+    // motif non optionnel cesserait de matcher tous les step.log anterieurs, et le replay les
+    // declarerait « sans instantane » — il refuse alors de les rejouer. Le champ doit rester
+    // ABSENT (pas 0) : un 0 mentirait sur le stock de CP de la partie rejouee.
+    const text = [
+      ...CONTROL_LOG_HEAD,
+      "[12:00:00] T1 OBJECTIVE CONTROL: VP1=2 VP2=1 ZONES=West:Ctrl=1|North:Ctrl=none",
+      "[12:00:01] T1 P1 MOVE : Unit 1(1,0) MOVED from (0,0) to (1,0)",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const control = parse_log_file_from_text(text).episodes[0].initial_state.objective_control;
+    expect(control).toEqual({
+      controllers: { West: 1, North: null },
+      victory_points: { 1: 2, 2: 1 },
+    });
+    expect(control?.command_points).toBeUndefined();
+  });
+
   it("lève sur une zone OBJECTIVE CONTROL malformée", () => {
     const text = [
       ...CONTROL_LOG_HEAD,

@@ -6132,7 +6132,7 @@ class W40KEngine(gym.Env):
     OBJECTIVE_CONTROL_LOGGED_KEY = "_objective_control_last_logged"
 
     def _log_objective_control_snapshot_if_changed(self) -> None:
-        """Journalise dans step.log l'etat 14.02 du moteur (controleurs + VP) quand il CHANGE.
+        """Journalise dans step.log l'etat de partie du moteur (controleurs, VP, CP) quand il CHANGE.
 
         POURQUOI : le replay affichait un controle d'objectif RECALCULE dans le navigateur
         (`BoardReplay.tsx`), par ancre d'escouade et sans le battle-shock — deux ecarts
@@ -6153,10 +6153,16 @@ class W40KEngine(gym.Env):
             return
         controllers = require_key(self.game_state, "objective_controllers")
         victory_points = require_key(self.game_state, "victory_points")
+        # Les CP entrent dans la CLE de deduplication, pas seulement dans la ligne : sinon un
+        # gain de CP sans changement de controle ni de VP (08.02, chaque phase de commandement)
+        # ne serait jamais journalise, et le replay afficherait un stock fige.
+        command_points = require_key(self.game_state, "command_points")
         snapshot = (
             tuple(sorted((str(k), v) for k, v in controllers.items())),
             require_key(victory_points, 1),
             require_key(victory_points, 2),
+            require_key(command_points, 1),
+            require_key(command_points, 2),
         )
         # get allowed : absent au tout premier passage de l'episode (cle purgee au reset)
         if snapshot == self.game_state.get(self.OBJECTIVE_CONTROL_LOGGED_KEY):
@@ -6167,6 +6173,7 @@ class W40KEngine(gym.Env):
             objectives,
             controllers,
             victory_points,
+            command_points,
         )
 
     def _verify_supplied_mask(

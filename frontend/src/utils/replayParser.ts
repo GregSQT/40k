@@ -128,6 +128,10 @@ export interface ReplayObjectiveControl {
   // Nom de zone (meme cle que `objectives[].name`) -> joueur controlant, ou null.
   controllers: Record<string, number | null>;
   victory_points: { 1: number; 2: number };
+  // Points de commandement (08.02). OPTIONNEL, et ca doit le rester : les step.log enregistres
+  // avant le 2026-08-04 n'en portent pas. `undefined` = « ce journal ne le sait pas », ce que
+  // l'UI affiche en n'affichant rien — un 0 par defaut mentirait sur la partie rejouee.
+  command_points?: { 1: number; 2: number };
 }
 
 interface ReplayGameState {
@@ -333,12 +337,14 @@ export function parse_log_file_from_text(text: string): ReplayData {
     //   [12:00:00] T3 OBJECTIVE CONTROL: VP1=5 VP2=2 ZONES=West:Ctrl=1|North:Ctrl=none
     // A ne pas confondre avec le recapitulatif de fin d'episode ([ts] OBJECTIVE CONTROL:
     // Obj1:P1_OC=...), qui n'a ni `T{tour}` ni `VP1=` — d'ou l'ancrage strict de ce motif.
+    // `CP1=/CP2=` est un groupe OPTIONNEL : ajoute le 2026-08-04, il est absent des journaux
+    // anterieurs, qui doivent rester rejouables.
     const objectiveControlMatch = trimmed.match(
-      /\bT(\d+) OBJECTIVE CONTROL: VP1=(-?\d+) VP2=(-?\d+) ZONES=(.*)$/
+      /\bT(\d+) OBJECTIVE CONTROL: VP1=(-?\d+) VP2=(-?\d+)(?: CP1=(-?\d+) CP2=(-?\d+))? ZONES=(.*)$/
     );
     if (objectiveControlMatch) {
       const controllers: Record<string, number | null> = {};
-      const zonesStr = objectiveControlMatch[4];
+      const zonesStr = objectiveControlMatch[6];
       if (zonesStr.length > 0) {
         for (const zone of zonesStr.split("|")) {
           const zoneMatch = zone.match(/^(.+):Ctrl=(none|1|2)$/);
@@ -356,6 +362,14 @@ export function parse_log_file_from_text(text: string): ReplayData {
             1: parseInt(objectiveControlMatch[2], 10),
             2: parseInt(objectiveControlMatch[3], 10),
           },
+          ...(objectiveControlMatch[4] !== undefined
+            ? {
+                command_points: {
+                  1: parseInt(objectiveControlMatch[4], 10),
+                  2: parseInt(objectiveControlMatch[5], 10),
+                },
+              }
+            : {}),
         },
       });
       continue;

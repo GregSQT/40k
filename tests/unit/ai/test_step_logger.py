@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from ai.step_logger import StepLogger
+from shared.data_validation import ConfigurationError
 
 
 def _read_text(path: Path) -> str:
@@ -329,11 +330,12 @@ def test_objective_control_snapshot_writes_engine_state(tmp_path: Path) -> None:
     output_file = tmp_path / "step.log"
     logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=1)
     logger.log_objective_control_snapshot(
-        3, _objectives(), {"1": 1, "2": None, "3": 2}, {1: 5, 2: 2}
+        3, _objectives(), {"1": 1, "2": None, "3": 2}, {1: 5, 2: 2}, {1: 4, 2: 3}
     )
     content = _read_text(output_file)
     assert (
-        "T3 OBJECTIVE CONTROL: VP1=5 VP2=2 ZONES=West:Ctrl=1|North:Ctrl=none|Obj3:Ctrl=2"
+        "T3 OBJECTIVE CONTROL: VP1=5 VP2=2 CP1=4 CP2=3 "
+        "ZONES=West:Ctrl=1|North:Ctrl=none|Obj3:Ctrl=2"
         in content
     )
 
@@ -351,7 +353,7 @@ def test_objective_control_snapshot_key_matches_objectives_line(tmp_path: Path) 
         primary_objective_config=None,
         board_config={"cols": 1, "rows": 1, "inches_to_subhex": 1, "hex_radius": 1, "margin": 1},
     )
-    logger.log_objective_control_snapshot(1, _objectives(), {}, {1: 0, 2: 0})
+    logger.log_objective_control_snapshot(1, _objectives(), {}, {1: 0, 2: 0}, {1: 0, 2: 0})
     content = _read_text(output_file)
     geometry_names = [
         group.split(":")[0]
@@ -366,7 +368,7 @@ def test_objective_control_snapshot_missing_controller_is_uncontrolled(tmp_path:
     # Aucune frontière de phase franchie (14.02) : le moteur n'a pas encore d'entrée pour la zone.
     output_file = tmp_path / "step.log"
     logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=1)
-    logger.log_objective_control_snapshot(1, _objectives(), {}, {1: 0, 2: 0})
+    logger.log_objective_control_snapshot(1, _objectives(), {}, {1: 0, 2: 0}, {1: 0, 2: 0})
     assert "ZONES=West:Ctrl=none|North:Ctrl=none|Obj3:Ctrl=none" in _read_text(output_file)
 
 
@@ -375,7 +377,7 @@ def test_objective_control_snapshot_rejects_unexpected_controller(tmp_path: Path
     output_file = tmp_path / "step.log"
     logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=1)
     with pytest.raises(ValueError, match=r"Unexpected objective controller for 1: 7"):
-        logger.log_objective_control_snapshot(1, _objectives(), {"1": 7}, {1: 0, 2: 0})
+        logger.log_objective_control_snapshot(1, _objectives(), {"1": 7}, {1: 0, 2: 0}, {1: 0, 2: 0})
 
 
 def test_objective_control_snapshot_goes_through_buffer(tmp_path: Path) -> None:
@@ -383,8 +385,34 @@ def test_objective_control_snapshot_goes_through_buffer(tmp_path: Path) -> None:
     # Une écriture directe le ferait passer AVANT des actions encore bufferisées.
     output_file = tmp_path / "step.log"
     logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=99)
-    logger.log_objective_control_snapshot(1, _objectives(), {}, {1: 0, 2: 0})
+    logger.log_objective_control_snapshot(1, _objectives(), {}, {1: 0, 2: 0}, {1: 0, 2: 0})
     assert "OBJECTIVE CONTROL" not in _read_text(output_file)
     assert any("OBJECTIVE CONTROL" in line for line in logger.log_buffer)
     logger._flush_buffer()
     assert "OBJECTIVE CONTROL" in _read_text(output_file)
+
+
+def test_les_cp_sont_journalises_pour_le_replay(tmp_path: Path) -> None:
+    """08.02 : le replay affiche les CP dans le MEME en-tete que les VP (`UnitStatusTable`).
+
+    Il ne rejoue pas un `game_state`, il relit ce journal : un compteur que le moteur n'ecrit
+    pas ici n'existe pas pour lui. C'est la raison pour laquelle les CP n'apparaissaient nulle
+    part en replay alors que le conteneur d'affichage etait deja commun avec le PvP.
+
+    La position est un contrat : entre les VP et `ZONES=`, parce que les DEUX parseurs de cette
+    ligne (`ai/analyzer_core.py` et `frontend/src/utils/replayParser.ts`) l'ancrent sur `ZONES=`
+    et lisent `CP1=/CP2=` en groupe optionnel.
+    """
+    output_file = tmp_path / "step.log"
+    logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=1)
+    logger.log_objective_control_snapshot(2, _objectives(), {}, {1: 10, 2: 5}, {1: 7, 2: 6})
+    content = _read_text(output_file)
+    assert "VP1=10 VP2=5 CP1=7 CP2=6 ZONES=" in content, content
+
+
+def test_un_stock_de_cp_absent_leve(tmp_path: Path) -> None:
+    """Aucune valeur par defaut : un joueur sans CP est un etat corrompu, pas un 0."""
+    output_file = tmp_path / "step.log"
+    logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=1)
+    with pytest.raises(ConfigurationError):
+        logger.log_objective_control_snapshot(1, _objectives(), {}, {1: 0, 2: 0}, {1: 0})

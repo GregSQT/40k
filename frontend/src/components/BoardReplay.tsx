@@ -559,6 +559,14 @@ export const BoardReplay: React.FC = () => {
     ? currentObjectiveControl.victory_points
     : null;
 
+  // `undefined` sur DEUX cas distincts, et c'est voulu : pas encore d'instantané, ou journal
+  // enregistré avant que le moteur ne journalise les CP (08.02). Les deux veulent dire « ce
+  // replay ne sait pas », et l'en-tête n'affiche alors pas de ligne CP — le même conteneur
+  // qu'en PvP, sans valeur inventée.
+  const replayCommandPoints = currentObjectiveControl
+    ? (currentObjectiveControl.command_points ?? null)
+    : null;
+
   // hexKey → joueur contrôlant, projeté depuis les zones nommées de l'instantané moteur.
   const replayObjectiveControlMap = useMemo((): Record<string, number | null> => {
     if (!currentEpisode || !currentObjectiveControl) {
@@ -1504,6 +1512,7 @@ export const BoardReplay: React.FC = () => {
           gameMode="training"
           isReplay={true}
           victoryPoints={replayVictoryPoints ? replayVictoryPoints[1] : undefined}
+          commandPoints={replayCommandPoints ? replayCommandPoints[1] : undefined}
           onCollapseChange={() => {}}
         />
       </ErrorBoundary>
@@ -1519,6 +1528,7 @@ export const BoardReplay: React.FC = () => {
           gameMode="training"
           isReplay={true}
           victoryPoints={replayVictoryPoints ? replayVictoryPoints[2] : undefined}
+          commandPoints={replayCommandPoints ? replayCommandPoints[2] : undefined}
           onCollapseChange={() => {}}
         />
       </ErrorBoundary>

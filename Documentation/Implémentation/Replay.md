@@ -62,22 +62,30 @@ en dérive `fight_eligible_units = [attacker_id]`.
 Ligne dédiée, écrite **hors action** (elle n'appartient à aucune ligne de jeu) :
 
 ```
-[hh:mm:ss] T{tour} OBJECTIVE CONTROL: VP1={vp} VP2={vp} ZONES={nom}:Ctrl={1|2|none}|{nom}:Ctrl=…
+[hh:mm:ss] T{tour} OBJECTIVE CONTROL: VP1={vp} VP2={vp} CP1={cp} CP2={cp} ZONES={nom}:Ctrl={1|2|none}|{nom}:Ctrl=…
 ```
 
 - **Producteur** : `StepLogger.log_objective_control_snapshot`, appelé par
   `W40KEngine._log_objective_control_snapshot_if_changed` depuis `_build_observation` — émission
-  **à chaque changement** de `objective_controllers` **ou** de `victory_points` (le contrôle bouge
-  à la frontière de phase 14.02, les VP bougent dans les handlers `apply_primary_objective_scoring`
-  des phases command/fight : un déclencheur unique en manquerait un). Passe par le **buffer**, comme
+  **à chaque changement** de `objective_controllers`, de `victory_points` **ou** de
+  `command_points` (le contrôle bouge à la frontière de phase 14.02, les VP dans les handlers
+  `apply_primary_objective_scoring` des phases command/fight, les CP à chaque phase de
+  commandement 08.02 : un déclencheur unique en manquerait un). Passe par le **buffer**, comme
   `log_action` : une écriture directe s'intercalerait avant des actions non encore vidées.
+- **`CP1=`/`CP2=` sont apparus le 2026-08-04**, entre les VP et `ZONES=`. Les DEUX parseurs de
+  cette ligne — `frontend/src/utils/replayParser.ts` et `ai/analyzer_core.py` — les lisent en
+  **groupe optionnel** ancré sur `ZONES=` : sans l'optionalité, tout step.log antérieur cesserait
+  d'être rejouable et l'analyzer le déclarerait « sans instantané ». Sur ces journaux-là, le champ
+  reste **absent** côté replay, jamais rempli d'un `0` — qui mentirait sur le stock de la partie.
+  Toute évolution de cette ligne doit bouger les deux parseurs ensemble.
 - **Clé de zone** = le **nom**, exactement celui de la ligne `Objectives:` (unique
   `StepLogger._objective_display_name`, partagé par les deux lignes). ⚠️ À ne pas confondre avec le
   récapitulatif de **fin d'épisode** `OBJECTIVE CONTROL: Obj{id}:P1_OC=…` (ni `T{tour}`, ni `VP1=`),
   que le parseur ignore délibérément.
 - **Consommation** : `replayParser.ts` horodate chaque instantané par le nombre d'actions déjà lues
   et le pose sur l'état correspondant (`state.objective_control`) ; `BoardReplay.tsx` le lit tel
-  quel pour les VP **et** la coloration des hexes.
+  quel pour les VP, **les CP** et la coloration des hexes — via le MÊME `UnitStatusTable` que le
+  PvP, dont l'en-tête affiche `CP : x` et `VP : x`.
 - **Pourquoi c'est journalisé et non recalculé** : le navigateur ne peut reproduire ni l'empreinte
   de socle par figurine (14.02, `sum_objective_control_oc_multi`) ni le battle-shock (01.07 : OC de
   toutes les figurines à `'-'`, 02.02) — ce drapeau n'existe nulle part dans le `step.log`. Le
