@@ -46,6 +46,8 @@ from engine.macro_intents import (
     CHOICE_COUNT,
     MOVE_CELL_BASE,
     MOVE_CELL_COUNT,
+    OATH_SLOT_BASE,
+    OATH_SLOT_COUNT,
     FIGHT_SLOT_BASE,
     FIGHT_SLOT_COUNT,
     SHOOT_SLOT_BASE,
@@ -139,6 +141,10 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
     choice = torch.einsum(
         "bd,bkd->bk", policy.choice_query_net(latent_pi), decision_emb
     ) / scale
+    # Chantier 01 : cinquieme requete, memes embeddings d'ENNEMIS -> logits de cible d'Oath.
+    oath_pointer = torch.einsum(
+        "bd,bkd->bk", policy.oath_query_net(latent_pi), embeddings
+    ) / scale
     move = policy._move_logits(latent_pi, move_map)
     expected = torch.cat(
         [
@@ -149,6 +155,7 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
             fight_pointer,
             base[:, 1:],        # fight-sans-cible, intents de zone
             choice,
+            oath_pointer,
         ],
         dim=1,
     )
@@ -263,11 +270,11 @@ def test_pointer_logit_is_slot_local(model):
         after = policy._action_logits(latent_pi, perturbed, move_map, decision_emb)
     diff = (after - before).abs()[0]
     changed = torch.nonzero(diff > 1e-6).flatten().tolist()
-    # Le slot 1 pilote TROIS logits depuis §9 P3-2 : « tirer sur lui », « le charger » et « le
-    # frapper ». Les trois sortent du MEME embedding, par trois requetes distinctes — c'est le
-    # partage recherche.
+    # Le slot 1 pilote QUATRE logits depuis le chantier 01 : « tirer sur lui », « le charger »,
+    # « le frapper » et « lui jurer Oath ». Les quatre sortent du MEME embedding, par quatre
+    # requetes distinctes — c'est le partage recherche.
     assert changed == [
-        SHOOT_SLOT_BASE + 1, CHARGE_SLOT_BASE + 1, FIGHT_SLOT_BASE + 1
+        SHOOT_SLOT_BASE + 1, CHARGE_SLOT_BASE + 1, FIGHT_SLOT_BASE + 1, OATH_SLOT_BASE + 1
     ], f"logits deplaces : {changed[:5]}"
 
 

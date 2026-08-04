@@ -48,6 +48,7 @@ def test_chaque_famille_est_atteinte_par_au_moins_un_id():
         action_family(mi.ACTION_FIGHT_NO_TARGET, "fight"),
         action_family(mi.BASE_ZONE_INTENT, "move"),
         action_family(mi.CHOICE_BASE, "move"),
+        action_family(mi.OATH_SLOT_BASE, "move"),
         action_family(mi.DEPLOY_SLOT_BASE, "deployment"),
     }
     assert reached == set(ACTION_FAMILIES)

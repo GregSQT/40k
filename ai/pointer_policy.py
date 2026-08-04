@@ -65,6 +65,8 @@ from engine.macro_intents import (
     FIGHT_SLOT_COUNT,
     MOVE_CELL_BASE,
     MOVE_CELL_COUNT,
+    OATH_SLOT_BASE,
+    OATH_SLOT_COUNT,
     SHOOT_SLOT_BASE,
     SHOOT_SLOT_COUNT,
     TOTAL_ACTION_SIZE,
@@ -86,6 +88,7 @@ DENSE_LOGIT_COUNT = (
     - CHARGE_SLOT_COUNT
     - FIGHT_SLOT_COUNT
     - CHOICE_COUNT
+    - OATH_SLOT_COUNT
 )
 
 
@@ -140,6 +143,12 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 f"observes contre {FIGHT_SLOT_COUNT} actions de combat. C'est l'invariant D1, "
                 f"cote melee (V11 §9 P3-1)."
             )
+        if extractor.n_enemy_slots != OATH_SLOT_COUNT:
+            raise ValueError(
+                f"Desalignement observation/action : {extractor.n_enemy_slots} slots ennemis "
+                f"observes contre {OATH_SLOT_COUNT} actions d'Oath of Moment. C'est l'invariant "
+                f"D1, cote Oath (chantier 01)."
+            )
         if GRID_CELL_COUNT != MOVE_CELL_COUNT:
             raise ValueError(
                 f"Desalignement grille/action : {GRID_CELL_COUNT} cellules de grille contre "
@@ -147,22 +156,23 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
             )
         # HYPOTHÈSE D'ASSEMBLAGE de `_action_logits` — vérifiée ici, où l'erreur est explicite,
         # plutôt que subie sous forme de logits décalés : cellules en tête, `wait`, puis les
-        # slots de tir, de charge et de mêlée CONTIGUS, puis le reste dense, et les CHOICE en
-        # fin d'action space.
+        # slots de tir, de charge et de mêlée CONTIGUS, puis le reste dense, puis les CHOICE et
+        # enfin les slots d'Oath, qui ferment l'action space.
         if (
             MOVE_CELL_BASE != 0
             or SHOOT_SLOT_BASE != MOVE_CELL_COUNT + 1
             or CHARGE_SLOT_BASE != SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT
             or FIGHT_SLOT_BASE != CHARGE_SLOT_BASE + CHARGE_SLOT_COUNT
-            or CHOICE_BASE != TOTAL_ACTION_SIZE - CHOICE_COUNT
+            or OATH_SLOT_BASE != CHOICE_BASE + CHOICE_COUNT
+            or OATH_SLOT_BASE != TOTAL_ACTION_SIZE - OATH_SLOT_COUNT
         ):
             raise ValueError(
                 "Disposition de l'action space inattendue : l'assemblage des logits suppose "
                 f"[cellules 0..{MOVE_CELL_COUNT - 1} | wait | tir | charge | melee | dense | "
-                f"CHOICE en fin]. Recu MOVE_CELL_BASE={MOVE_CELL_BASE}, "
+                f"CHOICE | Oath en fin]. Recu MOVE_CELL_BASE={MOVE_CELL_BASE}, "
                 f"SHOOT_SLOT_BASE={SHOOT_SLOT_BASE}, CHARGE_SLOT_BASE={CHARGE_SLOT_BASE}, "
-                f"FIGHT_SLOT_BASE={FIGHT_SLOT_BASE}, "
-                f"CHOICE_BASE={CHOICE_BASE}, TOTAL_ACTION_SIZE={TOTAL_ACTION_SIZE}."
+                f"FIGHT_SLOT_BASE={FIGHT_SLOT_BASE}, CHOICE_BASE={CHOICE_BASE}, "
+                f"OATH_SLOT_BASE={OATH_SLOT_BASE}, TOTAL_ACTION_SIZE={TOTAL_ACTION_SIZE}."
             )
         self.trunk_dim = extractor.trunk_dim
         self.entity_dim = extractor.entity_dim
@@ -213,6 +223,12 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         # « quelle option choisir » sont deux questions différentes posées au même latent, et
         # elles ne lisent même pas les mêmes embeddings (ennemis vs candidats).
         self.choice_query_net = nn.Linear(self.mlp_extractor.latent_dim_pi, self.entity_dim)
+        # Requête DISTINCTE pour Oath of Moment (chantier 01), MÊMES embeddings d'ennemis que le
+        # tir, la charge et la mêlée. « Quel ennemi jurer » ne se décide ni comme « quel ennemi
+        # tirer » (portée, couvert) ni comme « quel ennemi charger » : Oath vaut pour le tour
+        # ENTIER et sur toutes mes escouades, donc c'est la valeur globale de la cible qui pèse.
+        # Coût : `entity_dim x latent_dim` paramètres, et zéro par slot.
+        self.oath_query_net = nn.Linear(self.mlp_extractor.latent_dim_pi, self.entity_dim)
 
         # --- Tête de move : conv 1x1 sur [colonne de la cellule | latent diffusé] -------------
         # `move_cell_net` et `move_ctx_net` sont les DEUX MOITIÉS d'une seule et même conv 1x1
@@ -310,15 +326,16 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     ) -> torch.Tensor:
         """Logits complets, assemblés dans l'ordre des ids d'action.
 
-        Cinq têtes à poids partagés — conv 1x1 (cellules), pointeurs de tir, de charge (§9 P3-2)
-        et de mêlée (§9 P3-1 : trois requêtes, MÊMES embeddings d'ennemis) et pointeur de
-        décision (candidats `CHOICE_i`, §9.3 P2) — et UNE tête dense réduite à ses colonnes
-        réellement lues (`DENSE_LOGIT_COUNT` = 17) : wait, fight-sans-cible, 15 intents de zone.
+        Six têtes à poids partagés — conv 1x1 (cellules), pointeurs de tir, de charge (§9 P3-2),
+        de mêlée (§9 P3-1) et d'Oath of Moment (chantier 01 : quatre requêtes, MÊMES embeddings
+        d'ennemis) et pointeur de décision (candidats `CHOICE_i`, §9.3 P2) — et UNE tête dense
+        réduite à ses colonnes réellement lues (`DENSE_LOGIT_COUNT` = 17) : wait,
+        fight-sans-cible, 15 intents de zone.
 
         ⚠️ L'assemblage suit l'ordre EXACT des ids (`macro_intents`) : 0-1023 cellules, 1024 wait,
         1025-1044 tir, 1045-1064 charge, 1065-1084 mêlée, 1085 fight-sans-cible, 1086-1100 zone,
-        1101-1106 CHOICE. Une permutation ici ferait jouer à l'agent une action autre que celle
-        qu'il évalue, sans que rien ne lève — verrouillé par test.
+        1101-1106 CHOICE, 1107-1126 Oath. Une permutation ici ferait jouer à l'agent une action
+        autre que celle qu'il évalue, sans que rien ne lève — verrouillé par test.
         """
         base = self.action_net(latent_pi)
         move = self._move_logits(latent_pi, move_map)
@@ -333,6 +350,8 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         fight_pointer = (fight_query * embeddings).sum(dim=-1) / scale  # (B, K) — mêlée
         choice_query = self.choice_query_net(latent_pi).unsqueeze(1)
         choice = (choice_query * decision_emb).sum(dim=-1) / scale      # (B, K_candidats)
+        oath_query = self.oath_query_net(latent_pi).unsqueeze(1)
+        oath_pointer = (oath_query * embeddings).sum(dim=-1) / scale    # (B, K) — Oath
         return torch.cat(
             [
                 move,
@@ -342,6 +361,7 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 fight_pointer,
                 base[:, 1:],        # fight-sans-cible, intents de zone
                 choice,
+                oath_pointer,
             ],
             dim=1,
         )

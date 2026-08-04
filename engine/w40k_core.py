@@ -790,6 +790,18 @@ class W40KEngine(gym.Env):
                     spaces_dict[key] = gym.spaces.Box(
                         low=-1.0, high=1.0, shape=shape, dtype=np.float32
                     )
+                elif key.endswith("_ids"):
+                    # Ensembles d'ids de capacites/statuts (chantier 01) : des INDEX de ligne
+                    # d'embedding, bornes par le registre. Le Box DECLARE ce domaine (il decrit
+                    # l'espace, pour SB3 et pour qui lit la config) ; il ne le FAIT PAS RESPECTER
+                    # — rien ne valide jamais une observation contre son espace sur le chemin
+                    # d'entrainement. C'est `observation_builder._fill_id_slots` qui leve, au site
+                    # d'ecriture, ou l'erreur peut encore nommer l'escouade fautive.
+                    from engine.observation_entities import OBS_ID_MAX
+
+                    spaces_dict[key] = gym.spaces.Box(
+                        low=0.0, high=float(OBS_ID_MAX), shape=shape, dtype=np.float32
+                    )
                 else:
                     spaces_dict[key] = gym.spaces.Box(
                         low=-np.inf, high=np.inf, shape=shape, dtype=np.float32

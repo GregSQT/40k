@@ -9690,6 +9690,16 @@ SQUAD_ACTION_FIGHT_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20 -> 1065-1084
 # Combat « a vide » (12.04/12.06) : selectionne pour combattre sans cible eligible. Etat legal.
 SQUAD_ACTION_FIGHT_NO_TARGET = SQUAD_ACTION_FIGHT_SLOT_BASE + SQUAD_ACTION_FIGHT_SLOT_COUNT  # 1085
 SQUAD_ACTION_SIZE = SQUAD_ACTION_FIGHT_NO_TARGET + 1  # 1086
+# Chantier 01 : la CIBLE D'OATH OF MOMENT est une dimension d'action, sur le MEME mapping de
+# slots ennemis que le tir, la charge et la melee (`get_enemy_slot_mapping`, invariant D1). Le
+# compte est DERIVE de celui du tir, exactement comme les deux precedents.
+#
+# ⚠️ Ces ids ne sont PAS dans `SQUAD_ACTION_SIZE` : ce compteur borne les seules actions que
+# `build_squad_action_mask` produit (les micro-actions d'une activation d'escouade), et Oath se
+# declare au debut du tour, pas pendant une activation. Ils vivent dans l'action space COMPLET
+# (`macro_intents.TOTAL_ACTION_SIZE`), comme les zone intents et les CHOICE_i — le miroir est
+# verrouille par `tests/unit/engine/test_action_space_mirror.py`.
+SQUAD_ACTION_OATH_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20
 
 
 def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:

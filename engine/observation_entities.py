@@ -74,14 +74,14 @@ UNIT_CONT_FIELDS: Tuple[str, ...] = (
     "n_models_engaging",
 )
 
-#: Règles d'UNITÉ (`config/unit_rules.json`) exposées à l'agent, dans l'ordre d'émission.
+#: Règles d'UNITÉ (`config/unit_rules.json`) exposées à l'agent.
 #:
 #: Ne figurent ici que les règles à EFFET RÉEL — même critère que les règles d'armes, qui
-#: exclut délibérément [INDIRECT FIRE] : un bit pour une règle inerte est du bruit pur.
+#: exclut délibérément [INDIRECT FIRE] : exposer une règle inerte est du bruit pur.
 #: Vérifié par lecture le 2026-07-27 : chacune est consultée dans un handler vif.
 #:
 #: Ce sont les EFFETS, pas les capacités nommées. `unit_has_rule_effect` résout les règles
-#: SOURCES vers eux, donc les 13 bits couvrent aussi les capacités composites des datasheets —
+#: SOURCES vers eux, donc ces 13 entrées couvrent aussi les capacités composites des datasheets —
 #: vérifié sur les unités réelles : `cunning_hunters` → shoot_after_advance + shoot_after_flee,
 #: `targeted_intercession` → les deux rerolls to-wound, `adaptable_predators` et
 #: `target_priority` → charge_after_flee + shoot_after_flee, `aggression_imperative` →
@@ -92,13 +92,19 @@ UNIT_CONT_FIELDS: Tuple[str, ...] = (
 #: sous-registre « types de figurines » les porte déjà en one-hot ; et `adrenalised_onslaught`,
 #: qui n'est pas une règle mais un CHOIX de joueur (Aggression OU Preservation Imperative, au
 #: début de la phase de combat) : sans le mécanisme générique de décision agent (P2), elle ne
-#: produit aujourd'hui aucun effet — candidate à une tranche P3, pas à un bit d'observation.
+#: produit aujourd'hui aucun effet — candidate à une tranche P3, pas à une capacité observée.
 #:
-#: Ces bits décrivent l'union EN VIGUEUR (19.04) : une escouade menée par un character porte
-#: les règles de son leader et les perd à sa mort. C'était le sens même du trou fermé ici —
+#: Elles décrivent l'union EN VIGUEUR (19.04) : une escouade menée par un character porte les
+#: règles de son leader et les perd à sa mort. C'était le sens même du trou fermé ici —
 #: l'agent subissait ces règles, chez lui comme chez l'ennemi, sans jamais les percevoir : le
 #: pipeline squad n'avait aucun champ de règle d'unité, et `unit_has_rule_effect` n'était
 #: appelée que par le pipeline mono-figurine legacy (359-d), supprimé depuis.
+#:
+#: ⚠️ Ce tuple n'ordonne PLUS rien dans l'observation (chantier 01) : les capacités y sont
+#: écrites en `obs_id` triés croissant (`UNIT_ABILITY_SLOTS` ci-dessous), pas en bits positionnels.
+#: Il reste le VOCABULAIRE — la liste de ce qui est observable — et il sert tel quel au
+#: registre de candidats de décision (`DECISION_OPTION_BIN_FIELDS`), où le nombre de types
+#: reste petit et fixe.
 UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (
     "charge_after_advance",
     "charge_after_flee",
@@ -163,12 +169,99 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     # L'oracle est `charge_build_valid_plan`, la fonction MOTEUR qu'exécute le commit : une
     # réimplémentation annoncerait une atteignabilité que la résolution ne produirait pas.
     "charge_reachable_max_roll",
-) + tuple(f"rule_{rule_id}" for rule_id in UNIT_RULE_EFFECT_IDS) + (
     "present",             # masque d'entité (0 = slot vide / unité morte) — DERNIER, cf. ci-dessus
 )
 
 UNIT_CONT_SIZE = len(UNIT_CONT_FIELDS)
 UNIT_BIN_SIZE = len(UNIT_BIN_FIELDS)
+
+# ---------------------------------------------------------------------------
+# Capacités et statuts d'une unité — ENSEMBLES D'IDENTIFIANTS (chantier 01)
+# ---------------------------------------------------------------------------
+#
+# Les 13 bits `rule_<id>` ont vécu dans `UNIT_BIN_FIELDS` jusqu'au chantier 01. Le schéma
+# grossissait LINÉAIREMENT avec le nombre de capacités du jeu : chaque capacité ajoutée changeait
+# `UNIT_BIN_SIZE`, donc `obs_size`, donc invalidait tout modèle entraîné (`retrain --new`). Les
+# 17 capacités Armageddon auraient coûté 17 × 28 = 476 scalaires et un retrain, et chaque faction
+# ultérieure un retrain de plus.
+#
+# Une unité porte désormais deux ENSEMBLES D'ENTIERS (`obs_id`, registres `config/unit_rules.json`
+# et `config/unit_statuses.json`), lus comme des lignes de deux `EmbeddingBag` distinctes
+# (`ai/spatial_extractor.py`). Ajouter une capacité, un statut ou une faction entière ne change
+# alors NI `obs_size`, NI le nombre de paramètres du réseau.
+#
+# ⚠️ Aucun one-hot n'est jamais matérialisé : un `EmbeddingBag` fait une LECTURE DE LIGNE. C'est
+# ce qui rend la longueur du vecteur indépendante du nombre de capacités existantes.
+#
+# DEUX tables, pas une : « cette unité a Feel No Pain » et « cette unité est la cible Oath
+# adverse » ne sont pas de même nature. Un pooling commun les additionnerait dans le même espace
+# et le réseau ne pourrait plus les distinguer.
+#
+# Pooling SOMME (côté réseau) : invariant par permutation — {A, B} écrit (slot0, slot1) ou
+# (slot1, slot0) donne le même vecteur, la propriété qui disqualifiait les slots naïfs — et il
+# préserve la MULTIPLICITÉ, là où la moyenne confondrait un ensemble de 1 et un de 3.
+#
+# Les ids sont malgré tout écrits TRIÉS CROISSANT : le pooling rend l'ordre indifférent au
+# réseau, pas au debug. Sans tri, l'observation ne serait plus reproductible bit à bit d'un run
+# à l'autre et les diffs de replay deviendraient illisibles.
+
+#: Capacités EN VIGUEUR (19.04) portées par une unité.
+#:
+#: DEUX chiffres, et il faut les distinguer — ce slot garde un chemin de crash dur (débordement
+#: = `raise`), donc sa marge doit être lue sur la MESURE, pas sur la projection :
+#:
+#: - **Mesuré le 2026-08-04 sur le dépôt réel** (`UnitRegistry` + `unit_has_rule_effect` sur les
+#:   13 effets, 179 datasheets, puis les unions 19.04 légales — 70 paires et 50 trios
+#:   bodyguard + leader + support validés par les règles d'attachement 19.01/24.22/24.34) :
+#:   **2** effets au maximum par datasheet, **3** au maximum en vigueur sur une entité
+#:   (`AssaultIntercessor + CaptainPowerWeaponBolter [+ Ancient]` → `reroll_1_towound`,
+#:   `reroll_charge`, `reroll_towound_target_on_objective`). Marge actuelle : 5 slots.
+#: - **Projeté** une fois les 17 capacités Armageddon livrées (chantier 06) : 6 en vigueur sur
+#:   une même entité (`Boyz + Warboss + Painboy` → Get da Good Bitz, Might Is Right, Da Biggest
+#:   and da Best, Dok's Toolz, Hold Still and Say Aargh, Grot Orderly ;
+#:   `Intercessor + Captain Relic Shield + Ancient` → Objective Secured, Hail of Bolts, Finest
+#:   Hour, Rites of Battle, Relic Banner, Unbreakable Resolve). Ces capacités N'EXISTENT PAS
+#:   encore dans le moteur : c'est une projection de la conception du chantier 06, pas une mesure.
+#:
+#: 8 et non 6 : dimensionner sur la projection laisserait ZÉRO marge le jour où elle se réalise —
+#: une seule capacité ajoutée à une figurine rattachée ferait déborder. 8 coûte 2 × 28 = 56
+#: scalaires (0,3 % de l'observation) pour supprimer un mode de défaillance dur.
+#: ⚠️ À rouvrir au chantier 06 : c'est lui qui rendra la projection mesurable.
+#:
+#: ⚠️ Débordement = ERREUR, jamais troncature (`observation_builder`) : tronquer ferait subir à
+#: l'agent des règles qu'il ne perçoit pas — exactement le trou que V11 §0.30 avait fermé.
+#:
+#: ⚠️ Les effets de FACTION n'entrent PAS ici (chantier 03) : Waaagh! accorde quatre effets
+#: identiques à TOUTES les unités orkes. Les inscrire par unité, c'est répéter 4 ids sur 28
+#: entités et faire déborder les slots pour zéro information — le réseau reconstitue l'effet à
+#: partir de « cette unité est orke » + « Waaagh! actif », deux informations GLOBALES. Ils vont
+#: donc dans `GLOBAL_BIN_FIELDS`.
+UNIT_ABILITY_SLOTS = 8
+
+#: Statuts EN VIGUEUR portés par une unité (`battle_shock`, `oath_target`, `suppressed`).
+#: Déclarés ici AVANT leurs chantiers respectifs (02, 03, 06) : c'est ce qui garantit qu'aucun
+#: d'eux ne retouchera `obs_size`, donc qu'un SEUL retrain clôt la séquence.
+UNIT_STATUS_SLOTS = 4
+
+#: Domaine des identifiants écrits dans ces slots. C'est une dimension du SCHÉMA d'observation,
+#: au même titre que les deux constantes ci-dessus : le registre (`config/unit_rules.json`,
+#: `config/unit_statuses.json`) valide contre elles au chargement, l'écrivain
+#: (`observation_builder._fill_id_slots`) les fait respecter à l'écriture, l'espace d'observation
+#: (`w40k_core`) les déclare comme bornes, et le réseau (`ai/spatial_extractor`) dimensionne ses
+#: tables dessus. Elles vivent donc ICI, dans le module FEUILLE que ces quatre consommateurs
+#: importent déjà — et non dans `config_loader`, qu'`engine` et `ai` ne peuvent pas importer au
+#: niveau module sans cycle (vérifié : `import config_loader` en premier casse alors sur
+#: `pve_controller`).
+#:
+#: `0` est RÉSERVÉ au padding (`padding_idx` des tables d'embedding) : un slot vide doit
+#: contribuer exactement zéro au pooling, sinon « pas de capacité » deviendrait une capacité.
+OBS_ID_PADDING = 0
+OBS_ID_MIN = 1
+OBS_ID_MAX = 127
+#: Nombre de lignes des tables d'embedding : padding + [OBS_ID_MIN, OBS_ID_MAX]. PRÉ-DIMENSIONNÉ,
+#: jamais ajusté au nombre de capacités existantes — c'est ce qui rend l'ajout d'une capacité
+#: gratuit en paramètres, donc sans retrain.
+OBS_ID_VOCAB_SIZE = OBS_ID_MAX + 1
 
 _UNIT_CONT_INDEX: Dict[str, int] = {name: i for i, name in enumerate(UNIT_CONT_FIELDS)}
 _UNIT_BIN_INDEX: Dict[str, int] = {name: i for i, name in enumerate(UNIT_BIN_FIELDS)}
@@ -281,9 +374,16 @@ DECISION_CTX_BIN_FIELDS: Tuple[str, ...] = ("decision_pending",) + tuple(
 #: réseau de généraliser d'un slot de candidat à l'autre.
 #:
 #: Pour `rule_choice`, un candidat EST la règle qu'il accorde : le décrire par le one-hot de son
-#: effet (le MÊME vocabulaire `UNIT_RULE_EFFECT_IDS` que les drapeaux `rule_*` d'unité, §0.31)
-#: dit à l'agent CE QU'IL GAGNE. Un index de candidat, lui, ne dit rien : l'ordre des options
-#: dépend du prompt.
+#: effet (le MÊME vocabulaire `UNIT_RULE_EFFECT_IDS` que les capacités d'unité, §0.31) dit à
+#: l'agent CE QU'IL GAGNE. Un index de candidat, lui, ne dit rien : l'ordre des options dépend
+#: du prompt.
+#:
+#: ⚠️ Ce bloc reste POSITIONNEL — un bit par effet — là où les capacités d'unité sont passées aux
+#: ensembles d'`obs_id` (chantier 01). Ce n'est PAS un oubli de migration : un candidat de
+#: décision accorde UN effet, jamais un ensemble, et il n'y a que `MAX_DECISION_OPTIONS = 6`
+#: candidats — le registre coûte 14 bits UNE fois, pas 14 par entité, et il ne grossit que si un
+#: type de décision nouveau élargit le vocabulaire. Le migrer aux ids ferait bouger `obs_size`
+#: pour ~0 scalaire gagné, donc coûterait le retrain `--new` que le gel de §01 existe pour éviter.
 #:
 #: Aucun champ CONTINU n'existe aujourd'hui : `rule_choice` n'a aucune grandeur continue à
 #: décrire, et en inventer une, remplie de zéros, serait une valeur par défaut sans signifiant.

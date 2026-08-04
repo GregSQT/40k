@@ -63,7 +63,16 @@ l'autre : sans ça, les diffs de replay et les comparaisons d'état deviennent i
 
 ### Pourquoi 8 et 4, et pas 6 et 3
 
-Le maximum **mesuré** sur les rosters Armageddon est de 6 capacités en vigueur sur une même
+⚠️ **Correction du 2026-08-04, à la livraison.** Le chiffre de 6 ci-dessous n'est pas une mesure
+mais une **projection** de l'état post-chantier 06 : les capacités citées n'existent pas encore
+dans le moteur. Mesuré sur le dépôt réel le jour de la livraison (`UnitRegistry` +
+`unit_has_rule_effect` sur les 13 effets, 179 datasheets, puis les 70 paires et 50 trios
+d'attachement légaux 19.01/24.22/24.34) : **2** effets au maximum par datasheet et **3** au
+maximum en vigueur sur une entité (`AssaultIntercessor + CaptainPowerWeaponBolter [+ Ancient]`).
+La marge réelle est donc de 5 slots aujourd'hui, et le dimensionnement à 8 se justifie par la
+projection — qui deviendra mesurable au chantier 06, où ce chiffre est à rouvrir.
+
+Le maximum **projeté** sur les rosters Armageddon est de 6 capacités en vigueur sur une même
 entité :
 
 > `Boyz + Warboss + Painboy` → Get da Good Bitz, Might Is Right, Da Biggest and da Best,

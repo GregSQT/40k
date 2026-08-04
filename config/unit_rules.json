@@ -1,61 +1,73 @@
 {
   "charge_after_advance": {
     "id": "charge_after_advance",
+    "obs_id": 1,
     "name": "Bounding Leap",
     "description": "Allows a unit to charge in the same turn it advanced."
   },
   "charge_after_flee": {
     "id": "charge_after_flee",
+    "obs_id": 2,
     "description": "Allows a unit to charge in a turn in which it fell back."
   },
   "charge_impact": {
     "id": "charge_impact",
+    "obs_id": 3,
     "description": "After this unit has charged, select one enemy unit withing engagement. Roll 1d6 : On a 4+, the target suffers 1 mortal wound"
   },
   "closest_target_penetration": {
     "id": "closest_target_penetration",
+    "obs_id": 4,
     "description": "When this unit makes a shooting attack at the closest eligible unit, add 1 to the weapon's penetration."
   },
   "reactive_move": {
     "id": "reactive_move",
+    "obs_id": 6,
     "name": "Skulking Horrors",
     "description": "Once per turn, after an enemy unit ends a move (normal, advance or retreat) within 9\" of this unit, it can perform a normal move up to D6\"."
   },
   "reroll_1_save_fight": {
     "id": "reroll_1_save_fight",
+    "obs_id": 7,
     "description": "During the fight phase, when this unit makes an attack, it can reroll rolls of 1 for the save rolls."
   },
   "reroll_1_tohit_fight": {
     "id": "reroll_1_tohit_fight",
+    "obs_id": 8,
     "description": "During the fight phase, when this unit makes an attack, it can reroll rolls of 1 for the hit rolls."
   },
   "reroll_1_towound": {
     "id": "reroll_1_towound",
+    "obs_id": 9,
     "description": "When this unit makes an attack, it can reroll rolls of 1 for the wound rolls."
   },
   "reroll_charge": {
     "id": "reroll_charge",
+    "obs_id": 10,
     "description": "When this unit makes a charge, it can reroll the charge roll."
   },
   "reroll_towound_target_on_objective": {
     "id": "reroll_towound_target_on_objective",
+    "obs_id": 11,
     "description": "When this unit makes an attack, it can reroll the wound rolls if the target unit is on an objective."
   },
   "shoot_after_advance": {
     "id": "shoot_after_advance",
+    "obs_id": 12,
     "description": "Allows a unit to shoot in a turn in which it advanced."
   },
   "shoot_after_flee": {
     "id": "shoot_after_flee",
+    "obs_id": 13,
     "description": "Allows a unit to shoot in a turn in which it fell back."
   },
   "move_after_shooting": {
     "id": "move_after_shooting",
+    "obs_id": 5,
     "has_parameter": true,
     "parameter_name": "distance",
     "description": "This unit can make a normal move up to 6\" after shooting if it is not adjacent to an enemy unit. If it does so, this unit will not be able to charge until the end of the turn"
   },
-
   "adaptable_predators": {
     "id": "adaptable_predators",
     "description": "Tyranid Warrior (range) : This unit can shoot and charge in a turn in which it fell back."

@@ -13,8 +13,8 @@
 >
 > | | Valeur en vigueur | Source de vérité (à relire, jamais à recopier) |
 > |---|---|---|
-> | `obs_size` | **20 780** (2026-08-04 — retrait de la clause « buddy » : `ez_relayed_by_ally` et `n_relayed_ez` disparaissent) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) ; porté par `config/agents/<agent>/<agent>_training_config.json` → `observation_params` |
-> | espace d'action | **1 107** (1 086 micro + 15 macro + **6 `CHOICE_i`**, V11 §9 P3-2) | `engine/macro_intents.py` (`TOTAL_ACTION_SIZE`), miroir de `shared_utils.SQUAD_ACTION_*` |
+> | `obs_size` | **20 752** (2026-08-04 — chantier 01 : les 13 bits `rule_<effet>` remplacés par 8 slots d'ids de capacité + 4 d'ids de statut, lus par deux `EmbeddingBag`) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) ; porté par `config/agents/<agent>/<agent>_training_config.json` → `observation_params` |
+> | espace d'action | **1 127** (1 086 micro + 15 macro + 6 `CHOICE_i` + **20 slots d'Oath of Moment**, chantier 01) | `engine/macro_intents.py` (`TOTAL_ACTION_SIZE`), miroir de `shared_utils.SQUAD_ACTION_*` |
 >
 > - **L'observation n'est plus un vecteur** : c'est un `Dict` de **tenseurs d'entités** (chaque
 >   unité — la mienne, mes alliées, les ennemies — porte le même schéma et passe par le même
@@ -803,12 +803,12 @@ Règles:
     },
 
     "observation_params": {
-      // SEULE clé de la section : recopie de ObservationBuilder.SQUAD_OBS_SIZE_TARGET (20780 au
+      // SEULE clé de la section : recopie de ObservationBuilder.SQUAD_OBS_SIZE_TARGET (20752 au
       // 2026-08-04 — VALEUR À RELIRE dans le code, jamais à recopier d'ici). Un écart lève à
       // l'init du moteur. perception_radius / max_nearby_units / max_valid_targets ont été
       // SUPPRIMÉS le 2026-07-28 avec le pipeline mono-figurine : l'étendue perçue est celle de
       // la grille égocentrique (engine/spatial_grid.py).
-      "obs_size": 20780
+      "obs_size": 20752
     },
     
     "model_params": {
