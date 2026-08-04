@@ -781,9 +781,11 @@ class W40KEngine(gym.Env):
                     )
                 elif key.endswith("_ids"):
                     # Ensembles d'ids de capacites/statuts (chantier 01) : des INDEX de ligne
-                    # d'embedding, bornes par le registre. Les laisser dans le Box non borne des
-                    # cles "_cont" aurait laisse passer un id hors table — que `EmbeddingBag`
-                    # transforme en acces memoire invalide, pas en erreur lisible.
+                    # d'embedding, bornes par le registre. Le Box DECLARE ce domaine (il decrit
+                    # l'espace, pour SB3 et pour qui lit la config) ; il ne le FAIT PAS RESPECTER
+                    # — rien ne valide jamais une observation contre son espace sur le chemin
+                    # d'entrainement. C'est `observation_builder._fill_id_slots` qui leve, au site
+                    # d'ecriture, ou l'erreur peut encore nommer l'escouade fautive.
                     from config_loader import OBS_ID_MAX
 
                     spaces_dict[key] = gym.spaces.Box(

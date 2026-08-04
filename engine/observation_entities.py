@@ -339,9 +339,16 @@ DECISION_CTX_BIN_FIELDS: Tuple[str, ...] = ("decision_pending",) + tuple(
 #: réseau de généraliser d'un slot de candidat à l'autre.
 #:
 #: Pour `rule_choice`, un candidat EST la règle qu'il accorde : le décrire par le one-hot de son
-#: effet (le MÊME vocabulaire `UNIT_RULE_EFFECT_IDS` que les drapeaux `rule_*` d'unité, §0.31)
-#: dit à l'agent CE QU'IL GAGNE. Un index de candidat, lui, ne dit rien : l'ordre des options
-#: dépend du prompt.
+#: effet (le MÊME vocabulaire `UNIT_RULE_EFFECT_IDS` que les capacités d'unité, §0.31) dit à
+#: l'agent CE QU'IL GAGNE. Un index de candidat, lui, ne dit rien : l'ordre des options dépend
+#: du prompt.
+#:
+#: ⚠️ Ce bloc reste POSITIONNEL — un bit par effet — là où les capacités d'unité sont passées aux
+#: ensembles d'`obs_id` (chantier 01). Ce n'est PAS un oubli de migration : un candidat de
+#: décision accorde UN effet, jamais un ensemble, et il n'y a que `MAX_DECISION_OPTIONS = 6`
+#: candidats — le registre coûte 14 bits UNE fois, pas 14 par entité, et il ne grossit que si un
+#: type de décision nouveau élargit le vocabulaire. Le migrer aux ids ferait bouger `obs_size`
+#: pour ~0 scalaire gagné, donc coûterait le retrain `--new` que le gel de §01 existe pour éviter.
 #:
 #: Aucun champ CONTINU n'existe aujourd'hui : `rule_choice` n'a aucune grandeur continue à
 #: décrire, et en inventer une, remplie de zéros, serait une valeur par défaut sans signifiant.

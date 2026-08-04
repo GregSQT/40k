@@ -126,6 +126,58 @@ _ABILITY_OBS_IDS: Optional[Dict[str, int]] = None
 _STATUS_OBS_IDS: Optional[Dict[str, int]] = None
 
 
+def _fill_id_slots(
+    obs_ids: List[int],
+    n_slots: int,
+    *,
+    registry: Dict[str, int],
+    kind: str,
+    slots_constant: str,
+    squad_id: str,
+) -> np.ndarray:
+    """Ecrit un ENSEMBLE d'`obs_id` dans `n_slots` : trie croissant, padde a 0, et LEVE au moindre
+    ecart.
+
+    UN SEUL ecrivain pour les capacites ET les statuts. Les chantiers 02, 03 et 06, qui poseront
+    les statuts, heritent donc du tri, du padding et des deux gardes ci-dessous sans les reecrire :
+    deux ecrivains jumeaux auraient diverge sur le premier des deux, et c'est le motif d'echec n°1
+    de ce depot.
+
+    GARDE DE DOMAINE — au SITE D'ECRITURE, et pas seulement dans les bornes du `Box`
+    d'observation. Rien ne valide jamais une observation contre son espace (`gym` ne le fait pas
+    tout seul, et ni `check_env` ni `observation_space.contains` n'existent sur le chemin
+    d'entrainement) : un id hors vocabulaire traverserait donc les bornes declarees et
+    atteindrait `EmbeddingBag`, ou il devient — sur GPU — un `device-side assert` asynchrone a la
+    pile trompeuse, a des dizaines de kernels du vrai coupable. Ici, l'erreur nomme l'escouade.
+
+    GARDE DE DEBORDEMENT — ERREUR, jamais troncature : tronquer ferait subir a l'agent des regles
+    qu'il ne percoit pas, exactement le trou que V11 §0.30 avait ferme.
+    """
+    from config_loader import OBS_ID_MAX, OBS_ID_MIN
+
+    by_obs_id = {obs_id: name for name, obs_id in registry.items()}
+    out_of_range = [i for i in obs_ids if not (OBS_ID_MIN <= i <= OBS_ID_MAX)]
+    if out_of_range:
+        raise ValueError(
+            f"Escouade {squad_id} : {kind} d'obs_id hors domaine "
+            f"[{OBS_ID_MIN}, {OBS_ID_MAX}] : {out_of_range} "
+            f"({[by_obs_id.get(i, '?') for i in out_of_range]}). Un id hors table d'embedding "
+            f"n'est pas rattrapable en aval : il devient un acces memoire invalide."
+        )
+    ordered = sorted(obs_ids)
+    if len(ordered) > n_slots:
+        raise ValueError(
+            f"Escouade {squad_id} : {len(ordered)} {kind} en vigueur pour {n_slots} slots "
+            f"d'observation. En exces (les moins prioritaires du tri croissant) : "
+            f"{[by_obs_id.get(i, '?') for i in ordered[n_slots:]]}. Augmenter {slots_constant} "
+            f"(engine/observation_entities.py) — ce qui change obs_size et impose un retrain "
+            f"`--new`."
+        )
+    slots = np.zeros(n_slots, dtype=np.float32)
+    slots[: len(ordered)] = ordered
+    return slots
+
+
 class ObservationBuilder:
     """Builds observations for the agent."""
 
@@ -227,6 +279,11 @@ class ObservationBuilder:
     #   global_bin         (GLOBAL_BIN_SIZE,)               contexte discret, JAMAIS normalisé
     #   allies_cont        (K_ALLY_SLOTS, UNIT_CONT_SIZE)   ⚠ LIGNE 0 = l'unité ACTIVE
     #   allies_bin         (K_ALLY_SLOTS, UNIT_BIN_SIZE)
+    #   allies_ability_ids (K_ALLY_SLOTS, UNIT_ABILITY_SLOTS)  ENSEMBLE d'`obs_id` (chantier 01) :
+    #   allies_status_ids  (K_ALLY_SLOTS, UNIT_STATUS_SLOTS)   des INDEX de ligne d'embedding,
+    #                                                       triés croissants et paddés à 0, JAMAIS
+    #                                                       normalisés. Le slot k n'a aucune
+    #                                                       sémantique propre (cf. `_fill_id_slots`)
     #   allies_wpn_cont    (K_ALLY_SLOTS, K_WEAPONS, PROFILE_CONT_SIZE)
     #   allies_wpn_bin     (K_ALLY_SLOTS, K_WEAPONS, PROFILE_BIN_SIZE)
     #   allies_types_cont  (K_ALLY_SLOTS, K_MODEL_TYPES, MODEL_TYPE_CONT_SIZE)
@@ -1219,43 +1276,36 @@ class ObservationBuilder:
         # bits qu'elle remplace : elle résout les règles SOURCES vers leurs effets (une capacité
         # nommée confère un effet technique), donc ce qui est écrit décrit ce que le moteur
         # applique — et le jeu produit est identique à celui d'avant le chantier.
-        obs_ids = unit_ability_obs_ids()
-        ability_ids = np.zeros(UNIT_ABILITY_SLOTS, dtype=np.float32)
-        in_effect = sorted(
-            obs_ids[rule_id]
-            for rule_id in UNIT_RULE_EFFECT_IDS
-            if unit_has_rule_effect(unit, rule_id)
+        ability_obs_ids = unit_ability_obs_ids()
+        ability_ids = _fill_id_slots(
+            [
+                ability_obs_ids[rule_id]
+                for rule_id in UNIT_RULE_EFFECT_IDS
+                if unit_has_rule_effect(unit, rule_id)
+            ],
+            UNIT_ABILITY_SLOTS,
+            registry=ability_obs_ids,
+            kind="capacites",
+            slots_constant="UNIT_ABILITY_SLOTS",
+            squad_id=squad_id,
         )
-        if len(in_effect) > UNIT_ABILITY_SLOTS:
-            # ERREUR, jamais troncature : tronquer ferait subir à l'agent des règles qu'il ne
-            # perçoit pas — exactement le trou que V11 §0.30 avait fermé.
-            by_obs_id = {obs_id: rule_id for rule_id, obs_id in obs_ids.items()}
-            raise ValueError(
-                f"Escouade {squad_id} : {len(in_effect)} capacites en vigueur pour "
-                f"{UNIT_ABILITY_SLOTS} slots d'observation. En exces (les moins prioritaires du "
-                f"tri croissant) : {[by_obs_id[i] for i in in_effect[UNIT_ABILITY_SLOTS:]]}. "
-                f"Augmenter UNIT_ABILITY_SLOTS (engine/observation_entities.py) — ce qui change "
-                f"obs_size et impose un retrain `--new`."
-            )
-        ability_ids[: len(in_effect)] = in_effect
         # Statuts : les trois du registre (`battle_shock`, `oath_target`, `suppressed`) sont
         # DÉCLARÉS mais pas encore posés — ce sont les chantiers 02, 03 et 06 qui les
-        # renseigneront. Le tenseur reste donc nul, ce qui est l'état exact du jeu aujourd'hui :
+        # renseigneront. La liste est donc vide, ce qui est l'état exact du jeu aujourd'hui :
         # aucun de ces statuts n'était observé avant ce chantier non plus.
         #
-        # Le registre est malgré tout lu ICI, sur le chemin de PRODUCTION : un
-        # `unit_statuses.json` malformé, ou un statut déclaré de plus que de slots, doit lever
-        # maintenant et pas au chantier qui posera le statut — à ce moment-là, le défaut serait
-        # une capacité que l'agent subit sans la percevoir, faute de slot pour l'écrire.
-        declared_statuses = unit_status_obs_ids()
-        if len(declared_statuses) > UNIT_STATUS_SLOTS:
-            raise ValueError(
-                f"config/unit_statuses.json declare {len(declared_statuses)} statuts "
-                f"({sorted(declared_statuses)}) pour {UNIT_STATUS_SLOTS} slots d'observation. "
-                f"Augmenter UNIT_STATUS_SLOTS (engine/observation_entities.py) — ce qui change "
-                f"obs_size et impose un retrain `--new`."
-            )
-        status_ids = np.zeros(UNIT_STATUS_SLOTS, dtype=np.float32)
+        # Elle passe malgré tout par le MÊME écrivain, sur le chemin de PRODUCTION : c'est ce qui
+        # fait hériter les chantiers 02/03/06 du tri, du padding, du garde de débordement et du
+        # garde de domaine sans avoir à les réécrire — et un `unit_statuses.json` malformé lève
+        # ici plutôt qu'au chantier qui posera le statut.
+        status_ids = _fill_id_slots(
+            [],
+            UNIT_STATUS_SLOTS,
+            registry=unit_status_obs_ids(),
+            kind="statuts",
+            slots_constant="UNIT_STATUS_SLOTS",
+            squad_id=squad_id,
+        )
 
         if not is_ally:
             # Couvert et visibilité de cette entité ENNEMIE vus depuis l'unité observatrice.

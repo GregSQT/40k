@@ -41,6 +41,7 @@ from engine.observation_builder import unit_ability_obs_ids
 from engine.observation_entities import (
     UNIT_ABILITY_SLOTS,
     UNIT_RULE_EFFECT_IDS,
+    UNIT_STATUS_SLOTS,
     unit_bin_index,
 )
 from engine.w40k_core import W40KEngine
@@ -291,6 +292,76 @@ def test_duplicate_obs_id_in_the_registry_is_refused_at_load():
         _validate_obs_ids({"a": {"id": "a", "obs_id": 0}}, "test")
     with pytest.raises(ValueError, match="out of range"):
         _validate_obs_ids({"a": {"id": "a", "obs_id": 128}}, "test")
+
+
+def test_out_of_vocabulary_id_raises_at_the_write_site():
+    """Verrou de DOMAINE : un `obs_id` hors table leve A L'ECRITURE, pas en aval.
+
+    RIEN ne valide une observation contre son espace sur le chemin d'entrainement (ni
+    `check_env`, ni `observation_space.contains`) : les bornes du `Box` DECLARENT le domaine,
+    elles ne le font pas respecter. Un id hors vocabulaire atteindrait donc `EmbeddingBag`, ou il
+    devient — sur GPU — un `device-side assert` asynchrone a la pile trompeuse. Ici, l'erreur
+    nomme l'escouade.
+    """
+    import pytest
+
+    from config_loader import OBS_ID_MAX
+    from engine.observation_builder import _fill_id_slots
+
+    registry = {"a": 1}
+    for bad in (OBS_ID_MAX + 1, 0, -1):
+        with pytest.raises(ValueError, match="hors domaine"):
+            _fill_id_slots(
+                [bad], UNIT_ABILITY_SLOTS, registry=registry, kind="capacites",
+                slots_constant="UNIT_ABILITY_SLOTS", squad_id="101",
+            )
+
+
+def test_the_declared_observation_space_bounds_the_id_keys():
+    """Les bornes annoncees par l'espace d'observation sont celles du registre.
+
+    Elles ne remplacent pas le garde ci-dessus, mais un `Box` non borne dirait a SB3 (et a qui lit
+    la config) qu'un id peut valoir n'importe quoi.
+    """
+    from config_loader import OBS_ID_MAX
+
+    eng = _load([_BODYGUARD, _ENEMY])
+    id_keys = [k for k in eng.observation_space.spaces if k.endswith("_ids")]
+    assert sorted(id_keys) == [
+        "allies_ability_ids", "allies_status_ids",
+        "enemies_ability_ids", "enemies_status_ids",
+    ]
+    for key in id_keys:
+        space = eng.observation_space.spaces[key]
+        assert float(space.low.min()) == 0.0, f"{key} : borne basse != 0 (padding)"
+        assert float(space.high.max()) == float(OBS_ID_MAX), f"{key} : borne haute != OBS_ID_MAX"
+
+
+def test_the_status_slots_go_through_the_same_writer():
+    """Les statuts empruntent le MEME ecrivain que les capacites (tri, padding, gardes).
+
+    C'est ce qui fait heriter les chantiers 02/03/06 des gardes sans les reecrire — deux
+    ecrivains jumeaux auraient diverge sur le premier des deux.
+    """
+    import pytest
+
+    from engine.observation_builder import _fill_id_slots, unit_status_obs_ids
+
+    statuses = unit_status_obs_ids()
+    written = _fill_id_slots(
+        [statuses["suppressed"], statuses["battle_shock"]],
+        UNIT_STATUS_SLOTS, registry=statuses, kind="statuts",
+        slots_constant="UNIT_STATUS_SLOTS", squad_id="101",
+    )
+    assert list(written) == [
+        statuses["battle_shock"], statuses["suppressed"], 0.0, 0.0
+    ], "tri croissant ou padding non appliques aux statuts"
+
+    with pytest.raises(ValueError, match="statuts en vigueur"):
+        _fill_id_slots(
+            [1, 2, 3, 4, 5], UNIT_STATUS_SLOTS, registry=statuses, kind="statuts",
+            slots_constant="UNIT_STATUS_SLOTS", squad_id="101",
+        )
 
 
 def test_the_real_registries_load_clean():
