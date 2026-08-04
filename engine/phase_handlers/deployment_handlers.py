@@ -162,24 +162,18 @@ def _deployed_occupied_positions(
     restreint aux figurines à ce niveau (deux figs à des étages différents
     ne se gênent pas — murs mis à part, cf. stage.md § murs verticaux prolongés).
     """
-    from engine.phase_handlers.shared_utils import entry_is_on_battlefield
+    from engine.spatial_relations import entries_on_battlefield, entry_footprint
 
     units_cache = require_key(game_state, "units_cache")
     occupied: Set[Tuple[int, int]] = set()
     if level is None:
-        for uid, entry in units_cache.items():
-            if str(uid) == str(exclude_squad_id) or not entry_is_on_battlefield(entry):
-                continue
-            occ = entry.get("occupied_hexes")  # get allowed
-            if occ:
-                occupied.update((int(c), int(r)) for c, r in occ)
+        for _uid, entry in entries_on_battlefield(units_cache, exclude_id=exclude_squad_id):
+            occupied.update((int(c), int(r)) for c, r in entry_footprint(entry))
         return occupied
     # Filtrage par niveau : empreinte par-figurine des figs présentes au niveau demandé.
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    for uid, entry in units_cache.items():
-        if str(uid) == str(exclude_squad_id) or not entry_is_on_battlefield(entry):
-            continue
+    for uid, _entry in entries_on_battlefield(units_cache, exclude_id=exclude_squad_id):
         for mid in squad_models.get(str(uid), []):  # get allowed
             m = models_cache.get(mid)
             if m is None or int(require_key(m, "level")) != level:

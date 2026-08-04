@@ -40,6 +40,7 @@ from .shared_utils import (
     build_occupied_positions_set, build_enemy_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
     is_placement_valid_with_clearance, candidate_overlaps_any_unit,
     _synth_model_entry,
+    enemy_entries_on_battlefield, entries_on_battlefield, entry_footprint, entry_is_on_battlefield,
     roll_charge_distance, unit_can_reroll_charge,
     MovePlan, parse_model_plan, parse_model_plan_as_map, SQUAD_RIGID_MOVE_DESTINATION_LEVEL,
 )
@@ -416,14 +417,15 @@ def _build_charge_anchors_in_zone(
     te = units_cache.get(str(target["id"]))
     if not te:
         return []
-    target_fp = set(te.get("occupied_hexes") or {(int(te["col"]), int(te["row"]))})
+    target_fp = set(entry_footprint(te))
     engagement_zone = int(get_engagement_zone(game_state))
 
     unit_id_str = str(unit["id"])
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
     fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
 
-    charger_fp_now = set((units_cache.get(unit_id_str) or {}).get("occupied_hexes") or set())
+    _charger_entry_now = units_cache.get(unit_id_str)
+    charger_fp_now = set(entry_footprint(_charger_entry_now)) if _charger_entry_now else set()
     closest_ch, _ = _charge_closest_charger_hex_to_target(charger_fp_now, target_fp)
 
     anchors: List[Tuple[int, int]] = []
@@ -464,7 +466,7 @@ def _charge_anchor_is_socle_a_socle_with_target(
     te = units_cache.get(str(require_key(target, "id")))
     if not te:
         return False
-    target_fp = set(te.get("occupied_hexes") or {(int(te["col"]), int(te["row"]))})
+    target_fp = set(entry_footprint(te))
     fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
     candidate_fp = _candidate_footprint_charge(int(anchor_col), int(anchor_row), unit, game_state, fp_pair)
     if candidate_fp & target_fp:
@@ -492,7 +494,7 @@ def _charge_anchor_within_1_of_target(
     if not te:
         return False
     within_1_zone = int(game_state["inches_to_subhex"])  # 1" en sous-hex
-    target_fp = set(te.get("occupied_hexes") or {(int(te["col"]), int(te["row"]))})
+    target_fp = set(entry_footprint(te))
     fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
     candidate_fp = _candidate_footprint_charge(int(anchor_col), int(anchor_row), unit, game_state, fp_pair)
     if candidate_fp & target_fp:
@@ -594,19 +596,14 @@ def _charge_bfs_max_distance(
     if not ue:
         return rid
 
-    own_hexes = ue.get("occupied_hexes")
-    if not own_hexes:
-        own_hexes = {(int(ue["col"]), int(ue["row"]))}
+    own_hexes = entry_footprint(ue)
     # Union des empreintes des cibles déclarées (la boucle ci-dessous garde la plus proche).
     enemy_fp: Set[Tuple[int, int]] = set()
     for tid in tids:
         te = units_cache.get(tid)
         if not te:
             continue
-        tfp = te.get("occupied_hexes")
-        if not tfp:
-            tfp = {(int(te["col"]), int(te["row"]))}
-        enemy_fp |= {(int(c), int(r)) for c, r in tfp}
+        enemy_fp |= {(int(c), int(r)) for c, r in entry_footprint(te)}
     if not enemy_fp:
         return rid
 
@@ -680,9 +677,7 @@ def _charge_impossible_by_primary_to_enemy_hex_lower_bound(
     own = units_cache.get(unit_id_str)
     if not own:
         return False
-    own_hexes_raw = own.get("occupied_hexes")
-    if not own_hexes_raw:
-        own_hexes_raw = {(int(own["col"]), int(own["row"]))}
+    own_hexes_raw = entry_footprint(own)
     s_charger = 0
     for oc, orow in own_hexes_raw:
         dhc = hex_distance(int(start_col), int(start_row), int(oc), int(orow))
@@ -693,9 +688,7 @@ def _charge_impossible_by_primary_to_enemy_hex_lower_bound(
     for _, enemy_entry in indexed_enemy_engagement:
         ec = int(enemy_entry["col"])
         er = int(enemy_entry["row"])
-        efp_raw = enemy_entry.get("occupied_hexes")
-        if not efp_raw:
-            efp_raw = {(ec, er)}
+        efp_raw = entry_footprint(enemy_entry)
         for exc, exr in efp_raw:
             dse = hex_distance(int(start_col), int(start_row), int(exc), int(exr))
             if m is None or dse < m:
@@ -721,9 +714,7 @@ def _charge_primary_footprint_radius(
     own = units_cache.get(unit_id_str)
     if not own:
         raise KeyError(f"Unit {unit_id_str} missing from units_cache")
-    own_hexes = own.get("occupied_hexes")
-    if not own_hexes:
-        own_hexes = {(int(own["col"]), int(own["row"]))}
+    own_hexes = entry_footprint(own)
 
     radius = 0
     for oc, orow in own_hexes:
@@ -792,10 +783,9 @@ def _charge_reverse_goal_bfs_for_eligibility(
     for _, _gz_enemy in indexed_enemy_engagement:
         _gz_ec = int(require_key(_gz_enemy, "col"))
         _gz_er = int(require_key(_gz_enemy, "row"))
-        _gz_fp = _gz_enemy.get("occupied_hexes")
-        _gz_fp_r = (
-            max(hex_distance(_gz_ec, _gz_er, int(_fc), int(_fr)) for _fc, _fr in _gz_fp)
-            if _gz_fp else 0
+        _gz_fp = entry_footprint(_gz_enemy)
+        _gz_fp_r = max(
+            hex_distance(_gz_ec, _gz_er, int(_fc), int(_fr)) for _fc, _fr in _gz_fp
         )
         _gz_eff_r = goal_search_radius + _gz_fp_r
         enemy_goal_zone |= dilate_hex_set({(_gz_ec, _gz_er)}, _gz_eff_r, board_cols, board_rows)
@@ -816,9 +806,7 @@ def _charge_reverse_goal_bfs_for_eligibility(
     for eid, enemy_entry in indexed_enemy_engagement:
         ec = int(enemy_entry["col"])
         er = int(enemy_entry["row"])
-        enemy_fp = enemy_entry.get("occupied_hexes")
-        if not enemy_fp:
-            enemy_fp = {(ec, er)}
+        enemy_fp = entry_footprint(enemy_entry)
         enemy_engagement_zones[eid] = dilate_hex_set(
             {(int(fc), int(fr)) for fc, fr in enemy_fp},
             engagement_zone,
@@ -875,7 +863,7 @@ def _charge_reverse_goal_bfs_for_eligibility(
         for eid, enemy_entry in indexed_enemy_engagement:
             ec = int(enemy_entry["col"])
             er = int(enemy_entry["row"])
-            enemy_fp = enemy_entry.get("occupied_hexes", {(ec, er)})
+            enemy_fp = entry_footprint(enemy_entry)
             if candidate_fp & enemy_fp:
                 hex_overlaps_enemy = True
                 break
@@ -1138,8 +1126,8 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
             continue  # Wrong player
         # HORS TABLE (réserves 20.01 / attente de déploiement) : pas de position d'où charger.
         # Une unité arrivée de réserves ce tour-ci, elle, PEUT charger : le verrou 20.04 tombe
-        # au début de cette phase (`clear_ingress_move_lock`).
-        from engine.phase_handlers.shared_utils import entry_is_on_battlefield
+        # au début de cette phase (`clear_ingress_move_lock`). Règle côté CHARGEUR, pas un filtre
+        # d'énumération d'ennemis (ceux-là sont dans `enemy_entries_on_battlefield`).
         if not entry_is_on_battlefield(cache_entry):
             continue
         units_own_n += 1
@@ -1892,15 +1880,13 @@ def _compute_plan_context(
     target_entries: List[Dict[str, Any]] = []
     target_fps: List[Set[Tuple[int, int]]] = []
     nontarget_entries: List[Dict[str, Any]] = []
-    for eid, entry in units_cache.items():
-        if int(entry["player"]) != player:
-            occ = entry.get("occupied_hexes")
-            cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
-            if str(eid) in declared:
-                target_entries.append(entry)
-                target_fps.append(cells)
-            else:
-                nontarget_entries.append(entry)
+    for eid, entry in enemy_entries_on_battlefield(units_cache, player):
+        cells = set(entry_footprint(entry))
+        if str(eid) in declared:
+            target_entries.append(entry)
+            target_fps.append(cells)
+        else:
+            nontarget_entries.append(entry)
     # Blocage de traversée SOL par-figurine niveau 0 (ennemis) : une fig ennemie à l'étage ne bloque
     # pas le pas d'un chargeur au sol (03.04). Sert path_blocked (BFS 2D) et les obstacles sol du climb.
     # Miroir move/fight (build_enemy_occupied_positions_set).
@@ -2102,8 +2088,7 @@ def _compute_plan_context(
         if nontarget_entries:
             ntgt_union: Set[Tuple[int, int]] = set()
             for ne in nontarget_entries:
-                occ = ne.get("occupied_hexes")
-                ntgt_union |= set(occ) if occ else {(int(ne["col"]), int(ne["row"]))}
+                ntgt_union |= set(entry_footprint(ne))
             _td2 = time.perf_counter() if _perf else None
             dist_ntgt = _dist_field(ntgt_union, ez + _ENG_MARGIN)
             if _perf and _td2 is not None:
@@ -2194,7 +2179,7 @@ def _compute_plan_context(
 
         # Propriétés constantes par ennemi (forme, multi-figurine) + empreinte + masques.
         nontarget_fps = [
-            set(ne["occupied_hexes"]) if ne.get("occupied_hexes") else {(int(ne["col"]), int(ne["row"]))}
+            set(entry_footprint(ne))
             for ne in nontarget_entries
         ]
         tgt_shape = [te["BASE_SHAPE"] for te in target_entries]
@@ -2748,11 +2733,10 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_dis
     # Get all enemies - CRITICAL: is_unit_alive so dead units never enter pool
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(unit["player"]) if unit["player"] is not None else None
-    # HORS TABLE (réserves 20.01) : vivante mais absente du champ de bataille — jamais chargeable.
-    from engine.phase_handlers.shared_utils import entry_is_on_battlefield
-    enemies = [enemy_id for enemy_id, cache_entry in units_cache.items()
-               if int(cache_entry["player"]) != unit_player
-               and entry_is_on_battlefield(cache_entry)]
+    # Hors table (réserves 20.01) écarté par l'énumérateur : jamais chargeable.
+    enemies = [
+        enemy_id for enemy_id, _cache_entry in enemy_entries_on_battlefield(units_cache, unit_player)
+    ]
 
     from engine.spatial_relations import unit_entries_within_engagement_zone
     from .shared_utils import get_engagement_zone, build_occupied_positions_set
@@ -2774,7 +2758,7 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_dis
         if unit_entries_within_engagement_zone(unit_entry, enemy_entry, engagement_zone):
             continue
         ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
-        enemy_fp = enemy_entry.get("occupied_hexes", {(ec, er)})
+        enemy_fp = entry_footprint(enemy_entry)
         enemy_index.append((enemy_id, enemy_entry, enemy_fp))
 
     per_enemy_has_geom: Dict[Any, bool] = {eid: False for eid, _, _ in enemy_index}
@@ -3251,8 +3235,7 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
         _unit_player = int(unit["player"])
         _elig = any(
             ranged_in_range(_charger_socle, socle_from_cache_entry(e), int(CHARGE_MAX_DISTANCE), "euclidean")
-            for _eid, e in units_cache.items()
-            if int(e["player"]) != _unit_player
+            for _eid, e in enemy_entries_on_battlefield(units_cache, _unit_player)
         )
         _hvt_cache[_hvt_key] = _elig
         return _elig
@@ -3267,20 +3250,19 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     _charger_entry = require_key(units_cache, str(unit["id"]))
     unit_col, unit_row = int(require_key(_charger_entry, "col")), int(require_key(_charger_entry, "row"))
     unit_player = int(unit["player"])
-    _charger_occ = _charger_entry.get("occupied_hexes") or {(unit_col, unit_row)}
+    _charger_occ = entry_footprint(_charger_entry)
     _charger_radius = max(
         _hex_distance(unit_col, unit_row, int(_c), int(_r)) for _c, _r in _charger_occ
     )
 
     def _enemy_radius(_e: Dict[str, Any], _ec: int, _er: int) -> int:
-        _occ = _e.get("occupied_hexes") or {(_ec, _er)}
+        _occ = entry_footprint(_e)
         return max(_hex_distance(_ec, _er, int(_c), int(_r)) for _c, _r in _occ)
 
     _any_enemy_in_range = any(
         _hex_distance(unit_col, unit_row, _ec, _er)
         <= CHARGE_MAX_DISTANCE + 1 + _charger_radius + _enemy_radius(e, _ec, _er)
-        for e in units_cache.values()
-        if int(e["player"]) != unit_player
+        for _eid, e in enemy_entries_on_battlefield(units_cache, unit_player)
         for _ec, _er in (((int(e["col"]), int(e["row"])),))
     )
     if not _any_enemy_in_range:
@@ -3302,8 +3284,7 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(unit["player"]) if unit["player"] is not None else None
     enemy_n = sum(
-        1 for _, enemy_entry in units_cache.items()
-        if int(enemy_entry["player"]) != unit_player
+        1 for _eid, _enemy_entry in enemy_entries_on_battlefield(units_cache, unit_player)
     )
 
     outcome = "hit" if valid_any else "miss"
@@ -3348,21 +3329,19 @@ def _find_adjacent_enemy_at_destination(game_state: Dict[str, Any], col: int, ro
     """
     # First check if destination itself is occupied by an enemy (distance == 0)
     units_cache = require_key(game_state, "units_cache")
-    for enemy_id, enemy_entry in units_cache.items():
-        if enemy_entry["player"] != player:
-            enemy_pos = (enemy_entry["col"], enemy_entry["row"])
-            if enemy_pos == (col, row):
-                # Enemy is ON the destination - this is invalid for charge
-                return None
+    for enemy_id, enemy_entry in enemy_entries_on_battlefield(units_cache, player):
+        enemy_pos = (enemy_entry["col"], enemy_entry["row"])
+        if enemy_pos == (col, row):
+            # Enemy is ON the destination - this is invalid for charge
+            return None
     
     # Then check neighbors (adjacent enemies, distance == 1)
     hex_neighbors = set(get_hex_neighbors(col, row))
     adjacent_enemies = []
-    for enemy_id, enemy_entry in units_cache.items():
-        if enemy_entry["player"] != player:
-            enemy_pos = (enemy_entry["col"], enemy_entry["row"])
-            if enemy_pos in hex_neighbors:
-                adjacent_enemies.append(enemy_id)
+    for enemy_id, enemy_entry in enemy_entries_on_battlefield(units_cache, player):
+        enemy_pos = (enemy_entry["col"], enemy_entry["row"])
+        if enemy_pos in hex_neighbors:
+            adjacent_enemies.append(enemy_id)
     
     if adjacent_enemies:
         result_id = adjacent_enemies[0]
@@ -3434,8 +3413,10 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                 return []  # Cible déclarée invalide
             _multi_declared.add(str(_tt["id"]))
         unit_player = int(unit["player"]) if unit["player"] is not None else None
-        enemies = [enemy_id for enemy_id, cache_entry in units_cache.items()
-                   if int(cache_entry["player"]) != unit_player]
+        enemies = [
+            enemy_id
+            for enemy_id, _cache_entry in enemy_entries_on_battlefield(units_cache, unit_player)
+        ]
         if not enemies:
             return []  # No enemies to charge
     elif target_id:
@@ -3446,8 +3427,10 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     else:
         # Get all enemy positions for adjacency checks (used during activation preview)
         unit_player = int(unit["player"]) if unit["player"] is not None else None
-        enemies = [enemy_id for enemy_id, cache_entry in units_cache.items()
-                   if int(cache_entry["player"]) != unit_player]
+        enemies = [
+            enemy_id
+            for enemy_id, _cache_entry in enemy_entries_on_battlefield(units_cache, unit_player)
+        ]
         if not enemies:
             return []  # No enemies to charge
 
@@ -3490,7 +3473,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         # Remove moving unit's footprint from the pre-computed set
         units_cache_ref = require_key(game_state, "units_cache")
         own_entry = units_cache_ref.get(unit_id_str)
-        own_hexes = own_entry.get("occupied_hexes", {start_pos}) if own_entry else {start_pos}
+        own_hexes = entry_footprint(own_entry) if own_entry else {start_pos}
         occupied_positions = full_occupied_positions - own_hexes
     else:
         occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
@@ -3542,7 +3525,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         _charge_enemy_prox.append((_ec, _er, engagement_zone + _mover_r + _e_r + 1))
 
     def _min_dist_to_enemy(start_c: int, start_r: int, ce: Dict[str, Any], pec: int, per: int) -> int:
-        occ = ce.get("occupied_hexes") or {(pec, per)}
+        occ = entry_footprint(ce)
         return min(_calculate_hex_distance(start_c, start_r, int(mc), int(mr)) for mc, mr in occ)
     if _charge_enemy_prox and all(
         _min_dist_to_enemy(start_col, start_row, ce, pec, per) > bfs_max_distance + peth
@@ -3666,7 +3649,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                 _cur_engaging: Optional[Set[str]] = set() if _track_engages else None
                 for _eid, enemy_entry in indexed_enemy_engagement:
                     ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
-                    enemy_fp = enemy_entry.get("occupied_hexes", {(ec, er)})
+                    enemy_fp = entry_footprint(enemy_entry)
                     if candidate_fp & enemy_fp:
                         hex_overlaps_enemy = True
                         break
@@ -3736,7 +3719,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         # Ancres candidates = cellules du champ proches d'un ennemi (seuil = EZ + rayons, cf. _charge_enemy_prox).
         _eu_near: Set[Tuple[int, int]] = set()
         for (_ene_id, _ce_near), (_pec, _per, _peth) in zip(indexed_enemy_engagement, _charge_enemy_prox):
-            _ce_occ = _ce_near.get("occupied_hexes") or {(_pec, _per)}
+            _ce_occ = entry_footprint(_ce_near)
             _eu_near.update(_eu_dilate({(int(c), int(r)) for c, r in _ce_occ}, _peth))
 
         valid_destinations = []
@@ -3762,7 +3745,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             _cur_engaging: Optional[Set[str]] = set() if _track_engages else None
             for _eid, enemy_entry in indexed_enemy_engagement:
                 ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
-                enemy_fp = enemy_entry.get("occupied_hexes", {(ec, er)})
+                enemy_fp = entry_footprint(enemy_entry)
                 if candidate_fp & enemy_fp:
                     hex_overlaps_enemy = True
                     break
@@ -3814,7 +3797,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     from engine.hex_utils import dilate_hex_set_unbounded as _dilate_unbounded
     _near_enemy_set: Set[Tuple[int, int]] = set()
     for (_ene_id_prox, _ce_prox), (_pec, _per, _peth) in zip(indexed_enemy_engagement, _charge_enemy_prox):
-        _ce_occ_all: Set[Tuple[int, int]] = _ce_prox.get("occupied_hexes") or {(_pec, _per)}
+        _ce_occ_all: Set[Tuple[int, int]] = entry_footprint(_ce_prox)
         _near_enemy_set.update(_dilate_unbounded({(int(c), int(r)) for c, r in _ce_occ_all}, _peth))
 
     # Opt 3 — neighbor offsets inlinés : évite get_hex_neighbors (normalize_coordinates + int() redondants).
@@ -3828,7 +3811,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     _bfs_enemy_eng_zones: Dict[Any, Set[Tuple[int, int]]] = {}
     _bfs_rr_near_set: Dict[Any, Set[Tuple[int, int]]] = {}  # replaces _bfs_rr_prox for round-round
     for (_bfs_eid, _bfs_ee), (_bfs_pec, _bfs_per, _bfs_peth) in zip(indexed_enemy_engagement, _charge_enemy_prox):
-        _bfs_ee_occ_all = _bfs_ee.get("occupied_hexes") or {(int(_bfs_pec), int(_bfs_per))}
+        _bfs_ee_occ_all = entry_footprint(_bfs_ee)
         if _bfs_is_mover_round and _bfs_ee.get("BASE_SHAPE") == "round":
             # Round-round: proximity set from all model positions (not just anchor)
             _bfs_rr_near_set[_bfs_eid] = _dilate_unbounded(
@@ -3930,7 +3913,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             )
             for _eid, enemy_entry in indexed_enemy_engagement:
                 ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
-                enemy_fp = enemy_entry.get("occupied_hexes", {(ec, er)})
+                enemy_fp = entry_footprint(enemy_entry)
                 if candidate_fp & enemy_fp:
                     hex_overlaps_enemy = True
                     break
@@ -4187,12 +4170,12 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         _uc = require_key(game_state, "units_cache")
         _ue = _uc.get(unit_id)
         if _ue:
-            _charger_fp = set(_ue.get("occupied_hexes") or {(int(_ue["col"]), int(_ue["row"]))})
+            _charger_fp = set(entry_footprint(_ue))
             _union_tfp: Set[Tuple[int, int]] = set()
             for _te in target_entries:
                 _tc, _tr = int(_te["col"]), int(_te["row"])
                 _te_cache = _uc.get(str(_te["id"])) or {}
-                _union_tfp |= set(_te_cache.get("occupied_hexes") or {(_tc, _tr)})
+                _union_tfp |= set(entry_footprint(_te_cache))
             _closest_ch, _ = _charge_closest_charger_hex_to_target(_charger_fp, _union_tfp)
             charge_reference_hex = (int(_closest_ch[0]), int(_closest_ch[1]))
         if _perf and _t_tsel0 is not None and _t_bfs0 is not None and _t_bfs1 is not None:
@@ -4469,14 +4452,11 @@ def _charge_model_pos_is_closer(
     declared = {str(t) for t in target_ids}
     target_fps: List[Set[Tuple[int, int]]] = []
     nontarget_entries: List[Dict[str, Any]] = []
-    for eid, entry in units_cache.items():
-        if int(entry["player"]) != player:
-            occ = entry.get("occupied_hexes")
-            cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
-            if str(eid) in declared:
-                target_fps.append(cells)
-            else:
-                nontarget_entries.append(entry)
+    for eid, entry in enemy_entries_on_battlefield(units_cache, player):
+        if str(eid) in declared:
+            target_fps.append(set(entry_footprint(entry)))
+        else:
+            nontarget_entries.append(entry)
     if not target_fps:
         return False
     # Blocage de traversée SOL par-figurine niveau 0 (ennemis) : une fig ennemie à l'étage ne bloque
@@ -4794,14 +4774,10 @@ def charge_autoplace_plan(
     target_entry_by_id: Dict[str, Dict[str, Any]] = {}
     target_fp_by_id: Dict[str, Set[Tuple[int, int]]] = {}
     nontarget_entries: List[Dict[str, Any]] = []
-    for eid, entry in units_cache.items():
-        if int(entry["player"]) == player:
-            continue
-        occ = entry.get("occupied_hexes")
-        cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
+    for eid, entry in enemy_entries_on_battlefield(units_cache, player):
         if str(eid) in declared:
             target_entry_by_id[str(eid)] = entry
-            target_fp_by_id[str(eid)] = cells
+            target_fp_by_id[str(eid)] = set(entry_footprint(entry))
         else:
             nontarget_entries.append(entry)
     # Blocage de traversée SOL par-figurine niveau 0 (ennemis) : une fig ennemie à l'étage ne bloque
@@ -4924,7 +4900,7 @@ def charge_autoplace_plan(
     }
     nontarget_entries = [
         ne for ne in nontarget_entries
-        if set(ne.get("occupied_hexes") or {(int(ne["col"]), int(ne["row"]))}) & _zone
+        if set(entry_footprint(ne)) & _zone
     ]
 
     # all_slots[i] = (col, row, socle, slot_min_to_targets, engaged_target_ids, level)
@@ -4973,7 +4949,7 @@ def charge_autoplace_plan(
         )
         if euclid:
             return ("euclid", entry)
-        e_fp = set(entry.get("occupied_hexes") or {(int(entry["col"]), int(entry["row"]))})
+        e_fp = set(entry_footprint(entry))
         return ("fp", dilate_hex_set_unbounded(e_fp, ez))
 
     def _fp_engages(fp_set: Set[Tuple[int, int]], struct: Tuple[str, Any], synth: Any) -> bool:

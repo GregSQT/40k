@@ -37,6 +37,16 @@ from engine.action_log_utils import append_action_log
 # `spatial_grid` ne depend que de `hex_utils` -> import direct sans cycle (il importe
 # `get_squad_move_budget` en local dans sa seule fonction qui en a besoin).
 from engine.spatial_grid import GRID_CELL_COUNT
+# Primitives « hors table » : définies dans la couche BASSE (`spatial_relations` ne dépend que de
+# `hex_utils`) parce que les primitives de MESURE en dépendent elles-mêmes. Ré-exportées ici, où
+# une trentaine d'appelants importent déjà `entry_is_on_battlefield` — même symbole, pas un jumeau.
+from engine.spatial_relations import (  # noqa: F401  (ré-export)
+    enemy_entries_on_battlefield,
+    entries_on_battlefield,
+    entry_footprint,
+    entry_is_on_battlefield,
+    require_entry_on_battlefield,
+)
 from engine.combat_utils import (
     get_unit_coordinates,
     normalize_coordinates,
@@ -369,7 +379,7 @@ def _occupied_hexes_at_level(
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     occupied: Set[Tuple[int, int]] = set()
-    for uid, entry in units_cache.items():
+    for uid, entry in entries_on_battlefield(units_cache):
         if skip(uid, entry):
             continue
         for mid in squad_models.get(str(uid), []):  # get allowed
@@ -406,14 +416,8 @@ def build_occupied_positions_set(
         )
     units_cache = require_key(game_state, "units_cache")
     occupied: Set[Tuple[int, int]] = set()
-    for uid, entry in units_cache.items():
-        if uid == exclude_unit_id:
-            continue
-        occ = entry.get("occupied_hexes")
-        if occ:
-            occupied.update(occ)
-        else:
-            occupied.add((require_key(entry, "col"), require_key(entry, "row")))
+    for _uid, entry in entries_on_battlefield(units_cache, exclude_id=exclude_unit_id):
+        occupied.update(entry_footprint(entry))
     return occupied
 
 
@@ -435,15 +439,8 @@ def build_enemy_occupied_positions_set(
         )
     units_cache = require_key(game_state, "units_cache")
     occupied: Set[Tuple[int, int]] = set()
-    for uid, entry in units_cache.items():
-        player_raw = require_key(entry, "player")
-        if int(player_raw) == current_player_int:
-            continue
-        occ = entry.get("occupied_hexes")
-        if occ:
-            occupied.update(occ)
-        else:
-            occupied.add((require_key(entry, "col"), require_key(entry, "row")))
+    for _uid, entry in enemy_entries_on_battlefield(units_cache, current_player_int):
+        occupied.update(entry_footprint(entry))
     return occupied
 
 
@@ -525,13 +522,10 @@ def candidate_overlaps_any_unit(
     from engine.hex_utils import Socle, footprints_overlap
 
     units_cache = require_key(game_state, "units_cache")
-    for uid, entry in units_cache.items():
-        if exclude_unit_id is not None and str(uid) == str(exclude_unit_id):
-            continue
+    for _uid, entry in entries_on_battlefield(units_cache, exclude_id=exclude_unit_id):
         e_col = require_key(entry, "col")
         e_row = require_key(entry, "row")
-        occ = entry.get("occupied_hexes")
-        e_fp = set(occ) if occ else {(e_col, e_row)}
+        e_fp = set(entry_footprint(entry))
         neighbor = Socle(
             shape=require_key(entry, "BASE_SHAPE"),
             base_size=require_key(entry, "BASE_SIZE"),
@@ -1261,23 +1255,6 @@ def is_unit_alive(unit_id: str, game_state: Dict[str, Any]) -> bool:
     return game_state["units_cache"].get(unit_id) is not None
 
 
-def entry_is_on_battlefield(entry: Dict[str, Any]) -> bool:
-    """L'escouade décrite par cette entrée de ``units_cache`` est-elle SUR LE CHAMP DE BATAILLE ?
-
-    Une unité VIVANTE peut être hors table : en attente de déploiement actif, ou en réserves
-    stratégiques (20.01) tant qu'elle n'a pas fait son ingress move (20.04). Elle reste dans
-    ``units_cache`` — elle compte pour la victoire aux points et elle peut encore arriver — mais
-    elle n'a ni position ni empreinte : elle ne peut être ni ciblée, ni chargée, ni engagée, et
-    elle ne contrôle aucun objectif.
-
-    Prédicat = la sentinelle de position ``(-1,-1)``, jumelle exacte de ``deployed_on_turn is
-    None`` côté unité : les deux sont écrites par le MÊME commit de mise en place
-    (``_apply_deploy_plan``) et par le MÊME chargeur. Ici on lit le cache, la source des
-    énumérations de ciblage.
-    """
-    return int(require_key(entry, "col")) >= 0
-
-
 def model_is_on_board(model: Dict[str, Any]) -> bool:
     """La figurine décrite par cette entrée de ``models_cache`` est-elle sur le champ de bataille ?
 
@@ -1694,7 +1671,13 @@ def check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any]
     
     units_cache = require_key(game_state, "units_cache")
     unit_by_id = {str(u["id"]): u for u in game_state["units"]}
-    for unit_id, entry in units_cache.items():
+    # La cible aussi doit être posée : une escouade hors table ne peut pas être chargée (20.01).
+    # Absente du cache = détruite (invariant `remove_from_units_cache`), donc non chargeable non
+    # plus — même sortie, et c'est déjà ce que rendait `get_unit_position` en dessous.
+    target_entry = units_cache.get(str(require_key(target, "id")))
+    if target_entry is None or not entry_is_on_battlefield(target_entry):
+        return False
+    for unit_id, entry in entries_on_battlefield(units_cache):
         unit = unit_by_id.get(str(unit_id))
         if not unit:
             raise KeyError(f"Unit {unit_id} missing from game_state['units']")
@@ -1921,16 +1904,9 @@ def _compute_enemy_adjacent_cache_for_player_from_units_cache(
     all_enemy_occupied: Set[Tuple[int, int]] = set()
     per_unit_occupied: list = []
 
-    for entry in units_cache.values():
+    for _uid, entry in enemy_entries_on_battlefield(units_cache, player_int):
         hp_cur = require_key(entry, "HP_CUR")
         if hp_cur <= 0:
-            continue
-        entry_player_raw = require_key(entry, "player")
-        try:
-            entry_player = int(entry_player_raw)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"Invalid player value in units_cache entry: {entry_player_raw!r}") from exc
-        if entry_player == player_int:
             continue
 
         # EZ mesurée depuis le SOCLE (03.04 « engagement range » + 01.04 « closest part of the
@@ -2025,7 +2001,11 @@ def _build_enemy_adjacent_structures_from_units_cache(
         player_int: set() for player_int in players_present
     }
 
-    for cache_entry in units_cache.values():
+    # Hors table écarté ICI et pas plus bas : l'entrée hors table porte un
+    # `occupied_hexes_by_model` PEUPLÉ de `(-1,-1)` (mesuré), donc la branche `by_model` ci-dessous
+    # dilatait une vraie zone d'engagement autour de l'origine du plateau. Un ennemi en réserves
+    # verrouillait ainsi le coin (0,0) pour l'adversaire.
+    for _uid, cache_entry in entries_on_battlefield(units_cache):
         hp_cur = require_key(cache_entry, "HP_CUR")
         if hp_cur <= 0:
             continue
@@ -2377,9 +2357,7 @@ def _build_reactive_move_destinations_pool(
     units_cache = require_key(game_state, "units_cache")
     reactive_unit_id = str(require_key(reactive_unit, "id"))
     occupied_positions: Set[Tuple[int, int]] = set()
-    for unit_id, entry in units_cache.items():
-        if str(unit_id) == reactive_unit_id:
-            continue
+    for _unit_id, entry in entries_on_battlefield(units_cache, exclude_id=reactive_unit_id):
         entry_col = require_key(entry, "col")
         entry_row = require_key(entry, "row")
         occupied_positions.add((entry_col, entry_row))
@@ -5146,15 +5124,14 @@ def execute_squad_move(
 
 
 def _enemy_squad_ids(game_state: Dict[str, Any], player: int) -> List[str]:
-    """Liste des squad_id ennemis vivants (player != donne)."""
-    out: List[str] = []
-    for sid, entry in game_state.get("units_cache", {}).items():  # get allowed
-        try:
-            if int(entry.get("player", -1)) != int(player):
-                out.append(str(sid))
-        except (TypeError, ValueError):
-            continue
-    return out
+    """Liste des squad_id ennemis POSÉS sur la table (player != donne).
+
+    Les appelants mesurent une géométrie sur ces ids (zone d'engagement bord-à-bord dans
+    ``_cell_is_free_for_model``) : une escouade hors table n'en a aucune, et la primitive EZ lève
+    désormais plutôt que d'inventer un verdict. Le filtre est donc ici, à l'énumération.
+    """
+    units_cache = require_key(game_state, "units_cache")
+    return [sid for sid, _entry in enemy_entries_on_battlefield(units_cache, int(player))]
 
 
 def _squad_model_positions(game_state: Dict[str, Any], squad_id: str) -> List[Tuple[int, int]]:
@@ -5303,11 +5280,8 @@ def _hex_legal_for_charge(
         return False
     # Collision : autres escouades (sauf nous-meme)
     units_cache = game_state.get("units_cache", {})  # get allowed
-    for sid, entry in units_cache.items():
-        if str(sid) == str(squad_id):
-            continue
-        occ = entry.get("occupied_hexes")
-        if occ and cell in occ:
+    for _sid, entry in entries_on_battlefield(units_cache, exclude_id=squad_id):
+        if cell in entry_footprint(entry):
             return False
     # ER des escouades non-cibles (bord-a-bord) : la figurine candidate ne doit pas
     # finir dans l ER d un ennemi NON-cible.
@@ -6410,7 +6384,7 @@ def _declare_qty_candidates(
 
     from engine.hex_utils import min_distance_between_sets
     tgt_uc = require_key(game_state, "units_cache")[str(target_squad_id)]
-    tgt_fp = tgt_uc.get("occupied_hexes") or {(tgt_uc["col"], tgt_uc["row"])}
+    tgt_fp = entry_footprint(tgt_uc)
 
     candidates: List[tuple] = []
     for mid in squad_models.get(attacker_squad_id, []):  # get allowed
@@ -9139,7 +9113,9 @@ def squad_fight_activation_order(
     units_charged = game_state.get("units_charged", set())
     units_cache = game_state.get("units_cache", {})  # get allowed
     eligible: Dict[str, str] = {}
-    for sid, entry in units_cache.items():
+    # Hors table écarté avant `fight_v11_is_eligible_to_fight` : celui-ci mesure une adjacence,
+    # donc il lèverait sur une escouade en réserves (20.01) au lieu de la déclarer inéligible.
+    for sid, entry in entries_on_battlefield(units_cache):
         unit = get_unit_by_id(game_state, str(sid))
         if unit is None or not fight_v11_is_eligible_to_fight(game_state, unit):
             continue
@@ -9236,9 +9212,9 @@ def model_in_base_contact(
             key: float(_committed[str(model_id)]) for key in subject["floor_height_by_model"]
         }
 
-    for enemy_id, enemy_entry in units_cache.items():
-        if str(enemy_id) == squad_id or int(require_key(enemy_entry, "player")) == player:
-            continue
+    for _enemy_id, enemy_entry in enemy_entries_on_battlefield(
+        units_cache, player, exclude_id=squad_id
+    ):
         if unit_entries_within_engagement_zone(
             subject, enemy_entry, contact_zone, metric=metric
         ):
@@ -9284,11 +9260,8 @@ def _assign_cells_toward_enemies(
         cell = (col, row)
         if wall_hexes and cell in wall_hexes:
             return False
-        for sid, entry in units_cache.items():
-            if str(sid) == squad_id:
-                continue
-            occ = entry.get("occupied_hexes")
-            if occ and cell in occ:
+        for _sid, entry in entries_on_battlefield(units_cache, exclude_id=squad_id):
+            if cell in entry_footprint(entry):
                 return False
         return True
 
@@ -10613,10 +10586,14 @@ def build_squad_action_mask(
                 from engine.spatial_relations import unit_entries_within_engagement_zone
                 ez = get_engagement_zone(game_state)
                 enemy_entry = units_cache.get(esid)
+                # Ennemi hors table (réserves 20.01) : intirable, et sans géométrie à mesurer —
+                # le slot reste dans l'observation, le masque le ferme.
+                if enemy_entry is not None and not entry_is_on_battlefield(enemy_entry):
+                    continue
                 locked_by_ally = False
                 if enemy_entry is not None:
-                    for sid, e in units_cache.items():
-                        if int(e["player"]) != our_player or str(sid) == squad_id:
+                    for sid, e in entries_on_battlefield(units_cache, exclude_id=squad_id):
+                        if int(e["player"]) != our_player:
                             continue
                         if unit_entries_within_engagement_zone(enemy_entry, e, ez):
                             locked_by_ally = True

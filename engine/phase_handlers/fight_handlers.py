@@ -38,6 +38,9 @@ from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH, cube_to_offset, offset_t
 # `engine.phase_handlers`.
 from engine.terrain_utils import resolve_model_floor_level, resolved_floor_height_at
 from .shared_utils import (
+    enemy_entries_on_battlefield,
+    entries_on_battlefield,
+    entry_footprint,
     entry_is_on_battlefield,
     model_in_base_contact,
     end_of_turn_regain_coherency_all_squads,
@@ -262,12 +265,10 @@ def _fight_footprint_has_enemy_hex_contact(
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(unit["player"]) if unit["player"] is not None else None
     unit_id_str = str(unit["id"])
-    for enemy_id, cache_entry in units_cache.items():
-        if str(enemy_id) == unit_id_str:
-            continue
-        if int(cache_entry["player"]) == unit_player:
-            continue
-        enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+    for _enemy_id, cache_entry in enemy_entries_on_battlefield(
+        units_cache, unit_player, exclude_id=unit_id_str
+    ):
+        enemy_fp = entry_footprint(cache_entry)
         if min_distance_between_sets(fp, enemy_fp, max_distance=1) <= 1:
             return True
     return False
@@ -282,7 +283,7 @@ def _fight_unit_is_hex_adjacent_to_enemy_footprint(game_state: Dict[str, Any], u
     units_cache = require_key(game_state, "units_cache")
     unit_id_str = str(unit["id"])
     unit_entry = units_cache.get(unit_id_str)
-    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+    unit_fp = entry_footprint(unit_entry) if unit_entry else {(unit_col, unit_row)}
 
     return _fight_footprint_has_enemy_hex_contact(game_state, unit, unit_fp)
 
@@ -299,23 +300,19 @@ def _fight_pile_in_closest_enemy_snapshot(
     units_cache = require_key(game_state, "units_cache")
     unit_id_str = str(unit["id"])
     unit_entry = units_cache.get(unit_id_str)
-    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+    unit_fp = entry_footprint(unit_entry) if unit_entry else {(unit_col, unit_row)}
     unit_player = int(unit["player"]) if unit["player"] is not None else None
 
     d_cap: Optional[int] = None
-    for ce in units_cache.values():
-        if int(ce["player"]) == unit_player:
-            continue
+    for _eid, ce in enemy_entries_on_battlefield(units_cache, unit_player):
         approx = abs(unit_col - int(ce["col"])) + abs(unit_row - int(ce["row"]))
         if d_cap is None or approx < d_cap:
             d_cap = approx
 
     d_min: Optional[int] = None
     closest_ids: List[str] = []
-    for enemy_id, cache_entry in units_cache.items():
-        if int(cache_entry["player"]) == unit_player:
-            continue
-        enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+    for enemy_id, cache_entry in enemy_entries_on_battlefield(units_cache, unit_player):
+        enemy_fp = entry_footprint(cache_entry)
         if d_min is not None and d_cap is not None:
             cap = min(d_cap, d_min)
         elif d_min is not None:
@@ -360,7 +357,7 @@ def _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
             ce = units_cache.get(str(eid))
             if not ce:
                 continue
-            enemy_fps.append(ce.get("occupied_hexes", {(ce["col"], ce["row"])}))
+            enemy_fps.append(entry_footprint(ce))
     radius = d_min - 1
     for efp in enemy_fps:
         d = min_distance_between_sets(new_fp, efp, max_distance=radius)
@@ -400,14 +397,12 @@ def _fight_pile_in_anchor_adjacent_to_enemy_footprint(
     cc_range = get_engagement_zone(game_state)
     unit_shape = unit["BASE_SHAPE"]
     unit_base_size = unit["BASE_SIZE"]
-    for enemy_id, cache_entry in units_cache.items():
-        if str(enemy_id) == unit_id_str:
-            continue
+    for enemy_id, cache_entry in enemy_entries_on_battlefield(
+        units_cache, unit_player, exclude_id=unit_id_str
+    ):
         if target_filter is not None and str(enemy_id) not in target_filter:
             continue
-        if int(cache_entry["player"]) == unit_player:
-            continue
-        enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+        enemy_fp = entry_footprint(cache_entry)
         enemy_shape = cache_entry["BASE_SHAPE"]
         enemy_base_size = cache_entry["BASE_SIZE"]
         if (
@@ -604,7 +599,7 @@ def _fight_build_pile_in_valid_destinations(
     for eid in closest_ids:
         ce = units_cache_pre.get(str(eid))
         if ce:
-            closest_enemy_fps_pre.append(ce.get("occupied_hexes", {(ce["col"], ce["row"])}))
+            closest_enemy_fps_pre.append(entry_footprint(ce))
     closer_shell_union: Set[Tuple[int, int]] = set()
     if closest_enemy_fps_pre and d_min > 1:
         seed: Set[Tuple[int, int]] = set()
@@ -748,7 +743,7 @@ def _fight_compute_pile_in_footprint_zone(
     start_col, start_row = require_unit_position(unit, game_state)
     units_cache = require_key(game_state, "units_cache")
     cache_entry = units_cache.get(unit_id_str)
-    cur_fp = cache_entry.get("occupied_hexes", {(start_col, start_row)}) if cache_entry else {(start_col, start_row)}
+    cur_fp = entry_footprint(cache_entry) if cache_entry else {(start_col, start_row)}
     zone.update(cur_fp)
     return zone
 
@@ -1027,11 +1022,7 @@ def _fight_entry_in_engagement_with_any_enemy(
     mover_id = str(require_key(unit, "id"))
     mover_player = int(require_key(unit, "player"))
     units_cache = require_key(game_state, "units_cache")
-    for eid, ce in units_cache.items():
-        if str(eid) == mover_id:
-            continue
-        if int(require_key(ce, "player")) == mover_player:
-            continue
+    for _eid, ce in enemy_entries_on_battlefield(units_cache, mover_player, exclude_id=mover_id):
         if unit_entries_within_engagement_zone(synth, ce, ez):
             return True
     return False
@@ -1274,9 +1265,7 @@ def _fight_plan_consolidation_destinations(
                 cache_entry = units_cache.get(str(enemy_id))
                 if not cache_entry:
                     continue
-                closest_enemy_fps.append(
-                    cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-                )
+                closest_enemy_fps.append(entry_footprint(cache_entry))
             _t_shell0 = time.perf_counter() if _cons_pf else None
             closer_shell_union: Set[Tuple[int, int]] = set()
             if closest_enemy_fps:
@@ -1473,11 +1462,10 @@ def _fight_opposing_enemies_exist(game_state: Dict[str, Any], unit: Dict[str, An
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(unit["player"]) if unit["player"] is not None else None
     unit_id_str = str(unit["id"])
-    for uid, cache_entry in units_cache.items():
-        if str(uid) == unit_id_str:
-            continue
-        if int(cache_entry["player"]) != unit_player:
-            return True
+    for _uid, _cache_entry in enemy_entries_on_battlefield(
+        units_cache, unit_player, exclude_id=unit_id_str
+    ):
+        return True
     return False
 
 
@@ -1545,7 +1533,7 @@ def _ai_select_pile_in_destination(
         ce = units_cache.get(str(eid))
         if not ce:
             continue
-        tier_efps.append(ce.get("occupied_hexes", {(ce["col"], ce["row"])}))
+        tier_efps.append(entry_footprint(ce))
     best: Optional[Tuple[int, int]] = None
     best_score: Optional[int] = None
     for ac, ar in pile_dests:
@@ -1764,19 +1752,16 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
 
     valid_targets = []
 
-    from engine.phase_handlers.shared_utils import entry_is_on_battlefield
+    # Attaquant HORS TABLE (réserves 20.01, attente de déploiement) : il n'est engagé avec
+    # personne, donc son pool est VIDE. Réponse de RÈGLE, pas repli — la mesure, elle, est
+    # refusée par `entries_in_engagement_zone`. L'observation IA construit ce pool pour toute
+    # escouade du camp actif, réserves comprises.
+    if not entry_is_on_battlefield(unit_entry):
+        return valid_targets
 
-    for target_id, target_entry in units_cache.items():
-        target_id_str = str(target_id)
-        if target_id_str == unit_id_str:
-            continue
-        target_player = int(require_key(target_entry, "player"))
-        if target_player == unit_player:
-            continue
-        # HORS TABLE (réserves 20.01) : vivante mais pas sur le champ de bataille — jamais
-        # engagée, donc jamais une cible de mêlée.
-        if not entry_is_on_battlefield(target_entry):
-            continue
+    for target_id, target_entry in enemy_entries_on_battlefield(
+        units_cache, unit_player, exclude_id=unit_id_str
+    ):
         if not unit_entries_within_engagement_zone(
             unit_entry, target_entry, cc_range):
             continue
@@ -2181,14 +2166,13 @@ def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str,
     unit_col, unit_row = require_unit_position(unit, game_state)
     unit_id_str = str(unit["id"])
     unit_entry = units_cache.get(unit_id_str)
-    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+    unit_fp = entry_footprint(unit_entry) if unit_entry else {(unit_col, unit_row)}
 
-    for enemy_id, cache_entry in units_cache.items():
-        if int(cache_entry["player"]) != unit_player:
-            enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-            distance = min_distance_between_sets(unit_fp, enemy_fp)
-            if distance <= rng_rng:
-                return True
+    for _enemy_id, cache_entry in enemy_entries_on_battlefield(units_cache, unit_player):
+        enemy_fp = entry_footprint(cache_entry)
+        distance = min_distance_between_sets(unit_fp, enemy_fp)
+        if distance <= rng_rng:
+            return True
     return False
 
 
@@ -2280,11 +2264,10 @@ def _fight_units_engaged_with(game_state: Dict[str, Any], unit: Dict[str, Any]) 
         raise ValueError(f"Unit {unit_id_str} not in units_cache; cannot compute engagement")
     unit_player = int(require_key(entry, "player"))
     engaged: List[str] = []
-    for eid, ce in units_cache.items():
-        if str(eid) == unit_id_str:
-            continue
-        if int(require_key(ce, "player")) == unit_player:
-            continue
+    # Hors table = engagée avec personne (20.01). Même raison que le pool de cibles fight.
+    if not entry_is_on_battlefield(entry):
+        return engaged
+    for eid, ce in enemy_entries_on_battlefield(units_cache, unit_player, exclude_id=unit_id_str):
         if unit_entries_within_engagement_zone(entry, ce, ez):
             engaged.append(str(eid))
     return engaged
@@ -2304,14 +2287,13 @@ def pile_in_targets_within_range(game_state: Dict[str, Any], unit: Dict[str, Any
     if entry is None:
         raise ValueError(f"Unit {unit_id_str} not in units_cache; cannot compute pile-in targets")
     unit_player = int(require_key(entry, "player"))
-    unit_fp = entry.get("occupied_hexes", {(entry["col"], entry["row"])})
     within: List[str] = []
-    for eid, ce in units_cache.items():
-        if str(eid) == unit_id_str:
-            continue
-        if int(require_key(ce, "player")) == unit_player:
-            continue
-        enemy_fp = ce.get("occupied_hexes", {(ce["col"], ce["row"])})
+    # Hors table : aucune cible de pile-in (20.01), et aucune empreinte à mesurer.
+    if not entry_is_on_battlefield(entry):
+        return within
+    unit_fp = entry_footprint(entry)
+    for eid, ce in enemy_entries_on_battlefield(units_cache, unit_player, exclude_id=unit_id_str):
+        enemy_fp = entry_footprint(ce)
         if min_distance_between_sets(unit_fp, enemy_fp, max_distance=rng) <= rng:
             within.append(str(eid))
     return within
@@ -2386,7 +2368,7 @@ def pile_in_move_destinations_12_03(
     entry = units_cache.get(unit_id_str)
     if entry is None:
         raise ValueError(f"Unit {unit_id_str} not in units_cache; cannot plan pile-in")
-    unit_fp = entry.get("occupied_hexes", {(entry["col"], entry["row"])})
+    unit_fp = entry_footprint(entry)
 
     # Palier de la cible de pile-in la plus proche (parmi les cibles sélectionnées).
     d_min_sel: Optional[int] = None
@@ -2395,7 +2377,7 @@ def pile_in_move_destinations_12_03(
         ce = units_cache.get(str(tid))
         if ce is None:
             continue
-        efp = ce.get("occupied_hexes", {(ce["col"], ce["row"])})
+        efp = entry_footprint(ce)
         d = min_distance_between_sets(unit_fp, efp)
         if d_min_sel is None or d < d_min_sel:
             d_min_sel = d
@@ -2673,14 +2655,13 @@ def _fight_v11_enemies_within_range(
     if entry is None:
         raise ValueError(f"Unit {uid} not in units_cache; cannot compute range query")
     up = int(require_key(entry, "player"))
-    ufp = entry.get("occupied_hexes", {(entry["col"], entry["row"])})
     out: List[str] = []
-    for eid, ce in units_cache.items():
-        if str(eid) == uid:
-            continue
-        if int(require_key(ce, "player")) == up:
-            continue
-        efp = ce.get("occupied_hexes", {(ce["col"], ce["row"])})
+    # Hors table : aucun ennemi « à portée » (20.01), et aucune empreinte à mesurer.
+    if not entry_is_on_battlefield(entry):
+        return out
+    ufp = entry_footprint(entry)
+    for eid, ce in enemy_entries_on_battlefield(units_cache, up, exclude_id=uid):
+        efp = entry_footprint(ce)
         if min_distance_between_sets(ufp, efp, max_distance=rng) <= rng:
             out.append(str(eid))
     return out
@@ -2699,8 +2680,11 @@ def _fight_v11_objectives_within_range(
     entry = units_cache.get(uid)
     if entry is None:
         raise ValueError(f"Unit {uid} not in units_cache; cannot compute objective range")
-    ufp = entry.get("occupied_hexes", {(entry["col"], entry["row"])})
     out: List[Any] = []
+    # Hors table : ne contrôle et n'approche aucun objectif (cf. `entry_is_on_battlefield`).
+    if not entry_is_on_battlefield(entry):
+        return out
+    ufp = entry_footprint(entry)
     for oid, hexes in objective_hex_zones(game_state):
         if min_distance_between_sets(ufp, hexes, max_distance=rng) <= rng:
             out.append(oid)
@@ -3259,9 +3243,8 @@ def _fight_pile_in_build_model_pool(
     # Chaque socle est étiqueté de son niveau EFFECTIF : une fig d'un autre étage ne gêne pas
     # (superposition inter-étage, §13.06, miroir move par-figurine).
     blocker_socles: List[Tuple[int, Any]] = []
-    for eid, entry in units_cache.items():
-        occ = entry.get("occupied_hexes")
-        cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
+    for eid, entry in entries_on_battlefield(units_cache):
+        cells = set(entry_footprint(entry))
         if int(entry["player"]) != player:
             if str(eid) in closest:
                 target_entries.append(entry)
@@ -3434,14 +3417,16 @@ def _fight_pile_in_closest_tier_ids(
     entry = units_cache.get(uid)
     if entry is None:
         return []
-    unit_fp = set(entry.get("occupied_hexes") or {(int(entry["col"]), int(entry["row"]))})
+    if not entry_is_on_battlefield(entry):
+        return []
+    unit_fp = set(entry_footprint(entry))
     d_min: Optional[int] = None
     tier: List[str] = []
     for tid in target_ids:
         ce = units_cache.get(str(tid))
-        if ce is None:
+        if ce is None or not entry_is_on_battlefield(ce):
             continue
-        efp = set(ce.get("occupied_hexes") or {(int(ce["col"]), int(ce["row"]))})
+        efp = set(entry_footprint(ce))
         d = min_distance_between_sets(unit_fp, efp)
         if d_min is None or d < d_min:
             d_min = d
@@ -3550,16 +3535,12 @@ def _fight_pile_in_preview_plan(
     units_cache = require_key(game_state, "units_cache")
     player = int(require_key(unit, "player"))
     unit_engaged = any(
-        int(ce["player"]) != player
-        and unit_entries_within_engagement_zone(synth_unit, ce, ez)
-        for eid, ce in units_cache.items()
-        if str(eid) != str(squad_id)
+        unit_entries_within_engagement_zone(synth_unit, ce, ez)
+        for _eid, ce in enemy_entries_on_battlefield(units_cache, player, exclude_id=squad_id)
     )
-    enemy_entries = [
-        (str(eid), ce)
-        for eid, ce in units_cache.items()
-        if str(eid) != str(squad_id) and int(ce["player"]) != player
-    ]
+    enemy_entries = list(
+        enemy_entries_on_battlefield(units_cache, player, exclude_id=squad_id)
+    )
     kept_engagements = True
     for i, (mid, c, r, _lv) in enumerate(norm):
         m = models_cache.get(mid)
@@ -3820,8 +3801,7 @@ def pile_in_autoplace_plan(
         return {"plan": []}
 
     player = int(require_key(unit, "player"))
-    focus_occ = focus_entry.get("occupied_hexes")
-    focus_fp = set(focus_occ) if focus_occ else {(int(focus_entry["col"]), int(focus_entry["row"]))}
+    focus_fp = set(entry_footprint(focus_entry))
 
     # --- Étages §13.06 : niveau EFFECTIF (plancher réellement occupé) de chaque figurine. C'est à la
     # fois son niveau de départ et son niveau de destination — le pile-in replace une figurine sur son
@@ -3860,8 +3840,7 @@ def pile_in_autoplace_plan(
         ce = units_cache.get(str(tid))
         if ce is None:
             continue
-        occ = ce.get("occupied_hexes")
-        tier_fps.append(set(occ) if occ else {(int(ce["col"]), int(ce["row"]))})
+        tier_fps.append(set(entry_footprint(ce)))
 
     # Collision = test EUCLIDIEN officiel du jeu (``footprints_overlap`` : rond↔rond bord-à-bord
     # continu, méthode empreinte sinon), pas l'intersection de cellules — sinon des socles ronds
@@ -3890,9 +3869,7 @@ def pile_in_autoplace_plan(
     # Chaque socle est étiqueté de son niveau EFFECTIF (idem pool) : sans cette étiquette, une
     # figurine d'un autre étage interdisait une case parfaitement libre au niveau visé.
     blocker_socles: List[Tuple[int, Any]] = []
-    for eid, entry in units_cache.items():
-        if str(eid) == str(squad_id):
-            continue
+    for eid, entry in entries_on_battlefield(units_cache, exclude_id=squad_id):
         by_model = entry.get("occupied_hexes_by_model")
         if by_model:
             for _bmid, (mc, mr) in by_model.items():
@@ -3904,12 +3881,11 @@ def pile_in_autoplace_plan(
                     _charge_model_socle(game_state, _bm_entry, int(mc), int(mr)),
                 ))
         else:
-            occ = entry.get("occupied_hexes")
             blocker_socles.append((
                 int(entry.get("level", 0)),  # get allowed (champ optionnel : level absent = sol)
                 Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
                       col=int(entry["col"]), row=int(entry["row"]),
-                      fp=set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}),
+                      fp=set(entry_footprint(entry))),
             ))
 
     # Traversée au SOL : ennemis du niveau 0 seulement (les amies sont traversables, 03.01) et
@@ -4117,9 +4093,7 @@ def pile_in_autoplace_plan(
             level=int(require_key(models_cache[mid], "level")),
         )
         out: List[Dict[str, Any]] = []
-        for eid, ce in units_cache.items():
-            if int(ce["player"]) == player or str(eid) == str(squad_id):
-                continue
+        for _eid, ce in enemy_entries_on_battlefield(units_cache, player, exclude_id=squad_id):
             if unit_entries_within_engagement_zone(synth, ce, ez):
                 out.append(ce)
         return out
@@ -4592,9 +4566,8 @@ def _fight_consolidation_build_model_pool(
     # (footprints_overlap), comme les autoplaces. Chaque socle étiqueté de son niveau EFFECTIF :
     # une fig d'un autre étage ne gêne pas (superposition inter-étage, §13.06, miroir pile-in).
     blocker_socles: List[Tuple[int, Any]] = []
-    for eid, entry in units_cache.items():
-        occ = entry.get("occupied_hexes")
-        cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
+    for eid, entry in entries_on_battlefield(units_cache):
+        cells = set(entry_footprint(entry))
         if int(entry["player"]) != player:
             if tier_kind == "enemy" and str(eid) in closest:
                 target_entries.append(entry)
@@ -4868,10 +4841,8 @@ def _fight_consolidation_preview_plan(
     player = int(require_key(unit, "player"))
 
     unit_engaged = any(
-        int(ce["player"]) != player
-        and unit_entries_within_engagement_zone(synth_unit, ce, ez)
-        for eid, ce in units_cache.items()
-        if str(eid) != str(squad_id)
+        unit_entries_within_engagement_zone(synth_unit, ce, ez)
+        for _eid, ce in enemy_entries_on_battlefield(units_cache, player, exclude_id=squad_id)
     )
 
     kept_engagements = True
@@ -4881,11 +4852,9 @@ def _fight_consolidation_preview_plan(
     if mode == "ongoing":
         # 12.08 AFTER (Ongoing) PAR FIGURINE : chaque figurine engagée AU DÉPART avec une unité
         # ennemie doit rester engagée avec CETTE unité après le move (pas au niveau unité).
-        enemy_entries = [
-            (str(eid), ce)
-            for eid, ce in units_cache.items()
-            if str(eid) != str(squad_id) and int(ce["player"]) != player
-        ]
+        enemy_entries = list(
+            enemy_entries_on_battlefield(units_cache, player, exclude_id=squad_id)
+        )
         for i, (mid, c, r, _lv) in enumerate(norm):
             m = models_cache.get(mid)
             if m is None:

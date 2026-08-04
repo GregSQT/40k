@@ -146,7 +146,7 @@ def test_a_squad_with_no_models_left_in_the_cache_raises() -> None:
     `remove_from_units_cache` le dit : « Dead = absent from cache (single source of truth) ». Une
     entrée qui y reste avec une carte par-figurine VIDE viole donc cet invariant, et il n'existe
     aucune mesure juste à lui appliquer :
-      - à plat, `_cache_entry_footprint` retombe sur l'ANCRE — une escouade détruite redeviendrait
+      - à plat, `entry_footprint` retombe sur l'ANCRE — une escouade détruite redeviendrait
         engageable, donc cible de mêlée ;
       - en 3D, aucune classe verticale n'est produite et le verdict est « non engagé » sans que
         rien n'ait été mesuré.

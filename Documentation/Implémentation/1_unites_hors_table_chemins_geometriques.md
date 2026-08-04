@@ -1,134 +1,143 @@
 # Unités hors table — tous les chemins géométriques
 
 Découvert le 2026-08-04 pendant le chantier 04c (le bot fait arriver ses réserves).
-**Partiellement corrigé — 3 sites sur ~30 fermés.** Bloque l'activation des variantes de rosters
-à réserves stratégiques (cf. §Ce qui attend cette correction).
+**CORRIGÉ le 2026-08-05** (branche `worktree-hors-table-geometrie`).
 
-> **Périmètre** : `engine/`, tout code qui ÉNUMÈRE des unités pour en MESURER une géométrie.
-> Ne concerne pas `ai/` : le chantier 04c y est terminé et testé.
+> **Périmètre traité** : `engine/`, tout code qui ÉNUMÈRE des unités pour en MESURER une géométrie,
+> **plus `ai/evaluation_bots.py`**. Le doc d'origine écrivait « ne concerne pas `ai/` : le chantier
+> 04c y est terminé » — **c'est faux**, et c'est le grep JUMEAU qui l'a montré : les bots
+> d'évaluation portaient 6 fois le MÊME motif `.get("occupied_hexes", {ancre})`, sur des boucles
+> qui ne filtrent que `is_unit_alive`. Une réserve ennemie y faisait lever
+> `min_distance_between_sets`, dans le code qui produit justement les courbes d'éval.
 >
-> **Principe** : le prédicat existe déjà et est correct (`entry_is_on_battlefield`), il n'est
-> simplement pas appelé partout. Aucune règle à réécrire. Aucun fallback, aucune valeur par
-> défaut masquant une erreur.
->
-> **Statut (2026-08-04)** : root cause établie et PROUVÉE par exécution. Périmètre recensé mais
-> non trié. Décision d'architecture NON prise (cf. §La question à trancher).
+> **Ce qui a changé** : le prédicat `entry_is_on_battlefield` existait et était correct, mais il
+> n'était appelé qu'à quelques endroits sur ~130. Il est descendu dans la couche basse
+> (`engine/spatial_relations.py`) avec trois primitives autour de lui, et les énumérations du
+> moteur passent désormais par elles. Aucune règle réécrite, aucun fallback anti-erreur.
 
 ---
 
 ## Le défaut
 
-Le code qui énumère les unités pour mesurer une distance ne filtre pas celles qui sont **hors
-table**. Signature :
+Le code qui énumérait les unités pour mesurer une distance ne filtrait pas celles qui sont **hors
+table**. Une unité hors table est **vivante** (`is_unit_alive` → True), présente dans
+`units_cache`, à la position sentinelle `(-1,-1)`, avec `occupied_hexes` **vide** et
+`deployed_on_turn is None`. Tout filtre écrit sur « vivante » la laissait passer.
 
-```
-ValueError: Cannot compute distance between empty sets   (engine/hex_utils.py:158)
-```
+Ce n'était **pas** un bug des réserves stratégiques. `deployment_type: "active"` laisse **toutes**
+les unités hors table au reset — mesuré : 12 sur 12 sur `scenario_training_armageddon` à
+`board/44x60x1`. Les réserves (20.01) ne font qu'allonger la durée de cet état.
 
-Une unité hors table est **vivante** (`is_unit_alive` → True), présente dans `units_cache`, à la
-position sentinelle `(-1,-1)`, avec `occupied_hexes` **vide** et `deployed_on_turn is None`.
-Tout filtre écrit sur « vivante » la laisse donc passer. C'est le motif.
+### Les deux familles, et ce que la mesure a tranché
 
-### ⚠️ Ce n'est PAS un bug des réserves stratégiques
-
-C'est le contresens à ne pas faire, et il coûterait la moitié des sites. **MESURÉ** : avec
-`W40K_BOARD_PATH=board/44x60x1`, un `reset()` sur un roster **sans aucune** `strategic_reserves`
-plante déjà, avant tout déploiement :
-
-```
-CRASH AU RESET : Cannot compute distance between empty sets
-  engine/phase_handlers/shared_utils.py:3161, in _coherency_flags_footprint
-```
-
-La cause est `deployment_type: "active"`, qui laisse **toutes** les unités hors table au reset.
-Les réserses (20.01) ne font qu'allonger la durée pendant laquelle une unité est dans cet état —
-elles ont rendu le défaut visible, elles ne l'ont pas créé. Et il frappe `validate_squad_coherency`,
-un sous-système sans aucun rapport avec le tir.
-
-### Deux familles distinctes, ne pas traiter que la première
-
-| Famille | Symptôme | Gravité |
+| Famille | Symptôme | Verdict de la mesure (2026-08-05) |
 |---|---|---|
-| **DISTANCE** | empreinte vide → `min_distance_between_sets` **lève** | bruyant, donc traité en premier |
-| **ENGAGEMENT** | `_cache_entry_footprint` se rabat sur l'ancre `(-1,-1)` : l'unité hors table devient un **fantôme à une position réelle** | pas de crash, **verdict FAUX** — plus dangereux |
+| **DISTANCE** | empreinte vide → `min_distance_between_sets` lève « Cannot compute distance between empty sets » | bruyant, donc déjà partiellement traité par 04c |
+| **ENGAGEMENT** | verdict d'engagement FAUX, sans crash | **RÉELLE, et pire que décrit** — voir ci-dessous |
 
-Le repli d'ancre de la famille ENGAGEMENT est `engine/spatial_relations.py:131` et
-`_cache_entry_footprint` (shooting_handlers). État de la mesure sur cette famille :
+Le doc d'origine laissait la famille ENGAGEMENT ouverte (« à trancher par la mesure ») et la
+supposait due au repli d'ancre de `_cache_entry_footprint`. **C'est faux.** L'entrée-cache hors
+table a `occupied_hexes_by_model` et `floor_height_by_model` **entièrement peuplés de `(-1,-1)`**,
+donc `entry_has_vertical_data` rend True et la mesure part sur le **chemin 3D** — le repli d'ancre
+n'est jamais atteint. Mesuré à x1/hex, EZ = 2 :
 
-- à **x5 / euclidien** : non reproduit. `_is_adjacent_to_enemy_within_cc_range` rend `False` aux
-  5 positions testées, y compris `(0,0)`. `engagement_zone = 10`.
-- à **x1 / hex** : l'arithmétique la rend probable (distance hex `(-1,-1)→(0,0)` = 1, EZ = 2),
-  mais le crash de coherency ci-dessus empêche d'y arriver. **À trancher par la mesure**, pas
-  par le raisonnement.
-
-## Reproduction déterministe, gratuite
-
-```
-tests/unit/engine/test_roster_downscale_coherency.py::test_every_squad_is_coherent_right_after_reset[1]
-```
-
-Rouge sur `main` aujourd'hui, même signature. Vérifié dans un worktree propre : **antérieur au
-chantier 04c**, arrivé avec le merge du chantier 04.
-
-## Recensement — le bon grep
-
-Ne **pas** greper `entry_is_on_battlefield` : les appels **existants** ne peuvent pas révéler les
-**manquants**. C'est l'erreur de méthode qui a fait sous-estimer ce chantier d'un facteur 10.
-
-Greper les boucles `for x, y in units_cache.items()` qui font de la géométrie
-(`occupied_hexes`, `min_distance_between_sets`, `ranged_edge_distance`, `socle_from_cache_entry`,
-`engagement_zone`) **sans** filtre hors-table dans les lignes qui suivent. Rend ~30 candidats :
-
-| Fichier | Sites |
+| paire | verdict moteur AVANT |
 |---|---|
-| `fight_handlers.py` | 11 |
-| `shared_utils.py` | 8 |
-| `charge_handlers.py` | 5 |
-| `movement_handlers.py` | 2 |
-| `spatial_relations.py` | 2 |
-| `observation_builder.py` | 2 |
-| `shooting_handlers.py` | 2 (restants) |
+| fantôme `(-1,-1)` vs unité réelle en `(0,0)` | **ENGAGÉE** (faux) |
+| fantôme vs fantôme | **ENGAGÉE** (faux) |
+| fantôme vs unité réelle en `(1,1)` | non engagée (correct) |
 
-Trier les faux positifs (boucles sur des alliés déjà posés) fait partie du travail.
+Au reset, les 12 unités hors table étaient donc toutes mutuellement « engagées », et ça remontait
+jusqu'aux features d'observation IA `engaged` / `in_enemy_ez`.
 
-### Piège à ne pas redécouvrir
+### Le recensement réel
 
-`entry.get("occupied_hexes", {ancre})` **ne protège pas**. La clé est **PRÉSENTE et VIDE** hors
-table, donc le défaut du `.get` ne se déclenche jamais et l'ensemble vide passe.
+Le doc annonçait ~30 sites. Le grep du motif `entry.get("occupied_hexes", {ancre})` en donnait
+**96**, plus une trentaine d'énumérations `for … in units_cache.items()` faisant de la géométrie.
+Le motif `.get` ne protégeait rien : hors table, la clé est **PRÉSENTE et VIDE**, donc le défaut
+du `.get` ne se déclenche jamais et l'ensemble vide passe.
 
-Deux autres pièges mesurés :
+## La décision d'architecture
 
-- `shooting_phase_start` **ne fait pas** le choix d'arme complet si l'unité n'est ni adjacente ni
-  en advance : il prend la première arme portée sans regarder personne. Un test qui met une unité
-  en réserves et appelle `shooting_phase_start` reste **VERT avec le défaut**. Il faut
-  `units_advanced` ou le contact pour atteindre `weapon_availability_check`.
-- Le crash dépend de la **géométrie** : la sentinelle `(-1,-1)` est à ~274 subhex de la zone de
-  déploiement de `scenario_training_armageddon` (portées d'armes 120-240), donc hors portée, donc
-  pas de crash. Dans l'épisode qui plantait réellement, le tireur était à ~153. **Un test doit
-  CONSTRUIRE un tireur à portée du fantôme**, sinon il est vert vacant.
+La question ouverte était : ~30 correctifs par-site, ou UN point d'étranglement ?
 
-## La question à trancher
+**Réponse : les deux, à des rôles différents.** Un point d'étranglement ne peut pas décider à la
+place de l'appelant — hors table, la conduite juste est de **SAUTER** l'unité dans une
+énumération, et c'est une **ERREUR** de la mesurer nommément. Un helper feuille qui rendrait
+« distance infinie » serait exactement le fallback interdit par T1.
 
-Le correctif va-t-il **aux ~30 sites d'énumération**, ou à **UN point d'étranglement**
-(`min_distance_between_sets` qui refuse explicitement, `_cache_entry_footprint` /
-`spatial_relations.py:131` qui cessent de se rabattre sur l'ancre, ou un helper d'énumération
-d'ennemis partagé) ? **Décider et ARGUMENTER le choix.**
+D'où la règle qui structure tout le correctif :
 
-Trois correctifs par-site existent déjà (chantier 04c, `shooting_handlers.py`) :
-`_build_weapon_availability_enemy_precheck` (côté cible), `shooting_phase_start` (côté tireur),
-`_unit_has_firable_target`, plus le filtre de `_select_move_after_shooting_destination_for_ai`.
-**Les remettre en cause fait partie du travail** — si la racine est traitée, ils deviennent
-redondants et doivent sauter.
+> **Une MESURE par paire lève ; un PRÉDICAT sur le plateau répond par la RÈGLE ; une ÉNUMÉRATION
+> filtre.**
 
-## Ce qui n'est pas verrouillé
+### Les primitives (`engine/spatial_relations.py`)
 
-Les correctifs 04c dans `shooting_handlers.py` **n'ont pas de verrou**. Vérifié en retirant
-chaque filtre : les tests
-`test_strategic_reserves_20.py::test_shooting_phase_start_runs_with_a_reserve_{enemy,shooter}`
-restent **VERTS**. Ce sont des tests de non-régression, pas des verrous — c'est écrit en clair
-dans le fichier. Raison : voir le piège « géométrie » ci-dessus.
+`entry_is_on_battlefield` a été **déplacé** de `shared_utils` vers `spatial_relations` (couche
+basse, qui ne dépend que de `hex_utils`) parce que les primitives de mesure en dépendent
+elles-mêmes. `shared_utils` le ré-exporte : les imports existants sont intacts, c'est le même
+symbole.
 
-## Ce qui attend cette correction
+| Primitive | Rôle | Hors table |
+|---|---|---|
+| `require_entry_on_battlefield(entry, what)` | garde nommée | **lève** |
+| `entry_footprint(entry)` | empreinte d'escouade, source unique (remplace les 96 `.get`) | **lève** |
+| `entries_in_engagement_zone(a, b, …)` | mesure EZ par paire | **lève** |
+| `unit_within_engagement_zone_footprints(gs, u, …)` | prédicat « engagée ? » sur tout le plateau | **`False`** (20.01) |
+| `entries_on_battlefield(cache, exclude_id=…)` | énumération, toutes unités | **écarte** |
+| `enemy_entries_on_battlefield(cache, player, exclude_id=…)` | énumération, ennemis | **écarte** |
+
+Le `False` de la 4e ligne n'est pas un repli anti-erreur : c'est un prédicat qui a une réponse de
+règle (une unité absente du champ de bataille n'est engagée avec personne), interrogé sur TOUTES
+les unités vivantes par le snapshot 12.04 et par l'observation. La MESURE par paire, elle, n'a
+aucune réponse juste pour une entrée sans position — elle lève.
+
+Le repli sur l'ancre de `entry_footprint` ne subsiste que pour les entrées **synthétiques posées**
+(mover candidat de `move_anchor_violates_engagement_clearance`, fixtures mono-figurine), où il est
+exact.
+
+### Effet de bord voulu : le défaut devient bruyant
+
+Faire lever les feuilles a transformé chaque filtre manquant en crash localisable au lieu d'un
+verdict faux silencieux. C'est ce qui a permis de trouver les sites : la suite des réserves est
+passée de 25 échecs à 0 en suivant les tracebacks un par un.
+
+## Les correctifs par-site du chantier 04c
+
+Les quatre correctifs de 04c ont été **retirés** — pas supprimés, *déplacés* dans l'énumérateur :
+
+- `_build_weapon_availability_enemy_precheck` (côté cible) ;
+- `build_unit_los_cache` (côté cible) ;
+- `_unit_has_firable_target` (côté cible) ;
+- `_select_move_after_shooting_destination_for_ai`.
+
+Des gardes `entry_is_on_battlefield` **restent** dans `shooting_handlers`, `charge_handlers` et
+`movement_handlers`, et c'est volontaire : les `*_phase_start` / `*_build_activation_pool` portent
+la règle « une unité hors table ne choisit pas son arme, ne tire pas, ne charge pas, ne bouge
+pas », côté ACTEUR. Ce ne sont pas des filtres d'énumération d'ennemis.
+
+## Les verrous
+
+`tests/unit/engine/test_off_table_geometry.py`. Ils portent sur les deux familles, et chacun est
+construit pour ne pas être **vert vacant** :
+
+- contrat des primitives (lève / rend `False` / écarte), avec le test symétrique qui prouve que la
+  primitive rend bien quelque chose sur une entrée normale ;
+- famille ENGAGEMENT par le chemin de production, avec une unité réelle **amenée en `(1,1)`** ;
+- famille DISTANCE par le chemin de production, avec le tireur amené au coin du plateau.
+
+⚠️ **Le piège à ne pas redécouvrir** est géométrique : la sentinelle `(-1,-1)` est à ~274 subhex de
+la zone de déploiement de la fixture, donc hors de toute portée d'arme (120-240). Un test qui met
+une unité en réserves *sans rien d'autre* reste **VERT avec le défaut**, parce que le fantôme
+n'est jamais mesuré. Il faut CONSTRUIRE la géométrie. Second piège du même ordre :
+`shooting_phase_start` ne fait le choix d'arme complet que si l'unité est en advance ou au
+contact — sinon le précheck d'ennemis n'est jamais atteint.
+
+C'est exactement pourquoi les tests
+`test_strategic_reserves_20.py::test_shooting_phase_start_runs_with_a_reserve_{enemy,shooter}` de
+04c ne valaient pas verrou : ils restaient verts quand on retirait les filtres.
+
+## Ce qui attend encore
 
 Le chantier 04c a livré 6 variantes de rosters avec réserves stratégiques, rangées dans des
 sous-dossiers `variants/` :
@@ -138,24 +147,22 @@ sous-dossiers `variants/` :
 - `config/agents/_p2_rosters/500pts/training/variants/`
 
 Elles sont **hors du tirage** : le glob de `training_random` (`engine/game_state.py`,
-`_resolve_roster_ref`) n'est **pas récursif**. C'est volontaire — les câbler a fait rougir
-8 tests sur les trous décrits ici.
-
-**Ne pas les activer avant que ce chantier soit fini.** Le jour où il l'est :
+`_resolve_roster_ref`) n'est pas récursif. Le blocage technique est levé ; l'activation reste une
+**décision utilisateur** :
 
 1. déplacer les 4 variantes `training/` d'un cran vers le haut (hors de `variants/`) ;
 2. ajouter les 2 refs adverses à `opponent_roster_ref` dans
    `config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json` ;
 3. pour le holdout, créer les scénarios correspondants (`scenario_bot-05..08`) — ses rosters sont
    référencés **explicitement**, il n'y a pas de tirage. ⚠️ Ça double le coût d'évaluation et
-   change la composition du holdout : **décision utilisateur**.
+   change la composition du holdout.
 
 Tant que rien n'est activé, la ventilation `bot_eval/roster/*` livrée par 04c ne publiera jamais
 de courbe « avec réserves ».
 
 ## Ne pas oublier
 
-`tests/unit/engine/test_strategic_reserves_20.py` a été repointé sur une fixture à rosters pinnés
-(`scenarios/training/reserves_20_fixture.json`) précisément pour être indépendant du contenu du
-dossier `training/`. Ne pas le repointer sur `scenario_training_armageddon.json` en activant les
+`tests/unit/engine/test_strategic_reserves_20.py` est pointé sur une fixture à rosters pinnés
+(`scenarios/training/reserves_20_fixture.json`) pour être indépendant du contenu du dossier
+`training/`. Ne pas le repointer sur `scenario_training_armageddon.json` en activant les
 variantes : 16 de ses tests supposent que toutes les unités démarrent posées.
