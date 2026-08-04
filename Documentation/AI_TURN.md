@@ -408,6 +408,25 @@ test ne peut plus éteindre une règle en ne la déclarant pas. Même durcisseme
 l'échelle pouces → sub-hex de `W40KEngine.__init__`, qui sautait en silence sur un `.get` de
 `game_rules` / `charge` et laissait les distances en pouces sur un plateau x5/x10.
 
+**Le même défaut au niveau de la CLÉ, corrigé le même jour.** `shared_utils.get_max_base_size_hex`
+lisait `game_rules["max_base_size_hex"]` par trois replis en cascade terminés par un défaut
+littéral `35`, alors que son jumeau strict à dix lignes de là dans le MÊME fichier
+(`get_engagement_zone` → `spatial_relations.get_engagement_zone`) exige les trois niveaux par
+`require_key` : deux lecteurs de la même section, régimes opposés. Mesuré sur une partie réelle
+(791 appels, deux graines) : **zéro repli**, la valeur venait toujours de la config — le défaut ne
+pouvait que masquer un état malformé ou une clé retirée du JSON. Passé à `require_key` en cascade,
+la valeur ne vit plus que dans `config/game_config.json`. Ce seuil est un DIAMÈTRE HEX **non
+scalé** par `inches_to_subhex` (absent de la liste de conversion de `w40k_core`), donc un littéral
+en dur n'avait même pas le même sens d'un plateau à l'autre. Verrou :
+`tests/unit/engine/test_max_base_size_hex_regime.py`.
+
+**Ce qui reste ouvert sur ce motif.** Le prélude `require_key(game_state,"config")` +
+`require_key(config,"game_rules")` est écrit 23 fois dans `engine/` pour 13 clés distinctes : un
+`require_game_rule(game_state, name)` unique, et un test de contrat qui vérifie par AST que
+chaque clé lue existe dans `game_config.json`, factoriseraient les deux moitiés d'un coup. Côté
+tests, 97 fichiers construisent encore un `"game_rules"` littéral à la main contre 5 qui passent
+par `_config_helpers.build_game_rules` : c'est ce qui rend coûteux chaque durcissement de clé.
+
 Ce que ça change, MESURÉ (5 graines, même flux d'actions, `cp_gain_on_objective` neutralisée des
 deux côtés pour ne pas décaler le flux `random` — sans cette précaution les épisodes divergent et
 la comparaison ne mesure plus rien) :
