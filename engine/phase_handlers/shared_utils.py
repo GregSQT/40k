@@ -4836,6 +4836,17 @@ def roll_battle_shock(unit_id: str, game_state: Dict[str, Any]) -> bool:
         "player": int(unit.get("player", -1)),
         "result": result_str,
     })
+    # Trace debug ECRITE ICI, et pas chez l'appelant : `command_step_battle_shock` la produisait
+    # en recalculant `unit_effective_leadership` juste pour la remplir — un second balayage de
+    # `models_cache` par unite choquee et par phase de commandement, alors que le seuil est deja
+    # sous la main a cet endroit. Tous les declencheurs de 01.07 la produisent desormais.
+    from engine.game_utils import add_debug_file_log
+
+    add_debug_file_log(
+        game_state,
+        f"[BATTLE-SHOCK] E{game_state.get('episode_number', '?')} "
+        f"T{game_state.get('turn', '?')} unit={unit_id} shocked={battle_shocked} ld={ld}"
+    )
 
     return battle_shocked
 

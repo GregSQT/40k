@@ -179,14 +179,10 @@ def command_step_battle_shock(game_state: Dict[str, Any]) -> None:
     déjà battle-shocked rejette même revenue au-dessus du demi-effectif — c'est ce jet qui lui
     permet d'en sortir (clause de sortie appliquée par `roll_battle_shock`).
     """
-    from engine.game_utils import add_debug_file_log
     from engine.phase_handlers.shared_utils import (
         is_unit_alive, is_unit_at_or_below_half_strength, roll_battle_shock,
-        unit_effective_leadership,
     )
 
-    episode = game_state.get("episode_number", "?")
-    turn = game_state.get("turn", "?")
     current_player = require_key(game_state, "current_player")
     for unit in require_key(game_state, "units"):
         if require_key(unit, "player") != current_player:
@@ -198,12 +194,9 @@ def command_step_battle_shock(game_state: Dict[str, Any]) -> None:
             unit_id, game_state
         )
         if needs_roll:
-            ld = unit_effective_leadership(unit_id, game_state)
-            shocked = roll_battle_shock(unit_id, game_state)
-            add_debug_file_log(
-                game_state,
-                f"[BATTLE-SHOCK] E{episode} T{turn} unit={unit_id} shocked={shocked} ld={ld}"
-            )
+            # `roll_battle_shock` journalise le jet (action log + trace debug) : il connaît déjà
+            # le seuil qu'il a employé, le recalculer ici pour le logger le balayait deux fois.
+            roll_battle_shock(unit_id, game_state)
 
 
 def command_step_command_abilities(game_state: Dict[str, Any]) -> None:
