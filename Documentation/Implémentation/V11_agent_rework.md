@@ -121,6 +121,11 @@ aucune ligne de code touchée) :
 - ✅ **Somme des formes VÉRIFIÉE PAR EXÉCUTION le 2026-08-02** (elle était jusque-là la seule
   ligne déduite par lecture) : `sum(prod(shape))` sur les **20** clés de `squad_obs_shapes()`,
   grille exclue, = **20780** — égale à `SQUAD_OBS_SIZE_TARGET`.
+- ⏳ **Périmé depuis le 2026-08-04 (chantier 01)** — ce contrôle reste vrai À SA DATE, il ne
+  décrit plus l'état courant : `obs_size` **20752** (les 13 bits `rule_<effet>` sont devenus
+  8 slots d'ids de capacité + 4 d'ids de statut), `TOTAL_ACTION_SIZE` **1127** (+ 20 slots
+  d'Oath of Moment), **24** clés dans `squad_obs_shapes()`, et `pointer_policy` porte une
+  cinquième requête (`oath_query_net`).
 - ⚠️ **Non revérifié le 2026-08-02** : les suites de tests (la vérification large appartient à
   l'utilisateur).
 
@@ -1880,7 +1885,7 @@ squad** (`convert_squad_action`, [`engine/w40k_core.py:1697`](../../engine/w40k_
 Deux faits contre-vérifiés, à ne pas perdre :
 
 - **(a) Aucune exception de forme — le résultat est silencieusement faux, pas bruyamment cassé.**
-  Les DEUX masques sont dimensionnés à `self.total_action_size` = **1107**
+  Les DEUX masques sont dimensionnés à `self.total_action_size` = **1127**
   ([action_decoder.py:305](../../engine/action_decoder.py#L305) et
   [:208](../../engine/action_decoder.py#L208)). `predict` ne peut donc rien détecter : les bits
   autorisés désignent simplement d'autres intentions que celles que le décodeur lira.
@@ -1948,7 +1953,7 @@ Elle est **verrouillée par ~25 cas** de
 [`tests/unit/engine/test_action_decoder.py`](../../tests/unit/engine/test_action_decoder.py)
 (:242, :249, :256, :280, :287, :313-340, :400-448, :464, :591-631), dont la fixture de masque fait
 **31 entrées** ([:297](../../tests/unit/engine/test_action_decoder.py#L297)) — c'est-à-dire l'ancien
-espace d'action, pas 1107.
+espace d'action, pas 1127.
 
 C'est le motif **« code testé mais jamais appelé »** (§0.19, T6-i), dans sa forme aggravée :
 **testé dans une sémantique MORTE**. Cela viole frontalement le critère
@@ -2014,7 +2019,7 @@ hors et en command, `SHOOT`/`CHARGE`/`FIGHT_SLOT_BASE + k`, `ACTION_FIGHT_NO_TAR
 `CHOICE_BASE + i`, les 5 `DEPLOY_SLOT_BASE`, plus 4 gardes qui doivent **lever**. Le commit rapporte
 **16 défauts réintroduits un à un** (décalages de base/offset, gardes neutralisées), chaque cas
 devenant rouge sous au moins une mutation, et l'arbre restauré propre. Aucun littéral d'action nu.
-⚠️ **Ce verrou fige l'espace d'action COURANT (1107)** : il devra être mis à jour avec le lot
+⚠️ **Ce verrou fige l'espace d'action COURANT (1107 alors, 1127 depuis le chantier 01)** : il devra être mis à jour avec le lot
 (§0.48, dépendances).
 
 #### É4 — les bots d'évaluation ne jouent pas ce qu'ils décident : `DefensiveBot` ne charge JAMAIS, et les bots « intelligents » tirent sur le mauvais slot — ✅ CONTRE-VÉRIFIÉ, ✅ CORRIGÉ (non mergé)
@@ -2218,7 +2223,8 @@ contrats — c'est-à-dire s'il rend un modèle existant inchargeable ou son obs
 1. **ARCHITECTURE de la policy** — toute tête, tout `features_dim`, tout `_split_features` qui
    change ⇒ `load_state_dict` lève dans les workers d'éval `spawn` (leçon §0bis, runs 1 et 2).
 2. **OBSERVATION** — `obs_size` ou la **forme des clés** de `squad_obs_shapes()`.
-3. **ESPACE D'ACTION** — `macro_intents.TOTAL_ACTION_SIZE` (**1107** aujourd'hui).
+3. **ESPACE D'ACTION** — `macro_intents.TOTAL_ACTION_SIZE` (**1127** depuis le chantier 01,
+   qui le GÈLE : les chantiers 02 à 06 n'utilisent que des dimensions déjà déclarées).
 
 Un chantier qui n'en casse **aucun** se livre **à tout moment** et ne coûte **aucun**
 ré-entraînement — c'est le critère de tri, pas l'importance du chantier.
@@ -2277,7 +2283,8 @@ ré-entraînement — c'est le critère de tri, pas l'importance du chantier.
   ✅ **État au 2026-08-02 : les QUATRE sont MERGÉS sur `main`** — rampe `4c0ed7a4`,
   FLY `6191a360`, bots `72a34d5c` + `5f91c744`, 01.07 `4be41919` ; vérifié par
   `git merge-base --is-ancestor`. **Le prérequis d'ordre est LEVÉ.**
-- ⚠️ **Le verrou d'interface de [§0.47](#s0.47) É3 fige l'espace d'action COURANT (1107)** : écrit
+- ⚠️ **Le verrou d'interface de [§0.47](#s0.47) É3 fige l'espace d'action COURANT (1107 alors,
+  1127 depuis le chantier 01)** : écrit
   avant L2 / L8 / L9, il **devra être mis à jour avec le lot**. Ce n'est pas une raison de ne pas
   l'écrire, c'est une **conséquence à assumer**.
 

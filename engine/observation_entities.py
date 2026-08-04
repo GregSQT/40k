@@ -207,11 +207,26 @@ UNIT_BIN_SIZE = len(UNIT_BIN_FIELDS)
 
 #: Capacités EN VIGUEUR (19.04) portées par une unité.
 #:
-#: 8 et non 6 : le maximum MESURÉ sur les rosters Armageddon est de 6 capacités en vigueur sur
-#: une même entité (`Boyz + Warboss + Painboy`, `Intercessor + Captain Relic Shield + Ancient`).
-#: 6 slots signifierait ZÉRO marge — une seule capacité ajoutée à une figurine rattachée ferait
-#: déborder. 8 coûte 2 × 28 = 56 scalaires (0,3 % de l'observation) pour supprimer un mode de
-#: défaillance dur.
+#: DEUX chiffres, et il faut les distinguer — ce slot garde un chemin de crash dur (débordement
+#: = `raise`), donc sa marge doit être lue sur la MESURE, pas sur la projection :
+#:
+#: - **Mesuré le 2026-08-04 sur le dépôt réel** (`UnitRegistry` + `unit_has_rule_effect` sur les
+#:   13 effets, 179 datasheets, puis les unions 19.04 légales — 70 paires et 50 trios
+#:   bodyguard + leader + support validés par les règles d'attachement 19.01/24.22/24.34) :
+#:   **2** effets au maximum par datasheet, **3** au maximum en vigueur sur une entité
+#:   (`AssaultIntercessor + CaptainPowerWeaponBolter [+ Ancient]` → `reroll_1_towound`,
+#:   `reroll_charge`, `reroll_towound_target_on_objective`). Marge actuelle : 5 slots.
+#: - **Projeté** une fois les 17 capacités Armageddon livrées (chantier 06) : 6 en vigueur sur
+#:   une même entité (`Boyz + Warboss + Painboy` → Get da Good Bitz, Might Is Right, Da Biggest
+#:   and da Best, Dok's Toolz, Hold Still and Say Aargh, Grot Orderly ;
+#:   `Intercessor + Captain Relic Shield + Ancient` → Objective Secured, Hail of Bolts, Finest
+#:   Hour, Rites of Battle, Relic Banner, Unbreakable Resolve). Ces capacités N'EXISTENT PAS
+#:   encore dans le moteur : c'est une projection de la conception du chantier 06, pas une mesure.
+#:
+#: 8 et non 6 : dimensionner sur la projection laisserait ZÉRO marge le jour où elle se réalise —
+#: une seule capacité ajoutée à une figurine rattachée ferait déborder. 8 coûte 2 × 28 = 56
+#: scalaires (0,3 % de l'observation) pour supprimer un mode de défaillance dur.
+#: ⚠️ À rouvrir au chantier 06 : c'est lui qui rendra la projection mesurable.
 #:
 #: ⚠️ Débordement = ERREUR, jamais troncature (`observation_builder`) : tronquer ferait subir à
 #: l'agent des règles qu'il ne perçoit pas — exactement le trou que V11 §0.30 avait fermé.
