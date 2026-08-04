@@ -24,9 +24,7 @@ export class VanguardVeteranSquadJumpPackSergeant extends TroopRangeSwarm {
   static CC_WEAPONS = getWeapons(VanguardVeteranSquadJumpPackSergeant.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [
-    { ruleId: "deep_strike", displayName: "Deep Strike" },
-  ];
+  static UNIT_RULES = [{ ruleId: "deep_strike", displayName: "Deep Strike" }];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
   static RULES_STATUS = { deep_strike: 2 };

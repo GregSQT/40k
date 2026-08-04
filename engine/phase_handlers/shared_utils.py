@@ -488,6 +488,8 @@ def is_footprint_placement_valid(
     Returns:
         True if ALL cells pass every check
     """
+    if not candidate_hexes:
+        return False
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     wall_hexes = game_state.get("wall_hexes", set())
@@ -3272,7 +3274,10 @@ def validate_squad_coherency(game_state: Dict[str, Any], squad_id: str) -> bool:
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     model_ids = squad_models.get(squad_id, [])  # get allowed
-    alive = [models_cache[m] for m in model_ids if m in models_cache]
+    alive = [
+        models_cache[m] for m in model_ids
+        if m in models_cache and int(models_cache[m].get("col", -1)) >= 0 and int(models_cache[m].get("row", -1)) >= 0
+    ]
     return _positions_in_coherency(alive, game_state)
 
 
@@ -5861,6 +5866,8 @@ def _attacker_model_can_reach_squad(
             continue
         tc = int(tm["col"])
         tr = int(tm["row"])
+        if tc < 0 or tr < 0:
+            continue  # modèle hors-board (réserves stratégiques) — non ciblable
         target_level = int(tm.get("level", 0))  # get allowed (champ optionnel, défaut sol)
         footprint = list(_compute_unit_occupied_hexes(tc, tr, base_unit, game_state))
         target_socle = Socle(

@@ -115,7 +115,7 @@ class TestExecuteAction:
         """action_valid : engine + units_cache + action valide → 200 + success=True."""
         mock_engine = MagicMock()
         mock_engine.current_mode_code = "pve"  # sinon la porte RBAC refuse (moteur sans mode)
-        mock_engine.game_state = {"units_cache": {}, "phase": "move"}
+        mock_engine.game_state = {"units_cache": {}, "phase": "move", "turn": 1, "current_player": 0}
         mock_engine.execute_semantic_action.return_value = (True, {"action": "skip"})
         monkeypatch.setattr(api_server, "engine", mock_engine)
         monkeypatch.setattr(api_server, "is_endless_duty_mode", lambda eng: False)
