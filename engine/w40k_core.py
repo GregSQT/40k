@@ -375,15 +375,10 @@ class W40KEngine(gym.Env):
             self.config = {
                 "board": board_config,
                 "game_rules": require_key(game_config, "game_rules"),
-                # Regle 14.02 — points (phase, moment) ou le controle d'objectif est REEVALUE.
-                # OMIS de cette branche jusqu'au 2026-08-04, alors que les deux chemins API/PvP
-                # le posaient : `run_objective_control_checkpoint` sort sur `if not check_cfg`
-                # des que la section manque, donc le checkpoint 14.02 etait un NO-OP COMPLET en
-                # entrainement. Le controle n'y etait rafraichi que par effet de bord des chemins
-                # de scoring VP (`calculate_objective_control` appele en direct), a des moments
-                # qui ne sont pas ceux de la regle. « Code teste mais jamais appele » : le
-                # correctif de `refresh_objective_control_on_boundary` avait ete ecrit et sa
-                # docstring annonce les DEUX chemins, mais la config ne l'a jamais atteint ici.
+                # Regle 14.02. Omise ici jusqu'au 2026-08-04 alors que les deux constructeurs
+                # de `services/api_server` la posaient : le checkpoint etait un no-op muet en
+                # entrainement. Le recit complet est dans le test qui le verrouille,
+                # `tests/unit/engine/test_objective_control_checkpoint_1402.py`.
                 "objective_control_check": require_key(game_config, "objective_control_check"),
                 "move": require_key(game_config, "move"),
                 "charge": require_key(game_config, "charge"),
@@ -586,12 +581,9 @@ class W40KEngine(gym.Env):
             "command_points": initial_command_points(get_config_loader().get_game_config()),
             "primary_objective": self._scenario_primary_objective,
             "primary_objective_scored_turns": set(),
-            # Etapes « debut de phase de mouvement » deja resolues, en (tour, joueur) :
-            # `movement_phase_start` est ré-invoquee par `execute_action` quand elle voit un pool
-            # vide, et une capacite qui lance des des ne doit pas rejouer (cf.
-            # `movement_step_cp_gain_on_objective`). Meme cycle de vie que les marqueurs de
-            # scoring juste au-dessus : purge a chaque episode, sinon un tour 1 passerait pour
-            # deja resolu au reset suivant.
+            # Etapes « debut de phase de mouvement » deja resolues, en (tour, joueur). POURQUOI :
+            # docstring de `movement_step_cp_gain_on_objective`. Purge d'episode obligatoire,
+            # comme les marqueurs de scoring voisins.
             "cp_gain_on_objective_resolved": set(),
             "objective_rewarded_turns": set(),
             "coherency_penalized_turns": set(),
@@ -1362,12 +1354,9 @@ class W40KEngine(gym.Env):
             "command_points": initial_command_points(get_config_loader().get_game_config()),
             "primary_objective": self._scenario_primary_objective,
             "primary_objective_scored_turns": set(),
-            # Etapes « debut de phase de mouvement » deja resolues, en (tour, joueur) :
-            # `movement_phase_start` est ré-invoquee par `execute_action` quand elle voit un pool
-            # vide, et une capacite qui lance des des ne doit pas rejouer (cf.
-            # `movement_step_cp_gain_on_objective`). Meme cycle de vie que les marqueurs de
-            # scoring juste au-dessus : purge a chaque episode, sinon un tour 1 passerait pour
-            # deja resolu au reset suivant.
+            # Etapes « debut de phase de mouvement » deja resolues, en (tour, joueur). POURQUOI :
+            # docstring de `movement_step_cp_gain_on_objective`. Purge d'episode obligatoire,
+            # comme les marqueurs de scoring voisins.
             "cp_gain_on_objective_resolved": set(),
             "objective_rewarded_turns": set(),
             "coherency_penalized_turns": set(),
