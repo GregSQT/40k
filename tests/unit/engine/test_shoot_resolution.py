@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 from engine.phase_handlers.shooting_handlers import _has_valid_shooting_targets
 from engine.phase_handlers.shared_utils import build_units_cache
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 def _weapon(close_quarters: bool = False, rng: int = 24) -> Dict[str, Any]:
@@ -22,7 +22,7 @@ def _weapon(close_quarters: bool = False, rng: int = 24) -> Dict[str, Any]:
 
 
 def _unit(uid: int, player: int, col: int, row: int, close_quarters: bool = False, base_size: int = 3) -> Dict[str, Any]:
-    return {
+    return {**unit_invariants(),
         "id": uid,
         "player": player,
         "col": col,

@@ -24,7 +24,7 @@ import pytest
 
 from engine.phase_handlers import charge_handlers as ch
 from engine.phase_handlers.shared_utils import build_units_cache
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ from tests._state_invariants import turn_state_invariants
 
 def _unit(uid: str, player: int, models: Sequence[Tuple[int, int]]) -> Dict[str, Any]:
     col, row = models[0]
-    return {
+    return {**unit_invariants(),
         "id": uid, "player": player, "col": col, "row": row,
         "HP_CUR": len(models), "HP_MAX": len(models), "VALUE": 100, "OC": 1, "T": 4,
         "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,

@@ -44,7 +44,7 @@ from engine.phase_handlers.shared_utils import (
     charge_build_valid_plan,
     get_squad_move_budget,
 )
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -159,7 +159,7 @@ def _fly_gs(
     wall_override: Any = None,
 ) -> Dict[str, Any]:
     """`game_state` minimal centré sur une unique escouade FLY d'un seul modèle."""
-    unit: Dict[str, Any] = {
+    unit: Dict[str, Any] = {**unit_invariants(),
         "id": 1, "player": 1, "col": _START[0], "row": _START[1], "MOVE": move,
         "HP_CUR": 2, "HP_MAX": 2, "VALUE": 50, "OC": 1, "T": 4,
         "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
@@ -365,12 +365,12 @@ def _charge_gs(*, fly: bool, level: int = 0, gym: bool = True) -> Dict[str, Any]
     (`w40k_core.squad_charge`). `inches_to_subhex = 1`, plancher de niveau 1 haut de 3"."""
     # Casse MAJUSCULE : celle du vrai roster d'ArmageddonAgent.
     keywords = [{"keywordId": "FLY"}] if fly else []
-    charger = {
+    charger = {**unit_invariants(),
         "id": 1, "player": 1, "col": _CHARGE_START[0], "row": _CHARGE_START[1], "MOVE": 6,
         "HP_CUR": 1, "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": keywords,
         "level": level,
     }
-    target = {
+    target = {**unit_invariants(),
         "id": 2, "player": 2, "col": _CHARGE_ENEMY[0], "row": _CHARGE_ENEMY[1], "MOVE": 6,
         "HP_CUR": 1, "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": [], "level": 0,
     }

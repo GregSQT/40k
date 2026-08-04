@@ -25,7 +25,7 @@ from engine.phase_handlers.shared_utils import (
     erode_move_pool_by_squad_block,
     explain_move_plan_rejection,
 )
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 WALL = {(11, r) for r in range(6, 15)}
 ANCHOR_DEST = (7, 10)
@@ -34,12 +34,9 @@ BUDGET = 3  # MOVE=3, inches_to_subhex=1 → budget subhex = 3
 
 def _gs(wall: Iterable[Tuple[int, int]], *, fly: bool = False) -> Dict[str, Any]:
     keywords = [{"keywordId": "fly"}] if fly else []
-    unit = {
+    unit = {**unit_invariants(),
         "id": 1, "player": 1, "col": 5, "row": 10, "MOVE": BUDGET,
         "HP_CUR": 1, "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": keywords,
-        # Invariant de construction : posé par tous les constructeurs de production, lu en
-        # strict par le moteur depuis 2026-08-02.
-        "battle_shocked": False,
     }
     models_cache = {
         "1#0": {"col": 5, "row": 10, "level": 0, "player": 1, "squad_id": "1", "HP_CUR": 1,
@@ -199,12 +196,9 @@ def test_erosion_and_validation_agree_on_every_pool_cell():
 
 def _gym_state_for_cellmap() -> Dict[str, Any]:
     """État gym complet pour build_squad_move_cell_map : squad '1' mono-fig en (10,10), MOVE 3."""
-    unit = {
+    unit = {**unit_invariants(),
         "id": 1, "player": 1, "col": 10, "row": 10, "MOVE": 3, "HP_CUR": 1,
         "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": [],
-        # Invariant de construction : posé par tous les constructeurs de production, lu en
-        # strict par le moteur depuis 2026-08-02.
-        "battle_shocked": False,
     }
     return {**turn_state_invariants(),
         "models_cache": {

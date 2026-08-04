@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Tuple
 
 from engine.phase_handlers.shared_utils import build_units_cache, destroy_model
 from services.endless_duty_runtime import _replace_units_for_player
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 _GAME_RULES = {
     "engagement_zone": 1,
@@ -43,7 +43,7 @@ def _unit(uid: int, player: int, positions: List[Tuple[int, int]], value: int) -
     verrouillé par `test_endless_duty_is_broken.py`, et documenté dans
     `Documentation/Implémentation/A_faire/Endless_duty.md`.
     """
-    return {
+    return {**unit_invariants(),
         "id": uid, "player": player, "col": positions[0][0], "row": positions[0][1],
         "unitType": "TestUnit", "DISPLAY_NAME": f"Unit {uid}",
         "HP_CUR": len(positions), "HP_MAX": 1, "MOVE": 6, "T": 4,

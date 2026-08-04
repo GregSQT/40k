@@ -36,7 +36,7 @@ from engine.phase_handlers.shared_utils import (
     resolve_squad_move_constraints,
     squad_normal_move_frontier_subhex,
 )
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 MOVE = 6
 FLOOR_HEIGHT_INCHES = 3.0
@@ -52,13 +52,10 @@ def _gs(*, level: int, fly: bool = False, move: int = MOVE) -> Dict[str, Any]:
     tout-au-sol, où la descente vaut 0 et où rien ne doit changer.
     """
     keywords = [{"keywordId": "fly"}] if fly else []
-    unit = {
+    unit = {**unit_invariants(),
         "id": 1, "player": 1, "col": START[0], "row": START[1], "MOVE": move,
         "HP_CUR": 1, "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": keywords,
         "level": level,
-        # Invariant de construction : posé par tous les constructeurs de production, lu en
-        # strict par le moteur depuis 2026-08-02.
-        "battle_shocked": False,
     }
     models_cache = {
         "1#0": {

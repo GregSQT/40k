@@ -17,7 +17,7 @@ from ai.evaluation_bots import (
     _select_weighted_deployment_action,
     _squad_on_objective,
 )
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 # Espace d'action squad SPATIAL (macro_intents, refonte move_action_space_spatial_rework §6.2) :
 #   0-1023 cellules de la grille egocentrique, 1024 wait, 1025-1029 shoot, 1030 charge, 1031 fight,
@@ -790,7 +790,7 @@ def _value_move_gs(
     gs["units"][0].update(stats)
     gs["units_cache"]["1"]["HP_CUR"] = hp_max if hp_cur is None else hp_cur
     acol, arow = unit_hex
-    gs["units"].append({
+    gs["units"].append({**unit_invariants(),
         "id": "a", "player": ACTING, "col": acol, "row": arow,
         "HP_MAX": hp_max, "VALUE": ally_value, **_dmg(rng=1, cc=1),
     })

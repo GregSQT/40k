@@ -1,8 +1,9 @@
 # Les fixtures de test fabriquaient un `game_state` que la production ne produit jamais
 
-**Ouvert le 2026-07-29. Livré le 2026-07-29.**
+**Ouvert le 2026-07-29. Livré le 2026-07-29. Suite livrée le 2026-08-04 (§8).**
 Décision d'architecture prise par l'utilisateur (§4) : socle minimal, liste **répliquée** +
-test de conformité. Périmètre exécuté : volets 1 et 2.
+test de conformité. Périmètre exécuté : volets 1 et 2, puis §8 — clés de partie du `game_state`
+et socle d'unité, sur la même décision d'architecture.
 
 ---
 
@@ -63,9 +64,9 @@ explicitement hors socle.
 
 **Socle minimal, liste répliquée, conformité verrouillée par test.**
 
-`tests/_state_invariants.py` expose `turn_state_invariants()` (20 clés, valeurs exactes du
-`game_state` post-reset) et `TURN_STATE_KEYS`. Chaque fixture le fusionne en tête de son littéral,
-donc **ses propres clés gagnent** :
+`tests/_state_invariants.py` expose `turn_state_invariants()` (les 20 clés d'état de tour aux
+valeurs exactes du `game_state` post-reset, plus les clés de partie ajoutées depuis — cf. §8).
+Chaque fixture le fusionne en tête de son littéral, donc **ses propres clés gagnent** :
 
 ```python
 gs = {**turn_state_invariants(), "phase": "shoot", "units_advanced": {"3"}, ...}
@@ -128,3 +129,93 @@ rouge par mutation puis rétabli (`git status` propre sur `engine/` après chaqu
 - Les invariants restants sont exercés non vides quelque part (7 à 53 sites chacun) mais leur
   couverture n'a pas été auditée règle par règle : `reactive_decision_payload` (0 site non vide)
   et `units_took_to_skies_charge` (5) sont les plus faibles après ceux traités ci-dessus.
+
+---
+
+## 8. Suite du 2026-08-04 — les clés de partie, puis le socle d'unité
+
+Même motif, deux crans plus loin. Trois faits nouveaux, dans l'ordre où ils sont apparus.
+
+### 8.1 `command_points` : le socle ne couvrait que l'état de TOUR
+
+13 tests rouges d'un coup sur `Required key 'command_points' is missing`, après que la règle 08.02
+a rendu la lecture stricte (`gain_command_points`, `observation_builder`). La clé n'est pas un
+invariant d'état de tour — elle ne se réinitialise pas — mais elle est présente dans **tout**
+`game_state` de production : `reset()` la pose à `initial_command_points(config)` = 0, puis la
+cascade command du tour 1 accorde le CP de 08.02 aux deux joueurs. **Valeur du socle : `{1: 1, 2: 1}`**,
+comme pour `units_fought`, et c'est le verrou de valeurs qui l'a imposée (`{1: 0, 2: 0}` le
+rougissait). Le socle en compte donc 22 : 20 d'état de tour + `turn` + `command_points`.
+
+### 8.2 `TURN_STATE_KEYS` supprimé : une liste de clés recopiée à côté du dict
+
+Le frozenset répliquait la liste des clés **en parallèle** du dict. Deux trous : il ne couvrait pas
+les clés de partie (`turn`, `command_points` n'y étaient pas, donc aucun des trois tests ne les
+verrouillait), et il pouvait diverger du dict sans que rien ne rougisse. Il est supprimé : les
+trois tests de `TestTurnStateInvariantsConformity` partent tous du dict `turn_state_invariants()`.
+Le filet de dérive inverse continue de filtrer par préfixes (`units_`, `reactive_`, `last_move_`,
+`advance_`, `reaction_`) — c'est ce filtre, et non une seconde liste, qui définit « invariant
+d'état de tour ».
+
+### 8.3 Le même trou existait un cran plus bas : les UNITÉS
+
+Le `game_state` avait son socle, pas les unités. Chaque fichier recopiait à la main les champs
+qu'une unité de production porte toujours — `battle_shocked` était réécrit dans une dizaine de
+helpers, chacun avec son commentaire, et absent d'une trentaine d'autres.
+
+`unit_invariants()` pose les **13 champs d'état constants** : `level`, `orientation`,
+`deployed_on_turn`, `CAN_LEAD`, `_ATTACHED_RULE_GROUPS`, `hidden`, `hidden_models`,
+`battle_shocked`, et les 5 champs de réserves 20.01–20.04 (`in_strategic_reserves`,
+`reserves_repositioned`, `reserves_arrival_round`, `reserves_edge_distance_inches`,
+`reserves_enemy_clearance_inches`).
+
+**N'y entrent pas les champs DÉRIVÉS du roster**, qu'un socle figerait à une valeur fausse :
+`SHOOT_LEFT`/`ATTACK_LEFT`, `selectedRngWeaponIndex`/`selectedCcWeaponIndex` (armes), `hideable`
+(mots-clés), `_UNIT_RULES_OWN` (19.04). Cette classification est dans la docstring de
+`unit_invariants()`, et le test d'exhaustivité interdit qu'un champ nouveau échappe aux deux.
+
+Verrou : `tests/unit/engine/test_state_manager.py::TestUnitInvariantsConformity`, **5 tests** —
+clés, valeurs, valeurs du second constructeur, égalité des jeux de clés des deux constructeurs,
+exhaustivité. Il a mordu immédiatement : les 5 champs de réserves du chantier 04, mergé le même
+jour, étaient posés par `create_unit` sans être classés nulle part.
+
+**Les DEUX constructeurs sont exercés.** `create_unit` et `_build_enhanced_unit` (chargement de
+scénario, `change_roster`) dupliquent le même bloc de champs d'état, et `initialize_units` repasse
+chaque unité enrichie par `create_unit` : un champ ajouté d'un seul côté est silencieusement perdu
+en production — c'est la dérive déjà vécue avec `in_strategic_reserves`. Le test d'égalité des jeux
+de clés ferme ce cas ; sans lui, ajouter un champ au seul `_build_enhanced_unit` laissait tout vert.
+
+### 8.4 Migration : 80 dicts d'unité, et les deux pièges du balayage
+
+Le classement AST distingue **trois** sortes de dicts, et se tromper de cible est le vrai risque :
+
+| Sorte | Reconnue à | Socle ? |
+|---|---|---|
+| unité du `game_state` | `id` + `player` + ≥ 4 champs de stats | **oui** |
+| config d'entrée moteur | porte `ICON` / `ICON_SCALE` / `ILLUSTRATION_RATIO` | **non** — `create_unit` pose ces champs lui-même |
+| figurine (`models`, `models_cache`) | `squad_id`, `role`, `points_per_hp`, `model_id` | **non** — une figurine n'est pas une unité |
+
+Piège mesuré : le premier filtre ne connaissait que `squad_id`/`model_id` et a étalé le socle sur
+**10 figurines**, dont 8 n'étaient atteignables qu'en suivant le **flux** (dict affecté à une
+variable ensuite placée dans `models_cache`, fabrique `_target_model`, `models_cache[...].update()`).
+Sur une figurine, `level`/`orientation` du socle prennent la précédence spec > unité dans
+`_build_models_for_unit` : la figurine reste au sol et `models_cache` diverge de `units_cache`.
+Les 10 ont été retirées ; le balayage final (clés-marqueurs + flux de variable + fabriques) rend
+zéro.
+
+### 8.5 Vérifications, et ce qui ne l'est pas
+
+**Fait :** les 52 fichiers touchés lancés et verts (2 lots) ; `pyright` propre dessus ; chaque
+verrou prouvé rouge par mutation puis rétabli — valeur du socle faussée, clé retirée du socle,
+champ ajouté au seul `_build_enhanced_unit` — avec `git diff` vide sur `engine/` après coup.
+
+**Non fait / limites :**
+- La suite complète appartient à l'utilisateur.
+- Le socle d'unité ne couvre que les dicts **littéraux** : une unité fabriquée par copie ou par
+  une usine reste hors du balayage, comme au volet 1.
+- 231 stubs `{"id", "player"}` passés à des mocks n'ont pas été touchés : ils ne traversent aucune
+  lecture `require_key` d'unité.
+- **Dette d'altitude, hors périmètre :** `create_unit` et `_build_enhanced_unit` dupliquent leur
+  bloc de champs d'état dans `engine/game_state.py`. Une `default_unit_state()` en production
+  rendrait le socle *et* son verrou inutiles. C'est un refactor moteur, à décider séparément.
+- `_FULL_UNIT_CFG` (config d'entrée de `create_unit`) est recopié à l'identique dans
+  `test_morale.py` et `test_socle_invariant.py` : dette préexistante, signalée, non traitée.

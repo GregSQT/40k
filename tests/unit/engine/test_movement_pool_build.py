@@ -16,6 +16,7 @@ from engine.phase_handlers.movement_handlers import (
 )
 from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache
 from shared.data_validation import require_key
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 from _config_helpers import build_move_rules
 
@@ -55,7 +56,7 @@ def _fill(unit: Dict[str, Any]) -> Dict[str, Any]:
 def test_movement_engagement_violates_enemy_cache_items_matches_full_scan() -> None:
     """Liste ennemis préfiltrée ≡ filtre inline sur ``units_cache`` (ez > 1)."""
     units = [_fill(u) for u in [
-        {
+        {**unit_invariants(),
             "id": 1,
             "col": 10,
             "row": 10,
@@ -164,7 +165,7 @@ def test_movement_engagement_violates_enemy_cache_items_matches_full_scan() -> N
 def test_pruned_enemy_horizon_matches_full_scan_with_far_dummy_enemy() -> None:
     """La prune spatiale (``_enemy_items_within_move_engagement_horizon``) ⊂ cache mais même verdict que le scan complet."""
     units = [_fill(u) for u in [
-        {
+        {**unit_invariants(),
             "id": 1,
             "col": 20,
             "row": 20,
@@ -464,7 +465,7 @@ def _assert_euclidean_pool_invariants(
 
 def test_vectorized_multi_hex_matches_oracle_base3_ez10_round() -> None:
     units = [
-        {"id": 1, "col": 10, "row": 10, "HP_CUR": 2, "player": 0, "MOVE": 6,
+        {**unit_invariants(), "id": 1, "col": 10, "row": 10, "HP_CUR": 2, "player": 0, "MOVE": 6,
          "BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
         {"id": 2, "col": 22, "row": 10, "HP_CUR": 2, "player": 1,
          "BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
@@ -478,7 +479,7 @@ def test_vectorized_multi_hex_matches_oracle_base3_ez10_round() -> None:
 def test_vectorized_multi_hex_matches_oracle_with_walls_ez10() -> None:
     walls = {(c, 12) for c in range(8, 14)} | {(14, r) for r in range(8, 14)}
     units = [
-        {"id": 1, "col": 10, "row": 10, "HP_CUR": 2, "player": 0, "MOVE": 5,
+        {**unit_invariants(), "id": 1, "col": 10, "row": 10, "HP_CUR": 2, "player": 0, "MOVE": 5,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
         {"id": 2, "col": 25, "row": 25, "HP_CUR": 2, "player": 1,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
@@ -489,7 +490,7 @@ def test_vectorized_multi_hex_matches_oracle_with_walls_ez10() -> None:
 
 def test_vectorized_multi_hex_matches_oracle_base2_ez1() -> None:
     units = [
-        {"id": 1, "col": 5, "row": 5, "HP_CUR": 2, "player": 0, "MOVE": 4,
+        {**unit_invariants(), "id": 1, "col": 5, "row": 5, "HP_CUR": 2, "player": 0, "MOVE": 4,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
         {"id": 2, "col": 10, "row": 5, "HP_CUR": 2, "player": 1,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
@@ -507,19 +508,19 @@ def test_vectorized_multi_hex_matches_oracle_base2_ez1() -> None:
 
 _HEX_ORACLE_CASES = [
     ("base2_round_ez10", [
-        {"id": 1, "col": 12, "row": 12, "HP_CUR": 2, "player": 0, "MOVE": 5,
+        {**unit_invariants(), "id": 1, "col": 12, "row": 12, "HP_CUR": 2, "player": 0, "MOVE": 5,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
         {"id": 2, "col": 26, "row": 12, "HP_CUR": 2, "player": 1,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
     ], 10, None),
     ("base3_round_ez10", [
-        {"id": 1, "col": 12, "row": 12, "HP_CUR": 2, "player": 0, "MOVE": 6,
+        {**unit_invariants(), "id": 1, "col": 12, "row": 12, "HP_CUR": 2, "player": 0, "MOVE": 6,
          "BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
         {"id": 2, "col": 24, "row": 12, "HP_CUR": 2, "player": 1,
          "BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
     ], 10, None),
     ("base2_walls_ez5", [
-        {"id": 1, "col": 12, "row": 12, "HP_CUR": 2, "player": 0, "MOVE": 5,
+        {**unit_invariants(), "id": 1, "col": 12, "row": 12, "HP_CUR": 2, "player": 0, "MOVE": 5,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
         {"id": 2, "col": 28, "row": 28, "HP_CUR": 2, "player": 1,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
@@ -569,7 +570,6 @@ def test_hex_oracle_test_actually_reaches_build_multi_hex_vectorized(monkeypatch
 # Régénération (si le pool change LÉGITIMEMENT) : imprimer len + sha256[:16] de sorted(set(pool))
 # et de sorted(fz), et reporter ici — jamais éditer à l'aveugle.
 import hashlib
-from tests._state_invariants import turn_state_invariants
 
 _OVAL_SNAPSHOT = {
     # orientation -> (pool_len, pool_sha16, fz_len, fz_sha16)
@@ -582,7 +582,7 @@ _OVAL_SNAPSHOT = {
 def test_oval_base_hex_pool_snapshot(orient):
     """Non-régression stricte du pool ovale hex/gym (socle non couvert par l'oracle)."""
     units = [
-        {"id": 1, "col": 20, "row": 40, "HP_CUR": 2, "player": 0, "MOVE": 12,
+        {**unit_invariants(), "id": 1, "col": 20, "row": 40, "HP_CUR": 2, "player": 0, "MOVE": 12,
          "BASE_SIZE": [20, 14], "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "oval", "orientation": orient},
         {"id": 2, "col": 60, "row": 40, "HP_CUR": 2, "player": 1,
          "BASE_SIZE": [20, 14], "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "oval", "orientation": orient},
@@ -610,43 +610,43 @@ def test_oval_base_hex_pool_snapshot(orient):
 # ne touche pas (seuls `_dilate`/`_spread` sont fenêtrés) → invariant par construction.
 _LBBOX_AB_CASES = [
     ("round2_ez10", [
-        {"id": 1, "col": 20, "row": 20, "HP_CUR": 2, "player": 0, "MOVE": 6,
+        {**unit_invariants(), "id": 1, "col": 20, "row": 20, "HP_CUR": 2, "player": 0, "MOVE": 6,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
         {"id": 2, "col": 34, "row": 20, "HP_CUR": 2, "player": 1,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
     ], 10, None, 60, 60),
     ("round3_walls_ez5", [
-        {"id": 1, "col": 18, "row": 18, "HP_CUR": 2, "player": 0, "MOVE": 7,
+        {**unit_invariants(), "id": 1, "col": 18, "row": 18, "HP_CUR": 2, "player": 0, "MOVE": 7,
          "BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
         {"id": 2, "col": 40, "row": 40, "HP_CUR": 2, "player": 1,
          "BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
     ], 5, {(c, 24) for c in range(12, 26)} | {(25, r) for r in range(12, 26)}, 60, 60),
     ("round2_adjacent_enemy_ez1", [
-        {"id": 1, "col": 20, "row": 20, "HP_CUR": 2, "player": 0, "MOVE": 5,
+        {**unit_invariants(), "id": 1, "col": 20, "row": 20, "HP_CUR": 2, "player": 0, "MOVE": 5,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
         {"id": 2, "col": 24, "row": 20, "HP_CUR": 2, "player": 1,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
     ], 1, None, 60, 60),
     ("square2_ez10", [
-        {"id": 1, "col": 20, "row": 20, "HP_CUR": 2, "player": 0, "MOVE": 6,
+        {**unit_invariants(), "id": 1, "col": 20, "row": 20, "HP_CUR": 2, "player": 0, "MOVE": 6,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "square", "orientation": 1},
         {"id": 2, "col": 34, "row": 20, "HP_CUR": 2, "player": 1,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "square"},
     ], 10, None, 60, 60),
     ("oval_move12_orient0_ez10", [
-        {"id": 1, "col": 20, "row": 40, "HP_CUR": 2, "player": 0, "MOVE": 12,
+        {**unit_invariants(), "id": 1, "col": 20, "row": 40, "HP_CUR": 2, "player": 0, "MOVE": 12,
          "BASE_SIZE": [20, 14], "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "oval", "orientation": 0},
         {"id": 2, "col": 60, "row": 40, "HP_CUR": 2, "player": 1,
          "BASE_SIZE": [20, 14], "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "oval", "orientation": 0},
     ], 10, None, 80, 80),
     ("oval_move12_orient1_ez10", [
-        {"id": 1, "col": 20, "row": 40, "HP_CUR": 2, "player": 0, "MOVE": 12,
+        {**unit_invariants(), "id": 1, "col": 20, "row": 40, "HP_CUR": 2, "player": 0, "MOVE": 12,
          "BASE_SIZE": [20, 14], "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "oval", "orientation": 1},
         {"id": 2, "col": 60, "row": 40, "HP_CUR": 2, "player": 1,
          "BASE_SIZE": [20, 14], "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "oval", "orientation": 1},
     ], 10, None, 80, 80),
     ("round_move12_edge_clamp", [
-        {"id": 1, "col": 3, "row": 3, "HP_CUR": 2, "player": 0, "MOVE": 12,
+        {**unit_invariants(), "id": 1, "col": 3, "row": 3, "HP_CUR": 2, "player": 0, "MOVE": 12,
          "BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
         {"id": 2, "col": 50, "row": 50, "HP_CUR": 2, "player": 1,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
@@ -720,7 +720,7 @@ def test_ground_bbox_window_narrows_and_clamps():
 def test_vectorized_multi_hex_matches_oracle_mixed_square_enemy_ez10() -> None:
     """Ennemi carré → branche dilatation hex. Doit coïncider avec l'oracle sémantique."""
     units = [
-        {"id": 1, "col": 10, "row": 10, "HP_CUR": 2, "player": 0, "MOVE": 5,
+        {**unit_invariants(), "id": 1, "col": 10, "row": 10, "HP_CUR": 2, "player": 0, "MOVE": 5,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
         {"id": 2, "col": 20, "row": 10, "HP_CUR": 2, "player": 1,
          "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "square"},
@@ -732,7 +732,7 @@ def test_vectorized_multi_hex_matches_oracle_mixed_square_enemy_ez10() -> None:
 def test_movement_build_valid_destinations_pool_deterministic() -> None:
     """Deux appels identiques → mêmes ancres et même zone d’empreinte."""
     units = [_fill(u) for u in [
-        {
+        {**unit_invariants(),
             "id": 1,
             "col": 5,
             "row": 5,

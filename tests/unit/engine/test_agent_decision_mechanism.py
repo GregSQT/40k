@@ -45,7 +45,7 @@ from engine.phase_handlers.shared_utils import (
 from engine.w40k_core import W40KEngine
 
 from _config_helpers import build_move_rules
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 #: Le SEUL choix de règle du jeu aujourd'hui (Tyranid Warrior mêlée) : `adrenalised_onslaught`
 #: accorde `aggression_imperative` (alias de `reroll_1_tohit_fight`) OU `preservation_imperative`
@@ -83,7 +83,7 @@ def _config() -> Dict[str, Any]:
 
 
 def _unit(uid: int, player: int, col: int, row: int, rules: List[Dict[str, Any]]) -> Dict[str, Any]:
-    return {
+    return {**unit_invariants(),
         "id": uid,
         "player": player,
         "col": col,
@@ -97,12 +97,6 @@ def _unit(uid: int, player: int, col: int, row: int, rules: List[Dict[str, Any]]
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": rules,
-        # Pose par le moteur au deploiement (clause 2 de [HEAVY] 24.16) ; l'observation en derive
-        # le one-hot de mise en place, et l'exige.
-        "deployed_on_turn": 0,
-        # Statut 01.07 : depuis le chantier 02 l'observation ecrit `battle_shock` dans les
-        # `status_ids` de CHAQUE entite, elle lit donc ce champ sur toute unite decrite.
-        "battle_shocked": False,
         "T": 4,
         "ARMOR_SAVE": 4,
         "INVUL_SAVE": 7,

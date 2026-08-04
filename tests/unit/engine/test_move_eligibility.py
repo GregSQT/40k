@@ -19,7 +19,7 @@ from engine.phase_handlers.shared_utils import (
     compute_candidate_footprint,
     is_footprint_placement_valid,
 )
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 def _board_config() -> Dict[str, Any]:
@@ -40,7 +40,7 @@ def _board_config() -> Dict[str, Any]:
 
 def _unit(uid: int, player: int, col: int, row: int, move: int = 6, fly: bool = False) -> Dict[str, Any]:
     keywords = [{"keywordId": "fly"}] if fly else []
-    return {
+    return {**unit_invariants(),
         "id": uid,
         "player": player,
         "col": col,

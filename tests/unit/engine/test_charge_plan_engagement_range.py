@@ -33,7 +33,7 @@ from engine.phase_handlers.shared_utils import (
     charge_build_valid_plan,
     get_engagement_zone,
 )
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 ISH = 5
 CHARGER_COL = 100
@@ -54,12 +54,12 @@ def _gs(charger_cols: List[int]) -> Dict[str, Any]:
     distinguerait plus « unite engagee » de « toutes les figurines engagees ».
     """
     charger_positions = [(c, CHARGER_ROW) for c in charger_cols]
-    unit1 = {
+    unit1 = {**unit_invariants(),
         "id": 1, "player": 1, "col": charger_positions[0][0], "row": charger_positions[0][1],
         "MOVE": 6, "HP_CUR": len(charger_positions), "BASE_SIZE": 1, "BASE_SHAPE": "round",
         "UNIT_KEYWORDS": [], "level": 0,
     }
-    unit2 = {
+    unit2 = {**unit_invariants(),
         "id": 2, "player": 2, "col": TARGET[0], "row": TARGET[1], "MOVE": 6,
         "HP_CUR": 1, "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": [], "level": 0,
     }

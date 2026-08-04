@@ -24,7 +24,7 @@ from engine.phase_handlers.fight_handlers import (
     _fight_pile_in_preview_plan,
     pile_in_autoplace_plan,
 )
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 FLOOR_HEIGHT_INCHES = 3.0
 GROUND_START = (11, 20)
@@ -42,12 +42,12 @@ def _model(squad_id: str, col: int, row: int, player: int, level: int) -> Dict[s
 
 
 def _gs() -> Dict[str, Any]:
-    unit1 = {
+    unit1 = {**unit_invariants(),
         "id": 1, "player": 1, "col": GROUND_START[0], "row": GROUND_START[1], "MOVE": 6,
         "HP_CUR": 1, "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": INFANTRY,
         "MODEL_HEIGHT": 2.5, "level": 0, "orientation": 0,
     }
-    unit2 = {
+    unit2 = {**unit_invariants(),
         "id": 2, "player": 2, "col": ENEMY[0], "row": ENEMY[1], "MOVE": 6,
         "HP_CUR": 1, "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": INFANTRY,
         "MODEL_HEIGHT": 2.5, "level": 0, "orientation": 0,

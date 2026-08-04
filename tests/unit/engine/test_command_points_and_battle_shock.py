@@ -47,7 +47,7 @@ from engine.phase_handlers.shared_utils import (
     is_unit_below_starting_strength, unit_effective_leadership,
 )
 from shared.data_validation import ConfigurationError
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -279,7 +279,7 @@ def test_la_force_de_depart_dune_unite_attachee_compte_le_character():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _oc_unit(uid: int, player: int, col: int, row: int, oc: int) -> Dict[str, Any]:
-    return {
+    return {**unit_invariants(),
         "id": uid, "player": player, "col": col, "row": row, "OC": oc, "LD": 7,
         "battle_shocked": False, "HP_CUR": 3, "HP_MAX": 3, "VALUE": 100, "MOVE": 6,
         "T": 4, "ARMOR_SAVE": 4, "INVUL_SAVE": 7, "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,

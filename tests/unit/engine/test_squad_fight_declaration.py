@@ -41,7 +41,7 @@ from engine.phase_handlers.fight_handlers import (
     squad_undeclare_fight_weapon_qty,
     squad_union_cc_weapons,
 )
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 # Armes de melee reelles de l'armory (teste aussi la propagation du champ `code`).
 CCW = get_weapons("SpaceMarine", ["close_combat_weapon"])[0]
@@ -57,7 +57,7 @@ def _unit(
     uid: int, player: int, models: List[Dict[str, Any]], cc_weapons: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
     """Escouade multi-figurine minimale acceptee par build_units_cache."""
-    return {
+    return {**unit_invariants(),
         "id": uid,
         "player": player,
         "col": models[0]["col"],

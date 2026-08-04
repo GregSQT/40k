@@ -25,7 +25,7 @@ from engine.phase_handlers.fight_handlers import (
     pile_in_select_targets_12_03,
     pile_in_move_destinations_12_03,
 )
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 def _make_gs(
@@ -41,7 +41,7 @@ def _make_gs(
     norm_units: List[Dict[str, Any]] = []
     for u in units:
         uid = str(u["id"])
-        full = {
+        full = {**unit_invariants(),
             "id": uid,
             "player": u["player"],
             "col": u["col"],
@@ -49,7 +49,6 @@ def _make_gs(
             "BASE_SIZE": 1,
             "MODEL_HEIGHT": 2.5,
             "BASE_SHAPE": "round",
-            "orientation": 0,
             "HP_CUR": u.get("HP_CUR", 1),
             "HP_MAX": u.get("HP_MAX", 1),
         }

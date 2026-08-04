@@ -14,7 +14,7 @@ import pytest
 from engine.action_decoder import ActionDecoder, ActionValidationError
 from engine.macro_intents import TOTAL_ACTION_SIZE
 from engine.phase_handlers.shared_utils import build_units_cache
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -26,7 +26,7 @@ def _make_decoder() -> ActionDecoder:
 
 
 def _unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
-    return {
+    return {**unit_invariants(),
         "id": uid,
         "player": player,
         "col": col,

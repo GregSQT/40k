@@ -15,7 +15,7 @@ from engine.game_state import GameStateManager
 from engine.phase_handlers.shared_utils import build_units_cache
 from engine.combat_utils import normalize_coordinates
 from shared.data_validation import ConfigurationError
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ def _unit(
     oc: int = 1,
     battle_shocked: bool = False,
 ) -> Dict[str, Any]:
-    return {
+    return {**unit_invariants(),
         "id": uid,
         # Règle 01.07 : champ posé dès la construction d'une unité (create_unit /
         # _build_enhanced_unit), lu SANS défaut par le contrôle d'objectif 14.02.

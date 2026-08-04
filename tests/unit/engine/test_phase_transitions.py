@@ -23,7 +23,7 @@ from engine.phase_handlers.shared_utils import (
 )
 
 from _config_helpers import build_game_rules, build_move_rules
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -39,7 +39,7 @@ def _base_config() -> Dict[str, Any]:
 
 
 def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, Any]:
-    return {
+    return {**unit_invariants(),
         "id": uid,
         "player": player,
         "col": col,

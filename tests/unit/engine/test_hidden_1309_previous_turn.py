@@ -28,7 +28,7 @@ from engine.phase_handlers.shooting_handlers import (
     compute_hidden_statuses,
     preview_hidden_models_from_position,
 )
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 # Zone obscurante couvrant les colonnes 10..14, lignes 10..12.
 _AREA_HEXES = [[c, r] for c in range(10, 15) for r in range(10, 13)]
@@ -36,7 +36,7 @@ _AREA_POLYGON = [[10, 10], [14, 10], [14, 12], [10, 12]]
 
 
 def _unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
-    return {
+    return {**unit_invariants(),
         "id": uid,
         "player": player,
         "col": col,
@@ -51,7 +51,6 @@ def _unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
         "SHOOT_LEFT": 1,
         "ATTACK_LEFT": 1,
         "MOVE": 6,
-        "orientation": 0,
         "BASE_SHAPE": "round",
         "BASE_SIZE": 1,
         "MODEL_HEIGHT": 2.5,

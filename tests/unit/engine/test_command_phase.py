@@ -16,6 +16,7 @@ from engine.phase_handlers.shared_utils import build_units_cache
 from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
 from engine.reward_calculator import RewardCalculator
+from tests._state_invariants import unit_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -23,7 +24,7 @@ from engine.reward_calculator import RewardCalculator
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _cmd_unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
-    return {"id": uid, "player": player, "col": col, "row": row,
+    return {**unit_invariants(), "id": uid, "player": player, "col": col, "row": row,
             "HP_CUR": 3, "HP_MAX": 3, "VALUE": 100, "OC": 1,
             # Meme exigence que `battle_shocked` ci-dessous : depuis le chantier 02 le Ld est
             # recopie PAR FIGURINE dans models_cache (01.06, meilleur Ld d'une unite attachee),
@@ -32,10 +33,6 @@ def _cmd_unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
             "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
             "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
             "RNG_WEAPONS": [], "CC_WEAPONS": [], "UNIT_RULES": [],
-            # Invariant de construction : les 4 constructeurs de production posent ce champ
-            # (game_state, api_server, endless_duty_runtime). Les lecteurs le lisent en strict
-            # depuis 2026-08-02, une doublure qui l'omet ne represente donc plus une unite.
-            "battle_shocked": False,
             "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5}
 
 
