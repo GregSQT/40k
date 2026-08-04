@@ -59,33 +59,21 @@ def _has_action_in(valid_actions, action_ids) -> bool:
     return any(a in valid_actions for a in action_ids)
 
 
-def _require_placement_pool(valid_actions: List[int], who: str) -> List[int]:
-    """CONTRAT d'entree de `select_placement_action` : un pool non vide de slots 4-8, et rien d'autre.
-
-    Ce n'est plus un filtre — c'est une VERIFICATION. Le nettoyage se fait une seule fois en amont,
-    dans `BotControlledEnv._ask_bot_placement`, pour les deux sites de mise en place (deploiement
-    03.02 et ingress move 20.04). Les bots ne voient donc jamais le masque brut.
-
-    ⚠️ Ce que cette verification garde : `WAIT_ACTION` n'est PAS une attente au deploiement, le
-    masque l'y ouvre pour la decision 20.01 « placer cette unite en RESERVES STRATEGIQUES »
-    (`ActionDecoder.get_squad_action_mask_and_eligible_units`). Un bot ne prend jamais cette
-    decision — c'est un choix de LISTE, pas de doctrine. Un appelant qui transmettrait le masque
-    brut leve donc ICI au lieu de laisser un bot tirer WAIT en silence : c'est exactement le
-    defaut mesure au chantier 04c (TacticalBot 400 mises en reserves sur 400, cinq bots ponderes
-    1 a 3 % des leurs). Filtrer sans rien dire le reproduirait sous une autre forme.
-    """
-    if not valid_actions:
-        raise ValueError(
-            f"{who}: pool de mise en place vide. L'appelant doit trancher AVANT (au deploiement "
-            "c'est un deadlock moteur ; a l'ingress, pool vide = l'unite reste en reserves)."
-        )
-    intruders = [a for a in valid_actions if a not in DEPLOYMENT_ACTIONS]
-    if intruders:
-        raise ValueError(
-            f"{who}: pool de mise en place contenant des actions hors slots "
-            f"{DEPLOYMENT_ACTIONS} : {intruders}. Seul l'appelant nettoie le masque."
-        )
-    return list(valid_actions)
+# CONTRAT DES POLITIQUES DE POSE (`select_placement_action`, toutes implementations)
+# ---------------------------------------------------------------------------------
+# `valid_actions` est un pool NON VIDE de slots de mise en place (4-8), jamais un masque brut.
+# Il est construit une seule fois par l'appelant — `BotControlledEnv._open_placement_slots`, pour
+# les deux sites de mise en place (deploiement 03.02 et ingress move 20.04), qui y traitent aussi
+# le cas du pool vide.
+#
+# ⚠️ Ce que ce contrat protege : `WAIT_ACTION` n'est PAS une attente au deploiement, le masque l'y
+# ouvre pour la decision 20.01 « placer cette unite en RESERVES STRATEGIQUES »
+# (`ActionDecoder.get_squad_action_mask_and_eligible_units`). Un bot ne prend jamais cette
+# decision — c'est un choix de LISTE, pas de doctrine. Quand le filtre etait porte par les bots,
+# un site oublie ne plantait pas, il remettait le bot a decider des reserves en silence : mesure
+# du chantier 04c, TacticalBot 400 mises en reserves sur 400, cinq bots ponderes 1 a 3 % des leurs.
+# Le filtre a donc ete remonte chez l'appelant, ou il est structurellement impossible a oublier.
+# Aucun garde ne le double ici : un controle place APRES le filtre ne pourrait plus rien voir.
 
 
 # ⚠️ HISTORIQUE — « le premier slot ouvert = la cible la plus menacante » etait FAUX.
@@ -597,7 +585,8 @@ def _select_weighted_deployment_action(
     max_repeat: int,
 ) -> int:
     """Select deployment intent with weighted randomness and anti-repeat guard."""
-    candidates = _require_placement_pool(valid_actions, "_select_weighted_deployment_action")
+    # `valid_actions` est deja le pool de slots de pose (cf. CONTRAT DES POLITIQUES DE POSE).
+    candidates = list(valid_actions)
 
     if last_action in candidates and repeat_count >= max_repeat and len(candidates) > 1:
         candidates = [a for a in candidates if a != last_action]
@@ -624,9 +613,9 @@ class RandomBot:
         Uniforme sur les slots OUVERTS — c'est la doctrine de ce bot. `valid_actions` ne porte
         QUE des slots 4-8 : le wrapper a deja retire `WAIT_ACTION`, qui n'est pas une strategie
         de pose mais la decision 20.01 de mettre l'unite EN RESERVES au deploiement, et le
-        choix de reserve appartient a la LISTE, jamais au bot (cf. `_require_placement_pool`).
+        choix de reserve appartient a la LISTE, jamais au bot (cf. CONTRAT DES POLITIQUES DE POSE).
         """
-        return random.choice(_require_placement_pool(valid_actions, "RandomBot"))
+        return random.choice(valid_actions)
 
     def select_action_with_state(
         self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
@@ -1335,13 +1324,14 @@ class TacticalBot(_WeightedMover):
         le bot mettait EN RESERVES toute unite tenant sous le plafond de 50 %, a chaque
         deploiement (mesure : 400/400). Un bot ne decide jamais d'une mise en reserves — c'est
         un choix de LISTE. Le retrait de `WAIT_ACTION` se fait desormais UNE fois en amont
-        (`BotControlledEnv._ask_bot_placement`) ; ici on ne fait que VERIFIER le contrat.
+        (`BotControlledEnv._open_placement_slots`) : `valid_actions[0]` est donc bien le premier
+        slot de POSE ouvert, et jamais la mise en reserves.
 
         ⚠️ Depuis le routage de la mise en place par le wrapper (2026-08-05), cette politique
         est le SEUL comportement de pose du holdout : sa clause d'exploration `randomness` ne
         voit plus la phase de deploiement, ou elle tirait un slot uniforme dans 5 % des cas.
         """
-        return _require_placement_pool(valid_actions, "TacticalBot")[0]
+        return valid_actions[0]
 
     def select_action_with_state(
         self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]

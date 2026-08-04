@@ -1318,7 +1318,7 @@ class BotControlledEnv(gym.Wrapper):
         passage unique rend la correction independante de l'ordre des clauses de chaque bot, et
         d'un 8e bot qu'on ajouterait demain sans y penser.
         """
-        placement_actions = [a for a in valid_actions if a in mi.DEPLOY_SLOTS]
+        placement_actions = self._open_placement_slots(valid_actions)
         if not placement_actions:
             # Contrairement a l'ingress (pool vide = etat de jeu NORMAL, l'unite reste en
             # reserves), un deploiement sans aucun slot de pose est un defaut moteur : le decodeur
@@ -1331,6 +1331,18 @@ class BotControlledEnv(gym.Wrapper):
         actor = self.bot if bot is None else bot
         return self._ask_bot_placement(actor, placement_actions, game_state)
 
+    @staticmethod
+    def _open_placement_slots(valid_actions) -> list:
+        """SOURCE UNIQUE de la regle « seuls les slots 4-8 sont des poses ».
+
+        Les deux sites de mise en place (deploiement 03.02 et ingress move 20.04) l'appellent, et
+        c'est tout ce qu'ils partagent de la traduction masque -> pool : ce qui les separe — le
+        traitement du pool VIDE — leur reste propre, parce qu'il differe reellement (erreur au
+        deploiement, `ACTION_WAIT` a l'ingress). Ecrire ce filtre une fois par site rouvrirait le
+        defaut du chantier 04c d'un cran plus haut : deux copies qui derivent en silence.
+        """
+        return [a for a in valid_actions if a in mi.DEPLOY_SLOTS]
+
     def _ask_bot_placement(self, actor, placement_actions, game_state) -> int:
         """Interroge la politique de MISE EN PLACE du bot sur un pool DEJA nettoye.
 
@@ -1338,8 +1350,9 @@ class BotControlledEnv(gym.Wrapper):
         ingress move (20.04) — qui sont des jumeaux exacts cote moteur
         (`ActionDecoder.ingress_slot_candidates` : memes 5 strategies, memes slots 4-8, seule
         l'aire legale change). Un seul contrat en resulte pour `select_placement_action` : elle
-        recoit TOUJOURS un pool non vide de slots 4-8, jamais un masque brut. C'est ce qui permet
-        aux bots de ne plus porter le filtre eux-memes.
+        recoit TOUJOURS un pool non vide de slots 4-8, jamais un masque brut. Les bots n'ont donc
+        plus a porter le filtre eux-memes — et, ce filtre etant ici, ils n'ont pas non plus a le
+        re-verifier : un garde cote bot ne pourrait plus rien voir (cf. `_open_placement_slots`).
 
         On ne transmet QUE les slots ouverts lus dans le masque : un slot ferme ne peut donc pas
         etre choisi, meme par un bot qui ignorerait la liste qu'on lui passe —
@@ -1397,7 +1410,7 @@ class BotControlledEnv(gym.Wrapper):
         # bot ne DECLINAIT pas l'arrivee, il ABATTAIT le run — tout roster a reserves cote bot
         # etait injouable. Seul `unit_is_in_strategic_reserves` separe les deux familles.
         if unit_is_in_strategic_reserves(game_state, squad_id):
-            placement_actions = [a for a in valid_actions if a in mi.DEPLOY_SLOTS]
+            placement_actions = self._open_placement_slots(valid_actions)
             if not placement_actions:
                 # `ingress_slot_candidates` a rendu {} : aucune destination legale dans le pool
                 # d'ingress a ce round (positions ennemies, clause de zone adverse avant le 3e

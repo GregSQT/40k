@@ -137,9 +137,10 @@ def _move_gs(unit_hex=(0, 0), enemy_hex=(10, 0), objectives=None, models=None, c
 
 
 def test_select_weighted_deployment_action_errors_and_antirepeat(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Le pool de mise en place est nettoye par l'appelant (`BotControlledEnv._ask_bot_placement`) :
-    # une action hors slots 4-8 est une violation de contrat, pas quelque chose a filtrer ici.
-    with pytest.raises(ValueError, match=r"hors slots"):
+    # Le pool de mise en place est nettoye par l'appelant (`BotControlledEnv._open_placement_slots`) :
+    # une action hors slots 4-8 ne peut plus arriver ici, et si elle y arrivait la table de poids
+    # la refuserait — c'est le meme KeyError que pour un slot sans poids configure.
+    with pytest.raises(KeyError, match=r"Missing deployment weight"):
         _select_weighted_deployment_action([0, 1], {4: 1.0}, None, 0, 2)
 
     with pytest.raises(KeyError, match=r"Missing deployment weight"):

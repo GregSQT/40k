@@ -139,19 +139,32 @@ def test_placement_never_returns_a_closed_slot(bot_cls) -> None:
     assert chosen <= set(open_slots), f"{bot_cls.__name__} a joue un slot ferme : {chosen}"
 
 
-@pytest.mark.parametrize("bot_cls", ALL_BOTS, ids=lambda c: c.__name__)
-def test_placement_refuses_a_pool_it_has_not_been_promised(bot_cls) -> None:
-    """CONTRAT d'entree : un pool non vide de slots 4-8, et rien d'autre.
+def test_the_placement_pool_rule_is_written_once() -> None:
+    """Le pool de pose se construit a UN seul endroit, et les deux sites de mise en place l'appellent.
 
-    Le nettoyage se fait une seule fois chez l'appelant (`BotControlledEnv._ask_bot_placement`).
-    Les bots ne le refont pas — ils VERIFIENT. Un appelant qui transmettrait le masque brut leve
-    donc ici, au lieu de laisser un bot tirer `WAIT_ACTION` (= mise en reserves 20.01) en silence :
-    filtrer sans rien dire reproduirait le defaut du chantier 04c sous une autre forme.
+    Ce test remplace l'ancien garde cote bots (`_require_placement_pool`), devenu incapable de
+    rien voir une fois le filtre remonte chez l'appelant : un controle place APRES le filtre est un
+    vert vacant. Ce qui doit etre verrouille, c'est que la REGLE reste unique — deux copies qui
+    derivent en silence sont exactement le defaut du chantier 04c, un cran plus haut.
     """
-    with pytest.raises(ValueError):
-        _bot(bot_cls).select_placement_action([WAIT_ACTION], _deployment_state())
-    with pytest.raises(ValueError):
-        _bot(bot_cls).select_placement_action([], _deployment_state())
+    import inspect
+
+    from ai.env_wrappers import BotControlledEnv
+
+    assert BotControlledEnv._open_placement_slots([mi.DEPLOY_SLOT_BASE, WAIT_ACTION]) == [
+        mi.DEPLOY_SLOT_BASE
+    ]
+    for method in (
+        BotControlledEnv._select_bot_deploy_action,
+        BotControlledEnv._select_bot_move_action,
+    ):
+        source = inspect.getsource(method)
+        assert "_open_placement_slots(" in source, (
+            f"{method.__name__} doit passer par la regle commune"
+        )
+        assert "in mi.DEPLOY_SLOTS]" not in source, (
+            f"{method.__name__} reecrit le filtre de slots de pose au lieu de l'appeler"
+        )
 
 
 def test_tactical_bot_placement_is_frozen_on_the_first_open_slot() -> None:

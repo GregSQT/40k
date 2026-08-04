@@ -9,10 +9,11 @@ Proposé le 2026-08-04 par la revue d'altitude du chantier 04c. **IMPLÉMENTÉ l
 > au lieu de le faire dans chaque bot.
 >
 > **Statut (2026-08-05)** : fait. `BotControlledEnv._select_bot_deploy_action` route le
-> déploiement, `_ask_bot_placement` est le point de passage commun aux deux sites de mise en
-> place (déploiement 03.02 et ingress move 20.04), et `_open_placement_actions` est devenu
-> `_require_placement_pool` — une VÉRIFICATION de contrat côté bots, plus un filtre.
-> Cf. la section « Ce qui a été fait » en fin de document pour les écarts avec la proposition.
+> déploiement ; `_open_placement_slots` porte la règle « seuls les slots 4-8 sont des poses »
+> pour les deux sites de mise en place (déploiement 03.02 et ingress move 20.04) et
+> `_ask_bot_placement` est leur point d'interrogation commun ; `_open_placement_actions` a
+> disparu côté bots. Cf. « Ce qui a été fait » en fin de document pour les écarts avec la
+> proposition.
 
 ---
 
@@ -114,13 +115,17 @@ bougeait. **Arbitré : doctrine pure des deux côtés.** Conséquence à retenir
 désormais strictement déterministe à la pose, ses win-rates antérieurs ne sont plus bit-à-bit
 comparables.
 
-**2. `_open_placement_actions` n'a pas été supprimée mais RETOURNÉE.** Devenue
-`_require_placement_pool`, elle ne filtre plus — elle **vérifie** le contrat (pool non vide, que
-des slots 4-8) et lève sur un masque brut. Supprimer la garde aurait rendu silencieux exactement
-le défaut du chantier 04c ; la garder en filtre aurait conservé les deux contrats. D'où le test
-`test_placement_refuses_a_pool_without_any_open_slot`, qui n'a pas sauté : il a été retitré
-`test_placement_refuses_a_pool_it_has_not_been_promised` et couvre désormais les deux violations
-(pool vide, action hors slots).
+**2. `_open_placement_actions` a bien disparu côté bots, comme prévu — mais en deux temps.**
+Elle a d'abord été retournée en vérification de contrat (`_require_placement_pool`), pour ne pas
+perdre la garde. La passe `/simplify` a montré que cette garde ne pouvait plus rien voir : le
+filtre étant remonté chez l'appelant, un contrôle placé **après** lui est un vert vacant, et il
+restait à trois sites consommateurs qu'un 8ᵉ bot pouvait ignorer. Elle a donc été supprimée, et
+le contrat est documenté une fois en tête de `ai/evaluation_bots.py`. La règle elle-même vit dans
+`BotControlledEnv._open_placement_slots`, **écrite une seule fois** pour les deux sites — le
+premier jet la dupliquait dans les deux branches du wrapper, soit le défaut de 04c un cran plus
+haut. `test_placement_refuses_a_pool_without_any_open_slot` a bien sauté, comme la proposition
+l'avait prévu ; `test_the_placement_pool_rule_is_written_once` le remplace et verrouille
+l'unicité de la règle (défaut remis → rouge).
 
 **3. Le pool vide au déploiement ne peut pas se replier sur `ACTION_WAIT`** comme le fait
 l'ingress — WAIT y **est** la mise en réserves. `_select_bot_deploy_action` lève donc une
@@ -154,3 +159,5 @@ est le cas de la fixture d'ingress). Ces deux conditions sont assertées dans
   ne dépend plus de la liste `ALL_BOTS` tenue à la main — c'est le gain n°1 de la proposition.
 - `test_no_bot_ever_puts_a_unit_in_strategic_reserves` passe désormais par
   `_select_bot_deploy_action` et non plus par `select_action_with_state`.
+- `test_the_placement_pool_rule_is_written_once` : filtre réécrit à la main dans une des deux
+  branches → **rouge**. Verrouille l'unicité de la règle, pas seulement son comportement.
