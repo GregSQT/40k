@@ -100,6 +100,9 @@ def _unit(uid: int, player: int, col: int, row: int, rules: List[Dict[str, Any]]
         # Pose par le moteur au deploiement (clause 2 de [HEAVY] 24.16) ; l'observation en derive
         # le one-hot de mise en place, et l'exige.
         "deployed_on_turn": 0,
+        # Statut 01.07 : depuis le chantier 02 l'observation ecrit `battle_shock` dans les
+        # `status_ids` de CHAQUE entite, elle lit donc ce champ sur toute unite decrite.
+        "battle_shocked": False,
         "T": 4,
         "ARMOR_SAVE": 4,
         "INVUL_SAVE": 7,
@@ -165,6 +168,8 @@ def _game_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
         "objectives": [{"id": "obj1", "hexes": [[5, 5]]}],
         "inches_to_subhex": 1,
         "victory_points": {1: 0, 2: 0},
+        # 08.02 : etat de PARTIE pose au reset du moteur, comme les VP juste au-dessus.
+        "command_points": {1: 0, 2: 0},
         "objective_controllers": {},
         "moved_distance_by_model": {},
     }

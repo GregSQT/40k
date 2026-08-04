@@ -134,7 +134,7 @@ def _unit_statuses_in_effect(
     """`obs_id` des STATUTS en vigueur sur cette unite (`config/unit_statuses.json`).
 
     ⚠️ C'EST ICI que les chantiers suivants posent leur statut, et nulle part ailleurs :
-      - 02 : `battle_shock` — 08.03, etat d'unite (`unit["battle_shocked"]`) ;
+      - 02 : `battle_shock` — 08.03, etat d'unite (`unit["battle_shocked"]`) — POSE ;
       - 03 : `oath_target` — l'unite ENNEMIE designee par l'Oath adverse (d'ou `is_ally`) ;
       - 06 : `suppressed` — capacites Armageddon.
     Le retour part ensuite dans `_fill_id_slots`, qui applique le tri, le padding et les gardes
@@ -142,12 +142,15 @@ def _unit_statuses_in_effect(
     ecriture directe du tenseur) ferait rater ces quatre proprietes a la fois — c'est le motif du
     jumeau divergent que ce chantier existe pour fermer.
 
-    Vide aujourd'hui : ce n'est pas un placeholder mais l'etat EXACT du jeu — aucun de ces trois
-    statuts n'etait observe avant ce chantier non plus, et le chantier 01 ne change aucun
-    comportement. Les slots, eux, sont deja declares : c'est ce qui garantit que 02, 03 et 06 ne
-    toucheront pas `obs_size`.
+    `battle_shock` est ecrit pour TOUTE unite, alliee comme ennemie : c'est une information
+    publique (l'OC de l'unite est a '-' pour tout le monde, 01.07/02.02), et la cacher a l'agent
+    lui ferait croire qu'un objectif tenu par une escouade ennemie choquee lui echappe encore.
+    Les deux autres statuts restent absents tant que leurs chantiers (03, 06) ne les posent pas.
     """
-    return []
+    statuses: List[int] = []
+    if require_key(unit, "battle_shocked"):
+        statuses.append(require_key(unit_status_obs_ids(), "battle_shock"))
+    return statuses
 
 
 def _fill_id_slots(
@@ -1525,6 +1528,11 @@ class ObservationBuilder:
         g_cont[global_cont_index("episode_steps")] = float(int(game_state.get("episode_steps", 0)))  # get allowed
         g_cont[global_cont_index("my_victory_points")] = float(require_key(victory_points, active_player))
         g_cont[global_cont_index("enemy_victory_points")] = float(require_key(victory_points, enemy_player))
+        # CP des deux joueurs (08.02) — bruts, comme les points de victoire juste au-dessus :
+        # ce sont des compteurs, pas des ratios, et `VecNormalize` s'occupe de l'echelle.
+        command_points = require_key(game_state, "command_points")
+        g_cont[global_cont_index("my_command_points")] = float(require_key(command_points, active_player))
+        g_cont[global_cont_index("enemy_command_points")] = float(require_key(command_points, enemy_player))
         for field, p in (("my_value_ratio", active_player), ("enemy_value_ratio", enemy_player)):
             start_value = float(require_key(value_at_start, p))
             if start_value <= 0:

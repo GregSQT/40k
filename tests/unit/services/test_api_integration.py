@@ -94,6 +94,8 @@ def _make_full_gs(units: List[Dict[str, Any]], phase: str = "move") -> Dict[str,
         "game_over": False,
         "winner": None,
         "victory_points": {1: 0, 2: 0},
+        # 08.02 : etat de PARTIE pose au reset du moteur, comme les VP juste au-dessus.
+        "command_points": {1: 0, 2: 0},
         "primary_objective": None,
         "primary_objective_scored_turns": set(),
         "objective_rewarded_turns": set(),

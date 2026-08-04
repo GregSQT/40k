@@ -41,6 +41,11 @@
     "obs_id": 9,
     "description": "When this unit makes an attack, it can reroll rolls of 1 for the wound rolls."
   },
+  "cp_gain_on_objective": {
+    "id": "cp_gain_on_objective",
+    "name": "CP gain on controlled objective",
+    "description": "At the start of your Movement phase, for each objective marker you control that has one or more friendly non-battle-shocked units with this ability within range of it, roll one D6. If one or more of those rolls is a 4+, you gain 1CP. Le gain est GLOBAL : un seul CP quel que soit le nombre d'objectifs qui reussissent. Pas d'obs_id : la capacite n'est pas dans UNIT_RULE_EFFECT_IDS (vocabulaire observe), comme les marqueurs de role."
+  },
   "reroll_charge": {
     "id": "reroll_charge",
     "obs_id": 10,

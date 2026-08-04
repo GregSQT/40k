@@ -550,7 +550,11 @@ def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     turn = game_state.get("turn", "?")
     units_cache = require_key(game_state, "units_cache")
     add_debug_file_log(game_state, f"[PHASE START] E{episode} T{turn} move units_cache={units_cache}")
-    
+
+    # « At the START of your Movement phase » — avant toute activation, donc avant les pools.
+    movement_step_cp_gain_on_objective(game_state)
+
+
     # Pre-compute enemy_adjacent_hexes once at phase start for all players present.
     # Reactive movement may query adjacency from the opposing player's perspective.
     players_present = set()
@@ -586,6 +590,72 @@ def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
         "eligible_units": len(game_state["move_activation_pool"]),
         "phase_complete": False
     }
+
+
+def movement_step_cp_gain_on_objective(game_state: Dict[str, Any]) -> int:
+    """`cp_gain_on_objective` (Thievin' Scavengers) — début de la phase de mouvement.
+
+    « For each objective you control that has one or more friendly NON-BATTLE-SHOCKED units with
+    this ability within range of it, roll one D6. If one or more of those rolls is a 4+, you gain
+    1CP. »
+
+    ⚠️ UN dé par objectif, mais UN SEUL CP au total : le gain est global, pas cumulatif par
+    objectif. C'est le piège de lecture de la capacité — « if one or more of those rolls is a 4+ »
+    porte sur l'ENSEMBLE des jets.
+
+    Retourne le nombre de dés lancés (0 = aucun objectif éligible), pour le log et les tests.
+    """
+    import random
+
+    from engine.game_state import (
+        gain_command_points, objective_hex_zones, unit_is_within_objective,
+    )
+    from engine.game_utils import add_debug_file_log
+    from .shared_utils import is_unit_alive, unit_has_rule_effect
+
+    current_player = int(require_key(game_state, "current_player"))
+    units = require_key(game_state, "units")
+    # Porteurs vivants, non battle-shocked, du joueur actif. Calculé UNE fois : la liste ne
+    # dépend pas de l'objectif, seule l'appartenance à la zone en dépend.
+    # Ordre des filtres = du plus discriminant au plus cher : la capacite d'abord (presque
+    # aucune unite la porte), le statut ensuite.
+    carriers = [
+        unit for unit in units
+        if int(require_key(unit, "player")) == current_player
+        and unit_has_rule_effect(unit, "cp_gain_on_objective")
+        and not require_key(unit, "battle_shocked")
+        and is_unit_alive(str(require_key(unit, "id")), game_state)
+    ]
+    # Aucun porteur vivant : la capacite n'existe pas dans cette partie, il n'y a rien a lire.
+    # C'est aussi ce qui evite d'exiger l'etat de controle d'objectif d'un roster qui n'a
+    # aucune unite concernee.
+    if not carriers:
+        return 0
+
+    controllers = require_key(game_state, "objective_controllers")
+    rolls: List[int] = []
+    for objective_id, zone in objective_hex_zones(game_state):
+        # `.get` : un objectif jamais évalué par le checkpoint 14.02 n'a PAS de contrôleur, et
+        # « pas de contrôleur » est un état de jeu valide (début de bataille), pas une donnée
+        # manquante. Même lecture que `get_objective_control_for_player` (macro_intents).
+        if controllers.get(str(objective_id)) != current_player:
+            continue
+        if not any(
+            unit_is_within_objective(game_state, unit, zones=[zone]) for unit in carriers
+        ):
+            continue
+        rolls.append(random.randint(1, 6))
+
+    if not rolls:
+        return 0
+    if any(roll >= 4 for roll in rolls):
+        gain_command_points(game_state, current_player, 1, "cp_gain_on_objective")
+    add_debug_file_log(
+        game_state,
+        f"[CP GAIN ON OBJECTIVE] E{game_state.get('episode_number', '?')} "
+        f"T{game_state.get('turn', '?')} player={current_player} rolls={rolls}"
+    )
+    return len(rolls)
 
 
 def movement_build_activation_pool(game_state: Dict[str, Any]) -> None:

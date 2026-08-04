@@ -37,7 +37,7 @@ from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
 from engine.game_state import objective_hex_sets, unit_is_within_objective
 from engine.hex_utils import min_distance_between_sets
 from engine.phase_handlers.shared_utils import (
-    is_unit_alive, get_hp_from_cache, is_unit_at_half_strength,
+    is_unit_alive, get_hp_from_cache, is_unit_at_or_below_half_strength,
     require_unit_position,
     compute_candidate_footprint, get_enemy_slot_mapping,
 )
@@ -1253,7 +1253,7 @@ class ValueTradeBot(_WeightedMover):
         """Escouade a lui, ENTAMEE (08.03) ET plus chere que la moyenne de ses AUTRES escouades.
 
         ⚠️ « Entamee » est une question de REGLE, tranchee par le moteur
-        (`is_unit_at_half_strength`, 08.03), pas par une comparaison maison — meme principe que
+        (`is_unit_at_or_below_half_strength`, 08.03), pas par une comparaison maison — meme principe que
         `_squad_on_objective` pour 14.02. Le seuil naif `HP_CUR < HP_MAX * 0.5` est FAUX sur
         toute escouade multi-figurines : `units_cache["HP_CUR"]` porte la SOMME des PV des
         figurines vivantes (`_recompute_squad_hp_total`) alors que `unit["HP_MAX"]` est le PV
@@ -1271,7 +1271,7 @@ class ValueTradeBot(_WeightedMover):
         elle porte a elle seule tout le departage, donc entamee elle se retire.
         """
         squad_id = str(require_key(unit, "id"))
-        if not is_unit_at_half_strength(squad_id, game_state):
+        if not is_unit_at_or_below_half_strength(squad_id, game_state):
             return False
 
         other_values = [
@@ -1432,9 +1432,9 @@ class TacticalBot(_WeightedMover):
         # au PV d'UNE figurine (`unit["HP_MAX"]`). Sur toute escouade multi-figurines le test est
         # faux meme a un survivant (10 Boyz : `10 < 0.5`, puis `1 < 0.5`), donc
         # `_find_safest_position` etait INJOIGNABLE — avec le terme d'objectif qu'on y a ajoute.
-        # 08.03 (`is_unit_at_half_strength`) est l'implementation unique de la question, et
+        # 08.03 (`is_unit_at_or_below_half_strength`) est l'implementation unique de la question, et
         # retombe sur les PV pour les mono-figurine, ou les deux mesures coincident.
-        if is_unit_at_half_strength(str(unit["id"]), game_state):
+        if is_unit_at_or_below_half_strength(str(unit["id"]), game_state):
             return self._find_safest_position(unit, valid_destinations, game_state)
 
         # Otherwise, move toward optimal shooting range
