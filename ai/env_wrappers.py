@@ -1301,7 +1301,12 @@ class BotControlledEnv(gym.Wrapper):
         return obs, float(cumulative_reward), terminated, truncated, info, ready_decision
 
     def _select_bot_move_action(self, game_state, active_unit, valid_actions, bot=None) -> int:
-        """Traduit le choix de destination du bot en action-cellule legale (phase move spatiale).
+        """Action de PHASE MOVE du bot : ingress move si l'escouade est en reserves, sinon
+        traduction de son choix de destination en action-cellule legale (phase move spatiale).
+
+        Les deux cas se decident sur `unit_is_in_strategic_reserves`, jamais sur « la liste des
+        cellules est-elle vide » : cette question-la ne les distingue pas (une escouade posee et
+        totalement bloquee a elle aussi zero cellule).
 
         Contrat strict (cf. audit spec §7bis, le repli silencieux a ete eradique) :
           - Le bot ne choisit QUE parmi les destinations reellement executables : celles portees
@@ -1313,9 +1318,50 @@ class BotControlledEnv(gym.Wrapper):
           - Toute autre valeur hors des destinations legales est un bug d'invariant -> erreur
             explicite (jamais un repli silencieux en WAIT).
         """
-        from engine.phase_handlers.shared_utils import read_squad_move_cell_map, require_unit_position
+        from engine.phase_handlers.shared_utils import (
+            read_squad_move_cell_map,
+            require_unit_position,
+            unit_is_in_strategic_reserves,
+        )
 
         squad_id = str(require_key(active_unit, "id"))
+        actor = self.bot if bot is None else bot
+
+        # INGRESS MOVE (20.04) — l'escouade active est en RESERVES. Elle n'est pas sur le
+        # plateau, donc elle n'a AUCUNE cellule de move : le masque lui ouvre a la place les
+        # slots de mise en place 4-8 (`ActionDecoder.ingress_slot_candidates`, jumeau exact du
+        # deploiement) plus WAIT pour rester en reserves.
+        #
+        # ⚠️ Cette branche doit precede le calcul de `move_cells`, et le filtre `a in
+        # mi.MOVE_CELLS` ne peut PAS servir a distinguer les deux cas : les ids des slots de mise
+        # en place (DEPLOY_SLOTS = 4-8) sont NUMERIQUEMENT DANS la plage des cellules de move
+        # (MOVE_CELLS = 0-1023). Un slot d'ingress ouvert se lit donc comme une cellule de move,
+        # et le code d'avant ce chantier partait chercher sa destination dans la carte de
+        # cellules — laquelle n'existe pas pour une escouade en reserves, le masque ayant rendu
+        # la main avant de la construire. MESURE sur un episode complet : ValueError
+        # « read_squad_move_cell_map: aucune carte de cellules pour squad 101 » au step 30. Le
+        # bot ne DECLINAIT pas l'arrivee, il ABATTAIT le run — tout roster a reserves cote bot
+        # etait injouable. Seul `unit_is_in_strategic_reserves` separe les deux familles.
+        if unit_is_in_strategic_reserves(game_state, squad_id):
+            placement_actions = [a for a in valid_actions if a in mi.DEPLOY_SLOTS]
+            if not placement_actions:
+                # `ingress_slot_candidates` a rendu {} : aucune destination legale dans le pool
+                # d'ingress a ce round (positions ennemies, clause de zone adverse avant le 3e
+                # round). Etat de jeu NORMAL — l'unite reste en reserves et retentera au round
+                # suivant — et seul WAIT est alors arme par le masque.
+                return mi.ACTION_WAIT
+            if not hasattr(actor, "select_placement_action"):
+                # Meme contrat que `select_movement_destination` plus bas : erreur explicite,
+                # jamais un repli silencieux qui ferait renoncer le bot a ses reserves.
+                raise RuntimeError(
+                    f"Bot {type(actor).__name__} n'implemente pas select_placement_action, "
+                    f"requis par l'ingress move (20.04) d'une escouade en reserves."
+                )
+            # On ne transmet QUE les slots ouverts lus dans le masque : un slot ferme ne peut
+            # donc pas etre choisi, meme par un bot qui ignorerait la liste qu'on lui passe —
+            # `validate_action_against_mask` le rattraperait, mais en abattant le run.
+            return int(actor.select_placement_action(placement_actions, game_state))
+
         move_cells = [a for a in valid_actions if a in mi.MOVE_CELLS]
         if not move_cells:
             # Aucune cellule de move jouable (budget nul / totalement bloque) : seul WAIT reste,
@@ -1340,7 +1386,6 @@ class BotControlledEnv(gym.Wrapper):
                 dest_to_cell[dest] = cell_idx
                 valid_destinations.append(dest)
 
-        actor = self.bot if bot is None else bot
         if not hasattr(actor, "select_movement_destination"):
             raise RuntimeError(
                 f"Bot {type(actor).__name__} n'implemente pas select_movement_destination, "

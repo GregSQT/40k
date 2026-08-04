@@ -1351,7 +1351,7 @@ from ai.env_wrappers import BotControlledEnv, SelfPlayWrapper
 from ai.step_logger import StepLogger
 
 # Bot evaluation (extracted to ai/bot_evaluation.py)
-from ai.bot_evaluation import evaluate_against_bots
+from ai.bot_evaluation import ROSTER_SIDES, evaluate_against_bots
 
 # Training callbacks (extracted to ai/training_callbacks.py)
 from ai.training_callbacks import (
@@ -3580,6 +3580,18 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                     metrics_tracker.log_faction_bot_win_rates(
                         require_key(bot_results, "faction_bot_win_rates")
                     )
+                    # TROISIEME site de publication des ventilations, et le seul qui porte le
+                    # SCORE LIVRE : cette evaluation finale est independante, ses resultats ne
+                    # repassent par aucun callback. La ventilation par roster doit y figurer pour
+                    # la meme raison que celle par faction juste au-dessus — sans elle,
+                    # `bot_eval/roster/*` s'arrete a la derniere evaluation intermediaire pendant
+                    # que `bot_eval/faction/*` va jusqu'au bout, et les deux cessent d'etre
+                    # comparables exactement au point de mesure que l'on cite.
+                    for _side in ROSTER_SIDES:
+                        metrics_tracker.log_roster_bot_win_rates(
+                            _side,
+                            require_key(bot_results, f"{_side}_roster_bot_win_rates"),
+                        )
                     holdout_split_metrics = {
                         key: float(require_key(bot_results, key))
                         for key in (

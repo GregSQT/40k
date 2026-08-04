@@ -801,6 +801,13 @@ class MetricsCollectionCallback(BaseCallback):
                     self.metrics_tracker.log_faction_bot_win_rates(
                         require_key(bot_results, 'faction_bot_win_rates')
                     )
+                    # Ventilation par ROSTER (chantier 04c) : c'est elle qui rend une variante
+                    # « avec reserves » lisible separement de la liste dont elle derive.
+                    for _side in ("agent", "opponent"):
+                        self.metrics_tracker.log_roster_bot_win_rates(
+                            _side,
+                            require_key(bot_results, f'{_side}_roster_bot_win_rates'),
+                        )
                     # Flush to ensure metrics are written immediately
                     self.metrics_tracker.writer.flush()
                 
@@ -2143,6 +2150,13 @@ class BotEvaluationCallback(BaseCallback):
                 require_key(results, 'faction_bot_win_rates'),
                 step=int(eval_marker),
             )
+            # Ventilation par ROSTER (chantier 04c), meme point de mesure que la faction.
+            for _side in ("agent", "opponent"):
+                self.metrics_tracker.log_roster_bot_win_rates(
+                    _side,
+                    require_key(results, f'{_side}_roster_bot_win_rates'),
+                    step=int(eval_marker),
+                )
 
         if hasattr(self.model, 'logger') and self.model.logger:
             self.model.logger.record('eval_bots/combined_win_rate', combined_win_rate)

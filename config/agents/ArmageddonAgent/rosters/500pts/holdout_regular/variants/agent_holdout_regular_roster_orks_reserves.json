@@ -1,0 +1,71 @@
+{
+  "roster_id": "agent_holdout_regular_roster_orks_reserves",
+  "composition": [
+    {
+      "unit_type": "Boyz",
+      "count": 1,
+      "models": [
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "BoyzNobKombi",
+        "Warboss",
+        "PainBoy"
+      ]
+    },
+    {
+      "unit_type": "Boyz",
+      "count": 1,
+      "models": [
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "BoyzNobKombi",
+        "Bigboss",
+        "BannerNob"
+      ],
+      "strategic_reserves": true
+    },
+    {
+      "unit_type": "Gretchin",
+      "count": 1,
+      "models": [
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin"
+      ],
+      "strategic_reserves": true
+    },
+    {
+      "unit_type": "WeirdBoy",
+      "count": 1
+    },
+    {
+      "unit_type": "WarTrakk",
+      "count": 1
+    },
+    {
+      "unit_type": "BigMekDakkarig",
+      "count": 1
+    }
+  ]
+}

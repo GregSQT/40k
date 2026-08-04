@@ -307,6 +307,14 @@ def _move_wrapper(cell_map, dest):
     engine = _DummyEngine()
     engine.game_state["phase"] = "move"
     engine.game_state["units_cache"] = {"u1": {"col": 5, "row": 5}}
+    # `_select_bot_move_action` tranche d'ABORD sur `unit_is_in_strategic_reserves` (chantier
+    # 04c) : une escouade en réserves n'a pas de destination de move mais des candidats de mise
+    # en place, et les ids des slots 4-8 sont NUMÉRIQUEMENT dans la plage des cellules de move,
+    # donc « la liste des cellules est-elle vide » ne peut pas les distinguer. Ce prédicat lit
+    # l'unité par `unit_by_id` : le gréement doit donc porter une unité POSÉE.
+    engine.game_state["unit_by_id"] = {
+        "u1": {"id": "u1", "player": 1, "col": 5, "row": 5, "in_strategic_reserves": False}
+    }
     engine.game_state["_squad_move_cell_maps"] = {
         "u1": {"anchor": (5, 5), "phase": "move", "map": cell_map}
     }

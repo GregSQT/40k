@@ -137,7 +137,7 @@ def _move_gs(unit_hex=(0, 0), enemy_hex=(10, 0), objectives=None, models=None, c
 
 
 def test_select_weighted_deployment_action_errors_and_antirepeat(monkeypatch: pytest.MonkeyPatch) -> None:
-    with pytest.raises(ValueError, match=r"No deployment actions"):
+    with pytest.raises(ValueError, match=r"aucun slot de mise en place"):
         _select_weighted_deployment_action([0, 1], {4: 1.0}, None, 0, 2)
 
     with pytest.raises(KeyError, match=r"Missing deployment weight"):

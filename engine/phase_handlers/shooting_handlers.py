@@ -483,6 +483,16 @@ def _build_weapon_availability_enemy_precheck(
             _enemy_id_str = str(enemy_id)
             if not is_unit_alive(_enemy_id_str, game_state):
                 continue
+            # VIVANTE n'est pas SUR LA TABLE : une unité en réserves stratégiques (20.01) reste
+            # dans `units_cache` — elle compte aux points et peut encore arriver — mais elle n'a
+            # ni position ni empreinte. Sans ce filtre elle entrait dans les lignes de précheck,
+            # et `_is_valid_shooting_target` finissait par appeler `min_distance_between_sets`
+            # sur une empreinte VIDE -> « Cannot compute distance between empty sets », à la
+            # première phase de tir de tout épisode où une réserve subsiste.
+            # Même filtre, même prédicat qu'aux deux autres énumérations de ce module
+            # (`build_unit_los_cache`, `shooting_build_activation_pool`).
+            if not entry_is_on_battlefield(cache_entry):
+                continue
             if isinstance(_los_map, dict) and _enemy_id_str in _los_map:
                 if not _los_map[_enemy_id_str]:
                     continue
@@ -830,7 +840,20 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
             rng_weapons = require_key(unit, "RNG_WEAPONS")
             for weapon in rng_weapons:
                 weapon["shot"] = 0
-            
+
+            # La remise a zero ci-dessus vaut pour TOUTE unite vivante, y compris hors table :
+            # elle ne lit aucune position. Le CHOIX D'ARME qui suit, lui, en exige une — il
+            # mesure des distances aux ennemis. Une unite en reserves stratégiques (20.01) est
+            # vivante mais n'a ni position ni empreinte : `weapon_availability_check` finissait
+            # par appeler `min_distance_between_sets` avec l'empreinte VIDE du TIREUR ->
+            # « Cannot compute distance between empty sets ». Jumeau exact du filtre pose dans
+            # `_build_weapon_availability_enemy_precheck`, cote CIBLE.
+            # Rien n'est perdu : `shooting_build_activation_pool` exclut deja les unites hors
+            # table, et celle qui arrive par ingress (20.04) traverse ce meme phase_start au
+            # tour ou elle arrive, cette fois posee, donc avec son arme choisie.
+            if not entry_is_on_battlefield(cache_entry):
+                continue
+
             if rng_weapons:
                 # Initialize weapon selection. Full weapon_availability_check is only needed when
                 # adjacent (CLOSE_QUARTERS) or after advance (ASSAULT / combi) — otherwise O(weapons×enemies)
@@ -2122,6 +2145,13 @@ def _unit_has_firable_target(game_state: Dict[str, Any], unit: Dict[str, Any],
         if enemy_player == shooter_player_int:
             continue
         if not is_unit_alive(str(enemy_id), game_state):
+            continue
+        # VIVANTE n'est pas SUR LA TABLE (réserves stratégiques 20.01). Le repli
+        # `.get("occupied_hexes", {ancre})` ci-dessous ne protège PAS ce cas : la clé est
+        # PRÉSENTE et VIDE pour une unité hors table, donc `.get` rend l'ensemble vide et
+        # `min_distance_between_sets` lève « Cannot compute distance between empty sets ».
+        # Troisième énumération d'ennemis de ce module, même filtre que les deux autres.
+        if not entry_is_on_battlefield(enemy_entry):
             continue
         enemy = _get_unit_by_id(game_state, enemy_id)
         if enemy is None:
@@ -5217,10 +5247,14 @@ def _select_move_after_shooting_destination_for_ai(
     """Select one post-shoot move destination for gym/PvE automation."""
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(require_key(unit, "player"))
+    # `entry_is_on_battlefield` : une unité en réserves stratégiques (20.01) n'a ni position ni
+    # empreinte, et `socle_from_cache_entry` la placerait sur la sentinelle (-1,-1) — le plus
+    # proche ennemi serait alors un fantôme hors table, quand `ranged_edge_distance` ne lève pas
+    # d'abord sur son empreinte vide. Même filtre que les autres énumérations d'ennemis du module.
     enemies = [
         enemy_id
         for enemy_id, cache_entry in units_cache.items()
-        if int(cache_entry["player"]) != unit_player
+        if int(cache_entry["player"]) != unit_player and entry_is_on_battlefield(cache_entry)
     ]
     if not enemies:
         return destinations[0]

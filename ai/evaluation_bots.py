@@ -54,6 +54,30 @@ def _has_action_in(valid_actions, action_ids) -> bool:
     return any(a in valid_actions for a in action_ids)
 
 
+def _open_placement_actions(valid_actions: List[int], who: str) -> List[int]:
+    """Slots de MISE EN PLACE (4-8) ouverts par le masque, dans l'ordre des strategies.
+
+    SOURCE UNIQUE de la regle « seuls les slots 4-8 sont des poses ». `valid_actions` porte aussi
+    `WAIT_ACTION`, qui en phase de deploiement n'est PAS une attente : le masque l'y ouvre pour la
+    decision 20.01 « placer cette unite en RESERVES STRATEGIQUES »
+    (`ActionDecoder.get_squad_action_mask_and_eligible_units`). Un bot ne prend jamais cette
+    decision — c'est un choix de LISTE, pas de doctrine.
+
+    ⚠️ Ce filtre etait ecrit en quatre exemplaires. C'est son ABSENCE qui produisait le defaut du
+    chantier 04c : TacticalBot mettait en reserves 400 deploiements sur 400, et les cinq bots
+    ponderes 1 a 3 % des leurs via leur clause d'exploration. Un site oublie ne plante pas — il
+    remet le bot a decider des reserves, en silence. D'ou le point de passage unique.
+    """
+    placement_actions = [a for a in DEPLOYMENT_ACTIONS if a in valid_actions]
+    if not placement_actions:
+        raise ValueError(
+            f"{who}: aucun slot de mise en place {DEPLOYMENT_ACTIONS} ouvert dans "
+            f"{valid_actions}. Au deploiement c'est un deadlock moteur ; a l'ingress, l'appelant "
+            "doit trancher AVANT (pool vide = l'unite reste en reserves)."
+        )
+    return placement_actions
+
+
 # ⚠️ HISTORIQUE — « le premier slot ouvert = la cible la plus menacante » etait FAUX.
 # Les helpers `_first_charge_action_in` / `_first_fight_action_in` justifiaient le choix du
 # premier slot par l'ordre de `_enemy_threat_order`. Trois raisons de rejeter cette caution :
@@ -446,6 +470,65 @@ class _WeightedMover:
     # sous-classe qui oublierait de l'initialiser doit lever a l'acces, pas heriter d'un 0.0.
     randomness: float
 
+    # Poids de MISE EN PLACE par slot 4-8, et etat de la garde anti-repetition. Meme regle que
+    # `randomness` : declares sans valeur, une sous-classe qui les oublie leve a l'acces.
+    # TacticalBot ne les pose pas — il redefinit `select_placement_action` (cf. sa docstring).
+    PLACEMENT_WEIGHTS: Dict[int, float]
+    _deployment_last_action: Optional[int]
+    _deployment_repeat_count: int
+    _deployment_episode_marker: Optional[Any]
+
+    def _random_escape_action(self, valid_actions: List[int], phase: Any) -> int:
+        """Tirage d'EXPLORATION (`randomness`) — le seul site autorise a ignorer la doctrine.
+
+        En DEPLOIEMENT il est restreint aux slots de pose. `valid_actions` y porte aussi
+        `WAIT_ACTION`, qui n'y est PAS une action d'attente : le masque l'ouvre pour la decision
+        20.01 « mettre cette unite en RESERVES STRATEGIQUES ». Un bot ne prend jamais cette
+        decision-la — c'est un choix de LISTE.
+
+        ⚠️ Le filtre est ICI, et pas dans l'ordre des clauses de chaque bot, parce que l'ordre EST
+        le defaut : 5 bots sur 7 evaluaient leur clause de hasard AVANT leur branche
+        `deployment`, donc leur tirage tombait sur WAIT. MESURE avec les `randomness` reellement
+        configures : 2,3 % (greedy), 2,5 % (control), 2,9 % (adaptive), 2,3 % (value_trade),
+        1,0 % (tactical) des deploiements partaient en reserves. Un point de passage unique rend
+        la correction independante de cet ordre, qu'un refactor pourrait reintroduire.
+        """
+        if phase == "deployment":
+            return int(random.choice(_open_placement_actions(valid_actions, type(self).__name__)))
+        return int(random.choice(valid_actions))
+
+    def select_placement_action(self, valid_actions: List[int], game_state) -> int:
+        """Slot de MISE EN PLACE (03.02) : deploiement initial ET ingress move (20.04).
+
+        L'ingress EST une mise en place, et le moteur en a fait le JUMEAU exact du deploiement
+        (`ActionDecoder.ingress_slot_candidates` : memes 5 strategies, memes slots 4-8, seule
+        l'aire legale change). Le bot y joue donc la MEME politique — deux tables de poids
+        separees divergeraient au premier reglage, et un bot agressif arriverait de reserve
+        comme un bot prudent.
+
+        La garde anti-repetition est volontairement COMMUNE aux deux : son role est d'eviter
+        que tout un camp se pose au meme endroit, et une arrivee de reserves qui reproduit le
+        slot deja joue au deploiement pose exactement ce probleme.
+        """
+        episode_marker = game_state.get("episode_number")  # get allowed (absent hors episode)
+        if self._deployment_episode_marker != episode_marker:
+            self._deployment_episode_marker = episode_marker
+            self._deployment_last_action = None
+            self._deployment_repeat_count = 0
+        chosen = _select_weighted_deployment_action(
+            valid_actions=valid_actions,
+            weights_by_action=self.PLACEMENT_WEIGHTS,
+            last_action=self._deployment_last_action,
+            repeat_count=self._deployment_repeat_count,
+            max_repeat=2,
+        )
+        if self._deployment_last_action == chosen:
+            self._deployment_repeat_count += 1
+        else:
+            self._deployment_last_action = chosen
+            self._deployment_repeat_count = 1
+        return chosen
+
     def _weights(self, posture: Optional[str] = None) -> Tuple[float, float]:
         override = getattr(self, "_movement_weights_override", None)
         if override is not None:
@@ -502,9 +585,7 @@ def _select_weighted_deployment_action(
     max_repeat: int,
 ) -> int:
     """Select deployment intent with weighted randomness and anti-repeat guard."""
-    candidates = [a for a in DEPLOYMENT_ACTIONS if a in valid_actions]
-    if not candidates:
-        raise ValueError("No deployment actions available in valid_actions")
+    candidates = _open_placement_actions(valid_actions, "_select_weighted_deployment_action")
 
     if last_action in candidates and repeat_count >= max_repeat and len(candidates) > 1:
         candidates = [a for a in candidates if a != last_action]
@@ -525,6 +606,16 @@ def _select_weighted_deployment_action(
 class RandomBot:
     """Picks random valid actions, but prioritizes shooting when available"""
 
+    def select_placement_action(self, valid_actions: List[int], game_state) -> int:
+        """Slot de MISE EN PLACE (03.02) : deploiement initial ET ingress move (20.04).
+
+        Uniforme sur les slots OUVERTS — c'est la doctrine de ce bot. Le tirage est restreint
+        aux slots 4-8 : `valid_actions` porte aussi `WAIT_ACTION`, qui n'est pas une strategie
+        de pose mais la decision 20.01 de mettre l'unite EN RESERVES au deploiement, et le
+        choix de reserve appartient a la LISTE, jamais au bot.
+        """
+        return random.choice(_open_placement_actions(valid_actions, "RandomBot"))
+
     def select_action_with_state(
         self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
     ) -> int:
@@ -533,10 +624,7 @@ class RandomBot:
             return WAIT_ACTION
         phase = require_key(game_state, "phase")
         if phase == "deployment":
-            deploy_actions = [a for a in DEPLOYMENT_ACTIONS if a in valid_actions]
-            if deploy_actions:
-                return random.choice(deploy_actions)
-            return random.choice(valid_actions)
+            return self.select_placement_action(valid_actions, game_state)
         if phase == "shoot":
             shoot_actions = [a for a in mi.SHOOT_SLOTS if a in valid_actions]
             if shoot_actions:
@@ -569,6 +657,14 @@ class GreedyBot(_WeightedMover):
 
     MOVEMENT_BOT_KEY = "greedy"
 
+    PLACEMENT_WEIGHTS = {
+        DEPLOYMENT_ACTIONS[0]: 0.30,  # aggressive front
+        DEPLOYMENT_ACTIONS[1]: 0.30,  # objective pressure
+        DEPLOYMENT_ACTIONS[2]: 0.20,  # safe/cohesion
+        DEPLOYMENT_ACTIONS[3]: 0.10,  # left flank
+        DEPLOYMENT_ACTIONS[4]: 0.10,  # right flank
+    }
+
     def __init__(self, randomness: float = 0.0, movement_weights=None):
         """
         Initialize GreedyBot with optional randomness.
@@ -593,33 +689,9 @@ class GreedyBot(_WeightedMover):
             return WAIT_ACTION
         phase = require_key(game_state, "phase")
         if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_actions)
+            return self._random_escape_action(valid_actions, phase)
         if phase == "deployment":
-            episode_marker = game_state.get("episode_number")
-            if self._deployment_episode_marker != episode_marker:
-                self._deployment_episode_marker = episode_marker
-                self._deployment_last_action = None
-                self._deployment_repeat_count = 0
-            deployment_weights = {
-                DEPLOYMENT_ACTIONS[0]: 0.30,  # aggressive front
-                DEPLOYMENT_ACTIONS[1]: 0.30,  # objective pressure
-                DEPLOYMENT_ACTIONS[2]: 0.20,  # safe/cohesion
-                DEPLOYMENT_ACTIONS[3]: 0.10,  # left flank
-                DEPLOYMENT_ACTIONS[4]: 0.10,  # right flank
-            }
-            chosen = _select_weighted_deployment_action(
-                valid_actions=valid_actions,
-                weights_by_action=deployment_weights,
-                last_action=self._deployment_last_action,
-                repeat_count=self._deployment_repeat_count,
-                max_repeat=2,
-            )
-            if self._deployment_last_action == chosen:
-                self._deployment_repeat_count += 1
-            else:
-                self._deployment_last_action = chosen
-                self._deployment_repeat_count = 1
-            return chosen
+            return self.select_placement_action(valid_actions, game_state)
         # Doctrine greedy : ACHEVER. Tir, charge et melee visent l'escouade la plus ENTAMEE —
         # un seul critere, le meme partout, jamais l'ordre des slots.
         if phase == "shoot":
@@ -654,6 +726,14 @@ class DefensiveBot(_WeightedMover):
 
     MOVEMENT_BOT_KEY = "defensive"
 
+    PLACEMENT_WEIGHTS = {
+        DEPLOYMENT_ACTIONS[0]: 0.20,  # aggressive front
+        DEPLOYMENT_ACTIONS[1]: 0.25,  # objective pressure
+        DEPLOYMENT_ACTIONS[2]: 0.35,  # safe/cohesion
+        DEPLOYMENT_ACTIONS[3]: 0.10,  # left flank
+        DEPLOYMENT_ACTIONS[4]: 0.10,  # right flank
+    }
+
     def __init__(self, randomness: float = 0.0, movement_weights=None):
         """
         Initialize DefensiveBot with optional randomness.
@@ -684,38 +764,14 @@ class DefensiveBot(_WeightedMover):
             return WAIT_ACTION
         phase = require_key(game_state, "phase")
         if phase == "deployment":
-            episode_marker = game_state.get("episode_number")
-            if self._deployment_episode_marker != episode_marker:
-                self._deployment_episode_marker = episode_marker
-                self._deployment_last_action = None
-                self._deployment_repeat_count = 0
-            deployment_weights = {
-                DEPLOYMENT_ACTIONS[0]: 0.20,  # aggressive front
-                DEPLOYMENT_ACTIONS[1]: 0.25,  # objective pressure
-                DEPLOYMENT_ACTIONS[2]: 0.35,  # safe/cohesion
-                DEPLOYMENT_ACTIONS[3]: 0.10,  # left flank
-                DEPLOYMENT_ACTIONS[4]: 0.10,  # right flank
-            }
-            chosen = _select_weighted_deployment_action(
-                valid_actions=valid_actions,
-                weights_by_action=deployment_weights,
-                last_action=self._deployment_last_action,
-                repeat_count=self._deployment_repeat_count,
-                max_repeat=2,
-            )
-            if self._deployment_last_action == chosen:
-                self._deployment_repeat_count += 1
-            else:
-                self._deployment_last_action = chosen
-                self._deployment_repeat_count = 1
-            return chosen
+            return self.select_placement_action(valid_actions, game_state)
 
         # L'escouade activee est FOURNIE par le wrapper (`eligible_units[0]`), la meme que celle
         # dont le masque est construit. La deviner (« premiere unite vivante de current_player »)
         # designait potentiellement une AUTRE escouade — et, en phase de combat, un autre joueur,
         # la selection 12.04 alternant entre les deux camps.
         if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_actions)
+            return self._random_escape_action(valid_actions, phase)
 
         nearby_threats = self._count_nearby_threats(active_unit, game_state)
 
@@ -806,6 +862,15 @@ class ControlBot(_WeightedMover):
 
     MOVEMENT_BOT_KEY = "control"
 
+    #: Biais vers la pression d'objectif, doctrine de la classe.
+    PLACEMENT_WEIGHTS = {
+        DEPLOYMENT_ACTIONS[0]: 0.15,
+        DEPLOYMENT_ACTIONS[1]: 0.45,
+        DEPLOYMENT_ACTIONS[2]: 0.20,
+        DEPLOYMENT_ACTIONS[3]: 0.10,
+        DEPLOYMENT_ACTIONS[4]: 0.10,
+    }
+
     def __init__(self, randomness: float = 0.0, movement_weights=None):
         """
         Initialize ControlBot with optional randomness.
@@ -830,10 +895,10 @@ class ControlBot(_WeightedMover):
         phase = require_key(game_state, "phase")
 
         if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_actions)
+            return self._random_escape_action(valid_actions, phase)
 
         if phase == "deployment":
-            return self._deployment_action(valid_actions, game_state)
+            return self.select_placement_action(valid_actions, game_state)
 
         # Escouade activee FOURNIE par le wrapper : plus de devinette « premiere unite vivante
         # de current_player », qui pouvait designer une autre escouade et, en combat, un autre
@@ -867,34 +932,6 @@ class ControlBot(_WeightedMover):
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
-
-    def _deployment_action(self, valid_actions: List[int], game_state) -> int:
-        """Deploy with bias toward objectives."""
-        episode_marker = game_state.get("episode_number")
-        if self._deployment_episode_marker != episode_marker:
-            self._deployment_episode_marker = episode_marker
-            self._deployment_last_action = None
-            self._deployment_repeat_count = 0
-        deployment_weights = {
-            DEPLOYMENT_ACTIONS[0]: 0.15,
-            DEPLOYMENT_ACTIONS[1]: 0.45,
-            DEPLOYMENT_ACTIONS[2]: 0.20,
-            DEPLOYMENT_ACTIONS[3]: 0.10,
-            DEPLOYMENT_ACTIONS[4]: 0.10,
-        }
-        chosen = _select_weighted_deployment_action(
-            valid_actions=valid_actions,
-            weights_by_action=deployment_weights,
-            last_action=self._deployment_last_action,
-            repeat_count=self._deployment_repeat_count,
-            max_repeat=2,
-        )
-        if self._deployment_last_action == chosen:
-            self._deployment_repeat_count += 1
-        else:
-            self._deployment_last_action = chosen
-            self._deployment_repeat_count = 1
-        return chosen
 
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
         """Vers l'objectif ; le bonus de tenue le maintient sur la zone qu'il occupe deja.
@@ -989,6 +1026,14 @@ class AdaptiveBot(_WeightedMover):
     EARLY_TURN_THRESHOLD = 2
     MOVEMENT_BOT_KEY = "adaptive"
 
+    PLACEMENT_WEIGHTS = {
+        DEPLOYMENT_ACTIONS[0]: 0.25,
+        DEPLOYMENT_ACTIONS[1]: 0.35,
+        DEPLOYMENT_ACTIONS[2]: 0.20,
+        DEPLOYMENT_ACTIONS[3]: 0.10,
+        DEPLOYMENT_ACTIONS[4]: 0.10,
+    }
+
     def __init__(self, randomness: float = 0.0, movement_weights=None):
         self.randomness = max(0.0, min(1.0, randomness))
         self._movement_weights_override = movement_weights
@@ -1004,10 +1049,10 @@ class AdaptiveBot(_WeightedMover):
         phase = require_key(game_state, "phase")
 
         if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_actions)
+            return self._random_escape_action(valid_actions, phase)
 
         if phase == "deployment":
-            return self._deploy(valid_actions, game_state)
+            return self.select_placement_action(valid_actions, game_state)
 
         # Posture evaluee du point de vue du joueur AGISSANT (celui de l'escouade activee, la
         # source du masque), jamais de `current_player` : en combat, la selection 12.04 alterne.
@@ -1082,33 +1127,6 @@ class AdaptiveBot(_WeightedMover):
             return charge
         return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
-    def _deploy(self, valid_actions: List[int], game_state) -> int:
-        episode_marker = game_state.get("episode_number")
-        if self._deployment_episode_marker != episode_marker:
-            self._deployment_episode_marker = episode_marker
-            self._deployment_last_action = None
-            self._deployment_repeat_count = 0
-        weights = {
-            DEPLOYMENT_ACTIONS[0]: 0.25,
-            DEPLOYMENT_ACTIONS[1]: 0.35,
-            DEPLOYMENT_ACTIONS[2]: 0.20,
-            DEPLOYMENT_ACTIONS[3]: 0.10,
-            DEPLOYMENT_ACTIONS[4]: 0.10,
-        }
-        chosen = _select_weighted_deployment_action(
-            valid_actions=valid_actions,
-            weights_by_action=weights,
-            last_action=self._deployment_last_action,
-            repeat_count=self._deployment_repeat_count,
-            max_repeat=2,
-        )
-        if self._deployment_last_action == chosen:
-            self._deployment_repeat_count += 1
-        else:
-            self._deployment_last_action = chosen
-            self._deployment_repeat_count = 1
-        return chosen
-
 
 class ValueTradeBot(_WeightedMover):
     """Maximise le DIFFERENTIEL DE VALUE — le critere qui departage a VP d'objectifs egaux.
@@ -1135,6 +1153,16 @@ class ValueTradeBot(_WeightedMover):
 
     MOVEMENT_BOT_KEY = "value_trade"
 
+    #: Mise en place prudente : on ne brade pas sa VALUE au premier tour (safe/cohesion et
+    #: pression d'objectif dominent, l'avance agressive est marginale).
+    PLACEMENT_WEIGHTS = {
+        DEPLOYMENT_ACTIONS[0]: 0.10,  # aggressive front
+        DEPLOYMENT_ACTIONS[1]: 0.35,  # objective pressure
+        DEPLOYMENT_ACTIONS[2]: 0.35,  # safe/cohesion
+        DEPLOYMENT_ACTIONS[3]: 0.10,  # left flank
+        DEPLOYMENT_ACTIONS[4]: 0.10,  # right flank
+    }
+
     def __init__(self, randomness: float = 0.0, movement_weights=None):
         """
         Args:
@@ -1156,10 +1184,10 @@ class ValueTradeBot(_WeightedMover):
         phase = require_key(game_state, "phase")
 
         if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_actions)
+            return self._random_escape_action(valid_actions, phase)
 
         if phase == "deployment":
-            return self._deploy(valid_actions, game_state)
+            return self.select_placement_action(valid_actions, game_state)
         if phase == "shoot":
             if _has_action_in(valid_actions, mi.SHOOT_SLOTS):
                 return _shoot_focus_fire(
@@ -1197,35 +1225,6 @@ class ValueTradeBot(_WeightedMover):
             if charge is not None:
                 return charge
         return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
-
-    def _deploy(self, valid_actions: List[int], game_state) -> int:
-        """Deploiement prudent : on ne brade pas sa VALUE au premier tour (safe/cohesion et
-        pression d'objectif dominent, l'avance agressive est marginale)."""
-        episode_marker = game_state.get("episode_number")
-        if self._deployment_episode_marker != episode_marker:
-            self._deployment_episode_marker = episode_marker
-            self._deployment_last_action = None
-            self._deployment_repeat_count = 0
-        weights = {
-            DEPLOYMENT_ACTIONS[0]: 0.10,  # aggressive front
-            DEPLOYMENT_ACTIONS[1]: 0.35,  # objective pressure
-            DEPLOYMENT_ACTIONS[2]: 0.35,  # safe/cohesion
-            DEPLOYMENT_ACTIONS[3]: 0.10,  # left flank
-            DEPLOYMENT_ACTIONS[4]: 0.10,  # right flank
-        }
-        chosen = _select_weighted_deployment_action(
-            valid_actions=valid_actions,
-            weights_by_action=weights,
-            last_action=self._deployment_last_action,
-            repeat_count=self._deployment_repeat_count,
-            max_repeat=2,
-        )
-        if self._deployment_last_action == chosen:
-            self._deployment_repeat_count += 1
-        else:
-            self._deployment_last_action = chosen
-            self._deployment_repeat_count = 1
-        return chosen
 
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
         """Destination selon la posture : withdraw (sortir la piece chere) > engage > standoff."""
@@ -1318,6 +1317,24 @@ class TacticalBot(_WeightedMover):
         self.randomness = max(0.0, min(1.0, randomness))
         self._movement_weights_override = movement_weights
 
+    def select_placement_action(self, valid_actions: List[int], game_state) -> int:
+        """Premier slot de mise en place ouvert — deploiement initial ET ingress move (20.04).
+
+        REDEFINIE au lieu d'heriter du socle pondere : ce bot est le HOLDOUT d'evaluation, le
+        metre etalon dont la valeur est GELEE (cf. config/bot_movement_weights.json, entree
+        « tactical »). Lui donner une table de poids CHANGERAIT le metre et rendrait
+        incomparables toutes les mesures anterieures. « Premier slot ouvert » est exactement ce
+        qu'il jouait, par la clause de repli de `select_action_with_state`.
+
+        ⚠️ Cette methode RESTAURE ce comportement, elle ne l'invente pas. Depuis que le masque
+        de deploiement ouvre `WAIT_ACTION` pour la mise en reserves 20.01
+        (`ActionDecoder.get_squad_action_mask_and_eligible_units`), ce repli tombait sur WAIT :
+        le bot mettait EN RESERVES toute unite tenant sous le plafond de 50 %, a chaque
+        deploiement (mesure : 400/400). Un bot ne decide jamais d'une mise en reserves — c'est
+        un choix de LISTE. D'ou le filtrage sur `DEPLOYMENT_ACTIONS`.
+        """
+        return _open_placement_actions(valid_actions, "TacticalBot")[0]
+
     def select_action_with_state(
         self, valid_actions: List[int], game_state, active_unit: Dict[str, Any]
     ) -> int:
@@ -1335,9 +1352,11 @@ class TacticalBot(_WeightedMover):
         phase = require_key(game_state, "phase")
 
         if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_actions)
+            return self._random_escape_action(valid_actions, phase)
 
         # La phase move est routee par le wrapper vers select_movement_destination.
+        if phase == "deployment":
+            return self.select_placement_action(valid_actions, game_state)
         if phase == "shoot":
             return self._select_shoot_action(valid_actions, game_state, active_unit)
         if phase == "charge":
