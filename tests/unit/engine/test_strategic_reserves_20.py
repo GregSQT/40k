@@ -723,6 +723,65 @@ def test_ingress_places_every_model_and_locks_further_moves():
     )
 
 
+def test_ingress_ends_the_activation():
+    """VERROU — après l'arrivée, l'escouade SORT du pool d'activation de la phase.
+
+    Le pool n'est pas reconstruit après chaque action : une arrivée qui ne terminerait pas
+    l'activation laisserait l'escouade sélectionnable une seconde fois dans la MÊME phase (donc
+    un mouvement en plus, contre 20.04 AFTER MOVING) et empêcherait la phase de se terminer par
+    épuisement du pool.
+    """
+    from engine.phase_handlers.movement_handlers import execute_action, ingress_setup_pool
+
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    gs["turn"] = 2
+    gs["current_player"] = 1
+    gs["phase"] = "move"
+    squad_id = _reserve_squad(eng, deep_strike=False)
+    from engine.phase_handlers.movement_handlers import movement_build_activation_pool
+
+    movement_build_activation_pool(gs)
+    assert squad_id in gs["move_activation_pool"], "l'escouade en réserves doit être activable"
+
+    candidates = eng.action_decoder.ingress_slot_candidates(gs, squad_id)
+    assert candidates, "aucun candidat d'ingress — test sans portée"
+    col, row = candidates[sorted(candidates)[0]]["hex"]
+    ok, _res = execute_action(
+        gs, _unit(gs, squad_id),
+        {"action": "ingress_move", "unitId": squad_id, "destCol": col, "destRow": row},
+        gs["config"],
+    )
+    assert ok
+    assert squad_id not in gs["move_activation_pool"], (
+        "l'escouade arrivée de réserves doit être retirée du pool d'activation"
+    )
+    assert (int(gs["units_cache"][squad_id]["col"]), int(gs["units_cache"][squad_id]["row"])) != UNDEPLOYED
+
+
+def test_roster_declared_reserve_survives_unit_construction():
+    """VERROU — `create_unit` ne doit pas effacer une réserve déclarée par le roster.
+
+    `initialize_units` reconstruit CHAQUE unité enrichie via `create_unit` : une lecture du seul
+    champ brut `strategic_reserves` (absent de l'unité enrichie) remettait silencieusement
+    `in_strategic_reserves` à False, et l'unité repartait se déployer normalement.
+    """
+    from engine.game_state import GameStateManager
+
+    eng = _engine()
+    gs = eng.game_state
+    source = dict(gs["units"][0])
+    source["in_strategic_reserves"] = True
+    source["col"], source["row"] = -1, -1
+
+    rebuilt = GameStateManager(gs["config"]).create_unit(source)
+    assert rebuilt["in_strategic_reserves"] is True, (
+        "la mise en réserve déclarée doit survivre à la reconstruction de l'unité"
+    )
+    assert rebuilt["deployed_on_turn"] is None
+
+
 def test_ingress_lock_falls_at_the_start_of_the_charge_phase():
     from engine.phase_handlers.movement_handlers import (
         clear_ingress_move_lock, mark_unit_ingressed, unit_ingress_move_locked,

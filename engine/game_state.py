@@ -348,11 +348,27 @@ class GameStateManager:
             # valeur est écrite au commit) ; N > 0 = arrivée de réserve au tour N.
             "deployed_on_turn": None if int(config["col"]) < 0 else 0,
             # Réserves stratégiques (20.01/20.02) — cf. `_build_enhanced_unit` pour la
-            # sémantique. Une unité construite par ce chemin (API build army, fixture) n'est en
-            # réserves que si sa déclaration le dit.
-            "in_strategic_reserves": bool(config.get("strategic_reserves", False)),  # get allowed
-            "reserves_repositioned": False,
-            **_default_reserves_parameters(),
+            # sémantique. DEUX sources, dans cet ordre :
+            #   - `in_strategic_reserves` : l'unité vient de `_build_enhanced_unit`, qui a déjà
+            #     résolu la déclaration de roster. C'est le cas de TOUTES les unités du moteur,
+            #     `initialize_units` reconstruisant chaque unité enrichie par ce constructeur.
+            #     L'omettre annulait purement et simplement toute réserve déclarée par un roster :
+            #     l'unité repassait à False et se retrouvait soit redéployée normalement, soit
+            #     bloquée hors table sans arrivée possible ni destruction de fin de 3e round.
+            #   - `strategic_reserves` : déclaration BRUTE (roster/scénario), pour une unité
+            #     construite sans passer par l'enrichissement (API build army, fixture).
+            "in_strategic_reserves": bool(
+                config.get(  # get allowed (2 sources, cf. ci-dessus)
+                    "in_strategic_reserves", config.get("strategic_reserves", False)
+                )
+            ),
+            "reserves_repositioned": bool(config.get("reserves_repositioned", False)),  # get allowed
+            **{
+                # Paramètres 20.03/20.04 : ceux de l'unité enrichie si elle en porte (une
+                # capacité a pu les modifier avant un rechargement), sinon la règle générique.
+                _k: config.get(_k, _v)  # get allowed (idem)
+                for _k, _v in _default_reserves_parameters().items()
+            },
             # Attached units (rule 19.01): bodyguard unit-name keywords this leader/support may attach to.
             # Empty list for non-leader units (valid business case: the LEADER rule is absent from their config).
             "CAN_LEAD": copy.deepcopy(config["CAN_LEAD"] if "CAN_LEAD" in config else []),

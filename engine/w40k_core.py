@@ -2286,7 +2286,14 @@ class W40KEngine(gym.Env):
             # `action_int`, pas `action` : `normalize_action_input` accepte un ndarray de
             # taille 1, forme sur laquelle `int()` leve depuis NumPy 2. Compter la valeur
             # brute ferait planter le step pour une statistique.
-            family = action_family(action_int, pre_action_phase)
+            # `setting_up` : l'action a-t-elle ete jouee par une escouade HORS TABLE (arrivee de
+            # reserves, 20.04) ? Lu AVANT l'action via son resultat — `ingress_move` est la seule
+            # semantique produite par ce cas — parce qu'apres la pose l'unite n'est plus en
+            # reserves et la question ne se poserait plus.
+            family = action_family(
+                action_int, pre_action_phase,
+                setting_up=isinstance(result, dict) and result.get("action") == "ingress_move",
+            )
             self.episode_tactical_data['action_family_counts'][family] += 1
 
         # VENTILATION DE LA RECOMPENSE — cumulee ICI, pas cote callback.
@@ -5184,8 +5191,21 @@ class W40KEngine(gym.Env):
         # ── 20.04 : ingress move (arrivée de réserves) ────────────────────────
         elif action_name == "ingress_move":
             squad_id = str(require_key(semantic, "unitId"))
-            success, result = movement_handlers.ingress_commit_plan(
-                self.game_state, squad_id, require_key(semantic, "plan")
+            # MÊME point d'exécution que le flux PvP (`movement_handlers.execute_action`) : le
+            # plan y est reconstruit par `build_validated_deployment_plan`, déterministe, donc
+            # identique à celui que le masque a validé. Deux implémentations — une par siège —
+            # ont déjà produit ici un ingress sans fin d'activation côté PvP.
+            _ing_unit = get_unit_by_id(squad_id, self.game_state)
+            if _ing_unit is None:
+                raise KeyError(f"Unit {squad_id} introuvable pour ingress_move")
+            success, result = movement_handlers.execute_action(
+                self.game_state, _ing_unit,
+                {
+                    "action": "ingress_move", "unitId": squad_id,
+                    "destCol": int(require_key(semantic, "destCol")),
+                    "destRow": int(require_key(semantic, "destRow")),
+                },
+                self.config,
             )
             if not success:
                 # Le plan vient du MÊME `ingress_slot_candidates` que le masque : un refus est
@@ -5218,9 +5238,8 @@ class W40KEngine(gym.Env):
                     "reward": 0.0,
                 },
             )
-            end_activation(
-                self.game_state, _ing_unit, ACTION, 1, "MOVE", "MOVE", 0,
-            )
+            # Pas de `end_activation` ici : `movement_handlers` l'a déjà faite, comme pour tout
+            # autre type de mouvement. La refaire retirerait une SECONDE unité du pool.
 
         # ── zone_intent : command phase ───────────────────────────────────────
         elif action_name == "zone_intent":

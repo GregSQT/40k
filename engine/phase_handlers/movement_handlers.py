@@ -884,6 +884,14 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         # Validate (= bouton Validate) + commit d'un plan provisoire par-figurine.
         return movement_commit_move_plan_handler(game_state, unit_id, action)
 
+    elif action_type == "ingress_move":
+        # 20.04 — arrivée de réserves. Routée ICI, comme tout autre type de mouvement, et non
+        # depuis l'API : c'est ce qui lui donne sa FIN D'ACTIVATION. Sans elle, l'escouade
+        # resterait dans `move_activation_pool` (le pool n'est pas reconstruit après chaque
+        # action), donc réactivable pour un second mouvement le même tour, et la phase ne
+        # pourrait plus se terminer par épuisement du pool.
+        return _handle_ingress_move_action(game_state, active_unit, action)
+
     elif action_type == "skip":
         # Engine determined unit has no valid actions (e.g. no valid destinations)
         return _handle_skip_action(game_state, active_unit, had_valid_destinations=False)
@@ -4788,7 +4796,7 @@ def _ingress_enemy_clearance_forbidden(
     grid_x = (_cols * _hw + _hw / 2.0)[:, None] + np.zeros((1, board_rows))
     grid_y = _rows[None, :] * _hh + ((_cols[:, None].astype(np.int64) & 1) * _hh) / 2.0 + _hh / 2.0
 
-    def _stamp(sc: int, sr: int, reach: float) -> None:
+    def _stamp_into(dst: "np.ndarray", sc: int, sr: int, reach: float) -> None:
         if reach <= 0:
             return
         ex = sc * _hw + _hw / 2.0
@@ -4801,7 +4809,10 @@ def _ingress_enemy_clearance_forbidden(
             return
         dx = grid_x[c0:c1, r0:r1] - ex
         dy = grid_y[c0:c1, r0:r1] - ey
-        forbidden[c0:c1, r0:r1] |= (dx * dx + dy * dy) <= (reach * reach + 1e-9)
+        dst[c0:c1, r0:r1] |= (dx * dx + dy * dy) <= (reach * reach + 1e-9)
+
+    def _stamp(sc: int, sr: int, reach: float) -> None:
+        _stamp_into(forbidden, sc, sr, reach)
 
     units_cache = require_key(game_state, "units_cache")
     for uid, entry in units_cache.items():
@@ -4831,15 +4842,36 @@ def _ingress_enemy_clearance_forbidden(
             for ec, er in positions:
                 _stamp(int(ec), int(er), reach)
         else:
-            # Socle non rond : le socle est représenté par les cases de son empreinte (même
-            # dispatch que `entries_in_engagement_zone` en métrique hex).
-            from engine.hex_utils import precompute_footprint_offsets
+            # Socle NON ROND (oval/carré) : `euclidean_edge_distance` ne mesure alors PAS de
+            # centre de cellule à centre de cellule — elle mesure entre les CONTOURS géométriques
+            # réels (`_socle_edge_primitives`). Une approximation par cellules laisserait donc
+            # dans le pool des cases que la primitive canonique juge à 8" ou moins, et rien ne
+            # les rattraperait à la pose. On fait ici exactement ce que fait la primitive, mais
+            # seulement sur la BANDE utile : un disque conservateur (clearance + rayon englobant
+            # + rayon d'une case) borne les candidates, puis chacune est tranchée exactement.
+            from engine.hex_utils import Socle, bounding_radius_norm, euclidean_edge_distance
+
             e_orient = int(require_key(entry, "orientation"))
-            off_even, off_odd = precompute_footprint_offsets(e_shape, e_bs, e_orient)
+            cell_radius = round_base_radius_norm(1)
+            gate = clearance_norm + bounding_radius_norm(e_shape, e_bs) + cell_radius
             for ec, er in positions:
-                offs = off_even if (int(ec) & 1) == 0 else off_odd
-                for dc, dr in offs:
-                    _stamp(int(ec) + int(dc), int(er) + int(dr), clearance_norm)
+                enemy_socle = Socle(
+                    shape=e_shape, base_size=e_bs, col=int(ec), row=int(er),
+                    fp=compute_candidate_footprint(
+                        int(ec), int(er),
+                        {"BASE_SHAPE": e_shape, "BASE_SIZE": e_bs, "orientation": e_orient},
+                        game_state,
+                    ),
+                )
+                near = np.zeros((board_cols, board_rows), dtype=bool)
+                _stamp_into(near, int(ec), int(er), gate)
+                for cc, rr in zip(*np.nonzero(near)):
+                    cc, rr = int(cc), int(rr)
+                    if forbidden[cc, rr]:
+                        continue
+                    candidate = Socle(shape="round", base_size=1, col=cc, row=rr, fp=None)
+                    if euclidean_edge_distance(candidate, enemy_socle) <= clearance_norm:
+                        forbidden[cc, rr] = True
     return forbidden
 
 
@@ -5120,6 +5152,40 @@ def reposition_unit_to_strategic_reserves(game_state: Dict[str, Any], squad_id: 
         game_state,
         f"REPOSITIONED (20.02): unit {squad_id} removed from the battlefield into reserves",
     )
+
+
+def _handle_ingress_move_action(
+    game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any]
+) -> Tuple[bool, Dict[str, Any]]:
+    """Action `ingress_move` (20.04) du flux PvP : construit le plan, pose, termine l'activation.
+
+    Le plan est construit par la MÊME fonction que le décodeur gym
+    (`build_validated_deployment_plan` contraint au pool d'ingress) : les deux sièges posent donc
+    l'escouade exactement pareil. La fin d'activation est celle de tout mouvement — l'escouade
+    sort du pool d'activation, ce qui l'empêche de bouger une seconde fois et permet à la phase
+    de se terminer par épuisement.
+    """
+    from engine.phase_handlers.deployment_handlers import build_validated_deployment_plan
+
+    squad_id = str(require_key(unit, "id"))
+    if not squad_is_in_strategic_reserves(game_state, squad_id):
+        return False, {"error": "unit_not_in_strategic_reserves", "unitId": squad_id}
+    if squad_id not in ingress_eligible_units(game_state):
+        return False, {"error": "ingress_not_available_this_round", "unitId": squad_id}
+    dest_col = int(require_key(action, "destCol"))
+    dest_row = int(require_key(action, "destRow"))
+    pool = ingress_setup_pool(game_state, squad_id)
+    plan = build_validated_deployment_plan(game_state, squad_id, dest_col, dest_row, pool)
+    if plan is None:
+        return False, {
+            "error": "no_legal_formation_for_ingress",
+            "unitId": squad_id, "destCol": dest_col, "destRow": dest_row,
+        }
+    ok, result = ingress_commit_plan(game_state, squad_id, plan)
+    if not ok:
+        return False, result
+    end_result = end_activation(game_state, unit, ACTION, 1, MOVE, MOVE, 1)
+    return True, {**end_result, **result}
 
 
 def mark_unit_ingressed(game_state: Dict[str, Any], squad_id: str) -> None:

@@ -1280,6 +1280,12 @@ def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]
         return deployment_commit_plan(game_state, action)
     if action_type == "deploy_recommit":
         return deployment_recommit_plan(game_state, action)
+    # 20.01 — mise en réserves AU LIEU du déploiement. Routée ICI, dans le dispatcher commun aux
+    # deux sièges, et non depuis l'API : elle MUTE l'état (l'unité sort du pool à poser, la main
+    # passe au déployeur suivant), donc elle doit emprunter le chemin qui journalise l'action,
+    # capture le snapshot de rewind et resérialise l'état pour le client.
+    if action_type == "deploy_strategic_reserves":
+        return deployment_place_in_strategic_reserves(game_state, action)
     if action_type != "deploy_unit":
         return False, {"error": "invalid_deployment_action", "action": action_type}
 

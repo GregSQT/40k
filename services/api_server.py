@@ -2893,14 +2893,12 @@ def execute_action():
         return api_json_response({"success": bool(ok), "result": res})
 
     # ── RÉSERVES STRATÉGIQUES (20.01 / 20.04) ────────────────────────────────────────────────
-    # Mise en réserve AU LIEU du déploiement. L'unité sort du pool à poser et la main passe au
-    # déployeur suivant, exactement comme une pose (c'est le moteur qui le fait).
-    if action.get("action") == "deploy_strategic_reserves":
-        from engine.phase_handlers import deployment_handlers as _dh_res
-        ok, res = _dh_res.deployment_place_in_strategic_reserves(engine.game_state, action)
-        if not ok:
-            return jsonify({"success": False, "error": res}), 400
-        return api_json_response({"success": True, "result": res})
+    # `deploy_strategic_reserves` (20.01) et `ingress_move` (20.04) MUTENT l'état : elles ne sont
+    # PAS traitées ici mais routées par `engine.execute_semantic_action` comme toute autre action
+    # de jeu (dispatchers `execute_deployment_action` et `movement_handlers.execute_action`).
+    # C'est ce qui leur donne la fin d'activation, la journalisation, la capture de rewind et la
+    # resérialisation de l'état — tout ce qu'un retour anticipé depuis ce point leur retirerait.
+    # Seul l'APERÇU, en lecture pure, est servi ici (jumeau de `deploy_preview`).
 
     # Read-only : aire d'arrivée d'une unité en réserves, publiée dans le canal d'aperçu
     # (`move_preview_footprint_mask_loops`) — le client la rend comme l'aperçu de mouvement, en
@@ -2933,44 +2931,18 @@ def execute_action():
             "result": {
                 "action": "ingress_preview", "unitId": str(unit_id),
                 "eligible": True, "cells": _pool_n,
+                # Les contours sont RENDUS DANS LA RÉPONSE, comme `deploy_model_destinations`
+                # rend les siens : une action en lecture pure ne resérialise pas l'état, donc
+                # les publier seulement dans le game_state obligerait le client à refaire un
+                # aller-retour pour dessiner ce qu'il vient de demander.
+                "footprint_mask_loops": _compact_mask_loops_for_api_json(
+                    engine.game_state.get("move_preview_footprint_mask_loops")  # get allowed
+                ),
                 # Pool vide = aucune arrivée légale (les ennemis couvrent la bande). Le client
                 # doit le DIRE au joueur, sinon le clic suivant ne fera rien.
                 "reason": None if _pool_n else "no_legal_arrival",
             },
         })
-
-    # Arrivée effective (20.04). Le plan par-figurine est construit ICI, par la MÊME fonction que
-    # le décodeur gym (`build_validated_deployment_plan` contraint au pool d'ingress) : les deux
-    # sièges posent donc l'escouade exactement pareil.
-    if action.get("action") == "ingress_move":
-        unit_id = action.get("unitId")
-        dest_col = action.get("destCol")
-        dest_row = action.get("destRow")
-        if unit_id is None or dest_col is None or dest_row is None:
-            return jsonify({
-                "success": False,
-                "error": "ingress_move requires unitId, destCol, destRow",
-            }), 400
-        from engine.phase_handlers import movement_handlers as _mh_cmt
-        from engine.phase_handlers.deployment_handlers import build_validated_deployment_plan
-        if str(unit_id) not in _mh_cmt.ingress_eligible_units(engine.game_state):
-            return jsonify({
-                "success": False,
-                "error": f"unit {unit_id} cannot make an ingress move this battle round",
-            }), 400
-        _ing_pool = _mh_cmt.ingress_setup_pool(engine.game_state, str(unit_id))
-        _ing_plan = build_validated_deployment_plan(
-            engine.game_state, str(unit_id), int(dest_col), int(dest_row), _ing_pool
-        )
-        if _ing_plan is None:
-            return jsonify({
-                "success": False,
-                "error": "no legal formation at this anchor for the ingress move",
-            }), 400
-        ok, res = _mh_cmt.ingress_commit_plan(engine.game_state, str(unit_id), _ing_plan)
-        if not ok:
-            return jsonify({"success": False, "error": res}), 400
-        return api_json_response({"success": True, "result": res})
 
     # Read-only: dry-run d'un plan de déploiement par-figurine (rouge/vert + cohésion).
     if action.get("action") == "deploy_preview":

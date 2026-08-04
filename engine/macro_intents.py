@@ -204,13 +204,19 @@ ACTION_FAMILIES = (
 )
 
 
-def action_family(action_int: int, phase: str) -> str:
+def action_family(action_int: int, phase: str, *, setting_up: bool = False) -> str:
     """Famille de `action_int`, sachant la PHASE ou il a ete joue.
 
     La phase est indispensable, elle n'est pas un confort : les ids 4-8 sont a la fois les
     5 strategies de deploiement (`DEPLOY_SLOTS`) et des cellules de move (`MOVE_CELL_BASE = 0`).
     Sans elle, tout deploiement serait compte comme un deplacement — et c'est precisement le
     recouvrement que V11 §0.44 doit lever cote policy.
+
+    `setting_up` : l'escouade active est HORS TABLE et joue une MISE EN PLACE (ingress move
+    20.04, en phase de mouvement). La phase ne suffit alors plus a lever le recouvrement — les
+    ids 4-8 y designent des strategies de pose, pas des cellules — et sans ce drapeau une arrivee
+    de reserves serait comptee comme un deplacement dans `action_family_counts`. C'est l'appelant
+    qui le sait : lui seul connait l'unite active.
     """
     a = int(action_int)
     if a < 0 or a >= TOTAL_ACTION_SIZE:
@@ -242,6 +248,10 @@ def action_family(action_int: int, phase: str) -> str:
         )
     if a == ACTION_WAIT:
         return "wait"
+    # Mise en place d'une unite hors table (ingress move 20.04) : les ids 4-8 y sont des
+    # strategies de POSE, exactement comme en phase de deploiement, et non des cellules.
+    if setting_up and a in DEPLOY_SLOTS:
+        return "deploy_slot"
     if a in MOVE_CELLS:
         return "move_cell"
     if a in SHOOT_SLOTS:
