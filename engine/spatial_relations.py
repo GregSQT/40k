@@ -1,6 +1,6 @@
 """Shared spatial relation helpers for footprint contact and engagement checks."""
 
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 from engine.hex_utils import (
     _hex_center,
@@ -128,12 +128,101 @@ def _require_measurable_entry(entry: Dict[str, Any]) -> None:
             )
 
 
-def _cache_entry_footprint(cache_entry: Dict[str, Any]) -> Set[Tuple[int, int]]:
-    """Return a unit cache entry footprint, using its anchor only when no footprint is stored."""
-    footprint = cache_entry.get("occupied_hexes")
+def entry_is_on_battlefield(entry: Dict[str, Any]) -> bool:
+    """L'escouade décrite par cette entrée de ``units_cache`` est-elle SUR LE CHAMP DE BATAILLE ?
+
+    Une unité VIVANTE peut être hors table : en attente de déploiement actif, ou en réserves
+    stratégiques (20.01) tant qu'elle n'a pas fait son ingress move (20.04). Elle reste dans
+    ``units_cache`` — elle compte pour la victoire aux points et elle peut encore arriver — mais
+    elle n'a ni position ni empreinte : elle ne peut être ni ciblée, ni chargée, ni engagée, et
+    elle ne contrôle aucun objectif.
+
+    Prédicat = la sentinelle de position ``(-1,-1)``, jumelle exacte de ``deployed_on_turn is
+    None`` côté unité : les deux sont écrites par le MÊME commit de mise en place
+    (``_apply_deploy_plan``) et par le MÊME chargeur. Ici on lit le cache, la source des
+    énumérations de ciblage.
+
+    Vit dans la couche BASSE (``spatial_relations``) et non dans ``shared_utils`` parce que les
+    primitives de mesure elles-mêmes en dépendent (``entry_footprint``,
+    ``entries_in_engagement_zone``). ``shared_utils`` le ré-exporte : c'est le même symbole.
+    """
+    return int(require_key(entry, "col")) >= 0
+
+
+def require_entry_on_battlefield(entry: Dict[str, Any], what: str) -> None:
+    """Lève si l'entrée-cache est HORS TABLE — mesurer une unité sans position est une erreur.
+
+    Contrat volontairement BRUYANT. Une entrée hors table porte la sentinelle ``(-1,-1)`` avec
+    ``occupied_hexes`` VIDE et ``occupied_hexes_by_model`` peuplé de ``(-1,-1)`` par figurine :
+    toute mesure qui l'accepte rend un verdict INVENTÉ, sans jamais crasher. MESURÉ le
+    2026-08-05 : à x1/hex (EZ = 2), une unité hors table ressort « engagée » avec toute unité
+    réelle en ``(0,0)`` et avec toutes les autres unités hors table.
+
+    Le bon geste est donc de la SAUTER à l'ÉNUMÉRATION (``enemy_entries_on_battlefield``), pas de
+    laisser la feuille inventer une distance ou un booléen. La feuille lève pour que l'oubli d'un
+    filtre soit un crash localisable au lieu d'un verdict faux silencieux.
+    """
+    if not entry_is_on_battlefield(entry):
+        raise ValueError(
+            f"{what}: escouade {entry.get('id', '?')!r} HORS TABLE (sentinelle "  # get allowed
+            "`(-1,-1)`, cf. `entry_is_on_battlefield`) — pas de position, donc aucune géométrie "
+            "à mesurer. Elle doit être écartée à l'énumération "
+            "(`enemy_entries_on_battlefield` / `entries_on_battlefield`), pas mesurée ici."
+        )
+
+
+def entry_footprint(cache_entry: Dict[str, Any]) -> Set[Tuple[int, int]]:
+    """Empreinte hex d'une entrée ``units_cache``, à l'ancre seulement si aucune n'est stockée.
+
+    Source UNIQUE de l'empreinte d'escouade. Remplace le motif
+    ``entry.get("occupied_hexes", {(col, row)})`` qui était recopié ~96 fois : ce défaut de ``.get``
+    ne protégeait RIEN hors table, la clé y étant PRÉSENTE et VIDE — l'ensemble vide passait, et
+    ``min_distance_between_sets`` levait « Cannot compute distance between empty sets » loin du
+    vrai coupable.
+
+    Hors table → lève (cf. ``require_entry_on_battlefield``). Le repli sur l'ancre ne subsiste que
+    pour les entrées SYNTHÉTIQUES posées sur la table (mover candidat de
+    ``move_anchor_violates_engagement_clearance``, fixtures mono-figurine), où il est exact.
+    """
+    require_entry_on_battlefield(cache_entry, "entry_footprint")
+    footprint = cache_entry.get("occupied_hexes")  # get allowed (l'absence est le cas synthétique)
     if footprint:
         return footprint
     return {(require_key(cache_entry, "col"), require_key(cache_entry, "row"))}
+
+
+def entries_on_battlefield(
+    units_cache: Dict[str, Any], *, exclude_id: Optional[str] = None
+) -> Iterator[Tuple[str, Dict[str, Any]]]:
+    """Énumère les entrées ``units_cache`` POSÉES, dans l'ordre du cache.
+
+    Filtre UNIQUE des unités hors table pour tout code qui mesure une géométrie. Écrire le filtre
+    ici et non à chaque boucle est le correctif de fond : ~30 énumérations le manquaient, et un
+    filtre manquant ne se voit pas — l'unité hors table est VIVANTE et présente dans le cache,
+    donc tout test écrit sur « vivante » la laisse passer.
+    """
+    exclude = None if exclude_id is None else str(exclude_id)
+    for unit_id, entry in units_cache.items():
+        if exclude is not None and str(unit_id) == exclude:
+            continue
+        if not entry_is_on_battlefield(entry):
+            continue
+        yield str(unit_id), entry
+
+
+def enemy_entries_on_battlefield(
+    units_cache: Dict[str, Any], player: Optional[int], *, exclude_id: Optional[str] = None
+) -> Iterator[Tuple[str, Dict[str, Any]]]:
+    """Énumère les entrées ennemies de ``player`` qui sont POSÉES (jumeau de
+    ``entries_on_battlefield`` côté ciblage).
+
+    ``player`` ``None`` (unité sans camp) → aucune entrée n'est ennemie, la comparaison
+    ``==`` étant fausse pour tout camp entier ; c'est le comportement des boucles remplacées.
+    """
+    for unit_id, entry in entries_on_battlefield(units_cache, exclude_id=exclude_id):
+        if int(require_key(entry, "player")) == player:
+            continue
+        yield unit_id, entry
 
 
 # Hex count of a single base, memoized by geometry. The COUNT is invariant under
@@ -274,6 +363,12 @@ def entries_in_engagement_zone(
     imposé. L'analyzer en a besoin — il lit le sien dans l'entête ``Run rules:`` du journal analysé,
     pas dans le config du jour.
     """
+    # Hors table AVANT « mesurable » : l'entrée hors table est bien FORMÉE (cartes par-figurine
+    # peuplées de `(-1,-1)`), donc `_require_measurable_entry` la laisse passer et le chemin 3D
+    # ci-dessous rend « engagée » face à toute unité réelle proche de l'origine. MESURÉ à x1/hex
+    # (EZ = 2) : fantôme vs unité en `(0,0)` → True. Un verdict inventé, jamais un crash.
+    require_entry_on_battlefield(first_entry, "entries_in_engagement_zone")
+    require_entry_on_battlefield(second_entry, "entries_in_engagement_zone")
     _require_measurable_entry(first_entry)
     _require_measurable_entry(second_entry)
     if entry_has_vertical_data(first_entry) and entry_has_vertical_data(second_entry):
@@ -286,8 +381,8 @@ def entries_in_engagement_zone(
             first_entry, second_entry, engagement_zone, threshold, metric
         )
     if metric == "hex":
-        first_fp = _cache_entry_footprint(first_entry)
-        second_fp = _cache_entry_footprint(second_entry)
+        first_fp = entry_footprint(first_entry)
+        second_fp = entry_footprint(second_entry)
         return min_distance_between_sets(
             first_fp, second_fp, max_distance=engagement_zone
         ) <= engagement_zone
@@ -480,13 +575,17 @@ def unit_within_engagement_zone_footprints(
     if unit_entry is None:
         raise ValueError(f"Unit {unit_id_str} not in units_cache (dead or absent); cannot read engagement")
 
+    # HORS TABLE (réserves 20.01, attente de déploiement) : la réponse est donnée par la RÈGLE —
+    # une unité absente du champ de bataille n'est engagée avec personne. Ce n'est pas un repli
+    # anti-erreur : c'est un prédicat qui a une réponse juste, contrairement à la MESURE par paire
+    # (`entries_in_engagement_zone`), qui n'en a aucune et lève. Les appelants posent la question
+    # sur TOUTES les unités vivantes (snapshot 12.04, masque d'observation), réserves comprises.
+    if not entry_is_on_battlefield(unit_entry):
+        return False
     unit_player = int(require_key(unit, "player"))
-    for enemy_id, cache_entry in units_cache.items():
-        if str(enemy_id) == unit_id_str:
-            continue
-        enemy_player = int(require_key(cache_entry, "player"))
-        if enemy_player == unit_player:
-            continue
+    for _enemy_id, cache_entry in enemy_entries_on_battlefield(
+        units_cache, unit_player, exclude_id=unit_id_str
+    ):
         if unit_entries_within_engagement_zone(
             unit_entry, cache_entry, engagement_zone, vertical_zone_inches=vertical_zone_inches
         ):
@@ -542,10 +641,8 @@ def move_anchor_violates_engagement_clearance(
     if enemy_cache_items is not None:
         enemy_iter: Any = enemy_cache_items
     else:
-        enemy_iter = (
-            (eid, ce)
-            for eid, ce in units_cache.items()
-            if str(eid) != mover_id and int(require_key(ce, "player")) != mover_player
+        enemy_iter = enemy_entries_on_battlefield(
+            units_cache, mover_player, exclude_id=mover_id
         )
 
     for _, cache_entry in enemy_iter:

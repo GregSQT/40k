@@ -31,10 +31,8 @@ def resolve_unit_hexes(unit: Dict[str, Any], game_state: Dict[str, Any]) -> List
     entry = units_cache.get(str(require_key(unit, "id")))
     if not isinstance(entry, dict):
         raise KeyError(f"unit {unit.get('id')!r} not present in units_cache")
-    occ = entry.get("occupied_hexes")
-    if isinstance(occ, (set, list, tuple)) and len(occ) > 0:
-        return [(int(h[0]), int(h[1])) for h in occ]
-    return [(int(require_key(entry, "col")), int(require_key(entry, "row")))]
+    from engine.spatial_relations import entry_footprint
+    return [(int(h[0]), int(h[1])) for h in entry_footprint(entry)]
 
 
 def get_terrain_area_ids_for_hexes(

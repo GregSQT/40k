@@ -16,6 +16,7 @@ from engine.game_utils import get_unit_by_id
 # seulement), l'import de module ne crée aucun cycle.
 from engine.hex_utils import _hex_center
 from engine.phase_handlers.shared_utils import (
+    entries_on_battlefield,
     get_hp_from_cache, require_hp_from_cache,
     unit_has_rule_effect,
     # PR4 4a: nouveau pipeline d observation squad
@@ -579,7 +580,9 @@ class ObservationBuilder:
         ) or [(int(reference_entry["col"]), int(reference_entry["row"]))]
 
         out: List[Dict[str, Any]] = []
-        for _sid, entry in units_cache.items():
+        # Hors table (réserves 20.01) : `occupied_hexes_by_model` y est PEUPLÉ de `(-1,-1)`, donc
+        # sans ce filtre le pruning mesurait une distance à un fantôme posé sur l'origine.
+        for _sid, entry in entries_on_battlefield(units_cache):
             if int(entry["player"]) == enemy_of_player:
                 continue
             e_r = _hex_radius_upper_for_engagement_prune(
@@ -1986,7 +1989,7 @@ class ObservationBuilder:
         self_hexes: List[Tuple[int, int]] = []
         ally_hexes: List[Tuple[int, int]] = []
         enemy_hexes: List[Tuple[int, int]] = []
-        for sid, entry in units_cache.items():
+        for sid, entry in entries_on_battlefield(units_cache):
             if str(sid) == str(active_squad_id):
                 sink = self_hexes
             elif int(entry["player"]) == active_player:

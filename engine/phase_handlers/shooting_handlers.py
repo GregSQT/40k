@@ -36,6 +36,9 @@ from .shared_utils import (
     build_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
     is_placement_valid_with_clearance,
     _compute_unit_occupied_hexes,
+    enemy_entries_on_battlefield,
+    entries_on_battlefield,
+    entry_footprint,
     entry_is_on_battlefield,
 )
 
@@ -474,59 +477,50 @@ def _build_weapon_availability_enemy_precheck(
     out: List[Dict[str, Any]] = []
     # Snapshot iteration to avoid RuntimeError when rapid concurrent clicks
     # mutate units_cache while precheck is in progress.
-    for enemy_id, cache_entry in list(units_cache.items()):
-        enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
-        if enemy_player != unit_player:
-            enemy = get_unit_by_id(game_state, enemy_id)
-            if enemy is None:
-                raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
-            _enemy_id_str = str(enemy_id)
-            if not is_unit_alive(_enemy_id_str, game_state):
-                continue
-            # VIVANTE n'est pas SUR LA TABLE : une unité en réserves stratégiques (20.01) reste
-            # dans `units_cache` — elle compte aux points et peut encore arriver — mais elle n'a
-            # ni position ni empreinte. Sans ce filtre elle entrait dans les lignes de précheck,
-            # et `_is_valid_shooting_target` finissait par appeler `min_distance_between_sets`
-            # sur une empreinte VIDE -> « Cannot compute distance between empty sets », à la
-            # première phase de tir de tout épisode où une réserve subsiste.
-            # Même filtre, même prédicat qu'aux deux autres énumérations de ce module
-            # (`build_unit_los_cache`, `shooting_build_activation_pool`).
-            if not entry_is_on_battlefield(cache_entry):
-                continue
-            if isinstance(_los_map, dict) and _enemy_id_str in _los_map:
-                if not _los_map[_enemy_id_str]:
-                    continue
-
-            d = ranged_edge_distance(
-                _shooter_socle, _socle_from_entry(cache_entry), _ranged_metric, max_distance=max_rng
-            )
-            if d > max_rng:
+    # `list(...)` : snapshot, cf. commentaire ci-dessus. Le filtre hors-table (réserves 20.01) est
+    # DANS l'énumérateur — il n'a plus à être recopié ici (c'était l'un des trois correctifs
+    # par-site du chantier 04c, désormais couverts par la racine).
+    for enemy_id, cache_entry in list(enemy_entries_on_battlefield(units_cache, unit_player)):
+        enemy = get_unit_by_id(game_state, enemy_id)
+        if enemy is None:
+            raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
+        _enemy_id_str = str(enemy_id)
+        if not is_unit_alive(_enemy_id_str, game_state):
+            continue
+        if isinstance(_los_map, dict) and _enemy_id_str in _los_map:
+            if not _los_map[_enemy_id_str]:
                 continue
 
-            enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(
-                _ue, cache_entry, melee_range
-            )
-            friendly_blocks = _friendly_engagement_blocks_ranged_shot(
-                game_state,
-                shooter_id_str,
-                shooter_player_int,
-                cache_entry,
-                _enemy_id_str,
-                enemy_adjacent_to_shooter,
-                units_cache,
-            )
+        d = ranged_edge_distance(
+            _shooter_socle, _socle_from_entry(cache_entry), _ranged_metric, max_distance=max_rng
+        )
+        if d > max_rng:
+            continue
 
-            los_cache_has_key = isinstance(_los_map, dict) and _enemy_id_str in _los_map
-            los_cache_true = bool(_los_map[_enemy_id_str]) if (isinstance(_los_map, dict) and _enemy_id_str in _los_map) else False
+        enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(
+            _ue, cache_entry, melee_range
+        )
+        friendly_blocks = _friendly_engagement_blocks_ranged_shot(
+            game_state,
+            shooter_id_str,
+            shooter_player_int,
+            cache_entry,
+            _enemy_id_str,
+            enemy_adjacent_to_shooter,
+            units_cache,
+        )
 
-            out.append({
-                "enemy_id_str": _enemy_id_str,
-                "distance": d,
-                "enemy_engaged_with_shooter": enemy_adjacent_to_shooter,
-                "friendly_blocks": friendly_blocks,
-                "los_cache_has_key": los_cache_has_key,
-                "los_cache_true": los_cache_true,
-            })
+        los_cache_has_key = isinstance(_los_map, dict) and _enemy_id_str in _los_map
+        los_cache_true = bool(_los_map[_enemy_id_str]) if (isinstance(_los_map, dict) and _enemy_id_str in _los_map) else False
+
+        out.append({
+            "enemy_id_str": _enemy_id_str,
+            "distance": d,
+            "enemy_engaged_with_shooter": enemy_adjacent_to_shooter,
+            "friendly_blocks": friendly_blocks,
+            "los_cache_has_key": los_cache_has_key,
+            "los_cache_true": los_cache_true,
+        })
     return out
 
 
@@ -843,11 +837,10 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
             # La remise a zero ci-dessus vaut pour TOUTE unite vivante, y compris hors table :
             # elle ne lit aucune position. Le CHOIX D'ARME qui suit, lui, en exige une — il
-            # mesure des distances aux ennemis. Une unite en reserves stratégiques (20.01) est
-            # vivante mais n'a ni position ni empreinte : `weapon_availability_check` finissait
-            # par appeler `min_distance_between_sets` avec l'empreinte VIDE du TIREUR ->
-            # « Cannot compute distance between empty sets ». Jumeau exact du filtre pose dans
-            # `_build_weapon_availability_enemy_precheck`, cote CIBLE.
+            # mesure des distances aux ennemis, et une unite en reserves stratégiques (20.01)
+            # n'a ni position ni empreinte. Ce n'est PAS le filtre d'une enumeration d'ennemis
+            # (ceux-la sont dans `enemy_entries_on_battlefield`) : c'est la regle « une unite
+            # hors table ne choisit pas son arme », cote TIREUR.
             # Rien n'est perdu : `shooting_build_activation_pool` exclut deja les unites hors
             # table, et celle qui arrive par ingress (20.04) traverse ce meme phase_start au
             # tour ou elle arrive, cette fois posee, donc avec son arme choisie.
@@ -1244,18 +1237,10 @@ def build_unit_los_cache(
 
     # Calculate LoS for each enemy in units_cache (only alive enemies — dead must not appear in pool).
     # All visibility/cover is delegated to compute_unit_los() — the single source of truth.
-    for target_id, target_data in units_cache.items():
-        # Skip friendly units (only calculate LoS to enemies)
-        if target_data["player"] == unit_player:
-            continue
+    # Hors table (réserves 20.01) écarté par l'énumérateur : pas de position, donc pas de LoS.
+    for target_id, target_data in enemy_entries_on_battlefield(units_cache, unit_player):
         # CRITICAL: Exclude dead units so they never appear in los_cache → valid_target_pool
         if not is_unit_alive(str(target_id), game_state):
-            continue
-        # HORS TABLE (réserves 20.01 / attente de déploiement) : l'unité est VIVANTE mais absente
-        # du champ de bataille — elle n'a ni position ni empreinte, donc aucune ligne de vue vers
-        # elle. Sans ce filtre, une unité en réserves (sentinelle (-1,-1)) entrerait dans le
-        # pool de cibles.
-        if not entry_is_on_battlefield(target_data):
             continue
         # Range cull (preview) : ennemi hors portée max d'arme → jamais une cible valide.
         if _cull_ctx is not None:
@@ -2134,30 +2119,19 @@ def _unit_has_firable_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     shooter_id_str = str(unit["id"])
     shooter_entry = units_cache.get(shooter_id_str)
     shooter_col, shooter_row = require_unit_position(unit, game_state)
-    shooter_fp = shooter_entry.get("occupied_hexes", {(shooter_col, shooter_row)}) if shooter_entry else {(shooter_col, shooter_row)}
+    shooter_fp = entry_footprint(shooter_entry) if shooter_entry else {(shooter_col, shooter_row)}
     shooter_player_int = require_present(int(unit["player"]) if unit["player"] is not None else None, "unit['player']")
     melee_range = get_engagement_zone(game_state)
 
-    for enemy_id, enemy_entry in units_cache.items():
-        if str(enemy_id) == shooter_id_str:
-            continue
-        enemy_player = int(enemy_entry["player"]) if enemy_entry.get("player") is not None else None
-        if enemy_player == shooter_player_int:
-            continue
+    for enemy_id, enemy_entry in enemy_entries_on_battlefield(
+        units_cache, shooter_player_int, exclude_id=shooter_id_str
+    ):
         if not is_unit_alive(str(enemy_id), game_state):
-            continue
-        # VIVANTE n'est pas SUR LA TABLE (réserves stratégiques 20.01). Le repli
-        # `.get("occupied_hexes", {ancre})` ci-dessous ne protège PAS ce cas : la clé est
-        # PRÉSENTE et VIDE pour une unité hors table, donc `.get` rend l'ensemble vide et
-        # `min_distance_between_sets` lève « Cannot compute distance between empty sets ».
-        # Troisième énumération d'ennemis de ce module, même filtre que les deux autres.
-        if not entry_is_on_battlefield(enemy_entry):
             continue
         enemy = _get_unit_by_id(game_state, enemy_id)
         if enemy is None:
             continue
-        enemy_col, enemy_row = require_unit_position(enemy, game_state)
-        enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_col, enemy_row)}) if enemy_entry else {(enemy_col, enemy_row)}
+        enemy_fp = entry_footprint(enemy_entry)
         distance = min_distance_between_sets(shooter_fp, enemy_fp, max_distance=max_range)
         if distance > max_range:
             continue
@@ -2282,9 +2256,9 @@ def _friendly_engagement_blocks_ranged_shot(
     from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
 
     melee_range = get_engagement_zone(game_state)
-    for friendly_id, cache_entry in units_cache.items():
+    for friendly_id, cache_entry in entries_on_battlefield(units_cache, exclude_id=shooter_id_str):
         friendly_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
-        if friendly_player == shooter_player_int and friendly_id != shooter_id_str:
+        if friendly_player == shooter_player_int:
             if unit_entries_within_engagement_zone(target_entry, cache_entry, melee_range):
                 if game_state.get("debug_mode", False):
                     from engine.game_utils import add_debug_file_log
@@ -2324,8 +2298,8 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
 
     shooter_entry = units_cache.get(shooter_id_str)
     target_entry = units_cache.get(target_id_str)
-    shooter_fp = shooter_entry.get("occupied_hexes", {(shooter_col, shooter_row)}) if shooter_entry else {(shooter_col, shooter_row)}
-    target_fp = target_entry.get("occupied_hexes", {(target_col, target_row)}) if target_entry else {(target_col, target_row)}
+    shooter_fp = entry_footprint(shooter_entry) if shooter_entry else {(shooter_col, shooter_row)}
+    target_fp = entry_footprint(target_entry) if target_entry else {(target_col, target_row)}
     max_range = get_max_ranged_range(shooter)
     distance = min_distance_between_sets(shooter_fp, target_fp, max_distance=max_range)
     if distance > max_range:
@@ -2821,10 +2795,7 @@ def valid_target_pool_build(
     if game_state.get("debug_mode", False):
         from engine.game_utils import add_debug_file_log
         _los_map_diag = unit.get("los_cache") or {}
-        for _enemy_id, _entry in units_cache.items():
-            _enemy_player = int(_entry["player"]) if _entry.get("player") is not None else None
-            if _enemy_player == current_player_int:
-                continue
+        for _enemy_id, _entry in enemy_entries_on_battlefield(units_cache, current_player_int):
             _eid = str(_enemy_id)
             if not is_unit_alive(_eid, game_state):
                 continue
@@ -2905,8 +2876,8 @@ def valid_target_pool_build(
         unit_entry = units_cache.get(unit_id_normalized)
         if unit_entry is None:
             raise KeyError(f"Shooter {unit_id_normalized} not in units_cache")
-        shooter_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)})
-        enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
+        shooter_fp = entry_footprint(unit_entry)
+        enemy_fp = entry_footprint(enemy_entry)
 
         row_opt = precheck_by_id.get(target_id_str) if precheck_by_id else None
         if row_opt is not None:
@@ -2977,10 +2948,11 @@ def valid_target_pool_build(
         if not enemy_adjacent_to_shooter and row_opt is None:
             enemy_adjacent_to_friendly = False
             engaged_friendly_id = None
-            for friendly_id, cache_entry in units_cache.items():
+            for friendly_id, cache_entry in entries_on_battlefield(
+                units_cache, exclude_id=unit_id_normalized
+            ):
                 friendly_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
-                if (friendly_player == current_player_int and 
-                    friendly_id != unit_id_normalized):
+                if friendly_player == current_player_int:
                     if unit_entries_within_engagement_zone(enemy_entry, cache_entry, melee_range):
                         enemy_adjacent_to_friendly = True
                         engaged_friendly_id = friendly_id
@@ -5249,14 +5221,12 @@ def _select_move_after_shooting_destination_for_ai(
     """Select one post-shoot move destination for gym/PvE automation."""
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(require_key(unit, "player"))
-    # `entry_is_on_battlefield` : une unité en réserves stratégiques (20.01) n'a ni position ni
-    # empreinte, et `socle_from_cache_entry` la placerait sur la sentinelle (-1,-1) — le plus
-    # proche ennemi serait alors un fantôme hors table, quand `ranged_edge_distance` ne lève pas
-    # d'abord sur son empreinte vide. Même filtre que les autres énumérations d'ennemis du module.
+    # Hors table (réserves 20.01) écarté par l'énumérateur : sans ce filtre,
+    # `socle_from_cache_entry` placerait l'ennemi sur la sentinelle (-1,-1) et le « plus proche
+    # ennemi » serait un fantôme. C'était le quatrième correctif par-site du chantier 04c.
     enemies = [
         enemy_id
-        for enemy_id, cache_entry in units_cache.items()
-        if int(cache_entry["player"]) != unit_player and entry_is_on_battlefield(cache_entry)
+        for enemy_id, _cache_entry in enemy_entries_on_battlefield(units_cache, unit_player)
     ]
     if not enemies:
         return destinations[0]
@@ -6076,15 +6046,13 @@ def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str,
     unit_col, unit_row = require_unit_position(unit, game_state)
     unit_id_str = str(unit["id"])
     unit_entry = units_cache.get(unit_id_str)
-    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+    unit_fp = entry_footprint(unit_entry) if unit_entry else {(unit_col, unit_row)}
 
-    for enemy_id, cache_entry in units_cache.items():
-        enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
-        if enemy_player != unit_player:
-            enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-            distance = min_distance_between_sets(unit_fp, enemy_fp, max_distance=max_range)
-            if distance <= max_range:
-                return True
+    for _enemy_id, cache_entry in enemy_entries_on_battlefield(units_cache, unit_player):
+        enemy_fp = entry_footprint(cache_entry)
+        distance = min_distance_between_sets(unit_fp, enemy_fp, max_distance=max_range)
+        if distance <= max_range:
+            return True
 
     return False
 

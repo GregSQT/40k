@@ -500,6 +500,45 @@ une information publique. Tests : `test_command_points_and_battle_shock.py`.
   n'est ni ciblable au tir, ni chargeable, ni engageable — mais elle compte toujours dans le
   départage aux points.
 
+  **Comment cet invariant est TENU (structure, 2026-08-05).** Il ne l'était pas : `deployment_type:
+  "active"` laisse TOUTES les unités hors table au reset (mesuré 12/12), et une centaine de sites
+  de mesure les énuméraient quand même — le motif recopié `entry.get("occupied_hexes", {ancre})`
+  ne protégeait rien, la clé étant PRÉSENTE et VIDE hors table. Deux symptômes : l'empreinte vide
+  faisait lever `min_distance_between_sets` (bruyant), et surtout `occupied_hexes_by_model` est
+  lui PEUPLÉ de `(-1,-1)`, donc l'engagement partait sur le chemin 3D et rendait un verdict FAUX
+  sans crasher (mesuré x1/hex, EZ=2 : fantôme vs unité en `(0,0)` → « engagées »).
+
+  La tenue de l'invariant est désormais **structurelle**, dans la couche basse
+  `engine/spatial_relations.py` (`shared_utils` ré-exporte, les imports historiques sont intacts).
+  Règle : **une MESURE lève, un PRÉDICAT répond par la règle, une ÉNUMÉRATION filtre.**
+
+  | Primitive | Rôle | Hors table |
+  |---|---|---|
+  | `require_entry_on_battlefield(entry, what)` | garde nommée | **lève** |
+  | `entry_footprint(entry)` | empreinte d'escouade, SOURCE UNIQUE (remplace les 96 `.get` recopiés) | **lève** |
+  | `entries_in_engagement_zone(a, b, …)` | mesure EZ par paire | **lève** |
+  | `unit_within_engagement_zone_footprints(gs, u, …)` | prédicat « engagée ? » sur tout le plateau | **`False`** (20.01) |
+  | `entries_on_battlefield(cache, exclude_id=…)` | énumération, toutes unités | **écarte** |
+  | `enemy_entries_on_battlefield(cache, player, exclude_id=…)` | énumération, ennemis | **écarte** |
+
+  Le `False` du prédicat n'est pas un repli anti-erreur : la question « cette unité est-elle
+  engagée ? » a une réponse de RÈGLE (non, 20.01) et elle est posée sur TOUTES les unités vivantes
+  (snapshot 12.04, observation). La MESURE par paire, elle, n'a aucune réponse juste pour une
+  entrée sans position : elle lève, pour qu'un filtre oublié soit un crash localisable au lieu
+  d'un verdict inventé. C'est ce choix qui a permis de trouver les sites restants.
+
+  **Ce qui n'est PAS couvert par ces primitives, et reste une garde explicite** : les
+  `*_phase_start` / `*_build_activation_pool` de `shooting`, `charge` et `movement` portent la
+  règle « une unité hors table ne choisit pas d'arme, ne tire pas, ne charge pas, ne bouge pas »,
+  côté ACTEUR. Ce ne sont pas des filtres d'énumération d'ennemis, et les retirer serait un bug.
+  `ingress_eligible_units` (20.04) énumère au contraire les unités hors table : c'est sa raison
+  d'être, elle ne doit jamais passer par `entries_on_battlefield`.
+
+  ⚠️ **Piège de test** : la sentinelle `(-1,-1)` est à ~274 subhex des zones de déploiement, donc
+  hors de toute portée d'arme. Un test qui met une unité en réserves sans CONSTRUIRE la géométrie
+  (unité réelle amenée près de l'origine) reste vert avec le défaut. Verrou :
+  `tests/unit/engine/test_off_table_geometry.py`.
+
 **Règle 19 — clauses connexes auditées (2026-07-26, PDF relus : 19, 24 p5-p8, 25 p1-p3, 05 p5, 08) :**
 - **24.22 LEADER / 24.34 SUPPORT** → renvoient à 19, aucun contenu propre : rien à implémenter au-delà de 19.01.
 - **24.24 LONE OPERATIVE** (« unless part of an attached unit ») → **sans objet** : aucune donnée du projet ne déclare cette capacité (grep zéro dans `config/unit_rules.json` et les rosters). À rouvrir si une datasheet la déclare.

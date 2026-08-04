@@ -1101,14 +1101,14 @@ def test_repositioning_an_already_moved_unit_is_allowed():
 # d'arme — et c'est là que vivaient les deux trous corrigés au chantier 04c.
 #
 # ⚠️ PORTÉE EXACTE DE CES DEUX TESTS, à ne pas surestimer : ce sont des tests de NON-RÉGRESSION
-# du démarrage de phase en présence d'une unité hors table, PAS des verrous des deux filtres
-# `entry_is_on_battlefield` de `shooting_handlers`. Vérifié en retirant chaque filtre : ils
-# restent VERTS. Raison mesurée : le crash exige que le tireur soit à PORTÉE D'ARME du fantôme
-# en (-1,-1), or la zone de déploiement de ce scénario en est à 271-278 subhex pour des portées
-# de 120-240. Dans l'épisode qui plantait réellement, le tireur était à ~153. Le verrou effectif
-# des deux filtres est donc l'épisode complet de
-# tests/unit/ai/test_bot_ingress_reserves.py::test_bot_ingress_end_to_end, et il ne mord que sur
-# les graines où la géométrie s'y prête — c'est une faiblesse CONNUE, pas un oubli.
+# du démarrage de phase en présence d'une unité hors table, PAS des verrous. Vérifié en retirant
+# chaque filtre : ils restent VERTS. Raison mesurée : le crash exige que le tireur soit à PORTÉE
+# D'ARME du fantôme en (-1,-1), or la zone de déploiement de ce scénario en est à 271-278 subhex
+# pour des portées de 120-240. Dans l'épisode qui plantait réellement, le tireur était à ~153.
+#
+# Le VERROU, lui, est tests/unit/engine/test_off_table_geometry.py (2026-08-05) : il CONSTRUIT la
+# géométrie (tireur amené au coin du plateau, donc fantôme à portée) au lieu de l'espérer d'une
+# graine. Il couvre aussi la famille ENGAGEMENT, qui ne crashe jamais et rendait un verdict FAUX.
 
 
 def test_shooting_phase_start_runs_with_a_reserve_enemy():

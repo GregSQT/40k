@@ -23,6 +23,7 @@ from engine.combat_utils import (
 )
 from .shared_utils import (
     ACTION, WAIT, NO, PASS, ERROR, MOVE, FLED,
+    enemy_entries_on_battlefield, entries_on_battlefield, entry_footprint,
     build_enemy_adjacent_hexes, update_units_cache_position, translate_squad_to_destination,
     get_unit_position, require_unit_position,
     update_enemy_adjacent_caches_after_unit_move,
@@ -165,11 +166,7 @@ def _enemy_items_within_move_engagement_horizon(
     horizon_without_enemy_r = m + mover_r + int(ez) + 1
 
     out: List[Tuple[Any, Any]] = []
-    for eid, ce in units_cache.items():
-        if str(eid) == unit_id_str:
-            continue
-        if int(require_key(ce, "player")) == mover_player_int:
-            continue
+    for eid, ce in enemy_entries_on_battlefield(units_cache, mover_player_int, exclude_id=unit_id_str):
         e_span = min(_move_preview_footprint_span(ce), max_bs)
         e_r = _hex_radius_upper_for_engagement_prune(e_span)
         h = horizon_without_enemy_r + e_r
@@ -1326,14 +1323,10 @@ def _attempt_movement_to_destination(
         mover_player_int = int(require_key(unit, "player"))
         mover_id_str = str(require_key(unit, "id"))
         if ez_blk >= 1:
-            for eid, cache_entry in units_cache.items():
-                if str(eid) == mover_id_str:
-                    continue
-                if int(require_key(cache_entry, "player")) == mover_player_int:
-                    continue
-                enemy_fp = cache_entry.get("occupied_hexes")
-                if not enemy_fp:
-                    enemy_fp = {(require_key(cache_entry, "col"), require_key(cache_entry, "row"))}
+            for eid, cache_entry in enemy_entries_on_battlefield(
+                units_cache, mover_player_int, exclude_id=mover_id_str
+            ):
+                enemy_fp = entry_footprint(cache_entry)
                 if min_distance_between_sets(candidate_fp, enemy_fp, max_distance=ez_blk) <= ez_blk:
                     blocking_eid = str(eid)
                     break
@@ -1481,7 +1474,7 @@ def _is_in_enemy_engagement_zone(game_state: Dict[str, Any], unit: Dict[str, Any
     unit_id_str = str(unit["id"])
     units_cache = require_key(game_state, "units_cache")
     unit_entry = units_cache.get(unit_id_str)
-    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+    unit_fp = entry_footprint(unit_entry) if unit_entry else {(unit_col, unit_row)}
 
     cache_key = f"enemy_adjacent_hexes_player_{int(require_key(unit, 'player'))}"
     enemy_adj = game_state.get(cache_key)
@@ -2719,11 +2712,7 @@ def movement_build_valid_destinations_pool(
         board_cols = require_key(game_state, "board_cols")
         board_rows = require_key(game_state, "board_rows")
         current_player_int = int(current_player)
-        for enemy_id, enemy_entry in units_cache.items():
-            enemy_player_raw = require_key(enemy_entry, "player")
-            enemy_player_int = int(enemy_player_raw)
-            if enemy_player_int == current_player_int:
-                continue
+        for enemy_id, enemy_entry in enemy_entries_on_battlefield(units_cache, current_player_int):
             enemy_hp = require_key(enemy_entry, "HP_CUR")
             if enemy_hp <= 0:
                 continue
