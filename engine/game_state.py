@@ -2688,33 +2688,6 @@ class GameStateManager:
 
         return result
 
-    def count_controlled_objectives(self, game_state: Dict[str, Any]) -> Dict[int, int]:
-        """
-        Count objectives controlled by each player.
-
-        ⚠️ CETTE METHODE MUTE : elle passe par `calculate_objective_control`, qui RECALCULE le
-        controle et REECRIT `game_state["objective_controllers"]`. Elle n'est donc legitime que
-        sur une frontiere ou la regle 14.02 autorise cette reevaluation. Un chemin de RECOMPENSE,
-        de LOG ou d'OBSERVATION doit compter par lecture pure des controleurs deja figes :
-            sum(1 for c in require_key(game_state, "objective_controllers").values() if c == p)
-        Les deux appelants de `reward_calculator` qui restaient ont ete migres a cette lecture le
-        2026-08-04 ; la methode n'a plus aucun appelant de production (tests seulement).
-
-        Returns:
-            {1: count_for_player_1, 2: count_for_player_2}
-        """
-        control_data = self.calculate_objective_control(game_state)
-
-        counts = {1: 0, 2: 0}
-        for obj_id, data in control_data.items():
-            if data["controller"] is not None:
-                controller = data["controller"]
-                if controller not in counts:
-                    raise ValueError(f"Unexpected objective controller: {controller}")
-                counts[controller] += 1
-
-        return counts
-
     def run_objective_control_checkpoint(
         self,
         game_state: Dict[str, Any],

@@ -964,8 +964,8 @@ class RewardCalculator:
         objective_rewards = require_key(unit_rewards, "objective_rewards")
         objective_reward_factor = float(require_key(objective_rewards, "objective_reward_factor"))
 
-        # LECTURE PURE de l'etat 14.02, et non `state_manager.count_controlled_objectives` :
-        # celui-la RECALCULE le controle et REECRIT `objective_controllers`. Tant que cette
+        # LECTURE PURE de l'etat 14.02, et non un recomptage : recalculer le controle le
+        # REECRIRAIT (`calculate_objective_control`). Tant que cette
         # fonction ne versait rien, la mutation n'arrivait jamais ; la rendre effective aurait
         # fait recalculer le controle depuis un chemin de RECOMPENSE, hors des frontieres ou la
         # regle 14.02 l'autorise (run_objective_control_checkpoint) — donc un reward capable de
@@ -1046,8 +1046,8 @@ class RewardCalculator:
             return 0.0
         
         # LECTURE PURE de l'etat 14.02, jumeau exact de `_compute_objective_hold_reward` (~l.963,
-        # meme raisonnement, meme piege) : `count_controlled_objectives` RECALCULE le controle et
-        # REECRIT `objective_controllers`. Ce chemin est un chemin de RECOMPENSE, appele au step
+        # meme raisonnement, meme piege) : recalculer le controle le REECRIRAIT
+        # (`calculate_objective_control`). Ce chemin est un chemin de RECOMPENSE, appele au step
         # TERMINAL — et `w40k_core.settle_pending_zone_intent_declaration` relit ces controleurs
         # juste apres pour solder le shaping d'intention. Recalculer ici, hors des frontieres ou
         # 14.02 l'autorise, faisait donc dependre le solde final d'une reecriture faite par la

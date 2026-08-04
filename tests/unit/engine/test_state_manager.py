@@ -64,38 +64,6 @@ def _make_gs(p1_vp: int, p2_vp: int,
     return gs
 
 
-def _make_gs_with_objectives(controller: int | None = None) -> Dict[str, Any]:
-    """Game state avec un objectif, pour count_controlled_objectives."""
-    units = [_raw_unit(1, 1), _raw_unit(2, 2)]
-    gs: Dict[str, Any] = {
-        "turn_limit_reached": False,
-        "victory_points": {1: 0, 2: 0},
-        # 08.02 : etat de PARTIE pose au reset du moteur, comme les VP juste au-dessus.
-        "command_points": {1: 0, 2: 0},
-        "units": units,
-        "unit_by_id": {str(u["id"]): u for u in units},
-        "config": {"game_rules": {
-            "max_turns": 5, "engagement_zone": 1, "engagement_zone_vertical": 5}},
-        "objectives": [{"id": "obj1", "hexes": [[99, 99]]}],  # hexes inoccupés
-        "primary_objective": {
-            "id": "obj1",
-            "control": {
-                "method": "oc_sum_greater",
-                "control_method": "secured",
-                "tie_behavior": "no_control",
-            },
-            "scoring": {"start_turn": 1, "max_points_per_turn": 5, "rules": []},
-            "timing": {"default_phase": "command", "round5_second_player_phase": "fight"},
-        },
-        "objective_controllers": {"obj1": controller},
-        "primary_objective_scored_turns": set(),
-        "turn": 1,
-        "current_player": 1,
-    }
-    build_units_cache(gs)
-    return gs
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests — create_unit
 # ─────────────────────────────────────────────────────────────────────────────
@@ -184,29 +152,3 @@ class TestCheckGameOver:
         gs = {"turn_limit_reached": True, "turn": 1,
               "config": {"game_rules": {"max_turns": 5}}}
         assert _sm().check_game_over(gs) is True
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Tests — count_controlled_objectives
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestCountControlledObjectives:
-
-    def test_returns_dict_with_both_players(self) -> None:
-        """sm_obj_keys : résultat contient bien les clés 1 et 2."""
-        gs = _make_gs_with_objectives()
-        counts = _sm().count_controlled_objectives(gs)
-        assert 1 in counts and 2 in counts
-
-    def test_no_units_on_objective_uncontrolled(self) -> None:
-        """sm_obj_empty : objectif sans unité dessus → controller=None → 0 pour les deux."""
-        gs = _make_gs_with_objectives(controller=None)
-        counts = _sm().count_controlled_objectives(gs)
-        assert counts[1] == 0 and counts[2] == 0
-
-    def test_player1_controller_counts_correctly(self) -> None:
-        """sm_obj_p1 : objectif secured déjà contrôlé par p1 → counts[1]=1."""
-        gs = _make_gs_with_objectives(controller=1)
-        counts = _sm().count_controlled_objectives(gs)
-        assert counts[1] == 1
-        assert counts[2] == 0

@@ -40,7 +40,7 @@ PRIMARY_OBJECTIVE: Dict[str, Any] = get_config_loader().load_primary_objective_c
 def _objective_controllers(mine: int, theirs: int, controlled_player: int) -> Dict[str, Any]:
     """Etat 14.02 fige : `objective_controllers`, tel que le scoring vient de l'ecrire.
 
-    Le reward le LIT, il ne le recalcule pas — `count_controlled_objectives` reecrirait le
+    Le reward le LIT, il ne le recalcule pas — un recomptage reecrirait le
     controle depuis un chemin de recompense, hors des frontieres autorisees par la regle.
     """
     opponent = 2 if controlled_player == 1 else 1
@@ -121,7 +121,7 @@ def _calculator(controlled_player: int) -> RewardCalculator:
     """Aucun state_manager : le reward d'objectif par tour LIT l'etat, il ne le recalcule pas.
 
     C'est ce qui rend le controle portant : si le calcul repassait par
-    `state_manager.count_controlled_objectives`, ce test leverait au lieu de passer.
+    un recomptage via `calculate_objective_control`, ce test leverait au lieu de passer.
     """
     return RewardCalculator(
         {
