@@ -41,7 +41,7 @@ from engine.phase_handlers.shared_utils import (
     squad_union_weapons,
     _weapon_group_key,
 )
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 # Armes reelles de l'armory (teste aussi la propagation du champ `code` par le parser).
 STORM = get_weapons("SpaceMarine", ["storm_bolter"])[0]
@@ -53,7 +53,7 @@ def _unit(
     uid: int, player: int, models: List[Dict[str, Any]], rng_weapons: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
     """Escouade multi-figurine minimale acceptee par build_units_cache."""
-    return {
+    return {**unit_invariants(),
         "id": uid,
         "player": player,
         "col": models[0]["col"],

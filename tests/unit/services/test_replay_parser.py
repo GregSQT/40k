@@ -5,6 +5,7 @@ from services.replay_parser import (
     parse_log_file,
     parse_train_log_to_episodes,
 )
+from tests._state_invariants import unit_invariants
 
 
 def _write_log(tmp_path: Path, content: str) -> str:
@@ -80,8 +81,8 @@ def test_episode_to_replay_format_builds_states_and_clamps_hp() -> None:
         "episode_num": 3,
         "scenario": "scenario-x",
         "units": {
-            1: {"id": 1, "type": "A", "player": 1, "col": 1, "row": 1, "HP_CUR": 2, "HP_MAX": 2},
-            2: {"id": 2, "type": "B", "player": 2, "col": 2, "row": 1, "HP_CUR": 1, "HP_MAX": 2},
+            1: {**unit_invariants(), "id": 1, "type": "A", "player": 1, "col": 1, "row": 1, "HP_CUR": 2, "HP_MAX": 2},
+            2: {**unit_invariants(), "id": 2, "type": "B", "player": 2, "col": 2, "row": 1, "HP_CUR": 1, "HP_MAX": 2},
         },
         "actions": [
             {"type": "move", "unit_id": 1, "to": {"col": 3, "row": 3}},

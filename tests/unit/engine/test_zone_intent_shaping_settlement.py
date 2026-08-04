@@ -205,6 +205,7 @@ from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT  # noqa: E402
 from engine.w40k_core import W40KEngine  # noqa: E402
 
 from test_objective_held_samples import _config  # noqa: E402
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 def _engine() -> W40KEngine:
@@ -219,7 +220,7 @@ def _engine() -> W40KEngine:
     with patch.object(RewardCalculator, "calculate_reward", lambda self, *a, **kw: 0.0), \
          patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        engine = W40KEngine(config=_config(1), gym_training_mode=True, quiet=True)
+        engine = W40KEngine(config=build_engine_config(_config(1)), gym_training_mode=True, quiet=True)
         engine.reset()
     reference = _calculator()
     engine.reward_calculator.config["controlled_agent"] = "TestAgent"

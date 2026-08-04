@@ -17,7 +17,7 @@ import pytest
 from engine.w40k_core import W40KEngine
 from engine.game_state import GameStateManager
 from engine.phase_handlers.shared_utils import build_units_cache
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -136,7 +136,7 @@ class TestCheckGameOver:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _unit_entry(uid: int, player: int, hp: int = 3, value: int = 100) -> Dict[str, Any]:
-    return {
+    return {**unit_invariants(),
         "id": uid,
         "player": player,
         "col": 5,

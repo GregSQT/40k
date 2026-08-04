@@ -20,7 +20,7 @@ from engine.phase_handlers.shared_utils import (
     SQUAD_RIGID_MOVE_DESTINATION_LEVEL,
     charge_build_valid_plan,
 )
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 FLOOR_HEIGHT_INCHES = 3.0
 START = (10, 20)
@@ -29,15 +29,14 @@ ENEMY = (14, 20)
 
 def _gs(*, level: int) -> Dict[str, Any]:
     """`game_state` minimal pour le plan de charge : chargeur (squad 1), cible (squad 2)."""
-    unit1 = {
+    unit1 = {**unit_invariants(),
         "id": 1, "player": 1, "col": START[0], "row": START[1], "MOVE": 6,
         "HP_CUR": 1, "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": [],
         "level": level,
     }
-    unit2 = {
+    unit2 = {**unit_invariants(),
         "id": 2, "player": 2, "col": ENEMY[0], "row": ENEMY[1], "MOVE": 6,
         "HP_CUR": 1, "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": [],
-        "level": 0,
     }
     floor_hexes = [[START[0] + dc, START[1] + dr] for dc in (-1, 0, 1) for dr in (-1, 0, 1)]
     return {**turn_state_invariants(),

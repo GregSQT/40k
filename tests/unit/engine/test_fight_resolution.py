@@ -8,11 +8,11 @@ import pytest
 
 from engine.phase_handlers.fight_handlers import _fight_build_valid_target_pool
 from engine.phase_handlers.shared_utils import build_units_cache
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 def _unit(uid: int, player: int, col: int, row: int, base_size: int = 3) -> Dict[str, Any]:
-    return {
+    return {**unit_invariants(),
         "id": uid,
         "player": player,
         "col": col,

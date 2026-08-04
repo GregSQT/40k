@@ -47,7 +47,8 @@ from engine.phase_handlers.shared_utils import (
     is_unit_below_starting_strength, unit_effective_leadership,
 )
 from shared.data_validation import ConfigurationError
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -279,7 +280,7 @@ def test_la_force_de_depart_dune_unite_attachee_compte_le_character():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _oc_unit(uid: int, player: int, col: int, row: int, oc: int) -> Dict[str, Any]:
-    return {
+    return {**unit_invariants(),
         "id": uid, "player": player, "col": col, "row": row, "OC": oc, "LD": 7,
         "battle_shocked": False, "HP_CUR": 3, "HP_MAX": 3, "VALUE": 100, "MOVE": 6,
         "T": 4, "ARMOR_SAVE": 4, "INVUL_SAVE": 7, "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
@@ -316,7 +317,10 @@ def _oc_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
         "turn_limit_reached": False,
         "controlled_objective_samples_scoring_turns": [],
         "opponent_objective_samples_scoring_turns": [],
-        "config": {
+        # `build_engine_config` : le checkpoint 14.02 (`cp_gain_on_objective`, phase de
+        # mouvement) lit `objective_control_check` en `require_key` — un game_state qui traverse
+        # les handlers porte le CONTRAT moteur complet, pas un sous-ensemble.
+        "config": build_engine_config({
             "game_rules": {
                 "engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35,
                 # Cohesion 03.03 : lue des qu'une escouade MULTI-figurines entre dans le cache.
@@ -324,7 +328,7 @@ def _oc_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "squad_min_neighbors": 1, "cohesion_distance_mode": "euclidean",
             },
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
-        },
+        }),
     }
     build_units_cache(gs)
     return gs

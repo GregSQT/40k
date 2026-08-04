@@ -22,7 +22,7 @@ import pytest
 from engine.phase_handlers.shared_utils import build_units_cache
 from shared.data_validation import ConfigurationError
 from engine.reward_calculator import RewardCalculator
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -31,7 +31,7 @@ from tests._state_invariants import turn_state_invariants
 
 def _unit(uid: int, value: int, hp_max: int, models: List[Dict[str, Any]] | None) -> Dict[str, Any]:
     """Unite minimale acceptee par build_units_cache. `models=None` => mono-figurine."""
-    u: Dict[str, Any] = {
+    u: Dict[str, Any] = {**unit_invariants(),
         "id": uid,
         "player": 1,
         "col": 5,
@@ -53,16 +53,6 @@ def _unit(uid: int, value: int, hp_max: int, models: List[Dict[str, Any]] | None
         "MODEL_HEIGHT": 2.5,
         "MOVE": 6,
         "UNIT_RULES": [],
-        # Mise en place (24.16 clause 2 / feature d observation) : 0 = posee avant la bataille.
-        "deployed_on_turn": 0,
-        # Etat 08.03 : pose sur TOUTE unite au chargement (game_state.py) et lu en `require_key`
-        # par le statut d unite de l observation.
-        "battle_shocked": False,
-        # Orientation du socle : toute unite reelle la porte (posee au chargement du scenario,
-        # game_state.py) et la LoS l exige pour orienter l empreinte du tireur. Requise ici
-        # depuis que l observation lit le couvert par slot ennemi via `compute_unit_los`
-        # (V11 §0.31) : sans elle, la fixture etait plus pauvre que l etat runtime.
-        "orientation": 0,
         "RNG_WEAPONS": [],
         "CC_WEAPONS": [],
         "selectedRngWeaponIndex": 0,

@@ -386,12 +386,53 @@ Decision factors: Unit value, importance of actions this turn, long term strateg
 **Règle 14.02 — le checkpoint de contrôle d'objectif était éteint en entraînement.**
 Trouvé en corrigeant `cp_gain_on_objective`, qui lit « for each objective you control » et ne
 jouait JAMAIS au tour 1 (mesuré : `objective_controllers == {}` aux deux phases de mouvement).
-Cause : `run_objective_control_checkpoint` sort sur `if not check_cfg`, et la section
+Cause : `run_objective_control_checkpoint` sortait sur `if not check_cfg`, et la section
 `objective_control_check` de `game_config.json` n'était posée que par les deux constructeurs de
 `services/api_server` — la branche d'entraînement de `W40KEngine.__init__` l'avait omise. Le
 contrôle n'était donc rafraîchi en gym que par effet de bord des chemins de scoring VP, à des
 moments qui ne sont pas ceux de la règle. Corrigé le 2026-08-04 : **le contrôle est désormais
 réévalué à chaque frontière de phase**.
+
+**Le MÉCANISME, corrigé le même jour.** Le vrai défaut n'était pas la clé manquante mais le
+régime d'erreur : le contrat « sections de `game_config.json` exigées par le moteur » était
+recopié à la main sur QUATRE sites de construction (branche d'entraînement, les deux
+constructeurs de `services/api_server`, `main.load_config` — ce dernier omettant aussi `move` et
+`charge`), et il était lu en `.get()`. Deux sections du MÊME fichier avaient donc des régimes
+opposés : un oubli de `move` plante à la première action (`_get_move_traversal_rules`,
+`require_key`), un oubli de `objective_control_check` éteignait une règle du jeu en silence.
+Le contrat vit désormais en UN endroit — `config_loader.GAME_CONFIG_SECTIONS_REQUIRED_BY_ENGINE`
+et `require_engine_game_config_sections`, `require_key` sur chaque section — que les quatre sites
+appellent, et le point de lecture du checkpoint est passé à `require_key`. Côté tests,
+`tests/unit/engine/_config_helpers.build_engine_config` part de ce même contrat : une config de
+test ne peut plus éteindre une règle en ne la déclarant pas. Même durcissement sur la mise à
+l'échelle pouces → sub-hex de `W40KEngine.__init__`, qui sautait en silence sur un `.get` de
+`game_rules` / `charge` et laissait les distances en pouces sur un plateau x5/x10.
+
+**Le même défaut au niveau de la CLÉ, corrigé le même jour.** `shared_utils.get_max_base_size_hex`
+lisait `game_rules["max_base_size_hex"]` par trois replis en cascade terminés par un défaut
+littéral `35`, alors que son jumeau strict à dix lignes de là dans le MÊME fichier
+(`get_engagement_zone` → `spatial_relations.get_engagement_zone`) exige les trois niveaux par
+`require_key` : deux lecteurs de la même section, régimes opposés. Mesuré sur une partie réelle
+(791 appels, deux graines) : **zéro repli**, la valeur venait toujours de la config — le défaut ne
+pouvait que masquer un état malformé ou une clé retirée du JSON. Passé à `require_key` en cascade,
+la valeur ne vit plus que dans `config/game_config.json`. Ce seuil est un DIAMÈTRE HEX **non
+scalé** par `inches_to_subhex` (absent de la liste de conversion de `w40k_core`), donc un littéral
+en dur n'avait même pas le même sens d'un plateau à l'autre. Verrou :
+`tests/unit/engine/test_max_base_size_hex_regime.py`.
+
+**Trois généralisations évaluées et ÉCARTÉES** (2026-08-04) — écrites ici pour qu'on ne les
+re-propose pas comme dette. (a) Factoriser en un `require_game_rule(game_state, name)` le prélude
+`config` → `game_rules` écrit 23 fois dans `engine/` : découpage sur du code correct, aucun défaut
+évité. (b) Un test de contrat AST vérifiant que les 13 clés lues existent dans
+`game_config.json` : depuis que tous les lecteurs sont en `require_key`, une clé absente fait
+lever le moteur au premier step — le test n'attraperait rien de plus. (c) Migrer vers
+`_config_helpers.build_game_rules` les 97 fixtures qui écrivent un `"game_rules"` littéral :
+**activement nocif**, car la migration INJECTE les vraies valeurs des clés que la fixture n'avait
+pas (un test écrit sans `max_turns` se mettrait à tourner sur `max_turns: 5` et passerait en
+mesurant autre chose) — du vert vacant à 97 exemplaires. La douleur qu'elle prétend prévenir a
+été mesurée à zéro : sur les 21 fixtures dépourvues de `max_base_size_hex`, aucune n'a cassé au
+durcissement. La bonne granularité est le cas par cas : quand une fixture casse, on la migre en
+vérifiant qu'elle mesure encore la même chose.
 
 Ce que ça change, MESURÉ (5 graines, même flux d'actions, `cp_gain_on_objective` neutralisée des
 deux côtés pour ne pas décaler le flux `random` — sans cette précaution les épisodes divergent et
@@ -404,8 +445,9 @@ la comparaison ne mesure plus rien) :
 | **Observation, `cp_gain_on_objective`, step.log** | idem : tous lisent l'état persisté. |
 
 Le sens constant du delta (l'agent perd de la récompense) mesure ce sur-crédit.
-Verrou : `test_objective_control_checkpoint_1402.py`, qui contrôle la présence de la section
-**et** que le checkpoint écrit réellement.
+Verrou : `test_objective_control_checkpoint_1402.py`, qui contrôle la présence de la section,
+que le checkpoint écrit réellement, que l'assembleur refuse chaque section manquante, que le
+checkpoint LÈVE au lieu de se taire, et que `main.load_config` porte tout le contrat.
 
 **Observation.** Les CP des deux joueurs sont dans `global_cont`
 (`my_command_points` / `enemy_command_points`, grandeur globale : un CP appartient au joueur, pas

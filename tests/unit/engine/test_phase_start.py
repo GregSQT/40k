@@ -10,11 +10,11 @@ from engine.phase_handlers.movement_handlers import movement_phase_start
 from engine.phase_handlers.shooting_handlers import shooting_phase_start
 from engine.phase_handlers.fight_handlers import fight_phase_start
 from engine.phase_handlers.shared_utils import build_units_cache
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, Any]:
-    return {
+    return {**unit_invariants(),
         "id": uid,
         "player": player,
         "col": col,

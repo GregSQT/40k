@@ -39,7 +39,7 @@ import pytest
 from engine.phase_handlers import charge_handlers
 from engine.phase_handlers.charge_handlers import charge_build_valid_destinations_pool
 from engine.phase_handlers.shared_utils import build_units_cache
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 def _board_config() -> Dict[str, Any]:
@@ -62,7 +62,7 @@ def _unit(
     base_size: Any = 1,
     base_shape: str = "round",
 ) -> Dict[str, Any]:
-    return {
+    return {**unit_invariants(),
         "id": uid,
         "player": player,
         "col": col,

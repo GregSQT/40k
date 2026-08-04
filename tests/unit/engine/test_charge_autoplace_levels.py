@@ -27,7 +27,7 @@ from engine.phase_handlers.charge_handlers import (
     _charge_model_pos_is_closer,
     charge_autoplace_plan,
 )
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 FLOOR_HEIGHT_INCHES = 3.0
 UPPER_START = (100, 200)
@@ -36,12 +36,12 @@ INFANTRY = [{"keywordId": "INFANTRY"}]
 
 
 def _gs(*, roll: int) -> Dict[str, Any]:
-    unit1 = {
+    unit1 = {**unit_invariants(),
         "id": 1, "player": 1, "col": UPPER_START[0], "row": UPPER_START[1], "MOVE": 6,
         "HP_CUR": 1, "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": INFANTRY,
         "MODEL_HEIGHT": 2.5, "level": 1, "orientation": 0,
     }
-    unit2 = {
+    unit2 = {**unit_invariants(),
         "id": 2, "player": 2, "col": TARGET[0], "row": TARGET[1], "MOVE": 6,
         "HP_CUR": 1, "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": INFANTRY,
         "MODEL_HEIGHT": 2.5, "level": 0, "orientation": 0,

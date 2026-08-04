@@ -30,6 +30,7 @@ import pytest
 from engine.combat_utils import GYM_DISTANCE_METRIC_KEY, gym_distance_metric_override
 from engine.phase_handlers.charge_handlers import _charge_distance_metric
 from engine.phase_handlers.movement_handlers import _move_distance_metric
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 def _gs(*, ish: int, gym: bool, override: Any = None) -> Dict[str, Any]:
@@ -118,7 +119,7 @@ def _engine_x5_with_phase_metric(metric: Any):
         cfg["training_config"][GYM_DISTANCE_METRIC_KEY] = metric
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=cfg, gym_training_mode=True)
+        eng = W40KEngine(config=build_engine_config(cfg), gym_training_mode=True)
     eng.reset()
     return eng
 

@@ -4,6 +4,7 @@ import pytest
 
 from ai.step_logger import StepLogger
 from shared.data_validation import ConfigurationError
+from tests._state_invariants import unit_invariants
 
 
 def _read_text(path: Path) -> str:
@@ -63,7 +64,7 @@ def test_log_episode_start_writes_units_and_metadata(tmp_path: Path) -> None:
     output_file = tmp_path / "step.log"
     logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=10)
     units = [
-        {
+        {**unit_invariants(),
             "id": 1,
             "col": 2,
             "row": 3,
@@ -146,7 +147,7 @@ def test_log_action_increments_counters_and_flushes_on_threshold(tmp_path: Path)
         run_rules={"engagement_zone_subhex": 10, "metric.engagement": "hex",
                    "metric.ranged": "euclidean", "move.thru_ez": True,
                    "move.thru_enemy": False, "move.thru_friendly": True},
-        units_data=[{"id": 1, "col": 1, "row": 1, "player": 1, "HP_MAX": 1, "unitType": "Intercessor"}]
+        units_data=[{**unit_invariants(), "id": 1, "col": 1, "row": 1, "player": 1, "HP_MAX": 1, "unitType": "Intercessor"}]
     )
     logger.log_action(
         unit_id=1,
@@ -172,7 +173,7 @@ def test_log_episode_end_flushes_buffer_and_logs_objective_control(tmp_path: Pat
         run_rules={"engagement_zone_subhex": 10, "metric.engagement": "hex",
                    "metric.ranged": "euclidean", "move.thru_ez": True,
                    "move.thru_enemy": False, "move.thru_friendly": True},
-        units_data=[{"id": 1, "col": 1, "row": 1, "player": 1, "HP_MAX": 1, "unitType": "Intercessor"}]
+        units_data=[{**unit_invariants(), "id": 1, "col": 1, "row": 1, "player": 1, "HP_MAX": 1, "unitType": "Intercessor"}]
     )
     logger.log_action(
         unit_id=1,

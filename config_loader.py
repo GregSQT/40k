@@ -22,6 +22,52 @@ BOARD_DIR_BY_INCHES_TO_SUBHEX = {
     10: "board/44x60x10",
 }
 
+#: Sections de `config/game_config.json` que le moteur lit DANS SA PROPRE CONFIG, quel que soit
+#: le chemin de construction (branche d'entrainement de `W40KEngine.__init__`, les deux
+#: constructeurs de `services/api_server`, `main.load_config`). CONTRAT UNIQUE : cette liste et
+#: la fonction ci-dessous sont le seul endroit ou il s'ecrit.
+#:
+#: PERIMETRE EXACT. Les sections lues DIRECTEMENT au loader (`distance_metric` via
+#: `get_config_loader().get_game_config()`, cf. `engine/spatial_relations.py`,
+#: `engine/phase_handlers/shooting_handlers.py`) ne sont PAS ici : elles ne transitent par
+#: aucune config de moteur, donc aucun site de construction ne peut les oublier. N'ajouter une
+#: section ici que le jour ou le moteur la lit via `self.config` / `game_state["config"]`.
+#:
+#: POURQUOI ELLE EXISTE. Le contrat etait recopie a la main sur quatre sites. Le 2026-08-04,
+#: `objective_control_check` manquait de celui de l'entrainement : la regle 14.02 y etait un
+#: no-op COMPLET, sans aucune erreur, pendant toute la vie de ce chemin (`main.load_config`
+#: omettait en plus `move` et `charge`). Une section oubliee n'echoue pas — elle eteint en
+#: silence la fonctionnalite qu'elle porte. D'ou l'assemblage unique, `require_key` sur chacune.
+GAME_CONFIG_SECTIONS_REQUIRED_BY_ENGINE = (
+    "game_rules",
+    "objective_control_check",
+    "move",
+    "charge",
+)
+
+
+def require_engine_game_config_sections(game_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sous-dict de `game_config.json` exige par le moteur, chaque section `require_key`.
+
+    Args:
+        game_config: contenu de `config/game_config.json` (cf. `ConfigLoader.get_game_config`).
+
+    Returns:
+        Un dict des sections de `GAME_CONFIG_SECTIONS_REQUIRED_BY_ENGINE`, a fusionner dans la
+        config du moteur.
+
+    Raises:
+        ConfigurationError: des qu'une section manque. Pas de defaut, pas de section optionnelle :
+        c'est precisement l'absence silencieuse qui a eteint la regle 14.02.
+    """
+    from shared.data_validation import require_key
+
+    return {
+        section: require_key(game_config, section)
+        for section in GAME_CONFIG_SECTIONS_REQUIRED_BY_ENGINE
+    }
+
+
 def _validate_registry_entries(registry: Any, source: str, label: str) -> None:
     """Convention COMMUNE des registres indexes par id : un objet par entree, champ `id` present
     et EGAL a la cle.

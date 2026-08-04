@@ -17,6 +17,8 @@ from engine.phase_handlers.shared_utils import build_units_cache
 from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
 from engine.reward_calculator import RewardCalculator
+from tests._state_invariants import unit_invariants
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -24,7 +26,7 @@ from engine.reward_calculator import RewardCalculator
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _raw_unit(uid: int, player: int, value: int = 100) -> Dict[str, Any]:
-    return {"id": uid, "player": player, "col": uid, "row": 0,
+    return {**unit_invariants(), "id": uid, "player": player, "col": uid, "row": 0,
             "HP_CUR": 3, "HP_MAX": 3, "VALUE": value, "OC": 1,
             "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
             "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
@@ -170,7 +172,7 @@ def mocks(monkeypatch: pytest.MonkeyPatch) -> None:
 def _make_engine() -> W40KEngine:
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        return W40KEngine(config=_minimal_config())
+        return W40KEngine(config=build_engine_config(_minimal_config()))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

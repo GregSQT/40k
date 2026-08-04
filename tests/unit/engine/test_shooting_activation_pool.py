@@ -8,7 +8,7 @@ import pytest
 
 from engine.phase_handlers.shooting_handlers import shooting_build_activation_pool
 from engine.phase_handlers.shared_utils import build_units_cache
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 def _board_config() -> Dict[str, Any]:
@@ -19,7 +19,7 @@ def _board_config() -> Dict[str, Any]:
 
 
 def _unit(uid: int, player: int, col: int, row: int, hp: int = 2) -> Dict[str, Any]:
-    return {
+    return {**unit_invariants(),
         "id": uid,
         "player": player,
         "col": col,

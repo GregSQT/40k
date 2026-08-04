@@ -27,6 +27,7 @@ from unittest.mock import patch
 from engine.observation_builder import ObservationBuilder
 from engine.observation_entities import unit_bin_index
 from engine.w40k_core import W40KEngine
+from tests.unit.engine._config_helpers import build_engine_config
 
 BIN_CHARGE_REACHABLE = unit_bin_index("charge_reachable_max_roll")
 BIN_PRESENT = unit_bin_index("present")
@@ -88,7 +89,7 @@ def _config(
 def _make_engine(cfg: Dict[str, Any]) -> W40KEngine:
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=cfg)
+        eng = W40KEngine(config=build_engine_config(cfg))
     eng.reset()
     return eng
 

@@ -8,12 +8,13 @@ from engine.phase_handlers.shared_utils import (
     require_unit_position,
     update_units_cache_position,
 )
+from tests._state_invariants import unit_invariants
 
 
 def test_build_units_cache_normalizes_coordinates_hp_and_player() -> None:
     game_state: Dict[str, Any] = {
         "units": [
-            {
+            {**unit_invariants(),
                 "id": 1,
                 "col": "3.0",
                 "row": 4.0,

@@ -30,6 +30,7 @@ import pytest
 from engine.w40k_core import W40KEngine
 from engine.observation_builder import ObservationBuilder
 from engine.observation_entities import unit_bin_index
+from tests.unit.engine._config_helpers import build_engine_config
 
 BIN_HIDDEN = unit_bin_index("hidden")
 BIN_GTG = unit_bin_index("gone_to_ground")
@@ -117,7 +118,7 @@ def _config(
 def _make_engine(cfg: Dict[str, Any], obscuring: bool = True, dense: bool = True) -> W40KEngine:
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=cfg)
+        eng = W40KEngine(config=build_engine_config(cfg))
     eng.reset()
     gs = eng.game_state
     gs["terrain_areas"] = [_terrain_area(obscuring)]

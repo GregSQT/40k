@@ -23,7 +23,7 @@ from engine.phase_handlers.fight_handlers import (
     fight_v11_eligible_unit_ids,
     fight_v11_advance_selection,
 )
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 def _make_gs(
@@ -40,7 +40,7 @@ def _make_gs(
     norm_units: List[Dict[str, Any]] = []
     for u in units:
         uid = str(u["id"])
-        full = {
+        full = {**unit_invariants(),
             "id": uid, "player": u["player"], "col": u["col"], "row": u["row"],
             "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round", "orientation": 0,
             "HP_CUR": u.get("HP_CUR", 1), "HP_MAX": u.get("HP_MAX", 1),

@@ -30,6 +30,7 @@ from engine.observation_builder import ObservationBuilder
 from engine.reward_calculator import RewardCalculator
 from engine.utils.weapon_helpers import melee_weapons, ranged_weapons
 from engine.w40k_core import W40KEngine
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -124,7 +125,7 @@ def mocks(monkeypatch: pytest.MonkeyPatch) -> None:
 def _make_engine() -> W40KEngine:
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        return W40KEngine(config=_minimal_config())
+        return W40KEngine(config=build_engine_config(_minimal_config()))
 
 
 def test_toutes_les_unites_du_moteur_portent_les_deux_cles():

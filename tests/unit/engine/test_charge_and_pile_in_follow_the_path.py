@@ -30,12 +30,12 @@ from engine.phase_handlers.shared_utils import (
     geodesic_move_reach,
     squad_consolidate_plan,
 )
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 def _unit(uid: str, player: int, models: Sequence[Tuple[int, int]]) -> Dict[str, Any]:
     col, row = models[0]
-    return {
+    return {**unit_invariants(),
         "id": uid, "player": player, "col": col, "row": row,
         "HP_CUR": len(models), "HP_MAX": len(models), "VALUE": 100, "OC": 1, "T": 4,
         "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,

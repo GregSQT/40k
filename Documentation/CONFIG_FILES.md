@@ -189,6 +189,7 @@ elle est désormais pilotée par `defaults.agent_key`.
 | `game_rules.avg_charge_roll` | integer | Average charge distance used for heuristics |
 | `game_rules.macro_max_unit_value` | integer | Normalization constant for macro unit value |
 | `game_rules.macro_target_weights` | object | Target type weights for macro scoring |
+| `game_rules.max_base_size_hex` | integer | Plafond de DIAMÈTRE d'empreinte, en hexagones, servant à borner la prune conservatrice des ennemis. Deux lecteurs, de portées différentes : `observation_builder._engagement_relevant_entries` à CHAQUE construction d'observation (aucune garde), et `movement_handlers._enemy_items_within_move_engagement_horizon` seulement sous `engagement_zone > 1`. **Aucune valeur par défaut côté code** : `shared_utils.get_max_base_size_hex` lève si la clé manque — un défaut littéral masquerait un état de jeu malformé. ⚠️ N'est PAS scalé par `inches_to_subhex` (contrairement à `engagement_zone`) : c'est déjà un nombre d'hexagones, pas des pouces. |
 
 ### Example
 

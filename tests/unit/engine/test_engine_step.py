@@ -15,6 +15,7 @@ import pytest
 from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT
 from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -131,7 +132,7 @@ def mock_build_obs(monkeypatch):
 def _make_engine() -> W40KEngine:
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        return W40KEngine(config=_minimal_config())
+        return W40KEngine(config=build_engine_config(_minimal_config()))
 
 
 def _legal_action(engine: W40KEngine) -> int:

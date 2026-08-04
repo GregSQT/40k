@@ -13,11 +13,25 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
+from config_loader import require_engine_game_config_sections
+
 _CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "game_config.json"
 
 
+def _read_game_config() -> Dict[str, Any]:
+    """Relecture FRAÎCHE du fichier, à chaque appel.
+
+    Volontairement PAS `get_config_loader().get_game_config()` : le loader mémoïse et rend une
+    référence partagée par tout le process. Or des tests mutent les sous-dicts en place
+    (`cfg["game_rules"]["engagement_zone"] = 2`, `gs["config"]["game_rules"]["max_turns"] = 5`) —
+    ils contamineraient les tests suivants. Le moteur se protège du même piège en `copy.deepcopy`
+    avant de scaler (`w40k_core`, « cumulative ×10 on each game restart »).
+    """
+    return json.loads(_CONFIG_PATH.read_text())
+
+
 def _real_game_rules() -> Dict[str, Any]:
-    return json.loads(_CONFIG_PATH.read_text())["game_rules"]
+    return _read_game_config()["game_rules"]
 
 
 def build_game_rules(**overrides: Any) -> Dict[str, Any]:
@@ -31,8 +45,32 @@ def build_game_rules(**overrides: Any) -> Dict[str, Any]:
     return rules
 
 
+def build_engine_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Config de moteur de test : le CONTRAT de production, surcharge par ce que le test déclare.
+
+    Le moteur exige toutes les sections de
+    ``config_loader.GAME_CONFIG_SECTIONS_REQUIRED_BY_ENGINE`` (``require_key`` au point de
+    lecture — cf. ``GameStateManager.run_objective_control_checkpoint``). Un test qui construit
+    sa config à la main n'en déclare qu'une partie : les autres viennent d'ici, telles qu'elles
+    sont dans ``config/game_config.json``, donc le test tourne sur les VRAIES règles au lieu
+    d'éteindre en silence celles qu'il ignore.
+
+    Ce n'est pas un défaut anti-erreur : les sections que le test déclare gagnent intégralement,
+    et une section absente du fichier de config lève toujours (``require_key``). C'est ce que
+    faisaient déjà ``build_game_rules`` / ``build_move_rules``, généralisé à la config entière.
+
+    ⚠️ Avant ce helper, 44 fichiers omettaient ``objective_control_check`` : le checkpoint 14.02
+    y sortait à sa première ligne. Deux d'entre eux (``test_objective_held_samples``,
+    ``test_zone_intent_control_axis``) PRÉTENDAIENT mesurer l'axe de contrôle d'objectif alors
+    qu'aucun contrôle n'était jamais établi.
+    """
+    merged = require_engine_game_config_sections(_read_game_config())
+    merged.update(config)
+    return merged
+
+
 def _real_move_rules() -> Dict[str, Any]:
-    return json.loads(_CONFIG_PATH.read_text())["move"]
+    return _read_game_config()["move"]
 
 
 def build_move_rules(**overrides: Any) -> Dict[str, Any]:
@@ -40,6 +78,49 @@ def build_move_rules(**overrides: Any) -> Dict[str, Any]:
     rules = _real_move_rules()
     rules.update(overrides)
     return rules
+
+
+#: Scénario `deployment_type: active` réel. Le harnais habituel construit le moteur depuis une
+#: config en mémoire, qui démarre TOUJOURS en placement fixe (`deployment_type` ne vient que
+#: d'un fichier de scénario) : un test qui veut voir une phase de déploiement doit passer par un
+#: fichier, sinon il observe un état qui ne se produit jamais et affiche « tout va bien » — le
+#: VERT VACANT déjà payé en V11 §0.56.
+ACTIVE_DEPLOYMENT_SCENARIO = (
+    "config/agents/ArmageddonAgent/scenarios/holdout_regular/scenario_bot-01.json"
+)
+
+
+#: Scénario d'ENTRAÎNEMENT réel, le pendant de `ACTIVE_DEPLOYMENT_SCENARIO` pour les tests qui
+#: veulent la config et l'état du chemin gym plutôt qu'une phase de déploiement active.
+TRAINING_SCENARIO = (
+    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json"
+)
+
+
+def build_armageddon_engine(seed: int, **overrides):
+    """Construit et `reset` un `W40KEngine` ArmageddonAgent / `x1_debug`.
+
+    Fonction et non fixture : une fixture de `scope="module"` ne peut pas dépendre d'une
+    fixture de portée fonction, et plusieurs fichiers amortissent volontairement la
+    construction sur tout leur module. Les deux formes partagent donc ce corps unique — un
+    argument ajouté à `W40KEngine.__init__` ne casse plus les copies une par une.
+    """
+    from ai.unit_registry import UnitRegistry
+    from engine.w40k_core import W40KEngine
+
+    kwargs = {
+        "rewards_config": "ArmageddonAgent",
+        "training_config_name": "x1_debug",
+        "controlled_agent": "ArmageddonAgent",
+        "scenario_file": ACTIVE_DEPLOYMENT_SCENARIO,
+        "unit_registry": UnitRegistry(),
+        "quiet": True,
+        "gym_training_mode": True,
+    }
+    kwargs.update(overrides)
+    engine = W40KEngine(**kwargs)
+    engine.reset(seed=seed)
+    return engine
 
 
 #: Réglages PAR ÉPISODE qu'un test observant la phase de déploiement doit ÉPINGLER au lieu de

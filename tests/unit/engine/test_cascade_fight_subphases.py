@@ -16,7 +16,7 @@ import pytest
 
 from engine.w40k_core import W40KEngine
 from engine.phase_handlers.shared_utils import build_units_cache, build_enemy_adjacent_hexes
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ def _base_config() -> Dict[str, Any]:
 
 
 def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, Any]:
-    return {
+    return {**unit_invariants(),
         "id": uid,
         "player": player,
         "col": col,
@@ -51,9 +51,6 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
         "HP_MAX": hp,
         "VALUE": 100,
         "OC": 1,
-        # Invariant de construction : posé par tous les constructeurs de production, lu en
-        # strict par le moteur depuis 2026-08-02.
-        "battle_shocked": False,
         "BASE_SIZE": 1,
         "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",

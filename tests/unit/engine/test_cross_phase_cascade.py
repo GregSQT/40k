@@ -26,7 +26,7 @@ from engine.phase_handlers.shared_utils import (
     build_enemy_adjacent_hexes,
     is_unit_alive,
 )
-from tests._state_invariants import turn_state_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ def _base_config() -> Dict[str, Any]:
 
 
 def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, Any]:
-    return {
+    return {**unit_invariants(),
         "id": uid,
         "player": player,
         "col": col,

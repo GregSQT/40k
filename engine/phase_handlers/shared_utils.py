@@ -488,6 +488,8 @@ def is_footprint_placement_valid(
     Returns:
         True if ALL cells pass every check
     """
+    if not candidate_hexes:
+        return False
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     wall_hexes = game_state.get("wall_hexes", set())
@@ -1842,13 +1844,22 @@ def get_engagement_zone(game_state: Dict[str, Any]) -> int:
 def get_max_base_size_hex(game_state: Dict[str, Any]) -> int:
     """Plafond (diamètre hex) pour borner les empreintes ennemies dans les filtres spatiaux.
 
-    Utilisé par la prune conservatrice des ennemis en déplacement (ez > 1) : au-delà de ce
-    diamètre, on tronque la contribution « rayon d'empreinte » pour rester sûr sans exploser
-    la fenêtre si des données unité sont aberrantes.
+    Utilisé par la prune conservatrice des ennemis : au-delà de ce diamètre, on tronque la
+    contribution « rayon d'empreinte » pour rester sûr sans exploser la fenêtre si des données
+    unité sont aberrantes. DEUX lecteurs, de portées différentes :
+    ``observation_builder._engagement_relevant_entries`` à chaque construction d'observation,
+    sans aucune garde, et ``movement_handlers._enemy_items_within_move_engagement_horizon``
+    seulement sous ``ez > 1``. Ne pas réduire ce seuil au seul chemin du déplacement.
+
+    Aucun défaut caché, exactement comme ``get_engagement_zone`` (même section ``game_rules``,
+    même fichier) : un état sans ``config``/``game_rules``/``max_base_size_hex`` est malformé,
+    pas un cas à replier sur une constante. Ce seuil est en DIAMÈTRE HEX et n'est PAS scalé par
+    ``inches_to_subhex`` (absent de la liste de conversion de ``w40k_core``) : un littéral en
+    dur n'aurait donc même pas le même sens d'un plateau à l'autre.
     """
-    config = game_state.get("config") or {}
-    game_rules = config.get("game_rules") or {}
-    return int(game_rules.get("max_base_size_hex", 35))
+    config = require_key(game_state, "config")
+    game_rules = require_key(config, "game_rules")
+    return int(require_key(game_rules, "max_base_size_hex"))
 
 
 def build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[Tuple[int, int]]:
@@ -3263,7 +3274,10 @@ def validate_squad_coherency(game_state: Dict[str, Any], squad_id: str) -> bool:
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     model_ids = squad_models.get(squad_id, [])  # get allowed
-    alive = [models_cache[m] for m in model_ids if m in models_cache]
+    alive = [
+        models_cache[m] for m in model_ids
+        if m in models_cache and int(models_cache[m].get("col", -1)) >= 0 and int(models_cache[m].get("row", -1)) >= 0
+    ]
     return _positions_in_coherency(alive, game_state)
 
 
@@ -5852,6 +5866,8 @@ def _attacker_model_can_reach_squad(
             continue
         tc = int(tm["col"])
         tr = int(tm["row"])
+        if tc < 0 or tr < 0:
+            continue  # modèle hors-board (réserves stratégiques) — non ciblable
         target_level = int(tm.get("level", 0))  # get allowed (champ optionnel, défaut sol)
         footprint = list(_compute_unit_occupied_hexes(tc, tr, base_unit, game_state))
         target_socle = Socle(

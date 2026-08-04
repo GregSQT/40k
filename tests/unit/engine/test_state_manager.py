@@ -11,6 +11,7 @@ import pytest
 
 from engine.game_state import GameStateManager
 from engine.phase_handlers.shared_utils import build_units_cache
+from tests._state_invariants import unit_invariants
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -37,10 +38,7 @@ def _sm(config: Dict[str, Any] | None = None) -> GameStateManager:
 
 
 def _raw_unit(uid: int, player: int, value: int = 100) -> Dict[str, Any]:
-    return {"id": uid, "player": player, "col": uid, "row": 0,
-            # Règle 01.07 : champ posé dès la construction d'une unité, lu SANS défaut
-            # par le contrôle d'objectif (14.02).
-            "battle_shocked": False,
+    return {**unit_invariants(), "id": uid, "player": player, "col": uid, "row": 0,
             "HP_CUR": 3, "HP_MAX": 3, "VALUE": value, "OC": 1,
             "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
             "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
@@ -152,3 +150,126 @@ class TestCheckGameOver:
         gs = {"turn_limit_reached": True, "turn": 1,
               "config": {"game_rules": {"max_turns": 5}}}
         assert _sm().check_game_over(gs) is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Verrou du socle d'unité (tests/_state_invariants.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestUnitInvariantsConformity:
+    """Verrou de dérive du socle ``unit_invariants()``.
+
+    Même découpage que son jumeau ``TestTurnStateInvariantsConformity``
+    (tests/unit/engine/test_engine_reset.py) : clés / valeurs / exhaustivité. Le socle
+    **réplique** les champs d'état qu'une unité de production porte toujours — une fixture
+    unitaire ne peut pas faire tourner un chargement de scénario. Ces tests sont ce qui empêche
+    la copie de diverger du moteur : si un constructeur change une valeur, ajoute ou renomme un
+    champ constant, ils rougissent ici et pas dans les fixtures, en silence.
+
+    Les DEUX constructeurs sont exercés : ``create_unit`` (API build army, fixtures) et
+    ``_build_enhanced_unit`` (chargement de scénario et changement de roster). Le second ne
+    demande ni board ni registre — position injectée, ``unit_registry`` n'étant lu que pour un
+    override ``unit_type`` par figurine — donc rien ne justifiait de le laisser diverger.
+    """
+
+    #: Champs que les constructeurs DÉRIVENT d'autres champs de l'unité : leur valeur dépend du
+    #: roster (armes, mots-clés, règles), donc un socle les figerait à une valeur fausse. La
+    #: classification faisant autorité est la docstring de ``unit_invariants()``.
+    DERIVE = {
+        "selectedRngWeaponIndex", "selectedCcWeaponIndex", "SHOOT_LEFT", "ATTACK_LEFT",
+        "hideable", "_UNIT_RULES_OWN",
+    }
+
+    def test_socle_keys_all_posed_by_create_unit(self) -> None:
+        """unit_conformity_keys : toute clé du socle existe dans l'unité construite."""
+        unit = _sm().create_unit(_FULL_UNIT_CFG)
+
+        absentes = sorted(k for k in unit_invariants() if k not in unit)
+        assert absentes == [], f"Le socle réplique des champs que create_unit() ne pose pas : {absentes}"
+
+    def test_socle_values_match_create_unit(self) -> None:
+        """unit_conformity_values : chaque valeur du socle == la valeur posée par create_unit()."""
+        unit = _sm().create_unit(_FULL_UNIT_CFG)
+
+        socle = unit_invariants()
+        # Les clés absentes sont le sujet du test précédent : ici on ne juge que les valeurs,
+        # sinon un champ fantôme du socle remonterait en KeyError illisible.
+        divergentes = {
+            k: (v, unit[k])
+            for k, v in socle.items()
+            if k in unit and (unit[k] != v or type(unit[k]) is not type(v))
+        }
+        assert divergentes == {}, f"Socle d'unité désaligné de create_unit() : {divergentes}"
+
+    def test_socle_values_match_build_enhanced_unit(self) -> None:
+        """unit_conformity_second_builder : le socle vaut aussi pour le chemin du chargement.
+
+        ``_build_enhanced_unit`` construit TOUTES les unités du moteur (scénario, change_roster)
+        et duplique le bloc de champs d'état de ``create_unit``. Sans ce test, il pouvait
+        diverger sans que rien ne rougisse — les fixtures décrivant alors une unité que le
+        chemin de production majoritaire ne produit plus.
+        """
+        unit = _sm()._build_enhanced_unit(
+            unit_data={"id": 1, "player": 1},
+            full_unit_data=_FULL_UNIT_CFG,
+            unit_type="T",
+            unit_player=1,
+            player_deployment_type="fixed",
+            chosen_col=3,
+            chosen_row=3,
+            unit_registry=None,   # lu uniquement pour un override `unit_type` par figurine
+        )
+
+        socle = unit_invariants()
+        divergentes = {
+            k: (v, unit[k] if k in unit else "<ABSENT>")
+            for k, v in socle.items()
+            if k not in unit or unit[k] != v or type(unit[k]) is not type(v)
+        }
+        assert divergentes == {}, (
+            f"Socle d'unité désaligné de _build_enhanced_unit() : {divergentes}"
+        )
+
+    def test_les_deux_constructeurs_posent_les_memes_champs(self) -> None:
+        """unit_conformity_same_fields : create_unit et _build_enhanced_unit, MÊME jeu de clés.
+
+        Les deux constructeurs dupliquent le même bloc de champs d'état, et ``initialize_units``
+        repasse chaque unité enrichie par ``create_unit`` : un champ ajouté d'un seul côté est
+        soit perdu en production (posé par l'enrichissement, effacé par ``create_unit``), soit
+        absent du socle sans que l'exhaustivité ne le voie — c'est la dérive déjà vécue avec
+        ``in_strategic_reserves`` (cf. game_state.py, commentaire des deux sources).
+        """
+        cree = _sm().create_unit(_FULL_UNIT_CFG)
+        enrichie = _sm()._build_enhanced_unit(
+            unit_data={"id": 1, "player": 1},
+            full_unit_data=_FULL_UNIT_CFG,
+            unit_type="T",
+            unit_player=1,
+            player_deployment_type="fixed",
+            chosen_col=3,
+            chosen_row=3,
+            unit_registry=None,
+        )
+
+        assert sorted(set(cree) - set(enrichie)) == [], "champs que seul create_unit pose"
+        assert sorted(set(enrichie) - set(cree)) == [], (
+            "champs que seul _build_enhanced_unit pose : create_unit les effacera"
+        )
+
+    def test_create_unit_poses_no_unclassified_field(self) -> None:
+        """unit_conformity_exhaustive : tout champ posé par create_unit() est classé.
+
+        Filet de dérive inverse : un champ d'état ajouté au moteur doit entrer dans le socle
+        (constant) ou dans ``DERIVE`` (calculé depuis le roster). Sans ce test, il n'entrerait
+        nulle part et les fixtures recommenceraient à décrire une unité impossible.
+        """
+        unit = _sm().create_unit(_FULL_UNIT_CFG)
+
+        socle = unit_invariants()
+        non_classes = sorted(
+            k for k in unit
+            if k not in _FULL_UNIT_CFG and k not in socle and k not in self.DERIVE
+        )
+        assert non_classes == [], (
+            f"create_unit() pose des champs ni dans le socle ni dans DERIVE : {non_classes}"
+        )

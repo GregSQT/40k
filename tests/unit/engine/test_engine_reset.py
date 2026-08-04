@@ -24,6 +24,7 @@ import pytest
 from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
 from tests._state_invariants import turn_state_invariants
+from tests.unit.engine._config_helpers import build_engine_config
 
 
 @pytest.fixture(autouse=True)
@@ -125,7 +126,7 @@ def _make_engine() -> W40KEngine:
     """Crée un engine réel avec config minimale."""
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        return W40KEngine(config=_minimal_config_with_units())
+        return W40KEngine(config=build_engine_config(_minimal_config_with_units()))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -410,7 +411,7 @@ class TestResetLogsScenarioPath:
         with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
              patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
             engine = W40KEngine(
-                config=_minimal_config_with_units(), scenario_file=scenario_file
+                config=build_engine_config(_minimal_config_with_units()), scenario_file=scenario_file
             )
         log_path = tmp_path / "step.log"
         engine.step_logger = StepLogger(
