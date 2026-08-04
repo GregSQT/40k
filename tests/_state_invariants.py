@@ -2,9 +2,10 @@
 
 POURQUOI CE FICHIER
 -------------------
-Le moteur pose **toujours** les 20 clés ci-dessous (dict de reset de ``W40KEngine.reset()`` dans
-``engine/w40k_core.py``, plus ``units_fought`` posé par ``command_phase_start``). Un ``game_state`` littéral qui les omet décrit un état **impossible en
-production**, et la production le lit de deux façons :
+Le moteur pose **toujours** les clés ci-dessous (dict de reset de ``W40KEngine.reset()`` dans
+``engine/w40k_core.py``, plus ``units_fought`` et le CP de 08.02 posés par ``command_phase_start``,
+que la cascade command du reset appelle aussitôt). Un ``game_state`` littéral qui les omet décrit un
+état **impossible en production**, et la production le lit de deux façons :
 
 - ``require_key(...)`` / ``gs["..."]`` → le test casse bruyamment (cas ``units_advanced`` / 10.05) ;
 - ``.get("...", <défaut>)`` → le test observe un comportement faux et reste **vert**.
@@ -17,8 +18,9 @@ est interdit — c'est ce qui aurait désactivé 10.05 en silence.
 ``units_took_to_skies`` et ``units_took_to_skies_charge``. Seul le dict de ``reset()`` est complet,
 et tout chemin de production passe par ``engine.reset()``. La conformité de ce socle avec ce dict
 est verrouillée par ``tests/unit/engine/test_engine_reset.py`` (classe
-``TestTurnStateInvariantsConformity``) : la liste ci-dessous est **répliquée**, pas dérivée, et ce
-test rougit si le moteur ajoute, retire ou renomme un invariant.
+``TestTurnStateInvariantsConformity``) : le dict ci-dessous est **répliqué** à la main (une fixture
+unitaire ne peut pas construire un engine complet), et ces tests rougissent si le moteur ajoute,
+retire ou renomme un invariant. Ce dict est la seule source : rien ne recopie sa liste de clés.
 
 USAGE
 -----
@@ -34,31 +36,7 @@ Fusionner en tête du littéral, pour que les clés propres à la fixture gagnen
 
 from __future__ import annotations
 
-from typing import Any, Dict, FrozenSet
-
-#: Les 20 clés d'état de tour présentes dans tout ``game_state`` post-``reset()``.
-TURN_STATE_KEYS: FrozenSet[str] = frozenset({
-    "units_moved",
-    "units_fled",
-    "units_cannot_charge",
-    "units_shot",
-    "units_shot_previous_turn",
-    "units_charged",
-    "units_attacked",
-    "units_fought",
-    "units_advanced",
-    "advance_rolls",
-    "units_took_to_skies",
-    "units_took_to_skies_charge",
-    "units_reacted_this_enemy_turn",
-    "reaction_window_active",
-    "last_move_event_id",
-    "last_move_cause",
-    "reactive_mode",
-    "reactive_macro_order_current_window",
-    "reactive_decision_mode",
-    "reactive_decision_payload",
-})
+from typing import Any, Dict
 
 
 def turn_state_invariants() -> Dict[str, Any]:
@@ -78,6 +56,11 @@ def turn_state_invariants() -> Dict[str, Any]:
         # silencieux `game_state["current_turn"] ... else 1` — une cle qui n'a jamais existe et
         # qui datait toutes les lignes pile-in/consolidation de step.log au tour 1.
         "turn": 1,
+        # Stock de CP des deux joueurs (regle 08.02), lu en `require_key` par
+        # `gain_command_points` (cascade command) et par l'observation. `reset()` le pose a
+        # `initial_command_points(config)` = 0, puis la cascade command du tour 1 accorde le CP
+        # de 08.02 aux deux joueurs : la valeur post-reset est 1, comme pour `units_fought`.
+        "command_points": {1: 1, 2: 1},
         "units_moved": set(),
         "units_fled": set(),
         "units_cannot_charge": set(),

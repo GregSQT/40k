@@ -55,6 +55,9 @@ def _unit(uid: int, value: int, hp_max: int, models: List[Dict[str, Any]] | None
         "UNIT_RULES": [],
         # Mise en place (24.16 clause 2 / feature d observation) : 0 = posee avant la bataille.
         "deployed_on_turn": 0,
+        # Etat 08.03 : pose sur TOUTE unite au chargement (game_state.py) et lu en `require_key`
+        # par le statut d unite de l observation.
+        "battle_shocked": False,
         # Orientation du socle : toute unite reelle la porte (posee au chargement du scenario,
         # game_state.py) et la LoS l exige pour orienter l empreinte du tireur. Requise ici
         # depuis que l observation lit le couvert par slot ennemi via `compute_unit_los`
