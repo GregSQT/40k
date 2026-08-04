@@ -5185,9 +5185,15 @@ def _handle_ingress_move_action(
     if not ok:
         return False, result
     # Jumeau de `movement_commit_move_plan_handler` : une mise en place change l'occupation du
-    # plateau, donc tous les pools de destination (y compris les aires d'ingress des AUTRES
-    # réserves) sont périmés, et l'aperçu affiché — ici la bande d'arrivée, jusqu'à 2 286 points
-    # — doit être effacé, sans quoi il resterait sérialisé dans chaque réponse suivante.
+    # plateau, donc les pools de destination (BFS de move, de charge) sont périmés, et l'aperçu
+    # affiché — ici la bande d'arrivée, jusqu'à 2 286 points — doit être effacé, sans quoi il
+    # resterait sérialisé dans chaque réponse suivante.
+    #
+    # ⚠️ Les aires d'ingress des AUTRES réserves, elles, ne sont PAS périmées par cette pose :
+    # leur clé ne porte que les positions ENNEMIES (`_ingress_enemy_positions_fingerprint`), et
+    # l'unité qui vient d'arriver est amie. Leur mémo est bien vidé par l'appel ci-dessous, mais
+    # c'est de l'hygiène mémoire, pas une correction — le confondre avec une invalidation
+    # nécessaire ferait croire à un couplage qui n'existe pas.
     movement_clear_preview(game_state)
     _invalidate_all_destination_pools_after_movement(game_state)
     end_result = end_activation(game_state, unit, ACTION, 1, MOVE, MOVE, 1)
