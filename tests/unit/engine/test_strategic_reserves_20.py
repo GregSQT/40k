@@ -22,9 +22,19 @@ from typing import Any, Dict, List, Set, Tuple
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+# Scénario à rosters PINNÉS, et sans réserves déclarées. Ces tests construisent eux-mêmes leurs
+# réserves (`_force_into_reserves`, qui applique 20.02 et EXIGE une unité posée) : ils supposent
+# donc que toutes les unités démarrent SUR LA TABLE.
+#
+# `scenario_training_armageddon.json`, utilisé auparavant, tire son roster au sort
+# (`agent_roster_ref: "training_random"`, glob du dossier). Le jour où une variante à réserves
+# entre dans ce dossier, 16 tests de ce fichier tombent — mesuré au chantier 04c, qui les y a
+# mis puis les a ressortis dans un sous-dossier `variants/` (le glob n'est pas récursif). Ces
+# variantes ne sont donc PAS dans le tirage aujourd'hui : ce pin ne corrige pas un défaut actif,
+# il rend ce fichier indépendant d'un contenu de dossier qui a vocation à changer.
 SCENARIO = (
     PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
-    / "scenario_training_armageddon.json"
+    / "reserves_20_fixture.json"
 )
 
 UNDEPLOYED = (-1, -1)
@@ -1080,3 +1090,87 @@ def test_repositioning_an_already_moved_unit_is_allowed():
     gs.setdefault("units_moved", set()).add(squad_id)
     reposition_unit_to_strategic_reserves(gs, squad_id)  # ne doit pas lever
     assert _unit(gs, squad_id)["deployed_on_turn"] is None
+
+
+# ---------------------------------------------------------------------------
+# 20.01 — la phase de TIR ignore les unités hors table (chantier 04c)
+# ---------------------------------------------------------------------------
+#
+# `test_reserve_unit_is_not_a_shooting_target` ci-dessus couvre le cache de LoS. Il ne couvre
+# PAS `weapon_availability_check`, qui a sa propre énumération d'ennemis et son propre choix
+# d'arme — et c'est là que vivaient les deux trous corrigés au chantier 04c.
+#
+# ⚠️ PORTÉE EXACTE DE CES DEUX TESTS, à ne pas surestimer : ce sont des tests de NON-RÉGRESSION
+# du démarrage de phase en présence d'une unité hors table, PAS des verrous des deux filtres
+# `entry_is_on_battlefield` de `shooting_handlers`. Vérifié en retirant chaque filtre : ils
+# restent VERTS. Raison mesurée : le crash exige que le tireur soit à PORTÉE D'ARME du fantôme
+# en (-1,-1), or la zone de déploiement de ce scénario en est à 271-278 subhex pour des portées
+# de 120-240. Dans l'épisode qui plantait réellement, le tireur était à ~153. Le verrou effectif
+# des deux filtres est donc l'épisode complet de
+# tests/unit/ai/test_bot_ingress_reserves.py::test_bot_ingress_end_to_end, et il ne mord que sur
+# les graines où la géométrie s'y prête — c'est une faiblesse CONNUE, pas un oubli.
+
+
+def test_shooting_phase_start_runs_with_a_reserve_enemy():
+    """Le démarrage de phase de tir traverse une unité ENNEMIE hors table sans lever.
+
+    Elle est VIVANTE mais sans empreinte : `_is_valid_shooting_target` finissait par appeler
+    `min_distance_between_sets` sur un ensemble VIDE (« Cannot compute distance between empty
+    sets »), à la première phase de tir de tout épisode où une réserve subsiste.
+    """
+    from engine.phase_handlers.shooting_handlers import shooting_phase_start
+
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    shooter_player = int(gs["current_player"])
+    enemy_player = 2 if shooter_player == 1 else 1
+    # POSÉE : une unité déjà hors table ne prouverait rien (vert vacant).
+    target = next(
+        sid for sid, e in gs["units_cache"].items()
+        if int(e["player"]) == enemy_player and entry_is_on_battlefield_for(gs, sid)
+    )
+    _force_into_reserves(gs, target)
+    # CONSTRUIT : `shooting_phase_start` ne fait le choix d'arme COMPLET (donc le précheck
+    # d'ennemis) que si l'unité est adjacente ou a fait un advance — sinon il prend la première
+    # arme portée sans regarder personne. Sans cette ligne le test resterait vert avec le défaut.
+    for sid, entry in gs["units_cache"].items():
+        if int(entry["player"]) == shooter_player:
+            gs.setdefault("units_advanced", set()).add(str(sid))
+
+    shooting_phase_start(gs)  # ne doit pas lever
+
+    assert not entry_is_on_battlefield_for(gs, target)
+
+
+def test_shooting_phase_start_runs_with_a_reserve_shooter():
+    """Symétrique : une unité en réserves du joueur COURANT ne choisit pas d'arme.
+
+    Le choix d'arme mesure des distances aux ennemis depuis l'empreinte du TIREUR. Ce cas se
+    produit dès que l'agent exerce la décision 20.01 sur sa propre liste, ce qui est légal — le
+    masque de déploiement lui ouvre `SQUAD_ACTION_WAIT` pour ça.
+    """
+    from engine.phase_handlers.shooting_handlers import shooting_phase_start
+
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    shooter_player = int(gs["current_player"])
+    shooter = next(
+        sid for sid, e in gs["units_cache"].items()
+        if int(e["player"]) == shooter_player and entry_is_on_battlefield_for(gs, sid)
+    )
+    _force_into_reserves(gs, shooter)
+    # CONSTRUIT, même raison que ci-dessus : c'est le choix d'arme complet qui lit l'empreinte
+    # du TIREUR, et il n'est atteint qu'après un advance ou au contact.
+    gs.setdefault("units_advanced", set()).add(str(shooter))
+
+    shooting_phase_start(gs)  # ne doit pas lever
+
+    assert not entry_is_on_battlefield_for(gs, shooter)
+
+
+def entry_is_on_battlefield_for(gs: Dict[str, Any], unit_id: str) -> bool:
+    from engine.phase_handlers.shared_utils import entry_is_on_battlefield
+
+    return entry_is_on_battlefield(gs["units_cache"][str(unit_id)])

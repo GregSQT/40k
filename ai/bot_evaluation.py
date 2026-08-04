@@ -240,24 +240,73 @@ def _agent_faction_from_engine(engine: Any) -> str:
     return "+".join(sorted(factions))
 
 
-def _faction_bot_tally(
+#: Roster non identifiable : le scenario declare ses unites en dur au lieu de referencer un
+#: roster, donc `roster_info` est absent. Meme parti que la cle de faction composite
+#: (`_agent_faction_from_engine`) : la ventilation par roster est une metrique de DIAGNOSTIC et
+#: ne doit pas pouvoir abattre un run de 36 h. La valeur est VISIBLE dans TensorBoard et ne se
+#: confond avec aucun roster reel — elle signale un scenario a cabler, elle ne le masque pas.
+NO_ROSTER_REF = "<no_roster_ref>"
+
+#: Les deux camps dont le roster est ventile. Constante et pas litteral repete : l'ensemble etait
+#: reecrit sous trois formes (tuple de boucle, set de validation, litteral d'initialisation) sur
+#: huit sites, et un oubli sur `_failed_task_result` fait sauter le run au premier timeout.
+ROSTER_SIDES: Tuple[str, str] = ("agent", "opponent")
+
+
+def _episode_roster_ids(engine: Any) -> Dict[str, str]:
+    """`{"agent": <roster_id>, "opponent": <roster_id>}` de l'episode courant.
+
+    MESURE sur l'etat charge, pas deduite du nom du scenario — meme raison que
+    `_agent_faction_from_engine` : `agent_roster_ref: "training_random"` tire le roster au sort a
+    chaque reset, donc le scenario ne dit pas lequel a ete joue. C'est precisement ce que cette
+    ventilation existe pour rendre lisible : une variante de liste (avec / sans reserves
+    strategiques) est un ROSTER, pas un scenario — la figer dans un scenario tuerait la rotation
+    aleatoire qui sert la generalisation.
+
+    A appeler APRES reset().
+
+    Acces DIRECT a l'attribut, sans `getattr(..., None)` : le chargement de scenario le pose
+    toujours (`W40KEngine.__init__`, et a chaque rotation de scenario), donc un defaut ne
+    couvrirait aucun cas reel — il ne ferait que transformer un renommage d'attribut, ou un
+    moteur qui n'a jamais charge de scenario, en « 100 % des episodes sous `NO_ROSTER_REF` ».
+    L'operateur lirait alors « scenario a cabler » la ou la metrique est cassee. `None` reste une
+    valeur legitime, elle : un scenario qui declare ses unites en dur n'a pas de roster.
+    """
+    roster_info = engine._scenario_roster_info
+    if roster_info is None:
+        return {side: NO_ROSTER_REF for side in ROSTER_SIDES}
+    return {
+        "agent": str(require_key(roster_info, "agent_roster_id")),
+        "opponent": str(require_key(roster_info, "opponent_roster_id")),
+    }
+
+
+def _bot_tally(
     results_list: List[Dict[str, Any]],
     active_bot_names: Tuple[str, ...],
+    stats_of: Callable[[Dict[str, Any]], Dict[str, Dict[str, int]]],
 ) -> Dict[str, Dict[str, List[int]]]:
-    """`tally[faction][bot] = [wins, total]` — le SEUL comptage croise faction x bot.
+    """`tally[cle][bot] = [wins, total]` — le SEUL comptage croise <cle d'episode> x bot.
 
-    Extrait de `_compute_faction_scores` pour que la ventilation publiee
-    (`_compute_faction_bot_win_rates`) et l'agregat par faction derivent du meme comptage :
-    deux parcours independants de `results_list` divergeraient au premier changement de
-    ponderation ou de filtre.
+    `stats_of` extrait d'un resultat de tache la sous-table `{cle: {"wins", "total"}}` relevee
+    episode par episode : `faction_stats` pour la faction jouee, `roster_stats[side]` pour le
+    roster de chaque camp.
+
+    UNE mecanique pour toutes les ventilations, et c'est ce qui rend vraie la propriete qu'elles
+    annoncent : la somme des cellules retombe sur le win-rate global parce que le filtre de bot,
+    l'accumulation et les coercions sont litteralement le meme code, pas parce que deux copies
+    se ressemblent aujourd'hui. Une regle ajoutee ici (exclure les taches en erreur, ponderer,
+    seuil d'episodes) vaut pour les trois publications d'un coup — recopiee, elle en aurait
+    manque deux, et les courbes `bot_eval/faction/*` et `bot_eval/roster/*` auraient publie des
+    denominateurs differents pour le meme run.
     """
     tally: Dict[str, Dict[str, List[int]]] = {}
     for result in results_list:
         bot_name = result.get("bot_name")
         if bot_name not in active_bot_names:
             continue
-        for faction, stats in require_key(result, "faction_stats").items():
-            per_bot = tally.setdefault(str(faction), {})
+        for key, stats in stats_of(result).items():
+            per_bot = tally.setdefault(str(key), {})
             wins, total = per_bot.setdefault(str(bot_name), [0, 0])
             per_bot[str(bot_name)] = [
                 wins + int(require_key(stats, "wins")),
@@ -266,27 +315,59 @@ def _faction_bot_tally(
     return tally
 
 
-def _compute_faction_bot_win_rates(
+def _faction_bot_tally(
+    results_list: List[Dict[str, Any]],
+    active_bot_names: Tuple[str, ...],
+) -> Dict[str, Dict[str, List[int]]]:
+    """`tally[faction][bot] = [wins, total]`.
+
+    Existe pour que la ventilation publiee (`_compute_bot_win_rates`) et l'agregat par faction
+    (`_compute_faction_scores`) derivent du meme comptage : deux parcours independants de
+    `results_list` divergeraient au premier changement de ponderation ou de filtre.
+    """
+    return _bot_tally(
+        results_list, active_bot_names, lambda r: require_key(r, "faction_stats")
+    )
+
+
+def _roster_bot_tally(
+    results_list: List[Dict[str, Any]],
+    active_bot_names: Tuple[str, ...],
+    side: str,
+) -> Dict[str, Dict[str, List[int]]]:
+    """`tally[roster_id][bot] = [wins, total]` pour un COTE (`agent` ou `opponent`)."""
+    if side not in ROSTER_SIDES:
+        raise ValueError(
+            f"_roster_bot_tally: side doit valoir l'un de {ROSTER_SIDES}, pas {side!r}"
+        )
+    return _bot_tally(
+        results_list, active_bot_names, lambda r: require_key(r, "roster_stats")[side]
+    )
+
+
+def _compute_bot_win_rates(
     tally: Dict[str, Dict[str, List[int]]],
 ) -> Dict[str, Dict[str, float]]:
-    """
-    Win-rate BRUT de chaque bot, ventile par faction jouee par l'agent (V11 §10.6).
+    """Win-rate BRUT de chaque bot, ventile par la cle du `tally` (faction V11 §10.6, ou roster).
 
-    Croisement que ni `bot_eval/vs_<bot>` (tous rosters confondus) ni
-    `bot_eval/faction/<faction>` (agregat pondere) ne donnent : c'est lui qui dit si une
-    faiblesse contre un adversaire tient a UN roster ou aux deux.
+    Croisement que ni `bot_eval/vs_<bot>` (toutes cles confondues) ni `bot_eval/faction/<faction>`
+    (agregat pondere) ne donnent : c'est lui qui dit si une faiblesse contre un adversaire tient a
+    UNE cle ou a toutes. Par roster, c'est le seul endroit ou deux variantes d'une meme faction
+    (avec et sans reserves strategiques) cessent d'etre confondues — sans quoi une baisse apres
+    l'ajout des reserves serait inattribuable : liste plus faible, ou agent qui ne sait pas
+    defendre contre une arrivee ?
 
-    Contrairement a l'agregat, aucune faction n'est ecartee : chaque cellule est un win-rate
-    autonome, sur sa propre echelle, donc une couverture partielle reste lisible. Un couple
-    (faction, bot) sans episode joue n'est pas publie — un 0.0 y serait un score invente.
+    Contrairement a l'agregat, aucune cle n'est ecartee : chaque cellule est un win-rate autonome,
+    sur sa propre echelle, donc une couverture partielle reste lisible. Un couple (cle, bot) sans
+    episode joue n'est pas publie — un 0.0 y serait un score invente.
     """
     return {
-        faction: {
+        key: {
             bot_name: wins / total
             for bot_name, (wins, total) in per_bot.items()
             if total > 0
         }
-        for faction, per_bot in tally.items()
+        for key, per_bot in tally.items()
     }
 
 
@@ -305,7 +386,7 @@ def _compute_faction_scores(
     ne serait pas sur la meme echelle que celui des autres.
 
     Prend le `tally` CONSTRUIT, pas `results_list` : c'est le meme objet que consomme
-    `_compute_faction_bot_win_rates`, donc les deux ventilations ne peuvent pas diverger sur
+    `_compute_bot_win_rates`, donc les deux ventilations ne peuvent pas diverger sur
     un comptage. Meme geste que `scenario_bot_stats`, construit une fois puis derive.
     """
     faction_scores: Dict[str, float] = {}
@@ -699,12 +780,33 @@ def _eval_worker_task(
     # Faction jouee par l'agent, relevee A CHAQUE episode : un roster tire au sort peut
     # changer de faction d'un reset a l'autre au sein d'une meme tache.
     faction_stats: Dict[str, Dict[str, int]] = {}
+    # Meme releve, meme raison, pour les deux ROSTERS de l'episode : une variante de liste est un
+    # roster, et `agent_roster_ref: "training_random"` peut en changer a chaque reset.
+    roster_stats: Dict[str, Dict[str, Dict[str, int]]] = {side: {} for side in ROSTER_SIDES}
+
+    def _count_episode(faction: str, roster_ids: Dict[str, str], won: bool) -> None:
+        """Comptabilise UN episode dans les trois ventilations, gagne ou non.
+
+        Un seul site d'ecriture, appele une fois par episode : le `total` et le `wins` d'une
+        meme cle ne peuvent donc plus etre incrementes a deux endroits differents, ni sur deux
+        seaux distincts. La forme precedente rendait ses seaux a l'appelant pour qu'il y ajoute
+        `wins` plus loin — un aliasing a preserver a la main, alors que `winner` est connu avant
+        l'appel.
+        """
+        for stats, key in [(faction_stats, faction)] + [
+            (roster_stats[side], roster_ids[side]) for side in ROSTER_SIDES
+        ]:
+            bucket = stats.setdefault(key, {"wins": 0, "total": 0})
+            bucket["total"] += 1
+            bucket["wins"] += int(won)
+
     for ep_idx in range(task["n_episodes"]):
         ep_seed = _episode_seed(task["base_seed"], task["bot_name"], task["scenario_index"], ep_idx)
         random.seed(ep_seed)
         np.random.seed(ep_seed)
         obs, info = env.reset(seed=ep_seed)
         episode_faction = _agent_faction_from_engine(env.engine)
+        episode_roster_ids = _episode_roster_ids(env.engine)
         done = False
         step_count = 0
         # BACKSTOP, et il ne peut PAS preempter le garde moteur : les deux compteurs n'ont pas
@@ -783,8 +885,7 @@ def _eval_worker_task(
                 "engine_step_limit": engine_episode_limit,
             })
             draws += 1
-            faction_bucket = faction_stats.setdefault(episode_faction, {"wins": 0, "total": 0})
-            faction_bucket["total"] += 1
+            _count_episode(episode_faction, episode_roster_ids, won=False)
             if progress_callback is not None:
                 progress_callback()
             continue
@@ -794,11 +895,11 @@ def _eval_worker_task(
         # son absence est une anomalie d'environnement, pas un cas de jeu.
         winner = require_key(info, "winner")
         controlled_player = require_key(info, "controlled_player")
-        faction_bucket = faction_stats.setdefault(episode_faction, {"wins": 0, "total": 0})
-        faction_bucket["total"] += 1
+        _count_episode(
+            episode_faction, episode_roster_ids, won=(winner == controlled_player)
+        )
         if winner == controlled_player:
             wins += 1
-            faction_bucket["wins"] += 1
         elif winner == -1:
             draws += 1
         else:
@@ -816,6 +917,7 @@ def _eval_worker_task(
         "bot_name": task["bot_name"],
         "scenario_name": task["scenario_name"],
         "faction_stats": faction_stats,
+        "roster_stats": roster_stats,
     }
 
 
@@ -849,6 +951,10 @@ def _failed_task_result(
         # Aucun episode joue : la tache ne contribue a aucune faction. Cle PRESENTE et vide,
         # jamais absente — _compute_faction_scores la lit par require_key.
         "faction_stats": {},
+        # Meme regle, et c'est TOUT LE POINT de cette fabrique unique : `_roster_bot_tally` lit
+        # `roster_stats[side]` par require_key, donc les deux cotes doivent exister meme vides,
+        # sans quoi le premier timeout tuerait le run.
+        "roster_stats": {side: {} for side in ROSTER_SIDES},
         **cause,
     }
 
@@ -1507,10 +1613,24 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     faction_tally = _faction_bot_tally(results_list, active_bot_names)
     faction_scores = _compute_faction_scores(faction_tally, active_bot_names, eval_weights)
     results["faction_scores"] = faction_scores
-    results["faction_bot_win_rates"] = _compute_faction_bot_win_rates(faction_tally)
+    results["faction_bot_win_rates"] = _compute_bot_win_rates(faction_tally)
     if all(faction in faction_scores for faction in ROSTER_GAP_FACTIONS):
         results["roster_gap"] = (
             faction_scores[ROSTER_GAP_FACTIONS[0]] - faction_scores[ROSTER_GAP_FACTIONS[1]]
+        )
+
+    # Ventilation par ROSTER, des DEUX cotes (chantier 04c). `faction_bot_win_rates` confond
+    # deux variantes d'une meme faction — typiquement « avec » et « sans » reserves
+    # strategiques — et c'est exactement l'ecart qu'on veut lire.
+    # Les deux cotes repondent a deux questions DIFFERENTES, et les melanger les rendrait
+    # illisibles : le roster de l'AGENT dit s'il sait UTILISER ses reserves, celui de
+    # l'ADVERSAIRE s'il sait ENCAISSER une arrivee.
+    # Meme `results_list`, meme cle `roster_stats`, meme forme de tally que la faction : la
+    # somme ponderee par roster retombe donc sur le win-rate global par construction, ce n'est
+    # pas une coincidence a re-verifier a chaque changement.
+    for side in ROSTER_SIDES:
+        results[f"{side}_roster_bot_win_rates"] = _compute_bot_win_rates(
+            _roster_bot_tally(results_list, active_bot_names, side)
         )
 
     # V11 §10.5 : le holdout (tactical) est MESURE et affiche, mais EXCLU du worst_bot_score,

@@ -208,6 +208,10 @@ def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pyte
                 ),
                 config={"controlled_player": 0},
                 game_state={"units": []},
+                # Posé par le chargement de scénario sur le vrai moteur : la doublure porte le
+                # contrat au lieu de le contourner. `None` = scénario sans roster_ref, cas légitime
+                # que `_episode_roster_ids` range sous NO_ROSTER_REF.
+                _scenario_roster_info=None,
                 # Le worker aligne son backstop sur le plafond du MOTEUR (V11 §0.61) : la
                 # doublure porte ce contrat au lieu de le contourner.
                 _get_episode_step_limit=lambda: 500,
@@ -379,6 +383,7 @@ def test_eval_worker_task_attaches_step_logger(monkeypatch: pytest.MonkeyPatch) 
                 ),
                 config={"controlled_player": 0},
                 game_state={"units": [{"player": 0, "unitType": "Intercessor"}]},
+                _scenario_roster_info=None,
                 # Le worker aligne son backstop sur le plafond du MOTEUR (V11 §0.61).
                 _get_episode_step_limit=lambda: 500,
             )
@@ -614,7 +619,7 @@ def _faction_scores(results_list: list, active: tuple, weights: dict) -> dict:
 
 def _faction_cross(results_list: list, active: tuple) -> dict:
     """Jumeau de `_faction_scores` pour la ventilation brute : MEME tally en entree."""
-    return be._compute_faction_bot_win_rates(be._faction_bot_tally(results_list, active))
+    return be._compute_bot_win_rates(be._faction_bot_tally(results_list, active))
 
 
 def test_compute_faction_scores_weights_bots_like_combined() -> None:

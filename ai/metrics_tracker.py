@@ -1874,6 +1874,45 @@ class W40KMetricsTracker:
                     x,
                 )
 
+    def log_roster_bot_win_rates(
+        self,
+        side: str,
+        roster_bot_win_rates: Dict[str, Dict[str, float]],
+        step: Optional[int] = None,
+    ) -> None:
+        """Log le croisement `bot_eval/roster/<side>/<roster_id>/vs_<bot>` (chantier 04c).
+
+        Ce que `bot_eval/faction/<faction>/vs_<bot>` ne donne pas : deux VARIANTES d'une meme
+        faction — typiquement la meme liste avec et sans reserves strategiques — y sont
+        confondues sous une seule courbe. Lire l'agregat apres l'ajout des reserves rendrait
+        toute baisse inattribuable : liste plus faible, ou agent qui ne sait pas defendre contre
+        une arrivee ? Ces deux causes ont des courbes distinctes ici.
+
+        `side` porte une question DIFFERENTE de chaque cote, d'ou deux arbres de tags separes :
+          - `agent`    : l'agent sait-il UTILISER ses propres reserves ?
+          - `opponent` : sait-il ENCAISSER une arrivee adverse ?
+
+        Comme `log_faction_bot_win_rates`, ces cellules sont des win-rates BRUTS incluant le
+        holdout : leur moyenne ne redonne pas un agregat pondere, et c'est voulu.
+        """
+        if side not in {"agent", "opponent"}:
+            raise ValueError(
+                f"log_roster_bot_win_rates: side doit valoir 'agent' ou 'opponent', pas {side!r}"
+            )
+        if not isinstance(roster_bot_win_rates, dict):
+            raise TypeError(
+                f"roster_bot_win_rates must be dict "
+                f"(got {type(roster_bot_win_rates).__name__})"
+            )
+        x = step if step is not None else self.episode_count
+        for roster_id, per_bot in roster_bot_win_rates.items():
+            for bot_name, win_rate in per_bot.items():
+                self.writer.add_scalar(
+                    f'bot_eval/roster/{side}/{self._metric_slug(roster_id)}/vs_{bot_name}',
+                    float(win_rate),
+                    x,
+                )
+
     def log_holdout_split_metrics(self, split_metrics: Dict[str, float]) -> None:
         """Log holdout split aggregates to TensorBoard."""
         if 'holdout_regular_mean' in split_metrics:
