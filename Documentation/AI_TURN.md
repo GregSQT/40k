@@ -420,12 +420,19 @@ scalé** par `inches_to_subhex` (absent de la liste de conversion de `w40k_core`
 en dur n'avait même pas le même sens d'un plateau à l'autre. Verrou :
 `tests/unit/engine/test_max_base_size_hex_regime.py`.
 
-**Ce qui reste ouvert sur ce motif.** Le prélude `require_key(game_state,"config")` +
-`require_key(config,"game_rules")` est écrit 23 fois dans `engine/` pour 13 clés distinctes : un
-`require_game_rule(game_state, name)` unique, et un test de contrat qui vérifie par AST que
-chaque clé lue existe dans `game_config.json`, factoriseraient les deux moitiés d'un coup. Côté
-tests, 97 fichiers construisent encore un `"game_rules"` littéral à la main contre 5 qui passent
-par `_config_helpers.build_game_rules` : c'est ce qui rend coûteux chaque durcissement de clé.
+**Trois généralisations évaluées et ÉCARTÉES** (2026-08-04) — écrites ici pour qu'on ne les
+re-propose pas comme dette. (a) Factoriser en un `require_game_rule(game_state, name)` le prélude
+`config` → `game_rules` écrit 23 fois dans `engine/` : découpage sur du code correct, aucun défaut
+évité. (b) Un test de contrat AST vérifiant que les 13 clés lues existent dans
+`game_config.json` : depuis que tous les lecteurs sont en `require_key`, une clé absente fait
+lever le moteur au premier step — le test n'attraperait rien de plus. (c) Migrer vers
+`_config_helpers.build_game_rules` les 97 fixtures qui écrivent un `"game_rules"` littéral :
+**activement nocif**, car la migration INJECTE les vraies valeurs des clés que la fixture n'avait
+pas (un test écrit sans `max_turns` se mettrait à tourner sur `max_turns: 5` et passerait en
+mesurant autre chose) — du vert vacant à 97 exemplaires. La douleur qu'elle prétend prévenir a
+été mesurée à zéro : sur les 21 fixtures dépourvues de `max_base_size_hex`, aucune n'a cassé au
+durcissement. La bonne granularité est le cas par cas : quand une fixture casse, on la migre en
+vérifiant qu'elle mesure encore la même chose.
 
 Ce que ça change, MESURÉ (5 graines, même flux d'actions, `cp_gain_on_objective` neutralisée des
 deux côtés pour ne pas décaler le flux `random` — sans cette précaution les épisodes divergent et

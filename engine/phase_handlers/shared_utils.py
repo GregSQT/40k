@@ -1842,9 +1842,12 @@ def get_engagement_zone(game_state: Dict[str, Any]) -> int:
 def get_max_base_size_hex(game_state: Dict[str, Any]) -> int:
     """Plafond (diamètre hex) pour borner les empreintes ennemies dans les filtres spatiaux.
 
-    Utilisé par la prune conservatrice des ennemis en déplacement (ez > 1) : au-delà de ce
-    diamètre, on tronque la contribution « rayon d'empreinte » pour rester sûr sans exploser
-    la fenêtre si des données unité sont aberrantes.
+    Utilisé par la prune conservatrice des ennemis : au-delà de ce diamètre, on tronque la
+    contribution « rayon d'empreinte » pour rester sûr sans exploser la fenêtre si des données
+    unité sont aberrantes. DEUX lecteurs, de portées différentes :
+    ``observation_builder._engagement_relevant_entries`` à chaque construction d'observation,
+    sans aucune garde, et ``movement_handlers._enemy_items_within_move_engagement_horizon``
+    seulement sous ``ez > 1``. Ne pas réduire ce seuil au seul chemin du déplacement.
 
     Aucun défaut caché, exactement comme ``get_engagement_zone`` (même section ``game_rules``,
     même fichier) : un état sans ``config``/``game_rules``/``max_base_size_hex`` est malformé,
