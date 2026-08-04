@@ -547,27 +547,18 @@ def _charge_distance_metric(game_state: Dict[str, Any]) -> str:
     Miroir de ``_move_distance_metric`` (la charge EST un move, règle 11.04) : PvP/replay lisent
     ``distance_metric["charge"]`` ; le training gym lit ``distance_metric["charge_gym"]`` (défaut
     ``hex`` pour la perf training). Aucun défaut caché : section/clé/valeur invalide → erreur explicite.
+
+    Miroir aussi sur l'override de PHASE (``gym_distance_metric``) : une phase de training qui
+    bascule le move doit basculer la charge, sinon l'agent apprendrait une portée de move
+    euclidienne et une portée de charge hexagonale — deux frontières contradictoires pour la même
+    règle (11.04 : la charge EST un move).
+
+    « Miroir » n'est plus une consigne tenue à la main : les deux sélecteurs partagent le corps
+    ``combat_utils.resolve_gym_split_metric`` et ne peuvent plus diverger.
     """
-    from config_loader import get_config_loader
-    from engine.combat_utils import VALID_DISTANCE_METRICS
+    from engine.combat_utils import resolve_gym_split_metric
 
-    game_config = get_config_loader().get_game_config()
-    if "distance_metric" not in game_config:
-        raise KeyError("Missing 'distance_metric' section in game_config.json")
-    metrics = game_config["distance_metric"]
-    key = "charge_gym" if game_state.get("gym_training_mode") else "charge"
-    if key not in metrics:
-        raise KeyError(f"Missing distance_metric['{key}'] in game_config.json")
-    metric = metrics[key]
-    if metric not in VALID_DISTANCE_METRICS:
-        raise ValueError(
-            f"Invalid distance_metric['{key}'] = {metric!r}, expected one of {VALID_DISTANCE_METRICS}"
-        )
-    # Miroir de `_move_distance_metric` : la RÉSOLUTION prime sur la config (point de bascule
-    # unique `spatial_relations.geometry_is_hex`) — à x1 la géométrie du jeu est hex.
-    from engine.spatial_relations import geometry_is_hex
-
-    return "hex" if geometry_is_hex(game_state) else metric
+    return resolve_gym_split_metric("charge", game_state)
 
 
 def _charge_bfs_max_distance(

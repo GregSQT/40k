@@ -549,6 +549,8 @@ class W40KEngine(gym.Env):
             if col % 2 == 1:
                 base_wall_hexes.add((col, bottom_row))
         
+        from engine.combat_utils import GYM_DISTANCE_METRIC_KEY, gym_distance_metric_override
+
         # CRITICAL: Initialize game_state FIRST before any other operations
         # _cache_instance_id: unique per engine instance, prevents id(game_state) reuse collision
         # when multiple envs run in same process (bot eval) and old game_state is GC'd
@@ -655,6 +657,15 @@ class W40KEngine(gym.Env):
             "board_cols": board_cols,
             "board_rows": board_rows,
             "inches_to_subhex": require_key(_board.get("default", _board), "inches_to_subhex"),
+            # Métrique imposée par la PHASE de training (opt-in). Posée à côté de
+            # `inches_to_subhex` parce qu'elle joue le même rôle : un paramètre du monde, lu par
+            # les sélecteurs de distance depuis l'état plutôt que depuis le config global.
+            # `None` = phase muette → les sélecteurs lisent `game_config` comme avant.
+            # RÉSOLUE ICI, donc VALIDÉE à la construction : une phase avec une valeur invalide
+            # doit faire échouer le lancement du run, pas se découvrir au premier pool de move
+            # d'un worker vectorisé. `self.training_config` est None hors training (API/PvP) :
+            # pas de phase, pas d'override — le réglage ne peut structurellement pas fuir en PvP.
+            GYM_DISTANCE_METRIC_KEY: gym_distance_metric_override(self.training_config),
             "max_range": max_range,
             # Use scenario terrain if loaded, otherwise use board config
             "wall_hexes": base_wall_hexes,

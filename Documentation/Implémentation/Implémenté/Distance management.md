@@ -731,14 +731,50 @@ la métrique suit le run analysé.
 |-----|-----------------|-------|
 | `ranged` | `euclidean` | Portée de tir bord-à-bord (`ranged_edge_distance`/`ranged_in_range`, ÷1.5) |
 | `move` | `euclidean` | Budget de move PvP/replay (champ géodésique any-angle) |
-| `move_gym` | `hex` | Budget de move en training gym (1 param pour basculer le training) |
+| `move_gym` | `hex` | Budget de move en training gym (1 param pour basculer le training) — **surchargeable par PHASE**, cf. `gym_distance_metric` ci-dessous |
 | `charge` | `euclidean` | Budget de charge PvP/replay (géodésique + pré-gate 12" ligne droite) |
-| `charge_gym` | `hex` | Budget de charge en training gym |
+| `charge_gym` | `hex` | Budget de charge en training gym — **surchargeable par PHASE** (bascule avec `move_gym`, 11.04) |
 | `engagement` | `euclidean` | Zone d'engagement 4 phases (`engagement_distance_metric`/`entries_in_engagement_zone`, disque ×1.5) — **pas de split gym**, retrain requis |
 | `overlap` | `hex` | Collision de socles (couche d'occupation, ne bascule jamais) |
 
 `hex` = distance d'empreinte / cube ; `euclidean` = bord-à-bord `_hex_center` (facteur ×1.5
 `ENGAGEMENT_NORM_HEX_WIDTH`, confiné aux primitives). Un `_gym` absent = pas de split (suit la clé de base).
+
+### `gym_distance_metric` — métrique imposée par une PHASE de training (2026-08-04)
+
+Clé **optionnelle** d'un bloc de `config/agents/<agent>/<agent>_training_config.json`. Absente,
+rien ne bouge (les sélecteurs lisent `move_gym`/`charge_gym`). Présente, elle impose la métrique
+du gym pour ce run — `move` **et** `charge` ensemble (11.04 : la charge est un move), jamais
+l'engagement (qui n'a pas de variante gym et résout déjà en euclidien à x5). Valeur invalide →
+erreur à la **construction** du moteur, pas au premier pool d'un worker vectorisé.
+
+```jsonc
+"x5_append": { "gym_distance_metric": "euclidean", … }
+```
+
+Chemin : training config → `w40k_core` (validé une fois) → `game_state["gym_distance_metric"]` →
+`_move_distance_metric` / `_charge_distance_metric`. La **résolution prime toujours** : à
+`inches_to_subhex <= 1` la géométrie reste hex (`geometry_is_hex`), quoi qu'impose la phase — poser
+la clé sur une phase x1 est donc sans effet, par construction.
+
+**Pourquoi elle existe.** Mesuré sur 162 états de move réels (scénario d'entraînement, x5) : les
+pools hex et euclidien diffèrent dans **100 % des états**, de **11,4 % du pool en médiane**, et
+`euclidean ⊆ hex` dans 162/162 — l'agent n'est aveugle à aucune destination légale en PvP, mais il
+apprend une frontière de portée **hexagonale** là où elle est circulaire, et **72 %** de l'écart
+tombe sur l'anneau extérieur du disque de move (celui des entrées en portée de charge). Dans 5
+états sur 162, le pool euclidien est même VIDE alors que le hex ne l'est pas.
+
+**Pourquoi ce n'est pas gratuit.** Aligner coûte **×3,55** sur la construction du pool (mesuré,
+`scripts/profile_move_pool.py`), et ce surcoût est **structurel** : au sol, le pool euclidien est un
+champ géodésique qui encode le contournement d'obstacle. Testé — il n'est radialement clos dans le
+pool hex que pour **21 %** des états au sol (100 % en FLY, où 21.03 le fait dégénérer en disque),
+donc aucun filtre du pool hex ne le reconstitue. D'où le réglage par phase plutôt qu'une bascule
+globale : curriculum en `hex`, phase finale en `euclidean` par `--append` (`obs_size` inchangé,
+espace d'actions qui se resserre → le modèle reste chargeable).
+
+**Ce que ça ne prouve pas.** Le gain en win-rate n'est pas mesuré et ne peut pas l'être sans modèle
+x5 entraîné. La phase finale euclidienne doit être **évaluée** (win-rate euclidien avant/après), pas
+supposée suffisante : la fonction de valeur aura été calibrée sur la frontière permissive.
 
 **Dette hex intentionnelle — ce qui reste hex PAR CHOIX après les Étapes 1-7 :**
 
@@ -753,7 +789,7 @@ la métrique suit le run analysé.
 | ~~Charge (11.04) + éligibilité 12" (11.02)~~ | ✅ Migré euclidien (2026-07-03, Étape 5) — voir « Étape 5 » |
 | IA analyzer/replay charge (`ai/analyzer_phases/charge_handler.py`, `ai/game_replay_logger.py`) | Restent hex : traitent des runs gym-hex → la métrique suit le run (décision Étape 5.4) |
 | `dist_tgt` plan-context charge (filtre « closer to target » 11.04) | Reste hex, approximation mineure orthogonale au disque de reachability |
-| Gym (`move_gym=hex`) | Choix : training reste hex (perf) — 1 param (`distance_metric.move_gym`) pour basculer |
+| Gym (`move_gym=hex`) | Choix : training reste hex (perf, ×3,55 mesuré) — surchargeable PAR PHASE via `gym_distance_metric` (cf. § ci-dessous) |
 | `base_size==1` / X1 (`inches_to_subhex=1`) legacy | Parké — suppression = abandon support X1 (curriculum) ; non tranché |
 | Observations / récompenses IA (§10) | Retrain prévu de toute façon → ignoré pendant migration |
 | Replay TS (BoardReplay.tsx) | Cosmétique, parties passées — faible priorité |

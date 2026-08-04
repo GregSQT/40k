@@ -773,6 +773,13 @@ Règles:
     "total_episodes": 5000,              // How many episodes to train
     "max_turns_per_episode": 5,          // Game length limit
     "max_steps_per_turn": 200,           // Steps per turn limit
+    // OPTIONNEL. Impose la métrique de distance du gym pour CETTE phase (move + charge
+    // ensemble). Absente = comportement par défaut (distance_metric.move_gym/charge_gym).
+    // Sans effet à x1 : la résolution prime (geometry_is_hex). Coût mesuré du passage en
+    // euclidean : x3,55 sur la construction du pool de move.
+    // Usage prévu : curriculum x5 en "hex", phase finale en "euclidean" via --append.
+    // Détail complet : Documentation/Implémentation/Implémenté/Distance management.md
+    "gym_distance_metric": "euclidean",  // "hex" | "euclidean" | absent
 
     "callback_params": {
       "checkpoint_save_freq": 50000,     // Save model every N steps

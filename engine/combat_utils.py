@@ -315,6 +315,118 @@ def get_distance_metric(rule: str, game_config: Dict[str, Any]) -> str:
     return metric
 
 
+#: Clé du training config (et du ``game_state``) qui impose la métrique de distance du GYM.
+#: Nom UNIQUE, propriétaire de l'orthographe : le training config l'écrit, ``w40k_core`` la
+#: recopie dans le ``game_state``, les sélecteurs move/charge la lisent. Une constante plutôt
+#: qu'un littéral répété — une faute de frappe dans l'un des trois sites rendrait le switch
+#: silencieusement inopérant (le pire mode d'échec pour un réglage de fidélité).
+GYM_DISTANCE_METRIC_KEY = "gym_distance_metric"
+
+
+def gym_distance_metric_override(source: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Métrique imposée au GYM par le training config, ou ``None`` si la phase n'en impose pas.
+
+    ``source`` = le training config (à la construction du moteur) OU le ``game_state`` (aux
+    sélecteurs) : les deux portent la MÊME clé, et c'est délibéré — un seul nom à chercher pour
+    savoir d'où sort une métrique, du JSON jusqu'au pool.
+
+    POURQUOI CE RÉGLAGE EXISTE. Les clés ``move_gym``/``charge_gym`` valent ``hex`` alors que le
+    PvP résout en ``euclidean`` dès x5 : l'agent s'entraîne sur un pool de destinations dont
+    11-15 % n'existent pas en partie (mesuré sur 162 états réels, x5). Le pool euclidien est un
+    sous-ensemble STRICT du pool hex — l'agent n'est donc aveugle à rien, mais il apprend une
+    frontière de portée hexagonale là où elle est circulaire, et 72 % de l'écart tombe sur
+    l'anneau extérieur du disque de move, celui qui décide des entrées en portée de charge.
+
+    Aligner le gym coûte ×3,55 sur la construction du pool (mesuré). Ce surcoût est STRUCTUREL,
+    pas un défaut d'implémentation : au sol, le pool euclidien est un champ géodésique qui encode
+    le contournement d'obstacle, et aucun filtre radial du pool hex ne le reconstitue (testé —
+    le pool euclidien n'est radialement clos dans le hex que pour 21 % des états au sol, contre
+    100 % en FLY, où il dégénère en disque, 21.03).
+
+    D'où ce réglage PAR PHASE : gros du curriculum en ``hex`` (rapide), puis phase finale en
+    ``euclidean`` via ``--append`` pour recalibrer la frontière. ``obs_size`` ne change pas et
+    l'espace d'actions se RESSERRE — un modèle reste chargeable d'une phase à l'autre.
+
+    Absente → ``None`` → les sélecteurs lisent ``game_config`` comme avant : ce réglage est
+    strictement opt-in, il ne déplace rien tant qu'aucune phase ne le pose. Présente mais
+    invalide → erreur explicite, jamais un repli silencieux (CLAUDE.md).
+
+    ⚠️ PORTÉE. Ce switch ne pilote que ``move`` et ``charge``, les deux seules règles à avoir une
+    variante gym. La zone d'ENGAGEMENT n'en a pas : elle résout déjà en euclidien à x5, en
+    training comme en PvP. Une phase en ``hex`` a donc un move hex et un engagement euclidien —
+    ce qui est exactement l'état actuel du training, pas une incohérence introduite ici.
+    """
+    if source is None:
+        return None
+    value = source.get(GYM_DISTANCE_METRIC_KEY)  # get allowed (réglage OPTIONNEL, cf. docstring)
+    if value is None:
+        return None
+    if value not in VALID_DISTANCE_METRICS:
+        raise ValueError(
+            f"Invalid {GYM_DISTANCE_METRIC_KEY} = {value!r} dans le training config, "
+            f"expected one of {VALID_DISTANCE_METRICS}"
+        )
+    return value
+
+
+#: Règles dont la métrique a une variante GYM (``<rule>_gym``) distincte de la variante PvP.
+#: ``engagement`` n'en fait PAS partie — pas de split gym, cf. ``engagement_distance_metric``.
+GYM_SPLIT_DISTANCE_RULES = ("move", "charge")
+
+
+def resolve_gym_split_metric(rule: str, game_state: Optional[Dict[str, Any]]) -> str:
+    """Métrique effective d'une règle à split gym (``move``/``charge``) — CORPS UNIQUE.
+
+    ``_move_distance_metric`` et ``_charge_distance_metric`` avaient le même corps à la clé près,
+    tenus en phase à la main (« Miroir de… » dans les deux docstrings). C'est le motif JUMEAU :
+    une modification de la PRÉCÉDENCE faite d'un côté et pas de l'autre donnerait à l'agent une
+    portée de move et une portée de charge mesurées différemment, alors que 11.04 dit que la
+    charge EST un move. Un seul corps rend la divergence impossible plutôt qu'improbable.
+
+    Précédence, dans cet ordre et pour les deux règles :
+    1. la CLÉ de config (``<rule>_gym`` en gym, ``<rule>`` sinon) est lue et VALIDÉE — une config
+       cassée doit lever même quand un réglage la recouvre, sinon elle reste invisible ;
+    2. en gym seulement, la PHASE de training peut imposer sa métrique
+       (``gym_distance_metric``, cf. ``gym_distance_metric_override``) ;
+    3. la RÉSOLUTION prime sur tout : à ``inches_to_subhex <= 1`` la géométrie est hex
+       (``spatial_relations.geometry_is_hex``), quoi qu'en disent la config et la phase.
+
+    ``game_state`` optionnel — même convention que ``engagement_distance_metric``, qui est le
+    troisième sélecteur de ce jeu. Il n'utilise pas cette fonction aujourd'hui parce qu'il n'a
+    pas de variante ``_gym`` ; le jour où il en gagne une, il n'y aura pas de troisième corps à
+    écrire (ni de troisième copie de la précédence à tenir en phase).
+    """
+    if rule not in GYM_SPLIT_DISTANCE_RULES:
+        raise ValueError(
+            f"Unknown gym-split distance rule {rule!r}, expected one of {GYM_SPLIT_DISTANCE_RULES}"
+        )
+    from config_loader import get_config_loader
+
+    game_config = get_config_loader().get_game_config()
+    if "distance_metric" not in game_config:
+        raise KeyError("Missing 'distance_metric' section in game_config.json")
+    metrics = game_config["distance_metric"]
+    is_gym = bool(game_state.get("gym_training_mode")) if game_state else False  # get allowed (drapeau optionnel)
+    key = f"{rule}_gym" if is_gym else rule
+    if key not in metrics:
+        raise KeyError(f"Missing distance_metric['{key}'] in game_config.json")
+    metric = metrics[key]
+    if metric not in VALID_DISTANCE_METRICS:
+        raise ValueError(
+            f"Invalid distance_metric['{key}'] = {metric!r}, expected one of {VALID_DISTANCE_METRICS}"
+        )
+    if is_gym:
+        # Revalidé à chaque appel, et c'est VOULU : le `game_state` est un dict muté par le
+        # moteur et fabriqué à la main par les tests. La validation de `w40k_core` couvre le
+        # training config, pas un état trafiqué en cours de route.
+        override = gym_distance_metric_override(game_state)
+        if override is not None:
+            metric = override
+    from engine.spatial_relations import geometry_is_hex
+
+    return "hex" if geometry_is_hex(game_state) else metric
+
+
 def socle_from_cache_entry(entry: Dict[str, Any]) -> Any:
     """Construit un ``Socle`` (engine.hex_utils) depuis une entrée ``units_cache``.
 

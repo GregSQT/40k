@@ -2088,28 +2088,21 @@ def _move_distance_metric(game_state: Dict[str, Any]) -> str:
     Contexte : PvP/replay lisent ``distance_metric["move"]`` ; le training gym lit
     ``distance_metric["move_gym"]`` (le paramètre unique qui bascule le training, défaut
     ``hex`` pour la perf). Aucun défaut caché : section/clé/valeur invalide → erreur explicite.
+
+    En gym, une PHASE de training peut imposer sa métrique (``gym_distance_metric``, cf.
+    ``combat_utils.gym_distance_metric_override``) : c'est ce qui permet de courir le gros d'un
+    curriculum en ``hex`` puis de recalibrer la fin en ``euclidean`` par ``--append``. La clé de
+    config reste lue et validée avant l'override — une valeur invalide doit lever même quand la
+    phase impose autre chose, sinon une config cassée resterait invisible tant qu'un réglage la
+    recouvre. Hors gym (PvP/replay), l'override est ignoré : il ne décrit qu'un entraînement.
+
+    Le corps VIT dans ``combat_utils.resolve_gym_split_metric``, partagé avec
+    ``_charge_distance_metric`` : les deux sélecteurs étaient identiques à la clé près et tenus en
+    phase à la main (11.04 — la charge EST un move, leurs métriques ne peuvent pas diverger).
     """
-    from config_loader import get_config_loader
-    from engine.combat_utils import VALID_DISTANCE_METRICS
+    from engine.combat_utils import resolve_gym_split_metric
 
-    game_config = get_config_loader().get_game_config()
-    if "distance_metric" not in game_config:
-        raise KeyError("Missing 'distance_metric' section in game_config.json")
-    metrics = game_config["distance_metric"]
-    key = "move_gym" if game_state.get("gym_training_mode") else "move"
-    if key not in metrics:
-        raise KeyError(f"Missing distance_metric['{key}'] in game_config.json")
-    metric = metrics[key]
-    if metric not in VALID_DISTANCE_METRICS:
-        raise ValueError(
-            f"Invalid distance_metric['{key}'] = {metric!r}, expected one of {VALID_DISTANCE_METRICS}"
-        )
-    # La RÉSOLUTION prime sur la config : à `inches_to_subhex <= 1` la géométrie est hex
-    # (point de bascule unique `spatial_relations.geometry_is_hex`). La clé de config est lue et
-    # validée d'abord — une valeur invalide doit lever à x1 comme ailleurs.
-    from engine.spatial_relations import geometry_is_hex
-
-    return "hex" if geometry_is_hex(game_state) else metric
+    return resolve_gym_split_metric("move", game_state)
 
 
 def _filter_ground_anchors_vectorized(
