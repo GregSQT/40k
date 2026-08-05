@@ -2138,9 +2138,9 @@ def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:  # noqa: F8
         return _fight_v11_phase_complete(game_state)
 
     if not _is_fight_auto_execution_allowed(game_state):
-        # Manuel (PvP) : entre dans l'étape PILE IN interactive (aperçu des destinations ≤3").
-        # _fight_v11_manual_state présente la 1ère unité et renvoie le contrat waiting_for_pile_in
-        # (consommé par le front : mode pileInPreview). Consolidation reste auto-skip (V1).
+        # Manuel (PvP) : entre dans l'étape PILE IN interactive. _fight_v11_manual_state
+        # n'auto-présente aucune unité : il expose le pool cliquable (fight_eligible_units,
+        # active_fight_unit=None) ; le pile-in lui-même est par-figurine (pile_in_model_move).
         _fight_v11_log(game_state, "START (manuel) → étape PILE IN interactive")
         _ok, state = _fight_v11_manual_state(game_state)
         out = dict(state)

@@ -213,9 +213,6 @@ export function computeDrawBoardPartialRedrawFingerprint(
   const useAdvanceMovePoolLikeMove = mode === "advancePreview";
   const usePostShootMovePoolLikeMove =
     interactionPhase === "shoot" && pendingMoveAfterShooting === true;
-  const usePileInPoolLikeMoveHoisted =
-    interactionPhase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview");
-  const useConsolidationPreview = interactionPhase === "fight" && mode === "consolidationPreview";
   /** Move par-figurine « charge-like » en phase fight : pile-in OU consolidation (même pipeline). */
   const isPerFigChargeLikeMove =
     interactionPhase === "fight" &&
@@ -253,7 +250,6 @@ export function computeDrawBoardPartialRedrawFingerprint(
     interactionPhase,
     useAdvanceMovePoolLikeMove,
     usePostShootMovePoolLikeMove,
-    usePileInPoolLikeMoveHoisted,
     movePoolForDiskDraw,
     movePreviewFootprintMaskLoops,
     allowMovePoolFallbackFromGameState,
@@ -268,18 +264,12 @@ export function computeDrawBoardPartialRedrawFingerprint(
     !!chargeDestPoolRef?.current &&
     chargeDestPoolRef.current.size > 0;
 
-  const moveAdvanceOrPileInPickPool: Set<string> | null = (() => {
-    if (interactionPhase === "move" || useAdvanceMovePoolLikeMove || usePostShootMovePoolLikeMove) {
-      return movePoolForDiskDraw && movePoolForDiskDraw.size > 0 ? movePoolForDiskDraw : null;
-    }
-    if (usePileInPoolLikeMoveHoisted) {
-      if (moveDestPoolRef?.current && moveDestPoolRef.current.size > 0) {
-        return moveDestPoolRef.current;
-      }
-      return null;
-    }
-    return null;
-  })();
+  const movePickPool: Set<string> | null =
+    (interactionPhase === "move" || useAdvanceMovePoolLikeMove || usePostShootMovePoolLikeMove) &&
+    movePoolForDiskDraw &&
+    movePoolForDiskDraw.size > 0
+      ? movePoolForDiskDraw
+      : null;
 
   const clickableBranchExcluded = interactionPhase === "charge" && mode === "select" ? 1 : 0;
   const clickableAvailDigest =
@@ -303,7 +293,6 @@ export function computeDrawBoardPartialRedrawFingerprint(
     selectedUnitBaseSize: selectedUnitBaseSize ?? null,
     spanFromEngine,
     useMoveDestPoolCircleLayer,
-    useConsolidationPreview,
     useChargeDestPoolDiskDraw,
     chargeDestPoolHash:
       useChargeDestPoolDiskDraw && chargeDestPoolRef?.current
@@ -329,9 +318,7 @@ export function computeDrawBoardPartialRedrawFingerprint(
     digestAdv: digestHighlightCellList(advanceCells),
     clickableBranchExcluded,
     movePickPoolHash:
-      moveAdvanceOrPileInPickPool != null && moveAdvanceOrPileInPickPool.size > 0
-        ? hashStringSetStable(moveAdvanceOrPileInPickPool)
-        : null,
+      movePickPool != null && movePickPool.size > 0 ? hashStringSetStable(movePickPool) : null,
     moveRefPoolHash:
       moveDestPoolRef?.current && moveDestPoolRef.current.size > 0
         ? hashStringSetStable(moveDestPoolRef.current)
@@ -372,10 +359,7 @@ export function computeDrawBoardPartialRedrawFingerprint(
       const HIGHLIGHT_COLOR = parseColor(boardConfig.colors.highlight!);
       const advanceZoneFillColor = ADVANCE_DESTINATION_HEX_FILL;
       const poolFillColor = useAdvanceMovePoolLikeMove ? advanceZoneFillColor : HIGHLIGHT_COLOR;
-      const moveSpriteName = resolveMovePreviewSpriteName(
-        useAdvanceMovePoolLikeMove,
-        usePileInPoolLikeMoveHoisted
-      );
+      const moveSpriteName = resolveMovePreviewSpriteName(useAdvanceMovePoolLikeMove);
       const footprintMaskHexPool =
         footprintZonePoolRef?.current && footprintZonePoolRef.current.size > 0
           ? footprintZonePoolRef.current
@@ -460,9 +444,6 @@ export function updateMovePreviewPolygonLayerInHighlightContainer(
   const useAdvanceMovePoolLikeMove = mode === "advancePreview";
   const usePostShootMovePoolLikeMove =
     interactionPhase === "shoot" && pendingMoveAfterShooting === true;
-  const usePileInPoolLikeMoveHoisted =
-    interactionPhase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview");
-
   const spanFromEngine =
     typeof movePreviewFootprintSpanFromState === "number" &&
     Number.isFinite(movePreviewFootprintSpanFromState) &&
@@ -495,7 +476,6 @@ export function updateMovePreviewPolygonLayerInHighlightContainer(
     interactionPhase,
     useAdvanceMovePoolLikeMove,
     usePostShootMovePoolLikeMove,
-    usePileInPoolLikeMoveHoisted,
     movePoolForDiskDraw,
     movePreviewFootprintMaskLoops,
     allowMovePoolFallbackFromGameState,
@@ -517,10 +497,7 @@ export function updateMovePreviewPolygonLayerInHighlightContainer(
   const HIGHLIGHT_COLOR = parseColor(boardConfig.colors.highlight!);
   const advanceZoneFillColor = ADVANCE_DESTINATION_HEX_FILL;
   const poolFillColor = useAdvanceMovePoolLikeMove ? advanceZoneFillColor : HIGHLIGHT_COLOR;
-  const moveSpriteName = resolveMovePreviewSpriteName(
-    useAdvanceMovePoolLikeMove,
-    usePileInPoolLikeMoveHoisted
-  );
+  const moveSpriteName = resolveMovePreviewSpriteName(useAdvanceMovePoolLikeMove);
 
   if (selectedUnitAnchor == null) {
     throw new Error(
@@ -641,7 +618,7 @@ function fingerprintPrecomputedMaskLoops(loops: number[][] | null): string {
 }
 
 /**
- * Le calque de contour move/advance/pile-in est-il à dessiner ?
+ * Le calque de contour move/advance est-il à dessiner ?
  *
  * UNE SEULE définition, appelée par les trois sites qui doivent s'accorder : l'empreinte de
  * redessin partiel, la reconstruction du calque, et ``drawBoard``. Les voir diverger est le mode
@@ -663,17 +640,13 @@ function shouldUseMoveDestPoolCircleLayer(o: {
   interactionPhase: string;
   useAdvanceMovePoolLikeMove: boolean;
   usePostShootMovePoolLikeMove: boolean;
-  usePileInPoolLikeMoveHoisted: boolean;
   movePoolForDiskDraw: Set<string> | null;
   movePreviewFootprintMaskLoops: number[][] | null;
   allowMovePoolFallbackFromGameState: boolean;
   selectedUnitAnchor: { col: number; row: number } | null | undefined;
 }): boolean {
   const phaseOpens =
-    o.interactionPhase === "move" ||
-    o.useAdvanceMovePoolLikeMove ||
-    o.usePostShootMovePoolLikeMove ||
-    o.usePileInPoolLikeMoveHoisted;
+    o.interactionPhase === "move" || o.useAdvanceMovePoolLikeMove || o.usePostShootMovePoolLikeMove;
   if (!phaseOpens) return false;
   if (o.movePoolForDiskDraw != null && o.movePoolForDiskDraw.size > 0) return true;
   const hasServerMaskLoops =
@@ -681,14 +654,9 @@ function shouldUseMoveDestPoolCircleLayer(o: {
   return hasServerMaskLoops && o.allowMovePoolFallbackFromGameState && o.selectedUnitAnchor != null;
 }
 
-/** Nom de sprite du calque — dérivé du même triplet que le prédicat ci-dessus, aux mêmes 3 sites. */
-function resolveMovePreviewSpriteName(
-  useAdvanceMovePoolLikeMove: boolean,
-  usePileInPoolLikeMoveHoisted: boolean
-): string {
-  if (useAdvanceMovePoolLikeMove) return "advance-dest-pool";
-  if (usePileInPoolLikeMoveHoisted) return "fight-pile-in-dest-pool";
-  return "move-dest-pool";
+/** Nom de sprite du calque — dérivé du même drapeau que le prédicat ci-dessus, aux mêmes 3 sites. */
+function resolveMovePreviewSpriteName(useAdvanceMovePoolLikeMove: boolean): string {
+  return useAdvanceMovePoolLikeMove ? "advance-dest-pool" : "move-dest-pool";
 }
 
 /**
@@ -2084,8 +2052,6 @@ export const drawBoard = (
     const useAdvanceMovePoolLikeMove = mode === "advancePreview";
     const usePostShootMovePoolLikeMove =
       interactionPhase === "shoot" && pendingMoveAfterShooting === true;
-    const usePileInPoolLikeMoveHoisted =
-      interactionPhase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview");
     const advanceZoneFillColor = ADVANCE_DESTINATION_HEX_FILL;
     const spanFromEngine =
       typeof movePreviewFootprintSpanFromState === "number" &&
@@ -2127,7 +2093,6 @@ export const drawBoard = (
       interactionPhase,
       useAdvanceMovePoolLikeMove,
       usePostShootMovePoolLikeMove,
-      usePileInPoolLikeMoveHoisted,
       movePoolForDiskDraw,
       movePreviewFootprintMaskLoops,
       allowMovePoolFallbackFromGameState,
@@ -2568,23 +2533,13 @@ export const drawBoard = (
     // Évite les tableaux énormes de surbrillance move ; charge peut dépasser 500 hex (Board×10).
     const LARGE_POOL_THRESHOLD = 500;
 
-    // Pile in : zone rouge (empreinte moteur) — comme move_preview_footprint_zone en forme,
-    // pas seulement des disques aux ancres ; on dessine via ``availableCells`` (override).
-    // Dès que le moteur fournit valid_move_destinations_pool : un disque par ancre (cercle),
-    // pas un remplissage hex-par-hex de move_preview_footprint_zone (blob « hex géant » si BASE_SIZE
-    // tuple/oval et selectedUnitBaseSize était undefined).
-    const useConsolidationPreview = interactionPhase === "fight" && mode === "consolidationPreview";
     /** Move par-figurine « charge-like » en phase fight : pile-in OU consolidation (même pipeline). */
     const isPerFigChargeLikeMove =
       interactionPhase === "fight" &&
       (mode === "pileInModelMove" || mode === "consolidationModelMove");
     const availableCellsDrawColor = useAdvanceMovePoolLikeMove
       ? advanceZoneFillColor
-      : usePileInPoolLikeMoveHoisted
-        ? useConsolidationPreview
-          ? 0xff8c00
-          : ATTACK_COLOR
-        : HIGHLIGHT_COLOR;
+      : HIGHLIGHT_COLOR;
 
     const useChargeDestPoolDiskDraw =
       ((interactionPhase === "charge" &&
@@ -2594,12 +2549,9 @@ export const drawBoard = (
       chargeDestPoolRef?.current &&
       chargeDestPoolRef.current.size > 0;
 
-    /** Move / advance / pile-in / post-shoot move : disques d’empreinte (comme la charge), pas des pastilles rayon hex (= grille « en hex »). */
+    /** Move / advance / post-shoot move : disques d’empreinte (comme la charge), pas des pastilles rayon hex (= grille « en hex »). */
     const useFootprintDiskRadiusForAvailCells =
-      interactionPhase === "move" ||
-      useAdvanceMovePoolLikeMove ||
-      usePileInPoolLikeMoveHoisted ||
-      usePostShootMovePoolLikeMove;
+      interactionPhase === "move" || useAdvanceMovePoolLikeMove || usePostShootMovePoolLikeMove;
     const availableCellCircleR = useFootprintDiskRadiusForAvailCells
       ? (footprintSpanForPool / 2) * HEX_HORIZ_SPACING
       : HEX_RADIUS;
@@ -2630,10 +2582,7 @@ export const drawBoard = (
     if (useMoveDestPoolCircleLayer) {
       const footprintRadius = (footprintSpanForPool / 2) * HEX_HORIZ_SPACING;
       const poolFillColor = useAdvanceMovePoolLikeMove ? advanceZoneFillColor : HIGHLIGHT_COLOR;
-      const moveSpriteName = resolveMovePreviewSpriteName(
-        useAdvanceMovePoolLikeMove,
-        usePileInPoolLikeMoveHoisted
-      );
+      const moveSpriteName = resolveMovePreviewSpriteName(useAdvanceMovePoolLikeMove);
       // Preview move/advance : masque polygone (Chaikin) + blur alpha comme avant ;
       // calque coloré = rectangle sur les bornes du masque (plus de disque).
       // Pas de fallback : si ``selectedUnitAnchor`` absent, bug côté caller (BoardPvp).
@@ -2949,27 +2898,17 @@ export const drawBoard = (
       highlightContainer.addChild(ringGfx);
     }
 
-    const moveAdvanceOrPileInPickPool: Set<string> | null = (() => {
-      if (
-        interactionPhase === "move" ||
-        useAdvanceMovePoolLikeMove ||
-        usePostShootMovePoolLikeMove
-      ) {
-        return movePoolForDiskDraw && movePoolForDiskDraw.size > 0 ? movePoolForDiskDraw : null;
-      }
-      if (usePileInPoolLikeMoveHoisted) {
-        if (moveDestPoolRef?.current && moveDestPoolRef.current.size > 0) {
-          return moveDestPoolRef.current;
-        }
-        return null;
-      }
-      return null;
-    })();
+    const movePickPool: Set<string> | null =
+      (interactionPhase === "move" || useAdvanceMovePoolLikeMove || usePostShootMovePoolLikeMove) &&
+      movePoolForDiskDraw &&
+      movePoolForDiskDraw.size > 0
+        ? movePoolForDiskDraw
+        : null;
 
     // Invisible interactive overlay for click detection (pixelToHex nearest-neighbor)
     const hasClickableContent =
       clickableSet.size > 0 ||
-      (moveAdvanceOrPileInPickPool != null && moveAdvanceOrPileInPickPool.size > 0) ||
+      (movePickPool != null && movePickPool.size > 0) ||
       (interactionPhase === "charge" &&
         mode === "chargePreview" &&
         chargeDestPoolRef?.current &&
@@ -3017,8 +2956,7 @@ export const drawBoard = (
           if (e.button !== 0) return;
           const { col, row } = resolveHex(e.getLocalPosition(hitArea));
           const key = `${col},${row}`;
-          const useMovePoolForPick =
-            moveAdvanceOrPileInPickPool != null && moveAdvanceOrPileInPickPool.size > 0;
+          const useMovePoolForPick = movePickPool != null && movePickPool.size > 0;
           const useChargePoolForPick =
             interactionPhase === "charge" &&
             mode === "chargePreview" &&
@@ -3026,29 +2964,23 @@ export const drawBoard = (
             chargeDestPoolRef.current.size > 0;
           const isValid =
             clickableSet.has(key) ||
-            (useMovePoolForPick && (moveAdvanceOrPileInPickPool?.has(key) ?? false)) ||
+            (useMovePoolForPick && (movePickPool?.has(key) ?? false)) ||
             (useChargePoolForPick && (chargeDestPoolRef?.current?.has(key) ?? false));
           if (isValid) {
             const isHandledByBoardPvpCapture =
               selectedUnitId !== null &&
               ((interactionPhase === "move" && mode === "select") ||
                 mode === "advancePreview" ||
-                (interactionPhase === "charge" && mode === "chargePreview") ||
-                (interactionPhase === "fight" &&
-                  (mode === "pileInPreview" || mode === "consolidationPreview")));
+                (interactionPhase === "charge" && mode === "chargePreview"));
             if (isHandledByBoardPvpCapture) {
               return;
             }
 
             let destCol = col,
               destRow = row;
-            if (
-              useMovePoolForPick &&
-              moveAdvanceOrPileInPickPool &&
-              !moveAdvanceOrPileInPickPool.has(key)
-            ) {
+            if (useMovePoolForPick && movePickPool && !movePickPool.has(key)) {
               let bestDist = Infinity;
-              for (const k of moveAdvanceOrPileInPickPool) {
+              for (const k of movePickPool) {
                 const sep = k.indexOf(",");
                 const cc = Number(k.substring(0, sep));
                 const cr = Number(k.substring(sep + 1));

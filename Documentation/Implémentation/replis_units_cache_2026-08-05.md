@@ -497,6 +497,17 @@ pyright/pytest/tsc sur l'arbre fusionné ; **pas** par un essai PvP. Le reste de
 Le détail exploitable — chaîne morte tracée, découpage, pièges d'outillage — est dans
 [`A_faire/menage_v10_pile_in_et_perf_charge_2026-08-05.md`](A_faire/menage_v10_pile_in_et_perf_charge_2026-08-05.md).
 
+**FAIT (2026-08-05, branche `menage_v10_frontend`).** Les quatre points sont partis ensemble, en
+deux commits. Commit `7b5871dc` : `_fight_v11_clear_pile_in_preview` + ses 4 appels, et les deux
+branches V10 de `useEngineAPI.ts`. Ce lot-ci : la conséquence tracée de cette suppression — les
+modes `pileInPreview` / `consolidationPreview` n'avaient plus aucun `setMode`, donc leurs ~26
+sites de lecture (`BoardPvp`, `BoardDisplay`, `boardClickHandler`), leurs unions de type, les
+handlers `handlePileInMove` / `handleSkipPileIn` avec leurs props threadées, l'état
+`pileInDestinations` (jamais rempli) et les 4 clés `fight_*_footprint_*` de typage sont supprimés.
+Le chemin vivant reste le V11 par-figurine (`pile_in_model_move` + `plan_state`), non touché.
+Les actions moteur `pile_in` / `consolidation` restent, elles : le gym les émet (`w40k_core.py`
+`_fight_v11_gym_settle`) — seul le frontend cesse de les produire.
+
 
 ---
 

@@ -515,9 +515,7 @@ type Mode =
   | "chargePreview"
   | "chargeModelMove"
   | "advancePreview"
-  | "pileInPreview"
   | "pileInModelMove"
-  | "consolidationPreview"
   | "consolidationModelMove"
   | "deploymentMove"
   // 20.04 — l'aire d'arrivée d'une escouade en réserves est affichée ; le clic suivant la pose.
@@ -827,8 +825,6 @@ type BoardProps = {
   onShoot: (shooterId: number, targetId: number) => void;
   onDeployUnit?: (unitId: number | string, destCol: number, destRow: number) => void;
   onFightAttack?: (attackerId: number, targetId: number | null) => void;
-  onPileInMove?: (unitId: number, destCol: number, destRow: number) => void;
-  onSkipPileIn?: () => void;
   current_player: 1 | 2;
   unitsMoved: number[];
   unitsCharged?: number[];
@@ -1305,8 +1301,6 @@ export default function Board({
   onDeployUnit,
   onFightAttack,
   onSkipFight,
-  onPileInMove,
-  onSkipPileIn,
   onCharge,
   onActivateCharge,
   onChargeEnemyUnit,
@@ -1573,8 +1567,6 @@ export default function Board({
     onAdvanceMove?: (unitId: number | string, destCol: number, destRow: number) => void;
     onValidateCharge?: (chargerId: number) => void;
     onLogChargeRoll?: (unit: Unit, roll: number) => void;
-    onPileInMove?: (unitId: number, destCol: number, destRow: number) => void;
-    onSkipPileIn?: () => void;
   }>({
     onSelectUnit,
     onStartMovePreview,
@@ -1596,8 +1588,6 @@ export default function Board({
     onAdvanceMove,
     onValidateCharge,
     onLogChargeRoll,
-    onPileInMove,
-    onSkipPileIn,
   });
 
   /** Callbacks move par-figurine (squad.md brique 3) — ref toujours a jour pour les handlers d'event stables. */
@@ -2039,8 +2029,6 @@ export default function Board({
     onAdvanceMove,
     onValidateCharge,
     onLogChargeRoll,
-    onPileInMove,
-    onSkipPileIn,
   };
 
   // Remove debug log
@@ -3571,10 +3559,7 @@ export default function Board({
         ((enginePhaseForPoolsMs === "move" || enginePhaseForPoolsMs === "command") &&
           selectedUnitId !== null) ||
         (mode === "advancePreview" && selectedUnitId !== null) ||
-        (phase === "shoot" && pendingMoveAfterShooting && selectedUnitId !== null) ||
-        (phase === "fight" &&
-          (mode === "pileInPreview" || mode === "consolidationPreview") &&
-          selectedUnitId !== null);
+        (phase === "shoot" && pendingMoveAfterShooting && selectedUnitId !== null);
 
       if (keepMovementPickPoolMs && resolvedMoveDestPoolRef.current) {
         const shouldSyncMovePoolsFromStateMs =
@@ -3656,8 +3641,7 @@ export default function Board({
         movementPreviewUnitId !== null &&
         ((effectivePhase === "move" && activeMovementUnitId !== null) ||
           mode === "advancePreview" ||
-          (phase === "charge" && mode === "chargePreview") ||
-          (phase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview")));
+          (phase === "charge" && mode === "chargePreview"));
       if (!allowIconFollow) return;
       const app = appRef.current;
       if (!app || !canvas) return;
@@ -4246,8 +4230,7 @@ export default function Board({
         previewUnitIdRestore !== null &&
         ((effectivePhase === "move" && activeMovIdRestore !== null) ||
           mode === "advancePreview" ||
-          (phase === "charge" && mode === "chargePreview") ||
-          (phase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview")));
+          (phase === "charge" && mode === "chargePreview"));
       const sameContext =
         hoveredHexContextRef.current?.mode === mode &&
         hoveredHexContextRef.current?.unitId === previewUnitIdRestore;
@@ -4362,8 +4345,7 @@ export default function Board({
         ((effectivePhase === "move" && mode === "select") ||
           (effectivePhase === "move" && mode === "movePreview") ||
           mode === "advancePreview" ||
-          (phase === "charge" && mode === "chargePreview") ||
-          (phase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview"))));
+          (phase === "charge" && mode === "chargePreview")));
 
     if (!shouldConfirmAtIcon) return;
 
@@ -7960,10 +7942,7 @@ export default function Board({
       ((enginePhaseForPools === "move" || enginePhaseForPools === "command") &&
         selectedUnitId !== null) ||
       (mode === "advancePreview" && selectedUnitId !== null) ||
-      (phase === "shoot" && pendingMoveAfterShooting && selectedUnitId !== null) ||
-      (phase === "fight" &&
-        (mode === "pileInPreview" || mode === "consolidationPreview") &&
-        selectedUnitId !== null);
+      (phase === "shoot" && pendingMoveAfterShooting && selectedUnitId !== null);
 
     if (!keepMovementPickPool) {
       if (resolvedMoveDestPoolRef.current && resolvedMoveDestPoolRef.current.size > 0) {
@@ -8381,10 +8360,6 @@ export default function Board({
         clearMovePreviewLos();
         stableCallbacks.current.onAdvanceMove?.(uid, dc, dr);
       },
-      onPileInMove: (uid: number, dc: number, dr: number) => {
-        clearMovePreviewLos();
-        stableCallbacks.current.onPileInMove?.(uid, dc, dr);
-      },
       onStartMovePreview: onStartMovePreview,
       onDirectMove: (
         unitId: number | string,
@@ -8481,11 +8456,6 @@ export default function Board({
         if (targetPreview) {
           onCancelTargetPreview?.();
         }
-      } else if (
-        phase === "fight" &&
-        (mode === "pileInPreview" || mode === "consolidationPreview")
-      ) {
-        onSkipPileIn?.();
       } else if (mode === "movePreview" || mode === "attackPreview") {
         onCancelMove?.();
       }
@@ -9460,14 +9430,10 @@ export default function Board({
       } else if (mode === "perModelMove") {
         raw = squadMovePlan?.activeModelId ? (squadMoveModelMaskLoopsRef?.current ?? null) : null;
       } else {
-        raw =
-          effectivePhase === "fight" &&
-          (mode === "pileInPreview" || mode === "consolidationPreview")
-            ? null
-            : normalizeMaskLoopsFromApi(
-                (gameState as { move_preview_footprint_mask_loops?: unknown })
-                  .move_preview_footprint_mask_loops
-              );
+        raw = normalizeMaskLoopsFromApi(
+          (gameState as { move_preview_footprint_mask_loops?: unknown })
+            .move_preview_footprint_mask_loops
+        );
       }
       if (!raw) return raw;
       const ds =
@@ -11293,7 +11259,6 @@ export default function Board({
     handleUnitTooltip,
     gameState?.turn,
     resolvedMoveDestPoolRef.current.size,
-    onSkipPileIn,
     handleBlinkProbHtml,
     gameState?.units_cache,
     gameState?.primary_objective,
