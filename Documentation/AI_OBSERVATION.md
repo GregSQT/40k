@@ -25,13 +25,13 @@ lecture, jamais une copie de chiffres qui dériverait.
 
 | Clé | Forme | Contenu |
 |---|---|---|
-| `global_cont` / `global_bin` | (13,) / (27,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, **points de commandement des deux camps (08.02)**, force d'usure, **distance à chacun des 5 objectifs** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
+| `global_cont` / `global_bin` | (13,) / (33,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, **points de commandement des deux camps (08.02)**, force d'usure, **distance à chacun des 5 objectifs** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**, **capacités de faction des deux camps (Waaagh! disponible/actif, désignation Oath en vigueur — chantier 03)**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
 | `allies_cont` / `allies_bin` | (8, 19) / (8, 20) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les drapeaux incluent, pour les ennemis seulement, `los_can_see`, `cover_vs_observer` et `charge_reachable_max_roll` |
 | `allies_ability_ids` / `allies_status_ids` | (8, 8) / (8, 4) | **capacités et statuts EN VIGUEUR (19.04), en IDENTIFIANTS ENTIERS et non en bits** : `obs_id` des registres [`config/unit_rules.json`](../config/unit_rules.json) et [`config/unit_statuses.json`](../config/unit_statuses.json), **triés croissants**, paddés à `0`. Deux `nn.EmbeddingBag(128, 16, mode="sum", padding_idx=0)` en font une **lecture de ligne** : aucun one-hot n'est matérialisé, donc la longueur du vecteur est **indépendante du nombre de capacités existantes** — ajouter une capacité, un statut ou une faction entière ne change ni `obs_size`, ni le nombre de paramètres du réseau, donc n'impose **aucun retrain**. Débordement (> 8 capacités) → **erreur**, jamais troncature |
 | `allies_wpn_cont` / `_bin` | (8, 20, 13) / (8, 20, 18) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants et bits/params de règles |
 | `allies_types_cont` / `_bin` | (8, 6, 5) / (8, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
 | `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
-| `self_models_cont` / `_bin` | (20, 2) / (20, 4) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement, **bit de présence** |
+| `self_models_cont` / `_bin` | (20, 2) / (20, 3) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement, **bit de présence** |
 | `grid` | (9, 32, 32) | grille égocentrique : murs, **autres** escouades amies, ennemis, EZ, objectifs, niveau, couvert, **l'escouade active seule** (§0.32 T-L), **coût géodésique du pool de move** — encodé avec la frontière normal/advance à **0,5 exactement** (§0.32 T-K) ; escouade **engagée** : tout move est un Fall Back qui coûte le tir → toutes les cellules peintes sont **au-dessus de 0,5** (§0.37). **Centre de la fenêtre** (`ObservationBuilder.squad_grid_anchor`) : l'escouade active — sauf si elle n'est **pas encore posée** (`deployed_on_turn is None`, phase de déploiement), auquel cas c'est un hex de **sa zone de déploiement** ; avant V11 §0.40 la fenêtre était centrée sur la sentinelle `(-1,-1)`, donc sur une autre région du plateau |
 
 ### Structure Overview
@@ -41,11 +41,11 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 718 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 725 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (13,)                =      13               │
-│    global_bin             (27,)                =      27               │
+│    global_bin             (33,)                =      33               │
 │                                                                        │
 │  MES ESCOUADES — ligne 0 = l'unité ACTIVE          K_ALLY_SLOTS = 8    │
 │    allies_cont            (8, 19)              =     152               │
@@ -72,14 +72,14 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    self_models_bin        (20, 3)              =      60               │
 │                                                                        │
 │  DÉCISION AGENT — candidats de CHOICE_i        MAX_DECISION_OPTIONS = 6│
-│    decision_ctx_bin       (2,)                 =       2               │
+│    decision_ctx_bin       (3,)                 =       3               │
 │    decision_options_bin   (6, 8)               =      48               │
 │                                                                        │
 │  DÉPLOIEMENT — candidats des actions 4-8         N_DEPLOY_SLOTS = 5    │
 │    deploy_cand_cont       (5, 8)               =      40               │
 │    deploy_cand_bin        (5, 4)               =      20               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      20 718              │
+│  TOTAL vectoriel (= obs_size)                      20 725              │
 │  + grid  (9, 32, 32) = 9 216, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -152,7 +152,22 @@ global_bin[23]     = objective_dir_cos_3                    # -1.0..1.0 (vecteur
 global_bin[24]     = objective_dir_sin_3                    # -1.0..1.0
 global_bin[25]     = objective_dir_cos_4                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
 global_bin[26]     = objective_dir_sin_4                    # -1.0..1.0
+global_bin[27]     = my_waaagh_available                    # 0.0 / 1.0 — Waaagh! pas encore appele (1x/partie)
+global_bin[28]     = my_waaagh_active                       # 0.0 / 1.0 — Waaagh! en vigueur pour MON armee
+global_bin[29]     = enemy_waaagh_available                 # 0.0 / 1.0 — l'adversaire peut encore l'appeler
+global_bin[30]     = enemy_waaagh_active                    # 0.0 / 1.0 — Waaagh! adverse en vigueur (enjambe mon tour)
+global_bin[31]     = my_oath_target_selected                # 0.0 / 1.0 — une designation Oath est en vigueur pour moi
+global_bin[32]     = enemy_oath_target_selected             # 0.0 / 1.0 — idem cote adverse
 ```
+
+Les six derniers bits sont les **capacites de FACTION** (chantier 03) : globales par construction,
+une capacite de faction s'appliquant uniformement a toutes les unites de l'armee qui la porte.
+**Quatre** bits pour le Waaagh! et non deux : sa duree court « until the start of your next Command
+phase », donc elle enjambe le tour adverse — un Waaagh! ennemi *actif* change ce que je dois faire,
+un Waaagh! ennemi encore *disponible* change ce que je dois craindre, et aucun des deux ne se deduit
+de l'autre. Pour Oath, seul le fait qu'une designation soit en vigueur figure ici : l'identite de la
+cible est portee par le statut `oath_target` de l'entite visee (`enemies_status_ids` /
+`allies_status_ids`), donc la ou le reseau la lit avec l'unite qu'elle qualifie.
 
 La phase est un **one-hot de 6 bits** depuis le 2026-07-28 (V11 §0.32 T-J). L'encodage ordinal
 précédent (0 / .25 / .5 / .75 / 1) donnait la **même** valeur `0.0` à `deployment` et à `command`,
@@ -338,6 +353,7 @@ candidat** que les actions `CHOICE_0..5` (`macro_intents.CHOICE_SLOTS`) désigne
 ```python
 decision_ctx_bin[0]      = decision_pending                  # 0.0 / 1.0 — masque du bloc entier
 decision_ctx_bin[1]      = decision_type_rule_choice         # 0.0 / 1.0 — one-hot du type
+decision_ctx_bin[2]      = decision_type_waaagh_call         # 0.0 / 1.0 — appel du Waaagh! (chantier 03)
 
 decision_options_bin[c][ 0] = grants_charge_after_flee                     # 0.0 / 1.0
 decision_options_bin[c][ 1] = grants_reroll_1_save_fight                   # 0.0 / 1.0
@@ -372,6 +388,14 @@ un ordre STABLE d'un step à l'autre — un ordre mouvant brouillerait l'assigna
 d'un autre. C'est aussi ce qui rend légitime l'encodeur **partagé** (`decision_encoder`) et la
 tête **pointeur** qui score les candidats (`ai/pointer_policy.py`) : le nombre de candidats est
 gratuit en paramètres, et ce que le réseau apprend d'un candidat vaut pour tous.
+
+**Une exception, et une seule : `waaagh_call`** (chantier 03). Ses deux candidats portent un
+`effect_ids` **vide** — `DECISION_GRANTABLE_EFFECT_IDS` est dérivé des `grantsRuleIds` des rosters,
+or les effets du Waaagh! viennent de la faction, pas d'une datasheet. Les deux candidats sont donc
+décrits par le même vecteur nul, et ce qui les distingue est le couple (type de décision, INDEX) :
+`CHOICE_0` appelle, `CHOICE_1` passe, ordre CONTRACTUEL. C'est admissible **ici et seulement ici**
+parce que l'ensemble des candidats est FIXE — contrairement à `rule_choice`, où il varie d'une
+unité à l'autre et où l'index seul ne voudrait rien dire.
 
 **Le bloc reste nul** quand aucune décision n'est en attente, **ou** quand celle en attente
 appartient à l'autre camp : décrire à un joueur un choix qui n'est pas le sien lui ferait observer

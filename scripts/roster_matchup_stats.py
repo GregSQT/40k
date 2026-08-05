@@ -338,6 +338,10 @@ def _build_scenario_template(scale: str, board_ref: str, terrain_ref: str) -> Di
     """
     return {
         "deployment_type": "active",
+        # Clause de detachement d'Oath of Moment : champ OBLIGATOIRE des qu'une armee ADEPTUS
+        # ASTARTES est en jeu (`game_state.uses_codex_detachment` leve sinon), et ces matchups
+        # croisent tous les rosters, marines compris.
+        "uses_codex_detachment": {"1": True, "2": True},
         "scale": scale,
         "p1_roster_seed": 42,
         "primary_objectives": ["objectives_control"],
@@ -462,6 +466,10 @@ def _generate_rule_checker_artifacts(
             # (`GameStateManager.load_units_from_scenario`).
             scenario_payload = {
                 "deployment_type": "active",
+                # Clause de detachement d'Oath of Moment : champ OBLIGATOIRE des qu'une armee
+                # ADEPTUS ASTARTES est en jeu (`game_state.uses_codex_detachment` leve sinon), et
+                # ces scenarios croisent tous les rosters, marines compris.
+                "uses_codex_detachment": {"1": True, "2": True},
                 "scale": scale,
                 "primary_objectives": ["objectives_control"],
                 "board_ref": board_ref,
