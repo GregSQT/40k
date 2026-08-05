@@ -1,14 +1,23 @@
 # Campagne « typage & replis silencieux » — 2026-07-29
 
-**Chantier vivant** : contient à la fois du travail **LIVRÉ** (§2) et de la **DETTE RESTANTE**
-(§3, la partie la plus importante). Placé à la racine de `Implémentation/` pour cette raison —
-`A_faire/` ne porte que du backlog, `Implémenté/` que du livré.
+**CLOS le 2026-08-05**, déplacé de la racine de `Implémentation/` vers `Implémenté/`. Les sept
+points de dette de §3 sont tranchés : cinq traités (§3.1, §3.3, §3.4, §3.5, §3.6), un **arrêté
+sciemment** (§3.2 — le tri bruit/frontière ne peut pas être mécanique), un qui relève de la
+vérification large de l'utilisateur (§3.7 — `pytest --collect-only`). **Aucun travail actionnable
+par un agent ne subsiste dans ce document.**
+
+Sa valeur résiduelle est **§1** (le typage n'est presque jamais le défaut, seulement son symptôme)
+et **§4** (leçons de méthode : vert vacant, jumeau, preuve par provenance) — c'est ce qui resert.
+
+➡️ **Le seul chantier qu'il a engendré et qui reste ouvert** a désormais son propre document :
+[`../replis_units_cache_2026-08-05.md`](../replis_units_cache_2026-08-05.md) — 42 replis silencieux
+sur `units_cache` dans move/fight/shoot, inventoriés par site. Il ne rouvre pas celui-ci.
 
 **Périmètre de commits** : `bb3a788f` (14 h 38) → `d061f21b` (16 h 57), soit **38 commits hors
 merge + 19 merges = 57 commits** sur `main`. Constaté par `git log --oneline bb3a788f~1..d061f21b`.
 Le même jour, `main` a par ailleurs absorbé les six branches V11 (§0.46 → §0.51 du journal V11) —
 elles NE font PAS partie de cette campagne et sont consignées dans
-[`V11_agent_rework.md`](V11_agent_rework.md). Total du jour : **106 commits d'avance sur
+[`V11_agent_rework.md`](../V11_agent_rework.md). Total du jour : **106 commits d'avance sur
 `origin/main`**.
 
 **Convention d'ancrage** (identique au journal V11) : l'ancre de référence est le **nom de
@@ -80,7 +89,7 @@ Chaque ligne porte le hash **constaté** par `git log` et lu dans son message de
   **+85 ns par lecture**, soit **+13 %** sur `euclidean_edge_distance` et **+24 %** sur
   `footprints_overlap`.
 - `6f0c0c6b` — le type est **scindé** : `RoundSocle` / `SquareSocle` / `OvalSocle`
-  ([`engine/hex_utils.py:1728/1741/1754`](../../engine/hex_utils.py#L1728)) portent chacun le type
+  ([`engine/hex_utils.py:1728/1741/1754`](../../../engine/hex_utils.py#L1728)) portent chacun le type
   exact de `base_size` ; `Socle(...)` devient la **fabrique** qui choisit la classe. **Un socle
   incohérent ne peut plus exister** — l'invariant n'est plus vérifié à la lecture. La classe de
   base ne déclare pas `base_size` : on ne peut pas lire la taille sans savoir de quelle forme il
@@ -108,7 +117,7 @@ ne se bat jamais**. Quatre courbes muettes : `game_tactical/shooting_accuracy`,
 `game_detailed/damage_dealt`, `game_detailed/damage_received`, `game_tactical/damage_efficiency`.
 
 Rebranchés dans le bloc de fin d'épisode de `step()` sur `action_logs`
-([`engine/w40k_core.py:2007`](../../engine/w40k_core.py#L2007) et suivants) — **pas** sur
+([`engine/w40k_core.py:2007`](../../../engine/w40k_core.py#L2007) et suivants) — **pas** sur
 `attack_details`, qui vit sous `if (self.step_logger and self.step_logger.enabled)` et rendrait les
 métriques dépendantes de `--step`. Preuve de cohérence croisée sur vraie partie (14 tests, moteur
 réel, 3 graines) : `damage_dealt` == PV réellement perdus par l'adversaire et `damage_received` ==
@@ -119,7 +128,7 @@ PV perdus par le camp contrôlé, à l'unité près, **dans les deux sens et pou
 ### 2.4 La méthode centrale du moteur
 
 `b376f2ae` — le `# pyright: ignore[reportGeneralTypeIssues]` posé sur la ligne de définition de
-`_process_semantic_action` ([`engine/w40k_core.py:3035`](../../engine/w40k_core.py#L3035)) était
+`_process_semantic_action` ([`engine/w40k_core.py:3035`](../../../engine/w40k_core.py#L3035)) était
 **anonyme**. Retiré, pyright dit ce qu'il taisait : **« Code is too complex to analyze »** — soit
 **1582 lignes / 205 `if`** au moment du commit (mesuré à nouveau après la campagne : **1613 lignes,
 205 `if`**, sur un fichier que l'utilisateur modifiait). Ce n'était pas une erreur de type précise :
@@ -150,7 +159,7 @@ production, ou écrits jamais relus). Le quatrième, `_scenario_file`, était vi
 le bloc de nettoyage ne le remettait pas à zéro, donc une deuxième conversion dans le même
 processus relisait le scénario de la première. Devenu **paramètre explicite** de
 `convert_to_replay_format` / `convert_steplog_to_replay`
-([`ai/replay_converter.py:58`](../../ai/replay_converter.py#L58)).
+([`ai/replay_converter.py:58`](../../../ai/replay_converter.py#L58)).
 
 🔴 **Défaut connexe, le plus grave du lot** : le nettoyage appelait **`os.remove` sur le scénario
 bot**. Depuis que la source est `get_scenario_list_for_phase`, ce chemin désigne un **vrai fichier
@@ -196,7 +205,7 @@ vérification, **selon deux règles différentes** : l'un pelait **un** niveau
 **huit sites**. Un niveau de plus et `self.engine` pointait silencieusement sur un wrapper.
 
 Remplacé par `unwrap_engine(env, owner)`
-([`ai/env_wrappers.py:46`](../../ai/env_wrappers.py#L46)), qui pèle tous les `gym.Wrapper`, vérifie
+([`ai/env_wrappers.py:46`](../../../ai/env_wrappers.py#L46)), qui pèle tous les `gym.Wrapper`, vérifie
 `ENGINE_CONTRACT_ATTRS` (les 7 membres réellement utilisés) et lève un `TypeError` nommant la pile
 traversée. Coût : O(profondeur), **une fois par `__init__`** — aucun coût sur le chemin chaud.
 
@@ -226,7 +235,7 @@ en commentaire** (`ai/pointer_policy.py:254`) ⇒ **9 sourdines réelles**, tout
   paramètre est déjà `str`) et **105 gardées sans exception** (la conversion EST la normalisation
   qui produit la valeur typée depuis un JSON non typé).
 - `5466dbea` — mode **Endless Duty** : mesuré par exécution réelle, **jamais démarrable** (7
-  obstacles), consigné dans [`A_faire/Endless_duty.md`](A_faire/Endless_duty.md) + un signet
+  obstacles), consigné dans [`A_faire/Endless_duty.md`](../A_faire/Endless_duty.md) + un signet
   exécutable. **Aucun correctif livré** — l'état est documenté et instrumenté, pas réparé.
 
 ---
@@ -322,7 +331,7 @@ en commentaire** (`ai/pointer_policy.py:254`) ⇒ **9 sourdines réelles**, tout
 > **Correction mesurée (2026-07-29).** L'instrumentation qui a produit ce constat n'a tourné que sur
 > **20 fichiers de tests moteur** : elle n'a jamais joué `tests/integration/pvp/`. Réinstrumentées sur
 > ce répertoire, **6 des 7 fonctions SONT appelées** par
-> [`tests/integration/pvp/test_charge.py`](../../tests/integration/pvp/test_charge.py) —
+> [`tests/integration/pvp/test_charge.py`](../../../tests/integration/pvp/test_charge.py) —
 > `charge_build_valid_targets` 6 appels, `charge_target_selection_handler` /
 > `charge_preview_move_plan` / `charge_commit_move_plan_handler` / `_charge_model_pos_is_closer`
 > 2 chacune, `charge_autoplace_plan` 1. Couverture ligne mesurée : **62 % à 89 %**.
@@ -335,10 +344,10 @@ en commentaire** (`ai/pointer_policy.py:254`) ⇒ **9 sourdines réelles**, tout
 > raté non consommé, entrées manquantes de l'autoplace. Une correction fausse sur ces branches
 > passait au vert.
 >
-> **Livré** : [`tests/unit/engine/test_charge_manual_surface.py`](../../tests/unit/engine/test_charge_manual_surface.py)
+> **Livré** : [`tests/unit/engine/test_charge_manual_surface.py`](../../../tests/unit/engine/test_charge_manual_surface.py)
 > — 29 tests sur plateau nu (1 sous-hex = 1", bases 1 hex), chacun construisant sa situation et
 > vérifiant ses prémisses avant d'observer le refus ; plus 1 test de charge d'étage ajouté à
-> [`test_charge3d_floors_integration.py`](../../tests/unit/engine/test_charge3d_floors_integration.py)
+> [`test_charge3d_floors_integration.py`](../../../tests/unit/engine/test_charge3d_floors_integration.py)
 > (la branche `dest_level >= 1` de `_charge_model_pos_is_closer` passe par le champ climb §13.06,
 > pas par le BFS 2D — elle décidait de toute charge d'étage sans aucun test).
 > **28 mutations rejouées une par une : les 28 font rougir le test visé** (dont 2 contrôles
@@ -368,21 +377,22 @@ en commentaire** (`ai/pointer_policy.py:254`) ⇒ **9 sourdines réelles**, tout
   comme un vert de test. **Tout chantier qui les touche se paie en preuve statique faute de rouge
   possible.**
 - **Pourquoi ce n'est pas traité** : hors périmètre du lot ; demande un harnais de session API.
-  Un tel harnais **existe déjà** — [`scripts/pvp_smoke_test.py`](../../scripts/pvp_smoke_test.py),
+  Un tel harnais **existe déjà** — [`scripts/pvp_smoke_test.py`](../../../scripts/pvp_smoke_test.py),
   27 checks via l'API sans navigateur — il n'a pas été instruit comme point de départ ici.
 - **Effort** : non estimé. **C'est la recommandation la plus forte de la campagne** — elle vaut
   mieux que les 540 coercitions de §3.2.
 
-### 3.4 🟠 Deux motifs de repli non traités
+### 3.4 ✅ Deux motifs de repli — **les deux sont traités** (constaté le 2026-08-05)
 
-| Motif | Constat (working tree, 2026-07-29) | Nature |
-|---|---|---|
-| `get("squad_models", <défaut>)` | **13** `.get("squad_models"` au total, dont **10** avec valeur par défaut | **Net** — même nature que les replis corrigés en §2.1. Pas de tri à faire, seulement le travail. |
-| `get("occupied_hexes", <défaut>)` | **103** `.get("occupied_hexes"` au total, dont **42** avec valeur par défaut ; **266** occurrences du symbole toutes formes confondues | 🔴 **TRI NÉCESSAIRE** : une partie est un **repli métier documenté** (« utiliser l'ancre faute d'empreinte »), pas un repli anti-erreur. Traiter en bloc régresserait. |
+Le constat de 2026-07-29 est **périmé**. Re-mesuré :
 
-⏳ Les chiffres annoncés en fin de campagne étaient **11 sites** pour `squad_models` et **97
-occurrences** pour `occupied_hexes` ; les relevés ci-dessus sont ceux du working tree au moment de
-la rédaction (fichiers moteur modifiés par l'utilisateur). L'écart n'est pas instruit.
+| Motif | 2026-07-29 | 2026-08-05 | Ce qui s'est passé |
+|---|---|---|---|
+| `get("squad_models", <défaut>)` | 13 sites, 10 avec défaut | 13 sites, 10 avec défaut | **Le tri a été fait** : les 10 portent tous le marqueur `# get allowed` (convention de [`AI_RULES_checker.md`](../../Code_Compliance/AI_RULES_checker.md)). Ce ne sont pas des replis anti-erreur — le chiffre n'a pas bougé parce qu'il n'y avait rien à retirer. |
+| `get("occupied_hexes", <défaut>)` | 103 sites, 42 avec défaut | **20 sites, 3 avec défaut** | Le motif a été **factorisé** dans `entry_footprint` ([`engine/spatial_relations.py`](../../../engine/spatial_relations.py)), source unique de l'empreinte. Sa docstring tranche le point que ce §3.4 laissait ouvert : le `.get` ne protégeait **rien** hors table (la clé y est PRÉSENTE et VIDE), il déplaçait juste le crash loin du vrai coupable. |
+
+Il ne reste donc **aucun travail** sous ce point. Le « tri nécessaire » redouté a été rendu inutile
+par la factorisation, pas contourné.
 
 ### 3.5 ✅ `charge_build_model_destinations_pool` — **instruit puis SUPPRIMÉ** (2026-07-29)
 
@@ -404,20 +414,86 @@ la rédaction (fichiers moteur modifiés par l'utilisateur). L'écart n'est pas 
   `level=0` codé en dur) alors que les deux chemins vivants sont niveau-conscients. La ressusciter
   aurait régressé la charge d'étage (§03.04).
 
-### 3.6 🟠 Un cache-miss avalé en silence dans le calcul de distance de charge
+### 3.6 ✅ Un cache-miss avalé en silence dans le calcul de distance de charge — **CORRIGÉ le 2026-08-05**
 
-- **Où** : `_charge_bfs_max_distance`, `engine/phase_handlers/charge_handlers.py` (~l.594,
-  `return rid`).
-- **Ce que c'est** : un défaut de cache qui **retourne au lieu de lever**.
-- **Pourquoi il compte** : c'est lui qui a **rendu invisible la première mutation d'un agent**
+- **Où** : `_charge_bfs_max_distance`, `engine/phase_handlers/charge_handlers.py`.
+- **Ce que c'était** : un défaut de cache qui **retournait au lieu de lever**.
+- **Pourquoi il comptait** : c'est lui qui a **rendu invisible la première mutation d'un agent**
   pendant la campagne — le test ne pouvait pas rougir parce que le miss était absorbé.
-- **Statut** : identifié, **non corrigé, non instruit au-delà de ce constat.** Noter que
-  `_charge_bfs_max_distance` est l'une des 6 fonctions **effectivement atteintes** par les tests
-  (11 appels, §3.3) : le rouge est donc possible ici, contrairement aux 7 autres.
+- **Cause établie** : l'appelant **unique**, `charge_build_valid_destinations_pool`, valide déjà
+  l'unité (`get_unit_by_id`) **et chaque cible déclarée** (`get_unit_by_id` + `is_unit_alive`,
+  l.3411-3414) avant l'appel. Un miss d'`units_cache` ici n'est donc pas un cas de jeu mais une
+  **désynchronisation `units` / `units_cache`** — et y répondre par `rid` rendait une **borne BFS
+  fausse** (pool de charge tronqué) sans aucun signal.
+- **Corrigé** : les deux `return rid`/`continue` deviennent des `KeyError` nommant l'id fautif.
+  Le `return rid` du cas « aucune cible déclarée » (aperçu d'activation) est **conservé et
+  justifié en commentaire** : c'est le cas de jeu, pas un repli.
+- **Deux gardes mortes retirées avec** : `if not enemy_fp: return rid` et `if best_h is None:
+  return rid` n'étaient atteignables qu'à travers les deux replis supprimés — `tids` est non vide
+  par construction et `entry_footprint` rend au minimum l'ancre. La recherche du hex le plus
+  proche passe à `min(...)`, ce qui supprime aussi l'`Optional` sur `best_h`.
+- **Verrou** : `TestChargeBfsMaxDistanceCacheMiss` dans
+  [`tests/unit/engine/test_charge_resolution.py`](../../../tests/unit/engine/test_charge_resolution.py)
+  — 2 tests de refus + 1 contrôle positif (pour qu'un « lève toujours » ne passe pas). **Les 2
+  mutations rejouées font rougir le test visé, et lui seul** ; rétablies, tout est vert.
+- **Lot des jumeaux — TRAITÉ dans la foulée (2026-08-05), `charge_handlers.py` entier.**
+  Le `grep` initial (7 sites) était FAUX par construction : il ne cherchait que `units_cache.get(`
+  et ratait les alias. Inventaire refait **à l'AST** (tout `X.get(...)` où `X` est lié à
+  `units_cache`) → **13 sites réels**. Répartition finale :
+  - **déjà bruyants** (3) : `_charge_primary_footprint_radius`, `charge_build_valid_targets`,
+    `charge_build_valid_destinations_pool` (boucle ennemis) — ils avaient déjà écrit le contrat ;
+  - **`charge_preview_move_plan`** : d'abord classé « refus métier légitime » (il rangeait le manque
+    dans `missing_targets`), **reclassé en défaut et corrigé** après `/code-review`. `missing_targets`
+    est renvoyé tel quel par `charge_commit_move_plan_handler` dans `invalid_charge_plan` : une
+    désynchronisation d'état y sortait donc sous le message « cible non engagée ». Le champ ne porte
+    plus QUE des refus métier ;
+  - **corrigés** (10) : `_charge_anchor_is_socle_a_socle_with_target`,
+    `_charge_anchor_within_1_of_target`, `_charge_impossible_by_primary_to_enemy_hex_lower_bound`
+    (aligné sur son jumeau `_charge_primary_footprint_radius`, qui levait déjà dix lignes plus
+    bas), `_compute_plan_context` (×2 — le filtre `is not None` faisait DISPARAÎTRE une cible
+    déclarée des voiles UI, ni satisfaite ni insatisfaite), `charge_target_selection_handler`
+    (×2 — `if _ue:` laissait `charge_reference_hex` sur l'ancre de départ, `or {}` envoyait un
+    dict vide dans `entry_footprint`), `_attempt_charge_to_destination` (×2 — repli `None` sur le
+    delta d'adjacence, faux pour les socles multi-hex).
+- **Uniformisé après `/simplify`** : les dix `raise` avaient été écrits à la main, et la même
+  condition levait alors trois types d'exception (`KeyError`, `ValueError`, `ConfigurationError`) —
+  dont `ValueError`, canal de refus métier ailleurs dans le moteur. Les dix sites passent par
+  **`require_unit_from_cache`** (`shared_utils.py`), jumeau bruyant de `get_unit_from_cache` : c'est
+  l'accesseur qui manquait à la famille `require_unit_position` / `require_hp_from_cache` /
+  `require_entry_on_battlefield`. Il ne contrôle PAS le placement (réserves 20.01 = présent + sentinelle).
+- **Code mort trouvé en établissant les contrats** : `_build_charge_anchors_in_zone` (49 lignes)
+  n'avait **aucun appelant** — preuve en quatre directions (patron §2.6) appliquée. C'est lui qui
+  portait les deux pires sites : le second laissait passer une empreinte VIDE dans
+  `_charge_closest_charger_hex_to_target`, dont le repli rendait `((0, 0), 0)` — **une case RÉELLE
+  du plateau**, exactement le défaut de §2.7. Fonction supprimée ; le repli `(0,0)` de
+  `_charge_closest_charger_hex_to_target` (qui garde un appelant vivant) devient un `ValueError`.
+  **Jumeau frontend vérifié SAIN** : `closestChargerHexToTargetFootprint`
+  ([`frontend/src/components/BoardPvp.tsx:985`](../../../frontend/src/components/BoardPvp.tsx#L985))
+  retombe sur l'**ancre** reçue en paramètre, jamais sur `(0,0)` — c'est le backend qui divergeait.
+- **Verrous ajoutés** : `TestChargeUnitsCacheDesyncIsLoud` (2 tests sur la surface publique
+  atteignable, chacun vérifiant sa prémisse sur l'état sain avant de désynchroniser).
+  Mutations rejouées → **rouges** sur `_compute_plan_context` (retour au filtre silencieux) et sur
+  `charge_preview_move_plan` (retour à `missing.append`).
+  ⚠️ **Portée bornée et mesurée** : la mutation du repli `{start_pos}` de
+  `charge_build_valid_destinations_pool` reste **VERTE** — la garde amont `require_unit_position`
+  (`shared_utils.py:1348`) mord avant, et son message contient déjà « units_cache », donc le
+  `match=` du test est satisfait par elle. Ce site est une **branche morte retirée** (passée à
+  `require_key`), pas un comportement verrouillé ; le test correspondant est nommé et documenté
+  comme tel (`..._thanks_to_the_upstream_guard`). Les 6 autres sites
+  corrigés sont sur des chemins non atteignables par un test unitaire sans état corrompu
+  construit à la main : leur preuve est **statique** (contrat d'appelant établi par lecture),
+  comme le §3.3 d'origine l'avait déjà acté pour cette surface.
+- **Jumeau HORS `charge_handlers` — NON traité, chiffré** : le même inventaire AST sur les modules
+  miroirs rend **64 lookups `units_cache`**, dont **42 sans `raise` ni marqueur `# get allowed`**
+  (inventaire par site et découpage : [`../replis_units_cache_2026-08-05.md`](../replis_units_cache_2026-08-05.md)) :
+  `shared_utils` 23/18, `fight_handlers` 21/13, `shooting_handlers` 16/10, `movement_handlers` 3/2,
+  `deployment_handlers` 1/0. C'est un **lot à part entière**, pas un reliquat : chaque site demande
+  son contrat d'appelant (le lot charge a montré qu'un site sur quatre est déjà correct et qu'un
+  autre était du code mort). **Arbitrage utilisateur requis avant de l'ouvrir.**
 
 ### 3.7 🟠 L'inventaire de `TESTING.md` est globalement périmé
 
-- **Où** : [`Documentation/TESTING.md`](../TESTING.md), 319 lignes.
+- **Où** : [`Documentation/TESTING.md`](../../TESTING.md), 319 lignes.
 - **Ce qui existe** : l'**avertissement est en place**, ligne 56 —
   *« ⚠️ Chiffre périmé : « 990 tests, ~2.2s » (2 skipped). L'inventaire ci-dessous n'a pas suivi… »*.
   Deux entrées ont été corrigées ponctuellement (`test_reward_calculator.py`, l.90 ; la largeur de
@@ -431,7 +507,7 @@ la rédaction (fichiers moteur modifiés par l'utilisateur). L'écart n'est pas 
 ## 4. Leçons réutilisables
 
 > Formulées pour resservir. Le pendant V11 de cette section est **§0bis** de
-> [`V11_agent_rework.md`](V11_agent_rework.md), qui reste la copie canonique des leçons V11 ; celles
+> [`V11_agent_rework.md`](../V11_agent_rework.md), qui reste la copie canonique des leçons V11 ; celles
 > ci-dessous appartiennent à ce chantier.
 
 ### 4.1 Le piège du **vert vacant** — un contrôle qui ne regarde rien répond « tout va bien »
@@ -518,11 +594,8 @@ Vérification de confirmation possible et bon marché : un **balayage du tas** a
 2. **Les chiffres du contre-audit (85 / 13 / 66) n'ont pas d'artefact versionné** (§1).
 3. **Sept fonctions de `charge_handlers` n'ont aucune preuve d'exécution** (§3.3) — leur preuve est
    statique, et l'agent l'a explicitement refusée comme « vert de test ».
-4. **Une branche du lot n'est pas mergée** : `fix-weapon-collection-defaults` (`5980a035`,
-   « distinguer *pas d'arme* (liste vide) de *entité mal construite* (clé absente) », 8 fichiers,
-   +310/−35, dont un test de contrat de 213 lignes). **En attente parce qu'elle touche exactement
-   les quatre fichiers sur lesquels l'utilisateur a du travail en cours**
-   (`charge_handlers`, `fight_handlers`, `shared_utils`, `shooting_handlers`, plus `w40k_core`,
-   `weapon_helpers`, `main.py`).
+4. ✅ **Résolu.** `fix-weapon-collection-defaults` (`5980a035`, « distinguer *pas d'arme* (liste
+   vide) de *entité mal construite* (clé absente) ») est **mergée dans `main`** — vérifié le
+   2026-08-05 par `git merge-base --is-ancestor 5980a035 main`. La limite ci-dessus ne vaut plus.
 5. **Les mesures de §3 datent du 2026-07-29** et ont été prises sur un working tree modifié par
    l'utilisateur.

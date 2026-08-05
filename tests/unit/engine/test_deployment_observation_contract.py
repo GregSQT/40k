@@ -574,12 +574,24 @@ def test_unplaced_unit_is_not_engaged_by_an_enemy_standing_near_the_sentinel():
     set_unit_coordinates(victim_unit, 0, 0)
     build_units_cache(gs)
     assert int(gs["units_cache"][victim]["col"]) == 0
-    # Le cas doit être RÉEL : la primitive moteur doit bien voir un engagement sentinelle↔(0,0).
+    # Le cas doit être RÉEL : géométriquement, la sentinelle `(-1,-1)` EST à portée d'engagement
+    # du socle posé en (0,0). La preuve se prend sur la géométrie NUE et non sur la primitive :
+    # celle-ci lève désormais sur une entrée hors table (`require_entry_on_battlefield`) au lieu
+    # de rendre le verdict inventé qui rendait ce cas atteignable. C'est ce refus qui est vérifié
+    # juste après — les deux ensemble disent « le cas existe, et aucune mesure ne l'invente ».
+    from engine.hex_utils import min_distance_between_sets
     from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
 
-    assert unit_entries_within_engagement_zone(
-        gs["units_cache"][uid], gs["units_cache"][victim], get_engagement_zone(gs), metric="hex"
-    ), "montage invalide : la primitive ne voit pas d'engagement, le test ne prouverait rien"
+    ez = get_engagement_zone(gs)
+    sentinel_hexes = set(gs["units_cache"][uid]["occupied_hexes_by_model"].values())
+    assert sentinel_hexes == {(-1, -1)}, sentinel_hexes
+    assert min_distance_between_sets(
+        sentinel_hexes, gs["units_cache"][victim]["occupied_hexes"], max_distance=ez
+    ) <= ez, "montage invalide : la sentinelle n'est pas à portée du posé, le test ne prouverait rien"
+    with pytest.raises(ValueError, match="HORS TABLE"):
+        unit_entries_within_engagement_zone(
+            gs["units_cache"][uid], gs["units_cache"][victim], ez, metric="hex"
+        )
 
     obs = eng.obs_builder.build_squad_observation(gs, uid)
     assert float(obs["allies_bin"][0][oe.unit_bin_index("engaged")]) == 0.0, (

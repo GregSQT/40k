@@ -1300,7 +1300,7 @@ Plan d'origine (résolu ci-dessus) :
 > 17 sites n'étaient pas seulement « legacy » : ils étaient **inatteignables**, aucun appelant de
 > `execute_semantic_action` n'assignant de StepLogger. Le bloc a été **supprimé** (pierre tombale
 > dans `_process_semantic_action`) ; `_flush_squad_action_logs_to_step_logger` est désormais le
-> seul chemin de journalisation. Détail : `campagne_typage_et_replis_2026-07-29.md` §3.1.
+> seul chemin de journalisation. Détail : [`Implémenté/campagne_typage_et_replis_2026-07-29.md`](Implémenté/campagne_typage_et_replis_2026-07-29.md) §3.1.
 
 **Preuve empirique (run mono-env réel, 475 épisodes, après les fixes T6-b)** :
 - `Steps=0` sur **474/475** épisodes (`episode_step_count` n'est jamais incrémenté) ;

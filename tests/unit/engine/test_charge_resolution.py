@@ -10,6 +10,7 @@ from engine.phase_handlers.charge_handlers import (
     _charge_bfs_max_distance,
     _has_valid_charge_target,
     charge_build_valid_destinations_pool,
+    charge_model_plan_state,
 )
 from engine.phase_handlers.shared_utils import build_units_cache
 from tests._state_invariants import turn_state_invariants, unit_invariants
@@ -166,7 +167,7 @@ class TestChargeBfsMaxDistanceCacheMiss:
         assert "1" in gs["units_cache"], "prémisse : le chargeur EST dans le cache avant retrait"
         del gs["units_cache"]["1"]
 
-        with pytest.raises(KeyError, match="unit 1 missing from units_cache"):
+        with pytest.raises(KeyError, match="_charge_bfs_max_distance: unit 1 missing"):
             _charge_bfs_max_distance(gs, "1", 7, target_id="2")
 
     def test_declared_target_missing_from_units_cache_raises(self):
@@ -176,5 +177,78 @@ class TestChargeBfsMaxDistanceCacheMiss:
         assert "2" in gs["units_cache"], "prémisse : la cible EST dans le cache avant retrait"
         del gs["units_cache"]["2"]
 
-        with pytest.raises(KeyError, match="target 2 missing from units_cache"):
+        with pytest.raises(KeyError, match="_charge_bfs_max_distance: unit 2 missing"):
             _charge_bfs_max_distance(gs, "1", 7, target_ids=["2"])
+
+
+class TestChargeUnitsCacheDesyncIsLoud:
+    """Aucun chemin de charge ne doit dégrader en silence sur un miss d'``units_cache``.
+
+    ``units_cache`` est le miroir de ``units`` : toute unité vivante y est. Les entrées de la
+    charge valident déjà l'unité et les cibles (``get_unit_by_id`` + ``is_unit_alive``), et rien
+    ne meurt pendant la phase de charge — un miss est donc une désynchronisation d'état, pas un
+    cas de jeu. Chacun de ces chemins retombait auparavant sur une valeur crédible (pool tronqué,
+    ancre de départ, cible absente des voiles UI) sans jamais crasher.
+    """
+
+    def _gs_with_targets(self):
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 15, 10)]
+        gs = _make_game_state(units)
+        gs["charge_target_selections"] = {"1": ["2"]}
+        gs["charge_roll_values"] = {"1": 12}
+        gs["inches_to_subhex"] = 1  # plateau x1 : 1 sous-hex = 1"
+        return gs
+
+    def test_pool_is_loud_on_missing_charger_thanks_to_the_upstream_guard(self):
+        """⚠️ Ce test NE verrouille PAS le ``require_key`` de ``charge_build_valid_destinations_pool``.
+
+        Mesuré par mutation : remettre le repli ``{start_pos}`` laisse ce test VERT, parce que
+        ``require_unit_position`` (``shared_utils``) lève avant et que son message contient déjà
+        « units_cache ». Ce qui est vérifié ici est donc le contrat de bout en bout — le pool est
+        bruyant, jamais tronqué — **porté par la garde amont**, pas par la ligne de ce module.
+        Le ``require_key`` local reste pour supprimer la branche morte et le ``Optional``.
+        Conservé quand même : si la garde amont disparaît un jour, ce test tombera.
+        """
+        gs = self._gs_with_targets()
+        assert "1" in gs["units_cache"], "prémisse : le chargeur EST dans le cache avant retrait"
+        assert len(charge_build_valid_destinations_pool(gs, "1", 12, full_occupied_positions=set())) > 0, \
+            "prémisse : sur l'état sain, ce chemin rend un pool non vide"
+        del gs["units_cache"]["1"]
+
+        with pytest.raises((KeyError, ValueError), match="units_cache"):
+            charge_build_valid_destinations_pool(gs, "1", 12, full_occupied_positions=set())
+
+    def test_plan_state_raises_on_missing_declared_target(self):
+        """Une cible déclarée absente du cache disparaissait des voiles UI (ni satisfaite, ni pas)."""
+        gs = self._gs_with_targets()
+        assert "2" in gs["units_cache"], "prémisse : la cible EST dans le cache avant retrait"
+        # Prémisse : sur l'état sain, la cible déclarée est bien classée par le plan.
+        healthy = charge_model_plan_state(gs, "1", {})
+        assert set(healthy["satisfied_targets"]) | set(healthy["unsatisfied_targets"]) == {"2"}
+
+        del gs["units_cache"]["2"]
+        gs["_charge_plan_state_cache"] = None  # la mémoïsation servirait le ctx sain
+        with pytest.raises(KeyError, match="_compute_plan_context: unit 2 missing"):
+            charge_model_plan_state(gs, "1", {})
+
+    def test_preview_plan_raises_instead_of_reporting_a_desync_as_missing_target(self):
+        """``missing_targets`` ne doit porter QUE des refus métier, pas une désynchronisation.
+
+        ``charge_commit_move_plan_handler`` renvoie ce champ tel quel dans ``invalid_charge_plan``
+        (l.5504) : y ranger une cible absente d'``units_cache`` faisait lire « cible non engagée »
+        au joueur sur un état corrompu — le silence même que ce lot supprime ailleurs.
+        """
+        from engine.phase_handlers.charge_handlers import charge_preview_move_plan
+
+        gs = self._gs_with_targets()
+        mid = next(iter(gs["units_cache"]["1"]["occupied_hexes_by_model"]))
+        plan = [(str(mid), 14, 10, 0)]  # adjacent à la cible en (15,10) → engagement réel
+
+        # Prémisse : sur l'état sain, le plan engage la cible et `missing_targets` est vide.
+        healthy = charge_preview_move_plan(gs, "1", plan, ["2"])
+        assert healthy["engaged_all"] is True, healthy
+        assert healthy["missing_targets"] == [], healthy
+
+        del gs["units_cache"]["2"]
+        with pytest.raises(KeyError, match="charge_preview_move_plan: unit 2 missing"):
+            charge_preview_move_plan(gs, "1", plan, ["2"])

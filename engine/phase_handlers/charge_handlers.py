@@ -32,7 +32,7 @@ from engine.combat_utils import (
 from .shared_utils import (
     ACTION, WAIT, NO, ERROR, PASS, CHARGE,
     update_units_cache_position, translate_squad_to_destination, update_units_cache_hp, is_unit_alive, get_hp_from_cache, require_hp_from_cache,
-    get_unit_position, require_unit_position,
+    get_unit_position, require_unit_position, require_unit_from_cache,
     update_enemy_adjacent_caches_after_unit_move,
     unit_has_rule_effect as shared_unit_has_rule_effect,
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
@@ -378,72 +378,28 @@ def _charge_closest_charger_hex_to_target(
     charger_fp: Set[Tuple[int, int]],
     target_fp: Set[Tuple[int, int]],
 ) -> Tuple[Tuple[int, int], int]:
-    """Renvoie (hex allié le plus proche de la cible, distance hex associée)."""
-    from engine.hex_utils import hex_distance
+    """Renvoie (hex allié le plus proche de la cible, distance hex associée).
 
-    best_h: Optional[Tuple[int, int]] = None
-    best_d = 10**9
-    for hc, hr in charger_fp:
-        for tc, tr in target_fp:
-            d = hex_distance(int(hc), int(hr), int(tc), int(tr))
-            if d < best_d:
-                best_d = d
-                best_h = (int(hc), int(hr))
-    if best_h is None:
-        # charger_fp vide — repli arbitraire
-        return ((0, 0), 0)
-    return (best_h, best_d)
-
-
-def _build_charge_anchors_in_zone(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    target: Dict[str, Any],
-    zone: Set[Tuple[int, int]],
-    charge_roll: int,
-) -> List[Tuple[int, int]]:
-    """
-    Ancres de placement valides dont :
-    - le centre est dans la ``zone`` cible-centrée ;
-    - l'empreinte ne chevauche pas la cible (``occupied_hexes``) ;
-    - fin en zone d'engagement réelle vs la cible (``unit_entries_within_engagement_zone``, comme le BFS charge) ;
-    - le placement est légal (``is_footprint_placement_valid``).
+    Une empreinte vide LÈVE. Le repli ``((0, 0), 0)`` qui traînait ici rendait une case RÉELLE du
+    plateau à distance 0 : l'appelant plaçait sa référence de charge en haut à gauche sans jamais
+    crasher (même défaut que les quatre `(0,0)` du journal de tir, campagne 2026-07-29 §2.7). Les
+    deux empreintes viennent d'``entry_footprint``, qui rend au minimum l'ancre — un ensemble vide
+    signale donc un appelant qui a filtré ses entrées, pas un cas de jeu.
     """
     from engine.hex_utils import hex_distance
-    from engine.spatial_relations import unit_entries_within_engagement_zone
-    from .shared_utils import get_engagement_zone
 
-    units_cache = require_key(game_state, "units_cache")
-    te = units_cache.get(str(target["id"]))
-    if not te:
-        return []
-    target_fp = set(entry_footprint(te))
-    engagement_zone = int(get_engagement_zone(game_state))
-
-    unit_id_str = str(unit["id"])
-    occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
-    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
-
-    _charger_entry_now = units_cache.get(unit_id_str)
-    charger_fp_now = set(entry_footprint(_charger_entry_now)) if _charger_entry_now else set()
-    closest_ch, _ = _charge_closest_charger_hex_to_target(charger_fp_now, target_fp)
-
-    anchors: List[Tuple[int, int]] = []
-    for ac, ar in zone:
-        # Re-confirme la portée depuis l'hex chargeur le plus proche.
-        if hex_distance(closest_ch[0], closest_ch[1], int(ac), int(ar)) > int(charge_roll):
-            continue
-        candidate_fp = _candidate_footprint_charge(int(ac), int(ar), unit, game_state, fp_pair)
-        if candidate_fp & target_fp:
-            continue
-        # 3a : ancre du chargeur au SOL (level=0) ; le gate vertical ne mord que si la cible est en hauteur.
-        synth = _charge_synthetic_charger_cache_entry(game_state, unit, int(ac), int(ar), candidate_fp, level=0)
-        if not unit_entries_within_engagement_zone(synth, te, engagement_zone):
-            continue
-        if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
-            continue
-        anchors.append((int(ac), int(ar)))
-    return anchors
+    if not charger_fp or not target_fp:
+        raise ValueError(
+            "_charge_closest_charger_hex_to_target: empreinte vide "
+            f"(charger={len(charger_fp)}, target={len(target_fp)}) — aucune case à comparer."
+        )
+    return min(
+        (
+            (h, min(hex_distance(int(h[0]), int(h[1]), int(tc), int(tr)) for tc, tr in target_fp))
+            for h in charger_fp
+        ),
+        key=lambda pair: pair[1],
+    )
 
 
 def _charge_anchor_is_socle_a_socle_with_target(
@@ -462,10 +418,9 @@ def _charge_anchor_is_socle_a_socle_with_target(
     """
     from engine.hex_utils import min_distance_between_sets
 
-    units_cache = require_key(game_state, "units_cache")
-    te = units_cache.get(str(require_key(target, "id")))
-    if not te:
-        return False
+    te = require_unit_from_cache(
+        str(require_key(target, "id")), game_state, "_charge_anchor_is_socle_a_socle_with_target"
+    )
     target_fp = set(entry_footprint(te))
     fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
     candidate_fp = _candidate_footprint_charge(int(anchor_col), int(anchor_row), unit, game_state, fp_pair)
@@ -489,10 +444,9 @@ def _charge_anchor_within_1_of_target(
     (``unit_entries_within_engagement_zone`` à ``within_1_zone``) — source unique du « <=1" ». """
     from engine.spatial_relations import unit_entries_within_engagement_zone
 
-    units_cache = require_key(game_state, "units_cache")
-    te = units_cache.get(str(require_key(target, "id")))
-    if not te:
-        return False
+    te = require_unit_from_cache(
+        str(require_key(target, "id")), game_state, "_charge_anchor_within_1_of_target"
+    )
     within_1_zone = int(game_state["inches_to_subhex"])  # 1" en sous-hex
     target_fp = set(entry_footprint(te))
     fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
@@ -598,28 +552,21 @@ def _charge_bfs_max_distance(
         # Aucune cible déclarée (aperçu d'activation) : la borne EST le jet. Cas de jeu, pas un repli.
         return rid
 
-    units_cache = require_key(game_state, "units_cache")
-    ue = units_cache.get(unit_id)
-    if not ue:
-        raise KeyError(f"_charge_bfs_max_distance: unit {unit_id} missing from units_cache")
+    ue = require_unit_from_cache(unit_id, game_state, "_charge_bfs_max_distance")
 
     own_hexes = entry_footprint(ue)
     # Union des empreintes des cibles déclarées (le ``min`` ci-dessous garde la plus proche).
     enemy_fp: Set[Tuple[int, int]] = set()
     for tid in tids:
-        te = units_cache.get(tid)
-        if not te:
-            raise KeyError(f"_charge_bfs_max_distance: target {tid} missing from units_cache")
+        te = require_unit_from_cache(tid, game_state, "_charge_bfs_max_distance")
         enemy_fp |= {(int(c), int(r)) for c, r in entry_footprint(te)}
 
     # Ni `own_hexes` ni `enemy_fp` ne peuvent être vides : `tids` est non vide par construction et
     # `entry_footprint` rend au minimum l'ancre. Les deux gardes qui traînaient ici ne pouvaient
-    # être atteintes qu'à travers les deux `return rid` supprimés ci-dessus.
+    # être atteintes qu'à travers les deux `return rid` supprimés ci-dessus — c'est désormais
+    # `_charge_closest_charger_hex_to_target` qui porte la garde d'ensemble vide, une seule fois.
     primary = (int(ue["col"]), int(ue["row"]))
-    best_h = min(
-        own_hexes,
-        key=lambda h: min(hex_distance(int(h[0]), int(h[1]), int(tc), int(tr)) for tc, tr in enemy_fp),
-    )
+    best_h, _ = _charge_closest_charger_hex_to_target(own_hexes, enemy_fp)
     extra = hex_distance(primary[0], primary[1], int(best_h[0]), int(best_h[1]))
     return rid + extra
 
@@ -675,10 +622,11 @@ def _charge_impossible_by_primary_to_enemy_hex_lower_bound(
         return False
 
     ez = int(get_engagement_zone(game_state))
-    units_cache = require_key(game_state, "units_cache")
-    own = units_cache.get(unit_id_str)
-    if not own:
-        return False
+    # Retomber sur `False` ici désactivait la prune en silence : la charge restait correcte mais le
+    # BFS repartait sur le chemin lent, sans aucun signal.
+    own = require_unit_from_cache(
+        unit_id_str, game_state, "_charge_impossible_by_primary_to_enemy_hex_lower_bound"
+    )
     own_hexes_raw = entry_footprint(own)
     s_charger = 0
     for oc, orow in own_hexes_raw:
@@ -712,10 +660,7 @@ def _charge_primary_footprint_radius(
     """Distance hex maximale entre le primaire courant et une case de l'empreinte du chargeur."""
     from engine.hex_utils import hex_distance
 
-    units_cache = require_key(game_state, "units_cache")
-    own = units_cache.get(unit_id_str)
-    if not own:
-        raise KeyError(f"Unit {unit_id_str} missing from units_cache")
+    own = require_unit_from_cache(unit_id_str, game_state, "_charge_primary_footprint_radius")
     own_hexes = entry_footprint(own)
 
     radius = 0
@@ -2382,15 +2327,18 @@ def _compute_plan_context(
         placed_synths.append(
             (str(_mid), _synth_model_entry(game_state, str(unit["id"]), _sib, int(_pp[0]), int(_pp[1]), level=_plvl))
         )
+    # Les cibles déclarées ont été validées (`get_unit_by_id` + `is_unit_alive`) par
+    # `charge_target_selection_handler` avant d'être écrites dans `charge_target_selections`, et
+    # rien ne meurt pendant la phase de charge : un miss ici est une désynchronisation
+    # `units`/`units_cache`. Le filtre `is not None` qui traînait ici faisait DISPARAÎTRE la cible
+    # des voiles UI — ni satisfaite, ni insatisfaite, donc invisible.
+    _tids = [str(t) for t in target_ids]
     target_entries = [
-        units_cache.get(str(t)) for t in target_ids if units_cache.get(str(t)) is not None
+        require_unit_from_cache(tid, game_state, "_compute_plan_context") for tid in _tids
     ]
     satisfied: List[str] = []
     unsatisfied: List[str] = []
-    for tid in (str(t) for t in target_ids):
-        tentry = units_cache.get(tid)
-        if tentry is None:
-            continue
+    for tid, tentry in zip(_tids, target_entries):
         engaged_t = any(
             unit_entries_within_engagement_zone(synth, tentry, ez)
             for _mid, synth in placed_synths
@@ -3063,8 +3011,11 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
 
     # Capture old footprint before cache update (for multi-hex adjacency delta)
     chg_uid_str = str(unit["id"])
-    chg_old_entry = require_key(game_state, "units_cache").get(chg_uid_str)
-    chg_old_occupied = chg_old_entry.get("occupied_hexes") if chg_old_entry else None
+    # L'unité qui charge EST dans le cache (elle vient d'être sélectionnée et déplacée) : un miss
+    # est une désynchronisation. Le repli `None` faisait basculer le delta d'adjacence sur le seul
+    # couple d'ancres, donc des caches d'adjacence faux pour les socles multi-hex, sans signal.
+    chg_old_entry = require_key(require_key(game_state, "units_cache"), chg_uid_str)
+    chg_old_occupied = chg_old_entry.get("occupied_hexes")  # get allowed (absente = entrée mono-hex)
 
     # Update units_cache after position change.
     # Déplacement RIGIDE du squad (ancre + toutes les figs translatées + occupied_hexes_by_model
@@ -3074,8 +3025,8 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     translate_squad_to_destination(game_state, chg_uid_str, dest_col_int, dest_row_int)
     _t_upd1 = time.perf_counter() if _perf else None
 
-    chg_new_entry = require_key(game_state, "units_cache").get(chg_uid_str)
-    chg_new_occupied = chg_new_entry.get("occupied_hexes") if chg_new_entry else None
+    chg_new_entry = require_key(require_key(game_state, "units_cache"), chg_uid_str)
+    chg_new_occupied = chg_new_entry.get("occupied_hexes")  # get allowed (absente = entrée mono-hex)
 
     moved_unit_player = int(require_key(unit, "player"))
     _t_adj0 = time.perf_counter() if _perf else None
@@ -3473,9 +3424,12 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
     if full_occupied_positions is not None:
         # Remove moving unit's footprint from the pre-computed set
+        # `require_key` et non `.get(...) or {start_pos}` : le repli sur l'ancre masquait un
+        # désynchronisation `units`/`units_cache` en rendant un pool calculé sur une empreinte
+        # mono-hex. La garde amont `require_unit_position` mord avant sur ce chemin (mesuré), donc
+        # c'est une branche morte de moins, pas un changement de comportement observable.
         units_cache_ref = require_key(game_state, "units_cache")
-        own_entry = units_cache_ref.get(unit_id_str)
-        own_hexes = entry_footprint(own_entry) if own_entry else {start_pos}
+        own_hexes = entry_footprint(require_key(units_cache_ref, unit_id_str))
         occupied_positions = full_occupied_positions - own_hexes
     else:
         occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
@@ -4169,17 +4123,20 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
             game_state, unit, target_entries, bfs_reachable
         )
         # Hex de référence = case du chargeur la plus proche de l'union des empreintes cibles.
-        _uc = require_key(game_state, "units_cache")
-        _ue = _uc.get(unit_id)
-        if _ue:
-            _charger_fp = set(entry_footprint(_ue))
-            _union_tfp: Set[Tuple[int, int]] = set()
-            for _te in target_entries:
-                _tc, _tr = int(_te["col"]), int(_te["row"])
-                _te_cache = _uc.get(str(_te["id"])) or {}
-                _union_tfp |= set(entry_footprint(_te_cache))
-            _closest_ch, _ = _charge_closest_charger_hex_to_target(_charger_fp, _union_tfp)
-            charge_reference_hex = (int(_closest_ch[0]), int(_closest_ch[1]))
+        # Les cibles viennent d'être validées ci-dessus (`get_unit_by_id` + `is_unit_alive`) : un
+        # miss d'`units_cache` est une désynchronisation, pas un cas de jeu. Le `if _ue:` laissait
+        # `charge_reference_hex` sur l'ancre de départ et le `or {}` envoyait un dict vide dans
+        # `entry_footprint` — deux références de charge fausses sans le moindre signal.
+        _ue = require_unit_from_cache(unit_id, game_state, "charge_target_selection_handler")
+        _charger_fp = set(entry_footprint(_ue))
+        _union_tfp: Set[Tuple[int, int]] = set()
+        for _te in target_entries:
+            _te_cache = require_unit_from_cache(
+                str(_te["id"]), game_state, "charge_target_selection_handler"
+            )
+            _union_tfp |= set(entry_footprint(_te_cache))
+        _closest_ch, _ = _charge_closest_charger_hex_to_target(_charger_fp, _union_tfp)
+        charge_reference_hex = (int(_closest_ch[0]), int(_closest_ch[1]))
         if _perf and _t_tsel0 is not None and _t_bfs0 is not None and _t_bfs1 is not None:
             append_perf_timing_line(
                 f"CHARGE_TARGET_SEL episode={_ep} turn={_turn} unit_id={unit_id} "
@@ -4641,13 +4598,13 @@ def charge_preview_move_plan(
 
     # 3) engaged_all : chaque cible déclarée est engagée par au moins une figurine.
     ez = int(get_engagement_zone(game_state))
-    units_cache = require_key(game_state, "units_cache")
+    # `missing` ne porte QU'UNE chose : « cible déclarée non engagée par le plan » — un refus
+    # métier que `charge_commit_move_plan_handler` renvoie en `invalid_charge_plan`. Y ranger aussi
+    # une cible absente d'`units_cache` faisait sortir une désynchronisation d'état sous le même
+    # message, donc invisible : le joueur lisait « cible non engagée » sur un état corrompu.
     missing: List[str] = []
     for tid in (str(t) for t in target_ids):
-        tentry = units_cache.get(tid)
-        if tentry is None:
-            missing.append(tid)
-            continue
+        tentry = require_unit_from_cache(tid, game_state, "charge_preview_move_plan")
         engaged = False
         for idx, (mid, c, r, lv) in enumerate(norm):
             # 3b : synth au niveau RÉEL de la fig (sol ou étage) → engagement 3D correct en montant.

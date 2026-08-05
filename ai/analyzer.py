@@ -22,6 +22,7 @@ from engine.combat_utils import (
     get_hex_neighbors,
 )
 from shared.data_validation import require_key
+from ai.analyzer_perfig import position_is_on_battlefield
 
 
 def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: Any) -> int:
@@ -518,43 +519,6 @@ def parse_timestamp_to_seconds(line: str) -> Optional[int]:
     return None
 
 
-def is_hex_anchor_adjacent_to_enemy(
-    col: int,
-    row: int,
-    unit_player: Dict[str, int],
-    unit_positions: Dict[str, Tuple[int, int]],
-    unit_hp: Dict[str, int],
-    player: int,
-) -> bool:
-    """Check legacy analyzer A/anchor hex adjacency against any enemy unit."""
-    enemy_player = 3 - player
-    # CRITICAL: Normalize player values to int for consistent comparison (handles int/string mismatches)
-    enemy_player_int = int(enemy_player) if enemy_player is not None else None
-    # CRITICAL FIX: Iterate over unit_positions instead of unit_player to avoid checking dead units
-    # Dead units are removed from unit_positions when they die, so this ensures we only check living units
-    for uid, enemy_pos in unit_positions.items():
-        # Verify this is an enemy unit
-        if uid not in unit_player:
-            _debug_log(f"[ANALYZER WARNING] get_adjacent_enemies missing unit_player for unit_id: {uid}")
-            continue
-        p = require_key(unit_player, uid)
-        # CRITICAL: Normalize player value to int for consistent comparison (handles int/string mismatches)
-        p_int = int(p) if p is not None else None
-        hp_value = _get_unit_hp_value(unit_hp, uid)
-        if hp_value is None:
-            continue
-        if p_int == enemy_player_int and hp_value > 0:
-            if is_adjacent(col, row, enemy_pos[0], enemy_pos[1]):
-                return True
-    return False
-
-
-def is_adjacent_to_enemy(col: int, row: int, unit_player: Dict[str, int], unit_positions: Dict[str, Tuple[int, int]], 
-                         unit_hp: Dict[str, int], player: int) -> bool:
-    """Backward-compatible analyzer alias for legacy A/anchor hex adjacency."""
-    return is_hex_anchor_adjacent_to_enemy(col, row, unit_player, unit_positions, unit_hp, player)
-
-
 def _analyzer_engagement_metric() -> str:
     """Métrique de l'EZ (`hex`|`euclidean`) pour le run ANALYSÉ.
 
@@ -597,6 +561,7 @@ def is_within_engine_engagement_zone(
     heights_by_model: Optional[Dict[str, Dict[str, float]]] = None,
     unit_model_height: Optional[Dict[str, float]] = None,
     subject_heights: Optional[Dict[str, float]] = None,
+    exclude_unit_id: Optional[str] = None,
 ) -> bool:
     """L'unité est-elle engagée ? Mesure PER-FIGURINE, empreinte contre empreinte (03.04).
 
@@ -624,6 +589,10 @@ def is_within_engine_engagement_zone(
       cet instant-là (mouvement réactif). Le sujet est alors mesuré comme un point — repli sur
       donnée absente, jamais un contrôle désarmé.
     - Les AUTRES unités sont toujours mesurées sur leurs socles connus, ancre sinon.
+    - ``exclude_unit_id`` : une unité de plus retirée de l'ÉNUMÉRATION, en plus du sujet. Jumeau
+      d'``entries_on_battlefield(exclude_id=…)`` côté moteur. Sert à demander « cette cible est-elle
+      engagée par quelqu'un D'AUTRE que l'unité qui l'évalue ? » sans recopier tout
+      ``unit_positions`` amputé d'une clé à chaque ligne de journal.
 
     ENGAGEMENT 3D (§03.04 : 2" horizontal ET **5" vertical**). ``heights_by_model`` (hauteurs de
     plancher par socle, lues dans le segment `[MODELS:]`), ``unit_model_height`` (MODEL_HEIGHT
@@ -658,6 +627,9 @@ def is_within_engine_engagement_zone(
         # (`current_line_models`) doit donc passer les hauteurs correspondantes, sinon ses socles
         # n'ont pas d'altitude ici et il retombe en 2D plutôt que d'en inventer une.
         subject_heights = heights_by_unit.get(unit_id)  # get allowed
+    # HORS TABLE (§03.04 / 20.01) : le journal déclare toutes les escouades dès l'entête, à la
+    # sentinelle `(-1,-1)`, et `unit_positions` les garde tant qu'elles ne sont pas déployées.
+    # `model_cache_entries` n'en produit AUCUNE entrée — liste vide = rien à mesurer.
     subject_entries = model_cache_entries(
         unit_id, subject_models, bases, subject_anchor, subject_player,
         heights=subject_heights, model_height=model_heights.get(unit_id),  # get allowed
@@ -671,7 +643,7 @@ def is_within_engine_engagement_zone(
     # inanalysable tout journal antérieur à cette clé d'entête sans rien mesurer de plus.
     vertical_zone: Optional[float] = None
     for uid, anchor in unit_positions.items():
-        if uid == unit_id or uid not in unit_player:
+        if uid == unit_id or uid == exclude_unit_id or uid not in unit_player:
             continue
         enemy_player = int(require_key(unit_player, uid))
         if enemy_player == subject_player:
@@ -717,6 +689,10 @@ def _build_enemy_adjacent_hexes(
         unit_p = require_key(unit_player, uid)
         unit_p_int = int(unit_p) if unit_p is not None else None
         if unit_p_int != enemy_player_int:
+            continue
+        # Hors table : les voisins de la sentinelle `(-1,-1)` mettraient `(0,0)` et cinq autres
+        # cases réelles dans la bande d'EZ bloquante du BFS (cf. `position_is_on_battlefield`).
+        if not position_is_on_battlefield(pos):
             continue
         for neighbor in get_hex_neighbors(pos[0], pos[1]):
             adjacent_hexes.add(neighbor)
@@ -777,6 +753,13 @@ def _build_move_bfs_blockers(
         if hp_value is None or hp_value <= 0:
             continue
         if uid not in unit_player:
+            continue
+        # Hors table : une escouade en réserves n'occupe RIEN (20.01). Son empreinte, reconstruite
+        # depuis la sentinelle `(-1,-1)`, déborde sur le coin réel du plateau — à x5 un socle de
+        # 32 mm y couvre des dizaines d'hexes de `(0,0)` — et le BFS refuse alors des chemins
+        # légaux. C'est la boucle VIVE avec la config par défaut (`thru_enemy: false`), la bande
+        # d'EZ ci-dessous étant vide tant que `move.thru_ez` vaut True.
+        if not position_is_on_battlefield(anchor):
             continue
         is_friendly = int(require_key(unit_player, uid)) == mover_player_int
         if is_friendly and thru_friendly:
@@ -956,6 +939,11 @@ def get_adjacent_enemies(col: int, row: int, unit_player: Dict[str, int], unit_p
     # CRITICAL FIX: Iterate over unit_positions instead of unit_player to avoid checking dead units
     # Dead units are removed from unit_positions when they die, so this ensures we only check living units
     for uid, enemy_pos in unit_positions.items():
+        # Hors table : la sentinelle `(-1,-1)` est adjacente à `(0,0)`, donc une escouade en
+        # réserves ressortait « ennemi adjacent » et se retrouvait NOMMÉE dans les lignes d'erreur
+        # et les traces de charge/advance (cf. `position_is_on_battlefield`).
+        if not position_is_on_battlefield(enemy_pos):
+            continue
         # Verify this is an enemy unit
         p = require_key(unit_player, uid)
         # CRITICAL: Normalize player value to int for consistent comparison (handles int/string mismatches)

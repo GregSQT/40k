@@ -1236,6 +1236,28 @@ def get_unit_from_cache(unit_id: str, game_state: Dict[str, Any]) -> Optional[Di
     return game_state["units_cache"].get(unit_id)
 
 
+def require_unit_from_cache(unit_id: str, game_state: Dict[str, Any], what: str) -> Dict[str, Any]:
+    """Jumeau BRUYANT de ``get_unit_from_cache`` : l'absence LÈVE au lieu de rendre ``None``.
+
+    À appeler quand l'appelant a DÉJÀ établi que l'unité est vivante (``get_unit_by_id`` +
+    ``is_unit_alive``, ou une cible déclarée validée en amont). Dans ce cas l'absence n'est pas
+    l'encodage de la mort — c'est une désynchronisation ``units`` / ``units_cache``, et y répondre
+    par une valeur de repli produit un verdict géométrique INVENTÉ sans jamais crasher.
+
+    ``what`` nomme le site appelant : c'est ce qui rend la panne localisable, et c'est la raison
+    pour laquelle ce helper existe plutôt que dix ``raise`` recopiés à la main (types d'exception
+    et libellés divergents, impossibles à attraper ou à tester uniformément).
+
+    NE contrôle PAS le placement : une unité en réserves (20.01) EST dans ``units_cache`` avec la
+    sentinelle ``(-1,-1)``. « Exister » et « être sur la table » sont deux contrats distincts —
+    le second est ``require_entry_on_battlefield`` (``engine/spatial_relations.py``).
+    """
+    entry = get_unit_from_cache(unit_id, game_state)
+    if not entry:
+        raise KeyError(f"{what}: unit {unit_id} missing from units_cache")
+    return entry
+
+
 def is_unit_alive(unit_id: str, game_state: Dict[str, Any]) -> bool:
     """
     Check if a unit is alive (present in units_cache).

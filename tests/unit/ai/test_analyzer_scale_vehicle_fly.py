@@ -396,3 +396,193 @@ def test_les_socles_d_une_cible_fauchee_ne_hantent_pas_le_plateau(tmp_path):
         "les socles morts de la cible sont encore mesurés : "
         f"{stats['shoot_at_engaged_enemy']}"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. HORS TABLE : la sentinelle (-1,-1) n'est pas une position (20.01, 03.04)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# L'entête déclare TOUTES les escouades à `(-1,-1)`, et `unit_positions` les y garde jusqu'à leur
+# mise en place (réserves stratégiques : jusqu'à leur ingress move, 20.04). Toute énumération
+# géométrique qui les garde mesure contre le coin du plateau : la sentinelle est adjacente à
+# `(0,0)` et à portée de n'importe quelle arme. Un verdict inventé, jamais une erreur.
+
+# Le WAITer est un `Terminator` : sa seule arme de tir (Storm Bolter, 24") n'est PAS
+# [CLOSE_QUARTERS]. Avec un Intercessor — qui porte un Bolt Pistol — la requalification en `skip`
+# n'a jamais lieu, et le test de l'adjacence à la sentinelle serait vert sans rien verrouiller
+# (constaté par contre-épreuve : la garde retirée, la suite restait verte).
+_OFF_TABLE_UNITS = (
+    "[10:00:00] Unit 1 (Terminator) P1: Starting position (-1,-1), HP_MAX=2\n"
+    "[10:00:00] Unit 2 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2\n"
+    "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2\n"
+)
+
+
+def test_la_sentinelle_est_bien_adjacente_a_l_origine_du_plateau():
+    """Montage des deux tests suivants : sans cette adjacence, ils seraient verts sans rien
+    construire. `(0,0)` est le SEUL hexe réel voisin de `(-1,-1)`."""
+    assert an.is_adjacent(0, 0, -1, -1) is True
+    assert (0, 0) in an.get_hex_neighbors(-1, -1)
+
+
+def _wait_stats(tmp_path, name: str, body: str):
+    log = tmp_path / name
+    log.write_text(_log(body, inches_to_subhex=1, board="cols=60 rows=60", units=_OFF_TABLE_UNITS))
+    return an.parse_step_log(str(log))
+
+
+def test_un_ennemi_en_reserves_n_est_pas_une_cible_valide_pour_un_wait(tmp_path):
+    """101 n'est jamais mise en place : elle reste à la sentinelle. Mesurée depuis là, elle est à
+    portée du Bolt Rifle de n'importe où — tout WAIT légal ressortait `wait_with_los`."""
+    body = (
+        "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(10,10) DEPLOYED from (-1,-1) to (10,10) [R:+0.0] [SUCCESS]\n"
+        "[10:00:02] E1 T1 P1 SHOOT : Unit 1(10, 10) WAIT [R:+0.0] [SUCCESS]\n"
+    )
+    stats = _wait_stats(tmp_path, "reserve_target.log", body)
+
+    assert stats["wait_by_phase"][1]["wait_with_los"] == 0
+    assert stats["wait_by_phase"][1]["wait_no_los"] == 1
+    # Contre-épreuve : la MÊME unité posée à 3 cases EST une cible — sans quoi le filtre
+    # ci-dessus désarmerait le contrôle au lieu de le corriger.
+    body_posee = (
+        "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(10,10) DEPLOYED from (-1,-1) to (10,10) [R:+0.0] [SUCCESS]\n"
+        "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(13,10) DEPLOYED from (-1,-1) to (13,10) [R:+0.0] [SUCCESS]\n"
+        "[10:00:02] E1 T1 P1 SHOOT : Unit 1(10, 10) WAIT [R:+0.0] [SUCCESS]\n"
+    )
+    stats = _wait_stats(tmp_path, "posee.log", body_posee)
+    assert stats["wait_by_phase"][1]["wait_with_los"] == 1
+
+
+def test_une_escouade_ARRIVEE_des_reserves_quitte_la_sentinelle(tmp_path):
+    """Contrepartie indispensable des filtres : l'ingress move (20.04) est journalisé par le
+    formateur `deploy_unit` — « DEPLOYED from (-1,-1) to … » — mais dans la phase de MOUVEMENT.
+    La regex de mise en place étant épinglée sur `DEPLOYMENT`, l'arrivée n'était lue par AUCUNE
+    branche et l'escouade restait à la sentinelle tout l'épisode. Écarter les unités hors table
+    aurait alors rendu une unité RÉELLEMENT posée invisible : un angle mort au lieu d'un verdict
+    faux."""
+    body = (
+        "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(10,10) DEPLOYED from (-1,-1) to (10,10) [R:+0.0] [SUCCESS]\n"
+        "[10:00:02] E1 T2 P2 MOVE : Unit 101(13,10) DEPLOYED from (-1,-1) to (13,10) [R:+0.0] [SUCCESS]\n"
+        "[10:00:03] E1 T2 P1 SHOOT : Unit 1(10, 10) WAIT [R:+0.0] [SUCCESS]\n"
+    )
+    stats = _wait_stats(tmp_path, "ingress.log", body)
+
+    assert stats["wait_by_phase"][1]["wait_with_los"] == 1, (
+        "l'escouade arrivée des réserves est restée à la sentinelle : elle n'est plus une cible"
+    )
+    # L'ingress reste une ACTION de la phase de mouvement — un step gym. Lire sa position ne doit
+    # pas l'absorber : la ligne doit continuer vers le parseur d'action, qui la compte et porte
+    # les remises à zéro de tour et de phase. La ligne de DÉPLOIEMENT, elle, n'est pas comptée.
+    assert stats["actions_by_phase"]["MOVE"] == 1
+    assert stats["total_actions"] == 2
+
+
+def test_l_ingress_est_une_activation_et_une_seconde_en_est_une_double(tmp_path):
+    """20.04 : l'ingress EST le mouvement du tour, le moteur termine l'activation. Une escouade
+    qui arrive PUIS se déplace dans la même phase double son activation — invisible tant que la
+    ligne d'arrivée n'était pas un marqueur d'activation."""
+    body = (
+        "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(10,10) DEPLOYED from (-1,-1) to (10,10) [R:+0.0] [SUCCESS]\n"
+        "[10:00:02] E1 T2 P2 MOVE : Unit 101(13,10) DEPLOYED from (-1,-1) to (13,10) [R:+0.0] [SUCCESS]\n"
+        "[10:00:03] E1 T2 P2 MOVE : Unit 101(14,10) MOVED from (13,10) to (14,10)"
+        " [R:+0.0] [MODELS: 101#0@(14,10)] [SUCCESS]\n"
+    )
+    stats = _wait_stats(tmp_path, "ingress_double.log", body)
+
+    assert stats["double_activation_by_phase"]["MOVE"] == 1
+
+
+def test_une_unite_arrivee_des_reserves_compte_dans_les_collisions(tmp_path):
+    """L'entrée d'historique de l'arrivée porte `turn` et `episode`, sans quoi les détecteurs de
+    collision ne la retiennent jamais : deux escouades sur le MÊME hexe passaient inaperçues."""
+    body = (
+        "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(10,10) DEPLOYED from (-1,-1) to (10,10) [R:+0.0] [SUCCESS]\n"
+        "[10:00:02] E1 T2 P2 MOVE : Unit 101(13,10) DEPLOYED from (-1,-1) to (13,10) [R:+0.0] [SUCCESS]\n"
+        # L'unité 1 vient se poser sur l'hexe déjà tenu par l'arrivante.
+        "[10:00:03] E1 T2 P1 MOVE : Unit 1(13,10) MOVED from (10,10) to (13,10)"
+        " [R:+0.0] [MODELS: 1#0@(13,10)] [SUCCESS]\n"
+    )
+    stats = _wait_stats(tmp_path, "ingress_collision.log", body)
+
+    collisions = stats["unit_position_collisions"]
+    assert len(collisions) == 1, collisions
+    assert set(collisions[0]["units"]) == {"1", "101"}
+
+
+def test_un_ennemi_en_reserves_ne_transforme_pas_un_wait_en_skip(tmp_path):
+    """Jumeau adjacence du précédent : le tireur posé en `(0,0)` touche la sentinelle. Sans le
+    filtre, son WAIT — sans arme [CLOSE_QUARTERS] — était requalifié en `skip`."""
+    body = (
+        "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(0,0) DEPLOYED from (-1,-1) to (0,0) [R:+0.0] [SUCCESS]\n"
+        "[10:00:02] E1 T1 P1 SHOOT : Unit 1(0, 0) WAIT [R:+0.0] [SUCCESS]\n"
+    )
+    stats = _wait_stats(tmp_path, "reserve_adjacence.log", body)
+
+    assert stats["shoot_vs_wait"]["skip"] == 0
+    assert stats["shoot_vs_wait"]["wait"] == 1
+
+
+def test_un_ALLIE_en_reserves_ne_met_pas_la_cible_au_contact(tmp_path):
+    """Troisième énumération du même bloc, côté ami (10.05 : une cible au contact d'un ami ne se
+    tire pas). L'ennemi posé en `(0,0)` est voisin de la sentinelle : un ami PAS ENCORE POSÉ le
+    déclarait « au contact », et le WAIT ne voyait plus aucune cible."""
+    body = (
+        "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(0,3) DEPLOYED from (-1,-1) to (0,3) [R:+0.0] [SUCCESS]\n"
+        "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(0,0) DEPLOYED from (-1,-1) to (0,0) [R:+0.0] [SUCCESS]\n"
+        "[10:00:02] E1 T1 P1 SHOOT : Unit 1(0, 3) WAIT [R:+0.0] [SUCCESS]\n"
+    )
+    stats = _wait_stats(tmp_path, "allie_reserve.log", body)
+
+    assert stats["wait_by_phase"][1]["wait_with_los"] == 1
+
+
+def test_la_bande_d_ez_du_bfs_ignore_les_unites_hors_table():
+    """`_build_enemy_adjacent_hexes` alimente la bande d'EZ qui bloque le BFS de move et de
+    charge. Un ennemi en réserves y versait les six voisins de la sentinelle, dont `(0,0)`."""
+    unit_player = {"101": 2, "102": 2}
+    unit_hp = {"101": 1, "102": 1}
+
+    hors_table = an._build_enemy_adjacent_hexes({"101": (-1, -1)}, unit_player, unit_hp, player=1)
+    assert hors_table == set()
+    # Contre-épreuve : une unité POSÉE verse bien ses voisins.
+    posee = an._build_enemy_adjacent_hexes({"102": (10, 10)}, unit_player, unit_hp, player=1)
+    assert posee == set(an.get_hex_neighbors(10, 10))
+
+
+def test_les_cases_occupees_du_bfs_ignorent_les_unites_hors_table():
+    """Jumeau VIVANT du précédent : avec la config par défaut (`move.thru_ez=True`,
+    `move.thru_enemy=False`) la bande d'EZ est vide et seule cette boucle bloque le BFS. Une
+    escouade en réserves y versait l'empreinte de la sentinelle — à x5 un socle de 32 mm couvre
+    des dizaines d'hexes RÉELS autour de `(0,0)` — et le BFS refusait des chemins légaux."""
+    _pose_regles_du_run(5)
+    unit_player = {"a1": 1, "e1": 2}
+    unit_hp = {"a1": 1, "e1": 1}
+    base = {"e1": ("round", 16)}
+
+    occupied, ez_band = an._build_move_bfs_blockers(
+        {"e1": {"e1#0": (-1, -1)}}, {"a1": (50, 50), "e1": (-1, -1)}, base,
+        unit_player, unit_hp, "a1",
+    )
+    assert occupied == set(), sorted(h for h in occupied if h[0] >= 0)[:10]
+    assert ez_band == set()
+    # Contre-épreuve : la MÊME escouade posée bloque bien, et son empreinte déborde de son ancre.
+    occupied, _ = an._build_move_bfs_blockers(
+        {"e1": {"e1#0": (30, 30)}}, {"a1": (50, 50), "e1": (30, 30)}, base,
+        unit_player, unit_hp, "a1",
+    )
+    assert len(occupied) > 1 and (30, 30) in occupied
+
+
+def test_un_ennemi_hors_table_n_est_adjacent_a_personne():
+    """`get_adjacent_enemies` nomme l'ennemi dans les lignes d'erreur et les traces de
+    charge/advance. Une escouade en réserves y apparaissait pour toute unité en `(0,0)`."""
+    unit_player = {"101": 2}
+    unit_hp = {"101": 1}
+    unit_types = {"101": "AssaultIntercessor"}
+
+    assert an.get_adjacent_enemies(0, 0, unit_player, {"101": (-1, -1)}, unit_hp, unit_types, 1) == []
+    # Contre-épreuve : posée sur un hexe voisin, elle est bien nommée.
+    voisin = sorted(an.get_hex_neighbors(0, 0))[-1]
+    assert an.get_adjacent_enemies(
+        0, 0, unit_player, {"101": voisin}, unit_hp, unit_types, 1
+    ) == ["101"]

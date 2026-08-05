@@ -3500,7 +3500,7 @@ livraison. Relire le JSON avant de citer un poids.
 > **Périmètre de cette entrée : UNIQUEMENT ce qui change ce que l'utilisateur mesurera au prochain
 > entraînement.** La campagne complète (57 commits, `bb3a788f` → `d061f21b`) — contre-audit du
 > typage, replis silencieux, code mort, journal de tir, **et surtout la dette restante** — vit à UN
-> seul endroit : **[`campagne_typage_et_replis_2026-07-29.md`](campagne_typage_et_replis_2026-07-29.md)**.
+> seul endroit : **[`campagne_typage_et_replis_2026-07-29.md`](Implémenté/campagne_typage_et_replis_2026-07-29.md)**.
 > Ne pas recopier son contenu ici.
 
 #### 1. 🔴 Quatre compteurs de combat rebranchés — les courbes antérieures sont ABSENTES, pas nulles
@@ -3593,7 +3593,7 @@ NamedTuple) et les **179 datasheets** du registre qui portent `BASE_SHAPE` respe
 > (`git status` au 2026-07-29 : `engine/phase_handlers/fight_handlers.py`,
 > `engine/phase_handlers/shared_utils.py`, `engine/phase_handlers/shooting_handlers.py`,
 > `engine/w40k_core.py` modifiés). Elle appartient à la campagne « typage & replis » →
-> [`campagne_typage_et_replis_2026-07-29.md`](campagne_typage_et_replis_2026-07-29.md).
+> [`campagne_typage_et_replis_2026-07-29.md`](Implémenté/campagne_typage_et_replis_2026-07-29.md).
 >
 > ⚠️ **Le merge n'est PAS une validation.** La vérification large appartient toujours à
 > l'utilisateur et n'a pas été faite.

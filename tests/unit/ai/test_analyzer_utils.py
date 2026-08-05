@@ -160,11 +160,14 @@ def test_adjacency_and_position_cache_helpers() -> None:
     unit_player = {"e1": "2", "a1": 1}
     unit_positions = {"e1": (2, 1), "a1": (1, 1)}
     unit_hp = {"e1": 1, "a1": 1}
-    assert an.is_adjacent_to_enemy(1, 1, unit_player, unit_positions, unit_hp, player=1) is True
-    assert an.is_hex_anchor_adjacent_to_enemy(1, 1, unit_player, unit_positions, unit_hp, player=1) is True
+    assert an.get_adjacent_enemies(
+        1, 1, unit_player, unit_positions, unit_hp, {"e1": "Intercessor"}, player=1
+    ) == ["e1"]
     assert an.is_within_engine_engagement_zone("a1", unit_player, unit_positions, unit_hp, engagement_zone=1) is True
     unit_positions["e1"] = (3, 1)
-    assert an.is_hex_anchor_adjacent_to_enemy(1, 1, unit_player, unit_positions, unit_hp, player=1) is False
+    assert an.get_adjacent_enemies(
+        1, 1, unit_player, unit_positions, unit_hp, {"e1": "Intercessor"}, player=1
+    ) == []
     assert an.is_within_engine_engagement_zone("a1", unit_player, unit_positions, unit_hp, engagement_zone=2) is True
     unit_positions["e1"] = (2, 1)
     assert an._build_enemy_adjacent_hexes(unit_positions, unit_player, unit_hp, player=1)

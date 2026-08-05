@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance, ranged_edge_distance, get_distance_metric
+from ai.analyzer_perfig import position_is_on_battlefield
 
 if TYPE_CHECKING:
     from ai.analyzer_state import AnalyzerState
@@ -749,7 +750,6 @@ def handle_wait(
     Retourne True si la ligne doit être skippée (continue dans la boucle principale).
     """
     from ai.analyzer import (
-        is_adjacent,
         _get_unit_hp_value,
         has_line_of_sight,
         is_within_engine_engagement_zone,
@@ -787,7 +787,13 @@ def handle_wait(
                     stats['first_error_lines']['dead_unit_waiting'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
 
     if phase == 'SHOOT':
-        unit_match = re.search(r'Unit (\d+)\((\d+), (\d+)\)', action_desc)
+        # MÊME motif que la branche SHOOT (`\s*` autour de la virgule). L'ancienne forme exigeait
+        # `Unit 1(5, 48)` avec un espace, or TOUS les producteurs écrivent `Unit 1(5,48)` sans
+        # espace (`w40k_core.py` : `f"{unit_id}({col},{row})"`, 4 sites). MESURÉ sur un step.log
+        # réel : 15 151 lignes WAIT en phase de tir, **0 matchée**, 15 151 par cette forme-ci.
+        # Tout le bloc ci-dessous n'a donc JAMAIS tourné en production — et le `else` comptait
+        # « aucune cible » sans avoir rien mesuré.
+        unit_match = re.search(r'Unit (\d+)\s*\((\d+),\s*(\d+)\)', action_desc)
         if unit_match:
             wait_unit_id = unit_match.group(1)
             wait_col = int(unit_match.group(2))
@@ -796,24 +802,43 @@ def handle_wait(
             available_weapons = require_key(config.unit_weapons_cache, wait_unit_type)
             ranged_weapons = [w for w in available_weapons if require_key(w, 'range') > 0]
             enemy_player = 3 - player
-            enemy_player_int = int(enemy_player) if enemy_player is not None else None
-            is_adj = False
-            for uid, p in state.unit_player.items():
-                p_int = int(p) if p is not None else None
-                if p_int == enemy_player_int and uid in state.unit_positions:
-                    hp_value = _get_unit_hp_value(
-                        state.unit_hp, uid, stats, state.current_episode_num, turn, phase, line, "Wait adjacency"
-                    )
-                    if hp_value is None or hp_value <= 0:
-                        continue
-                    enemy_pos = state.unit_positions[uid]
-                    if is_adjacent(wait_col, wait_row, enemy_pos[0], enemy_pos[1]):
-                        is_adj = True
-                        break
+            # Grandeurs constantes sur toute la ligne : zone d'engagement et cartes verticales
+            # viennent de l'entête `Run rules:` du journal, elles ne dépendent d'aucune cible.
+            _wait_ez = _get_engagement_zone_for_analyzer()
+            _wait_3d = state.engagement_3d_kwargs()
+            # 10.04 : le tir NORMAL exige une unité UNENGAGED. Mesuré par la primitive partagée
+            # de l'analyzer, comme `shooter_engaged_at_all` dans `handle_shoot` : per-figurine,
+            # métrique du run, zone d'engagement du run (10 subhex à x5), et écarte les unités
+            # hors table à l'énumération. L'ancienne boucle mesurait `hex_distance(ancre) == 1` —
+            # aveugle à l'échelle ET à l'empreinte, donc un ennemi ENGAGÉ à 8 subhex laissait le
+            # WAIT compté comme un choix délibéré. Quatrième occurrence de la famille
+            # « ancre vs par-figurine » (LoS, fight non-adjacent, close-quarters).
+            wait_unit_engaged = is_within_engine_engagement_zone(
+                wait_unit_id,
+                state.unit_player,
+                state.unit_positions,
+                state.unit_hp,
+                engagement_zone=_wait_ez,
+                positions_by_model=state.positions_by_model,
+                unit_base=state.unit_base,
+                **_wait_3d,
+                subject_models=state.current_line_models.get(wait_unit_id),  # get allowed
+                subject_heights=state.current_line_heights.get(wait_unit_id),  # get allowed
+                position_override=(wait_col, wait_row),
+            )
 
-            if is_adj:
+            # 10.06 ELIGIBLE IF : « Has one or more [CLOSE-QUARTERS] weapons **OR is a
+            # MONSTER/VEHICLE unit** ». Le volet M/V manquait ici alors que `handle_shoot`
+            # l'applique : un Dreadnought engagé, qui n'a aucune arme [CLOSE-QUARTERS], voyait son
+            # WAIT requalifié en `skip` — la règle l'autorisait pourtant à tirer, c'était un vrai
+            # choix du joueur et il était effacé.
+            wait_unit_is_monster_or_vehicle = bool(require_key(
+                config.unit_is_monster_or_vehicle_by_type, wait_unit_type
+            ))
+
+            if wait_unit_engaged:
                 has_close_quarters = any(require_key(w, 'is_close_quarters') for w in ranged_weapons)
-                if not has_close_quarters:
+                if not has_close_quarters and not wait_unit_is_monster_or_vehicle:
                     stats['shoot_vs_wait']['wait'] -= 1
                     stats['shoot_vs_wait_by_player'][player]['wait'] -= 1
                     stats['shoot_vs_wait']['skip'] += 1
@@ -833,32 +858,83 @@ def handle_wait(
                     if hp_value is None or hp_value <= 0:
                         continue
                     enemy_pos = state.unit_positions[uid]
-                    distance = calculate_hex_distance(wait_col, wait_row, enemy_pos[0], enemy_pos[1])
+                    # Hors table : une escouade en réserves n'est PAS une cible (20.01). Mesurée
+                    # depuis la sentinelle elle est à portée de n'importe quelle arme, donc tout
+                    # WAIT légal ressortait en `wait_with_los` / `wait_with_targets`.
+                    if not position_is_on_battlefield(enemy_pos):
+                        continue
                     if not has_line_of_sight(wait_col, wait_row, enemy_pos[0], enemy_pos[1], state.wall_hexes):
                         continue
                     enemy_unit_type = require_key(state.unit_types, uid)
                     _enemy_socle = _analyzer_socle(config, enemy_unit_type, enemy_pos[0], enemy_pos[1])
                     _wait_ranged_edge = ranged_edge_distance(_wait_socle, _enemy_socle, _wait_metric)
+                    # Les trois grandeurs de 10.06 / 17.03, toutes indépendantes de l'arme donc
+                    # calculées une fois par ennemi. Mêmes noms et mêmes appels que `handle_shoot`.
+                    #  - `target_engaged` : la cible est-elle engagée avec un ALLIÉ du joueur ?
+                    #    L'unité qui attend est retirée de l'énumération de la primitive (elle itère
+                    #    `unit_positions`), sinon un tireur engagé perdrait la cible que 10.06
+                    #    l'autorise justement à viser.
+                    target_engaged = is_within_engine_engagement_zone(
+                        uid,
+                        state.unit_player,
+                        state.unit_positions,
+                        state.unit_hp,
+                        engagement_zone=_wait_ez,
+                        position_override=enemy_pos,
+                        positions_by_model=state.positions_by_model,
+                        unit_base=state.unit_base,
+                        **_wait_3d,
+                        subject_models=state.positions_by_model.get(uid),  # get allowed
+                        exclude_unit_id=wait_unit_id,
+                    )
+                    #  - l'unité qui attend est-elle engagée avec CETTE cible ? (10.06 : « you can
+                    #    only select enemy units that are ENGAGED WITH your unit as targets »)
+                    wait_unit_engaged_with_target = is_within_engine_engagement_zone(
+                        wait_unit_id,
+                        state.unit_player,
+                        {uid: enemy_pos},
+                        state.unit_hp,
+                        engagement_zone=_wait_ez,
+                        positions_by_model=state.positions_by_model,
+                        unit_base=state.unit_base,
+                        **_wait_3d,
+                        subject_models=state.current_line_models.get(wait_unit_id),  # get allowed
+                        subject_heights=state.current_line_heights.get(wait_unit_id),  # get allowed
+                        position_override=(wait_col, wait_row),
+                    )
+                    #  - 17.03 : « enemy MONSTER/VEHICLE units that are engaged can be selected as
+                    #    targets of ranged attacks ». N'exempte que la CIBLE : un tireur non-M/V
+                    #    lui-même engagé reste borné au close-quarters (encadré de 17.03).
+                    target_is_monster_or_vehicle = bool(require_key(
+                        config.unit_is_monster_or_vehicle_by_type, enemy_unit_type
+                    ))
+                    target_mv_exempt = target_is_monster_or_vehicle and not wait_unit_engaged
                     can_reach = False
                     for weapon in ranged_weapons:
                         weapon_range = require_key(weapon, 'range')
                         is_close_quarters = require_key(weapon, 'is_close_quarters')
-                        # Portée bord-à-bord (sélecteur `ranged`) ; `distance` hex reste pour == 1.
+                        # Portée bord-à-bord (sélecteur `ranged`).
                         if _wait_ranged_edge > weapon_range:
                             continue
-                        if distance == 1 and not is_close_quarters:
+                        # Les deux mêmes conditions que les deux contrôles d'erreur de
+                        # `handle_shoot`, à l'identique — un tir impossible là-bas est une cible
+                        # invalide ici, et écrire deux modèles de règles pour un seul chemin de
+                        # jeu est ce qui a laissé `handle_wait` diverger.
+                        #
+                        # 1) 10.06, volet « Non-MONSTER/Non-VEHICLE Models » : un tireur ENGAGÉ ne
+                        #    peut attaquer qu'avec des armes [CLOSE-QUARTERS]. Un M/V engagé, lui,
+                        #    tire avec TOUTES ses armes (au -1, que le moteur applique).
+                        if wait_unit_engaged and not is_close_quarters and not wait_unit_is_monster_or_vehicle:
                             continue
-                        target_in_melee = False
-                        player_int = int(player) if player is not None else None
-                        for friendly_id, friendly_p in state.unit_player.items():
-                            friendly_p_int = int(friendly_p) if friendly_p is not None else None
-                            if friendly_p_int == player_int and friendly_id != wait_unit_id:
-                                if friendly_id in state.unit_positions:
-                                    friendly_pos = state.unit_positions[friendly_id]
-                                    if is_adjacent(enemy_pos[0], enemy_pos[1], friendly_pos[0], friendly_pos[1]):
-                                        target_in_melee = True
-                                        break
-                        if target_in_melee:
+                        # 2) Cible engagée : intirable, sauf arme [CLOSE-QUARTERS], sauf exemption
+                        #    17.03 (cible M/V, tireur non engagé), sauf si le tireur est engagé
+                        #    avec ELLE — c'est précisément ce que 10.06 l'autorise à viser.
+                        if (
+                            target_engaged
+                            and not is_close_quarters
+                            and not target_mv_exempt
+                            and not wait_unit_engaged_with_target
+                        ):
                             continue
                         can_reach = True
                         break
@@ -872,8 +948,18 @@ def handle_wait(
                 stats['wait_by_phase'][player]['wait_no_los'] += 1
                 stats['shoot_vs_wait_by_player'][player]['wait_no_targets'] += 1
         else:
-            stats['wait_by_phase'][player]['wait_no_los'] += 1
-            stats['shoot_vs_wait_by_player'][player]['wait_no_targets'] += 1
+            # Ligne WAIT sans position lisible : on ne peut RIEN mesurer. Compter
+            # `wait_no_targets` ici affirmait « cette unité n'avait aucune cible » sans avoir
+            # regardé le plateau — un vert vacant, et le canal par lequel les 15 151 WAIT d'un run
+            # entier sont sortis « sans cible ». On remonte l'erreur de lecture et on ne classe
+            # rien : un compartiment vide se voit, un compartiment faux ne se voit pas.
+            stats['parse_errors'].append({
+                'episode': state.current_episode_num,
+                'turn': turn,
+                'phase': phase,
+                'line': line.strip(),
+                'error': "WAIT line without a readable 'Unit <id>(<col>,<row>)' position",
+            })
     elif phase == 'MOVE':
         stats['wait_by_phase'][player]['move_wait'] += 1
 

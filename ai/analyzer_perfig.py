@@ -64,6 +64,23 @@ def parse_base_token(token: str) -> Base:
     return (shape, int(size_str))
 
 
+def position_is_on_battlefield(pos: Optional[Tuple[int, int]]) -> bool:
+    """Cette position lue dans le journal est-elle SUR LE CHAMP DE BATAILLE ?
+
+    Jumeau analyzer de ``engine.spatial_relations.entry_is_on_battlefield`` — même sentinelle
+    ``(-1,-1)``, même règle (03.04 / 20.01) : une escouade hors table (pas encore déployée, ou en
+    réserves stratégiques tant qu'elle n'a pas fait son ingress move) n'a pas de position, donc
+    aucune géométrie à mesurer. Elle ne peut ni engager, ni bloquer, ni être prise pour cible.
+
+    L'entête du journal DÉCLARE toutes les escouades à la sentinelle (« Starting position
+    (-1,-1) ») et ``unit_positions`` la garde jusqu'à leur mise en place : toute énumération
+    géométrique de l'analyzer doit donc écarter ces unités, faute de quoi elle mesure contre le
+    coin du plateau et rend un verdict INVENTÉ — jamais une erreur. Le filtre se pose à
+    l'ÉNUMÉRATION, exactement comme ``entries_on_battlefield`` côté moteur.
+    """
+    return pos is not None and int(pos[0]) >= 0
+
+
 def parse_models_and_heights(
     text: str,
 ) -> Tuple[Optional[Dict[str, Dict[str, Tuple[int, int]]]], Optional[Dict[str, Dict[str, float]]]]:
@@ -300,6 +317,13 @@ def model_cache_entries(
     global » que subissent les entrées d'escouade. Une figurine sans hauteur connue ne reçoit
     aucune carte : la primitive lève alors si le gate est demandé, et l'appelant retombe en 2D
     plutôt que de la supposer au sol.
+
+    HORS TABLE : les socles à la sentinelle `(-1,-1)` ne produisent AUCUNE entrée. Le filtre vit
+    ICI, seule fabrique d'entrées de l'analyzer — jumeau exact d'``entries_on_battlefield`` côté
+    moteur, qui écarte à l'énumération pour la même raison : les primitives de mesure lèvent sur
+    une entrée hors table (``require_entry_on_battlefield``), et une escouade non déployée est à
+    portée d'engagement de l'origine du plateau. Une escouade entièrement hors table rend donc
+    une liste VIDE, que l'appelant lit comme « rien à mesurer ».
     """
     shape, size = _unit_base(unit_base, unit_id)
     if models:
@@ -308,7 +332,7 @@ def model_cache_entries(
         placed = [(f"{unit_id}#anchor", anchor)] if anchor is not None else []
     entries: List[Dict[str, object]] = []
     for mid, pos in placed:
-        if pos is None:
+        if not position_is_on_battlefield(pos):
             continue
         col, row = pos
         entry: Dict[str, object] = {

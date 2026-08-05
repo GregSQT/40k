@@ -228,26 +228,56 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 continue
 
             # Parse unit deployment positions (authoritative start positions)
+            #
+            # La PHASE n'est pas contrainte : une mise en place n'a pas lieu qu'au déploiement.
+            # L'ingress move des réserves stratégiques (20.04) EST une mise en place, journalisée
+            # par le même formateur (`deploy_unit` → « DEPLOYED from (-1,-1) to (c,r) ») mais dans
+            # la phase de MOUVEMENT. Épinglée sur `DEPLOYMENT`, cette regex laissait l'escouade
+            # arrivée à la sentinelle `(-1,-1)` pour tout le reste de l'épisode — et la ligne ne
+            # correspondait à aucune branche d'action ensuite (elles testent `MOVED from`,
+            # `ADVANCED`, `CHARGED`, `FLED`) : l'arrivée était donc simplement perdue.
             deploy_match = re.match(
-                r'.*E\d+\s+T\d+\s+P(\d+)\s+DEPLOYMENT\s+:\s+Unit\s+(\d+)\((\d+),\s*(\d+)\)\s+DEPLOYED\s+from\s+\((-?\d+),\s*(-?\d+)\)\s+to\s+\((\d+),\s*(\d+)\)',
+                r'.*E\d+\s+T(\d+)\s+P(\d+)\s+(\w+)\s+:\s+Unit\s+(\d+)\((\d+),\s*(\d+)\)\s+DEPLOYED\s+from\s+\((-?\d+),\s*(-?\d+)\)\s+to\s+\((\d+),\s*(\d+)\)',
                 line
             )
             if deploy_match:
-                player = int(deploy_match.group(1))
-                unit_id = str(deploy_match.group(2))
+                deploy_turn = int(deploy_match.group(1))
+                player = int(deploy_match.group(2))
+                deploy_phase = deploy_match.group(3)
+                unit_id = str(deploy_match.group(4))
                 unit_type = state.unit_types.get(unit_id)
                 if unit_type is None:
                     raise KeyError(f"Unit {unit_id} missing unit type before deployment parse")
-                dest_col = int(deploy_match.group(7))
-                dest_row = int(deploy_match.group(8))
-                
+                dest_col = int(deploy_match.group(9))
+                dest_row = int(deploy_match.group(10))
+
                 state.unit_player[unit_id] = player
                 _position_cache_set(state.unit_positions, unit_id, dest_col, dest_row)
                 state.positions_at_turn_start[unit_id] = (dest_col, dest_row)
                 if unit_id not in state.unit_movement_history:
                     state.unit_movement_history[unit_id] = []
-                state.unit_movement_history[unit_id].append({"position": (dest_col, dest_row)})
-                continue
+                # `turn` et `episode` sont PORTÉS, comme sur toute autre entrée d'historique
+                # (move, fled, charge, advance, reactive) : les trois détecteurs de collision
+                # (`move_handler`, `charge_handler`, `shoot_handler`) exigent ces deux clés pour
+                # retenir une unité posée sur l'hexe convoité. Sans elles, une escouade arrivée
+                # des réserves ne pouvait figurer dans AUCUNE collision — un chevauchement réel
+                # disparaissait du rapport au lieu d'y entrer.
+                _deploy_ts = re.search(r'\[(\d+:\d+:\d+)\]', line)
+                state.unit_movement_history[unit_id].append({
+                    'position': (dest_col, dest_row),
+                    'timestamp': _deploy_ts.group(1) if _deploy_ts else None,
+                    'action': 'deploy' if deploy_phase == 'DEPLOYMENT' else 'ingress',
+                    'turn': deploy_turn,
+                    'episode': state.current_episode_num,
+                })
+                # Seule la phase de DÉPLOIEMENT s'arrête ici. Un ingress (20.04) est une action de
+                # la phase de MOUVEMENT — un step gym à part entière (`deploy_unit` n'est pas dans
+                # `_STEP_LOG_NON_INCREMENTING_TYPES`) : il doit continuer vers le parseur d'action,
+                # qui le compte ET porte les remises à zéro de tour et de phase. L'absorber ici
+                # perdait son comptage et pouvait laisser `charged_units_current_fight` de la
+                # phase de charge précédente en place quand l'ingress ouvre la phase de move.
+                if deploy_phase == 'DEPLOYMENT':
+                    continue
 
             # Episode end
             if 'EPISODE END' in line:
@@ -588,8 +618,16 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         and not is_reactive_move
                         and not is_move_after_shooting_marker
                     )
+                    # 20.04 : l'ingress EST le mouvement du tour (« until the start of the next
+                    # Charge phase, your unit is not eligible to make any other type of move »),
+                    # et le moteur termine bien l'activation (`_handle_ingress_move_action` →
+                    # `end_activation`). Sans ce marqueur, une escouade qui arrive PUIS bouge dans
+                    # la même phase ne comptait aucune double activation. Les lignes de la phase
+                    # de DÉPLOIEMENT n'atteignent pas ce point (elles sont consommées plus haut).
+                    is_ingress_marker = ") DEPLOYED" in action_desc_upper
                     is_activation_marker = (
                         is_move_marker
+                        or is_ingress_marker
                         or " ADVANCED " in action_desc_upper
                         or " CHARGED " in action_desc_upper
                         or " FAILED CHARGE " in action_desc_upper
