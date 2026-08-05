@@ -457,7 +457,7 @@ appelants**, ou au minimum les compter séparément. Fonction, test et libellé 
 
 **Correctif de comptage** : la Forme A ne comptait donc que **6 sites vivants**, pas 7.
 
-### 8.4 — Plomberie frontend V10 morte (PARTIELLEMENT TRAITÉE — lot à part ouvert)
+### 8.4 — Plomberie frontend V10 morte — ✅ CLOSE (fusions `b8c5e0ef` + `b898bb95`)
 
 Deux clés de `game_state` n'ont plus **aucun écrivain** côté moteur :
 `fight_pile_in_footprint_zone` et `_fight_v11_pile_in_dests`. Leur seul producteur était
@@ -492,7 +492,9 @@ props threadées dans `BoardPvp.tsx` (12 223 lignes).
 Déjà fait et **MERGÉ dans `main`** (fusion `b8c5e0ef`) : le moteur
 (`_fight_v11_clear_pile_in_preview` + ses 4 appels) et les 2 branches V10 du hook. Vérifié
 pyright/pytest/tsc sur l'arbre fusionné ; **pas** par un essai PvP. Le reste de la chaîne morte
-(2 modes inatteignables, ~26 sites, handlers, props) est TOUJOURS dans `main` — lot A ouvert.
+(2 modes inatteignables, ~24 sites, handlers, props, 3 clés) a été retiré par `b898bb95` :
+−245 lignes sur 6 fichiers. Les actions moteur `pile_in` / `consolidation` ont été CONSERVÉES —
+le gym les utilise, le mort ne remontait pas au backend.
 
 Le détail exploitable — chaîne morte tracée, découpage, pièges d'outillage — est dans
 [`A_faire/menage_v10_pile_in_et_perf_charge_2026-08-05.md`](A_faire/menage_v10_pile_in_et_perf_charge_2026-08-05.md).

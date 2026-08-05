@@ -1,7 +1,9 @@
 # Deux lots issus du chantier `units_cache` — ménage V10 pile-in, et perf de la charge — 2026-08-05
 
-**Chantiers OUVERTS.** Le premier est **partiellement livré ET MERGÉ dans `main`** (fusion
-`b8c5e0ef`) ; le second n'est pas commencé. Les deux ont un worktree dédié déjà créé.
+**Lot A : CLOS** (fusion `b898bb95`). **Lot B : OUVERT**, pas commencé.
+
+⚠️ Ce document reste dans `A_faire/` tant que le lot B n'est pas traité. Ne pas le déplacer
+dans `Implémenté/` : il porte encore du travail.
 
 **Origine** : sortis du lot `units_cache`
 ([`replis_units_cache_2026-08-05.md`](../replis_units_cache_2026-08-05.md) §8.4 et §9). Ce
@@ -10,7 +12,7 @@ que ces deux paragraphes ne donnent pas.
 
 | Lot | Worktree | Base | État |
 |---|---|---|---|
-| A — ménage V10 pile-in / consolidation | `menage_v10_frontend` | `7b5871dc` | partie 1 MERGÉE (`b8c5e0ef`) ; reste §A.3 |
+| ~~A — ménage V10 pile-in / consolidation~~ ✅ | `menage_v10_frontend` | — | **CLOS** : partie 1 `b8c5e0ef`, chaîne morte `b898bb95` |
 | B — perf boucle de collision de charge | `perf_collision_charge` | `34b94c3d` | non commencé |
 
 ⚠️ Les deux worktrees ont été créés AVANT ce document ET avant la fusion `b8c5e0ef`. Faire
@@ -57,7 +59,7 @@ le **V11 par-figurine** — `pile_in_model_move` / `consolidation_model_move` + 
 d'écrivain » sans chercher si un autre chemin servait la fonctionnalité : c'était faux. *Constater
 la mort d'un symbole n'est pas constater la mort d'une fonctionnalité.*
 
-### A.3 La chaîne morte, tracée — ce qui RESTE
+### A.3 La chaîne morte, tracée — ✅ TRAITÉE (fusion `b898bb95`)
 
 `setMode("pileInPreview")` et `setMode("consolidationPreview")` n'existaient QUE dans les deux
 branches supprimées. Ces deux modes sont donc **inatteignables**, et tout ce qui en dépend est du
@@ -72,17 +74,22 @@ code conditionnel jamais exécuté :
 | props threadées à ≥4 niveaux | `onPileInMove`, `onSkipPileIn` (`BoardPvp.tsx`) |
 | 3 clés mortes + leur typage | `types/game.ts`, `useEngineAPI.ts` |
 
-**À VÉRIFIER avant de couper le dernier maillon** : si ces handlers sont les seuls émetteurs des
-actions moteur `"pile_in"` / `"consolidation"`, le mort remonte jusqu'au backend — mais le gym/IA
-les utilise peut-être. Le vérifier, ne pas le supposer.
+**Le contrôle du dernier maillon a été fait, et il a tranché dans l'autre sens** : les actions
+moteur `"pile_in"` / `"consolidation"` de `w40k_core` sont **conservées** — elles servent le
+chemin gym (`_gym_commit_fight_move`). Le mort ne remontait donc PAS au backend. C'est le genre
+de vérification qui évite de casser l'entraînement en croyant nettoyer l'UI.
 
-### A.4 Découpage recommandé
+### A.4 Bilan
 
-Le faire en **deux temps**, parce que le risque n'est pas le même :
+−245 lignes sur 6 fichiers. Vérifié : pyright 0, tsc 0, biome 0, tests ciblés au vert.
+Deux erreurs biome **préexistantes** (commit WIP `3a2a67c1` — dépendance `isDeploymentMove`
+manquante, `setError` Ingress/Deploy à reformater) ont été corrigées au passage : `biome check`
+passe désormais à 0 sur `main`.
 
-1. **Mécanique** — les ~26 sites de lecture et les unions de types. `tsc` suffit à le verrouiller.
-2. **Câblage** — handlers, props, branche de clic, et la remontée éventuelle au backend. C'est là
-   qu'est le risque : `BoardPvp.tsx` fait 12 223 lignes et n'a aucun test de rendu.
+⚠️ **Ce qui n'a PAS été validé** : l'essai PvP réel. Il n'existe aucun test de rendu sur
+`BoardPvp.tsx` / `BoardDisplay.tsx` ; `tsc` vert prouve seulement que rien ne casse au typage.
+L'aperçu pile-in PvP passe par le chemin V11 par-figurine, laissé intact et vérifié présent —
+mais seul un essai le confirme.
 
 ---
 
