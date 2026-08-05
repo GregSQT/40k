@@ -117,10 +117,6 @@ Lignes typiques (référence) :
   distinguer coût pools / caches IA vs écriture des logs.
 - ``FIGHT_KILL_VALID_TARGET_POOL`` — après une mort, si ``ATTACK_LEFT`` > 0 : durée de
   ``_fight_build_valid_target_pool`` pour l’attaquant (``pool_s``, ``valid_targets_n``).
-- ``FIGHT_CONSOLIDATION_PLAN`` — ``_fight_plan_consolidation_destinations`` (BFS / géométrie) :
-  ``plan_s``, ``has_plan``, ``trigger`` (raison ou libellé explicite).
-- ``FIGHT_CONSOLIDATION_FP_ZONE`` — ``_fight_compute_pile_in_footprint_zone`` (chemin UI humain) :
-  ``fp_zone_s``, ``dest_n``, ``trigger``.
 - ``FIGHT_CONSOLIDATION_BFS`` — ``_fight_bfs_reachable_anchors_consolidation`` : ``visited_n``,
   ``neighbor_eval_n``, ``compute_fp_s``, ``placement_valid_s``, ``total_s`` (isoler BFS vs filtre).
 - ``FIGHT_CONSOLIDATION_ENEMY_ANCHOR_FILTER`` — boucle ``for anchor in visited`` branche ennemie :

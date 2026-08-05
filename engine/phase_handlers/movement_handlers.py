@@ -25,7 +25,7 @@ from .shared_utils import (
     ACTION, WAIT, NO, PASS, ERROR, MOVE, FLED,
     enemy_entries_on_battlefield, entries_on_battlefield, entry_footprint,
     build_enemy_adjacent_hexes, update_units_cache_position, translate_squad_to_destination,
-    get_unit_position, require_unit_position,
+    get_unit_position, require_unit_position, require_unit_from_cache,
     update_enemy_adjacent_caches_after_unit_move,
     maybe_resolve_reactive_move,
     build_occupied_positions_set,
@@ -101,7 +101,11 @@ def _sync_move_preview_mask_loops(
         _mask_loop_cache.popitem(last=False)
 
 def _move_preview_footprint_span(unit: Dict[str, Any]) -> int:
-    """Dimension max d’empreinte (hexes), alignée sur charge_handlers._charge_base_diameter — rayon disques UI."""
+    """Dimension max d’empreinte (hexes) — rayon des disques UI.
+
+    Le jumeau de `charge_handlers` auquel ce calcul s'alignait était mort et a été supprimé le
+    2026-08-05 : cette fonction est désormais la seule implémentation.
+    """
     bs = unit["BASE_SIZE"]
     if isinstance(bs, (list, tuple)) and len(bs) >= 1:
         try:
@@ -1469,12 +1473,13 @@ def _is_in_enemy_engagement_zone(game_state: Dict[str, Any], unit: Dict[str, Any
     For CC_RNG>1, use hex distance calculation.
     MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1.
     """
-    unit_col, unit_row = require_unit_position(unit, game_state)
-
     unit_id_str = str(unit["id"])
     units_cache = require_key(game_state, "units_cache")
-    unit_entry = units_cache.get(unit_id_str)
-    unit_fp = entry_footprint(unit_entry) if unit_entry else {(unit_col, unit_row)}
+    unit_entry = require_unit_from_cache(
+        unit_id_str, game_state, "_is_in_enemy_engagement_zone"
+    )
+    unit_col, unit_row = int(unit_entry["col"]), int(unit_entry["row"])
+    unit_fp = entry_footprint(unit_entry)
 
     cache_key = f"enemy_adjacent_hexes_player_{int(require_key(unit, 'player'))}"
     enemy_adj = game_state.get(cache_key)
@@ -3156,8 +3161,12 @@ def movement_build_valid_destinations_pool(
     # N'affecte PAS footprint_zone (calculé séparément côté multi-hex) → la zone reste
     # complète, donc inZone ne rétrécit pas et le ghost PvP ne blink pas au bord.
     if not is_single_hex:
-        _sq_entry = units_cache.get(unit_id_str)
-        _by_model = _sq_entry.get("occupied_hexes_by_model") if _sq_entry else None
+        # Escouade absente = désynchronisation : le repli `None` SAUTAIT le bornage rigide, donc
+        # acceptait des ancres qui sortent une figurine du plateau.
+        _sq_entry = require_unit_from_cache(
+            unit_id_str, game_state, "movement_build_valid_destinations_pool"
+        )
+        _by_model = _sq_entry.get("occupied_hexes_by_model")  # get allowed (mono-fig : absent)
         if _by_model:
             _fc = [int(c) for c, _ in _by_model.values()]
             _fr = [int(r) for _, r in _by_model.values()]
