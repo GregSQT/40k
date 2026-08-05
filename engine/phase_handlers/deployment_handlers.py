@@ -147,6 +147,31 @@ def _deploy_pool_set(
     return {(int(c), int(r)) for c, r in pool}
 
 
+def placement_pool_for_squad(
+    game_state: Dict[str, Any], squad_id: str
+) -> Optional[AbstractSet[Tuple[int, int]]]:
+    """L'aire légale de mise en place de CETTE escouade, ou ``None`` pour « zone de déploiement ».
+
+    UN SEUL endroit répond à « où cette escouade a-t-elle le droit d'être posée ? ». Une escouade
+    EN RÉSERVES (20.01) n'est pas posée dans la zone de déploiement mais dans son aire d'arrivée
+    20.04, qui dépend de SES paramètres (bande de bord, clairance ennemie, zone adverse) — donc
+    d'elle, pas de son joueur. Toutes les primitives de placement (formation compacte, preview
+    par-figurine, pool per-fig, pool de suivi de bloc) passent par ici : le plan que le joueur
+    édite à l'écran est ainsi contraint par la MÊME aire que celle qui validera son commit.
+
+    Rendre ``None`` plutôt que la zone de déploiement garde `_deploy_pool_set` seul propriétaire
+    de la lecture de `deployment_state`, qui n'existe pas forcément hors phase de déploiement.
+    """
+    from engine.phase_handlers.movement_handlers import (
+        ingress_setup_pool,
+        unit_is_in_strategic_reserves,
+    )
+
+    if not unit_is_in_strategic_reserves(game_state, str(squad_id)):
+        return None
+    return ingress_setup_pool(game_state, str(squad_id))
+
+
 def _deployed_occupied_positions(
     game_state: Dict[str, Any], exclude_squad_id: str, level: Optional[int] = None
 ) -> Set[Tuple[int, int]]:
@@ -442,7 +467,7 @@ def deployment_build_model_destinations_pool(
         )
     squad_id = str(require_key(model, "squad_id"))
     player = int(require_key(model, "player"))
-    pool_set = _deploy_pool_set(game_state, player)
+    pool_set = _deploy_pool_set(game_state, player, placement_pool_for_squad(game_state, squad_id))
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     wall_hexes = game_state.get("wall_hexes", set())  # get allowed
@@ -651,7 +676,10 @@ def deployment_build_squad_destinations_pool(
             f"deployment_build_squad_destinations_pool: model {ref_mid} not in models_cache"
         )
     player = int(require_key(ref_model, "player"))
-    pool_set = _deploy_pool_set(game_state, player)
+    pool_set = _deploy_pool_set(
+        game_state, player,
+        placement_pool_for_squad(game_state, str(require_key(ref_model, "squad_id"))),
+    )
 
     # Empreinte combinée (absolue) du bloc aux positions provisoires.
     combined: Set[Tuple[int, int]] = set()
@@ -857,18 +885,28 @@ def deployment_generate_formation_action(
     squad_id = str(require_key(action, "unitId"))
     center_col = int(require_key(action, "destCol"))
     center_row = int(require_key(action, "destRow"))
-    deployment_state = require_key(game_state, "deployment_state")
-    current_deployer = int(require_key(deployment_state, "current_deployer"))
-    units_cache = require_key(game_state, "units_cache")
-    entry = require_key(units_cache, squad_id)
-    if int(require_key(entry, "player")) != current_deployer:
-        return False, {"error": "unit_not_current_deployer", "unitId": squad_id}
+    pool = placement_pool_for_squad(game_state, squad_id)
+    if pool is None:
+        # Mise en place de DÉPLOIEMENT : c'est l'alternance des déployeurs qui dit à qui c'est.
+        deployment_state = require_key(game_state, "deployment_state")
+        current_deployer = int(require_key(deployment_state, "current_deployer"))
+        units_cache = require_key(game_state, "units_cache")
+        entry = require_key(units_cache, squad_id)
+        if int(require_key(entry, "player")) != current_deployer:
+            return False, {"error": "unit_not_current_deployer", "unitId": squad_id}
+    else:
+        # Arrivée de réserves (20.04) : pas de `current_deployer` pendant la phase de mouvement.
+        # La porte équivalente est l'éligibilité du tour — le round d'arrivée est LU par unité.
+        from engine.phase_handlers.movement_handlers import ingress_eligible_units
+
+        if squad_id not in ingress_eligible_units(game_state):
+            return False, {"error": "ingress_not_available_this_round", "unitId": squad_id}
     # Niveau de VUE au drop (étages) : sert de niveau DEMANDÉ pour résoudre l'effectif par fig
     # (§13.06). Sans lui, le preview le prendrait à 0 → toutes les figs au sol même en vue étage.
     view_level = int(action.get("level") or 0)  # get allowed (défaut sol)
-    plan = generate_compact_formation(game_state, squad_id, center_col, center_row)
+    plan = generate_compact_formation(game_state, squad_id, center_col, center_row, pool)
     plan_leveled = [(mid, c, r, view_level) for mid, c, r in plan]
-    preview = deployment_preview_plan(game_state, squad_id, plan_leveled)
+    preview = deployment_preview_plan(game_state, squad_id, plan_leveled, pool)
     return True, {
         "action": "deploy_generate_formation",
         "unitId": squad_id,
@@ -885,7 +923,9 @@ def deployment_preview_action(
     """Action read-only : dry-run d'un plan fourni par le front."""
     squad_id = str(require_key(action, "unitId"))
     plan = _parse_plan(action)
-    preview = deployment_preview_plan(game_state, squad_id, plan)
+    preview = deployment_preview_plan(
+        game_state, squad_id, plan, placement_pool_for_squad(game_state, squad_id)
+    )
     return True, {
         "action": "deploy_preview",
         "unitId": squad_id,

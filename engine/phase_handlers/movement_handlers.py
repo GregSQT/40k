@@ -988,6 +988,12 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         # pourrait plus se terminer par épuisement du pool.
         return _handle_ingress_move_action(game_state, active_unit, action)
 
+    elif action_type == "ingress_commit":
+        # 20.04 — même arrivée, mais avec le plan par-figurine ÉDITÉ par le joueur (jumeau de
+        # `commit_move_plan` pour la mise en place). Routée ici pour la même raison que
+        # `ingress_move` : c'est ce qui lui donne sa fin d'activation.
+        return _handle_ingress_commit_action(game_state, active_unit, action)
+
     elif action_type == "skip":
         # Engine determined unit has no valid actions (e.g. no valid destinations)
         return _handle_skip_action(game_state, active_unit, had_valid_destinations=False)
@@ -5345,6 +5351,48 @@ def _handle_ingress_move_action(
             "error": "no_legal_formation_for_ingress",
             "unitId": squad_id, "destCol": dest_col, "destRow": dest_row,
         }
+    return _finalize_ingress(game_state, unit, squad_id, plan)
+
+
+def _handle_ingress_commit_action(
+    game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any]
+) -> Tuple[bool, Dict[str, Any]]:
+    """Action `ingress_commit` (20.04) : pose l'escouade selon le plan ÉDITÉ par le joueur.
+
+    Jumeau de `deploy_commit` pour l'arrivée. `ingress_move` construit la formation lui-même à
+    partir d'une seule ancre — c'est ce qu'il faut au masque de l'agent, qui n'a qu'une case à
+    proposer. Le joueur humain, lui, place ses figurines une à une dans l'aire d'arrivée comme il
+    le fait au déploiement, et envoie le plan obtenu ; `ingress_commit_plan` le revalide contre
+    l'aire du tour, donc rien n'est cru sur parole.
+    """
+    squad_id = str(require_key(unit, "id"))
+    if not unit_is_in_strategic_reserves(game_state, squad_id):
+        return False, {"error": "unit_not_in_strategic_reserves", "unitId": squad_id}
+    if squad_id not in ingress_eligible_units(game_state):
+        return False, {"error": "ingress_not_available_this_round", "unitId": squad_id}
+    from engine.phase_handlers.shared_utils import parse_model_plan
+
+    plan = [
+        (mid, col, row, level)
+        for mid, col, row, level in parse_model_plan(
+            require_key(action, "plan"), action_name="ingress_commit"
+        )
+    ]
+    return _finalize_ingress(game_state, unit, squad_id, plan)
+
+
+def _finalize_ingress(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    squad_id: str,
+    plan: List[Tuple[str, int, int, int]],
+) -> Tuple[bool, Dict[str, Any]]:
+    """Pose + journal + invalidation des pools + fin d'activation, pour les DEUX arrivées.
+
+    Tronc commun de `ingress_move` (ancre seule) et `ingress_commit` (plan édité) : ce qui suit
+    la pose ne dépend pas de la façon dont le plan a été obtenu, et l'avoir écrit deux fois est
+    exactement ce qui a déjà produit ici une arrivée sans fin d'activation.
+    """
     ok, result = ingress_commit_plan(game_state, squad_id, plan)
     if not ok:
         return False, result

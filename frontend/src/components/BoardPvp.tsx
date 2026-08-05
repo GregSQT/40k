@@ -647,6 +647,9 @@ type BoardProps = {
     canValidate: boolean;
     placed: boolean;
     following: boolean;
+    /** 20.04 — plan d'ARRIVÉE de réserves : même édition, mais l'aire légale est la bande
+     *  d'arrivée (contours sur ``ingressMaskLoopsRef``), pas la zone de déploiement. */
+    ingress: boolean;
   } | null;
   /** Pool de la zone de déploiement (Set "col,row") du déployeur courant. */
   deployPoolRef?: React.RefObject<Set<string>>;
@@ -9441,10 +9444,13 @@ export default function Board({
     /** Pile-in / consolidation : masque uniquement depuis ``footprintZonePoolRef`` (union hex → polygone lissé côté client, comme move sans ``move_preview_footprint_mask_loops``). */
     const activeFootprintMaskLoops = (() => {
       let raw: number[][] | null;
-      if (mode === "ingressPlacement") {
+      if (mode === "ingressPlacement" || (isDeploymentMove && deployPlan?.ingress)) {
         // 20.04 — l'aire d'arrivée ne vit PAS dans le game_state : ``ingress_preview`` est en
         // lecture pure et rend ses contours dans sa réponse. Ils sont donc lus sur leur ref, pas
         // sur ``move_preview_footprint_mask_loops`` (qui décrirait encore le move précédent).
+        // Elle reste affichée pendant l'ÉDITION du plan d'arrivée (mode ``deploymentMove``) :
+        // c'est la seule chose à l'écran qui dit au joueur jusqu'où il a le droit de pousser ses
+        // figurines, et la phase de mouvement ne peint aucune zone de déploiement à la place.
         raw = ingressMaskLoopsRef?.current ?? null;
       } else if (mode === "perModelMove") {
         raw = squadMovePlan?.activeModelId ? (squadMoveModelMaskLoopsRef?.current ?? null) : null;

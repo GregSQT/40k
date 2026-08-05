@@ -1305,3 +1305,154 @@ def test_ingress_preview_loops_leave_the_shared_preview_channel_untouched():
     assert "move_preview_footprint_mask_loops" not in gs, (
         "la bande d'arrivée est restée dans le canal d'aperçu partagé"
     )
+
+
+# ---------------------------------------------------------------------------
+# 20.04 — l'arrivée s'ÉDITE comme un déploiement (plan par-figurine, puis commit)
+# ---------------------------------------------------------------------------
+
+
+def _ingress_ready_engine():
+    """Moteur avec une escouade J1 en réserves, au tour 2, phase de mouvement du J1."""
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    gs["turn"] = 2
+    gs["current_player"] = 1
+    gs["phase"] = "move"
+    squad_id = _reserve_squad(eng, deep_strike=False)
+    return eng, gs, squad_id
+
+
+def test_placement_pool_of_a_reserve_squad_is_its_arrival_area_not_the_deployment_zone():
+    """LE point unique : les primitives de placement voient l'aire 20.04 pour une réserve.
+
+    Sans cela, le plan que le joueur édite serait contraint par la zone de DÉPLOIEMENT, qui n'a
+    aucun rapport avec l'aire d'arrivée — l'écran proposerait des cases que le commit refuse.
+    """
+    from engine.phase_handlers.deployment_handlers import placement_pool_for_squad
+    from engine.phase_handlers.movement_handlers import ingress_setup_pool
+
+    eng, gs, squad_id = _ingress_ready_engine()
+    pool = placement_pool_for_squad(gs, squad_id)
+    assert pool is not None, "une escouade EN RÉSERVES n'est pas posée dans la zone de déploiement"
+    assert set(pool) == set(ingress_setup_pool(gs, squad_id))
+
+    # Une escouade SUR LA TABLE garde la zone de déploiement (None = pas de substitution).
+    on_table = [
+        sid for sid in gs["units_cache"]
+        if sid != squad_id and _unit(gs, sid)["deployed_on_turn"] is not None
+    ]
+    assert on_table, "aucune escouade posée — test sans portée"
+    assert placement_pool_for_squad(gs, on_table[0]) is None
+
+
+def test_ingress_formation_and_preview_are_confined_to_the_arrival_area():
+    """`deploy_generate_formation` + `deploy_preview` sur une réserve : bornés par l'aire 20.04."""
+    from engine.phase_handlers.deployment_handlers import (
+        deployment_generate_formation_action,
+        deployment_preview_action,
+    )
+    from engine.phase_handlers.movement_handlers import ingress_setup_pool
+
+    eng, gs, squad_id = _ingress_ready_engine()
+    pool = ingress_setup_pool(gs, squad_id)
+    assert len(pool) > 100, "aire d'arrivée quasi vide — test sans portée"
+    anchor = sorted(pool)[len(pool) // 2]
+
+    ok, res = deployment_generate_formation_action(
+        gs, {"unitId": squad_id, "destCol": anchor[0], "destRow": anchor[1]}
+    )
+    assert ok, res
+    plan = res["plan"]
+    assert plan, "formation vide"
+    for _mid, col, row, _lv in plan:
+        assert (int(col), int(row)) in pool, (
+            f"figurine placée en ({col},{row}), hors de l'aire d'arrivée 20.04"
+        )
+
+    ok, prev = deployment_preview_action(gs, {"unitId": squad_id, "plan": plan})
+    assert ok and prev["can_validate"], prev
+
+    # Le MÊME plan poussé d'une case hors aire doit être refusé par le preview : c'est ce que le
+    # joueur verra en rouge s'il pousse une figurine trop loin.
+    outside = next(
+        (c, r)
+        for c in range(int(gs["board_cols"]))
+        for r in range(int(gs["board_rows"]))
+        if (c, r) not in pool
+    )
+    moved = [list(plan[0]) ] + [list(e) for e in plan[1:]]
+    moved[0][1], moved[0][2] = outside[0], outside[1]
+    ok, prev_bad = deployment_preview_action(gs, {"unitId": squad_id, "plan": moved})
+    assert ok
+    assert not prev_bad["can_validate"], "une figurine hors aire d'arrivée doit passer au rouge"
+
+
+def test_ingress_commit_applies_the_edited_plan_and_ends_the_activation():
+    """VERROU de bout en bout : le plan ÉDITÉ par le joueur arrive, verrou 20.04 compris.
+
+    C'est le jumeau de `test_ingress_places_every_model_and_locks_further_moves` pour le siège
+    humain : mêmes conséquences (posée, plus en réserves, verrouillée, hors du pool d'activation)
+    mais à partir d'un plan fourni par le client, pas d'une ancre.
+    """
+    from engine.phase_handlers.deployment_handlers import deployment_generate_formation_action
+    from engine.phase_handlers.movement_handlers import (
+        execute_action, ingress_setup_pool, unit_ingress_move_locked,
+    )
+
+    eng, gs, squad_id = _ingress_ready_engine()
+    pool = ingress_setup_pool(gs, squad_id)
+    anchor = sorted(pool)[len(pool) // 2]
+    ok, res = deployment_generate_formation_action(
+        gs, {"unitId": squad_id, "destCol": anchor[0], "destRow": anchor[1]}
+    )
+    assert ok, res
+    plan = res["plan"]
+
+    unit = _unit(gs, squad_id)
+    gs.setdefault("move_activation_pool", []).append(squad_id)
+    ok, out = execute_action(
+        gs, unit, {"action": "ingress_commit", "unitId": squad_id, "plan": plan}, eng.config
+    )
+    assert ok, out
+
+    assert unit["in_strategic_reserves"] is False
+    assert unit["deployed_on_turn"] == 2
+    for mid in gs["squad_models"][squad_id]:
+        model = gs["models_cache"][mid]
+        assert (int(model["col"]), int(model["row"])) != UNDEPLOYED
+        assert (int(model["col"]), int(model["row"])) in pool
+    assert unit_ingress_move_locked(gs, squad_id), "verrou 20.04 absent après un commit édité"
+    assert squad_id not in gs["move_activation_pool"], (
+        "l'activation n'est pas terminée : l'escouade pourrait rebouger le même tour"
+    )
+
+
+def test_ingress_commit_refuses_a_plan_that_leaves_the_arrival_area():
+    """Le client n'est pas cru sur parole : le plan est revalidé contre l'aire du tour."""
+    from engine.phase_handlers.deployment_handlers import deployment_generate_formation_action
+    from engine.phase_handlers.movement_handlers import execute_action, ingress_setup_pool
+
+    eng, gs, squad_id = _ingress_ready_engine()
+    pool = ingress_setup_pool(gs, squad_id)
+    anchor = sorted(pool)[len(pool) // 2]
+    ok, res = deployment_generate_formation_action(
+        gs, {"unitId": squad_id, "destCol": anchor[0], "destRow": anchor[1]}
+    )
+    assert ok, res
+    plan = [list(e) for e in res["plan"]]
+    outside = next(
+        (c, r)
+        for c in range(int(gs["board_cols"]))
+        for r in range(int(gs["board_rows"]))
+        if (c, r) not in pool
+    )
+    plan[0][1], plan[0][2] = outside[0], outside[1]
+
+    unit = _unit(gs, squad_id)
+    ok, out = execute_action(
+        gs, unit, {"action": "ingress_commit", "unitId": squad_id, "plan": plan}, eng.config
+    )
+    assert not ok, "un plan hors aire d'arrivée doit être REFUSÉ, pas appliqué"
+    assert unit["in_strategic_reserves"] is True, "l'escouade reste en réserves après un refus"

@@ -630,6 +630,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     placed: boolean;
     /** Squad move : le bloc suit le curseur (double-clic l'active, clic le pose). */
     following: boolean;
+    /** 20.04 — ce plan est une ARRIVÉE de réserves, pas un déploiement. Même édition (le moteur
+     *  partage toute la chaîne de mise en place, seule l'aire légale change), mais le Valider
+     *  route vers `ingress_commit` : lui seul pose le verrou 20.04 et termine l'activation. */
+    ingress: boolean;
   } | null>(null);
   /** Ref miroir de deployPlan pour accès synchrone dans les callbacks. */
   const deployPlanRef = useRef<typeof deployPlan>(null);
@@ -3911,6 +3915,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // sélectionne rien. Sans cette garde, cliquer sur une unité annulerait le mode et le joueur
       // perdrait l'aire affichée sans avoir rien fait.
       if (mode === "ingressPlacement" && unitId !== null) return;
+      // Plan d'ARRIVÉE en cours d'édition (20.04) : même garde, pour la même raison. La garde
+      // `deploymentMove` ci-dessous ne couvre que la phase de déploiement ; une arrivée s'édite
+      // en phase de mouvement, où un clic sur une unité repasserait en mode "select" et jetterait
+      // le plan que le joueur est en train de composer.
+      if (mode === "deploymentMove" && deployPlanRef.current?.ingress && unitId !== null) return;
       const numericUnitId = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
 
       // Déploiement par escouade (PvP "active") : un clic sur une escouade déployable entre en
@@ -5671,6 +5680,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         canValidate: false,
         placed: false,
         following: false,
+        ingress: false,
       });
       setMode("deploymentMove");
       setSelectedUnitId(uid);
@@ -5878,12 +5888,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     // moment du Valider (sinon changer d'étage avant de valider committait tout au sol).
     const planArr = toPlanArray(plan.models);
     try {
+      // 20.04 — une ARRIVÉE n'est pas un déploiement : `deploy_commit` poserait les figurines
+      // sans marquer l'escouade arrivée, sans le verrou « aucun autre mouvement » et sans
+      // terminer l'activation — elle pourrait rebouger dans le même tour.
       await executeAction({
-        action: "deploy_commit",
+        action: plan.ingress ? "ingress_commit" : "deploy_commit",
         unitId: String(plan.unitId),
         plan: planArr,
       });
       deployPoolRef.current = new Set();
+      ingressMaskLoopsRef.current = null;
+      ingressUnitIdRef.current = null;
       setDeployPlan(null);
       setMode("select");
       setSelectedUnitId(null);
@@ -5893,9 +5908,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     }
   }, [executeAction]);
 
-  /** Annule le mode déploiement (aucune écriture backend). */
+  /** Annule le mode déploiement OU une arrivée en cours d'édition (aucune écriture backend). */
   const handleCancelDeploy = useCallback(() => {
     deployPoolRef.current = new Set();
+    // L'aire d'arrivée 20.04 vit sur ses refs, pas dans le game_state : sans ce nettoyage elle
+    // resterait dessinée après l'abandon d'une arrivée.
+    ingressMaskLoopsRef.current = null;
+    ingressUnitIdRef.current = null;
     setDeployPlan(null);
     setMode("select");
     setSelectedUnitId(null);
@@ -5995,34 +6014,58 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [postEngineQuery]
   );
 
-  /** 20.04 — pose l'escouade à (col,row). Le moteur construit lui-même le plan par-figurine
-   *  (`build_validated_deployment_plan` contraint au pool d'ingress) et refuse ce qui ne tient
-   *  pas : le client n'anticipe aucune de ces conditions, il rapporte le refus. */
+  /** 20.04 — 1er clic dans l'aire d'arrivée : OUVRE un plan éditable, ne pose pas.
+   *
+   *  Jumeau exact du drop de déploiement (`handleDeployDropSquad`) : même action backend, qui
+   *  contraint la formation à l'aire d'arrivée dès que l'escouade est en réserves
+   *  (`placement_pool_for_squad`). Le joueur peut ensuite déplacer chaque figurine et le bloc
+   *  entier dans l'aire, exactement comme au déploiement, puis valider.
+   *
+   *  L'ancienne pose en un coup (`ingress_move`) reste le chemin de l'AGENT : son masque n'a
+   *  qu'une ancre à proposer, et le moteur y construit la formation lui-même. */
   const handleIngressPlace = useCallback(
     async (col: number, row: number) => {
       const uid = ingressUnitIdRef.current;
       if (uid === null) return;
-      const data = await executeAction({
-        action: "ingress_move",
-        unitId: String(uid),
-        destCol: col,
-        destRow: row,
-      });
-      // Même lecture qu'au dépôt. Sur une NON-ACTION on reste en mode pose, l'aire d'arrivée
-      // reste affichée et le joueur peut recliquer — en sortir aurait laissé l'escouade en
-      // réserves sans plus rien à l'écran pour l'en faire sortir.
-      const outcome = readEngineActionOutcome(data);
-      if (outcome.kind === "noop") return;
-      if (outcome.kind === "refused") {
-        setError(`Ingress move refused: ${outcome.message}`);
+      let result: Record<string, unknown> | null = null;
+      try {
+        result = await postEngineQuery({
+          action: "deploy_generate_formation",
+          unitId: String(uid),
+          destCol: col,
+          destRow: row,
+          level: currentLevelRef?.current ?? 0,
+        });
+      } catch (err) {
+        setError(`Ingress formation failed: ${formatApiConnectionError(err)}`);
         return;
       }
-      ingressMaskLoopsRef.current = null;
-      ingressUnitIdRef.current = null;
-      setMode("select");
-      setSelectedUnitId(null);
+      const rawPlan = result?.plan as Array<[string | number, number, number, number]> | undefined;
+      if (!rawPlan || !Array.isArray(rawPlan)) {
+        throw new Error("[INGRESS] deploy_generate_formation: plan absent dans la réponse");
+      }
+      const models: Record<string, { col: number; row: number; level?: number }> = {};
+      for (const [mid, c, r, l] of rawPlan) {
+        models[String(mid)] = { col: c, row: r, level: Number(l) };
+      }
+      setDeployPlan({
+        unitId: uid,
+        models,
+        originModels: { ...models },
+        activeModelId: null,
+        perModelValid: (result?.per_model ?? {}) as Record<string, boolean>,
+        effectiveLevels: (result?.effective_levels ?? {}) as Record<string, number>,
+        coherencyOk: result?.coherency_ok === true,
+        canValidate: result?.can_validate === true,
+        placed: true,
+        following: false,
+        ingress: true,
+      });
+      // L'aire d'arrivée reste affichée pendant l'édition : `ingressMaskLoopsRef` n'est vidée
+      // qu'au commit ou à l'annulation, jamais ici.
+      setMode("deploymentMove");
     },
-    [executeAction]
+    [postEngineQuery, currentLevelRef]
   );
 
   // 20.04 — « At the end of the third battle round … destroyed ». Avertir CHAQUE joueur au début

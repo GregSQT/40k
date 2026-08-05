@@ -3343,66 +3343,71 @@ export const BoardWithAPI: React.FC = () => {
             </div>
           </div>
         )}
-      {apiProps.gameState?.phase === "deployment" && apiProps.mode === "deploymentMove" && (
-        <div
-          className="squad-action-bar"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            background: "#1f2937",
-            border: "1px solid #555",
-            borderRadius: "8px",
-            padding: 8,
-            marginTop: 0,
-            marginBottom: 2,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              if (!isGameOver) apiProps.onCancelDeploy?.();
-            }}
+      {/* Barre Annuler / Valider de la mise en place par-figurine. Elle sert aussi à l'ARRIVÉE de
+          réserves (20.04), qui s'édite exactement pareil mais en phase de MOUVEMENT : la
+          conditionner à la seule phase de déploiement laissait le joueur avec un plan d'arrivée
+          qu'aucun bouton ne pouvait valider. */}
+      {apiProps.mode === "deploymentMove" &&
+        (apiProps.gameState?.phase === "deployment" || apiProps.deployPlan?.ingress === true) && (
+          <div
+            className="squad-action-bar"
             style={{
-              border: "1px solid rgba(0,0,0,0.35)",
-              borderRadius: 6,
-              background: "var(--ui-gray-cancel)",
-              color: "#fff",
-              cursor: "pointer",
-              fontSize: 14,
-              fontWeight: 700,
-              padding: "8px 14px",
-              width: 110,
-              textAlign: "center",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              background: "#1f2937",
+              border: "1px solid #555",
+              borderRadius: "8px",
+              padding: 8,
+              marginTop: 0,
+              marginBottom: 2,
             }}
           >
-            Annuler
-          </button>
-          <button
-            type="button"
-            disabled={!apiProps.deployPlan?.canValidate}
-            onClick={() => {
-              if (!isGameOver) apiProps.onCommitDeploy?.();
-            }}
-            style={{
-              border: "1px solid rgba(0,0,0,0.35)",
-              borderRadius: 6,
-              background: apiProps.deployPlan?.canValidate
-                ? "var(--ui-green-validate)"
-                : "var(--ui-green-validate-off)",
-              color: apiProps.deployPlan?.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
-              cursor: apiProps.deployPlan?.canValidate ? "pointer" : "not-allowed",
-              fontSize: 14,
-              fontWeight: 700,
-              padding: "8px 14px",
-              width: 110,
-              textAlign: "center",
-            }}
-          >
-            Valider
-          </button>
-        </div>
-      )}
+            <button
+              type="button"
+              onClick={() => {
+                if (!isGameOver) apiProps.onCancelDeploy?.();
+              }}
+              style={{
+                border: "1px solid rgba(0,0,0,0.35)",
+                borderRadius: 6,
+                background: "var(--ui-gray-cancel)",
+                color: "#fff",
+                cursor: "pointer",
+                fontSize: 14,
+                fontWeight: 700,
+                padding: "8px 14px",
+                width: 110,
+                textAlign: "center",
+              }}
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              disabled={!apiProps.deployPlan?.canValidate}
+              onClick={() => {
+                if (!isGameOver) apiProps.onCommitDeploy?.();
+              }}
+              style={{
+                border: "1px solid rgba(0,0,0,0.35)",
+                borderRadius: 6,
+                background: apiProps.deployPlan?.canValidate
+                  ? "var(--ui-green-validate)"
+                  : "var(--ui-green-validate-off)",
+                color: apiProps.deployPlan?.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+                cursor: apiProps.deployPlan?.canValidate ? "pointer" : "not-allowed",
+                fontSize: 14,
+                fontWeight: 700,
+                padding: "8px 14px",
+                width: 110,
+                textAlign: "center",
+              }}
+            >
+              Valider
+            </button>
+          </div>
+        )}
       {apiProps.mode === "squadModelShoot" && apiProps.squadShootPlan && (
         <div
           className="squad-action-bar"
