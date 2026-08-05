@@ -79,6 +79,8 @@ describe("canSelectReserveUnitForIngress — 20.04", () => {
 
 describe("shouldWarnReservesLastRound — 20.04", () => {
   const reserves = [{ player: 1 }];
+  /** PvP local : les deux joueurs sont humains. */
+  const bothHuman: Record<string, "human" | "ai"> = { "1": "human", "2": "human" };
 
   it("avertit le joueur concerné au round de destruction lu du moteur", () => {
     expect(
@@ -86,6 +88,8 @@ describe("shouldWarnReservesLastRound — 20.04", () => {
         turn: 3,
         lastRound: 3,
         currentPlayer: 1,
+        playerTypes: bothHuman,
+        isPreviewState: false,
         reserveUnits: reserves,
       })
     ).toBe(true);
@@ -97,6 +101,8 @@ describe("shouldWarnReservesLastRound — 20.04", () => {
         turn: 3,
         lastRound: 3,
         currentPlayer: 2,
+        playerTypes: bothHuman,
+        isPreviewState: false,
         reserveUnits: reserves,
       })
     ).toBe(false);
@@ -109,6 +115,8 @@ describe("shouldWarnReservesLastRound — 20.04", () => {
           turn,
           lastRound: 3,
           currentPlayer: 1,
+          playerTypes: bothHuman,
+          isPreviewState: false,
           reserveUnits: reserves,
         })
       ).toBe(false);
@@ -117,7 +125,14 @@ describe("shouldWarnReservesLastRound — 20.04", () => {
 
   it("n'avertit pas un joueur dont toutes les réserves sont arrivées", () => {
     expect(
-      shouldWarnReservesLastRound({ turn: 3, lastRound: 3, currentPlayer: 1, reserveUnits: [] })
+      shouldWarnReservesLastRound({
+        turn: 3,
+        lastRound: 3,
+        currentPlayer: 1,
+        playerTypes: bothHuman,
+        isPreviewState: false,
+        reserveUnits: [],
+      })
     ).toBe(false);
   });
 
@@ -127,6 +142,66 @@ describe("shouldWarnReservesLastRound — 20.04", () => {
         turn: 3,
         lastRound: undefined,
         currentPlayer: 1,
+        playerTypes: bothHuman,
+        isPreviewState: false,
+        reserveUnits: reserves,
+      })
+    ).toBe(false);
+  });
+
+  // PvE : le modal est un backdrop plein écran à valider. Sur le tour du BOT il bloquerait
+  // l'humain pour lui annoncer la destruction d'unités qui ne sont pas les siennes.
+  it("n'avertit pas sur le tour d'un joueur IA, même s'il a des réserves", () => {
+    expect(
+      shouldWarnReservesLastRound({
+        turn: 3,
+        lastRound: 3,
+        currentPlayer: 2,
+        playerTypes: { "1": "human", "2": "ai" },
+        isPreviewState: false,
+        reserveUnits: [{ player: 2 }],
+      })
+    ).toBe(false);
+  });
+
+  it("l'humain du même PvE reste averti de SES réserves", () => {
+    expect(
+      shouldWarnReservesLastRound({
+        turn: 3,
+        lastRound: 3,
+        currentPlayer: 1,
+        playerTypes: { "1": "human", "2": "ai" },
+        isPreviewState: false,
+        reserveUnits: reserves,
+      })
+    ).toBe(true);
+  });
+
+  // Rembobinage : le popup consommerait la clé `round:joueur` mémorisée par l'appelant, et
+  // l'avertissement RÉEL ne serait plus émis au retour au live — réserves détruites en silence.
+  it("n'avertit pas sur un état APERÇU, même quand tout le reste est réuni", () => {
+    expect(
+      shouldWarnReservesLastRound({
+        turn: 3,
+        lastRound: 3,
+        currentPlayer: 1,
+        playerTypes: bothHuman,
+        isPreviewState: true,
+        reserveUnits: reserves,
+      })
+    ).toBe(false);
+  });
+
+  // `player_types` vient du moteur (`_attach_player_types`) : tant qu'il n'a rien dit, le type
+  // de joueur n'est pas devinable et aucun modal bloquant ne s'ouvre.
+  it("sans player_types, aucun avertissement", () => {
+    expect(
+      shouldWarnReservesLastRound({
+        turn: 3,
+        lastRound: 3,
+        currentPlayer: 1,
+        playerTypes: undefined,
+        isPreviewState: false,
         reserveUnits: reserves,
       })
     ).toBe(false);

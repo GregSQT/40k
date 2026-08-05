@@ -9930,15 +9930,16 @@ export default function Board({
           continue;
         }
 
-        // Déploiement : une escouade non encore déployée a son ancre + toutes ses
-        // figurines à la sentinelle (-1,-1). Sans ce garde, ses N figurines sont
-        // dessinées empilées à l'origine (≈ 1 blob/escouade). On ne la rend QUE
-        // si c'est l'escouade en cours de placement (deploy ghost).
-        if (
-          enginePhaseForPools === "deployment" &&
-          (Number(unit.col) < 0 || Number(unit.row) < 0) &&
-          !isDeployGhost
-        ) {
+        // Une escouade HORS TABLE a son ancre + toutes ses figurines à la sentinelle (-1,-1).
+        // Sans ce garde, ses N figurines sont dessinées empilées à l'origine (≈ 1 blob/escouade).
+        // On ne la rend QUE si c'est l'escouade en cours de placement (deploy ghost).
+        //
+        // AUCUN filtre de phase ici : la sentinelle veut dire « hors table » à tout instant, pas
+        // seulement au déploiement (`entry_is_on_battlefield`, engine/spatial_relations.py). Une
+        // unité en réserves stratégiques (20.01) reste VIVANTE dans `units_cache` à (-1,-1)
+        // jusqu'à son ingress move — elle traverse donc commandement, mouvement, tir et combat.
+        // Restreindre le garde au déploiement ramenait le blob dès la phase de commandement.
+        if ((Number(unit.col) < 0 || Number(unit.row) < 0) && !isDeployGhost) {
           continue;
         }
 

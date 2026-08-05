@@ -29,6 +29,7 @@ import {
   getFightAttackerAttackLeft,
   isFightAttackSelectionUiOpen,
 } from "../utils/activationClickTarget";
+import { readEngineActionOutcome } from "../utils/engineActionOutcome";
 import { logFightClick } from "../utils/fightClickDebug";
 import { cubeDistance, cubeToOffset, offsetToCube } from "../utils/gameHelpers";
 import { addHexKeysToSet } from "../utils/movePoolRefsSync";
@@ -1114,6 +1115,24 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     }
   }, [activeRuleChoicePromptFromState, selectedUnitId]);
 
+  /** 20.04 — clés `round:joueur` dont l'avertissement « dernier round » a déjà été montré.
+   *
+   *  Déclarée ICI, en amont des démarrages de partie, et non près de son effet : c'est la SEULE
+   *  mémoire d'interaction qui doive survivre à un rembobinage (le joueur a déjà fermé le popup ;
+   *  revoir un point de sauvegarde ne doit pas le rouvrir) mais PAS à un changement de partie.
+   *  Elle n'entre donc pas dans `resetInteractionState`, qui sert les deux cas indistinctement :
+   *  elle est vidée par `clearReservesLastRoundMemo`, aux seuls endroits où la partie JOUÉE est
+   *  remplacée (démarrages, chargement d'une sauvegarde ou d'une partie). Le hook n'étant jamais
+   *  démonté, sans cette purge la partie suivante retrouvait la clé `"3:1"` de la précédente et
+   *  n'avertissait plus personne.
+   *
+   *  Un SET et non un slot unique : les deux joueurs sont avertis au même round, chacun au début
+   *  de son tour, donc deux clés coexistent dans la fenêtre. */
+  const reservesLastRoundShownRef = useRef<Set<string>>(new Set());
+  const clearReservesLastRoundMemo = useCallback(() => {
+    reservesLastRoundShownRef.current.clear();
+  }, []);
+
   // Initialize game - FIXED: Added ref to prevent multiple calls
   const gameInitialized = useRef(false);
 
@@ -1194,6 +1213,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           }
           setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
           setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
+          // Partie NEUVE : les avertissements 20.04 de la partie précédente ne la concernent pas.
+          clearReservesLastRoundMemo();
         } else {
           throw new Error(data.error || "Failed to start game");
         }
@@ -1206,7 +1227,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     };
 
     startGame();
-  }, []);
+  }, [clearReservesLastRoundMemo]);
 
   /** Relance une partie avec le scénario donné. options.preserveP1PositionsFrom : état de jeu à partir duquel garder les positions des unités P1. skipLoading : ne pas afficher l'écran de chargement. */
   const startGameWithScenario = useCallback(
@@ -1241,6 +1262,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         if (data.success && data.game_state) {
           setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
           setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
+          // Partie NEUVE : les avertissements 20.04 de la partie précédente ne la concernent pas.
+          clearReservesLastRoundMemo();
         } else {
           throw new Error(data.error || "Failed to start game");
         }
@@ -1252,7 +1275,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
       }
     },
-    []
+    [clearReservesLastRoundMemo]
   );
 
   /** POST /api/game/start pour le scénario PvE standard (fin tutoriel → mode PvE). */
@@ -1286,13 +1309,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
       setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
       setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
+      // Partie NEUVE : les avertissements 20.04 de la partie précédente ne la concernent pas.
+      clearReservesLastRoundMemo();
     } catch (err) {
       setError(formatApiConnectionError(err));
       throw err;
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [clearReservesLastRoundMemo]);
 
   /** POST /api/game/start pour une partie PvP locale (Continuer sans PvE). */
   const startPvpGame = useCallback(async () => {
@@ -1326,13 +1351,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
       setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
       setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
+      // Partie NEUVE : les avertissements 20.04 de la partie précédente ne la concernent pas.
+      clearReservesLastRoundMemo();
     } catch (err) {
       setError(formatApiConnectionError(err));
       throw err;
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [clearReservesLastRoundMemo]);
 
   // Listen for weapon selection events to update gameState
   useEffect(() => {
@@ -1687,9 +1714,19 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   }, []);
 
   // true pendant un aperçu (view non destructif) : bloque les actions (état affiché ≠ moteur live).
+  //
+  // La REF sert aux lectures synchrones (`executeAction`). Le MIROIR EN STATE sert aux effets, qui
+  // ne peuvent pas dépendre d'une ref. Une seule variable logique, deux écrivains qui s'accordent :
+  // les chargeurs ci-dessous la posent depuis leur propre `mode`, AVANT d'installer l'état affiché,
+  // et `SnapshotRewind` la réaffirme ensuite (`onViewModeChange`). Cet ordre est le sujet : le
+  // composant n'appelle `onViewModeChange(true)` qu'APRÈS son `await loadSave(id, "view")`, donc un
+  // effet réagissant au nouvel état le verrait encore « live » — c'est ainsi que l'avertissement
+  // 20.04 s'ouvrait sur un état rembobiné et consommait sa clé.
   const viewActiveRef = useRef(false);
+  const [viewActive, setViewActiveState] = useState(false);
   const setViewActive = useCallback((active: boolean) => {
     viewActiveRef.current = active;
+    setViewActiveState(active);
   }, []);
   // Handler appelé quand une action board est tentée pendant l'aperçu : ouvre le popup de confirmation
   // (« tu vas modifier la partie en cours »). Enregistré par BoardWithAPI.
@@ -5888,8 +5925,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     player: number;
     unitIds: number[];
   } | null>(null);
-  const reservesLastRoundShownRef = useRef<string | null>(null);
-
   /** Sort du mode d'arrivée sans rien écrire côté moteur. */
   const handleCancelIngress = useCallback(() => {
     ingressMaskLoopsRef.current = null;
@@ -5907,8 +5942,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         action: "deploy_strategic_reserves",
         unitId: String(uid),
       });
-      if (data?.success === false) {
-        setError(`Strategic reserves refused: ${String(data.error ?? "unknown")}`);
+      // Trois issues, pas deux (cf. `readEngineActionOutcome`). Sur une NON-ACTION on ne tombe
+      // PAS dans le `handleCancelDeploy` ci-dessous, qui détruirait le plan provisoire du joueur
+      // alors qu'aucun dépôt n'a eu lieu, et on n'affiche rien : le diagnostic est déjà posé.
+      const outcome = readEngineActionOutcome(data);
+      if (outcome.kind === "noop") return;
+      if (outcome.kind === "refused") {
+        setError(`Strategic reserves refused: ${outcome.message}`);
         return;
       }
       // Sortie de mode identique à un Annuler de déploiement : le dépôt CONSOMME le tour
@@ -5968,8 +6008,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         destCol: col,
         destRow: row,
       });
-      if (data?.success === false) {
-        setError(`Ingress move refused: ${String(data.error ?? "unknown")}`);
+      // Même lecture qu'au dépôt. Sur une NON-ACTION on reste en mode pose, l'aire d'arrivée
+      // reste affichée et le joueur peut recliquer — en sortir aurait laissé l'escouade en
+      // réserves sans plus rien à l'écran pour l'en faire sortir.
+      const outcome = readEngineActionOutcome(data);
+      if (outcome.kind === "noop") return;
+      if (outcome.kind === "refused") {
+        setError(`Ingress move refused: ${outcome.message}`);
         return;
       }
       ingressMaskLoopsRef.current = null;
@@ -5993,6 +6038,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         turn: currentTurnForReserves,
         lastRound: reservesLastRound,
         currentPlayer: currentPlayerForReserves,
+        playerTypes: gameState?.player_types,
+        isPreviewState: viewActive,
         reserveUnits,
       })
     ) {
@@ -6001,15 +6048,22 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     // Une seule fois par (round, joueur) : sans ce garde, chaque réponse serveur du tour
     // rouvrirait le popup que le joueur vient de fermer.
     const key = `${currentTurnForReserves}:${currentPlayerForReserves}`;
-    if (reservesLastRoundShownRef.current === key) return;
-    reservesLastRoundShownRef.current = key;
+    if (reservesLastRoundShownRef.current.has(key)) return;
+    reservesLastRoundShownRef.current.add(key);
     setReservesLastRoundWarning({
       player: currentPlayerForReserves as number,
       unitIds: reserveUnits
         .filter((u) => u.player === currentPlayerForReserves)
         .map((u) => (typeof u.id === "number" ? u.id : parseInt(String(u.id), 10))),
     });
-  }, [reservesLastRound, currentPlayerForReserves, currentTurnForReserves, gameState?.units]);
+  }, [
+    reservesLastRound,
+    currentPlayerForReserves,
+    currentTurnForReserves,
+    gameState?.units,
+    gameState?.player_types,
+    viewActive,
+  ]);
 
   const listArmies = useCallback(async (): Promise<ArmyListItem[]> => {
     const response = await apiFetch(`${API_BASE}/armies`);
@@ -8171,6 +8225,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     if (!data.success) throw new Error(data.error ?? "snapshot restore failed");
     // Divergence non tranchée (saves postérieures dans le fichier courant) : aucun commit, le popup décide.
     if (data.needs_decision) return data;
+    // AVANT `setGameState` : les effets qui réagissent au nouvel état doivent déjà savoir s'il
+    // s'agit d'un aperçu. Aucun purge de mémo 20.04 ici — un rembobinage reste la MÊME partie.
+    setViewActive(restoreMode === "view");
     setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
     // Restore vers le début de la phase courante : forcer le reset (l'effet phase ne tirerait pas).
     resetInteractionState();
@@ -8183,6 +8240,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const response = await apiFetch(`${API_BASE}/game/state`);
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "game state reload failed");
+    setViewActive(false);
     setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
     resetInteractionState();
     dispatchGameLogHydrate(data.game_log_history); // retour live : réhydrate le Game Log complet réel
@@ -8231,7 +8289,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "save load failed");
     if (data.needs_decision) return data; // divergence non tranchée : pas de commit
+    setViewActive(mode === "view");
     setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
+    // COMMIT seulement. Un `mode: "view"` est un aperçu non destructif de la partie EN COURS :
+    // purger là rouvrirait l'avertissement 20.04 que le joueur vient de fermer, à chaque row de
+    // la timeline qu'il regarde. Sur un commit, en revanche, la partie jouée est remplacée et une
+    // clé retenue ferait sauter l'avertissement d'une sauvegarde reprise au round de destruction.
+    if (mode === "resume") clearReservesLastRoundMemo();
     resetInteractionState();
     dispatchGameLogHydrate(data.game_log_history); // replay : réhydrate le Game Log au point chargé
     return data;
@@ -8257,7 +8321,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "party load failed");
     if (data.needs_decision) return data; // divergence non tranchée : pas de commit
+    setViewActive(mode === "view");
     setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
+    // COMMIT seulement. Un `mode: "view"` est un aperçu non destructif de la partie EN COURS :
+    // purger là rouvrirait l'avertissement 20.04 que le joueur vient de fermer, à chaque row de
+    // la timeline qu'il regarde. Sur un commit, en revanche, la partie jouée est remplacée et une
+    // clé retenue ferait sauter l'avertissement d'une sauvegarde reprise au round de destruction.
+    if (mode === "resume") clearReservesLastRoundMemo();
     resetInteractionState();
     dispatchGameLogHydrate(data.game_log_history); // replay : réhydrate le Game Log de la partie chargée
     return data;

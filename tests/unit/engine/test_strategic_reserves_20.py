@@ -1293,7 +1293,14 @@ def test_ingress_preview_loops_leave_the_shared_preview_channel_untouched():
 
     # Et quand AUCUN aperçu n'était affiché, la clé doit rester absente : la réintroduire
     # rallumerait le calque de contour côté client.
+    #
+    # Le mémo est VIDÉ avant ce second appel. Sans cette purge, `ingress_preview_loops` sort sur
+    # `cache_key in loops_cache` et n'exécute AUCUNE ligne du corps : l'assertion qui suit ne
+    # pourrait pas échouer, même en remettant la publication dans la fonction — vert vacant.
+    from engine.phase_handlers.movement_handlers import INGRESS_LOOPS_CACHE_KEY
+
     del gs["move_preview_footprint_mask_loops"]
+    gs.pop(INGRESS_LOOPS_CACHE_KEY, None)
     ingress_preview_loops(gs, squad_id)
     assert "move_preview_footprint_mask_loops" not in gs, (
         "la bande d'arrivée est restée dans le canal d'aperçu partagé"

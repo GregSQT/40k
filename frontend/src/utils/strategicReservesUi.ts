@@ -90,17 +90,33 @@ export function canSelectReserveUnitForIngress(o: {
  * Vrai au début du tour du joueur concerné, au round de destruction lu du moteur
  * (`strategic_reserves.last_round`), et seulement s'il lui reste des escouades hors table.
  * L'avertissement ne s'adresse jamais aux deux joueurs à la fois : `currentPlayer` est le filtre.
+ *
+ * Et seulement à un joueur HUMAIN. L'avertissement est un modal plein écran à valider : sur le
+ * tour du bot (PvE, `player_types[joueur] === "ai"`), il bloquerait l'humain pour lui annoncer
+ * la destruction d'unités qui ne sont pas les siennes et sur lesquelles il ne peut rien.
+ * `playerTypes` vient du moteur (`_attach_player_types`) — le type de joueur n'est jamais déduit
+ * d'un numéro.
+ *
+ * Et jamais sur un état APERÇU (rembobinage non destructif). L'appelant mémorise « ce round-là,
+ * ce joueur-là, c'est dit » pour ne pas rouvrir le popup à chaque réponse serveur : un
+ * avertissement tiré sur un état rembobiné consommerait cette mémoire, et l'avertissement RÉEL
+ * ne serait plus jamais émis au retour au live.
  */
 export function shouldWarnReservesLastRound(o: {
   turn: number | undefined;
   lastRound: number | undefined;
   currentPlayer: number | undefined;
+  playerTypes: Record<string, "human" | "ai"> | undefined;
+  /** L'état affiché est un aperçu non destructif, pas la partie vivante. */
+  isPreviewState: boolean;
   /** Unités encore en réserves, tous joueurs confondus. */
   reserveUnits: ReadonlyArray<{ player: number }>;
 }): boolean {
+  if (o.isPreviewState) return false;
   if (o.turn === undefined || o.lastRound === undefined || o.currentPlayer === undefined) {
     return false;
   }
   if (o.turn !== o.lastRound) return false;
+  if (o.playerTypes?.[String(o.currentPlayer)] !== "human") return false;
   return o.reserveUnits.some((u) => u.player === o.currentPlayer);
 }
