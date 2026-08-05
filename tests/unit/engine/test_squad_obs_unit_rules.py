@@ -30,7 +30,10 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import tempfile
+import types
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -403,3 +406,137 @@ def test_the_real_registries_load_clean():
     # Les trois statuts sont DECLARES des maintenant : c'est ce qui garantit que les chantiers
     # 02, 03 et 06 ne toucheront pas `obs_size`.
     assert set(statuses) == {"battle_shock", "oath_target", "suppressed"}
+
+
+#: Capacite qui n'existe nulle part : elle simule l'ajout d'une entree au vocabulaire OBSERVE.
+_FICTIVE_CAPABILITY = "zz_capacite_fictive"
+_VOCABULARY_MARKER = "UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (\n"
+
+
+def _entities_source_with_one_more_capability() -> str:
+    """Source d'`observation_entities` avec UNE capacite fictive de plus au vocabulaire.
+
+    Patcher le tuple APRES import ne prouverait rien : les `*_SIZE` sont figes au moment de leur
+    definition. C'est la source qu'il faut modifier, puis re-executer.
+    """
+    import engine.observation_entities as oe
+
+    assert oe.__file__, "schema d'entites sans fichier : la source est illisible"
+    source = Path(oe.__file__).read_text(encoding="utf-8")
+    assert _VOCABULARY_MARKER in source, "declaration du vocabulaire introuvable : adapter ce verrou"
+    return source.replace(
+        _VOCABULARY_MARKER, _VOCABULARY_MARKER + f'    "{_FICTIVE_CAPABILITY}",\n', 1
+    )
+
+
+def _entities_module_with_one_more_capability() -> Any:
+    """Le schema patche, execute dans un module JETABLE — aucun effet sur la session.
+
+    Sert au diagnostic (quel registre a grossi), pas au verdict : le module est une FEUILLE, donc
+    il ne voit pas ce qu'un module INTERMEDIAIRE ferait du vocabulaire.
+    """
+    module = types.ModuleType("engine.observation_entities")
+    exec(compile(_entities_source_with_one_more_capability(), "<entities+1>", "exec"),
+         module.__dict__)
+    # VERT VACANT : sans cette garde, une substitution ratee comparerait le schema a lui-meme.
+    assert _FICTIVE_CAPABILITY in module.UNIT_RULE_EFFECT_IDS
+    assert len(module.UNIT_RULE_EFFECT_IDS) == len(UNIT_RULE_EFFECT_IDS) + 1
+    return module
+
+
+#: Mesure d'`obs_size` sur le schema patche, dans un PROCESSUS NEUF. Le sous-processus est le
+#: motif deja retenu ailleurs pour ce besoin (`test_mask_verification.py`) : re-importer `engine.*`
+#: en cours de session laisserait, au moindre incident, un worker `-n 8` travailler sur un schema
+#: fictif pour tous les tests suivants. Ici le processus meurt avec la mesure.
+#: La source patchee arrive par l'ENTREE STANDARD, elle n'est pas relue depuis un chemin : le
+#: parent la tire de `oe.__file__`, donc l'enfant mesure l'arbre que la SESSION a importe. Un
+#: chemin re-derive du repertoire courant ferait diverger les deux cotes des que le fichier de
+#: test d'un worktree est lance depuis un autre arbre — ce depot travaille en worktrees paralleles.
+_MEASURE_SCRIPT = f"""
+import sys, types
+
+# Injecte AVANT tout import du paquet : `engine/__init__` tire `w40k_core`, donc le schema reel.
+module = types.ModuleType("engine.observation_entities")
+exec(compile(sys.stdin.read(), "<entities+1>", "exec"), module.__dict__)
+sys.modules["engine.observation_entities"] = module
+
+import engine.observation_builder as ob
+
+# VERT VACANT : si le builder avait importe le schema REEL, la mesure comparerait obs_size a
+# lui-meme et le verrou serait vert a vie, quel que soit le couplage.
+assert "{_FICTIVE_CAPABILITY}" in ob.UNIT_RULE_EFFECT_IDS, "builder bati sur le vocabulaire NON patche"
+print(int(ob.ObservationBuilder.SQUAD_OBS_SIZE_TARGET))
+print(ob.__file__)
+"""
+
+
+def _obs_size_with_one_more_capability() -> int:
+    """Mesure le NOMBRE, seul verdict qui couvre chaque terme de la formule ou qu'il vive.
+
+    Lire le TEXTE de la formule ne suffit pas : un terme peut venir d'un autre module
+    (`PROFILE_BIN_SIZE`) ou d'une indirection (`K_X = _calcule()`), et le couplage y passerait.
+    """
+    import engine.observation_builder as ob
+
+    result = subprocess.run(
+        [sys.executable, "-c", _MEASURE_SCRIPT],
+        input=_entities_source_with_one_more_capability(),
+        cwd=str(Path(str(ob.__file__)).parents[1]), capture_output=True, text=True,
+    )
+    assert result.returncode == 0, f"mesure d'obs_size impossible :\n{result.stderr}"
+    # Decoupage par LIGNES : un chemin de worktree peut contenir une espace, et un module qui
+    # ecrirait sur la sortie standard a l'import ajouterait des jetons — les deux feraient lever
+    # un `ValueError` opaque au lieu de l'assertion d'arbre ci-dessous.
+    lines = result.stdout.splitlines()
+    assert len(lines) >= 2, f"mesure illisible :\n{result.stdout}"
+    measured, builder_file = lines[-2], lines[-1]
+    # Les deux cotes doivent mesurer le MEME arbre : `frozen` vient du builder de la session,
+    # `measured` de celui que l'enfant a importe.
+    assert builder_file == str(ob.__file__), (
+        f"l'enfant a mesure un autre arbre : {builder_file} au lieu de {ob.__file__}"
+    )
+    return int(measured)
+
+
+def test_adding_an_observed_capability_costs_zero_scalar():
+    """VERROU DE LA PROMESSE du chantier 01 : allonger le vocabulaire OBSERVE ne bouge pas `obs_size`.
+
+    C'est le verrou qui manquait. Sans lui, le couplage repare le 2026-08-04 pouvait revenir sans
+    que rien ne leve : `DECISION_OPTION_BIN_FIELDS` etait bati sur `UNIT_RULE_EFFECT_IDS`, donc
+    chaque capacite ajoutee a l'observation coutait 6 scalaires (1 par slot de candidat) et un
+    retrain `--new` — l'exact contraire de ce que le chantier 01 existe pour garantir.
+
+    Methode : recalculer `obs_size` dans un processus neuf bati sur un schema d'entites augmente
+    d'une capacite fictive, et comparer le NOMBRE (cf. `_obs_size_with_one_more_capability`).
+
+    Le balayage des constantes du schema vient EN PLUS, pour nommer le champ fautif : le nombre
+    dit qu'`obs_size` a bouge, le balayage dit lequel des registres a grossi.
+    """
+    import engine.observation_builder as ob
+    import engine.observation_entities as oe
+
+    patched = _entities_module_with_one_more_capability()
+
+    real_ints = {
+        name: value
+        for name, value in vars(oe).items()
+        if name.isupper() and isinstance(value, int)
+    }
+    assert real_ints, "aucune constante entiere lue : le balayage regarde le mauvais module"
+    drifted = {
+        name: (value, getattr(patched, name))
+        for name, value in real_ints.items()
+        if getattr(patched, name) != value
+    }
+    assert not drifted, (
+        f"une capacite OBSERVEE de plus a fait grossir des registres du schema : {drifted}."
+    )
+
+    frozen = int(ob.ObservationBuilder.SQUAD_OBS_SIZE_TARGET)
+    measured = _obs_size_with_one_more_capability()
+    assert measured == frozen, (
+        f"une capacite OBSERVEE de plus fait passer obs_size de {frozen} a {measured} "
+        f"({measured - frozen:+d} scalaires), donc impose un retrain `--new`. Le vocabulaire "
+        "observe ne doit dimensionner AUCUN bloc : le registre positionnel des candidats de "
+        "decision est `DECISION_GRANTABLE_EFFECT_IDS`."
+    )

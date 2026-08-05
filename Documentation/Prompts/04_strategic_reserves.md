@@ -111,6 +111,24 @@ pas supposée.
 Aucun nouveau champ. Les bits `deploy_*` existent. L'unité en réserves est
 `deploy_not_on_board` avec un `deployed_on_turn` nul.
 
+**`deep_strike` est une capacité OBSERVÉE, et c'est ce chantier qui la déclare** (amendement du
+chantier 01, 2026-08-04). La règle technique n'existe pas encore : la créer dans
+`config/unit_rules.json` avec le prochain `obs_id` LIBRE — **15** à ce jour, jamais un id brûlé
+— et l'ajouter à `UNIT_RULE_EFFECT_IDS`. Coût : **zéro scalaire**, `obs_size` reste à `20718`,
+aucun retrain (verrou :
+`test_squad_obs_unit_rules.py::test_adding_an_observed_capability_costs_zero_scalar`).
+Ne PAS l'ajouter à `DECISION_GRANTABLE_EFFECT_IDS` : aucun candidat de `rule_choice` ne
+l'accorde. Sans cette déclaration, l'agent subit Deep Strike sans le percevoir — exactement le
+trou que V11 §0.30 a fermé, et la raison d'être de l'embedding du chantier 01.
+
+Vérification attendue : sur le roster d'entraînement Armageddon, les `allies_ability_ids` de
+CHAQUE unité à laquelle ce chantier accorde `deep_strike` — la liste en tête de ce chantier, à
+confirmer datasheet en main, aucune ne portant la capacité aujourd'hui — contiennent son
+`obs_id`, et une escouade sans la capacité ne le contient pas. Attention : la condition
+« every model » de 24.09 se lit sur les règles PROPRES de chaque figurine
+(`models_cache[mid]["UNIT_RULES"]`), pas sur les slots d'observation, qui décrivent l'union
+19.04.
+
 Ce qui manque éventuellement : le **round restant avant destruction**. Si l'agent ne le
 perçoit pas, il ne peut pas apprendre la pression de tempo de 20.04. Si un scalaire global est
 nécessaire, il doit être **déclaré par le chantier 01** — vérifier au démarrage, et remonter
