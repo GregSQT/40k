@@ -1,7 +1,7 @@
 # Deux lots issus du chantier `units_cache` — ménage V10 pile-in, et perf de la charge — 2026-08-05
 
-**Chantiers OUVERTS.** Le premier est **partiellement livré** (checkpoint commité, non mergé), le
-second n'est pas commencé. Les deux ont un worktree dédié déjà créé.
+**Chantiers OUVERTS.** Le premier est **partiellement livré ET MERGÉ dans `main`** (fusion
+`b8c5e0ef`) ; le second n'est pas commencé. Les deux ont un worktree dédié déjà créé.
 
 **Origine** : sortis du lot `units_cache`
 ([`replis_units_cache_2026-08-05.md`](../replis_units_cache_2026-08-05.md) §8.4 et §9). Ce
@@ -10,25 +10,34 @@ que ces deux paragraphes ne donnent pas.
 
 | Lot | Worktree | Base | État |
 |---|---|---|---|
-| A — ménage V10 pile-in / consolidation | `menage_v10_frontend` | `7b5871dc` | checkpoint partiel commité |
+| A — ménage V10 pile-in / consolidation | `menage_v10_frontend` | `7b5871dc` | partie 1 MERGÉE (`b8c5e0ef`) ; reste §A.3 |
 | B — perf boucle de collision de charge | `perf_collision_charge` | `34b94c3d` | non commencé |
 
-⚠️ Les deux worktrees ont été créés AVANT ce document. Pour le lire depuis eux : `git merge main`,
-ou simplement l'ouvrir dans `/home/greg/40k`.
+⚠️ Les deux worktrees ont été créés AVANT ce document ET avant la fusion `b8c5e0ef`. Faire
+`git merge main` dedans avant de commencer — sinon l'agent du lot A refera du travail déjà
+présent dans `main`.
 
 ---
 
 ## Lot A — Ménage V10 pile-in / consolidation
 
-### A.1 Ce qui est DÉJÀ fait (commit `7b5871dc`, branche `worktree-charge_collision_et_menage_v10`)
+### A.1 Ce qui est DÉJÀ fait — **dans `main`** depuis la fusion `b8c5e0ef`
 
 - Moteur : `_fight_v11_clear_pile_in_preview` supprimée + ses 4 appels. Elle ne faisait plus que
   `pop` deux clés que plus aucun écrivain ne produit.
 - `useEngineAPI.ts` : les deux branches V10 mortes retirées (pile-in ~39 l., consolidation ~50 l.),
   et les trois conditions `!waiting_for_*` devenues toujours vraies simplifiées.
 
-**Vérifié** : pyright 0, pytest 0 (56 tests fight/pile-in/consolidation), tsc 0.
+Un commentaire rendu faux par la suppression a été corrigé au merge (il renvoyait aux branches
+V10 disparues).
+
+**Vérifié sur l'arbre fusionné** : pyright 0, pytest 0 (71 tests), tsc 0.
 **NON vérifié** : l'essai PvP réel — aucun test de rendu n'existe sur ces fichiers.
+
+⚠️ **Conséquence du merge partiel, à connaître avant de reprendre** : `main` contient désormais
+2 modes UI (`pileInPreview`, `consolidationPreview`) qu'aucun code ne peut plus atteindre, et
+~26 sites qui les lisent. Ce n'est pas cassé, c'est du mort que plus rien ne signale — d'où
+l'intérêt de ne pas laisser traîner le §A.3.
 
 ### A.2 Le constat qui fonde le lot — ne PAS refaire l'enquête
 

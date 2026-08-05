@@ -489,9 +489,10 @@ symbole n'est pas constater la mort d'une fonctionnalité.
 (`pileInPreview` / `consolidationPreview`) dont dépendent ~26 sites de lecture, 2 handlers et des
 props threadées dans `BoardPvp.tsx` (12 223 lignes).
 
-Déjà fait, commit `7b5871dc`, branche `worktree-charge_collision_et_menage_v10`, **non mergé** :
-le moteur (`_fight_v11_clear_pile_in_preview` + ses 4 appels) et les 2 branches V10 du hook.
-Vérifié pyright/pytest/tsc ; **pas** par un essai PvP.
+Déjà fait et **MERGÉ dans `main`** (fusion `b8c5e0ef`) : le moteur
+(`_fight_v11_clear_pile_in_preview` + ses 4 appels) et les 2 branches V10 du hook. Vérifié
+pyright/pytest/tsc sur l'arbre fusionné ; **pas** par un essai PvP. Le reste de la chaîne morte
+(2 modes inatteignables, ~26 sites, handlers, props) est TOUJOURS dans `main` — lot A ouvert.
 
 Le détail exploitable — chaîne morte tracée, découpage, pièges d'outillage — est dans
 [`A_faire/menage_v10_pile_in_et_perf_charge_2026-08-05.md`](A_faire/menage_v10_pile_in_et_perf_charge_2026-08-05.md).
