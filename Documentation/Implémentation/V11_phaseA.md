@@ -726,6 +726,12 @@ mécanisme ne traversait pas avant P2.
    d'être proposé), mais il rendait P2 sans objet dès le 2ᵉ épisode d'un run. `reset()` purge
    désormais les 4 clés (`_choice_timing_fired_events`, la file, le prompt actif, la décision
    pendante) ; verrouillé par test avec sa mutation.
+   **Mise à jour 2026-08-05** : `_choice_timing_fired_events` n'est plus une clé de `game_state`.
+   Il a rejoint le registre unique `_once_claims` (`engine/game_utils.py`), partagé avec les
+   quatre autres marqueurs « étape déjà résolue ce (tour, joueur) ». Ce registre est créé
+   paresseusement et purgé en **un seul point** — le `pop(ONCE_CLAIMS_KEY)` de `reset()` — donc
+   le défaut ci-dessus n'est plus atteignable pour aucun marqueur, présent ou futur. La file, le
+   prompt actif et la décision pendante restent, eux, des clés du dict de `reset()`.
    ➜ **Leçon de méthode** : *un smoke à UN épisode ne peut pas voir un état qui fuit ENTRE
    épisodes.* Le smoke initial (2 épisodes, 2 moteurs distincts) montrait 28 décisions et
    validait un mécanisme qui, en run réel, se serait éteint après le premier épisode.

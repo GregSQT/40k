@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
 game_utils.py - Shared utility functions for all engine modules
-AI_TURN.md COMPLIANCE: Pure lookup functions, no game logic
+
+Majoritairement des lookups purs, MAIS pas exclusivement : la journalisation
+(`add_console_log`, `add_debug_log`) et le registre `_once_claims` ci-dessous ecrivent dans
+`game_state`. Le docstring d'origine annoncait « pure lookup functions, no game logic » —
+il decrivait mal le module et induisait en erreur sur l'endroit ou poser de l'etat partage.
 """
 
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Literal, Optional
 from shared.data_validation import require_key
 
 _debug_log_initialized = False
@@ -46,6 +50,67 @@ def add_debug_file_log(game_state: Dict[str, Any], message: str) -> None:
     if not game_state.get("debug_mode", False):
         return
     _write_diagnostic_to_debug_log(message)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Registre « cette etape a deja ete resolue » (marqueurs once)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# UN seul registre pour toutes les etapes qui ne doivent se resoudre qu'une fois par
+# (tour, joueur) : game_state["_once_claims"] -> {famille: set(cles)}.
+#
+#
+# POURQUOI un registre et pas une cle de game_state par famille : chaque famille devait
+# etre declaree DEUX fois dans w40k_core (dict d'init ET dict de reset), et l'oubli du
+# cote RESET est SILENCIEUX. La cle existe encore (heritee de l'init), le set garde donc
+# les marqueurs de l'episode precedent ; comme les cles sont indexees sur le tour (∈ 1..5)
+# elles se REPETENT d'un episode a l'autre. A partir de l'episode 2 l'etape est consideree
+# resolue pour toujours, sans lever la moindre erreur. Ce n'est pas theorique : c'est ce
+# qui est arrive a `_choice_timing_fired_events` — MESURE sur 3 episodes enchaines,
+# 16 decisions puis 2 puis 0, le mecanisme de decision entier devenu inerte. Le registre
+# naît paresseusement et se purge en UN point (`W40KEngine.reset`) : l'oubli n'existe plus.
+#
+# DEUX fonctions et pas un test-and-set unique : les sites ne posent PAS le marqueur au
+# meme instant, et c'est ce qui les rend corrects. `movement_step_cp_gain_on_objective` et
+# `_enqueue_rule_choice_candidates` doivent RESERVER avant d'agir (des lances, prompt
+# empile : rejouer coute un CP ou un doublon). Les trois autres marquent APRES l'effet,
+# parce que leur travail garde est PUR (lecture de `objective_controllers`, comptage) — et
+# deux d'entre eux ont une sortie anticipee ENTRE la garde et la pose (`if not
+# acting_unit`) qui ne doit pas consommer le tour. Un `claim_once()` unique imposerait
+# reserver-avant-agir a tout le monde.
+ONCE_CLAIMS_KEY = "_once_claims"
+
+# Familles ENUMEREES et non chaine libre : le nom est retape a la garde ET a la pose, sur
+# deux lignes parfois eloignees. Une faute de frappe sur UN des deux ne leverait rien — la
+# garde ne verrait jamais la pose — et l'etape se rejouerait a chaque passage (jet de des
+# et CP en double sur `cp_gain_on_objective_resolved`) ou ne se declencherait jamais. Le
+# registre supprime ce silence pour les cles de `game_state` ; sans cette union il le
+# reintroduirait un cran plus bas. Pyright refuse desormais toute famille hors liste, a
+# chaque site d'appel. Les CLES, elles, restent `Any` : leur forme varie legitimement
+# (2-uplet, 3-uplet avec l'id d'objectif, chaine pour les evenements de choix).
+OnceClaimFamily = Literal[
+    "primary_objective_scored_turns",
+    "objective_rewarded_turns",
+    "coherency_penalized_turns",
+    "cp_gain_on_objective_resolved",
+    "_choice_timing_fired_events",
+]
+
+
+def once_claimed(game_state: Dict[str, Any], family: OnceClaimFamily, key: Any) -> bool:
+    """True si `key` a deja ete reclamee dans `family` durant cet episode.
+
+    `.get` et non `require_key` : le registre naît a la PREMIERE reclamation. « Absent »
+    signifie « rien n'a encore ete resolu », un etat de jeu valide (debut d'episode), pas
+    une donnee manquante — meme lecture que `_objective_control_last_boundary`.
+    """
+    return key in game_state.get(ONCE_CLAIMS_KEY, {}).get(family, ())
+
+
+def once_claim(game_state: Dict[str, Any], family: OnceClaimFamily, key: Any) -> None:
+    """Reclame `key` dans `family` : `once_claimed` repondra True jusqu'au prochain reset."""
+    claims = game_state.setdefault(ONCE_CLAIMS_KEY, {})
+    claims.setdefault(family, set()).add(key)
 
 
 def get_unit_by_id(unit_id: str, game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:

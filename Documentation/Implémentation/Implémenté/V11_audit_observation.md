@@ -796,7 +796,8 @@ est géré par le **masque d'action**, pas filtré dans l'observation.
 
 ### 9.8 Ajouts stratégiques (contexte global) — décidés 2026-07-25
 - **Score de mission (victory points)** : le state tracke `victory_points {1,2}` +
-  `primary_objective_scored_turns` ([game_state.py:2392](../../../engine/game_state.py#L2392)) et le
+  `primary_objective_scored_turns` (depuis 2026-08-05 une famille du registre `_once_claims`,
+  cf. [game_utils.py](../../../engine/game_utils.py) ; réclamée par `_apply_primary_objective_scoring_single`) et le
   vainqueur en dépend — mais l'obs squad ne le voyait **pas**. → ajouter **mon VP / VP ennemi** (ou le
   différentiel) au Bloc A. **Trou stratégique majeur** : sans lui, l'agent ne sait pas qui gagne, donc
   ne peut pas arbitrer « je mène → défensif / je préserve » vs « je suis derrière → risques / objectifs ».

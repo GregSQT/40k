@@ -619,7 +619,7 @@ def movement_step_cp_gain_on_objective(game_state: Dict[str, Any]) -> int:
     from engine.game_state import (
         gain_command_points, objective_hex_zones, unit_is_within_objective,
     )
-    from engine.game_utils import add_debug_file_log
+    from engine.game_utils import add_debug_file_log, once_claim, once_claimed
     from .shared_utils import is_unit_alive, unit_has_rule_effect
 
     current_player = int(require_key(game_state, "current_player"))
@@ -657,11 +657,12 @@ def movement_step_cp_gain_on_objective(game_state: Dict[str, Any]) -> int:
     # Etape deja resolue ce (tour, joueur) ? Verifie APRES le filtre des porteurs : sans porteur
     # il n'y a rien a resoudre, donc rien a memoriser — et un etat de jeu sans cette capacite n'a
     # pas a porter le marqueur.
-    resolved = require_key(game_state, "cp_gain_on_objective_resolved")
+    # RESERVE AVANT D'AGIR, contrairement aux trois autres familles de `_once_claims` qui
+    # marquent apres l'effet : l'etape lance des des, la rejouer donnerait un CP en trop.
     marker = (int(require_key(game_state, "turn")), current_player)
-    if marker in resolved:
+    if once_claimed(game_state, "cp_gain_on_objective_resolved", marker):
         return 0
-    resolved.add(marker)
+    once_claim(game_state, "cp_gain_on_objective_resolved", marker)
 
     controllers = require_key(game_state, "objective_controllers")
     rolls: List[int] = []

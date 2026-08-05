@@ -793,7 +793,9 @@ def test_the_choice_mechanism_survives_the_first_episode():
         # (et non par `[]`) VOLONTAIRE : sous mutation du correctif, le test doit échouer sur
         # l'assertion FONCTIONNELLE du bas (le prompt n'est plus émis), pas sur un KeyError qui
         # ne prouverait rien du comportement.
-        assert engine.game_state.get("_choice_timing_fired_events", set()) == set()
+        assert not engine.game_state.get("_once_claims", {}).get(
+            "_choice_timing_fired_events"
+        )
         assert engine.game_state.get("pending_rule_choice_queue", []) == []
         assert engine.game_state.get("active_rule_choice_prompt") is None
         assert read_pending_agent_decision(engine.game_state) is None

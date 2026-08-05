@@ -166,7 +166,9 @@ class TestGameStateTrackingSets:
         "units_charged",
         "units_attacked",
         "units_reacted_this_enemy_turn",
-        "primary_objective_scored_turns",
+        # `primary_objective_scored_turns` N'EST PLUS une clé de game_state : c'est une
+        # famille du registre `_once_claims`, créé paresseusement. Son contrat de cycle de
+        # vie est vérifié par tests/unit/engine/test_once_claims_registry.py.
     ]
 
     @pytest.mark.parametrize("key", _required_sets)
