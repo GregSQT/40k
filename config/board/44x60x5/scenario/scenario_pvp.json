@@ -1,4 +1,5 @@
 {
+  "scale": "1000pts",
   "primary_objectives": ["objectives_control"],
   "deployment_zone": "mc1",
   "deployment_type": "active",

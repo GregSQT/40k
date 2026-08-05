@@ -20,7 +20,11 @@ import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
 import type { GamePhase, GameState, PlayerId, TargetPreview, Unit } from "../types";
 import type { DeploymentState } from "../types/game";
-import { getIconDiameterRatio } from "../utils/unitBaseDisplay";
+import {
+  canDropUnitIntoReserves,
+  canSelectReserveUnitForIngress,
+  selectReserveUnits,
+} from "../utils/strategicReservesUi";
 import BoardPvp, { type BoardDisplayMode, type MeasureModeState } from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
@@ -33,8 +37,10 @@ import { HelperPanel } from "./HelperPanel";
 import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
 import SnapshotRewind, { type SnapshotJump } from "./SnapshotRewind";
+import { StrategicReserveButton, StrategicReservesContainer } from "./StrategicReservesContainer";
 import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
+import { type RosterRowUnitsCache, rosterRowBorderColor, UnitRosterRow } from "./UnitRosterRow";
 import { HALO_GLOW, UnitStatusTable } from "./UnitStatusTable";
 
 /** En-tête de colonne du roster picker (Faction / Roster / Description). */
@@ -1744,8 +1750,6 @@ export const BoardWithAPI: React.FC = () => {
 
     const currentDeployer = Number(deploymentState.current_deployer) as PlayerId;
     const players: PlayerId[] = [1, 2];
-    const getIconBorderColor = (player: PlayerId): string =>
-      player === 2 ? "var(--hp-bar-player2)" : "var(--hp-bar-player1)";
 
     const isTestDeploymentMode = isRosterSetupMode;
     const isTestSetupLocked = isTestDeploymentMode && !testDeploymentStarted;
@@ -1769,6 +1773,8 @@ export const BoardWithAPI: React.FC = () => {
             ? !testDeploymentStarted
             : isCurrentDeployer && !hasDeployedByPlayer;
           const canInteractDeployment = isCurrentDeployer && !isTestSetupLocked;
+          // 20.01 — résumé MOTEUR des réserves de CE joueur (ratio affiché + dépôts acceptés).
+          const reservesSummary = apiProps.gameState?.strategic_reserves?.[`${player}`];
 
           return (
             <div
@@ -1833,190 +1839,54 @@ export const BoardWithAPI: React.FC = () => {
                   {deployableSorted.length === 0 && (
                     <div className="deployment-panel__empty">Aucune unite deployable restante</div>
                   )}
-                  {/* 1 ligne par escouade, triée par unit ID. */}
+                  {/* 1 ligne par escouade, triée par unit ID — même format que le conteneur
+                      de réserves (`UnitRosterRow`). */}
                   {deployableSorted.map((unit) => {
                     const isSelected = apiProps.selectedUnitId === unit.id;
-                    const displayName =
-                      unit.DISPLAY_NAME ||
-                      unit.name ||
-                      unit.type ||
-                      unit.unitType ||
-                      String(unit.id);
-                    // Nombre de figurines = clés de occupied_hexes_by_model (source du board,
-                    // toujours présente même pour une escouade non déployée à (-1,-1)).
-                    const ucEntry = (
-                      apiProps.gameState!.units_cache as
-                        | Record<
-                            string,
-                            {
-                              occupied_hexes_by_model?: Record<string, unknown>;
-                              models_meta_by_model?: Record<
-                                string,
-                                {
-                                  ICON?: string;
-                                  BASE_SIZE?: number | [number, number];
-                                  BASE_SHAPE?: string;
-                                  ICON_SCALE?: number;
-                                  role?: string | null;
-                                }
-                              >;
-                            }
-                          >
-                        | undefined
-                    )?.[String(unit.id)];
-                    // Ordre d'affichage gauche→droite : leader → support → sergeant
-                    // → special_weapon → figurine de base. role par figurine exposé
-                    // par le backend dans models_meta_by_model.
-                    const DEPLOY_ROLE_ORDER: Record<string, number> = {
-                      leader: 0,
-                      support: 1,
-                      sergeant: 2,
-                      special_weapon: 3,
-                    };
-                    const roleRank = (modelId: string): number => {
-                      const role = ucEntry?.models_meta_by_model?.[modelId]?.role;
-                      return role != null && role in DEPLOY_ROLE_ORDER
-                        ? DEPLOY_ROLE_ORDER[role]
-                        : 4;
-                    };
-                    const figModelIds = (
-                      ucEntry?.occupied_hexes_by_model
-                        ? Object.keys(ucEntry.occupied_hexes_by_model)
-                        : [String(unit.id)]
-                    ).sort((a, b) => roleRank(a) - roleRank(b));
-                    const figCount = figModelIds.length;
-                    // Icône par figurine : models_meta_by_model n'est exposé que pour
-                    // les escouades hétérogènes ; sinon repli métier sur l'icône d'unité.
-                    const iconForModel = (modelId: string): string => {
-                      const baseIcon = ucEntry?.models_meta_by_model?.[modelId]?.ICON ?? unit.ICON;
-                      return player === 2 ? baseIcon.replace(".webp", "_red.webp") : baseIcon;
-                    };
-                    // Taille d'icône = même ratio que le board (source unique
-                    // getIconDiameterRatio), avec un HEX_RADIUS fictif de calibrage tel que
-                    // l'infanterie standard ≈ 36px. Bornes optionnelles 24..60px.
-                    const DEPLOY_ICON_HEX_RADIUS = 3;
-                    const ICON_SCALE_GLOBAL = 1.2; // = board_config.display.icon_scale
-                    const iconPxForModel = (modelId: string): number => {
-                      const meta = ucEntry?.models_meta_by_model?.[modelId];
-                      const figUnit = {
-                        BASE_SIZE: meta?.BASE_SIZE ?? unit.BASE_SIZE,
-                        BASE_SHAPE: meta?.BASE_SHAPE ?? unit.BASE_SHAPE,
-                        ICON_SCALE: meta?.ICON_SCALE ?? unit.ICON_SCALE,
-                      } as Unit;
-                      const px = Math.round(
-                        getIconDiameterRatio(figUnit, ICON_SCALE_GLOBAL) * DEPLOY_ICON_HEX_RADIUS
-                      );
-                      return settings.deployIconBaseSizeBounded
-                        ? Math.max(24, Math.min(60, px))
-                        : px;
-                    };
-                    const tooltipText = `${displayName} - ID ${unit.id} - ${figCount} fig.${isCurrentDeployer ? "" : " (inactive this turn)"}`;
+                    // 20.01 — le dépôt n'est proposé que sur l'escouade SÉLECTIONNÉE : c'est
+                    // l'alternative à la poser, elle ne se décide qu'une fois l'escouade en main.
+                    const canDrop =
+                      canInteractDeployment &&
+                      canDropUnitIntoReserves({
+                        phase: apiProps.gameState?.phase,
+                        selectedUnitId: apiProps.selectedUnitId ?? null,
+                        summary: reservesSummary,
+                      });
                     return (
-                      <button
-                        type="button"
-                        className={`deployment-panel__unit-row deployment-panel__unit-row--player${player}`}
+                      <UnitRosterRow
                         key={`deploy-unit-${player}-${unit.id}`}
-                        onMouseEnter={(e) => {
-                          setDeploymentTooltip({
-                            visible: true,
-                            text: tooltipText,
-                            x: e.clientX,
-                            y: e.clientY,
-                          });
-                        }}
-                        onMouseMove={(e) => {
-                          setDeploymentTooltip((prev) => ({
-                            visible: true,
-                            text: prev?.text ?? tooltipText,
-                            x: e.clientX,
-                            y: e.clientY,
-                          }));
-                        }}
-                        onMouseLeave={() => {
-                          setDeploymentTooltip(null);
-                        }}
+                        unit={unit}
+                        player={player}
+                        unitsCache={apiProps.gameState!.units_cache as RosterRowUnitsCache}
+                        boundIconSize={settings.deployIconBaseSizeBounded}
+                        selected={isSelected}
+                        interactive={canInteractDeployment}
                         onClick={() => {
-                          if (!canInteractDeployment) {
-                            return;
-                          }
                           apiProps.onSelectUnit(unit.id);
                           setClickedUnitId(null);
                         }}
-                        aria-disabled={!canInteractDeployment}
-                        tabIndex={canInteractDeployment ? 0 : -1}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          width: "100%",
-                          minHeight: "32px",
-                          borderRadius: "6px",
-                          border: isSelected
-                            ? "1px solid transparent"
-                            : `1px solid ${getIconBorderColor(player)}`,
-                          background: isSelected ? "rgba(8, 40, 22, 0.92)" : "rgba(0, 0, 0, 0.35)",
-                          boxShadow: isSelected ? HALO_GLOW : undefined,
-                          outline: "none",
-                          color: "white",
-                          cursor: canInteractDeployment ? "pointer" : "not-allowed",
-                          opacity: canInteractDeployment ? 1 : 0.55,
-                          padding: "4px 8px",
-                          textAlign: "left",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            flexWrap: "wrap",
-                            alignItems: "center",
-                            gap: "2px",
-                            flex: "0 1 auto",
-                            minWidth: 0,
-                          }}
-                        >
-                          {figModelIds.map((figModelId) => {
-                            const figPx = iconPxForModel(figModelId);
-                            return (
-                              <img
-                                key={`deploy-fig-${player}-${unit.id}-${figModelId}`}
-                                src={iconForModel(figModelId)}
-                                alt={displayName}
-                                style={{
-                                  width: `${figPx}px`,
-                                  height: `${figPx}px`,
-                                  objectFit: "contain",
-                                  pointerEvents: "none",
-                                  flex: "0 0 auto",
-                                }}
-                              />
-                            );
-                          })}
-                        </div>
-                        <span
-                          style={{
-                            flex: "1 1 auto",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {displayName}
-                        </span>
-                        <span style={{ fontSize: "11px", opacity: 0.85, flex: "0 0 auto" }}>
-                          {figCount} fig.
-                        </span>
-                        <span
-                          style={{
-                            fontSize: "10px",
-                            background: "rgba(0, 0, 0, 0.65)",
-                            padding: "1px 4px",
-                            borderRadius: "3px",
-                            flex: "0 0 auto",
-                          }}
-                        >
-                          #{unit.id}
-                        </span>
-                      </button>
+                        onHover={(text, x, y) =>
+                          setDeploymentTooltip({ visible: true, text, x, y })
+                        }
+                        onLeave={() => setDeploymentTooltip(null)}
+                        tooltipSuffix={isCurrentDeployer ? "" : " (inactive this turn)"}
+                        borderColor={rosterRowBorderColor(player)}
+                        haloGlow={HALO_GLOW}
+                        trailing={
+                          isSelected ? (
+                            <StrategicReserveButton
+                              canDrop={canDrop}
+                              onDrop={() => {
+                                // Le dépôt DÉMONTE cette ligne (l'escouade sort de
+                                // `deployable_units`) : aucun `mouseleave` ne sera émis, donc le
+                                // tooltip resterait figé à l'écran. On le ferme avec la ligne.
+                                setDeploymentTooltip(null);
+                                apiProps.onDeployToStrategicReserves(unit.id);
+                              }}
+                            />
+                          ) : undefined
+                        }
+                      />
                     );
                   })}
                 </div>
@@ -2148,13 +2018,28 @@ export const BoardWithAPI: React.FC = () => {
             illustrationPreviewUnit?.player === 1 ? illustrationPreviewUnit.id : null
           }
           inspectedModel={effectiveInspectModel}
-          phase={apiProps.gameState?.phase}
-          deploymentType={apiProps.gameState?.deployment_type}
-          deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
-          strategicReserves={apiProps.gameState?.strategic_reserves?.["1"] ?? null}
-          currentPlayer={apiProps.gameState?.current_player}
-          onDropUnitToReserves={apiProps.onDeployToStrategicReserves}
+        />
+      </ErrorBoundary>
+      {/* 20.01/20.04 — les escouades hors table du joueur 1, SOUS sa table de statut.
+          Rendu ici et non dans la table : la ligne partagée montre chaque escouade par ses
+          FIGURINES, ce qui demande `units_cache` — le faire descendre dans la table ne lui
+          servirait qu'à ça. */}
+      <ErrorBoundary fallback={<div>Failed to load player 1 reserves</div>}>
+        <StrategicReservesContainer
+          player={1}
+          reserveUnits={selectReserveUnits(apiProps.gameState?.units ?? [], 1)}
+          summary={apiProps.gameState?.strategic_reserves?.["1"] ?? null}
+          unitsCache={apiProps.gameState?.units_cache as RosterRowUnitsCache}
+          boundIconSize={settings.deployIconBaseSizeBounded}
+          borderColor={rosterRowBorderColor(1)}
+          haloGlow={HALO_GLOW}
+          canSelectReserveUnit={canSelectReserveUnitForIngress({
+            phase: apiProps.gameState?.phase,
+            tablePlayer: 1,
+            currentPlayer: apiProps.gameState?.current_player,
+          })}
           onSelectReserveUnit={apiProps.onSelectReserveUnitForIngress}
+          phase={apiProps.gameState?.phase}
         />
       </ErrorBoundary>
 
@@ -2179,13 +2064,28 @@ export const BoardWithAPI: React.FC = () => {
             illustrationPreviewUnit?.player === 2 ? illustrationPreviewUnit.id : null
           }
           inspectedModel={effectiveInspectModel}
-          phase={apiProps.gameState?.phase}
-          deploymentType={apiProps.gameState?.deployment_type}
-          deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
-          strategicReserves={apiProps.gameState?.strategic_reserves?.["2"] ?? null}
-          currentPlayer={apiProps.gameState?.current_player}
-          onDropUnitToReserves={apiProps.onDeployToStrategicReserves}
+        />
+      </ErrorBoundary>
+      {/* 20.01/20.04 — les escouades hors table du joueur 2, SOUS sa table de statut.
+          Rendu ici et non dans la table : la ligne partagée montre chaque escouade par ses
+          FIGURINES, ce qui demande `units_cache` — le faire descendre dans la table ne lui
+          servirait qu'à ça. */}
+      <ErrorBoundary fallback={<div>Failed to load player 2 reserves</div>}>
+        <StrategicReservesContainer
+          player={2}
+          reserveUnits={selectReserveUnits(apiProps.gameState?.units ?? [], 2)}
+          summary={apiProps.gameState?.strategic_reserves?.["2"] ?? null}
+          unitsCache={apiProps.gameState?.units_cache as RosterRowUnitsCache}
+          boundIconSize={settings.deployIconBaseSizeBounded}
+          borderColor={rosterRowBorderColor(2)}
+          haloGlow={HALO_GLOW}
+          canSelectReserveUnit={canSelectReserveUnitForIngress({
+            phase: apiProps.gameState?.phase,
+            tablePlayer: 2,
+            currentPlayer: apiProps.gameState?.current_player,
+          })}
           onSelectReserveUnit={apiProps.onSelectReserveUnitForIngress}
+          phase={apiProps.gameState?.phase}
         />
       </ErrorBoundary>
     </>

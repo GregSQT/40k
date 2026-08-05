@@ -1,4 +1,5 @@
 {
+  "scale": "500pts",
   "primary_objectives": ["objectives_control"],
   "wall_ref": "walls-11.json",
   "units": [
