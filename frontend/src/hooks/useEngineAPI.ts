@@ -3068,52 +3068,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setSelectedUnitId(af != null ? parseInt(String(af), 10) : null);
             setMode("select");
           }
-          // Fight phase : pile in avant sélection de cible CC
-          else if (
-            data.game_state?.phase === "fight" &&
-            data.result?.waiting_for_pile_in &&
-            data.result?.valid_pile_in_destinations
-          ) {
-            const raw = data.result.valid_pile_in_destinations as Array<
-              [number, number] | { col: number; row: number }
-            >;
-            const norm = raw.map((h) =>
-              Array.isArray(h)
-                ? { col: Number(h[0]), row: Number(h[1]) }
-                : { col: Number(h.col), row: Number(h.row) }
-            );
-            setPileInDestinations(norm);
-            const poolSet = new Set<string>();
-            for (const h of norm) {
-              poolSet.add(`${h.col},${h.row}`);
-            }
-            moveDestPoolRef.current = poolSet;
-            const gsPi = data.game_state;
-            const fpZone = gsPi?.fight_pile_in_footprint_zone as unknown;
-            const fpSet = new Set<string>();
-            if (Array.isArray(fpZone)) {
-              for (const d of fpZone) {
-                if (Array.isArray(d) && d.length === 2) {
-                  fpSet.add(`${d[0]},${d[1]}`);
-                }
-              }
-            }
-            footprintZoneRef.current = fpSet;
-            footprintMaskLoopsRef.current = null;
-            const uid = parseInt(
-              String(data.result.unitId ?? data.game_state.active_fight_unit),
-              10
-            );
-            setSelectedUnitId(uid);
-            setMode("pileInPreview");
-          }
           // Fight : sous-phase pile_in SANS unité active (présentation paresseuse).
           // Le moteur expose seulement le pool éligible (sélection libre) ; on nettoie
           // tout aperçu résiduel d'une unité précédente et on reste en sélection.
           else if (
             data.game_state?.phase === "fight" &&
-            data.game_state?.fight_subphase === "pile_in" &&
-            !data.result?.waiting_for_pile_in
+            data.game_state?.fight_subphase === "pile_in"
           ) {
             setPileInDestinations([]);
             moveDestPoolRef.current = new Set();
@@ -3129,8 +3089,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             data.game_state?.phase === "fight" &&
             data.game_state?.fight_subphase === "consolidate" &&
             data.result?.consolidation_model_move !== true &&
-            !Array.isArray(data.result?.consolidation_new_foes) &&
-            !data.result?.waiting_for_consolidation
+            !Array.isArray(data.result?.consolidation_new_foes)
           ) {
             setConsolidationMovePlan(null);
             consolidationModelPoolRef.current = new Set();
@@ -3142,56 +3101,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             footprintMaskLoopsRef.current = null;
             setSelectedUnitId(null);
             setMode("select");
-          }
-          // Fight : consolidation après attaques (≤ 3") — sans destination valide = fin d'activation (comme le moteur)
-          else if (data.game_state?.phase === "fight" && data.result?.waiting_for_consolidation) {
-            const raw = data.result.valid_consolidation_destinations as
-              | Array<[number, number] | { col: number; row: number }>
-              | undefined;
-            const hasDests = Array.isArray(raw) && raw.length > 0;
-            if (hasDests) {
-              const norm = raw.map((h) =>
-                Array.isArray(h)
-                  ? { col: Number(h[0]), row: Number(h[1]) }
-                  : { col: Number(h.col), row: Number(h.row) }
-              );
-              setPileInDestinations(norm);
-              const poolSet = new Set<string>();
-              for (const h of norm) {
-                poolSet.add(`${h.col},${h.row}`);
-              }
-              moveDestPoolRef.current = poolSet;
-              const gsC = data.game_state;
-              const fpZone = gsC?.fight_consolidation_footprint_zone as unknown;
-              const fpSet = new Set<string>();
-              if (Array.isArray(fpZone)) {
-                for (const d of fpZone) {
-                  if (Array.isArray(d) && d.length === 2) {
-                    fpSet.add(`${d[0]},${d[1]}`);
-                  }
-                }
-              }
-              footprintZoneRef.current = fpSet;
-              footprintMaskLoopsRef.current = null;
-              const uid = parseInt(
-                String(data.result.unitId ?? data.game_state.active_fight_unit),
-                10
-              );
-              setSelectedUnitId(uid);
-              setMode("consolidationPreview");
-            } else {
-              if (blinkingUnits.blinkTimer) {
-                clearInterval(blinkingUnits.blinkTimer);
-              }
-              setBlinkingUnits({ unitIds: [], blinkTimer: null, attackerId: null });
-              setAttackPreview(null);
-              setPileInDestinations([]);
-              moveDestPoolRef.current = new Set();
-              footprintZoneRef.current = new Set();
-              footprintMaskLoopsRef.current = null;
-              setSelectedUnitId(null);
-              setMode("select");
-            }
           }
           // Handle fight phase multi-attack (ATTACK_LEFT > 0, waiting_for_player)
           // ``[]`` est truthy en JS : exiger au moins une cible, sinon on retombe sur fin d'activation / filet.
@@ -3346,9 +3255,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             if (
               data.game_state?.phase === "fight" &&
               fightPreviewUiActive &&
-              (inactiveFight || fightNoAttacksLeft) &&
-              !data.result?.waiting_for_pile_in &&
-              !data.result?.waiting_for_consolidation
+              (inactiveFight || fightNoAttacksLeft)
             ) {
               clearFightAttackActivationUi();
             }

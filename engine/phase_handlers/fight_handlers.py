@@ -3480,11 +3480,6 @@ def _fight_v11_pile_in_targets(game_state: Dict[str, Any], unit: Dict[str, Any])
     return engaged if engaged else pile_in_targets_within_range(game_state, unit)
 
 
-def _fight_v11_clear_pile_in_preview(game_state: Dict[str, Any]) -> None:
-    game_state.pop("fight_pile_in_footprint_zone", None)
-    game_state.pop("_fight_v11_pile_in_dests", None)
-
-
 # =====================================================================
 # === V11 FIGHT PHASE — CONSOLIDATION par-figurine (12.08) ============
 # =====================================================================
@@ -4383,7 +4378,6 @@ def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str,
             pool = [str(u) for u in eligible if str(u) not in done]
             game_state["fight_eligible_units"] = pool
             game_state["active_fight_unit"] = None
-            _fight_v11_clear_pile_in_preview(game_state)
             _fight_v11_log(
                 game_state,
                 f"PILE IN P{player} : unités éligibles = {pool} (sélection libre)",
@@ -4857,7 +4851,6 @@ def _fight_v11_manual_step(
             # adverse puis la sous-phase FIGHT.
             for e in eligible:
                 game_state["pile_in_done"].add(str(e))
-            _fight_v11_clear_pile_in_preview(game_state)
             _fight_v11_log(
                 game_state,
                 f"PILE IN → fin demandée par le joueur (groupe {list(eligible)} marqué traité)",
@@ -4881,7 +4874,6 @@ def _fight_v11_manual_step(
             if act_uid is not None and act_uid in eligible:
                 game_state["pile_in_done"].add(act_uid)
                 _fight_v11_log(game_state, f"PILE IN unit {act_uid} → SKIP (joueur)")
-            _fight_v11_clear_pile_in_preview(game_state)
             return _fight_v11_manual_state(game_state)
 
         if atype == "pile_in_plan_state":
@@ -4941,7 +4933,6 @@ def _fight_v11_manual_step(
             _from_col, _from_row = int(_uc_before["col"]), int(_uc_before["row"])
             _fight_pile_in_commit_plan(game_state, u, full_plan)
             game_state["pile_in_done"].add(act_uid)
-            _fight_v11_clear_pile_in_preview(game_state)
             # Log par-figurine (mode fin type charge, sans roll) : ligne unite + moveDetails.
             _uc_after = require_key(game_state, "units_cache")[act_uid]
             _to_col, _to_row = int(_uc_after["col"]), int(_uc_after["row"])
