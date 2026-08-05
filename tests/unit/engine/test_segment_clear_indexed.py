@@ -26,10 +26,13 @@ from typing import List, Set, Tuple
 import pytest
 
 from engine.hex_utils import (
+    _HEX_CIRCUMRADIUS,
+    _SEG_TOL,
     _build_obstacle_index,
     _hex_center,
     _hex_corners_at,
     _obstacle_bucket_size,
+    _point_segment_dist_sq,
     _segment_clear_indexed,
     _segment_hits_hex,
 )
@@ -74,7 +77,11 @@ def _segments_across(obstacles: Set[Tuple[int, int]]) -> List[Tuple[float, float
     `t_delta` a l'infini.
     """
     segs: List[Tuple[float, float, float, float]] = []
-    anchors = [(20, 20), (60, 45), (95, 70), (40, 90)]
+    # (200, 20) est dans la zone VIDE de la fixture : ses segments sont degages a TOUTE clearance.
+    # Sans eux, un gros socle (rayon 18,75) ne trouvait plus un seul passage dans le decor et la
+    # fixture ne rendait QUE des « bloque » — l'equivalence y etait alors satisfaite par une
+    # fonction constamment fausse. Verifie par `test_the_fixture_produces_both_verdicts`.
+    anchors = [(20, 20), (60, 45), (95, 70), (40, 90), (200, 20), (215, 75)]
     for (c0, r0) in anchors:
         x0, y0 = _hex_center(c0, r0)
         for (dc, dr) in ((30, 0), (0, 30), (25, 25), (-25, 25), (25, -25), (-30, -30),
@@ -109,13 +116,19 @@ def _terrain() -> Set[Tuple[int, int]]:
 TERRAIN = _terrain()
 
 
-def test_the_fixture_produces_both_verdicts() -> None:
+@pytest.mark.parametrize("clearance", CLEARANCES)
+def test_the_fixture_produces_both_verdicts(clearance: float) -> None:
     """VERT VACANT : si tous les segments etaient degages (ou tous bloques), l'equivalence
-    ci-dessous serait satisfaite par une fonction constante. On exige les deux verdicts."""
-    verdicts = {
-        _brute_force_clear(*seg, TERRAIN, 0.75) for seg in _segments_across(TERRAIN)
-    }
-    assert verdicts == {True, False}, f"la fixture ne produit que {verdicts}"
+    ci-dessous serait satisfaite par une fonction constante. On exige les deux verdicts.
+
+    PARAMETRE SUR LA CLEARANCE, et pas seulement sur 0,75 : plus le socle est gros, plus le decor
+    lui est infranchissable. Mesure sur la fixture d'origine — 28 degages a 0,75, 9 a 9,0, 2 a
+    12,0 et **0 a 18,75** : le regime des gros socles ne verrouillait donc plus que la direction
+    « faux degage ». Ce garde est ce qui rend cette derive impossible a re-introduire en silence.
+    """
+    verdicts = [_brute_force_clear(*seg, TERRAIN, clearance) for seg in _segments_across(TERRAIN)]
+    assert True in verdicts, f"aucun segment DEGAGE a clearance {clearance}"
+    assert False in verdicts, f"aucun segment BLOQUE a clearance {clearance}"
 
 
 @pytest.mark.parametrize("clearance", CLEARANCES)
@@ -162,6 +175,36 @@ def test_a_clear_corridor_stays_clear(clearance: float) -> None:
     sx, sy = _hex_center(20, 50)
     ex, ey = _hex_center(60, 50)
     assert _indexed_clear(sx, sy, ex, ey, {(200, 200)}, clearance) is True
+
+
+@pytest.mark.parametrize("clearance", CLEARANCES)
+def test_a_segment_grazing_inside_the_fast_reject_radius_stays_clear(clearance: float) -> None:
+    """Le rejet rapide ne DECIDE pas : il ne fait qu'eviter le test de contact quand il est inutile.
+
+    Cas construit dans la bande ou les deux etages sont en desaccord : le centre de l'obstacle est
+    a l'INTERIEUR du rayon de rejet rapide (`circumradius + clearance`), donc le segment n'est pas
+    ecarte d'emblee, mais il passe a cote du socle dilate (`inradius + clearance`), donc il est
+    DEGAGE. Le socle est flat-top : sa face plate regarde +y, d'ou une bande verticale
+    ]inradius + c ; circumradius + c[ ~ ]0,866 + c ; 1,0 + c[. On vise son milieu.
+
+    C'est ce que verrouille ce test : supprimer l'appel a `_segment_hits_hex` et se fier au seul
+    rejet rapide rendrait « bloque » ici. Sans ce cas, cette mutation sur-bloquante passait
+    inapercue a toutes les clearances — la fixture generale ne contient aucun segment dans cette
+    bande une fois le socle gros.
+    """
+    obstacle = (60, 60)
+    ocx, ocy = _hex_center(*obstacle)
+    dy = clearance + 0.93  # entre inradius (0,866) et circumradius (1,0), decale de la clearance
+    seg = (ocx - 6.0, ocy - dy, ocx + 6.0, ocy - dy)
+
+    reach = _HEX_CIRCUMRADIUS + (clearance if clearance > 0.0 else 0.0) + _SEG_TOL
+    assert _point_segment_dist_sq(ocx, ocy, *seg) <= reach * reach, (
+        "premisse : le rejet rapide NE DOIT PAS ecarter cet obstacle, sinon le test ne prouve rien"
+    )
+    assert _brute_force_clear(*seg, {obstacle}, clearance) is True, (
+        "premisse : le segment doit reellement passer a cote du socle dilate"
+    )
+    assert _indexed_clear(*seg, {obstacle}, clearance) is True
 
 
 def test_an_empty_index_is_always_clear() -> None:
