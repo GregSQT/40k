@@ -12,6 +12,7 @@ Verrouille les deux niveaux : la selection (`_select_fight_weapon_indices_for_fi
 CABLAGE dans `squad_declare_fight` (un intent par arme selectionnee + ATTACK_LEFT cumule).
 """
 from engine.phase_handlers import shared_utils
+from tests._state_invariants import turn_state_invariants
 from engine.phase_handlers.shared_utils import (
     _select_fight_weapon_indices_for_fig,
     squad_declare_fight,
@@ -69,6 +70,10 @@ def test_declaration_produit_un_intent_par_arme(monkeypatch):
     fig = _fig([_w("Choppa", [], nb=3), _w("Syringe", ["EXTRA_ATTACKS"], nb=1)])
     target = {"id": "T1", "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7}
     gs = {
+        # Socle d'etat de tour : `squad_declare_fight` lit l'etat des capacites de faction pour
+        # scorer les armes (+1 S/A du Waaagh!). Une doublure qui l'omet decrit un game_state
+        # que le moteur ne produit jamais — cf. `tests/_state_invariants`.
+        **turn_state_invariants(),
         "models_cache": {"A1": fig, "T1": target},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "pending_squad_fight_intents": {"1": []},
@@ -92,6 +97,7 @@ def test_declaration_sans_extra_reste_a_un_intent(monkeypatch):
     monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid, tid=None: ["A1"])
     fig = _fig([_w("Choppa", [], nb=3)])
     gs = {
+        **turn_state_invariants(),
         "models_cache": {"A1": fig, "T1": {"id": "T1", "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7}},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "pending_squad_fight_intents": {"1": []},

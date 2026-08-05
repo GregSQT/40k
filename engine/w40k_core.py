@@ -3527,13 +3527,11 @@ class W40KEngine(gym.Env):
         ⚠️ Le retour DOIT être respecté : `phase_complete` faux signifie que la phase attend une
         réponse, et enchaîner sur le mouvement la perd.
         """
-        result = command_handlers.command_phase_start(self.game_state)
-        # Borne au joueur ACTIF : une decision restee en attente pour l'ADVERSAIRE n'a pas a
-        # etre resolue pendant ce tour-ci, et surtout pas a arreter cette phase (cf. la garde
-        # de propriete de `faction_decision_is_pending`).
-        current_player = int(require_key(self.game_state, "current_player"))
-        if not command_handlers.faction_decision_is_pending(self.game_state, current_player):
-            return result
+        command_handlers.command_phase_start(self.game_state)
+        # UNE seule exécution de `command_phase_resume`, ici. `command_phase_start` ne la rend
+        # plus : elle la rendait avant, ce qui obligeait ce site à la rejouer et donc à garder
+        # un `if` pour ne pas exécuter `command_phase_end` deux fois. `_resolve…` sort d'elle-même
+        # quand rien n'attend, et elle est bornée au joueur actif.
         self._resolve_faction_decisions_for_ai_seats()
         return command_handlers.command_phase_resume(self.game_state)
 
@@ -3559,30 +3557,34 @@ class W40KEngine(gym.Env):
         les deux mots-clés de faction). Le compteur borne l'enchaînement — deux décisions par
         phase au maximum, une troisième signalerait un état incohérent plutôt qu'un cas de jeu.
         """
+        # En gym, les DEUX sièges répondent par le masque : cette fonction n'a rien à trancher.
+        # Le test est INVARIANT, il sort donc avant la boucle au lieu d'être répété dans chacune
+        # de ses deux branches.
+        if self.gym_training_mode:
+            return
         current_player = int(require_key(self.game_state, "current_player"))
-        for _ in range(3):
+        # Bornée par le nombre de mécanismes de 08.04, pas par un littéral : appliquer le Waaagh!
+        # peut poser l'Oath juste derrière (armée portant les deux mots-clés de faction), et une
+        # itération de plus signalerait un état qui ne se vide pas — pas un cas de jeu.
+        for _ in range(len(command_handlers.COMMAND_PHASE_DECISION_TYPES) + 1):
             if not command_handlers.faction_decision_is_pending(self.game_state, current_player):
                 return
+            if self._is_player_human(current_player):
+                return
             decision = read_pending_agent_decision(self.game_state)
-            if decision is not None and str(require_key(decision, "type")) == "waaagh_call":
-                player = int(require_key(decision, "player"))
-                if self.gym_training_mode or self._is_player_human(player):
-                    return
-                called = self._select_ai_waaagh_call(player)
-                command_handlers.apply_waaagh_call_decision(self.game_state, player, called)
+            if decision is not None and str(
+                require_key(decision, "type")
+            ) in command_handlers.COMMAND_PHASE_DECISION_TYPES:
+                command_handlers.apply_waaagh_call_decision(
+                    self.game_state, current_player, self._select_ai_waaagh_call(current_player)
+                )
                 continue
-            pending_oath = self.game_state.get("pending_oath_selection")  # get allowed
-            if pending_oath is None:
-                return
-            player = int(pending_oath)
-            if self.gym_training_mode or self._is_player_human(player):
-                return
             command_handlers.apply_oath_selection(
-                self.game_state, player, self._select_ai_oath_target(player)
+                self.game_state, current_player, self._select_ai_oath_target(current_player)
             )
         raise RuntimeError(
-            "08.04 : plus de deux decisions de capacite de faction enchainees pour un meme "
-            "joueur — l'etat de decision ne se vide pas."
+            "08.04 : plus de decisions de capacite de faction enchainees qu'il n'existe de "
+            "mecanismes pour un meme joueur — l'etat de decision ne se vide pas."
         )
 
     def _select_ai_waaagh_call(self, player: int) -> bool:
@@ -3595,40 +3597,38 @@ class W40KEngine(gym.Env):
         passe jamais ici : l'agent apprend ce tempo, c'est tout l'intérêt de la décision.
         """
         from engine.game_state import unit_has_waaagh_ability
-        from engine.phase_handlers.shared_utils import (
-            _ranged_squad_edge_distance, is_unit_alive,
-        )
         from engine.phase_handlers.shooting_handlers import _ranged_distance_metric
-        from engine.combat_utils import socle_from_cache_entry
+        from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
+        from engine.spatial_relations import (
+            enemy_entries_on_battlefield, entries_on_battlefield,
+        )
 
         units_cache = require_key(self.game_state, "units_cache")
         metric = _ranged_distance_metric(self.game_state)
         # 11.02 : la charge est un 2D6, donc 12" au maximum. Mesure en subhex, comme tout le
         # reste du moteur (`inches_to_subhex`, config de plateau).
         charge_reach = float(require_key(self.config, "inches_to_subhex")) * 12.0
-        enemies = [
-            str(require_key(u, "id")) for u in require_key(self.game_state, "units")
-            if int(require_key(u, "player")) != int(player)
-            and is_unit_alive(str(require_key(u, "id")), self.game_state)
-        ]
-        if not enemies:
+        # `*_on_battlefield` et pas « vivante » : une unité en réserves (20.01) est vivante ET
+        # présente dans `units_cache`, mais posée à la sentinelle (-1,-1). Un filtre écrit sur
+        # « vivante » la laisse passer, et la distance mesurée depuis la sentinelle ne décrit
+        # rien — c'est le filtre UNIQUE que `spatial_relations` existe pour porter.
+        enemy_socles = {
+            enemy_id: socle_from_cache_entry(entry)
+            for enemy_id, entry in enemy_entries_on_battlefield(units_cache, int(player))
+        }
+        if not enemy_socles:
             return False
-        for unit in require_key(self.game_state, "units"):
-            if int(require_key(unit, "player")) != int(player):
+        for squad_id, entry in entries_on_battlefield(units_cache):
+            if int(require_key(entry, "player")) != int(player):
                 continue
-            squad_id = str(require_key(unit, "id"))
-            if not is_unit_alive(squad_id, self.game_state) or squad_id not in units_cache:
+            unit = self._get_unit_by_id(squad_id)
+            if unit is None or not unit_has_waaagh_ability(unit):
                 continue
-            if not unit_has_waaagh_ability(unit):
-                continue
-            socle = socle_from_cache_entry(units_cache[squad_id])
-            for enemy_id in enemies:
-                if enemy_id not in units_cache:
-                    continue
-                distance = _ranged_squad_edge_distance(
-                    self.game_state, squad_id, enemy_id, metric=metric, attacker_socle=socle
-                )
-                if distance <= charge_reach:
+            socle = socle_from_cache_entry(entry)
+            # Socles des DEUX camps précalculés : `_ranged_squad_edge_distance` reconstruisait
+            # celui de la cible à chaque appel, donc une fois par unité orke et par ennemi.
+            for enemy_socle in enemy_socles.values():
+                if ranged_edge_distance(socle, enemy_socle, metric) <= charge_reach:
                     return True
         return False
 
@@ -3645,11 +3645,15 @@ class W40KEngine(gym.Env):
                 f"_select_ai_oath_target: aucune unite ennemie vivante pour le joueur {player} — "
                 f"la designation n'aurait pas du etre posee."
             )
-        units_by_id = {str(require_key(u, "id")): u for u in require_key(self.game_state, "units")}
-        return max(
-            candidates,
-            key=lambda uid: (int(require_key(units_by_id[uid], "VALUE")), uid),
-        )
+        # `_get_unit_by_id` (index `unit_by_id`) plutôt qu'un second index reconstruit ici : la
+        # classe l'utilise déjà partout ailleurs, et l'index existe depuis le reset.
+        def _value_of(unit_id: str) -> Tuple[int, str]:
+            unit = self._get_unit_by_id(unit_id)
+            if unit is None:
+                raise KeyError(f"_select_ai_oath_target: unite {unit_id!r} absente de l'index")
+            return int(require_key(unit, "VALUE")), unit_id
+
+        return max(candidates, key=_value_of)
 
     def _handle_select_oath_target_action(
         self, action: Dict[str, Any]

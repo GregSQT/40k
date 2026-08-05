@@ -18,7 +18,7 @@ from engine.game_state import (
 )
 
 
-def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
+def command_phase_start(game_state: Dict[str, Any]) -> None:
     """
     Initialize command phase - do all maintenance/resets, then either:
     - Stay in command if zone intent free steps are available (Phase 2), or
@@ -79,7 +79,11 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
         assignments[str(unit["id"])] = zone_idx
     game_state["unit_zone_assignments"] = assignments
 
-    return command_phase_resume(game_state)
+    # NE REND PAS la main sur la suite : c'est `W40KEngine.start_command_phase` qui enchaîne
+    # (résolution des sièges sans masque, puis `command_phase_resume`). Rendre `resume` ici
+    # obligeait l'appelant à le rejouer — donc à garder un `if` pour éviter que
+    # `command_phase_end` ne soit exécuté deux fois sur le chemin sans décision.
+    return None
 
 
 def command_phase_resume(game_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -281,10 +285,25 @@ def command_step_command_abilities(game_state: Dict[str, Any]) -> None:
     # 3. Oath of Moment — « select one unit from your opponent's army ». NON OPTIONNEL : pas de
     #    candidat « aucune cible ». S'il n'existe aucune unité ennemie vivante, il n'y a rien à
     #    désigner et la clause est sans objet (elle ne peut alors bénéficier à personne).
-    if OATH_FACTION_KEYWORD in army_faction_keywords(game_state, current_player):
-        if oath_selectable_enemy_ids(game_state, current_player):
-            game_state["pending_oath_selection"] = current_player
+    arm_oath_selection(game_state, current_player)
     return None
+
+
+def arm_oath_selection(game_state: Dict[str, Any], player: int) -> None:
+    """Pose la désignation d'Oath si `player` la doit — ÉCRIVAIN UNIQUE de l'armement.
+
+    Deux appelants : 08.04 lui-même, et la résolution du Waaagh! (une armée qui porterait les
+    deux mots-clés de faction enchaînerait les deux décisions). Le bloc était recopié aux deux
+    endroits ; le jour où la condition d'armement change, un seul site à corriger.
+
+    « Select one unit from your opponent's army » : s'il n'existe aucune unité ennemie vivante,
+    il n'y a rien à désigner et la clause est sans objet — elle ne pourrait bénéficier à personne.
+    """
+    player_int = int(player)
+    if OATH_FACTION_KEYWORD not in army_faction_keywords(game_state, player_int):
+        return
+    if oath_selectable_enemy_ids(game_state, player_int):
+        game_state["pending_oath_selection"] = player_int
 
 
 def oath_selectable_enemy_ids(game_state: Dict[str, Any], player: int) -> List[str]:
@@ -303,6 +322,22 @@ def oath_selectable_enemy_ids(game_state: Dict[str, Any], player: int) -> List[s
         if int(require_key(unit, "player")) != player_int
         and is_unit_alive(str(require_key(unit, "id")), game_state)
     ]
+
+
+#: Types de `pending_agent_decision` qui appartiennent au cycle de vie de 08.04 — c'est-à-dire
+#: ceux que la phase de commandement pose, arrête, et éteint « until the start of your next
+#: Command phase ».
+#:
+#: NOMMÉ plutôt que comparé en dur, parce que trois sites en dépendent : l'arrêt de la phase
+#: (`faction_decision_is_pending`), l'extinction (`game_state.expire_faction_abilities_for_player`)
+#: et la résolution des sièges sans masque (`W40KEngine._resolve_faction_decisions_for_ai_seats`).
+#: Le chantier 06 ajoute des capacités « in your command phase » : avec trois égalités de chaîne,
+#: un oubli est SILENCIEUX dans deux cas sur trois — la décision périmée survit et la repose
+#: suivante LÈVE, ou la phase ne s'arrête pas alors qu'un choix attend.
+#:
+#: `rule_choice` n'en fait PAS partie : il a son propre cycle (`pending_rule_choice_queue`) et
+#: peut être posé hors phase de commandement (`trigger: on_deploy`).
+COMMAND_PHASE_DECISION_TYPES: frozenset = frozenset({"waaagh_call"})
 
 
 def faction_decision_is_pending(game_state: Dict[str, Any], player: Optional[int] = None) -> bool:
@@ -329,7 +364,7 @@ def faction_decision_is_pending(game_state: Dict[str, Any], player: Optional[int
     if pending_oath is not None and (player is None or int(pending_oath) == int(player)):
         return True
     decision = read_pending_agent_decision(game_state)
-    if decision is None or str(require_key(decision, "type")) != "waaagh_call":
+    if decision is None or str(require_key(decision, "type")) not in COMMAND_PHASE_DECISION_TYPES:
         return False
     return player is None or int(require_key(decision, "player")) == int(player)
 
@@ -365,9 +400,7 @@ def apply_waaagh_call_decision(game_state: Dict[str, Any], player: int, called: 
     # Un joueur ORKS n'est pas ADEPTUS ASTARTES : cet appel ne pose rien dans les rosters
     # actuels. Il est là parce que la règle ne l'interdit pas — une armée qui porterait les deux
     # mots-clés déclarerait les deux capacités, et l'ordre de 08.04 doit rester le même.
-    if OATH_FACTION_KEYWORD in army_faction_keywords(game_state, int(player)):
-        if oath_selectable_enemy_ids(game_state, int(player)):
-            game_state["pending_oath_selection"] = int(player)
+    arm_oath_selection(game_state, player)
 
 
 def apply_oath_selection(game_state: Dict[str, Any], player: int, target_unit_id: str) -> None:
