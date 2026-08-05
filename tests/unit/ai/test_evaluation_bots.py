@@ -1067,3 +1067,84 @@ def test_smart_bot_shoot_slot_mapping_divergence_is_explicit(
     gs = _slot_gs("shoot", {"e_weak": _dmg(rng=1, cc=1)}, ["e_weak"])
     with pytest.raises(RuntimeError, match=r"sans escouade ennemie"):
         _act(GreedyBot(randomness=0.0), [SHOOT, SHOOT2], gs)
+
+
+# ---------------------------------------------------------------------------
+# HORS TABLE (reserves 20.01 / attente de deploiement) — chantier « tous les chemins hors table »
+# ---------------------------------------------------------------------------
+
+def _off_table_gs() -> dict:
+    """Etat minimal ou UN ennemi est hors table et un autre est pose.
+
+    Le `units_cache` est PEUPLE, contrairement aux autres montages de ce fichier qui le laissent
+    vide : avec un cache vide, `entry.get("occupied_hexes", {ancre})` tombe sur son repli et le
+    vrai chemin — celui que le moteur emprunte — n'est jamais exerce. Une unite hors table a une
+    entree PRESENTE avec une empreinte VIDE ; c'est exactement ce que le repli ne rattrape pas.
+    """
+    return {
+        "current_player": ACTING,
+        "inches_to_subhex": 1,
+        "units": [
+            # `_dmg` pose RNG_WEAPONS (NB/DMG) ; `RNG` (la PORTEE) s'y ajoute apres, sinon
+            # l'etalement de `_dmg` l'ecrase et `get_max_ranged_range` leve sur la cle manquante.
+            {"id": "u0", "player": ACTING, "col": 1, "row": 1,
+             **{**_dmg(rng=2, cc=1), "RNG_WEAPONS": [{"NB": 1, "DMG": 2, "RNG": 6}]}},
+            {"id": "e_posee", "player": FOE, "col": 4, "row": 1, **_dmg(rng=1, cc=3)},
+            {"id": "e_reserve", "player": FOE, "col": -1, "row": -1, **_dmg(rng=1, cc=3)},
+        ],
+        "units_cache": {
+            "u0": {"col": 1, "row": 1, "player": ACTING, "occupied_hexes": {(1, 1)}},
+            "e_posee": {"col": 4, "row": 1, "player": FOE, "occupied_hexes": {(4, 1)}},
+            # HORS TABLE : entree presente, empreinte VIDE, sentinelle (-1,-1).
+            "e_reserve": {"col": -1, "row": -1, "player": FOE, "occupied_hexes": set()},
+        },
+        "config": {
+            "game_rules": {
+                "engagement_zone": 1,
+                "engagement_zone_vertical": 5,
+                "max_base_size_hex": 35,
+                "cover_ratio": 0.3,
+                "avg_charge_roll": 7,
+            },
+            "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+        },
+    }
+
+
+def test_bots_ignore_off_table_units_when_measuring_distance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Les 4 mesures de distance des bots doivent ECARTER une unite hors table.
+
+    Une unite en reserves (20.01) ou pas encore posee est VIVANTE : le seul filtre de ces boucles
+    etait `is_unit_alive`, qui la laisse donc passer. Son empreinte est VIDE, et les quatre
+    methodes la passent directement a `min_distance_between_sets` -> « Cannot compute distance
+    between empty sets ». C'est un CRASH, pas un verdict fausse.
+
+    Le montage garde son temoin `e_posee` : sans lui, ecarter tout le monde rendrait ces methodes
+    muettes et le test serait vert a vide.
+    """
+    monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: True)
+
+    gs = _off_table_gs()
+    unit = gs["units"][0]
+
+    # TacticalBot — trois des quatre sites.
+    tac = TacticalBot(randomness=0.0)
+    nearest = tac._find_nearest_enemy(unit, gs)
+    assert nearest is not None and nearest["id"] == "e_posee", (
+        f"_find_nearest_enemy a retenu {nearest and nearest['id']!r} : une unite hors table n'est "
+        "a aucune distance, seule `e_posee` peut etre la plus proche"
+    )
+    assert tac._find_safest_position(unit, [(1, 1), (2, 2), (8, 8)], gs) in {(1, 1), (2, 2), (8, 8)}
+    assert tac._find_best_offensive_position(
+        unit, [(1, 1), (4, 4), (7, 7)], {"id": "e_posee", "col": 4, "row": 1}, gs
+    ) in {(1, 1), (4, 4), (7, 7)}
+
+    # DefensiveBot — le quatrieme site. `e_posee` est a 3 cases, dans les 12" : elle DOIT compter,
+    # sinon un compteur a zero passerait le test sans rien mesurer.
+    dfn = DefensiveBot(randomness=0.0)
+    assert dfn._count_nearby_threats(unit, gs) == 1, (
+        "la menace posee doit etre comptee (et elle seule) : un 0 signifierait que la methode "
+        "n'a rien mesure, un 2 qu'elle a compte la reserve"
+    )

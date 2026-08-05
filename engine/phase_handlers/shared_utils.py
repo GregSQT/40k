@@ -5251,6 +5251,24 @@ def charge_check_eligibility(
     our_positions = _squad_model_positions(game_state, squad_id)
     if not our_positions:
         return False
+    # HORS TABLE, cote CIBLE comme cote SUJET. 11.02 conditionne la declaration a « within 12" » :
+    # une unite pas encore posee, ou en reserves (20.01), n'est a AUCUNE distance.
+    #
+    # Sans ce controle, `_squad_model_positions` rend ses figurines a la sentinelle (-1,-1), et le
+    # test des 12" ci-dessous — une distance de grille brute — repond VRAI pour tout chargeur assez
+    # proche de l'origine du plateau. Cette fonction est la source UNIQUE que le masque ET le
+    # commit `squad_charge` interrogent (cf. la construction des slots de charge dans
+    # `build_squad_action_mask`) : le masque ouvrait donc un slot que `charge_build_valid_plan`
+    # refuse ensuite, l'agent depensait son activation en `charge_fail`. C'est la divergence
+    # masque/execution, pas une simple mesure fausse.
+    units_cache = require_key(game_state, "units_cache")
+    subject_entry = units_cache.get(str(squad_id))  # get allowed (escouade retiree = morte)
+    if subject_entry is None or not entry_is_on_battlefield(subject_entry):
+        return False
+    for tsid in target_squad_ids:
+        target_entry = units_cache.get(str(tsid))  # get allowed (idem)
+        if target_entry is None or not entry_is_on_battlefield(target_entry):
+            return False
     ish = int(require_key(game_state, "inches_to_subhex"))
     threshold_12 = CHARGE_THRESHOLD_INCHES * ish
 
@@ -5432,6 +5450,13 @@ def charge_build_valid_plan(
     ]
     if len(target_entries_by_id) != len(target_squad_ids):
         return None  # une cible declaree n'est plus dans le cache (detruite) : plan invalide
+    # HORS TABLE — meme verdict que « detruite », pour la meme raison : la cible n'est pas sur le
+    # champ de bataille (reserves 20.01, ou pas encore posee), donc 11.01 « within 12" » ne peut
+    # pas etre satisfait et aucune figurine ne peut finir en ER avec elle. Le plan est invalide,
+    # il n'est pas « vide » : c'est ce qu'appelle `_encode_unit_entity` pour dire a l'agent si une
+    # charge est possible sur cet ennemi, et la reponse est non.
+    if any(not entry_is_on_battlefield(te) for _tid, te in target_entries_by_id):
+        return None
     target_entries = [te for _tid, te in target_entries_by_id]
 
     # Portee d'engagement en distance CENTRE-A-CENTRE : borne superieure par inegalite
