@@ -3168,6 +3168,14 @@ def _get_activation_pool_key_for_phase(phase: str) -> str:
         return "shoot_activation_pool"
     if phase == "charge":
         return "charge_activation_pool"
+    if phase == "command":
+        # La phase de commandement est devenue OBSERVABLE par un humain : 08.04 l'arrête sur la
+        # décision de capacité de faction (Waaagh! / Oath), et le joueur a le bouton de fin de
+        # phase sous la main. Sans cette entrée, le clic LEVAIT — HTTP 500 sur une action de jeu
+        # ordinaire. Le pool est vide par construction (`command_build_activation_pool`) : la
+        # boucle sort immédiatement et le refus, s'il y a lieu, vient du moteur
+        # (`faction_decision_pending`, HTTP 200) et pas d'une exception.
+        return "command_activation_pool"
     raise ValueError(f"end_phase is not supported for phase '{phase}'")
 
 

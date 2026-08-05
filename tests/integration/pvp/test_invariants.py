@@ -19,12 +19,64 @@ class TestStartState:
         """t2_start_invariants : l'état initial satisfait tous les invariants."""
         assert_state_invariants(game_unchecked.state, "start")
 
-    def test_start_is_move_phase_player_one_turn_one(self, game_unchecked):
-        """t2_start_move : pvp_test démarre en phase move, joueur 1, tour 1."""
+    def test_start_is_command_phase_stopped_on_the_oath_designation(self, game_unchecked):
+        """t2_start_command : pvp_test démarre en phase command, ARRÊTÉE sur l'Oath (08.04).
+
+        Ce n'était pas le contrat jusqu'au chantier des capacités de faction : la phase de
+        commandement enchaînait sur le mouvement et ``/start`` rendait ``move``. Elle s'arrête
+        désormais sur une décision de joueur, et le roster de ``pvp_test`` est ADEPTUS ASTARTES —
+        la désignation d'Oath n'est pas optionnelle (« select one unit from your opponent's
+        army »), donc l'arrêt est certain, pas dépendant d'un tirage.
+        """
         state = game_unchecked.state
-        assert state["phase"] == "move"
+        assert state["phase"] == "command"
         assert int(state["current_player"]) == 1
         assert int(state["turn"]) == 1
+        assert int(state["pending_oath_selection"]) == 1, (
+            "la phase de commandement n'est pas arretee sur la designation d'Oath"
+        )
+
+    def test_start_refuses_any_action_until_the_oath_is_designated(self, game_unchecked):
+        """t2_start_arret_opposable : l'arrêt de 08.04 refuse tout le reste, `advance_phase` inclus.
+
+        Sans ce refus, un `advance_phase` terminait la phase avec la désignation encore posée :
+        elle était purgée à l'ouverture de la command phase suivante et le joueur perdait ses
+        relances de touche pour tout le tour, sans message.
+        """
+        accepted, body = game_unchecked.try_act("advance_phase")
+        assert not accepted
+        assert body["result"]["error"] == "faction_decision_pending"
+        assert game_unchecked.state["phase"] == "command"
+        assert int(game_unchecked.state["pending_oath_selection"]) == 1
+
+        # Le bouton « fin de phase » est sous la main du joueur pendant cet arrêt, et la phase de
+        # commandement n'était pas dans la table de pools de `_execute_end_phase_action` : le clic
+        # LEVAIT, donc HTTP 500 sur une action de jeu ordinaire. Refus métier attendu, en 200.
+        accepted, body = game_unchecked.try_act("end_phase", player=1)
+        assert body["_status"] == 200, f"end_phase a levé au lieu de refuser : HTTP {body['_status']}"
+        assert not accepted
+        assert body["result"]["details"]["error"] == "faction_decision_pending"
+        assert game_unchecked.state["phase"] == "command"
+        assert int(game_unchecked.state["pending_oath_selection"]) == 1
+
+    def test_start_lands_in_move_once_the_oath_is_played(self, game_unchecked):
+        """t2_start_move : la désignation jouée, la phase de mouvement DÉMARRE.
+
+        Pas « rend un `phase_complete` » : la phase doit avoir effectivement basculé et le pool de
+        move être construit. Les deux routes de décision sortent du moteur AVANT la boucle de
+        cascade — le seul endroit où une transition s'exécute — donc le `next_phase: move` rendu
+        au client a décrit pendant un temps une transition qui n'avait pas eu lieu. Le PvP n'a
+        AUCUN verbe de sortie de la phase de commandement : la partie restait bloquée là.
+        """
+        target = game_unchecked.alive_ids(2)[0]
+        body = game_unchecked.act("select_oath_target", unitId=target)
+        assert body["result"]["next_phase"] == "move"
+        assert game_unchecked.state["pending_oath_selection"] is None
+        assert game_unchecked.state["oath_target"]["1"] == target
+        assert game_unchecked.phase == "move", (
+            "la phase annonce le mouvement sans y basculer : la partie reste en commandement"
+        )
+        assert game_unchecked.pool("move_activation_pool"), "phase de mouvement sans pool"
 
     def test_start_has_units_of_both_players(self, game_unchecked):
         """t2_start_deux_joueurs : les deux camps ont des unités vivantes."""
