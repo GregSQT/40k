@@ -1770,6 +1770,12 @@ def _build_scenario_engine_config(scenario_file: str):
         "deployment_type_by_player": scenario_result.get("deployment_type_by_player"),
         "deployment_zone": scenario_result.get("deployment_zone"),
         "deployment_pools": scenario_result.get("deployment_pools"),
+        # Oath of Moment (chantier 03) : donnée de scénario, comme les clés de déploiement
+        # ci-dessus. Ce chemin construit la config LUI-MÊME et la passe à `W40KEngine(config=…)`,
+        # qui prend alors la branche `else` — celle qui ne relit aucun scénario. Sans ce
+        # forwarding, la clé déclarée dans le JSON reste inerte en PvP/PvE et le premier jet de
+        # blessure d'un marine sous Oath lève (`game_state.uses_codex_detachment`).
+        "uses_codex_detachment": scenario_result.get("uses_codex_detachment"),
     }
 
     agent_keys = get_agents_from_scenario(scenario_file, unit_registry)
@@ -3340,6 +3346,20 @@ def _load_army_file(army_file: str) -> Dict[str, Any]:
     if not isinstance(display_name, str) or not display_name.strip():
         raise ValueError(f"Army file {army_file} display_name must be a non-empty string")
     require_key(army_cfg, "description")
+    # Clause de détachement d'Oath of Moment : validée ICI, au CHARGEMENT, et non au moment de
+    # l'écrire dans la config moteur — `_execute_change_roster_action` a déjà remplacé et
+    # renuméroté les unités quand il y arrive, donc lever là-bas laisserait la partie à moitié
+    # échangée (caches et `deployment_state` encore sur les anciens ids).
+    detachment = require_key(army_cfg, "uses_codex_detachment")
+    # SCALAIRE, contrairement au scenario qui decrit DEUX armees et porte donc un dict par joueur.
+    # Un fichier d'armee decrit UNE liste : lui faire declarer les deux joueurs laissait la meme
+    # liste jouer sous deux regles differentes selon le siege qui la charge. Booleen STRICT pour
+    # la meme raison qu'en `game_state.uses_codex_detachment` : `bool("false")` vaut True.
+    if not isinstance(detachment, bool):
+        raise TypeError(
+            f"Army file {army_file} uses_codex_detachment must be a boolean (the list either uses "
+            f"a Codex: Space Marines Detachment or it does not), got {detachment!r}"
+        )
     units = require_key(army_cfg, "units")
     if not isinstance(units, list) or not units:
         raise ValueError(f"Army file {army_file} must contain a non-empty units array")
@@ -3601,6 +3621,26 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
         unit["id"] = new_id
     game_state["units"] = combined_units
     game_state["unit_by_id"] = {str(u["id"]): u for u in combined_units}
+
+    # Clause de detachement d'Oath of Moment : elle appartient a l'ARMEE (« If you are using a
+    # Codex: Space Marines Detachment »), pas au scenario. Changer de roster remplace donc l'armee
+    # ET sa clause, pour CE joueur seulement — l'autre garde la sienne. Sans cette propagation,
+    # une armee declarant `false` heritait du `true` du scenario et gagnait un +1 au jet de
+    # blessure que personne n'a decide.
+    army_detachment = require_key(army_cfg, "uses_codex_detachment")  # forme validée au chargement
+    engine_config = require_key(game_state, "config")
+    by_player = engine_config.get("uses_codex_detachment")  # get allowed : None = scenario muet
+    if by_player is None:
+        # Scenario sans armee ADEPTUS ASTARTES : il n'avait aucune raison de declarer la cle, et
+        # c'est le roster entrant qui l'etablit. Ce n'est pas un defaut anti-erreur.
+        by_player = {}
+        engine_config["uses_codex_detachment"] = by_player
+    elif not isinstance(by_player, dict):
+        raise TypeError(
+            "config['uses_codex_detachment'] doit etre un dict par joueur, "
+            f"recu {type(by_player).__name__}"
+        )
+    by_player[str(target_deployer)] = army_detachment
 
     # Rebuild reward config mappings using engine centralized logic.
     # This preserves mono-agent (single-policy) behavior by mapping all model keys

@@ -1,5 +1,5 @@
 {
-  "uses_codex_detachment": { "1": true, "2": true },
+  "uses_codex_detachment": true,
   "faction": "spaceMarine",
   "display_name": "Test - Space Marines",
   "description": "Test",

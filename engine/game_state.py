@@ -4007,7 +4007,16 @@ def uses_codex_detachment(game_state: Dict[str, Any], player: int) -> bool:
             f"config['uses_codex_detachment'] n'a pas d'entree pour le joueur {player_int} : "
             f"{by_player!r}"
         )
-    return bool(by_player[str(player_int)])
+    declared = by_player[str(player_int)]
+    # BOOLEEN STRICT, pas `bool(...)` : `bool("false")` vaut True. Une config qui ecrit la chaine
+    # "false" — au clavier, ou par un export qui stringifie — rendrait le +1 au jet de blessure
+    # que son auteur venait explicitement de couper, sans que rien ne le signale.
+    if not isinstance(declared, bool):
+        raise TypeError(
+            f"config['uses_codex_detachment'][{str(player_int)!r}] doit etre un booleen, recu "
+            f"{declared!r} ({type(declared).__name__})"
+        )
+    return declared
 
 
 # --- Application des effets : QUI est concerné par quoi, à cet instant -----------------------

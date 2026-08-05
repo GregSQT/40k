@@ -35,6 +35,9 @@ SEEDS = (1, 2, 3)
 
 MELEE_SCENARIO = {
     "primary_objectives": ["objectives_control"],
+    # Inerte ici (roster 100 % Tyranids) mais declare comme dans tout scenario : la clause de
+    # detachement d'Oath of Moment est OBLIGATOIRE des qu'une armee ADEPTUS ASTARTES entre.
+    "uses_codex_detachment": {"1": True, "2": True},
     "board_ref": "44x60x5",
     "terrain_ref": "terrain-train-01.json",
     "deployment_type": "fixed",

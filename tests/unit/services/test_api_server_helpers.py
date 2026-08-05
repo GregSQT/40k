@@ -419,6 +419,7 @@ def test_load_army_file_and_list_armies_from_temp_config(
           "faction": "spaceMarine",
           "display_name": "SM Army",
           "description": "Desc",
+          "uses_codex_detachment": true,
           "units": [{"unit_type": "Intercessor", "count": 2}]
         }
         """,

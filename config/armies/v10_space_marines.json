@@ -1,5 +1,5 @@
 {
-  "uses_codex_detachment": { "1": true, "2": true },
+  "uses_codex_detachment": true,
   "faction": "spaceMarine",
   "display_name": "Leviathan - Space Marines",
   "description": "• Librarian Terminator\n• Lieutenant (Combi Weapon)\n• Apothecary Biologis\n• Dreadnought Ballistus\n• Sternguard Veteran Squad (5)\n\t• 1 Sergent (Power Fist)\n\t• 4 Sternguard Veteran\n• Terminator Squad (5)\n\tCaptain Terminator Relic Weapon / Bolter\n\t1 Terminator Cyclone\n\t3 Terminator\n• Infernus Squad (10)\n",
