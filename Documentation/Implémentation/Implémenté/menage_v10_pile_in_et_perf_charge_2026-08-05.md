@@ -1,9 +1,7 @@
 # Deux lots issus du chantier `units_cache` — ménage V10 pile-in, et perf de la charge — 2026-08-05
 
-**Lot A : CLOS** (fusion `b898bb95`). **Lot B : OUVERT**, pas commencé.
-
-⚠️ Ce document reste dans `A_faire/` tant que le lot B n'est pas traité. Ne pas le déplacer
-dans `Implémenté/` : il porte encore du travail.
+**Les DEUX lots sont CLOS.** Lot A : fusions `b8c5e0ef` + `b898bb95`. Lot B : `22fbf363`,
+fusionné par `947996c8`. Document déplacé dans `Implémenté/`.
 
 **Origine** : sortis du lot `units_cache`
 ([`replis_units_cache_2026-08-05.md`](../replis_units_cache_2026-08-05.md) §8.4 et §9). Ce
@@ -12,12 +10,10 @@ que ces deux paragraphes ne donnent pas.
 
 | Lot | Worktree | Base | État |
 |---|---|---|---|
-| ~~A — ménage V10 pile-in / consolidation~~ ✅ | `menage_v10_frontend` | — | **CLOS** : partie 1 `b8c5e0ef`, chaîne morte `b898bb95` |
-| B — perf boucle de collision de charge | `perf_collision_charge` | `34b94c3d` | non commencé |
+| ~~A — ménage V10 pile-in / consolidation~~ ✅ | — | — | **CLOS** : partie 1 `b8c5e0ef`, chaîne morte `b898bb95` |
+| ~~B — boucle de collision de charge~~ ✅ | — | — | **CLOS** : `22fbf363`, fusion `947996c8` |
 
-⚠️ Les deux worktrees ont été créés AVANT ce document ET avant la fusion `b8c5e0ef`. Faire
-`git merge main` dedans avant de commencer — sinon l'agent du lot A refera du travail déjà
-présent dans `main`.
+Les deux worktrees ont été supprimés après fusion.
 
 ---
 
@@ -102,7 +98,7 @@ résolus **une fois** dans `charge_build_valid_plan` et passés en paramètre
 `non_target_enemy_entries`. Gain : 1 balayage de `units_cache` au lieu de ~14 641, et `E` lookups
 au lieu de ~14 641 × `E`.
 
-### B.2 Ce qui reste
+### B.2 Ce qui restait — ✅ TRAITÉ (`22fbf363`)
 
 La boucle de **collision** n'a pas été touchée :
 
@@ -124,7 +120,26 @@ Pourquoi c'est chaud : `_hex_legal_for_charge` est appelée **par cellule** dans
 commentaire du fichier chiffre le pire cas à ~14 641 itérations par anneau, pour chaque figurine),
 et `charge_build_valid_plan` est sur le chemin RL — `observation_builder.py:1420`, à chaque step.
 
-### B.3 Protocole de mesure — IMPOSÉ, ne pas corriger avant
+### B.3 Résultat de la mesure — et pourquoi le correctif a été gardé QUAND MÊME
+
+Le protocole ci-dessous a été suivi, et **il a rendu un verdict négatif sur la perf** :
+
+> Mesuré (×5, 22 escouades, jet 12) : 376 → 2 balayages de cache, 7 875 → 21 lectures
+> d'empreinte, −0,77 % d'appels de fonction. **Le gain temporel n'est PAS net** : le profil
+> montre que 94 % du plan est dans `geodesic_field` / `_segment_clear_indexed`, la boucle de
+> collision pesait 0,6 %.
+
+Le changement a été retenu **pour une autre raison** : il supprime deux
+`game_state.get("units_cache", {})` dont le repli aurait vidé l'union et rendu TOUTE cellule
+libre, sans le moindre bruit. C'est la bonne façon de conclure une mesure décevante — dire le
+chiffre, puis justifier la décision sur un autre critère, plutôt que d'habiller le résultat.
+
+La correction a aussi touché le **jumeau** `_cell_base_legal` (pile-in 12.03 / consolidation
+12.08), qui portait le même défaut. Verrou : 3 tests dans `test_charge_plan_engagement_range.py`,
+mutation `_occupied_by_others = set()` → 2 rouges, rétabli → 38 verts.
+
+<details><summary>Protocole de mesure utilisé (conservé pour réemploi)</summary>
+
 
 Le benchmark doit construire un roster de **taille réaliste** : le duo chargeur/cible des tests
 unitaires masque le coût, il n'a que 2 entrées dans `units_cache`. Mesurer à 2, 12 et 22 escouades.
@@ -170,11 +185,13 @@ for n in (0, 10, 20):
 4. **Si le gain n'est pas net, le DIRE et proposer d'annuler** : un refactor de chemin chaud sans
    gain mesuré n'a pas à être livré.
 
-### B.4 Verrou
+</details>
 
-Test qui CONSTRUIT une géométrie où une case est occupée par une escouade tierce et vérifie
-qu'elle est refusée, plus la contre-épreuve sans cette escouade. Prouver par mutation : remettre
-l'ancienne boucle, voir le test ROUGE, rétablir, le rapporter.
+### B.4 Verrou — ✅ posé
+
+3 tests dans `test_charge_plan_engagement_range.py` : exhaustivité des cellules engageantes,
+refus d'une case occupée par une escouade tierce + contre-épreuve, blocage total → plan `None`.
+Mutation prouvée.
 
 ---
 

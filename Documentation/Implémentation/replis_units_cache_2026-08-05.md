@@ -497,7 +497,7 @@ pyright/pytest/tsc sur l'arbre fusionné ; **pas** par un essai PvP. Le reste de
 le gym les utilise, le mort ne remontait pas au backend.
 
 Le détail exploitable — chaîne morte tracée, découpage, pièges d'outillage — est dans
-[`A_faire/menage_v10_pile_in_et_perf_charge_2026-08-05.md`](A_faire/menage_v10_pile_in_et_perf_charge_2026-08-05.md).
+[`Implémenté/menage_v10_pile_in_et_perf_charge_2026-08-05.md`](Implémenté/menage_v10_pile_in_et_perf_charge_2026-08-05.md).
 
 **FAIT (2026-08-05, branche `menage_v10_frontend`).** Les quatre points sont partis ensemble, en
 deux commits. Commit `7b5871dc` : `_fight_v11_clear_pile_in_preview` + ses 4 appels, et les deux
@@ -513,7 +513,7 @@ Les actions moteur `pile_in` / `consolidation` restent, elles : le gym les émet
 
 ---
 
-## 9. Effets de bord du lot hors « repli » — signature changée, et un gaspillage NON traité
+## 9. Effets de bord du lot hors « repli » — signature changée, gaspillage ✅ TRAITÉ
 
 Deux passes `/simplify` ont produit des changements qui ne sont pas des corrections de repli et
 qui doivent être trouvables :
@@ -539,10 +539,15 @@ dans la même fonction, la boucle de collision
 ordre de grandeur que ce qui vient d'être corrigé, et **antérieur à ce lot** (le `.get()` d'origine
 ne le rendait pas moins cher). Le corriger proprement demande de précalculer l'union des hexes
 occupés en un `set` avant les BFS — une transformation sémantique, pas un hissage, sur un chemin
-chaud qui mérite une mesure avant/après. **À traiter comme un sujet en soi** — lot ouvert, worktree `perf_collision_charge`, protocole de
-mesure et benchmark dans
-[`A_faire/menage_v10_pile_in_et_perf_charge_2026-08-05.md`](A_faire/menage_v10_pile_in_et_perf_charge_2026-08-05.md)
-(lot B). **Rien n'a encore été mesuré ni corrigé.**
+chaud qui mérite une mesure avant/après. ✅ **TRAITÉ** par `22fbf363` (fusion `947996c8`) : l'union des cases occupées est hissée hors des
+BFS via `build_occupied_positions_set`, et le jumeau `_cell_base_legal` (pile-in / consolidation)
+a reçu la même correction. **La mesure a rendu un verdict négatif sur la perf** — 376 → 2
+balayages de cache et 7 875 → 21 lectures d'empreinte, mais seulement −0,77 % d'appels : 94 % du
+plan est dans le champ géodésique, cette boucle pesait 0,6 %. Le changement a été gardé pour ce
+qu'il corrige d'autre — deux `game_state.get("units_cache", {})` dont le repli rendait TOUTE
+cellule libre en silence. Détail dans
+[`Implémenté/menage_v10_pile_in_et_perf_charge_2026-08-05.md`](Implémenté/menage_v10_pile_in_et_perf_charge_2026-08-05.md)
+(lot B).
 
 **Le contrat de `is_unit_alive` est désormais écrit dans son docstring** (`shared_utils.py`) :
 « un `True` PROUVE la présence dans `units_cache` ». C'est ce qui autorise les sites en aval à

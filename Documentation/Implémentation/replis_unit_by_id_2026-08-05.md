@@ -2,7 +2,14 @@
 
 **Chantier OUVERT, rien de livré.** Inventaire, pas rapport de travail.
 
-🔴 **CHIFFRES RECALÉS le 2026-08-05 sur `main` fusionné (`e672683a`).** Le premier relevé avait été
+🔴 **CHIFFRES À NOUVEAU PÉRIMÉS — re-mesurés le 2026-08-06 sur `main` (`d7be203e`) :
+186 appels, 79 déjà bruyants, 56 replis, 51 à lire.**
+C'est la DEUXIÈME dérive de cet inventaire en deux jours (198/78/56/64 la veille). La leçon n'est
+pas « recompter » mais **ne jamais partir des chiffres écrits** : les relever soi-même en ouvrant
+le chantier, avec le script du §3. Les tableaux par site ci-dessous gardent leur valeur (ils
+nomment des FONCTIONS, pas des lignes), les totaux non.
+
+🔴 **Premier recalage, conservé pour mémoire (`e672683a`).** Le premier relevé avait été
 fait DANS le worktree du lot `units_cache`, donc sur un arbre qui ignorait à la fois les avancées
 de `main` (réserves 20.01, registre `_once_claims` — ~2 783 lignes) et les 38 suppressions de code
 mort de ce lot. Écarts constatés : 198 appels (et non 186), 78 déjà bruyants (et non 82), **56
