@@ -183,7 +183,14 @@ Comportement IA:
    Si l'agent doit la PERCEVOIR : l'ajouter aussi a `UNIT_RULE_EFFECT_IDS`
    (`engine/observation_entities.py`) et lui donner un `obs_id` libre — le prochain entier
    JAMAIS utilise, y compris par une regle supprimee depuis (cf. §2). C'est tout : `obs_size`
-   ne bouge pas, aucun retrain n'est necessaire.
+   ne bouge pas, aucun retrain n'est necessaire. Ce « c'est tout » est VERROUILLE par
+   `tests/unit/engine/test_squad_obs_unit_rules.py::test_adding_an_observed_capability_costs_zero_scalar`
+   (il re-execute le schema d'entites avec une capacite fictive de plus et exige que toutes les
+   tailles restent identiques) : il etait faux jusqu'au 2026-08-04, ou le registre des candidats
+   de decision etait bati sur le vocabulaire observe, a 6 scalaires par capacite ajoutee.
+   Si la regle peut etre ACCORDEE par un candidat de `rule_choice` (`grantsRuleIds`), l'ajouter
+   EN PLUS a `DECISION_GRANTABLE_EFFECT_IDS` — la, ce n'est pas gratuit (1 bit x 6 slots), et
+   l'omettre fait lever `set_pending_agent_decision`.
 2. Si besoin de choix joueur, ajouter une (ou plusieurs) regles d'affichage avec:
    - `name`
    - `alias` vers la regle technique

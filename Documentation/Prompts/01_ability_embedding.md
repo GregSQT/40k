@@ -107,6 +107,38 @@ Les capacités de faction vont donc dans `global_bin`. Voir chantier 03.
 
 Un second registre, `config/unit_statuses.json`, suit la même convention pour les statuts.
 
+### Amendement du 2026-08-04 — vocabulaire OBSERVÉ ≠ effets ACCORDABLES
+
+`UNIT_RULE_EFFECT_IDS` jouait **deux** rôles : le vocabulaire des capacités observées (dont
+l'ajout devait être gratuit) **et** la liste des effets qu'un candidat de décision peut
+accorder — registre POSITIONNEL, 1 bit par effet, émis pour chacun des `MAX_DECISION_OPTIONS`
+slots (`DECISION_OPTION_BIN_FIELDS`). Ajouter **une** capacité observable coûtait donc
+**+6 scalaires** d'`obs_size`, donc un retrain `--new` : la promesse ci-dessus était fausse
+d'un facteur 6, et 6 des 13 effets portaient des bits qu'aucun roster ne pouvait jamais mettre
+à 1 (36 scalaires morts).
+
+Les deux vocabulaires sont **séparés** depuis :
+
+| Tuple | Rôle | Coût d'une entrée |
+|---|---|---|
+| `UNIT_RULE_EFFECT_IDS` | ce que l'agent PERÇOIT (ids → embedding) | **0 scalaire** |
+| `DECISION_GRANTABLE_EFFECT_IDS` | ce qu'un candidat de `rule_choice` ACCORDE | 1 bit × 6 slots |
+
+Le second est un sous-ensemble strict du premier, **dérivé** des `grantsRuleIds` réellement
+déclarés par les rosters — un test de contrat le recalcule et échoue dans les deux sens. La
+garde d'`effect_ids` de `agent_decision.set_pending_agent_decision` contrôle contre ce tuple-là :
+un effet accordable mais non déclaré **lève** à la pose de la décision, au lieu d'être décrit
+par un vecteur nul.
+
+Le verrou qui manquait — et sans lequel le couplage pouvait revenir sans que rien ne lève —
+est `test_adding_an_observed_capability_costs_zero_scalar` : il recalcule `obs_size` **dans un
+processus neuf** bâti sur un schéma d'entités augmenté d'une capacité fictive, et compare le
+**nombre**.
+Lire le texte de la formule ne suffirait pas — un terme d'un autre module (`PROFILE_BIN_SIZE`)
+ou derrière une indirection (`K_X = _calcule()`) y échapperait ; le nombre couvre tous les
+termes où qu'ils vivent. Le balayage des constantes du schéma vient en plus, pour nommer le
+registre fautif.
+
 Stabilité : un `obs_id` réattribué après suppression d'une règle ferait pointer un modèle
 entraîné sur une ligne d'embedding qui ne veut plus dire la même chose — corruption
 silencieuse. Un id retiré reste **brûlé**.
@@ -125,6 +157,12 @@ silencieuse. Un id retiré reste **brûlé**.
 Ce chantier est **le seul** de la séquence autorisé à changer `obs_size` ou
 `TOTAL_ACTION_SIZE`. Après lui, les deux sont figés : les chantiers 02 à 06 n'utilisent que
 des dimensions déjà déclarées ici. C'est ce qui garantit **un seul retrain** en fin de séquence.
+
+**Valeur gelée : `obs_size = 20718`** (2026-08-04). Historique du même jour, tout entier
+absorbé par le retrain unique : `20780` → `20752` (les 13 bits `rule_*` remplacés par 8+4 slots
+d'ids) → `20754` (les deux scalaires de CP que le chantier 02 attendait, oubliés ici) → `20718`
+(découplage du registre de décision, ci-dessus). Le gel porte désormais ce qu'il promettait :
+une capacité observée de plus coûte **zéro** scalaire, verrou à l'appui.
 
 D'où l'inclusion, ici et pas en 03, des slots d'action d'Oath of Moment (ci-dessous).
 
@@ -195,6 +233,9 @@ exactement le même jeu.
    **non renseignés** : ce sont leurs chantiers qui les posent. Les déclarer maintenant est ce
    qui garantit que ces chantiers ne toucheront pas `obs_size`.
    Chargeur : `obs_id` absent, dupliqué ou hors `[1,127]` → **erreur explicite**.
+   *(Amendement 2026-08-04.)* Le registre du bloc `decision_options_bin` n'est **pas** ce
+   vocabulaire : c'est `DECISION_GRANTABLE_EFFECT_IDS`, dérivé des `grantsRuleIds` des rosters
+   (cf. CONCEPTION). `obs_id` occupés à ce jour : **1 → 14** ; le prochain libre est **15**.
 
 2. **Schéma d'entités.** Retirer les 13 bits `rule_<id>` de `UNIT_BIN_FIELDS`. Ajouter
    `ABILITY_SLOTS = 8`, `STATUS_SLOTS = 4`, et les tenseurs `allies_ability_ids`,
@@ -224,6 +265,11 @@ exactement le même jeu.
   séquence d'actions qu'avant le chantier. C'est le critère d'acceptation principal.
 - **Verrou de débordement** : test qui construit une unité à 9 capacités et exige le `raise`.
   Le retirer doit rendre le test **rouge** — le prouver et le rapporter.
+- **Verrou de la promesse** (amendement 2026-08-04) : une capacité fictive ajoutée au
+  vocabulaire OBSERVÉ ne change **aucune** dimension d'observation. Prouvé rouge sur trois
+  défauts remis : `DECISION_OPTION_BIN_FIELDS` rebâti sur `UNIT_RULE_EFFECT_IDS` (`15 ≠ 16`),
+  `PROFILE_BIN_SIZE` couplé au vocabulaire depuis un autre module, et `K_MODEL_TYPES` couplé
+  derrière une indirection.
 - **Verrou de tri** : deux unités de mêmes capacités déclarées dans des ordres différents
   produisent des `ability_ids` identiques.
 - **Verrou d'unicité** : `obs_id` dupliqué dans `unit_rules.json` → erreur au chargement.
