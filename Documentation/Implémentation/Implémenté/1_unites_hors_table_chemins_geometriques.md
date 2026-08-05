@@ -137,6 +137,72 @@ C'est exactement pourquoi les tests
 `test_strategic_reserves_20.py::test_shooting_phase_start_runs_with_a_reserve_{enemy,shooter}` de
 04c ne valaient pas verrou : ils restaient verts quand on retirait les filtres.
 
+## Second passage (2026-08-05) — ce que le premier n'avait pas vu
+
+Un chantier mené en parallèle sur la même classe de défaut a convergé sur la **même architecture**
+(prédicat descendu, primitives, énumérations partagées) : cette partie-là a été abandonnée au
+profit des primitives ci-dessus, qui vont plus loin. Restent quatre défauts que le premier passage
+ne couvrait pas, plus les verrous.
+
+### La fuite inter-épisodes — la plus lourde
+
+Les objets `unit` **survivent d'un épisode à l'autre** (mesuré : 10/10 réutilisés). Le reset
+remettait la sentinelle sans remettre `deployed_on_turn`, et ne restaurait ni
+`in_strategic_reserves` ni `reserves_repositioned`. Deux conséquences :
+
+- l'observation bâtit son `on_battlefield` sur `deployed_on_turn` : dès l'épisode 2, elle déclarait
+  « posées » des escouades à la sentinelle (`[HEAVY]` 24.16 lit le même champ) ;
+- surtout, **un roster `strategic_reserves: true` ne se comportait comme tel qu'au PREMIER épisode
+  de chaque worker**. En entraînement, la fonctionnalité du chantier 04 était donc inerte.
+
+Corrigé dans la boucle de `reset` qui restaure déjà `col`/`row` depuis `self.config["units"]` —
+donc pour **tous** les modes de déploiement — avec la sémantique de `create_unit` (une config de
+scénario écrite à la main ne porte aucune de ces clés).
+
+### La divergence masque/exécution sur la charge
+
+`charge_check_eligibility` est la source **unique** que le masque interroge pour ouvrir un slot de
+charge ET que le commit `squad_charge` re-vérifie. Son test des 12" est une distance de **grille
+brute** sur `_squad_model_positions` : la sentinelle y répond « à portée » pour tout chargeur
+proche de l'origine du plateau. Le masque ouvrait donc un slot que `charge_build_valid_plan`
+refusait ensuite, et l'activation partait en `charge_fail`. Les deux fonctions sont désormais
+gardées.
+
+### L'asymétrie d'éligibilité, et une garde qu'aucun test ne peut tenir
+
+`_fight_v11_grouped_step_eligible` n'avait pas la garde que porte son jumeau
+`fight_v11_eligible_unit_ids`. Elle a été ajoutée — mais **sans effet observable**, et c'est
+mesuré : `fight_v11_is_pile_in_eligible` et `fight_v11_is_consolidation_eligible` rendent déjà
+`False` pour une unité à la sentinelle. Aucun test ne peut la faire virer au rouge ; inutile d'en
+chercher un. Elle reste parce que ce `False` vient d'un **effet de bord géométrique** (empreinte
+vide) et non d'une règle.
+
+### Du code mort, corrigé et testé pour rien
+
+`_has_los_to_enemies_within_range` existait **en double** (`fight_handlers`, `shooting_handlers`)
+et n'avait **aucun appelant**, ni Python ni frontend. Les deux copies sont supprimées. C'est le
+piège « corrigé mais jamais atteint » : un premier verrou « miroir tir/mêlée » avait été écrit
+dessus, donnant une couverture de façade ; il a été repointé sur
+`_friendly_engagement_blocks_ranged_shot` (4 appelants de production).
+
+### Les verrous ajoutés
+
+| Fichier | Ce qu'il verrouille |
+|---|---|
+| `tests/unit/engine/test_reserves_full_episode.py` | épisode complet, 6 graines, réserves des **deux côtés** ; invariant `col >= 0` ⟺ `deployed_on_turn is not None` à travers un reset ; survie de la déclaration de réserves à l'épisode 2 ; parité masque/commit de la charge |
+| `tests/unit/engine/test_fight_off_table_enumeration.py` | `enemy_entries_on_battlefield` **et ses 7 consommateurs appelables**, sur un état construit — la primitive du premier passage n'était verrouillée que par son contrat, pas par ses consommateurs |
+| `tests/unit/ai/test_evaluation_bots.py` | les 3 énumérations des bots, que le premier passage a corrigées sans verrou |
+
+Deux leçons de méthode, payées comptant :
+
+- **Une trajectoire ne verrouille pas.** La 1ʳᵉ version du test d'épisode jouait `legal[0]` : une
+  graine = une trajectoire, et le fichier certifiait un critère qu'il n'exerçait pas. L'action est
+  désormais **tirée** parmi les légales, et la couverture des 4 phases de mesure est vérifiée sur
+  l'**union** des graines — par graine, une partie sans phase de charge reste une partie valide.
+- **Ce qui n'est atteint par aucune trajectoire doit être CONSTRUIT.** Les filtres de la phase de
+  combat n'étaient atteints par aucune graine ; c'est la mutualisation qui les a rendus testables,
+  pas un test plus malin.
+
 ## Ce qui attend encore
 
 Le chantier 04c a livré 6 variantes de rosters avec réserves stratégiques, rangées dans des

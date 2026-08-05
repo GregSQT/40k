@@ -2150,43 +2150,6 @@ def _calculate_wound_target(strength: int, toughness: int) -> int:
 # Note: _is_adjacent_to_enemy_within_cc_range is defined at top of file
 
 
-def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
-    """Check if any enemy is within weapon range using footprint distance (§3.3).
-
-    Simplified LoS: assumes clear LoS if distance is within range.
-    """
-    from engine.utils.weapon_helpers import get_max_ranged_range
-    from engine.hex_utils import min_distance_between_sets
-    rng_rng = get_max_ranged_range(unit)
-    if rng_rng <= 0:
-        return False
-
-    units_cache = require_key(game_state, "units_cache")
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
-    unit_col, unit_row = require_unit_position(unit, game_state)
-    unit_id_str = str(unit["id"])
-    unit_entry = units_cache.get(unit_id_str)
-    unit_fp = entry_footprint(unit_entry) if unit_entry else {(unit_col, unit_row)}
-
-    for _enemy_id, cache_entry in enemy_entries_on_battlefield(units_cache, unit_player):
-        enemy_fp = entry_footprint(cache_entry)
-        distance = min_distance_between_sets(unit_fp, enemy_fp)
-        if distance <= rng_rng:
-            return True
-    return False
-
-
-# =====================================================================
-# === V11 FIGHT PHASE — FONDATIONS (Bloc 0) ===========================
-# =====================================================================
-# Helpers et primitives V11 (PDF `12 Fights phase.pdf`). ADDITIF PUR :
-# NON branchés sur le flux V10 actif → comportement de jeu inchangé.
-# Câblés aux blocs 1-5. Réf : Documentation/phase_fight_v11.md.
-#
-# Unités de distance : `engagement_zone` est exprimé dans la métrique
-# native du moteur (contrat d'engagement, cf. spatial_relations). Les
-# portées en POUCES (pile_in_target_range=5", consolidation_trigger_range=3")
-# sont converties via `inches_to_subhex`, comme l'existant `bfs_max = 3*scale`.
 
 
 def is_fights_first(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
@@ -2807,6 +2770,18 @@ def _fight_v11_grouped_step_eligible(
             continue
         uid = str(require_key(u, "id"))
         if not is_unit_alive(uid, game_state):
+            continue
+        # HORS TABLE — JUMEAU de `fight_v11_eligible_unit_ids`, qui porte la meme garde.
+        # AUCUN EFFET OBSERVABLE AUJOURD'HUI, et c'est verifie, pas suppose : appeles sur une
+        # unite a la sentinelle, `fight_v11_is_pile_in_eligible` et
+        # `fight_v11_is_consolidation_eligible` rendent deja False (mesure du 2026-08-05). Cette
+        # ligne est donc INVERROUILLABLE par un test — inutile d'en chercher un, il serait vert
+        # avec ou sans elle.
+        # Elle reste parce que ce False vient d'un EFFET DE BORD geometrique (empreinte vide), pas
+        # d'une regle : 12.03/12.08 portent sur les figurines sur le champ de bataille, et le dire
+        # ici evite que la regle depende de la geometrie du jour. L'asymetrie avec le jumeau etait
+        # par ailleurs exactement ce qui rend ce genre d'oubli invisible.
+        if not entry_is_on_battlefield(require_key(game_state, "units_cache")[uid]):
             continue
         if uid in done:
             continue

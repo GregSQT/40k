@@ -86,7 +86,7 @@ partout (le tir retire des figurines en cours de séquence).
 Relevé par analyse syntaxique (AST) : tout `X.get(...)` où `X` est lié à `units_cache`, moins ceux
 qui lèvent déjà et ceux portant le marqueur `# get allowed`. **Dénominateur brut avant filtre : 64.**
 
-### Forme A — `entry_footprint(x) if x else <repli sur l'ancre>` — 9 sites
+### Forme A — `entry_footprint(x) if x else <repli sur l'ancre>` — ~~9~~ **7** sites
 
 **La plus dangereuse, et la plus rapide à traiter** : contrat identique à chaque fois, correctif
 identique à celui du lot charge. Une empreinte de repli fait mentir la géométrie sans jamais crasher.
@@ -96,16 +96,22 @@ identique à celui du lot charge. Une empreinte de repli fait mentir la géomét
 | `fight_handlers.py:285` | `_fight_unit_is_hex_adjacent_to_enemy_footprint` | `unit_entry = units_cache.get(unit_id_str)` |
 | `fight_handlers.py:302` | `_fight_pile_in_closest_enemy_snapshot` | `unit_entry = units_cache.get(unit_id_str)` |
 | `fight_handlers.py:745` | `_fight_compute_pile_in_footprint_zone` | `cache_entry = units_cache.get(unit_id_str)` |
-| `fight_handlers.py:2168` | `_has_los_to_enemies_within_range` | `unit_entry = units_cache.get(unit_id_str)` |
+| ~~`fight_handlers.py:2168`~~ | ~~`_has_los_to_enemies_within_range`~~ | **SITE DISPARU** — fonction supprimée le 2026-08-05 (cf. note ci-dessous) |
 | `movement_handlers.py:1476` | `_is_in_enemy_engagement_zone` | `unit_entry = units_cache.get(unit_id_str)` |
 | `shooting_handlers.py:2120` | `_unit_has_firable_target` | `shooter_entry = units_cache.get(shooter_id_str)` |
 | `shooting_handlers.py:2299` | `_is_valid_shooting_target` | `shooter_entry = units_cache.get(shooter_id_str)` |
 | `shooting_handlers.py:2300` | `_is_valid_shooting_target` | `target_entry = units_cache.get(target_id_str)` |
-| `shooting_handlers.py:6048` | `_has_los_to_enemies_within_range` | `unit_entry = units_cache.get(unit_id_str)` |
+| ~~`shooting_handlers.py:6048`~~ | ~~`_has_los_to_enemies_within_range`~~ | **SITE DISPARU** — fonction supprimée le 2026-08-05 (cf. note ci-dessous) |
 
-🔴 **Jumeau évident dans la liste** : `_has_los_to_enemies_within_range` existe **en double**, dans
-`fight_handlers` ET `shooting_handlers`, avec le même défaut. Les traiter ensemble, ou vérifier
-d'abord si l'un des deux est mort (le lot charge a trouvé exactement ça).
+🔴 **Jumeau évident dans la liste — RÉSOLU le 2026-08-05, et la réponse est « les deux ».**
+`_has_los_to_enemies_within_range` existait en double dans `fight_handlers` ET `shooting_handlers`,
+avec le même défaut. Vérification faite (grep dépôt entier, `.py` / `.ts` / `.tsx` / `.json`) :
+**aucune des deux copies n'avait d'appelant**. Les deux ont été **supprimées** — 2 sites de moins
+dans la Forme A, qui en compte donc **7** à traiter, et 40 au total.
+
+L'intuition du lot charge était la bonne, et vaut d'être retenue : sur ce dépôt, un jumeau parfait
+qui n'a jamais divergé est un candidat sérieux au code mort. Le vérifier AVANT de corriger évite
+d'écrire un correctif — et pire, un test — sur du code que personne n'appelle.
 
 ### Forme B — `if x is None: return <valeur>` — 14 sites
 
@@ -194,7 +200,7 @@ Compréhensions filtrantes (`... for x in ... if x is not None`), gardes composi
 
 | Tranche | Contenu | Charge |
 |---|---|---|
-| **T1** | **Forme A, 9 sites.** Contrat déjà établi par le lot charge, correctif identique, risque le plus élevé (géométrie inventée sur trois phases). Commencer par le doublon `_has_los_to_enemies_within_range`. | 1 session |
+| **T1** | **Forme A, 7 sites** (9 − les 2 du doublon `_has_los_to_enemies_within_range`, supprimé le 2026-08-05 : il était mort des deux côtés). Contrat déjà établi par le lot charge, correctif identique, risque le plus élevé (géométrie inventée sur trois phases). | 1 session |
 | **T2** | Formes B + C, 20 sites. Un contrat par site ; attendre ~1/3 de légitimes. | 1 session |
 | **T3** | Forme D, 13 sites. Lecture d'abord, classement ensuite. | 1 session |
 

@@ -6033,28 +6033,6 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
     )
 
 
-def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
-    """Check if any enemy is within weapon range using footprint distance (§3.3)."""
-    from engine.utils.weapon_helpers import get_max_ranged_range
-    from engine.hex_utils import min_distance_between_sets
-    max_range = get_max_ranged_range(unit)
-    if max_range <= 0:
-        return False
-
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
-    units_cache = require_key(game_state, "units_cache")
-    unit_col, unit_row = require_unit_position(unit, game_state)
-    unit_id_str = str(unit["id"])
-    unit_entry = units_cache.get(unit_id_str)
-    unit_fp = entry_footprint(unit_entry) if unit_entry else {(unit_col, unit_row)}
-
-    for _enemy_id, cache_entry in enemy_entries_on_battlefield(units_cache, unit_player):
-        enemy_fp = entry_footprint(cache_entry)
-        distance = min_distance_between_sets(unit_fp, enemy_fp, max_distance=max_range)
-        if distance <= max_range:
-            return True
-
-    return False
 
 def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[str, Any]]:
     """Get unit by ID from game state. Compare both sides as strings for int/str ID mismatch.

@@ -99,7 +99,7 @@ Symboles : **●** = rôle principal ; **◐** = branche / mixte ; **—** = non
 | Fight — cibles CC | `fight_handlers.py` — `_fight_build_valid_target_pool` → `engine.spatial_relations.enemy_footprint_distances` | | ● | | Exclusion si `distance > cc_range`. Test : `tests/unit/engine/test_fight_spatial_contract.py`. |
 | Fight — pools alternance | `generic_handlers.py` — `_is_adjacent_to_enemy_for_fight` → `engine.spatial_relations.unit_within_engagement_zone_footprints` | | ● | | Même **B** que fight, via primitive partagée. |
 | Tir / advance | `shooting_handlers.py` — `_is_adjacent_to_enemy_within_cc_range` → `engine.spatial_relations.unit_within_engagement_zone_footprints` | | ● | | Copie locale conservée comme wrapper ; utilise `max_distance=cc_range`; voir **§5**. |
-| Tir — portée arme | `shooting_handlers.py` — `_has_los_to_enemies_within_range` | — | — | | **\*** Distance de portée arme (`get_max_ranged_range`), pas `engagement_zone` ; **hors** A/B/C — ne pas fusionner avec **B**. |
+| ~~Tir — portée arme~~ | ~~`shooting_handlers.py` — `_has_los_to_enemies_within_range`~~ | — | — | | **SUPPRIMÉE le 2026-08-05** : la fonction existait en double (`shooting_handlers` ET `fight_handlers`) et n'avait **aucun appelant**, ni Python ni frontend. Rien à migrer. |
 | Charge — déjà engagé | `charge_handlers.py` — `_is_adjacent_to_enemy`, `_is_adjacent_to_enemy_simple` → `engine.spatial_relations.unit_within_engagement_zone_footprints` | | ● | | **B** ; `max_distance=cc_range` comme le tir. |
 | Charge — hex voisin ennemi | `charge_handlers.py` — `_is_hex_adjacent_to_enemy` | ● | | | **A** grille / cache `enemy_adjacent_hexes` ; distinct de `_is_adjacent_to_enemy` **B**. |
 | Move — flee / pools | `movement_handlers.py` — `_is_adjacent_to_enemy` → `_movement_engagement_violates` → `engine.spatial_relations.move_anchor_violates_engagement_clearance` | | ◐ | ● | ³ **C** dominant (flee, pools) ; branche non-rond `ez > 1` **B-like** hex ; `ez <= 1` via cache dilaté. Test : `tests/unit/engine/test_spatial_relations.py`. |
@@ -199,7 +199,7 @@ Si un symbole du **§4** change de sémantique : mettre à jour la ligne du tabl
 
 1. **Fight** : factoriser **A** ; couverture **B** pour `_fight_build_valid_target_pool` et `_is_adjacent_to_enemy_within_cc_range` ; figer tests pile-in rond↔rond / non-rond, règle par défaut inchangée.
 2. **Éligibilité** : introduire **B** officielle ; wrapper déprécié visible, pas de silence.
-3. **Tir** : remplacer copie locale **B** par l’API partagée ; vérifier **§5** ; ne pas confondre avec `_has_los_to_enemies_within_range` (**§4**, hors A/B/C).
+3. **Tir** : remplacer copie locale **B** par l’API partagée ; vérifier **§5**. (La mise en garde « ne pas confondre avec `_has_los_to_enemies_within_range` » est sans objet depuis le 2026-08-05 : cette fonction était morte et a été supprimée.)
 4. **Charge** : aligner `_is_adjacent_to_enemy*` sur **B** ; garder **A** explicite pour `_is_hex_adjacent_to_enemy`.
 5. **Move** : extraire **C** ; tests BFS / destinations ; rond↔rond ×10.
 6. **IA** : appliquer la décision analyzer du **§10** après stabilisation moteur.

@@ -1605,6 +1605,38 @@ class W40KEngine(gym.Env):
 
             if original_config:
                 unit["col"], unit["row"] = normalize_coordinates(original_config["col"], original_config["row"])
+                # ETAT DE MISE EN PLACE — restaure depuis la MEME source que la position, et pour
+                # la meme raison : les objets `unit` SURVIVENT d'un episode a l'autre (mesure :
+                # 10/10 reutilises), donc tout champ mute pendant l'episode et non restaure ici
+                # fuit sur le suivant. La position l'etait deja ; ces trois-la ne l'etaient pas.
+                #
+                # Consequence mesuree, et elle rendait le chantier 04 inerte : une unite declaree
+                # en reserves par son roster (20.01) arrive pendant l'episode 1, ce qui met
+                # `in_strategic_reserves` a False (`_apply_deploy_plan`, source unique du passage
+                # hors table -> table). Au reset de l'episode 2 elle repartait donc SANS reserve.
+                # Un roster a `strategic_reserves: true` ne se comportait comme tel qu'au PREMIER
+                # episode de chaque worker — soit une poignee sur des milliers en entrainement.
+                #
+                # `deployed_on_turn` est le jumeau de `col` (cf. `entry_is_on_battlefield`) : il se
+                # restaure ICI, avec elle, pour TOUS les modes de deploiement. Le mode 'active'
+                # remet ensuite la sentinelle et le repasse a None (plus bas) — il deplace l'unite
+                # hors table quelle que soit la position du scenario.
+                # Valeurs relues avec EXACTEMENT la semantique de `create_unit` (game_state.py),
+                # qui est la definition de ces champs a la mise en place — et non un defaut muet :
+                # une config de scenario ecrite a la main (fixture moteur nu) ne porte aucune de
+                # ces cles, alors que la config issue du chargeur les porte toutes.
+                unit["deployed_on_turn"] = (
+                    None if int(original_config["col"]) < 0 else 0
+                )
+                unit["in_strategic_reserves"] = bool(
+                    original_config.get(  # get allowed (2 sources, cf. `create_unit`)
+                        "in_strategic_reserves",
+                        original_config.get("strategic_reserves", False),
+                    )
+                )
+                unit["reserves_repositioned"] = bool(
+                    original_config.get("reserves_repositioned", False)  # get allowed (idem)
+                )
             else:
                 raise ValueError(f"Unit {unit['id']} not found in scenario config during reset")
         
@@ -1669,6 +1701,17 @@ class W40KEngine(gym.Env):
                     continue
                 if player_deployment_type == "active":
                     set_unit_coordinates(unit, -1, -1)
+                    # JUMEAU OBLIGATOIRE de la sentinelle. `deployed_on_turn` et `col >= 0` sont
+                    # les deux faces du meme etat (cf. `entry_is_on_battlefield`) : les deux
+                    # autres ecrivains du « hors table » les posent ENSEMBLE (`_apply_deploy_plan`
+                    # pour l'arrivee, `reposition_unit_to_strategic_reserves` 20.02 pour le
+                    # retrait). Ce troisieme ecrivain ne remettait que la position, et les objets
+                    # `unit` SURVIVENT d'un episode a l'autre : au reset de l'episode 2, les 10
+                    # unites mesurees etaient a col=-1 avec `deployed_on_turn=0` herite de
+                    # l'episode 1. L'observation batit son `on_battlefield` sur ce champ — elle
+                    # declarait donc « posees » des escouades a la sentinelle, et [HEAVY] 24.16 le
+                    # lit aussi. Fuite inter-episodes, invisible tant que rien ne levait.
+                    unit["deployed_on_turn"] = None
                     if unit_player_int == 1:
                         deployable_units[1].append(str(unit["id"]))
                     elif unit_player_int == 2:
