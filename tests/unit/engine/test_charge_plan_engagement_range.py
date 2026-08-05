@@ -24,7 +24,7 @@ Geometrie : `inches_to_subhex = 5` (l'echelle d'entrainement), `engagement_zone 
 la cellule voisine du centre en valait 44 (jet 9).
 """
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
@@ -45,7 +45,9 @@ ROLL_REACHES_ENGAGEMENT = 7
 ROLL_TOO_SHORT = 6
 
 
-def _gs(charger_cols: List[int]) -> Dict[str, Any]:
+def _gs(
+    charger_cols: List[int], bystander_cells: Optional[List[Tuple[int, int]]] = None
+) -> Dict[str, Any]:
     """`game_state` minimal : escouade « 1 » en file vers l'est, cible « 2 » a l'est.
 
     Les figurines sont espacees de 10 subhex (= 2", la coherency 03.03) SUR LA MEME LIGNE :
@@ -73,20 +75,45 @@ def _gs(charger_cols: List[int]) -> Dict[str, Any]:
         "col": TARGET[0], "row": TARGET[1], "level": 0, "player": 2, "squad_id": "2",
         "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
     }
+    units = [unit1, unit2]
+    squad_models = {
+        "1": [f"1#{i}" for i in range(len(charger_positions))],
+        "2": ["2#0"],
+    }
+    units_cache: Dict[str, Any] = {
+        "1": {"col": charger_positions[0][0], "row": charger_positions[0][1], "player": 1,
+              "occupied_hexes": set(charger_positions), "BASE_SHAPE": "round", "BASE_SIZE": 1},
+        "2": {"col": TARGET[0], "row": TARGET[1], "player": 2,
+              "occupied_hexes": {TARGET}, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+    }
+    if bystander_cells:
+        # Escouade tierce AMIE : la collision physique porte sur TOUTES les escouades, cible ou
+        # non. La prendre amie isole ce qu'on verrouille — une escouade ennemie non-ciblee
+        # refuserait aussi ces cellules par son ER (11.04), et le test ne distinguerait plus les
+        # deux causes. Transit autorise (`can_move_through_friendly_model`), donc seule la case
+        # d'ARRIVEE est en jeu.
+        for i, (col, row) in enumerate(bystander_cells):
+            models_cache[f"3#{i}"] = {
+                "col": col, "row": row, "level": 0, "player": 1, "squad_id": "3", "HP_CUR": 1,
+                "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+            }
+        unit3 = {**unit_invariants(),
+            "id": 3, "player": 1, "col": bystander_cells[0][0], "row": bystander_cells[0][1],
+            "MOVE": 6, "HP_CUR": len(bystander_cells), "BASE_SIZE": 1, "BASE_SHAPE": "round",
+            "UNIT_KEYWORDS": [], "level": 0,
+        }
+        units.append(unit3)
+        squad_models["3"] = [f"3#{i}" for i in range(len(bystander_cells))]
+        units_cache["3"] = {
+            "col": bystander_cells[0][0], "row": bystander_cells[0][1], "player": 1,
+            "occupied_hexes": set(bystander_cells), "BASE_SHAPE": "round", "BASE_SIZE": 1,
+        }
     return {**turn_state_invariants(),
         "models_cache": models_cache,
-        "squad_models": {
-            "1": [f"1#{i}" for i in range(len(charger_positions))],
-            "2": ["2#0"],
-        },
-        "units_cache": {
-            "1": {"col": charger_positions[0][0], "row": charger_positions[0][1], "player": 1,
-                  "occupied_hexes": set(charger_positions), "BASE_SHAPE": "round", "BASE_SIZE": 1},
-            "2": {"col": TARGET[0], "row": TARGET[1], "player": 2,
-                  "occupied_hexes": {TARGET}, "BASE_SHAPE": "round", "BASE_SIZE": 1},
-        },
-        "units": [unit1, unit2],
-        "unit_by_id": {"1": unit1, "2": unit2},
+        "squad_models": squad_models,
+        "units_cache": units_cache,
+        "units": units,
+        "unit_by_id": {str(u["id"]): u for u in units},
         "board_cols": 200, "board_rows": 160,
         "wall_hexes": set(),
         "enemy_adjacent_hexes_player_1": set(),
@@ -234,3 +261,65 @@ def test_the_engagement_disc_is_empty_for_a_negative_radius() -> None:
     from engine.phase_handlers.shared_utils import _hex_cells_within_radius
 
     assert list(_hex_cells_within_radius(100, 84, -1)) == []
+
+#: Les SEULES cellules d'ou une figurine partie de (CHARGER_COL, CHARGER_ROW) peut finir engagee
+#: avec la cible pour ROLL_REACHES_ENGAGEMENT (budget 35 subhex) : enumeration exhaustive du
+#: rectangle atteignable, verifiee par `test_fixture_engaging_cells_are_exhaustive`.
+ENGAGING_CELLS = [(135, r) for r in range(81, 88)]
+
+
+def test_fixture_engaging_cells_are_exhaustive() -> None:
+    """Premisse des deux verrous suivants : ENGAGING_CELLS est bien TOUT ce qui engage.
+
+    Sans cette enumeration, boucher ces sept cases prouverait seulement qu'on a bouche sept
+    cases parmi d'autres — le plan pourrait aboutir ailleurs et le verrou serait vide.
+    """
+    from engine.phase_handlers.shared_utils import _synth_model_entry
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+
+    gs = _gs([CHARGER_COL])
+    ez = get_engagement_zone(gs)
+    budget = ROLL_REACHES_ENGAGEMENT * ISH
+    model = gs["models_cache"]["1#0"]
+    found = {
+        (col, row)
+        for col in range(CHARGER_COL, TARGET[0] + 1)
+        for row in range(CHARGER_ROW - budget, CHARGER_ROW + budget + 1)
+        if calculate_hex_distance(CHARGER_COL, CHARGER_ROW, col, row) <= budget
+        and unit_entries_within_engagement_zone(
+            _synth_model_entry(gs, "1", model, col, row), gs["units_cache"]["2"], ez
+        )
+    }
+    assert found == set(ENGAGING_CELLS)
+
+
+def test_a_third_squad_forbids_the_cell_it_occupies() -> None:
+    """Collision physique : la case occupee par une escouade tierce n'est pas une destination.
+
+    Contre-epreuve dans le meme test : sans l'escouade tierce, c'est EXACTEMENT cette case que
+    le plan retient. Le verrou porte donc sur le refus, pas sur un hasard de tri.
+    """
+    free_plan = charge_build_valid_plan(_gs([CHARGER_COL]), "1", ["2"], ROLL_REACHES_ENGAGEMENT)
+    assert free_plan is not None
+    _mid, picked_col, picked_row, _lvl = free_plan[0]
+
+    blocked = charge_build_valid_plan(
+        _gs([CHARGER_COL], [(picked_col, picked_row)]), "1", ["2"], ROLL_REACHES_ENGAGEMENT
+    )
+    assert blocked is not None, "boucher UNE case ne doit pas annuler la charge"
+    _mid2, col2, row2, _lvl2 = blocked[0]
+    assert (col2, row2) != (picked_col, picked_row)
+    assert (col2, row2) in set(ENGAGING_CELLS)
+
+
+def test_a_third_squad_covering_every_engaging_cell_cancels_the_charge() -> None:
+    """Toutes les destinations engageantes occupees → aucun plan (11.04 AFTER MOVING).
+
+    Contre-epreuve : la meme geometrie sans l'escouade tierce rend un plan.
+    """
+    assert charge_build_valid_plan(
+        _gs([CHARGER_COL]), "1", ["2"], ROLL_REACHES_ENGAGEMENT
+    ) is not None
+    assert charge_build_valid_plan(
+        _gs([CHARGER_COL], ENGAGING_CELLS), "1", ["2"], ROLL_REACHES_ENGAGEMENT
+    ) is None

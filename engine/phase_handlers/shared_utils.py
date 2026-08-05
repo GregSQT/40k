@@ -5279,6 +5279,7 @@ def _hex_legal_for_charge(
     squad_id: str,
     model_entry: Dict[str, Any],
     non_target_enemy_entries: List[Dict[str, Any]],
+    occupied_by_others: Set[Tuple[int, int]],
 ) -> bool:
     """Cellule valide pour le placement d une figurine en cours de charge :
        - dans le plateau
@@ -5294,13 +5295,13 @@ def _hex_legal_for_charge(
     cell = (col, row)
     if wall_hexes and cell in wall_hexes:
         return False
-    # Collision : autres escouades (sauf nous-meme)
-    # Cache absent : un `{}` de repli vidait l'énumération de collision, donc toute cellule
-    # devenait libre — un verdict inventé, sans bruit.
-    units_cache = require_key(game_state, "units_cache")
-    for _sid, entry in entries_on_battlefield(units_cache, exclude_id=squad_id):
-        if cell in entry_footprint(entry):
-            return False
+    # Collision : autres escouades (sauf nous-meme). `occupied_by_others` est l'UNION des
+    # empreintes, un PARAMÈTRE construit une fois par l'appelant — même raison que
+    # `non_target_enemy_entries` ci-dessous : la réénumérer par cellule reconstruisait
+    # l'empreinte de chaque escouade du plateau pour répondre « occupée ? ». Strictement
+    # équivalent : `cell ∈ union(empreintes)` ⟺ `∃ empreinte, cell ∈ empreinte`.
+    if cell in occupied_by_others:
+        return False
     # ER des escouades non-cibles (bord-a-bord) : la figurine candidate ne doit pas
     # finir dans l ER d un ennemi NON-cible.
     # ``non_target_enemy_entries`` est un PARAMÈTRE, pas une énumération locale : cette fonction
@@ -5394,7 +5395,10 @@ def charge_build_valid_plan(
         return None
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    units_cache = game_state.get("units_cache", {})  # get allowed
+    # `require_key` et non un `.get(..., {})` : `charge_check_eligibility`, appelée juste au-dessus,
+    # exige déjà la clé — le repli était mort, et il aurait vidé l'union de collision construite
+    # plus bas, donc rendu TOUTE cellule libre sans le moindre bruit.
+    units_cache = require_key(game_state, "units_cache")
     mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
     if not mids:
         return None
@@ -5431,6 +5435,10 @@ def charge_build_valid_plan(
     # réénumérait à chaque cellule de BFS. `_enemy_squad_ids` n'énumère que des ids lus dans
     # `units_cache`, donc une absence est une désynchronisation (d'où le `require`), pas un
     # ennemi disparu.
+    # Union des cases occupées par les AUTRES escouades, résolue une seule fois : invariante sur
+    # tout le plan (`units_cache` n'est pas muté entre ici et la fin des BFS ; les cellules
+    # réservées par le plan en cours sont suivies à part, par `occupied_after`).
+    _occupied_by_others = build_occupied_positions_set(game_state, exclude_unit_id=str(squad_id))
     _declared_targets = {str(t) for t in target_squad_ids}
     _non_target_enemies = [
         require_unit_from_cache(esid, game_state, "charge_build_valid_plan/enemy")
@@ -5546,7 +5554,9 @@ def charge_build_valid_plan(
             d_orig = calculate_hex_distance(orig_col, orig_row, nc, nr)
             if min(calculate_hex_distance(nc, nr, tc, tr) for tc, tr in target_positions) >= orig_dist_to_tgt:
                 continue
-            if not _hex_legal_for_charge(nc, nr, game_state, squad_id, m, _non_target_enemies):
+            if not _hex_legal_for_charge(
+                nc, nr, game_state, squad_id, m, _non_target_enemies, _occupied_by_others
+            ):
                 continue
             synth = _synth_model_entry(game_state, str(squad_id), m, nc, nr)
             if not any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
@@ -5591,7 +5601,10 @@ def charge_build_valid_plan(
                         # un mur.
                         if not _reachable(nc, nr):
                             continue
-                        if not _hex_legal_for_charge(nc, nr, game_state, squad_id, m, _non_target_enemies):
+                        if not _hex_legal_for_charge(
+                            nc, nr, game_state, squad_id, m, _non_target_enemies,
+                            _occupied_by_others,
+                        ):
                             continue
                         cand_d = calculate_hex_distance(nc, nr, tc, tr)
                         if cand_d >= orig_dist_to_tgt:
@@ -9356,7 +9369,10 @@ def _assign_cells_toward_enemies(
     Retour : {model_id: (col, row)} pour TOUTES les figurines de ``mids``. Aucune ecriture.
     """
     models_cache = require_key(game_state, "models_cache")
-    units_cache = game_state.get("units_cache", {})  # get allowed
+    # `require_key` et non un `.get(..., {})` : la fonction indexe `units_cache[str(squad_id)]`
+    # plus bas, donc une absence lève de toute façon — mais elle aurait d'abord vidé l'union de
+    # collision ci-dessous, rendant TOUTE cellule libre le temps du calcul.
+    units_cache = require_key(game_state, "units_cache")
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     wall_hexes = game_state.get("wall_hexes", set())
@@ -9366,6 +9382,12 @@ def _assign_cells_toward_enemies(
         mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"])) for mid in mids
     }
 
+    # JUMEAU de `charge_build_valid_plan` : union des empreintes des AUTRES escouades, résolue une
+    # fois. `_cell_base_legal` est appelée par cellule dans les deux balayages ci-dessous et le
+    # cache n'est pas muté entre-temps (« Aucune ecriture », cf. docstring) ; la réénumérer par
+    # cellule reconstruisait l'empreinte de chaque escouade du plateau pour dire « occupée ? ».
+    occupied_by_others = build_occupied_positions_set(game_state, exclude_unit_id=str(squad_id))
+
     def _cell_base_legal(col: int, row: int) -> bool:
         """Legalite INDEPENDANTE du plan : plateau, murs, autres escouades."""
         if col < 0 or row < 0 or col >= board_cols or row >= board_rows:
@@ -9373,10 +9395,7 @@ def _assign_cells_toward_enemies(
         cell = (col, row)
         if wall_hexes and cell in wall_hexes:
             return False
-        for _sid, entry in entries_on_battlefield(units_cache, exclude_id=squad_id):
-            if cell in entry_footprint(entry):
-                return False
-        return True
+        return cell not in occupied_by_others
 
     # 1. 12.03 WHILE MOVING : « Models in base-contact with one or more enemy models cannot be
     #    moved ». Ces figurines restent, et leur cellule est definitivement occupee.
