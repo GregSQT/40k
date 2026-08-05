@@ -238,6 +238,31 @@ class Harness:
             raise KeyError(f"Pool '{name}' absent du game_state")
         return [str(uid) for uid in raw]
 
+    # -- pilotage ---------------------------------------------------------- #
+
+    def play_pending_faction_decision(self) -> None:
+        """Répond à la décision de 08.04 en attente, comme le fait le panneau PvP.
+
+        Les deux mécanismes, parce qu'ils sont jumeaux et que le roster peut changer :
+        `select_oath_target` + `unitId` (Oath, cible = une unité adverse vivante, même règle que
+        `oathTargets` dans `BoardWithAPI.tsx`) et `agent_decision` + `option_index` (Waaagh!,
+        candidat 0 = appeler, ordre contractuel).
+        """
+        gs = self.game_state
+        pending_oath = gs.get("pending_oath_selection")
+        if pending_oath is not None:
+            enemy = 2 if int(gs["current_player"]) == 1 else 1
+            targets = self.alive_ids(enemy)
+            if not targets:
+                raise SystemExit(
+                    "Désignation d'Oath en attente sans cible vivante — état incohérent."
+                )
+            self.refresh(self.client.action({"action": "select_oath_target", "unitId": targets[0]}))
+            return
+        decision = gs.get("pending_agent_decision")
+        if decision is not None and decision["type"] == "waaagh_call":
+            self.refresh(self.client.action({"action": "agent_decision", "option_index": 0}))
+
     # ------------------------------------------------------------------ #
     # Checks
     # ------------------------------------------------------------------ #
@@ -252,6 +277,18 @@ class Harness:
         if not ok:
             raise SystemExit("Impossible de démarrer la partie — arrêt.")
         gs = self.refresh(response)
+        # Depuis le chantier des capacités de faction, `/start` rend la main en phase de
+        # COMMANDEMENT : 08.04 arrête le moteur sur la désignation d'Oath of Moment (le roster
+        # `pvp_test` est ADEPTUS ASTARTES), et cet arrêt est OPPOSABLE — toute autre action y est
+        # refusée (`faction_decision_pending`). Le harnais joue donc ce que joue le front.
+        self.record(
+            "start.arret_sur_la_decision_08_04",
+            gs["phase"] == "command" and gs.get("pending_oath_selection") is not None,
+            f"phase={gs['phase']}, oath={gs.get('pending_oath_selection')}, "
+            f"joueur={gs['current_player']}, tour={gs['turn']}",
+        )
+        self.play_pending_faction_decision()
+        gs = self.game_state
         self.record(
             "start.phase_initiale_move",
             gs["phase"] == "move",

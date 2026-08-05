@@ -966,6 +966,14 @@ def test_le_cycle_pvp_complet_s_arrete_puis_repart(tmp_path) -> None:
     assert out.get("phase_complete") is True, (
         "la phase ne repart pas : la partie resterait bloquee apres la designation"
     )
+    # « Repart » = la phase suivante DEMARRE, pas « le moteur annonce qu'elle va demarrer ».
+    # Les deux routes de decision sortent avant la boucle de cascade, seul endroit ou une
+    # transition s'execute : le `next_phase` rendu au client a decrit pendant un temps une
+    # bascule qui n'avait pas eu lieu, et le PvP n'a aucun verbe pour sortir de cette phase.
+    assert gs["phase"] == "move", (
+        "phase annoncee mais pas demarree : la partie reste en phase de commandement"
+    )
+    assert gs["move_activation_pool"], "phase de mouvement demarree sans pool d'activation"
 
 
 def test_le_waaagh_passe_aussi_par_le_chemin_de_l_ui() -> None:
@@ -980,6 +988,13 @@ def test_le_waaagh_passe_aussi_par_le_chemin_de_l_ui() -> None:
     engine = _engine(gs)
     gs["player_types"] = {"1": "human", "2": "human"}
     engine.gym_training_mode = True  # le siège ne doit pas être tranché par la politique interne
+    # Siège d'agent : la phase de commandement ne se TERMINE pas ici (elle garde ses free steps
+    # de zone intent). Ce qui est mesuré est le ROUTAGE du verbe, pas la sortie de phase — et
+    # depuis que le retour de la reprise est honoré, une sortie DÉMARRE la phase de mouvement,
+    # qu'un état de fixture ne peut pas construire (plateau, `game_rules`, caches). La sortie,
+    # elle, est verrouillée sur un `W40KEngine` réel par `test_le_cycle_pvp_complet_...`.
+    gs["gym_training_mode"] = True
+    gs["config"]["controlled_player"] = 1
     command_handlers.command_step_command_abilities(gs)
     assert read_pending_agent_decision(gs) is not None
 
@@ -1032,4 +1047,96 @@ def test_le_demarrage_pvp_ne_bascule_pas_sur_une_decision_en_attente() -> None:
         "la bascule vers le joueur 2 n'est plus gardee par `faction_decision_is_pending` : "
         "une decision du joueur 1 serait orphelinee au demarrage de la partie"
     )
+
+
+def test_verrou_l_arret_de_08_04_est_opposable_a_toute_autre_action(tmp_path) -> None:
+    """L'arrêt de phase doit REFUSER les autres actions, pas seulement les attendre.
+
+    Le défaut : `advance_phase` est intercepté AVANT le dispatch de phase, dans les DEUX points
+    d'entrée. Envoyé pendant que la désignation d'Oath est en attente, il terminait la phase de
+    commandement et rendait `next_phase: move`, désignation encore posée — donc purgée sans
+    avoir servi à l'ouverture de la command phase suivante. Le joueur perdait ses relances de
+    touche pour tout le tour, sans message. Un clic hors overlay suffisait.
+
+    Les deux points d'entrée sont exercés : `execute_semantic_action` (UI PvP) et
+    `_process_squad_action` (gym). Le second n'est jamais atteint en pratique — le masque est
+    exclusif — mais c'est le jumeau, et un garde posé d'un seul côté est le motif d'échec n°1.
+    """
+    from ai.unit_registry import UnitRegistry
+    from engine.w40k_core import W40KEngine
+
+    scenario = "config/board/44x60x5/scenario/scenario_attached_unit_test.json"
+    engine = W40KEngine(
+        config=None, rewards_config="ArmageddonAgent", training_config_name="x1",
+        controlled_agent="ArmageddonAgent", active_agents=["ArmageddonAgent"],
+        scenario_file=scenario, unit_registry=UnitRegistry(),
+        quiet=True, gym_training_mode=False, training_n_envs=1,
+    )
+    engine.reset()
+    gs = engine.game_state
+    gs["player_types"] = {"1": "human", "2": "human"}
+    engine.current_mode_code = "pvp"
+    engine.config["uses_codex_detachment"] = True
+    gs["current_player"] = 1
+    gs["phase"] = "command"
+    engine.start_command_phase()
+    assert gs["pending_oath_selection"] == 1, "la fixture doit poser une designation en attente"
+
+    for point_d_entree, appel in (
+        ("execute_semantic_action", lambda a: engine.execute_semantic_action(a)),
+        ("_process_squad_action", lambda a: engine._process_squad_action(a)),
+    ):
+        for action in ({"action": "advance_phase"}, {"action": "command_wait"}):
+            ok, out = appel(dict(action))
+            assert not ok, (
+                f"{point_d_entree} a accepte {action['action']!r} : la phase se termine et la "
+                f"designation d'Oath est perdue pour tout le tour"
+            )
+            assert out["error"] == "faction_decision_pending"
+            assert gs["phase"] == "command"
+            assert gs["pending_oath_selection"] == 1
+
+    # Et la réponse à la décision, elle, passe toujours : le garde ferme la phase, il ne la bloque pas.
+    cible = next(str(u["id"]) for u in gs["units"] if int(u["player"]) == 2)
+    ok, out = engine.execute_semantic_action({"action": "select_oath_target", "unitId": cible})
+    assert ok and gs["pending_oath_selection"] is None
+    assert out.get("phase_complete") is True
+
+
+def test_verrou_la_phase_de_commandement_refuse_les_verbes_hors_vocabulaire() -> None:
+    """Hors décision en attente, la command phase n'accepte que `zone_intent` et `skip`.
+
+    Tout autre verbe était traité comme une « sortie volontaire des free steps » et terminait la
+    phase en rendant `success: True` : un verbe inexistant, ou un `activate_unit` sur une unité
+    ADVERSE, faisaient basculer la partie vers le mouvement. Le refus doit être INERTE — ni
+    solde de la déclaration du tour précédent, ni consommation des free steps.
+    """
+    from engine.macro_intents import MAX_OBJECTIVES
+
+    # Aucune des deux armées ne porte de mot-clé de faction : rien n'est en attente, c'est bien
+    # le vocabulaire qui est mesuré ici et pas le garde de 08.04.
+    gs = _command_state(1, p1_faction=[{"keywordId": "NECRONS"}], p2_faction=[{"keywordId": "NECRONS"}])
+    engine = _engine(gs)
+    gs["zone_intent_free_steps_remaining"] = MAX_OBJECTIVES
+    # Sans ce champ, le solde de la déclaration lèverait : le refus serait « rouge » pour une
+    # raison qui n'est pas celle qu'on mesure. Vide = aucune déclaration en attente.
+    gs["_zone_intent_declarations"] = {}
+
+    for action in (
+        {"action": "action_qui_nexiste_pas"},
+        {"action": "activate_unit", "unitId": "2"},
+        {"action": "move", "destCol": 5, "destRow": 5},
+    ):
+        ok, out = engine._process_command_phase(dict(action))
+        assert not ok, f"{action['action']!r} accepte : la phase de commandement se termine"
+        assert out["error"] == "invalid_action_for_phase"
+        assert gs["phase"] == "command"
+        assert gs["zone_intent_free_steps_remaining"] == MAX_OBJECTIVES, (
+            "refus non inerte : les free steps ont ete consommes"
+        )
+
+    # Le verbe de sortie, lui, reste accepté.
+    gs["zone_intent_free_steps_remaining"] = 0
+    ok, out = engine._process_command_phase({"action": "skip"})
+    assert ok and out["phase_complete"] is True
     _ = inspect

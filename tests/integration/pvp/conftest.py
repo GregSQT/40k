@@ -161,8 +161,40 @@ class GameClient:
         "consolidate": "end_consolidation",
     }
 
+    def pending_faction_decision(self) -> Optional[Tuple[str, Dict[str, Any]]]:
+        """La réponse à une décision de 08.04 en attente, ou None.
+
+        Le moteur ARRÊTE la phase de commandement sur le Waaagh! et sur la désignation d'Oath,
+        et depuis que cet arrêt est OPPOSABLE (`faction_decision_pending`), aucune autre action
+        ne passe — un `advance_phase` y est refusé. Répondre est donc la seule façon d'avancer,
+        et c'est exactement ce que fait le front : `select_oath_target` + `unitId` pour l'Oath,
+        `agent_decision` + `option_index` pour le Waaagh!.
+
+        Cible d'Oath : la MÊME règle que le panneau PvP (`BoardWithAPI.tsx`, `oathTargets`) —
+        une unité adverse vivante, donc `oath_selectable_enemy_ids` côté moteur.
+        """
+        pending_oath = self.state.get("pending_oath_selection")
+        if pending_oath is not None and int(pending_oath) == self.current_player:
+            targets = self.alive_ids(self.enemy_player())
+            if not targets:
+                raise AssertionError(
+                    "designation d'Oath en attente sans aucune cible vivante : le moteur ne la "
+                    "pose que s'il en existe une"
+                )
+            return "select_oath_target", {"unitId": targets[0]}
+        decision = self.state.get("pending_agent_decision")
+        if decision is not None and decision["type"] == "waaagh_call":
+            # Candidat 0 = « Call the Waaagh! » (ordre CONTRACTUEL, cf. AGENT_DECISION_TYPE_IDS).
+            # Appeler plutôt que passer : c'est le chemin qui APPLIQUE la capacité, donc celui
+            # dont les invariants transversaux doivent tenir le coup.
+            return "agent_decision", {"option_index": 0}
+        return None
+
     def nominal_action(self) -> Tuple[str, Dict[str, Any]]:
         """L'action qui fait avancer la partie depuis l'état courant, sans rien tenter d'autre."""
+        faction_decision = self.pending_faction_decision()
+        if faction_decision is not None:
+            return faction_decision
         if self.phase == "fight":
             subphase = self.state["fight_subphase"]
             if subphase not in self.FIGHT_SUBPHASE_EXIT:
@@ -231,12 +263,24 @@ def api_isolated(monkeypatch):
 
 @pytest.fixture
 def game(api_isolated):
-    """Partie ``pvp_test`` démarrée, invariants transversaux armés."""
+    """Partie ``pvp_test`` démarrée, invariants transversaux armés, rendue en phase de MOUVEMENT.
+
+    ``/start`` rend la main en phase de COMMANDEMENT depuis le chantier des capacités de faction :
+    08.04 y arrête le moteur sur la désignation d'Oath of Moment (le roster de ``pvp_test`` est
+    ADEPTUS ASTARTES), et cet arrêt est opposable — toute autre action y est refusée
+    (``faction_decision_pending``). La fixture joue donc ce que le front joue : la désignation,
+    puis la sortie de phase. Les tests qui mesurent le mouvement, le tir, la charge ou la mêlée
+    reprennent ainsi là où ils l'ont toujours fait.
+
+    La phase de commandement elle-même est vérifiée par ``TestStartState``, sur ``game_unchecked``
+    qui, lui, ne joue rien.
+    """
     from tests.integration.pvp.invariants import assert_state_invariants
 
     with app.test_client() as flask_client:
         client = GameClient(flask_client, check=assert_state_invariants)
         client.start("pvp_test")
+        client.drain_to("move")
         yield client
 
 

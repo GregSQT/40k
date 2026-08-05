@@ -151,6 +151,25 @@ decision dans `game_state` (`pending_agent_decision` / `pending_oath_selection`)
 par les actions `agent_decision` (option 0/1) ou `select_oath_target` (`unitId`) — l'API les
 route deja ; il ne reste que les widgets React a brancher dessus.
 
+**L'arret de phase est OPPOSABLE.** Tant que la decision du joueur ACTIF n'est pas jouee, toute
+autre action est refusee (`error: "faction_decision_pending"`), aux DEUX points d'entree :
+`execute_semantic_action` (UI PvP) et `_process_squad_action` (gym). Sans ce refus, l'arret
+n'etait que conventionnel : `advance_phase` est intercepte AVANT le dispatch de phase et
+terminait la phase de commandement avec la designation encore posee — purgee sans avoir servi a
+l'ouverture de la phase suivante (`expire_faction_abilities_for_player`), donc plus aucune
+relance de touche du tour, et pas un message. Hors decision en attente, la phase de commandement
+n'accepte que `zone_intent` et `skip` (`W40KEngine.COMMAND_PHASE_ACTIONS`) : tout autre verbe y
+etait traite comme une sortie volontaire et la terminait en rendant `success: True`.
+
+**La reprise DEMARRE la phase suivante**, elle ne se contente pas de l'annoncer
+(`_resume_command_phase_after_faction_decision` : `phase_complete` -> `movement_phase_start`, le
+meme `if` que les six autres appelants de `start_command_phase`). Les deux routes de decision
+sortent du moteur AVANT la boucle de cascade, seul endroit ou une transition s'execute : le
+`next_phase: move` rendu au client decrivait une bascule qui n'avait pas eu lieu. Le gym s'en
+sortait par accident (son masque garde un WAIT, qui termine la phase au step suivant) ; le PvP,
+lui, n'a AUCUN verbe de sortie de cette phase — il n'en avait pas besoin tant que rien ne l'y
+arretait, et la partie restait bloquee en commandement une fois l'Oath designe.
+
 ## 3) Structure de `UNIT_RULES` dans une unite
 
 Exemple:

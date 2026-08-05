@@ -3546,10 +3546,23 @@ class W40KEngine(gym.Env):
         tour d'un joueur bot se terminerait sur un masque vide, et le moteur ne passerait pas au
         move. `command_phase_resume` est idempotente — c'est ce qui permet de la rappeler ici
         après CHAQUE décision, y compris quand une seconde vient d'être posée.
+
+        ⚠️ Le retour de la reprise est HONORÉ ici, pas seulement recopié dans `result` : les deux
+        routes de décision (`agent_decision`, `select_oath_target`) sortent de
+        `_process_semantic_action` / `_process_squad_action` AVANT la boucle de cascade, qui est
+        le seul endroit où une transition de phase s'exécute. Le `phase_complete` rendu au client
+        décrivait donc une transition qui n'avait pas eu lieu : la partie restait en phase de
+        commandement une fois l'Oath désigné. Le gym s'en sortait par accident (son masque garde
+        un WAIT, qui termine la phase au step suivant) ; le PvP, lui, n'a AUCUN verbe de sortie de
+        cette phase — il n'en avait pas besoin tant que rien ne l'y arrêtait. C'est le même
+        `if phase_complete → movement_phase_start` que les quatre appelants de
+        `start_command_phase` hors moteur (`api_server`, `endless_duty_runtime`).
         """
         self._resolve_faction_decisions_for_ai_seats()
         resume = command_handlers.command_phase_resume(self.game_state)
         result.update(resume)
+        if resume.get("phase_complete"):  # get allowed : absent == phase non close
+            movement_handlers.movement_phase_start(self.game_state)
         return result
 
     def _resolve_faction_decisions_for_ai_seats(self) -> None:
@@ -3584,6 +3597,41 @@ class W40KEngine(gym.Env):
             "08.04 : plus de deux decisions de capacite de faction enchainees pour un meme "
             "joueur — l'etat de decision ne se vide pas."
         )
+
+    def _reject_action_while_faction_decision_pending(
+        self, action: Dict[str, Any]
+    ) -> Optional[Tuple[bool, Dict[str, Any]]]:
+        """Refuse toute action tant que 08.04 attend la réponse du joueur ACTIF.
+
+        L'arrêt de phase de `command_phase_resume` n'était pas OPPOSABLE : les deux points
+        d'entrée (`_process_semantic_action` pour l'UI PvP, `_process_squad_action` pour le
+        gym) routent d'abord la réponse à la décision, puis laissaient passer TOUT le reste.
+        Or `advance_phase` est intercepté AVANT le dispatch de phase et rend
+        `{"next_phase": "move"}`, et n'importe quel autre verbe tombait dans
+        `_process_command_phase` → `command_phase_end()`. Dans les deux cas la phase se
+        terminait avec `pending_oath_selection` encore posé : la désignation d'Oath était
+        perdue pour tout le tour (purgée à l'ouverture de la command phase suivante par
+        `expire_faction_abilities_for_player`), donc plus aucune relance de touche, sans le
+        moindre message. Un seul clic hors overlay suffisait.
+
+        Rend un refus INERTE (aucune mutation) : c'est ce qui rend l'arrêt réel plutôt que
+        conventionnel. Appelée APRÈS le routage de `agent_decision` / `select_oath_target` —
+        seule la réponse à la décision est légale, ce que le masque du gym exprime déjà en
+        étant exclusif.
+        """
+        if self.game_state["phase"] != "command":
+            return None
+        current_player = int(require_key(self.game_state, "current_player"))
+        if not command_handlers.faction_decision_is_pending(self.game_state, current_player):
+            return None
+        # Forme des refus des trois autres phases (`movement_handlers.py:1043` et ses jumeaux) :
+        # le motif machine dans `error`, le verbe refusé dans `action`, la phase dans `phase`.
+        return False, {
+            "error": "faction_decision_pending",
+            "action": action.get("action"),
+            "phase": "command",
+            "player": current_player,
+        }
 
     def _select_ai_waaagh_call(self, player: int) -> bool:
         """Politique du siège IA hors gym pour « appeler ou non le Waaagh! ».
@@ -3974,6 +4022,10 @@ class W40KEngine(gym.Env):
             return self._handle_agent_decision_action(action)
         if action.get("action") == "select_oath_target":
             return self._handle_select_oath_target_action(action)
+
+        blocked = self._reject_action_while_faction_decision_pending(action)
+        if blocked is not None:
+            return blocked
 
         # TEST/DEBUG : force un battle-shock roll (01.07) sur une unité, hors séquence de jeu.
         # Permet de tester le Desperate Escape (09.07) en rendant une unité battle-shocked à la demande.
@@ -5429,6 +5481,10 @@ class W40KEngine(gym.Env):
         if semantic.get("action") == "select_oath_target":
             return self._handle_select_oath_target_action(semantic)
 
+        blocked = self._reject_action_while_faction_decision_pending(semantic)
+        if blocked is not None:
+            return blocked
+
         active_prompt = self.game_state.get("active_rule_choice_prompt")
         if active_prompt is not None:
             return True, {
@@ -6327,8 +6383,27 @@ class W40KEngine(gym.Env):
             self.game_state, declaration, int(player)
         )
 
+    #: Verbes que la phase de commandement accepte, et les SEULS. `zone_intent` joue un free
+    #: step (gym), `skip` sort de la phase — c'est ce que `command_wait` envoie, et le seul
+    #: chemin de sortie qui atteigne ce handler (`advance_phase` est intercepté en amont, dans
+    #: les deux points d'entrée). Tout autre verbe était traité comme une « sortie volontaire »
+    #: et terminait la phase : un `activate_unit` sur une unité ADVERSE, ou un verbe hors
+    #: vocabulaire, la faisaient basculer vers le move en rendant `success: True`.
+    COMMAND_PHASE_ACTIONS = frozenset({"zone_intent", "skip"})
+
     def _process_command_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """Process command phase actions."""
+        # Vocabulaire validé AVANT le solde et avant la consommation des free steps : un refus
+        # doit être inerte, et le solde de la déclaration du tour précédent n'a pas à être
+        # déclenché par une action que la phase n'accepte pas.
+        action_name = action.get("action")
+        if action_name not in self.COMMAND_PHASE_ACTIONS:
+            return False, {
+                "error": "invalid_action_for_phase",
+                "action": action_name,
+                "phase": "command",
+            }
+
         # SOLDE de la declaration du tour precedent, avant tout traitement d'action.
         #
         # Ici et pas a la frontiere de tour : a cet instant le controle d'objectif a deja ete
