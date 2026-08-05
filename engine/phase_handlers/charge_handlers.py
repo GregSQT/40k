@@ -355,25 +355,6 @@ def _resolve_charge_dest_to_anchor(
     return best
 
 
-def _charge_base_diameter(unit: Dict[str, Any]) -> int:
-    """Diamètre de l'empreinte en hexes (1 si BASE_SIZE absent ou invalide).
-
-    BASE_SIZE peut être int (round/square) ou [major, minor] (oval).
-    """
-    bs = unit["BASE_SIZE"]
-    if isinstance(bs, (list, tuple)) and len(bs) >= 1:
-        try:
-            return max(int(v) for v in bs)
-        except (TypeError, ValueError):
-            return 1
-    if isinstance(bs, (list, tuple)):
-        return 1
-    try:
-        return max(1, int(bs))
-    except (TypeError, ValueError):
-        return 1
-
-
 def _charge_closest_charger_hex_to_target(
     charger_fp: Set[Tuple[int, int]],
     target_fp: Set[Tuple[int, int]],
@@ -3268,39 +3249,6 @@ def _charge_unit_within_engagement_zone(game_state: Dict[str, Any], unit: Dict[s
     return unit_within_engagement_zone_footprints(
         game_state, unit, engagement_zone=cc_range, max_distance=cc_range,
     )
-
-
-def _find_adjacent_enemy_at_destination(game_state: Dict[str, Any], col: int, row: int, player: int) -> Optional[str]:
-    """
-    Find an enemy unit adjacent to the given hex position.
-
-    Used by gym training to auto-select charge target based on destination.
-    Returns the ID of the first adjacent enemy, or None if no adjacent enemy.
-    
-    CRITICAL FIX: Also checks if enemy is ON the destination (distance == 0) and
-    verifies that the destination is not occupied before returning target_id.
-    """
-    # First check if destination itself is occupied by an enemy (distance == 0)
-    units_cache = require_key(game_state, "units_cache")
-    for enemy_id, enemy_entry in enemy_entries_on_battlefield(units_cache, player):
-        enemy_pos = (enemy_entry["col"], enemy_entry["row"])
-        if enemy_pos == (col, row):
-            # Enemy is ON the destination - this is invalid for charge
-            return None
-    
-    # Then check neighbors (adjacent enemies, distance == 1)
-    hex_neighbors = set(get_hex_neighbors(col, row))
-    adjacent_enemies = []
-    for enemy_id, enemy_entry in enemy_entries_on_battlefield(units_cache, player):
-        enemy_pos = (enemy_entry["col"], enemy_entry["row"])
-        if enemy_pos in hex_neighbors:
-            adjacent_enemies.append(enemy_id)
-    
-    if adjacent_enemies:
-        result_id = adjacent_enemies[0]
-        return result_id
-    else:
-        return None
 
 
 def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str, charge_roll: int,

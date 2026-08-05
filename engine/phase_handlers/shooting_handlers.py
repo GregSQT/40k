@@ -6,7 +6,6 @@ Only pool building functionality - foundation for complete handler autonomy
 
 import copy
 import hashlib
-import math
 import os
 import time
 from typing import Dict, List, Tuple, Set, Optional, Any
@@ -27,7 +26,7 @@ from .shared_utils import (
     ACTION, WAIT, PASS, SHOOTING, ADVANCE, NOT_REMOVED,
     update_units_cache_position, update_units_cache_hp, remove_from_units_cache,
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
-    get_unit_position, require_unit_position,
+    get_unit_position, require_unit_position, require_unit_from_cache,
     update_enemy_adjacent_caches_after_unit_move,
     maybe_resolve_reactive_move,
     unit_has_rule_effect as shared_unit_has_rule_effect,
@@ -276,12 +275,6 @@ def _append_shoot_nb_roll_info_log(
     )
 
 
-def _tracking_set_contains_unit(unit_id: Any, tracking_set: Set[Any]) -> bool:
-    """Check unit membership in tracking sets with normalized string comparison."""
-    unit_id_str = str(unit_id)
-    return any(str(tracked_id) == unit_id_str for tracked_id in tracking_set)
-
-
 def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
     """Check if unit has a specific direct or granted rule effect by ruleId."""
     return shared_unit_has_rule_effect(unit, rule_id)
@@ -362,32 +355,6 @@ def _is_combi_profile_blocked(unit: Dict[str, Any], weapon: Dict[str, Any], weap
         return False
     combi_choice = unit["_combi_weapon_choice"]
     return combi_key in combi_choice and combi_choice[combi_key] != weapon_index
-
-
-def _set_combi_weapon_choice(game_state: Dict[str, Any], unit: Dict[str, Any], weapon_index: int) -> None:
-    """Record COMBI_WEAPON profile choice for this activation."""
-    rng_weapons = require_key(unit, "RNG_WEAPONS")
-    if weapon_index < 0 or weapon_index >= len(rng_weapons):
-        raise IndexError(f"Invalid ranged weapon index {weapon_index} for unit {unit['id']}")
-    weapon = rng_weapons[weapon_index]
-    combi_key = _get_combi_weapon_key(weapon)
-    if not combi_key:
-        return
-    if "_combi_weapon_choice" not in unit or unit["_combi_weapon_choice"] is None:
-        unit["_combi_weapon_choice"] = {}
-    combi_choice = unit["_combi_weapon_choice"]
-    if combi_key in combi_choice and combi_choice[combi_key] != weapon_index:
-        raise ValueError(
-            f"COMBI_WEAPON profile already selected for '{combi_key}': "
-            f"existing_index={combi_choice[combi_key]} new_index={weapon_index} unit_id={unit['id']}"
-        )
-    combi_choice[combi_key] = weapon_index
-    from engine.game_utils import add_debug_log
-    weapon_name = weapon.get("display_name", f"weapon_{weapon_index}")
-    add_debug_log(
-        game_state,
-        f"[COMBI_WEAPON] Unit {unit.get('id')} locked weapon {weapon_index} ({weapon_name}) combi_key={combi_key}"
-    )
 
 
 def _socle_from_entry(entry: Dict[str, Any]):
@@ -1097,10 +1064,12 @@ def preview_hidden_models_from_position(
     shot_prev_ids = {str(x) for x in game_state.get("units_shot_previous_turn", set())}
     if unit_id_str in shot_ids or unit_id_str in shot_prev_ids:
         return empty
-    units_cache = require_key(game_state, "units_cache")
-    entry = units_cache.get(unit_id_str)
-    if entry is None:
-        return empty
+    # `is_unit_alive(unit_id_str)` en tête de fonction a déjà tranché la présence dans
+    # `units_cache` : ce `return empty` est inatteignable, mais il rendait « aucune figurine
+    # masquée » — un verdict de jeu — sur une désynchronisation. Preuve statique.
+    entry = require_unit_from_cache(
+        unit_id_str, game_state, "preview_hidden_models_from_position"
+    )
     terrain_areas = require_key(game_state, "terrain_areas")
     norm_dest_col, norm_dest_row = normalize_coordinates(int(dest_col), int(dest_row))
     old_col = int(entry.get("col", norm_dest_col))
@@ -1326,49 +1295,6 @@ def _emit_shoot_activation_perf(
         f"outcome={outcome} valid_targets_n={valid_targets_n}"
     )
 
-
-def _build_shooting_los_cache(game_state: Dict[str, Any]) -> None:
-    """
-    DEPRECATED: This function is kept for backward compatibility but should not be used.
-    Use build_unit_los_cache() instead for unit-local cache (AI_TURN.md compliance).
-    
-    Build LoS cache for all unit pairs at shooting phase start.
-    Pure function, stores in game_state, no copying.
-    
-    Performance: O(n²) calculation once per phase vs O(n²×m) per activation.
-    Called once per shooting phase, massive speedup during unit activations.
-    
-    NOTE: Cache is invalidated when units move or die to prevent stale results.
-    """
-    los_cache = {}
-    
-    # Get all alive units (both players; units_cache is source of truth)
-    units_cache = require_key(game_state, "units_cache")
-    alive_units = []
-    for unit_id in units_cache.keys():
-        unit = _get_unit_by_id(game_state, unit_id)
-        if unit is None:
-            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-        alive_units.append(unit)
-    
-    # Calculate LoS for every shooter-target pair
-    for shooter in alive_units:
-        for target in alive_units:
-            # Skip same unit
-            if shooter["id"] == target["id"]:
-                continue
-            
-            # Calculate LoS using existing function (expensive but only once)
-            # CRITICAL: Always recalculate, don't rely on potentially stale cache
-            # CRITICAL: Normalize IDs to string for consistent cache key comparison
-            cache_key = (str(shooter["id"]), str(target["id"]))
-            los_cache[cache_key] = _has_line_of_sight(game_state, shooter, target)
-    
-    # Store cache in game_state (single source of truth)
-    game_state["los_cache"] = los_cache
-    
-    # Debug log cache size (optional, remove in production)
-    # print(f"LoS CACHE: Built {len(los_cache)} entries for {len(alive_units)} units")
 
 def preview_shoot_valid_targets_from_position(
     game_state: Dict[str, Any],
@@ -1652,12 +1578,11 @@ def build_hidden_too_far_by_unit_id(
     los_cache = shooter.get("los_cache")
     if not los_cache:
         return {}
-    units_cache = require_key(game_state, "units_cache")
     shooter_id = str(require_key(shooter, "id"))
     shooter_player = int(require_key(shooter, "player"))
-    shooter_entry = units_cache.get(shooter_id)
-    if shooter_entry is None:
-        raise KeyError(f"Shooter {shooter_id} not in units_cache")
+    shooter_entry = require_unit_from_cache(
+        shooter_id, game_state, "build_hidden_too_far_by_unit_id/shooter"
+    )
     _shooter_socle = socle_from_cache_entry(shooter_entry)
     result: Dict[str, bool] = {}
     for target_id, has_los in los_cache.items():
@@ -1673,9 +1598,11 @@ def build_hidden_too_far_by_unit_id(
             continue
         if not bool(enemy.get("hidden")):
             continue
-        enemy_entry = units_cache.get(target_id_str)
-        if enemy_entry is None:
-            continue
+        # Contrat de `is_unit_alive` (cf. son docstring) : la garde ci-dessus prouve la présence.
+        # Le `continue` qui était ici aurait effacé un ennemi masqué du rapport « trop loin ».
+        enemy_entry = require_unit_from_cache(
+            target_id_str, game_state, "build_hidden_too_far_by_unit_id/target"
+        )
         distance = ranged_edge_distance(
             _shooter_socle, socle_from_cache_entry(enemy_entry), _ranged_metric, max_distance=max_rng
         )
@@ -1746,12 +1673,11 @@ def build_hidden_detection_info_by_unit_id(
     los_cache = shooter.get("los_cache")
     if not los_cache:
         return {}
-    units_cache = require_key(game_state, "units_cache")
     shooter_id = str(require_key(shooter, "id"))
     shooter_player = int(require_key(shooter, "player"))
-    shooter_entry = units_cache.get(shooter_id)
-    if shooter_entry is None:
-        raise KeyError(f"Shooter {shooter_id} not in units_cache")
+    shooter_entry = require_unit_from_cache(
+        shooter_id, game_state, "build_hidden_detection_info_by_unit_id/shooter"
+    )
     _shooter_socle = socle_from_cache_entry(shooter_entry)
     gym_training = bool(
         game_state.get("gym_training_mode", False)
@@ -1776,9 +1702,11 @@ def build_hidden_detection_info_by_unit_id(
             continue
         if not bool(enemy.get("hidden")):
             continue
-        enemy_entry = units_cache.get(target_id_str)
-        if enemy_entry is None:
-            continue
+        # Contrat de `is_unit_alive` (cf. son docstring) : la garde ci-dessus prouve la présence.
+        # Le `continue` qui était ici aurait effacé un ennemi masqué du rapport « trop loin ».
+        enemy_entry = require_unit_from_cache(
+            target_id_str, game_state, "build_hidden_detection_info_by_unit_id/target"
+        )
         distance = ranged_edge_distance(
             _shooter_socle, socle_from_cache_entry(enemy_entry), _ranged_metric, max_distance=max_rng
         )
@@ -1857,48 +1785,6 @@ def _remove_dead_unit_from_pools(game_state: Dict[str, Any], dead_unit_id: str) 
     active_shooting_unit = game_state.get("active_shooting_unit")
     if active_shooting_unit is not None and str(active_shooting_unit) == unit_id_str:
         del game_state["active_shooting_unit"]
-
-
-def _rebuild_los_cache_for_unit(game_state: Dict[str, Any], unit_id: str) -> None:
-    """
-    Rebuild LoS cache for a specific unit after it moves (e.g., after advance).
-    Recalculates LoS from this unit to all other alive units.
-    
-    CRITICAL: Called after unit moves to ensure cache is up-to-date with new position.
-    This prevents "shoot through wall" bugs caused by stale cache.
-    """
-    unit = _get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return
-    
-    # Initialize cache if it doesn't exist
-    if "los_cache" not in game_state:
-        game_state["los_cache"] = {}
-    
-    # Get all alive units (both players; units_cache is source of truth)
-    units_cache = require_key(game_state, "units_cache")
-    alive_units = []
-    for target_id in units_cache.keys():
-        target = _get_unit_by_id(game_state, target_id)
-        if target is None:
-            raise KeyError(f"Unit {target_id} missing from game_state['units']")
-        alive_units.append(target)
-    
-    # Recalculate LoS from this unit to all other units
-    for target in alive_units:
-        if target["id"] == unit_id:
-            continue  # Skip self
-        
-        # Calculate LoS using current positions
-        # CRITICAL: Normalize IDs to string for consistent cache key comparison
-        cache_key = (str(unit_id), str(target["id"]))
-        has_los = _has_line_of_sight(game_state, unit, target)
-        game_state["los_cache"][cache_key] = has_los
-        
-        # Also update reverse direction (target -> unit)
-        # CRITICAL: Normalize IDs to string for consistent cache key comparison
-        reverse_key = (str(target["id"]), str(unit_id))
-        game_state["los_cache"][reverse_key] = has_los
 
 
 def _invalidate_los_cache_for_moved_unit(
@@ -2021,57 +1907,6 @@ def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
     
     return game_state["shoot_activation_pool"]
 
-def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_targets: List[str]) -> str:
-    """AI target selection using RewardMapper system"""
-    if not valid_targets:
-        raise ValueError("valid_targets required for AI shooting target selection")
-    
-    unit = _get_unit_by_id(game_state, unit_id)
-    if not unit:
-        raise ValueError(f"AI shooting target selection missing unit: unit_id={unit_id}")
-    
-    from ai.reward_mapper import RewardMapper
-    reward_configs = require_key(game_state, "reward_configs")
-    
-    # Get unit type for config lookup
-    global _unit_registry_singleton
-    if _unit_registry_singleton is None:
-        from ai.unit_registry import UnitRegistry
-        _unit_registry_singleton = UnitRegistry()
-    shooter_unit_type = require_key(unit, "unitType")
-    shooter_agent_key = _unit_registry_singleton.get_model_key(shooter_unit_type)
-    
-    # Get unit-specific config
-    unit_reward_config = require_key(reward_configs, shooter_agent_key)
-    reward_mapper = RewardMapper(unit_reward_config)
-    
-    # Build target list for reward mapper (single lookup per tid)
-    all_targets = []
-    for tid in valid_targets:
-        t = _get_unit_by_id(game_state, tid)
-        if not t:
-            raise ValueError(f"AI shooting target selection missing target: target_id={tid}")
-        all_targets.append(t)
-
-    best_target = valid_targets[0]
-    best_reward = None
-    
-    for target_id in valid_targets:
-        target = _get_unit_by_id(game_state, target_id)
-        if not target:
-            raise ValueError(f"AI shooting target selection missing target: target_id={target_id}")
-        
-        can_melee_charge = False  # TODO: implement melee charge check
-        
-        reward = reward_mapper.get_shooting_priority_reward(unit, target, all_targets, can_melee_charge, game_state)
-        
-        if best_reward is None or reward > best_reward:
-            best_reward = reward
-            best_target = target_id
-
-    return best_target
-
-
 def _is_ai_controlled_shooting_unit(
     game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]
 ) -> bool:
@@ -2117,9 +1952,10 @@ def _unit_has_firable_target(game_state: Dict[str, Any], unit: Dict[str, Any],
 
     units_cache = require_key(game_state, "units_cache")
     shooter_id_str = str(unit["id"])
-    shooter_entry = units_cache.get(shooter_id_str)
-    shooter_col, shooter_row = require_unit_position(unit, game_state)
-    shooter_fp = entry_footprint(shooter_entry) if shooter_entry else {(shooter_col, shooter_row)}
+    shooter_entry = require_unit_from_cache(
+        shooter_id_str, game_state, "_unit_has_firable_target"
+    )
+    shooter_fp = entry_footprint(shooter_entry)
     shooter_player_int = require_present(int(unit["player"]) if unit["player"] is not None else None, "unit['player']")
     melee_range = get_engagement_zone(game_state)
 
@@ -2291,15 +2127,19 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     if not is_unit_alive(target_id_str, game_state):
         return False
 
-    shooter_col, shooter_row = require_unit_position(shooter, game_state)
-    target_col, target_row = require_unit_position(target, game_state)
+    shooter_entry = require_unit_from_cache(
+        shooter_id_str, game_state, "_is_valid_shooting_target/shooter"
+    )
+    target_entry = require_unit_from_cache(
+        target_id_str, game_state, "_is_valid_shooting_target/target"
+    )
+    shooter_col, shooter_row = int(shooter_entry["col"]), int(shooter_entry["row"])
+    target_col, target_row = int(target_entry["col"]), int(target_entry["row"])
     if target_col < 0 or target_row < 0 or shooter_col < 0 or shooter_row < 0:
         return False  # tireur ou cible hors-board (réserves stratégiques)
 
-    shooter_entry = units_cache.get(shooter_id_str)
-    target_entry = units_cache.get(target_id_str)
-    shooter_fp = entry_footprint(shooter_entry) if shooter_entry else {(shooter_col, shooter_row)}
-    target_fp = entry_footprint(target_entry) if target_entry else {(target_col, target_row)}
+    shooter_fp = entry_footprint(shooter_entry)
+    target_fp = entry_footprint(target_entry)
     max_range = get_max_ranged_range(shooter)
     distance = min_distance_between_sets(shooter_fp, target_fp, max_distance=max_range)
     if distance > max_range:
@@ -3487,26 +3327,27 @@ def shooting_build_valid_target_pool(
     if os.environ.get("LOS_DEBUG") == "1" and valid_target_pool:
         import sys
         from engine.combat_utils import has_line_of_sight_coords
-        units_cache = require_key(game_state, "units_cache")
         sc, sr = unit_col, unit_row
         for tid in valid_target_pool:
-            entry = units_cache.get(tid)
-            if entry:
-                tc, tr = entry["col"], entry["row"]
-                has_los = has_line_of_sight_coords(int(sc), int(sr), int(tc), int(tr), game_state)
-                # Instrument de diagnostic : il ne rattrape RIEN. L'ancien
-                # `except Exception: topo_str = "los=N/A"` masquait la panne de la primitive
-                # que ce log existe précisément pour observer — un diagnostic qui avale ses
-                # propres erreurs ne diagnostique plus rien.
-                ratio, can_see = _get_los_visibility_state(
-                    game_state, int(sc), int(sr), int(tc), int(tr)
-                )
-                topo_str = f"los={ratio:.6f} can_see={can_see}"
-                ep = game_state.get("episode_number", "?")
-                turn = game_state.get("turn", "?")
-                msg = f"[LOS_DEBUG] cache MISS store unit={unit_id_str} target={tid} ({sc},{sr})->({tc},{tr}) has_los={has_los} {topo_str} ep={ep} turn={turn}\n"
-                sys.stderr.write(msg)
-                sys.stderr.flush()
+            # Instrument de diagnostic : il ne rattrape RIEN — ni ici, ni sur la primitive de LoS
+            # plus bas. L'ancien `entry = units_cache.get(tid)` / `if entry:` sautait en silence
+            # la cible que ce log existe précisément pour observer ; l'ancien
+            # `except Exception: topo_str = "los=N/A"` masquait la panne de cette primitive. Un
+            # diagnostic qui avale ses propres erreurs ne diagnostique plus rien.
+            entry = require_unit_from_cache(
+                tid, game_state, "shooting_build_valid_target_pool/LOS_DEBUG"
+            )
+            tc, tr = entry["col"], entry["row"]
+            has_los = has_line_of_sight_coords(int(sc), int(sr), int(tc), int(tr), game_state)
+            ratio, can_see = _get_los_visibility_state(
+                game_state, int(sc), int(sr), int(tc), int(tr)
+            )
+            topo_str = f"los={ratio:.6f} can_see={can_see}"
+            ep = game_state.get("episode_number", "?")
+            turn = game_state.get("turn", "?")
+            msg = f"[LOS_DEBUG] cache MISS store unit={unit_id_str} target={tid} ({sc},{sr})->({tc},{tr}) has_los={has_los} {topo_str} ep={ep} turn={turn}\n"
+            sys.stderr.write(msg)
+            sys.stderr.flush()
 
     # Prevent memory leak: Clear cache if it grows too large
     if len(_target_pool_cache) > _cache_size_limit:
@@ -3558,126 +3399,6 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
             f"visible={los['visible']}/{los['total']}"
         )
     return los["can_see"]
-
-
-def _resolve_target_hexes_for_los(
-    game_state: Dict[str, Any],
-    target: Dict[str, Any],
-    center_col: int,
-    center_row: int,
-) -> List[Tuple[int, int]]:
-    """Resolve target footprint hexes from units_cache, else use center hex."""
-    target_hexes: List[Tuple[int, int]] = [(center_col, center_row)]
-    if "id" not in target:
-        return target_hexes
-    units_cache = require_key(game_state, "units_cache")
-    target_entry = units_cache.get(str(require_key(target, "id")))
-    occ = target_entry.get("occupied_hexes") if isinstance(target_entry, dict) else None
-    if isinstance(occ, (set, list, tuple)) and len(occ) > 0:
-        occ_list: List[Tuple[int, int]] = []
-        for hx in occ:
-            if isinstance(hx, (list, tuple)) and len(hx) >= 2:
-                hc, hr = normalize_coordinates(hx[0], hx[1])
-                occ_list.append((hc, hr))
-        if occ_list:
-            target_hexes = occ_list
-    return target_hexes
-
-
-def _dump_los_contradiction_diagnostic(
-    game_state: Dict[str, Any],
-    attacker: Dict[str, Any],
-    target: Dict[str, Any],
-    attacker_id: Any,
-    target_id: Any,
-    attacker_col: Any,
-    attacker_row: Any,
-    target_col: Any,
-    target_row: Any,
-) -> None:
-    """
-    Diagnostic: target was in valid_target_pool (los_cache said visible) but
-    has_line_of_sight_coords returned False during save. Dump state to find root cause.
-    """
-    import sys
-    from engine.combat_utils import normalize_coordinates
-
-    lines: List[str] = []
-    lines.append("=" * 80)
-    lines.append("LOS CONTRADICTION DIAGNOSTIC")
-    lines.append("Target was in valid_target_pool (visible) but has_line_of_sight_coords returned False")
-    lines.append("=" * 80)
-
-    # Positions used in save path
-    ac, ar = int(attacker_col), int(attacker_row)
-    tc, tr = int(target_col), int(target_row)
-    ac_norm, ar_norm = normalize_coordinates(ac, ar)
-    tc_norm, tr_norm = normalize_coordinates(tc, tr)
-    cache_key = ((ac_norm, ar_norm), (tc_norm, tr_norm))
-    cache_key_inv = ((tc_norm, tr_norm), (ac_norm, ar_norm))
-
-    lines.append(f"Save path positions: attacker({attacker_id})=({ac},{ar}) target({target_id})=({tc},{tr})")
-    lines.append(f"Normalized: attacker=({ac_norm},{ar_norm}) target=({tc_norm},{tr_norm})")
-    lines.append(f"Cache key: {cache_key}")
-
-    # units_cache positions (what build_unit_los_cache uses)
-    uc = game_state.get("units_cache") or {}
-    attacker_uid = str(attacker_id)
-    target_uid = str(target_id)
-    if attacker_uid in uc:
-        ae = uc[attacker_uid]
-        ua_col, ua_row = ae.get("col"), ae.get("row")
-        lines.append(f"units_cache attacker: col={ua_col} (type={type(ua_col).__name__}) row={ua_row} (type={type(ua_row).__name__})")
-        if (ua_col, ua_row) != (ac_norm, ar_norm):
-            lines.append(f"  >>> MISMATCH vs save path ({ac_norm},{ar_norm})")
-    if target_uid in uc:
-        te = uc[target_uid]
-        ut_col, ut_row = te.get("col"), te.get("row")
-        lines.append(f"units_cache target: col={ut_col} (type={type(ut_col).__name__}) row={ut_row} (type={type(ut_row).__name__})")
-        if (ut_col, ut_row) != (tc_norm, tr_norm):
-            lines.append(f"  >>> MISMATCH vs save path ({tc_norm},{tr_norm})")
-
-    # los_cache (what we stored when building pool)
-    los_cache = attacker.get("los_cache") or {}
-    if target_uid in los_cache:
-        lines.append(f"attacker los_cache[{target_uid}] = {los_cache[target_uid]} (True=was visible when pool built)")
-    else:
-        lines.append(f"attacker los_cache: target {target_uid} NOT in los_cache")
-
-    # valid_target_pool
-    vtp = attacker.get("valid_target_pool") or []
-    lines.append(f"valid_target_pool contains target: {target_uid in vtp} (pool size={len(vtp)})")
-
-    # Pool cache trace (for LOS contradiction root cause)
-    pool_from_cache = attacker.get("_pool_from_cache")
-    pool_cache_key = attacker.get("_pool_cache_key")
-    lines.append(f"_pool_from_cache: {pool_from_cache} (True=pool came from cache HIT)")
-    lines.append(f"_pool_cache_key: {pool_cache_key}")
-
-    # hex_los_cache
-    hlc = game_state.get("hex_los_cache") or {}
-    lines.append(f"hex_los_cache size: {len(hlc)}")
-    if cache_key in hlc:
-        lines.append(f"hex_los_cache[cache_key] = {hlc[cache_key]}")
-    else:
-        lines.append(f"hex_los_cache[cache_key]: NOT FOUND (cache miss)")
-    if cache_key_inv in hlc:
-        lines.append(f"hex_los_cache[inverse_key] = {hlc[cache_key_inv]}")
-
-    # LoS tracée à la demande, dans les deux sens (la trace hex n'est pas symétrique)
-    from engine.hex_utils import compute_los_visibility
-    wall_set = _get_wall_set(game_state)
-    v_fwd = compute_los_visibility(ac_norm, ar_norm, tc_norm, tr_norm, wall_set)
-    v_inv = compute_los_visibility(tc_norm, tr_norm, ac_norm, ar_norm, wall_set)
-    lines.append(f"on-demand LoS: fwd={v_fwd:.6f} inv={v_inv:.6f}")
-
-    # Episode context
-    lines.append(f"episode={game_state.get('episode_number')} turn={game_state.get('turn')} phase={game_state.get('phase')}")
-
-    lines.append("=" * 80)
-    msg = "\n".join(lines)
-    sys.stderr.write(msg + "\n")
-    sys.stderr.flush()
 
 
 def _get_los_visibility_state(
@@ -4284,9 +4005,12 @@ def _resolve_unit_anchor_and_footprint(
         anchor = normalize_coordinates(int(unit["col"]), int(unit["row"]))
     footprint: List[Tuple[int, int]] = [anchor]
     if not gym_training and "id" in unit:
-        units_cache = require_key(game_state, "units_cache")
-        entry = units_cache.get(str(unit["id"]))
-        occ = entry.get("occupied_hexes") if isinstance(entry, dict) else None
+        # `require_unit_position` ci-dessus a déjà tranché la présence (preuve statique) ; le
+        # repli sur l'ancre seule aurait sinon amputé l'empreinte du tireur.
+        entry = require_unit_from_cache(
+            str(unit["id"]), game_state, "_resolve_unit_anchor_and_footprint"
+        )
+        occ = entry.get("occupied_hexes")  # get allowed (repli ancre si le champ est vide)
         if isinstance(occ, (set, list, tuple)) and len(occ) > 0:
             resolved = [
                 normalize_coordinates(hx[0], hx[1])
@@ -4925,63 +4649,6 @@ def _update_unit_los_preview_data(
     unit["los_preview_ratio_by_hex"] = ratio_by_hex
 
 
-def _hex_to_pixel(col: int, row: int, hex_radius: float) -> Tuple[float, float]:
-    """Convert offset hex coordinates to pixel center coordinates."""
-    hex_width = 1.5 * hex_radius
-    hex_height = math.sqrt(3.0) * hex_radius
-    x = col * hex_width
-    y = row * hex_height + ((col % 2) * hex_height) / 2.0
-    return x, y
-
-
-def _line_segments_intersect(
-    line1_start: Tuple[float, float],
-    line1_end: Tuple[float, float],
-    line2_start: Tuple[float, float],
-    line2_end: Tuple[float, float],
-) -> bool:
-    """Return whether two 2D line segments intersect."""
-    d1x = line1_end[0] - line1_start[0]
-    d1y = line1_end[1] - line1_start[1]
-    d2x = line2_end[0] - line2_start[0]
-    d2y = line2_end[1] - line2_start[1]
-    d3x = line2_start[0] - line1_start[0]
-    d3y = line2_start[1] - line1_start[1]
-
-    cross1 = d1x * d2y - d1y * d2x
-    if abs(cross1) < 0.0001:
-        return False
-    cross2 = d3x * d2y - d3y * d2x
-    cross3 = d3x * d1y - d3y * d1x
-    t1 = cross2 / cross1
-    t2 = cross3 / cross1
-    return 0.0 <= t1 <= 1.0 and 0.0 <= t2 <= 1.0
-
-
-def _line_passes_through_hex(
-    start_point: Tuple[float, float],
-    end_point: Tuple[float, float],
-    hex_col: int,
-    hex_row: int,
-    hex_radius: float,
-) -> bool:
-    """Return whether the segment intersects the boundary of a wall hex polygon."""
-    center_x, center_y = _hex_to_pixel(hex_col, hex_row, hex_radius)
-    hex_points: List[Tuple[float, float]] = []
-    for i in range(6):
-        angle = (i * math.pi) / 3.0
-        px = center_x + hex_radius * math.cos(angle)
-        py = center_y + hex_radius * math.sin(angle)
-        hex_points.append((px, py))
-
-    for i in range(len(hex_points)):
-        p1 = hex_points[i]
-        p2 = hex_points[(i + 1) % len(hex_points)]
-        if _line_segments_intersect(start_point, end_point, p1, p2):
-            return True
-    return False
-
-
 def _get_accurate_hex_line(start_col: int, start_row: int, end_col: int, end_row: int) -> List[Tuple[int, int]]:
     """Accurate hex line using cube coordinates."""
     start_cube = _offset_to_cube(start_col, start_row)
@@ -5181,15 +4848,6 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
     if "advance_range" in unit:
         del unit["advance_range"]
     unit["SHOOT_LEFT"] = 0
-
-def _get_shooting_context(game_state: Dict[str, Any], unit: Dict[str, Any]) -> str:
-    """Determine current shooting context for nested behavior."""
-    # Direct field access
-    if "selected_target_id" in unit and unit["selected_target_id"]:
-        return "target_selected"
-    else:
-        return "no_target_selected"
-
 
 def _build_move_after_shooting_destinations(
     game_state: Dict[str, Any], unit: Dict[str, Any], move_distance: int
@@ -5503,25 +5161,6 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
         del game_state["last_move_after_shooting"]
     
     return True, result
-
-# DEPRECATED: _shooting_activation_end is replaced by _handle_shooting_end_activation + end_activation
-# This function is kept for backward compatibility but should not be used in new code
-# All calls have been migrated to use end_activation directly (aligned with MOVE phase)
-def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any], 
-                   arg1: str, arg2: int, arg3: str, arg4: str, arg5: int = 1) -> Tuple[bool, Dict[str, Any]]:
-    """
-    DEPRECATED: Use _handle_shooting_end_activation instead (aligned with MOVE phase).
-    
-    This function is kept for backward compatibility but should not be used in new code.
-    All calls have been migrated to use end_activation directly via _handle_shooting_end_activation.
-    
-    Migration path:
-    - Replace all calls to _shooting_activation_end with _handle_shooting_end_activation
-    - For arg5=0 (NOT_REMOVED), call end_activation directly instead
-    """
-    # Redirect to new implementation
-    return _handle_shooting_end_activation(game_state, unit, arg1, arg2, arg3, arg4, arg5)
-
 
 def _handle_move_after_shooting_action(
     game_state: Dict[str, Any],
@@ -5897,36 +5536,6 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         return False, {"error": "invalid_action_for_phase", "action": action_type, "phase": "shoot"}
 
 
-def _calculate_save_target(target: Dict[str, Any], ap: int, save_bonus: int = 0) -> int:
-    """Calculate save target with AP, optional save bonus, and invulnerable save."""
-    # Direct UPPERCASE field access
-    if "ARMOR_SAVE" not in target:
-        raise KeyError(f"Target missing required 'ARMOR_SAVE' field: {target}")
-    if "INVUL_SAVE" not in target:
-        raise KeyError(f"Target missing required 'INVUL_SAVE' field: {target}")
-    armor_save = target["ARMOR_SAVE"]
-    invul_save = target["INVUL_SAVE"]
-    
-    if not isinstance(save_bonus, int):
-        raise TypeError(f"save_bonus must be int, got {type(save_bonus).__name__}")
-    if save_bonus < 0:
-        raise ValueError(f"save_bonus must be >= 0, got {save_bonus}")
-    effective_save_bonus = min(1, save_bonus)
-    # Apply AP to armor save (AP is negative, subtract to worsen save: 3+ with -1 AP = 4+)
-    modified_armor_save = armor_save - ap
-    # Save bonus improves armor save target number (cannot stack above +1 total).
-    modified_armor_save = modified_armor_save - effective_save_bonus
-    
-    # Handle invulnerable saves: 0 means no invul save, use 7 (impossible)
-    effective_invul = invul_save if invul_save > 0 else 7
-    
-    # Use best available save (lower target number is better)
-    best_save = min(modified_armor_save, effective_invul)
-    
-    # Cap impossible saves at 7, minimum save is 2+
-    return max(2, min(best_save, 6))
-
-
 def _calculate_wound_target(strength: int, toughness: int) -> int:
     """EXACT COPY from 40k_OLD w40k_engine.py wound calculation"""
     if strength >= toughness * 2:
@@ -5960,18 +5569,6 @@ def _unit_has_shot_with_any_weapon(unit: Dict[str, Any]) -> bool:
     return False
 
 
-def _shooting_activation_has_committed_action(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
-    """
-    A shooting activation is committed after the first shot or after an advance.
-    Once committed, it cannot be postponed back into shoot_activation_pool.
-    """
-    if _shooting_activation_has_started_or_completed_advance(game_state, unit):
-        return True
-    if _unit_has_shot_with_any_weapon(unit):
-        return True
-    return False
-
-
 def _shooting_activation_has_started_or_completed_advance(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -5984,37 +5581,6 @@ def _shooting_activation_has_started_or_completed_advance(
     if unit_id_str in require_key(game_state, "units_advanced"):
         return True
     return "advance_range" in unit and unit["advance_range"] is not None
-
-
-def _keep_committed_shooting_activation_waiting(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    error_code: str,
-) -> Tuple[bool, Dict[str, Any]]:
-    """
-    Preserve the active shooting selection after an invalid postpone/switch attempt.
-
-    This keeps the backend HP blink contract intact: if the active unit still has target
-    ids in its pool, the response includes waiting_for_player + start_blinking +
-    blinking_units for that same active unit.
-    """
-    unit_id = require_key(unit, "id")
-    game_state["active_shooting_unit"] = str(unit_id)
-    valid_targets = require_key(unit, "valid_target_pool")
-    response: Dict[str, Any] = {
-        "action": "no_effect",
-        "unitId": unit_id,
-        "error": error_code,
-        "waiting_for_player": True,
-        "phase": "shoot",
-    }
-    if valid_targets:
-        response["valid_targets"] = valid_targets
-        response["blinking_units"] = valid_targets
-        response["start_blinking"] = True
-    if "available_weapons" in unit:
-        response["available_weapons"] = unit["available_weapons"]
-    return True, response
 
 
 def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:

@@ -46,9 +46,13 @@ Suite `tests/unit/` verte avec ce fix (1289), smoke `(A) OK | (B) OK`.
 `fight_handlers` est **partagé PvP/gym**, et le changement n'est **pas neutre pour le PvP** —
 appelants VIVANTS du BFS depuis `_fight_v11_manual_step` (flux PvP manuel) :
 
-- `consolidate_autoplace_plan` (~L6395) → `_fight_plan_consolidation_destinations` → le BFS :
-  les destinations de consolidation proposées au joueur changent (−19 ancres sur les unités 1 et
-  2 du scénario mêlée) ;
+- ~~`consolidate_autoplace_plan` → `_fight_plan_consolidation_destinations` → le BFS~~
+  **CETTE CHAÎNE D'APPEL N'EXISTE PLUS** (constaté le 2026-08-05). `consolidate_autoplace_plan`
+  n'appelle pas ce planificateur ; son unique appelant,
+  `_fight_try_begin_consolidation_after_attacks`, a été retiré le 2026-07-23 par la purge de la
+  machine d'activation fight V10 (commit `d69dfe0a`), qui a oublié la fonction elle-même.
+  Celle-ci a été supprimée le 2026-08-05. **L'impact PvP décrit ici (−19 ancres) est donc à
+  re-mesurer sur le chemin V11 réel avant de traiter ce bug** ;
 - `_fight_v11_auto_overrun_pile_in` (~L6229) → `pile_in_move_destinations_12_03` → le BFS ;
   et sans le `except ValueError`, ce chemin PvP peut lever.
 

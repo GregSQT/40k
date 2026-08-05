@@ -10,7 +10,6 @@ CRITICAL: On ne tire PAS en phase de fight. La règle CLOSE_QUARTERS permet de t
 de SHOOTING même si l'unité est adjacente à une unité ennemie (exception au "engaged").
 """
 
-import os
 import sys
 import time
 from collections import deque
@@ -30,7 +29,7 @@ from engine.combat_utils import (
     set_unit_coordinates,
 )
 from engine.game_state import GameStateManager, objective_hex_zones
-from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH, cube_to_offset, offset_to_cube
+from engine.hex_utils import cube_to_offset, offset_to_cube
 # Etages 13.06 — remontes au NIVEAU MODULE : `_fight_effective_level_at` et
 # `_fight_rigid_model_placements` sont appeles par CELLULE CANDIDATE dans les boucles de pool
 # (des milliers de fois par construction), et un import local y coute un lookup `sys.modules`
@@ -48,7 +47,7 @@ from .shared_utils import (
     ACTION, PASS, ERROR, FIGHT,
     update_units_cache_hp, remove_from_units_cache,
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
-    get_unit_position, require_unit_position,
+    get_unit_position, require_unit_position, require_unit_from_cache,
     unit_has_rule_effect as shared_unit_has_rule_effect,
     is_unit_on_objective as shared_is_unit_on_objective,
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
@@ -89,7 +88,6 @@ from .shared_utils import (
     parse_model_plan_as_map,
 )
 
-_ADJACENT_EDGE_GAP_TOLERANCE_NORM = ENGAGEMENT_NORM_HEX_WIDTH
 FightFootprintOffsetPair = Optional[Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]]
 _unit_registry_singleton = None  # UnitRegistry reads static files — safe to share across all episodes
 
@@ -159,23 +157,6 @@ def _is_fight_auto_execution_allowed(game_state: Dict[str, Any]) -> bool:
     raise ValueError(f"Unsupported current_mode_code for fight auto execution: {mode_code}")
 
 
-def _fight_verbose_debug_enabled() -> bool:
-    """Actif si ``W40K_FIGHT_DEBUG`` vaut 1/true/yes/on (trace fight détaillée)."""
-    v = os.environ.get("W40K_FIGHT_DEBUG", "").strip().lower()
-    return v in ("1", "true", "yes", "on")
-
-
-def _fight_verbose_trace(message: str) -> None:
-    """
-    Trace fight détaillée : **stderr uniquement**, indépendant de ``game_state['debug_mode']``
-    et de ``console_logs`` (piste A : ne pas mélanger avec le debug training).
-    """
-    if not _fight_verbose_debug_enabled():
-        return
-    sys.stderr.write(message + "\n")
-    sys.stderr.flush()
-
-
 def _is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
     """Return True if unit coordinates are inside any objective hex.
 
@@ -183,39 +164,6 @@ def _is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> b
     _on_objective s applique aux deux phases)."""
     return shared_is_unit_on_objective(unit, game_state)
 
-
-def _append_fight_nb_roll_info_log(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    weapon: Dict[str, Any],
-    nb_roll: int
-) -> None:
-    """
-    Append informational log line for randomized melee attack count rolls.
-    """
-    nb_value = require_key(weapon, "NB")
-    if not isinstance(nb_value, str):
-        return
-
-    unit_id = require_key(unit, "id")
-    unit_col, unit_row = require_unit_position(unit, game_state)
-    weapon_name = str(require_key(weapon, "display_name"))
-
-    if "action_logs" not in game_state:
-        game_state["action_logs"] = []
-    append_action_log(
-        game_state,
-        {
-            "type": "roll_info",
-            "phase": "FIGHT",
-            "player": require_key(unit, "player"),
-            "unitId": unit_id,
-            "message": (
-                f"Unit {unit_id}({unit_col},{unit_row}) FIGHTS with [{weapon_name}]. "
-                f"Number of attacks ({nb_value}): {nb_roll}"
-            ),
-        },
-    )
 
 def _remove_dead_unit_from_fight_pools(game_state: Dict[str, Any], unit_id: str) -> None:
     """
@@ -279,11 +227,11 @@ def _fight_unit_is_hex_adjacent_to_enemy_footprint(game_state: Dict[str, Any], u
     « Collé » : au moins un hex de l'empreinte partage un bord avec un hex d'empreinte ennemie
     (distance minimale entre empreintes == 1).
     """
-    unit_col, unit_row = require_unit_position(unit, game_state)
-    units_cache = require_key(game_state, "units_cache")
     unit_id_str = str(unit["id"])
-    unit_entry = units_cache.get(unit_id_str)
-    unit_fp = entry_footprint(unit_entry) if unit_entry else {(unit_col, unit_row)}
+    unit_entry = require_unit_from_cache(
+        unit_id_str, game_state, "_fight_unit_is_hex_adjacent_to_enemy_footprint"
+    )
+    unit_fp = entry_footprint(unit_entry)
 
     return _fight_footprint_has_enemy_hex_contact(game_state, unit, unit_fp)
 
@@ -293,14 +241,21 @@ def _fight_pile_in_closest_enemy_snapshot(
 ) -> Tuple[int, List[str]]:
     """
     Retourne (d_min, ids des unités ennemies dont l'empreinte est à distance minimale d_min).
+
+    CONTRAT DE SORTIE, sur lequel s'appuient tous les consommateurs du palier : les ids rendus
+    sont lus dans ``units_cache`` (via ``enemy_entries_on_battlefield``), donc chacun y est
+    présent. Un consommateur qui n'en retrouve pas un constate une désynchronisation, pas un
+    palier vide — c'est pourquoi ils lèvent (``require_unit_from_cache``) au lieu de le sauter.
     """
     from engine.hex_utils import min_distance_between_sets
 
-    unit_col, unit_row = require_unit_position(unit, game_state)
     units_cache = require_key(game_state, "units_cache")
     unit_id_str = str(unit["id"])
-    unit_entry = units_cache.get(unit_id_str)
-    unit_fp = entry_footprint(unit_entry) if unit_entry else {(unit_col, unit_row)}
+    unit_entry = require_unit_from_cache(
+        unit_id_str, game_state, "_fight_pile_in_closest_enemy_snapshot"
+    )
+    unit_col, unit_row = int(unit_entry["col"]), int(unit_entry["row"])
+    unit_fp = entry_footprint(unit_entry)
     unit_player = int(unit["player"]) if unit["player"] is not None else None
 
     d_cap: Optional[int] = None
@@ -351,12 +306,13 @@ def _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
 
     enemy_fps = closest_enemy_fps
     if enemy_fps is None:
-        units_cache = require_key(game_state, "units_cache")
         enemy_fps = []
         for eid in closest_ids:
-            ce = units_cache.get(str(eid))
-            if not ce:
-                continue
+            # Contrat de sortie de `_fight_pile_in_closest_enemy_snapshot` (cf. son docstring).
+            # Sauter une empreinte relâchait la contrainte WHILE 12.03 sans le dire.
+            ce = require_unit_from_cache(
+                str(eid), game_state, "_fight_pile_in_new_fp_strictly_closer_to_closest_tier"
+            )
             enemy_fps.append(entry_footprint(ce))
     radius = d_min - 1
     for efp in enemy_fps:
@@ -364,388 +320,6 @@ def _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
         if d <= radius:
             return True
     return False
-
-
-def _fight_pile_in_anchor_adjacent_to_enemy_footprint(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    anchor_col: int,
-    anchor_row: int,
-    target_ids: Optional[List[str]] = None,
-    *,
-    candidate_footprint: Optional[Set[Tuple[int, int]]] = None,
-) -> bool:
-    """
-    True si l'empreinte à cette ancre est dans la zone d'engagement d'une cible.
-
-    Pour deux socles ronds, "adjacent" signifie collé bord-à-bord, pas simplement
-    dans la zone d'engagement (10 sous-hexes autour de l'empreinte).
-    """
-    from engine.hex_utils import (
-        euclidean_edge_clearance_round_round,
-        min_distance_between_sets,
-    )
-    from engine.spatial_relations import get_engagement_zone
-
-    candidate_fp = candidate_footprint
-    if candidate_fp is None:
-        candidate_fp = compute_candidate_footprint(int(anchor_col), int(anchor_row), unit, game_state)
-    units_cache = require_key(game_state, "units_cache")
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
-    unit_id_str = str(unit["id"])
-    target_filter = {str(t) for t in target_ids} if target_ids is not None else None
-    cc_range = get_engagement_zone(game_state)
-    unit_shape = unit["BASE_SHAPE"]
-    unit_base_size = unit["BASE_SIZE"]
-    for enemy_id, cache_entry in enemy_entries_on_battlefield(
-        units_cache, unit_player, exclude_id=unit_id_str
-    ):
-        if target_filter is not None and str(enemy_id) not in target_filter:
-            continue
-        enemy_fp = entry_footprint(cache_entry)
-        enemy_shape = cache_entry["BASE_SHAPE"]
-        enemy_base_size = cache_entry["BASE_SIZE"]
-        if (
-            unit_shape == "round"
-            and enemy_shape == "round"
-            and isinstance(unit_base_size, int)
-            and isinstance(enemy_base_size, int)
-        ):
-            gap = euclidean_edge_clearance_round_round(
-                int(anchor_col),
-                int(anchor_row),
-                unit_base_size,
-                int(cache_entry["col"]),
-                int(cache_entry["row"]),
-                enemy_base_size,
-            )
-            # Le non-chevauchement est déjà garanti par is_footprint_placement_valid
-            # lors de la construction du pool. Ici "adjacent" = bord-à-bord collé,
-            # pas "dans la zone d'engagement".
-            if gap <= _ADJACENT_EDGE_GAP_TOLERANCE_NORM:
-                return True
-            continue
-        if min_distance_between_sets(candidate_fp, enemy_fp, max_distance=cc_range) <= cc_range:
-            return True
-    return False
-
-
-def _fight_pile_in_bfs_numpy(
-    board_cols: int,
-    board_rows: int,
-    start_col: int,
-    start_row: int,
-    bfs_max: int,
-    off_even_arr: "Any",
-    off_odd_arr: "Any",
-    obstacles: Set[Tuple[int, int]],
-    closer_shell_union: Set[Tuple[int, int]],
-) -> List[Tuple[int, int]]:
-    """Numpy-vectorised BFS for fight pile-in (multi-hex units on ×10 boards).
-
-    Operates on a subgrid [c0..c1] × [r0..r1] centered on start to minimise
-    array size and speed up dilation/spread operations.
-    """
-    import numpy as np
-
-    # Subgrid: BFS radius + footprint radius (max footprint offset + 1)
-    fp_radius = max(
-        int(np.abs(off_even_arr).max()),
-        int(np.abs(off_odd_arr).max()),
-    ) + 1
-    margin = bfs_max + fp_radius + 1
-    c0 = max(0, start_col - margin); c1 = min(board_cols, start_col + margin + 1)
-    r0 = max(0, start_row - margin); r1 = min(board_rows, start_row + margin + 1)
-    W = c1 - c0; H = r1 - r0
-
-    # Local coordinates
-    sc = start_col - c0; sr = start_row - r0
-
-    # Local parity depends on absolute column index
-    col_is_even = ((np.arange(c0, c1, dtype=np.int64)) & 1) == 0
-    col_parity_mask = np.broadcast_to(col_is_even[:, None], (W, H)).copy()
-
-    def _spread(src: "np.ndarray", kernel: "np.ndarray") -> "np.ndarray":
-        out = np.zeros_like(src)
-        for dc, dr in kernel:
-            sl = max(0, -int(dc)); sh = W - max(0, int(dc))
-            rl = max(0, -int(dr)); rh = H - max(0, int(dr))
-            if sl >= sh or rl >= rh:
-                continue
-            out[sl + int(dc):sh + int(dc), rl + int(dr):rh + int(dr)] |= src[sl:sh, rl:rh]
-        return out
-
-    def _dilate(src: "np.ndarray", kernel: "np.ndarray") -> "np.ndarray":
-        out = np.zeros_like(src)
-        for dc, dr in kernel:
-            sl = max(0, int(dc)); sh = W - max(0, -int(dc))
-            rl = max(0, int(dr)); rh = H - max(0, -int(dr))
-            if sl >= sh or rl >= rh:
-                continue
-            out[sl - int(dc):sh - int(dc), rl - int(dr):rh - int(dr)] |= src[sl:sh, rl:rh]
-        return out
-
-    def _mask_from(cells: Set[Tuple[int, int]]) -> "np.ndarray":
-        m = np.zeros((W, H), dtype=bool)
-        if not cells:
-            return m
-        cs = np.fromiter((c - c0 for c, _ in cells), dtype=np.int64, count=len(cells))
-        rs = np.fromiter((r - r0 for _, r in cells), dtype=np.int64, count=len(cells))
-        valid = (cs >= 0) & (cs < W) & (rs >= 0) & (rs < H)
-        m[cs[valid], rs[valid]] = True
-        return m
-
-    nb_even = np.array([(0,-1),(1,-1),(1,0),(0,1),(-1,0),(-1,-1)], dtype=np.int64)
-    nb_odd  = np.array([(0,-1),(1,0),(1,1),(0,1),(-1,1),(-1,0)],   dtype=np.int64)
-
-    # bad_placement[lc, lr] = footprint at absolute (lc+c0, lr+r0) overlaps obstacles or OOB
-    obs_mask = _mask_from(obstacles)
-    bad_e = _dilate(obs_mask, off_even_arr)
-    bad_o = _dilate(obs_mask, off_odd_arr)
-    bad_placement = np.where(col_parity_mask, bad_e, bad_o)
-    # OOB: anchor (c, r) is OOB if any footprint cell falls outside the full board
-    min_dc_e = int(off_even_arr[:, 0].min()); max_dc_e = int(off_even_arr[:, 0].max())
-    min_dr_e = int(off_even_arr[:, 1].min()); max_dr_e = int(off_even_arr[:, 1].max())
-    min_dc_o = int(off_odd_arr[:, 0].min());  max_dc_o = int(off_odd_arr[:, 0].max())
-    min_dr_o = int(off_odd_arr[:, 1].min());  max_dr_o = int(off_odd_arr[:, 1].max())
-    abs_cols = np.arange(c0, c1, dtype=np.int64)[:, None]
-    abs_rows = np.arange(r0, r1, dtype=np.int64)[None, :]
-    oob_e = ((abs_cols + min_dc_e < 0) | (abs_cols + max_dc_e >= board_cols) |
-             (abs_rows + min_dr_e < 0) | (abs_rows + max_dr_e >= board_rows))
-    oob_o = ((abs_cols + min_dc_o < 0) | (abs_cols + max_dc_o >= board_cols) |
-             (abs_rows + min_dr_o < 0) | (abs_rows + max_dr_o >= board_rows))
-    bad_placement |= np.where(col_parity_mask, oob_e, oob_o)
-    allowed = ~bad_placement
-    allowed[sc, sr] = True
-
-    # in_shell[lc, lr] = footprint at that anchor overlaps closer_shell_union
-    shell_mask = _mask_from(closer_shell_union)
-    in_shell_e = _dilate(shell_mask, off_even_arr)
-    in_shell_o = _dilate(shell_mask, off_odd_arr)
-    in_shell = np.where(col_parity_mask, in_shell_e, in_shell_o)
-
-    # BFS spread within the subgrid
-    reach = np.zeros((W, H), dtype=bool)
-    reach[sc, sr] = True
-    for _ in range(bfs_max):
-        even_src = reach & col_parity_mask
-        odd_src  = reach & ~col_parity_mask
-        new_reach = reach | (_spread(even_src, nb_even) & allowed) | (_spread(odd_src, nb_odd) & allowed)
-        if np.array_equal(new_reach, reach):
-            break
-        reach = new_reach
-
-    valid_mask = reach & allowed & in_shell
-    valid_mask[sc, sr] = False
-
-    lc, lr = np.where(valid_mask)
-    return [(int(c + c0), int(r + r0)) for c, r in zip(lc, lr)]
-
-
-def _fight_build_pile_in_valid_destinations(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    d_min: int,
-    closest_ids: List[str],
-    contact_target_ids: List[str],
-) -> List[Tuple[int, int]]:
-    """
-    BFS jusqu'à 3\" (× inches_to_subhex) : mêmes contraintes de placement que charge
-    (empreinte légale, pas chevauchement), avec fin strictement plus proche d'une cible du palier d'activation.
-
-    Si au moins une ancre valide permet de finir au **même contact bord-à-bord / empreinte**
-    que ``_fight_pile_in_anchor_adjacent_to_enemy_footprint`` vs une cible CC éligible **ou**
-    une unité du palier ``closest_ids`` (même sémantique que la consolidation « contact »), seules
-    ces ancres sont proposées. Sinon repli sur toutes les ancres strictement plus proches.
-
-    PERF : si ``d_min <= 1``, aucune ancre ne peut être strictement plus proche sans overlap ;
-    retour immédiat sans BFS. Empreintes des destinations valides réutilisées pour le filtre contact.
-    """
-    if d_min <= 1:
-        return []
-
-    scale = game_state["inches_to_subhex"]
-    bfs_max = 3 * scale
-
-    unit_id_str = str(unit["id"])
-    start_col, start_row = require_unit_position(unit, game_state)
-    start_pos = (start_col, start_row)
-
-    occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
-
-    _bfs_board_cols = int(require_key(game_state, "board_cols"))
-    _bfs_board_rows = int(require_key(game_state, "board_rows"))
-    _bfs_wall_hexes: Set[Tuple[int, int]] = game_state.get("wall_hexes", set())
-
-    from engine.hex_utils import precompute_footprint_offsets
-    from engine.spatial_relations import geometry_is_hex
-
-    # Socle mono-hex : géométrie hex (x1, `geometry_is_hex` — 1 fig = 1 case) ou socle de taille 1.
-    # Le prédicat était `ez <= 1`, qui ne désigne plus le x1 depuis que l'EZ vaut 2".
-    _bfs_base_size = unit["BASE_SIZE"]
-    _bfs_single_hex = (geometry_is_hex(game_state) or _bfs_base_size == 1)
-    _bfs_off_e: Tuple[Tuple[int, int], ...] = ()
-    _bfs_off_o: Tuple[Tuple[int, int], ...] = ()
-
-    if not _bfs_single_hex:
-        _bfs_shape = unit["BASE_SHAPE"]
-        _bfs_orient = int(unit["orientation"])
-        _bfs_off_e, _bfs_off_o = precompute_footprint_offsets(_bfs_shape, _bfs_base_size, _bfs_orient)
-
-    # Precompute closer_shell_union: union of all hexes within (d_min-1) hex steps
-    # from any closest enemy footprint.
-    units_cache_pre = require_key(game_state, "units_cache")
-    closest_enemy_fps_pre: List[Set[Tuple[int, int]]] = []
-    for eid in closest_ids:
-        ce = units_cache_pre.get(str(eid))
-        if ce:
-            closest_enemy_fps_pre.append(entry_footprint(ce))
-    closer_shell_union: Set[Tuple[int, int]] = set()
-    if closest_enemy_fps_pre and d_min > 1:
-        seed: Set[Tuple[int, int]] = set()
-        for efp in closest_enemy_fps_pre:
-            seed.update(efp)
-        shell_visited = set(seed)
-        frontier = list(seed)
-        for _ in range(d_min - 1):
-            next_frontier: List[Tuple[int, int]] = []
-            for c, r in frontier:
-                for nc, nr in get_hex_neighbors(c, r):
-                    if (nc, nr) not in shell_visited:
-                        shell_visited.add((nc, nr))
-                        next_frontier.append((nc, nr))
-            frontier = next_frontier
-        closer_shell_union = shell_visited
-
-    # For multi-hex units on large boards, use numpy-vectorised BFS (avoids per-position set construction)
-    import numpy as np
-    _use_numpy = (not _bfs_single_hex and _bfs_off_e and _bfs_off_o and
-                  _bfs_board_cols * _bfs_board_rows >= 10000)
-    if _use_numpy:
-        import numpy as np
-        _off_e_arr = np.asarray(_bfs_off_e, dtype=np.int64).reshape(-1, 2)
-        _off_o_arr = np.asarray(_bfs_off_o, dtype=np.int64).reshape(-1, 2)
-        obstacles = _bfs_wall_hexes | occupied_positions
-        valid_destinations = _fight_pile_in_bfs_numpy(
-            _bfs_board_cols, _bfs_board_rows,
-            start_col, start_row, bfs_max,
-            _off_e_arr, _off_o_arr,
-            obstacles, closer_shell_union,
-        )
-        pile_in_fp_by_anchor: Dict[Tuple[int, int], Set[Tuple[int, int]]] = {}
-        for vc, vr in valid_destinations:
-            _offs = _bfs_off_e if (vc & 1) == 0 else _bfs_off_o
-            pile_in_fp_by_anchor[(vc, vr)] = {(vc + dc, vr + dr) for dc, dr in _offs}
-    else:
-        _closer_shell: Optional[Set[Tuple[int, int]]] = closer_shell_union if closer_shell_union else None
-        _bfs_bbox_e: Optional[Tuple[int, int, int, int]] = None
-        _bfs_bbox_o: Optional[Tuple[int, int, int, int]] = None
-        if not _bfs_single_hex and _bfs_off_e:
-            _bfs_bbox_e = (min(dc for dc, dr in _bfs_off_e), max(dc for dc, dr in _bfs_off_e),
-                           min(dr for dc, dr in _bfs_off_e), max(dr for dc, dr in _bfs_off_e))
-        if not _bfs_single_hex and _bfs_off_o:
-            _bfs_bbox_o = (min(dc for dc, dr in _bfs_off_o), max(dc for dc, dr in _bfs_off_o),
-                           min(dr for dc, dr in _bfs_off_o), max(dr for dc, dr in _bfs_off_o))
-        visited: Dict[Tuple[int, int], int] = {start_pos: 0}
-        queue = deque([(start_pos, 0)])
-        valid_destinations = []
-        pile_in_fp_by_anchor = {}
-
-        while queue:
-            current_pos, current_dist = queue.popleft()
-            current_col, current_row = current_pos
-            if current_dist >= bfs_max:
-                continue
-            neighbor_dist = current_dist + 1
-            for neighbor_col, neighbor_row in get_hex_neighbors(current_col, current_row):
-                neighbor_pos = (neighbor_col, neighbor_row)
-                if neighbor_pos in visited:
-                    continue
-                if _bfs_single_hex:
-                    if (neighbor_col < 0 or neighbor_row < 0 or
-                            neighbor_col >= _bfs_board_cols or neighbor_row >= _bfs_board_rows):
-                        continue
-                    if neighbor_pos in _bfs_wall_hexes or neighbor_pos in occupied_positions:
-                        continue
-                    visited[neighbor_pos] = neighbor_dist
-                    queue.append((neighbor_pos, neighbor_dist))
-                    if neighbor_pos == start_pos:
-                        continue
-                    if _closer_shell is not None and neighbor_pos not in _closer_shell:
-                        continue
-                    valid_destinations.append(neighbor_pos)
-                    pile_in_fp_by_anchor[neighbor_pos] = {neighbor_pos}
-                else:
-                    _bbox = _bfs_bbox_e if (neighbor_col & 1) == 0 else _bfs_bbox_o
-                    if _bbox is not None:
-                        _min_dc, _max_dc, _min_dr, _max_dr = _bbox
-                        if (neighbor_col + _min_dc < 0 or
-                                neighbor_col + _max_dc >= _bfs_board_cols or
-                                neighbor_row + _min_dr < 0 or
-                                neighbor_row + _max_dr >= _bfs_board_rows):
-                            visited[neighbor_pos] = neighbor_dist
-                            continue
-                    _offs = _bfs_off_e if (neighbor_col & 1) == 0 else _bfs_off_o
-                    candidate_fp: Set[Tuple[int, int]] = {(neighbor_col + dc, neighbor_row + dr) for dc, dr in _offs}
-                    if _bfs_wall_hexes and (candidate_fp & _bfs_wall_hexes):
-                        visited[neighbor_pos] = neighbor_dist
-                        continue
-                    if occupied_positions and (candidate_fp & occupied_positions):
-                        visited[neighbor_pos] = neighbor_dist
-                        continue
-                    visited[neighbor_pos] = neighbor_dist
-                    queue.append((neighbor_pos, neighbor_dist))
-                    if neighbor_pos == start_pos:
-                        continue
-                    if _closer_shell is not None and not (candidate_fp & _closer_shell):
-                        continue
-                    valid_destinations.append(neighbor_pos)
-                    pile_in_fp_by_anchor[neighbor_pos] = candidate_fp
-
-    if not contact_target_ids:
-        return valid_destinations
-    # Cibles pour le test « contact » : CC éligibles + palier distance minimale (pile-in GW :
-    # se rapprocher du plus proche ; évite un repli non-collé alors qu'un contact avec ce palier existe).
-    contact_filter = sorted(
-        {str(x) for x in contact_target_ids} | {str(x) for x in closest_ids}
-    )
-    contact_destinations = [
-        p
-        for p in valid_destinations
-        if _fight_pile_in_anchor_adjacent_to_enemy_footprint(
-            game_state,
-            unit,
-            p[0],
-            p[1],
-            contact_filter,
-            candidate_footprint=pile_in_fp_by_anchor[p],
-        )
-    ]
-    if contact_destinations:
-        return contact_destinations
-    return valid_destinations
-
-
-def _fight_compute_pile_in_footprint_zone(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    valid_anchors: List[Tuple[int, int]],
-) -> Set[Tuple[int, int]]:
-    """
-    Union des hexes occupés par l'empreinte à chaque ancre valide + empreinte actuelle.
-    Aligné sur l'idée de ``move_preview_footprint_zone`` (phase move).
-    """
-    zone: Set[Tuple[int, int]] = set()
-    for ac, ar in valid_anchors:
-        fp = compute_candidate_footprint(int(ac), int(ar), unit, game_state)
-        zone.update(fp)
-    unit_id_str = str(unit["id"])
-    start_col, start_row = require_unit_position(unit, game_state)
-    units_cache = require_key(game_state, "units_cache")
-    cache_entry = units_cache.get(unit_id_str)
-    cur_fp = entry_footprint(cache_entry) if cache_entry else {(start_col, start_row)}
-    zone.update(cur_fp)
-    return zone
 
 
 def _fight_apply_pile_in_move(
@@ -855,15 +429,6 @@ def _append_fight_move_log(
             "moveDetails": move_details,
         },
     )
-
-
-def _fight_clear_consolidation_state(game_state: Dict[str, Any]) -> None:
-    game_state.pop("fight_consolidation_pending", None)
-    game_state.pop("valid_consolidation_destinations", None)
-    game_state.pop("fight_consolidation_footprint_zone", None)
-    game_state.pop("fight_consolidation_footprint_mask_loops", None)
-    game_state.pop("fight_consolidation_branch", None)
-    game_state.pop("_fight_consolidation_ctx", None)
 
 
 def _fight_effective_level_at(
@@ -990,21 +555,6 @@ def _fight_synth_cache_entry_at_footprint(
     return out
 
 
-def _fight_footprint_in_engagement_with_any_enemy(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    anchor_col: int,
-    anchor_row: int,
-    candidate_fp: Set[Tuple[int, int]],
-) -> bool:
-    """True si l'empreinte candidate est en zone d'engagement (contrat ``spatial_relations``) avec ≥1 ennemi."""
-    return _fight_entry_in_engagement_with_any_enemy(
-        game_state,
-        unit,
-        _fight_synth_cache_entry_at_footprint(unit, game_state, anchor_col, anchor_row, candidate_fp),
-    )
-
-
 def _fight_entry_in_engagement_with_any_enemy(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -1026,16 +576,6 @@ def _fight_entry_in_engagement_with_any_enemy(
         if unit_entries_within_engagement_zone(synth, ce, ez):
             return True
     return False
-
-
-def _fight_consolidation_unit_engaged_with_any_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
-    """True si l'unité est en zone d'engagement (contrat B) d'au moins un ennemi — pas de consolidation objectif."""
-    from engine.spatial_relations import get_engagement_zone, unit_within_engagement_zone_footprints
-
-    cc_range = get_engagement_zone(game_state)
-    return unit_within_engagement_zone_footprints(
-        game_state, unit, engagement_zone=cc_range, max_distance=cc_range,
-    )
 
 
 def _fight_prepare_footprint_offsets(
@@ -1094,18 +634,6 @@ def _candidate_footprint_fight(
         offs = off_e if (center_col & 1) == 0 else off_o
         return {(center_col + dc, center_row + dr) for dc, dr in offs}
     return compute_candidate_footprint(center_col, center_row, unit, game_state)
-
-
-def _fight_unit_positions_for_observation_builder(game_state: Dict[str, Any]) -> Dict[str, Tuple[int, int]]:
-    """Positions ancre pour ``ObservationBuilder._target_priority_score`` (unités vivantes uniquement)."""
-    positions: Dict[str, Tuple[int, int]] = {}
-    for u in require_key(game_state, "units"):
-        uid = str(require_key(u, "id"))
-        if not is_unit_alive(uid, game_state):
-            continue
-        positions[uid] = require_unit_position(u, game_state)
-    return positions
-
 
 
 def _fight_bfs_reachable_anchors_consolidation(
@@ -1191,271 +719,11 @@ def _fight_fp_has_adjacent_enemy_footprint(
     """
     Contact **A** strict (empreintes : ``min_distance_between_sets`` ≤ 1).
 
-    Pour le palier « contact » **consolidation** / cohérence pile-in (rond↔rond bord-à-bord),
-    utiliser ``_fight_pile_in_anchor_adjacent_to_enemy_footprint`` avec l'ancre et l'empreinte.
+    Le renvoi qui figurait ici vers un jumeau par-ancre a disparu avec lui le 2026-08-05 (code
+    mort). Le contact rond↔rond bord-à-bord se mesure par ``unit_entries_within_engagement_zone``
+    (``engine/spatial_relations.py``), primitive unique du moteur.
     """
     return _fight_footprint_has_enemy_hex_contact(game_state, unit, fp)
-
-
-def _fight_plan_consolidation_destinations(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-) -> Optional[Tuple[str, List[Tuple[int, int]], Dict[Tuple[int, int], int], Optional[List[str]]]]:
-    """
-    Consolidation après attaques (alignée pile-in + engagement ``spatial_relations``) :
-
-    - **Ennemis** : uniquement si la distance minimale empreinte → palier d'ennemis les plus proches
-      est **> 1** : BFS 3\", placement valide, rapprochement **strict** + engagement + préférence contact
-      (pile-in). Si la distance est déjà minimale (≤ 1, ex. adjacent au palier) : **aucune**
-      consolidation vers l'ennemi (impossible de se rapprocher davantage). **Pas** de consolidation
-      objectif tant que l'unité est **engagée** (zone d'engagement B).
-    - **Objectif** : uniquement si **non engagée** ; si consolidation vers une figurine ennemie
-      impossible (ou pas d'ennemi opposant),
-      rapprochement du **hex marqueur** (centre déclaré ``center`` / médiode des ``hexes`` si pas de
-      centre). Les autres hexes de la zone sont la **zone de contrôle** ; la consolidation vise à
-      diminuer la distance empreinte → marqueur (comme le pile-in vers un palier), pas seulement à
-      entrer dans la zone. Préférence si ex aequo : empreinte recouvrant le hex marqueur.
-    - **Aucune** consolidation si aucune branche ne fournit d'ancre utile (hors position de départ seule).
-    """
-    from engine.hex_utils import min_distance_between_sets
-    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
-
-    start_col, start_row = require_unit_position(unit, game_state)
-    start_pos = (start_col, start_row)
-    unit_id_str = str(require_key(unit, "id"))
-    _cons_pf = perf_timing_enabled(game_state)
-    has_enemy = _fight_opposing_enemies_exist(game_state, unit)
-
-    visited: Optional[Dict[Tuple[int, int], int]] = None
-    fp_by_anchor: Optional[Dict[Tuple[int, int], Set[Tuple[int, int]]]] = None
-
-    def _ensure_consolidation_bfs(start_footprint: Optional[Set[Tuple[int, int]]] = None) -> None:
-        nonlocal visited, fp_by_anchor
-        if visited is not None and fp_by_anchor is not None:
-            return
-        visited_out, fp_out = _fight_bfs_reachable_anchors_consolidation(
-            game_state, unit, start_footprint=start_footprint
-        )
-        visited = visited_out
-        fp_by_anchor = fp_out
-
-    if has_enemy:
-        _t_snapshot0 = time.perf_counter() if _cons_pf else None
-        start_d_min, closest_ids = _fight_pile_in_closest_enemy_snapshot(game_state, unit)
-        if _cons_pf and _t_snapshot0 is not None:
-            append_perf_timing_line(
-                f"FIGHT_CONSOLIDATION_SNAPSHOT unitId={unit_id_str!r} "
-                f"enemy_n={len(closest_ids)} d_min={start_d_min} "
-                f"snapshot_s={time.perf_counter() - _t_snapshot0:.6f}"
-            )
-        if start_d_min > 1:
-            _ensure_consolidation_bfs()
-            assert visited is not None and fp_by_anchor is not None
-            _t_enemy_filt0 = time.perf_counter() if _cons_pf else None
-            strict_enemy_calls_n = 0
-            engagement_calls_n = 0
-            distance_pair_eval_n = 0
-            strict_eval_s = 0.0
-            engagement_eval_s = 0.0
-            distance_eval_s = 0.0
-            shell_build_s = 0.0
-            units_cache = require_key(game_state, "units_cache")
-            closest_enemy_fps: List[Set[Tuple[int, int]]] = []
-            for enemy_id in closest_ids:
-                cache_entry = units_cache.get(str(enemy_id))
-                if not cache_entry:
-                    continue
-                closest_enemy_fps.append(entry_footprint(cache_entry))
-            _t_shell0 = time.perf_counter() if _cons_pf else None
-            closer_shell_union: Set[Tuple[int, int]] = set()
-            if closest_enemy_fps:
-                _seed: Set[Tuple[int, int]] = set()
-                for _efp in closest_enemy_fps:
-                    _seed.update(_efp)
-                _shell_visited = set(_seed)
-                _board_cols = game_state["board_cols"]
-                _board_rows = game_state["board_rows"]
-                _shell_frontier = [
-                    h for h in _seed
-                    if 0 <= h[0] < _board_cols and 0 <= h[1] < _board_rows
-                ]
-                for _ in range(start_d_min - 1):
-                    if not _shell_frontier:
-                        break
-                    _next: List[Tuple[int, int]] = []
-                    for _c, _r in _shell_frontier:
-                        for _nc, _nr in get_hex_neighbors(_c, _r):
-                            if (_nc, _nr) not in _shell_visited and 0 <= _nc < _board_cols and 0 <= _nr < _board_rows:
-                                _shell_visited.add((_nc, _nr))
-                                _next.append((_nc, _nr))
-                    _shell_frontier = _next
-                closer_shell_union = _shell_visited
-            shell_build_s = (time.perf_counter() - _t_shell0) if _t_shell0 is not None else 0.0
-            dist_by_anchor: List[Tuple[Tuple[int, int], int]] = []
-            for anchor in visited:
-                if anchor == start_pos:
-                    continue
-                if anchor not in fp_by_anchor:
-                    raise KeyError(
-                        "_fight_plan_consolidation_destinations: missing candidate footprint for anchor "
-                        f"{anchor!r} (BFS fp_by_anchor inconsistency)"
-                    )
-                fp = fp_by_anchor[anchor]
-                strict_enemy_calls_n += 1
-                if _cons_pf:
-                    _ts0 = time.perf_counter()
-                if not _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
-                    game_state,
-                    fp,
-                    start_d_min,
-                    closest_ids,
-                    closest_enemy_fps=closest_enemy_fps,
-                    closer_shell_union=closer_shell_union,
-                ):
-                    if _cons_pf:
-                        strict_eval_s += time.perf_counter() - _ts0
-                    continue
-                if _cons_pf:
-                    strict_eval_s += time.perf_counter() - _ts0
-                ac, ar = anchor
-                engagement_calls_n += 1
-                if _cons_pf:
-                    _te0 = time.perf_counter()
-                if not _fight_footprint_in_engagement_with_any_enemy(
-                    game_state, unit, int(ac), int(ar), fp
-                ):
-                    if _cons_pf:
-                        engagement_eval_s += time.perf_counter() - _te0
-                    continue
-                if _cons_pf:
-                    engagement_eval_s += time.perf_counter() - _te0
-                dmin: Optional[int] = None
-                for enemy_fp in closest_enemy_fps:
-                    if _cons_pf:
-                        _td0 = time.perf_counter()
-                    d = min_distance_between_sets(fp, enemy_fp)
-                    if _cons_pf:
-                        distance_eval_s += time.perf_counter() - _td0
-                    distance_pair_eval_n += 1
-                    if dmin is None or d < dmin:
-                        dmin = d
-                if dmin is None or dmin >= start_d_min:
-                    continue
-                dist_by_anchor.append((anchor, int(dmin)))
-            if _cons_pf and _t_enemy_filt0 is not None:
-                filter_s = time.perf_counter() - _t_enemy_filt0
-                tracked_s = strict_eval_s + engagement_eval_s + distance_eval_s
-                other_s = max(0.0, filter_s - tracked_s)
-                append_perf_timing_line(
-                    f"FIGHT_CONSOLIDATION_ENEMY_ANCHOR_FILTER unitId={unit_id_str!r} start_d_min={start_d_min} "
-                    f"visited_n={len(visited)} strict_closer_calls_n={strict_enemy_calls_n} "
-                    f"engagement_calls_n={engagement_calls_n} distance_pair_eval_n={distance_pair_eval_n} "
-                    f"shell_build_s={shell_build_s:.6f} strict_eval_s={strict_eval_s:.6f} "
-                    f"engagement_eval_s={engagement_eval_s:.6f} "
-                    f"distance_eval_s={distance_eval_s:.6f} other_filter_s={other_s:.6f} "
-                    f"filter_s={filter_s:.6f} candidates_n={len(dist_by_anchor)}"
-                )
-            if dist_by_anchor:
-                best_score = min(d for _, d in dist_by_anchor)
-                tier = [a for a, d in dist_by_anchor if d == best_score]
-                contact_tier: List[Tuple[int, int]] = []
-                for anchor in tier:
-                    ac, ar = anchor
-                    fp = fp_by_anchor[anchor]
-                    if _fight_pile_in_anchor_adjacent_to_enemy_footprint(
-                        game_state,
-                        unit,
-                        int(ac),
-                        int(ar),
-                        None,
-                        candidate_footprint=fp,
-                    ):
-                        contact_tier.append(anchor)
-                final_cands = contact_tier if contact_tier else tier
-                if not (len(final_cands) == 1 and final_cands[0] == start_pos):
-                    return ("enemy", final_cands, visited, list(closest_ids))
-
-    if _fight_consolidation_unit_engaged_with_any_enemy(game_state, unit):
-        return None
-
-    # Objectif (12.08 Objective Consolidation) : viser la ZONE DU TERRAIN (14.02 « within that
-    # terrain area »), PAS un marqueur central. Distance = empreinte → partie la plus proche de la
-    # zone (14.01). « within range si possible, sinon plus proche » → on minimise la distance
-    # empreinte→zone ; un anchor dont l'empreinte recouvre la zone a une distance 0 (within range)
-    # et sort donc naturellement comme meilleur. IA et PvP appliquent ainsi la même règle.
-    zone_sets = objective_hex_zones(game_state)
-    if not zone_sets:
-        return None
-
-    start_fp_obj = compute_candidate_footprint(start_col, start_row, unit, game_state)
-    zone_dists = [
-        (oid, hexes, min_distance_between_sets(start_fp_obj, hexes)) for oid, hexes in zone_sets
-    ]
-    start_d_obj = min(d for _, _, d in zone_dists)
-    if start_d_obj == 0:
-        return None  # déjà within range (≥1 figurine dans une zone) → rien à gagner
-
-    # Palier = hexes des objectifs les plus proches (ex aequo réunis), comme pour les ennemis.
-    target_zone_hexes: Set[Tuple[int, int]] = set()
-    for oid, hexes, d in zone_dists:
-        if d == start_d_obj:
-            target_zone_hexes |= hexes
-    if not target_zone_hexes:
-        return None
-
-    _ensure_consolidation_bfs(start_fp_obj)
-    assert visited is not None and fp_by_anchor is not None
-    _obj_pf = _cons_pf
-    _obj_uid = unit_id_str
-    _t_obj_filt0 = time.perf_counter() if _obj_pf else None
-    # Carte de distance BFS depuis la zone (bornée à start_d_obj-1 pas) — remplace le calcul
-    # par-anchor de min_distance_between_sets. d=0 sur les hexes de la zone (within range).
-    _OBJ_INF = 10 ** 9
-    _obj_dist_map: Dict[Tuple[int, int], int] = {h: 0 for h in target_zone_hexes}
-    _t_distmap0 = time.perf_counter() if _obj_pf else None
-    _obj_frontier: List[Tuple[int, int]] = list(target_zone_hexes)
-    for _mdist in range(1, start_d_obj):
-        _obj_next: List[Tuple[int, int]] = []
-        for _c, _r in _obj_frontier:
-            for _nc, _nr in get_hex_neighbors(_c, _r):
-                if (_nc, _nr) not in _obj_dist_map:
-                    _obj_dist_map[(_nc, _nr)] = _mdist
-                    _obj_next.append((_nc, _nr))
-        _obj_frontier = _obj_next
-        if not _obj_frontier:
-            break
-    dist_map_build_s = (time.perf_counter() - _t_distmap0) if _t_distmap0 is not None else 0.0
-    dist_by_anchor_obj: List[Tuple[Tuple[int, int], int]] = []
-    for anchor in visited:
-        if anchor == start_pos:
-            continue
-        if anchor not in fp_by_anchor:
-            raise KeyError(
-                "_fight_plan_consolidation_destinations: missing candidate footprint for anchor "
-                f"{anchor!r} (BFS fp_by_anchor inconsistency)"
-            )
-        fp = fp_by_anchor[anchor]
-        d_tier = min((_obj_dist_map.get(h, _OBJ_INF) for h in fp), default=_OBJ_INF)
-        if d_tier >= start_d_obj:
-            continue
-        dist_by_anchor_obj.append((anchor, int(d_tier)))
-    if _obj_pf and _t_obj_filt0 is not None:
-        filter_s = time.perf_counter() - _t_obj_filt0
-        loop_s = max(0.0, filter_s - dist_map_build_s)
-        append_perf_timing_line(
-            f"FIGHT_CONSOLIDATION_OBJ_ANCHOR_FILTER unitId={_obj_uid!r} start_d_obj={start_d_obj} "
-            f"visited_n={len(visited)} dist_map_build_s={dist_map_build_s:.6f} "
-            f"loop_s={loop_s:.6f} filter_s={filter_s:.6f}"
-        )
-    if not dist_by_anchor_obj:
-        return None
-    # Meilleur palier : distance minimale à la zone. d=0 = within range (recouvre la zone) → priorité
-    # naturelle. Plus de préférence « marqueur ».
-    best_o = min(d for _, d in dist_by_anchor_obj)
-    tier_o = [a for a, d in dist_by_anchor_obj if d == best_o]
-    if len(tier_o) == 1 and tier_o[0] == start_pos:
-        return None
-    return ("objective", tier_o, visited, None)
 
 
 def _fight_opposing_enemies_exist(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
@@ -1467,48 +735,6 @@ def _fight_opposing_enemies_exist(game_state: Dict[str, Any], unit: Dict[str, An
     ):
         return True
     return False
-
-
-def _ai_select_consolidation_destination(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    branch: str,
-    destinations: List[Tuple[int, int]],
-    visited: Dict[Tuple[int, int], int],
-    closest_enemy_ids: Optional[List[str]],
-) -> Tuple[int, int]:
-    """
-    Choisit l'ancre de consolidation : d'abord marche BFS minimale, puis en branche ennemie
-    tie-break via ``ObservationBuilder._target_priority_score`` (même contrat que l'observation).
-    """
-    if not destinations:
-        raise ValueError("_ai_select_consolidation_destination: empty destinations")
-    best_w = min(visited.get(a, 10**9) for a in destinations)
-    tier_walk = [a for a in destinations if visited.get(a, 10**9) == best_w]
-    if branch != "enemy" or not closest_enemy_ids:
-        return tier_walk[0]
-    from engine.observation_builder import ObservationBuilder
-
-    obs_builder = ObservationBuilder(require_key(game_state, "config"))
-    positions = _fight_unit_positions_for_observation_builder(game_state)
-    best_anchor = tier_walk[0]
-    best_score = float("-inf")
-    for anchor in tier_walk:
-        local_best = float("-inf")
-        for eid in closest_enemy_ids:
-            enemy_u = get_unit_by_id(game_state, str(eid))
-            if enemy_u is None or not is_unit_alive(str(eid), game_state):
-                continue
-            prio_tup = obs_builder._target_priority_score(enemy_u, unit, game_state, positions)
-            eff = -float(prio_tup[0])
-            if eff > local_best:
-                local_best = eff
-        if local_best > best_score or (
-            local_best == best_score and (anchor[0], anchor[1]) < (best_anchor[0], best_anchor[1])
-        ):
-            best_score = local_best
-            best_anchor = anchor
-    return best_anchor
 
 
 def _ai_select_pile_in_destination(
@@ -1527,12 +753,13 @@ def _ai_select_pile_in_destination(
 
     if not pile_dests:
         raise ValueError("_ai_select_pile_in_destination: empty pile_dests")
-    units_cache = require_key(game_state, "units_cache")
     tier_efps: List[Set[Tuple[int, int]]] = []
     for eid in closest_ids:
-        ce = units_cache.get(str(eid))
-        if not ce:
-            continue
+        # Contrat de sortie du palier. En sauter un faussait le score de la destination choisie
+        # par l'IA (une cible du palier disparaissait du tri).
+        ce = require_unit_from_cache(
+            str(eid), game_state, "_ai_select_pile_in_destination"
+        )
         tier_efps.append(entry_footprint(ce))
     best: Optional[Tuple[int, int]] = None
     best_score: Optional[int] = None
@@ -1786,10 +1013,12 @@ def _model_can_fight_target(
     champ "squad_id" — on ne le devine donc pas depuis le modele).
     """
     from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
-    units_cache = require_key(game_state, "units_cache")
-    target_entry = units_cache.get(str(target_squad_id))
-    if target_entry is None:
-        return False
+    # `declare_attack_model` (shared_utils) a DÉJÀ prouvé la cible vivante — via `squad_models` +
+    # `models_cache`, pas via `units_cache`. Un `return False` sur l'absence sortait donc sous le
+    # message « hors portee/engagement » : une désynchronisation déguisée en refus de règle.
+    target_entry = require_unit_from_cache(
+        str(target_squad_id), game_state, "_model_can_fight_target"
+    )
     if not attacker_squad_id:
         return False
     ez = get_engagement_zone(game_state)
@@ -2029,108 +1258,6 @@ def _fight_ensure_activation_started(game_state: Dict[str, Any], squad_id: str) 
         squad_fight_unit_activation_start(game_state, squad_id)
 
 
-def _fight_ensure_current_fight_nb(unit: Dict[str, Any], unit_id: Any) -> None:
-    """
-    If unit['_current_fight_nb'] is missing (e.g. stripped from serialized state),
-    recover the original NB as ATTACK_LEFT + _fight_attacks_executed.
-
-    Using ATTACK_LEFT alone is wrong mid-activation: it equals remaining attacks only,
-    so the cap check can fire one strike early.
-    """
-    if "_current_fight_nb" in unit:
-        return
-    if "_fight_attacks_executed" not in unit:
-        unit["_fight_attacks_executed"] = 0
-    al = require_key(unit, "ATTACK_LEFT")
-    if not isinstance(al, int):
-        raise TypeError(
-            f"unit['ATTACK_LEFT'] must be int when initializing _current_fight_nb, "
-            f"got {type(al).__name__}"
-        )
-    if al <= 0:
-        raise ValueError(
-            f"Cannot initialize _current_fight_nb with non-positive ATTACK_LEFT: "
-            f"{al} (unit_id={unit_id})"
-        )
-    k = unit["_fight_attacks_executed"]
-    if not isinstance(k, int):
-        raise TypeError(
-            f"unit['_fight_attacks_executed'] must be int, got {type(k).__name__}"
-        )
-    if k < 0:
-        raise ValueError(
-            f"unit['_fight_attacks_executed'] cannot be negative: {k} (unit_id={unit_id})"
-        )
-    total = al + k
-    if total <= 0:
-        raise ValueError(
-            f"Recovered _current_fight_nb must be > 0, got total={total} "
-            f"(ATTACK_LEFT={al}, _fight_attacks_executed={k}, unit_id={unit_id})"
-        )
-    unit["_current_fight_nb"] = total
-
-
-def _handle_fight_postpone(game_state: Dict[str, Any], unit: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-    """
-    Handle postpone action.
-
-    CRITICAL: Can ONLY postpone if ATTACK_LEFT = CC_NB (no attacks made yet)
-    If unit has already attacked, must complete activation.
-    """
-    unit_id = unit["id"]
-
-    # Check ATTACK_LEFT = weapon NB?
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon NB
-    if "ATTACK_LEFT" not in unit:
-        raise KeyError(f"Unit missing required 'ATTACK_LEFT' field: {unit}")
-    
-    from engine.utils.weapon_helpers import get_selected_melee_weapon
-    selected_weapon = get_selected_melee_weapon(unit)
-    if not selected_weapon:
-        return False, {"error": "no_melee_weapon", "unitId": unit["id"], "action": "combat"}
-    
-    if unit["ATTACK_LEFT"] == require_key(unit, "_current_fight_nb"):
-        # YES -> Postpone allowed
-        # Do NOT call end_activation - just return postpone signal
-        # Unit stays in pool for later activation
-        return True, {
-            "action": "postpone",
-            "unitId": unit_id,
-            "postpone_allowed": True
-        }
-    else:
-        # NO -> Must complete activation
-        return False, {
-            "error": "postpone_not_allowed",
-            "reason": "unit_has_already_attacked",
-            "ATTACK_LEFT": unit["ATTACK_LEFT"],
-            "CC_NB": unit["CC_NB"]
-        }
-
-
-def _calculate_save_target(target: Dict[str, Any], ap: int) -> int:
-    """Calculate save target with AP modifier and invulnerable save"""
-    # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-    if "ARMOR_SAVE" not in target:
-        raise KeyError(f"Target missing required 'ARMOR_SAVE' field: {target}")
-    if "INVUL_SAVE" not in target:
-        raise KeyError(f"Target missing required 'INVUL_SAVE' field: {target}")
-    armor_save = target["ARMOR_SAVE"]
-    invul_save = target["INVUL_SAVE"]
-    
-    # Apply AP to armor save (AP is negative, subtract to worsen save: 3+ with -1 AP = 4+)
-    modified_armor_save = armor_save - ap
-    
-    # Handle invulnerable saves: 0 means no invul save, use 7 (impossible)
-    effective_invul = invul_save if invul_save > 0 else 7
-    
-    # Use best available save (lower target number is better)
-    best_save = min(modified_armor_save, effective_invul)
-    
-    # Cap impossible saves at 7, minimum save is 2+
-    return max(2, min(best_save, 6))
-
-
 def _calculate_wound_target(strength: int, toughness: int) -> int:
     """EXACT COPY from 40k_OLD w40k_engine.py wound calculation"""
     if strength >= toughness * 2:
@@ -2337,9 +1464,10 @@ def pile_in_move_destinations_12_03(
     d_min_sel: Optional[int] = None
     closest_tier: List[str] = []
     for tid in target_ids:
-        ce = units_cache.get(str(tid))
-        if ce is None:
-            continue
+        # Cf. `_fight_pile_in_closest_tier_ids` : `target_ids` vient d'une énumération du cache.
+        ce = require_unit_from_cache(
+            str(tid), game_state, "pile_in_move_destinations_12_03/target"
+        )
         efp = entry_footprint(ce)
         d = min_distance_between_sets(unit_fp, efp)
         if d_min_sel is None or d < d_min_sel:
@@ -2351,15 +1479,17 @@ def pile_in_move_destinations_12_03(
         raise ValueError("pile_in_move_destinations_12_03: no live target footprints among target_ids")
 
     # Cible(s) la/les plus proche(s) — pour le palier WHILE « engaged with it if possible ».
-    closest_tier_entries = [
-        units_cache[str(tid)] for tid in closest_tier if str(tid) in units_cache
-    ]
+    # Les filtres `if str(tid) in units_cache` qui étaient ici étaient morts : `closest_tier` sort
+    # de la boucle ci-dessus (qui exige déjà chaque entrée) et `engaged_before` de
+    # `_fight_units_engaged_with`, qui n'énumère que le cache.
+    closest_tier_entries = [units_cache[str(tid)] for tid in closest_tier]
+    # PERF : empreintes du palier calculées UNE fois. Sans ce passage explicite,
+    # `_fight_pile_in_new_fp_strictly_closer_to_closest_tier` les relit par ANCRE visitée.
+    closest_tier_fps = [entry_footprint(e) for e in closest_tier_entries]
 
     # Unités ennemies engagées AVANT le move (à conserver après).
     engaged_before = _fight_units_engaged_with(game_state, unit)
-    engaged_before_entries = [
-        (eid, units_cache[str(eid)]) for eid in engaged_before if str(eid) in units_cache
-    ]
+    engaged_before_entries = [(eid, units_cache[str(eid)]) for eid in engaged_before]
 
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
@@ -2374,7 +1504,7 @@ def pile_in_move_destinations_12_03(
         ac, ar = anchor
         # WHILE : strictement plus proche de la cible de pile-in la plus proche.
         if not _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
-            game_state, fp, d_min_sel, closest_tier
+            game_state, fp, d_min_sel, closest_tier, closest_enemy_fps=closest_tier_fps
         ):
             continue
         # AFTER : l'unité doit finir engagée (avec au moins un ennemi). L'entrée synthétique de
@@ -3384,22 +2514,29 @@ def _fight_pile_in_closest_tier_ids(
     game_state: Dict[str, Any], unit: Dict[str, Any], target_ids: List[str]
 ) -> List[str]:
     """Sous-ensemble de ``target_ids`` au palier de distance minimale de l'empreinte de l'unité —
-    palier WHILE commun à toutes les figs (cf. ``pile_in_move_destinations_12_03``)."""
+    palier WHILE commun à toutes les figs (cf. ``pile_in_move_destinations_12_03``).
+
+    CONTRAT DE SORTIE, identique à ``_fight_pile_in_closest_enemy_snapshot`` : les ids rendus sont
+    tous présents dans ``units_cache`` (ils y ont été lus). Les consommateurs du palier lèvent donc
+    sur une absence au lieu de la sauter.
+    """
     from engine.hex_utils import min_distance_between_sets
 
-    units_cache = require_key(game_state, "units_cache")
     uid = str(require_key(unit, "id"))
-    entry = units_cache.get(uid)
-    if entry is None:
-        return []
+    entry = require_unit_from_cache(uid, game_state, "_fight_pile_in_closest_tier_ids")
     if not entry_is_on_battlefield(entry):
         return []
     unit_fp = set(entry_footprint(entry))
     d_min: Optional[int] = None
     tier: List[str] = []
     for tid in target_ids:
-        ce = units_cache.get(str(tid))
-        if ce is None or not entry_is_on_battlefield(ce):
+        # `target_ids` sort toujours d'une énumération de `units_cache`
+        # (`pile_in_targets_within_range` / `_fight_units_engaged_with`) : la sauter faisait
+        # disparaître une cible DÉCLARÉE du palier WHILE sans laisser de trace.
+        ce = require_unit_from_cache(
+            str(tid), game_state, "_fight_pile_in_closest_tier_ids/target"
+        )
+        if not entry_is_on_battlefield(ce):
             continue
         efp = set(entry_footprint(ce))
         d = min_distance_between_sets(unit_fp, efp)
@@ -3812,9 +2949,11 @@ def pile_in_autoplace_plan(
     # Palier WHILE : empreintes des cibles les plus proches de l'unité.
     tier_fps: List[Set[Tuple[int, int]]] = []
     for tid in closest_tier:
-        ce = units_cache.get(str(tid))
-        if ce is None:
-            continue
+        # Contrat de sortie de `_fight_pile_in_closest_tier_ids` : absence = désynchronisation,
+        # pas un palier vide.
+        ce = require_unit_from_cache(
+            str(tid), game_state, "pile_in_autoplace_plan/tier"
+        )
         tier_fps.append(set(entry_footprint(ce)))
 
     # Collision = test EUCLIDIEN officiel du jeu (``footprints_overlap`` : rond↔rond bord-à-bord
@@ -4346,34 +3485,6 @@ def _fight_v11_clear_pile_in_preview(game_state: Dict[str, Any]) -> None:
     game_state.pop("_fight_v11_pile_in_dests", None)
 
 
-def _fight_v11_pile_in_present(
-    game_state: Dict[str, Any], unit: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
-    """Prépare l'aperçu pile-in d'une unité (destinations ≤3" + footprint zone), exposé au front.
-    Retourne le dict résultat ``waiting_for_pile_in`` ou None si aucune destination utile."""
-    targets = _fight_v11_pile_in_targets(game_state, unit)
-    if not targets:
-        return None
-    dests = pile_in_move_destinations_12_03(game_state, unit, targets)
-    if not dests:
-        return None
-    uid = str(require_key(unit, "id"))
-    game_state["active_fight_unit"] = uid
-    # NB: fight_eligible_units (pool cliquable du front) est posé par l'appelant
-    # avec la liste COMPLÈTE du groupe éligible (libre choix de l'unité à piler),
-    # pas réduit à l'unité présentée.
-    game_state["fight_pile_in_footprint_zone"] = list(
-        _fight_compute_pile_in_footprint_zone(game_state, unit, dests)
-    )
-    game_state["_fight_v11_pile_in_dests"] = [(int(c), int(r)) for c, r in dests]
-    return {
-        "phase": "fight", "fight_subphase": "pile_in", "waiting_for_pile_in": True,
-        "valid_pile_in_destinations": [[int(c), int(r)] for c, r in dests],
-        "unitId": uid, "active_fight_unit": uid,
-        "waiting_for_player": True, "action": "wait",
-    }
-
-
 # =====================================================================
 # === V11 FIGHT PHASE — CONSOLIDATION par-figurine (12.08) ============
 # =====================================================================
@@ -4859,9 +3970,15 @@ def _fight_consolidation_preview_plan(
         selected = [str(e) for e in tier]
         engaged_with_all_selected = bool(selected)
         for eid in selected:
-            ce = units_cache.get(eid)
-            if ce is None or not unit_entries_within_engagement_zone(
-                synth_unit, ce, ez):
+            # `selected` vient de `tier`, c'est-à-dire de la SÉLECTION du joueur filtrée sur
+            # `_fight_v11_consolidation_engaging_candidates` — laquelle énumère `units_cache`.
+            # (Pas de `_fight_pile_in_closest_tier_ids` : le contrat tient, mais par cette
+            # source-là.) Confondre l'absence avec « pas engagé » refusait la consolidation
+            # sans le dire.
+            ce = require_unit_from_cache(
+                str(eid), game_state, "_fight_consolidation_preview_plan"
+            )
+            if not unit_entries_within_engagement_zone(synth_unit, ce, ez):
                 engaged_with_all_selected = False
                 break
         after_ok = engaged_with_all_selected

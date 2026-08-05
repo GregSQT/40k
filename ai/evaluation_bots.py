@@ -38,7 +38,7 @@ from engine.game_state import objective_hex_sets, unit_is_within_objective
 from engine.hex_utils import min_distance_between_sets
 from engine.phase_handlers.shared_utils import (
     is_unit_alive, get_hp_from_cache, is_unit_at_or_below_half_strength,
-    require_unit_position,
+    require_unit_position, require_unit_from_cache,
     compute_candidate_footprint, get_enemy_slot_mapping,
     # HORS TABLE (20.01) : VIVANTE n'est pas SUR LA TABLE. Les bots itèrent `game_state["units"]`
     # en ne filtrant que sur `is_unit_alive`, donc une réserve ennemie y entrait avec une
@@ -562,13 +562,14 @@ def _living_enemy_positions(unit, game_state):
             continue
         if not is_unit_alive(str(enemy["id"]), game_state):
             continue
-        entry = units_cache.get(str(enemy["id"]))
-        if entry is not None:
-            if not entry_is_on_battlefield(entry):
-                continue
-            positions.append((int(entry["col"]), int(entry["row"])))
-        else:
-            positions.append((int(enemy["col"]), int(enemy["row"])))
+        # `is_unit_alive` ci-dessus PROUVE la présence dans `units_cache` : la branche `else`
+        # était morte, et elle repliait sur le col/row de la DATASHEET — pas la source de vérité
+        # spatiale, donc une position potentiellement périmée. Même motif que les six autres
+        # sites de ce fichier, écrit sous une autre forme (d'où sa survie au premier grep).
+        entry = require_unit_from_cache(str(enemy["id"]), game_state, "_living_enemy_positions")
+        if not entry_is_on_battlefield(entry):
+            continue
+        positions.append((int(entry["col"]), int(entry["row"])))
     return positions
 
 
@@ -828,18 +829,19 @@ class DefensiveBot(_WeightedMover):
         threat_count = 0
         _scale = game_state["inches_to_subhex"]
         threat_range = 12 * _scale
-        units_cache = game_state["units_cache"]
-        unit_entry = units_cache.get(str(unit["id"]))
-        if unit_entry is not None and not entry_is_on_battlefield(unit_entry):
+        unit_entry = require_unit_from_cache(str(unit["id"]), game_state, "_count_nearby_threats")
+        if not entry_is_on_battlefield(unit_entry):
             return 0  # hors table : aucune menace ne l'atteint (20.01)
-        unit_fp = entry_footprint(unit_entry) if unit_entry else {(unit["col"], unit["row"])}
+        unit_fp = entry_footprint(unit_entry)
 
         for enemy in require_key(game_state, 'units'):
             if enemy['player'] != unit['player'] and is_unit_alive(str(enemy["id"]), game_state):
-                enemy_entry = units_cache.get(str(enemy["id"]))
-                if enemy_entry is not None and not entry_is_on_battlefield(enemy_entry):
+                enemy_entry = require_unit_from_cache(
+                    str(enemy["id"]), game_state, "_count_nearby_threats/enemy"
+                )
+                if not entry_is_on_battlefield(enemy_entry):
                     continue
-                enemy_fp = entry_footprint(enemy_entry) if enemy_entry else {(enemy["col"], enemy["row"])}
+                enemy_fp = entry_footprint(enemy_entry)
                 distance = min_distance_between_sets(unit_fp, enemy_fp, max_distance=threat_range)
                 if distance <= threat_range:
                     threat_count += 1
@@ -1459,18 +1461,19 @@ class TacticalBot(_WeightedMover):
         """Find nearest enemy unit."""
         nearest = None
         min_dist = float('inf')
-        units_cache = game_state["units_cache"]
-        unit_entry = units_cache.get(str(unit.get("id", "")))
-        if unit_entry is not None and not entry_is_on_battlefield(unit_entry):
+        unit_entry = require_unit_from_cache(str(unit["id"]), game_state, "_find_nearest_enemy")
+        if not entry_is_on_battlefield(unit_entry):
             return None  # hors table : pas de position d'où mesurer (20.01)
-        unit_fp = entry_footprint(unit_entry) if unit_entry else {(unit["col"], unit["row"])}
+        unit_fp = entry_footprint(unit_entry)
 
         for enemy in require_key(game_state, 'units'):
             if enemy.get('player') != unit.get('player') and is_unit_alive(str(enemy.get("id")), game_state):
-                enemy_entry = units_cache.get(str(enemy.get("id", "")))
-                if enemy_entry is not None and not entry_is_on_battlefield(enemy_entry):
+                enemy_entry = require_unit_from_cache(
+                    str(enemy["id"]), game_state, "_find_nearest_enemy/enemy"
+                )
+                if not entry_is_on_battlefield(enemy_entry):
                     continue
-                enemy_fp = entry_footprint(enemy_entry) if enemy_entry else {(enemy["col"], enemy["row"])}
+                enemy_fp = entry_footprint(enemy_entry)
                 dist = min_distance_between_sets(unit_fp, enemy_fp)
                 if dist < min_dist:
                     min_dist = dist
@@ -1487,7 +1490,6 @@ class TacticalBot(_WeightedMover):
         """
         best_pos = destinations[0]
         best_score = -float('inf')
-        units_cache = game_state["units_cache"]
         w_obj, _ = self._weights()
         centers, zones, hold_bonus = _objective_context(game_state)
 
@@ -1498,10 +1500,12 @@ class TacticalBot(_WeightedMover):
                 if enemy.get('player') != unit.get('player') and is_unit_alive(str(enemy.get("id")), game_state):
                     # Only consider melee threats
                     if get_max_melee_damage(enemy) > get_max_ranged_damage(enemy):
-                        enemy_entry = units_cache.get(str(enemy.get("id", "")))
-                        if enemy_entry is not None and not entry_is_on_battlefield(enemy_entry):
+                        enemy_entry = require_unit_from_cache(
+                            str(enemy["id"]), game_state, "_find_safest_position/enemy"
+                        )
+                        if not entry_is_on_battlefield(enemy_entry):
                             continue
-                        enemy_fp = entry_footprint(enemy_entry) if enemy_entry else {(enemy["col"], enemy["row"])}
+                        enemy_fp = entry_footprint(enemy_entry)
                         dist = min_distance_between_sets(unit_fp, enemy_fp)
                         min_enemy_dist = min(min_enemy_dist, dist)
 
@@ -1534,9 +1538,10 @@ class TacticalBot(_WeightedMover):
         from engine.utils.weapon_helpers import get_max_ranged_range
         rng_weapons = require_key(unit, 'RNG_WEAPONS')
         rng_rng = get_max_ranged_range(unit) if rng_weapons else 0
-        units_cache = game_state["units_cache"]
-        target_entry = units_cache.get(str(target.get("id", "")))
-        target_fp = entry_footprint(target_entry) if target_entry else {(target["col"], target["row"])}
+        target_entry = require_unit_from_cache(
+            str(target["id"]), game_state, "_find_best_offensive_position/target"
+        )
+        target_fp = entry_footprint(target_entry)
         w_obj, _ = self._weights()
         centers, zones, hold_bonus = _objective_context(game_state)
         best_pos = destinations[0]

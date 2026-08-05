@@ -1263,6 +1263,12 @@ def is_unit_alive(unit_id: str, game_state: Dict[str, Any]) -> bool:
     Check if a unit is alive (present in units_cache).
     
     units_cache contains ONLY living units; dead units are removed at end of action.
+
+    CONTRAT, sur lequel s'appuient les appelants qui lisent le cache juste après : un `True`
+    PROUVE la présence dans ``units_cache`` — c'est la définition même de ce prédicat. Un site
+    qui a passé cette garde peut donc utiliser ``require_unit_from_cache`` sans repli ; son
+    ``raise`` y est statiquement inatteignable tant que cette garde le précède, et c'est
+    l'intention (il reste comme invariant, pour le jour où l'ordre changera).
     
     Args:
         unit_id: Unit ID (str)
@@ -1693,11 +1699,15 @@ def check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any]
     
     units_cache = require_key(game_state, "units_cache")
     unit_by_id = {str(u["id"]): u for u in game_state["units"]}
-    # La cible aussi doit être posée : une escouade hors table ne peut pas être chargée (20.01).
-    # Absente du cache = détruite (invariant `remove_from_units_cache`), donc non chargeable non
-    # plus — même sortie, et c'est déjà ce que rendait `get_unit_position` en dessous.
-    target_entry = units_cache.get(str(require_key(target, "id")))
-    if target_entry is None or not entry_is_on_battlefield(target_entry):
+    # La cible doit être POSÉE : une escouade hors table ne peut pas être chargée (20.01) — c'est
+    # un refus de règle, il reste un `return False`.
+    # L'ABSENCE, elle, n'en est pas un : l'unique appelant (`calculate_target_priority_score`) a
+    # déjà appelé `require_hp_from_cache` sur cette même cible dix lignes plus haut, donc elle est
+    # dans le cache. Les fusionner rendait « pas chargeable » sur une désynchronisation.
+    target_entry = require_unit_from_cache(
+        str(require_key(target, "id")), game_state, "check_if_melee_can_charge"
+    )
+    if not entry_is_on_battlefield(target_entry):
         return False
     for unit_id, entry in entries_on_battlefield(units_cache):
         unit = unit_by_id.get(str(unit_id))
@@ -1946,16 +1956,6 @@ def _compute_enemy_adjacent_cache_for_player_from_units_cache(
     return counts, zone_hexes
 
 
-def _compute_enemy_adjacent_hexes_from_units_cache(
-    game_state: Dict[str, Any], player: int
-) -> Set[Tuple[int, int]]:
-    """Compute engagement-zone hexes directly from current units_cache snapshot."""
-    _, zone_hexes = _compute_enemy_adjacent_cache_for_player_from_units_cache(
-        game_state, player
-    )
-    return zone_hexes
-
-
 def _get_players_present_from_units_cache(game_state: Dict[str, Any]) -> Set[int]:
     """Return all player ids currently present in units_cache."""
     units_cache = require_key(game_state, "units_cache")
@@ -1970,34 +1970,6 @@ def _get_players_present_from_units_cache(game_state: Dict[str, Any]) -> Set[int
             ) from exc
         players_present.add(player_int)
     return players_present
-
-
-def _bounded_neighbors(
-    col: int, row: int, board_cols: int, board_rows: int
-) -> List[Tuple[int, int]]:
-    """Get in-bounds hex neighbors."""
-    neighbors: List[Tuple[int, int]] = []
-    for n_col, n_row in get_hex_neighbors(col, row):
-        if n_col < 0 or n_row < 0 or n_col >= board_cols or n_row >= board_rows:
-            continue
-        neighbors.append((n_col, n_row))
-    return neighbors
-
-
-def _footprint_external_neighbors(
-    occupied_hexes: Set[Tuple[int, int]],
-    board_cols: int,
-    board_rows: int,
-) -> List[Tuple[int, int]]:
-    """Return all in-bounds hexes adjacent to a footprint but not part of it."""
-    neighbor_set: Set[Tuple[int, int]] = set()
-    for hx_col, hx_row in occupied_hexes:
-        for n_col, n_row in get_hex_neighbors(hx_col, hx_row):
-            if n_col < 0 or n_row < 0 or n_col >= board_cols or n_row >= board_rows:
-                continue
-            if (n_col, n_row) not in occupied_hexes:
-                neighbor_set.add((n_col, n_row))
-    return list(neighbor_set)
 
 
 def _build_enemy_adjacent_structures_from_units_cache(
@@ -3306,8 +3278,12 @@ def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -
     Egalement met a jour occupation_map (reverse lookup cell -> unit_id).
     Idempotent. Pas d'effet si squad_id absent du units_cache.
     """
-    units_cache = game_state.get("units_cache", {})  # get allowed
-    entry = units_cache.get(squad_id)
+    # Absence = escouade DÉTRUITE, et il n'y a alors rien à recalculer : `remove_model_from_squad`
+    # et `update_units_cache_hp` retirent l'escouade du cache sans purger `models_cache`, donc le
+    # retrait d'une figurine d'une escouade déjà morte atteint réellement ce chemin. C'est un cas
+    # métier, pas un repli — à la différence du cache ABSENT, qui ne l'est pas.
+    units_cache = require_key(game_state, "units_cache")
+    entry = units_cache.get(squad_id)  # get allowed (escouade détruite = rien à recalculer)
     if entry is None:
         return
     models_cache = require_key(game_state, "models_cache")
@@ -5302,7 +5278,7 @@ def _hex_legal_for_charge(
     game_state: Dict[str, Any],
     squad_id: str,
     model_entry: Dict[str, Any],
-    target_squad_ids: List[str],
+    non_target_enemy_entries: List[Dict[str, Any]],
 ) -> bool:
     """Cellule valide pour le placement d une figurine en cours de charge :
        - dans le plateau
@@ -5319,23 +5295,24 @@ def _hex_legal_for_charge(
     if wall_hexes and cell in wall_hexes:
         return False
     # Collision : autres escouades (sauf nous-meme)
-    units_cache = game_state.get("units_cache", {})  # get allowed
+    # Cache absent : un `{}` de repli vidait l'énumération de collision, donc toute cellule
+    # devenait libre — un verdict inventé, sans bruit.
+    units_cache = require_key(game_state, "units_cache")
     for _sid, entry in entries_on_battlefield(units_cache, exclude_id=squad_id):
         if cell in entry_footprint(entry):
             return False
     # ER des escouades non-cibles (bord-a-bord) : la figurine candidate ne doit pas
     # finir dans l ER d un ennemi NON-cible.
+    # ``non_target_enemy_entries`` est un PARAMÈTRE, pas une énumération locale : cette fonction
+    # est appelée par CELLULE dans le BFS de charge (jusqu'à ~14 641 itérations par anneau, cf. le
+    # commentaire de `charge_build_valid_plan`), et la liste des ennemis non-ciblés est invariante
+    # sur tout le plan — `units_cache` n'est pas muté entre le début du plan et la fin des BFS.
+    # La construire ici, c'était un balayage COMPLET de `units_cache` (`_enemy_squad_ids`) plus un
+    # lookup par ennemi, à chaque cellule testée. L'appelant la résout une fois.
     from engine.spatial_relations import unit_entries_within_engagement_zone
-    our_player = int(units_cache.get(str(squad_id), {}).get("player", -1))  # get allowed
     ez = get_engagement_zone(game_state)
     synth = _synth_model_entry(game_state, str(squad_id), model_entry, col, row)
-    targets = {str(t) for t in target_squad_ids}
-    for esid in _enemy_squad_ids(game_state, our_player):
-        if esid in targets:
-            continue
-        enemy_entry = units_cache.get(esid)
-        if enemy_entry is None:
-            continue
+    for enemy_entry in non_target_enemy_entries:
         if unit_entries_within_engagement_zone(synth, enemy_entry, ez):
             return False
     return True
@@ -5444,12 +5421,30 @@ def charge_build_valid_plan(
 
     from engine.spatial_relations import unit_entries_within_engagement_zone
     ez = get_engagement_zone(game_state)
-    target_entries_by_id: List[Tuple[str, Dict[str, Any]]] = [
-        (str(t), te) for t, te in ((t, units_cache.get(str(t))) for t in target_squad_ids)
-        if te is not None
+    # Résolu UNE fois pour tout le plan et passé à `_hex_legal_for_charge`, qui est appelée par
+    # cellule dans les deux BFS ci-dessous. `charge_check_eligibility` a déjà prouvé l'escouade
+    # présente dans le cache.
+    _charger_player = int(require_key(
+        require_unit_from_cache(str(squad_id), game_state, "charge_build_valid_plan"), "player"
+    ))
+    # Ennemis NON-ciblés, résolus une seule fois pour tout le plan : `_hex_legal_for_charge` les
+    # réénumérait à chaque cellule de BFS. `_enemy_squad_ids` n'énumère que des ids lus dans
+    # `units_cache`, donc une absence est une désynchronisation (d'où le `require`), pas un
+    # ennemi disparu.
+    _declared_targets = {str(t) for t in target_squad_ids}
+    _non_target_enemies = [
+        require_unit_from_cache(esid, game_state, "charge_build_valid_plan/enemy")
+        for esid in _enemy_squad_ids(game_state, _charger_player)
+        if esid not in _declared_targets
     ]
-    if len(target_entries_by_id) != len(target_squad_ids):
-        return None  # une cible declaree n'est plus dans le cache (detruite) : plan invalide
+    # `charge_check_eligibility` (appelée en tête) a DÉJÀ refusé toute cible absente du cache ET
+    # toute cible hors table. Le filtre + le contrôle de longueur qui suivaient étaient donc morts,
+    # et ils rangeaient une désynchronisation sous le même « plan invalide » que la destruction —
+    # le piège §2 du lot charge (un refus de règle qui avale une erreur d'état).
+    target_entries_by_id: List[Tuple[str, Dict[str, Any]]] = [
+        (str(t), require_unit_from_cache(str(t), game_state, "charge_build_valid_plan/target"))
+        for t in target_squad_ids
+    ]
     # HORS TABLE — meme verdict que « detruite », pour la meme raison : la cible n'est pas sur le
     # champ de bataille (reserves 20.01, ou pas encore posee), donc 11.01 « within 12" » ne peut
     # pas etre satisfait et aucune figurine ne peut finir en ER avec elle. Le plan est invalide,
@@ -5551,7 +5546,7 @@ def charge_build_valid_plan(
             d_orig = calculate_hex_distance(orig_col, orig_row, nc, nr)
             if min(calculate_hex_distance(nc, nr, tc, tr) for tc, tr in target_positions) >= orig_dist_to_tgt:
                 continue
-            if not _hex_legal_for_charge(nc, nr, game_state, squad_id, m, target_squad_ids):
+            if not _hex_legal_for_charge(nc, nr, game_state, squad_id, m, _non_target_enemies):
                 continue
             synth = _synth_model_entry(game_state, str(squad_id), m, nc, nr)
             if not any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
@@ -5596,7 +5591,7 @@ def charge_build_valid_plan(
                         # un mur.
                         if not _reachable(nc, nr):
                             continue
-                        if not _hex_legal_for_charge(nc, nr, game_state, squad_id, m, target_squad_ids):
+                        if not _hex_legal_for_charge(nc, nr, game_state, squad_id, m, _non_target_enemies):
                             continue
                         cand_d = calculate_hex_distance(nc, nr, tc, tr)
                         if cand_d >= orig_dist_to_tgt:
@@ -5832,9 +5827,13 @@ def _attacker_model_can_reach_squad(
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     units_cache = require_key(game_state, "units_cache")
-    base_unit = units_cache.get(str(target_squad_id))
-    if base_unit is None:
-        return False
+    # Dix lignes plus bas, la MÊME condition sur `squad_models` LÈVE (`not in squad_models`).
+    # Ici elle rendait « cible inatteignable » : le motif §2 du lot charge, un site bruyant et son
+    # jumeau muet dans la même fonction. Les appelants (`_model_can_shoot_target`, lui-même appelé
+    # par `declare_attack_model`) ont déjà prouvé la cible vivante.
+    base_unit = require_unit_from_cache(
+        str(target_squad_id), game_state, "_attacker_model_can_reach_squad"
+    )
     # Rule 13.09: hidden unit only targetable within detection range (15").
     _units = require_key(game_state, "units")
     try:
@@ -5976,10 +5975,14 @@ def _shoot_engagement_blocks_target(
     units_cache = require_key(game_state, "units_cache")
     sid = str(attacker_squad_id)
     tid = str(target_squad_id)
-    shooter_entry = units_cache.get(sid)
-    target_entry = units_cache.get(tid)
-    if shooter_entry is None or target_entry is None:
-        return False
+    # Cette fonction rend « le tir est INTERDIT » : le `return False` de repli AUTORISAIT donc le
+    # tir sur une désynchronisation, en sautant les contrôles 04.02 et 10.06.
+    shooter_entry = require_unit_from_cache(
+        sid, game_state, "_shoot_engagement_blocks_target/shooter"
+    )
+    target_entry = require_unit_from_cache(
+        tid, game_state, "_shoot_engagement_blocks_target/target"
+    )
 
     ez = get_engagement_zone(game_state)
     enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(
@@ -6975,11 +6978,11 @@ def _squads_are_engaged(
         unit_entries_within_engagement_zone,
     )
 
-    units_cache = require_key(game_state, "units_cache")
-    a = units_cache.get(str(squad_id))
-    b = units_cache.get(str(other_squad_id))
-    if a is None or b is None:
-        return False
+    # L'unique appelant (`_manual_roll_intent`) a écarté la cible détruite (`squad_models`) et lit
+    # déjà `units_cache[target_sid]` sans repli dix lignes plus haut. Un `False` ici effaçait en
+    # silence le malus 10.06 [CLOSE-QUARTERS] — donc rendait le tir PLUS facile.
+    a = require_unit_from_cache(str(squad_id), game_state, "_squads_are_engaged/a")
+    b = require_unit_from_cache(str(other_squad_id), game_state, "_squads_are_engaged/b")
     return unit_entries_within_engagement_zone(a, b, get_engagement_zone(game_state))
 
 
@@ -9475,11 +9478,17 @@ def fight_pile_in_plan(
     if not mids:
         return None
 
-    units_cache = game_state.get("units_cache", {})  # get allowed
-    our_entry = units_cache.get(squad_id)
-    if our_entry is None:
-        return None
-    our_player = int(our_entry.get("player", -1))
+    # ⚠️ NE PAS justifier ce `require` par « `mids` non vide donc l'escouade est dans le cache » :
+    # c'est FAUX. `update_units_cache_hp` retire une escouade dont les PV tombent à 0 SANS purger
+    # `models_cache` (asymétrie déjà documentée dans `_recompute_squad_occupied_hexes`), donc
+    # `mids` peut être non vide sur une escouade absente du cache.
+    # Le vrai contrat est chez l'APPELANT : `_gym_commit_fight_move` passe des ids issus de
+    # `fight_v11_grouped_next` → `_fight_v11_grouped_step_eligible`, qui filtre sur
+    # `is_unit_alive` (= présence dans `units_cache`). Un `return None` répondait « pas de pile-in
+    # possible » — un refus de règle — à une désynchronisation ; et `player=-1` faisait de TOUTES
+    # les escouades des ennemies.
+    our_entry = require_unit_from_cache(squad_id, game_state, "fight_pile_in_plan")
+    our_player = int(require_key(our_entry, "player"))
 
     # Positions ennemies (tous les modeles)
     enemy_positions: List[Tuple[int, int]] = []
@@ -9511,9 +9520,11 @@ def fight_pile_in_plan(
     # Au moins une figurine doit finir dans l ER (bord-a-bord) d une unite ennemie.
     from engine.spatial_relations import unit_entries_within_engagement_zone
     ez = get_engagement_zone(game_state)
+    # `_enemy_squad_ids` n'énumère que des ids lus dans `units_cache` : le filtre était mort, et
+    # il aurait retiré un ennemi du contrôle ER final — donc validé un pile-in illégal.
     enemy_entries = [
-        e for e in (units_cache.get(esid) for esid in _enemy_squad_ids(game_state, our_player))
-        if e is not None
+        require_unit_from_cache(esid, game_state, "fight_pile_in_plan/enemy")
+        for esid in _enemy_squad_ids(game_state, our_player)
     ]
     in_er = False
     for mid, c, r, _lv in plan:
@@ -9571,8 +9582,15 @@ def get_fighting_models(
     mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
     if not mids:
         return []
-    units_cache = game_state.get("units_cache", {})  # get allowed
-    our_player = int(units_cache.get(squad_id, {}).get("player", -1))  # get allowed
+    # Contrat chez l'APPELANT, pas dans `mids` (cf. `fight_pile_in_plan`) : l'unique appelant
+    # (`observation_builder`, encodage de l'escouade active) ne passe ici qu'un `active_squad_id`
+    # dont il a déjà lu l'entrée-cache pour tester `on_battlefield`.
+    # `player=-1` en aurait fait un camp inexistant, donc TOUTES les escouades ennemies, donc une
+    # liste de combattants calculée sur la mauvaise géométrie — et `enemy_sids` aurait ensuite
+    # fait lever le contrôle de cible désignée.
+    our_player = int(require_key(
+        require_unit_from_cache(squad_id, game_state, "get_fighting_models"), "player"
+    ))
     from engine.spatial_relations import unit_entries_within_engagement_zone
     ez = get_engagement_zone(game_state)
     enemy_sids: List[str] = list(_enemy_squad_ids(game_state, our_player))
@@ -9585,9 +9603,11 @@ def get_fighting_models(
                 f"ennemie de {squad_id!r} (joueur {our_player})"
             )
         enemy_sids = [str(target_squad_id)]
+    # `enemy_sids` sort de `_enemy_squad_ids` (ou d'une cible déjà validée ennemie juste au-dessus) :
+    # ils sont tous dans le cache. Le filtre était mort et aurait vidé la liste des combattants.
     enemy_entries = [
-        e for e in (units_cache.get(esid) for esid in enemy_sids)
-        if e is not None
+        require_unit_from_cache(esid, game_state, "get_fighting_models/enemy")
+        for esid in enemy_sids
     ]
     if not enemy_entries:
         return []
@@ -9814,18 +9834,19 @@ def squad_consolidate_plan(
     mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
     if not mids:
         return None
-    units_cache = game_state.get("units_cache", {})  # get allowed
-    our_entry = units_cache.get(squad_id)
-    if our_entry is None:
-        return None
-    our_player = int(our_entry.get("player", -1))
+    # Même contrat que `fight_pile_in_plan`, appelant compris (jumeau pile-in / consolidation) :
+    # l'id vient de `fight_v11_grouped_next`, filtré sur `is_unit_alive`.
+    our_entry = require_unit_from_cache(squad_id, game_state, "squad_consolidate_plan")
+    our_player = int(require_key(our_entry, "player"))
     enemy_positions: List[Tuple[int, int]] = []
     enemy_entries: List[Dict[str, Any]] = []
     for esid in _enemy_squad_ids(game_state, our_player):
         enemy_positions.extend(_squad_model_positions(game_state, esid))
-        ee = units_cache.get(esid)
-        if ee is not None:
-            enemy_entries.append(ee)
+        # `_enemy_squad_ids` énumère `units_cache` : filtrer sur `is not None` retirait
+        # silencieusement un ennemi du contrôle d'engagement final de la consolidation.
+        enemy_entries.append(
+            require_unit_from_cache(esid, game_state, "squad_consolidate_plan/enemy")
+        )
     if not enemy_positions:
         return None  # plus d ennemi → consolidation (2) seulement, deferree
 
@@ -9946,12 +9967,15 @@ def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
     shoot/fight/charge unit-level. Remplace l ancienne mesure centre-a-centre qui
     sous-detectait l engagement pour des bases ecartees (regle 03.04 : 2" entre figurines)."""
     from engine.spatial_relations import unit_within_engagement_zone_footprints
-    units_cache = game_state.get("units_cache", {})  # get allowed
-    entry = units_cache.get(str(squad_id))
+    # Cache absent = moteur non initialisé (erreur) -> require_key. Squad absent = mort ou pas
+    # déployé : LÉGITIME ici, ce prédicat est celui du MASQUE de move, dont le contrat est
+    # « squad absent/mort -> mask all-zero » (miroir exact de `build_squad_move_cell_map`).
+    units_cache = require_key(game_state, "units_cache")
+    entry = units_cache.get(str(squad_id))  # get allowed (contrat du masque : absent -> non engagé)
     if entry is None:
         return False
     ez = get_engagement_zone(game_state)
-    stub = {"id": str(squad_id), "player": int(entry.get("player", -1))}
+    stub = {"id": str(squad_id), "player": int(require_key(entry, "player"))}
     return unit_within_engagement_zone_footprints(game_state, stub, ez, max_distance=ez)
 
 
@@ -10498,42 +10522,6 @@ def build_squad_move_cell_map(
     return result
 
 
-def _squad_direction_move_legal(
-    game_state: Dict[str, Any],
-    squad_id: str,
-    direction_idx: int,
-    move_type: str,
-    advance_roll: Optional[int] = None,
-) -> bool:
-    """Dry-run : verifie qu un mouvement de l ancre dans la direction `direction_idx`
-    produit un plan rigide valide.
-
-    direction_idx : 0..5, index dans get_hex_neighbors (parity-aware).
-    move_type : "normal" / "advance" / "fall_back".
-    advance_roll : pour move_type="advance", D6 roll partage (caller doit fournir).
-
-    Aucune ecriture cache. Returns True si le plan rigide est valide
-    (bounds + walls + collisions + ER ennemi + budget + coherency).
-    """
-    models_cache = require_key(game_state, "models_cache")
-    squad_models = require_key(game_state, "squad_models")
-    alive_mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
-    if not alive_mids:
-        return False
-    anchor = models_cache[alive_mids[0]]
-    anchor_col, anchor_row = int(anchor["col"]), int(anchor["row"])
-    neighbors = get_hex_neighbors(anchor_col, anchor_row)
-    if not (0 <= direction_idx < len(neighbors)):
-        return False
-    dest_col, dest_row = neighbors[direction_idx]
-    plan = build_rigid_plan(dest_col, dest_row, squad_id, game_state)
-    if plan is None:
-        return False
-    budget = get_squad_move_budget(squad_id, game_state, move_type, advance_roll=advance_roll)
-    constraints = {"budget_per_model": budget}
-    return validate_move_plan(plan, game_state, constraints)
-
-
 def build_squad_action_mask(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -10563,11 +10551,13 @@ def build_squad_action_mask(
     outils) a la fabriquer.
     """
     mask = [0] * SQUAD_ACTION_SIZE
-    units_cache = game_state.get("units_cache", {})  # get allowed
+    # Cache absent = moteur non initialisé -> require_key. Squad absent = mort ou pas déployé :
+    # c'est le CONTRAT du masque (« absent/mort -> all-zero »), il reste.
+    units_cache = require_key(game_state, "units_cache")
     if squad_id not in units_cache:
         return mask
     entry = units_cache[squad_id]
-    our_player = int(entry.get("player", -1))
+    our_player = int(require_key(entry, "player"))
     phase = str(game_state.get("phase", "")).lower()
     in_er = _squad_is_in_enemy_er(game_state, squad_id)
     has_advanced = squad_id in game_state.get("units_advanced", set())
@@ -10632,19 +10622,22 @@ def build_squad_action_mask(
                 # Ennemi verrouille par un allie (bord-a-bord) => pas ciblable au tir.
                 from engine.spatial_relations import unit_entries_within_engagement_zone
                 ez = get_engagement_zone(game_state)
-                enemy_entry = units_cache.get(esid)
+                # `esid not in units_cache` vient d'être écarté juste au-dessus (slot d'ennemi
+                # mort = contrat du masque) : l'entrée existe, les deux `is not None` qui
+                # suivaient étaient morts — et le second aurait sauté le contrôle « verrouillé
+                # par un allié », donc ouvert un slot de tir interdit.
+                enemy_entry = units_cache[esid]
                 # Ennemi hors table (réserves 20.01) : intirable, et sans géométrie à mesurer —
                 # le slot reste dans l'observation, le masque le ferme.
-                if enemy_entry is not None and not entry_is_on_battlefield(enemy_entry):
+                if not entry_is_on_battlefield(enemy_entry):
                     continue
                 locked_by_ally = False
-                if enemy_entry is not None:
-                    for sid, e in entries_on_battlefield(units_cache, exclude_id=squad_id):
-                        if int(e["player"]) != our_player:
-                            continue
-                        if unit_entries_within_engagement_zone(enemy_entry, e, ez):
-                            locked_by_ally = True
-                            break
+                for sid, e in entries_on_battlefield(units_cache, exclude_id=squad_id):
+                    if int(e["player"]) != our_player:
+                        continue
+                    if unit_entries_within_engagement_zone(enemy_entry, e, ez):
+                        locked_by_ally = True
+                        break
                 if locked_by_ally:
                     continue
                 models_cache = game_state.get("models_cache", {})  # get allowed

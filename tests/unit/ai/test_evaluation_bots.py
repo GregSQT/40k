@@ -292,7 +292,15 @@ def test_tactical_bot_find_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
             {"id": "e1", "player": FOE, "col": 4, "row": 1, **_dmg(rng=1, cc=3)},
             {"id": "e2", "player": FOE, "col": 9, "row": 1, **_dmg(rng=3, cc=1)},
         ],
-        "units_cache": {},
+        # `units_cache` etait VIDE ici : `is_unit_alive` etant double a True, l'etat construit
+        # etait une desynchronisation `units` / `units_cache` que la production ne produit pas,
+        # et la geometrie retombait sur le col/row de la DATASHEET. Le cache est desormais le
+        # miroir de `units`, ce qu'il est dans le moteur.
+        "units_cache": {
+            "u0": {"col": 1, "row": 1, "player": ACTING, "occupied_hexes": {(1, 1)}},
+            "e1": {"col": 4, "row": 1, "player": FOE, "occupied_hexes": {(4, 1)}},
+            "e2": {"col": 9, "row": 1, "player": FOE, "occupied_hexes": {(9, 1)}},
+        },
     }
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: uid in {"u0", "e1", "e2"})
     monkeypatch.setattr(eb, "calculate_hex_distance", lambda c1, r1, c2, r2: abs(c1 - c2) + abs(r1 - r2))
@@ -307,8 +315,15 @@ def test_tactical_bot_movement_position_helpers(monkeypatch: pytest.MonkeyPatch)
             {"id": "u0", "player": ACTING},
             {"id": "e1", "player": FOE, "col": 5, "row": 5, **_dmg(rng=1, cc=3)},
             {"id": "e2", "player": FOE, "col": 10, "row": 10, **_dmg(rng=3, cc=1)},
+            {"id": "cible", "player": FOE, "col": 8, "row": 8, **_dmg(rng=1, cc=1)},
         ],
-        "units_cache": {},
+        # Cache VIDE auparavant : cf. `test_tactical_bot_find_helpers`. Meme correction.
+        "units_cache": {
+            "u0": {"col": 1, "row": 1, "player": ACTING, "occupied_hexes": {(1, 1)}},
+            "e1": {"col": 5, "row": 5, "player": FOE, "occupied_hexes": {(5, 5)}},
+            "e2": {"col": 10, "row": 10, "player": FOE, "occupied_hexes": {(10, 10)}},
+            "cible": {"col": 8, "row": 8, "player": FOE, "occupied_hexes": {(8, 8)}},
+        },
         # `inches_to_subhex` EST la résolution du moteur (`spatial_relations.geometry_is_hex`) : une
         # doublure qui l'omet hérite de celle du board ambiant, donc d'une géométrie multi-hex qui
         # exigerait un socle sur chaque unité. Board legacy ici (ez=1) → x1.
@@ -332,7 +347,11 @@ def test_tactical_bot_movement_position_helpers(monkeypatch: pytest.MonkeyPatch)
     safest = bot._find_safest_position(unit, [(1, 1), (2, 2), (8, 8)], game_state)
     assert safest == (1, 1) or safest == (2, 2) or safest == (8, 8)
 
-    best_off = bot._find_best_offensive_position(unit, [(1, 1), (4, 4), (7, 7)], {"col": 8, "row": 8}, game_state)
+    # La cible est une unite du jeu, comme celle que `_find_nearest_enemy` rend au vrai appelant —
+    # plus un dict de coordonnees nues, que le moteur ne fabrique nulle part.
+    best_off = bot._find_best_offensive_position(
+        unit, [(1, 1), (4, 4), (7, 7)], game_state["units"][3], game_state
+    )
     assert best_off in [(4, 4), (7, 7)]
 
 
