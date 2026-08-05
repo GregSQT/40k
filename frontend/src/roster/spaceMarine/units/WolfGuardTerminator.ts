@@ -32,7 +32,7 @@ export class WolfGuardTerminator extends EliteMeleeElite {
   ];
 
   // FACTION KEYWORDS
-  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }, { keywordId: "SPACE WOLVES" }];
 
   static ICON = "/icons/WolfGuardTerminator.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

@@ -43,7 +43,7 @@ export class BloodClaw extends TroopMeleeTroop {
   ];
 
   // FACTION KEYWORDS
-  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }, { keywordId: "SPACE WOLVES" }];
 
   static ICON = "/icons/BloodClaw.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

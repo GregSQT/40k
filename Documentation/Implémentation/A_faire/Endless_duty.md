@@ -133,9 +133,16 @@ d'architecture d'initialisation, pas une ligne de donnée.
 ConfigurationError: Required key 'ILLUSTRATION_RATIO' is missing from mapping.
 ```
 
-Mesuré sur le registre réel : les **18 fiches sur 18** n'ont ni `ILLUSTRATION_RATIO` ni
-`FACTION_KEYWORDS` (comparaison avec `Intercessor`, fiche de production). `MeleeTerminator` n'a en
-plus ni `RNG_WEAPON_CODES` ni `selectedRngWeaponIndex`. **Ce qu'il faut faire** : compléter ; c'est
+Mesuré sur le registre réel : les **18 fiches sur 18** n'ont pas d'`ILLUSTRATION_RATIO`
+(comparaison avec `Intercessor`, fiche de production). `MeleeTerminator` n'a en
+plus ni `RNG_WEAPON_CODES` ni `selectedRngWeaponIndex`.
+
+`FACTION_KEYWORDS` faisait partie de cette liste jusqu'au chantier 03 (2026-08-05). Il n'en fait
+plus partie, et **ce n'est pas la donnée qui a changé** : le parseur pose désormais la clé sur
+toute fiche, à `[]` quand la datasheet ne la déclare pas — même convention que `UNIT_KEYWORDS`.
+La conséquence métier subsiste : une fiche sans mot-clé de faction n'appartient à aucune faction,
+donc **aucune capacité de faction ne la vise** (ni Waaagh!, ni Oath of Moment). À compléter en
+même temps que le reste, avec le mot-clé de l'unité de production déléguée. **Ce qu'il faut faire** : compléter ; c'est
 mécanique (les fiches délèguent déjà leurs autres champs à leur unité de production, ex.
 `static VALUE = Intercessor.VALUE`).
 
