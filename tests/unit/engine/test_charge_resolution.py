@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+import pytest
+
 from engine.phase_handlers.charge_handlers import (
+    _charge_bfs_max_distance,
     _has_valid_charge_target,
     charge_build_valid_destinations_pool,
 )
@@ -132,3 +135,46 @@ class TestChargeResolution:
 
         assert len(dest_to_2) > 0, "enemy2 à (15,10) doit être une cible atteignable"
         assert len(dest_to_3) == 0, "enemy3 à (25,10) doit être hors de portée"
+
+
+class TestChargeBfsMaxDistanceCacheMiss:
+    """Un miss d'``units_cache`` dans ``_charge_bfs_max_distance`` doit LEVER, pas rendre le jet nu.
+
+    Avant correction, l'absence de l'unité ou d'une cible déclarée retombait sur ``return rid`` :
+    la borne du BFS de charge était alors calculée sans le décalage ancre→empreinte, donc le pool
+    de destinations était tronqué SANS aucun signal. C'est ce silence qui absorbait les mutations
+    de test sur ce chemin (cf. campagne 2026-07-29 §3.6).
+    """
+
+    def test_nominal_returns_the_roll_and_does_not_raise(self):
+        """Contrôle positif : sur un état sain, la borne est rendue et rien ne lève.
+
+        Bases 1 hex → l'empreinte se réduit à l'ancre, donc ``extra`` vaut 0 et la borne == jet.
+        Ce test existe pour qu'un « lève toujours » ne puisse pas faire passer les deux suivants.
+        """
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 15, 10)]
+        gs = _make_game_state(units)
+        assert gs["units_cache"]["1"]["occupied_hexes"] == {(5, 10)}, "prémisse : empreinte = ancre"
+
+        assert _charge_bfs_max_distance(gs, "1", 7, target_id="2") == 7
+        assert len(charge_build_valid_destinations_pool(gs, "1", 12, target_id="2")) > 0
+
+    def test_attacker_missing_from_units_cache_raises(self):
+        """``units`` porte le chargeur mais ``units_cache`` ne l'a plus → désynchronisation, ça lève."""
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 15, 10)]
+        gs = _make_game_state(units)
+        assert "1" in gs["units_cache"], "prémisse : le chargeur EST dans le cache avant retrait"
+        del gs["units_cache"]["1"]
+
+        with pytest.raises(KeyError, match="unit 1 missing from units_cache"):
+            _charge_bfs_max_distance(gs, "1", 7, target_id="2")
+
+    def test_declared_target_missing_from_units_cache_raises(self):
+        """L'appelant a déjà validé la cible par ``is_unit_alive`` : un miss ici est une erreur d'état."""
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 15, 10)]
+        gs = _make_game_state(units)
+        assert "2" in gs["units_cache"], "prémisse : la cible EST dans le cache avant retrait"
+        del gs["units_cache"]["2"]
+
+        with pytest.raises(KeyError, match="target 2 missing from units_cache"):
+            _charge_bfs_max_distance(gs, "1", 7, target_ids=["2"])

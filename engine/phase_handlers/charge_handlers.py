@@ -580,6 +580,12 @@ def _charge_bfs_max_distance(
 
     Multi-cibles (``target_ids``) : la borne se mesure vers la cible déclarée **la plus proche**
     (union des empreintes), borne permissive ; l'intersection ``eng==declared`` élague ensuite.
+
+    Une absence d'``units_cache`` LÈVE, elle ne retombe pas sur le jet nu. L'appelant unique
+    (``charge_build_valid_destinations_pool``) a déjà validé l'unité ET chaque cible déclarée par
+    ``get_unit_by_id`` + ``is_unit_alive`` : un miss ici est une désynchronisation
+    ``units``/``units_cache``, pas un cas de jeu. Y répondre par ``rid`` rendait une borne BFS
+    FAUSSE (pool de charge tronqué) sans jamais crasher — et absorbait les mutations de test.
     """
     from engine.hex_utils import hex_distance
 
@@ -589,36 +595,32 @@ def _charge_bfs_max_distance(
     elif target_id:
         tids = [str(target_id)]
     else:
+        # Aucune cible déclarée (aperçu d'activation) : la borne EST le jet. Cas de jeu, pas un repli.
         return rid
 
     units_cache = require_key(game_state, "units_cache")
     ue = units_cache.get(unit_id)
     if not ue:
-        return rid
+        raise KeyError(f"_charge_bfs_max_distance: unit {unit_id} missing from units_cache")
 
     own_hexes = entry_footprint(ue)
-    # Union des empreintes des cibles déclarées (la boucle ci-dessous garde la plus proche).
+    # Union des empreintes des cibles déclarées (le ``min`` ci-dessous garde la plus proche).
     enemy_fp: Set[Tuple[int, int]] = set()
     for tid in tids:
         te = units_cache.get(tid)
         if not te:
-            continue
+            raise KeyError(f"_charge_bfs_max_distance: target {tid} missing from units_cache")
         enemy_fp |= {(int(c), int(r)) for c, r in entry_footprint(te)}
-    if not enemy_fp:
-        return rid
 
+    # Ni `own_hexes` ni `enemy_fp` ne peuvent être vides : `tids` est non vide par construction et
+    # `entry_footprint` rend au minimum l'ancre. Les deux gardes qui traînaient ici ne pouvaient
+    # être atteintes qu'à travers les deux `return rid` supprimés ci-dessus.
     primary = (int(ue["col"]), int(ue["row"]))
-    best_h: Optional[Tuple[int, int]] = None
-    best_d = 10**9
-    for hc, hr in own_hexes:
-        for tc, tr in enemy_fp:
-            d = hex_distance(int(hc), int(hr), int(tc), int(tr))
-            if d < best_d:
-                best_d = d
-                best_h = (int(hc), int(hr))
-    if best_h is None:
-        return rid
-    extra = hex_distance(primary[0], primary[1], best_h[0], best_h[1])
+    best_h = min(
+        own_hexes,
+        key=lambda h: min(hex_distance(int(h[0]), int(h[1]), int(tc), int(tr)) for tc, tr in enemy_fp),
+    )
+    extra = hex_distance(primary[0], primary[1], int(best_h[0]), int(best_h[1]))
     return rid + extra
 
 
