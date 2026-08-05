@@ -37,7 +37,11 @@ import { HelperPanel } from "./HelperPanel";
 import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
 import SnapshotRewind, { type SnapshotJump } from "./SnapshotRewind";
-import { StrategicReserveButton, StrategicReservesContainer } from "./StrategicReservesContainer";
+import {
+  ResetPlacementButton,
+  StrategicReserveButton,
+  StrategicReservesContainer,
+} from "./StrategicReservesContainer";
 import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import { type RosterRowUnitsCache, rosterRowBorderColor, UnitRosterRow } from "./UnitRosterRow";
@@ -1872,8 +1876,25 @@ export const BoardWithAPI: React.FC = () => {
                         tooltipSuffix={isCurrentDeployer ? "" : " (inactive this turn)"}
                         borderColor={rosterRowBorderColor(player)}
                         haloGlow={HALO_GLOW}
-                        trailing={
-                          isSelected ? (
+                        trailing={(() => {
+                          if (!isSelected) return undefined;
+                          // Escouade posée EN PROVISOIRE : l'emplacement passe au `Reset`. Le
+                          // moteur, lui, accepterait toujours la mise en réserves (le plan est
+                          // purement client, l'escouade est encore dans `deployable_units`) — le
+                          // dépôt n'est donc pas devenu illégal, il devient inatteignable sans
+                          // repasser par Reset. Choix d'interface assumé : UN seul bouton à cet
+                          // endroit, celui du geste le plus probable une fois l'escouade posée.
+                          if (apiProps.deployPlan?.placed) {
+                            return (
+                              <ResetPlacementButton
+                                onReset={() => {
+                                  setDeploymentTooltip(null);
+                                  apiProps.onCancelDeploy?.();
+                                }}
+                              />
+                            );
+                          }
+                          return (
                             <StrategicReserveButton
                               canDrop={canDrop}
                               onDrop={() => {
@@ -1884,8 +1905,8 @@ export const BoardWithAPI: React.FC = () => {
                                 apiProps.onDeployToStrategicReserves(unit.id);
                               }}
                             />
-                          ) : undefined
-                        }
+                          );
+                        })()}
                       />
                     );
                   })}
@@ -2039,6 +2060,12 @@ export const BoardWithAPI: React.FC = () => {
             currentPlayer: apiProps.gameState?.current_player,
           })}
           onSelectReserveUnit={apiProps.onSelectReserveUnitForIngress}
+          placingUnitId={
+            apiProps.deployPlan?.ingress && apiProps.deployPlan.placed
+              ? apiProps.deployPlan.unitId
+              : null
+          }
+          onCancelPlacement={apiProps.onCancelDeploy}
           phase={apiProps.gameState?.phase}
         />
       </ErrorBoundary>
@@ -2085,6 +2112,12 @@ export const BoardWithAPI: React.FC = () => {
             currentPlayer: apiProps.gameState?.current_player,
           })}
           onSelectReserveUnit={apiProps.onSelectReserveUnitForIngress}
+          placingUnitId={
+            apiProps.deployPlan?.ingress && apiProps.deployPlan.placed
+              ? apiProps.deployPlan.unitId
+              : null
+          }
+          onCancelPlacement={apiProps.onCancelDeploy}
           phase={apiProps.gameState?.phase}
         />
       </ErrorBoundary>

@@ -5904,9 +5904,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const outcome = readEngineActionOutcome(data);
       if (outcome.kind === "noop") return;
       if (outcome.kind === "refused") {
-        setError(
-          `${plan.ingress ? "Ingress" : "Deploy"} refused: ${outcome.message}`
-        );
+        setError(`${plan.ingress ? "Ingress" : "Deploy"} refused: ${outcome.message}`);
         return;
       }
       deployPoolRef.current = new Set();

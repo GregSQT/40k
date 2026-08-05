@@ -1456,3 +1456,72 @@ def test_ingress_commit_refuses_a_plan_that_leaves_the_arrival_area():
     )
     assert not ok, "un plan hors aire d'arrivée doit être REFUSÉ, pas appliqué"
     assert unit["in_strategic_reserves"] is True, "l'escouade reste en réserves après un refus"
+
+
+def test_squad_destinations_erosion_matches_the_naive_definition():
+    """L'érosion vectorisée du pool de suivi de bloc rend EXACTEMENT le test case-par-case.
+
+    Oracle indépendant, écrit ici en toutes lettres : « une ancre est retenue si et seulement si
+    l'ancre translatée de chaque offset du bloc appartient au pool ». La version de production
+    calcule la même chose par décalages de grille — c'est une accélération (2,3 s → moins de 0,1 s
+    sur l'aire d'arrivée d'une unité Deep Strike), donc elle doit rendre le MÊME ensemble, pas un
+    ensemble « proche ». Vérifié sur les deux aires réelles : zone de déploiement ET aire 20.04,
+    parce que c'est la MÊME fonction qui sert aux deux.
+    """
+    from engine.hex_utils import offset_to_cube
+    from engine.phase_handlers.deployment_handlers import (
+        _deploy_pool_set, _model_footprint, deployment_build_squad_destinations_pool,
+        placement_pool_for_squad,
+    )
+
+    def naive(gs, pool_set, plan):
+        models_cache = gs["models_cache"]
+        combined = set()
+        for mid, c, r in plan:
+            m = models_cache.get(str(mid))
+            if m is not None:
+                combined.update(_model_footprint(gs, m, int(c), int(r)))
+        rx, ry, rz = offset_to_cube(int(plan[0][1]), int(plan[0][2]))
+        offsets = [
+            tuple(a - b for a, b in zip(offset_to_cube(int(cc), int(rr)), (rx, ry, rz)))
+            for cc, rr in combined
+        ]
+        pool_cube = {offset_to_cube(int(c), int(r)) for c, r in pool_set}
+        out = set()
+        for cc, rr in pool_set:
+            bx, by, bz = offset_to_cube(int(cc), int(rr))
+            if all((bx + ox, by + oy, bz + oz) in pool_cube for ox, oy, oz in offsets):
+                out.add((int(cc), int(rr)))
+        return out
+
+    # (1) Zone de DÉPLOIEMENT — le siège historique de cette fonction.
+    eng = _engine()
+    gs = eng.game_state
+    _du = gs["deployment_state"]["deployable_units"]
+    pending = _du.get(1, _du.get("1"))
+    squad_id = str(pending[0])
+    mids = gs["squad_models"][squad_id]
+    zone = sorted(_deploy_pool_set(gs, 1))
+    assert len(zone) > 1000, "zone de déploiement trop petite — test sans portée"
+    anchor = zone[len(zone) // 2]
+    plan = [(m, anchor[0] + i, anchor[1]) for i, m in enumerate(mids)]
+    got = {tuple(d) for d in deployment_build_squad_destinations_pool(gs, plan)["destinations"]}
+    assert got, "VERT VACANT : aucune ancre retenue, l'égalité ne prouverait rien"
+    assert got == naive(gs, set(zone), plan)
+
+    # (2) Aire d'ARRIVÉE 20.04 (Deep Strike : la plus grande, celle qui a motivé l'accélération).
+    eng2 = _engine()
+    _drive_deployment(eng2)
+    gs2 = eng2.game_state
+    gs2["turn"] = 3
+    gs2["current_player"] = 1
+    gs2["phase"] = "move"
+    sid2 = _reserve_squad(eng2, deep_strike=True)
+    area = sorted(placement_pool_for_squad(gs2, sid2))
+    assert len(area) > 10000, "aire d'arrivée trop petite — test sans portée"
+    a2 = area[len(area) // 2]
+    mids2 = gs2["squad_models"][sid2]
+    plan2 = [(m, a2[0] + i, a2[1]) for i, m in enumerate(mids2)]
+    got2 = {tuple(d) for d in deployment_build_squad_destinations_pool(gs2, plan2)["destinations"]}
+    assert got2, "VERT VACANT : aucune ancre retenue sur l'aire d'arrivée"
+    assert got2 == naive(gs2, set(area), plan2)

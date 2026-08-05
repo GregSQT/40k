@@ -4554,6 +4554,7 @@ export default function Board({
   }, [
     phase,
     mode,
+    isDeploymentMove,
     selectedUnitId,
     boardConfig,
     gameState?.units_cache,
