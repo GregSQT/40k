@@ -29,6 +29,16 @@ _GS_STATIC_KEYS = frozenset({
     "wall_hexes", "dense_wall_hexes", "weapon_damage_table", "config",
     "board_cols", "board_rows", "inches_to_subhex", "max_range",
     "terrain_areas", "objectives", "primary_objective",
+    # Zones de déploiement : posées par le reset depuis le SCÉNARIO, jamais réécrites de la
+    # partie (aucun écrivain hors reset). Deux raisons de les déclarer statiques :
+    # 1. RESTORE — `build_game_state` reconstruit l'état à partir des seules clés statiques
+    #    VIVANTES plus la copie du snapshot. Ces zones ont vécu dans `deployment_state` jusqu'au
+    #    2026-08-05 : un pickle capturé avant ce déplacement n'a pas la clé racine, et sans cette
+    #    ligne elle disparaîtrait du state reconstruit — le premier clic de déploiement lèverait
+    #    `Required key 'deployment_pools'`. Les prendre de l'engine vivant règle la reprise des
+    #    parties persistées d'avant le changement, sans code de migration.
+    # 2. COÛT — ~33 000 tuples immuables, deepcopy à CHAQUE capture de phase sinon.
+    "deployment_pools",
     "rewards_configs", "reward_configs", "hex_los_cache",
     # Grilles de blocage de la LoS vectorisée (murs + areas obscurantes) : dérivées du seul
     # terrain, donc invariantes pendant une partie et sûres à garder vivantes au restore. Non
